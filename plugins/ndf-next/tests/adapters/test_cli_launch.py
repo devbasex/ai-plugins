@@ -233,7 +233,7 @@ def _start_spec(tmp_path: Path) -> agents.Launch:
 def test_start_writes_files_in_new_session_with_spec_env(tmp_path, no_run_env):
     spec = _start_spec(tmp_path)
 
-    assert agents._start(spec).wait(timeout=30) == 0
+    assert agents.run_agent(spec, poll=0.05).exit_code == 0
 
     got = json.loads(spec.paths.out.read_text())
     assert got["env"] == {"NDF_RUN_ID": "from-spec", "NDF_RUN_LOG": None, "X_SPEC": "s", "PIN_PARENT": "kept"}
@@ -245,7 +245,7 @@ def test_start_run_log_env_overrides_spec_env(tmp_path, no_run_env):
     spec = _start_spec(tmp_path)
     log = run_log.open_run("entry", run_id="r2", location="repo")
 
-    assert agents._start(spec).wait(timeout=30) == 0
+    assert agents.run_agent(spec, poll=0.05).exit_code == 0
 
     got = json.loads(spec.paths.out.read_text())
     assert got["env"] == {"NDF_RUN_ID": "r2", "NDF_RUN_LOG": str(log.path), "X_SPEC": "s", "PIN_PARENT": "kept"}
@@ -254,7 +254,7 @@ def test_start_run_log_env_overrides_spec_env(tmp_path, no_run_env):
 def test_start_without_spec_env_keeps_parent_env(tmp_path, no_run_env):
     spec = agents.Launch("codex", (sys.executable, "-c", START_DUMP), tmp_path, agents.AgentPaths.at(tmp_path / "codex"), 30)
 
-    assert agents._start(spec).wait(timeout=30) == 0
+    assert agents.run_agent(spec, poll=0.05).exit_code == 0
 
     got = json.loads(spec.paths.out.read_text())
     assert got["env"] == {"NDF_RUN_ID": None, "NDF_RUN_LOG": None, "X_SPEC": None, "PIN_PARENT": "kept"}
