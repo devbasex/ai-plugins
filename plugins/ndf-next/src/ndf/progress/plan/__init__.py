@@ -351,7 +351,12 @@ def machine_waits(view: lane.PlanView, rows: dict[str, list[lane.LaneRow]], list
 def _lane_items(view: lane.PlanView, rows: dict[str, list[lane.LaneRow]], now: datetime) -> list[dict[str, Any]]:
     """レーンごとの表示の基本の項目（生死とマシンの上限の待ちは呼び手が足す）。"""
     return [
-        {"lane": name, "state": lane.lane_state(view, rows, name), "after": list(spec.after), "rows": [_row_item(r, now) for r in rows[name]]}
+        {
+            "lane": name,
+            "state": lane.lane_state(view, rows, name),
+            "after": list(spec.after),
+            "rows": [_row_item(r, now) for r in rows[name]],
+        }
         for name, spec in view.lanes.items()
     ]
 
