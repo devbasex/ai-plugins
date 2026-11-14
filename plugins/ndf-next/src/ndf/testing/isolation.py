@@ -93,9 +93,7 @@ def _resolve(path: object, dir_fd: object, kind: str) -> str | None:
     if isinstance(path, int) and not isinstance(path, bool):
         # 記述子は開いた先そのもの（中身を書き換える操作だけが記述子を受ける）
         return _fd_path(path)
-    if isinstance(path, bytes):
-        path = os.fsdecode(path)
-    if not isinstance(path, (str, os.PathLike)):
+    if not isinstance(path, (str, bytes, os.PathLike)):
         return None
     text = os.fspath(path)
     if isinstance(text, bytes):
