@@ -87,12 +87,21 @@ def _skill(row: Any, known: set[str], reads_all: set[str]) -> Skill:
         raise TableError(f"配る Skill の表の行の形が違う（name・runtimes）: {row}")
     name, runtimes = row["name"], tuple(row["runtimes"])
     why = row["why"] if "why" in row else ""
+    _check_name(name)
+    _check_runtimes(name, runtimes, why, known, reads_all)
+    return Skill(name, runtimes, why)
+
+
+def _check_name(name: str) -> None:
     if not name or "/" in name or name.startswith("."):
         raise TableError(f"配る Skill の表の名前が違う: {name!r}")
+
+
+def _check_runtimes(name: str, runtimes: tuple[str, ...], why: str, known: set[str], reads_all: set[str]) -> None:
+    """配るランタイムが表にあり、skills/ をすべて読むランタイムを含み、why がすべてへは配らない行だけにあること。"""
     if not set(runtimes) <= known:
         raise TableError(f"{name} の runtimes に表の runtimes（{', '.join(sorted(known))}）に無いものがある: {runtimes}")
     if not reads_all <= set(runtimes):
         raise TableError(f"{name} の runtimes は skills/ をすべて読むランタイム（{', '.join(sorted(reads_all))}）を含む")
     if (set(runtimes) != known) != bool(why):
         raise TableError(f"{name} の why は、すべてのランタイムへは配らない行だけが持つ")
-    return Skill(name, runtimes, why)
