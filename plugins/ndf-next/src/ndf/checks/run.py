@@ -3,7 +3,8 @@
     ndf check [--base <起点>] [--event <GitHub の事象の JSON>] [--only <規則>]...
 
 `--base` があれば差分の検査（I2）も行う。`--only` があれば、その規則の指摘だけを違反にする（新しいプラグインを
-変えていない PR で規則 port だけを当てる。新しいプラグインの側に残る違反で無関係な PR を落とさない）。PR 本文は `--event`（既定は環境変数 `GITHUB_EVENT_PATH`）から読む。
+変えていない PR で規則 port だけを当てる。新しいプラグインの側に残る違反で無関係な PR を落とさない）。規則が差分の
+規則（port・I2）だけなら、プラグインのファイルを読まずに差分と PR 本文だけを見る。PR 本文は `--event`（既定は環境変数 `GITHUB_EVENT_PATH`）から読む。
 結果 JSON（結果の契約 `ndf.contracts.result`）を標準出力の最後の 1 行に出す。違反は止まった理由 check_failed、構文の誤りは\ninvalid、読めない（規則のデータ・git・事象の JSON）は config_broken で、終了コードは種類の終了コード（1・2・2）である。
 """
 
@@ -90,6 +91,20 @@ def check(scope: Scope, rules: dict[str, Any]) -> list[Finding]:
     return sorted(found, key=lambda f: (f.path, f.line, f.rule, f.detail))
 
 
+def select(scope: Scope, rules: dict[str, Any], only: list[str] | None) -> list[Finding]:
+    """`only` の規則の指摘だけを返す（無ければすべての規則）。
+
+    `only` が差分の規則（`invariants.DIFF_RULES`）だけなら、ファイルを集めず構文木も作らずに差分と PR 本文だけを見る
+    （新しいプラグインを変えていない PR で、本文を直すたびに全体の検査を打たない）。
+    """
+    if only and set(only) <= invariants.DIFF_RULES:
+        found = sorted(invariants.old_plugin_diff(scope, rules["invariants"]), key=lambda f: (f.path, f.line, f.rule, f.detail))
+    else:
+        scope.sources = collect(scope.plugin_root, scope.repo_root)
+        found = check(scope, rules)
+    return [f for f in found if not only or f.rule in only]
+
+
 def _repo_root(plugin_root: Path) -> Path:
     try:
         done = subprocess.run(["git", "-C", str(plugin_root), "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=True)
@@ -128,10 +143,7 @@ def main(argv: list[str]) -> int:
         rules = load_rules()
         repo_root = _repo_root(ident.root)
         scope = Scope(repo_root, ident.root.resolve(), ident.name, args.base, _pr_body(args.event))
-        scope.sources = collect(scope.plugin_root, repo_root)
-        found = check(scope, rules)
-        if args.only:
-            found = [f for f in found if f.rule in args.only]
+        found = select(scope, rules, args.only)
     except (CheckError, identity.IdentityError) as exc:
         return emit(str(exc), [], {}, "config_broken")
     for f in found:

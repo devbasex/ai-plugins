@@ -32,6 +32,8 @@ DEFINITION_NAMES = frozenset({"FINAL_NAME", "FIXED_WORDS"})
 ISSUE_REF = re.compile(r"#\d+")
 # Python のパッケージの形（`src/<パッケージ>`・`<パッケージ>.<モジュール>`）。プラグイン名から切り離した固定の名前で、I1 は照合しない
 PACKAGE_FORM = re.compile(rf"(?<![\w.-])(?:src/{OWN_PACKAGE}(?![\w-])|{OWN_PACKAGE}\.(?=[A-Za-z_]))")
+# `old_plugin_diff` が出す規則。差分と PR 本文だけで決まり、プラグインのファイルを読まない
+DIFF_RULES = frozenset({"port", "I2"})
 
 
 def _name_pattern(names: set[str]) -> re.Pattern[str]:

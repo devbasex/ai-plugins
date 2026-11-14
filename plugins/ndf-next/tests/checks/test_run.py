@@ -63,6 +63,8 @@ def test_only_keeps_the_named_rules(plugin, monkeypatch, capsys, tmp_path, last_
     old.mkdir()
     (old / "x.py").write_text("x = 1\n")
     plugin.commit("old")
+    # 差分の規則だけなら、プラグインのファイルを集めない（全規則を打ってから捨てない）
+    monkeypatch.setattr(run, "collect", lambda *a: (_ for _ in ()).throw(AssertionError("collect を呼んだ")))
     event = tmp_path / "event.json"
     event.write_text(json.dumps({"pull_request": {"body": ""}}))
     assert run.main(["--base", base, "--event", str(event), "--only", "port"]) == exit_codes.code_of("failed")
