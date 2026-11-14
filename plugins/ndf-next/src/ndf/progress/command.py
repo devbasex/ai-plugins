@@ -288,6 +288,15 @@ def _dispatch(a: argparse.Namespace, cwd: Path) -> dict[str, Any]:
         return out
 
 
+# 止まった理由へ変換する例外の種類（main が受け、_stopped_from が理由へ変える）
+STOPPABLE = (
+    model.Refused,
+    durable.StoreStopped,
+    contracts.ContractError,
+    GitError,
+    identity.IdentityError,
+    subprocess.CalledProcessError,
+)
 # 付加情報を持たず、止まった理由の語だけが決まる例外の種類（前から引く）
 _CAUSES: tuple[tuple[type[Exception], str], ...] = (
     (contracts.ContractError, "invalid"),
@@ -297,6 +306,7 @@ _CAUSES: tuple[tuple[type[Exception], str], ...] = (
 
 
 def _stopped_from(exc: Exception) -> dict[str, Any]:
+    """STOPPABLE の種類を受け、結果 JSON の止まった理由にする。最後の分岐は CalledProcessError。"""
     if isinstance(exc, model.Refused):
         metrics = {"current_id": exc.current_id} if exc.current_id else {}
         return result.stopped(TOOL, "refused", exc.reason, metrics=metrics)
@@ -319,13 +329,6 @@ def main(argv: list[str]) -> int:
         return causes.exit_code("invalid") if exc.code else 0
     try:
         out = _dispatch(a, Path.cwd())
-    except (
-        model.Refused,
-        durable.StoreStopped,
-        contracts.ContractError,
-        GitError,
-        identity.IdentityError,
-        subprocess.CalledProcessError,
-    ) as exc:
+    except STOPPABLE as exc:
         out = _stopped_from(exc)
     return result.emit(out)
