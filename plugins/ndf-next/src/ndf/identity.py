@@ -25,7 +25,9 @@ hook の子として動いたなど）`PluginIdentity.foreign_root` に残し、
 - 退避する置き場が退避しない置き場（`Handling.KEEP` の行。アカウントの設定・動いているプロセスの排他など）か、
   新しい状態の置き場（`config-state` の下に `XDG_STATE_HOME` を置いたなど）を中に持てば、外側ごと動かすとそれらまで
   動くため、何も変えずに `IdentityError` を投げて人へ戻す
-- 戻り値の `StateReady` が、退避した置き場の元と先を持つ（結果 JSON の `items` へ載せる形は `StateReady.items`）
+- 戻り値の `StateReady` が、退避した置き場の元と先を持つ（結果 JSON の `items` へ載せる形は `StateReady.items`）。
+  退避の途中か退避の後で失敗したときは、それまでに退避した元と先を持つ `IdentityError` を投げる（同じ形は
+  `IdentityError.items`）
 """
 
 from __future__ import annotations
@@ -56,7 +58,18 @@ CALLER_ROOT_ENV = "NDF_CALLER_PLUGIN_ROOT"
 
 
 class IdentityError(Exception):
-    """`plugin.json` が読めず自分の名前を求められない、または旧い置き場を退避してよいと確かめられない。"""
+    """`plugin.json` が読めず自分の名前を求められない、旧い置き場を退避してよいと確かめられない、または退避の途中で失敗した。
+
+    退避の途中で失敗したときは、それまでに退避した置き場を `retired` に持つ（復旧先を呼び出し元が引ける）。
+    """
+
+    def __init__(self, message: str, retired: tuple[Retired, ...] = ()):
+        super().__init__(message)
+        self.retired = retired
+
+    def items(self) -> list[dict[str, str]]:
+        """結果 JSON の `items` へ載せる、失敗の前に退避した置き場の元と先。"""
+        return _retired_items(self.retired)
 
 
 @dataclass(frozen=True)
@@ -86,7 +99,11 @@ class StateReady:
 
     def items(self) -> list[dict[str, str]]:
         """結果 JSON の `items` へ載せる、退避した置き場の元と先。"""
-        return [{"retired_from": str(r.source), "retired_to": str(r.target)} for r in self.retired]
+        return _retired_items(self.retired)
+
+
+def _retired_items(retired: tuple[Retired, ...]) -> list[dict[str, str]]:
+    return [{"retired_from": str(r.source), "retired_to": str(r.target)} for r in retired]
 
 
 def _env_dir(var: str, *default: str) -> Path:
@@ -263,8 +280,11 @@ def _prepare_locked(ident: PluginIdentity, now: datetime) -> StateReady:
     old = _outermost([p for p in old_state_places(ident) if _is_old(p)])
     _refuse_unsafe_retire(ident, old)
     retired = _retire_all(old, now)
-    ident.state_dir.mkdir(parents=True, exist_ok=True)
-    _write_format(ident.state_dir)
+    try:
+        ident.state_dir.mkdir(parents=True, exist_ok=True)
+        _write_format(ident.state_dir)
+    except OSError as exc:
+        raise IdentityError(f"旧い状態の置き場を退避した後で、新しい状態の置き場を用意できなかった: {exc}", retired) from exc
     return StateReady(ident.state_dir, retired)
 
 
@@ -300,15 +320,28 @@ def _holding_kept(ident: PluginIdentity, old: list[Path]) -> list[tuple[Path, Pa
 
 
 def _retire_all(old: list[Path], now: datetime) -> tuple[Retired, ...]:
-    """旧い置き場を順に退避先の名前へ変え、退避した元と先を返す。"""
-    retired = []
-    for place in old:
-        target = _retire_target(place, now)
-        place.rename(target)
-        retired.append(Retired(place, target))
+    """旧い置き場を順に退避先の名前へ変え、退避した元と先を返す。
+
+    途中で名前を変えられなければ、それまでに退避した元と先をログへ書き、`retired` に持つ `IdentityError` を投げる。
+    """
+    retired: list[Retired] = []
+    try:
+        for place in old:
+            target = _retire_target(place, now)
+            place.rename(target)
+            retired.append(Retired(place, target))
+    except OSError as exc:
+        _log_retired(retired)
+        raise IdentityError(
+            f"旧い状態の置き場を退避する途中で名前を変えられなかった（退避した {len(retired)} 件）: {exc}", tuple(retired)
+        ) from exc
+    _log_retired(retired)
+    return tuple(retired)
+
+
+def _log_retired(retired: list[Retired]) -> None:
     if retired:
         log.warning("旧い状態の置き場を退避した: %s", ", ".join(f"{r.source} -> {r.target}" for r in retired))
-    return tuple(retired)
 
 
 def _write_format(state_dir: Path) -> None:

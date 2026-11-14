@@ -448,6 +448,9 @@ def _prepare_directory(options: GateOptions, env: Mapping[str, str]) -> tuple[Pa
             directory = options.directory
         directory.mkdir(parents=True, exist_ok=True)
     except (OSError, identity.IdentityError) as exc:
+        if isinstance(exc, identity.IdentityError):
+            # 退避の途中か後で失敗しても、それまでに退避した置き場を残す
+            retired = exc.items()
         # 置き場を使えなくてもテストは走らせ、結果を変えない（I8）
         log.warning("枠の置き場を使えないので枠を取らずに走らせる", extra={"error": str(exc)})
         return Held(note=f"枠の置き場を使えないので枠を取らずに走らせた: {exc}", retired=retired)

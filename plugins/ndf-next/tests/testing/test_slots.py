@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+from ndf import identity
 from ndf.testing import records, slots, waits
 from ndf.testing.limits import Limits
 
@@ -300,3 +301,20 @@ def test_interrupt_after_retiring_carries_the_retired_places(tmp_path, monkeypat
             raise KeyboardInterrupt
 
     assert caught.value.retired == retired
+
+
+def test_gate_keeps_the_places_retired_before_preparing_failed(tmp_path, monkeypatch):
+    # 退避の途中で失敗して枠を取らずに走らせるときも、先に退避した元と先を Held に残す
+    retired = (identity.Retired(Path("/s/p"), Path("/s/p.v10-20261114")),)
+
+    def fail(env):
+        raise identity.IdentityError("read-only", retired)
+
+    monkeypatch.setattr(slots, "slots_place", fail)
+    options = slots.GateOptions(environ={}, poll=POLL, read_memory=lambda: PLENTY)
+
+    with slots.gate("pytest .", tmp_path, kind="whole", limits=_limits(1), options=options) as held:
+        pass
+
+    assert held.index is None
+    assert held.retired == [{"retired_from": "/s/p", "retired_to": "/s/p.v10-20261114"}]

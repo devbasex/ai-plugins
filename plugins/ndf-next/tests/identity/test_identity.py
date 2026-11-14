@@ -144,6 +144,31 @@ def test_prepare_retires_every_old_place_by_the_same_rule(ident, tmp_path):
     assert ready.retired[1].target == moved
 
 
+def test_prepare_carries_the_places_retired_before_a_rename_fails(ident, tmp_path, monkeypatch):
+    # 後の置き場の名前を変えられなくても、先に退避した元と先を例外が持ち、ログにも残す
+    ident.state_dir.mkdir(parents=True)
+    (ident.state_dir / "a").write_text("1")
+    config_state = tmp_path / "config" / "p" / "state"
+    config_state.mkdir(parents=True)
+    (config_state / "b").write_text("2")
+    rename = Path.rename
+
+    def fail_on_config_state(self, target):
+        if self == config_state:
+            raise PermissionError("read-only")
+        return rename(self, target)
+
+    monkeypatch.setattr(Path, "rename", fail_on_config_state)
+
+    with pytest.raises(identity.IdentityError, match="read-only") as caught:
+        identity.prepare_state_dir(ident, now=NOW)
+
+    moved = ident.state_dir.with_name("p.v10-20261113")
+    assert caught.value.retired == (identity.Retired(ident.state_dir, moved),)
+    assert caught.value.items() == [{"retired_from": str(ident.state_dir), "retired_to": str(moved)}]
+    assert (moved / "a").read_text() == "1"
+
+
 def test_prepare_moves_a_place_inside_another_only_with_the_outer_one(tmp_path, monkeypatch):
     # XDG_STATE_HOME と CLAUDE_CONFIG_DIR が同じだと config-state が state-home の中にある。外側だけの名前を変える
     monkeypatch.setattr(identity, "ROOT", make_plugin(tmp_path, "x", "p"))

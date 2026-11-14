@@ -175,6 +175,19 @@ def test_run_writes_the_old_state_places_it_retired_after_the_output(project, tm
     assert (moved / "ledger.jsonl").read_text() == "old"
 
 
+def test_report_lists_the_places_retired_before_preparing_failed(monkeypatch, capsys):
+    # 退避の途中で失敗して止まるときも、先に退避した元と先を items に載せる
+    retired = (identity.Retired(Path("/s/p"), Path("/s/p.v10-20261114")),)
+
+    def fail(environ=None):
+        raise identity.IdentityError("read-only", retired)
+
+    monkeypatch.setattr(slots, "slots_place", fail)
+    code = command._report("1d")
+    got = _result(capsys.readouterr().out, code)
+    assert got["items"] == [{"retired_from": "/s/p", "retired_to": "/s/p.v10-20261114"}]
+
+
 def test_stopped_run_lists_the_old_state_places_it_retired(capsys):
     retired = [{"retired_from": "/s/p", "retired_to": "/s/p.v10-20261114"}]
     code = command._stopped_from(slots.Stopped(records.GAVE_UP, 1.0, None, retired))
