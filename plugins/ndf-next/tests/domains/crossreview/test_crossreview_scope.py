@@ -39,7 +39,7 @@ def test_issue_3181_cli_reads_sections_of_changed_documents(repos: Repos, tmp_pa
     state = tmp_path / "state"
     store.write_object(
         state / store.STATE_NAME.format(pr=8),
-        {store.ORIGIN_KEY: 8, "rounds": [{"round": 1, "head": "abc1234"}], cli.REVIEWED: ["issues/d.md#設計", A]},
+        {store.ORIGIN_KEY: 8, "rounds": [{"round": 1, "head": "abc1234"}], store.REVIEWED: ["issues/d.md#設計", A]},
     )
     base = ["review-scope", str(wt), "--state-dir", str(state), "--pr", "8", "--base", "origin/main"]
     assert cli.main([*base, "--purpose", "design"]) == 0
@@ -114,13 +114,13 @@ def test_scope_reads_rounds_of_the_state_file(scope_run, data: dict, summary: st
 
 def test_scope_of_a_design_pr_treats_a_broken_reviewed_list_as_empty(scope_run) -> None:
     """reviewed_sections が並びでなければ、どの節も詳細レビューを通っていない扱いで全差分を見る。"""
-    code, got = scope_run("design", {"pr": 8, "rounds": [{"round": 1, "head": "abc"}], cli.REVIEWED: "x"})
+    code, got = scope_run("design", {"pr": 8, "rounds": [{"round": 1, "head": "abc"}], store.REVIEWED: "x"})
     assert got["summary"] == "round 2 の範囲は full（詳細レビューを通らない節 3 件）"
     assert got["items"] == [_scope(scope_decide.FULL, None, _SECTIONS)]
 
 
 def test_scope_of_a_design_pr_narrows_to_the_last_head_once_every_section_was_reviewed(scope_run) -> None:
     rounds = [{"round": 1, "head": "abc"}, {"round": 2, "head": "def"}]
-    code, got = scope_run("design", {"pr": 8, "rounds": rounds, cli.REVIEWED: _SECTIONS})
+    code, got = scope_run("design", {"pr": 8, "rounds": rounds, store.REVIEWED: _SECTIONS})
     assert got["summary"] == "round 3 の範囲は since（詳細レビューを通らない節 0 件）"
     assert got["items"] == [_scope(scope_decide.SINCE, "def", [])]

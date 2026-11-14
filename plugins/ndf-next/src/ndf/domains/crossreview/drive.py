@@ -30,9 +30,9 @@ from ndf.core.converge import oscillation, participants, worktree
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.crossreview import fixgate_decide, push, scope_decide, store
 
-# 状態ファイルの鍵
-ROUNDS = "rounds"
-REVIEWED = "reviewed_sections"
+# 状態ファイルの鍵（rounds・reviewed_sections は store が持つ）
+ROUNDS = store.ROUNDS
+REVIEWED = store.REVIEWED
 FINDINGS = "findings"
 # 終わったときの要約（`finish_decide` が読む）
 SUMMARY_NAME = "summary.json"
@@ -341,10 +341,9 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
     """1 ラウンドを回す。終わり方（`finish_decide` の FINALS）か、次へ進むなら None。"""
     cfg = run.cfg
     rounds = run.data.setdefault(ROUNDS, [])
-    prev = rounds[-1].get("head") if rounds and isinstance(rounds[-1], dict) else None
-    reviewed = set(_list(run.data, REVIEWED))
+    reviewed = scope_decide.reviewed_of(run.data)
     sections = changed_sections(run.g, cfg.base, cfg.worktree)
-    scope = scope_decide.review_scope(cfg.every_section, round_no, prev, sections, reviewed)
+    scope = scope_decide.state_scope(run.data, cfg.every_section, round_no, sections)
     head = run.g.rev_parse("HEAD")
     diff = cfg.state_dir / f"round{round_no}.diff"
     diff.write_text(run.g.run("diff", f"{scope.base or cfg.base}...HEAD"), encoding="utf-8")

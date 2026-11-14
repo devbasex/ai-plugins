@@ -39,8 +39,6 @@ TOOL = cli.tool_of(__name__)
 CROSS_REVIEW = TOOL
 # PR の head を読むアダプター（依存の欠けを import の時点で見分ける。#2447）
 GITHUB_MODULE = "ndf.adapters.github"
-ROUNDS = drive.ROUNDS
-REVIEWED = drive.REVIEWED
 # 相手役と修正担当の起動（テストは偽物に差し替える）
 LAUNCH: drive.Launcher = agents.run_agent
 
@@ -178,7 +176,7 @@ def cmd_state(args: argparse.Namespace) -> int:
 
 def _last_round(ref: store.StateRef) -> dict[str, Any]:
     data = store.read_state(ref)
-    rounds = data.get(ROUNDS)
+    rounds = data.get(store.ROUNDS)
     return rounds[-1] if isinstance(rounds, list) and rounds and isinstance(rounds[-1], dict) else {}
 
 
@@ -208,7 +206,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     except store.FixResultMismatch as exc:
         return _stop("invalid", str(exc))
     data = store.read_state(ref)
-    rounds = data.setdefault(ROUNDS, [{"round": 1}])
+    rounds = data.setdefault(store.ROUNDS, [{"round": 1}])
     if not rounds:
         rounds.append({"round": 1})
     rounds[-1]["fix"] = found
@@ -227,12 +225,10 @@ def _every_section(purpose: str) -> bool:
 def cmd_scope(args: argparse.Namespace) -> int:
     ref = store.state_pr(Path(args.state_dir), args.pr)
     data = store.read_state(ref)
-    rounds = data.get(ROUNDS) if isinstance(data.get(ROUNDS), list) else []
-    prev = rounds[-1].get("head") if rounds and isinstance(rounds[-1], dict) else None
-    reviewed = data.get(REVIEWED) if isinstance(data.get(REVIEWED), list) else []
+    rounds = data.get(store.ROUNDS) if isinstance(data.get(store.ROUNDS), list) else []
     wt = Path(args.worktree)
     sections = drive.changed_sections(git.Git(wt), args.base, wt)
-    got = scope_decide.review_scope(_every_section(args.purpose), len(rounds) + 1, prev, sections, set(reviewed))
+    got = scope_decide.state_scope(data, _every_section(args.purpose), len(rounds) + 1, sections)
     item = {"kind": "scope", "scope": got.kind, "base": got.base, "unreviewed": list(got.unreviewed)}
     return _ok(f"round {len(rounds) + 1} の範囲は {got.kind}（詳細レビューを通らない節 {len(got.unreviewed)} 件）", [item])
 
@@ -247,7 +243,7 @@ def _handed(path: Optional[str]) -> tuple[fin.Handed, ...]:
 def _review(path: str) -> fin.Review:
     data = store.read_object(Path(path))
     findings = data.get("findings") if isinstance(data.get("findings"), list) else []
-    rounds = data.get(ROUNDS)
+    rounds = data.get(store.ROUNDS)
     return fin.Review(str(data.get("final")), rounds if type(rounds) is int else 0, fin.as_findings(findings))
 
 

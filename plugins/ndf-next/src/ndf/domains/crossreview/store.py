@@ -24,6 +24,8 @@ FIX_RESULT_NAME = "fix-pr{pr}-result.json"
 ORIGIN_KEY = "pr"
 CURRENT_KEY = "current_pr"
 REPO_KEY = "target_repo"
+ROUNDS = "rounds"
+REVIEWED = "reviewed_sections"
 
 
 class StateBroken(Exception):

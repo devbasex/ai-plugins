@@ -7,8 +7,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Collection, Iterable
-from typing import NamedTuple, Optional
+from collections.abc import Collection, Iterable, Mapping
+from typing import Any, NamedTuple, Optional
+
+from ndf.domains.crossreview import store
 
 FULL = "full"
 SINCE = "since"
@@ -37,6 +39,22 @@ def sections_of(path: str, text: str) -> list[str]:
             if title:
                 out.append(f"{path}#{title}")
     return out
+
+
+def reviewed_of(state: Mapping[str, Any]) -> set[str]:
+    """状態ファイルの中身から、前のラウンドまでに詳細レビューを通った節（並びでなければ無し）。"""
+    value = state.get(store.REVIEWED)
+    return set(value) if isinstance(value, list) else set()
+
+
+def _prev_head(state: Mapping[str, Any]) -> Optional[str]:
+    rounds = state.get(store.ROUNDS)
+    return rounds[-1].get("head") if isinstance(rounds, list) and rounds and isinstance(rounds[-1], dict) else None
+
+
+def state_scope(state: Mapping[str, Any], every_section: bool, round_no: int, sections: Iterable[str]) -> Scope:
+    """状態ファイルの中身（最後のラウンドの head・詳細レビューを通った節）から、ラウンド `round_no` の範囲を決める。"""
+    return review_scope(every_section, round_no, _prev_head(state), sections, reviewed_of(state))
 
 
 def review_scope(every_section: bool, round_no: int, prev_head: Optional[str], sections: Iterable[str], reviewed: Collection[str]) -> Scope:
