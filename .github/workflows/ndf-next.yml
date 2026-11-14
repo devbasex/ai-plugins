@@ -34,7 +34,9 @@ defaults:
 
 jobs:
   # 新しいプラグイン（とこの定義）を変えたか。plugins/ndf だけの PR ではテストと一時コピーを打たない
+  # 本文の編集（edited）では出力を読むジョブがどれも飛ぶので、判定も打たない
   ndf-next-scope:
+    if: github.event.action != 'edited'
     runs-on: ubuntu-latest
     outputs:
       next: ${{ steps.diff.outputs.next }}
@@ -146,6 +148,10 @@ jobs:
                   print(f"{label}: I1 {path}:{line}", file=sys.stderr)
           sys.exit(1 if orig != copy else 0)
           EOF
+      # 全件を打つ。ディレクトリ名・プラグイン名を組み立てた文字列はどのテストからも作れ、触れるテストを
+      # 絞る一覧は新しいモジュールの追加で古くなる（決定 101 は「テストが通ること」を確かめる）。
+      # 実測（PR #3443 の run 43581413222）: ndf-next-tests 74 秒・このジョブ 100 秒（コピーと I1 の照合を含む）。
+      # 並べて走るため待ち時間の増えは約 26 秒、runner の時間は 1 回あたり約 100 秒増える
       - name: コピーでテストを打つ
         working-directory: ${{ env.COPY }}
         run: uv run --frozen --project . pytest -q -n auto
