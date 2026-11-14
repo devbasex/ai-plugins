@@ -147,6 +147,10 @@ class _Run:
     def work(self) -> git.Git:
         return git.Git(self.ws.work)
 
+    def state_get(self, key: str, default: Any) -> Any:
+        """状態の `key` の値。無ければ `default`。"""
+        return self.state[key] if key in self.state else default
+
     def save(self) -> None:
         store.save(self.path, self.state)
 
@@ -196,9 +200,9 @@ def _record_phase(run: _Run, phase: str) -> str:
 
 def _net(run: _Run) -> budget_decide.SafetyNet:
     """安全網。上限は今の引数から毎回組む（--safety-net-minutes を大きくして打ち直すと続けられる）。"""
-    budget = run.state["budget"] if "budget" in run.state else None
+    budget = run.state_get("budget", None)
     effective = budget_decide.Budget(budget["minutes"], budget["extended_to"]).effective if budget is not None else run.cfg.budget
-    used = float(run.state["coding_seconds"]) if "coding_seconds" in run.state else 0.0
+    used = float(run.state_get("coding_seconds", 0.0))
     return budget_decide.SafetyNet.of(effective, run.cfg.safety_net_minutes, used)
 
 
@@ -213,7 +217,7 @@ def _launch(run: _Run, req: launch.Request) -> Optional[dict[str, Any]]:
     began = run.ports.clock()
     got, _ = launch.run(req, run.dirs(), run.ports.launcher)
     spent = run.ports.clock() - began
-    seconds = dict(run.state["phase_seconds"]) if "phase_seconds" in run.state else {}
+    seconds = dict(run.state_get("phase_seconds", {}))
     seconds[req.phase] = round((seconds[req.phase] if req.phase in seconds else 0.0) + spent, 1)
     run.state["phase_seconds"] = seconds
     if coding:
@@ -379,11 +383,11 @@ def _verify(run: _Run, item: dict[str, Any]) -> None:
 
 def _ask_flaky(run: _Run, flaky: frozenset[str]) -> None:
     """フレーキーな鍵のうち、この実行でまだ依頼していないものを直しの依頼へ積む。"""
-    asked = run.state["flaky_requested"] if "flaky_requested" in run.state else []
+    asked = run.state_get("flaky_requested", [])
     fresh = flaky_decide.fresh(asked, flaky)
     if not fresh:
         return
-    held = run.state["flaky_request"] if "flaky_request" in run.state else None
+    held = run.state_get("flaky_request", None)
     pending = held if held else {"keys": [], "attempts": 0, "sendback": []}
     pending["keys"] = sorted({*pending["keys"], *fresh})
     run.state.update(flaky_requested=sorted({*asked, *fresh}), flaky_request=pending)
@@ -417,7 +421,7 @@ def _flaky_fix(run: _Run) -> None:
     pending = run.state["flaky_request"]
     commits, kind = _attempt_flaky_fix(run, pending)
     done = flaky_decide.results(pending["keys"], commits, kind)
-    run.state.update(flaky_request=None, flaky_fixes=[*(run.state["flaky_fixes"] if "flaky_fixes" in run.state else []), *done])
+    run.state.update(flaky_request=None, flaky_fixes=[*run.state_get("flaky_fixes", []), *done])
     run.save()
 
 
@@ -460,9 +464,9 @@ def _final(run: _Run) -> None:
 
 def _step_metrics(run: _Run) -> dict[str, Any]:
     """予算・安全網・成立の判定・フレーキーの直しの数。"""
-    items = run.state["items"] if "items" in run.state else []
+    items = run.state_get("items", [])
     net = _net(run)
-    flaky = run.state["flaky_fixes"] if "flaky_fixes" in run.state else []
+    flaky = run.state_get("flaky_fixes", [])
     return {
         "budget_minutes": run.cfg.budget,
         "safety_net_minutes": round(net.limit_minutes, 1),
@@ -498,7 +502,7 @@ def _plan_comment(run: _Run, outcome: str) -> str:
     if "items" not in run.state:
         return "skipped"
     body = report_decide.plan_comment(run.cfg.pr, run.state, outcome)
-    sent = run.state["plan_comment"] if "plan_comment" in run.state else None
+    sent = run.state_get("plan_comment", None)
     if sent is not None and sent["digest"] == report_decide.digest(body):
         return "unchanged"
     try:
