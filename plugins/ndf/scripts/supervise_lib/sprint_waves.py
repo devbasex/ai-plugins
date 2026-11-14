@@ -337,26 +337,33 @@ def plan_sprint_release(a, repo: str, advise: bool = False, channel: str = "dev"
     `version` は明示の版（開発版は省けば --version）で、無ければ版を流す時点に決める（開発版は origin から、本番は開発版の
     プランの版の記録から。#2164）。"""
     version = version or (a.version if channel == "dev" else None)
-    wt, branch = release_names(version)
     ns = argparse.Namespace(
-        **decl_fields(a),
-        version=version,
-        level=getattr(a, "level", None),
-        series=DEV_SERIES if channel == "prod" else None,
+        **_release_fields(a, repo, version, channel),
         prs=["{queue_pr:check}"],
         prs_from_queue=False,
-        channel=channel,
-        repo=repo,
-        prev_tag=None,
-        worktree=f"{repo}/{wt}",
-        branch=branch,
-        issue=a.issue,
-        mode=a.mode,
         advise=a.state if advise else None,  # 承認資料を組むプランだけが読む（CD の無い本番は組まない）
         state=getattr(a, "state", None),  # 本番の approve がリリース承認ゲートの利用者の承認の記録を読む（#1426）
-        units=[sprint_branch(a)],  # 取り込み方の行が単位を選ぶときのリリースの単位（#3121）
     )
     return plan_release(ns)
+
+
+def _release_fields(a, repo: str, version: str | None, channel: str) -> dict:
+    """スプリントのリリースのプラン（通常・MVV）が共通に渡す引数。PR の選び方と承認の読み方は呼び手が足す。"""
+    wt, branch = release_names(version)
+    return {
+        **decl_fields(a),
+        "version": version,
+        "level": getattr(a, "level", None),
+        "series": DEV_SERIES if channel == "prod" else None,
+        "channel": channel,
+        "repo": repo,
+        "prev_tag": None,
+        "worktree": f"{repo}/{wt}",
+        "branch": branch,
+        "issue": a.issue,
+        "mode": a.mode,
+        "units": [sprint_branch(a)],  # 取り込み方の行が単位を選ぶときのリリースの単位（#3121）
+    }
 
 
 def advise_design_steps(a) -> list[dict]:
@@ -476,23 +483,11 @@ def plan_mvv_release(a, repo: str, version: str | None, channel: str, condition:
     """pace: fast と auto のリリース。開発版は承認資料を gate_as_ok で写し、本番は先頭の mvv のステップがリリース承認ゲートを判定する。
     prs を渡せばその Pull Request（`{queue_pr:<名>}` でもよい）を出す版の PR にし、省けば前のステージの PR のすべて。
     `version` は明示の版で、無ければ版を流す時点に決める（#2164）。"""
-    wt, branch = release_names(version)
     ns = argparse.Namespace(
-        **decl_fields(a),
-        version=version,
-        level=getattr(a, "level", None),
-        series=DEV_SERIES if channel == "prod" else None,
+        **_release_fields(a, repo, version, channel),
         prs=prs or [],
         prs_from_queue=prs is None,
-        channel=channel,
-        repo=repo,
-        prev_tag=None,
-        worktree=f"{repo}/{wt}",
-        branch=branch,
-        issue=a.issue,
-        mode=a.mode,
         mvv=a.state,
-        units=[sprint_branch(a)],  # 取り込み方の行が単位を選ぶときのリリースの単位（#3121）
     )
     plan = plan_release(ns)
     if condition:
