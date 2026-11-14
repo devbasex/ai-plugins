@@ -116,16 +116,15 @@ def _within_any(path: str, roots: tuple[str, ...]) -> bool:
 
 def _write_targets(event: str, args: tuple) -> list[tuple[object, object, str]]:
     """監査イベントが書き込む対象の（パス, そのパスを解決する dir_fd, 判定の種類）の並び。書き込みでなければ空。"""
-    targets: list[tuple[object, object, str]] = []
     if event == "open":
         path, mode, flags = (tuple(args) + (None, None, None))[:3]
         writing = (isinstance(mode, str) and any(c in mode for c in "wax+")) or (isinstance(flags, int) and flags & _WRITE_FLAGS)
-        if writing:
-            targets.append((path, None, CONTENT))
-    elif event in _WRITE_EVENTS:
-        for at, fd_at, kind in _WRITE_EVENTS[event]:
-            if at < len(args):
-                targets.append((args[at], args[fd_at] if fd_at is not None and fd_at < len(args) else None, kind))
+        return [(path, None, CONTENT)] if writing else []
+    targets: list[tuple[object, object, str]] = []
+    for at, fd_at, kind in _WRITE_EVENTS.get(event, ()):
+        if at >= len(args):
+            continue
+        targets.append((args[at], args[fd_at] if fd_at is not None and fd_at < len(args) else None, kind))
     return targets
 
 
