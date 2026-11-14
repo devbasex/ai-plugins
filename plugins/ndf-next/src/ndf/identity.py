@@ -126,34 +126,48 @@ class OldPlace:
 # 規則は「新しい NDF が同じパスへ書く旧い置き場だけを退避する」。退避は `prepare_state_dir` が上から順に行う
 OLD_STATE_PLACES: tuple[OldPlace, ...] = (
     OldPlace(
-        "state-home", "<XDG_STATE_HOME か ~/.local/state>/<名前>", True,
+        "state-home",
+        "<XDG_STATE_HOME か ~/.local/state>/<名前>",
+        True,
         "新しい状態の置き場と同じパスで、新しい NDF がそこへ書く。退避の後に作り直す",
         lambda ident: ident.state_dir,
     ),
     OldPlace(
-        "config-state", "<CLAUDE_CONFIG_DIR か ~/.claude>/<名前>/state", True,
+        "config-state",
+        "<CLAUDE_CONFIG_DIR か ~/.claude>/<名前>/state",
+        True,
         "旧い NDF の既定の状態の置き場。新しい NDF は同じ事実を新しい状態の置き場へ書くため、旧い記録を退避して"
         "2 か所に持たない。作り直さない",
         lambda ident: _config_home() / ident.name / "state",
     ),
     OldPlace(
-        "checkout-state", "<git の共通ディレクトリ>/<名前>/state", True,
+        "checkout-state",
+        "<git の共通ディレクトリ>/<名前>/state",
+        True,
         "新しい NDF の耐久の記録が同じパスへ書く。退避は `core/durable.py` の `prepare_store` が同じ規則で行う（決定 85）",
     ),
     OldPlace(
-        "config-accounts", "<CLAUDE_CONFIG_DIR か ~/.claude>/<名前>/accounts", False,
+        "config-accounts",
+        "<CLAUDE_CONFIG_DIR か ~/.claude>/<名前>/accounts",
+        False,
         "利用者のアカウントの設定。新しい NDF は新しい状態の置き場の `relay/accounts` を使い重ならない。移行は S2 #3304",
     ),
     OldPlace(
-        "config-relay", "<CLAUDE_CONFIG_DIR か ~/.claude>/<名前>/relay.py", False,
+        "config-relay",
+        "<CLAUDE_CONFIG_DIR か ~/.claude>/<名前>/relay.py",
+        False,
         "中継の 1 つの複製で、新しい NDF の導入（`ndf relay install`）が上書きする",
     ),
     OldPlace(
-        "config-locks", "<CLAUDE_CONFIG_DIR か ~/.claude>/<名前>/locks", False,
+        "config-locks",
+        "<CLAUDE_CONFIG_DIR か ~/.claude>/<名前>/locks",
+        False,
         "動いているプロセスの排他。退避すると動いている旧い NDF の排他が外れる",
     ),
     OldPlace(
-        "cache", "~/.cache/<名前>", False,
+        "cache",
+        "~/.cache/<名前>",
+        False,
         "新しい NDF が使わない、再生成できるキャッシュ",
     ),
 )
