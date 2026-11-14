@@ -161,19 +161,37 @@ def _limit_hit(payload: dict, text: str) -> bool:
 
 
 def _parse_reply(stdout: str) -> ClaudeReply:
+    payload = _payload(stdout)
+    if isinstance(payload, ClaudeReply):
+        return payload
+    spent = payload.get("total_cost_usd")
+    cost = float(spent) if isinstance(spent, (int, float)) else 0.0
+    text = payload.get("result") if isinstance(payload.get("result"), str) else stdout
+    if payload.get("is_error"):
+        return _error_reply(payload, text, cost)
+    return _answer_reply(payload, text, cost)
+
+
+def _payload(stdout: str) -> dict | ClaudeReply:
+    """claude の出力の JSON のオブジェクト。JSON のオブジェクトでなければ、その失敗の答え。"""
     try:
         payload = json.loads(stdout)
     except json.JSONDecodeError as exc:
         return ClaudeReply.failed(stdout, f"claude の出力が JSON でない: {exc}")
     if not isinstance(payload, dict):
         return ClaudeReply.failed(stdout, "claude の出力が JSON のオブジェクトでない")
-    spent = payload.get("total_cost_usd")
-    cost = float(spent) if isinstance(spent, (int, float)) else 0.0
-    text = payload.get("result") if isinstance(payload.get("result"), str) else stdout
-    if payload.get("is_error"):
-        if _limit_hit(payload, text):
-            return ClaudeReply.failed(text, f"claude の利用上限: {text[:200]}", cost, Failure.USAGE_LIMIT)
-        return ClaudeReply.failed(text, f"claude が誤りで終えた: {text[:200]}", cost)
+    return payload
+
+
+def _error_reply(payload: dict, text: str, cost: float) -> ClaudeReply:
+    """誤りで終えた答え。利用上限なら打ち直しても直らない失敗（`Failure.USAGE_LIMIT`）にする。"""
+    if _limit_hit(payload, text):
+        return ClaudeReply.failed(text, f"claude の利用上限: {text[:200]}", cost, Failure.USAGE_LIMIT)
+    return ClaudeReply.failed(text, f"claude が誤りで終えた: {text[:200]}", cost)
+
+
+def _answer_reply(payload: dict, text: str, cost: float) -> ClaudeReply:
+    """誤りで終えなかった答え。縛った答え（`structured_output`）があればそれ、無ければ本文の JSON。"""
     if "structured_output" in payload:
         return ClaudeReply(True, payload["structured_output"], text, cost)
     try:
