@@ -672,24 +672,33 @@ def _sweep_guard(root: Path, now: datetime) -> Iterator[bool]:
         _touch(mark, now)
 
 
-def sweep(root: Path, now: datetime | None = None) -> SweepResult:
-    """終わった鍵のファイルを retired/ へ移し、retired/・broken/ の `KEEP_DAYS` より古いファイルを消す（決定 83・A5）。
-
-    24 時間に 1 回だけ走査する。開いているプロセスがいる鍵（`run_lock` を待たずに取れない鍵）は触らない。
-    """
+def _guarded_sweep(root: Path, now: datetime | None, body: Callable[[datetime, SweepResult], None], message: str) -> SweepResult:
+    """`_sweep_guard` が走査を許したときだけ `body` を流し、読めなかったものを `message` でログに残す。"""
     now = now or datetime.now(UTC)
     out = SweepResult()
     with _sweep_guard(root, now) as go:
         if not go:
             out.skipped = True
             return out
+        body(now, out)
+    if out.warnings:
+        log.warning(message, extra={"count": len(out.warnings), "sample": out.warnings[:10]})
+    return out
+
+
+def sweep(root: Path, now: datetime | None = None) -> SweepResult:
+    """終わった鍵のファイルを retired/ へ移し、retired/・broken/ の `KEEP_DAYS` より古いファイルを消す（決定 83・A5）。
+
+    24 時間に 1 回だけ走査する。開いているプロセスがいる鍵（`run_lock` を待たずに取れない鍵）は触らない。
+    """
+
+    def body(now: datetime, out: SweepResult) -> None:
         dbos_dir = _dbos_dir(root)
         if dbos_dir.is_dir():
             _sweep_live(root, now, out)
             _sweep_kept(dbos_dir, now, out)
-    if out.warnings:
-        log.warning("片付けで読めないファイルがあった", extra={"count": len(out.warnings), "sample": out.warnings[:10]})
-    return out
+
+    return _guarded_sweep(root, now, body, "片付けで読めないファイルがあった")
 
 
 def _sweep_live(root: Path, now: datetime, out: SweepResult) -> None:
@@ -804,12 +813,8 @@ def sweep_url(database_url: str, now: datetime | None, root: Path) -> SweepResul
     目印と排他は `sweep` と同じ。鍵ごとに DB 側の鍵のロックを待たずに試し、取れない鍵は触らない（I13）。
     消すときは集めた ID をすべて並べて `delete_workflows` を呼び、`delete_children` には頼らない（I8）。
     """
-    now = now or datetime.now(UTC)
-    out = SweepResult()
-    with _sweep_guard(root, now) as go:
-        if not go:
-            out.skipped = True
-            return out
+
+    def body(now: datetime, out: SweepResult) -> None:
         try:
             rows = _ledger(database_url)
         except sa.exc.SQLAlchemyError as exc:
@@ -821,9 +826,8 @@ def sweep_url(database_url: str, now: datetime | None, root: Path) -> SweepResul
                 _sweep_url_run(database_url, row.run_name, row.started_at, cutoff, out)
             except Exception as exc:  # noqa: BLE001 ネットワーク: 1 つの鍵を片付けられなくても止めず、warnings に載せる
                 out.warnings.append(f"{row.run_name}: {exc}")
-    if out.warnings:
-        log.warning("URL の片付けで読めない鍵があった", extra={"count": len(out.warnings), "sample": out.warnings[:10]})
-    return out
+
+    return _guarded_sweep(root, now, body, "URL の片付けで読めない鍵があった")
 
 
 def _sweep_url_run(database_url: str, name: str, started_at: datetime, cutoff: datetime, out: SweepResult) -> None:
