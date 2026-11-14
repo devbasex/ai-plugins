@@ -107,14 +107,24 @@ def stale(plugin_root: Path) -> list[Path]:
 def write(plugin_root: Path) -> list[Path]:
     """違うファイルを作り直し、余ったファイルを消す。書いた・消したファイルを返す。"""
     found, want = _expected(plugin_root)
-    changed = []
+    written = _write_changed(want)
+    removed = [_remove(path) for path in _extra(plugin_root, found, want)]
+    return sorted(written + removed)
+
+
+def _write_changed(want: dict[Path, str]) -> list[Path]:
+    """無いか中身が違うファイルを書き、書いたファイルを返す。"""
+    written = []
     for path in _differ(want):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(want[path], encoding="utf-8")
-        changed.append(path)
-    for path in _extra(plugin_root, found, want):
-        path.unlink()
-        if not any(path.parent.iterdir()):
-            path.parent.rmdir()
-        changed.append(path)
-    return sorted(changed)
+        written.append(path)
+    return written
+
+
+def _remove(path: Path) -> Path:
+    """ファイルを消し、置き場が空になれば置き場も消す。消したファイルを返す。"""
+    path.unlink()
+    if not any(path.parent.iterdir()):
+        path.parent.rmdir()
+    return path
