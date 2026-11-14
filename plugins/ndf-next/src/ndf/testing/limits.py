@@ -88,22 +88,28 @@ def load_limits(cwd: Path, *, cpus: int | None = None, total_mib: int | None = N
     """設定と既定から上限を決める。誤った値は既定へ落とさず `SlotConfigError` を送る。"""
     base = default_limits(machine.cpu_count() if cpus is None else cpus, machine.total_mib() if total_mib is None else total_mib)
     path = find_setting(cwd, RESOURCES_FILE)
-    if path is None:
+    section = None if path is None else _section(path)
+    if section is None:
         return base
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        raise SlotConfigError(f"設定を読めない: {path}", [f"{path}: JSON として読めない（{exc}）"]) from exc
-    if isinstance(data, dict) and SECTION not in data:
-        return base
-    section = data[SECTION] if isinstance(data, dict) else None
-    if not isinstance(section, dict):
-        raise SlotConfigError(f"設定の形が違う: {path}", [f"{path}: {SECTION} はオブジェクトにする"])
     errors: list[str] = []
     values = {key: _positive(section, key, path, errors) for key in _LIMIT_KEYS}
     if errors:
         raise SlotConfigError(f"設定の値が誤っている: {path}", errors)
     return dataclasses.replace(base, **{key: value for key, value in values.items() if value is not None})
+
+
+def _section(path: Path) -> dict | None:
+    """設定の節 `SECTION`。節が無ければ None。読めない・形が違えば `SlotConfigError`。"""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise SlotConfigError(f"設定を読めない: {path}", [f"{path}: JSON として読めない（{exc}）"]) from exc
+    if isinstance(data, dict) and SECTION not in data:
+        return None
+    section = data[SECTION] if isinstance(data, dict) else None
+    if not isinstance(section, dict):
+        raise SlotConfigError(f"設定の形が違う: {path}", [f"{path}: {SECTION} はオブジェクトにする"])
+    return section
 
 
 def load_suites(cwd: Path) -> list[dict[str, object]]:
