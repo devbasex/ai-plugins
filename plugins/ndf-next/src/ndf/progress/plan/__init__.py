@@ -19,12 +19,14 @@ from typing import Any, Optional
 
 import sqlalchemy as sa
 
-from ndf import cli, contracts
+from ndf import cli as top
+from ndf import contracts
 from ndf.contracts import limits, result
 from ndf.progress import lane, model, store
 
-# 結果 JSON の tool の名前（副命令のモジュール `cli` の名前から引く）
-TOOL = cli.tool_of(f"{__name__}.cli")
+# 結果 JSON の tool の名前（副命令のモジュール `cli` の名前から引く）。`ndf.cli` を `cli` の名で束ねると、
+# 副モジュール `ndf.progress.plan.cli` を読む前の `from ndf.progress.plan import cli` が `ndf.cli` を返す
+TOOL = top.tool_of(f"{__name__}.cli")
 # 計画の宣言とレーンの宣言の形（レーンは同じファイルの $defs）
 PLAN_SCHEMA = "workflow/parallel-plan.schema.json"
 LANE_SCHEMA = PLAN_SCHEMA + "#/$defs/lane"

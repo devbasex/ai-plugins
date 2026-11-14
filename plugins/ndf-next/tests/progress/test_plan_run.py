@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from ndf.core import loop
+from ndf.core import durable, loop
 from ndf.progress import lane, plan, store
 from ndf.progress.lane import launch
 from ndf.progress.plan import run, run_decide
@@ -252,6 +252,9 @@ def test_a_report_is_not_written_once_the_plan_is_stopped(opened):
 
 @pytest.fixture
 def where(progress_url, root, tmp_path):
+    # 副命令（`plan.cli._where`）と同じく、表を作る前に置き場を用意する。用意の無い置き場に SQLite の表を作ると、
+    # 耐久ワークフローを起こすときの用意が `format.json` の無い置き場として表ごと退避する
+    durable.prepare_store(root)
     return run.Where(root=root, url=progress_url, repo=REPO, cwd=tmp_path)
 
 
