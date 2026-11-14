@@ -302,6 +302,14 @@ class WatchResult:
         return INFRA_WAIT_KIND if kind == CI_PENDING_KIND and self.runner_exhausted else kind
 
 
+def _next_interval(previous: Optional[Reading], reading: Reading, interval: float, policy: limits.Policy) -> float:
+    """この周の眠りの間隔。最初の周と、読んだ結果が変わった（チェックが動いた）周は最初の値へ戻し、
+    変化が無い間だけ前の間隔に倍率をかけて伸ばす（頭打ちは `max_interval`。不足 g）。"""
+    if previous is None or reading != previous:
+        return float(policy.interval)
+    return min(interval * float(policy.factor), float(policy.max_interval))
+
+
 @dataclass
 class Watch:
     """必須のチェックの結論が出るまで読み直す。
@@ -349,9 +357,7 @@ class Watch:
             reading, now, done = self._round(rounds)
             if done is not None:
                 return done
-            if previous is not None and reading != previous:
-                # 読んだ結果が変わった（チェックが動いた）ら、間隔を最初の値へ戻す。変化が無い間だけ伸ばす（不足 g）
-                interval = float(policy.interval)
+            interval = _next_interval(previous, reading, interval, policy)
             previous = reading
             wait = self._next_wait(reading, interval, now, runner_cap)
             if wait <= 0:
@@ -360,7 +366,6 @@ class Watch:
             if reading.only_queued:
                 # 眠りは頼んだ秒より短くならない。時計の差が丸めで縮んでも、頼んだ秒は数える
                 self._queued += max(self.clock() - now, wait)
-            interval = min(interval * float(policy.factor), float(policy.max_interval))
 
     def _round(self, rounds: int) -> tuple[Reading, float, Optional[WatchResult]]:
         """1 周（`rounds` 周目）: 読み、経過の秒を `on_round` へ渡し、結論が出た（か `decided` が真）なら結果を返す。
