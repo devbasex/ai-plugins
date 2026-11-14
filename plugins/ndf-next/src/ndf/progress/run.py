@@ -129,18 +129,15 @@ def append(
     st: store.Store, table_id: str, build: Callable[[View], list[model.EventDraft]], after: Callable[[Any], Any] = lambda _conn: None
 ) -> list[int]:
     """`build` が今の進行表から作った下書きを追記する（ぶつかれば作り直す。空なら書かない）。`after` は同じトランザクションで打つ。"""
-    for attempt in range(1, APPEND_ATTEMPTS + 1):
-        try:
-            with store.transaction(st) as conn:
-                v = view(conn, table_id)
-                drafts = build(v)
-                seqs = store.append_events(conn, table_id, drafts, v.events[-1].seq if v.events else 0) if drafts else []
-                after(conn)
-                return seqs
-        except store.Conflict:
-            if attempt == APPEND_ATTEMPTS:
-                raise
-    raise AssertionError("到達しない")
+
+    def write(conn: Any) -> list[int]:
+        v = view(conn, table_id)
+        drafts = build(v)
+        seqs = store.append_events(conn, table_id, drafts, v.events[-1].seq if v.events else 0) if drafts else []
+        after(conn)
+        return seqs
+
+    return command.retrying_transaction(st, write)
 
 
 def _write(st: store.Store, table_id: str, *drafts: model.EventDraft) -> list[int]:

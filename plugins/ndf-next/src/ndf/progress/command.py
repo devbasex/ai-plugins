@@ -229,20 +229,29 @@ def _current(conn: Any, table_id: str) -> tuple[int, stages.Snapshot, list[model
     return rev, stages.snapshot_from(raw), store.read_events(conn, table_id)
 
 
-def _append(
-    st: store.Store, table_id: str, build: Callable[[int, stages.Snapshot, list[model.Event]], list[model.EventDraft]]
-) -> list[int]:
-    """今の改訂と事象を読み、`build` が作った下書きを追記する。番号がぶつかれば読み直して作り直す。"""
+def retrying_transaction(st: store.Store, write: Callable[[Any], list[int]]) -> list[int]:
+    """`write(conn)` を 1 つのトランザクションで打つ。番号がぶつかれば（`store.Conflict`）APPEND_ATTEMPTS 回まで打ち直す。"""
     for attempt in range(1, APPEND_ATTEMPTS + 1):
         try:
             with store.transaction(st) as conn:
-                rev, snap, events = _current(conn, table_id)
-                drafts = build(rev, snap, events)
-                return store.append_events(conn, table_id, drafts, events[-1].seq if events else 0)
+                return write(conn)
         except store.Conflict:
             if attempt == APPEND_ATTEMPTS:
                 raise
     raise AssertionError("到達しない")
+
+
+def _append(
+    st: store.Store, table_id: str, build: Callable[[int, stages.Snapshot, list[model.Event]], list[model.EventDraft]]
+) -> list[int]:
+    """今の改訂と事象を読み、`build` が作った下書きを追記する。番号がぶつかれば読み直して作り直す。"""
+
+    def write(conn: Any) -> list[int]:
+        rev, snap, events = _current(conn, table_id)
+        drafts = build(rev, snap, events)
+        return store.append_events(conn, table_id, drafts, events[-1].seq if events else 0)
+
+    return retrying_transaction(st, write)
 
 
 def _rows(snap: stages.Snapshot, events: list[model.Event], rev: int) -> list[dict[str, Any]]:
