@@ -58,6 +58,17 @@ def test_launch_args_refuses_arguments(capsys):
     assert json.loads(capsys.readouterr().out)["cause"]["kind"] == "invalid"
 
 
+def test_call_claude_reads_structured_output(tmp_path):
+    fake = tmp_path / "claude"
+    payload = {"result": "", "structured_output": {"decision": "fix"}, "total_cost_usd": 0.25}
+    fake.write_text(f"#!/bin/sh\ncat > /dev/null\necho '{json.dumps(payload)}'\n")
+    fake.chmod(0o755)
+
+    got = cli.call_claude([str(fake)], "問い", 30)
+
+    assert got == cli.ClaudeReply(True, {"decision": "fix"}, "", 0.25)
+
+
 def fake_claude(tmp_path: Path, stdout: str) -> Path:
     """問いを読み捨て、`stdout` をそのまま標準出力へ書く偽の claude。"""
     out = tmp_path / "claude.stdout"
@@ -66,15 +77,6 @@ def fake_claude(tmp_path: Path, stdout: str) -> Path:
     fake.write_text(f"#!/bin/sh\ncat > /dev/null\ncat '{out}'\n")
     fake.chmod(0o755)
     return fake
-
-
-def test_call_claude_reads_structured_output(tmp_path):
-    payload = {"result": "", "structured_output": {"decision": "fix"}, "total_cost_usd": 0.25}
-    fake = fake_claude(tmp_path, json.dumps(payload))
-
-    got = cli.call_claude([str(fake)], "問い", 30)
-
-    assert got == cli.ClaudeReply(True, {"decision": "fix"}, "", 0.25)
 
 
 def test_call_claude_missing_command_is_not_ok(tmp_path):
