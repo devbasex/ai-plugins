@@ -433,6 +433,23 @@ def _retrying(sleep: Callable[[float], None]) -> tenacity.Retrying:
     )
 
 
+def _deliver(
+    notice: Notice, outbox: Path, sent: dict[str, float], deliver: Deliver, sleep: Callable[[float], None], out: Drained
+) -> PostError | None:
+    """1 件を打ち直し付きで送り、送った・設定が無いを数える。打ち直しても送れなければ、その失敗を返す。"""
+    try:
+        delivered = _retrying(sleep)(deliver, notice)
+    except PostError as e:
+        return e
+    if not delivered:
+        out.unconfigured += 1
+        return None
+    out.sent += 1
+    sent[notice.key] = _wall()
+    _save_sent(outbox, sent)
+    return None
+
+
 def _send_one(path: Path, outbox: Path, sent: dict[str, float], deliver: Deliver, sleep: Callable[[float], None], out: Drained) -> bool:
     """1 件を扱う。打ち直しても送れず、送信待ちに残したら偽（この回の送り手を終える）。"""
     now = _wall()
@@ -445,21 +462,12 @@ def _send_one(path: Path, outbox: Path, sent: dict[str, float], deliver: Deliver
         out.stale += 1
     elif _duplicate(notice, sent, now):
         out.duplicate += 1
-    else:
-        try:
-            delivered = _retrying(sleep)(deliver, notice)
-        except PostError as e:
-            if e.retryable:
-                out.left = len(pending(outbox))
-                return False
-            _move_unsent(path, outbox, f"{path.name}: {e}", out)
-            return True
-        if not delivered:
-            out.unconfigured += 1
-        else:
-            out.sent += 1
-            sent[notice.key] = _wall()
-            _save_sent(outbox, sent)
+    elif failure := _deliver(notice, outbox, sent, deliver, sleep, out):
+        if failure.retryable:
+            out.left = len(pending(outbox))
+            return False
+        _move_unsent(path, outbox, f"{path.name}: {failure}", out)
+        return True
     path.unlink(missing_ok=True)
     return True
 
