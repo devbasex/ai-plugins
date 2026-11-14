@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -114,5 +114,10 @@ def user_commands(features: Mapping[str, Any], commands: Mapping[str, str]) -> d
         if not r.get("user_command"):
             continue
         heads = places[r["to"]] if "to" in r else []
-        found[r["now"]] = sorted(cmd for cmd, module in commands.items() if any(_under(module, h) for h in heads))
+        found[r["now"]] = _commands_under(commands, heads)
     return found
+
+
+def _commands_under(commands: Mapping[str, str], heads: Sequence[str]) -> list[str]:
+    """副命令の表から、モジュールがいずれかの置き場の下にある副命令の名前を並べる。"""
+    return sorted(cmd for cmd, module in commands.items() if any(_under(module, h) for h in heads))
