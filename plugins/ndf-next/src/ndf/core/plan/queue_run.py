@@ -23,6 +23,9 @@ from ndf.contracts import result
 from ndf.contracts.exit_codes import GATE, OK, STOPPED
 from ndf.core.plan import files, model, queue_decide, runner, steps, wait_decide
 
+# 子のプランを `python -m` で起こすパッケージ（プラグイン名から切り離した名前）
+_PACKAGE = __name__.split(".")[0]
+
 QUEUE_SUFFIX = ".queue"
 QUEUE_FILE = "queue.json"
 QUEUE_PRS = "queue_prs"
@@ -77,7 +80,7 @@ def _outcome(entry: Entry, out: dict[str, Any]) -> queue_decide.Outcome:
 
 
 def _child_args(entry: Entry, sets: dict[str, str]) -> list[str]:
-    args = [sys.executable, "-m", "ndf", "plan", "next", str(entry.path)]
+    args = [sys.executable, "-m", _PACKAGE, "plan", "next", str(entry.path)]
     if entry.start is not None:
         args += ["--from", entry.start]
     for name, value in sets.items():

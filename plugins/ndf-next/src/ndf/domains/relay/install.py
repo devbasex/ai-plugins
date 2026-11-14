@@ -18,6 +18,7 @@ import shlex
 from pathlib import Path
 from typing import Mapping, NamedTuple
 
+from ndf import identity
 from ndf.domains.relay import signals
 
 ENTRY_NAME = "ndf-relay"
@@ -37,12 +38,12 @@ POINTER = HERE / "{root_file}"
 
 
 def _usable(root):
-    return root is not None and os.access(root / "bin" / "ndf", os.X_OK)
+    return root is not None and os.access(root / "bin" / "{entry}", os.X_OK)
 
 
 def _newest(parent):
     found = [p for p in parent.iterdir() if _usable(p)] if parent.is_dir() else []
-    return max(found, key=lambda p: (p / "bin" / "ndf").stat().st_mtime) if found else None
+    return max(found, key=lambda p: (p / "bin" / "{entry}").stat().st_mtime) if found else None
 
 
 def main():
@@ -54,9 +55,9 @@ def main():
             POINTER.write_text(str(root) + "\\n", encoding="utf-8")
     if not _usable(root):
         print("ndf-relay: 中継を呼ぶプラグインが見つからない（" + str(POINTER) + "）。"
-              "プラグインの bin/ndf relay install で置き直す", file=sys.stderr)
+              "プラグインの bin/{entry} relay install で置き直す", file=sys.stderr)
         return {code}
-    ndf = str(root / "bin" / "ndf")
+    ndf = str(root / "bin" / "{entry}")
     os.execv(ndf, [ndf, "relay", *sys.argv[1:]])
 
 
@@ -81,7 +82,7 @@ class Installed(NamedTuple):
 
 
 def config_dir(environ: Mapping[str, str]) -> Path:
-    return signals.claude_config_root(environ) / "ndf"
+    return signals.claude_config_root(environ) / identity.FINAL_NAME
 
 
 def bin_dir(environ: Mapping[str, str]) -> Path:
@@ -90,7 +91,7 @@ def bin_dir(environ: Mapping[str, str]) -> Path:
 
 
 def launcher(missing_code: int) -> str:
-    return _LAUNCHER.format(mark=MARK, root_file=ROOT_FILE, code=missing_code)
+    return _LAUNCHER.format(mark=MARK, root_file=ROOT_FILE, code=missing_code, entry=identity.FIXED_WORDS["entrypoint"])
 
 
 def entry_script(copy: Path) -> str:

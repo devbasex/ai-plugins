@@ -177,9 +177,11 @@ def test_relay_writes_create_the_parent_and_leave_no_temporary_file(tmp_path, mo
     assert (d / registry.STATE_FILE).read_text(encoding="utf-8") == (
         '{"state": "running", "reason": "区間 1", "at": "2026-11-14T00:00:00+00:00"}'
     )
-    hub._save_registry(state, {"t1": {"cwd": "/w/作業"}})
-    assert (hub.hub_dir(state) / hub.REGISTRY_FILE).read_text(encoding="utf-8") == '{"version": 1, "entries": {"t1": {"cwd": "/w/作業"}}}'
-    assert hub.read_registry(state) == {"t1": {"cwd": "/w/作業"}}
+    registry.save_registry(hub.hub_dir(state), {"t1": {"cwd": "/w/作業"}})
+    assert (hub.hub_dir(state) / registry.REGISTRY_FILE).read_text(
+        encoding="utf-8"
+    ) == '{"version": 1, "entries": {"t1": {"cwd": "/w/作業"}}}'
+    assert registry.read_registry(hub.hub_dir(state)) == {"t1": {"cwd": "/w/作業"}}
     m = marks.mark(state, "s1")
     assert m.read_text(encoding="utf-8") == '{"session_id": "s1", "at": "2026-11-14T00:00:00+00:00"}'
     assert _no_temporary(tmp_path) == []
@@ -224,6 +226,6 @@ def test_relay_places_match_the_declared_paths():
     assert accounts.usage_path(state) == Path("/s/relay/accounts/usage.json")
     assert marks.mark_path(state, "s1") == Path("/s/relay/marks/s1.json")
     declared = {r["path"] for r in facts.rows("ndf-files", place="relay-hub")}
-    assert {hub.STATE_FILE, hub.REGISTRY_FILE, hub.LOG_FILE} <= declared
+    assert {hub.STATE_FILE, registry.REGISTRY_FILE, hub.LOG_FILE} <= declared
     wrapper = {r["path"] for r in facts.rows("ndf-files", place="relay-wrappers")}
     assert {f"<名前>/{n}" for n in (registry.STATE_FILE, registry.LOCK_FILE, registry.LOG_FILE)} <= wrapper
