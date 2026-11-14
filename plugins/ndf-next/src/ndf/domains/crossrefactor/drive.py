@@ -468,11 +468,7 @@ def _flaky_fix(run: _Run) -> None:
             break
         pending["sendback"] = found
         run.save()
-    fixed = flaky_decide.fixed(commits) if kind == flaky_decide.KEPT else {}
-    done = [
-        {"key": k, "result": kind if kind != flaky_decide.KEPT or k in fixed else flaky_decide.NONE, "commit": fixed.get(k)}
-        for k in pending["keys"]
-    ]
+    done = flaky_decide.results(pending["keys"], commits, kind)
     run.state.update(flaky_request=None, flaky_fixes=[*(run.state["flaky_fixes"] if "flaky_fixes" in run.state else []), *done])
     run.save()
 

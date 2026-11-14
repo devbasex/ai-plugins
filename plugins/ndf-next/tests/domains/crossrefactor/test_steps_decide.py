@@ -89,6 +89,19 @@ def test_flaky_fix_violations_send_back_once_then_revert() -> None:
     assert flaky_decide.fixed([ok]) == {"pytest:b": "a1"}
 
 
+def test_flaky_results_mark_keys_without_a_fix_commit_as_no_commit() -> None:
+    ok = flaky_decide.Commit("a1", "pytest:b", ("tests/test_b.py",))
+    got = flaky_decide.results(["pytest:a", "pytest:b"], [ok], flaky_decide.KEPT)
+    assert got == [
+        {"key": "pytest:a", "result": flaky_decide.NONE, "commit": None},
+        {"key": "pytest:b", "result": flaky_decide.KEPT, "commit": "a1"},
+    ]
+    assert flaky_decide.results(["pytest:b"], [ok], flaky_decide.REVERTED) == [
+        {"key": "pytest:b", "result": flaky_decide.REVERTED, "commit": None}
+    ]
+    assert flaky_decide.results(["pytest:b"], [], flaky_decide.NONE) == [{"key": "pytest:b", "result": flaky_decide.NONE, "commit": None}]
+
+
 def test_plan_comment_and_report_show_items_budget_and_steps() -> None:
     state = {
         "items": [

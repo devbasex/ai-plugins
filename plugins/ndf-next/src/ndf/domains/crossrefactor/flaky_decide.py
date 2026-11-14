@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
+from typing import Optional
 
 TRAILER = "Flaky-Fix"
 KEPT = "kept"
@@ -82,3 +83,9 @@ def outcome(commits: Sequence[Commit], found: Sequence[dict[str, str]], attempts
 def fixed(commits: Sequence[Commit]) -> dict[str, str]:
     """鍵 → 直したコミット。"""
     return {c.trailer.strip(): c.sha for c in commits if c.trailer.strip()}
+
+
+def results(keys: Iterable[str], commits: Sequence[Commit], kind: str) -> list[dict[str, Optional[str]]]:
+    """依頼した鍵ごとの直しの記録（鍵の並びのまま）。取り込んだ起動でも、直したコミットの無い鍵は `NONE` にする。"""
+    by_key = fixed(commits) if kind == KEPT else {}
+    return [{"key": k, "result": kind if kind != KEPT or k in by_key else NONE, "commit": by_key.get(k)} for k in keys]
