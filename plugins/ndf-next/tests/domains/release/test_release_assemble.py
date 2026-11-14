@@ -7,7 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from ndf.domains.release import assemble, changes_decide, checks_decide, materials_decide, version_decide
+from ndf.adapters import git as git_mod
+from ndf.domains.release import assemble, changes_decide, checks_decide, gather, materials_decide, version_decide
+from ndf.domains.release import declaration as decl_mod
+from ndf.domains.release import plugins as plugins_mod
 
 from ._fakes import FakeHub, git, init_repo, write_json
 
@@ -114,3 +117,19 @@ def test_collect_without_bump_raises_with_span(tmp_path: Path) -> None:
     work = _origin_with_change(tmp_path, test_only=True)
     with pytest.raises(assemble.NothingToRelease, match="^origin/main..origin/develop に版を上げる変化が無い$"):
         assemble.collect(work, _hub(), assemble.Target("production", "patch", "develop", "main"))
+
+
+@pytest.mark.parametrize(
+    ("test_only", "expected"),
+    [
+        (False, [changes_decide.Change("kit", ("tools/kit/a.py",), ())]),
+        (True, [changes_decide.Change("kit", (), ("tools/kit/tests/test_a.py",))]),
+    ],
+)
+def test_gather_changes_current_behavior(tmp_path: Path, test_only: bool, expected: list[changes_decide.Change]) -> None:
+    """現状固定（gather.changes）: 範囲の変わったファイルをプラグインごとに配る・配らないへ分ける。空の範囲は空。"""
+    work = _origin_with_change(tmp_path, test_only=test_only)
+    repo_git = git_mod.Git(work)
+    found, decl = plugins_mod.load(work), decl_mod.load(work)
+    assert gather.changes(repo_git, gather.Range("origin/main", "origin/develop"), found, decl) == expected
+    assert gather.changes(repo_git, gather.Range("origin/develop", "origin/develop"), found, decl) == []
