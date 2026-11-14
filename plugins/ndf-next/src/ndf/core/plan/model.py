@@ -145,7 +145,11 @@ def _target_errors(step: Step, ids: set[str]) -> list[str]:
         *((f"on_cause.{kind}", target, PLAN_TARGETS, "知らない行き先") for kind, target in step.on_cause.items()),
         *((f"on_answer.{answer}", target, ANSWER_TARGETS, "知らない行き先") for answer, target in step.on_answer.items()),
     ]
-    return [f"ステップ {step.id} の {label} が{word}: {target}" for label, target, allowed, word in rows if target not in ids and target not in allowed]
+    return [
+        f"ステップ {step.id} の {label} が{word}: {target}"
+        for label, target, allowed, word in rows
+        if target not in ids and target not in allowed
+    ]
 
 
 def _kind_errors(step: Step, table: Mapping[str, Any]) -> list[str]:
