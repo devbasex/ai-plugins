@@ -136,3 +136,214 @@ def test_changed_files_returns_real_names_of_quoted_paths(tmp_path: Path) -> Non
     changed = git.Git(cwd=repo).changed_files(base, "main")
     assert sorted(changed) == sorted(names)
     assert all((repo / name).exists() for name in changed)
+
+
+# 現状固定（I-002）: `Git` の各操作が git へ渡す引数・作業場所と、失敗の扱い。期待値は今の実装の出力。
+def _fake_cwd(returncode: int = 0, stdout: str = "", stderr: str = ""):
+    calls: list[tuple[list[str], Path | None]] = []
+
+    def runner(args: list[str], cwd):
+        calls.append((args, cwd))
+        return git.Completed(returncode, stdout, stderr)
+
+    runner.calls = calls  # type: ignore[attr-defined]
+    return runner
+
+
+def test_run_returns_stdout_as_is() -> None:
+    runner = _fake_cwd(stdout="x\n")
+    assert git.Git(Path("/w"), runner).run("status") == "x\n"
+    assert runner.calls == [(["status"], Path("/w"))]
+
+
+def test_run_failure_message_names_command_and_stderr() -> None:
+    with pytest.raises(git.GitError) as exc:
+        git.Git(runner=_fake_cwd(128, stderr="bad\n")).run("status", "-s")
+    assert str(exc.value) == "git status -s が失敗（終了コード 128）: bad"
+
+
+def test_rev_parse_failures() -> None:
+    with pytest.raises(git.GitError) as exc:
+        git.Git(runner=_fake_cwd(1)).rev_parse("x")
+    assert str(exc.value) == "git rev-parse --verify --quiet x^{commit} が失敗（終了コード 1）: "
+    with pytest.raises(git.GitError) as exc:
+        git.Git(runner=_fake_cwd(stdout="abc\n")).rev_parse("x")
+    assert str(exc.value) == "x をコミットへ解決できない: 'abc'"
+
+
+def test_is_ancestor_passes_args_and_cwd_and_failure_message() -> None:
+    runner = _fake_cwd(0)
+    assert git.Git(Path("/w"), runner).is_ancestor("a", "b") is True
+    assert runner.calls == [(["merge-base", "--is-ancestor", "a", "b"], Path("/w"))]
+    with pytest.raises(git.GitError) as exc:
+        git.Git(runner=_fake_cwd(128, stderr="oops\n")).is_ancestor("a", "b")
+    assert str(exc.value) == "祖先を確かめられない（終了コード 128）: oops"
+
+
+def test_merge_base_strips_output() -> None:
+    runner = _fake_cwd(stdout=" abc \n")
+    assert git.Git(runner=runner).merge_base("a", "b") == "abc"
+    assert runner.calls == [(["merge-base", "a", "b"], None)]
+
+
+def test_changed_files_splits_on_nul() -> None:
+    runner = _fake_cwd(stdout="a\0b c\0\0")
+    assert git.Git(Path("/w"), runner).changed_files("b", "h") == ["a", "b c"]
+    assert runner.calls == [(["diff", "--name-only", "-z", "b...h"], Path("/w"))]
+
+
+def test_changed_lines_with_fake_log_excludes_short_sha_case_insensitively() -> None:
+    log = f"@{'a' * 40}\n\n 1 file changed, 2 insertions(+)\n@{'b' * 40}\n\n 1 file changed, 3 deletions(-)\n"
+    runner = _fake_cwd(stdout=log)
+    assert git.Git(runner=runner).changed_lines("b", "h", exclude=["BBBBBBB"]) == 2
+    assert runner.calls == [(["log", "--first-parent", "--diff-merges=first-parent", "--shortstat", "--format=@%H", "b..h"], None)]
+    assert git.Git(runner=_fake_cwd(stdout=log)).changed_lines("b", "h") == 5
+
+
+def test_worktrees_reads_porcelain_z() -> None:
+    text = f"worktree /m\0HEAD {'a' * 40}\0branch refs/heads/develop\0\0worktree /m/.worktrees/x\0HEAD {'b' * 40}\0detached\0prunable gone\0locked\0\0"
+    runner = _fake_cwd(stdout=text)
+    assert git.Git(runner=runner).worktrees() == [
+        git.WorktreeEntry(Path("/m"), "a" * 40, "develop", False, False),
+        git.WorktreeEntry(Path("/m/.worktrees/x"), "b" * 40, None, True, True),
+    ]
+    assert runner.calls == [(["worktree", "list", "--porcelain", "-z"], None)]
+
+
+def test_fetch_returns_completed_without_raising() -> None:
+    runner = _fake_cwd(1, stderr="no remote")
+    assert git.Git(Path("/w"), runner).fetch("origin", "a:b") == git.Completed(1, "", "no remote")
+    assert runner.calls == [(["fetch", "-q", "--no-tags", "origin", "a:b"], Path("/w"))]
+
+
+def test_remote_repo_passes_remote_name_and_propagates_failure() -> None:
+    runner = _fake_cwd(stdout="git@github.com:o/n.git\n")
+    assert git.Git(runner=runner).remote_repo("up") == "o/n"
+    assert runner.calls == [(["remote", "get-url", "up"], None)]
+    with pytest.raises(git.GitError) as exc:
+        git.Git(runner=_fake_cwd(2, stderr="no such remote")).remote_repo("up")
+    assert str(exc.value) == "git remote get-url up が失敗（終了コード 2）: no such remote"
+
+
+def test_run_git_disables_terminal_prompt(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict = {}
+
+    def fake_run(cmd, **kwargs):
+        seen.update(kwargs, cmd=cmd)
+        return subprocess.CompletedProcess(cmd, 3, "o", "e")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert git.run_git(["status"], Path("/w")) == git.Completed(3, "o", "e")
+    assert seen["cmd"] == ["git", "status"] and seen["cwd"] == Path("/w") and seen["env"]["GIT_TERMINAL_PROMPT"] == "0"
+
+
+def test_run_git_raises_when_git_cannot_start(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_run(cmd, **kwargs):
+        raise FileNotFoundError("no git")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    with pytest.raises(git.GitError, match="git を起動できない"):
+        git.run_git(["status"], None)
+
+
+def test_common_dir_is_real_main_git_dir_from_main_and_linked_worktree(tmp_path: Path) -> None:
+    path, _ = _init_repo(tmp_path, {"a": "a\n"})
+    _git(path, "worktree", "add", "-q", "-b", "side", str(tmp_path / "side"))
+    link = tmp_path / "link"
+    link.symlink_to(path)
+    want = Path(os.path.realpath(path / ".git"))
+    assert git.Git(cwd=path).common_dir() == want
+    assert git.Git(cwd=tmp_path / "side").common_dir() == want
+    assert git.Git(cwd=link).common_dir() == want
+
+
+def test_common_dir_propagates_git_failure() -> None:
+    with pytest.raises(git.GitError):
+        git.Git(runner=_fake(128, stderr="fatal: not a git repository\n")).common_dir()
+
+
+# 現状固定（I-009）: `localenv.changed_paths` が `git status --porcelain -z` を読む形。期待値は今の実装の出力。
+def test_changed_paths_reads_status_with_renames_and_untracked(tmp_path: Path) -> None:
+    from ndf.domains.worktree import localenv
+
+    repo, _ = _init_repo(tmp_path, {"keep.txt": "a\n", "mod.txt": "x\n", "old.txt": "old\n" * 20, "del.txt": "d\n"})
+    (repo / "mod.txt").write_text("x\ny\n")
+    _git(repo, "mv", "old.txt", "新 名.txt")
+    (repo / "del.txt").unlink()
+    (repo / "u" / "v").mkdir(parents=True)
+    (repo / "u" / "v" / "n.txt").write_text("n\n")
+    (repo / "staged.txt").write_text("s\n")
+    _git(repo, "add", "staged.txt")
+
+    # 改名は新しいパスの後に変更前のパス。追跡していないディレクトリは中のファイルまで
+    assert localenv.changed_paths(repo) == ["del.txt", "mod.txt", "staged.txt", "新 名.txt", "old.txt", "u/v/n.txt"]
+    (tmp_path / "clean").mkdir()
+    assert localenv.changed_paths(_init_repo(tmp_path / "clean", {"a": "a\n"})[0]) == []
+
+
+@pytest.mark.parametrize(
+    ("stdout", "want"),
+    [
+        ("C  dst\0src\0M  b\0", ["dst", "src", "b"]),  # 複製も変更前のパスを含める
+        ("R  new\0old\0", ["new", "old"]),
+        ("R  new\0", ["new", ""]),  # NOTE: 現状固定。末尾の空の項目を変更前のパスとして読む
+        ("ab\0 M c\0\0", ["c"]),  # 4 文字に満たない項目は飛ばす
+        ("", []),
+    ],
+)
+def test_changed_paths_parses_porcelain_z(monkeypatch: pytest.MonkeyPatch, stdout: str, want: list[str]) -> None:
+    from ndf.domains.worktree import localenv
+
+    seen: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        seen.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout, "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert localenv.changed_paths(Path("/w")) == want
+    assert seen == [["git", "status", "--porcelain", "-z", "--untracked-files=all"]]
+
+
+@pytest.mark.parametrize(
+    ("stdout", "want"),
+    [
+        ("C  dst\0src\0M  b\0", ["dst", "src", "b"]),
+        ("R  new\0old\0", ["new", "old"]),
+        ("R  new\0", ["new", ""]),  # NOTE: 現状固定。末尾の空の項目を変更前のパスとして読む
+        ("ab\0 M c\0\0", ["c"]),
+        (" M a b\0?? 改\n行\0", ["a b", "改\n行"]),  # 空白・改行を含む名前もそのまま
+        ("", []),
+    ],
+)
+def test_status_paths_parses_porcelain_z(stdout: str, want: list[str]) -> None:
+    runner = _fake_cwd(stdout=stdout)
+    assert git.Git(Path("/w"), runner).status_paths() == want
+    assert runner.calls == [(["status", "--porcelain", "-z", "--untracked-files=all"], Path("/w"))]
+
+
+# 現状固定（I-021）: `Git.has_ref`（元は `repo.has_ref`）の終了コードの読み方。期待値は今の実装の出力。
+@pytest.mark.parametrize(("code", "expected"), [(0, True), (1, False)])
+def test_has_ref_reads_exit_code(code: int, expected: bool) -> None:
+    calls: list = []
+
+    def runner(args: list[str], cwd):
+        calls.append((args, cwd))
+        return git.Completed(code, "", "")
+
+    assert git.Git(Path("/w"), runner).has_ref("refs/heads/x") is expected
+    assert calls == [(["show-ref", "--verify", "--quiet", "refs/heads/x"], Path("/w"))]
+
+
+def test_has_ref_raises_on_git_failure() -> None:
+    with pytest.raises(git.GitError) as exc:
+        git.Git(runner=_fake(128, stderr="fatal: bad\n")).has_ref("refs/heads/x")
+    assert str(exc.value) == "参照を確かめられない（終了コード 128）: fatal: bad"
+
+
+def test_has_ref_with_real_repository(tmp_path: Path) -> None:
+    path, _ = _init_repo(tmp_path, {"a": "a\n"})
+    g = git.Git(cwd=path)
+    assert g.has_ref("refs/heads/main") is True
+    assert g.has_ref("refs/heads/none") is False
+    assert g.has_ref("main") is False  # 完全な参照の名前だけを見る

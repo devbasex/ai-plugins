@@ -705,3 +705,13 @@ def test_landed_by_merge_commit_reads_ancestry(tmp_path: Path) -> None:
     assert github.landed(github.Pull.from_rest(_pull(head=head, merged=True)), "merge", "develop", repo)
     with pytest.raises(ValueError, match="知らないマージの方式"):
         github.landed(github.Pull.from_rest(_pull(head=head)), "fast-forward", "develop", repo)
+
+
+def test_pull_reads_merge_commit() -> None:
+    # 退避先の回収は squash のマージでも本番に含まれるかをマージコミットで決める
+    assert github.Pull.from_rest({**_pull(merged=True), "merge_commit_sha": "m" * 40}).merge_sha == "m" * 40
+    assert github.Pull.from_rest({**_pull(merged=False), "merge_commit_sha": "t" * 40}).merge_sha == ""  # 試しのマージは使わない
+    raw = {"number": 1, "state": "MERGED", "merged": True, "headRefOid": "h", "headRefName": "f", "baseRefName": "develop", "body": "",
+           "mergeStateStatus": "UNKNOWN", "author": None, "authorAssociation": "MEMBER"}  # fmt: skip
+    assert github.Pull.from_graphql({**raw, "mergeCommit": {"oid": "m"}}).merge_sha == "m"
+    assert github.Pull.from_graphql({**raw, "mergeCommit": None}).merge_sha == ""

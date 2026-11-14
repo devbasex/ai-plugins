@@ -45,6 +45,7 @@ COMMANDS: dict[str, str] = {
     "test-slot": "ndf.testing.command",
     "training": "ndf.adapters.training",
     "worker": "ndf.core.worker",
+    "worktree": "ndf.domains.worktree.cli",
 }
 # モジュールのパス → 副命令の名前（`tool_of` の引き）
 _TOOL_OF: dict[str, str] = {path: name for name, path in COMMANDS.items()}
