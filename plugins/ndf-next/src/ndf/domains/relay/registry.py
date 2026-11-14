@@ -107,6 +107,12 @@ def append_log(directory: Path, row: Mapping[str, Any]) -> None:
         f.write(json.dumps({"at": signals.now_iso(), **dict(row)}, ensure_ascii=False) + "\n")
 
 
+def _busy_dirs(root: Path) -> list[Path]:
+    """`root` の直下のディレクトリのうち、錠が持たれているもの（名前順）。`root` が無ければ空。"""
+    dirs = sorted(p for p in root.iterdir() if p.is_dir()) if root.is_dir() else []
+    return [d for d in dirs if lock_busy(d / LOCK_FILE)]
+
+
 def running(state_dir: Path) -> list[hub_decide.Running]:
     """この NDF のラッパーのうち動いているもの。"""
     root = wrappers_dir(state_dir)
@@ -130,9 +136,7 @@ def legacy_root(environ: Mapping[str, str]) -> Path:
 
 def legacy_running(environ: Mapping[str, str]) -> list[hub_decide.Running]:
     """旧い NDF（10.x）のラッパーのうち動いているもの。版は分からないので None。"""
-    root = legacy_root(environ)
-    dirs = sorted(p for p in root.iterdir() if p.is_dir()) if root.is_dir() else []
-    return [hub_decide.Running(d.name, None) for d in dirs if lock_busy(d / LOCK_FILE)]
+    return [hub_decide.Running(d.name, None) for d in _busy_dirs(legacy_root(environ))]
 
 
 def all_running(state_dir: Path, environ: Mapping[str, str]) -> list[hub_decide.Running]:
