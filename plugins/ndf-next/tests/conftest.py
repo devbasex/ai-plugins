@@ -40,7 +40,7 @@ def _isolated_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
 
 @pytest.fixture(scope="session")
 def start_postgres() -> Callable[[pytest.TempPathFactory], AbstractContextManager[tuple[Path, str]]]:
-    """PostgreSQL を起こす contextmanager（`postgres_server.start_postgres`）。fixture の scope は使う側が決める。"""
+    """PostgreSQL を起こす contextmanager。fixture の scope は使う側が決める。"""
     return postgres_server.start_postgres
 
 
