@@ -77,6 +77,8 @@ def apply_actions(gh: GitHub, ledger: Ledger, plan: dict[str, Any]) -> dict[str,
     """plan の `actions` を反映する。区分ごとの番号と、課題ごとの行を返す。"""
     buckets: dict[str, list[int]] = {b: [] for b in ad.BUCKETS}
     items = []
+    closed: list[int] = []
+    failed: list[dict[str, Any]] = []
     for act in plan["actions"] if "actions" in plan else []:
         try:
             bucket, reason = _one(gh, act, ad.ledger_key(gh.repo, act), ledger)
@@ -84,9 +86,10 @@ def apply_actions(gh: GitHub, ledger: Ledger, plan: dict[str, Any]) -> dict[str,
             bucket, reason = ad.FAILED, str(exc)
         buckets[bucket].append(act["number"])
         items.append({"kind": "issue", "name": f"#{act['number']}", "result": bucket, "verdict": act["verdict"], "reason": reason})
-    closed = [act["number"] for act in plan["actions"] if act["number"] in buckets[ad.APPLIED]
-              and ad.changes_of(act).get("state") == "closed"] if "actions" in plan else []  # fmt: skip
-    failed = [{"number": int(i["name"][1:]), "error": i["reason"]} for i in items if i["result"] == ad.FAILED]
+        if bucket == ad.FAILED:
+            failed.append({"number": act["number"], "error": reason})
+        elif bucket == ad.APPLIED and ad.changes_of(act).get("state") == "closed":
+            closed.append(act["number"])
     return {"buckets": buckets, "items": items, "closed": closed, "failed": failed}
 
 
