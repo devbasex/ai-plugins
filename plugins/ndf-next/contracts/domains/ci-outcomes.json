@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "summary": "CI のチェックの結論と状態（GitHub の CheckRun の conclusion・status と StatusContext の state を小文字にした値）を、NDF が数える結果へ写す。失敗と数える集合はこの 1 か所だけが持ち、PR の情報・merge-fix・merge-when-green・試走が同じ表を読む",
+  "owner": "D2（contracts/domains）",
+  "columns": {
+    "outcome": {"type": "string", "summary": "NDF が数える結果。passed は成功、failed は失敗、pending は待つ、cancelled は取り消し（Runner が付いた取り消しは failed、Runner が付かなかった取り消しは基盤待ち）"}
+  },
+  "rows": [
+    {"id": "success", "outcome": "passed"},
+    {"id": "neutral", "outcome": "passed"},
+    {"id": "skipped", "outcome": "passed"},
+    {"id": "failure", "outcome": "failed"},
+    {"id": "error", "outcome": "failed"},
+    {"id": "timed_out", "outcome": "failed"},
+    {"id": "action_required", "outcome": "failed"},
+    {"id": "startup_failure", "outcome": "failed"},
+    {"id": "stale", "outcome": "failed"},
+    {"id": "cancelled", "outcome": "cancelled"},
+    {"id": "pending", "outcome": "pending"},
+    {"id": "queued", "outcome": "pending"},
+    {"id": "in_progress", "outcome": "pending"},
+    {"id": "waiting", "outcome": "pending"},
+    {"id": "requested", "outcome": "pending"},
+    {"id": "expected", "outcome": "pending"}
+  ]
+}
