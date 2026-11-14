@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Optional
@@ -42,6 +42,7 @@ from ndf.progress.lane.types import (
     CANCELLED as CANCELLED,
     COMPLETED as COMPLETED,
     DONE_STATES as DONE_STATES,
+    PAUSED as PAUSED,
     PENDING as PENDING,
     PLAN_ROW as PLAN_ROW,
     RUNNING as RUNNING,
@@ -53,9 +54,8 @@ from ndf.progress.lane.types import (
     Request as Request,
 )
 
-# 行の鍵の接頭辞（r1・r2…）と、依頼の行の鍵の接頭辞
+# 行の鍵の接頭辞（r1・r2…）
 ROW_PREFIX = "r"
-REQUEST_PREFIX = "request-"
 # 計画が記録する形の番号の鍵。違えばレーンを起動しない（#3344 の決定 86）
 FORMAT_KEYS = ("store_format", "format", "table_version")
 # 計画の決まりを確かめて書く操作の排他の鍵の接頭辞（store.run_lock の鍵と値を分ける）
@@ -122,8 +122,8 @@ def read_view(conn: sa.Connection, plan_id: str) -> tuple[PlanView, dict[str, li
     return view, folded(read_lanes(conn, view))
 
 
-def _new_key(events: list[model.Event], drafts: Iterable[model.EventDraft]) -> str:
-    added = [e.draft for e in events if e.draft.kind == "row_added"] + [d for d in drafts if d.kind == "row_added"]
+def _new_key(events: list[model.Event]) -> str:
+    added = [e.draft for e in events if e.draft.kind == "row_added"]
     return f"{ROW_PREFIX}{len(added) + 1}"
 
 
@@ -156,8 +156,7 @@ def checked_write(conn: sa.Connection, plan_id: str, lane: str, drafts: list[mod
     """
     lock_plan(conn, plan_id)
     view, _ = read_plan(conn, plan_id)
-    if lane not in view.lanes:
-        raise model.Refused(f"計画 {view.name} にレーン {lane} は無い")
+    _require_lane(view, lane)
     events = read_lanes(conn, view)
     last = events[lane][-1].seq if events[lane] else 0
     for draft in drafts:
@@ -184,18 +183,22 @@ def create_lane(conn: sa.Connection, key: tuple[str, str, str], plan_id: str, in
     return store.create_table(conn, ("lane", repo, lane_table_name(plan, lane)), plan_id, None, drafts)
 
 
-def _lane_rows(conn: sa.Connection, plan_id: str, lane: str) -> tuple[PlanView, dict[str, list[LaneRow]]]:
-    view, rows = read_view(conn, plan_id)
+def _require_lane(view: PlanView, lane: str) -> None:
     if lane not in view.lanes:
         raise model.Refused(f"計画 {view.name} にレーン {lane} は無い")
+
+
+def _lane_rows(conn: sa.Connection, plan_id: str, lane: str) -> tuple[PlanView, dict[str, list[LaneRow]]]:
+    view, rows = read_view(conn, plan_id)
+    _require_lane(view, lane)
     return view, rows
 
 
 def _row(rows: list[LaneRow], key: str, lane: str) -> LaneRow:
-    for r in rows:
-        if r.key == key:
-            return r
-    raise model.Refused(f"レーン {lane} に行 {key} は無い")
+    found = next((r for r in rows if r.key == key), None)
+    if found is None:
+        raise model.Refused(f"レーン {lane} に行 {key} は無い")
+    return found
 
 
 @dataclass(frozen=True)
@@ -210,7 +213,7 @@ class RowChange:
 def add_row(conn: sa.Connection, plan_id: str, lane: str, inp: dict[str, Any], change: RowChange) -> str:
     """順番表へ行を足す（未着手）。足した行の鍵を返す。"""
     view, _ = _lane_rows(conn, plan_id, lane)
-    key = _new_key(store.read_events(conn, view.lanes[lane].table_id), [])
+    key = _new_key(store.read_events(conn, view.lanes[lane].table_id))
     payload = {"input": inp, "index": change.index}
     checked_write(conn, plan_id, lane, [model.EventDraft("row_added", change.actor, key, reason=change.reason, payload=payload)])
     return key
@@ -325,7 +328,7 @@ def cancel_pending(conn: sa.Connection, view: PlanView, reason: str) -> list[str
     for name, evs in read_lanes(conn, view).items():
         rows = fold_lane(evs)
         drafts = [model.EventDraft("row_cancelled", "organizer", r.key, reason=reason) for r in rows if r.state == PENDING]
-        running += [r.sprint_id for r in rows if r.state == RUNNING and r.sprint_id]
+        running += [r.sprint_id for r in rows if r.active]
         if drafts:
             store.append_events(conn, view.lanes[name].table_id, drafts, evs[-1].seq)
     return running

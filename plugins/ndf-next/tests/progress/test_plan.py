@@ -33,12 +33,6 @@ def _view(st, pid):
         return lane.read_view(conn, pid)
 
 
-def _refused(st, fn):
-    with pytest.raises(model.Refused) as got, store.transaction(st) as conn:
-        fn(conn)
-    return got.value.reason
-
-
 def _run_sprint(st, pid, lane_name, key, name, outcome="completed"):
     with store.transaction(st) as conn:
         view, _ = lane.read_plan(conn, pid)
@@ -62,16 +56,16 @@ def test_lane_added_to_a_running_plan_answers_the_request(opened):
     assert view.open_requests() == [] and view.requests[req].closed
 
 
-def test_lane_that_breaks_a_rule_is_not_added(opened):
+def test_lane_that_breaks_a_rule_is_not_added(opened, refused):
     pid = _two(opened)
-    assert "I19" in _refused(opened, lambda conn: plan.add_lane(conn, pid, _decl("c", [[3]], touches=("docs/",))))
+    assert "I19" in refused(opened, lambda conn: plan.add_lane(conn, pid, _decl("c", [[3]], touches=("docs/",))))
     view, _ = _view(opened, pid)
     assert list(view.lanes) == ["a", "b"]
 
 
-def test_changed_lane_is_checked_against_the_other_lanes(opened):
+def test_changed_lane_is_checked_against_the_other_lanes(opened, refused):
     pid = _two(opened)
-    reason = _refused(opened, lambda conn: plan.change_lane(conn, pid, "b", {"touches": ["src/a/x.py"]}, "広げる"))
+    reason = refused(opened, lambda conn: plan.change_lane(conn, pid, "b", {"touches": ["src/a/x.py"]}, "広げる"))
     assert "I13" in reason
     with store.transaction(opened) as conn:
         plan.change_lane(conn, pid, "b", {"touches": ["src/a/x.py"], "after": ["a"]}, "a の後に回す")
@@ -79,9 +73,9 @@ def test_changed_lane_is_checked_against_the_other_lanes(opened):
     assert view.lanes["b"].touches == ("src/a/x.py",) and view.lanes["b"].after == ("a",)
 
 
-def test_lane_limit_does_not_count_lanes_that_ended(opened):
+def test_lane_limit_does_not_count_lanes_that_ended(opened, refused):
     pid = _two(opened)
-    assert "I20" in _refused(opened, lambda conn: plan.change_lane(conn, pid, lane.PLAN_ROW, {"max_lanes": 1}, "減らす"))
+    assert "I20" in refused(opened, lambda conn: plan.change_lane(conn, pid, lane.PLAN_ROW, {"max_lanes": 1}, "減らす"))
     _run_sprint(opened, pid, "b", "r1", "s-b1")
     with store.transaction(opened) as conn:
         plan.change_lane(conn, pid, lane.PLAN_ROW, {"max_lanes": 1}, "b が終わった")
@@ -101,7 +95,7 @@ def test_row_moved_to_another_lane(opened):
 # --- 中止と完了 ------------------------------------------------------------------------------------
 
 
-def test_stop_cancels_pending_rows_and_hands_running_sprints_to_their_conductors(opened):
+def test_stop_cancels_pending_rows_and_hands_running_sprints_to_their_conductors(opened, refused):
     pid = _two(opened)
     sid = _run_sprint(opened, pid, "a", "r1", "s-a1", outcome=None)
     with store.transaction(opened) as conn:
@@ -114,7 +108,37 @@ def test_stop_cancels_pending_rows_and_hands_running_sprints_to_their_conductors
         assert lane.end_row(conn, sid, "cancelled", "conductor") is None
     _, rows = _view(opened, pid)
     assert rows["a"][0].state == "cancelled"
-    assert "中止" in _refused(opened, lambda conn: plan.add_lane(conn, pid, _decl("c", [[9]], touches=("docs/",))))
+    assert "中止" in refused(opened, lambda conn: plan.add_lane(conn, pid, _decl("c", [[9]], touches=("docs/",))))
+
+
+def test_pause_keeps_the_rows_and_start_resumes_the_same_plan_from_where_it_stopped(opened, refused):
+    """区切りで止めた計画は行を中止にせず、次の行を始めない。同じ名前の計画を始め直すと止めた所から続く。"""
+    pid = _two(opened)
+    sid = _run_sprint(opened, pid, "a", "r1", "s-a1", outcome=None)
+    with store.transaction(opened) as conn:
+        assert plan.pause_plan(conn, pid, "区切りで止める") == [sid]
+    view, rows = _view(opened, pid)
+    assert view.state == "paused" and [r.state for r in rows["a"]] == ["running", "pending"]
+    assert lane.wakeable_lanes(view, rows) == []
+    # 実行中の行は終わりまで流れる。次の行は止めている間は始められない
+    with store.transaction(opened) as conn:
+        lane.end_row(conn, sid, "completed", "conductor")
+    assert "停止" in refused(opened, lambda conn: lane.start_row(conn, pid, "b", "r1", "s-b1"))
+    assert "停止" in refused(opened, lambda conn: plan.pause_plan(conn, pid, "二度目"))
+    with store.transaction(opened) as conn:
+        plan.start_plan(conn, pid)
+    view, rows = _view(opened, pid)
+    assert view.state == "running" and lane.wakeable_lanes(view, rows) == [("a", "r2"), ("b", "r1")]
+
+
+def test_a_paused_plan_can_still_be_stopped_now(opened, refused):
+    pid = _two(opened)
+    with store.transaction(opened) as conn:
+        plan.pause_plan(conn, pid, "区切りで止める")
+        plan.stop_plan(conn, pid, "放棄する")
+    view, rows = _view(opened, pid)
+    assert view.state == "cancelled" and rows["b"][0].state == "cancelled"
+    assert "中止" in refused(opened, lambda conn: plan.start_plan(conn, pid))
 
 
 def test_plan_completes_only_when_every_row_ended_and_no_request_is_open(opened):
@@ -130,6 +154,56 @@ def test_plan_completes_only_when_every_row_ended_and_no_request_is_open(opened)
         assert plan.complete_plan(conn, pid) is True
     view, _ = _view(opened, pid)
     assert view.state == "completed"
+
+
+def test_a_batched_release_closes_every_request_and_keeps_its_answer(opened):
+    """まとめたリリースの答えは、まとめた依頼をすべて閉じ、各依頼に答え（版・リリース記録の PR）を残す（#2783・#3128・#3136）。"""
+    pid = _two(opened)
+    with store.transaction(opened) as conn:
+        ra = plan.open_request(conn, pid, {"lane": "a", "kind": "release"}, "リリースしたい", "workflow")
+        rb = plan.open_request(conn, pid, {"lane": "b", "kind": "release"}, "リリースしたい", "workflow")
+        plan.record_release(conn, pid, [ra, rb], plan.ReleaseAnswer(plan.REJECTED, "範囲を直してから"))
+        rc = plan.open_request(conn, pid, {"lane": "a", "kind": "release"}, "出し直す", "workflow")
+        plan.record_release(conn, pid, [rc], plan.ReleaseAnswer(plan.RELEASED, "出した", "10.28.0", "https://github.com/o/r/pull/900"))
+        out = plan.status(conn, pid, datetime.now(UTC))
+    view, _ = _view(opened, pid)
+    assert view.open_requests() == []
+    assert view.requests[ra].release == {"result": "rejected", "version": None, "release": None, "batch": [ra, rb]}
+    assert view.requests[rc].release["release"] == "https://github.com/o/r/pull/900"
+    assert out["metrics"]["releases"] == {"released": 1, "rejected": 2}
+
+
+def test_a_lane_reads_the_answer_of_its_closed_request_from_status(opened):
+    """閉じた依頼の答え（版・リリース記録の PR）を、レーンが status の closed_requests から読める（#3128）。"""
+    pid = _two(opened)
+    with store.transaction(opened) as conn:
+        ra = plan.open_request(conn, pid, {"lane": "a", "kind": "release"}, "リリースしたい", "workflow")
+        rb = plan.open_request(conn, pid, {"lane": "b", "kind": "release"}, "リリースしたい", "workflow")
+        record = "https://github.com/o/r/pull/900"
+        plan.record_release(conn, pid, [ra], plan.ReleaseAnswer(plan.RELEASED, "出した", "10.28.0", record))
+        out = plan.status(conn, pid, datetime.now(UTC))
+    assert out["metrics"]["open_requests"] == [{"request": rb, "lane": "b", "reason": "リリースしたい"}]
+    (closed,) = out["metrics"]["closed_requests"]
+    assert closed["request"] == ra and closed["lane"] == "a" and closed["closed"] == "出した"
+    assert closed["release"] == {"result": "released", "version": "10.28.0", "release": record, "batch": [ra]}
+
+
+@pytest.mark.parametrize(
+    ("keys", "outcome", "version", "release"),
+    [
+        ([], "rejected", None, None),
+        (["request-1", "request-1"], "rejected", None, None),
+        (["request-1"], "failed", None, None),
+        (["request-1"], "released", None, None),
+        (["request-9"], "rejected", None, None),
+    ],
+)
+def test_a_batched_release_refuses_a_bad_answer(opened, keys, outcome, version, release):
+    pid = _two(opened)
+    with store.transaction(opened) as conn:
+        plan.open_request(conn, pid, {"lane": "a", "kind": "release"}, "リリースしたい", "workflow")
+    with store.transaction(opened) as conn, pytest.raises(model.Refused):
+        plan.record_release(conn, pid, keys, plan.ReleaseAnswer(outcome, "理由", version, release))
 
 
 def test_status_is_built_from_the_two_tables(opened):
@@ -200,9 +274,20 @@ def test_cli_row_carry_keeps_the_dropped_issue_in_the_same_lane(repo, capsys, tm
     assert [r["input"]["issues"] for r in out["items"][0]["rows"]] == [[1, 2], [2]]
 
 
-def test_cli_stop_lists_the_cancel_for_running_sprints(repo, capsys, tmp_path):
+def test_cli_stop_pauses_by_default_and_start_resumes_the_same_plan(repo, capsys, tmp_path, detached):
+    path = _plan_file(tmp_path / "plan.json", _doc(_decl("a", [[1]])))
+    _cli(capsys, "start", path)
+    code, out = _cli(capsys, "stop", "p6", "--reason", "区切りで止める")
+    assert code == 0 and out["metrics"]["running"] == [] and out["next"]["argv"][1:3] == [plan.TOOL, "start"]
+    _, out = _cli(capsys, "status", "p6")
+    assert out["metrics"]["state"] == "paused" and out["items"][0]["rows"][0]["state"] == "pending"
+    code, out = _cli(capsys, "start", path)
+    assert code == 0 and out["metrics"]["state"] == "running" and len(detached) == 2
+
+
+def test_cli_stop_now_lists_the_cancel_for_running_sprints(repo, capsys, tmp_path):
     _cli(capsys, "start", _plan_file(tmp_path / "plan.json", _doc(_decl("a", [[1]]))))
-    code, out = _cli(capsys, "stop", "p6", "--reason", "放棄")
+    code, out = _cli(capsys, "stop", "p6", "--now", "--reason", "放棄")
     assert code == 0 and out["metrics"]["running"] == [] and out["items"] == []
     _, out = _cli(capsys, "status", "p6")
     assert out["metrics"]["state"] == "cancelled" and out["items"][0]["state"] == "cancelled"

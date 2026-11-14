@@ -22,6 +22,30 @@ def test_next_version_by_channel(current: str, level: str, channel: str, want: s
     assert version_decide.next_version(current, level, channel) == want
 
 
+@pytest.mark.parametrize(
+    ("planned", "shipped", "level", "channel", "want"),
+    [
+        ("1.2.4", None, "patch", "production", "1.2.4"),
+        ("1.2.4", "1.2.3", "patch", "production", "1.2.4"),
+        ("1.2.4", "1.2.4", "patch", "production", "1.2.5"),
+        ("1.2.4", "1.2.6", "minor", "production", "1.3.0"),
+        ("1.2.4-dev.3", "1.2.4", "patch", "dev", "1.2.5-dev.1"),
+        ("1.2.5-dev.1", "1.2.4", "patch", "dev", "1.2.5-dev.1"),
+    ],
+)
+def test_issue_2554_next_version_clears_shipped(planned: str, shipped: str | None, level: str, channel: str, want: str) -> None:
+    """#2554: 出し済みの版より大きくない次の版は、出し済みの版を同じ幅で上げた版へ繰り上げる。"""
+    assert version_decide.clear_of(planned, shipped, level, channel) == want
+
+
+def test_issue_2554_tag_versions_are_read_per_plugin() -> None:
+    assert version_decide.version_of_tag("kit", "kit--v1.2.4") == "1.2.4"
+    assert version_decide.version_of_tag("kit", "kit2--v1.2.4") is None
+    assert version_decide.version_of_tag("kit", "kit--vnext") is None
+    assert version_decide.highest(["1.2.4", "1.10.0-dev.1", "1.3.0"]) == "1.10.0"
+    assert version_decide.highest([]) is None
+
+
 def test_version_names_follow_one_rule() -> None:
     assert version_decide.branch_of("1.2.4") == "release/v1.2.4"
     assert version_decide.version_of_branch("release/v1.2.4-dev.1") == "1.2.4-dev.1"

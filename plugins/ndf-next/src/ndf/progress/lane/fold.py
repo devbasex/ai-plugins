@@ -60,7 +60,8 @@ def _fold_plan_event(view: PlanView, d: model.EventDraft) -> PlanView:
         req = Request(key, body.get("lane"), dict(body["body"]), d.reason)
         return replace(view, requests={**view.requests, key: req})
     if d.kind == "request_closed":
-        return replace(view, requests={**view.requests, key: replace(view.requests[key], closed=d.reason)})
+        done = None if body is None else body.get("release")
+        return replace(view, requests={**view.requests, key: replace(view.requests[key], closed=d.reason, release=done)})
     return view
 
 

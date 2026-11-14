@@ -11,6 +11,8 @@ from typing import Any, Optional
 PLAN_ROW = "@plan"
 # 行の状態の語（契約 progress.json の row_states.lane。計画の状態 table_states.plan も同じ語）
 PENDING, RUNNING, COMPLETED, CANCELLED = "pending", "running", "completed", "cancelled"
+# 計画だけが持つ状態: 区切りで止めた（実行中の行は終わりまで流し、次の行を起こさない。同じ名前で再開できる）
+PAUSED = "paused"
 DONE_STATES = (COMPLETED, CANCELLED)
 # レーンの状態の語のうち、行の状態に無いもの（after 待ち）
 WAITING_AFTER = "waiting_after"
@@ -38,6 +40,8 @@ class Request:
     body: dict[str, Any]
     reason: Optional[str]
     closed: Optional[str] = None
+    # まとめたリリースの答えで閉じた依頼の答え（result・version・release・batch）。採らずに閉じた依頼は None
+    release: Optional[dict[str, Any]] = None
 
 
 @dataclass(frozen=True)
@@ -84,6 +88,11 @@ class LaneRow:
     @property
     def live(self) -> bool:
         return self.state in (PENDING, RUNNING)
+
+    @property
+    def active(self) -> bool:
+        """スプリントの ID が付いた実行中の行か（動いているスプリントとみなす行）。"""
+        return self.state == RUNNING and bool(self.sprint_id)
 
     @property
     def awaiting_next(self) -> bool:

@@ -1,7 +1,8 @@
 """オーガナイザーの `ndf lanes wait` の判断（#3097・SF9）。DB も時計も読まない純粋な関数である。
 
 - 知らせは、渡した番号（`--after`）より後の計画の進行表の事象のうち、オーガナイザーが自分で書いたのでないもの
-  （依頼が開いた・計画が完了した）をすべて返す。最新の 1 件だけを返して途中の知らせを読み飛ばさない
+  （依頼が開いた・計画が完了した）をすべて返す。最新の 1 件だけを返して途中の知らせを読み飛ばさない。開いた後に
+  閉じた依頼（レーンが動き出して耐久ワークフローが閉じた止まりの知らせなど。#2585）は返さない
 - 計画が終わっていれば（完了・中止）、知らせが無くても待ちを終える
 - 答えが載った後に conductor が next を打たないまま猶予を過ぎた行（止まり）は、まだ知らせていないもの
   （`--known-stalls` に無いもの）があれば待ちを終える
@@ -32,8 +33,13 @@ class Seen:
 
 
 def notices(events: Iterable[dict[str, Any]], after: int) -> list[dict[str, Any]]:
-    """番号 `after` より後の、待ちを終える事象（`model.Event.as_dict` の形）をすべて番号の順で返す。"""
-    return [e for e in events if e["seq"] > after and e["kind"] in NOTICE_KINDS]
+    """番号 `after` より後の、待ちを終える事象（`model.Event.as_dict` の形）をすべて番号の順で返す。閉じた依頼の
+    `request_opened` は返さない（もう答える要が無い）。"""
+    seen = list(events)
+    closed = {e["row_key"] for e in seen if e["kind"] == "request_closed"}
+    return [
+        e for e in seen if e["seq"] > after and e["kind"] in NOTICE_KINDS and not (e["kind"] == "request_opened" and e["row_key"] in closed)
+    ]
 
 
 def done(seen: Seen, known: Iterable[str]) -> bool:
