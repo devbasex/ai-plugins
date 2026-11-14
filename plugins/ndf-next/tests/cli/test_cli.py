@@ -45,6 +45,12 @@ def _fake_subcommand(monkeypatch, main):
     monkeypatch.setitem(cli.COMMANDS, "fake", "fake_sub")
 
 
+def _argparse_main(argv):
+    """引数を argparse で読むだけの偽の副命令の main。"""
+    argparse.ArgumentParser(prog="fake").parse_args(argv)
+    return 0
+
+
 def test_uncaught_exception_ends_with_an_unknown_result(monkeypatch, capsys, last_result):
     # 3394-3: 副命令が捕まえない例外も、結果 JSON（stopped/unknown）で終わる
     def boom(argv):
@@ -60,11 +66,7 @@ def test_uncaught_exception_ends_with_an_unknown_result(monkeypatch, capsys, las
 
 def test_usage_error_of_a_subcommand_ends_with_an_invalid_result(monkeypatch, capsys, last_result):
     # 3394-3: argparse の使い方の誤り（終了コード 2 の SystemExit）も、結果 JSON（stopped/invalid）で終わる
-    def parse(argv):
-        argparse.ArgumentParser(prog="fake").parse_args(argv)
-        return 0
-
-    _fake_subcommand(monkeypatch, parse)
+    _fake_subcommand(monkeypatch, _argparse_main)
 
     assert cli.main(["fake", "--bogus"]) == causes.exit_code("invalid")
     out = capsys.readouterr()
@@ -73,11 +75,7 @@ def test_usage_error_of_a_subcommand_ends_with_an_invalid_result(monkeypatch, ca
 
 
 def test_help_of_a_subcommand_is_not_a_result(monkeypatch, capsys):
-    def parse(argv):
-        argparse.ArgumentParser(prog="fake").parse_args(argv)
-        return 0
-
-    _fake_subcommand(monkeypatch, parse)
+    _fake_subcommand(monkeypatch, _argparse_main)
 
     with pytest.raises(SystemExit) as exc:
         cli.main(["fake", "--help"])
@@ -86,10 +84,7 @@ def test_help_of_a_subcommand_is_not_a_result(monkeypatch, capsys):
 
 def test_dispatches_to_module_main(monkeypatch):
     calls = []
-    fake = types.ModuleType("fake_sub")
-    fake.main = lambda argv: calls.append(argv) or 7
-    monkeypatch.setitem(sys.modules, "fake_sub", fake)
-    monkeypatch.setitem(cli.COMMANDS, "fake", "fake_sub")
+    _fake_subcommand(monkeypatch, lambda argv: calls.append(argv) or 7)
 
     assert cli.main(["fake", "--x", "1"]) == 7
     assert calls == [["--x", "1"]]
