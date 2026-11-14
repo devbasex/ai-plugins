@@ -244,3 +244,46 @@ def test_run_git_raises_when_git_cannot_start(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(subprocess, "run", fake_run)
     with pytest.raises(git.GitError, match="git を起動できない"):
         git.run_git(["status"], None)
+
+
+# 現状固定（I-009）: `localenv.changed_paths` が `git status --porcelain -z` を読む形。期待値は今の実装の出力。
+def test_changed_paths_reads_status_with_renames_and_untracked(tmp_path: Path) -> None:
+    from ndf.domains.worktree import localenv
+
+    repo, _ = _init_repo(tmp_path, {"keep.txt": "a\n", "mod.txt": "x\n", "old.txt": "old\n" * 20, "del.txt": "d\n"})
+    (repo / "mod.txt").write_text("x\ny\n")
+    _git(repo, "mv", "old.txt", "新 名.txt")
+    (repo / "del.txt").unlink()
+    (repo / "u" / "v").mkdir(parents=True)
+    (repo / "u" / "v" / "n.txt").write_text("n\n")
+    (repo / "staged.txt").write_text("s\n")
+    _git(repo, "add", "staged.txt")
+
+    # 改名は新しいパスの後に変更前のパス。追跡していないディレクトリは中のファイルまで
+    assert localenv.changed_paths(repo) == ["del.txt", "mod.txt", "staged.txt", "新 名.txt", "old.txt", "u/v/n.txt"]
+    (tmp_path / "clean").mkdir()
+    assert localenv.changed_paths(_init_repo(tmp_path / "clean", {"a": "a\n"})[0]) == []
+
+
+@pytest.mark.parametrize(
+    ("stdout", "want"),
+    [
+        ("C  dst\0src\0M  b\0", ["dst", "src", "b"]),  # 複製も変更前のパスを含める
+        ("R  new\0old\0", ["new", "old"]),
+        ("R  new\0", ["new", ""]),  # NOTE: 現状固定。末尾の空の項目を変更前のパスとして読む
+        ("ab\0 M c\0\0", ["c"]),  # 4 文字に満たない項目は飛ばす
+        ("", []),
+    ],
+)
+def test_changed_paths_parses_porcelain_z(monkeypatch: pytest.MonkeyPatch, stdout: str, want: list[str]) -> None:
+    from ndf.domains.worktree import localenv
+
+    seen: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        seen.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout, "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert localenv.changed_paths(Path("/w")) == want
+    assert seen == [["git", "status", "--porcelain", "-z", "--untracked-files=all"]]
