@@ -8,8 +8,8 @@
     ndf cross-review push-fix <worktree> --branch B [--commit C]   # 修正の push。拒まれたら 1 回だけ取り込む（#2440）
     ndf cross-review release <worktree> --repo-dir D               # NDF の lock だけを外して片付ける（#3106）
     ndf cross-review state-file --state-dir D --pr N [--current M]            # 巻き直しの後の番号から元の状態ファイル（#2770）
-    ndf cross-review fix-gate --state-dir D --pr N                 # ラウンドの前の修正の記録の要否（#2770）
-    ndf cross-review merge-fix --state-dir D --pr N --file F       # 修正の結果を状態ファイルへ取り込む（#2770）
+    ndf cross-review fix-gate --state-dir D --pr N [--findings F]  # ラウンドの前の修正の記録の要否（#2770）
+    ndf cross-review merge-fix --state-dir D --pr N --file F [--findings F] # 修正の結果を状態ファイルへ取り込む（#2770）
     ndf cross-review review-scope <worktree> --state-dir D --pr N --purpose P --base B   # レビューの範囲（#3181）
     ndf cross-review finish --summary F [--findings F2]            # 終わり方から結果（#2370・#2444）
     ndf cross-review run --pr N --state-dir D --base B [--worktree W] [--branch B2] [--purpose P]
@@ -189,7 +189,8 @@ def cmd_fix_gate(args: argparse.Namespace) -> int:
     if gate.kind == fixgate_decide.STOP:
         return _stop("work_stopped", str(gate.reason), items=[_ref_item(ref)])
     if gate.kind == fixgate_decide.INGEST:
-        again = result.command(TOOL, "merge-fix", "--state-dir", args.state_dir, "--pr", str(args.pr), "--file", str(gate.pending))
+        handed = ("--findings", args.findings) if args.findings else ()
+        again = result.command(TOOL, "merge-fix", "--state-dir", args.state_dir, "--pr", str(args.pr), "--file", str(gate.pending), *handed)
         return _ok(
             f"修正の記録は無いが結果ファイルが残っている: {gate.pending}",
             [_ref_item(ref), {"kind": "ingest", "path": gate.pending}],
@@ -201,8 +202,8 @@ def cmd_fix_gate(args: argparse.Namespace) -> int:
 def cmd_ingest(args: argparse.Namespace) -> int:
     """`run` と同じ取り込み（台帳へ反映し、結果ファイルを移す）を `drive.merge_fix` で行う。"""
     try:
-        round_no = drive.merge_fix(Path(args.state_dir), args.pr, Path(args.file))
-    except store.FixResultMismatch as exc:
+        round_no = drive.merge_fix(Path(args.state_dir), args.pr, Path(args.file), _handed(args.findings))
+    except (store.FixResultMismatch, ValueError) as exc:
         return _stop("invalid", str(exc))
     ref = store.state_pr(Path(args.state_dir), args.pr)
     return _ok(f"修正の結果を round {round_no} へ取り込んだ: {args.file}", [_ref_item(ref)])
@@ -356,8 +357,11 @@ def _with_state(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
 
 def _state_parsers(add: Callable[..., argparse.ArgumentParser]) -> None:
     _with_state(add("state-file")).add_argument("--current", type=int)
-    _with_state(add("fix-gate"))
-    _with_state(add("merge-fix")).add_argument("--file", required=True)
+    # --findings は run へ渡した足すべき内容。merge-fix がその id の決定も台帳の行にする
+    _with_state(add("fix-gate")).add_argument("--findings")
+    merge = _with_state(add("merge-fix"))
+    merge.add_argument("--file", required=True)
+    merge.add_argument("--findings")
     scope = add("review-scope")
     scope.add_argument("worktree")
     scope.add_argument("--purpose", required=True)

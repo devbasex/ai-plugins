@@ -76,6 +76,23 @@ def test_issue_2770_fix_result_written_with_either_number_is_merged(
     assert store.pending_fix_result(tmp_path, ref) is None
 
 
+def test_merge_fix_takes_in_decisions_on_handed_items(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """PR #3466 の指摘: fix-gate と merge-fix は run と同じ足すべき内容（--findings）を受け、その id の決定も台帳の行にする。"""
+    _state(tmp_path, current_pr=CURRENT, rounds=[{"round": 1, "verdict": fixgate_decide.CHANGES_REQUIRED}])
+    handed = tmp_path / "rebuild.json"
+    handed.write_text(json.dumps({"items": [{"id": "R1", "text": "出すコミット"}]}), encoding="utf-8")
+    ref = store.state_pr(tmp_path, CURRENT)
+    path = store.fix_result_path(tmp_path, ref)
+    path.write_text(json.dumps({"pr": CURRENT, "commit": "abc1234", "findings": [{"id": "R1", "outcome": "fixed"}]}), encoding="utf-8")
+    code, gate = run_cli(capsys, "fix-gate", "--state-dir", str(tmp_path), "--pr", str(CURRENT), "--findings", str(handed))
+    assert code == 0 and gate["next"]["argv"][-2:] == ["--findings", str(handed)]
+    assert cli.main(gate["next"]["argv"][2:]) == 0
+    capsys.readouterr()
+    state = store.read_object(ref.path)
+    assert state["rounds"][-1]["fix"]["fixed"] == ["R1"]
+    assert [(f["id"], f["outcome"]) for f in state["findings"]] == [("R1", "fixed")]
+
+
 def test_fix_result_for_another_pr_is_refused(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     _state(tmp_path, current_pr=CURRENT)
     path = _fix_result(tmp_path, ORIGIN, 1)

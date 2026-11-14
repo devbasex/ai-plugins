@@ -253,6 +253,25 @@ def test_push_error_keeps_the_fix_record_and_the_restart_sends_it(repos: Repos, 
     assert "fix0.txt" in sh(repos.origin, "ls-tree", "--name-only", BRANCH)
 
 
+def test_resend_after_a_refused_push_restores_the_fixed_findings(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """PR #3466 の指摘: 送れずに未解決へ戻した指摘は、次の起動の送り直しが届いたら直したへ戻し、修正担当へ渡し直さない。"""
+    sent = drive.push.push_fix
+
+    def refused(*_args: Any, **_kwargs: Any) -> Any:
+        return drive.push.PushResult(False, True, None, None, drive.push.REJECTED_TWICE, ())
+
+    monkeypatch.setattr(drive.push, "push_fix", refused)
+    first = Fake(tmp_path / "st", {"codex": [["直す"]], "kiro": [[]]})
+    _run(capsys, monkeypatch, first, wt)
+    assert _state(first.state_dir)["findings"][0]["outcome"] == fin.UNRESOLVED
+    monkeypatch.setattr(drive.push, "push_fix", sent)
+    again = Fake(first.state_dir, {"codex": [[]], "kiro": [[]]})
+    code, got = _run(capsys, monkeypatch, again, wt)
+    assert (code, got["status"]) == (0, "ok")
+    assert _state(first.state_dir)["findings"][0]["outcome"] == fin.FIXED and "claude" not in again.calls
+    assert "fix0.txt" in sh(repos.origin, "ls-tree", "--name-only", BRANCH)
+
+
 def test_run_config_resolves_relative_paths_from_the_caller(tmp_path: Path, monkeypatch) -> None:
     """PR #3466 の指摘: 相対の --state-dir と --worktree は打った場所の cwd を基準に絶対パスへそろえて子へ渡す。"""
     monkeypatch.chdir(tmp_path)
@@ -437,6 +456,40 @@ def test_run_fixer_without_a_result_is_a_warning_and_errored(wt: Path, tmp_path:
     code, got = _run(capsys, monkeypatch, again, wt)
     assert (code, got["status"]) == (0, "ok")
     assert "claude" in again.calls and _state(fake.state_dir)["findings"][0]["outcome"] == fin.FIXED
+
+
+def test_run_takes_in_a_result_written_by_a_fixer_that_timed_out(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """PR #3466 の指摘: 修正担当が DONE で終わらなくても、結果ファイルを書き終えていれば取り込む。"""
+
+    class TimedOut(Fake):
+        def _fix(self, spec: agents.Launch) -> agents.AgentStatus:
+            super()._fix(spec)
+            return agents.AgentStatus(spec.agent, agents.AgentState.TIMEOUT, None, "時間切れ", ())
+
+    fake = TimedOut(tmp_path / "st", {"codex": [["直す"], []], "kiro": [[], []]})
+    code, got = _run(capsys, monkeypatch, fake, wt)
+    assert (code, got["status"]) == (0, "ok")
+    assert _state(fake.state_dir)["findings"][0]["outcome"] == fin.FIXED
+
+
+def test_run_sets_aside_a_stale_fix_result_before_the_fixer_starts(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """PR #3466 の指摘: 起動の前に残っている結果ファイルは退避し、結果を書かない修正担当の結果として読まない。"""
+
+    class Silent(Fake):
+        def _fix(self, spec: agents.Launch) -> agents.AgentStatus:
+            return agents.AgentStatus(spec.agent, agents.AgentState.DONE, 0, "", ())
+
+    state_dir = tmp_path / "st"
+    ref = store.state_pr(state_dir, PR)
+    state_dir.mkdir()
+    stale = store.fix_result_path(state_dir, ref)
+    stale.write_text(json.dumps({"pr": PR, "findings": [{"id": "r1-1", "outcome": fin.FIXED}]}), encoding="utf-8")
+    store.write_object(ref.path, {"pr": PR})
+    fake = Silent(state_dir, {"codex": [["直す"]], "kiro": [[]]})
+    code, got = _run(capsys, monkeypatch, fake, wt)
+    assert got["status"] == "stopped" and "結果を書かなかった" in got["warnings"][-1]
+    assert _state(state_dir)["findings"][0]["outcome"] == fin.UNRESOLVED
+    assert (state_dir / f"{stale.stem}-stale-round1.json").is_file() and not stale.is_file()
 
 
 def test_run_fix_result_for_another_pr_is_set_aside(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:

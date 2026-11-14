@@ -180,6 +180,12 @@ class FindingLedger:
             if fid in self.rows:
                 self.rows[fid] |= {"outcome": fin.UNRESOLVED, "reason": None}
 
+    def restore_fixed(self, fids: Sequence[str]) -> None:
+        """送れずに未解決へ戻した指摘を、送り直せた後に直したへ戻す（未解決のままの行だけ）。"""
+        for fid in fids:
+            if fid in self.rows and self.rows[fid].get("outcome") == fin.UNRESOLVED:
+                self.rows[fid] |= {"outcome": fin.FIXED, "reason": None}
+
     def findings(self) -> tuple[fin.Finding, ...]:
         """要約に載せる指摘（終わり方を知っている行）。"""
         return tuple(
@@ -218,6 +224,9 @@ def _resend(run: _Run, synced: worktree.SyncResult) -> None:
     remote = run.g.rev_parse(f"refs/remotes/{git.ORIGIN}/{run.cfg.branch}")
     # 載せ直しでコミットの SHA が変わるので、報告されたコミットとの照合はしない
     sent = _push(run, round_no, remote, fix, check_commit=False)
+    if sent:
+        # 前の起動が送れずに未解決へ戻した指摘は、PR へ届いたので直したへ戻す（修正担当へ渡し直さない）
+        run.ledger.restore_fixed(store.list_of(fix, "fixed"))
     _save(run)
     if not sent:
         raise DriveStopped("work_stopped", f"前の起動の round {round_no} の修正を送れない: {run.warnings[-1]}")
@@ -347,9 +356,10 @@ def _consume(path: Path, round_no: int, label: str = "round") -> None:
     os.replace(path, path.with_name(f"{path.stem}-{label}{round_no}.json"))
 
 
-def merge_fix(state_dir: Path, pr: int, path: Path) -> int:
+def merge_fix(state_dir: Path, pr: int, path: Path, handed: Sequence[fin.Handed] = ()) -> int:
     """駆動の外で残った修正の結果ファイルを、最後のラウンドへ `run` と同じ形で取り込む（`merge-fix`。#2770）。
-    台帳へ反映して状態ファイルへ書いてから結果ファイルを移し、取り込んだラウンドの番号を返す。
+    台帳へ反映して状態ファイルへ書いてから結果ファイルを移し、取り込んだラウンドの番号を返す。`handed` は `run` へ
+    渡した足すべき内容（`--findings`）で、その id の決定も台帳の行にする。
     番号が合わなければ `store.FixResultMismatch`（何も書かない）。"""
     ref = store.state_pr(state_dir, pr)
     data = store.read_state(ref)
@@ -358,7 +368,7 @@ def merge_fix(state_dir: Path, pr: int, path: Path) -> int:
         rounds.append({"round": 1})
     round_no = rounds[-1].get("round") or len(rounds)
     ledger = FindingLedger(store.list_of(data, store.FINDINGS))
-    rounds[-1]["fix"] = _fix_record(ledger, ref, path, (), round_no)
+    rounds[-1]["fix"] = _fix_record(ledger, ref, path, handed, round_no)
     data[store.FINDINGS] = list(ledger.rows.values())
     store.write_object(ref.path, data)
     _consume(path, round_no)
@@ -368,17 +378,22 @@ def merge_fix(state_dir: Path, pr: int, path: Path) -> int:
 def _fix(
     run: _Run, round_no: int, open_: Sequence[dict[str, Any]], handed: Sequence[fin.Handed], launch: Launcher
 ) -> Optional[dict[str, Any]]:
-    """修正担当を起動して結果を取り込む。答えが無ければ注意に載せて None。"""
+    """修正担当を起動して結果を取り込む。結果ファイルが無ければ注意に載せて None。
+    起動の前に残っている結果ファイルは退避する（前の起動の結果を今のラウンドの結果と読み違えない）。修正担当が
+    DONE で終わらなくても（タイムアウトなど）結果ファイルを書き終えていれば取り込む（直した・見送ったを失わない）。"""
     result_path = store.fix_result_path(run.cfg.state_dir, run.ref)
+    if result_path.is_file():
+        _consume(result_path, round_no, "stale-round")
     status = launch(_fixer_launch(run, round_no, _fix_prompt(run, open_, handed, result_path)))
-    if status.state != agents.AgentState.DONE or not result_path.is_file():
+    if not result_path.is_file():
         warning = f"round {round_no} の修正担当が結果を書かなかった（{status.state}: {status.detail}）"
         _note(run, round_no, run.cfg.fixer, f"結果無し（{status.state}）", warning)
         return None
     try:
         fix = _take_fix(run, result_path, round_no)
-    except store.FixResultMismatch as exc:
-        # 合わないファイルを残すと次の起動が同じファイルを取り込もうとして止まり続けるので、退避する
+    except (store.FixResultMismatch, store.StateBroken) as exc:
+        # 合わない・書きかけ（DONE でない修正担当）のファイルを残すと、次の起動が同じファイルを取り込もうとして
+        # 止まり続けるので、退避する
         _consume(result_path, round_no, "mismatch-round")
         run.warnings.append(f"round {round_no} の修正の結果を取り込めない: {exc}")
         return None

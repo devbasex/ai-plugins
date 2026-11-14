@@ -147,6 +147,21 @@ def test_sync_conflict_returns_to_the_previous_head(repos: Repos, tmp_path: Path
     assert sh(wt, "status", "--porcelain") == ""
 
 
+def test_sync_that_cannot_replay_without_conflicts_is_refused(repos: Repos, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """PR #3466 の指摘: 載せ直しが衝突のファイル無しで失敗したら（空になったコミット）、前の HEAD へ戻して止める。"""
+    wt = _review_worktree(repos, tmp_path)
+    before = commit(wt, "fix.txt", "fix\n", "修正（未送信）")
+    commit(repos.other, "fix.txt", "fix\n", "同じ修正を含む別の push")
+    (repos.other / "y.txt").write_text("y\n", encoding="utf-8")
+    sh(repos.other, "add", "y.txt")
+    sh(repos.other, "commit", "-q", "--amend", "--no-edit")
+    sh(repos.other, "push", "-q", "origin", f"HEAD:refs/heads/{BRANCH}")
+    code, got = run_cli(capsys, "sync", str(wt), "--branch", BRANCH)
+    assert code != 0 and got["cause"]["kind"] == "precondition" and before in got["summary"]
+    assert sh(wt, "rev-parse", "HEAD").strip() == before
+    assert sh(wt, "status", "--porcelain") == ""
+
+
 def test_sync_refuses_uncommitted_changes(repos: Repos, tmp_path: Path) -> None:
     wt = _review_worktree(repos, tmp_path)
     (wt / "doc.md").write_text("書きかけ\n", encoding="utf-8")

@@ -221,4 +221,7 @@ def sync_worktree(g: git.Git, head_branch: str) -> SyncResult:
     conflicts = conflicted_files(g)
     g.run("cherry-pick", "--abort")
     g.run("reset", "--hard", before)
+    if not conflicts:
+        # 空になったコミットなど、衝突のファイル無しで載せ直せなかった。origin へ合っていないので成功とは返さない
+        raise SyncRefused(f"自分の未送信のコミットを origin の先頭へ載せ直せないので {before} へ戻した: {picked.stderr.strip()}")
     return SyncResult(before, before, 0, conflicts)
