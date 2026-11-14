@@ -1,4 +1,4 @@
-"""HTTP で送る・取るアダプター（`ndf.adapters.notify`）。ネットワークへは出ず、`httpx.MockTransport` で答える。"""
+"""HTTP で送る・取るアダプター（`ndf.adapters.http`）。ネットワークへは出ず、`httpx.MockTransport` で答える。"""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from collections.abc import Callable, Iterator
 import httpx
 import pytest
 
-from ndf.adapters import notify
+from ndf.adapters import http
 
 from . import _drip_server
 
@@ -23,7 +23,7 @@ def _transport(routes: dict[str, Handler]) -> httpx.MockTransport:
 
 
 class _Clock:
-    """`notify._now` の代わり。`advance` で進める。"""
+    """`http._now` の代わり。`advance` で進める。"""
 
     def __init__(self) -> None:
         self.t = 100.0
@@ -38,7 +38,7 @@ class _Clock:
 @pytest.fixture
 def clock(monkeypatch: pytest.MonkeyPatch) -> _Clock:
     c = _Clock()
-    monkeypatch.setattr(notify, "_now", c)
+    monkeypatch.setattr(http, "_now", c)
     return c
 
 
@@ -65,7 +65,7 @@ def test_post_json_returns_object() -> None:
         seen.append(req)
         return httpx.Response(200, json={"ok": True})
 
-    got = notify.post_json("https://x.test/a", {"q": 1}, {"Authorization": "Bearer k"}, 5, transport=_transport({"/a": handler}))
+    got = http.post_json("https://x.test/a", {"q": 1}, {"Authorization": "Bearer k"}, 5, transport=_transport({"/a": handler}))
     assert got == {"ok": True}
     assert json.loads(seen[0].content) == {"q": 1}
     assert seen[0].headers["Authorization"] == "Bearer k"
@@ -86,16 +86,16 @@ def test_post_json_returns_object() -> None:
 )
 def test_post_json_tells_failures_apart(handler: Handler, reason: str, retryable: bool) -> None:
     # 3394-10: 失敗を 1 つの値にまとめず、理由と打ち直して通りうるかを分ける
-    with pytest.raises(notify.PostError) as got:
-        notify.post_json("https://x.test/a", {}, {}, 5, transport=_transport({"/a": handler}))
+    with pytest.raises(http.PostError) as got:
+        http.post_json("https://x.test/a", {}, {}, 5, transport=_transport({"/a": handler}))
     assert (str(got.value), got.value.retryable) == (reason, retryable)
 
 
 @pytest.mark.parametrize(("url", "transport"), [("::", _transport({})), ("ftp://x.test/a", None)], ids=["invalid", "scheme"])
 def test_post_json_invalid_url_is_not_retryable(url: str, transport: httpx.BaseTransport | None) -> None:
     # scheme の誤りは本物の transport が接続の前に断る（ネットワークへ出ない）
-    with pytest.raises(notify.PostError, match="^URL が不正$") as got:
-        notify.post_json(url, {}, {}, 5, transport=transport)
+    with pytest.raises(http.PostError, match="^URL が不正$") as got:
+        http.post_json(url, {}, {}, 5, transport=transport)
     assert got.value.retryable is False
 
 
@@ -104,7 +104,7 @@ def test_post_json_invalid_url_is_not_retryable(url: str, transport: httpx.BaseT
 
 def test_fetch_body_returns_body() -> None:
     t = _transport({"/a": lambda req: httpx.Response(200, content=b"body")})
-    assert notify.fetch_body("https://x.test/a", 5, transport=t) == b"body"
+    assert http.fetch_body("https://x.test/a", 5, transport=t) == b"body"
 
 
 def test_fetch_body_follows_redirect() -> None:
@@ -114,18 +114,18 @@ def test_fetch_body_follows_redirect() -> None:
             "/new": lambda req: httpx.Response(200, content=b"moved"),
         }
     )
-    assert notify.fetch_body("https://x.test/old", 5, transport=t) == b"moved"
+    assert http.fetch_body("https://x.test/old", 5, transport=t) == b"moved"
 
 
 def test_fetch_body_finishes_exactly_at_deadline(clock: _Clock) -> None:
     t = _transport({"/a": lambda req: httpx.Response(200, content=_slow_body(clock, [2.0, 3.0]))})
-    assert notify.fetch_body("https://x.test/a", 5, transport=t) == b"xx"
+    assert http.fetch_body("https://x.test/a", 5, transport=t) == b"xx"
 
 
 def test_fetch_body_deadline_while_reading(clock: _Clock) -> None:
     t = _transport({"/a": lambda req: httpx.Response(200, content=_slow_body(clock, [2.0, 3.5]))})
-    with pytest.raises(notify.FetchError, match=r"^5 秒を越えた$"):
-        notify.fetch_body("https://x.test/a", 5, transport=t)
+    with pytest.raises(http.FetchError, match=r"^5 秒を越えた$"):
+        http.fetch_body("https://x.test/a", 5, transport=t)
 
 
 def test_fetch_body_deadline_counts_across_redirect(clock: _Clock) -> None:
@@ -134,8 +134,8 @@ def test_fetch_body_deadline_counts_across_redirect(clock: _Clock) -> None:
         return httpx.Response(302, headers={"Location": "/new"})
 
     t = _transport({"/old": old, "/new": lambda req: httpx.Response(200, content=b"late")})
-    with pytest.raises(notify.FetchError, match=r"^5 秒を越えた$"):
-        notify.fetch_body("https://x.test/old", 5, transport=t)
+    with pytest.raises(http.FetchError, match=r"^5 秒を越えた$"):
+        http.fetch_body("https://x.test/old", 5, transport=t)
 
 
 def test_fetch_body_redirect_gets_remaining_timeout(clock: _Clock) -> None:
@@ -150,7 +150,7 @@ def test_fetch_body_redirect_gets_remaining_timeout(clock: _Clock) -> None:
         timeouts.append(req.extensions["timeout"])
         return httpx.Response(200, content=b"ok")
 
-    assert notify.fetch_body("https://x.test/old", 5, transport=_transport({"/old": old, "/new": new})) == b"ok"
+    assert http.fetch_body("https://x.test/old", 5, transport=_transport({"/old": old, "/new": new})) == b"ok"
     assert [t["read"] for t in timeouts] == [5, 3]
 
 
@@ -174,8 +174,8 @@ def serve() -> Iterator[Serve]:
 
 def _fails_at_deadline(url: str) -> None:
     started = time.monotonic()
-    with pytest.raises(notify.FetchError, match=r"^1 秒を越えた$"):
-        notify.fetch_body(url, 1)
+    with pytest.raises(http.FetchError, match=r"^1 秒を越えた$"):
+        http.fetch_body(url, 1)
     assert time.monotonic() - started < 1.5
 
 
@@ -209,7 +209,7 @@ def test_watchdog_stops_the_tls_connection_after_tcp_one_is_detached() -> None:
     tcp, _tcp_peer = socket.socketpair()
     tls, tls_peer = socket.socketpair()
     with tcp, _tcp_peer, tls, tls_peer:
-        watch = notify._Watchdog(0.2)
+        watch = http._Watchdog(0.2)
         watch.trace("connection.connect_tcp.complete", {"return_value": _Stream(tcp)})
         os.close(tcp.detach())
         watch.trace("connection.start_tls.complete", {"return_value": _Stream(tls)})
@@ -224,7 +224,7 @@ def test_fetch_body_does_not_read_redirect_body(clock: _Clock) -> None:
         return httpx.Response(302, headers={"Location": "/new"}, content=_slow_body(clock, [10.0]))
 
     t = _transport({"/old": old, "/new": lambda req: httpx.Response(200, content=b"ok")})
-    assert notify.fetch_body("https://x.test/old", 5, transport=t) == b"ok"
+    assert http.fetch_body("https://x.test/old", 5, transport=t) == b"ok"
 
 
 @pytest.mark.parametrize(
@@ -242,11 +242,11 @@ def test_fetch_body_does_not_read_redirect_body(clock: _Clock) -> None:
     ids=["status-404", "404-after-redirect", "too-many-redirects", "connect-error", "timeout"],
 )
 def test_fetch_body_errors(routes: dict[str, Handler], reason: str) -> None:
-    with pytest.raises(notify.FetchError) as caught:
-        notify.fetch_body("https://x.test/a", 5, transport=_transport(routes))
+    with pytest.raises(http.FetchError) as caught:
+        http.fetch_body("https://x.test/a", 5, transport=_transport(routes))
     assert str(caught.value) == reason
 
 
 def test_fetch_body_invalid_url() -> None:
-    with pytest.raises(notify.FetchError, match=r"^URL が不正$"):
-        notify.fetch_body("::", 5, transport=_transport({}))
+    with pytest.raises(http.FetchError, match=r"^URL が不正$"):
+        http.fetch_body("::", 5, transport=_transport({}))
