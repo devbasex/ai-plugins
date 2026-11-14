@@ -10,6 +10,7 @@ import json
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+from ndf.adapters.git import Git
 from ndf.domains.records import glossary
 from ndf.domains.records import glossary_decide as gd
 from ndf.domains.records import spec_decide as sd
@@ -49,3 +50,11 @@ def finalize(root: Path, specs: Sequence[str], removed: Sequence[str], overrides
     for p in removed:
         (root / p).unlink()
     return sd.commit_paths(specs, [lay.source, *written], removed)
+
+
+def commit(root: Path, paths: Sequence[str], message: str) -> str:
+    """パスをコミットし、コミットの sha を返す。git が失敗すれば `GitError`。"""
+    git = Git(root)
+    git.run("add", "-A", "--", *paths)
+    git.run("commit", "-q", "-m", message)
+    return git.rev_parse("HEAD")

@@ -84,10 +84,8 @@ def _spec(args: argparse.Namespace, root: Path) -> dict[str, Any]:
     items = [{"path": p} for p in paths]
     if args.message is None:
         return result.result(TOOL, result.OK, f"確定仕様化: コミットに入れるパス {len(paths)} 件", items)
-    git = Git(root)
-    git.run("add", "-A", "--", *paths)
-    git.run("commit", "-q", "-m", args.message)
-    return result.result(TOOL, result.OK, f"確定仕様化をコミットした: {len(paths)} 件", items, outputs={"commit": git.rev_parse("HEAD")})
+    sha = spec.commit(root, paths, args.message)
+    return result.result(TOOL, result.OK, f"確定仕様化をコミットした: {len(paths)} 件", items, outputs={"commit": sha})
 
 
 def _handoff(args: argparse.Namespace, root: Path) -> dict[str, Any]:
