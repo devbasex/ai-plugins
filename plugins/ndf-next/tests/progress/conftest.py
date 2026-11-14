@@ -78,6 +78,27 @@ def opened(progress_url, root):
 
 
 @pytest.fixture
+def conflicts(monkeypatch):
+    """`store.append_events` を差し替える関数。先頭の `times` 回だけ `Conflict` を出してから元の関数へ渡し、`times` が
+    None なら毎回出す。設定するたびに、その設定の呼出回数（`{"n": 回数}`）を新しく返す。"""
+    real = store.append_events
+
+    def arrange(times):
+        calls = {"n": 0}
+
+        def append_events(*a, **k):
+            calls["n"] += 1
+            if times is None or calls["n"] <= times:
+                raise store.Conflict("ぶつかった")
+            return real(*a, **k)
+
+        monkeypatch.setattr(store, "append_events", append_events)
+        return calls
+
+    return arrange
+
+
+@pytest.fixture
 def refused():
     """断られる操作の理由を返す関数。トランザクションの内側で `fn(conn)` を打ち、`Refused` がトランザクションの外へ
     伝わって（書いた分を戻して）から捕まえる。"""
