@@ -82,3 +82,18 @@ def test_instruction_files_defaults():
     assert facts.ids("instruction-files", undeclared_check=True) == ("AGENTS.md", "CLAUDE.md")
     for fid in facts.ids("instruction-files", import_syntax=True):
         assert facts.value("instruction-files", fid, "runtime") == "claude"
+
+
+def test_main_keys_are_declared_keys_and_guard_authorization():
+    main = facts.column(FILES, "main_keys")
+    for fid, keys in main.items():
+        assert set(keys) <= set(facts.value(FILES, fid, "keys")), fid
+    # 使ってよいランタイムは認可に関わり、PR の変更で広げられない
+    assert set(main["runtime-policy"]) == set(facts.value(FILES, "runtime-policy", "keys"))
+    assert {"production_branch", "branch_flow"} <= set(main["worktree"])
+
+
+def test_each_declaration_has_one_file():
+    paths = [r["path"] for r in facts.rows(FILES, kind="declaration")]
+    assert len(paths) == len(set(paths))
+    assert all(r["place"] == "ndf" for r in facts.rows(FILES, kind="declaration"))
