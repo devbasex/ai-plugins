@@ -17,6 +17,8 @@ from ndf.checks import imports
 RULES_PATH = Path(__file__).with_name("rules.json")
 # スクリプトを置くディレクトリ（プラグインの根からの相対パスの前置き）
 SCRIPT_PREFIXES = ("bin/", "hooks/")
+# 製品のコードを置くディレクトリ（プラグインの根からの相対パス）
+SRC_DIR = "src"
 
 
 class CheckError(Exception):
@@ -77,7 +79,7 @@ class Scope:
 
     def code(self) -> list[Source]:
         """製品のコード（`src/` の下の `.py`）。兆候・構造・輪・重複の規則が見る。"""
-        return [s for s in self.sources if s.is_python and self.plugin_rel(s).startswith("src/")]
+        return [s for s in self.sources if s.is_python and self.plugin_rel(s).startswith(SRC_DIR + "/")]
 
     def code_files(self) -> list[Source]:
         """コードのファイル（テストを含む `.py` と `bin/`・`hooks/` のスクリプト）。行数の上限が見る。"""
@@ -98,6 +100,11 @@ def module_name(scope: Scope, src: Source) -> str:
     if parts[-1] == "__init__":
         parts.pop()
     return ".".join(parts)
+
+
+def module_rel(module: str, suffix: str) -> str:
+    """`ndf.identity` と `.py` → `src/ndf/identity.py`（プラグインの根からの相対パス。`module_name` の逆）。"""
+    return SRC_DIR + "/" + module.replace(".", "/") + suffix
 
 
 def source_imports(src: Source, module: str) -> list[imports.Import]:

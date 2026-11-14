@@ -23,11 +23,11 @@ from pathlib import Path
 from typing import Any, Optional
 
 from ndf.checks import imports
-from ndf.checks.model import CheckError, Finding, Scope, Source, read_json_text, source_imports
+from ndf.checks.model import CheckError, Finding, Scope, Source, module_rel, read_json_text, source_imports
 
 RULE = "child-deps"
 # 子の表のコピーの置き場（プラグインの根からの相対パス）
-CHILDREN_REL = "src/" + __name__.rpartition(".")[0].replace(".", "/") + "/children.json"
+CHILDREN_REL = module_rel(__name__.rpartition(".")[0], "/children.json")
 # 追補の単位の記号は、元の子の記号の後ろにこの文字を付ける（#3395 の決定 110）
 ADDENDUM_MARK = "+"
 

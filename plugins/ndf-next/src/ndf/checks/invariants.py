@@ -21,12 +21,12 @@ from pathlib import Path
 from typing import Any
 
 from ndf import identity
-from ndf.checks.model import SCRIPT_PREFIXES, CheckError, Finding, Scope, Source
+from ndf.checks.model import SCRIPT_PREFIXES, SRC_DIR, CheckError, Finding, Scope, Source, module_rel
 
 OWN_PACKAGE = __name__.split(".")[0]
 LOCAL_TOPS = frozenset({OWN_PACKAGE, "conftest"})
 # I1 が定義の行を通す `identity` のファイル（プラグインの根からの相対パス）と、通す名前
-IDENTITY_FILE = "src/" + identity.__name__.replace(".", "/") + ".py"
+IDENTITY_FILE = module_rel(identity.__name__, ".py")
 DEFINITION_NAMES = frozenset({"FINAL_NAME", "FIXED_WORDS"})
 # 移す先の行が持つ Issue の参照
 ISSUE_REF = re.compile(r"#\d+")
@@ -79,7 +79,7 @@ def _own_name_texts(scope: Scope, src: Source) -> list[tuple[int, str]]:
     ほかのファイルは照合しない（空）。
     """
     rel = scope.plugin_rel(src)
-    if src.is_python and rel.startswith("src/"):
+    if src.is_python and rel.startswith(SRC_DIR + "/"):
         skip = _definition_lines(src.tree) if rel == IDENTITY_FILE else set()
         return [(no, text) for no, text in _strings(src.tree) if no not in skip]
     if rel.startswith(SCRIPT_PREFIXES):
