@@ -19,6 +19,11 @@ from ndf.contracts import facts
 SOCKET = "ndf-lanes"
 
 
+def _target(name: str) -> str:
+    """`-t` に渡すセッションの指定。先頭の `=` は名前の完全一致の印（落とすと前方一致になり別のレーンに当たる）。"""
+    return f"={name}"
+
+
 class Done(NamedTuple):
     ok: bool
     detail: str
@@ -42,19 +47,19 @@ class Tmux:
         return Done(done.returncode == 0, detail)
 
     def has(self, name: str) -> bool:
-        return self._run(["has-session", "-t", f"={name}"]).ok
+        return self._run(["has-session", "-t", _target(name)]).ok
 
     def start(self, name: str, cwd: Path, command: Sequence[str], env: Mapping[str, str]) -> Done:
         """名前つきのセッションを切り離して作る。秘密でない表の名前だけを `-e` で、残りはプロセスの環境で渡す。"""
         return self._run(new_session_args(name, cwd, command, env), env)
 
     def kill(self, name: str) -> Done:
-        return self._run(["kill-session", "-t", f"={name}"])
+        return self._run(["kill-session", "-t", _target(name)])
 
     def send(self, name: str, text: str) -> Done:
         """入力欄へ文字を送って Enter を押す（`-l` で文字どおりに送る）。"""
-        sent = self._run(["send-keys", "-t", f"={name}", "-l", text])
-        return sent if not sent.ok else self._run(["send-keys", "-t", f"={name}", "Enter"])
+        sent = self._run(["send-keys", "-t", _target(name), "-l", text])
+        return sent if not sent.ok else self._run(["send-keys", "-t", _target(name), "Enter"])
 
 
 def new_session_args(name: str, cwd: Path, command: Sequence[str], env: Mapping[str, str]) -> list[str]:
