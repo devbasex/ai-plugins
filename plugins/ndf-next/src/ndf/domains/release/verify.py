@@ -106,7 +106,13 @@ def sync_base(main_dir: Path, base: str) -> sync_decide.Plan:
     incoming = repo_git.changed_files("HEAD", remote_ref)
     overlap = sorted(set(dirty) & set(incoming))
     existing = [p for p in overlap if (main_dir / p).is_file()]
-    plan = sync_decide.plan(_branch(repo_git), base, dirty, incoming, _landed(repo_git, existing, remote_ref) if existing else [])
+    plan = sync_decide.plan(_branch(repo_git), base, dirty, incoming, _landed(repo_git, existing, remote_ref))
+    _apply(repo_git, plan, base, remote_ref)
+    return plan
+
+
+def _apply(repo_git: git_mod.Git, plan: sync_decide.Plan, base: str, remote_ref: str) -> None:
+    """決めた手を打つ（`stop` は何もしない）。"""
     if plan.action == sync_decide.UPDATE_REF:
         # 取り出さずに参照だけを進める。fast-forward でない・ほかの worktree が取り出していれば git が断る
         repo_git.run("fetch", "--quiet", "--no-tags", "--", git_mod.ORIGIN, f"refs/heads/{base}:refs/heads/{base}")
@@ -115,4 +121,3 @@ def sync_base(main_dir: Path, base: str) -> sync_decide.Plan:
         repo_git.run("merge", "--ff-only", "--quiet", remote_ref)
     elif plan.action == sync_decide.FAST_FORWARD:
         repo_git.run("merge", "--ff-only", "--quiet", remote_ref)
-    return plan
