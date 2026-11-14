@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from ndf.adapters import cli
+from ndf.adapters import cli, run_log
 
 SRC = Path(__file__).resolve().parents[2] / "src"
 NOW = datetime(2026, 11, 14, 3, 0, tzinfo=timezone.utc)
@@ -170,6 +170,6 @@ def test_half_written_line_is_closed_before_next(tmp_path):
     path = tmp_path / "x.jsonl"
     path.write_bytes(b'{"cut": ')
 
-    cli._append_line(path, b'{"a": 1}\n')
+    run_log._append_line(path, b'{"a": 1}\n')
 
     assert path.read_bytes().splitlines()[-1] == b'{"a": 1}'
