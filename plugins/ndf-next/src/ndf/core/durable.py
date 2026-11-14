@@ -3,6 +3,9 @@
 耐久ワークフローと耐久ステップを使う層は、DBOS の型と関数をここから受ける。判断の規則はここに置かず、
 `ndf.core.loop` の判断の関数に置く。
 
+DBOS は起こすか記録を読むときに初めて import する（`_load`。約 0.3 秒の CPU を DBOS を開かない呼び出しで使わない。B3）。
+先に付けた `workflow`・`step` は `_Deferred` が覚え、`launch` の前の `_load` が DBOS のデコレータを当てる。
+
 記録の置き場（設計の決定 81〜86。issues/issue-1142-design-next.md の「DBOS の記録と進行表の置き場」）:
 
 - チェックアウトの置き場 `<git の共通ディレクトリ>/<プラグイン名>/state/` は、先頭に形の番号 `format.json` を持つ。
@@ -39,6 +42,7 @@ from __future__ import annotations
 
 import copy
 import fcntl
+import functools
 import hashlib
 import importlib.metadata
 import json
@@ -53,17 +57,20 @@ from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import IO, Any, TypeVar
+from typing import IO, TYPE_CHECKING, Any, TypeVar
 
-import dbos._dbos as _dbos_runtime
-import dbos._migration as _dbos_migration
 import sqlalchemy as sa
-from dbos import DBOS, DBOSClient, DBOSConfig, SetEnqueueOptions, SetWorkflowID
-from dbos._serialization import DefaultSerializer
 
 from ndf.adapters import run_log
 from ndf.contracts import limits
 from ndf.core import durable_locks as locks
+from ndf.core.durable_ledger import (
+    RUNS_TABLE as RUNS_TABLE,
+    LedgerRow as LedgerRow,
+    _forget_run as _forget_run,
+    _ledger as _ledger,
+    _register_run as _register_run,
+)
 from ndf.core.durable_locks import (
     MAINT_LOCK as MAINT_LOCK,
     STORE_LOCK as STORE_LOCK,
@@ -97,8 +104,6 @@ STORE_FORMAT = 1
 KEEP_DAYS = 14
 # 鍵の名前の接頭辞。名前の形を決めるだけで、URL の片付けの絞り込みには使わない（絞るのは台帳）
 RUN_PREFIX = "run-"
-# URL のとき、NDF が起こした鍵を書く台帳の表。進行表と同じ DB に置き、DBOS の表ではない（I12）
-RUNS_TABLE = "ndf_runs"
 # quick_check と片付けの走査の間隔（決定 82・83）
 CHECK_INTERVAL = timedelta(hours=24)
 # DBOS を閉じる前に、走っている耐久ワークフローが記録を終えたかを見る間隔（秒）
@@ -130,7 +135,6 @@ FORMAT_DBOS_KEY = "dbos"
 SERIALIZER_NAME = "ndf_redacted_pickle"
 # 入れてある DBOS の版と、SQLite の表の版（DBOS が `dbos_migrations.version` に書く、移行の数）
 DBOS_VERSION = importlib.metadata.version("dbos")
-DBOS_SCHEMA = len(_dbos_migration.sqlite_migrations)
 
 
 @dataclass(frozen=True)
@@ -165,15 +169,6 @@ class RunRecord:
     app_version: str | None = None
 
 
-@dataclass(frozen=True)
-class LedgerRow:
-    """台帳 `ndf_runs` の 1 行。鍵の名前・実行の鍵・起こした時刻。"""
-
-    run_name: str
-    run_key: str
-    started_at: datetime
-
-
 # 置き場のロックを共有で持ち続けるファイル（プロセスが終わるまで放さない）
 _held_stores: dict[Path, IO[str]] = {}
 
@@ -199,77 +194,168 @@ def _redact(value: Any, secrets: list[str]) -> Any:
     return value
 
 
-class _RedactingSerializer(DefaultSerializer):
-    """耐久の記録（ワークフローの入力・ステップの出力・メッセージ・例外）へ書く値の秘密を伏せてから pickle にする（B8）。
+def _serializer_class(base: type) -> type:
+    class _RedactingSerializer(base):  # type: ignore[valid-type,misc]
+        """耐久の記録（ワークフローの入力・ステップの出力・メッセージ・例外）へ書く値の秘密を伏せてから pickle にする（B8）。
 
-    DBOS が記録へ書く値はすべてここを通るため、殻の 1 か所で伏せる。伏せるのは記録だけで、流れている呼び出しへは
-    元の値が渡る。回復で記録から読んだ値は伏せた後の値になるので、秘密はワークフローの入力にせず、ステップの中で
-    環境変数から読む。読むのは既定の pickle と同じ形。
-    """
+        DBOS が記録へ書く値はすべてここを通るため、殻の 1 か所で伏せる。伏せるのは記録だけで、流れている呼び出しへは
+        元の値が渡る。回復で記録から読んだ値は伏せた後の値になるので、秘密はワークフローの入力にせず、ステップの中で
+        環境変数から読む。読むのは既定の pickle と同じ形。
+        """
 
-    def serialize(self, data: Any) -> str:
-        return super().serialize(_redact(data, run_log.secret_values()))
+        def serialize(self, data: Any) -> str:
+            return str(super().serialize(_redact(data, run_log.secret_values())))
 
-    def name(self) -> str:
-        return SERIALIZER_NAME
+        def name(self) -> str:
+            return SERIALIZER_NAME
+
+    return _RedactingSerializer
+
+
+class _Deferred:
+    """DBOS を読む前に付けた `workflow`・`step`。`_load` が DBOS のデコレータを当て、呼ぶとそれへ渡す。"""
+
+    def __init__(self, fn: Callable[..., Any], kind: str) -> None:
+        functools.update_wrapper(self, fn)
+        self.fn = fn
+        self.kind = kind
+        self.real: Callable[..., Any] | None = None
+
+    def bind(self) -> None:
+        if self.real is None:
+            self.real = getattr(DBOS, self.kind)()(self.fn)
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        _load()
+        assert self.real is not None
+        return self.real(*args, **kwargs)
+
+
+_deferred: list[_Deferred] = []
+# `_load` が結ぶ名前。モジュールの属性として読まれたときも `__getattr__` が `_load` を呼んでから返す
+_LAZY_NAMES = frozenset({"DBOS", "DBOSClient", "SetEnqueueOptions", "SetWorkflowID", "_dbos_runtime", "DBOS_SCHEMA"})
+_loaded = False
+
+if TYPE_CHECKING:
+    import dbos._dbos as _dbos_runtime
+    from dbos import DBOS, DBOSClient, DBOSConfig, SetEnqueueOptions, SetWorkflowID
+
+
+def _load() -> None:
+    """DBOS を import して名前をこのモジュールに結び、先に付けた `workflow`・`step` に DBOS のデコレータを当てる（1 回だけ）。"""
+    global _loaded, _dbos_runtime, DBOS, DBOSClient, SetEnqueueOptions, SetWorkflowID, DBOS_SCHEMA, _serializer_type
+    if _loaded:
+        return
+    import dbos._dbos as _dbos_runtime
+    import dbos._migration as migration
+    from dbos import DBOS, DBOSClient, SetEnqueueOptions, SetWorkflowID
+    from dbos._serialization import DefaultSerializer
+
+    # 入れてある DBOS の SQLite の表の版（DBOS が `dbos_migrations.version` に書く、移行の数）と、記録へ書く serializer の型
+    DBOS_SCHEMA = len(migration.sqlite_migrations)
+    _serializer_type = _serializer_class(DefaultSerializer)
+    _loaded = True
+    for item in _deferred:
+        item.bind()
+
+
+def _schema() -> int:
+    _load()
+    return int(globals()["DBOS_SCHEMA"])
+
+
+def _serializer() -> Any:
+    """秘密を伏せてから記録へ書く serializer（B8）。"""
+    _load()
+    return globals()["_serializer_type"]()
+
+
+def __getattr__(name: str) -> Any:
+    if name in _LAZY_NAMES:
+        _load()
+        return globals()[name]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def _decorate(fn: Callable[..., R], kind: str) -> Callable[..., R]:
+    if _loaded:
+        return getattr(DBOS, kind)()(fn)  # type: ignore[no-any-return]
+    item = _Deferred(fn, kind)
+    _deferred.append(item)
+    return item
+
+
+def _target(fn: Callable[..., Any]) -> Callable[..., Any]:
+    """DBOS へ渡す関数（先に付けたデコレータなら、DBOS のデコレータを当てた方）。"""
+    _load()
+    return fn.real if isinstance(fn, _Deferred) and fn.real is not None else fn
 
 
 def workflow(fn: Callable[..., R]) -> Callable[..., R]:
     """関数を耐久ワークフローにする。中で呼んだ耐久ステップの結果が記録に残る。"""
-    return DBOS.workflow()(fn)
+    return _decorate(fn, "workflow")
 
 
 def step(fn: Callable[..., R]) -> Callable[..., R]:
     """関数を耐久ステップにする。済んだ呼び出しは回復のときに流し直さず、記録した結果を返す。"""
-    return DBOS.step()(fn)
+    return _decorate(fn, "step")
 
 
 def start(fn: Callable[..., R], workflow_id: str, *args: Any) -> R:
     """ID を決めて耐久ワークフローを流し、結果を返す。同じ ID が終わっていれば、記録した結果を返す。"""
+    real = _target(fn)
     with SetWorkflowID(workflow_id):
-        return fn(*args)
+        return real(*args)  # type: ignore[no-any-return]
 
 
 def spawn(fn: Callable[..., Any], workflow_id: str, *args: Any) -> None:
     """ID を決めて耐久ワークフローを裏で流し、終わりを待たずに戻る。耐久ワークフローの中で呼ぶと子になる。"""
+    real = _target(fn)
     with SetWorkflowID(workflow_id):
-        DBOS.start_workflow(fn, *args)
+        DBOS.start_workflow(real, *args)
 
 
 def queue(name: str) -> Any:
     """キューを登録して返す（DBOS を起こした後）。キューは鍵の `application_name` の持ち物になる。"""
+    _load()
     return DBOS.register_queue(name)
 
 
 def enqueue(target: Any, fn: Callable[..., Any], workflow_id: str, *args: Any, delay_seconds: float | None = None) -> None:
     """耐久ワークフローをキュー `target` へ入れる。`delay_seconds` を渡すと、その秒数の後に取り出せるようになる。"""
+    real = _target(fn)
     with SetWorkflowID(workflow_id), SetEnqueueOptions(delay_seconds=delay_seconds):
-        target.enqueue(fn, *args)
+        target.enqueue(real, *args)
 
 
 def result(workflow_id: str) -> Any:
     """耐久ワークフローが終わるまで待ち、結果を返す（回復で流れている途中のものも待つ）。"""
+    _load()
     return DBOS.retrieve_workflow(workflow_id).get_result()
 
 
 def status(workflow_id: str) -> str | None:
     """耐久ワークフローの状態（`PENDING`・`SUCCESS`・`ERROR`・`CANCELLED` など）。記録に無ければ None。"""
+    _load()
     found = DBOS.get_workflow_status(workflow_id)
     return None if found is None else found.status
 
 
 def current_id() -> str | None:
     """流れている耐久ワークフローの ID。耐久ワークフローの外では None。"""
+    _load()
     return DBOS.workflow_id
 
 
 def send(workflow_id: str, message: Any, topic: str) -> None:
     """耐久ワークフローへ話題 `topic` のメッセージを送る（DBOS を起こした後）。"""
+    _load()
     DBOS.send(workflow_id, message, topic)
 
 
 def recv(topic: str, timeout_seconds: float) -> Any:
     """話題 `topic` のメッセージを待つ。期限までに来なければ None。耐久ワークフローの中でだけ呼ぶ。"""
+    _load()
     return DBOS.recv(topic, timeout_seconds=timeout_seconds)
 
 
@@ -363,7 +449,8 @@ def _write_format(root: Path) -> None:
 
 
 def _dbos_record() -> dict[str, Any]:
-    return {"version": DBOS_VERSION, "schema": DBOS_SCHEMA}
+    _load()
+    return {"version": DBOS_VERSION, "schema": _schema()}
 
 
 def _record_dbos(root: Path) -> None:
@@ -572,10 +659,11 @@ def _backup_before_migration(path: Path, now: datetime) -> Path | None:
     新しければ開かずに `StoreFormatNewer`（古い DBOS は新しい表を読めない）。同じか、ファイル・表が無ければ None。
     """
     found = schema_of(path)
-    if not found or found == DBOS_SCHEMA:
+    schema = _schema()
+    if not found or found == schema:
         return None
-    if found > DBOS_SCHEMA:
-        raise StoreFormatNewer(f"耐久の記録の表の版 {found} が入れてある DBOS {DBOS_VERSION} の {DBOS_SCHEMA} より新しい: {path}", (path,))
+    if found > schema:
+        raise StoreFormatNewer(f"耐久の記録の表の版 {found} が入れてある DBOS {DBOS_VERSION} の {schema} より新しい: {path}", (path,))
     target = _free_name(path.parent / BACKUP_DIR / f"{path.stem}-schema{found}{DB_SUFFIX}", now)
     target.parent.mkdir(parents=True, exist_ok=True)
     src = sqlite3.connect(path, timeout=30)
@@ -585,7 +673,7 @@ def _backup_before_migration(path: Path, now: datetime) -> Path | None:
     finally:
         dst.close()
         src.close()
-    log.warning("耐久の記録の表を移す前に控えを取った", extra={"path": str(path), "backup": str(target), "from": found, "to": DBOS_SCHEMA})
+    log.warning("耐久の記録の表を移す前に控えを取った", extra={"path": str(path), "backup": str(target), "from": found, "to": schema})
     return target
 
 
@@ -595,7 +683,8 @@ def _client(database_url: str) -> Iterator[DBOSClient]:
 
     接続が切れたら待たずに例外にする（DBOS の既定は戻るまで待ち続け、片付けが `maint.lock` と鍵のロックを持ったまま止まる）。
     """
-    client = DBOSClient(system_database_url=database_url, retry_connection_errors=False, serializer=_RedactingSerializer())
+    _load()
+    client = DBOSClient(system_database_url=database_url, retry_connection_errors=False, serializer=_serializer())
     try:
         yield client
     finally:
@@ -741,60 +830,6 @@ def _sweep_kept(dbos_dir: Path, now: datetime, out: SweepResult) -> None:
 # --- URL（PostgreSQL）の台帳と片付け（決定 83・I12・I13） ---------------------------------
 
 
-def _runs_table(metadata: sa.MetaData) -> sa.Table:
-    return sa.Table(
-        RUNS_TABLE,
-        metadata,
-        sa.Column("run_name", sa.Text, primary_key=True),
-        sa.Column("run_key", sa.Text, nullable=False),
-        sa.Column("started_at", sa.DateTime(timezone=True), nullable=False),
-    )
-
-
-def _ensure_runs_table(engine: sa.Engine, table: sa.Table) -> None:
-    """台帳の表を作る。別の鍵の起動が同時に作ると片方が重複で落ちるため、落ちても表があれば続ける。"""
-    try:
-        with engine.begin() as conn:
-            table.create(conn, checkfirst=True)
-    except sa.exc.DBAPIError:
-        with engine.connect() as conn:
-            if not sa.inspect(conn).has_table(RUNS_TABLE):
-                raise
-
-
-def _register_run(database_url: str, name: str, run_key: str, now: datetime) -> None:
-    """台帳 `ndf_runs` へ鍵を 1 行書く（既にあれば書かない）。書けなければ `StoreBroken`。"""
-    with locks.open_engine(database_url) as engine:
-        table = _runs_table(sa.MetaData())
-        try:
-            _ensure_runs_table(engine, table)
-            with engine.begin() as conn:
-                _insert_run(conn, table, name, run_key, now)
-        except sa.exc.SQLAlchemyError as exc:
-            raise StoreBroken(f"台帳 {RUNS_TABLE} に鍵を書けない: {exc}") from exc
-
-
-def _insert_run(conn: sa.Connection, table: sa.Table, name: str, run_key: str, now: datetime) -> None:
-    """台帳に鍵 `name` の行が無ければ足す。"""
-    if conn.execute(sa.select(table.c.run_name).where(table.c.run_name == name)).first() is None:
-        conn.execute(table.insert().values(run_name=name, run_key=run_key, started_at=now))
-
-
-def _ledger(database_url: str) -> list[LedgerRow]:
-    """台帳の行（鍵の名前・実行の鍵・起こした時刻）。表が無ければ空。"""
-    table = _runs_table(sa.MetaData())
-    with locks.open_engine(database_url) as engine, engine.connect() as conn:
-        if not sa.inspect(conn).has_table(RUNS_TABLE):
-            return []
-        return [LedgerRow(*row) for row in conn.execute(sa.select(table))]
-
-
-def _forget_run(database_url: str, name: str) -> None:
-    table = _runs_table(sa.MetaData())
-    with locks.open_engine(database_url) as engine, engine.begin() as conn:
-        conn.execute(table.delete().where(table.c.run_name == name))
-
-
 def _expired(records: list[RunRecord], started_at: datetime, cutoff: datetime) -> bool:
     """鍵の実行がすべて終わり、どれも `cutoff` より前に終わったか。実行が無ければ台帳の時刻で決める。"""
     if not records:
@@ -881,6 +916,7 @@ def launch(database_url: str, run_key: str) -> None:
     記録へ書く値は `_RedactingSerializer` が秘密を伏せてから書く（B8）。
     耐久ワークフローと耐久ステップの関数は、呼ぶ前に定義しておく（回復が名前で引くため）。
     """
+    _load()
     now = datetime.now(UTC)
     name = run_name(run_key)
     path = locks.sqlite_path(database_url)
@@ -890,7 +926,7 @@ def launch(database_url: str, run_key: str) -> None:
         "executor_id": name,
         "application_version": app_version(run_key),
         "log_level": LOG_LEVEL,
-        "serializer": _RedactingSerializer(),
+        "serializer": _serializer(),
         "notification_listener_polling_interval_sec": limits.value(POLL, "interval"),
     }
     if path is not None:
@@ -918,6 +954,7 @@ def shutdown() -> None:
     `workflow_completion_timeout_sec` は秒の上限で 1 秒ごとに見るため使わない（上限を越えると先に閉じ、
     走っていなくても 1 秒待つ）。DBOS 3.4.0 は executor と走っている一覧の公開の取り出し口を持たない。
     """
+    _load()
     instance = getattr(_dbos_runtime, "_dbos_global_instance", None)
     executor: ThreadPoolExecutor | None = getattr(instance, "_executor_field", None)
     if instance is not None:
