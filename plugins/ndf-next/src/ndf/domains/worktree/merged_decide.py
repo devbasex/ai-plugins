@@ -3,6 +3,7 @@
 - `sprint_keep`: 選んで集める取り込み方（事実の表 `branch-flows` の `keeps_sprint` が真の行）では、スプリントブランチを
   本番チャネルに含まれるまで残す。取り込み方は**そのスプリントの開始時の記録**で決め、記録が無いスプリントだけ今の宣言で
   決める（#3310）。記録か宣言の取り込み方が表に無い・含まれるかを確かめられないときは残す側へ倒す（消すと戻せない）
+- `long_lived_keep`: PR の head がベースブランチか本番チャネル（リリースの PR）なら、worktree もブランチも消さない
 - `pull_skip`: メインディレクトリがベースブランチにいなければ取り込まない（別のブランチへ取り込まない）
 """
 
@@ -25,6 +26,14 @@ def _flow_row(promotion: Optional[str]) -> Optional[dict[str, Any]]:
     else:
         rows = facts.rows(FLOWS, promotion=promotion)
     return rows[0] if rows else None
+
+
+def long_lived_keep(branch: Optional[str], base: Optional[str], production: Optional[str]) -> Optional[str]:
+    """PR の head がベースブランチか本番チャネルなら残す理由（リリースの PR の後片付けで本流を消さない）。"""
+    for name, label in ((base, "ベースブランチ"), (production, "本番チャネル")):
+        if branch and branch == name:
+            return f"PR の head が{label} {branch} のため残す"
+    return None
 
 
 def sprint_keep(branch: Optional[str], flow: Optional[Mapping[str, Any]], contained: Optional[bool], remote: str) -> Optional[str]:

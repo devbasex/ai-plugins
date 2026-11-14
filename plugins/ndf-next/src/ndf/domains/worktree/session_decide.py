@@ -30,7 +30,7 @@ def deviation(dirty: list[str], in_worktree: bool, declared: bool, follow_branch
 
 
 # ブランチの追従の判断の結果
-FOLLOW_SKIP = "skip"
+FOLLOW_STAY = "stay"
 FOLLOW_DETACH = "detach"
 FOLLOW_BASE = "to_base"
 
@@ -38,11 +38,11 @@ FOLLOW_BASE = "to_base"
 def follow_target(dirty: bool, branches: list[Optional[str]]) -> tuple[str, Optional[str]]:
     """メインディレクトリをどこへ合わせるか（宣言の `follow_branch: true` のときだけ判断する）。
 
-    未コミットの変更があれば動かさない（`skip`）。ブランチを持つ開発 worktree がちょうど 1 つならそのブランチの
+    未コミットの変更があれば動かさない（`stay`）。ブランチを持つ開発 worktree がちょうど 1 つならそのブランチの
     コミットへ detached HEAD で合わせ（`detach`）、0 か 2 つ以上ならベースブランチへ合わせる（`base`）。
     """
     if dirty:
-        return FOLLOW_SKIP, None
+        return FOLLOW_STAY, None
     named = [b for b in branches if b]
     if len(named) == 1:
         return FOLLOW_DETACH, named[0]

@@ -160,8 +160,13 @@ _KEEP_DEST = object()
 
 
 def _existing_dest(src: Path, dest: Path, rel: str, kind: str, redo: bool) -> object:
-    """既にある宛先の扱い。`None` は複製へ進む（実体の複製は古い宛先を消してから）、文字列は失敗の理由、`_KEEP_DEST` はそのまま使う。"""
-    if not dest.exists() or dest.is_symlink():
+    """既にある宛先の扱い。`None` は複製へ進む（実体の複製は古い宛先を消してから）、文字列は失敗の理由、`_KEEP_DEST` はそのまま使う。
+
+    宛先そのものが symlink なら複製しない（複製はリンクをたどって、リンクが指す worktree の外のファイルへ書く）。
+    """
+    if dest.is_symlink():
+        return f"複製先が symlink を指す（たどって書かない）: {rel}"
+    if not dest.exists():
         return None
     if redo:
         return _KEEP_DEST

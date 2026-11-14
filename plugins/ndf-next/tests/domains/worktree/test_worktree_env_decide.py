@@ -26,6 +26,13 @@ def test_sprint_keep(branch: str, flow: dict | None, contained: bool | None, kep
     assert (merged_decide.sprint_keep(branch, flow, contained, "origin") is not None) == kept
 
 
+def test_long_lived_keep() -> None:
+    assert merged_decide.long_lived_keep("develop", "develop", "main") is not None  # リリースの PR の head はベースブランチ
+    assert merged_decide.long_lived_keep("main", "develop", "main") is not None
+    assert merged_decide.long_lived_keep("feat/a", "develop", "main") is None
+    assert merged_decide.long_lived_keep("feat/a", None, None) is None
+
+
 def test_pull_skip() -> None:
     assert merged_decide.pull_skip("develop", "develop") is None
     assert "detached" in str(merged_decide.pull_skip(None, "develop"))
@@ -35,7 +42,7 @@ def test_pull_skip() -> None:
 @pytest.mark.parametrize(
     ("dirty", "branches", "want"),
     [
-        (True, ["feat/a"], (session_decide.FOLLOW_SKIP, None)),
+        (True, ["feat/a"], (session_decide.FOLLOW_STAY, None)),
         (False, ["feat/a", None], (session_decide.FOLLOW_DETACH, "feat/a")),
         (False, ["feat/a", "feat/b"], (session_decide.FOLLOW_BASE, None)),
         (False, [], (session_decide.FOLLOW_BASE, None)),

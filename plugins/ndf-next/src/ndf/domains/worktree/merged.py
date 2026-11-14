@@ -3,11 +3,13 @@
 PR 1 件ごとに、メインディレクトリの排他（`mainlock`）を取ってから次を行う（並列のレーンの間で 1 本ずつ）。
 
 1. PR を GitHub から読む（`adapters.github.GitHub.pulls`）。マージされていなければ何も消さない
-2. スプリントブランチを残すかを決める（`merged_decide.sprint_keep`。開始時の記録 `flow_record` があればそれ、無ければ今の宣言）
+2. PR の head がベースブランチか本番チャネルなら何も消さない（`merged_decide.long_lived_keep`。develop から main への
+   リリースの PR）。スプリントブランチを残すかを決める（`merged_decide.sprint_keep`。開始時の記録 `flow_record` があればそれ、無ければ今の宣言）
 3. ブランチを checkout した worktree を外す。追跡しているファイルに未コミットの変更があれば外さない。外す前に公開を閉じて
    テスト環境を破棄する（できなければ外さない）。locked の worktree は何も動かさずに残す。追跡していないファイル
    （無視したものを含む。`git worktree remove` は無視したファイルを黙って消す）があれば、先に退避（`trash.evacuate`）
    してから `--force` を付けずに外す。退避できないファイルがあったとき・git が断ったときは外さずに理由を返す
+   （git が断ったときは退避したファイルを worktree へ戻す。`trash.restore`）
    （`--force` は戻せない削除で人の承認が要るため、この経路では使わない。C4）
 4. ローカルブランチを `git branch -d` で消す（`-D` は使わない。git がマージ済みと認めなければ残して理由を返す）
 
@@ -74,8 +76,8 @@ def _contained(main: Git, branch: str, flow: Optional[Mapping[str, Any]]) -> Opt
         return None
 
 
-def _remove_worktree(main: Git, item: repo.Worktree, rec: Record) -> bool:
-    """worktree を外す。外せたかを返す。"""
+def _remove_worktree(main: Git, item: repo.Worktree, rec: Record, merge: str = "") -> bool:
+    """worktree を外す。外せたかを返す。`merge` は PR のマージコミット（退避の台帳へ書く）。"""
     if item.path.is_dir():
         dirty = repo.dirty_paths(Git(item.path))
         if dirty:
@@ -90,9 +92,10 @@ def _remove_worktree(main: Git, item: repo.Worktree, rec: Record) -> bool:
         rec.add("worktree", str(item.path), outcomes.KEPT, closed)
         return False
     why = ""
+    got: Optional[trash.Evacuated] = None
     if item.path.is_dir() and trash.leftovers(item.path):
         try:
-            got = trash.evacuate(main, item.path, str(item.branch), item.head)
+            got = trash.evacuate(main, item.path, str(item.branch), item.head, merge)
         except trash.TrashError as exc:
             rec.add("worktree", str(item.path), outcomes.KEPT, f"退避できないため外さない: {exc}")
             return False
@@ -102,10 +105,19 @@ def _remove_worktree(main: Git, item: repo.Worktree, rec: Record) -> bool:
     done = main.attempt("worktree", "remove", str(item.path))
     if done.returncode != 0:
         refused = f"git worktree remove が断った: {done.stderr.strip()}"
-        rec.add("worktree", str(item.path), outcomes.KEPT, f"{why}。{refused}" if why else refused)
+        back = _restore_note(item.path, got)
+        rec.add("worktree", str(item.path), outcomes.KEPT, "。".join(filter(None, [refused, back])))
         return False
     rec.add("worktree", str(item.path), outcomes.REMOVED, why)
     return True
+
+
+def _restore_note(worktree: Path, got: Optional[trash.Evacuated]) -> str:
+    """外せなかった worktree へ退避したファイルを戻し、その結果の説明（退避していなければ空）。"""
+    if got is None or got.dest is None:
+        return ""
+    failed = trash.restore(worktree, got)
+    return f"退避したファイルを戻せなかった: {failed}" if failed is not None else "退避したファイルを worktree へ戻した"
 
 
 def _delete_branch(main: Git, branch: str, rec: Record) -> None:
@@ -121,7 +133,7 @@ def _delete_branch(main: Git, branch: str, rec: Record) -> None:
     rec.add("branch", branch, outcomes.KEPT, why, sha=sha)
 
 
-def _clean_branch(main: Git, main_dir: Path, branch: str, rec: Record) -> None:
+def _clean_branch(main: Git, main_dir: Path, branch: str, rec: Record, merge: str = "") -> None:
     free = True
     for item in main.worktrees():
         if item.branch != branch:
@@ -130,12 +142,14 @@ def _clean_branch(main: Git, main_dir: Path, branch: str, rec: Record) -> None:
             rec.add("worktree", str(item.path), outcomes.KEPT, "メインディレクトリがこのブランチを checkout している")
             free = False
             continue
-        free = _remove_worktree(main, item, rec) and free
+        free = _remove_worktree(main, item, rec, merge) and free
     if free:
         _delete_branch(main, branch, rec)
 
 
-def _one(main: Git, main_dir: Path, pull: Optional[Pull], number: int, flow: Optional[Mapping[str, Any]], rec: Record) -> None:
+def _one(
+    main: Git, main_dir: Path, pull: Optional[Pull], number: int, flow: Optional[Mapping[str, Any]], base: Optional[str], rec: Record
+) -> None:
     if pull is None:
         rec.add("pr", str(number), outcomes.KEPT, "PR が見つからない")
         return
@@ -143,11 +157,14 @@ def _one(main: Git, main_dir: Path, pull: Optional[Pull], number: int, flow: Opt
         rec.add("pr", str(number), outcomes.KEPT, "PR がマージされていない")
         return
     branch = pull.head_ref
-    keep = merged_decide.sprint_keep(branch, flow, _contained(main, branch, flow), ORIGIN)
+    production = flow.get("production_branch") if flow is not None else None
+    keep = merged_decide.long_lived_keep(branch, base, production if isinstance(production, str) else None)
+    if keep is None:
+        keep = merged_decide.sprint_keep(branch, flow, _contained(main, branch, flow), ORIGIN)
     if keep is not None:
         rec.add("branch", branch, outcomes.KEPT, keep)
         return
-    _clean_branch(main, main_dir, branch, rec)
+    _clean_branch(main, main_dir, branch, rec, pull.merge_sha)
 
 
 def sync_main(main: Git, base: Optional[str], rec: Record) -> None:
@@ -193,7 +210,7 @@ def after_merge(main_dir: Path, numbers: list[int], hub: PullsReader, flow_recor
         sync_main(main, base, rec)
     for n in numbers:
         with mainlock.held(main):
-            _one(main, main_dir, pulls.get(n), n, flow, rec)
+            _one(main, main_dir, pulls.get(n), n, flow, base, rec)
     main.run("worktree", "prune")
     # worktree の消えた割り当てのテスト環境を回収する（排他の外で行う。並列のレーンの後片付けを待たせない）
     t = testenv.target(main_dir)

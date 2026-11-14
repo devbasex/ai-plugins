@@ -5,7 +5,7 @@
 3. 残りのブランチの PR を GitHub から 1 回のクエリで読む（`adapters.github.GitHub.pulls_by_head`）
 4. 消すと決めた worktree の公開を閉じてテスト環境を破棄し（`testenv_sweep.close_for_removal`。できなければ消さない）、
    追跡していないファイル（無視したものを含む）を先に退避し（`trash.evacuate`。退避できなければ消さない）、
-   `git worktree remove`（`--force` を付けない）で消し、ブランチを `git branch -d` で消す
+   `git worktree remove`（`--force` を付けない）で消し（断られたら退避したファイルを戻す。`trash.restore`）、ブランチを `git branch -d` で消す
 5. 置き場の消えた worktree の管理情報を `git worktree prune` で片付ける
 
 `dry_run` では 1〜3 だけを行い、何も消さない。
@@ -86,6 +86,7 @@ def _remove(g: Git, item: repo.Worktree) -> Outcome:
     if closed is not None:
         return Outcome(item.path, item.branch, REMOVE, note=f"worktree を消さなかった: {closed}")
     evacuated = ""
+    got: Optional[trash.Evacuated] = None
     if item.path.is_dir() and trash.leftovers(item.path):  # 無視したファイルは git worktree remove が黙って消す
         try:
             got = trash.evacuate(g, item.path, str(item.branch), item.head)
@@ -95,7 +96,13 @@ def _remove(g: Git, item: repo.Worktree) -> Outcome:
     try:
         g.run("worktree", "remove", str(item.path))
     except GitError as exc:
-        return Outcome(item.path, item.branch, REMOVE, note="。".join(filter(None, [evacuated, f"worktree を消せなかった: {exc}"])))
+        failed = trash.restore(item.path, got) if got is not None else None
+        back = (
+            f"退避したファイルを戻せなかった: {failed}"
+            if failed is not None
+            else ("退避したファイルを worktree へ戻した" if evacuated else "")
+        )
+        return Outcome(item.path, item.branch, REMOVE, note="。".join(filter(None, [f"worktree を消せなかった: {exc}", back])))
     refused = repo.delete_merged_branch(g, str(item.branch))
     if refused is not None:
         note = f"ブランチは残した（git がマージ済みと認めない。{repo.MANUAL_FORCE}）: {refused}"

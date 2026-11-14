@@ -4,6 +4,7 @@
   （目印を握っている）の環境は止めない
 - `expose`: 宣言の `testenv.expose`（`enabled`・`public_tag`・`base_domain`・`open_command`）に従って、載っている基準が
   公開を許す基準と同じ環境だけを公開する。公開できるのは同時に 1 本（台帳の排他の中で判定する）
+  開く手段が失敗したときも閉じる手段で閉じてから記録を閉じる（閉じられなければ公開中の記録を残す）
 - `unexpose`: 宣言の `close_command` で閉じてから台帳を閉じる。閉じる手段が無い・失敗したら台帳を閉じない
   （口が開いたまま閉じたと記録すると、別の環境の公開とスロットの再利用が通る）
 - `close_for_removal`: worktree を外す前に公開を閉じ、テスト環境を破棄する（`merged` と `cleanup` が使う）
@@ -121,9 +122,12 @@ def expose(t: Target) -> str:
         raise TestenvError("拒否: 別のテスト環境が公開中（同時に開けるのは 1 本）")
     values = _expose_values(url, host, row)
     if t.shell.sh(str(conf["open_command"]), t.path, values).returncode != 0:
-        # 口は開いていないので、閉じる手段は呼ばずに記録だけ戻す
-        t.book.update(t.key, _close, pick=lambda r: r.get("expose") is not None and r["expose"].get("closed_at") is None)
-        raise TestenvError("公開の手段が失敗した。記録を戻した")
+        # 開く手段が口を作った後で失敗したかもしれない。閉じる手段で閉じられたときだけ記録を閉じる
+        try:
+            unexpose(t)
+        except TestenvError as exc:
+            raise TestenvError(f"公開の手段が失敗した。閉じたかを確かめられないため公開中の記録を残した: {exc}") from exc
+        raise TestenvError("公開の手段が失敗した。閉じる手段で閉じて記録を戻した")
     return url
 
 

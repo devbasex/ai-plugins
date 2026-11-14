@@ -1,8 +1,8 @@
 """worktree を外す前の退避: 追跡していないファイル（無視したものを含む）を退避先へ移し、作り直せる生成物は捨てる。
 
 退避先は `<git の共通ディレクトリ>/ndf/worktree-trash/<ブランチ>-<時刻>/` で、隣の台帳 `<退避先>.json` に元のブランチと
-先端のコミットを書く（退避先の中に置くと、利用者の同じ名前のファイルを上書きする）。作り直せる生成物の決め方と、
-1 件でも移せなければ止める決まりは `docs/specifications/ndf-cleanup-and-bundle-closing.md` の退避の節にある。退避先を消すのは、先端が本番に出たコミットに含まれ、人が名前を見て承認したものだけである
+先端のコミット（PR のマージコミットが分かればそれも）を書く（退避先の中に置くと、利用者の同じ名前のファイルを上書きする）。作り直せる生成物の決め方と、
+1 件でも移せなければ止める決まりは `docs/specifications/ndf-cleanup-and-bundle-closing.md` の退避の節にある。退避先を消すのは、先端か PR のマージコミットが本番に出たコミットに含まれ、人が名前を見て承認したものだけである
 （`sweep`。消すと戻せない利用者のファイル。C3・C4）。
 """
 
@@ -76,8 +76,11 @@ class Evacuated:
     discarded: tuple[str, ...]
 
 
-def evacuate(main: Git, worktree: Path, branch: str, head: str) -> Evacuated:
-    """`worktree` の追跡していないファイルを退避先へ移し、作り直せる生成物を消す。移せなければ `TrashError`。"""
+def evacuate(main: Git, worktree: Path, branch: str, head: str, merge: str = "") -> Evacuated:
+    """`worktree` の追跡していないファイルを退避先へ移し、作り直せる生成物を消す。移せなければ `TrashError`。
+
+    `merge` は PR のマージで本流へ入ったコミット（squash・rebase のマージでは先端と別。分からなければ空）。
+    """
     rels = _others(Git(worktree))
     discarded = tuple(r for r in rels if _regenerable(worktree, r))
     moved = tuple(r for r in rels if not _regenerable(worktree, r))
@@ -88,7 +91,13 @@ def evacuate(main: Git, worktree: Path, branch: str, head: str) -> Evacuated:
         return Evacuated(None, (), discarded)
     dest = trash_root(main) / f"{_UNSAFE.sub('-', branch)}-{time.strftime('%Y%m%dT%H%M%S')}-{os.getpid()}"
     dest.mkdir(parents=True)
-    record = {"branch": branch, "head": head, "from": str(worktree), "discarded": list(discarded)}
+    record = {
+        "branch": branch,
+        "head": head,
+        "from": str(worktree),
+        "discarded": list(discarded),
+        **({"merge_commit": merge} if merge else {}),
+    }
     ledger_of(dest).write_text(json.dumps(record, ensure_ascii=False), encoding="utf-8")
     for rel in moved:
         try:
@@ -97,6 +106,27 @@ def evacuate(main: Git, worktree: Path, branch: str, head: str) -> Evacuated:
         except (OSError, shutil.Error) as exc:  # 1 件でも移せなければ残りを移さず、worktree を外させない
             raise TrashError(f"{rel} を退避先 {dest} へ移せない: {exc}") from exc
     return Evacuated(dest, moved, discarded)
+
+
+def restore(worktree: Path, got: Evacuated) -> Optional[str]:
+    """`evacuate` で移したファイルを worktree へ戻し、空になった退避先と台帳を消す（worktree を外せなかったとき）。
+
+    戻せなければ理由を返し、退避先と台帳は残す（戻せなかったファイルは退避先にある）。
+    """
+    if got.dest is None:
+        return None
+    for rel in got.moved:
+        target = worktree / rel
+        if target.exists() or target.is_symlink():
+            return f"{rel} が worktree に既にあるため退避先 {got.dest} から戻さない"
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(got.dest / rel), str(target))
+        except (OSError, shutil.Error) as exc:  # 戻せなかったものは退避先に残す
+            return f"{rel} を退避先 {got.dest} から戻せない: {exc}"
+    shutil.rmtree(got.dest)
+    ledger_of(got.dest).unlink(missing_ok=True)
+    return None
 
 
 @dataclass(frozen=True)
@@ -128,13 +158,32 @@ def candidates(main: Git, ref: str) -> list[Candidate]:
             out.append(Candidate(path.name, "", False, f"台帳（{ledger_of(path).name}）が読めないため残す"))
             continue
         try:
-            released = main.is_ancestor(meta["head"], ref)
+            released = _released(main, meta, ref)
         except GitError as exc:  # 先端のコミットが無い（gc 済み）退避先は判断できないので残す
             out.append(Candidate(path.name, branch, False, f"先端を確かめられないため残す: {exc}"))
             continue
-        reason = f"先端が {ref} に含まれる" if released else f"先端が {ref} に含まれないため残す"
+        reason = f"先端かマージコミットが {ref} に含まれる" if released else f"先端もマージコミットも {ref} に含まれないため残す"
         out.append(Candidate(path.name, branch, released, reason))
     return out
+
+
+def _released(main: Git, meta: dict, ref: str) -> bool:
+    """先端か PR のマージコミット（squash のマージでは先端は本番に入らない）が `ref` に含まれるか。
+
+    どれも確かめられなければ `GitError`。
+    """
+    merge = meta.get("merge_commit")
+    commits = [meta["head"], *([merge] if isinstance(merge, str) and merge else [])]
+    errors: list[GitError] = []
+    for commit in commits:
+        try:
+            if main.is_ancestor(commit, ref):
+                return True
+        except GitError as exc:  # noqa: NDF401 外部コマンド: 片方のコミットが無くても、もう片方で確かめる
+            errors.append(exc)
+    if len(errors) == len(commits):
+        raise errors[0]
+    return False
 
 
 def sweep(main: Git, ref: str, approved: Iterable[str]) -> list[str]:

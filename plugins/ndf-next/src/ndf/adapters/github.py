@@ -36,7 +36,9 @@ T = TypeVar("T")
 # GraphQL のエイリアスで引ける番号つきの節点
 NUMBERED_NODES = ("pullRequest", "issue", "issueOrPullRequest")
 # PR を読むときの GraphQL の選択（`Pull.from_graphql` が読む項目）
-PULL_FIELDS = "number state merged headRefOid headRefName baseRefName body mergeStateStatus author { login } authorAssociation"
+PULL_FIELDS = (
+    "number state merged headRefOid headRefName baseRefName body mergeStateStatus author { login } authorAssociation mergeCommit { oid }"
+)
 # head のブランチごとに読む PR の件数（新しい順）
 PULLS_PER_HEAD = 5
 # 一覧の 1 ページの件数（REST と GraphQL の上限。ページ数の上限は limits.json の github.check-runs・github.list-pages）
@@ -184,6 +186,8 @@ class Pull(NamedTuple):
     merge_state: str
     author: str
     association: str
+    # マージで本流へ入ったコミット（squash・rebase のマージでは head と別）。マージされていなければ空
+    merge_sha: str = ""
 
     @property
     def authored(self) -> Authored:
@@ -197,6 +201,7 @@ class Pull(NamedTuple):
             int(raw["number"]), text_of(raw["state"]).lower(), bool(raw["merged"]), text_of(head["sha"]),
             text_of(head["ref"]), text_of(base["ref"]), text_of(raw["body"]), text_of(raw["mergeable_state"]).lower(),
             _login(raw["user"]), text_of(raw["author_association"]).upper(),
+            text_of(raw.get("merge_commit_sha")) if raw["merged"] else "",
         )  # fmt: skip
 
     @classmethod
@@ -206,6 +211,7 @@ class Pull(NamedTuple):
             int(raw["number"]), "open" if state == "open" else "closed", bool(raw["merged"]), text_of(raw["headRefOid"]),
             text_of(raw["headRefName"]), text_of(raw["baseRefName"]), text_of(raw["body"]), text_of(raw["mergeStateStatus"]).lower(),
             _login(raw["author"]), text_of(raw["authorAssociation"]).upper(),
+            text_of((raw.get("mergeCommit") or {}).get("oid")),
         )  # fmt: skip
 
 

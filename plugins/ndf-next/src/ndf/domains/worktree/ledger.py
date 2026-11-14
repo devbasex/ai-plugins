@@ -85,7 +85,8 @@ class Ledger:
             got = latest(rows, worktree, active)
             if got is not None:
                 return got
-            slot = testenv_decide.free_slot(r["slot"] for r in rows if active(r))
+            # 解放の後も公開が閉じていない行のスロットは使用中（古い公開の経路から次の環境へ届かせない）
+            slot = testenv_decide.free_slot(r["slot"] for r in rows if active(r) or exposing(r))
             if slot is None:
                 return None
             row = {"id": f"{time.strftime(COMPACT_STAMP, time.gmtime())}-{os.getpid()}", "worktree": worktree, "branch": branch,

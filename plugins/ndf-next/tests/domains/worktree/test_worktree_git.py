@@ -10,7 +10,7 @@ from typing import Callable, Iterable
 import pytest
 
 from ndf import identity
-from ndf.adapters.git import Git
+from ndf.adapters.git import Completed, Git
 from ndf.adapters.github import Pull
 from ndf.domains.worktree import cleanup, cleanup_decide, create, repo
 
@@ -144,6 +144,26 @@ def test_cleanup_evacuates_ignored_files_before_removing(main_repo: Path, run_gi
     assert got.removed and not wt.exists() and got.note.startswith("退避先 ")
     dest = Path(got.note.split(" ", 1)[1].split("。", 1)[0])
     assert dest.parent == trash.trash_root(Git(main_repo)) and (dest / ".env").read_text(encoding="utf-8") == "SECRET_NAME=1"
+
+
+def test_cleanup_restores_evacuated_files_when_git_refuses(main_repo: Path, run_git: Callable, monkeypatch: pytest.MonkeyPatch) -> None:
+    from ndf.domains.worktree import trash
+
+    wt = create.create(main_repo, "feat/back").path
+    (wt / ".gitignore").write_text("notes.txt\n", encoding="utf-8")
+    run_git(wt, "add", ".gitignore")
+    run_git(wt, "commit", "-q", "-m", "back")
+    run_git(main_repo, "merge", "-q", "--no-ff", "-m", "merge", "feat/back")
+    (wt / "notes.txt").write_text("keep me", encoding="utf-8")
+    real = Git.attempt
+
+    def refuse(self: Git, *args: str) -> Completed:
+        return Completed(1, "", "refused") if args[:2] == ("worktree", "remove") else real(self, *args)
+
+    monkeypatch.setattr(Git, "attempt", refuse)
+    [got] = cleanup.cleanup(main_repo, main_repo, FakeHub({"feat/back": [_pull("feat/back", "closed", True)]}))
+    assert not got.removed and "worktree へ戻した" in got.note
+    assert (wt / "notes.txt").read_text(encoding="utf-8") == "keep me" and trash.candidates(Git(main_repo), "develop") == []
 
 
 # 現状固定（I-022）: 状態ファイル（排他・台帳・退避先）の置き場は、どこから呼んでも共通の git ディレクトリの実体の下。

@@ -8,7 +8,7 @@ from typing import Callable, Iterable, Optional
 
 import pytest
 
-from ndf.adapters.git import Git
+from ndf.adapters.git import Completed, Git
 from ndf.adapters.github import Pull
 from ndf.domains.worktree import create, declaration, follow, merged, setup, trash
 
@@ -176,3 +176,38 @@ def test_after_merge_evacuates_ignored_files_before_removing(main_repo: Path, ru
     merged.after_merge(main_repo, [5], FakeHub({5: _pull(5, "feat/i", True)}))
     [cand] = trash.candidates(Git(main_repo), "origin/develop")
     assert (trash.trash_root(Git(main_repo)) / cand.name / ".env").read_text(encoding="utf-8") == "SECRET_NAME=1"
+
+
+def test_after_merge_keeps_base_branch_of_release_pull(main_repo: Path, run_git: Callable) -> None:
+    run_git(main_repo, "checkout", "-q", "main")
+    rec = merged.after_merge(main_repo, [3], FakeHub({3: _pull(3, "develop", True)}))
+    got = {(i["kind"], i["name"]): i for i in rec.items}
+    assert got[("branch", "develop")]["result"] == "kept" and run_git(main_repo, "branch", "--list", "develop").strip()
+
+
+def test_after_merge_restores_evacuated_files_when_git_refuses(main_repo: Path, run_git: Callable, monkeypatch: pytest.MonkeyPatch) -> None:
+    wt = _land(main_repo, run_git, "feat/r")
+    (wt / "notes.txt").write_text("keep me", encoding="utf-8")
+    real = Git.attempt
+
+    def refuse(self: Git, *args: str) -> Completed:
+        return Completed(1, "", "refused") if args[:2] == ("worktree", "remove") else real(self, *args)
+
+    monkeypatch.setattr(Git, "attempt", refuse)
+    rec = merged.after_merge(main_repo, [4], FakeHub({4: _pull(4, "feat/r", True)}))
+    item = next(i for i in rec.items if i["kind"] == "worktree")
+    assert item["result"] == "kept" and "戻した" in item["reason"]
+    assert (wt / "notes.txt").read_text(encoding="utf-8") == "keep me" and trash.candidates(Git(main_repo), "origin/develop") == []
+
+
+def test_trash_candidate_by_merge_commit_after_squash(main_repo: Path, run_git: Callable) -> None:
+    wt = create.create(main_repo, "feat/q").path
+    (wt / "q.txt").write_text("x", encoding="utf-8")
+    run_git(wt, "add", "-A")
+    run_git(wt, "commit", "-q", "-m", "q")
+    (wt / "notes.txt").write_text("n", encoding="utf-8")
+    head = run_git(wt, "rev-parse", "HEAD").strip()
+    squash = run_git(main_repo, "rev-parse", "develop").strip()  # 本番に入ったマージコミットの代わり
+    trash.evacuate(Git(main_repo), wt, "feat/q", head, squash)
+    [cand] = trash.candidates(Git(main_repo), "develop")
+    assert cand.released and not Git(main_repo).is_ancestor(head, "develop")

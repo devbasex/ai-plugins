@@ -105,6 +105,18 @@ def test_deps_refuses_parent_symlink_out_of_worktree(main_repo: Path, run_git: C
     assert got.failed.startswith("copy_as_real[0]") and not (outside / "cfg").exists()
 
 
+def test_deps_refuses_dest_symlink(main_repo: Path, run_git: Callable, tmp_path: Path) -> None:
+    (main_repo / ".gitignore").write_text(".worktrees/\ncfg\n", encoding="utf-8")
+    _declare(main_repo, run_git, {"deps": {"copy_as_real": ["cfg"]}})
+    (main_repo / "cfg").write_text("main", encoding="utf-8")
+    wt = create.create(main_repo, "feat/d").path
+    outside = tmp_path / "outside.txt"
+    outside.write_text("mine", encoding="utf-8")
+    (wt / "cfg").symlink_to(outside)
+    got = deps.prepare(wt)
+    assert got.failed.startswith("copy_as_real[0]") and outside.read_text(encoding="utf-8") == "mine"
+
+
 def test_deps_rejects_broken_section(main_repo: Path, run_git: Callable) -> None:
     _declare(main_repo, run_git, {"deps": {"run": "make"}})
     wt = create.create(main_repo, "feat/f").path
@@ -378,6 +390,13 @@ def test_ledger_acquire_current_update_and_release(tmp_path: Path) -> None:
     assert not list(book.path.parent.glob(f".{book.path.name}.*"))  # 一時ファイルは残らない
 
 
+def test_ledger_acquire_skips_released_slot_with_open_expose(tmp_path: Path) -> None:
+    book = ledger.Ledger(tmp_path / "reg.json")
+    rows = [{"worktree": "/w/a", "slot": 0, "released_at": "t1", "expose": {"url": "u", "closed_at": None}}]
+    book.path.write_text(json.dumps({"assignments": rows}), encoding="utf-8")
+    assert book.acquire("/w/new", "b", "e")["slot"] == 1  # type: ignore[index]  # 公開が閉じるまでスロットを渡さない
+
+
 def test_ledger_acquire_returns_none_when_slots_are_full(tmp_path: Path) -> None:
     book = ledger.Ledger(tmp_path / "reg.json")
     rows = [{"worktree": f"/w/{i}", "slot": i, "released_at": None} for i in range(testenv_decide.SLOTS)]
@@ -482,10 +501,20 @@ def test_expose_rolls_back_record_when_open_command_fails(tmp_path: Path) -> Non
     _assigned(t)
     with pytest.raises(testenv.TestenvError) as exc:
         testenv_sweep.expose(t)
-    assert str(exc.value) == "公開の手段が失敗した。記録を戻した"
+    assert str(exc.value) == "公開の手段が失敗した。閉じる手段で閉じて記録を戻した"
+    assert fake.calls[-1][0] == ["sh", "-c", "close-it"]  # 開く手段が口を作った後で失敗しても閉じる
     opened = t.book.current(t.key)["expose"]  # type: ignore[index]
     assert opened["closed_at"] is not None
     assert testenv_sweep.unexpose(t) is None  # 閉じた記録は開いている公開として読まない
+
+
+def test_expose_keeps_record_when_open_and_close_fail(tmp_path: Path) -> None:
+    fake = FakeShell({"-c open-it": Completed(1, "", ""), "-c close-it": Completed(2, "", "")})
+    t = _sweep_target(tmp_path, fake, EXPOSE)
+    _assigned(t)
+    with pytest.raises(testenv.TestenvError, match="^公開の手段が失敗した。閉じたかを確かめられないため公開中の記録を残した"):
+        testenv_sweep.expose(t)
+    assert t.book.current(t.key)["expose"]["closed_at"] is None  # type: ignore[index]
 
 
 def test_unexpose_runs_close_command_and_closes(tmp_path: Path) -> None:
