@@ -56,12 +56,17 @@ def _covered(item: str, others: Sequence[str]) -> bool:
     return any(o != item and PurePosixPath(o) in p.parents for o in others)
 
 
+def _near_tests(code: Sequence[str], near: Mapping[str, str | None]) -> list[str]:
+    """`code` の順に、近くのテストの置き場所が見つかったものだけを返す。"""
+    return [d for f in code if f in near and (d := near[f]) is not None]
+
+
 def compose(files: Iterable[str], declared: Sequence[str], near: Mapping[str, str | None], explicit: Sequence[str]) -> list[str]:
     """範囲を組む。`files` は差分の在るファイル、`near` はファイル → 見つかった近くのテストの置き場所（無ければ None）。"""
     code = [f for f in files if is_code(f)]
     tests = [t.rstrip("/") for t in declared if t.strip() not in WHOLE]
     if not tests:
-        tests = [d for f in code if (d := near[f] if f in near else None) is not None]
+        tests = _near_tests(code, near)
     items = [*code, *tests, *explicit]
     uniq = list(dict.fromkeys(i.rstrip("/") or i for i in items if i))
     return [i for i in uniq if not _covered(i, uniq)]
