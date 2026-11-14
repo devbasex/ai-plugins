@@ -83,11 +83,21 @@ class Invocation:
 
     @property
     def waiting_path(self) -> Path:
-        return self.state_dir / f"{WAITING_PREFIX}{durable.run_name(self.key)}.json"
+        return waiting_path(self.state_dir, durable.run_name(self.key))
 
     @property
     def result_path(self) -> Path:
-        return self.state_dir / RESULTS_DIR / f"{durable.run_name(self.key)}.json"
+        return result_path(self.state_dir, durable.run_name(self.key))
+
+
+def waiting_path(state_dir: Path, run: str) -> Path:
+    """回 `run`（鍵の名前）の承認の答えを待つ目印。"""
+    return state_dir / f"{WAITING_PREFIX}{run}.json"
+
+
+def result_path(state_dir: Path, run: str) -> Path:
+    """回 `run`（鍵の名前）の結果の控え。"""
+    return state_dir / RESULTS_DIR / f"{run}.json"
 
 
 # --- 耐久ワークフロー ---------------------------------------------------------------------

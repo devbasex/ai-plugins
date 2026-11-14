@@ -123,11 +123,11 @@ def _watched(path: Path) -> wait_decide.Watched:
     if record is None:
         return wait_decide.Watched(plan.name, None)
     run = durable.run_name(record["key"])
-    done = files.read_json(sdir / runner.RESULTS_DIR / f"{run}.json")
+    done = files.read_json(runner.result_path(sdir, run))
     if done is not None:
         cause = done.get("cause") if isinstance(done.get("cause"), dict) else {}
         return wait_decide.Watched(plan.name, done["status"], cause.get("kind"), cause.get("detail"), done.get("routes"))
-    marker = files.read_json(sdir / f"{runner.WAITING_PREFIX}{run}.json")
+    marker = files.read_json(runner.waiting_path(sdir, run))
     if marker is not None:
         return wait_decide.Watched(plan.name, GATE, routes=marker["routes"])
     return wait_decide.Watched(plan.name, None)
