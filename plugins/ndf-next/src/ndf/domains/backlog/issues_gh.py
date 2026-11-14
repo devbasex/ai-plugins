@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from typing import Any, Optional
 from urllib.parse import quote
 
@@ -47,35 +48,36 @@ def open_issues(gh: GitHub) -> list[dict[str, Any]]:
     return [_issue(raw) for _, raw in sorted(got.items()) if raw]
 
 
-def closed_since(gh: GitHub, since: str) -> list[dict[str, Any]]:
-    """`since`（ISO 8601）より後に閉じた Issue の番号とマイルストーンの題。`github.list-pages` ページを超えたら `GitHubError`。"""
+def _graphql_pages(gh: GitHub, query: str, variables: dict[str, Any], key: str, what: str) -> Iterator[list[dict[str, Any]]]:
+    """GraphQL の接続 `key` を after のカーソルで送り、ページごとの nodes を返す。`github.list-pages` ページを超えたら `GitHubError`。"""
     pages = int(limits.value("github.list-pages", "count"))
-    out: list[dict[str, Any]] = []
     after: Optional[str] = None
     for _ in range(pages):
-        conn = gh.repository(_CLOSED_PAGE, {"since": since, "after": after})["issues"]
-        for raw in conn["nodes"]:
+        conn = gh.repository(query, {**variables, "after": after})[key]
+        yield conn["nodes"]
+        if not conn["pageInfo"]["hasNextPage"]:
+            return
+        after = conn["pageInfo"]["endCursor"]
+    raise GitHubError(f"{what}が {pages} ページを超えた（github.list-pages）")
+
+
+def closed_since(gh: GitHub, since: str) -> list[dict[str, Any]]:
+    """`since`（ISO 8601）より後に閉じた Issue の番号とマイルストーンの題。`github.list-pages` ページを超えたら `GitHubError`。"""
+    out: list[dict[str, Any]] = []
+    for nodes in _graphql_pages(gh, _CLOSED_PAGE, {"since": since}, "issues", "閉じた Issue の一覧"):
+        for raw in nodes:
             if text_of(raw["closedAt"]) >= since:
                 ms = raw["milestone"]
                 out.append({"number": int(raw["number"]), "milestone": text_of(ms["title"]) if isinstance(ms, dict) else None})
-        if not conn["pageInfo"]["hasNextPage"]:
-            return out
-        after = conn["pageInfo"]["endCursor"]
-    raise GitHubError(f"閉じた Issue の一覧が {pages} ページを超えた（github.list-pages）")
+    return out
 
 
 def milestone_rows(gh: GitHub) -> dict[str, dict[str, Any]]:
     """マイルストーンの題 → {number, description}（open と closed）。`github.list-pages` ページを超えたら `GitHubError`。"""
-    pages = int(limits.value("github.list-pages", "count"))
     out: dict[str, dict[str, Any]] = {}
-    after: Optional[str] = None
-    for _ in range(pages):
-        conn = gh.repository(_MILESTONE_PAGE, {"after": after})["milestones"]
-        out.update({text_of(m["title"]): {"number": int(m["number"]), "description": text_of(m.get("description"))} for m in conn["nodes"]})
-        if not conn["pageInfo"]["hasNextPage"]:
-            return out
-        after = conn["pageInfo"]["endCursor"]
-    raise GitHubError(f"マイルストーンの一覧が {pages} ページを超えた（github.list-pages）")
+    for nodes in _graphql_pages(gh, _MILESTONE_PAGE, {}, "milestones", "マイルストーンの一覧"):
+        out.update({text_of(m["title"]): {"number": int(m["number"]), "description": text_of(m.get("description"))} for m in nodes})
+    return out
 
 
 def milestones(gh: GitHub) -> dict[str, int]:
