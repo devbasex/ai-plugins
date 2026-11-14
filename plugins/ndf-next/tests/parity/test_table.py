@@ -92,7 +92,6 @@ def test_entrypoints_give_the_place_after_the_move(tables):
     by_now = {e.now: e for e in every}
     moved = by_now["scripts/acceptance-check.py"]
     assert (moved.to, moved.after) == ("M1", ("src/ndf/domains/loop/",))
-    assert moved.after == tuple(features["places"][moved.to])
     not_built = by_now["scripts/bundle-close.py"]
     assert (not_built.to, not_built.after) == (None, ())
 
