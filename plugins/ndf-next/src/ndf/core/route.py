@@ -378,14 +378,18 @@ def _read_lines(path: Path) -> list[str]:
     return [json.loads(line)["key"] for line in text.splitlines() if line.strip()]
 
 
+def _invalid(detail: str) -> int:
+    return result.emit(result.stopped(TOOL, "invalid", detail))
+
+
 def _cmd_repeat(a: argparse.Namespace) -> int:
     try:
         found = steps.last_json(Path(a.result).read_text(encoding="utf-8"))
     except OSError as exc:
-        return result.emit(result.stopped(TOOL, "invalid", f"結果 {a.result} を読めない: {exc.strerror or exc}"))
+        return _invalid(f"結果 {a.result} を読めない: {exc.strerror or exc}")
     key = cause_key(found) if found is not None else None
     if key is None:
-        return result.emit(result.stopped(TOOL, "invalid", f"結果 {a.result} は止まった結果でない"))
+        return _invalid(f"結果 {a.result} は止まった結果でない")
     log = Path(a.log)
     history = _read_lines(log)
     same_cause = int(limits.value(REPEAT_LIMIT, "same_cause"))
@@ -426,6 +430,6 @@ def main(argv: list[str]) -> int:
     try:
         return a.fn(a)
     except RouteError as exc:
-        return result.emit(result.stopped(TOOL, "invalid", str(exc)))
+        return _invalid(str(exc))
     except git.GitError as exc:
         return result.emit(result.stopped(TOOL, "precondition", str(exc)))
