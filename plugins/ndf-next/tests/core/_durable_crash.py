@@ -1,6 +1,6 @@
 """判断のループを耐久ワークフローで回し、指定の手で落ちるプロセス（test_durable.py が子プロセスで起こす）。
 
-引数: <DB の URL> <ワークフローの ID> <手の記録のファイル> <落ちる手の番号（0 なら落ちない）>
+引数: <チェックアウトの置き場> <実行の鍵> <ワークフローの ID> <手の記録のファイル> <落ちる手の番号（0 なら落ちない）>
 落ちない回は、回復した耐久ワークフローの結果を JSON で標準出力へ 1 行書く。
 """
 
@@ -15,8 +15,8 @@ from _counting import decide
 
 from ndf.core import durable, loop
 
-DB_URL, WORKFLOW_ID, LOG, CRASH_AT = sys.argv[1], sys.argv[2], Path(sys.argv[3]), int(sys.argv[4])
-EXECUTOR = "crash-test"
+ROOT, RUN_KEY, WORKFLOW_ID = Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+LOG, CRASH_AT = Path(sys.argv[4]), int(sys.argv[5])
 # 落ちる手で落ちたことを示す終了コード（test_durable.py の CRASH_EXIT_CODE と同じ値）
 CRASH_EXIT_CODE = 9
 
@@ -36,14 +36,11 @@ def flow(start: list[int]) -> list[int]:
 
 
 def main() -> None:
-    durable.launch(DB_URL, EXECUTOR, "durable-crash-test")
-    try:
+    with durable.session(ROOT, RUN_KEY):
         if CRASH_AT:
             durable.start(flow, WORKFLOW_ID, [])
         else:
             print(json.dumps(durable.result(WORKFLOW_ID)))
-    finally:
-        durable.shutdown()
 
 
 if __name__ == "__main__":
