@@ -272,3 +272,35 @@ def test_whole_fields_move_when_many_short_strings_overflow():
     assert len(raw) + 1 <= 32000
     moved = json.loads(raw)["fields"]["fields_json"]
     assert json.loads(Path(moved["full_text"]).read_text()) == {"result": many}
+
+
+def test_open_run_prepares_state_dir_so_next_prepare_keeps_it():
+    """記録が先に置き場を作っても、次の用意が置き場ごと退避しない（#3394）。"""
+    from ndf import identity
+
+    log = run_log.open_run("entry", location="repo")
+    ident = identity.load()
+
+    assert identity.prepare_state_dir(ident) == ident.state_dir
+    assert log.path.exists() and not list(ident.state_dir.parent.glob(ident.state_dir.name + identity.RETIRED_SUFFIX + "*"))
+
+
+def test_redact_hides_dict_keys_bytes_and_non_json_values(monkeypatch):
+    """文字列以外の値と辞書の鍵も伏せ、数・真偽値・None だけをそのまま返す（#3394）。"""
+    monkeypatch.setenv("NDF_TEST_TOKEN", "s3cr3t-value-123")
+    token = "ghp_abcdefgh12345678"
+
+    got = run_log.redact(
+        {
+            token: 1,
+            "raw": b"use s3cr3t-value-123",
+            "path": Path("/tmp") / token,
+            "error": RuntimeError(f"failed with {token}"),
+            "set": {token},
+            "keep": [3, 1.5, True, None],
+        }
+    )
+
+    assert token not in json.dumps(got) and "s3cr3t-value-123" not in json.dumps(got)
+    assert got["keep"] == [3, 1.5, True, None]
+    assert got["raw"] == "use " + run_log.MASK and got[run_log.MASK] == 1
