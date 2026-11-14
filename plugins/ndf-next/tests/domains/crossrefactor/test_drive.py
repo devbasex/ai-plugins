@@ -72,7 +72,10 @@ def test_items_follow_the_touched_function_and_results_stay_inside_each_workdir(
         if phase in ("propose", "plan"):
             assert cwd == root / "read" / agent
         else:
-            assert cwd == root / "work" and submit.is_relative_to(cwd)
+            assert cwd == root / "work"
+    # 読み取りの担当は標準出力で返し、コードを書く担当は作業ディレクトリの中へ書く。どちらも起動の側が logs へ回収する
+    assert (root / "logs" / "codex-propose-pr7-result.json").is_file()
+    assert (root / "logs" / "claude-add-tests-I-001-result.json").is_file()
     pushed = sh(world.origin, "rev-parse", f"refs/heads/{BRANCH}")
     assert waited == [pushed] and "product = w * h" in sh(world.origin, "show", f"{pushed}:src/geo.py")
     assert not (root / "work").exists()
