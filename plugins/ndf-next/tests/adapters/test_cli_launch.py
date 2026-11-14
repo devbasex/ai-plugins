@@ -13,7 +13,7 @@ MINIMAL_HEAD = ["-p", "--output-format", "json", "--no-session-persistence", "--
 
 
 def test_full_args_disable_installed_ndf_and_load_this_plugin(tmp_path):
-    argv = cli.claude_args(cli.ClaudeCall(system="sys", full=True), root=tmp_path)
+    argv = cli.claude_args(cli.ClaudeCall(system="sys", permission=cli.Permission.FULL), root=tmp_path)
 
     settings = json.loads(argv[argv.index("--settings") + 1])
     assert settings == {"enabledPlugins": cli.DISABLED_PLUGINS}
@@ -23,7 +23,7 @@ def test_full_args_disable_installed_ndf_and_load_this_plugin(tmp_path):
 
 
 def test_full_args_default_to_own_root():
-    argv = cli.claude_args(cli.ClaudeCall(system="sys", full=True, resume="abc"))
+    argv = cli.claude_args(cli.ClaudeCall(system="sys", permission=cli.Permission.FULL, resume="abc"))
 
     assert argv[argv.index("--plugin-dir") + 1] == str(identity.load().root)
     assert argv[-2:] == ["--resume", "abc"]
@@ -31,7 +31,9 @@ def test_full_args_default_to_own_root():
 
 def test_minimal_args_stay_minimal_without_plugin_settings():
     no_tools = cli.claude_args(cli.ClaudeCall(system="sys"))
-    with_tools = cli.claude_args(cli.ClaudeCall(system="sys", tools="Read,Grep", model="m"), base=("x", "y"))
+    with_tools = cli.claude_args(
+        cli.ClaudeCall(system="sys", permission=cli.Permission.TOOLS, tools="Read,Grep", model="m"), base=("x", "y")
+    )
 
     assert no_tools == ["claude", *MINIMAL_HEAD, "--disable-slash-commands", "--system-prompt", "sys", "--tools", ""]
     assert with_tools[:2] == ["x", "y"] and with_tools[-2:] == ["--model", "m"]
@@ -43,6 +45,36 @@ def test_json_schema_is_passed_as_json():
     argv = cli.claude_args(cli.ClaudeCall(system="sys", json_schema={"type": "object"}))
 
     assert json.loads(argv[argv.index("--json-schema") + 1]) == {"type": "object"}
+
+
+DANGEROUS = ("--dangerously-skip-permissions", "bypassPermissions")
+
+
+def test_each_permission_has_its_own_tools_and_never_skips_permissions(tmp_path):
+    """判断は Tool を使わせず、Tool を許す起動も acceptEdits までにする（#3364）。"""
+    judge = cli.claude_args(cli.ClaudeCall(system="sys"))
+    tools = cli.claude_args(cli.ClaudeCall(system="sys", permission=cli.Permission.TOOLS, tools="Read"))
+    full = cli.claude_args(cli.ClaudeCall(system="sys", permission=cli.Permission.FULL), root=tmp_path)
+
+    assert judge[judge.index("--tools") + 1] == "" and "--permission-mode" not in judge and "--allowed-tools" not in judge
+    assert tools[tools.index("--allowed-tools") + 1] == "Read" and tools[tools.index("--permission-mode") + 1] == "acceptEdits"
+    assert full[full.index("--allowed-tools") + 1] == cli.FULL_TOOLS and full[full.index("--permission-mode") + 1] == "acceptEdits"
+    for argv in (judge, tools, full):
+        assert not set(argv) & set(DANGEROUS)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"permission": cli.Permission.TOOLS},
+        {"permission": cli.Permission.JUDGE, "tools": "Read"},
+        {"permission": cli.Permission.FULL, "tools": "Read"},
+        {"permission": cli.Permission.JUDGE, "resume": "abc"},
+    ],
+)
+def test_call_refuses_tools_or_resume_outside_their_permission(kwargs):
+    with pytest.raises(ValueError):
+        cli.ClaudeCall(system="sys", **kwargs)
 
 
 def test_launch_args_subcommand_prints_the_same_values(capsys):
@@ -80,7 +112,9 @@ def fake_claude(tmp_path: Path, stdout: str) -> Path:
 
 
 def test_call_claude_missing_command_is_not_ok(tmp_path):
-    assert not cli.call_claude([str(tmp_path / "missing")], "問い", 30).ok
+    got = cli.call_claude([str(tmp_path / "missing")], "問い", 30)
+
+    assert not got.ok and got.failure is cli.Failure.LAUNCH
 
 
 @pytest.mark.parametrize("stdout", ["not json", json.dumps({"is_error": True, "result": "boom"})])
@@ -149,6 +183,28 @@ def test_call_claude_nonzero_exit_without_stdout_reports_stderr(no_run_env):
     assert got == cli.ClaudeReply(False, None, "boom", 0.0, "claude が終了コード 3 で終えた: boom")
 
 
+LIMIT_JSON = json.dumps({"is_error": True, "api_error_status": 429, "result": "You've hit your limit · resets 3pm"})
+
+
+@pytest.mark.parametrize(
+    "script",
+    [
+        f"import sys; sys.stdin.read(); print({LIMIT_JSON!r})",
+        'import sys; sys.stdin.read(); sys.stderr.write("You\'ve hit your limit · resets 3pm\\n"); sys.exit(1)',
+    ],
+)
+def test_call_claude_tells_usage_limit_apart(no_run_env, script):
+    got = cli.call_claude([sys.executable, "-c", script], "q", 30)
+
+    assert not got.ok and got.failure is cli.Failure.USAGE_LIMIT
+
+
+def test_call_claude_other_error_can_be_retried(tmp_path):
+    got = cli.call_claude([str(fake_claude(tmp_path, json.dumps({"is_error": True, "result": "boom"})))], "q", 30)
+
+    assert not got.ok and got.failure is None
+
+
 def test_call_claude_nonzero_exit_with_stdout_still_parses(no_run_env):
     script = 'import sys; sys.stdin.read(); print(\'{"result": "{}", "total_cost_usd": 1}\'); sys.exit(1)'
 
@@ -161,7 +217,7 @@ def test_call_claude_timeout_is_not_ok(no_run_env):
     got = cli.call_claude([sys.executable, "-c", "import time; time.sleep(5)"], "q", 0.2)
 
     assert (got.ok, got.answer, got.raw, got.cost) == (False, None, "", 0.0)
-    assert got.error.startswith("claude を起動できない・期限を超えた: ")
+    assert got.error.startswith("claude が期限を超えた: ") and got.failure is cli.Failure.TIMEOUT
 
 
 START_DUMP = (

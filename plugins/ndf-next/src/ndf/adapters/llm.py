@@ -5,6 +5,10 @@
 
 問いを `claude -p --json-schema` で渡し、答えを `jsonschema` で確かめ直す。合わなければ 1 回だけ打ち直し、
 なお合わなければ `needs_human` で人へ戻す（決定 60）。答えの文から近い選択肢を拾わない。
+起動は判断の権限（`claude.Permission.JUDGE`。Tool を使わせない）で行う（#3364）。
+
+claude を起動できない・期限を超えた・利用上限・学習の設定の控えが無い・重い起動の枠が空かないは、打ち直しても直らないので打ち直さず、それぞれの止まった理由
+（`FAILURE_CAUSES`）で返す（#3394）。どの理由で止まるかと答えの形はこのモジュールが決め、呼び手の LLM に決めさせない。
 """
 
 from __future__ import annotations
@@ -24,6 +28,14 @@ from ndf.contracts import causes
 ATTEMPTS = 2
 # needs_human の説明に載せる、答えの先頭の字数
 ANSWER_HEAD = 200
+# 打ち直さない失敗の、止まった理由の種類（`contracts/causes.json`）
+FAILURE_CAUSES: dict[claude.Failure, str] = {
+    claude.Failure.LAUNCH: "precondition",
+    claude.Failure.TIMEOUT: "interrupted",
+    claude.Failure.USAGE_LIMIT: "usage_limit",
+    claude.Failure.REFUSED: "precondition",
+    claude.Failure.NO_SLOT: "infra_wait",
+}
 SYSTEM = "あなたは判断の呼び出しに答える。渡したスキーマに合う JSON だけを返す。前置きや説明の文を足さない。"
 
 # 選択肢のモードの答えの形。`decision` の `enum` は呼ぶときに選択肢で埋める
@@ -48,7 +60,10 @@ class AnswerSchemaError(Exception):
 
 
 class JudgeAnswer(NamedTuple):
-    """判断の呼び出しの結果。`ok` が真なら `answer` はスキーマに合う。偽なら `cause` が `needs_human`。"""
+    """判断の呼び出しの結果。`ok` が真なら `answer` はスキーマに合う。
+
+    偽なら `cause` の種類は、答えが 2 回とも合わなければ `needs_human`、打ち直さない失敗なら `FAILURE_CAUSES` の値。
+    """
 
     ok: bool
     answer: Any
@@ -97,16 +112,21 @@ def ask(question: str, material: str, schema: dict, timeout: float, call: Option
     """問いと材料を `claude -p --json-schema` で渡し、答えを確かめる。合わなければ 1 回だけ打ち直す。
 
     `schema` は `answer_schema` の値。2 回とも合わなければ `cause` が `needs_human` で、2 回の答えの先頭を
-    `detail` に持つ。claude の失敗も 1 回の外れと数える。
+    `detail` に持つ。claude が誤りで終えた・出力が JSON でないときは 1 回の外れと数える。起動できない・期限切れ・
+    利用上限はその回で止め、打ち直さない。
     """
     run = call if call is not None else claude.call_claude
-    argv = claude.claude_args(claude.ClaudeCall(system=SYSTEM, json_schema=schema))
+    argv = claude.claude_args(claude.ClaudeCall(system=SYSTEM, permission=claude.Permission.JUDGE, json_schema=schema))
     errors: list[str] = []
     heads: list[str] = []
     cost = 0.0
     for attempt in range(1, ATTEMPTS + 1):  # noqa: NDF201 上限: 決定 60 の 2 回
         reply = run(argv, _prompt(question, material, errors), timeout)
         cost += reply.cost
+        if reply.failure is not None:
+            run_log.record("judge", attempts=attempt, valid=False, cost=cost, failure=str(reply.failure))
+            kind = FAILURE_CAUSES[reply.failure]
+            return JudgeAnswer(False, None, causes.cause(kind, reply.error or str(reply.failure)), attempt, cost)
         errors = [reply.error] if reply.error else check_answer(reply.answer, schema)
         if not errors:
             run_log.record("judge", attempts=attempt, valid=True, cost=cost)

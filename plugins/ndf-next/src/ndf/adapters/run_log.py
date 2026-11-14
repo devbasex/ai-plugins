@@ -85,15 +85,22 @@ def _mask(text: str, secrets: list[str]) -> str:
 
 
 def redact(value: Any, secrets: Optional[list[str]] = None) -> Any:
-    """文字列・配列・辞書の中の、秘密の環境変数の値とトークンの形（`SECRET_SHAPES`）を伏せる。"""
+    """値の中の、秘密の環境変数の値とトークンの形（`SECRET_SHAPES`）を伏せる。
+
+    辞書は鍵も伏せる。配列・タプル・集合は配列にして中を伏せる。バイト列は UTF-8 の文字列に読んで伏せる。
+    JSON の値にならないもの（パス・例外など）は、記録へ書くときの文字列（`str`）にしてから伏せる。
+    数・真偽値・None だけをそのまま返す（秘密を持ちうる値をパススルーしない。#3394）。
+    """
     secrets = _secret_values() if secrets is None else secrets
-    if isinstance(value, str):
-        return _mask(value, secrets)
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
     if isinstance(value, dict):
-        return {k: redact(v, secrets) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
+        return {_mask(str(k), secrets): redact(v, secrets) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set, frozenset)):
         return [redact(v, secrets) for v in value]
-    return value
+    if isinstance(value, (bytes, bytearray)):
+        return _mask(bytes(value).decode("utf-8", errors="replace"), secrets)
+    return _mask(value if isinstance(value, str) else str(value), secrets)
 
 
 def _string_slots(value: Any) -> list[tuple[Any, Any]]:
@@ -263,8 +270,12 @@ def close() -> None:
 
 
 def runs_dir() -> Path:
-    """記録の置き場の根（利用者の状態の置き場の下）。"""
-    return identity.load().state_dir / RUNS_DIR
+    """記録の置き場の根（利用者の状態の置き場の下）。
+
+    状態の置き場は `identity.prepare_state_dir` を通して用意する。形の版のファイルの無いまま記録を書くと、
+    次の用意が旧い置き場と判定して、書いている途中の記録と枠のロックごと退避するため（#3394）。
+    """
+    return identity.prepare_state_dir(identity.load()) / RUNS_DIR
 
 
 def _prune(repo_dir: Path, today: date) -> None:

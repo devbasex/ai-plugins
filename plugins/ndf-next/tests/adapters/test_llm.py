@@ -120,3 +120,26 @@ def test_ask_records_attempts_and_validity_in_run_log(tmp_path):
     lines = [json.loads(line) for line in log.path.read_text().splitlines()]
     judge = [line for line in lines if line["event"] == "judge"]
     assert judge[0]["fields"] == {"attempts": 2, "valid": True, "cost": 1.0}
+
+
+def test_ask_launches_with_judge_permission_and_no_tools():
+    fake = FakeClaude(reply(good()))
+
+    llm.ask("q", "m", llm.answer_schema(choices=["fix"]), 30, call=fake)
+
+    argv = fake.calls[0][0]
+    assert argv[argv.index("--tools") + 1] == "" and "--permission-mode" not in argv
+
+
+@pytest.mark.parametrize(
+    ("failure", "kind"),
+    [(cli.Failure.LAUNCH, "precondition"), (cli.Failure.TIMEOUT, "interrupted"), (cli.Failure.USAGE_LIMIT, "usage_limit")],
+)
+def test_ask_stops_at_once_on_failures_retrying_cannot_fix(failure, kind):
+    """起動できない・期限切れ・利用上限は needs_human にまとめず、打ち直さない（#3394）。"""
+    fake = FakeClaude(cli.ClaudeReply.failed("", "claude の失敗", 0.2, failure), reply(good()))
+
+    got = llm.ask("q", "m", llm.answer_schema(choices=["fix"]), 30, call=fake)
+
+    assert not got.ok and got.attempts == 1 and len(fake.calls) == 1
+    assert got.cause == {"kind": kind, "detail": "claude の失敗"}
