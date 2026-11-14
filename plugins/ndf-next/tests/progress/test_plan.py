@@ -33,12 +33,6 @@ def _view(st, pid):
         return lane.read_view(conn, pid)
 
 
-def _refused(st, fn):
-    with pytest.raises(model.Refused) as got, store.transaction(st) as conn:
-        fn(conn)
-    return got.value.reason
-
-
 def _run_sprint(st, pid, lane_name, key, name, outcome="completed"):
     with store.transaction(st) as conn:
         view, _ = lane.read_plan(conn, pid)
@@ -62,16 +56,16 @@ def test_lane_added_to_a_running_plan_answers_the_request(opened):
     assert view.open_requests() == [] and view.requests[req].closed
 
 
-def test_lane_that_breaks_a_rule_is_not_added(opened):
+def test_lane_that_breaks_a_rule_is_not_added(opened, refused):
     pid = _two(opened)
-    assert "I19" in _refused(opened, lambda conn: plan.add_lane(conn, pid, _decl("c", [[3]], touches=("docs/",))))
+    assert "I19" in refused(opened, lambda conn: plan.add_lane(conn, pid, _decl("c", [[3]], touches=("docs/",))))
     view, _ = _view(opened, pid)
     assert list(view.lanes) == ["a", "b"]
 
 
-def test_changed_lane_is_checked_against_the_other_lanes(opened):
+def test_changed_lane_is_checked_against_the_other_lanes(opened, refused):
     pid = _two(opened)
-    reason = _refused(opened, lambda conn: plan.change_lane(conn, pid, "b", {"touches": ["src/a/x.py"]}, "広げる"))
+    reason = refused(opened, lambda conn: plan.change_lane(conn, pid, "b", {"touches": ["src/a/x.py"]}, "広げる"))
     assert "I13" in reason
     with store.transaction(opened) as conn:
         plan.change_lane(conn, pid, "b", {"touches": ["src/a/x.py"], "after": ["a"]}, "a の後に回す")
@@ -79,9 +73,9 @@ def test_changed_lane_is_checked_against_the_other_lanes(opened):
     assert view.lanes["b"].touches == ("src/a/x.py",) and view.lanes["b"].after == ("a",)
 
 
-def test_lane_limit_does_not_count_lanes_that_ended(opened):
+def test_lane_limit_does_not_count_lanes_that_ended(opened, refused):
     pid = _two(opened)
-    assert "I20" in _refused(opened, lambda conn: plan.change_lane(conn, pid, lane.PLAN_ROW, {"max_lanes": 1}, "減らす"))
+    assert "I20" in refused(opened, lambda conn: plan.change_lane(conn, pid, lane.PLAN_ROW, {"max_lanes": 1}, "減らす"))
     _run_sprint(opened, pid, "b", "r1", "s-b1")
     with store.transaction(opened) as conn:
         plan.change_lane(conn, pid, lane.PLAN_ROW, {"max_lanes": 1}, "b が終わった")
@@ -101,7 +95,7 @@ def test_row_moved_to_another_lane(opened):
 # --- 中止と完了 ------------------------------------------------------------------------------------
 
 
-def test_stop_cancels_pending_rows_and_hands_running_sprints_to_their_conductors(opened):
+def test_stop_cancels_pending_rows_and_hands_running_sprints_to_their_conductors(opened, refused):
     pid = _two(opened)
     sid = _run_sprint(opened, pid, "a", "r1", "s-a1", outcome=None)
     with store.transaction(opened) as conn:
@@ -114,10 +108,10 @@ def test_stop_cancels_pending_rows_and_hands_running_sprints_to_their_conductors
         assert lane.end_row(conn, sid, "cancelled", "conductor") is None
     _, rows = _view(opened, pid)
     assert rows["a"][0].state == "cancelled"
-    assert "中止" in _refused(opened, lambda conn: plan.add_lane(conn, pid, _decl("c", [[9]], touches=("docs/",))))
+    assert "中止" in refused(opened, lambda conn: plan.add_lane(conn, pid, _decl("c", [[9]], touches=("docs/",))))
 
 
-def test_pause_keeps_the_rows_and_start_resumes_the_same_plan_from_where_it_stopped(opened):
+def test_pause_keeps_the_rows_and_start_resumes_the_same_plan_from_where_it_stopped(opened, refused):
     """区切りで止めた計画は行を中止にせず、次の行を始めない。同じ名前の計画を始め直すと止めた所から続く。"""
     pid = _two(opened)
     sid = _run_sprint(opened, pid, "a", "r1", "s-a1", outcome=None)
@@ -129,22 +123,22 @@ def test_pause_keeps_the_rows_and_start_resumes_the_same_plan_from_where_it_stop
     # 実行中の行は終わりまで流れる。次の行は止めている間は始められない
     with store.transaction(opened) as conn:
         lane.end_row(conn, sid, "completed", "conductor")
-    assert "停止" in _refused(opened, lambda conn: lane.start_row(conn, pid, "b", "r1", "s-b1"))
-    assert "停止" in _refused(opened, lambda conn: plan.pause_plan(conn, pid, "二度目"))
+    assert "停止" in refused(opened, lambda conn: lane.start_row(conn, pid, "b", "r1", "s-b1"))
+    assert "停止" in refused(opened, lambda conn: plan.pause_plan(conn, pid, "二度目"))
     with store.transaction(opened) as conn:
         plan.start_plan(conn, pid)
     view, rows = _view(opened, pid)
     assert view.state == "running" and lane.wakeable_lanes(view, rows) == [("a", "r2"), ("b", "r1")]
 
 
-def test_a_paused_plan_can_still_be_stopped_now(opened):
+def test_a_paused_plan_can_still_be_stopped_now(opened, refused):
     pid = _two(opened)
     with store.transaction(opened) as conn:
         plan.pause_plan(conn, pid, "区切りで止める")
         plan.stop_plan(conn, pid, "放棄する")
     view, rows = _view(opened, pid)
     assert view.state == "cancelled" and rows["b"][0].state == "cancelled"
-    assert "中止" in _refused(opened, lambda conn: plan.start_plan(conn, pid))
+    assert "中止" in refused(opened, lambda conn: plan.start_plan(conn, pid))
 
 
 def test_plan_completes_only_when_every_row_ended_and_no_request_is_open(opened):
