@@ -12,6 +12,7 @@ import sys
 import pytest
 
 from ndf.domains.crossrefactor import scope, tests_decide
+from ndf.testing import scoped
 
 FILES = {
     "lib/foo.py": "def f():\n    return 1\n",
@@ -63,7 +64,7 @@ def test_scope_test_files_are_files_and_run_with_a_file_only_template(gitwork):
     # tests/ の下の補助のファイルも、共有の表（置き場の行）ではテストのファイルに数える
     assert files == ["tests/helpers.py", "tests/test_bar.py", "tests/test_foo.py"]
     template = f"{sys.executable} -m unittest {{paths}}"
-    done = subprocess.run(tests_decide.fill_paths(template, files), shell=True, cwd=gitwork.work, capture_output=True, text=True)
+    done = subprocess.run(scoped.fill_paths(template, files), shell=True, cwd=gitwork.work, capture_output=True, text=True)
     assert done.returncode == 0, done.stderr
 
 
@@ -73,9 +74,9 @@ def test_scope_without_tests_gives_no_files(gitwork):
 
 
 def test_fill_paths_quotes_and_requires_the_slot():
-    assert tests_decide.fill_paths("run {paths}", ["a b.py", "c.py"]) == "run 'a b.py' c.py"
+    assert scoped.fill_paths("run {paths}", ["a b.py", "c.py"]) == "run 'a b.py' c.py"
     with pytest.raises(ValueError, match="paths"):
-        tests_decide.fill_paths("run", ["a.py"])
+        scoped.fill_paths("run", ["a.py"])
 
 
 @pytest.mark.parametrize(

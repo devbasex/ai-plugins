@@ -13,18 +13,16 @@ from __future__ import annotations
 
 import ast
 import fnmatch
-import shlex
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Any
 
 from ndf.contracts import facts
-from ndf.domains.crossrefactor.diff_decide import in_scope
+from ndf.testing.scoped import in_scope
 from ndf.domains.crossrefactor.symbols_decide import PYTHON_SUFFIX
 
 TABLE = "test-files"
-PATHS_SLOT = "{paths}"
 # 名前の対応（Python 以外のソースと、import を持たないテスト）。`{s}` はソースのファイル名の語幹
 NAME_FORMS = ("test_{s}", "{s}_test", "{s}Test", "{s}Tests", "{s}_spec")
 
@@ -132,13 +130,6 @@ def tests_for_change(changed: Iterable[str], tests: Mapping[str, str | None]) ->
 def scope_test_files(tracked: Iterable[str], scope: Sequence[str]) -> list[str]:
     """追跡されるファイルのうち、範囲の配下のテストのファイル（ファイルだけで、ディレクトリを含まない）。"""
     return sorted(p for p in tracked if in_scope(p, tuple(scope)) and is_test_file(p))
-
-
-def fill_paths(template: str, files: Sequence[str]) -> str:
-    """テンプレートの `{paths}` へファイルを引用して入れる。`{paths}` の無いテンプレートは `ValueError`。"""
-    if PATHS_SLOT not in template:
-        raise ValueError(f"テンプレートに {PATHS_SLOT} が無い: {template}")
-    return template.replace(PATHS_SLOT, " ".join(shlex.quote(f) for f in files))
 
 
 @dataclass(frozen=True)

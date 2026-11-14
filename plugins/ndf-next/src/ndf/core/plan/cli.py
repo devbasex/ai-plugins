@@ -1,9 +1,10 @@
 """副命令 `plan`: プランの実行の回を流す・待つ・待ちの一覧を出す。
 
-ndf plan next <plan.json> [--from <ステップ>] [--state-dir <置き場>] [--answer <答え>] [--set <名前>=<値>]...
-    回を始めるか続け、終わるか承認の答えを待つ所まで進める。答えを待つ所では承認ゲートの結果（routes）を出して抜ける
-ndf plan queue <plan.json>... [--then <plan.json>...]... [--from <プラン>=<ステップ>]... [--resume] [--queue-dir <置き場>]
-    段（並びと `--then` の区切り）ごとに、触るファイルの重ならない組でプランを並べて流す
+ndf plan next <plan.json> [--from <ステップ>] [--state-dir <置き場>] [--answer <答え>] [--set <名前>=<値>]... [--fresh]
+    回を始めるか続け、終わるか承認の答えを待つ所まで進める。答えを待つ所では承認ゲートの結果（routes）を出して抜ける。
+    `--fresh` は前の回の耐久の記録に戻らず、新しい回で先頭のステップから流す
+ndf plan queue <plan.json>... [--then <plan.json>...]... [--from <プラン>=<ステップ>]... [--resume] [--fresh] [--queue-dir <置き場>]
+    段（並びと `--then` の区切り）ごとに、触るファイルの重ならない組でプランを並べて流す。`--fresh` は子の next へ渡す
 ndf plan wait <plan.json>... [--state-dir <置き場>] [--timeout <秒>]
     DBOS を開かずに回の控えと待ちの目印を見回り、止まり・承認ゲート・終わりを種類つきで返す（next は続きの待ち）。
     `--state-dir` は `next` に渡した置き場（プラン 1 本のときだけ）
@@ -65,7 +66,7 @@ def _cmd_next(a: argparse.Namespace) -> int:
     cwd = Path.cwd()
     try:
         with runner.plan_lock(runner.state_dir_of(Path(a.plan), a.state_dir, cwd)):
-            inv = runner.prepare(root, Path(a.plan), a.start, a.state_dir, cwd, _pairs(a.sets, "--set"))
+            inv = runner.prepare(root, Path(a.plan), a.start, a.state_dir, cwd, runner.RunOptions(_pairs(a.sets, "--set"), a.fresh))
             return result.emit(runner.advance(root, inv, a.answer, _exit_with, _url()))
     except model.PlanError as exc:
         return result.emit(result.stopped(TOOL, "invalid", str(exc)))
@@ -108,7 +109,7 @@ def _cmd_queue(a: argparse.Namespace) -> int:
         return result.emit(result.stopped(TOOL, "invalid", str(exc)))
     except subprocess.CalledProcessError as exc:
         return result.emit(result.stopped(TOOL, "precondition", f"チェックアウトの根を引けない: {exc}"))
-    outcomes = queue_run.run(stages, qdir, stable, a.resume)
+    outcomes = queue_run.run(stages, qdir, stable, a.resume, a.fresh)
     return result.emit(queue_run.queue_result(TOOL, outcomes, stages, qdir))
 
 
@@ -196,12 +197,14 @@ def _parser() -> argparse.ArgumentParser:
     nx.add_argument("--state-dir")
     nx.add_argument("--answer")
     nx.add_argument("--set", dest="sets", action="append")
+    nx.add_argument("--fresh", action="store_true")
     nx.set_defaults(fn=_cmd_next)
     qu = sub.add_parser("queue", help="段ごとにプランを並べて流す")
     qu.add_argument("plans", nargs="+")
     qu.add_argument("--then", action="append", nargs="+")
     qu.add_argument("--from", dest="starts", action="append")
     qu.add_argument("--resume", action="store_true")
+    qu.add_argument("--fresh", action="store_true")
     qu.add_argument("--queue-dir")
     qu.set_defaults(fn=_cmd_queue)
     wt = sub.add_parser("wait", help="流れている回を見回る")
