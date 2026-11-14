@@ -141,6 +141,13 @@ def _start(cfg: RunConfig) -> _Run:
     return run
 
 
+def _note(run: _Run, round_no: int, who: str, result: str, warning: Optional[str] = None) -> None:
+    """過程へ 1 行足す。`warning` があれば先に注意へも足す。"""
+    if warning is not None:
+        run.warnings.append(warning)
+    run.process.append({"run": f"round {round_no} {who}", "result": result})
+
+
 # --- 相手役 -----------------------------------------------------------------------------
 
 
@@ -184,11 +191,11 @@ def _review(run: _Run, round_no: int, prompt: str, launch: Launcher) -> tuple[li
     for spec, status in zip(specs, statuses):
         found = _reviewer_findings(status, spec.paths.out)
         if found is None:
-            run.warnings.append(f"round {round_no} の相手役 {spec.agent} が答えなかった（{status.state}: {status.detail}）")
-            run.process.append({"run": f"round {round_no} {spec.agent}", "result": f"答え無し（{status.state}）"})
+            warning = f"round {round_no} の相手役 {spec.agent} が答えなかった（{status.state}: {status.detail}）"
+            _note(run, round_no, spec.agent, f"答え無し（{status.state}）", warning)
             continue
         answered += 1
-        run.process.append({"run": f"round {round_no} {spec.agent}", "result": f"指摘 {len(found)} 件"})
+        _note(run, round_no, spec.agent, f"指摘 {len(found)} 件")
         raised += [{**f, "by": spec.agent} for f in found]
     return raised, answered
 
@@ -282,15 +289,15 @@ def _fix(
     result_path = store.fix_result_path(run.cfg.state_dir, run.ref)
     status = launch(_fixer_launch(run, round_no, _fix_prompt(run, open_, handed, result_path)))
     if status.state != agents.AgentState.DONE or not result_path.is_file():
-        run.warnings.append(f"round {round_no} の修正担当が結果を書かなかった（{status.state}: {status.detail}）")
-        run.process.append({"run": f"round {round_no} {run.cfg.fixer}", "result": f"結果無し（{status.state}）"})
+        warning = f"round {round_no} の修正担当が結果を書かなかった（{status.state}: {status.detail}）"
+        _note(run, round_no, run.cfg.fixer, f"結果無し（{status.state}）", warning)
         return None
     try:
         fix = _take_fix(run, result_path, round_no)
     except store.FixResultMismatch as exc:
         run.warnings.append(f"round {round_no} の修正の結果を取り込めない: {exc}")
         return None
-    run.process.append({"run": f"round {round_no} {run.cfg.fixer}", "result": f"指摘 {fix['reported']} 件を扱った"})
+    _note(run, round_no, run.cfg.fixer, f"指摘 {fix['reported']} 件を扱った")
     return fix
 
 
@@ -308,8 +315,7 @@ def _push(run: _Run, round_no: int, reviewed_head: str, fix: dict[str, Any]) -> 
         if fid in run.ledger:
             run.ledger[fid] |= {"outcome": fin.UNRESOLVED, "reason": None}
     tail = f"（衝突: {', '.join(sent.conflicts)}）" if sent.conflicts else ""
-    run.warnings.append(f"round {round_no} の修正を送れなかった: {sent.reason}{tail}")
-    run.process.append({"run": f"round {round_no} push", "result": f"送れない（{sent.reason}）"})
+    _note(run, round_no, "push", f"送れない（{sent.reason}）", f"round {round_no} の修正を送れなかった: {sent.reason}{tail}")
     return False
 
 
