@@ -516,6 +516,10 @@ class GitHub:
         """Issue（か PR）のコメントを古い順にすべて読む（`github.list-pages` ページまで。超えたら `GitHubError`）。"""
         return [Authored.from_rest(c) for c in self._pages(f"/repos/{self.repo}/issues/{int(number)}/comments")]
 
+    def pull_commits(self, number: int) -> list[dict]:
+        """PR のコミット（head から辿れて base から辿れないもの）を REST の形のまま読む。GitHub は 250 件までしか返さない。"""
+        return self._pages(f"/repos/{self.repo}/pulls/{int(number)}/commits")
+
     def _pages(self, path: str) -> list[dict]:
         """配列を返す REST の一覧を、短いページが来るまで読む。`github.list-pages` ページを超えたら途中で切らずに止まる。"""
         pages = _page_cap("github.list-pages")
