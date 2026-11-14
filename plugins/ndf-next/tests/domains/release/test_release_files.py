@@ -20,7 +20,12 @@ from ._fakes import FakeHub, not_found, pull, write_json
 def _repo(root: Path) -> Path:
     write_json(
         root / ".claude-plugin" / "marketplace.json",
-        {"plugins": [{"name": "kit", "source": "./tools/kit", "description": "Kit (v1.2.3)"}, {"name": "mcp-x", "source": "./plugins/mcp/x"}]},
+        {
+            "plugins": [
+                {"name": "kit", "source": "./tools/kit", "description": "Kit (v1.2.3)"},
+                {"name": "mcp-x", "source": "./plugins/mcp/x"},
+            ]
+        },
     )
     write_json(root / "tools" / "kit" / ".claude-plugin" / "plugin.json", {"name": "kit", "version": "1.2.3"})
     write_json(root / "tools" / "kit" / ".codex-plugin" / "plugin.json", {"name": "kit", "version": "1.2.3"})
@@ -41,7 +46,12 @@ def test_bump_writes_manifests_marketplace_and_declared_files(tmp_path: Path) ->
     root = _repo(tmp_path)
     kit = plugins_mod.by_name(plugins_mod.load(root))["kit"]
     written = plugins_mod.bump(root, kit, "1.2.4", ["README.md"])
-    assert written == ["tools/kit/.claude-plugin/plugin.json", "tools/kit/.codex-plugin/plugin.json", ".claude-plugin/marketplace.json", "README.md"]
+    assert written == [
+        "tools/kit/.claude-plugin/plugin.json",
+        "tools/kit/.codex-plugin/plugin.json",
+        ".claude-plugin/marketplace.json",
+        "README.md",
+    ]
     assert plugins_mod.version(root, kit) == "1.2.4"
     assert "Kit (v1.2.4)" in (root / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8")
     assert (root / "README.md").read_text(encoding="utf-8") == "| kit | 1.2.4 |\n| other | 1.2.3 |\n"

@@ -57,9 +57,7 @@ def pull_facts(hub: GitHub, numbers: Sequence[int]) -> list[materials_decide.Pul
         return []
     got: dict[int, Any] = hub.nodes(numbers, "pullRequest", PULL_SELECTION)
     return [
-        materials_decide.PullFact(n, text_of(raw["title"]), checks_decide.tally(_contexts(raw)))
-        for n, raw in sorted(got.items())
-        if raw
+        materials_decide.PullFact(n, text_of(raw["title"]), checks_decide.tally(_contexts(raw))) for n, raw in sorted(got.items()) if raw
     ]
 
 
@@ -76,7 +74,12 @@ def changes(repo_git: git_mod.Git, span: Range, found: Sequence[plugins_mod.Plug
 
 
 def plan_bumps(
-    root: Path, found: Sequence[plugins_mod.Plugin], change_list: Sequence[changes_decide.Change], decl: Declaration, level: str, channel: str
+    root: Path,
+    found: Sequence[plugins_mod.Plugin],
+    change_list: Sequence[changes_decide.Change],
+    decl: Declaration,
+    level: str,
+    channel: str,
 ) -> list[version_decide.Planned]:
     """版を上げるプラグインと次の版（マーケットプレイスの登録の順）。"""
     wanted = {c.plugin for c in change_list if changes_decide.needs_bump(c, decl.bump_undistributed)}

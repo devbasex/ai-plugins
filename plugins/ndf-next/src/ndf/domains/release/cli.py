@@ -26,7 +26,18 @@ from ndf.adapters import git as git_mod
 from ndf.adapters import github as github_mod
 from ndf.adapters.github import GitHub
 from ndf.contracts import result
-from ndf.domains.release import approval_decide, assemble, cleanup, land, materials_decide, tagging, trail, user_config_decide, verify, version_decide
+from ndf.domains.release import (
+    approval_decide,
+    assemble,
+    cleanup,
+    land,
+    materials_decide,
+    tagging,
+    trail,
+    user_config_decide,
+    verify,
+    version_decide,
+)
 from ndf.domains.release import declaration as decl_mod
 from ndf.domains.release import plugins as plugins_mod
 
@@ -46,7 +57,9 @@ def _target(args: argparse.Namespace) -> assemble.Target:
 def cmd_assemble(args: argparse.Namespace) -> dict:
     built = assemble.assemble(Path(args.root), _hub(args), _target(args))
     outputs = {"pr": built.pr, "url": built.url, "branch": built.branch, "version": built.version}
-    return result.result(TOOL, result.OK, f"{built.branch} の PR #{built.pr} を作った: {built.url}", materials_decide.items(built.facts), outputs=outputs)
+    return result.result(
+        TOOL, result.OK, f"{built.branch} の PR #{built.pr} を作った: {built.url}", materials_decide.items(built.facts), outputs=outputs
+    )
 
 
 def cmd_materials(args: argparse.Namespace) -> dict:
@@ -67,7 +80,9 @@ def cmd_present(args: argparse.Namespace) -> dict:
         answer: result.command(TOOL, "answer", "--pr", str(args.pr), "--answer", answer, "--presented", head, ask=("--by",))
         for answer in approval_decide.ANSWERS
     }
-    return result.result(TOOL, result.GATE, f"#{args.pr}（{head[:12]}）の承認資料を提示した。答えを待つ", routes=routes, outputs={"head": head})
+    return result.result(
+        TOOL, result.GATE, f"#{args.pr}（{head[:12]}）の承認資料を提示した。答えを待つ", routes=routes, outputs={"head": head}
+    )
 
 
 def cmd_answer(args: argparse.Namespace) -> dict:
@@ -81,7 +96,9 @@ def cmd_approval_check(args: argparse.Namespace) -> dict:
     if pull.base_ref != args.production:
         return result.stopped(TOOL, "not_applicable", f"#{args.pr} は本番ブランチ {args.production} 宛てでない（{pull.base_ref}）")
     got = trail.check(hub, args.pr)
-    return result.result(TOOL, result.OK, f"#{args.pr} の承認の判定: {got.judgment.detail}", outputs={"state": got.judgment.state, "head": got.pull.head_sha})
+    return result.result(
+        TOOL, result.OK, f"#{args.pr} の承認の判定: {got.judgment.detail}", outputs={"state": got.judgment.state, "head": got.pull.head_sha}
+    )
 
 
 def cmd_merge(args: argparse.Namespace) -> dict:
@@ -108,7 +125,9 @@ def cmd_sync_base(args: argparse.Namespace) -> dict:
 
 def cmd_config_snapshot(args: argparse.Namespace) -> dict:
     snap = verify.snapshot()
-    Path(args.out).write_text(json.dumps({"items": snap.items, "unreadable": list(snap.unreadable)}, ensure_ascii=False, indent=2), encoding="utf-8")
+    Path(args.out).write_text(
+        json.dumps({"items": snap.items, "unreadable": list(snap.unreadable)}, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     return result.result(TOOL, result.OK, f"利用者の設定を控えた（{len(snap.items)} 件）", warnings=list(snap.unreadable))
 
 
@@ -116,7 +135,12 @@ def cmd_config_check(args: argparse.Namespace) -> dict:
     before = json.loads(Path(args.before).read_text(encoding="utf-8"))["items"]
     lines = user_config_decide.diff(before, verify.snapshot().items)
     if lines:
-        return result.stopped(TOOL, "check_failed", f"利用者の設定ディレクトリが変わった（{len(lines)} 件）", items=[{"kind": "config", "change": x} for x in lines])
+        return result.stopped(
+            TOOL,
+            "check_failed",
+            f"利用者の設定ディレクトリが変わった（{len(lines)} 件）",
+            items=[{"kind": "config", "change": x} for x in lines],
+        )
     return result.result(TOOL, result.OK, "利用者の設定ディレクトリは変わっていない")
 
 
@@ -125,7 +149,13 @@ def cmd_cleanup(args: argparse.Namespace) -> dict:
     swept = cleanup.sweep(repo_git.worktrees(), args.branch, cleanup.git_remover(repo_git))
     items = [{"kind": "worktree", "path": str(p), "result": "removed"} for p in swept.removed]
     items += [{"kind": "worktree", "path": str(p), "result": "kept", "reason": why} for p, why in swept.kept]
-    return result.result(TOOL, result.OK, f"worktree を {len(swept.removed)} 件外した（残した {len(swept.kept)} 件）", items, warnings=[f"{p}: {w}" for p, w in swept.kept])
+    return result.result(
+        TOOL,
+        result.OK,
+        f"worktree を {len(swept.removed)} 件外した（残した {len(swept.kept)} 件）",
+        items,
+        warnings=[f"{p}: {w}" for p, w in swept.kept],
+    )
 
 
 def _common(p: argparse.ArgumentParser) -> None:

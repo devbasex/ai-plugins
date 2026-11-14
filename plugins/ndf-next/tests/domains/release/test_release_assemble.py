@@ -23,7 +23,9 @@ def _node(number: int, title: str, conclusion: str) -> dict:
 def _origin_with_change(tmp_path: Path, test_only: bool) -> Path:
     """本番（main）の後に、ベースブランチ（develop）へ PR #5 をマージした origin と、その clone。"""
     seed = init_repo(tmp_path / "seed")
-    write_json(seed / ".claude-plugin" / "marketplace.json", {"plugins": [{"name": "kit", "source": "./tools/kit", "description": "Kit (v1.2.3)"}]})
+    write_json(
+        seed / ".claude-plugin" / "marketplace.json", {"plugins": [{"name": "kit", "source": "./tools/kit", "description": "Kit (v1.2.3)"}]}
+    )
     write_json(seed / "tools" / "kit" / ".claude-plugin" / "plugin.json", {"name": "kit", "version": "1.2.3"})
     (seed / "CHANGELOG.md").write_text("# 変更履歴\n\n## [kit 1.2.3] - 2026-01-01\n\n- 前\n", encoding="utf-8")
     git(seed, "add", "-A")

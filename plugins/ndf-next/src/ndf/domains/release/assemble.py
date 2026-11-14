@@ -74,7 +74,13 @@ def _named(planned: Sequence[version_decide.Planned], plugin: str | None) -> ver
     return hit[0]
 
 
-def _write(root: Path, planned: Sequence[version_decide.Planned], decl: decl_mod.Declaration, pulls: Sequence[materials_decide.PullFact], channel: str) -> None:
+def _write(
+    root: Path,
+    planned: Sequence[version_decide.Planned],
+    decl: decl_mod.Declaration,
+    pulls: Sequence[materials_decide.PullFact],
+    channel: str,
+) -> None:
     """版・CHANGELOG を書き換え、宣言の手順を流す。"""
     found = plugins_mod.by_name(plugins_mod.load(root))
     entries = [changelog_decide.Entry(p.number, p.title) for p in pulls]
@@ -115,7 +121,12 @@ def collect(root: Path, hub: GitHub, target: Target) -> tuple[list[version_decid
     pulls = gather.pull_facts(hub, gather.included(repo_git, span))
     paths = repo_git.changed_files(span.since, span.until)
     facts = materials_decide.Facts(
-        target.channel, tuple(planned), tuple(pulls), tuple(change_list), tuple(changes_decide.instruction_changes(paths)), repo_git.rev_parse(span.until)
+        target.channel,
+        tuple(planned),
+        tuple(pulls),
+        tuple(change_list),
+        tuple(changes_decide.instruction_changes(paths)),
+        repo_git.rev_parse(span.until),
     )
     return planned, facts
 

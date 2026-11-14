@@ -81,7 +81,10 @@ def _wait(failed: bool, calls: list[int]) -> Callable[[Callable[[], ci.Reading],
 
 def _lander(hub: FakeHub, failed: bool, calls: list[int]) -> land.Lander:
     hub.responses[("GET", "/repos/o/r/rules/branches/main")] = [
-        {"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": "pytest"}, {"context": approval_decide.STATUS_CONTEXT}]}}
+        {
+            "type": "required_status_checks",
+            "parameters": {"required_status_checks": [{"context": "pytest"}, {"context": approval_decide.STATUS_CONTEXT}]},
+        }
     ]
     hub.responses[("GET", "/repos/o/r/rules/branches/develop")] = []
     return land.Lander(hub, "develop", "main", 60.0, wait=_wait(failed, calls))
