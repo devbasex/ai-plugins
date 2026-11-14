@@ -168,3 +168,15 @@ def test_an_unwritable_gate_rejections_file_is_a_warning_and_the_answer_stays(st
     out = _give(st, tid, _waiting(st, tid))
     assert out["status"] == "ok" and any("gate-rejections" in w for w in out["warnings"])
     assert run.decide(run.read(st, tid)).action == run.Action.CONSUME
+
+
+def test_the_conductor_reads_the_choice_the_notes_who_and_when(st, new_table, flow, tmp_path):
+    # #2934・#3174: 答えの選択肢と指摘を分け、答えた者と時刻を持つ
+    tid = new_table()
+    flow.turn(tid)
+    notes = tmp_path / "notes.md"
+    notes.write_text("節 2 の根拠が足りない")
+    _give(st, tid, _waiting(st, tid), "revise", notes=notes)
+    (got,) = gate.answers(run.read(st, tid))
+    assert got["answer"] == "revise" and got["notes"] == "節 2 の根拠が足りない" and got["reason"] == "人が答えた"
+    assert got["by"] == BY and got["at"] and got["gate"] == "design" and got["stage"] == "設計"

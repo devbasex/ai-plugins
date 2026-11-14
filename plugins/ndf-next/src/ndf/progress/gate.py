@@ -26,6 +26,7 @@
                [--notes <指摘ファイル>] [--head <見た head の SHA>] [--material-sha256 <見た承認資料の sha256>]
                [--drop <課題の番号>...]
     ndf answer ask [--gate design|release]   # プランの中の承認ゲート（雛形の {{gate}}）。答えを待つ結果 JSON を返す
+    ndf answer list <進行表>                 # 書いた答え（選択肢・指摘・理由・答えた者・時刻）を古い順に返す
 """
 
 from __future__ import annotations
@@ -334,7 +335,7 @@ def answer(st: store.Store, table_id: str, a: Answer, observe: Observe = no_obse
             "dropped": list(a.drop),
             "carried_row": carried,
         }
-        draft = run.answer_draft(v, q.stage, q.step, a.value, a.reason, text, a.notes, actor=a.by, extra=extra)
+        draft = run.answer_draft(v, q.stage, a.value, a.reason, text, extra)
         seqs = store.append_events(conn, table_id, [draft], v.events[-1].seq if v.events else 0)
     summary = f"工程 {q.stage} へ答え {a.value} を書いた（{a.by}）。続きは ndf progress next で流す"
     metrics = {"table_id": table_id, "seqs": seqs, "gate_id": q.id, "carried_row": carried}
@@ -378,7 +379,8 @@ def recheck(st: store.Store, table_id: str, observe: Observe) -> Optional[str]:
     payload = {"step": m.step.id, "status": "waiting", "report": None, "generation": m.progress.generation, "reason": why}
     draft = model.EventDraft(run.STEP_EVENT, run.ACTOR, m.stage.name, payload=payload, rev=v.rev)
     # 比べた後に答えが読まれていれば（同じ答えの事象が今も読む答えでなければ）書かない
-    run.append(st, table_id, lambda now: [draft] if _still(now, m.event) else [])
+    answered = m.event
+    run.append(st, table_id, lambda now: [draft] if _still(now, answered) else [])
     return why
 
 
@@ -635,6 +637,44 @@ def parser() -> argparse.ArgumentParser:
     return ap
 
 
+def answers(v: run.View) -> list[dict[str, Any]]:
+    """進行表に書いた答え（古い順）。選択肢（`answer`）と差し戻しの指摘（`notes`）を分け、理由・答えた者・時刻・問いを持つ。
+
+    conductor が答えを読む口（#2934・#3174）。答えの正本は事象 `answered` で、ここは読むだけである。
+    """
+    out = []
+    for ev in v.events:
+        if ev.draft.kind != run.ANSWERED:
+            continue
+        p = ev.draft.payload if ev.draft.payload is not None else {}
+        out.append(
+            {
+                "seq": ev.seq,
+                "at": ev.at.isoformat(),
+                "stage": ev.draft.row_key,
+                "step": p.get("step"),
+                "gate": p.get("gate"),
+                "gate_id": p.get("gate_id"),
+                "answer": p["answer"],
+                "notes": p.get("notes"),
+                "reason": ev.draft.reason,
+                "by": ev.draft.actor,
+            }
+        )
+    return out
+
+
+def _cmd_list(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, Any]:
+    got = answers(run.read(st, a.table_id))
+    return result.result(TOOL, result.OK, f"進行表 {a.table_id} の答え {len(got)} 件", items=got, metrics={"table_id": a.table_id})
+
+
+def list_parser() -> argparse.ArgumentParser:
+    ap = argparse.ArgumentParser(prog=f"{result.ENTRY} {TOOL} list")
+    ap.add_argument("table_id")
+    return ap
+
+
 def ask_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog=f"{result.ENTRY} {TOOL} ask")
     ap.add_argument("--gate", choices=sorted(model.table()["gates"]))
@@ -662,12 +702,14 @@ def progress_verbs() -> set[str]:
 def main(argv: list[str]) -> int:
     """副命令 `ndf answer` と `ndf progress`（副命令の表の 2 行がこのモジュールを指す）。
 
-    - `ask` はプランの中の承認ゲート、進行表の ID で始まれば承認ゲートへの答え（`ndf answer`）
+    - `ask` はプランの中の承認ゲート、`list` は書いた答え、進行表の ID で始まれば承認ゲートへの答え（`ndf answer`）
     - `ndf progress` の副命令の名前か、引数が無い・`-` で始まるときは `ndf progress`。スプリントの完了と同じ
       トランザクションでレーンの行を終える `Env`（`lane_env`。決定 17）で流す。P1b（`run`）はレーンを読まない
     """
     if argv and argv[0] == "ask":
         return command.run_main(ask_parser(), lambda a, _cwd: ask(a.gate), argv[1:])
+    if argv and argv[0] == "list":
+        return command.run_main(list_parser(), lambda a, cwd: command.with_store(cwd, _cmd_list, a), argv[1:])
     if argv and argv[0] in run.COMMANDS:
         return command.run_main(run.parser(), lambda a, cwd: command.with_store(cwd, _progress, a), argv)
     if not argv or argv[0].startswith("-") or argv[0] in progress_verbs():
