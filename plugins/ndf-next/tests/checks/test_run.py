@@ -79,3 +79,78 @@ def test_collect_does_not_descend_into_skipped_dirs(plugin, monkeypatch):
     found = [s.rel.rsplit("/", 1)[-1] for s in run.collect(plugin.root, plugin.repo)]
     assert "a.py" in found and "site.py" not in found
     assert not any(".venv" in top for top in walked)
+
+
+# 現状固定（I-001 emit）。結果 JSON の 1 行の形を、出し方を変えても保つ。
+def test_emit_ok_prints_one_line_without_cause(capsys):
+    run.emit("ok", "3 ファイルに違反なし", [], {"files": 3, "findings": {}})
+    out = capsys.readouterr()
+    assert out.err == ""
+    assert out.out.count("\n") == 1
+    assert json.loads(out.out) == {
+        "tool": run.TOOL,
+        "status": "ok",
+        "summary": "3 ファイルに違反なし",
+        "items": [],
+        "metrics": {"files": 3, "findings": {}},
+    }
+
+
+def test_emit_stopped_with_items_has_no_cause(capsys):
+    items = [{"rule": "NDF502", "path": "a.py", "line": 2}]
+    run.emit("stopped", "違反 1 件", items, {"files": 1, "findings": {"NDF502": 1}})
+    assert json.loads(capsys.readouterr().out) == {
+        "tool": run.TOOL,
+        "status": "stopped",
+        "summary": "違反 1 件",
+        "items": items,
+        "metrics": {"files": 1, "findings": {"NDF502": 1}},
+    }
+
+
+def test_emit_stopped_without_items_is_config_broken(capsys):
+    run.emit("stopped", "読めない", [], {})
+    out = capsys.readouterr().out
+    assert "読めない" in out  # 非 ASCII をそのまま出す
+    assert json.loads(out) == {
+        "tool": run.TOOL,
+        "status": "stopped",
+        "summary": "読めない",
+        "items": [],
+        "metrics": {},
+        "cause": {"kind": "config_broken"},
+    }
+
+
+def test_main_ok_report_shape(plugin, monkeypatch, capsys):
+    monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(plugin.root))
+    plugin.write("src/ndf/a.py", "def f(x):\n    return x\n")
+    assert run.main([]) == run.EXIT_OK
+    report, _ = last_json(capsys)
+    assert set(report) == {"tool", "status", "summary", "items", "metrics"}
+    assert report["tool"] == run.TOOL
+    assert report["summary"] == f"{report['metrics']['files']} ファイルに違反なし"
+    assert report["items"] == []
+
+
+def test_main_violation_report_shape(plugin, monkeypatch, capsys):
+    monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(plugin.root))
+    plugin.write("src/ndf/a.py", "def f(d):\n    return d.get('k', 1)\n")
+    assert run.main([]) == run.EXIT_VIOLATION
+    report, _ = last_json(capsys)
+    assert set(report) == {"tool", "status", "summary", "items", "metrics"}
+    assert report["summary"] == "違反 1 件"
+    assert report["metrics"]["findings"] == {"NDF502": 1}
+
+
+def test_main_unreadable_report_shape(plugin, monkeypatch, capsys, tmp_path):
+    monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(plugin.root))
+    missing = tmp_path / "missing.json"
+    assert run.main(["--event", str(missing)]) == exit_codes.unreadable_code()
+    report, _ = last_json(capsys)
+    assert set(report) == {"tool", "status", "summary", "items", "metrics", "cause"}
+    assert report["tool"] == run.TOOL
+    assert report["status"] == "stopped"
+    assert report["summary"].startswith(f"事象の JSON を読めない: {missing}: ")
+    assert report["items"] == [] and report["metrics"] == {}
+    assert report["cause"] == {"kind": "config_broken"}
