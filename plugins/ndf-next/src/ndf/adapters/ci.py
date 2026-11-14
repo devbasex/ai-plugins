@@ -19,9 +19,9 @@ import re
 import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from typing import Any, NamedTuple, Optional
+from typing import NamedTuple, Optional
 
-from ndf.adapters.github import GitHub
+from ndf.adapters.github import GitHub, text_of
 from ndf.contracts import limits
 
 # 通過として読む結論（SKIPPED・NEUTRAL を通す）。ほかの結論で終わったチェックは落ちたと数える
@@ -40,10 +40,6 @@ _VERDICT_KINDS = {
     "missing": "precondition",
     "stale": "infra_wait",
 }
-
-
-def _text(value: Any) -> str:
-    return value if isinstance(value, str) else ""
 
 
 class Check(NamedTuple):
@@ -65,7 +61,7 @@ def check_of(run: dict) -> Check:
     `status` が `completed` でなくても、終わった時刻と結論があれば終わったとして読む（GitHub の状態の不整合。#2690）。
     終わった時刻があり結論の無いものは `stale` にし、待ち続けない。
     """
-    status, conclusion, completed = _text(run["status"]).lower(), _text(run["conclusion"]).lower(), _text(run["completed_at"])
+    status, conclusion, completed = text_of(run["status"]).lower(), text_of(run["conclusion"]).lower(), text_of(run["completed_at"])
     if status == "completed" or (completed and conclusion):
         state = "done"
     elif completed:
@@ -74,12 +70,12 @@ def check_of(run: dict) -> Check:
         state = "queued"
     else:
         state = "running"
-    return Check(_text(run["name"]), state, conclusion if state == "done" else "", int(run["id"]))
+    return Check(text_of(run["name"]), state, conclusion if state == "done" else "", int(run["id"]))
 
 
 def _newness(run: dict, index: int) -> tuple:
     """新しさ（大きいほど新しい）。時刻の無い実行（まだ始まっていない再実行）は最も新しい。"""
-    stamp = max(_text(run["completed_at"]), _text(run["started_at"]))
+    stamp = max(text_of(run["completed_at"]), text_of(run["started_at"]))
     return (0 if stamp else 1, stamp, int(run["id"]), index)
 
 
@@ -87,7 +83,7 @@ def latest(runs: Iterable[dict]) -> list[Check]:
     """同じ名前のチェックを最新の実行 1 件へ畳む（再実行で通ったチェックは通ったとして読む）。並びは名前の順。"""
     best: dict[str, tuple[tuple, dict]] = {}
     for i, run in enumerate(runs):
-        name, rank = _text(run["name"]), _newness(run, i)
+        name, rank = text_of(run["name"]), _newness(run, i)
         if name not in best or rank >= best[name][0]:
             best[name] = (rank, run)
     return [check_of(best[name][1]) for name in sorted(best)]

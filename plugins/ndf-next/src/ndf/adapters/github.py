@@ -68,7 +68,8 @@ def client(auth: Optional[str] = None, transport: Optional[httpx.BaseTransport] 
     return Client(auth if auth is not None else token(), http_cache=True, auto_retry=True, transport=transport)
 
 
-def _text(value: Any) -> str:
+def text_of(value: Any) -> str:
+    """文字列ならそのまま、ほかの値（None など）は空文字。"""
     return value if isinstance(value, str) else ""
 
 
@@ -88,16 +89,16 @@ class Pull(NamedTuple):
     def from_rest(cls, raw: dict) -> Pull:
         head, base = raw["head"], raw["base"]
         return cls(
-            int(raw["number"]), _text(raw["state"]).lower(), bool(raw["merged"]), _text(head["sha"]),
-            _text(head["ref"]), _text(base["ref"]), _text(raw["body"]), _text(raw["mergeable_state"]).lower(),
+            int(raw["number"]), text_of(raw["state"]).lower(), bool(raw["merged"]), text_of(head["sha"]),
+            text_of(head["ref"]), text_of(base["ref"]), text_of(raw["body"]), text_of(raw["mergeable_state"]).lower(),
         )  # fmt: skip
 
     @classmethod
     def from_graphql(cls, raw: dict) -> Pull:
-        state = _text(raw["state"]).lower()
+        state = text_of(raw["state"]).lower()
         return cls(
-            int(raw["number"]), "open" if state == "open" else "closed", bool(raw["merged"]), _text(raw["headRefOid"]),
-            _text(raw["headRefName"]), _text(raw["baseRefName"]), _text(raw["body"]), _text(raw["mergeStateStatus"]).lower(),
+            int(raw["number"]), "open" if state == "open" else "closed", bool(raw["merged"]), text_of(raw["headRefOid"]),
+            text_of(raw["headRefName"]), text_of(raw["baseRefName"]), text_of(raw["body"]), text_of(raw["mergeStateStatus"]).lower(),
         )  # fmt: skip
 
 
