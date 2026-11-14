@@ -1,0 +1,31 @@
+{
+  "summary": "外の呼び手（サービス Factory のランナー）の側からエントリポイント（entrypoints）を確かめる見本。呼び手が渡す値（call）と入れる環境変数（env）が、エントリポイントの引数の形か置き場のファイルの形に合い、エントリポイントの env に載る名前だけのときに通る（valid）。新しい起動（new）・開発ループ（loop）・再開（resume）を含む",
+  "owner": "D2（contracts/domains）",
+  "columns": {
+    "entrypoint": {"type": "string", "summary": "確かめるエントリポイント", "ref": "domains/entrypoints"},
+    "call": {"type": "string", "summary": "呼び手が渡す値。skill・block・command は引数、report は結果の行の値、hook は事象、file は置き場からの相対パス"},
+    "env": {"type": "array", "summary": "呼び手が入れる環境変数の名前"},
+    "valid": {"type": "boolean", "summary": "エントリポイントが受けるか"},
+    "meaning": {"type": "string", "summary": "見本が表す場面"}
+  },
+  "rows": [
+    {"id": "new", "entrypoint": "skill-workflow", "call": "#895", "env": ["NDF_FACTORY_RUN", "NDF_VERSION", "NDF_STATE_HOME", "NDF_MVV_STATE_DIR", "NDF_ISSUE_REQUEST_FILE", "GH_TOKEN"], "valid": true, "meaning": "課題を指して工程を始める"},
+    {"id": "loop", "entrypoint": "skill-workflow", "call": "--loop", "env": ["NDF_FACTORY_RUN", "NDF_VERSION", "NDF_STATE_HOME", "NDF_MVV_STATE_DIR", "NDF_ISSUE_REQUEST_FILE", "GH_TOKEN", "NDF_LOOP_EXCLUDE"], "valid": true, "meaning": "開発ループを始め、別の実行が持つ課題を外す"},
+    {"id": "loop-named", "entrypoint": "skill-workflow", "call": "--loop l20261102", "env": ["NDF_FACTORY_RUN", "NDF_VERSION", "NDF_STATE_HOME", "NDF_MVV_STATE_DIR", "NDF_ISSUE_REQUEST_FILE", "GH_TOKEN", "NDF_PROGRESS_DB"], "valid": true, "meaning": "名前つきの開発ループを、サービスの進行表の DB で回す"},
+    {"id": "resume", "entrypoint": "block-next", "call": "#895", "env": ["NDF_FACTORY_RUN", "NDF_VERSION", "NDF_STATE_HOME", "NDF_MVV_STATE_DIR", "NDF_ISSUE_REQUEST_FILE", "GH_TOKEN"], "valid": true, "meaning": "区間の報告の ndf-next ブロックの中身で次の区間を始める"},
+    {"id": "unknown-flag", "entrypoint": "skill-workflow", "call": "--resume 895", "env": ["NDF_FACTORY_RUN", "NDF_VERSION", "NDF_STATE_HOME", "NDF_MVV_STATE_DIR", "NDF_ISSUE_REQUEST_FILE", "GH_TOKEN"], "valid": false, "meaning": "契約に無い引数は受けない"},
+    {"id": "terminal-env", "entrypoint": "skill-workflow", "call": "#895", "env": ["NDF_FACTORY_RUN", "NDF_VERSION", "NDF_STATE_HOME", "NDF_MVV_STATE_DIR", "NDF_ISSUE_REQUEST_FILE", "GH_TOKEN", "NDF_RELAY_NAME"], "valid": false, "meaning": "端末で中継を使うときの環境変数はサービスのエントリポイントに無い"},
+    {"id": "report-done", "entrypoint": "report-unattended", "call": "完了", "env": ["NDF_FACTORY_RUN"], "valid": true, "meaning": "区間を最後まで通した"},
+    {"id": "report-gate", "entrypoint": "report-unattended", "call": "判断が要る", "env": ["NDF_FACTORY_RUN"], "valid": true, "meaning": "承認ゲートで止まった"},
+    {"id": "report-unknown", "entrypoint": "report-unattended", "call": "保留", "env": ["NDF_FACTORY_RUN"], "valid": false, "meaning": "結果の行の値は 3 つだけ"},
+    {"id": "hook-stop", "entrypoint": "hook-unattended-stop", "call": "Stop", "env": ["NDF_FACTORY_RUN"], "valid": true, "meaning": "区間の報告の無い最後の応答を差し戻す"},
+    {"id": "gate-design", "entrypoint": "gate-record", "call": "設計承認ゲート", "env": ["NDF_FACTORY_RUN", "NDF_VERSION", "NDF_STATE_HOME", "NDF_MVV_STATE_DIR", "NDF_ISSUE_REQUEST_FILE", "GH_TOKEN"], "valid": true, "meaning": "正の名前で承認ゲートを記録する"},
+    {"id": "gate-legacy", "entrypoint": "gate-record", "call": "gate1", "env": ["NDF_FACTORY_RUN", "NDF_VERSION", "NDF_STATE_HOME", "NDF_MVV_STATE_DIR", "NDF_ISSUE_REQUEST_FILE", "GH_TOKEN"], "valid": false, "meaning": "正の名前のほかの呼び名（id の形を含む）は受けない（volareinc/nd-factory#183）"},
+    {"id": "organizer-request", "entrypoint": "file-organizer", "call": "requests/loop-l20261102-r000000000042.json", "env": ["NDF_ORGANIZER_DIR", "NDF_ORGANIZER_LANE", "NDF_VERSION"], "valid": true, "meaning": "外のオーガナイザーがリリースの依頼を読む"},
+    {"id": "organizer-stray", "entrypoint": "file-organizer", "call": "inbox/x.json", "env": ["NDF_ORGANIZER_DIR"], "valid": false, "meaning": "置き場の表に無いファイルはやり取りしない"},
+    {"id": "plan-progress", "entrypoint": "file-plan-progress", "call": "s1/8-release-request-state/progress.jsonl", "env": ["NDF_FACTORY_RUN"], "valid": true, "meaning": "プランの進捗の step と attention を読む"},
+    {"id": "loop-record", "entrypoint": "file-loop-record", "call": "l20261102/loop.json", "env": ["NDF_FACTORY_RUN"], "valid": true, "meaning": "開発ループの記録を読む"},
+    {"id": "ask-ledger", "entrypoint": "file-ledgers", "call": "ask.jsonl", "env": ["NDF_MVV_STATE_DIR"], "valid": true, "meaning": "判断の記録を読む"},
+    {"id": "issue-request", "entrypoint": "file-issue-request", "call": ".", "env": ["NDF_ISSUE_REQUEST_FILE"], "valid": true, "meaning": "別のリポジトリ宛ての起票の依頼を読む"}
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "summary": "外の呼び手（サービス Factory のランナー）が NDF を起動し、NDF とやり取りするエントリポイント（Factory の契約）。エントリポイントごとに、呼び手が渡す引数と環境変数・やり取りの置き場と形・新しい側でエントリポイントを持つ子・呼び手と合わせる順番を持つ。引数は正規表現（全体が一致）で、Skill の名前の前置き（プラグイン名と :）は identity が決め、表は持たない。見本は entrypoint-cases にある",
+  "owner": "D2（contracts/domains）",
+  "columns": {
+    "kind": {"type": "string", "summary": "エントリポイントの種類。skill は Skill の起動、block は応答の末尾の ndf-next ブロック（中身は Skill の起動）、report は応答の末尾の区間の報告、hook は hook の登録の行、command は副命令の起動、file は置き場のファイルでのやり取り"},
+    "target": {"type": "string", "summary": "エントリポイントの名前。skill と block は Skill の名前（前置きを除く）、report は結果の行の項目名、hook は hook の事象、command は副命令の名前、file は置き場（domains/places の id）"},
+    "args": {"type": "array", "summary": "呼び手が渡してよい引数の形（正規表現。どれか 1 つに全体が一致する）。report は結果の行の値", "optional": true},
+    "env": {"type": "array", "summary": "呼び手が入れてよい環境変数（domains/env の id）。エントリポイントはこの表に無い名前に頼らない"},
+    "files": {"type": "array", "summary": "エントリポイントがやり取りするファイル（domains/ndf-files の id）", "optional": true},
+    "owner_child": {"type": "string", "summary": "新しい側でこのエントリポイントを持つ子（作り直しの実装計画の記号）"},
+    "order": {"type": "string", "summary": "呼び手と合わせる順番。kept は入れ替えで形を変えず呼び手は何もしない、caller-first は入れ替え（S2）の前に呼び手の側を新しいエントリポイントへ直す"},
+    "source": {"type": "string", "summary": "今の NDF での出所（契約のファイル・Issue）"}
+  },
+  "rows": [
+    {"id": "skill-workflow", "kind": "skill", "target": "development-workflow", "args": ["#[1-9][0-9]*", "--loop( [a-z0-9][a-z0-9-]*)?"], "env": ["NDF_FACTORY_RUN", "NDF_VERSION", "NDF_STATE_HOME", "NDF_LOOP_EXCLUDE", "NDF_ISSUE_REQUEST_FILE", "NDF_MVV_STATE_DIR", "NDF_PROGRESS_DB", "NDF_ORGANIZER_DIR", "NDF_ORGANIZER_LANE", "GH_TOKEN"], "owner_child": "S1a", "order": "kept", "source": "plugins/ndf/skills/development-workflow（#2439・#3242）"},
+    {"id": "block-next", "kind": "block", "target": "development-workflow", "args": ["#[1-9][0-9]*", "--loop( [a-z0-9][a-z0-9-]*)?"], "env": ["NDF_FACTORY_RUN", "NDF_VERSION", "NDF_STATE_HOME", "NDF_LOOP_EXCLUDE", "NDF_ISSUE_REQUEST_FILE", "NDF_MVV_STATE_DIR", "NDF_PROGRESS_DB", "NDF_ORGANIZER_DIR", "NDF_ORGANIZER_LANE", "GH_TOKEN"], "owner_child": "M3b", "order": "kept", "source": "plugins/ndf/contracts/forms/ndf-next-block.json"},
+    {"id": "report-unattended", "kind": "report", "target": "結果", "args": ["判断が要る", "完了", "できなかった"], "env": ["NDF_FACTORY_RUN"], "owner_child": "M3a", "order": "kept", "source": "plugins/ndf/contracts/forms/unattended-report.json（#3242）"},
+    {"id": "hook-unattended-start", "kind": "hook", "target": "UserPromptSubmit", "env": ["NDF_FACTORY_RUN"], "owner_child": "M3a", "order": "kept", "source": "plugins/ndf/hooks/claude.json の unattended-start（#3242）"},
+    {"id": "hook-unattended-stop", "kind": "hook", "target": "Stop", "env": ["NDF_FACTORY_RUN"], "owner_child": "M3a", "order": "kept", "source": "plugins/ndf/hooks/claude.json の unattended-stop（#3242）"},
+    {"id": "hook-unattended-end", "kind": "hook", "target": "SessionEnd", "env": ["NDF_FACTORY_RUN"], "owner_child": "M3a", "order": "kept", "source": "plugins/ndf/hooks/claude.json の unattended-end（#3242）"},
+    {"id": "file-organizer", "kind": "file", "target": "organizer", "env": ["NDF_ORGANIZER_DIR", "NDF_ORGANIZER_LANE", "NDF_VERSION", "NDF_FACTORY_RUN"], "files": ["organizer-request", "organizer-answer", "organizer-range", "organizer-batch", "organizer-presented", "organizer-progress", "organizer-result"], "owner_child": "P3", "order": "kept", "source": "plugins/ndf/contracts/forms/parallel-external.json（#2439）"},
+    {"id": "file-plan-progress", "kind": "file", "target": "ndf-tmp", "env": ["NDF_FACTORY_RUN"], "files": ["plan-progress"], "owner_child": "C2", "order": "kept", "source": "プランの状態のディレクトリの progress.jsonl（#3390）"},
+    {"id": "file-loop-record", "kind": "file", "target": "ndf-loop", "env": ["NDF_FACTORY_RUN"], "files": ["loop-record"], "owner_child": "M1", "order": "kept", "source": "開発ループの loop.json（#3390）"},
+    {"id": "file-ledgers", "kind": "file", "target": "mvv-state", "env": ["NDF_MVV_STATE_DIR"], "files": ["ask-ledger", "gate-rejections"], "owner_child": "P2", "order": "kept", "source": "ask.jsonl と gate-rejections.jsonl（#3390・volareinc/nd-factory#183）"},
+    {"id": "file-issue-request", "kind": "file", "target": "issue-request", "env": ["NDF_ISSUE_REQUEST_FILE"], "files": ["issue-request"], "owner_child": "M7", "order": "kept", "source": "plugins/ndf/scripts/lib/runner_issue_request.py（#2216）"},
+    {"id": "gate-record", "kind": "command", "target": "gate", "args": ["設計承認ゲート", "リリース承認ゲート"], "env": ["NDF_FACTORY_RUN", "NDF_VERSION", "NDF_STATE_HOME", "NDF_LOOP_EXCLUDE", "NDF_ISSUE_REQUEST_FILE", "NDF_MVV_STATE_DIR", "NDF_PROGRESS_DB", "NDF_ORGANIZER_DIR", "NDF_ORGANIZER_LANE", "GH_TOKEN"], "owner_child": "P2", "order": "caller-first", "source": "sprint-state.py gate と gate-rejections.py record に渡す承認ゲートの名前（volareinc/nd-factory#183）"}
+  ]
+}

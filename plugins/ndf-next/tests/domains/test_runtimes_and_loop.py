@@ -10,7 +10,7 @@ LOOP = "loop-phases"
 def test_every_domain_table_has_its_owner_and_valid_references():
     policy_names = set(limits.table())
     domain_tables = [n for n in facts.names() if facts.place(n).startswith(f"{facts.DOMAINS_DIR}/")]
-    assert len(domain_tables) == 13
+    assert len(domain_tables) == 16
     for name in domain_tables:
         assert facts.table(name).owner.startswith("D2")
         assert facts.ref_errors(name, policy_names) == []
