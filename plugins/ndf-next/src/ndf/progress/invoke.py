@@ -195,8 +195,7 @@ def _tool(run: StageRun) -> str:
 def finished(run: StageRun, report: dict[str, Any]) -> StageResult:
     """結果 JSON から、宣言した鍵だけの出力を取る。宣言に無い鍵は捨てて `warnings` に載せる。"""
     given = report["outputs"] if isinstance(report.get("outputs"), dict) else {}
-    kept = {k: v for k, v in given.items() if k in run.outputs}
-    dropped = sorted(set(given) - set(kept))
+    kept, dropped = stages.keep_declared(run.outputs, given)
     warnings = tuple(f"工程の定義の outputs に無い鍵を捨てた: {k}" for k in dropped)
     errs = value_errors(kept)
     if errs:

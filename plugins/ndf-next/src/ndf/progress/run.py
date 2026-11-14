@@ -762,7 +762,7 @@ def _stage_output(s: stages.StageDef, prog: StepProgress) -> tuple[dict[str, Any
         if isinstance(rep.get("outputs"), dict):
             merged.update(rep["outputs"])
     out: dict[str, Any] = {"steps": reports, "summary": f"{s.name} の {len(reports)} ステップが終わった"}
-    kept = {k: val for k, val in merged.items() if k in s.outputs}
+    kept, _ = stages.keep_declared(s.outputs, merged)
     if kept:
         out["outputs"] = kept
     return out, merged
