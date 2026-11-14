@@ -22,7 +22,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Iterable, Iterator, Mapping
-from typing import Any
+from typing import Any, Optional
 
 from jsonschema import Draft202012Validator
 
@@ -105,6 +105,36 @@ def ref_target(ref: str) -> Any:
             return None
         node = node[part]
     return node
+
+
+def _enum_of_property(node: dict[str, Any], key: str) -> Optional[list[str]]:
+    """スキーマの節 `node` の性質 `key` の `enum`。無ければ None。"""
+    props = node["properties"] if isinstance(node.get("properties"), dict) else {}
+    prop = props[key] if key in props else None
+    return list(prop["enum"]) if isinstance(prop, dict) and "enum" in prop else None
+
+
+def _children(node: Any) -> Iterable[Any]:
+    """スキーマの木の子（オブジェクトなら値、配列なら要素）。"""
+    if isinstance(node, dict):
+        return node.values()
+    if isinstance(node, list):
+        return node
+    return ()
+
+
+def find_enum(node: Any, key: str) -> Optional[list[str]]:
+    """スキーマの木から、性質 `key` の `enum` を探す（自分の性質が先、次に子を順に。最初に見つかったもの）。無ければ None。"""
+    own = _enum_of_property(node, key) if isinstance(node, dict) else None
+    if own is not None:
+        return own
+    return next((found for child in _children(node) if (found := find_enum(child, key)) is not None), None)
+
+
+def answer_choices(ref: Optional[str]) -> list[str]:
+    """規約の参照 `ref` が指すスキーマの `answer` の enum（承認ゲートの答えの語）。参照が無いか enum が無ければ空。"""
+    listed = find_enum(ref_target(ref), "answer") if ref else None
+    return listed if listed is not None else []
 
 
 def validate_io(ref: str, obj: Any) -> list[str]:
