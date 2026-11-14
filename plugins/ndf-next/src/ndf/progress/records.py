@@ -16,7 +16,7 @@ from ndf import identity
 from ndf.adapters.git import Git, GitError
 from ndf.adapters.github import GitHub, GitHubError, client
 from ndf.progress import model
-from ndf.progress.table import View
+from ndf.progress.table import FINISHED, View
 
 # 進捗記録の節の見出しと終わりの印、時刻の表示の時間帯（JST）
 ISSUE_SECTION = "## 進行"
@@ -49,7 +49,7 @@ def github_records(cwd: Path) -> Records:
 
 
 def _record_line(name: str, row: Optional[model.RowState]) -> str:
-    if row is not None and row.state == "finished" and row.at is not None:
+    if row is not None and row.state == FINISHED and row.at is not None:
         return f"- [x] {name} — {row.at.astimezone(JST):%Y-%m-%d %H:%M}"
     if row is not None and row.state in ("disabled", "cancelled"):
         why = f"（{row.reason}）" if row.reason else ""
@@ -67,7 +67,7 @@ def issue_section(v: View) -> str:
 def pr_section(v: View) -> str:
     """スプリント PR の「通した工程」。終了の印が付いた行だけを並べる。"""
     rows = v.rows
-    done = [_record_line(s.name, rows[s.name]) for s in v.snap.stages if s.name in rows and rows[s.name].state == "finished"]
+    done = [_record_line(s.name, rows[s.name]) for s in v.snap.stages if s.name in rows and rows[s.name].state == FINISHED]
     return "\n".join(line.replace("- [x] ", "- ", 1) for line in done)
 
 

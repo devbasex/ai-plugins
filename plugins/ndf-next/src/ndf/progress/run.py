@@ -35,12 +35,19 @@ from ndf.core import durable
 from ndf.core.plan import cli as plan_cli
 from ndf.progress import command, conditions, definition, invoke, model, stages, store
 from ndf.progress.records import Records, github_records, sync_records
-from ndf.progress.table import View, append, read
+from ndf.progress.table import FINISHED, View, append, read
 from ndf.progress.table import payload as _payload
 
 TOOL = __package__.rpartition(".")[2]
 ACTOR = invoke.ACTOR
+# 事象の種類
+STARTED = "started"
 STEP_EVENT = "step_recorded"
+ANSWERED = "answered"
+FAILED = "failed"
+# 答えの語（承認と差し戻し）
+APPROVED = "approved"
+REVISE = "revise"
 # 外から待つ問い合わせの間隔と、作業が排他を取るまでの待ちの間隔（どちらも宣言の値）
 WAIT_POLL = plan_cli.WAIT_POLL
 LOCK_POLL = durable.POLL
@@ -83,19 +90,19 @@ class StepProgress:
 
 def _seen(prog: StepProgress, ev: model.Event) -> None:
     kind, p = ev.draft.kind, _payload(ev)
-    if kind == "started":
+    if kind == STARTED:
         prog.anchor, prog.answer, prog.waiting = ev.seq, None, None
     elif kind == STEP_EVENT:
-        if p["status"] == "finished":
+        if p["status"] == FINISHED:
             prog.done[p["step"]], prog.waiting = p["report"], None
         else:
             prog.waiting = p
         prog.anchor, prog.answer = ev.seq, None
-    elif kind == "answered" and p["answer"] == "revise" and p["kind"] == invoke.LISTEN:
+    elif kind == ANSWERED and p["answer"] == REVISE and p["kind"] == invoke.LISTEN:
         prog.generation += 1
         prog.done, prog.waiting, prog.answer, prog.anchor = {}, None, None, ev.seq
         prog.notes = p["notes"]
-    elif kind == "answered" and ev.seq > prog.anchor:
+    elif kind == ANSWERED and ev.seq > prog.anchor:
         prog.answer = ev
 
 
@@ -162,7 +169,7 @@ def decide(v: View) -> Move:
         if model.is_terminal(state):
             continue
         if state == "failed":
-            return Move(Action.FAILED, s, event=_last(v.row_events(s.name), "failed"))
+            return Move(Action.FAILED, s, event=_last(v.row_events(s.name), FAILED))
         if state == "running":
             return _running_move(v, s)
         return Move(Action.START, s)
@@ -210,7 +217,7 @@ def _gate_routes(table_id: str, m: Move) -> dict[str, Any]:
     assert m.stage is not None
     out = {}
     for a in choices(m):
-        ask = ("notes", "reason") if a == "revise" else ("reason",)
+        ask = ("notes", "reason") if a == REVISE else ("reason",)
         out[a] = _cmd("answer", table_id, m.stage.name, "--answer", a, ask=ask)
     return out
 
@@ -345,7 +352,7 @@ RETRO_STAGE_ID = "retrospective"
 def _retro_enabled(v: View) -> bool:
     """振り返りの工程が進行表にあって終わったか。無い・無効・中止なら偽（#3092 の前提 4）。"""
     rows = v.rows
-    return any(s.id == RETRO_STAGE_ID and s.name in rows and rows[s.name].state == "finished" for s in v.snap.stages)
+    return any(s.id == RETRO_STAGE_ID and s.name in rows and rows[s.name].state == FINISHED for s in v.snap.stages)
 
 
 TABLE_FACTS: dict[str, Callable[[View], bool]] = {"retro_enabled": _retro_enabled}  # 進行表から求める条件の語
@@ -376,7 +383,7 @@ def _start(d: Drive, v: View, s: stages.StageDef) -> Optional[dict[str, Any]]:
         inputs = invoke.resolve_inputs(s, v.context())
     except invoke.StageInputError as exc:
         return result.stopped(TOOL, exc.kind, str(exc), items=exc.items, metrics=_metrics(v, m))
-    d.write(model.EventDraft("started", ACTOR, s.name, payload={"inputs": inputs}, rev=v.rev))
+    d.write(model.EventDraft(STARTED, ACTOR, s.name, payload={"inputs": inputs}, rev=v.rev))
     return None if d.inline else _launched(d, v, m)
 
 
@@ -397,9 +404,9 @@ def gate_report(step: stages.StepDef, answer: model.Event) -> dict[str, Any]:
 def _consume(d: Drive, v: View, m: Move) -> None:
     """承認ゲートの答えを読む。承認ならステップを終え、承認しないなら行を失敗にして conductor へ返す。"""
     assert m.stage is not None and m.step is not None and m.event is not None and m.progress is not None
-    if _payload(m.event)["answer"] == "approved":
+    if _payload(m.event)["answer"] == APPROVED:
         rep = gate_report(m.step, m.event)
-        payload = {"step": m.step.id, "status": "finished", "report": rep, "generation": m.progress.generation}
+        payload = {"step": m.step.id, "status": FINISHED, "report": rep, "generation": m.progress.generation}
         d.write(model.EventDraft(STEP_EVENT, ACTOR, m.stage.name, payload=payload, rev=v.rev))
         return
     detail = f"承認ゲート {m.step.gate} で承認されなかった（{m.event.draft.reason}）"
@@ -501,7 +508,7 @@ def wait(st: store.Store, table_id: str, timeout: float, sleep: Callable[[float]
 
 def _notes(value: str, path: Optional[Path]) -> Optional[str]:
     """差し戻しの指摘の本文。差し戻しには空でない指摘ファイルが要る（3365-4）。"""
-    if value != "revise":
+    if value != REVISE:
         return None
     if path is None:
         raise model.Refused("差し戻し（revise）には指摘ファイル（--notes）が要る")
@@ -528,7 +535,7 @@ def answer(st: store.Store, table_id: str, stage: str, value: str, reason: str, 
         payload = {"answer": value, "step": m.step.id, "kind": invoke.kind_of(m.step), "notes": text}
         if notes is not None:
             payload["notes_path"] = str(notes)
-        return [model.EventDraft("answered", "conductor", stage, reason=reason, payload=payload, rev=v.rev)]
+        return [model.EventDraft(ANSWERED, "conductor", stage, reason=reason, payload=payload, rev=v.rev)]
 
     seqs = append(st, table_id, build)
     summary = f"工程 {stage} へ答え {value} を書いた。続きは next で流す"
@@ -566,7 +573,7 @@ def _retrying(call: Callable[[], invoke.StageResult], sleep: Callable[[float], N
 
 def _failed_with(s: stages.StageDef, step: Optional[str], rev: int, cause: dict[str, Any]) -> model.EventDraft:
     """行を失敗にする事象の下書き（止まった理由と、止まったステップ）。"""
-    return model.EventDraft("failed", ACTOR, s.name, payload={"cause": cause, "step": step}, rev=rev)
+    return model.EventDraft(FAILED, ACTOR, s.name, payload={"cause": cause, "step": step}, rev=rev)
 
 
 def _failed(s: stages.StageDef, step: Optional[str], rev: int, kind: str, detail: str) -> model.EventDraft:
@@ -581,7 +588,7 @@ def _step_draft(v: View, s: stages.StageDef, step: stages.StepDef, prog: StepPro
     errs = definition.validate_io(step.output_ref, res.report) if step.output_ref else []
     if errs:
         return _failed(s, step.id, v.rev, "bad_report", f"ステップ {step.id} の出力が規約に合わない: {'; '.join(errs)}")
-    status = "finished" if res.status == result.OK else "waiting"
+    status = FINISHED if res.status == result.OK else "waiting"
     payload = {"step": step.id, "status": status, "report": res.report, "generation": prog.generation, "warnings": list(res.warnings)}
     return model.EventDraft(STEP_EVENT, ACTOR, s.name, payload=payload, rev=v.rev)
 

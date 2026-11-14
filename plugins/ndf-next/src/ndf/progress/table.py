@@ -13,6 +13,8 @@ from ndf.progress import model, stages, store
 
 # 番号のぶつかり（同時の追記）で読み直して書き直す回数
 APPEND_ATTEMPTS = 3
+# 行とステップの終わり（行の状態と、事象 step_recorded の status）
+FINISHED = "finished"
 
 
 @dataclass(frozen=True)
