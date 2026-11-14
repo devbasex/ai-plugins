@@ -25,9 +25,9 @@ from ndf.domains.crossrefactor import scope, tests_decide, verify_decide
 from ndf.domains.crossrefactor.diff_decide import in_scope
 from ndf.testing import limits as test_limits
 from ndf.testing import slots, weight
+from ndf.testing.rerun import SCOPE_KEY
 
 RUN_POLICY = "test-run.test"
-SCOPE_KEY = "scope_command"
 
 
 @dataclass(frozen=True)

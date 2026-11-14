@@ -22,9 +22,9 @@ from typing import Any
 from ndf.contracts import facts
 from ndf.domains.crossrefactor.diff_decide import in_scope
 from ndf.domains.crossrefactor.symbols_decide import PYTHON_SUFFIX
+from ndf.testing.rerun import PATHS_SLOT
 
 TABLE = "test-files"
-PATHS_SLOT = "{paths}"
 # 名前の対応（Python 以外のソースと、import を持たないテスト）。`{s}` はソースのファイル名の語幹
 NAME_FORMS = ("test_{s}", "{s}_test", "{s}Test", "{s}Tests", "{s}_spec")
 
