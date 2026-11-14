@@ -62,6 +62,7 @@ from dbos import DBOS, DBOSClient, DBOSConfig, SetEnqueueOptions, SetWorkflowID
 from dbos._serialization import DefaultSerializer
 
 from ndf.adapters import run_log
+from ndf.contracts import limits
 from ndf.core import durable_locks as locks
 from ndf.core.durable_locks import (
     MAINT_LOCK as MAINT_LOCK,
@@ -102,6 +103,10 @@ RUNS_TABLE = "ndf_runs"
 CHECK_INTERVAL = timedelta(hours=24)
 # DBOS を閉じる前に、走っている耐久ワークフローが記録を終えたかを見る間隔（秒）
 SHUTDOWN_POLL_SECONDS = 0.05
+# 耐久の記録への問い合わせの間隔の宣言。DBOS の通知の見回り（DBOS の既定は 1 秒）にも当てる。閉じるときに見回りの
+# スレッドの眠りの残りを待つため、既定のままでは 1 回の起動ごとに最大 1 秒が上乗せになる（B3）。
+# 見回りは待っている recv が無ければ DB を読まない
+POLL = "durable.poll"
 
 DBOS_DIR = "dbos"
 RETIRED_DIR = "retired"
@@ -886,6 +891,7 @@ def launch(database_url: str, run_key: str) -> None:
         "application_version": app_version(run_key),
         "log_level": LOG_LEVEL,
         "serializer": _RedactingSerializer(),
+        "notification_listener_polling_interval_sec": limits.value(POLL, "interval"),
     }
     if path is not None:
         path.parent.mkdir(parents=True, exist_ok=True)

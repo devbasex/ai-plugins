@@ -50,7 +50,7 @@ TOPIC_ANSWER = "answer"
 TOPIC_RETRY = "retry-wait"
 # 承認の答えを 1 回に待つ秒。期限で答えが無ければ待ち直す（答えの来ない承認ゲートを打ち切らない）
 ANSWER_WAIT_SECONDS = 86400.0
-POLL = "durable.poll"
+POLL = durable.POLL
 
 
 @dataclass(frozen=True)
