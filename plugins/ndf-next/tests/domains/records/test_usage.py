@@ -6,8 +6,11 @@ import json
 from datetime import date, datetime, timezone
 from pathlib import Path
 
+import git_sandbox
 import pytest
 
+from ndf import cli
+from ndf.adapters import github
 from ndf.domains.records import jsonl, usage
 from ndf.domains.records import usage_decide as ud
 
@@ -124,3 +127,37 @@ def test_report_counts_transcript_once_and_the_last_response_missed_by_the_hook(
     got = usage.report(usage.ledger_path(env), date(2026, 11, 14), date(2026, 11, 14), lambda q: queries.append(q) or 3)
     assert got["usage"]["output_tokens"] == 10 and got["closed_issues"] == 3 and queries[0].startswith("closed:2026-11-14T00")
     assert got["since"].endswith("+09:00") and got["unknown_rows"] == 0
+
+
+class _SearchApi:
+    """GraphQL の検索だけに答えるクライアント（件数を文字列で返す）。"""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict]] = []
+
+    def graphql(self, query: str, variables: dict) -> dict:
+        self.calls.append((query, variables))
+        return {"search": {"issueCount": "4"}}
+
+
+def test_usage_report_counts_closed_issues_of_the_origin_repo_with_one_search(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], last_result
+) -> None:
+    """現状固定（I-005 の前）: `ndf records usage report` が閉じた課題を数える検索の形と、件数の読み方。"""
+    git_sandbox.isolate_git(tmp_path, monkeypatch)
+    root = tmp_path / "r"
+    git_sandbox.sh(tmp_path, "init", "-q", str(root))
+    git_sandbox.sh(root, "remote", "add", "origin", "https://github.com/o/r.git")
+    monkeypatch.setenv("NDF_USAGE_DIR", str(tmp_path / "ledger"))
+    api = _SearchApi()
+    monkeypatch.setattr(github, "client", lambda *a, **k: api)
+    code = cli.main(["records", "--cwd", str(root), "usage", "report", "--since", "2026-11-14", "--until", "2026-11-14"])
+    got = last_result(capsys.readouterr().out)
+    assert code == 0 and got["status"] == "ok"
+    assert got["items"][0]["closed_issues"] == 4
+    assert api.calls == [
+        (
+            "query($q: String!) { search(query: $q, type: ISSUE) { issueCount } }",
+            {"q": "repo:o/r is:issue closed:2026-11-14T00:00:00+09:00..2026-11-14T23:59:59+09:00"},
+        )
+    ]
