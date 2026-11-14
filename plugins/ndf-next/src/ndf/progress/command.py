@@ -21,6 +21,9 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
+
+import sqlalchemy as sa
 
 from ndf import contracts, identity
 from ndf.adapters.git import Git, GitError
@@ -48,10 +51,19 @@ def _root(cwd: Path) -> Path:
     return durable.store_root(identity.load().name, cwd)
 
 
+def _without_userinfo(url: str) -> str:
+    """URL の userinfo（`user:token@`）を外す。トークンを DB へ残さず、トークンの入れ替えで識別を変えない。"""
+    parts = urlsplit(url)
+    if not parts.scheme or "@" not in parts.netloc:
+        # scp の形（git@host:o/r）と userinfo の無い URL はそのまま
+        return url
+    return urlunsplit(parts._replace(netloc=parts.netloc.rpartition("@")[2]))
+
+
 def _repo(cwd: Path, root: Path) -> str:
-    """リポジトリの識別。origin の URL、無ければメインディレクトリの絶対パス（置き場の 2 つ上の親）。"""
+    """リポジトリの識別。origin の URL（userinfo を外す）、無ければメインディレクトリの絶対パス（置き場の 2 つ上の親）。"""
     try:
-        return Git(cwd).run("remote", "get-url", "origin").strip()
+        return _without_userinfo(Git(cwd).run("remote", "get-url", "origin").strip())
     except GitError:
         # origin の無いリポジトリはメインディレクトリで識別する
         return str(root.parents[2])
@@ -325,6 +337,7 @@ STOPPABLE = (
     GitError,
     identity.IdentityError,
     subprocess.CalledProcessError,
+    sa.exc.SQLAlchemyError,
 )
 # 付加情報を持たず、止まった理由の語だけが決まる例外の種類（前から引く）
 _CAUSES: tuple[tuple[type[Exception], str], ...] = (
@@ -336,6 +349,9 @@ _CAUSES: tuple[tuple[type[Exception], str], ...] = (
 
 def _stopped_from(exc: Exception) -> dict[str, Any]:
     """STOPPABLE の種類を受け、結果 JSON の止まった理由にする。最後の分岐は CalledProcessError。"""
+    if isinstance(exc, sa.exc.SQLAlchemyError):
+        # store が包み直さなかった DB の誤り。本文は SQL・値・接続先を含みうるので種類の名前だけを出す
+        return result.stopped(TOOL, "store_broken", f"進行表の DB を使えない: {type(exc).__name__}")
     if isinstance(exc, model.Refused):
         metrics = {"current_id": exc.current_id} if exc.current_id else {}
         return result.stopped(TOOL, "refused", exc.reason, metrics=metrics)

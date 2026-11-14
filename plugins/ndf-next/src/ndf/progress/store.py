@@ -209,19 +209,21 @@ def _sqlite_engine(path: Path) -> sa.Engine:
 
 
 @contextmanager
-def _translated(root: Path) -> Iterator[None]:
-    """SQLite の取り合いと破損を止まった理由へ包み直す。破損を受けたら検査の目印を消す。"""
+def _translated(store: Store) -> Iterator[None]:
+    """SQLite の取り合いと破損、DB へ繋げない・切れたことを止まった理由へ包み直す。破損を受けたら検査の目印を消す。"""
     try:
         yield
     except sa.exc.OperationalError as exc:
         text = str(exc.orig)
         if any(m in text for m in BUSY_MARKERS):
             raise StoreBusy(f"進行表の DB の書き込みが {BUSY_TIMEOUT_SECONDS} 秒を超えて待った: {text}") from exc
-        raise
+        # 接続の失敗・認証の失敗・途中の切断。接続 URL のパスワードを結果 JSON・ログへ出さない
+        shown = store.engine.url.render_as_string(hide_password=True)
+        raise durable.StoreBroken(f"進行表の DB へ繋げない・使えない（{shown}）: {type(exc.orig).__name__}") from exc
     except sa.exc.DatabaseError as exc:
         text = str(exc.orig)
         if any(m in text for m in BROKEN_MARKERS):
-            (root / CHECKED_MARK).unlink(missing_ok=True)
+            (store.root / CHECKED_MARK).unlink(missing_ok=True)
             raise durable.StoreBroken(f"進行表の DB が壊れている: {exc.orig}") from exc
         raise
 
@@ -247,7 +249,7 @@ def _write_schema(engine: sa.Engine, found: Optional[int]) -> None:
 
 def ensure_schema(store: Store, now: datetime) -> None:
     """表が無ければ作り、表の版を上げる。版を上げる前は（SQLite なら）日時に依らず控えを取る。"""
-    with _translated(store.root):
+    with _translated(store):
         found = _read_version(store.engine)
         if found is not None and found > SCHEMA_VERSION:
             # 接続 URL のパスワードを結果 JSON・ログへ出さない
@@ -341,7 +343,7 @@ def restore(url: str, root: Path, source: Path, now: Optional[datetime] = None) 
 @contextmanager
 def transaction(store: Store) -> Iterator[sa.Connection]:
     """1 つのトランザクション。例外で抜ければ何も残らない。"""
-    with _translated(store.root), store.engine.begin() as conn:
+    with _translated(store), store.engine.begin() as conn:
         yield conn
 
 

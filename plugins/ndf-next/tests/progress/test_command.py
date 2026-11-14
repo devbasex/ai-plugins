@@ -310,6 +310,32 @@ def test_new_names_the_table_by_the_origin_url_when_there_is_one(repo, capsys):
     assert out["metrics"]["table_id"] == model.table_id("sprint", "https://example.invalid/o/r.git", "s1")
 
 
+def test_new_drops_the_credentials_of_the_origin_url_from_the_table_id(repo, capsys):
+    subprocess.run(["git", "remote", "add", "origin", "https://x-access-token:secret@example.invalid/o/r.git"], cwd=repo, check=True)
+    _, out = _new(capsys)
+    assert out["metrics"]["table_id"] == model.table_id("sprint", "https://example.invalid/o/r.git", "s1")
+    table, _ = _stored(out["metrics"]["table_id"])
+    assert "secret" not in json.dumps(table, ensure_ascii=False, default=str)
+
+
+@pytest.mark.parametrize("url", ["git@example.invalid:o/r.git", "https://example.invalid/o/r.git", "/srv/o/r"])
+def test_without_userinfo_keeps_urls_without_credentials(url):
+    assert command._without_userinfo(url) == url
+
+
+def test_unreachable_database_stops_as_store_broken_without_the_password(repo, capsys, monkeypatch):
+    monkeypatch.setenv("NDF_PROGRESS_DB", "postgresql+psycopg://u:hunter2@127.0.0.1:1/none")
+    code, out = _new(capsys)
+    assert out["status"] == "stopped" and out["cause"]["kind"] == "store_broken"
+    assert "hunter2" not in json.dumps(out, ensure_ascii=False)
+
+
+def test_stopped_from_a_bare_sqlalchemy_error_shows_only_its_type():
+    import sqlalchemy as sa
+
+    assert _stopped(sa.exc.ArgumentError("postgresql://u:pw@h/db"))[:2] == ("store_broken", "進行表の DB を使えない: ArgumentError")
+
+
 def test_new_stores_the_context_the_enablement_and_the_parent(repo, capsys):
     _declare(repo, json.dumps({"workflow": {"stages": {"リファクタリング": {"enabled": False, "reason": "止めている"}}}}))
     _, out = _run(
