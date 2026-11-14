@@ -2,7 +2,7 @@
 
 ## 目的
 
-- **今どうなっているか**: `plugins/ndf-next/pyproject.toml` の依存のうち 11 本が最新の安定版より古く（「外部の調査」の LIB7）、版の遅れを知らせる検査も版を上げる操作も無い。`[tool.uv]` に 7 日待つ設定（`exclude-newer`）が無い。リポジトリの Dependabot は GitHub Actions だけを見ている
+- **今どうなっているか**: `plugins/ndf-next/pyproject.toml` の依存のうち 11 本が最新の安定版より古い（「外部の調査」の LIB7）。版の遅れを知らせる検査も、版を上げる操作も無い。`[tool.uv]` に 7 日待つ設定（`exclude-newer`）が無い。リポジトリの Dependabot は GitHub Actions だけを見ている
 - **誰に効くか**: #1142 の作り直しを流すレーンと、入れ替え（S2 #3304）の後に `plugins/ndf` を保守する開発者
 - **変えると何が成り立つか**: 依存の版を、公開から 7 日たった最新の安定版へ上げる（#3347 の決定 106）。週 1 回の検査が遅れを 1 件の Issue に知らせ、その Issue でチェックを入れると、更新を 1 本にまとめた PR が届く。`uv.lock` と宣言の食い違いは CI が落とす
 
@@ -57,7 +57,7 @@
 | I7 | 依存の更新の規則 | 固定した依存は、固定した版の外を上げる先にしない（httpx は 0.28.1 だけ） | 固定の範囲を外すと、設定の検査のテストが落ちる |
 | I8 | 依存の宣言 | 依存の宣言の書き手は、同じ時点に 1 つだけである。この課題の実装の PR が `develop` に入るまで、Renovate を動かすワークフローを有効にしない | Renovate の導入（App と秘密）を、実装の PR のマージの後に行う順序を実装の PR 本文に書く。順序が逆になったら、ワークフローを止めてから実装の PR を入れる |
 
-`develop` への取り込みで必須のチェックは、ルールセット（`gh api repos/devbasex/ai-plugins/rulesets/26777950`、2026-11-14）の 17 件で、`ndf-next.yml` のジョブ（`ndf-next-checks`・`ndf-next-tests`）と `renovate/artifacts` は含まれない。I4 と IG5 の「マージしない」は、今はマージする人が赤のチェックを見て止めることで守る（NDF のマージのスクリプトが必須でないチェックの赤で止まるかは未確認）。必須のチェックへ足すかは「人へ残す判断」にある。
+`develop` への取り込みで必須のチェックは 17 件である（ルールセット `gh api repos/devbasex/ai-plugins/rulesets/26777950`、2026-11-14）。その中に、`ndf-next.yml` のジョブ（`ndf-next-checks`・`ndf-next-tests`）と `renovate/artifacts` は含まれない。I4 と IG5 の「マージしない」は、今はマージする人が赤のチェックを見て止めることで守る（NDF のマージのスクリプトが必須でないチェックの赤で止まるかは未確認）。必須のチェックへ足すかは「人へ残す判断」にある。
 
 ### ドメインイベント
 
@@ -100,8 +100,8 @@
 | LIB4 | 自作（PyPI の JSON API・packaging・uv の上の `scripts/plugin-deps.py`。#3347 の決定 107） | — | —（このリポジトリの MIT） | — | — | 満たす（決定 106 をそのまま表せる）。脆弱性・推移的な依存・Actions と CLI の版は持たない | `issues/issue-3347-design.md` の決定 107・LIB20・LIB22（2026-11-14） |
 | LIB5 | uv の `exclude-newer` | 0.13.7 | MIT / Apache-2.0 | — | 無し | 満たす。相対の期間（`"7 days"` など）を書け、比べる日時はパッケージのファイル（wheel・sdist）ごとのアップロードの日時である。依存ごとの例外（`exclude-newer-package`）もある | https://docs.astral.sh/uv/reference/settings/ ・ https://docs.astral.sh/uv/concepts/resolution/ （2026-11-14）・M1・M2 |
 | LIB6 | このリポジトリの依存グラフと Dependabot alerts | — | — | — | — | 今は Python の依存を見ていない。Dependabot alerts は有効だが、依存グラフのマニフェストは 0 件で、開いている知らせも 0 件 | M3 |
-| LIB8 | Renovate の依存の一覧の Issue を閉じる設定と、lock の作り直しの失敗の知らせ | 44.239.1 の文書 | AGPL-3.0 | — | — | 一部を満たす。`dependencyDashboard.autoclose` を `true` にすると「残る PR が無くなったとき」に Issue を閉じる。承認を待つ更新が残るときに閉じるかは文書に無い。パッケージマネージャが lock の作り直しを拒むと「artifact error」になり、PR に警告のコメントと `renovate/artifacts` のチェックが付く。`statusCheckWhen.artifactError` を `"always"` にすると成功で緑・失敗で赤を出し、必須のチェックにできる | `gh api repos/renovatebot/renovate/contents/docs/usage/configuration-options.md`（blob `06410a943f7f`、2026-11-14）の `dependencyDashboard.autoclose`・`minimumReleaseAgeBuffer`・`platformAutomerge`・`statusCheckWhen` の節 |
 | LIB7 | `plugins/ndf-next/pyproject.toml` の今の版 | — | — | — | — | githubkit は 0.17.1、DBOS は 3.4.0 に上がっている（コミット `2a7b00260`・`1200b0488`）。#3347 の「14 本の最新の版」の表で上げる先が今と違うのは 11 本（DBOS と githubkit と httpx を除く） | `git log -- plugins/ndf-next/pyproject.toml`・`issues/issue-3347-design.md` の表（2026-11-14） |
+| LIB8 | Renovate の依存の一覧の Issue を閉じる設定と、lock の作り直しの失敗の知らせ | 44.239.1 の文書 | AGPL-3.0 | — | — | 一部を満たす。`dependencyDashboard.autoclose` を `true` にすると「残る PR が無くなったとき」に Issue を閉じる。承認を待つ更新が残るときに閉じるかは文書に無い。パッケージマネージャが lock の作り直しを拒むと「artifact error」になり、PR に警告のコメントと `renovate/artifacts` のチェックが付く。`statusCheckWhen.artifactError` を `"always"` にすると成功で緑・失敗で赤を出し、必須のチェックにできる | `gh api repos/renovatebot/renovate/contents/docs/usage/configuration-options.md`（blob `06410a943f7f`、2026-11-14）の `dependencyDashboard.autoclose`・`minimumReleaseAgeBuffer`・`platformAutomerge`・`statusCheckWhen` の節 |
 
 **実測**（一時ディレクトリに `plugins/ndf-next` の `pyproject.toml` と `uv.lock` をコピーして打った。uv 0.13.7、2026-11-14）:
 
@@ -220,7 +220,10 @@ sequenceDiagram
     Note over U: 落ちたら同じ PR で直す（決定 108）。直せない依存は規則に固定と理由を足す
 ```
 
-PyPI の取得が失敗したときの Renovate の振る舞い（Issue を書き換えるか、実行を失敗で終えるか）と、承認を待つ更新が残るときに Issue を閉じるかは「未確認のまま残ること」にあり、確かめ方と、満たさないときの構成もそこに書く。
+次の 2 つは「未確認のまま残ること」にあり、確かめ方と、満たさないときの構成もそこに書く。
+
+- PyPI の取得が失敗したときの Renovate の振る舞い（Issue を書き換えるか、実行を失敗で終えるか）
+- 承認を待つ更新が残るときに Issue を閉じるか
 
 ## 非機能の実現方式
 
@@ -234,7 +237,7 @@ PyPI の取得が失敗したときの Renovate の振る舞い（Issue を書�
 
 ### 決定 1: 自作の保守を負わずに遅れの知らせと版上げを得るため、依存の更新の仕組みに Renovate を採り、#3347 の決定 107 の自作を置き換える
 
-3 案のうち、7 日待つ・固定と理由・1 件の Issue での知らせ・承認してから PR を作る形を、コードを書かずに設定だけで満たすのは Renovate である（比較の表の観点 1・5・知らせの形）。#3380 が決める範囲（脆弱性・ほかの lock と推移的な依存・Actions と CLI の版）も、同じ仕組みの設定を足して扱える（観点 2〜4）。自作で始めると、#3380 で広げるときに 2 つ目の仕組みを足すか、自作を育てることになる。
+3 案のうち、コードを書かずに設定だけで次の 4 つを満たすのは Renovate である（比較の表の観点 1・5・知らせの形）。4 つとは、7 日待つ・固定と理由・1 件の Issue での知らせ・承認してから PR を作る形である。#3380 が決める範囲（脆弱性・ほかの lock と推移的な依存・Actions と CLI の版）も、同じ仕組みの設定を足して扱える（観点 2〜4）。自作で始めると、#3380 で広げるときに 2 つ目の仕組みを足すか、自作を育てることになる。
 
 Dependabot は採らない。理由を書く項目を持たず、知らせが PR の単位で、1 件の Issue にまとめる設定が無い（観点 5・知らせの形）。動いている子の PR の間に依存の PR が届き続ける点は、#3347 の決定 107 のとおりである。自作は採らない。決定 106 をそのまま表せるが、脆弱性・推移的な依存・Actions と CLI の版を持たず、スクリプトと単体テストとワークフローを自分で保守し続ける。
 
@@ -247,11 +250,11 @@ Dependabot は採らない。理由を書く項目を持たず、知らせが PR
 
 ### 決定 2: 起動の時刻と条件をこのリポジトリで決め、PR の CI を自動で走らせるため、Renovate を GitHub Actions の上で GitHub App の token で動かす
 
-アクション（LIB2）で動かすと、起動の時刻（週 1 回と手動）と起動の条件（PR では走らない）をワークフローで決められ、リポジトリの中身は GitHub の実行環境の外へ出ない。token には GitHub App を使う。PAT は特定の人の権限に結びつき、`GITHUB_TOKEN` では Renovate の PR の上の CI が手で承認するまで走らず、Actions に PR を作らせるリポジトリの設定の変更も要る（LIB2）。
+アクション（LIB2）で動かすと、起動の時刻（週 1 回と手動）と起動の条件（PR では走らない）をワークフローで決められ、リポジトリの中身は GitHub の実行環境の外へ出ない。token には GitHub App を使う。PAT は特定の人の権限に結びつく。`GITHUB_TOKEN` では、Renovate の PR の上の CI が手で承認するまで走らず、Actions に PR を作らせるリポジトリの設定の変更も要る（LIB2）。
 
 Mend が運用する Renovate のアプリは、導入の手順とリポジトリの中身の扱いを確かめられず（「確かめられなかったこと」）、比べる材料が無いため採らない。アクションで動かす形は、上の 2 点（起動の時刻と条件を決められる・中身が GitHub の実行環境の外へ出ない）を確かめた材料で満たす。
 
-Renovate の本体の版はワークフローで固定し、その版も公開から 7 日たったものにする（2026-11-14 の最新 44.239.1 は 2026-11-13 の公開で、まだ 7 日に満たない）。
+Renovate の本体の版はワークフローで固定し、その版も公開から 7 日たったものにする。2026-11-14 の最新 44.239.1 は 2026-11-13 の公開で、まだ 7 日に満たない。
 
 - 作り方: ライブラリやサービスを使う
 - 比べた候補: LIB1 / LIB2
@@ -271,9 +274,9 @@ Renovate の承認の設定（`dependencyDashboardApproval`）で、依存の一
 
 ### 決定 4: 7 日の守りを 1 か所の取りこぼしで破らないため、Renovate の待つ日数と uv の `exclude-newer` の 2 か所に同じ 7 日を置き、値の一致をテストで縛る
 
-Renovate は uv の設定を読まない。Renovate の文書は、待つ日数を Renovate とパッケージマネージャの両方に置くことを勧める（LIB1）。uv の `exclude-newer = "7 days"` は lock に `exclude-newer-span = "P7D"` として残り、引数なしの `uv lock --check` が通る（M1）。7 日に満たない版を宣言に書くと、uv が解決を拒む（M2）。2 か所が同じ値であることは、設定の検査のテストが縛る（I6）。日がたっても、依存に関係の無い PR で `uv lock --check` は落ちない（M4）。
+Renovate は uv の設定を読まない。Renovate の文書は、待つ日数を Renovate とパッケージマネージャの両方に置くことを勧める（LIB1）。uv の `exclude-newer = "7 days"` は、lock に `exclude-newer-span = "P7D"` として残る。そのうえで引数なしの `uv lock --check` が通る（M1）。7 日に満たない版を宣言に書くと、uv が解決を拒む（M2）。2 か所が同じ値であることは、設定の検査のテストが縛る（I6）。日がたっても、依存に関係の無い PR で `uv lock --check` は落ちない（M4）。
 
-決定 106 の「最新の安定版が 365 日より古く、新しいプレリリースがあれば最新」は、`matchCurrentAge: "> 365 days"` の依存だけ `ignoreUnstable` を外す規則で表す。基準が「最新の安定版の年齢」から「今の版の年齢」に変わる。依存の宣言を最新の安定版に保つ限り 2 つは同じ依存を指す。今の版が 365 日より古いのは httpx・ptyprocess・pytest-xdist・tree-sitter-bash の 4 本で、そのうち新しいプレリリースを持つのは httpx だけである（`issues/issue-3347-design.md` の決定 106）。httpx は固定するため（決定 5）、X2 の上げる先は変わらない。基準を変えることは承認済みの決定 106 の変更に当たるため、「人へ残す判断」に載せる。
+決定 106 の「最新の安定版が 365 日より古く、新しいプレリリースがあれば最新」は、次の規則で表す。`matchCurrentAge: "> 365 days"` の依存だけ、`ignoreUnstable` を外す。基準が「最新の安定版の年齢」から「今の版の年齢」に変わる。依存の宣言を最新の安定版に保つ限り 2 つは同じ依存を指す。今の版が 365 日より古いのは httpx・ptyprocess・pytest-xdist・tree-sitter-bash の 4 本である。そのうち新しいプレリリースを持つのは httpx だけである（`issues/issue-3347-design.md` の決定 106）。httpx は固定するため（決定 5）、X2 の上げる先は変わらない。基準を変えることは承認済みの決定 106 の変更に当たるため、「人へ残す判断」に載せる。
 
 - 作り方: ライブラリやサービスを使う
 - 比べた候補: LIB1 / LIB5 / LIB4
@@ -282,7 +285,7 @@ Renovate は uv の設定を読まない。Renovate の文書は、待つ日数�
 
 ### 決定 5: 固定の理由を仕組みが読む 1 か所に置くため、httpx の固定と理由を Renovate の依存ごとの規則に書き、宣言の頭の注記からはそこを指す
 
-httpx の規則に、許す版 `==0.28.1` と理由の文「githubkit 0.17.1 が httpx<1.0.0,>=0.23.0 を求める」を書く（LIB1 の `allowedVersions`・`description`）。利用者の指示と受け入れ条件 8 が「0.28.1 に固定」とするため、0.28.x の修正版も上げる先にしない。決定 106 の `[tool.ndf.deps.hold]` は作らない。同じ事実を 2 か所に持たないためである。
+httpx の規則に、許す版 `==0.28.1` と理由の文を書く（LIB1 の `allowedVersions`・`description`）。理由の文は「githubkit 0.17.1 が httpx<1.0.0,>=0.23.0 を求める」である。利用者の指示と受け入れ条件 8 が「0.28.1 に固定」とするため、0.28.x の修正版も上げる先にしない。決定 106 の `[tool.ndf.deps.hold]` は作らない。同じ事実を 2 か所に持たないためである。
 
 固定させている相手（githubkit）が制約を外したことは、Renovate は知らせない。githubkit の更新の PR を作る規則に、httpx の固定を見直す旨の文を添える（添え方は詳細設計）。決定 106 の「相手が制約を外したら検査が遅れとして出す」は、この形に置き換える。固定の置き場と見直しの知らせ方を替えることは承認済みの決定 106 の変更に当たるため、「人へ残す判断」に載せる。検査の結果で httpx が「固定」として出るか（受け入れ条件 8）は「未確認のまま残ること」にある。
 
@@ -293,7 +296,14 @@ httpx の規則に、許す版 `==0.28.1` と理由の文「githubkit 0.17.1 が
 
 ### 決定 6: X2 の範囲を受け入れ条件に合わせるため、Renovate の対象を `plugins/ndf-next` の Python の依存だけに絞り、脆弱性・ほかの lock・Actions と CLI の版は有効にしない
 
-対象の仕組みを pep621（`pyproject.toml` と `uv.lock`）だけにし、対象のディレクトリを `plugins/ndf-next` に絞る。GitHub Actions の版は Dependabot が今のまま持つ。同じ依存を 2 つの仕組みが上げないためである。脆弱性の知らせ（`vulnerabilityAlerts`・`osvVulnerabilityAlerts`）・ほかの lock・推移的な依存の定期の更新・CLI の版は、#3380 の設計が比較の表を材料に決める。このリポジトリの依存グラフは今 Python の依存を見ていないため（M3）、GitHub の知らせを読む形を選ぶなら依存グラフの対応を先に確かめる必要があることも、#3380 へ渡す。
+対象の仕組みを pep621（`pyproject.toml` と `uv.lock`）だけにし、対象のディレクトリを `plugins/ndf-next` に絞る。GitHub Actions の版は Dependabot が今のまま持つ。同じ依存を 2 つの仕組みが上げないためである。次の 4 つは、#3380 の設計が比較の表を材料に決める。
+
+- 脆弱性の知らせ（`vulnerabilityAlerts`・`osvVulnerabilityAlerts`）
+- ほかの lock
+- 推移的な依存の定期の更新
+- CLI の版
+
+このリポジトリの依存グラフは今 Python の依存を見ていないため（M3）、GitHub の知らせを読む形を選ぶなら依存グラフの対応を先に確かめる必要があることも、#3380 へ渡す。
 
 - 作り方: ライブラリやサービスを使う
 - 比べた候補: LIB1 / LIB3 / LIB6
@@ -302,17 +312,17 @@ httpx の規則に、許す版 `==0.28.1` と理由の文「githubkit 0.17.1 が
 
 ### 決定 7: 7 日の規則を最初の版上げにも当てるため、実装の PR は上げる先を実装の時点で uv に決めさせ、#3347 の表の版をそのまま写さない
 
-#3347 の「14 本の最新の版」の表には、2026-11-14 の時点で公開から 7 日に満たない版が含まれる（例: slack-sdk 3.47.0 は 2026-11-13、semver 3.1.1 は 2026-11-09。M2 で uv が拒んだ）。実装の PR は、`exclude-newer = "7 days"` を置いた後に、DBOS と httpx を除く依存を、その時点の上げる先へ上げて `uv lock` を打つ。版が変わる依存の数は実装の時点で決まり、PR 本文に一覧を書く。最初の 1 回を Renovate の PR にしないのは、Renovate の導入（App と秘密）が本番の承認の後になるためである。
+#3347 の「14 本の最新の版」の表には、2026-11-14 の時点で公開から 7 日に満たない版が含まれる。例は slack-sdk 3.47.0（2026-11-13 公開）と semver 3.1.1（2026-11-09 公開）で、M2 で uv が拒んだ。実装の PR は、`exclude-newer = "7 days"` を置いた後に、DBOS と httpx を除く依存を、その時点の上げる先へ上げて `uv lock` を打つ。版が変わる依存の数は実装の時点で決まり、PR 本文に一覧を書く。最初の 1 回を Renovate の PR にしないのは、Renovate の導入（App と秘密）が本番の承認の後になるためである。
 
-DBOS の行は X2 では変えず、Renovate の対象からも外す（DBOS の規則に `enabled: false` と理由の文「DBOS の版は C1+ の続きが上げる。#3370 の対象の外」を書く）。要求は DBOS の版を「含まない」とし、境界の「行わない」に「DBOS の版を変える」を置く。DBOS を対象に含めると、決定 3 の 1 本にまとめた PR がチェック 1 回で DBOS も上げ、この範囲を越える。C1+ の殻の変更（コミット `d26eb4bbd`）は `develop` に入っているが、DBOS は 3.4.0 に止めてあり（コミット `1200b0488`、3.5.0 は公開から 7 日を待つため）、3.5.0 へ上げる作業は C1+ の続きに残る。DBOS を Renovate の対象へ戻すかは、その作業の後に決める（「人へ残す判断」）。
+DBOS の行は X2 では変えず、Renovate の対象からも外す（DBOS の規則に `enabled: false` と理由の文「DBOS の版は C1+ の続きが上げる。#3370 の対象の外」を書く）。要求は DBOS の版を「含まない」とし、境界の「行わない」に「DBOS の版を変える」を置く。DBOS を対象に含めると、決定 3 の 1 本にまとめた PR がチェック 1 回で DBOS も上げ、この範囲を越える。C1+ の殻の変更（コミット `d26eb4bbd`）は `develop` に入っている。DBOS は 3.4.0 に止めてある（コミット `1200b0488`、3.5.0 は公開から 7 日を待つため）。3.5.0 へ上げる作業は C1+ の続きに残る。DBOS を Renovate の対象へ戻すかは、その作業の後に決める（「人へ残す判断」）。
 
 根拠: Value 13 / Value 3（MVV 版 7）
 
 ### 決定 8: 解決できない上げ方を失敗として返すため、lock の作り直しの成否を Renovate のチェックで常に出し、赤のときは更新の PR をマージしない
 
-Renovate は、uv が lock の作り直しを拒むと、更新の PR に警告のコメントと `renovate/artifacts` のチェックを付ける（LIB8）。`statusCheckWhen.artifactError` を `"always"` にし、成功で緑・失敗で赤を出す。受け入れ条件 9 の「上げる操作が失敗を返す」は、このチェックが赤になることで満たし、「宣言と lock を元のまま残す」は、`develop` の宣言と lock が変わらないこと（赤の PR をマージしない）で満たす。更新の PR の上の宣言と lock がどうなるか（宣言だけを変えてコミットするか）は文書に記述が無く、次の段落の確かめ方で見る。この読み替えは受け入れ条件の字義と違うため、「人へ残す判断」に載せる。
+Renovate は、uv が lock の作り直しを拒むと、更新の PR に警告のコメントと `renovate/artifacts` のチェックを付ける（LIB8）。`statusCheckWhen.artifactError` を `"always"` にし、成功で緑・失敗で赤を出す。受け入れ条件 9 の「上げる操作が失敗を返す」は、このチェックが赤になることで満たす。「宣言と lock を元のまま残す」は、`develop` の宣言と lock が変わらないこと（赤の PR をマージしない）で満たす。更新の PR の上の宣言と lock がどうなるか（宣言だけを変えてコミットするか）は文書に記述が無く、次の段落の確かめ方で見る。この読み替えは受け入れ条件の字義と違うため、「人へ残す判断」に載せる。
 
-httpx は 0.28.1 に固定するため（決定 5）、Renovate の上げる操作で「httpx を 1.0.dev6 へ」の場合は起きない。上げる操作そのものの失敗は、実装のレーンが検証用のブランチで、httpx の規則を一時的に `1.0.dev6` を許す形にして Renovate を 1 度動かし、`renovate/artifacts` が赤になり `develop` が変わらないことを見て確かめる（受け入れ条件 9 のテスト）。
+httpx は 0.28.1 に固定するため（決定 5）、Renovate の上げる操作で「httpx を 1.0.dev6 へ」の場合は起きない。上げる操作そのものの失敗は、実装のレーンが検証用のブランチで確かめる（受け入れ条件 9 のテスト）。httpx の規則を一時的に `1.0.dev6` を許す形にして Renovate を 1 度動かし、`renovate/artifacts` が赤になり `develop` が変わらないことを見る。
 
 `renovate/artifacts`・`ndf-next-checks`・`ndf-next-tests` は今 `develop` の必須のチェックに無い（不変条件の表の後の段落）。必須のチェックへ足すとリポジトリの設定が変わるため、「人へ残す判断」に載せる。
 

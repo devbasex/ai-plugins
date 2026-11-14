@@ -50,7 +50,7 @@ scripts/tests/
 
 | 置き場 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- |
-| `.github/renovate.json` | 設定（JSON のオブジェクト） | 最上位の鍵と `packageRules` の 5 規則（新設。値は「内部のデータと定数」） |
+| `.github/renovate.json` | 設定（JSON のオブジェクト） | 最上位のキーと `packageRules` の 5 規則（新設。値は「内部のデータと定数」） |
 | `.github/workflows/renovate.yml` | ワークフロー | `jobs.renovate`（新設。ステップ `token`・`renovate` の 2 つ） |
 | `plugins/ndf-next/pyproject.toml` | 依存の宣言 | `[tool.uv]` の `exclude-newer`（新設）・頭の注記（変更）・`dependencies` と `[dependency-groups]` の版（変更） |
 | `.github/dependabot.yml` | Dependabot の設定 | 頭の注記（変更） |
@@ -64,7 +64,7 @@ scripts/tests/
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `jobs.renovate` | `.github/workflows/renovate.yml` | 新設 | 起動: `schedule`（月曜 00:00 UTC）・`workflow_dispatch`。入力: Actions の変数 `RENOVATE_APP_CLIENT_ID`・秘密 `RENOVATE_APP_PRIVATE_KEY`。出力: 終了の状態（成功 / 失敗） | 実行の token を作り、固定した版の Renovate をこのリポジトリだけに対して 1 回動かす | GitHub App がこのリポジトリに入っていて、変数と秘密が置かれている。既定ブランチに Renovate の設定がある | 成功なら、依存の一覧の Issue が今の遅れを表し、承認された更新のブランチと PR が `develop` を起点に 1 本ある。失敗なら、ジョブが失敗の状態で終わる | GitHub API（実行の token の作成と失効・Issue・ブランチ・PR・コミットの状態の書き込み）・PyPI への取得・コンテナの取得（`ghcr.io`）・uv の取得 |
 | `load_renovate` | `scripts/tests/test_renovate_config.py` | 新設 | `() -> dict` | Renovate の設定を JSON として読んで返す | 無し | 戻り値は設定の最上位のオブジェクトである | ファイルの読み取り |
-| `load_workflow` | `scripts/tests/test_renovate_config.py` | 新設 | `() -> dict` | 動かすワークフローを YAML として読んで返す | 無し | 戻り値はワークフローの最上位の対応表で、鍵 `on` は文字列のまま残る | ファイルの読み取り |
+| `load_workflow` | `scripts/tests/test_renovate_config.py` | 新設 | `() -> dict` | 動かすワークフローを YAML として読んで返す | 無し | 戻り値はワークフローの最上位の対応表で、キー `on` は文字列のまま残る | ファイルの読み取り |
 | `load_pyproject` | `scripts/tests/test_renovate_config.py` | 新設 | `() -> tuple[dict, str]` | 依存の宣言を TOML として読み、中身と生の文字列（頭の注記を見るため）を返す | 無し | 1 つ目は TOML の中身、2 つ目はファイルの文字列そのものである | ファイルの読み取り |
 | `rule_for` | `scripts/tests/test_renovate_config.py` | 新設 | `(config: dict, package: str) -> dict` | `packageRules` から、`matchPackageNames` がちょうど `[package]` の規則を 1 つ返す | `config` は `load_renovate` の戻り値 | 戻り値は該当する規則がちょうど 1 つのときのその規則である | 無し |
 | `span_days` | `scripts/tests/test_renovate_config.py` | 新設 | `(text: str) -> int` | `"7 days"` の形の期間を日数の整数へ直す | 無し | 戻り値は 1 以上の整数で、`"<整数> day"` か `"<整数> days"` の形だけを受ける | 無し |
@@ -74,7 +74,7 @@ scripts/tests/
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `jobs.renovate` | 実行の token を作れない | App の秘密鍵が無い・失効した、App がリポジトリから外れた、変数の名前の誤り | ステップ `token`（`actions/create-github-app-token`） | 止める | ジョブが失敗で終わり、Actions の実行の一覧に赤が付く。Renovate は動かず、Issue と PR は変わらない | 後始末は要らない。秘密か App の導入を直してから手動の実行で打ち直せる |
-| `jobs.renovate` | Renovate の設定を読めない・検証に落ちる | JSON の誤り・Renovate の版が知らない鍵 | Renovate の設定の検証（実行の初め） | 止める | Renovate は依存の一覧の Issue に「設定の誤り」を出し、ブランチと PR を作らない。ジョブの終了の状態は未確認（「未確認のまま残ること」） | 設定を直す PR を入れ、リリースで `main` に載った後に打ち直す |
+| `jobs.renovate` | Renovate の設定を読めない・検証に落ちる | JSON の誤り・Renovate の版が知らないキー | Renovate の設定の検証（実行の初め） | 止める | Renovate は依存の一覧の Issue に「設定の誤り」を出し、ブランチと PR を作らない。ジョブの終了の状態は未確認（「未確認のまま残ること」） | 設定を直す PR を入れ、リリースで `main` に載った後に打ち直す |
 | `jobs.renovate` | 既定ブランチに設定が無い | 実装の PR が `develop` に入っただけで、まだ `main` に載っていない | Renovate のリポジトリの初期化（`requireConfig: required`） | 既定値で続ける | Renovate はこのリポジトリを飛ばし、Issue と PR を作らない。ジョブは成功で終わる | 後始末は要らない。I8 の順序を守る仕組みとして働く |
 | `jobs.renovate` | PyPI から版の一覧を取れない | PyPI の障害・ネットワークの誤り | Renovate の依存の取得（`Package lookup error`） | 呼び出し元へ返す（扱いは未確認） | 受け入れ条件 7 が求める「Issue を書き換えず、失敗で終わる」を満たすかは未確認。満たさないときは、Renovate の前に PyPI の JSON API へ 1 回届くかを確かめるステップを足し、届かなければジョブを失敗で終える（設計文書の「未確認のまま残ること」） | 取得が戻った後の定時か手動の実行で打ち直せる。Renovate は Issue を毎回書き直すので、途中の状態は残らない |
 | `jobs.renovate` | lock を作り直せない | 上げる先の版どうしが解決できない・7 日に満たない版を uv が拒む | Renovate の lock の作り直し（uv の終了コード） | 呼び出し元へ返す | 更新の PR に警告のコメントと、赤の `renovate/artifacts` が付く（決定 8）。`develop` の宣言と lock は変わらない | 赤の PR はマージしない。直せない依存は規則に固定と理由を足す PR を入れ、次の実行で PR が作り直される |
@@ -109,7 +109,7 @@ scripts/tests/
 **最初の版上げ（実装の PR が手で行う。決定 7）** は次の順に打つ。Renovate の手順ではないため上の表に含めない。
 
 1. 依存の宣言の `[tool.uv]` に `exclude-newer = "7 days"` を足す
-2. dbos と httpx を除く依存ごとに、`uv lock --upgrade-package <名前>` で選ばれた版を確かめ、宣言の `==` の版をその版へ書き換える（dev グループの 2 本も含む）
+2. dbos と httpx を除く依存ごとに、`uv lock --upgrade-package <名前>` で選ばれた版を確かめる。宣言の `==` の版をその版へ書き換える（dev グループの 2 本も含む）
 3. 引数なしの `uv lock` を打ち、続けて `uv lock --check` が 0 で終わることを確かめる
 4. `uv run --frozen --project plugins/ndf-next pytest plugins/ndf-next/tests -q` が通るまで、上げた版で落ちたコードとテストを直す（受け入れ条件 11）
 5. 版が変わった依存の一覧（名前・前の版・後の版）を実装の PR 本文に書く
@@ -144,7 +144,7 @@ scripts/tests/
 | 実行の token の権限 | 定数 | 動かすワークフローの `permission-*` | contents・pull-requests・issues・statuses を `write`、checks を `read`。App に与えた権限の中で、さらに実行ごとに絞る |
 | Renovate のグローバル設定 | 設定値 | 動かすワークフローの `env` | `RENOVATE_REPOSITORIES: ${{ github.repository }}`・`RENOVATE_ONBOARDING: "false"`・`RENOVATE_REQUIRE_CONFIG: required`・`RENOVATE_BINARY_SOURCE: install` |
 
-**鍵の形は固定する版に合わせる。** 2026-11-14 の Renovate の文書は、依存の一覧の Issue の題と閉じる設定を `dependencyDashboard` のオブジェクト（`title`・`autoclose`）に置く。固定する 44.221.6 の設定の定義（`lib/config/options/index.ts` の `44.221.6` のタグ）では `dependencyDashboard` は真偽値で、`dependencyDashboardTitle`・`dependencyDashboardAutoclose` が別の鍵である。新しい版は古い鍵をオブジェクトへ移すと文書にあるため、古い鍵で書く。Renovate の版を上げてオブジェクトの形へ書き換えるときは、設定の検査のテストの鍵も同じ PR で替える。
+**キーの形は固定する版に合わせる。** 2026-11-14 の Renovate の文書は、依存の一覧の Issue の題と閉じる設定を `dependencyDashboard` のオブジェクト（`title`・`autoclose`）に置く。固定する 44.221.6 の設定の定義（`lib/config/options/index.ts` の `44.221.6` のタグ）では、`dependencyDashboard` は真偽値である。題と閉じる設定は、`dependencyDashboardTitle`・`dependencyDashboardAutoclose` という別のキーである。新しい版は古いキーをオブジェクトへ移すと文書にあるため、古いキーで書く。Renovate の版を上げてオブジェクトの形へ書き換えるときは、設定の検査のテストのキーも同じ PR で替える。
 
 **uv の版。** 動かすワークフローは `RENOVATE_BINARY_SOURCE: install` で、Renovate が実行のたびに uv を取得する。依存の宣言に `required-version` が無いため、取得するのはその時点の最新の uv である。CI の `astral-sh/setup-uv` も、リポジトリの根に `required-version` が無いため最新の uv を入れる（setup-uv の README）。両者が同じ時点の最新を使い、食い違えば更新の PR の上で CI の `uv lock --check` が落ちる。依存の宣言に `required-version` を足して固定する形は採らない。手元で別の版の uv を使う開発者の操作が拒まれるためである。
 
@@ -303,7 +303,7 @@ Dependabot の設定の頭の注記（2 行を置き換える）:
 | --- | --- | --- | --- |
 | `jobs.renovate` | リリース後テスト: 手動の実行を 2 回打ち、依存の一覧の Issue が 1 件のまま書き直される | 設定が `main` に無い時点の手動の実行が、Issue と PR を作らずに成功で終わる | token の作成の失敗・lock の作り直しの失敗（検証用のブランチで httpx の規則を一時的に `1.0.dev6` を許す形にして 1 度動かす。決定 8）・PyPI の取得の失敗（「未確認のまま残ること」の確かめ方）。設定の読めない場合・重なり・長引きはリリース後テストで見ない（Renovate と Actions の振る舞いに任せる） |
 | `load_renovate` | 実物の設定を読み、`packageRules` を持つ | 無し | ファイルが無い・JSON の誤りで落ちる（実物を壊さず、`tmp_path` の偽のファイルを読ませるテストは書かない。補助は実物の 1 ファイルだけを読むため） |
-| `load_workflow` | 実物のワークフローを読み、鍵 `on` が文字列である | 無し | 読めない YAML で `yamlio.YamlError` |
+| `load_workflow` | 実物のワークフローを読み、キー `on` が文字列である | 無し | 読めない YAML で `yamlio.YamlError` |
 | `load_pyproject` | 実物の宣言を読み、`tool.uv.exclude-newer` を持つ | 無し | 読めない TOML で `tomllib.TOMLDecodeError` |
 | `rule_for` | httpx の規則を 1 つ返す | `matchPackageNames` が 2 つの名前を持つ規則は当たらない | 0 件・2 件で `AssertionError` |
 | `span_days` | `"7 days"` → 7・`"1 day"` → 1 | `"0 days"` を拒む（1 以上） | `"P7D"`・`"1 week"`・`"7d"` で `ValueError` |
@@ -316,6 +316,6 @@ Dependabot の設定の頭の注記（2 行を置き換える）:
 | `test_approval_and_dashboard` | `dependencyDashboard`・`dependencyDashboardApproval`・`dependencyDashboardAutoclose` が `true`（受け入れ条件 7・E6） | — | どれかを外すと落ちる |
 | `test_artifacts_check_always` | `statusCheckWhen.artifactError == "always"`（決定 8・I4） | — | 設定を外すと落ちる |
 | `test_vulnerability_alerts_off` | `vulnerabilityAlerts.enabled` と `osvVulnerabilityAlerts` が `false`（決定 6） | — | 有効にすると落ちる |
-| `test_workflow_triggers` | 起動の鍵がちょうど `schedule` と `workflow_dispatch` で、`concurrency.cancel-in-progress` が `false`（I5） | — | `pull_request` か `push` を足すと落ちる |
+| `test_workflow_triggers` | 起動のキーがちょうど `schedule` と `workflow_dispatch` で、`concurrency.cancel-in-progress` が `false`（I5） | — | `pull_request` か `push` を足すと落ちる |
 | `test_workflow_token_permissions` | ワークフローの `permissions` が `contents: read` だけで、token のステップの `permission-*` が「内部のデータと定数」の 5 つだけ。`permission-workflows` を持たない | — | `permission-workflows` を足す、ワークフローの `permissions` を広げると落ちる |
 | `test_pyproject_note_points_to_config` | 依存の宣言の頭の注記が `.github/renovate.json` を名指し、そのファイルがある（受け入れ条件 12） | — | 設定ファイルを消すか移すと落ちる |
