@@ -322,8 +322,9 @@ PROJECT_KEYS = {
     "review": ("workflow", "launch", "review"),
     "rebuild": ("workflow", "launch", "rebuild"),
 }
-# 課題の本文を書き出す置き場のファイル（プランの実行の置き場の下）
+# 課題の本文を書き出す置き場のファイルと、題の写し（プランの実行の置き場の下）
 ISSUE_BODY_FILE = "issue-{number}-body.md"
+ISSUE_TITLE_FILE = "issue-{number}-title.json"
 
 
 def issue_text(place: Path, number: int) -> Optional[tuple[str, str]]:
@@ -371,6 +372,9 @@ def _project(place: Path) -> dict[str, Any]:
 def _issue_values(run: StageRun, work_dir: Path, place: Path) -> Optional[dict[str, route.Value]]:
     """課題が 1 つなら、その題（title）と本文を書いたファイル（body_file）。課題が 1 つでなければ空。
 
+    題と本文は置き場へ初回に 1 度だけ写し（`ISSUE_BODY_FILE`・`ISSUE_TITLE_FILE`）、以後の呼び出し（承認の答え・続き・
+    打ち直し）はその写しを使う。読み直すと GitHub を毎回呼び、途中で題が直されるとプランが変わって、終わっていない回へ
+    届かず開始点から流れ直すためである（PR 3469 の指摘）。
     書き手を信用しない課題は、本文を書き出さずに None（足りない値の出所を `FROM_UNTRUSTED_ISSUE` にする）。
     読めない失敗（`GitError`・`github.GitHubError`）は捕まえずに `_call_plan` へ上げる。空にすると、打ち直せば通る
     失敗が打ち直せない「値が無い」（invalid）に変わり、本当の理由も消えるためである。
@@ -378,12 +382,18 @@ def _issue_values(run: StageRun, work_dir: Path, place: Path) -> Optional[dict[s
     issues = run.inputs["issues"] if "issues" in run.inputs else None
     if not isinstance(issues, list) or len(issues) != 1:
         return {}
-    found = issue_text(place, int(issues[0]))
+    number = int(issues[0])
+    out = work_dir / ISSUE_BODY_FILE.format(number=number)
+    copy = work_dir / ISSUE_TITLE_FILE.format(number=number)
+    held = plan_files.read_json(copy)
+    if held is not None and isinstance(held.get("title"), str) and out.is_file():
+        return {"title": held["title"], "body_file": str(out)}
+    found = issue_text(place, number)
     if found is None:
         return None
     title, body = found
-    out = work_dir / ISSUE_BODY_FILE.format(number=int(issues[0]))
     out.write_text(body, encoding="utf-8")
+    plan_files.write_json(copy, {"title": title})
     return {"title": title, "body_file": str(out)}
 
 

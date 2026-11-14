@@ -272,6 +272,26 @@ def test_an_issue_by_an_untrusted_author_is_not_written_and_stops_as_invalid_by_
     assert not (work / invoke.ISSUE_BODY_FILE.format(number=3092)).exists()
 
 
+def test_the_issue_is_read_once_and_later_calls_use_the_copy_in_the_work_dir(tmp_path, monkeypatch):
+    # PR 3469 の指摘: プランを描き直すたび（承認の答え・続き・打ち直し）に課題を GitHub から読み直さない。
+    # 途中で題が直されてもプランは同じで、終わっていない回へ同じ鍵で届く
+    repo = _sprint_repo(tmp_path, PROJECT)
+    reads = []
+
+    def read(place, n):
+        reads.append(n)
+        return (f"#{n} の題（{len(reads)} 回目）", f"#{n} の本文（{len(reads)} 回目）")
+
+    monkeypatch.setattr(invoke, "issue_text", read)
+    work = tmp_path / "w"
+    work.mkdir()
+    run = _stage_run_of("impl", repo, [3092])
+    first = invoke._issue_values(run, work, repo)
+    again = invoke._issue_values(run, work, repo)
+    assert reads == [3092] and first == again and first["title"] == "#3092 の題（1 回目）"
+    assert Path(first["body_file"]).read_text() == "#3092 の本文（1 回目）"
+
+
 @pytest.mark.parametrize(
     ("error", "kind"),
     [
