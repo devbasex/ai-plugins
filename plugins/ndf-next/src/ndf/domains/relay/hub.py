@@ -222,15 +222,22 @@ def restart(ctx: Context, name: str) -> Outcome:
     if refused is not None:
         return refused
     pending = ctx.pending()
-    if target:
-        stopped = stop(ctx, name)
-        if not stopped.ok:
-            return stopped
+    unstopped = _await_exit(ctx, name, target)
+    if unstopped is not None:
+        return unstopped
     entry = {**entry, "starts": starts.bumped().as_json(), "version": ctx.version}
     got = _launch(ctx, name, entry)
     entries[name] = entry
     _save_registry(ctx.state_dir, entries)
     return _with_pending(got, pending)
+
+
+def _await_exit(ctx: Context, name: str, running: bool) -> Optional[Outcome]:
+    """動いていれば止めて終わるまで待つ。止められなければその結果、止めた・動いていなければ None。"""
+    if not running:
+        return None
+    stopped = stop(ctx, name)
+    return None if stopped.ok else stopped
 
 
 def _refused(d: hub_decide.Decision, cause: str) -> Optional[Outcome]:
