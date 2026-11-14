@@ -58,6 +58,14 @@ log = logging.getLogger(__name__)
 
 TOOL = cli.tool_of(__name__)
 
+# 止まった理由の種類（contracts の causes.json の kind）
+INVALID = "invalid"
+PRECONDITION = "precondition"
+INTERRUPTED = "interrupted"
+USAGE_LIMIT = "usage_limit"
+REFUSED = "refused"
+INFRA_WAIT = "infra_wait"
+WORK_STOPPED = "work_stopped"
 # 結果ファイルを書かずに応答を終えた worker を、同じ会話で起こし直す回数の上限
 RESUMES = 3
 RESUME_PROMPT = (
@@ -162,7 +170,7 @@ def skills_section(kind: str, skills_dir: Path) -> str:
         try:
             text = path.read_text(encoding="utf-8")
         except OSError as exc:  # ファイル: リリースの欠けは worker を起動せずに止める
-            raise WorkerError("precondition", f"作業 {kind} の手順書 {path} を読めない: {exc.strerror or exc}") from None
+            raise WorkerError(PRECONDITION, f"作業 {kind} の手順書 {path} を読めない: {exc.strerror or exc}") from None
         parts.append(f"## 手順書 {path.parent.name}（この手順に従って作業する）\n{text}")
     return "\n\n".join(parts)
 
@@ -182,11 +190,11 @@ def sources_of(raw: Any) -> list[Source]:
     形が違えば `WorkerError`（invalid）。trusted が真偽でなければ区分なし（信用されない側）にする。
     """
     if not isinstance(raw, list):
-        raise WorkerError("invalid", "書き手の付いた本文は JSON の並びで渡す")
+        raise WorkerError(INVALID, "書き手の付いた本文は JSON の並びで渡す")
     out = []
     for item in raw:
         if not isinstance(item, dict) or not all(isinstance(item.get(k), str) for k in SOURCE_KEYS):
-            raise WorkerError("invalid", f"書き手の付いた本文の形が違う（{'・'.join(SOURCE_KEYS)} の文字列が要る）: {item!r}")
+            raise WorkerError(INVALID, f"書き手の付いた本文の形が違う（{'・'.join(SOURCE_KEYS)} の文字列が要る）: {item!r}")
         trusted = item.get("trusted")
         out.append(Source(*(item[k] for k in SOURCE_KEYS), trusted if isinstance(trusted, bool) else None))
     return out
@@ -199,11 +207,11 @@ Caller = Callable[[list[str], str, float, Optional[Path]], claude.ClaudeReply]
 
 # 起動の失敗 → 止まった理由の種類
 _FAILURE_CAUSES: dict[claude.Failure, str] = {
-    claude.Failure.LAUNCH: "precondition",
-    claude.Failure.TIMEOUT: "interrupted",
-    claude.Failure.USAGE_LIMIT: "usage_limit",
-    claude.Failure.REFUSED: "refused",
-    claude.Failure.NO_SLOT: "infra_wait",
+    claude.Failure.LAUNCH: PRECONDITION,
+    claude.Failure.TIMEOUT: INTERRUPTED,
+    claude.Failure.USAGE_LIMIT: USAGE_LIMIT,
+    claude.Failure.REFUSED: REFUSED,
+    claude.Failure.NO_SLOT: INFRA_WAIT,
 }
 
 
@@ -277,7 +285,7 @@ def delegate(
             return out
         argv = args_for(out.session)
         prompt = RESUME_PROMPT
-    out.cause = "work_stopped"
+    out.cause = WORK_STOPPED
     out.detail = f"作業 {handoff.kind} の worker が {RESUMES} 回起こし直しても結果ファイル {handoff.result_file} を書かなかった"
     return out
 
@@ -330,7 +338,7 @@ def _new_text(new: Path) -> str:
         model.load(new)
         return new.read_text(encoding="utf-8")
     except model.PlanError as exc:
-        raise WorkerError("invalid", f"新しいプランを使えない: {exc}") from None
+        raise WorkerError(INVALID, f"新しいプランを使えない: {exc}") from None
 
 
 def _replace_plan(plan: Path, text: str, at: str) -> Path:
@@ -357,14 +365,14 @@ def edit_plan(plan: Path, new: Path, reason: str, state_dir: Path, now: Optional
     持っていれば `durable_locks.StoreInUse`。差分が無ければ何も書かずに None を返す。
     """
     if not reason.strip():
-        raise WorkerError("invalid", "プランを書き換える理由が空")
+        raise WorkerError(INVALID, "プランを書き換える理由が空")
     text = _new_text(new)
     at = now or _now()
     with durable_locks.exclusive_lock(plan.with_name(plan.name + ".lock")):
         try:
             old = plan.read_text(encoding="utf-8")
         except OSError as exc:  # ファイル: 書き換える元が無ければ呼び出しの誤り
-            raise WorkerError("invalid", f"プラン {plan} を読めない: {exc.strerror or exc}") from None
+            raise WorkerError(INVALID, f"プラン {plan} を読めない: {exc.strerror or exc}") from None
         diff = "".join(difflib.unified_diff(old.splitlines(True), text.splitlines(True), str(plan), str(new)))
         if not diff:
             return None
@@ -387,9 +395,9 @@ def _rows(path: Path) -> list[dict[str, Any]]:
         try:
             row = json.loads(line)
         except json.JSONDecodeError as exc:
-            raise WorkerError("invalid", f"{path} の {number} 行目が JSON でない: {exc}") from None
+            raise WorkerError(INVALID, f"{path} の {number} 行目が JSON でない: {exc}") from None
         if not isinstance(row, dict):
-            raise WorkerError("invalid", f"{path} の {number} 行目が JSON のオブジェクトでない")
+            raise WorkerError(INVALID, f"{path} の {number} 行目が JSON のオブジェクトでない")
         rows.append(row)
     return rows
 
@@ -399,7 +407,7 @@ def list_edits(progress_files: Iterable[Path]) -> list[dict[str, Any]]:
     found = [r for path in progress_files for r in _rows(path) if r.get("event") == PLAN_EDIT_EVENT]
     untimed = [r for r in found if not isinstance(r.get("at"), str)]
     if untimed:
-        raise WorkerError("invalid", f"時刻（at）の無いプランの書き換えの記録がある: {untimed[0]!r}")
+        raise WorkerError(INVALID, f"時刻（at）の無いプランの書き換えの記録がある: {untimed[0]!r}")
     return sorted(found, key=lambda r: r["at"])
 
 
@@ -422,7 +430,7 @@ def _read_input(path: str, label: str) -> str:
     try:
         return Path(path).read_text(encoding="utf-8")
     except OSError as exc:  # 利用者の入力: 読めないファイルは呼び出しの誤り
-        raise WorkerError("invalid", f"{label} {path} を読めない: {exc.strerror or exc}") from None
+        raise WorkerError(INVALID, f"{label} {path} を読めない: {exc.strerror or exc}") from None
 
 
 def _load_sources(path: Optional[str]) -> list[Source]:
@@ -432,7 +440,7 @@ def _load_sources(path: Optional[str]) -> list[Source]:
     try:
         return sources_of(json.loads(text))
     except json.JSONDecodeError as exc:
-        raise WorkerError("invalid", f"書き手の付いた本文 {path} が JSON でない: {exc}") from None
+        raise WorkerError(INVALID, f"書き手の付いた本文 {path} が JSON でない: {exc}") from None
 
 
 def _cmd_run(a: argparse.Namespace) -> int:
@@ -461,7 +469,7 @@ def _cmd_closing(a: argparse.Namespace) -> int:
     try:
         hits = closing_commits(git.Git(Path(a.cwd)), a.base)
     except git.GitError as exc:
-        return result.emit(result.stopped(TOOL, "invalid", f"コミットを読めない: {exc}"))
+        return result.emit(result.stopped(TOOL, INVALID, f"コミットを読めない: {exc}"))
     if not hits:
         return result.emit(result.result(TOOL, OK, f"{a.base}..HEAD のコミットに closing keywords は無い"))
     items = [{"kind": "closing_commit", "sha": h.sha, "subject": h.subject, "words": list(h.words)} for h in hits]
@@ -469,7 +477,7 @@ def _cmd_closing(a: argparse.Namespace) -> int:
         f"closing keywords を持つコミットが {len(hits)} 件ある（push しない）。件名と本文の語を `… （#番号）` の参照の形へ"
         f"直してから打ち直す: " + "; ".join(f"{h.sha[:12]} {h.subject!r} → {', '.join(h.words)}" for h in hits)
     )
-    return result.emit(result.stopped(TOOL, "refused", detail, items=items))
+    return result.emit(result.stopped(TOOL, REFUSED, detail, items=items))
 
 
 def _cmd_plan_edit(a: argparse.Namespace) -> int:
@@ -478,7 +486,7 @@ def _cmd_plan_edit(a: argparse.Namespace) -> int:
         state_dir = _plan_state_dir(plan, a.state_dir)
         row = edit_plan(plan, Path(a.new), a.reason, state_dir)
     except model.PlanError as exc:
-        return result.emit(result.stopped(TOOL, "invalid", f"プランを使えない: {exc}"))
+        return result.emit(result.stopped(TOOL, INVALID, f"プランを使えない: {exc}"))
     except durable_locks.StoreInUse as exc:
         return result.emit(result.stopped(TOOL, exc.kind, f"プラン {plan} をほかの書き換えが持っている: {exc}"))
     if row is None:
@@ -491,7 +499,7 @@ def _cmd_plan_edits(a: argparse.Namespace) -> int:
     try:
         files = [_plan_state_dir(Path(p), a.state_dir) / PROGRESS_FILE for p in a.plans]
     except model.PlanError as exc:
-        return result.emit(result.stopped(TOOL, "invalid", f"プランを使えない: {exc}"))
+        return result.emit(result.stopped(TOOL, INVALID, f"プランを使えない: {exc}"))
     edits = list_edits(files)
     items = [{"kind": PLAN_EDIT_EVENT, **{k: r.get(k) for k in ("plan", "at", "reason", "diff")}} for r in edits]
     return result.emit(result.result(TOOL, OK, f"プランの書き換えが {len(items)} 件ある", items, {"edits": len(items)}))
@@ -536,7 +544,7 @@ def main(argv: list[str]) -> int:
     try:
         a = _parser().parse_args(argv)
     except SystemExit as exc:
-        return causes.exit_code("invalid") if exc.code else exit_codes.code_of("ok")
+        return causes.exit_code(INVALID) if exc.code else exit_codes.code_of("ok")
     try:
         return a.fn(a)
     except WorkerError as exc:
