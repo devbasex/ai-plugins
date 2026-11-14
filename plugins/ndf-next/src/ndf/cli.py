@@ -43,6 +43,8 @@ COMMANDS: dict[str, str] = {
     "test-slot": "ndf.testing.command",
     "training": "ndf.adapters.training",
 }
+# モジュールのパス → 副命令の名前（`tool_of` の引き）
+_TOOL_OF: dict[str, str] = {path: name for name, path in COMMANDS.items()}
 
 
 def tool_of(module: str) -> str:
@@ -51,10 +53,9 @@ def tool_of(module: str) -> str:
     副命令の結果 JSON の `tool` はこの名前にする（各副命令は `TOOL = cli.tool_of(__name__)` で引き、名前を写さない）。
     表に無いモジュールは `LookupError`。
     """
-    for name, path in COMMANDS.items():
-        if path == module:
-            return name
-    raise LookupError(f"副命令の表（cli.COMMANDS）に無いモジュール: {module}")
+    if module not in _TOOL_OF:
+        raise LookupError(f"副命令の表（cli.COMMANDS）に無いモジュール: {module}")
+    return _TOOL_OF[module]
 
 
 def _usage(name: str) -> str:
