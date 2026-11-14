@@ -339,38 +339,59 @@ def _summary(run: _Run, final: str, rounds: int) -> Outcome:
     return Outcome(fin.Review(final, rounds, findings), path, tuple(run.warnings), tuple(run.process))
 
 
-def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
-    """1 ラウンドを回す。終わり方（`finish_decide` の FINALS）か、次へ進むなら None。"""
+class _Prepared(NamedTuple):
+    """ラウンドの前半で決めたもの（範囲・変わった節・詳細レビューを通った節・レビューする head・差分のファイル）。"""
+
+    scope: scope_decide.Scope
+    sections: list[str]
+    reviewed: set[str]
+    head: str
+    diff: Path
+
+
+def _prepare_round(run: _Run, round_no: int) -> _Prepared:
+    """範囲を決めて差分のファイルを書く。"""
     cfg = run.cfg
-    rounds = run.data.setdefault(store.ROUNDS, [])
     reviewed = scope_decide.reviewed_of(run.data)
     sections = changed_sections(run.g, cfg.base, cfg.worktree)
     scope = scope_decide.state_scope(run.data, cfg.every_section, round_no, sections)
     head = run.g.rev_parse("HEAD")
     diff = cfg.state_dir / f"round{round_no}.diff"
     diff.write_text(run.g.run("diff", f"{scope.base or cfg.base}...HEAD"), encoding="utf-8")
-    raised, answered = _review(run, round_no, _review_prompt(run, round_no, scope, diff), launch)
+    return _Prepared(scope, sections, reviewed, head, diff)
+
+
+def _verdict(run: _Run, open_: Sequence[dict[str, Any]], handed: Sequence[fin.Handed]) -> str:
+    """ラウンドの判定（収束・振動・修正が要る）。"""
+    if not open_ and not handed:
+        return fin.CONVERGED
+    if oscillation.returned(run.history):
+        return fin.OSCILLATING
+    return CHANGES_REQUIRED
+
+
+def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
+    """1 ラウンドを回す。終わり方（`finish_decide` の FINALS）か、次へ進むなら None。"""
+    rounds = run.data.setdefault(store.ROUNDS, [])
+    prep = _prepare_round(run, round_no)
+    raised, answered = _review(run, round_no, _review_prompt(run, round_no, prep.scope, prep.diff), launch)
     if answered == 0:
         return fin.ERROR
     run.history.append(_enter(run, round_no, raised))
-    if scope.kind == scope_decide.FULL:
-        run.data[store.REVIEWED] = sorted(reviewed | set(sections))
-    record: dict[str, Any] = {"round": round_no, "head": head, "scope": scope.kind}
+    if prep.scope.kind == scope_decide.FULL:
+        run.data[store.REVIEWED] = sorted(prep.reviewed | set(prep.sections))
+    record: dict[str, Any] = {"round": round_no, "head": prep.head, "scope": prep.scope.kind}
     rounds.append(record)
     open_, handed = _pending(run)
-    if not open_ and not handed:
-        record["verdict"] = fin.CONVERGED
-        return fin.CONVERGED
-    if oscillation.returned(run.history):
-        record["verdict"] = fin.OSCILLATING
-        return fin.OSCILLATING
-    record["verdict"] = CHANGES_REQUIRED
+    record["verdict"] = _verdict(run, open_, handed)
+    if record["verdict"] != CHANGES_REQUIRED:
+        return record["verdict"]
     _save(run)
     fix = _fix(run, round_no, open_, handed, launch)
     if fix is None:
         return fin.ERROR
     record["fix"] = fix
-    return None if _push(run, round_no, head, fix) else fin.ERROR
+    return None if _push(run, round_no, prep.head, fix) else fin.ERROR
 
 
 def drive(cfg: RunConfig, launch: Launcher = agents.run_agent) -> Outcome:
