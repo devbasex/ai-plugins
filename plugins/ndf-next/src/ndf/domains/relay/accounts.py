@@ -15,6 +15,7 @@ import json
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
+from ndf.contracts import facts
 from ndf.domains.relay import account_decide, signals
 
 NAME_RE = signals.NAME_RE
@@ -25,7 +26,7 @@ class AccountError(ValueError):
 
 
 def accounts_dir(state_dir: Path) -> Path:
-    return state_dir / "relay" / "accounts"
+    return state_dir / facts.value("places", "relay-accounts", "path")
 
 
 def pin_path(state_dir: Path) -> Path:

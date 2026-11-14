@@ -23,6 +23,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Callable, Mapping, NamedTuple
 
+from ndf.contracts import facts
 from ndf.domains.relay import hub_decide, registry, session_env, signals
 from ndf.domains.relay.tmux import Tmux
 
@@ -66,7 +67,7 @@ class Context:
 
 
 def hub_dir(state_dir: Path) -> Path:
-    return state_dir / "relay" / "hub"
+    return state_dir / facts.value("places", "relay-hub", "path")
 
 
 def submit(ctx: Context, request: Mapping[str, Any]) -> Outcome:

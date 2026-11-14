@@ -21,6 +21,7 @@ import os
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
+from ndf.contracts import facts
 from ndf.domains.relay import hub_decide, signals
 
 NAME_RE = signals.NAME_RE
@@ -34,7 +35,7 @@ class RegistryError(ValueError):
 
 
 def wrappers_dir(state_dir: Path) -> Path:
-    return state_dir / "relay" / "wrappers"
+    return state_dir / facts.value("places", "relay-wrappers", "path")
 
 
 def wrapper_dir(state_dir: Path, name: str) -> Path:
