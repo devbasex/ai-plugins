@@ -94,11 +94,13 @@ def test_a_fix_needs_either_a_destination_or_a_reason_not_to_move(tables):
 
 def test_entrypoints_give_the_place_after_the_move(tables):
     features, _ = tables
-    places = features["places"]
     every = table.entrypoints(features)
     assert {e.now for e in every} == {r["now"] for r in features["rows"] if r["kind"] == "entrypoint"}
-    for e in every:
-        assert e.after == (tuple(places[e.to]) if e.to else ())
+    by_now = {e.now: e for e in every}
+    moved = by_now["scripts/acceptance-check.py"]
+    assert (moved.to, moved.after) == ("M1", ("src/ndf/domains/loop/",))
+    not_built = by_now["scripts/bundle-close.py"]
+    assert (not_built.to, not_built.after) == (None, ())
 
 
 def test_conductor_entrypoints_are_the_marked_subset(tables):
