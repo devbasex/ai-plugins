@@ -19,10 +19,12 @@ import re
 import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from typing import NamedTuple, Optional
+from typing import NamedTuple, Optional, TypeVar
 
 from ndf.adapters.github import GitHub, text_of
 from ndf.contracts import limits
+
+T = TypeVar("T")
 
 # チェックの状態（`Check.state`）
 DONE = "done"
@@ -106,9 +108,23 @@ def bare_name(name: str) -> str:
     return _SHARD.sub("", name.rpartition(" / ")[2]).strip()
 
 
+def bare_names(names: Iterable[str]) -> set[str]:
+    """照合に使う名前（`bare_name`）の集合。テストのチェックの名前を 1 度だけ揃えて、分類の間で使い回す。"""
+    return {bare_name(n) for n in names}
+
+
 def is_test_check(name: str, tests: Iterable[str]) -> bool:
     """チェックがテストのチェックか。名前の一致か、分割ジョブ（`pytest (1/2)`）の一致で数える（#3153）。"""
-    return bare_name(name) in {bare_name(t) for t in tests}
+    return bare_name(name) in bare_names(tests)
+
+
+def _partition(items: Iterable[T], name_of: Callable[[T], str], test_names: set[str]) -> tuple[list[T], list[T]]:
+    """(テストのチェック, テスト以外) に 1 回の走査で分ける。並びと重なりは保つ。"""
+    hits: list[T] = []
+    others: list[T] = []
+    for item in items:
+        (hits if bare_name(name_of(item)) in test_names else others).append(item)
+    return hits, others
 
 
 class Reading(NamedTuple):
@@ -146,13 +162,14 @@ def read(runs: Iterable[dict], required: Iterable[str], tests: Iterable[str]) ->
     一覧にまだ現れない必須のチェックは、ほかのチェックが終わるまでは push の直後として待ち（`pending`）、
     一覧のチェックがすべて終わった後も現れなければ `missing` にする（#2317）。
     """
-    checks, tests = latest(runs), list(tests)
+    checks, test_names = latest(runs), bare_names(tests)
     wanted = {bare_name(r) for r in required}
     mine = [c for c in checks if bare_name(c.name) in wanted]
     present = {bare_name(c.name) for c in mine}
+    failed_tests, failed_other = _partition((c for c in mine if c.failed), lambda c: c.name, test_names)
     return Reading(
-        failed_tests=[c for c in mine if c.failed and is_test_check(c.name, tests)],
-        failed_other=[c for c in mine if c.failed and not is_test_check(c.name, tests)],
+        failed_tests=failed_tests,
+        failed_other=failed_other,
         running=[c.name for c in mine if c.state == RUNNING],
         queued=[c.name for c in mine if c.state == QUEUED],
         stale=[c.name for c in mine if c.state == STALE],
@@ -163,9 +180,7 @@ def read(runs: Iterable[dict], required: Iterable[str], tests: Iterable[str]) ->
 
 def split_failed(names: Iterable[str], tests: Iterable[str]) -> tuple[list[str], list[str]]:
     """落ちたチェックの名前を (テストのチェック, テスト以外) に分ける（SF4）。"""
-    tests = list(tests)
-    named = list(names)
-    return [n for n in named if is_test_check(n, tests)], [n for n in named if not is_test_check(n, tests)]
+    return _partition(names, lambda n: n, bare_names(tests))
 
 
 def cause_of(reading: Reading, tests: Iterable[str], merge_failed: Optional[Iterable[str]] = None) -> Optional[str]:
