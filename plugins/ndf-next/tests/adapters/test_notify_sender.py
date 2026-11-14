@@ -234,7 +234,12 @@ def test_drain_does_not_read_temporary_names(outbox: Path, wall: list[float]) ->
 
 
 def test_slack_deliver_posts_message_with_mention(outbox: Path, wall: list[float], monkeypatch: pytest.MonkeyPatch) -> None:
-    for name, value in {"SLACK_BOT_TOKEN": "t", "SLACK_CHANNEL_ID": "C1", "SLACK_USER_MENTION": "<@U1>", "NDF_SLACK_API_BASE": "https://slack.test"}.items():
+    for name, value in {
+        "SLACK_BOT_TOKEN": "t",
+        "SLACK_CHANNEL_ID": "C1",
+        "SLACK_USER_MENTION": "<@U1>",
+        "NDF_SLACK_API_BASE": "https://slack.test",
+    }.items():
         monkeypatch.setenv(name, value)
     seen: list[httpx.Request] = []
     _write(outbox, "a", kind="done", text="終えた")
