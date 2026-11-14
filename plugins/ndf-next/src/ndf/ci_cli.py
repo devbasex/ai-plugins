@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import argparse
 import sys
-from typing import Any
+from typing import Any, Optional
 
 from ndf.adapters import git
 from ndf.adapters import github as github_mod
@@ -40,11 +40,20 @@ def _progress(reading: Reading, elapsed: float) -> None:
         print(f"CI を待っている（{int(elapsed)} 秒）: {', '.join(waiting)}", file=sys.stderr)
 
 
+def _item(name: str, outcome: str, test: bool, job: Optional[int] = None) -> dict:
+    """結果の項目 1 件（`outcome` は鍵 `result` の値）。`job` が無ければ鍵を置かない。"""
+    row: dict[str, Any] = {"kind": "check", "name": name, "result": outcome}
+    if job is not None:
+        row["job"] = job
+    row["test"] = test
+    return row
+
+
 def _items(reading: Reading, tests: list[str]) -> list[dict]:
-    rows = [{"kind": "check", "name": c.name, "result": c.conclusion, "job": c.job, "test": True} for c in reading.failed_tests]
-    rows += [{"kind": "check", "name": c.name, "result": c.conclusion, "job": c.job, "test": False} for c in reading.failed_other]
-    rows += [{"kind": "check", "name": n, "result": "missing", "test": is_test_check(n, tests)} for n in reading.missing]
-    rows += [{"kind": "check", "name": n, "result": "stale", "test": is_test_check(n, tests)} for n in reading.stale]
+    rows = [_item(c.name, c.conclusion, True, c.job) for c in reading.failed_tests]
+    rows += [_item(c.name, c.conclusion, False, c.job) for c in reading.failed_other]
+    rows += [_item(n, "missing", is_test_check(n, tests)) for n in reading.missing]
+    rows += [_item(n, "stale", is_test_check(n, tests)) for n in reading.stale]
     return rows
 
 
