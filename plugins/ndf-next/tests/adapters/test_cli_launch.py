@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
+
+import pytest
 
 from ndf import identity
 from ndf.adapters import cli
@@ -78,3 +81,64 @@ def test_agent_paths_at_names_files_next_to_stem():
     paths = cli.AgentPaths.at(Path("/w/kiro"))
 
     assert (paths.out.name, paths.err.name, paths.launch.name) == ("kiro.out", "kiro.err.log", "kiro-launch.json")
+
+
+# ---------------------------------------------------------------- 現状固定: 子へ渡す環境と失敗の形（I-011・I-012）
+
+
+@pytest.fixture
+def no_run_env(monkeypatch):
+    """実行の記録を開いていない状態から始め、終わったら手放す。"""
+    for name in (cli.ENV_RUN_ID, cli.ENV_RUN_LOG, cli.ENV_RUN_LOG_SINK):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("PIN_PARENT", "kept")
+    cli.close()
+    yield
+    cli.close()
+
+
+ENV_DUMP = (
+    "import json, os, sys\n"
+    "prompt = sys.stdin.read()\n"
+    "seen = {k: os.environ.get(k) for k in ('NDF_RUN_ID', 'NDF_RUN_LOG', 'PIN_PARENT')}\n"
+    "print(json.dumps({'result': json.dumps({'prompt': prompt, 'cwd': os.getcwd(), 'env': seen})}))\n"
+)
+
+
+def test_call_claude_passes_parent_env_prompt_and_cwd_without_run_log(tmp_path, no_run_env):
+    got = cli.call_claude([sys.executable, "-c", ENV_DUMP], "問い", 30, cwd=tmp_path)
+
+    assert (got.ok, got.cost, got.error) == (True, 0.0, None)
+    env = {"NDF_RUN_ID": None, "NDF_RUN_LOG": None, "PIN_PARENT": "kept"}
+    assert got.answer == {"prompt": "問い", "cwd": str(tmp_path), "env": env}
+
+
+def test_call_claude_passes_open_run_log_to_child(no_run_env):
+    log = cli.open_run("entry", run_id="r1", location="repo")
+
+    got = cli.call_claude([sys.executable, "-c", ENV_DUMP], "q", 30)
+
+    assert got.answer["env"] == {"NDF_RUN_ID": "r1", "NDF_RUN_LOG": str(log.path), "PIN_PARENT": "kept"}
+
+
+def test_call_claude_nonzero_exit_without_stdout_reports_stderr(no_run_env):
+    script = "import sys; sys.stdin.read(); sys.stderr.write('boom'); sys.exit(3)"
+
+    got = cli.call_claude([sys.executable, "-c", script], "q", 30)
+
+    assert got == cli.ClaudeReply(False, None, "boom", 0.0, "claude が終了コード 3 で終えた: boom")
+
+
+def test_call_claude_nonzero_exit_with_stdout_still_parses(no_run_env):
+    script = 'import sys; sys.stdin.read(); print(\'{"result": "{}", "total_cost_usd": 1}\'); sys.exit(1)'
+
+    got = cli.call_claude([sys.executable, "-c", script], "q", 30)
+
+    assert got == cli.ClaudeReply(True, {}, "{}", 1.0)
+
+
+def test_call_claude_timeout_is_not_ok(no_run_env):
+    got = cli.call_claude([sys.executable, "-c", "import time; time.sleep(5)"], "q", 0.2)
+
+    assert (got.ok, got.answer, got.raw, got.cost) == (False, None, "", 0.0)
+    assert got.error.startswith("claude を起動できない・期限を超えた: ")
