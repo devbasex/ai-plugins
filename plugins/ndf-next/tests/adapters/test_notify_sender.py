@@ -8,7 +8,7 @@ from pathlib import Path
 
 import httpx
 import pytest
-from filelock import FileLock
+from filelock import FileLock, Timeout
 
 from ndf import contracts
 from ndf.adapters import notify
@@ -246,6 +246,85 @@ def test_only_one_sender_runs(outbox: Path, wall: list[float]) -> None:
 def test_drain_does_not_read_temporary_names(outbox: Path, wall: list[float]) -> None:
     _write(outbox, ".writing")
     assert notify.drain(outbox, _Deliver()).sent == 0
+
+
+class _Lock:
+    """`notify.FileLock` の代わり。`script` の先頭から 1 回ずつ、取れる（"ok"）か取れない（"busy"）かを決める。
+
+    排他を外すたびに `on_release` を呼び、外す間際に書かれた 1 件を作る。
+    """
+
+    def __init__(self, script: list[str], on_release=lambda n: None) -> None:
+        self.script = script
+        self.on_release = on_release
+        self.acquired = 0
+
+    def __call__(self, path: object) -> _Lock:
+        return self
+
+    def acquire(self, timeout: float) -> _Lock:
+        if self.script.pop(0) == "busy":
+            raise Timeout("lock")
+        self.acquired += 1
+        return self
+
+    def __enter__(self) -> _Lock:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.on_release(self.acquired)
+
+
+def test_drain_on_missing_outbox_creates_it_and_does_nothing(outbox: Path, wall: list[float]) -> None:
+    deep = outbox / "a" / "b"
+    out = notify.drain(deep, _Deliver())
+    assert deep.is_dir()
+    assert out == notify.Drained()
+
+
+def test_drain_sends_notice_written_as_lock_is_released(outbox: Path, wall: list[float], monkeypatch: pytest.MonkeyPatch) -> None:
+    _write(outbox, "a")
+    lock = _Lock(["ok", "ok"], on_release=lambda n: n == 1 and _write(outbox, "b"))
+    monkeypatch.setattr(notify, "FileLock", lock)
+    deliver = _Deliver()
+    out = notify.drain(outbox, deliver)
+    assert [n.key for n in deliver.calls] == ["a", "b"]
+    assert (out.sent, out.busy, lock.acquired, notify.pending(outbox)) == (2, False, 2, [])
+
+
+def test_drain_leaves_late_notice_when_another_sender_took_the_lock(
+    outbox: Path, wall: list[float], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 2 回目に排他を取れなかったときは busy にせず、それまでの結果を返す
+    _write(outbox, "a")
+    lock = _Lock(["ok", "busy"], on_release=lambda n: _write(outbox, "b"))
+    monkeypatch.setattr(notify, "FileLock", lock)
+    out = notify.drain(outbox, _Deliver())
+    assert (out.sent, out.busy, lock.acquired) == (1, False, 1)
+    assert [p.name for p in notify.pending(outbox)] == ["b.json"]
+
+
+def test_drain_does_not_retake_lock_after_retries_run_out(outbox: Path, wall: list[float], monkeypatch: pytest.MonkeyPatch) -> None:
+    _write(outbox, "a")
+    lock = _Lock(["ok", "ok"])
+    monkeypatch.setattr(notify, "FileLock", lock)
+    out = notify.drain(outbox, _Deliver(*[notify.PostError("HTTP 503", True)] * 4), sleep=lambda s: None)
+    assert (out.left, out.busy, lock.acquired) == (1, False, 1)
+    assert [p.name for p in notify.pending(outbox)] == ["a.json"]
+
+
+def test_drain_on_empty_outbox_takes_lock_once(outbox: Path, wall: list[float], monkeypatch: pytest.MonkeyPatch) -> None:
+    lock = _Lock(["ok", "ok"])
+    monkeypatch.setattr(notify, "FileLock", lock)
+    assert (notify.drain(outbox, _Deliver()), lock.acquired) == (notify.Drained(), 1)
+
+
+def test_busy_drain_reports_ok_without_sending(outbox: Path, wall: list[float]) -> None:
+    _write(outbox, "a")
+    with FileLock(outbox / ".sender.lock"):
+        out = notify.drain(outbox, _Deliver())
+    got = notify._report(out)
+    assert (got["status"], got["metrics"]["sent"]) == ("ok", 0)
 
 
 # ---- 送ったキーの記録と、送れなかった 1 件の保持 ----
