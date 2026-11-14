@@ -6,10 +6,13 @@ import json
 import re
 import subprocess
 from collections.abc import Callable
+from datetime import timedelta
 
 import httpx
 import pytest
 from githubkit import GitHub as Client
+from githubkit.exception import RateLimitExceeded, RequestFailed
+from githubkit.response import Response
 
 from ndf.adapters import github
 
@@ -131,6 +134,25 @@ def test_rate_limit_carries_retry_after() -> None:
     with pytest.raises(github.GitHubError) as err:
         _hub(server).pull(7)
     assert err.value.status == 403 and err.value.retry_after is not None and err.value.retry_after > 0
+
+
+def _rate_limited(retry_after: float) -> RateLimitExceeded:
+    request = httpx.Request("GET", f"https://api.github.com/repos/{REPO}/pulls/7")
+    response = Response(httpx.Response(403, request=request), object)
+    return RateLimitExceeded(response, timedelta(seconds=retry_after))
+
+
+@pytest.mark.parametrize(("retry_after", "retry"), [(30.0, True), (120.0, False)])
+def test_retry_within_waits_only_until_the_deadline(retry_after: float, retry: bool) -> None:
+    # 解除が締め切り（時刻 100 + 予算 60）を越える上限は githubkit の中で眠らず、呼び手へ返す
+    decide = github.RetryWithin(deadline=160.0, clock=lambda: 100.0)
+    assert decide(_rate_limited(retry_after), 0).do_retry is retry
+
+
+def test_retry_within_keeps_default_server_error_retries() -> None:
+    request = httpx.Request("GET", "https://api.github.com/x")
+    failed = RequestFailed(Response(httpx.Response(502, request=request), object))
+    assert github.RetryWithin(deadline=0.0, clock=lambda: 100.0)(failed, 0).do_retry
 
 
 def test_check_runs_reads_pages_until_total() -> None:

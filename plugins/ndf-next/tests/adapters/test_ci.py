@@ -103,6 +103,17 @@ def test_missing_check_waits_until_the_list_settles() -> None:
     assert ci.cause_of(settled, ["pytest"]) == "precondition"
 
 
+def test_named_shards_are_required_one_by_one() -> None:
+    # 名指しした分割ジョブは畳まない。(0/2) だけが通っても (1/2) を待ち、出そろった後も無ければ名前を挙げる
+    required = ["pytest (0/2)", "pytest (1/2)"]
+    early = ci.read([run("pytest (0/2)", rid=1), run("other", status="in_progress", rid=2)], required, ["pytest"])
+    assert early.verdict == "pending"
+    settled = ci.read([run("pytest (0/2)", rid=1), run("CI / other", rid=2)], required, ["pytest"])
+    assert (settled.verdict, settled.missing) == ("missing", ["pytest (1/2)"])
+    both = ci.read([run("CI / pytest (0/2)", rid=1), run("pytest (1/2)", rid=2)], required, ["pytest"])
+    assert both.verdict == "passed"
+
+
 def test_empty_list_is_pending() -> None:
     assert ci.read([], ["pytest"], ["pytest"]).verdict == "pending"
 
@@ -280,7 +291,7 @@ def test_watch_stops_with_infra_wait_when_runner_wait_exceeds_its_limit() -> Non
 # --- 副命令 `ndf ci watch` ---
 
 
-def _serve(monkeypatch: pytest.MonkeyPatch, runs: list[dict], log: str = "") -> None:
+def _serve(monkeypatch: pytest.MonkeyPatch, runs: list[dict], log: str = "", log_status: int = 200) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
         if path.endswith("/pulls/7"):
@@ -297,11 +308,11 @@ def _serve(monkeypatch: pytest.MonkeyPatch, runs: list[dict], log: str = "") -> 
         if path.endswith("/check-runs"):
             return httpx.Response(200, json={"total_count": len(runs), "check_runs": runs})
         if path.endswith("/logs"):
-            return httpx.Response(200, text=log, headers={"content-type": "text/plain"})
+            return httpx.Response(log_status, text=log, headers={"content-type": "text/plain"})
         return httpx.Response(404, json={"message": "not found"})
 
     api = Client("t", transport=httpx.MockTransport(handler), http_cache=False, auto_retry=False)
-    monkeypatch.setattr(github, "client", lambda: api)
+    monkeypatch.setattr(github, "client", lambda **_: api)
 
 
 ARGS = ["watch", "--pr", "7", "--repo", REPO, "--required", "pytest", "--required", "doc-lint", "--test", "pytest", "--budget", "60"]
@@ -320,6 +331,18 @@ def test_cli_watch_test_failure_lists_test_files(monkeypatch: pytest.MonkeyPatch
     assert (out["status"], out["cause"]["kind"], out["cause"]["instance"]) == ("stopped", "test_failed", HEAD)
     assert out["metrics"]["test_files"] == ["tests/test_other.py", "tests/test_stage_check.py"]
     assert out["items"][0] == {"kind": "check", "name": "pytest (0/2)", "result": "failure", "job": 41, "test": True}
+
+
+def test_cli_watch_keeps_test_failure_when_logs_cannot_be_read(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    # ログを読めない（権限・Actions 以外のチェック）ときも、test_failed の分類と落ちたチェックの一覧は残す
+    runs = [run("pytest (0/2)", conclusion="failure", rid=41), run("pytest", rid=42), run("doc-lint", rid=43)]
+    _serve(monkeypatch, runs, log="forbidden", log_status=403)
+    assert ci_cli.main(ARGS) == causes.exit_code("test_failed")
+    out = _out(capsys)
+    assert out["cause"]["kind"] == "test_failed"
+    assert (out["metrics"]["failed_tests"], out["metrics"]["test_files"]) == ([], [])
+    assert "403" in out["metrics"]["log_error"]
+    assert out["items"][0]["name"] == "pytest (0/2)"
 
 
 def test_cli_watch_passes(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
@@ -341,7 +364,7 @@ def test_cli_watch_after_merge_without_failures_is_not_ci(monkeypatch: pytest.Mo
 
 
 def test_cli_watch_rate_limit_is_infra_wait(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    def limited() -> Client:
+    def limited(**_) -> Client:
         headers = {"x-ratelimit-remaining": "0", "x-ratelimit-reset": "9999999999"}
         handler = lambda request: httpx.Response(403, json={"message": "rate"}, headers=headers)  # noqa: E731
         return Client("t", transport=httpx.MockTransport(handler), http_cache=False, auto_retry=False)

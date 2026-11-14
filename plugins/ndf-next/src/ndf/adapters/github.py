@@ -13,14 +13,16 @@ from __future__ import annotations
 import os
 import re
 import subprocess
-from collections.abc import Iterable, Iterator
+import time
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, NamedTuple, Optional
 
 import httpx
 from githubkit import GitHub as Client
-from githubkit.exception import GraphQLFailed, RateLimitExceeded, RequestError, RequestFailed
+from githubkit.exception import GitHubException, GraphQLFailed, RateLimitExceeded, RequestError, RequestFailed
+from githubkit.retry import RETRY_DEFAULT, RetryOption
 
 from ndf.adapters import git
 from ndf.contracts import limits
@@ -68,9 +70,33 @@ def token() -> str:
     return done.stdout.strip()
 
 
-def client(auth: Optional[str] = None, transport: Optional[httpx.BaseTransport] = None) -> Client:
-    """githubkit のクライアント（ETag の読み直しと再試行つき）。`transport` はテストが差し替える。"""
-    return Client(auth if auth is not None else token(), http_cache=True, auto_retry=True, transport=transport)
+class RetryWithin:
+    """githubkit の再試行の判断（既定の判断に、上限の待ちの締め切りを足す）。
+
+    githubkit の既定は上限（rate limit）の解除の時刻まで同期で眠るため、待ちの予算を持つ呼び手（CI の監視）が
+    数十分戻らない。解除が `deadline`（`clock` の時刻）を越える上限は再試行せず、`GitHubError` の `retry_after`
+    で呼び手へ返す。サーバーの誤り（5xx）の再試行は既定のまま。
+    """
+
+    def __init__(self, deadline: float, clock: Callable[[], float] = time.monotonic) -> None:
+        self.deadline = deadline
+        self.clock = clock
+
+    def __call__(self, exc: GitHubException, retry_count: int) -> RetryOption:
+        option = RETRY_DEFAULT(exc, retry_count)
+        if option.do_retry and isinstance(exc, RateLimitExceeded):
+            if self.clock() + exc.retry_after.total_seconds() > self.deadline:
+                return RetryOption(False)
+        return option
+
+
+def client(auth: Optional[str] = None, transport: Optional[httpx.BaseTransport] = None, deadline: Optional[float] = None) -> Client:
+    """githubkit のクライアント（ETag の読み直しと再試行つき）。`transport` はテストが差し替える。
+
+    `deadline`（`time.monotonic` の時刻）を渡すと、解除がそれを越える上限の待ちは再試行しない（`RetryWithin`）。
+    """
+    retry: bool | RetryWithin = True if deadline is None else RetryWithin(deadline)
+    return Client(auth if auth is not None else token(), http_cache=True, auto_retry=retry, transport=transport)
 
 
 def text_of(value: Any) -> str:

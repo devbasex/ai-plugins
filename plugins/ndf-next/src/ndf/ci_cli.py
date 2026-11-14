@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
 from typing import Any, Optional
 
 from ndf.adapters import git
@@ -58,16 +59,26 @@ def _items(reading: Reading, tests: list[str]) -> list[dict]:
     return rows
 
 
+def _failed_nodes(hub: GitHub, reading: Reading) -> dict:
+    """落ちたテストの node id とファイル。ログを読めなくても（権限・Actions 以外のチェック）分類は保ち、理由を `log_error` に残す。"""
+    try:
+        nodes = failed_test_nodes_of(hub, reading.failed_tests)
+    except github_mod.GitHubError as exc:
+        return {"failed_tests": [], "test_files": [], "log_error": str(exc)}
+    return {"failed_tests": nodes, "test_files": files_of(nodes)}
+
+
 def _watch(args: argparse.Namespace) -> dict:
-    hub = GitHub(args.repo if args.repo else git.Git().remote_repo(), github_mod.client())
+    # 上限の解除が待ちの予算を越えるなら githubkit の中で眠らず、`infra_wait` と `retry_after` で返す
+    deadline = time.monotonic() + args.budget
+    hub = GitHub(args.repo if args.repo else git.Git().remote_repo(), github_mod.client(deadline=deadline))
     pull = hub.pull(args.pr)
     watched = Watch(watch_head(hub, pull.head_sha, args.required, args.test), args.budget, on_round=_progress).run()
     merge_failed = args.merge_failed if args.after_merge else None
     kind = watched.cause(args.test, merge_failed)
     metrics: dict[str, Any] = {"rounds": watched.rounds, "elapsed": round(watched.elapsed, 1), "queued_for": round(watched.queued_for, 1)}
     if kind == "test_failed":
-        nodes = failed_test_nodes_of(hub, watched.reading.failed_tests)
-        metrics.update({"failed_tests": nodes, "test_files": files_of(nodes)})
+        metrics.update(_failed_nodes(hub, watched.reading))
     items = _items(watched.reading, args.test)
     if kind is None:
         return result.result(TOOL, result.OK, f"#{args.pr} の必須のチェックが通った", items=items, metrics=metrics)

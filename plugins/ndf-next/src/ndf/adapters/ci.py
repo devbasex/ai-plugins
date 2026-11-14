@@ -113,6 +113,21 @@ def bare_names(names: Iterable[str]) -> set[str]:
     return {bare_name(n) for n in names}
 
 
+def required_key(name: str) -> str:
+    """必須のチェックの照合の鍵。分割ジョブを名指しした（`pytest (1/2)`）ものはその分割を保ち、ほかは `bare_name`。
+
+    名指しした分割を畳むと、`pytest (0/2)` だけが通った時点で `pytest (1/2)` も揃ったと読んでしまう。
+    """
+    short = name.rpartition(" / ")[2].strip()
+    return short if _SHARD.search(short) else bare_name(name)
+
+
+def _fulfils(check_name: str, key: str) -> bool:
+    """チェックが必須の鍵（`required_key`）に当たるか。分割を名指しした鍵はその分割だけに当たる。"""
+    short = check_name.rpartition(" / ")[2].strip()
+    return short == key if _SHARD.search(key) else bare_name(check_name) == key
+
+
 def is_test_check(name: str, tests: Iterable[str]) -> bool:
     """チェックがテストのチェックか。名前の一致か、分割ジョブ（`pytest (1/2)`）の一致で数える（#3153）。"""
     return bare_name(name) in bare_names(tests)
@@ -163,9 +178,9 @@ def read(runs: Iterable[dict], required: Iterable[str], tests: Iterable[str]) ->
     一覧のチェックがすべて終わった後も現れなければ `missing` にする（#2317）。
     """
     checks, test_names = latest(runs), bare_names(tests)
-    wanted = {bare_name(r) for r in required}
-    mine = [c for c in checks if bare_name(c.name) in wanted]
-    present = {bare_name(c.name) for c in mine}
+    wanted = {required_key(r) for r in required}
+    mine = [c for c in checks if any(_fulfils(c.name, w) for w in wanted)]
+    present = {w for w in wanted if any(_fulfils(c.name, w) for c in mine)}
     failed_tests, failed_other = _partition((c for c in mine if c.failed), lambda c: c.name, test_names)
     return Reading(
         failed_tests=failed_tests,
