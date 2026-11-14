@@ -84,7 +84,7 @@ LOCK_SUFFIX = ".lock"
 # SQLite の URL の接頭辞（この後ろがファイルの絶対パス）
 SQLITE_PREFIX = "sqlite:///"
 FINISHED = frozenset({"SUCCESS", "ERROR", "CANCELLED"})
-WAITING = ("PENDING", "ENQUEUED")
+WAITING = ("PENDING", "ENQUEUED", "DELAYED")
 # 置き場の退避で番号を読み直す回数の上限（決定 85 の手順の (5)）
 PREPARE_ATTEMPTS = 3
 
@@ -604,8 +604,11 @@ def _check_key_file(path: Path, now: datetime) -> None:
 
 @contextmanager
 def _client(database_url: str) -> Iterator[DBOSClient]:
-    """DBOS を起こさずに記録を扱うクライアントを作り、抜けるときに破棄する。"""
-    client = DBOSClient(system_database_url=database_url)
+    """DBOS を起こさずに記録を扱うクライアントを作り、抜けるときに破棄する。
+
+    接続が切れたら待たずに例外にする（DBOS の既定は戻るまで待ち続け、片付けが `maint.lock` と鍵のロックを持ったまま止まる）。
+    """
+    client = DBOSClient(system_database_url=database_url, retry_connection_errors=False)
     try:
         yield client
     finally:
@@ -779,11 +782,15 @@ def _register_run(database_url: str, name: str, run_key: str, now: datetime) -> 
         try:
             _ensure_runs_table(engine, table)
             with engine.begin() as conn:
-                exists = conn.execute(sa.select(table.c.run_name).where(table.c.run_name == name)).first()
-                if exists is None:
-                    conn.execute(table.insert().values(run_name=name, run_key=run_key, started_at=now))
+                _insert_run(conn, table, name, run_key, now)
         except sa.exc.SQLAlchemyError as exc:
             raise StoreBroken(f"台帳 {RUNS_TABLE} に鍵を書けない: {exc}") from exc
+
+
+def _insert_run(conn: sa.Connection, table: sa.Table, name: str, run_key: str, now: datetime) -> None:
+    """台帳に鍵 `name` の行が無ければ足す。"""
+    if conn.execute(sa.select(table.c.run_name).where(table.c.run_name == name)).first() is None:
+        conn.execute(table.insert().values(run_name=name, run_key=run_key, started_at=now))
 
 
 def _ledger(database_url: str) -> list[LedgerRow]:
@@ -867,7 +874,7 @@ def _pending_in(root: Path) -> list[RunRecord]:
 
 
 def pending(root_or_url: Path | str) -> list[RunRecord]:
-    """待ちを抱えた（`PENDING`・`ENQUEUED`）実行を集める。置き場なら鍵ごとのファイル、URL なら台帳の鍵から。"""
+    """待ちを抱えた（`PENDING`・`ENQUEUED`・`DELAYED`）実行を集める。置き場なら鍵ごとのファイル、URL なら台帳の鍵から。"""
     if isinstance(root_or_url, Path):
         return _pending_in(root_or_url)
     names = [row.run_name for row in _ledger(root_or_url)]
