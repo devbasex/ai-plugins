@@ -343,20 +343,14 @@ def _strings(value: Any) -> Optional[list[str]]:
     return list(value) if ok else None
 
 
-def _dig(node: Any, *keys: str) -> Any:
-    for key in keys:
-        node = node[key] if isinstance(node, dict) and key in node else None
-    return node
-
-
 def _project_value(name: str, project: Mapping[str, Any]) -> Optional[route.Value]:
     """宣言から読む差し込みの値。宣言に無いか形が違えば None。"""
     if name == "test_command":
-        suites = _dig(project, "test", "suites")
+        suites = definition.dig(project, "test", "suites")
         found = [s for s in suites if isinstance(s, dict) and weight.is_test_suite(s)] if isinstance(suites, list) else []
         cmds = [c for c in (s.get("command") for s in found) if isinstance(c, str) and c]
         return " && ".join(cmds) if cmds else None
-    return _strings(_dig(project, *PROJECT_KEYS[name]))
+    return _strings(definition.dig(project, *PROJECT_KEYS[name]))
 
 
 def _project(place: Path) -> dict[str, Any]:

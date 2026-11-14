@@ -112,12 +112,6 @@ BEHAVIOR_DOCS = ("**/skills/**/*.md", "**/agents/*.md")  # 同じく `docs.behav
 DIFF_WORDS = ("code_in_diff", "docs_only_diff", "behavior_docs_in_diff")
 
 
-def _dig(node: Any, *keys: str) -> Any:
-    for key in keys:
-        node = node.get(key) if isinstance(node, dict) else None
-    return node
-
-
 def diff_kinds(files: set[str], docs: set[str], behavior: set[str]) -> dict[str, bool]:
     """差分の語の値。振る舞いを決める文書は文書の部分集合。文書だけは、文書が 1 件以上でコードと振る舞いの文書が 0 件。"""
     code, behavior = files - docs, behavior & docs
@@ -130,14 +124,14 @@ def diff_kinds(files: set[str], docs: set[str], behavior: set[str]) -> dict[str,
 
 def _pathspecs(project: Mapping[str, Any], key: str, default: tuple[str, ...]) -> list[str]:
     """宣言のパターン（根からのパス全体に当てる glob。`!` は前が当てたものを外す）を git の pathspec にする。"""
-    value = _dig(project, "docs", key)
+    value = definition.dig(project, "docs", key)
     patterns = value if isinstance(value, list) and value and all(isinstance(p, str) for p in value) else default
     return [f":(exclude,glob){p[1:]}" if p.startswith("!") else f":(glob){p}" for p in patterns]
 
 
 def _sprint_range(context: Mapping[str, Any], cwd: Path) -> tuple[Git, str]:
     """スプリントブランチとベースブランチ（`.ndf/worktree.json` の `base_branch`。手元に無ければ `origin/`）の分岐点からの範囲。"""
-    base = _dig(declaration(cwd, WORKTREE_FILE), "base_branch")
+    base = definition.dig(declaration(cwd, WORKTREE_FILE), "base_branch")
     if not isinstance(base, str) or not base or base.startswith("-"):
         raise FactUnknown(f"差分を求められない: {WORKTREE_FILE} の base_branch が無いか、- で始まる")
     git = Git(Path(context.get("worktree") or cwd))
@@ -176,8 +170,8 @@ def facts_of(words: tuple[str, ...], context: Mapping[str, Any], cwd: Path) -> d
     kinds = functools.cache(lambda: sprint_diff_kinds(context, cwd))
     known: dict[str, Callable[[], bool]] = {
         **{w: (lambda w=w: kinds()[w]) for w in DIFF_WORDS},
-        "ci_declared": lambda: _dig(declaration(cwd, PROJECT_FILE), "test", "ci", "only") is True,
-        "prod_branch": lambda: bool(_dig(declaration(cwd, WORKTREE_FILE), "production_branch")),
+        "ci_declared": lambda: definition.dig(declaration(cwd, PROJECT_FILE), "test", "ci", "only") is True,
+        "prod_branch": lambda: bool(definition.dig(declaration(cwd, WORKTREE_FILE), "production_branch")),
         "release_record": lambda: "version" in context,
         "design_pr": lambda: "design_pr" in context,
     }

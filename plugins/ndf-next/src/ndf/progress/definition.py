@@ -114,7 +114,7 @@ def validate_io(ref: str, obj: Any) -> list[str]:
     return _errors(_io_validator(ref), obj)
 
 
-def _dig(node: Any, *keys: str) -> Any:
+def dig(node: Any, *keys: str) -> Any:
     """入れ子の dict を鍵の順にたどる。途中で dict でないか鍵が無ければ None。"""
     for key in keys:
         if not isinstance(node, dict):
@@ -124,7 +124,7 @@ def _dig(node: Any, *keys: str) -> Any:
 
 
 def _missing_keys(obj: Any, part: str, keys: tuple[str, ...]) -> list[str]:
-    held = _dig(obj, part)
+    held = dig(obj, part)
     have = held if isinstance(held, dict) else {}
     return [f"{part}: 文脈の鍵 {k} が無い" for k in keys if k not in have]
 
@@ -160,7 +160,7 @@ def _tasks(doc: Mapping[str, Any]) -> Iterator[tuple[str, dict[str, Any]]]:
 
 
 def _ndf_meta(node: Mapping[str, Any]) -> Any:
-    return _dig(node, "metadata", NAMESPACE)
+    return dig(node, "metadata", NAMESPACE)
 
 
 def _context_keys() -> set[str]:
@@ -200,14 +200,14 @@ def _task_errors(where: str, name: str, body: dict[str, Any], level: str) -> lis
 
 def _listen_errors(where: str, listen: Any) -> list[str]:
     """`listen` の要素は 1 つの事象（`to.one`）を待ち、その種類は答えの事象（`LISTENED_EVENT`）である。"""
-    kind = _dig(listen, "to", "one", "with", "type")
+    kind = dig(listen, "to", "one", "with", "type")
     if kind != LISTENED_EVENT:
         return [f"{where}: listen が待つのは事象 {LISTENED_EVENT} の 1 つ（to.one.with.type。渡された値 {kind}）"]
     return []
 
 
 def _document(doc: Mapping[str, Any]) -> dict[str, Any]:
-    held = _dig(doc, "document")
+    held = dig(doc, "document")
     return held if isinstance(held, dict) else {}
 
 
@@ -224,7 +224,7 @@ def check_vocabulary(doc: Mapping[str, Any], level: str) -> list[str]:
 
 
 def _endpoint(node: Mapping[str, Any], part: str) -> Any:
-    return _dig(node, part, "schema", "resource", "endpoint")
+    return dig(node, part, "schema", "resource", "endpoint")
 
 
 def _ref_errors(where: str, ref: Any, what: str) -> list[str]:
@@ -300,7 +300,7 @@ def _called(mode_doc: Mapping[str, Any]) -> list[tuple[str, str]]:
     """モードの文書が呼ぶ（工程表の行名, 工程の文書の名前）の並び。"""
     out = []
     for name, body in _tasks(mode_doc):
-        out.append((name, _dig(body, "run", "workflow", "name")))
+        out.append((name, dig(body, "run", "workflow", "name")))
     return out
 
 
