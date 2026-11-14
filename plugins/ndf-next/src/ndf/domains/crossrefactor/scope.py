@@ -10,7 +10,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from ndf.adapters.git import Git, GitError
-from ndf.domains.crossrefactor import diff_decide, symbols_decide, tests_decide
+from ndf.domains.crossrefactor import diff_decide, range_decide, symbols_decide, tests_decide
 from ndf.domains.crossrefactor.symbols_decide import PYTHON_SUFFIX, Touched
 
 
@@ -68,3 +68,19 @@ def tests_for_change(work: Path, changed: Sequence[str]) -> tests_decide.PickedT
     """項目が触るファイルに対応するテストのファイル（#3049）。作業場所の追跡されるテストのファイルから選ぶ。"""
     tests = {p: _read(work / p) for p in tracked(work, ["."]) if tests_decide.is_test_file(p)}
     return tests_decide.tests_for_change(changed, tests)
+
+
+def _nearest(work: Path, path: str) -> str | None:
+    """`path` から根へ向かって最初に在るテストの置き場所。"""
+    return next((d for d in range_decide.near_candidates(path) if (work / d).is_dir()), None)
+
+
+def scope_args(work: Path, base: str, declared: Sequence[str], explicit: Sequence[str]) -> list[str]:
+    """検査のプランが `--scope` へ渡す範囲（#1484）。差分は `base...HEAD` の在るファイル（消したファイルを除く）。"""
+    try:
+        changed = _git(work).changed_files(base, "HEAD")
+    except GitError as exc:
+        raise ScopeError(str(exc)) from exc
+    files = [f for f in changed if (work / f).is_file()]
+    near = {} if any(t.strip() not in range_decide.WHOLE for t in declared) else {f: _nearest(work, f) for f in files}
+    return range_decide.compose(files, declared, near, explicit)
