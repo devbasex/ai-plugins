@@ -168,11 +168,21 @@ def resolve_inputs(stage: stages.StageDef, context: Mapping[str, Any]) -> dict[s
     return picked
 
 
+def kind_of(step: stages.StepDef) -> str:
+    """ステップの作業種別（`call` から引く）。"""
+    return CALLS[step.call]
+
+
+def is_listen(step: stages.StepDef) -> bool:
+    """作業を呼ばず、承認ゲートの答えを待つステップか。"""
+    return kind_of(step) == LISTEN
+
+
 def stage_run(stage: stages.StageDef, step: stages.StepDef, inputs: Mapping[str, Any]) -> StageRun:
     """工程とステップの定義から呼び出しを組む。知らない `call` は `model.Refused`。"""
     if step.call not in CALLS:
         raise model.Refused(f"工程 {stage.name} のステップ {step.id} の call {step.call} は呼べない")
-    kind = CALLS[step.call]
+    kind = kind_of(step)
     name = _named(kind, step.args)
     return StageRun(kind, name, dict(inputs), stage.outputs, step.range, step.id, dict(step.args))
 

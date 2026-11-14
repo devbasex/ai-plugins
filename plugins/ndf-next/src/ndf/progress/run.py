@@ -145,7 +145,7 @@ def _running_move(v: View, s: stages.StageDef) -> Move:
     step = prog.next_step(s)
     if step is None:
         return Move(Action.RESUME, s, None, prog)
-    listen = invoke.CALLS[step.call] == invoke.LISTEN
+    listen = invoke.is_listen(step)
     waiting = listen or (prog.waiting is not None and prog.waiting["step"] == step.id)
     if waiting and prog.answer is None:
         return Move(Action.GATE, s, step, prog)
@@ -198,7 +198,7 @@ def choices(m: Move) -> list[str]:
     """待っているステップへの答えの選択肢。承認ゲートは出力の規約の答えの語、プランの承認ゲートはプランの routes。"""
     assert m.step is not None and m.progress is not None
     known = facts.ids(result.ANSWERS)
-    if invoke.CALLS[m.step.call] == invoke.LISTEN:
+    if invoke.is_listen(m.step):
         listed = _find_enum(definition.ref_target(m.step.output_ref), "answer") if m.step.output_ref else None
         return [a for a in (listed if listed is not None else []) if a in known]
     waiting = m.progress.waiting if m.progress.waiting is not None else {}
@@ -525,7 +525,7 @@ def answer(st: store.Store, table_id: str, stage: str, value: str, reason: str, 
         allowed = choices(m)
         if value not in allowed:
             raise model.Refused(f"工程 {stage} の答えは {', '.join(allowed)} のどれか（渡された値 {value}）")
-        payload = {"answer": value, "step": m.step.id, "kind": invoke.CALLS[m.step.call], "notes": text}
+        payload = {"answer": value, "step": m.step.id, "kind": invoke.kind_of(m.step), "notes": text}
         if notes is not None:
             payload["notes_path"] = str(notes)
         return [model.EventDraft("answered", "conductor", stage, reason=reason, payload=payload, rev=v.rev)]
