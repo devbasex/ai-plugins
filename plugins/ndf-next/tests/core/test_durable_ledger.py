@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 import pytest
 import sqlalchemy as sa
 
+from ndf.core import durable
 from ndf.core import durable_ledger as ledger
 from ndf.core import durable_locks as locks
 
@@ -18,7 +19,7 @@ STARTED = datetime(2026, 11, 1, 9, 30, tzinfo=UTC)
 
 @pytest.fixture
 def disposed(monkeypatch):
-    """durable_locks が作った Engine の数と、dispose された数を数える。"""
+    """durable が作った Engine の数と、dispose された数を数える。"""
     counts = {"created": 0, "disposed": 0}
     real = sa.create_engine
 
@@ -67,7 +68,7 @@ def test_register_that_cannot_write_raises_store_broken_and_disposes(tmp_path, d
     with pytest.raises(locks.StoreBroken) as err:
         ledger._register_run(_url(tmp_path), "run-a", "key-a", STARTED)
     assert err.value.kind == "store_broken"
-    assert str(err.value).startswith(f"台帳 {ledger.RUNS_TABLE} に鍵を書けない: ")
+    assert str(err.value).startswith(f"台帳 {durable.RUNS_TABLE} に鍵を書けない: ")
     assert isinstance(err.value.__cause__, sa.exc.SQLAlchemyError)
     assert disposed == {"created": 1, "disposed": 1}
 
