@@ -87,5 +87,5 @@ def scope_args(work: Path, base: str, declared: Sequence[str], explicit: Sequenc
     except GitError as exc:
         raise ScopeError(str(exc)) from exc
     files = [f for f in changed if (work / f).is_file()]
-    near = {} if any(t.strip() not in range_decide.WHOLE for t in declared) else {f: _nearest(work, f) for f in files}
+    near = {} if range_decide.declared_tests(declared) else {f: _nearest(work, f) for f in files}
     return range_decide.compose(files, declared, near, explicit)

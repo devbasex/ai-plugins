@@ -56,6 +56,11 @@ def _covered(item: str, others: Sequence[str]) -> bool:
     return any(o != item and PurePosixPath(o) in p.parents for o in others)
 
 
+def declared_tests(declared: Sequence[str]) -> list[str]:
+    """宣言のテストの置き場所のうち範囲に数えるもの（リポジトリ全体を除く。判定は前後の空白を除いて行い、末尾の / を除く）。"""
+    return [t.rstrip("/") for t in declared if t.strip() not in WHOLE]
+
+
 def _near_tests(code: Sequence[str], near: Mapping[str, str | None]) -> list[str]:
     """`code` の順に、近くのテストの置き場所が見つかったものだけを返す。"""
     return [d for f in code if f in near and (d := near[f]) is not None]
@@ -64,7 +69,7 @@ def _near_tests(code: Sequence[str], near: Mapping[str, str | None]) -> list[str
 def compose(files: Iterable[str], declared: Sequence[str], near: Mapping[str, str | None], explicit: Sequence[str]) -> list[str]:
     """範囲を組む。`files` は差分の在るファイル、`near` はファイル → 見つかった近くのテストの置き場所（無ければ None）。"""
     code = [f for f in files if is_code(f)]
-    tests = [t.rstrip("/") for t in declared if t.strip() not in WHOLE]
+    tests = declared_tests(declared)
     if not tests:
         tests = _near_tests(code, near)
     items = [*code, *tests, *explicit]
