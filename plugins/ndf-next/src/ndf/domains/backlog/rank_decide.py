@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import heapq
+from collections import Counter
 import math
 import re
 from collections.abc import Callable, Iterable
@@ -53,6 +54,19 @@ def depends_on_map(edges: Iterable[Edge]) -> dict[int, set[int]]:
     out: dict[int, set[int]] = {}
     for a, b in edges:
         out.setdefault(a, set()).add(b)
+    return out
+
+
+def _reachable(starts: Iterable[int], adjacency: dict[int, set[int]]) -> set[int]:
+    """`starts` から隣接の表をたどって届く番号（`starts` 自身は含めない）。"""
+    seen = set(starts)
+    stack, out = list(seen), set()
+    while stack:
+        for b in adjacency.get(stack.pop(), ()):
+            if b not in seen:
+                seen.add(b)
+                stack.append(b)
+                out.add(b)
     return out
 
 
@@ -219,15 +233,7 @@ def boundary(
 def held_back(rows: list[Row], edges: Iterable[Edge]) -> set[int]:
     """境界に入れない課題: 尺度を超える課題・人の判断待ちの課題と、それを（辺を辿って）前提とする課題。"""
     blocked = {r.number for r in rows if r.over or r.waiting_decision}
-    edge_list = list(edges)
-    grew = bool(blocked)
-    while grew:
-        grew = False
-        for a, b in edge_list:
-            if b in blocked and a not in blocked:
-                blocked.add(a)
-                grew = True
-    return blocked
+    return blocked | _reachable(blocked, depends_on_map((b, a) for a, b in edges))
 
 
 def slots(board: Board, ranked: list[Row]) -> tuple[Optional[dict], Optional[dict], Optional[dict]]:
@@ -245,17 +251,7 @@ def milestone_rows(board: Board, rows: dict[int, Row], place: dict[int, Optional
 
 def group_of(board: Board, n: int, place: dict[int, Optional[str]], nearest: str) -> list[int]:
     """候補が（推移的に）依存する課題のうち、直近のマイルストーンに無いもの。前倒しは一緒に動かす。"""
-    deps = depends_on_map(board.edges)
-    seen, stack, out = {n}, [n], set()
-    while stack:
-        for b in _of(deps, stack.pop()):
-            if b in seen:
-                continue
-            seen.add(b)
-            stack.append(b)
-            if place.get(b) != nearest:
-                out.add(b)
-    return sorted(out)
+    return sorted(b for b in _reachable({n}, depends_on_map(board.edges)) if place.get(b) != nearest)
 
 
 @dataclass
@@ -384,10 +380,7 @@ def _milestone_out(board: Board, rows: dict[int, Row], place: dict[int, Optional
 
 def released_counts(edges: Iterable[Edge]) -> dict[int, int]:
     """課題ごとの被依存の数（閉じると解放する課題の数）。"""
-    out: dict[int, int] = {}
-    for _, b in edges:
-        out[b] = out[b] + 1 if b in out else 1
-    return out
+    return Counter(b for _, b in edges)
 
 
 def compute(board: Board) -> dict[str, Any]:
