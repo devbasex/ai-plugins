@@ -300,6 +300,22 @@ def restore_branch(root, branch: str, ref: str = "HEAD", run_git=None) -> bool:
     return True
 
 
+HEAD_GONE = "Head ref must be a branch"  # gh pr create が、origin に head のブランチが無いときに返す語
+
+
+def pr_create_restoring_head(root, gh, base: str, head: str, title: str, body: str, run_git=None):
+    """`gh pr create` を `gh`（`gh_parts.gh` の形）で打ち、結果を返す。origin に head が無いと落ち、head が作業ツリーの
+    ブランチなら、`restore_branch` で push し直して 1 回だけ打ち直す。開発版の PR のマージの後に `delete_branch_on_merge`
+    が遅れて head を消し、`restore_branch` の確かめとすれ違った場合に効く（v10.27.63 の release）。"""
+    g = run_git or proc.git
+    args = ["pr", "create", "--base", base, "--head", head, "--title", title, "--body", body]
+    p = gh(args, cwd=root)
+    if p.returncode != 0 and HEAD_GONE in p.stderr and g(root, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip() == head:
+        if restore_branch(root, head, run_git=g):
+            p = gh(args, cwd=root)
+    return p
+
+
 def first_git_tree(roots) -> Path | None:
     """木の並びのうち、存在するディレクトリで、メインディレクトリ（`decl.main_dir`）を解ける最初の木。無ければ `None`。
 
