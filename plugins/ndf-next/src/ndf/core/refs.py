@@ -37,7 +37,6 @@ from ndf.core.plan.queue_run import QUEUE_PRS
 from ndf.core.plan.files import read_json
 from ndf.core.plan.records import PROGRESS_FILE
 from ndf.core.plan.runner import RUN_FILE, result_path
-
 from ndf.core.resume import SKIP, DesignPr
 
 # 参照の種類（プランの `refs` の `kind`）
