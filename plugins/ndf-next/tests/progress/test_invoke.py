@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from ndf.adapters import github
 from ndf.contracts import result
 from ndf.core import route
 from ndf.core.plan import cli as plan_cli
@@ -254,6 +255,43 @@ def test_template_values_are_filled_from_the_issue_the_declaration_and_the_defau
         assert "ndf-review" in text and "ndf-rebuild" in text
     if "gate" in t.params:
         assert "ndf-gate" in text
+
+
+def test_an_issue_by_an_untrusted_author_is_not_written_and_stops_as_invalid_by_name(tmp_path, monkeypatch):
+    # PR 3469 の指摘（#3364）: write 以上の権限が無い書き手の課題の本文を、指示として読まれる作業の入力へ写さない。
+    # 題と本文は欠けとして、信用しない出所を挙げて止まり、本文のファイルは書かない
+    repo = _sprint_repo(tmp_path, PROJECT)
+    monkeypatch.setattr(invoke, "issue_text", lambda place, n: None)
+    monkeypatch.setattr(route, "default_merge_method", lambda repo, base: "squash")
+    work = tmp_path / "w"
+    work.mkdir()
+    got = invoke.invoke(_stage_run_of("impl", repo, [3092]), repo, work, runner=lambda *a: pytest.fail("打たない"))
+    assert got.status == "stopped" and got.cause["kind"] == "invalid"
+    named = {i["key"]: i["source"] for i in got.report["items"]}
+    assert named["title"] == invoke.FROM_UNTRUSTED_ISSUE and named["body_file"] == invoke.FROM_UNTRUSTED_ISSUE
+    assert not (work / invoke.ISSUE_BODY_FILE.format(number=3092)).exists()
+
+
+def test_the_issue_text_is_withheld_unless_the_author_is_trusted(monkeypatch):
+    # #3364: 課題の題と本文は、`GitHub.trusts` が真の書き手のときだけ返す
+    authored = github.Authored("someone", "NONE", "本文")
+
+    class Hub:
+        def __init__(self, repo, client):
+            pass
+
+        def issue_text(self, number):
+            return "題", authored
+
+        def trusts(self, a):
+            return a.association == "OWNER"
+
+    monkeypatch.setattr(invoke.github, "GitHub", Hub)
+    monkeypatch.setattr(invoke.github, "client", lambda: None)
+    monkeypatch.setattr(invoke.git.Git, "remote_repo", lambda self: "o/r")
+    assert invoke.issue_text(Path("."), 1) is None
+    authored = github.Authored("owner", "OWNER", "本文")
+    assert invoke.issue_text(Path("."), 1) == ("題", "本文")
 
 
 def test_every_template_value_has_one_source():

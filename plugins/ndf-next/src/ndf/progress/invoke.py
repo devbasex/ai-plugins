@@ -299,6 +299,8 @@ def _param_value(value: Any) -> route.Value:
 # 雛形の差し込みのうち、工程の入力に無い値の出所（差し込みの名前 → 出所。#3092）。表に無い名前は工程の入力・
 # 打った場所（`route.derived`）・`params.json` の既定で決まる
 FROM_ISSUE = "課題の題と本文"
+# 書き手を信用しない（`GitHub.trusts` が偽。#3364）課題の題と本文は、作業の入力（指示として読まれる）へ写さない
+FROM_UNTRUSTED_ISSUE = "課題の題と本文（書き手に write 以上の権限が無く、指示として渡さない）"
 FROM_PROJECT = f"{PROJECT_FILE} の宣言"
 FROM_DEFAULT = "params.json の既定"
 FROM_WORKTREE = "作業場所のブランチ"
@@ -324,11 +326,14 @@ PROJECT_KEYS = {
 ISSUE_BODY_FILE = "issue-{number}-body.md"
 
 
-def issue_text(place: Path, number: int) -> tuple[str, str]:
-    """課題の題と本文（作業場所のリモートの GitHub から読む）。テストが差し替える。"""
+def issue_text(place: Path, number: int) -> Optional[tuple[str, str]]:
+    """課題の題と本文（作業場所のリモートの GitHub から読む）。テストが差し替える。
+
+    書き手を信用しない（`GitHub.trusts` が偽。#3364）なら None。本文は作業の入力として指示に読まれるためである。
+    """
     hub = github.GitHub(git.Git(place).remote_repo(), github.client())
     title, authored = hub.issue_text(number)
-    return title, authored.body
+    return (title, authored.body) if hub.trusts(authored) else None
 
 
 def _strings(value: Any) -> Optional[list[str]]:
@@ -363,15 +368,21 @@ def _project(place: Path) -> dict[str, Any]:
         raise route.RouteError(str(exc)) from None
 
 
-def _issue_values(run: StageRun, work_dir: Path, place: Path) -> dict[str, route.Value]:
-    """課題が 1 つなら、その題（title）と本文を書いたファイル（body_file）。読めなければ空。"""
+def _issue_values(run: StageRun, work_dir: Path, place: Path) -> Optional[dict[str, route.Value]]:
+    """課題が 1 つなら、その題（title）と本文を書いたファイル（body_file）。読めなければ空。
+
+    書き手を信用しない課題は、本文を書き出さずに None（足りない値の出所を `FROM_UNTRUSTED_ISSUE` にする）。
+    """
     issues = run.inputs["issues"] if "issues" in run.inputs else None
     if not isinstance(issues, list) or len(issues) != 1:
         return {}
     try:
-        title, body = issue_text(place, int(issues[0]))
+        found = issue_text(place, int(issues[0]))
     except (GitError, github.GitHubError):
         return {}
+    if found is None:
+        return None
+    title, body = found
     out = work_dir / ISSUE_BODY_FILE.format(number=int(issues[0]))
     out.write_text(body, encoding="utf-8")
     return {"title": title, "body_file": str(out)}
@@ -397,8 +408,13 @@ def template_values(t: route.Template, run: StageRun, work_dir: Path, cwd: Path)
     values = {k: _param_value(v) for k, v in run.inputs.items() if k in t.params}
     wanted = {n: FILL_SOURCES[n] for n in t.params if n not in values and n in FILL_SOURCES}
     place = work_place(run, cwd)
+    sources = dict(FILL_SOURCES)
     if FROM_ISSUE in wanted.values():
-        values.update({k: v for k, v in _issue_values(run, work_dir, place).items() if k in wanted})
+        issued = _issue_values(run, work_dir, place)
+        if issued is None:
+            sources.update({n: FROM_UNTRUSTED_ISSUE for n, s in wanted.items() if s == FROM_ISSUE})
+        else:
+            values.update({k: v for k, v in issued.items() if k in wanted})
     if FROM_PROJECT in wanted.values():
         project = _project(place)
         for name in (n for n, s in wanted.items() if s == FROM_PROJECT):
@@ -411,7 +427,7 @@ def template_values(t: route.Template, run: StageRun, work_dir: Path, cwd: Path)
             values["branch"] = branch
     values = route.derived(t, values, cwd)
     defs = route.params()
-    missing = {n: (FILL_SOURCES[n] if n in FILL_SOURCES else FROM_INPUT) for n in t.params if n not in values and defs[n].default is None}
+    missing = {n: (sources[n] if n in sources else FROM_INPUT) for n in t.params if n not in values and defs[n].default is None}
     if missing:
         raise TemplateValuesMissing(t.name, missing)
     return values
