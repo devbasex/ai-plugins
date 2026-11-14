@@ -52,7 +52,12 @@ def checked() -> bool:
 def stop(broken: list[str]) -> int:
     """入れ直しの手順を結果 JSON で出し、終了コードの表の deps_missing の終了コードを返す。"""
     steps = f"UV_PROJECT_ENVIRONMENT={sys.prefix} uv sync --frozen --no-dev --reinstall --project {ROOT}"
-    detail = f"依存の環境 {sys.prefix} のファイルが欠けている: {', '.join(broken)}。入れ直す: {steps}"
+    return emit_deps_missing(f"依存の環境 {sys.prefix} のファイルが欠けている: {', '.join(broken)}。入れ直す: {steps}")
+
+
+def emit_deps_missing(detail: str) -> int:
+    """依存の欠けを結果 JSON（stopped・deps_missing）1 行で出し、説明を標準エラーへ書き、終了コードの表の deps_missing の
+    終了コードを返す。隣のシェルのスクリプト（uv を入れられないとき）もここを呼ぶ。"""
     report = {
         "tool": "cli",
         "status": "stopped",
