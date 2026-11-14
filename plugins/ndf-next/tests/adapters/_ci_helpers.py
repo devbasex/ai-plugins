@@ -1,4 +1,4 @@
-"""CI のテストが共有する見本（check run の行と落ちたテストを含むログ）。"""
+"""CI のテスト（`test_ci.py`・`test_ci_cli.py`）が共有する check run の作り方と、落ちたテストの並ぶログ。"""
 
 from __future__ import annotations
 
@@ -13,7 +13,6 @@ def run(name: str, status: str = "completed", conclusion: str | None = None, rid
     return {**row, **extra}
 
 
-# 落ちたテストの拾い出し（#3188）の見本のログ
 LOG = """2026-11-12T13:33:01.1Z ============ short test summary info ============
 2026-11-12T13:33:01.2Z FAILED tests/test_stage_check.py::test_order[standard] - AssertionError: x
 2026-11-12T13:33:01.3Z FAILED tests/test_stage_check.py::test_names - AssertionError

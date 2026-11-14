@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "as_of": "2026-11-14",
+  "since": {"pr": 3280, "at": "2026-11-13T19:40:00Z"},
+  "fixes": [
+    {"id": "fix:3242", "issue": 3242, "fix": "人のいない実行で、判定結果の次のコマンドを打たずに区間を終える Stop を差し戻す（人の操作待ちとバッククォートの「無し」を外す）", "prs": [3312], "commits": ["c48687bcd", "9b44028c6", "32f74b04d"], "tests": ["scripts/tests/test_hook_unattended.py"], "to": "M3a"},
+    {"id": "fix:3021", "issue": 3021, "fix": "並列の計画の上限の検査で、終わりの記録のあるレーンを数えない", "prs": [3333], "commits": ["2c496d112", "3f0f862fa"], "tests": ["scripts/tests/test_parallel_ledger.py", "scripts/tests/test_parallel_plan.py"], "to": "P3"},
+    {"id": "fix:3329", "issue": 3329, "fix": "人のいない実行の差し戻しの文と案内に、契約から作った形の説明を載せる", "prs": [3332, 3335], "commits": ["b0c5d177f", "8377bcbc8", "0c44be01a", "bdb5ae9a3"], "tests": ["scripts/tests/test_hook_unattended.py", "scripts/tests/test_unattended_report.py"], "to": "M3a"},
+    {"id": "fix:3190", "issue": 3190, "fix": "用語集の検査を意味の説明の廃止した語と、単独で照合する廃止した語にも掛ける", "prs": [3316, 3330], "commits": ["2203e09ae", "558d7ef75", "0a0be5a0e"], "tests": ["scripts/tests/test_glossary.py"], "to": "M7"},
+    {"id": "fix:3119", "issue": 3119, "fix": "スプリントブランチを main から切るブランチ運用への切り替え", "prs": [3314], "commits": ["35c49e5aa"], "tests": [], "not_moved": "スプリント lsw-1 から revert して develop に無い（2026-11-14 の利用者の決定）。入れ直すときは、ブランチの運用の宣言の持ち主 D2+ を行き先にしてこの行を書き直す"},
+    {"id": "fix:3308", "issue": 3308, "fix": "スプリントに属さないリリースのプランを、本番チャネルの宣言の取り込み方で組む。取り込み直しの上限を上限の宣言から引く", "prs": [3338, 3360], "commits": ["a98416b92", "f6c2a4670", "2cc6bfcbb", "48104af1d"], "tests": ["scripts/tests/test_release_production_flow.py"], "to": "M2"},
+    {"id": "fix:3309", "issue": 3309, "fix": "既定ブランチの候補を、ブランチの運用の宣言の定数から読む", "prs": [3340, 3360], "commits": ["bbc58ba53", "41f457863"], "tests": ["scripts/tests/test_worktree_default_branch.py"], "to": "D2+"},
+    {"id": "fix:3310-cleanup", "issue": 3310, "fix": "後片付けの残す判断を、スプリントの開始時の記録で決める", "prs": [3354, 3360], "commits": ["447284781"], "tests": ["scripts/tests/test_sprint_start_record.py"], "to": "M8"},
+    {"id": "fix:3310-branch", "issue": 3310, "fix": "スプリントブランチの作成で、開始時の記録の起点を常に --from で渡す", "prs": [3354, 3360], "commits": ["0caa57060"], "tests": ["scripts/tests/test_sprint_branch_flow.py"], "to": "M1"},
+    {"id": "fix:release-restore-branch", "issue": null, "fix": "開発版の PR のマージの後に遅れて消えたリリースブランチを push し直して本番の PR を作る（v10.27.63 のリリースの即時修正）", "prs": [3376], "commits": ["0b0312c80", "b55f5dad7"], "tests": ["scripts/tests/test_release_steps.py"], "to": "M2"},
+    {"id": "fix:lock-vulns", "issue": null, "fix": "旧いプラグインの lock の既知の脆弱性を、公開から 7 日を過ぎた修正版へ上げる", "prs": [3375], "commits": ["c84649f6c"], "tests": [], "not_moved": "新しい側は自分の依存の宣言と lock を持ち、版はそちらで決める（#1142 の決定 78）。旧いプラグインの lock の版は移さない"},
+    {"id": "fix:structure-limits", "issue": null, "fix": "旧いプラグインの構造の検査（500 行）に合わせた分割と、旧いテストの直し", "prs": [3333, 3360, 3363], "commits": ["afa47c22b", "3f0f862fa", "3eac42b41", "476e7f745", "801b18821", "5ddcf7194", "6b19c1cf4", "31366585e"], "tests": [], "not_moved": "旧いコードの行数とテストの都合の直しで、利用者に見える振る舞いを変えない。新しい側は 0 から書き、行数は自分の検査（1,000 行）で縛る"},
+    {"id": "fix:refactoring", "issue": null, "fix": "スプリントの検査（cross-refactoring）が旧いコードに当てたリファクタリングと現状固定テスト", "prs": [3335, 3360], "commits": ["48aa4b505", "5a4ea907e", "0db36044b", "bbc14b28f", "1ca8442da", "b1beae90d", "e4d5292e6", "481508ca2", "cfe9257cd", "ea3439f4d", "4a81ba18b", "0aa73734f", "98b7584d1", "a588ecc28", "ae4a1fb2a", "ac87dafba", "cb163aea2", "887cb4af5", "d53664e92", "a90d5cf13", "028142c51", "31dc2352b", "52c90cbbc", "cfa040525", "796449223", "0fbdc4796"], "tests": [], "not_moved": "振る舞いを変えない構造の整理で、移す振る舞いが無い"},
+    {"id": "fix:1811", "issue": 1811, "fix": "重なりの判定にディレクトリの宣言を使わず、等しいファイルの宣言と共有の一覧だけで組を決める（承認の前に develop へ入った実装済みの行。R5）", "prs": [], "commits": ["73c7c5558", "0be4e9482"], "tests": [], "to": "C2"},
+    {"id": "fix:2453", "issue": 2453, "fix": "分割した設計文書を番号でつなぎ、リンクで委ねたセルを止める（承認の前に develop へ入った実装済みの行。R5）", "prs": [], "commits": [], "tests": [], "to": "C2"},
+    {"id": "fix:2614", "issue": 2614, "fix": "スプリント MVV の照合で、入力が同じで最新の判定が「従う」なら再利用する（承認の前に develop へ入った実装済みの行。R5）", "prs": [2830], "commits": ["08f51d00a", "2ed8952a1"], "tests": [], "to": "M7"}
+  ],
+  "regressions": [
+    {"id": "regression:2629", "issue": 2629, "test": "scripts/tests/test_parallel_run.py:1077", "behavior": "続きの一時レーンを起動した直後に、一覧に残る前の起動の止まった行では問わない", "to": "P3"}
+  ],
+  "intake": [
+    {"issue": 3317, "summary": "merged: メインディレクトリの取り込みが git pull で FETCH_HEAD を他のセッションと取り合い、マージ済みの検査が止まる", "row": "entrypoint:scripts/merged-steps.py", "to": "M8", "listed": true},
+    {"issue": 3313, "summary": "cross-refactoring: テストを足す担当が結果を出さずに終わると、起点が記録されておらず範囲を確定できずにスプリントが止まる", "row": "entrypoint:skills/cross-refactoring/scripts/refactor.py", "to": "M4", "listed": true},
+    {"issue": 3339, "summary": "cross-refactoring: 1 項目が持ち込んだ共有の検査の違反を後の全項目が自分の失敗として拾い、停滞して止まる", "row": "entrypoint:skills/cross-refactoring/scripts/drive.py", "to": "M4", "listed": false},
+    {"issue": 3329, "summary": "人のいない実行: プラグインの導入先を読めない権限で、差し戻しの後も結果の行が契約に無い値（続けられない）のまま区間が終わる", "row": "hook-judgment:scripts/hook_lib/unattended.py", "to": "M3a", "listed": false},
+    {"issue": 3322, "summary": "project-decl の解析: pytest.yml の代表 run が取れないと、別のワークフロー（ndf-next.yml の 2 秒）で test_duration を置き換える", "row": "entrypoint:scripts/project-decl.py", "to": "D2+", "listed": false},
+    {"issue": 3310, "summary": "ブランチ運用の宣言: 宣言を変える前に始めたスプリントのスプリントブランチの作成と後片付けが、変えた後の宣言で動く", "row": "entrypoint:scripts/merged-steps.py", "to": "M8", "listed": false},
+    {"issue": 3309, "summary": "ブランチ名の決め打ちの検査が master・origin/main・シェルの単語を拾わず、worktree-branch.sh に既定ブランチの候補が残る", "row": "entrypoint:scripts/project-decl.py", "to": "D2+", "listed": false},
+    {"issue": 3276, "summary": "レーンの開発版のデプロイで approval-facts の終了コード 10 を止まった扱いにする", "row": "entrypoint:scripts/release-steps.py", "to": "M2", "listed": false},
+    {"issue": 3248, "summary": "pr-body-decisions: 「決めたこと」が最後の H2 だと末尾のモードの 1 行まで節に含めて CI が落ちる", "row": "entrypoint:scripts/pr-body-decisions.sh", "to": "M7", "listed": false},
+    {"issue": 3242, "summary": "development-workflow: Factory の実行ジョブ（NDF_FACTORY_RUN）で conductor が問い返して止まり、- 結果: の行を書かない", "row": "hook-judgment:scripts/hook_lib/unattended.py", "to": "M3a", "listed": false},
+    {"issue": 3175, "summary": "並列の計画: リリース承認ゲートの承認を送った後、約 6 時間リリースが進まなかった", "row": "entrypoint:scripts/parallel.py", "to": "P3", "listed": false},
+    {"issue": 3274, "summary": "mcp-serena: このリポジトリの言語の割合が検出の閾値をまたぐたびに test_serena_lsp_this_repo が無関係な PR で落ちる", "row": null, "not_taken": "旧いプラグインの機能でない（mcp-serena の不具合）。作り直しの受け付けに入れない", "listed": false}
+  ]
+}

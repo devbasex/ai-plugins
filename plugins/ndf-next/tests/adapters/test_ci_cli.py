@@ -1,4 +1,4 @@
-"""副命令 `ndf ci watch`（`ndf.ci_cli`）を、HTTP の疑似応答で通す。"""
+"""副命令 `ndf ci watch`（`ndf.ci_cli`）の引数・GitHub への接続・標準出力の契約。"""
 
 from __future__ import annotations
 
@@ -18,27 +18,31 @@ HEAD = "2bb66a6c14a618cbac108b61737ad49cfb1ac48b"
 REPO = "devbasex/ai-plugins"
 
 
+PULL = {
+    "number": 7,
+    "state": "open",
+    "merged": False,
+    "body": "",
+    "mergeable_state": "clean",
+    "head": {"sha": HEAD, "ref": "x"},
+    "base": {"ref": "develop"},
+}
+
+
 def _serve(monkeypatch: pytest.MonkeyPatch, runs: list[dict], log: str = "", log_status: int = 200, calls: list[str] | None = None) -> None:
+    # パスの末尾 → 応答を作る関数
+    responses = {
+        "/pulls/7": lambda: httpx.Response(200, json=PULL),
+        "/check-runs": lambda: httpx.Response(200, json={"total_count": len(runs), "check_runs": runs}),
+        "/logs": lambda: httpx.Response(log_status, text=log, headers={"content-type": "text/plain"}),
+    }
+
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
         if calls is not None:
             calls.append(path)
-        if path.endswith("/pulls/7"):
-            pull = {
-                "number": 7,
-                "state": "open",
-                "merged": False,
-                "body": "",
-                "mergeable_state": "clean",
-                "head": {"sha": HEAD, "ref": "x"},
-                "base": {"ref": "develop"},
-            }
-            return httpx.Response(200, json=pull)
-        if path.endswith("/check-runs"):
-            return httpx.Response(200, json={"total_count": len(runs), "check_runs": runs})
-        if path.endswith("/logs"):
-            return httpx.Response(log_status, text=log, headers={"content-type": "text/plain"})
-        return httpx.Response(404, json={"message": "not found"})
+        respond = next((r for tail, r in responses.items() if path.endswith(tail)), None)
+        return respond() if respond else httpx.Response(404, json={"message": "not found"})
 
     api = Client("t", transport=httpx.MockTransport(handler), http_cache=False, auto_retry=False)
     monkeypatch.setattr(github, "client", lambda **_: api)
