@@ -281,7 +281,7 @@ def test_open_run_prepares_state_dir_so_next_prepare_keeps_it():
     log = run_log.open_run("entry", location="repo")
     ident = identity.load()
 
-    assert identity.prepare_state_dir(ident) == ident.state_dir
+    assert identity.prepare_state_dir(ident).path == ident.state_dir
     assert log.path.exists() and not list(ident.state_dir.parent.glob(ident.state_dir.name + identity.RETIRED_SUFFIX + "*"))
 
 

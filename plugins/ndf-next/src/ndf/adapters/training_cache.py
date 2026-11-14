@@ -113,7 +113,7 @@ def context(runtime: str, env: Mapping[str, str]) -> str:
 
 def cache_path() -> Path:
     """控えの置き場（状態の置き場の `training.json`）。"""
-    return identity.prepare_state_dir(identity.load()) / CACHE_FILE
+    return identity.prepare_state_dir(identity.load()).path / CACHE_FILE
 
 
 def _stamp(now: float) -> str:

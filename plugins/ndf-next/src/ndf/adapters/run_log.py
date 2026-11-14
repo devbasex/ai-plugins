@@ -282,7 +282,7 @@ def runs_dir() -> Path:
     状態の置き場は `identity.prepare_state_dir` を通して用意する。形の版のファイルの無いまま記録を書くと、
     次の用意が旧い置き場と判定して、書いている途中の記録と枠のロックごと退避するため（#3394）。
     """
-    return identity.prepare_state_dir(identity.load()) / RUNS_DIR
+    return identity.prepare_state_dir(identity.load()).path / RUNS_DIR
 
 
 def _prune(repo_dir: Path, today: date) -> None:
