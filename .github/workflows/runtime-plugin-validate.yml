@@ -5,6 +5,9 @@ name: Runtime plugin validation
 # 「成功」ではなく「実行されていない」として扱うため、絞り込んだままだと対象外の変更で
 # マージ可能にならない。push の側は絞り込みを残す（マージの可否を決めないため）
 on:
+  # merge queue の一時のコミット（gh-readonly-queue/...）でも必須のチェックを出す（#3572 の決定 23。キューが無い間は起動しない）
+  merge_group:
+    types: [checks_requested]
   pull_request:
   push:
     branches:

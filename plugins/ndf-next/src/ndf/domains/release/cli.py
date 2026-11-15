@@ -345,7 +345,8 @@ def cmd_verify_ref(args: argparse.Namespace) -> dict:
     root = Path(args.root)
     verify = decl_mod.optional_verify(root)
     if verify is None:
-        return result.stopped(TOOL, "not_applicable", "検証の行が無いので検証環境を使わない")
+        # 検証環境を使わないリポジトリの workflow を落とさない（結果は ok、状態は値の項目 state の not_applicable）
+        return result.result(TOOL, result.OK, "検証の行が無いので検証環境を使わない", _values(state=bump_decide.NOT_APPLICABLE))
     try:
         built = verify_ref.build(root, _hub(args), verify, datetime.now(timezone.utc))
     except verify_ref.VerifyConflict as exc:

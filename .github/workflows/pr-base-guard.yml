@@ -4,6 +4,9 @@ name: PR base branch guard
 # 宛先にもかかわらず結果を返す必要がある。判定そのものは既定ブランチ宛のときだけ行う
 # （開発の起点ブランチ宛の Pull Request には、この判定が当てはまらない）
 on:
+  # merge queue の一時のコミット（gh-readonly-queue/...）でも必須のチェックを出す（#3572 の決定 23。キューが無い間は起動しない）
+  merge_group:
+    types: [checks_requested]
   pull_request:
 
 jobs:
@@ -15,10 +18,15 @@ jobs:
           # release/v* の head が起点ブランチの祖先か（選んで集める取り込み方ではスプリントブランチの祖先か）を
           # git merge-base で判定するため、履歴をすべて取る
           fetch-depth: 0
+      # merge queue の一時のコミットは PR の head と宛先を持たない。キューに入れられるのは PR の時点で必須のチェックを
+      # 満たした PR だけなので、PR の時点の結論を引き継いで通す（#3572 の決定 23）
+      - name: Inherit the pull request result in the merge queue
+        if: github.event_name == 'merge_group'
+        run: echo "キューの一時のコミットは PR の時点の結論を引き継ぐ"
       - name: Check the branch this pull request came from
         # 宛先が既定ブランチでなければ、チェックは行わずに成功で終わる。既定ブランチの名前は
         # ワークフローへ書かず、リポジトリの設定から受け取る
-        if: github.base_ref == github.event.repository.default_branch
+        if: github.event_name == 'pull_request' && github.base_ref == github.event.repository.default_branch
         # ブランチ名をそのままシェルの本文へ埋めない。名前に置換の記法を含められる。
         env:
           HEAD_REF: ${{ github.head_ref }}

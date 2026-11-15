@@ -13,6 +13,9 @@ name: Script structure
 #
 # Pull Request では絞り込まずに常に起動する（pytest.yml と同じ理由）。数秒で終わる
 on:
+  # merge queue の一時のコミット（gh-readonly-queue/...）でも必須のチェックを出す（#3572 の決定 23。キューが無い間は起動しない）
+  merge_group:
+    types: [checks_requested]
   pull_request:
   push:
     branches:
