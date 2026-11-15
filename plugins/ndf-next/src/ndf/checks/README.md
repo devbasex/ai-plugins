@@ -54,7 +54,7 @@ plugins/ndf-next/bin/ndf check --base origin/develop
 
 入れ子の関数・クラス・`lambda` は、外の関数の長さ以外では外の関数に数えず、それぞれ 1 つの関数として数える。
 
-**`S110`・`S112`・`BLE001`・`E722`・`PLR0912`・`PLR1702`・`PLR0913` は ruff が数える**（設計の決定 36。既存の規則で見られるものは自作しない）。`rules.json` で `by` が `ruff` の規則で、しきい値は `ruff.config` にある。見るファイルすべてへ ruff を 1 回だけ起動する（`lint.py`）。ruff には `# noqa` を読ませず（`--ignore-noqa`）、下の抑制コメントは NDF の規則として `marks` が当てる。ruff が `except` の兆候を型の式の行へ置いても（複数行の `except (` など）、`lint` が構文木の `except` の行へ揃えてから抑制コメントを当てる。
+**`S110`・`S112`・`BLE001`・`E722`・`PLR0912`・`PLR1702`・`PLR0913` は ruff が数える**（設計の決定 36。既存の規則で見られるものは自作しない）。`rules.json` で `by` が `ruff` の規則で、しきい値は `ruff.config` にある。見るファイルすべてへ ruff を 1 回だけ起動する（`lint.py`）。ruff には `# noqa` を読ませず（`--ignore-noqa`）、下の抑制コメントは NDF の規則として `suppressions` が当てる。ruff が `except` の兆候を型の式の行へ置いても（複数行の `except (` など）、`lint` が構文木の `except` の行へ揃えてから抑制コメントを当てる。
 
 ### 抑制コメント
 

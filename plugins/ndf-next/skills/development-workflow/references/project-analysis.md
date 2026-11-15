@@ -147,7 +147,7 @@ Pull Request（最大 100 件）と origin のスプリントブランチで、�
 | `release_strategy` | 本番チャネル宛ての Pull Request の head。ベースブランチそのもの・リリースブランチの first-parent の列がマージ前の本番チャネルへ届かないなら `merge_base_branch`、届けば `release_branch` |
 
 回答は `branch_flow` に `{"value": {"start": ..., "integrate": ..., "doc_prs": ..., "release_strategy": ...}}` で書く。リリース方式の表
-（[worktree の ndf_settings.md](../../worktree/references/ndf-settings.md) の「ブランチ運用を定義するリポジトリ」）に合わない回答は、
+（[worktree の ndf-settings.md](../../worktree/references/ndf-settings.md) の「ブランチ運用を定義するリポジトリ」）に合わない回答は、
 `write` が書かずに 1 で終わる。`write` が書くのは `worktree.json` に `branch_flow` が無いときと、前の `write` の値のままのときだけである。
 
 **ずれの検出は `drift` が行う。** `check` は `gh` を呼ばないため、`.ndf/worktree.json` が読めない誤り（2）だけを見る。振り返りと棚卸しは

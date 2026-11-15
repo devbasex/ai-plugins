@@ -951,9 +951,12 @@
     {
       "term": "スロット",
       "context": "ndf-agent-cli",
-      "meaning": "1 ラウンドで 1 つの CLI プロセスが占めるスロット",
+      "meaning": "同時に流せる本数の 1 つ分。1 ラウンドで 1 つの CLI プロセスが 1 つを占める",
       "code": "slot",
-      "source": "docs/specifications/cross-review-participants-and-seats.md"
+      "source": "docs/specifications/cross-review-participants-and-seats.md",
+      "deprecated_standalone": [
+        "枠"
+      ]
     },
     {
       "term": "フォールバック",
@@ -1284,7 +1287,10 @@
       "term": "設定",
       "context": "ndf-workflow",
       "meaning": "リポジトリ側に置く .ndf/<名前>.json。無ければその機能は既定の動きだけになるか、何も動かない。「<対象>の設定」の形で呼ぶ（指示書チェックの設定・リリースの設定・ボードの設定・worktree の設定・用語集の設定）。git で追跡するものを共有設定、追跡しないものを個人設定と呼ぶ",
-      "source": "docs/specifications/ndf-instruction-files-check.md"
+      "source": "docs/specifications/ndf-instruction-files-check.md",
+      "deprecated": [
+        "宣言"
+      ]
     },
     {
       "term": "読み込み量",

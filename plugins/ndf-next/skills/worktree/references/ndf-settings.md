@@ -450,3 +450,19 @@ bash "$SCRIPTS/worktree-localenv.sh" verify "$WT"; echo $?
 
 `version` を上げるのは、既存の項目の意味を変えるときに限る。項目の追加では上げない。
 読み取り側は知らない項目を無視する。
+
+## 改名した旧いキーを書き換える
+
+11.0 で改名したキー（`.ndf/worktree.json` の `branch_flow.release_strategy` と、`.ndf/mvv.json` の各バージョンの
+`validation`）の旧い名前が残る設定を読むと、NDF は旧いキーと新しいキーを示して止まる。既定の値へは倒さない。
+旧いキーと新しいキー・値の対応は改名表（`contracts/domains/ndf-settings-renames.json`）が持つ。
+
+書き換えは 2 回の実行に分ける。1 回目は差分を示すだけで、ファイルを書かない。
+
+```bash
+ndf settings migrate --root <リポジトリ>                       # 差分（JSON Patch）と差分のハッシュを示す
+ndf settings migrate --root <リポジトリ> --apply <差分のハッシュ>  # 差分を承認した後に書き換える
+```
+
+`--apply` は差分を作り直し、示したハッシュと一致して、書き換えた設定がスキーマに通るときだけ書く。
+差分を示した後に設定が変わると、1 バイトも書かずに止まる。利用者の設定を書き換えるため、差分を利用者に示して承認を取ってから打つ。
