@@ -27,7 +27,10 @@ def fakes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Fakes:
 
 
 def _status(source: str, method: str = "none", client: bool = True, **extra: Any) -> dict[str, Any]:
-    return {"prefix": ["auth", "status"], "out": json.dumps({"credential_source": source, "auth_method": method, "client_config_exists": client, **extra})}
+    return {
+        "prefix": ["auth", "status"],
+        "out": json.dumps({"credential_source": source, "auth_method": method, "client_config_exists": client, **extra}),
+    }
 
 
 def test_gws_is_in_the_command_table() -> None:
@@ -38,7 +41,12 @@ def test_authenticated_by_token_source(fakes: Fakes, capsys, last_result) -> Non
     fakes.add("gws", [_status("token_env_var", client=False)])
     code, got = run_gws(capsys, last_result, "check")
     assert (code, got["status"]) == (0, "ok")
-    assert got["metrics"] == {"state": "authenticated", "credential_source": "token_env_var", "auth_method": "none", "client_config_exists": False}
+    assert got["metrics"] == {
+        "state": "authenticated",
+        "credential_source": "token_env_var",
+        "auth_method": "none",
+        "client_config_exists": False,
+    }
 
 
 def test_token_in_env_is_authenticated_even_when_source_is_none(fakes: Fakes, capsys, last_result, monkeypatch) -> None:
@@ -78,7 +86,12 @@ def test_missing_without_install_writes_the_material_and_does_not_install(fakes:
     assert_routes(got)
     assert got["routes"] == {"approved": {"argv": ["ndf", "gws", "check", "--install"]}, "rejected": None}
     text = Path(got["presentation_path"]).read_text(encoding="utf-8")
-    for part in ("https://www.npmjs.com/package/@googleworkspace/cli", "npm install -g @googleworkspace/cli", "/opt/npm-global", "npm uninstall -g @googleworkspace/cli"):
+    for part in (
+        "https://www.npmjs.com/package/@googleworkspace/cli",
+        "npm install -g @googleworkspace/cli",
+        "/opt/npm-global",
+        "npm uninstall -g @googleworkspace/cli",
+    ):
         assert part in text
 
 
@@ -197,6 +210,6 @@ def test_records_auth_status_keeps_its_default_limit_and_carries_stderr(fakes: F
 def test_tail_and_pick() -> None:
     lines = [f"l{n}" for n in range(rd.DETAIL_LINES + 1)]
     assert rd.tail("\n".join(lines)).splitlines() == lines[1:]
-    assert rd.tail("\n".join(lines[:rd.DETAIL_LINES])).splitlines() == lines[: rd.DETAIL_LINES]
+    assert rd.tail("\n".join(lines[: rd.DETAIL_LINES])).splitlines() == lines[: rd.DETAIL_LINES]
     assert rd.tail(None) == "" and rd.tail("") == ""
     assert rd.pick({"a": 1, "b": 2, "token": "t"}, ("a", "b")) == {"a": 1, "b": 2}

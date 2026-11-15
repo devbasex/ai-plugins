@@ -9,6 +9,7 @@ from ndf import identity
 from ndf.domains.records import files
 from ndf.domains.worktree import atomic
 
+
 def render(*, package: str, package_url: str, command: Sequence[str], where: str) -> str:
     """承認資料の Markdown（対象を開くためのもの・承認の判断に使うもの・同意を求めること・戻し方）。"""
     shown = " ".join(command)

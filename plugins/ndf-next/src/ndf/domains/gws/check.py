@@ -72,7 +72,9 @@ def _report(tool: str) -> Outcome:
         raise GwsStop("invalid", f"gws の認証の状態を読めない: {exc}", items=items) from exc
     keys = rd.pick(status, records_gws.STATUS_KEYS)
     if records_gws.authenticated(status):
-        return result.result(tool, result.OK, "gws は認証済み", metrics={"state": rd.AUTHENTICATED, **keys}), exit_codes.first_code(result.OK)
+        return result.result(tool, result.OK, "gws は認証済み", metrics={"state": rd.AUTHENTICATED, **keys}), exit_codes.first_code(
+            result.OK
+        )
     summary = "gws はあるが未認証。" + _LOGIN
     if not keys["client_config_exists"]:
         summary = (
@@ -103,9 +105,7 @@ def _install(npm: str) -> None:
     """`npm install -g @googleworkspace/cli` を 1 回打つ。失敗したら止まる（`sudo` で打ち直さない）。"""
     no_sudo = "出力を利用者に示して止まる。sudo で打ち直さない"
     try:
-        done = subprocess.run(
-            [npm, *INSTALL_ARGS], capture_output=True, text=True, timeout=limits.seconds(INSTALL_LIMIT), check=False
-        )
+        done = subprocess.run([npm, *INSTALL_ARGS], capture_output=True, text=True, timeout=limits.seconds(INSTALL_LIMIT), check=False)
     except subprocess.TimeoutExpired as exc:
         raise GwsStop("interrupted", f"npm install -g が上限の {exc.timeout} 秒を超えた", summary=no_sudo) from exc
     except OSError as exc:
@@ -122,9 +122,7 @@ def _install(npm: str) -> None:
 def _npm_prefix(npm: str) -> Optional[str]:
     """npm の全体インストールの置き場（読むだけ）。読めなければ None。"""
     try:
-        done = subprocess.run(
-            [npm, "prefix", "-g"], capture_output=True, text=True, timeout=limits.seconds(CALL_LIMIT), check=False
-        )
+        done = subprocess.run([npm, "prefix", "-g"], capture_output=True, text=True, timeout=limits.seconds(CALL_LIMIT), check=False)
     except (OSError, subprocess.SubprocessError):  # noqa: NDF401 外部コマンド: 読めない置き場は承認資料と案内の文を変えるだけ
         return None
     out = done.stdout.strip()

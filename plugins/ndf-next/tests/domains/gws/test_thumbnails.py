@@ -75,7 +75,9 @@ def test_size_is_passed_to_gws(fakes: Fakes, tmp_path: Path, capsys, last_result
     assert _thumb_params(thumb)["thumbnailProperties.thumbnailSize"] == "SMALL"
 
 
-@pytest.mark.parametrize("argv", [["thumbnails", PID], ["thumbnails", PID, "out", "--size", "HUGE"], ["thumbnails"]], ids=["no-out", "bad-size", "none"])
+@pytest.mark.parametrize(
+    "argv", [["thumbnails", PID], ["thumbnails", PID, "out", "--size", "HUGE"], ["thumbnails"]], ids=["no-out", "bad-size", "none"]
+)
 def test_bad_arguments_return_2(fakes: Fakes, capsys, last_result, argv: list[str]) -> None:
     code, got = run_gws(capsys, last_result, *argv)
     assert (code, got["cause"]["kind"]) == (2, "invalid")
@@ -105,7 +107,9 @@ def test_gws_failure_stops_with_1_and_shows_the_tail(fakes: Fakes, tmp_path: Pat
 
 
 @pytest.mark.parametrize("status", [{"prefix": AUTH, "code": 1}, {"prefix": AUTH, "sleep": 10}], ids=["exit-1", "over-the-limit"])
-def test_unreadable_status_after_a_failure_is_a_plain_failure(fakes: Fakes, tmp_path: Path, capsys, last_result, monkeypatch, status: dict) -> None:
+def test_unreadable_status_after_a_failure_is_a_plain_failure(
+    fakes: Fakes, tmp_path: Path, capsys, last_result, monkeypatch, status: dict
+) -> None:
     asked: list[str] = []
 
     def short(name: str) -> float:
