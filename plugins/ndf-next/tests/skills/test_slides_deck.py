@@ -210,3 +210,149 @@ def test_save_checks_page_count_against_script(base: Path, body: str, message: s
 def test_missing_script_raises_input_error(tmp_path: Path):
     missing = str(tmp_path / "none.md")
     assert build_error(tmp_path, "", json.dumps({"script": missing})) == {"message": f"台本が無い: {missing}", "code": 1, "deck": True}
+
+
+# ---- 同じ形の処理が複数の部品にある箇所（I-013） ----
+
+FONT = "Noto Sans JP"
+BODY = {"fontFace": FONT, "fontSize": 10, "color": "303030", "margin": 0, "valign": "top"}
+
+
+def page_calls(base: Path, body: str, opts: str = "{}") -> list:
+    """本編 1 ページ（`const s = d.page("p")`）に `body` を載せ、ページの枠の後の呼び出しだけを返す。"""
+    got = build(base, 'const s = d.page("p");\n' + body, opts, save=None)
+    calls = got["slides"][-1]["calls"]
+    return calls[4:] if json.loads(opts).get("theme") else calls[3:]
+
+
+def test_color_names_resolve_in_fill_line_and_border_objects_and_arrays(tmp_path: Path):
+    body = """
+d.text(s, "t", { line: { color: "accent", width: 2 }, border: { color: "rule", pt: 1 }, fill: [{ color: "warn" }, null, { pt: 1 }], x: 1 });
+d.text(s, "t", { fill: { color: "accent" }, line: [{ color: "mute" }], border: [{ color: "ink" }, "raw"] });
+d.text(s, "t", { fill: { type: "none" }, line: { width: 1 }, color: undefined, fontSize: undefined });
+"""
+    assert page_calls(tmp_path, body) == [
+        [
+            "text",
+            "t",
+            {
+                **BODY,
+                "line": {"color": "2B6CB0", "width": 2},
+                "border": {"color": "D9D9D9", "pt": 1},
+                "fill": [{"color": "F4CCCC"}, None, {"pt": 1}],
+                "x": 1,
+            },
+        ],
+        ["text", "t", {**BODY, "fill": {"color": "2B6CB0"}, "line": [{"color": "7F7F7F"}], "border": [{"color": "303030"}, "raw"]}],
+        # undefined を渡すと既定の色と大きさが消える（今の振る舞い）
+        ["text", "t", {"fontFace": FONT, "margin": 0, "valign": "top", "fill": {"type": "none"}, "line": {"width": 1}}],
+    ]
+
+
+def test_runs_resolve_options_and_keep_other_entries(tmp_path: Path):
+    body = """
+d.text(s, [null, "x", { text: "y" }, { text: "z", options: { fill: { color: "warn" } } }]);
+d.note(s, [{ text: "n", options: { color: "accent" } }]);
+d.callout(s, 1, 1, "warn", "h", [{ text: "b", options: { color: "warn" } }]);
+d.tbl(s, [[null, "x", { text: "y" }]]);
+"""
+    calls = page_calls(tmp_path, body)
+    assert calls[0] == ["text", [None, "x", {"text": "y"}, {"text": "z", "options": {"fill": {"color": "F4CCCC"}}}], BODY]
+    assert calls[1] == [
+        "text",
+        [{"text": "n", "options": {"color": "2B6CB0"}}],
+        {"x": 0.26, "y": 4.88, "w": 9.5, "h": 0.28, "fontFace": FONT, "fontSize": 8, "color": "7F7F7F", "valign": "middle", "margin": 0},
+    ]
+    assert calls[2] == ["shape", "rect", {"x": 0.26, "y": 1, "w": 9.48, "h": 1, "fill": {"color": "F4CCCC"}, "line": {"type": "none"}}]
+    assert calls[3] == [
+        "text",
+        "h",
+        {
+            "x": 0.48,
+            "y": 1.05,
+            "w": 9.04,
+            "h": 0.28,
+            "fontFace": FONT,
+            "fontSize": 11.5,
+            "bold": True,
+            "color": "000000",
+            "valign": "middle",
+            "margin": 0,
+        },
+    ]
+    assert calls[4] == [
+        "text",
+        [{"text": "b", "options": {"color": "F4CCCC"}}],
+        {"x": 0.48, "y": 1.33, "w": 9.04, "h": 0.62, "fontFace": FONT, "fontSize": 9.5, "color": "303030", "valign": "top", "margin": 0},
+    ]
+    assert calls[5] == [
+        "table",
+        [[None, "x", {"text": "y"}]],
+        {
+            "fontFace": FONT,
+            "fontSize": 10,
+            "color": "303030",
+            "valign": "middle",
+            "border": {"type": "solid", "color": "D9D9D9", "pt": 1},
+            "autoPage": False,
+            "margin": [2, 4, 2, 4],
+        },
+    ]
+    assert len(calls) == 6
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        'd.text(d.page("p"), [{ text: "a", options: { color: "nope" } }]);',
+        'd.tbl(d.page("p"), [[{ text: "a", options: { fill: { color: "nope" } } }]]);',
+        'd.text(d.page("p"), "t", { border: [{ color: "nope" }] });',
+        'd.text(d.page("p"), "t", { line: { color: "nope" } });',
+        'd.chip(d.page("p"), 0, 0, 1, 1, "c", "nope");',
+        'd.callout(d.page("p"), 0, 1, "nope", "h");',
+        'd.note(d.page("p"), [{ text: "a", options: { color: "nope" } }]);',
+    ],
+)
+def test_unknown_color_name_in_nested_options_raises(tmp_path: Path, body: str):
+    assert build_error(tmp_path, body) == {"message": "色は theme.colors の項目名で指す: nope", "code": 1, "deck": True}
+
+
+def test_cover_and_section_share_band_accent_and_footer_shapes(tmp_path: Path):
+    got = build(tmp_path, 'd.page("p"); d.cover("c"); d.section("s");', json.dumps({"theme": {"copyright": "(c)"}}), save=None)
+    _, cover, section = got["slides"]
+    foot = {"fontFace": FONT, "fontSize": 9, "color": "7F7F7F", "valign": "middle", "margin": 0}
+    assert cover["calls"] == [
+        ["shape", "rect", {"x": 0, "y": 0, "w": 10, "h": 0.36, "fill": {"color": "2B6CB0"}, "line": {"type": "none"}}],
+        [
+            "text",
+            "c",
+            {
+                "x": 1.02,
+                "y": 1.3,
+                "w": 8.2,
+                "h": 0.72,
+                "fontFace": FONT,
+                "fontSize": 28,
+                "bold": True,
+                "color": "000000",
+                "valign": "bottom",
+                "margin": 0,
+                "fit": "shrink",
+            },
+        ],
+        ["shape", "line", {"x": 1.04, "y": 2.1, "w": 1.2, "h": 0, "line": {"color": "2B6CB0", "width": 4}}],
+        ["text", "(c)", {"x": 0.26, "y": 5.18, "w": 3.2, "h": 0.3, **foot}],
+    ]
+    assert section["calls"] == [
+        ["shape", "rect", {"x": 0, "y": 0, "w": 0.36, "h": 5.625, "fill": {"color": "2B6CB0"}, "line": {"type": "none"}}],
+        [
+            "text",
+            "s",
+            {"x": 0.9, "y": 1.9, "w": 8.4, "h": 0.8, "fontFace": FONT, "fontSize": 32, "bold": True, "color": "000000", "margin": 0},
+        ],
+        ["shape", "line", {"x": 0.92, "y": 2.82, "w": 1.2, "h": 0, "line": {"color": "2B6CB0", "width": 4}}],
+        ["text", "(c)", {"x": 0.56, "y": 5.18, "w": 3.2, "h": 0.3, **foot}],
+        ["text", "3", {"x": 9.27, "y": 5.18, "w": 0.5, "h": 0.3, **foot, "align": "right"}],
+    ]
+    # 表紙は台本の番号を進め、章扉は進めない
+    assert (got["pageNo"], got["scriptNo"]) == (3, 2)
