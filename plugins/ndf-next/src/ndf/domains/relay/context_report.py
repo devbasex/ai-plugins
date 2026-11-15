@@ -26,11 +26,13 @@ READ_RATES = (("claude-opus-5-5", 0.05), ("claude-sonnet-5-5", 0.05), ("claude-f
 READ_RATE_DEFAULT = 0.1
 ALL_TIME = [(float("-inf"), float("inf"))]
 Windows = list[tuple[float, float]]
+# 区分の名前（NDF が起動した分は identity.FINAL_NAME）。結果の `parts` のキーで、旧い report と同じ綴り
+CONDUCTOR, HANDOFF, RESTORE = "conductor", "handoff", "restore"
 
 
 def buckets() -> tuple[str, str, str, str]:
     """区分の名前（conductor・NDF が起動した分・引継ぎ・復元）。結果の `parts` のキーで、旧い report と同じ綴り。"""
-    return ("conductor", identity.FINAL_NAME, "handoff", "restore")
+    return (CONDUCTOR, identity.FINAL_NAME, HANDOFF, RESTORE)
 
 
 def read_rate(model: Optional[str]) -> float:
@@ -85,10 +87,10 @@ def _add_call(t: dict[str, Any], c: Mapping[str, Any]) -> None:
 
 def _bucket_of(ts: Optional[float], restore_end: Optional[float], handoff_from: Optional[float]) -> str:
     if ts is not None and restore_end is not None and ts <= restore_end:
-        return buckets()[3]
+        return RESTORE
     if ts is not None and handoff_from is not None and ts >= handoff_from:
-        return buckets()[2]
-    return buckets()[0]
+        return HANDOFF
+    return CONDUCTOR
 
 
 def _within(ts: Optional[float], windows: Windows) -> bool:
