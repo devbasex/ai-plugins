@@ -347,3 +347,9 @@ class Git:
     def fetch_branch(self, remote: str, name: str) -> Completed:
         """ブランチ 1 本を `refs/remotes/<remote>/<name>` へ取り込む（`FETCH_HEAD` を読まない。#3317）。結果はそのまま返す。"""
         return self.fetch(remote, f"+refs/heads/{name}:refs/remotes/{remote}/{name}")
+
+    def fetch_branch_or_raise(self, remote: str, name: str) -> None:
+        """`fetch_branch` を打ち、取り込めなければ `GitError`（`<remote> の <name> を取り込めない`）。"""
+        done = self.fetch_branch(remote, name)
+        if done.returncode != 0:
+            raise GitError(f"{remote} の {name} を取り込めない: {done.stderr.strip()}")

@@ -106,9 +106,7 @@ def sync_base(main_dir: Path, base: str) -> sync_decide.Plan:
     """メインディレクトリのベースブランチをリモート名のリモートへそろえる。止めたときは手 `stop` と、重なったパスを返す。"""
     repo_git = git_mod.Git(main_dir)
     remote = repo_git.remote()
-    done = repo_git.fetch_branch(remote, base)
-    if done.returncode != 0:
-        raise git_mod.GitError(f"{remote} の {base} を取り込めない: {done.stderr.strip()}")
+    repo_git.fetch_branch_or_raise(remote, base)
     remote_ref = f"{remote}/{base}"
     dirty = repo_git.status_paths()
     incoming = repo_git.changed_files("HEAD", remote_ref)
