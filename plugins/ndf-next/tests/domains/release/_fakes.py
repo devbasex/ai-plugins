@@ -34,6 +34,8 @@ class FakeHub:
     drop_comments: bool = False
     node_data: dict[int, dict] = field(default_factory=dict)
     runs: list[dict] = field(default_factory=list)
+    status_list: list[dict] = field(default_factory=list)
+    bot_apps: dict[str, int] = field(default_factory=dict)
     # compare で読むコミット（先端の SHA ごと）と、読んだ (base, head)
     commits_of: dict[str, list[dict]] = field(default_factory=dict)
     compared: list[tuple[str, str]] = field(default_factory=list)
@@ -69,6 +71,10 @@ class FakeHub:
             raise got
         return got if got is not None else {}
 
+    def branch_rules(self, branch: str) -> list[dict]:
+        got = self.rest("GET", f"/repos/{self.repo}/rules/branches/{branch}")
+        return got if isinstance(got, list) else []
+
     def nodes(self, numbers: Any, node: str, fields: str) -> dict[int, dict]:
         return {int(n): self.node_data.get(int(n), {}) for n in numbers}
 
@@ -81,6 +87,12 @@ class FakeHub:
 
     def check_runs(self, sha: str) -> list[dict]:
         return list(self.runs)
+
+    def statuses(self, sha: str) -> list[dict]:
+        return list(self.status_list)
+
+    def bot_app(self, login: str) -> int | None:
+        return self.bot_apps.get(login)
 
     def merge(self, number: int, expect_head: str | None = None, method: str | None = None, require_method: bool = False) -> MergeOutcome:
         self.merged.append(number)

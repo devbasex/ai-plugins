@@ -151,6 +151,11 @@ def _fulfils(check_name: str, key: str) -> bool:
     return _short_name(check_name) == key if _SHARD.search(key) else bare_name(check_name) == key
 
 
+def fulfils(check_name: str, required: str) -> bool:
+    """チェックが必須のチェック `required` に当たるか（`read` と同じ照合。発行元の照合もこれで揃える。#3506）。"""
+    return _fulfils(check_name, required_key(required))
+
+
 def is_test_check(name: str, tests: Iterable[str]) -> bool:
     """チェックがテストのチェックか。名前の一致か、分割ジョブ（`pytest (1/2)`）の一致で数える（#3153）。"""
     return bare_name(name) in bare_names(tests)

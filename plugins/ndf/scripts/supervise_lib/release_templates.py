@@ -7,6 +7,7 @@ import shlex
 from pathlib import Path
 from typing import Callable, NamedTuple
 
+import release_case
 from gate_answer import RELEASE_GATE
 from supervise_lib.decl import PRODUCTION_SOURCES, DeclError, with_decls
 from supervise_lib.release_flow import REVIEW_RANGE_IDS, bump_others_cmd, promotion_flag, release_branch_step, release_ref, release_units
@@ -225,7 +226,7 @@ def _prepare_steps(
     return steps
 
 
-def _release_step(a, v: str, dev: bool, repo: str | None, approval: str, on_pr: str | None = None) -> dict:
+def _release_step(a, v: str, dev: bool, repo: str | None, approval: str, on_pr: release_case.Case | None = None) -> dict:
     """release のステップ。本番は承認資料を --approval で渡し（承認したコミットはステップの実行時に資料から読む）、
     承認の外の変更で承認ゲート（10）になったら verify へ進まない。MVV 判定のプランは handoff でリリース承認ゲートの by: mvv の
     記録を外して人へ戻し、それ以外は end で終える（#815 の I7）。
@@ -273,9 +274,9 @@ def _record_step(v: str, prs: str) -> dict:
 
 
 def _release_verify_steps(
-    a, v: str, dev: bool, repo: str | None, ref: str, rts: str, approval: str, prs: str, on_pr: str | None = None
+    a, v: str, dev: bool, repo: str | None, ref: str, rts: str, approval: str, prs: str, on_pr: release_case.Case | None = None
 ) -> list[dict]:
-    """release と verify（導入の確かめ）のステップ。本番は間に record（リリース記録）を挟む。`on_pr` は CD のある場合の名前。"""
+    """release と verify（導入の確かめ）のステップ。本番は間に record（リリース記録）を挟む。`on_pr` は CD のある場合。"""
     dev_next = ("release-branch" if release_units(a) else "end" if on_pr else "facts") if dev else "cleanup"
     return [
         _release_step(a, v, dev, repo, approval, on_pr),
@@ -306,7 +307,7 @@ class _KindArgs(NamedTuple):
     v: str
     base: str
     units: list
-    cd: str | None  # CD のある場合の名前（release_cd.release_cd_case）。CD が無ければ None
+    cd: release_case.Case | None  # CD のある場合（release_cd.release_cd_case）。CD が無ければ None
 
 
 def _dev_approvals(c: _KindArgs) -> list[dict]:

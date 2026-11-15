@@ -433,7 +433,8 @@
         "tests": [
           "plugins/ndf/scripts/tests/test_mvv_gate.py",
           "plugins/ndf/scripts/tests/test_sprint_state.py",
-          "plugins/ndf/scripts/tests/test_supervise_pace_auto.py"
+          "plugins/ndf/scripts/tests/test_supervise_pace_auto.py",
+          "plugins/ndf-next/tests/progress/gate/test_gate_checks.py"
         ]
       },
       {
@@ -1063,8 +1064,22 @@
         "tests": [
           "plugins/playwright-kit/skills/playwright-planning/tests/test_plan_skeleton.py"
         ]
+      },
+      {
+        "paths": [
+          "docs/glossary.md",
+          ".ndf/mvv.md"
+        ],
+        "tests": [
+          "plugins/ndf-next/tests/domains/records/test_glossary.py",
+          "plugins/ndf-next/tests/domains/records/test_preflight.py",
+          "plugins/ndf-next/tests/domains/records/test_spec.py"
+        ]
       }
     ]
+  },
+  "production_merge": {
+    "admin": true
   },
   "analysis": {
     "analyzer": 3,

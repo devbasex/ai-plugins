@@ -1,8 +1,8 @@
 {
   "template": "impl",
   "purpose": "implement",
-  "summary": "実装: 今の HEAD が取り込み済みなら流さずに終える → worker の実装 → 手元のテスト → push → PR → CI。手元のテストと CI の落ちは同じ原因の続きを数え、落ちたテストを手元で通してから push する",
-  "params": ["repo", "worktree", "branch", "base", "title", "body_file", "test_command", "worker", "ci_budget", "required", "tests"],
+  "summary": "実装: 今の HEAD が取り込み済みなら流さずに終える → worker の実装 → 受け入れ条件の確認の区分の照らし合わせ（記録の無い条件が残れば止まる。#1682）→ 手元のテスト → push → PR → CI。手元のテストと CI の落ちは同じ原因の続きを数え、落ちたテストを手元で通してから push する",
+  "params": ["repo", "worktree", "branch", "base", "title", "body_file", "issue", "test_command", "worker", "ci_budget", "required", "tests"],
   "plan": {
     "name": "impl-{{branch}}",
     "repo": "{{repo}}",
@@ -15,6 +15,7 @@
         "on_cause": {"not_applicable": "end"}
       },
       {"use": "worker"},
+      {"id": "acceptance", "run": ["ndf", "loop", "acceptance", "check", "--issue", "{{issue}}"]},
       {"use": "test", "on_cause": {"test_failed": "test-repeat"}},
       {"use": "push", "on_fail": "fix-push"},
       {"use": "pr"},

@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import shlex
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from pathlib import PurePosixPath
 
 # 並列の指定の語（この表を持つのはこのモジュールだけ）
@@ -100,6 +100,16 @@ def _looks_like_path(word: str) -> bool:
     return "/" in word or "." in word or "::" in word
 
 
+def _drop_parallel_values(args: Sequence[str]) -> Iterator[str]:
+    """並列の指定（`-n` など値を取る形）とその直後の語を除いた語を、元の順で返す。"""
+    words = iter(args)
+    for arg in words:
+        if arg in PARALLEL_FLAGS:
+            next(words, None)
+            continue
+        yield arg
+
+
 def _targets(args: Sequence[str]) -> list[str]:
     """対象の語（選択肢でも、選択肢の値でも、並列の指定の値でもない語）。
 
@@ -107,15 +117,8 @@ def _targets(args: Sequence[str]) -> list[str]:
     （`pytest --tb short` の `short` を対象と取り違えて全体の実行を軽いと判定しない。迷う語は重い側へ倒す）。
     """
     out: list[str] = []
-    skip = False
     after_option = False
-    for arg in args:
-        if skip:
-            skip = False
-            continue
-        if arg in PARALLEL_FLAGS:
-            skip = True
-            continue
+    for arg in _drop_parallel_values(args):
         if arg.startswith("-") or "=" in arg:
             after_option = arg.startswith("-") and "=" not in arg
             continue
@@ -155,10 +158,7 @@ def _classify_words(words: list[str], suites: list[Mapping[str, object]]) -> str
     if any(_matches_declared(words, s) for s in suites):
         return WHOLE
     for suite in suites:
-        runner = suite.get("runner")
-        if not isinstance(runner, str) or not runner:
-            continue
-        kind = _classify_runner(words, runner)
+        kind = _classify_runner(words, suite)
         if kind:
             return kind
     return None
@@ -179,17 +179,44 @@ def _matches_declared(target: str | list[str], suite: Mapping[str, object]) -> b
     return bool(commands) and target == commands[-1]
 
 
-def _classify_runner(words: list[str], runner: str) -> str | None:
-    """`runner` がコマンドの位置にあれば、並列の指定で SCOPE、対象が全体なら WHOLE。どちらでもなければ None。"""
-    pos = runner_position(words, runner)
-    if pos is None:
+def _runner_args(words: Sequence[str], suite: Mapping[str, object]) -> list[str] | None:
+    """suite の `runner`（空でない文字列）がコマンドの位置にあれば、その後ろの語。無ければ None。"""
+    runner = suite.get("runner")
+    if not isinstance(runner, str) or not runner:
         return None
-    args = words[pos + 1 :]
+    pos = runner_position(words, runner)
+    return None if pos is None else list(words[pos + 1 :])
+
+
+def _targets_whole(args: Sequence[str]) -> bool:
+    """対象が全体（無いか `.` だけ）か。"""
+    return all(t == "." for t in _targets(args))
+
+
+def _classify_runner(words: list[str], suite: Mapping[str, object]) -> str | None:
+    """`runner` がコマンドの位置にあれば、並列の指定で SCOPE、対象が全体なら WHOLE。どちらでもなければ None。"""
+    args = _runner_args(words, suite)
+    if args is None:
+        return None
     if _has_parallel(args):
         return SCOPE
-    if all(t == "." for t in _targets(args)):
+    if _targets_whole(args):
         return WHOLE
     return None
+
+
+def is_whole(words: Sequence[str], suites: Iterable[Mapping[str, object]]) -> bool:
+    """単純コマンド 1 つ（語の並び）が、宣言のテストの suite の全体の実行か。並列の指定の有無は問わない。
+
+    宣言の `command` の最後の単純コマンドと同じか、`runner` がコマンドの位置にあって対象が全体（無いか `.` だけ）なら真。
+    `scope_command` の `{paths}` へファイルを入れた範囲の実行は、対象がファイルなので偽になる。
+    """
+    target = list(words)
+    return any(
+        _matches_declared(target, s) or ((args := _runner_args(target, s)) is not None and _targets_whole(args))
+        for s in suites
+        if is_test_suite(s)
+    )
 
 
 def is_heavy(command: str | Sequence[str], suites: Iterable[Mapping[str, object]]) -> bool:
