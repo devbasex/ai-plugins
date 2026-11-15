@@ -1,0 +1,243 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/io/refactor.args.schema.json",
+  "title": "ndf refactor の引数",
+  "description": "ndf refactor が受ける引数。キーは引数の名前（オプションは -- の名前、位置引数は名前）。規約の生成が作り、手で直さない",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "collected",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "--timeout": {
+          "type": "number"
+        },
+        "--work": {
+          "type": "string",
+          "default": "."
+        }
+      },
+      "required": [
+        "subcommand",
+        "--paths"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "release",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--pr": {
+          "type": "integer"
+        },
+        "--work": {
+          "type": "string",
+          "default": "."
+        }
+      },
+      "required": [
+        "subcommand",
+        "--pr"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "run",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--pr": {
+          "type": "integer"
+        },
+        "--branch": {
+          "type": "string"
+        },
+        "--base": {
+          "type": "string"
+        },
+        "--scope": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "--required": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "--ci-test": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "--symbols": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "--participants": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "--max-fix": {
+          "type": "integer",
+          "default": 2
+        },
+        "--budget-minutes": {
+          "type": "integer"
+        },
+        "--safety-net-minutes": {
+          "type": "number"
+        },
+        "--work": {
+          "type": "string",
+          "default": "."
+        }
+      },
+      "required": [
+        "subcommand",
+        "--pr",
+        "--branch",
+        "--base",
+        "--scope",
+        "--required"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "scope-args",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--base": {
+          "type": "string"
+        },
+        "--tests": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "--scope": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "--work": {
+          "type": "string",
+          "default": "."
+        }
+      },
+      "required": [
+        "subcommand",
+        "--base"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "state",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--pr": {
+          "type": "integer"
+        },
+        "--work": {
+          "type": "string",
+          "default": "."
+        }
+      },
+      "required": [
+        "subcommand",
+        "--pr"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "tests",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--changed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "--work": {
+          "type": "string",
+          "default": "."
+        }
+      },
+      "required": [
+        "subcommand",
+        "--changed"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "touched",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--base": {
+          "type": "string"
+        },
+        "--head": {
+          "type": "string",
+          "default": "HEAD"
+        },
+        "--scope": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "--symbols": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "--work": {
+          "type": "string",
+          "default": "."
+        }
+      },
+      "required": [
+        "subcommand",
+        "--base",
+        "--scope"
+      ]
+    }
+  ]
+}

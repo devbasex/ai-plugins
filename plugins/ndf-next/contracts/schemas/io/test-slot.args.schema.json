@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/io/test-slot.args.schema.json",
+  "title": "ndf test-slot の引数",
+  "description": "ndf test-slot が受ける引数。キーは引数の名前（オプションは -- の名前、位置引数は名前）。規約の生成が作り、手で直さない",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "report",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--since": {
+          "type": "string",
+          "default": "7d",
+          "description": "期間（既定 7d）"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "run",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--wait-limit": {
+          "type": "integer",
+          "description": "枠とメモリを待つ上限の秒（既定は設定の値）"
+        },
+        "command": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "-- の後ろにシェルのコマンド 1 つ",
+          "x-ndf-positional": true
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    }
+  ]
+}

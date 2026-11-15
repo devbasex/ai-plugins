@@ -660,15 +660,16 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | マシンに依らない条件 | — | 同じ入力なら、合否がコードの振る舞いと、条件の文に書いた測る場所だけで決まる受け入れ条件。正しさ・回数と計算量・同じマシンの上で測った基準との相対の 3 つの形。正しさと回数と計算量は、どのマシンで実行しても同じ合否になる。相対は、変更の影響がマシンごとに違うため比もマシンで変わり、スペックが固定された測る場所を同じ文に書いたときだけこの条件に当たる（非機能の条件の書き方） | — | — | — |
 | 時間で区切った負荷試験 | — | 「N 分流す」のように、流す時間と同時に動かす本数を決めて所要や失敗を測る試験。結果がマシンのスペックで変わるため、受け入れ条件に置かない | — | — | — |
 | 測る場所 | — | 秒数の上限と、同じマシンの上で測る相対の比を測るマシン。CI のランナーのように、スペックが設定で固定され、ほかの処理と CPU を取り合わない場所に限る。共有の開発機は当たらない | — | — | — |
-| 宣言 | — | リポジトリの `.ndf/` に置く、人が決める設定のファイル。置き場の表で種類が宣言の行 | — | — | — |
-| 公開する面 | — | 外の呼び手が頼ってよい面（副命令・環境変数・受け渡しのファイル・hook・宣言とそのスキーマの置き場）。名前と意味を版で約束し、公開する面の表に載る | — | — | — |
-| 内部の面 | — | NDF の中だけで使い、形を約束しない面。公開する面の表に載らない | — | — | — |
-| 副命令 | — | `bin/ndf <名前>` の `<名前>`。ndf-next の副命令の表（`cli.py` の `COMMANDS`）に載るもの | — | — | — |
-| 配る Skill の表 | — | ndf-next が配る Skill と配るランタイムの一覧（`plugins/ndf-next/manifests/skills.json`） | — | — | — |
-| 起動スクリプト | — | 利用者と AI が打つ `plugins/ndf-next/bin/` のスクリプト（`ndf`・`ndf-claude`） | — | — | — |
-| 契約のページ | — | ndf-next の宣言と入出力の規約を、面ごとのページ（宣言・副命令・終了コード・環境変数・受け渡しのファイル・hook・Skill）で表した文書（`plugins/ndf-next/docs/contracts/`）。正本の表とスキーマから生成し、手で書かない | — | — | — |
-| Skill の入出力の表 | — | 配る Skill ごとの `/goal` の終わりの条件・読む宣言・結果の形と、公開する面に無い Skill の引数の形と環境変数を持つ事実の表（`plugins/ndf-next/contracts/domains/skill-io.json`） | — | — | — |
-| 起動スクリプトの表 | — | `plugins/ndf-next/bin/` のファイルごとに、起動スクリプトか内部の部品かを持つ事実の表（`plugins/ndf-next/contracts/domains/launchers.json`） | — | — | — |
+| 宣言 | — | リポジトリの `.ndf/` に置く、人が決める設定のファイル。置き場の表で種類が宣言の行 | — | — | `docs/specifications/ndf-next-declarations-and-io-contracts.md` |
+| 公開する面 | — | 外の呼び手が頼ってよい面（副命令・環境変数・受け渡しのファイル・hook・宣言とそのスキーマの置き場）。名前と意味を版で約束し、公開する面の表に載る | — | — | `docs/specifications/ndf-next-declarations-and-io-contracts.md` |
+| 内部の面 | — | NDF の中だけで使い、形を約束しない面。公開する面の表に載らない | — | — | `docs/specifications/ndf-next-declarations-and-io-contracts.md` |
+| 副命令 | — | `bin/ndf <名前>` の `<名前>`。ndf-next の副命令の表（`cli.py` の `COMMANDS`）に載るもの | — | — | `docs/specifications/ndf-next-declarations-and-io-contracts.md` |
+| 配る Skill の表 | — | ndf-next が配る Skill と配るランタイムの一覧（`plugins/ndf-next/manifests/skills.json`） | — | — | `docs/specifications/ndf-next-declarations-and-io-contracts.md` |
+| 起動スクリプト | — | 利用者と AI が打つ `plugins/ndf-next/bin/` のスクリプト（`ndf`・`ndf-claude`） | — | — | `docs/specifications/ndf-next-declarations-and-io-contracts.md` |
+| 契約のページ | — | ndf-next の宣言と入出力の規約を、面ごとのページ（宣言・副命令・終了コード・環境変数・受け渡しのファイル・hook・Skill）で表した文書（`plugins/ndf-next/docs/contracts/`）。正本の表とスキーマから生成し、手で書かない | — | — | `docs/specifications/ndf-next-declarations-and-io-contracts.md` |
+| Skill の入出力の表 | — | 配る Skill ごとの `/goal` の終わりの条件・読む宣言・結果の形と、公開する面に無い Skill の引数の形と環境変数を持つ事実の表（`plugins/ndf-next/contracts/domains/skill-io.json`） | — | — | `docs/specifications/ndf-next-declarations-and-io-contracts.md` |
+| 起動スクリプトの表 | — | `plugins/ndf-next/bin/` のファイルごとに、起動スクリプトか内部の部品かを持つ事実の表（`plugins/ndf-next/contracts/domains/launchers.json`） | — | — | `docs/specifications/ndf-next-declarations-and-io-contracts.md` |
+| 手書きの引数の表 | — | argparse を使わない副命令の呼び方（下位の命令の道ごとに 1 行）と引数を持つ事実の表（`plugins/ndf-next/contracts/domains/manual-args.json`）。規約の生成がこの表から引数のスキーマを作る | — | — | `docs/specifications/ndf-next-declarations-and-io-contracts.md` |
 | 上げる先（依存の版の） | — | #3347 の決定 106 の規則で選んだ依存の版のうち、最初のアップロードから 7 日たったもの | — | — | — |
 | 遅れ（依存の版の） | — | 宣言の版が上げる先より古く、固定する理由も無い状態。週 1 回の検査が知らせる | — | — | — |
 | 依存の更新の仕組み | — | 依存の版の遅れを知らせ、版を上げる手段。このリポジトリでは Renovate を GitHub Actions で動かす形（#3370 の決定 1） | — | — | — |
@@ -1265,4 +1266,4 @@ Neural Development Factory（別のリポジトリのサービス）が NDF を�
 | 区間の報告 | — | 人のいない実行の conductor が区間を終える最後の応答の末尾に置く報告。見出し「## 区間の報告」の直後の項目が結果の行で、値ごとに要る項目を添える。形は contracts/forms/unattended-report.json | — | — | — |
 | 人のいない実行の印 | — | 人のいない実行の conductor のセッションに UserPromptSubmit hook が付ける状態のファイル。Stop hook が差し戻しの対象と回数をここで決める | — | — | — |
 | 結果の行の差し戻し | — | 人のいない実行の印のあるセッションで、最後の応答が区間の報告の形に合わないとき、Stop hook が Stop を止めて報告を書かせること。形に合わない Stop が続く間は 2 回までで、形に合った Stop で数え直す | — | — | — |
-| 連携システム | — | NDF を外から呼び、`.ndf/` の設定ページを作るシステム（サービス Factory のランナーと、その上の設定画面） | — | — | — |
+| 連携システム | — | NDF を外から呼び、`.ndf/` の設定ページを作るシステム（サービス Factory のランナーと、その上の設定画面） | — | — | `docs/specifications/ndf-next-declarations-and-io-contracts.md` |

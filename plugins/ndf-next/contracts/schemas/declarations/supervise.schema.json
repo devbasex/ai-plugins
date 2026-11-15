@@ -1,0 +1,240 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "declarations/supervise.schema.json",
+  "title": "プランの実行の宣言（.ndf/supervise.json）",
+  "description": "プランの実行で打つ同期とチェック・整形のコマンドと、リリースの形。テストのコマンドは project.json の test だけが持つ",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "編集のときの補完に使うスキーマの位置。読み手は参照しない"
+    },
+    "version": {
+      "type": "integer",
+      "enum": [
+        1
+      ],
+      "description": "宣言の形の版。読み手は知らない版を読まない"
+    },
+    "sync_checks": {
+      "type": "array",
+      "description": "同期とチェックのコマンドの並び。書いた順に打ち、落ちたら止める",
+      "items": {
+        "type": "object",
+        "description": "名前つきのコマンド",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "コマンドの名前（記録と報告に出す）"
+          },
+          "command": {
+            "type": "string",
+            "description": "シェルで打つコマンド"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "command"
+        ]
+      }
+    },
+    "format": {
+      "type": "array",
+      "description": "整形のコマンドの並び。チェックの前に打つ",
+      "items": {
+        "type": "object",
+        "description": "名前つきのコマンド",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "コマンドの名前（記録と報告に出す）"
+          },
+          "command": {
+            "type": "string",
+            "description": "シェルで打つコマンド"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "command"
+        ]
+      }
+    },
+    "release": {
+      "type": "object",
+      "description": "リリースの形",
+      "properties": {
+        "form": {
+          "type": "string",
+          "description": "リリースの形の名前（package-plugin など）"
+        },
+        "plugin": {
+          "type": "string",
+          "description": "配るプラグインの名前"
+        },
+        "runtimes": {
+          "type": "array",
+          "description": "配るランタイム",
+          "items": {
+            "type": "string"
+          }
+        },
+        "dev_workflow": {
+          "type": "string",
+          "description": "開発版を出す GitHub Actions のワークフローのファイル名"
+        }
+      },
+      "additionalProperties": false
+    },
+    "queue": {
+      "type": "object",
+      "description": "プランを流す待ち行列の資源の枠と共有の一覧。無ければ既定（graphql の枠 2 本・共有の一覧は無し）",
+      "properties": {
+        "resources": {
+          "type": "object",
+          "description": "資源のタグごとの枠。宣言したタグは既定の同じタグへ項目ごとに重なる",
+          "properties": {
+            "graphql": {
+              "$ref": "#/$defs/resource",
+              "description": "GitHub の GraphQL の枠。書かない項目は既定（limit 2・types [pr, drive]・commands [merged-steps.py]）"
+            }
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/resource",
+            "required": [
+              "limit"
+            ]
+          }
+        },
+        "shared": {
+          "type": "array",
+          "description": "共有の一覧。複数のプランが書き足すファイル",
+          "items": {
+            "type": "object",
+            "description": "共有するファイルと当たり方",
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "複数のプランが書き足すファイル"
+              },
+              "touched_by": {
+                "type": "array",
+                "description": "当たり方（このパスに触れたら共有のファイルに当たるとみなす）。無ければ path そのもの",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "path"
+            ]
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "impl_timeout": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1,
+      "description": "実装の上限（秒）。引数が先に効く。null は書かないのと同じ"
+    },
+    "impl_stall_seconds": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1,
+      "description": "実装の無進捗の許容時間（秒）。引数が先に効く。null は書かないのと同じ"
+    },
+    "refactor_budget_minutes": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1,
+      "description": "リファクタリングの想定最大時間（分）。引数が先に効く。null は書かないのと同じ"
+    },
+    "test": {
+      "type": "object",
+      "description": "読み手は読まない（今の版の読み手が読む値。テストのコマンドは project.json の test が持つ）",
+      "properties": {
+        "command": {
+          "type": "string",
+          "description": "テストのコマンド"
+        },
+        "all": {
+          "type": "string",
+          "description": "全体を指す引数"
+        },
+        "no_reports": {
+          "type": "string",
+          "description": "報告を止める引数"
+        }
+      },
+      "additionalProperties": false,
+      "deprecated": true
+    }
+  },
+  "$defs": {
+    "resource": {
+      "type": "object",
+      "description": "資源の枠: 同時に流せる本数と、タグを持つステップの型・run の cmd に含まれる語",
+      "properties": {
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "同時に流せる本数（1 以上）"
+        },
+        "types": {
+          "type": "array",
+          "description": "このタグを持つステップの型",
+          "items": {
+            "type": "string"
+          }
+        },
+        "commands": {
+          "type": "array",
+          "description": "run の cmd にこの語を含むステップがタグを持つ",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "x-ndf-place": "worktree",
+  "x-ndf-read-by": [
+    {
+      "by": "工程: プランの実行",
+      "when": "実装の後に同期とチェック・整形を打つとき"
+    }
+  ],
+  "examples": [
+    {
+      "version": 1,
+      "sync_checks": [
+        {
+          "name": "lint",
+          "command": "bash scripts/check-lint.sh"
+        }
+      ],
+      "format": [
+        {
+          "name": "lint-fix",
+          "command": "bash scripts/check-lint.sh --fix"
+        }
+      ]
+    }
+  ]
+}

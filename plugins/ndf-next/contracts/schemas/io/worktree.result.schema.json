@@ -1,0 +1,288 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "worktree.result.schema.json",
+  "title": "ndf worktree の結果 JSON",
+  "description": "ndf worktree が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果の契約（result.schema.json）が持ち、ここは metrics と items の形だけを足す。metrics と items の要素は閉じていて、載せた項目のほかの項目を持つと通らない",
+  "allOf": [
+    {
+      "$ref": "../result.schema.json"
+    }
+  ],
+  "properties": {
+    "tool": {
+      "const": "worktree"
+    },
+    "metrics": {
+      "type": "object",
+      "description": "ndf worktree の計測値",
+      "additionalProperties": false,
+      "properties": {
+        "count": {
+          "type": "integer",
+          "description": "worktree の数（list）"
+        },
+        "worktrees": {
+          "type": "integer",
+          "description": "見た worktree の数（cleanup）"
+        },
+        "removed": {
+          "type": "integer",
+          "description": "外した worktree（cleanup）か消した退避先（trash）の数"
+        },
+        "branches_deleted": {
+          "type": "integer",
+          "description": "消したブランチの数（cleanup）"
+        },
+        "dirty": {
+          "type": "integer",
+          "description": "メインディレクトリの未コミットのパスの数（session）"
+        },
+        "followed": {
+          "type": "boolean",
+          "description": "メインディレクトリを追従先へ合わせたか（session）"
+        },
+        "worktree:removed": {
+          "type": "integer",
+          "description": "外した worktree の数（merged）"
+        },
+        "branch:deleted": {
+          "type": "integer",
+          "description": "消したブランチの数（merged）"
+        },
+        "worktree:kept": {
+          "type": "integer",
+          "description": "残した worktree の数（merged）"
+        },
+        "branch:kept": {
+          "type": "integer",
+          "description": "残したブランチの数（merged）"
+        },
+        "candidates": {
+          "type": "integer",
+          "description": "回収の候補の数（trash）"
+        },
+        "present": {
+          "type": "boolean",
+          "description": "宣言があるか（check）"
+        },
+        "steps": {
+          "type": "integer",
+          "description": "依存の用意の手順の数（deps）"
+        },
+        "skipped": {
+          "type": "boolean",
+          "description": "用意の印があって飛ばしたか（deps）"
+        },
+        "seconds": {
+          "type": "number",
+          "description": "依存の用意にかかった秒（deps）"
+        },
+        "result": {
+          "type": "string",
+          "description": "ローカル環境の判定（localenv）"
+        },
+        "environment": {
+          "type": "string",
+          "description": "テスト環境の名前（testenv env）"
+        },
+        "slot": {
+          "type": "integer",
+          "description": "テスト環境のスロット（testenv env）"
+        },
+        "worktree": {
+          "type": "string",
+          "description": "テスト環境を使う worktree（testenv env・reap・reclaim）"
+        },
+        "branch": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "ブランチ（testenv env・create・list・cleanup・trash）"
+        },
+        "ports": {
+          "type": "object",
+          "description": "役 → ポート（testenv env）"
+        },
+        "tag": {
+          "type": "string",
+          "description": "基準のタグ（testenv tag）"
+        },
+        "created": {
+          "type": "integer",
+          "description": "作った基準の数（testenv bake）"
+        },
+        "existing": {
+          "type": "integer",
+          "description": "既にあった基準の数（testenv bake）"
+        },
+        "exit": {
+          "type": "integer",
+          "description": "テストの終了コード（testenv test）"
+        },
+        "values": {
+          "type": "integer",
+          "description": "コンテナへ渡す値の数（testenv compose-env）"
+        },
+        "url": {
+          "type": "string",
+          "description": "公開した URL（testenv expose）"
+        }
+      }
+    },
+    "items": {
+      "type": "array",
+      "description": "ndf worktree の項目の並び",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "worktree・宣言・案内するパス"
+          },
+          "base": {
+            "type": "string",
+            "description": "起点（create）"
+          },
+          "start_ref": {
+            "type": "string",
+            "description": "起点の ref（create）"
+          },
+          "new_branch": {
+            "type": "boolean",
+            "description": "ブランチを新しく作ったか（create）"
+          },
+          "head": {
+            "type": "string",
+            "description": "先端（list）"
+          },
+          "prunable": {
+            "type": "boolean",
+            "description": "prune できるか（list）"
+          },
+          "locked": {
+            "type": "boolean",
+            "description": "locked か（list）"
+          },
+          "verdict": {
+            "type": "string",
+            "description": "片付けの判定（cleanup）"
+          },
+          "reason": {
+            "type": "string",
+            "description": "判定・残した理由"
+          },
+          "removed": {
+            "type": "boolean",
+            "description": "外したか（cleanup）・消したか（trash）"
+          },
+          "branch_deleted": {
+            "type": "boolean",
+            "description": "ブランチを消したか（cleanup）"
+          },
+          "note": {
+            "type": "string",
+            "description": "片付けの注記（cleanup）"
+          },
+          "context": {
+            "type": "string",
+            "description": "伝える文（session・guard）"
+          },
+          "kind": {
+            "type": "string",
+            "description": "項目の種類（merged の worktree・branch・main_dir・pr、testenv の testenv）"
+          },
+          "name": {
+            "type": "string",
+            "description": "対象の名前（merged・trash・testenv reap・reclaim）"
+          },
+          "result": {
+            "type": "string",
+            "description": "操作の結果（merged・testenv reap・reclaim）"
+          },
+          "sha": {
+            "type": "string",
+            "description": "ブランチの先端（merged の branch）"
+          },
+          "restore": {
+            "type": "string",
+            "description": "消したブランチを戻すコマンド（merged の branch）"
+          },
+          "released": {
+            "type": "boolean",
+            "description": "先端が本番に出たか（trash）"
+          },
+          "written": {
+            "type": "boolean",
+            "description": "宣言を書いたか（init）"
+          },
+          "declaration": {
+            "type": "string",
+            "description": "宣言の状態（check）"
+          },
+          "detail": {
+            "type": "string",
+            "description": "宣言の状態の説明（check）"
+          },
+          "base_branch": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "ベースブランチ（check）"
+          },
+          "production_branch": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "本番のブランチ（check）"
+          },
+          "local_ignored": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "個人設定で受けなかった項目（check）"
+          },
+          "line": {
+            "type": "string",
+            "description": "依存の用意の出力の末尾の行（deps が失敗したとき）"
+          },
+          "environment": {
+            "type": "string",
+            "description": "テスト環境の名前（testenv env）"
+          },
+          "slot": {
+            "type": "integer",
+            "description": "テスト環境のスロット（testenv env）"
+          },
+          "worktree": {
+            "type": "string",
+            "description": "テスト環境を使う worktree（testenv env・reap・reclaim）"
+          },
+          "branch": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "ブランチ（testenv env・create・list・cleanup・trash）"
+          },
+          "ports": {
+            "type": "object",
+            "description": "役 → ポート（testenv env）"
+          },
+          "key": {
+            "type": "string",
+            "description": "コンテナへ渡す値の名前（testenv compose-env）"
+          },
+          "value": {
+            "type": "string",
+            "description": "コンテナへ渡す値（testenv compose-env）"
+          }
+        }
+      }
+    }
+  }
+}

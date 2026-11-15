@@ -1,0 +1,287 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/io/issues.args.schema.json",
+  "title": "ndf issues の引数",
+  "description": "ndf issues が受ける引数。キーは引数の名前（オプションは -- の名前、位置引数は名前）。規約の生成が作り、手で直さない",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "apply",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--repo": {
+          "type": "string",
+          "description": "<所有者>/<名前>（省けば origin）"
+        },
+        "--state-dir": {
+          "type": "string",
+          "description": "状態の置き場（省けば環境変数の置き場かメインディレクトリの既定の置き場）"
+        },
+        "--plan": {
+          "type": "string"
+        },
+        "--run-id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--plan"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "candidates",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--repo": {
+          "type": "string",
+          "description": "<所有者>/<名前>（省けば origin）"
+        },
+        "--state-dir": {
+          "type": "string",
+          "description": "状態の置き場（省けば環境変数の置き場かメインディレクトリの既定の置き場）"
+        },
+        "--add": {
+          "type": "string",
+          "description": "必ず候補に入れる番号（カンマ区切り。上限で切らない）"
+        },
+        "--limit": {
+          "type": "integer",
+          "default": 10
+        },
+        "--depth": {
+          "type": "string",
+          "enum": [
+            "diff",
+            "review"
+          ],
+          "default": "diff"
+        },
+        "--since-ref": {
+          "type": "string",
+          "description": "差分の起点（タグか SHA）"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "depth-limits",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--repo": {
+          "type": "string",
+          "description": "<所有者>/<名前>（省けば origin）"
+        },
+        "--state-dir": {
+          "type": "string",
+          "description": "状態の置き場（省けば環境変数の置き場かメインディレクトリの既定の置き場）"
+        },
+        "depth": {
+          "type": "string",
+          "enum": [
+            "review",
+            "overhaul"
+          ],
+          "x-ndf-positional": true
+        }
+      },
+      "required": [
+        "subcommand",
+        "depth"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "depth-record",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--repo": {
+          "type": "string",
+          "description": "<所有者>/<名前>（省けば origin）"
+        },
+        "--state-dir": {
+          "type": "string",
+          "description": "状態の置き場（省けば環境変数の置き場かメインディレクトリの既定の置き場）"
+        },
+        "--depth": {
+          "type": "string",
+          "enum": [
+            "review",
+            "overhaul"
+          ]
+        },
+        "--event": {
+          "type": "string",
+          "enum": [
+            "timed_out",
+            "ran"
+          ]
+        },
+        "--left": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--depth",
+        "--event"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "due",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--repo": {
+          "type": "string",
+          "description": "<所有者>/<名前>（省けば origin）"
+        },
+        "--state-dir": {
+          "type": "string",
+          "description": "状態の置き場（省けば環境変数の置き場かメインディレクトリの既定の置き場）"
+        },
+        "depth": {
+          "type": "string",
+          "enum": [
+            "review",
+            "overhaul"
+          ],
+          "x-ndf-positional": true
+        },
+        "--manual": {
+          "type": "boolean",
+          "description": "利用者が求めた"
+        }
+      },
+      "required": [
+        "subcommand",
+        "depth"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "rank",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--repo": {
+          "type": "string",
+          "description": "<所有者>/<名前>（省けば origin）"
+        },
+        "--state-dir": {
+          "type": "string",
+          "description": "状態の置き場（省けば環境変数の置き場かメインディレクトリの既定の置き場）"
+        },
+        "--scores": {
+          "type": "string",
+          "description": "見積の入力（{\"issues\": [...]}）"
+        },
+        "--sizes": {
+          "type": "string",
+          "description": "見積もりの記録から決めた Size（{\"issues\": [{\"number\", \"size\"}]}。size は尺度の値か \"over\"）"
+        },
+        "--capacity": {
+          "type": "integer"
+        },
+        "--milestones": {
+          "type": "string",
+          "description": "着手の順のマイルストーンの題（カンマ区切り）"
+        },
+        "--approved": {
+          "type": "string"
+        },
+        "--depth": {
+          "type": "string",
+          "enum": [
+            "diff",
+            "review"
+          ],
+          "default": "diff"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "revert",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--repo": {
+          "type": "string",
+          "description": "<所有者>/<名前>（省けば origin）"
+        },
+        "--state-dir": {
+          "type": "string",
+          "description": "状態の置き場（省けば環境変数の置き場かメインディレクトリの既定の置き場）"
+        },
+        "--run": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--run"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "settle",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--repo": {
+          "type": "string",
+          "description": "<所有者>/<名前>（省けば origin）"
+        },
+        "--state-dir": {
+          "type": "string",
+          "description": "状態の置き場（省けば環境変数の置き場かメインディレクトリの既定の置き場）"
+        },
+        "--file": {
+          "type": "string",
+          "description": "入力（{\"settle\": [...]}）"
+        },
+        "--base": {
+          "type": "string",
+          "description": "基底のブランチ（省けば既定のブランチ）"
+        },
+        "--dry-run": {
+          "type": "boolean",
+          "description": "確かめるだけで閉じない"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--file"
+      ]
+    }
+  ]
+}
