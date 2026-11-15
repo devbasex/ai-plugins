@@ -460,11 +460,18 @@ def plan(inp: Inputs) -> Plan:
     )
 
 
+def p_number(key: str, default: str) -> str:
+    """項目のキー（`#` より前を見る）の P の番号。表に無ければ、`.ndf/worktree.json` のキーは P6、ほかは `default`。"""
+    head = key.split("#")[0]
+    if head in P_NUMBER:
+        return P_NUMBER[head]
+    return "P6" if key.startswith(WORKTREE_TAG) else default
+
+
 def row_line(row: dict[str, Any]) -> str:
     """出力の行 1 つを人が読む 1 行にする。"""
     key, kind = row["key"], row["kind"]
-    head = key.split("#")[0]
-    p = P_NUMBER[head] if head in P_NUMBER else ("P6" if key.startswith(WORKTREE_TAG) else "")
+    p = p_number(key, "")
     if kind == "mismatch":
         return f"  {p} {key}: 食い違い 宣言 {json.dumps(row['declared'], ensure_ascii=False)} / 解析 {json.dumps(row['analyzed'], ensure_ascii=False)}"
     if kind == "unknown":

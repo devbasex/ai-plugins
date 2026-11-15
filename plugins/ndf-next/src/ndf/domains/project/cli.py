@@ -147,9 +147,7 @@ def _measure(args: argparse.Namespace) -> int:
     print(f"測定の結果: {out}（{data['elapsed_seconds']} 秒）")
     items = []
     for key, m in data["items"].items():
-        print(
-            f"  {write.P_NUMBER[key] if key in write.P_NUMBER else ''} {key}: {m['status']}{'（' + m['reason'] + '）' if m.get('reason') else ''}"
-        )
+        print(f"  {write.p_number(key, '')} {key}: {m['status']}{'（' + m['reason'] + '）' if m.get('reason') else ''}")
         items.append({"kind": m["status"], "name": key, **({"reason": m["reason"]} if m.get("reason") else {})})
     metrics = {**counts, "elapsed_seconds": data["elapsed_seconds"], "out": str(out)}
     return result.emit(result.result(TOOL, result.OK, f"測った（{data['elapsed_seconds']} 秒）", items=items, metrics=metrics))
@@ -209,12 +207,7 @@ def _print_write(planned: write.Plan, rows: list[dict[str, Any]], dry_run: bool)
 def _report_write(planned: write.Plan, dry_run: bool) -> dict[str, Any]:
     rows = secret.mask(planned.rows)  # 表に無い形の秘密も、出力の直前でもう一度伏せる
     _print_write(planned, rows, dry_run)
-    unknown = sorted(
-        {
-            write.P_NUMBER[h] if h in write.P_NUMBER else "P6"
-            for h in (r["key"].split("#")[0] for r in rows if r["kind"] in ("unknown", "secret"))
-        }
-    )
+    unknown = sorted({write.p_number(r["key"], "P6") for r in rows if r["kind"] in ("unknown", "secret")})
     names = "・".join(f.name for f in planned.files)
     verb = "作成した" if any(f.old is None for f in planned.files) else "更新した"
     summary = f"{verb}（{names}。不明 {'・'.join(unknown) if unknown else '無し'}）" if planned.files else "書くものが無い"
