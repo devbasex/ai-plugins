@@ -286,10 +286,8 @@ def detail_items(group: list[Doc], require: bool) -> list[dict]:
         raise StepError(str(exc), EXIT_UNREADABLE) from None
 
 
-def repo_items(group: list[Doc], settings: design_repos.RepoSettings | None) -> list[dict]:
+def repo_items(group: list[Doc], settings: design_repos.RepoSettings) -> list[dict]:
     """まとまりの頭の設計文書ごとに、当てる範囲を決めて代表のリポジトリの 2 規則を当てる。"""
-    if settings is None:
-        return []
     try:
         heads = [d for d in group if doc_kinds.doc_kind(d.path, placed=False) == "design"]
     except doc_kinds.DocKindsError as exc:
