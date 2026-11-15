@@ -1809,9 +1809,9 @@ def test_ensure_no_port_line_waits_until_the_failed_check_is_rerun(monkeypatch, 
     monkeypatch.setattr(pm, "gh_json", lambda root, args, what: {"body": "解いたパス: README.md"})
     reads = iter(
         [
-            [{"name": "ndf-next-checks", "bucket": "fail"}, {"name": "test", "bucket": "pass"}],  # 編集の前
-            [{"name": "ndf-next-checks", "bucket": "fail"}, {"name": "test", "bucket": "pass"}],  # 打ち直しがまだ登録されていない
-            [{"name": "ndf-next-checks", "bucket": "pending"}, {"name": "test", "bucket": "pass"}],
+            [{"name": "ndf-next-checks", "bucket": "fail"}, {"name": "ndf/release-approval", "bucket": "fail"}],  # 編集の前
+            [{"name": "ndf-next-checks", "bucket": "fail"}, {"name": "ndf/release-approval", "bucket": "fail"}],  # 未登録
+            [{"name": "ndf-next-checks", "bucket": "pending"}, {"name": "ndf/release-approval", "bucket": "fail"}],
         ]
     )
     calls = []
@@ -1825,6 +1825,26 @@ def test_ensure_no_port_line_waits_until_the_failed_check_is_rerun(monkeypatch, 
     monkeypatch.setattr(pm.waits, "wait_until", lambda read, done, policy: _Waited(read, done))
     assert pm.ensure_no_port_line(tmp_path, {"number": 7}) == {"number": 7}
     assert calls == ["checks", "edit", "checks", "checks"]
+
+
+def test_ensure_no_port_line_does_not_wait_for_checks_the_mark_does_not_change(monkeypatch, tmp_path):
+    """port 検査のほかに落ちているチェック（証跡が無い間の ndf/release-approval など）は、本文の編集で変わらないため待たない（#3573）。"""
+    import json as _json
+
+    from release_lib import port_mark as pm
+
+    monkeypatch.setattr(pm, "gh_json", lambda root, args, what: {"body": "解いたパス: README.md"})
+    calls = []
+
+    def gh(args, stdin=None, cwd=None):
+        calls.append(args[1])
+        rows = [{"name": "ndf-next-checks", "bucket": "pass"}, {"name": "ndf/release-approval", "bucket": "fail"}]
+        return SimpleNamespace(returncode=0, stdout=_json.dumps(rows) if args[1] == "checks" else "", stderr="")
+
+    monkeypatch.setattr(pm.gh_parts, "gh", gh)
+    monkeypatch.setattr(pm.waits, "wait_until", lambda read, done, policy: pytest.fail("待たない"))
+    assert pm.ensure_no_port_line(tmp_path, {"number": 7}) == {"number": 7}
+    assert calls == ["checks", "edit"]
 
 
 @pytest.mark.parametrize("synced", [None, 6])
