@@ -10,6 +10,7 @@ import pytest
 
 from ndf import cli
 from ndf.adapters import git as git_mod
+from ndf.adapters.github import GitHubError
 from ndf.domains.release import cleanup, tagging
 from ndf.domains.release import cli as release_cli
 from ndf.domains.release import declaration as decl_mod
@@ -97,6 +98,62 @@ def test_publish_creates_missing_tag_and_release_for_bumped_plugins(tmp_path: Pa
     ]
     release = next(p for m, path, p in hub.requests if m == "POST" and path.endswith("/releases"))
     assert release["body"] == "- 直した（#5）" and release["name"] == "kit v1.2.3"
+
+
+# --- 現状固定（I-011）: タグと GitHub Release の有無の読み（GET の 404 だけを「無い」とする）---
+
+
+def _publish_hub(root: Path, monkeypatch: pytest.MonkeyPatch, tag: object, release: object) -> FakeHub:
+    monkeypatch.setattr(git_mod.Git, "changed_files", lambda self, a, b: ["tools/kit/.claude-plugin/plugin.json"])
+    hub = FakeHub()
+    for path, got in (("/repos/o/r/git/ref/tags/kit--v1.2.3", tag), ("/repos/o/r/releases/tags/kit--v1.2.3", release)):
+        if got is not None:
+            hub.responses[("GET", path)] = got
+    return hub
+
+
+def _posts(hub: FakeHub) -> list[str]:
+    return [path for m, path, _p in hub.requests if m == "POST"]
+
+
+def test_characterize_publish_keeps_what_exists(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """GET が通れば（応答が空でも）あるとして作らない。タグだけあれば GitHub Release だけを作る。"""
+    root = _repo(tmp_path)
+    hub = _publish_hub(root, monkeypatch, None, None)
+    assert [m.item() for m in tagging.publish(root, hub, "d" * 40)] == [
+        {"kind": "tag", "name": "kit--v1.2.3", "result": "exists"},
+        {"kind": "release", "name": "kit--v1.2.3", "result": "exists"},
+    ]
+    assert _posts(hub) == []
+    hub = _publish_hub(root, monkeypatch, {"ref": "refs/tags/kit--v1.2.3"}, not_found())
+    assert [m.result for m in tagging.publish(root, hub, "d" * 40)] == ["exists", "created"]
+    assert _posts(hub) == ["/repos/o/r/releases"]
+    release = next(p for m, path, p in hub.requests if m == "POST")
+    assert release == {"tag_name": "kit--v1.2.3", "name": "kit v1.2.3", "body": "kit v1.2.3", "make_latest": "true"}
+
+
+def test_characterize_publish_creates_the_tag_at_the_revision(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = _repo(tmp_path)
+    hub = _publish_hub(root, monkeypatch, not_found(), {})
+    assert [m.result for m in tagging.publish(root, hub, "d" * 40)] == ["created", "exists"]
+    assert [(path, p) for m, path, p in hub.requests if m == "POST"] == [
+        ("/repos/o/r/git/refs", {"ref": "refs/tags/kit--v1.2.3", "sha": "d" * 40})
+    ]
+
+
+@pytest.mark.parametrize("status", [0, 403, 500])
+@pytest.mark.parametrize("which", ["tag", "release"])
+def test_characterize_publish_raises_errors_other_than_404(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, status: int, which: str
+) -> None:
+    """404 でない GitHub の誤りは呼び出し元へ上げ、そこから先を作らない。"""
+    root = _repo(tmp_path)
+    error = GitHubError("断られた", status)
+    hub = _publish_hub(root, monkeypatch, error if which == "tag" else None, error if which == "release" else None)
+    with pytest.raises(GitHubError) as caught:
+        tagging.publish(root, hub, "d" * 40)
+    assert caught.value is error
+    assert _posts(hub) == []
 
 
 def _entry(path: str, branch: str | None) -> git_mod.WorktreeEntry:
