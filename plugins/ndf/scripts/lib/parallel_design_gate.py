@@ -310,19 +310,40 @@ def answer_design(
     sprint = phs.find_sprint(repo, (ph.lane_input(main, name, lane) or {}).get("issues") or [])  # design_gate と同じ探し方
     what = f"設計 PR #{pr} の承認（並列の計画 {name} の依頼 {rid}）"
     if result == "approved":
-        if not _has_gate(state, pr, by, "approved") and (err := _write_gate(run, state, pr, by, "approved", what, repo, msg)):
-            return "stopped", f"設計承認ゲートの記録を書けない: {err}", 2, metrics
-        nxt = _merge_resume(sprint)
-        return "ok", f"設計 PR #{pr} の承認（{by}）を記録した。続きを流す", 0, {**metrics, "next": nxt}
+        return _answer_approved(run, state, pr, by, what, repo, msg, sprint, metrics)
     work = _plan_work(msg)
     if result == "revise":
-        note = work / REVISE_NOTE.format(pr=pr)
-        try:
-            _write_atomic(note, str(ans.get("note") or ""))
-        except OSError as exc:
-            return "stopped", f"指摘ファイルを書けない: {exc}", 2, metrics
-        nxt = f"指摘 {note} を読んで設計を直し、{_revise_step(sprint, pr)}"
-        return "gate", f"設計 PR #{pr} は直して出し直す（指摘 {note}）", 10, {**metrics, "note": str(note), "next": nxt}
+        return _answer_revise(work, pr, ans, sprint, metrics)
+    return _answer_rejected(run, state, pr, rid, what, repo, msg, work, metrics)
+
+
+def _answer_approved(
+    run, state: Path, pr: int, by: str, what: str, repo: Path, msg: dict, sprint: Path | None, metrics: dict
+) -> tuple[str, str, int, dict]:
+    """承認の答え: 設計承認ゲートの記録が無ければ書き、設計 PR のマージのステージの `resume` を続きにする。"""
+    if not _has_gate(state, pr, by, "approved") and (err := _write_gate(run, state, pr, by, "approved", what, repo, msg)):
+        return "stopped", f"設計承認ゲートの記録を書けない: {err}", 2, metrics
+    nxt = _merge_resume(sprint)
+    return "ok", f"設計 PR #{pr} の承認（{by}）を記録した。続きを流す", 0, {**metrics, "next": nxt}
+
+
+def _answer_revise(work: Path, pr: int, ans: dict, sprint: Path | None, metrics: dict) -> tuple[str, str, int, dict]:
+    """直しの答え: 指摘ファイルを書き、直して流し直す続きを返す。"""
+    note = work / REVISE_NOTE.format(pr=pr)
+    try:
+        _write_atomic(note, str(ans.get("note") or ""))
+    except OSError as exc:
+        return "stopped", f"指摘ファイルを書けない: {exc}", 2, metrics
+    nxt = f"指摘 {note} を読んで設計を直し、{_revise_step(sprint, pr)}"
+    return "gate", f"設計 PR #{pr} は直して出し直す（指摘 {note}）", 10, {**metrics, "note": str(note), "next": nxt}
+
+
+def _answer_rejected(
+    run, state: Path, pr: int, rid: str, what: str, repo: Path, msg: dict, work: Path, metrics: dict
+) -> tuple[str, str, int, dict]:
+    """差し戻しの答え: 同じ依頼の印が無ければ差し戻しを記録して印を書く（2 回打っても 1 件）。"""
+    import jsonio
+
     mark = work / REJECTED_MARK.format(pr=pr)
     if jsonio.read(mark, missing={}, broken={}, want=dict).get("id") != rid:
         if err := _write_gate(run, state, pr, "user", "rejected", what, repo, msg):
