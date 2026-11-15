@@ -4,7 +4,8 @@
     ndf relay account use <名前> | show | clear               # 子の claude を起動するアカウントの指定（#2464）
     ndf relay run --name <名前> [--prompt <1 行>] [-- <claude の引数>]   # ラッパーを今の端末で動かす
     ndf relay spawn [--name <名前>] [--cwd <dir>] [--role <役割>] [--plan <計画>] [-- <claude の引数>]
-    ndf relay restart <名前> | stop <名前> | ls                # リレーハブへの依頼と一覧
+    ndf relay restart <名前> | stop <名前> | stop --all | ls   # リレーハブへの依頼と一覧
+    ndf relay notice                                          # カットポイントのアナウンス（ラッパーの直接の子か）
     ndf relay pending                                         # 再起動の前に載せる、待ちを抱えた実行の一覧（決定 86）
     ndf relay mark <session_id>                               # 子へ入力を送る前に中継の印を立てる（決定 92）
     ndf relay decide < 区間の状態の JSON                       # 区間を切り替えるかの判断（#2962）
@@ -25,7 +26,7 @@ from typing import Any, Callable, Mapping
 
 from ndf import cli, identity
 from ndf.contracts import causes, limits, result
-from ndf.domains.relay import account_decide, accounts, hub, install, lane_question, marks, pending, registry, switch_decide, wrapper
+from ndf.domains.relay import account_decide, accounts, hub, install, lane_question, marks, notice, pending, registry, switch_decide, wrapper
 from ndf.domains.relay.tmux import Tmux
 
 # 結果 JSON の tool の名前は副命令の名前（正本は `cli.COMMANDS`）
@@ -38,11 +39,12 @@ COMMANDS = {
     "run": "ラッパーを今の端末で動かす",
     "spawn": "名前つきのラッパーを tmux で起動する",
     "restart": "名前つきのラッパーを起こし直す（止める前に上限を判定する）",
-    "stop": "名前つきのラッパーを止める",
+    "stop": "名前つきのラッパーを止める（--all ですべて）",
     "ls": "名前つきのラッパーの一覧と状態",
     "pending": "再起動の前に、待ちを抱えた実行の一覧を出す",
     "mark": "子へ入力を送る前に中継の印を立てる",
     "decide": "区間の状態の JSON（標準入力）から次の手を出す",
+    "notice": "カットポイントのアナウンスの 1 文を出す（呼び手がラッパーの直接の子か）",
 }
 ACCOUNT_COMMANDS = {
     "use": "子の claude を起動するアカウントを指定する",
@@ -179,9 +181,33 @@ def _hub(args: argparse.Namespace) -> int:
     if args.action == "spawn":
         cwd = str(Path(args.cwd).resolve()) if args.cwd else os.getcwd()
         req = {"kind": "spawn", "name": args.name, "cwd": cwd, "role": args.role, "plan": args.plan, "args": args.rest}
+    elif args.action == "stop" and args.all:
+        return _stop_all(ctx)
     else:
         req = {"kind": args.action, "name": args.name}
     return _outcome(hub.submit(ctx, req))
+
+
+def _stop_all(ctx: hub.Context) -> int:
+    """動いている名前つきのラッパーのすべてへ、名前つきの停止を依頼する。断られたものがあれば止まった結果。"""
+    names = [r.name for r in registry.running(ctx.state_dir)]
+    items: list[dict[str, Any]] = []
+    refused: list[str] = []
+    for name in names:
+        got = hub.submit(ctx, {"kind": "stop", "name": name})  # noqa: NDF201 外部コマンド: ラッパーごとに依頼する（本数は上限の表 relay.max-named まで）
+        items.append({"name": name, "ok": got.ok, "summary": got.summary})
+        if not got.ok:
+            refused.append(name)
+    metrics = {"stopped": len(names) - len(refused)}
+    if refused:
+        return result.emit(result.stopped(TOOL, "refused", f"止められないラッパーがある: {'・'.join(refused)}", items=items, metrics=metrics))
+    return result.emit(result.result(TOOL, result.OK, f"ラッパーを {len(names)} 本止めた", items=items, metrics=metrics))
+
+
+def _notice() -> int:
+    pos = notice.position(os.environ, os.getppid())
+    got = notice.lines(pos, limits.seconds("relay.quiet"))
+    return result.emit(result.result(TOOL, result.OK, got.text, items=[{"text": got.text, "position": pos.kind}], metrics={"inside": got.inside}))
 
 
 def wrapper_settings(name: str, rest: list[str]) -> wrapper.Settings:
@@ -242,8 +268,10 @@ def _parser() -> argparse.ArgumentParser:
     p["run"].add_argument("--prompt")
     for opt in ("--cwd", "--role", "--plan"):
         p["spawn"].add_argument(opt)
-    for name in ("restart", "stop"):
-        p[name].add_argument("name")
+    p["restart"].add_argument("name")
+    stop = p["stop"].add_mutually_exclusive_group(required=True)
+    stop.add_argument("name", nargs="?", help="止めるラッパーの名前")
+    stop.add_argument("--all", action="store_true", help="動いている名前つきのラッパーをすべて止める")
     p["mark"].add_argument("session_id")
     return parser
 
@@ -268,6 +296,7 @@ HANDLERS: dict[str, Callable[[argparse.Namespace], int]] = {
     "pending": lambda a: _pending(),
     "mark": lambda a: _mark(a.session_id),
     "decide": lambda a: _decide(),
+    "notice": lambda a: _notice(),
 }
 
 
