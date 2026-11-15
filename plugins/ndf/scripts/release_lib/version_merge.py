@@ -48,7 +48,7 @@ def _same_but_versions(a: list[str], b: list[str], allowed: set[str]) -> bool:
 
 def _newer(x: str, y: str) -> str:
     """版数だけが違う 2 行のうち、版数の大きい側（#3551）。起点のブランチの側（y）の版数がどれも同じか大きく、1 つでも大きければ y、
-    ほかは x（release/v<版> の側）。同期の PR が起点のブランチの開発版の版数（10.27.69-dev.1）を本番の版（10.27.68）へ戻さない。"""
+    ほかは x（本番の版を書いた側）。同期の PR が起点のブランチの開発版の版数（10.27.69-dev.1）を本番の版（10.27.68）へ戻さない。"""
     import versions
 
     pairs = [(v, w) for v, w in zip(VERSION_RE.findall(x), VERSION_RE.findall(y)) if v != w]
