@@ -104,12 +104,8 @@ def _parsed_imports(path: str, text: str | None) -> frozenset[str] | None:
         return None
 
 
-def tests_for_change(changed: Iterable[str], tests: Mapping[str, str | None]) -> PickedTests:
-    """触るファイルから範囲テストのファイルを選ぶ。
-
-    `tests` はテストのファイル → 中身（読めなければ None）。触ったテストのファイルはそれ自身を選ぶ。
-    Python のソースはそれを import するテスト、どの言語でも名前の対応するテストを選ぶ。返す並びにディレクトリは入らない。
-    """
+def _import_index(tests: Mapping[str, str | None]) -> tuple[dict[str, frozenset[str]], list[str]]:
+    """テストのファイル → その import（読めなければ空）と、読めないテストの並び（ファイルの順）。"""
     imports: dict[str, frozenset[str]] = {}
     unreadable: list[str] = []
     for path, text in sorted(tests.items()):
@@ -117,6 +113,16 @@ def tests_for_change(changed: Iterable[str], tests: Mapping[str, str | None]) ->
         if parsed is None:
             unreadable.append(path)
         imports[path] = frozenset() if parsed is None else parsed
+    return imports, unreadable
+
+
+def tests_for_change(changed: Iterable[str], tests: Mapping[str, str | None]) -> PickedTests:
+    """触るファイルから範囲テストのファイルを選ぶ。
+
+    `tests` はテストのファイル → 中身（読めなければ None）。触ったテストのファイルはそれ自身を選ぶ。
+    Python のソースはそれを import するテスト、どの言語でも名前の対応するテストを選ぶ。返す並びにディレクトリは入らない。
+    """
+    imports, unreadable = _import_index(tests)
     files: set[str] = set()
     unmapped: list[str] = []
     for path in sorted(set(changed)):
