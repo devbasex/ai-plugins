@@ -99,7 +99,7 @@ plugins/ndf-next/
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `junit_failures` | `src/ndf/testing/junit.py` | 新設 | `(xml: bytes, tracked: frozenset[str]) -> JunitFailures` | XML 1 本の落ちた testcase を `<ファイル>::<name>` と、ファイルを決められない testcase の理由へ分ける | `tracked` は作業ディレクトリの根からの相対パスの集合 | `nodes` は重ならず昇順で、各要素のファイルは `tracked` に入る（I1・I2）。`<skipped>` だけの testcase と通った testcase はどちらにも入らない（I3） | 無し |
 | `resolve_file` | `src/ndf/testing/junit.py` | 新設 | `(candidates: Sequence[str], tracked: frozenset[str]) -> Optional[str]` | 属性の候補を順に試し、追跡するファイルの 1 つに決める | 候補は試す順に並ぶ（空文字を含んでよい） | 返す値は `tracked` の要素か None。設計の「JUnit の読み取りのファイルの決め方」の規則に従う | 無し |
-| `xml_members` | `src/ndf/testing/junit.py` | 新設 | `(archive: bytes) -> list[bytes]` | 成果物の ZIP の中の `.xml`（大文字小文字を問わない）の中身を、展開後の大きさを上限で切って、ZIP の中の名前の順に返す | 無し | 返す要素は ZIP の `.xml` のメンバーだけ。1 本の展開後は `MAX_XML_BYTES` 以下、合計は `MAX_EXTRACT_BYTES` 以下で、超えたら 1 本も返さず `JunitError` を投げる。大きさは展開の前に `ZipInfo.file_size` で比べ、読むときも上限 + 1 バイトまでしか読まない（中央ディレクトリの値が実物と違う ZIP でも上限を超えて展開しない） | 無し |
+| `xml_members` | `src/ndf/testing/junit.py` | 新設 | `(archive: bytes) -> list[bytes]` | 成果物の ZIP の中の `.xml`（大文字小文字を問わない）の中身を、展開後の大きさを上限で切って、ZIP の中の名前の順に返す | 無し | 返す要素は ZIP の `.xml` のメンバーだけ。1 本の展開後は `MAX_XML_BYTES` 以下、合計は `MAX_EXTRACT_BYTES` 以下で、超えたら 1 本も返さず `JunitError` を投げる。大きさは展開の前に `ZipInfo.file_size` で比べ、上限以下のものだけを読む。`zipfile` は宣言された `file_size` を超えて読まず、宣言より大きい中身は CRC の不一致で `zipfile.BadZipFile` になる（実測: Python 3.14.4）ため、宣言の値が実物と違う ZIP でも上限を超えて展開しない | 無し |
 | `parser_of` | `src/ndf/testing/ci_logs.py` | 新設 | `(runner: Optional[str]) -> Optional[LogParser]` | `runner` の名前に登録されたログのパーサーを返す | 無し | `PARSERS` に無い名前と None には None を返す（I4） | 無し |
 | `pytest_failures` | `src/ndf/testing/ci_logs.py` | 新設 | `(log_text: str) -> list[str]` | pytest のログの `FAILED`・`ERROR` の行から node id を並べる | 無し | 今の `failed_test_nodes` と同じ入力に同じ並びを返す（重ならず昇順。I8・受け入れ条件 7） | 無し |
 | `GitHub.job` | `src/ndf/adapters/github.py` | 新設 | `(job_id: int) -> dict` | `GET /repos/{repo}/actions/jobs/{job_id}` の本文を返す | 無し | 返す辞書は応答の JSON のまま | ネットワーク（GitHub の REST） |
@@ -125,8 +125,8 @@ plugins/ndf-next/
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `junit_failures` | XML として読めない | 壊れた成果物・JUnit でない XML | `ET.fromstring` の `ET.ParseError` | `JunitError` にして呼び出し元へ返す | 無し（組み立てが読み取りの記録の `reason` に書く） | 後始末なし。同じ入力で再実行しても同じ結果 |
-| `xml_members` | ZIP として読めない | 壊れた成果物 | `zipfile.BadZipFile` | `JunitError` にして呼び出し元へ返す | 無し（同上） | 同上 |
-| `xml_members` | 展開後が大きすぎる | 1 本の `.xml` が `MAX_XML_BYTES` を超える・`.xml` の合計が `MAX_EXTRACT_BYTES` を超える（圧縮の効く巨大なテストの出力） | 展開の前の `ZipInfo.file_size` の比較と、上限 + 1 バイトまでの読み取り | `JunitError` にして呼び出し元へ返す（読んだ分は捨てる） | 無し（組み立てが読み取りの記録の `reason` に大きさを書き、その実行のチェックをログへ移す） | 同上 |
+| `xml_members` | ZIP として読めない | 壊れた成果物・宣言された `file_size` より中身が大きい成果物（CRC の不一致） | `zipfile.BadZipFile` | `JunitError` にして呼び出し元へ返す | 無し（同上） | 同上 |
+| `xml_members` | 展開後が大きすぎる | 1 本の `.xml` が `MAX_XML_BYTES` を超える・`.xml` の合計が `MAX_EXTRACT_BYTES` を超える（圧縮の効く巨大なテストの出力） | 展開の前の `ZipInfo.file_size` の比較 | `JunitError` にして呼び出し元へ返す（読んだ分は捨てる） | 無し（組み立てが読み取りの記録の `reason` に大きさを書き、その実行のチェックをログへ移す） | 同上 |
 | `GitHub.job` | 応答が誤り・上限・ネットワーク | 権限・存在しないジョブ・rate limit | `_translating` | `GitHubError` で呼び出し元へ返す | 無し（組み立てが記録する） | 後始末なし。次の `ndf ci watch` で再実行できる |
 | `GitHub.workflow_run` | 同上 | 同上 | `_translating` | `GitHubError` で呼び出し元へ返す | 無し（同上） | 同上 |
 | `GitHub.run_artifacts` | 同上・ページの上限を超えた | 同上・成果物が `github.list-pages` × 100 件を超える | `_translating`・ページの数え上げ | `GitHubError` で呼び出し元へ返す（上限は `_too_many_pages`） | 無し（同上） | 同上 |
@@ -256,7 +256,7 @@ plugins/ndf-next/
 | --- | --- | --- | --- |
 | `junit_failures` | 5 つのランナーの見本の XML（設計のテスト設計の受け入れ条件 1 の形）から、落ちたテストだけが `<ファイル>::<name>` で返る | `<skipped>` だけの testcase・`<error>` だけの testcase・`testsuites` の無い根の `testsuite`・入れ子の `testsuite` | 壊れた XML で `JunitError` |
 | `resolve_file` | `file` が相対パスで一致・`classname` がパスで一致 | 絶対パス（PHPUnit）で長い方のファイルを選ぶ・バックスラッシュと `./` の正規化・末尾の照合で 2 つ当たる候補は次へ | 全候補が当たらず None（jest の既定・pytest の `xunit2`） |
-| `xml_members` | `.xml` と `.XML` だけを返す | `.xml` の無い ZIP で空・1 本が `MAX_XML_BYTES` ちょうどで返る・合計が `MAX_EXTRACT_BYTES` ちょうどで返る | 壊れた ZIP で `JunitError`・1 本が `MAX_XML_BYTES` + 1 バイトで `JunitError`・合計が `MAX_EXTRACT_BYTES` + 1 バイトで `JunitError`・`ZipInfo.file_size` が実物より小さい ZIP でも上限 + 1 バイトで読むのをやめて `JunitError`（上限を小さく差し替えて試す） |
+| `xml_members` | `.xml` と `.XML` だけを返す | `.xml` の無い ZIP で空・1 本が `MAX_XML_BYTES` ちょうどで返る・合計が `MAX_EXTRACT_BYTES` ちょうどで返る | 壊れた ZIP で `JunitError`・1 本が `MAX_XML_BYTES` + 1 バイトで `JunitError`・合計が `MAX_EXTRACT_BYTES` + 1 バイトで `JunitError`・`ZipInfo.file_size` を実物より小さく書いた ZIP で、上限を超えて展開せずに `BadZipFile` から `JunitError`（上限を小さく差し替えて試す） |
 | `parser_of` | `pytest` でパーサー | 試験用のパーサーを足した対応表でその `runner` が引ける（受け入れ条件 9） | 登録の無い名前・None で None |
 | `pytest_failures` | 今の `test_failed_test_nodes_and_files_from_log` の入力と期待（受け入れ条件 7） | 同じ node の重なり・`ERROR <パス>` | `.py` を含まない行は拾わない |
 | `GitHub.job` | 偽の転送の応答の JSON を返す | — | 404 で `GitHubError` |
