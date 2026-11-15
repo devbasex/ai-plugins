@@ -4,7 +4,7 @@
 
 - **今どうなっているか**: ndf-next のリリースのワークフロー（テンプレート `release.json`）は、承認ゲートの後に worker 1 つへリリースを任せる。worker は CI が落ちるとコードを直して本番の PR へ push できる（今の NDF でリリース 8・14 に同じ形が 2 回起きた）。ほぼ同時に承認された 2 つの PR は、main の必須のチェックが最新の取り込みを求めない（`strict` が偽）ため、組み合わせを CI に通さずに本番へ入る
 - **誰に効くか**: ndf-next を使うすべてのリポジトリ（Web サービス・アプリ・プラグイン）の、本番のリリースを承認する利用者と、リリースを実行するオーガナイザー・一時レーン
-- **変えると何が成り立つか**: 承認の後にコードを直すステップが無くなり、承認済みのコミットだけが本番へ入る。利用者の GitHub でのマージも承認として扱われる。ブランチ戦略・マージの方式・検証環境・バージョンの保存先はリポジトリごとに 1 つの設定ファイル `.ndf/branch-strategy.json` のセクション `branch_strategy` で選ぶ。develop と main を分けるリポジトリは既存のブランチ戦略のまま動く。GitHub flow を選んだリポジトリでは、同時に承認された PR の組み合わせを merge queue（使えなければ最新の取り込みの必須）で確かめてから main へ入れる
+- **変えると何が成り立つか**: 承認の後にコードを直すステップが無くなり、承認済みのコミットだけが本番へ入る。利用者の GitHub でのマージも承認として扱われる。ブランチ戦略・マージの方式・検証環境・バージョンの保存先はリポジトリごとに 1 つの設定ファイル `.ndf/branch-strategy.json` のセクション `branch_strategy` で選ぶ。develop と main を分けるリポジトリは既存のブランチ戦略のまま動く。GitHub flow を選んだリポジトリでは、同時に承認された PR の組み合わせを merge queue（使えなければ最新の取り込みの必須、どちらも使えない private の Free では NDF が順に確かめる `serial`）で確かめてから main へ入れる
 
 ## 適用範囲
 
@@ -34,7 +34,8 @@
 | --- | --- | --- |
 | ai-plugins（11.0.0 の入れ替えの後） | `trunk`・`merge-queue`・検証マーケットプレイス・`plugin` | スプリントを main から切り、PR を main へ出す。承認の後にキューへ入れ、GitHub が main と前に並ぶ PR を合わせて確かめてからマージする。CD がバージョンアップの PR で `plugin.json` を上げ、タグを作る。マージの前の PR は `ai-plugins-next` から試せる |
 | ai-plugins（入れ替えまで） | `.ndf/branch-strategy.json` は無い。今の NDF の値は旧いキー（`.ndf/worktree.json` の `base_branch: develop`・`branch_flow`、`.ndf/project.json` の `production_merge.admin`）にある | 今の NDF が旧いキーを読み、develop と main で動く（#3613 の前提 7）。この期間、ai-plugins のスプリント・マージ先・解析・リリースは ndf-next で実行しない（下の段落）。ndf-next のリリースの workflow は変数 `NDF_RELEASE_RUNNER` が ndf-next でないため動かない |
-| GitHub flow の Web サービス（private で Enterprise Cloud でない） | `trunk`・`strict`・`deploy`（staging）・`json`（`package.json`） | merge queue が使えないため `strict` を選ぶ。先に A がマージされると B はマージの前に止まり、main を取り込んだ新しい head で承認を取り直す。staging へは設定ファイルのコマンドで配る。CD が `package.json` のバージョンを上げる。ただし CD を起動する workflow のテンプレートは #3615 の範囲で、それが入るまでは、利用者が自分の workflow から main への push で `ndf release-steps bump`・`publish` を呼ぶ形になる（この課題が届けるのはサブコマンドと保存先 `json` のアダプタまで） |
+| GitHub flow の Web サービス（private の Pro・Team） | `trunk`・`strict`・`deploy`（staging）・`json`（`package.json`） | merge queue が使えないため `strict` を選ぶ。先に A がマージされると B はマージの前に止まり、main を取り込んだ新しい head で承認を取り直す。staging へは設定ファイルのコマンドで配る。CD が `package.json` のバージョンを上げる。ただし CD を起動する workflow のテンプレートは #3615 の範囲で、それが入るまでは、利用者が自分の workflow から main への push で `ndf release-steps bump`・`publish` を呼ぶ形になる（この課題が届けるのはサブコマンドと保存先 `json` のアダプタまで） |
+| GitHub flow の Web サービス（private の Free） | `trunk`・`serial`・`deploy`（staging）・`json`（`package.json`） | merge queue もブランチ保護（`strict`）も使えないため `serial` を選ぶ。承認の後、NDF が main のロックを取り、main の HEAD と承認済みのコミットを合わせた一時ブランチで CI を走らせ、通って main が動いていなければ承認済みのコミットのまま PR をマージする。A と B が同時に承認されると、B は A のロックが返った後に「A を入れた main + B」で確かめられ、承認は取り直さない。GitHub はマージを縛らないため、人が GitHub で直接マージすると確かめの外で入りうる。NDF はそれをマージの後に検出して止まる（決定 32）。staging への配り方とバージョンは上の行と同じ |
 | develop を持つ Web・アプリ | `merge_base_branch` か `release_branch`・`base_branch: develop`・マージの方式は任意 | 既存のブランチ戦略のまま動く。スプリントは develop（`release_branch` は main）から切り、リリースブランチの PR が本番の PR になる。組み合わせは develop（かリリースブランチ）で既に CI を通っており、本番の PR は 1 度に 1 つのため、マージの方式を書かなくても止まらない。書けば ruleset との一致を確かめて使う。同期の PR は今のまま作る |
 | `.ndf/branch-strategy.json` の無いリポジトリ | どれも無い | ブランチ戦略は既定の `merge_base_branch` 戦略（本番ブランチはリポジトリの既定ブランチ）で、今と同じに動く。マージの方式は無く、今のマージ（head の一致の確認付き）を実行する。検証環境は使わない。CD のバージョンアップは `trunk` 戦略でだけ動くため実行されない |
 
@@ -57,6 +58,7 @@
 | --- | --- | --- |
 | STD1・STD10 | 外部の一次情報 | マージの API とキューへ入れる API は、どちらも承認済みのコミット（`sha`・`expectedHeadOid`）を受け、違えば GitHub が断る |
 | STD7・STD8・STD9 | 外部の一次情報 | merge queue は main の HEAD と前に並ぶ PR を合わせた一時マージコミットで必須のチェックを回し、通ったものだけを順にマージする。Organization の public か Enterprise Cloud の private で使える |
+| STD9・STD14・STD15 | 外部の一次情報 | merge queue は Organization の public と Enterprise Cloud の private だけ、ブランチ保護（`strict` を含む）は private の Free で使えない。どの方式も使えないリポジトリがある |
 | 確かめ 7（2026-11-15） | 実測 | 公開リポジトリの記録で、キューで確かめた一時マージコミットがそのまま PR のマージコミットになり、`merged_by` はキューへ入れた人だった（[issue-3572-design-evidence.md](issue-3572-design-evidence.md) ） |
 | 確かめ 6（2026-11-15） | 実測 | ai-plugins の main の必須のチェックは `strict` が偽で、merge queue も無い。後にマージする PR は先の PR を取り込まずに入れる |
 | 確かめ 1〜3（2026-11-15） | 実測 | 同じリポジトリを違う名前と ref で登録すると両方が残り、検証ブランチの作り直しが更新で入り、正式版の登録は変わらない |
@@ -69,7 +71,7 @@
 
 | 分けた文書 | 中身 |
 | --- | --- |
-| [issue-3572-design-decisions.md](issue-3572-design-decisions.md) | 決定の記録（決定 1〜31。置き換えた決定は superseded と置き換え先を添えて残す） |
+| [issue-3572-design-decisions.md](issue-3572-design-decisions.md) | 決定の記録（決定 1〜33。置き換えた決定は superseded と置き換え先を添えて残す） |
 | [issue-3572-design-evidence.md](issue-3572-design-evidence.md) | 実物の確かめ（確かめ 1〜8。実行したコマンドと出力） |
 | [issue-3572-design-detail.md](issue-3572-design-detail.md) | 詳細設計（ファイル配置・関数の仕様・異常系の処理。#3587 の HEAD 84e6c33b4 からの、ブランチ戦略のセクションを読む形への差分） |
 
@@ -111,6 +113,7 @@ GitHub との間は**腐敗防止層**である。ruleset と merge queue の語
 | 同期の PR（既存のブランチ戦略だけ） | リリース（`land`） | 同期の PR（番号） | — | 戻す元のマージコミット・マージ先のベースブランチ |
 | バージョンアップの PR | リリース（`bump`） | バージョンアップの PR（番号） | — | バージョン・バージョン種別・分岐元のコミット |
 | 検証ブランチ | リリース（`verify-ref`） | ブランチの名前（設定ファイルの値） | — | 含めた PR と head の一覧・検証のバージョン |
+| 本番ブランチのロックと一時ブランチ（`serial` だけ） | リリース（`land`・`land_bump` の `serial.py`）。ロックのブランチはロックを持つ処理だけが fast-forward で進め、一時ブランチはそれを作った処理だけが作り・消す | ロックのブランチの名前（`ndf-lock/<本番ブランチ>`） | ロックのコミット・一時ブランチ | 持ち主の PR・承認済みのコミット・期限・確かめた本番ブランチの HEAD |
 | リリースのワークフロー | テンプレート `release.json` | プラン | ステップ | ステップの起動の引数 |
 | ブランチ戦略のセクション | 利用者（設定は利用者のもの。C7）。利用者の代わりに書くプログラムは期間ごとに 1 つだけ（#3613 の I11）。11.0.0 の入れ替えまでは無し（ndf-next は `.ndf/` を書かない。#3613 の前提 7）。入れ替えのときは #3613 の移行のコマンド（`ndf settings migrate --apply`）が、リポジトリごとに利用者が承認した差分だけを書く。入れ替えの後はリポジトリの解析（`domains/project/write.py`）が、キーの無い項目と、前の解析の書き出しの値のまま（指紋が一致する）の項目だけを書く。セクションを読む 4 つのコンテキストは読むだけで書かない | ファイル `.ndf/branch-strategy.json` | — | セクションのキーの値（下の「ブランチ戦略のセクション」の表） |
 
@@ -118,7 +121,7 @@ GitHub との間は**腐敗防止層**である。ruleset と merge queue の語
 | --- | --- | --- |
 | `assemble` | PR の本文の承認資料のセクション | 既存のブランチ戦略（`merge_base_branch`・`release_branch`）ではリリースブランチとリリースブランチの PR の集約（今のまま） |
 | `answer` | 承認の記録のコメント（経路 `gate` と `github-merge`） | — |
-| `merge`（`land`） | マージか merge queue への追加と、merge queue への追加の記録・迂回の記録・人のマージの記録のコメント | 既存のブランチ戦略では同期の PR の集約（今のまま） |
+| `merge`（`land`） | マージか merge queue への追加と、merge queue への追加の記録・迂回の記録・人のマージの記録のコメント | 既存のブランチ戦略では同期の PR の集約（今のまま）。`serial` では本番ブランチのロックと一時ブランチ |
 | `confirm` | 作ったバージョンの記録のコメント | — |
 | `bump` | — | バージョンアップの PR の作成・コミット・マージ |
 | `publish` | — | タグと GitHub Release |
@@ -143,10 +146,11 @@ GitHub との間は**腐敗防止層**である。ruleset と merge queue の語
 | I11 | バージョンアップの PR | 範囲にリリース対象の変化が無ければバージョンを上げない | `bump` が `not_applicable` を返す |
 | I12 | 検証ブランチ | 検証ブランチは fast-forward でだけ進み、強制 push を使わない | `verify-ref` は止まる |
 | I13 | リリースのワークフロー | `merge` のコンポーネント（`check.json` では `merge-gate`）の直前に `release-guard` がある | テンプレートの検査が返す |
-| I14 | 本番の PR の承認とマージの記録 | `trunk` 戦略で、本番の PR から本番ブランチへ入るコミットは、その時点の本番ブランチの HEAD と承認済みのコミットを合わせたもので必須のチェックを通ったものである（`merge-queue` はキューの一時マージコミット、`strict` は最新の取り込み済みの head）。バージョンアップの PR も迂回せずに同じマージの方式を通るため、同じ条件で入る（I17） | マージの方式が無い・表に無い値・ruleset と食い違うときは、マージも merge queue への追加もせずに止まる（I15）。`strict` で head が本番ブランチの HEAD を含まなければ止まる |
-| I15 | 本番の PR の承認とマージの記録 | 設定ファイルのマージの方式と、本番ブランチの ruleset の実際の設定（merge queue の有無・`strict` の値）が一致する。`trunk` 戦略では方式の記述が必須で、既定の方式へ倒さない。本番ブランチの規則がレビューの承認（`required_approving_review_count` が 1 以上）を求めるときは、PR がその承認を持つ（決定 17） | `land` が原因 `precondition`・理由に設定の値と ruleset の値を出して止まる |
+| I14 | 本番の PR の承認とマージの記録 | `trunk` 戦略で、本番の PR から本番ブランチへ入るコミットは、その時点の本番ブランチの HEAD と承認済みのコミットを合わせたもので必須のチェックを通ったものである（`merge-queue` はキューの一時マージコミット、`strict` は最新の取り込み済みの head、`serial` は一時ブランチのマージコミット）。バージョンアップの PR も迂回せずに同じマージの方式を通るため、同じ条件で入る（I17） | マージの方式が無い・表に無い値・ruleset と食い違うときは、マージも merge queue への追加もせずに止まる（I15）。`strict` で head が本番ブランチの HEAD を含まなければ止まる。`serial` で確かめた HEAD とマージコミットの第 1 親が違えば `untested_merge` で止まる（I19） |
+| I15 | 本番の PR の承認とマージの記録 | 設定ファイルのマージの方式と、本番ブランチの ruleset の実際の設定（merge queue の有無・`strict` の値）が一致し、リポジトリのプランと公開範囲で使える方式である（`serial` は merge queue の規則が無いことだけを求める。決定 33）。`trunk` 戦略では方式の記述が必須で、既定の方式へ倒さない。本番ブランチの規則がレビューの承認（`required_approving_review_count` が 1 以上）を求めるときは、PR がその承認を持つ（決定 17） | `land` が原因 `precondition`・理由に設定の値と ruleset の値と、使える方式の一覧を出して止まる |
 | I16 | 本番の PR の承認とマージの記録 | キューから外れた PR は、同じ head のままキューへ入れ直さない。入れ直すのは新しい head が承認された後だけ。`land` はキューへ入れた時点で、入れた head を本番の PR の追加の記録のコメントに残す。再実行（`ci_pending` の後の `rerun` など）で始まった `land` も、この記録で初めての追加と見分ける | `land` は外れた PR の次の手に `rerun` を出さず、`reject` だけを出す。始めに追加の記録を読み、承認済みのコミットの記録があり、PR がマージされておらずキューにも無ければ、入れ直さずに `queue_removed` で止まる |
-| I17 | 本番の PR の承認とマージの記録 | マージの方式があるとき（`merge-queue`・`strict`）、本番の PR もバージョンアップの PR も管理者の迂回でマージしない。迂回を使えるのは、マージの方式の無い既存のブランチ戦略の PR（今の規則）だけで、迂回は PR のマージで実行する。工程は本番ブランチの ref を PR を通さずに更新しない（ruleset の迂回の形 `pull_request` は PR を通さない更新を許さない。STD12） | セクションのスキーマが、マージの方式と `production_merge.admin` の真の組み合わせを設定を読む時点で落とす。`land` と `land_bump` も、マージの方式があるとき `production_merge.admin` が真でも迂回のマージを呼ばない。`land_bump` は差分がバージョンの保存先・CHANGELOG・手順の書き先に限られるときだけ入れる。`land_bump` も `land` と同じく設定ファイルの方式と ruleset の一致を確かめ、食い違えば入れずに止まる（I15）。`merge-queue` では head が本番ブランチの HEAD を含むときだけ、バージョンアップの PR の head を `expectedHeadOid` に渡してキューの先頭へ入れ（`jump`）、キューの一時マージコミットで組み合わせが確かめられる。キューで前に並んだ PR に追い越されたマージコミットには、タグを作らない。`strict` では head が本番ブランチの HEAD を含むときだけ head の一致の確認付きでマージし、確かめの後に本番ブランチが動けば GitHub の最新の取り込みの規則が断る。外れた・断られたら止まり、次の push の `bump` が進める |
+| I17 | 本番の PR の承認とマージの記録 | マージの方式があるとき（`merge-queue`・`strict`・`serial`）、本番の PR もバージョンアップの PR も管理者の迂回でマージしない。迂回を使えるのは、マージの方式の無い既存のブランチ戦略の PR（今の規則）だけで、迂回は PR のマージで実行する。工程は本番ブランチの ref を PR を通さずに更新しない（ruleset の迂回の形 `pull_request` は PR を通さない更新を許さない。STD12） | セクションのスキーマが、マージの方式と `production_merge.admin` の真の組み合わせを設定を読む時点で落とす。`land` と `land_bump` も、マージの方式があるとき `production_merge.admin` が真でも迂回のマージを呼ばない。`land_bump` は差分がバージョンの保存先・CHANGELOG・手順の書き先に限られるときだけ入れる。`land_bump` も `land` と同じく設定ファイルの方式と ruleset の一致を確かめ、食い違えば入れずに止まる（I15）。`merge-queue` では head が本番ブランチの HEAD を含むときだけ、バージョンアップの PR の head を `expectedHeadOid` に渡してキューの先頭へ入れ（`jump`）、キューの一時マージコミットで組み合わせが確かめられる。キューで前に並んだ PR に追い越されたマージコミットには、タグを作らない。`strict` では head が本番ブランチの HEAD を含むときだけ head の一致の確認付きでマージし、確かめの後に本番ブランチが動けば GitHub の最新の取り込みの規則が断る。外れた・断られたら止まり、次の push の `bump` が進める |
+| I19 | 本番ブランチのロック | `serial` で本番ブランチへマージする `land`・`land_bump` は、その本番ブランチのロックを期限の内に持つものだけで、同時に 1 つである。マージは、一時ブランチで確かめた本番ブランチの HEAD が動いていないときだけ実行する | ロックを取れなければマージせずに待ち、`ci_budget` を過ぎたら `ci_pending` で止まる。期限が切れたかほかの持ち主へ移っていればマージせずに `ci_pending` で止まる。HEAD が動いていれば一時ブランチを作り直す（決定 32） |
 | I18 | バージョンアップの PR | バージョンアップの経路は、設定ファイルのバージョンの保存先が選んだアダプタだけを通る。プラグインの登録のパスを、保存先が `plugin` でないときに読まない | 保存先が無ければ `bump` は原因 `precondition`・理由に取れる値を出して止まる |
 
 ### ドメインイベント
@@ -158,8 +162,9 @@ GitHub との間は**腐敗防止層**である。ruleset と merge queue の語
 | E3 | 検証環境へ、マージの前の PR を集めたものを配った | `verify-ref`（本番ブランチ宛ての PR の作成・更新・閉じ） | 検証環境の利用者 |
 | E4 | 承認資料を本番の PR に書き、提示した | `assemble`・`release-steps present` | 工程の承認ゲート |
 | E5 | 利用者が承認ゲートで承認の回答を書いた | `release-steps answer` | リリースのワークフロー（最初のステップのマージ） |
-| E6 | 本番の PR を承認済みのコミットとの一致の確認付きでマージした、またはキューへ入れた | `land` | E6a（`merge-queue`）か CD・`confirm` |
+| E6 | 本番の PR を承認済みのコミットとの一致の確認付きでマージした、またはキューへ入れた | `land` | E6a（`merge-queue`）・E6b（`serial`）か CD・`confirm` |
 | E6a | merge queue が一時マージコミットで必須のチェックを通し、PR をマージした | GitHub | `land` の待ち・CD |
+| E6b | `serial` で、ロックを持つ `land` が一時ブランチのチェックを通し、承認済みのコミットで PR をマージした | `land` | CD・`confirm` |
 | E7 | 利用者が GitHub で本番の PR をマージした（キューへ入れたものを含む）ことを検知した | 承認ゲートの待ちの読み直しと `land`（マージ済みからの再開） | リリースのワークフロー |
 | E8 | 差し戻した、または CI かキューで落ちた本番の PR を止めた | `release-steps answer`（差し戻し）・`land`（止まった結果） | スプリントの経路 |
 | E9 | 直しを PR へ入れた新しい head で承認を取り直した | スプリントの経路の push の後の `assemble`・`present` と `answer` | リリースのワークフロー。古い head への承認は `stale` |
@@ -178,7 +183,9 @@ GitHub との間は**腐敗防止層**である。ruleset と merge queue の語
 | 承認の経路 | 本番の PR の承認がどこで与えられたか。承認ゲート（`gate`）か、人の GitHub でのマージ（`github-merge`） | 用語集の既存の行の意味のまま |
 | 差し戻し | 承認ゲートで承認しない回答、または CI かキューで落ちた本番の PR を出さずに止めること。直しを同じ本番の PR へ入れた head で承認を取り直す | 用語集の既存の行の意味のまま（要求のステップで「キュー」を足した） |
 | fix の worker | CI が落ちたときにコードを直して push するプランのステップ（テンプレートの `ci-fix`・`fix-push`・`fix-base` と、それに続く `push`） | 用語集の既存の行の意味のまま |
-| マージの方式 | 承認した複数の PR の組み合わせを確かめてから本番ブランチへマージする方式（`merge-queue`・`strict`） | 要求のステップで追加済み |
+| マージの方式 | 承認した複数の PR の組み合わせを確かめてから本番ブランチへマージする方式（`merge-queue`・`strict`・`serial`） | 意味の変更（`serial` を足した） |
+| 一時ブランチ | `serial` で、本番ブランチの HEAD と承認済みのコミットを合わせて CI に通すために NDF が作るブランチ `ndf-serial/<本番ブランチ>/<PR の番号>-<回数>`。確かめた後に消す | 追加 |
+| 本番ブランチのロック | `serial` で、本番ブランチへマージする `land` を 1 つにするための、origin のブランチ `ndf-lock/<本番ブランチ>` のコミットの列。fast-forward の更新で取り合う | 追加 |
 | merge queue への追加 | 承認済みのコミットを `expectedHeadOid` に渡して、本番の PR を merge queue へ入れること（`enqueuePullRequest`） | 追加 |
 | バージョンの保存先 | バージョンを持つファイルと、その読み書きのアダプタ（`plugin`・`json`）。ブランチ戦略のセクションの `release.version_store` で選ぶ | 追加 |
 | 版上げの PR | `trunk` 戦略で、main へのマージの後に CD の `bump` が main の HEAD から作る、バージョンアップのコミットだけを持つ main 宛ての PR。head のブランチの名前（`release/v<バージョン>`）と差分の範囲（バージョンの保存先・CHANGELOG・手順の書き先）の両方で見分ける。本文では業界の語に寄せて「バージョンアップの PR」と書く | 意味の変更（今の NDF の意味「head のブランチが `release/` で始まる PR」に、`trunk` 戦略の意味を書き分けて足した） |
@@ -215,6 +222,9 @@ GitHub との間は**腐敗防止層**である。ruleset と merge queue の語
 | STD10 | GitHub GraphQL の `enqueuePullRequest` | 引数 `pullRequestId`（必須）・`expectedHeadOid`・`jump`。エントリの状態は `QUEUED`・`AWAITING_CHECKS`・`MERGEABLE`・`UNMERGEABLE`・`LOCKED` | merge queue への追加に承認済みのコミットを渡す（I3・決定 18） | 型の照会（確かめ 4・5、2026-11-15） |
 | STD11 | GitHub Docs「Merging a pull request with a merge queue」 | 管理者は保護の迂回で直接マージできる（許されていれば）。`gh pr merge` はキューのある本番ブランチでは PR をキューへ入れる | 本番の PR もバージョンアップの PR も迂回せずキューへ入れる（決定 20） | https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/incorporating-changes-from-a-pull-request/merging-a-pull-request-with-a-merge-queue （2026-11-15） |
 | STD13 | JSON Schema「Conditional subschemas」 | 「The `if`, `then` and `else` keywords allow the application of a subschema based on the outcome of another schema.」`if` が通れば `then` も通らなければならない。値（`const`）で別のキーを必須にする例を持つ | 戦略が許す値と `trunk` 戦略で必須のキーをセクションのスキーマの `if`/`then` で縛る（決定 28） | https://json-schema.org/understanding-json-schema/reference/conditionals （2026-11-16） |
+| STD14 | GitHub Docs「About protected branches」の提供条件 | 「Protected branches are available in public repositories with GitHub Free and GitHub Free for organizations. Protected branches are also available in public and private repositories with GitHub Pro, GitHub Team, GitHub Enterprise Cloud, and GitHub Enterprise Server」 | private の Free では `strict` も使えないため、`serial` を足す（決定 32）。プランと公開範囲から方式を選ぶ表（決定 33） | https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches （2026-11-16） |
+| STD15 | GitHub Docs「About rulesets」の提供条件 | 「Rulesets are available in public repositories with GitHub Free and GitHub Free for organizations, and in public and private repositories with GitHub Pro, GitHub Team, and GitHub Enterprise Cloud」 | 同上（決定 32・33） | https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/about-rulesets （2026-11-16） |
+| STD16 | GitHub REST「Git references」と「Merge a branch」 | 「Update a reference」の `force` は「Leaving this out or setting it to false will make sure you're not overwriting work」で、偽なら fast-forward だけを許す。「Merge a branch」（`POST /merges`）は衝突で 409 を返す | `serial` のロックを fast-forward の更新で取り合い、一時ブランチのマージコミットを API で作る（決定 32） | https://docs.github.com/en/rest/git/refs ・ https://docs.github.com/en/rest/branches/branches#merge-a-branch （2026-11-16） |
 | STD12 | GitHub Docs「Creating rulesets for a repository」の「Granting bypass permissions for your branch or tag ruleset」 | 迂回の形「For pull requests only」は、直接の push を許さずに迂回を与える。迂回する者は変更に PR を開く必要があり、その PR の保護を迂回してマージできる | 工程は本番ブランチの ref を直接更新せず、バージョンアップの PR もマージの方式があればキューか最新の取り込みの規則を通す（決定 20・I17） | https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/creating-rulesets-for-a-repository （2026-11-15） |
 
 ### 主要な製品
@@ -233,7 +243,8 @@ GitHub との間は**腐敗防止層**である。ruleset と merge queue の語
 | LIB1 | release-please-action | バージョンアップの Release PR・CHANGELOG・タグ | 採らない。バージョン種別を Conventional Commits から読み、このリポジトリのコミットの書式（`Add:`・`Fix:` などの日本語の題）と合わない。CHANGELOG のセクションの形も今の `changelog_decide` と違う | PRD1 と同じ |
 | LIB2 | semantic-release | CI でのバージョンの決定とタグ | 採らない。LIB1 と同じくコミットの書式からバージョン種別を読む。Node の依存が増える | PRD2 と同じ |
 | LIB3 | GitHub merge queue | 組み合わせを一時マージコミットで確かめ、通ったものだけを順にマージする | 採る（使えるリポジトリで）。組み合わせの確かめを自前で作らない | STD7 |
-| LIB4 | bors-ng（ボットによる組み合わせの確かめ） | 承認した PR を一時のブランチで合わせて確かめ、通ればマージする | 採らない。リポジトリはアーカイブ済みで、README の Deprecation notice が「use GitHub's built-in merge queue」と案内している | https://github.com/bors-ng/bors-ng （`gh api repos/bors-ng/bors-ng` の `archived: true`、2026-11-15） |
+| LIB4 | bors-ng（ボットによる組み合わせの確かめ） | 承認した PR を main のコピーの staging のブランチへマージして確かめ、通れば staging を main へ入れる | ツールは採らない（2024-04-04 にアーカイブ済みで、README の Deprecation notice が「use GitHub's built-in merge queue」と案内している）。merge queue も `strict` も使えないリポジトリ向けの `serial` は、この形に倣う。ただし staging を main へ入れず、承認済みのコミットで PR をマージする（決定 32） | https://github.com/bors-ng/bors-ng （`gh api repos/bors-ng/bors-ng` の `archived: true`、2026-11-15） |
+| LIB5 | Mergify の Merge Queue（GitHub App のサービス） | GitHub のプランに依らない merge queue。public と private の 5 人までは無料、それより大きいチームは席ごとに月 21 ドルまで | 採らない。費用と、GitHub App へ private のリポジトリの書き込みの権限を渡すこと（決定 32） | https://docs.mergify.com/merge-queue/ ・ https://mergify.com/pricing （2026-11-16） |
 
 ### 確かめられなかったこと
 
@@ -242,7 +253,10 @@ GitHub との間は**腐敗防止層**である。ruleset と merge queue の語
 | semantic-release がバージョンアップのコミットを書き戻すか | README と gitbook | どちらにも記述が無い。決定 7 は自前の `bump` で作成するため、結論に影響しない |
 | `enqueuePullRequest` に違う `expectedHeadOid` を渡したときの応答の形 | 型の照会（確かめ 4） | 型は分かったが、キューの無い本番ブランチでは確かめられない。実装のときに確かめる（「未確認のまま残ること」） |
 
-調べた量: 候補 20 件・取得の試み 22 回。
+| private の Free で規則の読み取り（`rules/branches`）が返す応答の形 | 公式のページの提供条件（STD14・STD15） | 断られることは提供条件から分かるが、応答の状態と本文は private の Free のリポジトリが無く確かめていない。決定 33 の読み取りの形は実装のときに確かめる（「未確認のまま残ること」） |
+| ref が既にあるときの「Create a reference」の状態 | 公式のページ（STD16） | 状態の一覧に 409・422 があるが、どちらが返るかの記述が無い。決定 32 は 201 以外をすべて「取れなかった」と読み、読み直すため結論に影響しない |
+
+調べた量: 候補 26 件・取得の試み 30 回。
 
 ## 機能一覧
 
@@ -265,9 +279,10 @@ GitHub との間は**腐敗防止層**である。ruleset と merge queue の語
 | テンプレート `contracts/templates/release.json`（変更） | リリースのワークフローを `merge` → `confirm` → `record` → `cleanup` の 4 ステップにする。worker・push・次のバージョンの用意を持たない（I1・I2） |
 | テンプレート `merge.json`・`check.json`・`close.json` とコンポーネント `parts/steps.json`（変更） | コンポーネント `release-guard` を `merge` のコンポーネントの直前に置く。本番の PR（マージ先が本番ブランチの PR）なら終了コード 3（原因 `production_pr`）で `end` へ進める（I6・I13） |
 | テンプレートの検査 `domains/release/release_plan.py`（新設） | 純粋な処理。プランの JSON を受け、I1・I2・I13 を破るステップを返す |
-| マージ `domains/release/land.py`（変更） | ブランチ戦略とマージの方式で振る舞いを選ぶ。`merge-queue` は merge queue への追加と待ち、`strict` は本番ブランチの HEAD を取り込んだかの確かめとマージ、方式なしは今のマージ。止まったら落ちたチェックと次の手を返す（I3・I4・I16）。マージ済みの PR から再開したら人のマージの記録を書く（I5）。同期の PR は既存のブランチ戦略でだけ作る（I10）。マージの方式があるとき、本番の PR でもバージョンアップの PR でも迂回を呼ばない（I17） |
-| マージの方式の解決 `domains/release/merge_method.py`（新設） | 純粋な処理。ブランチ戦略のセクションの `production_merge.method` と、アダプタが読んだ ruleset の事実（merge queue の有無・`strict`）を受け、方式か食い違いの理由を返す（I15） |
-| GitHub のアダプタ `adapters/github.py`（変更） | `enqueue(number, expect_head)`（GraphQL `enqueuePullRequest`）・`queue_entry(number)`（`mergeQueueEntry` と `isInMergeQueue`）・`branch_rules(branch)`（`GET /repos/{o}/{r}/rules/branches/{branch}` と GraphQL `mergeQueue(branch)`）を足す。どれも読むか追加するだけで、ruleset を書かない |
+| マージ `domains/release/land.py`（変更） | ブランチ戦略とマージの方式で振る舞いを選ぶ。`merge-queue` は merge queue への追加と待ち、`strict` は本番ブランチの HEAD を取り込んだかの確かめとマージ、`serial` はロックと一時ブランチでの確かめとマージ（`serial.py`）、方式なしは今のマージ。止まったら落ちたチェックと次の手を返す（I3・I4・I16・I19）。マージ済みの PR から再開したら人のマージの記録を書く（I5）。同期の PR は既存のブランチ戦略でだけ作る（I10）。マージの方式があるとき、本番の PR でもバージョンアップの PR でも迂回を呼ばない（I17） |
+| マージの方式の解決 `domains/release/merge_method.py`（新設） | 純粋な処理。ブランチ戦略のセクションの `production_merge.method` と、アダプタが読んだ ruleset の事実（merge queue の有無・`strict`）とリポジトリの事実（公開範囲・持ち主の種類・ブランチ保護を使えるか）を受け、方式か、食い違いの理由と使える方式の一覧を返す（I15・決定 33） |
+| `serial` の確かめ `domains/release/serial.py`（新設） | 本番ブランチのロックの取り・返し・期限の延長、一時ブランチの作成・消去・作り直しの回数、確かめた HEAD とマージコミットの第 1 親の比べ（I19・決定 32）。GitHub はアダプタだけを通す |
+| GitHub のアダプタ `adapters/github.py`（変更） | `enqueue(number, expect_head)`（GraphQL `enqueuePullRequest`）・`queue_entry(number)`（`mergeQueueEntry` と `isInMergeQueue`）・`branch_rules(branch)`（`GET /repos/{o}/{r}/rules/branches/{branch}` と GraphQL `mergeQueue(branch)`）を足す。`serial` のために `merge_branches(base, head)`（`POST /merges`）・`create_ref`・`update_ref`（`force: false` だけ）・`delete_ref`（`ndf-serial/` の下だけ）・`repo_facts()`（`private`・`owner.type`・規則の読み取りの可否）を足す。どれも ruleset を書かない |
 | 承認の記録 `domains/release/trail.py`（変更） | 人のマージの記録をコメントで書き、読む |
 | 人のマージの判定 `domains/release/merge_decide.py`（新設） | 純粋な処理。PR の応答と承認の記録から、承認の経路・承認した人・承認済みのコミット・マージした head を決める |
 | 承認資料 `domains/release/assemble.py`（変更） | `trunk` 戦略ではブランチを作らず、本番の PR の範囲（main の HEAD..PR の head）から承認資料を作成して本文のセクションへ書く。既存のブランチ戦略ではリリースブランチを今のまま作成する |
@@ -283,7 +298,7 @@ GitHub との間は**腐敗防止層**である。ruleset と merge queue の語
 | セクションの読み取り `core/branch_strategy.py`（新設） | `.ndf/branch-strategy.json` をメインディレクトリから読み、セクションのスキーマで確かめ、既定を埋めた値を返す。セクションを読むどの領域もこれだけを通す（決定 27・28） |
 | スプリントの経路 `domains/worktree/`・マージ先の既定 `core/route`・リポジトリの解析 `domains/project/`・工程の記録 `progress/command.py`・`progress/gate/release.py`（変更） | 分岐元・マージ先・クリーンアップ・解析の書き出し・差分の範囲・本番ブランチの判定の規則は変えず、読み書きする設定を `.ndf/worktree.json` からブランチ戦略のセクションへ移す（決定 24 の 12 の行） |
 | リリース記録 `record.py`・承認資料のセクション `materials_decide.py`・タグ `tagging.py`（変更） | バージョンを `confirm` の記録から読む。本文の承認資料のセクションだけを差し替える。タグはバージョンアップの PR のマージのコミットで作る |
-| 止まった理由の表 `contracts/causes.json`（変更） | `production_pr`・`queue_removed`・`behind` を足す |
+| 止まった理由の表 `contracts/causes.json`（変更） | `production_pr`・`queue_removed`・`behind`・`combination_failed`・`untested_merge` を足す |
 | サブコマンド `domains/release/cli.py` と契約のスキーマ（変更） | `guard`・`bump`・`pr-check`・`verify-ref`・`confirm` を足す。結果と引数のスキーマを同じ変更で合わせる |
 | 承認ゲートの待ち `progress/gate/release.py`（変更） | 待ちの読み直しで本番の PR がマージ済みなら `release-steps answer --route github-merge` を呼ぶ（E7） |
 | workflow `.github/workflows/ndf-next-release.yml`（変更） | main への push で `bump` と `publish`、本番ブランチ宛ての PR のイベントで `pr-check` と `verify-ref` を実行する |
@@ -309,6 +324,8 @@ graph TD
     C --> V[verify_ref・verify_decide]
     L --> MM[merge_method.py]
     L --> MD[merge_decide・trail]
+    L --> SR[serial.py]
+    SR --> GH
     B --> VS[version_store.py]
     B -->|land_bump| L
     MM --> D[declaration.py]
@@ -364,7 +381,7 @@ graph TD
 | `doc_prs` | `base`・`sprint`（戦略が許す値だけ） | `base` | `release_branch`・`trunk` |
 | `integrate` | `check`・`release`（戦略が許す値だけ） | `check` | `trunk` |
 | `reviews` | PR の種類ごとのレビューの単位（今の `branch_flow.reviews` の形。`release` の種類は `release_branch` 戦略だけ） | 種類ごとの今の既定 | — |
-| `production_merge.method` | `merge-queue`・`strict` | 無し（既存のブランチ戦略では今のマージ） | `trunk` |
+| `production_merge.method` | `merge-queue`・`strict`・`serial`（使えるかはプランと公開範囲で決まる。下の「マージの方式の選び方」） | 無し（既存のブランチ戦略では今のマージ） | `trunk` |
 | `production_merge.admin` | 真偽（マージの方式の無い既存のブランチ戦略で、迂回のマージを使うか。I17）。`production_merge.method` と一緒に真を書けない | 偽 | — |
 | `verify` | `kind: "marketplace"`（`ref`・`marketplace`）・`kind: "deploy"`（`ref`・`command`・`timeout_seconds`） | 無し（検証環境を使わない） | — |
 | `release.version_store` | `kind: "plugin"`・`kind: "json"`（`path`・`key`・`name`）。`trunk` 戦略でだけ書ける | 無し（既存のブランチ戦略はセクションの外の今の経路。#3615） | `trunk` |
@@ -403,9 +420,25 @@ graph TD
 | `trunk` 戦略で必須のキー（`production_merge.method`・`release.version_store`） | `.ndf/branch-strategy.json` | セクションのスキーマの `if`/`then` の `required` | 同上。既定の方式・保存先へ倒さない |
 | `trunk` 以外のブランチ戦略の `release.version_store`（既存のブランチ戦略はこの値を読まない） | `.ndf/branch-strategy.json` | セクションのスキーマの `if`/`then` | 同上 |
 | マージの方式と `production_merge.admin` の真の組み合わせ（方式があるとき迂回は使われない。I17） | `.ndf/branch-strategy.json` | `production_merge` のスキーマの `if`/`then`（`method` があれば `admin` は偽だけ） | 同上 |
-| マージの方式と ruleset の一致の確認（I15） | `.ndf/branch-strategy.json` の `production_merge.method` と、本番ブランチの規則の読み取り | `merge_method`（`land`・`land_bump` が呼ぶ） | 原因 `precondition`・理由に設定の値と ruleset の値 |
+| マージの方式と ruleset の一致の確認・プランと公開範囲で使える方式か（I15・決定 33） | `.ndf/branch-strategy.json` の `production_merge.method` と、本番ブランチの規則とリポジトリの読み取り | `merge_method`（`land`・`land_bump` が呼ぶ） | 原因 `precondition`・理由に設定の値と ruleset の値と使える方式の一覧 |
 
 確かめ 8（[issue-3572-design-evidence.md](issue-3572-design-evidence.md) ）は、スキーマの案に次の例が通り、組み合わせを壊した 13 の例が落ちることを示す。通る例は、下の 2 つの例と、Web サービスの例を `trunk` 戦略へ書き換えた例である。
+
+### マージの方式の選び方（プランと公開範囲）
+
+使えるマージの方式は、リポジトリの持ち主の種類・公開範囲・GitHub のプランで決まる（STD9・STD14・STD15。決定 33）。
+
+| リポジトリ | 使える方式 | 勧める方式 |
+| --- | --- | --- |
+| Organization の public | `merge-queue`・`strict`・`serial` | `merge-queue`（作者の取り込みも承認の取り直しも要らない） |
+| 個人アカウントの public | `strict`・`serial` | `strict` |
+| private（Free） | `serial` | `serial` |
+| private（Pro・Team） | `strict`・`serial` | `strict` |
+| private（Enterprise Cloud） | `merge-queue`・`strict`・`serial` | `merge-queue` |
+
+`strict` を勧める行で `serial` を選ぶこともできる。`strict` は先にマージされた PR を取り込んで承認を取り直すが、`serial` は取り直さない代わりに一時ブランチの CI が 1 回増える。
+`land` はプランを直接読まず、公開範囲と持ち主の種類・規則の読み取りの可否・キューの有無の 3 つで行を決める。設定の方式が行に無ければ、マージせずに `precondition` で止まり、使える方式の一覧を出す。
+規則の読み取りがプランの不足でない理由で失敗したときは行を決めず、`merge-queue`・`strict` は止まり、`serial` は進める（決定 33）。
 
 ### 設定の例
 
@@ -465,11 +498,17 @@ develop を持つ Web サービス（`merge_base_branch`・staging 環境へ配�
 {"name": "lock", "stage": "production", "command": ["npm", "install", "--package-lock-only"], "writes": ["package-lock.json"]}
 ```
 
-Web サービスの例はマージの方式を書かない（今のマージ）。書くなら `production_merge.method` に `strict` か `merge-queue` を書き、ruleset との一致を確かめて使う。
+Web サービスの例はマージの方式を書かない（今のマージ）。書くなら `production_merge.method` に上の表で使える方式を書き、ruleset との一致を確かめて使う。
 同じ Web サービスが `trunk` 戦略を選ぶと、`package.json` のバージョンはセクションの次の値で選ぶ（確かめ 8 の `web-trunk` の例）:
 
 ```json
 "release": {"version_store": {"kind": "json", "path": "package.json", "key": "version", "name": "web"}}
+```
+
+その Web サービスが private の Free なら、`trunk` 戦略で必須のマージの方式は `serial` だけを書ける:
+
+```json
+"production_merge": {"method": "serial"}
 ```
 
 ## 処理の流れ
@@ -489,6 +528,7 @@ ndf-next で本番の PR を扱うプランを、テンプレートと工程の�
 | --- | --- | --- |
 | `merge-queue` | 承認の記録の読み直し → 設定ファイルと ruleset の一致の確認 → PR の必須のチェックの待ち → merge queue への追加（`expectedHeadOid` = 承認済みのコミット）→ マージかキューから外れるのを待つ → マージした head とマージコミットの記録 | head が動いた（`refused`）・ruleset と食い違う（`precondition`）・PR のチェックが落ちた（`test_failed`・`check_failed`）・キューから外れた（`queue_removed`）・待ちの時間切れ（`ci_pending`） |
 | `strict` | 承認の記録の読み直し → 一致の確認 → head が本番ブランチの HEAD を含むかの確かめ → 必須のチェックの待ち → マージ（`expect_head` = 承認済みのコミット） | 上の `queue_removed` の代わりに、head が本番ブランチの HEAD を含まない（`behind`） |
+| `serial` | 承認の記録の読み直し → 使える方式か（merge queue の規則が無いこと）の確かめ → PR のチェックの待ち → 本番ブランチのロックを取る → 一時ブランチで HEAD と承認済みのコミットをマージ → 一時ブランチのチェックの待ち → HEAD が動いていなければマージ（`expect_head` = 承認済みのコミット）→ 第 1 親の確かめと記録 → 一時ブランチを消してロックを返す | 上の `queue_removed` の代わりに、衝突か一時ブランチのチェックが落ちた（`combination_failed`）・ロックか一時ブランチの待ちの時間切れ（`ci_pending`）・確かめた HEAD と第 1 親が違う（`untested_merge`） |
 | 方式なし（既存のブランチ戦略だけ） | 今と同じ（承認の記録の読み直し → 必須のチェックの待ち → マージ → 既存のブランチ戦略の同期の PR） | 今と同じ |
 
 ### スプリントから main へのマージまで（経路 (a)、`trunk`・`merge-queue`）
@@ -523,6 +563,33 @@ A が落ちて外れると、B は「main + B」で確かめ直される（GitHu
 1. 承認の記録を読み直し、ruleset の `strict` が真であることを確かめる（I15）
 2. PR の head が main の HEAD を含むかを確かめる。含まなければ原因 `behind` で止まり、次の手は `reject`（main を取り込んで head を進め、新しい head で承認を取り直す）だけを出す。取り込んだ後は古い承認が `stale` になる（受け入れ条件 23）
 3. 必須のチェックを待ち、`expect_head` = 承認済みのコミットでマージする。本番の PR は `production_merge.admin` が真でも迂回せずに実行する（I17）。迂回は最新の取り込みの規則も越えるため、迂回しないことで、待ちの間に main が動けば GitHub がマージを断り（strict の規則）、`land` は 2 へ戻って `behind` で止まる
+
+### 経路 (a)、`trunk`・`serial`
+
+```mermaid
+sequenceDiagram
+    participant P as リリースのワークフロー（land）
+    participant L as ロック ndf-lock/main
+    participant T as 一時ブランチ ndf-serial/main/...
+    participant H as GitHub（main・PR）
+    P->>H: 承認の記録の読み直し・PR のチェックの待ち
+    P->>L: fast-forward の更新でロックを取る
+    P->>T: main の HEAD（M）から作り、承認済みのコミット A をマージ
+    P->>T: A の PR と同じ名前のチェックを待つ
+    alt 通って main が M のまま
+        P->>H: PR をマージ（expect_head=A）
+        P->>H: 第 1 親が M かを確かめて記録
+    else main が動いた
+        P->>T: M を読み直して作り直す（3 回まで）
+    else 落ちた・衝突した
+        P-->>P: stopped（combination_failed）。次の手は reject だけ
+    end
+    P->>T: 消す
+    P->>L: 返す
+```
+
+A と B がほぼ同時に承認されると、先にロックを取った A のレーンが確かめてマージし、B のレーンはロックが返るのを待って「A を入れた main + B」で確かめる。A・B の head は承認済みのコミットのままで、承認を取り直さない。
+ロック・期限・取りこぼし・待ちの上限・GitHub が縛らないことの扱いは決定 32 にある。バージョンアップの PR も `land_bump` が同じロックと一時ブランチを通して入れる（決定 20）。
 
 ### 既存のブランチ戦略（`merge_base_branch`・`release_branch`）
 
@@ -583,7 +650,7 @@ workflow は main への push の run を `concurrency`（グループ 1 つ・`
 確かめていない組み合わせは main へ入らない。先頭へ入れる理由は、前に並んだ PR の扱いにある。その PR がバージョンアップのマージコミットの祖先に入ると、
 タグの範囲（そのコミット..HEAD）から外れる。するとバージョンアップも CHANGELOG の行も無いまま、前のバージョンとして出る。
 作り直しが間に合わずに追い越されたときは、上の表の最初の行のとおり `bump` がタグを作らずに上げ直す。`strict` では head が main の HEAD を含むときだけ head の一致の確認付きでマージし、確かめの後に
-main が動けば GitHub の最新の取り込みの規則が断る。キューから外れた・断られたときは `bump` はタグを作らずに止まり、次の main への push の
+main が動けば GitHub の最新の取り込みの規則が断る。`serial` では本番の PR と同じロックと一時ブランチで確かめてからマージする。キューから外れた・断られたときは `bump` はタグを作らずに止まり、次の main への push の
 `bump` が開いたバージョンアップの PR を上の表のとおり進める。
 
 **リリースとバージョンの間の時間。** main へのマージで本番の中身は新しいコードになり、バージョンはバージョンアップの PR のマージで変わる。
@@ -646,8 +713,8 @@ head が動いた（`refused`）・キューから外れた（`queue_removed`）
 
 | サブコマンド | 足す・変えるもの | 形 |
 | --- | --- | --- |
-| `merge` | `outputs.version`・`outputs.approval`・`outputs.method` | 予定のバージョン、`{"route": "gate" \| "github-merge", "by": <ログイン>, "approved_head": <SHA>, "merged_head": <SHA>, "merge_sha": <SHA>, "gate_head": <SHA か null>}`、`merge-queue`・`strict`・`null` |
-| `merge`（止まったとき） | `items`・`routes`・`outputs.suggested` | 落ちたチェック `{"kind": "check", "name": <名前>, "outcome": <結論>}`。キューから外れたときは `{"kind": "queue", "name": "removed", "detail": <理由>}`、ruleset との食い違いは `{"kind": "method", "name": <設定の値>, "detail": <ruleset の値>}`。次の手は決定 3 の表 |
+| `merge` | `outputs.version`・`outputs.approval`・`outputs.method` | 予定のバージョン、`{"route": "gate" \| "github-merge", "by": <ログイン>, "approved_head": <SHA>, "merged_head": <SHA>, "merge_sha": <SHA>, "gate_head": <SHA か null>, "tested_base": <`serial` で確かめた本番ブランチの HEAD か null>}`、`merge-queue`・`strict`・`serial`・`null` |
+| `merge`（止まったとき） | `items`・`routes`・`outputs.suggested` | 落ちたチェック `{"kind": "check", "name": <名前>, "outcome": <結論>}`。キューから外れたときは `{"kind": "queue", "name": "removed", "detail": <理由>}`、ruleset との食い違いと使えない方式は `{"kind": "method", "name": <設定の値>, "detail": <ruleset の値と使える方式の一覧>}`。`serial` のロックの待ちの切れは `{"kind": "lock", "name": <持ち主の PR>}`、一時ブランチの衝突は `{"kind": "conflict", "name": <一時ブランチ>}`、確かめの外のマージは `{"kind": "serial", "name": "untested", "detail": <確かめた HEAD と第 1 親>}`。次の手は決定 3 の表 |
 | `merge` | 外すもの（`trunk` 戦略だけ） | `outputs.sync_pr` |
 | `answer` | 引数 `--route gate \| github-merge` | `github-merge` の回答者は `merged_by`、対象は `merged_head`。省けば `gate` |
 | `confirm`（新設） | `outputs.version`・`outputs.tag`・`outputs.bump_pr`・`outputs.bump_revision`・`items`・`routes` | 作ったバージョン・タグ・バージョンアップの PR・そのマージコミット。そろわなければ `stopped` で、`items` に `{"kind": "cd", "name": <bump か publish>, "detail": <理由>}`、次の手は `rerun` の 1 つ |
@@ -668,18 +735,19 @@ head が動いた（`refused`）・キューから外れた（`queue_removed`）
 | 大項目 | 実現方式 |
 | --- | --- |
 | 運用・保守性 | 止まった・マージした・キューへ入れた・キューから外れた・人のマージを検知した・バージョンを上げたことは、結果 JSON の `outputs`・`items`・`routes` と、本番の PR とバージョンアップの PR のコメントに、承認済みのコミット・マージした head・承認した人・作ったバージョンと一緒に残る |
-| セキュリティ | token は今の `secrets.NDF_RELEASE_TOKEN`（merge queue への追加・バージョンアップの PR・検証ブランチの push）と `github.token`（タグと GitHub Release）だけで、新しい秘密を足さない。工程は ruleset を読むだけで書き換えない。マージの方式があるとき、工程は迂回のマージを実行しない。迂回のマージは方式の無い既存のブランチ戦略で迂回の設定（`production_merge.admin`）があるときだけ、PR のマージで実行する（I17） |
+| セキュリティ | token は今の `secrets.NDF_RELEASE_TOKEN`（merge queue への追加・バージョンアップの PR・検証ブランチの push・`serial` のロックと一時ブランチの ref の更新）と `github.token`（タグと GitHub Release）だけで、新しい秘密を足さない。工程は ruleset を読むだけで書き換えない。マージの方式があるとき、工程は迂回のマージを実行しない。迂回のマージは方式の無い既存のブランチ戦略で迂回の設定（`production_merge.admin`）があるときだけ、PR のマージで実行する（I17） |
 | セキュリティ（PR の中身と秘密） | 秘密を持つジョブで PR 側のコードを実行しない。`verify-ref` は `pull_request_target` で動き、workflow と `ndf` は本番ブランチから取り出したものだけを使う。PR の head は `git fetch` でデータとして取り込んでマージするだけで、取り込んだ木のスクリプト・依存の導入・hook を実行しない。フォークの PR は含めない。種類 `deploy` のコマンドは本番ブランチの設定ファイルにあるものだけを実行し、PR の側で書き換えたコマンドは実行しない。`pr-check` は秘密を使わない `pull_request` で動く。`bump`・`publish` は main への `push` で動き、main のコードだけを実行する。検証ブランチの push は、`NDF_RELEASE_TOKEN` の push のため、リポジトリの `push` の workflow を起動しうる。そのとき起動する workflow の定義は push したコミットの木（PR が書き換えた `.github/workflows` を含む）から読まれる。この経路の扱いは次の 2 つである。(1) 前提: 含める PR はフォークでない PR だけで、その作者はリポジトリへの書き込みの権限を持ち、自分でブランチを push して同じ workflow を起動できる。そのため、この経路は書き込みの権限を持つ人ができることを広げない (2) 絞り込み: 本番ブランチの木の `push` の workflow は `branches`（ai-plugins では `push` をトリガーに持つ 8 本とも `main` か `main`・`develop` だけ。2026-11-15 の `.github/workflows/*.yml`）で起動のブランチを絞り、検証ブランチでは起動しない。絞りの無い `push` の workflow を足す PR は、レビューで `branches-ignore` に検証ブランチを足す |
+| 費用（`serial`） | 一時ブランチで CI をもう 1 回走らせる。待ちは 1 回の確かめで `ci_budget`、作り直しを含めて 1 回の `land` で最大 `ci_budget` の 4 倍。private の Free の GitHub Actions の実行時間の上限に効くため、勧める方式は表のとおり使える中で CI の回数の少ないものにする（決定 32・33） |
 | 移植性 | ブランチ戦略・マージの方式・検証環境・バージョンの保存先はブランチ戦略のセクションの値だけで切り替わる。`ndf`・`verify/next`・`ai-plugins-next`・`plugin.json` はコードに決め打たない（`plugin.json` のパスは `plugin` のアダプタの中だけに置く） |
 
 ## 決定の記録
 
-決定 1〜31 は [issue-3572-design-decisions.md](issue-3572-design-decisions.md) にある。
+決定 1〜33 は [issue-3572-design-decisions.md](issue-3572-design-decisions.md) にある。
 
 | # | 決定 | 状態 |
 | --- | --- | --- |
 | 1・2 | リリースのワークフローから worker を外し、承認の後に fix の worker を置かない。`merge` のコンポーネントの前に `release-guard` を置く | 有効 |
-| 3 | 止まった本番の PR の次の手は `rerun` と `reject`。head が動いた・キューから外れた・`behind` は `reject` だけ | 有効（決定 18・19 が行を足した） |
+| 3 | 止まった本番の PR の次の手は `rerun` と `reject`。head が動いた・キューから外れた・`behind`・`combination_failed` は `reject` だけ | 有効（決定 18・19・32 が行を足した） |
 | 4・8 | 人のマージを承認ゲートの待ちで検知し、本番の PR のコメントに記録する | 有効 |
 | 5 | ブランチ戦略の一覧に `trunk` 戦略を足す | 一部 superseded（既定にする・2 行を外す部分は決定 16） |
 | 6 | `trunk` 戦略で main へのマージをリリースにし、スプリントの PR を本番の PR にする | 有効（`trunk` 戦略に限る。決定 16） |
@@ -690,16 +758,18 @@ head が動いた（`refused`）・キューから外れた（`queue_removed`）
 | 14 | #3119 の決定 21 を置き換える | superseded（決定 25） |
 | 15 | #3587 を閉じずに直す | superseded（決定 24） |
 | 16 | ブランチ戦略の一覧の 3 行を残し、既定は `merge_base_branch`、リリースのサブコマンドは戦略ごとに振る舞いを選ぶ | 一部 superseded（設定の保存先と戦略が許す値の保存先は決定 27・28） |
-| 17〜20 | マージの方式を設定ファイルで選んで ruleset（レビューの承認の数を含む）との一致を確かめる・`merge-queue` での追加と待ちと経路の見分け・`strict` の止め方・マージの方式があるとき本番の PR もバージョンアップの PR も迂回しない | 17・19・20 は一部 superseded（設定の保存先は決定 27）。18 は有効 |
+| 17〜20 | マージの方式を設定ファイルで選んで ruleset（レビューの承認の数を含む）との一致を確かめる・`merge-queue` での追加と待ちと経路の見分け・`strict` の止め方・マージの方式があるとき本番の PR もバージョンアップの PR も迂回しない | 17・19・20 は一部 superseded（設定の保存先は決定 27。17 の値を 2 つにする部分は決定 32、使えない方式の止まり方は決定 33）。18 は有効 |
 | 21・22 | 検証環境の種類を選ぶ・バージョンの保存先をアダプタで受け、#3615 との境を決める | 一部 superseded（設定の保存先は決定 27、`release` の下のキーは決定 30） |
 | 23 | ruleset へ merge queue を足すのは 11.0.0 の入れ替えと同時、`merge_group` は実装で足す | 一部 superseded（書き換える設定ファイルは決定 27） |
-| 24・25 | #3587 に足す変更の一覧・#3119 の決定 21 の見直し | 24 は有効（12・13 の行を足した）。25 は一部 superseded（設定の保存先は決定 27） |
+| 24・25 | #3587 に足す変更の一覧・#3119 の決定 21 の見直し | 24 は有効（12・13・14 の行を足した）。25 は一部 superseded（設定の保存先は決定 27） |
 | 26 | ブランチ戦略のキーと値は #3613 の改名の後の名前（`release_strategy`・`merge_base_branch`・`release_branch`・`trunk`）で書き、改名と移行は #3613 が持つ | 一部 superseded（キーの保存先は決定 27） |
 | 27 | ブランチ戦略・マージの方式・検証環境・バージョンの保存先を `.ndf/branch-strategy.json` のセクション `branch_strategy` にまとめ、`base_branch` もメインディレクトリから読む（前提 18・受け入れ条件 2n・18 との差） | 新設 |
 | 28 | 組み合わせの検査をセクションのスキーマと ruleset の読み取りだけで行い、戦略が許す値をブランチ戦略の一覧からスキーマへ移す | 新設 |
 | 29 | #3613 との境と実装の受け持ち（移す行は #3613 の続きの PR、セクションを読む側は #3587）・取り込みの順序 | 新設 |
 | 30 | #3615 のリリースの形の設定はセクションのキー `release` の下に置く | 新設 |
 | 31 | 既存のブランチ戦略のバージョンの上げ方はセクションに置かず、セクションへ移すのは #3615 に任せる（受け入れ条件 2l・2r との差） | 新設 |
+| 32 | merge queue も `strict` も使えないリポジトリのため、マージの方式 `serial`（本番ブランチのロック・一時ブランチでの確かめ・承認済みのコミットでのマージ）を足す | 新設 |
+| 33 | プランと公開範囲から使える方式を決め、設定が使えない方式を指していたら使える方式を示して止める。プランを読めないときは `merge-queue`・`strict` は止まり、`serial` は進める | 新設 |
 
 ## テスト設計
 
@@ -729,6 +799,8 @@ head が動いた（`refused`）・キューから外れた（`queue_removed`）
 | 受け入れ条件 24・I15 | 方式が無い・表に無い値・`merge-queue` なのにキューが無い・`strict` なのに偽、の 4 つで `land` が `precondition` で止まり、マージも `enqueue` も呼ばない | 既定の方式へ倒すと落ちる |
 | 受け入れ条件 25・I16 | キューから外れた PR で `land` が `queue_removed` で止まり、次の手が `reject` だけで、`enqueue` を 2 回呼ばない | 同じ head で入れ直すと落ちる |
 | 受け入れ条件 26・I17 | `merge-queue` と `strict` で、本番の PR もバージョンアップの PR も `production_merge.admin` が真でも迂回のマージを呼ばない。バージョンアップの PR は差分の判定と方式の検証が通り、本番ブランチの HEAD を含むときだけ、`merge-queue` ではキューの先頭へ入れ、`strict` ではマージする。ruleset が設定ファイルと食い違えば `precondition` で止まる | 迂回を呼ぶと落ちる。保存先の外のファイルを含むバージョンアップの PR をキューへ入れるかマージすると落ちる。方式の検証を外すと、宣言 `strict` で ruleset の `strict` が偽のときにマージが呼ばれて落ちる。`jump` を渡さないと落ちる |
+| 指摘 p6-onefile:2-4・I19・決定 32 | `serial` で A・B を承認すると、ロックを先に取った A が一時ブランチ（M+A）のチェックの後に `expect_head` = A でマージされ、B は返った後に（M+A+B）で確かめられてマージされる。どちらも head は変わらない。確かめの間に main が動くと一時ブランチを作り直し、3 回を超えると `ci_pending`。一時ブランチのチェックが落ちるか衝突すると `combination_failed` で `reject` だけ。期限切れのロックは上書きされ、期限の切れた持ち主はマージしない。マージコミットの第 1 親が M でなければ `untested_merge` | ロックを取らずにマージすると、2 つの `land` が同じ M でマージして落ちる。HEAD の読み直しを外すと、動いた main の上でマージされて落ちる。ロックの更新に `force: true` を渡すと落ちる。一時ブランチでなく PR の head のチェックだけでマージすると落ちる |
+| 指摘 p6-onefile:2-5・I15・決定 33 | 公開範囲・持ち主の種類・規則の読み取りの可否・キューの有無の組み合わせで、`merge_method` が表のとおりの使える方式を返す。private の Free で `strict` を設定すると `precondition` で止まり、`items` の使える方式が `serial` だけ。規則の読み取りが権限の不足で失敗すると、`merge-queue`・`strict` は止まり `serial` は進む | 使えない方式でマージを呼ぶと落ちる。使える方式へ切り替えてマージすると落ちる |
 | 受け入れ条件 10（追い越し）・I8 | キューで前の PR を祖先に含むバージョンアップのマージコミットに、`publish` がタグを作らず、`bump` がそのコミットの分岐元からの範囲で、より大きいバージョンのバージョンアップの PR を作る | 追い越しの判定を外すと、前の PR を含まない範囲でタグが作られて落ちる |
 | I6・I13 | `merge`・`check`・`close` のテンプレートで、`merge` の直前が `release-guard` で、本番の PR では終了コード 3 で `end` へ進み、マージが呼ばれない | `release-guard` を外すと落ちる |
 | 受け入れ条件 16 | `AGENTS.md` と `docs/versioning-and-distribution.md` を実装 PR のレビューで読み、4 つの質問に回答できるかを見る。`instructions-check.py --root .` が 0 | — （文書の条件） |
@@ -738,7 +810,7 @@ head が動いた（`refused`）・キューから外れた（`queue_removed`）
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #3572 | 実装する | — | `plugins/ndf-next/contracts/templates/release.json`、`plugins/ndf-next/contracts/templates/merge.json`、`plugins/ndf-next/contracts/templates/check.json`、`plugins/ndf-next/contracts/templates/close.json`、`plugins/ndf-next/contracts/templates/parts/steps.json`、`plugins/ndf-next/contracts/templates/params.json`、`plugins/ndf-next/contracts/causes.json`、`plugins/ndf-next/contracts/domains/branch-flows.json`、`plugins/ndf-next/contracts/schemas/ndf-settings/worktree.schema.json`、`plugins/ndf-next/contracts/schemas/ndf-settings/project.schema.json`、`plugins/ndf-next/contracts/schemas/ndf-settings/branch-strategy.schema.json`、`plugins/ndf-next/contracts/domains/ndf-files.json`、`plugins/ndf-next/contracts/schemas/io/release-steps.result.schema.json`、`plugins/ndf-next/contracts/schemas/io/release-steps.args.schema.json`、`plugins/ndf-next/docs/contracts/commands.md`、`plugins/ndf-next/src/ndf/adapters/github.py`、`plugins/ndf-next/src/ndf/domains/release/release_plan.py`、`plugins/ndf-next/src/ndf/domains/release/merge_decide.py`、`plugins/ndf-next/src/ndf/domains/release/merge_method.py`、`plugins/ndf-next/src/ndf/domains/release/version_store.py`、`plugins/ndf-next/src/ndf/domains/release/confirm.py`、`plugins/ndf-next/src/ndf/domains/release/bump.py`、`plugins/ndf-next/src/ndf/domains/release/bump_decide.py`、`plugins/ndf-next/src/ndf/domains/release/pr_check.py`、`plugins/ndf-next/src/ndf/domains/release/verify_ref.py`、`plugins/ndf-next/src/ndf/domains/release/verify_decide.py`、`plugins/ndf-next/src/ndf/domains/release/land.py`、`plugins/ndf-next/src/ndf/domains/release/trail.py`、`plugins/ndf-next/src/ndf/domains/release/assemble.py`、`plugins/ndf-next/src/ndf/domains/release/materials_decide.py`、`plugins/ndf-next/src/ndf/domains/release/declaration.py`、`plugins/ndf-next/src/ndf/domains/release/record.py`、`plugins/ndf-next/src/ndf/domains/release/tagging.py`、`plugins/ndf-next/src/ndf/domains/release/cli.py`、`plugins/ndf-next/src/ndf/progress/gate/release.py`、`plugins/ndf-next/src/ndf/domains/worktree/declaration.py`、`plugins/ndf-next/src/ndf/core/route/__init__.py`、`plugins/ndf-next/src/ndf/domains/project/check.py`、`plugins/ndf-next/src/ndf/domains/project/write.py`、`plugins/ndf-next/src/ndf/domains/project/cli.py`、`plugins/ndf-next/src/ndf/domains/project/measure_flow.py`、`plugins/ndf-next/tests/domains/release/test_release_plan.py`、`plugins/ndf-next/tests/domains/release/test_release_approval.py`、`plugins/ndf-next/tests/domains/release/test_release_assemble.py`、`plugins/ndf-next/tests/domains/release/test_release_bump.py`、`plugins/ndf-next/tests/domains/release/test_release_confirm.py`、`plugins/ndf-next/tests/domains/release/test_release_pr_check.py`、`plugins/ndf-next/tests/domains/release/test_release_verify_ref.py`、`plugins/ndf-next/tests/domains/release/test_release_merge_method.py`、`plugins/ndf-next/tests/domains/release/test_release_version_store.py`、`plugins/ndf-next/tests/domains/release/test_release_record.py`、`plugins/ndf-next/tests/domains/worktree/test_worktree_merged.py`、`plugins/ndf-next/tests/route/test_flows.py`、`plugins/ndf-next/tests/domains/release/test_release_branch_strategy.py`、`.github/workflows/ndf-next-release.yml`、`.github/workflows/pytest.yml`、`.github/workflows/lint.yml`、`.github/workflows/glossary.yml`、`.github/workflows/script-structure.yml`、`.github/workflows/runtime-plugin-smoke.yml`、`.github/workflows/runtime-plugin-validate.yml`、`.github/workflows/pr-base-guard.yml`、`.github/workflows/pr-body-decisions.yml`、`AGENTS.md`、`docs/versioning-and-distribution.md`、`plugins/ndf-next/src/ndf/core/branch_strategy.py`、`plugins/ndf-next/contracts/schemas/ndf-settings/release.schema.json`、`plugins/ndf-next/contracts/schemas/io/project.result.schema.json`、`plugins/ndf-next/contracts/schemas/io/worktree.args.schema.json`、`plugins/ndf-next/docs/contracts/ndf-settings.md`、`plugins/ndf-next/docs/contracts/files.md`、`plugins/ndf-next/src/ndf/domains/release/records_trail.py`、`plugins/ndf-next/src/ndf/progress/command.py`、`plugins/ndf-next/skills/worktree/SKILL.md`、`plugins/ndf-next/skills/worktree/references/ndf-settings.md`、`plugins/ndf-next/skills/worktree/schemas/worktree.schema.json`、`plugins/ndf-next/skills/development-workflow/schemas/project.schema.json`、`plugins/ndf-next/skills/development-workflow/references/production-merge.md`、`plugins/ndf-next/skills/development-workflow/references/project-analysis.md`、`plugins/ndf-next/skills/development-workflow/references/parallel.md`、`plugins/ndf-next/skills/development-workflow/references/parallel-work.md`、`plugins/ndf-next/skills/development-workflow/references/glossary.md`、`plugins/ndf-next/skills/merged/SKILL.md`、`plugins/ndf-next/skills/release/SKILL.md`、`plugins/ndf-next/skills/release/references/release-steps.md`、`plugins/ndf-next/tests/core/test_branch_strategy.py`、`plugins/ndf-next/tests/domains/project/test_project_cli.py`、`plugins/ndf-next/tests/domains/project/test_project_measure.py`、`plugins/ndf-next/tests/domains/release/test_release_files.py`、`plugins/ndf-next/tests/domains/test_branch_flows.py`、`plugins/ndf-next/tests/domains/test_ndf_settings.py`、`plugins/ndf-next/tests/domains/worktree/conftest.py`、`plugins/ndf-next/tests/domains/worktree/test_worktree_decide.py`、`plugins/ndf-next/tests/domains/worktree/test_worktree_env_decide.py`、`plugins/ndf-next/tests/domains/worktree/test_worktree_envs.py`、`plugins/ndf-next/tests/domains/worktree/test_worktree_git.py`、`plugins/ndf-next/tests/progress/gate/test_gate_release.py`、`plugins/ndf-next/tests/progress/test_invoke.py`、`plugins/ndf-next/tests/progress/test_run.py`、`plugins/ndf-next/tests/progress/test_sprint_templates.py`、`plugins/ndf-next/tests/route/test_cli.py`、`plugins/ndf-next/tests/skills/test_schema_refs.py` |
+| #3572 | 実装する | — | `plugins/ndf-next/contracts/templates/release.json`、`plugins/ndf-next/contracts/templates/merge.json`、`plugins/ndf-next/contracts/templates/check.json`、`plugins/ndf-next/contracts/templates/close.json`、`plugins/ndf-next/contracts/templates/parts/steps.json`、`plugins/ndf-next/contracts/templates/params.json`、`plugins/ndf-next/contracts/causes.json`、`plugins/ndf-next/contracts/domains/branch-flows.json`、`plugins/ndf-next/contracts/schemas/ndf-settings/worktree.schema.json`、`plugins/ndf-next/contracts/schemas/ndf-settings/project.schema.json`、`plugins/ndf-next/contracts/schemas/ndf-settings/branch-strategy.schema.json`、`plugins/ndf-next/contracts/domains/ndf-files.json`、`plugins/ndf-next/contracts/schemas/io/release-steps.result.schema.json`、`plugins/ndf-next/contracts/schemas/io/release-steps.args.schema.json`、`plugins/ndf-next/docs/contracts/commands.md`、`plugins/ndf-next/src/ndf/adapters/github.py`、`plugins/ndf-next/src/ndf/domains/release/release_plan.py`、`plugins/ndf-next/src/ndf/domains/release/merge_decide.py`、`plugins/ndf-next/src/ndf/domains/release/merge_method.py`、`plugins/ndf-next/src/ndf/domains/release/serial.py`、`plugins/ndf-next/tests/domains/release/test_release_serial.py`、`plugins/ndf-next/src/ndf/domains/release/version_store.py`、`plugins/ndf-next/src/ndf/domains/release/confirm.py`、`plugins/ndf-next/src/ndf/domains/release/bump.py`、`plugins/ndf-next/src/ndf/domains/release/bump_decide.py`、`plugins/ndf-next/src/ndf/domains/release/pr_check.py`、`plugins/ndf-next/src/ndf/domains/release/verify_ref.py`、`plugins/ndf-next/src/ndf/domains/release/verify_decide.py`、`plugins/ndf-next/src/ndf/domains/release/land.py`、`plugins/ndf-next/src/ndf/domains/release/trail.py`、`plugins/ndf-next/src/ndf/domains/release/assemble.py`、`plugins/ndf-next/src/ndf/domains/release/materials_decide.py`、`plugins/ndf-next/src/ndf/domains/release/declaration.py`、`plugins/ndf-next/src/ndf/domains/release/record.py`、`plugins/ndf-next/src/ndf/domains/release/tagging.py`、`plugins/ndf-next/src/ndf/domains/release/cli.py`、`plugins/ndf-next/src/ndf/progress/gate/release.py`、`plugins/ndf-next/src/ndf/domains/worktree/declaration.py`、`plugins/ndf-next/src/ndf/core/route/__init__.py`、`plugins/ndf-next/src/ndf/domains/project/check.py`、`plugins/ndf-next/src/ndf/domains/project/write.py`、`plugins/ndf-next/src/ndf/domains/project/cli.py`、`plugins/ndf-next/src/ndf/domains/project/measure_flow.py`、`plugins/ndf-next/tests/domains/release/test_release_plan.py`、`plugins/ndf-next/tests/domains/release/test_release_approval.py`、`plugins/ndf-next/tests/domains/release/test_release_assemble.py`、`plugins/ndf-next/tests/domains/release/test_release_bump.py`、`plugins/ndf-next/tests/domains/release/test_release_confirm.py`、`plugins/ndf-next/tests/domains/release/test_release_pr_check.py`、`plugins/ndf-next/tests/domains/release/test_release_verify_ref.py`、`plugins/ndf-next/tests/domains/release/test_release_merge_method.py`、`plugins/ndf-next/tests/domains/release/test_release_version_store.py`、`plugins/ndf-next/tests/domains/release/test_release_record.py`、`plugins/ndf-next/tests/domains/worktree/test_worktree_merged.py`、`plugins/ndf-next/tests/route/test_flows.py`、`plugins/ndf-next/tests/domains/release/test_release_branch_strategy.py`、`.github/workflows/ndf-next-release.yml`、`.github/workflows/pytest.yml`、`.github/workflows/lint.yml`、`.github/workflows/glossary.yml`、`.github/workflows/script-structure.yml`、`.github/workflows/runtime-plugin-smoke.yml`、`.github/workflows/runtime-plugin-validate.yml`、`.github/workflows/pr-base-guard.yml`、`.github/workflows/pr-body-decisions.yml`、`AGENTS.md`、`docs/versioning-and-distribution.md`、`plugins/ndf-next/src/ndf/core/branch_strategy.py`、`plugins/ndf-next/contracts/schemas/ndf-settings/release.schema.json`、`plugins/ndf-next/contracts/schemas/io/project.result.schema.json`、`plugins/ndf-next/contracts/schemas/io/worktree.args.schema.json`、`plugins/ndf-next/docs/contracts/ndf-settings.md`、`plugins/ndf-next/docs/contracts/files.md`、`plugins/ndf-next/src/ndf/domains/release/records_trail.py`、`plugins/ndf-next/src/ndf/progress/command.py`、`plugins/ndf-next/skills/worktree/SKILL.md`、`plugins/ndf-next/skills/worktree/references/ndf-settings.md`、`plugins/ndf-next/skills/worktree/schemas/worktree.schema.json`、`plugins/ndf-next/skills/development-workflow/schemas/project.schema.json`、`plugins/ndf-next/skills/development-workflow/references/production-merge.md`、`plugins/ndf-next/skills/development-workflow/references/project-analysis.md`、`plugins/ndf-next/skills/development-workflow/references/parallel.md`、`plugins/ndf-next/skills/development-workflow/references/parallel-work.md`、`plugins/ndf-next/skills/development-workflow/references/glossary.md`、`plugins/ndf-next/skills/merged/SKILL.md`、`plugins/ndf-next/skills/release/SKILL.md`、`plugins/ndf-next/skills/release/references/release-steps.md`、`plugins/ndf-next/tests/core/test_branch_strategy.py`、`plugins/ndf-next/tests/domains/project/test_project_cli.py`、`plugins/ndf-next/tests/domains/project/test_project_measure.py`、`plugins/ndf-next/tests/domains/release/test_release_files.py`、`plugins/ndf-next/tests/domains/test_branch_flows.py`、`plugins/ndf-next/tests/domains/test_ndf_settings.py`、`plugins/ndf-next/tests/domains/worktree/conftest.py`、`plugins/ndf-next/tests/domains/worktree/test_worktree_decide.py`、`plugins/ndf-next/tests/domains/worktree/test_worktree_env_decide.py`、`plugins/ndf-next/tests/domains/worktree/test_worktree_envs.py`、`plugins/ndf-next/tests/domains/worktree/test_worktree_git.py`、`plugins/ndf-next/tests/progress/gate/test_gate_release.py`、`plugins/ndf-next/tests/progress/test_invoke.py`、`plugins/ndf-next/tests/progress/test_run.py`、`plugins/ndf-next/tests/progress/test_sprint_templates.py`、`plugins/ndf-next/tests/route/test_cli.py`、`plugins/ndf-next/tests/skills/test_schema_refs.py` |
 | #3576 | 閉じる | — | — |
 
 #3572 の実装は #3587 に足す（決定 24）。#3576 を閉じる理由は決定 13 にある。#3119 は設計の決定 21 を見直す（決定 25）。差分は同じ設計 PR の `issues/issue-3119-design.md` にあり、
@@ -777,6 +849,7 @@ head が動いた（`refused`）・キューから外れた（`queue_removed`）
 | 古い保護（branch protection）だけを使うリポジトリでの `strict` の読み取り | ruleset は `rules/branches` で読めるが、古い保護の `strict` は管理の権限が要る API にある。読めなければ `land` は「ruleset を読めない」で止まる。この止まり方が利用者に通じるかは、最初に `strict` を選んだ外のリポジトリで分かる |
 | PR の本文やマージ先を読むチェックの `merge_group` での結論 | `pr-body-decisions-check` などはキューの一時マージコミットで PR の本文を持たない。PR の時点の結論を引き継いで通す形を実装で決め、上の (2) で確かめる |
 | バージョンアップの PR の CI の時間・リリースとバージョンの間の時間 | main へのマージからタグまでに、`merge-queue` ではバージョンアップの PR の CI とキューの CI の 2 回分かかる。実測は 11.0.0 の後の最初のリリースで分かる |
+| `serial` の実物での動き | private の Free のリポジトリを持たず、`serial` を実物で走らせていない。最初に `serial` を選んだリポジトリで次を確かめる: (1) 規則の読み取り（`rules/branches`）がプランの不足で断られるときの状態と本文（決定 33 の見分けに使う） (2) `POST /merges` で作った一時ブランチのマージコミットの木と、PR のマージ（マージの方法 `merge`・`squash`）の木が同じこと (3) 作り直しの上限 3 回と、ロックの期限 `ci_budget` が足りるか。合わなければ値を直す |
 | 2 つの NDF を同時に有効にしたとき | `ndf@ai-plugins` と `ndf@ai-plugins-next` を同時に有効にしたときの Skill・hook の重なりは確かめていない。手順は片方を `claude plugin disable` で止める形にする |
 | Codex での検証マーケットプレイス | 確かめは Claude Code だけで行った。Codex の登録の形は実装のステップで確かめる |
 | 人のマージの検知の遅れ | 承認ゲートの待ちの読み直しの間隔だけ、人のマージから記録までが遅れる。実測は最初に人が GitHub でマージしたリリースで分かる |
@@ -808,3 +881,9 @@ head が動いた（`refused`）・キューから外れた（`queue_removed`）
 | p6-onefile:1-7 | 承認の資料と承認リクエストの質問を業界の語で書き、どの設定ファイルに何を書くかに 1 か所で回答するセクションに ai-plugins と develop を持つ Web サービスの例を置く | 直した | 「ブランチ戦略のセクション（どの設定ファイルに何を書くか）」のセクションと、その「設定の例」の 2 つの全文（スキーマの案に通ることは確かめ 8）。足した文は業界の語（ブランチ戦略・設定ファイル・スキーマ・merge queue・ruleset）で書いた |
 | p6-onefile:1-8 | lterms の移行の側の差分の記号へ値を入れて #3613 の設計へ反映し、実装の受け持ちを決定の記録に書く | 直した | `issue-3613-design.md` の「ブランチ戦略のセクションへ移す行」（`<F>` = `.ndf/branch-strategy.json`、`<S>` = `branch_strategy`、キーの名前と検証環境の持ち方 `verify` を入れた行・列 `to_file`・`where`・移行のコマンドと不変条件の変更）と `issue-3613-design-detail.md` の改名表の列と行の注記。受け持ちは決定 29 |
 
+| p6-onefile:2-1 | 直訳調の言い回しを、指摘の対応表の業界の語へ直す（設計 PR の差分の文書すべて） | 直した | コミット 48cba7912 で要求・設計・決定の記録・証跡・詳細設計と #3119・#3613 の設計の差分を直した。この回で足した文（決定 32・33 と設計文書の `serial` の行）も同じ語で書いた。スクリプトが見出しで読む「人へ残す判断」「既存の部品の再利用」は見出しのまま残した |
+| p6-onefile:2-2 | 表に無い直訳の語も直し、1 語 1 意味を保つ。用語集の見出し語が変わるなら用語集も直す | 直した | 用語集（`docs/glossary/glossary.json` と `docs/glossary.md`）の見出し語を、設計の語へ改名した（承認した head → 承認済みのコミット、ブランチ戦略の節 → ブランチ戦略のセクション、取り込み方の表 → ブランチ戦略の一覧、キューへの投入 → merge queue への追加、バージョンの置き場 → バージョンの保存先、検証用ブランチ → 検証ブランチ、検証用マーケットプレイス → 検証マーケットプレイス、バージョン上げ → バージョンアップ、上げ幅のラベル → バージョン種別のラベル）。旧い語は廃止した語の欄へ移し、ほかの行の意味の欄も直した。`issue-3119-design.md` の用語の行は、用語集の今の NDF の語（取り込み方）へ戻した。`glossary.py check --diff origin/develop --rules all` は当たりなし。「あるべき姿の根拠」の利用者の指示の原文（「取り込み方の表から」）は原文のまま残した |
+| p6-onefile:2-3 | 設計承認のリクエストの文も同じ基準で書く | 直した | リクエストの文はオーガナイザーが送るため、この文書には置かない。この回の作業の報告に、業界の語で書いたリクエストの文の案を添えた |
+| p6-onefile:2-4 | merge queue も strict も使えないプラン向けに、NDF がロックと一時ブランチで確かめてからマージする 3 つ目の方式を足し、得失・ロックの保存先・取りこぼし・CI の待ちの上限・比べた候補と出典を決める | 直した | 決定 32（値 `serial`。ロックは origin のブランチ `ndf-lock/<本番ブランチ>` のコミットの列を fast-forward の更新で取り合う。期限は取った時刻 + `ci_budget`、期限切れは次の取り手が上書きし、期限切れの持ち主はマージしない。作り直しは 3 回まで。比べた候補は Mergify・bors-ng の fast-forward・ロックなし・ローカルのファイル・`concurrency`・ラベル）、決定 17 の状態の行、決定 3 の表の `combination_failed`・`untested_merge`、決定 24 の 14 の行、「外部の調査」の STD14〜16・LIB4・LIB5、I14・I15・I17・I19、E6b、「処理の流れ」の `serial` の行と経路 (a) の `serial` の図、「入出力の契約」、「テスト設計」の p6-onefile:2-4 の行、「未確認のまま残ること」の `serial` の行。詳細設計（`serial.py` の関数・異常系）は、詳細設計のステップが書く |
+| p6-onefile:2-5 | プランと公開範囲から使える方式を選ぶ表を置き、出典を書く。設定が使えない方式なら使える方式を示して止める。プランを読めないときの扱いを決める | 直した | 「ブランチ戦略のセクション」の「マージの方式の選び方（プランと公開範囲）」の表、決定 33（公開範囲と持ち主の種類・規則の読み取りの可否・キューの有無の 3 つで行を決める。読めないときは `merge-queue`・`strict` は止まり、`serial` は進める）、STD9・STD14・STD15、「組み合わせの検査」の表の最後の行、「テスト設計」の p6-onefile:2-5 の行 |
+| p6-onefile:2-6 | 代表のリポジトリでの振る舞いの表に「private の Free の Web サービス」の行を足す | 直した | 「適用範囲」の代表のリポジトリの表に「GitHub flow の Web サービス（private の Free）」の行を足した。`strict` の行は提供条件（STD14・STD15）に合わせて「private の Pro・Team」に直した。「設定の例」に `serial` の 1 行を足した |

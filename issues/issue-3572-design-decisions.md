@@ -52,10 +52,10 @@
 
 | 次の手 | 何をするか | 既定の手（`outputs.suggested`）になる止まった理由 |
 | --- | --- | --- |
-| `rerun` | 同じ承認・同じ head のまま `merge` を再実行する | `infra_wait`・`ci_pending`（チェックの一時的な失敗・待ちの切れ） |
-| `reject`（差し戻し） | 本番の PR を開いたまま、修正を同じ PR へ入れ、新しい head で承認を取り直す | `test_failed`・`check_failed`・`refused`・`queue_removed`・`behind` |
+| `rerun` | 同じ承認・同じ head のまま `merge` を再実行する | `infra_wait`・`ci_pending`（チェックの一時的な失敗・待ちの切れ・`serial` のロックの待ちの切れ）・`untested_merge`（`serial` で本番はマージ済み。決定 32） |
+| `reject`（差し戻し） | 本番の PR を開いたまま、修正を同じ PR へ入れ、新しい head で承認を取り直す | `test_failed`・`check_failed`・`refused`・`queue_removed`・`behind`・`combination_failed` |
 
-`refused`（head が動いた）・`queue_removed`（キューから外れた）・`behind`（`strict` で HEAD を含まない）では、`routes` に `reject` だけを出す。
+`refused`（head が動いた）・`queue_removed`（キューから外れた）・`behind`（`strict` で HEAD を含まない）・`combination_failed`（`serial` の一時ブランチで衝突したかチェックが落ちた。決定 32）では、`routes` に `reject` だけを出す。
 `refused` は PR の head が承認済みのコミットと違い、同じ承認で再実行しても GitHub が同じく断る。キューは同じ head では同じ組み合わせで落ち（I16）、
 `behind` は head を進めない限り解けないためである（決定 18・19）。ほかの止まった理由では 2 つとも出す（受け入れ条件 4）。
 `rerun` は止まった理由から機械的に決まるため、オーガナイザーか一時レーンが実行してよい。`reject` の後の修正は承認の前の工程（スプリントの経路）で
@@ -316,7 +316,7 @@ ai-plugins の設定ファイルの値である。既定の戦略（`branch_flow
 
 ### 決定 17: 同時に承認された PR の組み合わせを確かめてから入れるため、マージの方式を `.ndf/project.json` の `production_merge.method` で選び、本番ブランチの ruleset と突き合わせて検証する
 
-状態: 一部 superseded（保存先を `.ndf/project.json` の `production_merge` にする部分と、その理由の段落は決定 27。検証の入力は決定 28。値・ruleset との検証・レビューの承認の数は有効）
+状態: 一部 superseded（保存先を `.ndf/project.json` の `production_merge` にする部分と、その理由の段落は決定 27。検証の入力は決定 28。値を 2 つにする部分と、自前で組み合わせを確かめる候補を採らない行は決定 32（3 つ目の値 `serial`）。使えない方式の止まり方は決定 33。`merge-queue`・`strict` の値・ruleset との検証・レビューの承認の数は有効）
 
 GitHub flow ではスプリントの PR が直接本番ブランチへ入る。ほぼ同時に承認された A と B のうち後の B は、`strict` が偽なら A を取り込まずにマージできる。
 そのため A+B の組み合わせが CI を通らずに本番へ出る（確かめ 6）。組み合わせの確かめは GitHub の merge queue に任せる（LIB3）。
@@ -568,7 +568,7 @@ git log --oneline origin/develop..origin/sprint/lrel-lock | wc -l
 #3587 は、決定 1〜4・6〜8・10〜12 の実装と、ブランチ戦略の一覧の 3 つの戦略（`trunk`・`merge_base_branch`・`release_branch`）を既に持つ。この差分は cross-review と cross-refactoring を通った。閉じて出し直すと、残す部分の
 レビューとリファクタリングをやり直す。ndf-next は 11.0.0 の入れ替えまで develop で開発するため、マージ先 develop も変えない。
 次の変更を同じ PR へ足し、変わった差分を再びレビューへ通す。
-12・13 の行の実装は、ブランチ戦略のセクションを決めたこの設計（決定 27〜30）の承認の後に行う。
+12・13 の行の実装は、ブランチ戦略のセクションを決めたこの設計（決定 27〜30）の承認の後に行う。14 の行も、`serial` を決めたこの設計（決定 32・33）の承認の後に行う。
 
 | # | 変更 | 決定 |
 | --- | --- | --- |
@@ -585,6 +585,7 @@ git log --oneline origin/develop..origin/sprint/lrel-lock | wc -l
 | 11 | #3613 の改名が develop へ入った後に develop を取り込み、#3587 が足した戦略・値・スキーマの名前を `release_strategy`・`trunk` へそろえる | 26 |
 | 12 | 設定の解決を `.ndf/branch-strategy.json` のセクション `branch_strategy` から読む形へ直す。`declaration.py`（ブランチ戦略・迂回の設定・検証環境の読み）・`merge_method.py`（入力をセクションの `production_merge.method` にする）・`version_store.py`（セクションの `release.version_store` でアダプタを選ぶ）・セクションのスキーマ `contracts/schemas/declarations/branch-strategy.schema.json` の新設と、`worktree.schema.json`・`project.schema.json` から移したキーを外すこと（`release.schema.json` には `version_store` を足さない）・保存先の表（`contracts/domains/ndf-files.json`）の行 `branch-strategy`。セクションを読むほかの箇所（`domains/worktree/declaration.py`・`core/route` の `default_base`・`domains/project` の `check`・`write`・`cli`・`measure_flow`・`progress/command.py`・`progress/gate/release.py`・`domains/release/records_trail.py` の迂回の記録の文言）も同じ読み取りの関数（`core/branch_strategy.py`）を通す。`domains/records/mvv.py` はベースブランチを引数 `--base` で受け、設定ファイルを読まないため変えない。配る Skill の説明（`skills/worktree`・`skills/development-workflow`・`skills/merged`・`skills/release`）と生成する契約のページ（`docs/contracts/declarations.md`・`files.md`）もセクションの保存先へ直す。3・7・8 の行のスキーマの保存先は、この行のセクションのスキーマである | 27・28 |
 | 13 | ブランチ戦略の一覧（`branch-flows.json`）から戦略が許す値の列（`start`・`doc_prs`・`integrate`・`review_kinds`）を外し、セクションのスキーマの `if`/`then` へ移す。表に残すのは振る舞いの列（`release_strategy`・`default`・`keeps_sprint`・`release_from`・`release_units`）である | 28 |
+| 14 | マージの方式 `serial`: セクションのスキーマの値、`domains/release/serial.py`（新設。ロックの取り・返し・期限と一時ブランチの作成と消去）、アダプタの `merge_branches`（`POST /merges`）・`create_ref`・`update_ref`（`force: false`）・`repo_facts`（`private`・`owner.type`・規則の読み取りの可否）、`land`・`land_bump` の `serial` の順、原因 `combination_failed`・`untested_merge`、`merge_method` の使える方式の一覧（決定 33）とそのテスト | 32・33 |
 
 | 比べた候補 | 採否と理由 |
 | --- | --- |
@@ -802,3 +803,100 @@ spec-decl（`.ndf/` の実物を改名表で変換してからスキーマで確
 - 比べた候補: PRD1
 
 根拠: Value 4 / Value 11（MVV 版 7）
+
+### 決定 32: merge queue も `strict` も使えないリポジトリのため、マージの方式に `serial` を足し、NDF が本番ブランチごとのロックを取って一時ブランチで組み合わせを確かめてからマージする
+
+`strict` もブランチ保護（ruleset と古い保護）の機能で、private の Free のリポジトリでは使えない（STD14・STD15）。merge queue も使えない（STD9）。
+`merge-queue` と `strict` だけでは、private の Free のリポジトリが `trunk` 戦略を選べず、代表のリポジトリの種類の 1 つを扱えない。
+そこで、GitHub の機能に頼らずに NDF が組み合わせを確かめる 3 つ目の値 `serial` を足す。形は bors-ng と同じで、承認した PR を本番ブランチの HEAD と合わせた一時ブランチで CI に通し、通ったものを順にマージする（LIB4）。
+値の名前は、1 度に 1 つずつ順に確かめてマージすることを表す業界の語（serial）にした。
+
+`land`（と `land_bump`）の順:
+
+1. 承認の記録を読み直し、PR の必須のチェック（PR の head で走ったチェック）を待つ。チェックが 1 つも無ければ、確かめるものが無いため原因 `precondition` で止まる
+2. 本番ブランチのロックを取る（下の「ロック」）。取れなければ `ci_budget` の秒まで待ち、過ぎたら原因 `ci_pending`（`items` に `{"kind": "lock", "name": <持ち主の PR>}`）で止まる。次の手は `rerun`
+3. 本番ブランチの HEAD（M）から一時ブランチ `ndf-serial/<本番ブランチ>/<PR の番号>-<回数>` を作り、承認済みのコミット（A）をマージする（REST `POST /repos/{o}/{r}/merges`。STD16）。衝突すれば原因 `combination_failed` で止まる
+4. 一時ブランチのマージコミットで、1 で待ったチェックと同じ名前のチェックを `ci_budget` の秒まで待つ。落ちれば原因 `combination_failed`、過ぎれば `ci_pending` で止まる
+5. 本番ブランチの HEAD を読み直す。M のままで、ロックがまだ自分のもので期限の内なら、`expect_head` = A で PR をマージする（STD1）。HEAD が M から動いていれば 3 へ戻る（一時ブランチを作り直す）。作り直しは 1 回の `land` で 3 回までとし、超えたら原因 `ci_pending` で止まる
+6. マージコミットの第 1 親が M であることを確かめ、マージした head とマージコミットと確かめた M を記録する。一時ブランチを消し、ロックを返す
+
+`combination_failed` は同じ承認・同じ head では通らないため、次の手は `reject` だけである（決定 3 の表に行を足す）。PR の head は A のままで、承認を取り直さない。
+A の後に B を承認したとき、B のレーンは A のロックが返るのを待ってから「A を入れた main + B」で確かめる。
+
+**ロック。** 本番ブランチごとのロックを、origin のブランチ `ndf-lock/<本番ブランチ>` のコミットの列で持つ。
+
+| 操作 | やり方 |
+| --- | --- |
+| 取る | ロックのブランチの HEAD のコミットのメッセージを読む。`返した` か期限切れなら、HEAD を親に持つ新しいコミット（メッセージに `持ち主: #<PR の番号>`・`承認済みのコミット: <SHA>`・`期限: <UTC>`）を作り、`PATCH /git/refs/heads/ndf-lock/<本番ブランチ>`（`force: false`）で進める。ブランチが無ければ `POST /git/refs` で作る。どちらも、ほかの持ち主が先に進めていれば fast-forward にならず GitHub が断る（STD16）。断られたら読み直す |
+| 返す | 同じ形で `返した` のコミットを足す |
+| 期限 | 取った時刻 + `ci_budget`。作り直し（手順 5 から 3 へ）のたびに期限を足したコミットで延ばす |
+
+ロックのブランチは fast-forward だけで進め、強制 push も削除もしない。コミットの列が、誰がいつロックを持ったかの記録になる。
+
+**ロックの取りこぼし。** 持ち主のプロセスが途中で終わると、ロックは `返した` にならずに残る。期限を過ぎたロックは、次に取る `land` が上の「取る」で上書きする。
+持ち主が期限を過ぎて動き続けても、手順 5 でロックが自分のものでないか期限切れならマージせず、原因 `ci_pending` で止まる。そのため、2 つの `land` が同時にマージへ進むことは無い。
+期限を過ぎて残った一時ブランチは、次にロックを取った `land` が `ndf-serial/<本番ブランチ>/` の下を読んで消す（NDF が作ったものだけのクリーンアップ。Value 6）。
+
+**CI の待ちの上限。** 1 回の確かめの待ちは、ほかの方式と同じ `ci_budget` の秒である。作り直しの 3 回で、1 回の `land` の待ちは最大で `ci_budget` の 4 倍になる。
+作り直しは、ロックの外の誰か（GitHub で直接マージした人）が本番ブランチを動かしたときだけ起きる。3 回続くのは人が続けてマージしている状態で、待たずに人へ戻す。回数の値は、最初に `serial` を使ったリポジトリの記録で見直す（「未確認のまま残ること」）。
+
+**守れないこと。** `serial` では GitHub が本番ブランチへのマージを縛らない（ブランチ保護が無い）。手順 5 の HEAD の読み直しと PR のマージの間（数秒）に、人が GitHub で別の PR をマージすると、確かめていない組み合わせが入る。
+手順 6 はそれを検出する。マージコミットの第 1 親が M でなければ、原因 `untested_merge`（本番はマージ済み）で止まり、`items` に確かめた M と実際の第 1 親を出す。次の手は `rerun` で、再開した `land` はマージコミットで走る本番ブランチの push の CI を `ci_budget` の秒まで待ち、通れば `ok` にする。
+人が GitHub でマージすること自体は利用者の操作で、工程は止めない（決定 20 の最後の段落と同じ）。
+
+**費用。** `serial` は PR の CI に加えて、一時ブランチで CI をもう 1 回走らせる。private の Free の GitHub Actions の実行時間は月の上限があり、同時の承認が多いほど作り直しで増える（Value 2）。
+必須のチェックを出す workflow は、`push` のトリガーの `branches` に `ndf-serial/**` を足す（ai-plugins は `serial` を使わないため、この課題の実装では足さない。使うリポジトリが足す手順を `production-merge.md` に書く）。ロックのブランチ `ndf-lock/**` では workflow を起動しない。
+
+| 比べた候補 | 採否と理由 |
+| --- | --- |
+| private の Free では `trunk` 戦略を選べないままにする | 採らない。代表のリポジトリの種類の 1 つを扱えず、普及の前に守る汎用性に当たる |
+| 外部の merge queue のサービス（Mergify。LIB5） | 採らない。private の 6 人以上は席ごとに費用がかかる。GitHub App にリポジトリの書き込みの権限を渡す（C1 に当たる秘密の扱いが増える）。NDF の承認の記録と承認済みのコミットの縛りを、サービスの設定へ写すことになる |
+| 一時ブランチを本番ブランチへ fast-forward で入れる（bors-ng と同じ） | 採らない。PR を通さずに本番ブランチの ref を進め、I17 の「PR を通さずに更新しない」に当たる。承認済みのコミットでなく一時のマージコミットが入る |
+| ロックを置かず、一時ブランチだけで確かめる | 採らない。2 つのレーンが同じ M で確かめて続けてマージすると、後の PR は前の PR との組み合わせを確かめないまま入る |
+| ロックをローカルのファイル・GitHub Actions の `concurrency`・Issue のラベルで持つ | 採らない。ローカルのファイルはほかの機械のレーンと CD の workflow に効かない。`concurrency` は workflow の run だけを並べ、手元のレーンの `land` に効かない。ラベルの付け外しは先に付けた者だけが通る形（比べて書き換える操作）を持たない |
+| ロックを origin のブランチのコミットの列で持ち、fast-forward の更新で取り合う | 採る。GitHub の ref の更新が fast-forward でないときに断る振る舞い（STD16）が比べて書き換える操作になり、どのプランでも使え、新しい秘密もサービスも要らない |
+
+- 作り方: 自前で作る
+- 比べた候補: LIB4 / LIB5 / STD1 / STD9 / STD14 / STD15 / STD16
+
+根拠: Value 4 / Value 7 / Value 12 / Value 2（MVV 版 7）
+
+### 決定 33: GitHub のプランと公開範囲から使えるマージの方式を決め、設定が使えない方式を指していたら使える方式を示して止める
+
+使えるマージの方式は、リポジトリの持ち主の種類・公開範囲・プランで決まる（STD9・STD14・STD15）。
+
+| リポジトリ | `merge-queue` | `strict` | `serial` |
+| --- | --- | --- | --- |
+| Organization の public | 使える | 使える | 使える |
+| 個人アカウントの public | 使えない | 使える | 使える |
+| private（Free） | 使えない | 使えない | 使える |
+| private（Pro・Team） | 使えない | 使える | 使える |
+| private（Enterprise Cloud） | 使える | 使える | 使える |
+
+NDF の token ではプランを直接読めないことがある（Organization のプランは持ち主の権限が要る）。そのため、`land` はプランを読まず、次の 3 つの事実で表の行を決める。
+
+| 読む事実 | 読み方 | 決まること |
+| --- | --- | --- |
+| 公開範囲と持ち主の種類 | `GET /repos/{o}/{r}` の `private`・`owner.type` | public の 2 行のどちらか、または private |
+| ブランチ保護を使えるか | `GET /repos/{o}/{r}/rules/branches/{branch}` が規則の一覧を返すか、プランの不足で断られるか | private の Free か、それ以外の private |
+| merge queue を使っているか | GraphQL `mergeQueue(branch)` | Enterprise Cloud の private で、キューの規則があるか |
+
+`merge_method` はこの 3 つと設定の方式を受け、使える方式の一覧を返す。設定の方式が一覧に無ければ、`land` はマージせずに原因 `precondition` で止まり、`items` に `{"kind": "method", "name": <設定の値>, "detail": <使える方式の一覧>}` を出す。
+private で Pro・Team か Enterprise Cloud かは、キューの規則が無いときは見分けられない。そのときの `merge-queue` の設定は、「キューの規則が無い。Enterprise Cloud なら ruleset へキューを足し、そうでなければ `strict` か `serial` を選ぶ」を理由に出して止まる（今の I15 の止まり方と同じ）。
+
+**プランを読めないとき。** 2 行目の読み取りが、プランの不足でない理由（権限の不足・ネットワークの誤り）で失敗したときは、表の行を決めない。
+`merge-queue` と `strict` は ruleset の値を確かめられないため、原因 `precondition`・理由に「本番ブランチの規則を読めない」と失敗の応答を出して止まる（今の I15 のとおり）。
+`serial` は GitHub の機能を前提にしないため、読めなくても進める。キューの規則がある本番ブランチでは PR のマージの API が断るため、手順 5 のマージで止まる。どの場合も、使える方式を推して書き換えない（既定の方式へ倒さない。決定 17）。
+
+設定を読む時点（セクションのスキーマ）ではこの検査を行わない。スキーマはファイルだけを入力にし、GitHub を読まないためである（決定 28）。
+
+| 比べた候補 | 採否と理由 |
+| --- | --- |
+| プランを API で読み、表を引く | 採らない。Organization のプランは持ち主の権限が要り、`land` の token では読めないことがある |
+| 使える方式へ自動で切り替える | 採らない。リポジトリの持ち主が選んだ方式を黙って変える。組み合わせの確かめの強さが変わったことに気づけない |
+| 公開範囲・ブランチ保護の可否・キューの有無の 3 つの事実で行を決め、合わなければ使える方式を示して止める | 採る |
+
+- 作り方: 標準に倣う
+- 比べた候補: STD9 / STD14 / STD15
+
+根拠: Value 4 / Value 1（MVV 版 7）
