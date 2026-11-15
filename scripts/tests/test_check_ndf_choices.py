@@ -60,7 +60,11 @@ def _drop_form(tree: Path, value: str) -> None:
     (tree / FORMS / f"form-{value}.md").unlink()
 
 
-DROPS = [("branch-flows", "promote-selected", _drop_flow), ("delivery-kind", "manual", _drop_delivery), ("release-form", "slide", _drop_form)]
+DROPS = [
+    ("branch-flows", "promote-selected", _drop_flow),
+    ("delivery-kind", "manual", _drop_delivery),
+    ("release-form", "slide", _drop_form),
+]
 
 
 def test_the_real_contracts_match_the_baseline(capsys):

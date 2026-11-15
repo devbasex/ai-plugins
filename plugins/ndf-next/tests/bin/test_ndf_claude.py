@@ -167,4 +167,7 @@ def test_launch_args_keep_a_plugin_whose_name_is_on_the_disabled_list(tmp_path):
         assert claude.plugin_args(root, lambda: OLD).args == ["--plugin-dir", str(root)]
     unnamed = tmp_path / "unnamed"
     expected = {e["id"]: False for e in OLD}
-    assert claude.plugin_args(unnamed, lambda: OLD).args[:2] == ["--settings", json.dumps({"enabledPlugins": expected}, separators=(",", ":"))]
+    assert claude.plugin_args(unnamed, lambda: OLD).args[:2] == [
+        "--settings",
+        json.dumps({"enabledPlugins": expected}, separators=(",", ":")),
+    ]

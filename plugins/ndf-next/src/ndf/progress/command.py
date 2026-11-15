@@ -148,9 +148,11 @@ def _sprint_range(context: Mapping[str, Any], cwd: Path) -> tuple[Git, str]:
 
 def _diff_names(git: Git, rng: str, specs: list[str] | None) -> set[str]:
     """範囲の差分のパス。`specs` が `None` なら全体、空の並びなら空（`git diff` を打たない。打つと全体が返る）。"""
-    if specs is not None and not specs:
+    if specs is None:
+        specs = []
+    elif not specs:
         return set()
-    return {p for p in git.run("diff", "--name-only", "-z", rng, "--", *(specs or [])).split("\0") if p}
+    return {p for p in git.run("diff", "--name-only", "-z", rng, "--", *specs).split("\0") if p}
 
 
 def range_diff_kinds(git: Git, rng: str, cwd: Path) -> dict[str, bool]:
@@ -488,7 +490,7 @@ def parser() -> argparse.ArgumentParser:
     sub.add_parser("restore", help="控えから進行表の DB を戻す").add_argument("--from", dest="source", required=True)
     docs = sub.add_parser("docs-only", help="ベースブランチからの差分が文書だけかを返す")
     docs.add_argument("--base", required=True, help="ベースブランチ")
-    docs.add_argument("--remote", help="リモート名（省けば .ndf/worktree.json の remote か既定）")
+    docs.add_argument("--remote", help="リモート名（省けば worktree の宣言の remote か既定）")
     return ap
 
 

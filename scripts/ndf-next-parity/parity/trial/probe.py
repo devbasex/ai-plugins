@@ -244,7 +244,9 @@ def write_trials(path: Path, results: Mapping[str, Mapping[str, str]]) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--write", action="store_true", help="対応表の trial の列を書き換える")
-    parser.add_argument("--plugin-root", type=Path, default=PLUGIN_ROOT, help="本文を読むプラグインの根（既定はリポジトリの plugins/ndf-next）")
+    parser.add_argument(
+        "--plugin-root", type=Path, default=PLUGIN_ROOT, help="本文を読むプラグインの根（既定はリポジトリの plugins/ndf-next）"
+    )
     args = parser.parse_args(argv)
     if not args.plugin_root.is_dir():
         print(f"プラグインの根が無い: {args.plugin_root}", file=sys.stderr)

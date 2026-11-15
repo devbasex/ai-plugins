@@ -32,7 +32,7 @@ HEADS = "refs/heads/"
 # リモート名の既定を持つ唯一の置き場（スキーマの `default`）。値はここに書かない（#3617 の I7a）
 REMOTE_SCHEMA = ("contracts/schemas/declarations/worktree.schema.json", ("properties", "remote", "default"))
 # リモート名を書く宣言（メインディレクトリからの相対）
-WORKTREE_DECLARATION = ".ndf/worktree.json"
+WORKTREE_DECLARATION = identity.FIXED_WORDS["declaration_dir"] + "/worktree.json"
 # git が認証の入力を端末へ求めないようにする環境変数（取得と送信が人の入力を待って止まらない）
 NO_PROMPT = {"GIT_TERMINAL_PROMPT": "0"}
 # ref・リモートの名前を option として読ませない区切り（3364-7）。`--` が pathspec の区切りになるサブコマンド

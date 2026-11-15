@@ -38,7 +38,9 @@ def decide(defaults: Mapping[str, Any], declared: Optional[Mapping[str, Any]]) -
         raise AllocationError(f"宣言の {DECLARED_KEY} が object でない")
     unknown = sorted(set(override) - set(out))
     if unknown:
-        raise AllocationError(f"宣言の {DECLARED_KEY} に初期値に無い種類がある: {', '.join(unknown)}（使える種類: {', '.join(sorted(out))}）")
+        raise AllocationError(
+            f"宣言の {DECLARED_KEY} に初期値に無い種類がある: {', '.join(unknown)}（使える種類: {', '.join(sorted(out))}）"
+        )
     for kind, minutes in override.items():
         out[kind] = _positive(minutes, f"宣言の {DECLARED_KEY}.{kind}")
     return out
