@@ -350,11 +350,23 @@ function createDeck(opts) {
   }
   function footer(s, cx, withNo, textColor) {
     if (theme.copyright) {
-      s.addText(theme.copyright, { ...cx, fontFace: F, fontSize: theme.sizes.footer, color: color(textColor || "mute"), valign: "middle", margin: 0 });
+      label(s, theme.copyright, cx, "footer", textColor || "mute", { valign: "middle" });
     }
     if (withNo) {
-      s.addText(String(pages.pageNo), { ...FRAME.pageNo, fontFace: F, fontSize: theme.sizes.footer, color: color("mute"), align: "right", valign: "middle", margin: 0 });
+      label(s, String(pages.pageNo), FRAME.pageNo, "footer", "mute", { align: "right", valign: "middle" });
     }
+  }
+  // 書体・大きさ（theme.sizes の項目名）・色（theme.colors の項目名）・margin: 0 を埋めて文字を置く
+  function label(s, t, at, sizeName, colorName, extra) {
+    s.addText(t, { ...at, fontFace: F, fontSize: theme.sizes[sizeName], color: color(colorName), margin: 0, ...extra });
+  }
+  // アクセントの色の帯
+  function band(s, at) {
+    s.addShape(p.ShapeType.rect, { ...at, fill: { color: color("accent") }, line: { type: "none" } });
+  }
+  // アクセントの色の線（at.width は線の太さ）
+  function accentLine(s, at) {
+    s.addShape(p.ShapeType.line, { x: at.x, y: at.y, w: at.w, h: 0, line: { color: color("accent"), width: at.width } });
   }
   function putLogo(s, at) {
     if (logo) s.addImage({ data: logo, ...at });
@@ -368,22 +380,22 @@ function createDeck(opts) {
   function cover(title, sub, meta) {
     const s = newSlide();
     const c = FRAME.cover;
-    s.addShape(p.ShapeType.rect, { ...c.band, fill: { color: color("accent") }, line: { type: "none" } });
+    band(s, c.band);
     putLogo(s, c.logo);
-    s.addText(title, { ...c.title, fontFace: F, fontSize: theme.sizes.coverTitle, bold: true, color: color("text"), valign: "bottom", margin: 0, fit: "shrink" });
-    s.addShape(p.ShapeType.line, { x: c.accent.x, y: c.accent.y, w: c.accent.w, h: 0, line: { color: color("accent"), width: c.accent.width } });
-    if (sub) s.addText(sub, { ...c.sub, fontFace: F, fontSize: theme.sizes.coverSub, bold: true, color: color("ink"), valign: "top", margin: 0 });
-    if (meta) s.addText(meta, { ...c.meta, fontFace: F, fontSize: theme.sizes.coverMeta, color: color("ink"), margin: 0 });
+    label(s, title, c.title, "coverTitle", "text", { bold: true, valign: "bottom", fit: "shrink" });
+    accentLine(s, c.accent);
+    if (sub) label(s, sub, c.sub, "coverSub", "ink", { bold: true, valign: "top" });
+    if (meta) label(s, meta, c.meta, "coverMeta", "ink");
     footer(s, FRAME.copyright, false);
     return s;
   }
 
   function page(title, lead) {
     const s = newSlide();
-    s.addText(title, { ...FRAME.title, fontFace: F, fontSize: theme.sizes.title, bold: true, color: color("text"), valign: "middle", margin: 0, fit: "shrink" });
+    label(s, title, FRAME.title, "title", "text", { bold: true, valign: "middle", fit: "shrink" });
     putLogo(s, FRAME.logo);
     s.addShape(p.ShapeType.line, { x: FRAME.rule.x, y: FRAME.rule.y, w: FRAME.rule.w, h: 0, line: { color: color("rule"), width: 1 } });
-    if (lead) s.addText(lead, { ...FRAME.lead, fontFace: F, fontSize: theme.sizes.lead, bold: true, color: color("ink"), valign: "middle", margin: 0 });
+    if (lead) label(s, lead, FRAME.lead, "lead", "ink", { bold: true, valign: "middle" });
     footer(s, FRAME.copyright, true);
     return s;
   }
@@ -391,11 +403,11 @@ function createDeck(opts) {
   function section(title, sub) {
     const s = newSlide(false);
     const c = FRAME.section;
-    s.addShape(p.ShapeType.rect, { ...c.band, fill: { color: color("accent") }, line: { type: "none" } });
+    band(s, c.band);
     putLogo(s, FRAME.logo);
-    s.addText(title, { ...c.title, fontFace: F, fontSize: theme.sizes.sectionTitle, bold: true, color: color("text"), margin: 0 });
-    s.addShape(p.ShapeType.line, { x: c.accent.x, y: c.accent.y, w: c.accent.w, h: 0, line: { color: color("accent"), width: c.accent.width } });
-    if (sub) s.addText(sub, { ...c.sub, fontFace: F, fontSize: theme.sizes.sectionSub, bold: true, color: color("ink"), margin: 0 });
+    label(s, title, c.title, "sectionTitle", "text", { bold: true });
+    accentLine(s, c.accent);
+    if (sub) label(s, sub, c.sub, "sectionSub", "ink", { bold: true });
     footer(s, c.copyright, true);
     return s;
   }
@@ -416,7 +428,7 @@ function createDeck(opts) {
   }
 
   function note(s, t) {
-    s.addText(runs(t), { ...FRAME.note, fontFace: F, fontSize: theme.sizes.note, color: color("mute"), valign: "middle", margin: 0 });
+    label(s, runs(t), FRAME.note, "note", "mute", { valign: "middle" });
   }
 
   function tbl(s, rows, opt) {
@@ -427,8 +439,8 @@ function createDeck(opts) {
   function callout(s, y, h, fill, head, body) {
     const c = FRAME.callout;
     box(s, c.x, y, c.w, h, fill, false);
-    s.addText(head, { x: c.x + c.padX, y: y + 0.05, w: c.w - 2 * c.padX, h: c.headH, fontFace: F, fontSize: theme.sizes.calloutHead, bold: true, color: color("text"), valign: "middle", margin: 0 });
-    if (body) s.addText(runs(body), { x: c.x + c.padX, y: y + 0.05 + c.headH, w: c.w - 2 * c.padX, h: h - c.headH - 0.1, fontFace: F, fontSize: theme.sizes.calloutBody, color: color("ink"), valign: "top", margin: 0 });
+    label(s, head, { x: c.x + c.padX, y: y + 0.05, w: c.w - 2 * c.padX, h: c.headH }, "calloutHead", "text", { bold: true, valign: "middle" });
+    if (body) label(s, runs(body), { x: c.x + c.padX, y: y + 0.05 + c.headH, w: c.w - 2 * c.padX, h: h - c.headH - 0.1 }, "calloutBody", "ink", { valign: "top" });
   }
 
   async function save(out) {
