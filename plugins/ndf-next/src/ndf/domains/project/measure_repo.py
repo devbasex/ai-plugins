@@ -137,6 +137,10 @@ class Tree:
         out = self.git(*args)
         return out.split() if out is not None else []
 
+    def refs(self, prefix: str) -> list[str]:
+        """`prefix`（`refs/heads` など）の下の ref の短い名前の並び。失敗なら空。"""
+        return self.words("for-each-ref", "--format=%(refname:short)", prefix)
+
     def read(self, path: str) -> Optional[str]:
         """追跡ファイルの HEAD の中身。秘密の名前・大きすぎる・無いファイルは `None`。"""
         if path not in self.files or is_secret_path(path):
@@ -409,13 +413,13 @@ def default_branch(tree: Tree) -> Optional[str]:
     head = tree.git("symbolic-ref", "--short", "refs/remotes/origin/HEAD")
     if head and head.strip():
         return head.strip().split("/", 1)[-1]
-    local = tree.words("for-each-ref", "--format=%(refname:short)", "refs/heads")
+    local = tree.refs("refs/heads")
     return next((b for b in DEFAULT_BRANCH_CANDIDATES if b in local), None)
 
 
 def measure_branches(tree: Tree) -> dict[str, Any]:
     state = check.branch_state(git.Git(tree.root))
-    local = tree.words("for-each-ref", "--format=%(refname:short)", "refs/heads")
+    local = tree.refs("refs/heads")
     evidence: list[dict[str, Any]] = []
     names: list[str] = []
     for b in check.KNOWN_BRANCHES:

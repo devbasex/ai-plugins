@@ -242,7 +242,7 @@ def collect_flow(tree: Tree, gh: Gh, base: str, production: str) -> dict[str, An
         if p.get("merged_at")
     ]
     kinds = [classify_release(tree, p["merge"], p["head"], base) for p in prs if p["base"] == production and p["merge"]]
-    refs = tree.words("for-each-ref", "--format=%(refname:short)", f"refs/remotes/origin/{Branch.SPRINT}")
+    refs = tree.refs(f"refs/remotes/origin/{Branch.SPRINT}")
     starts = [sprint_start(tree, r, base, production) for r in refs]
     item = as_item(infer(prs, base, production, [k for k in kinds if k], [s for s in starts if s]), [_rulesets(gh)])
     try:
