@@ -25,7 +25,8 @@
 | 利用者の指示（2026-11-15、課題の本文の「承認とマージの扱い」） | 利用者の指示の原文 | 「リリース承認と github 操作による merge は等価とします。つまりどちらもリリース承認かつ、マージ承認とみなします」 |
 
 要求と受け入れ条件は #3572 の本文にある（コピーは [issue-3572-requirements.md](issue-3572-requirements.md) ）。この文書は「どう作るか」だけを扱う。
-#3119 の設計の差分は [issue-3119-design.md](issue-3119-design.md) の決定 21 と [issue-3119-design-detail.md](issue-3119-design-detail.md) の宣言の値に置く。その判断は決定 14 が持つ。
+#3119 の設計の差分は 2 か所に置く。[issue-3119-design.md](issue-3119-design.md) の決定 21 と、[issue-3119-design-detail.md](issue-3119-design-detail.md) の宣言の値である。
+その判断は決定 14 が持つ。
 
 | 分けた文書 | 中身 |
 | --- | --- |
@@ -73,7 +74,7 @@
 I3 が守るのは、スプリントブランチの先端が承認した先端から動いたときに main へ入れないことである。先端を動かす書き手はスプリントの経路
 （と、GitHub で直接 push する人）で、リリースの領域はマージの直前に先端を読み直して照らすだけである。
 
-承認資料の書き込み（`materials`）はリリースの領域の副命令で、本文の承認資料の節だけを書く。経路 (a) の流れでスプリントの経路が
+承認資料の書き込み（`materials`）はリリースの領域の副命令で、本文の承認資料の節だけを書く。承認ゲートで承認する流れ（経路 (a)。「処理の流れ」）でスプリントの経路が
 `materials` を打つのは、副命令を呼ぶ順をスプリントのプランが持つためで、書き換えの持ち主はリリースの領域のままである。
 承認資料は PR の本文に置き、先端を動かさない。そのため承認資料の書き直しは本番の PR の先端と承認の対象を変えない。
 
@@ -195,7 +196,8 @@ $ claude plugin marketplace list
   ❯ exp-plugins-next  Source: Git (https://127.0.0.1:18443/repo.git@verify/next)
 ```
 
-登録（`known_marketplaces.json`）は `exp-plugins` が `{"source": "git", "url": ...}`、`exp-plugins-next` が同じ URL に `"ref": "verify/next"` を持つ。
+登録（`known_marketplaces.json`）では、`exp-plugins` が `{"source": "git", "url": ...}` を持つ。
+`exp-plugins-next` は同じ URL に `"ref": "verify/next"` を持つ。
 同じプラグイン `demo` を両方から入れると、`demo@exp-plugins` と `demo@exp-plugins-next` が両方とも有効になる。
 `claude plugin disable demo@exp-plugins` で片方だけを止められた。
 
@@ -226,6 +228,15 @@ $ claude plugin marketplace add https://127.0.0.1:18443/repo.git#verify/same
 ただし、`CLAUDE_CODE_PLUGIN_CACHE_DIR` を向ける前の 1 回（取得に失敗した試み）で、利用者の登録の `lastUpdated` が 2026-11-15T11:53:54Z
 （20:53 JST）に書き換わった。取得元と ref は変わっていない。この 1 回は受け入れ条件 2d の「利用者の登録を変えない場所」を満たしておらず、
 扱いを「人へ残す判断」の C6 の行で人が判断する。使い捨ての確かめには、3 つの変数をそろえて向ける。
+
+## 本番の PR を流すプランと、承認の後に通るステップ（受け入れ条件 2）
+
+ndf-next で本番の PR を扱うプランを、雛形と工程の定義から特定した結果である（develop の 154c4e507 の時点）。
+
+| プラン | どこから流れるか | 承認の後に通るステップ（今） | 承認の後に通るステップ（変更後） |
+| --- | --- | --- | --- |
+| `release`（`contracts/templates/release.json`。`release: true`） | 工程「デプロイ」（`contracts/workflow/stages/deploy.json`）の `release-gate` の答えの後の `call ndf.plan release` | `work`（`{{worker}} release`）の 1 つ。worker が `ndf release-steps` の副命令とコードの直しを自分の判断で打つ | `merge` → `confirm` → `record` → `cleanup` |
+| `merge`・`check`・`close`（`merge` の部品を持つ雛形） | 本番の PR を `ndf route merge` などで流したとき | `ci` →（落ちたら）`repeat-check` → `ci-fix` → `ci-local` → `push` → … → `merge` | 承認の前の `ci` と直しは残る。`merge`（`check` は `merge-gate`）の直前の `release-guard` が本番の PR なら `end` へ進め、デプロイの工程へ引き渡す。承認の後に通るステップは無い |
 
 ## 機能一覧
 
@@ -443,17 +454,8 @@ stateDiagram-v2
 1. 宣言から検証の ref の名前と 2 つ目のマーケットプレイスの名前を読む
 2. main 宛ての開いた PR のうち、下書きでなく、head が検証の ref でも版上げの PR でもないものを番号の順に並べる
 3. main の先端から作業用の ref を作り、PR の先端を順にマージする。衝突すればそこで止め、衝突した PR の番号を結果に出し、ref を動かさない
-4. `.claude-plugin/marketplace.json` の `name` を 2 つ目のマーケットプレイスの名前へ、リリース対象のプラグインの版を `<main の版>-next.<組んだ時刻 UTC の YYYYMMDDHHMMSS>` へ書き換えたコミットを足す
+4. 2 か所を書き換えたコミットを足す。`.claude-plugin/marketplace.json` の `name` は 2 つ目のマーケットプレイスの名前へ、リリース対象のプラグインの版は `<main の版>-next.<組んだ時刻 UTC の YYYYMMDDHHMMSS>` へ書き換える
 5. 前の検証の ref の先端と 4 のコミットを親にし、4 の木を持つコミットを作って fast-forward で push する（強制 push を使わない）
-
-## 本番の PR を流すプランと、承認の後に通るステップ（受け入れ条件 2）
-
-ndf-next で本番の PR を扱うプランを、雛形と工程の定義から特定した結果である（develop の 154c4e507 の時点）。
-
-| プラン | どこから流れるか | 承認の後に通るステップ（今） | 承認の後に通るステップ（変更後） |
-| --- | --- | --- | --- |
-| `release`（`contracts/templates/release.json`。`release: true`） | 工程「デプロイ」（`contracts/workflow/stages/deploy.json`）の `release-gate` の答えの後の `call ndf.plan release` | `work`（`{{worker}} release`）の 1 つ。worker が `ndf release-steps` の副命令とコードの直しを自分の判断で打つ | `merge` → `confirm` → `record` → `cleanup` |
-| `merge`・`check`・`close`（`merge` の部品を持つ雛形） | 本番の PR を `ndf route merge` などで流したとき | `ci` →（落ちたら）`repeat-check` → `ci-fix` → `ci-local` → `push` → … → `merge` | 承認の前の `ci` と直しは残る。`merge`（`check` は `merge-gate`）の直前の `release-guard` が本番の PR なら `end` へ進め、デプロイの工程へ引き渡す。承認の後に通るステップは無い |
 
 ## 入出力の契約
 
@@ -564,6 +566,20 @@ ndf-next で本番の PR を扱うプランを、雛形と工程の定義から�
 | `verify-ref` が `pull_request_target` の出来事で `NDF_RELEASE_TOKEN` を使い、未承認の PR の先端を検証の ref へ取り込んで push してよいか（決定 9） | C1 | 秘密を持つジョブが、承認の前の PR の中身を扱う。PR 側のコードを実行しない分け方は「非機能の実現方式」のセキュリティ（PR の中身と秘密）の行 |
 | 実物の確かめの 1 回で、利用者の登録の `lastUpdated` が書き換わったことをどう扱うか（受け入れ条件 2d） | C6 | 受け入れ条件 2d は利用者の登録を変えない場所で確かめることを求める。`CLAUDE_CODE_PLUGIN_CACHE_DIR` を向ける前の 1 回（取得に失敗した試み）で、利用者の登録（`known_marketplaces.json`）の `ai-plugins` の `lastUpdated` が 2026-11-15T11:53:54Z（20:53 JST）に書き換わった。取得元と ref は前後で同じだった。条件を 1 回満たさなかった事実で、利用者のローカル環境の書き換えに当たるかを人が判断する |
 
+## 未確認のまま残ること
+
+| 項目 | 内容 |
+| --- | --- |
+| 版上げの PR の CI の時間 | 版上げの PR は必須のチェック（pytest など）を待つため、main へのマージからタグまでに CI 1 回分の時間がかかる。実測は 11.0.0 の後の最初のリリースで分かる |
+| 版上げの PR の迂回のマージが通ること | 迂回は管理者の役割（`RepositoryRole` 5）だけに許されている（ruleset の応答）。`NDF_RELEASE_TOKEN` の持ち主がこの役割を持つかと、その token で版上げの PR を迂回してマージできるかは実測していない（秘密の中身を読まず、main へマージする操作になるため）。実装の後の最初の版上げで確かめ、断られたら `bump` が止まって人へ戻る |
+| リリースと版数の間の時間 | main へのマージから版上げの PR のマージまで、正式版の利用者のうち新しく入れた人は前の版の番号で新しいコードを持つ（「main へのマージの後（CD）」）。間の長さと、その間に入れる利用者の数は測っていない |
+| マージの直前の確かめと GitHub のマージの間の main の移動 | 版上げの PR のマージの直前に main の先端を含むかを確かめるが、確かめと GitHub のマージの間に main が動くと、タグを打つコミットに版の節に載らない PR が入る。その PR は次の版の節に載り、`publish` が知らせる。この間の移動が起きる頻度は測っていない |
+| `bypass_mode: pull_request` で直接 push が断られること | ruleset の応答（迂回は管理者の役割だけ、形は `pull_request`）から読んだ。直接 push を実際に打っては確かめていない（main を書き換えるため） |
+| 2 つの NDF を同時に有効にしたとき | 確かめ 1 で同じ名前のプラグインが両方とも有効になった。`ndf@ai-plugins` と `ndf@ai-plugins-next` を同時に有効にしたときの Skill・hook の重なりは確かめていない。手順は片方を `claude plugin disable` で止める形にする（決定 9） |
+| Codex での 2 つ目のマーケットプレイス | 確かめは Claude Code だけで行った。Codex の登録の形は実装のステップで確かめる |
+| develop を持つリポジトリの ndf-next のリリース | ndf-next のリリースは取り込み方の行 `github-flow` だけを扱い、ほかの行では止まる。表の 2 行も 11.0.0 の入れ替えで外す（決定 5）。ベースブランチが本番ブランチと違うリポジトリのリリースを ndf-next で扱うかは範囲外の課題で決める |
+| 人のマージの検知の遅れ | 承認ゲートの待ちの読み直しの間隔だけ、人のマージから記録までが遅れる。実測は最初に人が GitHub でマージしたリリースで分かる |
+
 ## 出し直しの指摘への対応
 
 | 項目 | 指摘 | 対応 | 直した箇所・直せない理由 |
@@ -579,17 +595,3 @@ ndf-next で本番の PR を扱うプランを、雛形と工程の定義から�
 | p6-ghflow:1-9 | #3587 の残すもの・外すものと進め方 | 直した | 決定 15 |
 | p6-ghflow:1-10 | 2 つ目のマーケットプレイスを実物で確かめる | 直した | 「実物の確かめ」（打ったコマンドと出力） |
 | p6-ghflow:1-11 | `CHANGELOG.md` の扱いの得失 | 直した | 決定 11（2 つの案の得失、読むスクリプト 25 本、廃止したときの書き換え先）。採否は「人へ残す判断」の P1 の行で人が見る |
-
-## 未確認のまま残ること
-
-| 項目 | 内容 |
-| --- | --- |
-| 版上げの PR の CI の時間 | 版上げの PR は必須のチェック（pytest など）を待つため、main へのマージからタグまでに CI 1 回分の時間がかかる。実測は 11.0.0 の後の最初のリリースで分かる |
-| 版上げの PR の迂回のマージが通ること | 迂回は管理者の役割（`RepositoryRole` 5）だけに許されている（ruleset の応答）。`NDF_RELEASE_TOKEN` の持ち主がこの役割を持つかと、その token で版上げの PR を迂回してマージできるかは実測していない（秘密の中身を読まず、main へマージする操作になるため）。実装の後の最初の版上げで確かめ、断られたら `bump` が止まって人へ戻る |
-| リリースと版数の間の時間 | main へのマージから版上げの PR のマージまで、正式版の利用者のうち新しく入れた人は前の版の番号で新しいコードを持つ（「main へのマージの後（CD）」）。間の長さと、その間に入れる利用者の数は測っていない |
-| マージの直前の確かめと GitHub のマージの間の main の移動 | 版上げの PR のマージの直前に main の先端を含むかを確かめるが、確かめと GitHub のマージの間に main が動くと、タグを打つコミットに版の節に載らない PR が入る。その PR は次の版の節に載り、`publish` が知らせる。この間の移動が起きる頻度は測っていない |
-| `bypass_mode: pull_request` で直接 push が断られること | ruleset の応答（迂回は管理者の役割だけ、形は `pull_request`）から読んだ。直接 push を実際に打っては確かめていない（main を書き換えるため） |
-| 2 つの NDF を同時に有効にしたとき | 確かめ 1 で同じ名前のプラグインが両方とも有効になった。`ndf@ai-plugins` と `ndf@ai-plugins-next` を同時に有効にしたときの Skill・hook の重なりは確かめていない。手順は片方を `claude plugin disable` で止める形にする（決定 9） |
-| Codex での 2 つ目のマーケットプレイス | 確かめは Claude Code だけで行った。Codex の登録の形は実装のステップで確かめる |
-| develop を持つリポジトリの ndf-next のリリース | ndf-next のリリースは取り込み方の行 `github-flow` だけを扱い、ほかの行では止まる。表の 2 行も 11.0.0 の入れ替えで外す（決定 5）。ベースブランチが本番ブランチと違うリポジトリのリリースを ndf-next で扱うかは範囲外の課題で決める |
-| 人のマージの検知の遅れ | 承認ゲートの待ちの読み直しの間隔だけ、人のマージから記録までが遅れる。実測は最初に人が GitHub でマージしたリリースで分かる |

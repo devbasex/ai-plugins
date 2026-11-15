@@ -350,8 +350,8 @@ GitHub と git のアダプタを読まず、`version_decide` と `changelog_dec
  ]}
 ```
 
-部品 `release-guard`（`parts/steps.json`）は次のとおりで、`merge.json` と `close.json` は `{"use": "merge"}` の直前、
-`check.json` は `{"use": "merge-gate"}` の直前に `{"use": "release-guard"}` を置く。
+部品 `release-guard`（`parts/steps.json`）は次のとおりである。
+`{"use": "release-guard"}` は、`merge.json` と `close.json` では `{"use": "merge"}` の直前、`check.json` では `{"use": "merge-gate"}` の直前に置く。
 
 ```json
 {"id": "release-guard", "run": ["ndf", "release-steps", "guard", "--root", "{{repo}}", "--branch", "{{branch}}"],
@@ -369,7 +369,7 @@ workflow `ndf-next-release.yml` のジョブは次のとおりにする。どの
 | `merge`・`approval` | 441dc236e のまま | `merge`・`record` | 441dc236e のまま | 既定ブランチ |
 | `assemble` | `workflow_dispatch`（`step=assemble`、入力 `pr`） | `assemble --pr` | `NDF_RELEASE_TOKEN` | 既定ブランチ |
 
-`concurrency` は `bump`・`publish` を `ndf-next-release-main` の 1 つのグループ、`verify-ref` を `ndf-next-verify` の 1 つのグループに入れ、
+`concurrency` は `bump`・`publish` を `ndf-next-release-main` の 1 つのグループに、`verify-ref` を `ndf-next-verify` の 1 つのグループに入れる。
 どちらも `cancel-in-progress: false` にする。入力 `channel`・`level` は外す。
 
 ## 並行と排他

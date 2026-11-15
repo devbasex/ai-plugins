@@ -93,8 +93,8 @@ GitHub flow ではスプリントの PR が本番の PR を兼ねるため、ス
 
 表から 2 行を外す時点は、ai-plugins の宣言を `github-flow` へ書き換える 11.0.0 の入れ替え（#3304、決定 14）にそろえる。
 今の ai-plugins の宣言は `promotion: whole`・`base_branch: develop` で、入れ替えまでスプリントの経路（`domains/worktree`）はこの宣言を読む。
-この課題の実装で 2 行を外すと、表に合わない宣言は既定へ倒さずに止める取り込み方の表の規則（`branch-flows.json` の `summary`）により、
-ndf-next のスプリントの経路が入れ替えまで ai-plugins で止まる。そのため、入れ替えまでの扱いは次のとおりにする。
+取り込み方の表には、表に合わない宣言を既定へ倒さずに止める規則（`branch-flows.json` の `summary`）がある。
+そのため、この課題の実装で 2 行を外すと、ndf-next のスプリントの経路が入れ替えまで ai-plugins で止まる。そのため、入れ替えまでの扱いは次のとおりにする。
 
 | 時点 | 取り込み方の表 | ai-plugins の宣言 | ndf-next のリリースの副命令 |
 | --- | --- | --- | --- |
@@ -134,8 +134,8 @@ push には迂回が効かず、承認 1 と必須のチェックが掛かる。
 1. main への push で `bump` が動く。先端の版にタグがあり、範囲（前の版上げのコミットの起点..main の先端。設計文書の「main へのマージの後（CD）」）にリリース対象の変化があれば、上げ幅を決める
 2. 上げ幅は、範囲にマージされた PR のラベル（`release:major`・`release:minor`・`release:patch`）の最大で、
    ラベルが無い PR は PATCH とする（要求の起票者の推定 S8 を採る。宣言の付け忘れでマージを止めないため）
-3. main の先端から `release/v<版>` を作り、`plugin.json` の `version` と CHANGELOG の版の節（決定 11）だけを変えたコミットを足し、
-   `NDF_RELEASE_TOKEN` で版上げの PR を作る（`github.token` で作ると CI が起動しない）
+3. main の先端から `release/v<版>` を作り、`plugin.json` の `version` と CHANGELOG の版の節（決定 11）だけを変えたコミットを足す。
+   版上げの PR は `NDF_RELEASE_TOKEN` で作る（`github.token` で作ると CI が起動しない）
 4. `bump_decide` が差分を版数の文字列と CHANGELOG の版の節に限られると判定し、必須のチェックの後に、迂回の宣言で照合付きでマージする
 5. 版上げの PR のマージの push で、`bump` は先端の版にタグが無いと読んで版を上げず、`publish` がタグと GitHub Release を作る
 
@@ -241,8 +241,8 @@ GitHub Release の本文は今の `tagging` のとおりその節から作り、
 | `AGENTS.md` の「版とリリースの方針」 | 「11.0.0 の入れ替えで GitHub flow へ移る」1 段落と、版数の正本の節へのリンク | チャネルの表を GitHub flow の形へ書き換える |
 
 `CLAUDE.md` の「の次の版で」の段落の形は、版が決まる前の決定を `CLAUDE.md` に置くためのもので、運用の正本の文書には使わない。
-今の `AGENTS.md` の「取得元の登録に ref は保存されない」は、確かめ 1 の登録（`known_marketplaces.json` に `ref` が残る）と食い違うため、
-同じ実装で版数の正本の該当の段落と合わせて直す。
+今の `AGENTS.md` の「取得元の登録に ref は保存されない」は、確かめ 1 の登録（`known_marketplaces.json` に `ref` が残る）と食い違う。
+そのため、同じ実装で版数の正本の該当の段落と合わせて直す。
 
 - 作り方: 標準に倣う
 - 比べた候補: STD4
@@ -275,7 +275,8 @@ GitHub Release の本文は今の `tagging` のとおりその節から作り、
 ### 決定 15: #3587 を閉じずに直す
 
 #3587（宛先 develop、先端 441dc236e、33 ファイル）は、新しい土台でも残る部分が大半で、その部分は cross-review と cross-refactoring を通った。
-閉じて出し直すと、残す部分のレビューと 21 件のリファクタリングのコミット（`git log --oneline origin/develop..origin/sprint/lrel-lock | grep -c "Refactor:"`）をやり直す。ndf-next は 11.0.0 の入れ替えまで develop で開発するため、
+閉じて出し直すと、残す部分のレビューと 21 件のリファクタリングのコミットをやり直す（件数は `git log --oneline origin/develop..origin/sprint/lrel-lock | grep -c "Refactor:"`）。
+ndf-next は 11.0.0 の入れ替えまで develop で開発するため、
 宛先 develop も変えない。外す部分を取り除くコミットと、決定 5〜7・9・10 の実装を同じ PR へ足し、変わった差分を再びレビューへ通す。
 
 | 分け | ファイル | 何が残るか・何を外すか |
