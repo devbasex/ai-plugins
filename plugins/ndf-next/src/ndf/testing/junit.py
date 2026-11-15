@@ -56,14 +56,22 @@ def resolve_file(candidates: Sequence[str], tracked: frozenset[str]) -> Optional
         cand = _normalized(raw)
         if not cand:
             continue
-        if cand in tracked:
-            return cand
-        suffixes = [t for t in tracked if cand.endswith("/" + t)]
-        if suffixes:
-            return max(suffixes, key=len)
-        longer = [t for t in tracked if t.endswith("/" + cand)]
-        if len(longer) == 1:
-            return longer[0]
+        got = _match_one(cand, tracked)
+        if got is not None:
+            return got
+    return None
+
+
+def _match_one(cand: str, tracked: frozenset[str]) -> Optional[str]:
+    """候補 1 つを追跡するファイルへ照らす（`resolve_file` の表の 3 行を上から）。決まらなければ None。"""
+    if cand in tracked:
+        return cand
+    suffixes = [t for t in tracked if cand.endswith("/" + t)]
+    if suffixes:
+        return max(suffixes, key=len)
+    longer = [t for t in tracked if t.endswith("/" + cand)]
+    if len(longer) == 1:
+        return longer[0]
     return None
 
 
