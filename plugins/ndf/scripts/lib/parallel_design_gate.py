@@ -28,6 +28,7 @@ GATE1_SOURCE = "ndf-gate:1"  # 設計承認の区分
 RETURNED_SUFFIX = "-r"  # MVV 判定で承認した後に開いたまま問い直された依頼の id の接尾辞の頭（I4）
 REVISE_NOTE = "design-revise-{pr}.md"  # 直しの指摘ファイルの名前（プランの状態ディレクトリの work/ に置く）
 REJECTED_MARK = "design-rejected-{pr}.json"  # 差し戻しを記録した印（同じ依頼で 2 回打っても 1 件にする）
+MERGE_MARK = "design-merge-{pr}.json"  # マージのやり直しで CI の基盤待ちを再実行した累計（同じ依頼・同じ stamp の間だけ数える）
 APPROVAL_PREFIX = "承認: #"  # 承認の行の頭
 DESIGN_STAGE = "設計"
 # 承認した先端を今の先端に当てられないマージの結果（開発ループの問い直し `sprint_loop_select._settle_one` と同じ 2 つ）
@@ -229,10 +230,15 @@ def _stage_next(stage: dict) -> str:
     return str(stage.get("command") or resume)
 
 
-def _merge_resume(sprint: Path | None) -> str:
+def _merge_resume(sprint: Path | None, issue: object = None, merged: bool = False) -> str:
     """設計のステージの後で最初に `resume` を持つステージ（設計 PR のマージのステージ）の続き。無ければ設計のステージの続き。
     マージのキューをまだ起動していなければ（normal の最初の設計承認）`resume` は「前の起動の一覧が無い」で止まるため、
-    そのステージの `command` を返す（`_stage_next`）。読めなければ空。"""
+    そのステージの `command` を返す（`_stage_next`）。読めなければ空。
+
+    続きが設計と同じキュー（auto: 後ろのステージが設計のステージの `--then`）なら、素の `queue --resume` は承認ゲートで
+    終えた設計のプランの handoff を流し直して終了コード 10 で止まる。そのため設計のプラン `design-<課題>` を承認の後の
+    ステップから流す `--from` を足す（設計承認ゲートの決まり `AUTO_GATE_1`）。マージ済み（`merged`）なら `merge`（マージ済みの
+    PR は `already_merged` で通り、プランが完了して後続へ進む。`approve` の `gh pr ready` は閉じた PR で落ちる）、まだなら `approve`。"""
     import parallel_hold_sprint as phs
 
     if sprint is None:
@@ -242,7 +248,11 @@ def _merge_resume(sprint: Path | None) -> str:
     if at is None:
         return ""
     later = next((s for s in stages[at + 1 :] if s.get("resume")), None)
-    return _stage_next(later or stages[at])
+    nxt = _stage_next(later or stages[at])
+    same_queue = later is None or later.get("then_of") == DESIGN_STAGE
+    if same_queue and issue and _resume_started(nxt):
+        nxt += f" --from design-{int(issue)}={'merge' if merged else 'approve'}"
+    return nxt
 
 
 def _has_gate(state: Path, pr: int, by: str, outcome: str) -> bool:
@@ -354,53 +364,75 @@ def answer_design(
         return Answered("stopped", f"スプリント状態を読めない: {exc}", 2, metrics)
     repo, sprint = lane_sprint(main, name, lane)  # design_gate と同じ探し方
     what = f"設計 PR #{pr} の承認（並列の計画 {name} の依頼 {rid}）"
-    if result == "approved":
-        return _answer_approved(run, state, pr, by, what, repo, msg, sprint, metrics)
     work = _plan_work(msg)
+    if result == "approved":
+        return _answer_approved(
+            run, GateRecord(state=state, pr=pr, by=by, outcome="approved", what=what, repo=repo, msg=msg), rid, work, sprint, metrics
+        )
     if result == "revise":
         return _answer_revise(work, pr, ans, sprint, metrics)
     return _answer_rejected(run, state, pr, rid, what, repo, msg, work, metrics)
 
 
-def _settle_unmerged(run, repo: Path, pr: int, msg: dict, merge: dict) -> tuple[str, str, dict] | None:
-    """答えに載ったマージの結果がマージ済みでないときの (要約, 続き, やり直したマージの結果)。マージ済みと分かれば None。
+def _retry_merge(run, repo: Path, pr: int, stamp: str, merge: dict, mark: Path, rid: str) -> dict:
+    """依頼の stamp で `merge_approved` をやり直す。CI の基盤待ちの再実行は、答えのマージ（`merge.infra_rerun`）と、同じ依頼・
+    同じ stamp でのやり直しの累計（印 `mark`）を足した残りだけを渡し、打った回数を印へ足す（開発ループの `_settle_one` と同じ
+    上限。design-answer を打ち直しても再実行の上限が戻らない）。印を書けなければ、マージの結果の代わりに failed を返す。"""
+    import jsonio
+
+    seen = jsonio.read(mark, missing={}, broken={}, want=dict)
+    prior = int(seen.get("infra_reruns") or 0) if (seen.get("id"), seen.get("stamp")) == (rid, stamp) else 0
+    used = int(merge.get("infra_rerun") or 0) + prior
+    got = design_pr_merge.merge_approved(repo, pr, stamp, run=run, infra_budget=max(0, design_pr_merge.INFRA_RERUNS - used))
+    total = prior + int(got.get("infra_rerun") or 0)
+    try:
+        _write_atomic(mark, json.dumps({"id": rid, "stamp": stamp, "pr": pr, "infra_reruns": total}, ensure_ascii=False) + "\n")
+    except OSError as exc:
+        if got.get("result") not in design_pr_merge.MERGED_RESULTS:
+            return {**got, "result": "failed", "reason": f"再実行の回数の印を書けない: {exc}"}
+    return got
+
+
+def _settle_unmerged(run, rec: GateRecord, rid: str, work: Path, merge: dict) -> tuple[tuple[str, str] | None, dict, bool]:
+    """答えに載ったマージの結果を決着させ、(止まるときの (要約, 続き) か None, 最新のマージの結果, マージ済みか) を返す。
     開発ループの `_settle_one` と同じ扱いにする。先端を変えずに解ける結果（`not_green`・`conflict`・`failed`）は、依頼の
     stamp で `merge_approved` をやり直す（承認した先端のままのときだけマージされる）。`production` は人がリリース承認ゲートで
-    マージしたか（`gh pr view` が MERGED か）だけを読む。承認した先端を今の先端に当てられないもの（`REASK_MERGE`）は問い直す。"""
+    マージしたか（`gh pr view` が MERGED か）だけを読む。承認した先端を今の先端に当てられないもの（`REASK_MERGE`）は問い直す。
+    やり直したときは、成功しても失敗してもその結果を返す（呼び手が `metrics.merge` を最新にする）。"""
+    repo, pr = rec.repo, rec.pr
     got = merge
     if got.get("result") not in (*design_pr_merge.MERGED_RESULTS, *REASK_MERGE, "production"):
-        got = design_pr_merge.merge_approved(repo, pr, msg.get("stamp"), run=run)
+        got = _retry_merge(run, repo, pr, str(rec.msg.get("stamp") or ""), merge, work / MERGE_MARK.format(pr=pr), rid)
     res, why = got.get("result"), str(got.get("reason") or got.get("result"))
     if res in design_pr_merge.MERGED_RESULTS:
-        return None
+        return None, got, True
     if res == "production":
         if (pr_state_of(repo, pr, run) or {}).get("state") == "MERGED":
-            return None
+            return None, got, True
         nxt = f"人がリリース承認ゲートで設計 PR #{pr} をマージした後に、同じ design-answer を打ち直す"
-        return f"設計 PR #{pr} は人のマージを待つ（{why}）。記録を書かずに待つ", nxt, got
+        return (f"設計 PR #{pr} は人のマージを待つ（{why}）。記録を書かずに待つ", nxt), got, False
     if res in REASK_MERGE:
         nxt = f"設計 PR #{pr} の今の先端で設計承認を問い直す（同じ承認の問いを出し直すと、新しい先端の依頼が送られる）"
-        return f"設計 PR #{pr} の承認は今の先端に当てられない（{why}）。記録を書かずに問い直す", nxt, got
+        return (f"設計 PR #{pr} の承認は今の先端に当てられない（{why}）。記録を書かずに問い直す", nxt), got, False
     nxt = f"設計 PR #{pr} のマージを止めた原因（{res}: {why}）を解き、同じ design-answer を打ち直す（承認した先端のままならマージをやり直し、先端が動けば問い直しへ回す）"
-    return f"設計 PR #{pr} をマージできなかった（{res}: {why}）。記録を書かずに止まる", nxt, got
+    return (f"設計 PR #{pr} をマージできなかった（{res}: {why}）。記録を書かずに止まる", nxt), got, False
 
 
-def _answer_approved(run, state: Path, pr: int, by: str, what: str, repo: Path, msg: dict, sprint: Path | None, metrics: dict) -> Answered:
+def _answer_approved(run, rec: GateRecord, rid: str, work: Path, sprint: Path | None, metrics: dict) -> Answered:
     """承認の答え: 設計承認ゲートの記録が無ければ書き、設計 PR のマージのステージの `resume` を続きにする。
     答えにマージの結果が載り、それがマージ済み（`MERGED_RESULTS`）でなく、やり直し・人のマージの確認（`_settle_unmerged`）でも
     マージ済みにならなければ記録を書かない。続く `design-approved` と `--expect-head` の無いマージのプランが、承認していない
     先端（CI を直す push・衝突を解く取り込み）を通さないためである。"""
     merge = metrics.get("merge") if isinstance(metrics.get("merge"), dict) else {}
-    left = _settle_unmerged(run, repo, pr, msg, merge) if merge else None
+    left, got, merged = _settle_unmerged(run, rec, rid, work, merge) if merge else (None, merge, False)
+    metrics = {**metrics, "merge": got or metrics.get("merge")}
     if left is not None:
-        head, nxt, got = left
-        return Answered("gate", head, 10, {**metrics, "merge": got, "next": nxt})
-    if not _has_gate(state, pr, by, "approved") and (
-        err := _write_gate(run, GateRecord(state=state, pr=pr, by=by, outcome="approved", what=what, repo=repo, msg=msg))
-    ):
+        head, nxt = left
+        return Answered("gate", head, 10, {**metrics, "next": nxt})
+    if not _has_gate(rec.state, rec.pr, rec.by, "approved") and (err := _write_gate(run, rec)):
         return Answered("stopped", f"設計承認ゲートの記録を書けない: {err}", 2, metrics)
-    nxt = _merge_resume(sprint)
-    return Answered("ok", f"設計 PR #{pr} の承認（{by}）を記録した。続きを流す", 0, {**metrics, "next": nxt})
+    nxt = _merge_resume(sprint, rec.msg.get("issue"), merged)
+    return Answered("ok", f"設計 PR #{rec.pr} の承認（{rec.by}）を記録した。続きを流す", 0, {**metrics, "next": nxt})
 
 
 def _answer_revise(work: Path, pr: int, ans: dict, sprint: Path | None, metrics: dict) -> Answered:

@@ -122,6 +122,20 @@ def test_merge_resume_starts_the_merge_queue_until_it_has_run(tmp_path, started)
     assert (got == command) is not started and got.endswith(f"--resume {tmp_path / 'done-3.json'}") is started
 
 
+@pytest.mark.parametrize(("merged", "step"), [(True, "merge"), (False, "approve")])
+def test_merge_resume_in_the_design_queue_continues_the_design_plan(tmp_path, merged, step):
+    """auto: 後ろのステージが設計の queue の --then なら、素の resume は handoff を流し直して 10 で止まる。設計のプランを承認の後から流す。"""
+    done = tmp_path / "done-1.json"
+    resume = f"python3 supervise.py queue --resume {done}"
+    stages = [
+        {"name": "設計", "plans": [], "command": f"python3 supervise.py queue 1-design-7.json --done {done}", "resume": resume},
+        {"name": "設計の結果", "plans": [], "then_of": "設計", "resume": resume},
+    ]
+    (tmp_path / "sprint.json").write_text(json.dumps({"ステージ": stages}, ensure_ascii=False))
+    done.with_suffix(".plans.json").write_text("{}")
+    assert pdg._merge_resume(tmp_path, 7, merged) == f"{resume} --from design-7={step}"
+
+
 # ---- 依頼の id（I2・I4） ----
 
 
@@ -256,7 +270,9 @@ def test_answer_design_retries_the_merge_with_the_approved_stamp(lane, monkeypat
     pl.send_answer(main, "p1", "la-g12-0123456789ab", "approved", by="user", merge={"result": res, "reason": "赤"})
     tried = []
     monkeypatch.setattr(
-        pdg.design_pr_merge, "merge_approved", lambda root, pr, stamp, run=None: tried.append(stamp) or {"result": again, "reason": "r"}
+        pdg.design_pr_merge,
+        "merge_approved",
+        lambda root, pr, stamp, run=None, infra_budget=3: tried.append(stamp) or {"result": again, "reason": "r"},
     )
     run = Run()
     got = pdg.answer_design(main, "p1", "la-g12-0123456789ab", sprint / "state.json", run=run)
@@ -266,6 +282,22 @@ def test_answer_design_retries_the_merge_with_the_approved_stamp(lane, monkeypat
         assert "問い直す" in got.metrics["next"]
     elif want == "gate":
         assert "同じ design-answer を打ち直す" in got.metrics["next"]
+
+
+def test_answer_design_retries_spend_one_infra_budget_per_request(lane, monkeypatch):
+    """CI の基盤待ちの再実行は、答えのマージと同じ依頼・stamp のやり直しの累計で上限を守る（打ち直しても既定の回数へ戻らない）。"""
+    main, sprint = lane
+    pl.send_answer(main, "p1", "la-g12-0123456789ab", "approved", by="user", merge={"result": "not_green", "infra_rerun": 1})
+    budgets = []
+
+    def merge(root, pr, stamp, run=None, infra_budget=3):
+        budgets.append(infra_budget)
+        return {"result": "not_green", "class": "infra", "infra_rerun": min(1, infra_budget)}
+
+    monkeypatch.setattr(pdg.design_pr_merge, "merge_approved", merge)
+    for _ in range(4):
+        assert pdg.answer_design(main, "p1", "la-g12-0123456789ab", sprint / "state.json", run=Run()).status == "gate"
+    assert budgets == [2, 1, 0, 0]
 
 
 class GhView(Run):
