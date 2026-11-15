@@ -178,14 +178,24 @@ class Lander:
             return Landed(False, "refused", f"#{pull.number} は承認されていない: {got.judgment.detail}")
         return None
 
-    def _merge(self, pull: Pull, bypass: bool = False) -> Landed:
-        """チェックの待ち・証跡の読み直しの後にマージする。`bypass` なら管理者の迂回で打つ（戻す PR は常に偽）。"""
-        kind = self._watch(pull)
-        if kind is not None:
-            return Landed(False, kind, f"#{pull.number} の必須のチェックが通らない（{kind}。打ち直さずに人へ戻す）")
+    def _blocker(self, pull: Pull, bypass: bool = False) -> Landed | None:
+        """マージの前の停止条件を順に確かめ、止まった結果（進めてよければ None）。
+
+        証跡の読み直し → 必須のチェックの待ち → 待ちの後の証跡の読み直し（本番ブランチ宛てでなければ読み直しは素通り）。
+        """
         refused = self._refusal(pull, bypass)
         if refused is not None:
             return refused
+        kind = self._watch(pull)
+        if kind is not None:
+            return Landed(False, kind, f"#{pull.number} の必須のチェックが通らない（{kind}。打ち直さずに人へ戻す）")
+        return self._refusal(pull, bypass)
+
+    def _merge(self, pull: Pull, bypass: bool = False) -> Landed:
+        """停止条件（`_blocker`）を確かめた後にマージする。`bypass` なら管理者の迂回で打つ（戻す PR は常に偽）。"""
+        blocked = self._blocker(pull, bypass)
+        if blocked is not None:
+            return blocked
         merge = self.hub.merge_as_admin if bypass else self.hub.merge
         outcome: MergeOutcome = merge(pull.number, expect_head=pull.head_sha, method=MERGE_METHOD)
         return Landed(outcome.merged, outcome.kind, outcome.detail)  # 迂回の印は _record が立てる
@@ -252,9 +262,6 @@ class Lander:
             return self._resume_merged(number, pull)
         version_decide.version_of_branch(pull.head_ref)
         bypass = self._bypass(pull)
-        refused = self._refusal(pull, bypass)
-        if refused is not None:
-            return refused
         done = self._merge(pull, bypass)
         if not done.merged or pull.base_ref != self.production:
             return done
