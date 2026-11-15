@@ -88,6 +88,42 @@ class Routed:
     sent: Optional[plg.Sent] = None
 
 
+def _design_gate_or_none(main: Path, name: str, lane: str, tool_input: dict, rows: list[dict]):
+    """設計承認の依頼の中身。組めなければ None（今どおり ask で送る。決定 3）。"""
+    import parallel_design_gate as pdg
+
+    try:
+        return pdg.design_gate(main, name, lane, tool_input, rows)
+    except Exception:  # noqa: BLE001 — 組めなければ今どおり ask で送る（決定 3）
+        return None
+
+
+def _route_gate1(main: Path, name: str, lane: str, gate, rows: list[dict], ledger_id: str, deadline_at) -> Routed:
+    """分岐 1: 設計承認の依頼を送る。同じ先頭の打ち直しは送らずに already を返す（I2）。"""
+    rid = f"{lane}-g{gate.pr}-{gate.stamp[:12]}{gate.suffix}"
+    state = {"sprint_state": gate.state}
+    if any(r.get("kind") == "gate1" and r.get("id") == rid for r in rows):  # 同じ先頭の打ち直し（I2）
+        return Routed("gate1", rid, {**state, "already": True})
+    if expired(deadline_at):
+        return Routed("late")
+    extra = {"returned": True} if gate.returned else {}
+    pl.request_gate1(
+        main, name, lane, gate.issue, gate.pr, gate.report, gate.state, gate.stamp, suffix=gate.suffix,
+        verdict=gate.verdict, reasons=gate.reasons, boundary=gate.boundary, ledger_id=ledger_id, **extra,
+    )  # fmt: skip
+    return Routed("gate1", rid, state)
+
+
+def _route_reused(main: Path, name: str, lane: str, prior: Prior, source: str, target: str, ledger_id: str, deadline_at) -> Routed | None:
+    """分岐 2: 同じ問いの前の答えを引き継ぐ。記録に失敗したら None（呼び出し元は分岐 3 へ落ちる）。"""
+    if expired(deadline_at):
+        return Routed("late")
+    if record_reused(main, name, lane, prior, source, target, ledger_id):
+        answer = {"answer": prior.answer} if prior.answer is not None else {}
+        return Routed("reused", prior.id, {"target": target, **answer})
+    return None
+
+
 def route_ask(main: Path, name: str, lane: str, got: dict, rows: list[dict]) -> Routed:
     """問いを 3 つの分岐の最初に当たったものへ送る。台帳へ書けなければ `OSError`（呼び出し元が 2 で終える）。"""
     import parallel_design_gate as pdg
@@ -96,33 +132,13 @@ def route_ask(main: Path, name: str, lane: str, got: dict, rows: list[dict]) -> 
     ledger_id, deadline_at = str(got.get("ledger_id") or ""), got.get("deadline_at")
     source = str((tool_input.get("metadata") or {}).get("source") or "")
     kind = sender_kind(main, name, lane)
-    gate = None
-    if kind == "sprint" and source == pdg.GATE1_SOURCE:
-        try:
-            gate = pdg.design_gate(main, name, lane, tool_input, rows)
-        except Exception:  # noqa: BLE001 — 組めなければ今どおり ask で送る（決定 3）
-            gate = None
+    gate = _design_gate_or_none(main, name, lane, tool_input, rows) if kind == "sprint" and source == pdg.GATE1_SOURCE else None
     if gate is not None:  # 分岐 1
-        rid = f"{lane}-g{gate.pr}-{gate.stamp[:12]}{gate.suffix}"
-        state = {"sprint_state": gate.state}
-        if any(r.get("kind") == "gate1" and r.get("id") == rid for r in rows):  # 同じ先頭の打ち直し（I2）
-            return Routed("gate1", rid, {**state, "already": True})
-        if expired(deadline_at):
-            return Routed("late")
-        extra = {"returned": True} if gate.returned else {}
-        pl.request_gate1(
-            main, name, lane, gate.issue, gate.pr, gate.report, gate.state, gate.stamp, suffix=gate.suffix,
-            verdict=gate.verdict, reasons=gate.reasons, boundary=gate.boundary, ledger_id=ledger_id, **extra,
-        )  # fmt: skip
-        return Routed("gate1", rid, state)
+        return _route_gate1(main, name, lane, gate, rows, ledger_id, deadline_at)
     target = ask_target(tool_input, cwd).target
     prior = prior_of(rows, lane, source, target) if kind == "helper" and target else None  # 同じ問いは一時レーンだけ（I5）
-    if prior is not None:  # 分岐 2
-        if expired(deadline_at):
-            return Routed("late")
-        if record_reused(main, name, lane, prior, source, target, ledger_id):
-            answer = {"answer": prior.answer} if prior.answer is not None else {}
-            return Routed("reused", prior.id, {"target": target, **answer})
+    if prior is not None and (reused := _route_reused(main, name, lane, prior, source, target, ledger_id, deadline_at)):  # 分岐 2
+        return reused
     if expired(deadline_at):  # 分岐 3
         return Routed("late")
     sent = pl.request_ask(main, name, lane, tool_input, cwd, ledger_id, target=target or None)
