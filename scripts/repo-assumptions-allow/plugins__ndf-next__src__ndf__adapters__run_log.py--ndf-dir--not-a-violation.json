@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf-next/src/ndf/adapters/run_log.py",
+  "name": "ndf-dir",
+  "kind": "not-a-violation",
+  "reason": "旧実装の置き場を出所として示す注記",
+  "count": 1
+}

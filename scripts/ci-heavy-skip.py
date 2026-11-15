@@ -7,7 +7,7 @@
 1. PR の差分（merge-base..head）が版数と説明だけ。版上げの PR（release/v<版> → develop）
 2. PR の差分が文書のファイルだけ（NDF の差分の分類 `lib/diff_kinds.py`。宣言は `.ndf/project.json` の `docs`）。
    テストが読む文書があれば `docs_tests` に対応するテストを出し、文書のテストのジョブが走らせる
-2b. PR の差分のうち文書でないファイルが、作り直しのディレクトリ（`SELF_TESTED`。#1142 の `plugins/ndf-next/`）と
+2b. PR の差分のうち文書でないファイルが、作り直しのディレクトリ（`SELF_TESTED`。#1142 の `plugins/ndf-next/` と、その機能の対応表の `scripts/ndf-next-parity/`）と
    その workflow だけ。そのディレクトリは自分の workflow（`ndf-next.yml`）のテストと検査で確かめ、根のテストと
    runtime smoke はそのディレクトリを読まない（マーケットプレイスに載せていない。#1142 の決定 74）。
    入れ替え（#1142 の S2）で ndf-next.yml と一緒に `SELF_TESTED` を消す
@@ -39,7 +39,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import Callable, NamedTuple
+from typing import Callable, NamedTuple, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 from ndf_wrappers import require  # noqa: E402  根の lock で包みの依存を解決する（#1142 の決定 19）
@@ -50,7 +50,12 @@ import diff_kinds  # noqa: E402
 
 BEHAVIOR_AS_CODE = {"runtime-plugin-smoke.yml"}
 # 自分の workflow で確かめるディレクトリと、その workflow（規則 2b）
-SELF_TESTED = ("plugins/ndf-next/", ".github/workflows/ndf-next.yml", ".github/workflows/ndf-next-checks.yml")
+SELF_TESTED = (
+    "plugins/ndf-next/",
+    "scripts/ndf-next-parity/",
+    ".github/workflows/ndf-next.yml",
+    ".github/workflows/ndf-next-checks.yml",
+)
 MANIFEST_RE = re.compile(
     r"^(\.claude-plugin/marketplace\.json"
     r"|plugins/.+/(\.claude-plugin/|\.codex-plugin/)?plugin\.json)$"
@@ -98,7 +103,11 @@ def kinds_of(root: str, a: str, b: str, behavior_as_code: bool = False) -> diff_
 
 def version_only(root: str, a: str, b: str, behavior_as_code: bool = False) -> tuple[bool, str]:
     """a..b の差分が版数と説明だけか。(判定, 省かない理由) を返す。"""
-    k = kinds_of(root, a, b, behavior_as_code)
+    return _version_only_of(root, a, b, kinds_of(root, a, b, behavior_as_code))
+
+
+def _version_only_of(root: str, a: str, b: str, k: diff_kinds.DiffKinds) -> tuple[bool, str]:
+    """分類済みの a..b の差分 `k` が版数と説明だけか。(判定, 省かない理由) を返す。"""
     if k.unknown:
         return False, k.unknown
     untested = set(k.docs) - set(k.tested)
@@ -149,16 +158,8 @@ def selects_units(decl: dict) -> tuple[bool, str]:
         return True, f"宛先の branch_flow を読めない（{e}）"
 
 
-def decide(
-    root: str, event: str, base: str, head: str, repo: str, workflow: str, branch: str = "", api: Callable[[str], dict] = gh_api
-) -> Decision:
-    if event != "pull_request":
-        return Decision(False, f"{event or '不明'} のイベントでは省かない")
-    mb = git(root, "merge-base", base, head)
-    if mb.returncode != 0:
-        return Decision(False, "merge-base が求まらない")
-    as_code = workflow in BEHAVIOR_AS_CODE
-    k = kinds_of(root, mb.stdout.strip(), head, as_code)
+def _docs_or_self_tested(k: diff_kinds.DiffKinds, as_code: bool) -> Optional[Decision]:
+    """規則 2・2b: 差分が文書だけか、自分の workflow で確かめるディレクトリと文書だけなら省く判定。当たらなければ None。"""
     if k.docs_only():
         tests = () if as_code else tuple(k.tests)
         return Decision(True, f"差分が文書のファイルだけ（文書 {len(k.docs)} ファイル・テストが読む文書 {len(k.tested)} ファイル）", tests)
@@ -169,12 +170,25 @@ def decide(
             f"差分が自分の workflow で確かめる {SELF_TESTED[0]} と文書だけ（{len(k.code)} ファイル・文書 {len(k.docs)} ファイル）",
             tests,
         )
-    ok, why = version_only(root, mb.stdout.strip(), head, as_code)
-    if ok:
-        return Decision(True, "差分が版数と説明だけ")
+    return None
+
+
+def _promotion_decision(
+    root: str,
+    mb_sha: str,
+    base: str,
+    head: str,
+    repo: str,
+    workflow: str,
+    branch: str,
+    as_code: bool,
+    why: str,
+    api: Callable[[str], dict],
+) -> Decision:
+    """規則 3: 本番の PR で、head の祖先のうち比べるブランチで通り、そこからの差分が版数と説明だけのコミットを探す。"""
     # base が merge-base から中身を足していなければ、マージの結果は head と同じ木になる
     # （main は develop のマージしか受けないので、main のマージのコミットは develop に無くてよい）
-    if git(root, "diff", "--quiet", mb.stdout.strip(), base).returncode != 0:
+    if git(root, "diff", "--quiet", mb_sha, base).returncode != 0:
         return Decision(False, f"{why}（base に head の無い変更がある）")
     decl = target_decl(root, base)
     selected, broken = selects_units(decl)
@@ -188,6 +202,26 @@ def decide(
         if passed_on_branch(repo, workflow, sha, branch, api):
             return Decision(True, f"{sha[:12]} が {branch} で通り、そこからの差分が版数と説明だけ")
     return Decision(False, f"{why}（{branch} で通った同じ中身のコミットが無い）")
+
+
+def decide(
+    root: str, event: str, base: str, head: str, repo: str, workflow: str, branch: str = "", api: Callable[[str], dict] = gh_api
+) -> Decision:
+    if event != "pull_request":
+        return Decision(False, f"{event or '不明'} のイベントでは省かない")
+    mb = git(root, "merge-base", base, head)
+    if mb.returncode != 0:
+        return Decision(False, "merge-base が求まらない")
+    mb_sha = mb.stdout.strip()
+    as_code = workflow in BEHAVIOR_AS_CODE
+    k = kinds_of(root, mb_sha, head, as_code)
+    found = _docs_or_self_tested(k, as_code)
+    if found is not None:
+        return found
+    ok, why = _version_only_of(root, mb_sha, head, k)
+    if ok:
+        return Decision(True, "差分が版数と説明だけ")
+    return _promotion_decision(root, mb_sha, base, head, repo, workflow, branch, as_code, why, api)
 
 
 def main(argv: list[str] | None = None) -> int:

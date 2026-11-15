@@ -4,7 +4,7 @@ import copy
 
 import pytest
 
-from ndf.parity import table
+from parity import table
 
 
 @pytest.fixture

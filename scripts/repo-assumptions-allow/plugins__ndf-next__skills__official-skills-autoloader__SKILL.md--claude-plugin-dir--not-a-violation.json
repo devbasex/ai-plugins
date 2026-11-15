@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf-next/skills/official-skills-autoloader/SKILL.md",
+  "name": "claude-plugin-dir",
+  "kind": "not-a-violation",
+  "reason": "Anthropic の公式の Skill をプラグインとして入れる手順と、その配布の置き場の説明。対象リポジトリの前提でない",
+  "count": 1
+}

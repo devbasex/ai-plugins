@@ -83,6 +83,7 @@ worktree・チーム・公開・[estimate.schema.json](../../contracts/schemas/d
 
 | キー | 型 | 既定値 | 取りうる値 | 必須か | 説明 |
 | --- | --- | --- | --- | --- | --- |
+| `allocation_minutes` | object | — | — | 任意 | cross-refactoring の配分の 1 件あたりの分を種類ごとに上書きする。省いた種類は初期値（skills/cross-refactoring/data/allocation-defaults.json）を使う。初期値に無い種類は止める。まだ読まない（M4 で読む。配分を決める処理は M4 #3298 で入る） |
 | `min_samples`（非推奨。読み手は読まない） | integer | — | — | 任意 | 読み手は読まない。書いてある宣言を断らないために残す（#2505） |
 | `records_dir` | string | — | — | 任意 | 実績の記録の置き場（リポジトリの根から。絶対パスも可） |
 | `scale` | array of integer | — | — | 任意 | Size の取りうる値（小さい順に並べ替えて使う）。省くか空なら 1・2・3・5・8・13・20 |
@@ -324,13 +325,14 @@ worktree・チーム・公開・[supervise.schema.json](../../contracts/schemas/
 | キー | 型 | 既定値 | 取りうる値 | 必須か | 説明 |
 | --- | --- | --- | --- | --- | --- |
 | `$schema` | string | — | — | 任意 | 編集のときの補完に使うスキーマの位置。読み手は参照しない |
-| `base_branch` | string | — | — | 任意 | 開発の起点ブランチ。worktreeの分岐元になり、follow_branch が true のときはメインディレクトリの追従先にもなる。未指定なら origin の HEAD が指すブランチを使う。指定した名前が origin にもローカルにも無いときは既定へ落とさず解決に失敗する |
+| `base_branch` | string | — | — | 任意 | 開発の起点ブランチ。worktreeの分岐元になり、follow_branch が true のときはメインディレクトリの追従先にもなる。未指定なら remote のリモートの HEAD が指すブランチを使う。指定した名前がそのリモートにもローカルにも無いときは既定へ落とさず解決に失敗する |
 | `branch_flow`（メインディレクトリから読む） | object | — | — | 任意 | ブランチ運用の宣言。無ければ既定値の行（ベースブランチから切り、ベースブランチを丸ごと出す） |
 | `deps` | object | — | — | 任意 | 依存の用意。worktree を作った直後に copy_from_main・copy_as_real・run の順に行う。無いか空なら何もしない。個人設定からは反映しない |
 | `follow_branch` | boolean | `false` | — | 任意 | true のときだけ、セッションセッション開始 hook がメインディレクトリのブランチを稼働中のworktreeへ detached HEAD で追従させる。既定ではメインディレクトリの HEAD を動かさない。真偽値以外は false と同じ |
 | `guard` | object | — | — | 任意 | メインディレクトリでの編集の案内（guard）。allow_paths は案内を出さないパス |
 | `localenv` | object | — | — | 任意 | ローカルの動作の確かめ（compose）の宣言。個人設定の値を重ねる |
-| `production_branch`（メインディレクトリから読む） | string | — | — | 任意 | リリースした版が常用する利用者へ届く本番チャネルのブランチ。この先へ進める操作は人手の承認を求める。開発の起点である base_branch とは別の鍵で、流用しない。未指定なら origin の HEAD が指すブランチを使う。指定した名前が origin にもローカルにも無いときは既定へ落とさず解決に失敗する |
+| `production_branch`（メインディレクトリから読む） | string | — | — | 任意 | リリースした版が常用する利用者へ届く本番チャネルのブランチ。この先へ進める操作は人手の承認を求める。開発の起点である base_branch とは別の鍵で、流用しない。未指定なら remote のリモートの HEAD が指すブランチを使う。指定した名前がそのリモートにもローカルにも無いときは既定へ落とさず解決に失敗する |
+| `remote` | string | `"origin"` | — | 任意 | 取得・照合・差分の基準・送信に使う git のリモートの名前。未指定なら既定の名前を使う。- で始まる名前は受けない |
 | `testenv` | object | — | — | 任意 | テスト環境（ポートの採番・ゴールデンのタグ・リセット）の宣言。個人設定の値を重ねる |
 | `version` | integer | — | `1` | 必須 | 宣言の形の版。読み手は知らない版を読まない |
 

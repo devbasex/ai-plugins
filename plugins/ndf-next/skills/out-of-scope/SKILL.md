@@ -10,8 +10,6 @@ allowed-tools:
 
 # 範囲外の課題を、見つけたその場で起票する
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `issue-file.py`（M6）・`project-mvv.py`（M7）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
-
 作業の途中で見つけた**この変更の範囲に含まれない課題**を、発見の瞬間に issue へ残す。工程の外に置き、どの工程からも
 呼ぶ。決まった手順は `issue-file.py` が行い、1 行の JSON と終了コードで返す（`$SCRIPTS` は `development-workflow` の
 `references/scripts-lookup.md`）。

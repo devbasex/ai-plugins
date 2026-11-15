@@ -1,7 +1,5 @@
 # 並列開発のオーガナイザー（`--parallel <計画名>`）
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `handoff.py`（M7）・`mvv-gate.py`（P2）・`parallel.py`（P3）・`sprint-state.py`（P1b）。キューの答え待ちの停止（止めたプランと、止まり方・解けたかの結果）は `ndf plan queue` がまだ持たず、P3 #3097 が `ndf` の副命令に足す。新しいプラグインだけではまだ打てない。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
-
 並列の計画（[issue-plan-strategy の parallel-plan.md](../../issue-plan-strategy/references/parallel-plan.md) で作る）を、
 1 行で始める。
 
@@ -359,7 +357,7 @@ CI の失敗・衝突・版数の衝突は、リリースプランの直しの�
 
 ## レーンの動き方
 
-並列の計画のレーンに共通の規定である。各規定の「起きた例」は、並行開発のモデルの文書（ai-plugins の `docs/ndf-parallel-model.md`）の
+並列の計画のレーンに共通の規定である。各規定の「起きた例」は、並行開発のモデルの文書（NDF のリポジトリの `docs/ndf-parallel-model.md`）の
 「レーンの動き方の規定で欠けているもの」の表の行を指す。
 
 ### 形によらない規定

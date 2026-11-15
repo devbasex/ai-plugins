@@ -81,7 +81,7 @@ git log origin/develop --since=2026-11-13T19:40:00Z --no-merges --format='%h %s'
 試走は、ndf-next だけを読む起動（`bin/ndf-claude`）でスプリントと計画を流し、行ごとの `trial` を書く。`trial` は次のコマンドが記録（`trial/<日付>.json` の `passed`）と本文から書く。手で書き換えない。
 
 ```bash
-cd plugins/ndf-next && PYTHONPATH=src uv run --frozen --project . python -m ndf.parity.trial.probe --write
+cd scripts/ndf-next-parity && uv run --frozen --project ../../plugins/ndf-next python -m parity.trial.probe --write
 ```
 
 | 結果 | 決まり方 |

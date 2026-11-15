@@ -1,7 +1,5 @@
 # 通過記録と、設計 Pull Request のマージの縛り
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `progress-record.sh`（M7）・`projects-sync.sh`（M7）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
-
 必須の工程を通らずにリリースまで進んでも、それに気づく出力がどこにも出ない。設計
 Pull Request のマージが、人間の承認を経ずに実行できる。前者は進捗記録のスクリプトが
 積む通過記録で、後者は tool 実行前の判定で扱う。
@@ -90,7 +88,7 @@ ${TMPDIR:-/tmp}/ndf-stages/              # どちらも作れないとき
 `git config --get remote.origin.url` から取る。**通信しない。**
 
 ```json
-{"version": 1, "repo": "devbasex/ai-plugins", "issue": 221, "mode": "standard",
+{"version": 1, "repo": "<owner>/<repo>", "issue": 221, "mode": "standard",
  "stages": ["作業場所の用意", "要求と受け入れ条件", "設計", "ドキュメント再構成",
             "ドキュメントレビュー"],
  "updated_at": "2026-09-03T00:00:00Z"}

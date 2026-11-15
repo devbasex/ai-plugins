@@ -1,7 +1,5 @@
 # 開発ワークフローの用語集
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `check-trigger.py`（M1）・`doc-lint.py`（M7）・`glossary.py`（M7）・`handoff.py`（M7）・`merged-steps.py`（M8）・`mvv-gate.py`（P2）・`pr-review-steps.py`（M5）・`progress-record.sh`（M7）・`projects-sync.sh`（M7）・`release-steps.py`（M2）・`release-verification-steps.py`（M2）・`spec-copy.py`（M7）・`sprint-close.py`（M1）・`sprint-state.py`（P1b）・`state.py`（M5）・`upkeep.py`（M6）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
-
 `development-workflow` と、そこから呼ぶ Skill・スクリプトで使う語を集める。**定義は各語の正本が持ち、
 この文書は 1 行の要約と正本への案内だけを持つ。** 食い違ったときは正本を正とする。
 
@@ -205,7 +203,7 @@ flowchart TB
 | リリースブランチ | 本番チャネルへ入れる変更を集め、版を上げるブランチ | `release/v<版>` | [release-steps.md](../../release/references/release-steps.md) |
 | リリースの単位 | 選んで集める取り込み方で、リリースが選ぶ 1 つのブランチ。本番チャネルに含まれていないコミットを持つスプリントブランチ | `sprint/<名前>` | [worktree の declaration.md](../../worktree/references/declaration.md) の「ブランチ運用を宣言するリポジトリ」 |
 | スプリントブランチ | 課題の Pull Request を集め、ベースブランチへの Pull Request をスプリントで 1 本にするブランチ。`fast` では作らない | `sprint/<名前>` | [parallel-work.md](parallel-work.md) の「スプリントの中の並列の 4 つの形」 |
-| 安定版と実験版 | NDF の変更の 2 つの経路。既定で働くもの（安定版）は工程どおりに、呼んだときだけ働くもの（実験版）はその場で実装して使ってから入れる | stable / experimental、台帳 `docs/ndf-experiments.md` | ai-plugins の `AGENTS.md` の「安定版と実験版」 |
+| 安定版と実験版 | NDF の変更の 2 つの経路。既定で働くもの（安定版）は工程どおりに、呼んだときだけ働くもの（実験版）はその場で実装して使ってから入れる | stable / experimental、台帳 `docs/ndf-experiments.md` | NDF のリポジトリの `AGENTS.md` の「安定版と実験版」 |
 | 即時修正 | 4 つの条件（[../SKILL.md](../SKILL.md) の「即時修正」）を満たす不具合を、起票せず、その場のプランで直すこと。マージ済みの変更の不具合なら流出不具合として記録する | `new impl --escape-of <PR>` | [../SKILL.md](../SKILL.md) の「即時修正」、[pace.md](pace.md) の「流出不具合の記録」 |
 | 範囲外の課題 | この変更の受け入れ条件にも直す対象にも入らない課題。見つけたその場で issue にする | `/ndf:out-of-scope` | [out-of-scope](../../out-of-scope/SKILL.md) |
 | 棚卸し | 既存の課題の本文・マイルストーン・ラベルを現状に合わせ、着手の順位を決め直すこと。スクラムのバックログリファインメントに当たる。工程表の行名でもある | `/ndf:backlog-refinement`、`upkeep.py`、進捗記録の `stage 棚卸し` | [backlog-refinement](../../backlog-refinement/SKILL.md) の「用語」 |

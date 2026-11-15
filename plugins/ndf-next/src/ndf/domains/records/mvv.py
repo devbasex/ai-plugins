@@ -64,7 +64,7 @@ def decl_path() -> str:
 
 
 def decl_at(root: Path, ref: str) -> dict[str, Any]:
-    """参照（`origin/<開発の起点>` など）にある MVV の宣言を読む。読めなければ `MvvError`。"""
+    """参照（`<リモート名>/<開発の起点>` など）にある MVV の宣言を読む。読めなければ `MvvError`。"""
     try:
         text = git_mod.Git(root).run("show", f"{ref}:{decl_path()}")
         raw = json.loads(text)
@@ -77,7 +77,7 @@ def decl_at(root: Path, ref: str) -> dict[str, Any]:
 
 def signals(root: Path, base_branch: str) -> md.Signals:
     """ベースブランチの宣言の現行の版で、改訂の兆候を数える（本番のブランチの古い版で数えない）。"""
-    decl = decl_at(root, md.signals_ref(base_branch, git_mod.ORIGIN))
+    decl = decl_at(root, md.signals_ref(base_branch, git_mod.Git(root).remote()))
     rows, _ = jsonl.read_rows(record_path("mvv-signals"))
     return md.count_signals(rows, decl, repo_key(root))
 

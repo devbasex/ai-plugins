@@ -289,6 +289,7 @@ class Delivery:
     cause: Optional[str] = None
     detail: str = ""
     replies: list[str] = field(default_factory=list)
+    notice: Optional[str] = None
 
 
 def _written(path: Path) -> bool:
@@ -352,9 +353,13 @@ def _worker_env(kind: str) -> Iterator[None]:
             os.environ[identity.WORKER_KIND_ENV] = before
 
 
-def _args_for(system: str, root: Optional[Path], resume: Optional[str]) -> list[str]:
-    """worker の起動の引数（`resume` があればその会話を起こし直す）。"""
-    return claude.claude_args(claude.ClaudeCall(system, claude.Permission.FULL, resume=resume), root)
+def _args_for(system: str, root: Optional[Path], cwd: Path) -> claude.PluginArgs:
+    """worker の起動の引数（会話の指定を除く）。導入済みの一覧は worker の `cwd` で読む。
+
+    一覧の読み取り（`claude plugin list --json` の起動）は 1 回の委譲で 1 回だけにするため、`delegate` の頭で 1 回組み、
+    新しい会話は `--session-id`、起こし直しは `--resume` だけを足す。
+    """
+    return claude.claude_launch(claude.ClaudeCall(system, claude.Permission.FULL), root, cwd=cwd)
 
 
 def _stopped_detail(handoff: Handoff) -> str:
@@ -378,7 +383,8 @@ def delegate(
     """
     out = Delivery(session=session or str(uuid.uuid4()))
     handoff.result_file.unlink(missing_ok=True)
-    argv = _args_for(system, root, None) + ["--session-id", out.session]
+    base, out.notice = _args_for(system, root, handoff.cwd)
+    argv = base + ["--session-id", out.session]
     prompt = f"{handoff.prompt}\n\n" + RESULT_FILE_LINE.format(result_file=handoff.result_file)
     for attempt in range(RESUMES + 1):
         with _worker_env(handoff.kind):
@@ -388,7 +394,7 @@ def delegate(
         written = _written(handoff.result_file)
         if (written and not _missing_record(handoff)) or _reply_failed(reply, out):
             return out
-        argv = _args_for(system, root, out.session)
+        argv = base + ["--resume", out.session]
         prompt = RECORD_PROMPT if written else RESUME_PROMPT
     out.cause = "work_stopped"
     out.detail = _stopped_detail(handoff)
@@ -628,8 +634,12 @@ def _cmd_run(a: argparse.Namespace) -> int:
     items = [{"kind": "session", "session": done.session, "result_file": str(handoff.result_file)}]
     log.info("worker の受け渡しを終えた", extra={"kind": handoff.kind, "attempts": done.attempts, "cause": done.cause})
     if done.cause is not None:
-        return result.emit(result.stopped(TOOL, done.cause, done.detail, items=items, metrics=metrics))
-    return result.emit(outcome_of(handoff.kind, handoff.result_file, items, metrics, done.attempts))
+        out = result.stopped(TOOL, done.cause, done.detail, items=items, metrics=metrics)
+    else:
+        out = outcome_of(handoff.kind, handoff.result_file, items, metrics, done.attempts)
+    if done.notice is not None:
+        out.setdefault("warnings", []).append(done.notice)
+    return result.emit(out)
 
 
 def _closing_items(hits: Sequence[ClosingHit]) -> list[dict[str, Any]]:

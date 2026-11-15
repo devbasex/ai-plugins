@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf-next/src/ndf/testing/ci_logs.py",
+  "name": "pytest",
+  "kind": "not-a-violation",
+  "reason": "suite の runner で選ぶパーサーの対応表に登録した 1 行。登録の無い runner のログは読まず、pytest の形をほかのランナーに当てない",
+  "count": 4
+}

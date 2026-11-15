@@ -5,8 +5,6 @@ description: "Delegate coding, review, or research to the codex, agy, kiro-cli, 
 
 # 外部 AI 委譲スキル (Codex / agy / Kiro / Claude)
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `external-ai.py`（AD3+）・`pr-review-steps.py`（M5）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
-
 ## 概要
 
 `codex` CLI（OpenAI Codex）、`agy` CLI（Google Antigravity）、`kiro-cli`（Kiro CLI）、
