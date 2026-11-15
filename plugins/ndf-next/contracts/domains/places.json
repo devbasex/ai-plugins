@@ -21,6 +21,7 @@
     {"id": "measured", "root": "state", "path": "measured", "tracked": false},
     {"id": "relay-hub", "root": "state", "path": "relay/hub", "tracked": false},
     {"id": "mvv-state", "root": "state", "path": ".", "tracked": false, "env": "NDF_MVV_STATE_DIR"},
+    {"id": "usage-ledger", "root": "state", "path": "usage", "tracked": false, "env": "NDF_USAGE_DIR"},
     {"id": "organizer", "root": "env", "path": ".", "tracked": false, "env": "NDF_ORGANIZER_DIR"},
     {"id": "issue-request", "root": "env", "path": ".", "tracked": false, "env": "NDF_ISSUE_REQUEST_FILE"},
     {"id": "relay-wrappers", "root": "state", "path": "relay/wrappers", "tracked": false},
