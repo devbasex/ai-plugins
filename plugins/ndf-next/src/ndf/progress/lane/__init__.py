@@ -88,7 +88,9 @@ def format_check(view: PlanView, now: Mapping[str, Any], version: Optional[str])
     if diff:
         raise FormatMismatch(f"計画 {view.name} の形の番号が自分と違う: {'; '.join(diff)}")
     if view.ndf_version is not None and version is not None and view.ndf_version != version:
-        return [f"計画 {view.name} を作った NDF のバージョン {view.ndf_version} と自分のバージョン {version} が違う（形は同じなので続ける）"]
+        return [
+            f"計画 {view.name} を作った NDF のバージョン {view.ndf_version} と自分のバージョン {version} が違う（形は同じなので続ける）"
+        ]
     return []
 
 

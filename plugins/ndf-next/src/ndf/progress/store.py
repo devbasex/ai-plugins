@@ -287,7 +287,9 @@ def ensure_schema(store: Store, now: datetime) -> None:
         if found is not None and store.path is None:
             # バージョン 1 の表は列の名前が古い。列を変える移行は持たず、表を作り直す手順を示して止まる
             shown = store.engine.url.render_as_string(hide_password=True)
-            raise durable.StoreBroken(f"ステートマシンの表のバージョン {found} は列の名前が古い。表 ndf_progress_* を消して作り直す: {shown}")
+            raise durable.StoreBroken(
+                f"ステートマシンの表のバージョン {found} は列の名前が古い。表 ndf_progress_* を消して作り直す: {shown}"
+            )
         if found is not None and store.path is not None:
             _backup_or_warn(store, now, force=True)
         _write_schema(store.engine, found)

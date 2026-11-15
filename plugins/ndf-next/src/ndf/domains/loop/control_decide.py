@@ -108,7 +108,9 @@ def start(state: rec.LoopState, c: Ctx, ttl: float) -> Decision:
     if state.status == rec.HALTED:
         return refuse(REFUSED, f"ループ {c.name} は止めた。新しい名前で始める")
     if state.held_by_other(c.session, c.now):
-        return refuse(REFUSED, f"ループ {c.name} のキーはセッション {state.holder} が持つ（期限 {state.lease_until:.0f}）", get_step(c.name))
+        return refuse(
+            REFUSED, f"ループ {c.name} のキーはセッション {state.holder} が持つ（期限 {state.lease_until:.0f}）", get_step(c.name)
+        )
     ev = rec.event(rec.LEASE_TAKEN, c.now, session=c.session, until=c.now + ttl)
     after = rec.apply(state, ev)
     return Decision(f"ループ {c.name} のキーを取った", (ev,), next=next_step(after, c.name))
@@ -235,7 +237,9 @@ def answer(state: rec.LoopState, c: Ctx, pr: int, given: str, head: Optional[str
     if shown is None:
         return refuse(PRECONDITION, f"PR #{pr} の設計承認ゲートを記録していない", regate)
     if head != shown:
-        return refuse(PRECONDITION, f"PR #{pr} の HEAD がゲートを出した {shown[:12]} から {str(head)[:12]} へ動いた。資料を出し直す", regate)
+        return refuse(
+            PRECONDITION, f"PR #{pr} の HEAD がゲートを出した {shown[:12]} から {str(head)[:12]} へ動いた。資料を出し直す", regate
+        )
     ev = rec.event(rec.GATE_ANSWERED, c.now, lap=lap.number, pr=pr, answer=given, head=head, note=note)
     return Decision(f"PR #{pr} の回答 {given} を記録した", (ev,), metrics={"head": head, "answer": given})
 

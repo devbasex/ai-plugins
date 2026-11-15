@@ -228,7 +228,9 @@ def _add_mvv(sub: Any) -> None:
     signals.add_argument("--base", required=True, help="ベースブランチ")
     signals.set_defaults(handler=_mvv_signals)
     answer = m.add_parser("answer")
-    answer.add_argument("--version", type=int, default=None, help="回答したときの MVV のバージョン（無ければ worktree の設定の現行のバージョン）")
+    answer.add_argument(
+        "--version", type=int, default=None, help="回答したときの MVV のバージョン（無ければ worktree の設定の現行のバージョン）"
+    )
     answer.set_defaults(handler=_mvv_answer)
 
 

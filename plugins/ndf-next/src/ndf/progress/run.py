@@ -912,7 +912,9 @@ def work(st: store.Store, machine_id: str, cwd: Path, env: Env) -> dict[str, Any
         locked = _work_lock(stack, st, machine_id, env.sleep)
         launch_path(st.root, machine_id).unlink(missing_ok=True)  # 排他を取った（か、ほかの作業が持つ）ので起動のマーカーは要らない
         if not locked:
-            return result.result(TOOL, result.OK, f"ステートマシン {machine_id} はほかの作業が流している", metrics={"machine_id": machine_id})
+            return result.result(
+                TOOL, result.OK, f"ステートマシン {machine_id} はほかの作業が流している", metrics={"machine_id": machine_id}
+            )
         return _drive(Drive(st, machine_id, cwd, env, inline=True))
     raise AssertionError("到達しない")
 

@@ -415,7 +415,10 @@ def _keep_unrestored(backup: Path) -> None:
         return
     kept = backup.with_name(f"{backup.name}-unrestored-{time.time_ns()}")
     backup.rename(kept)
-    diag(f"前の kiro の起動で戻せなかったバックアップを {kept} へ移して残す（起動の前の {KIRO_AGENTS} の中身。戻すのは人の手で）", agent="kiro")
+    diag(
+        f"前の kiro の起動で戻せなかったバックアップを {kept} へ移して残す（起動の前の {KIRO_AGENTS} の中身。戻すのは人の手で）",
+        agent="kiro",
+    )
 
 
 def _backup_agents(workdir: Path, paths: AgentPaths) -> _AgentsBackup:

@@ -12,7 +12,18 @@ import pytest
 
 from ndf import identity
 from ndf.adapters.git import Completed, Git
-from ndf.domains.worktree import cli_env, container, create, deps, allocations, localenv, localenv_decide, testenv, testenv_decide, testenv_sweep
+from ndf.domains.worktree import (
+    cli_env,
+    container,
+    create,
+    deps,
+    allocations,
+    localenv,
+    localenv_decide,
+    testenv,
+    testenv_decide,
+    testenv_sweep,
+)
 
 
 def _declare(main: Path, run_git: Callable, extra: dict) -> None:

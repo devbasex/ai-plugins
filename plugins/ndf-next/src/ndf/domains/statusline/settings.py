@@ -190,7 +190,9 @@ def _migrate(p: Paths, data: dict[str, Any], line: dict[str, Any]) -> Switched:
     if not p.backup.exists():
         _write(p.backup, line)
     _write(p.settings, _with_ndf(data))
-    return Switched("updated", f"NDF の旧いコピーを指す設定を正規の保存先へ移した（旧い設定は {p.backup} にバックアップした）", _ndf_line(), line)
+    return Switched(
+        "updated", f"NDF の旧いコピーを指す設定を正規の保存先へ移した（旧い設定は {p.backup} にバックアップした）", _ndf_line(), line
+    )
 
 
 def status(p: Paths) -> Switched:

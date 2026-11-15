@@ -42,5 +42,15 @@ def mvv(versions: int = 2) -> dict[str, Any]:
     rows = []
     for n in range(1, versions + 1):
         key, value = old_validation(f"2026-01-0{n}T00:00:00+00:00")
-        rows.append({"version": n, "sha256": "0" * 64, "approved_at": "2026-01-01T00:00:00+00:00", "approved_by": "a", key: value, "changes": [], "body": "# MVV\n"})
+        rows.append(
+            {
+                "version": n,
+                "sha256": "0" * 64,
+                "approved_at": "2026-01-01T00:00:00+00:00",
+                "approved_by": "a",
+                key: value,
+                "changes": [],
+                "body": "# MVV\n",
+            }
+        )
     return {"version": 1, "body": "mvv.md", "settings": {"revise_after": {"overrides": 3}}, "versions": rows}

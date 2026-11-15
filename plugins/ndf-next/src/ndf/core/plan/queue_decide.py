@@ -134,7 +134,9 @@ def stage_blocked(prior: Sequence[Outcome], accepts_gate: bool) -> Optional[str]
     held = [o for o in prior if o.status != OK and not (o.status == GATE and accepts_gate)]
     if not held:
         return None
-    return "前のステップのプランが完了でない: " + "、".join(f"{o.name}（{o.status if o.status is not None else '流していない'}）" for o in held)
+    return "前のステップのプランが完了でない: " + "、".join(
+        f"{o.name}（{o.status if o.status is not None else '流していない'}）" for o in held
+    )
 
 
 def queue_prs(prior: Sequence[Outcome], accepts_gate: bool = False) -> list[int]:

@@ -27,7 +27,11 @@ def test_worktree_settings_with_a_legacy_key_stop(tmp_path: Path):
 
 
 def test_worktree_settings_with_the_new_key_are_read(tmp_path: Path):
-    _write(tmp_path, "worktree.json", {**legacy.worktree(), "branch_flow": {"start": "production", "release_strategy": "release_branch", "doc_prs": "sprint"}})
+    _write(
+        tmp_path,
+        "worktree.json",
+        {**legacy.worktree(), "branch_flow": {"start": "production", "release_strategy": "release_branch", "doc_prs": "sprint"}},
+    )
     got = ndf_settings.load(tmp_path)
     assert got is not None
 

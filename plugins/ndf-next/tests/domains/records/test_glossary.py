@@ -42,7 +42,12 @@ def test_deprecated_in_meanings_skips_code_live_terms_and_kanji_neighbours() -> 
         "contexts": [{"id": "c", "name": "c"}],
         "terms": [
             {"context": "c", "term": "承認ゲート", "meaning": "旧語ではない。`旧語` はコード", "deprecated": ["旧語"]},
-            {"context": "c", "term": "段階", "meaning": "段階の中のステップと、単独の ステップ がある", "deprecated_standalone": ["ステップ"]},
+            {
+                "context": "c",
+                "term": "段階",
+                "meaning": "段階の中のステップと、単独の ステップ がある",
+                "deprecated_standalone": ["ステップ"],
+            },
             {"context": "c", "term": "ゲート", "meaning": "承認ゲートの略"},
         ],
     }

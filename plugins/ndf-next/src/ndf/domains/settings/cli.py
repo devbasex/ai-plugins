@@ -95,7 +95,14 @@ def plan(root: Path) -> dict[str, Any]:
     if not changed:
         return result.result(TOOL, result.OK, "書き換えるものが無い", metrics={"files": 0})
     items = [
-        {"kind": "settings-file", "file": t.file, "path": t.rel, "legacy_keys": t.legacy, "patch": t.patch, "reindent": _dump(json.loads(t.text)) != t.text}
+        {
+            "kind": "settings-file",
+            "file": t.file,
+            "path": t.rel,
+            "legacy_keys": t.legacy,
+            "patch": t.patch,
+            "reindent": _dump(json.loads(t.text)) != t.text,
+        }
         for t in changed
     ]
     digest = _digest(targets)

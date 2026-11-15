@@ -357,7 +357,9 @@ def _row_errors(model: SpecModel) -> list[str]:
     env = model.env_ids
     names = model.skill_names
     errs = [f"Skill {s.name} が Skill の入出力の表（skill-io）に行を持たない" for s in model.skills if s.present and not s.row]
-    errs += [f"公開する Skill {s.name} の行が args か env を持つ（SSOT はエントリポイントの表）" for s in model.skills if s.row_has_args_env]
+    errs += [
+        f"公開する Skill {s.name} の行が args か env を持つ（SSOT はエントリポイントの表）" for s in model.skills if s.row_has_args_env
+    ]
     errs += [f"Skill の入出力の表の行 {i} の Skill に実体が無い" for i in model.skill_io_ids if i not in names]
     for s in model.skills:
         errs += [f"Skill {s.name} の読む設定 {d} が保存先の表に無い" for d in s.ndf_settings if d not in decls]

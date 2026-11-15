@@ -15,7 +15,9 @@ from ndf.domains.settings import cli, renames
 
 def _repo(tmp_path: Path, indent: int = 2) -> Path:
     (tmp_path / ".ndf").mkdir()
-    (tmp_path / ".ndf" / "worktree.json").write_text(json.dumps(legacy.worktree(), indent=indent, ensure_ascii=False) + "\n", encoding="utf-8")
+    (tmp_path / ".ndf" / "worktree.json").write_text(
+        json.dumps(legacy.worktree(), indent=indent, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
     (tmp_path / ".ndf" / "mvv.json").write_text(json.dumps(legacy.mvv(2), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return tmp_path
 
@@ -60,7 +62,9 @@ def test_apply_refuses_when_the_settings_changed_after_the_diff(tmp_path: Path):
     digest = cli.plan(root)["metrics"]["digest"]
     data = _read(root, "mvv.json")
     key = legacy.old_validation()[0]
-    data["versions"][0][key][legacy.last(next(r.old for r in renames.load() if r.id == "mvv-validation-checked-at"))] = "2027-01-01T00:00:00+00:00"
+    data["versions"][0][key][legacy.last(next(r.old for r in renames.load() if r.id == "mvv-validation-checked-at"))] = (
+        "2027-01-01T00:00:00+00:00"
+    )
     (root / ".ndf" / "mvv.json").write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     before = _bytes(root)
     got = cli.apply(root, digest)

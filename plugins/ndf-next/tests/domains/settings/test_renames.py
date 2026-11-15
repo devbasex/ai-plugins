@@ -54,7 +54,10 @@ def test_legacy_keys_list_each_array_element_of_the_parent_first():
     data = legacy.mvv(2)
     got = renames.legacy_keys("mvv", data)
     key = legacy.old_validation()[0]
-    assert [(k.old, k.new) for k in got] == [(f"/versions/0/{key}", "/versions/0/validation"), (f"/versions/1/{key}", "/versions/1/validation")]
+    assert [(k.old, k.new) for k in got] == [
+        (f"/versions/0/{key}", "/versions/0/validation"),
+        (f"/versions/1/{key}", "/versions/1/validation"),
+    ]
     half = copy.deepcopy(data)
     half["versions"] = [{"validation": v.pop(key)} for v in half["versions"]][:1]
     assert [k.new for k in renames.legacy_keys("mvv", half)] == ["/versions/0/validation/result", "/versions/0/validation/checked_at"]

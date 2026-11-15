@@ -79,7 +79,9 @@ def test_apply_fix_takes_decided_outcomes_and_ignores_unknown_ids() -> None:
 
 
 def test_reopen_and_findings() -> None:
-    journal = drive.FindingJournal([_row("r1-1", "a", 1, fin.FIXED), _row("r1-2", "b", 1, fin.SKIPPED, "理由"), {"id": "x", "outcome": "?"}])
+    journal = drive.FindingJournal(
+        [_row("r1-1", "a", 1, fin.FIXED), _row("r1-2", "b", 1, fin.SKIPPED, "理由"), {"id": "x", "outcome": "?"}]
+    )
     journal.reopen(["r1-1", "nope"])
     assert journal.rows["r1-1"]["outcome"] == fin.UNRESOLVED
     assert journal.findings() == (fin.Finding("r1-1", "a", fin.UNRESOLVED, None), fin.Finding("r1-2", "b", fin.SKIPPED, "理由"))

@@ -120,10 +120,16 @@ def _apply_row(row: Rename, out: dict[str, Any], patch: list[dict[str, Any]]) ->
         if new[-1] in parent:
             continue  # 利用者が旧いキーと新しいキーの両方を書いた設定は、機械が選ばずに残す
         value = parent[old[-1]]
-        patch += [{"op": "test", "path": _pointer(old), "value": copy.deepcopy(value)}, {"op": "move", "from": _pointer(old), "path": _pointer(new)}]
+        patch += [
+            {"op": "test", "path": _pointer(old), "value": copy.deepcopy(value)},
+            {"op": "move", "from": _pointer(old), "path": _pointer(new)},
+        ]
         _rename_in_place(parent, old[-1], new[-1])
         if isinstance(value, str) and value in row.values and row.values[value] != value:
-            patch += [{"op": "test", "path": _pointer(new), "value": value}, {"op": "replace", "path": _pointer(new), "value": row.values[value]}]
+            patch += [
+                {"op": "test", "path": _pointer(new), "value": value},
+                {"op": "replace", "path": _pointer(new), "value": row.values[value]},
+            ]
             _parent(out, new)[new[-1]] = row.values[value]
 
 
@@ -147,7 +153,4 @@ def legacy_detail(file: str, data: Mapping[str, Any], root: Path) -> Optional[st
     if not found:
         return None
     pairs = "、".join(f"{k.old} → {k.new}" for k in found)
-    return (
-        f"{relpath(file)} に旧いキーが残る: {pairs}。"
-        f"ndf settings migrate --root {root} で差分を示し、承認してから --apply で書き換える"
-    )
+    return f"{relpath(file)} に旧いキーが残る: {pairs}。ndf settings migrate --root {root} で差分を示し、承認してから --apply で書き換える"

@@ -348,7 +348,9 @@ def _cmd_show(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, A
     rows = _rows(snap, events, rev)
     whole = model.table_state("sprint", events)
     metrics = {"machine_id": a.machine_id, "mode": snap.mode, "rev": rev, "state": whole, "history": [e.as_dict() for e in events]}
-    return result.result(TOOL, result.OK, f"ステートマシン {a.machine_id} は{model.label(whole)}（{len(rows)} 行）", items=rows, metrics=metrics)
+    return result.result(
+        TOOL, result.OK, f"ステートマシン {a.machine_id} は{model.label(whole)}（{len(rows)} 行）", items=rows, metrics=metrics
+    )
 
 
 def _changed(a: argparse.Namespace, st: store.Store, kind: str, payload: dict[str, Any] | None) -> dict[str, Any]:
@@ -360,7 +362,10 @@ def _changed(a: argparse.Namespace, st: store.Store, kind: str, payload: dict[st
 
     seqs = _append(st, a.machine_id, build)
     return result.result(
-        TOOL, result.OK, f"ステートマシン {a.machine_id} の {a.stage} に {kind} を書いた", metrics={"machine_id": a.machine_id, "seqs": seqs}
+        TOOL,
+        result.OK,
+        f"ステートマシン {a.machine_id} の {a.stage} に {kind} を書いた",
+        metrics={"machine_id": a.machine_id, "seqs": seqs},
     )
 
 
@@ -392,7 +397,10 @@ def _cmd_finish(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str,
     seqs = _append(st, a.machine_id, build)
     st.warnings.extend(dropped)
     return result.result(
-        TOOL, result.OK, f"ステートマシン {a.machine_id} の {a.stage} に manual_finished を書いた", metrics={"machine_id": a.machine_id, "seqs": seqs}
+        TOOL,
+        result.OK,
+        f"ステートマシン {a.machine_id} の {a.stage} に manual_finished を書いた",
+        metrics={"machine_id": a.machine_id, "seqs": seqs},
     )
 
 
@@ -407,7 +415,10 @@ def _cmd_cancel(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str,
         seqs = _append(st, a.machine_id, build)
     rows = len(seqs) - 1
     return result.result(
-        TOOL, result.OK, f"ステートマシン {a.machine_id} を中止した（中止にした行 {rows}）", metrics={"machine_id": a.machine_id, "cancelled_rows": rows}
+        TOOL,
+        result.OK,
+        f"ステートマシン {a.machine_id} を中止した（中止にした行 {rows}）",
+        metrics={"machine_id": a.machine_id, "cancelled_rows": rows},
     )
 
 

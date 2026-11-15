@@ -696,7 +696,10 @@ def test_wait_while_the_work_runs_past_the_limit_returns_the_same_wait(repo, st,
         at_once = run.wait(st, tid, 0, sleep=slept.append)
         later = run.wait(st, tid, 0.05, sleep=sleep, clock=lambda: now[0])
     assert at_once == result.stopped(
-        run.TOOL, "wait_timeout", f"ステートマシン {tid} を流す作業がまだ動いている（0 秒待った）", next=result.command(run.TOOL, "wait", tid)
+        run.TOOL,
+        "wait_timeout",
+        f"ステートマシン {tid} を流す作業がまだ動いている（0 秒待った）",
+        next=result.command(run.TOOL, "wait", tid),
     )
     assert later["cause"] == {"kind": "wait_timeout", "detail": f"ステートマシン {tid} を流す作業がまだ動いている（0.05 秒待った）"}
     assert later["next"] == result.command(run.TOOL, "wait", tid) and len(slept) >= 1

@@ -320,7 +320,10 @@ def test_unreachable_database_stops_as_store_unreachable_without_the_password(re
 def test_stopped_from_a_bare_sqlalchemy_error_shows_only_its_type():
     import sqlalchemy as sa
 
-    assert _stopped(sa.exc.ArgumentError("postgresql://u:pw@h/db"))[:2] == ("store_unreachable", "ステートマシンの DB を使えない: ArgumentError")
+    assert _stopped(sa.exc.ArgumentError("postgresql://u:pw@h/db"))[:2] == (
+        "store_unreachable",
+        "ステートマシンの DB を使えない: ArgumentError",
+    )
 
 
 def test_sqlite_url_with_a_query_stops_as_invalid_before_preparing_the_store(repo, capsys, monkeypatch, tmp_path, last_result):

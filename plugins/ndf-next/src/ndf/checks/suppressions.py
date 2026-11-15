@@ -63,7 +63,9 @@ class Applied:
     unused: list[tuple[Suppression, str]]
 
 
-def apply(hits: list[tuple[int, str]], suppressions: dict[int, list[Suppression]], caught: dict[int, tuple[str, ...]], rules: dict[str, Any]) -> Applied:
+def apply(
+    hits: list[tuple[int, str]], suppressions: dict[int, list[Suppression]], caught: dict[int, tuple[str, ...]], rules: dict[str, Any]
+) -> Applied:
     """兆候に抑制コメントを当て、数に入るものと要らない抑制コメントに分ける。"""
     counted: list[tuple[int, str, str | None]] = []
     used: set[tuple[int, str]] = set()
@@ -74,5 +76,7 @@ def apply(hits: list[tuple[int, str]], suppressions: dict[int, list[Suppression]
         if own and None in problems:
             continue
         counted.append((line, code, next((p for p in problems if p), None)))
-    unused = [(m, code) for ms in suppressions.values() for m in ms for code in m.codes if m.label and m.reason and (m.line, code) not in used]
+    unused = [
+        (m, code) for ms in suppressions.values() for m in ms for code in m.codes if m.label and m.reason and (m.line, code) not in used
+    ]
     return Applied(counted, unused)

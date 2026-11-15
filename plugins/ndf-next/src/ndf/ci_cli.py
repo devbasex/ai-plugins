@@ -45,7 +45,8 @@ def _parser() -> argparse.ArgumentParser:
     w.add_argument("--merge-failed", action="append", default=[], help="マージの段階が落ちたと読んだチェックの名前")
     w.set_defaults(run=_watch)
     m = sub.add_parser(
-        "merge", help="ブランチの開いた PR を、作業場所の HEAD のまま、前段の確かめ（決めていない残リスク・HEAD の食い違い）を通してマージする"
+        "merge",
+        help="ブランチの開いた PR を、作業場所の HEAD のまま、前段の確かめ（決めていない残リスク・HEAD の食い違い）を通してマージする",
     )
     m.add_argument("--branch", required=True, help="PR の head のブランチ")
     m.add_argument("--repo", help="<所有者>/<リポジトリ>。省けば作業場所の origin")

@@ -111,7 +111,9 @@ CONTEXT_HANDLERS: dict[str, Callable[[argparse.Namespace], int]] = {
 
 def parser(sub: Any, help_text: str) -> None:
     """`context` のサブコマンドの parser を `sub` へ足す（`help_text` は `ndf relay` の一覧の説明）。"""
-    ctx = sub.add_parser("context", help=help_text, description="サブコマンド: " + " / ".join(f"{k}（{v}）" for k, v in CONTEXT_COMMANDS.items()))
+    ctx = sub.add_parser(
+        "context", help=help_text, description="サブコマンド: " + " / ".join(f"{k}（{v}）" for k, v in CONTEXT_COMMANDS.items())
+    )
     ctx_sub = ctx.add_subparsers(dest="context_action", required=True)
     p = {name: ctx_sub.add_parser(name, help=text, description=text) for name, text in CONTEXT_COMMANDS.items()}
     p["resolve"].add_argument("--root", help="設定を読むリポジトリ（省けば今の作業場所の git の根）")

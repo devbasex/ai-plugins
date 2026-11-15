@@ -407,7 +407,9 @@ def _translated(exc: RequestFailed | RequestError, label: str, detail_body: bool
     """
     if isinstance(exc, RateLimitExceeded):
         quota = GRAPHQL if label == GRAPHQL else REST
-        return GitHubError(f"GitHub の上限（{quota} のスロット）: {label}", exc.response.status_code, exc.retry_after.total_seconds(), quota)
+        return GitHubError(
+            f"GitHub の上限（{quota} のスロット）: {label}", exc.response.status_code, exc.retry_after.total_seconds(), quota
+        )
     if isinstance(exc, RequestFailed):
         status = exc.response.status_code
         body = f": {exc.response.text[:300]}" if detail_body else ""

@@ -144,7 +144,9 @@ def head_parser() -> argparse.ArgumentParser:
 
 def _cmd_list(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, Any]:
     got = answers(run.read(st, a.machine_id))
-    return result.result(TOOL, result.OK, f"ステートマシン {a.machine_id} の回答 {len(got)} 件", items=got, metrics={"machine_id": a.machine_id})
+    return result.result(
+        TOOL, result.OK, f"ステートマシン {a.machine_id} の回答 {len(got)} 件", items=got, metrics={"machine_id": a.machine_id}
+    )
 
 
 def list_parser() -> argparse.ArgumentParser:

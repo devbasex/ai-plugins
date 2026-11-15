@@ -73,7 +73,12 @@ def _rows() -> dict[str, dict[str, Any]]:
 def default_flow() -> dict[str, Any]:
     """`branch_flow` の無い設定が使う値（表の既定の行の各列の先頭）。"""
     row = next(r for r in facts.rows("branch-flows") if r["default"])
-    return {"start": row["start"][0], "integrate": row["integrate"][0], "doc_prs": row["doc_prs"][0], "release_strategy": row["release_strategy"]}
+    return {
+        "start": row["start"][0],
+        "integrate": row["integrate"][0],
+        "doc_prs": row["doc_prs"][0],
+        "release_strategy": row["release_strategy"],
+    }
 
 
 def review_allowed(kind: str) -> tuple[list[str], list[str]]:
@@ -174,7 +179,9 @@ def infer(prs: list[dict[str, str]], base: str, production: str, release_kinds: 
 
 def as_item(fields: dict[str, Any], extra_evidence: list[dict[str, Any]]) -> dict[str, Any]:
     """測定の結果の 1 項目。4 項目すべてが `高` で組み合わせがリリース方式の表に合えば測った値、ほかは質問（候補は推した値）。"""
-    fields = {k: {**v, "evidence": [*seq(v.get("evidence")), *(extra_evidence if k == "release_strategy" else [])]} for k, v in fields.items()}
+    fields = {
+        k: {**v, "evidence": [*seq(v.get("evidence")), *(extra_evidence if k == "release_strategy" else [])]} for k, v in fields.items()
+    }
     proposal = {k: v["value"] for k, v in fields.items() if "value" in v}
     unsure = any(v.get("confidence") != "高" for v in fields.values())
     problem = None if unsure else answer_problem(proposal)
@@ -331,7 +338,8 @@ def _infer_kind(kind: str, got: list[frozenset[str]], release_markers: dict[str,
 def infer_reviews(samples: dict[str, list[frozenset[str]]], release_markers: dict[str, int], unreadable: dict[str, int]) -> dict[str, Any]:
     """種類ごとのマーカーの組から、掛けるレビュー・対象の差分・確からしさを推す。標本が足りない種類は `unknown` と理由。"""
     return {
-        k: _infer_kind(k, samples[k] if k in samples else [], release_markers, unreadable[k] if k in unreadable else 0) for k in REVIEW_KINDS
+        k: _infer_kind(k, samples[k] if k in samples else [], release_markers, unreadable[k] if k in unreadable else 0)
+        for k in REVIEW_KINDS
     }
 
 

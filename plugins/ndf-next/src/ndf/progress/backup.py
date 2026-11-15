@@ -123,7 +123,9 @@ def _stage_backup(root: Path, source: Path, path: Path) -> Path:
     shutil.copyfile(source, temp)
     if not durable.check_file(temp):
         temp.unlink(missing_ok=True)
-        raise durable.StoreBroken(f"バックアップ {source} が quick_check を通らない。次に新しいバックアップ: {_next_backup(root, source)}", (source,))
+        raise durable.StoreBroken(
+            f"バックアップ {source} が quick_check を通らない。次に新しいバックアップ: {_next_backup(root, source)}", (source,)
+        )
     return temp
 
 

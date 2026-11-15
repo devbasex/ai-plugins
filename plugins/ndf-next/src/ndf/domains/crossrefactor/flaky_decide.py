@@ -64,7 +64,9 @@ def violations(commits: Sequence[Commit], tests: Iterable[str], is_test: Callabl
     found: list[dict[str, str]] = []
     for c in commits:
         if c.trailer.strip() not in wanted:
-            found.append({"commit": c.sha, "kind": "trailer", "detail": f"{TRAILER}: <リクエストしたキー> が無い（{c.trailer.strip() or '空'}）"})
+            found.append(
+                {"commit": c.sha, "kind": "trailer", "detail": f"{TRAILER}: <リクエストしたキー> が無い（{c.trailer.strip() or '空'}）"}
+            )
         others = [p for p in c.paths if not is_test(p)]
         if others:
             found.append({"commit": c.sha, "kind": "non_test", "detail": "テスト以外のファイルを変えた: " + ", ".join(others[:5])})

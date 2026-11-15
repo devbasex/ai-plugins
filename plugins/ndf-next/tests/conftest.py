@@ -38,7 +38,9 @@ _ok_tools: set[str] = set()
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    config.addinivalue_line("markers", f"{BAD_RESULT_MARK}: 形の誤った結果 JSON をわざと作るテスト（結果のコントラクトの確かめで落とさない）")
+    config.addinivalue_line(
+        "markers", f"{BAD_RESULT_MARK}: 形の誤った結果 JSON をわざと作るテスト（結果のコントラクトの確かめで落とさない）"
+    )
 
 
 def record_output(obj: dict, code: int | None, allow_bad: bool) -> None:

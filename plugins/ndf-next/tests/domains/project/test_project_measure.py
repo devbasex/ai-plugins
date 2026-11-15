@@ -161,9 +161,14 @@ def test_flow_infer_and_table():
 
 
 def test_flow_answer_problem():
-    assert measure_flow.answer_problem({"start": "base", "integrate": "check", "doc_prs": "base", "release_strategy": "merge_base_branch"}) is None
+    assert (
+        measure_flow.answer_problem({"start": "base", "integrate": "check", "doc_prs": "base", "release_strategy": "merge_base_branch"})
+        is None
+    )
     assert "start" in measure_flow.answer_problem({"start": "production", "release_strategy": "merge_base_branch"})
-    assert "reviews.release" in measure_flow.answer_problem({"release_strategy": "merge_base_branch", "reviews": {"release": {"checks": [], "diff": "none"}}})
+    assert "reviews.release" in measure_flow.answer_problem(
+        {"release_strategy": "merge_base_branch", "reviews": {"release": {"checks": [], "diff": "none"}}}
+    )
     assert measure_flow.answer_problem({"release_strategy": "nope"}) is not None
     assert measure_flow.bad_answer({"unknown": "x"}) is None
 
@@ -449,7 +454,10 @@ def test_collect_flow_current_behavior_measured_when_all_high():
         {"command": "gh api repos/o/r/rulesets", "text": "ルールセット: main"},
     ]
     assert f["start"]["value"] == "base" and f["start"]["confidence"] == "高"
-    assert f["start"]["evidence"][-1] == {"command": measure_flow.TABLE_COMMAND, "text": "release_strategy = whole が許す start は base だけ"}
+    assert f["start"]["evidence"][-1] == {
+        "command": measure_flow.TABLE_COMMAND,
+        "text": "release_strategy = whole が許す start は base だけ",
+    }
     rv = item["reviews"]
     assert set(rv) == set(measure_flow.REVIEW_KINDS)
     assert rv["sprint"] == {

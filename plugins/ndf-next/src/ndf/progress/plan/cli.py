@@ -175,7 +175,9 @@ def _read_question(path: Path) -> dict[str, Any]:
 def _cmd_release(a: argparse.Namespace, conn: sa.Connection, repo: str) -> dict[str, Any]:
     record_release(conn, _pid(conn, repo, a.plan), a.requests, ReleaseAnswer(a.result, a.reason, a.version, a.release))
     return _ok(
-        f"計画 {a.plan} のまとめたリリースの回答（{a.result}）をリクエスト {len(a.requests)} 件へ記録した", requests=a.requests, result=a.result
+        f"計画 {a.plan} のまとめたリリースの回答（{a.result}）をリクエスト {len(a.requests)} 件へ記録した",
+        requests=a.requests,
+        result=a.result,
     )
 
 

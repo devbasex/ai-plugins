@@ -151,7 +151,9 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--base", help="差分の起点（I2）。無ければ差分を見ない")
     parser.add_argument("--event", default="", help="PR 本文を読む GitHub の事象の JSON。無ければ GITHUB_EVENT_PATH")
     parser.add_argument("--only", action="append", metavar="RULE", help="この規則の指摘だけを違反にする（繰り返せる）")
-    parser.add_argument("--write-spec", action="store_true", help="規約の生成物（コントラクトのページと引数のスキーマ）を書いてから検査する")
+    parser.add_argument(
+        "--write-spec", action="store_true", help="規約の生成物（コントラクトのページと引数のスキーマ）を書いてから検査する"
+    )
     args = parser.parse_args(argv)
     written: list[str] | None = [] if args.write_spec else None
     try:

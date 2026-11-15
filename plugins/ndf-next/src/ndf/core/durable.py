@@ -621,7 +621,9 @@ def _backup_before_migration(path: Path, now: datetime) -> Path | None:
     if not found or found == schema:
         return None
     if found > schema:
-        raise StoreFormatNewer(f"耐久の記録の表のバージョン {found} が入れてある DBOS {DBOS_VERSION} の {schema} より新しい: {path}", (path,))
+        raise StoreFormatNewer(
+            f"耐久の記録の表のバージョン {found} が入れてある DBOS {DBOS_VERSION} の {schema} より新しい: {path}", (path,)
+        )
     target = _free_name(path.parent / BACKUP_DIR / f"{path.stem}-schema{found}{DB_SUFFIX}", now)
     target.parent.mkdir(parents=True, exist_ok=True)
     src = sqlite3.connect(path, timeout=30)
@@ -631,7 +633,9 @@ def _backup_before_migration(path: Path, now: datetime) -> Path | None:
     finally:
         dst.close()
         src.close()
-    log.warning("耐久の記録の表を移す前にバックアップを取った", extra={"path": str(path), "backup": str(target), "from": found, "to": schema})
+    log.warning(
+        "耐久の記録の表を移す前にバックアップを取った", extra={"path": str(path), "backup": str(target), "from": found, "to": schema}
+    )
     return target
 
 

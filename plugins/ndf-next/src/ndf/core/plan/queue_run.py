@@ -109,7 +109,9 @@ def _sets(entry: Entry, prior: list[queue_decide.Outcome]) -> tuple[dict[str, st
         return {}, None
     prs = queue_decide.queue_prs(prior, entry.plan.accepts_gate)
     if not prs:
-        return {}, queue_decide.Outcome(entry.plan.name, STOPPED, "input_missing", "{queue_prs} を埋める完了したプランの PR が前のステップに無い")
+        return {}, queue_decide.Outcome(
+            entry.plan.name, STOPPED, "input_missing", "{queue_prs} を埋める完了したプランの PR が前のステップに無い"
+        )
     return {QUEUE_PRS: " ".join(map(str, prs))}, None
 
 

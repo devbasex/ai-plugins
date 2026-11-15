@@ -104,7 +104,6 @@ def test_newer_table_version_is_not_touched(progress_url, root):
         store.open_store(progress_url, root)
 
 
-
 def test_an_old_table_version_without_a_file_stops_without_changing_the_table(progress_url, root):
     # PostgreSQL の接続先（ファイルの保存先を持たない）でバージョン 1 の表を見つけたら、表を変えずに止まる。SQLite でも path を None にして模す
     with store.open_store(progress_url, root) as st:
