@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from ndf.checks import run, spec_docs, spec_model, spec_render
-from ndf.checks.model import CheckError, Scope, load_rules
+from ndf.checks.model import CheckError, Scope, Source, load_rules
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[2]
 COPIED = ("contracts", "docs", "bin", "skills", "agents", "manifests")
@@ -253,3 +253,87 @@ def test_key_errors_missing_place_and_empty_examples_are_findings(copy):
 def test_key_errors_are_not_run_for_a_declaration_without_schema(copy):
     decl = dataclasses.replace(_decl({}), schema=None, sections=({"id": "s"},))
     assert _decl_only(copy, decl) == []
+
+
+# --- 現状固定: spec-io の指摘（io_findings の副命令・環境変数・起動スクリプトの 3 つの部分と並び） ---
+
+
+def _command(name, extracted, manual, result_schema):
+    return spec_model.CommandSpec(
+        name=name, module=f"ndf.{name}", args=None, extracted=extracted, manual=manual, result_schema=result_schema, surface="public"
+    )
+
+
+def _io_only(copy, sources=(), **fields):
+    """実物のモデルの列を差し替え、spec-io の指摘を (rule, path, line, detail) で返す。"""
+    model = dataclasses.replace(spec_model.load(copy.root), **fields)
+    scope = Scope(copy.repo, copy.root, "p")
+    for rel, text in sources:
+        copy.write(rel, text)
+        scope.sources.append(Source(copy.path(rel), f"plugins/p/{rel}"))
+    found = spec_docs.io_findings(model, scope, lambda p: f"plugins/p/{p}")
+    return [(f.rule, f.path, f.line, f.detail) for f in found]
+
+
+def test_io_findings_pins_command_messages_and_their_order(copy):
+    ok = {"properties": {"tool": {"const": "c-ok"}}}
+    commands = (
+        _command("c-both", True, True, {"properties": {"tool": {"const": "other"}}}),
+        _command("c-none", False, False, None),
+        _command("c-ok", True, False, ok),
+        _command("c-manual", False, True, {"properties": {}}),
+    )
+    io = "plugins/p/contracts/schemas/io"
+    assert _io_only(copy, commands=commands, env=(), launchers=(), bin_files=()) == [
+        (spec_docs.IO, io, 1, "副命令 c-both: argparse から取り出せる。手書きの引数の表（manual-args）の行を消す"),
+        (spec_docs.IO, io, 1, "副命令 c-both: 結果のスキーマの tool の const が c-both でない"),
+        (spec_docs.IO, io, 1, "副命令 c-none: 引数を取り出せず、手書きの引数の表（manual-args）にも行が無い"),
+        (spec_docs.IO, io, 1, "副命令 c-none: 結果のスキーマが無い"),
+        (spec_docs.IO, io, 1, "副命令 c-manual: 結果のスキーマの tool の const が c-manual でない"),
+    ]
+
+
+def test_io_findings_pins_env_messages_for_code_only(copy):
+    code = "import os\nos.environ['KNOWN']\nos.getenv('UNKNOWN_B')\nos.environ.get('UNKNOWN_A')\n"
+    sources = [("src/ndf/zz_env.py", code), ("tests/zz_env.py", code)]
+    found = _io_only(copy, sources, commands=(), env=({"id": "KNOWN"},), launchers=(), bin_files=())
+    assert found == [
+        (spec_docs.IO, "plugins/p/src/ndf/zz_env.py", 3, "環境変数 UNKNOWN_B が環境変数の表（env）に無い"),
+        (spec_docs.IO, "plugins/p/src/ndf/zz_env.py", 4, "環境変数 UNKNOWN_A が環境変数の表（env）に無い"),
+    ]
+
+
+def test_io_findings_pins_launcher_messages_and_their_order(copy):
+    found = _io_only(
+        copy, commands=(), env=(), launchers=({"id": "z-row"}, {"id": "a-row"}, {"id": "both"}), bin_files=("y-bin", "both", "b-bin")
+    )
+    launchers = "plugins/p/contracts/domains/launchers.json"
+    assert found == [
+        (spec_docs.IO, launchers, 1, "bin/y-bin が起動スクリプトの表（launchers）に無い"),
+        (spec_docs.IO, launchers, 1, "bin/b-bin が起動スクリプトの表（launchers）に無い"),
+        (spec_docs.IO, launchers, 1, "起動スクリプトの表の行 a-row のファイルが bin/ に無い"),
+        (spec_docs.IO, launchers, 1, "起動スクリプトの表の行 z-row のファイルが bin/ に無い"),
+    ]
+
+
+def test_io_findings_orders_commands_then_env_then_launchers(copy):
+    found = _io_only(
+        copy,
+        [("src/ndf/zz_env.py", "import os\nos.getenv('NOPE')\n")],
+        commands=(_command("c", True, False, None),),
+        env=(),
+        launchers=({"id": "row"},),
+        bin_files=("file",),
+    )
+    assert [d for *_, d in found] == [
+        "副命令 c: 結果のスキーマが無い",
+        "環境変数 NOPE が環境変数の表（env）に無い",
+        "bin/file が起動スクリプトの表（launchers）に無い",
+        "起動スクリプトの表の行 row のファイルが bin/ に無い",
+    ]
+
+
+def test_io_findings_of_the_real_model_is_empty(copy):
+    scope = Scope(copy.repo, copy.root, "p")
+    scope.sources = run.collect(copy.root, copy.repo)
+    assert spec_docs.io_findings(spec_model.load(copy.root), scope, lambda p: f"plugins/p/{p}") == []
