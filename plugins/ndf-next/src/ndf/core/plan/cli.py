@@ -109,7 +109,7 @@ def _cmd_queue(a: argparse.Namespace) -> int:
         return result.emit(result.stopped(TOOL, "invalid", str(exc)))
     except subprocess.CalledProcessError as exc:
         return result.emit(result.stopped(TOOL, "precondition", f"チェックアウトの根を引けない: {exc}"))
-    outcomes = queue_run.run(stages, qdir, stable, a.resume, a.fresh)
+    outcomes = queue_run.run(stages, qdir, stable, queue_run.QueueOptions(a.resume, a.fresh))
     return result.emit(queue_run.queue_result(TOOL, outcomes, stages, qdir))
 
 
