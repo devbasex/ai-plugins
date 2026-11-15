@@ -220,6 +220,16 @@ def check(hub: GitHub, number: int, human_only: bool = False) -> Read:
     return got
 
 
+def _existing_record(comments: list[Authored], hub: GitHub, mark: str, sha: str) -> str | None:
+    """印 `mark` と `sha` を含み、編集されておらず、信用する書き手が書いた記録のコメントの URL（無ければ None）。
+
+    コメントできる誰かが印と SHA の入ったコメントを先に置いても、本物の記録を止められないようにする。"""
+    for c in comments:
+        if mark in c.body and f"`{sha}`" in c.body and not c.edited and hub.trusts(c):
+            return c.url
+    return None
+
+
 def render_admin_record(sha: str, trail_url: str) -> str:
     """迂回の記録の本文（証跡の印を持たない）。"""
     if not _SHA.fullmatch(sha):
@@ -240,9 +250,9 @@ def write_admin_record(hub: GitHub, number: int, sha: str) -> tuple[bool, str]:
     """
     try:
         found = hub.comments(number)
-        for c in found:
-            if ADMIN_MARK in c.body and f"`{sha}`" in c.body and not c.edited and hub.trusts(c):
-                return False, c.url
+        existing = _existing_record(found, hub, ADMIN_MARK, sha)
+        if existing is not None:
+            return False, existing
         judged = user_judgment_at(hub, number, sha)
         used = judged.trail.order if judged is not None and judged.trail is not None else None
         trail_url = found[used].url if used is not None and used < len(found) else ""
@@ -270,9 +280,9 @@ def write_merge_record(hub: GitHub, number: int, approval: merge_decide.Approval
     既にある記録に数えるのは、信用する書き手が書き、編集されていない、同じマージした先端のものだけ。
     """
     try:
-        for c in hub.comments(number):
-            if MERGE_MARK in c.body and f"`{approval.merged_head}`" in c.body and not c.edited and hub.trusts(c):
-                return False, c.url
+        existing = _existing_record(hub.comments(number), hub, MERGE_MARK, approval.merged_head)
+        if existing is not None:
+            return False, existing
         url = Publisher(hub).comment(number, render_merge_record(approval)).url
     except (GitHubError, ValueError) as exc:
         raise TrailError(f"#{number} に人のマージの記録を置けない: {exc}") from None
