@@ -21,19 +21,25 @@ from ndf.contracts import causes
 WORKER = "{{worker}}"
 # 承認の後に置かない直しのステップ（コードを変えるか、リリースブランチへ push する）
 FIX_STEPS = frozenset({"push", "fix-push", "ci-fix", "fix-base", "base-sync"})
-# `merge` のプランの最初のステップの id と、本番の PR で止まる終了コード（止まった理由の表の refused の終了コード）
+# `merge` のプランの最初のステップの id
 GUARD_ID = "release-guard"
-GUARD_EXIT = causes.exit_code("refused")
+# 本番のプランの最初のステップの起動の頭（`ndf release-steps merge`）
+MERGE_RUN = (identity.FIXED_WORDS["entrypoint"], "release-steps", "merge")
 
 
 def guard_cause() -> str:
-    """`release-guard` が本番の PR で止まる原因の種類（止まった理由の表の既存の種類。行き先を持たない）。"""
+    """`release-guard` が本番の PR で止まる原因の種類（止まった理由の表の既存の種類。行き先を持たない）。
+    原因の文字列の持ち主はここだけで、終了コード `GUARD_EXIT` もここから求める。"""
     return "refused"
 
 
+# 本番の PR で止まる終了コード（止まった理由の表の refused の終了コード）
+GUARD_EXIT = causes.exit_code(guard_cause())
+
+
 def merge_run() -> tuple[str, ...]:
-    """本番のプランの最初のステップの起動の頭（`ndf release-steps merge`）。"""
-    return (identity.FIXED_WORDS["entrypoint"], "release-steps", "merge")
+    """本番のプランの最初のステップの起動の頭（`MERGE_RUN`）。"""
+    return MERGE_RUN
 
 
 def _steps(plan: Mapping[str, Any]) -> list[Mapping[str, Any]]:
