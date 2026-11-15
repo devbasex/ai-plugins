@@ -1,6 +1,6 @@
 # #3618 の詳細設計: 代表のリポジトリの種類を扱えなくする設計を設計承認の前に見つける
 
-設計文書 [issue-3618-design.md](issue-3618-design.md) の「構成要素」と「入出力の契約」を、ファイルと関数の粒度へ下ろした文書である。決定の番号（決定 1〜12）は [issue-3618-design-decisions.md](issue-3618-design-decisions.md) を指す。不変条件の番号（I1〜I6）は設計文書の「ドメインモデル」を指す。
+設計文書 [issue-3618-design.md](issue-3618-design.md) の「構成要素」と「入出力の契約」を、ファイルと関数の粒度へ下ろした文書である。決定の番号（決定 1〜12）は [issue-3618-design-decisions.md](issue-3618-design-decisions.md) を指す。不変条件の番号（I1〜I7）は設計文書の「ドメインモデル」を指す。
 
 この文書で使う語は設計文書の「用語」の表と同じである。とくに次の 3 語を使う。
 
@@ -8,7 +8,7 @@
 | --- | --- |
 | 頭の設計文書 | `issues/issue-<番号>-design.md`（文書の種類の契約で種類が `design` のもの）。決定の記録と詳細設計の文書は含まない |
 | 代表のリポジトリの設定 | `.ndf/design.json` の `representative_repos`。読み込んだ後の内部の形は「内部のデータと定数」の `RepoSettings` |
-| 2 規則 | 設計の検査に足す規則 `repo_scope_missing`（振る舞いの表と事情の欄が無い）と `repo_loss_unrouted`（使えなくなるものが人へ残す判断へ届かない） |
+| 2 規則 | 設計の検査に足す規則 `repo_scope_missing`（振る舞いの表と事情の欄が無い）と `repo_loss_unrouted`（扱えなくなることが人へ残す判断へ届かない） |
 
 ## ファイル配置
 
@@ -63,8 +63,8 @@ plugins/ndf-next/
 | `plugins/ndf/skills/design/references/design-template.md` | 変更 | 「適用範囲」に、振る舞いの表と「このリポジトリだけの事情」の欄の書き方を置く | 無し |
 | `plugins/ndf/skills/requirements-design/references/spec-template.md` | 変更 | 方針を「このリポジトリの運用の決まり」と「作るものの振る舞い」に分ける節（該当時）を置く | 無し |
 | `plugins/ndf/scripts/data/issue-items.json` | 変更 | 起票の項目 `policy_split` を足す | 無し |
-| `plugins/ndf/skills/cross-review/scripts/review_lib/review_focus.py` | 変更 | `DESIGN_REVIEW_TEMPLATE` に後方互換の 1 行を足す | 無し |
-| `plugins/ndf/skills/cross-review/docs/08-review-categories.md` | 変更 | `design` の分類の説明に後方互換の観点を足す | 無し |
+| `plugins/ndf/skills/cross-review/scripts/review_lib/review_focus.py` | 変更 | `DESIGN_REVIEW_TEMPLATE` に汎用性の 1 行を足す | 無し |
+| `plugins/ndf/skills/cross-review/docs/08-review-categories.md` | 変更 | `design` の分類の説明に汎用性の観点を足す | 無し |
 | `plugins/ndf/scripts/tests/test_design_repos.py` | 新設 | 設定の読み込み・当てる範囲・2 規則・設計の検査の結果を縛る | `lib/design_repos.py`・`design-survey.py` |
 | `plugins/ndf/scripts/tests/test_issue_items.py` | 変更 | `policy_split` が該当時の項目として読めることを縛る | `lib/issue_items.py` |
 | `plugins/ndf/scripts/tests/test_mvv_gate.py` | 変更 | P2 の行を持つ MVV で、判定の指示に P2 が入ることと、`boundary` が空でなければ承認ゲートを省かないことを縛る | `mvv-gate.py` |
@@ -98,9 +98,9 @@ plugins/ndf-next/
 | `load_settings` | `plugins/ndf/scripts/lib/design_repos.py` | 新設 | `load_settings(root: Path) -> RepoSettings \| None` | リポジトリの根の `.ndf/design.json` を読み、形を確かめて内部の形へ直す | `root` はリポジトリの根の絶対パス | ファイルが無いか `representative_repos` が無ければ `None`。あれば `kinds` が空でなく重複が無く、`redline` が `[CPR][1-9][0-9]*` の形の `RepoSettings` を返す。形が合わなければ値を返さない | ファイルの読み取り。ファイルがあるときだけ `deps.require("schema", "pathmatch")`（依存が無ければ uv で起動し直す） |
 | `design_json_schema` | `plugins/ndf/scripts/lib/design_repos.py` | 新設 | `design_json_schema() -> str` | 設定の型から JSON Schema の文字列（末尾の改行つき・キーの順は型の定義の順）を作る | `deps.require("schema")` を呼べる | 同じ型からは同じ文字列が返る。`$schema` は draft 2020-12 | `deps.require("schema")` |
 | `applies` | `plugins/ndf/scripts/lib/design_repos.py` | 新設 | `applies(settings: RepoSettings, touched: set[str] \| None) -> bool` | 頭の設計文書に 2 規則を当てるかを決める | `settings` は `load_settings` の戻り値 | 判定表（「処理の手順」）のとおりの真偽を返す | 無し |
-| `check_repos` | `plugins/ndf/scripts/lib/design_repos.py` | 新設 | `check_repos(path: str, text: str, settings: RepoSettings, left_ids: set[str]) -> list[dict]` | 頭の設計文書 1 本に 2 規則を当て、指摘の並びを返す | `applies` が真を返した文書である。`left_ids` は同じ文書の「人へ残す判断」の表の番号のセルから切り出したレッドラインの番号の集合 | 指摘はそれぞれ `name`（`<パス>:<行>`）・`rule`（2 規則のどちらか）・`text` を持ち、文書の行の順に並ぶ。表と事情の欄がそろい、使えなくなるものの行が無いか番号の行があれば空 | 無し |
+| `check_repos` | `plugins/ndf/scripts/lib/design_repos.py` | 新設 | `check_repos(path: str, text: str, settings: RepoSettings, left_ids: set[str]) -> list[dict]` | 頭の設計文書 1 本に 2 規則を当て、指摘の並びを返す | `applies` が真を返した文書である。`left_ids` は同じ文書の「人へ残す判断」の表の番号のセルから切り出したレッドラインの番号の集合 | 指摘はそれぞれ `name`（`<パス>:<行>`）・`rule`（2 規則のどちらか）・`text` を持ち、文書の行の順に並ぶ。表と事情の欄がそろい、扱えなくなることの行が無いか番号の行があれば空 | 無し |
 | `_scope_problems` | `plugins/ndf/scripts/lib/design_repos.py` | 新設 | `_scope_problems(text: str, settings: RepoSettings) -> tuple[list[tuple[int, str]], Table \| None]` | 「適用範囲」の節・振る舞いの表・種類ごとの行・事情の欄の欠けを（行, 理由）で並べ、見つけた表を返す | `text` は頭の設計文書の本文 | 欠けが無ければ並びは空。表が見つからなければ 2 つ目は `None` | 無し |
-| `_loss_rows` | `plugins/ndf/scripts/lib/design_repos.py` | 新設 | `_loss_rows(table: Table) -> tuple[list[int], list[int]]` | 振る舞いの表の行を「使えなくなるものがある行」と「使えなくなるものが空の行」に分け、文書の中の行番号で返す | `table` は `_behavior_table` が返した表 | セルが `無し` で始まる行はどちらにも入らない | 無し |
+| `_loss_rows` | `plugins/ndf/scripts/lib/design_repos.py` | 新設 | `_loss_rows(table: Table) -> tuple[list[int], list[int]]` | 振る舞いの表の行を「扱えなくなることがある行」と「扱えなくなることが空の行」に分け、文書の中の行番号で返す | `table` は `_behavior_table` が返した表 | セルが `無し` で始まる行はどちらにも入らない | 無し |
 | `repo_items` | `plugins/ndf/scripts/design-survey.py` | 新設 | `repo_items(group: list[Doc], settings: RepoSettings \| None) -> list[dict]` | まとまりの頭の設計文書ごとに、当てる範囲を決めて 2 規則を呼ぶ | `group` は `survey_groups` の 1 まとまり | `settings` が `None` なら空。そうでなければ、当てる頭の設計文書ごとの `check_repos` の結果をつないだもの | 無し |
 | `judge_docs` | `plugins/ndf/scripts/design-survey.py` | 変更 | `judge_docs(docs: list[Doc], require_detail: bool, settings: RepoSettings \| None = None) -> tuple[list[dict], dict]` | 文書の並びに調査・レッドライン・詳細設計・代表のリポジトリの判定を当て、指摘と件数を返す | 今と同じ | 今の指摘と件数に加え、`metrics` に `repo_scope_missing`・`repo_loss_unrouted` の件数（`settings` が `None` なら 0）がある。今の指摘の並びと件数は変わらない（I3） | 無し |
 | `cmd_check` | `plugins/ndf/scripts/design-survey.py` | 変更 | `cmd_check(a: argparse.Namespace) -> None` | 文書を読み、設定を 1 回読んで判定し、結果の 1 行の JSON を出す | 今と同じ | 終了コードの意味は今と同じ（0 / 1 / 2 / 3）。設定が壊れていれば 2 | 標準出力。`load_settings` のファイルの読み取り |
@@ -126,18 +126,18 @@ plugins/ndf-next/
 | 関数 | 条件の組み合わせ | 結果 |
 | --- | --- | --- |
 | `applies` | `settings.paths` が `None` | 真（リポジトリのすべての頭の設計文書に当てる） |
-| `applies` | `paths` があり、`touched` が `None`（設計の結果の表を読めない、または `legacy-refactor` の書式） | 真。触るファイルが分からない設計を外すと、減少を書いた設計が検査を通らずに承認へ届くため、安全側に倒す |
+| `applies` | `paths` があり、`touched` が `None`（設計の結果の表を読めない、または `legacy-refactor` の書式） | 真。触るファイルが分からない設計を外すと、扱えなくなる種類を書いた設計が検査を通らずに承認へ届くため、安全側に倒す |
 | `applies` | `paths` があり、`touched` のどれかが `pathmatch.path_matches(f, paths)` で当たる | 真 |
 | `applies` | `paths` があり、`touched` が空か、どれも当たらない | 偽（今と同じ。I3） |
 | `_scope_problems` | 「適用範囲」の `##` の節が無い | 1 件（行 0・「適用範囲の節が無い」）。ほかは見ずに表は `None` |
 | `_scope_problems` | 節の中に `### 代表のリポジトリでの振る舞い` が無い | 1 件（適用範囲の見出しの行・「代表のリポジトリでの振る舞いの節が無い」） |
-| `_scope_problems` | 小見出しはあるが、見出しに `代表のリポジトリ` と `使えなくなるもの` の列を持つ表が中に無い | 1 件（小見出しの行・「振る舞いの表に 代表のリポジトリ と 使えなくなるもの の列が無い」） |
+| `_scope_problems` | 小見出しはあるが、見出しに `代表のリポジトリ` と `この種類で扱えなくなること` の列を持つ表が中に無い | 1 件（小見出しの行・「振る舞いの表に 代表のリポジトリ と この種類で扱えなくなること の列が無い」） |
 | `_scope_problems` | 表はあるが、`settings.kinds` のある種類で始まる 1 列目のセルが無い | 種類ごとに 1 件（表の見出しの行・「種類 <名前> の行が無い」） |
-| `_scope_problems` | 表に「使えなくなるもの」のセルが空の行がある | 行ごとに 1 件（その行・「使えなくなるものが空」） |
+| `_scope_problems` | 表に「この種類で扱えなくなること」のセルが空の行がある | 行ごとに 1 件（その行・「扱えなくなることが空」） |
 | `_scope_problems` | 節の中に、題が `だけの事情` で終わる `###` の節が無いか、その本文に空白でない行が無い | 1 件（適用範囲の見出しの行・「このリポジトリだけの事情の欄が無い」） |
 | `check_repos` | `_scope_problems` の欠けが 1 件以上 | 欠けごとに `repo_scope_missing` の指摘 |
-| `check_repos` | 表があり、使えなくなるものがある行が 1 行以上あり、`settings.redline` が `left_ids` に無い（`P2` と `P20` は別の番号として扱う） | 使えなくなるものがある行ごとに `repo_loss_unrouted` の指摘 |
-| `check_repos` | 使えなくなるものがある行があり、番号の行もある | `repo_loss_unrouted` は出さない |
+| `check_repos` | 表があり、扱えなくなることがある行が 1 行以上あり、`settings.redline` が `left_ids` に無い（`P2` と `P20` は別の番号として扱う） | 扱えなくなることがある行ごとに `repo_loss_unrouted` の指摘 |
+| `check_repos` | 扱えなくなることがある行があり、番号の行もある | `repo_loss_unrouted` は出さない |
 | `check_repos` | 表が `None` | `repo_loss_unrouted` は判定しない（`repo_scope_missing` だけを返す） |
 | `cmd_check` | `load_settings` が `RepoSettingsError` | 文書の判定より前に終了コード 2 |
 | `cmd_check` | 設定が `None` | 今と同じ判定（`repo_items` は空） |
@@ -155,16 +155,16 @@ plugins/ndf-next/
 | `SETTINGS_PATH` | 定数（根からの相対パス） | `plugins/ndf/scripts/lib/design_repos.py` | `.ndf/design.json` |
 | `RULES` | 定数（規則の順。指摘の並びと `metrics` の鍵） | `plugins/ndf/scripts/lib/design_repos.py` | `("repo_scope_missing", "repo_loss_unrouted")` |
 | `SCOPE_TITLE`・`BEHAVIOR_TITLE`・`OWN_SUFFIX` | 定数（規則が名指す節の題） | `plugins/ndf/scripts/lib/design_repos.py` | `適用範囲`・`代表のリポジトリでの振る舞い`・`だけの事情` |
-| `REPO_COL`・`LOSS_COL`・`NONE_VALUE` | 定数（規則が名指す列と値） | `plugins/ndf/scripts/lib/design_repos.py` | `代表のリポジトリ`・`使えなくなるもの`・`無し` |
+| `REPO_COL`・`LOSS_COL`・`NONE_VALUE` | 定数（規則が名指す列と値） | `plugins/ndf/scripts/lib/design_repos.py` | `代表のリポジトリ`・`この種類で扱えなくなること`・`無し` |
 | `REDLINE_ID` | 定数（レッドラインの番号の正規表現） | `plugins/ndf/scripts/design-survey.py`（今の唯一の置き場。番号の切り出しは呼ぶ側の `repo_items` が行い、`design_repos.py` へは番号の集合 `left_ids` を渡す。`design_repos.py` は `redline` の形を型の `pattern` で確かめるだけで、この正規表現を写さない） | `(?<![A-Za-z0-9])[CPR][0-9]+(?![0-9])` |
 | 設定の型 `DesignSettings`・`RepresentativeRepos` | 型（`schema.Shape`。`version: Literal[1]`・`representative_repos: RepresentativeRepos \| None = None`／`kinds: list[NonEmptyStr]`（1 個以上）・`paths: list[NonEmptyStr] \| None = None`（1 個以上）・`redline: str`（`^[CPR][1-9][0-9]*$`）） | `plugins/ndf/scripts/lib/design_repos.py` の `_models()`（pydantic を読む前に依存を確かめるため、`project_mvv_decl.decl_models` と同じく関数の中で組む） | — |
 | 設定のスキーマ | 生成物 | `plugins/ndf/skills/design/schemas/design.schema.json`（正本は上の型。`design-survey.py schema --out` で作り直す） | — |
 | ai-plugins の設定の値 | 設定値 | `.ndf/design.json` | `kinds`: `Web サービス`・`モバイルアプリ`・`業務文書だけ`、`paths`: `plugins/ndf/**`・`plugins/ndf-next/**`・`.claude-plugin/marketplace.json`、`redline`: `P2` |
-| 後方互換の観点の 1 行 | 定数の文 | `review_focus.py` の `DESIGN_REVIEW_TEMPLATE` の末尾の前（文は決定 6 の 1 行） | — |
+| 汎用性の観点の 1 行 | 定数の文 | `review_focus.py` の `DESIGN_REVIEW_TEMPLATE` の末尾の前（文は決定 6 の 1 行） | — |
 | 起票の項目 `policy_split` | データ | `plugins/ndf/scripts/data/issue-items.json` の `boundary` の後・`request` の前 | `name`: `方針の分け方`、`need`: `運用`・`機能` は `該当時`、`不具合`・`調査` は `不要`、`level`: 「依頼の方針を、このリポジトリの運用の決まり（設定の値）と作るものの振る舞いの 2 列の表に分けて書く」、`when.text`: 「依頼に運用の方針（ブランチの運用・リリースの形など）が含まれるとき」、`when.key`: `null` |
-| 直しの棚卸しの行 | データ | `plugins/ndf-next/src/ndf/parity/fixes.json` の `fixes` | `fix:3618-survey`（設定の読み込み・2 規則・スキーマ・直しの指示。`to`: `M7`）、`fix:3618-focus`（後方互換の観点。`to`: `M5`）、`fix:3618-items`（起票の項目。`to`: `M6`）。`prs`・`commits` は実装の Pull Request を作った後にその番号とコミットを書く。実装の時点で行き先の子が閉じていれば、追補の単位（`M7+` など）を `to` にする（決定 9） |
-| 子 G1 の行 | データ | `plugins/ndf-next/src/ndf/checks/children.json` の `children` | `{"issue": 3618, "packages": [], "needs": ["S1a", "X3"], "order": 9, "lane": "lguard", "closed": false}`。S2 の `needs` は `["T2", "S1d", "G1"]`（決定 12） |
-| 直しの指示の文 | 定数の文 | `procedures.py` の `survey_steps` の `fix-survey` の `prompt`（`require_detail` に依らず足す） | 「repo_* の指摘は頭の設計文書の適用範囲を直す: `### 代表のリポジトリでの振る舞い` の表に設定の種類ごとの行を足す・`### <名前>だけの事情` の欄を書く・使えなくなるものがある行は、人へ残す判断の表に設定が名指す番号の行を足す。使えなくなるものを `無し` へ書き換えて指摘を消さない」 |
+| 直しの棚卸しの行 | データ | `plugins/ndf-next/src/ndf/parity/fixes.json` の `fixes` | `fix:3618-survey`（設定の読み込み・2 規則・スキーマ・直しの指示。`to`: `M7`）、`fix:3618-focus`（汎用性の観点。`to`: `M5`）、`fix:3618-items`（起票の項目。`to`: `M6`）。各行は既存の行と同じ項目（`id`・`issue`・`fix`・`prs`・`commits`・`tests`・`to`）を持つ。`prs`・`commits` は実装の Pull Request を作った後にその番号とコミットを書く。実装の時点で行き先の子が閉じていれば、追補の単位（`M7+` など）を `to` にする（決定 9） |
+| 子 G1 の行 | データ | `plugins/ndf-next/src/ndf/checks/children.json` の `children`（記号を鍵にした辞書） | 鍵 `G1`、値 `{"issue": 3618, "packages": [], "needs": ["S1a", "X3"], "order": 9, "lane": "lguard", "closed": false}`。S2 の `needs` は `["T2", "S1d", "G1"]`（決定 12） |
+| 直しの指示の文 | 定数の文 | `procedures.py` の `survey_steps` の `fix-survey` の `prompt`（`require_detail` に依らず足す） | 「repo_* の指摘は頭の設計文書の適用範囲を直す: `### 代表のリポジトリでの振る舞い` の表に設定の種類ごとの行を足す・`### <名前>だけの事情` の欄を書く・扱えなくなることがある行は、人へ残す判断の表に設定が名指す番号の行を足す。扱えなくなることを `無し` へ書き換えて指摘を消さない。`無し` と書いてよいのは、同じ種類が改名後の設定か別の選択肢で同じ運用を続けられるときだけ」 |
 
 ## 並行と排他
 
@@ -205,7 +205,7 @@ plugins/ndf-next/
 | `load_settings` | 3 種・`paths`・`P2` の設定を読み、`RepoSettings` の値が一致する | ファイルが無い → `None`。`{"version": 1}` だけ（`representative_repos` が無い）→ `None`。`paths` を省く → `paths` が `None` | 読めない・JSON の誤り・知らない項目・`kinds` が空の配列・`redline` が `X1`・`paths` が空の配列・種類の重なりのそれぞれで `RepoSettingsError` |
 | `design_json_schema` | 出力が公開した `design.schema.json` と一致する（生成物の食い違いを落とす） | 2 回呼んで同じ文字列 | 依存の欠けは `deps` の既存のテストが持つ |
 | `applies` | `paths` が `plugins/ndf/**` で触るファイルが `plugins/ndf/scripts/a.py` → 真 | `paths` が `None` → 真。`touched` が `None` → 真。`touched` が空 → 偽。`plugins/mcp/x.json` だけ → 偽 | — |
-| `check_repos` | 3 種の行と事情の欄があり、使えなくなるものがすべて `無し` → 空 | 種類で前方一致する行（`Web サービス・設定なし`）を数える。使えなくなるものがある行と、人へ残す判断に `P2` の行がある → 空。`P2` がインラインコードで書かれていても数える | 表が無い・種類の行が 1 つ欠ける・事情の欄が無い・事情の欄が空・使えなくなるものが空 → `repo_scope_missing`。使えなくなるものがある行があり、人へ残す判断に `P2` が無い（`P1` だけ・`P20` だけ）→ `repo_loss_unrouted` |
+| `check_repos` | 3 種の行と事情の欄があり、扱えなくなることがすべて `無し` → 空 | 種類で前方一致する行（`Web サービス・設定なし`）を数える。扱えなくなることがある行と、人へ残す判断に `P2` の行がある → 空。`P2` がインラインコードで書かれていても数える | 表が無い・種類の行が 1 つ欠ける・事情の欄が無い・事情の欄が空・扱えなくなることが空 → `repo_scope_missing`。扱えなくなることがある行があり、人へ残す判断に `P2` が無い（`P1` だけ・`P20` だけ）→ `repo_loss_unrouted` |
 | `_scope_problems` | `check_repos` の正常の行で欠けが空 | 「適用範囲」の外にある同じ名前の小見出しは数えない | 「適用範囲」の節が無い → 1 件だけで表は `None` |
 | `_loss_rows` | `無し` で始まる行（`無し（今と同じ）`）は入らない | `` `無し` `` の記法を外して `無し` として読む | 空のセルは 2 つ目の並びに入る |
 | `repo_items` | 頭の設計文書だけに当て、決定の記録と要求のコピーには当てない | 触るファイルが `paths` に当たらない頭の設計文書は表が無くても空 | 文書の種類の契約を読めない → `StepError(EXIT_UNREADABLE)` |
