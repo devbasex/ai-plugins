@@ -119,12 +119,12 @@ def applies(settings: RepoSettings, touched: set[str] | None) -> bool:
     return any(pathmatch.path_matches(f, settings.paths) for f in touched)
 
 
-def _plain(cell: str) -> str:
+def _strip_marks(cell: str) -> str:
     return cell.strip().strip("`*_ ").strip()
 
 
 def _col(header: list[str], name: str) -> int | None:
-    return next((k for k, h in enumerate(header) if _plain(h) == name), None)
+    return next((k for k, h in enumerate(header) if _strip_marks(h) == name), None)
 
 
 def _behavior_table(text: str, section):
@@ -137,8 +137,8 @@ def _behavior_table(text: str, section):
     )
 
 
-def _cell(row: list[str], col: int) -> str:
-    return _plain(row[col]) if col < len(row) else ""
+def _row_cell(row: list[str], col: int) -> str:
+    return _strip_marks(row[col]) if col < len(row) else ""
 
 
 def _loss_rows(table) -> tuple[list[int], list[int]]:
@@ -147,7 +147,7 @@ def _loss_rows(table) -> tuple[list[int], list[int]]:
     lost: list[int] = []
     empty: list[int] = []
     for k, row in enumerate(table.rows):
-        value = _cell(row, col)
+        value = _row_cell(row, col)
         if not value:
             empty.append(table.body_line(k))
         elif not value.startswith(NONE_VALUE):
@@ -176,7 +176,7 @@ def _scope_problems(text: str, settings: RepoSettings):
             problems.append((behavior.heading.line, f"振る舞いの表に {REPO_COL} と {LOSS_COL} の列が無い"))
     if table is not None:
         repo_col = _col(table.header, REPO_COL)
-        names = [_cell(r, repo_col) for r in table.rows]
+        names = [_row_cell(r, repo_col) for r in table.rows]
         for kind in settings.kinds:
             if not any(n.startswith(kind) for n in names):
                 problems.append((table.start, f"種類 {kind} の行が無い"))
@@ -186,7 +186,7 @@ def _scope_problems(text: str, settings: RepoSettings):
         if after_col is None:
             problems.append((table.start, f"振る舞いの表に {AFTER_COL} の列が無い"))
         else:
-            problems += [(table.body_line(k), f"{AFTER_COL}が空") for k, r in enumerate(table.rows) if not _cell(r, after_col)]
+            problems += [(table.body_line(k), f"{AFTER_COL}が空") for k, r in enumerate(table.rows) if not _row_cell(r, after_col)]
     lines = text.splitlines()
     fenced = md.fenced_lines(text)
     own = [s for s in inner if s.heading.title.endswith(OWN_SUFFIX)]

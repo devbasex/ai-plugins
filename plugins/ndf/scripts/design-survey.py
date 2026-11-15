@@ -41,12 +41,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import deps  # noqa: E402
-import design_repos  # noqa: E402
 from proc import git_root as _probe_root  # noqa: E402
 
 
 def _required_groups(argv: list[str]) -> tuple[str, ...]:
     """外部パッケージを読む前に、`--root` とサブコマンドの名前だけを読んで要る依存のグループを決める。"""
+    import design_repos  # 標準ライブラリだけで読める（外部パッケージは使う関数の中で読む）
+
     ap = argparse.ArgumentParser(add_help=False)
     ap.add_argument("--root", default=None)
     ap.add_argument("cmd", nargs="?")
@@ -58,7 +59,8 @@ def _required_groups(argv: list[str]) -> tuple[str, ...]:
     return design_repos.dep_groups(root, known.cmd == "schema")
 
 
-deps.require(*_required_groups(sys.argv[1:]))
+deps.require("md", *_required_groups(sys.argv[1:]))  # md は静的に並べ、設定で増える分は dep_groups が決める
+import design_repos  # noqa: E402
 import md  # noqa: E402
 import doc_kinds  # noqa: E402
 from design_detail import RULES, DetailTemplateError, check_detail, is_detail  # noqa: E402

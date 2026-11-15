@@ -1,0 +1,10 @@
+{
+  "name": "design-schema-json",
+  "pattern": "design.schema.json",
+  "kind": "report",
+  "place": "worktree",
+  "skill_readers": [],
+  "writers": [
+    "plugins/ndf/scripts/design-survey.py:cmd_schema"
+  ]
+}
