@@ -21,10 +21,8 @@ from ndf.adapters import git
 from ndf.contracts import limits
 from ndf.core.converge import worktree
 from ndf.domains.crossrefactor import scope, verify_decide
-from ndf.testing.scoped import in_scope
 from ndf.testing import limits as test_limits
-from ndf.testing import slots
-from ndf.testing import scoped
+from ndf.testing import scoped, slots
 
 RUN_POLICY = "test-run.test"
 
@@ -57,7 +55,7 @@ def targets(work: Path, found: Sequence[scoped.Suite], changed: Sequence[str]) -
     tests = list(scope.tests_for_change(work, changed).files) if any(s.test for s in found) else []
     out: dict[str, list[str]] = {}
     for s in found:
-        files = [f for f in (tests if s.test else changed) if in_scope(f, s.paths) and (work / f).is_file()]
+        files = [f for f in (tests if s.test else changed) if scoped.in_scope(f, s.paths) and (work / f).is_file()]
         if files:
             out[s.name] = files
     return out
@@ -87,7 +85,7 @@ def failing(work: Path, found: Sequence[scoped.Suite], picked: Mapping[str, Sequ
 
 def tests_failing(work: Path, found: Sequence[scoped.Suite], tests: Sequence[str]) -> frozenset[str]:
     """足したテストのファイル `tests` をテストの suite で打ち、落ちた鍵を返す（どの suite にも当たらないファイルは打たない）。"""
-    picked = {s.name: [t for t in tests if in_scope(t, s.paths) and (work / t).is_file()] for s in found if s.test}
+    picked = {s.name: [t for t in tests if scoped.in_scope(t, s.paths) and (work / t).is_file()] for s in found if s.test}
     return failing(work, found, {n: fs for n, fs in picked.items() if fs})
 
 
