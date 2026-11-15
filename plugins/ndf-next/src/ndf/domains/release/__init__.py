@@ -10,7 +10,7 @@
 | 材料を集める | `plugins`（マーケットプレイスと版）・`declaration`（宣言と宣言の手順）・`gather` |
 | 組み立て | `assemble`（版上げ・CHANGELOG・宣言の手順・PR） |
 | 提示と承認 | `materials_decide`（承認資料）・`approval_decide`（証跡の判定）・`trail`（証跡の読み書き） |
-| マージ | `land`（証跡の後のマージとベースブランチへ戻す PR）・`cleanup`（worktree の後片付け） |
+| マージ | `land`（証跡の後のマージとベースブランチへ戻す PR）・`required_checks`（宛先の必須のチェックの解決）・`cleanup`（worktree の後片付け） |
 | リリース記録 | `record_decide`（記録の本文と読み方）・`record`（含めた PR の各々へ書く・同じ PR へリリース後テストの記録を書く） |
 | タグと GitHub Release | `tagging` |
 | リリース後テスト | `verify`（ベースブランチのそろえと利用者の設定の控え） |
