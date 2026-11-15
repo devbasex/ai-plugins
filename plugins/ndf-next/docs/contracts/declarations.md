@@ -302,7 +302,7 @@ worktree・チーム・公開・[supervise.schema.json](../../contracts/schemas/
 | --- | --- | --- | --- | --- | --- |
 | `$schema` | string | — | — | 任意 | 編集のときの補完に使うスキーマの位置。読み手は参照しない |
 | `base_branch` | string | — | — | 任意 | 開発の起点ブランチ。worktreeの分岐元になり、follow_branch が true のときはメインディレクトリの追従先にもなる。未指定なら origin の HEAD が指すブランチを使う。指定した名前が origin にもローカルにも無いときは既定へ落とさず解決に失敗する |
-| `branch_flow`（メインディレクトリから読む） | object | — | — | 任意 | ブランチ運用の宣言。無ければ既定値の行（ベースブランチから切り、ベースブランチを丸ごと出す） |
+| `branch_flow`（メインディレクトリから読む） | object | — | — | 任意 | ブランチ運用の宣言（#3121）。無ければ既定値の行（ベースブランチから切り、ベースブランチを丸ごと出す） |
 | `deps` | object | — | — | 任意 | 依存の用意。worktree を作った直後に copy_from_main・copy_as_real・run の順に行う。無いか空なら何もしない。個人設定からは反映しない |
 | `follow_branch` | boolean | `false` | — | 任意 | true のときだけ、セッションセッション開始 hook がメインディレクトリのブランチを稼働中のworktreeへ detached HEAD で追従させる。既定ではメインディレクトリの HEAD を動かさない。真偽値以外は false と同じ |
 | `guard` | object | — | — | 任意 | メインディレクトリでの編集の案内（guard）。allow_paths は案内を出さないパス |

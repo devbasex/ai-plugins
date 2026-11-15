@@ -139,7 +139,7 @@ def emit(summary: str, items: list[dict], metrics: dict, kind: str | None = None
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="check", description="新しいプラグインだけを見る検査")
     parser.add_argument("--base", help="差分の起点（I2）。無ければ差分を見ない")
-    parser.add_argument("--event", default=os.environ.get("GITHUB_EVENT_PATH", ""), help="PR 本文を読む GitHub の事象の JSON")
+    parser.add_argument("--event", default="", help="PR 本文を読む GitHub の事象の JSON。無ければ GITHUB_EVENT_PATH")
     parser.add_argument("--only", action="append", metavar="RULE", help="この規則の指摘だけを違反にする（繰り返せる）")
     parser.add_argument("--write-spec", action="store_true", help="規約の生成物（契約のページと引数のスキーマ）を書いてから検査する")
     args = parser.parse_args(argv)
@@ -148,7 +148,7 @@ def main(argv: list[str]) -> int:
         ident = identity.load()
         rules = load_rules()
         repo_root = _repo_root(ident.root)
-        scope = Scope(repo_root, ident.root.resolve(), ident.name, args.base, _pr_body(args.event))
+        scope = Scope(repo_root, ident.root.resolve(), ident.name, args.base, _pr_body(args.event or os.environ.get("GITHUB_EVENT_PATH", "")))
         found = select(scope, rules, args.only, args.write_spec, written)
     except (CheckError, identity.IdentityError) as exc:
         return emit(str(exc), [], {}, "config_broken")

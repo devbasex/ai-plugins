@@ -20,7 +20,7 @@
 
 | 呼び方 | 引数 |
 | --- | --- |
-| `ndf check` | `--base`（string・任意）: 差分の起点（I2）。無ければ差分を見ない<br>`--event`（string・任意・既定 `""`）: PR 本文を読む GitHub の事象の JSON<br>`--only`（array of string・任意）: この規則の指摘だけを違反にする（繰り返せる）<br>`--write-spec`（boolean・任意）: 規約の生成物（契約のページと引数のスキーマ）を書いてから検査する |
+| `ndf check` | `--base`（string・任意）: 差分の起点（I2）。無ければ差分を見ない<br>`--event`（string・任意・既定 `""`）: PR 本文を読む GitHub の事象の JSON。無ければ GITHUB_EVENT_PATH<br>`--only`（array of string・任意）: この規則の指摘だけを違反にする（繰り返せる）<br>`--write-spec`（boolean・任意）: 規約の生成物（契約のページと引数のスキーマ）を書いてから検査する |
 
 結果の `metrics`: `files`（integer）・`findings`（object）・`written`（integer）。`items` の要素: `detail`（string）・`line`（integer）・`path`（string）・`rule`（string）
 

@@ -15,7 +15,7 @@
         "--event": {
           "type": "string",
           "default": "",
-          "description": "PR 本文を読む GitHub の事象の JSON"
+          "description": "PR 本文を読む GitHub の事象の JSON。無ければ GITHUB_EVENT_PATH"
         },
         "--only": {
           "type": "array",
