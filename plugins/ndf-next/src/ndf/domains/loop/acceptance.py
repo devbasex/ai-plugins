@@ -26,8 +26,6 @@ from ndf.domains.loop import acceptance_decide as acc
 
 # 結果の tool は親の副命令 `ndf loop` の名前
 TOOL = cli.tool_of(f"{__package__}.cli")
-INCOMPLETE = "incomplete"
-INVALID = "invalid"
 
 
 def _hub(cwd: Path) -> github.GitHub:
@@ -36,7 +34,7 @@ def _hub(cwd: Path) -> github.GitHub:
 
 def read_body(cwd: Path, issue: int) -> str:
     """課題の本文（GitHub から読む）。テストが差し替える。"""
-    return _hub(cwd).issue_body(issue).body or ""
+    return _hub(cwd).issue_body(issue).body
 
 
 def write_body(cwd: Path, issue: int, body: str) -> None:
@@ -97,7 +95,7 @@ def _check(a: argparse.Namespace) -> dict[str, Any]:
         return result.result(TOOL, result.OK, f"#{a.issue}: 受け入れ条件 {len(found)} 件のすべてに確認の区分がある", _items(checks))
     gaps = [{"kind": "criterion", "name": str(c.number), "reason": f"確認の区分の記録が無い: {c.text}"} for c in left]
     detail = f"#{a.issue}: 受け入れ条件 {len(found)} 件のうち {len(left)} 件に確認の区分の記録が無い（要求の手動確認が残っている）"
-    return result.stopped(TOOL, INCOMPLETE, detail, items=_items(checks), gaps=gaps)
+    return result.stopped(TOOL, "incomplete", detail, items=_items(checks), gaps=gaps)
 
 
 def add_parsers(sub: Any) -> None:
@@ -119,4 +117,4 @@ def run(a: argparse.Namespace) -> dict[str, Any]:
     try:
         return a.handler(a)
     except acc.AcceptanceError as exc:
-        return result.stopped(TOOL, INVALID, str(exc))
+        return result.stopped(TOOL, "invalid", str(exc))

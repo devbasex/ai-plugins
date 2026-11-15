@@ -45,9 +45,6 @@ from ndf.contracts import result
 from ndf.progress import command
 from ndf.progress.lane import CANCELLED, LaneRow
 
-# 行の入力の kind（スプリントの行と開発ループの行）
-SPRINT_KIND = "sprint"
-LOOP_KIND = "loop"
 # 行の入力の args に --mode が無いときのモード
 DEFAULT_MODE = "standard"
 # レーンの conductor の役（ラッパーの登録簿の role）
@@ -107,9 +104,9 @@ def start_commands(plan: str, lane: str, lane_table: str, row: LaneRow) -> list[
     開発ループの行は `loop_commands`。スプリントの行でも開発ループの行でもなければ `Unsupported`。
     """
     kind = row.input.get("kind")
-    if kind == LOOP_KIND:
+    if kind == "loop":
         return loop_commands(plan, lane, row)
-    if kind != SPRINT_KIND:
+    if kind != "sprint":
         raise Unsupported(f"行 {lane}/{row.key} は {kind} の行で、起こす入力を組めない（起こせるのは sprint と loop の行だけ）")
     args = [str(a) for a in row.args]
     mode = [] if "--mode" in args else ["--mode", DEFAULT_MODE]

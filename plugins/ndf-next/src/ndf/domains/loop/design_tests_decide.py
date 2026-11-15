@@ -8,13 +8,14 @@
 - 「採らなかった案」の中の名前。採らなかった案は作らないので、HEAD に無くてよい。`採らなかった案` で始まる行から
   次の見出しまでを採らなかった案の範囲とみなす
 - 設計が改名を宣言した前の名前。設計文書のどこかに `` `前` → `後` `` の形で書いた改名を集め（`renames`）、HEAD に
-  無い名前は改名を当てた名前（`variants`。ファイル名の `-` と `_` の違いも当てる）で探し直す。見つかれば renamed
+  無い名前は改名を当てた名前（`variants`。ファイル名の `-` と `_` の違いも当てる）で探し直す。見つかれば renamed（`Verdict.RENAMED`）
 """
 
 from __future__ import annotations
 
 import re
 from collections.abc import Iterable
+from enum import Enum
 from pathlib import PurePosixPath
 from typing import NamedTuple, Optional
 
@@ -33,20 +34,28 @@ _FENCE = re.compile(r"^\s{0,3}(```|~~~)")
 _HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
 _LIST_MARK = re.compile(r"^\s*(?:[-*+]|\d+\.)\s+|\*\*")
 
-# 判定の結果
-PRESENT = "present"
-MISSING = "missing"
-RENAMED = "renamed"
-UNVERIFIED = "unverified"
-SKIPPED = "skipped"
-TEST_FILE_KIND = "test_file"
-TEST_FUNCTION_KIND = "test_function"
+
+class Verdict(str, Enum):
+    """名前 1 つの判定。"""
+
+    PRESENT = "present"
+    MISSING = "missing"
+    RENAMED = "renamed"
+    UNVERIFIED = "unverified"
+
+
+class Kind(str, Enum):
+    """拾った字面の種類。SHAPE は形の説明（`<名前>` など）で、判定しない。"""
+
+    FILE = "test_file"
+    FUNCTION = "test_function"
+    SHAPE = "skipped"
 
 
 class Span(NamedTuple):
     """拾った名前 1 つの形。`path` はファイルのパス（パスの無い識別子なら None）、`names` は確かめる名前。"""
 
-    kind: str
+    kind: Kind
     path: Optional[str]
     names: tuple[str, ...]
 
@@ -74,17 +83,17 @@ def classify(span: str, section: str) -> Optional[Span]:
     s = span.strip()
     if any(c in s for c in SHAPE_CHARS):
         probe = re.sub(r"[<>{}*…]+", "x", s)
-        return Span(SKIPPED, None, ()) if ("::" in s or looks_like_test_file(probe) or BARE_TEST.match(probe)) else None
+        return Span(Kind.SHAPE, None, ()) if ("::" in s or looks_like_test_file(probe) or BARE_TEST.match(probe)) else None
     if "::" in s:
         path, *names = s.split("::")
         names = [ARGS.sub("", n).strip() for n in names]
         if looks_like_test_file(path) and names and all(names):
-            return Span(TEST_FUNCTION_KIND, path.removeprefix("./"), tuple(names))
+            return Span(Kind.FUNCTION, path.removeprefix("./"), tuple(names))
         return None
     if looks_like_test_file(s):
-        return Span(TEST_FILE_KIND, s.removeprefix("./").rstrip("/"), ())
+        return Span(Kind.FILE, s.removeprefix("./").rstrip("/"), ())
     if section == BARE_SECTION and BARE_TEST.match(s):
-        return Span(TEST_FUNCTION_KIND, None, (s,))
+        return Span(Kind.FUNCTION, None, (s,))
     return None
 
 
@@ -131,7 +140,7 @@ def extract(doc: str, text: str, seen: set[str]) -> tuple[list[Found], int]:
             if shape is None:
                 continue
             seen.add(span)
-            if shape.kind == SKIPPED:
+            if shape.kind == Kind.SHAPE:
                 skipped += 1
                 continue
             items.append(Found(span, doc, lineno, section, shape))
@@ -160,11 +169,11 @@ def variants(span: str, pairs: Iterable[tuple[str, str]]) -> list[str]:
 def outcome(results: Iterable[str]) -> tuple[str, str]:
     """判定の並びから (止まった理由の種類か ok, 要約)。無いものは check_failed、確かめられないものは incomplete。"""
     got = list(results)
-    missing, unverified = got.count(MISSING), got.count(UNVERIFIED)
+    missing, unverified = got.count(Verdict.MISSING), got.count(Verdict.UNVERIFIED)
     if missing:
         return "check_failed", f"設計に名前の出るテストのうち {missing} 件が HEAD に無い"
     if unverified:
         return "incomplete", f"設計に名前の出るテストのうち {unverified} 件を確かめられなかった"
-    renamed = got.count(RENAMED)
+    renamed = got.count(Verdict.RENAMED)
     note = f"（うち改名の後の名前で見つけたもの {renamed} 件）" if renamed else ""
     return "ok", f"設計に名前の出るテスト {len(got)} 件がすべて HEAD にある{note}"

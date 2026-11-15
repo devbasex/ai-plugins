@@ -27,8 +27,6 @@ from ndf.domains.loop import design_tests_decide as dt
 # 結果の tool は親の副命令 `ndf loop` の名前
 TOOL = cli.tool_of(f"{__package__}.cli")
 DESIGN_FILE = re.compile(r"^issues/issue-(\d+)-design[^/]*\.md$")
-NOT_APPLICABLE = "not_applicable"
-INVALID = "invalid"
 
 Grep = Callable[[Sequence[str], Sequence[str]], Optional[set[str]]]
 
@@ -49,35 +47,35 @@ def _grep(g: git.Git) -> Grep:
     return run
 
 
-def judge(shape: dt.Span, files: set[str], dirs: set[str], grep: Grep) -> str:
+def judge(shape: dt.Span, files: set[str], dirs: set[str], grep: Grep) -> dt.Verdict:
     """名前 1 つの判定（present / missing / unverified）。"""
-    if shape.kind == dt.TEST_FILE_KIND:
+    if shape.kind == dt.Kind.FILE:
         assert shape.path is not None
         here = (
             shape.path in files or shape.path in dirs or ("/" not in shape.path and any(f.rsplit("/", 1)[-1] == shape.path for f in files))
         )
-        return dt.PRESENT if here else dt.MISSING
+        return dt.Verdict.PRESENT if here else dt.Verdict.MISSING
     if shape.path is not None and shape.path not in files:
-        return dt.MISSING
+        return dt.Verdict.MISSING
     names = list(shape.names) if shape.path is not None else list(shape.names[:1])
     found = grep(names, [shape.path] if shape.path is not None else [".", ":(exclude)*.md"])
     if found is None:
-        return dt.UNVERIFIED
-    return dt.PRESENT if set(names) <= found else dt.MISSING
+        return dt.Verdict.UNVERIFIED
+    return dt.Verdict.PRESENT if set(names) <= found else dt.Verdict.MISSING
 
 
 def judge_found(item: dt.Found, pairs: list[tuple[str, str]], files: set[str], dirs: set[str], grep: Grep) -> dict[str, Any]:
     """拾った名前 1 つの結果の行。HEAD に無ければ改名を当てた名前で探し直す（#2118）。"""
-    row: dict[str, Any] = {"kind": item.shape.kind, "name": item.span, "doc": item.doc, "line": item.line, "section": item.section}
+    row: dict[str, Any] = {"kind": item.shape.kind.value, "name": item.span, "doc": item.doc, "line": item.line, "section": item.section}
     got = judge(item.shape, files, dirs, grep)
-    if got == dt.MISSING:
+    if got == dt.Verdict.MISSING:
         for other in dt.variants(item.span, pairs):
             shape = dt.classify(other, item.section)
-            if shape is not None and shape.kind != dt.SKIPPED and judge(shape, files, dirs, grep) == dt.PRESENT:
+            if shape is not None and shape.kind != dt.Kind.SHAPE and judge(shape, files, dirs, grep) == dt.Verdict.PRESENT:
                 row["renamed_to"] = other
-                got = dt.RENAMED
+                got = dt.Verdict.RENAMED
                 break
-    row["result"] = got
+    row["result"] = got.value
     return row
 
 
@@ -104,9 +102,9 @@ def run(a: argparse.Namespace) -> dict[str, Any]:
         designs = _designs(g, root, a)
         files = set(g.run("ls-tree", "-r", "--name-only", "HEAD").splitlines())
     except (OSError, UnicodeDecodeError, GitError) as exc:
-        return result.stopped(TOOL, INVALID, f"設計文書か git を読めない: {exc}")
+        return result.stopped(TOOL, "invalid", f"設計文書か git を読めない: {exc}")
     if not designs:
-        return result.stopped(TOOL, NOT_APPLICABLE, "設計文書が無い。設計に名前の出るテストの確かめは該当なし")
+        return result.stopped(TOOL, "not_applicable", "設計文書が無い。設計に名前の出るテストの確かめは該当なし")
     dirs = {str(p) for f in files for p in PurePosixPath(f).parents if str(p) != "."}
     pairs = dt.renames(text for _, text in designs)
     seen: set[str] = set()
@@ -123,11 +121,11 @@ def run(a: argparse.Namespace) -> dict[str, Any]:
         "designs": len(designs),
         "names": len(rows),
         "skipped": skipped,
-        **{k: sum(r["result"] == k for r in rows) for k in (dt.MISSING, dt.UNVERIFIED, dt.RENAMED)},
+        **{k.value: sum(r["result"] == k for r in rows) for k in (dt.Verdict.MISSING, dt.Verdict.UNVERIFIED, dt.Verdict.RENAMED)},
     }
     if kind == "ok":
         return result.result(TOOL, result.OK, summary, rows, metrics)
-    left = [r for r in rows if r["result"] in (dt.MISSING, dt.UNVERIFIED)]
+    left = [r for r in rows if r["result"] in (dt.Verdict.MISSING, dt.Verdict.UNVERIFIED)]
     detail = summary + ": " + "、".join(f"{r['name']}（{r['doc']} の {r['line']} 行・{r['result']}）" for r in left)
     extra: dict[str, Any] = {}
     if kind == "incomplete":

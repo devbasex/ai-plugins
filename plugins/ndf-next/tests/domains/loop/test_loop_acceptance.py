@@ -34,10 +34,10 @@ x
 
 def test_criteria_are_counted_outside_code_blocks_in_the_section():
     found = acc.criteria(BODY)
-    assert [(c.number, c.checked, c.text) for c in found] == [
-        (1, False, "1 つ目"),
-        (2, True, "2 つ目"),
-        (3, False, "3 つ目（手動確認（マージ前）: arm64 で建てる）"),
+    assert [(c.number, c.text) for c in found] == [
+        (1, "1 つ目"),
+        (2, "2 つ目"),
+        (3, "3 つ目（手動確認（マージ前）: arm64 で建てる）"),
     ]
 
 

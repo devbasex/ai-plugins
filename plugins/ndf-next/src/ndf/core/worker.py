@@ -85,10 +85,6 @@ BACKUP_SUFFIX = ".bak-"
 TMP_SUFFIX = ".tmp"
 # 進捗ログで、conductor の注意が要る state
 ATTENTION_STATES = ("failing", "stopped", "gate")
-# worker の結果ファイルの status を写すときの止まった理由の種類と、行き先を持たない承認ゲートの答え（#1682）
-BAD_REPORT = "bad_report"
-INCOMPLETE = "incomplete"
-GATE_ROUTES: dict[str, None] = {"retry": None, "cancel": None}
 
 # GitHub が課題をclosing keywords（https://docs.github.com/en/issues/tracking-your-work-with-issues/using-issues/linking-a-pull-request-to-an-issue）。
 # 形は旧実装 plugins/ndf/scripts/lib/closing.py の CLOSING と同じ。語の後ろの `:` と空白は省いてよく（`Fix:#12`）、
@@ -494,17 +490,17 @@ def outcome_of(kind: str, result_file: Path, items: list[dict[str, Any]], metric
     status = report.get("status") if isinstance(report, dict) else None
     if not isinstance(report, dict) or status not in (OK, GATE, STOPPED):
         return result.stopped(
-            TOOL, BAD_REPORT, f"作業 {kind} の結果ファイルを読めないか status が無い: {result_file}", items=items, metrics=metrics
+            TOOL, "bad_report", f"作業 {kind} の結果ファイルを読めないか status が無い: {result_file}", items=items, metrics=metrics
         )
     said = report.get("summary") if isinstance(report.get("summary"), str) and report["summary"] else "（要約なし）"
     gaps = _gaps_of(report)
     if status == OK and not gaps:
         return result.result(TOOL, OK, f"作業 {kind} の worker が完了した（起動 {attempts} 回）: {said}", items, metrics)
     if status == GATE:
-        routes = report.get("routes") if isinstance(report.get("routes"), dict) and report["routes"] else dict(GATE_ROUTES)
+        routes = report.get("routes") if isinstance(report.get("routes"), dict) and report["routes"] else {"retry": None, "cancel": None}
         return result.result(TOOL, GATE, f"作業 {kind} の worker が判断を求めた: {said}", items, metrics, routes=routes)
     gaps = gaps or [{"kind": "work", "name": kind, "reason": said}]
-    return result.stopped(TOOL, INCOMPLETE, f"作業 {kind} の worker が作業を残した: {said}", items=items, metrics=metrics, gaps=gaps)
+    return result.stopped(TOOL, "incomplete", f"作業 {kind} の worker が作業を残した: {said}", items=items, metrics=metrics, gaps=gaps)
 
 
 def _cmd_run(a: argparse.Namespace) -> int:
