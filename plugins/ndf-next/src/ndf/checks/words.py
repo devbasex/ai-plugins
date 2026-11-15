@@ -29,8 +29,13 @@ def banned_words(repo_root: Path, config_name: str) -> dict[str, str]:
     if not config_path.is_file():
         return {}
     config = _read(config_path)
+    return _words_from(config, _read(repo_root / config["source"]))
+
+
+def _words_from(config: dict[str, Any], glossary: dict[str, Any]) -> dict[str, str]:
+    """用語集の設定と用語集から、禁止する語 → 理由（廃止した語は替える語、禁止語は「禁止語」）を作る。"""
     words: dict[str, str] = {}
-    terms = [t for t in _read(repo_root / config["source"])["terms"] if "deprecated" in t]
+    terms = [t for t in glossary["terms"] if "deprecated" in t]
     for term in terms:
         words.update({w: f"廃止した語。「{term['term']}」と書く" for w in term["deprecated"]})
     banned = config["check"]["banned"]["words"] if "banned" in config["check"] else []
