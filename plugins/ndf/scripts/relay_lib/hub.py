@@ -339,6 +339,18 @@ class Refusal(NamedTuple):
     busy: str = ""  # 断りの元の動いている一時レーンの名前（`helper-busy` のときだけ）
 
 
+class _Launch(NamedTuple):
+    """`Hub.process` が決めた起動内容（`Hub.launch` が起こす）。`role`・`plan` は役割 `helper` のときだけ環境と登録簿へ載る。"""
+
+    kind: str
+    name: str
+    cwd: str
+    args: list[str]
+    by: str
+    role: str | None = None
+    plan: str | None = None
+
+
 class Hub:
     """リレーハブの役目。`claim` で `hub.lock` を取り、`start` で受付箱を読む thread を始める。"""
 
@@ -428,7 +440,8 @@ class Hub:
         if refusal := self.judge(name, now, role, by):
             return self.refuse(kind, name, refusal)
         plan = req.get("plan") if isinstance(req.get("plan"), str) else (registry.get(name) or {}).get("plan")
-        return self.launch(kind, name, cwd, args, by, registry, role, plan, self._over_limit(by, now))
+        spec = _Launch(kind=kind, name=name, cwd=cwd, args=args, by=by, role=role, plan=plan)
+        return self.launch(spec, registry, self._over_limit(by, now))
 
     def _launch_input(self, kind, req: dict, registry: dict, ws, now: Live) -> tuple | Refusal:
         name = req.get("name")  # 依頼の種類ごとの起動の入力 (name, cwd, args, role)。決められなければ Refusal
@@ -479,7 +492,9 @@ class Hub:
             return Refusal(NO_TMUX, "tmux が PATH に無い", 3)
         return None
 
-    def launch(self, kind: str, name: str, cwd: str, args: list[str], by: str, registry: dict, role=None, plan=None, over=None) -> dict:
+    def launch(self, spec: _Launch, registry: dict, over=None) -> dict:
+        """起動内容 `spec` を tmux のセッションで起こし、登録簿 `registry` へ書く。`over` は上限を超えた人の起動の記録と通知。"""
+        kind, name, cwd, args, by, role, plan = spec
         py, switched = launch_python()  # 置き場が消えたら relay.current の仮想環境。どちらも無ければ下の確かめで落ちる
         if switched:
             hub_log("version-switched", name, f"{sys.executable} が無いため {switched} の仮想環境で起こす")
