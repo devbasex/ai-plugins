@@ -592,7 +592,8 @@ def test_human_merge_of_a_moved_head_keeps_both_heads() -> None:
     done = release_lander(hub, False, []).land(7)
     assert done.approval == merge_decide.Approval("github-merge", "takemi", OTHER, OTHER, MERGE_SHA, HEAD)
     (record,) = [c.body for c in hub.comments(7) if records_trail.MERGE_MARK in c.body]
-    assert f"{records_trail.GATE_HEAD_LINE} `{HEAD}`" in record and f"{records_trail.MERGED_HEAD_LINE} `{OTHER}`" in record
+    trail = records_trail  # 先端の行の印は記録の側へ移った。期待する文字列は分割の前と同じ式で書く
+    assert f"{trail.GATE_HEAD_LINE} `{HEAD}`" in record and f"{trail.MERGED_HEAD_LINE} `{OTHER}`" in record
 
 
 def test_merge_record_failure_keeps_the_merge_and_reports_it(monkeypatch, capsys) -> None:
