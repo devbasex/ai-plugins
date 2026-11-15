@@ -20,13 +20,16 @@ CD（本番チャネルへのマージで届くデプロイ）を持つリポジ
 
 この文書の語（リリースの場合・承認資料のコメント・開発版の workflow・リリースの PR・承認の証跡・証跡のチェック・承認権限）の定義は、用語集 [docs/glossary.md](../glossary.md) の `ndf-release` にある。「承認の証跡」は `ndf-workflow` の同名の語（承認ゲートの記録・承認ラベル）とは別の意味で、この文書ではリリースの PR に置いたコメントだけを指す。
 
-リリースの場合は 3 つある。
+リリースの場合は 4 つある。
 
 | 値 | 条件 | 承認を取る場所 | マージの主体 |
 | --- | --- | --- | --- |
 | `cd-no-review` | CD があり、レビューなしでマージできる | リリースの PR の証跡のコメント | 利用者のアカウント |
-| `cd-review` | CD があり、レビューが必須 | PR のレビューの承認 | 利用者のアカウント |
+| `cd-review` | CD があり、レビューが必須で、迂回の宣言が無い | PR のレビューの承認 | 利用者のアカウント |
+| `cd-admin` | CD があり、レビューが必須で、迂回の宣言がある | リリースの PR の証跡のコメント（利用者が書いたものだけ） | 利用者のアカウント（管理者の迂回） |
 | `no-cd` | CD が無い | 手元の承認資料（従来の経路） | NDF |
+
+迂回の宣言は `.ndf/project.json` の `production_merge.admin` である。JSON の `true` のときだけ宣言があるとみなし、キーが無い・型が違う・`unknown` は宣言なしとして扱う。契約の置き場は `main` で、`delivery` と同じくメインディレクトリから読む（PR の変更だけで迂回を選べない）。
 
 ## 背景
 
@@ -39,7 +42,8 @@ CD（本番チャネルへのマージで届くデプロイ）を持つリポジ
 - **承認した人と時刻は GitHub がコメントに付けた作成者と作成の時刻で読み、作成の後に編集された証跡は数えない。** 書き込み権限を持つ人は他人の PR のコメントを編集できるため、編集を数えると書いた人と承認したコミットの組が崩れる
 - **承認権限は共同作業者の権限の API の `role_name` で読む。** `permission` は maintain を write へ丸めるため使わない
 - **承認の正本は PR の上の 1 つにする。** `cd-no-review` と `cd-review` の `release --channel prod` は承認したコミットの引数を受けない
-- **`cd-no-review` と `cd-review` のマージは利用者のアカウントで `--admin` なしに行う。** `GITHUB_TOKEN` で main へマージした push は CD を起動しない
+- **CD のある場合のマージは利用者のアカウントで行う。** `GITHUB_TOKEN` で main へマージした push は CD を起動しない。`cd-no-review` と `cd-review` は `--admin` なしで、`cd-admin` だけ `--admin` を付ける
+- **迂回は宣言で選ぶ。** 本番の PR の作者が利用者自身だと、作者本人の承認レビューは付けられず、承認数 1 の main は人の手のマージまで止まる。宣言のあるリポジトリでは承認を PR の証跡で取り、承認と先端の一致と CI の通過の後に管理者の迂回でマージする。迂回は NDF の固定の振る舞いにせず、ruleset も変えない
 - **開発版の PR は手元で作り、マージだけを workflow が行う。** `GITHUB_TOKEN` で作った PR では CI が起動しない。秘密を置かずに済ませるためである。GitHub の自動マージはリポジトリの設定の変更が要るため使わない
 
 ## 対象範囲
@@ -71,7 +75,9 @@ CD（本番チャネルへのマージで届くデプロイ）を持つリポジ
 | I4 | 承認した人と時刻はコメントの `user.login` と `created_at` で読み、本文の記述を使わない。`updated_at` が `created_at` と違う証跡は数えない | 理由に「編集された証跡」を出す |
 | I5 | 判定は既定ブランチの定義で動き、PR のコードを取り出さない | — |
 | I6 | リリースの手順は承認を求めた後にリリースのブランチへコミットを足さない | 足せば先端が動き、I1 で落ちる |
-| I7 | `cd-no-review`・`cd-review` の本番の経路（`release --channel prod` と `merged-steps.py promote`）は、CI の必須チェックが通った先端でだけ、管理者の迂回なしで main へマージする | GitHub がマージを拒み、手順は止まって理由を出す |
+| I7 | 本番の経路（`release --channel prod` と `merged-steps.py promote`）は、CI の必須チェックが通った先端でだけ main へマージする。迂回の宣言が無い場合（`cd-no-review`・`cd-review`）は管理者の迂回なしで、宣言がある場合（`cd-admin`）は、利用者の証跡が先端と一致した後にだけ管理者の迂回で打つ。どちらも先端を指定して打ち、断られた後に先端が動いていれば `head_moved` として扱う | 迂回なしでは GitHub がマージを拒み、手順は止まって理由を出す。承認が無い・先端が動いたら 10（`promote` は 1）、チェックが落ちたら 1、上限なら 75 で止まり、迂回しない |
+| I7a | `cd-admin` で迂回してマージした本番の PR には、マージした先端と照らした証跡を指す迂回の記録（印 `ndf:admin-merge` のコメント）が 1 件だけ残る。結果 JSON の本番の PR の行の `admin` は迂回したら `true`、ほかは `false` | 記録を書けなければ本番の完了と分けて 1 で報告し、打ち直しで記録だけを書く |
+| I7b | `cd-admin` の承認に数えるのは担い手が `user` の証跡だけである。MVV 判定はこの承認ゲートを代えない | 承認ゲート（10）で止まり、迂回しない |
 | I8 | `cd-review` では証跡を書かず、証跡のチェックを付けない。必須レビューの承認者として有効な人（`permission` が admin か write）の最新の `APPROVED` のレビューの `commit_id` が先端と一致したときだけマージする | 一致しない・有効な承認が無ければ 10 で止まる |
 | I9 | `no-cd` の工程は従来の `release` の工程と同じに進む | — |
 | I10 | main 宛ての開いた PR のうち、判定する PR のほかに同じ先端の SHA を持つ PR があれば落ちる | もう一方の番号を理由に出す。`success` を付けた後に読み直し、同じ先端の PR が増えていれば `failure` に付け直す |
@@ -87,13 +93,15 @@ graph TD
     A[release-case] --> B{CD の行が<br/>ある}
     B -->|無い| S3[no-cd<br/>従来の工程]
     B -->|ある| C{承認数 1 以上<br/>と読めた}
-    C -->|はい| S2[cd-review<br/>レビューの承認]
+    C -->|はい| D{迂回の宣言<br/>がある}
+    D -->|無い| S2[cd-review<br/>レビューの承認]
+    D -->|ある| S4[cd-admin<br/>利用者の証跡と迂回]
     C -->|いいえ・読めない| S1[cd-no-review<br/>証跡のコメント]
 ```
 
 - CD の有無は、`.ndf/project.json` の `delivery` に本番チャネルへのマージで届く行があるかで決める。無ければネットワークを使わない
 - 承認数は本番チャネルの ruleset（`GET /repos/{owner}/{repo}/rules/branches/{branch}`）の `pull_request` 規則から読み、規則が無ければ従来のブランチ保護の API を読む
-- どちらも読めなければ `cd-no-review` とする。この経路は迂回を使わないため、レビューが本当は必須なら GitHub がマージを拒んで止まるだけで、承認なしのマージは起きない。`cd-review` へ倒すと、レビューが必須でないリポジトリで承認なしのマージが通る
+- どちらも読めなければ、迂回の宣言があっても `cd-no-review` とする。この経路は迂回を使わないため、レビューが本当は必須なら GitHub がマージを拒んで止まるだけで、承認なしのマージは起きない。`cd-review` へ倒すと、レビューが必須でないリポジトリで承認なしのマージが通る
 
 ### 本番のリリース（`cd-no-review`）
 
@@ -129,9 +137,15 @@ sequenceDiagram
 
 `approve-pr` を置かない。承認資料を置いた所で承認ゲートとして終え、本番の PR のレビューの承認を得てから `release` から打ち直す。MVV 判定はレビューの承認を代えられないため、MVV 判定のプランでも判定の記録を置いた所で承認ゲートとして終える。
 
+### 本番のリリース（`cd-admin`）
+
+プランの並びは `cd-no-review` と同じで、承認資料を置いた所で承認ゲートとして終える。MVV 判定のプランでも判定の記録を置いた所で承認ゲートとして終え、利用者の承認の後に `run <計画> --from approve-pr` で証跡を `--by user` で書く。`release` は利用者の証跡と先端を照らし、`ndf/release-approval` の success と CI の通過を待ってから `merge-when-green` へ迂回ありで頼む。マージの後に迂回の記録を置く。
+
+作り直し（`plugins/ndf-next/`）の `release-steps merge` も同じ宣言を読む。宣言があり本番ブランチの承認数が 1 以上と読めるときだけ、GraphQL の `mergePullRequest` を先端（`expectedHeadOid`）付きで打ち、迂回の記録を置いて出力に `admin` と `admin_record` を書く。
+
 ### リリースの PR で届く経路（`merged-steps.py promote`）
 
-承認資料と `--approved-from` で先端を照らしてマージする経路も、CD のある場合は `--no-admin` でマージする。`cd-no-review` ではマージの前に `approve --pr` と同じ書き手で証跡を置き、`cd-review` ではレビューの承認と先端を照らす（`_trail_before_merge`）。証跡のチェックの workflow が無いリポジトリでも、GitHub に承認の記録が残る。
+承認資料と `--approved-from` で先端を照らしてマージする経路も、`cd-no-review` と `cd-review` は `--no-admin` でマージし、`cd-admin` は迂回でマージして迂回の記録を置く。`cd-no-review` と `cd-admin` ではマージの前に `approve --pr` と同じ書き手で証跡を置き、`cd-review` ではレビューの承認と先端を照らす（`_trail_before_merge`）。`cd-admin` で `--gate-approved mvv` を受けたら、証跡を書かずに 10 で止まる。証跡のチェックの workflow が無いリポジトリでも、GitHub に承認の記録が残る。
 
 ### 開発版のデプロイ
 
@@ -190,7 +204,7 @@ CD のある場合（`cd-no-review`・`cd-review`）の検査のプランは、�
 | `release-steps.py approval-post --pr <番号> --approval <資料>` | 承認資料のコメントを置いて 0。同じ先端・同じ本文があれば置かずに 0 | 資料の承認したコミットが先端と違えば置かずに 3。投稿の失敗は 1 |
 | `release-steps.py approve --pr <番号> --approved-sha <SHA>\|--facts-from <dir> --by user\|mvv` | 証跡を置いて 0。同じ人の同じ SHA の編集されていない証跡があれば置かずに 0 | SHA が先端と違えば置かずに 10。投稿の失敗は 1 |
 | `release-steps.py release-case` | `metrics` に `case`・`approval_place`・`merger`・`reason` を出して 0 | 宣言を読めなければ 3 |
-| `release-steps.py release --channel prod --version <版>`（CD のある場合） | 承認が先端と一致し CI が通っていれば迂回なしでマージして 0 | 未承認か先端と違えば 10（本番の PR は開いたまま。`metrics.approved_sha` は先端・`metrics.main_pr`）。`--approved-sha` か `--approval` を渡すと 3。GitHub がマージを拒めば 1 |
+| `release-steps.py release --channel prod --version <版>`（CD のある場合） | 承認が先端と一致し CI が通っていればマージして 0（`cd-admin` だけ迂回でマージし、迂回の記録を置く。本番の PR の行の `admin` が迂回の有無） | 未承認か先端と違えば 10（本番の PR は開いたまま。`metrics.approved_sha` は先端・`metrics.main_pr`）。`--approved-sha` か `--approval` を渡すと 3。GitHub がマージを拒めば 1 |
 | `release-steps.py release --channel dev --version <版>`（`dev_workflow` あり） | workflow の結論が成功なら 0 | 失敗なら 1、待ちの上限なら 75 |
 | `merged-steps.py merge-when-green <番号> --no-admin` | `gh pr merge` を `--admin` なしで打つ | GitHub が拒めば従来と同じ形で止まる |
 
@@ -220,7 +234,7 @@ CD のある場合（`cd-no-review`・`cd-review`）の検査のプランは、�
 
 - workflow は秘密を置かず `GITHUB_TOKEN` だけを使い、権限は上の表の範囲に限る
 - 承認権限を持つ人のアカウントで AI が書いた証跡は、その人の承認として扱う（利用者の決定）
-- **残るリスク**: 書き込み権限を持つ人は、PR に別の workflow を足し、同じ名前の commit status を GitHub Actions のアプリから付けられる。ruleset に管理者の迂回も残り、管理者は証跡なしでマージできる（NDF は迂回を使わない）。前者は共同作業者が admin の 1 人だけの間は起きないとして受け入れた。**共同作業者を足すとき、とくに書き込み権限だけの人を足すときに見直し**、ruleset の必須の workflow で塞ぐかを決める
+- **残るリスク**: 書き込み権限を持つ人は、PR に別の workflow を足し、同じ名前の commit status を GitHub Actions のアプリから付けられる。ruleset に管理者の迂回も残り、管理者は証跡なしでマージできる（NDF が迂回を打つのは `cd-admin` で利用者の証跡と先端が一致した後だけ）。前者は共同作業者が admin の 1 人だけの間は起きないとして受け入れた。**共同作業者を足すとき、とくに書き込み権限だけの人を足すときに見直し**、ruleset の必須の workflow で塞ぐかを決める
 
 ## 運用
 
@@ -235,7 +249,7 @@ ai-plugins を `cd-no-review` へ移す ruleset の変更は、人が次の順�
 
 移行の途中（手順 2〜3）は、本番チャネルの ruleset が証跡のチェックを必須にしていれば、`cd-review` の判定でも `approval-check` が判定して付ける。移行の途中は本番のリリースを出さない。出す必要が生じた場合は `cd-review` の経路になり、リリースの PR の作成者以外のコードオーナーがレビューを承認するまで止まる。
 
-2026-11-13 の時点で `protect main`（id 22332172）は承認数 1 で、必須チェックに `ndf/release-approval` を持たない（`gh api repos/devbasex/ai-plugins/rulesets/22332172` の出力）。そのため ai-plugins の場合の判定は `cd-review` を返す。
+2026-11-13 の時点で `protect main`（id 22332172）は承認数 1 で、必須チェックに `ndf/release-approval` を持たない（`gh api repos/devbasex/ai-plugins/rulesets/22332172` の出力）。ai-plugins は `.ndf/project.json` に迂回の宣言（`production_merge.admin: true`）を持つため、承認数 1 のままでは場合の判定は `cd-admin` を返す。
 
 ### 確かめていないこと
 
@@ -257,17 +271,18 @@ ai-plugins を `cd-no-review` へ移す ruleset の変更は、人が次の順�
 - 証跡が無い PR と、承認資料のコメントだけの PR で落ちること（I2）
 - `role_name` が write・triage・読めない人の証跡では落ち、admin・maintain なら通ること（I3）
 - 証跡のチェックの workflow が `pull_request_target` と `issue_comment` だけで起動し、PR の head を取り出さず、`secrets.` を参照しないこと（I5）
-- `cd-no-review`・`cd-review` の本番の経路と `promote` が `--no-admin` を渡し、CI の必須チェックの通過を待ってからマージすること（I7）
+- `cd-no-review`・`cd-review` の本番の経路と `promote` が `--no-admin` を渡し、`cd-admin` だけ迂回を渡し、どれも CI の必須チェックの通過を待ってからマージすること（I7）
+- `cd-admin` で迂回の記録が 1 件置かれ、打ち直しても増えず、書けなければ 1 で報告すること。MVV 判定の証跡では迂回しないこと（I7a・I7b）
 - 選んで集める取り込み方でも、承認の後にリリースのブランチへコミットを足すと 10 で止まること（I6）
 - 本番のプランの並びで、bump〜snapshot が承認ゲートの前、証跡とマージが後にあること
 - CD のある場合の検査のプランと本番のプランに全体テストのステップが無いこと
-- `release-case` が宣言と ruleset の組ごとに 3 つの場合を返し、読めない ruleset は `cd-no-review` になること
+- `release-case` が宣言と ruleset の組ごとに 4 つの場合を返し、読めない ruleset は迂回の宣言があっても `cd-no-review` になること
 - `cd-review` では証跡を書かず、有効な権限の人の最新の承認のレビューのコミットが先端と一致すれば証跡なしでマージし、違えば 10 で止まること。旧先端への write の人の承認と新先端への read の人の承認が並ぶと 10 で止まること（I8）
 - 同じ先端の main 宛ての開いた PR が 2 本あると証跡のある PR でも落ち、一方が閉じると判定し直して通ること。`success` を付けた後の読み直しで同じ先端の PR が見つかると `failure` に付け直すこと（I10）
 - `no-cd` の本番の経路が従来のテストを通ること（I9）
 - 宣言した commit status の名前が必須にあっても、`check-required-checks.py` がジョブが無いことを理由に落ちないこと
 
-テストは `plugins/ndf/scripts/tests/` の `test_release_approval_trail.py`・`test_release_case.py`・`test_release_steps.py`・`test_release_selected.py`・`test_step_scripts.py`・`test_supervise_layout.py`・`test_supervise_ci_only.py` と、`tests/test_check_required_checks.py` にある。
+テストは `plugins/ndf/scripts/tests/` の `test_release_approval_trail.py`・`test_release_case.py`・`test_release_steps.py`・`test_release_selected.py`・`test_step_scripts.py`・`test_supervise_layout.py`・`test_supervise_ci_only.py` と、`tests/test_check_required_checks.py` にある。迂回の宣言の振る舞いは `test_release_cd.py`・`test_sprint_close_merge_green.py` と、作り直しの `plugins/ndf-next/tests/domains/release/test_release_approval.py` にもある。
 
 ## 関連リンク
 

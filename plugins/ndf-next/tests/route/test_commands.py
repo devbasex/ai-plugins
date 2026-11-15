@@ -4,12 +4,22 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 
+import httpx
+from githubkit import GitHub as Client
+
+from ndf import cli
+from ndf.adapters import github
+from ndf.contracts import causes
 from ndf.core import route
+from ndf.core.route import local_tests
 from ndf.core.plan import model, steps
 
-from ._flow import fake_bin, git, plan_of, repo_with_base, run_step, step_of
+from ._flow import fake_bin, git, plan_of, repo_with_base, run_step, step_of, values
+
+_REPO = "devbasex/ai-plugins"
 
 
 def test_conflict_check_reports_dirty_pr_as_base_conflict(tmp_path):
@@ -80,11 +90,14 @@ def _ci_result(path, nodes):
     path.write_text("CI を待っている\n" + json.dumps(found) + "\n", encoding="utf-8")
 
 
-def _slot(monkeypatch, tmp_path, body):
+def _slot(monkeypatch, tmp_path, body, *, append=False):
     """`ndf route test` が打つ枠（test-slot）を偽のコマンドへ差し替え、受けた引数を書くファイルを返す。"""
     seen = tmp_path / "seen.txt"
-    bindir = fake_bin(tmp_path, "slot", f'printf "%s\\n" "$@" > {shlex.quote(str(seen))}\n{body}')
-    monkeypatch.setattr(route, "TEST_SLOT", (str(bindir / "slot"),))
+    script = (
+        f'printf "%s\\n" "$@" >> {shlex.quote(str(seen))}\n{body}' if append else f'printf "%s\\n" "$@" > {shlex.quote(str(seen))}\n{body}'
+    )
+    bindir = fake_bin(tmp_path, "slot", script)
+    monkeypatch.setattr(local_tests, "TEST_SLOT", (str(bindir / "slot"),))
     return seen
 
 
@@ -92,10 +105,26 @@ def test_test_steps_run_through_route_test():
     """手元のテスト・全体テスト・CI の落ちの確かめ直しは ndf route test で打つ（終了コードの読み替えを 1 か所にする）。"""
     impl = plan_of("implement", test_command="pytest -q")
     assert step_of(impl, "test").run == ("ndf", "route", "test", "--result", "{state_dir}/test.json", "--", "pytest -q")
-    ci_local = ("ndf", "route", "test", "--nodes-from", "{state_dir}/ci.json", "--", "pytest -q")
+    ci_local = ("ndf", "route", "test", "--failed-from", "{state_dir}/ci.json", "--result", "{state_dir}/ci-local.json")
     assert step_of(impl, "ci-local").run == ci_local
     whole = step_of(plan_of("check", whole_test_command="make test"), "test-all").run
     assert whole == ("ndf", "route", "test", "--result", "{state_dir}/test.json", "--", "make test")
+
+
+def test_ci_only_plans_drop_local_test_steps_and_follow_on():
+    """#3473: CI テストの宣言のあるリポジトリのプランから test・test-all・ci-local を外し、そこへの行き先は続きへ付け替える。"""
+    for purpose in ("implement", "check", "quality_gates", "merge", "close"):
+        t = route.choose(purpose)
+        plan = route.render(t, values(purpose), local_tests=False)
+        ids = [s["id"] for s in plan["steps"]]
+        assert not set(route.LOCAL_TEST_STEPS) & set(ids)
+        model.parse(plan)
+    assert "test_command" not in route.needed(route.choose("implement"), local_tests=False)
+    impl = route.render(route.choose("implement"), {k: v for k, v in values("implement").items() if k != "test_command"}, local_tests=False)
+    by_id = {s["id"]: s for s in impl["steps"]}
+    assert by_id["fix"]["next"] == "push" and by_id["ci-fix"]["next"] == "push"
+    check = route.render(route.choose("check"), values("check"), local_tests=False)
+    assert {s["id"]: s for s in check["steps"]}["fix"]["next"] == "refactor"
 
 
 def test_route_test_reads_any_non_signal_failure_as_test_failed(tmp_path, monkeypatch, capsys, last_result):
@@ -120,59 +149,231 @@ def test_route_test_passes_signal_and_slot_results_through(tmp_path, monkeypatch
     assert json.loads(capsys.readouterr().out.splitlines()[-1]) == own
 
 
-def test_ci_local_runs_only_failed_tests_and_reports_failure(tmp_path, monkeypatch, capsys, last_result):
-    """#3188: CI の修正の後に、CI で落ちたテストの node id だけを手元のテストのコマンドへ足して打つ。落ちれば test_failed。"""
-    ci = tmp_path / "ci.json"
-    _ci_result(ci, ["tests/a.py::t1", "tests/b.py::t2"])
-    seen = _slot(monkeypatch, tmp_path, "exit 0")
-    assert route.main(["test", "--nodes-from", str(ci), "--", "pytest -q"]) == 0
-    assert seen.read_text().splitlines() == ["pytest -q tests/a.py::t1 tests/b.py::t2"]
-    _slot(monkeypatch, tmp_path, "exit 2")
-    route.main(["test", "--nodes-from", str(ci), "--", "pytest -q"])
+SUITES = [
+    {"name": "py", "command": "pytest -q", "scope_command": "pytest -q {paths}", "paths": ["tests"]},
+    {"name": "web", "command": "vitest run", "scope_command": "vitest run {paths}", "paths": ["web"]},
+    {"name": "lint", "kind": "lint", "command": "ruff check", "scope_command": "ruff check {paths}"},
+]
+
+
+def _declare(monkeypatch, tmp_path, suites=SUITES):
+    """打つ場所（作業場所）の宣言 `.ndf/project.json` にテストの suite を置き、そこへ移る。"""
+    (tmp_path / ".ndf").mkdir(exist_ok=True)
+    (tmp_path / ".ndf" / "project.json").write_text(json.dumps({"test": {"suites": suites}}), encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+
+def _slots(monkeypatch, tmp_path, body):
+    """`_slot` と同じだが、打つたびに受けたコマンドを 1 行ずつ足す（suite ごとに打つ回数を数える）。"""
+    return _slot(monkeypatch, tmp_path, body, append=True)
+
+
+def _failed_from(ci, out):
+    return route.main(["test", "--failed-from", str(ci), "--result", str(out)])
+
+
+def test_ci_local_runs_failed_test_files_through_their_suite_and_records_the_command(tmp_path, monkeypatch, capsys, last_result):
+    """#3188: CI で落ちたテストのファイルだけを、それを持つ suite の scope_command の {paths} へ入れて打つ。
+
+    落ちたテストを持たない suite（web）と検査の suite（lint）は打たない。通ったときも打ったコマンドと合否を結果 JSON に残す。
+    """
+    _declare(monkeypatch, tmp_path)
+    ci, out = tmp_path / "ci.json", tmp_path / "state" / "ci-local.json"
+    nodes = ["tests/a.py::t1", "tests/a.py::t2", "tests/b.py::t3"]
+    _ci_result(ci, nodes)
+    seen = _slots(monkeypatch, tmp_path, "exit 0")
+    assert _failed_from(ci, out) == 0
+    assert seen.read_text().splitlines() == ["pytest -q tests/a.py tests/b.py"]
     found = last_result(capsys.readouterr().out)
-    assert (found["cause"]["kind"], found["metrics"]["failed_tests"]) == ("test_failed", ["tests/a.py::t1", "tests/b.py::t2"])
+    assert found["status"] == "ok" and found["metrics"]["failed_tests"] == nodes
+    assert [(i["command"], i["passed"]) for i in found["items"]] == [("pytest -q tests/a.py tests/b.py", True)]
+    assert json.loads(out.read_text(encoding="utf-8")) == found
 
 
-def test_ci_local_without_nodes_runs_whole_local_command(tmp_path, monkeypatch):
-    """#3188: 落ちたテストを読めなかったときは、手元のテストのコマンドを丸ごと打ってから push する。"""
-    ci = tmp_path / "ci.json"
-    _ci_result(ci, [])
-    seen = _slot(monkeypatch, tmp_path, "exit 0")
-    route.main(["test", "--nodes-from", str(ci), "--", "pytest -q"])
-    assert seen.read_text().splitlines() == ["pytest -q"]
+def test_ci_local_runs_each_suite_holding_failed_tests_and_reports_failure(tmp_path, monkeypatch, capsys, last_result):
+    """#3188: suite が複数なら、落ちたテストを持つ suite ごとに 1 回打つ。どれかが落ちれば test_failed（push しない）。"""
+    _declare(monkeypatch, tmp_path)
+    ci, out = tmp_path / "ci.json", tmp_path / "ci-local.json"
+    nodes = ["tests/a.py::t1", "web/b.test.ts"]
+    _ci_result(ci, nodes)
+    seen = _slots(monkeypatch, tmp_path, 'case "$1" in vitest*) exit 1 ;; esac')
+    assert _failed_from(ci, out) == causes.exit_code("test_failed")
+    assert seen.read_text().splitlines() == ["pytest -q tests/a.py", "vitest run web/b.test.ts"]
+    found = last_result(capsys.readouterr().out)
+    assert (found["cause"]["kind"], found["metrics"]["failed_tests"]) == ("test_failed", nodes)
+    assert [(i["suite"], i["exit_code"], i["passed"]) for i in found["items"]] == [("py", 0, True), ("web", 1, False)]
+    assert json.loads(out.read_text(encoding="utf-8")) == found
+
+
+def test_ci_local_stops_without_running_whole_tests_when_failed_tests_are_unknown(tmp_path, monkeypatch, capsys, last_result):
+    """#3188: 落ちたテストを読めない（空）か、範囲を打てる suite に当たらないファイルがあれば、全体テストを打たずに止まる。"""
+    _declare(monkeypatch, tmp_path)
+    seen = _slots(monkeypatch, tmp_path, "exit 0")
+    for nodes in ([], ["tests/a.py::t1", "docs/x.py::t"]):
+        ci = tmp_path / "ci.json"
+        _ci_result(ci, nodes)
+        _failed_from(ci, tmp_path / "ci-local.json")
+        assert last_result(capsys.readouterr().out)["cause"]["kind"] == "precondition"
+    _declare(monkeypatch, tmp_path, [{"name": "py", "command": "pytest -q"}])
+    _ci_result(ci, ["tests/a.py::t1"])
+    _failed_from(ci, tmp_path / "ci-local.json")
+    assert last_result(capsys.readouterr().out)["cause"]["kind"] == "precondition"
+    assert not seen.exists()
 
 
 def test_ci_local_stops_as_invalid_when_ci_result_is_unreadable(tmp_path, monkeypatch, capsys, last_result):
     """CI の結果を読めないときは、テストを打たずに invalid の結果 JSON で止まる（テストの落ちの終了コードと衝突しない）。"""
-    seen = _slot(monkeypatch, tmp_path, "exit 0")
-    route.main(["test", "--nodes-from", str(tmp_path / "no.json"), "--", "pytest -q"])
+    _declare(monkeypatch, tmp_path)
+    seen = _slots(monkeypatch, tmp_path, "exit 0")
+    _failed_from(tmp_path / "no.json", tmp_path / "ci-local.json")
     assert last_result(capsys.readouterr().out)["cause"]["kind"] == "invalid"
     assert not seen.exists()
 
 
-def test_ci_local_quotes_failed_test_ids_for_the_shell(tmp_path, monkeypatch):
-    """落ちたテストの node id は 1 つずつシェルの引用へ通して足す（空白・`$(...)`・`;` を分割も実行もしない）。"""
+def test_route_test_takes_either_a_command_or_failed_tests(tmp_path, monkeypatch, capsys, last_result):
+    """コマンドと --failed-from は 1 つだけを渡す（両方・どちらも無しは打たずに invalid）。"""
+    seen = _slots(monkeypatch, tmp_path, "exit 0")
+    for argv in (["test"], ["test", "--failed-from", str(tmp_path / "ci.json"), "--", "pytest -q"]):
+        route.main(argv)
+        assert last_result(capsys.readouterr().out)["cause"]["kind"] == "invalid"
+    assert not seen.exists()
+
+
+def test_ci_local_quotes_failed_test_files_for_the_shell(tmp_path, monkeypatch):
+    """落ちたテストのファイルは 1 つずつシェルの引用へ通して {paths} へ入れる（空白・`$(...)`・`;` を分割も実行もしない）。"""
+    _declare(monkeypatch, tmp_path)
     ci = tmp_path / "ci.json"
-    nodes = ["tests/a.py::t[a b]", "tests/b.py::t[$(touch hit); x]"]
-    _ci_result(ci, nodes)
-    seen = _slot(monkeypatch, tmp_path, "exit 0")
-    assert route.main(["test", "--nodes-from", str(ci), "--", "pytest -q"]) == 0
-    assert shlex.split(seen.read_text().splitlines()[-1]) == ["pytest", "-q", *nodes]
+    files = ["tests/a b.py", "tests/$(touch hit); x.py"]
+    _ci_result(ci, [f"{f}::t[1]" for f in files])
+    seen = _slots(monkeypatch, tmp_path, "exit 0")
+    assert _failed_from(ci, tmp_path / "ci-local.json") == 0
+    assert shlex.split(seen.read_text().splitlines()[-1]) == ["pytest", "-q", *files]
     assert not (tmp_path / "hit").exists()
 
 
-def test_merge_requires_checked_head_and_waits_for_merge_queue(tmp_path):
-    """マージは手元の HEAD（CI・承認の対象）との一致を --match-head-commit で強制し、MERGED になるまで済んだとしない。"""
+def test_ci_local_passes_signal_and_slot_results_through_without_running_the_rest(tmp_path, monkeypatch, capsys):
+    """現状固定: --failed-from でも枠の止まり・シグナルの終了コードはそのまま返し、残りの suite を打たず結果ファイルも書かない。"""
+    _declare(monkeypatch, tmp_path)
+    ci, out = tmp_path / "ci.json", tmp_path / "ci-local.json"
+    _ci_result(ci, ["tests/a.py::t1", "web/b.test.ts"])
+    seen = _slots(monkeypatch, tmp_path, "exit 130")
+    assert _failed_from(ci, out) == 130
+    assert seen.read_text().splitlines() == ["pytest -q tests/a.py"]
+    assert capsys.readouterr().out == "" and not out.exists()
+    seen.unlink()
+    own = {"tool": "test-slot", "status": "stopped", "summary": "待ちの上限", "cause": {"kind": "wait_timeout", "detail": "x"}}
+    seen = _slots(monkeypatch, tmp_path, f"echo {shlex.quote(json.dumps(own))}; exit 3")
+    assert _failed_from(ci, out) == 3
+    assert seen.read_text().splitlines() == ["pytest -q tests/a.py"]
+    assert json.loads(capsys.readouterr().out.splitlines()[-1]) == own and not out.exists()
+
+
+def test_ci_local_writes_the_precondition_result_with_the_failed_tests(tmp_path, monkeypatch, capsys, last_result):
+    """現状固定: 打てずに止まるときも --result へ同じ結果を書き、metrics.failed_tests に CI の落ちたテストを残す。"""
+    _declare(monkeypatch, tmp_path)
+    ci, out = tmp_path / "ci.json", tmp_path / "state" / "ci-local.json"
+    nodes = ["tests/a.py::t1", "docs/x.py::t"]
+    _ci_result(ci, nodes)
+    code = _failed_from(ci, out)
+    found = last_result(capsys.readouterr().out)
+    assert code == causes.exit_code("precondition")
+    assert (found["cause"]["kind"], found["metrics"]) == ("precondition", {"failed_tests": nodes})
+    assert json.loads(out.read_text(encoding="utf-8")) == found
+
+
+def test_ci_local_invalid_result_is_not_written_to_the_result_file(tmp_path, monkeypatch, capsys, last_result):
+    """現状固定: CI の結果を読めない invalid は標準出力だけに出し、--result のファイルは作らない。"""
+    _declare(monkeypatch, tmp_path)
+    out = tmp_path / "ci-local.json"
+    assert _failed_from(tmp_path / "no.json", out) == causes.exit_code("invalid")
+    assert last_result(capsys.readouterr().out)["cause"]["kind"] == "invalid"
+    assert not out.exists()
+
+
+def test_ci_local_counts_runs_and_names_the_first_failed_command(tmp_path, monkeypatch, capsys, last_result):
+    """現状固定: metrics の runs・failed_runs は打った本数と落ちた本数。落ちの詳細は最初に落ちたコマンドを名指す。"""
+    _declare(monkeypatch, tmp_path)
+    ci, out = tmp_path / "ci.json", tmp_path / "ci-local.json"
+    nodes = ["tests/a.py::t1", "web/b.test.ts"]
+    _ci_result(ci, nodes)
+    _slots(monkeypatch, tmp_path, "exit 1")
+    _failed_from(ci, out)
+    found = last_result(capsys.readouterr().out)
+    assert found["metrics"] == {"failed_tests": nodes, "runs": 2, "failed_runs": 2}
+    assert found["cause"]["detail"].endswith(": pytest -q tests/a.py")
+    assert "2 本のうち 2 本" in found["cause"]["detail"]
+    assert [i["kind"] for i in found["items"]] == ["test_run", "test_run"]
+    _slots(monkeypatch, tmp_path, "exit 0")
+    _failed_from(ci, out)
+    found = last_result(capsys.readouterr().out)
+    assert found["metrics"] == {"failed_tests": nodes, "runs": 2, "failed_runs": 0}
+    assert "2 本" in found["summary"]
+
+
+_RISK = "- [ ] 残リスク: 設計文書に名前の出るテストの照合が止まっている。マージの前に決める"
+
+
+def _serve_pull(monkeypatch, head: str, body: str) -> list[dict]:
+    """feat/x の開いた PR 7 番（本文 `body`・先端 `head`）を答える GitHub。送ったマージの要求の本文を返す並びへ足す。"""
+    sent: list[dict] = []
+    pull = {
+        "number": 7, "state": "open", "merged": False, "body": body, "mergeable_state": "clean",
+        "head": {"sha": head, "ref": "feat/x"}, "base": {"ref": "develop"},
+        "user": {"login": "octocat"}, "author_association": "OWNER",
+    }  # fmt: skip
+    node = {
+        "number": 7, "state": "OPEN", "merged": False, "headRefOid": head, "headRefName": "feat/x", "baseRefName": "develop",
+        "body": body, "mergeStateStatus": "CLEAN", "author": {"login": "octocat"}, "authorAssociation": "OWNER",
+    }  # fmt: skip
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path == "/graphql":
+            aliases = re.findall(r"(a\d+): pullRequests", json.loads(request.content)["query"])
+            return httpx.Response(200, json={"data": {"repository": {a: {"nodes": [node]} for a in aliases}}})
+        if request.method == "PUT":
+            sent.append(json.loads(request.content))
+            return httpx.Response(200, json={"merged": True})
+        if path.endswith("/rules/branches/develop"):
+            return httpx.Response(200, json=[])
+        if path == f"/repos/{_REPO}":
+            return httpx.Response(200, json={"allow_squash_merge": True, "allow_merge_commit": True, "allow_rebase_merge": True})
+        return httpx.Response(200, json=pull)
+
+    api = Client("t", transport=httpx.MockTransport(handler), http_cache=False, auto_retry=False)
+    monkeypatch.setattr(github, "client", lambda **_: api)
+    return sent
+
+
+def _merge_step(monkeypatch, tmp_path, body: str) -> tuple[int, list[dict], str]:
+    """雛形の merge のステップの run を、feat/x の作業場所で打つ（GitHub は `_serve_pull` が答える）。"""
     step = step_of(plan_of("immediate_fix", branch="feat/x", merge_method="merge"), "merge")
-    repo = repo_with_base(tmp_path / "a", {"a.py": "a = 1\n"})
+    assert list(step.run[:3]) == ["ndf", "ci", "merge"]
+    repo = repo_with_base(tmp_path, {"a.py": "a = 1\n"})
+    git(repo, "remote", "add", "origin", f"https://github.com/{_REPO}.git")
     head = git(repo, "rev-parse", "HEAD").strip()
-    seen = tmp_path / "seen.txt"
-    record = f'case "$2" in merge) printf "%s\\n" "$@" > {shlex.quote(str(seen))} ;;'
-    merged = fake_bin(tmp_path / "m", "gh", f"{record} view) echo MERGED ;; esac")
-    assert run_step(step, repo, merged)["status"] == "ok"
-    assert seen.read_text().splitlines() == ["pr", "merge", "feat/x", "--merge", "--match-head-commit", head]
-    queued = fake_bin(tmp_path / "q", "gh", f"{record} view) echo OPEN ;; esac")
-    assert run_step(step, repo, queued)["kind"] == "ci_pending"
+    sent = _serve_pull(monkeypatch, head, body)
+    monkeypatch.chdir(repo)
+    code = cli.main(list(step.run[1:]))
+    return code, sent, head
+
+
+def test_merge_stops_on_an_undecided_premerge_risk_and_names_the_line(tmp_path, monkeypatch, capsys, last_result):
+    """#2602: 本文に `- [ ] …マージの前に決める…` が残る PR は、マージの要求を送らずに止まり、残った行を理由に出す。"""
+    code, sent, _ = _merge_step(monkeypatch, tmp_path, f"## 残リスク\n\n{_RISK}\n")
+    out = last_result(capsys.readouterr().out)
+    assert (out["status"], out["cause"]["kind"], code) == ("stopped", "refused", causes.exit_code("refused"))
+    assert _RISK.removeprefix("- [ ] ") in out["cause"]["detail"]
+    assert sent == []
+
+
+def test_merge_proceeds_when_the_premerge_risk_is_checked(tmp_path, monkeypatch, capsys, last_result):
+    """決めた印（`- [x]`）のある残リスクは判断の記録とみなし、手元の HEAD を添えて宣言の方式でマージする。"""
+    decided = _RISK.replace("- [ ]", "- [x]", 1) + "（続けると決めた）"
+    code, sent, head = _merge_step(monkeypatch, tmp_path, f"## 残リスク\n\n{decided}\n")
+    out = last_result(capsys.readouterr().out)
+    assert (out["status"], code) == ("ok", 0)
+    assert sent == [{"sha": head, "merge_method": "merge"}]
 
 
 def test_pr_step_returns_pr_number_when_created_and_when_found(tmp_path):

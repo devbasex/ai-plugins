@@ -802,6 +802,21 @@
       "title": "Product",
       "type": "object"
     },
+    "ProductionMerge": {
+      "additionalProperties": false,
+      "description": "本番の PR のマージの方式（#3506）。`admin` が true なら、本番チャネルが承認レビューを必須にするとき管理者の迂回でマージする。利用者が手で書き、解析は書かない。",
+      "properties": {
+        "admin": {
+          "title": "Admin",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "admin"
+      ],
+      "title": "ProductionMerge",
+      "type": "object"
+    },
     "Seeds": {
       "additionalProperties": false,
       "properties": {
@@ -1424,6 +1439,21 @@
       ],
       "default": null,
       "title": "Docs"
+    },
+    "production_merge": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ProductionMerge"
+        },
+        {
+          "$ref": "#/$defs/Unknown"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Production Merge"
     },
     "analysis": {
       "anyOf": [

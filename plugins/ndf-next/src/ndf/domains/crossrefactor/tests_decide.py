@@ -13,18 +13,16 @@ from __future__ import annotations
 
 import ast
 import fnmatch
-import shlex
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Any
 
 from ndf.contracts import facts
-from ndf.domains.crossrefactor.diff_decide import in_scope
+from ndf.testing.scoped import NODE_SEPARATOR, in_scope
 from ndf.domains.crossrefactor.symbols_decide import PYTHON_SUFFIX
 
 TABLE = "test-files"
-PATHS_SLOT = "{paths}"
 # 名前の対応（Python 以外のソースと、import を持たないテスト）。`{s}` はソースのファイル名の語幹
 NAME_FORMS = ("test_{s}", "{s}_test", "{s}Test", "{s}Tests", "{s}_spec")
 
@@ -106,12 +104,8 @@ def _parsed_imports(path: str, text: str | None) -> frozenset[str] | None:
         return None
 
 
-def tests_for_change(changed: Iterable[str], tests: Mapping[str, str | None]) -> PickedTests:
-    """触るファイルから範囲テストのファイルを選ぶ。
-
-    `tests` はテストのファイル → 中身（読めなければ None）。触ったテストのファイルはそれ自身を選ぶ。
-    Python のソースはそれを import するテスト、どの言語でも名前の対応するテストを選ぶ。返す並びにディレクトリは入らない。
-    """
+def _import_index(tests: Mapping[str, str | None]) -> tuple[dict[str, frozenset[str]], list[str]]:
+    """テストのファイル → その import（読めなければ空）と、読めないテストの並び（ファイルの順）。"""
     imports: dict[str, frozenset[str]] = {}
     unreadable: list[str] = []
     for path, text in sorted(tests.items()):
@@ -119,6 +113,16 @@ def tests_for_change(changed: Iterable[str], tests: Mapping[str, str | None]) ->
         if parsed is None:
             unreadable.append(path)
         imports[path] = frozenset() if parsed is None else parsed
+    return imports, unreadable
+
+
+def tests_for_change(changed: Iterable[str], tests: Mapping[str, str | None]) -> PickedTests:
+    """触るファイルから範囲テストのファイルを選ぶ。
+
+    `tests` はテストのファイル → 中身（読めなければ None）。触ったテストのファイルはそれ自身を選ぶ。
+    Python のソースはそれを import するテスト、どの言語でも名前の対応するテストを選ぶ。返す並びにディレクトリは入らない。
+    """
+    imports, unreadable = _import_index(tests)
     files: set[str] = set()
     unmapped: list[str] = []
     for path in sorted(set(changed)):
@@ -132,13 +136,6 @@ def tests_for_change(changed: Iterable[str], tests: Mapping[str, str | None]) ->
 def scope_test_files(tracked: Iterable[str], scope: Sequence[str]) -> list[str]:
     """追跡されるファイルのうち、範囲の配下のテストのファイル（ファイルだけで、ディレクトリを含まない）。"""
     return sorted(p for p in tracked if in_scope(p, tuple(scope)) and is_test_file(p))
-
-
-def fill_paths(template: str, files: Sequence[str]) -> str:
-    """テンプレートの `{paths}` へファイルを引用して入れる。`{paths}` の無いテンプレートは `ValueError`。"""
-    if PATHS_SLOT not in template:
-        raise ValueError(f"テンプレートに {PATHS_SLOT} が無い: {template}")
-    return template.replace(PATHS_SLOT, " ".join(shlex.quote(f) for f in files))
 
 
 @dataclass(frozen=True)
@@ -155,9 +152,10 @@ def collected_files(output: str) -> frozenset[str]:
     files: set[str] = set()
     for raw in output.splitlines():
         line = raw.strip()
-        if not line or " " in line.split("::", 1)[0]:
+        file = line.split(NODE_SEPARATOR, 1)[0]
+        if not line or " " in file:
             continue
-        files.add(line.split("::", 1)[0])
+        files.add(file)
     return frozenset(files)
 
 

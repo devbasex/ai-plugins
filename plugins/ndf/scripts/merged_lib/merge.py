@@ -9,6 +9,9 @@ merge-gate は、PR 本文の手動確認（マージ前）に印の無い行が
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any
 
 import approved_commit
 import delivery
@@ -16,11 +19,11 @@ import gh_parts
 import manual_checks
 import project_decl
 import release_case
-import repo as repo_lib
 import test_strategy
+from merged_lib import promote_trail
+from merged_lib.required_checks import admin_required_checks, check_sources
 from merged_lib.checks import TOOL, GreenWatch, pr_state
-from release_lib import approval_trail, reviewed
-from step_result import EXIT_GATE, EXIT_PRECONDITION, EXIT_UNREADABLE, StepError, approval_present, emit, git_root, result
+from step_result import EXIT_UNREADABLE, StepError, approval_present, emit, git_root, result
 
 
 def add_wait_args(m):
@@ -86,6 +89,8 @@ def add_promote_args(pm):
 # --- リリース承認ゲート（自動反映の本番チャネルへのマージ。#1336） ------------------------
 
 GATE = "production-merge"
+# gh pr merge がベースブランチとの衝突でマージのコミットを作れなかったときの標準エラーの文言（#1917）
+CONFLICT_TEXT = "cannot be cleanly created"
 GATE_ROLLBACK = (
     "マージのコミットを revert する Pull Request を同じ宛先へマージする。本番系には revert が反映されるまで変更が残り、"
     "その間に利用者が触れた結果（データの書き込みなど）は revert で戻らない"
@@ -102,12 +107,32 @@ def _judge_rows(verdict):
     return [("判定", verdict.value), ("理由", verdict.reason), *[(i["name"], i["result"]) for i in verdict.items]]
 
 
-def gate_stop(n, verdict, info=None, next_cmd=None, plan_step="merge-approved", approved_sha=None, out=None):
+@dataclass(frozen=True)
+class MergeOptions:
+    """merge_when_green の承認ゲートとマージの前後の選択（既定は merge-when-green の CLI のまま。promote が組んで渡す）。
+
+    `next_cmd` は承認ゲートで止まるときの打ち方（文字列か、書いた承認資料のパスを受けて打ち方を返す関数）、`plan_step` はプランの
+    続け方のステップ。`gate_head` なら止まるときに最初の読みの先端を承認資料へ載せる（promote。#2104）。`moved_next` は、先端が
+    --expect-head と違って止まるときに next へ載せる続け方。`ci_tests` なら、CI テストの宣言のあるリポジトリでテストのチェックが
+    すべて現れて通るまでマージしない。`trail_item` は promote が照らした承認の証跡かレビューの項目で、マージの記録の前に items へ
+    足す。`after_merge(items)` は、マージの後かマージ済みを見たときに結果を出す前に呼ぶ（promote の迂回の記録。#3506）。"""
+
+    next_cmd: Any = None
+    plan_step: str = "merge-approved"
+    gate_head: bool = False
+    moved_next: str | None = None
+    ci_tests: bool = True
+    trail_item: dict | None = None
+    after_merge: Callable[[list[dict]], str | None] | None = None
+
+
+def gate_stop(n, verdict, info=None, opts: MergeOptions = MergeOptions(), approved_sha=None, out=None):
     """承認の無い本番系へのマージを止める結果（status: gate・終了コード 10）を出して終える。承認資料を書く。
     approved_sha（リリースの Pull Request の先端。#2104）があれば、判断の表の先頭へ「承認したコミット」の行を置き、
     metrics.approved_sha と gate の items[].head にも載せる。out は承認資料の置き場（無ければ既定の置き場）。
-    next_cmd は文字列か、書いた承認資料のパスを受けて打ち方を返す関数。"""
+    打ち方は opts の next_cmd と plan_step。"""
     info = info or {}
+    next_cmd, plan_step = opts.next_cmd, opts.plan_step
     target = verdict.target or "（不明）"
     what = f"#{n}" if n else f"宛先 {target} へのマージ"
     lead = (
@@ -214,27 +239,50 @@ def _rerun_superseded_next(n, items):
     return f"置き換わった失敗を通し直してから打ち直す: {cmds}"
 
 
-def _conflicted(root, n, stderr: str) -> bool:
-    """gh pr merge の拒否がベースブランチとの衝突か（標準エラーの文言か、読み直した mergeStateStatus が DIRTY。#1917）。"""
-    if "cannot be cleanly created" in stderr:
-        return True
+def _reread(root, n) -> dict:
+    """マージを断られた後の PR の読み直し（1 回だけ打つ）。読めなければ空。"""
     try:
-        return pr_state(root, n).get("mergeStateStatus") == "DIRTY"
+        return pr_state(root, n) or {}
     except StepError:
-        return False
+        return {}
 
 
-def _merge_pr(root, a, n, watch, items, waits, trail_item=None):
+def _conflicted(stderr: str, info: dict) -> bool:
+    """gh pr merge の拒否がベースブランチとの衝突か（標準エラーの文言か、読み直した mergeStateStatus が DIRTY。#1917）。"""
+    return CONFLICT_TEXT in stderr or info.get("mergeStateStatus") == "DIRTY"
+
+
+def _moved_after_refusal(info: dict, sha: str | None) -> str | None:
+    """断られた後に読み直した先端が、マージを頼んだ先端 `sha` と違えばその先端（#3506 の I6b）。同じ・`sha` が無い・読めなければ None。"""
+    head = str(info.get("headRefOid") or "")
+    return head if sha and head and head != sha else None
+
+
+def _merge_pr(root, a, n, watch, items, waits, opts: MergeOptions):
     """緑を確かめた先頭で gh pr merge を走らせ、マージの記録を items へ足す。失敗すれば stopped を emit する。
-    `trail_item` は promote が照らした承認の証跡かレビューの項目（#2773）で、マージできたときだけ items へ足す。"""
+    断られた後に PR を読み直し、先端が動いていれば head_moved の項目で止める（#3506 の I6b）。マージした行には迂回の有無を
+    `admin` で必ず書く（I8）。opts の `trail_item` は promote が照らした承認の証跡かレビューの項目（#2773）で、マージできたときだけ items へ足す。"""
     sha = watch.last_sha  # --expect-head があれば、GreenWatch が読むたびにこれと比べている
     pin = ["--match-head-commit", sha] if sha else []  # 緑を確かめた先頭（--expect-head なら比べた先端）だけをマージする
     no_admin = getattr(a, "no_admin", False)
     how = "gh pr merge（管理者の迂回なし）" if no_admin else "gh pr merge --admin"
     p = gh_parts.gh(["pr", "merge", str(n), *([] if no_admin else ["--admin"]), f"--{a.method}", *pin], cwd=root)
     if p.returncode != 0:
-        if _conflicted(root, n, p.stderr or ""):
+        err = p.stderr or ""
+        info = {} if CONFLICT_TEXT in err else _reread(root, n)
+        if _conflicted(err, info):
             watch.stop_conflict("gh pr merge がマージのコミットを作れずに拒んだ")
+        if moved := _moved_after_refusal(info, sha):
+            emit(
+                result(
+                    TOOL,
+                    "stopped",
+                    f"#{n} の先端が {sha[:8]} から {moved[:8]} へ動いたため、{how} が断られた。マージしない",
+                    items + [{"kind": "pr", "name": f"#{n}", "result": "head_moved", "head": moved, "expected": sha}],
+                    {"waits": waits},
+                    next=watch.moved_next,
+                )
+            )
         emit(
             result(
                 TOOL,
@@ -245,11 +293,9 @@ def _merge_pr(root, a, n, watch, items, waits, trail_item=None):
                 next=_rerun_superseded_next(n, items),
             )
         )
-    merged = {"kind": "pr", "name": f"#{n}", "result": "merged", "method": a.method, "head": sha}
-    if no_admin:
-        merged["admin"] = False
-    if trail_item:
-        items.append(trail_item)
+    merged = {"kind": "pr", "name": f"#{n}", "result": "merged", "method": a.method, "head": sha, "admin": not no_admin}
+    if opts.trail_item:
+        items.append(opts.trail_item)
     if a.gate_approved:
         merged["gate_approved"] = a.gate_approved  # 誰がリリース承認ゲートを通したか（監査で辿る。#1336 の I8）
     items.append(merged)
@@ -269,27 +315,27 @@ def test_checks_of(root) -> list[str] | None:
     return test_strategy.ci_checks(project) if test_strategy.declares_ci_only(project) else None
 
 
-def merge_when_green(
-    a, cleanup, next_cmd=None, plan_step="merge-approved", gate_head=False, moved_next=None, ci_tests=True, trail_item=None
-):
-    """gate_head なら、リリース承認ゲートで止まるときに最初の読みの先端を承認資料へ載せる（promote。#2104）。
-    moved_next は、先端が --expect-head と違って止まるときに next へ載せる続け方。`ci_tests` なら、CI テストの宣言の
-    あるリポジトリでテストのチェックがすべて現れて通るまでマージしない（リリースの Pull Request の promote は渡さない）。
-    `trail_item` は promote が照らした承認の証跡かレビューの項目で、マージの記録の前に items へ足す。"""
+def merge_when_green(a, cleanup, opts: MergeOptions = MergeOptions()):
+    """緑を確かめてマージする。選択は `opts`（MergeOptions。リリースの Pull Request の promote は `ci_tests` を偽にする）。
+    `after_merge` が文を返せばマージは済んだまま stopped（1）で出す。"""
     root = git_root(a.root)
     n = a.pr
     decl = delivery.load_delivery(root)  # 判定は保存しない。呼ぶたびに宣言から作り直す
-    watch = GreenWatch(root, a, moved_next=moved_next)
-    watch.test_checks = test_checks_of(root) if ci_tests else None
+    watch = GreenWatch(root, a, moved_next=opts.moved_next)
+    watch.test_checks = test_checks_of(root) if opts.ci_tests else None
     judged = {}
 
     def gate(info):
         # CI を待つ前・draft を外す前に、最初の読みの宛先で判定する（gh の呼び出しを足さない）
         verdict = delivery.judge_target(decl, info.get("baseRefName") or "")
         judged["verdict"] = verdict
+        if not getattr(a, "no_admin", False) and verdict.value != delivery.NOT_PRODUCTION:
+            required = admin_required_checks(root, n, info.get("baseRefName") or "")
+            judged["required"] = required
+            watch.required_checks = required.names
         if verdict.stops and not a.gate_approved:
-            sha = _gate_head(info) if gate_head else None
-            gate_stop(n, verdict, info, next_cmd, plan_step, sha, getattr(a, "out", None) if gate_head else None)
+            sha = _gate_head(info) if opts.gate_head else None
+            gate_stop(n, verdict, info, opts, sha, getattr(a, "out", None) if opts.gate_head else None)
 
     watch.on_open = gate
     watch.wait()
@@ -298,7 +344,11 @@ def merge_when_green(
     gate_metrics = {"verdict": verdict.value, "target": verdict.target} if verdict else {}
 
     if not any(i["kind"] == "pr" and i["result"] == "already_merged" for i in items):
-        _merge_pr(root, a, n, watch, items, waits, trail_item)
+        if not getattr(a, "no_admin", False) and (required := judged.get("required")):
+            check_sources(root, n, watch.last_sha, required, items)  # 迂回の前に、発行元を指定された必須のチェックを照らす
+        _merge_pr(root, a, n, watch, items, waits, opts)
+    if opts.after_merge and (why := opts.after_merge(items)):
+        emit(result(TOOL, "stopped", f"#{n} をマージした。{why}", items, {"waits": waits, "queued_runs": queued_runs, **gate_metrics}))
 
     if a.no_cleanup:
         emit(
@@ -381,6 +431,35 @@ def _pin_expect_head(a, reader, path, what):
         raise StepError(f"{what}を読めないため本番チャネルへ入れない: {e}", EXIT_UNREADABLE) from e
 
 
+def _stop_without_approved_from(a) -> None:
+    """--gate-approved user に照合の材料（--approved-from）が無いときに止める（#2104 の I3〜I5）。"""
+    emit(
+        result(
+            TOOL,
+            "stopped",
+            "--gate-approved user に照合の材料（--approved-from のリリースの承認資料）が無いため本番チャネルへ入れない",
+            next=(
+                f"promote --head {a.head} --base {a.base} --gate-approved user --approved-from <承認資料> で打つ"
+                "（プランなら run <プラン> --from promote から流し直し、リリース承認ゲートを取り直す）"
+            ),
+        ),
+        EXIT_UNREADABLE,
+    )
+
+
+def _cd_trail_and_admin(root, a, n):
+    """CD のある場合は cd-admin だけ迂回でマージし、証跡で承認を取る場合は先に証跡を書く（#2773 の決定 14・#3506）。
+    (照らした証跡かレビューの項目, 迂回の記録を書く処理) を返す。CD が無ければどちらも None。"""
+    trail_item = after_merge = None
+    case = release_case.case_or_stop(root)
+    if case.has_cd:
+        trail_item = promote_trail.trail_before_merge(root, a, n, case)
+        a.no_admin = not case.admin_merge
+        if case.admin_merge:
+            after_merge = promote_trail.admin_after_for(root, case, n, a.expect_head, trail_item)
+    return trail_item, after_merge
+
+
 def promote(a, cleanup):
     """ベースブランチ（--head）から本番チャネル（--base）へのリリースの Pull Request を作り（あれば使い）、リリース承認ゲートの後にマージする。
     head はベースブランチなので、マージの後に後片付けをしない（#1336 の I7）。
@@ -394,18 +473,7 @@ def promote(a, cleanup):
     approved_from = getattr(a, "approved_from", None)
     moved_next = None
     if a.gate_approved == "user" and not approved_from:
-        emit(
-            result(
-                TOOL,
-                "stopped",
-                "--gate-approved user に照合の材料（--approved-from のリリースの承認資料）が無いため本番チャネルへ入れない",
-                next=(
-                    f"promote --head {a.head} --base {a.base} --gate-approved user --approved-from <承認資料> で打つ"
-                    "（プランなら run <プラン> --from promote から流し直し、リリース承認ゲートを取り直す）"
-                ),
-            ),
-            EXIT_UNREADABLE,
-        )
+        _stop_without_approved_from(a)
     if approved_from:
         _pin_expect_head(a, approved_commit.material_sha, approved_from, "承認したコミット")
         moved_next = (
@@ -417,58 +485,16 @@ def promote(a, cleanup):
     item = {"kind": "pr", "name": f"#{n}", "result": "created" if created else "found", "base": a.base, "head_branch": a.head}
     if a.prepare:
         _prepare_promote(root, a, n, item)
-    trail_item = None
-    if a.gate_approved:
-        case = release_case.case_or_stop(root)
-        if case.has_cd:  # CD のある場合は迂回なしでマージし、場合 1 は先に証跡を書く（#2773 の決定 14）
-            trail_item = _trail_before_merge(root, a, n, case)
-            a.no_admin = True
+    trail_item, after_merge = _cd_trail_and_admin(root, a, n) if a.gate_approved else (None, None)
     a.pr, a.no_cleanup = n, True
     approve = f"promote --head {a.head} --base {a.base} --gate-approved user --approved-from "
-    merge_when_green(
-        a,
-        cleanup,
+    opts = MergeOptions(
         next_cmd=lambda path: approve + str(path),
         plan_step="promote-approved",
         gate_head=True,
         moved_next=moved_next,
         ci_tests=False,
         trail_item=trail_item,
+        after_merge=after_merge,
     )
-
-
-def _trail_before_merge(root, a, n, case) -> dict | None:
-    """promote のマージの前（#2773 の決定 14）: 場合 1 は照合した先端の証跡を置き、場合 2 は有効な人の承認のレビューのコミットと
-    先端を照らす。照合する先端は a.expect_head（承認資料の承認したコミット）。場合 2 で一致しなければ承認ゲート（10）で止める。
-    場合 1 で先端が既に動いていれば証跡を書かずに None を返し、merge-when-green の先端の照合（head_moved で 1）に止めさせる。
-    照らした証跡かレビューの結果の項目を返す。"""
-    sha, repo = getattr(a, "expect_head", None), _promote_repo(root)
-    if not sha or not repo:
-        raise StepError(
-            "CD のある場合の promote には照合する承認したコミット（--approved-from か --expect-head-from）とリポジトリが要る",
-            EXIT_PRECONDITION,
-        )
-    redo = "リリース承認ゲートからやり直す: プランなら run <プラン> --from promote（fast / auto は --from verify）"
-    try:
-        if case.case == release_case.CD_NO_REVIEW:
-            written, url = approval_trail.write_trail(repo, n, sha, a.gate_approved)
-            # PR を開いた時点の failure（証跡が無い）を workflow が付け直すまで待つ。待たないと merge-when-green が落ちたチェックとして止まる
-            reviewed.wait_trail_status(root, repo, a.base, sha)
-            return {"kind": "comment", "name": url or f"#{n}", "result": "written" if written else "kept", "approved_sha": sha}
-        got = approval_trail.read_review_commit(repo, n)
-    except approval_trail.TrailError as e:
-        if e.kind != "head_moved":
-            raise StepError(str(e)) from e
-        return None  # 証跡を書かない。マージは --expect-head の照合が止める
-    if got != sha:
-        what = "有効な人の承認のレビューが無い" if got is None else f"承認のレビュー {got[:8]} が承認したコミット {sha[:8]} と違う"
-        emit(result(TOOL, "gate", f"#{n} をマージしない: {what}", [], {"approved_sha": sha, "review_commit": got}, None, redo), EXIT_GATE)
-    return {"kind": "review", "name": f"#{n}", "result": "approved", "approved_sha": got}
-
-
-def _promote_repo(root) -> str | None:
-    """`owner/repo`。origin の URL から読み、読めなければ gh に聞く。"""
-    if got := repo_lib.owner_repo(root):
-        return got
-    p = gh_parts.gh(["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"], cwd=root)
-    return p.stdout.strip() or None if p.returncode == 0 else None
+    merge_when_green(a, cleanup, opts)
