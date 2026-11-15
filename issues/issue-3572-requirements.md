@@ -57,7 +57,7 @@ NDF 10.27.66〜10.27.67（一時レーン p6-rel14）、Claude Code、Linux。20
 - 人が GitHub で本番の PR をマージしたことを検知し、承認済みとして後の工程（開発版との同期・後片付け・終わりの記録）へ進む経路（経路 (b)）
 - 差し戻しの後、直しを入れたリリースブランチの先端で承認を取り直す経路。承認の後に見つかった直しを、次の版のリリースブランチへスプリントとして入れる経路
 - #3119 の設計を、前提 6 の構想に合わせて直す差分（同じ設計 PR に載せる）。#3121 の宣言 `branch_flow` の値が構想に要るかの判断を含む
-- 実装の範囲は ndf-next の `plugins/ndf-next/src/ndf/domains/release/` と雛形 `plugins/ndf-next/contracts/templates/`
+- 実装の範囲は ndf-next（`plugins/ndf-next/`）の中。主にリリースのドメイン `plugins/ndf-next/src/ndf/domains/release/` と雛形 `plugins/ndf-next/contracts/templates/` で、副命令を変える同じ変更で合わせる承認ゲートの待ち（`plugins/ndf-next/src/ndf/progress/gate/release.py`）と副命令の契約のスキーマ（`plugins/ndf-next/contracts/schemas/io/release-steps.*.schema.json`）を含む（設計の決定 4）
 
 含まない:
 - 今の NDF（`plugins/ndf/`）の変更。11.0.0 の入れ替えまでは、今の NDF はマージの時点の先端の照合と CI で受ける
@@ -130,7 +130,7 @@ E4 と E5 の間に push が割り込んでも、先端の照合でマージは�
        操作: 後の工程を流す
        結果: 次の版のリリースブランチが本番ブランチのマージ後の先端から用意され、結果にその名前が出る
 - [ ] 11. 開発版チャネルの組み立てとマージは、今と同じく進む（退行しない）
-- [ ] 12. 変更は `plugins/ndf-next/src/ndf/domains/release/` と `plugins/ndf-next/contracts/templates/`（とそのテスト）だけにあり、`plugins/ndf/` の差分が無い
+- [ ] 12. 変更は ndf-next（`plugins/ndf-next/`）の中だけにあり、`plugins/ndf/` の差分が無い
 
 ## 非機能の条件
 

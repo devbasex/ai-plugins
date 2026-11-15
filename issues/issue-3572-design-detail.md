@@ -279,7 +279,7 @@ plugins/ndf-next/
 | `forbidden` | `ndf.core.route.expanded`（`use` を開いた形） | `grep -n "def expanded" src/ndf/core/route/__init__.py` | 使う。テストが雛形をこの関数で開いてから渡す |
 | `guard_first` | `ndf.core.plan.model._kind_errors` | `grep -n "_kind_errors" -A4 src/ndf/core/plan/model.py` | 使えない（種類が表にあるかだけを見る）。止まる原因が表にあることはこの関数で確かめられるため、`refused` を使う根拠にする |
 | `is_production_pr` | `ndf.domains.release.land.Lander._bypass` の本番の判定（`pull.base_ref != self.production`） | `land.py` を読んだ | 使えない（`Lander` のメソッドで、宣言の迂回の判定と一体）。比べ 1 つを純粋な関数に切り出し、`land` も使い直す |
-| `facts_of` | `ndf.adapters.github.Pull.from_rest` | `grep -n "class Pull" -A30 src/ndf/adapters/github.py` | 使えない。`Pull` は `merged_by` を持たず、足すとアダプタ（受け入れ条件 12 の範囲の外）を変える。`hub.rest("GET", ".../pulls/<番号>")` の生の応答から読む |
+| `facts_of` | `ndf.adapters.github.Pull.from_rest` | `grep -n "class Pull" -A30 src/ndf/adapters/github.py` | 使えない。`Pull` は `merged_by` を持たず、足すとリリースの外のアダプタ（`adapters/github.py`）を変える。`hub.rest("GET", ".../pulls/<番号>")` の生の応答から読む |
 | `decide` | `ndf.domains.release.approval_decide.judge` | `approval_decide.py` を読んだ | 使えない（今の先端への最新の答えだけを返し、経路と別の先端の承認を返さない）。証跡の読み取り（`parse`・`trails`）は `trail.approvals` が使う |
 | `suggested` | `ndf.contracts.causes` の `route` の列 | `grep -n '"kind"' contracts/causes.json` | 使えない（行き先は人・conductor・ステップの区分で、`reject` と `defer` を分けない）。2 値の対応だけを持つ |
 | `next_branch` | `version_decide.version_of_branch`・`production_next`・`branch_of` | `grep -n "^def " src/ndf/domains/release/version_decide.py` | 使う（3 つを組み合わせる） |
