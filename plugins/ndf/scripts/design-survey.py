@@ -35,6 +35,8 @@
 from __future__ import annotations
 
 import argparse
+import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -42,6 +44,19 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import deps  # noqa: E402
 from proc import git_root as _probe_root  # noqa: E402
+
+
+_ROOT_ENV = "NDF_DESIGN_SURVEY_ROOT"  # 依存の判定で決めた根を、uv の環境へ起動し直した子へ渡す（git の起動を 1 回にする）
+
+
+def _passed_root(key: list) -> Path | None:
+    """起動し直す前の親が同じ引数とカレントで決めた根。無いか鍵が違えば None。印は孫へ継がせない。"""
+    raw = os.environ.pop(_ROOT_ENV, None)
+    try:
+        passed = json.loads(raw) if raw else None
+    except ValueError:
+        return None
+    return Path(passed["root"]) if isinstance(passed, dict) and passed.get("key") == key else None
 
 
 def _required_groups(argv: list[str]) -> tuple[str, ...]:
@@ -52,11 +67,16 @@ def _required_groups(argv: list[str]) -> tuple[str, ...]:
     ap.add_argument("--root", default=None)
     ap.add_argument("cmd", nargs="?")
     known, _ = ap.parse_known_args(argv)
-    try:
-        root = _probe_root(known.root)
-    except Exception:  # noqa: BLE001 - 根を決められなければ設定なしとして求め、本体が同じ誤りで止まる
-        root = None
+    key = [known.root, str(Path.cwd())]
+    root = _passed_root(key)
+    if root is None:
+        try:
+            root = _probe_root(known.root)
+        except Exception:  # noqa: BLE001 - 根を決められなければ設定なしとして求め、本体が同じ誤りで止まる
+            root = None
     _PROBED.update(key=(known.root, Path.cwd()), root=root)
+    if root is not None:  # deps.require が起動し直すと _PROBED は消えるため、子へは環境変数で渡す
+        os.environ[_ROOT_ENV] = json.dumps({"key": key, "root": str(root)})
     return design_repos.dep_groups(root, known.cmd == "schema")
 
 
@@ -71,6 +91,7 @@ def _root(arg) -> Path:
 
 
 deps.require("md", *_required_groups(sys.argv[1:]))  # md は静的に並べ、設定で増える分は dep_groups が決める
+os.environ.pop(_ROOT_ENV, None)  # 起動し直さずに戻ったときは、本体が起動する子のプロセスへ継がせない
 import design_repos  # noqa: E402
 import md  # noqa: E402
 import doc_kinds  # noqa: E402

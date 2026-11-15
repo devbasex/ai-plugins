@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -571,3 +572,16 @@ def test_findings_of_every_kind_keep_their_order_and_metrics(tmp_path):
         "detail_file": 0,
         "detail_missing": 1,
     }
+
+
+@pytest.mark.parametrize("same_key, code", [(True, 0), (False, 2)])
+def test_root_passed_by_the_parent_is_reused(tmp_path, same_key, code):
+    """uv の環境へ起動し直す前に親が決めた根を、同じ引数とカレントの子は git を打たずに使う（#3651）。
+
+    git の作業ツリーでないカレントから `--root` を省いて起動する。根を受け取れば文書を読んで 0、
+    鍵（引数とカレント）が違えば git で根を探して 2 になる。"""
+    (tmp_path / "d.md").write_text("# 設計\n", encoding="utf-8")
+    key = [None, str(tmp_path) if same_key else str(tmp_path / "other")]
+    env = {**os.environ, "NDF_DESIGN_SURVEY_ROOT": json.dumps({"key": key, "root": str(tmp_path)}), "GIT_CEILING_DIRECTORIES": str(tmp_path.parent)}
+    p = subprocess.run([sys.executable, str(SCRIPT), "check", "--file", "d.md"], cwd=tmp_path, env=env, capture_output=True, text=True)
+    assert p.returncode == code, p.stderr
