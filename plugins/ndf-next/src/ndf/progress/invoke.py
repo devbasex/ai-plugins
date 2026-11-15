@@ -46,7 +46,7 @@ from ndf.core.plan import files as plan_files
 from ndf.core.plan import runner as plan_runner
 from ndf.progress import definition, model, stages
 from ndf.progress.command import PROJECT_FILE, declaration
-from ndf.testing import weight
+from ndf.testing import scoped, weight
 
 # 作業種別と、工程の定義の call → 作業種別（plan は副命令 `ndf plan` の名前）
 PLAN = plan_cli.TOOL
@@ -425,7 +425,8 @@ def _branch_of(run: StageRun) -> Optional[str]:
 
 def ci_only(place: Path) -> bool:
     """作業場所のリポジトリがテストを CI に寄せる宣言（`test.ci.only` が真）を持つか（#3473）。"""
-    return definition.dig(_project(place), "test", "ci", "only") is True
+    test = definition.dig(_project(place), "test")
+    return scoped.ci_only(test if isinstance(test, Mapping) else {})
 
 
 def template_values(t: route.Template, run: StageRun, work_dir: Path, cwd: Path) -> dict[str, route.Value]:

@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 import shlex
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -39,6 +39,12 @@ class ScopedRun:
     suite: str
     command: str
     files: tuple[str, ...]
+
+
+def ci_only(test: Mapping[str, Any]) -> bool:
+    """宣言の `test` の節がテストを CI に寄せる（`ci.only` が真）か。"""
+    ci = test.get("ci")
+    return isinstance(ci, dict) and ci.get("only") is True
 
 
 def in_scope(path: str, scope: Sequence[str]) -> bool:

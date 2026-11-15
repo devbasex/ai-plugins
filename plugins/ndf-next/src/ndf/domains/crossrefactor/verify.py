@@ -46,8 +46,7 @@ def _declaration(work: Path) -> Mapping[str, Any]:
 def suites(work: Path) -> list[scoped.Suite]:
     """検証に使う suite。テストを CI に寄せる宣言があれば検査の suite だけ。"""
     decl = _declaration(work)
-    ci = decl.get("ci")
-    ci_only = isinstance(ci, dict) and ci.get("only") is True
+    ci_only = scoped.ci_only(decl)
     raws = decl.get("suites")
     found = [s for s in (scoped.suite_of(r) for r in (raws if isinstance(raws, list) else [])) if s is not None]
     return [s for s in found if not (s.test and ci_only)]
