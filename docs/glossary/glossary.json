@@ -4048,7 +4048,7 @@
     {
       "term": "版上げの PR",
       "context": "ndf-release",
-      "meaning": "今の NDF では、head のブランチが `release/` で始まる PR。版数と CHANGELOG だけを変え、中身の変更を持たない。ndf-next の取り込み方の行 `trunk` では、main へのマージの後に CD の `bump` が main の先端から作る main 宛ての PR で、head のブランチの名前（`release/v<バージョン>`）と、差分がバージョンの置き場・CHANGELOG のバージョンの節・`.ndf/release.json` の手順の書き先に限られることの両方で見分ける。名前が `release/` で始まるだけの PR は含まない",
+      "meaning": "今の NDF の取り込み方 `whole`・`selected` では、head のブランチが `release/` で始まる PR。版数と CHANGELOG だけを変え、中身の変更を持たない。取り込み方 `trunk`（今の NDF と ndf-next）では、main へのマージの後に CD が main の先端から作る main 宛ての PR で、head のブランチの名前（`release/v<バージョン>`）と、差分が版数と説明だけ（ndf-next ではバージョンの置き場・CHANGELOG のバージョンの節・`.ndf/release.json` の手順の書き先）に限られることの両方で見分ける。名前が `release/` で始まるだけの PR は含まない。本文では「バージョン上げの PR」とも書く",
       "source": "docs/specifications/ndf-release-approval-included-prs.md"
     },
     {
@@ -7062,7 +7062,7 @@
     {
       "term": "スプリントの PR",
       "context": "ndf-workflow",
-      "meaning": "スプリントブランチからベースブランチへ出す、検査のプランの PR",
+      "meaning": "スプリントブランチから宛先へ出す、検査のプランの PR。宛先は取り込み方 `whole`・`selected` ではベースブランチ、`trunk` では本番ブランチで、`trunk` では本番の PR を兼ねる",
       "source": "docs/specifications/ndf-branch-flow-review-units.md"
     },
     {
@@ -7327,7 +7327,7 @@
       "term": "取り込み方",
       "code": "promotion",
       "context": "ndf-workflow",
-      "meaning": "スプリントの変更を本番チャネルへ入れる方法。ブランチ運用の宣言の `branch_flow.promotion`。`whole` はベースブランチを丸ごと、`selected` は選んだスプリントブランチだけをリリースブランチへ集めて入れる",
+      "meaning": "スプリントの変更を本番チャネルへ入れる方法。ブランチ運用の宣言の `branch_flow.promotion`。`whole` はベースブランチを丸ごと、`selected` は選んだスプリントブランチだけをリリースブランチへ集めて入れる。`trunk`（GitHub flow）はスプリントの PR を本番ブランチへ直接マージし、マージをリリースとする",
       "pending_source": "issues/issue-3119-requirements.md"
     },
     {
@@ -7591,7 +7591,7 @@
     {
       "term": "本番の PR",
       "context": "ndf-release",
-      "meaning": "本番チャネル（main）へ入れる Pull Request。CD のある場合は、この PR のマージで本番へ届く。ndf-next の取り込み方の行 `trunk` では main 宛てのスプリントの PR が兼ね、CD が作る版上げの PR は含まない。行 `merge_base_branch`・`release_branch` と今の NDF では、リリースのブランチから本番チャネルへ出す PR を指す",
+      "meaning": "本番チャネル（main）へ入れる Pull Request。CD のある場合は、この PR のマージで本番へ届く。取り込み方の行 `trunk`（今の NDF と ndf-next）では main 宛てのスプリントの PR が兼ね、CD が作る版上げの PR は含まない。行 `merge_base_branch`・`release_branch` と今の NDF の `whole`・`selected` では、リリースのブランチから本番チャネルへ出す PR を指す",
       "source": "docs/specifications/ndf-release-production-admin-merge.md"
     },
     {

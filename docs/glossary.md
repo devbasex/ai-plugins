@@ -623,7 +623,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 定義の改訂 | — | スプリントの進行表の定義のスナップショットの番号（`rev`）。作成で 1 になり、範囲とモードの変更で 1 ずつ上がる。工程の行は定義の改訂と工程の名前の組で決まる。定義の文書の版（`document.version`）と MVV の改訂とは別 | — | — | — |
 | レビューの単位 | — | PR の種類ごとに、掛けるレビューと対象の差分を決めた組。ブランチ運用の宣言の `reviews` に書く | — | — | `plugins/ndf/skills/worktree/references/declaration.md` |
 | PR の種類 | — | NDF のプランが出す PR の分け方。実装 PR・スプリントの PR・リリースブランチの PR・設計 PR・確定仕様化の PR の 5 つ | — | — | `plugins/ndf/skills/worktree/references/declaration.md` |
-| スプリントの PR | — | スプリントブランチからベースブランチへ出す、検査のプランの PR | — | — | `docs/specifications/ndf-branch-flow-review-units.md` |
+| スプリントの PR | — | スプリントブランチから宛先へ出す、検査のプランの PR。宛先は取り込み方 `whole`・`selected` ではベースブランチ、`trunk` では本番ブランチで、`trunk` では本番の PR を兼ねる | — | — | `docs/specifications/ndf-branch-flow-review-units.md` |
 | 対象の差分 | — | レビューに渡す差分の取り方。PR の差分全体・未検査の差分・衝突の解消の差分・掛けないの 4 つ | — | — | `plugins/ndf/skills/worktree/references/declaration.md` |
 | 未検査の差分 | — | 前回の検査の後に入った差分。最後の検査の範囲（#3126）と同じ取り方 | — | — | `docs/specifications/ndf-branch-flow-review-units.md` |
 | 掛けるレビュー | — | レビューの単位のうち、PR に掛ける検査の組。cross-review・cross-refactoring・振る舞いの確認の 3 つから選ぶ | — | — | `plugins/ndf/skills/worktree/references/declaration.md` |
@@ -650,7 +650,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 判断のループ | — | 判断の関数と、手を実行する関数を受けて回す共通の部品（lib/decide_loop.py）。実行する関数に耐久ステップを渡すと耐久の層になり、ただの関数を渡すと DBOS を起こさない実行器になる | — | — | — |
 | CI | — | Pull Request ごとに自動で走る検査（GitHub Actions のワークフロー） | 継続的統合 | — | `docs/specifications/ndf-glossary-deprecated-meaning.md` |
 | 文字列 | — | 文字の並びとして持つ値 | 字で持（単独） | — | `docs/specifications/ndf-glossary-deprecated-meaning.md` |
-| 取り込み方 | `promotion` | スプリントの変更を本番チャネルへ入れる方法。ブランチ運用の宣言の `branch_flow.promotion`。`whole` はベースブランチを丸ごと、`selected` は選んだスプリントブランチだけをリリースブランチへ集めて入れる | — | — | — |
+| 取り込み方 | `promotion` | スプリントの変更を本番チャネルへ入れる方法。ブランチ運用の宣言の `branch_flow.promotion`。`whole` はベースブランチを丸ごと、`selected` は選んだスプリントブランチだけをリリースブランチへ集めて入れる。`trunk`（GitHub flow）はスプリントの PR を本番ブランチへ直接マージし、マージをリリースとする | — | — | — |
 | プラグインの入れ替え | — | 作り直した `plugins/ndf-next/` を 1 本の PR で `plugins/ndf/` へ `git mv` し、名前と版を替えること。取得元とプラグイン名は変えない。「入れ替え」と略す。ラッパーの入れ替えとは別 | — | — | — |
 | 旧いプラグイン | — | #1142 の作り直しの前から配っている NDF のプラグイン（`plugins/ndf/`）。作り直した `plugins/ndf-next/` と区別して呼ぶ | — | — | `docs/specifications/ndf-next-closed-children-subcommands.md` |
 | 機能の対応表 | — | 旧いプラグインの機能 1 つを 1 行に持ち、行き先の子・作らない理由・試走の結果を持つ表。置き場は NDF 自身の開発の `scripts/ndf-next-parity/features.json` で、ndf-next のリリース対象に置かない | — | — | — |
@@ -1003,7 +1003,7 @@ release が走らせるリリースの種別・リリースコマンド・公開
 | 補足の表 | — | リリース後テストの記録のうち、課題の表でない表（例: 主なテストの実行の表）。課題を閉じる判定にも承認資料にも使わない | — | — | `docs/specifications/ndf-sprint-close-acceptance-criteria.md` |
 | 版数を上げないリリース | — | 版数を変えず、既定ブランチへのマージかコミットの反映で本番へ届けるリリース | 版数を上げない配布 | — | `docs/specifications/ndf-production-release-record.md` |
 | 範囲の PR | — | 直前の正式版のタグから範囲の終点までに、ベースブランチへ merge commit か squash merge で入った PR と、スプリント経由の PR の和。`--prs` で渡した番号は、マージコミットが範囲の終点の祖先であるものだけを含む。版上げの PR と、PR でない番号（squash の件名の `(#N)` が課題を指すもの）は含まない | — | — | `docs/specifications/ndf-release-approval-included-prs.md` |
-| 版上げの PR | — | 今の NDF では、head のブランチが `release/` で始まる PR。版数と CHANGELOG だけを変え、中身の変更を持たない。ndf-next の取り込み方の行 `trunk` では、main へのマージの後に CD の `bump` が main の先端から作る main 宛ての PR で、head のブランチの名前（`release/v<バージョン>`）と、差分がバージョンの置き場・CHANGELOG のバージョンの節・`.ndf/release.json` の手順の書き先に限られることの両方で見分ける。名前が `release/` で始まるだけの PR は含まない | — | — | `docs/specifications/ndf-release-approval-included-prs.md` |
+| 版上げの PR | — | 今の NDF の取り込み方 `whole`・`selected` では、head のブランチが `release/` で始まる PR。版数と CHANGELOG だけを変え、中身の変更を持たない。取り込み方 `trunk`（今の NDF と ndf-next）では、main へのマージの後に CD が main の先端から作る main 宛ての PR で、head のブランチの名前（`release/v<バージョン>`）と、差分が版数と説明だけ（ndf-next ではバージョンの置き場・CHANGELOG のバージョンの節・`.ndf/release.json` の手順の書き先）に限られることの両方で見分ける。名前が `release/` で始まるだけの PR は含まない。本文では「バージョン上げの PR」とも書く | — | — | `docs/specifications/ndf-release-approval-included-prs.md` |
 | 合格の行 | — | リリース後テストの表で、`結果` の列が `合格` で始まる行 | — | — | `docs/specifications/ndf-sprint-close-acceptance-criteria.md` |
 | 手で足した節 | — | 承認資料の `## ` の節のうち、デプロイのステップ（approval-facts・notes --approval・changed-plugins --approval）が書く見出しに当たらないもの。作り直しの後も見出しと中身が残る | — | — | `plugins/ndf/skills/release/references/release-steps.md` |
 | 置き換える箇条 | — | 後の PR の本文の `## 置き換える箇条` の節に書く行。同じ版に含む前の PR の「利用者向けの変化」の箇条を指し、その箇条を CHANGELOG と承認資料の「配る中身」から除く | — | — | `plugins/ndf/skills/release/references/release-steps.md` |
@@ -1042,7 +1042,7 @@ release が走らせるリリースの種別・リリースコマンド・公開
 | 開発版の workflow | — | 手元で作った開発版の PR を、CI の必須チェックが通るのを待って develop へマージする GitHub Actions の workflow | — | — | `docs/specifications/ndf-release-approval-on-pr.md` |
 | 承認の証跡 | — | リリースの PR に置いた、承認したコミットの 40 桁の SHA を書いたコメント（証跡の印と `承認したコミット:` の行を持つ）。承認ラベルや承認ゲートの記録は含まない | — | — | `docs/specifications/ndf-release-approval-on-pr.md` |
 | 戻すマージ | — | 今の NDF（11.0.0 の入れ替えの前）だけの語。正式版のリリースの後、リリースブランチを `release/v<版>-sync` 経由でベースブランチへ取り込むマージ。版数を持つ箇所が衝突したら本番の版を取る。ndf-next（GitHub flow）は同期の PR を作らず、この操作を持たない | — | — | — |
-| 本番の PR | — | 本番チャネル（main）へ入れる Pull Request。CD のある場合は、この PR のマージで本番へ届く。ndf-next の取り込み方の行 `trunk` では main 宛てのスプリントの PR が兼ね、CD が作る版上げの PR は含まない。行 `merge_base_branch`・`release_branch` と今の NDF では、リリースのブランチから本番チャネルへ出す PR を指す | — | — | `docs/specifications/ndf-release-production-admin-merge.md` |
+| 本番の PR | — | 本番チャネル（main）へ入れる Pull Request。CD のある場合は、この PR のマージで本番へ届く。取り込み方の行 `trunk`（今の NDF と ndf-next）では main 宛てのスプリントの PR が兼ね、CD が作る版上げの PR は含まない。行 `merge_base_branch`・`release_branch` と今の NDF の `whole`・`selected` では、リリースのブランチから本番チャネルへ出す PR を指す | — | — | `docs/specifications/ndf-release-production-admin-merge.md` |
 | 管理者の迂回 | — | ruleset が迂回を許した役割の人が、必須の承認レビューと必須のチェックを満たさずにマージすること。`gh pr merge --admin` で打つ | — | — | `docs/specifications/ndf-release-production-admin-merge.md` |
 | 迂回の宣言 | — | 本番の PR を管理者の迂回でマージすることを選ぶ、`.ndf/project.json` の `production_merge.admin` の値。`true` のときだけ宣言があるとみなし、無いときは迂回しない | — | — | `docs/specifications/ndf-release-production-admin-merge.md` |
 | 迂回の記録 | — | 本番の PR を管理者の迂回でマージしたことを示す、本番の PR へ置くコメント。マージした先端と照らした承認の証跡を指す。証跡とは別の印を持ち、承認の判定に数えない | — | — | `docs/specifications/ndf-release-production-admin-merge.md` |
