@@ -802,3 +802,46 @@ def test_ndf_next_skill_docs_get_the_name_words(tmp_path: Path) -> None:
     (skills / LISTED_SKILL / "SKILL.md").write_text(CLEAN_BODY + "\n（ai-plugins）と[機能の対応表](x)\n", encoding="utf-8")
     out = output_of(run_check(skills, [], tmp_path))
     assert "'ai-plugins'" in out and "'機能の対応表'" in out
+
+
+# --- 現状固定テスト（I-020: _split_defaults。scan_contracts と remote_defaults から通す） --------------------------
+
+
+def _write_defaults_tree(tmp_path: Path) -> Path:
+    files = {
+        "a.json": '{\n"default": "origin", "enum": ["origin"]\n"x": 1\n"default"  :  "use origin/main", "y": "remotes/origin"\n}\n',
+        "b.json": '{"default": "origin"}\n',
+        "c.json": '{"k": 1}\n',
+    }
+    for name, text in files.items():
+        (tmp_path / name).write_text(text, encoding="utf-8")
+    return tmp_path
+
+
+def test_split_defaults_current_behavior_separates_default_values(tmp_path: Path) -> None:
+    """同じ行でも `"default"` の値の中の当たりは既定の側へ、外の当たりはヒットへ分かれる。"""
+    mod = load_checker()
+    root = _write_defaults_tree(tmp_path)
+    rels = ["a.json", "b.json", "c.json"]
+    hits = mod.scan_contracts(root, rels, mod.NEXT_CODE_MATCHERS)
+    assert [(h.rel, h.lineno, h.word_id, h.word) for h in hits] == [
+        ("a.json", 4, "origin-main", "origin/main"),
+        ("a.json", 2, "remote-origin", '"origin"'),
+        ("a.json", 4, "remote-origin", "remotes/origin"),
+    ]
+    assert mod.remote_defaults(root, rels) == [("a.json", 2), ("a.json", 4), ("b.json", 1)]
+
+
+def test_split_defaults_current_behavior_skipped_without_remote_word(tmp_path: Path) -> None:
+    """語 `remote-origin` を渡さなければ既定の分け方を通らない。"""
+    mod = load_checker()
+    root = _write_defaults_tree(tmp_path)
+    others = [(w, r) for w, r in mod.NEXT_CODE_MATCHERS if w != mod.REMOTE_WORD]
+    hits = mod.scan_contracts(root, ["a.json"], others)
+    assert [(h.rel, h.lineno, h.word_id, h.word) for h in hits] == [("a.json", 4, "origin-main", "origin/main")]
+
+
+def test_split_defaults_current_behavior_unreadable_file_raises(tmp_path: Path) -> None:
+    mod = load_checker()
+    with pytest.raises(mod.ScanError, match="を読めない"):
+        mod.remote_defaults(tmp_path, ["missing.json"])
