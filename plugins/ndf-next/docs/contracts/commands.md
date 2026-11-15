@@ -295,6 +295,10 @@
 | `ndf relay account clear` | 引数を受けない |
 | `ndf relay account show` | 引数を受けない |
 | `ndf relay account use` | `name`（string・必須・位置） |
+| `ndf relay context calibrate` | `--days`（integer・任意・既定 `30`）: 較正に使う直近の日数 |
+| `ndf relay context record` | `--verdict`（string・任意・値 `再起動`）: 再起動の行を書く（--reason と組む）<br>`--event`（string・任意・値 `引継ぎ開始`・`復元完了`）: 印の行を書く<br>`--reason`（string・任意・値 `容量`・`運用上限`・`費用`・`独立性`・`手動`・`カットポイント`・`待ち`）: 再起動の理由<br>`--work`（string・必須）: 作業の識別子（課題番号の並び） |
+| `ndf relay context report` | `--work`（string・任意）: 集計する作業の識別子<br>`--all`（boolean・任意）: 記録にあるすべての作業を集計する<br>`--since`（string・任意）: この日（YYYY-MM-DD）以降の判定の行だけを読む<br>`--from`（string・任意）: この時刻（ISO 8601）からの呼び出しと行だけを数える<br>`--until`（string・任意）: この時刻（ISO 8601）までの呼び出しと行だけを数える |
+| `ndf relay context resolve` | `--root`（string・任意）: 設定を読むリポジトリ（省けば今の作業場所の git の根）<br>`--policy`（string・任意・値 `current`・`trial`）: 方針を上書きする |
 | `ndf relay decide` | 引数を受けない |
 | `ndf relay install` | `--replace-old`（boolean・任意）: 旧い NDF の複製を置き換える（旧いラッパーが動いていれば断る） |
 | `ndf relay ls` | 引数を受けない |
@@ -308,7 +312,7 @@
 | `ndf relay stop` | `name`（string・任意・位置）: 止めるラッパーの名前<br>`--all`（boolean・任意）: 動いている名前つきのラッパーをすべて止める |
 | `ndf relay uninstall` | 引数を受けない |
 
-結果の `metrics`: `inside`（boolean）・`stopped`（integer）。`items` の要素: `account`（string か null）・`args`（array か null）・`cwd`（string か null）・`kind`（string）・`name`（string）・`ok`（boolean）・`path`（string）・`pending`（array か null）・`plan`（string か null）・`position`（string）・`prompt`（string）・`reason`（string か null）・`role`（string か null）・`run`（string）・`running`（boolean）・`starts`（object）・`state`（string か null）・`status`（string か null）・`summary`（string）・`text`（string）・`updated_at`（string か null）・`version`（string）・`workflow`（string）
+結果の `metrics`: `inside`（boolean）・`limit`（integer）・`no_policy_rows`（integer）・`policy`（string）・`samples`（integer）・`skipped`（integer）・`stopped`（integer）・`works`（integer）。`items` の要素: `account`（string か null）・`args`（array か null）・`at`（string）・`auto_compacts`（integer か string）・`band`（string か null）・`basis`（string か null）・`config_error`（string か null）・`context`（integer か null）・`cwd`（string か null）・`decide_from`（integer）・`effective_limit`（integer か null）・`estimate`（object か null）・`event`（string）・`handoff_calls`（number か null）・`handoff_output`（number か null）・`kind`（string）・`limit`（integer）・`margin`（integer）・`missing`（array）・`model`（string か null）・`name`（string）・`no_policy_rows`（integer）・`ok`（boolean）・`parts`（object）・`passed_once`（boolean）・`path`（string）・`pending`（array か null）・`plan`（string か null）・`policy`（string）・`position`（string）・`prompt`（string）・`quality`（object）・`reason`（string か null）・`relay`（boolean）・`restart_count`（integer）・`restarts`（object）・`restore_calls`（number か null）・`restore_context`（number か null）・`restores`（array）・`role`（string か null）・`run`（string）・`running`（boolean）・`runtime`（string）・`samples`（object）・`schema`（integer）・`session_id`（string か null）・`sessions`（integer）・`source`（string）・`sources`（object）・`stage`（string か null）・`stage_calls`（object）・`stage_expiries`（object）・`starts`（object）・`state`（string か null）・`status`（string か null）・`summary`（string）・`text`（string）・`transcript`（string か null）・`unknown_parts`（object）・`updated_at`（string か null）・`verdict`（string か null）・`version`（string）・`window`（integer か null）・`work`（string）・`workflow`（string）
 
 ## `ndf release-steps`
 

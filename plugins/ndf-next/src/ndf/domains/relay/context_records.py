@@ -20,18 +20,18 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional
 
 from ndf.adapters import git
+from ndf.contracts import facts
 from ndf.domains.records import jsonl, usage_decide
 from ndf.domains.relay import context_policy as cp
 from ndf.domains.relay import registry, signals
 
 SCHEMA = 1
 LOCAL = "_local"
-UNKNOWN_REPO = "unknown"
 MARK_HANDOFF, MARK_RESTORED = "引継ぎ開始", "復元完了"
 MARKS = (MARK_HANDOFF, MARK_RESTORED)
 EVENT_DECISION = "判定"
 UNKNOWN = "不明"
-HANDOFF_PATH = re.compile(r"\.ndf/handoff/")
+HANDOFF_PATH = re.compile(re.escape(facts.value("places", "ndf-handoff", "path") + "/"))
 CACHE_1H = 3600  # 呼び出しの間隔がこれを超えたら、1 時間のキャッシュが切れたとみなす
 ISSUE = re.compile(r"(?:^|[^0-9A-Za-z_/])#?([0-9]+)\b")
 NOISE = re.compile(r"[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}|[0-9]+(?:\.[0-9]+)+")
@@ -63,9 +63,9 @@ def repo_key(root: Optional[Path]) -> str:
     try:
         done = git.run_git(["config", "--get", "remote.origin.url"], root)
     except git.GitError:  # noqa: NDF401 外部コマンド: origin を読めなければ旧いと同じ unknown
-        return UNKNOWN_REPO
+        return "unknown"
     m = _SLUG.search(done.stdout.strip())
-    return f"{m.group(1)}__{m.group(2)}" if m else UNKNOWN_REPO
+    return f"{m.group(1)}__{m.group(2)}" if m else "unknown"
 
 
 def decisions_path(repo: str, environ: Mapping[str, str]) -> Path:

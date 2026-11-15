@@ -27,6 +27,9 @@ NDF が読む環境変数と、NDF が子のプロセスへ渡す環境変数で
 | `NDF_CLAUDE_API_KEY_GENERATION` | ndf | integer | — | 子へ渡した API キーの世代。入れ子の監督が読む | 内部（予告なく変えてよい） |
 | `NDF_CLAUDE_API_KEY_NAME` | ndf | string | — | 子へ渡した API キーの名前。入れ子の監督が読む | 内部（予告なく変えてよい） |
 | `NDF_CLAUDE_KEY_ACCOUNT` | ndf | string | — | API キーで起動した子が、キーを外したときに戻る登録済みのアカウントの名前 | 内部（予告なく変えてよい） |
+| `NDF_CONTEXT_DIR` | user | path | — | 再起動の方針の判定の記録と費用の見込みの置き場（ndf relay context）。無ければ旧い状態の根の context（旧いプラグインと同じ置き場） | 内部（予告なく変えてよい） |
+| `NDF_CONTEXT_LIMIT` | user | integer | — | 適用中の再起動の方針の運用上限（正の整数）。判断開始の値がこれを上回れば同じ値へ下げる | 内部（予告なく変えてよい） |
+| `NDF_CONTEXT_POLICY` | user | string | — | 再起動の方針（current・trial）。.ndf/context.json より先で --policy より後。ほかの値は無視して出所に ignored を書く | 内部（予告なく変えてよい） |
 | `NDF_FACTORY_RUN` | service | flag | — | サービスの実行ジョブの中で動いている印 | 公開 |
 | `NDF_HOOK_OFF` | user | string | — | 止める guard の名前をカンマでつなぐ。all で全部を止める。無ければ全部の guard が働く。閾値はこの変数で受けず、上限の宣言から読む | 内部（予告なく変えてよい） |
 | `NDF_ISSUE_REQUEST_FILE` | service | path | — | 作業のリポジトリと別の宛先への起票を、承認資料を書かずに依頼の 1 行（{repo, title, body, labels} の JSON）として足すファイル。サービスが起票するかを決める。無ければ承認資料で止まる | 公開 |

@@ -53,6 +53,128 @@
       "additionalProperties": false,
       "properties": {
         "subcommand": {
+          "const": "context calibrate",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--days": {
+          "type": "integer",
+          "default": 30,
+          "description": "較正に使う直近の日数"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "context record",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--verdict": {
+          "type": "string",
+          "enum": [
+            "再起動"
+          ],
+          "description": "再起動の行を書く（--reason と組む）"
+        },
+        "--event": {
+          "type": "string",
+          "enum": [
+            "引継ぎ開始",
+            "復元完了"
+          ],
+          "description": "印の行を書く"
+        },
+        "--reason": {
+          "type": "string",
+          "enum": [
+            "容量",
+            "運用上限",
+            "費用",
+            "独立性",
+            "手動",
+            "カットポイント",
+            "待ち"
+          ],
+          "description": "再起動の理由"
+        },
+        "--work": {
+          "type": "string",
+          "description": "作業の識別子（課題番号の並び）"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--work"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "context report",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--work": {
+          "type": "string",
+          "description": "集計する作業の識別子"
+        },
+        "--all": {
+          "type": "boolean",
+          "description": "記録にあるすべての作業を集計する"
+        },
+        "--since": {
+          "type": "string",
+          "description": "この日（YYYY-MM-DD）以降の判定の行だけを読む"
+        },
+        "--from": {
+          "type": "string",
+          "description": "この時刻（ISO 8601）からの呼び出しと行だけを数える"
+        },
+        "--until": {
+          "type": "string",
+          "description": "この時刻（ISO 8601）までの呼び出しと行だけを数える"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "context resolve",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--root": {
+          "type": "string",
+          "description": "設定を読むリポジトリ（省けば今の作業場所の git の根）"
+        },
+        "--policy": {
+          "type": "string",
+          "enum": [
+            "current",
+            "trial"
+          ],
+          "description": "方針を上書きする"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
           "const": "decide",
           "description": "下位の命令（入れ子は空白でつなぐ）"
         }

@@ -12,12 +12,12 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Iterable, Mapping, NamedTuple, Optional
 
+from ndf import identity
 from ndf.domains.records import jsonl, usage
 from ndf.domains.relay import context_policy as cp
 from ndf.domains.relay import context_records as cr
 
 IDLE_CAP = 1800  # 呼び出しの間隔をこの秒数で打ち切る（利用者の返答待ちを所要に入れない）
-BUCKETS = ("conductor", "ndf", "handoff", "restore")
 TOKENS = ("inp", "out", "read", "w5", "w1h")
 # 入力の単価を 1 とした換算の重み（旧い token_rates.WEIGHTS と同じ）
 WEIGHTS = {"inp": 1.0, "w5": 1.25, "w1h": 2.0, "out": 5.0}
@@ -26,6 +26,11 @@ READ_RATES = (("claude-opus-5-5", 0.05), ("claude-sonnet-5-5", 0.05), ("claude-f
 READ_RATE_DEFAULT = 0.1
 ALL_TIME = [(float("-inf"), float("inf"))]
 Windows = list[tuple[float, float]]
+
+
+def buckets() -> tuple[str, str, str, str]:
+    """区分の名前（conductor・NDF が起動した分・引継ぎ・復元）。結果の `parts` のキーで、旧い report と同じ綴り。"""
+    return ("conductor", identity.FINAL_NAME, "handoff", "restore")
 
 
 def read_rate(model: Optional[str]) -> float:
@@ -48,8 +53,8 @@ def load_ledger(environ: Mapping[str, str]) -> list[dict[str, Any]]:
     """新しいプラグインの使用量の台帳の行。読めなければ空の一覧（NDF が起動した分は会話の記録の分だけにする）。"""
     try:
         return jsonl.read_rows(usage.ledger_path(environ))[0]
-    except (LookupError, OSError, UnicodeDecodeError):  # noqa: NDF401 ファイル: 台帳が読めなければ台帳の分を数えない
-        return []
+    except (LookupError, OSError, UnicodeDecodeError):
+        return []  # 台帳が読めなければ NDF が起動した分は会話の記録の分だけにする
 
 
 def _ledger_sid(row: Mapping[str, Any]) -> Optional[str]:
@@ -80,10 +85,10 @@ def _add_call(t: dict[str, Any], c: Mapping[str, Any]) -> None:
 
 def _bucket_of(ts: Optional[float], restore_end: Optional[float], handoff_from: Optional[float]) -> str:
     if ts is not None and restore_end is not None and ts <= restore_end:
-        return "restore"
+        return buckets()[3]
     if ts is not None and handoff_from is not None and ts >= handoff_from:
-        return "handoff"
-    return "conductor"
+        return buckets()[2]
+    return buckets()[0]
 
 
 def _within(ts: Optional[float], windows: Windows) -> bool:
@@ -174,17 +179,17 @@ def session_parts(sid: str, transcript: Optional[str], marks: list[dict[str, Any
     calls, compacts, by_next = cr.read_calls(transcript, scope.seen) if transcript and sid not in scope.excluded else ([], None, False)
     calls = [c for c in calls if _within(c["ts"], windows)]
     restore_end, handoff_from = _mark_bounds(marks, by_next)
-    parts = {b: _empty_totals() for b in BUCKETS}
+    parts = {b: _empty_totals() for b in buckets()}
     times: dict[str, list[Optional[float]]] = defaultdict(list)
     for c in calls:
         b = _bucket_of(c["ts"], restore_end, handoff_from)
         _add_call(parts[b], c)
         times[b].append(c["ts"])
     if transcript:
-        _add_subagents(parts["ndf"], transcript, scope, windows)
+        _add_subagents(parts[identity.FINAL_NAME], transcript, scope, windows)
     stamps = [c["ts"] for c in calls if c["ts"]]
     span = (min(stamps, default=None), max(stamps, default=None))
-    _add_ledger(parts["ndf"], sid, span, scope, windows)
+    _add_ledger(parts[identity.FINAL_NAME], sid, span, scope, windows)
     for b, ts in times.items():
         parts[b]["seconds"] += busy_seconds(ts)
     restored = [c for c in calls if restore_end is not None and c["ts"] is not None and c["ts"] <= restore_end]
@@ -212,20 +217,20 @@ def _session_spans(sessions: Mapping[str, Any], excluded: set[str], windows: Map
 
 def _sum_sessions(sessions: Mapping[str, Any], by_session: Mapping[Any, Any], scope: _Scope, windows: Mapping[str, Windows], restarted: set[Any]) -> dict[str, Any]:
     """セッションごとの区分を合算し、自動圧縮の数と印の無い区間の数を数える。"""
-    totals = {b: _empty_totals() for b in BUCKETS}
+    totals = {b: _empty_totals() for b in buckets()}
     compacts: Optional[int] = 0
     unknown = {"restore": 0, "handoff": 0}
     restores: list[dict[str, Any]] = []
     for sid, s in sessions.items():
         got = session_parts(sid, s["transcript"], by_session[sid] if sid in by_session else [], scope, windows[sid] if sid in windows else ALL_TIME)
         restores += [got["restore"]] if got["restore"] else []
-        for b in BUCKETS:
+        for b in buckets():
             for k, v in got["parts"][b].items():
                 totals[b][k] += v
         compacts = None if compacts is None or got["compacts"] is None else compacts + got["compacts"]
         unknown["restore"] += 0 if got["restore_known"] else 1
         unknown["handoff"] += 1 if sid in restarted and not got["handoff_known"] else 0
-    for b in BUCKETS:
+    for b in buckets():
         totals[b]["cost"] = round(totals[b]["cost"])
         totals[b]["seconds"] = round(totals[b]["seconds"])
     return {"parts": totals, "compacts": compacts, "unknown_parts": unknown, "restores": restores}

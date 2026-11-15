@@ -14,7 +14,6 @@ from ndf.domains.records import files, jsonfile
 
 CURRENT, TRIAL = "current", "trial"
 POLICIES = (CURRENT, TRIAL)
-SETTING = "context"  # 宣言のファイルの表（ndf-files）の id
 CURRENT_LIMIT = 200_000  # 現行方式の運用上限（NDF_CONTEXT_LIMIT で変える）
 TRIAL_DECIDE_FROM = 200_000  # 試行方式の判断開始の値（初期値）
 TRIAL_LIMIT = 400_000  # 試行方式の運用上限（初期値）
@@ -38,6 +37,11 @@ class Resolved(NamedTuple):
 
     def as_dict(self) -> dict[str, Any]:
         return self._asdict()
+
+
+def setting_id() -> str:
+    """設定のファイルの、宣言のファイルの表（ndf-files）の id。"""
+    return "context"
 
 
 def is_positive_int(v: object) -> bool:
@@ -82,14 +86,14 @@ def read_setting(root: Optional[Path]) -> tuple[dict[str, Any], Optional[str]]:
     """`.ndf/context.json` を読み、検めた値と壊れた理由を返す。根が無い・ファイルが無ければ空。"""
     if root is None:
         return {}, None
-    path = files.path(root, SETTING)
+    path = files.path(root, setting_id())
     if not path.is_file():
         return {}, None
     try:
         data = jsonfile.read_object(path)
     except (jsonfile.JsonFileError, UnicodeDecodeError) as exc:
-        return {}, f"{files.relpath(SETTING)}: 読めない（{exc}）"
-    return parse_setting(data, files.relpath(SETTING))
+        return {}, f"{files.relpath(setting_id())}: 読めない（{exc}）"
+    return parse_setting(data, files.relpath(setting_id()))
 
 
 def _policy_name(setting: Mapping[str, Any], environ: Mapping[str, str], cli: Optional[str]) -> tuple[str, str, Optional[str]]:

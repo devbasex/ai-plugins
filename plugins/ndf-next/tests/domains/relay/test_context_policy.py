@@ -11,7 +11,7 @@ from ndf.domains.relay import cli, context_policy, context_records, registry
 
 
 def _setting(root, data) -> None:
-    path = files.path(root, context_policy.SETTING)
+    path = files.path(root, context_policy.setting_id())
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(data if isinstance(data, str) else json.dumps(data), encoding="utf-8")
 
