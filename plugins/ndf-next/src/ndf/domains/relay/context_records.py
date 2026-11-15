@@ -353,23 +353,30 @@ def _stage_segments(calls: list[dict[str, Any]], rows: list[dict[str, Any]]) -> 
 
 
 def _sampled(sessions: Mapping[str, Any], cache: Mapping[str, Any], by_session: Mapping[Any, Any]) -> dict[str, Any]:
-    acc: dict[str, Any] = {"rq": [], "rn": [], "hh": [], "ho": [], "k": defaultdict(list), "m": defaultdict(list)}
+    acc: dict[str, Any] = {
+        "restore_context": [],
+        "restore_calls": [],
+        "handoff_calls": [],
+        "handoff_output": [],
+        "stage_calls": defaultdict(list),
+        "stage_expiries": defaultdict(list),
+    }
     for sid, s in sessions.items():
         calls, _, by_next = cache[sid]
         marks = by_session[sid] if sid in by_session else []
         restore_end, handoff_from = mark_bounds(marks, by_next)
         restore = _restore_sample(calls, restore_end)
         if restore is not None:
-            acc["rq"].append(restore[0])
-            acc["rn"].append(restore[1])
+            acc["restore_context"].append(restore[0])
+            acc["restore_calls"].append(restore[1])
         handoff = _handoff_sample(calls, handoff_from)
         if handoff is not None:
-            acc["hh"].append(handoff[0])
-            acc["ho"].append(handoff[1])
+            acc["handoff_calls"].append(handoff[0])
+            acc["handoff_output"].append(handoff[1])
         for stage, n, gaps in _stage_segments(calls, s["rows"]):
             for key in (stage, "*"):
-                acc["k"][key].append(n)
-                acc["m"][key].append(gaps)
+                acc["stage_calls"][key].append(n)
+                acc["stage_expiries"][key].append(gaps)
     return acc
 
 
@@ -390,13 +397,14 @@ def estimate(rows: list[dict[str, Any]], since: Optional[float]) -> dict[str, An
         return _median(values) if len(values) >= cp.MIN_SAMPLES else None
 
     return {
-        "restore_context": med(acc["rq"]),
-        "restore_calls": med(acc["rn"]),
-        "handoff_calls": med(acc["hh"]),
-        "handoff_output": med(acc["ho"]),
-        "stage_calls": {k: _median(v) for k, v in acc["k"].items()},
-        "stage_expiries": {k: _median(v) for k, v in acc["m"].items()},
-        "samples": {"restore": len(acc["rq"]), "handoff": len(acc["hh"])} | {f"stage:{k}": len(v) for k, v in acc["k"].items()},
+        "restore_context": med(acc["restore_context"]),
+        "restore_calls": med(acc["restore_calls"]),
+        "handoff_calls": med(acc["handoff_calls"]),
+        "handoff_output": med(acc["handoff_output"]),
+        "stage_calls": {k: _median(v) for k, v in acc["stage_calls"].items()},
+        "stage_expiries": {k: _median(v) for k, v in acc["stage_expiries"].items()},
+        "samples": {"restore": len(acc["restore_context"]), "handoff": len(acc["handoff_calls"])}
+        | {f"stage:{k}": len(v) for k, v in acc["stage_calls"].items()},
         "at": jsonl.now(),
     }
 
