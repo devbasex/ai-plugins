@@ -24,6 +24,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any, NamedTuple
 
 from ndf.contracts import causes
+from ndf.domains.release.shapes import text_at
 
 GATE_ROUTE, MERGE_ROUTE = "gate", "github-merge"
 ROUTES = (GATE_ROUTE, MERGE_ROUTE)
@@ -67,25 +68,20 @@ class Approval(NamedTuple):
         return dict(self._asdict())
 
 
-def _text(raw: Mapping[str, Any], key: str) -> str:
-    got = raw[key] if key in raw else None
-    return got if isinstance(got, str) else ""
-
-
 def _ref(raw: Mapping[str, Any], side: str, key: str) -> str:
     part = raw[side] if side in raw else None
-    return _text(part, key) if isinstance(part, Mapping) else ""
+    return text_at(part, key) if isinstance(part, Mapping) else ""
 
 
 def facts_of(raw: Mapping[str, Any]) -> MergeFacts:
     """PR の REST の応答（STD2）からマージの事実を読む。"""
     merged = raw["merged"] is True if "merged" in raw else False
     user = raw["merged_by"] if "merged_by" in raw else None
-    by = _text(user, "login") if isinstance(user, Mapping) else ""
+    by = text_at(user, "login") if isinstance(user, Mapping) else ""
     head, base_ref, head_ref = _ref(raw, "head", "sha"), _ref(raw, "base", "ref"), _ref(raw, "head", "ref")
     if not merged:
         return MergeFacts(False, "", head, "", base_ref, head_ref)
-    return MergeFacts(True, by, head, _text(raw, "merge_commit_sha"), base_ref, head_ref)
+    return MergeFacts(True, by, head, text_at(raw, "merge_commit_sha"), base_ref, head_ref)
 
 
 def _latest(found: Sequence[Approved]) -> Approved | None:

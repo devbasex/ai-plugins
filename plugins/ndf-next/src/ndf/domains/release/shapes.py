@@ -10,3 +10,9 @@ def list_of(raw: Mapping[str, Any], key: str) -> list[Any]:
     """`raw[key]` が配列ならその配列そのもの、ほか（鍵が無いを含む）は空の配列。要素は変換しない。"""
     got = raw.get(key)
     return got if isinstance(got, list) else []
+
+
+def text_at(raw: Mapping[str, Any], key: str) -> str:
+    """`raw[key]` が文字列ならその文字列、ほか（鍵が無いを含む）は空文字。"""
+    got = raw.get(key)
+    return got if isinstance(got, str) else ""
