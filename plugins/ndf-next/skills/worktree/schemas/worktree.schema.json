@@ -83,16 +83,7 @@
               ],
               "properties": {
                 "checks": {
-                  "type": "array",
-                  "uniqueItems": true,
-                  "items": {
-                    "type": "string",
-                    "enum": [
-                      "cross-refactoring",
-                      "cross-review",
-                      "behavior"
-                    ]
-                  }
+                  "$ref": "#/$defs/reviewChecks"
                 },
                 "diff": {
                   "type": "string",
@@ -112,16 +103,7 @@
               ],
               "properties": {
                 "checks": {
-                  "type": "array",
-                  "uniqueItems": true,
-                  "items": {
-                    "type": "string",
-                    "enum": [
-                      "cross-refactoring",
-                      "cross-review",
-                      "behavior"
-                    ]
-                  }
+                  "$ref": "#/$defs/reviewChecks"
                 },
                 "diff": {
                   "type": "string",
@@ -501,6 +483,21 @@
             }
           }
         }
+      }
+    }
+  },
+  "$defs": {
+    "reviewChecks": {
+      "description": "実装とスプリントの PR に掛けるレビュー",
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": [
+          "cross-refactoring",
+          "cross-review",
+          "behavior"
+        ]
       }
     }
   }
