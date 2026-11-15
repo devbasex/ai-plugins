@@ -21,7 +21,8 @@ name: ndf-next release
 # ブランチの名前は宣言 .ndf/worktree.json の base_branch・production_branch から読む（ここに写さない）。
 # リリースの PR とベースブランチへ戻す PR で CI を起動するため、PR・ブランチの作成とマージは利用者の token
 # （secrets.NDF_RELEASE_TOKEN）で行う（GITHUB_TOKEN の操作では CI が起動しない）。無ければ github.token で行い、CI は手で
-# 起動し直す。
+# 起動し直す。本番ブランチへのマージは NDF_RELEASE_TOKEN を必須にする（github.token の書いたリリース記録は読み手に信用
+# されないため、release-steps merge が本番ブランチへ入れる前に止まる）。
 on:
   workflow_dispatch:
     inputs:

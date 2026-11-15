@@ -7,7 +7,7 @@ from collections.abc import Callable
 import pytest
 
 from ndf.adapters import ci
-from ndf.adapters.github import Authored, GitHubError
+from ndf.adapters.github import MERGE_QUEUE_PENDING, Authored, GitHubError, MergeOutcome, Pull
 from ndf.domains.release import approval_decide, land, trail
 
 from ._fakes import HEAD, OTHER, FakeHub, pull
@@ -194,3 +194,57 @@ def test_sync_without_diff_is_done_but_other_422_raises() -> None:
     hub.responses[("POST", "/repos/o/r/pulls")] = GitHubError("Validation Failed: head invalid", 422)
     with pytest.raises(GitHubError):
         _lander(hub, False, []).land(7)
+
+
+def test_issue_3487_production_merge_stops_before_merging_with_untrusted_token() -> None:
+    """#3487: 書く token が信用されなければ、本番ブランチへ入れる前に止まる（マージの後の記録が必ず落ちる）。"""
+    hub = FakeHub(pulls={7: pull()}, comments_of={7: [_trail("approved", HEAD)]})
+    hub.trusted = set()
+    done = _lander(hub, False, []).land(7)
+    assert not done.merged and done.kind == "refused" and "NDF_RELEASE_TOKEN" in done.detail and hub.merged == []
+
+
+class _QueueHub(FakeHub):
+    """マージをキューへ入れ、`merge_after` 回読み直した後にマージ済みにする。"""
+
+    merge_after: int = 2
+
+    def merge(self, number: int, expect_head: str | None = None, method: str | None = None) -> MergeOutcome:
+        self.merged.append(number)
+        return MergeOutcome(False, MERGE_QUEUE_PENDING, "キューへ入れた", self.pulls[number].head_sha)
+
+    def pull(self, number: int) -> Pull:
+        got = self.pulls[number]
+        if number in self.merged and got.number == 7:
+            self.merge_after -= 1
+            if self.merge_after < 0:
+                return got._replace(merged=True, merge_sha="c" * 40)
+        return got
+
+
+def _queue_lander(hub: FakeHub, now: list[float], budget: float) -> land.Lander:
+    base = _lander(hub, False, [])
+
+    def sleep(seconds: float) -> None:
+        now[0] += seconds
+
+    return land.Lander(hub, base.base, base.production, budget, wait=base.wait, clock=lambda: now[0], sleep=sleep)
+
+
+def test_merge_queue_waits_until_merged_then_syncs() -> None:
+    """マージキューへ入れたら、マージされるまで待ってから戻す PR へ進む（記録とタグが走る）。"""
+    hub = _QueueHub(pulls={7: pull()}, comments_of={7: [_trail("approved", HEAD)]})
+    hub.responses[("POST", "/repos/o/r/pulls")] = GitHubError("No commits between develop and main", 422)
+    now = [0.0]
+    done = _queue_lander(hub, now, 600.0).land(7)
+    assert done.merged and done.kind is None and now[0] == 2 * land.QUEUE_POLL_SECONDS
+
+
+def test_merge_queue_stops_with_rerun_hint_when_budget_runs_out() -> None:
+    """予算の内にキューがマージしなければ ci_pending で止まり、打ち直しを促す。"""
+    hub = _QueueHub(pulls={7: pull()}, comments_of={7: [_trail("approved", HEAD)]})
+    hub.merge_after = 10**6
+    now = [0.0]
+    done = _queue_lander(hub, now, 45.0).land(7)
+    assert not done.merged and done.kind == MERGE_QUEUE_PENDING and "release-steps merge" in done.detail
+    assert now[0] == 45.0

@@ -1,24 +1,27 @@
 """承認の証跡の後に、リリースの PR をマージする（GitHub Actions の workflow が打つ）。
 
-1. 本番ブランチ宛ての PR は、証跡を読み直して今の先端が承認されていることを確かめる（commit status も付け直す）
+1. 本番ブランチ宛ての PR は、証跡を読み直して今の先端が承認されていることを確かめる（commit status も付け直す）。
+   書く token が記録の読み手に信用されなければ、本番ブランチへ入れる前に止まる（マージの後のリリース記録が必ず落ちる。#3487）
 2. 宛先のブランチの規則（ruleset）と従来の保護の必須のチェック（check run と commit status）が PR の先端で通るまで待つ。落ちたら打ち直さずに止まった理由で
    返す（同じ CI の失敗を読み直し続けない。#1983）
 3. 本番ブランチ宛ての PR は、待ちの後にもう一度証跡を読み直し、待つ前と同じ先端への最新の答えが承認のときだけ進む
    （待つ間に足された差し戻しや消された承認を見落とさない）
-4. 先端の SHA を添えて merge commit でマージする（承認の後に先端が動いていれば GitHub が断る）
+4. 先端の SHA を添えて merge commit でマージする（承認の後に先端が動いていれば GitHub が断る）。マージキューへ入れたら、
+   予算の範囲で PR がマージされるまで待つ（待たずに返すと、戻す PR・リリース記録・タグが走らない）
 5. 本番ブランチへ入れたら、本番ブランチからベースブランチ宛ての PR を作り（開いたものがあれば使い直す）、必須のチェックの
    後にマージする（版上げのコミットをベースブランチへ戻す）。マージ済みの PR で打ち直しても、ここから再開する
 """
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from http import HTTPStatus
 from typing import NamedTuple
 
 from ndf.adapters import ci
-from ndf.adapters.github import MERGE_COMMIT, GitHub, GitHubError, MergeOutcome, Pull, text_of
+from ndf.adapters.github import MERGE_COMMIT, MERGE_QUEUE_PENDING, GitHub, GitHubError, MergeOutcome, Pull, text_of
 from ndf.contracts import facts
 from ndf.domains.release import approval_decide, trail, version_decide
 
@@ -34,6 +37,8 @@ NOTHING_TO_SYNC_TEXT = "No commits between"
 NOT_FOUND = HTTPStatus.NOT_FOUND
 # 結論の出ていない状態（事実の表 ci-outcomes の pending。commit status の `pending` を含む）
 PENDING_STATES = frozenset(facts.ids("ci-outcomes", outcome="pending"))
+# マージキューへ入れた PR がマージされたかを読み直す間隔（秒）
+QUEUE_POLL_SECONDS = 30.0
 
 
 class Landed(NamedTuple):
@@ -86,6 +91,8 @@ class Lander:
     production: str
     budget: float
     wait: Callable[[Callable[[], ci.Reading], float], ci.WatchResult] | None = None
+    clock: Callable[[], float] = time.monotonic
+    sleep: Callable[[float], None] = time.sleep
 
     def required(self, branch: str) -> list[str]:
         """宛先のブランチの規則（ruleset）と従来の保護の必須のチェックの名前（承認の commit status を除く）。"""
@@ -133,6 +140,8 @@ class Lander:
         return None
 
     def _merge(self, pull: Pull) -> Landed:
+        # 必須のチェックの待ちとマージキューの待ちで、同じ予算を分け合う（workflow の時間の上限を超えない）
+        deadline = self.clock() + self.budget
         kind = self._watch(pull)
         if kind is not None:
             return Landed(False, kind, f"#{pull.number} の必須のチェックが通らない（{kind}。打ち直さずに人へ戻す）")
@@ -140,7 +149,29 @@ class Lander:
         if refused is not None:
             return refused
         outcome: MergeOutcome = self.hub.merge(pull.number, expect_head=pull.head_sha, method=MERGE_METHOD)
+        if outcome.kind == MERGE_QUEUE_PENDING:
+            return self._await_queue(pull.number, deadline)
         return Landed(outcome.merged, outcome.kind, outcome.detail)
+
+    def _await_queue(self, number: int, deadline: float) -> Landed:
+        """マージキューへ入れた PR `number` がマージされるまで、時刻 `deadline`（`clock` の値）まで読み直す。
+
+        予算の内にマージされなければ `ci_pending` で止まり、キューがマージした後の打ち直しを促す（`land` はマージ済みの
+        本番ブランチ宛ての PR から、戻す PR へ再開する）。
+        """
+        while True:
+            got = self.hub.pull(number)
+            if got.merged:
+                return Landed(True, None, f"#{number} をマージキューがマージした")
+            left = deadline - self.clock()
+            if got.state != "open" or left <= 0:
+                return Landed(
+                    False,
+                    MERGE_QUEUE_PENDING,
+                    f"#{number} はマージキューに入れたが、待ちの内にマージされない（{got.state}）。"
+                    "キューがマージした後に `ndf release-steps merge` を打ち直す（戻す PR・リリース記録・タグへ進む）",
+                )
+            self.sleep(min(QUEUE_POLL_SECONDS, left))
 
     def _open_sync(self) -> int | None:
         """本番ブランチからベースブランチへ戻す PR の番号（開いたものがあれば使い直し、無ければ作る。差分が無ければ None）。
@@ -186,6 +217,13 @@ class Lander:
                 return self._sync(pull)
             return Landed(True, None, f"#{number} は既にマージされている")
         version_decide.version_of_branch(pull.head_ref)
+        if pull.base_ref == self.production and not self.hub.token_trusted():
+            return Landed(
+                False,
+                "refused",
+                f"#{number} を {self.production} へ入れる token の書き手が write 以上の権限を持つ利用者でなく、マージの後の"
+                "リリース記録が読まれない。利用者の token（workflow では secrets.NDF_RELEASE_TOKEN）でマージする",
+            )
         refused = self._refusal(pull)
         if refused is not None:
             return refused
