@@ -9,12 +9,12 @@
 | # | 条件 | 推した出所 | この要求での扱い |
 | --- | --- | --- | --- |
 | S1 | 事故の多くは、develop と main の 2 本で検査の範囲・コミット・バージョンを運ぶ作りから来ており、GitHub flow に移ればその運び自体が無くなる | 本文の「起票者の推定」 | 目的・受け入れ条件 10・11 |
-| S2 | 今の NDF に入れるのは最小限にし、手本は #3572 の設計（`issues/issue-3572-design*.md`）の `trunk` の行と merge queue にする | 本文の「方針」「設計への指示」 | 前提 3・対象範囲 |
+| S2 | 今の NDF に入れるのは最小限にし、手本は #3572 の設計（`issues/issue-3572-design*.md`）のブランチ戦略 `trunk` と merge queue にする | 本文の「方針」「設計への指示」 | 前提 3・対象範囲 |
 | S3 | バージョン・タグ・CHANGELOG はマージの後に CD が作り、PR はバージョンを触らない | 本文の「方針」（#3572 の設計の決定 7 から） | 受け入れ条件 3・4 |
-| S4 | 承認の後にコードを直すステップを持たない | 本文の「方針」（#3592 で今の NDF の本番のプランから外した形を引き継ぐ） | 受け入れ条件 7 |
+| S4 | 承認の後にコードを直すステップを持たない | 本文の「方針」（#3592 で今の NDF のリリースのワークフローから外した形を引き継ぐ） | 受け入れ条件 7 |
 | S5 | ほぼ同時に承認された PR の組み合わせは、merge queue か `strict` で確かめる | 本文の「方針」（#3572 の設計から） | 受け入れ条件 8・未決 1 |
 | S6 | マージの前に試す場（検証用マーケットプレイス）は、最小限に入れるか後に回すかを設計で決める | 本文の「方針」 | 利用者の追加の決定（2026-11-16）で「後に回す」に決まった（前提 10）。対象範囲の「含まない」 |
-| S7 | 設定の名前は #3613・#3628 の決定（値 `trunk`、ブランチ戦略の設定を 1 つの節へまとめ直す）と食い違わず、11.0 の移行のコマンドで移せる | 本文の「方針」「設計への指示」と `.ndf/handoff/branch-strategy-one-file.md` | 受け入れ条件 15・未決 3 |
+| S7 | 設定の名前は #3613・#3628 の決定（値 `trunk`、ブランチ戦略の設定を 1 つのセクションへまとめ直す）と食い違わず、11.0 の移行のコマンドで移せる | 本文の「方針」「設計への指示」と `.ndf/handoff/branch-strategy-one-file.md` | 受け入れ条件 15・未決 3 |
 | S8 | ほかのリポジトリ（nd-factory の `promotion: selected`、宣言の無いリポジトリの既定 `whole`）の振る舞いは変えず、代表のリポジトリでの振る舞いの表を設計に書く | 本文の「方針」「設計への指示」 | 受け入れ条件 12・14・16 |
 | S9 | ndf-next 側（#3572・#3615）は触らない | 本文の「対象範囲」「設計への指示」 | 対象範囲の「含まない」 |
 | S10 | 切り替えの手順（develop にあって main に無い変更・動いているレーンの付け替え・develop の扱い・設定と `AGENTS.md` の書き換え・ruleset の変更）を設計に書く | 本文の「移る手順」「設計への指示」 | 受け入れ条件 17・18・未決 4・5 |
@@ -27,7 +27,7 @@ ai-plugins のブランチ運用を、develop と main の 2 本から GitHub fl
 
 達成したい状態:
 
-- ai-plugins のスプリントの PR は main 宛てで、承認した head のまま main へマージされ、マージの後に CD がバージョンを上げてタグと GitHub Release を作る
+- ai-plugins のスプリントの PR は main 宛てで、承認済みのコミットのまま main へマージされ、マージの後に CD がバージョンを上げてタグと GitHub Release を作る
 - develop と main の間で、検査の範囲・コミット・バージョンを運ぶ経路（同期の PR・develop 宛ての検査・develop からのリリースの PR）が ai-plugins で走らない
 - ほかのリポジトリ（develop と main を分ける運用、宣言の無い運用）の振る舞いは変わらない
 
@@ -36,9 +36,9 @@ ai-plugins のブランチ運用を、develop と main の 2 本から GitHub fl
 | 事故 | 例 |
 | --- | --- |
 | 本番の PR が ndf-next の検査（`ndf-next-checks`）で落ちる。develop 宛ての PR では検査の一部しか走らず、違反が develop に溜まる | リリース 14〜17・22（#3573・#3635） |
-| 本番の PR の再実行で積まれたコミットが develop に無く、宛先の検査（guard）で落ちる | リリース 22（#3637） |
-| 同期の PR・バージョンの戻り・古い起点のタグ | リリース 14〜19（#3551・#3592） |
-| 承認の後に直しの worker が承認の外のコミットを積む | リリース 8・14（#3572） |
+| 本番の PR の再実行で積まれたコミットが develop に無く、マージ先の検査（guard）で落ちる | リリース 22（#3637） |
+| 同期の PR・バージョンの戻り・古い分岐元のタグ | リリース 14〜19（#3551・#3592） |
+| 承認の後に修正用の worker が承認の外のコミットを積む | リリース 8・14（#3572） |
 
 ## 用語
 
@@ -46,14 +46,14 @@ ai-plugins のブランチ運用を、develop と main の 2 本から GitHub fl
 
 | 用語 | 意味 |
 | --- | --- |
-| GitHub flow | スプリントブランチを本番ブランチ（main）から切り、PR で main へマージし、マージをリリースとする運用。設定の値は `trunk`（#3613 の改名表と #3572 の設計の行の名前） |
+| GitHub flow | スプリントブランチを本番ブランチ（main）から切り、PR で main へマージし、マージをリリースとする運用。設定の値は `trunk`（#3613 の改名表と #3572 の設計のブランチ戦略の名前） |
 | ブランチ戦略 | リポジトリがどこから作業を切り、どこへマージし、どこから本番へ出すかの決まり。今の NDF では `.ndf/worktree.json` の `branch_flow`（`promotion` の値 `whole`・`selected`）で選ぶ |
-| スプリントの PR | スプリントブランチを宛先へマージする PR。GitHub flow では main 宛てで、本番の PR を兼ねる |
-| 本番の PR | 宛先が main で、リリース承認ゲートの承認を受ける PR |
-| 承認した head | リリース承認ゲートの承認か、人の GitHub でのマージが対象にした本番の PR の head コミット |
-| head の一致の確認 | マージの API に承認した head を渡し、head が違えば GitHub にマージを断らせること（`gh pr merge --match-head-commit`） |
+| スプリントの PR | スプリントブランチをマージ先へマージする PR。GitHub flow では main 宛てで、本番の PR を兼ねる |
+| 本番の PR | マージ先が main で、リリース承認ゲートの承認を受ける PR |
+| 承認した head | 承認済みのコミット（approved commit）。リリース承認ゲートの承認か、人の GitHub でのマージが対象にした本番の PR の head コミット |
+| head の一致の確認 | マージの API に承認済みのコミットを渡し、head が違えば GitHub にマージを断らせること（`gh pr merge --match-head-commit`） |
 | 同期の PR | 本番のリリースの後に、main の変更を develop へ戻す PR（`release/v<バージョン>-sync`） |
-| merge queue | GitHub の機能。キューへ入れた PR を、main の先端と前に並ぶ PR を合わせた一時のコミットで必須のチェックに通し、通ったものだけを順にマージする |
+| merge queue | GitHub の機能。キューへ入れた PR を、main の HEAD と前に並ぶ PR を合わせた一時マージコミットで必須のチェックに通し、通ったものだけを順にマージする |
 | マージの方式 | 承認した複数の PR の組み合わせを確かめてから main へマージする方式。`merge-queue`（merge queue を使う）か `strict`（main の ruleset の「マージの前に最新の main を取り込む」を必須にし、head が動けば承認を取り直す） |
 | 検証用マーケットプレイス | 正式版と違う名前で、マージの前の PR を集めたブランチを指すマーケットプレイス（#3572 の設計の `ai-plugins-next`） |
 | 切り替えの手順 | ai-plugins を develop と main の運用から GitHub flow へ切り替える一度きりの手順。利用者が新しい版へ移るときの「移行の手順」とは別 |
@@ -61,23 +61,23 @@ ai-plugins のブランチ運用を、develop と main の 2 本から GitHub fl
 
 ## 前提
 
-- 前提 1: 利用者はレッドライン P1（リリース対象の取得元・版の規則を変える）に当たるこの移行を承認している（本文の「由来」、2026-11-16、`ndf-ask:redline:P1` の答え「B を優先」）。設計承認ゲートとリリース承認ゲートは省かない
+- 前提 1: 利用者はレッドライン P1（リリース対象の取得元・版の規則を変える）に当たるこの移行を承認している（本文の「由来」、2026-11-16、`ndf-ask:redline:P1` の回答「B を優先」）。設計承認ゲートとリリース承認ゲートは省かない
 - 前提 2: 起票の時点（2026-11-16、`origin/main` d7318c984・`origin/develop` 69e83130a）で、develop にあって main に無いコミットは 133、main にあって develop に無いコミットは 155 ある（`git rev-list --count`）。main 側はリリースのマージコミットと同期の跡である
-- 前提 3: 手本の #3572 の設計（設計 PR https://github.com/devbasex/ai-plugins/pull/3628 、マージ済み）は ndf-next のための設計で、今の NDF には実装が無い。この課題は、その設計の `trunk` の行の振る舞いのうち、ai-plugins が今すぐ移るのに要るものだけを今の NDF に入れる
+- 前提 3: 手本の #3572 の設計（設計 PR https://github.com/devbasex/ai-plugins/pull/3628 、マージ済み）は ndf-next のための設計で、今の NDF には実装が無い。この課題は、その設計のブランチ戦略 `trunk` の振る舞いのうち、ai-plugins が今すぐ移るのに要るものだけを今の NDF に入れる
 - 前提 4: main の ruleset（`protect main`、id 22332172）は承認 1・`strict_required_status_checks_policy: false`・merge queue の規則なしで、main の merge queue は無い（2026-11-16 の `gh api repos/devbasex/ai-plugins/rulesets/22332172` と GraphQL `repository.mergeQueue(branch:"main")` が `null`）。このリポジトリの workflow に `merge_group` の起動は無い（`.github/workflows` を `merge_group` で検索して 0 件）
 - 前提 5: 今の CD（`.github/workflows/release-cd.yml`）は main への push で動き、`github.token` でタグと GitHub Release だけを作る。バージョンを上げるコミットは作らない
-- 前提 6: 今の NDF のブランチ戦略の行は `whole`・`selected` の 2 つ（`plugins/ndf/scripts/lib/branch_flow.py` の `PROMOTIONS`）で、宣言の無いリポジトリは `whole` で動く
+- 前提 6: 今の NDF のブランチ戦略は `whole`・`selected` の 2 つ（`plugins/ndf/scripts/lib/branch_flow.py` の `PROMOTIONS`）で、宣言の無いリポジトリは `whole` で動く
 - 前提 7: #3613 の移行のコマンド（`ndf settings migrate`）と改名表（`contracts/domains/ndf-settings-renames.json`）は、起票の時点で未実装である（`origin/develop` に改名表のファイルが無い）。改名表の値の対応は #3613 の設計（`issues/issue-3613-design.md`）の表を正とする
 - 前提 8: 起票の時点で develop 宛ての開いた PR は 6 本ある（#3640・#3638・#3637・#3627・#3587・#3327、`gh pr list --base develop`）
 - 前提 9: 開発版チャネルを使う利用者は、取得元に `develop` の ref を登録している（`docs/versioning-and-distribution.md` の `marketplace add ...#develop`・`--ref develop`）
-- 前提 10: 利用者は、ai-plugins 自身のリリースの手順から開発版をやめると決めた（2026-11-16、`ndf-ask:redline:P1` の答えを起票者が本文の「追加の決定」に記録）。開発版チャネル・`-dev.N` の版数（版上げの PR）・`develop` からの導入の確かめ（`verify-install --ref develop`）を ai-plugins では使わず、検証用マーケットプレイスも最初は作らない。確かめは PR の CI と、main へ出した後のリリース後テストに絞る。NDF が利用者へ提供する開発版のデプロイの機能は残し、やめるのは ai-plugins の設定の値と手順だけである
+- 前提 10: 利用者は、ai-plugins 自身のリリースの手順から開発版をやめると決めた（2026-11-16、`ndf-ask:redline:P1` の回答を起票者が本文の「追加の決定」に記録）。開発版チャネル・`-dev.N` の版数（版上げの PR）・`develop` からの導入の確かめ（`verify-install --ref develop`）を ai-plugins では使わず、検証用マーケットプレイスも最初は作らない。確かめは PR の CI と、main へ出した後のリリース後テストに絞る。NDF が利用者へ提供する開発版のデプロイの機能は残し、やめるのは ai-plugins の設定の値と手順だけである
 
 ## 対象範囲
 
 含む:
 
-- 今の NDF（`plugins/ndf/`）のブランチ戦略に GitHub flow の行を足し、worktree の起点・スプリントの PR の宛先・本番のプラン・承認とマージ・CD がその行に従って動くようにする
-- CD（`.github/workflows/release-cd.yml` など）が、GitHub flow の行でマージの後にバージョン・タグ・CHANGELOG・GitHub Release を作るようにする
+- 今の NDF（`plugins/ndf/`）のブランチ戦略に GitHub flow を足し、worktree の分岐元・スプリントの PR のマージ先・リリースのワークフロー・承認とマージ・CD がそのブランチ戦略に従って動くようにする
+- CD（`.github/workflows/release-cd.yml` など）が、GitHub flow でマージの後にバージョン・タグ・CHANGELOG・GitHub Release を作るようにする
 - 同時に承認された PR の組み合わせの確かめ（merge queue か `strict`）と、設定と ruleset の食い違いの検出
 - ai-plugins の設定（`.ndf/worktree.json`・`.ndf/project.json`）・`AGENTS.md`・`docs/versioning-and-distribution.md` の書き換えと、切り替えの手順
 - main の ruleset の変更の手順（実行は人の承認の後）
@@ -98,44 +98,44 @@ ai-plugins のブランチ運用を、develop と main の 2 本から GitHub fl
 | # | イベント | 引き金 | 失敗したとき | 順序の前提 |
 | --- | --- | --- | --- | --- |
 | E1 | 移る前の最後の develop の変更を main へ入れた | 切り替えの手順の開始 | 入らなければ移らずに止まり、残った差分を返す | — |
-| E2 | ai-plugins の設定を GitHub flow の行へ書き換えた | E1 の後の設定の PR のマージ | 設定が読めなければ NDF が止まり、直す箇所を出す | E1 |
-| E3 | 動いているレーンのブランチと PR の宛先を main へ付け替えた | E2 の後の切り替えの手順 | 付け替えで衝突すれば、その PR を返して止まる | E2 |
-| E4 | スプリントブランチを main から切った | スプリントの開始 | 起点が main でなければ止まる | E2 |
+| E2 | ai-plugins の設定を GitHub flow へ書き換えた | E1 の後の設定の PR のマージ | 設定が読めなければ NDF が止まり、直す箇所を出す | E1 |
+| E3 | 動いているレーンのブランチと PR のマージ先を main へ付け替えた | E2 の後の切り替えの手順 | 付け替えで衝突すれば、その PR を返して止まる | E2 |
+| E4 | スプリントブランチを main から切った | スプリントの開始 | 分岐元が main でなければ止まる | E2 |
 | E5 | スプリントの PR を main 宛てに作った。バージョンは触らない | スプリントの PR の作成 | バージョンを変えた PR は検査が落とす | E4 |
-| E6 | リリース承認ゲートで本番の PR（スプリントの PR）の head を承認した | 承認ゲートの答え | head が提示から動いていれば承認を書かない | E5 |
-| E7 | 承認した head との一致の確認付きで main へマージした（merge queue ならキューへ入れた） | E6 の直後のステップ、または人の GitHub でのマージ | head が違えばマージせずに止まる。設定と ruleset が食い違えば止まる | E6 |
-| E8 | 同時に承認されたほかの PR との組み合わせが必須のチェックを通った | merge queue の一時のコミット、または `strict` での最新の main の取り込み | 落ちた PR はマージされず、差し戻して承認を取り直す | E7 |
+| E6 | リリース承認ゲートで本番の PR（スプリントの PR）の head を承認した | 承認ゲートの回答 | head が提示から動いていれば承認を書かない | E5 |
+| E7 | 承認済みのコミットとの一致の確認付きで main へマージした（merge queue ならキューへ入れた） | E6 の直後のステップ、または人の GitHub でのマージ | head が違えばマージせずに止まる。設定と ruleset が食い違えば止まる | E6 |
+| E8 | 同時に承認されたほかの PR との組み合わせが必須のチェックを通った | merge queue の一時マージコミット、または `strict` での最新の main の取り込み | 落ちた PR はマージされず、差し戻して承認を取り直す | E7 |
 | E9 | CD がバージョンを上げ、CHANGELOG・タグ・GitHub Release を作った | main への push | 作れなければタグを作らずに止まり、理由を出す | E7・E8 |
-| E10 | 後片付けと終わりの記録を行った | E9 | 残ったものと理由を結果に出す | E9 |
+| E10 | クリーンアップと終わりの記録を行った | E9 | 残ったものと理由を結果に出す | E9 |
 
 ## 受け入れ条件
 
-GitHub flow の行の振る舞い:
+GitHub flow の振る舞い:
 
-- [ ] 1. GitHub flow の行を選んだリポジトリで worktree を用意すると、スプリントブランチは `origin/main` から切られる
-- [ ] 2. GitHub flow の行を選んだリポジトリでスプリントの PR を作ると、宛先は main になる
-- [ ] 3. GitHub flow の行で、スプリントの PR が main へマージされると、CD がバージョンを上げ、CHANGELOG のバージョンの節・タグ `ndf--v<バージョン>`・GitHub Release を作る。同期の PR は作られない
-- [ ] 4. GitHub flow の行で、main 宛ての PR（CD のバージョン上げを除く）がバージョンの置き場（`plugin.json` の `version`）を変えていれば、PR の検査が落ち、理由に「バージョンは CD がマージの後に上げる」を出す
-- [ ] 5. 承認した head と本番の PR の今の head が違えば、工程はマージもキューへの投入もせずに止まり、承認を取り直すよう理由を返す
-- [ ] 6. 人が GitHub で本番の PR をマージした後に工程を再開すると、工程はマージ済みとして後の工程（CD の確かめ・後片付け）へ進み、もう一度マージしない
-- [ ] 7. GitHub flow の行の本番のプランに、承認の後にコードを直して本番の PR へ push するステップが無い。CI が落ちれば止まり、差し戻す
-- [ ] 8. ほぼ同時に承認された 2 本の PR は、main の先端ともう一方を合わせたコミットで必須のチェックを通ってから main へ入る。通らなければ後の 1 本はマージされない
+- [ ] 1. GitHub flow を選んだリポジトリで worktree を用意すると、スプリントブランチは `origin/main` から切られる
+- [ ] 2. GitHub flow を選んだリポジトリでスプリントの PR を作ると、マージ先は main になる
+- [ ] 3. GitHub flow で、スプリントの PR が main へマージされると、CD がバージョンを上げ、CHANGELOG のバージョンのセクション・タグ `ndf--v<バージョン>`・GitHub Release を作る。同期の PR は作られない
+- [ ] 4. GitHub flow で、main 宛ての PR（CD のバージョンアップを除く）がバージョンの格納場所（`plugin.json` の `version`）を変えていれば、PR の検査が落ち、理由に「バージョンは CD がマージの後に上げる」を出す
+- [ ] 5. 承認済みのコミットと本番の PR の今の head が違えば、工程はマージも merge queue への追加もせずに止まり、承認を取り直すよう理由を返す
+- [ ] 6. 人が GitHub で本番の PR をマージした後に工程を再開すると、工程はマージ済みとして後の工程（CD の確かめ・クリーンアップ）へ進み、もう一度マージしない
+- [ ] 7. GitHub flow のリリースのワークフローに、承認の後にコードを直して本番の PR へ push するステップが無い。CI が落ちれば止まり、差し戻す
+- [ ] 8. ほぼ同時に承認された 2 本の PR は、main の HEAD ともう一方を合わせたコミットで必須のチェックを通ってから main へ入る。通らなければ後の 1 本はマージされない
 - [ ] 9. 設定のマージの方式（`merge-queue` か `strict`）と main の ruleset の実際の設定が食い違えば、工程はマージの前に止まり、設定の値と ruleset の値を理由に出す
 
 ai-plugins が移った後:
 
-- [ ] 10. 移った後の ai-plugins で、同期の PR・develop 宛ての本番の PR・develop からのリリースの PR を作る経路が走らない（本番のプランと CD の結果に同期の PR が出ない）
-- [ ] 11. 移った後の ai-plugins のリリースのプランに、開発版のデプロイ（`-dev.N` の版上げの PR・`release-steps release --channel dev`・`verify-install --ref develop`）のステップが無い
+- [ ] 10. 移った後の ai-plugins で、同期の PR・develop 宛ての本番の PR・develop からのリリースの PR を作る経路が走らない（リリースのワークフローと CD の結果に同期の PR が出ない）
+- [ ] 11. 移った後の ai-plugins のリリースのワークフローに、開発版のデプロイ（`-dev.N` の版上げの PR・`release-steps release --channel dev`・`verify-install --ref develop`）のステップが無い
 
 ほかのリポジトリが変わらないこと:
 
-- [ ] 12. `promotion: selected` のリポジトリ（nd-factory の形）で、スプリントの起点・PR の宛先・リリースブランチの組み立て・同期の PR が変わらない（既存のテストが通り、GitHub flow の行を足した後も同じ結果になる）
+- [ ] 12. `promotion: selected` のリポジトリ（nd-factory の形）で、スプリントの分岐元・PR のマージ先・リリースブランチの組み立て・同期の PR が変わらない（既存のテストが通り、GitHub flow を足した後も同じ結果になる）
 - [ ] 13. 開発版のデプロイを使うリポジトリで、`release-steps release --channel dev` の振る舞いが変わらない（既存のテストが通る）
 - [ ] 14. ブランチ戦略の宣言が無いリポジトリは、今と同じく `whole` で動く（既存のテストが通る）
 
 設計に書くこと:
 
-- [ ] 15. 設計が、ai-plugins の移った後の設定の値を、#3613 の改名表で新しい 1 つの節（`release_strategy: trunk`）へ移す対応を表で示す
+- [ ] 15. 設計が、ai-plugins の移った後の設定の値を、#3613 の改名表で新しい 1 つのセクション（`release_strategy: trunk`）へ移す対応を表で示す
 - [ ] 16. 設計の「適用範囲」に、ai-plugins（GitHub flow・開発版なし）・nd-factory（`selected`）・宣言の無いリポジトリ（`whole`）の振る舞いの表があり、開発版のデプロイの機能が ai-plugins の外で残ることを示す
 - [ ] 17. 設計の切り替えの手順が、develop にあって main に無い変更の扱い・動いているレーンのブランチと PR の付け替え・develop のブランチの扱い・開発版チャネルの利用者への知らせ・設定と `AGENTS.md` と `docs/versioning-and-distribution.md` の書き換えを、順序つきで書く
 - [ ] 18. 設計が、main の ruleset の変更（merge queue の追加・`strict`・承認の数）の具体的な値と、実行の前に人の承認で止まる箇所を書く
@@ -146,7 +146,7 @@ ai-plugins が移った後:
 | 大項目 | 条件 |
 | --- | --- |
 | 移行性 | 切り替えの手順は順序つきで、各手順の後に戻す方法（設定を戻す PR・ruleset を戻す値）を持つ。切り替えの途中で止まっても、正式版のマーケットプレイス（main）の利用者は前の正式版を取得できる |
-| セキュリティ | CD が main へバージョンを上げるコミットを入れる権限は、ruleset の承認を越える既存の秘密（`secrets.NDF_RELEASE_TOKEN` など）の範囲に留め、新しい秘密を足すなら設計に理由を書く |
+| セキュリティ | CD が main へバージョンを上げるコミットを入れる権限は、ruleset の承認を越える既存のシークレット（`secrets.NDF_RELEASE_TOKEN` など）の範囲に留め、新しいシークレットを足すなら設計に理由を書く |
 | 運用・保守性 | 工程が止まったときは、止まった理由（head の不一致・設定と ruleset の食い違い・CD の失敗）を結果 JSON の理由に出す |
 
 ## 影響
@@ -155,13 +155,13 @@ ai-plugins が移った後:
 | --- | --- |
 | 公開インタフェース | 変わる。ブランチ戦略の設定に GitHub flow の値を足す（既存の値 `whole`・`selected` は変えない）。互換あり |
 | データ | 無し |
-| 既存の振る舞い | ai-plugins のブランチ運用とリリースの方式（develop を使わない）。動いているレーンの PR の宛先。開発版チャネル（`develop`）の更新 |
+| 既存の振る舞い | ai-plugins のブランチ運用とリリースの方式（develop を使わない）。動いているレーンの PR のマージ先。開発版チャネル（`develop`）の更新 |
 
 ## 検証手段
 
 | 項目 | 手段 |
 | --- | --- |
-| テスト | `uv run --frozen --project . --all-extras pytest plugins/ndf/scripts/tests -q -n 4` の範囲（ブランチ戦略・本番のプラン・CD の判定のテスト） |
+| テスト | `uv run --frozen --project . --all-extras pytest plugins/ndf/scripts/tests -q -n 4` の範囲（ブランチ戦略・リリースのワークフロー・CD の判定のテスト） |
 | 静的解析・型検査 | `python3 scripts/check-script-structure.py`・`ruff`（`.ndf/project.json` の `checks`） |
 | 検証 | `claude plugin validate .` |
 | 手動確認 | 移った後の最初のスプリントの PR のマージで、CD がバージョン・タグ・GitHub Release を作り、同期の PR が作られないことをリリース後テストで見る（受け入れ条件 3・10・11） |
@@ -172,8 +172,8 @@ ai-plugins が移った後:
 | 項目 | 参照先 / 決めたこと |
 | --- | --- |
 | プロジェクト構造 | 実装は `plugins/ndf/` と `.github/workflows/`、設定は `.ndf/`。`plugins/ndf-next/` は触らない |
-| コーディング規約 | `AGENTS.md` の「ベストプラクティス」。`.md` の文言を照合するテストを書かない |
-| テスト戦略 | ブランチ戦略の行ごとの振る舞いは単体テスト（`test_branch_flow.py` などの既存の階層）で見る。GitHub の ruleset・merge queue はテストで偽の応答を返し、実物は手動確認で見る |
+| コーディング規約 | `AGENTS.md` の「ベストプラクティス」。`.md` の文言を検証するテストを書かない |
+| テスト戦略 | ブランチ戦略ごとの振る舞いは単体テスト（`test_branch_flow.py` などの既存の階層）で見る。GitHub の ruleset・merge queue はテストで偽の応答を返し、実物は手動確認で見る |
 
 ## 境界
 
@@ -182,7 +182,7 @@ ai-plugins が移った後:
 | 常に行う | 既存のテストの実行、`whole`・`selected` の振る舞いの退行の確かめ |
 | 確認してから行う | `AGENTS.md`・`.ndf/` の書き換え（C7。実装の PR に入れ、リリース承認ゲートで人が見る）。ブランチ戦略の設定の値の追加（公開インタフェース） |
 | 実行の前に止めて人へ戻す | main の ruleset の変更（C2）、develop のブランチの削除（C4。消す場合） |
-| 行わない | ndf-next の変更、ほかのリポジトリの設定の書き換え、依頼範囲外のリファクタリング |
+| 行わない | ndf-next の変更、ほかのリポジトリの設定の書き換え、リクエストの範囲外のリファクタリング |
 
 ## 未決
 
@@ -190,10 +190,10 @@ ai-plugins が移った後:
 | --- | --- | --- | --- |
 | 1 | 同時の承認の確かめを merge queue と `strict` のどちらにするか（ai-plugins は Organization が持つ public のリポジトリ） | 設計（設計承認ゲートで利用者） | 設計承認 |
 | ~~2~~ | ~~検証用マーケットプレイスを今回入れるか後に回すか~~ → 後に回す（2026-11-16、利用者の追加の決定。前提 10） | — | — |
-| 3 | 今の NDF での設定の置き場と値の名前（今の `promotion` へ値を足すか、新しい 1 つの節を先に使うか）と、移行のコマンドの改名表の行 | 設計 | 設計承認 |
+| 3 | 今の NDF での設定の格納場所と値の名前（今の `promotion` へ値を足すか、新しい 1 つのセクションを先に使うか）と、移行のコマンドの改名表の行 | 設計 | 設計承認 |
 | 4 | develop のブランチを消すか残すか、開発版チャネル（`#develop`）を登録した利用者へどう知らせるか | 設計（設計承認ゲートで利用者） | 設計承認 |
 | 5 | develop にあって main に無い変更を、最後の develop→main のリリースで出してから移るか、ほかの形にするか | 設計 | 設計承認 |
-| 6 | CD がバージョン上げを main へ入れる手段（バージョン上げの PR か直接の push か）と、その権限 | 設計 | 設計承認 |
+| 6 | CD がバージョンアップを main へ入れる手段（版上げの PR か直接の push か）と、その権限 | 設計 | 設計承認 |
 
 ## 依頼（原文）
 

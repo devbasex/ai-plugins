@@ -623,7 +623,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 定義の改訂 | — | スプリントの進行表の定義のスナップショットの番号（`rev`）。作成で 1 になり、範囲とモードの変更で 1 ずつ上がる。工程の行は定義の改訂と工程の名前の組で決まる。定義の文書の版（`document.version`）と MVV の改訂とは別 | — | — | — |
 | レビューの単位 | — | PR の種類ごとに、掛けるレビューと対象の差分を決めた組。ブランチ運用の宣言の `reviews` に書く | — | — | `plugins/ndf/skills/worktree/references/declaration.md` |
 | PR の種類 | — | NDF のプランが出す PR の分け方。実装 PR・スプリントの PR・リリースブランチの PR・設計 PR・確定仕様化の PR の 5 つ | — | — | `plugins/ndf/skills/worktree/references/declaration.md` |
-| スプリントの PR | — | スプリントブランチから宛先へ出す、検査のプランの PR。宛先は取り込み方 `whole`・`selected` ではベースブランチ、`trunk` では本番ブランチで、`trunk` では本番の PR を兼ねる | — | — | `docs/specifications/ndf-branch-flow-review-units.md` |
+| スプリントの PR | — | スプリントブランチからマージ先へ出す、検査のプランの PR。マージ先はブランチ戦略 `whole`・`selected` ではベースブランチ、`trunk` では本番ブランチで、`trunk` では本番の PR を兼ねる | — | — | `docs/specifications/ndf-branch-flow-review-units.md` |
 | 対象の差分 | — | レビューに渡す差分の取り方。PR の差分全体・未検査の差分・衝突の解消の差分・掛けないの 4 つ | — | — | `plugins/ndf/skills/worktree/references/declaration.md` |
 | 未検査の差分 | — | 前回の検査の後に入った差分。最後の検査の範囲（#3126）と同じ取り方 | — | — | `docs/specifications/ndf-branch-flow-review-units.md` |
 | 掛けるレビュー | — | レビューの単位のうち、PR に掛ける検査の組。cross-review・cross-refactoring・振る舞いの確認の 3 つから選ぶ | — | — | `plugins/ndf/skills/worktree/references/declaration.md` |
@@ -1003,7 +1003,7 @@ release が走らせるリリースの種別・リリースコマンド・公開
 | 補足の表 | — | リリース後テストの記録のうち、課題の表でない表（例: 主なテストの実行の表）。課題を閉じる判定にも承認資料にも使わない | — | — | `docs/specifications/ndf-sprint-close-acceptance-criteria.md` |
 | 版数を上げないリリース | — | 版数を変えず、既定ブランチへのマージかコミットの反映で本番へ届けるリリース | 版数を上げない配布 | — | `docs/specifications/ndf-production-release-record.md` |
 | 範囲の PR | — | 直前の正式版のタグから範囲の終点までに、ベースブランチへ merge commit か squash merge で入った PR と、スプリント経由の PR の和。`--prs` で渡した番号は、マージコミットが範囲の終点の祖先であるものだけを含む。版上げの PR と、PR でない番号（squash の件名の `(#N)` が課題を指すもの）は含まない | — | — | `docs/specifications/ndf-release-approval-included-prs.md` |
-| 版上げの PR | — | 今の NDF の取り込み方 `whole`・`selected` では、head のブランチが `release/` で始まる PR。版数と CHANGELOG だけを変え、中身の変更を持たない。取り込み方 `trunk`（今の NDF と ndf-next）では、main へのマージの後に CD が main の先端から作る main 宛ての PR で、head のブランチの名前（`release/v<バージョン>`）と、差分が版数と説明だけ（ndf-next ではバージョンの置き場・CHANGELOG のバージョンの節・`.ndf/release.json` の手順の書き先）に限られることの両方で見分ける。名前が `release/` で始まるだけの PR は含まない | — | — | `docs/specifications/ndf-release-approval-included-prs.md` |
+| 版上げの PR | — | 今の NDF のブランチ戦略 `whole`・`selected` では、head のブランチが `release/` で始まる PR。版数と CHANGELOG だけを変え、中身の変更を持たない。ブランチ戦略 `trunk`（今の NDF と ndf-next）では、main へのマージの後に CD が main の HEAD から作る main 宛ての PR で、head のブランチの名前（`release/v<バージョン>`）と、差分が版数と説明だけ（ndf-next ではバージョンの格納場所・CHANGELOG のバージョンのセクション・`.ndf/release.json` の手順の書き先）に限られることの両方で見分ける。名前が `release/` で始まるだけの PR は含まない | — | — | `docs/specifications/ndf-release-approval-included-prs.md` |
 | 合格の行 | — | リリース後テストの表で、`結果` の列が `合格` で始まる行 | — | — | `docs/specifications/ndf-sprint-close-acceptance-criteria.md` |
 | 手で足した節 | — | 承認資料の `## ` の節のうち、デプロイのステップ（approval-facts・notes --approval・changed-plugins --approval）が書く見出しに当たらないもの。作り直しの後も見出しと中身が残る | — | — | `plugins/ndf/skills/release/references/release-steps.md` |
 | 置き換える箇条 | — | 後の PR の本文の `## 置き換える箇条` の節に書く行。同じ版に含む前の PR の「利用者向けの変化」の箇条を指し、その箇条を CHANGELOG と承認資料の「配る中身」から除く | — | — | `plugins/ndf/skills/release/references/release-steps.md` |
@@ -1042,7 +1042,7 @@ release が走らせるリリースの種別・リリースコマンド・公開
 | 開発版の workflow | — | 手元で作った開発版の PR を、CI の必須チェックが通るのを待って develop へマージする GitHub Actions の workflow | — | — | `docs/specifications/ndf-release-approval-on-pr.md` |
 | 承認の証跡 | — | リリースの PR に置いた、承認したコミットの 40 桁の SHA を書いたコメント（証跡の印と `承認したコミット:` の行を持つ）。承認ラベルや承認ゲートの記録は含まない | — | — | `docs/specifications/ndf-release-approval-on-pr.md` |
 | 戻すマージ | — | 今の NDF（11.0.0 の入れ替えの前）だけの語。正式版のリリースの後、リリースブランチを `release/v<版>-sync` 経由でベースブランチへ取り込むマージ。版数を持つ箇所が衝突したら本番の版を取る。ndf-next（GitHub flow）は同期の PR を作らず、この操作を持たない | — | — | — |
-| 本番の PR | — | 本番チャネル（main）へ入れる Pull Request。CD のある場合は、この PR のマージで本番へ届く。取り込み方の行 `trunk`（今の NDF と ndf-next）では main 宛てのスプリントの PR が兼ね、CD が作る版上げの PR は含まない。行 `merge_base_branch`・`release_branch` と今の NDF の `whole`・`selected` では、リリースのブランチから本番チャネルへ出す PR を指す | — | — | `docs/specifications/ndf-release-production-admin-merge.md` |
+| 本番の PR | — | 本番チャネル（main）へ入れる Pull Request。CD のある場合は、この PR のマージで本番へ届く。ブランチ戦略 `trunk`（今の NDF と ndf-next）では main 宛てのスプリントの PR が兼ね、CD が作る版上げの PR は含まない。ブランチ戦略 `merge_base_branch`・`release_branch` と今の NDF の `whole`・`selected` では、リリースのブランチから本番チャネルへ出す PR を指す | — | — | `docs/specifications/ndf-release-production-admin-merge.md` |
 | 管理者の迂回 | — | ruleset が迂回を許した役割の人が、必須の承認レビューと必須のチェックを満たさずにマージすること。`gh pr merge --admin` で打つ | — | — | `docs/specifications/ndf-release-production-admin-merge.md` |
 | 迂回の宣言 | — | 本番の PR を管理者の迂回でマージすることを選ぶ、`.ndf/project.json` の `production_merge.admin` の値。`true` のときだけ宣言があるとみなし、無いときは迂回しない | — | — | `docs/specifications/ndf-release-production-admin-merge.md` |
 | 迂回の記録 | — | 本番の PR を管理者の迂回でマージしたことを示す、本番の PR へ置くコメント。マージした先端と照らした承認の証跡を指す。証跡とは別の印を持ち、承認の判定に数えない | — | — | `docs/specifications/ndf-release-production-admin-merge.md` |
@@ -1065,8 +1065,8 @@ release が走らせるリリースの種別・リリースコマンド・公開
 | バージョン上げ | — | main へのマージの後に CD がバージョンを上げること。書き換えるファイルと流すコマンドは `.ndf/release.json` の手順で決める | — | — | — |
 | キューへの投入 | — | 承認した head を `expectedHeadOid` に渡して、本番の PR を merge queue へ入れること（GraphQL の `enqueuePullRequest`）。PR の head が違えば GitHub が断る | — | — | — |
 | バージョンの置き場 | — | リリースの単位のバージョンを持つファイルと、その読み書きのアダプタ（`plugin`・`json` など）。`.ndf/release.json` の `version_store` で選ぶ | — | — | — |
-| GitHub flow | — | スプリントブランチを本番ブランチ（main）から切り、PR で main へマージし、マージをリリースとするブランチ戦略。設定の値と取り込み方の表の行の名前は `trunk` | — | — | — |
-| 同期の PR | — | 今の NDF の行 `whole`・`selected` で、本番のリリースの後に main の変更をベースブランチ（develop）へ戻す PR（`release/v<版>-sync`）。戻すマージを運ぶ。GitHub flow の行では作らない | — | — | — |
+| GitHub flow | — | スプリントブランチを本番ブランチ（main）から切り、PR で main へマージし、マージをリリースとするブランチ戦略。設定の値とブランチ戦略の一覧の行の名前は `trunk` | — | — | — |
+| 同期の PR | — | 今の NDF のブランチ戦略 `whole`・`selected` で、本番のリリースの後に main の変更をベースブランチ（develop）へ戻す PR（`release/v<版>-sync`）。戻すマージを運ぶ。GitHub flow では作らない | — | — | — |
 | 切り替えの手順 | — | リポジトリのブランチ戦略を、develop と main の運用から GitHub flow へ切り替える一度きりの手順。利用者が新しい版へ移るときの「移行の手順」とは別 | — | — | — |
 
 ## NDF の指示書チェック（`ndf-instructions`）

@@ -4048,7 +4048,7 @@
     {
       "term": "版上げの PR",
       "context": "ndf-release",
-      "meaning": "今の NDF の取り込み方 `whole`・`selected` では、head のブランチが `release/` で始まる PR。版数と CHANGELOG だけを変え、中身の変更を持たない。取り込み方 `trunk`（今の NDF と ndf-next）では、main へのマージの後に CD が main の先端から作る main 宛ての PR で、head のブランチの名前（`release/v<バージョン>`）と、差分が版数と説明だけ（ndf-next ではバージョンの置き場・CHANGELOG のバージョンの節・`.ndf/release.json` の手順の書き先）に限られることの両方で見分ける。名前が `release/` で始まるだけの PR は含まない",
+      "meaning": "今の NDF のブランチ戦略 `whole`・`selected` では、head のブランチが `release/` で始まる PR。版数と CHANGELOG だけを変え、中身の変更を持たない。ブランチ戦略 `trunk`（今の NDF と ndf-next）では、main へのマージの後に CD が main の HEAD から作る main 宛ての PR で、head のブランチの名前（`release/v<バージョン>`）と、差分が版数と説明だけ（ndf-next ではバージョンの格納場所・CHANGELOG のバージョンのセクション・`.ndf/release.json` の手順の書き先）に限られることの両方で見分ける。名前が `release/` で始まるだけの PR は含まない",
       "source": "docs/specifications/ndf-release-approval-included-prs.md"
     },
     {
@@ -7062,7 +7062,7 @@
     {
       "term": "スプリントの PR",
       "context": "ndf-workflow",
-      "meaning": "スプリントブランチから宛先へ出す、検査のプランの PR。宛先は取り込み方 `whole`・`selected` ではベースブランチ、`trunk` では本番ブランチで、`trunk` では本番の PR を兼ねる",
+      "meaning": "スプリントブランチからマージ先へ出す、検査のプランの PR。マージ先はブランチ戦略 `whole`・`selected` ではベースブランチ、`trunk` では本番ブランチで、`trunk` では本番の PR を兼ねる",
       "source": "docs/specifications/ndf-branch-flow-review-units.md"
     },
     {
@@ -7591,7 +7591,7 @@
     {
       "term": "本番の PR",
       "context": "ndf-release",
-      "meaning": "本番チャネル（main）へ入れる Pull Request。CD のある場合は、この PR のマージで本番へ届く。取り込み方の行 `trunk`（今の NDF と ndf-next）では main 宛てのスプリントの PR が兼ね、CD が作る版上げの PR は含まない。行 `merge_base_branch`・`release_branch` と今の NDF の `whole`・`selected` では、リリースのブランチから本番チャネルへ出す PR を指す",
+      "meaning": "本番チャネル（main）へ入れる Pull Request。CD のある場合は、この PR のマージで本番へ届く。ブランチ戦略 `trunk`（今の NDF と ndf-next）では main 宛てのスプリントの PR が兼ね、CD が作る版上げの PR は含まない。ブランチ戦略 `merge_base_branch`・`release_branch` と今の NDF の `whole`・`selected` では、リリースのブランチから本番チャネルへ出す PR を指す",
       "source": "docs/specifications/ndf-release-production-admin-merge.md"
     },
     {
@@ -7898,13 +7898,13 @@
     {
       "term": "GitHub flow",
       "context": "ndf-release",
-      "meaning": "スプリントブランチを本番ブランチ（main）から切り、PR で main へマージし、マージをリリースとするブランチ戦略。設定の値と取り込み方の表の行の名前は `trunk`",
+      "meaning": "スプリントブランチを本番ブランチ（main）から切り、PR で main へマージし、マージをリリースとするブランチ戦略。設定の値とブランチ戦略の一覧の行の名前は `trunk`",
       "pending_source": "issues/issue-3641-requirements.md"
     },
     {
       "term": "同期の PR",
       "context": "ndf-release",
-      "meaning": "今の NDF の行 `whole`・`selected` で、本番のリリースの後に main の変更をベースブランチ（develop）へ戻す PR（`release/v<版>-sync`）。戻すマージを運ぶ。GitHub flow の行では作らない",
+      "meaning": "今の NDF のブランチ戦略 `whole`・`selected` で、本番のリリースの後に main の変更をベースブランチ（develop）へ戻す PR（`release/v<版>-sync`）。戻すマージを運ぶ。GitHub flow では作らない",
       "pending_source": "issues/issue-3641-requirements.md"
     },
     {
