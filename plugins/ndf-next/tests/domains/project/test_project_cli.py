@@ -191,3 +191,75 @@ def test_drift_compares_with_the_default_row(repo, tmp_path, capsys, last_result
     assert got["metrics"] == {"drifted": 1, "declared": False}
     assert got["items"][0]["name"] == "branch_flow.promotion"
     assert cli.main(["drift", "--root", str(repo), "--measure", str(tmp_path / "none.json")]) == 1
+
+
+SECRET = "ghp_abcdefghijklmnopqrstuvwxyz"
+
+
+def test_merge_item_branches():
+    """現状固定（I-008）: 秘密の形・キーが無い・手の値・食い違い・前の write の値の置き換えの各経路。"""
+    from ndf.domains.project import write
+
+    old = {"x": 1}
+    ours = {"languages": write.value_digest(old)}
+    unknown = {"unknown": "測れない"}
+    assert write.merge_item("languages", (True, {"t": SECRET}), {"x": 2}, "測った", ours) == (
+        {"unknown": write.SECRET_REASON},
+        [{"kind": "secret", "key": "languages"}],
+        True,
+    )
+    assert write.merge_item("languages", (False, None), {"t": SECRET}, "測った", {}) == (
+        {"unknown": write.SECRET_REASON},
+        [{"kind": "secret", "key": "languages"}, {"kind": "unknown", "key": "languages", "reason": write.SECRET_REASON}],
+        True,
+    )
+    assert write.merge_item("languages", (False, None), {"x": 2}, "測った", {}) == (
+        {"x": 2},
+        [{"kind": "written", "key": "languages", "origin": "測った"}],
+        True,
+    )
+    assert write.merge_item("languages", (True, old), {"x": 2}, "測った", {}) == (
+        old,
+        [{"kind": "mismatch", "key": "languages", "declared": old, "analyzed": {"x": 2}}],
+        False,
+    )
+    assert write.merge_item("languages", (True, old), {"x": 1}, "測った", {}) == (old, [{"kind": "kept", "key": "languages"}], False)
+    assert write.merge_item("languages", (True, old), unknown, "不明", {}) == (old, [{"kind": "kept", "key": "languages"}], False)
+    assert write.merge_item("languages", (True, old), {"t": SECRET}, "測った", {}) == (
+        old,
+        [{"kind": "secret", "key": "languages"}, {"kind": "kept", "key": "languages"}],
+        False,
+    )
+    assert write.merge_item("languages", (True, old), {"x": 2}, "判断した", ours) == (
+        {"x": 2},
+        [{"kind": "written", "key": "languages", "origin": "判断した"}],
+        True,
+    )
+    assert write.merge_item("languages", (True, old), unknown, "不明", ours) == (
+        old,
+        [{"kind": "unknown", "key": "languages", "reason": "測れない", "kept_previous": True}],
+        True,
+    )
+
+
+def test_merge_item_carries_ci_walls_and_delivery_fields():
+    """現状固定（I-008）: 前の write の値の `ci` は壁時計を、`delivery` は利用者の欄を引き継ぐ。"""
+    from ndf.domains.project import write
+
+    ci_old = {"workflows": [{"path": "a.yml", "wall_seconds": 60}, {"path": "b.yml"}]}
+    ci_new = {"workflows": [{"path": "a.yml"}, {"path": "c.yml"}]}
+    assert write.merge_item("ci", (True, ci_old), ci_new, "測った", {"ci": write.value_digest(ci_old)}) == (
+        {"workflows": [{"path": "a.yml", "wall_seconds": 60}, {"path": "c.yml"}]},
+        [
+            {"kind": "unknown", "key": "ci#a.yml", "reason": "新しい解析に壁時計が無い", "kept_previous": True},
+            {"kind": "written", "key": "ci", "origin": "測った"},
+        ],
+        True,
+    )
+    d_old = [{"target": "prod", "manual_reason": "手", "result": "r", "how": "old"}, "x"]
+    d_new = [{"target": "prod", "how": "new", "result": "keep-new"}, {"target": "stg"}, "y"]
+    assert write.merge_item("delivery", (True, d_old), d_new, "判断した", {"delivery": write.value_digest(d_old)}) == (
+        [{"manual_reason": "手", "target": "prod", "how": "new", "result": "keep-new"}, {"target": "stg"}, "y"],
+        [{"kind": "written", "key": "delivery", "origin": "判断した"}],
+        True,
+    )
