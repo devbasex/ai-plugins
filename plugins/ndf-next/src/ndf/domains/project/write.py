@@ -164,6 +164,16 @@ def _replace_ours(key: str, cur: Any, new: Any, origin: str) -> tuple[Any, list[
     return new, rows + [_put_row(key, new, origin)]
 
 
+def _owned_decision(tag: str, cur: Any, new: Any, written_before: dict[str, Any]) -> Optional[dict[str, Any]]:
+    """前の値 `cur` の持ち主を指紋で見る。前の `write` の値のまま（指紋が一致）なら None（置き換えてよい）。
+    手の値なら、新しい値が不明か同じ値で `kept`、違えば `mismatch` の行を返す。"""
+    if written_before.get(tag) == value_digest(cur):
+        return None
+    if is_unknown(new) or value_digest(new) == value_digest(cur):
+        return {"kind": "kept", "key": tag}
+    return {"kind": "mismatch", "key": tag, "declared": cur, "analyzed": new}
+
+
 def merge_item(
     key: str, current: tuple[bool, Any], new: Any, origin: str, written: dict[str, Any]
 ) -> tuple[Any, list[dict[str, Any]], bool]:
@@ -177,10 +187,9 @@ def merge_item(
         rows.append({"kind": "secret", "key": key})
     if not has_cur:
         return new, rows + [_put_row(key, new, origin)], True
-    if written.get(key) != value_digest(cur):
-        if not is_unknown(new) and value_digest(new) != value_digest(cur):
-            return cur, rows + [{"kind": "mismatch", "key": key, "declared": cur, "analyzed": new}], False
-        return cur, rows + [{"kind": "kept", "key": key}], False
+    decided = _owned_decision(key, cur, new, written)
+    if decided is not None:
+        return cur, rows + [decided], False
     value, got = _replace_ours(key, cur, new, origin)
     return value, rows + got, True
 
@@ -230,13 +239,13 @@ def _worktree_key(
         if wkey not in doc:
             return [{"kind": "unknown", "key": tag, "reason": "起点・本番を決められない"}], {}
         return [], ({tag: written_before[tag]} if ours else {})
-    if wkey not in doc or ours:
-        changed = wkey not in doc or doc[wkey] != new
-        doc[wkey] = new
-        return [{"kind": "written" if changed else "kept", "key": tag, "origin": origin}], {tag: value_digest(new)}
-    if doc[wkey] != new:
-        return [{"kind": "mismatch", "key": tag, "declared": doc[wkey], "analyzed": new}], {}
-    return [{"kind": "kept", "key": tag}], {}
+    if wkey in doc:
+        decided = _owned_decision(tag, doc[wkey], new, written_before)
+        if decided is not None:
+            return [decided], {}
+    changed = wkey not in doc or doc[wkey] != new
+    doc[wkey] = new
+    return [{"kind": "written" if changed else "kept", "key": tag, "origin": origin}], {tag: value_digest(new)}
 
 
 def merge_worktree(
@@ -261,10 +270,10 @@ def merge_flow(
     if is_unknown(value) or not isinstance(value, dict):
         reason = value["unknown"] if is_unknown(value) else "値が無い"
         return doc, ([] if BRANCH_FLOW in doc else [{"kind": "unknown", "key": tag, "reason": reason}]), {}
-    if BRANCH_FLOW in doc and written_before.get(tag) != value_digest(doc[BRANCH_FLOW]):
-        if value_digest(doc[BRANCH_FLOW]) == value_digest(value):
-            return doc, [{"kind": "kept", "key": tag}], {}
-        return doc, [{"kind": "mismatch", "key": tag, "declared": doc[BRANCH_FLOW], "analyzed": value}], {}
+    if BRANCH_FLOW in doc:
+        decided = _owned_decision(tag, doc[BRANCH_FLOW], value, written_before)
+        if decided is not None:
+            return doc, [decided], {}
     return {**doc, BRANCH_FLOW: value}, [{"kind": "written", "key": tag, "origin": origin}], {tag: value_digest(value)}
 
 
