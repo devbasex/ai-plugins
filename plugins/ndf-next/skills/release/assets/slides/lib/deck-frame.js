@@ -188,6 +188,19 @@ function plain(s) {
   return s.replace(/\*\*/g, "").replace(/`/g, "");
 }
 
+// ページが 1 つ以上あり、番号が重ならず、1 から欠けずに続くこと
+function validatePageNumbers(pages, name) {
+  if (!pages.length) throw new DeckError(`台本にページの区切り（## <番号>. <見出し>）が無い: ${name}`, EXIT_SCRIPT);
+  const seen = new Map();
+  for (const p of pages) seen.set(p.no, (seen.get(p.no) || 0) + 1);
+  const dup = [...seen].filter(([, c]) => c > 1).map(([n]) => n);
+  if (dup.length) throw new DeckError(`台本のページの番号が重なる: ${dup.join(", ")}（${name}）`, EXIT_SCRIPT);
+  const max = Math.max(...pages.map((p) => p.no));
+  const missing = [];
+  for (let i = 1; i <= max; i++) if (!seen.has(i)) missing.push(i);
+  if (missing.length) throw new DeckError(`台本のページの番号が欠ける: ${missing.join(", ")}（${name}）`, EXIT_SCRIPT);
+}
+
 function parseScript(text, name) {
   const pages = [];
   let cur = null;
@@ -227,15 +240,7 @@ function parseScript(text, name) {
     }
   }
   flush();
-  if (!pages.length) throw new DeckError(`台本にページの区切り（## <番号>. <見出し>）が無い: ${name}`, EXIT_SCRIPT);
-  const seen = new Map();
-  for (const p of pages) seen.set(p.no, (seen.get(p.no) || 0) + 1);
-  const dup = [...seen].filter(([, c]) => c > 1).map(([n]) => n);
-  if (dup.length) throw new DeckError(`台本のページの番号が重なる: ${dup.join(", ")}（${name}）`, EXIT_SCRIPT);
-  const max = Math.max(...pages.map((p) => p.no));
-  const missing = [];
-  for (let i = 1; i <= max; i++) if (!seen.has(i)) missing.push(i);
-  if (missing.length) throw new DeckError(`台本のページの番号が欠ける: ${missing.join(", ")}（${name}）`, EXIT_SCRIPT);
+  validatePageNumbers(pages, name);
   pages.sort((a, b) => a.no - b.no);
   for (const p of pages) p.reading = p.paragraphs.join("\n");
   return pages;
