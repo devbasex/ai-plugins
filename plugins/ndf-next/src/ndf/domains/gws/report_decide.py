@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import subprocess
-from collections.abc import Mapping, Sequence
-from typing import Any, Optional
+from typing import Optional
 
 # 失敗した外部のコマンドの出力から結果へ載せる末尾の行の数
 DETAIL_LINES = 20
@@ -13,11 +12,6 @@ AUTHENTICATED = "authenticated"
 MISSING = "missing"
 UNAUTHENTICATED = "unauthenticated"
 UNINSTALLABLE = "uninstallable"
-
-
-def pick(status: Mapping[str, Any], keys: Sequence[str]) -> dict[str, Any]:
-    """認証の状態から `keys` のキーだけを取り出す（ほかのキーは結果へ写さない）。"""
-    return {key: status[key] for key in keys}
 
 
 def tail(text: Optional[str]) -> str:

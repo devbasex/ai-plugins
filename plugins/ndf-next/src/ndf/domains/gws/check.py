@@ -70,7 +70,8 @@ def _report(tool: str) -> Outcome:
         stderr = rd.tail(exc.stderr)
         items = [{"name": "gws auth status の標準エラーの末尾", "result": "stderr", "detail": stderr}] if stderr else None
         raise GwsStop("invalid", f"gws の認証の状態を読めない: {exc}", items=items) from exc
-    keys = rd.pick(status, records_gws.STATUS_KEYS)
+    # 結果へ写すのは 3 つのキーだけ（ほかのキーは写さない）
+    keys = {key: status[key] for key in records_gws.STATUS_KEYS}
     if records_gws.authenticated(status):
         return result.result(tool, result.OK, "gws は認証済み", metrics={"state": rd.AUTHENTICATED, **keys}), exit_codes.first_code(
             result.OK

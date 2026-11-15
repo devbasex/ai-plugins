@@ -196,12 +196,11 @@ def test_records_auth_status_keeps_its_default_limit_and_carries_stderr(fakes: F
     assert records_gws.GwsError("x").stderr == ""
 
 
-def test_tail_and_pick() -> None:
+def test_tail() -> None:
     lines = [f"l{n}" for n in range(rd.DETAIL_LINES + 1)]
     assert rd.tail("\n".join(lines)).splitlines() == lines[1:]
     assert rd.tail("\n".join(lines[: rd.DETAIL_LINES])).splitlines() == lines[: rd.DETAIL_LINES]
     assert rd.tail(None) == "" and rd.tail("") == ""
-    assert rd.pick({"a": 1, "b": 2, "token": "t"}, ("a", "b")) == {"a": 1, "b": 2}
 
 
 def _io_schema(name: str) -> dict[str, Any]:
