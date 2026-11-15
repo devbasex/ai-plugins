@@ -9,21 +9,18 @@ import subprocess
 import sys
 from pathlib import Path
 
+import git_sandbox
 import pytest
 
 from ndf.core.plan import model, steps
-
-
-def _git(cwd: Path, *args: str) -> None:
-    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
 
 
 @pytest.fixture
 def repo(tmp_path) -> Path:
     path = tmp_path / "repo"
     path.mkdir()
-    _git(path, "init", "-q")
-    _git(path, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m", "init")
+    git_sandbox.sh(path, "init", "-q")
+    git_sandbox.sh(path, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m", "init")
     return path
 
 
@@ -54,7 +51,7 @@ def test_outcome_of_a_gate_keeps_its_routes():
 def test_steps_after_the_worktree_is_removed_run_in_the_repo_root(repo, tmp_path):
     """マージで作業場所が消えた・登録が外れた後のステップはリポジトリの根で打つ（#2969・#3022・#3186・#1886）。"""
     wt = tmp_path / "wt"
-    _git(repo, "worktree", "add", "-q", str(wt))
+    git_sandbox.sh(repo, "worktree", "add", "-q", str(wt))
     plan = model.parse({"name": "p", "repo": str(repo), "worktree": str(wt), "steps": [{"id": "s", "run": ["true"]}]})
     assert steps.workdir(plan, plan.steps[0]) == str(wt)
     shutil.rmtree(repo / ".git" / "worktrees")
