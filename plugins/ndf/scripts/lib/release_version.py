@@ -84,6 +84,18 @@ def _version_at(repo: str | Path, ref: str, rel: str) -> str | None:
     return v if isinstance(v, str) and versions.parse_version(v) else None
 
 
+def _release_tags(stdout: str, plugin: str) -> list[str]:
+    """`git tag --list` の出力から、プラグインの接頭辞を外した正式版（接尾辞の無い SemVer）だけを出た順に返す。"""
+    head = f"{plugin}--v"
+    tags: list[str] = []
+    for t in stdout.split():
+        v = t[len(head) :]
+        ver = versions.parse_version(v)
+        if ver is not None and not ver.prerelease:
+            tags.append(v)
+    return tags
+
+
 def observe(repo: str | Path, plugin: str, base: str, production: str | None, fetch: bool = True, rel: str | None = None) -> Observed:
     """origin を取り直してから、ベースブランチ・本番のブランチ・タグを読む。本番のブランチが無ければ読まない（読めないに数えない）。
     タグが 1 つも無いことは読めないに数えない。取り直しに落ちたら、読んだ値が古いかもしれないため `origin` を読めないに数える。
@@ -105,12 +117,7 @@ def observe(repo: str | Path, plugin: str, base: str, production: str | None, fe
     if p.returncode:
         unreadable.append("tags")
     else:
-        head = f"{plugin}--v"
-        for t in p.stdout.split():
-            v = t[len(head) :]
-            ver = versions.parse_version(v)
-            if ver is not None and not ver.prerelease:
-                tags.append(v)
+        tags = _release_tags(p.stdout, plugin)
     latest = max(tags, key=versions.version_order) if tags else None
     return Observed(plugin, base_ref, base_version, prod_ref, prod_version, latest, tags, unreadable)
 
