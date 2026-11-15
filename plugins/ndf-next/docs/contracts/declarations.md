@@ -54,7 +54,6 @@ worktree・チーム・公開・[code-metrics.schema.json](../../contracts/schem
 
 | キー | 型 | 既定値 | 取りうる値 | 必須か | 説明 |
 | --- | --- | --- | --- | --- | --- |
-| `$schema` | string | — | — | 任意 | 編集のときの補完に使うスキーマの位置。読み手は参照しない |
 | `tools` | object | — | — | 必須 | 言語 → 測りの Tool の名前。言語は python・javascript・typescript・php・go・ruby・java・kotlin・swift・rust・c・cpp・csharp・lua・shell、Tool は lizard・ruff-complexipy（python だけ）・null（測らない）。形が違えば読み手は宣言の全体を使わず既定で測る |
 | `version` | integer | — | `1` | 必須 | 宣言の形の版。読み手は知らない版を読まない |
 
@@ -139,14 +138,14 @@ Issue の種類ごとの記載項目（必須・該当時・不要）と水準�
 | キー | 型 | 既定値 | 取りうる値 | 必須か | 説明 |
 | --- | --- | --- | --- | --- | --- |
 | `$schema` | string | — | — | 任意 | 編集のときの補完に使うスキーマの位置。読み手は参照しない |
-| `items` | array of object | — | — | 任意 | 記載項目の並び |
+| `items` | array of object | — | — | 必須 | 記載項目の並び |
 | `kind_labels` | object | — | — | 任意 | 種類 → GitHub のラベルの名前 |
-| `kinds` | array of string | — | — | 任意 | Issue の種類の並び |
+| `kinds` | array of string | — | — | 必須 | Issue の種類の並び |
 | `last` | string | `"request"` | — | 任意 | 書き手が書く節の最後に置く項目の id |
 | `record_headings` | array of string | — | — | 任意 | 工程が足す節の見出しの語 |
 | `version` | integer | — | `1` | 必須 | 宣言の形の版。読み手は知らない版を読まない |
 
-例: `{"version": 1, "kinds": ["不具合", "機能"], "items": [{"id": "purpose", "name": "目的", "need": {"不具合": "必須", "機能": "必須"}}]}`
+例: `{"version": 1, "kinds": ["不具合", "機能"], "items": [{"id": "purpose", "name": "目的", "need": {"不具合": "必須", "機能": "必須"}, "level": "何を良くするかを 1〜2 文で書く"}]}`
 
 ## `.ndf/mvv.json`（mvv）
 
@@ -267,15 +266,20 @@ worktree・チーム・公開・[release.schema.json](../../contracts/schemas/de
 
 worktree・チーム・公開・[review.schema.json](../../contracts/schemas/declarations/review.schema.json)。読む工程: `ndf loop`（レビューの引数を組むとき）・`工程: コードレビュー`（レビューの観点を足すとき）
 
-レビューで必ず見る観点の並び
+レビューで必ず見る観点の並びと、指摘の基準・見送り・返信を差し替えるプロファイル。version 1 は focus だけを読みほかのキーを無視し、version 2 は focus と profile、version 3 は focus と最上位の criteria・not_written と profiles を読む
 
 | キー | 型 | 既定値 | 取りうる値 | 必須か | 説明 |
 | --- | --- | --- | --- | --- | --- |
 | `$schema` | string | — | — | 任意 | 編集のときの補完に使うスキーマの位置。読み手は参照しない |
-| `focus` | array of string | — | — | 任意 | レビューで必ず見る観点の文 |
-| `version` | integer | — | `1` | 必須 | 宣言の形の版。読み手は知らない版を読まない |
+| `criteria` | criteria | — | — | 任意 | version 3 で全プロファイルに足す指摘の基準（番号 → 文）。番号はプロファイルか既定の基準と重ならない |
+| `focus` | array of string | — | — | 任意 | レビューで必ず見る観点の文。version 1 では必須 |
+| `not_written` | not_written | — | — | 任意 | version 3 で全プロファイルに足す、書かないものの並び |
+| `profile` | profile | — | — | 任意 | version 2 のプロファイル（指摘の基準・書かないもの・見送りの種類・返信・観点の区分）。version 3 では書かず profiles に移す |
+| `profiles` | array of profile_entry | — | — | 任意 | version 3 のプロファイルの候補。PR の変更ファイルのパスが paths に当たる先頭の 1 つを選ぶ。name は重ならず、paths を持たない候補は高々 1 つで末尾に置く |
+| `version` | integer | — | `1`・`2`・`3` | 必須 | 宣言の形の版。読み手は知らない版を読まない |
 
 例: `{"version": 1, "focus": ["処理の回数と所要時間"]}`
+例: `{"version": 3, "focus": ["処理の回数と所要時間"], "profiles": [{"name": "docs", "paths": ["docs/**"], "criteria": {"1": "読み手が違う手順を踏む食い違い"}}, {"name": "code"}]}`
 
 ## `.ndf/runtimes.json`（runtime-policy）
 

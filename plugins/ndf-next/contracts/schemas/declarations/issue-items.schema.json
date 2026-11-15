@@ -6,7 +6,9 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "version"
+    "version",
+    "kinds",
+    "items"
   ],
   "properties": {
     "$schema": {
@@ -24,8 +26,10 @@
       "type": "array",
       "description": "Issue の種類の並び",
       "items": {
-        "type": "string"
-      }
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 1
     },
     "last": {
       "type": "string",
@@ -55,15 +59,17 @@
         "properties": {
           "id": {
             "type": "string",
-            "description": "項目の id"
+            "description": "項目の id",
+            "minLength": 1
           },
           "name": {
             "type": "string",
-            "description": "見出し"
+            "description": "見出し",
+            "minLength": 1
           },
           "need": {
             "type": "object",
-            "description": "種類 → 必須・該当時・不要",
+            "description": "種類 → 必須・該当時・不要。kinds の種類をすべて書く",
             "additionalProperties": {
               "type": "string",
               "enum": [
@@ -75,22 +81,27 @@
           },
           "level": {
             "type": "string",
-            "description": "水準"
+            "description": "水準（空でない文）",
+            "pattern": "\\S"
           },
           "when": {
             "type": "object",
-            "description": "該当する条件",
+            "description": "該当する条件。need に該当時があれば text は必須",
             "properties": {
               "text": {
                 "type": "string",
                 "description": "条件の文"
               },
               "key": {
-                "type": "string",
-                "description": "機械で判定する鍵",
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "機械で判定する鍵。null は機械で判定しない",
                 "enum": [
                   "ai",
-                  "origin"
+                  "origin",
+                  null
                 ]
               }
             },
@@ -101,9 +112,11 @@
         "required": [
           "id",
           "name",
-          "need"
+          "need",
+          "level"
         ]
-      }
+      },
+      "minItems": 1
     }
   },
   "x-ndf-place": "worktree",
@@ -127,7 +140,8 @@
           "need": {
             "不具合": "必須",
             "機能": "必須"
-          }
+          },
+          "level": "何を良くするかを 1〜2 文で書く"
         }
       ]
     }
