@@ -370,7 +370,7 @@ def cause_key(found: Mapping[str, Any]) -> Optional[str]:
     kind = causes.kind_of(found.get("cause"))
     if found.get("status") != exit_codes.STOPPED or kind is None:
         return None
-    return json.dumps([kind, sorted(local_tests.failed_tests_of(found))], ensure_ascii=False)
+    return json.dumps([kind, sorted(local_tests.failed_tests_in(found))], ensure_ascii=False)
 
 
 def streak(history: Sequence[str], key: str) -> int:
