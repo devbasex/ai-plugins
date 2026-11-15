@@ -262,3 +262,15 @@ def test_a_github_flow_declaration_targets_main(tmp_path):
     (tmp_path / ".ndf").mkdir()
     (tmp_path / ".ndf" / "worktree.json").write_text(json.dumps(decl), encoding="utf-8")
     assert route_mod.default_base(tmp_path) == "main"
+
+
+def test_a_repository_without_a_branch_flow_keeps_the_base_branch(tmp_path):
+    """#3572 の決定 16: branch_flow の無い宣言は既定の行（promote-whole）で、PR の宛先はベースブランチのまま。"""
+    import json
+
+    from ndf.core import route as route_mod
+
+    decl = {"version": 1, "base_branch": "develop", "production_branch": "main"}
+    (tmp_path / ".ndf").mkdir()
+    (tmp_path / ".ndf" / "worktree.json").write_text(json.dumps(decl), encoding="utf-8")
+    assert route_mod.default_base(tmp_path) == "develop"

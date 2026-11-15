@@ -14,7 +14,7 @@ import pytest
 from ndf.adapters import ci
 from ndf.adapters import git as git_mod
 from ndf.adapters.github import MergeOutcome
-from ndf.domains.release import bump, bump_decide, land, version_decide
+from ndf.domains.release import bump, bump_decide, land, version_decide, version_store
 from ndf.domains.release import cli as release_cli
 from ndf.domains.release import declaration as decl_mod
 
@@ -23,6 +23,14 @@ from ._fakes import pull as fake_pull
 
 REVIEW_RULE = {"type": "pull_request", "parameters": {"required_approving_review_count": 1}}
 BUMP_PR = 20
+# CD のバージョン上げを使うリポジトリの宣言（ブランチ戦略 github-flow と、バージョンの置き場。#3572 の決定 16・22）
+TRUNK_DECL = {"base_branch": "main", "production_branch": "main", "branch_flow": {"promotion": "direct"}}
+PLUGIN_STORE = {"version": 1, "version_store": {"kind": "plugin"}}
+
+
+def _declare(root: Path, store: dict | None = None) -> None:
+    write_json(root / ".ndf" / "worktree.json", TRUNK_DECL)
+    write_json(root / ".ndf" / "release.json", store if store is not None else PLUGIN_STORE)
 
 
 @dataclass
@@ -67,6 +75,7 @@ def _origin(tmp_path: Path, test_only: bool = False, tagged: bool = True, other:
     write_json(seed / ".claude-plugin" / "marketplace.json", {"plugins": listed})
     write_json(seed / "tools" / "kit" / ".claude-plugin" / "plugin.json", {"name": "kit", "version": "1.2.3"})
     (seed / "CHANGELOG.md").write_text("# 変更履歴\n\n## [kit 1.2.3] - 2026-01-01\n\n- 前\n", encoding="utf-8")
+    _declare(seed)
     git_sandbox.sh(seed, "add", "-A")
     git_sandbox.sh(seed, "commit", "-q", "-m", "init")
     git_sandbox.sh(seed, "branch", "-M", "main")
@@ -115,7 +124,8 @@ def test_a_minor_pr_on_x_y_z_makes_and_merges_one_bump_pr_with_only_the_version_
     changed = git_sandbox.sh(work, "diff", "--name-only", "origin/main", "origin/release/v1.3.0").split()
     assert "tools/kit/.claude-plugin/plugin.json" in changed and "CHANGELOG.md" in changed
     assert set(changed) <= {"CHANGELOG.md", ".claude-plugin/marketplace.json", "tools/kit/.claude-plugin/plugin.json"}
-    assert not bump_decide.only_bump(changed, bump.allowed_paths(work, decl_mod.load(work)))
+    decl = decl_mod.load(work)
+    assert not bump_decide.only_bump(changed, bump.allowed_paths(version_store.of(work, decl, decl_mod.flow_of(work)), decl))
     assert "tools/kit/a.py" not in changed
     message = git_sandbox.sh(work, "log", "-1", "--format=%B", "origin/release/v1.3.0")
     assert bump_decide.origin_of(message) == tip
@@ -323,11 +333,53 @@ def test_the_bump_never_force_pushes(tmp_path: Path, monkeypatch: pytest.MonkeyP
     assert pushes and not any(a in ("--force", "-f", "--force-with-lease") or a.startswith("+") for p in pushes for a in p)
 
 
-def test_the_bump_stops_on_a_flow_that_ndf_next_does_not_release(tmp_path: Path) -> None:
+def test_the_bump_does_nothing_outside_the_github_flow(tmp_path: Path) -> None:
+    """決定 16: github-flow でない行ではリリースブランチがバージョンを上げるため、何も読まずに not_applicable。"""
     work = _origin(tmp_path)
     write_json(work / ".ndf" / "worktree.json", {"branch_flow": {"promotion": "whole"}})
-    with pytest.raises(decl_mod.DeclarationError):
+    hub = _hub()
+    assert _bumper(work, hub).bump().state == "not_applicable" and hub.created == []
+
+
+def test_the_github_flow_without_a_version_store_stops(tmp_path: Path) -> None:
+    """I18: github-flow で置き場を書いていなければ、既定の置き場へ倒さずに止まる。"""
+    work = _origin(tmp_path)
+    write_json(work / ".ndf" / "release.json", {"version": 1})
+    with pytest.raises(version_store.VersionStoreError, match="version_store"):
         _bumper(work, _hub()).bump()
+
+
+def _json_origin(tmp_path: Path) -> Path:
+    """marketplace.json を持たず、バージョンを package.json に持つ web 1.2.3（タグあり）の main へ PR #5 をマージした origin の clone。"""
+    seed = init_repo(tmp_path / "seed")
+    write_json(seed / "package.json", {"name": "web", "version": "1.2.3", "private": True})
+    _declare(seed, {"version": 1, "version_store": {"kind": "json", "path": "package.json", "key": "version", "name": "web"}})
+    git_sandbox.sh(seed, "add", "-A")
+    git_sandbox.sh(seed, "commit", "-q", "-m", "init")
+    git_sandbox.sh(seed, "branch", "-M", "main")
+    git_sandbox.sh(seed, "tag", "web--v1.2.3")
+    git_sandbox.sh(seed, "switch", "-q", "-c", "sprint/x")
+    (seed / "src").mkdir()
+    (seed / "src" / "a.js").write_text("export const a = 1\n", encoding="utf-8")
+    git_sandbox.sh(seed, "add", "-A")
+    git_sandbox.sh(seed, "commit", "-q", "-m", "change")
+    git_sandbox.sh(seed, "switch", "-q", "main")
+    git_sandbox.sh(seed, "merge", "-q", "--no-ff", "sprint/x", "-m", "Merge pull request #5 from o/sprint/x")
+    origin = tmp_path / "origin.git"
+    git_sandbox.sh(tmp_path, "clone", "-q", "--bare", str(seed), str(origin))
+    return clone(tmp_path, origin, "work", branch="main")
+
+
+def test_a_json_store_bumps_only_the_package_version_without_a_marketplace(tmp_path: Path) -> None:
+    """受け入れ条件 21: marketplace.json の無いリポジトリで、置き場 json の package.json だけを上げ、プラグインの登録で止まらない。"""
+    work = _json_origin(tmp_path)
+    hub = _hub()
+    made = _bumper(work, hub).bump()
+    assert (made.state, made.version, made.pr) == ("merged", "1.3.0", BUMP_PR)
+    changed = git_sandbox.sh(work, "diff", "--name-only", "origin/main", "origin/release/v1.3.0").split()
+    assert changed == ["package.json"]
+    after = json.loads(git_sandbox.sh(work, "show", "origin/release/v1.3.0:package.json"))
+    assert after == {"name": "web", "version": "1.3.0", "private": True}
 
 
 @pytest.mark.parametrize(
@@ -375,6 +427,7 @@ def test_action_follows_the_table(tagged: bool, changed: bool, opened: bump_deci
 
 
 def _cli_bump(monkeypatch, capsys, tmp_path: Path, made: bump.Bumped) -> tuple[int, dict, FakeHub]:
+    _declare(tmp_path)
     hub = FakeHub()
     monkeypatch.setattr(release_cli, "_hub", lambda args: hub)
 
@@ -446,10 +499,21 @@ def test_characterize_cli_bump_ok_states(monkeypatch, capsys, tmp_path: Path) ->
         {"kind": "value", "name": "state", "value": "merged"},
         {"kind": "value", "name": "level", "value": "minor"},
         {"kind": "value", "name": "production_sha", "value": "f" * 40},
+        {"kind": "value", "name": "store", "value": "plugin"},
     ]
     assert out["outputs"] == {"version": "1.3.0", "pr": 12}
     assert _posted(hub) == []
     code, out, _unused = _cli_bump(monkeypatch, capsys, tmp_path, bump.Bumped("not_applicable"))
     assert code == 0 and out["summary"] == "版上げ: not_applicable（版 無し・版上げの PR 無し）"
-    assert out["items"] == [{"kind": "value", "name": "state", "value": "not_applicable"}]
+    assert out["items"] == [
+        {"kind": "value", "name": "state", "value": "not_applicable"},
+        {"kind": "value", "name": "store", "value": "plugin"},
+    ]
     assert "outputs" not in out
+
+
+def test_cli_bump_outside_the_github_flow_is_not_applicable_without_reading_the_store(monkeypatch, capsys, tmp_path: Path) -> None:
+    monkeypatch.setattr(release_cli, "_hub", lambda args: FakeHub())
+    assert release_cli.main(["bump", "--root", str(tmp_path), "--production", "main", "--budget", "0"]) == 0
+    out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert out["items"] == [{"kind": "value", "name": "state", "value": "not_applicable"}]

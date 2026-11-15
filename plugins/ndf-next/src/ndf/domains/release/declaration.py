@@ -221,11 +221,12 @@ def _read_json(path: Path, hint: str = "") -> object:
         raise DeclarationError(f"{path} を読めない{hint}: {exc}") from None
 
 
-def base_branch(root: Path) -> str:
-    """宣言（`.ndf/worktree.json`）のベースブランチの名前（同期の PR の宛先）。書いていなければ本番ブランチと同じ。"""
-    raw = _read_json(root / BRANCH_FILE)
+def base_branch(root: Path, production: str) -> str:
+    """宣言（`.ndf/worktree.json`）のベースブランチの名前（同期の PR の宛先）。宣言が無い・書いていなければ本番ブランチ `production`。"""
+    path = root / BRANCH_FILE
+    raw = _read_json(path) if path.is_file() else {}
     got = raw.get("base_branch") if isinstance(raw, dict) else None
-    return got if isinstance(got, str) and got and got == got.strip() else production_branch(root)
+    return got if isinstance(got, str) and got and got == got.strip() else production
 
 
 def production_branch(root: Path) -> str:

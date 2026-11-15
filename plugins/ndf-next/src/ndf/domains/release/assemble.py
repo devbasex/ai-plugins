@@ -100,10 +100,10 @@ class _Run:
 def _run_of(root: Path, hub: GitHub, target: Target) -> _Run:
     """公開のエントリポイントの引数から `_Run` を作る。行に合わない引数なら `AssembleError`。"""
     run = _Run(root, git_mod.Git(root), hub, target, decl_mod.flow_of(root))
-    if run.trunk and target.pr is None:
-        raise AssembleError(f"取り込み方 {run.flow} では --pr（本番の PR）が要る")
-    if not run.trunk and (target.channel is None or target.base is None):
-        raise AssembleError(f"取り込み方 {run.flow} では --channel と --base が要る")
+    if run.trunk and (target.pr is None or target.channel is not None or target.base is not None):
+        raise AssembleError(f"取り込み方 {run.flow} では --pr（本番の PR）だけを渡す（--channel・--base は使わない）")
+    if not run.trunk and (target.channel is None or target.base is None or target.pr is not None):
+        raise AssembleError(f"取り込み方 {run.flow} では --channel と --base が要る（--pr は使わない）")
     return run
 
 

@@ -204,7 +204,7 @@ def _planned(root: Path, hub: GitHub, number: int, production: str) -> str | Non
 def cmd_merge(args: argparse.Namespace) -> dict:
     root, hub, production = Path(args.root), _hub(args), _production_of(args)
     flow = decl_mod.flow_of(root)
-    base = decl_mod.base_branch(root) if flow != decl_mod.GITHUB_FLOW else None
+    base = decl_mod.base_branch(root, production) if flow != decl_mod.GITHUB_FLOW else None
     lander = land.Lander(
         hub, production, args.budget, admin=decl_mod.production_admin(root), flow=flow, method=decl_mod.merge_method_of(root), base=base
     )
@@ -561,7 +561,7 @@ def _parser() -> argparse.ArgumentParser:
 # 止まった理由の種類（例外 → 種類）
 _ERRORS: tuple[tuple[type[Exception], str], ...] = (
     (assemble.NothingToRelease, "not_applicable"),
-    (assemble.ReleaseOpen, "precondition"),
+    (assemble.ReleaseOpen, "refused"),
     (assemble.AssembleError, "precondition"),
     (version_store.VersionStoreError, "precondition"),
     (bump.BumpError, "precondition"),

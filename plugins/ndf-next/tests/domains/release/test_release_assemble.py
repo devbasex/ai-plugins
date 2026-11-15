@@ -1,4 +1,5 @@
-"""本番の PR（main 宛てのスプリントの PR）の承認資料の組み立て（本物の git と、偽の GitHub。#3572 の決定 6）。"""
+"""承認資料の組み立て（本物の git と、偽の GitHub）。行 github-flow は本番の PR の本文の節（#3572 の決定 6）、ほかの行は
+リリースブランチと PR（決定 16。develop の形を戻したもの）。"""
 
 from __future__ import annotations
 
@@ -30,6 +31,9 @@ from ._fakes import pull as fake_pull
 
 PR = 9
 SPRINT = "sprint/x"
+# 行 github-flow と、バージョンの置き場 plugin の宣言（#3572 の決定 16・22）
+TRUNK_DECL = {"base_branch": "main", "production_branch": "main", "branch_flow": {"promotion": "direct"}}
+STORE_DECL = {"version": 1, "version_store": {"kind": "plugin"}}
 
 
 def _node(number: int, title: str, conclusion: str) -> dict:
@@ -49,6 +53,8 @@ def _origin(tmp_path: Path, test_only: bool = False, extra: tuple[str, ...] = ()
     )
     write_json(seed / "tools" / "kit" / ".claude-plugin" / "plugin.json", {"name": "kit", "version": "1.2.3"})
     (seed / "CHANGELOG.md").write_text("# 変更履歴\n\n## [kit 1.2.3] - 2026-01-01\n\n- 前\n", encoding="utf-8")
+    write_json(seed / ".ndf" / "worktree.json", TRUNK_DECL)
+    write_json(seed / ".ndf" / "release.json", STORE_DECL)
     git_sandbox.sh(seed, "add", "-A")
     git_sandbox.sh(seed, "commit", "-q", "-m", "init")
     git_sandbox.sh(seed, "branch", "-M", "main")
@@ -61,8 +67,8 @@ def _origin(tmp_path: Path, test_only: bool = False, extra: tuple[str, ...] = ()
     changed.write_text("x = 1\n", encoding="utf-8")
     for rel in extra:
         (seed / rel).parent.mkdir(parents=True, exist_ok=True)
-        # 宣言のファイルは読み手（declaration.load）が読める版 1 の形で置く
-        (seed / rel).write_text('{"version": 1}\n', encoding="utf-8")
+        # 宣言のファイルは読み手（declaration.load）が読める形で置く（main の宣言と違う 1 行の書き方にして変化にする）
+        (seed / rel).write_text(json.dumps(STORE_DECL) + "\n", encoding="utf-8")
     git_sandbox.sh(seed, "add", "-A")
     git_sandbox.sh(seed, "commit", "-q", "-m", "change")
     git_sandbox.sh(seed, "switch", "-q", SPRINT)
@@ -157,11 +163,11 @@ def test_collect_refuses_when_head_is_not_the_pr_head(tmp_path: Path) -> None:
         assemble.collect(work, _hub(), _target())
 
 
-def test_collect_stops_on_a_flow_that_ndf_next_does_not_release(tmp_path: Path) -> None:
-    """決定 5: 取り込み方の行が github-flow でなければ、既定の行へ倒さずに止まる。"""
+def test_collect_on_another_row_needs_the_channel_and_the_base(tmp_path: Path) -> None:
+    """決定 16: github-flow でない行ではリリースブランチを組むため、--channel と --base が無ければ止まる。"""
     work = _origin(tmp_path)
     write_json(work / ".ndf" / "worktree.json", {"branch_flow": {"promotion": "whole"}})
-    with pytest.raises(decl_mod.DeclarationError, match="promote-whole は ndf-next のリリースで扱わない"):
+    with pytest.raises(assemble.AssembleError, match="--channel と --base"):
         assemble.collect(work, _hub(), _target())
 
 
@@ -218,8 +224,9 @@ def test_cli_assemble_outputs_the_pr_and_the_version_and_refuses_the_channel(mon
     assert release_cli.main(["assemble", "--root", str(work), "--pr", str(PR), "--production", "main"]) == 0
     out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert out["outputs"] == {"pr": PR, "version": "1.2.4"}
-    with pytest.raises(SystemExit):
-        release_cli.main(["assemble", "--root", str(work), "--pr", str(PR), "--channel", "dev"])
+    # 行に合わない引数（github-flow の --channel）は組まずに止まる
+    assert release_cli.main(["assemble", "--root", str(work), "--pr", str(PR), "--channel", "dev", "--production", "main"]) != 0
+    assert json.loads(capsys.readouterr().out.strip().splitlines()[-1])["cause"]["kind"] == "precondition"
 
 
 def test_splice_replaces_only_the_section_and_drops_a_broken_mark() -> None:
@@ -236,3 +243,91 @@ def test_the_version_record_refuses_a_suffixed_version() -> None:
     assert records_trail.VERSION_MARK in records_trail.render_version_record("1.3.0", "kit--v1.3.0", 20)
     with pytest.raises(ValueError):
         records_trail.render_version_record("1.3.0-next.1", "kit--v1.3.0", 20)
+
+
+# --- 今の行（promote-whole・promote-selected）: リリースブランチと PR（develop の形を戻した。受け入れ条件 18） ---
+
+
+def _branch_origin(tmp_path: Path, test_only: bool = False) -> Path:
+    """本番（main）の後に、ベースブランチ（develop）へ PR #5 をマージした origin と、その clone（宣言の無い既定の行）。"""
+    seed = init_repo(tmp_path / "seed")
+    write_json(
+        seed / ".claude-plugin" / "marketplace.json", {"plugins": [{"name": "kit", "source": "./tools/kit", "description": "Kit (v1.2.3)"}]}
+    )
+    write_json(seed / "tools" / "kit" / ".claude-plugin" / "plugin.json", {"name": "kit", "version": "1.2.3"})
+    (seed / "CHANGELOG.md").write_text("# 変更履歴\n\n## [kit 1.2.3] - 2026-01-01\n\n- 前\n", encoding="utf-8")
+    git_sandbox.sh(seed, "add", "-A")
+    git_sandbox.sh(seed, "commit", "-q", "-m", "init")
+    git_sandbox.sh(seed, "branch", "main")
+    git_sandbox.sh(seed, "switch", "-q", "-c", "feat/x")
+    changed = seed / "tools" / "kit" / ("tests/test_a.py" if test_only else "a.py")
+    changed.parent.mkdir(parents=True, exist_ok=True)
+    changed.write_text("x = 1\n", encoding="utf-8")
+    git_sandbox.sh(seed, "add", "-A")
+    git_sandbox.sh(seed, "commit", "-q", "-m", "change")
+    git_sandbox.sh(seed, "switch", "-q", "develop")
+    git_sandbox.sh(seed, "merge", "-q", "--no-ff", "feat/x", "-m", "Merge pull request #5 from o/feat/x")
+    origin = tmp_path / "origin.git"
+    git_sandbox.sh(tmp_path, "clone", "-q", "--bare", str(seed), str(origin))
+    return clone(tmp_path, origin, "work")
+
+
+def _branch_hub(*opened: tuple[int, str]) -> FakeHub:
+    hub = FakeHub(node_data={5: _node(5, "直した", "SUCCESS")})
+    hub.responses[("POST", "/repos/o/r/pulls")] = {"number": 9, "html_url": "https://example.invalid/pull/9"}
+    hub.responses[("PATCH", "/repos/o/r/issues/9")] = {"html_url": "https://example.invalid/pull/9"}
+    if opened:
+        hub.responses[("GET", "/repos/o/r/pulls")] = [{"number": n, "head": {"ref": ref}} for n, ref in opened]
+    return hub
+
+
+def _branch_target(channel: str = "production", level: str = "patch") -> assemble.Target:
+    return assemble.Target("main", channel=channel, level=level, base="develop")
+
+
+def test_current_row_builds_the_release_branch_and_the_pull(tmp_path: Path) -> None:
+    work = _branch_origin(tmp_path)
+    hub = _branch_hub()
+    built = assemble.assemble(work, hub, _branch_target())
+    assert (built.branch, built.version, built.pr) == ("release/v1.2.4", "1.2.4", 9)
+    shown = git_sandbox.sh(work, "show", "origin/release/v1.2.4:tools/kit/.claude-plugin/plugin.json")
+    assert json.loads(shown)["version"] == "1.2.4"
+    log = git_sandbox.sh(work, "show", "origin/release/v1.2.4:CHANGELOG.md")
+    assert log.index("## [kit 1.2.4]") < log.index("## [kit 1.2.3]") and "- 直した（#5）" in log
+    create = next(p for m, path, p in hub.requests if (m, path) == ("POST", "/repos/o/r/pulls"))
+    assert (create["head"], create["base"]) == ("release/v1.2.4", "main")
+    assert built.facts.head == git_sandbox.sh(work, "rev-parse", "HEAD").strip()
+
+
+def test_current_row_tests_only_change_is_not_released(tmp_path: Path) -> None:
+    work = _branch_origin(tmp_path, test_only=True)
+    hub = _branch_hub()
+    with pytest.raises(assemble.NothingToRelease, match="^origin/main..origin/develop に版を上げる変化が無い$"):
+        assemble.assemble(work, hub, _branch_target())
+    assert hub.requests == []
+
+
+def test_current_row_dev_channel_plans_a_dev_version_without_a_changelog_section(tmp_path: Path) -> None:
+    work = _branch_origin(tmp_path)
+    facts = assemble.collect(work, _branch_hub(), _branch_target("dev", "minor"))
+    assert list(facts.planned) == [version_decide.Planned("kit", "1.2.3", "1.3.0-dev.1")] and facts.channel == "dev"
+
+
+@pytest.mark.parametrize("head", ["release/v9.9.9", "develop"])
+def test_current_row_waits_while_another_release_is_open(tmp_path: Path, head: str) -> None:
+    """#2441: 本番ブランチ宛ての別のリリースの PR が開いている間は、ブランチも PR も作らずに止まる。"""
+    work = _branch_origin(tmp_path)
+    hub = _branch_hub((41, head))
+    with pytest.raises(assemble.ReleaseOpen, match="#41"):
+        assemble.assemble(work, hub, _branch_target())
+    assert not [r for r in hub.requests if r[0] == "POST"]
+    assert release_cli._stopped_of(assemble.ReleaseOpen("x"))["cause"]["kind"] == "refused"
+
+
+def test_cli_assemble_on_the_current_row_outputs_the_branch(monkeypatch, capsys, tmp_path: Path) -> None:
+    work = _branch_origin(tmp_path)
+    monkeypatch.setattr(release_cli, "_hub", lambda args: _branch_hub())
+    argv = ["assemble", "--root", str(work), "--channel", "production", "--base", "develop", "--production", "main"]
+    assert release_cli.main(argv) == 0
+    out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert out["outputs"] == {"pr": 9, "branch": "release/v1.2.4", "version": "1.2.4"}

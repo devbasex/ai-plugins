@@ -528,7 +528,7 @@ def test_cli_merge_reports_the_failed_check_and_two_next_moves(monkeypatch, caps
     hub = FakeHub(pulls={7: pull()}, comments_of={7: [trail_comment("approved", HEAD)]})
     lander = release_lander(hub, True, [])
     monkeypatch.setattr(release_cli, "_hub", lambda args: hub)
-    monkeypatch.setattr(land, "Lander", lambda h, p, budget, admin=False: lander)
+    monkeypatch.setattr(land, "Lander", lambda h, p, budget, admin=False, **_kw: lander)
     monkeypatch.setattr(release_cli.bump, "planned_for", lambda *a: None)
     code = release_cli.main(["merge", "--pr", "7", "--root", str(tmp_path), "--production", "main", "--budget", "1"])
     out = _last(capsys)
@@ -663,7 +663,7 @@ def test_cli_merge_of_an_approved_pr_writes_only_the_version_into_the_outputs(mo
     hub.responses[("GET", "/repos/o/r/pulls/7")] = _merged_raw(HEAD, by="octocat")
     lander = release_lander(hub, False, [])
     monkeypatch.setattr(release_cli, "_hub", lambda args: hub)
-    monkeypatch.setattr(land, "Lander", lambda h, p, budget, admin=False: lander)
+    monkeypatch.setattr(land, "Lander", lambda h, p, budget, admin=False, **_kw: lander)
     monkeypatch.setattr(release_cli.bump, "planned_for", lambda *a: "1.2.4")
     assert release_cli.main(["merge", "--pr", "7", "--root", str(tmp_path), "--production", "main", "--budget", "1"]) == 0
     out = _last(capsys)
@@ -694,8 +694,9 @@ def _cli_merge(monkeypatch, capsys, done: land.Landed, root: Path, *extra: str) 
     seen: dict[str, Any] = {}
 
     class _Fixed:
-        def __init__(self, h, p, budget, admin=False) -> None:
+        def __init__(self, h, p, budget, admin=False, flow=None, method=None, base=None) -> None:
             seen.update(hub=h is hub, production=p, budget=budget, admin=admin)
+            seen["flow"], seen["method"], seen["base"] = flow, method, base
 
         def land(self, pr: int) -> land.Landed:
             seen["pr"] = pr
@@ -710,7 +711,17 @@ def _cli_merge(monkeypatch, capsys, done: land.Landed, root: Path, *extra: str) 
 
 
 def _seen(admin: bool) -> dict:
-    return {"hub": True, "production": "main", "budget": 30.0, "admin": admin, "pr": 7}
+    # 宣言の無いリポジトリは既定の行（promote-whole）・方式なし・ベースブランチは本番ブランチ（同期の PR を作らない）
+    return {
+        "hub": True,
+        "production": "main",
+        "budget": 30.0,
+        "admin": admin,
+        "pr": 7,
+        "flow": "promote-whole",
+        "method": None,
+        "base": "main",
+    }
 
 
 def test_characterize_cli_merge_merged_lists_every_value_and_reads_admin_from_the_declaration(monkeypatch, capsys, tmp_path) -> None:

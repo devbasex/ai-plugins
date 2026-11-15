@@ -55,8 +55,9 @@ def _picked(decl: dict[str, Any], row: dict[str, Any]) -> dict[str, Any]:
 
 def test_one_default_row_and_values_come_from_the_table():
     assert len(facts.rows(FLOWS, default=True)) == 1
-    assert flow_of(None) == {"row": "github-flow", "start": "production", "doc_prs": "sprint", "integrate": "release"}
-    assert flow_of({"promotion": "whole"}) == {"row": "promote-whole", "start": "base", "doc_prs": "base", "integrate": "check"}
+    # 既定の行は promote-whole（宣言の無いリポジトリの起点と宛先を変えない。#3572 の決定 16）
+    assert flow_of(None) == {"row": "promote-whole", "start": "base", "doc_prs": "base", "integrate": "check"}
+    assert flow_of({"promotion": "direct"}) == {"row": "github-flow", "start": "production", "doc_prs": "sprint", "integrate": "release"}
 
 
 def test_selected_flow_of_another_repository():

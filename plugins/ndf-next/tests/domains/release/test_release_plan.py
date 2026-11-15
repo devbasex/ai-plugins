@@ -140,7 +140,7 @@ def test_guard_refuses_the_verify_ref(monkeypatch, capsys, tmp_path) -> None:
         "trigger": "wf",
         "channel": "verify",
         "versioned": False,
-        "verify": {"ref": "verify/next", "marketplace": "x-next"},
+        "verify": {"kind": "marketplace", "ref": "verify/next", "marketplace": "x-next"},
     }
     (tmp_path / ".ndf" / "project.json").write_text(json.dumps({"delivery": [row]}), encoding="utf-8")
     hub = _HeadHub(pulls={9: pull(number=9, ref="verify/next")})

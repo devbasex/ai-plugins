@@ -71,7 +71,7 @@ def test_check_does_nothing_outside_the_github_flow(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     ("flow", "row"),
-    [(None, "github-flow"), ({"promotion": "direct"}, "github-flow"), ({"promotion": "whole"}, "promote-whole")],
+    [(None, "promote-whole"), ({"promotion": "direct"}, "github-flow"), ({"promotion": "whole"}, "promote-whole")],
 )
 def test_flow_of_reads_the_row(tmp_path: Path, flow: dict | None, row: str) -> None:
     assert decl_mod.flow_of(_decl(tmp_path, flow)) == row
@@ -83,10 +83,22 @@ def test_flow_of_refuses_values_outside_the_row(tmp_path: Path, flow: dict) -> N
         decl_mod.flow_of(_decl(tmp_path, flow))
 
 
-def test_require_github_flow_names_the_other_row(tmp_path: Path) -> None:
-    decl_mod.require_github_flow(_decl(tmp_path, {"promotion": "direct"}))
-    with pytest.raises(decl_mod.DeclarationError, match="取り込み方 promote-whole は ndf-next のリリースで扱わない"):
-        decl_mod.require_github_flow(_decl(tmp_path, {"promotion": "whole"}))
+def test_merge_method_of_reads_the_declared_method_and_refuses_values_outside_the_table(tmp_path: Path) -> None:
+    """決定 17: 方式は表の値だけを読み、書いていなければ None、表に無い値は既定へ倒さずに止まる。"""
+    assert decl_mod.merge_method_of(tmp_path) is None
+    write_json(tmp_path / ".ndf" / "project.json", {"production_merge": {"admin": False, "method": "merge-queue"}})
+    assert decl_mod.merge_method_of(tmp_path) == "merge-queue"
+    write_json(tmp_path / ".ndf" / "project.json", {"production_merge": {"admin": False}})
+    assert decl_mod.merge_method_of(tmp_path) is None
+    write_json(tmp_path / ".ndf" / "project.json", {"production_merge": {"method": "rebase"}})
+    with pytest.raises(decl_mod.DeclarationError, match="merge-queue"):
+        decl_mod.merge_method_of(tmp_path)
+
+
+def test_base_branch_reads_the_declaration_or_falls_back_to_the_production_branch(tmp_path: Path) -> None:
+    assert decl_mod.base_branch(tmp_path, "main") == "main"
+    write_json(tmp_path / ".ndf" / "worktree.json", {"base_branch": "develop", "production_branch": "main"})
+    assert decl_mod.base_branch(tmp_path, "main") == "develop"
 
 
 CROSS = {"checks": ["cross-review"], "diff": "pr"}
@@ -117,11 +129,25 @@ def test_verify_of_reads_one_verify_row(tmp_path: Path) -> None:
         "trigger": "wf",
         "channel": "verify",
         "versioned": False,
-        "verify": {"ref": "verify/next", "marketplace": "x-next"},
+        "verify": {"kind": "marketplace", "ref": "verify/next", "marketplace": "x-next"},
     }
     write_json(tmp_path / ".ndf" / "project.json", {"delivery": [row]})
-    assert decl_mod.verify_of(tmp_path) == decl_mod.VerifyDecl("verify/next", "x-next")
-    for rows in ([], [row, row], [{**row, "verify": {"ref": "", "marketplace": "x"}}]):
+    assert decl_mod.verify_of(tmp_path) == decl_mod.VerifyDecl("marketplace", "verify/next", marketplace="x-next")
+    deploy = {**row, "verify": {"kind": "deploy", "ref": "verify/next", "command": ["make", "deploy", "{ref}"]}}
+    write_json(tmp_path / ".ndf" / "project.json", {"delivery": [deploy]})
+    assert decl_mod.verify_of(tmp_path) == decl_mod.VerifyDecl(
+        "deploy", "verify/next", command=("make", "deploy", "{ref}"), timeout_seconds=600
+    )
+    write_json(tmp_path / ".ndf" / "project.json", {"delivery": []})
+    assert decl_mod.optional_verify(tmp_path) is None
+    bad_rows = (
+        [],
+        [row, row],
+        [{**row, "verify": {"kind": "marketplace", "ref": "", "marketplace": "x"}}],
+        [{**row, "verify": {"kind": "staging", "ref": "verify/next"}}],
+        [{**row, "verify": {"kind": "deploy", "ref": "verify/next"}}],
+    )
+    for rows in bad_rows:
         write_json(tmp_path / ".ndf" / "project.json", {"delivery": rows})
         with pytest.raises(decl_mod.DeclarationError):
             decl_mod.verify_of(tmp_path)
@@ -136,11 +162,15 @@ def test_the_project_schema_accepts_the_verify_row_and_rejects_unknown_keys(sche
     Draft202012Validator.check_schema(doc)
     v = Draft202012Validator(doc)
     row = {"target": "検証版", "kind": "auto", "trigger": "wf", "channel": "verify", "versioned": False}
-    ok = {**row, "verify": {"ref": "verify/next", "marketplace": "x-next"}}
+    ok = {**row, "verify": {"kind": "marketplace", "ref": "verify/next", "marketplace": "x-next"}}
+    deploy = {**row, "verify": {"kind": "deploy", "ref": "verify/next", "command": ["make", "deploy"], "timeout_seconds": 60}}
     assert not list(v.iter_errors({"version": 1, "delivery": [ok, {**row, "channel": "production"}]}))
+    assert not list(v.iter_errors({"version": 1, "delivery": [deploy]}))
     for bad in (
-        {**row, "verify": {"ref": "verify/next", "marketplace": "x-next", "branch": "x"}},
-        {**row, "verify": {"ref": "verify/next"}},
+        {**row, "verify": {"kind": "marketplace", "ref": "verify/next", "marketplace": "x-next", "branch": "x"}},
+        {**row, "verify": {"ref": "verify/next", "marketplace": "x-next"}},
+        {**row, "verify": {"kind": "marketplace", "ref": "verify/next"}},
+        {**row, "verify": {"kind": "deploy", "ref": "verify/next"}},
         {**ok, "unknown": 1},
     ):
         assert list(v.iter_errors({"version": 1, "delivery": [bad]}))
@@ -165,7 +195,7 @@ VERIFY_ROW = {
     "trigger": "wf",
     "channel": "verify",
     "versioned": False,
-    "verify": {"ref": "verify/next", "marketplace": "x-next"},
+    "verify": {"kind": "marketplace", "ref": "verify/next", "marketplace": "x-next"},
 }
 
 
@@ -183,6 +213,7 @@ def _check(monkeypatch, root: Path, head_ref: str) -> list[dict[str, str]] | Non
     monkeypatch.setattr(gather, "fetch", lambda repo_git, name: None)
     monkeypatch.setattr(gather, "fetch_pull", lambda repo_git, number: "refs/pull/7")
     monkeypatch.setattr(plugins_mod, "load", lambda root: [])
+    write_json(root / ".ndf" / "release.json", {"version": 1, "version_store": {"kind": "plugin"}})
     hub = FakeHub(pulls={7: fake_pull(number=7, ref=head_ref, base="main")})
     return pr_check.check(root, hub, _FakeGit(), 7)  # type: ignore[arg-type]
 
