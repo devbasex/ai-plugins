@@ -141,6 +141,12 @@ def _thumbnail(deck: _Deck, no: int, object_id: str, out: Path) -> Path:
     url = data.get("contentUrl") if isinstance(data, dict) else None
     if not isinstance(url, str) or not url:
         raise GwsStop("invalid", f"{what}: 応答に contentUrl が無い")
+    _download_thumbnail(url, dest, what)
+    return dest
+
+
+def _download_thumbnail(url: str, dest: Path, what: str) -> None:
+    """サムネイルの画像を curl で `url` から `dest` へ保存する。取れなければ `GwsStop`。"""
     # 打ち切りは curl の --max-time に任せ、subprocess の上限を重ねない
     cmd = [CURL, "-fsSL", "--max-time", str(limits.seconds(LIMIT)), "-o", str(dest), url]
     try:
@@ -155,4 +161,3 @@ def _thumbnail(deck: _Deck, no: int, object_id: str, out: Path) -> Path:
             f"{what}: 画像を取れない（curl の終了コード {done.returncode}）",
             items=[{"name": what, "result": "download-failed", "detail": rd.tail(done.stderr)}],
         )
-    return dest
