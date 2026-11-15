@@ -7923,55 +7923,55 @@
       "term": "汎用性の後退",
       "context": "ndf-workflow",
       "meaning": "NDF の変更の後に、代表のリポジトリの種類のどれかを NDF で扱えなくなること。その種類に要る選択肢（運用・リリースの形・テストのツール・CI など）を、代わりの形なしに無くすことで起きる。値の改名・作り直し・既定の変更・代わりの形のある値の削除は当たらない",
-      "pending_source": "issues/issue-3618-design.md"
+      "source": "docs/specifications/ndf-design-representative-repos.md"
     },
     {
       "term": "サポートする選択肢",
       "context": "ndf-workflow",
       "meaning": "設定で選べる値（supported options）。リリース方式の値・delivery の種類・リリースの形など。汎用性の後退は、ある種類に要るサポートする選択肢を代わりの形なしに無くすことで起きる",
-      "pending_source": "issues/issue-3618-design.md"
+      "source": "docs/specifications/ndf-design-representative-repos.md"
     },
     {
       "term": "代表のリポジトリの種類",
       "context": "ndf-workflow",
       "meaning": "NDF が扱えることを保つリポジトリの種類。代表のリポジトリの設定の kinds に名前で書く（ai-plugins では Web サービス・モバイルアプリ・業務文書だけ）",
-      "pending_source": "issues/issue-3618-design.md"
+      "source": "docs/specifications/ndf-design-representative-repos.md"
     },
     {
       "term": "代表のリポジトリ",
       "context": "ndf-workflow",
       "meaning": "代表のリポジトリの種類ごとに、設計の振る舞いを確かめるために選ぶ、このリポジトリの作るものを使う側のリポジトリ（実物か、設定を仮に置いたもの）",
-      "pending_source": "issues/issue-3618-design.md"
+      "source": "docs/specifications/ndf-design-representative-repos.md"
     },
     {
       "term": "代表のリポジトリの設定",
       "context": "ndf-workflow",
       "meaning": ".ndf/design.json の representative_repos。代表のリポジトリの種類の一覧・表を求めるパス・扱えなくなる種類があるときに名指すレッドラインの番号を持つ。置いたリポジトリで、触るファイルがそのパスに当たる設計だけに設計の検査が振る舞いの表を求める",
-      "pending_source": "issues/issue-3618-design.md"
+      "source": "docs/specifications/ndf-design-representative-repos.md"
     },
     {
       "term": "このリポジトリだけの事情",
       "context": "ndf-workflow",
       "meaning": "設計を書くリポジトリの運用で決めた値。作るものの既定や振る舞いへ入れず、そのリポジトリの .ndf/ の設定に置く。ai-plugins では「ai-plugins だけの事情」と書く",
-      "pending_source": "issues/issue-3618-design.md"
+      "source": "docs/specifications/ndf-design-representative-repos.md"
     },
     {
       "term": "ai-plugins だけの事情",
       "context": "ndf-workflow",
       "meaning": "ai-plugins の運用で決めた値（ブランチの運用・リリースの形・マーケットプレイスの名前など）。NDF の既定や振る舞いへ入れず、ai-plugins の .ndf/ の設定に置く",
-      "pending_source": "issues/issue-3618-requirements.md"
+      "source": "docs/specifications/ndf-design-representative-repos.md"
     },
     {
       "term": "製品の約束",
       "context": "ndf-workflow",
       "meaning": "NDF が利用者の多様なリポジトリへ約束する価値。ai-plugins の MVV の Value 1〜14 と Vision が持つ",
-      "pending_source": "issues/issue-3618-requirements.md"
+      "source": "docs/specifications/ndf-design-representative-repos.md"
     },
     {
       "term": "設計の検査",
       "context": "ndf-workflow",
       "meaning": "設計文書を書いた後に工程が走らせる、言語モデルを呼ばない決まった検査（design-survey.py check。設計のプランのステップ survey-check）",
-      "pending_source": "issues/issue-3618-requirements.md"
+      "source": "docs/specifications/ndf-design-representative-repos.md"
     }
   ]
 }

@@ -720,15 +720,15 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 移行のコマンド | `settings_migrate` | 設定のキーの改名表に従い、利用者の .ndf/ を新しいキーへ書き換えるサブコマンド。差分と差分のハッシュを示す実行と、利用者が承認した差分のハッシュを渡して書く実行に分かれる | — | — | — |
 | 設計承認の依頼 | — | 並列の計画のレーン（開発ループのレーンと 1 スプリントのレーン）が設計承認ゲートでオーガナイザーへ送る、設計 PR の承認の依頼。計画の台帳の `kind: gate1` の行で、`answer --approved` が設計 PR をマージし、MVV 判定と古い依頼の整理が掛かる | — | — | — |
 | 区分つきの問い | — | `metadata.source` に区分（`ndf-gate:<番号>`・`ndf-ask:<名前>`）を持つ `AskUserQuestion`。並列の計画のレーンと一時レーンが出すと、問いの hook が `parallel.py request-ask` でオーガナイザーへ送り、計画の台帳の `kind: ask` の行になる。1 スプリントのレーンの区分 `ndf-gate:1` の問いが、承認の行で承認ゲートで終わった設計 PR を 1 本だけ指し、その PR が開いていて先頭のコミットを読めたときは `kind: gate1` の行（設計承認の依頼）になる | — | — | — |
-| 汎用性の後退 | — | NDF の変更の後に、代表のリポジトリの種類のどれかを NDF で扱えなくなること。その種類に要る選択肢（運用・リリースの形・テストのツール・CI など）を、代わりの形なしに無くすことで起きる。値の改名・作り直し・既定の変更・代わりの形のある値の削除は当たらない | — | — | — |
-| サポートする選択肢 | — | 設定で選べる値（supported options）。リリース方式の値・delivery の種類・リリースの形など。汎用性の後退は、ある種類に要るサポートする選択肢を代わりの形なしに無くすことで起きる | — | — | — |
-| 代表のリポジトリの種類 | — | NDF が扱えることを保つリポジトリの種類。代表のリポジトリの設定の kinds に名前で書く（ai-plugins では Web サービス・モバイルアプリ・業務文書だけ） | — | — | — |
-| 代表のリポジトリ | — | 代表のリポジトリの種類ごとに、設計の振る舞いを確かめるために選ぶ、このリポジトリの作るものを使う側のリポジトリ（実物か、設定を仮に置いたもの） | — | — | — |
-| 代表のリポジトリの設定 | — | .ndf/design.json の representative_repos。代表のリポジトリの種類の一覧・表を求めるパス・扱えなくなる種類があるときに名指すレッドラインの番号を持つ。置いたリポジトリで、触るファイルがそのパスに当たる設計だけに設計の検査が振る舞いの表を求める | — | — | — |
-| このリポジトリだけの事情 | — | 設計を書くリポジトリの運用で決めた値。作るものの既定や振る舞いへ入れず、そのリポジトリの .ndf/ の設定に置く。ai-plugins では「ai-plugins だけの事情」と書く | — | — | — |
-| ai-plugins だけの事情 | — | ai-plugins の運用で決めた値（ブランチの運用・リリースの形・マーケットプレイスの名前など）。NDF の既定や振る舞いへ入れず、ai-plugins の .ndf/ の設定に置く | — | — | — |
-| 製品の約束 | — | NDF が利用者の多様なリポジトリへ約束する価値。ai-plugins の MVV の Value 1〜14 と Vision が持つ | — | — | — |
-| 設計の検査 | — | 設計文書を書いた後に工程が走らせる、言語モデルを呼ばない決まった検査（design-survey.py check。設計のプランのステップ survey-check） | — | — | — |
+| 汎用性の後退 | — | NDF の変更の後に、代表のリポジトリの種類のどれかを NDF で扱えなくなること。その種類に要る選択肢（運用・リリースの形・テストのツール・CI など）を、代わりの形なしに無くすことで起きる。値の改名・作り直し・既定の変更・代わりの形のある値の削除は当たらない | — | — | `docs/specifications/ndf-design-representative-repos.md` |
+| サポートする選択肢 | — | 設定で選べる値（supported options）。リリース方式の値・delivery の種類・リリースの形など。汎用性の後退は、ある種類に要るサポートする選択肢を代わりの形なしに無くすことで起きる | — | — | `docs/specifications/ndf-design-representative-repos.md` |
+| 代表のリポジトリの種類 | — | NDF が扱えることを保つリポジトリの種類。代表のリポジトリの設定の kinds に名前で書く（ai-plugins では Web サービス・モバイルアプリ・業務文書だけ） | — | — | `docs/specifications/ndf-design-representative-repos.md` |
+| 代表のリポジトリ | — | 代表のリポジトリの種類ごとに、設計の振る舞いを確かめるために選ぶ、このリポジトリの作るものを使う側のリポジトリ（実物か、設定を仮に置いたもの） | — | — | `docs/specifications/ndf-design-representative-repos.md` |
+| 代表のリポジトリの設定 | — | .ndf/design.json の representative_repos。代表のリポジトリの種類の一覧・表を求めるパス・扱えなくなる種類があるときに名指すレッドラインの番号を持つ。置いたリポジトリで、触るファイルがそのパスに当たる設計だけに設計の検査が振る舞いの表を求める | — | — | `docs/specifications/ndf-design-representative-repos.md` |
+| このリポジトリだけの事情 | — | 設計を書くリポジトリの運用で決めた値。作るものの既定や振る舞いへ入れず、そのリポジトリの .ndf/ の設定に置く。ai-plugins では「ai-plugins だけの事情」と書く | — | — | `docs/specifications/ndf-design-representative-repos.md` |
+| ai-plugins だけの事情 | — | ai-plugins の運用で決めた値（ブランチの運用・リリースの形・マーケットプレイスの名前など）。NDF の既定や振る舞いへ入れず、ai-plugins の .ndf/ の設定に置く | — | — | `docs/specifications/ndf-design-representative-repos.md` |
+| 製品の約束 | — | NDF が利用者の多様なリポジトリへ約束する価値。ai-plugins の MVV の Value 1〜14 と Vision が持つ | — | — | `docs/specifications/ndf-design-representative-repos.md` |
+| 設計の検査 | — | 設計文書を書いた後に工程が走らせる、言語モデルを呼ばない決まった検査（design-survey.py check。設計のプランのステップ survey-check） | — | — | `docs/specifications/ndf-design-representative-repos.md` |
 
 ## NDF の Slack 通知（`ndf-notification`）
 
