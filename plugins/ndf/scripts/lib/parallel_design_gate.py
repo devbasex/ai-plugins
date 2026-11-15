@@ -62,14 +62,12 @@ def approval_prs(tool_input: dict) -> list[int]:
 
 
 def _plans_of(sprint: Path, stage_name: str) -> list[Path]:
-    try:
-        stages = json.loads((Path(sprint) / "sprint.json").read_text(encoding="utf-8")).get("ステージ") or []
-    except (OSError, ValueError, AttributeError):
-        return []
+    import parallel_hold_sprint as phs
+
     out = []
-    for stage in stages:
+    for stage in phs.sprint_manifest(sprint).get("ステージ") or []:
         if isinstance(stage, dict) and stage.get("name") == stage_name:
-            out += [Path(p) if Path(p).is_absolute() else Path(sprint) / p for p in stage.get("plans") or []]
+            out += phs.stage_plans(sprint, stage)
     return out
 
 
@@ -102,10 +100,9 @@ def gated_design_prs(sprint: Path) -> dict[int, dict]:
 
 def sprint_state_of(sprint: Path) -> str:
     """スプリント状態のパス（`sprint.json` の `状態`、無ければスプリントの `state.json`）。読めなければ空。"""
-    try:
-        got = json.loads((Path(sprint) / "sprint.json").read_text(encoding="utf-8")).get("状態")
-    except (OSError, ValueError, AttributeError):
-        got = None
+    import parallel_hold_sprint as phs
+
+    got = phs.sprint_manifest(sprint).get("状態")
     if got:
         return str(got)
     p = Path(sprint) / "state.json"
@@ -199,13 +196,11 @@ def _answer_row(rows: list[dict], rid: str) -> dict | None:
 def _merge_resume(sprint: Path | None) -> str:
     """設計のステージの後で最初に `resume` を持つステージ（設計 PR のマージのステージ）の `resume`。無ければ設計のステージの `resume`。
     読めなければ空。"""
+    import parallel_hold_sprint as phs
+
     if sprint is None:
         return ""
-    try:
-        stages = json.loads((Path(sprint) / "sprint.json").read_text(encoding="utf-8")).get("ステージ") or []
-    except (OSError, ValueError, AttributeError):
-        return ""
-    stages = [s for s in stages if isinstance(s, dict)]
+    stages = [s for s in phs.sprint_manifest(sprint).get("ステージ") or [] if isinstance(s, dict)]
     at = next((i for i, s in enumerate(stages) if s.get("name") == DESIGN_STAGE), None)
     if at is None:
         return ""
