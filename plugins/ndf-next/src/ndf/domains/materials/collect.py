@@ -28,6 +28,8 @@ KIND_HEADING = "種類"
 IMPACT_HEADING = "影響"
 INTERFACE_ROW = "公開インタフェース"
 NOT_STATED = "記載なし"
+# 「公開インタフェース」の 2 列目の書き出しと値（この順に当てる）
+INTERFACE_VALUES = ("変わらない", "変わる")
 
 
 class Head(NamedTuple):
@@ -105,6 +107,14 @@ def _tables(tokens: list[Token]) -> list[Table]:
     return tables
 
 
+def _section_tables(tokens: list[Token], title: str) -> list[Table]:
+    """見出しが `title` の節の行の範囲に始まる表（出てくる順）。節が無ければ空。"""
+    span = _section(_heads(tokens), title)
+    if span is None:
+        return []
+    return [table for table in _tables(tokens) if span[0] <= table.line < span[1]]
+
+
 def raw_candidates(body: str) -> list[tuple[str, str]]:
     """本文の code span の中身とリンクの宛先を整えて (パス, 節の見出し) で返す（出てくる順）。"""
     tokens = _tokens(body)
@@ -157,15 +167,11 @@ def issue_kind(body: str) -> Optional[str]:
 
 def public_interface(body: str) -> dict[str, str]:
     """本文の「影響」の表の `公開インタフェース` の行の 2 列目。無ければ `記載なし`。"""
-    tokens = _tokens(body)
-    span = _section(_heads(tokens), IMPACT_HEADING)
-    for table in _tables(tokens):
-        if span is None or not span[0] <= table.line < span[1]:
-            continue
+    for table in _section_tables(_tokens(body), IMPACT_HEADING):
         for row in table.rows:
             if len(row) >= 2 and row[0].strip() == INTERFACE_ROW:
                 cell = row[1].strip()
-                value = "変わらない" if cell.startswith("変わらない") else "変わる" if cell.startswith("変わる") else NOT_STATED
+                value = next((v for v in INTERFACE_VALUES if cell.startswith(v)), NOT_STATED)
                 return {"value": value, "cell": cell}
     return {"value": NOT_STATED, "cell": ""}
 
@@ -191,14 +197,8 @@ def issue_materials(number: int, body: str, files: list[str], designs: list[tupl
 
 def design_rows(text: str, number: int) -> list[str]:
     """設計文書の「設計の結果」の表から、課題 `number` の行の触るファイル（バッククォートで囲んだパス）を読む。"""
-    tokens = _tokens(text)
-    span = _section(_heads(tokens), RESULTS_HEADING)
-    if span is None:
-        return []
     found: list[str] = []
-    for table in _tables(tokens):
-        if not span[0] <= table.line < span[1]:
-            continue
+    for table in _section_tables(_tokens(text), RESULTS_HEADING):
         for row in table.rows[1:]:
             hit = ISSUE_CELL.match(row[0].strip()) if row else None
             if hit is not None and int(hit.group(1)) == number and len(row) >= 4:
