@@ -186,13 +186,18 @@ BRANCH_FILE = Path(identity.FIXED_WORDS["declaration_dir"]) / "worktree.json"
 PRODUCTION_KEY = "production_branch"
 
 
+def _read_json(path: Path, hint: str = "") -> object:
+    """宣言の JSON を読む。読めない・JSON でなければ `DeclarationError`（`hint` は文言の補足）。"""
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise DeclarationError(f"{path} を読めない{hint}: {exc}") from None
+
+
 def production_branch(root: Path) -> str:
     """宣言（`.ndf/worktree.json`）の本番ブランチの名前。無い・読めない・空・前後に空白があれば `DeclarationError`。"""
     path = root / BRANCH_FILE
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        raise DeclarationError(f"{path} を読めない（{PRODUCTION_KEY} を宣言するか --production を渡す）: {exc}") from None
+    raw = _read_json(path, f"（{PRODUCTION_KEY} を宣言するか --production を渡す）")
     got = raw[PRODUCTION_KEY] if isinstance(raw, dict) and PRODUCTION_KEY in raw else None
     if not isinstance(got, str) or not got or got != got.strip():
         raise DeclarationError(f"{path} の {PRODUCTION_KEY} が名前でない（宣言するか --production を渡す）: {got!r}")
@@ -218,10 +223,7 @@ def _branch_flow(root: Path) -> dict:
     path = root / BRANCH_FILE
     if not path.is_file():
         return {}
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        raise DeclarationError(f"{path} を読めない: {exc}") from None
+    raw = _read_json(path)
     got = raw.get("branch_flow") if isinstance(raw, dict) else None
     if got is not None and not isinstance(got, dict):
         raise DeclarationError(f"{path} の branch_flow がオブジェクトでない")
@@ -291,10 +293,7 @@ def verify_of(root: Path) -> VerifyDecl:
     行が無い・2 つ以上・値が空なら `DeclarationError`（既定値を持たない）。
     """
     path = _trusted_project_path(root)
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        raise DeclarationError(f"{path} を読めない: {exc}") from None
+    raw = _read_json(path)
     rows = raw.get("delivery") if isinstance(raw, dict) else None
     channel = "verify"
     found = [r for r in rows if isinstance(r, dict) and r.get("channel") == channel] if isinstance(rows, list) else []
