@@ -55,10 +55,10 @@ worktree・チーム・公開・[code-metrics.schema.json](../../contracts/schem
 | キー | 型 | 既定値 | 取りうる値 | 必須か | 説明 |
 | --- | --- | --- | --- | --- | --- |
 | `$schema` | string | — | — | 任意 | 編集のときの補完に使うスキーマの位置。読み手は参照しない |
-| `tools` | object | — | — | 必須 | 言語 → 測りの Tool の名前（null は測らない） |
+| `tools` | object | — | — | 必須 | 言語 → 測りの Tool の名前。言語は python・javascript・typescript・php・go・ruby・java・kotlin・swift・rust・c・cpp・csharp・lua・shell、Tool は lizard・ruff-complexipy（python だけ）・null（測らない）。形が違えば読み手は宣言の全体を使わず既定で測る |
 | `version` | integer | — | `1` | 必須 | 宣言の形の版。読み手は知らない版を読まない |
 
-例: `{"version": 1, "tools": {"python": "radon", "go": null}}`
+例: `{"version": 1, "tools": {"python": "ruff-complexipy", "go": null}}`
 
 ## `.ndf/context.json`（context）
 
@@ -80,17 +80,17 @@ worktree・チーム・公開・[context.schema.json](../../contracts/schemas/de
 
 worktree・チーム・公開・[estimate.schema.json](../../contracts/schemas/declarations/estimate.schema.json)。読む工程: `ndf issues`（棚卸しの見積もりのとき）・`ndf refactor`（リファクタリングの予算を決めるとき）
 
-見積もりに使う実績の置き場と、読む範囲
+見積もりに使う実績の置き場と、Size の基準。読み手（estimate_records.Decl）は下のほかのキー（version・$schema を含む）を知らないキーとして止める
 
 | キー | 型 | 既定値 | 取りうる値 | 必須か | 説明 |
 | --- | --- | --- | --- | --- | --- |
-| `$schema` | string | — | — | 任意 | 編集のときの補完に使うスキーマの位置。読み手は参照しない |
-| `min_samples` | integer | — | — | 任意 | 見積もりに要る最小の件数 |
-| `records_dir` | string | — | — | 任意 | 実績の記録の置き場（リポジトリの根から） |
-| `version` | integer | — | `1` | 必須 | 宣言の形の版。読み手は知らない版を読まない |
-| `window` | integer | — | — | 任意 | 読む実績の件数 |
+| `min_samples`（非推奨。読み手は読まない） | integer | — | — | 任意 | 読み手は読まない。書いてある宣言を断らないために残す（#2505） |
+| `records_dir` | string | — | — | 任意 | 実績の記録の置き場（リポジトリの根から。絶対パスも可） |
+| `scale` | array of integer | — | — | 任意 | Size の取りうる値（小さい順に並べ替えて使う）。省くか空なら 1・2・3・5・8・13・20 |
+| `size_unit_seconds` | number | — | — | 任意 | Size 1 の基準の秒。省くと、実績のある課題のうち所要時間の短い 4 分の 1 の中央値（4 課題以上のとき） |
+| `window`（非推奨。読み手は読まない） | integer | — | — | 任意 | 読み手は読まない。書いてある宣言を断らないために残す（#2505） |
 
-例: `{"version": 1, "window": 20, "min_samples": 3}`
+例: `{"size_unit_seconds": 60, "scale": [1, 2, 3]}`
 
 ## `.ndf/glossary.json`（glossary）
 

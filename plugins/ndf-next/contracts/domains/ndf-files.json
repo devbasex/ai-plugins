@@ -37,7 +37,7 @@
     {"id": "runtime-policy", "place": "ndf", "path": "runtimes.json", "kind": "declaration", "tracked": true, "writer": "人", "ends": "kept", "keys": ["allowed", "review_seats"], "main_keys": ["allowed", "review_seats"]},
     {"id": "ask", "place": "ndf", "path": "ask.json", "kind": "declaration", "tracked": true, "writer": "人", "ends": "kept", "keys": ["mode", "allow", "cost", "extra"]},
     {"id": "context", "place": "ndf", "path": "context.json", "kind": "declaration", "tracked": true, "writer": "人", "ends": "kept", "keys": ["policy", "trial", "margin"]},
-    {"id": "estimate", "place": "ndf", "path": "estimate.json", "kind": "declaration", "tracked": true, "writer": "人", "ends": "kept", "keys": ["records_dir", "window", "min_samples"]},
+    {"id": "estimate", "place": "ndf", "path": "estimate.json", "kind": "declaration", "tracked": true, "writer": "人", "ends": "kept", "keys": ["records_dir", "size_unit_seconds", "scale"]},
     {"id": "issue-items", "place": "ndf", "path": "issue-items.json", "kind": "declaration", "tracked": true, "writer": "人", "ends": "kept", "keys": ["kinds", "last", "record_headings", "kind_labels", "items"]},
     {"id": "projects", "place": "ndf", "path": "projects.json", "kind": "declaration", "tracked": true, "writer": "人", "ends": "kept", "keys": ["owner", "number", "fields"]},
     {"id": "code-metrics", "place": "ndf", "path": "code-metrics.json", "kind": "declaration", "tracked": true, "writer": "人", "ends": "kept", "keys": ["tools"]},
