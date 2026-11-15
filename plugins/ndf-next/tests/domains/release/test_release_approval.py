@@ -815,3 +815,145 @@ def test_cli_merge_of_an_approved_pr_writes_only_the_version_into_the_outputs(mo
     assert release_cli.main(["merge", "--pr", "7", "--base", "develop", "--production", "main", "--budget", "1"]) == 0
     out = _last(capsys)
     assert out["outputs"] == {"version": "1.2.4"} and _values(out)["approval"]["route"] == "gate"
+
+
+# --- 現状固定: `release-steps merge`（cli.cmd_merge）の結果の組み方 -----------------------------------------
+# NOTE: 現状固定テスト。期待値は今の実装の出力をそのまま写した（仕様ではない。リファクタリングの退行の検出用）。
+#       Lander を、決まった Landed を返す偽物に替え、cmd_merge の分岐（マージ済み・記録の失敗・止まった種類の有無・
+#       次の手の有無）と、Lander へ渡す引数（宣言から読む admin・宣言から読む本番ブランチ）だけを見る。
+
+_RERUN = ["ndf", "release-steps", "merge", "--pr", "7", "--base", "develop", "--budget", "30.0"]
+_REJECT = {"argv": ["ndf", "release-steps", "answer", "--pr", "7", "--answer", "rejected"], "ask": ["--presented", "--by"]}
+_DEFER = {"argv": ["ndf", "release-steps", "defer", "--pr", "7"]}
+_ADMIN_FALSE = {"kind": "value", "name": "admin", "value": False}
+
+
+def _moves_items(rerun: list[str], suggested: str) -> list[dict]:
+    moves = {"rerun": {"argv": rerun}, "reject": _REJECT, "defer": _DEFER}
+    return [{"kind": "value", "name": "moves", "value": moves}, {"kind": "value", "name": "suggested", "value": suggested}]
+
+
+def _cli_merge(monkeypatch, capsys, done: land.Landed, root: Path, *extra: str) -> tuple[int, dict, dict]:
+    hub = FakeHub()
+    seen: dict[str, Any] = {}
+
+    class _Fixed:
+        def __init__(self, h, b, p, budget, admin=False) -> None:
+            seen.update(hub=h is hub, base=b, production=p, budget=budget, admin=admin)
+
+        def land(self, pr: int) -> land.Landed:
+            seen["pr"] = pr
+            return done
+
+    monkeypatch.setattr(release_cli, "_hub", lambda args: hub)
+    monkeypatch.setattr(land, "Lander", _Fixed)
+    argv = ["merge", "--pr", "7", "--base", "develop", "--budget", "30", "--root", str(root), *extra]
+    code = release_cli.main(argv)
+    return code, _last(capsys), seen
+
+
+def _seen(admin: bool) -> dict:
+    return {"hub": True, "base": "develop", "production": "main", "budget": 30.0, "admin": admin, "pr": 7}
+
+
+def test_characterize_cli_merge_merged_lists_every_value_and_reads_admin_from_the_declaration(monkeypatch, capsys, tmp_path) -> None:
+    (tmp_path / declaration.PROJECT_FILE).parent.mkdir(parents=True)
+    (tmp_path / declaration.PROJECT_FILE).write_text(json.dumps({"production_merge": {"admin": True}}), encoding="utf-8")
+    approval = merge_decide.Approval("gate", "octocat", HEAD, HEAD, MERGE_SHA, HEAD)
+    done = land.Landed(
+        True,
+        None,
+        "マージした",
+        sync_pr=8,
+        production_sha=MERGE_SHA,
+        admin=True,
+        admin_record="https://example.invalid/7",
+        version="1.2.4",
+        approval=approval,
+        merge_record="https://example.invalid/m",
+    )
+    code, out, seen = _cli_merge(monkeypatch, capsys, done, tmp_path, "--production", "main")
+    assert code == 0 and seen == _seen(True)
+    assert out == {
+        "tool": "release-steps",
+        "status": "ok",
+        "summary": "マージした",
+        "items": [
+            {"kind": "value", "name": "sync_pr", "value": 8},
+            {"kind": "value", "name": "production_sha", "value": MERGE_SHA},
+            {"kind": "value", "name": "admin", "value": True},
+            {"kind": "value", "name": "admin_record", "value": "https://example.invalid/7"},
+            {"kind": "value", "name": "approval", "value": approval.as_json()},
+            {"kind": "value", "name": "merge_record", "value": "https://example.invalid/m"},
+        ],
+        "metrics": {},
+        "outputs": {"version": "1.2.4"},
+    }
+
+
+def test_characterize_cli_merge_record_error_stops_as_unknown_without_moves(monkeypatch, capsys, tmp_path) -> None:
+    done = land.Landed(True, None, "マージした", version="1.2.4", record_error="書けない")
+    code, out, seen = _cli_merge(monkeypatch, capsys, done, tmp_path, "--production", "main")
+    detail = "マージした。記録を書けなかった（本番は出ている）: 書けない"
+    assert code == 1 and seen == _seen(False)
+    assert out == {
+        "tool": "release-steps",
+        "status": "stopped",
+        "summary": detail,
+        "items": [_ADMIN_FALSE],
+        "metrics": {},
+        "cause": {"kind": "unknown", "detail": detail},
+        "outputs": {"version": "1.2.4"},
+    }
+
+
+def test_characterize_cli_merge_merged_with_a_kind_stops_with_that_kind_without_moves(monkeypatch, capsys, tmp_path) -> None:
+    done = land.Landed(True, "ci_pending", "戻す PR を待つ")
+    code, out, seen = _cli_merge(monkeypatch, capsys, done, tmp_path, "--production", "main")
+    assert code == 1 and seen == _seen(False)
+    assert out == {
+        "tool": "release-steps",
+        "status": "stopped",
+        "summary": "戻す PR を待つ",
+        "items": [_ADMIN_FALSE],
+        "metrics": {},
+        "cause": {"kind": "ci_pending", "detail": "戻す PR を待つ"},
+    }
+
+
+def test_characterize_cli_merge_unmerged_without_a_kind_is_unknown_and_reads_production_from_the_declaration(
+    monkeypatch, capsys, tmp_path
+) -> None:
+    """--production を省けば本番ブランチは宣言から読み、打ち直しの手にも --production を付けない。"""
+    (tmp_path / declaration.BRANCH_FILE).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / declaration.BRANCH_FILE).write_text(json.dumps({declaration.PRODUCTION_KEY: "main"}), encoding="utf-8")
+    code, out, seen = _cli_merge(monkeypatch, capsys, land.Landed(False, None, "止まった"), tmp_path)
+    assert code == 1 and seen == _seen(False)
+    assert out == {
+        "tool": "release-steps",
+        "status": "stopped",
+        "summary": "止まった",
+        "items": [_ADMIN_FALSE, *_moves_items(_RERUN, "defer")],
+        "metrics": {},
+        "cause": {"kind": "unknown", "detail": "止まった"},
+    }
+
+
+def test_characterize_cli_merge_unmerged_lists_failed_checks_first_then_the_moves(monkeypatch, capsys, tmp_path) -> None:
+    failed = (ci.Check("pytest", "done", "failure", 1),)
+    done = land.Landed(False, "ci_pending", "待ちきれない", version="1.2.4", failed=failed)
+    code, out, seen = _cli_merge(monkeypatch, capsys, done, tmp_path, "--production", "main")
+    assert code == 1 and seen == _seen(False)
+    assert out == {
+        "tool": "release-steps",
+        "status": "stopped",
+        "summary": "待ちきれない",
+        "items": [
+            {"kind": "check", "name": "pytest", "outcome": "failure"},
+            _ADMIN_FALSE,
+            *_moves_items([*_RERUN, "--production", "main"], "rerun"),
+        ],
+        "metrics": {},
+        "cause": {"kind": "ci_pending", "detail": "待ちきれない"},
+        "outputs": {"version": "1.2.4"},
+    }
