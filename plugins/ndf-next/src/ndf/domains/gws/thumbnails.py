@@ -26,6 +26,7 @@ from ndf.domains.records import gws as records_gws
 
 # 上限の宣言（contracts/limits.json）の名前。gws のスライドの操作・認証の状態の読み取り・curl に使う
 LIMIT = "google-workspace.thumbnails"
+# サムネイルの大きさ（引数の選択肢。引数のスキーマ gws.args はここから生成し、結果のスキーマ gws.result の列挙と同じであることをテストが確かめる）
 SIZES = ("SMALL", "MEDIUM", "LARGE")
 DEFAULT_SIZE = "LARGE"
 CURL = "curl"
