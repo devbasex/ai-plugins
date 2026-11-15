@@ -797,3 +797,49 @@ def test_merge_as_admin_raises_when_graphql_is_unreached() -> None:
     with pytest.raises(github.GitHubError) as err:
         _hub(handler).merge_as_admin(7, HEAD)
     assert (str(err.value), err.value.status, err.value.unreached) == ("GitHub へ届かない: graphql: down", 0, True)
+
+
+class _GraphQLRecorder:
+    """`merge_as_admin` の GraphQL の要求を残す偽物（ネットワークへ出ない）。"""
+
+    def __init__(self, refuse: str | None = None, after: dict | None = None, unreached: bool = False) -> None:
+        self.sent: list[dict] = []
+        self.refuse, self.after, self.unreached = refuse, after, unreached
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path == "/graphql":
+            return self._graphql(request)
+        if path == "/repos/o/r/pulls/7":
+            return httpx.Response(200, json=self.after if self.after is not None and self.sent else _pull())
+        if path == "/repos/o/r/rules/branches/develop":
+            return httpx.Response(200, json=[])
+        if path == "/repos/o/r":
+            return httpx.Response(200, json={"allow_squash_merge": False, "allow_merge_commit": True, "allow_rebase_merge": False})
+        raise AssertionError(f"想定外の要求: {request.method} {path}")
+
+    def _graphql(self, request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        if "mergePullRequest" not in body["query"]:
+            return httpx.Response(200, json=_PULL_ID_ANSWER)
+        self.sent.append(body["variables"])
+        if self.unreached:
+            raise httpx.ConnectError("届かない", request=request)
+        if self.refuse is not None:
+            return httpx.Response(200, json={"data": None, "errors": [{"type": "UNPROCESSABLE", "message": self.refuse}]})
+        return httpx.Response(200, json=_ADMIN_MERGED)
+
+
+def test_merge_as_admin_keeps_the_release_contract() -> None:
+    """決定 5: 迂回は mergePullRequest を expectedHeadOid 付きで打つ。先端が違えば送らない。断られたら読み直して種類を返す。"""
+    server = _GraphQLRecorder()
+    got = hub("o/r", server).merge_as_admin(7, HEAD, "merge")
+    assert got.merged and server.sent == [{"id": "PR_1", "head": HEAD, "method": "MERGE"}]
+    server = _GraphQLRecorder()
+    assert not hub("o/r", server).merge_as_admin(7, OTHER).merged and server.sent == []
+    server = _GraphQLRecorder(refuse="Head branch was modified", after=_pull(head=OTHER))
+    got = hub("o/r", server).merge_as_admin(7, HEAD)
+    assert not got.merged and got.kind == "refused"
+    server = _GraphQLRecorder(unreached=True)
+    with pytest.raises(github.GitHubError):
+        hub("o/r", server).merge_as_admin(7, HEAD)
