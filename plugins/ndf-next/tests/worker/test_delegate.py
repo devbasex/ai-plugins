@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 
 from ndf import identity
@@ -101,3 +102,65 @@ def test_run_resolves_relative_paths_from_the_launcher(tmp_path, monkeypatch, ca
     h = seen["handoff"]
     assert (h.result_file, h.cwd, h.state_dir) == (tmp_path / "out.json", tmp_path / "work", tmp_path / "state")
     assert '"result_file": "' + str(tmp_path / "out.json") in capsys.readouterr().out
+
+
+SEARCHED = {"terms": ["詳細設計"], "files": ["tests/test_stage_check.py"]}
+
+
+def _ci_fix(tmp_path):
+    return worker.Handoff("ci-fix", "CI を直す", tmp_path / "result.json", tmp_path, tmp_path / "state")
+
+
+def _replies(h, *bodies):
+    """呼び出しごとに `bodies` の順で結果ファイルを書く worker（None は書かない）。"""
+    calls = []
+
+    def fake(argv, prompt, timeout, cwd):
+        calls.append(prompt)
+        body = bodies[len(calls) - 1]
+        if body is not None:
+            h.result_file.write_text(json.dumps(body), encoding="utf-8")
+        return claude.ClaudeReply(True, None, "終えた", 0.5)
+
+    return fake, calls
+
+
+def test_ci_fix_without_the_search_record_is_resumed_until_it_is_written(tmp_path):
+    # #3188: 期待値の直書きを探した記録が無い結果ファイルは、書いたとみなさず起こし直す
+    h = _ci_fix(tmp_path)
+    fake, calls = _replies(h, {"status": "ok"}, {"status": "ok", "metrics": {worker.SEARCH_RECORD: SEARCHED}})
+    assert worker.delegate(h, "規則", root=tmp_path, call=fake).cause is None
+    assert calls[1] == worker.RECORD_PROMPT
+    assert worker.search_record(h.result_file) == SEARCHED
+
+
+def test_ci_fix_that_never_records_the_search_stops(tmp_path):
+    h = _ci_fix(tmp_path)
+    no_terms = {"metrics": {worker.SEARCH_RECORD: {"terms": [], "files": []}}}
+    fake, _ = _replies(h, *[no_terms] * (worker.RESUMES + 1))
+    done = worker.delegate(h, "規則", root=tmp_path, call=fake)
+    assert done.cause == "work_stopped" and worker.SEARCH_RECORD in done.detail
+
+
+def test_other_kinds_do_not_need_the_search_record(tmp_path):
+    h = _handoff(tmp_path)
+    fake, calls = _replies(h, {"status": "ok"})
+    assert worker.delegate(h, "規則", root=tmp_path, call=fake).cause is None and len(calls) == 1
+
+
+def test_ci_fix_run_carries_the_search_record_into_its_result(tmp_path, monkeypatch, capsys):
+    (tmp_path / "prompt.md").write_text("CI を直す", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    seen = {}
+
+    def fake_delegate(handoff, system, root=None):
+        seen["system"] = system
+        body = {"status": "ok", "metrics": {worker.SEARCH_RECORD: SEARCHED}}
+        handoff.result_file.write_text(json.dumps(body), encoding="utf-8")
+        return worker.Delivery(attempts=1, session="s")
+
+    monkeypatch.setattr(worker, "delegate", fake_delegate)
+    args = ["run", "--kind", "ci-fix", "--prompt-file", "prompt.md", "--result-file", "out.json"]
+    assert worker.main(args + ["--cwd", ".", "--state-dir", "state"]) == 0
+    assert json.loads(capsys.readouterr().out)["metrics"][worker.SEARCH_RECORD] == SEARCHED
+    assert "\n".join(worker.KIND_RULES["ci-fix"]) in seen["system"]
