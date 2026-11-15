@@ -74,6 +74,19 @@
       "params": {}
     },
     {
+      "name": "full-test",
+      "summary": "worker（環境変数 NDF_WORKER_KIND がある）の中で、宣言のテストの suite の全体の実行を止める。範囲テスト（scope_command）と静的解析は通す（#3112）",
+      "module": "ndf.domains.hooks.guards.full_test",
+      "events": ["PreToolUse"],
+      "tools": ["Bash"],
+      "order": 35,
+      "strict": false,
+      "suggests": [],
+      "deny_key": "command",
+      "limits": [],
+      "params": {}
+    },
+    {
       "name": "script-chain",
       "summary": "NDF のコマンドをシェルの演算子やループでつないで待つ呼び出しを止め、計画の待ちの副命令を背景で打つよう案内する（#1919）",
       "module": "ndf.domains.hooks.guards.chain",

@@ -21,7 +21,7 @@ from ndf.adapters import git
 from ndf.contracts import limits
 from ndf.core.converge import worktree
 from ndf.domains.crossrefactor import scope, verify_decide
-from ndf.testing import limits as test_limits
+from ndf.testing import declared
 from ndf.testing import scoped, slots
 
 RUN_POLICY = "test-run.test"
@@ -35,7 +35,7 @@ def _read_declaration(path: Path) -> Any:
 
 
 def _declaration(work: Path) -> Mapping[str, Any]:
-    path = test_limits.find_setting(work, test_limits.PROJECT_FILE)
+    path = declared.find_setting(work, declared.PROJECT_FILE)
     data = _read_declaration(path) if path is not None else None
     test = data.get("test") if isinstance(data, dict) else None
     return test if isinstance(test, dict) else {}

@@ -192,5 +192,22 @@ def _classify_runner(words: list[str], runner: str) -> str | None:
     return None
 
 
+def is_whole(words: Sequence[str], suites: Iterable[Mapping[str, object]]) -> bool:
+    """単純コマンド 1 つ（語の並び）が、宣言のテストの suite の全体の実行か。並列の指定の有無は問わない。
+
+    宣言の `command` の最後の単純コマンドと同じか、`runner` がコマンドの位置にあって対象が全体（無いか `.` だけ）なら真。
+    `scope_command` の `{paths}` へファイルを入れた範囲の実行は、対象がファイルなので偽になる。
+    """
+    target = list(words)
+    for suite in (s for s in suites if is_test_suite(s)):
+        if _matches_declared(target, suite):
+            return True
+        runner = suite.get("runner")
+        pos = runner_position(target, runner) if isinstance(runner, str) and runner else None
+        if pos is not None and all(t == "." for t in _targets(target[pos + 1 :])):
+            return True
+    return False
+
+
 def is_heavy(command: str | Sequence[str], suites: Iterable[Mapping[str, object]]) -> bool:
     return classify(command, suites) is not None
