@@ -2,7 +2,7 @@
 
 設計文書 [issue-3600-design.md](issue-3600-design.md) の「構成要素」と「構造」を、ファイルと関数の粒度へ下ろした文書である。書き方は NDF の `design` Skill の `references/detailed-design.md` にある。
 
-対象は 11.0 の構造（2026-11-15 の `plugins/ndf-next/`）である。今の `plugins/ndf/` には書かない。11.0（#1142）が閉じるまでに配置先や関数の名前が変わりうるため、11.x の着手の前に「ファイル配置」の表のパスがあるかを確かめる（設計文書の「未確認のまま残ること」）。
+対象は 11.0 の構造（2026-11-15 の `plugins/ndf-next/`）である。今の `plugins/ndf/` には書かない。11.0（#1142）が閉じるまでに、配置先や関数の名前が変わりうる。11.x の着手の前に「ファイル配置」の表のパスがあるかを確かめる（設計文書の「未確認のまま残ること」）。
 
 **用語と表記。**
 
@@ -205,7 +205,7 @@ plugins/ndf-next/
 | `plan_epic.tick` | `progress/plan/epic.py` | 新設 | `tick(spec: dict[str, Any], fetch_failures: int) -> dict[str, Any]` | Durable Step。1 回分のエピックのアクションとして、ベースブランチを取得し直し、判定のコミットで比較と判定を行って書く | 計画が `epic` を持つ。`fetch_failures` はこの回より前に続けて失敗した回数 | 戻り値は `{"fetch_failed": 真偽, "commit": 判定のコミット \| None, "noticed": 件数, "judged": 件数, "remaining": [番号], "error": 文 \| None}` | git・ネットワーク・外部コマンド・ワークフロー状態の DB |
 | `plan_epic.gather` | `progress/plan/epic.py` | 新設 | `gather(root: Path, view: PlanView, timeout: float) -> TickInput` | DB の外で、ベースブランチの取得・判定のコミットのアーキテクチャ設計書・比較元のリビジョン・判定を読む | 無し | 取得できなければ `TickInput.fetch_failed` が真で、ほかは空。`command:` の行があれば `foundation.checkout` の中で判定し、戻る前に判定の作業ディレクトリを消す。計画の番号のうちアーキテクチャ設計書に無いものは `met: false`（`detail` は「アーキテクチャ設計書に無い番号」）にし、`TickInput.unknown` に並べる | git・ネットワーク・外部コマンド |
 | `plan_epic.write_tick` | `progress/plan/epic.py` | 新設 | `write_tick(conn, plan_id: str, got: TickInput, fetch_failures: int, fetch_limit: int) -> dict[str, Any]` | 読み直した計画に、変わった判定・変更通知・エピックのリクエストの開閉を書く | 無し | 計画が実行中でなければ何も書かない。同じ入力で 2 回呼んでも 2 回目は何も書かない。書く順は「処理の手順」の表のとおり | ワークフロー状態の DB にイベントを書く |
-| `plan_run._perform` | `progress/plan/run.py` | 変更 | 変えない | アクション `EpicTick` を `plan_epic.tick` へ渡す | 無し | 結果は `Done(act, 戻り値)` | Durable Stepを実行する |
+| `plan_run._perform` | `progress/plan/run.py` | 変更 | 変えない | アクション `EpicTick` を `plan_epic.tick` へ渡す | 無し | 結果は `Done(act, 戻り値)` | Durable Step を実行する |
 | `plan_run.snapshot_of` | `progress/plan/run.py` | 変更 | 変えない | スナップショットに `epic`（フィールドの有無）と `rows_finished`（完了か中止の行の数）を足す | 無し | `epic` の無い計画は `epic: false` | 無し |
 | `run_decide._epic_due` | `progress/plan/run_decide.py` | 新設 | `_epic_due(state: RunState, snap: Snapshot, policy: Policy) -> EpicTick \| None` | エピックのアクションを実行する時点かを決める | 無し | 実行するなら `EpicTick(rows_finished, fetch_failures)`、実行しなければ None | 無し |
 | `run_decide._after_observe` | `progress/plan/run_decide.py` | 変更 | 変えない | 完了・変更通知・起動の判断の前に `_epic_due` を当てる | 無し | `epic: false` のスナップショットでは今と同じアクションを返す | 無し |
@@ -218,7 +218,6 @@ plugins/ndf-next/
 | `rules.done_remaining` | `progress/lane/rules.py` | 新設 | `done_remaining(view: PlanView) -> list[str]` | 計画の完了条件の番号のうち、最後の判定が満たしていないもの（未判定を含む）を返す | 無し | `epic` が無ければ空。並びは `epic.done` の順 | 無し |
 | `rules.plan_complete` | `progress/lane/rules.py` | 変更 | 変えない | 全行の終わりと、完了条件待ちのリクエストを除いた答えていないリクエストが無いことに、完了条件の残りが無いことを足す | 無し | `epic` が無ければ今と同じ（I6）。取得の失敗とアーキテクチャ設計書に無い番号のリクエストは、答えていないリクエストに数える | 無し |
 | `rules.epic_state` | `progress/lane/rules.py` | 新設 | `epic_state(view: PlanView, lanes: Lanes) -> str \| None` | 計画の終了判定の状態を `running`・`waiting_done`・`done` のどれかに導く | 無し | `epic` が無ければ None。手順は「処理の手順」の計画の終了判定の状態の表のとおり。完了してよいかは `plan_complete` を呼んで決め、規則を別に持たない | 無し |
-
 | `rules.notice_targets` | `progress/lane/rules.py` | 新設 | `notice_targets(view: PlanView, lanes: Lanes, places: Sequence[str]) -> list[str]` | 終わっていないレーンのうち、触るファイルが `places` のどれかと重なるものを返す | 無し | 重なりは既存の `touch_hit`。`**` はすべてのレーンに当たる。並びは計画のレーンの順 | 無し |
 | `command._prepare_new` | `progress/command.py` | 変更 | 変えない | `--scale` があればコンテキストに `scale` を足し、`epic-first` の組み合わせを確かめる | 無し | `--scale` が無ければコンテキストは今と同じ。`epic-first` でモードが `standard` でないか進め方が `normal` でなければ `model.Refused` | 無し |
 | `progress_run.issue_section` | `progress/run.py` | 変更 | 変えない | コンテキストに `scale` があれば `モード:` の次の行に `規模:` の行を出す | 無し | `scale` が無ければ今と同じ文 | 無し |
@@ -267,7 +266,7 @@ plugins/ndf-next/
 | `plan_epic.gather` | 計画の番号がアーキテクチャ設計書に無い | 起動の後に、アーキテクチャ設計書を書き換える Pull Request が行を消すか番号を付け替えた（I10） | `unknown_done` | 判定の値にする | 無い番号は `met: false`（`detail` は「アーキテクチャ設計書に無い番号」）。リクエスト `unknown-done:<番号の並び>` が開く | オーガナイザーが計画の `done` かアーキテクチャ設計書を直し、無い番号がなくなった回に `write_tick` が閉じる |
 | `plan_epic.gather` | ベースブランチのリビジョンにアーキテクチャ設計書が無くなった | アーキテクチャ設計書を消す・移す変更がマージされた | `read_at` が None | 既定値で続ける（変更通知と判定を書かない） | 戻り値の `error`（「ベースブランチのリビジョンにアーキテクチャ設計書が無い」）。`status` の完了条件の項目は前の判定のまま | アーキテクチャ設計書が戻れば次の間隔で続く |
 | `plan_epic.write_tick` | 計画が実行中でない | 止めた・中止した・完了した | 読み直した計画の状態 | 何も書かずに返す | 無し | 無し |
-| `plan_epic.write_tick` | 書く前に計画が動いた | 同時の書き込み | `store.append_events` の番号の食い違い | 呼び出し元へ返す | Durable Stepの失敗として記録される | トランザクションごと戻る。冪等なので次のアクションで再実行できる |
+| `plan_epic.write_tick` | 書く前に計画が動いた | 同時の書き込み | `store.append_events` の番号の食い違い | 呼び出し元へ返す | Durable Step の失敗として記録される | トランザクションごと戻る。冪等なので次のアクションで再実行できる |
 | `plan_run._perform` | エピックのアクションが例外で落ちた | `tick` の中の予期しない例外 | Durable Step | 呼び出し元へ返す | 既存の Durable Workflow の失敗の扱い（`ndf lanes run` の結果） | 再開すると同じアクションから再実行する |
 | `lane.take_notices` | 書く前にレーンのワークフロー状態が動いた | 同時の書き込み | `checked_write` | 呼び出し元へ返す | 呼び手の既存の再実行 | トランザクションごと戻る |
 | `lane.sprint_notices` | 同上 | 同上 | 同上 | 呼び出し元へ返す | 同上 | 同上 |
@@ -342,7 +341,7 @@ plugins/ndf-next/
 
 「開いたことが無い」は、計画のスナップショットのリクエスト（閉じたものを含む）にそのキーが無いことで判定する。オーガナイザーが閉じたキーでは開き直さない。キーの頭（`epic-done:`・`unknown-done:`・`fetch-failed`）は `types.EPIC_KEYS` が持つ。
 
-**比較元のリビジョン。** 最後の `foundation_noticed` の `to_rev`、無ければ最初の `plan_started` の `foundation_rev` である（設計文書の「計画のワークフロー状態へ足すイベントと値」）。6 の行で比較元を進めないため、検証方法だけを書き換えた変更が続く間は、毎回 2 つのリビジョンを読んで比べる。
+**比較元のリビジョン。** 最後の `foundation_noticed` の `to_rev` である。無ければ最初の `plan_started` の `foundation_rev` を使う（設計文書の「計画のワークフロー状態へ足すイベントと値」）。6 の行で比較元を進めないため、検証方法だけを書き換えた変更が続く間は、毎回 2 つのリビジョンを読んで比べる。
 
 **検証方法（`verify.verify_one`）。**
 
@@ -394,7 +393,6 @@ plugins/ndf-next/
 | `Snapshot` の足すフィールド | 型 | `progress/plan/run_decide.py` | `epic: bool = False`・`rows_finished: int = 0`（前の Durable Workflow の記録には無いので既定で補って読む） |
 | `RunState` の足すフィールド | 型のフィールド | `progress/plan/run_decide.py` | `epic_slept: float = 0.0`・`epic_rows_seen: int = -1`・`epic_fetch_failures: int = 0` |
 | `Policy` の足すフィールド | 型のフィールド | `progress/plan/run_decide.py` | `epic_every`（`lanes.epic-recheck` の `seconds`）・`epic_fetch_limit`（`lanes.epic-fetch-failures` の `count`）。どちらも `plan_run.policy` が読む |
-
 
 **セクションの名前と列はコントラクト 1 か所だけが持つ。** `foundation_decide` はセクションの名前を定数にコピーせず、引数の `spec` から読む。ガイド（`epic-foundation.md`）のセクションの表は、`ndf check --write-spec` の生成の仕組みでコントラクトから描く。
 
@@ -531,7 +529,6 @@ GitHub の読み取り（`states`）と DB の書き込みを同じトランザ�
 | `rules.done_remaining` | 満たしていない番号 | 未判定の番号を含む | `epic` が無ければ空 |
 | `rules.plan_complete` | 判定表の 7 行 | 完了条件待ちのリクエストだけが開いている | リクエスト `fetch-failed`・`unknown-done:` が開いていると偽 |
 | `rules.epic_state` | 判定表の 5 行 | 全行が終わり完了条件待ちのリクエストだけが開いていて残りがあると `waiting_done` | `epic` が無いと None。Durable Workflow が完了にした計画で `done`（`waiting_done` のまま残らない） |
-
 | `rules.notice_targets` | 重なるレーンだけ | `**` で終わっていないレーンすべて | 終わったレーンは選ばない |
 | `command._prepare_new` | `scale` をコンテキストに書く（受け入れ条件 7） | `--scale` 無しで今と同じ | 判定表の断る 2 行。`--scale-reason` だけで誤り |
 | `progress_run.issue_section` | `規模:` の行が `モード:` の次 | `scale` が無ければ今と同じ | — |
