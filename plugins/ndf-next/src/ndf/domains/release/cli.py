@@ -135,7 +135,7 @@ def cmd_approval_check(args: argparse.Namespace) -> dict:
     hub = _hub(args)
     pull = hub.pull(args.pr)
     production = _production_of(args)
-    if pull.base_ref != production:
+    if not release_plan.is_production_pr(pull.base_ref, production):
         return result.stopped(TOOL, "not_applicable", f"#{args.pr} は本番ブランチ {production} 宛てでない（{pull.base_ref}）")
     got = trail.check(hub, args.pr)
     return result.result(

@@ -32,7 +32,7 @@ from typing import NamedTuple
 from ndf.adapters import ci
 from ndf.adapters.github import MERGE_COMMIT, MERGE_QUEUE_PENDING, GitHub, GitHubError, MergeOutcome, Pull, text_of
 from ndf.contracts import facts
-from ndf.domains.release import approval_decide, merge_decide, trail, version_decide
+from ndf.domains.release import approval_decide, merge_decide, release_plan, trail, version_decide
 
 # 規則の種類（必須のチェック）
 REQUIRED_RULE = "required_status_checks"
@@ -207,6 +207,10 @@ class Lander:
     clock: Callable[[], float] = time.monotonic
     sleep: Callable[[float], None] = time.sleep
 
+    def _is_production(self, pull: Pull) -> bool:
+        """`pull` が本番ブランチ宛ての本番の PR か（判定の正本は `release_plan.is_production_pr`）。"""
+        return release_plan.is_production_pr(pull.base_ref, self.production)
+
     def approvals(self, branch: str) -> int | None:
         """宛先のブランチの承認数。ruleset の承認の規則があればその最大、無ければ従来の保護、保護が無ければ 0、読めなければ None。"""
         try:
@@ -228,7 +232,7 @@ class Lander:
 
     def _bypass(self, pull: Pull) -> bool:
         """この PR を管理者の迂回でマージするか（宣言があり、本番ブランチ宛てで、承認数が 1 以上と読める。#3506 の I2b）。"""
-        if not self.admin or pull.base_ref != self.production:
+        if not self.admin or not self._is_production(pull):
             return False
         n = self.approvals(pull.base_ref)
         return n is not None and n >= 1
@@ -284,7 +288,7 @@ class Lander:
     def _refusal(self, pull: Pull, human_only: bool = False) -> Landed | None:
         """本番ブランチ宛ての PR の証跡を読み直し、`pull` の先端が承認されていなければ止まった結果（承認されていれば None）。
         `human_only` なら担い手が MVV 判定の証跡を数えない（迂回の前提。#3506 の I9）。"""
-        if pull.base_ref != self.production:
+        if not self._is_production(pull):
             return None
         got = trail.check(self.hub, pull.number, human_only)
         if got.pull.head_sha != pull.head_sha:
@@ -338,7 +342,7 @@ class Lander:
         `now` はこのループの 1 回で読んだ PR で、読み直さずに判定へ渡す（ループの 1 回ごとの照会を 1 回に保つ）。
         待ちの間は commit status を付け直さない（読み直しのたびに書かない）。
         """
-        if pull.base_ref != self.production:
+        if not self._is_production(pull):
             return None
         got = trail.judged(self.hub, now)
         if got.pull.head_sha != pull.head_sha:
@@ -433,7 +437,7 @@ class Lander:
     def _resume_merged(self, number: int, pull: Pull, deadline: float) -> Landed:
         """マージ済みの PR からの再開。本番ブランチ宛てならベースブランチへ戻し、承認を決めて（人のマージなら記録を書き）、
         迂回の記録が無ければ補う。"""
-        if pull.base_ref != self.production:
+        if not self._is_production(pull):
             return Landed(True, None, f"#{number} は既にマージされている")
         synced = self._released(pull, self._sync(pull, deadline))
         # 再開: 利用者の証跡がマージした先端への承認なら、迂回でマージしたとして記録を補う（I7）
@@ -452,7 +456,7 @@ class Lander:
         if pull.merged:
             return self._resume_merged(number, pull, deadline)
         version_decide.version_of_branch(pull.head_ref)
-        if pull.base_ref == self.production and not self.hub.token_trusted():
+        if self._is_production(pull) and not self.hub.token_trusted():
             return Landed(
                 False,
                 "refused",
@@ -461,7 +465,7 @@ class Lander:
             )
         bypass = self._bypass(pull)
         done = self._merge(pull, deadline, bypass)
-        if not done.merged or pull.base_ref != self.production:
+        if not done.merged or not self._is_production(pull):
             return done
         synced = self._released(pull, self._sync(pull, deadline))
         return self._record(pull, synced) if bypass else synced

@@ -11,7 +11,7 @@ from http import HTTPStatus
 from typing import NamedTuple
 
 from ndf.adapters.github import GitHub, GitHubError
-from ndf.domains.release import version_decide
+from ndf.domains.release import release_plan, version_decide
 
 # 同じ名前の参照が既にあるときの GitHub の状態
 EXISTS = HTTPStatus.UNPROCESSABLE_ENTITY
@@ -43,7 +43,7 @@ def prepare_next(hub: GitHub, number: int, production: str) -> Prepared:
     pull = hub.pull(number)
     if not pull.merged or not pull.merge_sha:
         raise PrepareError(f"#{number} はまだマージされていない（本番のマージの後に打つ）")
-    if pull.base_ref != production:
+    if not release_plan.is_production_pr(pull.base_ref, production):
         raise PrepareError(f"#{number} は本番ブランチ {production} 宛てでない（{pull.base_ref}）")
     version, branch = next_branch(pull.head_ref)
     try:

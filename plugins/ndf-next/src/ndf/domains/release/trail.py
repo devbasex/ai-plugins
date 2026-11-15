@@ -25,7 +25,7 @@ import re
 from ndf import identity
 from ndf.adapters.github import Authored, GitHub, GitHubError, Pull
 from ndf.adapters.publish import Publisher
-from ndf.domains.release import approval_decide, merge_decide
+from ndf.domains.release import approval_decide, merge_decide, release_plan
 
 # 迂回の記録の印と行の見出し（旧いプラグインと同じ文字列。作り直しは旧いプラグインを読み込まないため別に持つ）
 ADMIN_MARK = f"<!-- {identity.FIXED_WORDS['workflow_namespace']}:admin-merge -->"
@@ -178,7 +178,7 @@ def answer_merged(hub: GitHub, number: int, production: str) -> tuple[approval_d
     facts = merge_facts(hub, number)
     if not facts.merged:
         raise NotMerged(f"#{number} はまだマージされていない")
-    if facts.base_ref != production:
+    if not release_plan.is_production_pr(facts.base_ref, production):
         raise TrailError(f"#{number} は本番ブランチ {production} 宛てでない（{facts.base_ref}）")
     now = read(hub, number)
     if now.judgment.approved and now.pull.head_sha == facts.head:
