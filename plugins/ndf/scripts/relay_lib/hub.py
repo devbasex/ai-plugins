@@ -274,11 +274,11 @@ def live(ws: list[Wrapper], registry: dict[str, dict], sessions: dict[str, dict]
     names = [w.name or "-" for w in running] + pending
     roles = [_role_of(w, registry) for w in running] + [registry[n].get("role") for n in pending]
     human = [_human(n, registry, sessions) for n in [w.name for w in running] + pending]
-    helpers = roles.count("helper")
-    humans = sum(1 for h, r in zip(human, roles) if h and r != "helper")
-    organizer = 1 if any(r == "organizer" and not h for h, r in zip(human, roles)) else 0
     # tmux のセッションの名前も重ねない（tmux が `duplicate session` で断る）
     helper_names = tuple(n for n, r in zip(names, roles) if r == "helper")
+    helpers = len(helper_names)
+    humans = sum(1 for h, r in zip(human, roles) if h and r != "helper")
+    organizer = 1 if any(r == "organizer" and not h for h, r in zip(human, roles)) else 0
     return Live(len(names) - helpers - humans - organizer, names, taken | set(sessions), helpers, humans, helper_names)
 
 
