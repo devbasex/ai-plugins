@@ -318,7 +318,7 @@ def test_a_human_merge_while_the_release_gate_waits_becomes_the_approval(st, lan
     assert out is not None and out["status"] == "ok"
     assert calls[0][-4:] == ["--pr", str(q.pr), "--route", "github-merge"] and "answer" in calls[0]
     (ev,) = [e for e in run.read(st, tid).events if e.draft.kind == "answered" and e.draft.payload["gate_id"] == q.id]
-    assert ev.draft.actor == release.MERGE_ACTOR and ev.draft.payload["answer"] == "approved"
+    assert ev.draft.payload["by"] == release.MERGE_ACTOR and ev.draft.payload["answer"] == "approved"
     assert "takemi" in ev.draft.reason and MERGED_HEAD[:12] in ev.draft.reason
     assert run.read(st, tid).context()["version"] == "11.0.0"
     assert gate.take_reply(st, tid, {}, runner=_runner(MERGED_REPORT, calls), cwd=tmp_path) is None and len(calls) == 1
