@@ -242,7 +242,13 @@ PROJECT = {
     "workflow": {"launch": {"review": ["ndf-review"], "rebuild": ["ndf-rebuild"]}},
 }
 # 雛形 → 工程の入力（設計は issues・worktree、実装は issues・worktree・mode、設計のマージは設計の工程の入力）
-STAGE_INPUTS = {"design": ("issues", "worktree"), "impl": ("issues", "worktree", "mode"), "design-merge": ("issues", "worktree")}
+STAGE_INPUTS = {
+    "design": ("issues", "worktree"),
+    "impl": ("issues", "worktree", "mode"),
+    "design-merge": ("issues", "worktree"),
+    "quality-gates": ("issues", "worktree"),
+    "cross-review": ("issues", "worktree"),
+}
 
 
 def _stage_run_of(name: str, repo: Path, issues: list[int]) -> invoke.StageRun:
@@ -253,8 +259,8 @@ def _stage_run_of(name: str, repo: Path, issues: list[int]) -> invoke.StageRun:
 @pytest.mark.parametrize(
     ("name", "missing"),
     [
-        ("design", {"title", "body_file", "worker", "rebuild", "review", "required"}),
-        ("impl", {"title", "body_file", "test_command", "worker", "required"}),
+        ("design", {"title", "body_file", "worker", "rebuild", "required"}),
+        ("impl", {"title", "body_file", "issue", "test_command", "worker", "required"}),
         ("design-merge", {"worker"}),
     ],
 )
@@ -299,6 +305,20 @@ def test_template_values_fill_the_worker_from_the_default_and_the_branch_from_th
     plan, text, repo, _ = _filled_plan(tmp_path, monkeypatch, name)
     assert plan["worktree"] == str(repo) and "sprint/s1" in plan["name"]
     assert "ndf-worker" in text and "{{" not in text
+
+
+def test_quality_gates_builds_for_a_sprint_with_several_issues(tmp_path, monkeypatch):
+    # 完了判定の design-tests は工程の入力の課題の並びを読む。課題が 2 つ以上でも、課題を読まずにプランを組める
+    repo = _sprint_repo(tmp_path, PROJECT)
+    held = route.params()
+    monkeypatch.setattr(route, "params", lambda: {n: replace(p, default=["ndf-worker"]) if n == "worker" else p for n, p in held.items()})
+    monkeypatch.setattr(invoke, "issue_text", lambda *a: pytest.fail("完了判定は課題の題と本文を読まない"))
+    work = tmp_path / "w"
+    work.mkdir()
+    argv = invoke.plan_argv(_stage_run_of("quality-gates", repo, [1, 2]), work, None, repo)
+    plan = json.loads(Path(argv[argv.index("next") + 1]).read_text())
+    step = next(s for s in plan["steps"] if s.get("id") == "design-tests")
+    assert step["run"] == ["ndf", "loop", "design-tests", "--issue", "1", "2"]
 
 
 @pytest.mark.parametrize("name", ["design", "impl"])
@@ -363,7 +383,67 @@ def test_ci_only_declaration_builds_the_impl_plan_without_local_tests(tmp_path, 
     assert not {"test", "ci-local"} & set(ids)
     assert not any(s["run"][:3] == ["ndf", "route", "test"] for s in plan["steps"])
     by_id = {s["id"]: s for s in plan["steps"]}
-    assert ids[ids.index("work") + 1] == "push" and by_id["fix"]["next"] == "push" and by_id["ci-fix"]["next"] == "push"
+    assert ids[ids.index("work") + 1] == "acceptance" and ids[ids.index("acceptance") + 1] == "push"
+    assert by_id["fix"]["next"] == "push" and by_id["ci-fix"]["next"] == "push"
+
+
+def test_the_impl_plan_checks_the_acceptance_records_of_the_issue_after_the_worker(tmp_path, monkeypatch):
+    # #1682: 実装のプランは worker の後に、課題の受け入れ条件の確認の区分を照らす（記録の無い条件が残れば止まる）
+    plan, _, _, _ = _filled_plan(tmp_path, monkeypatch, "impl")
+    ids = [s["id"] for s in plan["steps"]]
+    check = next(s for s in plan["steps"] if s["id"] == "acceptance")
+    assert ids[ids.index("work") + 1] == "acceptance"
+    assert check["run"] == ["ndf", "loop", "acceptance", "check", "--issue", "3092"]
+
+
+def test_review_without_a_declaration_runs_cross_review_with_the_pr_made_before_the_step(tmp_path, monkeypatch):
+    # #3489: 宣言に review が無ければ、設計のプランの review は pr のステップの後に、ブランチの PR の番号で cross-review run を打つ
+    held = PROJECT["workflow"]
+    monkeypatch.setitem(PROJECT, "workflow", {"launch": {"rebuild": held["launch"]["rebuild"]}})
+    plan, _, _, _ = _filled_plan(tmp_path, monkeypatch, "design")
+    ids = [s["id"] for s in plan["steps"]]
+    review = next(s for s in plan["steps"] if s["id"] == "review")
+    assert ids.index("pr") < ids.index("review")
+    head = review["run"][:4]
+    assert head[:2] == ["sh", "-c"] and head[3] == "sprint/s1"
+    rest = review["run"][4:]
+    assert rest[1:4] == ["cross-review", "run", "--state-dir"] and rest[rest.index("--purpose") + 1] == "design"
+    assert rest[rest.index("--base") + 1] == "develop" and "--pr" not in rest and rest[-2] == "--findings"
+
+
+def test_review_without_a_declaration_resolves_the_base_for_the_cross_review_template(tmp_path, monkeypatch):
+    # PR 3537 の指摘: cross-review の雛形は params に base を持たないので、宛先はリポジトリのブランチの運用から決める
+    held = PROJECT["workflow"]
+    monkeypatch.setitem(PROJECT, "workflow", {"launch": {"rebuild": held["launch"]["rebuild"]}})
+    plan, _, _, _ = _filled_plan(tmp_path, monkeypatch, "cross-review")
+    review = next(s for s in plan["steps"] if s["id"] == "review")
+    rest = review["run"][4:]
+    assert rest[rest.index("--base") + 1] == "develop" and rest[rest.index("--purpose") + 1] == "code"
+
+
+@pytest.mark.parametrize(("name", "purpose"), [("design", "design"), ("check", "code"), ("cross-review", "code")])
+def test_review_launch_appends_the_pr_number_read_when_the_step_runs(tmp_path, name, purpose):
+    # #3489: 打つ時点にブランチの PR の番号を読み、--pr に足して打つ（gh を差し替えて確かめる）
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "gh").write_text("#!/bin/sh\necho 3489\n")
+    (bin_dir / "gh").chmod(0o755)
+    argv = invoke.review_launch(name, "feat/x", "develop")
+    argv = [a if a != "ndf" else "echo" for a in argv]
+    env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"}
+    out = subprocess.run(argv, capture_output=True, text=True, env=env, check=True).stdout.split()
+    assert out[:2] == ["cross-review", "run"] and out[-2:] == ["--pr", "3489"]
+    assert out[out.index("--purpose") + 1] == purpose and out[out.index("--base") + 1] == "develop"
+
+
+def test_review_launch_stops_when_the_branch_has_no_pr(tmp_path):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "gh").write_text("#!/bin/sh\nexit 1\n")
+    (bin_dir / "gh").chmod(0o755)
+    argv = [a if a != "ndf" else "echo" for a in invoke.review_launch("design", "feat/x", "develop")]
+    env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"}
+    assert subprocess.run(argv, capture_output=True, text=True, env=env).returncode == 1
 
 
 def test_workflow_declaration_with_launch_and_stages_passes_the_schema(tmp_path):

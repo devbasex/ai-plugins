@@ -25,7 +25,7 @@ from typing import Any, Callable, Mapping
 
 from ndf import cli, identity
 from ndf.contracts import causes, limits, result
-from ndf.domains.relay import account_decide, accounts, hub, install, marks, pending, registry, switch_decide, wrapper
+from ndf.domains.relay import account_decide, accounts, hub, install, lane_question, marks, pending, registry, switch_decide, wrapper
 from ndf.domains.relay.tmux import Tmux
 
 # 結果 JSON の tool の名前は副命令の名前（正本は `cli.COMMANDS`）
@@ -187,11 +187,12 @@ def _hub(args: argparse.Namespace) -> int:
 def wrapper_settings(name: str, rest: list[str]) -> wrapper.Settings:
     ident = identity.load()
     environ = dict(os.environ)
+    cwd = Path.cwd()
     return wrapper.Settings(
         state_dir=ident.state_dir,
         version=plugin_version(ident.root),
         name=name,
-        cwd=Path.cwd(),
+        cwd=cwd,
         environ=environ,
         args=tuple(rest),
         tick=limits.value("relay.tick", "interval"),
@@ -201,6 +202,7 @@ def wrapper_settings(name: str, rest: list[str]) -> wrapper.Settings:
         context_limit=int(limits.value("relay.context", "count")),
         usage_threshold=limits.value("relay.usage-guard", "count"),
         transcript_bytes=int(limits.value("relay.transcript-tail", "count")),
+        ask_plan=lane_question.plan_asker(environ, name, cwd, ident.root, limits.seconds("relay.lanes-ask")),
     )
 
 

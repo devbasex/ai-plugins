@@ -18,7 +18,7 @@ from ndf import cli, contracts, identity
 from ndf.contracts import exit_codes, result
 from ndf.contracts.exit_codes import OK
 from ndf.core.plan import steps
-from ndf.testing import limits as test_limits
+from ndf.testing import declared
 from ndf.testing import scoped
 
 # 結果 JSON の tool は副命令 `route` の名前（このパッケージ）
@@ -87,13 +87,13 @@ def _write_result(path: Optional[str], found: Mapping[str, Any]) -> None:
 
 def _declared_suites(cwd: Path) -> Any:
     """打った場所から根へ探した宣言の `test.suites`（宣言か鍵が無ければ空か None。形の確かめは `scoped.scoped_runs` が持つ）。読めなければ `LocalTestError`。"""
-    path = test_limits.find_setting(cwd, test_limits.PROJECT_FILE)
-    if path is None:
-        return []
     try:
-        found = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        raise LocalTestError(f"宣言 {path} を読めない: {exc}") from None
+        read = declared.read_declaration(cwd)
+    except declared.DeclarationError as exc:
+        raise LocalTestError(f"宣言 {exc.path} を読めない: {exc.cause}") from None
+    if read is None:
+        return []
+    found = read[1]
     test = found.get("test") if isinstance(found, Mapping) else None
     return test.get("suites") if isinstance(test, Mapping) else None
 

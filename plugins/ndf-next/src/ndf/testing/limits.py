@@ -1,7 +1,6 @@
 """テストの枠の上限の値（#2711 の契約「設定 `.ndf/resources.json`」・決定 5）。
 
-設定とテストの宣言は、呼ばれた位置から根へ向かって最初に見つかる `.ndf/` から読む
-（worktree はメインディレクトリの下に置くので、worktree に無ければメインディレクトリの値が効く）。
+設定は、呼ばれた位置から根へ向かって最初に見つかる `.ndf/` から読む（`ndf.testing.declared.find_setting`）。
 設定を書き換えるコマンドは作らない。
 """
 
@@ -13,11 +12,11 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from ndf import identity, slot_pool
-from ndf.testing import machine, weight
+from ndf import slot_pool
+from ndf.testing import machine
+from ndf.testing.declared import find_setting
 
 RESOURCES_FILE = "resources.json"
-PROJECT_FILE = "project.json"
 SECTION = "test_slots"
 # 1 本の全体テストが使う CPU の数（`-n 4`。決定 5）。メモリの見込みは重い起動の枠のテストの重み
 CPUS_PER_RUN = 4
@@ -65,15 +64,6 @@ def default_limits(cpus: int, total_mib: int | None) -> Limits:
     return Limits(max(1, min(by_cpu, by_memory)), floor, DEFAULT_WAIT_LIMIT_SECONDS)
 
 
-def find_setting(cwd: Path, name: str) -> Path | None:
-    """`cwd` から根へ向かって `.ndf/<name>` を探す。"""
-    for base in (cwd.resolve(), *cwd.resolve().parents):
-        candidate = base / identity.FIXED_WORDS["declaration_dir"] / name
-        if candidate.is_file():
-            return candidate
-    return None
-
-
 def _positive(section: Mapping[str, object], key: str, path: Path, errors: list[str]) -> int | None:
     if key not in section:
         return None
@@ -110,19 +100,3 @@ def _section(path: Path) -> dict | None:
     if not isinstance(section, dict):
         raise SlotConfigError(f"設定の形が違う: {path}", [f"{path}: {SECTION} はオブジェクトにする"])
     return section
-
-
-def load_suites(cwd: Path) -> list[dict[str, object]]:
-    """宣言（`.ndf/project.json` の `test.suites`）のうちテストの suite。読めなければ空の一覧。"""
-    path = find_setting(cwd, PROJECT_FILE)
-    if path is None:
-        return []
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return []
-    test = data.get("test") if isinstance(data, dict) else None
-    suites = test.get("suites") if isinstance(test, dict) else None
-    if not isinstance(suites, list):
-        return []
-    return [s for s in suites if isinstance(s, dict) and weight.is_test_suite(s)]

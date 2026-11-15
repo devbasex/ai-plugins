@@ -26,6 +26,12 @@ def test_fix_and_sweep_get_the_fix_procedure(tmp_path, kind):
     assert "# fix の手順書の本文" in worker.system_prompt(kind, tmp_path, skills)
 
 
+@pytest.mark.parametrize(("kind", "carried"), [("impl", True), ("quality-gates", True), ("design", False), ("fix-push", False)])
+def test_only_kinds_that_check_acceptance_get_the_acceptance_procedure(tmp_path, kind, carried):
+    text = worker.system_prompt(kind, tmp_path / "state", tmp_path / "skills")
+    assert ("\n".join(worker.ACCEPTANCE_RULES) in text) is carried
+
+
 def test_a_kind_without_a_procedure_gets_none(tmp_path):
     assert worker.skill_paths("impl", tmp_path) == []
     assert worker.skills_section("impl", tmp_path) == ""

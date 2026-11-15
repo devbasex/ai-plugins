@@ -11,6 +11,8 @@ ndf lanes limits <計画> [--max-lanes <数>] [--max-plans <本数>] --reason <�
 ndf lanes move <計画> <元のレーン> <行> <先のレーン> --reason <理由>
 ndf lanes stop <計画> [--now] --reason <理由>       区切りで止める（--now はすぐ中止する）。再開は start を打ち直す
 ndf lanes request close <計画> <依頼> --reason <理由>
+ndf lanes question <計画> --wrapper <ラッパーの名前> --question <question.json>
+                                                 レーンの問い（AskUserQuestion）を依頼として載せる（中継のラッパーが打つ）
 ndf lanes release <計画> <依頼>... --result released|rejected --reason <理由> [--version <版>] [--release <PR>]
                                                  まとめたリリースの答えを記録し、まとめた依頼を閉じる
 ndf lanes answered <スプリントの進行表の ID> --answer <答え>
@@ -18,13 +20,14 @@ ndf lanes row add|move|cancel|carry|start|end|resumed ...   （レーンの cond
 
 書き手は段ごとに 1 つに寄る。計画の進行表の副命令の書き手はオーガナイザー（作成・レーンをまたぐ変更・中止・依頼を閉じる・
 答えの記録）で、完了は耐久ワークフロー（`run`）が書く。`row` の副命令はレーンの進行表（`ndf.progress.lane`）を書き、
-書き手はレーンの conductor になる。結果は結果 JSON の 1 行で返す。
+書き手はレーンの conductor になる。`question` はレーンの中継のラッパーが打ち、計画の進行表へ問いの依頼を書く（#3035）。結果は結果 JSON の 1 行で返す。
 """
 
 from __future__ import annotations
 
 import argparse
 import functools
+import json
 import subprocess
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -43,8 +46,10 @@ from ndf.progress.plan import (
     PLAN_SCHEMA,
     RELEASE_RESULTS,
     TOOL,
+    PlanInputError,
     ReleaseAnswer,
     add_lane,
+    ask_request,
     change_lane,
     close_request,
     create_plan,
@@ -149,6 +154,24 @@ def _cmd_request_close(a: argparse.Namespace, conn: sa.Connection, repo: str) ->
     return _ok(f"計画 {a.plan} の依頼 {a.request} を閉じた", request=a.request)
 
 
+def _cmd_question(a: argparse.Namespace, conn: sa.Connection, repo: str) -> dict[str, Any]:
+    question = _read_question(Path(a.question))
+    key, opened = ask_request(conn, _pid(conn, repo, a.plan), a.wrapper, question)
+    said = "載せた" if opened else "既に載っている"
+    return _ok(f"計画 {a.plan} の依頼 {key} にレーンの問いを{said}", request=key, opened=opened)
+
+
+def _read_question(path: Path) -> dict[str, Any]:
+    """hook が書いた問い（`question.json`）。読めない・オブジェクトでなければ `PlanInputError`。"""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise PlanInputError(f"問い {path} を JSON として読めない: {exc}") from exc
+    if not isinstance(data, dict):
+        raise PlanInputError(f"問い {path} の形が違う（オブジェクトでない）")
+    return data
+
+
 def _cmd_release(a: argparse.Namespace, conn: sa.Connection, repo: str) -> dict[str, Any]:
     record_release(conn, _pid(conn, repo, a.plan), a.requests, ReleaseAnswer(a.result, a.reason, a.version, a.release))
     return _ok(
@@ -233,6 +256,7 @@ COMMANDS: dict[str, Command] = {
     "move": _cmd_move,
     "stop": _cmd_stop,
     "request": _cmd_request_close,
+    "question": _cmd_question,
     "release": _cmd_release,
     "answered": _cmd_answered,
     "row": _cmd_row,
@@ -330,6 +354,10 @@ def parser() -> argparse.ArgumentParser:
     for arg in ("plan", "request"):
         req.add_argument(arg)
     req.add_argument("--reason", required=True)
+    qn = sub.add_parser("question")
+    qn.add_argument("plan")
+    qn.add_argument("--wrapper", required=True, help="問いを出したレーンのラッパーの名前（NDF_RELAY_NAME）")
+    qn.add_argument("--question", required=True, help="hook が書いた問いのファイル（question.json）")
     rel = sub.add_parser("release")
     rel.add_argument("plan")
     rel.add_argument("requests", nargs="+")
