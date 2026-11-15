@@ -26,7 +26,7 @@ def admin_after(root, repo, case, n, sha, trail_url):
             row = None
         if row:
             items.append(row)
-        return "迂回の記録を書けなかった（本番は出ている）" if row and row.get("result") == "unwritten" else None
+        return reviewed.UNWRITTEN_NOTE if row and reviewed.admin_unwritten([row]) else None
 
     return run
 

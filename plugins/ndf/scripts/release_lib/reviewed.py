@@ -36,6 +36,8 @@ from step_result import EXIT_GATE, EXIT_INFRA_WAIT, EXIT_PRECONDITION, EXIT_UNRE
 TOOL = approval.TOOL
 # 迂回の記録の行（items の `record`。#3506 の I7）
 ADMIN_RECORD = "admin_merge"
+# 迂回の記録を書けなかったときに、本番の完了と分けて報告する文（#3506 の決定 7）
+UNWRITTEN_NOTE = "迂回の記録を書けなかった（本番は出ている）"
 
 
 release_case_or_stop = release_case.case_or_stop  # release-steps.py と merged_lib が同じ止め方を使う
@@ -167,14 +169,19 @@ def admin_record_on_resume(root, repo: str, case, pr: int) -> dict | None:
     return admin_record_item(repo, pr, head, judged.url or "")
 
 
+def admin_unwritten(items: list[dict]) -> bool:
+    """迂回の記録を書けなかった行があるか。"""
+    return any(i.get("record") == ADMIN_RECORD and i.get("result") == "unwritten" for i in items if isinstance(i, dict))
+
+
 def admin_back(back=None):
     """公開の後に打つ関数（`release-steps.py` の `_published` の `back`）。`back`（戻すマージ）を先に打ち、迂回の記録を書けなかった行が
     あれば本番の完了と分けて止まりとして報告する（#3506 の決定 7）。打ち直すと再開の経路が記録だけを書く。"""
 
     def run(items: list[dict], metrics: dict, done: str) -> tuple[str, int, str]:
         status, code, done = back(items, metrics, done) if back else ("ok", None, done)
-        if any(i.get("record") == ADMIN_RECORD and i.get("result") == "unwritten" for i in items if isinstance(i, dict)):
-            return "stopped", (code or 1) if status != "ok" else 1, f"{done}。迂回の記録を書けなかった（本番は出ている）"
+        if admin_unwritten(items):
+            return "stopped", (code or 1) if status != "ok" else 1, f"{done}。{UNWRITTEN_NOTE}"
         return status, code, done
 
     return run
