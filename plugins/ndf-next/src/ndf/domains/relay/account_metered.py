@@ -281,13 +281,13 @@ def add_api_key(
         raise MeteredError("refused", f"登録済みアカウントでない: {account}")
     if not key:
         raise MeteredError("input_missing", "キーの値を標準入力か --key-file で渡す")
+    with reg.locked(store, reg.BOOK_LOCK):
+        _refuse_taken(reg.read_book(store), account, name)  # 有料の確かめより前に、登録簿だけで断れる要求を断る
     _verify_key(key, environ, name, transport)
     at = time.time()
     with reg.locked(store, reg.BOOK_LOCK):
         book = reg.read_book(store)
-        taken = [n for n, r in book["keys"].items() if isinstance(r, dict) and r.get("account") == account and n != name]
-        if taken:
-            raise MeteredError("refused", f"アカウント {account} には API キー {taken[0]} が結び付いている（1 アカウントに 1 本）")
+        _refuse_taken(book, account, name)  # 確かめている間に別のキーが結び付いたら書かない
         replaced = name in book["keys"]
         book.setdefault("version", 1)
         book.setdefault("use", "off")
@@ -297,6 +297,13 @@ def add_api_key(
         book["keys"][name] = row
         reg.write(reg.book_path(store), book)
     return {"name": name, "kind": "api_key", "account": account, "monthly_usd": monthly, "replaced": replaced}
+
+
+def _refuse_taken(book: Mapping[str, Any], account: str, name: str) -> None:
+    """アカウントに別の名前のキーが結び付いていれば `MeteredError`（1 アカウントに 1 本）。"""
+    taken = [n for n, r in book["keys"].items() if isinstance(r, dict) and r.get("account") == account and n != name]
+    if taken:
+        raise MeteredError("refused", f"アカウント {account} には API キー {taken[0]} が結び付いている（1 アカウントに 1 本）")
 
 
 def read_key(key_file: Optional[str], stdin_line: str) -> str:

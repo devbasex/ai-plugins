@@ -173,9 +173,21 @@ def test_run_puts_overlapping_plans_of_a_stage_into_separate_waves(tmp_path, chi
 
 
 def test_run_launches_at_most_max_parallel_plans_at_once(tmp_path, children):
+    """枠の 3 本がそろって起動するまで子を終わらせない（子の即時完了と起動の順の競合で落ちない）。"""
+    full = threading.Event()
     fake = children({n: _ok() for n in "abcd"})
+    real = _FakeProc.communicate
+
+    def held(self):
+        if sum(event == "start" for event, _ in self.owner.log) >= 3:
+            full.set()
+        assert full.wait(5)
+        return real(self)
+
     plans = [_entry(tmp_path, n, touches=[f"{n}.py"]) for n in "abcd"]
-    outs = queue_run.run([plans], tmp_path / "q", tmp_path, queue_run.QueueOptions(max_parallel=3))
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(_FakeProc, "communicate", held)
+        outs = queue_run.run([plans], tmp_path / "q", tmp_path, queue_run.QueueOptions(max_parallel=3))
     assert [o.name for o in outs] == list("abcd")
     assert fake.log[:3] == [("start", n) for n in "abc"]
     running, peak = 0, 0

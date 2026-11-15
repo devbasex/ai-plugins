@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import argparse
+import getpass
 import os
 import sys
 from pathlib import Path
@@ -80,10 +81,17 @@ def _acc_bedrock(store: Path, a: argparse.Namespace) -> int:
 
 def _acc_api_key(store: Path, a: argparse.Namespace) -> int:
     usd = account_metered.amount(a.monthly)
-    key = account_metered.read_key(a.key_file, "" if a.key_file else sys.stdin.readline())
+    key = account_metered.read_key(a.key_file, "" if a.key_file else _stdin_key())
     row = account_metered.add_api_key(store, os.environ, account_metered.KeyRequest(a.name, a.account, key, usd))
     note = "組織に買ったクレジットか自動チャージがあると、月の API クレジットを使い切った後もそちらから払われる（Console の spend limit で抑える）"
     return result.emit(result.result(TOOL, result.OK, f"登録した: {a.name}（アカウント {a.account}）", items=[row], warnings=[note]))
+
+
+def _stdin_key() -> str:
+    """標準入力のキーの 1 行。端末からは旧版と同じく表示せずに読む（画面と端末の記録へ残さない）。"""
+    if sys.stdin.isatty():
+        return getpass.getpass("API キーの値（表示しない）: ", stream=sys.stderr)
+    return sys.stdin.readline()
 
 
 def _acc_monthly(store: Path, a: argparse.Namespace) -> int:

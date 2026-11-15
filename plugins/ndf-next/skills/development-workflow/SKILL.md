@@ -259,7 +259,7 @@ CI の結果の監視が読んだ結論と改修の回数は、プランの状�
 
 **MVV 判定は `mvv-gate.py` が行う。** 「従う」でレッドラインに当たらないときだけ承認ゲートを通し、ほかは人の承認へ戻す。
 
-**`auto` と `fast` は、使ってよい条件を `ndf progress new --pace <値>` が機械で確かめる。** 条件は
+**`auto` と `fast` は、使ってよい条件を `supervise.py new sprint --pace <値> --state <状態>` が機械で確かめる**（`ndf progress new --pace` は値を保存するだけで、条件を確かめない）。 条件は
 開発版のチャネル・インストール確認・`.ndf/pace.json` の許可・モード・MVV の承認で、1 つでも欠ければ断る。
 そのときは `normal` で進める。進め方ごとのフロー・`fast` の工程の区分・条件・設定・トリガー・記録の読み方は
 [references/pace.md](references/pace.md) にある。

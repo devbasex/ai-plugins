@@ -44,8 +44,6 @@ from ndf.progress.lane.types import LaneRow, RUNNING
 
 # マシンの上限の宣言（計画の上限の既定と同じ。`ndf.progress.plan.LIMIT_POLICY`）と、起動の排他を待つ上限の宣言
 CAP_POLICY = ("relay.max-named", "count")
-# リレーハブと同じく上限を替える環境変数（`ndf lanes start` を打つ環境で渡すと、切り離した `ndf lanes run` が引き継ぐ）
-CAP_ENV = "NDF_RELAY_MAX_NAMED"
 LOCK_POLICY = "parallel-machine.admit-lock"
 # 起動の排他のファイル（状態の置き場からの相対パス。#2999 の決定 4）と、取り直す間隔の秒
 LOCK_PATH = Path("parallel") / "admit.lock"
@@ -143,8 +141,11 @@ def waiting(reason: str, got: Optional[Count], plans: int, cap: int) -> dict[str
 
 
 def cap(environ: Optional[Mapping[str, str]] = None) -> int:
-    """マシン全体の本数の上限。リレーハブと同じく `NDF_RELAY_MAX_NAMED` があればそれ、無ければ宣言の値。"""
-    return int(limits.from_env(os.environ if environ is None else environ, CAP_ENV, *CAP_POLICY))
+    """マシン全体の本数の上限。リレーハブと同じく `NDF_RELAY_MAX_NAMED` があればそれ、無ければ宣言の値。
+
+    環境変数は `ndf lanes start` を打つ環境で渡すと、切り離した `ndf lanes run` が引き継ぐ（名前の正本は表 env）。
+    """
+    return int(limits.from_env(os.environ if environ is None else environ, "NDF_RELAY_MAX_NAMED", *CAP_POLICY))
 
 
 # --- 読み取り（進行表・登録簿）と排他 --------------------------------------------------------------

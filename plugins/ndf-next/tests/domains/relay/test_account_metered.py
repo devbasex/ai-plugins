@@ -76,8 +76,10 @@ def test_add_api_key_saves_only_after_the_check(tmp_path):
     row = m.add_api_key(store, {}, m.KeyRequest("key1", "work1", "sk-secret", 100.0), _transport(200))
     assert row["monthly_usd"] == 100.0 and "sk-secret" not in json.dumps(row)
     assert reg.read_book(store)["keys"]["key1"]["key"] == "sk-secret"
+    calls: list[httpx.Request] = []
     with pytest.raises(m.MeteredError, match="結び付いている"):
-        m.add_api_key(store, {}, m.KeyRequest("key2", "work1", "sk-2", None), _transport(200))
+        m.add_api_key(store, {}, m.KeyRequest("key2", "work1", "sk-2", None), httpx.MockTransport(calls.append))
+    assert calls == []  # 登録簿だけで断れる要求は、有料の確かめを呼ばずに断る
     with pytest.raises(m.MeteredError, match="重なる"):
         m.add_api_key(store, {}, m.KeyRequest("work1", "work1", "sk-2", None), _transport(200))
     with pytest.raises(m.MeteredError, match="登録済みアカウントでない"):

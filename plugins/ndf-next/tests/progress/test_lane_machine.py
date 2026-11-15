@@ -223,6 +223,6 @@ def test_status_reads_the_other_plans_once_for_all_wakeable_lanes(opened, monkey
 def test_cap_reads_the_same_env_as_the_relay_hub():
     """マシン全体の上限はリレーハブと同じ `NDF_RELAY_MAX_NAMED` で替わり、無ければ宣言の値。"""
     assert machine.cap({}) == int(limits.value(*machine.CAP_POLICY))
-    assert machine.cap({machine.CAP_ENV: "9"}) == 9
+    assert machine.cap({"NDF_RELAY_MAX_NAMED": "9"}) == 9
     with pytest.raises(limits.EnvError):
-        machine.cap({machine.CAP_ENV: "0"})
+        machine.cap({"NDF_RELAY_MAX_NAMED": "0"})
