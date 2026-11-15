@@ -28,7 +28,7 @@ docs/
 
 | パス | 種類 | 役割 1 文 | 依存する先 |
 | --- | --- | --- | --- |
-| `.ndf/worktree.json` | 変更 | ai-plugins のブランチの流れ 4 項目とレビューの単位 5 行の値の正本を持つ | NDF の `lib/branch_flow.py` のスキーマと許す値の表 |
+| `.ndf/worktree.json` | 変更 | ai-plugins のブランチの流れ 4 項目とレビューの単位 4 行の値の正本を持つ | NDF の `lib/branch_flow.py` のスキーマと許す値の表 |
 | `docs/versioning-and-distribution.md` | 変更 | 各ブランチの役割、選んで集める手順、戻すマージ、依存するスプリント、本番の不具合の直し、取り込み方を戻す順序、レビューの単位の表を持つ | `.ndf/worktree.json`（値の意味を説明する）、用語集 |
 | `AGENTS.md` | 変更 | 起点と宛先、チャネルの役割、取り込み方とレビューの単位の要点を持ち、手順を正本の文書へリンクで渡す | `docs/versioning-and-distribution.md` |
 | `CONTRIBUTING.md` | 変更 | NDF のスプリントの外の変更の起点と宛先（決定 4）を外部の貢献者へ示す | `AGENTS.md` |
@@ -43,7 +43,9 @@ docs/
 
 ### `.ndf/worktree.json` の書き換え
 
-`base_branch`・`production_branch`・`guard` は変えず、`branch_flow` を足す。足した後の全体は「内部のデータと定数」にある。
+`production_branch`・`guard` は変えず、`base_branch` を `main` にし、`branch_flow` を GitHub flow の行の値にする。書き換えた後の全体は「内部のデータと定数」にある。
+取り込み方は GitHub flow（`promotion: direct`。設計文書の決定 21）で、この値は今の NDF（`plugins/ndf/`）の取り込み方の表に無い。
+書き換えは ndf-next への入れ替え（11.0.0）と同じ時点で行う。行は #3572 が ndf-next の取り込み方の表へ足す。
 メインディレクトリの未コミットの同じファイル（`whole` の値）は、この worktree の書き換えに使わない（決定 6。扱いは「並行と排他」）。
 
 ### `docs/versioning-and-distribution.md` の節ごとの変更
@@ -58,7 +60,7 @@ docs/
 | 正式版を出す（この手順では `main` に〜） | `main` は `develop` の fast-forward から外れる | 段落を残し、比べる相手を「出した `release/v<版>`」だけにする |
 | 正式版を出す（Pull Request のベースは `develop`） | `--base develop` を必ず付ける | 宛先は PR の種類で決まる。設計・実装・確定仕様化の PR は `sprint/<名前>`、スプリントの検査の PR は `develop`、リリースの PR は `main`。`gh pr create` には `--base` を必ず付ける |
 | 正式版を出す（重いチェックを省く 2 条件） | 2 つ目は `develop` への push で通ったコミットからの差分 | 2 つ目の条件は宛先の宣言が `selected` のとき当たらないことを 1 文で足す（確定仕様の規則 3 へリンク） |
-| 正式版を出す（新しい小節 4 つ） | 無し | 「依存するスプリントを出す」「本番の不具合を直す」「取り込み方を戻す」（決定 20 の 4 段の順序）「PR の種類ごとのレビュー」（決定 1 の 5 行の表。値は宣言と同じ） |
+| 正式版を出す（新しい小節 4 つ） | 無し | 「依存するスプリントを出す」「本番の不具合を直す」「取り込み方を戻す」（決定 20 の 4 つのステップの順序）「PR の種類ごとのレビュー」（決定 1 の表から `release` の行を除いた 4 行の表。値は宣言と同じ） |
 
 新しい小節は `###` で「正式版を出す」の下に置く。この文書は 439 行あり（2026-11-13 に `wc -l` で数えた）、4 つの小節で 80 行前後増えると 500 行を超える見込みである。
 超えた分は、「正式版を出す」を別の文書へ分けずに縮める。置き換える段落（`develop` を本流とする説明・`--base develop` の段落）を
@@ -108,7 +110,7 @@ docs/
 
 ## 異常系の処理
 
-省く: 関数を足さず変えないため、関数の粒度の失敗が無い。宣言の値が許す組み合わせから外れたときは既存の `parse_flow` が指摘を返し、宣言を読む工程が止まる（設計文書の I1・I2）。運用の順序の失敗（メインディレクトリの取り込みの衝突・段 3〜段 4 の間に始めたスプリント）は「並行と排他」に置く
+省く: 関数を足さず変えないため、関数の粒度の失敗が無い。宣言の値が許す組み合わせから外れたときは ndf-next の宣言のスキーマの検査と、#3572 の詳細設計の `declaration.flow_of`・`declaration.review_problems` が断り、宣言を読む工程か main 宛ての PR のチェックが止まる（設計文書の I1・I2）。ai-plugins の値（`main` の 2 つのブランチ・4 種類の行）は実装 PR の確認の手順で見る。運用の順序の失敗（メインディレクトリの取り込みの衝突・この課題のスプリントのマージからそのリリースのマージまでの間に始めたスプリント）は「並行と排他」に置く
 
 ## 処理の手順
 
@@ -122,17 +124,16 @@ docs/
 ```json
 {
   "version": 1,
-  "base_branch": "develop",
+  "base_branch": "main",
   "production_branch": "main",
   "branch_flow": {
     "start": "production",
-    "integrate": "check",
+    "integrate": "release",
     "doc_prs": "sprint",
-    "promotion": "selected",
+    "promotion": "direct",
     "reviews": {
       "impl": {"checks": ["cross-review"], "diff": "pr"},
       "sprint": {"checks": ["cross-refactoring", "behavior"], "diff": "unchecked"},
-      "release": {"checks": ["cross-review"], "diff": "resolution"},
       "design": {"checks": ["cross-review"], "diff": "pr"},
       "spec": {"checks": [], "diff": "none"}
     }
@@ -143,19 +144,21 @@ docs/
 }
 ```
 
-`guard.allow_paths` は値を変えない。実装ではいまの複数行の書き方のまま残し、差分を `branch_flow` の追加だけにする。
+`guard.allow_paths` は値を変えない。実装ではいまの複数行の書き方のまま残す。レビューの単位の `release` の行は、GitHub flow の行がリリースの単位を選ばない（`release_units: false`）ため書けず、持たない。
 
 | 名前 | 種類 | 置き場 | 既定値 |
 | --- | --- | --- | --- |
 | `branch_flow.start` | 設定値 | `.ndf/worktree.json` | `production`（スプリントを `main` から切る） |
-| `branch_flow.integrate` | 設定値 | `.ndf/worktree.json` | `check`（スプリントの検査の後に `develop` へ入れる） |
+| `branch_flow.integrate` | 設定値 | `.ndf/worktree.json` | `release`（スプリントの PR の `main` へのマージがリリースになる。マージの前は検証の ref で試す） |
 | `branch_flow.doc_prs` | 設定値 | `.ndf/worktree.json` | `sprint`（設計 PR と確定仕様化の PR の宛先はスプリントブランチ） |
-| `branch_flow.promotion` | 設定値 | `.ndf/worktree.json` | `selected`（選んだスプリントだけをリリースブランチへ集める） |
-| `branch_flow.reviews` | 設定値 | `.ndf/worktree.json` | 5 種類の行（決定 1・決定 2） |
-| `base_branch` | 設定値 | `.ndf/worktree.json` | `develop`（変えない。開発版のチャネルと結合の場） |
+| `branch_flow.promotion` | 設定値 | `.ndf/worktree.json` | `direct`（スプリントの PR を `main` へ直接マージする。develop と常設のリリースブランチを持たない） |
+| `branch_flow.reviews` | 設定値 | `.ndf/worktree.json` | 4 種類の行（`impl`・`sprint`・`design`・`spec`。決定 1・決定 2） |
+| `base_branch` | 設定値 | `.ndf/worktree.json` | `main`（本番ブランチと同じ。develop を持たない） |
 | `production_branch` | 設定値 | `.ndf/worktree.json` | `main`（変えない） |
 
 キーの名前と許す値の正本は NDF の `lib/branch_flow.py`（取り込み方の表と `REVIEW_ALLOWED`）で、ai-plugins の側で値の一覧を持たない。
+`direct` の行（行の名前 `github-flow`。`start`・`doc_prs`・`integrate` が許す値と、`keeps_sprint: false`・`release_from: production`・`release_units: false` の列）は、
+ndf-next の取り込み方の表（`contracts/domains/branch-flows.json`）へ #3572 が足す。行の値は #3572 の設計の決定 5 にある。
 
 ## 並行と排他
 

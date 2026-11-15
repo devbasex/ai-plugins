@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -226,3 +228,149 @@ def test_notes_stop_without_the_included_cell(monkeypatch, world, tmp_path):
     with pytest.raises(mod.StepError) as e:
         notes(mod, world, path, [13])
     assert e.value.code == 3 and path.read_bytes() == before
+
+
+def test_ci_fact_names_checks_that_did_not_pass_with_the_reason():
+    """含む PR の CI が全部は通っていなければ、通らなかったチェックの名前と止めなかった理由を載せる（#3585）。"""
+    for p in (SCRIPT.parent, SCRIPT.parent / "lib"):
+        sys.path.insert(0, str(p))
+    from release_lib import included
+
+    checks = [
+        {"name": "pytest", "bucket": "pass"},
+        {"name": "smoke", "bucket": "skipping"},
+        {"name": "lint", "bucket": "skipping"},
+        {"name": "latest", "bucket": "fail"},
+    ]
+    assert included.ci_fact(checks) == "CI 1/4、飛ばした: smoke, lint、必須でない失敗: latest"
+    assert included.ci_fact([{"name": "pytest", "bucket": "pass"}]) == "CI 1/1"
+
+
+# ---- pr_fields の現状固定（I-007） ----
+
+
+def _included():
+    for p in (SCRIPT.parent, SCRIPT.parent / "lib"):
+        sys.path.insert(0, str(p))
+    import gh_call
+    from release_lib import included
+
+    return included, gh_call
+
+
+def _fake_gh(monkeypatch, gh_call, reply):
+    """`gh` の呼び出しを (argv, cwd) で記録し、reply(argv) を返す。"""
+    calls = []
+
+    def run(args, stdin=None, cwd=None):
+        calls.append((args, cwd))
+        return reply(args)
+
+    monkeypatch.setattr(gh_call, "RUNNER", run)
+    return calls
+
+
+def _numbers_in(args) -> list[int]:
+    return [int(n) for n in re.findall(r"p(\d+): pullRequest", args[-1])]
+
+
+def _repo_reply(nodes):
+    def reply(args):
+        return _gh_result(0, json.dumps({"data": {"repository": {f"p{n}": nodes(n) for n in _numbers_in(args)}}}), "")
+
+    return reply
+
+
+def _gh_result(code, out, err):
+    _, gh_call = _included()
+    return gh_call.GhResult(code, out, err)
+
+
+def test_pr_fields_flattens_the_nodes_and_marks_non_prs_as_none(monkeypatch):
+    included, gh_call = _included()
+    pr = {
+        "number": 11,
+        "title": "A",
+        "state": "MERGED",
+        "closingIssuesReferences": {"nodes": [{"number": 5, "url": "u5"}]},
+        "comments": {"nodes": [{"body": "x"}]},
+    }
+    calls = _fake_gh(monkeypatch, gh_call, _repo_reply(lambda n: {11: pr, 12: {"number": 12, "closingIssuesReferences": None}}.get(n)))
+    got, why = included.pr_fields(["11", 12, 11, 740], cwd="/r")
+    assert why == ""
+    assert got == {
+        11: {
+            "number": 11,
+            "title": "A",
+            "state": "MERGED",
+            "closingIssuesReferences": [{"number": 5, "url": "u5"}],
+            "comments": {"nodes": [{"body": "x"}]},
+        },
+        12: {"number": 12, "closingIssuesReferences": []},
+        740: None,
+    }
+    [(args, cwd)] = calls
+    assert cwd == "/r" and args[:6] == ["api", "graphql", "-F", "owner={owner}", "-F", "name={repo}"]
+    assert args[6] == "-f" and args[7].startswith(
+        "query=query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { "
+    )
+    assert _numbers_in(args) == [11, 12, 740]
+    assert "comments(last: 100)" not in args[7]
+
+
+def test_pr_fields_with_comments_reads_and_flattens_them(monkeypatch):
+    included, gh_call = _included()
+    calls = _fake_gh(
+        monkeypatch,
+        gh_call,
+        _repo_reply(lambda n: {"number": n, "comments": {"nodes": [{"body": "c"}]}} if n == 1 else {"number": n, "comments": None}),
+    )
+    got, why = included.pr_fields([1, 2], comments=True)
+    assert why == ""
+    assert got == {
+        1: {"number": 1, "closingIssuesReferences": [], "comments": [{"body": "c"}]},
+        2: {"number": 2, "closingIssuesReferences": [], "comments": []},
+    }
+    [(args, cwd)] = calls
+    assert cwd is None and " comments(last: 100) { nodes { body } }" in args[7]
+
+
+def test_pr_fields_reads_a_hundred_numbers_per_call(monkeypatch):
+    included, gh_call = _included()
+    calls = _fake_gh(monkeypatch, gh_call, _repo_reply(lambda n: {"number": n}))
+    got, why = included.pr_fields(range(1, 202))
+    assert why == "" and sorted(got) == list(range(1, 202))
+    assert [len(_numbers_in(a)) for a, _ in calls] == [100, 100, 1]
+
+
+def test_pr_fields_without_numbers_does_not_call_gh(monkeypatch):
+    included, gh_call = _included()
+    calls = _fake_gh(monkeypatch, gh_call, _repo_reply(lambda n: None))
+    assert included.pr_fields([]) == ({}, "")
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    ("code", "out", "err", "why"),
+    [
+        (127, "", "gh を実行できない: x", "gh が無い"),
+        (1, "", " HTTP 502 \n", "HTTP 502"),
+        (1, "not json", "", "not json"),
+        (0, "", "", "応答を読めない"),
+        (0, '{"data": {"repository": null}}', "", '{"data": {"repository": null}}'),
+        (0, '{"errors": []}', "", '{"errors": []}'),
+        (1, "", "e" * 400, "e" * 300),
+    ],
+)
+def test_pr_fields_returns_none_and_the_reason_when_unreadable(monkeypatch, code, out, err, why):
+    included, gh_call = _included()
+    _fake_gh(monkeypatch, gh_call, lambda args: _gh_result(code, out, err))
+    assert included.pr_fields([1]) == (None, why)
+
+
+def test_pr_fields_stops_at_the_first_unreadable_page(monkeypatch):
+    included, gh_call = _included()
+    ok = _repo_reply(lambda n: {"number": n})
+    calls = _fake_gh(monkeypatch, gh_call, lambda args: ok(args) if len(calls) == 1 else _gh_result(1, "", "boom"))
+    assert included.pr_fields(range(1, 202)) == (None, "boom")
+    assert len(calls) == 2

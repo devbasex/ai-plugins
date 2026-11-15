@@ -385,7 +385,7 @@ def section_prs(root, a):
     return prs, prev, to, extra_out
 
 
-def _pr_fields(to):
+def _pr_view_fields(to):
     """PR の読み出しの欄。終点 to があれば絞り込みに使うマージコミットも読む。"""
     return "title,body,state" + (",mergeCommit" if to else "")
 
@@ -400,7 +400,7 @@ def pr_titles(root, prs, skipped=None, to=None, extra_out=(), outside=None):
     """PR ごとに (番号, 箇条)（included.titles_of。スプリント経由と利用者向けの変化なしの PR は箇条にしない）。
     終点 to を渡すと、範囲の外の --prs のうち終点に入っていない番号を外して outside へ足す（included.drop_outside）。"""
     prs = included.as_included(prs)
-    data = pr_many(root, [p.number for p in prs], _pr_fields(to))
+    data = pr_many(root, [p.number for p in prs], _pr_view_fields(to))
     prs = _within_end(root, prs, data, to, extra_out, outside)
     return included.titles_of(prs, data, skipped)
 
@@ -550,13 +550,18 @@ def merge_commit_of(root, n):
     return ((d.get("mergeCommit") or {}).get("oid")) or None
 
 
+def _base_contains_head(root, base) -> bool:
+    """origin のベースブランチを取り直し、HEAD がその祖先か（マージ済みの PR を使い回してよいかの根拠）。"""
+    git(root, "fetch", "-q", "origin", base)
+    return git(root, "merge-base", "--is-ancestor", "HEAD", f"origin/{base}", check=False).returncode == 0
+
+
 def _reusable_release_pr(root, branch, base):
     """開発版の PR（release/v<版> → ベースブランチ）のうち使い回せるものを返す。無ければ None。"""
     pr = find_pr(root, branch, base, states=("OPEN", "MERGED"))
     if pr and pr["state"] == "MERGED":
         # マージ済みの PR へ後から積んだコミットは GitHub が開き直さずベースブランチに入らない。入っていなければ PR を作り直す
-        git(root, "fetch", "-q", "origin", base)
-        pr = pr if git(root, "merge-base", "--is-ancestor", "HEAD", f"origin/{base}", check=False).returncode == 0 else None
+        pr = pr if _base_contains_head(root, base) else None
     return pr
 
 
@@ -606,8 +611,7 @@ def _merged_sync_pr(root, branch, base):
     pr = find_pr(root, f"{branch}-sync", base, states=("MERGED",))
     if pr is None:
         return None
-    git(root, "fetch", "-q", "origin", base)
-    return pr["number"] if git(root, "merge-base", "--is-ancestor", "HEAD", f"origin/{base}", check=False).returncode == 0 else None
+    return pr["number"] if _base_contains_head(root, base) else None
 
 
 def _merge_sync_pr(root, a, plugin, branch, base, release_pr, lead=None, sections=False, merge=None):
@@ -708,33 +712,45 @@ def cmd_release(a):
     git(root, "fetch", "-q", "origin", "--tags")
     done = find_pr(root, branch, prod, states=("MERGED", "OPEN"))
     if done and done["state"] == "MERGED":
-        # 再開: 本番チャネルへのマージは済んでいる（取り消せない）。比べ直さず、無いものだけを作って続ける
         main_pr = done["number"]
-        git(root, "fetch", "-q", "origin")
-        merge = merge_commit_of(root, main_pr) or git(root, "rev-parse", f"origin/{prod}").stdout.strip()
-        if git(root, "merge-base", "--is-ancestor", approved, merge, check=False).returncode != 0:
-            raise StepError(f"マージ済みの本番の PR #{main_pr} のコミット {merge[:8]} が承認したコミット {approved[:8]} を含まない")
-        metrics["approved_sha"] = approved
-        items.append({"kind": "pr", "name": f"#{main_pr}", "result": "already_merged", "base": prod})
+        merge = _resume_merged_prod(ctx, approved, main_pr, items, metrics)
     else:
-        if git(root, "rev-parse", "-q", "--verify", f"refs/tags/{tag}", check=False).returncode == 0:
-            raise StepError(f"タグ {tag} は既にある")
-        # 承認したコミットの後に、版上げの外のコミットが release/v<版> に無いか（#815・#2436 の R2）。
-        # 照合に渡すのは元の release/v<版> の PR で、-sync の PR は渡さない（承認の後のベースブランチの変更を含むため）
-        allowed = approval.release_pr_allowed(root, release_pr, pr_view)
-        # 開発版の PR のマージで消えた release/v<版> を戻す。本番の照合と本番の PR の head はこの枝を読む
-        repo_lib.restore_branch(root, branch, run_git=git)
-        verdict = approval.check_approved(root, approved, branch, allowed)
-        if not verdict.ok:
-            emit(approval.gate(root, a, plugin, branch, verdict, items, metrics), EXIT_GATE)
-        metrics.update({"approved_sha": approved, "compared_head": verdict.tip, "tolerated": len(verdict.tolerated)})
-        main_pr, merge, verdict = _merge_prod_pr(root, a, plugin, branch, prod, release_pr, approved, allowed, verdict, items, metrics)
-        metrics.update({"compared_head": verdict.tip, "tolerated": len(verdict.tolerated)})
-        items += approval.tolerated_items(verdict)
-        items.append({"kind": "pr", "name": f"#{main_pr}", "result": "merged", "base": prod})
-        git(root, "fetch", "-q", "origin")
-        merge = merge or git(root, "rev-parse", f"origin/{prod}").stdout.strip()
+        main_pr, merge = _merge_new_prod(ctx, approved, release_pr, tag, items, metrics)
     _published(root, a, plugin, prod, main_pr, merge, items, metrics)
+
+
+def _resume_merged_prod(ctx, approved, main_pr, items, metrics):
+    """再開: 本番チャネルへのマージは済んでいる（取り消せない）。比べ直さず、無いものだけを作って続ける。マージコミットを返す。"""
+    root, prod = ctx.root, ctx.prod
+    git(root, "fetch", "-q", "origin")
+    merge = merge_commit_of(root, main_pr) or git(root, "rev-parse", f"origin/{prod}").stdout.strip()
+    if git(root, "merge-base", "--is-ancestor", approved, merge, check=False).returncode != 0:
+        raise StepError(f"マージ済みの本番の PR #{main_pr} のコミット {merge[:8]} が承認したコミット {approved[:8]} を含まない")
+    metrics["approved_sha"] = approved
+    items.append({"kind": "pr", "name": f"#{main_pr}", "result": "already_merged", "base": prod})
+    return merge
+
+
+def _merge_new_prod(ctx, approved, release_pr, tag, items, metrics):
+    """本番の PR を承認と照らしてマージする。(本番の PR 番号, マージコミット) を返す。"""
+    root, a, plugin, branch, prod = ctx.root, ctx.a, ctx.plugin, ctx.branch, ctx.prod
+    if git(root, "rev-parse", "-q", "--verify", f"refs/tags/{tag}", check=False).returncode == 0:
+        raise StepError(f"タグ {tag} は既にある")
+    # 承認したコミットの後に、版上げの外のコミットが release/v<版> に無いか（#815・#2436 の R2）。
+    # 照合に渡すのは元の release/v<版> の PR で、-sync の PR は渡さない（承認の後のベースブランチの変更を含むため）
+    allowed = approval.release_pr_allowed(root, release_pr, pr_view)
+    # 開発版の PR のマージで消えた release/v<版> を戻す。本番の照合と本番の PR の head はこの枝を読む
+    repo_lib.restore_branch(root, branch, run_git=git)
+    verdict = approval.check_approved(root, approved, branch, allowed)
+    if not verdict.ok:
+        emit(approval.gate(root, a, plugin, branch, verdict, items, metrics), EXIT_GATE)
+    metrics.update({"approved_sha": approved, "compared_head": verdict.tip, "tolerated": len(verdict.tolerated)})
+    main_pr, merge, verdict = _merge_prod_pr(root, a, plugin, branch, prod, release_pr, approved, allowed, verdict, items, metrics)
+    metrics.update({"compared_head": verdict.tip, "tolerated": len(verdict.tolerated)})
+    items += approval.tolerated_items(verdict)
+    items.append({"kind": "pr", "name": f"#{main_pr}", "result": "merged", "base": prod})
+    git(root, "fetch", "-q", "origin")
+    return main_pr, merge or git(root, "rev-parse", f"origin/{prod}").stdout.strip()
 
 
 def _prod_ops() -> reviewed.ProdOps:
@@ -954,7 +970,7 @@ def included_pr_facts(prs, data, checks, repo):
         n, d = p.number, data.get(p.number) or {}
         oid = (d.get("mergeCommit") or {}).get("oid") or ""
         pr_checks = checks[n]
-        passed = sum(1 for c in pr_checks if c.get("bucket") == "pass")
+        passed = included.ci_passed(pr_checks)
         url = d.get("url") or f"https://github.com/{repo}/pull/{n}"
         items.append(
             {
@@ -970,7 +986,7 @@ def included_pr_facts(prs, data, checks, repo):
                 "no_change": included.no_change(d),
             }
         )
-        facts = [str(d.get("state", "")), oid[:8] if oid else "—", f"CI {passed}/{len(pr_checks)}"]
+        facts = [str(d.get("state", "")), oid[:8] if oid else "—", included.ci_fact(pr_checks)]
         rows.append(included.included_row(n, d.get("title", ""), facts, p.via, included.no_change(d)))
     return items, rows
 
@@ -1095,7 +1111,7 @@ def pr_notes(root, prs, skipped=None, replacing=None, unreadable=None, data=None
     """PR ごとの配る中身・危険・移行の手順（included.notes_of）。data は pr_many の出力（渡さなければここで読む）。
     終点 to を渡すと、範囲の外の --prs のうち終点に入っていない番号を外して outside へ足す（included.drop_outside）。"""
     prs = included.as_included(prs)
-    data = data if data is not None else pr_many(root, [p.number for p in prs], _pr_fields(to))
+    data = data if data is not None else pr_many(root, [p.number for p in prs], _pr_view_fields(to))
     prs = _within_end(root, prs, data, to, extra_out, outside)
     return included.notes_of(prs, data, skipped, replacing, unreadable)
 
@@ -1169,14 +1185,14 @@ def cmd_notes(a):
     reps, bad = [], []
     data = pr_many(root, [p.number for p in prs], "title,body,state,closingIssuesReferences", comments=True) if path else None
     notes = pr_notes(root, prs, skipped, reps, bad, data, to, extra_out, outside)
-    before = {n: items for n, items, *_ in notes}
+    before = {x.number: x.changes for x in notes}
     after, rep_items = replaced.apply(before, reps)  # 後の PR が置き換えた箇条を除く（#1834）
     rep_items += bad
     gone = sum(len(before[n]) - len(after[n]) for n in before)
-    bullets = [f"- {i}" for n, *_ in notes for i in after[n]]
-    risks = [f"- {i}" for _, _, rs, *_ in notes for i in rs]
-    migration = [f"- {i}" for *_, ms in notes for i in ms]
-    fallback = sum(1 for *_, by_title, _ in notes if by_title)
+    bullets = [f"- {i}" for x in notes for i in after[x.number]]
+    risks = [f"- {i}" for x in notes for i in x.risks]
+    migration = [f"- {i}" for x in notes for i in x.migration]
+    fallback = sum(1 for x in notes if x.by_title)
     if path:
         _emit_approval_notes(root, a, path, prs, data, notes, bullets, risks, migration, skipped, rep_items, gone)
         return

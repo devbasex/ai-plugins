@@ -5,7 +5,9 @@
 
 - `observe(repo, plugin, base, production)`: `git fetch -q origin --tags` の後に、origin のベースブランチと本番のブランチの
   `plugin.json` の版と、`<plugin>--v<版>` の正式版のタグを読む。読めなかったものは `unreadable` に名前で入れる
+- `fetch_origin(repo)`: `git fetch -q origin --tags` を打ち、落ちたら git の stderr を返す（取り直せないことを版を読めないことと分けて伝える側が使う）
 - `decide_dev(obs, level)`: 次に空いている開発版
+- `collected_release(obs)`: 並列の計画のまとめたリリースで出す正式版（最新のタグより大きい版）
 - `taken(obs, version)`: その版がもう出ているか（開発版はベースブランチの版が同じか大きい、正式版は同じ版のタグがある）
 - `own_released(repo, branch, base)`: `branch` → `base` のマージ済みの PR があるか（照会できなければ None）
 
@@ -83,12 +85,30 @@ def _version_at(repo: str | Path, ref: str, rel: str) -> str | None:
     return v if isinstance(v, str) and versions.parse_version(v) else None
 
 
+def _release_tags(stdout: str, plugin: str) -> list[str]:
+    """`git tag --list` の出力から、プラグインの接頭辞を外した正式版（接尾辞の無い SemVer）だけを出た順に返す。"""
+    head = f"{plugin}--v"
+    tags: list[str] = []
+    for t in stdout.split():
+        v = t[len(head) :]
+        ver = versions.parse_version(v)
+        if ver is not None and not ver.prerelease:
+            tags.append(v)
+    return tags
+
+
+def fetch_origin(repo: str | Path) -> str | None:
+    """origin をタグごと取り直す。取り直せれば None、落ちたら git の stderr（空なら終了コード）を返す。"""
+    p = _git_run(repo, "fetch", "-q", "origin", "--tags")
+    return None if p.returncode == 0 else ((p.stderr or "").strip() or f"git fetch の終了コード {p.returncode}")
+
+
 def observe(repo: str | Path, plugin: str, base: str, production: str | None, fetch: bool = True, rel: str | None = None) -> Observed:
     """origin を取り直してから、ベースブランチ・本番のブランチ・タグを読む。本番のブランチが無ければ読まない（読めないに数えない）。
     タグが 1 つも無いことは読めないに数えない。取り直しに落ちたら、読んだ値が古いかもしれないため `origin` を読めないに数える。
     `rel` は `plugin.json` のリポジトリの根からの位置で、省けばベースブランチの木から探す。"""
     unreadable: list[str] = []
-    if fetch and _git_run(repo, "fetch", "-q", "origin", "--tags").returncode:
+    if fetch and fetch_origin(repo) is not None:
         unreadable.append("origin")
     base_ref = f"origin/{base}"
     rel = rel or plugin_json_rel(repo, base_ref, plugin)
@@ -104,12 +124,7 @@ def observe(repo: str | Path, plugin: str, base: str, production: str | None, fe
     if p.returncode:
         unreadable.append("tags")
     else:
-        head = f"{plugin}--v"
-        for t in p.stdout.split():
-            v = t[len(head) :]
-            ver = versions.parse_version(v)
-            if ver is not None and not ver.prerelease:
-                tags.append(v)
+        tags = _release_tags(p.stdout, plugin)
     latest = max(tags, key=versions.version_order) if tags else None
     return Observed(plugin, base_ref, base_version, prod_ref, prod_version, latest, tags, unreadable)
 
@@ -130,6 +145,17 @@ def decide_dev(obs: Observed, level: str = "patch") -> Decision:
     else:
         v = f"{versions.next_version(_max_base([obs.latest_tag, obs.production_version, b]), level)}-dev.1"
     return Decision(v, versions.release_base(v), "decided", observed=obs.as_dict())
+
+
+def collected_release(obs: Observed) -> str | None:
+    """並列の計画のまとめたリリースで出す正式版（#3551）。ベースブランチの版の基底が最新のタグより大きければその基底、
+    同じか小さければ（同期の PR が出した版へ揃えた後など）最新のタグの次の PATCH。読めないものがあれば決めない。"""
+    if obs.unreadable or not obs.base_version:
+        return None
+    b = versions.release_base(obs.base_version)
+    if obs.latest_tag and versions.compare_versions(b, obs.latest_tag) <= 0:
+        return versions.next_patch(obs.latest_tag)
+    return b
 
 
 def taken(obs: Observed, version: str, how: str = "explicit", level: str = "patch") -> Decision:

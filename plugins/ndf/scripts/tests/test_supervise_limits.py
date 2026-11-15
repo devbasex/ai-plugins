@@ -138,7 +138,8 @@ def _failing_sets(plans: dict[str, dict]) -> dict[frozenset, tuple[str, dict]]:
 
 def test_every_fix_loop_shape_gets_through_each_fix_loop_three_times(plans, tmp_path):
     reps = _failing_sets(plans)
-    assert len(reps) >= 4, sorted(n for n, _ in reps.values())  # impl・check・release・release-prod の形
+    # impl・check・release（開発版）の形。本番のリリースは直しの段を持たず（#3572）、修正のループが無いので数えない
+    assert len(reps) >= 3, sorted(n for n, _ in reps.values())
     for failing, (name, plan) in reps.items():
         visits: dict[str, int] = {}
 

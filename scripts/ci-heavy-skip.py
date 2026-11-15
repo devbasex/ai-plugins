@@ -50,7 +50,7 @@ import diff_kinds  # noqa: E402
 
 BEHAVIOR_AS_CODE = {"runtime-plugin-smoke.yml"}
 # 自分の workflow で確かめるディレクトリと、その workflow（規則 2b）
-SELF_TESTED = ("plugins/ndf-next/", ".github/workflows/ndf-next.yml")
+SELF_TESTED = ("plugins/ndf-next/", ".github/workflows/ndf-next.yml", ".github/workflows/ndf-next-checks.yml")
 MANIFEST_RE = re.compile(
     r"^(\.claude-plugin/marketplace\.json"
     r"|plugins/.+/(\.claude-plugin/|\.codex-plugin/)?plugin\.json)$"
