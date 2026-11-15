@@ -65,7 +65,7 @@
             "description": "止まった理由と破れの理由（cd・version・level・verify-ref・reviews）"
           },
           "value": {
-            "description": "値の項目（value）の値。outputs（スプリントの文脈の閉じた語彙）に無い値を name の名前で返す（承認・次の手・SHA・タグ・版上げの PR・bump の state・上げ幅・検証の ref など）"
+            "description": "値の項目（value）の値。outputs（スプリントの文脈の閉じた語彙）に無い値を name の名前で返す（承認・次の手・SHA・タグ・版上げの PR・bump の state・上げ幅・検証用ブランチ など）"
           },
           "outcome": {
             "type": "string",

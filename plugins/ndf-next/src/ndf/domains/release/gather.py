@@ -85,7 +85,7 @@ def fetch_pull(repo_git: git_mod.Git, number: int) -> str:
 
 
 def labels_of(hub: GitHub, number: int) -> list[str]:
-    """PR のラベルの名前（上げ幅の宣言を読む）。"""
+    """PR のラベルの名前（上げ幅のラベルを読む）。"""
     rows = hub.rest("GET", f"/repos/{hub.repo}/issues/{int(number)}/labels")
     return [text_of(r["name"]) for r in rows if isinstance(r, dict) and "name" in r] if isinstance(rows, list) else []
 

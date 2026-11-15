@@ -7,7 +7,7 @@
     "base": {"summary": "PR の宛先のブランチ。省けば ndf route がリポジトリの根の .ndf/worktree.json の base_branch、宣言が無ければ origin の既定ブランチにする"},
     "title": {"summary": "PR の題"},
     "body_file": {"summary": "PR の本文のファイル"},
-    "pr": {"summary": "本番の PR の番号（工程「デプロイ」の入力 pr）。本番のプランはこの PR を承認した先端との照合付きでマージする"},
+    "pr": {"summary": "本番の PR の番号（工程「デプロイ」の入力 pr）。本番のプランはこの PR を承認した headとの照合付きでマージする"},
     "issue": {"summary": "作業の課題の番号（課題が 1 つのとき課題から写す）。実装のプランは worker の後に、この課題の受け入れ条件の確認の区分を照らす（ndf loop acceptance check）"},
     "issues": {"summary": "作業の課題の番号の並び（工程の入力 issues から写す。課題が 2 つ以上のスプリントでも決まる）。完了判定は、この課題の設計文書に名前の出るテストが HEAD にあるかを判定する（ndf loop design-tests）", "list": true},
     "test_command": {"summary": "手元で打つテストのシェルのコマンド 1 つ。CI の落ちの確かめ直しには使わない（落ちたテストを持つ suite の scope_command で打つ）"},

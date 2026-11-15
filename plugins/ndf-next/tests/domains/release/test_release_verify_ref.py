@@ -1,4 +1,4 @@
-"""検証の ref の組み立て（本物の git と、偽の GitHub。#3572 の決定 9・I9・I12）。"""
+"""検証用ブランチ の組み立て（本物の git と、偽の GitHub。#3572 の決定 9・I9・I12）。"""
 
 from __future__ import annotations
 
@@ -57,7 +57,7 @@ def _show(work: Path, path: str) -> str:
 
 
 def test_build_merges_the_open_prs_renames_the_marketplace_and_sets_the_verify_version(tmp_path: Path) -> None:
-    """受け入れ条件 12: main の先端に P1・P2 を入れ、2 つ目のマーケットプレイスの名前と検証の版を持つ。"""
+    """受け入れ条件 12: main の先端に P1・P2 を入れ、検証用マーケットプレイスの名前と検証の版を持つ。"""
     work = _origin(tmp_path, {1: ("a.txt", "a\n"), 2: ("b.txt", "b\n")})
     built = verify_ref.build(work, _hub(_row(2), _row(1)), DECL, NOW)
     assert built.ref == "verify/next" and built.version == "1.2.3-next.20261115120000"
@@ -70,7 +70,7 @@ def test_build_merges_the_open_prs_renames_the_marketplace_and_sets_the_verify_v
 
 
 def test_rebuilding_is_a_child_of_the_previous_verify_ref(tmp_path: Path) -> None:
-    """I12: 組み直しは前の検証の ref の先端を親に持ち、fast-forward でだけ進む。"""
+    """I12: 組み直しは前の検証用ブランチ の先端を親に持ち、fast-forward でだけ進む。"""
     work = _origin(tmp_path, {1: ("a.txt", "a\n"), 2: ("b.txt", "b\n")})
     first = verify_ref.build(work, _hub(_row(1)), DECL, NOW)
     second = verify_ref.build(work, _hub(_row(1), _row(2)), DECL, NOW.replace(minute=5))

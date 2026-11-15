@@ -23,7 +23,7 @@ from typing import NamedTuple
 
 from ndf.domains.release import version_decide
 
-# 上げ幅の宣言のラベル → 上げ幅
+# 上げ幅のラベルのラベル → 上げ幅
 LEVEL_LABELS = {"release:major": "major", "release:minor": "minor", "release:patch": "patch"}
 # 宣言が無い PR の上げ幅（要求の起票者の推定 S8。宣言の付け忘れでマージを止めない）
 DEFAULT_LEVEL = "patch"

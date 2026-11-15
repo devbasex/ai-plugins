@@ -1,10 +1,10 @@
-"""検証の ref の組み立ての判定（純粋な関数。#3572 の決定 9）。
+"""検証用ブランチ の組み立ての判定（純粋な関数。#3572 の決定 9）。
 
 | 関数 | 決めること |
 | --- | --- |
-| `included` | 含める PR（下書きでなく、head が検証の ref でも版上げの PR でもなく、head が同じリポジトリのもの。番号の順） |
+| `included` | 含める PR（下書きでなく、head が検証用ブランチ でも版上げの PR でもなく、head が同じリポジトリのもの。番号の順） |
 | `version_of` | 検証の版 `<main の版>-next.<組んだ時刻 UTC の YYYYMMDDHHMMSS>`（版が変わらない ref の移動は利用者のキャッシュに残るため） |
-| `marketplace_of` | `marketplace.json` の名前を 2 つ目のマーケットプレイスの名前へ書き換えた中身 |
+| `marketplace_of` | `marketplace.json` の名前を 検証用マーケットプレイスの名前へ書き換えた中身 |
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ class OpenPull(NamedTuple):
 
 
 def included(pulls: Sequence[OpenPull], verify_ref: str, repo: str) -> list[OpenPull]:
-    """検証の ref に含める PR を番号の順に返す（フォークの PR は含めない）。"""
+    """検証用ブランチ に含める PR を番号の順に返す（フォークの PR は含めない）。"""
     kept = [
         p
         for p in pulls

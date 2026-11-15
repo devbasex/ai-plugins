@@ -1,14 +1,14 @@
-"""main へマージする前の PR を集めた検証の ref を組み直す（workflow が main 宛ての PR の出来事で打つ。#3572 の決定 9）。
+"""main へマージする前の PR を集めた検証用ブランチ を組み直す（workflow が main 宛ての PR の出来事で打つ。#3572 の決定 9）。
 
-1. 宣言から検証の ref の名前と 2 つ目のマーケットプレイスの名前を読む（`declaration.verify_of`）
+1. 宣言から検証用ブランチ の名前と 検証用マーケットプレイスの名前を読む（`declaration.verify_of`）
 2. main 宛ての開いた PR のうち、含めるもの（`verify_decide.included`）を番号の順に並べる
 3. 一時の worktree に main の先端を取り出し、PR の先端を順に取り込みのマージで入れる。衝突すればそこで止め、ref を動かさない
-4. `marketplace.json` の名前を 2 つ目のマーケットプレイスの名前へ、プラグインの版を検証の版へ書き換えたコミットを足す
-5. 前の検証の ref の先端と 4 のコミットを親にし、4 の木を持つコミットを作って fast-forward で push する（強制 push を使わない。I12）
+4. `marketplace.json` の名前を 検証用マーケットプレイスの名前へ、プラグインの版を検証の版へ書き換えたコミットを足す
+5. 前の検証用ブランチ の先端と 4 のコミットを親にし、4 の木を持つコミットを作って fast-forward で push する（強制 push を使わない。I12）
 
 取り込んだ PR の木のスクリプト・依存の導入・hook を実行しない（git のマージとファイルの書き換えだけ）。一時の worktree を作る・
 使う git は起動ごとに `core.hooksPath` を無効にする（`NO_HOOKS`。`core.hooksPath` が追跡されたディレクトリを指す環境で、PR が
-変えた hook が `--no-verify` の効かない場面でも走らず、渡した認証情報を読めない）。検証の ref は main へ戻さない（I9）。
+変えた hook が `--no-verify` の効かない場面でも走らず、渡した認証情報を読めない）。検証用ブランチ は main へ戻さない（I9）。
 """
 
 from __future__ import annotations
@@ -51,7 +51,7 @@ class VerifyEscape(Exception):
 
 
 class Verified(NamedTuple):
-    """組んだ検証の ref。`included` は含めた PR の (番号, 先端)。"""
+    """組んだ検証用ブランチ。`included` は含めた PR の (番号, 先端)。"""
 
     ref: str
     head: str
@@ -85,11 +85,11 @@ def _merge_pulls(work: git_mod.Git, pulls: Sequence[verify_decide.OpenPull]) -> 
     for p in pulls:
         ref = gather.fetch_pull(work, p.number)
         if not gather.merge_or_abort(work, ("--quiet", "--no-edit", "--no-verify", git_mod.END_OF_OPTIONS, ref)):
-            raise VerifyConflict(p.number, f"#{p.number} を検証の ref へ取り込めない（ほかの PR と衝突する）")
+            raise VerifyConflict(p.number, f"#{p.number} を検証用ブランチ へ取り込めない（ほかの PR と衝突する）")
 
 
 def _commit_on_top(work: git_mod.Git, previous: str | None, message: str) -> str:
-    """今の木を持ち、前の検証の ref の先端 `previous` と HEAD を親にするコミット（初回は HEAD をそのまま使う）。"""
+    """今の木を持ち、前の検証用ブランチ の先端 `previous` と HEAD を親にするコミット（初回は HEAD をそのまま使う）。"""
     head = work.rev_parse("HEAD")
     if previous is None:
         return head
@@ -97,7 +97,7 @@ def _commit_on_top(work: git_mod.Git, previous: str | None, message: str) -> str
 
 
 def _previous(repo_git: git_mod.Git, ref: str) -> str | None:
-    """origin の検証の ref の先端（無ければ None）。"""
+    """origin の検証用ブランチ の先端（無ければ None）。"""
     if not gather.remote_has_branch(repo_git, ref):
         return None
     gather.fetch(repo_git, ref)
@@ -114,7 +114,7 @@ def _contained(work_root: Path) -> None:
         targets += [work_root / p.dir / m for m in plugins_mod.MANIFESTS]
     outside = [str(r) for t in targets if not (r := t.resolve()).is_relative_to(top)]
     if outside:
-        raise VerifyEscape(f"検証の ref の書き換え先が一時の worktree の外を指す（書き換えない）: {', '.join(outside)}")
+        raise VerifyEscape(f"検証用ブランチ の書き換え先が一時の worktree の外を指す（書き換えない）: {', '.join(outside)}")
 
 
 def _rewrite(work_root: Path, marketplace: str, now: datetime) -> str:
@@ -133,7 +133,7 @@ def _rewrite(work_root: Path, marketplace: str, now: datetime) -> str:
 
 
 def build(root: Path, hub: GitHub, decl: decl_mod.VerifyDecl, now: datetime) -> Verified:
-    """一時の worktree で検証の ref を組み直し、fast-forward で push する（I9・I12）。衝突すれば ref を動かさず `VerifyConflict`。"""
+    """一時の worktree で検証用ブランチ を組み直し、fast-forward で push する（I9・I12）。衝突すれば ref を動かさず `VerifyConflict`。"""
     decl_mod.require_github_flow(root)
     production = decl_mod.production_branch(root)
     repo_git = git_mod.Git(root)
@@ -153,7 +153,7 @@ def build(root: Path, hub: GitHub, decl: decl_mod.VerifyDecl, now: datetime) -> 
         work.run("commit", "--quiet", "--no-verify", "-m", message)
         head = _commit_on_top(work, previous, message)
         if previous is not None and not work.is_ancestor(previous, head):
-            raise git_mod.GitError(f"組んだコミット {head[:12]} が前の検証の ref {previous[:12]} を祖先に持たない（push しない）")
+            raise git_mod.GitError(f"組んだコミット {head[:12]} が前の検証用ブランチ {previous[:12]} を祖先に持たない（push しない）")
         work.run("push", "--quiet", "--", git_mod.ORIGIN, f"{head}:refs/heads/{decl.ref}")
     finally:
         repo_git.attempt("worktree", "remove", "--force", "--", str(path))

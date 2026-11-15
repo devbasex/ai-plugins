@@ -18,7 +18,7 @@
 | 関数 | 宣言 | 読むもの |
 | --- | --- | --- |
 | `flow_of`・`require_github_flow`・`review_problems` | `.ndf/worktree.json` の `branch_flow` | 取り込み方の表（`branch-flows`）の行。ndf-next のリリースは行 `github-flow` だけを扱う |
-| `verify_of` | `.ndf/project.json` の `delivery` の検証の行（`channel: verify`） | 検証の ref の名前と 2 つ目のマーケットプレイスの名前 |
+| `verify_of` | `.ndf/project.json` の `delivery` の検証の行（`channel: verify`） | 検証用ブランチ の名前と 検証用マーケットプレイスの名前 |
 """
 
 from __future__ import annotations
@@ -206,13 +206,14 @@ def production_branch(root: Path) -> str:
 
 # ndf-next のリリースが扱う取り込み方の表の行（スプリントの PR を本番ブランチへ直接マージする行。#3572 の決定 5）
 GITHUB_FLOW = facts.ids("branch-flows", promotion="direct")[0]
-FLOW_CHOICES = ("start", "doc_prs", "integrate")
-# 実装の差分を cross-review するレビューの単位の種類（#3119 の I2）
-CODE_REVIEW_KINDS = ("impl", "sprint")
+# 宣言が表の行の許す値から選ぶ鍵（表の配列の列のうち、レビューの単位の種類の列を除いたもの。事実の表から読む）
+FLOW_CHOICES = tuple(
+    c for c, spec in facts.table("branch-flows").columns.items() if spec.get("type") == "array" and c != "review_kinds"
+)
 
 
 class VerifyDecl(NamedTuple):
-    """検証の ref の名前と、それを指す 2 つ目のマーケットプレイスの名前。"""
+    """検証用ブランチ の名前と、それを指す 検証用マーケットプレイスの名前。"""
 
     ref: str
     marketplace: str
@@ -279,9 +280,10 @@ def review_problems(root: Path) -> list[dict[str, str]]:
         for kind in reviews
         if kind not in row["review_kinds"]
     ]
-    code = [k for k in CODE_REVIEW_KINDS if k in reviews]
-    if len(code) == len(CODE_REVIEW_KINDS) and not any(_reviews_cross(reviews[k]) for k in code):
-        detail = f"{'・'.join(CODE_REVIEW_KINDS)} のどちらも実装の差分を cross-review しない"
+    code_kinds = ("impl", "sprint")  # 実装の差分を cross-review するレビューの単位の種類（#3119 の I2）
+    code = [k for k in code_kinds if k in reviews]
+    if len(code) == len(code_kinds) and not any(_reviews_cross(reviews[k]) for k in code):
+        detail = f"{'・'.join(code_kinds)} のどちらも実装の差分を cross-review しない"
         out.append({"kind": "reviews", "name": "cross-review", "detail": detail})
     return out
 
@@ -307,8 +309,8 @@ def verify_of(root: Path) -> VerifyDecl:
 
 
 def optional_verify_ref(root: Path) -> str | None:
-    """宣言の検証の ref の名前（検証の行が無ければ None。検証の ref の判定を飛ばす）。"""
+    """宣言の検証用ブランチ の名前（検証の行が無ければ None。検証用ブランチ の判定を飛ばす）。"""
     try:
         return verify_of(root).ref
-    except DeclarationError:  # noqa: NDF401 ファイル: 検証の行の無いリポジトリは検証の ref を持たない
+    except DeclarationError:  # noqa: NDF401 ファイル: 検証の行の無いリポジトリは検証用ブランチ を持たない
         return None

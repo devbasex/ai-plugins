@@ -9,10 +9,10 @@
 | `approval-check` | workflow | `trail.check`（証跡の判定を commit status へ） |
 | `merge` | 本番のプラン・workflow | `land`（証跡の後の照合付きのマージ。同期の PR を作らない。止まったら次の手を値の項目 `moves` に出す） |
 | `confirm` | 本番のプラン | `confirm`（CD の版上げの PR のマージ・タグ・GitHub Release を待ち、作った版を記録する） |
-| `guard` | `merge`・`check`・`close` のプラン | `release_plan.is_production_pr`（本番の PR をマージせずにデプロイの工程へ渡す。検証の ref を main へ入れない） |
+| `guard` | `merge`・`check`・`close` のプラン | `release_plan.is_production_pr`（本番の PR をマージせずにデプロイの工程へ渡す。検証用ブランチ を main へ入れない） |
 | `bump` | workflow（main への push） | `bump`（版上げの PR を作り・進め・置き換え、照合付きでマージする） |
-| `pr-check` | workflow（main 宛ての PR） | `pr_check.check`（版数・上げ幅のラベル・検証の ref・レビューの単位の検査） |
-| `verify-ref` | workflow（main 宛ての PR の出来事） | `verify_ref.build`（検証の ref を組み直す） |
+| `pr-check` | workflow（main 宛ての PR） | `pr_check.check`（版数・上げ幅のラベル・検証用ブランチ・レビューの単位の検査） |
+| `verify-ref` | workflow（main 宛ての PR の出来事） | `verify_ref.build`（検証用ブランチ を組み直す） |
 | `record` | 本番のプラン・workflow | `record.write`（含めた PR の各々へリリース記録を書く。`confirm` の後） |
 | `verification-record` | 会話のセッション | `record.write_verification`（リリース後テストの記録を、リリース記録と同じ PR へ書く） |
 | `records` | 会話のセッション | `record.read`（PR のリリース記録とリリース後テストの記録を読む） |
@@ -228,7 +228,7 @@ def _merge_result(args: argparse.Namespace, done: land.Landed, version: str | No
 def cmd_guard(args: argparse.Namespace) -> dict:
     verify_ref_name = decl_mod.optional_verify_ref(Path(args.root))
     if verify_ref_name is not None and verify_ref_name in args.branch:
-        detail = f"{verify_ref_name}: 検証の ref は main へ戻さない（マージしない）"
+        detail = f"{verify_ref_name}: 検証用ブランチ は main へ戻さない（マージしない）"
         return result.stopped(TOOL, "refused", detail)
     try:
         production = _production_of(args)

@@ -606,7 +606,7 @@
             }
           ],
           "default": null,
-          "description": "検証の行（channel が verify）の検証の ref と 2 つ目のマーケットプレイスの名前（#3572 の決定 9）"
+          "description": "検証の行（channel が verify）の検証用ブランチ と 検証用マーケットプレイスの名前（#3572 の決定 9）"
         }
       },
       "required": [
@@ -665,7 +665,7 @@
     },
     "DeliveryVerify": {
       "additionalProperties": false,
-      "description": "検証の ref の名前と、検証の ref が持つ 2 つ目のマーケットプレイスの名前。読み手は ndf.domains.release.declaration.verify_of",
+      "description": "検証用ブランチ の名前と、検証用ブランチ が持つ 検証用マーケットプレイスの名前。読み手は ndf.domains.release.declaration.verify_of",
       "properties": {
         "ref": {
           "minLength": 1,

@@ -5,7 +5,7 @@
 
 | PR | 破れ |
 | --- | --- |
-| head が検証の ref | `verify-ref`（ほかを見ない。検証の ref は main へ戻さない） |
+| head が検証用ブランチ | `verify-ref`（ほかを見ない。検証用ブランチ は main へ戻さない） |
 | head が `release/v` で、差分が版のファイルと CHANGELOG だけ（版上げの PR） | 版数の破れを数えない |
 | それ以外で、プラグインの定義の `version` が merge-base と PR の先端で違う | `version`（版数は CD がマージの時点に上げる） |
 | 上げ幅のラベルが 2 つ以上 | `level` |
@@ -27,7 +27,7 @@ from ndf.domains.release import plugins as plugins_mod
 
 # 版数の破れの理由
 VERSION_DETAIL = "版数は CD がマージの時点に上げる（PR は版数を変えない）"
-VERIFY_DETAIL = "検証の ref は main へ戻さない"
+VERIFY_DETAIL = "検証用ブランチ は main へ戻さない"
 
 
 class PrFacts(NamedTuple):
@@ -43,7 +43,7 @@ class PrFacts(NamedTuple):
 
 
 def problems(facts: PrFacts) -> list[dict[str, str]]:
-    """PR の事実から、版数・上げ幅のラベル・検証の ref の破れを 1 件ずつ返す（モジュールの説明の表）。"""
+    """PR の事実から、版数・上げ幅のラベル・検証用ブランチ の破れを 1 件ずつ返す（モジュールの説明の表）。"""
     if facts.verify_ref is not None and facts.head_ref == facts.verify_ref:
         return [{"kind": "verify-ref", "name": facts.head_ref, "detail": VERIFY_DETAIL}]
     out = []

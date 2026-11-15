@@ -132,7 +132,7 @@ def test_guard_hands_a_production_pr_to_the_deploy_stage(monkeypatch, capsys) ->
 
 
 def test_guard_refuses_the_verify_ref(monkeypatch, capsys, tmp_path) -> None:
-    """受け入れ条件 14・I9: head が検証の ref なら refused（終了コード 1）で止まる。"""
+    """受け入れ条件 14・I9: head が検証用ブランチ なら refused（終了コード 1）で止まる。"""
     (tmp_path / ".ndf").mkdir()
     row = {
         "target": "検証版",
@@ -147,7 +147,7 @@ def test_guard_refuses_the_verify_ref(monkeypatch, capsys, tmp_path) -> None:
     monkeypatch.setattr(release_cli, "_hub", lambda args: hub)
     code = release_cli.main(["guard", "--root", str(tmp_path), "--branch", "verify/next", "--production", "main"])
     out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
-    assert code == 1 and out["cause"]["kind"] == "refused" and "検証の ref は main へ戻さない" in out["cause"]["detail"]
+    assert code == 1 and out["cause"]["kind"] == "refused" and "検証用ブランチ は main へ戻さない" in out["cause"]["detail"]
 
 
 @pytest.mark.parametrize("pulls", [{8: pull(number=8, base="develop")}, {}])

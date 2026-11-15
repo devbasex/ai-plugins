@@ -452,7 +452,7 @@ def test_issue_3487_production_merge_stops_before_merging_with_untrusted_token()
     assert not done.merged and done.kind == "refused" and "NDF_RELEASE_TOKEN" in done.detail and hub.merged == []
 
 
-# --- #3572: 承認した先端だけを本番ブランチへ入れ、承認の後にコードを直さない -----------------------------
+# --- #3572: 承認した headだけを本番ブランチへ入れ、承認の後にコードを直さない -----------------------------
 
 MERGE_SHA = "c" * 40
 
@@ -548,7 +548,7 @@ def test_moved_head_after_the_approval_is_not_merged_and_names_both_heads() -> N
 
 
 def test_gate_approval_merge_reports_the_gate_route() -> None:
-    """受け入れ条件 5: 承認ゲートで承認した先端を、その先端との照合付きでマージし、結果に経路 gate を載せる。"""
+    """受け入れ条件 5: 承認ゲートで承認した headを、その先端との照合付きでマージし、結果に経路 gate を載せる。"""
     hub = FakeHub(pulls={7: pull()}, comments_of={7: [_gate_trail(HEAD)]})
     hub.responses[("POST", "/repos/o/r/pulls")] = {"number": 8}
     hub.responses[("GET", "/repos/o/r/pulls/7")] = _merged_raw(HEAD, by="octocat")
