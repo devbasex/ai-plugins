@@ -7367,6 +7367,24 @@
       "pending_source": "issues/issue-3395-design.md"
     },
     {
+      "term": "マシンに依らない条件",
+      "context": "ndf-workflow",
+      "meaning": "同じ入力なら、合否がコードの振る舞いと、条件の文に書いた測る場所だけで決まる受け入れ条件。正しさ・回数と計算量・同じマシンの上で測った基準との相対の 3 つの形。正しさと回数と計算量は、どのマシンで実行しても同じ合否になる。相対は、変更の影響がマシンごとに違うため比もマシンで変わり、スペックが固定された測る場所を同じ文に書いたときだけこの条件に当たる（非機能の条件の書き方）",
+      "pending_source": "issues/issue-3436-requirements.md"
+    },
+    {
+      "term": "時間で区切った負荷試験",
+      "context": "ndf-workflow",
+      "meaning": "「N 分流す」のように、流す時間と同時に動かす本数を決めて所要や失敗を測る試験。結果がマシンのスペックで変わるため、受け入れ条件に置かない",
+      "pending_source": "issues/issue-3436-requirements.md"
+    },
+    {
+      "term": "測る場所",
+      "context": "ndf-workflow",
+      "meaning": "秒数の上限と、同じマシンの上で測る相対の比を測るマシン。CI のランナーのように、スペックが設定で固定され、ほかの処理と CPU を取り合わない場所に限る。共有の開発機は当たらない",
+      "pending_source": "issues/issue-3436-requirements.md"
+    },
+    {
       "term": "宣言",
       "context": "ndf-workflow",
       "meaning": "リポジトリの `.ndf/` に置く、人が決める設定のファイル。置き場の表で種類が宣言の行",
