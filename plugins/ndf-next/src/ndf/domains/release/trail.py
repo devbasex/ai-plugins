@@ -37,7 +37,12 @@ class Read(NamedTuple):
 
 def read(hub: GitHub, number: int) -> Read:
     """PR と、信用する書き手の証跡からの判定。"""
-    pull = hub.pull(number)
+    return judged(hub, hub.pull(number))
+
+
+def judged(hub: GitHub, pull: Pull) -> Read:
+    """読んだ PR `pull` と、信用する書き手の証跡からの判定（PR を読み直さない。読んだばかりの呼び手が使う）。"""
+    number = pull.number
     comments = [(c.author, c.body, hub.trusts(c)) for c in hub.comments(number)]
     return Read(pull, approval_decide.judge(approval_decide.trails(comments), pull.head_sha))
 

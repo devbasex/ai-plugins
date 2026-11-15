@@ -119,14 +119,15 @@ class Lander:
         statuses = _list(combined, "statuses") if isinstance(combined, dict) else []
         return self.hub.check_runs(sha) + [_status_run(s) for s in statuses if isinstance(s, dict)]
 
-    def _watch(self, pull: Pull) -> str | None:
-        """必須のチェック（check run と commit status）を待ち、止まった理由の種類（通れば None）。"""
+    def _watch(self, pull: Pull, deadline: float) -> str | None:
+        """必須のチェック（check run と commit status）を時刻 `deadline` まで待ち、止まった理由の種類（通れば None）。"""
         required = self.required(pull.base_ref)
 
         def reader() -> ci.Reading:
             return ci.read(self._runs(pull.head_sha), required, [])
 
-        watched = self.wait(reader, self.budget) if self.wait is not None else ci.Watch(reader, self.budget).run()
+        left = max(0.0, deadline - self.clock())
+        watched = self.wait(reader, left) if self.wait is not None else ci.Watch(reader, left).run()
         return watched.cause([])
 
     def _refusal(self, pull: Pull) -> Landed | None:
@@ -140,10 +141,9 @@ class Lander:
             return Landed(False, "refused", f"#{pull.number} は承認されていない: {got.judgment.detail}")
         return None
 
-    def _merge(self, pull: Pull) -> Landed:
-        # 必須のチェックの待ちとマージキューの待ちで、同じ予算を分け合う（workflow の時間の上限を超えない）
-        deadline = self.clock() + self.budget
-        kind = self._watch(pull)
+    def _merge(self, pull: Pull, deadline: float) -> Landed:
+        """必須のチェックの後に `pull` をマージする。待ちは時刻 `deadline`（`land` が 1 度だけ決める）まで。"""
+        kind = self._watch(pull, deadline)
         if kind is not None:
             return Landed(False, kind, f"#{pull.number} の必須のチェックが通らない（{kind}。打ち直さずに人へ戻す）")
         refused = self._refusal(pull)
@@ -154,14 +154,15 @@ class Lander:
             return self._await_queue(pull, deadline)
         return Landed(outcome.merged, outcome.kind, outcome.detail)
 
-    def _queued_refusal(self, pull: Pull) -> Landed | None:
+    def _queued_refusal(self, pull: Pull, now: Pull) -> Landed | None:
         """キューで待つ本番ブランチ宛ての PR の証跡を読み直し、承認が失効していれば止まった結果（承認のままなら None）。
 
+        `now` はこの周回で読んだ PR で、読み直さずに判定へ渡す（周回ごとの照会を 1 回に保つ）。
         待ちの間は commit status を付け直さない（読み直しのたびに書かない）。
         """
         if pull.base_ref != self.production:
             return None
-        got = trail.read(self.hub, pull.number)
+        got = trail.judged(self.hub, now)
         if got.pull.head_sha != pull.head_sha:
             return Landed(False, "refused", f"#{pull.number} の先端がキューの待ちの間に {got.pull.head_sha[:12]} へ動いた")
         if not got.judgment.approved:
@@ -178,9 +179,10 @@ class Lander:
         """
         number = pull.number
         while True:
-            if self.hub.pull(number).merged:
+            now = self.hub.pull(number)
+            if now.merged:
                 return Landed(True, None, f"#{number} をマージキューがマージした")
-            refused = self._queued_refusal(pull)
+            refused = self._queued_refusal(pull, now)
             if refused is not None:
                 self.hub.dequeue(number)
                 return refused._replace(detail=f"{refused.detail}。マージキューから外した")
@@ -229,23 +231,28 @@ class Lander:
             return None
         return int(made["number"])
 
-    def _sync(self, pull: Pull) -> Landed:
+    def _sync(self, pull: Pull, deadline: float) -> Landed:
         """本番ブランチへ入れた版上げを、ベースブランチへ戻す PR でマージする（マージ済みからの再開でも打つ）。"""
         merged_sha = self.hub.pull(pull.number).merge_sha
         landed = merged_sha if merged_sha else None
         number = self._open_sync()
         if number is None:
             return Landed(True, None, f"#{pull.number} をマージした（{self.base} へ戻す差分は無い）", production_sha=landed)
-        synced = self._merge(self.hub.pull(number))
+        synced = self._merge(self.hub.pull(number), deadline)
         detail = f"#{pull.number} をマージした。戻す PR: {synced.detail}"
         return synced._replace(sync_pr=number, detail=detail, production_sha=landed)
 
     def land(self, number: int) -> Landed:
-        """リリースの PR をマージする。本番ブランチへ入れた後（マージ済みからの再開を含む）は、ベースブランチへ戻す。"""
+        """リリースの PR をマージする。本番ブランチへ入れた後（マージ済みからの再開を含む）は、ベースブランチへ戻す。
+
+        待ちの予算（`budget`）は入口で 1 つの締め切りにし、本番の PR と戻す PR のチェックの待ち・マージキューの待ちで
+        分け合う（PR ごとに取り直すと合計が予算の倍になり、workflow の時間の上限を超えて取り消される）。
+        """
+        deadline = self.clock() + self.budget
         pull = self.hub.pull(number)
         if pull.merged:
             if pull.base_ref == self.production:
-                return self._sync(pull)
+                return self._sync(pull, deadline)
             return Landed(True, None, f"#{number} は既にマージされている")
         version_decide.version_of_branch(pull.head_ref)
         if pull.base_ref == self.production and not self.hub.token_trusted():
@@ -258,7 +265,7 @@ class Lander:
         refused = self._refusal(pull)
         if refused is not None:
             return refused
-        done = self._merge(pull)
+        done = self._merge(pull, deadline)
         if not done.merged or pull.base_ref != self.production:
             return done
-        return self._sync(pull)
+        return self._sync(pull, deadline)

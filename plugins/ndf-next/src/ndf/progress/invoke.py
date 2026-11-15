@@ -423,25 +423,28 @@ def _branch_of(run: StageRun) -> Optional[str]:
     return branch if branch else None
 
 
-def ci_only(place: Path) -> bool:
-    """作業場所のリポジトリがテストを CI に寄せる宣言（`test.ci.only` が真）を持つか（#3473）。"""
-    test = definition.dig(_project(place), "test")
+def ci_only(project: Mapping[str, Any]) -> bool:
+    """宣言（`_project` が読んだもの）がテストを CI に寄せる（`test.ci.only` が真）か（#3473）。"""
+    test = definition.dig(project, "test")
     return scoped.ci_only(test if isinstance(test, Mapping) else {})
 
 
-def template_values(t: route.Template, run: StageRun, work_dir: Path, cwd: Path, *, local_tests: bool) -> dict[str, route.Value]:
+def template_values(
+    t: route.Template, run: StageRun, work_dir: Path, cwd: Path, *, project: Mapping[str, Any], local_tests: bool
+) -> dict[str, route.Value]:
     """雛形の差し込みの値。工程の入力 → 出所の表（`FILL_SOURCES`）→ 打った場所（`route.derived`）の順に決める。
 
     既定も無く決まらない差し込みは、名前と出所を挙げて `TemplateValuesMissing`。手元のテストのステップを外したプランを
     組むとき（`local_tests` が偽。テストを CI に寄せる宣言 `ci_only` がある）は、そこだけが使う差し込み
-    （`test_command` など）は求めない。
+    （`test_command` など）は求めない。`project` は呼び手が 1 度だけ読んだ宣言（`_project`）で、CI に寄せるかの判定と
+    宣言の出所の差し込みが同じものを使う（読み直すと git・ファイル・形の検査が 2 回ずつ走る。PR 3525 の指摘）。
     """
     place = work_place(run, cwd)
     names = route.needed(t, local_tests=local_tests)
     values = {k: _param_value(v) for k, v in run.inputs.items() if k in t.params}
     wanted = {n: FILL_SOURCES[n] for n in names if n not in values and n in FILL_SOURCES}
     issued, untrusted = _fill_from_issue(run, work_dir, place, wanted)
-    values = {**values, **issued, **_fill_from_project(place, wanted), **_fill_branch(run, wanted), **_fill_gate(wanted)}
+    values = {**values, **issued, **_fill_from_project(project, wanted), **_fill_branch(run, wanted), **_fill_gate(wanted)}
     values = route.derived(t, values, cwd)
     missing = _missing(names, values, {**FILL_SOURCES, **untrusted})
     if missing:
@@ -461,11 +464,10 @@ def _fill_from_issue(
     return {k: v for k, v in issued.items() if k in wanted}, {}
 
 
-def _fill_from_project(place: Path, wanted: Mapping[str, str]) -> dict[str, route.Value]:
+def _fill_from_project(project: Mapping[str, Any], wanted: Mapping[str, str]) -> dict[str, route.Value]:
     """宣言の出所の差し込みの値（宣言に無いか形が違う差し込みは含めない）。"""
     if FROM_PROJECT not in wanted.values():
         return {}
-    project = _project(place)
     found = {name: _project_value(name, project) for name in (n for n, s in wanted.items() if s == FROM_PROJECT)}
     return {name: value for name, value in found.items() if value is not None}
 
@@ -496,8 +498,10 @@ def plan_path(run: StageRun, work_dir: Path, cwd: Path) -> Path:
     t = template(run.name)
     if t is None:
         raise model.Refused(f"プランの雛形 {run.name} が無い")
-    local_tests = not ci_only(work_place(run, cwd))
-    plan = route.render(t, template_values(t, run, work_dir, cwd, local_tests=local_tests), local_tests=local_tests)
+    project = _project(work_place(run, cwd))
+    local_tests = not ci_only(project)
+    values = template_values(t, run, work_dir, cwd, project=project, local_tests=local_tests)
+    plan = route.render(t, values, local_tests=local_tests)
     out = work_dir / f"{run.name}.json"
     out.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return out

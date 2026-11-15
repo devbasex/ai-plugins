@@ -210,6 +210,8 @@ class _QueueHub(FakeHub):
     merge_after: int = 2
     leave_after: int = 10**6
     polls: int = 0
+    # キューへ入れた後に PR を読んだ回数
+    reads: int = 0
 
     def merge(self, number: int, expect_head: str | None = None, method: str | None = None) -> MergeOutcome:
         self.merged.append(number)
@@ -218,6 +220,7 @@ class _QueueHub(FakeHub):
 
     def pull(self, number: int) -> Pull:
         got = self.pulls[number]
+        self.reads += number in self.merged
         if number in self.merged and self.polls >= self.merge_after:
             self.queued.discard(number)
             return got._replace(merged=True, merge_sha="c" * 40)
@@ -255,6 +258,25 @@ def test_merge_queue_stops_with_rerun_hint_when_budget_runs_out() -> None:
     done = _queue_lander(hub, now, 45.0).land(7)
     assert not done.merged and done.kind == MERGE_QUEUE_PENDING and "release-steps merge" in done.detail
     assert now[0] == 45.0
+    # 周回ごとに PR を 1 回だけ読み、承認の判定にもその PR を使う（0 秒・30 秒・45 秒の 3 周）
+    assert hub.reads == 3
+
+
+def test_one_budget_is_shared_by_the_release_pr_and_the_sync_pr() -> None:
+    """待ちの予算は land の入口で 1 つに決め、戻す PR のチェックの待ちには本番の PR の待ちの残りだけを渡す。"""
+    hub = _QueueHub(pulls={7: pull(), 8: pull(number=8, base="develop")}, comments_of={7: [_trail("approved", HEAD)]})
+    hub.responses[("POST", "/repos/o/r/pulls")] = {"number": 8}
+    now = [0.0]
+    lander = _queue_lander(hub, now, 600.0)
+    budgets: list[float] = []
+
+    def wait(reader: Callable[[], ci.Reading], budget: float) -> ci.WatchResult:
+        budgets.append(budget)
+        return ci.WatchResult(_reading(False), 1, 0.0, 0.0)
+
+    done = land.Lander(hub, lander.base, lander.production, 600.0, wait=wait, clock=lander.clock, sleep=lander.sleep).land(7)
+    assert done.merged and done.sync_pr == 8
+    assert budgets == [600.0, 600.0 - 2 * land.QUEUE_POLL_SECONDS]
 
 
 def test_merge_queue_stops_at_once_when_the_queue_drops_the_pull() -> None:
