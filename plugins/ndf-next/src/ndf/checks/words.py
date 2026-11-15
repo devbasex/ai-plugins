@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from ndf import identity
-from ndf.checks.model import Finding, Scope, read_json
+from ndf.checks.model import Finding, Scope, Source, read_json
 
 KATAKANA = r"゠-ヿ"
 ONLY_KATAKANA = re.compile(rf"^[{KATAKANA}]+$")
@@ -69,10 +69,16 @@ def check(scope: Scope, rules: dict[str, Any]) -> list[Finding]:
     for src in scope.sources:
         if src.path.name in conf["skip_files"]:
             continue
-        allowed = _examples(conf["examples"], scope.plugin_rel(src))
-        for no, line in enumerate(src.text.splitlines(), 1):
-            hits = [m.group() for m in found_pattern.finditer(line) if m.group() not in allowed]
-            found += [Finding("banned-word", src.rel, no, f"「{w}」: {words[w]}") for w in hits]
+        found += _check_source(src, found_pattern, words, _examples(conf["examples"], scope.plugin_rel(src)))
+    return found
+
+
+def _check_source(src: Source, found_pattern: re.Pattern[str], words: dict[str, str], allowed: set[str]) -> list[Finding]:
+    """1 つのファイルから、例として許した語（`allowed`）を除いて禁止する語を行ごとに拾う。"""
+    found = []
+    for no, line in enumerate(src.text.splitlines(), 1):
+        hits = [m.group() for m in found_pattern.finditer(line) if m.group() not in allowed]
+        found += [Finding("banned-word", src.rel, no, f"「{w}」: {words[w]}") for w in hits]
     return found
 
 
