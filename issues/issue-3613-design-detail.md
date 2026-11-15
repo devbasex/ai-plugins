@@ -4,7 +4,7 @@
 
 この文書が決めるのは次の 3 つである。
 
-- 禁止語の規則（`plugins/ndf-next/src/ndf/checks/words.py`）が単独で照合する廃止した語を読むための、関数の形と失敗の扱い
+- 禁止語の規則（`plugins/ndf-next/src/ndf/checks/words.py`）が単独でマッチする廃止した語を読むための、関数の形と失敗の扱い
 - 識別子の改名で、どのファイル・モジュール・関数がどの名前になるか
 - 状態のデータベースの列を改名したときに、旧い形の保存先と表をどう扱うか
 
@@ -69,11 +69,11 @@ plugins/ndf-next/
 
 | パス | 種類 | 役割 1 文 | 依存する先 |
 | --- | --- | --- | --- |
-| `docs/glossary/glossary.json` | 変更 | 置き換え先の語の項目を足し、旧い語を廃止した語・単独で照合する廃止した語へ登録する | 無し |
+| `docs/glossary/glossary.json` | 変更 | 置き換え先の語の項目を足し、旧い語を廃止した語・単独でマッチする廃止した語へ登録する | 無し |
 | `docs/glossary.md` | 変更 | 用語集のデータから `glossary.py render` で作り直す | `docs/glossary/glossary.json` |
-| `plugins/ndf-next/src/ndf/checks/words.py` | 変更 | 廃止した語・単独で照合する廃止した語・禁止語を、ndf-next の文字のファイルの行から拾う | `plugins/ndf-next/src/ndf/identity.py`、`plugins/ndf-next/src/ndf/checks/rules.json` |
+| `plugins/ndf-next/src/ndf/checks/words.py` | 変更 | 廃止した語・単独でマッチする廃止した語・禁止語を、ndf-next の文字のファイルの行から拾う | `plugins/ndf-next/src/ndf/identity.py`、`plugins/ndf-next/src/ndf/checks/rules.json` |
 | `plugins/ndf-next/src/ndf/checks/rules.json` | 変更 | 例として許す箇所（`words.examples`）を足し、兆候の表のキー `mark` を `suppress` へ改める | 無し |
-| `plugins/ndf-next/src/ndf/checks/README.md` | 変更 | 禁止語の規則の説明に、単独で照合する廃止した語の扱いを足す | 無し |
+| `plugins/ndf-next/src/ndf/checks/README.md` | 変更 | 禁止語の規則の説明に、単独でマッチする廃止した語の扱いを足す | 無し |
 | `plugins/ndf-next/src/ndf/checks/marks.py` | 削除 | `suppressions.py` へ移す | — |
 | `plugins/ndf-next/src/ndf/checks/suppressions.py` | 新設 | 抑制コメント（`# noqa: <規則> <境界の種類>: <理由>`）を読み、兆候を外せるかを決める（`marks.py` の中身を改名して移す） | `plugins/ndf-next/src/ndf/checks/rules.json` |
 | `plugins/ndf-next/src/ndf/checks/smells.py` | 変更 | `suppressions` を読むように import と呼び出しの名前を改める | `plugins/ndf-next/src/ndf/checks/suppressions.py` |
@@ -104,7 +104,7 @@ plugins/ndf-next/
 | `plugins/ndf-next/contracts/schemas/ndf-settings/` | 新設 | 設定のスキーマ 19 ファイル。受けるキーは変えない（I6） | 無し |
 | `plugins/ndf-next/docs/contracts/declarations.md` | 削除 | `ndf check --write-spec` が `ndf-settings.md` を作り、旧い文書は残さない | — |
 | `plugins/ndf-next/docs/contracts/ndf-settings.md` | 新設 | 設定のスキーマから作る契約の文書 | `plugins/ndf-next/contracts/schemas/ndf-settings/` |
-| `plugins/ndf-next/tests/checks/test_words.py` | 変更 | 単独で照合する廃止した語の単体テストを足す | `plugins/ndf-next/src/ndf/checks/words.py` |
+| `plugins/ndf-next/tests/checks/test_words.py` | 変更 | 単独でマッチする廃止した語の単体テストを足す | `plugins/ndf-next/src/ndf/checks/words.py` |
 | `plugins/ndf-next/tests/checks/test_marks.py` | 削除 | `test_suppressions.py` へ移す | — |
 | `plugins/ndf-next/tests/checks/test_suppressions.py` | 新設 | 抑制コメントのテスト（`test_marks.py` の中身を改名して移す） | `plugins/ndf-next/src/ndf/checks/suppressions.py` |
 | `plugins/ndf-next/tests/core/test_durable_store.py` | 変更 | 形の番号 1 の保存先が退避されることを確かめる | `plugins/ndf-next/src/ndf/core/durable.py` |
@@ -168,9 +168,9 @@ plugins/ndf-next/
 
 | 関数 | 置き場 | 種類 | シグネチャ | 責務 1 文 | 事前条件 | 事後条件 | 副作用 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `banned_words` | `plugins/ndf-next/src/ndf/checks/words.py` | 変更 | `banned_words(repo_root: Path, config_name: str) -> BannedWords` | 用語集の設定と用語集から、禁止する語の理由と単独で照合する語の集合を作る | `repo_root` はリポジトリの根 | 用語集の設定が無ければ `reasons` も `standalone` も空。あれば `standalone` のすべての語が `reasons` のキーにある | 用語集の設定（`.ndf/<config_name>`）と用語集のデータを読む |
+| `banned_words` | `plugins/ndf-next/src/ndf/checks/words.py` | 変更 | `banned_words(repo_root: Path, config_name: str) -> BannedWords` | 用語集の設定と用語集から、禁止する語の理由と単独でマッチする語の集合を作る | `repo_root` はリポジトリの根 | 用語集の設定が無ければ `reasons` も `standalone` も空。あれば `standalone` のすべての語が `reasons` のキーにある | 用語集の設定（`.ndf/<config_name>`）と用語集のデータを読む |
 | `_words_from` | `plugins/ndf-next/src/ndf/checks/words.py` | 変更 | `_words_from(config: dict[str, Any], glossary: dict[str, Any]) -> dict[str, str]` | 廃止した語（`deprecated`）と禁止語から、語 → 理由を作る | `glossary` は `terms` を持つ | 同じ廃止した語を複数の項目が持つときは、用語集で先に出る項目の語を理由に書く。禁止語は「禁止語」の理由で上書きする | 無し |
-| `_standalone_from` | `plugins/ndf-next/src/ndf/checks/words.py` | 新設 | `_standalone_from(glossary: dict[str, Any]) -> dict[str, str]` | 単独で照合する廃止した語（`deprecated_standalone`）から、語 → 理由を作る | `glossary` は `terms` を持つ | 欄を持たない項目は飛ばす。同じ語を複数の項目が持つときは、先に出る項目の語を理由に書く | 無し |
+| `_standalone_from` | `plugins/ndf-next/src/ndf/checks/words.py` | 新設 | `_standalone_from(glossary: dict[str, Any]) -> dict[str, str]` | 単独でマッチする廃止した語（`deprecated_standalone`）から、語 → 理由を作る | `glossary` は `terms` を持つ | 欄を持たない項目は飛ばす。同じ語を複数の項目が持つときは、先に出る項目の語を理由に書く | 無し |
 | `pattern` | `plugins/ndf-next/src/ndf/checks/words.py` | 変更 | `pattern(words: Mapping[str, str], standalone: AbstractSet[str] = frozenset()) -> re.Pattern[str] \| None` | 長い語から当てる正規表現を作り、単独の語にだけ前後が漢字でない条件を付ける | `standalone` は `words` のキーの部分集合 | `words` が空なら `None`。単独の語は前後が漢字の出現に当たらない | 無し |
 | `_part` | `plugins/ndf-next/src/ndf/checks/words.py` | 変更 | `_part(word: str, standalone: bool) -> str` | 1 つの語の正規表現の断片を作る | `word` は空でない | 単独の語は、字種に依らず前後が漢字でない条件が付く。それ以外は今の規則（ASCII・カタカナ）のまま | 無し |
 | `check` | `plugins/ndf-next/src/ndf/checks/words.py` | 変更 | `check(scope: Scope, rules: dict[str, Any]) -> list[Finding]` | プラグインの下の文字のファイルから、禁止する語を行ごとに拾う | `rules` は `words` の節を持つ | 例として許した語を除き、当たった語ごとに `banned-word` の指摘が 1 件ある | `banned_words` を通して用語集の設定と用語集のデータを読む |
@@ -192,7 +192,7 @@ plugins/ndf-next/
 
 | 関数 | 条件の組み合わせ | 結果 |
 | --- | --- | --- |
-| `_part` | 語が単独で照合する語 | `(?<![<漢字>])<語>(?![<漢字>])`（ASCII・カタカナの判定より先に当てる） |
+| `_part` | 語が単独でマッチする語 | `(?<![<漢字>])<語>(?![<漢字>])`（ASCII・カタカナの判定より先に当てる） |
 | `_part` | 単独でなく、語が ASCII だけ | 今の規則（前後が英数字と `_` でない） |
 | `_part` | 単独でなく、語がカタカナだけ | 今の規則（前後がカタカナでない） |
 | `_part` | 上のどれでもない | 語をそのまま当てる（今の規則） |
@@ -205,7 +205,7 @@ plugins/ndf-next/
 | `ensure_schema` | 版が `SCHEMA_VERSION` より小さく、SQLite | バックアップを取ってから表を用意する（今と同じ。形の番号の退避で、この組み合わせは起こらない） |
 | `ensure_schema` | 版が `SCHEMA_VERSION` より小さく、PostgreSQL | `StoreBroken` で止める（新しい分岐） |
 
-**単独の語の条件を、語の先頭か末尾が漢字かに依らず両側に付ける。** 今の NDF の用語の検査（`glossary_words.standalone_part`）は、先頭が漢字なら前に、末尾が漢字なら後ろにだけ条件を付ける。ndf-next の対応表の「問い」は末尾がひらがなで、今の NDF の形では「問い合わせ」に当たる。対応表が「問い合わせ」を外すと決めたため（W12）、両側に付ける。両側に付けても「版の記録」「段を足す」のように前後が漢字でない出現には当たる。
+**単独の語の条件を、語の先頭か末尾が漢字かに依らず両側に付ける。** 今の NDF の用語の検査（`glossary_words.standalone_part`）は、先頭が漢字なら前に、末尾が漢字なら後ろにだけ条件を付ける。ndf-next の対応表の「問い」は末尾がひらがなで、今の NDF の形では「問い合わせ」に当たる。対応表が「問い合わせ」を外すと決めたため（W12）、両側に付ける。両側に付けても「版の記録」「`段を足す`」のように前後が漢字でない出現には当たる。
 
 - 繰り返しの終わる条件: `check` はプラグインの下の文字のファイルを 1 回ずつ読み、各ファイルの行を 1 回ずつ見る（今と同じ）
 - 計算量の注意: 語の数は、廃止した語の登録で今の数十から数百へ増える。正規表現は語を `|` で並べた 1 つにまとめ、ファイルの行ごとに 1 回だけ当てる（今と同じ）。語ごとにファイルを読み直さない
@@ -220,7 +220,7 @@ plugins/ndf-next/
 | `STORE_FORMAT` | 定数 | `plugins/ndf-next/src/ndf/core/durable.py` | `2`（今は 1） |
 | `SCHEMA_VERSION` | 定数 | `plugins/ndf-next/src/ndf/progress/store.py` | `2`（今は 1） |
 | `FIXED_WORDS["ndf_settings_dir"]` | 定数の表のキー | `plugins/ndf-next/src/ndf/identity.py` | `".ndf"`（値は変えない） |
-| `words.examples` の足す行 | 設定値 | `plugins/ndf-next/src/ndf/checks/rules.json` | 単独で照合する廃止した語を例として挙げるファイル（`skills/requirements-design/references/glossary-format.md` の「字で持」など）と、同等性の表（`src/ndf/parity/features.json`）。行ごとにファイル・語・理由を書く。件数は実装の時点の禁止語の規則の出力で決める |
+| `words.examples` の足す行 | 設定値 | `plugins/ndf-next/src/ndf/checks/rules.json` | 単独でマッチする廃止した語を例として挙げるファイル（`skills/requirements-design/references/glossary-format.md` の「`字で持`」など）と、同等性の表（`src/ndf/parity/features.json`）。行ごとにファイル・語・理由を書く。件数は実装の時点の禁止語の規則の出力で決める |
 | 兆候の表のキー `suppress` | 設定値のキー | `plugins/ndf-next/src/ndf/checks/rules.json` | 値（`boundary`・`none` など）は変えない |
 
 承認ゲートの回答の値（`request_changes`）の置き場は `contracts/facts/answers.json` だけである。`progress/run.py` の定数は、そこから引く今の形（`_answer("...")`）を保つ。
