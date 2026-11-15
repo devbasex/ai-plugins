@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import subprocess
 from typing import Optional
 
 # 失敗した外部のコマンドの出力から結果へ載せる末尾の行の数
@@ -21,6 +20,6 @@ def tail(text: Optional[str]) -> str:
     return "\n".join(text.strip().splitlines()[-DETAIL_LINES:])
 
 
-def output_tail(done: subprocess.CompletedProcess[str]) -> str:
-    """終わった外部のコマンドの標準出力と標準エラーをつないだ末尾（`tail`）。"""
-    return tail(done.stdout + "\n" + done.stderr)
+def output_tail(stdout: Optional[str], stderr: Optional[str]) -> str:
+    """終わった外部のコマンドの標準出力と標準エラーをつないだ末尾（`tail`）。`None` は空として扱う。"""
+    return tail((stdout or "") + "\n" + (stderr or ""))

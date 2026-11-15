@@ -118,7 +118,7 @@ def _install(npm: str) -> None:
             "unknown",
             f"npm install -g が終了コード {done.returncode} で終わった",
             summary=f"npm install -g が終了コード {done.returncode} で終わった。{no_sudo}",
-            items=[{"name": "npm の出力の末尾", "result": "failed", "detail": rd.output_tail(done)}],
+            items=[{"name": "npm の出力の末尾", "result": "failed", "detail": rd.output_tail(done.stdout, done.stderr)}],
         )
 
 

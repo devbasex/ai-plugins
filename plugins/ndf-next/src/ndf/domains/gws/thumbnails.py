@@ -102,7 +102,7 @@ def _save_all(deck: _Deck, out: Path) -> list[dict[str, str]]:
 def _gws(gws: str, args: Sequence[str], what: str) -> Any:
     """gws のスライドの操作を打ち、応答の JSON を返す。未認証の失敗は `_NeedsLogin`、ほかは `GwsStop`。"""
     done = call([gws, *args], LIMIT, f"{what}: gws")
-    out = rd.output_tail(done)
+    out = rd.output_tail(done.stdout, done.stderr)
     if done.returncode != 0:
         if _unauthenticated():
             raise _NeedsLogin(what, out)
