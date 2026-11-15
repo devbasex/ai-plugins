@@ -43,6 +43,34 @@ def test_collect_failure_stops_instead_of_passing(gitwork):
         collect.collected(gitwork.work, ["tests/test_doc.py"], [suite(collect_command=f"{sys.executable} -c 'raise SystemExit(3)'")], 120)
 
 
+EXIT_5 = f"{sys.executable} -c 'raise SystemExit(5)'"
+
+
+def test_declared_exit_codes_are_read_as_success(gitwork):
+    # 受け入れ条件 12: collect_exit_codes の並びの終了コードだけを成功と読む（5 は収集が 0 件で、どのファイルも収集されない）
+    gitwork.make(FILES)
+    got = collect.collected(gitwork.work, ["tests/test_doc.py"], [suite(collect_command=EXIT_5, collect_exit_codes=[0, 5])], 120)
+    assert got.uncollected == ("tests/test_doc.py",)
+    exit_1 = f"{sys.executable} -c 'raise SystemExit(1)'"
+    with pytest.raises(collect.CollectError, match="終了コード 1"):
+        collect.collected(gitwork.work, ["tests/test_doc.py"], [suite(collect_command=exit_1, collect_exit_codes=[0])], 120)
+
+
+def test_exit_code_5_stops_a_suite_without_the_declaration(gitwork):
+    # 受け入れ条件 13: 宣言の無い suite は 0 だけを成功と読み、pytest の 5 も CollectError にする
+    gitwork.make(FILES)
+    with pytest.raises(collect.CollectError, match="終了コード 5"):
+        collect.collected(gitwork.work, ["tests/test_doc.py"], [suite(collect_command=EXIT_5)], 120)
+
+
+@pytest.mark.parametrize(
+    ("declared", "codes"),
+    [({"collect_exit_codes": [0, 5]}, {0, 5}), ({}, {0}), ({"collect_exit_codes": [True]}, {0}), ({"collect_exit_codes": 5}, {0})],
+)
+def test_exit_codes_of_reads_the_suite_declaration(declared, codes):
+    assert collect.exit_codes_of(declared) == frozenset(codes)
+
+
 def test_collect_timeout_stops(gitwork):
     gitwork.make(FILES)
     slow = f"{sys.executable} -c 'import time; time.sleep(5)'"
