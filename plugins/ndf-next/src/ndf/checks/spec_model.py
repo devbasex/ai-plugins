@@ -49,6 +49,8 @@ INTERNAL = "internal"
 # エントリポイントの表の種類と順番
 SPEC_KIND = "spec"
 CALLER_FIRST = "caller-first"
+# 宣言のスキーマの注釈 x-ndf-place が取る値（宣言を読む置き場）
+DECL_PLACES = ("main", "worktree")
 # 正本が読めないときの指摘の前置き
 UNREADABLE = "規約の正本を読めない"
 

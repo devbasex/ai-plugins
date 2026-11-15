@@ -14,6 +14,7 @@ from ndf.checks.spec_args import Arg, ArgTree
 from ndf.checks.spec_model import (
     CALLER_FIRST,
     CONTRACTS,
+    DECL_PLACES,
     DECL_SCHEMA_DIR,
     INTERNAL,
     IO_SCHEMA_DIR,
@@ -43,8 +44,8 @@ SURFACE_WORDS = {PUBLIC: "公開", INTERNAL: "内部（予告なく変えてよ�
 GENERATED = "<!-- ndf check --write-spec が生成する。手で直さない（正本は各節の出典） -->\n"
 NONE = "—"
 MAIN_MARK = "（メインディレクトリから読む）"
-# 宣言のスキーマの注釈 x-ndf-place の値 → 置き場の語
-PLACE_LABELS = {"worktree": "worktree", "main": "メインディレクトリ（既定ブランチの worktree）"}
+# 宣言のスキーマの注釈 x-ndf-place の値（spec_model.DECL_PLACES の並び）→ 置き場の語
+PLACE_LABELS = dict(zip(DECL_PLACES, ("メインディレクトリ（既定ブランチの worktree）", "worktree"), strict=True))
 DEPRECATED_MARK = "（非推奨。読み手は読まない）"
 # ページの名前 → 見出し
 PAGES = {

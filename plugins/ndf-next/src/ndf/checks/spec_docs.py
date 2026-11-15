@@ -83,7 +83,7 @@ def _key_errors(decl: DeclarationSpec) -> list[str]:
             errs.append(f"キー {key} に説明（description）が無い")
         elif not any(w in prop for w in TYPE_WORDS):
             errs.append(f"キー {key} に型が無い")
-    places = sorted(spec_render.PLACE_LABELS)
+    places = sorted(spec_model.DECL_PLACES)
     if opt(decl.schema, "x-ndf-place", None) not in places:
         errs.append(f"注釈 x-ndf-place は {' か '.join(places)}")
     if not decl.read_by:
