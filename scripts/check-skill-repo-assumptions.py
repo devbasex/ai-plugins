@@ -19,7 +19,7 @@ ndf-next の形の family（Skill の一覧を `manifests/skills.json` に持つ
 マーケットプレイスの登録・リモート名・機能の対応表）も掛ける（#3617）。今の NDF（`*-skills.txt` を持つ family）の
 走査の対象と語は変えない。`remote-origin` は JSON Schema の `default` の値を走査せず、その値が
 `contracts/schemas/declarations/worktree.schema.json` の `/properties/remote/default` の 1 か所だけかを数える
-（2 か所以上か 0 か所なら 2 で落とす）。
+（2 か所以上か 0 か所なら 2 で落とす。Skill が同梱する `skills/*/schemas/*.json` の `default` も数に入れる）。
 配らない Skill と、`tests/`・`experimental/` の下は対象にしない。Markdown には
 DOC_WORDS、スクリプトと hook には SCRIPT_WORDS を掛け、シェルのスクリプトには SHELL_WORDS も掛ける。プロジェクトごとに違うものは
 `.ndf/` の宣言か引数で受ける。**manifest に載っていながら走査できる本文を 1 本も持たない
@@ -322,6 +322,11 @@ def collect_code(skills_dir: pathlib.Path) -> tuple[list[str], list[str], list[s
     return src, contracts, hooks
 
 
+def skill_schemas(skills_dir: pathlib.Path) -> list[str]:
+    """Skill が同梱する JSON Schema（`skills/<名前>/schemas/*.json`）のプラグインの根からの相対。"""
+    return [p.relative_to(skills_dir.parent).as_posix() for p in sorted(skills_dir.glob("*/schemas/*.json")) if p.is_file()]
+
+
 def _split_defaults(base: pathlib.Path, rels: list[str]) -> tuple[list[Hit], list[tuple[str, int]]]:
     """JSON の `remote-origin` の当たりを、`default` の値の外（ヒット）と中（ファイル・行）に分ける。"""
     regex = re.compile(NEXT_CODE_WORDS[REMOTE_WORD])
@@ -573,7 +578,8 @@ def _scan_next_code(
     hits = scan(root, src, code_matchers) + scan(hooks_dir, hook_code, code_matchers)
     contract_hits, defaults = scan_contracts_with_defaults(root, contracts, code_matchers)
     hits += contract_hits
-    problems = default_problems(defaults, root)
+    # Skill が同梱する JSON Schema は語の走査の外だが、リモート名の既定の数には入れる（既定の写しを落とす。I7a）
+    problems = default_problems(defaults + remote_defaults(root, skill_schemas(skills_dir)), root)
     code = f" / src {len(src)} 本 / contracts {len(contracts)} 本"
     return scanned, hits, problems, hook_code, code
 

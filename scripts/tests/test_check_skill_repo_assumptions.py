@@ -787,6 +787,16 @@ def test_remote_default_must_be_in_exactly_one_place(tmp_path: Path, contract: s
     assert "リモート名の既定が" in output_of(result)
 
 
+def test_a_remote_default_in_a_skill_schema_fails(tmp_path: Path) -> None:
+    """Skill が同梱するスキーマにリモート名の既定を写すと 2 で落ちる（I7a）。"""
+    skills = build_next_tree(tmp_path)
+    (skills / LISTED_SKILL / "schemas").mkdir()
+    (skills / LISTED_SKILL / "schemas" / "w.schema.json").write_text(REMOTE_SCHEMA, encoding="utf-8")
+    result = run_check(skills, [], tmp_path)
+    assert result.returncode == 2, output_of(result)
+    assert "リモート名の既定が 2 か所にある" in output_of(result)
+
+
 def test_broken_skills_json_and_missing_src_fail(tmp_path: Path) -> None:
     """Skill の一覧が読めない・src が無いときは、0 件と読まずに 2 で落ちる。"""
     skills = build_next_tree(tmp_path / "a")
