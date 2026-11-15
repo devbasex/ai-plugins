@@ -33,8 +33,8 @@ class PushResult(NamedTuple):
     conflicts: tuple[str, ...]
 
 
-def _push(g: git.Git, head_branch: str) -> git.Completed:
-    return g.runner(["push", "--", g.remote(), f"HEAD:refs/heads/{head_branch}"], g.cwd)
+def _push(g: git.Git, head_branch: str, remote: str) -> git.Completed:
+    return g.runner(["push", "--", remote, f"HEAD:refs/heads/{head_branch}"], g.cwd)
 
 
 def _failed(done: git.Completed) -> git.GitError:
@@ -47,9 +47,9 @@ def _rejected_or_raise(done: git.Completed) -> None:
         raise _failed(done)
 
 
-def _rebase_onto_origin(g: git.Git, head_branch: str) -> tuple[str, tuple[str, ...]]:
+def _rebase_onto_origin(g: git.Git, head_branch: str, remote: str) -> tuple[str, tuple[str, ...]]:
     """origin の先頭を取り込み、自分のコミットを載せ直す。衝突したら取り消して衝突したファイルを返す。"""
-    origin_head = worktree.fetch_head(g, head_branch)
+    origin_head = worktree.fetch_head(g, head_branch, remote)
     done = g.runner(["rebase", origin_head], g.cwd)
     if done.returncode == 0:
         return origin_head, ()
@@ -63,15 +63,16 @@ def push_fix(g: git.Git, head_branch: str, fix_commit: Optional[str]) -> PushRes
     if fix_commit and not g.is_ancestor(fix_commit, "HEAD"):
         return PushResult(False, False, None, None, NOT_ANCESTOR, ())
     head = g.rev_parse("HEAD")
-    first = _push(g, head_branch)
+    remote = g.remote()  # 入口で 1 回だけ求める（送り直しの経路で `git worktree list` を打ち直さない）
+    first = _push(g, head_branch, remote)
     if first.returncode == 0:
         return PushResult(True, False, None, head, None, ())
     _rejected_or_raise(first)
-    origin_head, conflicts = _rebase_onto_origin(g, head_branch)
+    origin_head, conflicts = _rebase_onto_origin(g, head_branch, remote)
     if conflicts:
         return PushResult(False, False, origin_head, head, DIVERGED, conflicts)
     head = g.rev_parse("HEAD")
-    again = _push(g, head_branch)
+    again = _push(g, head_branch, remote)
     if again.returncode == 0:
         return PushResult(True, True, origin_head, head, None, ())
     _rejected_or_raise(again)

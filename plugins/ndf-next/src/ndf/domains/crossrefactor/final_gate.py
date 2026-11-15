@@ -51,10 +51,11 @@ FixLauncher = Callable[[Sequence[str], int], bool]
 
 def send(g: git.Git, branch: str) -> str:
     """リモート名のリモートの先頭へ合わせて送り、送った head を返す。"""
-    synced = worktree.sync_worktree(g, branch)
+    remote = g.remote()  # 同期と送信で 1 回だけ求める
+    synced = worktree.sync_worktree(g, branch, remote)
     if synced.conflicts:
         raise GateStopped("base_conflict", worktree.conflict_detail(synced))
-    done = g.attempt("push", "-q", "--", g.remote(), f"HEAD:refs/heads/{branch}")
+    done = g.attempt("push", "-q", "--", remote, f"HEAD:refs/heads/{branch}")
     if done.returncode != 0:
         raise GateStopped("push_rejected", f"PR のブランチ {branch} へ送れない: {done.stderr.strip()}")
     return g.rev_parse("HEAD")

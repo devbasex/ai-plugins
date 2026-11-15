@@ -39,8 +39,8 @@ class Created:
     warnings: list[str] = field(default_factory=list)
 
 
-def start_branch(git: Git, decl: Optional[declaration.Declaration]) -> str:
-    """スプリントのベースブランチ。決められなければ `CreateError`（precondition）。"""
+def start_branch(git: Git, decl: Optional[declaration.Declaration], remote: Optional[str] = None) -> str:
+    """スプリントのベースブランチ。決められなければ `CreateError`（precondition）。`remote` を省けばこの作業場所のリモート名。"""
     name: Optional[str] = None
     if decl is not None:
         try:
@@ -49,7 +49,7 @@ def start_branch(git: Git, decl: Optional[declaration.Declaration]) -> str:
             raise CreateError("precondition", str(exc)) from exc
         name = decl.production_branch if channel == "production" else decl.base_branch
     if name is None:
-        name = repo.default_branch(git)
+        name = git.remote_default_branch(remote)
     if name is None:
         raise CreateError("precondition", "ベースブランチを決められない（宣言の base_branch も origin の既定ブランチも無い）")
     return name
@@ -70,14 +70,12 @@ def _check_place(git: Git, main_dir: Path, target: Path) -> None:
         raise CreateError("refused", f"worktree の置き場が既にある: {target}")
 
 
-def _fetch(git: Git) -> list[str]:
-    remote = git.remote()
+def _fetch(git: Git, remote: str) -> list[str]:
     done = git.attempt("fetch", "-q", "--", remote)
     return [] if done.returncode == 0 else [f"git fetch {remote} が失敗した（取得済みの参照で続けた）: {done.stderr.strip()}"]
 
 
-def _start_ref(git: Git, base: str) -> str:
-    remote = git.remote()
+def _start_ref(git: Git, base: str, remote: str) -> str:
     if git.has_ref(f"refs/remotes/{remote}/{base}"):
         return f"{remote}/{base}"
     if git.has_ref(f"refs/heads/{base}"):
@@ -91,16 +89,17 @@ def create(main_dir: Path, branch: str, start: Optional[str] = None, git: Option
     _check_name(g, branch)
     target = repo.worktree_path(main_dir, branch)
     _check_place(g, main_dir, target)
-    warnings = _fetch(g)
+    remote = g.remote()
+    warnings = _fetch(g, remote)
     if start is None:
         try:
             decl = declaration.load(main_dir)
         except declaration.DeclarationError as exc:
             raise CreateError("precondition", str(exc)) from exc
-        base = start_branch(g, decl)
+        base = start_branch(g, decl, remote)
     else:
         base = start
-    ref = _start_ref(g, base)
+    ref = _start_ref(g, base, remote)
     if g.has_ref(f"refs/heads/{branch}"):
         g.run("worktree", "add", "-q", str(target), branch)
         return Created(target, branch, base, branch, False, warnings)

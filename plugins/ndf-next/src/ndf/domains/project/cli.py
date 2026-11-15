@@ -48,9 +48,9 @@ def _check(args: argparse.Namespace) -> int:
     return result.emit(result.stopped(TOOL, "not_applicable", "；".join(got.reasons), summary=f"宣言が{label}", items=items))
 
 
-def _gh_repo(repo: git.Git) -> Optional[str]:
+def _gh_repo(repo: git.Git, remote: str) -> Optional[str]:
     try:
-        return git.repo_of_url(repo.remote_url())
+        return git.repo_of_url(repo.remote_url(remote))
     except git.GitError:  # noqa: NDF401 外部コマンド: リモート名か URL を決められなければリポジトリは不明
         return None
 
@@ -133,8 +133,8 @@ def measure_project(root: Path, budget: float) -> dict[str, Any]:
     step = _Steps(start + budget)
     repo_issues = measure_repo.measure(tree, step, step.items)
     _, worktree = check.load(main)
-    head = check.branch_state(repo)["head"]
-    ctx = MeasurementContext(gh_repo=_gh_repo(repo), head=head, repo_issues=repo_issues, worktree=worktree)
+    head = check.branch_state(repo, remote=tree.remote)["head"]
+    ctx = MeasurementContext(gh_repo=_gh_repo(repo, tree.remote), head=head, repo_issues=repo_issues, worktree=worktree)
     notes = _ci_items(tree, step, ctx)
     if tree.skipped:
         notes.append(f"秘密の名前のファイルを開かなかった: {'・'.join(tree.skipped[:10])}")
@@ -144,7 +144,7 @@ def measure_project(root: Path, budget: float) -> dict[str, Any]:
         "elapsed_seconds": round(time.monotonic() - start, 1),
         "items": {k: step.items[k] for k in keys if k in step.items},
         "inputs": check.inputs(repo, tree.files),
-        "branch_state": check.branch_state(repo, check.declared_branches(worktree)),
+        "branch_state": check.branch_state(repo, check.declared_branches(worktree), tree.remote),
         "skipped_files": tree.skipped,
         "notes": notes,
     }

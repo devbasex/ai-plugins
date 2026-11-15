@@ -83,7 +83,7 @@ worktree・チーム・公開・[estimate.schema.json](../../contracts/schemas/d
 
 | キー | 型 | 既定値 | 取りうる値 | 必須か | 説明 |
 | --- | --- | --- | --- | --- | --- |
-| `allocation_minutes` | object | — | — | 任意 | cross-refactoring の配分の 1 件あたりの分を種類ごとに上書きする。省いた種類は初期値（skills/cross-refactoring/data/allocation-defaults.json）を使う。初期値に無い種類は止める |
+| `allocation_minutes` | object | — | — | 任意 | cross-refactoring の配分の 1 件あたりの分を種類ごとに上書きする。省いた種類は初期値（skills/cross-refactoring/data/allocation-defaults.json）を使う。初期値に無い種類は止める。まだ読まない（M4 で読む。配分を決める処理は M4 #3298 で入る） |
 | `min_samples`（非推奨。読み手は読まない） | integer | — | — | 任意 | 読み手は読まない。書いてある宣言を断らないために残す（#2505） |
 | `records_dir` | string | — | — | 任意 | 実績の記録の置き場（リポジトリの根から。絶対パスも可） |
 | `scale` | array of integer | — | — | 任意 | Size の取りうる値（小さい順に並べ替えて使う）。省くか空なら 1・2・3・5・8・13・20 |
