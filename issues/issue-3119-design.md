@@ -10,7 +10,7 @@
 ## 適用範囲
 
 - **働く範囲**: ai-plugins のリポジトリだけ。NDF のコードは変えない（NDF の側は #3121・#3163 で、どんなブランチ運用も宣言で受けられる形になっている）
-- **プロジェクトごとに違うもの**: ブランチの流れとレビューの単位は、リポジトリの宣言（`.ndf/worktree.json` の `branch_flow`）の値で受ける。この課題は ai-plugins の値を決めて書く
+- **プロジェクトごとに違うもの**: ブランチの流れとレビューの単位は、リポジトリの設定（`.ndf/branch-strategy.json` の節 `branch_strategy`。#3572 の決定 27）の値で受ける。この課題は ai-plugins の値を決めて書く
 - **当たるモード**: スプリントを組むすべてのモード（`standard`・`light`・`operation`・`documentation`・`legacy-refactor`）。`pace: fast` は、選んで集める取り込み方と組めない（[ndf-branch-flow-declaration.md](../docs/specifications/ndf-branch-flow-declaration.md) の「組み合わせの制限」）
 
 ## あるべき姿の根拠
@@ -45,7 +45,7 @@ NDF の確定仕様に ai-plugins の値や置き場を書き込まない。確�
 
 | 集約 | 持ち主（書き換えてよいもの） | 根 | エンティティ | 値オブジェクト |
 | --- | --- | --- | --- | --- |
-| ai-plugins のブランチ運用の宣言 | リポジトリの管理者 | `.ndf/worktree.json` の `branch_flow` | — | ブランチの流れの 4 項目、レビューの単位の 4 行 |
+| ai-plugins のブランチ運用の宣言 | リポジトリの管理者 | `.ndf/branch-strategy.json` の節 `branch_strategy` | — | ブランチの流れの 4 項目、レビューの単位の 4 行 |
 | ai-plugins の運用の文書 | リポジトリの管理者 | `docs/versioning-and-distribution.md`（正本） | `AGENTS.md` の 2 節、`CONTRIBUTING.md`・`docs/plugin-development-guide.md` の宛先の段落 | レビューの単位の表 |
 
 持ち主はどちらもリポジトリの管理者 1 人に決まる。
@@ -70,7 +70,7 @@ C7 に当たる書き換え（`.ndf/` と `AGENTS.md` の運用の節）は、PR
 
 | # | 集約 | 条件 | 破れたときの扱い |
 | --- | --- | --- | --- |
-| I1 | 宣言 | `branch_flow` のブランチの流れは `start: production`・`integrate: release`・`doc_prs: sprint`・`release_strategy: trunk`（決定 21）、`base_branch` と `production_branch` はどちらも `main` | 鍵ごとの値の誤りは ndf-next の宣言のスキーマの検査（`ndf check spec-decl`）が断る。`release_strategy: trunk` に `start: base` を組むなど、取り込み方の表の行が許さない組み合わせは、取り込み方の読み取り（#3572 の詳細設計の `declaration.flow_of`）が行の列と照らして断り、宣言を読む工程が止まる。`base_branch` と `production_branch` が `main` であることは ai-plugins の値で、実装 PR の確認の手順で見る |
+| I1 | 宣言 | 節 `branch_strategy` のブランチの流れは `start: production`・`integrate: release`・`doc_prs: sprint`・`release_strategy: trunk`（決定 21）、`base_branch` と `production_branch` はどちらも `main` | 鍵ごとの値の誤りと、`release_strategy: trunk` に `start: base` を組むなど行が許さない組み合わせは、節のスキーマ（`if`/`then`。#3572 の決定 28）の検査（`ndf check spec-decl` と節を読む関数）が断り、設定を読む工程が止まる。`base_branch` と `production_branch` が `main` であることは ai-plugins の値で、実装 PR の確認の手順で見る |
 | I2 | 宣言 | `reviews` は GitHub flow の行（`trunk`）で書ける 4 種類（`impl`・`sprint`・`design`・`spec`）すべての行を持ち、`release` の行を持たない（決定 21）。各行は許す値の表の値で、実装の差分をどの PR でも cross-review しない組（NDF の I4）と既定値の行との重なり（NDF の I12）を生じない | 2 つに分けて見る。書けない種類の行（`release`）と、書いた `impl`・`sprint` の行のどちらも cross-review しない組は、ndf-next の main 宛ての PR の検査（`release-steps pr-check`。#3572 の詳細設計の `declaration.review_problems`）が PR のチェックを落とす。この検査はどのプロジェクトにも掛かり、書いていない種類を既定値に任せる。4 種類すべての行を持つことは ai-plugins の値で、実装 PR の確認の手順で見る（下の「テスト設計」）。行の値の形の誤りは宣言のスキーマの検査が落とす |
 | I3 | 文書 | 正本の文書のレビューの単位の表は、宣言の `reviews` の 4 行と同じ値を持つ | コードレビューで見る（`.md` の文言を照合するテストは書かない） |
 | I4 | 文書 | `AGENTS.md` は判断の基準だけを持ち、手順と実測を正本の文書へリンクで渡す。指示書のチェックが 0 を返す | `instructions-check.py` が 1 を返す |
@@ -152,7 +152,7 @@ C7 に当たる書き換え（`.ndf/` と `AGENTS.md` の運用の節）は、PR
 
 | 要素 | 責務 |
 | --- | --- |
-| `.ndf/worktree.json`（宣言） | ブランチの流れの 4 項目とレビューの単位の 4 行を持つ。ai-plugins の運用の値の正本（I1・I2） |
+| `.ndf/branch-strategy.json`（設定。#3572 の決定 27） | 節 `branch_strategy` に、ブランチの流れの 4 項目とレビューの単位の 4 行を持つ。ai-plugins の運用の値の正本（I1・I2）。入れ替えの前の `.ndf/worktree.json` の `branch_flow` から移す |
 | `docs/versioning-and-distribution.md`（正本の文書） | 「チャネルと ref」に各ブランチの役割、「正式版を出す」に選んで集める手順・戻すマージ・依存するスプリント・本番の不具合の直し・取り込み方を戻す条件と順序・レビューの単位の表を持つ（I3・I5） |
 | `AGENTS.md` | 「Git運用ルール」に起点と宛先、「版とリリースの方針」にチャネルの役割と取り込み方とレビューの単位の要点を持ち、手順は正本の文書へリンクする。「ベストプラクティス」の DO の宛先の行も合わせる（I4・I5） |
 | `CONTRIBUTING.md` | NDF のスプリントの外の変更の起点と宛先（決定 4）を持つ。「開発の進め方」の宛先と worktree を切る起点、「一括の整形の前から続くブランチを取り込む」の取り込む先、「Pull Request を出す」の宛先の 4 か所（I5） |
@@ -233,7 +233,7 @@ graph TD
 
 | 大項目 | 実現方式 |
 | --- | --- |
-| 運用・保守性 | 値の正本は `.ndf/worktree.json` の 1 か所に置く。`AGENTS.md` は値を写さず要点とリンクだけを持つ。正本の文書のレビューの単位の表は値の説明として置き、宣言との食い違いは実装 PR のコードレビューで見る（I3）。値の読み分けは ndf-next の宣言の読み取り（#3572 の `declaration.flow_of`・`declaration.review_problems`）が持ち、文書の側で検査を足さない |
+| 運用・保守性 | 値の正本は `.ndf/branch-strategy.json` の節 `branch_strategy` の 1 か所に置く。`AGENTS.md` は値を写さず要点とリンクだけを持つ。正本の文書のレビューの単位の表は値の説明として置き、宣言との食い違いは実装 PR のコードレビューで見る（I3）。値の読み分けは ndf-next の宣言の読み取り（#3572 の `declaration.flow_of`・`declaration.review_problems`）が持ち、文書の側で検査を足さない |
 | 移行性 | 切り替えは決定 19 の段 3→4→5 の順で行い、強制 push・ルールセットの変更・検査の緩和を使わない。戻すときは決定 20 の 4 段の順で、宣言を `main` 経由で戻す。どちらの順序も正本の文書の「取り込み方を戻す」の節に置く（戻す側だけ。切り替える側は 1 回限りのため、この設計とリリースの依頼に置く） |
 
 ## 決定の記録
@@ -376,35 +376,36 @@ conductor が決めた。設計承認ゲートの承認資料に載せる。
 スプリントブランチを `main` から切って PR で `main` へマージし、`develop` と常設のリリースブランチを持たない（#3572 の課題の本文の「方針の転換」と
 「設計のやり直し」、2026-11-15・2026-11-16）。マージがそのままリリースで、バージョンとタグは CD がマージの時点に作る。決定 1〜10 が前提にした
 行 `release_branch` はスプリントを `develop` へ入れ、リリースの時点で選んで集めるため、ai-plugins の選ぶ運用と違う。
-キーと値の名前は #3613 の改名の後の名前で書く（#3572 の決定 26）。ai-plugins の設定ファイルは、#3572 が ndf-next の取り込み方の表へ足す次の行の値にし、`base_branch` を `main` にする（行の意味と理由は
-[issue-3572-design-decisions.md](issue-3572-design-decisions.md) の決定 5・16）。
+キーと値の名前は #3613 の改名の後の名前で書く（#3572 の決定 26）。ai-plugins の設定は `.ndf/branch-strategy.json` の節 `branch_strategy` に書き（#3572 の決定 27）、
+#3572 が ndf-next の取り込み方の表へ足す次の行を選び、`base_branch` を `main` にする（行の意味と理由は
+[issue-3572-design-decisions.md](issue-3572-design-decisions.md) の決定 5・16）。行が許す値は節のスキーマが持ち、表は振る舞いの列だけを持つ（#3572 の決定 28）。
 
-| 列 | 値 |
-| --- | --- |
-| `release_strategy` | `trunk` |
-| `start` | `["production"]` |
-| `doc_prs` | `["sprint"]` |
-| `integrate` | `["release"]` |
-| `keeps_sprint` | `false` |
-| `release_from` | `production` |
-| `release_units` | `false` |
+| 置き場 | キー | 値 |
+| --- | --- | --- |
+| 取り込み方の表の行 | `release_strategy` | `trunk` |
+| 節のスキーマ（行 `trunk` が許す値） | `start` | `production` |
+| 節のスキーマ（行 `trunk` が許す値） | `doc_prs` | `sprint` |
+| 節のスキーマ（行 `trunk` が許す値） | `integrate` | `release` |
+| 取り込み方の表の行 | `keeps_sprint` | `false` |
+| 取り込み方の表の行 | `release_from` | `production` |
+| 取り込み方の表の行 | `release_units` | `false` |
 
 **取り込み方の表は `merge_base_branch`・`release_branch` の 2 行を残す。** `trunk` は選べる行の 1 つで、ai-plugins がそれを選ぶのは ai-plugins の
 設定ファイルの値である。develop と main を分けるリポジトリは今の 2 行を選び続け、既定の行も `merge_base_branch` のままである（#3572 の決定 16）。
-ai-plugins のほかの選択も設定ファイルの値で受ける。マージの前の検証は検証環境の種類 `marketplace`（検証用マーケットプレイス、#3572 の決定 21）、
-同時に承認された PR の組み合わせの確かめはマージの方式 `merge-queue`（#3572 の決定 17）で、main の ruleset へ merge queue を足すのは入れ替えの
+ai-plugins のほかの選択も同じ節の値で受ける。マージの前の検証は節の `verify` の種類 `marketplace`（検証用マーケットプレイス、#3572 の決定 21）、
+同時に承認された PR の組み合わせの確かめは節の `production_merge.method` の `merge-queue`（#3572 の決定 17）、バージョンの置き場は節の `release.version_store` の `plugin`（#3572 の決定 22）で、main の ruleset へ merge queue を足すのは入れ替えの
 PR と同じ時点に人の承認の後に行う（#3572 の決定 23）。
 
-この取り込み方は今の NDF（`plugins/ndf/`）の取り込み方の表に無いため、設定ファイルの書き換え（受け入れ条件 1）は ndf-next への入れ替え（11.0.0）と同じ時点で行う。
+この取り込み方は今の NDF（`plugins/ndf/`）の取り込み方の表に無いため、設定ファイルの書き換え（受け入れ条件 1。`.ndf/branch-strategy.json` の作成と、`.ndf/worktree.json` から `base_branch`・`production_branch`・`branch_flow` を外すこと）は ndf-next への入れ替え（11.0.0）と同じ時点で、#3613 の移行のコマンドで行う。
 `release_branch` への途中の切り替えは行わない（切り替えを 2 回にすると、`release_branch` の間に始めたスプリントの宛先を付け直す手間が残る）。
 「処理の流れ」の切り替えの順序・決定 10・I7・I8 は `release_branch` への切り替えを前提にしており、GitHub flow への 1 回の切り替えとして詳細設計の工程で書き直す。
 今の NDF の読み取り（`plugins/ndf/scripts/lib/branch_flow.py` の `parse_flow`）は GitHub flow の行を持たず、`release_strategy: trunk` の設定を読めない。
-そのため I1・I2 のうちどのプロジェクトにも掛かる検査は ndf-next の部品（#3572 の `declaration.flow_of`・`declaration.review_problems` と設定ファイルのスキーマ）が持つ。
+そのため I1・I2 のうちどのプロジェクトにも掛かる検査は ndf-next の部品（#3572 の節のスキーマと `declaration.flow_of`・`declaration.review_problems`）が持つ。
 ai-plugins の値（`base_branch` と `production_branch` が `main`・`reviews` が 4 種類の行を持つ）は、ndf-next の部品へ持ち込まず、実装 PR の確認の手順で見る（NDF の側は ai-plugins の値を前提にしない）。
 レビューの単位（決定 1）は、リリースブランチの PR の行（`release`）を持たない。`trunk` の行ではスプリントの PR が本番の PR を兼ね、集めたときに
 生じる衝突の解消の差分が無いためである。承認した head でのマージ・バージョン上げ・検証環境・同期の PR の扱いは #3572 の設計
 （[issue-3572-design.md](issue-3572-design.md) の決定 1〜25）が持つ。詳細設計（[issue-3119-design-detail.md](issue-3119-design-detail.md)）の
-設定ファイルの値（「`.ndf/worktree.json` の書き換え」「内部のデータと定数」）はこの決定の値にしてある。運用の文書（`AGENTS.md`・
+設定ファイルの値（「`.ndf/branch-strategy.json` の作成と `.ndf/worktree.json` の書き換え」「内部のデータと定数」）はこの決定の値にしてある。運用の文書（`AGENTS.md`・
 `docs/versioning-and-distribution.md`）の書き換えは #3572 の決定 12 が持ち、詳細設計の節ごとの変更の表は #3572 の詳細設計の工程でそれに合わせる。
 
 根拠: Value 4 / P1（MVV 版 7）
@@ -415,13 +416,13 @@ ai-plugins の値（`base_branch` と `production_branch` が `main`・`reviews`
 
 | 受け入れ条件・不変条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
 | --- | --- | --- |
-| 受け入れ条件 1・I1 | worktree でコミットした `.ndf/worktree.json` が ndf-next の宣言のスキーマの検査に通り、`declaration.flow_of` が `trunk` を返し、`base_branch`・`production_branch` が `main` である | `release_strategy` を表に無い値にするか、`release_strategy: trunk` に `start: base` を組むと `flow_of` が `DeclarationError` を返す（#3572 の詳細設計の単体テストの観点） |
+| 受け入れ条件 1・I1 | worktree でコミットした `.ndf/branch-strategy.json` が節のスキーマの検査に通り、`declaration.flow_of` が `trunk` を返し、`base_branch`・`production_branch` が `main` である | `release_strategy` を表に無い値にするか、`release_strategy: trunk` に `start: base` を組むと、節のスキーマの検査が落ち、節を読む関数が原因 `precondition` で止まる（#3572 の決定 28・確かめ 8） |
 | 受け入れ条件 2 | #3121 の受け入れ条件 14 のテスト（`test_sprint_branch_flow.py`）が、この宣言の値で起点 `origin/main`・設計 PR の宛先 `sprint/<名前>` を返す | 宣言の `start` を読まないと落ちる |
 | 受け入れ条件 3 | #3121 の受け入れ条件 15 のテスト（`scripts/tests/test_pr_base_guard.py`）で、head が `develop` の `main` 宛を `check-pr-base.sh` が 1 で断る | worktree の宣言を読むと落ちる |
 | 受け入れ条件 4 | #3121 の受け入れ条件 16 のテストで、選んでいないスプリントのコミットを含む head を `check-pr-base.sh` が 1 で断る。承認資料の範囲は、このスプリントでは確かめず、段 5 の最初のリリースで見る（「未確認のまま残ること」） | 決定 14 の 3 つ目の条件を外すと落ちる |
 | 受け入れ条件 5 | 正本の文書に戻すマージの手順があることをコードレビューで見る。版上げのコミットが入らないことは #3121 の受け入れ条件 17 のテスト | スプリントブランチへ `develop` を取り込むと落ちる |
 | 受け入れ条件 6 | #3121 の受け入れ条件 18 のテストで、宛先の宣言が `selected` のとき `ci-heavy-skip.py` が規則 3 で省かない | 規則 3 で宣言を見ないと落ちる |
-| 受け入れ条件 7・I2 | コミットした宣言で `declaration.review_problems` が空を返す（テストは #3572 の `test_release_pr_check.py`）。4 種類の行を持つことは、実装 PR の確認の手順で `jq -e '.branch_flow.reviews \| keys == ["design","impl","spec","sprint"]' .ndf/worktree.json` が 0 を返すことで見る | `release` の行を足すと `reviews`・`release` の破れが出る。`impl` の行を消すと `jq` が 1 を返す |
+| 受け入れ条件 7・I2 | コミットした宣言で `declaration.review_problems` が空を返す（テストは #3572 の `test_release_pr_check.py`）。4 種類の行を持つことは、実装 PR の確認の手順で `jq -e '.branch_strategy.reviews \| keys == ["design","impl","spec","sprint"]' .ndf/branch-strategy.json` が 0 を返すことで見る | `release` の行を足すと `reviews`・`release` の破れが出る。`impl` の行を消すと `jq` が 1 を返す |
 | 受け入れ条件 8・I3 | 正本の文書の表の 4 行と宣言の `reviews` が同じ値であることをコードレビューで見る。決定 1 に理由と採らなかった値がある | 表と宣言の片方だけを変えると、レビューで食い違いとして指摘される |
 | 受け入れ条件 9 | 段 5 の最初のスプリントのリリース後テストで、`project-decl.py measure --out <ファイル>` → `project-decl.py drift --measure <ファイル>` のずれが 0 件（標本 3 件未満の種類は `unknown`） | 宣言と違うレビューを掛けた PR が 3 件以上あれば、その種類のずれが出る |
 | 受け入れ条件 10・I4 | `python3 plugins/ndf/scripts/instructions-check.py --root .` が 0 | `AGENTS.md` に手順を書き足して上限を超えると 1 |
@@ -436,13 +437,13 @@ ai-plugins の値（`base_branch` と `production_branch` が `main`・`reviews`
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #3119 | 実装する | — | `.ndf/worktree.json`、`AGENTS.md`、`docs/versioning-and-distribution.md`、`CONTRIBUTING.md`、`docs/plugin-development-guide.md`、`docs/specifications/ndf-branch-flow-declaration.md`、`docs/glossary/glossary.json`、`docs/glossary.md` |
+| #3119 | 実装する | — | `.ndf/branch-strategy.json`、`.ndf/worktree.json`、`AGENTS.md`、`docs/versioning-and-distribution.md`、`CONTRIBUTING.md`、`docs/plugin-development-guide.md`、`docs/specifications/ndf-branch-flow-declaration.md`、`docs/glossary/glossary.json`、`docs/glossary.md` |
 
 ## 人へ残す判断
 
 | 判断 | 当たるレッドライン | なぜ当たるか |
 | --- | --- | --- |
-| `.ndf/worktree.json` の `branch_flow` と `AGENTS.md` の運用の節を書き換えてよいか | C7 | 利用者の設定と指示書の運用の節の書き換えである。実装の中でコミットし、リリース承認ゲートで人が見る |
+| `.ndf/branch-strategy.json` の作成と `.ndf/worktree.json` の `branch_flow` などの移動、`AGENTS.md` の運用の節を書き換えてよいか | C7 | 利用者の設定と指示書の運用の節の書き換えである。実装の中でコミットし、リリース承認ゲートで人が見る |
 | 正式版の組み方を `develop` 丸ごとから、`main` へマージしたスプリントの PR ごと（GitHub flow）へ変えてよいか | P1 | 正式版のブランチへ何が載るかの規則を変え、利用者全員に効く。リリース承認ゲートで人が見る |
 
 ## 未確認のまま残ること

@@ -2,18 +2,19 @@
 
 設計文書 [issue-3119-design.md](issue-3119-design.md) の「構成要素」を、ファイルと節の粒度へ下ろした文書である。
 
-**この課題はコードを足さず、変えもしない。** 書き換えるのは宣言（`.ndf/worktree.json`）と運用の文書だけである。
+**この課題はコードを足さず、変えもしない。** 書き換えるのは設定（`.ndf/branch-strategy.json` の作成と `.ndf/worktree.json`）と運用の文書だけである。
 宣言の読み分け・`main` 宛の検査・全体テストの省略の判定は、NDF の既存の関数（#3121・#3163）がそのまま受ける。
 そのため関数を単位にする節（クラスと関数の構造・関数の仕様・異常系の処理・処理の手順・ログ・再利用・単体テスト）は
 `省く:` にし、代わりに「ファイル配置」の下にファイルと節ごとの変更点を置く。
 
 ## ファイル配置
 
-触るファイル（`*` は新設。この課題に新設は無い）:
+触るファイル（`*` は新設）:
 
 ```text
 .ndf/
-└── worktree.json                     # 宣言。branch_flow を足す
+├── branch-strategy.json              * # 設定。節 branch_strategy を作る
+└── worktree.json                     # 設定。節へ移したキーを外す
 AGENTS.md                             # Git運用ルール・版とリリースの方針・DO の 1 行
 CONTRIBUTING.md                       # 開発の進め方・一括の整形の取り込み・Pull Request を出す
 docs/
@@ -28,8 +29,9 @@ docs/
 
 | パス | 種類 | 役割 1 文 | 依存する先 |
 | --- | --- | --- | --- |
-| `.ndf/worktree.json` | 変更 | ai-plugins のブランチの流れ 4 項目とレビューの単位 4 行の値の正本を持つ | NDF の `lib/branch_flow.py` のスキーマと許す値の表 |
-| `docs/versioning-and-distribution.md` | 変更 | 各ブランチの役割、選んで集める手順、戻すマージ、依存するスプリント、本番の不具合の直し、取り込み方を戻す順序、レビューの単位の表を持つ | `.ndf/worktree.json`（値の意味を説明する）、用語集 |
+| `.ndf/branch-strategy.json` | 新設 | ai-plugins のブランチの流れ 4 項目・レビューの単位 4 行・マージの方式・検証環境・バージョンの置き場の値の正本を持つ | ndf-next の節のスキーマ（`branch-strategy.schema.json`）と取り込み方の表 |
+| `.ndf/worktree.json` | 変更 | 節へ移した `base_branch`・`production_branch`・`branch_flow` を外し、worktree の作り方の設定（`guard`）だけを持つ | ndf-next の `worktree.schema.json` |
+| `docs/versioning-and-distribution.md` | 変更 | 各ブランチの役割、選んで集める手順、戻すマージ、依存するスプリント、本番の不具合の直し、取り込み方を戻す順序、レビューの単位の表を持つ | `.ndf/branch-strategy.json`（値の意味を説明する）、用語集 |
 | `AGENTS.md` | 変更 | 起点と宛先、チャネルの役割、取り込み方とレビューの単位の要点を持ち、手順を正本の文書へリンクで渡す | `docs/versioning-and-distribution.md` |
 | `CONTRIBUTING.md` | 変更 | NDF のスプリントの外の変更の起点と宛先（決定 4）を外部の貢献者へ示す | `AGENTS.md` |
 | `docs/plugin-development-guide.md` | 変更 | 既存プラグインの削除の手順の宛先を決定 4 に合わせる | `AGENTS.md` |
@@ -41,9 +43,11 @@ docs/
 `AGENTS.md` は正本の文書を指し、`CONTRIBUTING.md` と `docs/plugin-development-guide.md` は `AGENTS.md` を指す。
 確定仕様（`ndf-branch-flow-declaration.md`）は ai-plugins のどのファイルも指さない（設計文書の「コンテキスト」の公表された言語の関係）。
 
-### `.ndf/worktree.json` の書き換え
+### `.ndf/branch-strategy.json` の作成と `.ndf/worktree.json` の書き換え
 
-`production_branch`・`guard` は変えず、`base_branch` を `main` にし、`branch_flow` を GitHub flow の行の値にする。書き換えた後の全体は「内部のデータと定数」にある。
+ブランチ戦略は `.ndf/branch-strategy.json` の節 `branch_strategy` に書く（#3572 の決定 27）。`.ndf/worktree.json` の `base_branch`・`production_branch`・`branch_flow` を節へ移し、
+`base_branch` を `main` に、ブランチの流れを GitHub flow の行の値にする。`.ndf/worktree.json` には `version`・`guard` が残る。移すのは #3613 の移行のコマンドで、
+書き換えた後の 2 つのファイルの全体は「内部のデータと定数」にある。
 取り込み方は GitHub flow（`release_strategy: trunk`。設計文書の決定 21）で、この値は今の NDF（`plugins/ndf/`）の取り込み方の表に無い。
 書き換えは ndf-next への入れ替え（11.0.0）と同じ時点で行う。行は #3572 が ndf-next の取り込み方の表へ足す。
 メインディレクトリの未コミットの同じファイル（`whole` の値）は、この worktree の書き換えに使わない（決定 6。扱いは「並行と排他」）。
@@ -73,7 +77,7 @@ docs/
 | --- | --- | --- |
 | Git運用ルール（1 行目） | Pull Request の宛先は `develop` | スプリントは `main` から切り、PR の宛先は種類で決まる（スプリントブランチ・`develop`・`main`）。表は正本の文書にあるとリンクする |
 | Git運用ルール（`--base develop` の付け忘れ〜） | head は `develop` か `origin/develop` の祖先の `release/v<版>` | `main` 宛は、選んだスプリントブランチを集めたリリースブランチだけを通す（`scripts/check-pr-base.sh` が `main` の宣言で判定する）。条件の詳細は正本の文書へ |
-| 版とリリースの方針（チャネルの表の前後） | 開発版はマージされた変更がそのまま載る | 開発版の行の文言を正本の文書と同じにする。取り込み方（承認したスプリントだけを `main` へ）とレビューの単位の要点を 1 段落ずつ足し、値の正本は `.ndf/worktree.json` の `branch_flow` だと書く |
+| 版とリリースの方針（チャネルの表の前後） | 開発版はマージされた変更がそのまま載る | 開発版の行の文言を正本の文書と同じにする。取り込み方（承認したスプリントだけを `main` へ）とレビューの単位の要点を 1 段落ずつ足し、値の正本は `.ndf/branch-strategy.json` の節 `branch_strategy` だと書く |
 | ベストプラクティスの DO | `develop` 宛の PR を通じてマージ | スプリントブランチ宛の PR を通じてマージ |
 
 `AGENTS.md` には表と手順を足さない（決定 3・I4）。書き換えた後に `instructions-check.py --root .` が 0 を返すことを確かめる。
@@ -118,26 +122,38 @@ docs/
 
 ## 内部のデータと定数
 
-宣言の値の唯一の置き場は `.ndf/worktree.json` である。文書は値を写さず、正本の文書のレビューの単位の表だけが説明として値を並べる（決定 3・I3）。
-書き換えた後のファイルの全体は次のとおりである。
+設定の値の唯一の置き場は `.ndf/branch-strategy.json` の節 `branch_strategy` である。文書は値を写さず、正本の文書のレビューの単位の表だけが説明として値を並べる（決定 3・I3）。
+書き換えた後の 2 つのファイルの全体は次のとおりである。`.ndf/branch-strategy.json` は #3572 の設計の「ブランチ戦略の節」の ai-plugins の例と同じで、スキーマの案に通ることは
+#3572 の確かめ 8 にある。
 
 ```json
 {
   "version": 1,
-  "base_branch": "main",
-  "production_branch": "main",
-  "branch_flow": {
+  "branch_strategy": {
+    "base_branch": "main",
+    "production_branch": "main",
+    "release_strategy": "trunk",
     "start": "production",
     "integrate": "release",
     "doc_prs": "sprint",
-    "release_strategy": "trunk",
     "reviews": {
       "impl": {"checks": ["cross-review"], "diff": "pr"},
       "sprint": {"checks": ["cross-refactoring", "behavior"], "diff": "unchecked"},
       "design": {"checks": ["cross-review"], "diff": "pr"},
       "spec": {"checks": [], "diff": "none"}
-    }
-  },
+    },
+    "production_merge": {"method": "merge-queue", "admin": true},
+    "verify": {"kind": "marketplace", "ref": "verify/next", "marketplace": "ai-plugins-next"},
+    "release": {"version_store": {"kind": "plugin"}}
+  }
+}
+```
+
+`.ndf/worktree.json`:
+
+```json
+{
+  "version": 1,
   "guard": {
     "allow_paths": ["issues/", "docs/", ".claude/", ".codex/", ".kiro/", ".agents/", ".serena/", ".ndf/", ".gitignore"]
   }
@@ -148,17 +164,18 @@ docs/
 
 | 名前 | 種類 | 置き場 | 既定値 |
 | --- | --- | --- | --- |
-| `branch_flow.start` | 設定値 | `.ndf/worktree.json` | `production`（スプリントを `main` から切る） |
-| `branch_flow.integrate` | 設定値 | `.ndf/worktree.json` | `release`（スプリントの PR の `main` へのマージがリリースになる。マージの前は検証用ブランチで試す） |
-| `branch_flow.doc_prs` | 設定値 | `.ndf/worktree.json` | `sprint`（設計 PR と確定仕様化の PR の宛先はスプリントブランチ） |
-| `branch_flow.release_strategy` | 設定値 | `.ndf/worktree.json` | `trunk`（スプリントの PR を `main` へ直接マージする。develop と常設のリリースブランチを持たない） |
-| `branch_flow.reviews` | 設定値 | `.ndf/worktree.json` | 4 種類の行（`impl`・`sprint`・`design`・`spec`。決定 1・決定 2） |
-| `base_branch` | 設定値 | `.ndf/worktree.json` | `main`（本番ブランチと同じ。develop を持たない） |
-| `production_branch` | 設定値 | `.ndf/worktree.json` | `main`（変えない） |
+| `branch_strategy.start` | 設定値 | `.ndf/branch-strategy.json` | `production`（スプリントを `main` から切る） |
+| `branch_strategy.integrate` | 設定値 | `.ndf/branch-strategy.json` | `release`（スプリントの PR の `main` へのマージがリリースになる。マージの前は検証用ブランチで試す） |
+| `branch_strategy.doc_prs` | 設定値 | `.ndf/branch-strategy.json` | `sprint`（設計 PR と確定仕様化の PR の宛先はスプリントブランチ） |
+| `branch_strategy.release_strategy` | 設定値 | `.ndf/branch-strategy.json` | `trunk`（スプリントの PR を `main` へ直接マージする。develop と常設のリリースブランチを持たない） |
+| `branch_strategy.reviews` | 設定値 | `.ndf/branch-strategy.json` | 4 種類の行（`impl`・`sprint`・`design`・`spec`。決定 1・決定 2） |
+| `branch_strategy.base_branch` | 設定値 | `.ndf/branch-strategy.json` | `main`（本番ブランチと同じ。develop を持たない） |
+| `branch_strategy.production_branch` | 設定値 | `.ndf/branch-strategy.json` | `main`（変えない） |
+| `branch_strategy.production_merge`・`verify`・`release.version_store` | 設定値 | `.ndf/branch-strategy.json` | `merge-queue`・検証用マーケットプレイス・`plugin`（#3572 の決定 17・21・22） |
 
-キーの名前と許す値の正本は NDF の `lib/branch_flow.py`（取り込み方の表と `REVIEW_ALLOWED`）で、ai-plugins の側で値の一覧を持たない。
-`trunk` の行（`start`・`doc_prs`・`integrate` が許す値と、`keeps_sprint: false`・`release_from: production`・`release_units: false` の列）は、
-ndf-next の取り込み方の表（`contracts/domains/branch-flows.json`）へ #3572 が足す。行の値は #3572 の設計の決定 5 にある。
+キーの名前と許す値の正本は ndf-next の節のスキーマ（`contracts/schemas/declarations/branch-strategy.schema.json`）で、ai-plugins の側で値の一覧を持たない。
+`trunk` の行が許す値（`start`・`doc_prs`・`integrate`）は節のスキーマへ、振る舞いの列（`keeps_sprint: false`・`release_from: production`・`release_units: false`）は
+ndf-next の取り込み方の表（`contracts/domains/branch-flows.json`）へ #3572 が足す（#3572 の決定 28）。行の値は #3572 の設計の決定 5 にある。
 
 ## 並行と排他
 

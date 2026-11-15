@@ -361,6 +361,7 @@ plugins/ndf-next/
 | 兆候の表のキー `suppress` | 設定値のキー | `plugins/ndf-next/src/ndf/checks/rules.json` | 値（`boundary`・`none` など）は変えない |
 | 改名表の列 | 契約の表の列の定義 | `plugins/ndf-next/contracts/domains/ndf-settings-renames.json` | `file`（string。表 `ndf-files` の ID）・`old`（string。JSON Pointer。`*` は配列のすべての要素）・`new`（string。JSON Pointer。`old` と最後の 1 階層だけが違う）・`values`（object。`optional: true`。旧い値 → 新しい値） |
 | 改名表の行 | 契約の表の行 | `plugins/ndf-next/contracts/domains/ndf-settings-renames.json` | 設計文書の「データ構造」の「利用者の設定のキーと値の改名」の 4 行。行の id は `worktree-release-strategy`・`mvv-validation`・`mvv-validation-result`・`mvv-validation-checked-at`。名前を変えない `accepted_unknown` は親の行で移り、行を持たない。子の行の `old` は親を改めた後の位置（`/versions/*/validation/verdict`） |
+| 改名表の列と行（続きの PR） | 契約の表の列と行 | `plugins/ndf-next/contracts/domains/ndf-settings-renames.json` | 列 `to_file`・`where`・`pick`（どれも `optional: true`）と、ブランチ戦略の節（`.ndf/branch-strategy.json` の `branch_strategy`）へ移す 10 行。`to_file` のある行では `new` の「`old` と最後の 1 階層だけが違う」を外す。値と並びは設計文書の「ブランチ戦略の節へ移す行」にあり、関数の形はその PR の詳細設計で決める |
 | `Rename` | 型（凍結した dataclass。`id`・`file`・`old`・`new`・`values: Mapping[str, str]`） | `plugins/ndf-next/src/ndf/domains/settings/renames.py` | `values` は行に無ければ空 |
 | `LegacyKey` | 型（凍結した dataclass。`file`・`old`・`new`。`old` と `new` は添字を広げた位置） | `plugins/ndf-next/src/ndf/domains/settings/renames.py` | 無し |
 | `RENAMES` | 定数（契約の表の名前） | `plugins/ndf-next/src/ndf/domains/settings/renames.py` | `"ndf-settings-renames"` |

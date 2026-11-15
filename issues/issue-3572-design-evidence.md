@@ -1,6 +1,6 @@
-# #3572 の実物の確かめ: 検証用マーケットプレイスと merge queue
+# #3572 の実物の確かめ: 検証用マーケットプレイス・merge queue・ブランチ戦略の節
 
-設計文書 [issue-3572-design.md](issue-3572-design.md) の実物の確かめ（要求の受け入れ条件 2d・2g）を置く。打ったコマンドと出力をそのまま載せる。
+設計文書 [issue-3572-design.md](issue-3572-design.md) の実物の確かめ（要求の受け入れ条件 2d・2g・2o・2r）を置く。打ったコマンドと出力をそのまま載せる。
 用語は設計文書の「用語」の表の意味で使う。
 
 ## 検証用マーケットプレイス（受け入れ条件 2d）
@@ -143,3 +143,218 @@ main と PR の head を親に持つマージコミットになる見込みで�
 タイムラインには理由が出る（「if there are failed required status checks or conflicts with the base branch, the pull request will be removed from
 the queue」）。外れる理由は、チェックの失敗・チェックの待ちの時間切れ・API か画面からの取り外し・自動で解けない保護の違反の 4 つである。
 キューへ入れられるのは、PR が保護の条件（承認・必須のチェック）をすべて満たした後で、書き込みの権限を持つ利用者である。
+
+## ブランチ戦略の節のスキーマ（受け入れ条件 2m・2r。確かめ 8、2026-11-16）
+
+設計文書の「ブランチ戦略の節」の 2 つの設定の例が、節のスキーマの案に通ることと、組み合わせを壊した設定が落ちることを確かめた。
+スキーマの案は実装（#3587）で `plugins/ndf-next/contracts/schemas/declarations/branch-strategy.schema.json` に置く形の下書きである。
+`$defs.reviews` は今の `worktree.schema.json` の `branch_flow.reviews`（`jq '.properties.branch_flow.properties.reviews'` で取り出したもの）をそのまま使った。
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "declarations/branch-strategy.schema.json",
+  "title": "ブランチ戦略の設定（.ndf/branch-strategy.json）",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version"],
+  "properties": {
+    "$schema": {"type": "string"},
+    "version": {"type": "integer", "enum": [1]},
+    "branch_strategy": {"$ref": "#/$defs/section"}
+  },
+  "$defs": {
+    "section": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "base_branch": {"type": "string", "minLength": 1},
+        "production_branch": {"type": "string", "minLength": 1},
+        "release_strategy": {"enum": ["merge_base_branch", "release_branch", "trunk"], "default": "merge_base_branch"},
+        "start": {"enum": ["base", "production"], "default": "base"},
+        "integrate": {"enum": ["check", "release"], "default": "check"},
+        "doc_prs": {"enum": ["base", "sprint"], "default": "base"},
+        "reviews": {"$ref": "#/$defs/reviews"},
+        "production_merge": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "method": {"enum": ["merge-queue", "strict"]},
+            "admin": {"type": "boolean"}
+          }
+        },
+        "verify": {
+          "type": "object",
+          "required": ["kind", "ref"],
+          "properties": {
+            "kind": {"enum": ["marketplace", "deploy"]},
+            "ref": {"type": "string", "minLength": 1},
+            "marketplace": {"type": "string", "minLength": 1},
+            "command": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+            "timeout_seconds": {"type": "integer", "minimum": 1}
+          },
+          "oneOf": [
+            {"properties": {"kind": {"const": "marketplace"}}, "required": ["marketplace"],
+             "propertyNames": {"enum": ["kind", "ref", "marketplace"]}},
+            {"properties": {"kind": {"const": "deploy"}}, "required": ["command", "timeout_seconds"],
+             "propertyNames": {"enum": ["kind", "ref", "command", "timeout_seconds"]}}
+          ]
+        },
+        "release": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "version_store": {
+              "type": "object",
+              "required": ["kind"],
+              "oneOf": [
+                {"properties": {"kind": {"const": "plugin"}}, "propertyNames": {"enum": ["kind"]}},
+                {"properties": {"kind": {"const": "json"}, "path": {"type": "string", "minLength": 1},
+                                "key": {"type": "string", "minLength": 1}, "name": {"type": "string", "minLength": 1}},
+                 "required": ["path", "key", "name"], "propertyNames": {"enum": ["kind", "path", "key", "name"]}}
+              ]
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"release_strategy": {"const": "release_branch"}}, "required": ["release_strategy"]},
+          "then": {"properties": {"start": {"const": "production"}, "doc_prs": {"const": "sprint"}, "integrate": {"const": "check"}},
+                   "required": ["start", "doc_prs"]}
+        },
+        {
+          "if": {"properties": {"release_strategy": {"const": "trunk"}}, "required": ["release_strategy"]},
+          "then": {"properties": {"start": {"const": "production"}, "doc_prs": {"const": "sprint"}, "integrate": {"const": "release"},
+                                  "production_merge": {"required": ["method"]}, "release": {"required": ["version_store"]},
+                                  "reviews": {"not": {"required": ["release"]}}},
+                   "required": ["start", "doc_prs", "integrate", "production_merge", "release"]},
+          "else": {
+            "if": {"properties": {"release_strategy": {"const": "release_branch"}}, "required": ["release_strategy"]},
+            "then": true,
+            "else": {"properties": {"start": {"const": "base"}, "doc_prs": {"const": "base"}, "integrate": {"const": "check"},
+                                    "reviews": {"not": {"required": ["release"]}}}}
+          }
+        }
+      ]
+    }
+  }
+}
+```
+
+設定の例（設計文書の「ブランチ戦略の節」と同じ全文）:
+
+```json
+{
+  "version": 1,
+  "branch_strategy": {
+    "base_branch": "main",
+    "production_branch": "main",
+    "release_strategy": "trunk",
+    "start": "production",
+    "integrate": "release",
+    "doc_prs": "sprint",
+    "reviews": {
+      "impl": {"checks": ["cross-review"], "diff": "pr"},
+      "sprint": {"checks": ["cross-refactoring", "behavior"], "diff": "unchecked"},
+      "design": {"checks": ["cross-review"], "diff": "pr"},
+      "spec": {"checks": [], "diff": "none"}
+    },
+    "production_merge": {"method": "merge-queue", "admin": true},
+    "verify": {"kind": "marketplace", "ref": "verify/next", "marketplace": "ai-plugins-next"},
+    "release": {"version_store": {"kind": "plugin"}}
+  }
+}
+```
+
+```json
+{
+  "version": 1,
+  "branch_strategy": {
+    "base_branch": "develop",
+    "production_branch": "main",
+    "release_strategy": "merge_base_branch",
+    "start": "base",
+    "integrate": "check",
+    "doc_prs": "base",
+    "verify": {
+      "kind": "deploy",
+      "ref": "verify/staging",
+      "command": ["gh", "workflow", "run", "deploy-staging.yml", "-f", "ref={ref}"],
+      "timeout_seconds": 900
+    },
+    "release": {"version_store": {"kind": "json", "path": "package.json", "key": "version", "name": "web"}}
+  }
+}
+```
+
+検査のスクリプトは `/tmp/bs3572/check.py`（jsonschema 4.26.0 の `Draft202012Validator`。ndf-next の依存と同じバージョン）で、上の 3 つのファイルを読む。
+
+```text
+$ cd /tmp/bs3572 && /work/ai-plugins/.worktrees/design/issue-3572/plugins/ndf-next/.venv/bin/python -I check.py
+ai-plugins: 通る
+web-develop: 通る
+壊した例 trunk でマージの方式が無い: 落ちる
+壊した例 trunk でバージョンの置き場が無い: 落ちる
+壊した例 trunk で start が base: 落ちる
+壊した例 trunk で reviews に release: 落ちる
+壊した例 merge_base_branch で start が production: 落ちる
+壊した例 表に無い行: 落ちる
+壊した例 表に無いマージの方式: 落ちる
+壊した例 deploy でコマンドが無い: 落ちる
+壊した例 表に無い検証環境の種類: 落ちる
+壊した例 json の置き場で path が無い: 落ちる
+壊した例 release_branch で doc_prs が無い: 落ちる
+release_branch の例: 通る
+節の無いファイル: 通る
+```
+
+ai-plugins の今の設定ファイルに、節へ移す前の値（検証環境の行・バージョンの置き場・マージの方式）があるかを数えた結果（a677e2d51 の時点）:
+
+```text
+$ grep -c '"verify"\|version_store\|"method"' .ndf/project.json .ndf/release.json .ndf/worktree.json
+.ndf/project.json:0
+.ndf/release.json:0
+.ndf/worktree.json:0
+```
+
+この 3 つは #3572 の設計で足した値で、ai-plugins の設定ファイルにはまだ無い。移す値は `.ndf/worktree.json` の `base_branch`・`production_branch`・`branch_flow` と `.ndf/project.json` の `production_merge.admin` である。
+
+## #3613 の設計との一致（受け入れ条件 2o。確かめ 9、2026-11-16）
+
+#3613 の設計（`issues/issue-3613-design.md` の「ブランチ戦略の節へ移す行」）の移す行の新しい位置が、この設計の「ブランチ戦略の節」の「節のキー」の表に
+すべてあり、置き場のファイルと節の名前が両方の文書にあり、移行の側の差分の記号（`<F>`・`<S>`）が残っていないことを、次のスクリプトで確かめた。
+
+```python
+import re, sys
+d3613 = open("issues/issue-3613-design.md").read()
+d3572 = open("issues/issue-3572-design.md").read()
+sec = d3572[d3572.index("### 節のキー"):d3572.index("行が許す値:")]
+news = re.findall(r"\| `\.ndf/branch-strategy\.json` \| `(/branch_strategy/[^`]+)` \|", d3613)
+print("3613 の移す行の新しい位置:", len(news))
+for p in news:
+    key = p.removeprefix("/branch_strategy/").replace("/", ".")
+    print(f"  {p}\t3572 の節のキーの表: {'ある' if re.search(r'\| `' + re.escape(key) + r'(\.|`)', sec) else '無い'}")
+print("置き場のファイル（3572 / 3613）:", d3572.count("`.ndf/branch-strategy.json`"), "/", d3613.count("`.ndf/branch-strategy.json`"))
+print("節の名前（3572 / 3613）:", d3572.count("`branch_strategy`"), "/", d3613.count("`branch_strategy`"))
+print("記号 <F>・<S> の残り（3613）:", len(re.findall(r"<F>|<S>", d3613)))
+```
+
+```text
+$ python3 -I /tmp/bs3572/keys.py
+3613 の移す行の新しい位置: 10
+  /branch_strategy/release_strategy	3572 の節のキーの表: ある
+  /branch_strategy/start	3572 の節のキーの表: ある
+  /branch_strategy/integrate	3572 の節のキーの表: ある
+  /branch_strategy/doc_prs	3572 の節のキーの表: ある
+  /branch_strategy/reviews	3572 の節のキーの表: ある
+  /branch_strategy/base_branch	3572 の節のキーの表: ある
+  /branch_strategy/production_branch	3572 の節のキーの表: ある
+  /branch_strategy/production_merge	3572 の節のキーの表: ある
+  /branch_strategy/verify	3572 の節のキーの表: ある
+  /branch_strategy/release/version_store	3572 の節のキーの表: ある
+置き場のファイル（3572 / 3613）: 15 / 11
+節の名前（3572 / 3613）: 7 / 1
+記号 <F>・<S> の残り（3613）: 0
+```
+

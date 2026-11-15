@@ -75,7 +75,7 @@
 | I2 | 用語集 | 廃止した語・単独で照合する廃止した語は、どのコンテキストの生きた語とも重ならず、語の項目と意味の欄に出ない（例として挙げる行を除く） | 構造の検査の `schema`・`deprecated_meaning` が落とす |
 | I3 | 禁止語の規則 | 単独で照合する廃止した語は、前後が漢字の出現に当たらない（「開発版」「出版」「問い合わせ」に当たらない） | 禁止語の規則の単体テストが落とす |
 | I4 | 禁止語の規則 | ndf-next のファイルに、対応表で置き換えると決めた語が `words.examples` の箇所の外に 0 件である | `ndf check` の `banned-word` が終了コード 1 で落とす |
-| I9 | 設定のキーの改名表 | 改名表の新しいキーの位置は、どれも設定のスキーマにあり、旧いキーの位置はどれもスキーマに無い。1 つの旧いキーの位置に、新しいキーの位置は 1 つだけある。`old` と `new` が同じ行は無い | 改名表とスキーマを突き合わせる単体テストが落とす |
+| I9 | 設定のキーの改名表 | 改名表の新しいキーの位置は、どれも設定のスキーマ（列 `to_file` がある行は、そのファイルのスキーマ。「ブランチ戦略の節へ移す行」）にあり、旧いキーの位置はどれもスキーマに無い。1 つの旧いキーの位置に、新しいキーの位置は 1 つだけある。`old` と `new` が同じ行は無い | 改名表とスキーマを突き合わせる単体テストが落とす |
 | I10 | 利用者の設定 | 移行のコマンドが書き換えるのは、利用者が承認した差分と今の差分が一致するときだけで、書き換えた結果は新しいスキーマに通る（受け入れ条件 12） | 移行のコマンドの単体テストが落とす |
 | I11 | 利用者の設定 | 1 つの期間に利用者の代わりに書くプログラムは、上の期間の表の 1 つだけである。ndf-next は入れ替えまで利用者の `.ndf/` を書かない | ndf-next の `.ndf/` を書くコードの単体テストが、入れ替えの前の設定（旧いキーを持つ設定）へ書こうとすると止まることを確かめる。書く側を作るまでは、書くコードが無いことで満たす |
 
@@ -429,6 +429,54 @@ MVV 判定の記録（読み手に `service` を持たない）も改名する�
 | （#3572 が足す行。#3572 の設計では `direct`） | `trunk` | `trunk` |
 
 行の id は値の下線をハイフンに換えた形にし、表のほかの行の id（`ndf-files` の `mvv-body` など）の綴りの規則にそろえる。`trunk` の行は #3572 が足す（要求の前提 8）。この課題のマージの時点で #3572 の `direct` の行が表にあれば、この課題で `trunk` へ改める。#3572 の設計（`issues/issue-3572-design.md`）へは値の名前 `trunk` を実装計画のステップで伝える。
+
+### ブランチ戦略の節へ移す行（続きの PR）
+
+ブランチ戦略・マージの方式・検証環境・バージョンの置き場は、#3572 の設計が決めた 1 つの設定ファイルの節へまとめる（利用者の決定、2026-11-16 03:4x JST。
+#3572 の決定 27〜29）。置き場のファイルは `.ndf/branch-strategy.json`（表 `ndf-files` の ID `branch-strategy`）、節の名前は `branch_strategy` である。
+移行のコマンドは、旧い 3 つのファイルの値をこの節へ移す。下の行・列・振る舞いの実装は、この課題の続きの PR が持ち、その PR は #3572 の実装 PR
+（#3587）の head ブランチを宛先にして、#3587 と一緒に develop へ入る（#3572 の決定 29。片方だけが入ると、規約の規則 spec-decl か改名表とスキーマの
+突き合わせ（I9）が落ちる）。最初の実装の Pull Request は上の 4 行のまま先に入る。
+
+改名表に足す列:
+
+| 列 | 意味 | 無いとき |
+| --- | --- | --- |
+| `to_file` | 新しいキーの置き場のファイル（表 `ndf-files` の ID） | `file` と同じ（上の 4 行はこれ） |
+| `where` | `old` が配列の要素を指すとき、移す要素の条件（キーと値の組。例: `{"channel": "verify"}`） | 条件なし（`*` はすべての要素） |
+| `pick` | 移す要素の中で、新しい位置へ置く値のキー（例: `verify`）。要素そのものは旧いファイルから消す | 要素の値をそのまま置く |
+
+`new` は、`to_file` が `file` と違う行では、最後の 1 階層だけが違う位置でなくてよい。
+
+改名表に足す行（上の表の `/branch_flow/promotion` の行は、この表の 1 行目に置き換わる）:
+
+| 旧いファイル | 旧いキーの位置 | 新しいファイル | 新しいキーの位置 | 値の対応 |
+| --- | --- | --- | --- | --- |
+| `.ndf/worktree.json` | `/branch_flow/promotion` | `.ndf/branch-strategy.json` | `/branch_strategy/release_strategy` | `whole` → `merge_base_branch`、`selected` → `release_branch` |
+| `.ndf/worktree.json` | `/branch_flow/start` | `.ndf/branch-strategy.json` | `/branch_strategy/start` | — |
+| `.ndf/worktree.json` | `/branch_flow/integrate` | `.ndf/branch-strategy.json` | `/branch_strategy/integrate` | — |
+| `.ndf/worktree.json` | `/branch_flow/doc_prs` | `.ndf/branch-strategy.json` | `/branch_strategy/doc_prs` | — |
+| `.ndf/worktree.json` | `/branch_flow/reviews` | `.ndf/branch-strategy.json` | `/branch_strategy/reviews` | — |
+| `.ndf/worktree.json` | `/base_branch` | `.ndf/branch-strategy.json` | `/branch_strategy/base_branch` | — |
+| `.ndf/worktree.json` | `/production_branch` | `.ndf/branch-strategy.json` | `/branch_strategy/production_branch` | — |
+| `.ndf/project.json` | `/production_merge`（`method`・`admin` をまとめて） | `.ndf/branch-strategy.json` | `/branch_strategy/production_merge` | — |
+| `.ndf/project.json` | `/delivery/*`（`where: {"channel": "verify"}`・`pick: "verify"`） | `.ndf/branch-strategy.json` | `/branch_strategy/verify` | 要素の `verify` の中身だけを置き、要素を `delivery` から消す |
+| `.ndf/release.json` | `/version_store` | `.ndf/branch-strategy.json` | `/branch_strategy/release/version_store` | — |
+
+検証環境は `delivery` の行の形をやめ、節のキー `verify`（中身は `kind`・`ref`・`marketplace` か `command`・`timeout_seconds`）で持つ（#3572 の決定 27）。
+`branch_flow` の子をすべて移した後の空の `branch_flow` は、旧いファイルから消す（旧いスキーマに `branch_flow` が無いため、残すとスキーマに通らない）。
+worktree の作り方だけの設定（`guard`・`follow_branch`・`deps`・`localenv`・`testenv`）と、`delivery` の検証環境でない行、`.ndf/release.json` の
+`steps` などは移さない。旧いファイルの移した後の中身が空のオブジェクトになっても、ファイルは消さずに `{}` を残す。
+
+移行のコマンドの変わること:
+
+- 差分（JSON Patch の操作の列）はファイルごとに出す。移す行は、旧いファイルの `remove` と新しいファイルの `add` の 2 つの操作になる。新しいファイルが無ければ、`add` の前にファイルの作成（中身 `{"version": 1}`）を差分に載せる
+- 差分のハッシュは今のとおり全ファイルの差分を並べた JSON の sha256（新しいファイルの作成を含む）。承認の結び付けは変えない（決定 12）
+- `--apply` は、変換した中身が旧いファイルと新しいファイルの両方のスキーマに通るときだけ書く。書く順は新しいファイル → 旧いファイル（途中で落ちても旧いキーが残り、読む側が止まって再実行できる）
+- 移す先に同じキーがすでにあり値が違えば、書かずに `cause: refused` で止め、両方の値を出す
+
+不変条件の読み替え: I9 の「新しいキーの位置はスキーマにある」は、`to_file` のファイルのスキーマで確かめる。旧いキーの位置は `file` のファイルのスキーマに無い。
+I6（旧いキーを見たら止まる）は変えない。旧いファイルに移す前のキーが残っていれば止まる。
 
 ## 入出力の契約
 
