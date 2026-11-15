@@ -6,6 +6,8 @@
   書く（#3572 の決定 8）
 - 作った版（`write_version_record`・`read_version_record`）: CD が版上げの PR・タグ・GitHub Release を作った後に、本番の PR へ
   作った版の記録（印 `VERSION_MARK`）を 1 回だけ書き、リリース記録がそこから版を読む（#3572 の決定 7）
+- キューへの投入の記録（`write_queue_record`・`queued_heads`）: 本番の PR を merge queue へ入れた head を 1 回だけ残し、打ち直しで
+  キューから外れた PR を同じ head で入れ直さない（#3572 の決定 18・I16）
 
 `trail` を読む向きだけを持つ（`trail` はこのモジュールを読まない）。
 """
@@ -36,6 +38,9 @@ VERSION_MARK = f"<!-- {identity.FIXED_WORDS['workflow_namespace']}:release-versi
 VERSION_LINE = "作った版:"
 TAG_LINE = "タグ:"
 BUMP_PR_LINE = "版上げの PR:"
+# キューへの投入の記録の印と行の見出し（#3572 の決定 18）
+QUEUE_MARK = f"<!-- {identity.FIXED_WORDS['workflow_namespace']}:queue-entry -->"
+QUEUE_HEAD_LINE = "キューへ入れた head:"
 _SHA = re.compile(r"\b([0-9a-f]{40})\b")
 
 
@@ -165,3 +170,30 @@ def read_version_record(hub: GitHub, number: int) -> str | None:
         if got:
             found = got.strip("`")
     return found
+
+
+def render_queue_record(sha: str) -> str:
+    """キューへの投入の記録の本文（証跡の印を持たない）。`sha` が 40 桁の SHA でなければ `ValueError`。"""
+    _require_sha(sha, "キューへ入れた head")
+    return f"{QUEUE_MARK}\n## merge queue へ入れた\n\n{QUEUE_HEAD_LINE} `{sha}`\n"
+
+
+def write_queue_record(hub: GitHub, number: int, sha: str) -> tuple[bool, str]:
+    """キューへ入れた head を本番の PR のコメントに 1 回だけ残す（I16）。(書いたか, コメントの URL)。読めない・書けなければ `TrailError`。"""
+    return _write_once(hub, number, _Record(QUEUE_MARK, sha, "キューへの投入の記録"), lambda _found: render_queue_record(sha))
+
+
+def queued_heads(hub: GitHub, number: int) -> frozenset[str]:
+    """本番の PR へキューへ入れた head の集合（信用する書き手が書き、編集されていない記録だけを数える）。読めなければ `TrailError`。"""
+    try:
+        comments = hub.comments(number)
+    except GitHubError as exc:
+        raise trail.TrailError(f"#{number} のキューへの投入の記録を読めない: {exc}") from None
+    found = set()
+    for c in comments:
+        if QUEUE_MARK not in c.body or c.edited or not hub.trusts(c):
+            continue
+        got = _SHA.search(trail._line_of(c.body, QUEUE_HEAD_LINE) or "")
+        if got:
+            found.add(got.group(1))
+    return frozenset(found)

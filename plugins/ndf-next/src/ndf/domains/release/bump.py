@@ -1,5 +1,8 @@
 """main へのマージの後に、版上げの PR を作り・進め・置き換え、必須のチェックの後に照合付きでマージする（CD が打つ。#3572 の決定 7）。
 
+取り込み方の行が `github-flow` のときだけ働き、ほかの行では何も読まずに `not_applicable` を返す（今の行はリリースブランチで
+バージョンを上げる。決定 16）。バージョンの読み書きはバージョンの置き場（`version_store`。決定 22）を介し、`plugins` を直接呼ばない。
+
 main の ruleset は PR を通さない push を断るため、版上げのコミットは `release/v<版>` を head にした版上げの PR で main へ入れる。
 動きは `bump_decide.action` が main の先端の状態から決める。範囲は「前の版上げのコミットの起点..main の先端」で、上げ幅と
 CHANGELOG の版の節（決定 11）はこの範囲にマージされた PR から決める。
@@ -12,7 +15,7 @@ CHANGELOG の版の節（決定 11）はこの範囲にマージされた PR か
 | `UPDATE` | 開いた版上げの PR へ main を取り込むコミットと、版の節を組み直したコミットを足す（強制 push を使わない） |
 | `REPLACE` | 古い版の版上げの PR（同じリポジトリの head で、差分が版上げだけのもの。違えば止まる）を理由つきで閉じてブランチを消し、`CREATE` へ進む |
 
-作るか進めた後は、main の先端が head の祖先のときだけ `land.Lander.land_bump` でマージする（祖先でなければ `reused`。次の
+作るか進めた後は、main の先端が head の祖先のときだけ `land.Lander.land_bump` で入れる（マージの方式があれば迂回せずに方式で。決定 20）（祖先でなければ `reused`。次の
 main への push の `bump` が進める）。同じ main の先端で 2 回打っても版上げの PR は 1 本で、差分が同じならコミットを足さない（I8）。
 """
 
@@ -26,9 +29,9 @@ from typing import NamedTuple
 
 from ndf.adapters import git as git_mod
 from ndf.adapters.github import PER_PAGE, GitHub, Pull, text_of
-from ndf.domains.release import bump_decide, changelog_decide, gather, land, materials_decide, tagging, version_decide
+from ndf.domains.release import bump_decide, changelog_decide, gather, land, materials_decide, tagging, version_decide, version_store
 from ndf.domains.release import declaration as decl_mod
-from ndf.domains.release import plugins as plugins_mod
+from ndf.domains.release.version_store import VersionStore
 
 
 class BumpError(Exception):
@@ -52,13 +55,15 @@ class Bumped(NamedTuple):
 
 
 class _Tip(NamedTuple):
-    """main の先端のプラグインの名前 → 版（定義が無ければ None）、タグを待つプラグインのタグが origin にあるか、
-    タグを待つ先頭のプラグインの版（`shown`）、タグを打つコミット（`revision`）。"""
+    """main の先端の単位の名前 → バージョン（無ければ None）、タグを待つ単位のタグが origin にあるか、
+    タグを待つ先頭の単位のバージョン（`shown`）、タグを打つコミット（`revision`）、最後のバージョン上げのコミットが
+    キューで追い越されたか（`overtaken`。真なら範囲の起点をそのコミットの起点にして上げ直す）。"""
 
     versions: dict[str, str | None]
     tagged: bool
     shown: str | None
     revision: str
+    overtaken: bool = False
 
 
 class _Plan(NamedTuple):
@@ -69,45 +74,48 @@ class _Plan(NamedTuple):
     planned: list[version_decide.Planned]
 
 
-def allowed_paths(root: Path, decl: decl_mod.Declaration) -> frozenset[str]:
-    """版上げの PR が変えてよいパス（プラグインの定義・マーケットプレイス・宣言の `version_files`・CHANGELOG・手順の書き先）。"""
-    paths = {plugins_mod.MARKETPLACE.as_posix(), decl.changelog, *decl.version_files}
+def allowed_paths(store: VersionStore, decl: decl_mod.Declaration) -> frozenset[str]:
+    """バージョン上げの PR が変えてよいパス（バージョンの置き場・CHANGELOG・手順の書き先）。"""
+    paths = {*store.paths(), decl.changelog}
     for step in decl.for_stage(version_decide.PRODUCTION):
         paths |= set(step.writes)
-    for p in plugins_mod.load(root):
-        paths |= {m.relative_to(root).as_posix() for m in p.manifests(root)}
     return frozenset(paths)
 
 
 def write_bump(
     root: Path,
+    store: VersionStore,
     decl: decl_mod.Declaration,
     planned: Sequence[version_decide.Planned],
     pulls: Sequence[materials_decide.PullFact],
     today: str,
+    channel: str = version_decide.PRODUCTION,
 ) -> frozenset[str]:
-    """版のファイルと CHANGELOG の版の節を書き、宣言の手順を流す。書いたパスを返す。"""
-    found = plugins_mod.by_name(plugins_mod.load(root))
+    """バージョンと（本番のチャネルなら）CHANGELOG のバージョンの節を書き、チャネルの手順を流す。書いたパスを返す。
+
+    `root` は書く作業場所（`store` の作業場所と同じ）。CHANGELOG の見出しは単位の名前。
+    """
+    units = {u.name: u for u in store.units()}
     entries = [changelog_decide.Entry(p.number, p.title) for p in pulls]
     log_path = root / decl.changelog
     written: set[str] = set()
     for p in planned:
-        written |= set(plugins_mod.bump(root, found[p.plugin], p.next, decl.version_files))
-        if log_path.is_file():
+        written |= set(store.write(units[p.plugin], p.next))
+        if channel == version_decide.PRODUCTION and log_path.is_file():
             new = changelog_decide.block(p.plugin, p.next, today, entries)
             log_path.write_text(changelog_decide.insert(log_path.read_text(encoding="utf-8"), p.plugin, p.next, new), encoding="utf-8")
             written.add(decl.changelog)
-    for step in decl.for_stage(version_decide.PRODUCTION):
+    for step in decl.for_stage(channel):
         decl_mod.run_step(root, step, planned[0].next)
         written |= set(step.writes)
     return frozenset(written)
 
 
-def planned_for(root: Path, hub: GitHub, number: int, production: str) -> str | None:
-    """本番の PR の予定の版（PR のラベルと main の版から。マージ済みはマージの第 1 親の版から）。読めなければ None。"""
+def planned_for(root: Path, hub: GitHub, number: int, production: str, store: VersionStore) -> str | None:
+    """本番の PR の予定のバージョン（PR のラベルと main のバージョンから。マージ済みはマージの第 1 親から）。読めなければ None。"""
     try:
-        found = plugins_mod.load(root)
-        if not found:
+        units = store.units()
+        if not units:
             return None
         pull = hub.pull(number)
         level = bump_decide.level_of(gather.labels_of(hub, number))
@@ -117,9 +125,9 @@ def planned_for(root: Path, hub: GitHub, number: int, production: str) -> str | 
         else:
             gather.fetch(repo_git, production)
             ref = f"{git_mod.ORIGIN}/{production}"
-        current = gather.version_at(repo_git, found[0], ref)
+        current = store.read(repo_git, ref, units[0])
         return bump_decide.planned(current, level) if current is not None else None
-    except (git_mod.GitError, plugins_mod.PluginsError, version_decide.VersionError):  # noqa: NDF401 外部コマンド: 予定の版は表示だけで、確定の版は confirm が読む
+    except (git_mod.GitError, version_store.VersionStoreError, version_decide.VersionError):  # noqa: NDF401 外部コマンド: 予定の版は表示だけで、確定の版は confirm が読む
         return None
 
 
@@ -132,10 +140,21 @@ class Bumper:
     lander: land.Lander
     production: str
     today: str
+    # 取り込み方の行とバージョンの置き場（None なら `root` の宣言から読む）
+    flow: str | None = None
+    store: VersionStore | None = None
 
     @property
     def _git(self) -> git_mod.Git:
         return git_mod.Git(self.root)
+
+    @property
+    def _flow(self) -> str:
+        return self.flow if self.flow is not None else decl_mod.flow_of(self.root)
+
+    @property
+    def _store(self) -> VersionStore:
+        return self.store if self.store is not None else version_store.of(self.root, decl_mod.load(self.root), self._flow)
 
     @property
     def _tip_ref(self) -> str:
@@ -158,10 +177,11 @@ class Bumper:
             if origin is None or not repo_git.is_ancestor(origin, tip):
                 raise BumpError(f"版上げのコミット {last[:12]} の起点 {str(origin)[:12]} が {self._tip_ref} の祖先でない")
             return origin
-        found = plugins_mod.load(self.root)
-        current = gather.version_at(repo_git, found[0], tip) if found else None
+        store = self._store
+        units = store.units()
+        current = store.read(repo_git, tip, units[0]) if units else None
         if current is not None:
-            tag = version_decide.tag_of(found[0].name, current)
+            tag = version_decide.tag_of(units[0].name, current)
             if repo_git.fetch(git_mod.ORIGIN, f"+refs/tags/{tag}:refs/tags/{tag}").returncode == 0:
                 return repo_git.rev_parse(f"refs/tags/{tag}^{{commit}}")
         return repo_git.run("rev-list", "--max-parents=0", git_mod.END_OF_OPTIONS, tip).split()[-1]
@@ -239,6 +259,7 @@ class Bumper:
         repo_git = self._git
         branch = version_decide.branch_of(version)
         decl = decl_mod.load(self.root)
+        store = self._store
         if gather.remote_has_branch(repo_git, branch):
             gather.fetch(repo_git, branch)
             remote = f"{git_mod.ORIGIN}/{branch}"
@@ -247,7 +268,7 @@ class Bumper:
                 raise BumpError(f"origin に {branch} が既にあり、main の先端の版上げだけを持つブランチでない（人が見てから打ち直す）")
         else:
             repo_git.run("switch", "--quiet", "-C", branch, span.until)
-            write_bump(self.root, decl, planned, pulls, self.today)
+            write_bump(self.root, store, decl, planned, pulls, self.today)
             self._commit(bump_decide.message_of(planned[0].plugin, version, span.until))
             self._push(branch)
         made = self.hub.rest(
@@ -289,7 +310,7 @@ class Bumper:
 
         if not gather.merge_or_abort(repo_git, ("--quiet", "--no-edit", git_mod.END_OF_OPTIONS, span.until), read_conflicted):
             raise BumpConflict(f"{span.until[:12]} を {opened.head_ref} へ取り込めない（衝突: {', '.join(conflicted) or '読めない'}）")
-        write_bump(self.root, decl, planned, pulls, self.today)
+        write_bump(self.root, self._store, decl, planned, pulls, self.today)
         committed = self._commit(bump_decide.message_of(planned[0].plugin, opened.version, span.until))
         if committed or repo_git.rev_parse("HEAD") != before:
             self._push(opened.head_ref)
@@ -343,16 +364,15 @@ class Bumper:
     def _outside(self, base: str, head: str, decl: decl_mod.Declaration) -> list[str]:
         """`base..head` の差分のうち、版上げの変更でないもの（許したパスの外と、許したパスの中の版の外の変更。I7）。"""
         repo_git = self._git
+        store = self._store
         paths = repo_git.changed_files(base, head)
-        allowed = allowed_paths(self.root, decl)
+        allowed = allowed_paths(store, decl)
         outside = bump_decide.only_bump(paths, allowed)
         generated = frozenset(w for step in decl.for_stage(version_decide.PRODUCTION) for w in step.writes)
         pairs = [
             (old, new)
-            for p in plugins_mod.load(self.root)
-            if (old := gather.version_at(repo_git, p, base)) is not None
-            and (new := gather.version_at(repo_git, p, head)) is not None
-            and old != new
+            for u in store.units()
+            if (old := store.read(repo_git, base, u)) is not None and (new := store.read(repo_git, head, u)) is not None and old != new
         ]
         for path in paths:
             if (
@@ -378,39 +398,39 @@ class Bumper:
         removed, added = bump_decide.diff_lines(diff)
         return not removed if path == changelog else bump_decide.version_lines_only(removed, added, pairs)
 
-    def _tip(self, span: gather.Range, found: Sequence[plugins_mod.Plugin]) -> _Tip:
-        """main の先端のプラグインごとの版と、タグを待つプラグインのタグが origin にあるか。
+    def _tip(self, span: gather.Range, store: VersionStore) -> _Tip:
+        """main の先端の単位ごとのバージョンと、タグを待つ単位のタグが origin にあるか。
 
-        タグを待つのは、直前の版上げの PR のマージで定義が変わったプラグイン（`tagging.bumped`。publish がタグを作る対象と
-        同じ）。版上げの PR のマージが無ければタグを待つプラグインは無く、`tagged` は真（PUBLISH はタグの無い版上げのマージが
-        あるときだけ。版上げの履歴が無く今の版にタグが無いリポジトリで、版上げの PR を作らずに published を返し続けない）。"""
+        タグを待つのは、直前のバージョン上げの PR のマージでバージョンが変わった単位（`tagging.bumped`。publish がタグを作る
+        対象と同じ）。バージョン上げの PR のマージが無ければタグを待つ単位は無く、`tagged` は真。そのマージがキューで追い越されて
+        いれば（`tagging.overtaken`）、そのバージョンにはタグを作らずに待たず、範囲（そのコミットの起点..先端）で上げ直す（決定 20）。"""
         tags = self._tags()
-        versions = {p.name: gather.version_at(self._git, p, span.until) for p in found}
+        versions = {u.name: store.read(self._git, span.until, u) for u in store.units()}
         merged = self._bump_merge(span.until)
-        waiting = [p.name for p in tagging.bumped(self.root, merged)] if merged is not None else []
+        overtaken = merged is not None and tagging.overtaken(self._git, merged)
+        waiting = [u.name for u in tagging.bumped(store, self.root, merged)] if merged is not None and not overtaken else []
         targets = [(n, v) for n in waiting if (v := versions.get(n)) is not None and not version_decide.is_dev(v)]
         tagged = all(version_decide.tag_of(n, v) in tags for n, v in targets)
         shown = targets[0][1] if targets else None
-        return _Tip(versions, tagged, shown, merged if merged is not None else span.until)
+        return _Tip(versions, tagged, shown, merged if merged is not None else span.until, overtaken)
 
-    def _plan(self, span: gather.Range, found: Sequence[plugins_mod.Plugin]) -> _Plan:
-        """範囲にマージされた PR・その上げ幅・出し済みの版より大きく繰り上げた版を上げる予定。"""
+    def _plan(self, span: gather.Range, store: VersionStore) -> _Plan:
+        """範囲にマージされた PR・その上げ幅・出し済みのバージョンより大きく繰り上げたバージョンを上げる予定。"""
         repo_git = self._git
         numbers = gather.included(repo_git, span, self.production)
         level = bump_decide.widest([bump_decide.level_of(gather.labels_of(self.hub, n)) for n in numbers])
         decl = decl_mod.load(self.root)
-        change_list = gather.changes(self._changed(span), found, decl)
-        bumps = gather.plan_bumps(self.root, found, change_list, decl, level, version_decide.PRODUCTION)
-        planned = gather.clear_shipped(bumps, gather.shipped(repo_git, found, self._tip_ref), level, version_decide.PRODUCTION)
+        planned = version_store.plan(store, repo_git, self._changed(span), decl, level, self._tip_ref)
         return _Plan(numbers, level, planned)
 
     def bump(self) -> Bumped:
-        """main の先端に合わせて版上げの PR を作るか進めるか置き換え、マージまで進める（I8・I11）。"""
-        decl_mod.require_github_flow(self.root)
+        """main の先端に合わせて版上げの PR を作るか進めるか置き換え、マージまで進める（I8・I11）。`github-flow` でなければ何もしない。"""
+        if self._flow != decl_mod.GITHUB_FLOW:
+            return Bumped(bump_decide.NOT_APPLICABLE)
+        store = self._store
         span = self._span()
-        found = plugins_mod.load(self.root)
-        tip = self._tip(span, found)
-        plan = self._plan(span, found)
+        tip = self._tip(span, store)
+        plan = self._plan(span, store)
         opened = self._open_bump()
         planned, level = plan.planned, plan.level
         version = planned[0].next if planned else None

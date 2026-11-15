@@ -47,11 +47,11 @@ def test_the_bump_pr_may_change_the_version() -> None:
 
 
 def test_two_level_labels_and_the_verify_ref_are_refused() -> None:
-    """I9: head が検証用ブランチ ならその破れだけを返す。上げ幅のラベルが 2 つ以上なら level。"""
+    """I9: head が検証用ブランチならその破れだけを返す。上げ幅のラベルが 2 つ以上なら level。"""
     (level,) = pr_check.problems(_facts(labels=("release:minor", "release:patch")))
     assert level["kind"] == "level" and level["name"] == "release:minor, release:patch"
     (verify,) = pr_check.problems(_facts(head_ref="verify/next", after="9.9.9"))
-    assert verify["kind"] == "verify-ref" and "検証用ブランチ は main へ戻さない" in verify["detail"]
+    assert verify["kind"] == "verify-ref" and "検証用ブランチは main へ戻さない" in verify["detail"]
 
 
 def _decl(root: Path, flow: dict[str, Any] | None) -> Path:
@@ -157,7 +157,7 @@ def test_cli_pr_check_exits_1_with_the_items_and_0_outside_the_flow(monkeypatch,
     assert release_cli.main(["pr-check", "--root", str(tmp_path), "--pr", "7"]) == 0
 
 
-# --- 現状固定（I-001）: 検証用ブランチ の名前の読み（pr_check と guard の両方）---
+# --- 現状固定（I-001）: 検証用ブランチの名前の読み（pr_check と guard の両方）---
 
 VERIFY_ROW = {
     "target": "検証版",
@@ -192,7 +192,7 @@ def _check(monkeypatch, root: Path, head_ref: str) -> list[dict[str, str]] | Non
     [
         ({"delivery": [VERIFY_ROW]}, "verify/next", ["verify-ref"]),
         ({"delivery": [VERIFY_ROW]}, "sprint/x", []),
-        (None, "verify/next", []),  # 宣言が無い: 検証用ブランチ を持たない
+        (None, "verify/next", []),  # 宣言が無い: 検証用ブランチを持たない
         ({"delivery": []}, "verify/next", []),  # 検証の行が無い
         ({"delivery": [VERIFY_ROW, VERIFY_ROW]}, "verify/next", []),  # 検証の行が 2 つ
     ],
@@ -239,4 +239,4 @@ def test_characterize_guard_reads_the_verify_ref_or_none(monkeypatch, capsys, tm
     if status is None:
         assert out["status"] == "ok"
     else:
-        assert out["cause"]["kind"] == status and out["cause"]["detail"] == "verify/next: 検証用ブランチ は main へ戻さない（マージしない）"
+        assert out["cause"]["kind"] == status and out["cause"]["detail"] == "verify/next: 検証用ブランチは main へ戻さない（マージしない）"

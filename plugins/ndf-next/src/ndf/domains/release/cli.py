@@ -2,17 +2,17 @@
 
 | 副命令 | 打つもの | 段階のモジュール |
 | --- | --- | --- |
-| `assemble` | workflow・スプリントのプラン | `assemble`（本番の PR の本文の承認資料の節を書く。ブランチを作らない） |
+| `assemble` | workflow・スプリントのプラン | `assemble`（`github-flow` は本番の PR の本文の承認資料の節を書く。ほかの行はリリースブランチと PR を作る） |
 | `materials` | 会話のセッション・workflow | `assemble.collect`（承認資料を組んで出す。本文を書かない） |
 | `present` | 会話のセッション | `trail.present`（承認資料の提示。承認ゲート） |
 | `answer` | 会話のセッション・承認ゲートの待ち | `trail.answer`（答えを証跡に書き、届いたかを確かめる）。`--route github-merge` は `trail.answer_merged`（人のマージを承認の証跡にする） |
 | `approval-check` | workflow | `trail.check`（証跡の判定を commit status へ） |
-| `merge` | 本番のプラン・workflow | `land`（証跡の後の照合付きのマージ。同期の PR を作らない。止まったら次の手を値の項目 `moves` に出す） |
-| `confirm` | 本番のプラン | `confirm`（CD の版上げの PR のマージ・タグ・GitHub Release を待ち、作った版を記録する） |
-| `guard` | `merge`・`check`・`close` のプラン | `release_plan.is_production_pr`（本番の PR をマージせずにデプロイの工程へ渡す。検証用ブランチ を main へ入れない） |
-| `bump` | workflow（main への push） | `bump`（版上げの PR を作り・進め・置き換え、照合付きでマージする） |
+| `merge` | 本番のプラン・workflow | `land`（証跡の後に、マージの方式で照合付きで入れる。`github-flow` でない行は同期の PR も。止まったら次の手を値の項目 `moves` に出す） |
+| `confirm` | 本番のプラン | `confirm`（CD のタグと GitHub Release を待ち、作った版を記録する。`github-flow` は版上げの PR のマージも待つ） |
+| `guard` | `merge`・`check`・`close` のプラン | `release_plan.is_production_pr`（本番の PR をマージせずにデプロイの工程へ渡す。検証用ブランチを main へ入れない） |
+| `bump` | workflow（main への push） | `bump`（`github-flow` で版上げの PR を作り・進め・置き換え、照合付きで入れる。ほかの行は何もしない） |
 | `pr-check` | workflow（main 宛ての PR） | `pr_check.check`（版数・上げ幅のラベル・検証用ブランチ・レビューの単位の検査） |
-| `verify-ref` | workflow（main 宛ての PR の出来事） | `verify_ref.build`（検証用ブランチ を組み直す） |
+| `verify-ref` | workflow（main 宛ての PR の出来事） | `verify_ref.build`（検証用ブランチを組み直し、検証環境へ配る。検証の行が無ければ何もしない） |
 | `record` | 本番のプラン・workflow | `record.write`（含めた PR の各々へリリース記録を書く。`confirm` の後） |
 | `verification-record` | 会話のセッション | `record.write_verification`（リリース後テストの記録を、リリース記録と同じ PR へ書く） |
 | `records` | 会話のセッション | `record.read`（PR のリリース記録とリリース後テストの記録を読む） |
@@ -45,7 +45,6 @@ from ndf.domains.release import (
     bump_decide,
     cleanup,
     confirm,
-    gather,
     land,
     materials_decide,
     merge_decide,
@@ -60,12 +59,16 @@ from ndf.domains.release import (
     verify,
     verify_ref,
     version_decide,
+    version_store,
 )
 from ndf.domains.release import declaration as decl_mod
 from ndf.domains.release import plugins as plugins_mod
 
 # 結果 JSON の tool の名前は副命令の名前（正本は `cli.COMMANDS`）
 TOOL = cli.tool_of(__name__)
+# 次の手を差し戻しだけにする止まった理由（同じ head で打ち直しても通らない。#3572 の決定 3）と、キューから外れた止まった理由
+QUEUE_REMOVED = "queue_removed"
+REJECT_ONLY = frozenset({"refused", QUEUE_REMOVED, "behind"})
 # 結果の `outputs` はスプリントの文脈の閉じた語彙（版・PR・ブランチなど）だけを持つ。ほかの値（承認・次の手・SHA など）は
 # 種類 `VALUE_KIND` の項目（`name` と `value`）で返す（#3572）
 VALUE_KIND = "value"
@@ -87,15 +90,22 @@ def _production_of(args: argparse.Namespace) -> str:
 
 
 def _target(args: argparse.Namespace) -> assemble.Target:
-    return assemble.Target(_production_of(args), args.pr, args.plugin)
+    return assemble.Target(_production_of(args), args.pr, args.plugin, args.channel, args.level, args.base)
+
+
+def _store_of(root: Path) -> version_store.VersionStore:
+    """取り込み方の行と宣言からバージョンの置き場を選ぶ（`version_store.of`）。"""
+    return version_store.of(root, decl_mod.load(root), decl_mod.flow_of(root))
 
 
 def cmd_assemble(args: argparse.Namespace) -> dict:
     built = assemble.assemble(Path(args.root), _hub(args), _target(args))
-    outputs = {"pr": built.pr, "version": built.version}
     items = materials_decide.items(built.facts) + _values(url=built.url, head=built.facts.head)
+    if built.branch is not None:
+        outputs = {"pr": built.pr, "branch": built.branch, "version": built.version}
+        return result.result(TOOL, result.OK, f"{built.branch} の PR #{built.pr} を作った: {built.url}", items, outputs=outputs)
     detail = f"#{built.pr} の本文の承認資料を {built.facts.head[:12]} で書いた（予定の版 v{built.version}）: {built.url}"
-    return result.result(TOOL, result.OK, detail, items, outputs=outputs)
+    return result.result(TOOL, result.OK, detail, items, outputs={"pr": built.pr, "version": built.version})
 
 
 def cmd_materials(args: argparse.Namespace) -> dict:
@@ -175,19 +185,31 @@ def _moves(args: argparse.Namespace, kind: str, released: bool) -> dict[str, Any
     if released:
         return {"moves": {merge_decide.RERUN: rerun}, "suggested": merge_decide.RERUN}
     answer_args = ("answer", "--pr", pr, "--answer", approval_decide.REJECTED, *target)
-    moves = {
-        merge_decide.RERUN: rerun,
-        merge_decide.REJECT: result.command(TOOL, *answer_args, ask=("--presented", "--by")),
-    }
-    return {"moves": moves, "suggested": merge_decide.suggested(kind)}
+    reject = result.command(TOOL, *answer_args, ask=("--presented", "--by"))
+    if kind in REJECT_ONLY:
+        # 同じ head で打ち直しても通らない（head が動いた・キューから外れた・先端を含まない）。差し戻しだけを出す
+        return {"moves": {merge_decide.REJECT: reject}, "suggested": merge_decide.REJECT}
+    return {"moves": {merge_decide.RERUN: rerun, merge_decide.REJECT: reject}, "suggested": merge_decide.suggested(kind)}
+
+
+def _planned(root: Path, hub: GitHub, number: int, production: str) -> str | None:
+    """本番の PR の予定の版（置き場を選べなければ None。確定の版は confirm が読む）。"""
+    try:
+        store = _store_of(root)
+    except version_store.VersionStoreError:  # noqa: NDF401 ファイル: 予定の版は表示だけで、置き場の誤りは bump と confirm が止める
+        return None
+    return bump.planned_for(root, hub, number, production, store)
 
 
 def cmd_merge(args: argparse.Namespace) -> dict:
     root, hub, production = Path(args.root), _hub(args), _production_of(args)
-    decl_mod.require_github_flow(root)
-    admin = decl_mod.production_admin(root)
-    done = land.Lander(hub, production, args.budget, admin=admin).land(args.pr)
-    return _merge_result(args, done, bump.planned_for(root, hub, args.pr, production))
+    flow = decl_mod.flow_of(root)
+    base = decl_mod.base_branch(root) if flow != decl_mod.GITHUB_FLOW else None
+    lander = land.Lander(
+        hub, production, args.budget, admin=decl_mod.production_admin(root), flow=flow, method=decl_mod.merge_method_of(root), base=base
+    )
+    done = lander.land(args.pr)
+    return _merge_result(args, done, _planned(root, hub, args.pr, production))
 
 
 def _check_items(failed: Sequence[ci.Check]) -> list[dict[str, Any]]:
@@ -206,12 +228,18 @@ def _merge_result(args: argparse.Namespace, done: land.Landed, version: str | No
     outputs = {"version": version} if version is not None else None
     approval = done.approval.as_json() if done.approval is not None else None
     items = _check_items(done.failed)
+    if done.kind == QUEUE_REMOVED:
+        items.append({"kind": "queue", "name": "removed", "detail": done.detail})
+    if done.mismatch is not None:
+        items.append({"kind": "method", "name": done.mismatch[0], "detail": done.mismatch[1]})
     items += _values(
         production_sha=done.production_sha,
         admin=done.admin,
         admin_record=done.admin_record,
         approval=approval,
         merge_record=done.merge_record,
+        method=done.method,
+        sync_pr=done.sync_pr,
     )
     detail = done.detail
     if done.record_error is not None:  # 本番は出ている。記録だけを打ち直しで書く（#3506 の決定 7）
@@ -228,7 +256,7 @@ def _merge_result(args: argparse.Namespace, done: land.Landed, version: str | No
 def cmd_guard(args: argparse.Namespace) -> dict:
     verify_ref_name = decl_mod.optional_verify_ref(Path(args.root))
     if verify_ref_name is not None and verify_ref_name in args.branch:
-        detail = f"{verify_ref_name}: 検証用ブランチ は main へ戻さない（マージしない）"
+        detail = f"{verify_ref_name}: 検証用ブランチは main へ戻さない（マージしない）"
         return result.stopped(TOOL, "refused", detail)
     try:
         production = _production_of(args)
@@ -260,37 +288,38 @@ def _bump_stopped(hub: GitHub, made: bump.Bumped) -> dict:
 
 def cmd_bump(args: argparse.Namespace) -> dict:
     root, hub, production = Path(args.root), _hub(args), _production_of(args)
-    lander = land.Lander(hub, production, args.budget, admin=decl_mod.production_admin(root))
+    flow = decl_mod.flow_of(root)
+    if flow != decl_mod.GITHUB_FLOW:
+        detail = f"取り込み方 {flow} ではリリースブランチがバージョンを上げる（CD のバージョン上げをしない）"
+        return result.result(TOOL, result.OK, detail, _values(state=bump_decide.NOT_APPLICABLE))
+    store = _store_of(root)
+    lander = land.Lander(
+        hub, production, args.budget, admin=decl_mod.production_admin(root), flow=flow, method=decl_mod.merge_method_of(root)
+    )
     today = datetime.now(timezone.utc).date().isoformat()
-    made = bump.Bumper(root, hub, lander, production, today).bump()
+    made = bump.Bumper(root, hub, lander, production, today, flow, store).bump()
     if made.state not in bump_decide.bump_states():
         return _bump_stopped(hub, made)
     production_sha = made.landed.production_sha if made.landed else None
-    items = _values(state=made.state, level=made.level, production_sha=production_sha, revision=made.revision)
+    items = _values(state=made.state, level=made.level, production_sha=production_sha, revision=made.revision, store=store.kind)
     detail = f"版上げ: {made.state}（版 {made.version or '無し'}・版上げの PR {f'#{made.pr}' if made.pr else '無し'}）"
     return result.result(TOOL, result.OK, detail, items, outputs=_bump_outputs(made))
 
 
-def _plugin_of(root: Path, found: Sequence[plugins_mod.Plugin]) -> confirm.PluginOf:
-    """版上げの PR のマージコミットで定義が変わったプラグインのうち、そのコミットの版が版上げの版と同じもの
-    （無ければ定義が変わった先頭、それも無ければマーケットプレイスの先頭）。publish がタグを作る対象と同じ規則。"""
+def _unit_of(root: Path, store: version_store.VersionStore) -> confirm.UnitOf:
+    """タグを確かめる単位の名前（`version_store.unit_at`。publish がタグを作る対象と同じ規則）。"""
 
-    def plugin_of(revision: str, version: str) -> str:
-        changed = tagging.bumped(root, revision)
-        repo_git = git_mod.Git(root)
-        hits = [p for p in changed if gather.version_at(repo_git, p, revision) == version]
-        return (hits or changed or list(found))[0].name
+    def unit_of(revision: str, version: str) -> str:
+        return version_store.unit_at(store, git_mod.Git(root), revision, version).name
 
-    return plugin_of
+    return unit_of
 
 
 def cmd_confirm(args: argparse.Namespace) -> dict:
     root, hub, production = Path(args.root), _hub(args), _production_of(args)
-    found = plugins_mod.load(root)
-    if not found:
-        return result.stopped(TOOL, "precondition", "マーケットプレイスにプラグインが無い")
+    flow, store = decl_mod.flow_of(root), _store_of(root)
     watch = confirm.Watch(args.budget, time.monotonic, time.sleep)
-    got = confirm.confirm(hub, git_mod.Git(root), args.pr, production, _plugin_of(root, found), watch)
+    got = confirm.confirm(hub, git_mod.Git(root), args.pr, production, _unit_of(root, store), watch, flow, store)
     outputs = {"version": got.version} if got.version is not None else None
     values = _values(tag=got.tag, bump_pr=got.bump_pr, bump_revision=got.bump_revision)
     if got.kind is None:
@@ -306,7 +335,7 @@ def cmd_pr_check(args: argparse.Namespace) -> dict:
     root = Path(args.root)
     found = pr_check.check(root, _hub(args), git_mod.Git(root), args.pr)
     if found is None:
-        return result.result(TOOL, result.OK, f"取り込み方が {decl_mod.GITHUB_FLOW} でないので #{args.pr} を検査しない")
+        return result.result(TOOL, result.OK, f"ブランチ戦略が {decl_mod.GITHUB_FLOW} でないので #{args.pr} を検査しない")
     if found:
         return result.stopped(TOOL, "check_failed", f"#{args.pr} の検査で {len(found)} 件の破れがある", items=found)
     return result.result(TOOL, result.OK, f"#{args.pr} の検査に破れは無い")
@@ -314,14 +343,21 @@ def cmd_pr_check(args: argparse.Namespace) -> dict:
 
 def cmd_verify_ref(args: argparse.Namespace) -> dict:
     root = Path(args.root)
+    verify = decl_mod.optional_verify(root)
+    if verify is None:
+        return result.stopped(TOOL, "not_applicable", "検証の行が無いので検証環境を使わない")
     try:
-        built = verify_ref.build(root, _hub(args), decl_mod.verify_of(root), datetime.now(timezone.utc))
+        built = verify_ref.build(root, _hub(args), verify, datetime.now(timezone.utc))
     except verify_ref.VerifyConflict as exc:
         return result.stopped(TOOL, "base_conflict", str(exc), items=[{"kind": "conflict", "name": f"#{exc.number}"}])
+    except verify_ref.VerifyDeployFailed as exc:
+        code = str(exc.code) if exc.code is not None else "none"
+        return result.stopped(TOOL, "deploy_failed", str(exc), items=[{"kind": "deploy", "name": code, "detail": str(exc)}])
     included = [{"number": n, "head": h} for n, h in built.included]
-    items = _values(ref=built.ref, head=built.head, included=included)
-    detail = f"{built.ref} を {built.head[:12]} へ組み直した（{built.version}。含めた PR {len(included)} 本）"
-    return result.result(TOOL, result.OK, detail, items, outputs={"version": built.version})
+    items = _values(ref=built.ref, head=built.head, included=included, kind=built.kind)
+    shown = f"{built.version}。" if built.version else ""
+    detail = f"{built.ref} を {built.head[:12]} へ組み直した（{built.kind}。{shown}含めた PR {len(included)} 本）"
+    return result.result(TOOL, result.OK, detail, items, outputs={"version": built.version} if built.version else None)
 
 
 def cmd_record(args: argparse.Namespace) -> dict:
@@ -349,7 +385,8 @@ def cmd_records(args: argparse.Namespace) -> dict:
 
 
 def cmd_publish(args: argparse.Namespace) -> dict:
-    made = tagging.publish(Path(args.root), _hub(args), args.revision)
+    root = Path(args.root)
+    made = tagging.publish(root, _hub(args), args.revision, _store_of(root))
     created = sum(1 for m in made if m.result == tagging.CREATED)
     return result.result(TOOL, result.OK, f"タグと GitHub Release を {created} 件作った", [m.item() for m in made])
 
@@ -406,9 +443,12 @@ def _common(p: argparse.ArgumentParser) -> None:
 
 
 def _target_args(p: argparse.ArgumentParser) -> None:
-    _pr(p)
+    p.add_argument("--pr", type=int, help="本番の PR（取り込み方 github-flow で要る）")
     _production(p)
-    p.add_argument("--plugin", help="予定の版を出すプラグイン（省けば登録の順の先頭）")
+    p.add_argument("--plugin", help="予定の版を出す単位（省けば置き場の順の先頭）")
+    p.add_argument("--channel", choices=version_decide.CHANNELS, help="リリースのチャネル（github-flow でない行で要る）")
+    p.add_argument("--level", choices=version_decide.LEVELS, default=version_decide.LEVELS[2], help="上げ幅（github-flow でない行）")
+    p.add_argument("--base", help="ベースブランチ（github-flow でない行で要る。宣言 worktree.json の base_branch）")
 
 
 def _pr(p: argparse.ArgumentParser) -> None:
@@ -520,7 +560,9 @@ def _parser() -> argparse.ArgumentParser:
 # 止まった理由の種類（例外 → 種類）
 _ERRORS: tuple[tuple[type[Exception], str], ...] = (
     (assemble.NothingToRelease, "not_applicable"),
+    (assemble.ReleaseOpen, "precondition"),
     (assemble.AssembleError, "precondition"),
+    (version_store.VersionStoreError, "precondition"),
     (bump.BumpError, "precondition"),
     (bump.BumpConflict, "base_conflict"),
     (confirm.ConfirmError, "precondition"),

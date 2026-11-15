@@ -13,8 +13,8 @@
     "review_kinds": {"type": "array", "summary": "reviews に書ける PR の種類"}
   },
   "rows": [
-    {"id": "github-flow", "promotion": "direct", "start": ["production"], "doc_prs": ["sprint"], "integrate": ["release"], "default": true, "keeps_sprint": false, "release_from": "production", "release_units": false, "review_kinds": ["impl", "sprint", "design", "spec"]},
-    {"id": "promote-whole", "promotion": "whole", "start": ["base"], "doc_prs": ["base"], "integrate": ["check"], "default": false, "keeps_sprint": false, "release_from": "base", "release_units": false, "review_kinds": ["impl", "sprint", "design", "spec"]},
+    {"id": "github-flow", "promotion": "direct", "start": ["production"], "doc_prs": ["sprint"], "integrate": ["release"], "default": false, "keeps_sprint": false, "release_from": "production", "release_units": false, "review_kinds": ["impl", "sprint", "design", "spec"]},
+    {"id": "promote-whole", "promotion": "whole", "start": ["base"], "doc_prs": ["base"], "integrate": ["check"], "default": true, "keeps_sprint": false, "release_from": "base", "release_units": false, "review_kinds": ["impl", "sprint", "design", "spec"]},
     {"id": "promote-selected", "promotion": "selected", "start": ["production"], "doc_prs": ["sprint"], "integrate": ["check"], "default": false, "keeps_sprint": true, "release_from": "production", "release_units": true, "review_kinds": ["impl", "sprint", "release", "design", "spec"]}
   ]
 }

@@ -2,7 +2,7 @@
 
 ブランチの運用は GitHub flow を土台にする（#3572）。スプリントの PR（main 宛て）が本番の PR を兼ね、承認した headとの照合付きの
 main へのマージがリリースになる。版数とタグは CD（`.github/workflows/ndf-next-release.yml`）がマージの後に版上げの PR で作り、
-PR の検査と検証用ブランチ は `.github/workflows/ndf-next-pr.yml` が持つ。会話のセッションは承認資料の提示と、答えを証跡のコメントに
+PR の検査と検証用ブランチは `.github/workflows/ndf-next-pr.yml` が持つ。会話のセッションは承認資料の提示と、答えを証跡のコメントに
 書くことだけを持つ（#3395 の決定 128）。承認の正本は本番の PR の証跡と、人の GitHub でのマージである。
 
 段階と持ち主:

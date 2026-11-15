@@ -1,26 +1,29 @@
-"""承認の証跡の後に、本番の PR（main 宛てのスプリントの PR）をマージする（本番のプランと workflow が打つ）。
+"""承認の証跡の後に、本番の PR（本番ブランチ宛ての PR）を、取り込み方の行とマージの方式に合った経路で入れる（本番のプランと workflow が打つ）。
 
-1. 本番ブランチ宛ての PR は、証跡を読み直して今の先端が承認されていることを確かめる（commit status も付け直す）。
+1. 本番ブランチ宛ての PR は、証跡を読み直して今の head が承認されていることを確かめる（commit status も付け直す）。
    書く token が記録の読み手に信用されなければ、本番ブランチへ入れる前に止まる（マージの後のリリース記録が必ず落ちる。#3487）
-2. 宛先のブランチの規則（ruleset）と従来の保護の必須のチェック（check run と commit status）が PR の先端で通るまで待つ。落ちたら打ち直さずに止まった理由で
-   返す（同じ CI の失敗を読み直し続けない。#1983）
-3. 本番ブランチ宛ての PR は、待ちの後にもう一度証跡を読み直し、待つ前と同じ先端への最新の答えが承認のときだけ進む
-   （待つ間に足された差し戻しや消された承認を見落とさない）
-4. 先端の SHA を添えて merge commit でマージする（承認の後に先端が動いていれば GitHub が断る）。マージキューへ入れたら、
-   予算の範囲で PR がマージされるまで待つ（待たずに返すと、リリース記録が走らない）。待つ間も
-   キューに残っているかと承認を読み直し、キューが外したらすぐに止まり、承認が失効したらキューから外して止まる
+2. マージの方式（`.ndf/project.json` の `production_merge.method`）を本番ブランチの ruleset と照らす（`merge_method.decide`。
+   #3572 の決定 17）。食い違えば投入もマージもせずに `precondition` で止まる（I15）
+3. 宛先のブランチの規則と従来の保護の必須のチェックが PR の head で通るまで待つ。落ちたら打ち直さずに止まった理由で返す（#1983）
+4. 待ちの後にもう一度証跡を読み直し、待つ前と同じ head への最新の答えが承認のときだけ進む
+5. 方式ごとに入れる。どれも承認した head を添えて打ち、承認の後に head が動いていれば GitHub が断る
 
-本番ブランチへ入れた後に、次の版のブランチも、ベースブランチへ戻す同期の PR も作らない（#3572 の I10）。版数とタグは CD が
-マージの後に版上げの PR で作る（決定 7）。版上げの PR は `land_bump` が、承認の証跡を読まずに、差分の判定と必須のチェックの
-後に照合付きで迂回のマージを打つ。
+| 方式 | 入れ方 |
+| --- | --- |
+| `merge-queue` | 承認した head を `expectedHeadOid` に渡してキューへ入れ、投入の記録を残し、マージかキューから外れるまで待つ。外れたら `queue_removed`（同じ head で入れ直さない。決定 18・I16） |
+| `strict` | head が本番ブランチの先端を含むときだけマージする。含まなければ `behind`（決定 19） |
+| 無し（`github-flow` でない行だけ） | merge commit でマージする（基底がキューを持てばキューへ入れて待つ）。迂回の宣言があれば迂回する（#3506） |
+
+取り込み方の行が `github-flow` でなく、ベースブランチが本番ブランチと違えば、本番ブランチへ入れた後に同期の PR（本番ブランチから
+ベースブランチ宛て）でベースブランチへ戻す。`github-flow` の行では同期の PR を作らない（決定 10・I10）。
 
 承認の後はコードを直さない（#3572 の I4）。必須のチェックが落ちたら、落ちたチェック（`Landed.failed`）を結果に載せて
 止まり、push もマージもしない。本番ブランチへ入れたら（マージ済みからの再開を含む）、承認（`merge_decide.Approval`。
 承認ゲートの承認か、人の GitHub でのマージか）を結果に載せ、人のマージなら人のマージの記録を 1 回だけ書く（決定 8）。
 
-迂回の宣言（`admin`。`.ndf/project.json` の `production_merge.admin`）があり、本番ブランチの規則の承認数が 1 以上と読めるときだけ、
-本番ブランチ宛ての PR を管理者の迂回でマージし（`GitHub.merge_as_admin`）、迂回の記録を置く（#3506 の I2b・I7）。そのときの
-証跡の照合は、担い手が MVV 判定の証跡を数えない（I9）。承認数が 0 か読めなければ迂回しない。
+迂回の宣言（`admin`。`.ndf/project.json` の `production_merge.admin`）があり、マージの方式が無く、本番ブランチの規則の承認数が 1 以上と
+読めるときだけ、本番ブランチ宛ての PR を管理者の迂回でマージし（`GitHub.merge_as_admin`）、迂回の記録を置く（#3506 の I2b・I7）。
+マージの方式があるときは、本番の PR もバージョン上げの PR も迂回しない（I17。迂回は組み合わせの確かめも越える）。
 """
 
 from __future__ import annotations
@@ -28,19 +31,21 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from http import HTTPStatus
 from typing import NamedTuple
 
 from ndf.adapters import ci
 from ndf.adapters.github import MERGE_COMMIT, MERGE_QUEUE_PENDING, GitHub, GitHubError, MergeOutcome, Pull
-from ndf.domains.release import merge_decide, records_trail, release_plan, required_checks, trail
+from ndf.domains.release import merge_decide, merge_method, records_trail, release_plan, required_checks, trail
+from ndf.domains.release.declaration import GITHUB_FLOW
 from ndf.domains.release.required_checks import NOT_FOUND, RequiredChecks, from_sources
 
 # 本番の PR と版上げの PR のマージの方式。版上げのコミットの起点と範囲（版上げの PR の第 2 親）を保つため merge commit に限る
 # （squash・rebase では範囲の PR が読めなくなる）。許されていなければ GitHub へ送らずに止まる
 MERGE_METHOD = MERGE_COMMIT
-# 承認レビューの規則の種類（ruleset）
-REVIEW_RULE = "pull_request"
-REVIEW_COUNT = "required_approving_review_count"
+# GitHub が PR の作成を断る状態と、そのうち差分が無いことを表す文言（ベースブランチへ戻す差分が無い）
+UNPROCESSABLE = HTTPStatus.UNPROCESSABLE_ENTITY
+NOTHING_TO_SYNC_TEXT = "No commits between"
 # マージキューへ入れた PR がマージされたかを読み直す間隔（秒）
 QUEUE_POLL_SECONDS = 30.0
 
@@ -61,12 +66,10 @@ class Landed(NamedTuple):
     approval: merge_decide.Approval | None = None
     failed: tuple[ci.Check, ...] = ()
     merge_record: str | None = None
-
-
-def _review_count(raw: dict) -> int:
-    """規則か従来の保護の承認数（`required_approving_review_count`）。数でなければ 0。"""
-    value = raw.get(REVIEW_COUNT)
-    return value if isinstance(value, int) else 0
+    # 同期の PR（`github-flow` でない行）・使ったマージの方式・方式の食い違い（設定の値, ruleset の値）
+    sync_pr: int | None = None
+    method: str | None = None
+    mismatch: tuple[str, str] | None = None
 
 
 def _failed_listing(failed: tuple[ci.Check, ...]) -> str:
@@ -91,12 +94,12 @@ def _judged_refusal(pull: Pull, got: trail.Read, moved: str, unapproved: str) ->
 
 
 def _dequeued(number: int) -> Landed:
-    """マージされずにマージキューから外された PR `number` の止まった結果。"""
+    """マージされずにマージキューから外された PR `number` の止まった結果（決定 18・I16）。"""
     return Landed(
         False,
-        "not_ci",
-        f"#{number} はマージされずにマージキューから外された。merge_group の必須のチェック（または衝突）を"
-        "確かめて人へ戻す（打ち直してもキューへ入れ直すだけになる）",
+        "queue_removed",
+        f"#{number} はマージされずにマージキューから外れた（キューの一時のコミットの必須のチェックか衝突）。"
+        "同じ head では入れ直さない。直しを入れた head で承認を取り直す",
     )
 
 
@@ -122,6 +125,16 @@ class Lander:
     admin: bool = False
     clock: Callable[[], float] = time.monotonic
     sleep: Callable[[float], None] = time.sleep
+    # 取り込み方の行（`declaration.flow_of`。None は既定の行）・マージの方式（`declaration.merge_method_of`）・
+    # ベースブランチ（`declaration.base_branch`。None なら同期の PR を作らない）
+    flow: str | None = None
+    method: str | None = None
+    base: str | None = None
+
+    @property
+    def _syncs(self) -> bool:
+        """本番ブランチへ入れた後に同期の PR でベースブランチへ戻すか（`github-flow` でなく、ベースブランチが本番ブランチと違う）。"""
+        return self.flow != GITHUB_FLOW and self.base is not None and self.base != self.production
 
     def _is_production(self, pull: Pull) -> bool:
         """`pull` が本番ブランチ宛ての本番の PR か（判定の正本は `release_plan.is_production_pr`）。"""
@@ -134,9 +147,9 @@ class Lander:
         except GitHubError:  # noqa: NDF401 ネットワーク: 承認数を読めなければ迂回しない（#3506 の I2b）
             return None
         found = [
-            _review_count(rule["parameters"])
+            merge_method.review_count(rule["parameters"])
             for rule in rules
-            if rule.get("type") == REVIEW_RULE and isinstance(rule.get("parameters"), dict)
+            if rule.get("type") == merge_method.REVIEW_RULE and isinstance(rule.get("parameters"), dict)
         ]
         if found:
             return max(found)
@@ -144,11 +157,12 @@ class Lander:
             got = self.hub.rest("GET", f"/repos/{self.hub.repo}/branches/{branch}/protection/required_pull_request_reviews")
         except GitHubError as exc:
             return 0 if exc.status == NOT_FOUND else None
-        return _review_count(got) if isinstance(got, dict) else None
+        return merge_method.review_count(got) if isinstance(got, dict) else None
 
     def _bypass(self, pull: Pull) -> bool:
-        """この PR を管理者の迂回でマージするか（宣言があり、本番ブランチ宛てで、承認数が 1 以上と読める。#3506 の I2b）。"""
-        if not self.admin or not self._is_production(pull):
+        """この PR を管理者の迂回でマージするか（宣言があり、マージの方式が無く、本番ブランチ宛てで、承認数が 1 以上と読める。
+        #3506 の I2b。方式があれば迂回しない。#3572 の I17）。"""
+        if not self.admin or self.method is not None or not self._is_production(pull):
             return False
         n = self.approvals(pull.base_ref)
         return n is not None and n >= 1
@@ -217,6 +231,111 @@ class Lander:
             return self._await_queue(pull, deadline)
         return Landed(outcome.merged, outcome.kind, outcome.detail)
 
+    def _method_of(self, pull: Pull) -> tuple[str | None, Landed | None]:
+        """マージの方式を本番ブランチの ruleset と照らし、(方式, None) か (None, 止まった結果) を返す（I15）。
+
+        `github-flow` でない行で方式の宣言が無ければ、ruleset を読まずに方式なし（今のマージ）。"""
+        if self.method is None and self.flow != GITHUB_FLOW:
+            return None, None
+        try:
+            facts = merge_method.rules_of(self.hub.branch_rules(pull.base_ref), self.hub.merge_queue(pull.base_ref))
+            review = self.hub.review_decision(pull.number) if self.method is not None and facts.review_count >= 1 else None
+        except GitHubError as exc:
+            return None, Landed(False, "precondition", f"#{pull.number} の宛先 {pull.base_ref} の ruleset を読めない: {exc}")
+        chosen = merge_method.decide(self.flow or "", self.method, facts, review, GITHUB_FLOW)
+        if chosen.problem is None:
+            return chosen.value, None
+        declared = chosen.declared if chosen.declared is not None else "（無し）"
+        detail = (
+            f"#{pull.number} を入れない: {chosen.problem}（設定 production_merge.method={declared}・ruleset: {chosen.actual}）。"
+            "設定か ruleset を直して打ち直す"
+        )
+        return None, Landed(False, "precondition", detail, mismatch=(declared, chosen.actual))
+
+    def _behind(self, pull: Pull) -> Landed | None:
+        """head が本番ブランチの先端を祖先に持たなければ止まった結果（`behind`）。比べを読めなければ `precondition`。"""
+        try:
+            n = self.hub.behind_by(self.production, pull.head_sha)
+        except GitHubError as exc:
+            return Landed(False, "precondition", f"#{pull.number} の head と {self.production} を比べられない: {exc}")
+        if n == 0:
+            return None
+        return Landed(
+            False,
+            "behind",
+            f"#{pull.number} の head が {self.production} の先端より {n} コミット遅れている。{self.production} を取り込んで承認を取り直す",
+        )
+
+    def _land_queue(self, pull: Pull, deadline: float) -> Landed:
+        """承認した head でキューへ入れ、投入の記録を残し、マージかキューから外れるのを待つ（決定 18・I16。迂回しない）。"""
+        number = pull.number
+        try:
+            queued = records_trail.queued_heads(self.hub, number)
+        except trail.TrailError as exc:
+            return Landed(False, "unknown", f"#{number} のキューへの投入の記録を読めない: {exc}")
+        if pull.head_sha in queued:
+            # 打ち直し: 入れた head の記録がある。キューの中なら待ちを続け、無ければ外れたとして入れ直さない
+            return self._await_queue(pull, deadline) if self.hub.queue_entry(number).in_queue else _dequeued(number)
+        blocked = self._blocker(pull, deadline)
+        if blocked is not None:
+            return blocked
+        outcome = self.hub.enqueue(number, pull.head_sha)
+        if outcome.merged:
+            return Landed(True, None, outcome.detail)
+        if outcome.kind != MERGE_QUEUE_PENDING:
+            return Landed(False, outcome.kind, outcome.detail)
+        try:
+            records_trail.write_queue_record(self.hub, number, pull.head_sha)
+        except trail.TrailError as exc:
+            self.hub.dequeue(number)
+            return Landed(False, "unknown", f"#{number} のキューへの投入の記録を書けない: {exc}。キューから外した")
+        return self._await_queue(pull, deadline)
+
+    def _land_strict(self, pull: Pull, deadline: float) -> Landed:
+        """head が本番ブランチの先端を含むかを確かめ、停止条件の後に承認した head でマージする（決定 19。迂回しない）。"""
+        behind = self._behind(pull)
+        if behind is not None:
+            return behind
+        blocked = self._blocker(pull, deadline)
+        if blocked is not None:
+            return blocked
+        outcome = self.hub.merge(pull.number, expect_head=pull.head_sha, method=MERGE_METHOD, require_method=True)
+        if outcome.merged:
+            return Landed(True, None, outcome.detail)
+        again = self._behind(pull)
+        return again if again is not None else Landed(False, outcome.kind, outcome.detail)
+
+    def _open_sync(self) -> int | None:
+        """本番ブランチからベースブランチへ戻す PR の番号（開いたものがあれば使い直し、無ければ作る。差分が無ければ None）。"""
+        owner = self.hub.repo.partition("/")[0]
+        found = self.hub.rest(
+            "GET",
+            f"/repos/{self.hub.repo}/pulls",
+            params={"state": "open", "head": f"{owner}:{self.production}", "base": self.base},
+        )
+        if isinstance(found, list) and found:
+            return int(found[0]["number"])
+        try:
+            made = self.hub.rest(
+                "POST",
+                f"/repos/{self.hub.repo}/pulls",
+                {"title": f"Sync: {self.production} を {self.base} へ戻す", "head": self.production, "base": self.base, "body": ""},
+            )
+        except GitHubError as exc:
+            if exc.status != UNPROCESSABLE or NOTHING_TO_SYNC_TEXT not in str(exc):
+                raise
+            return None
+        return int(made["number"])
+
+    def _sync(self, done: Landed, deadline: float) -> Landed:
+        """本番ブランチへ入れた結果 `done` に、ベースブランチへ戻す同期の PR のマージを足す（`github-flow` の行では呼ばない。I10）。"""
+        number = self._open_sync()
+        if number is None:
+            return done._replace(detail=f"{done.detail}（{self.base} へ戻す差分は無い）")
+        synced = self._merge(self.hub.pull(number), deadline)
+        detail = f"{done.detail}。同期の PR #{number}: {synced.detail}"
+        return done._replace(merged=synced.merged, kind=synced.kind, failed=synced.failed, sync_pr=number, detail=detail)
+
     def _record_admin(self, pull: Pull, done: Landed) -> Landed:
         """迂回でマージした結果に、迂回の記録の URL か、書けなかった理由を足す（#3506 の I7・決定 7）。"""
         try:
@@ -241,7 +360,7 @@ class Lander:
         """マージキューへ入れた PR `pull` がマージされるまで、時刻 `deadline`（`clock` の値）まで読み直す。
 
         読み直すたびに、キューに残っているかと（本番ブランチ宛てで `judge` なら）承認を確かめる。版上げの PR は承認の
-        証跡を持たないため、`land_bump` は `judge` を偽にして呼ぶ。キューが外したら `not_ci` で
+        証跡を持たないため、`land_bump` は `judge` を偽にして呼ぶ。キューが外したら `queue_removed` で
         すぐに止まり、承認が失効したらキューから外して `refused` で止まる（前の承認のままキューがマージしない）。
         予算の内にマージされなければ `ci_pending` で止まり、キューがマージした後の打ち直しを促す（`land` はマージ済みの
         本番ブランチ宛ての PR から、承認の記録へ再開する）。
@@ -286,26 +405,26 @@ class Lander:
         approval = self._approval(pull.number)
         return self._record_merge(pull.number, done, approval) if approval is not None else done
 
-    def _resume_merged(self, number: int, pull: Pull) -> Landed:
+    def _resume_merged(self, number: int, pull: Pull, deadline: float) -> Landed:
         """マージ済みの PR からの再開。本番ブランチ宛てなら承認を決めて（人のマージなら記録を書き）、
-        迂回の記録が無ければ補う。同期の PR を作らない（I10）。"""
+        迂回の記録が無ければ補い、`github-flow` でない行では同期の PR へ進む。"""
         if not self._is_production(pull):
             return Landed(True, None, f"#{number} は既にマージされている")
-        synced = self._released(pull, Landed(True, None, f"#{number} は既に {self.production} へマージされている"))
-        # 再開: 利用者の証跡がマージした先端への承認なら、迂回でマージしたとして記録を補う（I7）
+        released = self._released(pull, Landed(True, None, f"#{number} は既に {self.production} へマージされている"))
+        # 再開: 利用者の証跡がマージした head への承認なら、迂回でマージしたとして記録を補う（I7）
         if self._bypass(pull) and (judged := trail.user_judgment_at(self.hub, number, pull.head_sha)) is not None and judged.approved:
-            return self._record_admin(pull, synced)
-        return synced
+            released = self._record_admin(pull, released)
+        return self._sync(released, deadline) if self._syncs else released
 
     def land(self, number: int) -> Landed:
-        """本番の PR を照合付きでマージし、承認を結果に載せる。head の名前を問わない。同期の PR を作らない（I10）。
+        """本番の PR を行とマージの方式に合った経路で入れ、承認を結果に載せる。head の名前を問わない。
 
-        待ちの予算（`budget`）はエントリポイントで 1 つの締め切りにし、チェックの待ちとマージキューの待ちで分け合う。
+        待ちの予算（`budget`）はエントリポイントで 1 つの締め切りにし、チェックの待ち・マージキューの待ち・同期の PR で分け合う。
         """
         deadline = self.clock() + self.budget
         pull = self.hub.pull(number)
         if pull.merged:
-            return self._resume_merged(number, pull)
+            return self._resume_merged(number, pull, deadline)
         if self._is_production(pull) and not self.hub.token_trusted():
             return Landed(
                 False,
@@ -313,19 +432,32 @@ class Lander:
                 f"#{number} を {self.production} へ入れる token の書き手が write 以上の権限を持つ利用者でなく、マージの後の"
                 "リリース記録が読まれない。利用者の token（workflow では secrets.NDF_RELEASE_TOKEN）でマージする",
             )
-        bypass = self._bypass(pull)
-        done = self._merge(pull, deadline, bypass)
-        if not done.merged or not self._is_production(pull):
+        if not self._is_production(pull):
+            return self._merge(pull, deadline)
+        method, stopped = self._method_of(pull)
+        if stopped is not None:
+            return stopped
+        bypass = False
+        if method == merge_method.QUEUE:
+            done = self._land_queue(pull, deadline)
+        elif method == merge_method.STRICT:
+            done = self._land_strict(pull, deadline)
+        else:
+            bypass = self._bypass(pull)
+            done = self._merge(pull, deadline, bypass)
+        done = done._replace(method=method)
+        if not done.merged:
             return done
         released = self._released(pull, done)
-        return self._record_admin(pull, released) if bypass else released
+        released = self._record_admin(pull, released) if bypass else released
+        return self._sync(released, deadline) if self._syncs else released
 
     def land_bump(self, number: int, allowed: Callable[[Pull], list[str]]) -> Landed:
-        """版上げの PR を、承認の証跡を読まずに、差分の判定と必須のチェックの後に先端との照合付きでマージする（#3572 の決定 7）。
+        """バージョン上げの PR を、承認の証跡を読まずに、差分の判定と必須のチェックの後に head との照合付きで入れる（決定 7・20）。
 
-        `allowed` は版のファイルと CHANGELOG の外に及ぶ差分のパスを返す（空なら版上げだけ）。宛先の承認数が 0 と読めれば
-        普通のマージで、1 以上なら迂回でマージする。承認が要るのに迂回の宣言が無い・承認数を読めない・マージが断られたときは、
-        ruleset を変えずに済む手段が無いとして止まる（要求の未決 3）。
+        `allowed` はバージョンの置き場と CHANGELOG の外に及ぶ差分のパスを返す（空ならバージョン上げだけ）。マージの方式があれば
+        本番の PR と同じく ruleset と照らし、迂回せずに方式で入れる（`merge-queue` はキューの先頭へ、`strict` は先端を含む head を
+        マージ）。方式が無ければ、宛先の承認数が 0 なら普通のマージ、1 以上なら迂回でマージする。
         """
         deadline = self.clock() + self.budget
         pull = self.hub.pull(number)
@@ -333,7 +465,12 @@ class Lander:
             return Landed(True, None, f"#{number} は既にマージされている", production_sha=_sha_or_none(pull.merge_sha))
         outside = allowed(pull)
         if outside:
-            return Landed(False, "refused", f"#{number} の差分が版のファイルと CHANGELOG の外に及ぶ: {', '.join(outside)}")
+            return Landed(False, "refused", f"#{number} の差分がバージョンの置き場と CHANGELOG の外に及ぶ: {', '.join(outside)}")
+        method, stopped = self._method_of(pull) if self._is_production(pull) else (None, None)
+        if stopped is not None:
+            return stopped
+        if method is not None:
+            return self._bump_by_method(pull, method, deadline)
         plain = self._is_production(pull) and self.approvals(pull.base_ref) == 0
         if not plain and not self._bypass(pull):
             return Landed(
@@ -360,3 +497,29 @@ class Lander:
         merged_sha = self.hub.pull(number).merge_sha
         how = "マージした" if plain else "迂回でマージした"
         return Landed(True, None, f"#{number} を{how}", production_sha=_sha_or_none(merged_sha), admin=not plain)
+
+    def _bump_by_method(self, pull: Pull, method: str, deadline: float) -> Landed:
+        """バージョン上げの PR を、head が本番ブランチの先端を含むときだけ方式で入れる（迂回しない。I17）。"""
+        number = pull.number
+        behind = self._behind(pull)
+        if behind is not None:
+            return behind
+        kind, failed = self._watch(pull, deadline)
+        if kind is not None:
+            return Landed(False, kind, f"#{number} の必須のチェックが通らない（{kind}{_failed_listing(failed)}）", failed=failed)
+        if method == merge_method.QUEUE:
+            # キューの先頭へ入れ、キューで前に並んだ PR がバージョン上げのマージコミットの祖先に入らないようにする
+            outcome = self.hub.enqueue(number, pull.head_sha, jump=True)
+            if not outcome.merged and outcome.kind != MERGE_QUEUE_PENDING:
+                return Landed(False, outcome.kind, outcome.detail, method=method)
+            if not outcome.merged:
+                queued = self._await_queue(pull, deadline, judge=False)
+                if not queued.merged:
+                    return queued._replace(method=method)
+        else:
+            outcome = self.hub.merge(number, expect_head=pull.head_sha, method=MERGE_METHOD, require_method=True)
+            if not outcome.merged:
+                again = self._behind(pull)
+                return (again if again is not None else Landed(False, outcome.kind, outcome.detail))._replace(method=method)
+        merged_sha = self.hub.pull(number).merge_sha
+        return Landed(True, None, f"#{number} を {method} でマージした", production_sha=_sha_or_none(merged_sha), method=method)

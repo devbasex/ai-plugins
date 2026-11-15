@@ -1,4 +1,4 @@
-"""検証用ブランチ の組み立て（本物の git と、偽の GitHub。#3572 の決定 9・I9・I12）。"""
+"""検証用ブランチの組み立て（本物の git と、偽の GitHub。#3572 の決定 9・I9・I12）。"""
 
 from __future__ import annotations
 
@@ -70,7 +70,7 @@ def test_build_merges_the_open_prs_renames_the_marketplace_and_sets_the_verify_v
 
 
 def test_rebuilding_is_a_child_of_the_previous_verify_ref(tmp_path: Path) -> None:
-    """I12: 組み直しは前の検証用ブランチ の先端を親に持ち、fast-forward でだけ進む。"""
+    """I12: 組み直しは前の検証用ブランチの先端を親に持ち、fast-forward でだけ進む。"""
     work = _origin(tmp_path, {1: ("a.txt", "a\n"), 2: ("b.txt", "b\n")})
     first = verify_ref.build(work, _hub(_row(1)), DECL, NOW)
     second = verify_ref.build(work, _hub(_row(1), _row(2)), DECL, NOW.replace(minute=5))

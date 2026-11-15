@@ -1,9 +1,11 @@
-"""本番の PR のマージの後に、CD の版上げ（版上げの PR のマージ・タグ・その GitHub Release）がそろうのを待って確かめ、
-作った版を本番の PR へ記録する（本番のプランの `confirm`。#3572 の決定 7）。
+"""本番の PR のマージの後に、CD がそろうのを待って確かめ、作った版を本番の PR へ記録する（本番のプランの `confirm`。#3572 の決定 7・16）。
+
+取り込み方の行で待つものを選ぶ。`github-flow` は本番の PR のマージコミットを含む版上げの PR のマージ・タグ・GitHub Release を、
+ほかの行（リリースブランチでバージョンを上げた）はマージコミットのバージョンのタグと GitHub Release を待つ。
 
 | 読み直しの結果 | 動き |
 | --- | --- |
-| 本番の PR のマージコミットを含む版上げの PR のマージ・タグ・GitHub Release の 3 つがある | 作った版の記録を 1 回だけ書いて返す |
+| 待つものがそろった | 作った版の記録を 1 回だけ書いて返す（今の行の版上げの PR の欄は本番の PR の番号） |
 | どれかが無く、締め切りの前 | `CONFIRM_POLL_SECONDS` 秒待って読み直す |
 | どれかが無く、締め切りを過ぎた | 足りないもの（`bump` か `publish`）を持つ止まった結果を返す。記録を書かない |
 
@@ -17,7 +19,9 @@ from typing import NamedTuple
 
 from ndf.adapters import git as git_mod
 from ndf.adapters.github import PER_PAGE, GitHub, text_of
-from ndf.domains.release import gather, land, records_trail, version_decide
+from ndf.domains.release import gather, land, records_trail, version_decide, version_store
+from ndf.domains.release.declaration import GITHUB_FLOW
+from ndf.domains.release.version_store import VersionStore
 
 # 読み直しの間隔（秒。マージキューの読み直しと同じ値）
 CONFIRM_POLL_SECONDS = land.QUEUE_POLL_SECONDS
@@ -27,8 +31,8 @@ MISSING_BUMP, MISSING_PUBLISH = "bump", "publish"
 DEPLOY_FAILED = "deploy_failed"
 
 
-# 版上げの PR のマージコミットと版 → タグを確かめるプラグインの名前
-PluginOf = Callable[[str, str], str]
+# 版上げの PR のマージコミットと版 → タグを確かめる単位の名前（`version_store.unit_at` を包む）
+UnitOf = Callable[[str, str], str]
 
 
 class ConfirmError(Exception):
@@ -96,7 +100,7 @@ def _has_release(hub: GitHub, tag: str) -> bool:
     return gather.resource_exists(hub, f"/repos/{hub.repo}/releases/tags/{tag}")
 
 
-def _read(hub: GitHub, repo_git: git_mod.Git, merge_sha: str, production: str, plugin_of: PluginOf) -> Confirmed:
+def _read(hub: GitHub, repo_git: git_mod.Git, merge_sha: str, production: str, plugin_of: UnitOf) -> Confirmed:
     """1 回の読み直し。そろっていれば `kind` が None の結果、そろわなければ足りないものを持つ結果。
 
     確かめるタグのプラグインは、版上げの PR のマージコミットと版から `plugin_of` が決める（マーケットプレイスの先頭に限らない）。"""
@@ -113,21 +117,44 @@ def _read(hub: GitHub, repo_git: git_mod.Git, merge_sha: str, production: str, p
     return Confirmed(version, tag, number, bump_revision=sha)
 
 
+def _read_release_branch(hub: GitHub, repo_git: git_mod.Git, number: int, merge_sha: str, store: VersionStore) -> Confirmed:
+    """今の行で、本番の PR のマージコミットのバージョンのタグと GitHub Release を 1 回読む（版上げの PR の欄は本番の PR の番号）。"""
+    changed = version_store.bumped(store, repo_git, merge_sha)
+    if not changed:
+        return Confirmed(None, None, None, DEPLOY_FAILED, MISSING_PUBLISH, f"マージコミット {merge_sha[:12]} でバージョンが変わっていない")
+    unit = changed[0]
+    version = store.read(repo_git, merge_sha, unit)
+    if version is None:
+        return Confirmed(None, None, None, DEPLOY_FAILED, MISSING_PUBLISH, f"{merge_sha[:12]} に {unit.name} のバージョンが無い")
+    tag = version_decide.tag_of(unit.name, version)
+    if not _tagged(hub, tag) or not _has_release(hub, tag):
+        return Confirmed(version, tag, number, DEPLOY_FAILED, MISSING_PUBLISH, f"タグ {tag} か GitHub Release がまだ無い", merge_sha)
+    return Confirmed(version, tag, number, bump_revision=merge_sha)
+
+
 def confirm(
     hub: GitHub,
     repo_git: git_mod.Git,
     number: int,
     production: str,
-    plugin_of: PluginOf,
+    plugin_of: UnitOf,
     watch: Watch,
+    flow: str = GITHUB_FLOW,
+    store: VersionStore | None = None,
 ) -> Confirmed:
-    """本番の PR `number` のマージを含む版上げの PR のマージ・タグ・GitHub Release を `watch.budget` 秒まで待ち、作った版を記録する。"""
+    """本番の PR `number` のマージの後の CD を `watch.budget` 秒まで待ち、作った版を記録する（`github-flow` でない行は `store` が要る）。"""
     pull = hub.pull(number)
     if not pull.merged or not pull.merge_sha:
         raise ConfirmError(f"#{number} はまだマージされていない（release-steps merge の後に打つ）")
+    if flow != GITHUB_FLOW and store is None:
+        raise ConfirmError(f"取り込み方 {flow} の確かめにはバージョンの置き場が要る")
     deadline = watch.clock() + watch.budget
     while True:
-        got = _read(hub, repo_git, pull.merge_sha, production, plugin_of)
+        if flow == GITHUB_FLOW or store is None:
+            got = _read(hub, repo_git, pull.merge_sha, production, plugin_of)
+        else:
+            gather.fetch(repo_git, production)
+            got = _read_release_branch(hub, repo_git, number, pull.merge_sha, store)
         if got.kind is None and got.version is not None and got.tag is not None and got.bump_pr is not None:
             records_trail.write_version_record(hub, number, got.version, got.tag, got.bump_pr)
             return got._replace(detail=f"#{number} の版 v{got.version}（タグ {got.tag}・版上げの PR #{got.bump_pr}）を確かめた")

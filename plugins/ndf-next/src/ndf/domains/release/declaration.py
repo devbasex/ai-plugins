@@ -10,6 +10,7 @@
 | `bump_undistributed` | リリース対象に関わらない変化だけのプラグインも版を上げるか（#2217） | 偽 |
 | `version_files` | 版上げで、プラグインの名前を含む行の版を書き換えるファイル | 無し |
 | `changelog` | CHANGELOG のファイル（リポジトリの根から） | `CHANGELOG.md` |
+| `version_store` | バージョンの置き場（`kind` が `plugin` か `json`。形は `version_store.of` が見る。#3572 の決定 22） | 無し |
 
 トークン消費の記録のような、リポジトリ固有のリリースの作業は宣言の手順に書く（NDF は中身を知らない）。
 
@@ -17,8 +18,10 @@
 
 | 関数 | 宣言 | 読むもの |
 | --- | --- | --- |
-| `flow_of`・`require_github_flow`・`review_problems` | `.ndf/worktree.json` の `branch_flow` | 取り込み方の表（`branch-flows`）の行。ndf-next のリリースは行 `github-flow` だけを扱う |
-| `verify_of` | `.ndf/project.json` の `delivery` の検証の行（`channel: verify`） | 検証用ブランチ の名前と 検証用マーケットプレイスの名前 |
+| `flow_of`・`review_problems` | `.ndf/worktree.json` の `branch_flow` | 取り込み方の表（`branch-flows`）の行。リリースのサブコマンドは行ごとに振る舞いを選ぶ（決定 16） |
+| `base_branch` | `.ndf/worktree.json` の `base_branch` | 同期の PR の宛先（無ければ本番ブランチ） |
+| `merge_method_of` | `.ndf/project.json` の `production_merge.method` | 本番のマージの方式（`merge-queue`・`strict`。決定 17） |
+| `verify_of` | `.ndf/project.json` の `delivery` の検証の行（`channel: verify`） | 検証環境の種類（`marketplace`・`deploy`）と種類ごとの値（決定 21） |
 """
 
 from __future__ import annotations
@@ -33,7 +36,7 @@ from typing import NamedTuple
 from ndf import identity
 from ndf.adapters import git as git_mod
 from ndf.contracts import facts
-from ndf.domains.release import changes_decide
+from ndf.domains.release import changes_decide, merge_method
 
 # 読める宣言の版
 READABLE_VERSION = 1
@@ -71,6 +74,7 @@ class Declaration:
     bump_undistributed: bool = False
     version_files: tuple[str, ...] = ()
     changelog: str = "CHANGELOG.md"
+    version_store: dict | None = None
     raw: dict = field(default_factory=dict, compare=False, repr=False)
 
     def for_stage(self, stage: str) -> list[Step]:
@@ -118,13 +122,17 @@ def _parse(raw: dict) -> Declaration:
     changelog = _value(raw, "changelog", Declaration.changelog)
     if not isinstance(flag, bool) or not isinstance(changelog, str):
         raise DeclarationError("bump_undistributed は真偽、changelog は文字列")
+    store = _value(raw, "version_store", None)
+    if store is not None and not isinstance(store, dict):
+        raise DeclarationError("version_store はオブジェクト")
     return Declaration(
-        tuple(_step(s) for s in steps),
-        _strings(raw, "undistributed", changes_decide.DEFAULT_UNDISTRIBUTED),
-        flag,
-        _strings(raw, "version_files", ()),
-        changelog,
-        raw,
+        steps=tuple(_step(s) for s in steps),
+        undistributed=_strings(raw, "undistributed", changes_decide.DEFAULT_UNDISTRIBUTED),
+        bump_undistributed=flag,
+        version_files=_strings(raw, "version_files", ()),
+        changelog=changelog,
+        version_store=store,
+        raw=raw,
     )
 
 
@@ -181,6 +189,25 @@ def production_admin(root: Path) -> bool:
     return isinstance(got, dict) and got.get("admin") is True
 
 
+def merge_method_of(root: Path) -> str | None:
+    """本番のマージの方式（`.ndf/project.json` の `production_merge.method`。#3572 の決定 17）。書いていなければ None。
+
+    宣言はメインディレクトリから読む（PR の作業場所の宣言で方式を選べない）。ファイルが無ければ None、壊れていれば・
+    表に無い値なら `DeclarationError`（既定の方式へ倒さない）。
+    """
+    path = _trusted_project_path(root)
+    if not path.is_file():
+        return None
+    raw = _read_json(path)
+    got = raw.get("production_merge") if isinstance(raw, dict) else None
+    value = got.get("method") if isinstance(got, dict) else None
+    if value is None:
+        return None
+    if value not in merge_method.METHODS:
+        raise DeclarationError(f"{path} の production_merge.method {value!r} が表に無い（取れる値: {', '.join(merge_method.METHODS)}）")
+    return str(value)
+
+
 # ブランチの運用の宣言と、本番ブランチの名前の鍵（#3572。`ndf.core.route.default_base` と同じ宣言の 1 鍵を読む）
 BRANCH_FILE = Path(identity.FIXED_WORDS["declaration_dir"]) / "worktree.json"
 PRODUCTION_KEY = "production_branch"
@@ -194,6 +221,13 @@ def _read_json(path: Path, hint: str = "") -> object:
         raise DeclarationError(f"{path} を読めない{hint}: {exc}") from None
 
 
+def base_branch(root: Path) -> str:
+    """宣言（`.ndf/worktree.json`）のベースブランチの名前（同期の PR の宛先）。書いていなければ本番ブランチと同じ。"""
+    raw = _read_json(root / BRANCH_FILE)
+    got = raw.get("base_branch") if isinstance(raw, dict) else None
+    return got if isinstance(got, str) and got and got == got.strip() else production_branch(root)
+
+
 def production_branch(root: Path) -> str:
     """宣言（`.ndf/worktree.json`）の本番ブランチの名前。無い・読めない・空・前後に空白があれば `DeclarationError`。"""
     path = root / BRANCH_FILE
@@ -204,19 +238,24 @@ def production_branch(root: Path) -> str:
     return got
 
 
-# ndf-next のリリースが扱う取り込み方の表の行（スプリントの PR を本番ブランチへ直接マージする行。#3572 の決定 5）
+# スプリントの PR を本番ブランチへ直接マージする取り込み方の表の行（GitHub flow。#3572 の決定 5・16）
 GITHUB_FLOW = facts.ids("branch-flows", promotion="direct")[0]
 # 宣言が表の行の許す値から選ぶ鍵（表の配列の列のうち、レビューの単位の種類の列を除いたもの。事実の表から読む）
-FLOW_CHOICES = tuple(
-    c for c, spec in facts.table("branch-flows").columns.items() if spec.get("type") == "array" and c != "review_kinds"
-)
+FLOW_CHOICES = tuple(c for c, spec in facts.table("branch-flows").columns.items() if spec.get("type") == "array" and c != "review_kinds")
+
+
+# 検証環境の種類（宣言のスキーマの列挙と同じ値。#3572 の決定 21）
+VERIFY_KINDS = ("marketplace", "deploy")
 
 
 class VerifyDecl(NamedTuple):
-    """検証用ブランチ の名前と、それを指す 検証用マーケットプレイスの名前。"""
+    """検証環境の種類と、検証用ブランチの名前・検証用マーケットプレイスの名前（`marketplace`）・配るコマンドと時間（`deploy`）。"""
 
+    kind: str
     ref: str
-    marketplace: str
+    marketplace: str | None = None
+    command: tuple[str, ...] = ()
+    timeout_seconds: int = DEFAULT_TIMEOUT
 
 
 def _branch_flow(root: Path) -> dict:
@@ -247,13 +286,6 @@ def _flow_row(flow: dict) -> dict:
 def flow_of(root: Path) -> str:
     """宣言の取り込み方の表の行の id（`branch_flow` が無ければ既定の行）。"""
     return str(_flow_row(_branch_flow(root))["id"])
-
-
-def require_github_flow(root: Path) -> None:
-    """取り込み方の行が `github-flow` でなければ `DeclarationError` で止める（既定の行へ倒さない。決定 5）。"""
-    found = flow_of(root)
-    if found != GITHUB_FLOW:
-        raise DeclarationError(f"取り込み方 {found} は ndf-next のリリースで扱わない（{GITHUB_FLOW} の宣言だけを扱う）")
 
 
 def _reviews_cross(unit: object) -> bool:
@@ -288,29 +320,60 @@ def review_problems(root: Path) -> list[dict[str, str]]:
     return out
 
 
-def verify_of(root: Path) -> VerifyDecl:
-    """`.ndf/project.json` の `delivery` の検証の行（`channel: verify`）の ref とマーケットプレイスの名前。
+def _name(value: object) -> str | None:
+    """空でなく前後に空白の無い文字列ならその値。"""
+    return value if isinstance(value, str) and value and value.strip() == value else None
 
-    宣言はメインディレクトリから読む（`_trusted_project_path` と同じ。PR の作業場所が足した宣言で ref を選べない）。
-    行が無い・2 つ以上・値が空なら `DeclarationError`（既定値を持たない）。
+
+def verify_of(root: Path) -> VerifyDecl:
+    """検証の行の種類と値（`optional_verify`）。行が無ければ `DeclarationError`（既定値を持たない）。"""
+    got = optional_verify(root)
+    if got is None:
+        raise DeclarationError(f"{_trusted_project_path(root)} の delivery に channel verify の行が無い")
+    return got
+
+
+def optional_verify(root: Path) -> VerifyDecl | None:
+    """`.ndf/project.json` の `delivery` の検証の行（`channel: verify`）の種類と、種類ごとの値（#3572 の決定 21）。行が無ければ None。
+
+    宣言はメインディレクトリから読む（`_trusted_project_path` と同じ。PR の作業場所が足した宣言で ref もコマンドも選べない）。
+    ファイルが無ければ None。行が 2 つ以上・種類が表に無い・種類の鍵が欠ければ `DeclarationError`（既定値を持たない）。
     """
     path = _trusted_project_path(root)
+    if not path.is_file():
+        return None
     raw = _read_json(path)
     rows = raw.get("delivery") if isinstance(raw, dict) else None
     channel = "verify"
     found = [r for r in rows if isinstance(r, dict) and r.get("channel") == channel] if isinstance(rows, list) else []
+    if not found:
+        return None
     if len(found) != 1:
         raise DeclarationError(f"{path} の delivery に channel {channel} の行が 1 つでない（{len(found)} 行）")
     verify = found[0].get("verify")
-    values = [verify.get(k) if isinstance(verify, dict) else None for k in ("ref", "marketplace")]
-    if not all(isinstance(v, str) and v.strip() == v and v for v in values):
-        raise DeclarationError(f"{path} の検証の行の verify.ref と verify.marketplace が空でない名前でない: {verify!r}")
-    return VerifyDecl(str(values[0]), str(values[1]))
+    verify = verify if isinstance(verify, dict) else {}
+    kind, ref = verify.get("kind"), _name(verify.get("ref"))
+    if kind not in VERIFY_KINDS:
+        raise DeclarationError(f"{path} の検証の行の verify.kind {kind!r} が表に無い（取れる種類: {', '.join(VERIFY_KINDS)}）")
+    if ref is None:
+        raise DeclarationError(f"{path} の検証の行の verify.ref が空でない名前でない: {verify!r}")
+    if kind == VERIFY_KINDS[0]:
+        market = _name(verify.get("marketplace"))
+        if market is None:
+            raise DeclarationError(f"{path} の検証の行（{kind}）の verify.marketplace が空でない名前でない: {verify!r}")
+        return VerifyDecl(str(kind), ref, marketplace=market)
+    command = verify.get("command")
+    if not isinstance(command, list) or not command or not all(isinstance(c, str) and c for c in command):
+        raise DeclarationError(f"{path} の検証の行（{kind}）の verify.command は空でない文字列の配列")
+    timeout = verify.get("timeout_seconds", DEFAULT_TIMEOUT)
+    if not isinstance(timeout, int) or isinstance(timeout, bool) or timeout <= 0:
+        raise DeclarationError(f"{path} の検証の行（{kind}）の verify.timeout_seconds は正の整数")
+    return VerifyDecl(str(kind), ref, command=tuple(command), timeout_seconds=timeout)
 
 
 def optional_verify_ref(root: Path) -> str | None:
-    """宣言の検証用ブランチ の名前（検証の行が無ければ None。検証用ブランチ の判定を飛ばす）。"""
+    """宣言の検証用ブランチの名前（検証の行が無ければ None。検証用ブランチの判定を飛ばす）。"""
     try:
         return verify_of(root).ref
-    except DeclarationError:  # noqa: NDF401 ファイル: 検証の行の無いリポジトリは検証用ブランチ を持たない
+    except DeclarationError:  # noqa: NDF401 ファイル: 検証の行の無いリポジトリは検証用ブランチを持たない
         return None
