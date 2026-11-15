@@ -290,7 +290,8 @@ def gate_locked(a) -> dict:
             return stop
         entry.update(judged)
         # MVV 判定の承認にも答えた PR を残す（設計 PR のマージのプランが PR ごとに引く。#3603 の I9）
-        entry.update({**({"pr": a.pr} if a.pr else {}), **({"outcome": "approved"} if a.outcome == "approved" else {})})
+        if a.pr:  # --pr を渡さない今の呼び出しの記録は今と同じ形（outcome を載せない）
+            entry.update({"pr": a.pr, **({"outcome": "approved"} if a.outcome == "approved" else {})})
     m["gates"] = gates = [g for g in m.get("gates", []) if not gate_answer.replaces(g, a.name, entry.get("pr"))] + [entry]
     jsonio.write_atomic(a.sprint, m, indent=1)
     who = "MVV 判定" if a.by == "mvv" else "承認"
@@ -554,7 +555,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument(
         "--outcome",
         choices=("approved", "rejected"),
-        help="答え（省くと approved。記録に outcome を書かない。--by mvv は approved だけを記録に残す）",
+        help="答え（省くと approved。記録に outcome を書かない。--by mvv は --pr と併せたときだけ approved を記録に残す）",
     )
     s.add_argument("--mvv-log", default=str(pm.gate_log_path()), help="--by user: 直前の MVV 判定を読むログ（既定 mvv-gate.jsonl）")
     s.add_argument(

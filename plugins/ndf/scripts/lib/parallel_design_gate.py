@@ -270,6 +270,7 @@ def answer_design(
     """設計承認の依頼 `rid` の答えを読み、答えの種類ごとの記録を書いて (状態, 要約, 終了コード, metrics) を返す。"""
     import jsonio
     import parallel_answer as pa
+    import parallel_hold as ph
     import parallel_hold_sprint as phs
     import parallel_ledger as plg
 
@@ -294,7 +295,7 @@ def answer_design(
     except (OSError, jsonio.JsonReadError) as exc:
         return "stopped", f"スプリント状態を読めない: {exc}", 2, metrics
     repo = pa.lane_repo(main, name, lane)
-    sprint = phs.find_sprint(repo, [msg.get("issue")] if msg.get("issue") else [])
+    sprint = phs.find_sprint(repo, (ph.lane_input(main, name, lane) or {}).get("issues") or [])  # design_gate と同じ探し方
     what = f"設計 PR #{pr} の承認（並列の計画 {name} の依頼 {rid}）"
     if result == "approved":
         if not _has_gate(state, pr, by, "approved") and (err := _write_gate(run, state, pr, by, "approved", what, repo, msg)):
