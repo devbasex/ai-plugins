@@ -70,7 +70,26 @@ def test_span_cuts_calls_and_rows(tmp_path):
 def test_ledger_rows_go_to_the_ndf_bucket_and_missing_ledger_is_empty(tmp_path):
     t = _transcript(tmp_path / "t.jsonl", [_call(0, "2026-11-15T01:00:00Z"), _call(1, "2026-11-15T01:30:00Z")])
     rows = [{"at": "2026-11-15T00:59:00Z", "session_id": "s", "transcript": t, "work": "#1"}]
-    ledger = [{"at": "2026-11-15T01:10:00Z", "caller": "subagent", "agent_id": "a1", "usage": {"input_tokens": 5, "output_tokens": 1}}]
+    sub = str(tmp_path / "t" / "subagents" / "agent-a1.jsonl")
+    other = str(tmp_path / "u" / "subagents" / "agent-b1.jsonl")
+    ledger = [
+        {
+            "at": "2026-11-15T01:10:00Z",
+            "caller": "subagent",
+            "agent_id": "a1",
+            "transcript": sub,
+            "usage": {"input_tokens": 5, "output_tokens": 1},
+        },
+        # 別のセッション（別のリポジトリやレーン）の行は、時刻が重なっても数えない
+        {
+            "at": "2026-11-15T01:15:00Z",
+            "caller": "subagent",
+            "agent_id": "b1",
+            "transcript": other,
+            "usage": {"input_tokens": 7, "output_tokens": 1},
+        },
+        {"at": "2026-11-15T01:20:00Z", "caller": "claude-p", "run": "x", "usage": {"input_tokens": 9, "output_tokens": 1}},
+    ]
     got = context_report.report("#1", rows, ledger, None)
     assert got["parts"]["ndf"]["calls"] == 1 and got["parts"]["ndf"]["inp"] == 5
     assert got["parts"]["conductor"]["calls"] == 2

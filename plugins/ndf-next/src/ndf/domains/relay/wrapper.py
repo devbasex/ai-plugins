@@ -36,8 +36,11 @@ from ndf.domains.relay.lane_question import AskPlan
 SCREEN_KEEP = 65536
 READ_SIZE = 65536
 DEFAULT_DIMS = (40, 120)
-# 停止の合図（`ndf relay stop --all`）があるときに打たない手（区間を替える・起こし直す・引継ぎを頼む）
+# 停止シグナルファイル（`ndf relay stop --all`）があるときに打たない手（区間を替える・起こし直す・引継ぎを頼む）
 STOP_HELD = frozenset({"switch", "account", "restart", "handover"})
+STOP_REASON = "停止シグナルファイルがある"
+# 停止で次の区間を保留したときに一度だけ端末へ出す 1 行（カットポイントの案内「ndf-relay: の 1 行が出たら従う」が待つ行）
+HALT_LINE = f"ndf-relay: 次の区間を起動しない（{STOP_REASON}）。このまま続けるか、/exit する"
 
 
 @dataclass(frozen=True)
@@ -153,7 +156,8 @@ class Wrapper:
             return self._loop(prompt)
 
     def _loop(self, prompt: str) -> Ended:
-        signals.drop(self.dir, signals.STOP_FILE)  # 前の実行が残した合図で、始めたばかりの実行を止めない
+        signals.drop(self.dir, signals.STOP_FILE)  # 前の実行が残したシグナルファイルで、始めたばかりの実行を止めない
+        halt_shown = False
         self._start(Launch(1, str(uuid.uuid4()), accounts.chosen(self.s.environ, self.s.state_dir), prompt, resume=False))
         while True:
             self._pump(self.s.tick)
@@ -165,9 +169,11 @@ class Wrapper:
             self._note(step)
             if step.kind in STOP_HELD and signals.has_stop(self.dir):
                 if self._current().child.isalive():
-                    continue  # 停止の合図の後は、今のセッションへ入力を送らず・替えず、利用者が終えるのを待つ
+                    # 停止シグナルファイルの後は、今のセッションへ入力を送らず・替えず、利用者が終えるのを待つ
+                    halt_shown = halt_shown or self._show_halt()
+                    continue
                 signals.drop(self.dir, signals.STOP_FILE)
-                return self._end(Ended("", "停止の合図がある"))
+                return self._end(Ended("", STOP_REASON))
             ended = self._act(step)
             if ended is not None:
                 return self._end(ended)
@@ -345,6 +351,14 @@ class Wrapper:
         sec.screen += data
         del sec.screen[:-SCREEN_KEEP]
         sec.last_output = self.clock()
+
+    def _show_halt(self) -> bool:
+        """次の区間を保留したことを端末へ 1 行で知らせる（利用者が /exit するかを決められるように）。出したら真。"""
+        self._log({"kind": "halt", "reason": STOP_REASON})
+        if self.out is not None:
+            self.out.write(f"\r\n{HALT_LINE}\r\n".encode())
+            self.out.flush()
+        return True
 
     def _note(self, step: switch_decide.Step) -> None:
         if step.reason != self.last_reason:

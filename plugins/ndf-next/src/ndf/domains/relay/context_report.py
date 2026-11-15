@@ -147,9 +147,14 @@ class _Scope(NamedTuple):
         return self.windows[sid] if sid in self.windows else ALL_TIME
 
 
+def _subagents_dir(transcript: str) -> Path:
+    """セッションの会話の記録の隣の、サブエージェントの会話の記録の置き場（`<記録>/subagents`）。"""
+    return Path(str(transcript).removesuffix(".jsonl")) / "subagents"
+
+
 def _add_subagents(ndf: dict[str, Any], transcript: str, scope: _Scope, windows: Windows) -> None:
     """会話の記録の隣の `subagents/` の呼び出しと秒を、NDF が起動した分へ足す。"""
-    sub = Path(str(transcript).removesuffix(".jsonl")) / "subagents"
+    sub = _subagents_dir(transcript)
     for f in sorted(sub.glob("*.jsonl")) if sub.is_dir() else []:
         if f.stem.removeprefix("agent-") in scope.excluded:
             continue  # 帳簿へ書いたサブエージェントは帳簿の行で数える
@@ -159,12 +164,23 @@ def _add_subagents(ndf: dict[str, Any], transcript: str, scope: _Scope, windows:
         ndf["seconds"] += busy_seconds(c["ts"] for c in calls)
 
 
-def _add_ledger(ndf: dict[str, Any], sid: str, span: tuple[Optional[float], Optional[float]], scope: _Scope, windows: Windows) -> None:
-    """このセッションが親か、親の無い行で時刻がセッションの範囲に入る台帳の行を、NDF が起動した分へ 1 回だけ足す。"""
+def _ledger_owned(row: Mapping[str, Any], sid: str, transcript: Optional[str]) -> bool:
+    """台帳の行がこのセッションのものか。親のセッション（`parent_session_id`）か、サブエージェントの会話の記録
+    （`transcript`）がこのセッションの `subagents/` の下にあるかで結び付ける。
+
+    時刻が重なるだけの行は数えない（複数のリポジトリやレーンを同時に使うと、別の作業の使用量が入って重複して数えられる）。
+    """
+    if row.get("parent_session_id") == sid:
+        return True
+    path = row.get("transcript")
+    return bool(transcript) and isinstance(path, str) and Path(path).parent == _subagents_dir(str(transcript))
+
+
+def _add_ledger(ndf: dict[str, Any], sid: str, transcript: Optional[str], scope: _Scope, windows: Windows) -> None:
+    """このセッションのものと結び付いた台帳の行（`_ledger_owned`）を、NDF が起動した分へ 1 回だけ足す。"""
     for row in scope.ledger:
         at = cr.parse_ts(row.get("at"))
-        parent = row.get("parent_session_id")
-        mine = parent == sid or (not parent and span[0] is not None and span[1] is not None and at is not None and span[0] <= at <= span[1])
+        mine = _ledger_owned(row, sid, transcript)
         key = ("ledger", _ledger_sid(row), row.get("at"), row.get("step"))
         c = ledger_call(row) if mine and key not in scope.seen and _within(at, windows) else None
         if c is not None:
@@ -187,9 +203,7 @@ def session_parts(sid: str, transcript: Optional[str], marks: list[dict[str, Any
         times[b].append(c["ts"])
     if transcript:
         _add_subagents(parts[identity.FINAL_NAME], transcript, scope, windows)
-    stamps = [c["ts"] for c in calls if c["ts"]]
-    span = (min(stamps, default=None), max(stamps, default=None))
-    _add_ledger(parts[identity.FINAL_NAME], sid, span, scope, windows)
+    _add_ledger(parts[identity.FINAL_NAME], sid, transcript, scope, windows)
     for b, ts in times.items():
         parts[b]["seconds"] += busy_seconds(ts)
     restored = [c for c in calls if restore_end is not None and c["ts"] is not None and c["ts"] <= restore_end]

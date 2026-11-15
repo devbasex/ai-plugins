@@ -192,10 +192,10 @@ def _hub(args: argparse.Namespace) -> int:
 
 
 def _stop_all(ctx: hub.Context) -> int:
-    """動いているラッパーのすべてへ停止の合図を置き、tmux のセッションで動くものは名前つきの停止も依頼する。
+    """動いているラッパーのすべてへ停止シグナルファイルを置き、tmux のセッションで動くものは名前つきの停止も依頼する。
 
-    端末から直接起動したラッパー（`ndf-relay run`）は tmux のセッションを持たないため、合図だけで止める（今の
-    セッションが終わると次の区間を始めずに終わる）。合図を置けない・止められないものがあれば止まった結果。
+    端末から直接起動したラッパー（`ndf-relay run`）は tmux のセッションを持たないため、シグナルファイルだけで止める（今の
+    セッションが終わると次の区間を始めずに終わる）。シグナルファイルを置けない・止められないものがあれば止まった結果。
     """
     names = [r.name for r in registry.running(ctx.state_dir)]
     items: list[dict[str, Any]] = []
@@ -217,10 +217,10 @@ def _stop_one(ctx: hub.Context, name: str) -> hub.Outcome:
     try:
         signals.place_stop(registry.wrapper_dir(ctx.state_dir, name))
     except (OSError, registry.RegistryError) as exc:
-        return hub.Outcome(False, f"停止の合図を置けない: {exc}", "refused")
+        return hub.Outcome(False, f"停止シグナルファイルを置けない: {exc}", "refused")
     if ctx.tmux.has(name):
         return hub.submit(ctx, {"kind": "stop", "name": name})
-    return hub.Outcome(True, f"{name} へ停止の合図を置いた（tmux の外。今のセッションが終わると止まる）")
+    return hub.Outcome(True, f"{name} へ停止シグナルファイルを置いた（tmux の外。今のセッションが終わると止まる）")
 
 
 def _notice() -> int:

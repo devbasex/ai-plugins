@@ -58,7 +58,7 @@
 | 既に起動したプロセス・書き終わりを待つファイル | 終わりを待つ until ループ（例: `until [ -s out.md ]; do sleep 5; done`）を `run_in_background: true` で起動する |
 | Pull Request のチェック | 今の状態は `lib/gh_parts.py pr-status <番号>` を 1 回打って読む。`metrics.action` が次の 1 手（`wait` 待つ・`fix` 直す・`merge` マージへ進める・`escalate` 人へ戻す）で、`next` に打つコマンドが載る。待つときは下の `merge-when-green` を `run_in_background: true` で起動する。PR の表示とチェックの照会を別々に続けて打たない |
 | 新しいコメントを 1 件ずつ | `Monitor` |
-| `ndf plan next` | `report.md` が揃うか、`progress.jsonl` に `attention` の行が足されるまでの until ループを `run_in_background: true` で起動する（下の節） |
+| `ndf plan next` | 同じプランと状態の置き場で `ndf plan wait <プラン> [--state-dir <next に渡した置き場>]` を `run_in_background: true` で 1 回起動する（承認ゲートの結果の `next` がこの形）。止まり・承認ゲート・終わりで終わる（下の節） |
 | `ndf plan queue` | 同じプランの並びで `ndf plan wait <プラン>...` を `run_in_background: true` で 1 回起動する。プランの止まり・承認ゲート・終わりで終わる（下の節） |
 | Pull Request の CI とマージ | `merged-steps.py merge-when-green <PR 番号>` を `run_in_background: true` で 1 回起動する。CI がまだ現れない間も待ち、緑になればマージする。マージの承認を得た後に限る。起動の前に `gh_parts.py pr-status <PR 番号>` で、直すもの（失敗したチェック・未解決のスレッド）と衝突が無いかを 1 回で確かめる。チェックの照会と `gh pr merge` を手でつながない |
 | 判断の要らない NDF の手順を続けて打つ（`queue` の後の `wait` など） | 1 行ずつ打たず、手順をプランのステップにして `ndf plan next <プラン>` を 1 回打つ。承認ゲートか止まる所まで続けて進め、理由と続きのコマンドを `next` に返す。長く待つ手順を含むなら `run_in_background: true` で起動する |
@@ -66,8 +66,7 @@
 
 ### `ndf plan` の進捗ログ
 
-**フェーズを `ndf plan next` / `queue` で回すとき、conductor は `report.md` が揃うか、
-`progress.jsonl` に conductor 向けの行が足されるまでを 1 回のバックグラウンドの待ちで待つ。**
+**フェーズを `ndf plan next` / `queue` で回すとき、conductor は `ndf plan wait` を 1 回のバックグラウンドの待ちで待つ（下の節）。**
 `progress.jsonl` はプランの状態ディレクトリ（`<プラン>-state/`）に置かれ、1 行が 1 つの JSON である。
 書くのは `ndf plan` と worker で、LLM は使わない。
 
@@ -98,20 +97,16 @@
   回数・費用を持つ。手を打ったステップは `- 遅れ:` の行に並ぶ
 - 待ちのコマンドは下のとおり
 
-**conductor は `report.md` と、`progress.jsonl` の `attention` の行の数を 1 つの until ループで待つ。**
-`step` / `alive` / `worker` の行では起きない。
+**`ndf plan next` の待ちも、同じプランと状態の置き場を渡した `ndf plan wait` で待つ。** until ループで `report.md` や
+`progress.jsonl` を見回らない（`ndf plan` の実行は `report.md` と `kind: attention` の行を書かず、状態の置き場は
+`--state-dir` を渡さなければプランのファイルの隣の `<プラン>.state` である）。
 
 ```bash
-# Bash の run_in_background: true で起動する（フォアグラウンドで打たない）。S はプランの状態ディレクトリ、最後の 3600 が上限の秒数
-S="<プラン>-state"; n=$(cat "$S/progress.jsonl" 2>/dev/null | grep -c '"kind": "attention"')
-bash -c 'c() { cat "$1/progress.jsonl" 2>/dev/null | grep -c "\"kind\": \"attention\""; }
-until [ -s "$1/report.md" ] || [ "$(c "$1")" -gt "$2" ]; do [ "$SECONDS" -lt "$3" ] || exit 124; sleep 5; done' _ "$S" "$n" 3600; rc=$?; echo "exit=$rc"; exit "$rc"
+# Bash の run_in_background: true で起動する（フォアグラウンドで打たない）。--state-dir は next に渡したときだけ同じ値を渡す
+ndf plan wait plan-1101.json --state-dir <next に渡した置き場>
 ```
 
-- `queue` で流すときは、この until ループの代わりに `ndf plan wait` で待つ（次の節）
-- 起きたら `attention` の行と `progress.jsonl` の末尾だけを読む。続けるなら数を取り直して同じ待ちを起動する
-- 124（上限の 3600 秒）で終わったら、`progress.jsonl` の最後の行（`alive` ならステップと経過）を 1 度読み、
-  同じ待ちを起動し直す
+- 終わり方と次にすることは次の節の表のとおりである
 
 ### キューの待ち（ndf plan wait）
 
@@ -124,11 +119,15 @@ ndf plan queue plan-1101.json plan-1102.json --then plan-release-dev.json
 ndf plan wait plan-1101.json plan-1102.json plan-release-dev.json
 ```
 
-| 終わり方 | 終了コード | 次にすること |
-| --- | --- | --- |
-| キューが終わった（done に結果の JSON が書かれた） | 0 | 結果の JSON の `items[0]`（キューの結果）の `status` を見る。`gate` なら承認ゲートを返したプランの `report.md` を読んで提示する |
-| キューが流すプランの `progress.jsonl` に `attention` の行が足された | 20 | その行（結果の `items`）と `progress.jsonl` の末尾だけを読み、止めるか続けるかを決める。続けるなら同じ `wait` を打つ。知らせた行の続きから待つ |
-| 上限（`--timeout`、既定 10800 秒）に達した | 3 | 流れているプランの `progress.jsonl` の最後の行を 1 度読み、同じ `wait` を打つ |
+結果は 1 行の JSON で、次の手はトップレベルの `status`・`cause`・`routes`・`next` で決める（`items` はプラン 1 本ごとの行で、
+`items[0]` は最初のプランの分である）。
+
+| 終わり方 | 終了コード | トップレベルの値 | 次にすること |
+| --- | --- | --- | --- |
+| 渡したプランがすべて終わった | 0 | `status: ok` | 次のステージへ進む |
+| どれかのプランが承認ゲートで待っている | 10 | `status: gate`・`routes`（答えごとに打つコマンド。先頭の承認ゲートの分）・`next`（同じ待ち） | 承認ゲートの資料を提示し、人の答えに対応する `routes` のコマンドを打つ。ほかの承認ゲートの `routes` は `items` の各行にある |
+| どれかのプランが止まった | 原因の種類（`cause.kind`）ごとの終了コード | `status: stopped`・`cause`（先頭の止まり）・`next`（同じ待ち） | `cause.kind` と `items` の各行の `cause` を読み、原因を片付けてから続きを打つ |
+| 上限（`--timeout`、既定 600 秒）に達した | 3（`cause.kind: wait_timeout`） | `status: stopped`・`next`（同じ待ち） | 待つ相手は動いている。結果の `next` の同じ `wait` を打つ |
 
 - 出力は要約の 1 行と結果の JSON の 1 行だけである
 - 開発ループでは `loop sprint` の `metrics.research`（`upkeep.py research run --until <done> ...`）も `wait` と並べて背景で起動する。

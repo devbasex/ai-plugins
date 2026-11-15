@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import fcntl
+import io
 import json
 import os
 import time
@@ -193,7 +194,7 @@ def test_crashed_child_is_resumed_until_the_daily_limit(tmp_path):
 
 
 class StopOnSpawn(Spawner):
-    """子を起動したすぐ後に停止の合図を置く（`ndf relay stop --all` が別の端末から置いた形）。"""
+    """子を起動したすぐ後に停止シグナルファイルを置く（`ndf relay stop --all` が別の端末から置いた形）。"""
 
     def __call__(self, argv, env, cwd):
         child = super().__call__(argv, env, cwd)
@@ -208,13 +209,15 @@ def test_stop_signal_lets_the_session_finish_and_starts_no_next_section(tmp_path
     s = _settings(tmp_path)
     child = FakeChild([b"a\r\n", b"b\r\n", b"c\r\n", b"d\r\n"], 0)
     spawn = StopOnSpawn([child], {0: "/goal 次の区間"})
-    w = wrapper.Wrapper(s, spawn=spawn, clock=_clock())
+    out = io.BytesIO()
+    w = wrapper.Wrapper(s, spawn=spawn, clock=_clock(), out=out)
     try:
         ended = w.run("最初の 1 行")
     finally:
         child.close()
-    assert (ended.cause, ended.reason) == ("", "停止の合図がある")
+    assert (ended.cause, ended.reason) == ("", wrapper.STOP_REASON)
     assert len(spawn.calls) == 1 and child.exitstatus == 0 and child.written == []  # 替えず・入力も送らず・殺さない
+    assert out.getvalue().decode().count(wrapper.HALT_LINE) == 1  # 案内の 1 行は保留の間に一度だけ出る
     assert not signals.has_stop(w.dir)
 
 
