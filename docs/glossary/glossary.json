@@ -7728,7 +7728,7 @@
     {
       "term": "代表のリポジトリの設定",
       "context": "ndf-workflow",
-      "meaning": ".ndf/design.json の representative_repos。代表のリポジトリの種類の一覧と、使えなくなるものがあるときに名指すレッドラインの番号を持つ。置いたリポジトリだけで設計の検査が振る舞いの表を求める",
+      "meaning": ".ndf/design.json の representative_repos。代表のリポジトリの種類の一覧・表を求めるパス・使えなくなるものがあるときに名指すレッドラインの番号を持つ。置いたリポジトリで、触るファイルがそのパスに当たる設計だけに設計の検査が振る舞いの表を求める",
       "pending_source": "issues/issue-3618-design.md"
     },
     {
