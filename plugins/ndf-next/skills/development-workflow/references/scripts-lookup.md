@@ -1,6 +1,6 @@
 # `$SCRIPTS` を決める
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `projects-sync.sh`（M7）・`resolve.sh`（X0）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `projects-sync.sh`（M7）・`resolve.sh`（X0）・`worktree-localenv.sh`（M8）・`worktree-setup.sh`（M8）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 プラグインの `scripts/` の位置は 4 ランタイムで別々である。**候補を順に試す処理は
 `scripts/resolve.sh`（解決のエントリポイント）1 本が持つ。** Skill はこのエントリポイントを探すコマンドだけを持ち、
@@ -15,8 +15,8 @@ SCRIPTS=$(bash "$R/scripts/resolve.sh" scripts fix)           # skills/<Skill名
 見つからなければ理由を標準エラーへ書き、終了コード 3 で終わる（引数の誤りは 2）。
 conductor が `$SCRIPTS` の下で直に使うエントリポイントは [conductor-entrypoints.md](conductor-entrypoints.md) にある。
 
-**この手順の値はボードの記録の外でも使う。** `worktree` は `ndf worktree` /
-`ndf worktree localenv` / `ndf worktree testenv` の 3 本を呼ぶ。ボードの説明の中に置くと、
+**この手順の値はボードの記録の外でも使う。** `worktree` は `worktree-setup.sh` /
+`worktree-localenv.sh` / `ndf worktree testenv` の 3 本を呼ぶ。ボードの説明の中に置くと、
 ボードと無関係な読み手がその文書を開くことになる。
 
 ## 候補の並び

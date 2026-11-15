@@ -9,7 +9,7 @@ allowed-tools:
 
 # worktree で開発する
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `projects-sync.sh`（M7）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `projects-sync.sh`（M7）・`worktree-localenv.sh`（M8）・`worktree-setup.sh`（M8）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 開発の変更は、git の worktree の中で行い、リポジトリを clone したディレクトリには加えない。
 並行して複数の作業を進めても、互いの変更が同じ作業ディレクトリで混ざらない状態を保つ。
@@ -59,7 +59,7 @@ allowed-tools:
 ```bash
 # 「$SCRIPTS を決める」の手順でパスを決めてから実行する。
 [ -n "${SCRIPTS:-}" ] || { echo "NDF の scripts/ を解決できない" >&2; exit 1; }
-ndf worktree init; echo "exit=$?"
+bash "$SCRIPTS/worktree-setup.sh" init; echo "exit=$?"
 ```
 
 worktree 運用の仕組みは、リポジトリ側に `.ndf/worktree.json` があるときだけ動く。
@@ -79,8 +79,8 @@ worktree 運用の仕組みは、リポジトリ側に `.ndf/worktree.json` が�
 - **作った設定ファイルはコミットする。** リポジトリの設定であり、他の開発者にも同じ
   運用が要る
 
-導入の状態は `ndf worktree list` で見られる（設定ファイルの有無、`.worktrees/`
-の登録、稼働中の worktree 数）。**手順が分岐に使うなら `ndf worktree check` を使う。**
+導入の状態は `worktree-setup.sh status` で見られる（設定ファイルの有無、`.worktrees/`
+の登録、稼働中の worktree 数）。**手順が分岐に使うなら `worktree-setup.sh check` を使う。**
 設定の状態を終了コードで返し（0 あり / 2 なし / 3 読めない / 1 判定できない）、ファイルを作らない。
 
 ローカル環境での動作検証やテスト実行の分離を使うときは `localenv` / `testenv` を足す。
@@ -169,9 +169,9 @@ cd "$main_dir/.worktrees/$branch"
 
 ```bash
 # スプリントブランチ。起点はスプリントの起点
-ndf worktree create sprint/<名前>
+bash "$SCRIPTS/worktree-setup.sh" create sprint/<名前>
 # 課題の worktree。起点はスプリントブランチ
-ndf worktree create feat/issue-<番号>-<名前> --from sprint/<名前>
+bash "$SCRIPTS/worktree-setup.sh" create feat/issue-<番号>-<名前> --from sprint/<名前>
 ```
 
 `create` は `.worktrees/` の登録を確かめ、`origin` を取得してから作り、worktree のパスと
@@ -279,7 +279,7 @@ Claude Code 本体が Bash を走らせる直前に「git がメインディレ�
 
 | 状況 | どこで何を打つか |
 | --- | --- |
-| NDF の手順で worktree に入る | `ndf worktree create` の後に `cd <worktree>` する（手順 2-3） |
+| NDF の手順で worktree に入る | `worktree-setup.sh create` の後に `cd <worktree>` する（手順 2-3） |
 | 隔離の中で `… \| bash "$CLOSING"` の形が拒まれた | worktree の中で、スクリプトを変数でなくリテラルの絶対パスで書き、複合コマンドを 1 つずつに割る（`… \| bash /abs/…/lib/closing-issues.sh`） |
 | それでも拒まれる（`git -C <メインディレクトリ>` など） | `ExitWorktree` で隔離を外し、`cd <worktree>` してから同じコマンドを打つ |
 
@@ -290,7 +290,7 @@ Claude Code 本体が Bash を走らせる直前に「git がメインディレ�
 
 worktree は追跡されているファイルしか持たないため、`vendor/`・`node_modules/`・`.env` が無く、pre-commit や
 テストが落ちる。設定（`.ndf/worktree.json`）の `deps` に用意の仕方を書くと、NDF が worktree を作るとき
-（`ndf worktree create`・3 層の run と queue・cross-review・cross-refactoring・落ちたテストの見分け）に
+（`worktree-setup.sh create`・3 層の run と queue・cross-review・cross-refactoring・落ちたテストの見分け）に
 メインディレクトリから依存物を用意する。書き方は [references/declaration.md](references/declaration.md) の `deps` にある。
 
 ```json
@@ -323,12 +323,12 @@ ndf worktree deps "$WT" --if-unprepared  # 用意が済んでいなければ用�
 無い。手順は [references/local-environment.md](references/local-environment.md) にある。
 
 ```bash
-NDF=ndf
+NDF="$SCRIPTS/worktree-localenv.sh"
 WT="$main_dir/.worktrees/<ブランチ名>"
-"$NDF" worktree localenv setup "$WT"       # 設定と依存物を持ち込む
-"$NDF" worktree localenv mode "$WT"        # 相乗り(0) か 分離(1) かを提示
-"$NDF" worktree localenv aim "$WT"         # ローカル環境が指すコードを向ける
-"$NDF" worktree localenv verify "$WT"; echo $?  # 0 一致 / 1 不一致 / 2 未起動
+bash "$NDF" setup "$WT"       # 設定と依存物を持ち込む
+bash "$NDF" mode "$WT"        # 相乗り(0) か 分離(1) かを提示
+bash "$NDF" aim "$WT"         # ローカル環境が指すコードを向ける
+bash "$NDF" verify "$WT"; echo $?  # 0 一致 / 1 不一致 / 2 未起動
 ```
 
 **対象の worktree を引数で渡す。** 省略すると現在地が対象になるため、メインディレクトリから

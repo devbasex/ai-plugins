@@ -48,7 +48,7 @@ PR を**既定の参加者プール（claude / codex / kiro とホスト）か�
 - [docs/06-evidence.md](docs/06-evidence.md) — 指摘に求める根拠と反証条件、独立発見の規約、効果の測定（4 つの集約方式と限界）
 - [docs/07-posts-and-records.md](docs/07-posts-and-records.md) — 状態ファイルの外へ書くもの（投稿の種別ごとの契約・投稿キュー・監視と計測が残すファイル。手順の途中では読まない）
 - [docs/08-review-categories.md](docs/08-review-categories.md) — 変更ファイルの分類から担当へ渡す自動レビュー観点の一覧（手順の途中では読まない）
-- [scripts/drive.py](scripts/drive.py) — 収束ループの駆動（LLM が要る地点で pause を返して止まる）
+- `scripts/drive.py` — 収束ループの駆動（LLM が要る地点で pause を返して止まる）
 - `scripts/state.py` — state.json 操作。起動・監視・巻き直しは `launch-reviewer.sh` / `monitor.py` / `rotate-pr.sh`、効果の測定は `measure.py`（状態を保存するたびに呼ばれる）
 
 ## 設計方針

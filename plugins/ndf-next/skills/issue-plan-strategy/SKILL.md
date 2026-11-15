@@ -13,7 +13,7 @@ allowed-tools:
 
 # issue → plan → multi-PR ワークフロー
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `parallel.py`（P3）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `parallel.py`（P3）・`worktree-setup.sh`（M8）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 1 つの issue から plan を作る際、推奨される PR が複数に分かれることは日常的に発生する。本 skill はその際の **release ブランチ + 個別 PR ブランチ + Draft PR 先行作成 + git worktree 並行開発 + レビュー運用** の標準フローを規定する。
 
@@ -259,7 +259,7 @@ git worktree add "$main_dir/.worktrees/feature/<PLAN-ID>-ui"     feature/<PLAN-I
 - **競合は後からマージする側が解き、解いた後の head でレビューを収束させてからマージする**
 - 終わった worktree は `git worktree remove <path>` で片付ける。マージ後の後片付けは
   `/ndf:merged` が扱う
-- Claude Code から並行開発を指示する場合も、worktree は `ndf worktree create` で作り、そのパスを渡す。
+- Claude Code から並行開発を指示する場合も、worktree は `worktree-setup.sh create` で作り、そのパスを渡す。
   Agent tool の `isolation: "worktree"` は使わない（隔離の中では NDF のスクリプトが拒まれることがあり、
   依存の用意も走らない）
 

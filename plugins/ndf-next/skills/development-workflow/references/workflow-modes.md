@@ -1,6 +1,6 @@
 # モード判定の境界事例
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `projects-sync.sh`（M7）・`refactor.py`（M4）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `projects-sync.sh`（M7）・`refactor.py`（M4）・`worktree-setup.sh`（M8）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 `SKILL.md` の条件表で決まらない場合の判断材料。ここも**判定基準の一部**であり、判定基準を
 この Skill の外へコピーしない原則はここにも及ぶ。
@@ -284,7 +284,7 @@ flowchart TD
 条件は別である。
 
 ```bash
-BASE="<開発の起点>"   # ndf worktree check の「開発の起点:」の行の名前
+BASE="<開発の起点>"   # worktree-setup.sh check の「開発の起点:」の行の名前
 python3 "$RF/refactor.py" assess --base "origin/$BASE"; rc=$?; echo "exit=$rc"
 ```
 

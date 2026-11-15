@@ -1,6 +1,6 @@
 # 設定ファイルの書き方
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `pr-steps.py`（M1）・`project-decl.py`（D2+）・`release-steps.py`（M2）・`supervise.py`（C2）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `pr-steps.py`（M1）・`project-decl.py`（D2+）・`release-steps.py`（M2）・`supervise.py`（C2）・`worktree-localenv.sh`（M8）・`worktree-setup.sh`（M8）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 worktree 運用の仕組みは、リポジトリごとの差を `.ndf/worktree.json` から読む。
 **このファイルが無いリポジトリでは、すべての仕組みが何もせずに終わる。**
@@ -22,7 +22,7 @@ worktree 運用の仕組みは、リポジトリごとの差を `.ndf/worktree.j
 ## 作る
 
 ```bash
-ndf worktree init
+bash "$SCRIPTS/worktree-setup.sh" init
 ```
 
 `/ndf:worktree` を起動すると、手順 0 としてこれが走る。既にあるファイルは上書きしない。
@@ -387,8 +387,8 @@ worktree レジストリの定義は [`../schemas/registry.schema.json`](../sche
 ```
 
 `version` は共有設定と同じく必須で、値は `1` である。追跡から外す登録は
-`.ndf/.gitignore` が持ち、`ndf worktree init` が共有設定と一緒に作る。**既に
-設定があるリポジトリでは作られない。** `ndf worktree list` が登録の無い状態を
+`.ndf/.gitignore` が持ち、`worktree-setup.sh init` が共有設定と一緒に作る。**既に
+設定があるリポジトリでは作られない。** `worktree-setup.sh status` が登録の無い状態を
 1 行で伝えるので、その行が出たら `.ndf/.gitignore` へ `worktree.local.json` を足す。
 
 ### 上書きできる項目
@@ -424,7 +424,7 @@ worktree レジストリの定義は [`../schemas/registry.schema.json`](../sche
 気づけるよう、置いた直後に状態を確かめる。
 
 ```bash
-ndf worktree list
+bash "$SCRIPTS/worktree-setup.sh" status
 ```
 
 「個人設定:」の行が状態を、「個人設定で反映しない項目:」の行が無視した項目名を出す。
@@ -435,10 +435,10 @@ ndf worktree list
 WT="$main_dir/.worktrees/<ブランチ名>"
 
 # 設定が読めているか（読めなければ何も出ない）
-ndf worktree localenv mode "$WT"
+bash "$SCRIPTS/worktree-localenv.sh" mode "$WT"
 
 # 照合の状態（0 一致 / 1 不一致 / 2 未起動または適用外）
-ndf worktree localenv verify "$WT"; echo $?
+bash "$SCRIPTS/worktree-localenv.sh" verify "$WT"; echo $?
 ```
 
 対象の worktree は引数で渡す。省略すると現在地が対象になる。
