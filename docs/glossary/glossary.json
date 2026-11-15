@@ -7716,14 +7716,26 @@
     {
       "term": "受け口",
       "context": "ndf-workflow",
-      "meaning": "設定が受け付ける値の種類（リリース方式の表の行・delivery の種類・リリースの形など）。「受け口を減らす」は、今受け付けている値を受け付けなくすること、または既定の値を変えること",
-      "pending_source": "issues/issue-3618-requirements.md"
+      "meaning": "設定が受け付ける値の種類（リリース方式の表の行・delivery の種類・リリースの形など）。「受け口を減らす」は、今受け付けている値を受け付けなくすること、または既定の値を変えること。SemVer の後方互換を壊す変更（breaking change）の 1 つである",
+      "pending_source": "issues/issue-3618-design.md"
     },
     {
       "term": "代表のリポジトリ",
       "context": "ndf-workflow",
-      "meaning": "設計の振る舞いを確かめるために選ぶ、ai-plugins 以外のリポジトリの種類（Web サービス・モバイルアプリ・業務文書だけ など）",
-      "pending_source": "issues/issue-3618-requirements.md"
+      "meaning": "設計の振る舞いを確かめるために、代表のリポジトリの設定（.ndf/design.json）に種類として書く、このリポジトリの作るものを使う側のリポジトリ（Web サービス・モバイルアプリ・業務文書だけ など）",
+      "pending_source": "issues/issue-3618-design.md"
+    },
+    {
+      "term": "代表のリポジトリの設定",
+      "context": "ndf-workflow",
+      "meaning": ".ndf/design.json の representative_repos。代表のリポジトリの種類の一覧と、使えなくなるものがあるときに名指すレッドラインの番号を持つ。置いたリポジトリだけで設計の検査が振る舞いの表を求める",
+      "pending_source": "issues/issue-3618-design.md"
+    },
+    {
+      "term": "このリポジトリだけの事情",
+      "context": "ndf-workflow",
+      "meaning": "設計を書くリポジトリの運用で決めた値。作るものの既定や振る舞いへ入れず、そのリポジトリの .ndf/ の設定に置く。ai-plugins では「ai-plugins だけの事情」と書く",
+      "pending_source": "issues/issue-3618-design.md"
     },
     {
       "term": "ai-plugins だけの事情",
