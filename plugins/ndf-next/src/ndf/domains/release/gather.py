@@ -115,13 +115,18 @@ def version_at(repo_git: git_mod.Git, plugin: plugins_mod.Plugin, ref: str) -> s
     return found[0] if found else None
 
 
+def remote_tags(repo_git: git_mod.Git) -> list[str]:
+    """origin のタグの名前（`refs/tags/` を外したもの。`ls-remote` の並び）。"""
+    refs = repo_git.run("ls-remote", "--tags", "--refs", git_mod.ORIGIN).splitlines()
+    return [line.partition("\t")[2].removeprefix("refs/tags/") for line in refs]
+
+
 def shipped(repo_git: git_mod.Git, found: Sequence[plugins_mod.Plugin], production_ref: str) -> dict[str, str]:
     """プラグインごとの出し済みの版（本番ブランチの版とタグの版のうち基底が最も大きいもの。無いプラグインは入れない）。
 
     タグは origin から 1 回で読む（手元に取り込んだタグに限らない）。
     """
-    refs = repo_git.run("ls-remote", "--tags", "--refs", git_mod.ORIGIN).splitlines()
-    tags = [line.partition("\t")[2].removeprefix("refs/tags/") for line in refs]
+    tags = remote_tags(repo_git)
     out = {}
     for p in found:
         tagged = [v for v in (version_decide.version_of_tag(p.name, t) for t in tags) if v is not None]

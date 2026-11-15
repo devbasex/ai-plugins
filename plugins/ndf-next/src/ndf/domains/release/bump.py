@@ -136,8 +136,7 @@ class Bumper:
         return f"{git_mod.ORIGIN}/{self.production}"
 
     def _tags(self) -> set[str]:
-        refs = self._git.run("ls-remote", "--tags", "--refs", git_mod.ORIGIN).splitlines()
-        return {line.partition("\t")[2].removeprefix("refs/tags/") for line in refs}
+        return set(gather.remote_tags(self._git))
 
     def _last_bump(self, tip: str) -> str | None:
         """main の祖先にある最新の版上げのコミット（起点の行を持つ。無ければ None）。"""
