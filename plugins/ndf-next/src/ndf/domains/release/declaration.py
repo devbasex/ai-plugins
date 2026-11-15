@@ -305,3 +305,11 @@ def verify_of(root: Path) -> VerifyDecl:
     if not all(isinstance(v, str) and v.strip() == v and v for v in values):
         raise DeclarationError(f"{path} の検証の行の verify.ref と verify.marketplace が空でない名前でない: {verify!r}")
     return VerifyDecl(str(values[0]), str(values[1]))
+
+
+def optional_verify_ref(root: Path) -> str | None:
+    """宣言の検証の ref の名前（検証の行が無ければ None。検証の ref の判定を飛ばす）。"""
+    try:
+        return verify_of(root).ref
+    except DeclarationError:  # noqa: NDF401 ファイル: 検証の行の無いリポジトリは検証の ref を持たない
+        return None

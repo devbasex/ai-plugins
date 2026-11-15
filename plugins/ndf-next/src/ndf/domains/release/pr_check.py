@@ -64,14 +64,6 @@ def _versions(repo_git: git_mod.Git, found: Sequence[plugins_mod.Plugin], ref: s
     return {f"{p.dir}/{plugins_mod.MANIFESTS[0].as_posix()}": gather.version_at(repo_git, p, ref) for p in found}
 
 
-def _verify_ref(root: Path) -> str | None:
-    """宣言の検証の ref の名前（検証の行が無ければ None。検証の ref の判定を飛ばす）。"""
-    try:
-        return decl_mod.verify_of(root).ref
-    except decl_mod.DeclarationError:  # noqa: NDF401 ファイル: 検証の行の無いリポジトリは検証の ref を持たない
-        return None
-
-
 def check(root: Path, hub: GitHub, repo_git: git_mod.Git, number: int) -> list[dict[str, str]] | None:
     """宣言の行が `github-flow` で、PR が本番ブランチ宛てのときだけ PR の事実を集めて破れを返す（ほかは None で何も見ない）。"""
     if decl_mod.flow_of(root) != decl_mod.GITHUB_FLOW:
@@ -89,7 +81,7 @@ def check(root: Path, hub: GitHub, repo_git: git_mod.Git, number: int) -> list[d
         _versions(repo_git, found, head),
         repo_git.changed_files(base, head),
         gather.labels_of(hub, number),
-        _verify_ref(root),
+        decl_mod.optional_verify_ref(root),
         bump.allowed_paths(root, decl_mod.load(root)),
     )
     return problems(facts) + decl_mod.review_problems(root)

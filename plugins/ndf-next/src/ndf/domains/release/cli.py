@@ -212,16 +212,8 @@ def _merge_result(args: argparse.Namespace, done: land.Landed, version: str | No
     return result.stopped(TOOL, kind, detail, items=items, outputs=outputs)
 
 
-def _verify_ref_of(root: Path) -> str | None:
-    """宣言の検証の ref の名前（検証の行が無ければ None）。"""
-    try:
-        return decl_mod.verify_of(root).ref
-    except decl_mod.DeclarationError:  # noqa: NDF401 ファイル: 検証の行の無いリポジトリは検証の ref を持たない
-        return None
-
-
 def cmd_guard(args: argparse.Namespace) -> dict:
-    verify_ref_name = _verify_ref_of(Path(args.root))
+    verify_ref_name = decl_mod.optional_verify_ref(Path(args.root))
     if verify_ref_name is not None and verify_ref_name in args.branch:
         detail = f"{verify_ref_name}: 検証の ref は main へ戻さない（マージしない）"
         return result.stopped(TOOL, "refused", detail)
