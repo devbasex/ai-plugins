@@ -99,6 +99,7 @@ BEFORE = {
     "relay.runtime-install": {"seconds": 600},
     "release-steps.head-moved": {"attempts": 4},
     "release-steps.trail-status": {"seconds": 600, "interval": 10},  # #2773 で足した承認の証跡のチェックの待ち
+    "release-steps.port-rerun": {"seconds": 120, "interval": 5},  # #3573 で足した本文の印を足した後の打ち直しの待ち
     "release-steps.ci-wait": {"seconds": 3600, "interval": 15},  # #2773 で足した CD のある場合の本番の PR の待ち
     "release-steps.dev-workflow": {"seconds": 3900, "interval": 15},  # #2773 で足した開発版の workflow の待ち
     "release-verification-steps.env-i": {"seconds": 600},

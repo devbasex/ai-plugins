@@ -103,7 +103,7 @@ import step_read  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from merged_lib import trash  # noqa: E402
 from release_lib import approval, bump, carry, cd_result, changed, deploy, included, instructions, materials  # noqa: E402
-from release_lib import others, promotion, publish, record, replaced, review_range, reviewed  # noqa: E402
+from release_lib import others, port_mark, promotion, publish, record, replaced, review_range, reviewed  # noqa: E402
 import limits
 from release_lib import version_merge  # noqa: E402
 from release_lib.approval import HeadMoved  # noqa: E402
@@ -567,7 +567,7 @@ def _release_pr_body(root, a, plugin, plugins):
     mark = {True: "pass", False: "fail", None: "skip"}
     return "\n".join(
         [
-            f"{plugin} v{ver} のリリース（{a.channel}）。対象の plugin: {', '.join(plugins)}\n\n{reviewed.NO_PORT_LINE}",
+            f"{plugin} v{ver} のリリース（{a.channel}）。対象の plugin: {', '.join(plugins)}\n\n{port_mark.NO_PORT_LINE}",
             "",
             "## 含む PR",
             "",
@@ -628,10 +628,10 @@ def _merge_sync_pr(root, a, plugin, branch, base, release_pr, lead=None, section
             msg = f"Merge {base} into {sync}（{plugin} v{a.version} の版数の衝突を本番の版で解く）"
             commit, resolved = version_merge.sync_commit(root, ours, f"origin/{base}", msg, sections=sections)
             git(root, "push", "-q", "origin", f"{commit}:refs/heads/{sync}")
-        found = find_pr(root, sync, base, states=("OPEN",))
+        found = port_mark.ensure_no_port_line(root, find_pr(root, sync, base, states=("OPEN",)))
         head = lead or f"{plugin} v{a.version} の release/v{a.version} → {base}（#{release_pr}）が版数を持つ箇所で衝突したため"
         body = (
-            f"{head}、本番の版を取って取り込む（解いたパス: {', '.join(resolved) or 'なし'}）。\n\n{reviewed.NO_PORT_LINE}\n\n"
+            f"{head}、本番の版を取って取り込む（解いたパス: {', '.join(resolved) or 'なし'}）。\n\n{port_mark.NO_PORT_LINE}\n\n"
             "🤖 Generated with [Claude Code](https://claude.com/claude-code)"
         )
         n = found["number"] if found else create_pr(root, base, sync, f"Release: {plugin} v{a.version} の版数を {base} へ揃える", body)
@@ -646,9 +646,9 @@ def _merge_prod_pr(root, a, plugin, branch, prod, release_pr, approved, allowed,
     """本番の PR（head は release/v<版>）を使い回すか作り、承認と比べた release/v<版> の先端を指定してマージする。
     先端が動いたら比べ直し、許可リストの下に収まる限り HEAD_MOVED_RETRIES 回まで入れ直し、それ以外は承認ゲートで止める。
     (PR 番号, マージコミット, 判定) を返す。"""
-    mp = find_pr(root, branch, prod, states=("OPEN",))
+    mp = port_mark.ensure_no_port_line(root, find_pr(root, branch, prod, states=("OPEN",)))  # 本番の PR も旧いプラグインを運ぶ
     title = f"Release: {plugin} v{a.version} を {prod} へ"
-    body = f"{plugin} v{a.version} を {prod} へ出す（開発版の PR #{release_pr}）。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+    body = f"{plugin} v{a.version} を {prod} へ出す（開発版の PR #{release_pr}）。\n\n{port_mark.NO_PORT_LINE}\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
     main_pr = mp["number"] if mp else create_pr(root, prod, branch, title, body)
     by = approval.approved_by(root, a)  # ここへ来た時点で承認の記録を照合済み。CD で届く本番チャネルへのマージにこの担い手が要る
     for left in range(HEAD_MOVED_RETRIES, -1, -1):
