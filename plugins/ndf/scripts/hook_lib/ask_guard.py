@@ -107,11 +107,16 @@ def run_request_ask(main: Path, plan: str, lane: str, payload: dict, timeout: fl
     return got.returncode, out or {}
 
 
-def hold_text(rid: str, plan: str) -> str:
-    """オーガナイザーへ送った問いの理由と保留の手順（正本: asking.md の「並列の計画のレーン」）。"""
+def _stop_command() -> str:
+    """自分のラッパーを止めるコマンド（中継の名前が分からなければ `$NDF_RELAY_NAME` で止める形）。"""
     import parallel_files
 
-    stop = parallel_files.stop_self() or f'python3 {parallel_files.RELAY} stop "$NDF_RELAY_NAME"'
+    return parallel_files.stop_self() or f'python3 {parallel_files.RELAY} stop "$NDF_RELAY_NAME"'
+
+
+def hold_text(rid: str, plan: str) -> str:
+    """オーガナイザーへ送った問いの理由と保留の手順（正本: asking.md の「並列の計画のレーン」）。"""
+    stop = _stop_command()
     loop = f'python3 "{Path(__file__).resolve().parent.parent / "sprint-state.py"}" loop hold-question <ループ> --ref {rid} --plan <止まったプラン> --step <続きのステップ> --parallel {plan}'
     return "\n".join(
         [
@@ -126,9 +131,7 @@ def hold_text(rid: str, plan: str) -> str:
 
 def design_hold_text(rid: str, plan: str, state: str) -> str:
     """設計承認の依頼の保留の手順（正本: asking.md の「並列の計画のレーン」。#3603 の決定 4）。"""
-    import parallel_files
-
-    stop = parallel_files.stop_self() or f'python3 {parallel_files.RELAY} stop "$NDF_RELAY_NAME"'
+    stop = _stop_command()
     answer = f'python3 "{PARALLEL_PY}" design-answer {plan} {rid} --state {state or "<スプリント状態>"}'
     return "\n".join(
         [
