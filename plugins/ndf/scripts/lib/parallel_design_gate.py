@@ -195,7 +195,8 @@ def design_gate(
 # ---- 答え（parallel.py design-answer） ----
 
 
-def _gate1_row(rows: list[dict], rid: str) -> dict | None:
+def gate1_row(rows: list[dict], rid: str) -> dict | None:
+    """台帳の行のうち、設計承認の依頼（kind `gate1`）で id が `rid` の最初の行。無ければ None。"""
     return next((r for r in rows if r.get("kind") == "gate1" and r.get("id") == rid), None)
 
 
@@ -297,7 +298,7 @@ def answer_design(
         rows = plg.current_rows(main, name)
     except OSError as exc:
         return Answered("stopped", f"計画の台帳を読めない: {exc}", 2, {})
-    row = _gate1_row(rows, rid)
+    row = gate1_row(rows, rid)
     if row is None:
         return Answered("stopped", f"依頼 {rid} は設計承認の依頼（gate1）でない", 1, {})
     msg = row.get("msg") or {}

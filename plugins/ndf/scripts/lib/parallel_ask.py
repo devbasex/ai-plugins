@@ -101,9 +101,11 @@ def _design_gate_or_none(main: Path, name: str, lane: str, tool_input: dict, row
 
 def _route_gate1(main: Path, name: str, lane: str, gate, rows: list[dict], ledger_id: str, deadline_at) -> Routed:
     """分岐 1: 設計承認の依頼を送る。同じ先頭の打ち直しは送らずに already を返す（I2）。"""
+    import parallel_design_gate as pdg
+
     rid = gate1_id(lane, gate.pr, gate.stamp, gate.suffix)
     state = {"sprint_state": gate.state}
-    if any(r.get("kind") == "gate1" and r.get("id") == rid for r in rows):  # 同じ先頭の打ち直し（I2）
+    if pdg.gate1_row(rows, rid) is not None:  # 同じ先頭の打ち直し（I2）
         return Routed("gate1", rid, {**state, "already": True})
     if expired(deadline_at):
         return Routed("late")
