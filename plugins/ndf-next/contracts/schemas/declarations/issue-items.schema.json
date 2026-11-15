@@ -114,7 +114,42 @@
           "name",
           "need",
           "level"
-        ]
+        ],
+        "if": {
+          "description": "need のどれかの値が該当時",
+          "required": [
+            "need"
+          ],
+          "properties": {
+            "need": {
+              "not": {
+                "additionalProperties": {
+                  "not": {
+                    "const": "該当時"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "then": {
+          "description": "該当時の項目は when.text（空でない文）を持つ",
+          "required": [
+            "when"
+          ],
+          "properties": {
+            "when": {
+              "required": [
+                "text"
+              ],
+              "properties": {
+                "text": {
+                  "pattern": "\\S"
+                }
+              }
+            }
+          }
+        }
       },
       "minItems": 1
     }
