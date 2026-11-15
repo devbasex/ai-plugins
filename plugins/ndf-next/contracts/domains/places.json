@@ -19,6 +19,7 @@
     {"id": "issues", "root": "repo", "path": "issues", "tracked": true},
     {"id": "issues-old", "root": "repo", "path": "issues/old", "tracked": true},
     {"id": "measured", "root": "state", "path": "measured", "tracked": false},
+    {"id": "google-workspace", "root": "state", "path": "gws", "tracked": false},
     {"id": "relay-hub", "root": "state", "path": "relay/hub", "tracked": false},
     {"id": "mvv-state", "root": "state", "path": ".", "tracked": false, "env": "NDF_MVV_STATE_DIR"},
     {"id": "usage-ledger", "root": "state", "path": "usage", "tracked": false, "env": "NDF_USAGE_DIR"},

@@ -70,6 +70,17 @@
 
 結果の `metrics`: `findings`（integer）・`rounds`（integer）。`items` の要素: `after`（string）・`base`（string か null）・`before`（string）・`branch`（string）・`conflicts`（array of string）・`current_pr`（integer）・`head`（string か null）・`id`（string）・`kind`（string）・`locked`（string）・`number`（integer）・`ok`（boolean）・`origin_head`（string か null）・`origin_pr`（integer）・`outcome`（string）・`path`（string）・`points_to`（string）・`reason`（string か null）・`rebased`（boolean）・`replayed`（integer）・`scope`（string）・`slug`（string）・`source`（string）・`unreviewed`（array of string）
 
+## `ndf gws`
+
+内部（予告なく変えてよい）。[引数のスキーマ](../../contracts/schemas/io/gws.args.schema.json)・[結果のスキーマ](../../contracts/schemas/io/gws.result.schema.json)
+
+| 呼び方 | 引数 |
+| --- | --- |
+| `ndf gws check` | `--install`（boolean・任意）: 導入の同意の印。gws が無ければ npm で入れる |
+| `ndf gws thumbnails` | `presentation_id`（string・必須・位置）: プレゼンテーションの ID<br>`out_dir`（string・必須・位置）: 出力のディレクトリ（無ければ作る）<br>`--size`（string・任意・既定 `"LARGE"`・値 `SMALL`・`MEDIUM`・`LARGE`）: サムネイルの大きさ |
+
+結果の `metrics`: `auth_method`（string）・`client_config_exists`（boolean）・`credential_source`（string）・`out_dir`（string）・`pages`（integer）・`size`（string）・`state`（string）。`items` の要素: `detail`（string）・`name`（string）・`objectId`（string）・`result`（string）
+
 ## `ndf hooks`
 
 内部（予告なく変えてよい）。[引数のスキーマ](../../contracts/schemas/io/hooks.args.schema.json)・[結果のスキーマ](../../contracts/schemas/io/hooks.result.schema.json)

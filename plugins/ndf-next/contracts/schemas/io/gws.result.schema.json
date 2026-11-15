@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gws.result.schema.json",
+  "title": "ndf gws の結果 JSON",
+  "description": "ndf gws が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果の契約（result.schema.json）が持ち、ここは metrics と items の形だけを足す。metrics と items の要素は閉じていて、載せた項目のほかの項目を持つと通らない（gws auth status の応答のほかのキーを写さない）",
+  "allOf": [
+    {
+      "$ref": "../result.schema.json"
+    }
+  ],
+  "properties": {
+    "tool": {
+      "const": "gws"
+    },
+    "metrics": {
+      "type": "object",
+      "description": "ndf gws の計測値",
+      "additionalProperties": false,
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": ["authenticated", "missing", "unauthenticated", "uninstallable"],
+          "description": "gws の状態（check。thumbnails は未認証で止まったときだけ）"
+        },
+        "credential_source": {
+          "type": "string",
+          "description": "gws auth status の credential_source（check）"
+        },
+        "auth_method": {
+          "type": "string",
+          "description": "gws auth status の auth_method（check）"
+        },
+        "client_config_exists": {
+          "type": "boolean",
+          "description": "gws auth status の client_config_exists。偽なら OAuth クライアントの用意が先に要る（check）"
+        },
+        "pages": {
+          "type": "integer",
+          "description": "保存したページの数（thumbnails）"
+        },
+        "size": {
+          "type": "string",
+          "enum": ["SMALL", "MEDIUM", "LARGE"],
+          "description": "サムネイルの大きさ（thumbnails）"
+        },
+        "out_dir": {
+          "type": "string",
+          "description": "出力のディレクトリ（thumbnails）"
+        }
+      }
+    },
+    "items": {
+      "type": "array",
+      "description": "ndf gws の項目の並び",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "ページ（p<番号>）か、失敗した操作の名前"
+          },
+          "result": {
+            "type": "string",
+            "description": "saved・unauthenticated・gws-failed・download-failed・unreadable・stderr・failed のどれか"
+          },
+          "objectId": {
+            "type": "string",
+            "description": "ページの ID（thumbnails の saved）"
+          },
+          "detail": {
+            "type": "string",
+            "description": "保存先のパスか、外部のコマンドの出力の末尾（20 行まで）"
+          }
+        }
+      }
+    }
+  }
+}
