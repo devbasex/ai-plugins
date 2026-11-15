@@ -109,10 +109,7 @@ def _first_denial(
     saved: List[Tuple[Optional[Path], Optional[str]]] = []
     for i, raw in enumerate(parts):
         if isinstance(raw, str):
-            if raw == "(":
-                saved.append((here, gh_repo))
-            elif raw == ")":
-                here, gh_repo = saved.pop() if saved else (None, gh_repo)
+            here, gh_repo = _subshell_step(raw, saved, here, gh_repo)
             continue
         words = _command_words(raw)
         moved = _moved(here, gh_repo, raw, words)
@@ -121,12 +118,26 @@ def _first_denial(
                 here, gh_repo = moved
             continue
         env_repo = _assigned_gh_repo(raw[: len(raw) - len(words)], gh_repo)
-        verdict = (
-            _unreadable_script_denial(words) or _inner_denial(here, raw, words, depth, env_repo) or _call_verdict(here, words, env_repo)
-        )
+        verdict = _statement_denial(here, raw, words, depth, env_repo)
         if verdict is not None:
             return verdict
     return None
+
+
+def _subshell_step(
+    raw: str, saved: List[Tuple[Optional[Path], Optional[str]]], here: Optional[Path], gh_repo: Optional[str]
+) -> Tuple[Optional[Path], Optional[str]]:
+    """区切りの字句 1 つの処理。`(` で今の値を `saved` へ退避し、`)` で戻す（退避が無ければ作業ディレクトリを決められない）。"""
+    if raw == "(":
+        saved.append((here, gh_repo))
+    elif raw == ")":
+        return saved.pop() if saved else (None, gh_repo)
+    return here, gh_repo
+
+
+def _statement_denial(here: Optional[Path], raw: List[str], words: List[str], depth: int, env_repo: Optional[str]) -> Optional[Verdict]:
+    """文 1 つの判定（読めないスクリプト → 中のスクリプト → `gh pr merge` の呼び出しの順）。止めなければ None。"""
+    return _unreadable_script_denial(words) or _inner_denial(here, raw, words, depth, env_repo) or _call_verdict(here, words, env_repo)
 
 
 def _moved(
