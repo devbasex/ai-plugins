@@ -34,5 +34,5 @@ def test_apply_splits_counted_allowed_and_unused(rules):
         5: [suppressions.Suppression(5, ("NDF502",), "ファイル", "理由")],
     }
     applied = suppressions.apply([(1, "NDF502"), (2, "NDF701"), (3, "NDF502")], found, {}, rules)
-    assert applied.counted == [(2, "NDF701", "この規則は印で外せない。直す"), (3, "NDF502", None)]
+    assert applied.counted == [(2, "NDF701", "この規則は抑制コメントで外せない。直す"), (3, "NDF502", None)]
     assert [(m.line, code) for m, code in applied.unused] == [(5, "NDF502")]

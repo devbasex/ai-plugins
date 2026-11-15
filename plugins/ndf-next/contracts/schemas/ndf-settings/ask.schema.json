@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "ndf-settings/ask.schema.json",
-  "title": "人へ問う区分の宣言（.ndf/ask.json）",
+  "title": "人へ問う区分の設定（.ndf/ask.json）",
   "description": "人へ問う区分（AskUserQuestion の守り）と費用の閾値",
   "type": "object",
   "additionalProperties": false,
@@ -18,11 +18,11 @@
       "enum": [
         1
       ],
-      "description": "宣言の形の版。読み手は知らない版を読まない"
+      "description": "設定の形のバージョン。読み手は知らないバージョンを読まない"
     },
     "mode": {
       "type": "string",
-      "description": "区分の無い問いの扱い。enforce は断る、advise は案内する、off は見ない",
+      "description": "区分の無い質問の扱い。enforce は断る、advise は案内する、off は見ない",
       "enum": [
         "enforce",
         "advise",
@@ -78,7 +78,7 @@
   "x-ndf-read-by": [
     {
       "by": "ndf hooks",
-      "when": "人への問いの hook（PreToolUse）で区分を照らすとき"
+      "when": "人への質問の hook（PreToolUse）で区分を照らすとき"
     }
   ],
   "examples": [

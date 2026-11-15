@@ -1,43 +1,43 @@
-"""行き先の選び方: 依頼の種類からプランの雛形を選んで埋め、止まった後の CI の落ちが同じ原因で続くかを数える。
+"""ルートの選び方: リクエストの種類からプランのテンプレートを選んで埋め、止まった後の CI の落ちが同じ原因で続くかを数える。
 
-雛形は `contracts/templates/` にある。
+テンプレートは `contracts/templates/` にある。
 
-- `<名前>.json`: 雛形 1 本。`purpose`（依頼の種類。雛形どうしで重ならない）・`params`（使う差し込みの名前）・`plan`
+- `<名前>.json`: テンプレート 1 本。`purpose`（リクエストの種類。テンプレートどうしで重ならない）・`params`（使う差し込みの名前）・`plan`
   （プランの形。`ndf.core.plan.model` が読む形に `{{名前}}` と `{"use": ...}` を足したもの）を持つ
 - `params.json`: 差し込みの名前ごとの意味・既定・並びか（`list`）。意味と既定はここだけが持つ
-- `parts/steps.json`: 雛形どうしで共有するステップ。雛形のステップは `{"use": "<名前>", ...}` で 1 つを引き、
-  並べた鍵で鍵ごとに上書きする。値が null の鍵は消す
+- `parts/steps.json`: テンプレートどうしで共有するステップ。テンプレートのステップは `{"use": "<名前>", ...}` で 1 つを引き、
+  並べたキーでキーごとに上書きする。値が null のキーは消す
 
 差し込み `{{名前}}` はここで埋める。実行のときの差し込み `{名前}`（`{state_dir}` など）はプランの実行（`runner`）が
 埋めるので触らない。並びの名前は引数の要素ごとに展開する: 要素がその名前だけなら並びを差し込み、ほかの字を含めば
 値ごとに要素を作る（空の並びなら要素ごと消える）。1 つの要素に並びの名前を 2 つ置くと誤り。
 
-副命令 `ndf route`:
+サブコマンド `ndf route`:
 
     ndf route templates
-        雛形の一覧（名前・依頼の種類・使う差し込み）
-    ndf route render <依頼の種類> --out <plan.json> [--set <名前>=<値>]... [--add <名前>=<値>]...
-        雛形を選んで埋め、プランのファイルを書く。`--add` は並びの名前へ値を 1 つ足す。`repo` を省けば打った場所の
+        テンプレートの一覧（名前・リクエストの種類・使う差し込み）
+    ndf route render <リクエストの種類> --out <plan.json> [--set <名前>=<値>]... [--add <名前>=<値>]...
+        テンプレートを選んで埋め、プランのファイルを書く。`--add` は並びの名前へ値を 1 つ足す。`repo` を省けば打った場所の
         git の根、`worktree` を省けば根の `.worktrees/<branch>` にする（サブモジュールでもそのworktreeの根。#2054）。
         省いた作業場所が使えなければ書かずに止まる。`base` を省けば根の `.ndf/worktree.json` の `base_branch`、
-        宣言が無ければ `origin` の既定ブランチにする。`merge_method` を省けば `base` のブランチで許された方式
-        （ruleset とリポジトリの設定）の先頭にし、読めなければ無い差し込みとして止まる。`repo` の宣言
+        設定が無ければ `origin` の既定ブランチにする。`merge_method` を省けば `base` のブランチで許された方式
+        （ruleset とリポジトリの設定）の先頭にし、読めなければ無い差し込みとして止まる。`repo` の設定
         （`.ndf/project.json`）がテストを CI に寄せる（`test.ci.only`）なら、手元のテストのステップを外す
-    ndf route run <依頼の種類> --out <plan.json> [--set ...] [--add ...]
+    ndf route run <リクエストの種類> --out <plan.json> [--set ...] [--add ...]
         render の後に同じプランを `ndf plan next` で流す（即時修正をテスト → PR → merge-when-green の 1 つの
         エントリポイントで流す）
     ndf route repeat --result <結果 JSON のファイル> --log <記録の JSONL>
-        止まった結果の同じ原因の鍵（種類と落ちたテストの集まり）を記録へ足し、続いた回数が
+        止まった結果の同じ原因のキー（種類と落ちたテストの集まり）を記録へ足し、続いた回数が
         `supervise.step-rerun` の `same_cause` を超えたら `fix_limit` で止まる（人へ戻す）
     ndf route test [--result <結果 JSON のファイル>] -- <コマンド>
         手元のテストのコマンドを `ndf test-slot run` で打つ。シグナル（128 以上）を除く 0 以外の終了コードは
         どれも `test_failed` の止まった結果にし（`--result` があればそこへも書く。`ndf route repeat` が数える）、
         `test-slot` 自身が止まった結果はそのまま返す
     ndf route test --failed-from <CI の結果 JSON のファイル> [--result <結果 JSON のファイル>]
-        CI の修正の後の確かめ（#3188）。CI で落ちたテストのファイルだけを、打った場所の宣言（`.ndf/project.json`）の
+        CI の修正の後の確かめ（#3188）。CI で落ちたテストのファイルだけを、打った場所の設定（`.ndf/project.json`）の
         テストの suite の `scope_command` の `{paths}` へ入れて打つ。落ちたテストを持つ suite だけを打ち、全体テストは
         打たない。落ちたテストが無い・どの suite にも当たらないファイルがあれば打たずに `precondition`、
-        CI の結果や宣言を読めなければ `invalid`。通ったときも落ちたときも、打ったコマンドと合否を結果 JSON の
+        CI の結果や設定を読めなければ `invalid`。通ったときも落ちたときも、打ったコマンドと合否を結果 JSON の
         `items` に並べる（`--result` があればそこへも書く）
 
 結果 JSON を標準出力へ 1 行で出す。
@@ -65,22 +65,22 @@ from ndf.core.plan import model, steps
 from ndf.testing import declared, scoped
 
 TOOL = cli.tool_of(__name__)
-# 雛形の置き場（contracts/ の下）と、雛形でない決まった名前のファイル
+# テンプレートの保存先（contracts/ の下）と、テンプレートでない決まった名前のファイル
 TEMPLATE_DIR = "templates"
 PARAMS_FILE = "params.json"
 PARTS_FILE = "parts/steps.json"
-# 雛形のステップで共有のステップを引く鍵
+# テンプレートのステップで共有のステップを引くキー
 USE = "use"
-# 手元でテストを打つステップの id。CI テストの宣言（`test.ci.only`）があるリポジトリのプランからは外す（#3473）
+# 手元でテストを打つステップの id。CI テストの設定（`test.ci.only`）があるリポジトリのプランからは外す（#3473）
 LOCAL_TEST_STEPS = ("test", "test-all", "ci-local")
-# ステップの行き先の鍵: 1 つの行き先を持つ鍵と、場合 → 行き先の対応表を持つ鍵（ステップを外すときに付け替える）
+# ステップのルートのキー: 1 つのルートを持つキーと、場合 → ルートの対応表を持つキー（ステップを外すときに付け替える）
 TARGET_KEYS = ("next", "on_fail")
 TARGET_TABLE_KEYS = ("on_cause", "on_answer")
-# 同じ原因の続きの上限の宣言
+# 同じ原因の続きの上限の設定
 REPEAT_LIMIT = "supervise.step-rerun"
-# 作業場所を省いたときの置き場（リポジトリの根の下）
+# 作業場所を省いたときの保存先（リポジトリの根の下）
 WORKTREES = ".worktrees"
-# base を省いたときに読むブランチの運用の宣言（リポジトリの根の下）と、その鍵
+# base を省いたときに読むブランチの運用の設定（リポジトリの根の下）と、そのキー
 BRANCH_NDF_SETTINGS = identity.FIXED_WORDS["ndf_settings_dir"] + "/worktree.json"
 BASE_KEY = "base_branch"
 _PARAM = re.compile(r"\{\{([a-z_][a-z0-9_]*)\}\}")
@@ -89,7 +89,7 @@ Value = Union[str, list[str]]
 
 
 class RouteError(contracts.ContractError):
-    """雛形が読めない・形が違う・差し込みの値が欠ける。"""
+    """テンプレートが読めない・形が違う・差し込みの値が欠ける。"""
 
 
 @dataclass(frozen=True)
@@ -109,7 +109,7 @@ class Template:
     plan: Mapping[str, Any]
 
 
-# --- 雛形の読み込み ---------------------------------------------------------------------
+# --- テンプレートの読み込み ---------------------------------------------------------------------
 
 
 def _load(rel: str) -> Any:
@@ -136,7 +136,7 @@ def _template_files() -> list[str]:
 
 @contracts.cached_reader
 def templates() -> dict[str, Template]:
-    """雛形の一覧（名前 → 雛形）。形の誤りは `RouteError`。"""
+    """テンプレートの一覧（名前 → テンプレート）。形の誤りは `RouteError`。"""
     found: dict[str, Template] = {}
     for rel in _template_files():
         raw = _load(rel)
@@ -144,24 +144,24 @@ def templates() -> dict[str, Template]:
         found[t.name] = t
     errs = template_errors(found.values())
     if errs:
-        raise RouteError(f"雛形の形が違う: {'; '.join(errs)}")
+        raise RouteError(f"テンプレートの形が違う: {'; '.join(errs)}")
     return found
 
 
 def choose(purpose: str) -> Template:
-    """依頼の種類から雛形を 1 つ選ぶ。無ければ `RouteError`。"""
+    """リクエストの種類からテンプレートを 1 つ選ぶ。無ければ `RouteError`。"""
     for t in templates().values():
         if t.purpose == purpose:
             return t
     known = ", ".join(sorted(t.purpose for t in templates().values()))
-    raise RouteError(f"依頼の種類 {purpose} の雛形が無い（{known}）")
+    raise RouteError(f"リクエストの種類 {purpose} のテンプレートが無い（{known}）")
 
 
 # --- 埋める ---------------------------------------------------------------------------
 
 
 def _expand_step(raw: Mapping[str, Any]) -> dict[str, Any]:
-    """`use` の共有のステップに上書きを重ね、値が null の鍵を消す。"""
+    """`use` の共有のステップに上書きを重ね、値が null のキーを消す。"""
     if USE not in raw:
         return dict(raw)
     shared = parts()
@@ -179,7 +179,7 @@ def expanded(t: Template, *, local_tests: bool = True) -> dict[str, Any]:
 
 
 def _successors(found: Sequence[Mapping[str, Any]], drop: frozenset[str]) -> dict[str, str]:
-    """外すステップの id → 代わりの行き先（そのステップの `next`、無ければ並びの次。外すステップが続けば辿る）。"""
+    """外すステップの id → 代わりのルート（そのステップの `next`、無ければ並びの次。外すステップが続けば辿る）。"""
     ids = [str(s["id"]) for s in found]
     following = [*ids[1:], END]
     plain = {i: str(s["next"]) if "next" in s else after for i, s, after in zip(ids, found, following)}
@@ -193,12 +193,12 @@ def _successors(found: Sequence[Mapping[str, Any]], drop: frozenset[str]) -> dic
 
 
 def _moved(target: Any, moved: Mapping[str, str]) -> Any:
-    """行き先 `target` が外したステップなら代わりの行き先、そうでなければそのまま。"""
+    """ルート `target` が外したステップなら代わりのルート、そうでなければそのまま。"""
     return moved[target] if target in moved else target
 
 
 def _retarget(step: Mapping[str, Any], moved: Mapping[str, str]) -> dict[str, Any]:
-    """ステップの行き先（`next`・`on_fail`・`on_cause`・`on_answer`）のうち外したステップを代わりの行き先へ置き換える。"""
+    """ステップのルート（`next`・`on_fail`・`on_cause`・`on_answer`）のうち外したステップを代わりのルートへ置き換える。"""
     out = dict(step)
     for key in TARGET_KEYS:
         if key in out:
@@ -210,7 +210,7 @@ def _retarget(step: Mapping[str, Any], moved: Mapping[str, str]) -> dict[str, An
 
 
 def without_steps(plan: Mapping[str, Any], ids: Iterable[str]) -> dict[str, Any]:
-    """プランから `ids` のステップを外し、そこへ向かう行き先を外したステップの続きへ付け替える。"""
+    """プランから `ids` のステップを外し、そこへ向かうルートを外したステップの続きへ付け替える。"""
     drop = frozenset(ids)
     found = list(plan["steps"])
     moved = _successors(found, drop)
@@ -269,7 +269,7 @@ def _fill(value: Any, values: Mapping[str, Value]) -> Any:
 def _check_unknown(t: Template, given: Mapping[str, Value]) -> None:
     unknown = sorted(set(given) - set(t.params))
     if unknown:
-        raise RouteError(f"雛形 {t.name} に無い差し込み: {', '.join(unknown)}")
+        raise RouteError(f"テンプレート {t.name} に無い差し込み: {', '.join(unknown)}")
 
 
 def _value_of(name: str, given: Mapping[str, Value], defs: Mapping[str, Param]) -> Optional[Value]:
@@ -288,32 +288,32 @@ def needed(t: Template, *, local_tests: bool = True) -> tuple[str, ...]:
 
 
 def resolve(t: Template, given: Mapping[str, Value], *, local_tests: bool = True) -> dict[str, Value]:
-    """差し込みの値を決める（与えた値 → 既定）。雛形に無い名前・欠けた値・並びかの食い違いは `RouteError`。"""
+    """差し込みの値を決める（与えた値 → 既定）。テンプレートに無い名前・欠けた値・並びかの食い違いは `RouteError`。"""
     defs = params()
     _check_unknown(t, given)
     found = {name: _value_of(name, given, defs) for name in needed(t, local_tests=local_tests)}
     values = {name: value for name, value in found.items() if value is not None}
     missing = [name for name, value in found.items() if value is None]
     if missing:
-        raise RouteError(f"雛形 {t.name} の差し込みの値が無い: {', '.join(missing)}")
+        raise RouteError(f"テンプレート {t.name} の差し込みの値が無い: {', '.join(missing)}")
     return values
 
 
 def render(t: Template, given: Mapping[str, Value], *, local_tests: bool = True) -> dict[str, Any]:
-    """雛形を埋めたプラン（`model.parse` を通る形）。誤りは `RouteError`。
+    """テンプレートを埋めたプラン（`model.parse` を通る形）。誤りは `RouteError`。
 
-    `local_tests` が偽（CI テストの宣言 `test.ci.only` があるリポジトリ）なら、手元でテストを打つステップ
+    `local_tests` が偽（CI テストの設定 `test.ci.only` があるリポジトリ）なら、手元でテストを打つステップ
     （`LOCAL_TEST_STEPS`）を外して組む。テストは CI の結果で確かめる。
     """
     plan = _fill(expanded(t, local_tests=local_tests), resolve(t, given, local_tests=local_tests))
     try:
         model.parse(plan)
     except model.PlanError as exc:
-        raise RouteError(f"雛形 {t.name} から組んだプランが誤り: {exc}") from None
+        raise RouteError(f"テンプレート {t.name} から組んだプランが誤り: {exc}") from None
     return plan
 
 
-# --- 雛形の検査 -----------------------------------------------------------------------
+# --- テンプレートの検査 -----------------------------------------------------------------------
 
 
 def _sample(names: Sequence[str]) -> dict[str, Value]:
@@ -322,8 +322,8 @@ def _sample(names: Sequence[str]) -> dict[str, Value]:
 
 
 def _param_name_errors(t: Template, used: set[str]) -> list[str]:
-    errs = [f"雛形 {t.name} が params に無い差し込みを使う: {n}" for n in sorted(used - set(t.params))]
-    errs += [f"雛形 {t.name} が使わない差し込みを params に持つ: {n}" for n in sorted(set(t.params) - used)]
+    errs = [f"テンプレート {t.name} が params に無い差し込みを使う: {n}" for n in sorted(used - set(t.params))]
+    errs += [f"テンプレート {t.name} が使わない差し込みを params に持つ: {n}" for n in sorted(set(t.params) - used)]
     return errs
 
 
@@ -338,13 +338,13 @@ def _sample_render_errors(t: Template) -> list[str]:
 
 
 def _one_template_errors(t: Template, defs: Mapping[str, Param]) -> list[str]:
-    errs = [f"雛形 {t.name} の params に定義の無い名前: {n}" for n in t.params if n not in defs]
+    errs = [f"テンプレート {t.name} の params に定義の無い名前: {n}" for n in t.params if n not in defs]
     if errs:
         return errs
     try:
         used = used_names(expanded(t))
     except RouteError as exc:
-        return [f"雛形 {t.name}: {exc}"]
+        return [f"テンプレート {t.name}: {exc}"]
     errs = _param_name_errors(t, used)
     if errs:
         return errs
@@ -352,11 +352,11 @@ def _one_template_errors(t: Template, defs: Mapping[str, Param]) -> list[str]:
 
 
 def template_errors(found: Iterable[Template]) -> list[str]:
-    """雛形の誤り: 定義の無い差し込み・使わない差し込み・依頼の種類の重なり・組んだプランの誤り。"""
+    """テンプレートの誤り: 定義の無い差し込み・使わない差し込み・リクエストの種類の重なり・組んだプランの誤り。"""
     found = list(found)
     defs = params()
     purposes = [t.purpose for t in found]
-    errs = [f"依頼の種類が重なる: {p}" for p in contracts.duplicates(purposes)]
+    errs = [f"リクエストの種類が重なる: {p}" for p in contracts.duplicates(purposes)]
     for t in found:
         errs += _one_template_errors(t, defs)
     return errs
@@ -366,7 +366,7 @@ def template_errors(found: Iterable[Template]) -> list[str]:
 
 
 def cause_key(found: Mapping[str, Any]) -> Optional[str]:
-    """止まった結果の同じ原因の鍵（種類と落ちたテストの集まり）。止まっていなければ None。文（summary）を読まない。"""
+    """止まった結果の同じ原因のキー（種類と落ちたテストの集まり）。止まっていなければ None。文（summary）を読まない。"""
     kind = causes.kind_of(found.get("cause"))
     if found.get("status") != exit_codes.STOPPED or kind is None:
         return None
@@ -388,7 +388,7 @@ def repeated(history: Sequence[str], key: str, same_cause: int) -> bool:
     return streak(history, key) + 1 > same_cause
 
 
-# --- 副命令 ---------------------------------------------------------------------------
+# --- サブコマンド ---------------------------------------------------------------------------
 
 
 def repo_root(cwd: Path) -> str:
@@ -397,7 +397,7 @@ def repo_root(cwd: Path) -> str:
 
 
 def default_base(repo: Path) -> Optional[str]:
-    """宛先のブランチの既定: ブランチの運用の宣言の `base_branch`、無ければ `origin` の既定ブランチ（決まらなければ None）。"""
+    """宛先のブランチの既定: ブランチの運用の設定の `base_branch`、無ければ `origin` の既定ブランチ（決まらなければ None）。"""
     try:
         declared = json.loads((repo / BRANCH_NDF_SETTINGS).read_text(encoding="utf-8")).get(BASE_KEY)
     except (OSError, ValueError, AttributeError):
@@ -423,7 +423,7 @@ def default_merge_method(repo: Path, base: str) -> Optional[str]:
 
 
 def _omitted(t: Template, out: Mapping[str, Value], name: str) -> bool:
-    """雛形が差し込み `name` を使い、まだ値が無いか。"""
+    """テンプレートが差し込み `name` を使い、まだ値が無いか。"""
     return name in t.params and name not in out
 
 
@@ -474,9 +474,9 @@ def _pairs(sets: Optional[list[str]], adds: Optional[list[str]]) -> dict[str, Va
 
 
 def _declared_ci_only(values: Mapping[str, Value]) -> bool:
-    """埋める先のリポジトリ（`repo`、無ければ打った場所）の宣言がテストを CI に寄せる（`test.ci.only` が真）か。
+    """埋める先のリポジトリ（`repo`、無ければ打った場所）の設定がテストを CI に寄せる（`test.ci.only` が真）か。
 
-    工程から組むプラン（`ndf.progress.invoke.plan_path`）と同じく、宣言があれば手元のテストのステップを外す（PR 3590 の指摘）。
+    工程から組むプラン（`ndf.progress.invoke.plan_path`）と同じく、設定があれば手元のテストのステップを外す（PR 3590 の指摘）。
     """
     repo = values.get("repo")
     location = Path(repo) if isinstance(repo, str) and repo else Path.cwd()
@@ -499,7 +499,7 @@ def _cmd_render(a: argparse.Namespace) -> int:
     t, out = _write_plan(a)
     item = {"kind": "path", "path": str(out)}
     nxt = result.command("plan", "next", str(out))
-    return result.emit(result.result(TOOL, OK, f"雛形 {t.name} からプラン {out} を書いた", [item], next=nxt))
+    return result.emit(result.result(TOOL, OK, f"テンプレート {t.name} からプラン {out} を書いた", [item], next=nxt))
 
 
 def _cmd_run(a: argparse.Namespace) -> int:
@@ -510,7 +510,7 @@ def _cmd_run(a: argparse.Namespace) -> int:
 def _cmd_templates(_: argparse.Namespace) -> int:
     found = templates().values()
     items = [{"kind": "template", "name": t.name, "purpose": t.purpose, "params": list(t.params)} for t in found]
-    return result.emit(result.result(TOOL, OK, f"雛形が {len(items)} 本ある", items, {"templates": len(items)}))
+    return result.emit(result.result(TOOL, OK, f"テンプレートが {len(items)} 本ある", items, {"templates": len(items)}))
 
 
 def _read_lines(path: Path) -> list[str]:
@@ -526,7 +526,7 @@ def _invalid(detail: str) -> int:
 
 
 def _stopped_key(a: argparse.Namespace) -> str:
-    """結果ファイルの同じ原因の鍵。読めない・止まった結果でなければ `RouteError`。"""
+    """結果ファイルの同じ原因のキー。読めない・止まった結果でなければ `RouteError`。"""
     found = local_tests.read_result(a.result, "結果", RouteError)
     key = cause_key(found) if found is not None else None
     if key is None:
@@ -558,10 +558,10 @@ def _cmd_repeat(a: argparse.Namespace) -> int:
 
 
 def _parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="ndf route", description="プランの雛形を選んで埋める・同じ原因の続きを数える")
+    p = argparse.ArgumentParser(prog="ndf route", description="プランのテンプレートを選んで埋める・同じ原因の続きを数える")
     sub = p.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("templates", help="雛形の一覧").set_defaults(fn=_cmd_templates)
-    for name, fn, text in (("render", _cmd_render, "雛形を選んで埋める"), ("run", _cmd_run, "埋めたプランを流す")):
+    sub.add_parser("templates", help="テンプレートの一覧").set_defaults(fn=_cmd_templates)
+    for name, fn, text in (("render", _cmd_render, "テンプレートを選んで埋める"), ("run", _cmd_run, "埋めたプランを流す")):
         r = sub.add_parser(name, help=text)
         r.add_argument("purpose")
         r.add_argument("--out", required=True)

@@ -1,4 +1,4 @@
-"""claude の起動と答えの読み方（縛った答え・本文の JSON・失敗の種類・期限切れ・子へ渡す環境）。"""
+"""claude の起動と回答の読み方（縛った回答・本文の JSON・失敗の種類・期限切れ・子へ渡す環境）。"""
 
 from __future__ import annotations
 
@@ -17,13 +17,13 @@ def test_call_claude_reads_structured_output(tmp_path):
     fake.write_text(f"#!/bin/sh\ncat > /dev/null\necho '{json.dumps(payload)}'\n")
     fake.chmod(0o755)
 
-    got = claude.call_claude([str(fake)], "問い", 30)
+    got = claude.call_claude([str(fake)], "質問", 30)
 
     assert got == claude.ClaudeReply(True, {"decision": "fix"}, "", 0.25)
 
 
 def fake_claude(tmp_path: Path, stdout: str) -> Path:
-    """問いを読み捨て、`stdout` をそのまま標準出力へ書く偽の claude。"""
+    """質問を読み捨て、`stdout` をそのまま標準出力へ書く偽の claude。"""
     out = tmp_path / "claude.stdout"
     out.write_text(stdout)
     fake = tmp_path / "claude"
@@ -33,14 +33,14 @@ def fake_claude(tmp_path: Path, stdout: str) -> Path:
 
 
 def test_call_claude_missing_command_is_not_ok(tmp_path):
-    got = claude.call_claude([str(tmp_path / "missing")], "問い", 30)
+    got = claude.call_claude([str(tmp_path / "missing")], "質問", 30)
 
     assert not got.ok and got.failure is claude.Failure.LAUNCH
 
 
 @pytest.mark.parametrize("stdout", ["not json", json.dumps({"is_error": True, "result": "boom"})])
 def test_call_claude_failures_are_not_ok(tmp_path, stdout):
-    assert not claude.call_claude([str(fake_claude(tmp_path, stdout))], "問い", 30).ok
+    assert not claude.call_claude([str(fake_claude(tmp_path, stdout))], "質問", 30).ok
 
 
 @pytest.mark.parametrize(
@@ -48,7 +48,7 @@ def test_call_claude_failures_are_not_ok(tmp_path, stdout):
     [(json.dumps({"result": '{"a": 1}'}), {"a": 1}), (json.dumps({"result": "fix です"}), None)],
 )
 def test_call_claude_reads_json_in_result_text(tmp_path, stdout, answer):
-    assert claude.call_claude([str(fake_claude(tmp_path, stdout))], "問い", 30).answer == answer
+    assert claude.call_claude([str(fake_claude(tmp_path, stdout))], "質問", 30).answer == answer
 
 
 # ---------------------------------------------------------------- 現状固定: 子へ渡す環境と失敗の形（I-011・I-012）
@@ -63,11 +63,11 @@ ENV_DUMP = (
 
 
 def test_call_claude_passes_parent_env_prompt_and_cwd_without_run_log(tmp_path, no_run_env):
-    got = claude.call_claude([sys.executable, "-c", ENV_DUMP], "問い", 30, cwd=tmp_path)
+    got = claude.call_claude([sys.executable, "-c", ENV_DUMP], "質問", 30, cwd=tmp_path)
 
     assert (got.ok, got.cost, got.error) == (True, 0.0, None)
     env = {"NDF_RUN_ID": None, "NDF_RUN_LOG": None, "PIN_PARENT": "kept"}
-    assert got.answer == {"prompt": "問い", "cwd": str(tmp_path), "env": env}
+    assert got.answer == {"prompt": "質問", "cwd": str(tmp_path), "env": env}
 
 
 def test_call_claude_passes_open_run_log_to_child(no_run_env):

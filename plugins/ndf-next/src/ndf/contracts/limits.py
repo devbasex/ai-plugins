@@ -1,6 +1,6 @@
-"""上限の宣言（`contracts/limits.json`）の読み手。
+"""上限の設定（`contracts/limits.json`）の読み手。
 
-時間・回数・間隔・量の上限は宣言だけが値を持ち、コードは方針の名前で引く（値を写さない）。
+時間・回数・間隔・量の上限は設定だけが値を持ち、コードは方針の名前で引く（値を写さない）。
 形は `contracts/schemas/limits.schema.json` にある。
 """
 
@@ -16,7 +16,7 @@ SCHEMA = contracts.schema_path("limits")
 
 
 class LimitsError(contracts.ContractError):
-    """宣言が無い・形が違う・引いた方針や値が無い。"""
+    """設定が無い・形が違う・引いた方針や値が無い。"""
 
 
 class EnvError(ValueError):
@@ -24,7 +24,7 @@ class EnvError(ValueError):
 
 
 class Policy(NamedTuple):
-    """宣言の 1 行。方針に無い値は None。"""
+    """設定の 1 行。方針に無い値は None。"""
 
     name: str
     summary: str
@@ -42,7 +42,7 @@ class Policy(NamedTuple):
     margin: Optional[float] = None
     timeout: Optional[float] = None
     inject_chars: Optional[int] = None
-    # 重い起動の枠の重み
+    # 重い起動のスロットの重み
     gib: Optional[float] = None
 
 
@@ -51,14 +51,14 @@ VALUE_KEYS = tuple(f for f in Policy._fields if f not in ("name", "summary"))
 
 
 def validate(raw: object) -> dict[str, Policy]:
-    """宣言の中身を確かめて方針の表にする。形の誤りは `LimitsError`。"""
-    contracts.require_schema(raw, SCHEMA, LimitsError, f"上限の宣言 {NDF_SETTINGS}")
+    """設定の中身を確かめて方針の表にする。形の誤りは `LimitsError`。"""
+    contracts.require_schema(raw, SCHEMA, LimitsError, f"上限の設定 {NDF_SETTINGS}")
     return {name: Policy(name=name, **row) for name, row in raw["policies"].items()}  # type: ignore[index]
 
 
 @contracts.cached_reader
 def table() -> dict[str, Policy]:
-    """宣言を 1 プロセスに 1 回読む。"""
+    """設定を 1 プロセスに 1 回読む。"""
     return validate(contracts.load_as(NDF_SETTINGS, LimitsError))
 
 
@@ -66,7 +66,7 @@ def policy(name: str) -> Policy:
     """方針の名前で 1 行を引く。無ければ `LimitsError`。"""
     found = table().get(name)
     if found is None:
-        raise LimitsError(f"上限の宣言に方針 {name} が無い")
+        raise LimitsError(f"上限の設定に方針 {name} が無い")
     return found
 
 
@@ -74,7 +74,7 @@ def value(name: str, key: str) -> float:
     """方針の 1 つの値。方針にその値が無ければ `LimitsError`。"""
     got = getattr(policy(name), key) if key in VALUE_KEYS else None
     if got is None:
-        raise LimitsError(f"上限の宣言の方針 {name} に {key} が無い")
+        raise LimitsError(f"上限の設定の方針 {name} に {key} が無い")
     return got
 
 
@@ -95,7 +95,7 @@ def scaled(name: str, measured: Optional[float]) -> float:
 
 
 def from_env(environ: Mapping[str, str], name: str, policy_name: str, key: str) -> float:
-    """環境変数 `name` があればその値、無ければ宣言の値。数でない・0 以下なら `EnvError`。
+    """環境変数 `name` があればその値、無ければ設定の値。数でない・0 以下なら `EnvError`。
 
     リレーハブとマシン全体の本数の判定が同じ環境変数を同じ規則で読む（片方だけが替わった上限で数えない）。
     """

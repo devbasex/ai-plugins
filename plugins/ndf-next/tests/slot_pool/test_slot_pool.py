@@ -13,7 +13,7 @@ from ndf import slot_pool
 OWNER = {"pid": os.getpid()}
 SRC_DIR = Path(__file__).resolve().parents[2] / "src"
 CHILD_SECONDS = 30
-# 枠を取って番号を出し、返さずに終わる子
+# スロットを取って番号を出し、返さずに終わる子
 TAKE_AND_EXIT = (
     "import os, sys; from pathlib import Path; from ndf import slot_pool; "
     "taken = slot_pool.take(Path(sys.argv[1]), int(sys.argv[2]), int(sys.argv[3]), {'pid': os.getpid()}); "
@@ -50,7 +50,7 @@ def test_a_child_of_a_cli_does_not_wait_for_other_clis(tmp_path):
     assert a is not None and b is not None
     child = slot_pool.take(tmp_path, 1024, 1024, OWNER, absorbed=a.index)
     assert child is not None
-    assert slot_pool.take(tmp_path, 1024, 1024, OWNER, absorbed=b.index) is None  # テストの重みを持つ持ち主では待つ
+    assert slot_pool.take(tmp_path, 1024, 1024, OWNER, absorbed=b.index) is None  # テストの重みを持つオーナーでは待つ
     for taken in (child, b, a):
         taken.release()
 
@@ -63,7 +63,7 @@ def test_owner_description_keeps_the_weight(tmp_path):
 
 
 def _take_in_a_gone_owner(directory: Path, capacity: int, weight: int) -> int:
-    """子プロセスで枠を取り、返さずに終わらせる（記述を残して持ち主が消えた形）。取った番号を返す。"""
+    """子プロセスでスロットを取り、返さずに終わらせる（記述を残してオーナーが消えた形）。取った番号を返す。"""
     env = {**os.environ, "PYTHONPATH": str(SRC_DIR)}
     done = subprocess.run(
         [sys.executable, "-c", TAKE_AND_EXIT, str(directory), str(capacity), str(weight)],
@@ -77,7 +77,7 @@ def _take_in_a_gone_owner(directory: Path, capacity: int, weight: int) -> int:
 
 
 def test_an_owner_whose_lock_is_free_is_not_counted(tmp_path):
-    # 持ち主のプロセスが記述を残して消えるとカーネルがロックを解く
+    # オーナーのプロセスが記述を残して消えるとカーネルがロックを解く
     index = _take_in_a_gone_owner(tmp_path, 1024, 1024)
     assert slot_pool.slot_path(tmp_path, index, ".json").exists()
     assert slot_pool.held_mib(tmp_path) == 0

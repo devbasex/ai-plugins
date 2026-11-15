@@ -1,22 +1,22 @@
 ---
 name: design
-description: "Write the design document before coding: data structures, interface contracts, decisions. Use when a change needs a design step（設計書を作る・データ構造を決める・APIの契約を決める）."
+description: "Write the design document before coding: data structures, interface contracts, decisions. Use when a change needs a design step（設計書を作る・データ構造を決める・APIのコントラクトを決める）."
 ---
 
 # 設計
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `design-survey.py`（M7）・`glossary.py`（M7）・`projects-sync.sh`（M7）・`spec-copy.py`（M7）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトのサブコマンドは新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `design-survey.py`（M7）・`glossary.py`（M7）・`projects-sync.sh`（M7）・`spec-copy.py`（M7）。移行先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 実装を始める前に、**どう作るか**を文書として確定させる。担当する AI が変わっても同じ構成の
 成果物になるよう、作る文書と書く内容を規約で決める。
 
 ## この Skill の責務
 
-| 問い | 担当 |
+| 質問 | 担当 |
 | --- | --- |
 | どの工程が必要か（モード判定） | `development-workflow` |
 | 何を満たすか（受け入れ条件・仕様） | `requirements-design` |
-| **どう作るか（データ構造・入出力の契約・処理の流れ・決定の理由）と、詳細設計（ファイル配置・関数の責務・異常系の処理）** | この Skill |
+| **どう作るか（データ構造・入出力のコントラクト・処理の流れ・決定の理由）と、詳細設計（ファイル配置・関数の責務・異常系の処理）** | この Skill |
 | どう分解するか（タスク・順序・対象ファイル） | `implementation-plan` |
 | 完了後に何を残すか | `plan-to-spec` |
 
@@ -82,7 +82,7 @@ issue のことではない。
 
 **設計の判断の前に、触る領域の業界の標準・仕様、主要な製品の解き方、使える既存のライブラリとサービスを
 一次情報で調べ、設計文書の `## 外部の調査` の節に残す。** 手元のコードと要求の文だけで組むと、比べないまま
-「自前で作る」「古い形に寄せる」と決まるためである。手順の正本は
+「自前で作る」「古い形に寄せる」と決まるためである。手順の SSOT は
 [references/external-survey.md](references/external-survey.md) にある。
 
 - 3 種類の調べる対象ごとに調べるかを決め、調べない種類には理由を 1 行残す
@@ -101,7 +101,7 @@ issue のことではない。
 **H1 と承認する人が読む欄（目的・適用範囲・あるべき姿の根拠）を先に書き、続けてドメインモデルの節を書く。**
 欄の書き方は [design-template.md の「承認する人が読む欄」](references/design-template.md#承認する人が読む欄) にある。
 
-**ドメインモデルの節は機能一覧より先に書く。** 変更が属するコンテキスト・変える集約とその持ち主・不変条件・
+**ドメインモデルの節は機能一覧より先に書く。** 変更が属するコンテキスト・変える集約とそのオーナー・不変条件・
 ドメインイベント・用語を、機能一覧より先に決める。書き方は
 [references/domain-model.md](references/domain-model.md) にある。
 
@@ -136,10 +136,10 @@ issue のことではない。
 人へ残すのは、レッドライン（共通原則の `C<番号>`・プロジェクト MVV の `P<番号>`・スプリント MVV の `R<番号>`）に
 当たる判断だけで、`## 人へ残す判断` の表に判断ごとの番号となぜ当たるかを書く。番号を挙げられない判断は人へ残さない。
 
-**決定ごとに、根拠にした MVV の項目を最後の行に書く**（「根拠: Value 6（MVV 版 1）」）。MVV に反する疑いのある決定は
+**決定ごとに、根拠にした MVV の項目を最後の行に書く**（「根拠: Value 6（MVV バージョン 1）」）。MVV に反する疑いのある決定は
 設計に書かずに人へ戻す（理由と根拠の項目つき）。MVV の節の読み方と根拠の行の形は [project-mvv.md の「工程での読み方」](../development-workflow/references/project-mvv.md) にある。
 
-**承認の工程を足す決定を書かない。** 承認ゲートの数と置き場所は `development-workflow` の「人手の承認を求める承認ゲート」だけが持つ。
+**承認の工程を足す決定を書かない。** 承認ゲートの数と置く場所は `development-workflow` の「人手の承認を求める承認ゲート」だけが持つ。
 共通原則の「必ず人の承認が要る操作」（C1〜C8）やプロジェクト固有の操作に当たる変更も、設計承認ゲート・リリース承認ゲートで人が見る。
 「別の Pull Request で承認を取ってから書く」「実装でコミットを止めて承認を待つ」のような決定は書かず、変更は実装の中に置く。
 
@@ -162,16 +162,16 @@ issue のことではない。
 設計文書の構成要素と構造を、ファイル・関数の粒度へ下ろした詳細設計の文書 `issues/issue-<番号>-design-detail.md` を書く。
 ファイル配置・関数の責務・異常系の処理を実装の前に決め、設計 Pull Request に載せて設計レビューと設計承認ゲートで見せる。
 
-- 雛形は [references/detail-template.md](references/detail-template.md)、項目ごとの書き方と既存の参照との分担は
+- テンプレートは [references/detail-template.md](references/detail-template.md)、項目ごとの書き方と既存の参照との分担は
   [references/detailed-design.md](references/detailed-design.md) にある
 - 書く関数は、新設する関数と、シグネチャ・責務・失敗の扱いのいずれかを変える関数だけである
 - 1 本は 1,000 行以下にする。超える主題は設計を 2 本に分けると報告して止まる
 - 書いたら `python3 "$SCRIPTS/design-survey.py" check --file <設計文書> <詳細設計の文書> --require-detail` を打ち、
   `detail_*` の指摘を直す（規則は `design-survey.py` の冒頭にある）
 
-**設計のプランの段から呼ばれたときは、手前で止まるか、ここだけを書く。** 設計のプランの `design` の段の指示に
-「詳細設計は後の段が書く」とあれば、手順 5 で止める。`/ndf:design #<番号> 詳細設計` で呼ばれたら、手順 0〜5 を
-繰り返さずにこの手順だけを行う（設計文書は前の段が書き、設計単体のレビューで直してある）。
+**設計のプランのステップから呼ばれたときは、手前で止まるか、ここだけを書く。** 設計のプランの `design` のステップの指示に
+「詳細設計は後のステップが書く」とあれば、手順 5 で止める。`/ndf:design #<番号> 詳細設計` で呼ばれたら、手順 0〜5 を
+繰り返さずにこの手順だけを行う（設計文書は前のステップが書き、設計単体のレビューで直してある）。
 
 ### 7. 設計 Pull Request を出す
 
@@ -255,7 +255,7 @@ API の記述を求めない。
 
 **契機は 3 つあり、別々の時点で 1 つずつ進捗記録を打つ。** 手順 1（触る領域を決める）に
 入るときに 1 つ目、手順 6（詳細設計を書く）に入るときに 2 つ目、手順 7（設計 Pull Request を出す）に入るときに
-3 つ目を打つ。`/ndf:design #<番号> 詳細設計` で呼ばれたときは 1 つ目を打たない（工程「設計」は前の段が記録した）。issue の本文の
+3 つ目を打つ。`/ndf:design #<番号> 詳細設計` で呼ばれたときは 1 つ目を打たない（工程「設計」は前のステップが記録した）。issue の本文の
 `## 進行` とボードの両方に残る（`$SCRIPTS` の決め方は `development-workflow` の
 `references/scripts-lookup.md`。3 層では起動指示にある進捗進捗記録をそのまま使う）。
 

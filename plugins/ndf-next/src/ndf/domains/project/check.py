@@ -1,4 +1,4 @@
-"""プロジェクトの宣言（`.ndf/project.json`）の新しさの判定と、判定の入力の指紋（#3569。旧い `project-decl.py check` と
+"""プロジェクトの設定（`.ndf/project.json`）の新しさの判定と、判定の入力の指紋（#3569。旧い `project-decl.py check` と
 `project_lib/fingerprint.py` の移し先）。
 
 入力の指紋は、入力のパスの表に当たる追跡ファイルの HEAD の blob と、ブランチの構成である。`git ls-tree -r HEAD` と
@@ -8,9 +8,9 @@
 
 | 種類 | 条件 |
 | --- | --- |
-| `missing` | 宣言が無い |
-| `broken` | 宣言か `.ndf/worktree.json` が読めない・宣言がスキーマに合わない |
-| `stale` | 解析の記録が無い・解析器の版が古い・入力の指紋かブランチの構成が変わった・`--force` |
+| `missing` | 設定が無い |
+| `broken` | 設定か `.ndf/worktree.json` が読めない・設定がスキーマに合わない |
+| `stale` | 解析の記録が無い・解析器のバージョンが古い・入力の指紋かブランチの構成が変わった・`--force` |
 | `fresh` | それ以外 |
 """
 
@@ -25,7 +25,7 @@ from ndf.contracts import facts
 from ndf.adapters import git
 from ndf.domains.records import files, jsonfile
 
-# 解析器の版。測る項目・入力のパスの表を変えたら上げる（上がると check が古いと判定する。旧い project_lib と同じ値）
+# 解析器のバージョン。測る項目・入力のパスの表を変えたら上げる（上がると check が古いと判定する。旧い project_lib と同じ値）
 ANALYZER = 3
 SCHEMA = contracts.schema_path("ndf-settings/project")
 WORKFLOWS = ".github/workflows/*"
@@ -50,7 +50,7 @@ INPUT_NAMES = (
     "buildspec.yml",
     "appspec.yml",
 )
-# ブランチの構成で見る名前（宣言の起点と本番の名前を足す）
+# ブランチの構成で見る名前（設定の起点と本番の名前を足す）
 KNOWN_BRANCHES = ("main", "master", "develop")
 FRESH, MISSING, STALE, BROKEN = "fresh", "missing", "stale", "broken"
 
@@ -93,7 +93,7 @@ def inputs(repo: git.Git, tracked: Optional[dict[str, str]] = None) -> dict[str,
 
 
 def branch_state(repo: git.Git, declared: tuple[str, ...] = ()) -> dict[str, Any]:
-    """origin の HEAD の指す先と、main・master・develop と宣言した名前のうち origin にあるもの。"""
+    """origin の HEAD の指す先と、main・master・develop と定義した名前のうち origin にあるもの。"""
     head_done = repo.attempt("symbolic-ref", "--short", "refs/remotes/origin/HEAD")
     head = head_done.stdout.strip() if head_done.returncode == 0 else ""
     refs_done = repo.attempt("for-each-ref", "--format=%(refname:short)", "refs/remotes/origin")
@@ -117,7 +117,7 @@ def diff(recorded: dict[str, Any], current: dict[str, str]) -> list[str]:
 
 
 def _read(path: Path) -> Optional[dict[str, Any]]:
-    """宣言の JSON の object。無ければ None、読めなければ `JsonFileError`。"""
+    """設定の JSON の object。無ければ None、読めなければ `JsonFileError`。"""
     return jsonfile.read_object(path) if path.is_file() else None
 
 
@@ -136,7 +136,7 @@ def repo_dirs(root: Path) -> tuple[git.Git, Path]:
 
 
 def load(main: Path) -> tuple[Optional[dict[str, Any]], Optional[dict[str, Any]]]:
-    """宣言と `.ndf/worktree.json`。読めない・宣言がスキーマに合わなければ `JsonFileError`。"""
+    """設定と `.ndf/worktree.json`。読めない・設定がスキーマに合わなければ `JsonFileError`。"""
     decl = _read(files.path(main, "project"))
     worktree = _read(files.path(main, "worktree"))
     if decl is not None:
@@ -149,7 +149,7 @@ def load(main: Path) -> tuple[Optional[dict[str, Any]], Optional[dict[str, Any]]
 def _stale_reasons(repo: git.Git, analysis: dict[str, Any], worktree: Optional[dict[str, Any]]) -> list[str]:
     reasons: list[str] = []
     if analysis["analyzer"] < ANALYZER:
-        reasons.append(f"解析器の版が古い（{analysis['analyzer']} < {ANALYZER}）")
+        reasons.append(f"解析器のバージョンが古い（{analysis['analyzer']} < {ANALYZER}）")
     reasons += [f"変わった入力: {p}" for p in diff(analysis["inputs"], inputs(repo))]
     now = branch_state(repo, declared_branches(worktree))
     if analysis["branches"] != now:
@@ -158,17 +158,17 @@ def _stale_reasons(repo: git.Git, analysis: dict[str, Any], worktree: Optional[d
 
 
 def judge(root: Path, force: bool) -> Judged:
-    """宣言が新しい・無い・古い・壊れているのどれかを決める。判定できなければ `CheckError`。"""
+    """設定が新しい・無い・古い・壊れているのどれかを決める。判定できなければ `CheckError`。"""
     repo, main = repo_dirs(root)
     try:
         decl, worktree = load(main)
     except jsonfile.JsonFileError as exc:
         return Judged(BROKEN, [f"{exc}。直してから打ち直す"])
     if decl is None:
-        return Judged(MISSING, ["宣言が無い"])
+        return Judged(MISSING, ["設定が無い"])
     analysis = decl["analysis"] if "analysis" in decl and isinstance(decl["analysis"], dict) else None
     if analysis is None:
-        return Judged(STALE, ["解析の記録（analysis）が無い（手で書いた宣言）"])
+        return Judged(STALE, ["解析の記録（analysis）が無い（手で書いた設定）"])
     reasons = _stale_reasons(repo, analysis, worktree)
     if not reasons and force:
         reasons.append("変わった入力: 強制（--force）")

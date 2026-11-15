@@ -1,4 +1,4 @@
-"""遷移の判断（transition_decide）。DBOS を起こさず、偽の手の実行で判断のループを回す（RF4）。"""
+"""遷移の判断（transition_decide）。DBOS を起動せず、偽の手の実行で判断のループを回す（RF4）。"""
 
 from __future__ import annotations
 
@@ -67,7 +67,7 @@ def test_after_the_retry_limit_the_step_goes_to_on_fail():
 
 
 def test_a_conductor_kind_does_not_go_to_on_fail():
-    """既定の行き先が conductor の種類は on_fail へ進まず、その種類で止まる（行き先の選択を残す）。"""
+    """既定のルートが conductor の種類は on_fail へ進まず、その種類で止まる（ルートの選択を残す）。"""
     plan = _plan({"id": "a", "on_fail": "fix"}, {"id": "fix"})
     acts, final = _drive(plan, {"a": [Outcome("stopped", None)]})
     assert _ran(acts) == ["a"]
@@ -85,7 +85,7 @@ def test_usage_limit_without_retry_after_goes_to_the_human():
 
 
 def test_each_choice_is_kept_in_order():
-    """打ち直し・ステップへの行き先を選ぶたびに、選択を 1 件ずつ足す。"""
+    """打ち直し・ステップへのルートを選ぶたびに、選択を 1 件ずつ足す。"""
     plan = _plan({"id": "a", "on_fail": "fix", "retry": {"ci_pending": {"attempts": 1, "interval": 0}}}, {"id": "fix", "next": "end"})
     stopped = Outcome("stopped", "ci_pending")
     _, final = _drive(plan, {"a": [stopped, stopped]})
@@ -100,7 +100,7 @@ def test_not_applicable_to_end_finishes_ok():
 
 
 def test_resume_runs_the_prelude_before_the_start():
-    """--from が base-sync より後でも、間に入った変更を取り込んでから流す（#3114）。"""
+    """--from が base-sync より後でも、間に入った変更をマージしてから流す（#3114）。"""
     plan = _plan({"id": "base-sync"}, {"id": "impl"}, {"id": "pr"})
     acts, final = _drive(plan, {}, start="pr", prelude=("base-sync",))
     assert _ran(acts) == ["base-sync", "pr"]
@@ -116,7 +116,7 @@ def test_a_stopped_prelude_step_ends_with_its_cause():
 
 
 def test_starting_at_end_finishes_without_running_a_step():
-    """リリースの依頼の答えの後に --from <プラン>=end で続けても止まらない（#3086）。"""
+    """リリースのリクエストの回答の後に --from <プラン>=end で続けても止まらない（#3086）。"""
     acts, final = _drive(_plan({"id": "a"}), {}, start="end")
     assert acts == []
     assert final.status == "ok"

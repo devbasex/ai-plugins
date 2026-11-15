@@ -1,7 +1,7 @@
 """確定仕様化の口: 設計を確定仕様へ溶かした後の用語集の付け替え・文書の作り直し・設計の削除（N8a・#1715）。
 
-正本を決められない語があれば、何も書かずに `spec_decide.SourceError` で止まる（書く前に判定する）。
-コミットに入れるパスは、渡した確定仕様のすべて・用語集の正本と書き直した文書・消した設計である。
+SSOT を決められない語があれば、何も書かずに `spec_decide.SourceError` で止まる（書く前に判定する）。
+コミットに入れるパスは、渡した確定仕様のすべて・用語集の SSOT と書き直した文書・消した設計である。
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ def _texts(root: Path, specs: Sequence[str]) -> dict[str, str]:
 def _rel(root: Path, p: str) -> str:
     """渡したパスをリポジトリの根からの相対パス（`/` 区切り）にそろえる。根の外なら `SpecError`。
 
-    `./issues/d.md` と `issues/d.md` を同じ設計として用語集の `pending_source` と照合するためにそろえる。
+    `./issues/d.md` と `issues/d.md` を同じ設計として用語集の `pending_source` と検証するためにそろえる。
     """
     base = os.path.normpath(os.path.abspath(root))
     target = os.path.normpath(os.path.join(base, os.path.expanduser(p)))
@@ -45,7 +45,7 @@ def _rel(root: Path, p: str) -> str:
 
 
 def finalize(root: Path, specs: Sequence[str], removed: Sequence[str], overrides: Mapping[str, str]) -> list[str]:
-    """用語集の正本を付け替え、文書を作り直し、設計を消して、コミットに入れるパスを返す。
+    """用語集の SSOT を付け替え、文書を作り直し、設計を消して、コミットに入れるパスを返す。
 
     渡したパス（確定仕様・消す設計・`overrides` のファイル）は、リポジトリの根からの相対パスにそろえてから使う。
     """
@@ -66,12 +66,12 @@ def finalize(root: Path, specs: Sequence[str], removed: Sequence[str], overrides
 
 
 def _glossary(root: Path, removed: set[str], texts: Mapping[str, str], overrides: Mapping[str, str]) -> list[str]:
-    """用語集の正本を付け替えて文書を作り直し、書いたパス（正本と文書）を返す。"""
+    """用語集の SSOT を付け替えて文書を作り直し、書いたパス（SSOT と文書）を返す。"""
     lay = glossary.layout(root)
     g = glossary.load(root, lay)
     plan = sd.plan_glossary(g, removed, texts, overrides)
     applied = sd.apply_plan(g, plan) if plan is not None else g
-    # 上限を超えるコンテキストがあれば、正本を書く前に止まる
+    # 上限を超えるコンテキストがあれば、SSOT を書く前に止まる
     gd.render_files(applied, lay)
     if plan is not None:
         (root / lay.source).write_text(json.dumps(applied, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

@@ -41,7 +41,7 @@
             "user",
             "mvv"
           ],
-          "description": "答えた担い手（利用者 user / MVV 判定 mvv。迂回は user だけを数える）"
+          "description": "回答した担い手（利用者 user / MVV 判定 mvv。迂回は user だけを数える）"
         }
       },
       "required": [
@@ -101,11 +101,11 @@
         },
         "--base": {
           "type": "string",
-          "description": "ベースブランチ（宣言 worktree.json の base_branch）"
+          "description": "ベースブランチ（設定 worktree.json の base_branch）"
         },
         "--production": {
           "type": "string",
-          "description": "本番ブランチ（宣言 worktree.json の production_branch）"
+          "description": "本番ブランチ（設定 worktree.json の production_branch）"
         },
         "--channel": {
           "type": "string",
@@ -125,7 +125,7 @@
         },
         "--plugin": {
           "type": "string",
-          "description": "ブランチの名前に版を使うプラグイン（省けば登録の順の先頭）"
+          "description": "ブランチの名前にバージョンを使うプラグイン（省けば登録の順の先頭）"
         }
       },
       "required": [
@@ -235,11 +235,11 @@
         },
         "--base": {
           "type": "string",
-          "description": "ベースブランチ（宣言 worktree.json の base_branch）"
+          "description": "ベースブランチ（設定 worktree.json の base_branch）"
         },
         "--production": {
           "type": "string",
-          "description": "本番ブランチ（宣言 worktree.json の production_branch）"
+          "description": "本番ブランチ（設定 worktree.json の production_branch）"
         },
         "--channel": {
           "type": "string",
@@ -259,7 +259,7 @@
         },
         "--plugin": {
           "type": "string",
-          "description": "ブランチの名前に版を使うプラグイン（省けば登録の順の先頭）"
+          "description": "ブランチの名前にバージョンを使うプラグイン（省けば登録の順の先頭）"
         },
         "--out": {
           "type": "string",
@@ -295,11 +295,11 @@
         },
         "--base": {
           "type": "string",
-          "description": "ベースブランチ（宣言 worktree.json の base_branch）"
+          "description": "ベースブランチ（設定 worktree.json の base_branch）"
         },
         "--production": {
           "type": "string",
-          "description": "本番ブランチ（宣言 worktree.json の production_branch）"
+          "description": "本番ブランチ（設定 worktree.json の production_branch）"
         },
         "--budget": {
           "type": "number",

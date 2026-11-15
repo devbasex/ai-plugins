@@ -1,4 +1,4 @@
-"""launch-args の副命令（claude の起動の引数を結果 JSON で出す）。"""
+"""launch-args のサブコマンド（claude の起動の引数を結果 JSON で出す）。"""
 
 from __future__ import annotations
 

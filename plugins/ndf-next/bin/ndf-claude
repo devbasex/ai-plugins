@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# このプラグインだけを読む claude を起こす（#3409・決定 74）。引数はそのまま claude の後ろへ渡す。
+# このプラグインだけを読む claude を起動する（#3409・決定 74）。引数はそのまま claude の後ろへ渡す。
 #
 #   bin/ndf-claude                                              # 対話のセッション
-#   bin/ndf-claude -p --output-format stream-json --verbose "…"  # 1 回の問い
+#   bin/ndf-claude -p --output-format stream-json --verbose "…"  # 1 回の質問
 #
 # `claude --plugin-dir <このプラグイン>` だけでは、入っている旧い NDF も読まれ、同じ名前の Skill と旧い hook が並ぶ。
 # ここでは旧い NDF を `--settings` の `enabledPlugins` で外し、`--plugin-dir` でこのプラグインを読む。
@@ -18,10 +18,10 @@ while [ -L "$self" ]; do
   self="$(readlink "$self")"
   case "$self" in /*) ;; *) self="$dir/$self" ;; esac
 done
-# 隣のエントリポイント（このファイルの名前から末尾の -claude を外したもの）。名前を文字で持たない（決定 75）
+# 隣のエントリポイント（このファイルの名前から末尾の -claude を外したもの）。名前を文文字列で持たない（決定 75）
 entry="${self%-claude}"
 
-# 結果 JSON を 1 行出して止まる副命令の答えは、そのまま出して同じ終了コードで終わる
+# 結果 JSON を 1 行出して止まるサブコマンドの回答は、そのまま出して同じ終了コードで終わる
 out="$("$entry" launch-args)" || {
   code=$?
   printf '%s\n' "$out"
@@ -35,7 +35,7 @@ if any("\n" in a for a in args):
     sys.exit("改行を含む引数は渡せない")
 print("\n".join(args))
 ')"; then
-  printf '%s\n' "ndf launch-args の答えを読めない: $out" >&2
+  printf '%s\n' "ndf launch-args の回答を読めない: $out" >&2
   exit 2
 fi
 

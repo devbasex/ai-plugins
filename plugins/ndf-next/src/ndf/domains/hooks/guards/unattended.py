@@ -1,7 +1,7 @@
 """人のいない実行（`NDF_FACTORY_RUN`）の Stop の guard（#3242）。
 
-最後の応答が区間の報告の形（表の `params.labels` の行がすべてある）に合わなければ差し戻す。背景の作業が残る Stop は
-差し戻さない。差し戻しはセッションの数え手が理由をまたいで数える（#3345 の決定 92）。
+最後の応答がセグメントの報告の形（表の `params.labels` の行がすべてある）に合わなければ変更を要求する。背景の作業が残る Stop は
+変更を要求しない。変更要求はセッションの数え手が理由をまたいで数える（#3345 の決定 92）。
 """
 
 from __future__ import annotations
@@ -23,4 +23,4 @@ def check(ctx, svc) -> Verdict | None:
     if not missing:
         return None
     form = " / ".join(f"- {label} <中身>" for label in labels)
-    return pushback(f"人のいない実行の区間の報告の形に合わない（無い行: {'・'.join(missing)}）。最後に次の行を書いて終える: {form}")
+    return pushback(f"人のいない実行のセグメントの報告の形に合わない（無い行: {'・'.join(missing)}）。最後に次の行を書いて終える: {form}")

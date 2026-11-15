@@ -3,9 +3,9 @@
 - `slack_call` は Slack の Web API を 1 回呼ぶ。設定は `slack_settings` が環境変数と `.env`（python-dotenv）から読む。
   宛先（`NDF_SLACK_API_BASE`）だけは環境変数からしか読まない（通知の `cwd` の `.env` でトークンの送り先を替えさせない）
 - `drain` は送信待ち（`outbox_dir`）の通知を送る送り手で、排他で 1 つだけ動き、通りうる失敗を打ち直す。
-  副命令 `notify send` がこれを呼ぶ
+  サブコマンド `notify send` がこれを呼ぶ
 
-上限の秒数は呼ぶ側が上限の宣言（`contracts/limits.json`）から引いて渡す。テストは `transport` に
+上限の秒数は呼ぶ側が上限の設定（`contracts/limits.json`）から引いて渡す。テストは `transport` に
 `httpx.MockTransport` を渡し、ネットワークへ出ない。
 
 送信待ちの 1 件は、通知 1 件を 1 ファイル（`<時刻>-<任意>.json`）として一時の名前で書いてから名前を変えたもので、
@@ -109,8 +109,8 @@ def slack_call(
 
 # ---- 送信待ちの 1 件 ----
 
-# 知らせる事象（送信待ちの `kind`）と、本文の先頭に付ける見出し。事象の一覧の正本はスキーマ（notice.schema.json）の
-# kind の enum で、鍵の集合はそれと一致させる（テストが確かめる）
+# 知らせる事象（送信待ちの `kind`）と、本文の先頭に付ける見出し。事象の一覧の SSOT はスキーマ（notice.schema.json）の
+# kind の enum で、キーの集合はそれと一致させる（テストが確かめる）
 KIND_LABELS = {"question": "回答待ち", "approval": "承認待ち", "done": "完了"}
 NOTICE_SCHEMA = contracts.schema_path("notice")
 
@@ -121,7 +121,7 @@ class NoticeError(Exception):
 
 @dataclass(frozen=True)
 class Notice:
-    """送信待ちの 1 件。`key` が同じ通知は重ねて送らない（`window` が真なら上限の宣言の `notify.window` の秒の内だけ）。"""
+    """送信待ちの 1 件。`key` が同じ通知は重ねて送らない（`window` が真なら上限の設定の `notify.window` の秒の内だけ）。"""
 
     kind: str
     key: str
@@ -156,16 +156,16 @@ def read_notice(path: Path) -> Notice:
 
 # ---- 送り手 ----
 
-# 送信待ちの置き場（状態の置き場からの相対）
+# 送信待ちの保存先（状態の保存先からの相対）
 OUTBOX_PARTS = ("hooks", "outbox")
-# 送り手が 1 つだけ動くための排他のファイル・送ったキーの記録・送れなかった 1 件の置き場
+# 送り手が 1 つだけ動くための排他のファイル・送ったキーの記録・送れなかった 1 件の保存先
 _LOCK = ".sender.lock"
 _SENT = ".sent.json"
 _UNSENT = "unsent"
 
 
 def outbox_dir(state_dir: Path) -> Path:
-    """状態の置き場の下の送信待ちの置き場。"""
+    """状態の保存先の下の送信待ちの保存先。"""
     return state_dir.joinpath(*OUTBOX_PARTS)
 
 
@@ -242,7 +242,7 @@ def _honor_retry_after(backoff: tenacity.wait.wait_base) -> Callable[[tenacity.R
 
 
 def _retrying(sleep: Callable[[float], None]) -> tenacity.Retrying:
-    """通りうる失敗（`PostError.retryable`）だけを、上限の宣言の `notify.send` の回数と間隔で打ち直す。
+    """通りうる失敗（`PostError.retryable`）だけを、上限の設定の `notify.send` の回数と間隔で打ち直す。
 
     応答が `Retry-After` を付けていれば、その秒より早くは打ち直さない（Slack の rate limit の仕様）。
     """
@@ -394,7 +394,7 @@ def _report(out: Drained) -> dict[str, Any]:
 
 
 def main(argv: list[str]) -> int:
-    """`ndf notify send`: 状態の置き場の送信待ちを Slack へ送る（hook が切り離して起動する送り手）。"""
+    """`ndf notify send`: 状態の保存先の送信待ちを Slack へ送る（hook が切り離して起動する送り手）。"""
     if argv != ["send"]:
         return result.emit(result.stopped(TOOL, "invalid", f"使い方: notify send（受けた引数: {' '.join(argv)}）"))
     ident = identity.load()

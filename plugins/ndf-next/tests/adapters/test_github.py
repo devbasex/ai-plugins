@@ -90,7 +90,7 @@ def test_merge_refuses_moved_head_without_sending_merge() -> None:
 
 def test_merge_refuses_undecided_premerge_risk() -> None:
     # #2602: 本文の「マージの前に決める」残リスクを、決めた記録なしにマージしない
-    body = "## 残リスク\n\n- [ ] 残リスク: テストの照合が止まっている。マージの前に決める\n"
+    body = "## 残リスク\n\n- [ ] 残リスク: テストの検証が止まっている。マージの前に決める\n"
     server = Server({("GET", f"/repos/{REPO}/pulls/7"): [httpx.Response(200, json=_pull(body=body))]})
     out = _hub(server).merge(7)
     assert (out.merged, out.kind) == (False, "refused")
@@ -99,7 +99,7 @@ def test_merge_refuses_undecided_premerge_risk() -> None:
 
 
 def test_merge_proceeds_when_premerge_risk_is_checked() -> None:
-    body = "- [x] 残リスク: テストの照合が止まっている。マージの前に決める（続けると決めた）\n"
+    body = "- [x] 残リスク: テストの検証が止まっている。マージの前に決める（続けると決めた）\n"
     server = Server({
         ("GET", f"/repos/{REPO}/pulls/7"): [httpx.Response(200, json=_pull(body=body))],
         ("PUT", f"/repos/{REPO}/pulls/7/merge"): [httpx.Response(200, json={"merged": True})],
@@ -184,7 +184,7 @@ def test_merge_raises_on_server_error() -> None:
 
 
 def test_rate_limit_carries_retry_after() -> None:
-    # REST の枠が上限なら GraphQL の枠で読み替える（不足 g）。読み替えた先も上限なら、その回復までの秒を持って止まる
+    # REST のスロットが上限なら GraphQL のスロットで読み替える（不足 g）。読み替えた先も上限なら、その回復までの秒を持って止まる
     limited = httpx.Response(403, json={"message": "rate"}, headers={"x-ratelimit-remaining": "0", "x-ratelimit-reset": "9999999999"})
     server = Server({("GET", f"/repos/{REPO}/pulls/7"): [limited], ("POST", "/graphql"): [limited]})
     with pytest.raises(github.GitHubError) as err:
@@ -317,7 +317,7 @@ def test_job_log_returns_text() -> None:
 @pytest.mark.parametrize(
     ("body", "risks"),
     [
-        ("残リスク: 照合が止まっている。マージの前に決める", ["残リスク: 照合が止まっている。マージの前に決める"]),
+        ("残リスク: 検証が止まっている。マージの前に決める", ["残リスク: 検証が止まっている。マージの前に決める"]),
         ("- [ ] 残リスク: A。マージの前に決める", ["- [ ] 残リスク: A。マージの前に決める"]),
         ("- [x] 残リスク: A。マージの前に決める", []),
         ("残リスク: リリースの後に確かめる", []),
@@ -356,7 +356,7 @@ def _unreachable(request: httpx.Request) -> httpx.Response:
 @pytest.mark.parametrize(
     ("handler", "rest_detail", "graphql_detail", "status", "has_retry"),
     [
-        (_rate_limited_response, "GitHub の上限（rest の枠）: GET /x", "GitHub の上限（graphql の枠）: graphql", 403, True),
+        (_rate_limited_response, "GitHub の上限（rest のスロット）: GET /x", "GitHub の上限（graphql のスロット）: graphql", 403, True),
         (_server_error, 'GitHub が断った（500）: GET /x: {"message":"boom"}', "GitHub が断った（500）: graphql", 500, False),
         (_unreachable, "GitHub へ届かない: GET /x: down", "GitHub へ届かない: graphql: down", 0, False),
     ],
@@ -545,7 +545,7 @@ def _limited(request: httpx.Request) -> httpx.Response:
 
 
 def test_pull_reads_through_graphql_when_the_rest_quota_is_exhausted() -> None:
-    # 不足 g: REST の枠が上限なら、代われる読み取り（PR の状態）を GraphQL の枠で読む
+    # 不足 g: REST のスロットが上限なら、代われる読み取り（PR の状態）を GraphQL のスロットで読む
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/graphql":
             return httpx.Response(200, json={"data": {"repository": {"a0": _pr_node(7)}}})
@@ -568,7 +568,7 @@ def test_pulls_read_through_rest_when_the_graphql_quota_is_exhausted() -> None:
 
 
 def test_default_client_falls_back_without_waiting_for_the_rate_limit_reset() -> None:
-    # 既定のクライアント（remaining を省く）は上限の解除（9999999999 秒後）まで眠らず、すぐに REST の枠へ読み替える
+    # 既定のクライアント（remaining を省く）は上限の解除（9999999999 秒後）まで眠らず、すぐに REST のスロットへ読み替える
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/graphql":
             return _limited(request)
@@ -640,7 +640,7 @@ def test_pick_merge_method(declared: str | None, allowed: list[str], chosen: str
 
 
 def test_merge_methods_keep_their_order_and_landing_checks() -> None:
-    # 現状固定: 宣言が無いときに選ぶ順と、方式ごとの「基底に含まれたか」の確かめ方
+    # 現状固定: 設定が無いときに選ぶ順と、方式ごとの「基底に含まれたか」の確かめ方
     assert list(github.MERGE_METHODS.items()) == [("squash", github.MERGED), ("merge", github.ANCESTRY), ("rebase", github.MERGED)]
 
 
@@ -726,7 +726,7 @@ def test_allowed_merge_methods_encodes_the_branch_name() -> None:
 
 
 def test_merge_uses_the_method_the_ruleset_allows() -> None:
-    # 3378-2: 宣言が無ければ、基底のブランチの ruleset が許す方式でマージする
+    # 3378-2: 設定が無ければ、基底のブランチの ruleset が許す方式でマージする
     rules = [{"type": "pull_request", "parameters": {"allowed_merge_methods": ["merge"]}}]
     server = Server({
         ("GET", f"/repos/{REPO}/pulls/7"): [httpx.Response(200, json=_pull())],
@@ -772,7 +772,7 @@ def test_merge_refuses_a_declared_method_the_branch_does_not_allow() -> None:
 
 
 def _squashed_repo(tmp_path: Path) -> tuple[git.Git, str]:
-    """feat の 2 コミットを develop へ squash で取り込んだリポジトリと、feat の先端の SHA。"""
+    """feat の 2 コミットを develop へ squash でマージしたリポジトリと、feat の先端の SHA。"""
     git_sandbox.sh(tmp_path, "init", "-q", "-b", "develop", strip=True)
     git_sandbox.sh(tmp_path, "config", "user.email", "t@example.invalid", strip=True)
     git_sandbox.sh(tmp_path, "config", "user.name", "t", strip=True)
@@ -794,7 +794,7 @@ def _squashed_repo(tmp_path: Path) -> tuple[git.Git, str]:
     ("method", "merged", "landed"), [("squash", True, True), ("rebase", True, True), ("squash", False, False), ("merge", True, False)]
 )
 def test_landed_reads_each_merge_method_in_its_own_way(tmp_path: Path, method: str, merged: bool, landed: bool) -> None:
-    # 3378-2: squash・rebase で取り込んだ head は基底の祖先にならない。含まれたかは PR のマージ済みで読む
+    # 3378-2: squash・rebase でマージした head は基底の祖先にならない。含まれたかは PR のマージ済みで読む
     repo, head = _squashed_repo(tmp_path)
     pull = github.Pull.from_rest({**_pull(head=head, merged=merged)})
     assert not repo.is_ancestor(head, "develop")

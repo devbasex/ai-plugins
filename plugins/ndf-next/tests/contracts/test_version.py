@@ -30,7 +30,7 @@ def test_contract_change_needs_a_version_bump(contracts_copy, rel, change):
     before = version.current()
     contracts_copy(rel, change)
     errs = version.errors()
-    assert len(errs) == 1 and "版を上げて" in errs[0]
+    assert len(errs) == 1 and "バージョンを上げて" in errs[0]
     contracts_copy("version.json", _bump)
     assert version.errors() == []
     assert version.current() == before + 1

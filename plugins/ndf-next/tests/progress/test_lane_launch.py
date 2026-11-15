@@ -1,4 +1,4 @@
-"""レーンの conductor を起こす最初の入力と、名前つきのラッパーでの起動（#3097）。"""
+"""レーンの conductor を起動する最初の入力と、名前つきのラッパーでの起動（#3097）。"""
 
 from __future__ import annotations
 
@@ -107,9 +107,9 @@ def test_prompt_carries_the_commands_as_json():
 
 
 def test_spawn_names_the_wrapper_after_the_plan_and_the_lane(tmp_path):
-    run, calls = _fake_run(stdout=json.dumps({"tool": "relay", "status": "ok", "summary": "起こした"}) + "\n")
+    run, calls = _fake_run(stdout=json.dumps({"tool": "relay", "status": "ok", "summary": "起動した"}) + "\n")
     got = launch.spawn("o/r", "p6", "a", tmp_path, "入力", run=run)
-    assert got == {"ok": True, "detail": "起こした"}
+    assert got == {"ok": True, "detail": "起動した"}
     argv = calls[0]
     assert (
         argv[1:3] == ["relay", "spawn"] and argv[argv.index("--name") + 1] == launch.wrapper_name("o/r", "p6", "a") and argv[-1] == "入力"
@@ -136,9 +136,9 @@ def test_spawn_passes_the_whole_argv_and_the_run_options(tmp_path):
 
     def run(argv, **kwargs):
         calls.append((argv, kwargs))
-        return subprocess.CompletedProcess(argv, 0, "ログ\n" + json.dumps({"status": "ok", "summary": "起こした"}) + "\n", "")
+        return subprocess.CompletedProcess(argv, 0, "ログ\n" + json.dumps({"status": "ok", "summary": "起動した"}) + "\n", "")
 
-    assert launch.spawn("o/r", "p6", "a", tmp_path, "入力", run=run) == {"ok": True, "detail": "起こした"}
+    assert launch.spawn("o/r", "p6", "a", tmp_path, "入力", run=run) == {"ok": True, "detail": "起動した"}
     argv, kwargs = calls[0]
     assert argv == [
         str(identity.entrypoint(identity.ROOT)),
@@ -187,7 +187,7 @@ def test_spawn_reads_the_last_line_as_it_is_now(tmp_path, stdout, stderr, code, 
             1,
             {"ok": False, "detail": "後"},
         ),
-        ("ログ\n" + json.dumps({"status": "ok", "summary": "起こした"}) + "\n\n", "", 0, {"ok": True, "detail": "起こした"}),
+        ("ログ\n" + json.dumps({"status": "ok", "summary": "起動した"}) + "\n\n", "", 0, {"ok": True, "detail": "起動した"}),
         # 最後の行が壊れていれば、前の行が読めても壊れた出力と同じ扱い
         (json.dumps({"status": "ok", "summary": "前"}) + "\n壊れた", "エラー", 1, {"ok": False, "detail": "エラー"}),
         # 空白だけの出力は空の出力と同じ扱い
@@ -226,13 +226,13 @@ def test_probe_reads_only_the_last_line_as_an_object_as_it_is_now(stdout, got):
 
 def test_spawn_reports_the_os_error_in_the_detail(tmp_path):
     run, _ = _fake_run(error=PermissionError("denied"))
-    assert launch.spawn("o/r", "p6", "a", tmp_path, "入力", run=run) == {"ok": False, "detail": "ラッパーを起こせない: denied"}
+    assert launch.spawn("o/r", "p6", "a", tmp_path, "入力", run=run) == {"ok": False, "detail": "ラッパーを起動できない: denied"}
 
 
 def test_spawn_uses_subprocess_run_when_no_runner_is_given(tmp_path, monkeypatch):
-    run, calls = _fake_run(stdout=json.dumps({"status": "ok", "summary": "起こした"}))
+    run, calls = _fake_run(stdout=json.dumps({"status": "ok", "summary": "起動した"}))
     monkeypatch.setattr(subprocess, "run", run)
-    assert launch.spawn("o/r", "p6", "a", tmp_path, "入力") == {"ok": True, "detail": "起こした"}
+    assert launch.spawn("o/r", "p6", "a", tmp_path, "入力") == {"ok": True, "detail": "起動した"}
     assert calls[0][-1] == "入力"
 
 
@@ -248,7 +248,7 @@ def _version(base, name, mtime):
 
 
 def test_a_removed_version_dir_launches_with_the_newest_version_and_leaves_a_line(tmp_path, monkeypatch, capsys):
-    """起こした版の置き場がプラグインの更新で消えても、同じ親の下の最も新しい版でレーンを起こし、切り替えた 1 行を
+    """起動したバージョンの保存先がプラグインの更新で消えても、同じ親の下の最も新しいバージョンでレーンを起動し、切り替えた 1 行を
     残す（#2583 の条件 17・18。更新を 2 回行った後を模す）。"""
     from ndf import identity
 
@@ -259,7 +259,7 @@ def test_a_removed_version_dir_launches_with_the_newest_version_and_leaves_a_lin
 
     def run(argv, **kw):
         seen.append(argv)
-        return subprocess.CompletedProcess(argv, 0, json.dumps({"status": "ok", "summary": "起こした"}) + "\n", "")
+        return subprocess.CompletedProcess(argv, 0, json.dumps({"status": "ok", "summary": "起動した"}) + "\n", "")
 
     assert launch.spawn("o/r", "p6", "a", tmp_path, "入力", run=run)["ok"]
     assert seen[0][0] == str(newest / "bin" / "ndf")
@@ -276,7 +276,7 @@ def test_a_present_version_dir_is_used_as_it_is(tmp_path, monkeypatch, capsys):
     assert launch.entry() == own / "bin" / "ndf" and capsys.readouterr().err == ""
 
 
-# --- _probe 経由の副命令の読みの現状固定（正常・status 違い・末尾が JSON でない・打てない） ------------------
+# --- _probe 経由のサブコマンドの読みの現状固定（正常・status 違い・末尾が JSON でない・打てない） ------------------
 
 _LISTED = {"name": "w", "running": True}
 

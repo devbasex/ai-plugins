@@ -11,7 +11,7 @@ allowed-tools:
 
 # PR作成
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `ask.py`（P2）・`pr-body-decisions.sh`（M7）・`pr-steps.py`（M1）・`projects-sync.sh`（M7）・`release-steps.py`（M2）・`revise-note.py`（P2）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトのサブコマンドは新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `ask.py`（P2）・`pr-body-decisions.sh`（M7）・`pr-steps.py`（M1）・`projects-sync.sh`（M7）・`release-steps.py`（M2）・`revise-note.py`（P2）。移行先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 このプロジェクトのコードを commit, push し、GitHub で Pull Request を作る。既に PR があれば本文を最新の変更内容に書き直す。
 
@@ -24,7 +24,7 @@ allowed-tools:
 
 ## push / PR 作成前の同意取得（必須）
 
-push と PR 作成は取り消しに追加の操作が要る書き込みである。自然文の依頼でも起動するため、この手順で守る。
+push と PR 作成は取り消しに追加の操作が要る書き込みである。自然文のリクエストでも起動するため、この手順で守る。
 
 **手順 3（push）と手順 4（PR 作成）の直前に、`plan` の結果から次を提示する。**
 
@@ -35,8 +35,8 @@ push と PR 作成は取り消しに追加の操作が要る書き込みであ�
 
 同意の扱い:
 
-- 依頼が push と PR 作成まで明示的に含む（`/ndf:pr` の明示起動、「コミットしてPRを作って」等）なら、
-  依頼を同意とみなす。提示は行い、結果報告に含める
+- リクエストが push と PR 作成まで明示的に含む（`/ndf:pr` の明示起動、「コミットしてPRを作って」等）なら、
+  リクエストを同意とみなす。提示は行い、結果報告に含める
 - 作業の流れで暗黙に起動したとき、push 先が fork・他のリポジトリなら、提示したうえで**明示的な同意を得てから push する**
   （`AskUserQuestion` の `metadata.source` は `ndf-ask:redline:C5`）。同意が無ければ commit までで止める
 - 暗黙に起動して push 先が開発対象と同じリポジトリなら、問わずに AI が決める（`ask.py decide --question` で記録する）
@@ -96,19 +96,19 @@ credential helper が応答しない環境の退避（`gh auth git-credential` �
 **`standard` の実装 PR は `## 設計と違う点` の節を持つ。** 完了判定の設計との突き合わせ（`quality-gates` の
 `references/design-match.md`）で見つけた、設計の決定・設計に名前の出るテスト・既存の確定仕様・受け入れ条件と実装の
 違いを「| 設計の箇所 | 違い | 理由 |」の表で並べる。違いが無ければ「- 無し」、設計文書が無ければ
-「- 該当なし（設計文書が無い）」と書く。`template --mode standard` が雛形を書き、`create` / `update` に
+「- 該当なし（設計文書が無い）」と書く。`template --mode standard` がテンプレートを書き、`create` / `update` に
 `--mode standard` を渡すと、節の無い本文では `next` が節を足すよう求める（設計 PR は対象にしない）。
 
-**`## 利用者向けの変化` はリリースの CHANGELOG の版の節へそのまま載る**（`release-steps.py notes` が組む）。
+**`## 利用者向けの変化` はリリースの CHANGELOG のバージョンの節へそのまま載る**（`release-steps.py notes` が組む）。
 利用者に何ができるようになるか・使い方が変わる点を箇条書きにし、今の決まりだけを書く。見える変化が無ければ
 「- 無し」と書く（リリースの説明文は題名で代わる）。節の無い本文では、`create` / `update` の `next` が節を足すよう求める。
 
-**`## 移行の手順` は CHANGELOG の版の節の `### 移行の手順` へ載る。** 利用者が新しい版へ移るときに自分で行う操作
+**`## 移行の手順` は CHANGELOG のバージョンの節の `### 移行の手順` へ載る。** 利用者が新しいバージョンへ移るときに自分で行う操作
 （引数の置き換え・認証のし直し・導入し直し）を、プラグインの名前を添えて箇条書きにする。操作が要らなければ
 「- 無し」と書く。プラグインの名前に触れる箇条は、デプロイでそのプラグインの上げ幅の候補を MAJOR にする。要求の
-「公開インタフェース」の行に互換なしの印がある課題では、要求の移行性の行を手順にする。
+「公開インタフェース」の行に互換なしのフラグがある課題では、要求の移行性の行を手順にする。
 
-**`## 置き換える箇条`（任意）は、同じ版の前の PR の「利用者向けの変化」の箇条を CHANGELOG と承認資料から外す。**
+**`## 置き換える箇条`（任意）は、同じバージョンの前の PR の「利用者向けの変化」の箇条を CHANGELOG と承認資料から外す。**
 この PR が前の PR の振る舞いを変えたときに書き、前の PR の本文は直さない。書き方は `release` の
 `references/release-steps.md` の「置き換える箇条」にある。
 
@@ -149,8 +149,8 @@ URL は最終行に生のまま置く（Markdown リンクにすると利用者�
 
 | 宛て先 | 何の Pull Request か | コードレビュー | `metrics` |
 | --- | --- | --- | --- |
-| `sprint/<名前>` | 課題の Pull Request。課題の worktree からスプリントブランチへ集める | 通さない。緑になったらスプリントブランチへ取り込む | `target: sprint` / `review: false` |
-| `sprint/<名前>`（並列の計画のレーンで、課題のまとまりの記録があるスプリント） | まとまりの Pull Request。まとまり 1 つにつき 1 本で、代表の課題の番号のブランチから出す | 通す（そのまとまりの差分だけを範囲にした `cross-review`）。収束してからスプリントブランチへ取り込む | `target: sprint` / `review: true` |
+| `sprint/<名前>` | 課題の Pull Request。課題の worktree からスプリントブランチへ集める | 通さない。緑になったらスプリントブランチへマージする | `target: sprint` / `review: false` |
+| `sprint/<名前>`（並列の計画のレーンで、課題のまとまりの記録があるスプリント） | まとまりの Pull Request。まとまり 1 つにつき 1 本で、代表の課題の番号のブランチから出す | 通す（そのまとまりの差分だけを範囲にした `cross-review`）。収束してからスプリントブランチへマージする | `target: sprint` / `review: true` |
 | ベースブランチ（worktree の設定の `base_branch`） | スプリントの Pull Request（スプリントで 1 本）か、スプリントブランチを経ない単独の Pull Request | 通す（リファクタリング・`cross-review`・完了判定を 1 回）。まとまりの記録があるスプリントの Pull Request は `cross-review` を回さず、リファクタリングと完了判定だけを通す | `target: base` / `review: true` |
 
 課題の Pull Request は `--base sprint/<名前>` で出す。スプリントの Pull Request は、
@@ -167,7 +167,7 @@ URL は最終行に生のまま置く（Markdown リンクにすると利用者�
 **宛先が既定ブランチの Pull Request では、`pr-steps.py create` / `update` が本文の closing keywords を閉じる予定の参照
 （`最終工程の後に閉じる: #<番号>`）へ置き換えてから送る。** 書く側は closing keywords で書いてよい。置き換えた
 指し先は結果の `metrics.deferred_closing` に載る。課題を閉じる時点と閉じる予定の参照の形は `progress-tracking` の
-「スプリントを閉じる」が正本である。
+「スプリントを閉じる」が SSOT である。
 
 ## 設計 Pull Request の本文
 
@@ -213,5 +213,5 @@ URL は最終行に生のまま置く（Markdown リンクにすると利用者�
 - `/ndf:deploy` — 環境ブランチへのデプロイPR（ブランチ全体）
 - `/ndf:pr-tests` — Test Plan 自動実行
 - `/ndf:pr-review` — PR単位レビュー
-- `/ndf:merged` — マージ後のブランチ整理 / 現ブランチにベースブランチを取り込み
+- `/ndf:merged` — マージ後のブランチ整理 / 現ブランチにベースブランチをマージ
 - `/ndf:release` — リリース。**本番系へ届く操作の承認の規則を持つ**

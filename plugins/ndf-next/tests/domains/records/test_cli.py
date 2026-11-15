@@ -1,4 +1,4 @@
-"""副命令 `ndf records` の結果 JSON（表の 1 行・閉じる条件・引継ぎ文書）。"""
+"""サブコマンド `ndf records` の結果 JSON（表の 1 行・閉じる条件・引継ぎ文書）。"""
 
 from __future__ import annotations
 
@@ -105,7 +105,7 @@ def test_mvv_answer_refuses_a_non_object_input(mvv_repo: Path, capsys, last_resu
     for stdin in ("壊れた", "[1]", ""):
         code, got = _answer(monkeypatch, capsys, last_result, mvv_repo, stdin)
         assert code != 0 and got["cause"]["kind"] == "invalid" and got["items"] == []
-        assert got["summary"] == "承認ゲートの答え（標準入力の JSON object）が無い"
+        assert got["summary"] == "承認ゲートの回答（標準入力の JSON object）が無い"
 
 
 def test_mvv_answer_writes_only_an_override_and_signals_count_it(
@@ -136,4 +136,4 @@ def test_mvv_answer_writes_only_an_override_and_signals_count_it(
 def test_mvv_signals_stops_when_the_base_branch_has_no_ndf_settings(mvv_repo: Path, capsys, last_result) -> None:
     code, got = _run(capsys, last_result, "--cwd", str(mvv_repo), "mvv", "signals", "--base", "none")
     assert code == 3 and got["status"] == "stopped" and got["cause"]["kind"] == "precondition"
-    assert got["summary"].startswith("origin/none の MVV の宣言を読めない: ")
+    assert got["summary"].startswith("origin/none の MVV の設定を読めない: ")

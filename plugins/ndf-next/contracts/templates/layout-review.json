@@ -1,7 +1,7 @@
 {
   "template": "layout-review",
   "purpose": "layout_review",
-  "summary": "体裁レビュー: worker が出した版（入力の version）の体裁を確かめる",
+  "summary": "体裁レビュー: worker が出したバージョン（入力の version）の体裁を確かめる",
   "params": ["repo", "worker"],
   "plan": {
     "name": "layout-review",

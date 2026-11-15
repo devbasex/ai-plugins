@@ -1,6 +1,6 @@
 """作業マシンの CPU とメモリの読み取り（#2711 の構成要素「プロセスの読み取り」）。
 
-cgroup の上限があればその値で絞る。上限は、このプロセスが属する cgroup とその祖先の全部の段から読む。読めない値は None を返し、呼ぶ側は測れなかったとして扱う（I8）。
+cgroup の上限があればその値で絞る。上限は、このプロセスが属する cgroup とその祖先の全部のステップから読む。読めない値は None を返し、呼ぶ側は測れなかったとして扱う（I8）。
 cgroup・OOM Killer の回数・OOM の優先度は Linux だけで働く。
 """
 
@@ -46,7 +46,7 @@ def cgroup_dirs(
 ) -> tuple[Path, ...]:
     """このプロセスが属する cgroup v2 のディレクトリと、マウントの根までの祖先（葉から根の順）。
 
-    祖先の上限も子へ効くので、上限は全部の段の小さい方を採る。所属先を解決できなければ `root` だけを返す。
+    祖先の上限も子へ効くので、上限は全部のステップの小さい方を採る。所属先を解決できなければ `root` だけを返す。
     """
     mount = _cgroup_mount(mountinfo)
     mount_root, mount_point = mount if mount is not None else ("/", root)
@@ -83,7 +83,7 @@ def cgroup_memory_limit(cgroups: tuple[Path, ...] | None = None) -> int | None:
 
 
 def cgroup_memory_remaining(cgroups: tuple[Path, ...] | None = None) -> int | None:
-    """cgroup v2 の上限までの残り（バイト）。祖先を含め一番少ない段の値。上限が無いか読めなければ None。"""
+    """cgroup v2 の上限までの残り（バイト）。祖先を含め一番少ないステップの値。上限が無いか読めなければ None。"""
     remaining: list[int | None] = []
     for d in _resolve(cgroups):
         limit, current = _read_int(d / "memory.max"), _read_int(d / "memory.current")

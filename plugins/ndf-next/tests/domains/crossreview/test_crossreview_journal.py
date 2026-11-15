@@ -1,4 +1,4 @@
-"""指摘の台帳（drive.FindingJournal）の規則。外部の起動・git を使わずに確かめる。"""
+"""指摘のジャーナル（drive.FindingJournal）の規則。外部の起動・git を使わずに確かめる。"""
 
 from __future__ import annotations
 

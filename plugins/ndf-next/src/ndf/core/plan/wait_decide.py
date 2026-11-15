@@ -3,7 +3,7 @@
 `ndf plan wait` は流れているプランを見回り、人の手が要るもの（止まった・承認ゲート）を種類つきで返す。
 結果の各行は止まりなら `cause`、承認ゲートなら `gate: true` と `routes` を持ち、`next` には続きの待ちを打つコマンドを
 載せる。読み手は文でなく `status`・`cause.kind`・`next` で次の手を決める。
-`routes` と `next` の値はそのまま打てるコマンド（`result.command` の形）である。結果の `routes` の鍵は答えの語彙だけを持つため、
+`routes` と `next` の値はそのまま打てるコマンド（`result.command` の形）である。結果の `routes` のキーは回答の語彙だけを持つため、
 承認ゲートが 2 本以上あれば結果の `routes` は先頭の 1 本の分にし、各行の `routes` にそれぞれの分を残す。
 """
 
@@ -17,7 +17,7 @@ from ndf.contracts.exit_codes import GATE, OK, STOPPED
 
 
 class Watched(NamedTuple):
-    """見回った 1 本。`status` は終わっていなければ None。`routes` は承認ゲートの答えごとのコマンド。"""
+    """見回った 1 本。`status` は終わっていなければ None。`routes` は承認ゲートの回答ごとのコマンド。"""
 
     name: str
     status: Optional[str]
@@ -45,7 +45,7 @@ def settled(found: Sequence[Watched]) -> bool:
 def gate_routes(head_routes: Optional[Mapping[str, Any]], again: dict[str, Any]) -> dict[str, Any]:
     """承認ゲートの結果の routes。routes を持つ先頭の 1 本の分にする。
 
-    答えを持たない待ち（承認ゲート・流していないプラン）は、答えの語彙の「同じ作業を打ち直す」で打ち直す。
+    回答を持たない待ち（承認ゲート・流していないプラン）は、回答の語彙の「同じ作業を打ち直す」で打ち直す。
     """
     return dict(head_routes) if head_routes else {"retry": again}
 

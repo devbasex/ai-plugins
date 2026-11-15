@@ -1,4 +1,4 @@
-"""開発ループの判断の関数（周の結果・選定・持ち主の鍵・止める要求・ゲートの答え）。"""
+"""開発ループの判断の関数（周の結果・選定・オーナーのキー・止める要求・ゲートの回答）。"""
 
 from __future__ import annotations
 
@@ -52,7 +52,7 @@ def test_lap_outcome_prefers_release_facts(facts: lap_decide.LapFacts, outcome: 
     got, why = lap_decide.lap_outcome(facts)
     assert got == outcome
     if facts.released and facts.failed:
-        assert "失敗の印" in why
+        assert "失敗のマーカー" in why
 
 
 def test_failure_streak_skips_held_laps() -> None:
@@ -66,7 +66,7 @@ def test_failure_streak_skips_held_laps() -> None:
 
 
 def test_issue_2722_first_issue_survives_backlog_wait() -> None:
-    """直して出し直すと答えた課題は、棚卸しの判断待ちの印があっても選定に残る。前のループの判断待ちは外す。"""
+    """直して出し直すと回答した課題は、棚卸しの判断待ちのマーカーがあっても選定に残る。前のループの判断待ちは外す。"""
     rows = [sel.Row(5, waiting=True), sel.Row(6, prior=True), sel.Row(7, waiting=True)]
     facts = sel.ExclusionFacts(first=(5, 6), size=3)
     got = sel.select(rows, facts)
@@ -75,7 +75,7 @@ def test_issue_2722_first_issue_survives_backlog_wait() -> None:
 
 
 def test_issue_2746_skipped_rows_do_not_use_capacity() -> None:
-    """外す理由のある行は枠を使わず、後ろの選べる行が枠に入る。"""
+    """外す理由のある行はスロットを使わず、後ろの選べる行がスロットに入る。"""
     rows = [sel.Row(1, blocked="未回答"), sel.Row(2, needs=(9,)), sel.Row(3), sel.Row(4), sel.Row(5)]
     got = sel.select(rows, sel.ExclusionFacts(size=2))
     assert got.chosen == (3, 4)
@@ -119,7 +119,7 @@ def test_issue_2132_created_issues_are_recorded_and_left_out_next_lap() -> None:
 
 
 def test_issue_2820_stop_request_keeps_the_lease_until_the_boundary() -> None:
-    """止める要求は鍵を返さず、周の途中でほかのセッションは入れない。鍵は周の境で返す。"""
+    """止める要求はキーを返さず、周の途中でほかのセッションは入れない。キーは周の境で返す。"""
     running = _running((1,))
     state = _apply(running, ctl.stop(running, _ctx(None), "human", "今日は終わり", False))
     assert state.status == rec.STOPPING and state.holder == "s1"
@@ -166,7 +166,7 @@ def _gated(head: str = "a" * 40) -> rec.LoopState:
 
 
 def test_issue_2714_moved_head_refuses_the_answer() -> None:
-    """答えの先端がゲートを出した先端と違えば、答えを書かずに資料の出し直しへ向ける。"""
+    """回答の先端がゲートを出した先端と違えば、回答を書かずに資料の出し直しへ向ける。"""
     state = _gated()
     d = ctl.answer(state, _ctx(), 77, "approved", "b" * 40, "")
     assert d.kind == ctl.PRECONDITION and not d.events
@@ -192,7 +192,7 @@ def test_issue_2400_revise_answer_is_kept_as_a_rejection() -> None:
     ],
 )
 def test_refusals_carry_kind_and_next(given: Any, make: Any, kind: str, verb: str) -> None:
-    """断りは止まった理由の種類と、打てる次の 1 手を持つ（SF11）。"""
+    """断りは停止理由の種類と、打てる次の 1 手を持つ（SF11）。"""
     d = make(given())
     assert d.kind == kind
     assert d.next is not None and d.next.args[0] == verb
@@ -242,7 +242,7 @@ def _two_laps() -> rec.LoopState:
     ],
 )
 def test_lap_events_change_only_the_named_lap(ev: dict[str, Any], want: dict[str, Any]) -> None:
-    """周に付く事象は番号の周だけを変え、ほかの周と状態の鍵はそのまま残す。"""
+    """周に付く事象は番号の周だけを変え、ほかの周と状態のキーはそのまま残す。"""
     before = _two_laps()
     after = rec.apply(before, ev)
     assert after.laps[0] == before.laps[0]
@@ -319,7 +319,7 @@ def _kinds(d: ctl.Decision) -> list[str]:
 
 
 def test_close_lap_events_order_and_fields() -> None:
-    """出した版（記録に無いものだけ・重複なし）→ 締め → 鍵の延長の順に、今の時刻で事象を並べる。"""
+    """出したバージョン（記録に無いものだけ・重複なし）→ 締め → キーの延長の順に、今の時刻で事象を並べる。"""
     state = _running((1,))
     state = _apply(state, ctl.released(state, _ctx(), "1.0"))
     d = ctl.close_lap(state, _ctx(now=40.0), lap_decide.LapFacts(released=("1.0", "2.0", "2.0", "3.0")), TTL)
@@ -329,9 +329,9 @@ def test_close_lap_events_order_and_fields() -> None:
     assert all(ev["at"] == 40.0 for ev in d.events)
     assert all(ev["lap"] == 1 for ev in d.events[:3])
     closed = d.events[2]
-    assert closed["outcome"] == rec.DONE and closed["reason"] == "版をリリースした（1.0・2.0・3.0）"
+    assert closed["outcome"] == rec.DONE and closed["reason"] == "バージョンをリリースした（1.0・2.0・3.0）"
     assert d.events[3]["session"] == "s1" and d.events[3]["until"] == 40.0 + TTL
-    assert d.summary == "周 1 を完了で締めた: 版をリリースした（1.0・2.0・3.0）"
+    assert d.summary == "周 1 を完了で締めた: バージョンをリリースした（1.0・2.0・3.0）"
     assert d.metrics == {"lap": 1, "outcome": rec.DONE, "streak": 0}
     assert _argv(d.next) == ("select",) and d.next is not None and d.next.session
     after = _apply(state, d)
@@ -344,7 +344,7 @@ def test_close_lap_uses_recorded_versions_when_facts_have_none() -> None:
     d = ctl.close_lap(state, _ctx(), lap_decide.LapFacts(failure_key="ci"), TTL)
     assert _kinds(d) == [rec.LAP_CLOSED, rec.LEASE_TAKEN]
     assert d.metrics["outcome"] == rec.DONE
-    assert d.events[0]["reason"] == "版をリリースした（1.0）。手順の失敗 ci は結果を変えない"
+    assert d.events[0]["reason"] == "バージョンをリリースした（1.0）。手順の失敗 ci は結果を変えない"
 
 
 def test_close_lap_failure_counts_the_streak() -> None:
@@ -356,11 +356,11 @@ def test_close_lap_failure_counts_the_streak() -> None:
     state = _apply(state, ctl.open_lap(state, _ctx(), (2,)))
     d2 = ctl.close_lap(state, _ctx(), lap_decide.LapFacts(failed=True), TTL)
     assert d2.metrics == {"lap": 2, "outcome": rec.FAILED, "streak": 2}
-    assert d2.events[0]["reason"] == "失敗の印"
+    assert d2.events[0]["reason"] == "失敗のマーカー"
 
 
 def test_close_lap_with_stop_request_closes_then_halts() -> None:
-    """止める要求があれば、締めた後に鍵を延ばさず、止めて鍵を返す。"""
+    """止める要求があれば、締めた後にキーを延ばさず、止めてキーを返す。"""
     state = _running((1,))
     state = _apply(state, ctl.stop(state, _ctx(None), "human", "終わり", False))
     d = ctl.close_lap(state, _ctx(now=30.0), lap_decide.LapFacts(released=("1.0",)), TTL)
@@ -386,7 +386,7 @@ def test_close_lap_without_open_lap() -> None:
 
 
 def test_close_lap_refusals() -> None:
-    """鍵を持たないセッションと、止めたループの締めは断る。"""
+    """キーを持たないセッションと、止めたループの締めは断る。"""
     state = _running((1,))
     no_key = ctl.close_lap(state, _ctx("s2"), lap_decide.LapFacts(), TTL)
     assert no_key.kind == ctl.REFUSED and not no_key.events and _argv(no_key.next) == ("get",)

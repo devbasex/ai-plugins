@@ -1,14 +1,14 @@
-"""副命令 `test-slot`（#2711 の契約「`test-slot.py run`」「`test-slot.py report`」）。
+"""サブコマンド `test-slot`（#2711 のコントラクト「`test-slot.py run`」「`test-slot.py report`」）。
 
-- `run [--wait-limit <秒>] -- <シェルのコマンド 1 つ>`: 重い処理なら枠の下で走らせる。出力と終了コードはそのまま返す（I7）。
+- `run [--wait-limit <秒>] -- <シェルのコマンド 1 つ>`: 重い処理ならスロットの下で走らせる。出力と終了コードはそのまま返す（I7）。
   待ちを諦めた・メモリで止めた・引数か設定が誤っているときは、子を走らせずに（止めて）`stopped` の結果 JSON を
-  標準出力へ 1 行出し、止まった理由の表の種類の終了コードで終える。枠の置き場を用意するときに旧い状態の置き場を
+  標準出力へ 1 行出し、停止理由の表の種類の終了コードで終える。スロットの保存先を用意するときに旧い状態の保存先を
   退避したら、元と先を `stopped` の結果の `items` へ載せる。子を走らせたときは標準出力を子のものに保つため（I7）、
   元と先を 1 件 1 行で標準エラーの最後へ書く（`RETIRED_LINE` の形）。シグナルで中断して終わるときも同じ形で書く
-- `report [--since <7d のような期間>]`: 枠の記録を読み、結果 JSON を標準出力へ 1 行出す
+- `report [--since <7d のような期間>]`: スロットの記録を読み、結果 JSON を標準出力へ 1 行出す
 
-結果 JSON の形と終了コードは `ndf.contracts.result` が持つ。枠の記録の結果の語（`gave_up`・`memory_stopped`）は
-`slots.CAUSE_OF` で止まった理由の表の種類へ写す。
+結果 JSON の形と終了コードは `ndf.contracts.result` が持つ。スロットの記録の結果の語（`gave_up`・`memory_stopped`）は
+`slots.CAUSE_OF` で停止理由の表の種類へ写す。
 """
 
 from __future__ import annotations
@@ -31,12 +31,12 @@ from ndf.testing import declared
 from ndf.testing import limits as limits_mod
 from ndf.testing import machine, records, slots, weight
 
-# 結果 JSON の tool の名前は副命令の名前（正本は `cli.COMMANDS`）
+# 結果 JSON の tool の名前はサブコマンドの名前（SSOT は `cli.COMMANDS`）
 TOOL = cli.tool_of(__name__)
 _PERIOD = re.compile(r"^(\d+)([smhd])$")
 _UNIT_SECONDS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
 _FORWARDED = (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)
-# run で子を走らせたときに、退避した旧い状態の置き場を標準エラーへ書く 1 行の形
+# run で子を走らせたときに、退避した旧い状態の保存先を標準エラーへ書く 1 行の形
 RETIRED_LINE = identity.RETIRED_LINE
 
 
@@ -64,9 +64,9 @@ def _load_limits(cwd: Path, wait_limit: int | None) -> limits_mod.Limits:
 def _forwarding_signals(get_proc: Callable[[], subprocess.Popen | None]) -> Iterator[list[int]]:
     """受けたシグナルを子のグループへ送り、受けたシグナルの一覧を渡す。出るときに元のハンドラーへ戻す。
 
-    子をまだ起こしていない（枠・メモリを待っている）ときは一覧へ足すだけにする。ここで例外を送ると、ハンドラーを
+    子をまだ起動していない（スロット・メモリを待っている）ときは一覧へ足すだけにする。ここで例外を送ると、ハンドラーを
     入れてから `slots.gate` が待ちに入るまでの間に受けたときに記録が残らないため、待ちを抜けるのは
-    `slots.gate` の `interrupted`（一覧を見る）に任せる。取りかけた枠は `slots.gate` が返す。
+    `slots.gate` の `interrupted`（一覧を見る）に任せる。取りかけたスロットは `slots.gate` が返す。
     """
     interrupted: list[int] = []
 
@@ -91,7 +91,7 @@ def _again(command: str, wait_limit: int | None) -> dict:
 
 
 def _stopped_from(exc: slots.Stopped, again: dict | None = None) -> int:
-    """枠の待ちを止めた結果を出す。wait_timeout は契約どおり同じ待ち（`again`）を next に載せる。"""
+    """スロットの待ちを止めた結果を出す。wait_timeout はコントラクトどおり同じ待ち（`again`）を next に載せる。"""
     kind = exc.cause
     return _stopped(
         kind,
@@ -99,7 +99,7 @@ def _stopped_from(exc: slots.Stopped, again: dict | None = None) -> int:
         instance=exc.reason,
         metrics={"waited_seconds": round(exc.waited_seconds, 1), "available_mib": exc.available_mib},
         next=again if kind == "wait_timeout" else None,
-        # 枠の置き場を用意するときに退避した旧い状態の置き場（復旧先を結果から引ける）
+        # スロットの保存先を用意するときに退避した旧い状態の保存先（復旧先を結果から引ける）
         items=exc.retired,
     )
 
@@ -110,7 +110,7 @@ def _run(command: str, wait_limit: int | None) -> int:
         limits = _load_limits(cwd, wait_limit)
     except limits_mod.SlotConfigError as exc:
         return _stopped("invalid", str(exc), items=[{"detail": item} for item in exc.items])
-    # 枠の記録の種類は AI の直接の実行（direct）。重くなければ枠を取らない（宣言の suites を空で渡す）
+    # スロットの記録の種類は AI の直接の実行（direct）。重くなければスロットを取らない（設定の suites を空で渡す）
     kind = slots.DIRECT if weight.is_heavy(command, declared.load_suites(cwd)) else None
     started: list[subprocess.Popen] = []
     with _forwarding_signals(lambda: started[-1] if started else None) as interrupted:
@@ -121,7 +121,7 @@ def _run(command: str, wait_limit: int | None) -> int:
         except slots.Stopped as exc:
             return _stopped_from(exc, _again(command, wait_limit))
         except KeyboardInterrupt as exc:
-            # 中断で終わるときも、退避した旧い状態の置き場の元と先を標準エラーへ残す（復旧先を引ける）
+            # 中断で終わるときも、退避した旧い状態の保存先の元と先を標準エラーへ残す（復旧先を引ける）
             _print_retired(exc.retired if isinstance(exc, slots.Interrupted) else [])
             return 128 + (interrupted[0] if interrupted else signal.SIGINT)
     if held.note:
@@ -136,17 +136,17 @@ def _print_retired(retired: list[dict[str, str]]) -> None:
 
 
 def _run_child(command: str, held: slots.Held, interrupted: list[int], started: list[subprocess.Popen]) -> int:
-    """枠の下で子を起こして終わりを待つ。起こした子は `started` へ足す（シグナルの転送先）。"""
+    """スロットの下で子を起動して終わりを待つ。起動した子は `started` へ足す（シグナルの転送先）。"""
     if interrupted:
         raise KeyboardInterrupt
     proc = subprocess.Popen(["bash", "-c", command], env={**os.environ, **held.env}, start_new_session=True, preexec_fn=held.preexec)
     started.append(proc)
     if interrupted:
-        process_group.signal_group(proc.pid, interrupted[0])  # 起こしている間に受けたシグナルは転送されていない
+        process_group.signal_group(proc.pid, interrupted[0])  # 起動している間に受けたシグナルは転送されていない
     held.watch(proc)
     code = _wait(proc)
     if interrupted:
-        # SIGTERM を無視する子孫が残っていれば、終わるまで（猶予の後は SIGKILL で）枠を持ち続ける
+        # SIGTERM を無視する子孫が残っていれば、終わるまで（猶予の後は SIGKILL で）スロットを持ち続ける
         process_group.stop_group(proc, grace_key=slots.STOP_TEST, send_first=False)
         raise KeyboardInterrupt  # 記録に interrupted を残す
     return code
@@ -175,15 +175,15 @@ def _report(since: str) -> int:
     # 記録が無ければ 0 件として読む
     metrics = records.report(directory, seconds, current_oom=machine.oom_kill_count())
     summary = f"直近 {since}: 待った実行 {metrics['waited_runs']} 本・メモリで止めた {metrics['memory_stopped']} 本・諦めた {metrics['gave_up']} 本"
-    # 置き場を用意するときに旧い状態の置き場を退避したら、元と先を items に載せる（復旧先を結果から引ける）
+    # 保存先を用意するときに旧い状態の保存先を退避したら、元と先を items に載せる（復旧先を結果から引ける）
     return result.emit(result.result(TOOL, result.OK, summary, items=retired, metrics=metrics))
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog=TOOL, description="重いテストを作業マシンのテストの枠の下で走らせる")
+    parser = argparse.ArgumentParser(prog=TOOL, description="重いテストを作業マシンのテストのスロットの下で走らせる")
     sub = parser.add_subparsers(dest="action", required=True)
-    run = sub.add_parser("run", help="1 本のコマンドを枠の下で走らせる")
-    run.add_argument("--wait-limit", type=int, help="枠とメモリを待つ上限の秒（既定は設定の値）")
+    run = sub.add_parser("run", help="1 本のコマンドをスロットの下で走らせる")
+    run.add_argument("--wait-limit", type=int, help="スロットとメモリを待つ上限の秒（既定は設定の値）")
     run.add_argument("command", nargs=argparse.REMAINDER, help="-- の後ろにシェルのコマンド 1 つ")
     rep = sub.add_parser("report", help="待った・止めた・諦めた回数と OOM Killer の増分を読む")
     rep.add_argument("--since", default="7d", help="期間（既定 7d）")

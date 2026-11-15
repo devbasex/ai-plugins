@@ -3,9 +3,9 @@
 テストを足す工程は、足したテストが今のコードで通ることに加え、全体の実行（suite の `command`）が収集するファイルかを確かめる。
 pytest の `python_files` に当たらない補助のモジュールへ足したテストは、範囲テストで通っても全体の実行に入らない。
 
-suite の宣言（`.ndf/project.json` の `test.suites[]`）の `collect_command` が、全体の実行が収集するテストを 1 行ずつ出す
+suite の設定（`.ndf/project.json` の `test.suites[]`）の `collect_command` が、全体の実行が収集するテストを 1 行ずつ出す
 （pytest なら `pytest --collect-only -q`）。pytest は引数に渡したファイルを `python_files` に依らず収集するため、テンプレートに
-`{paths}` を書くのは、渡したファイルを名前の規則で落とすランナーに限る。宣言の無い suite のファイルは判定できない
+`{paths}` を書くのは、渡したファイルを名前の規則で落とすランナーに限る。設定の無い suite のファイルは判定できない
 （`undecided`）。終了コードは 0 と 5（pytest の「収集が 0 件」）を受け、ほかは `CollectError` で止める。
 """
 
@@ -22,7 +22,7 @@ from ndf.testing import scoped
 from ndf.testing import slots
 
 COLLECT_KEY = "collect_command"
-# 収集の確かめの上限（秒）の宣言
+# 収集の確かめの上限（秒）の設定
 COLLECT_POLICY = "cross-refactoring.collect-check"
 # 収集の終了コードのうち、判定に使ってよいもの（0: 収集した、5: pytest の「収集が 0 件」）
 COLLECT_OK = frozenset({0, 5})

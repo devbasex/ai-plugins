@@ -28,7 +28,7 @@ def test_runtime_columns_point_at_declared_facts():
         assert set(names) <= env, rid
     # 使用量を測れるランタイムは hook の事象も渡す（使用量の記録は hook の停止で書く）
     assert set(facts.ids("runtimes", usage_observable=True)) <= set(facts.ids("runtimes", hook_events=True))
-    # 委ねる先は既定の席と別の問い。agy は既定の席に無くても委ねられる
+    # 委ねる先は既定の席と別の質問。agy は既定の席に無くても委ねられる
     assert "agy" in facts.ids("runtimes", delegate=True)
 
 

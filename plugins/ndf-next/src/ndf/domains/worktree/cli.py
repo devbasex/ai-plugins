@@ -1,16 +1,16 @@
-"""`ndf worktree` の副命令。
+"""`ndf worktree` のサブコマンド。
 
     ndf worktree create <ブランチ> [--from <起点>]   # 作業場所を用意する（結果の outputs に worktree と branch）
-    ndf worktree list                               # 置き場 .worktrees/ の下の worktree の一覧
+    ndf worktree list                               # 保存先 .worktrees/ の下の worktree の一覧
     ndf worktree cleanup [--dry-run]                # マージ済みのブランチの worktree を片付ける
-    ndf worktree session                            # メインディレクトリの逸脱を伝え、宣言で有効ならブランチを追従する
+    ndf worktree session                            # メインディレクトリの逸脱を伝え、設定で有効ならブランチを追従する
     ndf worktree guard [--base <dir>] [--unread] <パス>...   # 書き込み先がメインディレクトリかの案内
-    ndf worktree merged <PR番号>... [--flow-record <JSON>]   # マージの後の後片付け（worktree・ブランチ・取り込み）
+    ndf worktree merged <PR番号>... [--flow-record <JSON>]   # マージの後の後片付け（worktree・ブランチ・マージ）
     ndf worktree trash --ref <コミット> [--yes --only <退避先>...]   # 本番に出た退避先を挙げる（承認した名前だけ消す）
-    ndf worktree init [--force] | check             # 宣言を作る・宣言の状態を出す
+    ndf worktree init [--force] | check             # 設定を作る・設定の状態を出す
     ndf worktree deps|localenv|testenv ...          # worktree の環境（cli_env）
 
-どの副命令も今の位置（`--cwd`。既定はカレントディレクトリ）のリポジトリを対象にし、宣言はメインディレクトリから読む。
+どのサブコマンドも今の位置（`--cwd`。既定はカレントディレクトリ）のリポジトリを対象にし、設定はメインディレクトリから読む。
 """
 
 from __future__ import annotations
@@ -46,14 +46,14 @@ from ndf.domains.worktree import (
 TOOL = cli.tool_of(__name__)
 COMMANDS = {
     "create": "作業場所（ブランチの worktree）を用意する",
-    "list": "置き場の下の worktree の一覧",
+    "list": "保存先の下の worktree の一覧",
     "cleanup": "マージ済みのブランチの worktree を片付ける",
     "session": "メインディレクトリの逸脱（未コミットの変更）を伝える文を出す",
     "guard": "書き込み先がメインディレクトリかを判断し、案内の文を出す",
-    "merged": "マージ済みの PR のブランチの worktree とブランチを外し、メインディレクトリを取り込む",
+    "merged": "マージ済みの PR のブランチの worktree とブランチを外し、メインディレクトリをマージする",
     "trash": "本番に出たブランチの退避先を挙げる。承認した名前だけを消す",
-    "init": f"宣言（{identity.FIXED_WORDS['ndf_settings_dir']}/worktree.json）を作る",
-    "check": "宣言の状態とベースブランチ・本番チャネルを出す",
+    "init": f"設定（{identity.FIXED_WORDS['ndf_settings_dir']}/worktree.json）を作る",
+    "check": "設定の状態とベースブランチ・本番チャネルを出す",
 }
 
 
@@ -80,7 +80,7 @@ def _parser() -> argparse.ArgumentParser:
     t.add_argument("--yes", action="store_true", help="--only の退避先を消す。人が候補を見て承認したときだけ付ける")
     t.add_argument("--only", nargs="+", default=[], metavar="退避先")
     i = sub.add_parser("init", help=COMMANDS["init"])
-    i.add_argument("--force", action="store_true", help="既にある宣言を書き直す")
+    i.add_argument("--force", action="store_true", help="既にある設定を書き直す")
     sub.add_parser("check", help=COMMANDS["check"])
     cli_env.add_parsers(sub)
     return p
@@ -134,7 +134,7 @@ def _session(args: argparse.Namespace, where: repo.Location) -> dict[str, Any]:
 def _guard(args: argparse.Namespace, where: repo.Location) -> dict[str, Any]:
     decl = ndf_settings.load(where.main_dir)
     if decl is None:
-        return result.result(TOOL, result.OK, "宣言が無いリポジトリでは案内しない")
+        return result.result(TOOL, result.OK, "設定が無いリポジトリでは案内しない")
     wdir = repo.worktrees_dir(where.main_dir).relative_to(where.main_dir).as_posix()
     location = guard_decide.Location(str(where.main_dir), where.in_worktree, decl.allow_paths, wdir)
     base = os.path.realpath(args.base if args.base is not None else args.cwd)
@@ -176,8 +176,8 @@ def _init(args: argparse.Namespace, where: repo.Location) -> dict[str, Any]:
         got = setup.init(where.main_dir, args.force)
     except setup.SetupError as exc:
         return result.stopped(TOOL, "refused", str(exc))
-    summary = f"宣言を作った: {got.path}（コミットする）" if got.written else f"宣言は既にある: {got.path}"
-    # outputs はスプリントの文脈の閉じた語彙だけを持つ（宣言のパスは工程どうしで渡す値ではない）
+    summary = f"設定を作った: {got.path}（コミットする）" if got.written else f"設定は既にある: {got.path}"
+    # outputs はスプリントの文脈の閉じた語彙だけを持つ（設定のパスは工程どうしで渡す値ではない）
     return result.result(TOOL, result.OK, summary, [{"path": str(got.path), "written": got.written}], warnings=list(got.warnings))
 
 
@@ -189,7 +189,7 @@ def _check(args: argparse.Namespace, where: repo.Location) -> dict[str, Any]:
                       "local_ignored": list(got.decl.local_ignored)})  # fmt: skip
     if got.state == setup.UNREADABLE:
         return result.stopped(TOOL, "precondition", got.detail, items=items)
-    return result.result(TOOL, result.OK, f"宣言: {got.state}", items, {"present": got.state == setup.PRESENT})
+    return result.result(TOOL, result.OK, f"設定: {got.state}", items, {"present": got.state == setup.PRESENT})
 
 
 def _env(run: Callable[[str, argparse.Namespace], dict[str, Any]]) -> Callable[[argparse.Namespace, repo.Location], dict[str, Any]]:

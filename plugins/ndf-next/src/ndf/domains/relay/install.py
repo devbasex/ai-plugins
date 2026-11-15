@@ -1,14 +1,14 @@
 """中継の複製 `~/.claude/ndf/relay.py` と PATH のエントリポイント `ndf-relay` の設置・撤去・有無（#2461・#2583・要求の 346 行）。
 
 - 複製（`<CLAUDE_CONFIG_DIR か ~/.claude>/ndf/relay.py`）は標準ライブラリだけの小さな起動の部品で、隣の
-  `relay.root`（プラグインの根のパス 1 行）が指すプラグインの `bin/ndf relay` を呼ぶ。中身は版によらず同じで、
+  `relay.root`（プラグインの根のパス 1 行）が指すプラグインの `bin/ndf relay` を呼ぶ。中身はバージョンによらず同じで、
   プラグインを更新しても `relay.root` を書き換えるだけで済む（1 回の導入で動き続ける）
-- プラグインの更新で `relay.root` の指す版の置き場が消えたら、複製は同じ親の下の最も新しい版の置き場へ向け直す。
+- プラグインの更新で `relay.root` の指すバージョンの保存先が消えたら、複製は同じ親の下の最も新しいバージョンの保存先へ向け直す。
   見つからなければ理由と打ち直しのコマンドを 1 行出して止まる（何も出さずに失敗しない。#2583）
 - PATH のエントリポイントは `<XDG_BIN_HOME か ~/.local/bin>/ndf-relay` に置く 2 行のシェルのスクリプトで、複製を呼ぶ
-- どれも利用者が `ndf relay install` を打ったときだけ置く（黙って置かない）。撤去は、自分が置いた印の行がある
+- どれも利用者が `ndf relay install` を打ったときだけ置く（黙って置かない）。撤去は、自分が置いたマーカーの行がある
   ファイルだけを消す（利用者が置いた同じ名前のファイルを消さない）
-- 旧い NDF（10.x）の複製は印を持たない。旧いラッパーが動いている間は置き換えない（3341-2）
+- 旧い NDF（10.x）の複製はマーカーを持たない。旧いラッパーが動いている間は置き換えない（3341-2）
 """
 
 from __future__ import annotations
@@ -67,14 +67,14 @@ if __name__ == "__main__":
 
 
 class Status(NamedTuple):
-    """置いたファイルの有無。`state` は `absent`・`ours`・`stale`（中身が違う）・`foreign`（印が無い）。"""
+    """置いたファイルの有無。`state` は `absent`・`ours`・`stale`（中身が違う）・`foreign`（マーカーが無い）。"""
 
     path: Path
     state: str
 
 
 class Installed(NamedTuple):
-    """設置の結果。`copy`・`entry` はそれぞれの状態、`on_path` はエントリポイントの置き場が PATH にあるか。"""
+    """設置の結果。`copy`・`entry` はそれぞれの状態、`on_path` はエントリポイントの保存先が PATH にあるか。"""
 
     copy: Status
     entry: Status
@@ -123,7 +123,7 @@ def status(environ: Mapping[str, str], missing_code: int) -> Installed:
 def install(environ: Mapping[str, str], plugin_root: Path, missing_code: int, replace_foreign: bool) -> Installed:
     """複製とエントリポイントを置き、`relay.root` をこのプラグインへ向ける。
 
-    印の無い複製（旧い NDF の複製）は `replace_foreign` が真のときだけ置き換える。印の無いエントリポイントは置き換えない。
+    マーカーの無い複製（旧い NDF の複製）は `replace_foreign` が真のときだけ置き換える。マーカーの無いエントリポイントは置き換えない。
     """
     now = status(environ, missing_code)
     copy = now.copy

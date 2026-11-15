@@ -1,12 +1,12 @@
-"""worktree でのローカルの動作検証（宣言の `localenv` 節。実行系は `kind: compose` だけを扱う）。
+"""worktree でのローカルの動作検証（設定の `localenv` 節。実行系は `kind: compose` だけを扱う）。
 
-- `setup`: 宣言の `localenv.copy_from_main`・`copy_as_real` に従って設定と依存物を worktree へ複製する（複製の手順は `deps` と同じ）
-- `verify`: ローカル環境に載っているコードと対象の worktree のブランチを照合する（判断は `localenv_decide.verify`）
-- `healthcheck`: 照合が一致したときだけ、宣言の `localenv.healthcheck` をメインディレクトリで打つ
+- `setup`: 設定の `localenv.copy_from_main`・`copy_as_real` に従って設定と依存物を worktree へ複製する（複製の手順は `deps` と同じ）
+- `verify`: ローカル環境に載っているコードと対象の worktree のブランチを検証する（判断は `localenv_decide.verify`）
+- `healthcheck`: 検証が一致したときだけ、設定の `localenv.healthcheck` をメインディレクトリで打つ
 - `aim`: ローカル環境が指すコードを対象の worktree へ向ける（`layout: indirect` だけ。`direct`・`host` は手順書で行う）
 - `mode`: 対象の変更の一覧から、相乗りか分離かを提示する（判断は `localenv_decide.mode`）
 
-宣言・`localenv` 節が無い、または `kind` が `compose` でないリポジトリでは、どれも `None`（適用外）を返す。
+設定・`localenv` 節が無い、または `kind` が `compose` でないリポジトリでは、どれも `None`（適用外）を返す。
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ KIND = "compose"
 
 
 class LocalenvError(Exception):
-    """処理できない（宣言の値が足りない・実行系が無い・複製やコマンドが失敗した）。"""
+    """処理できない（設定の値が足りない・実行系が無い・複製やコマンドが失敗した）。"""
 
 
 @dataclass(frozen=True)
@@ -83,7 +83,7 @@ def verify(t: Target, shell: container.Shell) -> localenv_decide.Verdict:
 
 
 def healthcheck(t: Target, shell: container.Shell) -> tuple[localenv_decide.Verdict, Optional[int]]:
-    """照合の結果と、動作確認のコマンドの終了コード（打たなければ `None`）。"""
+    """検証の結果と、動作確認のコマンドの終了コード（打たなければ `None`）。"""
     got = verify(t, shell)
     command = t.text("healthcheck")
     if got.result != localenv_decide.MATCH or command is None:
@@ -131,7 +131,7 @@ def aim(t: Target, shell: container.Shell) -> int:
         raise LocalenvError("localenv.layout が indirect・direct・host のどれでもない")
     if src_target is None:
         raise LocalenvError("localenv.src_target が要る")
-    # 宣言の `compose_project`（名前を決めて起動するプロジェクト）。無ければメインディレクトリの名前から作る
+    # 設定の `compose_project`（名前を決めて起動するプロジェクト）。無ければメインディレクトリの名前から作る
     project = container.compose_project(t.text("compose_project") or t.main_dir.name)
     if project is None:
         raise LocalenvError("コンテナのプロジェクト名を決められない（localenv.compose_project を書く）")

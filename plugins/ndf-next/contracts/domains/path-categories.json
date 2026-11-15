@@ -1,9 +1,9 @@
 {
-  "summary": "変更のファイルの分類（レビューの観点のテンプレートを選ぶ）。パスを / . - _ と CamelCase の境で語に分け、語を小文字にして末尾の複数形（ies→y・s）を外してから words と比べる（UserPolicy.php は policy、app/Jobs は job）。dirs はディレクトリの 1 段の名前、names はファイル名（小文字）、extensions は languages の表と同じく最も長い拡張子で比べる。1 つのファイルは当たったすべての分類を持ち、どれにも当たらなければ code",
+  "summary": "変更のファイルの分類（レビューの観点のテンプレートを選ぶ）。パスを / . - _ と CamelCase の境で語に分け、語を小文字にして末尾の複数形（ies→y・s）を外してから words と比べる（UserPolicy.php は policy、app/Jobs は job）。dirs はディレクトリの 1 ステップの名前、names はファイル名（小文字）、extensions は languages の表と同じく最も長い拡張子で比べる。1 つのファイルは当たったすべての分類を持ち、どれにも当たらなければ code",
   "owner": "D2（contracts/domains）",
   "columns": {
     "words": {"type": "array", "summary": "パスの語（分けて小文字にし複数形を外した後）"},
-    "dirs": {"type": "array", "summary": "ディレクトリの 1 段の名前（小文字）"},
+    "dirs": {"type": "array", "summary": "ディレクトリの 1 ステップの名前（小文字）"},
     "names": {"type": "array", "summary": "ファイル名（小文字）"},
     "extensions": {"type": "array", "summary": "拡張子（先頭の . を含む）"}
   },

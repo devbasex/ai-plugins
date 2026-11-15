@@ -29,9 +29,9 @@ def test_prose_wait_is_pushed_back_at_most_twice_per_user_input(tmp_path):
 def test_pushbacks_are_counted_across_reasons(tmp_path, monkeypatch):
     monkeypatch.setenv("NDF_FACTORY_RUN", "1")
     first = call_entry("claude", "Stop", stop(tmp_path, WAIT))
-    assert "AskUserQuestion" in first["reason"] and "区間の報告の形" in first["reason"]
+    assert "AskUserQuestion" in first["reason"] and "セグメントの報告の形" in first["reason"]
     second = call_entry("claude", "Stop", stop(tmp_path, "- 作業: x\n- 結果: 完了\n"))
-    assert second is not None and "区間の報告の形" in second["reason"]
+    assert second is not None and "セグメントの報告の形" in second["reason"]
     assert call_entry("claude", "Stop", stop(tmp_path, "形の無い応答")) is None
 
 
@@ -52,7 +52,7 @@ def test_relay_input_does_not_reset_the_counts(tmp_path):
         call_entry("claude", "Stop", stop(tmp_path, WAIT))
     session = sample("claude", "Stop", tmp_path)["session_id"]
     assert counter_mod.mark_relay(session, state_dir())
-    _prompt(tmp_path)  # 中継が送った入力: 印を消すだけ
+    _prompt(tmp_path)  # 中継が送った入力: マーカーを消すだけ
     assert call_entry("claude", "Stop", stop(tmp_path, WAIT)) is None
     _prompt(tmp_path)  # 人の入力: 数え直す
     assert call_entry("claude", "Stop", stop(tmp_path, WAIT)) is not None
@@ -65,7 +65,7 @@ def test_relay_mark_file_written_by_the_relay_does_not_reset_the_counts(tmp_path
         call_entry("claude", "Stop", stop(tmp_path, WAIT))
     session = sample("claude", "Stop", tmp_path)["session_id"]
     path = markers.mark(state_dir(), session)
-    _prompt(tmp_path)  # 中継が送った入力: 中継の印を消すだけ
+    _prompt(tmp_path)  # 中継が送った入力: 中継のマーカーを消すだけ
     assert not path.exists()
     assert call_entry("claude", "Stop", stop(tmp_path, WAIT)) is None
 

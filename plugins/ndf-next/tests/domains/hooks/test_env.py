@@ -1,4 +1,4 @@
-"""依存の環境の置き場・根の目印・片付け（M3-H14・#3105）。"""
+"""依存の環境の保存先・根の目印・片付け（M3-H14・#3105）。"""
 
 from __future__ import annotations
 
@@ -116,7 +116,7 @@ def test_touch_used_only_marks_an_existing_location(tmp_path):
 
 
 def test_prune_leaves_environments_it_did_not_make(tmp_path):
-    # bin/ndf が同じ親の下に作る版の名前の環境と、目印の無い置き場は古くても消さない
+    # bin/ndf が同じ親の下に作るバージョンの名前の環境と、目印の無い保存先は古くても消さない
     ident = _ident(tmp_path)
     versioned = _venv(ident, "10.26.3", 0)
     bare = ident.venv_root / ("4" * 16)

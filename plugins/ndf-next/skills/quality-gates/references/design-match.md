@@ -1,6 +1,6 @@
 # 設計との突き合わせ
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `design-match.py`（M1）・`pr-steps.py`（M1）・`spec-copy.py`（M7）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトのサブコマンドは新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `design-match.py`（M1）・`pr-steps.py`（M1）・`spec-copy.py`（M7）。移行先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 `standard` の完了判定で、実装を設計文書・既存の確定仕様・要求と照らし、食い違いをマージの前に見えるようにする。
 確認は (a)(b)(c) の 3 つで、結果は実装 PR の本文の `## 設計と違う点` の節に残す。
@@ -16,8 +16,8 @@ python3 "$SCRIPTS/design-match.py" tests --issue 216
 # items: tests/ci/test_ci_workflow.py missing（構成要素）・test_pull_request_is_not_filtered_by_branch missing（テスト設計）…
 ```
 
-同じスプリントで shellcheck の版を固定した変更（devbasex/devbase の `4d82277`）に確認 (b) を打つと、既存の確定仕様 `docs/specifications/base-image-shellcheck.md` が
-一致した語 4 つ（変えたパス 3 つと `SHELLCHECK_VERSION`）で最上位に並び、「版は固定せず」と書いた行が出る。
+同じスプリントで shellcheck のバージョンを固定した変更（devbasex/devbase の `4d82277`）に確認 (b) を打つと、既存の確定仕様 `docs/specifications/base-image-shellcheck.md` が
+一致した語 4 つ（変えたパス 3 つと `SHELLCHECK_VERSION`）で最上位に並び、「バージョンは固定せず」と書いた行が出る。
 担い手はテストを作るか節に「作らなかった」と理由を並べ、確定仕様の記述を同じ PR で直す。
 
 ## いつ行うか
@@ -99,6 +99,6 @@ python3 "$SCRIPTS/design-match.py" specs --base origin/<ベースブランチ>
 違いが無ければ `- 無し`、設計文書が無ければ `- 該当なし（設計文書が無い）` の 1 行にする。同じ PR で設計文書・既存の
 確定仕様・要求の文書を直した箇所は並べない（直した文書が正になる）。
 
-単発では `pr-steps.py template --mode standard` が節の雛形を書き、`create` / `update` に `--mode standard` を渡すと、
+単発では `pr-steps.py template --mode standard` が節のテンプレートを書き、`create` / `update` に `--mode standard` を渡すと、
 節が無ければ `next` で足すよう求める。3 層では `design-match` のステップの worker が節を書き、`pr` のステップが本文へ
 1 つだけ置く。節のファイルが無いまま設計文書があると、`pr` のステップは PR を作らずに止まり、judge へ戻る。

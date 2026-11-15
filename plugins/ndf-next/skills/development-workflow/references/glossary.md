@@ -1,9 +1,9 @@
 # 開発ワークフローの用語集
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `check-trigger.py`（M1）・`doc-lint.py`（M7）・`glossary.py`（M7）・`handoff.py`（M7）・`merged-steps.py`（M8）・`mvv-gate.py`（P2）・`pr-review-steps.py`（M5）・`progress-record.sh`（M7）・`projects-sync.sh`（M7）・`release-steps.py`（M2）・`release-verification-steps.py`（M2）・`spec-copy.py`（M7）・`sprint-close.py`（M1）・`sprint-state.py`（P1b）・`state.py`（M5）・`upkeep.py`（M6）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトのサブコマンドは新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `check-trigger.py`（M1）・`doc-lint.py`（M7）・`glossary.py`（M7）・`handoff.py`（M7）・`merged-steps.py`（M8）・`mvv-gate.py`（P2）・`pr-review-steps.py`（M5）・`progress-record.sh`（M7）・`projects-sync.sh`（M7）・`release-steps.py`（M2）・`release-verification-steps.py`（M2）・`spec-copy.py`（M7）・`sprint-close.py`（M1）・`sprint-state.py`（P1b）・`state.py`（M5）・`upkeep.py`（M6）。移行先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
-`development-workflow` と、そこから呼ぶ Skill・スクリプトで使う語を集める。**定義は各語の正本が持ち、
-この文書は 1 行の要約と正本への案内だけを持つ。** 食い違ったときは正本を正とする。
+`development-workflow` と、そこから呼ぶ Skill・スクリプトで使う語を集める。**定義は各語の SSOT が持ち、
+この文書は 1 行の要約と SSOT への案内だけを持つ。** 食い違ったときは SSOT を正とする。
 
 **1 語には 1 つの意味だけを持たせる。** 語を足すときは、下の「語を足すときの規則」に従う。
 
@@ -31,7 +31,7 @@
 ```mermaid
 flowchart TB
     subgraph MS["マイルストーン（着手の順序）"]
-        subgraph MI["スプリント（1 つの版として出す課題と Pull Request のセット）"]
+        subgraph MI["スプリント（1 つのバージョンとして出す課題と Pull Request のセット）"]
             subgraph CH["パイプライン（キューが --then でつなぐプランの列）"]
                 subgraph T1["ステージ 1（同時に 3 本まで）"]
                     P1["プラン: 実装 #1078"]
@@ -58,27 +58,27 @@ flowchart TB
 
 ## 進行の単位
 
-| 語 | 意味 | 英語や識別子 | 正本 |
+| 語 | 意味 | 英語や識別子 | SSOT |
 | --- | --- | --- | --- |
 | マイルストーン | 着手の順序を表す単位。スプリントはこの中から切り出す | GitHub の milestone。open は `<2 桁の連番> <主題>`、closed は `v<版数>` | [parallel-work.md](parallel-work.md) の「用語」 |
-| スプリント | 1 回のリリースとして出す課題と Pull Request のセット。版数を持つプロジェクトでは 1 つの版になる。区切りは 1 回のリリースとして出す中身で決める。工程はスプリント単位で 1 回ずつ通し、モードもスプリントで 1 つにする | ブランチ `sprint/<名前>`、目録 `sprint.json`、状態のファイル（例 `sprint-state.json`） | [parallel-work.md](parallel-work.md) の「用語」 |
+| スプリント | 1 回のリリースとして出す課題と Pull Request のセット。版数を持つプロジェクトでは 1 つのバージョンになる。区切りは 1 回のリリースとして出す中身で決める。工程はスプリント単位で 1 回ずつ通し、モードもスプリントで 1 つにする | ブランチ `sprint/<名前>`、目録 `sprint.json`、状態のファイル（例 `sprint-state.json`） | [parallel-work.md](parallel-work.md) の「用語」 |
 | スプリント課題 | 「スプリントを閉じる」が閉じる対象にする課題。スプリントに含まれる Pull Request の本文が GitHub の closing keywords（PR 本文に `Closes #123` のように書くと、マージ時にその課題を自動で閉じる機能）か閉じる予定の参照（`最終工程の後に閉じる: #N`）で指す課題と、`--issues` で渡した課題の和 | `sprint-close.py` が閉じる | [progress-tracking](../../progress-tracking/SKILL.md) |
 | 工程 | 工程表（モードごとに起動する Skill の表）の 1 行。要求と受け入れ条件・設計・実装・リリースなど | 進捗記録の `stage` | [../SKILL.md](../SKILL.md) の「モードごとに起動する Skill」 |
-| フェーズ | supervisor 1 つ（またはプラン 1 本）が通す、連続する工程のグループ。設計・実装・検査・取り込み・仕上げ・リリースの 6 つ | プランの `"フェーズ"`、Agent の `description` の先頭語 | [agent-layers.md](agent-layers.md) の「フェーズ」 |
+| フェーズ | supervisor 1 つ（またはプラン 1 本）が通す、連続する工程のグループ。設計・実装・検査・マージ・仕上げ・リリースの 6 つ | プランの `"フェーズ"`、Agent の `description` の先頭語 | [agent-layers.md](agent-layers.md) の「フェーズ」 |
 | プラン | `ndf plan` が流す 1 本の JSON。フェーズの手順をステップの列として持つ | `plan.json`、`ndf route render implement` / `check` / `release` / `sprint` / `close` | `ndf plan` の docstring |
 | ステップ | プランの `steps` の 1 要素。型は run / work / drive / judge / pr の 5 つ | `"id"`・`"type"`・`"next"`、`ndf plan next <プラン> --from <ステップの id>` | `ndf plan` の docstring |
-| キュー | プランを空いた枠へ順に流す副命令 | `ndf plan queue <plan.json>... --then <plan.json>...` | `ndf plan` の docstring |
+| キュー | プランを空いたスロットへ順に流すサブコマンド | `ndf plan queue <plan.json>... --then <plan.json>...` | `ndf plan` の docstring |
 | パイプライン | キューが `--then` でつないだプランの列（実装 → 開発版 → 本番） | `--then`、`new release --prs-from-queue` | [relay.md](relay.md) の「カットポイントの引継ぎ文書と ndf-next はスクリプトで作る」 |
 | ステージ | パイプラインの中のプランのグループ 1 つ。中はキューで並列に流し、前のステージがすべて完了したときだけ次のステージが流れる。`new sprint` はステージごとにプランを書き出す（設計・設計承認ゲート・実装・検査・開発版・本番） | `--then` の 1 回分、`then_of` | [pace.md](pace.md) の「プランのステージ」 |
-| セッション | ラッパーが起動する claude の 1 回の起動（1 つの会話）。番号を付けて「セッション 4」と呼ぶ。ndf-next のブロックで次のセッションへ切り替わる | セッションの境の行 `── ndf-relay: 区間 2 ──`、`log.jsonl` の `section` | [relay.md](relay.md) |
+| セッション | ラッパーが起動する claude の 1 回の起動（1 つの会話）。番号を付けて「セッション 4」と呼ぶ。ndf-next のブロックで次のセッションへ切り替わる | セッションの境の行 `── ndf-relay: セグメント 2 ──`、`log.jsonl` の `section` | [relay.md](relay.md) |
 | context window | 1 回の会話が保持する文脈の全体と、その量 | `NDF_CONTEXT_LIMIT`（既定 200,000） | [context-window.md](context-window.md) の「用語」 |
 | カットポイント | context window を切ってよい 4 点。3 層ではフェーズの境になる | — | [context-window.md](context-window.md) の「切ってよい点は 4 つある」 |
 | スイッチポイント | フェーズの中で supervisor を替える点。収束ループの前で hook が決める | 報告の `結果: スイッチポイント`、`NDF_SUPERVISOR_CUT_RATIO` | [context-window.md](context-window.md) の「フェーズの中のスイッチポイント」 |
-| リリース差分 | 版と版の間（タグからタグまで）の変更 | `ndf--v10.17.10..ndf--v10.17.18` | [pace.md](pace.md) の「具体例」 |
+| リリース差分 | バージョンとバージョンの間（タグからタグまで）の変更 | `ndf--v10.17.10..ndf--v10.17.18` | [pace.md](pace.md) の「具体例」 |
 
 ## 役割
 
-| 語 | 意味 | 英語や識別子 | 正本 |
+| 語 | 意味 | 英語や識別子 | SSOT |
 | --- | --- | --- | --- |
 | 3 層 | 工程を conductor → supervisor → worker の順に起動して通す形 | — | [agent-layers.md](agent-layers.md) |
 | conductor | 人間と対話しているセッション。スプリントを持ち、承認ゲートで人間へ問えるのはこの層だけ | `AskUserQuestion` | [agent-layers.md](agent-layers.md) の「3 層の責務」 |
@@ -93,7 +93,7 @@ flowchart TB
 
 ## 進め方と判定
 
-| 語 | 意味 | 英語や識別子 | 正本 |
+| 語 | 意味 | 英語や識別子 | SSOT |
 | --- | --- | --- | --- |
 | モード | 変更の目的物で決める工程の振り分け。上から `operation` / `documentation` / `standard` / `legacy-refactor` / `light` | モード判定の結果の `mode:` | [../SKILL.md](../SKILL.md) の「判定の手順」、[workflow-modes.md](workflow-modes.md) |
 | pace | モードとは別の軸で、工程をどう通すかを決める。ウォーターフォールで人の承認を取る `normal`（既定）、`normal` の承認だけを MVV 判定にする `auto`、実践投入の中で検証しながら MVV で自動に進める `fast` の 3 つ | `pace:`、`ndf progress new --pace`（値を保存する。使ってよい条件の確かめは P2 #3295 が足す）、`.ndf/pace.json` | [pace.md](pace.md) |
@@ -111,7 +111,7 @@ flowchart TB
 
 ## 承認ゲートと承認
 
-| 語 | 意味 | 英語や識別子 | 正本 |
+| 語 | 意味 | 英語や識別子 | SSOT |
 | --- | --- | --- | --- |
 | 承認ゲート | 人手の承認を求める点。取り消せない操作の前の 2 つだけで、増やさない | 報告の `結果: 承認ゲート`、結果 JSON の `status: gate`、終了コード 10〜19 | [../SKILL.md](../SKILL.md) の「人手の承認を求める承認ゲート」 |
 | 設計承認ゲート | 設計 Pull Request のマージの前に人の承認を求める承認ゲート。documentation モードでは企画承認に当たる | 承認ラベル `design-approved` | [../SKILL.md](../SKILL.md) の「設計 Pull Request のマージ」 |
@@ -122,16 +122,16 @@ flowchart TB
 
 ## リリース
 
-| 語 | 意味 | 英語や識別子 | 正本 |
+| 語 | 意味 | 英語や識別子 | SSOT |
 | --- | --- | --- | --- |
 | デプロイ | 開発・本番を問わず、環境へ変更を届けること。本番へのデプロイだけをリリースと呼ぶ。工程の名前でもある | `/ndf:release`、`ndf route render release`、工程表の行と進捗記録の `stage` の値は `デプロイ` | [release](../../release/SKILL.md) |
 | リリース | 本番へのデプロイ。フェーズの名前でもある | プランの `"フェーズ"` の値は `リリース` | [release](../../release/SKILL.md) |
 | リリースプラン | リリースの手順をステップの列として持つプラン | `ndf route render release`、`--channel dev` / `prod` | `ndf plan` の docstring |
-| 開発版 | ベースブランチに載るチャネルと、そこへ出す接尾辞付きの版。マージされた変更がそのまま載る。手動反映の本番系の形では、`production: false` の行（検証の環境）へ届くことも開発版に当たる | `<版>-dev.<n>`、`new release --channel dev` | [release](../../release/SKILL.md) の「リリース種別」 |
+| 開発版 | ベースブランチに載るチャネルと、そこへ出す接尾辞付きのバージョン。マージされた変更がそのまま載る。手動反映の本番系の形では、`production: false` の行（検証の環境）へ届くことも開発版に当たる | `<バージョン>-dev.<n>`、`new release --channel dev` | [release](../../release/SKILL.md) の「リリース種別」 |
 | 本番 | 利用者が現に使っているチャネル・環境・外部サービス（本番系）。プラグインのリリースでは本番のブランチ | `.ndf/worktree.json` の `production_branch`（無ければ既定ブランチ）、`--channel prod` | [../SKILL.md](../SKILL.md) の「本番系へ届く操作」 |
-| 正式版 | 本番チャネルへ出す、接尾辞の無い版。出したらリリースタグを打つ | タグ `<plugin>--v<版>` | [release](../../release/SKILL.md) の「リリース種別」 |
+| 正式版 | 本番チャネルへ出す、接尾辞の無いバージョン。出したらリリースタグを打つ | タグ `<plugin>--v<バージョン>` | [release](../../release/SKILL.md) の「リリース種別」 |
 | 開発版のデプロイ | 開発版と分かる版数での公開か、検証環境への反映。提示して進めてよい | — | [release](../../release/SKILL.md) の「リリース種別」 |
-| インストール確認 | 隔離した HOME で ref からプラグインをインストールし、版と中身が ref と一致するかを確かめる | `release-verification-steps.py verify-install --ref <ブランチ> --expect <版>`、プランの `verify` のステップ、`fast.verify` | `release-verification-steps.py` の docstring |
+| インストール確認 | 隔離した HOME で ref からプラグインをインストールし、バージョンと中身が ref と一致するかを確かめる | `release-verification-steps.py verify-install --ref <ブランチ> --expect <バージョン>`、プランの `verify` のステップ、`fast.verify` | `release-verification-steps.py` の docstring |
 | リリース完了の確認 | 公開が済んだことを、リリース先の状態から読み取れる値 | `release` の結果 JSON の `items[]` | [completion-check.md](../../release/references/completion-check.md) の「用語」 |
 | スタックしたチェック | 実行が終わったのに pending のまま残った CI のチェック。1 度だけ再実行し、再び残れば止まる | `merged-steps.py merge-when-green --stale-after <秒>`、`items` の `rerun` / `stuck` | [merged](../../merged/SKILL.md) の `merge-when-green` |
 | コピー | 元のファイルをそのまま別の場所へ置いたもの。ラッパーの起動の部品の複製（指す先は横の `relay.root`）・マイルストーンの説明から作る `mvv.md`・承認資料の `issues/approval-*.md` | `~/.claude/ndf/` の複製、`relay.root` | [relay.md](relay.md) の「始め方」 |
@@ -140,7 +140,7 @@ flowchart TB
 
 ## 検査とテスト
 
-| 語 | 意味 | 英語や識別子 | 正本 |
+| 語 | 意味 | 英語や識別子 | SSOT |
 | --- | --- | --- | --- |
 | 検査 | リファクタリング・コードレビュー・完了判定・Pull Request を通すフェーズ。`fast` ではトリガーが立ったときだけ、前回の検査からの差分に流す。コードレビューだけは開発版ごとに流す（`--review-only`） | `new check`、`new check --since-last --id <名>`、`new check --since-last --review-only --id <名>` | [agent-layers.md](agent-layers.md) の「フェーズ」、[pace.md](pace.md) の「検査のプラン」 |
 | チェック | 機械が合否を返すもの。CI のジョブと、`mvv-gate.py`・`doc-lint.py` などのスクリプト | CI の checks、結果 JSON の `status` | [merged](../../merged/SKILL.md) の `merge-when-green`、各スクリプトの docstring |
@@ -153,11 +153,11 @@ flowchart TB
 | 完了判定 | コマンドの証跡で完了を判定する工程。スクラムの完了の定義に当たる | `/ndf:quality-gates` | [quality-gates](../../quality-gates/SKILL.md) |
 | 範囲テスト | 変更が触った範囲に限って走らせるテスト | `new impl --tests`、プランの `test-limited` のステップ、`cross-refactoring` の `test_targets` | `ndf plan` の docstring、[cross-refactoring](../../cross-refactoring/SKILL.md) の「この Skill で使う語」 |
 | ラウンドテスト | `cross-refactoring` の `round-only` で、項目ごとにそのまま走らせるコマンド（`{paths}` を含まない `--round-test`、または `scope_command` の無い suite の `command`。suite ごとに別のシェルで 1 本ずつ走らせる） | `--round-test`、`round_test` | [cross-refactoring](../../cross-refactoring/SKILL.md) の「引数」 |
-| 範囲テストのテンプレート | `{paths}` を引用の外の 1 字句として含むテストのコマンド（宣言の `scope_command` か、`{paths}` を含む引数）。`{paths}` をシェルの引用で守った対象の並びへ置き換え、シェルで走らせる | `scope_command` | [project-analysis.md](project-analysis.md) の P2 |
-| suite の種別 | テストの宣言の suite がテスト（`test`）か静的解析（`lint`。整形の検査を含む）か。書かなければテスト。テストの suite の範囲は対象のテスト、静的解析の suite の範囲は変更したファイルのうち `paths` に当たるもの | `.ndf/project.json` の `test.suites[].kind`、引数 `--test-kind` | [project-analysis.md](project-analysis.md) の P2 |
+| 範囲テストのテンプレート | `{paths}` を引用の外の 1 字句として含むテストのコマンド（設定の `scope_command` か、`{paths}` を含む引数）。`{paths}` をシェルの引用で守った対象の並びへ置き換え、シェルで走らせる | `scope_command` | [project-analysis.md](project-analysis.md) の P2 |
+| suite の種別 | テストの設定の suite がテスト（`test`）か静的解析（`lint`。整形の検査を含む）か。書かなければテスト。テストの suite の範囲は対象のテスト、静的解析の suite の範囲は変更したファイルのうち `paths` に当たるもの | `.ndf/project.json` の `test.suites[].kind`、引数 `--test-kind` | [project-analysis.md](project-analysis.md) の P2 |
 | 起動の失敗 | テストのコマンドのプロセスを起動できない、またはシェルが終了コード 126 / 127 を返したこと。テストが落ちたこととは別に扱い、その時点で止まる | `launch_failed`、`launch_failure` | [cross-refactoring](../../cross-refactoring/SKILL.md) の「この Skill で使う語」 |
-| JUnit の置き場 | テストのコマンドが JUnit XML を書くファイルの、作業ディレクトリからの相対パス（宣言の `suites[].junit`）。NDF はコマンドへ引数を足さず、このファイルから落ちたテストの ID を読む | `junit` | [project-analysis.md](project-analysis.md) の P2 |
-| 全体テスト | リポジトリ全体を範囲にするテストか静的解析。テストは宣言の `command`、無ければ範囲テストのテンプレートの `{paths}` を `.` にしたもの（その旨を注記 `WHOLE_FROM_TEMPLATE` に残す）。静的解析は宣言の `command`、無ければテンプレートの `{paths}` を範囲のパスで埋めたもの（範囲のパスが無ければ組まず、注記 `NO_LINT_WHOLE` を残す）。戦略が `local-scoped-ci-whole` なら手元で走らせず CI の結果で見る | プランの `test-all` のステップ、`.ndf/project.json` の `test.suites[].command` | `ndf plan` の docstring |
+| JUnit の保存先 | テストのコマンドが JUnit XML を書くファイルの、作業ディレクトリからの相対パス（設定の `suites[].junit`）。NDF はコマンドへ引数を足さず、このファイルから落ちたテストの ID を読む | `junit` | [project-analysis.md](project-analysis.md) の P2 |
+| 全体テスト | リポジトリ全体を範囲にするテストか静的解析。テストは設定の `command`、無ければ範囲テストのテンプレートの `{paths}` を `.` にしたもの（その旨を注記 `WHOLE_FROM_TEMPLATE` に残す）。静的解析は設定の `command`、無ければテンプレートの `{paths}` を範囲のパスで埋めたもの（範囲のパスが無ければ組まず、注記 `NO_LINT_WHOLE` を残す）。戦略が `local-scoped-ci-whole` なら手元で走らせず CI の結果で見る | プランの `test-all` のステップ、`.ndf/project.json` の `test.suites[].command` | `ndf plan` の docstring |
 | 危険フラグ | `cross-refactoring` で、範囲テストでは覆えない変更（D1〜D5）。立てば全体テストを 1 度走らせる | D1〜D5 | [cross-refactoring](../../cross-refactoring/SKILL.md) の「この Skill で使う語」 |
 | グレード | `cross-refactoring` が候補ごとに付ける適用の価値（high / medium / low）。改善項目の順位の最初のキー | `tier` | [cross-refactoring](../../cross-refactoring/SKILL.md) の「この Skill で使う語」 |
 | コメントのスナップショット | `cross-review` が取る既存コメントの一覧。2 ラウンド目以降は取り直す | `state.py init` | [cross-review](../../cross-review/SKILL.md) |
@@ -169,15 +169,15 @@ flowchart TB
 
 ## 記録と状態
 
-| 語 | 意味 | 英語や識別子 | 正本 |
+| 語 | 意味 | 英語や識別子 | SSOT |
 | --- | --- | --- | --- |
 | 進捗記録 | 工程に入った時点で 1 回打つ記録。リリース後テストだけは、受け入れ条件ごとの記録を投稿してその工程を終えた時点で打つ。課題の本文の `## 進行` も同じ 1 回で更新される | `projects-sync.sh`、`progress-record.sh` | [stage-completeness.md](stage-completeness.md) の「用語」 |
 | ボード | 進行を記録する GitHub Projects のプロジェクト 1 つ。設定が無ければ何も動かない | `.ndf/projects.json` | [projects-tracking.md](projects-tracking.md) の「用語」 |
 | 通過工程 | ある課題について、進捗記録が実際に書かれた工程の集合 | — | [stage-completeness.md](stage-completeness.md) の「用語」 |
-| 通過記録 | 通過工程を課題ごとに残したファイル | `ndf progress show <進行表の ID>` | [stage-completeness.md](stage-completeness.md) の「用語」 |
-| スプリント状態ファイル | スプリントのプラン・done・承認ゲートの記録・MVV・版を持つファイル。パスは呼ぶ側が決め、目録 `sprint.json` とは別のファイルにする。引継ぎ文書の表と ndf-next をここから作る | 例 `sprint-state.json`、`sprint-state.py init` / `update` / `gate` / `render` / `next` / `status` | `sprint-state.py` の docstring |
-| 引継ぎ文書 | 会話を切って新しいセッションで続けるための文書。メインディレクトリに置き、コミットしない。1 本が 1 つの引継ぎの対象を受け持つ。「今の会話の進み」と「次に実行するコマンド」の節はスクリプトが書く | `.ndf/handoff/<名>.md`、`handoff.py`、引継ぎ文書の表への追記（M7 #3302 が `ndf` の副命令に足す。新しいプラグインだけではまだ打てない） | [handoff.md](handoff.md) |
-| 引継ぎの対象 | 引継ぎ文書 1 本が受け持つ仕事のまとまり（スプリント・マイルストーン・課題のどれか）。名の頭になる | `sprint-` / `milestone-` / `issue-` | [handoff.md](handoff.md) の「置き場と名」 |
+| 通過記録 | 通過工程を課題ごとに残したファイル | `ndf progress show <ステートマシンの ID>` | [stage-completeness.md](stage-completeness.md) の「用語」 |
+| スプリント状態ファイル | スプリントのプラン・done・承認ゲートの記録・MVV・バージョンを持つファイル。パスは呼ぶ側が決め、目録 `sprint.json` とは別のファイルにする。引継ぎ文書の表と ndf-next をここから作る | 例 `sprint-state.json`、`sprint-state.py init` / `update` / `gate` / `render` / `next` / `status` | `sprint-state.py` の docstring |
+| 引継ぎ文書 | 会話を切って新しいセッションで続けるための文書。メインディレクトリに置き、コミットしない。1 本が 1 つの引継ぎの対象を受け持つ。「今の会話の進み」と「次に実行するコマンド」の節はスクリプトが書く | `.ndf/handoff/<名>.md`、`handoff.py`、引継ぎ文書の表への追記（M7 #3302 が `ndf` のサブコマンドに足す。新しいプラグインだけではまだ打てない） | [handoff.md](handoff.md) |
+| 引継ぎの対象 | 引継ぎ文書 1 本が受け持つ仕事のまとまり（スプリント・マイルストーン・課題のどれか）。名の頭になる | `sprint-` / `milestone-` / `issue-` | [handoff.md](handoff.md) の「保存先と名」 |
 | 引継ぎの履歴 | 引継ぎ文書の本体から終わった項目を移す文書。本体と同じ場所に置く | `<名>-history.md`、`handoff.py check --trim` | [handoff.md](handoff.md) の「作る・更新する」 |
 | ndf-next | 次のセッションの最初の入力を置く、情報文字列が `ndf-next` のコードブロック。最後の応答に 1 つだけ置く | フェンスの情報文字列 `ndf-next` | [context-window.md](context-window.md) の「新しい会話で戻す」 |
 | シグナルファイル | ラッパーへ知らせるファイル。Stop hook が最後の応答の ndf-next を移した `next.json` と、止める `stop`。ラッパーはこれを受けてセッションを切り替える | `next.json`、`stop`、Stop の hook の guard（`hooks/guards/relay_mark.py`） | [relay.md](relay.md) の「承認ゲートを越えない守り」 |
@@ -192,39 +192,39 @@ flowchart TB
 
 ## 作業場所と経路
 
-| 語 | 意味 | 英語や識別子 | 正本 |
+| 語 | 意味 | 英語や識別子 | SSOT |
 | --- | --- | --- | --- |
 | worktree | 開発の変更を行う git worktree。課題ごとに 1 つ切る | `.worktrees/<ブランチ名>`、`/ndf:worktree` | [worktree](../../worktree/SKILL.md) |
 | メインディレクトリ | リポジトリを clone したディレクトリ。`issues/` `docs/` と各ランタイムの設定は、ここで編集してよい | `git rev-parse --git-common-dir` の親 | [worktree](../../worktree/SKILL.md) の用語の表 |
 | ベースブランチ | Pull Request の宛先で、スプリントどうしを結合して試すブランチ。開発版のチャネルを兼ねることがある。worktree の分岐元はスプリントの起点が決める | `.ndf/worktree.json` の `base_branch` | [../SKILL.md](../SKILL.md) の「本番系へ届く操作」 |
-| 結合ブランチ | ベースブランチを、スプリントどうしの組み合わせを試す役割で呼ぶときの名前 | — | [worktree の ndf_settings.md](../../worktree/references/ndf-settings.md) の「ブランチ運用を宣言するリポジトリ」 |
-| ブランチ運用の宣言 | スプリントの起点・ベースブランチへ入れる時点・文書の Pull Request の宛先・本番への取り込み方を書いた設定。無ければベースブランチから切り、ベースブランチを丸ごと出す | `.ndf/worktree.json` の `branch_flow` | [worktree の ndf_settings.md](../../worktree/references/ndf-settings.md) の「ブランチ運用を宣言するリポジトリ」 |
+| 結合ブランチ | ベースブランチを、スプリントどうしの組み合わせを試す役割で呼ぶときの名前 | — | [worktree の ndf_settings.md](../../worktree/references/ndf-settings.md) の「ブランチ運用を定義するリポジトリ」 |
+| ブランチ運用の設定 | スプリントの起点・ベースブランチへ入れる時点・文書の Pull Request の宛先・本番へのリリース方式を書いた設定。無ければベースブランチから切り、ベースブランチを丸ごと出す | `.ndf/worktree.json` の `branch_flow` | [worktree の ndf_settings.md](../../worktree/references/ndf-settings.md) の「ブランチ運用を定義するリポジトリ」 |
 | スプリントの起点 | スプリントブランチと worktree を切る元のブランチ。ベースブランチか本番チャネルをチャネルの名前で指す | `branch_flow.start`（`base` / `production`） | 同上 |
 | 文書の Pull Request の宛先 | 設計 PR と確定仕様化の PR の宛先。ベースブランチかスプリントブランチ | `branch_flow.doc_prs`（`base` / `sprint`） | 同上 |
-| 本番への取り込み方 | 本番チャネルへ何をどう入れるか。ベースブランチを丸ごと出すか、選んだリリースの単位を集めるか | `branch_flow.release_strategy`（`merge_base_branch` / `release_branch`） | 同上 |
-| リリースブランチ | 本番チャネルへ入れる変更を集め、版を上げるブランチ | `release/v<版>` | [release-steps.md](../../release/references/release-steps.md) |
-| リリースの単位 | 選んで集める取り込み方で、リリースが選ぶ 1 つのブランチ。本番チャネルに含まれていないコミットを持つスプリントブランチ | `sprint/<名前>` | [worktree の ndf_settings.md](../../worktree/references/ndf-settings.md) の「ブランチ運用を宣言するリポジトリ」 |
+| 本番へのリリース方式 | 本番チャネルへ何をどう入れるか。ベースブランチを丸ごと出すか、選んだリリースの単位を集めるか | `branch_flow.release_strategy`（`merge_base_branch` / `release_branch`） | 同上 |
+| リリースブランチ | 本番チャネルへ入れる変更を集め、バージョンを上げるブランチ | `release/v<バージョン>` | [release-steps.md](../../release/references/release-steps.md) |
+| リリースの単位 | 選んで集めるリリース方式で、リリースが選ぶ 1 つのブランチ。本番チャネルに含まれていないコミットを持つスプリントブランチ | `sprint/<名前>` | [worktree の ndf_settings.md](../../worktree/references/ndf-settings.md) の「ブランチ運用を定義するリポジトリ」 |
 | スプリントブランチ | 課題の Pull Request を集め、ベースブランチへの Pull Request をスプリントで 1 本にするブランチ。`fast` では作らない | `sprint/<名前>` | [parallel-work.md](parallel-work.md) の「スプリントの中の並列の 4 つの形」 |
-| 安定版と実験版 | NDF の変更の 2 つの経路。既定で働くもの（安定版）は工程どおりに、呼んだときだけ働くもの（実験版）はその場で実装して使ってから入れる | stable / experimental、台帳 `docs/ndf-experiments.md` | ai-plugins の `AGENTS.md` の「安定版と実験版」 |
+| 安定版と実験版 | NDF の変更の 2 つの経路。既定で働くもの（安定版）は工程どおりに、呼んだときだけ働くもの（実験版）はその場で実装して使ってから入れる | stable / experimental、ジャーナル `docs/ndf-experiments.md` | ai-plugins の `AGENTS.md` の「安定版と実験版」 |
 | 即時修正 | 4 つの条件（[../SKILL.md](../SKILL.md) の「即時修正」）を満たす不具合を、起票せず、その場のプランで直すこと。マージ済みの変更の不具合なら流出不具合として記録する | `new impl --escape-of <PR>` | [../SKILL.md](../SKILL.md) の「即時修正」、[pace.md](pace.md) の「流出不具合の記録」 |
 | 範囲外の課題 | この変更の受け入れ条件にも直す対象にも入らない課題。見つけたその場で issue にする | `/ndf:out-of-scope` | [out-of-scope](../../out-of-scope/SKILL.md) |
 | 棚卸し | 既存の課題の本文・マイルストーン・ラベルを現状に合わせ、着手の順位を決め直すこと。スクラムのバックログリファインメントに当たる。工程表の行名でもある | `/ndf:backlog-refinement`、`upkeep.py`、進捗記録の `stage 棚卸し` | [backlog-refinement](../../backlog-refinement/SKILL.md) の「用語」 |
 | 実装計画 | `implementation-plan` が `issues/` に書く、実装の前の計画 | `issues/{feature-name}.md`（タスク ID があれば `issues/TASK-1234_<説明>.md`） | [implementation-plan](../../implementation-plan/SKILL.md) |
 | 確定仕様化 | 完了した実装計画を `docs/` の確定仕様へ書き直す工程 | `/ndf:plan-to-spec` | [plan-to-spec](../../plan-to-spec/SKILL.md) |
-| 用語集の設定 | プロジェクトの用語集の置き場・形式・チェックの対象を持つファイル。設計の工程を持つモードでは、これと用語集が揃うまで設計へ入らない | `.ndf/glossary.json`、`glossary.py gate` | [glossary-format.md](../../requirements-design/references/glossary-format.md) |
+| 用語集の設定 | プロジェクトの用語集の保存先・形式・チェックの対象を持つファイル。設計の工程を持つモードでは、これと用語集が揃うまで設計へ入らない | `.ndf/glossary.json`、`glossary.py gate` | [glossary-format.md](../../requirements-design/references/glossary-format.md) |
 | 仕様のコピー | 課題の本文（仕様の正）にある要求を、設計 Pull Request と一緒にコミットする `issues/` のファイル | `spec-copy.py write` / `check`、`issues/issue-<番号>-requirements.md` | [requirements-design](../../requirements-design/SKILL.md) の手順 7 |
 | 振り返り | 進め方で変えることを記録し、起票の取りこぼしを拾う工程 | `/ndf:retrospective` | [retrospective](../../retrospective/SKILL.md) |
 
 ## 語を足すときの規則
 
-- **日本のエンジニア業界で流通している語を使う。** 正本は `document-style` のルール 11 である。業界に定着した
+- **日本のエンジニア業界で流通している語を使う。** SSOT は `document-style` のルール 11 である。業界に定着した
   カタカナ語・英語（リファクタリング・ベースブランチ・worktree・パイプライン・エビデンスなど）があれば、それを採る
-- **直訳の和語を、語にも意味の文にも使わない。** 段・鎖・束・まとまり・器・持ち場・入れ物などである
+- **直訳の和語を、語にも意味の文にも使わない。** ステップ・鎖・束・まとまり・器・持ち場・入れ物などである
 - **複合語は「の」でつながず、業界で使う形にする。** 実行条件・進捗記録のように書く
 - **足す前にこの用語集と突き合わせる。** 同じ字が別の意味で載っていれば、別の語を選ぶ。業界の語が NDF の別の語と
   ぶつかるときは、複合語で分ける
 - **裸の語は 1 つの意味だけに使う。** 意味を足したくなったら複合語にする（モード判定・MVV 判定・進捗記録など）。複合語は別の語として表に載せる
 - **一般語はそのまま使ってよい。** 段階・手段・区切り文字のように、用語として定めていない語は対象にしない
-- **足した語はこの表に 1 行を加える。** 正本の文書は、その語の定義を持つ 1 か所に決める
+- **足した語はこの表に 1 行を加える。** SSOT の文書は、その語の定義を持つ 1 か所に決める
 - **この規則は NDF の語彙とこのリポジトリの用語集（`docs/glossary/glossary.json`）に当てる。** ほかのプロジェクトの
   用語集の語は、そのプロジェクトの領域で決める

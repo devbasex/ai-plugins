@@ -9,7 +9,7 @@ allowed-tools:
 
 # worktree で開発する
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `projects-sync.sh`（M7）・`worktree-deps.sh`（M8）・`worktree-localenv.sh`（M8）・`worktree-setup.sh`（M8）・`worktree-testenv.sh`（M8）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトのサブコマンドは新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `projects-sync.sh`（M7）・`worktree-deps.sh`（M8）・`worktree-localenv.sh`（M8）・`worktree-setup.sh`（M8）・`worktree-testenv.sh`（M8）。移行先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 開発の変更は、git の worktree の中で行い、リポジトリを clone したディレクトリには加えない。
 並行して複数の作業を進めても、互いの変更が同じ作業ディレクトリで混ざらない状態を保つ。
@@ -24,7 +24,7 @@ allowed-tools:
 | レビュー worktree | `cross-review` と `cross-refactoring` が一時的に使うもの。システムの一時ディレクトリに置く |
 
 この Skill が扱うのは開発 worktree だけである。レビュー worktree は
-それぞれの Skill が作って捨てるため、置き場所も後片付けの主体も異なる。
+それぞれの Skill が作って捨てるため、置く場所も後片付けの主体も異なる。
 
 ## メインディレクトリを編集してよい場合
 
@@ -112,7 +112,7 @@ wt_in_worktree && echo "worktreeの中" || echo "メインディレクトリ"
 
 ### 2-1. `superpowers:using-git-worktrees` があれば委譲する
 
-外部 Skill が導入されているときは、作成の手順をそちらへ渡す。置き場所の既定は
+外部 Skill が導入されているときは、作成の手順をそちらへ渡す。置く場所の既定は
 どちらも `.worktrees/` で一致するため、結果は変わらない。
 
 導入の有無は、利用できる Skill の一覧に `superpowers:using-git-worktrees` が
@@ -145,7 +145,7 @@ fi
 
 ### 2-3. 作成して移る
 
-置き場所はブランチ名をそのまま使う。`feature/foo` は `.worktrees/feature/foo` になり、
+置く場所はブランチ名をそのまま使う。`feature/foo` は `.worktrees/feature/foo` になり、
 ブランチ名から場所が一意に決まる。
 
 ```bash
@@ -218,7 +218,7 @@ git -C "$target" status --short
 ```
 
 手順 2 で `git diff` ではなく `git diff HEAD` を使う。`git diff` は `git add` 済みの
-変更を差分に含めないため、取り込み済みの変更があるとパッチが空になる。手順 3 で
+変更を差分に含めないため、マージ済みの変更があるとパッチが空になる。手順 3 で
 中身の有無を見るのは、変更が未追跡ファイルだけのときにパッチが空になり、`git apply`
 が入力なしとして失敗するためである。
 
@@ -275,7 +275,7 @@ Pull Request がマージされた後の削除は `/ndf:merged` が行う。
 
 **NDF の手順は `EnterWorktree` と Agent の `isolation: "worktree"` を使わない。** 隔離したセッションでは、
 Claude Code 本体が Bash を走らせる直前に「git がメインディレクトリを触らない」と示せないコマンドを拒む
-（`Refusing to run it`）。判定は権限モードに関係なく働き、版で変わる。
+（`Refusing to run it`）。判定は権限モードに関係なく働き、バージョンで変わる。
 
 | 状況 | どこで何を打つか |
 | --- | --- |
@@ -301,12 +301,12 @@ worktree は追跡されているファイルしか持たないため、`vendor/
 出力の末尾を出して 0 以外で終わる。**worktree は消さない。** 直してから手で打ち直す。
 
 ```bash
-bash "$SCRIPTS/worktree-deps.sh" prepare "$WT"                  # 印を見ずにやり直す
+bash "$SCRIPTS/worktree-deps.sh" prepare "$WT"                  # マーカーを見ずにやり直す
 bash "$SCRIPTS/worktree-deps.sh" prepare "$WT" --if-unprepared  # 用意が済んでいなければ用意する
 ```
 
-用意が済むと worktree ごとの git の管理ディレクトリに印（`ndf-deps`）を書く。印は用意した時の HEAD と宣言の
-中身を持つ。使い回す worktree は、HEAD も宣言も変わっていなければやり直さない（別の commit へ同期した後はやり直す）。
+用意が済むと worktree ごとの git の管理ディレクトリにマーカー（`ndf-deps`）を書く。マーカーは用意した時の HEAD と設定の
+中身を持つ。使い回す worktree は、HEAD も設定も変わっていなければやり直さない（別の commit へ同期した後はやり直す）。
 このやり直しでは、既にある `copy_from_main` / `copy_as_real` の宛先はメインディレクトリと食い違っていてもそのまま使い、
 無い宛先の複製と `run` だけを走らせる（`run` が入れ替えた依存物や、メインディレクトリ側の更新で止めない）。
 コミットしていない lock ファイルの変更などで用意し直すときは、引数なしの `prepare` を打つ。
@@ -332,7 +332,7 @@ bash "$NDF" verify "$WT"; echo $?  # 0 一致 / 1 不一致 / 2 未起動
 ```
 
 **対象の worktree を引数で渡す。** 省略すると現在地が対象になるため、メインディレクトリから
-実行するとメインディレクトリを照合してしまう。
+実行するとメインディレクトリを検証してしまう。
 
 **検証の直前に `verify` を通す。** ローカル環境に載っているコードが対象と違っていても、失敗と
 しては現れない。別のコードを検証したことに気づけないまま進む。
@@ -355,11 +355,11 @@ bash "$TE" test "$WT" --kind stateful       # 実行したコマンドの終了�
 bash "$TE" down "$WT"                       # 破棄し、割り当てを解放する。ボリュームも消す（消すのは既定で、戻せない）
 ```
 
-**テストのステップは、止まっているテスト環境を自動で起こす。** `/ndf:merged` の後片付けは worktree を外す前に破棄する。
+**テストのステップは、止まっているテスト環境を自動で起動する。** `/ndf:merged` の後片付けは worktree を外す前に破棄する。
 手で worktree を消すときは先に `down "$WT"` を打つ。worktree が消えた割り当ては、後片付けとスロットの枯渇のときに
 NDF が回収する（`reclaim`）。
-ボリュームを残すのは `.ndf/worktree.json` の `testenv.discard_volumes` に `false` を宣言したときだけで、宣言より優先して
-消すときは `--volumes` を付ける。データを残して止めるのは `stop "$WT"` である。起こし方・破棄の担い手・回収の結果の読み方・
+ボリュームを残すのは `.ndf/worktree.json` の `testenv.discard_volumes` に `false` を定義したときだけで、設定より優先して
+消すときは `--volumes` を付ける。データを残して止めるのは `stop "$WT"` である。起動方・破棄の担い手・回収の結果の読み方・
 残ったボリュームの消し方も `references/test-execution.md` にある。
 
 worktree レジストリは共通の git ディレクトリ配下（`.git/ndf/worktree-registry.json`）に置く。worktree の

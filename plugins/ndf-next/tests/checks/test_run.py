@@ -99,7 +99,7 @@ def test_collect_does_not_descend_into_skipped_dirs(plugin, monkeypatch):
     assert not any(".venv" in top for top in walked)
 
 
-# 結果の契約（ndf.contracts.result）に合う 1 行を出し、種類の終了コードを返す（#3394 の 3394-2）
+# 結果のコントラクト（ndf.contracts.result）に合う 1 行を出し、種類の終了コードを返す（#3394 の 3394-2）
 def test_emit_ok_prints_one_line_without_cause(capsys):
     assert run.emit("3 ファイルに違反なし", [], {"files": 3, "findings": {}}) == exit_codes.code_of("ok")
     out = capsys.readouterr()

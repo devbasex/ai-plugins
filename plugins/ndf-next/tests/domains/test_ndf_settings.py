@@ -1,4 +1,4 @@
-"""置き場・NDF が書くファイル・環境変数・PR 本文の部品・指示書の表（D2）を、読み手が頼る性質で確かめる。"""
+"""保存先・NDF が書くファイル・環境変数・PR 本文の部品・指示書の表（D2）を、読み手が頼る性質で確かめる。"""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ def test_measured_values_are_never_written_to_a_tracked_file():
 def test_test_command_is_declared_in_one_file():
     holders = [fid for fid, keys in facts.column(FILES, "keys").items() if "test" in keys]
     assert holders == ["project"]
-    # 計測値は宣言と別のファイルが持ち、宣言のキーと重ならない
+    # 計測値は設定と別のファイルが持ち、設定のキーと重ならない
     measured = {k for r in facts.rows(FILES, kind="measured") for k in r["keys"]}
     assert not measured & set(facts.value(FILES, "project", "keys"))
 
@@ -59,7 +59,7 @@ def _assemble(parts: dict[str, str]) -> list[str]:
 
 
 def _section(lines: list[str], heading: str) -> list[str]:
-    """節の中身: 見出しの次から、次の部品（見出し・行の印・署名）の前まで。"""
+    """節の中身: 見出しの次から、次の部品（見出し・行のマーカー・署名）の前まで。"""
     starts = tuple(r["text"] for r in facts.rows("pr-body"))
     i = lines.index(heading) + 1
     j = next((k for k in range(i, len(lines)) if lines[k].startswith(starts)), len(lines))
@@ -103,7 +103,7 @@ def test_main_keys_are_declared_keys_and_guard_authorization():
 def test_each_ndf_settings_has_one_file():
     paths = [r["path"] for r in facts.rows(FILES, kind="ndf_settings")]
     assert len(paths) == len(set(paths))
-    # リポジトリへ載る宣言は `.ndf` に置く。手元だけの宣言（中継のアカウントの指定など）は追跡しない置き場に置く
+    # リポジトリへ載る設定は `.ndf` に置く。手元だけの設定（中継のアカウントの指定など）は追跡しない保存先に置く
     tracked = facts.column("locations", "tracked")
     for r in facts.rows(FILES, kind="ndf_settings"):
         assert r["location"] == "ndf" or not tracked[r["location"]], r["id"]

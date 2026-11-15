@@ -1,4 +1,4 @@
-"""副命令 `ndf progress`（受け入れ条件 1・2・3・5・10。P1-2 の戻し）。"""
+"""サブコマンド `ndf progress`（受け入れ条件 1・2・3・5・10。P1-2 の戻し）。"""
 
 from __future__ import annotations
 
@@ -184,10 +184,10 @@ def test_stopped_from_anything_else_is_a_precondition_outside_git():
     exc = subprocess.CalledProcessError(128, ["git", "rev-parse"])
     kind, detail, items, _ = _stopped(exc)
     assert kind == "precondition" and items == []
-    assert detail == f"git の中で打つ（チェックアウトの置き場を求められない）: {exc}"
+    assert detail == f"git の中で打つ（チェックアウトの保存先を求められない）: {exc}"
 
 
-# --- 現状固定: `.ndf/project.json` の工程の宣言の読み取り（_declared） ----------------------------------
+# --- 現状固定: `.ndf/project.json` の工程の設定の読み取り（_declared） ----------------------------------
 
 
 def _declare(repo: Path, raw: str) -> Path:
@@ -270,7 +270,7 @@ def test_requirements_is_refused_in_a_mode_without_the_requirements_stage(repo, 
     assert "要求と受け入れ条件の工程が無い" in out["cause"]["detail"]
 
 
-# --- 現状固定: 進行表の作成（_cmd_new） ------------------------------------------------------------
+# --- 現状固定: ステートマシンの作成（_cmd_new） ------------------------------------------------------------
 
 
 def _stored(tid: str) -> tuple[dict, dict]:
@@ -286,7 +286,7 @@ def test_new_reports_the_machine_id_rows_and_disabled_in_summary_and_metrics(rep
     tid = model.machine_id("sprint", str(repo), "s1")
     assert code == 0 and out["tool"] == "progress"
     assert out["metrics"] == {"machine_id": tid, "rows": 18, "disabled": ["振り返り"]}
-    assert out["summary"] == f"進行表 {tid} を作った（18 行、無効 1 行）"
+    assert out["summary"] == f"ステートマシン {tid} を作った（18 行、無効 1 行）"
     assert set(out["items"][0]) == {"stage", "phase", "state", "label", "at", "reason", "gates"}
 
 
@@ -320,7 +320,7 @@ def test_unreachable_database_stops_as_store_unreachable_without_the_password(re
 def test_stopped_from_a_bare_sqlalchemy_error_shows_only_its_type():
     import sqlalchemy as sa
 
-    assert _stopped(sa.exc.ArgumentError("postgresql://u:pw@h/db"))[:2] == ("store_unreachable", "進行表の DB を使えない: ArgumentError")
+    assert _stopped(sa.exc.ArgumentError("postgresql://u:pw@h/db"))[:2] == ("store_unreachable", "ステートマシンの DB を使えない: ArgumentError")
 
 
 def test_sqlite_url_with_a_query_stops_as_invalid_before_preparing_the_store(repo, capsys, monkeypatch, tmp_path, last_result):
@@ -362,7 +362,7 @@ def test_new_writes_created_then_disabled_then_finished_events(repo, capsys, tmp
     tail = [(h["kind"], h["row_key"], h["reason"], h["payload"]) for h in history[18:]]
     assert tail == [
         ("disabled", "振り返り", "不要", {"source": "sprint"}),
-        ("manual_finished", "要求と受け入れ条件", "進行表の作成の時点で済んでいる", {"output": str(req)}),
+        ("manual_finished", "要求と受け入れ条件", "ステートマシンの作成の時点で済んでいる", {"output": str(req)}),
     ]
     assert shown["metrics"]["mode"] == "standard" and shown["metrics"]["rev"] == 1
 
@@ -382,7 +382,7 @@ def test_new_stops_as_invalid_with_one_item_per_error(repo, capsys, extra, prefi
 
 @pytest.mark.parametrize("extra", [("--pace", "slow"), ("--issues", "5", "5"), ("--disable", "存在しない=理由")])
 def test_new_that_stops_as_invalid_leaves_no_table(repo, capsys, extra, last_result):
-    """現状固定: 文脈か --disable で止まった new は進行表を残さず、同じ名前で作り直せる。"""
+    """現状固定: 文脈か --disable で止まった new はステートマシンを残さず、同じ名前で作り直せる。"""
     code, out = _new(capsys, last_result, *extra)
     assert code == 2 and out["cause"]["kind"] == "invalid"
     code, out = _new(capsys, last_result)

@@ -86,7 +86,7 @@
         },
         "--if-unprepared": {
           "type": "boolean",
-          "description": "今の HEAD と宣言で用意した印があれば何もしない"
+          "description": "今の HEAD と設定で用意したマーカーがあれば何もしない"
         }
       },
       "required": [
@@ -140,7 +140,7 @@
         },
         "--force": {
           "type": "boolean",
-          "description": "既にある宣言を書き直す"
+          "description": "既にある設定を書き直す"
         }
       },
       "required": [

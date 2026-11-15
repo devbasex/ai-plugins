@@ -1,4 +1,4 @@
-"""セッションを始めたときのブランチの追従（宣言の `follow_branch: true` のときだけ。判断は `session_decide.follow_target`）。
+"""セッションを始めたときのブランチの追従（設定の `follow_branch: true` のときだけ。判断は `session_decide.follow_target`）。
 
 メインディレクトリの HEAD を、稼働中の開発 worktree のブランチ（1 つだけのとき）か、ベースブランチの指すコミットへ
 detached HEAD で合わせる。HEAD を動かす git の操作はメインディレクトリの排他（`mainlock`）の中で行う。合わせる先を

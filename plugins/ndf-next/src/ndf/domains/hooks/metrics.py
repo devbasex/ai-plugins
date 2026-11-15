@@ -1,9 +1,9 @@
 """hook の計測（#3345 の決定 94・IH9）。
 
-エントリポイントは起動ごとに `<状態の置き場>/hooks/<日付>.jsonl` へ 1 行を 1 回の追記（`O_APPEND`）で書く。書けなくても
+エントリポイントは起動ごとに `<状態の保存先>/hooks/<日付>.jsonl` へ 1 行を 1 回の追記（`O_APPEND`）で書く。書けなくても
 判定は変えない。古い日のファイルを消すのは SessionStart のエントリポイントだけ（`prune`）で、ほかの事象ではディレクトリを
-走査しない。注入の控え・セッションの数え手・送信待ちの古いファイルも同じ時に消す（`prune_state`）。
-`stats` は記録から事象・guard ごとの p50・p95・拒否と差し戻しの数・注入の最大を返す。
+走査しない。注入のバックアップ・セッションの数え手・送信待ちの古いファイルも同じ時に消す（`prune_state`）。
+`stats` は記録から事象・guard ごとの p50・p95・拒否と変更要求の数・注入の最大を返す。
 """
 
 from __future__ import annotations
@@ -25,12 +25,12 @@ def keep_days() -> float:
 
 
 def new_record(path: str) -> dict[str, Any]:
-    """計測の 1 行の雛形。`path` はエントリポイント（`entry`・`boot`）。"""
+    """計測の 1 行のテンプレート。`path` はエントリポイント（`entry`・`boot`）。"""
     return {"runtime": None, "event": None, "tool": None, "path": path, "guards": [], "verdict": "pass", "error": ""}
 
 
 def state_dir_or_none() -> Optional[Path]:
-    """計測を書く状態の置き場。plugin.json を読めなければ None（計測を書かない）。"""
+    """計測を書く状態の保存先。plugin.json を読めなければ None（計測を書かない）。"""
     from ndf import identity
 
     try:
@@ -76,12 +76,12 @@ def prune(state_dir: Path, days: float, now: Optional[datetime] = None) -> int:
     return removed
 
 
-# 状態の置き場のうち、SessionStart で古いファイルを消す置き場（注入の控え・セッションの数え手・送信待ち）と名前の形
+# 状態の保存先のうち、SessionStart で古いファイルを消す保存先（注入のバックアップ・セッションの数え手・送信待ち）と名前の形
 _AGED = (("notes", "*.md"), ("sessions", "*.json"), ("outbox", "*/*.json"))
 
 
 def prune_state(state_dir: Path, days: float, now: Optional[float] = None) -> int:
-    """注入の控え・セッションの数え手・送信待ちのうち、`days` 日より前から更新の無いファイルを消し、消した数を返す。
+    """注入のバックアップ・セッションの数え手・送信待ちのうち、`days` 日より前から更新の無いファイルを消し、消した数を返す。
 
     SessionStart のエントリポイントだけが呼ぶ。錠のファイル（`.` で始まる名前）は消さない。
     """
@@ -98,7 +98,7 @@ def prune_state(state_dir: Path, days: float, now: Optional[float] = None) -> in
 
 
 def _aged_files(state_dir: Path) -> Iterator[Path]:
-    """`_AGED` の置き場ごとの、名前の形に合うファイル。"""
+    """`_AGED` の保存先ごとの、名前の形に合うファイル。"""
     for sub, pattern in _AGED:
         yield from sorted((tables.hooks_dir(state_dir) / sub).glob(pattern))
 
@@ -138,7 +138,7 @@ def percentile(values: Iterable[float], q: float) -> Optional[float]:
 
 
 def stats(records: list[dict[str, Any]]) -> dict[str, Any]:
-    """事象ごとと guard ごとの p50・p95（ミリ秒）・拒否と差し戻しの数・注入の最大の字数。"""
+    """事象ごとと guard ごとの p50・p95（ミリ秒）・拒否と変更要求の数・注入の最大の字数。"""
     events: dict[str, list[dict[str, Any]]] = {}
     guards: dict[str, list[dict[str, Any]]] = {}
     for rec in records:

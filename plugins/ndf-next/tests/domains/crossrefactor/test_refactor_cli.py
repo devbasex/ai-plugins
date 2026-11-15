@@ -1,6 +1,6 @@
-"""副命令 `ndf refactor`（touched・tests・collected）の結果 JSON と止まり方。
+"""サブコマンド `ndf refactor`（touched・tests・collected）の結果 JSON と止まり方。
 
-- I9: テストの枠の待ちの諦めとメモリの停止は、落ちたテストと別の止まった理由で結果 JSON を出す
+- I9: テストのスロットの待ちの諦めとメモリの停止は、落ちたテストと別の停止理由で結果 JSON を出す
 """
 
 from __future__ import annotations

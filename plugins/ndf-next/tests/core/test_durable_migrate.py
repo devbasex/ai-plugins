@@ -1,7 +1,7 @@
-"""DBOS の版を変えたときの表の移行（B12）。前の版で作った鍵のファイルを今の版で開き、途中の実行が回復する。
+"""DBOS のバージョンを変えたときの表の移行（B12）。前のバージョンで作ったキーのファイルを今のバージョンで開き、途中の実行が回復する。
 
-見本 `fixtures/dbos-<前の版>-pending.sqlite` は `_durable_old_make.py` で作る（ステップ 1 を記録し、ステップ 2 で落ちた）。
-DBOS の版を上げる PR は、上げる前の版で見本を作り直す。
+見本 `fixtures/dbos-<前のバージョン>-pending.sqlite` は `_durable_old_make.py` で作る（ステップ 1 を記録し、ステップ 2 で落ちた）。
+DBOS のバージョンを上げる PR は、上げる前のバージョンで見本を作り直す。
 """
 
 from __future__ import annotations

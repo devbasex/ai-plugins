@@ -1,4 +1,4 @@
-"""承認ゲートの問い・答えごとの行き先・答えの証拠（#3295。3364-2・3390-2・決定 99・決定 17）。"""
+"""承認ゲートの質問・回答ごとのルート・回答の証拠（#3295。3364-2・3390-2・決定 99・決定 17）。"""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ def _waiting(st, tid, **kw):
 
 def _give(st, tid, q, value="approved", **kw):
     kw.setdefault("key", KEY)
-    a = gate.Answer(q.id, value, "人が答えた", BY, kw.pop("key"), **kw)
+    a = gate.Answer(q.id, value, "人が回答した", BY, kw.pop("key"), **kw)
     return gate.answer(st, tid, a)
 
 
@@ -48,7 +48,7 @@ def test_the_answer_keeps_who_answered_the_key_and_what_was_seen_and_is_idempote
     assert first["status"] == "ok" and first["next"]["argv"] == ["ndf", "progress", "next", tid]
     ev = [e for e in run.read(st, tid).events if e.draft.kind == "answered"][-1]
     p = ev.draft.payload
-    # 事象の書き手は答えを書いた conductor で、答えた者は payload の by に残る（run.answer_draft）
+    # 事象の書き手は回答を書いた conductor で、回答した者は payload の by に残る（run.answer_draft）
     assert (
         ev.draft.actor == run.CONDUCTOR
         and p["by"] == BY
@@ -59,7 +59,7 @@ def test_the_answer_keeps_who_answered_the_key_and_what_was_seen_and_is_idempote
     )
     again = _give(st, tid, q)
     assert again["metrics"]["replayed"] is True and again["metrics"]["seqs"] == first["metrics"]["seqs"]
-    with pytest.raises(model.Refused, match="別の答え"):
+    with pytest.raises(model.Refused, match="別の回答"):
         _give(st, tid, q, "rejected")
 
 
@@ -68,8 +68,8 @@ def test_answers_before_the_gate_or_to_another_question_are_refused(st, new_tabl
     with pytest.raises(model.Refused, match="待っていない"):
         gate.answer(st, tid, gate.Answer("x", "approved", "早い", BY, KEY))
     flow.turn(tid)
-    with pytest.raises(model.Refused, match="今の問い"):
-        gate.answer(st, tid, gate.Answer("0" * 16, "approved", "違う問い", BY, KEY))
+    with pytest.raises(model.Refused, match="今の質問"):
+        gate.answer(st, tid, gate.Answer("0" * 16, "approved", "違う質問", BY, KEY))
     with pytest.raises(model.Refused, match="形が違う"):
         gate.answer(st, tid, gate.Answer(_waiting(st, tid).id, "approved", "誰か", "someone", KEY))
 
@@ -79,7 +79,7 @@ def test_an_answer_without_the_question_id_is_refused_at_the_gate(st, new_table,
     flow.turn(tid)
     q = _waiting(st, tid)
     with pytest.raises(model.Refused, match="ndf answer"):
-        run.answer(st, tid, q.stage, "approved", "問いの id が無い", None)
+        run.answer(st, tid, q.stage, "approved", "質問の id が無い", None)
     assert gate.waiting(run.read(st, tid)) == q
 
 
@@ -103,7 +103,7 @@ def test_a_revised_stage_asks_a_new_question_and_the_rejections_are_counted(st, 
     assert flow.turn(tid)["status"] == "gate"
     new = _waiting(st, tid)
     assert new.id != old.id
-    with pytest.raises(model.Refused, match="今の問い"):
+    with pytest.raises(model.Refused, match="今の質問"):
         _give(st, tid, old, key="k-2")
     assert gate.rejections(run.read(st, tid).events) == {"design": 1}
 
@@ -139,7 +139,7 @@ def test_dropped_issues_go_to_the_next_row_of_the_same_lane(st, lane_sprint, flo
 
 
 def test_an_answer_sent_back_to_waiting_restores_the_dropped_issues(st, lane_sprint, flow):
-    # 答えた後に対象が変わって待ちへ戻すと、外した課題はスプリントへ戻り、入れた行は取り消され、答え直しで同じ課題を外せる
+    # 回答した後に対象が変わって待ちへ戻すと、外した課題はスプリントへ戻り、入れた行は取り消され、回答し直しで同じ課題を外せる
     pid, tid = lane_sprint("--issues", "3092", "5")
     flow.turn(tid)
     out = _give(st, tid, _waiting(st, tid), drop=(3092,), seen=gate.Target(head="h1"))
@@ -173,7 +173,7 @@ def test_ask_waits_for_the_plan_gate_and_the_entry_is_on_the_command_table(capsy
 
 
 def test_answers_are_copied_to_the_gate_rejections_file_for_the_service(st, new_table, flow, tmp_path, monkeypatch):
-    # #3136: 正本は事象 answered で、サービスが読む gate-rejections.jsonl へ写す
+    # #3136: SSOT は事象 answered で、サービスが読む gate-rejections.jsonl へ写す
     monkeypatch.setenv("NDF_MVV_STATE_DIR", str(tmp_path / "mvv"))
     tid = new_table()
     flow.turn(tid)
@@ -195,18 +195,18 @@ def test_an_unwritable_gate_rejections_file_is_a_warning_and_the_answer_stays(st
 
 
 def test_the_conductor_reads_the_choice_the_notes_who_and_when(st, new_table, flow, tmp_path):
-    # #2934・#3174: 答えの選択肢と指摘を分け、答えた者と時刻を持つ
+    # #2934・#3174: 回答の選択肢と指摘を分け、回答した者と時刻を持つ
     tid = new_table()
     flow.turn(tid)
     notes = tmp_path / "notes.md"
     notes.write_text("節 2 の根拠が足りない")
     _give(st, tid, _waiting(st, tid), "request_changes", notes=notes)
     (got,) = gate.answers(run.read(st, tid))
-    assert got["answer"] == "request_changes" and got["notes"] == "節 2 の根拠が足りない" and got["reason"] == "人が答えた"
+    assert got["answer"] == "request_changes" and got["notes"] == "節 2 の根拠が足りない" and got["reason"] == "人が回答した"
     assert got["by"] == BY and got["at"] and got["gate"] == "design" and got["stage"] == "設計"
 
 
-# --- 現状固定: gate.rejections（I-014。承認しなかった承認ゲートの答えを区分ごとに数える） -------------------
+# --- 現状固定: gate.rejections（I-014。承認しなかった承認ゲートの回答を区分ごとに数える） -------------------
 
 
 def _event(seq, event_kind, **payload):
@@ -222,8 +222,8 @@ def test_current_rejections_count_the_unapproved_listen_answers_per_gate_in_firs
         _event(4, run.ANSWERED, answer=run.APPROVED, kind=invoke.LISTEN, gate="design"),
         _event(5, run.ANSWERED, answer=run.REJECTED, kind=invoke.LISTEN, gate=None),
         _event(6, run.ANSWERED, answer=run.REJECTED, kind=invoke.LISTEN, gate="design"),
-        _event(7, run.ANSWERED, answer=run.REQUEST_CHANGES, kind="plan", gate="release"),  # プランの中の承認ゲートの答えは数えない
-        _event(8, run.STARTED, answer=run.REJECTED, kind=invoke.LISTEN, gate="design"),  # 答えの事象でなければ数えない
+        _event(7, run.ANSWERED, answer=run.REQUEST_CHANGES, kind="plan", gate="release"),  # プランの中の承認ゲートの回答は数えない
+        _event(8, run.STARTED, answer=run.REJECTED, kind=invoke.LISTEN, gate="design"),  # 回答の事象でなければ数えない
     ]
     counted = gate.rejections(events)
     assert counted == {"release": 2, "plan": 2, "design": 1}
@@ -231,7 +231,7 @@ def test_current_rejections_count_the_unapproved_listen_answers_per_gate_in_firs
     assert gate.rejections([]) == {}
 
 
-# --- 現状固定: gate.main の ndf answer の副命令（I-017。ask・list・head の振り分け） ------------------------
+# --- 現状固定: gate.main の ndf answer のサブコマンド（I-017。ask・list・head の振り分け） ------------------------
 
 
 def _last_json(capsys):

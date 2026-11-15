@@ -1,4 +1,4 @@
-"""テストの枠の上限の値（#2711 の契約「設定 `.ndf/resources.json`」・決定 5）。
+"""テストのスロットの上限の値（#2711 のコントラクト「設定 `.ndf/resources.json`」・決定 5）。
 
 設定は、呼ばれた位置から根へ向かって最初に見つかる `.ndf/` から読む（`ndf.testing.declared.find_setting`）。
 設定を書き換えるコマンドは作らない。
@@ -18,7 +18,7 @@ from ndf.testing.declared import find_setting
 
 RESOURCES_FILE = "resources.json"
 SECTION = "test_slots"
-# 1 本の全体テストが使う CPU の数（`-n 4`。決定 5）。メモリの見込みは重い起動の枠のテストの重み
+# 1 本の全体テストが使う CPU の数（`-n 4`。決定 5）。メモリの見込みは重い起動のスロットのテストの重み
 CPUS_PER_RUN = 4
 # メモリの下限の最小と、全体のメモリに対する割合（earlyoom の既定に揃える）
 FLOOR_MIN_MIB = 2 * 1024
@@ -48,11 +48,11 @@ class Limits:
 
     @property
     def capacity_mib(self) -> int:
-        """重い起動の枠の容量。テスト `max_runs` 本の重みの合計で、LLM の CLI もこの中で数える（#3368）。"""
+        """重い起動のスロットの容量。テスト `max_runs` 本の重みの合計で、LLM の CLI もこの中で数える（#3368）。"""
         return self.max_runs * test_weight_mib()
 
 
-# 設定の鍵（Limits のフィールドの名前と同じ）
+# 設定のキー（Limits のフィールドの名前と同じ）
 _LIMIT_KEYS = tuple(f.name for f in dataclasses.fields(Limits))
 
 

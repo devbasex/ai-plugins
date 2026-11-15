@@ -1,7 +1,7 @@
 """引継ぎ文書の本体の検査と退避の判断（純粋な関数。N8a・#1785・#1835）。
 
-引継ぎ文書は区間の頭で毎回読まれるため、行数とバイト数の上限で大きさを抑える。雛形に無い節（「セッション 95 の
-記録」など）と「前の会話の進み」は退避先へ移し、本体には雛形の節だけを残す。本文に書いたパス（「作成済み」と
+引継ぎ文書はセグメントの頭で毎回読まれるため、行数とバイト数の上限で大きさを抑える。テンプレートに無い節（「セッション 95 の
+記録」など）と「前の会話の進み」は退避先へ移し、本体にはテンプレートの節だけを残す。本文に書いたパス（「作成済み」と
 書いたファイル）が無ければ、書いた直後と読む時点の両方で気付けるよう違反にする。
 """
 
@@ -11,7 +11,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-# 雛形の節（この順で本体に残す）
+# テンプレートの節（この順で本体に残す）
 TEMPLATE_SECTIONS = (
     "進め方（利用者の指示）",
     "課題の順",
@@ -21,7 +21,7 @@ TEMPLATE_SECTIONS = (
     "運用の知見",
     "次に実行するコマンド",
 )
-# 行内のコードのうち、パスとして実在を確かめる候補（/ を含むか、拡張子を持つ。空白・URL・置き換える印を含まない）。
+# 行内のコードのうち、パスとして実在を確かめる候補（/ を含むか、拡張子を持つ。空白・URL・置き換えるマーカーを含まない）。
 # 候補はファイルを作ったと書いた行（_CREATED のどれかを含む行）からだけ取る。ほかの行の版数（`10.17.x`）・
 # ブランチ（`origin/develop`）・属性（`facts.value`）はパスでないため数えない
 _CREATED = ("作成済み", "作成した")
@@ -33,7 +33,7 @@ _H2 = re.compile(r"^## (.+?)\s*$")
 
 @dataclass(frozen=True)
 class Limits:
-    """本体の上限（契約の limits の handoff.lines・handoff.bytes）。"""
+    """本体の上限（コントラクトの limits の handoff.lines・handoff.bytes）。"""
 
     max_lines: int
     max_bytes: int
@@ -82,9 +82,9 @@ def path_candidates(text: str) -> list[str]:
 
 
 def check_body(text: str, present: Callable[[str], bool], limits: Limits) -> CheckReport:
-    """本体の節の形・行数・バイト数・本文に書いたパスの実在を確かめる。`present` はパスが実在するかを答える。"""
+    """本体の節の形・行数・バイト数・本文に書いたパスの実在を確かめる。`present` はパスが実在するかを回答する。"""
     names = [name for name, _ in sections(text) if name is not None]
-    violations = [f"雛形に無い節: {n}" for n in names if n not in TEMPLATE_SECTIONS]
+    violations = [f"テンプレートに無い節: {n}" for n in names if n not in TEMPLATE_SECTIONS]
     violations += [f"節が重なる: {n}" for n in sorted({n for n in names if names.count(n) > 1})]
     lines = len(text.splitlines())
     size = len(text.encode("utf-8"))
@@ -99,7 +99,7 @@ def check_body(text: str, present: Callable[[str], bool], limits: Limits) -> Che
 def trim(text: str) -> tuple[str, list[str]]:
     """本体に残す本文と、退避先へ移す節（見出しを含む本文）の一覧を返す。移す節が無ければ本文をそのまま返す。
 
-    雛形に無い節（「前の会話の進み」も雛形に無い）を移す。返す本文の `## ` の節は雛形の節だけになる。
+    テンプレートに無い節（「前の会話の進み」もテンプレートに無い）を移す。返す本文の `## ` の節はテンプレートの節だけになる。
     """
     kept: list[str] = []
     moved: list[str] = []

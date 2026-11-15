@@ -102,10 +102,10 @@ def test_domain_tables_are_checked_and_names_do_not_repeat(with_schema, rules):
     plugin.write("contracts/domains/seats.json", table([{"id": "a"}, {"id": "a"}], {}))
     found = facts.check(plugin.scope(), rules)
     details = sorted((f.path.rsplit("/", 2)[-2], f.detail) for f in found if f.rule == "fact-table")
-    assert details == [("domains", "`id` の重なり: a"), ("domains", "表の名前 stages が別の置き場の表と重なる")]
+    assert details == [("domains", "`id` の重なり: a"), ("domains", "表の名前 stages が別の保存先の表と重なる")]
 
 
-# 現状固定テスト（I-002）: 列の宣言から作る行の形。`contracts/facts.py` の `_row_schema` と次の 2 点が違う（今の出力を固定する）。
+# 現状固定テスト（I-002）: 列の設定から作る行の形。`contracts/facts.py` の `_row_schema` と次の 2 点が違う（今の出力を固定する）。
 # - `id` に `minLength` を付けない
 # - `optional` は `True` のときだけ欠いてよい（真に見えるだけの値では必須のまま）
 

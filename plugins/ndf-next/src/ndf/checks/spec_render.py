@@ -1,4 +1,4 @@
-"""規約の描画: 規約のモデルから契約のページ（`docs/contracts/` の 8 ページ）と引数のスキーマの中身を作る（#3518）。
+"""規約の描画: 規約のモデルからコントラクトのページ（`docs/contracts/` の 8 ページ）と引数のスキーマの中身を作る（#3518）。
 
 純粋な処理で、ファイルを触らない。同じモデルから 1 字も違わない文字列を返す。行の並びは id の昇順で、日時・ホスト名・
 プラグインの名前を入れない（入れ替えの後も同じ中身になる）。
@@ -33,26 +33,26 @@ from ndf.checks.spec_model import (
     surface_of,
 )
 
-# エントリポイントの短い名前と宣言の置き場（`identity` の固定の語）
+# エントリポイントの短い名前と設定の保存先（`identity` の固定の語）
 ENTRY = identity.FIXED_WORDS["entrypoint"]
 DECL_DIR = identity.FIXED_WORDS["ndf_settings_dir"]
 JSON_SCHEMA = "https://json-schema.org/draft/2020-12/schema"
-# 範囲の語（置き場の表の列 tracked から導く）
+# 範囲の語（保存先の表の列 tracked から導く）
 SCOPE_WORDS = {True: "チーム", False: "個人"}
 # 公開か内部かの語
 SURFACE_WORDS = {PUBLIC: "公開", INTERNAL: "内部（予告なく変えてよい）"}
-GENERATED = "<!-- ndf check --write-spec が生成する。手で直さない（正本は各節の出典） -->\n"
+GENERATED = "<!-- ndf check --write-spec が生成する。手で直さない（SSOT は各節の出典） -->\n"
 NONE = "—"
 MAIN_MARK = "（メインディレクトリから読む）"
-# 宣言のスキーマの注釈 x-ndf-location の値（spec_model.DECL_LOCATIONS の並び）→ 置き場の語
+# 設定のスキーマの注釈 x-ndf-location の値（spec_model.DECL_LOCATIONS の並び）→ 保存先の語
 LOCATION_LABELS = dict(zip(DECL_LOCATIONS, ("メインディレクトリ（既定ブランチの worktree）", "worktree"), strict=True))
 DEPRECATED_MARK = "（非推奨。読み手は読まない）"
 # ページの名前 → 見出し
 PAGES = {
-    "index.md": "宣言と入出力の規約",
-    "ndf-settings.md": f"宣言（{DECL_DIR}/）",
-    "commands.md": "副命令の引数と結果",
-    "exit-codes.md": "終了コードと止まった理由",
+    "index.md": "設定と入出力の規約",
+    "ndf-settings.md": f"設定（{DECL_DIR}/）",
+    "commands.md": "サブコマンドの引数と結果",
+    "exit-codes.md": "終了コードと停止理由",
     "env.md": "環境変数",
     "files.md": "受け渡しのファイル",
     "hooks.md": "hook の入出力",
@@ -84,7 +84,7 @@ def _page(name: str, intro: str, body: list[str]) -> str:
 
 
 def render(model: SpecModel) -> dict[str, str]:
-    """契約のページ 8 つと副命令ごとの引数のスキーマを、プラグインの根からの相対パス → 中身で返す。"""
+    """コントラクトのページ 8 つとサブコマンドごとの引数のスキーマを、プラグインの根からの相対パス → 中身で返す。"""
     pages = {
         "index.md": page_index(model),
         "ndf-settings.md": page_ndf_settings(model),
@@ -211,7 +211,7 @@ def page_index(model: SpecModel) -> str:
     counts = {
         "ndf-settings.md": _count([d.surface for d in model.ndf_settings]),
         "commands.md": _count([c.surface for c in model.commands]),
-        "exit-codes.md": f"終了コード {len(model.exit_codes)}・止まった理由 {len(model.causes)}",
+        "exit-codes.md": f"終了コード {len(model.exit_codes)}・停止理由 {len(model.causes)}",
         "env.md": _count([surface_of(model.public, "env", r["id"]) for r in model.env]),
         "files.md": _count([surface_of(model.public, "file", r["id"]) for r in model.files]),
         "hooks.md": _count([h.surface for h in model.hooks]),
@@ -221,17 +221,17 @@ def page_index(model: SpecModel) -> str:
     spec = [[code(r["id"]), code(r["target"]), "・".join(code(f) for f in opt(r, "files"))] for r in model.entrypoints if is_spec(r)]
     caller = [[code(r["id"]), r["kind"], code(r["target"]), r["source"]] for r in model.entrypoints if r["order"] == CALLER_FIRST]
     intro = (
-        "NDF を外から呼ぶ面（宣言・副命令・環境変数・受け渡しのファイル・hook・Skill・起動スクリプト）の規約である。"
-        "機械が読む形は JSON Schema（`contracts/schemas/ndf-settings/`・`contracts/schemas/io/`）で、このページの表はそれと正本の表から生成する。\n\n"
-        "**公開**の項目は外の呼び手（連携システム）が頼ってよく、名前と意味を版で約束する。"
+        "NDF を外から呼ぶ面（設定・サブコマンド・環境変数・受け渡しのファイル・hook・Skill・起動スクリプト）の規約である。"
+        "機械が読む形は JSON Schema（`contracts/schemas/ndf-settings/`・`contracts/schemas/io/`）で、このページの表はそれと SSOT の表から生成する。\n\n"
+        "**公開**の項目は外の呼び手（連携システム）が頼ってよく、名前と意味をバージョンで約束する。"
         "**内部**の項目は NDF の中の Skill・エージェント・AI が使い、予告なく変えてよい。"
         "公開か内部かは、公開する面の表（`contracts/domains/entrypoints.json` と、`contracts/domains/ndf-files.json` の列 `reader`）に当たるかで決まる"
     )
     body = [
         "## ページ\n",
         md_table(["ページ", "件数"], rows),
-        "## 規約の置き場（公開する面の表の種類 spec）\n",
-        md_table(["行", "置き場", "公開する宣言"], spec),
+        "## 規約の保存先（公開する面の表の種類 spec）\n",
+        md_table(["行", "保存先", "公開する設定"], spec),
         "## 呼び手と合わせる前の行\n",
         "公開する面の表で順番が `caller-first` の行は、入れ替えの前に呼び手の側を新しいエントリポイントへ直す行で、規約の項目にまだ当たらなくてよい。\n",
         md_table(["行", "種類", "名前", "出所"], caller),
@@ -240,10 +240,10 @@ def page_index(model: SpecModel) -> str:
 
 
 def _location_word(decl: NdfSettingsSpec) -> str:
-    """置き場（スキーマの注釈 `x-ndf-location`）。`main_keys` のキーは worktree の宣言でもメインディレクトリから読む。"""
+    """保存先（スキーマの注釈 `x-ndf-location`）。`main_keys` のキーは worktree の設定でもメインディレクトリから読む。"""
     location = opt(decl.schema, "x-ndf-location", None) if decl.schema is not None else None
     label = LOCATION_LABELS[location] if location in LOCATION_LABELS else NONE
-    return f"{label}（印のキーはメインディレクトリ）" if decl.main_keys else label
+    return f"{label}（抑制コメントのキーはメインディレクトリ）" if decl.main_keys else label
 
 
 def _read_by(rows: tuple[dict[str, Any], ...]) -> str:
@@ -279,7 +279,7 @@ def _ndf_settings(decl: NdfSettingsSpec) -> list[str]:
             [str(r["order"]), "#" * r["level"] + " " + r["heading"], "必須" if r["required"] else "任意", r["meaning"]]
             for r in decl.sections
         ]
-        return [*head, "Markdown の宣言。節の並び:\n", md_table(["順", "見出し", "必須か", "持つもの"], rows)]
+        return [*head, "Markdown の設定。節の並び:\n", md_table(["順", "見出し", "必須か", "持つもの"], rows)]
     if decl.schema is None:
         return [*head, "スキーマが無い（`ndf check` の spec-decl が落とす）。\n"]
     examples = "".join(f"例: `{json.dumps(ex, ensure_ascii=False)}`\n" for ex in opt(decl.schema, "examples"))
@@ -293,10 +293,10 @@ def _schema_link(decl: NdfSettingsSpec) -> str:
 
 
 def page_ndf_settings(model: SpecModel) -> str:
-    """宣言のファイルごとの置き場・範囲・読む工程と、キーごとの型・既定値・取りうる値・必須か・説明・例。"""
+    """設定のファイルごとの保存先・範囲・読む工程と、キーごとの型・既定値・取りうる値・必須か・説明・例。"""
     intro = (
-        f"リポジトリの `{DECL_DIR}/` に置く宣言（人が決める設定のファイル）である。正本は置き場の表（`contracts/domains/ndf-files.json` の種類 "
-        "`ndf_settings` の行）と宣言のスキーマで、読み手は表の `keys` に無いキーを読まない。範囲のチームは git が追跡するファイル、個人は追跡しないファイルである"
+        f"リポジトリの `{DECL_DIR}/` に置く設定（人が決める設定のファイル）である。SSOT は保存先の表（`contracts/domains/ndf-files.json` の種類 "
+        "`ndf_settings` の行）と設定のスキーマで、読み手は表の `keys` に無いキーを読まない。範囲のチームは git が追跡するファイル、個人は追跡しないファイルである"
     )
     body: list[str] = []
     for decl in model.ndf_settings:
@@ -337,11 +337,11 @@ def _command(command: CommandSpec) -> list[str]:
 
 
 def page_commands(model: SpecModel) -> str:
-    """副命令と下位の命令ごとの引数の表と、結果の `metrics`・`items` の形。"""
+    """サブコマンドと下位の命令ごとの引数の表と、結果の `metrics`・`items` の形。"""
     intro = (
-        "`ndf <副命令>` の引数と結果である。どの副命令も結果 JSON（`contracts/schemas/result.schema.json`）を標準出力の最後の 1 行に出す。"
-        "正本は副命令の表（`src/ndf/cli.py` の `COMMANDS`）・各副命令の引数の定義・手書きの引数の表（`contracts/domains/manual-args.json`）・結果のスキーマ。"
-        "終了コードと止まった理由は [終了コードと止まった理由](exit-codes.md) にある"
+        "`ndf <サブコマンド>` の引数と結果である。どのサブコマンドも結果 JSON（`contracts/schemas/result.schema.json`）を標準出力の最後の 1 行に出す。"
+        "SSOT はサブコマンドの表（`src/ndf/cli.py` の `COMMANDS`）・各サブコマンドの引数の定義・手書きの引数の表（`contracts/domains/manual-args.json`）・結果のスキーマ。"
+        "終了コードと停止理由は [終了コードと停止理由](exit-codes.md) にある"
     )
     body: list[str] = []
     for command in model.commands:
@@ -350,7 +350,7 @@ def page_commands(model: SpecModel) -> str:
 
 
 def page_exit_codes(model: SpecModel) -> str:
-    """終了コードの表と止まった理由の表の全行。"""
+    """終了コードの表と停止理由の表の全行。"""
     codes = {r["id"]: r for r in model.exit_codes}
     ranges = [
         [code(r["id"]), str(r["code"]) + (f"〜{r['last']}" if "last" in r else ""), r["status"], r["label"]] for r in model.exit_codes
@@ -368,14 +368,14 @@ def page_exit_codes(model: SpecModel) -> str:
         for c in model.causes
     ]
     intro = (
-        "結果 JSON の `status` と終了コードの区分、`stopped` の `cause.kind`（止まった理由）である。正本は `contracts/facts/exit-codes.json` と `contracts/causes.json`。"
-        "行き先は `cause.kind` だけで選び、終了コードは `status` の区分を表すだけである"
+        "結果 JSON の `status` と終了コードの区分、`stopped` の `cause.kind`（停止理由）である。SSOT は `contracts/facts/exit-codes.json` と `contracts/causes.json`。"
+        "ルートは `cause.kind` だけで選び、終了コードは `status` の区分を表すだけである"
     )
     body = [
         "## 終了コード\n",
         md_table(["区分", "終了コード", "status", "見出し"], ranges),
-        "## 止まった理由\n",
-        md_table(["種類", "意味", "標準の型", "終了コード", "行き先", "再試行の方針", "尽きたとき"], causes),
+        "## 停止理由\n",
+        md_table(["種類", "意味", "標準の型", "終了コード", "ルート", "再試行の方針", "尽きたとき"], causes),
     ]
     return _page("exit-codes.md", intro, body)
 
@@ -394,7 +394,7 @@ def page_env(model: SpecModel) -> str:
         for r in model.env
     ]
     intro = (
-        "NDF が読む環境変数と、NDF が子のプロセスへ渡す環境変数である。正本は `contracts/domains/env.json`。"
+        "NDF が読む環境変数と、NDF が子のプロセスへ渡す環境変数である。SSOT は `contracts/domains/env.json`。"
         "公開は、公開する面の表のエントリポイントの `env` に載る変数である。値が秘密の変数は値をログ・結果・記録へ出さない"
     )
     return _page("env.md", intro, [md_table(["名前", "設定する者", "型", "秘密か", "意味", "公開か"], rows)])
@@ -409,7 +409,7 @@ def _location(model: SpecModel, location: str) -> str:
 
 
 def page_files(model: SpecModel) -> str:
-    """置き場の表の全行と、公開する行の項目（列 `fields`）。"""
+    """保存先の表の全行と、公開する行の項目（列 `fields`）。"""
     rows = [
         [
             code(r["id"]),
@@ -429,12 +429,12 @@ def page_files(model: SpecModel) -> str:
         if surface_of(model.public, "file", r["id"]) == PUBLIC
     ]
     intro = (
-        "NDF の工程が書くファイル（宣言・計測値・実行の記録・文書・受け渡し）である。正本は `contracts/domains/ndf-files.json` と置き場の表 `contracts/domains/locations.json`。"
-        "形（項目）を約束するのは公開する行だけで、内部の行は置き場と種類だけを載せる"
+        "NDF の工程が書くファイル（設定・計測値・実行の記録・文書・受け渡し）である。SSOT は `contracts/domains/ndf-files.json` と保存先の表 `contracts/domains/locations.json`。"
+        "形（項目）を約束するのは公開する行だけで、内部の行は保存先と種類だけを載せる"
     )
     body = [
         "## 一覧\n",
-        md_table(["行", "置き場", "パス", "種類", "追跡", "書き手", "消す時点", "公開か"], rows),
+        md_table(["行", "保存先", "パス", "種類", "追跡", "書き手", "消す時点", "公開か"], rows),
         "## 公開する行の項目\n",
         "書き手は項目の名前と意味を変えない。ほかの項目は足してよく、読み手は知らない項目を受け流す。\n",
         md_table(["行", "読む外の呼び手", "項目"], public),
@@ -443,9 +443,9 @@ def page_files(model: SpecModel) -> str:
 
 
 def page_hooks(model: SpecModel) -> str:
-    """ランタイムと事象ごとの、読む入力の鍵と判定ごとの出力の形。"""
+    """ランタイムと事象ごとの、読む入力のキーと判定ごとの出力の形。"""
     intro = (
-        "Claude Code・Codex から呼ばれる hook の入出力である。正本は `contracts/hooks/runtimes.json`。"
+        "Claude Code・Codex から呼ばれる hook の入出力である。SSOT は `contracts/hooks/runtimes.json`。"
         "出力の形の `{reason}` と `{context}` は判定の文に置き換わり、形の無い判定は何も出さない"
     )
     body: list[str] = []
@@ -453,7 +453,7 @@ def page_hooks(model: SpecModel) -> str:
         body.append(f"## {hook.runtime}: `{hook.event}`\n")
         body.append(
             md_table(
-                ["読む入力の鍵", "無くてよい鍵", "公開か"],
+                ["読む入力のキー", "無くてよいキー", "公開か"],
                 [["・".join(code(k) for k in hook.reads), "・".join(code(k) for k in hook.optional), SURFACE_WORDS[hook.surface]]],
             )
         )
@@ -495,15 +495,15 @@ def page_skills(model: SpecModel) -> str:
     launchers = [[code(r["id"]), r["passes_to"], r["meaning"]] for r in model.launchers if r["kind"] == "launcher"]
     intro = (
         "配る Skill（`manifests/skills.json` の行で `skills/<名前>/SKILL.md` があるもの）と、公開する面に載る Skill の入出力である。"
-        "正本は公開する Skill の引数と環境変数がエントリポイントの表、ほかは `contracts/domains/skill-io.json`。引数の形は正規表現で、どれか 1 つに全体が一致する"
+        "SSOT は公開する Skill の引数と環境変数がエントリポイントの表、ほかは `contracts/domains/skill-io.json`。引数の形は正規表現で、どれか 1 つに全体が一致する"
     )
     body = [
         "## Skill\n",
-        md_table(["Skill", "公開か", "引数の形", "/goal の終わりの条件", "読む宣言", "読む環境変数", "結果", "意味"], rows),
+        md_table(["Skill", "公開か", "引数の形", "/goal の終わりの条件", "読む設定", "読む環境変数", "結果", "意味"], rows),
         "## 応答の末尾の報告\n",
         md_table(["結果の行の項目", "値", "環境変数"], reports),
         "## 起動スクリプト\n",
-        "利用者と AI が打つ `bin/` のスクリプトである（正本は `contracts/domains/launchers.json`）。`ndf` の副命令は [副命令の引数と結果](commands.md) にある。\n",
+        "利用者と AI が打つ `bin/` のスクリプトである（SSOT は `contracts/domains/launchers.json`）。`ndf` のサブコマンドは [サブコマンドの引数と結果](commands.md) にある。\n",
         md_table(["名前", "渡し先", "意味"], launchers),
     ]
     return _page("skills.md", intro, body)

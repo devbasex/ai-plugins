@@ -1,7 +1,7 @@
 """機能の対応表（`features.json`）と直しの棚卸し（`fixes.json`）を読み、形を確かめ、一覧を引く。
 
 形と書き方の決まりは同じディレクトリの `README.md` にある。入れ替え（S2）の確かめは、対応表の行の
-`feature`・`to`・`not_built`・`trial` の 4 つの鍵だけを読む。
+`feature`・`to`・`not_built`・`trial` の 4 つのキーだけを読む。
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ import jsonschema
 HERE = Path(__file__).resolve().parent
 # ファイルの名前 → スキーマ（schema.json）の $defs の名前
 SHAPES = {"features": "features_file", "fixes": "fixes_file"}
-# fixes.json の部のうち、id を持つ部と、行き先（to）を持ちうる部
+# fixes.json の部のうち、id を持つ部と、移行先（to）を持ちうる部
 ID_PARTS = ("fixes", "regressions")
 DESTINATION_PARTS = (*ID_PARTS, "intake")
 
@@ -37,7 +37,7 @@ def _read(name: str) -> Any:
 
 @functools.cache
 def _schema() -> dict[str, Any]:
-    """`schema.json`。共有の値なので、呼び手は書き換えずに写してから鍵を足す。"""
+    """`schema.json`。共有の値なので、呼び手は書き換えずに写してからキーを足す。"""
     return _read("schema")
 
 
@@ -54,7 +54,7 @@ def _duplicates(ids: list[str]) -> list[str]:
 
 def _unknown_children(name: str, items: list[dict[str, Any]], locations: Mapping[str, Any]) -> list[str]:
     return [
-        f"{name}: 行き先 {item['to']} が locations に無い（{item.get('id') or item.get('issue')}）"
+        f"{name}: 移行先 {item['to']} が locations に無い（{item.get('id') or item.get('issue')}）"
         for item in items
         if "to" in item and item["to"] not in locations
     ]
@@ -63,7 +63,7 @@ def _unknown_children(name: str, items: list[dict[str, Any]], locations: Mapping
 def shape_errors(features: Any, fixes: Any) -> list[str]:
     """2 つの表の誤りを並べる。空なら合う。
 
-    スキーマ（鍵・値の形・`to` か作らない理由のどちらか 1 つ）に加え、id の重なり・`locations` に無い行き先・
+    スキーマ（キー・値の形・`to` か作らない理由のどちらか 1 つ）に加え、id の重なり・`locations` に無い移行先・
     受け付けた不具合が指す対応表の行が無いことを数える。
     """
     errs = _schema_errors("features", features) + _schema_errors("fixes", fixes)
@@ -71,7 +71,7 @@ def shape_errors(features: Any, fixes: Any) -> list[str]:
 
 
 def _reference_errors(features: Mapping[str, Any], fixes: Mapping[str, Any]) -> list[str]:
-    """スキーマで表せない参照の誤り（id の重なり・`locations` に無い行き先・対応表に無い行を指す受け付け）。"""
+    """スキーマで表せない参照の誤り（id の重なり・`locations` に無い移行先・対応表に無い行を指す受け付け）。"""
     locations = features["locations"]
     rows = features["rows"]
     ids = [r["id"] for r in rows]
@@ -88,7 +88,7 @@ def _missing_rows(intake: list[dict[str, Any]], known: set[str]) -> list[str]:
 
 
 class Entrypoint(NamedTuple):
-    """エントリポイントの今の置き場と、移行後の置き場（行き先の子の locations）。作らない行は `after` が空。"""
+    """エントリポイントの今の保存先と、移行後の保存先（移行先の子の locations）。作らない行は `after` が空。"""
 
     now: str
     to: str | None
@@ -107,13 +107,13 @@ def _entrypoint(row: Mapping[str, Any], locations: Mapping[str, Any]) -> Entrypo
 
 
 def _destination(locations: Mapping[str, Any], row: Mapping[str, Any]) -> tuple[str, ...]:
-    """行の行き先の子の置き場。行き先（`to`）の無い行は空。"""
+    """行の移行先の子の保存先。移行先（`to`）の無い行は空。"""
     to = row.get("to")
     return tuple(locations[to]) if to else ()
 
 
 def _under(module: str, location: str) -> bool:
-    """モジュール（`a.b.c`）が置き場（`src/a/b/` のディレクトリか `src/a/b/c.py` のファイル）にあるか。"""
+    """モジュール（`a.b.c`）が保存先（`src/a/b/` のディレクトリか `src/a/b/c.py` のファイル）にあるか。"""
     path = "src/" + module.replace(".", "/")
     if location.endswith("/"):
         return (path + "/").startswith(location)
@@ -121,10 +121,10 @@ def _under(module: str, location: str) -> bool:
 
 
 def user_commands(features: Mapping[str, Any], commands: Mapping[str, str]) -> dict[str, list[str]]:
-    """利用者が手で打つ今のコマンド → 行き先の子の置き場にある副命令の名前（まだ無ければ空）。
+    """利用者が手で打つ今のコマンド → 移行先の子の保存先にあるサブコマンドの名前（まだ無ければ空）。
 
-    `commands` は副命令の表（`cli.COMMANDS`）。副命令の名前は表に写さず、行き先の子の置き場にモジュールがある
-    副命令をこの表から引く。
+    `commands` はサブコマンドの表（`cli.COMMANDS`）。サブコマンドの名前は表に写さず、移行先の子の保存先にモジュールがある
+    サブコマンドをこの表から引く。
     """
     by_child = features["locations"]
     found: dict[str, list[str]] = {}
@@ -136,5 +136,5 @@ def user_commands(features: Mapping[str, Any], commands: Mapping[str, str]) -> d
 
 
 def _commands_under(commands: Mapping[str, str], locations: Sequence[str]) -> list[str]:
-    """副命令の表から、モジュールがいずれかの置き場の下にある副命令の名前を並べる。"""
+    """サブコマンドの表から、モジュールがいずれかの保存先の下にあるサブコマンドの名前を並べる。"""
     return sorted(cmd for cmd, module in commands.items() if any(_under(module, p) for p in locations))

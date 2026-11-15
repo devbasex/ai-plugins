@@ -1,6 +1,6 @@
 """重い処理の判定（#2711 の決定 4）。ファイルもプロセスも触らない純粋な関数だけを置く。
 
-判定は宣言（`.ndf/project.json` の `test.suites`）の `runner` と `command` だけを照らし、実行器の一覧を持たない。
+判定は設定（`.ndf/project.json` の `test.suites`）の `runner` と `command` だけを照らし、実行器の一覧を持たない。
 持つのは並列の指定の語の表と、コマンドの位置を探すときに読み飛ばすラッパーの表だけである。
 """
 
@@ -130,7 +130,7 @@ def _targets(args: Sequence[str]) -> list[str]:
 
 
 def is_test_suite(suite: Mapping[str, object]) -> bool:
-    """宣言の suite がテストか（`kind` が `lint` でなければテスト。既定は `test`）。"""
+    """設定の suite がテストか（`kind` が `lint` でなければテスト。既定は `test`）。"""
     return suite.get("kind") != "lint"
 
 
@@ -138,7 +138,7 @@ def classify(command: str | Sequence[str], suites: Iterable[Mapping[str, object]
     """重い処理なら種類（`whole` / `scope`）、重くなければ None を返す。
 
     `command` は文字列（シェルのコマンド）か語の並び（そのまま 1 つの単純コマンドとして読む）。
-    `suites` は宣言のうちテストの suite（`kind` が `lint` でないもの）を渡す。
+    `suites` は設定のうちテストの suite（`kind` が `lint` でないもの）を渡す。
     """
     suite_list = [s for s in suites if is_test_suite(s)]
     if isinstance(command, str):
@@ -165,13 +165,13 @@ def _classify_words(words: list[str], suites: list[Mapping[str, object]]) -> str
 
 
 def _declared_command(suite: Mapping[str, object]) -> str:
-    """宣言の suite の `command`（無ければ空の文字列）。"""
+    """設定の suite の `command`（無ければ空の文字列）。"""
     command = suite.get("command")
     return str(command) if command else ""
 
 
 def _matches_declared(target: str | list[str], suite: Mapping[str, object]) -> bool:
-    """宣言の `command` と一致するか。文字列は前後の空白を除いた全体を、語の並びは宣言の最後の単純コマンドと比べる。"""
+    """設定の `command` と一致するか。文字列は前後の空白を除いた全体を、語の並びは設定の最後の単純コマンドと比べる。"""
     declared = _declared_command(suite)
     if isinstance(target, str):
         return bool(declared) and target.strip() == declared.strip()
@@ -206,9 +206,9 @@ def _classify_runner(words: list[str], suite: Mapping[str, object]) -> str | Non
 
 
 def is_whole(words: Sequence[str], suites: Iterable[Mapping[str, object]]) -> bool:
-    """単純コマンド 1 つ（語の並び）が、宣言のテストの suite の全体の実行か。並列の指定の有無は問わない。
+    """単純コマンド 1 つ（語の並び）が、設定のテストの suite の全体の実行か。並列の指定の有無は問わない。
 
-    宣言の `command` の最後の単純コマンドと同じか、`runner` がコマンドの位置にあって対象が全体（無いか `.` だけ）なら真。
+    設定の `command` の最後の単純コマンドと同じか、`runner` がコマンドの位置にあって対象が全体（無いか `.` だけ）なら真。
     `scope_command` の `{paths}` へファイルを入れた範囲の実行は、対象がファイルなので偽になる。
     """
     target = list(words)

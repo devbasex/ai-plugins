@@ -1,6 +1,6 @@
 # 待ち方
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `hook.py`（M3a）・`merged-steps.py`（M8）・`release-steps.py`（M2）・`sprint-state.py`（P1b）・`upkeep.py`（M6）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトのサブコマンドは新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `hook.py`（M3a）・`merged-steps.py`（M8）・`release-steps.py`（M2）・`sprint-state.py`（P1b）・`upkeep.py`（M6）。移行先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 **待つ間に状態を問い合わせる呼び出しを繰り返さない。** 待ち方の規約はこの文書だけが持ち、
 他の文書はコピーせずにここを指す。
@@ -58,7 +58,7 @@
 | 既に起動したプロセス・書き終わりを待つファイル | 終わりを待つ until ループ（例: `until [ -s out.md ]; do sleep 5; done`）を `run_in_background: true` で起動する |
 | Pull Request のチェック | 今の状態は `lib/gh_parts.py pr-status <番号>` を 1 回打って読む。`metrics.action` が次の 1 手（`wait` 待つ・`fix` 直す・`merge` マージへ進める・`escalate` 人へ戻す）で、`next` に打つコマンドが載る。待つときは下の `merge-when-green` を `run_in_background: true` で起動する。PR の表示とチェックの照会を別々に続けて打たない |
 | 新しいコメントを 1 件ずつ | `Monitor` |
-| `ndf plan next` | 同じプランと状態の置き場で `ndf plan wait <プラン> [--state-dir <next に渡した置き場>]` を `run_in_background: true` で 1 回起動する（承認ゲートの結果の `next` がこの形）。止まり・承認ゲート・終わりで終わる（下の節） |
+| `ndf plan next` | 同じプランと状態の保存先で `ndf plan wait <プラン> [--state-dir <next に渡した保存先>]` を `run_in_background: true` で 1 回起動する（承認ゲートの結果の `next` がこの形）。止まり・承認ゲート・終わりで終わる（下の節） |
 | `ndf plan queue` | 同じプランの並びで `ndf plan wait <プラン>...` を `run_in_background: true` で 1 回起動する。プランの止まり・承認ゲート・終わりで終わる（下の節） |
 | Pull Request の CI とマージ | `merged-steps.py merge-when-green <PR 番号>` を `run_in_background: true` で 1 回起動する。CI がまだ現れない間も待ち、緑になればマージする。マージの承認を得た後に限る。起動の前に `gh_parts.py pr-status <PR 番号>` で、直すもの（失敗したチェック・未解決のスレッド）と衝突が無いかを 1 回で確かめる。チェックの照会と `gh pr merge` を手でつながない |
 | 判断の要らない NDF の手順を続けて打つ（`queue` の後の `wait` など） | 1 行ずつ打たず、手順をプランのステップにして `ndf plan next <プラン>` を 1 回打つ。承認ゲートか止まる所まで続けて進め、理由と続きのコマンドを `next` に返す。長く待つ手順を含むなら `run_in_background: true` で起動する |
@@ -80,10 +80,10 @@
 
 - `host` は負荷とメモリの値とマシンの上の pytest の数である（`load`（1・5・15 分の load average）・`mem_available_mib`・
   `swap_total_mib`・`swap_free_mib`・`pytest`（本体の数）・`pytest_workers`（xdist の作業プロセスの数））。並列の上限を決め直す
-  材料で、待ちの判断には使わない。読めない値は鍵ごと省く
+  材料で、待ちの判断には使わない。読めない値はキーごと省く
 - **conductor 向けの行は `attention` だけである。** `ndf plan` が worker の行の語（`止まった`・`承認ゲート`・
-  `失敗`）と繰り返し、ステップの結果からスクリプトで分ける。`step` / `alive` / `worker` / `slow` は起こさない
-  （起こすたびに conductor の文脈の全体を読み直すため）
+  `失敗`）と繰り返し、ステップの結果からスクリプトで分ける。`step` / `alive` / `worker` / `slow` は起動しない
+  （起動するたびに conductor の文脈の全体を読み直すため）
 - `queue` は `attention` の行を標準出力の 1 行 `{"tool": "supervise-queue", "event": "attention", ...}`
   で知らせる。最後の行は結果の JSON のままである
 - `attention` で起きたら、その行と `progress.jsonl` の末尾だけを読み、止めるか続けるかを決める。
@@ -97,13 +97,13 @@
   回数・費用を持つ。手を打ったステップは `- 遅れ:` の行に並ぶ
 - 待ちのコマンドは下のとおり
 
-**`ndf plan next` の待ちも、同じプランと状態の置き場を渡した `ndf plan wait` で待つ。** until ループで `report.md` や
-`progress.jsonl` を見回らない（`ndf plan` の実行は `report.md` と `kind: attention` の行を書かず、状態の置き場は
+**`ndf plan next` の待ちも、同じプランと状態の保存先を渡した `ndf plan wait` で待つ。** until ループで `report.md` や
+`progress.jsonl` を見回らない（`ndf plan` の実行は `report.md` と `kind: attention` の行を書かず、状態の保存先は
 `--state-dir` を渡さなければプランのファイルの隣の `<プラン>.state` である）。
 
 ```bash
 # Bash の run_in_background: true で起動する（フォアグラウンドで打たない）。--state-dir は next に渡したときだけ同じ値を渡す
-ndf plan wait plan-1101.json --state-dir <next に渡した置き場>
+ndf plan wait plan-1101.json --state-dir <next に渡した保存先>
 ```
 
 - 終わり方と次にすることは次の節の表のとおりである
@@ -125,7 +125,7 @@ ndf plan wait plan-1101.json plan-1102.json plan-release-dev.json
 | 終わり方 | 終了コード | トップレベルの値 | 次にすること |
 | --- | --- | --- | --- |
 | 渡したプランがすべて終わった | 0 | `status: ok` | 次のステージへ進む |
-| どれかのプランが承認ゲートで待っている | 10 | `status: gate`・`routes`（答えごとに打つコマンド。先頭の承認ゲートの分）・`next`（同じ待ち） | 承認ゲートの資料を提示し、人の答えに対応する `routes` のコマンドを打つ。ほかの承認ゲートの `routes` は `items` の各行にある |
+| どれかのプランが承認ゲートで待っている | 10 | `status: gate`・`routes`（回答ごとに打つコマンド。先頭の承認ゲートの分）・`next`（同じ待ち） | 承認ゲートの資料を提示し、人の回答に対応する `routes` のコマンドを打つ。ほかの承認ゲートの `routes` は `items` の各行にある |
 | どれかのプランが止まった | 原因の種類（`cause.kind`）ごとの終了コード | `status: stopped`・`cause`（先頭の止まり）・`next`（同じ待ち） | `cause.kind` と `items` の各行の `cause` を読み、原因を片付けてから続きを打つ |
 | 上限（`--timeout`、既定 600 秒）に達した | 3（`cause.kind: wait_timeout`） | `status: stopped`・`next`（同じ待ち） | 待つ相手は動いている。結果の `next` の同じ `wait` を打つ |
 
@@ -139,7 +139,7 @@ ndf plan wait plan-1101.json plan-1102.json plan-release-dev.json
 ### 1 スプリントの流し方
 
 **1 スプリント（実装 → 開発版 → リリース承認ゲート→ 本番 → 後片付け）で conductor が打つのは、キューと `wait` と、承認ゲートで
-利用者の答えを書く 1 行だけである。** プランの組み立て・待ちの監視・次のプランの起動・承認の記録のために起きない。
+利用者の回答を書く 1 行だけである。** プランの組み立て・待ちの監視・次のプランの起動・承認の記録のために起きない。
 
 1. 実装のプランを並べ、開発版のリリースプランを `new release --channel dev --prs-from-queue` で作る
    （固定の PR があれば `--prs 1052` を併せて渡す）。キューは `--then` のプランを流す前に、先行のプランの
@@ -147,17 +147,17 @@ ndf plan wait plan-1101.json plan-1102.json plan-release-dev.json
    先行の報告に Pull Request が 1 件も無ければ、リリースプランは `流さなかった` になる
 2. `queue <実装のプラン>... --then <開発版のプラン>` と `wait <実装のプラン>... <開発版のプラン>` をバックグラウンドで起動する
 3. `wait` が 0 で終わり、キューの結果が `gate`（開発版の facts のステップのリリース承認ゲート）なら、承認資料を添えて本番の承認（`ndf-gate:2`）を取る。
-   利用者が答えたら `sprint-state.py gate <状態> "リリース承認ゲート" --what <要約> --by user --outcome approved|rejected` を打つ
+   利用者が回答したら `sprint-state.py gate <状態> "リリース承認ゲート" --what <要約> --by user --outcome approved|rejected` を打つ
 4. 承認の後、本番のプランを `new release --channel prod --dev-state <開発版のプランの状態ディレクトリ> --state <状態>` で作り、
    `queue <本番のプラン>` と `wait <本番のプラン>` をバックグラウンドで起動する。本番のプランの先頭の `approve` が、
    開発版の facts の承認したコミットと 3 の記録を照らして承認資料へ承認の記録を書く（記録が無い・facts の後に承認資料が
    書き直されていれば、書かずに承認ゲートで止まり `release` へ進まない）。状態のファイルが無いときは、`approve` の前に
    `release-steps.py approve --approval <承認資料> --approved-sha <SHA> --by user` で承認の記録を書いておく。
-   本番のプランのステップの最後は後片付け（`merged-steps.py cleanup`）で、リリースの PR（`release/v<版>` → main）と
+   本番のプランのステップの最後は後片付け（`merged-steps.py cleanup`）で、リリースの PR（`release/v<バージョン>` → main）と
    スプリントの PR（`--prs`）のブランチ・worktree を片付ける。`git branch -D` が要るブランチがあれば承認ゲートで止まる
 5. どこかのプランが止まったら、原因を直してから `queue --resume <パス>` と `wait <パス>` をバックグラウンドで起動する。
    止まったプランは終えたステップから続き、後続のステージも流れる。プランのファイルを写して作り直さない
-6. `wait` が 0 で終わったら、引継ぎ文書を 引継ぎ文書の表への追記（M7 #3302 が `ndf` の副命令に足す。新しいプラグインだけではまだ打てない） で更新し、`ndf-next` を出す
+6. `wait` が 0 で終わったら、引継ぎ文書を 引継ぎ文書の表への追記（M7 #3302 が `ndf` のサブコマンドに足す。新しいプラグインだけではまだ打てない） で更新し、`ndf-next` を出す
 
 ### スプリントを流すコマンド
 
@@ -171,9 +171,9 @@ ndf plan wait plan-1101.json plan-1102.json plan-release-dev.json
 1. プランを書き出す。ステージごとのプランと目録（`$O/sprint.json`）ができる:
    `ndf progress new m6 --mode standard --issues 1052 1053`（ステージごとのプランと目録を書き出す働きは P1b #3092 が `ndf progress` に足す。新しいプラグインだけではまだ打てない）。
    版数は渡さず、開発版のプランを流す時点に queue が決める（明示するなら `--version`）
-   設計の前に別の課題を取り込むと決めていれば `--absorb <課題>:<取り込み先>` を足す（取り込んだ課題は設計のプランを持たない）
+   設計の前に別の課題を統合すると決めていれば `--absorb <課題>:<統合先>` を足す（統合した課題は設計のプランを持たない）
 2. 設計: `sv queue $O/1-design-1052.json` と `sv wait $O/1-design-1052.json`
-3. 設計承認ゲート: キューの結果が `gate` なら、設計 Pull Request をまとめて 1 回の承認に載せる。利用者が答えたら、設計 PR ごとに
+3. 設計承認ゲート: キューの結果が `gate` なら、設計 Pull Request をまとめて 1 回の承認に載せる。利用者が回答したら、設計 PR ごとに
    `sprint-state.py gate $S "設計承認ゲート" --what <要約> --by user --pr <設計 PR> --outcome approved|rejected` を打つ
 4. 設計 PR のマージから開発版まで: `sv queue $O/3-design-merge-1052.json
    --then $O/4-design-results.json --then $O/5-sprint-branch.json --then $O/6-impl-1052.json $O/6-impl-1053.json
@@ -181,12 +181,12 @@ ndf plan wait plan-1101.json plan-1102.json plan-release-dev.json
    付けてからマージする（記録が無ければ承認ゲートで止まる）。設計の結果のプランがマージした設計文書の「設計の結果」の表を
    実装のプランへ写し、検査のプランがスプリントの Pull Request をベースブランチへマージし、開発版のリリースプランが続けて流れる
 5. リリース承認ゲート: キューの結果が `gate`（開発版の facts のステップ）なら、`sprint.json` の `リリース承認ゲート` のステージの `gate` に沿って
-   承認資料（版は `$O/8-release-state/version.json` の `base`）を添えて本番の承認（`ndf-gate:2`）を取る。利用者が答えたら `sprint-state.py gate $S "リリース承認ゲート" --what <要約> --by user --outcome approved|rejected`
-   を打つ。差し戻されたら 6 を打たない
+   承認資料（バージョンは `$O/8-release-state/version.json` の `base`）を添えて本番の承認（`ndf-gate:2`）を取る。利用者が回答したら `sprint-state.py gate $S "リリース承認ゲート" --what <要約> --by user --outcome approved|rejected`
+   を打つ。変更を要求されたら 6 を打たない
 6. 本番: `sv queue $O/10-release-prod.json` と `sv wait $O/10-release-prod.json`。先頭の `approve` が
    5 の記録を見て承認資料へ承認の記録を書き、出す PR は検査の報告から埋まる。最後のステップが後片付けを行う
 
-- どこかで止まったら（CI の古い失敗・衝突・手動確認の印の待ち・承認の証跡の無さ）、原因を片付けてから止まった結果 JSON の
+- どこかで止まったら（CI の古い失敗・衝突・手動確認のマーカーの待ち・承認の証跡の無さ）、原因を片付けてから止まった結果 JSON の
   `next`（元の全プランと `--then` の区切りを保った `sv queue … --resume`）と、同じプランの並びで `sv wait` を打つ。プラン 1 本だけに
   `--resume` を付けて打つと後続のステージが戻らない。止まったプランは終えたステップから続き、後続の
   ステージは前のステージがすべて完了のときだけ流れる。承認の後に別のエントリポイントから入るステップ（`merge-approved`・`promote-approved`）
@@ -194,7 +194,7 @@ ndf plan wait plan-1101.json plan-1102.json plan-release-dev.json
 - ステージの番号とプランのファイル名は `new sprint` の出力（`sprint.json` の `ステージ`）が正である
 - `--state` を渡さないスプリントでは、設計承認ゲートで `gh pr edit <設計 PR> --add-label design-approved` を、リリース承認ゲートで
   `release-steps.py approve --approval <承認資料> --approved-sha <SHA> --by user` を打つ（`sprint.json` の承認ゲートのステージの文が示す）
-- 確定仕様化・振り返り・棚卸しは `normal` のプランが持たないため、supervisor で回す（[agent-layers.md](agent-layers.md) の表の取り込み・仕上げの行）
+- 確定仕様化・振り返り・棚卸しは `normal` のプランが持たないため、supervisor で回す（[agent-layers.md](agent-layers.md) の表のマージ・仕上げの行）
 - 本番の後に続けるコマンドは [relay.md](relay.md)、`pace: fast` と `pace: auto` の並びは [pace.md](pace.md) にある
 
 **サブエージェントは、バックグラウンドの処理を残したまま応答を終えない。** 完了通知で再開はされるが、
@@ -214,33 +214,33 @@ interim」）で行う。
 
 | 受け取る層 | 手 |
 | --- | --- |
-| conductor | **2 回目の通知を待ってから報告を読む。** conductor は応答を終えても次の通知で起こされる |
+| conductor | **2 回目の通知を待ってから報告を読む。** conductor は応答を終えても次の通知で起動される |
 | supervisor | **応答を終える前に、自分のバックグラウンドの処理として報告コピーの待ちを起動する。** 下のコマンドを `run_in_background: true` で起動し、完了通知で再開する |
 
 **supervisor が「2 回目の通知を待つ」で応答を終えると止まる。** supervisor が起動した worker
 は supervisor のバックグラウンドの子に数えられず、worker が後で終わっても、応答を終えた supervisor は
-起こされない。自分で起動したバックグラウンドの Bash の完了通知なら、supervisor は再開する。
+起動されない。自分で起動したバックグラウンドの Bash の完了通知なら、supervisor は再開する。
 
 **worker の規則 5（バックグラウンドの処理を残したまま応答を終えない）は保つ。** 規則を守る worker では
 中間通知は起きない。この手は、守れなかった worker（`Monitor` やバックグラウンドの待ちを残して応答を
 終えた worker）への備えである。
 
-**supervisor は worker を起動する前に、`置き場所` のファイルを worker ごとに新しいパスで空に
-作り、完了マーカーを消す**（`: > <置き場所>; rm -f <置き場所>.done`）。前の worker の報告や完了マーカーが
+**supervisor は worker を起動する前に、`置く場所` のファイルを worker ごとに新しいパスで空に
+作り、完了マーカーを消す**（`: > <置く場所>; rm -f <置く場所>.done`）。前の worker の報告や完了マーカーが
 残ったパスを渡すと、コピーの待ちがその完了マーカーに即座に反応し、今の worker の報告を待たずに終わる。
 
-**待つのは完了マーカーのファイル `<置き場所>.done` である。** worker
-は報告コピーを `置き場所` の末尾へ書き終えた後に、空のファイル `<置き場所>.done` を作る
-（[agent-layers.md](agent-layers.md) の起動指示の `置き場所`）。
+**待つのは完了マーカーのファイル `<置く場所>.done` である。** worker
+は報告コピーを `置く場所` の末尾へ書き終えた後に、空のファイル `<置く場所>.done` を作る
+（[agent-layers.md](agent-layers.md) の起動指示の `置く場所`）。
 
 ```bash
 # Bash の run_in_background: true で起動する（フォアグラウンドで打たない）。最後の 3600 が上限の秒数
-bash -c 'until [ -e "$1.done" ]; do [ "$SECONDS" -lt "$2" ] || exit 124; sleep 5; done' _ "<置き場所>" 3600; rc=$?; echo "exit=$rc"; exit "$rc"
+bash -c 'until [ -e "$1.done" ]; do [ "$SECONDS" -lt "$2" ] || exit 124; sleep 5; done' _ "<置く場所>" 3600; rc=$?; echo "exit=$rc"; exit "$rc"
 ```
 
 | 終了コード | supervisor の動き |
 | --- | --- |
-| 0（`<置き場所>.done` が現れた） | `置き場所` の最後の `## 作業の報告` から末尾までを読み、フェーズを進める |
+| 0（`<置く場所>.done` が現れた） | `置く場所` の最後の `## 作業の報告` から末尾までを読み、フェーズを進める |
 | 124（上限の 3600 秒に達した） | [interrupt-resume.md](interrupt-resume.md) の「supervisor の worker の点検」を 1 回行う。レートリミット中断でなければ「報告が無いまま終わったとき」の規則で `SendMessage` を送る |
 
 - **worker の 2 回目の通知は、コピーを読んだ後に届いても読み直さない。** 同じ報告である

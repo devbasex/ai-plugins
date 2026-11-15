@@ -309,7 +309,7 @@ def test_row_line_formats_each_kind():
         "  P4 ci: 秘密の形の値を捨てて不明にした",
         "  P4 ci#a.yml: 不明（壁時計が無い）（前の値を残した）",
         "  P8 issues: 不明（None）",
-        '  P9 checks: 食い違い 宣言 {"a": "値"} / 解析 [1]',
+        '  P9 checks: 食い違い 設定 {"a": "値"} / 解析 [1]',
         "   notes: note",
         "  P6 worktree.json#base_branch: 測った",
         f"  P6 {write.BRANCH_FLOW}: 判断した",

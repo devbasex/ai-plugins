@@ -1,26 +1,26 @@
-"""副命令 `ndf lanes`: 計画の進行表とレーンの進行表を読み書きする（#3097）。
+"""サブコマンド `ndf lanes`: 計画のステートマシンとレーンのステートマシンを読み書きする（#3097）。
 
-ndf lanes init <plan.json>                       計画の検査を通し、計画の進行表と各レーンの進行表を未着手で作る
-ndf lanes start <plan.json>                      init と同じに作り（作ってあれば読み）、計画を始めて耐久ワークフローを切り離して起こす
+ndf lanes init <plan.json>                       計画の検査を通し、計画のステートマシンと各レーンのステートマシンを未着手で作る
+ndf lanes start <plan.json>                      init と同じに作り（作ってあれば読み）、計画を始めて耐久ワークフローを切り離して起動する
 ndf lanes run <計画>                             計画を進める耐久ワークフローを前で流す（start が切り離して打つ）
-ndf lanes wait <計画> [--after <番号>]           計画の知らせ（依頼・終わり・止まり）を、渡した番号より後からすべて待って返す
-ndf lanes status <計画>                          計画とレーンの進行表から計画の状態を出す
-ndf lanes lane add <計画> <lane.json> [--request <依頼>]
-ndf lanes set <計画> <レーン> [--plans <本数>] [--touches <場所>...] [--after <先>...] --reason <理由> [--request <依頼>]
+ndf lanes wait <計画> [--after <番号>]           計画の知らせ（リクエスト・終わり・止まり）を、渡した番号より後からすべて待って返す
+ndf lanes status <計画>                          計画とレーンのステートマシンから計画の状態を出す
+ndf lanes lane add <計画> <lane.json> [--request <リクエスト>]
+ndf lanes set <計画> <レーン> [--plans <本数>] [--touches <場所>...] [--after <先>...] --reason <理由> [--request <リクエスト>]
 ndf lanes limits <計画> [--max-lanes <数>] [--max-plans <本数>] --reason <理由>
 ndf lanes move <計画> <元のレーン> <行> <先のレーン> --reason <理由>
 ndf lanes stop <計画> [--now] --reason <理由>       区切りで止める（--now はすぐ中止する）。再開は start を打ち直す
-ndf lanes request close <計画> <依頼> --reason <理由>
+ndf lanes request close <計画> <リクエスト> --reason <理由>
 ndf lanes question <計画> --wrapper <ラッパーの名前> --question <question.json>
-                                                 レーンの問い（AskUserQuestion）を依頼として載せる（中継のラッパーが打つ）
-ndf lanes release <計画> <依頼>... --result released|rejected --reason <理由> [--version <版>] [--release <PR>]
-                                                 まとめたリリースの答えを記録し、まとめた依頼を閉じる
-ndf lanes answered <スプリントの進行表の ID> --answer <答え>
-ndf lanes row add|move|cancel|carry|start|end|resumed ...   （レーンの conductor が打つ。レーンの進行表）
+                                                 レーンの質問（AskUserQuestion）をリクエストとして載せる（中継のラッパーが打つ）
+ndf lanes release <計画> <リクエスト>... --result released|rejected --reason <理由> [--version <バージョン>] [--release <PR>]
+                                                 まとめたリリースの回答を記録し、まとめたリクエストを閉じる
+ndf lanes answered <スプリントのステートマシンの ID> --answer <回答>
+ndf lanes row add|move|cancel|carry|start|end|resumed ...   （レーンの conductor が打つ。レーンのステートマシン）
 
-書き手は段ごとに 1 つに寄る。計画の進行表の副命令の書き手はオーガナイザー（作成・レーンをまたぐ変更・中止・依頼を閉じる・
-答えの記録）で、完了は耐久ワークフロー（`run`）が書く。`row` の副命令はレーンの進行表（`ndf.progress.lane`）を書き、
-書き手はレーンの conductor になる。`question` はレーンの中継のラッパーが打ち、計画の進行表へ問いの依頼を書く（#3035）。結果は結果 JSON の 1 行で返す。
+書き手はステップごとに 1 つに寄る。計画のステートマシンのサブコマンドの書き手はオーガナイザー（作成・レーンをまたぐ変更・中止・リクエストを閉じる・
+回答の記録）で、完了は耐久ワークフロー（`run`）が書く。`row` のサブコマンドはレーンのステートマシン（`ndf.progress.lane`）を書き、
+書き手はレーンの conductor になる。`question` はレーンの中継のラッパーが打ち、計画のステートマシンへ質問のリクエストを書く（#3035）。結果は結果 JSON の 1 行で返す。
 """
 
 from __future__ import annotations
@@ -78,7 +78,7 @@ def _pid(conn: sa.Connection, repo: str, name: str) -> str:
 
 
 def _cmd_create(a: argparse.Namespace, conn: sa.Connection, repo: str) -> dict[str, Any]:
-    doc = read_doc(Path(a.plan_file), PLAN_SCHEMA, "計画の宣言")
+    doc = read_doc(Path(a.plan_file), PLAN_SCHEMA, "計画の設定")
     start = a.action == "start"
     existing = store.read_machine(conn, plan_id(repo, doc["name"]))
     if existing is None:
@@ -87,14 +87,14 @@ def _cmd_create(a: argparse.Namespace, conn: sa.Connection, repo: str) -> dict[s
         pid = existing["id"]
         start_plan(conn, pid)
     else:
-        raise model.Refused(f"計画 {doc['name']} の進行表は既にある", current_id=existing["id"])
+        raise model.Refused(f"計画 {doc['name']} のステートマシンは既にある", current_id=existing["id"])
     view, _ = lane.read_plan(conn, pid)
-    summary = f"計画 {view.name} の進行表を作った（{model.label(view.state)}・レーン {len(view.lanes)}）"
+    summary = f"計画 {view.name} のステートマシンを作った（{model.label(view.state)}・レーン {len(view.lanes)}）"
     return _ok(summary, plan_id=pid, plan=view.name, state=view.state)
 
 
 def _cmd_status(a: argparse.Namespace, where: run.Where) -> dict[str, Any]:
-    """計画の状態。生死の材料（`ndf progress wait` など同じ DB を開く副命令）は、進行表を読んでトランザクションを
+    """計画の状態。生死の材料（`ndf progress wait` など同じ DB を開くサブコマンド）は、ステートマシンを読んでトランザクションを
     閉じてから読む（耐久ワークフローの `observe` と同じ順）。"""
     with store.open_store(where.url, where.root) as st:
         with store.transaction(st) as conn:
@@ -108,7 +108,7 @@ def _cmd_status(a: argparse.Namespace, where: run.Where) -> dict[str, Any]:
 
 
 def _cmd_lane_add(a: argparse.Namespace, conn: sa.Connection, repo: str) -> dict[str, Any]:
-    decl = read_doc(Path(a.lane_file), LANE_SCHEMA, "レーンの宣言")
+    decl = read_doc(Path(a.lane_file), LANE_SCHEMA, "レーンの設定")
     tid = add_lane(conn, _pid(conn, repo, a.plan), decl, a.request)
     return _ok(f"計画 {a.plan} にレーン {decl['name']} を足した", lane_machine_id=tid)
 
@@ -151,31 +151,31 @@ def _pause(a: argparse.Namespace, conn: sa.Connection, repo: str) -> dict[str, A
 
 def _cmd_request_close(a: argparse.Namespace, conn: sa.Connection, repo: str) -> dict[str, Any]:
     close_request(conn, _pid(conn, repo, a.plan), a.request, a.reason)
-    return _ok(f"計画 {a.plan} の依頼 {a.request} を閉じた", request=a.request)
+    return _ok(f"計画 {a.plan} のリクエスト {a.request} を閉じた", request=a.request)
 
 
 def _cmd_question(a: argparse.Namespace, conn: sa.Connection, repo: str) -> dict[str, Any]:
     question = _read_question(Path(a.question))
     key, opened = ask_request(conn, _pid(conn, repo, a.plan), a.wrapper, question)
     said = "載せた" if opened else "既に載っている"
-    return _ok(f"計画 {a.plan} の依頼 {key} にレーンの問いを{said}", request=key, opened=opened)
+    return _ok(f"計画 {a.plan} のリクエスト {key} にレーンの質問を{said}", request=key, opened=opened)
 
 
 def _read_question(path: Path) -> dict[str, Any]:
-    """hook が書いた問い（`question.json`）。読めない・オブジェクトでなければ `PlanInputError`。"""
+    """hook が書いた質問（`question.json`）。読めない・オブジェクトでなければ `PlanInputError`。"""
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
-        raise PlanInputError(f"問い {path} を JSON として読めない: {exc}") from exc
+        raise PlanInputError(f"質問 {path} を JSON として読めない: {exc}") from exc
     if not isinstance(data, dict):
-        raise PlanInputError(f"問い {path} の形が違う（オブジェクトでない）")
+        raise PlanInputError(f"質問 {path} の形が違う（オブジェクトでない）")
     return data
 
 
 def _cmd_release(a: argparse.Namespace, conn: sa.Connection, repo: str) -> dict[str, Any]:
     record_release(conn, _pid(conn, repo, a.plan), a.requests, ReleaseAnswer(a.result, a.reason, a.version, a.release))
     return _ok(
-        f"計画 {a.plan} のまとめたリリースの答え（{a.result}）を依頼 {len(a.requests)} 件へ記録した", requests=a.requests, result=a.result
+        f"計画 {a.plan} のまとめたリリースの回答（{a.result}）をリクエスト {len(a.requests)} 件へ記録した", requests=a.requests, result=a.result
     )
 
 
@@ -183,7 +183,7 @@ def _cmd_answered(a: argparse.Namespace, conn: sa.Connection, _repo: str) -> dic
     seq = lane.record_answer(conn, a.sprint_id, {"answer": a.answer})
     if seq is None:
         raise model.Refused(f"スプリント {a.sprint_id} を持つレーンの行が無い")
-    return _ok(f"スプリント {a.sprint_id} の答えをレーンの行へ載せた（次はそのレーンの conductor が next を打つ）", seq=seq)
+    return _ok(f"スプリント {a.sprint_id} の回答をレーンの行へ載せた（次はそのレーンの conductor が next を打つ）", seq=seq)
 
 
 def _row_change(a: argparse.Namespace) -> lane.RowChange:
@@ -191,7 +191,7 @@ def _row_change(a: argparse.Namespace) -> lane.RowChange:
 
 
 def _cmd_row(a: argparse.Namespace, conn: sa.Connection, repo: str) -> dict[str, Any]:
-    """レーンの conductor の副命令（レーンの進行表を書く）。"""
+    """レーンの conductor のサブコマンド（レーンのステートマシンを書く）。"""
     if a.row_action in ("end", "resumed"):
         return _ROW_BY_SPRINT[a.row_action](a, conn)
     pid = _pid(conn, repo, a.plan)
@@ -233,7 +233,7 @@ def _row_end(a: argparse.Namespace, conn: sa.Connection) -> dict[str, Any]:
 
 def _row_resumed(a: argparse.Namespace, conn: sa.Connection) -> dict[str, Any]:
     seq = lane.record_resumed(conn, a.sprint_id, "conductor")
-    return _ok(f"スプリント {a.sprint_id} の答えの後の next を記録した", seq=seq)
+    return _ok(f"スプリント {a.sprint_id} の回答の後の next を記録した", seq=seq)
 
 
 _ROW_ACTIONS: dict[str, Callable[[argparse.Namespace, sa.Connection, str], dict[str, Any]]] = {
@@ -267,7 +267,7 @@ ArgMaker = Callable[[argparse.ArgumentParser], Any]
 
 
 def _arg_row(p: argparse.ArgumentParser) -> Any:
-    return p.add_argument("row", help="行の鍵（r1 など）")
+    return p.add_argument("row", help="行のキー（r1 など）")
 
 
 def _arg_issues(p: argparse.ArgumentParser) -> Any:
@@ -287,10 +287,10 @@ def _arg_reason(p: argparse.ArgumentParser) -> Any:
 
 
 def _arg_sprint(p: argparse.ArgumentParser) -> Any:
-    return p.add_argument("--sprint", required=True, help="スプリントの進行表の ID")
+    return p.add_argument("--sprint", required=True, help="スプリントのステートマシンの ID")
 
 
-# row の副命令ごとの、plan と lane の後に足す引数（足す順）
+# row のサブコマンドごとの、plan と lane の後に足す引数（足す順）
 _ROW_ARGS: dict[str, tuple[ArgMaker, ...]] = {
     "add": (_arg_issues, functools.partial(_arg_index, required=False), _arg_args, _arg_reason),
     "move": (_arg_row, functools.partial(_arg_index, required=True), _arg_reason),
@@ -301,7 +301,7 @@ _ROW_ARGS: dict[str, tuple[ArgMaker, ...]] = {
 
 
 def _row_parser(sub: Any) -> None:
-    row = sub.add_parser("row", help="レーンの進行表を書く（レーンの conductor）").add_subparsers(dest="row_action", required=True)
+    row = sub.add_parser("row", help="レーンのステートマシンを書く（レーンの conductor）").add_subparsers(dest="row_action", required=True)
     for name, makers in _ROW_ARGS.items():
         p = row.add_parser(name)
         p.add_argument("plan")
@@ -323,7 +323,7 @@ def parser() -> argparse.ArgumentParser:
     sub.add_parser("run").add_argument("plan")
     wt = sub.add_parser("wait")
     wt.add_argument("plan")
-    wt.add_argument("--after", type=int, default=0, help="計画の進行表の事象の番号（前の wait の next が渡す）")
+    wt.add_argument("--after", type=int, default=0, help="計画のステートマシンの事象の番号（前の wait の next が渡す）")
     wt.add_argument("--known-stalls", nargs="*", default=[], help="知らせ済みの止まり（<レーン>/<行>）")
     add = sub.add_parser("lane").add_subparsers(dest="lane_action", required=True).add_parser("add")
     add.add_argument("plan")
@@ -356,8 +356,8 @@ def parser() -> argparse.ArgumentParser:
     req.add_argument("--reason", required=True)
     qn = sub.add_parser("question")
     qn.add_argument("plan")
-    qn.add_argument("--wrapper", required=True, help="問いを出したレーンのラッパーの名前（NDF_RELAY_NAME）")
-    qn.add_argument("--question", required=True, help="hook が書いた問いのファイル（question.json）")
+    qn.add_argument("--wrapper", required=True, help="質問を出したレーンのラッパーの名前（NDF_RELAY_NAME）")
+    qn.add_argument("--question", required=True, help="hook が書いた質問のファイル（question.json）")
     rel = sub.add_parser("release")
     rel.add_argument("plan")
     rel.add_argument("requests", nargs="+")
@@ -373,21 +373,21 @@ def parser() -> argparse.ArgumentParser:
 
 
 def _where(cwd: Path) -> run.Where:
-    """計画の置き場を求め、チェックアウトの置き場を用意する。"""
+    """計画の保存先を求め、チェックアウトの保存先を用意する。"""
     root = command.store_root_of(cwd)
     url = store.default_url(root)
-    store.sqlite_path(url)  # 受けない URL の形は、置き場を用意する前に断る
+    store.sqlite_path(url)  # 受けない URL の形は、保存先を用意する前に断る
     ready = durable.prepare_store(root, datetime.now(UTC))
     with store.open_store(url, ready.root) as st:
         return run.Where(root=ready.root, url=url, repo=command.repo_id(cwd, st.root), cwd=cwd)
 
 
 def _detach_run(out: dict[str, Any], cwd: Path) -> None:
-    """計画を始めた後に、計画を進める耐久ワークフローを切り離して起こし、pid を結果へ載せる。"""
+    """計画を始めた後に、計画を進める耐久ワークフローを切り離して起動し、pid を結果へ載せる。"""
     out["metrics"]["run_pid"] = run.detach(out["metrics"]["plan"], cwd)
 
 
-# トランザクションと置き場を閉じた後に打つ、副命令ごとの後処理
+# トランザクションと保存先を閉じた後に打つ、サブコマンドごとの後処理
 _AFTER: dict[str, Callable[[dict[str, Any], Path], None]] = {"start": _detach_run}
 
 
@@ -408,7 +408,7 @@ def _dispatch(a: argparse.Namespace, cwd: Path) -> dict[str, Any]:
 
 def _cmd_run(a: argparse.Namespace, where: run.Where) -> dict[str, Any]:
     final = run.advance(where, a.plan, run.policy())
-    summary = f"計画 {a.plan} の耐久ワークフローが終わった（{final['outcome']}・起こした {len(final['launched'])}・起こせなかった {len(final['failed'])}）"
+    summary = f"計画 {a.plan} の耐久ワークフローが終わった（{final['outcome']}・起動した {len(final['launched'])}・起動できなかった {len(final['failed'])}）"
     return result.result(TOOL, result.OK, summary, metrics=final, warnings=final["errors"])
 
 
@@ -439,7 +439,7 @@ def _stopped_store(exc: Any) -> dict[str, Any]:
 
 def _stopped_db(exc: Exception) -> dict[str, Any]:
     # 本文は SQL・値・接続先を含みうるので種類の名前だけを出す
-    return result.stopped(TOOL, store.StoreUnreachable.kind, f"進行表の DB を使えない: {type(exc).__name__}")
+    return result.stopped(TOOL, store.StoreUnreachable.kind, f"ステートマシンの DB を使えない: {type(exc).__name__}")
 
 
 # 止まった例外の型 → 結果を作る関数（例外の MRO を順にたどって引く。表に無ければ invalid）
@@ -450,7 +450,7 @@ _STOPPED: dict[type, Callable[[Any], dict[str, Any]]] = {
     sa.exc.SQLAlchemyError: _stopped_db,
     identity.IdentityError: lambda exc: result.stopped(TOOL, "config_broken", str(exc)),
     subprocess.CalledProcessError: lambda exc: result.stopped(
-        TOOL, "precondition", f"git の中で打つ（チェックアウトの置き場を求められない）: {exc}"
+        TOOL, "precondition", f"git の中で打つ（チェックアウトの保存先を求められない）: {exc}"
     ),
 }
 

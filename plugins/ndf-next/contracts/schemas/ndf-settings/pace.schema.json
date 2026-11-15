@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "ndf-settings/pace.schema.json",
-  "title": "進め方の宣言（.ndf/pace.json）",
+  "title": "進め方の設定（.ndf/pace.json）",
   "description": "進め方（fast・auto）の許可と、共通の層の範囲・レッドラインのパス・閾値・開発ループの設定",
   "type": "object",
   "additionalProperties": false,
@@ -18,7 +18,7 @@
       "enum": [
         1
       ],
-      "description": "宣言の形の版。読み手は知らない版を読まない"
+      "description": "設定の形のバージョン。読み手は知らないバージョンを読まない"
     },
     "fast": {
       "type": "object",
@@ -212,7 +212,7 @@
       "properties": {
         "answer_limit": {
           "type": "object",
-          "description": "並列の計画の答え待ちの依頼の閾値",
+          "description": "並列の計画の回答待ちのリクエストの閾値",
           "properties": {
             "plan": {
               "type": "integer",
@@ -234,7 +234,7 @@
     },
     "business_hours": {
       "type": "object",
-      "description": "業務時間（日をまたがない）。不正なら警告して宣言なしとして扱う",
+      "description": "業務時間（日をまたがない）。不正なら警告して設定なしとして扱う",
       "properties": {
         "timezone": {
           "type": "string",

@@ -56,6 +56,6 @@ def last_result(out: str) -> dict:
 
 
 def run_cli(capsys: pytest.CaptureFixture[str], *argv: str) -> tuple[int, dict]:
-    """副命令 `cross-review` を打ち、終了コードと結果 JSON を返す。"""
+    """サブコマンド `cross-review` を打ち、終了コードと結果 JSON を返す。"""
     code = cli.main(list(argv))
     return code, last_result(capsys.readouterr().out)

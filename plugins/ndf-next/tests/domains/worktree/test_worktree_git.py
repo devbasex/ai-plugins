@@ -167,7 +167,7 @@ def test_cleanup_restores_evacuated_files_when_git_refuses(main_repo: Path, run_
 
 
 def test_cleanup_keeps_selected_sprint_until_production(main_repo: Path, run_git: Callable) -> None:
-    """選んで集める取り込み方のスプリントは、merged と同じく本番チャネルに含まれるまで cleanup でも消さない。"""
+    """選んで集めるリリース方式のスプリントは、merged と同じく本番チャネルに含まれるまで cleanup でも消さない。"""
     decl = {"version": 1, "base_branch": "develop", "production_branch": "main", "branch_flow": {"release_strategy": "release_branch"}}
     (main_repo / ".ndf" / "worktree.json").write_text(json.dumps(decl), encoding="utf-8")
     run_git(main_repo, "add", "-A")
@@ -184,7 +184,7 @@ def test_cleanup_keeps_selected_sprint_until_production(main_repo: Path, run_git
 
 
 def test_cleanup_records_merge_commit_for_evacuated_files(main_repo: Path, run_git: Callable) -> None:
-    """squash のマージでは先端が本番に入らないため、退避の台帳へ PR のマージコミットも書く（回収の候補になる）。"""
+    """squash のマージでは先端が本番に入らないため、退避のジャーナルへ PR のマージコミットも書く（回収の候補になる）。"""
     from ndf.domains.worktree import trash
 
     wt = create.create(main_repo, "feat/sq").path
@@ -200,7 +200,7 @@ def test_cleanup_records_merge_commit_for_evacuated_files(main_repo: Path, run_g
     assert json.loads(trash.record_of(dest).read_text(encoding="utf-8"))["merge_commit"] == merge
 
 
-# 現状固定（I-022）: 状態ファイル（排他・台帳・退避先）の置き場は、どこから呼んでも共通の git ディレクトリの実体の下。
+# 現状固定（I-022）: 状態ファイル（排他・ジャーナル・退避先）の保存先は、どこから呼んでも共通の git ディレクトリの実体の下。
 def test_state_files_live_under_common_git_dir_from_main_and_worktree(main_repo: Path, tmp_path: Path) -> None:
     from ndf.domains.worktree import allocations, mainlock, trash
 

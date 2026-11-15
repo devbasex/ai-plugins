@@ -23,9 +23,9 @@ def _fresh_run_log(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _launch_allowed(monkeypatch):
-    """起動の口の前提をそろえる: 学習に使わない設定の控えが期限内にあり、重い起動の枠はテストの枠の中として取らない。
+    """起動の口の前提をそろえる: 学習に使わない設定のスナップショットが期限内にあり、重い起動のスロットはテストのスロットの中として取らない。
 
-    前提そのものを確かめるテストは、控えを消すか `slots.HELD_ENV` を外して上書きする。
+    前提そのものを確かめるテストは、バックアップを消すか `slots.HELD_ENV` を外して上書きする。
     """
     from ndf.adapters import training
     from ndf.testing import slots
@@ -36,7 +36,7 @@ def _launch_allowed(monkeypatch):
 
 @pytest.fixture
 def marker_launch(tmp_path):
-    """起動されたら印のファイルを作る起動を組む関数。`marker_launch(agent)` が (印のパス, claude の argv, run_agent の Launch)。
+    """起動されたらマーカーのファイルを作る起動を組む関数。`marker_launch(agent)` が (マーカーのパス, claude の argv, run_agent の Launch)。
 
     起動しなかったことは `assert not marker.exists()` で確かめる。
     """

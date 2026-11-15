@@ -132,7 +132,7 @@
         },
         "--trim": {
           "type": "boolean",
-          "description": "雛形に無い節を退避先へ移してから確かめる"
+          "description": "テンプレートに無い節を退避先へ移してから確かめる"
         },
         "--history": {
           "type": "string",
@@ -158,7 +158,7 @@
         },
         "--version": {
           "type": "integer",
-          "description": "答えたときの MVV の版（無ければ worktree の宣言の現行の版）"
+          "description": "回答したときの MVV のバージョン（無ければ worktree の設定の現行のバージョン）"
         }
       },
       "required": [
@@ -235,7 +235,7 @@
           "items": {
             "type": "string"
           },
-          "description": "<語>=<ファイル> で語の正本を明示する"
+          "description": "<語>=<ファイル> で語の SSOT を明示する"
         },
         "--message": {
           "type": "string",

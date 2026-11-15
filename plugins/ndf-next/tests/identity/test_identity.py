@@ -15,7 +15,7 @@ PLUGIN_ROOT = Path(__file__).resolve().parents[2]
 NOW = datetime(2026, 11, 13, 20, 30, 5)
 
 
-# make_plugin の manifest の既定（plugin.json を名前と版から書く）
+# make_plugin の manifest の既定（plugin.json を名前とバージョンから書く）
 FROM_NAME = object()
 
 
@@ -31,7 +31,7 @@ def make_plugin(base: Path, dirname: str, name: str, manifest: object = FROM_NAM
 
 
 def _retired_names(ident: identity.PluginIdentity) -> list[str]:
-    """状態の置き場の親にある、退避先の名前。"""
+    """状態の保存先の親にある、退避先の名前。"""
     return [p.name for p in ident.state_dir.parent.iterdir() if identity.RETIRED_SUFFIX in p.name]
 
 
@@ -104,7 +104,7 @@ def test_ndf_state_home_is_the_root_before_xdg(tmp_path, monkeypatch, use_plugin
     use_plugin("p")
     monkeypatch.setenv("NDF_STATE_HOME", str(tmp_path / "service"))
 
-    # サービスが渡した根の下にプラグイン名の置き場を作り、根そのもの（旧い NDF の置き場）を退避しない
+    # サービスが渡した根の下にプラグイン名の保存先を作り、根そのもの（旧い NDF の保存先）を退避しない
     old = tmp_path / "service" / "old.json"
     old.parent.mkdir()
     old.write_text("{}")
@@ -153,7 +153,7 @@ def test_prepare_retires_old_state_and_keeps_its_contents(ident):
 
 
 def test_prepare_retires_every_old_location_by_the_same_rule(ident, tmp_path):
-    # 3341-3: 旧い NDF の既定の状態の置き場（<設定の置き場>/<名前>/state）も同じ規則で退避し、作り直さない
+    # 3341-3: 旧い NDF の既定の状態の保存先（<設定の保存先>/<名前>/state）も同じ規則で退避し、作り直さない
     ident.state_dir.mkdir(parents=True)
     (ident.state_dir / "a").write_text("1")
     config_state = tmp_path / "config" / "p" / "state"
@@ -170,7 +170,7 @@ def test_prepare_retires_every_old_location_by_the_same_rule(ident, tmp_path):
 
 
 def test_prepare_carries_the_locations_retired_before_a_rename_fails(ident, tmp_path, monkeypatch):
-    # 後の置き場の名前を変えられなくても、先に退避した元と先を例外が持ち、ログにも残す
+    # 後の保存先の名前を変えられなくても、先に退避した元と先を例外が持ち、ログにも残す
     ident.state_dir.mkdir(parents=True)
     (ident.state_dir / "a").write_text("1")
     config_state = tmp_path / "config" / "p" / "state"
@@ -223,7 +223,7 @@ def test_prepare_refuses_to_move_an_outer_location_holding_locations_marked_not_
     (ident.state_dir / "locks").mkdir()
     (ident.state_dir / "locks" / "x.lock").write_text("held")
 
-    with pytest.raises(identity.IdentityError, match="退避しない置き場"):
+    with pytest.raises(identity.IdentityError, match="退避しない保存先"):
         identity.prepare_state_dir(ident, now=NOW)
 
     assert (ident.state_dir / "locks" / "x.lock").read_text() == "held"
@@ -233,7 +233,7 @@ def test_prepare_refuses_to_move_an_outer_location_holding_locations_marked_not_
 
 
 def test_prepare_refuses_to_move_a_config_state_holding_the_new_state_dir(tmp_path, monkeypatch):
-    # XDG_STATE_HOME を config-state の下に置くと、config-state が新しい状態の置き場とロックを含む。外側ごと動かさず止める
+    # XDG_STATE_HOME を config-state の下に置くと、config-state が新しい状態の保存先とロックを含む。外側ごと動かさず止める
     monkeypatch.setattr(identity, "ROOT", make_plugin(tmp_path, "x", "p"))
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "config"))
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "config" / "p" / "state"))
@@ -255,7 +255,7 @@ def test_old_state_locations_are_the_state_home_and_the_config_state_in_order(id
 
 
 def test_every_old_location_has_a_decision_and_a_reason():
-    # 3341-3: 旧い NDF の状態の置き場の全行が、退避するか・その理由を持つ
+    # 3341-3: 旧い NDF の状態の保存先の全行が、退避するか・その理由を持つ
     keys = [location.key for location in identity.OLD_STATE_LOCATIONS]
     assert len(keys) == len(set(keys))
     assert {"state-home", "config-state", "checkout-state", "config-accounts", "config-relay", "config-locks", "cache"} == set(keys)
@@ -285,7 +285,7 @@ def test_prepare_leaves_locations_marked_not_to_retire(ident, tmp_path, monkeypa
 
 
 def test_prepare_does_not_retire_when_the_environment_names_another_root(ident, tmp_path, monkeypatch):
-    # 3367-4: ほかのプラグインの hook の子として動いたときは、旧い置き場に触れずに止まる
+    # 3367-4: ほかのプラグインの hook の子として動いたときは、旧い保存先に触れずに止まる
     monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(make_plugin(tmp_path, "old", "p")))
     foreign = identity.load()
     foreign.state_dir.mkdir(parents=True)
@@ -349,7 +349,7 @@ def test_prepare_adds_time_when_retired_name_exists(ident):
 
 
 def test_prepare_waits_for_the_state_lock(ident):
-    # 判定から format.json の作成までは、同じ置き場を用意するほかの処理と重ならない
+    # 判定から format.json の作成までは、同じ保存先を用意するほかの処理と重ならない
     ident.state_dir.parent.mkdir(parents=True, exist_ok=True)
     with open(identity.lock_path(ident), "a") as held:
         fcntl.flock(held, fcntl.LOCK_EX)

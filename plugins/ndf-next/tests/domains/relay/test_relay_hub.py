@@ -1,4 +1,4 @@
-"""リレーハブ: 受付箱・起動の確かめ・起こし直しの順・版の混ざり・待ちの一覧（#2563・#2583・#2753・3341-2・決定 86）。
+"""リレーハブ: 受付箱・起動の確かめ・再起動の順・バージョンの混ざり・待ちの一覧（#2563・#2583・#2753・3341-2・決定 86）。
 
 tmux は偽物に差し替え、ラッパーの代わりに錠を持つ。時計は進めるだけの偽物で、眠らない。
 """
@@ -36,7 +36,7 @@ class FakeTmux:
         if self.boots:
             d = registry.wrapper_dir(self.state_dir, name)
             fd = self.hold(d / registry.LOCK_FILE)
-            registry.write_state(d, {"version": VERSION, "state": "running", "reason": "区間 1 を始めた"})
+            registry.write_state(d, {"version": VERSION, "state": "running", "reason": "セグメント 1 を始めた"})
             self.sessions[name] = fd
         return Done(True, "")
 
@@ -109,7 +109,7 @@ def test_spawn_that_never_comes_up_is_not_reported_as_started(ctx):
 
 
 def test_missing_wrapper_location_says_how_to_recover(ctx):
-    # プラグインの更新で版の置き場が消えたら、理由と打ち直しを返す（#2583）
+    # プラグインの更新でバージョンの保存先が消えたら、理由と打ち直しを返す（#2583）
     (ctx.plugin_root / "bin" / "ndf").unlink()
     got = hub.submit(ctx, {"kind": "spawn", "name": "t1"})
     assert (got.ok, got.cause) == (False, "precondition") and "ndf relay install" in got.summary
@@ -134,7 +134,7 @@ def test_restart_refused_by_the_limit_does_not_stop_the_target(ctx):
 
 
 def test_old_ndf_wrapper_blocks_spawn_and_restart(ctx, tmp_path, hold_lock):
-    # 旧い版のラッパーが動いていれば、新しい版で起動しない（3341-2）
+    # 旧いバージョンのラッパーが動いていれば、新しいバージョンで起動しない（3341-2）
     assert hub.submit(ctx, {"kind": "spawn", "name": "t1"}).ok
     fd = hold_lock(tmp_path / "old" / "relay" / "20261113T1" / registry.LOCK_FILE)
     try:
@@ -188,7 +188,7 @@ def test_tmux_runner_failures_are_reported():
     assert not t.has("t1")
 
 
-# 現状固定（I-004）: 起こし直しの回数は登録簿の starts が今日の日付のときだけ数え、ほかは 0 回から数える
+# 現状固定（I-004）: 再起動の回数は登録簿の starts が今日の日付のときだけ数え、ほかは 0 回から数える
 def _register(ctx, starts):
     path = hub.hub_dir(ctx.state_dir) / registry.REGISTRY_FILE
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -230,7 +230,7 @@ def test_spawn_registers_zero_starts_for_today(ctx):
 
 
 def test_a_broken_registry_answers_invalid_and_does_not_block_later_requests(ctx):
-    # 依頼 1 本の例外で、後ろの依頼が答えを待ち切れなくならない
+    # リクエスト 1 本の例外で、後ろのリクエストが回答を待ち切れなくならない
     path = hub.hub_dir(ctx.state_dir) / registry.REGISTRY_FILE
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("{壊れた", encoding="utf-8")
@@ -251,7 +251,7 @@ def test_an_unreadable_request_file_gets_an_invalid_result(ctx):
 
 
 def test_a_request_removed_by_its_timed_out_submitter_is_skipped(ctx, monkeypatch):
-    # 頼む側が期限切れで消した依頼に結果を書かず、後ろの依頼も処理する
+    # 頼む側が期限切れで消したリクエストに結果を書かず、後ろのリクエストも処理する
     requests = hub.hub_dir(ctx.state_dir) / "requests"
     requests.mkdir(parents=True)
     for rid in ("0-a", "1-gone", "2-c"):

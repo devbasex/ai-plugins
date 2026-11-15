@@ -1,13 +1,13 @@
 """作業場所の片付け: マージ済みのブランチの worktree を消す（判断は `cleanup_decide`）。
 
-1. メインディレクトリの `git worktree list` から、置き場 `.worktrees/` の下の worktree を集める
+1. メインディレクトリの `git worktree list` から、保存先 `.worktrees/` の下の worktree を集める
 2. git だけで分かる事実（detached・鎖・今の位置・未コミットの変更）を読み、残すものを先に決める
 3. 残りのブランチの PR を GitHub から 1 回のクエリで読む（`adapters.github.GitHub.pulls_by_head`）。消すと決まっても、
-   選んで集める取り込み方のスプリントブランチは本番チャネルに含まれるまで残す（`merged_decide.sprint_keep`。今の宣言で決める）
+   選んで集めるリリース方式のスプリントブランチは本番チャネルに含まれるまで残す（`merged_decide.sprint_keep`。今の設定で決める）
 4. 消すと決めた worktree の公開を閉じてテスト環境を破棄し（`testenv_sweep.close_for_removal`。できなければ消さない）、
    追跡していないファイル（無視したものを含む）を先に退避し（`trash.evacuate`。退避できなければ消さない）、
    `git worktree remove`（`--force` を付けない）で消し（断られたら退避したファイルを戻す。`trash.restore`）、ブランチを `git branch -d` で消す
-5. 置き場の消えた worktree の管理情報を `git worktree prune` で片付ける
+5. 保存先の消えた worktree の管理情報を `git worktree prune` で片付ける
 
 `dry_run` では 1〜3 だけを行い、何も消さない。
 """
@@ -62,7 +62,7 @@ def _inside(path: Path, cwd: Path) -> bool:
 
 
 def _local_facts(item: repo.Worktree, cwd: Path) -> Facts:
-    """git だけで分かる事実。置き場が消えた worktree は変更なしとして扱う（prune が片付ける）。"""
+    """git だけで分かる事実。保存先が消えた worktree は変更なしとして扱う（prune が片付ける）。"""
     dirty = item.path.is_dir() and bool(repo.dirty_paths(Git(item.path), untracked=True))
     return Facts(item.branch, item.locked, _inside(item.path, cwd), dirty, ())
 
@@ -83,7 +83,7 @@ def survey(main_dir: Path, cwd: Path, hub: PullReader, git: Optional[Git] = None
 
 
 def _merge_commit(facts: Facts) -> str:
-    """マージ済みの PR のマージコミット（退避の台帳へ書く。分からなければ空）。"""
+    """マージ済みの PR のマージコミット（退避のジャーナルへ書く。分からなければ空）。"""
     return next((p.merge_sha for p in facts.pulls if p.merged and p.merge_sha), "")
 
 

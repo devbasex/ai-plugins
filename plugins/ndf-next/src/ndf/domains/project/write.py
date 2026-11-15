@@ -1,13 +1,13 @@
-"""測定の結果と答えを宣言のキーへ取り込む書き出しの規則と、差分・`.gitignore` の確かめ（#3569。旧い `project_lib/merge.py`・
+"""測定の結果と回答を設定のキーへマージする書き出しの規則と、差分・`.gitignore` の確かめ（#3569。旧い `project_lib/merge.py`・
 `ci_tests.py`・`lib/ndf_tracking.py` と `project-decl.py write` の組み立ての移し先）。
 
-宣言の値は辞書のまま扱い、キーの順序と知らないキーを保つ。
+設定の値は辞書のまま扱い、キーの順序と知らないキーを保つ。
 
 - 秘密の形を最初に当てる: 書く値・既存の値のどちらかが秘密の形なら、その項目を `{"unknown": "秘密の形"}` にし、値を出さない
 - 置き換えてよいのは、キーが無い項目と、前の `write` の値のまま（`analysis.written` の指紋が一致する）項目だけ
 - `.ndf/worktree.json` は `base_branch`・`production_branch`・`branch_flow` の無いキー（と前の `write` の値のままのキー）だけを変える
 - 新しい解析で不明でも、前の値があれば残す。`ci` のワークフローの行の壁時計も、新しい行に無ければ同じパスの前の値を残す
-- CI テストの宣言（`test.ci.only`）は、テストの suite の `ci_jobs` のファイルがリポジトリにあるときだけ書く。人が書いた値は変えない
+- CI テストの設定（`test.ci.only`）は、テストの suite の `ci_jobs` のファイルがリポジトリにあるときだけ書く。人が書いた値は変えない
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ from ndf.domains.records import files
 from ndf.domains.project.items import MEASURED, QUESTION, obj, seq
 from ndf.domains.project.secret import has_secret, redact
 
-# 解析が測る宣言の項目（スキーマの並びの順）。外すのは人が書く項目・解析の記録・形の版
+# 解析が測る設定の項目（スキーマの並びの順）。外すのは人が書く項目・解析の記録・形のバージョン
 ITEM_KEYS = tuple(
     k
     for k in contracts.load_json(check.SCHEMA)["properties"]
@@ -38,7 +38,7 @@ BRANCH_FLOW = measure_flow.ITEM
 SECRET_REASON = "秘密の形"
 WORKTREE_KEYS = (("base_branch", "base"), ("production_branch", "production"))
 WORKTREE_TAG = "worktree.json"
-DELIVERY_KEPT = ("manual_reason", "result", "publishes_release")  # 利用者が書く欄。解析の答えに無ければ残す
+DELIVERY_KEPT = ("manual_reason", "result", "publishes_release")  # 利用者が書く欄。解析の回答に無ければ残す
 CI_KEY = "test.ci.only"  # `analysis.written` に持つ指紋のキー
 P_NUMBER = {
     "languages": "P1",
@@ -59,11 +59,11 @@ Check = Callable[[str, Any], Optional[str]]
 
 
 class WriteError(Exception):
-    """書き出せない（測定の結果か答えが読めない・答えが表に合わない・書き出す宣言が形に合わない）。"""
+    """書き出せない（測定の結果か回答が読めない・回答が表に合わない・書き出す設定が形に合わない）。"""
 
 
 class File(NamedTuple):
-    """書く 1 つのファイル（置き場・表示の名前・前の中身・新しい中身）。"""
+    """書く 1 つのファイル（保存先・表示の名前・前の中身・新しい中身）。"""
 
     path: Path
     name: str
@@ -90,13 +90,13 @@ def dumps(data: dict[str, Any]) -> str:
 
 
 def item_problem(key: str, value: Any) -> Optional[str]:
-    """宣言の 1 項目の値がスキーマに合わなければその誤り。合えば None。"""
+    """設定の 1 項目の値がスキーマに合わなければその誤り。合えば None。"""
     errs = contracts.schema_errors({"version": 1, key: value}, check.SCHEMA)
     return "; ".join(errs[:3]) if errs else None
 
 
 def flow_problem(key: str, value: Any) -> Optional[str]:
-    """`branch_flow` の答えの形（取り込み方の表）。`item_problem` と同じ形で返す。"""
+    """`branch_flow` の回答の形（リリース方式の表）。`item_problem` と同じ形で返す。"""
     return measure_flow.answer_problem(value)
 
 
@@ -111,12 +111,12 @@ def resolve_item(key: str, m: Optional[dict[str, Any]], answers: dict[str, Any],
         return {"unknown": str(m["reason"]) if m.get("reason") else "測れない"}, "不明"
     ans = answers.get(key)
     if not isinstance(ans, dict):
-        return {"unknown": "答えが無い"}, "不明"
+        return {"unknown": "回答が無い"}, "不明"
     if "unknown" in ans:
         return {"unknown": str(ans["unknown"]) if ans["unknown"] else "決められない"}, "不明"
     problem = problem_of(key, ans.get("value"))
     if problem:
-        return {"unknown": f"答えが形に合わない: {problem}"}, "不明"
+        return {"unknown": f"回答が形に合わない: {problem}"}, "不明"
     return ans.get("value"), "判断した"
 
 
@@ -165,7 +165,7 @@ def _replace_ours(key: str, cur: Any, new: Any, origin: str) -> tuple[Any, list[
 
 
 def _owned_decision(tag: str, cur: Any, new: Any, written_before: dict[str, Any]) -> Optional[dict[str, Any]]:
-    """前の値 `cur` の持ち主を指紋で見る。前の `write` の値のまま（指紋が一致）なら None（置き換えてよい）。
+    """前の値 `cur` のオーナーを指紋で見る。前の `write` の値のまま（指紋が一致）なら None（置き換えてよい）。
     手の値なら、新しい値が不明か同じ値で `kept`、違えば `mismatch` の行を返す。"""
     if written_before.get(tag) == value_digest(cur):
         return None
@@ -195,7 +195,7 @@ def merge_item(
 
 
 def written_digests(doc: Optional[dict[str, Any]]) -> dict[str, Any]:
-    """前の `write` が書いた値の指紋（宣言の `analysis.written`）。無ければ空。"""
+    """前の `write` が書いた値の指紋（設定の `analysis.written`）。無ければ空。"""
     return obj(obj(obj(doc).get("analysis")).get("written"))
 
 
@@ -223,7 +223,7 @@ def merge_project(
 
 
 def delivery_channels(answers: dict[str, Any], names: dict[str, Any]) -> dict[str, Any]:
-    """`delivery` の答えの行で、本番チャネルとベースブランチの名前を写した `branch` を `channel` に直す。両方に当たる名前は本番を採る。"""
+    """`delivery` の回答の行で、本番チャネルとベースブランチの名前を写した `branch` を `channel` に直す。両方に当たる名前は本番を採る。"""
     ans = answers.get("delivery")
     rows = ans.get("value") if isinstance(ans, dict) else None
     if not isinstance(rows, list):
@@ -318,7 +318,7 @@ def _put_ci(doc: dict[str, Any], value: Optional[bool]) -> dict[str, Any]:
 def declare_ci(
     doc: dict[str, Any], previous: Optional[dict[str, Any]], written_before: dict[str, Any], exists: Callable[[str], bool]
 ) -> tuple[dict[str, Any], str, Optional[str]]:
-    """書き出す宣言の `test.ci.only` を決め、(宣言, 出力の 1 行, 指紋か None) を返す。"""
+    """書き出す設定の `test.ci.only` を決め、(設定, 出力の 1 行, 指紋か None) を返す。"""
     test = doc.get("test")
     if not isinstance(test, dict) or is_unknown(test):
         return doc, "変えない（test が不明）", None
@@ -335,7 +335,7 @@ def declare_ci(
 def _declare_ci_tests(
     doc: dict[str, Any], existing: Optional[dict[str, Any]], written_before: dict[str, Any], root: Path
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """CI テストの宣言を決める。`test` を解析が持つなら、その指紋を書き足した値で取り直す。"""
+    """CI テストの設定を決める。`test` を解析が持つなら、その指紋を書き足した値で取り直す。"""
     doc, line, digest = declare_ci(doc, existing, written_before, lambda p: (root / p).is_file())
     written = doc["analysis"]["written"]
     written.pop(CI_KEY, None)
@@ -343,7 +343,7 @@ def _declare_ci_tests(
         written[CI_KEY] = digest
     if "test" in written:
         written["test"] = value_digest(doc["test"])
-    return doc, {"kind": "note", "key": CI_KEY, "text": f"CI テストの宣言: {line}"}
+    return doc, {"kind": "note", "key": CI_KEY, "text": f"CI テストの設定: {line}"}
 
 
 def ignored_notes(root: Path, rels: list[str]) -> list[dict[str, Any]]:
@@ -382,7 +382,7 @@ def summary_note(rows: list[dict[str, Any]]) -> str:
         return ""
     names = "・".join(n["name"] for n in hits)
     rules = "・".join(dict.fromkeys(f"{n['source']} の `{n['pattern']}`" for n in hits))
-    return f"。宣言をコミットできない（{rules} が除外している: {names}）"
+    return f"。設定をコミットできない（{rules} が除外している: {names}）"
 
 
 def _same_but_time(old: Optional[dict[str, Any]], new: dict[str, Any]) -> bool:
@@ -396,7 +396,7 @@ def _same_but_time(old: Optional[dict[str, Any]], new: dict[str, Any]) -> bool:
 
 
 class Inputs(NamedTuple):
-    """書き出しの入力（作業場所の git・メインディレクトリ・今の 2 つの宣言・測定の結果・答え）。"""
+    """書き出しの入力（作業場所の git・メインディレクトリ・今の 2 つの設定・測定の結果・回答）。"""
 
     root: Path
     main: Path
@@ -409,7 +409,7 @@ class Inputs(NamedTuple):
 def _worktree_part(
     inp: Inputs, written_before: dict[str, Any]
 ) -> tuple[list[File], list[dict[str, Any]], dict[str, str], tuple[str, ...], dict[str, Any]]:
-    """`.ndf/worktree.json` の起点・本番・ブランチ運用。返すのは (書くファイル, 行, 指紋, 宣言したブランチ, 起点と本番の名前)。"""
+    """`.ndf/worktree.json` の起点・本番・ブランチ運用。返すのは (書くファイル, 行, 指紋, 定義したブランチ, 起点と本番の名前)。"""
     items = obj(inp.measure.get("items"))
     value, origin = resolve_item(BRANCHES, items.get(BRANCHES), inp.answers, item_problem_branches)
     branches = {} if is_unknown(value) else dict(obj(value))
@@ -430,17 +430,17 @@ def _worktree_part(
 
 
 def item_problem_branches(key: str, value: Any) -> Optional[str]:
-    """P6 の答えの形（`{"base": 名前, "production": 名前}`）。"""
+    """P6 の回答の形（`{"base": 名前, "production": 名前}`）。"""
     if not isinstance(value, dict) or any(not isinstance(value.get(k), str) for k in ("base", "production")):
         return "base と production をブランチの名前で書く"
     return None
 
 
 def plan(inp: Inputs) -> Plan:
-    """書くファイルと出力の行を決める（何も書かない）。答えが取り込み方の表に合わない・書き出す宣言が形に合わなければ `WriteError`。"""
+    """書くファイルと出力の行を決める（何も書かない）。回答がリリース方式の表に合わない・書き出す設定が形に合わなければ `WriteError`。"""
     bad = measure_flow.bad_answer(inp.answers.get(BRANCH_FLOW))
     if bad:
-        raise WriteError(f"ブランチ運用の答えが取り込み方の表に合わないため書かない: {bad}")
+        raise WriteError(f"ブランチ運用の回答がリリース方式の表に合わないため書かない: {bad}")
     questions = {k for k, m in obj(inp.measure.get("items")).items() if obj(m).get("status") == QUESTION}
     rows = [{"kind": "ignored", "key": k} for k in inp.answers if k not in questions]
     written_before = written_digests(inp.existing)
@@ -456,7 +456,7 @@ def plan(inp: Inputs) -> Plan:
     doc, ci_row = _declare_ci_tests(doc, inp.existing, written_before, inp.root)
     errs = contracts.schema_errors(doc, check.SCHEMA)
     if errs:
-        raise WriteError(f"書き出す宣言が形に合わない（解析器の誤り）: {'; '.join(errs[:3])}")
+        raise WriteError(f"書き出す設定が形に合わない（解析器の誤り）: {'; '.join(errs[:3])}")
     if not _same_but_time(inp.existing, doc):
         path = files.path(inp.main, "project")
         out.insert(
@@ -481,7 +481,7 @@ def row_line(row: dict[str, Any]) -> str:
     key, kind = row["key"], row["kind"]
     p = p_number(key, "")
     if kind == "mismatch":
-        return f"  {p} {key}: 食い違い 宣言 {json.dumps(row['declared'], ensure_ascii=False)} / 解析 {json.dumps(row['analyzed'], ensure_ascii=False)}"
+        return f"  {p} {key}: 食い違い 設定 {json.dumps(row['declared'], ensure_ascii=False)} / 解析 {json.dumps(row['analyzed'], ensure_ascii=False)}"
     if kind == "unknown":
         return f"  {p} {key}: 不明（{row.get('reason')}）{'（前の値を残した）' if row.get('kept_previous') else ''}"
     labels = {"written": str(row.get("origin")), "kept": "手の値を保った", "secret": "秘密の形の値を捨てて不明にした"}

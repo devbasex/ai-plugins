@@ -1,4 +1,4 @@
-"""オーガナイザーの `ndf lanes wait`（#3097・SF9 の待ちの結果の行き先、3346-5 の止まりの知らせ）。"""
+"""オーガナイザーの `ndf lanes wait`（#3097・SF9 の待ちの結果のルート、3346-5 の止まりの知らせ）。"""
 
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ def test_notices_return_every_event_after_the_number_not_only_the_latest():
 
 
 def test_a_request_closed_after_it_opened_is_not_returned():
-    """止まりを知らせた後にレーンが動き出して閉じた依頼は、wait に出ない（#2585 の受け入れ条件 2）。"""
+    """止まりを知らせた後にレーンが動き出して閉じたリクエストは、wait に出ない（#2585 の受け入れ条件 2）。"""
     events = [
         {"seq": 2, "kind": "request_opened", "row_key": "request-1"},
         {"seq": 3, "kind": "request_opened", "row_key": "request-2"},

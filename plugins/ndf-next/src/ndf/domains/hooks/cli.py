@@ -1,9 +1,9 @@
-"""`ndf hooks` の副命令（#3345 の決定 90・94・95）。
+"""`ndf hooks` のサブコマンド（#3345 の決定 90・94・95）。
 
-    ndf hooks stats [--days 14]                         # 事象・guard ごとの p50・p95・拒否と差し戻しの数・注入の最大
+    ndf hooks stats [--days 14]                         # 事象・guard ごとの p50・p95・拒否と変更要求の数・注入の最大
     ndf hooks check-budget                              # 予算の順序の検査（破れがあれば stopped）
-    ndf hooks capture <ランタイム> <版> <事象> < payload  # 本体の入力の見本を、秘密を伏せて足す
-    ndf hooks render [--check]                          # 登録（hooks/<ランタイム>.json）を契約表と予算から作り直す
+    ndf hooks capture <ランタイム> <バージョン> <事象> < payload  # 本体の入力の見本を、秘密を伏せて足す
+    ndf hooks render [--check]                          # 登録（hooks/<ランタイム>.json）をコントラクト表と予算から作り直す
 
 hook の経路ではない（利用者と CI が打つ）。
 """
@@ -21,10 +21,10 @@ from ndf import cli, identity
 from ndf.contracts import causes, result
 from ndf.domains.hooks import budget, metrics, registration, tables
 
-# 結果 JSON の tool の名前は副命令の名前（正本は `cli.COMMANDS`）
+# 結果 JSON の tool の名前はサブコマンドの名前（SSOT は `cli.COMMANDS`）
 TOOL = cli.tool_of(__name__)
 SAMPLES = tables.PLUGIN_ROOT / "tests" / "domains" / "hooks" / "samples"
-# 見本で中身を残すトップレベルの鍵（ほかの文字列と、入れ子の中の同名の鍵は伏せる）
+# 見本で中身を残すトップレベルのキー（ほかの文字列と、入れ子の中の同名のキーは伏せる）
 _KEEP = frozenset({"hook_event_name", "tool_name", "source", "reason", "permission_mode", "model", "matcher"})
 _ID_KEYS = frozenset({"session_id", "turn_id", "tool_use_id", "prompt_id"})
 _PLACEHOLDER = {"cwd": "<cwd>", "transcript_path": "<transcript>"}
@@ -34,7 +34,7 @@ _VERSION_RE = re.compile(r"^\d+(\.\d+){1,3}$")
 def redact(payload: Any) -> Any:
     """見本に書く形。トップレベルの識別子は 0 に、作業ディレクトリと会話の記録のパスは置き換え、既知のメタデータだけを残す。
 
-    `tool_input`・`tool_response` などの入れ子の中は、鍵の名前によらず文字列をすべて伏せる。
+    `tool_input`・`tool_response` などの入れ子の中は、キーの名前によらず文字列をすべて伏せる。
     """
     if not isinstance(payload, dict):
         return _hide(payload)
@@ -48,7 +48,7 @@ def _top(key: str, value: Any) -> Any:
         return value
     if key in _ID_KEYS:
         return re.sub(r"[0-9a-fA-F]", "0", value)
-    return _PLACEHOLDER.get(key, "<text>")  # noqa: NDF502 外部コマンド: ランタイムが渡したほかの鍵の文字列は伏せる
+    return _PLACEHOLDER.get(key, "<text>")  # noqa: NDF502 外部コマンド: ランタイムが渡したほかのキーの文字列は伏せる
 
 
 def _hide(value: Any) -> Any:
@@ -60,7 +60,7 @@ def _hide(value: Any) -> Any:
 
 
 def capture(runtime: str, version: str, event: str, payload: dict, root: Path = SAMPLES) -> Path:
-    """見本を `<root>/<ランタイム>/<版>/<事象>.json` へ書く。"""
+    """見本を `<root>/<ランタイム>/<バージョン>/<事象>.json` へ書く。"""
     path = root / runtime / version / f"{event}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(redact(payload), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -87,9 +87,9 @@ def _invalid(detail: str) -> int:
 
 def _capture(args: argparse.Namespace) -> int:
     if args.runtime not in tables.runtimes() or tables.event_spec(args.runtime, args.event) is None:
-        return _invalid(f"契約表に無いランタイムか事象: {args.runtime} {args.event}")
+        return _invalid(f"コントラクト表に無いランタイムか事象: {args.runtime} {args.event}")
     if not _VERSION_RE.match(args.version):
-        return _invalid(f"版の形が違う: {args.version}")
+        return _invalid(f"バージョンの形が違う: {args.version}")
     try:
         payload = json.loads(sys.stdin.read())
     except ValueError as exc:
@@ -124,7 +124,7 @@ def main(argv: list[str]) -> int:
     cap.add_argument("version")
     cap.add_argument("event")
     cap.set_defaults(run=_capture)
-    ren = sub.add_parser("render", help="登録を契約表と予算から作り直す")
+    ren = sub.add_parser("render", help="登録をコントラクト表と予算から作り直す")
     ren.add_argument("--check", action="store_true", help="書かずに、作り直した結果と違えば stopped")
     ren.set_defaults(run=lambda a: _render(a.check))
     try:

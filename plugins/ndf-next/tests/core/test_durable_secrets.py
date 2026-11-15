@@ -14,7 +14,7 @@ from ._durable_helpers import SRC
 
 SCRIPT = Path(__file__).with_name("_durable_secret.py")
 TOKEN = "durable-s3cr3t-token-77"
-# 進行表の DB の URL は名前が秘密の形でなくても秘密として扱う（資格情報の無い形でも値ごと伏せる）
+# ステートマシンの DB の URL は名前が秘密の形でなくても秘密として扱う（資格情報の無い形でも値ごと伏せる）
 PROGRESS_URL = "postgresql://ndf@db.internal.example:5432/progress"
 
 

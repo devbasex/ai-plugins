@@ -1,7 +1,7 @@
 """ステップのコマンドを打ち、結果 JSON を読む。
 
 - 作業ディレクトリは打つたびに決める。マージで作業場所が消えた・登録が外れた後はリポジトリの根で打つ
-- 子のプロセスは自分のプロセスの組で起こし、pid とホスト名を状態の置き場の `steps/<ステップ>.pid.json` に書く。
+- 子のプロセスは自分のプロセスの組で起動し、pid とホスト名を状態の保存先の `steps/<ステップ>.pid.json` に書く。
   打ち直しの前に、前の回の子が残っていれば `process_group` で止めてから打つ。別のホストの子が残っていれば打たずに止まる（B10）
 - 結果は標準出力の最後の JSON の行から読む。JSON を出さないコマンドは終了コードと `exit_cause` で種類を決める
 - 結果に載せる文は、秘密の環境変数の値とトークンの形を伏せてから返す（耐久の記録と結果 JSON へ秘密を入れない）
@@ -10,7 +10,7 @@
 
 外部への操作（push・PR の作成・マージ・Issue を閉じる・ラベル・コメント・リリース）のステップは、`probe` に相手の状態を
 読むコマンドを持つ（B9）。`run` の前に毎回打ち、済んでいれば `run` を打たずに ok を返す。操作の直後にプロセスが落ちて
-耐久ステップの記録が残らなくても、回復で打ち直したステップは済んだ操作を繰り返さない。`probe` の答え:
+耐久ステップの記録が残らなくても、回復で打ち直したステップは済んだ操作を繰り返さない。`probe` の回答:
 
 - 終了コードが成功（終了コードの表の `ok`。結果 JSON なら `ok`）: 済んでいる。`run` を打たない
 - 終了コードが失敗（終了コードの表の `failed`。結果 JSON なら `not_applicable` で止まった）: まだ。`run` を打つ
@@ -83,7 +83,7 @@ def ensure_previous_stopped(state_dir: Path, step_id: str) -> Optional[int]:
     path = _pid_path(state_dir, step_id)
     try:
         record = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):  # noqa: NDF401 ファイル: 記録が無い・壊れている（前の回は子を起こす前に終わった）
+    except (OSError, json.JSONDecodeError):  # noqa: NDF401 ファイル: 記録が無い・壊れている（前の回は子を起動する前に終わった）
         return None
     if record["host"] != socket.gethostname():
         raise StepRefused(f"ステップ {step_id} の前の子（pid {record['pid']}）が別のホスト {record['host']} に残っている")

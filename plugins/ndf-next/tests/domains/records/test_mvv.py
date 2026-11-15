@@ -1,4 +1,4 @@
-"""MVV の記録: worktree の鍵（#2603）・照合の再利用（#2614）・覆しの数え方（#2777）・数える版（#2970）。"""
+"""MVV の記録: worktree のキー（#2603）・ MVV 判定の再利用（#2614）・覆しの数え方（#2777）・数えるバージョン（#2970）。"""
 
 from __future__ import annotations
 
@@ -137,7 +137,7 @@ def test_mvv_validate_sprint_reuses_the_latest_follow_and_survives_broken_rows(r
     assert len(rows) == 4 and broken == 1
 
 
-# 現状固定（I-011 の前）: 記録の置き場は NDF_MVV_STATE_DIR → 状態の置き場の順。状態の置き場を解けなければ IdentityError のまま
+# 現状固定（I-011 の前）: 記録の保存先は NDF_MVV_STATE_DIR → 状態の保存先の順。状態の保存先を解けなければ IdentityError のまま
 def test_record_path_prefers_the_env_dir_and_does_not_load_the_identity(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("NDF_MVV_STATE_DIR", str(tmp_path / "m"))
     monkeypatch.setattr(identity, "load", _unloadable)

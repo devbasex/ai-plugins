@@ -1,8 +1,8 @@
-"""本物の状態の置き場への書き込みを拒む部品（#2776）。pytest に依らない。
+"""本物の状態の保存先への書き込みを拒む部品（#2776）。pytest に依らない。
 
 テストの前提（pytest の fixture `forbid_real_state`）はテストの側（`tests/testing/_real_state.py`）が持ち、ここの部品を
-組み合わせる: 状態の置き場を指す環境変数（`REDIRECTED_ENV`）を一時ディレクトリへ向け、`REMOVED_ENV` を外し、
-`guarding` の間は本物の置き場（`protected_roots`。実行した人のホームの下など）を開いて書くと `RealStateWriteError` を送る。
+組み合わせる: 状態の保存先を指す環境変数（`REDIRECTED_ENV`）を一時ディレクトリへ向け、`REMOVED_ENV` を外し、
+`guarding` の間は本物の保存先（`protected_roots`。実行した人のホームの下など）を開いて書くと `RealStateWriteError` を送る。
 
 監視は Python の監査フック（`sys.addaudithook`）で、このプロセスの中の書き込みだけを見る。子プロセスは環境変数の
 差し替えで一時ディレクトリへ向く。
@@ -35,9 +35,9 @@ REDIRECTED_ENV = {
     "XDG_DATA_HOME": "data",
     slots.SLOTS_DIR_ENV: "test-slots",
 }
-# テストの間は外す環境変数（ほかのプラグインの根・状態の置き場の根の指定・実行中の工程の識別子）
+# テストの間は外す環境変数（ほかのプラグインの根・状態の保存先の根の指定・実行中の工程の識別子）
 REMOVED_ENV = ("CLAUDE_PLUGIN_ROOT", "NDF_CALLER_PLUGIN_ROOT", "NDF_STATE_HOME", slots.HELD_ENV, slot_pool.PARENT_ENV)
-# ホームの下の本物の置き場
+# ホームの下の本物の保存先
 REAL_STATE_UNDER_HOME = (".claude", ".local/state", ".config", ".local/share")
 
 _WRITE_FLAGS = os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_APPEND | os.O_TRUNC
@@ -61,7 +61,7 @@ _WRITE_EVENTS: dict[str, tuple[WriteTarget, ...]] = {
     "os.remove": (WriteTarget(0, 1, NAME),),
     "os.rmdir": (WriteTarget(0, 1, NAME),),
     "os.rename": (WriteTarget(0, 2, NAME), WriteTarget(1, 3, NAME)),
-    # 本物の置き場のファイルへのハードリンクは、別名への書き込みで本物を書き換えられるのでリンク元も見る
+    # 本物の保存先のファイルへのハードリンクは、別名への書き込みで本物を書き換えられるのでリンク元も見る
     "os.link": (WriteTarget(0, 2, CONTENT), WriteTarget(1, 3, NAME)),
     # リンクの作成先だけを見る（参照先への書き込みは、書くときに参照先で判定する）
     "os.symlink": (WriteTarget(1, 2, NAME),),
@@ -69,17 +69,17 @@ _WRITE_EVENTS: dict[str, tuple[WriteTarget, ...]] = {
     "os.chmod": (WriteTarget(0, 2, CONTENT),),
     "shutil.rmtree": (WriteTarget(0, 1, NAME),),
 }
-# 元の値が指す場所も本物の置き場として守る環境変数（差し替える前の値を読む）
+# 元の値が指す場所も本物の保存先として守る環境変数（差し替える前の値を読む）
 REAL_STATE_ENV = ("NDF_STATE_HOME", "XDG_STATE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", slots.SLOTS_DIR_ENV)
 # 読み込んだ時点（conftest の読み込み・fixture より前）の値。fixture の実行時には、先に動いたほかの autouse の
-# fixture（例: XDG_STATE_HOME を tmp_path へ向けるもの）が書き換えていて、本来の置き場を読めないため
+# fixture（例: XDG_STATE_HOME を tmp_path へ向けるもの）が書き換えていて、本来の保存先を読めないため
 _ORIGINAL_ENV = {name: value for name in REAL_STATE_ENV if (value := os.environ.get(name)) is not None}
 # 同じ理由で、ホームも読み込んだ時点の値を持つ（先に動いた fixture が HOME を一時領域へ向けても、本来のホームの下を守る）
 _ORIGINAL_HOME = Path.home()
 
 
 class RealStateWriteError(PermissionError):
-    """テストが本物の状態の置き場へ書こうとした。"""
+    """テストが本物の状態の保存先へ書こうとした。"""
 
 
 def _fd_path_by_fcntl(fd: int) -> str | None:
@@ -182,14 +182,14 @@ class _Guard:
         if not holds_root and not _within_any(resolved, self.roots):
             return
         self.violations.append(resolved)
-        raise RealStateWriteError(f"テストが本物の状態の置き場へ書こうとした: {resolved}")
+        raise RealStateWriteError(f"テストが本物の状態の保存先へ書こうとした: {resolved}")
 
 
 _guard = _Guard()
 
 
 def real_roots(home: Path, environ: Mapping[str, str]) -> tuple[str, ...]:
-    """守る根。ホームの下の置き場と、差し替える前の環境変数（`REAL_STATE_ENV`）が指す置き場（絶対パスだけ）。"""
+    """守る根。ホームの下の保存先と、差し替える前の環境変数（`REAL_STATE_ENV`）が指す保存先（絶対パスだけ）。"""
     under_home = [os.path.realpath(home / sub) for sub in REAL_STATE_UNDER_HOME]
     from_env = [os.path.realpath(value) for name in REAL_STATE_ENV if (value := environ.get(name)) is not None and os.path.isabs(value)]
     return tuple(dict.fromkeys(under_home + from_env))

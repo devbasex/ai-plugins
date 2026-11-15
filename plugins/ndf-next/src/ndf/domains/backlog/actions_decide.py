@@ -1,4 +1,4 @@
-"""判定の反映と起票の決まり（純粋）。plan の `actions`・`create` の形の確かめ、反映の区分、書く差分、記録の鍵。
+"""判定の反映と起票の決まり（純粋）。plan の `actions`・`create` の形の確かめ、反映の区分、書く差分、記録のキー。
 
 判定（verdict）ごとの扱い:
 
@@ -13,7 +13,7 @@
 同じ plan の打ち直しで 2 度書かない。
 
 起票は種類（needs・seeds・policy）・題・出典・MVV の当たる所を要る。MVV の判定が `follow` でない起票には
-要判断の印（ラベル `needs-decision`）を付ける。
+要判断のマーカー（ラベル `needs-decision`）を付ける。
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ STATES = ("open", "closed")
 KINDS = ("needs", "seeds", "policy")
 DECISION_LABEL = "needs-decision"
 FOLLOW = "follow"
-# 反映の区分（結果の items の result と metrics の鍵）
+# 反映の区分（結果の items の result と metrics のキー）
 APPLIED, UNCHANGED, ALREADY, SKIPPED, WAITING, RETURNED_BUCKET, FAILED = (
     "applied", "unchanged", "already", "skipped_changed", "needs_approval", "returned", "failed",
 )  # fmt: skip
@@ -56,7 +56,7 @@ def _list_of_str(v: Any) -> bool:
     return isinstance(v, list) and all(isinstance(x, str) for x in v)
 
 
-# 鍵 → 値の形。TEXT は文字列、TEXTS は文字列の列、タプルは取れる値の列。並びは誤りを返す順
+# キー → 値の形。TEXT は文字列、TEXTS は文字列の列、タプルは取れる値の列。並びは誤りを返す順
 TEXT, TEXTS = "text", "texts"
 _SHAPE_CHECKS: dict[str, tuple[Callable[[Any], bool], str]] = {
     TEXT: (lambda v: isinstance(v, str), "は文字列で書く"),
@@ -69,7 +69,7 @@ CREATE_SHAPES: dict[str, Any] = {"title": TEXT, "body": TEXT, "mvv_basis": TEXT,
 
 
 def _shape_errors(prefix: str, obj: dict[str, Any], shapes: dict[str, Any]) -> list[str]:
-    """`obj` にある鍵のうち形の違うものの誤り（`<prefix><鍵> は…`）。"""
+    """`obj` にあるキーのうち形の違うものの誤り（`<prefix><キー> は…`）。"""
     errs = []
     for key, shape in shapes.items():
         if key not in obj:
@@ -87,7 +87,7 @@ def _shape_errors(prefix: str, obj: dict[str, Any], shapes: dict[str, Any]) -> l
 def _change_errors(n: int, ch: Any) -> list[str]:
     if not isinstance(ch, dict):
         return [f"#{n} の changes はオブジェクトで書く"]
-    errs = [f"#{n} の changes の知らない鍵: {k}" for k in sorted(set(ch) - set(CHANGE_KEYS))]
+    errs = [f"#{n} の changes の知らないキー: {k}" for k in sorted(set(ch) - set(CHANGE_KEYS))]
     return errs + _shape_errors(f"#{n} の changes.", ch, CHANGE_SHAPES)
 
 
@@ -99,7 +99,7 @@ def _action_errors(k: int, act: Any) -> list[str]:
     if act.get("verdict") not in VERDICTS:
         errs.append(f"#{n} の verdict は {' / '.join(VERDICTS)} のどれか")
     if not isinstance(act.get("updated_at"), str) or not isinstance(act.get("digest"), str):
-        errs.append(f"#{n} に updated_at と digest が無い（照合できない）")
+        errs.append(f"#{n} に updated_at と digest が無い（検証できない）")
     if "approved" in act and not isinstance(act["approved"], bool):
         errs.append(f"#{n} の approved は true / false で書く")
     return errs + (_change_errors(n, act["changes"]) if "changes" in act else [])
@@ -137,7 +137,7 @@ def changes_of(act: dict[str, Any]) -> dict[str, Any]:
 
 
 def journal_key(repo: str, act: dict[str, Any]) -> str:
-    """記録の鍵。plan の更新の時刻と要約値も含め、後の回の同じ変更を「済み」にしない。"""
+    """記録のキー。plan の更新の時刻と要約値も含め、後の回の同じ変更を「済み」にしない。"""
     return (
         f"{repo}#{act['number']}:"
         + model.stable_digest({"changes": changes_of(act), "updated_at": act["updated_at"], "digest": act["digest"]})[:12]
@@ -197,7 +197,7 @@ def compose_body(c: dict[str, Any]) -> str:
 
 
 def create_labels(c: dict[str, Any]) -> list[str]:
-    """起票のラベル。種類のラベルを足し、MVV の判定が follow でなければ要判断の印を付ける。"""
+    """起票のラベル。種類のラベルを足し、MVV の判定が follow でなければ要判断のマーカーを付ける。"""
     labels = list(dict.fromkeys([*(c["labels"] if "labels" in c else []), c["kind"]]))
     if c.get("mvv_verdict") != FOLLOW and DECISION_LABEL not in labels:
         labels.append(DECISION_LABEL)

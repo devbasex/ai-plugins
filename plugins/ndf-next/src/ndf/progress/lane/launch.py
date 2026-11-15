@@ -1,32 +1,32 @@
-"""レーンの conductor を起こす（#3097）: 起こすときの最初の入力を組み、名前つきのラッパー（`ndf relay spawn`）で起こす。
+"""レーンの conductor を起動する（#3097）: 起動するときの最初の入力を組み、名前つきのラッパー（`ndf relay spawn`）で起動する。
 
-最初の入力はコマンドの並びで、起きた conductor がレーンの進行表を読んで行を実行中にする（E4）。
+最初の入力はコマンドの並びで、起きた conductor がレーンのステートマシンを読んで行を実行中にする（E4）。
 
-- 行を始める: `ndf progress new <スプリント名> --mode <モード> --issues <課題>... --parent <レーンの進行表の ID>` で
-  スプリントの進行表を作り、返った ID で `ndf lanes row start <計画> <レーン> <行> --sprint <ID>` を打つ。
+- 行を始める: `ndf progress new <スプリント名> --mode <モード> --issues <課題>... --parent <レーンのステートマシンの ID>` で
+  スプリントのステートマシンを作り、返った ID で `ndf lanes row start <計画> <レーン> <行> --sprint <ID>` を打つ。
   `row start` は計画が記録した形の番号と自分のものを比べ、違えば `format_mismatch` で止まる（P3-1）。
   スプリント名は `<計画>-<レーン>-<行>-<要約>` にし、別の計画が同じレーン名を使っても、名前の区切りが曖昧な組
   （計画 `dev-api`／レーン `tests` と計画 `dev`／レーン `api-tests` など）でも重ならない
 - 開発ループの行（`kind: loop`）は、レーン名をループの名前にして `ndf loop start <レーン> --session <S>` で始め、
   スプリントの行と同じく `ndf lanes row start <計画> <レーン> <行> --sprint <レーン>` で行を実行中にする（行の ID は
-  レーン名）。`--session` は起きた conductor が自分のセッションで埋める。ほかの kind は起こす入力を組めないので
+  レーン名）。`--session` は起きた conductor が自分のセッションで埋める。ほかの kind は起動する入力を組めないので
   `Unsupported` で断る
-- 答えの後の next を打つ: `ndf lanes row resumed <スプリントの ID>` で答えの後の next の印を書いてから、
+- 回答の後の next を打つ: `ndf lanes row resumed <スプリントの ID>` で回答の後の next のマーカーを書いてから、
   `ndf progress next <スプリントの ID>` で承認ゲートの続きを流す（3346-5）
 - 止めた計画で実行中のスプリントを中止する: `ndf progress cancel <スプリントの ID> --reason <理由>` の後に
   `ndf lanes row end <スプリントの ID> --outcome cancelled` で行を中止にする（`progress cancel` はレーンの行を書かない）
-- 認証の失敗で `/goal` が外れたレーンを起こし直す: 入力の先頭に `/goal` を置き、`ndf progress next <スプリントの ID>` で
-  止まった所から続ける（`goal_prompt`。#3243）。アカウントが使えるかは `account_ok` が自分の副命令
+- 認証の失敗で `/goal` が外れたレーンを再起動する: 入力の先頭に `/goal` を置き、`ndf progress next <スプリントの ID>` で
+  止まった所から続ける（`goal_prompt`。#3243）。アカウントが使えるかは `account_ok` が自分のサブコマンド
   （`ndf relay account show`）で読む
 
-ラッパーの名前は `<計画>-<レーン>-<要約>` に固定し、同じレーンを 2 本起こさない（ラッパーが動いていれば `spawn` が断る）。
+ラッパーの名前は `<計画>-<レーン>-<要約>` に固定し、同じレーンを 2 本起動しない（ラッパーが動いていれば `spawn` が断る）。
 要約はリポジトリ・計画・レーンの 3 つから作る。ラッパーの登録簿は利用者単位で共通なので、別のリポジトリが同じ
 計画名・レーン名を使っても、名前の区切りが曖昧な組（`a-b` と `a` / `b-c` など）でも重ならない。
-ラッパーは子の conductor が終わるまで動き続けるので、起こす前に（行を始めるときも中止のときも）同じ名前の
-ラッパーを `ndf relay stop` で止め、止まったのを確かめてから起こす（`stop`）。
+ラッパーは子の conductor が終わるまで動き続けるので、起動する前に（行を始めるときも中止のときも）同じ名前の
+ラッパーを `ndf relay stop` で止め、止まったのを確かめてから起動する（`stop`）。
 
-打つ副命令のエントリポイントは打つたびに求める（`entry`）。耐久ワークフローを起こした版の置き場がプラグインの更新の
-片付けで消えていれば、同じ親の下の最も新しい版の置き場のものを使い、切り替えた 1 行を標準エラー（切り離した
+打つサブコマンドのエントリポイントは打つたびに求める（`entry`）。耐久ワークフローを起動したバージョンの保存先がプラグインの更新の
+片付けで消えていれば、同じ親の下の最も新しいバージョンの保存先のものを使い、切り替えた 1 行を標準エラー（切り離した
 `ndf lanes run` の `run.log`）へ残す（#2583）。規則は中継の複製（`ndf.domains.relay.install`）と同じである。
 """
 
@@ -61,9 +61,9 @@ def _usable(root: Path) -> bool:
 
 
 def entry() -> Path:
-    """打つ副命令のエントリポイント。自分の版の置き場が消えていれば、同じ親の下の最も新しい版の置き場のものにする。
+    """打つサブコマンドのエントリポイント。自分のバージョンの保存先が消えていれば、同じ親の下の最も新しいバージョンの保存先のものにする。
 
-    切り替えたら 1 行を標準エラーへ書く。使える置き場が無ければ自分のパスのまま返す（打つ側の失敗が起動の失敗になる）。
+    切り替えたら 1 行を標準エラーへ書く。使える保存先が無ければ自分のパスのまま返す（打つ側の失敗が起動の失敗になる）。
     """
     own = identity.ROOT
     if _usable(own):
@@ -73,7 +73,7 @@ def entry() -> Path:
     if not found:
         return identity.entrypoint(own)
     newest = max(found, key=lambda p: identity.entrypoint(p).stat().st_mtime)
-    print(f"ndf lanes: 版の置き場 {own} が無いので {newest} の版で打つ", file=sys.stderr)
+    print(f"ndf lanes: バージョンの保存先 {own} が無いので {newest} のバージョンで打つ", file=sys.stderr)
     return identity.entrypoint(newest)
 
 
@@ -90,7 +90,7 @@ def wrapper_name(repo: str, plan: str, lane: str) -> str:
 
 
 class Unsupported(Exception):
-    """起こす入力を組めない行（開発ループの行など）。打ち直しても起こせない。"""
+    """起動する入力を組めない行（開発ループの行など）。打ち直しても起動できない。"""
 
 
 def sprint_name(plan: str, lane: str, row: str) -> str:
@@ -107,7 +107,7 @@ def start_commands(plan: str, lane: str, lane_table: str, row: LaneRow) -> list[
     if kind == "loop":
         return loop_commands(plan, lane, row)
     if kind != "sprint":
-        raise Unsupported(f"行 {lane}/{row.key} は {kind} の行で、起こす入力を組めない（起こせるのは sprint と loop の行だけ）")
+        raise Unsupported(f"行 {lane}/{row.key} は {kind} の行で、起動する入力を組めない（起動できるのは sprint と loop の行だけ）")
     args = [str(a) for a in row.args]
     mode = [] if "--mode" in args else ["--mode", DEFAULT_MODE]
     issues = [str(i) for i in row.input["issues"]]
@@ -132,31 +132,31 @@ def cancel_commands(sprint_id: str) -> list[dict[str, Any]]:
 
 
 def resume_commands(sprint_id: str) -> list[dict[str, Any]]:
-    """答えが載った行で、答えの後の next の印を書いてから next を打つコマンドの並び。"""
+    """回答が載った行で、回答の後の next のマーカーを書いてから next を打つコマンドの並び。"""
     mark = result.command("lanes", "row", "resumed", sprint_id)
     nxt = result.command("progress", "next", sprint_id)
     return [mark, nxt]
 
 
-# 起こし直しの入力の先頭に置く、claude の目標を入れる命令（#3243）
+# 再起動の入力の先頭に置く、claude の目標を入れる命令（#3243）
 GOAL = "/goal"
 
 
 def goal_prompt(plan: str, lane: str, sprint_id: str) -> str:
-    """認証の失敗で `/goal` が外れたレーンを起こし直す入力。目標を入れ直し、スプリントを止まった所から続ける。"""
+    """認証の失敗で `/goal` が外れたレーンを再起動する入力。目標を入れ直し、スプリントを止まった所から続ける。"""
     return f"{GOAL} {prompt(plan, lane, [result.command('progress', 'next', sprint_id)])}"
 
 
 def prompt(plan: str, lane: str, commands: list[dict[str, Any]]) -> str:
     """conductor へ渡す最初の入力。コマンドの並びを JSON で持つ。"""
     body = json.dumps(commands, ensure_ascii=False)
-    return f"計画 {plan} のレーン {lane} の conductor として、次のコマンドを順に打つ（ask の鍵は前の結果で埋める）: {body}"
+    return f"計画 {plan} のレーン {lane} の conductor として、次のコマンドを順に打つ（ask のキーは前の結果で埋める）: {body}"
 
 
 def spawn(repo: str, plan: str, lane: str, cwd: Path, first: str, run: Optional[Any] = None) -> dict[str, Any]:
-    """名前つきのラッパーでレーンの conductor を起こす。結果 JSON の `status` が ok なら `ok` を真にする。"""
+    """名前つきのラッパーでレーンの conductor を起動する。結果 JSON の `status` が ok なら `ok` を真にする。"""
     argv = _entry("relay", "spawn", "--name", wrapper_name(repo, plan, lane), "--cwd", str(cwd), "--role", ROLE, "--plan", plan, first)
-    return _relay(argv, run, "ラッパーを起こせない")
+    return _relay(argv, run, "ラッパーを起動できない")
 
 
 def stop(repo: str, plan: str, lane: str, run: Optional[Any] = None) -> dict[str, Any]:
@@ -184,13 +184,13 @@ def _last_json(stdout: str) -> Optional[dict[str, Any]]:
 
 
 def _run(argv: list[str], run: Optional[Any]) -> subprocess.CompletedProcess[str]:
-    """副命令を打つ（`run` が無ければ `subprocess.run`）。打てなければ OSError を呼び手へ伝える。"""
+    """サブコマンドを打つ（`run` が無ければ `subprocess.run`）。打てなければ OSError を呼び手へ伝える。"""
     runner = run if run is not None else subprocess.run
     return runner(argv, capture_output=True, text=True, check=False)
 
 
 def _probe(argv: list[str], run: Optional[Any]) -> Optional[dict[str, Any]]:
-    """自分の副命令を打ち、結果 JSON（末尾の行）を返す。打てない・読めなければ None。"""
+    """自分のサブコマンドを打ち、結果 JSON（末尾の行）を返す。打てない・読めなければ None。"""
     try:
         done = _run(argv, run)
     except OSError:  # noqa: NDF401 外部コマンド: 打てなければ呼び手が「読めない」として生死を unknown にする
@@ -208,13 +208,13 @@ def wrappers(run: Optional[Any] = None) -> Optional[dict[str, dict[str, Any]]]:
 
 def account_ok(run: Optional[Any] = None) -> bool:
     """子を起動するアカウントが使えるか（`ndf relay account show` が ok を返すか。指定が壊れていれば使えない）。
-    打てない・読めなければ偽（起こし直さずに止まりとして知らせる）。"""
+    打てない・読めなければ偽（再起動せずに止まりとして知らせる）。"""
     out = _probe(_entry("relay", "account", "show"), run)
     return out is not None and out.get("status") == result.OK
 
 
 def sprint_wait(sprint_id: str, run: Optional[Any] = None) -> Optional[dict[str, Any]]:
-    """スプリントの進行表の今の待ち（`ndf progress wait <ID> --timeout 0` の結果 JSON）。読めなければ None。"""
+    """スプリントのステートマシンの今の待ち（`ndf progress wait <ID> --timeout 0` の結果 JSON）。読めなければ None。"""
     return _probe(_entry("progress", "wait", sprint_id, "--timeout", "0"), run)
 
 

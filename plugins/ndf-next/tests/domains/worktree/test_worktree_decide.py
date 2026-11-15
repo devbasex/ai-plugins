@@ -1,4 +1,4 @@
-"""worktree の判断（純粋な関数）と、宣言・一覧の読み取り。"""
+"""worktree の判断（純粋な関数）と、設定・一覧の読み取り。"""
 
 from __future__ import annotations
 

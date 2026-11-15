@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "worktree.result.schema.json",
   "title": "ndf worktree の結果 JSON",
-  "description": "ndf worktree が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果の契約（result.schema.json）が持ち、ここは metrics と items の形だけを足す。metrics と items の要素は閉じていて、載せた項目のほかの項目を持つと通らない",
+  "description": "ndf worktree が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果のコントラクト（result.schema.json）が持ち、ここは metrics と items の形だけを足す。metrics と items の要素は閉じていて、載せた項目のほかの項目を持つと通らない",
   "allOf": [
     {
       "$ref": "../result.schema.json"
@@ -63,7 +63,7 @@
         },
         "present": {
           "type": "boolean",
-          "description": "宣言があるか（check）"
+          "description": "設定があるか（check）"
         },
         "steps": {
           "type": "integer",
@@ -71,7 +71,7 @@
         },
         "skipped": {
           "type": "boolean",
-          "description": "用意の印があって飛ばしたか（deps）"
+          "description": "用意のマーカーがあって飛ばしたか（deps）"
         },
         "seconds": {
           "type": "number",
@@ -139,7 +139,7 @@
         "properties": {
           "path": {
             "type": "string",
-            "description": "worktree・宣言・案内するパス"
+            "description": "worktree・設定・案内するパス"
           },
           "base": {
             "type": "string",
@@ -215,15 +215,15 @@
           },
           "written": {
             "type": "boolean",
-            "description": "宣言を書いたか（init）"
+            "description": "設定を書いたか（init）"
           },
           "ndf_settings": {
             "type": "string",
-            "description": "宣言の状態（check）"
+            "description": "設定の状態（check）"
           },
           "detail": {
             "type": "string",
-            "description": "宣言の状態の説明（check）"
+            "description": "設定の状態の説明（check）"
           },
           "base_branch": {
             "type": [

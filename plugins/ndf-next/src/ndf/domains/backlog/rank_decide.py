@@ -1,4 +1,4 @@
-"""順位の算出（純粋）。マイルストーンごとの並び・大きい課題の枠・品質の枠・切り出しの境界・前倒しと後ろ倒しの候補。
+"""順位の算出（純粋）。マイルストーンごとの並び・大きい課題のクォータ・品質のクォータ・切り出しの境界・前倒しと後ろ倒しの候補。
 
 切り出しの境界は、直近のマイルストーンの先頭から容量に収まるまで取った最後の課題である。尺度を超える課題と
 人の判断待ちの課題（と、それを前提とする課題）は境界へ渡さない（#2232）。
@@ -90,7 +90,7 @@ def dependency_edges(raws: list[Any], issues: list[dict[str, Any]]) -> frozenset
 
 
 def sub_issues_of(issues: list[dict[str, Any]]) -> dict[int, list[int]]:
-    """open の親 → open の子の番号の列（大きい課題の枠が子を切り出しに当てる）。"""
+    """open の親 → open の子の番号の列（大きい課題のクォータが子を切り出しに当てる）。"""
     open_numbers = {i["number"] for i in issues}
     out: dict[int, list[int]] = {}
     for i in issues:
@@ -136,7 +136,7 @@ def milestone_order(titles: Iterable[str], given: Optional[list[str]] = None) ->
 
 
 def large_slot(rows: list[Row], cfg: Config, board: Board) -> Optional[dict[str, Any]]:
-    """大きい課題の枠。容量が無い・枠が 1 未満なら None。子の課題があれば依存の順で枠に収まる最初の子を当てる。"""
+    """大きい課題のクォータ。容量が無い・スロットが 1 未満なら None。子の課題があれば依存の順でスロットに収まる最初の子を当てる。"""
     if cfg.capacity is None:
         return None
     budget = math.floor(cfg.capacity * cfg.large_slot_ratio)
@@ -154,7 +154,7 @@ def large_slot(rows: list[Row], cfg: Config, board: Board) -> Optional[dict[str,
 
 
 def _slice_of(big: Row, board: Board, by_num: dict[int, Row], budget: int) -> Optional[int]:
-    """枠に当てる 1 切れ。子があれば依存の順で枠に収まる最初の子、無ければ本人が収まれば本人、どちらも無ければ None。"""
+    """スロットに当てる 1 切れ。子があれば依存の順でスロットに収まる最初の子、無ければ本人が収まれば本人、どちらも無ければ None。"""
     kids = [k for k in _of(board.sub_issues, big.number) if k in by_num]
     if not kids:
         return big.number if big.size <= budget else None
@@ -171,14 +171,14 @@ def _slot_piece(slot: Optional[dict[str, Any]]) -> Optional[int]:
 
 
 def _slot_used(slot: Optional[dict[str, Any]]) -> int:
-    """枠の 1 切れが使う Size（当てた切れが無ければ 0）。"""
+    """スロットの 1 切れが使う Size（当てた切れが無ければ 0）。"""
     return slot["size"] if _slot_piece(slot) is not None else 0
 
 
 def _fits(total: int, size: int, budget: Optional[int], room: Optional[int], below_min: bool) -> bool:
-    """品質の枠に入るか。容量の残り（大きい課題の枠を引いた分）に収まり、ratio の枠にも収まるか、min 件に満たないか。
+    """品質のクォータに入るか。容量の残り（大きい課題のクォータを引いた分）に収まり、ratio のスロットにも収まるか、min 件に満たないか。
 
-    ratio は大きい課題の枠と別々に宣言できるため、ratio の枠だけで判定すると 2 つの枠の和が容量を超える。
+    ratio は大きい課題のクォータと別々に設定できるため、ratio のスロットだけで判定すると 2 つのスロットの和が容量を超える。
     """
     if budget is None or room is None:
         return True
@@ -186,9 +186,9 @@ def _fits(total: int, size: int, budget: Optional[int], room: Optional[int], bel
 
 
 def quality_slot(rows: list[Row], board: Board, slot: Optional[dict[str, Any]], blocked: set[int]) -> Optional[dict[str, Any]]:
-    """品質の枠。宣言が無ければ None。容量の ratio 分（最低 min 件）を品質のラベルの課題から先に取る。
+    """品質のクォータ。設定が無ければ None。容量の ratio 分（最低 min 件）を品質のラベルの課題から先に取る。
 
-    並びは 利用者へ届いた不具合 → 起票の古い順 → 今の順位。依存先が先に枠へ入っていない課題は取らない。
+    並びは 利用者へ届いた不具合 → 起票の古い順 → 今の順位。依存先が先にスロットへ入っていない課題は取らない。
     """
     cfg, q = board.cfg, board.cfg.quality
     if q is None:
@@ -216,9 +216,9 @@ def quality_slot(rows: list[Row], board: Board, slot: Optional[dict[str, Any]], 
 def boundary(
     rows: list[Row], capacity: Optional[int], slot: Optional[dict[str, Any]], quality: Optional[dict[str, Any]]
 ) -> Optional[dict[str, Any]]:
-    """切り出しの境界。枠の 1 切れと品質の枠の課題を除いて先頭から、容量の残りに収まるまで取った最後の課題。
+    """切り出しの境界。スロットの 1 切れと品質のクォータの課題を除いて先頭から、容量の残りに収まるまで取った最後の課題。
 
-    1 件も収まらなければ、枠で容量を使い切ったときは `empty`、そうでなければ先頭の 1 件を `over` で返す。
+    1 件も収まらなければ、スロットで容量を使い切ったときは `empty`、そうでなければ先頭の 1 件を `over` で返す。
     """
     if capacity is None or not rows:
         return None
@@ -247,9 +247,9 @@ def held_back(rows: list[Row], edges: Iterable[Edge]) -> set[int]:
 
 
 def slots(board: Board, ranked: list[Row]) -> tuple[Optional[dict], Optional[dict], Optional[dict]]:
-    """大きい課題の枠・品質の枠・切り出しの境界。候補と表で同じ決め方を使う。
+    """大きい課題のクォータ・品質のクォータ・切り出しの境界。候補と表で同じ決め方を使う。
 
-    境界に入れない課題（`held_back`）は、どの枠にも当てず容量も使わない。
+    境界に入れない課題（`held_back`）は、どのスロットにも当てず容量も使わない。
     """
     blocked = held_back(ranked, board.edges)
     slot = large_slot([r for r in ranked if r.number not in blocked], board.cfg, board)
@@ -438,7 +438,7 @@ def origin(snap: dict[str, Any]) -> dict[int, Optional[str]]:
 
 
 def retable(snap: dict[str, Any], moved: dict[int, Optional[str]], gone: set[int]) -> list[dict[str, Any]]:
-    """`snapshot` から順位の表を組み直す。`moved` は実際に移した所属、`gone` は閉じた課題（表・枠・境界から除く）。"""
+    """`snapshot` から順位の表を組み直す。`moved` は実際に移した所属、`gone` は閉じた課題（表・スロット・境界から除く）。"""
     kept = [i for i in snap["issues"] if i["number"] not in gone]
     rows = {i["number"]: Row(**i["row"]) for i in kept}
     location = {i["number"]: moved[i["number"]] if i["number"] in moved else i["milestone"] for i in kept}

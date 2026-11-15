@@ -1,6 +1,6 @@
 """worktree を外す前の退避: 追跡していないファイル（無視したものを含む）を退避先へ移し、作り直せる生成物は捨てる。
 
-退避先は `<git の共通ディレクトリ>/ndf/worktree-trash/<ブランチ>-<時刻>/` で、隣の台帳 `<退避先>.json` に元のブランチと
+退避先は `<git の共通ディレクトリ>/ndf/worktree-trash/<ブランチ>-<時刻>/` で、隣のジャーナル `<退避先>.json` に元のブランチと
 先端のコミット（PR のマージコミットが分かればそれも）を書く（退避先の中に置くと、利用者の同じ名前のファイルを上書きする）。作り直せる生成物の決め方と、
 1 件でも移せなければ止める決まりは `docs/specifications/ndf-cleanup-and-bundle-closing.md` の退避の節にある。退避先を消すのは、先端か PR のマージコミットが本番に出たコミットに含まれ、人が名前を見て承認したものだけである
 （`sweep`。消すと戻せない利用者のファイル。C3・C4）。
@@ -24,7 +24,7 @@ from ndf.adapters.git import Git, GitError
 REGENERABLE = frozenset({".venv", "node_modules", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"})
 # 名前だけでは生成物と決められないディレクトリと、同じ階層にあれば生成物とみなす作り直しの設定
 MANIFEST_REGENERABLE = {"target": ("Cargo.toml", "pom.xml", "dbt_project.yml")}
-# 退避先の置き場の名前（git の共通ディレクトリの下の、プラグイン名の置き場に置く）
+# 退避先の保存先の名前（git の共通ディレクトリの下の、プラグイン名の保存先に置く）
 TRASH_DIR = "worktree-trash"
 _UNSAFE = re.compile(r"[^A-Za-z0-9._-]+")
 
@@ -43,7 +43,7 @@ class TrashError(Exception):
 
 
 def record_of(dest: Path) -> Path:
-    """退避先の隣の台帳 `<退避先>.json`。"""
+    """退避先の隣のジャーナル `<退避先>.json`。"""
     return dest.with_name(f"{dest.name}.json")
 
 
@@ -111,9 +111,9 @@ def evacuate(main: Git, worktree: Path, branch: str, head: str, merge: str = "")
 
 
 def restore(worktree: Path, got: Evacuated) -> Optional[str]:
-    """`evacuate` で移したファイルを worktree へ戻し、空になった退避先と台帳を消す（worktree を外せなかったとき）。
+    """`evacuate` で移したファイルを worktree へ戻し、空になった退避先とジャーナルを消す（worktree を外せなかったとき）。
 
-    戻せなければ理由を返し、退避先と台帳は残す（戻せなかったファイルは退避先にある）。
+    戻せなければ理由を返し、退避先とジャーナルは残す（戻せなかったファイルは退避先にある）。
     """
     if got.dest is None:
         return None
@@ -144,7 +144,7 @@ class Candidate:
 def _read_meta(path: Path) -> Optional[dict]:
     try:
         data = json.loads(record_of(path).read_text(encoding="utf-8"))
-    except (OSError, ValueError):  # noqa: NDF401 ファイル: 台帳の無い・壊れた退避先は候補にしない（残す）
+    except (OSError, ValueError):  # noqa: NDF401 ファイル: ジャーナルの無い・壊れた退避先は候補にしない（残す）
         return None
     return data if isinstance(data, dict) else None
 
@@ -157,7 +157,7 @@ def candidates(main: Git, ref: str) -> list[Candidate]:
         meta = _read_meta(path)
         branch = str(meta["branch"]) if meta is not None and "branch" in meta else ""
         if meta is None or not isinstance(meta.get("head"), str):
-            out.append(Candidate(path.name, "", False, f"台帳（{record_of(path).name}）が読めないため残す"))
+            out.append(Candidate(path.name, "", False, f"ジャーナル（{record_of(path).name}）が読めないため残す"))
             continue
         try:
             released = _released(main, meta, ref)

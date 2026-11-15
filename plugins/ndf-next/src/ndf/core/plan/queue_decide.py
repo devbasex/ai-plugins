@@ -2,9 +2,9 @@
 
 - 前提のプランがすべて `ok` で終わっていなければ流さない（`blocked_reason`）
 - 再開の開始点より前にある `RESUME_ALWAYS` のステップは毎回通す（`resume_prelude`。#3114・#3047）
-- 触るファイルの宣言（`touches`）の無いプランは、すべてのプランと重なるものとして直列にする（#2165）
-- 宣言の値は、リポジトリの根からの相対のパス。重なるのは同じファイルの宣言どうしだけである。`/` で終わる値（ディレクトリ）は
-  重なりに数えない。テストのディレクトリのような多くのプランが触る置き場で、別のファイルを触るプランを直列にしない（#1811）
+- 触るファイルの設定（`touches`）の無いプランは、すべてのプランと重なるものとして直列にする（#2165）
+- 設定の値は、リポジトリの根からの相対のパス。重なるのは同じファイルの設定どうしだけである。`/` で終わる値（ディレクトリ）は
+  重なりに数えない。テストのディレクトリのような多くのプランが触る保存先で、別のファイルを触るプランを直列にしない（#1811）
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ RESUME_ALWAYS = ("base-sync", "deep-due")
 
 
 class Queued(NamedTuple):
-    """キューの 1 本。`touches` が None なら宣言が無い。"""
+    """キューの 1 本。`touches` が None なら設定が無い。"""
 
     name: str
     touches: Optional[tuple[str, ...]]
@@ -53,31 +53,31 @@ def resume_prelude(order: Sequence[str], start: str, always: Collection[str] = R
 
 
 def _norm(path: str) -> str:
-    """宣言の値をリポジトリの根からの相対のパスにそろえる（`./` と重なった `/` を除く。ディレクトリの `/` は残す）。"""
+    """設定の値をリポジトリの根からの相対のパスにそろえる（`./` と重なった `/` を除く。ディレクトリの `/` は残す）。"""
     tail = "/" if path.endswith("/") else ""
     body = str(PurePosixPath(path.strip()))
     return "" if body in (".", "/") else body.removeprefix("./") + tail
 
 
 def declares_dir(path: str) -> bool:
-    """宣言の値がディレクトリ（`/` で終わるか、根そのもの）か。"""
+    """設定の値がディレクトリ（`/` で終わるか、根そのもの）か。"""
     return path.strip().endswith("/") or not _norm(path)
 
 
 def contains(a: str, b: str) -> bool:
-    """宣言 `a` と `b` が同じファイルを指すか。ディレクトリの宣言はどれとも重ならない（#1811）。"""
+    """設定 `a` と `b` が同じファイルを指すか。ディレクトリの設定はどれとも重ならない（#1811）。"""
     if declares_dir(a) or declares_dir(b):
         return False
     return _norm(a) == _norm(b)
 
 
 def shared_hits(a: Sequence[str], b: Sequence[str]) -> list[str]:
-    """2 つの宣言で重なる値（`a` の側）を並べる。"""
+    """2 つの設定で重なる値（`a` の側）を並べる。"""
     return [x for x in a if any(contains(x, y) for y in b)]
 
 
 def overlaps(a: Optional[Sequence[str]], b: Optional[Sequence[str]]) -> bool:
-    """2 本のプランが同時に流せないか。どちらかに宣言が無ければ重なる（#2165）。"""
+    """2 本のプランが同時に流せないか。どちらかに設定が無ければ重なる（#2165）。"""
     if a is None or b is None:
         return True
     return bool(shared_hits(a, b))
@@ -92,7 +92,7 @@ def _admits(batch: Sequence[Queued], item: Queued, placed: Collection[str]) -> b
 def waves(items: Sequence[Queued], before: Collection[str] = ()) -> list[list[str]]:
     """キューの並びを、同時に流してよい組の並びに分ける。
 
-    並びの順に、前提がすべて前の組（か `before`。前の段で流したプラン）にあり、組の中のどれとも重ならないものを今の組へ
+    並びの順に、前提がすべて前の組（か `before`。前のステップで流したプラン）にあり、組の中のどれとも重ならないものを今の組へ
     入れる。入らないものは次の組へ回す。
     前提がキューに無いものは、残りがすべて置けなくなった時点で 1 本ずつの組にする（流す前に `blocked_reason` が止める）。
     """
@@ -126,21 +126,21 @@ class Outcome(NamedTuple):
 
 
 def stage_blocked(prior: Sequence[Outcome], accepts_gate: bool) -> Optional[str]:
-    """前の段の結果から、この段を流さない理由を返す。流してよければ None。
+    """前のステップの結果から、このステップを流さない理由を返す。流してよければ None。
 
-    前の段がすべて `ok` なら流す。承認ゲートで待つプランがあっても、この段のプランがすべて前の段の承認ゲートを
+    前のステップがすべて `ok` なら流す。承認ゲートで待つプランがあっても、このステップのプランがすべて前のステップの承認ゲートを
     人へ届ける役（`accepts_gate`）なら流す（#2876）。承認ゲートの待ちはキューの結果に残る。
     """
     held = [o for o in prior if o.status != OK and not (o.status == GATE and accepts_gate)]
     if not held:
         return None
-    return "前の段のプランが完了でない: " + "、".join(f"{o.name}（{o.status if o.status is not None else '流していない'}）" for o in held)
+    return "前のステップのプランが完了でない: " + "、".join(f"{o.name}（{o.status if o.status is not None else '流していない'}）" for o in held)
 
 
 def queue_prs(prior: Sequence[Outcome], accepts_gate: bool = False) -> list[int]:
-    """前の段で完了したプランの PR の番号を、重ねずに番号の順で返す。リリースのプラン（`release`）の PR は入れない。
+    """前のステップで完了したプランの PR の番号を、重ねずに番号の順で返す。リリースのプラン（`release`）の PR は入れない。
 
-    承認ゲートを人へ届ける役（`accepts_gate`）の段には、承認ゲートで待つプランの PR も入れる（#2876）。
+    承認ゲートを人へ届ける役（`accepts_gate`）のステップには、承認ゲートで待つプランの PR も入れる（#2876）。
     """
     taken = (OK, GATE) if accepts_gate else (OK,)
     return sorted({n for o in prior if o.status in taken and not o.release for n in o.prs})

@@ -1,6 +1,6 @@
 """レーンの生死の判定（#3097・N3）。判定は純粋な関数なので、材料（ラッパーの一覧・スプリントの待ち）を値で渡して確かめる。
 
-`ndf lanes status` は `opened`（SQLite と PostgreSQL）の進行表に、差し替えた材料を渡して確かめる。
+`ndf lanes status` は `opened`（SQLite と PostgreSQL）のステートマシンに、差し替えた材料を渡して確かめる。
 """
 
 from __future__ import annotations
@@ -20,17 +20,17 @@ from plan_decls import decl as _decl
 from plan_decls import doc as _doc
 
 RUNNING_ROW = LaneRow("r1", {"kind": "sprint", "issues": [1]}, "running", sprint_id="s1")
-ALIVE = {"name": "w", "running": True, "state": "running", "reason": "区間 1 を始めた"}
+ALIVE = {"name": "w", "running": True, "state": "running", "reason": "セグメント 1 を始めた"}
 AUTH = {"name": "w", "running": True, "state": "stalled", "reason": "認証の失敗で /goal が外れ、子が入力を待っている"}
 GONE = {"name": "w", "running": False, "state": "stopped", "reason": None}
 
 
 def _gate():
-    return result.result("progress", result.GATE, "工程 設計 のステップ gate が答えを待っている")
+    return result.result("progress", result.GATE, "工程 設計 のステップ gate が回答を待っている")
 
 
 def _working():
-    return result.stopped("progress", "wait_timeout", "進行表 s1 を流す作業がまだ動いている（0 秒待った）")
+    return result.stopped("progress", "wait_timeout", "ステートマシン s1 を流す作業がまだ動いている（0 秒待った）")
 
 
 def _idle():
@@ -57,7 +57,7 @@ def test_sprint_wait_reads_the_wait_result(out, want):
     ("row", "sprint", "wrapper", "listed", "kind"),
     [
         (None, liveness.SPRINT_IDLE, None, True, liveness.IDLE),
-        # 承認ゲートや問いの答えを待つ行は、ラッパーが無くても正常な待ち（止まりとして知らせない）
+        # 承認ゲートや質問の回答を待つ行は、ラッパーが無くても正常な待ち（止まりとして知らせない）
         (RUNNING_ROW, liveness.SPRINT_GATE, None, True, liveness.WAITING_ANSWER),
         (RUNNING_ROW, liveness.SPRINT_GATE, AUTH, True, liveness.WAITING_ANSWER),
         # 一覧に無いことを止まりと読まない
@@ -91,7 +91,7 @@ def test_a_stalled_wrapper_carries_its_reason():
 
 @pytest.mark.parametrize(("status", "usable"), [("ok", True), ("stopped", False), (None, False)])
 def test_account_ok_asks_the_relay_for_the_chosen_account(status, usable):
-    """認証で止まったレーンを起こし直すのは、子を起動するアカウントを中継が出せるときだけ（#3243）。"""
+    """認証で止まったレーンを再起動するのは、子を起動するアカウントを中継が出せるときだけ（#3243）。"""
     seen = []
 
     def run(argv, **kw):
@@ -205,7 +205,7 @@ def test_status_shows_liveness_and_warns_only_about_stalls(opened):
         for name in ("a", "b"):
             sids[name] = store.create_machine(conn, ("sprint", REPO, f"{name}-r1"), view.lanes[name].machine_id, None, [])
             lane.start_row(conn, pid, name, "r1", sids[name])
-    # a は承認ゲートの答えを待ち（正常）、b は conductor が落ちた
+    # a は承認ゲートの回答を待ち（正常）、b は conductor が落ちた
     probes = _Probes({}, {sids["a"]: _gate(), sids["b"]: _idle()})
     with store.transaction(opened) as conn:
         out = plan.status(conn, pid, datetime.now(UTC), probes.build())

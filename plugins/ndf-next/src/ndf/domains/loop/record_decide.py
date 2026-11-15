@@ -1,21 +1,21 @@
 """開発ループの記録: 事象の語彙と、事象の列から今の状態を求める畳み込み。
 
 記録は事象を追記するだけで、今の値は事象の列を畳んで求める（書き換えない）。事象 1 件は辞書で、`kind` と
-`at`（UNIX 秒）と種類ごとの鍵を持つ。周（ループの 1 回）は `lap-opened` で始まり `lap-closed` で締まる。
+`at`（UNIX 秒）と種類ごとのキーを持つ。周（ループの 1 回）は `lap-opened` で始まり `lap-closed` で締まる。
 
-| 事象 | 鍵 | 意味 |
+| 事象 | キー | 意味 |
 | --- | --- | --- |
-| `lease-taken` | `session`・`until` | 持ち主の鍵を取った（`until` まで有効） |
-| `lease-returned` | `session` | 持ち主の鍵を返した（周の境か期限切れだけ。#2820） |
+| `lease-taken` | `session`・`until` | オーナーのキーを取った（`until` まで有効） |
+| `lease-returned` | `session` | オーナーのキーを返した（周の境か期限切れだけ。#2820） |
 | `lap-opened` | `lap`・`issues` | 周を始め、選んだ課題を記録した |
 | `mode-decided` | `lap`・`mode`・`basis` | モードを根拠つきで決めた（#2923） |
 | `issue-excluded` | `lap`・`issue`・`reason` | 周の途中で課題を外した（#2788）。外すとモードを決め直す |
 | `issues-created` | `lap`・`issues` | 周の中で起票した課題（#2132） |
 | `gate-shown` | `lap`・`pr`・`head` | 設計承認ゲートを出した時点の PR の先端 |
-| `gate-answered` | `lap`・`pr`・`answer`・`head`・`note` | ゲートの答え。`request_changes` は差し戻しとして残る（#2400） |
-| `version-shipped` | `lap`・`version` | その周で版をリリースした |
+| `gate-answered` | `lap`・`pr`・`answer`・`head`・`note` | ゲートの回答。`request_changes` は変更要求として残る（#2400） |
+| `version-shipped` | `lap`・`version` | その周でバージョンをリリースした |
 | `lap-closed` | `lap`・`outcome`・`reason` | 周を締めた |
-| `stop-requested` | `by`・`reason` | 止める要求。鍵は返さない（#2820） |
+| `stop-requested` | `by`・`reason` | 止める要求。キーは返さない（#2820） |
 | `loop-halted` | `by`・`reason` | ループを止めた状態にした（`--now` か、要求の後の周の境。#2435） |
 """
 
@@ -58,7 +58,7 @@ class RecordError(ValueError):
 
 @dataclass(frozen=True)
 class Answer:
-    """承認ゲートの答え 1 件。"""
+    """承認ゲートの回答 1 件。"""
 
     pr: int
     answer: str
@@ -132,15 +132,15 @@ class LoopState:
         return RUNNING if self.laps or self.holder is not None else IDLE
 
     def holds(self, session: str, now: float) -> bool:
-        """`session` が今、持ち主の鍵を持つか。"""
+        """`session` が今、オーナーのキーを持つか。"""
         return self.holder == session and self.lease_until > now
 
     def held_by_other(self, session: str, now: float) -> bool:
-        """`session` でない持ち主が、期限の切れていない鍵を持つか。"""
+        """`session` でないオーナーが、期限の切れていないキーを持つか。"""
         return self.holder is not None and self.holder != session and self.lease_until > now
 
     def rejections(self) -> list[dict[str, Any]]:
-        """設計承認ゲートの差し戻し（答え `request_changes` と `rejected`）の一覧。振り返りが数える（#2400）。"""
+        """設計承認ゲートの変更要求（回答 `request_changes` と `rejected`）の一覧。振り返りが数える（#2400）。"""
         return [
             {"lap": lap.number, "pr": a.pr, "answer": a.answer, "note": a.note, "at": a.at}
             for lap in self.laps
@@ -149,7 +149,7 @@ class LoopState:
         ]
 
 
-# 種類ごとに要る鍵
+# 種類ごとに要るキー
 REQUIRED: dict[str, tuple[str, ...]] = {
     LEASE_TAKEN: ("session", "until"),
     LEASE_RETURNED: ("session",),
@@ -167,7 +167,7 @@ REQUIRED: dict[str, tuple[str, ...]] = {
 
 
 def event(kind: str, at: float, **keys: Any) -> dict[str, Any]:
-    """事象 1 件を組む。種類が語彙に無いか、要る鍵が欠ければ `RecordError`。"""
+    """事象 1 件を組む。種類が語彙に無いか、要るキーが欠ければ `RecordError`。"""
     out = {"kind": kind, "at": at, **keys}
     check(out)
     return out
@@ -180,7 +180,7 @@ def check(ev: Mapping[str, Any]) -> None:
         raise RecordError(f"開発ループの記録の知らない事象: {kind!r}")
     missing = [k for k in ("at", *REQUIRED[kind]) if k not in ev]
     if missing:
-        raise RecordError(f"事象 {kind} に鍵 {', '.join(missing)} が無い")
+        raise RecordError(f"事象 {kind} にキー {', '.join(missing)} が無い")
     if kind == LAP_CLOSED and ev["outcome"] not in OUTCOMES:
         raise RecordError(f"周の結果 {ev['outcome']!r} は {'・'.join(OUTCOMES)} のどれでもない")
 

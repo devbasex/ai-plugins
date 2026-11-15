@@ -2,10 +2,10 @@
 
 旧いプラグインの `relay_lib/mark.py` の `notice_lines` と `proc.py` の `relay_position` を移した。
 
-- 区間のやり取りの置き場（`NDF_RELAY_DIR`）が無いか、ディレクトリでなければ `no-dir`
+- セグメントのやり取りの保存先（`NDF_RELAY_DIR`）が無いか、ディレクトリでなければ `no-dir`
 - ラッパーの排他（`relay.lock`）が持たれていなければ `not-running`
 - 親をたどって最初に当たる claude の親の pid が、ラッパーの状態（`wrapper.json`）の `pid` と違えば `not-child`
-  （fork したセッション・別のエントリポイント。conductor が Bash から起こした `claude -p` は子の claude の孫に当たり、先にそちらに当たる）
+  （fork したセッション・別のエントリポイント。conductor が Bash から起動した `claude -p` は子の claude の孫に当たり、先にそちらに当たる）
 - 同じなら `relay`
 
 秒数はラッパーの静かな時間（上限の表 `relay.quiet`）そのもので、切り替えの時間は足さない。

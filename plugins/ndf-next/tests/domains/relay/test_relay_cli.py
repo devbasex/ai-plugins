@@ -1,4 +1,4 @@
-"""`ndf relay` の副命令と、待ちを抱えた実行の一覧の読み取り（#2898・#2464・決定 86・決定 92）。"""
+"""`ndf relay` のサブコマンドと、待ちを抱えた実行の一覧の読み取り（#2898・#2464・決定 86・決定 92）。"""
 
 from __future__ import annotations
 
@@ -90,7 +90,7 @@ def test_pending_reads_the_plan_command_result(tmp_path):
 @pytest.mark.parametrize(
     "runner",
     [
-        lambda *a, **k: _Done("", 2, "知らない副命令: plan"),
+        lambda *a, **k: _Done("", 2, "知らないサブコマンド: plan"),
         lambda *a, **k: _Done(json.dumps({"status": "stopped", "summary": "壊れた"})),
         lambda *a, **k: (_ for _ in ()).throw(FileNotFoundError("bin/ndf")),
         lambda *a, **k: (_ for _ in ()).throw(subprocess.TimeoutExpired("ndf", 5)),
@@ -186,7 +186,7 @@ def test_install_keeps_an_old_copy_and_replace_old_refuses_while_an_old_wrapper_
     ],
 )
 def test_amount_reads_a_positive_number(value, allow_zero, expected):
-    """現状固定（I-031）: 月の額は正の有限の数。`allow_zero` なら 0 は宣言を外す None。"""
+    """現状固定（I-031）: 月の額は正の有限の数。`allow_zero` なら 0 は設定を外す None。"""
     from ndf.domains.relay import account_metered
 
     assert account_metered.amount(value, allow_zero=allow_zero) == expected

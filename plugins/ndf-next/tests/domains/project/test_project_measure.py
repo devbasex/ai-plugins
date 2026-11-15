@@ -102,7 +102,7 @@ def test_compose_services_reads_names_and_images():
     [
         # 空行・行頭のコメントの行（字下げの有無を問わず）は飛ばす。行末のコメントは落とさないため、`web:  # …` は名前にならない
         (
-            'services:\n\n  # 先頭のコメント\n  web:  # 行末のコメント\n    image: nginx  # 版\n  "db":\n    image: "postgres:16"\n'
+            'services:\n\n  # 先頭のコメント\n  web:  # 行末のコメント\n    image: nginx  # バージョン\n  "db":\n    image: "postgres:16"\n'
             "#root comment\n  cache:\n    image: redis\n",
             [("db", "postgres:16"), ("cache", "redis")],
         ),
@@ -153,7 +153,7 @@ def test_flow_infer_and_table():
     got = measure_flow.infer(prs, "main", "main", ["merge_base_branch"] * 3, [])
     assert got["integrate"]["value"] == "check" and got["integrate"]["confidence"] == "高"
     assert got["doc_prs"]["value"] == "base"
-    assert got["start"]["value"] == "base"  # 動いているスプリントブランチが無ければ取り込み方の表が許す起点
+    assert got["start"]["value"] == "base"  # 動いているスプリントブランチが無ければリリース方式の表が許す起点
     assert measure_flow.as_item(got, [])["status"] == "measured"
     assert measure_flow.confidence(2, 3) == "中"
     assert measure_flow.confidence(1, 2) is None

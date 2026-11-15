@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "relay.result.schema.json",
   "title": "ndf relay の結果 JSON",
-  "description": "ndf relay が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果の契約（result.schema.json）が持ち、ここは metrics と items の形だけを足す。metrics と items の要素は閉じていて、載せた項目のほかの項目を持つと通らない",
+  "description": "ndf relay が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果のコントラクト（result.schema.json）が持ち、ここは metrics と items の形だけを足す。metrics と items の要素は閉じていて、載せた項目のほかの項目を持つと通らない",
   "allOf": [
     {
       "$ref": "../result.schema.json"
@@ -23,7 +23,7 @@
         },
         "stopped": {
           "type": "integer",
-          "description": "停止の依頼が通ったラッパーの数（stop --all）"
+          "description": "停止のリクエストが通ったラッパーの数（stop --all）"
         },
         "policy": {
           "type": "string",
@@ -68,7 +68,7 @@
         "properties": {
           "path": {
             "type": "string",
-            "description": "複製・エントリポイント・中継の印のパス（install・mark）"
+            "description": "複製・エントリポイント・中継のマーカーのパス（install・mark）"
           },
           "state": {
             "type": [
@@ -86,7 +86,7 @@
           },
           "kind": {
             "type": "string",
-            "description": "次の手の種類（decide）か、待ちを抱えた実行の種類（pending）、登録の種類 oauth・metered・api_key（account の登録の副命令）"
+            "description": "次の手の種類（decide）か、待ちを抱えた実行の種類（pending）、登録の種類 oauth・metered・api_key（account の登録のサブコマンド）"
           },
           "reason": {
             "type": [
@@ -144,7 +144,7 @@
           },
           "version": {
             "type": "string",
-            "description": "ラッパーを起こしたプラグインの版（hub ls）"
+            "description": "ラッパーを起動したプラグインのバージョン（hub ls）"
           },
           "pending": {
             "type": [
@@ -191,11 +191,11 @@
           },
           "ok": {
             "type": "boolean",
-            "description": "停止の依頼が通ったか（stop --all）"
+            "description": "停止のリクエストが通ったか（stop --all）"
           },
           "summary": {
             "type": "string",
-            "description": "リレーハブの答えの要約（stop --all）"
+            "description": "リレーハブの回答の要約（stop --all）"
           },
           "policy": {
             "type": [
@@ -228,7 +228,7 @@
           },
           "schema": {
             "type": "integer",
-            "description": "判定の記録の行の版（context record）"
+            "description": "判定の記録の行のバージョン（context record）"
           },
           "at": {
             "type": "string",
@@ -240,7 +240,7 @@
           },
           "source": {
             "type": "string",
-            "description": "行の書き手（context record）、従量の接続の宣言の出所 env・saved（account list）"
+            "description": "行の書き手（context record）、従量の接続の設定の出所 env・saved（account list）"
           },
           "session_id": {
             "type": [
@@ -269,7 +269,7 @@
           },
           "event": {
             "type": "string",
-            "description": "判定か印（context record）"
+            "description": "判定かマーカー（context record）"
           },
           "stage": {
             "type": [
@@ -389,7 +389,7 @@
           },
           "unknown_parts": {
             "type": "object",
-            "description": "印の無い区間の数（context report）"
+            "description": "マーカーの無いセグメントの数（context report）"
           },
           "restores": {
             "type": "array",
@@ -434,7 +434,7 @@
           },
           "pinned": {
             "type": "boolean",
-            "description": "次の区間から使うと指定したアカウントか（account list）"
+            "description": "次のセグメントから使うと指定したアカウントか（account list）"
           },
           "percent": {
             "type": [
@@ -445,7 +445,7 @@
           },
           "capacity_declared": {
             "type": "object",
-            "description": "宣言した 5 時間と週の枠の大きさ（account list・capacity）"
+            "description": "定義した 5 時間と週のクォータの大きさ（account list・capacity）"
           },
           "provider": {
             "type": "string",
@@ -457,7 +457,7 @@
           },
           "keys": {
             "type": "array",
-            "description": "環境変数の宣言の変数の名前（account list。値は出さない）"
+            "description": "環境変数の設定の変数の名前（account list。値は出さない）"
           },
           "monthly_usd": {
             "type": [

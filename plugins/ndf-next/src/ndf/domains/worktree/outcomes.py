@@ -13,8 +13,8 @@ class Outcome(StrEnum):
     REMOVED = "removed"  # worktree を外した
     DELETED = "deleted"  # ブランチを消した
     ABSENT = "absent"  # 消すブランチが無かった
-    PULLED = "pulled"  # メインディレクトリを取り込んだ
-    STOPPED = "stopped"  # 止めた（取り込みが止まった・テスト環境を止めた）
+    PULLED = "pulled"  # メインディレクトリをマージした
+    STOPPED = "stopped"  # 止めた（マージが止まった・テスト環境を止めた）
     RECLAIMED = "reclaimed"  # テスト環境を破棄して解放した
     RELEASED = "released"  # 割り当てだけを解放した
 

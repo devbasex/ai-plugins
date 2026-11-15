@@ -1,15 +1,15 @@
-"""副命令 `plan`: プランの実行の回を流す・待つ・待ちの一覧を出す。
+"""サブコマンド `plan`: プランの実行の回を流す・待つ・待ちの一覧を出す。
 
-ndf plan next <plan.json> [--from <ステップ>] [--state-dir <置き場>] [--answer <答え>] [--set <名前>=<値>]... [--fresh]
-    回を始めるか続け、終わるか承認の答えを待つ所まで進める。答えを待つ所では承認ゲートの結果（routes）を出して抜ける。
+ndf plan next <plan.json> [--from <ステップ>] [--state-dir <保存先>] [--answer <回答>] [--set <名前>=<値>]... [--fresh]
+    回を始めるか続け、終わるか承認の回答を待つ所まで進める。回答を待つ所では承認ゲートの結果（routes）を出して抜ける。
     `--fresh` は前の回の耐久の記録に戻らず、新しい回で先頭のステップから流す
-ndf plan queue <plan.json>... [--then <plan.json>...]... [--from <プラン>=<ステップ>]... [--resume] [--fresh] [--queue-dir <置き場>]
-    段（並びと `--then` の区切り）ごとに、触るファイルの重ならない組でプランを並べて流す。`--fresh` は子の next へ渡す
-ndf plan wait <plan.json>... [--state-dir <置き場>] [--timeout <秒>]
-    DBOS を開かずに回の控えと待ちの目印を見回り、止まり・承認ゲート・終わりを種類つきで返す（next は続きの待ち）。
-    `--state-dir` は `next` に渡した置き場（プラン 1 本のときだけ）
+ndf plan queue <plan.json>... [--then <plan.json>...]... [--from <プラン>=<ステップ>]... [--resume] [--fresh] [--queue-dir <保存先>]
+    ステップ（並びと `--then` の区切り）ごとに、触るファイルの重ならない組でプランを並べて流す。`--fresh` は子の next へ渡す
+ndf plan wait <plan.json>... [--state-dir <保存先>] [--timeout <秒>]
+    DBOS を開かずに回のバックアップと待ちの目印を見回り、止まり・承認ゲート・終わりを種類つきで返す（next は続きの待ち）。
+    `--state-dir` は `next` に渡した保存先（プラン 1 本のときだけ）
 ndf plan pending
-    チェックアウトの置き場から、待ちを抱えた（PENDING・ENQUEUED・DELAYED）実行を並べる（B5）
+    チェックアウトの保存先から、待ちを抱えた（PENDING・ENQUEUED・DELAYED）実行を並べる（B5）
 ndf plan check <plan.json>...
     プランの形と、キューの組（触るファイルの重なり・前提）を確かめる
 
@@ -33,7 +33,7 @@ from ndf.core import durable
 from ndf.core.plan import files, model, queue_decide, queue_run, runner, wait_decide
 
 TOOL = runner.TOOL
-# 待ちの上限の既定（秒）と、見回りの間隔の宣言
+# 待ちの上限の既定（秒）と、見回りの間隔の設定
 WAIT_DEFAULT_SECONDS = 600.0
 WAIT_POLL = "durable.wait-from-poll"
 
@@ -43,18 +43,18 @@ def _root() -> Path:
 
 
 def _url() -> Optional[str]:
-    """進行表と同じ DB を使うときの URL（`NDF_PROGRESS_DB`。無ければチェックアウトの置き場の SQLite）。値は秘密として伏せる。"""
+    """ステートマシンと同じ DB を使うときの URL（`NDF_PROGRESS_DB`。無ければチェックアウトの保存先の SQLite）。値は秘密として伏せる。"""
     value = os.environ.get("NDF_PROGRESS_DB")
     return value if value else None
 
 
 def _store_stopped(exc: durable.StoreStopped) -> dict[str, Any]:
-    """置き場の止まり。種類は殻の語（止まった理由の表の `store_in_use`・`store_broken`・`format_newer`・`config_broken`）。"""
+    """保存先の止まり。種類は殻の語（停止理由の表の `store_in_use`・`store_broken`・`format_newer`・`config_broken`）。"""
     return result.stopped(TOOL, exc.kind, str(exc), items=[{"kind": "path", "path": str(p)} for p in exc.paths])
 
 
 def _exit_with(out: dict[str, Any]) -> NoReturn:
-    """結果を出し、DBOS を閉じずにプロセスを抜ける（承認の答えを待つ耐久ワークフローを鍵のファイルに残す）。"""
+    """結果を出し、DBOS を閉じずにプロセスを抜ける（承認の回答を待つ耐久ワークフローをキーのファイルに残す）。"""
     code = result.emit(out)
     sys.stdout.flush()
     sys.stderr.flush()
@@ -86,7 +86,7 @@ def _pairs(values: Optional[list[str]], flag: str) -> dict[str, str]:
 
 
 def _stages(a: argparse.Namespace, cwd: Path) -> list[list[queue_run.Entry]]:
-    """引数からキューの段を作る。プランは絶対のパスにし、`--from` の開始点を付ける。"""
+    """引数からキューのステップを作る。プランは絶対のパスにし、`--from` の開始点を付ける。"""
     starts = _pairs(a.starts, "--from")
     groups = [a.plans, *(a.then if a.then is not None else [])]
     stages = [[queue_run.Entry((cwd / p).resolve(), model.load(cwd / p)) for p in group] for group in groups]
@@ -116,7 +116,7 @@ def _cmd_queue(a: argparse.Namespace) -> int:
 
 
 def _watched(path: Path, state_dir: Optional[str] = None) -> wait_decide.Watched:
-    """1 本のプランの回の今を、DBOS を開かずに控えと目印から読む。"""
+    """1 本のプランの回の今を、DBOS を開かずにバックアップと目印から読む。"""
     name = path.stem
     try:
         plan = model.load(path)
@@ -201,7 +201,7 @@ def _parser() -> argparse.ArgumentParser:
     nx.add_argument("--set", dest="sets", action="append")
     nx.add_argument("--fresh", action="store_true")
     nx.set_defaults(fn=_cmd_next)
-    qu = sub.add_parser("queue", help="段ごとにプランを並べて流す")
+    qu = sub.add_parser("queue", help="ステップごとにプランを並べて流す")
     qu.add_argument("plans", nargs="+")
     qu.add_argument("--then", action="append", nargs="+")
     qu.add_argument("--from", dest="starts", action="append")

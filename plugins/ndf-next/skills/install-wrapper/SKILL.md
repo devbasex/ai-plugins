@@ -22,9 +22,9 @@ allowed-tools:
 
 ## 引数
 
-| 引数 | 副命令 | すること |
+| 引数 | サブコマンド | すること |
 | --- | --- | --- |
-| 無し・`install` | `install` | 複製と PATH のエントリポイントを置く（あれば今の版で置き直す）。旧い NDF の複製があれば残して警告する。旧いラッパーを止めた後に `ndf relay install --replace-old` で置き換える |
+| 無し・`install` | `install` | 複製と PATH のエントリポイントを置く（あれば今のバージョンで置き直す）。旧い NDF の複製があれば残して警告する。旧いラッパーを止めた後に `ndf relay install --replace-old` で置き換える |
 | `uninstall` | `uninstall` | 置いた複製と PATH のエントリポイントを消す。利用者が置いた同じ名前のファイルは消さない |
 | `status` | `status` | 複製と PATH のエントリポイントの有無と状態を示す。今のセッションがラッパーの直接の子かは `ndf relay notice` の `metrics.inside` で示す。何も書かない |
 
@@ -32,12 +32,12 @@ allowed-tools:
 
 ## 手順
 
-副命令を **1 回だけ** 実行して、結果 JSON の `summary`・`items`・`warnings` と終了コードをそのまま示す。
-`<副命令>` は上の表で決めた値に置き換える。
+サブコマンドを **1 回だけ** 実行して、結果 JSON の `summary`・`items`・`warnings` と終了コードをそのまま示す。
+`<サブコマンド>` は上の表で決めた値に置き換える。
 
 ```bash
 command -v ndf >/dev/null 2>&1 || { echo "ndf が PATH に無い" >&2; exit 3; }   # development-workflow/references/scripts-lookup.md
-ndf relay <副命令>
+ndf relay <サブコマンド>
 echo "exit=$?"
 ```
 
@@ -46,10 +46,10 @@ echo "exit=$?"
 | 0 | 置いた・外した・既にそうなっていた | `summary` と `warnings`（PATH の追加が要るなど）のとおり |
 | 3 | 前提が無い（複製がプラグインを見つけられない・`--replace-old` で旧いラッパーが動いている）。何も変えていない | `summary` の理由。旧いラッパーなら止めてから打ち直す |
 
-**実行前の確認は置かない。** 明示指示でだけ動き、置くのは `~/.claude/ndf/` と `~/.local/bin/` の自分の印のあるファイルだけで、`uninstall` で戻せる。
+**実行前の確認は置かない。** 明示指示でだけ動き、置くのは `~/.claude/ndf/` と `~/.local/bin/` の自分のマーカーのあるファイルだけで、`uninstall` で戻せる。
 シェルの設定ファイルは書き換えない。`~/.local/bin` が PATH に無いときは、`warnings` の 1 行を利用者へ示す。
 
-## 置き場所
+## 置く場所
 
 | もの | パス |
 | --- | --- |

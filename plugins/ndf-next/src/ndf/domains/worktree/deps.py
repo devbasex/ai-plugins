@@ -1,4 +1,4 @@
-"""worktree の依存の用意（宣言の `deps` 節）。
+"""worktree の依存の用意（設定の `deps` 節）。
 
 `deps` は共有設定（`.ndf/worktree.json`）からだけ読む（個人設定の `deps` は重ねない）。手順は次の順に行う。
 
@@ -9,8 +9,8 @@
 用意の後に、git の状態が変わっていないこと（依存物は git が無視するパスに置く）と、ハードリンクで複製したファイルが
 その場で書き換えられていないこと（メインディレクトリの同じファイルも変わる）を確かめる。
 
-用意した印は `<worktree の git ディレクトリ>/ndf-deps` に、今の HEAD と宣言の中身の要約を書く。`if_unprepared` では
-印が今のものと同じなら何もしない。印が別の HEAD・宣言のもの（前に用意した worktree）なら、既にある複製の宛先は
+用意したマーカーは `<worktree の git ディレクトリ>/ndf-deps` に、今の HEAD と設定の中身の要約を書く。`if_unprepared` では
+マーカーが今のものと同じなら何もしない。マーカーが別の HEAD・設定のもの（前に用意した worktree）なら、既にある複製の宛先は
 そのまま使い、無い宛先の複製と `run` だけをやり直す。
 """
 
@@ -28,21 +28,21 @@ from typing import Any, Optional
 from ndf.adapters.git import Git
 from ndf.domains.worktree import container, ndf_settings, repo
 
-# 宣言の節と、その中の手順の名前（行う順）
+# 設定の節と、その中の手順の名前（行う順）
 SECTION = ndf_settings.DEPS
 # 複製の手順（ハードリンクで複製する `LINK_STEP` と、実体を複製する手順）と、コマンドを打つ手順
 LINK_STEP = "copy_from_main"
 COPY_STEPS = (LINK_STEP, "copy_as_real")
 RUN_STEP = "run"
 STEPS = (*COPY_STEPS, RUN_STEP)
-# 印のファイルの名前（worktree の git ディレクトリの下）
+# マーカーのファイルの名前（worktree の git ディレクトリの下）
 MARK = "ndf-deps"
 # 失敗の後に返す出力の末尾の行数
 TAIL_LINES = 20
 
 
 class DepsError(Exception):
-    """宣言の `deps` 節の形が違う（手順を 1 つも行わない）。"""
+    """設定の `deps` 節の形が違う（手順を 1 つも行わない）。"""
 
 
 @dataclass
@@ -67,7 +67,7 @@ def safe_relative(rel: str) -> bool:
 
 
 def read_steps(decl: Optional[ndf_settings.NdfSettings]) -> dict[str, list[str]]:
-    """`deps` 節の手順。宣言・節が無ければ空。形が違えば `DepsError`。"""
+    """`deps` 節の手順。設定・節が無ければ空。形が違えば `DepsError`。"""
     if decl is None or SECTION not in decl.raw:
         return {}
     section = decl.section(SECTION)
@@ -83,7 +83,7 @@ def read_steps(decl: Optional[ndf_settings.NdfSettings]) -> dict[str, list[str]]
 
 
 def mark_key(worktree: Git, main_dir: Path) -> str:
-    """印の中身: 今の HEAD と宣言の中身の要約。どちらかが変われば印は効かない。"""
+    """マーカーの中身: 今の HEAD と設定の中身の要約。どちらかが変わればマーカーは効かない。"""
     head = worktree.run("rev-parse", "HEAD").strip()
     shared = ndf_settings.shared_file(main_dir)
     digest = hashlib.sha256(shared.read_bytes()).hexdigest()[:16] if shared.is_file() else "none"
@@ -255,7 +255,7 @@ def _verify(wt: Git, top: Path, steps: dict[str, list[str]], before: str, since:
 
 
 def prepare(worktree: Path, if_unprepared: bool = False, shell: Optional[container.Shell] = None) -> Prepared:
-    """依存を用意する。宣言・`deps` 節が無ければ何もしない。形が違えば `DepsError`、git の失敗は `GitError`。
+    """依存を用意する。設定・`deps` 節が無ければ何もしない。形が違えば `DepsError`、git の失敗は `GitError`。
 
     `worktree` が worktree の下のディレクトリでも、worktree の根へ複製する。
     """

@@ -1,6 +1,6 @@
 """1 回の実行を識別子 1 つで追う記録（#1142 の AD3。N10。#2338）。
 
-`open_run` が実行の識別子を振り、利用者の状態の置き場の `runs/<リポジトリ>/<UTC の日付>/<起点の識別子>.jsonl` へ
+`open_run` が実行の識別子を振り、利用者の状態の保存先の `runs/<リポジトリ>/<UTC の日付>/<起点の識別子>.jsonl` へ
 1 行ずつ書く。子は環境変数 `NDF_RUN_ID`・`NDF_RUN_LOG` を受けて親と同じファイルへ書き、`parent_id` で親を指す。
 
 書き口は標準の `logging` の専用の logger `ndf.run`（`propagate` は偽）に出力先の `Handler`（`Sink`）を 1 つだけ
@@ -29,7 +29,7 @@ from ndf.contracts import causes, facts, limits, result
 ENV_RUN_ID = "NDF_RUN_ID"
 ENV_RUN_LOG = "NDF_RUN_LOG"
 ENV_RUN_LOG_SINK = "NDF_RUN_LOG_SINK"
-# 記録の出力先。file は状態の置き場のファイル、stderr は標準エラー（コンテナのログへ流す）
+# 記録の出力先。file は状態の保存先のファイル、stderr は標準エラー（コンテナのログへ流す）
 SINKS = ("file", "stderr")
 RUNS_DIR = "runs"
 # 名前がこの形の環境変数の値は、記録へ書く前に伏せる
@@ -52,7 +52,7 @@ SECRET_SHAPES = (
 HEAD_CHARS = 200
 # JSON に書いた 1 字の最大のバイト数（制御文字の `\u00XX`）。stderr の続きの行の 1 行に入る字数を決める
 JSON_CHAR_BYTES = 6
-# 置き場のリポジトリの名前・実行の識別子に使えない値（パスの 1 要素だけを許す）
+# 保存先のリポジトリの名前・実行の識別子に使えない値（パスの 1 要素だけを許す）
 UNSAFE_LOCATION = re.compile(r"[/\\\x00]")
 # 書き口の logger（#2338 の決定 1）。ルートの logger へ流さない
 LOGGER_NAME = "ndf.run"
@@ -61,7 +61,7 @@ _LOGGER.propagate = False
 
 
 class RunLogError(Exception):
-    """記録を開けない（置き場に書けない・知らない出力先・既に開いている・置き場の名前や識別子が使えない）。"""
+    """記録を開けない（保存先に書けない・知らない出力先・既に開いている・保存先の名前や識別子が使えない）。"""
 
 
 def _safe_name(name: str, what: str) -> str:
@@ -74,7 +74,7 @@ def _safe_name(name: str, what: str) -> str:
 def secret_values() -> list[str]:
     """伏せる値（名前が秘密の形の環境変数と、環境変数の表で `secret` の値）。長いものから並べ、短い値が長い値の一部を先に伏せないようにする。
 
-    表の `secret` は名前の形に当たらない秘密（進行表の DB の URL は資格情報を含みうる。B8）を拾う。
+    表の `secret` は名前の形に当たらない秘密（ステートマシンの DB の URL は資格情報を含みうる。B8）を拾う。
     """
     marked = set(facts.ids("env", secret=True))
     found = [v for k, v in os.environ.items() if (SECRET_NAME.search(k) or k in marked) and len(v) >= SECRET_MIN]
@@ -92,7 +92,7 @@ def _mask(text: str, secrets: list[str]) -> str:
 def redact(value: Any, secrets: Optional[list[str]] = None) -> Any:
     """値の中の、秘密の環境変数の値とトークンの形（`SECRET_SHAPES`）を伏せる。
 
-    辞書は鍵も伏せる。配列・タプル・集合は配列にして中を伏せる。バイト列は UTF-8 の文字列に読んで伏せる。
+    辞書はキーも伏せる。配列・タプル・集合は配列にして中を伏せる。バイト列は UTF-8 の文字列に読んで伏せる。
     JSON の値にならないもの（パス・例外など）は、記録へ書くときの文字列（`str`）にしてから伏せる。
     数・真偽値・None だけをそのまま返す（秘密を持ちうる値をパススルーしない。#3394）。
     """
@@ -109,7 +109,7 @@ def redact(value: Any, secrets: Optional[list[str]] = None) -> Any:
 
 
 def _string_slots(value: Any) -> list[tuple[Any, Any]]:
-    """入れ子の辞書・配列の中の文字列の置き場（入れ物と鍵）を並べる。"""
+    """入れ子の辞書・配列の中の文字列の保存先（入れ物とキー）を並べる。"""
     if isinstance(value, dict):
         items: Any = value.items()
     elif isinstance(value, list):
@@ -145,7 +145,7 @@ class Sink(logging.Handler):
 
 
 class FileSink(Sink):
-    """状態の置き場のファイルへ、排他の中で 1 行を書き切る。"""
+    """状態の保存先のファイルへ、排他の中で 1 行を書き切る。"""
 
     def __init__(self, path: Path) -> None:
         super().__init__()
@@ -282,10 +282,10 @@ def close() -> None:
 
 
 def runs_dir() -> Path:
-    """記録の置き場の根（利用者の状態の置き場の下）。
+    """記録の保存先の根（利用者の状態の保存先の下）。
 
-    状態の置き場は `identity.prepare_state_dir` を通して用意する。形の版のファイルの無いまま記録を書くと、
-    次の用意が旧い置き場と判定して、書いている途中の記録と枠のロックごと退避するため（#3394）。
+    状態の保存先は `identity.prepare_state_dir` を通して用意する。形のバージョンのファイルの無いまま記録を書くと、
+    次の用意が旧い保存先と判定して、書いている途中の記録とスロットのロックごと退避するため（#3394）。
     """
     return identity.prepare_state_dir(identity.load()).path / RUNS_DIR
 
@@ -296,7 +296,7 @@ def _prune(repo_dir: Path, today: date) -> None:
     for day in sorted(repo_dir.iterdir()):
         try:
             old = date.fromisoformat(day.name) < today - keep
-        except ValueError:  # noqa: S112 ファイル: 日付の名前でないディレクトリは記録の置き場のものでないので触らない
+        except ValueError:  # noqa: S112 ファイル: 日付の名前でないディレクトリは記録の保存先のものでないので触らない
             continue
         if old:
             try:
@@ -307,7 +307,7 @@ def _prune(repo_dir: Path, today: date) -> None:
 
 @dataclass(frozen=True)
 class RunTarget:
-    """記録の置き場を決める値。`location` は置き場のリポジトリの名前（None なら作業ディレクトリの名前）。"""
+    """記録の保存先を決める値。`location` は保存先のリポジトリの名前（None なら作業ディレクトリの名前）。"""
 
     run_id: str
     parent_id: Optional[str]
@@ -316,8 +316,8 @@ class RunTarget:
 
 
 def _repo_dir(target: RunTarget) -> Path:
-    """置き場のリポジトリのディレクトリ。runs の下の 1 階層でなければ、作る・消すの前に `RunLogError`。"""
-    name = _safe_name(target.location or Path.cwd().name, f"記録の置き場のリポジトリの名前（{RUNS_DIR} の下の 1 階層）")
+    """保存先のリポジトリのディレクトリ。runs の下の 1 階層でなければ、作る・消すの前に `RunLogError`。"""
+    name = _safe_name(target.location or Path.cwd().name, f"記録の保存先のリポジトリの名前（{RUNS_DIR} の下の 1 階層）")
     return runs_dir() / name
 
 
@@ -360,7 +360,7 @@ def open_run(
 ) -> RunLog:
     """実行の記録を開き、start の行を書く。親の識別子は省けば環境変数 `NDF_RUN_ID` から受ける。
 
-    `location` は置き場のリポジトリの名前（省けば作業ディレクトリの名前）。起点の実行は保持の日数を超えた
+    `location` は保存先のリポジトリの名前（省けば作業ディレクトリの名前）。起点の実行は保持の日数を超えた
     日付のディレクトリを消す。開けなければ `RunLogError`（呼び出し元は結果を stopped にする）。
     """
     if _CURRENT:
@@ -370,7 +370,7 @@ def open_run(
     try:
         path = _log_path(RunTarget(rid, parent, location, now or datetime.now(timezone.utc)))
     except OSError as exc:
-        raise RunLogError(f"実行の記録の置き場を作れない: {exc}") from exc
+        raise RunLogError(f"実行の記録の保存先を作れない: {exc}") from exc
     log = RunLog(run_id=rid, parent_id=parent, entry=entry, sink=StderrSink() if path is None else FileSink(path))
     _LOGGER.handlers[:] = [log.sink]
     log.write("start", pid=os.getpid(), cwd=str(Path.cwd()))

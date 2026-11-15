@@ -1,4 +1,4 @@
-"""引継ぎ文書を確かめる口と、雛形に無い節を退避する口（N8a・#1785・#1835）。
+"""引継ぎ文書を確かめる口と、テンプレートに無い節を退避する口（N8a・#1785・#1835）。
 
 本文に書いたパスは、リポジトリの根からの相対パス（絶対パスはそのまま）で実在を確かめる。退避は退避先を先に
 書き、書けてから本体を書き換える（退避先を書けなければ本体を変えない）。
@@ -13,7 +13,7 @@ from ndf.domains.records import handoff_decide as hd
 
 
 def body_limits() -> hd.Limits:
-    """本体の上限（契約の limits の handoff.lines・handoff.bytes）。"""
+    """本体の上限（コントラクトの limits の handoff.lines・handoff.bytes）。"""
     return hd.Limits(int(limits_mod.value("handoff.lines", "count")), int(limits_mod.value("handoff.bytes", "count")))
 
 
@@ -29,7 +29,7 @@ def check_file(path: Path, root: Path, limits: hd.Limits) -> hd.CheckReport:
 
 
 def trim_file(path: Path, history: Path) -> list[str]:
-    """雛形に無い節を退避先の末尾へ移し、移した節の見出しを返す。移す節が無ければ何も書かない。
+    """テンプレートに無い節を退避先の末尾へ移し、移した節の見出しを返す。移す節が無ければ何も書かない。
 
     退避先へ書けなければ `OSError`（本体は書き換えない）。退避先が本体と同じファイル（相対・絶対・リンク経由を
     問わない）なら、本体の書き換えが退避した節を消すため、何も書かずに `OSError` で止まる。

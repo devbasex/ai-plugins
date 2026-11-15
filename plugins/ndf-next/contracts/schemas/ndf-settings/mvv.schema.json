@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "ndf-settings/mvv.schema.json",
-  "title": "プロジェクト MVV の宣言（.ndf/mvv.json）",
-  "description": "プロジェクト MVV の本文の置き場・改訂の設定・承認された版の並び。人の承認（M7）で書く",
+  "title": "プロジェクト MVV の設定（.ndf/mvv.json）",
+  "description": "プロジェクト MVV の本文の保存先・改訂の設定・承認されたバージョンの並び。人の承認（M7）で書く",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -19,17 +19,17 @@
       "enum": [
         1
       ],
-      "description": "宣言の形の版。読み手は知らない版を読まない"
+      "description": "設定の形のバージョン。読み手は知らないバージョンを読まない"
     },
     "body": {
       "default": "mvv.md",
       "minLength": 1,
       "type": "string",
-      "description": "body（このリポジトリの宣言にある最上位のキー）"
+      "description": "body（このリポジトリの設定にある最上位のキー）"
     },
     "settings": {
       "$ref": "#/$defs/MvvSettings",
-      "description": "settings（このリポジトリの宣言にある最上位のキー）"
+      "description": "settings（このリポジトリの設定にある最上位のキー）"
     },
     "versions": {
       "items": {
@@ -37,22 +37,22 @@
       },
       "minItems": 1,
       "type": "array",
-      "description": "versions（このリポジトリの宣言にある最上位のキー）"
+      "description": "versions（このリポジトリの設定にある最上位のキー）"
     }
   },
   "x-ndf-location": "worktree",
   "x-ndf-read-by": [
     {
       "by": "ndf records mvv",
-      "when": "MVV の照合と改訂の提案のとき"
+      "when": "MVV 判定と改訂の提案のとき"
     },
     {
       "by": "ndf records preflight",
-      "when": "工程の前の確かめで本文の置き場を読むとき"
+      "when": "工程の前の確かめで本文の保存先を読むとき"
     },
     {
       "by": "ndf answer",
-      "when": "承認ゲートで MVV の版を照らすとき"
+      "when": "承認ゲートで MVV のバージョンを照らすとき"
     }
   ],
   "examples": [

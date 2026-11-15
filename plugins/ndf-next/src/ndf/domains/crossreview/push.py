@@ -1,8 +1,8 @@
 """修正の push（#2440）。
 
-強制の push はしない。拒まれたら（non-fast-forward・fetch first）origin の先頭を取り込んで自分の未送信のコミットを
-載せ直し、1 回だけ送り直す。載せ直しで衝突したら取り込みを取り消して `diverged` と衝突したファイルを返す。
-送り直しも拒まれたら `rejected_twice` を返す（worktree は取り込んだ後のまま。次の流し直しの同期が合わせる）。
+強制の push はしない。拒まれたら（non-fast-forward・fetch first）origin の先頭をマージして自分の未送信のコミットを
+載せ直し、1 回だけ送り直す。載せ直しで衝突したらマージを取り消して `diverged` と衝突したファイルを返す。
+送り直しも拒まれたら `rejected_twice` を返す（worktree はマージした後のまま。次の流し直しの同期が合わせる）。
 pre-push の hook などほかの理由の失敗は `git.GitError` のまま呼び手へ返す。
 """
 
@@ -14,7 +14,7 @@ from typing import NamedTuple, Optional
 from ndf.adapters import git
 from ndf.core.converge import worktree
 
-# 先に別の push が入ったときの git の拒否の印
+# 先に別の push が入ったときの git の拒否のマーカー
 _REJECTED = re.compile(r"\[rejected\]|non-fast-forward|fetch first|\(stale info\)")
 # 理由
 NOT_ANCESTOR = "not_ancestor"
@@ -23,7 +23,7 @@ REJECTED_TWICE = "rejected_twice"
 
 
 class PushResult(NamedTuple):
-    """push の結果。`rebased` は取り込んだか、`origin_head` は取り込んだ origin の先頭、`head` は送った（送ろうとした）HEAD。"""
+    """push の結果。`rebased` はマージしたか、`origin_head` はマージした origin の先頭、`head` は送った（送ろうとした）HEAD。"""
 
     ok: bool
     rebased: bool
@@ -48,7 +48,7 @@ def _rejected_or_raise(done: git.Completed) -> None:
 
 
 def _rebase_onto_origin(g: git.Git, head_branch: str) -> tuple[str, tuple[str, ...]]:
-    """origin の先頭を取り込み、自分のコミットを載せ直す。衝突したら取り消して衝突したファイルを返す。"""
+    """origin の先頭をマージ、自分のコミットを載せ直す。衝突したら取り消して衝突したファイルを返す。"""
     origin_head = worktree.fetch_head(g, head_branch)
     done = g.runner(["rebase", origin_head], g.cwd)
     if done.returncode == 0:

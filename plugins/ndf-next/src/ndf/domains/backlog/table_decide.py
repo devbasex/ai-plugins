@@ -50,12 +50,12 @@ def has_section(desc: str) -> bool:
 
 def slot_text(slot: dict[str, Any]) -> str:
     if slot["status"] == SLOT_NONE:
-        return f"なし（枠 {slot['budget']} を順位の先頭からの切り出しへ戻した）"
+        return f"なし（スロット {slot['budget']} を順位の先頭からの切り出しへ戻した）"
     if slot["status"] == SLOT_SPLIT:
-        return f"#{slot['issue']} は分割が要る（Size {slot['size']} / 枠 {slot['budget']}）"
+        return f"#{slot['issue']} は分割が要る（Size {slot['size']} / スロット {slot['budget']}）"
     if slot["slice"] == slot["issue"]:
-        return f"#{slot['issue']}（Size {slot['size']} / 枠 {slot['budget']}）"
-    return f"#{slot['slice']}（#{slot['issue']} の子、Size {slot['size']} / 枠 {slot['budget']}）"
+        return f"#{slot['issue']}（Size {slot['size']} / スロット {slot['budget']}）"
+    return f"#{slot['slice']}（#{slot['issue']} の子、Size {slot['size']} / スロット {slot['budget']}）"
 
 
 def _row_line(r: dict[str, Any]) -> str:
@@ -68,13 +68,13 @@ def _row_line(r: dict[str, Any]) -> str:
 
 def quality_text(q: dict[str, Any]) -> str:
     got = " ".join(f"#{n}" for n in q["issues"]) or "なし"
-    budget = "容量なし" if q["budget"] is None else f"枠 {q['budget']}"
+    budget = "容量なし" if q["budget"] is None else f"スロット {q['budget']}"
     return f"{got}（ラベル {q['label']}、Size の和 {q['size_sum']} / {budget}、最低 {q['min']} 件）"
 
 
 def boundary_text(b: dict[str, Any]) -> str:
     if b.get("empty"):
-        return f"無し（枠で容量 {b['capacity']} を使い切った）"
+        return f"無し（スロットで容量 {b['capacity']} を使い切った）"
     over = "。1 件で容量を超える" if b.get("over") else ""
     return f"#{b['number']}（Size の和 {b['size_sum']} / 容量 {b['capacity']}{over}）"
 
@@ -84,10 +84,10 @@ def _tail(ms: dict[str, Any], shown: int) -> list[str]:
     if len(ms["rows"]) > shown:
         tail.append(f"以下 {len(ms['rows']) - shown} 件は表に載せていない")
     if ms["large_slot"]:
-        tail.append("大きい課題の枠: " + slot_text(ms["large_slot"]))
+        tail.append("大きい課題のクォータ: " + slot_text(ms["large_slot"]))
     q = ms["quality_slot"] if "quality_slot" in ms else None
     if q is not None:
-        tail.append("品質の枠: " + quality_text(q))
+        tail.append("品質のクォータ: " + quality_text(q))
     if ms["boundary"]:
         tail.append("切り出しの境界: " + boundary_text(ms["boundary"]))
     return tail

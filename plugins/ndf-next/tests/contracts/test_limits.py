@@ -66,7 +66,7 @@ def test_missing_ndf_settings_stops(contracts_copy):
         limits.table()
 
 
-# 現状固定（I-006）: 値の鍵は Policy の欄（name・summary を除く）と宣言の形の値の鍵の 3 か所が同じ集合を持つ。
+# 現状固定（I-006）: 値のキーは Policy の欄（name・summary を除く）と設定の形の値のキーの 3 か所が同じ集合を持つ。
 _SCHEMA_VALUE_KEYS = (
     "seconds",
     "interval",

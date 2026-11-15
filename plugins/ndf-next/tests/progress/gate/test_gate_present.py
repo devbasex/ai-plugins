@@ -1,4 +1,4 @@
-"""承認ゲートの結果の差し替え・承認資料・答えを読む前の対象の見直し（#3295。3364-2・3390-2・#2444・#2554）。"""
+"""承認ゲートの結果の差し替え・承認資料・回答を読む前の対象の見直し（#3295。3364-2・3390-2・#2444・#2554）。"""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ def _asked(st, repo, tid, observe):
 
 
 def _with_gaps(env):
-    """design-review の結果に扱われなかった指摘（欠け）を載せる `Env`。ok の結果は欠けを outputs.gaps に持つ（結果の契約）。"""
+    """design-review の結果に扱われなかった指摘（欠け）を載せる `Env`。ok の結果は欠けを outputs.gaps に持つ（結果のコントラクト）。"""
 
     def invoker(r, cwd, work_dir, answer):
         if r.step == "design-review":
@@ -41,7 +41,7 @@ def test_the_gate_result_of_progress_is_the_question_with_the_material(st, env, 
     assert out["routes"]["approved"]["argv"][:2] == ["ndf", "answer"]
     text = open(out["presentation_path"], encoding="utf-8").read()
     assert "f-1（直したとも見送ったとも決めていない）" in text and meta["id"] in text
-    # 書いた承認資料は書き直さない（答えた者が見た sha256 が変わらない）
+    # 書いた承認資料は書き直さない（回答した者が見た sha256 が変わらない）
     again = _asked(st, repo, tid, gate.github_observe(repo, st.root, lambda: _hub("h1")))
     assert again["metrics"]["gate"]["material_sha256"] == gate.material_sha256(Path(out["presentation_path"]))
 

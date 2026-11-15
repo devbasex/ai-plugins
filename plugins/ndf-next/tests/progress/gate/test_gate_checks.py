@@ -54,7 +54,7 @@ def test_the_gate_is_skipped_only_for_a_well_formed_follow_without_a_boundary():
     assert gate.may_skip(PASSING, {**FOLLOW, "verdict": "unknown"})[0] is False
     assert gate.may_skip(PASSING, {**FOLLOW, "boundary": ["C4 の削除"]}) == (False, ["レッドラインに当たる: C4 の削除"])
     for broken in ({"verdict": "follow", "reasons": ["r"]}, {**FOLLOW, "boundary": [""]}, {**FOLLOW, "boundary": {}}, "follow"):
-        assert gate.may_skip(PASSING, broken) == (False, ["MVV 判定の応答が契約の形でない"])
+        assert gate.may_skip(PASSING, broken) == (False, ["MVV 判定の応答がコントラクトの形でない"])
 
 
 def test_a_follow_with_an_empty_boundary_does_not_skip_a_change_on_the_boundary_paths():

@@ -1,9 +1,9 @@
-"""cross 系の作業場所の置き場（#3106）。
+"""cross 系の作業場所の保存先（#3106）。
 
-既定の置き場はリポジトリのメインディレクトリの `.worktrees/.ndf`。`/tmp` は別のコンテナ（マウントの名前空間）と共有されず、
+既定の保存先はリポジトリのメインディレクトリの `.worktrees/.ndf`。`/tmp` は別のコンテナ（マウントの名前空間）と共有されず、
 そちらで打った `git worktree prune` に作業場所が無いと見なされて登録が消えるため、リポジトリと同じ所に置く。
 `.` で始まる名前はブランチ名に使えず、開発の worktree（`.worktrees/<ブランチ>`）と重ならない。
-環境変数 `NDF_WORKTREE_BASE` があればその置き場を使う。
+環境変数 `NDF_WORKTREE_BASE` があればその保存先を使う。
 """
 
 from __future__ import annotations
@@ -32,5 +32,5 @@ def main_dir(g: git.Git) -> Path:
 
 
 def work_root(g: git.Git, tool_dir: str) -> Path:
-    """1 回の作業の作業場所の根（`<置き場>/<tool_dir>`。例: `rf3101`）。"""
+    """1 回の作業の作業場所の根（`<保存先>/<tool_dir>`。例: `rf3101`）。"""
     return default_base(main_dir(g)) / tool_dir

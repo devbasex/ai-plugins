@@ -1,4 +1,4 @@
-"""副命令 `ndf route`: 雛形の一覧・プランを書く・書いて流す・同じ原因の続きを数える・省いた置き場を決める。"""
+"""サブコマンド `ndf route`: テンプレートの一覧・プランを書く・書いて流す・同じ原因の続きを数える・省いた保存先を決める。"""
 
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ def test_render_writes_plan_and_points_to_plan_next(tmp_path, capsys, last_resul
 
 
 def test_run_is_one_entrypoint_for_immediate_fix(tmp_path, monkeypatch):
-    """C3-1（#1142 の要求の不足 a）: conductor は ndf route run immediate_fix 1 つで、雛形を埋めたプランを流す。"""
+    """C3-1（#1142 の要求の不足 a）: conductor は ndf route run immediate_fix 1 つで、テンプレートを埋めたプランを流す。"""
     called: list[list[str]] = []
     monkeypatch.setattr(route.plan_cli, "main", lambda argv: called.append(argv) or 0)
     out = tmp_path / "fix.json"
@@ -45,7 +45,7 @@ def test_run_is_one_entrypoint_for_immediate_fix(tmp_path, monkeypatch):
 
 
 def test_render_drops_local_tests_when_repo_declares_ci_only(tmp_path):
-    """CI テストの宣言（`test.ci.only`）のあるリポジトリでは、即時修正のプランも手元のテストを持たず、test_command を求めない。"""
+    """CI テストの設定（`test.ci.only`）のあるリポジトリでは、即時修正のプランも手元のテストを持たず、test_command を求めない。"""
     (tmp_path / ".ndf").mkdir()
     (tmp_path / ".ndf" / "project.json").write_text(json.dumps({"test": {"ci": {"only": True}}}), encoding="utf-8")
     out = tmp_path / "fix.json"
@@ -78,7 +78,7 @@ def _stopped_ci(path: Path, nodes: list[str]) -> None:
 def test_repeat_stops_when_same_cause_continues(tmp_path, capsys, last_result):
     """#2844: 同じ落ちたテストの集まりで CI が続けて落ちたら、上限（supervise.step-rerun の same_cause）を超えた回で fix_limit。
 
-    別の原因が挟まれば数え直す。summary の文は鍵に入れない。
+    別の原因が挟まれば数え直す。summary の文はキーに入れない。
     """
     res, log = tmp_path / "ci.json", tmp_path / "causes.jsonl"
     args = ["repeat", "--result", str(res), "--log", str(log)]
@@ -184,7 +184,7 @@ def test_render_stops_when_omitted_worktree_is_not_usable(tmp_path, monkeypatch,
 
 
 def test_omitted_base_reads_ndf_settings_then_origin_default_branch(tmp_path):
-    """base を省けば、ブランチの運用の宣言の base_branch、無ければ origin の既定ブランチにする（develop に固定しない）。"""
+    """base を省けば、ブランチの運用の設定の base_branch、無ければ origin の既定ブランチにする（develop に固定しない）。"""
     repo = tmp_path / "repo"
     repo.mkdir()
     git(repo, "init", "-q", "-b", "main")

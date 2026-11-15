@@ -1,16 +1,16 @@
 """本番チャネルへのマージを見る `strict` の guard（#3345 の決定 91）。
 
-AI が Bash で直に打つ `gh pr merge` を、宛先のリポジトリの宣言（`.ndf/project.json` の `delivery`）で判定する。
-自動で本番へ届く宣言のリポジトリでは止め、宛先を確かめる NDF のマージの手順へ回す。hook の中では通信しないため
+AI が Bash で直に打つ `gh pr merge` を、宛先のリポジトリの設定（`.ndf/project.json` の `delivery`）で判定する。
+自動で本番へ届く設定のリポジトリでは止め、宛先を確かめる NDF のマージの手順へ回す。hook の中では通信しないため
 Pull Request の宛先のブランチを確かめられない。
 
 - 宛先のリポジトリは、`cd` で移った先の作業ディレクトリと `-R`・`--repo`・環境変数 `GH_REPO` で決める（#2446・#2838）。
-  宛先が作業ディレクトリの `origin` と違えば、宛先の宣言を読めないので止め、宛先の clone へ `cd` して打つよう案内する
+  宛先が作業ディレクトリの `origin` と違えば、宛先の設定を読めないので止め、宛先の clone へ `cd` して打つよう案内する
 - `cd` の先が展開（`$`・`` ` ``）や `-` を含むとき、`pushd`・`popd` のときは、移った先を決められないので後のマージを止める
 - サブシェル（`(`…`)`）の中の `cd`・`export` は閉じた後に戻し、パイプラインと裏で走らせる（`&`）コマンドの `cd`・`export` は
   後の文へ持ち越さない（どれも別のシェルで走る）。対にならない `)` の後は作業ディレクトリを決められないので止める
 - 宛先の初期値は hook の起動時の環境変数 `GH_REPO`（Bash の Tool と同じセッションの環境）
-- シェルの字句は `shlex` で読む。読めない・宣言を読めないときは止める（自分の失敗で止める側へ倒す）
+- シェルの字句は `shlex` で読む。読めない・設定を読めないときは止める（自分の失敗で止める側へ倒す）
 - 宛先は Pull Request の URL（`gh pr merge https://github.com/<owner>/<repo>/pull/<番号>`）からも決める
 - 制御構文の語（`if` / `then` / `do` など）と包む語（`env -i`・`sudo -u x`・`xargs` など）の後ろのコマンドも読み、
   `bash -c` / `sh -c` / `eval` の引数とコマンド置換（`$(...)`・`` `...` ``）は中のスクリプトとして読み直す
@@ -32,7 +32,7 @@ from ndf import identity
 from ndf.domains.hooks import strict_shell, tables
 from ndf.domains.hooks.verdict import Verdict, deny
 
-# 宛先のリポジトリの宣言（delivery を読む）
+# 宛先のリポジトリの設定（delivery を読む）
 _PROJECT_FILE = identity.FIXED_WORDS["ndf_settings_dir"] + "/project.json"
 
 # guard の表（hooks/guards.json）でのこの guard の名前
@@ -71,7 +71,7 @@ def judge(payload: dict, off: frozenset) -> Tuple[Optional[Verdict], Optional[fl
 
 
 def check(raw_payload: object, root: str, gh_repo: Optional[str] = None) -> Optional[Verdict]:
-    """止める答えか None。Bash の PreToolUse 以外は None。`gh_repo` は hook の起動時の環境変数 `GH_REPO`。"""
+    """止める回答か None。Bash の PreToolUse 以外は None。`gh_repo` は hook の起動時の環境変数 `GH_REPO`。"""
     text = _command_text(raw_payload)
     if text is None or not _mentions_merge(text):
         return None
@@ -350,7 +350,7 @@ def _judge(here: Optional[Path], call: MergeCall) -> Optional[Verdict]:
         if origin is None or origin.lower() != call.repo.lower():
             return deny(
                 f"宛先 {call.repo}（-R・--repo・GH_REPO か Pull Request の URL）は作業ディレクトリ {repo_root} のリポジトリ（{origin or '不明'}）と違い、"
-                f"宛先の宣言を読めない。`cd <{call.repo} の clone> && gh pr merge ...` で打つか、{_MERGE_HELP}"
+                f"宛先の設定を読めない。`cd <{call.repo} の clone> && gh pr merge ...` で打つか、{_MERGE_HELP}"
             )
     rows = _delivery(repo_root)
     if rows is None:
@@ -422,7 +422,7 @@ def slug_of_url(url: str) -> Optional[str]:
 def _delivery(repo_root: Path) -> Optional[list]:
     try:
         data = json.loads((repo_root / _PROJECT_FILE).read_text(encoding="utf-8"))
-    except (OSError, ValueError):  # noqa: NDF401 ファイル: 宣言を読めないことを None で返し、呼び手が止める
+    except (OSError, ValueError):  # noqa: NDF401 ファイル: 設定を読めないことを None で返し、呼び手が止める
         return None
     rows = data.get("delivery") if isinstance(data, dict) else None
     return rows if isinstance(rows, list) else None

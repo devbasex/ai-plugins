@@ -1,11 +1,11 @@
-"""プランの組み立ての判断（純粋な関数）: 状態の置き場・実行の鍵・差し込み・ステップを打つ作業ディレクトリ。
+"""プランの組み立ての判断（純粋な関数）: 状態の保存先・実行のキー・差し込み・ステップを打つ作業ディレクトリ。
 
-- 差し込み `{state_dir}` は絶対のパスで埋める。プランを相対のパスで渡しても、作業場所の中のステップが同じ置き場を指す（#2949）
-- 実行の鍵はプランの中身・開始点・作業場所の head・回の番号から作る。差し戻しの後に直した head は別の鍵になり、前の回の
-  報告を返さずに流れる（#3176）。同じ引数で打ち直せば同じ鍵で、承認ゲートの待ちから続く（B2）
-- 差し込みの値を変えた打ち直しは別の回にする（#3053）。`{owner}` は回をまたいで同じ持ち主の名前（#2640）
+- 差し込み `{state_dir}` は絶対のパスで埋める。プランを相対のパスで渡しても、作業場所の中のステップが同じ保存先を指す（#2949）
+- 実行のキーはプランの中身・開始点・作業場所の head・回の番号から作る。変更要求の後に直した head は別のキーになり、前の回の
+  報告を返さずに流れる（#3176）。同じ引数で打ち直せば同じキーで、承認ゲートの待ちから続く（B2）
+- 差し込みの値を変えた打ち直しは別の回にする（#3053）。`{owner}` は回をまたいで同じオーナーの名前（#2640）
 - マージで作業場所が消えたか登録が外れた後のステップは、リポジトリの根で打つ（#2969・#3022・#3186・#1886）
-- `--fresh` は前の回に戻らず、耐久の記録の置き場に無い番号の回で先頭から流す。状態の置き場を消した後も前の鍵に戻らない（#1592）
+- `--fresh` は前の回に戻らず、耐久の記録の保存先に無い番号の回で先頭から流す。状態の保存先を消した後も前のキーに戻らない（#1592）
 """
 
 from __future__ import annotations
@@ -19,14 +19,14 @@ from typing import Any, NamedTuple, Optional
 
 from ndf.core.plan.model import IN_REPO
 
-# 状態の置き場を渡さないときの、プランのファイルの隣の置き場の接尾辞
+# 状態の保存先を渡さないときの、プランのファイルの隣の保存先の接尾辞
 STATE_SUFFIX = ".state"
-# 実行の鍵の先頭の語
+# 実行のキーの先頭の語
 KEY_KIND = "plan-run"
 
 
 def state_dir_for(plan_path: str, state_dir: Optional[str], cwd: str) -> str:
-    """差し込み `{state_dir}` に使う置き場の絶対のパス。渡されなければプランのパスから導く。`cwd` は絶対のパス。"""
+    """差し込み `{state_dir}` に使う保存先の絶対のパス。渡されなければプランのパスから導く。`cwd` は絶対のパス。"""
     base = PurePath(cwd)
     if state_dir is not None:
         return str(base / state_dir)
@@ -35,7 +35,7 @@ def state_dir_for(plan_path: str, state_dir: Optional[str], cwd: str) -> str:
 
 
 def run_key(name: str, digest: str, start: Optional[str], head: Optional[str], round_no: int = 0) -> str:
-    """実行の回の鍵。プランの名前・中身・開始点・head・回の番号のどれかが違えば別の鍵になる（B1）。"""
+    """実行の回のキー。プランの名前・中身・開始点・head・回の番号のどれかが違えば別のキーになる（B1）。"""
     parts = [KEY_KIND, name, digest, start if start is not None else "", head if head is not None else "", str(round_no)]
     return ":".join(parts)
 
@@ -49,9 +49,9 @@ def run_digest(plan_digest: str, sets: Mapping[str, str]) -> str:
 
 
 def owner_of(name: str, state_dir: str) -> str:
-    """差し込み `{owner}`: プランと状態の置き場で決まる持ち主の名前。回・開始点・差し込みの値が変わっても同じ。
+    """差し込み `{owner}`: プランと状態の保存先で決まるオーナーの名前。回・開始点・差し込みの値が変わっても同じ。
 
-    ステップが作業場所の持ち主を記録するときに使えば、打ち直して回が変わっても前の回の続きとして扱える（#2640）。
+    ステップが作業場所のオーナーを記録するときに使えば、打ち直して回が変わっても前の回の続きとして扱える（#2640）。
     """
     return f"{name}-{hashlib.sha256(state_dir.encode('utf-8')).hexdigest()[:12]}"
 
@@ -71,7 +71,7 @@ class RunPlan(NamedTuple):
     start: Optional[str]
 
     def key(self, head: Optional[str], round_no: int) -> str:
-        """head と回の番号を添えた実行の回の鍵（`run_key`）。"""
+        """head と回の番号を添えた実行の回のキー（`run_key`）。"""
         return run_key(self.name, self.digest, self.start, head, round_no)
 
 
@@ -92,14 +92,14 @@ def choose_run(
     fresh: bool = False,
     taken: Callable[[str], bool] = _never_taken,
 ) -> RunChoice:
-    """前の回の記録 `record`（`run.json`）から、`plan`（名前・中身・開始点）の今回の実行の鍵を選ぶ。
+    """前の回の記録 `record`（`run.json`）から、`plan`（名前・中身・開始点）の今回の実行のキーを選ぶ。
 
-    同じプラン・開始点の回が終わっていなければ同じ鍵で続ける（承認ゲートの待ちから回復する。B2）。終わっていても、
-    head が回の初めか終わりの head と同じなら同じ鍵（終わった結果を返す。B4）。head が違えば次の回の鍵（#3176）。
-    プランか開始点が違えば次の回の鍵にする。
+    同じプラン・開始点の回が終わっていなければ同じキーで続ける（承認ゲートの待ちから回復する。B2）。終わっていても、
+    head が回の初めか終わりの head と同じなら同じキー（終わった結果を返す。B4）。head が違えば次の回のキー（#3176）。
+    プランか開始点が違えば次の回のキーにする。
 
-    `fresh` なら前の回を続けず、次の番号から数えて `taken`（耐久の記録の置き場に鍵の記録があるか）が偽になる最初の
-    番号の鍵を選ぶ。`record` が無くても（状態の置き場を消した後でも）前の回の鍵に戻らない（#1592）。
+    `fresh` なら前の回を続けず、次の番号から数えて `taken`（耐久の記録の保存先にキーの記録があるか）が偽になる最初の
+    番号のキーを選ぶ。`record` が無くても（状態の保存先を消した後でも）前の回のキーに戻らない（#1592）。
     """
     if not fresh and record is not None and _same_plan(record, plan):
         if not finished or head is None or head in record["heads"]:

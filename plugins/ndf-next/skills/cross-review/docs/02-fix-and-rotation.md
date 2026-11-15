@@ -1,6 +1,6 @@
 # 02: 修正 (Step 5) + PR ローテーション (Step 6) + 終了処理 (Step 8)
 
-主要処理は次のスクリプトにある。副命令は新しいエントリポイント `bin/ndf` にまだ無いため今の名前のまま残した（`fix-steps.py` は M1・ほかは M5。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走 T2 #3411 が行ごとに確かめる）:
+主要処理は次のスクリプトにある。サブコマンドは新しいエントリポイント `bin/ndf` にまだ無いため今の名前のまま残した（`fix-steps.py` は M1・ほかは M5。移行先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走 T2 #3411 が行ごとに確かめる）:
 
 | script | 役割 |
 |---|---|
@@ -27,7 +27,7 @@
 （`scripts/drive.py`）は fix で止まるとき、worker へ渡す指示を `prompt_file` に書く。指示が持つのは
 `/ndf:fix <PR>` の呼び出しと PR 固有の値だけである。**自動で直すのは `critical` / `major` だけで、
 `minor` / `nit` は直さず見送りの返信を付けて閉じる**（振り分けの規則は `/ndf:fix` の「重要度の判定」、
-基準の正本は `scripts/lib/review_criteria.py`）。
+基準の SSOT は `scripts/lib/review_criteria.py`）。
 
 | 値 | 出どころ |
 | --- | --- |
@@ -38,8 +38,8 @@
 | 戻り値ファイル | `$TMP_DIR/fix-pr<PR>-result.json`。環境変数 `CROSS_REVIEW_TMP_DIR` を渡すと `/ndf:fix` がここへ書く |
 | 指摘の基準 | 環境変数 `CROSS_REVIEW_STATE=$TMP_DIR/cross-review-pr<STATE_PR>-state.json`。`fix-steps.py context` が状態ファイルの `review_criteria`（`init` がコピーした重点とレビューのプロファイル）を読み、担当と同じ基準で振り分ける |
 
-**送信・返信・決着・まとめは取り込み（`state.py merge-fix`）が行う**。worker は
-GitHub と git へ書かない。取り込みは現在の頭を指定して送り（`git push origin HEAD:<ブランチ名>`）、
+**送信・返信・決着・まとめはマージ（`state.py merge-fix`）が行う**。worker は
+GitHub と git へ書かない。マージは現在の頭を指定して送り（`git push origin HEAD:<ブランチ名>`）、
 戻り値ファイルが報告したコミットが送り先に載ったことを確かめてから、`resolved_threads` /
 `deferred` / `rejected` の配列から返信と決着を、件数からまとめを組み立てて投稿キューで送る。
 載っていなければ記録も投稿もせずに止まる。担当が送ると、切り離された頭ではブランチ名だけの
@@ -47,7 +47,7 @@ GitHub と git へ書かない。取り込みは現在の頭を指定して送�
 
 **レビュー本文の指摘は `thread_id` を `null` にし、`comment_id` にはレビューの ID を書く。**
 スレッドを持たない要素には返信を積まず、`summary` と理由をまとめのコメントの「レビュー本文の指摘への返事」へ載せる。
-**総評だけの指摘（スレッドを持たない指摘）は、スクリプトが修正担当の雛形へ `finding_id` つきで入れる。**
+**総評だけの指摘（スレッドを持たない指摘）は、スクリプトが修正担当のテンプレートへ `finding_id` つきで入れる。**
 選び方・決着の記録・収束と残数への算入は [06-evidence.md](06-evidence.md) の「総評だけへ書いた指摘」 にある。
 投稿キューは、送り直しても届かない項目（`HTTP 400` / `404` / `410` / `422`、レビューの
 投稿を除く）を飛ばして投稿キューの `dropped/` へ移し、後ろの決着とまとめを送る。飛ばした数は
@@ -80,14 +80,14 @@ meta-only の語は**区切りで挟まれた語として**一致したときだ
 **例**: `check_pr_requirements`（Assignees 未設定）はループ継続、
 lint や型検査の失敗は即中断してユーザ判断。
 
-**同じコミットを 2 回取り込まない。** 段階は `rounds[-1].fix.merge` に書き進める。最後のラウンドの `fix.commit` と
+**同じコミットを 2 回マージしない。** 段階は `rounds[-1].fix.merge` に書き進める。最後のラウンドの `fix.commit` と
 戻り値ファイルのコミットが同じなら、`done` のときは何も書かず投稿もせずに記録した終了コード（0 / 3）で抜け、
-`done` でなければ済んでいない段階（投稿・CI の分類）から続ける。投稿の途中で止まった取り込みを打ち直しても、
+`done` でなければ済んでいない段階（投稿・CI の分類）から続ける。投稿の途中で止まったマージを打ち直しても、
 送信と記録はやり直さない。
 
 **ホストが `/ndf:fix` を通さずに自分で直したとき**は、コミットを送り、返信と Resolve を済ませてから
 `state.py record-fix <PR> --resolved-thread <ID>...` を打つ。コミットが PR の head から辿れることと、申告したスレッドが
-解決済みであることを GitHub で確かめ、戻り値ファイルを書いて同じ取り込みを通す（送信は飛ばす）。確かめられなければ
+解決済みであることを GitHub で確かめ、戻り値ファイルを書いて同じマージを通す（送信は飛ばす）。確かめられなければ
 記録を作らずに exit 5。形は [04-contracts.md](04-contracts.md) の「`record-fix`」にある。
 
 **収束の判定（Step 3）も同じ振り分けを使う**（#327）。両方の AI が承認したラウンドは、
@@ -116,7 +116,7 @@ if "$SCRIPTS/state.py" should-rotate "$STATE_PR"; then
   # $TMP_DIR/rotate-pr<STATE_PR>-newtext.json に書き出させる。
   # (squash モードでは Step 6b は不要)
 
-  # Step 6c: 実行 (NEW_PR / NEW_PR_URL / NEW_BRANCH を取り込む)
+  # Step 6c: 実行 (NEW_PR / NEW_PR_URL / NEW_BRANCH をマージする)
   ROTATE_VARS=$("$SCRIPTS/rotate-pr.sh" execute "$STATE_PR" --mode "$ROTATE_MODE") || exit $?
   eval "$ROTATE_VARS"
 
@@ -151,7 +151,7 @@ state.json から旧 PR / worktree を解決し、以下の素材を 1 つの JS
 
 ファイル: `$TMP_DIR/rotate-pr<STATE_PR>-prepare.json`。
 stdout にも `OLD_PR=` / `HEAD_BRANCH=` / `BASE_BRANCH=` / `IS_DRAFT=` / `PREPARE_JSON=` を出すので
-`eval` で取り込める。
+`eval` でマージできる。
 
 ### Step 6b: Agent (general-purpose) で新 title/body を生成 (light モードのみ)
 
@@ -284,7 +284,7 @@ while ループ脱出後にメインが以下のプロンプトでサブエー�
 > 3. 判断保留（`deferred`）と bot 誤指摘（`rejected`）→ 理由を添えて入れ、**`"resolve": true`** を付ける
 >    （スレッドを open のまま残さない）
 >
-> 雛形の総評だけの指摘（`finding_id` を持つ要素）も同じ規則で振り分け、`finding_id` ごと結果ファイルへ入れる。
+> テンプレートの総評だけの指摘（`finding_id` を持つ要素）も同じ規則で振り分け、`finding_id` ごと結果ファイルへ入れる。
 >
 > **GitHub と git へ書かない。** 返信・決着・送信は、メインがこの結果ファイルを読んで
 > 共通ライブラリの 1 行（`result_posts.py fix`）で行う。
@@ -292,9 +292,9 @@ while ループ脱出後にメインが以下のプロンプトでサブエー�
 > **修正をコミットした場合は、対象リポジトリの検証を 1 度通すこと。** 何を実行するかは
 > 対象リポジトリを見て決める。**コマンドを推測して組み立てない。**
 >
-> 対象リポジトリに `.ndf/project.json` の `test` があれば、駆動（`drive.py`）がプロンプトに宣言の全体テスト
+> 対象リポジトリに `.ndf/project.json` の `test` があれば、駆動（`drive.py`）がプロンプトに設定の全体テスト
 > （テストと静的解析の両方の suite の `command`）を並べる。そのときは並んだコマンドを順に実行し、下の探し方は使わない。起動の引数 `--verify-command`（実行検証 Step 2.5 の例外リスト）は、ここでは使わない。
-> 宣言が無いときと、テストの無い宣言（`strategy` を書かず、どの suite も `command` と `scope_command` を持たない。`{"suites": []}` を含む）のときだけ次の手順で探す。
+> 設定が無いときと、テストの無い設定（`strategy` を書かず、どの suite も `command` と `scope_command` を持たない。`{"suites": []}` を含む）のときだけ次の手順で探す。
 >
 > 1. 実行手段を探す。`Makefile` の `test` / `lint` / `check` ターゲット、`package.json` の
 >    `scripts`、`pyproject.toml` の `[tool.pytest.ini_options]`、`composer.json` の
@@ -389,7 +389,7 @@ sweep 中にメインが落ちても、`sweep-pr<STATE_PR>-result.json` が無�
 - ラウンドサマリ表
 - 基準外の見送りの件数（`waived`。返信を付けて閉じたもので、残 deferred の一覧には入れない）
 - 残 deferred nit 一覧
-- レビューの重点の宣言が読めなかったときは、その理由（基準 1・2・4 だけで続けた）
+- レビューの重点の設定が読めなかったときは、その理由（基準 1・2・4 だけで続けた）
 
 `verify-sweep` を通していれば、`report` の出力に「## 最終スイープ」の節が入り、
 GitHub 側で数え直した残件数と、0 件にできなかった場合の理由が含まれる。
@@ -401,31 +401,31 @@ GitHub 側で数え直した残件数と、0 件にできなかった場合の�
 > deferred は「対応見送りの記録」として report に **参考列挙**するに留める（再対応が要るものが
 > あればユーザがその場で指示できる）。`remaining_open > 0` の場合のみ、残った理由を添えて報告する。
 
-## レビューの宣言（`.ndf/review.json`）
+## レビューの設定（`.ndf/review.json`）
 
 PR の head の worktree の `.ndf/review.json` を、`init`（新規は worktree を用意した後、再開は同期した後）が読む。
-読み取りと検査の正本は `scripts/lib/review_criteria.py`（`load_review_decl`）で、`/ndf:fix` も同じ部品で読む。
+読み取りと検査の SSOT は `scripts/lib/review_criteria.py`（`load_review_decl`）で、`/ndf:fix` も同じ部品で読む。
 
-| 鍵 | 型 | 規則 |
+| キー | 型 | 規則 |
 | --- | --- | --- |
-| `version` | 数 | `1`・`2`・`3`。`1` は `focus` だけを読み、ほかの鍵を無視する。`2` はプロファイルを `profile` に 1 つ、`3` は `profiles` に名前つきで複数書く。ほかの値は宣言全体が読めない（重点を `unreadable`、プロファイルなし） |
+| `version` | 数 | `1`・`2`・`3`。`1` は `focus` だけを読み、ほかのキーを無視する。`2` はプロファイルを `profile` に 1 つ、`3` は `profiles` に名前つきで複数書く。ほかの値は設定全体が読めない（重点を `unreadable`、プロファイルなし） |
 | `focus` | 文字列の配列 | 重点の名前（基準 3）。`version: 1` では必須、`version: 2`・`3` では任意で、`3` ではどのプロファイルを選んでも効く。形が違えば重点だけが `unreadable` |
-| `profile` | オブジェクト | `version: 2` だけで読むレビューのプロファイル。無いか `{}` ならプロファイルなし。下の鍵のどれか 1 つでも形が違う・知らない鍵があれば、プロファイル全体を捨てて既定の基準で続け、理由を標準エラーと `report` に出す（重点はそのまま効く） |
+| `profile` | オブジェクト | `version: 2` だけで読むレビューのプロファイル。無いか `{}` ならプロファイルなし。下のキーのどれか 1 つでも形が違う・知らないキーがあれば、プロファイル全体を捨てて既定の基準で続け、理由を標準エラーと `report` に出す（重点はそのまま効く） |
 | `profile.criteria` | オブジェクト（番号の文字列 → 文） | 1 件以上。既定の基準 1・4 と置き換わる。番号は 1 以上の整数で、`2`（外せない基準: 秘密・認証認可・利用者のデータ・戻せない操作）と `3`（重点）は使えない。基準 2 と、重点があるときの基準 3 はそのまま残る |
 | `profile.not_written` | 文字列の配列 | 「書かないもの」。`[]` なら行を出さない |
 | `profile.waive_kinds` | オブジェクト（種類 → 名前） | 1 件以上。種類は英小文字・数字・`_`。既定の見送りの種類と置き換わる |
-| `profile.reply` | 文字列 | 見送りの返信の雛形。`{inner}` をちょうど 1 回含み、そこへ見送りの種類の名前が入る。重点の句は足さない |
+| `profile.reply` | 文字列 | 見送りの返信のテンプレート。`{inner}` をちょうど 1 回含み、そこへ見送りの種類の名前が入る。重点の句は足さない |
 | `profile.categories` | オブジェクト（名前 → `{paths, instructions}`） | `paths` は glob の配列で、`.ndf/pace.json` の `areas` と同じ規則（`*` と `?` は `/` をまたがず、`**` はまたぐ）。当たった分類の名前が `auto_review_categories` に、`instructions` が自動レビュー観点に入る |
 | `profile.replace_auto_categories` | 真偽値 | 真なら既定の自動カテゴリの観点を渡さない（外部の調査の確認の観点は外さない。[08-review-categories.md](08-review-categories.md) の `code`）。既定は偽 |
 | `profiles` | 配列 | `version: 3` だけで読む、名前つきのプロファイルの列。無いか `[]` ならどれも選ばない。`version: 3` で `profile` を書くと壊れている |
-| `profiles[].name` | 文字列 | 必須。英小文字・数字・`_`。宣言の中で重複しない |
+| `profiles[].name` | 文字列 | 必須。英小文字・数字・`_`。設定の中で重複しない |
 | `profiles[].paths` | 文字列の配列 | 任意。空でない glob の配列で、`profile.categories` の `paths` と同じ規則。書かないプロファイルはどの PR にも当たり、高々 1 つを末尾に置く |
-| `profiles[]` のほかの鍵 | — | `profile` の鍵（`criteria`・`not_written`・`waive_kinds`・`reply`・`categories`・`replace_auto_categories`）と同じ形と規則。知らない鍵があれば壊れている |
-| `criteria`（最上位） | オブジェクト（番号の文字列 → 文） | `version: 3` だけで読む、宣言の側で外せない基準。任意。形は `profile.criteria` と同じ（`2` と `3` は使えない）。選んだプロファイルの基準（選ばなかったとき・`criteria` を書かないプロファイルでは既定の 1・4）に足す。番号が、どれかのプロファイルの `criteria` か、既定の 1・4 が効きうるとき（`criteria` を書かないプロファイルがある・`paths` を持たないプロファイルが無い）のその番号と重なれば壊れている |
+| `profiles[]` のほかのキー | — | `profile` のキー（`criteria`・`not_written`・`waive_kinds`・`reply`・`categories`・`replace_auto_categories`）と同じ形と規則。知らないキーがあれば壊れている |
+| `criteria`（最上位） | オブジェクト（番号の文字列 → 文） | `version: 3` だけで読む、設定の側で外せない基準。任意。形は `profile.criteria` と同じ（`2` と `3` は使えない）。選んだプロファイルの基準（選ばなかったとき・`criteria` を書かないプロファイルでは既定の 1・4）に足す。番号が、どれかのプロファイルの `criteria` か、既定の 1・4 が効きうるとき（`criteria` を書かないプロファイルがある・`paths` を持たないプロファイルが無い）のその番号と重なれば壊れている |
 | `not_written`（最上位） | 文字列の配列 | `version: 3` だけで読む。任意。選んだプロファイルの書かないもの（書かなければ既定）の前に足し、同じ文は 1 つにする |
 
 状態ファイルの `review_criteria` には、プロファイルがあるときだけ `profile_status`（`declared` / `unreadable`）を置き、
-`declared` では `profile`（検査を通ったプロファイルの写し。宣言の `profile` と同じ形）を、`unreadable` では
+`declared` では `profile`（検査を通ったプロファイルの写し。設定の `profile` と同じ形）を、`unreadable` では
 `profile_error`（理由）を持つ。プロファイルが無ければこの 3 項目を置かない。`init` の出力の
 `REVIEW_PROFILE=<declared|none|unreadable>` に同じ値が出る。`fix-steps.py context` は `profile` を振り分けの JSON の
 `review_profile` へ写し、`finalize` はその写しで振り分けを検査して見送りの返信を組む。
@@ -440,23 +440,23 @@ PR の head の worktree の `.ndf/review.json` を、`init`（新規は worktre
 選んだ名前は状態ファイルの `review_criteria.profile_name` と `init` の出力の `REVIEW_PROFILE_NAME=<名前>` に出る。
 `profile_name` は `version: 3` のときだけ置き、選ばなかった・壊れていたときは空文字。`REVIEW_PROFILE_NAME=` は
 `version: 3` で選んだときだけ値を持ち、ほかは空。ほかのプロファイルにも当たったときだけ、その名前を
-`review_criteria.profile_others`（宣言の順の配列）に置く。名前と `paths` だけを書いたプロファイルを選ぶと、名前だけが残り、
+`review_criteria.profile_others`（設定の順の配列）に置く。名前と `paths` だけを書いたプロファイルを選ぶと、名前だけが残り、
 プロファイルの項目は既定のまま（`profile_status` を置かない）。
 
-最上位の `criteria`・`not_written` を書いた宣言では、選んだプロファイル（選ばなかったときは既定の組）にそれを足した組が
+最上位の `criteria`・`not_written` を書いた設定では、選んだプロファイル（選ばなかったときは既定の組）にそれを足した組が
 効き、状態ファイルの `profile` と振り分けの JSON の `review_profile` にも足した組が写る（`profile_status: declared`）。
 どの PR にも効かせたい基準は最上位に 1 か所だけ書き、プロファイルごとに写さない。
 
 `report` の要約は、`profile_name` があるときだけ `## レビューのプロファイル: <名前>`（空文字なら `既定`）の行を出し、
 `profile_others` があれば同じ行に `（ほかに <名前>, … にも当たった。先に書いた <名前> を使った）` を足す。
 
-状態ファイルが無いまま `/ndf:fix` を単独で使うときは、`fix-steps.py context` が宣言を読み、`version: 3` のときだけ
+状態ファイルが無いまま `/ndf:fix` を単独で使うときは、`fix-steps.py context` が設定を読み、`version: 3` のときだけ
 `gh api repos/<repo>/pulls/<PR>/files --paginate` で変更ファイルを取って同じ規則で選ぶ。取れなければ理由を標準エラーへ出し、
 変更ファイルなしで選ぶ（`paths` を持たないプロファイルか、既定）。`review_criteria.py reviewer|fixer` は
 `--changed-file <パス>`（繰り返し可）で選ぶ。
 
-書いた鍵だけが既定を差し替え、書かない鍵は既定のまま。プロファイルがあると、修正担当への節の見送りの句は
-「対象のファイルを変えずに」になる。収束の判定・投稿の形・ラウンドの段・`review_kind` はプロファイルで変わらない。
+書いたキーだけが既定を差し替え、書かないキーは既定のまま。プロファイルがあると、修正担当への節の見送りの句は
+「対象のファイルを変えずに」になる。収束の判定・投稿の形・ラウンドのステップ・`review_kind` はプロファイルで変わらない。
 
 ```json
 {
@@ -477,7 +477,7 @@ PR の head の worktree の `.ndf/review.json` を、`init`（新規は worktre
 ```json
 {
   "version": 3,
-  "criteria": {"9": "取得したデータとその分析の中身を、公開の置き場や外部の API へ出す"},
+  "criteria": {"9": "取得したデータとその分析の中身を、公開の保存先や外部の API へ出す"},
   "profiles": [
     {
       "name": "manuscript",
@@ -496,5 +496,5 @@ PR の head の worktree の `.ndf/review.json` を、`init`（新規は worktre
 }
 ```
 
-再開の前に宣言を書き換えると、`init` が保存した `changed_files` からプロファイルを選び直し、観点と指摘の基準を組み直して、
-保存した値と違うときだけ状態ファイルを書き直す。再開では変更ファイルを GitHub から取り直さない。次のラウンドから新しい宣言が効く。
+再開の前に設定を書き換えると、`init` が保存した `changed_files` からプロファイルを選び直し、観点と指摘の基準を組み直して、
+保存した値と違うときだけ状態ファイルを書き直す。再開では変更ファイルを GitHub から取り直さない。次のラウンドから新しい設定が効く。

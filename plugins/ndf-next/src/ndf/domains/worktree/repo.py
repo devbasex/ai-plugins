@@ -1,8 +1,8 @@
 """リポジトリの中の位置と worktree の一覧（git は `adapters.git.Git` を通して読む）。
 
 - `locate`: メインディレクトリと、今の位置が worktree の中か。サブモジュールの中は通常のリポジトリとして扱う
-- `dev_worktrees`: `git worktree list` の一覧（`adapters.git.Git.worktrees`）を置き場 `.worktrees/` の下だけに絞る
-  （置き場の名前は事実の表 `locations` の `worktrees` から引く）
+- `dev_worktrees`: `git worktree list` の一覧（`adapters.git.Git.worktrees`）を保存先 `.worktrees/` の下だけに絞る
+  （保存先の名前は事実の表 `locations` の `worktrees` から引く）
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ def worktrees_dir(main_dir: Path) -> Path:
 
 
 def worktree_path(main_dir: Path, branch: str) -> Path:
-    """ブランチの worktree の置き場 `<メインディレクトリ>/.worktrees/<ブランチ>`。"""
+    """ブランチの worktree の保存先 `<メインディレクトリ>/.worktrees/<ブランチ>`。"""
     return worktrees_dir(main_dir) / branch
 
 
@@ -57,7 +57,7 @@ Worktree = WorktreeEntry
 
 
 def dev_worktrees(main_dir: Path, items: Iterable[Worktree]) -> list[Worktree]:
-    """置き場 `.worktrees/` の下（その下の `.ndf/` の作業用を除く）の worktree。"""
+    """保存先 `.worktrees/` の下（その下の `.ndf/` の作業用を除く）の worktree。"""
     root = os.path.realpath(worktrees_dir(main_dir))
     scratch = os.path.join(root, identity.FIXED_WORDS["ndf_settings_dir"])
     picked = []
@@ -76,12 +76,12 @@ def default_branch(git: Git) -> Optional[str]:
 
 
 def base_branch(git: Git, decl: Optional[ndf_settings.NdfSettings]) -> Optional[str]:
-    """ベースブランチ: 宣言の `base_branch`、無ければ origin の既定ブランチ。"""
+    """ベースブランチ: 設定の `base_branch`、無ければ origin の既定ブランチ。"""
     return decl.base_branch if decl is not None and decl.base_branch else default_branch(git)
 
 
 def declared_flow(decl: Optional[ndf_settings.NdfSettings]) -> Optional[dict[str, Any]]:
-    """今の宣言の取り込み方と本番チャネル（開始時の記録の無いスプリントが使う）。"""
+    """今の設定のリリース方式と本番チャネル（開始時の記録の無いスプリントが使う）。"""
     if decl is None:
         return None
     flow = decl.branch_flow

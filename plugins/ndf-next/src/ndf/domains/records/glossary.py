@@ -1,7 +1,7 @@
 """用語集の文書を書く口（`render`・`render --check`）と、意味の説明の検査の口（N8a・#1616・fix:3190）。
 
-置き場は用語集の設定（表 ndf-files の glossary の行）から読む。宣言の `document` は索引のパス、`document_dir` は
-コンテキストごとのファイルの置き場、`max_lines` は 1 ファイルの上限の行数。無ければ既定を使う。
+保存先は用語集の設定（表 ndf-files の glossary の行）から読む。設定の `document` は索引のパス、`document_dir` は
+コンテキストごとのファイルの保存先、`max_lines` は 1 ファイルの上限の行数。無ければ既定を使う。
 """
 
 from __future__ import annotations
@@ -12,12 +12,12 @@ from typing import Any, Optional
 from ndf.domains.records import files, jsonfile
 from ndf.domains.records import glossary_decide as gd
 
-# 宣言に max_lines が無いときの 1 ファイルの上限の行数（document_dir が無ければ索引のパスから拡張子を除いたディレクトリ）
+# 設定に max_lines が無いときの 1 ファイルの上限の行数（document_dir が無ければ索引のパスから拡張子を除いたディレクトリ）
 DEFAULT_MAX_LINES = 500
 
 
 class GlossaryError(ValueError):
-    """宣言か正本が読めない。"""
+    """設定か SSOT が読めない。"""
 
 
 def _read_json(path: Path) -> Any:
@@ -28,7 +28,7 @@ def _read_json(path: Path) -> Any:
 
 
 def layout(root: Path) -> gd.Layout:
-    """宣言から置き場を求める。宣言が無い・source か document が無ければ `GlossaryError`。"""
+    """設定から保存先を求める。設定が無い・source か document が無ければ `GlossaryError`。"""
     raw = _read_json(files.path(root, "glossary"))
     if not isinstance(raw, dict) or not isinstance(raw.get("source"), str) or not isinstance(raw.get("document"), str):
         raise GlossaryError("用語集の設定に source と document が無い")
@@ -40,7 +40,7 @@ def layout(root: Path) -> gd.Layout:
 
 
 def load(root: Path, lay: gd.Layout) -> dict[str, Any]:
-    """正本を読む。contexts と terms の配列が無ければ `GlossaryError`。"""
+    """SSOT を読む。contexts と terms の配列が無ければ `GlossaryError`。"""
     g = _read_json(root / lay.source)
     if not isinstance(g, dict) or not isinstance(g.get("contexts"), list) or not isinstance(g.get("terms"), list):
         raise GlossaryError(f"{lay.source} に contexts と terms の配列が無い")

@@ -21,14 +21,14 @@ _LOOP_NODES = frozenset({"while_statement", "until_statement", "for_statement", 
 # 語として読む節（引用を外して読む）
 _WORD_NODES = frozenset({"word", "string", "raw_string", "number", "concatenation", "simple_expansion", "expansion", "ansi_c_string"})
 
-# 本文で人の答えを待つ言い回し（AskUserQuestion を使わずに待った応答）
+# 本文で人の回答を待つ言い回し（AskUserQuestion を使わずに待った応答）
 _WAIT_RE = re.compile(
     r"(よろしいですか|いかがですか|どうしますか|どちらにしますか|選んでください|お知らせください|教えてください|"
-    r"承認をお願いします|ご確認ください|ご判断ください|指示をください|お待ちしています|返答を待ちます|答えを待ちます)"
+    r"承認をお願いします|ご確認ください|ご判断ください|指示をください|お待ちしています|返答を待ちます|回答を待ちます)"
     r"|[?？]\s*$"
 )
 # 別の場所（ほかのセッション・レーン・計画）の待ちを報告する言い回し（#2324）
-_ELSEWHERE_RE = re.compile(r"(別の|ほかの|他の)?(セッション|レーン|計画|オーガナイザー)[^\n]{0,40}(承認|答え|判断)[^\n]{0,10}待")
+_ELSEWHERE_RE = re.compile(r"(別の|ほかの|他の)?(セッション|レーン|計画|オーガナイザー)[^\n]{0,40}(承認|回答|判断)[^\n]{0,10}待")
 # 本文の待ちを見る末尾の行数
 _TAIL_LINES = 4
 
@@ -115,9 +115,9 @@ def read_tail(path: str, size: int) -> str:
 
 
 def classify_reply(text: str, code_lines: Optional[list[bool]] = None) -> str:
-    """最後の応答の種類: `none`（空）・`elsewhere_wait`（別の場所の待ちの報告）・`prose_wait`（本文で人の答えを待つ）・`report`。
+    """最後の応答の種類: `none`（空）・`elsewhere_wait`（別の場所の待ちの報告）・`prose_wait`（本文で人の回答を待つ）・`report`。
 
-    `code_lines` は行ごとのコードブロックの印（`ndf.adapters.markdown.code_lines`）。コードの中の行は見ない。
+    `code_lines` は行ごとのコードブロックのマーカー（`ndf.adapters.markdown.code_lines`）。コードの中の行は見ない。
     """
     lines = text.splitlines()
     flags = code_lines if code_lines is not None and len(code_lines) == len(lines) else [False] * len(lines)
@@ -182,7 +182,7 @@ class HookContext:
         return value if isinstance(value, str) else ""
 
     def missing(self, keys: list[str]) -> list[str]:
-        """入力に無い鍵。"""
+        """入力に無いキー。"""
         return [k for k in keys if k not in self.payload]
 
     @cached_property

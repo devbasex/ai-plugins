@@ -1,4 +1,4 @@
-"""試走（T2 #3411）の静的な確かめ。対応表の行ごとに、ndf-next だけで機能が届くかを置き場と本文から判定する。
+"""試走（T2 #3411）の静的な確かめ。対応表の行ごとに、ndf-next だけで機能が届くかを保存先と本文から判定する。
 
 ndf-next の Skill・エージェント・hook の本文が旧いプラグインのスクリプト（対応表の `now`）をまだ呼んでいれば、その行は
 ndf-next だけでは動かない（`failed`）。呼んでいなくても、試走のスプリントがその行まで届かなかった行は `not_run` にする。
@@ -28,9 +28,9 @@ from ndf.parity import table
 
 ROOT = Path(__file__).resolve().parents[4]
 REPO = ROOT.parents[1]
-# 旧いスクリプトを呼ぶ本文を探す置き場は、本文を移した子（Skill・エージェント・hook・配る表）の locations から引く
+# 旧いスクリプトを呼ぶ本文を探す保存先は、本文を移した子（Skill・エージェント・hook・配る表）の locations から引く
 TEXT_CHILDREN = ("S1a", "S1b")
-# 試走の記録の置き場（対応表のディレクトリからの相対。中の `<日付>.json` を名前の順に読む）
+# 試走の記録の保存先（対応表のディレクトリからの相対。中の `<日付>.json` を名前の順に読む）
 RECORDS = "trial"
 ROW_PREFIX = '    {"id": '
 STALLED = (
@@ -39,7 +39,7 @@ STALLED = (
 
 
 def texts(locations: Mapping[str, Any], root: Path = ROOT) -> dict[str, str]:
-    """本文の置き場の文字のファイル（プラグインの根からの相対 → 中身）。Python のコードは本文に数えない。"""
+    """本文の保存先の文字のファイル（プラグインの根からの相対 → 中身）。Python のコードは本文に数えない。"""
     found = {}
     for location in sorted({p for child in TEXT_CHILDREN for p in locations[child]}):
         for path in sorted((root / location).rglob("*")):
@@ -121,7 +121,7 @@ def _missing_locations(row: Mapping[str, Any], locations: Mapping[str, Any], roo
 
 
 def _skill_calls(under: str, calls: Mapping[str, set[str]], scripts: Mapping[str, Mapping[str, Any]]) -> list[str]:
-    """`under` の下の本文が呼ぶ旧いスクリプトを「名前（行き先）」で並べる。"""
+    """`under` の下の本文が呼ぶ旧いスクリプトを「名前（移行先）」で並べる。"""
     nows = {now for p, called in calls.items() if p.startswith(under) for now in called}
     labels = sorted((_label(now, scripts), scripts[now]) for now in nows)
     return [f"{label}（{row['to'] if 'to' in row else '作らない'}）" for label, row in labels]
@@ -134,11 +134,11 @@ def _by_path(
     name = row["id"].split(":", 1)[1]
     under = f"skills/{name}/" if row["kind"] == "skill" else f"agents/{name}.md"
     if not (root / under).exists():
-        return _failed(f"ndf-next に {under} が無い（行き先 {row['to']}）")
+        return _failed(f"ndf-next に {under} が無い（移行先 {row['to']}）")
     calls = _skill_calls(under, calls, scripts)
     if calls:
         return _failed(
-            f"本文が旧いプラグインのスクリプトを呼ぶ: {'・'.join(calls)}。括弧は新しいエントリポイントの副命令へ置き換える行き先の子"
+            f"本文が旧いプラグインのスクリプトを呼ぶ: {'・'.join(calls)}。括弧は新しいエントリポイントのサブコマンドへ置き換える移行先の子"
         )
     return None
 
@@ -149,7 +149,7 @@ def _by_script(row: Mapping[str, Any], calls: Mapping[str, set[str]]) -> dict[st
     if not who:
         return None
     to = row.get("to")
-    where = f"行き先 {to} が新しいエントリポイントの副命令に置き換えていない" if to else "作らない行なのに呼び手が残る"
+    where = f"移行先 {to} が新しいエントリポイントのサブコマンドに置き換えていない" if to else "作らない行なのに呼び手が残る"
     return _failed(f"ndf-next の {len(who)} ファイルがまだ旧い {row['now']} を呼ぶ（例 {who[0]}）。{where}")
 
 
@@ -158,7 +158,7 @@ def _by_workflow(row: Mapping[str, Any], repo: Path, scripts: Mapping[str, Mappi
     called = resolve(row["now"], (repo / row["now"]).read_text(encoding="utf-8"), scripts)
     named = sorted(_label(now, scripts) for now in called)
     if named:
-        return _failed(f"{row['now']} が旧いプラグインのスクリプトを直に呼ぶ: {'・'.join(named)}（行き先 {row['to']}）")
+        return _failed(f"{row['now']} が旧いプラグインのスクリプトを直に呼ぶ: {'・'.join(named)}（移行先 {row['to']}）")
     return None
 
 
@@ -170,7 +170,7 @@ def judge_row(row: Mapping[str, Any], ctx: Mapping[str, Any]) -> dict[str, str]:
     """
     missing = _missing_locations(row, ctx["locations"], ctx["root"])
     if missing:
-        return _failed(f"行き先 {row['to']} の置き場が無い: {'・'.join(missing)}")
+        return _failed(f"移行先 {row['to']} の保存先が無い: {'・'.join(missing)}")
     kind = row["kind"]
     found = None
     if kind in ("skill", "agent"):

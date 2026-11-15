@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "summary": "進行表の状態・事象の種類と書き手の表・承認ゲートの語・ブランチの接頭辞。事象を追記する関数（ndf.progress.store.append_events）が、書く前にこの表で書き手と遷移を確かめる",
+  "summary": "ステートマシンの状態・事象の種類と書き手の表・承認ゲートの語・ブランチの接頭辞。事象を追記する関数（ndf.progress.store.append_events）が、書く前にこの表で書き手と遷移を確かめる",
   "row_states": {
     "sprint": ["pending", "running", "finished", "failed", "disabled", "cancelled"],
     "lane": ["pending", "running", "completed", "cancelled"]
@@ -21,10 +21,10 @@
     "completed": "完了"
   },
   "actors": {
-    "conductor": "レーンの conductor（進行表のスクリプト ndf progress を打つ）",
-    "workflow": "進行表のワークフロー（耐久ワークフロー。工程を流す）",
+    "conductor": "レーンの conductor（ステートマシンのスクリプト ndf progress を打つ）",
+    "workflow": "ステートマシンのワークフロー（耐久ワークフロー。工程を流す）",
     "organizer": "オーガナイザー",
-    "durable": "計画の耐久ワークフロー（レーンを起こす）"
+    "durable": "計画の耐久ワークフロー（レーンを起動する）"
   },
   "events": [
     {"level": "sprint", "kind": "created", "actors": ["conductor"], "scope": "row", "from": ["new"], "state": "pending"},

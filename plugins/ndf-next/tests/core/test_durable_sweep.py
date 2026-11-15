@@ -1,4 +1,4 @@
-"""鍵ごとのファイルの検査・退避・片付けと、待ちの一覧（SQLite。決定 82・83・86・I6・I8）。"""
+"""キーごとのファイルの検査・退避・片付けと、待ちの一覧（SQLite。決定 82・83・86・I6・I8）。"""
 
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ def _key_files(root: Path, key: str) -> list[str]:
 
 
 def _finish_without_retire(root: Path, key: str) -> None:
-    """耐久ワークフローを流し終え、退避の前に抜けた（移す前にプロセスが落ちた）鍵のファイルを作る。"""
+    """耐久ワークフローを流し終え、退避の前に抜けた（移す前にプロセスが落ちた）キーのファイルを作る。"""
     durable.prepare_store(root)
     with durable.run_lock(root, key):
         durable.launch(durable.run_url(root, key), key)
@@ -77,7 +77,7 @@ def test_pending_lists_only_waiting_runs(root):
 
 
 def test_sweep_skips_a_key_whose_lock_is_held_and_retires_it_later(root):
-    """I6: 過去の実行が終わった鍵でも、`run_lock` を持つプロセスがいる間は移さない。"""
+    """I6: 過去の実行が終わったキーでも、`run_lock` を持つプロセスがいる間は移さない。"""
     _finish_without_retire(root, "reopened")
     with durable.run_lock(root, "reopened"):
         held = durable.sweep(root, _later(hours=25))
@@ -148,11 +148,11 @@ def test_broken_key_file_is_moved_to_broken_and_stops(root):
     assert _key_files(root, "bad") == []
 
 
-# --- 現状固定: 鍵ごとのファイルの走査（_sweep_live） --------------------------------------
+# --- 現状固定: キーごとのファイルの走査（_sweep_live） --------------------------------------
 
 
 def test_sweep_retires_finished_keys_in_name_order_and_reports_unreadable_files(root):
-    """現状固定: 読めない鍵のファイルは warnings に載せて残し、ほかの終わった鍵は名前の順に移す。"""
+    """現状固定: 読めないキーのファイルは warnings に載せて残し、ほかの終わったキーは名前の順に移す。"""
     _finish_without_retire(root, "b-done")
     _finish_without_retire(root, "a-done")
     bad = root / "dbos" / "run-unreadable.sqlite"
@@ -166,13 +166,13 @@ def test_sweep_retires_finished_keys_in_name_order_and_reports_unreadable_files(
     assert all(p.parent == root / "dbos" / "retired" for p in result.retired)
     assert len(result.warnings) == 1 and result.warnings[0].startswith(f"{bad}: ")
     assert bad.read_bytes() == b"this is not a database" * 100
-    # 読めないファイルの鍵は、走査が取った `.lock` が残る
+    # 読めないファイルのキーは、走査が取った `.lock` が残る
     assert (root / "dbos" / "run-unreadable.lock").exists()
     assert _key_files(root, "a-done") == [] and _key_files(root, "b-done") == []
 
 
 def test_sweep_removes_marks_and_locks_left_without_a_key_file(root):
-    """現状固定: 本体の無い `.checked` と、だれも持たない `.lock` を消し、本体のある鍵の目印とロックは残す。"""
+    """現状固定: 本体の無い `.checked` と、だれも持たない `.lock` を消し、本体のあるキーの目印とロックは残す。"""
     _run(root, "waits", "wait")
     dbos = root / "dbos"
     name = durable.run_name("waits")
@@ -209,7 +209,7 @@ def _fields(record: durable.RunRecord) -> tuple:
 
 
 def test_workflows_reads_records_of_the_key_with_their_fields(root):
-    """現状固定: `workflows` は鍵の名前・状態・親・アプリの版と、UTC の更新時刻を持つ記録を返す。"""
+    """現状固定: `workflows` はキーの名前・状態・親・アプリのバージョンと、UTC の更新時刻を持つ記録を返す。"""
     _finish_without_retire(root, "fields")
     url = durable.run_url(root, "fields")
     name = durable.run_name("fields")
@@ -240,7 +240,7 @@ def test_records_of_a_child_carry_the_parent_and_pending_lists_only_the_waiting_
 
 
 def test_cancel_before_launch_cancels_the_run_and_its_waiting_child(root):
-    """現状固定: DBOS を起こさずに、親と待ちの子をまとめて取り消す。"""
+    """現状固定: DBOS を起動せずに、親と待ちの子をまとめて取り消す。"""
     _run(root, "cancel", "child-wait")
     url = durable.run_url(root, "cancel")
 
@@ -318,7 +318,7 @@ def test_retiring_an_old_store_counts_its_pending_runs(root):
 
 
 def test_run_lock_reopens_when_the_lock_file_was_removed(root):
-    """`.lock` を消した後に同じ鍵で 2 つ取ると、1 つ目が抜けるまで 2 つ目が待つ（inode の確かめ）。"""
+    """`.lock` を消した後に同じキーで 2 つ取ると、1 つ目が抜けるまで 2 つ目が待つ（inode の確かめ）。"""
     lock = root / "dbos" / f"{durable.run_name('k')}.lock"
     got1, got2, release1 = threading.Event(), threading.Event(), threading.Event()
 

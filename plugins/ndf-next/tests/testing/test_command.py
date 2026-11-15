@@ -24,7 +24,7 @@ SRC_DIR = Path(__file__).resolve().parents[2] / "src"
 
 @pytest.fixture
 def project(tmp_path):
-    """宣言の runner が `fakerun` のプロジェクト。`fakerun` は始まりと終わりを記録へ足して少し眠る。"""
+    """設定の runner が `fakerun` のプロジェクト。`fakerun` は始まりと終わりを記録へ足して少し眠る。"""
     root = tmp_path / "project"
     (root / ".ndf").mkdir(parents=True)
     suites = [{"name": "fake", "runner": "fakerun", "command": "fakerun ."}]
@@ -44,7 +44,7 @@ def project(tmp_path):
 
 @pytest.fixture
 def slots_dir(forbid_real_state):
-    """枠の置き場。forbid_real_state が `NDF_TEST_SLOTS_DIR` をテストの一時ディレクトリへ向けている。"""
+    """スロットの保存先。forbid_real_state が `NDF_TEST_SLOTS_DIR` をテストの一時ディレクトリへ向けている。"""
     return Path(os.environ[slots.SLOTS_DIR_ENV])
 
 
@@ -54,7 +54,7 @@ def _at(seconds: float) -> str:
 
 
 def _slot_held_elsewhere(root: Path, directory: Path):
-    """別の実行が枠を 1 つ埋めている状態（上限 1 本の枠を持ち続ける）。"""
+    """別の実行がスロットを 1 つ埋めている状態（上限 1 本のスロットを持ち続ける）。"""
     holding = Limits(max_runs=1, memory_floor_mib=1, wait_limit_seconds=60)
     return slots.gate(
         "fakerun .",
@@ -64,14 +64,14 @@ def _slot_held_elsewhere(root: Path, directory: Path):
 
 
 def _result(out: str, code: int) -> dict:
-    """標準出力の 1 行の結果 JSON。契約（形と終了コードの対応）に合うことも確かめる。"""
+    """標準出力の 1 行の結果 JSON。コントラクト（形と終了コードの対応）に合うことも確かめる。"""
     obj = json.loads(out)
     assert result.errors(obj, code) == []
     return obj
 
 
 def _ndf(args, cwd, bin_dir=None, log=None, **extra):
-    # CI（GITHUB_ACTIONS）と入れ子の印は枠を飛ばす（決定 12・I3）。手元の振る舞いを確かめるので外す
+    # CI（GITHUB_ACTIONS）と入れ子のマーカーはスロットを飛ばす（決定 12・I3）。手元の振る舞いを確かめるので外す
     env = {k: v for k, v in os.environ.items() if k not in ("GITHUB_ACTIONS", slots.HELD_ENV)}
     env.update({"PYTHONPATH": str(SRC_DIR), **extra})
     if bin_dir:
@@ -147,7 +147,7 @@ def test_report_reads_the_records(tmp_path, slots_dir):
 
 
 def test_report_lists_the_old_state_locations_it_retired(monkeypatch, tmp_path, capsys):
-    # 枠の置き場のために状態の置き場を用意して旧い置き場を退避したら、元と先を items に載せる（エントリポイントを通らずに呼んだとき）
+    # スロットの保存先のために状態の保存先を用意して旧い保存先を退避したら、元と先を items に載せる（エントリポイントを通らずに呼んだとき）
     state_home = tmp_path / "xdg-state"
     old = state_home / identity.load().name
     old.mkdir(parents=True)
@@ -163,7 +163,7 @@ def test_report_lists_the_old_state_locations_it_retired(monkeypatch, tmp_path, 
 
 
 def test_run_writes_the_old_state_locations_it_retired(project, tmp_path):
-    # エントリポイント（`ndf test-slot run`）を通すと、エントリポイントが副命令の前に退避し、元と先を標準エラーへ書く。標準出力は子のもののまま（I7）
+    # エントリポイント（`ndf test-slot run`）を通すと、エントリポイントがサブコマンドの前に退避し、元と先を標準エラーへ書く。標準出力は子のもののまま（I7）
     root, bin_dir, log = project
     state_home = tmp_path / "xdg-state"
     old = state_home / identity.load().name
@@ -207,7 +207,7 @@ def test_report_refuses_a_wrong_period(tmp_path):
     assert _result(out, proc.returncode)["cause"]["kind"] == "invalid"
 
 
-# --- 現状固定テスト（_run の経路: 待ちの上限の上書き・諦め・置き場を使えない・シグナル・CI・入力の誤り） ---
+# --- 現状固定テスト（_run の経路: 待ちの上限の上書き・諦め・保存先を使えない・シグナル・CI・入力の誤り） ---
 
 
 def test_wait_limit_overrides_the_setting_and_gives_up_with_a_stopped_result(project, slots_dir):
@@ -216,7 +216,7 @@ def test_wait_limit_overrides_the_setting_and_gives_up_with_a_stopped_result(pro
     with _slot_held_elsewhere(root, directory):
         proc = _ndf(["run", "--wait-limit", "1", "--", "fakerun ."], root, bin_dir, log)
         out, _ = proc.communicate()
-    # 待ちの上限で諦めたのは wait_timeout（枠を持つ実行は動いている）。記録の語は instance に残す
+    # 待ちの上限で諦めたのは wait_timeout（スロットを持つ実行は動いている）。記録の語は instance に残す
     assert proc.returncode == causes.exit_code("wait_timeout")
     got = _result(out, proc.returncode)
     assert got["status"] == "stopped"
@@ -224,7 +224,7 @@ def test_wait_limit_overrides_the_setting_and_gives_up_with_a_stopped_result(pro
     assert got["metrics"]["available_mib"] is None
     assert got["metrics"]["waited_seconds"] >= 1
     assert "諦めた" in got["summary"]
-    # 契約の wait_timeout は同じ待ちを next に載せる
+    # コントラクトの wait_timeout は同じ待ちを next に載せる
     assert got["next"] == {"argv": ["ndf", "test-slot", "run", "--wait-limit", "1", "--", "fakerun ."]}
     assert not log.exists()
     rows = records.read_events(directory)
@@ -233,7 +233,7 @@ def test_wait_limit_overrides_the_setting_and_gives_up_with_a_stopped_result(pro
 
 
 def _gate_stopping_by_memory(command_text, cwd, *, options=None):
-    """`slots.gate` の代わり。枠を持たない実行を渡し、出るときにメモリで止めたとして `Stopped` を送る。"""
+    """`slots.gate` の代わり。スロットを持たない実行を渡し、出るときにメモリで止めたとして `Stopped` を送る。"""
 
     @contextmanager
     def gate():
@@ -264,7 +264,7 @@ def test_unusable_slots_dir_still_runs_and_prints_the_note(project, tmp_path):
     out, err = proc.communicate()
     assert (proc.returncode, out) == (0, "out\n")
     assert "err" in err.splitlines()
-    assert err.splitlines()[-1].startswith("枠の置き場を使えないので枠を取らずに走らせた: ")
+    assert err.splitlines()[-1].startswith("スロットの保存先を使えないのでスロットを取らずに走らせた: ")
     assert log.exists()
 
 
@@ -298,7 +298,7 @@ def test_signal_while_waiting_for_a_slot_ends_the_wait(project, slots_dir):
     with _slot_held_elsewhere(root, slots_dir):
         proc = _ndf(["run", "--", "fakerun ."], root, bin_dir, log)
         try:
-            # 枠が埋まっているので待ちに入る。SIGTERM のハンドラーを入れたのを待ってから送る（起動の速さに
+            # スロットが埋まっているので待ちに入る。SIGTERM のハンドラーを入れたのを待ってから送る（起動の速さに
             # 頼らない）。待ちの間の SIGTERM で、上限（120 秒）を待たずに抜ける
             waits.wait_until(lambda: _catches(proc.pid, signal.SIGTERM), what="SIGTERM のハンドラーの設定")
             assert proc.poll() is None
@@ -353,7 +353,7 @@ def test_wrong_run_arguments_are_stopped_before_running(project, args, summary):
 
 
 def test_interrupted_run_writes_the_old_state_locations_it_retired(monkeypatch, tmp_path, capsys):
-    # 中断で終わる run でも、退避した旧い置き場の元と先を標準エラーへ残す
+    # 中断で終わる run でも、退避した旧い保存先の元と先を標準エラーへ残す
     retired = [{"retired_from": "/s/p", "retired_to": "/s/p.v10-20261114"}]
 
     @contextlib.contextmanager

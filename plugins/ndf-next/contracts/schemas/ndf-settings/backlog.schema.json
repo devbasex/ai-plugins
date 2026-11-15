@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "ndf-settings/backlog.schema.json",
-  "title": "棚卸しの宣言（.ndf/backlog.json）",
-  "description": "棚卸しの順位の設定（容量・ラベルの下限・尺度ほか）と品質の枠、深さごとの頻度・閾値・上限",
+  "title": "棚卸しの設定（.ndf/backlog.json）",
+  "description": "棚卸しの順位の設定（容量・ラベルの下限・尺度ほか）と品質のクォータ、深さごとの頻度・閾値・上限",
   "type": "object",
   "additionalProperties": false,
   "required": [],
@@ -16,7 +16,7 @@
       "enum": [
         1
       ],
-      "description": "宣言の形の版。読み手は知らない版を読まない"
+      "description": "設定の形のバージョン。読み手は知らないバージョンを読まない"
     },
     "scale": {
       "type": "array",
@@ -38,7 +38,7 @@
     },
     "margin_steps": {
       "type": "integer",
-      "description": "前倒しの閾値の余白（尺度の段の数）",
+      "description": "前倒しの閾値の余白（尺度のステップの数）",
       "minimum": 0,
       "default": 1
     },
@@ -95,7 +95,7 @@
     },
     "large_slot_ratio": {
       "type": "number",
-      "description": "大きな課題の枠の割合（0 以上 1 未満）",
+      "description": "大きな課題のクォータの割合（0 以上 1 未満）",
       "minimum": 0,
       "exclusiveMaximum": 1,
       "default": 0.5
@@ -114,7 +114,7 @@
     },
     "quality": {
       "type": "object",
-      "description": "品質の枠。無ければ枠を取らない。書いた枠の省略した項目は既定値",
+      "description": "品質のクォータ。無ければスロットを取らない。書いたスロットの省略した項目は既定値",
       "properties": {
         "label": {
           "type": "string",
@@ -123,14 +123,14 @@
         },
         "ratio": {
           "type": "number",
-          "description": "枠の割合（0 以上 1 未満）",
+          "description": "スロットの割合（0 以上 1 未満）",
           "minimum": 0,
           "default": 0.2,
           "exclusiveMaximum": 1
         },
         "min": {
           "type": "integer",
-          "description": "枠の最小の件数",
+          "description": "スロットの最小の件数",
           "minimum": 0,
           "default": 1
         }

@@ -1,14 +1,14 @@
 """送信待ち（#3345 の決定 93・IH7）。
 
-hook のエントリポイントは通信しない。通知は 1 件を 1 ファイルとして `<状態の置き場>/hooks/outbox/<宛先>/` へ一時の名前で書いて
+hook のエントリポイントは通信しない。通知は 1 件を 1 ファイルとして `<状態の保存先>/hooks/outbox/<宛先>/` へ一時の名前で書いて
 名前を変え（`enqueue`）、NDF 自身の送り手（`ndf.domains.hooks.sender`）を切り離して起動する（`kick`）。
 送り手が走っていれば起動しない。どちらも待たない。投稿キュー（Pull Request へのコメントの投稿）とは別である。
 
-- 送信待ちは宛先（Slack の接続とチャンネル）ごとの置き場に分ける。置き場の名前は宛先の sha256 の先頭で、
+- 送信待ちは宛先（Slack の接続とチャンネル）ごとの保存先に分ける。保存先の名前は宛先の sha256 の先頭で、
   秘密そのものは書かない。別のプロジェクトの接続で起動した送り手は、ほかの宛先の通知を読まない
-- 送り手は置き場の錠（`lock_path`）の排他を取ってから送り、取れなければ送らずに終わる。`kick` は錠が
+- 送り手は保存先の錠（`lock_path`）の排他を取ってから送り、取れなければ送らずに終わる。`kick` は錠が
   持たれていれば起動しない。送り手は錠を離した後に一覧を読み直し、残りがあれば取り直して送る
-- 通知は問いの本文と作業のパスを持つので、置き場は所有者だけが開ける権限（0700）、ファイルは作る時から
+- 通知は質問の本文と作業のパスを持つので、保存先は所有者だけが開ける権限（0700）、ファイルは作る時から
   所有者だけが読める権限（0600）にする
 """
 
@@ -36,13 +36,13 @@ def notify_configured(env: Mapping[str, str]) -> bool:
 
 
 def outbox_dir(state_dir: Path, env: Mapping[str, str]) -> Path:
-    """宛先（`SLACK_BOT_TOKEN` と `SLACK_CHANNEL_ID`）ごとの送信待ちの置き場。"""
+    """宛先（`SLACK_BOT_TOKEN` と `SLACK_CHANNEL_ID`）ごとの送信待ちの保存先。"""
     dest = f"{env.get('SLACK_BOT_TOKEN', '')}\n{env.get('SLACK_CHANNEL_ID', '')}"  # noqa: NDF502 利用者の入力: 未設定の宛先は空として名前を作る
     return tables.hooks_dir(state_dir) / "outbox" / hashlib.sha256(dest.encode("utf-8")).hexdigest()[:16]
 
 
 def enqueue(state_dir: Path, kind: str, payload: dict[str, Any], env: Mapping[str, str]) -> Path:
-    """通知を 1 件、宛先の置き場へ書き、置いたパスを返す。"""
+    """通知を 1 件、宛先の保存先へ書き、置いたパスを返す。"""
     box = outbox_dir(state_dir, env)
     _private_dir(box)
     name = f"{time.time_ns()}-{os.getpid()}-{uuid.uuid4().hex[:8]}.json"
@@ -56,14 +56,14 @@ def enqueue(state_dir: Path, kind: str, payload: dict[str, Any], env: Mapping[st
 
 
 def _private_dir(box: Path) -> None:
-    """宛先の置き場を所有者だけが開ける権限（0700）で用意する（umask によらず、前からあった置き場も直す）。"""
+    """宛先の保存先を所有者だけが開ける権限（0700）で用意する（umask によらず、前からあった保存先も直す）。"""
     box.parent.mkdir(parents=True, exist_ok=True)
     box.mkdir(mode=0o700, exist_ok=True)
     os.chmod(box, 0o700)
 
 
 def lock_path(box: Path) -> Path:
-    """宛先の置き場の送り手の錠のファイル。"""
+    """宛先の保存先の送り手の錠のファイル。"""
     return box / ".sender.lock"
 
 
@@ -85,7 +85,7 @@ def release(fd: int) -> None:
 
 
 def sender_alive(box: Path) -> bool:
-    """送り手が置き場の錠を持っているか。"""
+    """送り手が保存先の錠を持っているか。"""
     fd = try_lock(box)
     if fd is None:
         return True

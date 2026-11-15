@@ -37,7 +37,7 @@ class Facts(NamedTuple):
 
 def _plugins(planned: Sequence[version_decide.Planned]) -> list[str]:
     if not planned:
-        return ["- 版を上げるプラグインは無い"]
+        return ["- バージョンを上げるプラグインは無い"]
     return [f"- {p.plugin}: {p.current} → {p.next}" for p in planned]
 
 
@@ -81,7 +81,7 @@ def render(facts: Facts) -> str:
         "",
         f"{approval_decide.HEAD_LINE} `{facts.head}`",
         "",
-        "## 版",
+        "## バージョン",
         *_plugins(facts.planned),
         "",
         "## 含む PR",

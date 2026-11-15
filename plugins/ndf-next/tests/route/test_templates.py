@@ -1,4 +1,4 @@
-"""雛形の読み込み・選び方・差し込みの埋め方と、雛形の検査。"""
+"""テンプレートの読み込み・選び方・差し込みの埋め方と、テンプレートの検査。"""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ def test_all_templates_render_into_valid_plans():
 
 
 def test_choose_unknown_purpose_is_refused():
-    with pytest.raises(route.RouteError, match="雛形が無い"):
+    with pytest.raises(route.RouteError, match="テンプレートが無い"):
         route.choose("no_such_purpose")
 
 
@@ -96,9 +96,9 @@ def test_template_errors_find_duplicated_purpose_and_unused_or_undeclared_names(
     b = route.Template("b", "same", "見本", ("branch", "title", "base"), plan)
     c = route.Template("c", "other", "見本", ("branch",), plan)
     errs = route.template_errors([a, b, c])
-    assert "依頼の種類が重なる: same" in errs
-    assert "雛形 b が使わない差し込みを params に持つ: base" in errs
-    assert "雛形 c が params に無い差し込みを使う: title" in errs
+    assert "リクエストの種類が重なる: same" in errs
+    assert "テンプレート b が使わない差し込みを params に持つ: base" in errs
+    assert "テンプレート c が params に無い差し込みを使う: title" in errs
 
 
 def test_unknown_shared_step_is_refused():
@@ -107,7 +107,7 @@ def test_unknown_shared_step_is_refused():
         route.expanded(t)
 
 
-# 現状固定（I-008）: worker を起こすステップの展開結果（差し込みは埋めない）。
+# 現状固定（I-008）: worker を起動するステップの展開結果（差し込みは埋めない）。
 @pytest.mark.parametrize(
     ("template", "step", "expected"),
     [

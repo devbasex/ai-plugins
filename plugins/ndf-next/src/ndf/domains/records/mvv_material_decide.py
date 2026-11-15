@@ -115,7 +115,7 @@ MVV に従う変更なら承認ゲートでの個別の承認を省いてよい�
 
 
 def prompt(redlines: Mapping[str, str], materials: Mapping[str, str]) -> str:
-    """判定の依頼の本文。レッドラインの一覧（番号 → 操作）を材料の先に置く。"""
+    """判定のリクエストの本文。レッドラインの一覧（番号 → 操作）を材料の先に置く。"""
     parts = ["## レッドライン（必ず人の承認が要る操作）", ""]
     parts += [f"- {k}: {v}" for k, v in redlines.items()]
     for title, text in materials.items():

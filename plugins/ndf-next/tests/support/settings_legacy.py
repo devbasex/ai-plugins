@@ -21,7 +21,7 @@ def old_value(row_id: str, new_value: str) -> str:
 
 
 def worktree(flow_value: str = "release_branch") -> dict[str, Any]:
-    """`branch_flow` の取り込み方を旧いキーと旧い値で持つ worktree の設定。"""
+    """`branch_flow` のリリース方式を旧いキーと旧い値で持つ worktree の設定。"""
     row = _row("worktree-release-strategy")
     return {
         "version": 1,
@@ -32,7 +32,7 @@ def worktree(flow_value: str = "release_branch") -> dict[str, Any]:
 
 
 def old_validation(checked_at: str = "2026-01-01T00:00:00+00:00", result: str = "pass") -> tuple[str, dict[str, Any]]:
-    """MVV の版の、旧いキーの名前と旧い中身（名前を変えない accepted_unknown を含む）。"""
+    """MVV のバージョンの、旧いキーの名前と旧い中身（名前を変えない accepted_unknown を含む）。"""
     parent, res, at = _row("mvv-validation"), _row("mvv-validation-result"), _row("mvv-validation-checked-at")
     return last(parent.old), {last(res.old): old_value(res.id, result), last(at.old): checked_at, "accepted_unknown": False}
 

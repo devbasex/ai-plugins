@@ -1,4 +1,4 @@
-"""レーンの進行表（#3097 の受け入れ条件 1・2・3・5、P3-1、3346-5）。
+"""レーンのステートマシン（#3097 の受け入れ条件 1・2・3・5、P3-1、3346-5）。
 
 DB を使うテストは `opened`（SQLite と PostgreSQL の両方）で流す。計画は `plan.create_plan` で作る。
 """
@@ -26,7 +26,7 @@ def _rows(st, pid):
 
 
 def _sprint(st, pid, lane_name, name):
-    """レーンの進行表を親に持つスプリントの進行表（工程の行は持たない）。"""
+    """レーンのステートマシンを親に持つスプリントのステートマシン（工程の行は持たない）。"""
     with store.transaction(st) as conn:
         view, _ = lane.read_plan(conn, pid)
         return store.create_machine(conn, ("sprint", REPO, name), view.lanes[lane_name].machine_id, None, [])
@@ -213,7 +213,7 @@ def test_only_the_ndf_version_differs_so_the_lane_starts_with_a_warning(opened, 
     assert started[0].draft.payload["sprint_id"] == sid
 
 
-# --- 答えの後の next（3346-5） -----------------------------------------------------------------------
+# --- 回答の後の next（3346-5） -----------------------------------------------------------------------
 
 
 def test_answer_without_a_following_next_is_read_as_a_stall(opened):
@@ -398,7 +398,7 @@ def test_row_order_chain_as_it_is_now(view, rows, errors):
 
 
 def test_cross_lane_writes_of_one_plan_wait_for_each_other_on_postgresql(pg_url, root):
-    """PostgreSQL では、計画の決まりを確かめて書く操作が計画の鍵で直列になる（別レーンへの同時の書き込みが互いを見る）。"""
+    """PostgreSQL では、計画の決まりを確かめて書く操作が計画のキーで直列になる（別レーンへの同時の書き込みが互いを見る）。"""
     import sqlalchemy as sa
 
     with store.open_store(pg_url, root) as st, st.engine.connect() as first, st.engine.connect() as second:

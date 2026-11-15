@@ -2,13 +2,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "fact.schema.json",
   "title": "事実の表の共通の形",
-  "description": "contracts/facts/<名前>.json と contracts/domains/<名前>.json の形。列の宣言から行の形を作り、読み手（ndf.contracts.facts）が各行を確かめる",
+  "description": "contracts/facts/<名前>.json と contracts/domains/<名前>.json の形。列の設定から行の形を作り、読み手（ndf.contracts.facts）が各行を確かめる",
   "type": "object",
   "additionalProperties": false,
   "required": ["summary", "owner", "columns", "rows"],
   "properties": {
     "summary": {"type": "string", "minLength": 1},
-    "owner": {"type": "string", "minLength": 1, "description": "表を書き換えてよい持ち主（子 Issue の記号とパッケージ）"},
+    "owner": {"type": "string", "minLength": 1, "description": "表を書き換えてよいオーナー（子 Issue の記号とパッケージ）"},
     "shared_names": {"type": "boolean", "description": "真なら表の id は他の名前空間と共有する名前で、コードの定数が同じ字を持っても写しと数えない"},
     "columns": {
       "type": "object",

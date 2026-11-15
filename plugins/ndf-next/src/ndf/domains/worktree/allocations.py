@@ -1,8 +1,8 @@
-"""テスト環境の割り当ての台帳（`<git の共通ディレクトリ>/ndf/worktree-registry.json`）。
+"""テスト環境の割り当ての割り当て表（`<git の共通ディレクトリ>/ndf/worktree-registry.json`）。
 
 割り当て 1 件は `{id, worktree, branch, environment, slot, ports, assigned_at, last_used_at, released_at, expose,
 golden_tag?}` で、解放しても行を消さず `released_at` を書く（履歴は追記で持つ）。今の割り当ては worktree ごとの
-未解放の最後の 1 件である。読み書きは台帳の排他（同じ置き場の `.lock`）の中で行い、空きの判定と行の追加を
+未解放の最後の 1 件である。読み書きは割り当て表の排他（同じ保存先の `.lock`）の中で行い、空きの判定と行の追加を
 同じ排他の中で行う（排他の外で空きを読むと、同時に走った別のプロセスと同じスロットを掴む）。
 """
 
@@ -21,13 +21,13 @@ from ndf import identity
 from ndf.adapters.git import Git
 from ndf.domains.worktree import atomic, testenv_decide
 
-# 台帳のファイル名（git の共通ディレクトリの下の、プラグイン名の置き場に置く）と、排他を待つ上限の秒
+# 割り当て表のファイル名（git の共通ディレクトリの下の、プラグイン名の保存先に置く）と、排他を待つ上限の秒
 ALLOCATIONS_FILE = "worktree-registry.json"
 LOCK_WAIT = 30
 Row = dict[str, Any]
-# 台帳の時刻の書式（書く側の `now` と、読む側の `testenv_sweep` が同じ書式を使う）
+# 割り当て表の時刻の書式（書く側の `now` と、読む側の `testenv_sweep` が同じ書式を使う）
 STAMP = "%Y-%m-%dT%H:%M:%SZ"
-# 割り当ての ID と証跡の置き場に付ける時刻の書式
+# 割り当ての ID と証跡の保存先に付ける時刻の書式
 COMPACT_STAMP = "%Y%m%dT%H%M%SZ"
 
 
@@ -50,7 +50,7 @@ def allocations_path(git: Git) -> Path:
 
 
 class Allocations:
-    """1 つのリポジトリの台帳。"""
+    """1 つのリポジトリの割り当て表。"""
 
     def __init__(self, path: Path) -> None:
         self.path = path

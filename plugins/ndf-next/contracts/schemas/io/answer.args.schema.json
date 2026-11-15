@@ -10,31 +10,31 @@
       "properties": {
         "machine_id": {
           "type": "string",
-          "description": "答える進行表の ID",
+          "description": "回答するステートマシンの ID",
           "x-ndf-positional": true
         },
         "--gate": {
           "type": "string",
-          "description": "問いの id（承認ゲートの結果の metrics.gate.id）"
+          "description": "質問の id（承認ゲートの結果の metrics.gate.id）"
         },
         "--result": {
           "type": "string",
-          "description": "答えの語（承認ゲートの結果の routes のキー）"
+          "description": "回答の語（承認ゲートの結果の routes のキー）"
         },
         "--reason": {
           "type": "string"
         },
         "--by": {
           "type": "string",
-          "description": "答えた者（human・conductor・organizer か service:<主体>）"
+          "description": "回答した者（human・conductor・organizer か service:<主体>）"
         },
         "--key": {
           "type": "string",
-          "description": "冪等の鍵（同じ鍵の答え直しは書かない）"
+          "description": "冪等のキー（同じキーの回答し直しは書かない）"
         },
         "--notes": {
           "type": "string",
-          "description": "差し戻し（request_changes）の指摘ファイル"
+          "description": "変更要求（request_changes）の指摘ファイル"
         },
         "--head": {
           "type": "string",

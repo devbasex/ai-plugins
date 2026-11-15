@@ -45,14 +45,14 @@ def _project(gitwork) -> None:
 def test_later_item_does_not_take_the_violation_an_earlier_item_brought(gitwork, tmp_path: Path) -> None:
     gitwork.make({"src/glossary.py": "a = 1\n", "src/items.py": "b = 1\n"})
     _project(gitwork)
-    gitwork.commit({}, "宣言")
+    gitwork.commit({}, "設定")
     # I-010: 共有のファイルを上限の外へ伸ばす
     gitwork.commit({"src/glossary.py": "a = 1\na = 2\na = 3\na = 4\n"}, "I-010")
     start_of_next = gitwork.git("rev-parse", "HEAD")
     # I-011: 同じファイルにも触るが、違反は持ち込まない
     gitwork.commit({"src/glossary.py": "a = 1\na = 2\na = 3\na = 5\n", "src/items.py": "b = 2\n"}, "I-011")
     found = verify.suites(gitwork.work)
-    assert [s.name for s in found] == ["lines"]  # テストを CI に寄せる宣言では、手元はテストの suite を打たない
+    assert [s.name for s in found] == ["lines"]  # テストを CI に寄せる設定では、手元はテストの suite を打たない
     changed = ["src/glossary.py", "src/items.py"]
     now = verify.failing(gitwork.work, found, verify.targets(gitwork.work, found, changed))
     assert now == frozenset({"lines:src/glossary.py"})

@@ -1,4 +1,4 @@
-"""レーンのリリースの依頼（リリース承認ゲート）: 依頼を出し、答えを承認ゲートの答えにし、差し戻しで依頼を閉じる（#3295・#3097）。"""
+"""レーンのリリースのリクエスト（リリース承認ゲート）: リクエストを出し、回答を承認ゲートの回答にし、変更要求でリクエストを閉じる（#3295・#3097）。"""
 
 from __future__ import annotations
 
@@ -44,9 +44,9 @@ def test_a_rejection_at_the_release_gate_closes_the_request_with_the_rejection(s
     pid, tid = lane_sprint()
     q = _at_release(st, tid, flow)
     gate.request_release(st, run.read(st, tid), q, {})
-    out = gate.answer(st, tid, gate.Answer(q.id, "rejected", "版が違う", BY, "k-release"))
+    out = gate.answer(st, tid, gate.Answer(q.id, "rejected", "バージョンが違う", BY, "k-release"))
     (req,) = _requests(st, pid)
-    assert req.closed == "版が違う" and req.release["result"] == plan.REJECTED
+    assert req.closed == "バージョンが違う" and req.release["result"] == plan.REJECTED
     assert out["status"] == "ok"
     ev = [e for e in run.read(st, tid).events if e.draft.kind == "answered"][-1]
     assert ev.draft.payload["release_request"] == req.key
@@ -67,7 +67,7 @@ def test_the_organizers_release_on_the_plan_becomes_the_gate_answer(st, lane_spr
 
 
 def test_the_organizers_release_writes_the_version_and_the_record_pr_into_the_sprint_context(st, lane_sprint, flow):
-    """まとめたリリースの版とリリース記録の PR は、答えと同じ書き込みで文脈へ入り、閉じが PR を探さずに読める（#2783）。"""
+    """まとめたリリースのバージョンとリリース記録の PR は、回答と同じ書き込みで文脈へ入り、閉じが PR を探さずに読める（#2783）。"""
     pid, tid = lane_sprint()
     q = _at_release(st, tid, flow)
     sent = gate.request_release(st, run.read(st, tid), q, {})
@@ -95,7 +95,7 @@ def test_a_rejection_from_the_organizer_writes_no_release_into_the_context(st, n
 def test_an_answer_carrying_a_key_the_stage_does_not_output_is_refused(st, new_table, flow):
     tid = new_table()
     q = _at_release(st, tid, flow)
-    with pytest.raises(model.Refused, match="outputs に無い鍵"):
+    with pytest.raises(model.Refused, match="outputs に無いキー"):
         gate.answer(st, tid, gate.Answer(q.id, "approved", "出した", BY, "k-x", outputs={"pr": 3}))
     assert run.decide(run.read(st, tid)).action == run.Action.GATE
 
@@ -150,7 +150,7 @@ def _now_at_release(st, tid, flow):
     v = run.read(st, tid)
     q = gate.waiting(v)
     assert q is not None and q.gate == "release"
-    gate.write_material(st.root, v, q)  # 呼び出し元（gate.present）と同じく、依頼の前に承認資料を置く
+    gate.write_material(st.root, v, q)  # 呼び出し元（gate.present）と同じく、リクエストの前に承認資料を置く
     return q
 
 
@@ -220,7 +220,7 @@ def test_current_an_unreadable_version_refuses_the_file_request_after_the_seen_f
     tid = new_table()
     q = _now_at_release(st, tid, flow)
     env = {"NDF_ORGANIZER_DIR": str(tmp_path / "org"), "NDF_ORGANIZER_LANE": "a"}
-    with pytest.raises(model.Refused, match="NDF の版が読めず"):
+    with pytest.raises(model.Refused, match="NDF のバージョンが読めず"):
         gate.request_release(st, run.read(st, tid), q, env)
     assert _seen(st, q).exists() and not (tmp_path / "org" / "requests").exists()
 
@@ -235,7 +235,7 @@ def test_current_a_file_request_without_a_lane_name_is_refused_by_the_exchange(s
         gate.request_release(st, run.read(st, tid), q, env)
 
 
-# --- 現状固定: 計画の依頼を引く 3 手（I-009。release._organizer_reply・answering._reject_release） -------------
+# --- 現状固定: 計画のリクエストを引く 3 手（I-009。release._organizer_reply・answering._reject_release） -------------
 
 
 def _rejection(q):
@@ -268,11 +268,11 @@ def test_current_a_rejection_closes_the_open_plan_request_once(st, lane_sprint, 
     pid, tid = lane_sprint()
     q = _now_at_release(st, tid, flow)
     with store.transaction(st) as conn:
-        assert answering._reject_release(conn, q, _rejection(q)) is None  # 依頼がまだ無い
+        assert answering._reject_release(conn, q, _rejection(q)) is None  # リクエストがまだ無い
     gate.request_release(st, run.read(st, tid), q, {})
     with store.transaction(st) as conn:
         key = answering._reject_release(conn, q, _rejection(q))
     (req,) = _requests(st, pid)
     assert key == req.key and req.closed is not None
     with store.transaction(st) as conn:
-        assert answering._reject_release(conn, q, _rejection(q)) is None  # 閉じた依頼は閉じ直さない
+        assert answering._reject_release(conn, q, _rejection(q)) is None  # 閉じたリクエストは閉じ直さない

@@ -42,11 +42,11 @@ def _make(tmp_path: Path, decl: dict | None) -> Path:
 
 @pytest.fixture
 def main_repo(tmp_path: Path) -> Path:
-    """宣言（base_branch は develop）を持つメインディレクトリ。origin に develop と main がある。"""
+    """設定（base_branch は develop）を持つメインディレクトリ。origin に develop と main がある。"""
     return _make(tmp_path, NDF_SETTINGS)
 
 
 @pytest.fixture
 def make_repo(tmp_path: Path) -> Callable[[dict | None], Path]:
-    """宣言を選んでメインディレクトリを作る関数（`None` は宣言なし）。"""
+    """設定を選んでメインディレクトリを作る関数（`None` は設定なし）。"""
     return lambda decl: _make(tmp_path, decl)

@@ -9,7 +9,7 @@ description: |
 
 # 品質管理エージェント
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `external-ai.py`（AD3+）。行き先は[機能の対応表](../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトのサブコマンドは新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `external-ai.py`（AD3+）。移行先は[機能の対応表](../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 あなたは品質管理とテストの専門家です。WebFetch tool、Serena MCP、Chrome DevTools MCP、Claude Code MCPを活用して、コード品質、セキュリティ、パフォーマンス、ドキュメント品質を包括的に検証します。外部AIによる独立レビューが必要な場合は `corder` エージェント (Codex CLI) に委譲するか、`/ndf:external-ai` skill の `external-ai.py run codex` を 1 行で呼びます。
 
@@ -146,7 +146,7 @@ description: |
 
 ### 理由
 
-- サブエージェント間の相互呼び出しは無限ループやcore dumpを引き起こす可能性がある
+- サブエージェント間の相互呼び出しは無限ループやcore dumpの原因になる可能性がある
 - 専門的なタスクは直接MCPツールを使用して実行する
 - 複雑なタスクの分割や他エージェントへの委譲はdirectorエージェントの役割
 

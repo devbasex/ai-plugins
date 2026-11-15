@@ -1,20 +1,20 @@
-"""プランの実行の回を、1 つの実行の鍵で DBOS の殻を通して流す（B1・B2・B4）。
+"""プランの実行の回を、1 つの実行のキーで DBOS の殻を通して流す（B1・B2・B4）。
 
-- 実行の回の記録 `run.json`（状態の置き場）が鍵を持つ。同じプラン・開始点で打ち直すと、回が終わるまで同じ鍵で続く。
-  終わった回は、head が回の初めか終わりの head と同じなら同じ鍵で、結果を返して流さない（B4）。head が違えば
-  （差し戻しの後に直した）次の回の鍵で流す（#3176）
+- 実行の回の記録 `run.json`（状態の保存先）がキーを持つ。同じプラン・開始点で打ち直すと、回が終わるまで同じキーで続く。
+  終わった回は、head が回の初めか終わりの head と同じなら同じキーで、結果を返して流さない（B4）。head が違えば
+  （変更要求の後に直した）次の回のキーで流す（#3176）
 - 耐久ワークフロー `plan_workflow` は遷移の判断（`transition_decide.decide`）と手の実行を判断のループで回す。
-  ステップは耐久ステップで打ち、打ち直しの待ちと承認の答えの待ちは耐久の `recv` で待つ
-- `next` は状態の置き場のロック（`plan.lock`）を持って回を選び、流す。同じプランの別の回を同時に打つと、後の `next` は
+  ステップは耐久ステップで打ち、打ち直しの待ちと承認の回答の待ちは耐久の `recv` で待つ
+- `next` は状態の保存先のロック（`plan.lock`）を持って回を選び、流す。同じプランの別の回を同時に打つと、後の `next` は
   先の回が終わるか承認ゲートで抜けるまで上限まで待つ。ステップの打ち直しが、別の回の流れている子を前の回の残りとして
   止めない
-- 遷移の判断が行き先を選ぶたびに、選択の記録（`ndf.contracts.chosen`）を状態の置き場の `progress.jsonl` へ追記する。
+- 遷移の判断がルートを選ぶたびに、選択の記録（`ndf.contracts.chosen`）を状態の保存先の `progress.jsonl` へ追記する。
   書くのは耐久ステップで、回復で判断を流し直しても同じ選択を 2 回書かない
 - ステップの結果 JSON の `outputs` を回をまたいで `outputs.json` に重ね（後のステップの値が勝つ）、プランの結果の `outputs` に載せる。
   `outputs.gaps` が空でなければ、最後まで ok で流れてもプランの結果は incomplete でその欠けを持つ（レビューの欠けを
   CI の後まで引き継ぐ）
-- 承認の答えを待つ所に来たら、待ちの目印 `waiting-<鍵の名前>.json` を書く。呼び手は目印を見て承認ゲートの結果を出し、
-  DBOS を閉じずにプロセスを抜ける（待っている耐久ワークフローは鍵のファイルに残り、次の起動が回復する。B2）
+- 承認の回答を待つ所に来たら、待ちの目印 `waiting-<キーの名前>.json` を書く。呼び手は目印を見て承認ゲートの結果を出し、
+  DBOS を閉じずにプロセスを抜ける（待っている耐久ワークフローはキーのファイルに残り、次の起動が回復する。B2）
 """
 
 from __future__ import annotations
@@ -37,19 +37,19 @@ from ndf.core.plan.files import read_json, write_json
 from ndf.core.plan.records import PROGRESS_FILE, _add_outputs, _add_prs, recorded_outputs, recorded_prs
 from ndf.core.plan.transition_decide import ANSWERED, SLEPT, AwaitAnswer, Outcome, RunStep, Sleep
 
-# 結果 JSON の tool の名前は副命令の名前（副命令の表から引く）
+# 結果 JSON の tool の名前はサブコマンドの名前（サブコマンドの表から引く）
 TOOL = cli.tool_of(f"{__package__}.cli")
 CLI_NAME = result.ENTRY
 RUN_FILE = "run.json"
-# 状態の置き場を 1 つの `next` に限るロック（回を選ぶ・ステップの子を打つ間）
+# 状態の保存先を 1 つの `next` に限るロック（回を選ぶ・ステップの子を打つ間）
 PLAN_LOCK = "plan.lock"
 RESULTS_DIR = "results"
-# 差し込み `{work_base}` の置き場（状態の置き場の隣。git の共通ディレクトリの中で、リポジトリと同じボリュームにある）
+# 差し込み `{work_base}` の保存先（状態の保存先の隣。git の共通ディレクトリの中で、リポジトリと同じボリュームにある）
 WORK_DIR = "work"
 WAITING_PREFIX = "waiting-"
 TOPIC_ANSWER = "gate-answer"
 TOPIC_RETRY = "retry-wait"
-# 承認の答えを 1 回に待つ秒。期限で答えが無ければ待ち直す（答えの来ない承認ゲートを打ち切らない）
+# 承認の回答を 1 回に待つ秒。期限で回答が無ければ待ち直す（回答の来ない承認ゲートを打ち切らない）
 ANSWER_WAIT_SECONDS = 86400.0
 POLL = durable.POLL
 
@@ -80,7 +80,7 @@ class Invocation:
 
     @property
     def run_id(self) -> str:
-        """回の鍵の名前（`durable.run_name`）。"""
+        """回のキーの名前（`durable.run_name`）。"""
         return durable.run_name(self.key)
 
     @property
@@ -97,12 +97,12 @@ class Invocation:
 
 
 def waiting_path(state_dir: Path, run: str) -> Path:
-    """回 `run`（鍵の名前）の承認の答えを待つ目印。"""
+    """回 `run`（キーの名前）の承認の回答を待つ目印。"""
     return state_dir / f"{WAITING_PREFIX}{run}.json"
 
 
 def result_path(state_dir: Path, run: str) -> Path:
-    """回 `run`（鍵の名前）の結果の控え。"""
+    """回 `run`（キーの名前）の結果のバックアップ。"""
     return state_dir / RESULTS_DIR / f"{run}.json"
 
 
@@ -136,13 +136,13 @@ def record_choices(path: str, run_id: str, choices: list[list[Any]]) -> int:
 
 @durable.step
 def mark_waiting(path: str, step_id: str, seq: int, routes: dict[str, dict[str, Any]]) -> None:
-    """承認の答えを待つ目印を書く（呼び手と `wait` が読む）。"""
+    """承認の回答を待つ目印を書く（呼び手と `wait` が読む）。"""
     write_json(Path(path), {"step": step_id, "seq": seq, "routes": routes})
 
 
 @durable.step
 def clear_waiting(path: str) -> None:
-    """答えを受けたので待ちの目印を消す。"""
+    """回答を受けたので待ちの目印を消す。"""
     Path(path).unlink(missing_ok=True)
 
 
@@ -190,7 +190,7 @@ def _head(plan: model.Plan) -> Optional[str]:
         return None
     try:
         return git.Git(Path(where)).rev_parse("HEAD")
-    except git.GitError:  # noqa: NDF401 外部コマンド: head の無い置き場は head を鍵に入れない
+    except git.GitError:  # noqa: NDF401 外部コマンド: head の無い保存先は head をキーに入れない
         return None
 
 
@@ -206,7 +206,7 @@ def _again(plan_path: Path, start: Optional[str], state_dir: Optional[str], sets
 
 
 def _with_start(again: tuple[str, ...], start: str) -> list[str]:
-    """打ち直しの引数の開始点を `start` に置き換える（状態の置き場と差し込みの値は保つ）。"""
+    """打ち直しの引数の開始点を `start` に置き換える（状態の保存先と差し込みの値は保つ）。"""
     args = list(again)
     if "--from" in args:
         at = args.index("--from")
@@ -221,20 +221,20 @@ def _prelude(plan: model.Plan, start: Optional[str]) -> tuple[str, ...]:
 
 
 def resolve_state_dir(plan_path: Path, given: Optional[str], plan: Optional[model.Plan], cwd: Path) -> Path:
-    """状態の置き場。`given`（`--state-dir`）が無ければプランの `state_dir` を使う（`plan` はそのときだけ要る）。"""
+    """状態の保存先。`given`（`--state-dir`）が無ければプランの `state_dir` を使う（`plan` はそのときだけ要る）。"""
     found = given if given is not None else plan.state_dir
     return Path(assemble_decide.state_dir_for(str(plan_path), found, str(cwd)))
 
 
 def state_dir_of(plan_path: Path, state_dir: Optional[str], cwd: Path) -> Path:
-    """プランの状態の置き場（`prepare` と同じ決め方）。プランを読めなければ `model.PlanError`。"""
+    """プランの状態の保存先（`prepare` と同じ決め方）。プランを読めなければ `model.PlanError`。"""
     plan = model.load(plan_path) if state_dir is None else None
     return resolve_state_dir(plan_path, state_dir, plan, cwd)
 
 
 @contextmanager
 def plan_lock(state_dir: Path) -> Iterator[Path]:
-    """状態の置き場のロック。上限まで待ち、取れなければ持ち主（ホスト・pid・時刻）を添えて `durable.StoreInUse`（B11）。"""
+    """状態の保存先のロック。上限まで待ち、取れなければオーナー（ホスト・pid・時刻）を添えて `durable.StoreInUse`（B11）。"""
     with durable_locks.exclusive_lock(state_dir / PLAN_LOCK) as path:
         yield path
 
@@ -267,13 +267,13 @@ def prepare(
     cwd: Path,
     options: Optional[RunOptions] = None,
 ) -> Invocation:
-    """プランを読み、状態の置き場・鍵・差し込みの値を決める。誤りは `model.PlanError`（開始点の誤りを含む）。
+    """プランを読み、状態の保存先・キー・差し込みの値を決める。誤りは `model.PlanError`（開始点の誤りを含む）。
 
     `options.sets` は呼び手が足す差し込みの値（キューの `{queue_prs}` など）。決まった名前（`state_dir` など）は上書きできない。
-    `{work_base}` はステップが作業ディレクトリを作る置き場。`/tmp` でなくリポジトリと同じボリューム（git の共通ディレクトリの
+    `{work_base}` はステップが作業ディレクトリを作る保存先。`/tmp` でなくリポジトリと同じボリューム（git の共通ディレクトリの
     中）に置き、Docker のデーモンがホストにある環境（DooD）でも compose の bind mount から見える（#2933）
-    `options.fresh` は前の回に戻らず、耐久の記録の置き場に無い番号の回を選ぶ（#1592）。打ち直しの引数（`again`）には入れず、
-    承認の答えはその回へ届く
+    `options.fresh` は前の回に戻らず、耐久の記録の保存先に無い番号の回を選ぶ（#1592）。打ち直しの引数（`again`）には入れず、
+    承認の回答はその回へ届く
     """
     opts = options if options is not None else RunOptions()
     sets = dict(opts.sets)
@@ -303,20 +303,20 @@ def prepare(
 
 
 def _finished(root: Path, key: str) -> bool:
-    """鍵の回が終わって退避されたか（retired/ に鍵のファイルがある）。"""
+    """キーの回が終わって退避されたか（retired/ にキーのファイルがある）。"""
     name = durable.run_name(key)
     return any((root / durable.DBOS_DIR / durable.RETIRED_DIR).glob(f"{name}*{durable.DB_SUFFIX}"))
 
 
 def _recorded_key(root: Path, key: str) -> bool:
-    """鍵の記録（DB・ロックのファイル）が耐久の記録の置き場か retired/ にあるか。"""
+    """キーの記録（DB・ロックのファイル）が耐久の記録の保存先か retired/ にあるか。"""
     name = durable.run_name(key)
     dbos = root / durable.DBOS_DIR
     return any(dbos.glob(f"{name}*")) or any((dbos / durable.RETIRED_DIR).glob(f"{name}*"))
 
 
 def _routes(inv: Invocation) -> dict[str, dict[str, dict[str, Any]]]:
-    """承認の答えを待つステップごとの、答え → 次に打つコマンド（結果 JSON の command の形）。"""
+    """承認の回答を待つステップごとの、回答 → 次に打つコマンド（結果 JSON の command の形）。"""
     return {s.id: {a: result.command(TOOL, "next", *inv.again, "--answer", a) for a in s.on_answer} for s in inv.plan.steps if s.on_answer}
 
 
@@ -368,8 +368,8 @@ def _run_item(inv: Invocation) -> dict[str, Any]:
 
 
 def gate_result(inv: Invocation, marker: dict[str, Any]) -> dict[str, Any]:
-    """承認の答えを待つ結果。`routes` は答えごとに打つコマンド。"""
-    summary = f"{inv.plan.name} のステップ {marker['step']} が承認の答えを待っている"
+    """承認の回答を待つ結果。`routes` は回答ごとに打つコマンド。"""
+    summary = f"{inv.plan.name} のステップ {marker['step']} が承認の回答を待っている"
     items = [{"kind": "plan", "name": inv.plan.name, "step": marker["step"], "gate": True}, *_pr_items(inv.state_dir)]
     return result.result(
         TOOL,
@@ -402,7 +402,7 @@ def _finished_result(inv: Invocation, rec: _FinalRecords) -> dict[str, Any]:
 
 
 def _result_of(inv: Invocation, final: Optional[dict[str, Any]], status: Optional[str], rec: _FinalRecords) -> dict[str, Any]:
-    """終わった回の結果を組む（状態の置き場を読まない）。耐久ワークフローが例外で終わったときは unknown で止まる。"""
+    """終わった回の結果を組む（状態の保存先を読まない）。耐久ワークフローが例外で終わったときは unknown で止まる。"""
     items, metrics, shared = rec.items, rec.metrics, rec.shared
     if final is None:
         detail = f"{inv.plan.name} の耐久ワークフローが {status} で終わった"
@@ -419,7 +419,7 @@ def _result_of(inv: Invocation, final: Optional[dict[str, Any]], status: Optiona
 
 
 def final_result(inv: Invocation, final: Optional[dict[str, Any]], status: Optional[str]) -> dict[str, Any]:
-    """終わった回の結果。状態の置き場の記録（載った PR・ステップの outputs）を読み、`_result_of` で組む。"""
+    """終わった回の結果。状態の保存先の記録（載った PR・ステップの outputs）を読み、`_result_of` で組む。"""
     items = [_run_item(inv), *_pr_items(inv.state_dir)]
     metrics = {"round": inv.round_no, "steps": final["count"] if final else 0}
     outputs, warnings = recorded_outputs(inv.state_dir)
@@ -432,7 +432,7 @@ def _stored(inv: Invocation) -> dict[str, Any]:
     if found is not None:
         return found
     items = [_run_item(inv)]
-    return result.result(TOOL, OK, f"{inv.plan.name} の回は終わっている（結果の控えが無い）", items, {"round": inv.round_no})
+    return result.result(TOOL, OK, f"{inv.plan.name} の回は終わっている（結果のバックアップが無い）", items, {"round": inv.round_no})
 
 
 def _finish(inv: Invocation) -> dict[str, Any]:
@@ -447,10 +447,10 @@ def _finish(inv: Invocation) -> dict[str, Any]:
 def advance(
     root: Path, inv: Invocation, answer: Optional[str], on_gate: Callable[[dict[str, Any]], None], url: Optional[str] = None
 ) -> dict[str, Any]:
-    """回を始めるか続け、終わるか承認の答えを待つ所まで進める。
+    """回を始めるか続け、終わるか承認の回答を待つ所まで進める。
 
     待つ所に来たら `on_gate(結果)` を DBOS を開いたまま呼ぶ。`on_gate` は結果を出してプロセスを抜ける（戻らない）。
-    終わった回（retired/）なら流さずに控えの結果を返す（B4）。
+    終わった回（retired/）なら流さずにバックアップの結果を返す（B4）。
     """
     if _finished(root, inv.key):
         return _stored(inv)
@@ -462,7 +462,7 @@ def advance(
             durable.spawn(plan_workflow, inv.workflow_id, _spec(inv))
         elif answer is not None:
             if baseline is None:
-                return result.stopped(TOOL, "invalid", f"{inv.plan.name} は承認の答えを待っていない")
+                return result.stopped(TOOL, "invalid", f"{inv.plan.name} は承認の回答を待っていない")
             durable.send(inv.workflow_id, answer, TOPIC_ANSWER)
         else:
             baseline = None

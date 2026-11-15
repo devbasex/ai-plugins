@@ -1,17 +1,17 @@
 """規約の検査と生成（`ndf check` の規則 spec-docs・spec-decl・spec-io・spec-skill・spec-public。#3518）。
 
-規約のモデル（`spec_model`）を読み、描画（`spec_render`）した中身とコミットされた生成物を比べ、コードと正本の表と規約の
-食い違いを指摘にする。`--write-spec` のときは描画した中身を書いてから比べる（書くのは生成物の置き場だけ）。
+規約のモデル（`spec_model`）を読み、描画（`spec_render`）した中身とコミットされた生成物を比べ、コードと SSOT の表と規約の
+食い違いを指摘にする。`--write-spec` のときは描画した中身を書いてから比べる（書くのは生成物の保存先だけ）。
 
 | 規則 | 縛る不変条件 |
 | --- | --- |
-| spec-decl | 宣言の行がスキーマか節の表を持つ・スキーマのキーと置き場の表の `keys` が等しい・`main_keys` が `keys` に含まれる・キーが型と説明を持つ・`.ndf/` の実物がスキーマに通る |
-| spec-io | 副命令が結果のスキーマを持つ・引数の出所が取り出しか手書きの表のどちらか一方・コードが名前で読む環境変数が環境変数の表にある・`bin/` のファイルが起動スクリプトの表にある |
-| spec-skill | 実体のある配る Skill が Skill の入出力の表に行を持つ・Skill の本文とエージェント定義に書かれた `ndf` の呼び出しが規約の副命令と引数に当たる |
-| spec-public | 公開する面の表の行が規約の項目に当たる・規約の置き場の行が実在のディレクトリを指す |
+| spec-decl | 設定の行がスキーマか節の表を持つ・スキーマのキーと保存先の表の `keys` が等しい・`main_keys` が `keys` に含まれる・キーが型と説明を持つ・`.ndf/` の実物がスキーマに通る |
+| spec-io | サブコマンドが結果のスキーマを持つ・引数の出所が取り出しか手書きの表のどちらか一方・コードが名前で読む環境変数が環境変数の表にある・`bin/` のファイルが起動スクリプトの表にある |
+| spec-skill | 実体のある配る Skill が Skill の入出力の表に行を持つ・Skill の本文とエージェント定義に書かれた `ndf` の呼び出しが規約のサブコマンドと引数に当たる |
+| spec-public | 公開する面の表の行が規約の項目に当たる・規約の保存先の行が実在のディレクトリを指す |
 | spec-docs | コミットされた生成物が、生成し直した中身と 1 字も違わない |
 
-契約の置き場（`contracts/`）を持たないプラグインには当てない（検査のテストが作る小さなプラグイン）。
+コントラクトの保存先（`contracts/`）を持たないプラグインには当てない（検査のテストが作る小さなプラグイン）。
 """
 
 from __future__ import annotations
@@ -36,26 +36,26 @@ from ndf.domains.settings import renames
 DOCS, DECL, IO, SKILL, PUBLIC = "spec-docs", "spec-decl", "spec-io", "spec-skill", "spec-public"
 # キーの型の語（どれか 1 つを持てば型がある）
 TYPE_WORDS = ("type", "$ref", "anyOf", "oneOf", "const", "enum")
-# 規約の置き場（公開する面の表の種類 spec の行が指す、プラグインの根からの相対パス）
+# 規約の保存先（公開する面の表の種類 spec の行が指す、プラグインの根からの相対パス）
 SPEC_TARGETS = (spec_model.PAGES_DIR, f"{CONTRACTS}/{DECL_SCHEMA_DIR}", f"{CONTRACTS}/{IO_SCHEMA_DIR}")
-# 書かれた呼び出しを探す置き場と、呼び出しの区切りの語
+# 書かれた呼び出しを探す保存先と、呼び出しの区切りの語
 CALL_DIRS = ("skills/", "agents/")
 CALL_STOPS = frozenset({"|", "||", "&&", ";", ">", ">>", "2>&1", "&", ")", "<"})
 # 呼び出しの先頭の語（エントリポイントの短い名前か、末尾がそのファイルのパス）
 ENTRY = identity.FIXED_WORDS["entrypoint"]
-# プラグインの根からの相対パス → リポジトリの根からの相対パス（指摘の置き場）
+# プラグインの根からの相対パス → リポジトリの根からの相対パス（指摘の保存先）
 Rel = Callable[[str], str]
 
 
 def _table_rel(rel: Rel, name: str) -> str:
-    """事実の表 `name` のリポジトリの根からの相対パス（置き場の facts/ か domains/ は `facts.location` が決める）。"""
+    """事実の表 `name` のリポジトリの根からの相対パス（保存先の facts/ か domains/ は `facts.location` が決める）。"""
     return rel(f"{CONTRACTS}/{facts.location(name)}")
 
 
 def check(scope: Scope, rules: dict[str, Any], write_spec: bool = False, written: list[str] | None = None) -> list[Finding]:
     """規約の 5 つの規則の指摘を返す。`write_spec` なら生成物を書いてから比べ、書いたパスを `written` へ足す。"""
     if "spec" not in rules:
-        raise CheckError("規則のデータに鍵 spec が無い")
+        raise CheckError("規則のデータにキー spec が無い")
     conf = rules["spec"]
     root = scope.plugin_root
     if not (root / CONTRACTS).is_dir():
@@ -98,16 +98,16 @@ def _key_errors(decl: NdfSettingsSpec) -> list[str]:
 
 
 def _keys_errors(decl: NdfSettingsSpec) -> list[str]:
-    """置き場の表の keys とスキーマの最上位の非推奨でないキーの食い違い、keys に無い main_keys。"""
+    """保存先の表の keys とスキーマの最上位の非推奨でないキーの食い違い、keys に無い main_keys。"""
     errs = [f"main_keys の {k} が keys に無い" for k in decl.main_keys if k not in decl.keys]
     if decl.schema is None:
         return errs
     props = opt(decl.schema, "properties", {})
-    # スキーマの最上位で置き場の表の keys と比べないキー（表の列 keys の説明のとおり）
+    # スキーマの最上位で保存先の表の keys と比べないキー（表の列 keys の説明のとおり）
     schema_only = {"version", "$schema"}
     live = {k for k, v in props.items() if k not in schema_only and not (isinstance(v, dict) and v.get("deprecated") is True)}
-    errs += [f"キー {k} が置き場の表の keys にだけある（スキーマに無い）" for k in sorted(set(decl.keys) - live)]
-    errs += [f"キー {k} がスキーマにだけある（置き場の表の keys に無い）" for k in sorted(live - set(decl.keys))]
+    errs += [f"キー {k} が保存先の表の keys にだけある（スキーマに無い）" for k in sorted(set(decl.keys) - live)]
+    errs += [f"キー {k} がスキーマにだけある（保存先の表の keys に無い）" for k in sorted(live - set(decl.keys))]
     return errs
 
 
@@ -136,10 +136,10 @@ def decl_findings(model: SpecModel, repo_root: Path, rel: Rel) -> list[Finding]:
     for decl in model.ndf_settings:
         schema_rel = rel(f"{CONTRACTS}/{DECL_SCHEMA_DIR}/{spec_model.decl_schema_rel(decl.id, spec_model.SCHEMA_SUFFIX)}")
         if decl.schema is None and decl.sections is None:
-            found.append(Finding(DECL, files_rel, 1, f"宣言 {decl.id} にスキーマか節の表が無い"))
-        found += [Finding(DECL, files_rel, 1, f"宣言 {decl.id}: {e}") for e in _keys_errors(decl)]
+            found.append(Finding(DECL, files_rel, 1, f"設定 {decl.id} にスキーマか節の表が無い"))
+        found += [Finding(DECL, files_rel, 1, f"設定 {decl.id}: {e}") for e in _keys_errors(decl)]
         if decl.schema is not None:
-            found += [Finding(DECL, schema_rel, 1, f"宣言 {decl.id}: {e}") for e in _key_errors(decl)]
+            found += [Finding(DECL, schema_rel, 1, f"設定 {decl.id}: {e}") for e in _key_errors(decl)]
             real = decl_dir / decl.path
             found += [Finding(DECL, real.relative_to(repo_root).as_posix(), 1, e) for e in _real_errors(decl, real)]
     return found
@@ -193,7 +193,7 @@ def env_reads(tree: ast.Module) -> list[tuple[int, str]]:
 
 
 def io_findings(model: SpecModel, scope: Scope, rel: Rel) -> list[Finding]:
-    """副命令の引数の出所と結果のスキーマ、コードが読む環境変数、起動スクリプトの表と `bin/` の照合の指摘（この順）。"""
+    """サブコマンドの引数の出所と結果のスキーマ、コードが読む環境変数、起動スクリプトの表と `bin/` の検証の指摘（この順）。"""
     return _command_findings(model, rel) + _env_findings(model, scope) + _launcher_findings(model, rel)
 
 
@@ -201,7 +201,7 @@ def _command_findings(model: SpecModel, rel: Rel) -> list[Finding]:
     io_rel = rel(f"{CONTRACTS}/{IO_SCHEMA_DIR}")
     found = []
     for command in model.commands:
-        found += [Finding(IO, io_rel, 1, f"副命令 {command.name}: {e}") for e in _source_errors(command) + _result_errors(command)]
+        found += [Finding(IO, io_rel, 1, f"サブコマンド {command.name}: {e}") for e in _source_errors(command) + _result_errors(command)]
     return found
 
 
@@ -231,12 +231,12 @@ def _launcher_findings(model: SpecModel, rel: Rel) -> list[Finding]:
 
 
 def _segments(line: str) -> list[str]:
-    """呼び出しを探す区間。インラインのコード（`...`）を持つ行はその中身ごと、持たない行は行の全体。"""
+    """呼び出しを探すセグメント。インラインのコード（`...`）を持つ行はその中身ごと、持たない行は行の全体。"""
     return line.split("`")[1::2] if "`" in line else [line]
 
 
 def _words(segment: str) -> list[str]:
-    """区間の語の並び。単独の `#` から後ろはシェルの注釈で、呼び出しに数えない。"""
+    """セグメントの語の並び。単独の `#` から後ろはシェルの注釈で、呼び出しに数えない。"""
     try:
         words = shlex.split(segment)
     except ValueError:
@@ -245,7 +245,7 @@ def _words(segment: str) -> list[str]:
 
 
 def _call_at(words: list[str], i: int) -> list[str] | None:
-    """`words[i]` が呼び出しの先頭なら、区切りの語までの後ろの語。副命令の形でなければ `None`。"""
+    """`words[i]` が呼び出しの先頭なら、区切りの語までの後ろの語。サブコマンドの形でなければ `None`。"""
     if words[i] != ENTRY and not words[i].endswith("/bin/" + ENTRY):
         return None
     rest: list[str] = []
@@ -281,15 +281,15 @@ def _is_placeholder(word: str) -> bool:
 
 
 def call_errors(words: list[str], commands: dict[str, CommandSpec]) -> list[str]:
-    """呼び出しの語を副命令・下位の命令・引数の名前で引数の木に当て、当たらない語を返す（値の型は見ない）。
+    """呼び出しの語をサブコマンド・下位の命令・引数の名前で引数の木に当て、当たらない語を返す（値の型は見ない）。
 
     オプションの値の語は、そのオプションが取る数（`Arg.takes`）だけ読み飛ばしてから下位の命令を辿る。
     残りの語をすべて取る位置引数（`Arg.remainder`）に達するか、それを持つ命令で `--` に達したら、
-    それより後ろの語は照合しない（argparse がその位置引数へ渡す語で、引数の名前ではない）。
+    それより後ろの語は検証しない（argparse がその位置引数へ渡す語で、引数の名前ではない）。
     """
     name = words[0]
     if name not in commands:
-        return [f"副命令 {name} が無い"]
+        return [f"サブコマンド {name} が無い"]
     tree = commands[name].args
     if tree is None:
         return []
@@ -357,10 +357,10 @@ def _row_errors(model: SpecModel) -> list[str]:
     env = model.env_ids
     names = model.skill_names
     errs = [f"Skill {s.name} が Skill の入出力の表（skill-io）に行を持たない" for s in model.skills if s.present and not s.row]
-    errs += [f"公開する Skill {s.name} の行が args か env を持つ（正本はエントリポイントの表）" for s in model.skills if s.row_has_args_env]
+    errs += [f"公開する Skill {s.name} の行が args か env を持つ（SSOT はエントリポイントの表）" for s in model.skills if s.row_has_args_env]
     errs += [f"Skill の入出力の表の行 {i} の Skill に実体が無い" for i in model.skill_io_ids if i not in names]
     for s in model.skills:
-        errs += [f"Skill {s.name} の読む宣言 {d} が置き場の表に無い" for d in s.ndf_settings if d not in decls]
+        errs += [f"Skill {s.name} の読む設定 {d} が保存先の表に無い" for d in s.ndf_settings if d not in decls]
         errs += [f"Skill {s.name} の読む環境変数 {e} が環境変数の表に無い" for e in s.env if e not in env]
     return errs
 
@@ -415,17 +415,17 @@ def public_findings(model: SpecModel, plugin_root: Path, rel: Rel) -> list[Findi
 
 
 def _spec_location_findings(model: SpecModel, plugin_root: Path, ep_rel: str) -> list[Finding]:
-    """種類 spec の行が規約の置き場ごとにちょうど 1 行あり、どの行も実在の規約の置き場を指すか。"""
+    """種類 spec の行が規約の保存先ごとにちょうど 1 行あり、どの行も実在の規約の保存先を指すか。"""
     found = []
     spec = [r for r in model.entrypoints if spec_model.is_spec(r)]
     for target in SPEC_TARGETS:
         n = sum(1 for r in spec if r["target"] == target)
         if n != 1:
-            found.append(Finding(PUBLIC, ep_rel, 1, f"規約の置き場 {target} を指す種類 spec の行が {n} 行（1 行にする）"))
+            found.append(Finding(PUBLIC, ep_rel, 1, f"規約の保存先 {target} を指す種類 spec の行が {n} 行（1 行にする）"))
     for r in spec:
         if r["target"] not in SPEC_TARGETS or not (plugin_root / r["target"]).is_dir():
             found.append(
-                Finding(PUBLIC, ep_rel, 1, f"種類 spec の行 {r['id']} の置き場 {r['target']} が規約の置き場でないか、ディレクトリが無い")
+                Finding(PUBLIC, ep_rel, 1, f"種類 spec の行 {r['id']} の保存先 {r['target']} が規約の保存先でないか、ディレクトリが無い")
             )
     return found
 
@@ -438,7 +438,7 @@ def _generated(plugin_root: Path, patterns: list[str]) -> set[str]:
 
 
 def _stale(rendered: dict[str, str], plugin_root: Path, patterns: list[str]) -> list[str]:
-    """描画に無いのに生成物の置き場に残るファイル（プラグインの根からの相対パスの昇順）。"""
+    """描画に無いのに生成物の保存先に残るファイル（プラグインの根からの相対パスの昇順）。"""
     return sorted(_generated(plugin_root, patterns) - set(rendered))
 
 
@@ -466,7 +466,7 @@ def docs_findings(rendered: dict[str, str], plugin_root: Path, patterns: list[st
         if have != rendered[path]:
             found.append(Finding(DOCS, rel(path), _first_diff(rendered[path], have), "生成し直した中身と違う" + hint))
     found += [
-        Finding(DOCS, rel(p), 1, "生成されないファイルが生成物の置き場に残る" + hint) for p in _stale(rendered, plugin_root, patterns)
+        Finding(DOCS, rel(p), 1, "生成されないファイルが生成物の保存先に残る" + hint) for p in _stale(rendered, plugin_root, patterns)
     ]
     return found
 

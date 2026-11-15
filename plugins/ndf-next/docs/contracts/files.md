@@ -1,17 +1,17 @@
 # 受け渡しのファイル
 
-<!-- ndf check --write-spec が生成する。手で直さない（正本は各節の出典） -->
+<!-- ndf check --write-spec が生成する。手で直さない（SSOT は各節の出典） -->
 
-NDF の工程が書くファイル（宣言・計測値・実行の記録・文書・受け渡し）である。正本は `contracts/domains/ndf-files.json` と置き場の表 `contracts/domains/locations.json`。形（項目）を約束するのは公開する行だけで、内部の行は置き場と種類だけを載せる
+NDF の工程が書くファイル（設定・計測値・実行の記録・文書・受け渡し）である。SSOT は `contracts/domains/ndf-files.json` と保存先の表 `contracts/domains/locations.json`。形（項目）を約束するのは公開する行だけで、内部の行は保存先と種類だけを載せる
 
 ## 一覧
 
-| 行 | 置き場 | パス | 種類 | 追跡 | 書き手 | 消す時点 | 公開か |
+| 行 | 保存先 | パス | 種類 | 追跡 | 書き手 | 消す時点 | 公開か |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `approval` | `issues` repo:issues | `approval-<id>.md` | document | — | 承認ゲート（P2） | cleanup | 内部（予告なく変えてよい） |
 | `archived-docs` | `issues-old` repo:issues/old | `<name>.md` | document | 追跡 | 後片付けの工程 | kept | 内部（予告なく変えてよい） |
 | `ask` | `ndf` repo:.ndf | `ask.json` | ndf_settings | 追跡 | 人 | kept | 内部（予告なく変えてよい） |
-| `ask-journal` | `mvv-state` state:.（NDF_MVV_STATE_DIR で差し替え） | `ask.jsonl` | record | — | 人への問いの守り（M3a） | kept | 公開 |
+| `ask-journal` | `mvv-state` state:.（NDF_MVV_STATE_DIR で差し替え） | `ask.jsonl` | record | — | 人への質問の守り（M3a） | kept | 公開 |
 | `backlog` | `ndf` repo:.ndf | `backlog.json` | ndf_settings | 追跡 | 人 | kept | 内部（予告なく変えてよい） |
 | `backlog-before` | `backlog-state` main:.ndf/backlog/state（NDF_UPKEEP_STATE_DIR で差し替え） | `<repo>/before-<id>.json` | record | — | 棚卸し（M6） | kept | 内部（予告なく変えてよい） |
 | `backlog-candidates` | `backlog-state` main:.ndf/backlog/state（NDF_UPKEEP_STATE_DIR で差し替え） | `<repo>/candidates.json` | record | — | 棚卸し（M6） | replaced | 内部（予告なく変えてよい） |
@@ -35,17 +35,17 @@ NDF の工程が書くファイル（宣言・計測値・実行の記録・文�
 | `loop-record` | `ndf-loop` main:.ndf/loop | `<loop>/loop.json` | record | — | 開発ループとスプリント（M1） | cleanup | 公開 |
 | `mvv` | `ndf` repo:.ndf | `mvv.json` | ndf_settings | 追跡 | 人の承認（M7） | kept | 内部（予告なく変えてよい） |
 | `mvv-body` | `ndf` repo:.ndf | `mvv.md` | ndf_settings | 追跡 | 人の承認（M7） | kept | 内部（予告なく変えてよい） |
-| `mvv-signals` | `mvv-state` state:.（NDF_MVV_STATE_DIR で差し替え） | `mvv-signals.jsonl` | record | — | 承認ゲートの答えの写し（M7） | kept | 内部（予告なく変えてよい） |
-| `mvv-validation` | `mvv-state` state:.（NDF_MVV_STATE_DIR で差し替え） | `mvv-validation.jsonl` | record | — | MVV の照合（M7） | kept | 内部（予告なく変えてよい） |
+| `mvv-signals` | `mvv-state` state:.（NDF_MVV_STATE_DIR で差し替え） | `mvv-signals.jsonl` | record | — | 承認ゲートの回答の写し（M7） | kept | 内部（予告なく変えてよい） |
+| `mvv-validation` | `mvv-state` state:.（NDF_MVV_STATE_DIR で差し替え） | `mvv-validation.jsonl` | record | — | MVV 判定（M7） | kept | 内部（予告なく変えてよい） |
 | `organizer-answer` | `organizer` env:.（NDF_ORGANIZER_DIR で差し替え） | `answers/<id>.json` | exchange | — | 外のオーガナイザー（サービス） | kept | 公開 |
 | `organizer-batch` | `organizer` env:.（NDF_ORGANIZER_DIR で差し替え） | `batch.json` | exchange | — | 外のオーガナイザー（サービス） | kept | 公開 |
 | `organizer-presented` | `organizer` env:.（NDF_ORGANIZER_DIR で差し替え） | `presented/<n>-<k>.json` | exchange | — | リリース（M2） | kept | 公開 |
 | `organizer-progress` | `organizer` env:.（NDF_ORGANIZER_DIR で差し替え） | `progress/<n>.json` | exchange | — | リリース（M2） | kept | 公開 |
 | `organizer-range` | `organizer` env:.（NDF_ORGANIZER_DIR で差し替え） | `ranges/<n>.json` | exchange | — | 外のオーガナイザー（サービス） | kept | 公開 |
-| `organizer-request` | `organizer` env:.（NDF_ORGANIZER_DIR で差し替え） | `requests/<id>.json` | exchange | — | 計画とレーンの進行表（P3） | kept | 公開 |
+| `organizer-request` | `organizer` env:.（NDF_ORGANIZER_DIR で差し替え） | `requests/<id>.json` | exchange | — | 計画とレーンのステートマシン（P3） | kept | 公開 |
 | `organizer-result` | `organizer` env:.（NDF_ORGANIZER_DIR で差し替え） | `results/<n>.json` | exchange | — | リリース（M2） | kept | 公開 |
 | `pace` | `ndf` repo:.ndf | `pace.json` | ndf_settings | 追跡 | 人 | kept | 内部（予告なく変えてよい） |
-| `parallel` | `ndf-parallel` repo:.ndf/parallel | `<id>/` | record | — | 計画の進行表（P3） | cleanup | 内部（予告なく変えてよい） |
+| `parallel` | `ndf-parallel` repo:.ndf/parallel | `<id>/` | record | — | 計画のステートマシン（P3） | cleanup | 内部（予告なく変えてよい） |
 | `plan-progress` | `ndf-tmp` repo:.ndf/tmp | `<sprint>/<n>-<plan>-state/progress.jsonl` | record | — | プランの実行（C2） | cleanup | 公開 |
 | `project` | `ndf` repo:.ndf | `project.json` | ndf_settings | 追跡 | 人と解析（M7） | kept | 内部（予告なく変えてよい） |
 | `project-measured` | `measured` state:measured | `<repo>/project.json` | measured | — | 解析とテストの実行（M7） | replaced | 内部（予告なく変えてよい） |
@@ -70,10 +70,10 @@ NDF の工程が書くファイル（宣言・計測値・実行の記録・文�
 | `requirements` | `issues` repo:issues | `issue-<n>-requirements.md` | document | 追跡 | 要求の工程 | archived | 内部（予告なく変えてよい） |
 | `review` | `ndf` repo:.ndf | `review.json` | ndf_settings | 追跡 | 人 | kept | 内部（予告なく変えてよい） |
 | `runtime-policy` | `ndf` repo:.ndf | `runtimes.json` | ndf_settings | 追跡 | 人 | kept | 内部（予告なく変えてよい） |
-| `scratch` | `ndf-tmp` repo:.ndf/tmp | `<id>/` | record | — | 各副命令 | run | 内部（予告なく変えてよい） |
+| `scratch` | `ndf-tmp` repo:.ndf/tmp | `<id>/` | record | — | 各サブコマンド | run | 内部（予告なく変えてよい） |
 | `sprint` | `ndf-sprints` repo:.ndf/sprints | `<id>/` | record | — | 開発ループとスプリント（M1） | cleanup | 内部（予告なく変えてよい） |
 | `supervise` | `ndf` repo:.ndf | `supervise.json` | ndf_settings | 追跡 | 人 | kept | 内部（予告なく変えてよい） |
-| `usage-log-file` | `usage-log` state:usage（NDF_USAGE_DIR で差し替え） | `usage.jsonl` | record | — | 使用量の帳簿（M7） | kept | 内部（予告なく変えてよい） |
+| `usage-log-file` | `usage-log` state:usage（NDF_USAGE_DIR で差し替え） | `usage.jsonl` | record | — | 使用量の使用量ログ（M7） | kept | 内部（予告なく変えてよい） |
 | `worktree` | `ndf` repo:.ndf | `worktree.json` | ndf_settings | 追跡 | 人 | kept | 内部（予告なく変えてよい） |
 | `worktree-local` | `ndf` repo:.ndf | `worktree.local.json` | ndf_settings | — | 人（各自の機械の値。worktree.json のキーを上書きする） | kept | 内部（予告なく変えてよい） |
 

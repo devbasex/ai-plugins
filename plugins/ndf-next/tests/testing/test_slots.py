@@ -119,7 +119,7 @@ def test_gives_up_after_the_wait_limit_and_records_it(tmp_path):
 
 
 def test_llm_cli_launches_count_against_the_test_slot(tmp_path):
-    # 枠 1 本分の容量に LLM の CLI が 1 本でもいれば、テストは待つ（#3368）
+    # スロット 1 本分の容量に LLM の CLI が 1 本でもいれば、テストは待つ（#3368）
     limits = _limits(1, wait=1)
     cli = slot_pool.take(tmp_path, limits.capacity_mib, slot_pool.weight_mib("llm-cli"), {"pid": os.getpid()})
     assert cli is not None
@@ -243,11 +243,11 @@ def test_unwritable_slot_files_release_the_slot_and_run_without_it(tmp_path, mon
     monkeypatch.setattr(slot_pool, "write_json", refuse)
     with _gate(tmp_path, _limits(1)) as held:
         assert held.index is None and held.env == {}
-        assert held.note.startswith("枠の置き場へ書けないので枠を取らずに走らせた: ")
+        assert held.note.startswith("スロットの保存先へ書けないのでスロットを取らずに走らせた: ")
     monkeypatch.setattr(slot_pool, "write_json", real_write)
     with waits.returns_before(10):
         with _gate(tmp_path, _limits(1, wait=10)) as held:
-            assert held.index == 0  # 取りかけた枠は返してある
+            assert held.index == 0  # 取りかけたスロットは返してある
 
 
 @pytest.mark.skipif(not os.path.exists("/proc/self/oom_score_adj"), reason="OOM の優先度は Linux だけ")
@@ -271,7 +271,7 @@ def test_preexec_is_none_when_running_without_a_slot():
 
 @pytest.mark.parametrize("in_child", [False, True])
 def test_interrupt_after_retiring_carries_the_retired_locations(tmp_path, monkeypatch, in_child):
-    # 旧い状態の置き場を退避した後の中断（待ちの間・子の実行中）は、退避の元と先を持つ Interrupted で抜ける
+    # 旧い状態の保存先を退避した後の中断（待ちの間・子の実行中）は、退避の元と先を持つ Interrupted で抜ける
     retired = [{"retired_from": "/s/p", "retired_to": "/s/p.v10-20261114"}]
     monkeypatch.setattr(slots, "slots_location", lambda env: (tmp_path / "slots", retired))
     options = slots.GateOptions(
@@ -286,7 +286,7 @@ def test_interrupt_after_retiring_carries_the_retired_locations(tmp_path, monkey
 
 
 def test_gate_keeps_the_locations_retired_before_preparing_failed(tmp_path, monkeypatch):
-    # 退避の途中で失敗して枠を取らずに走らせるときも、先に退避した元と先を Held に残す
+    # 退避の途中で失敗してスロットを取らずに走らせるときも、先に退避した元と先を Held に残す
     retired = (identity.Retired(Path("/s/p"), Path("/s/p.v10-20261114")),)
 
     def fail(env):

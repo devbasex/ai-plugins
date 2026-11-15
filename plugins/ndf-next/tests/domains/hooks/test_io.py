@@ -106,7 +106,7 @@ def test_sender_drops_without_slack_and_keeps_failed_sends(tmp_path, monkeypatch
 def test_queues_are_kept_per_destination(tmp_path, monkeypatch):
     # プロジェクト A の宛先で残った通知を、プロジェクト B の接続で起動した送り手が送らない
     other = {"SLACK_BOT_TOKEN": "t-b", "SLACK_CHANNEL_ID": "C-B"}
-    outbox.enqueue(tmp_path, "question", {"text": "A の問い"}, DEST)
+    outbox.enqueue(tmp_path, "question", {"text": "A の質問"}, DEST)
     sent = []
     monkeypatch.setattr(sender.notify, "post_json", lambda url, body, headers, timeout: sent.append((headers, body)) or {"ok": True})
     assert sender.run(tmp_path, other) == 0 and sent == []
@@ -139,7 +139,7 @@ def test_sender_reads_the_queue_again_after_releasing_the_lock(tmp_path, monkeyp
 
 
 def test_queued_notices_are_readable_only_by_the_owner(tmp_path):
-    # 問いの本文を持つので、umask によらず置き場は 0700・ファイルは 0600
+    # 質問の本文を持つので、umask によらず保存先は 0700・ファイルは 0600
     old = os.umask(0o022)
     try:
         path = outbox.enqueue(tmp_path, "question", {"text": "q"}, DEST)

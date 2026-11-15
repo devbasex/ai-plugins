@@ -1,12 +1,12 @@
 """新しいプラグインの不変条件 I1〜I3（issues/issue-1142-design-next.md の「不変条件」）。
 
-- I1: コード（`src/` の `.py`・`bin/`・`hooks/` のスクリプト）は、自分のプラグイン名・ディレクトリ名・状態の置き場の名前を
-  文字で持たない。名前は `identity` が `plugin.json` から求める。`hooks/` の `.json`（hook の登録）は `ndf hooks render` が
-  `plugin.json` から作る生成物で、照合しない（名前を変えたら作り直す）
+- I1: コード（`src/` の `.py`・`bin/`・`hooks/` のスクリプト）は、自分のプラグイン名・ディレクトリ名・状態の保存先の名前を
+  文文字列で持たない。名前は `identity` が `plugin.json` から求める。`hooks/` の `.json`（hook の登録）は `ndf hooks render` が
+  `plugin.json` から作る生成物で、検証しない（名前を変えたら作り直す）
 - I2: 新しいプラグインの子の PR（差分が新しいプラグインも変える）は、旧いプラグインのディレクトリを変えない。即時修正だけは、
-  PR 本文の印の行で許す
+  PR 本文の抑制コメントの行で許す
 - port: 旧いプラグインを変えた PR は、PR 本文に新しいプラグインへ移す先の Issue か移さない理由を持つ（#3343）
-- I3: 旧いプラグインの Python を読まない。import は自分のパッケージ・標準ライブラリ・宣言した依存だけ
+- I3: 旧いプラグインの Python を読まない。import は自分のパッケージ・標準ライブラリ・定義した依存だけ
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ IDENTITY_FILE = module_rel(identity.__name__, ".py")
 DEFINITION_NAMES = frozenset({"FINAL_NAME", "FIXED_WORDS"})
 # 移す先の行が持つ Issue の参照
 ISSUE_REF = re.compile(r"#\d+")
-# Python のパッケージの形（`src/<パッケージ>`・`<パッケージ>.<モジュール>`）。プラグイン名から切り離した固定の名前で、I1 は照合しない
+# Python のパッケージの形（`src/<パッケージ>`・`<パッケージ>.<モジュール>`）。プラグイン名から切り離した固定の名前で、I1 は検証しない
 PACKAGE_FORM = re.compile(rf"(?<![\w.-])(?:src/{OWN_PACKAGE}(?![\w-])|{OWN_PACKAGE}\.(?=[A-Za-z_]))")
 # `old_plugin_diff` が出す規則。差分と PR 本文だけで決まり、プラグインのファイルを読まない
 DIFF_RULES = frozenset({"port", "I2"})
@@ -60,16 +60,16 @@ def _shell_lines(src: Source) -> list[tuple[int, str]]:
 
 
 def own_name(scope: Scope) -> list[Finding]:
-    """I1: コードが自分の名前を文字で持つ箇所（#3347 の決定 101）。
+    """I1: コードが自分の名前を文文字列で持つ箇所（#3347 の決定 101）。
 
     名前の文字列そのものは今の名前と入れ替えの後の名前（`identity.FINAL_NAME`）で、パスと前置きはそれに
-    ディレクトリ名を足して照合する。Python のパッケージの形（`src/ndf/`・`ndf.` で始まるモジュール名）は照合しない。
+    ディレクトリ名を足して検証する。Python のパッケージの形（`src/ndf/`・`ndf.` で始まるモジュール名）は検証しない。
     `identity` の固定の語の表（`FIXED_WORDS`）と `FINAL_NAME` の定義の行だけは通す。
     """
     exact = {scope.plugin_name, identity.FINAL_NAME, *identity.FIXED_WORDS.values()}
     pattern = _name_pattern(exact | {scope.plugin_root.name})
     return [
-        Finding("I1", src.rel, no, f"自分の名前を文字で持つ: {text.strip()[:80]}")
+        Finding("I1", src.rel, no, f"自分の名前を文文字列で持つ: {text.strip()[:80]}")
         for src in scope.sources
         for no, text in _own_name_texts(scope, src)
         if text in exact or pattern.search(PACKAGE_FORM.sub("", text))
@@ -77,11 +77,11 @@ def own_name(scope: Scope) -> list[Finding]:
 
 
 def _own_name_texts(scope: Scope, src: Source) -> list[tuple[int, str]]:
-    """I1 が照合する行と文字。製品の Python は文字列の定数（`identity` の定義の行を除く）、スクリプトはコメントを除いた行。
+    """I1 が検証する行と文字。製品の Python は文字列の定数（`identity` の定義の行を除く）、スクリプトはコメントを除いた行。
 
-    `bin/`・`hooks/` の `.json`（`ndf hooks render` が作る登録）は照合しない。
+    `bin/`・`hooks/` の `.json`（`ndf hooks render` が作る登録）は検証しない。
 
-    ほかのファイルは照合しない（空）。
+    ほかのファイルは検証しない（空）。
     """
     rel = scope.plugin_rel(src)
     if src.is_python and rel.startswith(SRC_DIR + "/"):
@@ -111,7 +111,7 @@ def _pyproject(plugin_root: Path) -> dict[str, Any]:
 
 
 def declared_tops(plugin_root: Path) -> frozenset[str]:
-    """`pyproject.toml` が宣言した依存（グループを含む）が入れる最上位のモジュールの名前。"""
+    """`pyproject.toml` が定義した依存（グループを含む）が入れる最上位のモジュールの名前。"""
     project = _pyproject(plugin_root)
     specs = list(project["project"]["dependencies"])
     specs += [s for group in project["dependency-groups"].values() for s in group]
@@ -138,7 +138,7 @@ def _normalize(dist: str) -> str:
 
 
 def old_imports(scope: Scope, old_plugin: str) -> list[Finding]:
-    """I3: 自分のパッケージ・標準ライブラリ・宣言した依存の外の import と、旧いプラグインのパスの文字。
+    """I3: 自分のパッケージ・標準ライブラリ・定義した依存の外の import と、旧いプラグインのパスの文字。
 
     同じディレクトリの隣の `.py` と、pytest の `pythonpath` にある `.py`（テストの補助のモジュール）は自分のものとして許す。
     """
@@ -159,7 +159,7 @@ def _undeclared_imports(src: Source, own: frozenset[str]) -> list[Finding]:
     """`own` の外の最上位のモジュールを読む import。"""
     found = []
     for node in ast.walk(src.tree):
-        found += [Finding("I3", src.rel, node.lineno, f"宣言の外のモジュールを読む: {t}") for t in _import_tops(node) if t not in own]
+        found += [Finding("I3", src.rel, node.lineno, f"設定の外のモジュールを読む: {t}") for t in _import_tops(node) if t not in own]
     return found
 
 
@@ -192,7 +192,7 @@ def changed_files(repo_root: Path, base: str, *dirs: str) -> list[str]:
 
 
 def mark_reason(pr_body: str, mark: str) -> str:
-    """PR 本文の、印で始まる行の理由。印の行が無いか理由が空なら空の文字列。"""
+    """PR 本文の、抑制コメントで始まる行の理由。抑制コメントの行が無いか理由が空なら空の文字列。"""
     reasons = [line.strip()[len(mark) :].strip() for line in pr_body.splitlines() if line.strip().startswith(mark)]
     return next((r for r in reasons if r), "")
 
@@ -209,7 +209,7 @@ def old_plugin_diff(scope: Scope, conf: dict[str, Any]) -> list[Finding]:
     """I2 と規則 port。起点が無ければ見ない。
 
     - port: 差分が旧いプラグインを変えたら、PR 本文に移す先の Issue か移さない理由が要る
-    - I2: 新しいプラグインも変えた差分（新しいプラグインの子の PR）は、旧いプラグインを変えない。即時修正の印があれば許す
+    - I2: 新しいプラグインも変えた差分（新しいプラグインの子の PR）は、旧いプラグインを変えない。即時修正の抑制コメントがあれば許す
     """
     if scope.base is None:
         return []

@@ -1,6 +1,6 @@
 {
-  "summary": "T2 #3411 の 2 回目の試走（2026-11-16）。#3569 の実装（PR #3590）の上で ndf-next だけを読む起動でスプリントを流した。手順 0 の $SCRIPTS は空のままで旧いプラグインへ解決せず、宣言の判定・測定・書き出しは ndf project で通り、判定結果の次のコマンド（ndf progress new）も ndf-next だけで打てた。試走の後、本文から supervise.py・relay.py・test-run.py の呼び出しを外した 3067c1b83（手順 0 の本文は変えていない）で対応表を判定し直した（failed 109・passed 16・not_run 91）。行ごとの結果は対応表の trial の列にあり、python -m ndf.parity.trial.probe --write がこの記録の passed と本文の確かめから書く",
-  "base": "sprint/lr-t2-3569 6c22947d6（PR #3590 の head。develop を取り込み済み。ndf-next 11.0.0-dev.8）",
+  "summary": "T2 #3411 の 2 回目の試走（2026-11-16）。#3569 の実装（PR #3590）の上で ndf-next だけを読む起動でスプリントを流した。手順 0 の $SCRIPTS は空のままで旧いプラグインへ解決せず、設定の判定・測定・書き出しは ndf project で通り、判定結果の次のコマンド（ndf progress new）も ndf-next だけで打てた。試走の後、本文から supervise.py・relay.py・test-run.py の呼び出しを外した 3067c1b83（手順 0 の本文は変えていない）で対応表を判定し直した（failed 109・passed 16・not_run 91）。行ごとの結果は対応表の trial の列にあり、python -m ndf.parity.trial.probe --write がこの記録の passed と本文の確かめから書く",
+  "base": "sprint/lr-t2-3569 6c22947d6（PR #3590 の head。develop をマージ済み。ndf-next 11.0.0-dev.8）",
   "runs": [
     {
       "what": "起動",
@@ -13,18 +13,18 @@
       "issue": 3411,
       "command": "plugins/ndf-next/bin/ndf-claude -p --output-format stream-json --verbose --max-turns 40 --permission-mode bypassPermissions \"/ndf11:development-workflow #3411 の手順 0 から 3（判定結果の出力）までだけを行い、次のコマンドは打たずに判定結果を返して終える\"",
       "result": "passed",
-      "observed": "手順 0 は SCRIPTS= の空のまま進み、plugins/ndf/scripts へ解決しなかった。worktree-setup.sh check（M8 #3408）と project-mvv.py check（M7 #3302）は新しいプラグインだけでは打てないとして飛ばした。ndf project check が 3（宣言が古い。変わった入力 .github/workflows/ndf-next-checks.yml・ndf-next.yml）を返し、ndf project measure → 答え → ndf project write を通して再度の check は 0。宣言はメインディレクトリの .ndf/project.json に書かれた（旧い project-decl.py と同じ置き場）。判定結果は mode: standard、次のコマンドは ndf progress new lr-t2-3569 --mode standard --issues 3411 3569。11 ターン・$0.87"
+      "observed": "手順 0 は SCRIPTS= の空のまま進み、plugins/ndf/scripts へ解決しなかった。worktree-setup.sh check（M8 #3408）と project-mvv.py check（M7 #3302）は新しいプラグインだけでは打てないとして飛ばした。ndf project check が 3（設定が古い。変わった入力 .github/workflows/ndf-next-checks.yml・ndf-next.yml）を返し、ndf project measure → 回答 → ndf project write を通して再度の check は 0。設定はメインディレクトリの .ndf/project.json に書かれた（旧い project-decl.py と同じ保存先）。判定結果は mode: standard、次のコマンドは ndf progress new lr-t2-3569 --mode standard --issues 3411 3569。11 ターン・$0.87"
     },
     {
       "what": "次のコマンド",
       "command": "NDF_PROGRESS_DB=sqlite:///<スクラッチ>/trial2-progress.db plugins/ndf-next/bin/ndf progress new lr-t2-3569 --mode standard --issues 3411 3569",
       "result": "passed",
-      "observed": "exit 0。進行表 sprint:2cea9b46d998:lr-t2-3569 を作った（18 行、無効 0 行）。共有の進捗記録を汚さないよう、接続先をスクラッチの SQLite にして 1 回だけ打った"
+      "observed": "exit 0。ステートマシン sprint:2cea9b46d998:lr-t2-3569 を作った（18 行、無効 0 行）。共有の進捗記録を汚さないよう、接続先をスクラッチの SQLite にして 1 回だけ打った"
     },
     {
       "what": "計画",
       "result": "not_run",
-      "reason": "並列の計画（parallel.py。行き先 P3 #3097 は開いている）は ndf-next に置き場が無く、流していない。スプリントの続き（工程の実行）も、外へ届く操作（マージ・リリース・課題の閉鎖）を含むため流していない"
+      "reason": "並列の計画（parallel.py。移行先 P3 #3097 は開いている）は ndf-next に保存先が無く、流していない。スプリントの続き（工程の実行）も、外へ届く操作（マージ・リリース・課題の閉鎖）を含むため流していない"
     },
     {
       "what": "閉じる証拠（#2602・#2690・#2719 の再現しない記録）",
@@ -33,7 +33,7 @@
     }
   ],
   "fixes": {
-    "open_children": "failed の行は、行の to の子が直す。行き先の子の Issue 番号は src/ndf/checks/children.json にある"
+    "open_children": "failed の行は、行の to の子が直す。移行先の子の Issue 番号は src/ndf/checks/children.json にある"
   },
   "passed": [
     "entrypoint:scripts/project-decl.py"

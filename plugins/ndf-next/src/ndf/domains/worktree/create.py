@@ -1,14 +1,14 @@
 """作業場所の用意: ブランチの worktree を `<メインディレクトリ>/.worktrees/<ブランチ>` に作る。
 
-起点は `start` を渡せばそれ、無ければスプリントの起点（宣言の `branch_flow.start` が指すチャネル。`base` は
-`base_branch`、`production` は `production_branch`。宣言が無い・値が無ければ origin の既定ブランチ）である。
-宣言は書き換えない。課題の worktree はスプリントブランチを `start` に渡して切る。
+起点は `start` を渡せばそれ、無ければスプリントの起点（設定の `branch_flow.start` が指すチャネル。`base` は
+`base_branch`、`production` は `production_branch`。設定が無い・値が無ければ origin の既定ブランチ）である。
+設定は書き換えない。課題の worktree はスプリントブランチを `start` に渡して切る。
 
 - 取得（`git fetch origin`）は作る前に 1 回だけ行う。失敗しても止めず `warnings` に載せる（origin の無い
   リポジトリでもローカルのブランチから切れる）。hook は取得しない（hook の外で通信する決まり）
 - 起点は origin に参照があればそれ、無ければローカルのブランチから切る。どちらにも無ければ作らずに止める
 - ブランチが既にあれば、そのブランチを checkout した worktree を作る（新しいブランチを切らない）
-- 置き場が既にある・置き場が `.gitignore` に無い・ブランチ名として使えないときは作らずに止める
+- 保存先が既にある・保存先が `.gitignore` に無い・ブランチ名として使えないときは作らずに止める
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ REMOTE = ORIGIN
 
 
 class CreateError(Exception):
-    """作れない。`kind` は止まった理由の表の種類（`invalid`・`precondition`・`refused`）。"""
+    """作れない。`kind` は停止理由の表の種類（`invalid`・`precondition`・`refused`）。"""
 
     def __init__(self, kind: str, detail: str) -> None:
         super().__init__(detail)
@@ -54,7 +54,7 @@ def start_branch(git: Git, decl: Optional[ndf_settings.NdfSettings]) -> str:
     if name is None:
         name = repo.default_branch(git)
     if name is None:
-        raise CreateError("precondition", "ベースブランチを決められない（宣言の base_branch も origin の既定ブランチも無い）")
+        raise CreateError("precondition", "ベースブランチを決められない（設定の base_branch も origin の既定ブランチも無い）")
     return name
 
 
@@ -70,7 +70,7 @@ def _check_location(git: Git, main_dir: Path, target: Path) -> None:
     if ignored.returncode != 0:
         raise CreateError("precondition", f"{rel}/ が .gitignore に無い。作る前に登録する")
     if target.exists():
-        raise CreateError("refused", f"worktree の置き場が既にある: {target}")
+        raise CreateError("refused", f"worktree の保存先が既にある: {target}")
 
 
 def _fetch(git: Git) -> list[str]:

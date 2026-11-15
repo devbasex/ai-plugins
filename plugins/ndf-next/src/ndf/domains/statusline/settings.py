@@ -1,10 +1,10 @@
-"""statusline の設定（`settings.json` の `statusLine`）と控え・表示の本体を、排他の中で切り替える（#3569）。
+"""statusline の設定（`settings.json` の `statusLine`）とバックアップ・表示の本体を、排他の中で切り替える（#3569）。
 
-旧いプラグインの `statusline-switch.sh` の振る舞いを移した。置き場は旧いと同じにする（旧い版で控えた利用者が新しい版で
+旧いプラグインの `statusline-switch.sh` の振る舞いを移した。保存先は旧いと同じにする（旧いバージョンでバックアップした利用者が新しいバージョンで
 `restore` できるため）。
 
 - `settings.json` は Claude Code と同じく `CLAUDE_CONFIG_DIR`（無ければ `~/.claude`）の下。symlink なら参照先へ書き、
-  控え（`.ndf-statusline-backup.json`）と排他（`.ndf-statusline.lock`）も参照先の隣に置く（#1576）
+  バックアップ（`.ndf-statusline-backup.json`）と排他（`.ndf-statusline.lock`）も参照先の隣に置く（#1576）
 - 表示の本体は `~/.claude/ndf-statusline.sh`。`statusLine.command` が `~` 起点で指すため `CLAUDE_CONFIG_DIR` に依らない
 - 排他は旧い `flock` コマンドと同じ種類の錠（`fcntl.flock`）で取り、旧い書き手と互いに待つ
 - JSON は Python で読み書きし、`jq` を使わない
@@ -56,7 +56,7 @@ class Paths(NamedTuple):
 
 
 class Switched(NamedTuple):
-    """行った操作（`action`）と、今の `statusLine`・控えの値。"""
+    """行った操作（`action`）と、今の `statusLine`・バックアップの値。"""
 
     action: str
     message: str
@@ -65,11 +65,11 @@ class Switched(NamedTuple):
 
 
 def paths(environ: Mapping[str, str], home: Optional[Path] = None) -> Paths:
-    """`settings.json`（symlink なら参照先）・控え・排他・表示の本体の置き場。壊れた symlink は `StatuslineError`。"""
+    """`settings.json`（symlink なら参照先）・バックアップ・排他・表示の本体の保存先。壊れた symlink は `StatuslineError`。"""
     link = signals.claude_config_root(environ) / SETTINGS_NAME
     settings = link.resolve(strict=False) if link.is_symlink() else link
     if link.is_symlink() and not settings.parent.is_dir():
-        raise StatuslineError("invalid", f"{link} の参照先の置き場が無い: {settings}")
+        raise StatuslineError("invalid", f"{link} の参照先の保存先が無い: {settings}")
     base = home if home is not None else Path.home()
     return Paths(settings, settings.parent / BACKUP_NAME, settings.parent / LOCK_NAME, base / ".claude" / BODY_NAME)
 
@@ -123,7 +123,7 @@ def _ndf_line() -> dict[str, Any]:
 
 
 def _location_body(p: Paths) -> bool:
-    """表示の本体を今の版で置く。中身が同じなら置かない。置いたら真。"""
+    """表示の本体を今のバージョンで置く。中身が同じなら置かない。置いたら真。"""
     text = BODY_SOURCE.read_text(encoding="utf-8")
     if p.body.is_file() and p.body.read_text(encoding="utf-8") == text:
         return False
@@ -169,7 +169,7 @@ def _keep_refresh(p: Paths, data: dict[str, Any], line: dict[str, Any]) -> None:
 
 
 def ensure(p: Paths, home: Optional[Path] = None) -> Switched:
-    """SessionStart 向け。`statusLine` が無ければ NDF の表示を設定する。NDF の表示なら本体だけを今の版に置き直す。"""
+    """SessionStart 向け。`statusLine` が無ければ NDF の表示を設定する。NDF の表示なら本体だけを今のバージョンに置き直す。"""
     placed = _location_body(p)
     data = _read_settings(p)
     line = _status_line(data)
@@ -179,22 +179,22 @@ def ensure(p: Paths, home: Optional[Path] = None) -> Switched:
     if is_ndf(line):
         _keep_refresh(p, data, line)
         action = "updated" if placed else "kept"
-        return Switched(action, "NDF の表示を使っている。本体を今の版に揃えた", line, _read_backup(p))
+        return Switched(action, "NDF の表示を使っている。本体を今のバージョンに揃えた", line, _read_backup(p))
     if _managed_copy(_script_path(line, home if home is not None else Path.home())):
         return _migrate(p, data, line)
     return Switched("kept", "statusLine は利用者の設定のため触らない", line, _read_backup(p))
 
 
 def _migrate(p: Paths, data: dict[str, Any], line: dict[str, Any]) -> Switched:
-    """NDF が過去に置いたコピーを指す設定を、控えてから正規の置き場の参照へ移す。"""
+    """NDF が過去に置いたコピーを指す設定を、バックアップしてから正規の保存先の参照へ移す。"""
     if not p.backup.exists():
         _write(p.backup, line)
     _write(p.settings, _with_ndf(data))
-    return Switched("updated", f"NDF の旧いコピーを指す設定を正規の置き場へ移した（旧い設定は {p.backup} に控えた）", _ndf_line(), line)
+    return Switched("updated", f"NDF の旧いコピーを指す設定を正規の保存先へ移した（旧い設定は {p.backup} にバックアップした）", _ndf_line(), line)
 
 
 def status(p: Paths) -> Switched:
-    """今の `statusLine` と控えの有無を読む。何も書かない。"""
+    """今の `statusLine` とバックアップの有無を読む。何も書かない。"""
     line = _status_line(_read_settings(p))
     if line is None:
         message = "statusLine: 未設定（既定の表示）"
@@ -206,14 +206,14 @@ def status(p: Paths) -> Switched:
 
 
 def set_ndf(p: Paths) -> Switched:
-    """今の値を控えて NDF の表示へ切り替える。既に NDF の表示なら再描画の間隔だけを補う。"""
+    """今の値をバックアップして NDF の表示へ切り替える。既に NDF の表示なら再描画の間隔だけを補う。"""
     data = _read_settings(p)
     _location_body(p)
     line = _status_line(data)
     if is_ndf(line) and line is not None:
         _keep_refresh(p, data, line)
         return Switched("kept", "既に NDF の表示が設定されている", line, _read_backup(p))
-    # 上書きする前の控え（settings.json を書けなければこの中身へ戻す。無かったなら消す）
+    # 上書きする前のバックアップ（settings.json を書けなければこの中身へ戻す。無かったなら消す）
     before = _backup_text(p) if line is not None else None
     if line is not None:
         _write(p.backup, line)
@@ -227,7 +227,7 @@ def set_ndf(p: Paths) -> Switched:
 
 
 def _backup_text(p: Paths) -> Optional[str]:
-    """今の控えのバイト列のまま（壊れた JSON でも戻せるよう、読み解かない）。無ければ None。"""
+    """今のバックアップのバイト列のまま（壊れた JSON でも戻せるよう、読み解かない）。無ければ None。"""
     if not p.backup.exists():
         return None
     try:
@@ -237,7 +237,7 @@ def _backup_text(p: Paths) -> Optional[str]:
 
 
 def _undo_backup(p: Paths, before: Optional[str]) -> None:
-    """控えを操作の前の状態へ戻す。前に控えがあればその中身を書き戻し、無ければ消す。"""
+    """バックアップを操作の前の状態へ戻す。前にバックアップがあればその中身を書き戻し、無ければ消す。"""
     if before is None:
         p.backup.unlink(missing_ok=True)
         return
@@ -248,15 +248,15 @@ def _undo_backup(p: Paths, before: Optional[str]) -> None:
 
 
 def restore(p: Paths) -> Switched:
-    """控えから元の値へ戻し、控えを消す。控えが無く NDF の表示なら `statusLine` を消す。"""
+    """バックアップから元の値へ戻し、バックアップを消す。バックアップが無く NDF の表示なら `statusLine` を消す。"""
     data = _read_settings(p)
     backup = _read_backup(p)
     if backup is not None:
         _write(p.settings, {**data, "statusLine": backup})
         p.backup.unlink(missing_ok=True)
-        return Switched("restored", "控えから statusLine を戻した", backup, None)
+        return Switched("restored", "バックアップから statusLine を戻した", backup, None)
     line = _status_line(data)
     if is_ndf(line):
         _write(p.settings, {k: v for k, v in data.items() if k != "statusLine"})
-        return Switched("removed", "控えが無いため statusLine を消した（既定の表示に戻る）", None, None)
-    return Switched("kept", "戻すものが無い（NDF の表示を使っておらず、控えも無い）", line, None)
+        return Switched("removed", "バックアップが無いため statusLine を消した（既定の表示に戻る）", None, None)
+    return Switched("kept", "戻すものが無い（NDF の表示を使っておらず、バックアップも無い）", line, None)

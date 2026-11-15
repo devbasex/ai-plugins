@@ -53,7 +53,7 @@ def test_kinds_lack_lists_criteria_without_a_kind():
 
 
 def test_absorbed_missing_lists_lost_criteria_per_issue():
-    """取り込んだ課題の受け入れ条件が取り込み先から落ちていれば拾う（#2274）。"""
+    """統合した課題の受け入れ条件が統合先から落ちていれば拾う（#2274）。"""
     absorbed = {10: "## 受け入れ条件\n\n- [ ] A が動く\n- [ ] C が動く\n"}
     assert absorbed_missing(BODY, absorbed) == {10: ["C が動く"]}
 

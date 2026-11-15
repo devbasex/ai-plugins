@@ -32,7 +32,7 @@ TOOL = cli.tool_of(__name__)
 DIGEST = re.compile(r"[0-9a-f]{64}")
 # 書くときのインデント（人が書いた .ndf/ の実物と同じ）
 INDENT = 2
-# 書き換えの対象の設定のスキーマの置き場（contracts/schemas/ からの相対）
+# 書き換えの対象の設定のスキーマの保存先（contracts/schemas/ からの相対）
 SCHEMA_DIR = "ndf-settings"
 
 

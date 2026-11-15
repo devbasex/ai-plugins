@@ -139,7 +139,7 @@ def test_domain_tables_are_read_by_name(contracts_copy, fact_table):
 
 def test_same_name_in_both_locations_is_refused(contracts_copy, fact_table):
     contracts_copy("domains/exit-codes.json", lambda _: fact_table({}, [{"id": "x"}]))
-    with pytest.raises(facts.FactsError, match="2 つの置き場"):
+    with pytest.raises(facts.FactsError, match="2 つの保存先"):
         facts.table("exit-codes")
 
 
@@ -155,7 +155,7 @@ def test_table_ref_must_name_the_tables_location(contracts_copy, fact_table):
     assert any("'nobody' が表 runtimes に無い" in e for e in errs)
 
 
-# 現状固定テスト（I-001）: 列の宣言から作る行の形。`checks/facts.py` の `row_schema` と違い、`id` は既定で空を許さず、`id` の列の宣言があればそれで置き換える。
+# 現状固定テスト（I-001）: 列の設定から作る行の形。`checks/facts.py` の `row_schema` と違い、`id` は既定で空を許さず、`id` の列の設定があればそれで置き換える。
 
 ROW_COLUMNS = {"rank": {"type": "integer", "summary": "r"}, "tags": {"type": "array", "summary": "t", "optional": True}}
 
@@ -197,7 +197,7 @@ def test_row_shape_missing_required_column(contracts_copy, fact_table):
         facts.table("sample")
 
 
-# 現状固定テスト（I-008）: 列の ref の先に無い値の文面と順。列の宣言の順に、列の中は行の順に並ぶ。
+# 現状固定テスト（I-008）: 列の ref の先に無い値の文面と順。列の設定の順に、列の中は行の順に並ぶ。
 
 
 def test_ref_errors_lists_missing_values_in_column_then_row_order(contracts_copy, sample_table):
@@ -209,8 +209,8 @@ def test_ref_errors_lists_missing_values_in_column_then_row_order(contracts_copy
     ]
     contracts_copy("facts/sample.json", lambda _: {**sample_table, "rows": rows})
     assert facts.ref_errors("sample", {"monitor.phase.review"}) == [
-        "sample:a の policy 'nope' の方針 monitor.phase.nope が上限の宣言に無い",
-        "sample:d の policy 'gone' の方針 monitor.phase.gone が上限の宣言に無い",
+        "sample:a の policy 'nope' の方針 monitor.phase.nope が上限の設定に無い",
+        "sample:d の policy 'gone' の方針 monitor.phase.gone が上限の設定に無い",
         "sample:a の code 'zz' が表 exit-codes に無い",
         "sample:c の code 'yy' が表 exit-codes に無い",
     ]

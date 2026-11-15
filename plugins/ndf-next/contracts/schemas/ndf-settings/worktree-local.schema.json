@@ -18,7 +18,7 @@
       "enum": [
         1
       ],
-      "description": "宣言の形の版。読み手は知らない版を読まない"
+      "description": "設定の形のバージョン。読み手は知らないバージョンを読まない"
     },
     "follow_branch": {
       "type": "boolean",
@@ -38,7 +38,7 @@
   "x-ndf-read-by": [
     {
       "by": "ndf worktree",
-      "when": "worktree の運用の宣言を読むとき（共有設定に重ねる）"
+      "when": "worktree の運用の設定を読むとき（共有設定に重ねる）"
     }
   ],
   "examples": [

@@ -1,4 +1,4 @@
-"""HTTP で送る・取るアダプター（`ndf.adapters.notify`）。ネットワークへは出ず、`httpx.MockTransport` で答える。"""
+"""HTTP で送る・取るアダプター（`ndf.adapters.notify`）。ネットワークへは出ず、`httpx.MockTransport` で回答する。"""
 
 from __future__ import annotations
 

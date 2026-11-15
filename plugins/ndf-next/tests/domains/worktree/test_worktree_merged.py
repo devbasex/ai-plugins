@@ -1,4 +1,4 @@
-"""マージの後の後片付け・退避・ブランチの追従・宣言の導入を、一時の git のリポジトリで確かめる。"""
+"""マージの後の後片付け・退避・ブランチの追従・設定の導入を、一時の git のリポジトリで確かめる。"""
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ class FakeHub:
 
 
 def _land(main_repo: Path, run_git: Callable, branch: str) -> Path:
-    """worktree を作ってコミットし、origin の develop へマージした状態にする（メインディレクトリは取り込む前）。"""
+    """worktree を作ってコミットし、origin の develop へマージした状態にする（メインディレクトリはマージする前）。"""
     wt = create.create(main_repo, branch).path
     (wt / f"{branch.replace('/', '-')}.txt").write_text("x", encoding="utf-8")
     run_git(wt, "add", "-A")
@@ -48,7 +48,7 @@ def test_after_merge_removes_worktree_and_branch_then_fast_forwards(main_repo: P
     (wt / "__pycache__" / "m.pyc").write_text("", encoding="utf-8")
     run_git(
         main_repo, "update-ref", "refs/remotes/origin/develop", "develop"
-    )  # 取得済みの参照を古くし、取り込みが fetch を読むことを確かめる
+    )  # 取得済みの参照を古くし、マージが fetch を読むことを確かめる
 
     rec = merged.after_merge(main_repo, [7, 8, 9], FakeHub({7: _pull(7, "feat/a", True), 8: _pull(8, "feat/b", False)}))
 
@@ -78,7 +78,7 @@ def test_after_merge_keeps_tracked_changes_and_main_dir_off_base(main_repo: Path
 
 
 def test_sprint_branch_uses_start_record_over_ndf_settings(main_repo: Path, run_git: Callable) -> None:
-    """宣言（whole）を変えても、開始時の記録（selected）で始めたスプリントブランチは本番に入るまで残す（#3310）。"""
+    """設定（whole）を変えても、開始時の記録（selected）で始めたスプリントブランチは本番に入るまで残す（#3310）。"""
     wt = _land(main_repo, run_git, "sprint/s1")
     record = {"release_strategy": "release_branch", "production_branch": "main"}
     rec = merged.after_merge(main_repo, [2], FakeHub({2: _pull(2, "sprint/s1", True)}), flow_record=record)
@@ -123,16 +123,16 @@ def test_setup_init_and_state(make_repo: Callable) -> None:
     got = setup.init(main)
     assert got.written and setup.state(main).state == setup.PRESENT
     assert (main / ".ndf" / ".gitignore").read_text(encoding="utf-8").splitlines()[-1] == "worktree.local.json"
-    assert not setup.init(main).written  # 既にある宣言は上書きしない
+    assert not setup.init(main).written  # 既にある設定は上書きしない
     (main / ".ndf" / "worktree.json").write_text("{", encoding="utf-8")
     assert setup.state(main).state == setup.UNREADABLE
     with pytest.raises(setup.SetupError):
-        setup.init(main)  # 読めない宣言は書き直さない
+        setup.init(main)  # 読めない設定は書き直さない
     assert setup.init(main, force=True).written
 
 
 def test_after_merge_evacuates_meta_json_and_named_dirs_without_overwriting(main_repo: Path, run_git: Callable) -> None:
-    """利用者の meta.json は管理の台帳に上書きされず、名前だけで生成物と決められない target・venv は退避する。"""
+    """利用者の meta.json は管理のジャーナルに上書きされず、名前だけで生成物と決められない target・venv は退避する。"""
     wt = _land(main_repo, run_git, "feat/m")
     (wt / "meta.json").write_text("mine", encoding="utf-8")
     for name in ("target", "venv"):

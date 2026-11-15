@@ -1,6 +1,6 @@
 # リリースコマンドを走らせる
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `merged-steps.py`（M8）・`release-steps.py`（M2）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトのサブコマンドは新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `merged-steps.py`（M8）・`release-steps.py`（M2）。移行先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 **リポジトリに固有のリリースの手順は、リポジトリのリリースの設定 `.ndf/release.json` が
 リリースコマンドとして持つ。** `release` は手順 3 で、設定されたコマンドを 1 行のコマンドで走らせるだけである。
@@ -26,7 +26,7 @@
 }
 ```
 
-`release` の手順 3 で、版と変更履歴を上げた後、リリースの Pull Request を作る前に次を打つ。
+`release` の手順 3 で、バージョンと変更履歴を上げた後、リリースの Pull Request を作る前に次を打つ。
 
 ```bash
 python3 "$SCRIPTS/release-steps.py" run --root . --stage production --version 2.4.0
@@ -54,11 +54,11 @@ echo "exit=$rc"
 
 | 項目 | 必須 | 何を決めるか |
 | --- | --- | --- |
-| `version` | 必須 | 設定の形の版。`1` だけを読む |
+| `version` | 必須 | 設定の形のバージョン。`1` だけを読む |
 | `steps` | 必須 | コマンドの並び。書いた順に実行し、最初に落ちたコマンドで止める |
 | `steps[].name` | 必須 | 出力と完了報告に出す名前 |
 | `steps[].stage` | 必須 | `production` / `verification` / `any` |
-| `steps[].command` | 必須 | 引数の配列。シェルを通さない。`{version}` を配る版で置き換える（置き換えるのはこの 1 つだけ） |
+| `steps[].command` | 必須 | 引数の配列。シェルを通さない。`{version}` を配るバージョンで置き換える（置き換えるのはこの 1 つだけ） |
 | `steps[].writes` | 必須 | 書いてよいパスの前置き（根からの相対）。`[]` は何も書かないコマンド |
 | `steps[].guide` | 任意 | エージェントが判断する部分の手引き |
 | `steps[].timeout_seconds` | 任意 | コマンド 1 つの時間の上限。既定 600、1 以上 |
@@ -87,7 +87,7 @@ python3 "$SCRIPTS/release-steps.py" check --root .                              
 python3 "$SCRIPTS/release-steps.py" run --root . --stage production --version 2.4.0 --dry-run
 ```
 
-`--dry-run` は実行せず、走らせるコマンドと、版を置き換えた後のコマンドを出す。
+`--dry-run` は実行せず、走らせるコマンドと、バージョンを置き換えた後のコマンドを出す。
 
 ## Claude Code のプラグインの形のサブコマンド
 
@@ -97,60 +97,60 @@ python3 "$SCRIPTS/release-steps.py" run --root . --stage production --version 2.
 
 ```bash
 # 手順 2: 公開前の承認資料のうち機械で作れる部分を書き出す
-python3 "$SCRIPTS/release-steps.py" approval-facts --version <版> --prs <PR番号>... [--prev-tag <タグ>] [--approval <承認資料>] --root .
+python3 "$SCRIPTS/release-steps.py" approval-facts --version <バージョン> --prs <PR番号>... [--prev-tag <タグ>] [--approval <承認資料>] --root .
 # 手順 3: 版数と変更履歴を上げる
-python3 "$SCRIPTS/release-steps.py" bump      --plugin <名前> --to <版> --root .
-python3 "$SCRIPTS/release-steps.py" changelog --version <版> --prs <PR番号>... --root .
-python3 "$SCRIPTS/release-steps.py" notes     --version <版> --prs <PR番号>... --root .
+python3 "$SCRIPTS/release-steps.py" bump      --plugin <名前> --to <バージョン> --root .
+python3 "$SCRIPTS/release-steps.py" changelog --version <バージョン> --prs <PR番号>... --root .
+python3 "$SCRIPTS/release-steps.py" notes     --version <バージョン> --prs <PR番号>... --root .
 # 手順 2 の承認資料の欄を埋める（開発版のデプロイの後）
-python3 "$SCRIPTS/release-steps.py" notes     --version <版> --prs <PR番号>... --approval <承認資料> \
+python3 "$SCRIPTS/release-steps.py" notes     --version <バージョン> --prs <PR番号>... --approval <承認資料> \
   --verified claude,codex,kiro --ref <ベースブランチ> --root .
-# 版を上げる他のプラグインと上げ幅の候補を承認資料へ書く（変えるなら --set <名前>=MAJOR|MINOR|PATCH で書き直す）
+# バージョンを上げる他のプラグインと上げ幅の候補を承認資料へ書く（変えるなら --set <名前>=MAJOR|MINOR|PATCH で書き直す）
 python3 "$SCRIPTS/release-steps.py" changed-plugins --prs <PR番号>... --approval <承認資料> [--since <タグ>] --root .
-# 本番: 承認資料の表の上げ幅で上げる版を返す（items の name と to を bump --plugin <name> --to <to> へ渡す）
+# 本番: 承認資料の表の上げ幅で上げるバージョンを返す（items の name と to を bump --plugin <name> --to <to> へ渡す）
 python3 "$SCRIPTS/release-steps.py" changed-plugins --decided <承認資料> [--since <タグ>] --root .
 # 承認を得たら、承認資料へ承認の記録を書く（<SHA> は提示した資料を書いた approval-facts の metrics.approved_sha）
 python3 "$SCRIPTS/release-steps.py" approve --approval <承認資料> --approved-sha <SHA> --by user --root .
 # 手順 4: 公開する（bump と changelog の変更をコミットしてから）
-python3 "$SCRIPTS/release-steps.py" release --version <版> --channel dev --root .   # 開発版のデプロイ
-python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --approved-sha <SHA> --root .  # 本番リリース（承認を得てから）
-python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --approval <承認資料> --root .  # 本番のリリースプランの形
-# 選んで集める取り込み方（branch_flow.release_strategy: release_branch）: 本番チャネルから組んだリリースブランチで出す
-python3 "$SCRIPTS/release-steps.py" release-branch --version <版> --units <スプリントブランチ>... [--production <本番チャネル>] --root .
+python3 "$SCRIPTS/release-steps.py" release --version <バージョン> --channel dev --root .   # 開発版のデプロイ
+python3 "$SCRIPTS/release-steps.py" release --version <バージョン> --channel prod --approved-sha <SHA> --root .  # 本番リリース（承認を得てから）
+python3 "$SCRIPTS/release-steps.py" release --version <バージョン> --channel prod --approval <承認資料> --root .  # 本番のリリースプランの形
+# 選んで集めるリリース方式（branch_flow.release_strategy: release_branch）: 本番チャネルから組んだリリースブランチで出す
+python3 "$SCRIPTS/release-steps.py" release-branch --version <バージョン> --units <スプリントブランチ>... [--production <本番チャネル>] --root .
 # リリースブランチの PR のレビュー（branch_flow.reviews.release が none でないとき。差分が空なら終了コード 3）
-python3 "$SCRIPTS/release-steps.py" review-open --version <版> --diff pr|resolution [--production <本番チャネル>] --root .
-python3 "$SCRIPTS/release-steps.py" review-close --version <版> --root .
-python3 "$SCRIPTS/release-steps.py" approval-facts --version <版> --prs --head release/v<版> --approval <承認資料> --root .
-python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --approval <承認資料> --release-strategy release_branch --root .
+python3 "$SCRIPTS/release-steps.py" review-open --version <バージョン> --diff pr|resolution [--production <本番チャネル>] --root .
+python3 "$SCRIPTS/release-steps.py" review-close --version <バージョン> --root .
+python3 "$SCRIPTS/release-steps.py" approval-facts --version <バージョン> --prs --head release/v<バージョン> --approval <承認資料> --root .
+python3 "$SCRIPTS/release-steps.py" release --version <バージョン> --channel prod --approval <承認資料> --release-strategy release_branch --root .
 # CD のある場合（release-case の metrics.case が cd-no-review / cd-review / cd-admin）の本番
 python3 "$SCRIPTS/release-steps.py" release-case --root .   # リリースの場合を出す
-python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --root .   # 承認の前: 本番の PR を作り CI を待って gate（10）
+python3 "$SCRIPTS/release-steps.py" release --version <バージョン> --channel prod --root .   # 承認の前: 本番の PR を作り CI を待って gate（10）
 python3 "$SCRIPTS/release-steps.py" approval-post --pr <本番の PR> --approval <承認資料> --root .   # 承認資料を本番の PR へ置く
 python3 "$SCRIPTS/release-steps.py" approve --pr <本番の PR> --approved-sha <先端> --by user --root .   # cd-no-review・cd-admin: 承認の証跡を書く
-python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --root .   # 承認の後: --admin なしでマージし CD の結果を読む
+python3 "$SCRIPTS/release-steps.py" release --version <バージョン> --channel prod --root .   # 承認の後: --admin なしでマージし CD の結果を読む
 ```
 
-- 選んで集める取り込み方: `release-branch` は `release/v<版>` を `origin/<本番チャネル>` から切り（origin に既にあればその先頭へ足す。
+- 選んで集めるリリース方式: `release-branch` は `release/v<バージョン>` を `origin/<本番チャネル>` から切り（origin に既にあればその先頭へ足す。
   強制 push はしない）、`--units` のブランチだけを `--no-ff` でマージして push する。衝突すれば `stopped`（1）。`approval-facts --head`
   は承認に出す先頭をそのブランチにし、「含む PR」はリリースブランチへマージした単位の中の PR になる。`release --release-strategy release_branch`
-  はベースブランチへの開発版の PR を出さず、`release/v<版>` → 本番チャネルの PR を承認と照合してマージし、タグと GitHub Release を
-  作った後に `release/v<版>-sync` → ベースブランチの PR で本番の中身をベースブランチへ戻す。手順の全体は `development-workflow` の
-  `references/production-merge.md` の「選んで集める取り込み方のリリース」にある
+  はベースブランチへの開発版の PR を出さず、`release/v<バージョン>` → 本番チャネルの PR を承認と検証してマージし、タグと GitHub Release を
+  作った後に `release/v<バージョン>-sync` → ベースブランチの PR で本番の中身をベースブランチへ戻す。手順の全体は `development-workflow` の
+  `references/production-merge.md` の「選んで集めるリリース方式のリリース」にある
 - リリースブランチの PR のレビュー（`branch_flow.reviews.release`。`worktree` の `references/ndf-settings.md` の
   「レビューの単位」）: 開発版のデプロイのプランが `release-branch` と `approval-facts` の間で打つ。
-  - `review-open` は、範囲（同じ版の前のレビュー済みの先頭、無ければ本番チャネルから、リリースブランチの先頭まで）の差分を
-    一時の PR（衝突の解消のレビューの PR。head は `review/release/v<版>`、宛先は `review/release/v<版>-base`）にして、
+  - `review-open` は、範囲（同じバージョンの前のレビュー済みの先頭、無ければ本番チャネルから、リリースブランチの先頭まで）の差分を
+    一時の PR（衝突の解消のレビューの PR。head は `review/release/v<バージョン>`、宛先は `review/release/v<バージョン>-base`）にして、
     `metrics.review_pr` に番号を出す。`--diff resolution` は範囲の first-parent のマージの再マージの差分
     （`git log --remerge-diff`）だけを見せ、衝突したマージが無ければ PR を作らずに 3 で終える。`--diff pr` は範囲の差分全体を見せる。
     逆に当てられない・PR を作れないなら 1
-  - 始めに、開いている衝突の解消のレビューの PR を版に依らず調べ、直しをリリースブランチへ移し終えたものを閉じて一時の
-    ブランチを消す。同じ版で範囲の終わりがリリースブランチの先頭と同じ、移していない直しを持つ PR は使い直す。それ以外の
+  - 始めに、開いている衝突の解消のレビューの PR をバージョンに依らず調べ、直しをリリースブランチへ移し終えたものを閉じて一時の
+    ブランチを消す。同じバージョンで範囲の終わりがリリースブランチの先頭と同じ、移していない直しを持つ PR は使い直す。それ以外の
     移していない直しを持つ PR か、比べるリリースブランチを取得できない PR があれば、何も閉じずに 1 で止める
   - `review-close` は、cross-review が見せるブランチへ積んだ直しのうち、まだリリースブランチへ移していないものを
     cherry-pick して送り、レビュー済みの先頭を PR の本文へ書いて閉じ、一時のブランチを消す。移せなければリリースブランチを
     動かさず、PR とブランチを残して 1 で止める（人が原因を直して `review-close` から打ち直す）。レビューの後にリリースブランチへ
     マージが足されていれば、閉じた後に 1 で止める（`review-open` から打ち直すと、足したマージだけを範囲に取る）
-  - 本番のリリースのプランの後片付けは、その版の一時のブランチが残っていれば消す
+  - 本番のリリースのプランの後片付けは、そのバージョンの一時のブランチが残っていれば消す
 
 - `approval-facts`: `gate` なら `presentation_path` の承認資料の「`配る中身`」と「`開発版のデプロイで確かめたこと`」を
   `notes --approval` で埋めて利用者へ示し、承認（`AskUserQuestion` の `metadata.source` は `ndf-gate:2`）を得てから `next` のコマンドを打つ。`stopped`
@@ -162,7 +162,7 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --roo
   （マージ前の PR など）だけを渡せば足りる。範囲のログか squash の head を読めなければ、資料を書かずに
   `stopped`（2 = git のログ・1 = GitHub）で止まる。
   `## 指示書の変更` の節には、前のタグから承認したコミットまでの first-parent のログで指示書（`.ndf/instructions.json`
-  の `files`。宣言が無ければ `AGENTS.md` と `CLAUDE.md`）に触れたコミットを、指示書ごとに `短い SHA（#PR）` と
+  の `files`。設定が無ければ `AGENTS.md` と `CLAUDE.md`）に触れたコミットを、指示書ごとに `短い SHA（#PR）` と
   差分を見るコマンド（`git diff <前のタグ> <承認したコミット> -- <ファイル>`）で並べる（触れていなければ「- 無し」。
   個数は `metrics.instructions`）。`--approval` に前の承認資料を渡すと、`approval-facts` が書く節（`## 1.`・
   `## 2.`・`## 指示書の変更`・`## 同意を求めること`・`## 戻し方`）だけを作り直し、それ以外の `## ` の節（手で
@@ -174,40 +174,40 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --roo
   `--approved-sha` が資料の今の値と違えば（提示の後に書き直された）書かずに `stopped`（1）で止まるので、
   資料を提示し直して承認を取り直す。形の誤りは 2、資料・欄が無いと 3
 - `bump`: `items[]` に手で直す箇所が載っていれば直す。plugin の README には触れない
-- `changelog`: CHANGELOG.md の版の節へ見出しと PR のタイトルを並べるだけで、本文は書かない。plugin の README は
+- `changelog`: CHANGELOG.md のバージョンの節へ見出しと PR のタイトルを並べるだけで、本文は書かない。plugin の README は
   書かない。未マージの PR は載せず、番号を
   `metrics.unmerged` へ出す。すべて未マージなら `stopped`（3）で止まるので、マージしてから打ち直すか `--prs` を直す
-- `notes`: 各 PR の本文の `## 利用者向けの変化` の箇条（1 行目の末尾に `（#番号）`）で、CHANGELOG.md の版の節を
+- `notes`: 各 PR の本文の `## 利用者向けの変化` の箇条（1 行目の末尾に `（#番号）`）で、CHANGELOG.md のバージョンの節を
   組み直す。plugin の README は読まず書かない（README は CHANGELOG.md を参照する固定の「`## 更新情報`」の節だけを
-  持つ）。字下げした子の箇条は独立した項目にせず、親の項目の下に 1 段の入れ子（`  - `）で残す。節が無い・「無し」の
+  持つ）。字下げした子の箇条は独立した項目にせず、親の項目の下に 1 ステップの入れ子（`  - `）で残す。節が無い・「無し」の
   PR は題名で代える（`metrics.fallback` が件数）。`--approval` を渡すと CHANGELOG は変えず、承認資料の 2 つの欄と、
   PR の本文の `## 未検証・残る危険` を集めた節と `## 移行の手順` の節（0 件なら「- 無し」）を書く。
   `## 未検証・残る危険` の節が既にあれば行を消さず、PR の箇条のうち無いものだけを足す（足したら「- PR の本文に
   記載が無い」の行を外す）。PR の本文の
-  `## 移行の手順` の箇条は、CHANGELOG.md の版の節では `### 移行の手順` の下へ `（#番号）` つきで並ぶ（0 件なら
+  `## 移行の手順` の箇条は、CHANGELOG.md のバージョンの節では `### 移行の手順` の下へ `（#番号）` つきで並ぶ（0 件なら
   見出しを作らない）。`--approval` のとき、欄を書く PR は承認資料の「`含む PR`」の欄の PR で、`--prs` は
   欄に足さない。`--prs` に「`含む PR`」に無い番号があれば欄を書かずに `stopped`（3）で止まるので、
   `approval-facts` で承認資料を作り直す。未マージの PR は載せず、番号を `metrics.unmerged` へ出す。
   `stopped`（3）は changelog や approval-facts を先に打つ。渡した PR がすべて未マージのときも 3 で止まるので、
   マージしてから打ち直すか `--prs` を直す。
-  後の PR の本文の `## 置き換える箇条` が指す前の PR の箇条は、CHANGELOG.md の版の節にも「`配る中身`」にも
+  後の PR の本文の `## 置き換える箇条` が指す前の PR の箇条は、CHANGELOG.md のバージョンの節にも「`配る中身`」にも
   載せない（前の PR の本文は書き換えない）。書き方は下の「置き換える箇条」。置き換えごとに `items[]` へ
   `kind: replacement`・`name: #<後>→#<前>`・`result`（`removed` / `not_found`。形に合わない行は `unreadable`）を
   出し、除いた箇条の数を `metrics.replaced` へ出す。見つからない置き換えは何も除かず、終了コードは 0 のまま
-- `changed-plugins`: 前のタグからの差分にある、宣言の `release.plugin` 以外のプラグインを `items[]`（`from`・`to`・
-  `level`・`basis`）へ返す。前のタグから版が変わったものは `metrics.already` へ入れ、上げ直さない。`--prs` は PR の
-  本文の GitHub の closing keywords（PR 本文に `Closes #123` のように書くと、マージ時にその課題を自動で閉じる機能）が指す課題の `## 影響` の「公開インタフェース」の行に互換なしの印（`互換なし` か `互換の経路は持たない`）
+- `changed-plugins`: 前のタグからの差分にある、設定の `release.plugin` 以外のプラグインを `items[]`（`from`・`to`・
+  `level`・`basis`）へ返す。前のタグからバージョンが変わったものは `metrics.already` へ入れ、上げ直さない。`--prs` は PR の
+  本文の GitHub の closing keywords（PR 本文に `Closes #123` のように書くと、マージ時にその課題を自動で閉じる機能）が指す課題の `## 影響` の「公開インタフェース」の行に互換なしのフラグ（`互換なし` か `互換の経路は持たない`）
   があるか、PR の本文の `## 移行の手順` がプラグインの名前に触れれば、そのパスに触れた PR のプラグインの候補を
   MAJOR、無ければ PATCH にする（MINOR の候補は出さない）。材料を読めない PR は根拠の欄に書く。`--approval` は承認
-  資料の `## 版を上げる他のプラグイン` の節（0 件なら「- 無し」）と同意の行を書き、`--set` はリリース承認ゲートで決めた
+  資料の `## バージョンを上げる他のプラグイン` の節（0 件なら「- 無し」）と同意の行を書き、`--set` はリリース承認ゲートで決めた
   上げ幅へ行を書き直す（表に無い名前・知らない上げ幅は 2）。`--decided` は表の上げ幅で `to` を決め、表が無い・
-  上げ幅を読めない・版や集合が差分と合わないときは PATCH へ倒さずに 1 で止まる。他のプラグインが 0 件なら表を読まない
-- `release`: `dev` は `release/v<版>` →ベースブランチの Pull Request を作り、チェックを待ってマージのコミットで取り込む。
-  取り込みが版数を持つ箇所だけで衝突すれば、`release/v<版>-sync` に `origin/<ベースブランチ>` を取り込んで本番の版の側を取り、
-  `release/v<版>-sync` →ベースブランチの Pull Request で取り込む（`release/v<版>` そのものへはベースブランチを取り込まない）。
-  版数の外の箇所が衝突すれば解かずに 1 で止まる（`release_lib/version_merge.py`）。`metrics.release_pr` は照合に使う
-  `release/v<版>` の Pull Request、`metrics.sync_pr` は `-sync` で取り込んだときのその Pull Request である。
-  `prod` は続けて `release/v<版>` を head にした本番チャネル宛の Pull Request をマージし、タグと GitHub Release を作る。
+  上げ幅を読めない・バージョンや集合が差分と合わないときは PATCH へ倒さずに 1 で止まる。他のプラグインが 0 件なら表を読まない
+- `release`: `dev` は `release/v<バージョン>` →ベースブランチの Pull Request を作り、チェックを待ってマージのコミットでマージする。
+  マージが版数を持つ箇所だけで衝突すれば、`release/v<バージョン>-sync` に `origin/<ベースブランチ>` をマージして本番のバージョンの側を取り、
+  `release/v<バージョン>-sync` →ベースブランチの Pull Request でマージする（`release/v<バージョン>` そのものへはベースブランチをマージしない）。
+  版数の外の箇所が衝突すれば解かずに 1 で止まる（`release_lib/version_merge.py`）。`metrics.release_pr` は検証に使う
+  `release/v<バージョン>` の Pull Request、`metrics.sync_pr` は `-sync` でマージしたときのその Pull Request である。
+  `prod` は続けて `release/v<バージョン>` を head にした本番チャネル宛の Pull Request をマージし、タグと GitHub Release を作る。
   `delivery` の行が `publishes_release: true` なら、この 2 つは CD が作り、`release` は作らない（`metrics.tag` は `null`、`metrics.publisher` は `cd`）。
   本番チャネル宛の Pull Request がマージ済みなら（途中で止まったリリースの再開）、比較とマージを飛ばし、タグと GitHub Release のうち
   無いものだけを作る（`items[]` の `result: already_merged`・`exists`）。`items[]`
@@ -215,16 +215,16 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --roo
   `prod` は最後に「退避先の回収」の候補を挙げ、`items[]` の `kind: trash`（`result: candidate`）と
   `metrics.sweep_candidates` に載せる。消すのは人の承認（`ndf-ask:redline:C4`）を得た後である（下の節）。
   どちらの Pull Request でも pytest と runtime smoke は省かれて成功（skipping / pass）を返す
-  （[版とリリース](../../../../../docs/versioning-and-distribution.md#正式版を出す)）。待ちはそれを通ったものとして扱う
+  （[バージョンとリリース](../../../../../docs/versioning-and-distribution.md#正式版を出す)）。待ちはそれを通ったものとして扱う
 - `release --channel prod` の承認したコミット: `--approved-sha <SHA>` か `--approval <承認資料>` のどちらかが要る
   （どちらも無い・形の誤りは 2、資料・欄が無いと 3。どれも何もマージしない）。`--approval` は承認の記録の SHA が
   承認したコミットと同じときだけ受け取り、違えば何もマージせずに `gate`（10・`result: not_approved`）で止まる。
-  デプロイの PR をマージした後、承認したコミットから `origin/release/v<版>` の先端（比べた先端）までに `release/v<版>` の
+  デプロイの PR をマージした後、承認したコミットから `origin/release/v<バージョン>` の先端（比べた先端）までに `release/v<バージョン>` の
   Pull Request の外のコミットか中身があれば、本番チャネルの PR・タグ・GitHub Release を作らずに `gate`（10）で止まる。
   承認の後にベースブランチが進んでいても、ベースブランチは比べる相手に入らないため止まらず、進んだ分は次のデプロイで出る。ただし差分がすべて許可リスト
   （`docs/`・`issues/`。`release_lib/approval.py` の `UNGATED`）の下に収まる外のコミット（設計文書・用語集だけの PR など）は止めずに通し、
   `items[]` に `result: outside_unshipped` で、件数を `metrics.tolerated` に残す。本番チャネルへは比べた先端だけを
-  マージし（`merged-steps.py merge-when-green --expect-head`）、CI 待ちの間に `release/v<版>` の先端が進んだときは比べ直す。進んだ分が
+  マージし（`merged-steps.py merge-when-green --expect-head`）、CI 待ちの間に `release/v<バージョン>` の先端が進んだときは比べ直す。進んだ分が
   リリース対象に触れなければ比べ直した先端で入れ直し（3 回まで）、触れれば `gate` で止まる。
   `--channel dev` には渡さない（2）
 
@@ -243,16 +243,16 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --roo
 `release-case` が出す場合（`metrics.case`）が `cd-no-review`・`cd-review`・`cd-admin` のとき、`release --channel prod` は次の形で進む。
 場合の意味は [SKILL.md](../SKILL.md) の「リリースの場合」にある。
 
-- `release --channel prod`: `--approved-sha` も `--approval` も受けない（渡すと 3。承認の正本は本番の PR の上にある）。
-  本番の PR が無ければ、開発版の PR をマージし、`release/v<版>` を戻して本番の PR を作る。承認が先端と一致しなければ、
+- `release --channel prod`: `--approved-sha` も `--approval` も受けない（渡すと 3。承認の SSOT は本番の PR の上にある）。
+  本番の PR が無ければ、開発版の PR をマージし、`release/v<バージョン>` を戻して本番の PR を作る。承認が先端と一致しなければ、
   `ndf/release-approval` を除くチェックが通るのを待ってから `gate`（10）で止まる（本番の PR は開いたまま。`metrics.main_pr`・
-  `metrics.approved_sha` は先端・`metrics.reason` は照合の理由）。一致すれば、`cd-no-review` は先端の `ndf/release-approval` が
+  `metrics.approved_sha` は先端・`metrics.reason` は検証の理由）。一致すれば、`cd-no-review` は先端の `ndf/release-approval` が
   `success` になるのを待ち、先端に固定して `merge-when-green --no-admin` でマージし、CD の結果を読む。`cd-admin` は利用者の証跡
   （担い手が `user`）だけで照らし、同じ待ちの後に `--no-admin` を付けずに（管理者の迂回で）マージして、本番の PR へ迂回の記録
-  （`ndf:admin-merge` の印のコメント）を置く。本番の PR の行の `admin` が迂回の有無で、記録の行は `record: admin_merge`。記録を
+  （`ndf:admin-merge` のマーカーのコメント）を置く。本番の PR の行の `admin` が迂回の有無で、記録の行は `record: admin_merge`。記録を
   書けなければ本番の完了と分けて `stopped`（1）で報告し、打ち直すとマージ済みからの再開で記録だけを書く。マージ済みなら公開の後から続ける。
-  選んで集める取り込み方も同じ照合を使い、許可リストの許容と先端の入れ直しを使わない。承認の後に先端が動けば `gate`（10）で止まる
-- `approval-post`: 承認資料を本番の PR へ承認資料のコメント（証跡に数えない印つき）で置く。同じ先端の承認資料のコメントがあれば
+  選んで集めるリリース方式も同じ検証を使い、許可リストの許容と先端の入れ直しを使わない。承認の後に先端が動けば `gate`（10）で止まる
+- `approval-post`: 承認資料を本番の PR へ承認資料のコメント（証跡に数えないマーカーつき）で置く。同じ先端の承認資料のコメントがあれば
   置かずに 0。承認資料が無ければ 3
 - `approve --pr`: `cd-no-review` と `cd-admin` の承認の証跡を本番の PR へ書く（`cd-admin` は `--by user` の証跡だけを承認に数える）。承認したコミットは `--approved-sha` か、`--facts-from`（本番のプランの
   状態ディレクトリの `facts` の出力。`--by user` なら `--answer-from` の利用者の承認の記録も要る）。PR の先端が承認したコミットと違えば
@@ -264,12 +264,12 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --roo
 - `cd-review`: 証跡を書かず、承認権限として有効な人（共同作業者の権限が admin か write）の最新の承認のレビューのコミットを先端と比べる
 - `release --channel dev`: `.ndf/supervise.json` の `release.dev_workflow` があれば、開発版の PR を作るか使い回し、開いていればその
   workflow を `gh workflow run` で起動し、実行が終わるまで待つ（上限は `release-steps.dev-workflow`。75 で止まる）。workflow は宛先と
-  版の接尾辞を確かめ、CI の必須チェックが通るのを待って `merge-when-green --no-admin` でマージする。宣言が無ければ手元でマージする
+  バージョンの接尾辞を確かめ、CI の必須チェックが通るのを待って `merge-when-green --no-admin` でマージする。設定が無ければ手元でマージする
 
 ### 置き換える箇条
 
-同じ版の後の PR が前の PR の振る舞いを変えたときは、後の PR の本文に次の節を書き、前の PR の「利用者向けの変化」の
-箇条を CHANGELOG.md の版の節と承認資料の「`配る中身`」から外す。マージ済みの前の PR の本文は直さない。
+同じバージョンの後の PR が前の PR の振る舞いを変えたときは、後の PR の本文に次の節を書き、前の PR の「利用者向けの変化」の
+箇条を CHANGELOG.md のバージョンの節と承認資料の「`配る中身`」から外す。マージ済みの前の PR の本文は直さない。
 
 ```markdown
 ## 置き換える箇条
@@ -279,7 +279,7 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --roo
 
 - 1 行に 1 つ、`- #<前の PR の番号>: <前の PR の「利用者向けの変化」の箇条の 1 行目>`。CHANGELOG の案から写してよい
 - 比べるときは両側の末尾の `（#N…）` / `(#N…)` を外し、空白の続きを 1 つにする。文が一致した箇条だけを外す
-- 指す PR は同じ版の PR（`notes` へ渡す PR）に限る。前の PR の `## 未検証・残る危険` と `## 移行の手順` は外さない
+- 指す PR は同じバージョンの PR（`notes` へ渡す PR）に限る。前の PR の `## 未検証・残る危険` と `## 移行の手順` は外さない
 
 ## デプロイの後にリリース記録を置く
 
@@ -290,9 +290,9 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --roo
 
 | 形 | 置き方 |
 | --- | --- |
-| Claude Code のプラグイン | `release-steps.py record --version <版> --prs <PR番号>...` が本番のリリースの Pull Request へコメントで書く |
-| リリースの Pull Request のマージで届くもの | `release-steps.py record --promote --head <ベースブランチ> --base <本番チャネル> --prs <PR番号>...` がリリースの Pull Request へコメントで書く。`版:` はマージのコミットである |
-| 本番チャネルへの直接のマージで CD が届けるもの | `release-steps.py record --merged --base <本番チャネル> --prs <PR番号>...` が最後の `--prs` の Pull Request へコメントで書く。`版:` はマージのコミットである |
+| Claude Code のプラグイン | `release-steps.py record --version <バージョン> --prs <PR番号>...` が本番のリリースの Pull Request へコメントで書く |
+| リリースの Pull Request のマージで届くもの | `release-steps.py record --promote --head <ベースブランチ> --base <本番チャネル> --prs <PR番号>...` がリリースの Pull Request へコメントで書く。`バージョン:` はマージのコミットである |
+| 本番チャネルへの直接のマージで CD が届けるもの | `release-steps.py record --merged --base <本番チャネル> --prs <PR番号>...` が最後の `--prs` の Pull Request へコメントで書く。`バージョン:` はマージのコミットである |
 | それ以外 | SKILL.md の「出力物」と同じ 3 行の `## リリース記録` を、デプロイした値で記録の Pull Request へコメントで足す |
 
 スプリントのプランでデプロイするときは、プランの `record` のステップがこれを打つ。
@@ -307,7 +307,7 @@ python3 "$SCRIPTS/release-steps.py" cd-result --base <本番チャネル> [--hea
 | --- | --- | --- |
 | `success`（成功） | CD の状態を読んで成功を確かめた | リリース後テストへ進む |
 | `failure`（失敗） | CD が成功以外で終わった | デプロイの工程は完了にならず、スプリントは閉じられない |
-| `undetermined`（未確定） | 読む手段が宣言されていないか、待ちの上限に当たった | 未確定と書いてリリース後テストへ進む。リリース後テストが本番の状態を直接確かめ、その記録が無ければスプリントは閉じられない |
+| `undetermined`（未確定） | 読む手段が定義されていないか、待ちの上限に当たった | 未確定と書いてリリース後テストへ進む。リリース後テストが本番の状態を直接確かめ、その記録が無ければスプリントは閉じられない |
 | `none` | 本番チャネルへ自動で届く行が無い | 記録に CD の行を足さない |
 
 値は `metrics.cd_result` に出す。`cd-result` の終了コードは 4 つの値のどれでも 0 である。
@@ -317,7 +317,7 @@ python3 "$SCRIPTS/release-steps.py" cd-result --base <本番チャネル> [--hea
 
 ## 退避先の回収
 
-**本番へ出したら、その版に入ったブランチの退避先を回収の候補として挙げ、人の承認を得てから消す。**
+**本番へ出したら、そのバージョンに入ったブランチの退避先を回収の候補として挙げ、人の承認を得てから消す。**
 `merged` が worktree を外すときに退避したファイル（`<共通の git ディレクトリ>/ndf/worktree-trash/`）は、
 戻す必要が出るのが本番の前だけだからである。ただし退避先は Git にも本番のコミットにも無い利用者のファイル
 （手で直した `.env`・未追跡のメモ）を含み、消すと戻せない。**本番の承認はこの削除の承認を兼ねない**
@@ -332,6 +332,6 @@ python3 "$SCRIPTS/merged-steps.py" sweep-trash --ref <本番に出たコミッ�
 python3 "$SCRIPTS/merged-steps.py" sweep-trash --ref <本番に出たコミット> --yes --only <承認した退避先>...  # 承認した名前だけを消す
 ```
 
-候補の件数（`metrics.sweep_candidates`）・消した退避先（`metrics.swept_trash`）・台帳が無いため残した件数
+候補の件数（`metrics.sweep_candidates`）・消した退避先（`metrics.swept_trash`）・ジャーナルが無いため残した件数
 （`metrics.unledgered_trash`）を完了報告に書く。
-退避先と台帳の形は `merged` の SKILL.md にある。
+退避先とジャーナルの形は `merged` の SKILL.md にある。

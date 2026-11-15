@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "ndf-settings/code-metrics.schema.json",
-  "title": "コードの測り方の宣言（.ndf/code-metrics.json）",
+  "title": "コードの測り方の設定（.ndf/code-metrics.json）",
   "description": "リファクタリングが言語ごとに使う測りの Tool。null はその言語を測らない",
   "type": "object",
   "additionalProperties": false,
@@ -15,11 +15,11 @@
       "enum": [
         1
       ],
-      "description": "宣言の形の版。読み手は知らない版を読まない"
+      "description": "設定の形のバージョン。読み手は知らないバージョンを読まない"
     },
     "tools": {
       "type": "object",
-      "description": "言語 → 測りの Tool の名前。言語は python・javascript・typescript・php・go・ruby・java・kotlin・swift・rust・c・cpp・csharp・lua・shell、Tool は lizard・ruff-complexipy（python だけ）・null（測らない）。形が違えば読み手は宣言の全体を使わず既定で測る",
+      "description": "言語 → 測りの Tool の名前。言語は python・javascript・typescript・php・go・ruby・java・kotlin・swift・rust・c・cpp・csharp・lua・shell、Tool は lizard・ruff-complexipy（python だけ）・null（測らない）。形が違えば読み手は設定の全体を使わず既定で測る",
       "propertyNames": {
         "enum": [
           "python",

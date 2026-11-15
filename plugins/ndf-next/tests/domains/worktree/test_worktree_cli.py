@@ -1,4 +1,4 @@
-"""`ndf worktree` の副命令が結果 JSON を 1 行出す。"""
+"""`ndf worktree` のサブコマンドが結果 JSON を 1 行出す。"""
 
 from __future__ import annotations
 
@@ -67,7 +67,7 @@ def test_init_check_and_env_subcommands(make_repo: Callable, capsys: pytest.Capt
     assert code == 0 and out["metrics"] == {"present": False}
     code, out = _run(capsys, last_result, "--cwd", str(main), "init")
     assert code == 0 and out["items"][0]["path"].endswith("worktree.json") and "outputs" not in out
-    # 節の無い宣言では環境の副命令は何もしない
+    # 節の無い設定では環境のサブコマンドは何もしない
     for argv in (("deps", str(main)), ("localenv", "mode"), ("testenv", "compose-env")):
         code, out = _run(capsys, last_result, "--cwd", str(main), *argv)
         assert code == 0 and out["status"] == result.OK

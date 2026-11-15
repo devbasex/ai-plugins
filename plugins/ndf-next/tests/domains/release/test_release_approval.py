@@ -1,4 +1,4 @@
-"""承認の証跡（判定・答えの書き込みと読み戻し）と、証跡の後のマージ。"""
+"""承認の証跡（判定・回答の書き込みと読み戻し）と、証跡の後のマージ。"""
 
 from __future__ import annotations
 
@@ -42,7 +42,7 @@ def test_judge_reports_stale_and_missing() -> None:
 
 
 def test_known_bug_answer_after_reapproval_reaches_the_record() -> None:
-    """リリース 8 の事例: 先端が動いた後の承認し直しの答えが、今の先端への承認として判定に届く。"""
+    """リリース 8 の事例: 先端が動いた後の承認し直しの回答が、今の先端への承認として判定に届く。"""
     hub = FakeHub(pulls={7: pull(head=HEAD)}, comments_of={7: [_trail("approved", OTHER)]})
     assert trail.read(hub, 7).judgment.state == approval_decide.STALE
     got = trail.answer(hub, 7, "approved", "人", presented=HEAD)
@@ -50,7 +50,7 @@ def test_known_bug_answer_after_reapproval_reaches_the_record() -> None:
 
 
 def test_answer_is_refused_when_it_does_not_reach_the_record() -> None:
-    """書いた答えが読み直しで見えなければ、答えたつもりで進めずに止める。"""
+    """書いた回答が読み直しで見えなければ、回答したつもりで進めずに止める。"""
     hub = FakeHub(pulls={7: pull(head=HEAD)}, drop_comments=True)
     with pytest.raises(trail.TrailError, match="届いていない"):
         trail.answer(hub, 7, "approved", "人", presented=HEAD)
@@ -123,7 +123,7 @@ def test_issue_1983_failed_ci_stops_without_retry() -> None:
 
 
 def test_production_merge_rechecks_approval_after_waiting() -> None:
-    """必須のチェックを待つ間に差し戻しが足されたら、マージしない（待ちの後に証跡を読み直す）。"""
+    """必須のチェックを待つ間に変更要求が足されたら、マージしない（待ちの後に証跡を読み直す）。"""
     hub = FakeHub(pulls={7: pull()}, comments_of={7: [_trail("approved", HEAD)]})
 
     def wait(reader: Callable[[], ci.Reading], budget: float) -> ci.WatchResult:
@@ -246,7 +246,7 @@ def test_required_check_with_a_named_app_counts_that_apps_commit_status() -> Non
 
 @pytest.mark.parametrize("name", ["other / pytest", "pytest (1/2)", "ci / pytest (0/2)"])
 def test_named_app_check_is_matched_by_the_same_name_rule_as_the_wait(name: str) -> None:
-    """#3506: 別の発行元の実行は、前置きや分割ジョブの末尾が付いていても、必須のチェックとして数えない（待ちと同じ照合で絞る）。"""
+    """#3506: 別の発行元の実行は、前置きや分割ジョブの末尾が付いていても、必須のチェックとして数えない（待ちと同じ検証で絞る）。"""
     hub = FakeHub(runs=[_run(name, 999, 1)])
     hub.status_list = [_status(name, "someone", 2)]
     lander, readers = _named_app_lander(hub)
@@ -284,7 +284,7 @@ def test_sync_without_diff_is_done_but_other_422_raises() -> None:
         _lander(hub, False, []).land(7)
 
 
-# --- #3506: 迂回の宣言（production_merge.admin）のある本番のマージ ------------------------------------
+# --- #3506: 迂回の設定（production_merge.admin）のある本番のマージ ------------------------------------
 
 REVIEW_RULE = {"type": "pull_request", "parameters": {"required_approving_review_count": 1}}
 
@@ -325,7 +325,7 @@ def _records(hub: FakeHub, number: int = 7) -> list[str]:
 
 
 def test_admin_ndf_settings_merges_the_production_pr_with_the_bypass_and_records_it() -> None:
-    """受け入れ条件 8・I7・I8: 宣言があり承認数 1 なら、迂回でマージし、記録を置き、admin が真。戻す PR は迂回しない。"""
+    """受け入れ条件 8・I7・I8: 設定があり承認数 1 なら、迂回でマージし、記録を置き、admin が真。戻す PR は迂回しない。"""
     hub = AdminHub(pulls={7: pull(), 8: pull(number=8, base="develop")}, comments_of={7: [_trail("approved", HEAD)]})
     done = _admin_lander(hub).land(7)
     assert done.merged and done.admin and done.admin_record == "https://example.invalid/7" and done.record_error is None
@@ -335,7 +335,7 @@ def test_admin_ndf_settings_merges_the_production_pr_with_the_bypass_and_records
 
 
 def test_admin_ndf_settings_stops_like_the_plain_merge_without_merging() -> None:
-    """受け入れ条件 8（条件 2〜4）: 証跡が無い・チェックが落ちた・待つ間に差し戻されたら止まり、迂回しない。"""
+    """受け入れ条件 8（条件 2〜4）: 証跡が無い・チェックが落ちた・待つ間に変更を要求されたら止まり、迂回しない。"""
     hub = AdminHub(pulls={7: pull()})
     done = _admin_lander(hub).land(7)
     assert not done.merged and done.kind == "refused" and hub.admin_merged == [] and not done.admin
@@ -362,12 +362,12 @@ def test_admin_ndf_settings_does_not_count_the_mvv_trail() -> None:
 @pytest.mark.parametrize(
     "rejection",
     [
-        Authored("octocat", "OWNER", approval_decide.render_trail("rejected", HEAD, trail.MVV_BY)),  # MVV 判定の差し戻し
+        Authored("octocat", "OWNER", approval_decide.render_trail("rejected", HEAD, trail.MVV_BY)),  # MVV 判定の変更要求
         Authored("octocat", "OWNER", approval_decide.render_trail("rejected", HEAD, trail.USER_BY).replace("担い手: user\n", "")),
     ],
 )
 def test_admin_ndf_settings_counts_rejections_by_any_trusted_author(rejection: Authored) -> None:
-    """I9: 利用者の承認の後の差し戻しは、担い手が user でなくても数えて refused で止まり、迂回しない。"""
+    """I9: 利用者の承認の後の変更要求は、担い手が user でなくても数えて refused で止まり、迂回しない。"""
     hub = AdminHub(pulls={7: pull()}, comments_of={7: [_trail("approved", HEAD), rejection]})
     done = _admin_lander(hub).land(7)
     assert not done.merged and done.kind == "refused" and hub.admin_merged == [] and hub.merged == []
@@ -389,7 +389,7 @@ def test_admin_ndf_settings_counts_only_unedited_user_trails(comment: Authored) 
 
 
 def test_admin_record_ignores_records_by_untrusted_or_edited_comments() -> None:
-    """I7: 信用しない書き手か編集された、印と先端の SHA を持つコメントがあっても、本物の記録を書く。"""
+    """I7: 信用しない書き手か編集された、マーカーと先端の SHA を持つコメントがあっても、本物の記録を書く。"""
     fake = trail.render_admin_record(HEAD, "")
     hub = AdminHub(
         pulls={7: pull()},
@@ -408,7 +408,7 @@ def test_authored_from_rest_marks_edited_comments() -> None:
 
 @pytest.mark.parametrize("admin, approvals", [(False, 1), (True, 0)])
 def test_without_the_bypass_the_merge_stays_as_it_was(admin: bool, approvals: int) -> None:
-    """受け入れ条件 8（迂回しない）・I2b: 宣言が無い・承認数 0 なら今のマージで、記録を置かず admin は偽。"""
+    """受け入れ条件 8（迂回しない）・I2b: 設定が無い・承認数 0 なら今のマージで、記録を置かず admin は偽。"""
     hub = AdminHub(pulls={7: pull(), 8: pull(number=8, base="develop")}, comments_of={7: [_trail("approved", HEAD)]})
     done = _admin_lander(hub, admin=admin, approvals=approvals).land(7)
     assert done.merged and not done.admin and done.admin_record is None
@@ -469,7 +469,7 @@ def test_production_admin_reads_only_json_true(tmp_path: Path, body: Any, admin:
 
 
 def test_production_admin_reads_the_main_directory_before_the_worktree(tmp_path: Path) -> None:
-    """I1: PR の作業場所の宣言だけに迂回を足しても選べない。メインディレクトリの宣言だけが効く。"""
+    """I1: PR の作業場所の設定だけに迂回を足しても選べない。メインディレクトリの設定だけが効く。"""
     import subprocess
 
     main, wt = tmp_path / "main", tmp_path / "wt"
@@ -486,7 +486,7 @@ def test_production_admin_reads_the_main_directory_before_the_worktree(tmp_path:
         (root / ndf_settings.PROJECT_FILE).write_text(json.dumps({"production_merge": {"admin": admin}}), encoding="utf-8")
     assert ndf_settings.production_admin(wt) is False
     (main / ndf_settings.PROJECT_FILE).unlink()
-    assert ndf_settings.production_admin(wt) is False  # メインディレクトリに無ければ作業場所の宣言で補わない（#2363）
+    assert ndf_settings.production_admin(wt) is False  # メインディレクトリに無ければ作業場所の設定で補わない（#2363）
 
 
 def test_issue_3487_production_merge_stops_before_merging_with_untrusted_token() -> None:
@@ -583,7 +583,7 @@ def test_merge_queue_stops_at_once_when_the_queue_drops_the_pull() -> None:
 
 
 def test_merge_queue_dequeues_when_approval_is_revoked_while_waiting() -> None:
-    """キューの待ちの間に差し戻しが足されたら、キューから外して止まる（前の承認のままマージしない）。"""
+    """キューの待ちの間に変更要求が足されたら、キューから外して止まる（前の承認のままマージしない）。"""
     hub = _QueueHub(pulls={7: pull()}, comments_of={7: [_trail("approved", HEAD)]})
     hub.merge_after = 10**6
     now = [0.0]

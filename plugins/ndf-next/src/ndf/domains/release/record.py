@@ -4,10 +4,10 @@
   タグと GitHub Release だけを持ち、含めた PR の範囲を持たない
 - 含めた PR は、リリースの PR のコミットを先端から first-parent で辿った件名から、承認資料と同じ規則
   （`included_decide`）で決める（承認資料の範囲 `<前のリリース>..<ベースブランチ>` と同じ範囲）
-- 同じ版のリリース記録が既にある PR には書かない（打ち直しで重ねない）。既にあるかは信用する書き手
-  （write 以上の権限）の記録だけで見る。信用しない書き手のコメントは印があっても読み飛ばし、壊れていても止まらない。
+- 同じバージョンのリリース記録が既にある PR には書かない（打ち直しで重ねない）。既にあるかは信用する書き手
+  （write 以上の権限）の記録だけで見る。信用しない書き手のコメントはマーカーがあっても読み飛ばし、壊れていても止まらない。
   信用する書き手の記録の JSON が読めなければ `record_decide.UnreadableRecord` で止める
-- リリース後テストの記録は、同じ版のリリース記録を持つ PR へだけ書く。本番ブランチ宛てのリリースの PR は
+- リリース後テストの記録は、同じバージョンのリリース記録を持つ PR へだけ書く。本番ブランチ宛てのリリースの PR は
   リリース記録を持たないので、そこへは書かれない（#3128）
 - 読む側（`read`）は write 以上の権限を持つ書き手の記録だけを読む
 - 書く前に、書く token の書き手を読む側が信用するかを確かめ、信用されなければ 1 件も書かずに `RecordError` で止まる。
@@ -35,7 +35,7 @@ class NotReleased(Exception):
 
 
 class RecordError(Exception):
-    """記録を書けない（マージコミットが読めない・記録の形が違う・書き先が同じ版のリリース記録を持たない）。"""
+    """記録を書けない（マージコミットが読めない・記録の形が違う・書き先が同じバージョンのリリース記録を持たない）。"""
 
 
 class Written(NamedTuple):
@@ -71,7 +71,7 @@ def included_of(hub: GitHub, pull: Pull, production: str) -> list[int]:
 
 
 def released(hub: GitHub, number: int, production: str) -> tuple[Pull, record_decide.Record]:
-    """本番ブランチへマージしたリリースの PR と、その版のリリース記録。そうでなければ `NotReleased`。"""
+    """本番ブランチへマージしたリリースの PR と、そのバージョンのリリース記録。そうでなければ `NotReleased`。"""
     pull = hub.pull(number)
     if not pull.merged or pull.base_ref != production:
         raise NotReleased(f"#{number} は {production} へマージしたリリースの PR でない（{pull.base_ref}・merged={pull.merged}）")
@@ -121,9 +121,9 @@ def _versions(found: Sequence[record_decide.Record]) -> str:
 
 
 def write_verification(hub: GitHub, number: int, payload: Mapping[str, Any]) -> str:
-    """リリース後テストの記録を、同じ版のリリース記録を持つ PR `number` へ書く。書いたコメントの URL を返す。
+    """リリース後テストの記録を、同じバージョンのリリース記録を持つ PR `number` へ書く。書いたコメントの URL を返す。
 
-    形がスキーマ `release-verification` に合わない・PR が同じ版の信用するリリース記録を持たない・書く token が
+    形がスキーマ `release-verification` に合わない・PR が同じバージョンの信用するリリース記録を持たない・書く token が
     信用されなければ `RecordError`。
     """
     errors = contracts.schema_errors(dict(payload), VERIFICATION_SCHEMA)
@@ -132,7 +132,7 @@ def write_verification(hub: GitHub, number: int, payload: Mapping[str, Any]) -> 
     found = record_decide.records(_trusted_bodies(hub, number))
     if not record_decide.has_record_of(found, payload["version"]):
         raise RecordError(
-            f"#{number} は版 {payload['version']} のリリース記録を持たない（持つ版: {_versions(found)}）。"
+            f"#{number} はバージョン {payload['version']} のリリース記録を持たない（持つバージョン: {_versions(found)}）。"
             "リリース後テストの記録はリリース記録と同じ PR へ書く"
         )
     _require_trusted_writer(hub)

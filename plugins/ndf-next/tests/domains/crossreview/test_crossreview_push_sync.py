@@ -1,4 +1,4 @@
-"""修正の push の取り込みと、流し直しの初めの origin への同期（#2440）。"""
+"""修正の push のマージと、流し直しの初めの origin への同期（#2440）。"""
 
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ def test_push_without_a_competing_push_sends_as_is(repos: Repos, tmp_path: Path)
 
 
 def test_issue_2440_push_after_another_push_takes_it_in_and_sends_once_more(repos: Repos, tmp_path: Path) -> None:
-    """#2440: 修正の間に別の push が入っても止まらず、取り込んで 1 回だけ送り直す（強制の push はしない）。"""
+    """#2440: 修正の間に別の push が入っても止まらず、マージして 1 回だけ送り直す（強制の push はしない）。"""
     wt = _review_worktree(repos, tmp_path)
     fix = commit(wt, "fix.txt", "fix\n", "修正")
     theirs = commit(repos.other, "other.txt", "other\n", "別の push")
@@ -48,7 +48,7 @@ def test_issue_2440_push_after_another_push_takes_it_in_and_sends_once_more(repo
 def test_issue_2440_conflicting_push_is_undone_and_reported_as_diverged(
     repos: Repos, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """#2440: 同じ行を変えた push の後は取り込みを取り消し、diverged と衝突したファイル・同期の 1 行を返す。"""
+    """#2440: 同じ行を変えた push の後はマージを取り消し、diverged と衝突したファイル・同期の 1 行を返す。"""
     wt = _review_worktree(repos, tmp_path)
     fix = commit(wt, "doc.md", "# 設計\n\n## 節 A\n\n直した本文\n", "修正")
     commit(repos.other, "doc.md", "# 設計\n\n## 節 A\n\n別の本文\n", "別の push")
@@ -62,7 +62,7 @@ def test_issue_2440_conflicting_push_is_undone_and_reported_as_diverged(
 
 
 class _Script:
-    """git の起動を順の答えで返す差し替え。"""
+    """git の起動を順の回答で返す差し替え。"""
 
     def __init__(self, answers: list[tuple[str, git.Completed]]):
         self.answers = answers
@@ -80,7 +80,7 @@ def _ok(out: str = "") -> git.Completed:
 
 
 def test_issue_2440_push_rejected_again_after_taking_in_stops_with_rejected_twice() -> None:
-    """#2440: 取り込みの間にさらに別の push が入れば、再試行は 1 回だけで rejected_twice を返す。"""
+    """#2440: マージの間にさらに別の push が入れば、再試行は 1 回だけで rejected_twice を返す。"""
     rejected = git.Completed(1, "", " ! [rejected]        HEAD -> feat/x (fetch first)")
     script = _Script(
         [

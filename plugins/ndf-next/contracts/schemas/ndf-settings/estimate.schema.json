@@ -1,14 +1,14 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "ndf-settings/estimate.schema.json",
-  "title": "見積もりの宣言（.ndf/estimate.json）",
-  "description": "見積もりに使う実績の置き場と、Size の基準。読み手（estimate_records.Decl）は下のほかのキー（version・$schema を含む）を知らないキーとして止める",
+  "title": "見積もりの設定（.ndf/estimate.json）",
+  "description": "見積もりに使う実績の保存先と、Size の基準。読み手（estimate_records.Decl）は下のほかのキー（version・$schema を含む）を知らないキーとして止める",
   "type": "object",
   "additionalProperties": false,
   "properties": {
     "records_dir": {
       "type": "string",
-      "description": "実績の記録の置き場（リポジトリの根から。絶対パスも可）"
+      "description": "実績の記録の保存先（リポジトリの根から。絶対パスも可）"
     },
     "size_unit_seconds": {
       "type": "number",
@@ -23,12 +23,12 @@
     },
     "window": {
       "type": "integer",
-      "description": "読み手は読まない。書いてある宣言を断らないために残す（#2505）",
+      "description": "読み手は読まない。書いてある設定を断らないために残す（#2505）",
       "deprecated": true
     },
     "min_samples": {
       "type": "integer",
-      "description": "読み手は読まない。書いてある宣言を断らないために残す（#2505）",
+      "description": "読み手は読まない。書いてある設定を断らないために残す（#2505）",
       "deprecated": true
     }
   },

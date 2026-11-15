@@ -1,17 +1,17 @@
-"""副命令 `ndf project`: プロジェクトの宣言（`.ndf/project.json`）の判定・測定・書き出し・ずれ・スキーマ（#3569。旧い
+"""サブコマンド `ndf project`: プロジェクトの設定（`.ndf/project.json`）の判定・測定・書き出し・ずれ・スキーマ（#3569。旧い
 `project-decl.py` の移し先）。
 
-    ndf project check   [--force] [--root <ディレクトリ>]                              # 宣言が新しいか
+    ndf project check   [--force] [--root <ディレクトリ>]                              # 設定が新しいか
     ndf project measure --out <ファイル> [--budget <秒>] [--root <ディレクトリ>]          # リポジトリと CI を測る
-    ndf project write   --measure <ファイル> [--answers <ファイル>] [--dry-run] [--root <ディレクトリ>]  # 宣言を書き出す
-    ndf project drift   --measure <ファイル> [--root <ディレクトリ>]                      # ブランチ運用の宣言と使い方のずれ
-    ndf project schema  [--out <ファイル>]                                                # 宣言の JSON Schema を出す
+    ndf project write   --measure <ファイル> [--answers <ファイル>] [--dry-run] [--root <ディレクトリ>]  # 設定を書き出す
+    ndf project drift   --measure <ファイル> [--root <ディレクトリ>]                      # ブランチ運用の設定と使い方のずれ
+    ndf project schema  [--out <ファイル>]                                                # 設定の JSON Schema を出す
 
 `check` の終了コード: 0 = 新しい / 3 = 無い・古い（`--force` なら新しくても 3。種類 `not_applicable`）/ 2 = 壊れている
 （種類 `invalid`）/ 1 = 判定できない（git の外。種類 `unknown`）。LLM も GitHub も呼ばず、ファイルを書かない。
 `measure` は `--out` だけを書き、`gh` へは読む要求だけを渡す。0 = 書けた（項目が不明でも 0）/ 1 = `--out` を書けない。
-`write` は 0 = 書けた・書くものが無い / 1 = 書けない・答えが取り込み方の表に合わない / 2 = 既存の宣言が壊れている。
-`drift` は 0 = 比べた（ずれが無ければ items は空）/ 1 = 測定の結果を読めない / 2 = 宣言が壊れている。
+`write` は 0 = 書けた・書くものが無い / 1 = 書けない・回答がリリース方式の表に合わない / 2 = 既存の設定が壊れている。
+`drift` は 0 = 比べた（ずれが無ければ items は空）/ 1 = 測定の結果を読めない / 2 = 設定が壊れている。
 結果は 1 行の結果 JSON（形は contracts/schemas/io/project.result.schema.json）。その前に人が読む行を出す。
 """
 
@@ -41,11 +41,11 @@ def _check(args: argparse.Namespace) -> int:
         return result.emit(result.stopped(TOOL, "unknown", f"判定できない: {exc}"))
     items = [{"kind": got.kind, "reason": r} for r in got.reasons]
     if got.kind == check.FRESH:
-        return result.emit(result.result(TOOL, result.OK, "宣言は新しい", items=items, metrics={"inputs": got.inputs}))
+        return result.emit(result.result(TOOL, result.OK, "設定は新しい", items=items, metrics={"inputs": got.inputs}))
     if got.kind == check.BROKEN:
         return result.emit(result.stopped(TOOL, "invalid", "；".join(got.reasons), items=items))
     label = "無い" if got.kind == check.MISSING else "古い"
-    return result.emit(result.stopped(TOOL, "not_applicable", "；".join(got.reasons), summary=f"宣言が{label}", items=items))
+    return result.emit(result.stopped(TOOL, "not_applicable", "；".join(got.reasons), summary=f"設定が{label}", items=items))
 
 
 def _gh_repo(repo: git.Git) -> Optional[str]:
@@ -54,7 +54,7 @@ def _gh_repo(repo: git.Git) -> Optional[str]:
 
 
 def _flow_branches(tree: measure_repo.Tree, worktree: Optional[dict[str, Any]]) -> tuple[Optional[str], Optional[str]]:
-    """ブランチ運用を測るベースブランチと本番チャネル（宣言の値、無ければ既定ブランチ）。"""
+    """ブランチ運用を測るベースブランチと本番チャネル（設定の値、無ければ既定ブランチ）。"""
     wt = obj(worktree)
     base, production = (v if isinstance(v, str) else None for v in (wt.get("base_branch"), wt.get("production_branch")))
     if base is None or production is None:
@@ -89,7 +89,7 @@ def _instruction_notes(items: dict[str, Any]) -> list[str]:
 
 
 def _add_merge_evidence(items: dict[str, Any], merges: Optional[dict[str, int]]) -> None:
-    """問いの P6（`branches`）の根拠へ、直近のマージ先の数を足す。"""
+    """質問の P6（`branches`）の根拠へ、直近のマージ先の数を足す。"""
     if merges and obj(items.get(write.BRANCHES)).get("status") == QUESTION:
         counts = "・".join(f"{k} {v}" for k, v in sorted(merges.items(), key=lambda kv: -kv[1]))
         items[write.BRANCHES]["evidence"].append({"text": f"直近 100 件のマージ先: {counts}"})
@@ -167,13 +167,13 @@ def _read_input(path: Optional[str]) -> dict[str, Any]:
 
 
 def _inputs(args: argparse.Namespace) -> write.Inputs:
-    """書き出しの入力。git の外は `CheckError`、宣言が壊れていれば `JsonFileError`、測定の結果か答えが読めなければ `WriteError`。"""
+    """書き出しの入力。git の外は `CheckError`、設定が壊れていれば `JsonFileError`、測定の結果か回答が読めなければ `WriteError`。"""
     repo, main = check.repo_dirs(Path(args.root).resolve())
     existing, worktree = check.load(main)
     try:
         measured, answers = _read_input(args.measure), _read_input(args.answers)
     except jsonfile.JsonFileError as exc:
-        raise write.WriteError(f"測定の結果か答えを読めない: {exc}") from None
+        raise write.WriteError(f"測定の結果か回答を読めない: {exc}") from None
     return write.Inputs(repo.cwd, main, existing, worktree, measured, answers)
 
 
@@ -181,7 +181,7 @@ def _write(args: argparse.Namespace) -> int:
     try:
         planned = write.plan(_inputs(args))
     except jsonfile.JsonFileError as exc:
-        return result.emit(result.stopped(TOOL, "invalid", f"既存の宣言が壊れている（作り直さない）: {exc}。直してから打ち直す"))
+        return result.emit(result.stopped(TOOL, "invalid", f"既存の設定が壊れている（作り直さない）: {exc}。直してから打ち直す"))
     except (check.CheckError, write.WriteError) as exc:
         return result.emit(result.stopped(TOOL, "check_failed", str(exc)))
     if not args.dry_run:
@@ -189,7 +189,7 @@ def _write(args: argparse.Namespace) -> int:
             for f in planned.files:
                 signals.replace_text(f.path, f.new)
         except OSError as exc:
-            return result.emit(result.stopped(TOOL, "check_failed", f"宣言を書けない: {exc}"))
+            return result.emit(result.stopped(TOOL, "check_failed", f"設定を書けない: {exc}"))
     return result.emit(_report_write(planned, args.dry_run))
 
 
@@ -199,7 +199,7 @@ def _print_write(planned: write.Plan, rows: list[dict[str, Any]], dry_run: bool)
         print(f"{verb}: {f.path}")
         print(write.unified(f.name, f.old, f.new))
     if not planned.files:
-        print("書くものが無い（宣言は解析と同じ）")
+        print("書くものが無い（設定は解析と同じ）")
     print("項目ごとの出所:")
     for row in rows:
         if row["kind"] not in ("note", "ignored"):
@@ -208,7 +208,7 @@ def _print_write(planned: write.Plan, rows: list[dict[str, Any]], dry_run: bool)
         if row["kind"] == "note":
             print(f"案内: {row['text']}")
         elif row["kind"] == "ignored":
-            print(f"無視した答え: {row['key']}（問いでない）")
+            print(f"無視した回答: {row['key']}（質問でない）")
     if planned.files and not dry_run:
         print("差分を見て、要らなければコミットしない（承認は求めない）")
 
@@ -232,13 +232,13 @@ def _drift(args: argparse.Namespace) -> int:
     except check.CheckError as exc:
         return result.emit(result.stopped(TOOL, "unknown", f"比べられない: {exc}"))
     except jsonfile.JsonFileError as exc:
-        return result.emit(result.stopped(TOOL, "check_failed", f"測定の結果か宣言を読めない: {exc}"))
+        return result.emit(result.stopped(TOOL, "check_failed", f"測定の結果か設定を読めない: {exc}"))
     except ValueError as exc:
         return result.emit(result.stopped(TOOL, "invalid", f"{files.relpath('worktree')}: {exc}"))
     rows = secret.mask(rows)
     for r in rows:
-        print(f"ずれ: {r['name']} 宣言 {r['declared']} / 測った {r['measured']}（{r['confidence']}）— {r['proposal']}")
-    summary = f"ブランチ運用の宣言と使い方のずれ {len(rows)} 件" if rows else "ブランチ運用の宣言は使い方と合う"
+        print(f"ずれ: {r['name']} 設定 {r['declared']} / 測った {r['measured']}（{r['confidence']}）— {r['proposal']}")
+    summary = f"ブランチ運用の設定と使い方のずれ {len(rows)} 件" if rows else "ブランチ運用の設定は使い方と合う"
     declared = worktree is not None and write.BRANCH_FLOW in worktree
     return result.emit(result.result(TOOL, result.OK, summary, items=rows, metrics={"drifted": len(rows), "declared": declared}))
 
@@ -247,39 +247,39 @@ def _schema(args: argparse.Namespace) -> int:
     text = write.dumps(contracts.load_json(check.SCHEMA))
     if not args.out:
         print(text, end="")
-        return result.emit(result.result(TOOL, result.OK, "宣言の JSON Schema を出した"))
+        return result.emit(result.result(TOOL, result.OK, "設定の JSON Schema を出した"))
     try:
         signals.replace_text(Path(args.out), text)
     except OSError as exc:
         return result.emit(result.stopped(TOOL, "unknown", f"--out を書けない: {exc}"))
     return result.emit(
-        result.result(TOOL, result.OK, f"宣言の JSON Schema を書いた: {args.out}", items=[{"kind": "schema", "reason": args.out}])
+        result.result(TOOL, result.OK, f"設定の JSON Schema を書いた: {args.out}", items=[{"kind": "schema", "reason": args.out}])
     )
 
 
 def _parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog=f"ndf {TOOL}", description=__doc__.splitlines()[0] if __doc__ else None)
     sub = p.add_subparsers(dest="command", required=True)
-    c = sub.add_parser("check", help="宣言が新しいかを判定する（0 = 新しい / 3 = 無い・古い / 2 = 壊れている / 1 = 判定できない）")
+    c = sub.add_parser("check", help="設定が新しいかを判定する（0 = 新しい / 3 = 無い・古い / 2 = 壊れている / 1 = 判定できない）")
     c.add_argument("--force", action="store_true", help="新しくても古いと判定する（手動の再解析）")
     c.add_argument("--root", default=".", help="リポジトリの作業場所")
     c.set_defaults(handler=_check)
     m = sub.add_parser("measure", help="リポジトリと CI を測り、測定の結果を --out へ書く")
-    m.add_argument("--out", required=True, help="測定の結果の置き場（リポジトリの外の一時ディレクトリ）")
+    m.add_argument("--out", required=True, help="測定の結果の保存先（リポジトリの外の一時ディレクトリ）")
     m.add_argument("--budget", type=float, default=120.0, help="締め切りの秒（既定 120）")
     m.add_argument("--root", default=".", help="リポジトリの作業場所")
     m.set_defaults(handler=_measure)
-    w = sub.add_parser("write", help="測定の結果と答えから宣言を書き出す")
+    w = sub.add_parser("write", help="測定の結果と回答から設定を書き出す")
     w.add_argument("--measure", required=True, help="ndf project measure の測定の結果")
-    w.add_argument("--answers", help="問いの項目への答え（キー → {value} か {unknown}）")
+    w.add_argument("--answers", help="質問の項目への回答（キー → {value} か {unknown}）")
     w.add_argument("--dry-run", action="store_true", help="書かずに差分だけを出す")
     w.add_argument("--root", default=".", help="リポジトリの作業場所")
     w.set_defaults(handler=_write)
-    d = sub.add_parser("drift", help="ブランチ運用の宣言と測った使い方のずれを出す")
+    d = sub.add_parser("drift", help="ブランチ運用の設定と測った使い方のずれを出す")
     d.add_argument("--measure", required=True, help="ndf project measure の測定の結果")
     d.add_argument("--root", default=".", help="リポジトリの作業場所")
     d.set_defaults(handler=_drift)
-    s = sub.add_parser("schema", help="宣言の JSON Schema を出す")
+    s = sub.add_parser("schema", help="設定の JSON Schema を出す")
     s.add_argument("--out", help="書く先。省けば標準出力")
     s.set_defaults(handler=_schema)
     return p

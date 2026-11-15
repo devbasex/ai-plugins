@@ -38,7 +38,7 @@ def _fill(value: Any, locations: dict[str, str]) -> Any:
 
 
 def read_sample(path: Path, cwd: Path, **override: Any) -> dict[str, Any]:
-    """見本の入力。作業ディレクトリと会話の記録のパスを置き換え、`override` の鍵を上書きする。"""
+    """見本の入力。作業ディレクトリと会話の記録のパスを置き換え、`override` のキーを上書きする。"""
     data = json.loads(path.read_text(encoding="utf-8"))
     data = _fill(data, {"<cwd>": str(cwd), "<transcript>": str(cwd / "transcript.jsonl")})
     data.update(override)
@@ -79,7 +79,7 @@ def records() -> list[dict[str, Any]]:
 
 
 def make_repo(root: Path, slug: str = "owner/repo", delivery: Any = None, worktree: bool = False) -> Path:
-    """宛先のリポジトリ（.git の設定に origin と、.ndf/project.json の delivery）を作る。`delivery` が None なら宣言を置かない。"""
+    """宛先のリポジトリ（.git の設定に origin と、.ndf/project.json の delivery）を作る。`delivery` が None なら設定を置かない。"""
     root.mkdir(parents=True, exist_ok=True)
     config = f'[core]\n\tbare = false\n[remote "origin"]\n\turl = git@github.com:{slug}.git\n'
     if worktree:

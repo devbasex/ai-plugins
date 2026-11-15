@@ -1,4 +1,4 @@
-"""組み立ての判断（assemble_decide）: 状態の置き場・実行の鍵・差し込み・作業ディレクトリ（RF5a・N2b・B1）。"""
+"""組み立ての判断（assemble_decide）: 状態の保存先・実行のキー・差し込み・作業ディレクトリ（RF5a・N2b・B1）。"""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ def test_state_dir_is_absolute_for_a_relative_plan_path():
 
 
 def test_run_key_differs_for_each_part():
-    """実行の回ごとに鍵を分ける（B1）。head が違えば直した head を流す（#3176）。"""
+    """実行の回ごとにキーを分ける（B1）。head が違えば直した head を流す（#3176）。"""
     base = run_key("p", "d", None, "h1")
     assert (
         len(
@@ -40,12 +40,12 @@ def _record(**kw):
 
 
 def test_choose_run_keeps_the_key_while_the_round_is_running():
-    """承認ゲートで待つ回は、head が動いても同じ鍵で続ける（B2）。"""
+    """承認ゲートで待つ回は、head が動いても同じキーで続ける（B2）。"""
     assert choose_run(_record(), RunPlan("p", "d", None), "h9", finished=False) == ("K", 0)
 
 
 def test_choose_run_keeps_a_finished_key_for_the_same_head():
-    """終わった回を同じ head で打ち直すと同じ鍵（retired/ の結果を返す。B4）。"""
+    """終わった回を同じ head で打ち直すと同じキー（retired/ の結果を返す。B4）。"""
     assert choose_run(_record(heads=["h1", "h2"]), RunPlan("p", "d", None), "h2", finished=True) == ("K", 0)
 
 
@@ -80,7 +80,7 @@ def test_workdir_falls_back_to_the_repo_root(location, worktree, repo, usable, e
 
 
 def test_choose_run_fresh_skips_the_running_round_and_taken_numbers():
-    """`--fresh` は終わっていない回も続けず、耐久の記録の置き場に無い番号を選ぶ（#1592）。"""
+    """`--fresh` は終わっていない回も続けず、耐久の記録の保存先に無い番号を選ぶ（#1592）。"""
     taken = {run_key("p", "d", None, "h1", 1)}
     assert choose_run(_record(), RunPlan("p", "d", None), "h1", finished=False, fresh=True, taken=taken.__contains__) == (
         run_key("p", "d", None, "h1", 2),
@@ -89,7 +89,7 @@ def test_choose_run_fresh_skips_the_running_round_and_taken_numbers():
 
 
 def test_choose_run_fresh_without_a_record_does_not_return_to_the_old_key():
-    """状態の置き場を消して `record` が無くても、記録の残る番号 0 の鍵に戻らない（#1592）。"""
+    """状態の保存先を消して `record` が無くても、記録の残る番号 0 のキーに戻らない（#1592）。"""
     taken = {run_key("p", "d", None, "h1", 0)}
     choice = choose_run(None, RunPlan("p", "d", None), "h1", finished=False, fresh=True, taken=taken.__contains__)
     assert choice == (run_key("p", "d", None, "h1", 1), 1)

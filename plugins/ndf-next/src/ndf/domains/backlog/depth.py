@@ -1,7 +1,7 @@
 """深さ（見直し `review`・大整理 `overhaul`）の 1 回の秒の上限と、打ち切りの記録（#2423）。
 
-秒の上限は `.ndf/backlog.json` の `depths.<深さ>.seconds` を先に読み、無ければ上限の宣言の既定
-（`backlog-refinement.depth-<深さ>`）を使う。費用（ドル）の宣言は持たない（読み手が無い）。宣言の形が違えば
+秒の上限は `.ndf/backlog.json` の `depths.<深さ>.seconds` を先に読み、無ければ上限の設定の既定
+（`backlog-refinement.depth-<深さ>`）を使う。費用（ドル）の設定は持たない（読み手が無い）。設定の形が違えば
 既定へ倒さずに止まる。
 
 工程の本体を秒の上限で打ち切ったら、残りの番号を深さの記録（depths.jsonl）へ `timed_out` の行で書く。次の
@@ -25,7 +25,7 @@ EVENTS = (TIMED_OUT, RAN)
 
 
 class DepthError(Exception):
-    """宣言の形が違う・宣言を読めない。"""
+    """設定の形が違う・設定を読めない。"""
 
 
 def ndf_settings_path(cwd: Path) -> Path:
@@ -39,7 +39,7 @@ def ndf_settings_path(cwd: Path) -> Path:
 
 
 def ndf_settings(path: Path) -> dict[str, Any]:
-    """宣言を読む。無ければ空。JSON のオブジェクトでなければ `DepthError`。"""
+    """設定を読む。無ければ空。JSON のオブジェクトでなければ `DepthError`。"""
     if not path.exists():
         return {}
     try:
@@ -52,7 +52,7 @@ def ndf_settings(path: Path) -> dict[str, Any]:
 
 
 def depth_entry(decl: dict[str, Any], depth: str) -> Any:
-    """宣言の `depths.<深さ>`（無ければ空）。深さが違う・`depths` がオブジェクトでなければ `DepthError`。"""
+    """設定の `depths.<深さ>`（無ければ空）。深さが違う・`depths` がオブジェクトでなければ `DepthError`。"""
     if depth not in DEPTHS:
         raise DepthError(f"深さは {' / '.join(DEPTHS)} のどれか: {depth!r}")
     depths = decl["depths"] if "depths" in decl else {}
@@ -62,7 +62,7 @@ def depth_entry(decl: dict[str, Any], depth: str) -> Any:
 
 
 def depth_seconds(decl: dict[str, Any], depth: str) -> int:
-    """深さの 1 回の秒の上限。宣言の `depths.<深さ>.seconds` は正の整数で書く。"""
+    """深さの 1 回の秒の上限。設定の `depths.<深さ>.seconds` は正の整数で書く。"""
     entry = depth_entry(decl, depth)
     if not isinstance(entry, dict) or ("seconds" in entry and not is_positive_int(entry["seconds"])):
         raise DepthError(f"depths.{depth}.seconds は正の整数で書く")

@@ -248,7 +248,7 @@
     "version",
     "versions"
   ],
-  "title": "NDF のプロジェクト MVV の宣言（.ndf/mvv.json）",
+  "title": "NDF のプロジェクト MVV の設定（.ndf/mvv.json）",
   "type": "object",
   "$schema": "https://json-schema.org/draft/2020-12/schema"
 }

@@ -4,24 +4,24 @@
 
 | `call` | 種類 | 呼ぶもの |
 | --- | --- | --- |
-| `ndf.plan` | `plan` | プランの実行（`ndf plan next <プラン>`）。プランは雛形 `<with.plan>`（`ndf.core.route.templates()` の鍵）を埋めたもの |
+| `ndf.plan` | `plan` | プランの実行（`ndf plan next <プラン>`）。プランはテンプレート `<with.plan>`（`ndf.core.route.templates()` のキー）を埋めたもの |
 | `ndf.skill` | `skill` | LLM の起動（`claude -p`。Skill `<前置き><with.skill>` を回す） |
 | `ndf.script` | `script` | 子プロセス（`with.argv`）。入力は環境変数 `NDF_STAGE_INPUT` の JSON で渡す |
-| `ndf.listen`（工程の定義の `listen` の要素） | `listen` | 作業を呼ばない。承認ゲートの答えを待つ（`ndf.progress.run` が受ける） |
+| `ndf.listen`（工程の定義の `listen` の要素） | `listen` | 作業を呼ばない。承認ゲートの回答を待つ（`ndf.progress.run` が受ける） |
 
-作業へ渡す引数は工程の定義の `metadata.ndf.inputs` の鍵だけで、値は渡す前にスプリントの文脈の
+作業へ渡す引数は工程の定義の `metadata.ndf.inputs` のキーだけで、値は渡す前にスプリントの文脈の
 スキーマ（`contracts/workflow/context.schema.json`）で形を確かめる（3364-7）。作業の出力のうち工程の
-定義の `outputs` に無い鍵は書かずに捨て、結果の `warnings` に載せる。プランの実行は進行表を読まず、書かない。
+定義の `outputs` に無いキーは書かずに捨て、結果の `warnings` に載せる。プランの実行はステートマシンを読まず、書かない。
 
-雛形は `ndf.core.route` から引き、雛形の差し込み（`{{名前}}`）を入力の値と `ndf route render` と同じ省いた値の
-決め方（`route.derived`）で埋めたプランを実行の置き場へ書いて流す。プランへの作業場所（文脈の `worktree`）は
+テンプレートは `ndf.core.route` から引き、テンプレートの差し込み（`{{名前}}`）を入力の値と `ndf route render` と同じ省いた値の
+決め方（`route.derived`）で埋めたプランを実行の保存先へ書いて流す。プランへの作業場所（文脈の `worktree`）は
 差し込みの値（`--set`）でなく、埋めたプランの作業場所（プランの `worktree`）で渡す。差し込みの `worktree` はプランの
 実行が決まった名前として持ち、上書きを断るためである。止まったプランを打ち直すときは、前の回の結果の打ち直し（`next` の `--from`）と
-同じく止まったステップから新しい回を始め、差し込み `progress_attempt` に打ち直しの数を載せて回の鍵を変える。同じ引数で
-打ち直すと、プランは前の回の控えの結果を返すだけだからである。skill と script は入力の作業場所で打つ。
+同じく止まったステップから新しい回を始め、差し込み `progress_attempt` に打ち直しの数を載せて回のキーを変える。同じ引数で
+打ち直すと、プランは前の回のバックアップの結果を返すだけだからである。skill と script は入力の作業場所で打つ。
 
 工程の入力に無い差し込みは、値の性質ごとの出所（`FILL_SOURCES`）から埋める（#3092）。課題の題と本文は課題から写し、
-テストのコマンド・必須のチェック・レビューと組み直しとリファクタリングの起動は `.ndf/project.json` の宣言から読み（レビューは宣言が
+テストのコマンド・必須のチェック・レビューと組み直しとリファクタリングの起動は `.ndf/project.json` の設定から読み（レビューは設定が
 無ければ `ndf cross-review run` を、打つ時点のブランチの PR の番号で組む。`review_launch`）、worker と承認ゲートの
 起動は `params.json` の既定を使う。どこからも決まらない差し込みは、名前と出所を挙げて invalid で止める。
 """
@@ -49,36 +49,36 @@ from ndf.progress import definition, model, stages
 from ndf.progress.command import PROJECT_FILE, ndf_settings
 from ndf.testing import scoped, weight
 
-# 作業種別と、工程の定義の call → 作業種別（plan は副命令 `ndf plan` の名前）
+# 作業種別と、工程の定義の call → 作業種別（plan はサブコマンド `ndf plan` の名前）
 PLAN = plan_cli.TOOL
 SKILL = "skill"
 SCRIPT = "script"
 LISTEN = "listen"
 CALLS = {"ndf.plan": PLAN, "ndf.skill": SKILL, "ndf.script": SCRIPT, definition.LISTEN_CALL: LISTEN}
-# 作業種別 → 呼ぶものの名前を持つ with の鍵（listen は作業を呼ばないので無い）
+# 作業種別 → 呼ぶものの名前を持つ with のキー（listen は作業を呼ばないので無い）
 NAME_ARG = {PLAN: "plan", SKILL: "skill", SCRIPT: "argv"}
 # script の作業へ入力を渡す環境変数
 INPUT_ENV = "NDF_STAGE_INPUT"
 NOTES_ENV = "NDF_STAGE_NOTES"
 # skill の作業の上限（Skill 1 本を回す起動は実装の工程と同じ桁）
 SKILL_LIMIT = "monitor.phase.implement"
-SKILL_SYSTEM = "工程の作業を 1 つ行い、最後に結果 JSON（統一 JSON レポート）だけを答える。"
-# 打ち直しても直らない `claude -p` の失敗 → 止まった理由（表に無い失敗は前提の欠け）
+SKILL_SYSTEM = "工程の作業を 1 つ行い、最後に結果 JSON（統一 JSON レポート）だけを回答する。"
+# 打ち直しても直らない `claude -p` の失敗 → 停止理由（表に無い失敗は前提の欠け）
 SKILL_FAILURES = {claude.Failure.USAGE_LIMIT: "usage_limit", claude.Failure.TIMEOUT: "interrupted"}
 ACTOR = model.WORKFLOW_ACTOR
-# 承認の答えの語（表 answers の行）。プランの承認ゲートの続きが無い承認は、プランが終わったとみなす
+# 承認の回答の語（表 answers の行）。プランの承認ゲートの続きが無い承認は、プランが終わったとみなす
 APPROVED = str(facts.row(result.ANSWERS, "approved")["id"])
-# プランの実行の置き場に残す、回の打ち直しの数（`plan_attempt`）と、それを渡す差し込みの名前
+# プランの実行の保存先に残す、回の打ち直しの数（`plan_attempt`）と、それを渡す差し込みの名前
 ATTEMPT_FILE = "progress-attempt.json"
 ATTEMPT_SET = "progress_attempt"
 # このプラグインの Python のパッケージの名前（`python -m` で打つ名前）
 PACKAGE = __package__.partition(".")[0]
-# このパッケージの置き場（`src`。子プロセスの import の道）
+# このパッケージの保存先（`src`。子プロセスの import の道）
 SRC = Path(__file__).resolve().parents[2]
 
 
 class StageInputError(Exception):
-    """工程の入力を文脈から渡せない。`kind` は止まった理由の語、`items` は結果 JSON の項目。"""
+    """工程の入力を文脈から渡せない。`kind` は停止理由の語、`items` は結果 JSON の項目。"""
 
     kind = "invalid"
 
@@ -88,12 +88,12 @@ class StageInputError(Exception):
 
 
 class StageInputMissing(StageInputError):
-    """工程の入力の鍵がスプリントの文脈に無い。`keys` は足りない鍵。"""
+    """工程の入力のキーがスプリントの文脈に無い。`keys` は足りないキー。"""
 
     kind = "input_missing"
 
     def __init__(self, keys: Sequence[str]) -> None:
-        super().__init__(f"工程の入力の鍵が文脈に無い: {', '.join(keys)}")
+        super().__init__(f"工程の入力のキーが文脈に無い: {', '.join(keys)}")
         self.keys = tuple(keys)
 
     @property
@@ -116,11 +116,11 @@ class StageInputInvalid(StageInputError):
 
 
 class TemplateValuesMissing(route.RouteError):
-    """雛形の差し込みの値がどの出所からも決まらない。`missing` は足りない差し込みの名前 → 出所。"""
+    """テンプレートの差し込みの値がどの出所からも決まらない。`missing` は足りない差し込みの名前 → 出所。"""
 
     def __init__(self, template_name: str, missing: Mapping[str, str]) -> None:
         listed = ", ".join(f"{n}（{s}）" for n, s in missing.items())
-        super().__init__(f"雛形 {template_name} の差し込みの値が無い: {listed}")
+        super().__init__(f"テンプレート {template_name} の差し込みの値が無い: {listed}")
         self.missing = dict(missing)
 
     @property
@@ -139,7 +139,7 @@ class StageRun:
     range: str
     step: str
     args: dict[str, Any] = field(default_factory=dict)
-    # 差し戻しの指摘の本文（承認ゲートの request_changes の答え）。作業へは環境変数 NDF_STAGE_NOTES か問いの末尾で渡す
+    # 変更要求の指摘の本文（承認ゲートの request_changes の回答）。作業へは環境変数 NDF_STAGE_NOTES か質問の末尾で渡す
     notes: Optional[str] = None
     # 行の打ち直し（conductor の retry）の回数と、方針による自動の打ち直しか。プランはどちらでも新しい回を始める（`plan_attempt`）
     retries: int = 0
@@ -154,7 +154,7 @@ class StageRun:
 
 @dataclass(frozen=True)
 class StageResult:
-    """作業の結果。`report` は結果 JSON、`outputs` は工程の定義が書くと宣言した鍵だけの値。"""
+    """作業の結果。`report` は結果 JSON、`outputs` は工程の定義が書くと定義したキーだけの値。"""
 
     report: dict[str, Any]
     outputs: dict[str, Any]
@@ -171,12 +171,12 @@ class StageResult:
 
 
 def ndf_command(*args: str) -> list[str]:
-    """このプラグインの副命令を子プロセスで打つ argv（同じ Python で `-m ndf`。作業ディレクトリを import の道に入れない）。"""
+    """このプラグインのサブコマンドを子プロセスで打つ argv（同じ Python で `-m ndf`。作業ディレクトリを import の道に入れない）。"""
     return [sys.executable, "-P", "-m", PACKAGE, *args]
 
 
 def ndf_env(env: Mapping[str, str]) -> dict[str, str]:
-    """子プロセスの環境変数。このパッケージの置き場（`src`）を `PYTHONPATH` の頭へ足す。"""
+    """子プロセスの環境変数。このパッケージの保存先（`src`）を `PYTHONPATH` の頭へ足す。"""
     out = dict(env)
     held = out["PYTHONPATH"] if "PYTHONPATH" in out else ""
     out["PYTHONPATH"] = os.pathsep.join(p for p in (str(SRC), held) if p)
@@ -187,7 +187,7 @@ def ndf_env(env: Mapping[str, str]) -> dict[str, str]:
 Runner = Callable[[list[str], Path, dict[str, str]], "subprocess.CompletedProcess[str]"]
 
 
-# Skill を回す `claude -p` を打つ関数（argv・問い・上限の秒・作業ディレクトリ → 答え）。テストが差し替える
+# Skill を回す `claude -p` を打つ関数（argv・質問・上限の秒・作業ディレクトリ → 回答）。テストが差し替える
 SkillCaller = Callable[[Sequence[str], str, float, Optional[Path]], claude.ClaudeReply]
 
 
@@ -199,12 +199,12 @@ def run_command(argv: list[str], cwd: Path, env: dict[str, str]) -> subprocess.C
 
 
 def value_errors(values: Mapping[str, Any]) -> list[str]:
-    """文脈の鍵と値の組を、スプリントの文脈のスキーマで確かめた誤り（3364-7）。"""
+    """文脈のキーと値の組を、スプリントの文脈のスキーマで確かめた誤り（3364-7）。"""
     return [f"文脈の値: {e}" for e in contracts.schema_errors(dict(values), definition.CONTEXT)]
 
 
 def resolve_inputs(stage: stages.StageDef, context: Mapping[str, Any]) -> dict[str, Any]:
-    """工程の定義の `inputs` の鍵だけを文脈から取り、形を確かめて返す（余分な鍵は渡さない）。"""
+    """工程の定義の `inputs` のキーだけを文脈から取り、形を確かめて返す（余分なキーは渡さない）。"""
     missing = [k for k in stage.inputs if k not in context]
     if missing:
         raise StageInputMissing(missing)
@@ -221,7 +221,7 @@ def kind_of(step: stages.StepDef) -> str:
 
 
 def is_listen(step: stages.StepDef) -> bool:
-    """作業を呼ばず、承認ゲートの答えを待つステップか。"""
+    """作業を呼ばず、承認ゲートの回答を待つステップか。"""
     return kind_of(step) == LISTEN
 
 
@@ -271,10 +271,10 @@ def _tool(run: StageRun) -> str:
 
 
 def finished(run: StageRun, report: dict[str, Any]) -> StageResult:
-    """結果 JSON から、宣言した鍵だけの出力を取る。宣言に無い鍵は捨てて `warnings` に載せる。"""
+    """結果 JSON から、定義したキーだけの出力を取る。設定に無いキーは捨てて `warnings` に載せる。"""
     given = report["outputs"] if isinstance(report.get("outputs"), dict) else {}
     kept, dropped = stages.keep_declared(run.outputs, given)
-    warnings = tuple(f"工程の定義の outputs に無い鍵を捨てた: {k}" for k in dropped)
+    warnings = tuple(f"工程の定義の outputs に無いキーを捨てた: {k}" for k in dropped)
     errs = value_errors(kept)
     if errs:
         return bad_report(run, "; ".join(errs))
@@ -285,31 +285,31 @@ def finished(run: StageRun, report: dict[str, Any]) -> StageResult:
 
 
 def template(name: str) -> Optional[route.Template]:
-    """プランの雛形（`route.templates()` の鍵 `name`）。無ければ None。"""
+    """プランのテンプレート（`route.templates()` のキー `name`）。無ければ None。"""
     found = route.templates()
     return found[name] if name in found else None
 
 
 def _param_value(value: Any) -> route.Value:
-    """入力の値を雛形の差し込みの値（文字列か文字列の並び）にする。"""
+    """入力の値をテンプレートの差し込みの値（文字列か文字列の並び）にする。"""
     if isinstance(value, list):
         return [_set_value(v) for v in value]
     return _set_value(value)
 
 
-# 雛形の差し込みのうち、工程の入力に無い値の出所（差し込みの名前 → 出所。#3092）。表に無い名前は工程の入力・
+# テンプレートの差し込みのうち、工程の入力に無い値の出所（差し込みの名前 → 出所。#3092）。表に無い名前は工程の入力・
 # 打った場所（`route.derived`）・`params.json` の既定で決まる
 FROM_ISSUE = "課題の題と本文"
 # 書き手を信用しない（`GitHub.trusts` が偽。#3364）課題の題と本文は、作業の入力（指示として読まれる）へ写さない
 FROM_UNTRUSTED_ISSUE = "課題の題と本文（書き手に write 以上の権限が無く、指示として渡さない）"
-FROM_PROJECT = f"{PROJECT_FILE} の宣言"
+FROM_PROJECT = f"{PROJECT_FILE} の設定"
 FROM_DEFAULT = "params.json の既定"
 FROM_WORKTREE = "作業場所のブランチ"
 FROM_INPUT = "工程の入力か打った場所"
 FROM_STAGE = "工程の承認ゲート（モードが置く listen のステップ）"
-# 工程から呼ぶプランの中の承認ゲート（雛形の `{{gate}}`）に入れる起動。承認の要否と答えは工程の側（モードが置く
+# 工程から呼ぶプランの中の承認ゲート（テンプレートの `{{gate}}`）に入れる起動。承認の要否と回答は工程の側（モードが置く
 # listen のステップ）が持つため、プランの中では待たずに通す（終了コード 0 で結果 JSON を出さない手は ok）。
-# `params.json` の既定（`ndf answer ask`）は工程の外で雛形を使うときの値で、工程から使うと承認待ちを足してしまう
+# `params.json` の既定（`ndf answer ask`）は工程の外でテンプレートを使うときの値で、工程から使うと承認待ちを足してしまう
 STAGE_GATE = ["true"]
 FILL_SOURCES = {
     "title": FROM_ISSUE,
@@ -324,21 +324,21 @@ FILL_SOURCES = {
     "gate": FROM_STAGE,
     "branch": FROM_WORKTREE,
 }
-# レーンの宣言に `workflow.launch.review` が無いときの `{{review}}`: 設計の雛形は purpose design、ほかは code の
+# レーンの設定に `workflow.launch.review` が無いときの `{{review}}`: 設計のテンプレートは purpose design、ほかは code の
 # `ndf cross-review run` を、ステップを打つ時点でブランチの PR の番号を読んで `--pr` に足して打つ。設計のプランは PR を
 # プランの中（pr のステップ）で作るため、組む時点に番号が無い。打つ時点で読めば、PR を作った後の番号で組める
 REVIEW_STATE = "{state_dir}/cross-review"
 REVIEW_WITH_PR = 'n=$(gh pr view "$0" --json number --jq .number) && [ -n "$n" ] || exit 1; exec "$@" --pr "$n"'
-# `.ndf/project.json` の宣言のうち、差し込みの値を持つ鍵の道（test_command は `test.suites` のテストの suite の command を宣言の順に ` && ` でつなぐ）
+# `.ndf/project.json` の設定のうち、差し込みの値を持つキーの道（test_command は `test.suites` のテストの suite の command を設定の順に ` && ` でつなぐ）
 PROJECT_KEYS = {
     "required": ("ci", "required_checks"),
     "review": ("workflow", "launch", "review"),
     "rebuild": ("workflow", "launch", "rebuild"),
     "refactor": ("workflow", "launch", "refactor"),
 }
-# 宣言の `workflow`（launch・stages）の形。旧いプラグインの宣言のスキーマへ足さず、読む側のここに置く（#3473）
+# 設定の `workflow`（launch・stages）の形。旧いプラグインの設定のスキーマへ足さず、読む側のここに置く（#3473）
 WORKFLOW_SCHEMA = contracts.schema_path("project-workflow")
-# 課題の本文を書き出す置き場のファイルと、題の写し（プランの実行の置き場の下）
+# 課題の本文を書き出す保存先のファイルと、題の写し（プランの実行の保存先の下）
 ISSUE_BODY_FILE = "issue-{number}-body.md"
 ISSUE_TITLE_FILE = "issue-{number}-title.json"
 
@@ -360,7 +360,7 @@ def _strings(value: Any) -> Optional[list[str]]:
 
 
 def _test_command(project: Mapping[str, Any]) -> Optional[str]:
-    """宣言の `test.suites` のうちテストの suite の command を、宣言の順に ` && ` でつなぐ。無ければ None。"""
+    """設定の `test.suites` のうちテストの suite の command を、設定の順に ` && ` でつなぐ。無ければ None。"""
     suites = definition.dig(project, "test", "suites")
     found = [s for s in suites if isinstance(s, dict) and weight.is_test_suite(s)] if isinstance(suites, list) else []
     cmds = [c for c in (s.get("command") for s in found) if isinstance(c, str) and c]
@@ -368,7 +368,7 @@ def _test_command(project: Mapping[str, Any]) -> Optional[str]:
 
 
 def _project_value(name: str, project: Mapping[str, Any]) -> Optional[route.Value]:
-    """宣言から読む差し込みの値。宣言に無いか形が違えば None。"""
+    """設定から読む差し込みの値。設定に無いか形が違えば None。"""
     if name == "test_command":
         return _test_command(project)
     return _strings(definition.dig(project, *PROJECT_KEYS[name]))
@@ -393,7 +393,7 @@ def _project(location: Path) -> dict[str, Any]:
 def _issue_values(run: StageRun, work_dir: Path, location: Path) -> Optional[dict[str, route.Value]]:
     """課題が 1 つなら、その題（title）・本文を書いたファイル（body_file）・番号（issue）。課題が 1 つでなければ空。
 
-    題と本文は置き場へ初回に 1 度だけ写し（`ISSUE_BODY_FILE`・`ISSUE_TITLE_FILE`）、以後の呼び出し（承認の答え・続き・
+    題と本文は保存先へ初回に 1 度だけ写し（`ISSUE_BODY_FILE`・`ISSUE_TITLE_FILE`）、以後の呼び出し（承認の回答・続き・
     打ち直し）はその写しを使う。読み直すと GitHub を毎回呼び、途中で題が直されるとプランが変わって、終わっていない回へ
     届かず開始点から流れ直すためである（PR 3469 の指摘）。
     書き手を信用しない課題は、本文を書き出さずに None（足りない値の出所を `FROM_UNTRUSTED_ISSUE` にする）。
@@ -431,7 +431,7 @@ def _branch_of(run: StageRun) -> Optional[str]:
 
 
 def ci_only(project: Mapping[str, Any]) -> bool:
-    """宣言（`_project` が読んだもの）がテストを CI に寄せる（`test.ci.only` が真）か（#3473）。"""
+    """設定（`_project` が読んだもの）がテストを CI に寄せる（`test.ci.only` が真）か（#3473）。"""
     test = definition.dig(project, "test")
     return scoped.ci_only(test if isinstance(test, Mapping) else {})
 
@@ -439,12 +439,12 @@ def ci_only(project: Mapping[str, Any]) -> bool:
 def template_values(
     t: route.Template, run: StageRun, work_dir: Path, cwd: Path, *, project: Mapping[str, Any], local_tests: bool
 ) -> dict[str, route.Value]:
-    """雛形の差し込みの値。工程の入力 → 出所の表（`FILL_SOURCES`）→ 打った場所（`route.derived`）の順に決める。
+    """テンプレートの差し込みの値。工程の入力 → 出所の表（`FILL_SOURCES`）→ 打った場所（`route.derived`）の順に決める。
 
     既定も無く決まらない差し込みは、名前と出所を挙げて `TemplateValuesMissing`。手元のテストのステップを外したプランを
-    組むとき（`local_tests` が偽。テストを CI に寄せる宣言 `ci_only` がある）は、そこだけが使う差し込み
-    （`test_command` など）は求めない。`project` は呼び手が 1 度だけ読んだ宣言（`_project`）で、CI に寄せるかの判定と
-    宣言の出所の差し込みが同じものを使う（読み直すと git・ファイル・形の検査が 2 回ずつ走る。PR 3525 の指摘）。
+    組むとき（`local_tests` が偽。テストを CI に寄せる設定 `ci_only` がある）は、そこだけが使う差し込み
+    （`test_command` など）は求めない。`project` は呼び手が 1 度だけ読んだ設定（`_project`）で、CI に寄せるかの判定と
+    設定の出所の差し込みが同じものを使う（読み直すと git・ファイル・形の検査が 2 回ずつ走る。PR 3525 の指摘）。
     """
     location = work_location(run, cwd)
     names = route.needed(t, local_tests=local_tests)
@@ -473,7 +473,7 @@ def _fill_from_issue(
 
 
 def _fill_from_project(project: Mapping[str, Any], wanted: Mapping[str, str]) -> dict[str, route.Value]:
-    """宣言の出所の差し込みの値（宣言に無いか形が違う差し込みは含めない）。"""
+    """設定の出所の差し込みの値（設定に無いか形が違う差し込みは含めない）。"""
     if FROM_PROJECT not in wanted.values():
         return {}
     found = {name: _project_value(name, project) for name in (n for n, s in wanted.items() if s == FROM_PROJECT)}
@@ -481,7 +481,7 @@ def _fill_from_project(project: Mapping[str, Any], wanted: Mapping[str, str]) ->
 
 
 def review_launch(template_name: str, branch: str, base: str) -> list[str]:
-    """宣言が無いときの `{{review}}` の値（`REVIEW_WITH_PR`）。PR の番号は打つ時点にブランチから読んで `--pr` に足す。"""
+    """設定が無いときの `{{review}}` の値（`REVIEW_WITH_PR`）。PR の番号は打つ時点にブランチから読んで `--pr` に足す。"""
     purpose = "design" if template_name == "design" else "code"
     entry = identity.FIXED_WORDS["entrypoint"]
     review = [entry, "cross-review", "run", "--state-dir", REVIEW_STATE, "--base", base, "--purpose", purpose]
@@ -489,10 +489,10 @@ def review_launch(template_name: str, branch: str, base: str) -> list[str]:
 
 
 def _fill_review(t: route.Template, values: Mapping[str, route.Value], wanted: Mapping[str, str]) -> dict[str, route.Value]:
-    """宣言に無い `{{review}}` の値（ブランチと宛先が決まらなければ含めない）。
+    """設定に無い `{{review}}` の値（ブランチと宛先が決まらなければ含めない）。
 
-    雛形が `base` を持たない（`cross-review` など）ときは、宛先を `route.default_base`（ブランチの運用の宣言、無ければ
-    origin の既定ブランチ）から決める。`route.derived` は雛形の params にある値しか補わないため（PR 3537 の指摘）。
+    テンプレートが `base` を持たない（`cross-review` など）ときは、宛先を `route.default_base`（ブランチの運用の設定、無ければ
+    origin の既定ブランチ）から決める。`route.derived` はテンプレートの params にある値しか補わないため（PR 3537 の指摘）。
     """
     if "review" not in wanted or "review" in values:
         return {}
@@ -523,14 +523,14 @@ def _missing(names: Sequence[str], values: Mapping[str, route.Value], sources: M
 
 
 def plan_path(run: StageRun, work_dir: Path, cwd: Path) -> Path:
-    """雛形を入力の値で埋めたプランを実行の置き場へ書き、そのパスを返す。
+    """テンプレートを入力の値で埋めたプランを実行の保存先へ書き、そのパスを返す。
 
     差し込みのうち入力に無いものは出所の表（`FILL_SOURCES`）と、`ndf route render` と同じく打った場所から決め
-    （`template_values`）、それでも欠ければ `TemplateValuesMissing`（`route.RouteError`）。雛形が無ければ `model.Refused`。
+    （`template_values`）、それでも欠ければ `TemplateValuesMissing`（`route.RouteError`）。テンプレートが無ければ `model.Refused`。
     """
     t = template(run.name)
     if t is None:
-        raise model.Refused(f"プランの雛形 {run.name} が無い")
+        raise model.Refused(f"プランのテンプレート {run.name} が無い")
     project = _project(work_location(run, cwd))
     local_tests = not ci_only(project)
     values = template_values(t, run, work_dir, cwd, project=project, local_tests=local_tests)
@@ -541,7 +541,7 @@ def plan_path(run: StageRun, work_dir: Path, cwd: Path) -> Path:
 
 
 def _previous(work_dir: Path) -> tuple[Optional[dict[str, Any]], Optional[dict[str, Any]]]:
-    """置き場の前の回の記録（`run.json`）と、その回の結果の控え（終わっていなければ None）。"""
+    """保存先の前の回の記録（`run.json`）と、その回の結果のバックアップ（終わっていなければ None）。"""
     record = plan_files.read_json(work_dir / plan_runner.RUN_FILE)
     if record is None:
         return None, None
@@ -557,7 +557,7 @@ def _from_of(command: Any) -> Optional[str]:
 def plan_start(work_dir: Path) -> Optional[str]:
     """プランを打ち直す開始点。前の回が止まっていれば、その結果の打ち直し（`next`）の `--from`（止まったステップ）。
 
-    止まっていなければ前の回の開始点（承認の答えを渡すときも同じ回に届く）。前の回が無ければ None（初めから）。
+    止まっていなければ前の回の開始点（承認の回答を渡すときも同じ回に届く）。前の回が無ければ None（初めから）。
     """
     record, done = _previous(work_dir)
     if record is None:
@@ -570,9 +570,9 @@ def plan_start(work_dir: Path) -> Optional[str]:
 
 
 def stored_gate_routes(work_dir: Path) -> Optional[dict[str, Any]]:
-    """前の回が承認ゲートで終わっていれば、その結果の routes（答え → 続きのコマンドか None）。ほかは None。
+    """前の回が承認ゲートで終わっていれば、その結果の routes（回答 → 続きのコマンドか None）。ほかは None。
 
-    終わった回へ `--answer` を渡しても、プランは控えの結果を返すだけである。続きは routes の開始点から新しい回で流す。
+    終わった回へ `--answer` を渡しても、プランはバックアップの結果を返すだけである。続きは routes の開始点から新しい回で流す。
     """
     _, done = _previous(work_dir)
     if done is None or done["status"] != result.GATE or not isinstance(done.get("routes"), dict):
@@ -581,10 +581,10 @@ def stored_gate_routes(work_dir: Path) -> Optional[dict[str, Any]]:
 
 
 def plan_attempt(run: StageRun, work_dir: Path) -> int:
-    """プランの回の打ち直しの数。打ち直し（`retries` が増えたか `again`）で前の回が終わっていれば 1 つ上げて置き場に残す。
+    """プランの回の打ち直しの数。打ち直し（`retries` が増えたか `again`）で前の回が終わっていれば 1 つ上げて保存先に残す。
 
-    差し込み `progress_attempt` に載せて回の鍵を変える。開始点と head が前の回と同じでも、プランが終わった回の控えの結果を
-    返さず、新しい回を流すためである。打ち直さない呼び出し（承認の答え・作業が落ちた後の続き）は残した数をそのまま使い、同じ回に届く。
+    差し込み `progress_attempt` に載せて回のキーを変える。開始点と head が前の回と同じでも、プランが終わった回のバックアップの結果を
+    返さず、新しい回を流すためである。打ち直さない呼び出し（承認の回答・作業が落ちた後の続き）は残した数をそのまま使い、同じ回に届く。
     """
     path = work_dir / ATTEMPT_FILE
     held = plan_files.read_json(path)
@@ -603,10 +603,10 @@ def _set_value(value: Any) -> str:
 
 
 def plan_argv(run: StageRun, work_dir: Path, answer: Optional[str], cwd: Path) -> list[str]:
-    """`ndf plan next <プラン> [--from <ステップ>] --state-dir <置き場> --set <鍵>=<値>...`（答えがあれば `--answer`）。
+    """`ndf plan next <プラン> [--from <ステップ>] --state-dir <保存先> --set <キー>=<値>...`（回答があれば `--answer`）。
 
     作業場所（`worktree`）は `--set` に載せず、埋めたプランの作業場所で渡す（`plan_path`）。前の回が承認ゲートで終わって
-    いれば、答えの routes の開始点から `--answer` 無しで新しい回を流す（`stored_gate_routes`）。
+    いれば、回答の routes の開始点から `--answer` 無しで新しい回を流す（`stored_gate_routes`）。
     """
     routes = stored_gate_routes(work_dir) if answer else None
     if routes is not None:
@@ -626,7 +626,7 @@ def plan_argv(run: StageRun, work_dir: Path, answer: Optional[str], cwd: Path) -
 
 
 def _no_route(run: StageRun, work_dir: Path, answer: Optional[str]) -> Optional[StageResult]:
-    """承認ゲートで終わった回への答えに続きが無いときの結果。承認ならプランは終わり、ほかは承認されなかった。続きがあれば None。"""
+    """承認ゲートで終わった回への回答に続きが無いときの結果。承認ならプランは終わり、ほかは承認されなかった。続きがあれば None。"""
     routes = stored_gate_routes(work_dir) if answer else None
     if routes is None or _from_of(routes[answer] if answer in routes else None) is not None:
         return None
@@ -635,11 +635,11 @@ def _no_route(run: StageRun, work_dir: Path, answer: Optional[str]) -> Optional[
         assert done is not None
         outputs = done["outputs"] if isinstance(done.get("outputs"), dict) else {}
         return finished(run, result.result(PLAN, result.OK, f"プラン {run.name} の最後の承認ゲートが承認された", outputs=outputs))
-    return StageResult(result.stopped(PLAN, "refused", f"プラン {run.name} の承認ゲートで承認されなかった（答え {answer}）"), {})
+    return StageResult(result.stopped(PLAN, "refused", f"プラン {run.name} の承認ゲートで承認されなかった（回答 {answer}）"), {})
 
 
 def same_run(before: StageResult, after: StageResult) -> bool:
-    """2 つの結果が同じプランの回の結果か（打ち直しても回が変わらず、プランが控えの結果を返した）。"""
+    """2 つの結果が同じプランの回の結果か（打ち直しても回が変わらず、プランがバックアップの結果を返した）。"""
     run_id = before.report["run_id"] if "run_id" in before.report else None
     return isinstance(run_id, str) and "run_id" in after.report and after.report["run_id"] == run_id
 
@@ -652,7 +652,7 @@ def _from_process(run: StageRun, done: subprocess.CompletedProcess[str]) -> Stag
 
 
 def _github_kind(exc: github.GitHubError) -> str:
-    """GitHub の失敗の止まった理由。打ち直せば通りうるもの（不達・5xx・上限）は transient、ほかは precondition。
+    """GitHub の失敗の停止理由。打ち直せば通りうるもの（不達・5xx・上限）は transient、ほかは precondition。
 
     分け方は課題の参照の読み手（`ndf.core.refs` の `_unreadable`）と同じ。状態が 0 でも届いて断られた失敗（GraphQL の誤り・
     認証が無い）は precondition。
@@ -664,20 +664,20 @@ def _github_kind(exc: github.GitHubError) -> str:
 def _call_plan(run: StageRun, cwd: Path, work_dir: Path, answer: Optional[str], runner: Runner) -> StageResult:
     try:
         if template(run.name) is None:
-            return StageResult(result.stopped(PLAN, "precondition", f"プランの雛形 {run.name} が無い"), {})
+            return StageResult(result.stopped(PLAN, "precondition", f"プランのテンプレート {run.name} が無い"), {})
         work_dir.mkdir(parents=True, exist_ok=True)
         ended = _no_route(run, work_dir, answer)
         if ended is not None:
             return ended
         argv = plan_argv(run, work_dir, answer, cwd)
     except TemplateValuesMissing as exc:
-        return StageResult(result.stopped(PLAN, "invalid", f"プランの雛形 {run.name} を埋められない: {exc}", items=exc.items), {})
+        return StageResult(result.stopped(PLAN, "invalid", f"プランのテンプレート {run.name} を埋められない: {exc}", items=exc.items), {})
     except route.RouteError as exc:
-        return StageResult(result.stopped(PLAN, "invalid", f"プランの雛形 {run.name} を埋められない: {exc}"), {})
+        return StageResult(result.stopped(PLAN, "invalid", f"プランのテンプレート {run.name} を埋められない: {exc}"), {})
     except GitError as exc:
-        return StageResult(result.stopped(PLAN, "precondition", f"プランの雛形 {run.name} の省いた値を決められない: {exc}"), {})
+        return StageResult(result.stopped(PLAN, "precondition", f"プランのテンプレート {run.name} の省いた値を決められない: {exc}"), {})
     except github.GitHubError as exc:
-        detail = f"プランの雛形 {run.name} の差し込みを GitHub から読めない: {exc}"
+        detail = f"プランのテンプレート {run.name} の差し込みを GitHub から読めない: {exc}"
         return StageResult(result.stopped(PLAN, _github_kind(exc), detail, retry_after=exc.retry_after), {})
     return _from_process(run, runner(argv, cwd, run.env({})))
 
@@ -688,13 +688,13 @@ def _call_script(run: StageRun, cwd: Path, runner: Runner) -> StageResult:
 
 
 def skill_prompt(run: StageRun) -> str:
-    """Skill を回す問い。入力の値は文脈の形を通した JSON だけを渡す。"""
+    """Skill を回す質問。入力の値は文脈の形を通した JSON だけを渡す。"""
     prompt = f"/{identity.load().prefix}{run.name}\n\n入力（JSON）: {json.dumps(run.inputs, ensure_ascii=False)}"
-    return prompt if run.notes is None else f"{prompt}\n\n差し戻しの指摘:\n{run.notes}"
+    return prompt if run.notes is None else f"{prompt}\n\n変更要求の指摘:\n{run.notes}"
 
 
 def _skill_cause(failure: Optional[claude.Failure]) -> str:
-    """`claude -p` が答えを返せなかった理由 → 止まった理由。理由の無い失敗は打ち直せば直りうる。"""
+    """`claude -p` が回答を返せなかった理由 → 停止理由。理由の無い失敗は打ち直せば直りうる。"""
     if failure is None:
         return "transient"
     return SKILL_FAILURES[failure] if failure in SKILL_FAILURES else "precondition"
@@ -708,7 +708,7 @@ def _call_skill(run: StageRun, cwd: Path, call_claude: SkillCaller) -> StageResu
         kind = _skill_cause(reply.failure)
         return StageResult(result.stopped(SKILL, kind, f"Skill {run.name} を回せない: {reply.error}"), {})
     if not isinstance(reply.answer, dict) or result.errors(reply.answer):
-        return bad_report(run, "答えが結果 JSON の形に合わない")
+        return bad_report(run, "回答が結果 JSON の形に合わない")
     return finished(run, reply.answer)
 
 
@@ -721,7 +721,7 @@ def invoke(
     *,
     call_claude: SkillCaller = claude.call_claude,
 ) -> StageResult:
-    """作業を種類ごとに呼ぶ。`work_dir` はプランの実行の置き場、`answer` はプランの承認ゲートの答え。
+    """作業を種類ごとに呼ぶ。`work_dir` はプランの実行の保存先、`answer` はプランの承認ゲートの回答。
 
     `runner` は plan・script の子プロセスを、`call_claude` は skill の `claude -p` を打つ。skill と script は、入力に
     作業場所（`worktree`）があればそこで打つ（プランは埋めたプランの作業場所で受ける）。
@@ -729,7 +729,7 @@ def invoke(
     if run.kind == PLAN:
         return _call_plan(run, cwd, work_dir, answer, runner)
     if run.kind not in (SCRIPT, SKILL):
-        raise model.Refused(f"作業種別 {run.kind} は呼ばない（答えを待つステップ）")
+        raise model.Refused(f"作業種別 {run.kind} は呼ばない（回答を待つステップ）")
     location = work_location(run, cwd)
     if not location.is_dir():
         return StageResult(result.stopped(run.kind, "precondition", f"作業場所 {location} が無い"), {})

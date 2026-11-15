@@ -35,7 +35,7 @@ class StepDef:
 
 @dataclass(frozen=True)
 class StageDef:
-    """工程（工程表の行）。`name` が行の鍵、`id` は工程の文書の名前。"""
+    """工程（工程表の行）。`name` が行のキー、`id` は工程の文書の名前。"""
 
     id: str
     name: str
@@ -56,7 +56,7 @@ class StageDef:
 
 @dataclass(frozen=True)
 class Snapshot:
-    """モードの定義のスナップショット。進行表の定義の改訂に JSON で残す。"""
+    """モードの定義のスナップショット。ステートマシンの定義の改訂に JSON で残す。"""
 
     mode: str
     version: str
@@ -123,7 +123,7 @@ def snapshot_from(raw: Mapping[str, Any]) -> Snapshot:
 # --- 順序の決まり（I8〜I10） ---------------------------------------------------------------
 
 
-# 範囲を差分に限るステップの種類（review・test）と、その範囲。verify の範囲はリリースした版
+# 範囲を差分に限るステップの種類（review・test）と、その範囲。verify の範囲はリリースしたバージョン
 CHECKED_KINDS = ("review", "test")
 DIFF_RANGES = ("sprint_diff", "issue_diff")
 RELEASED = "released"
@@ -134,13 +134,13 @@ def _where(step: StepDef) -> str:
 
 
 def _range_errors(steps: list[StepDef]) -> list[str]:
-    """review・test の範囲は差分だけ、verify の範囲はリリースした版だけ（I9）。"""
+    """review・test の範囲は差分だけ、verify の範囲はリリースしたバージョンだけ（I9）。"""
     errs = []
     for st in steps:
         if st.kind in CHECKED_KINDS and st.range not in DIFF_RANGES:
             errs.append(f"I9: {_where(st)} の {st.kind} の範囲 {st.range} が差分（sprint_diff・issue_diff）でない")
         if st.kind == "verify" and st.range != RELEASED:
-            errs.append(f"I9: {_where(st)} の verify の範囲 {st.range} がリリースした版（released）でない")
+            errs.append(f"I9: {_where(st)} の verify の範囲 {st.range} がリリースしたバージョン（released）でない")
     return errs
 
 
@@ -207,16 +207,16 @@ def resolve_enabled(
     declared: Mapping[str, Mapping[str, Any]],
     disables: Mapping[str, str],
 ) -> dict[str, Enablement]:
-    """工程ごとの有効と理由を 3 つの順位で決める。スプリントの引数 > プロジェクトの宣言 > 定義の条件。
+    """工程ごとの有効と理由を 3 つの順位で決める。スプリントの引数 > プロジェクトの設定 > 定義の条件。
 
-    `facts` が None なら定義の条件はまだ見ない（進行表の作成の時点。条件は工程を流すときに見る）。
+    `facts` が None なら定義の条件はまだ見ない（ステートマシンの作成の時点。条件は工程を流すときに見る）。
     `declared` は `.ndf/project.json` の `workflow.stages`（工程の名前 → `{"enabled": 真偽, "reason": 理由}`）。
     """
     return {stage.name: _enablement(stage, facts, declared, disables) for stage in snap.stages}
 
 
 def _refuse_disabled_gate(stage: StageDef, declared: Mapping[str, Mapping[str, Any]], disables: Mapping[str, str]) -> None:
-    """承認ゲートの工程を、スプリントの引数かプロジェクトの宣言で無効にしようとしていれば断る。"""
+    """承認ゲートの工程を、スプリントの引数かプロジェクトの設定で無効にしようとしていれば断る。"""
     off_by_project = stage.name in declared and not declared[stage.name]["enabled"]
     if stage.gates and (stage.name in disables or off_by_project):
         raise model.Refused(gate_refusal(stage))
@@ -233,7 +233,7 @@ def _enablement(
     declared: Mapping[str, Mapping[str, Any]],
     disables: Mapping[str, str],
 ) -> Enablement:
-    """工程 1 つの有効と理由（スプリントの引数 > プロジェクトの宣言 > 定義の条件）。"""
+    """工程 1 つの有効と理由（スプリントの引数 > プロジェクトの設定 > 定義の条件）。"""
     _refuse_disabled_gate(stage, declared, disables)
     if stage.name in disables:
         return Enablement(False, disables[stage.name], "sprint")
@@ -243,7 +243,7 @@ def _enablement(
 
 
 def enabled_by_project(saved: Mapping[str, Mapping[str, Any]], stage: str) -> bool:
-    """作成の時点で保存した enablement で、プロジェクトの宣言が工程を有効にしていたか（宣言 > 定義の条件）。"""
+    """作成の時点で保存した enablement で、プロジェクトの設定が工程を有効にしていたか（設定 > 定義の条件）。"""
     en = saved.get(stage)
     return en is not None and en["source"] == "project" and en["enabled"] is True
 
@@ -258,20 +258,20 @@ OUTPUTS_EVENT = "outputs_recorded"  # 工程の出力をスプリントの文脈
 
 
 def keep_declared(declared: Iterable[str], outputs: Mapping[str, Any]) -> tuple[dict[str, Any], list[str]]:
-    """出力のうち宣言した鍵だけを残した辞書と、宣言に無い鍵（並べ替えたもの）。`outputs` は書き換えない。"""
+    """出力のうち定義したキーだけを残した辞書と、設定に無いキー（並べ替えたもの）。`outputs` は書き換えない。"""
     names = set(declared)
     kept = {k: v for k, v in outputs.items() if k in names}
     return kept, sorted(set(outputs) - set(kept))
 
 
 def outputs_draft(stage: StageDef, rev: int, outputs: Mapping[str, Any], actor: str) -> tuple[Optional[model.EventDraft], list[str]]:
-    """工程の出力を文脈へ書く事象の下書き。鍵は工程の定義の `outputs` に列挙したものだけ。
+    """工程の出力を文脈へ書く事象の下書き。キーは工程の定義の `outputs` に列挙したものだけ。
 
     `actor` は書き手。工程を流した作業（`workflow`）か、手で終えた conductor（`ndf progress finish`）。
-    宣言に無い鍵は書かずに捨て、捨てた鍵を警告で返す。書く鍵が無ければ下書きは None。
+    設定に無いキーは書かずに捨て、捨てたキーを警告で返す。書くキーが無ければ下書きは None。
     """
     kept, dropped = keep_declared(stage.outputs, outputs)
-    warnings = [f"工程 {stage.name} の定義の outputs に無い鍵を捨てた: {k}" for k in dropped]
+    warnings = [f"工程 {stage.name} の定義の outputs に無いキーを捨てた: {k}" for k in dropped]
     if not kept:
         return None, warnings
     return model.EventDraft(OUTPUTS_EVENT, actor, stage.name, payload={"outputs": kept}, rev=rev), warnings

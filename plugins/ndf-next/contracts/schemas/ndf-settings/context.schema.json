@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "ndf-settings/context.schema.json",
-  "title": "再起動の方針の宣言（.ndf/context.json）",
+  "title": "再起動の方針の設定（.ndf/context.json）",
   "description": "文脈の量による再起動の方針（現行方式か試行方式）と、試行方式の値",
   "type": "object",
   "additionalProperties": false,
@@ -18,7 +18,7 @@
       "enum": [
         1
       ],
-      "description": "宣言の形の版。読み手は知らない版を読まない"
+      "description": "設定の形のバージョン。読み手は知らないバージョンを読まない"
     },
     "policy": {
       "type": "string",

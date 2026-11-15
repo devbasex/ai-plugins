@@ -58,7 +58,7 @@ def test_stage_order_matches_the_mode_definition(mode):
 
 
 def test_a_changed_row_is_caught(monkeypatch, tmp_path):
-    """表の行を入れ替えると並びが食い違い、照合が落ちる（照合が空振りしていないことの確かめ）。"""
+    """表の行を入れ替えると並びが食い違い、検証が落ちる（検証が空振りしていないことの確かめ）。"""
     text = SKILL.read_text(encoding="utf-8")
     swapped = re.sub(r"^(\| 完了判定 .*)\n(\| Pull Request .*)$", r"\2\n\1", text, flags=re.M)
     assert swapped != text

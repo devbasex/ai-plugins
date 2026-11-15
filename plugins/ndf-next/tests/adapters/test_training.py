@@ -1,4 +1,4 @@
-"""学習に使わない設定の確認と控え、起動の口が控えで起動を断ること（#3391 の 3391-5）。"""
+"""学習に使わない設定の確認とバックアップ、起動の口がバックアップで起動を断ること（#3391 の 3391-5）。"""
 
 from __future__ import annotations
 
@@ -183,7 +183,7 @@ def test_check_all_off_is_ok(tmp_path):
 @pytest.mark.parametrize(
     ("entry", "said"),
     [
-        (None, "控えが無い"),
+        (None, "バックアップが無い"),
         ({"training": False, "reason": "x", "checked_at": "2000-01-01T00:00:00+00:00"}, "期限切れ"),
         ({"training": None, "reason": "HTTP 500", "checked_at": None}, "時刻が読めない"),
         ({"training": None, "reason": "HTTP 500", "checked_at": training._stamp(NOW)}, "HTTP 500"),

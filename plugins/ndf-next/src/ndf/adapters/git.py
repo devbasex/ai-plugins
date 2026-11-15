@@ -14,18 +14,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple, Optional
 
-# 完全な SHA と、照合に使える短い SHA（git の既定の短縮の長さ以上）
+# 完全な SHA と、検証に使える短い SHA（git の既定の短縮の長さ以上）
 FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
 SHORT_SHA = re.compile(r"^[0-9a-f]{7,40}$")
 # `git diff --shortstat` の 1 行（`N files changed, A insertions(+), D deletions(-)`）
 _SHORTSTAT = re.compile(r"(\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:, (\d+) deletions?\(-\))?")
 # リモートの URL から `<所有者>/<リポジトリ>` を取る（https と ssh の両方）
 _REMOTE = re.compile(r"github\.com[:/](?P<owner>[^/]+)/(?P<name>[^/]+?)(?:\.git)?/?$")
-# `git log --format` で各コミットの行の先頭に置く印（差分の統計の行と見分ける）
+# `git log --format` で各コミットの行の先頭に置くマーカー（差分の統計の行と見分ける）
 _COMMIT_MARK = "@"
 # ブランチの参照の接頭辞（`git worktree list --porcelain` の branch の行）
 HEADS = "refs/heads/"
-# 取得と照合に使うリモートの名前
+# 取得と検証に使うリモートの名前
 ORIGIN = "origin"
 # git が認証の入力を端末へ求めないようにする環境変数（取得と送信が人の入力を待って止まらない）
 NO_PROMPT = {"GIT_TERMINAL_PROMPT": "0"}
@@ -198,7 +198,7 @@ class Git:
     def checkout_detached(self, ref: str) -> Completed:
         """`ref` へ detached HEAD で移る。結果はそのまま返す。`ref` を option として読ませない（3364-7）。
 
-        checkout は版によって `END_OF_OPTIONS` を ref の側へ残して正しい ref でも失敗する（git 2.43 の
+        checkout はバージョンによって `END_OF_OPTIONS` を ref の側へ残して正しい ref でも失敗する（git 2.43 の
         parse-options）。先に `rev_parse` で完全な SHA へ解決し、16 進の SHA だけを渡す。SHA は `-` で始まらない。
         """
         try:
@@ -208,7 +208,7 @@ class Git:
         return self.attempt("checkout", "-q", "--detach", sha)
 
     def merge_ff(self, ref: str) -> Completed:
-        """`ref` を fast-forward だけで取り込む。結果はそのまま返す。`ref` を option として読ませない（3364-7）。"""
+        """`ref` を fast-forward だけでマージする。結果はそのまま返す。`ref` を option として読ませない（3364-7）。"""
         return self.attempt("merge", "--ff-only", "-q", END_OF_OPTIONS, ref)
 
     def changed_files(self, base: str, head: str) -> list[str]:
@@ -263,11 +263,11 @@ class Git:
     def fetch(self, remote: str, *refspecs: str) -> Completed:
         """`git fetch -q --no-tags <remote> <refspec>...` を打ち、結果をそのまま返す（失敗を止めるかは呼び手が決める）。
 
-        既定の起動の関数は認証の入力を端末へ求めない。`FETCH_HEAD` を読まずに済むよう、取り込む側は
+        既定の起動の関数は認証の入力を端末へ求めない。`FETCH_HEAD` を読まずに済むよう、マージする側は
         `refs/remotes/<remote>/<ブランチ>` を読む（ほかのセッションの fetch と `FETCH_HEAD` を取り合わない。#3317）。
         """
         return self.attempt("fetch", "-q", "--no-tags", "--", remote, *refspecs)
 
     def fetch_branch(self, remote: str, name: str) -> Completed:
-        """ブランチ 1 本を `refs/remotes/<remote>/<name>` へ取り込む（`FETCH_HEAD` を読まない。#3317）。結果はそのまま返す。"""
+        """ブランチ 1 本を `refs/remotes/<remote>/<name>` へマージする（`FETCH_HEAD` を読まない。#3317）。結果はそのまま返す。"""
         return self.fetch(remote, f"+refs/heads/{name}:refs/remotes/{remote}/{name}")

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "ndf-settings/issue-items.schema.json",
-  "title": "Issue の記載項目の宣言（.ndf/issue-items.json）",
+  "title": "Issue の記載項目の設定（.ndf/issue-items.json）",
   "description": "Issue の種類ごとの記載項目（必須・該当時・不要）と水準。あれば NDF の既定の代わりに使う",
   "type": "object",
   "additionalProperties": false,
@@ -20,7 +20,7 @@
       "enum": [
         1
       ],
-      "description": "宣言の形の版。読み手は知らない版を読まない"
+      "description": "設定の形のバージョン。読み手は知らないバージョンを読まない"
     },
     "kinds": {
       "type": "array",
@@ -97,7 +97,7 @@
                   "string",
                   "null"
                 ],
-                "description": "機械で判定する鍵。null は機械で判定しない",
+                "description": "機械で判定するキー。null は機械で判定しない",
                 "enum": [
                   "ai",
                   "origin",

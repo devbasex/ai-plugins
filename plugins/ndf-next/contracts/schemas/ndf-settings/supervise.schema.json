@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "ndf-settings/supervise.schema.json",
-  "title": "プランの実行の宣言（.ndf/supervise.json）",
+  "title": "プランの実行の設定（.ndf/supervise.json）",
   "description": "プランの実行で打つ同期とチェック・整形のコマンドと、リリースの形。テストのコマンドは project.json の test だけが持つ",
   "type": "object",
   "additionalProperties": false,
@@ -18,7 +18,7 @@
       "enum": [
         1
       ],
-      "description": "宣言の形の版。読み手は知らない版を読まない"
+      "description": "設定の形のバージョン。読み手は知らないバージョンを読まない"
     },
     "sync_checks": {
       "type": "array",
@@ -94,15 +94,15 @@
     },
     "queue": {
       "type": "object",
-      "description": "プランを流す待ち行列の資源の枠と共有の一覧。無ければ既定（graphql の枠 2 本・共有の一覧は無し）",
+      "description": "プランを流す待ち行列の資源のクォータと共有の一覧。無ければ既定（graphql のスロット 2 本・共有の一覧は無し）",
       "properties": {
         "resources": {
           "type": "object",
-          "description": "資源のタグごとの枠。宣言したタグは既定の同じタグへ項目ごとに重なる",
+          "description": "資源のタグごとのスロット。定義したタグは既定の同じタグへ項目ごとに重なる",
           "properties": {
             "graphql": {
               "$ref": "#/$defs/resource",
-              "description": "GitHub の GraphQL の枠。書かない項目は既定（limit 2・types [pr, drive]・commands [merged-steps.py]）"
+              "description": "GitHub の GraphQL のスロット。書かない項目は既定（limit 2・types [pr, drive]・commands [merged-steps.py]）"
             }
           },
           "additionalProperties": {
@@ -166,7 +166,7 @@
     },
     "test": {
       "type": "object",
-      "description": "読み手は読まない（今の版の読み手が読む値。テストのコマンドは project.json の test が持つ）",
+      "description": "読み手は読まない（今のバージョンの読み手が読む値。テストのコマンドは project.json の test が持つ）",
       "properties": {
         "command": {
           "type": "string",
@@ -188,7 +188,7 @@
   "$defs": {
     "resource": {
       "type": "object",
-      "description": "資源の枠: 同時に流せる本数と、タグを持つステップの型・run の cmd に含まれる語",
+      "description": "資源のクォータ: 同時に流せる本数と、タグを持つステップの型・run の cmd に含まれる語",
       "properties": {
         "limit": {
           "type": "integer",

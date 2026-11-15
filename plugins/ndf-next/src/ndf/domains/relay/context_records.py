@@ -1,7 +1,7 @@
 """再起動の方針の判定の記録・会話の記録の読み取り・費用の見込みの較正（#3569。旧い `lib/context_decisions.py` と
 `lib/context_calibrate.py` の移し先）。
 
-置き場は旧いプラグインと同じ（`NDF_CONTEXT_DIR` → `<旧い状態の根>/context`）で、入れ替えの前は旧い
+保存先は旧いプラグインと同じ（`NDF_CONTEXT_DIR` → `<旧い状態の根>/context`）で、入れ替えの前は旧い
 `context-policy.py` と hook も同じファイルを読み書きする。そのため行の形（キー・値の型）を足さない・変えない。
 
 | ファイル | 中身 | 書き方 |
@@ -38,11 +38,11 @@ NOISE = re.compile(r"[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}|[0-9]+(?:\.[0-9]+)+")
 _SLUG = re.compile(r"([^/:]+)/([^/]+?)(?:\.git)?/?$")
 
 
-# --- 置き場 ------------------------------------------------------------------------------------------
+# --- 保存先 ------------------------------------------------------------------------------------------
 
 
 def context_dir(environ: Mapping[str, str]) -> Path:
-    """旧い置き場（`NDF_CONTEXT_DIR` → `<旧い状態の根>/context`）。"""
+    """旧い保存先（`NDF_CONTEXT_DIR` → `<旧い状態の根>/context`）。"""
     explicit = environ.get("NDF_CONTEXT_DIR")
     return Path(explicit) if explicit else registry.legacy_state_root(environ) / "context"
 
@@ -116,7 +116,7 @@ def recorded_work(text: str, sid: Optional[str]) -> str:
 
 
 def record_row(session_id: Optional[str], work: str, applied: cp.Resolved, event: Optional[str], reason: Optional[str]) -> dict[str, Any]:
-    """`record` が書く行（判定をしない。`band` は null）。`event` を渡せば印の行、渡さなければ再起動の行。
+    """`record` が書く行（判定をしない。`band` は null）。`event` を渡せばマーカーの行、渡さなければ再起動の行。
     列は旧い `context_decisions.boundary_row` と同じ。"""
     row: dict[str, Any] = {
         "schema": SCHEMA,
@@ -205,7 +205,7 @@ def sessions_of(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
 
 
 def attach_markers(markers: list[dict[str, Any]], spans: Mapping[str, tuple[float, float]]) -> dict[Optional[str], list[dict[str, Any]]]:
-    """session_id の無い印を、`at` を時間の範囲に含むセッションへ割り当てる。どれにも入らなければ None へ。"""
+    """session_id の無いマーカーを、`at` を時間の範囲に含むセッションへ割り当てる。どれにも入らなければ None へ。"""
     out: dict[Optional[str], list[dict[str, Any]]] = defaultdict(list)
     for m in markers:
         sid = m.get("session_id")
@@ -321,15 +321,15 @@ def _mark_times(markers: Iterable[Mapping[str, Any]], event: str) -> list[float]
 
 
 def mark_bounds(markers: list[dict[str, Any]], by_next: bool) -> tuple[Optional[float], Optional[float]]:
-    """(復元の区間の終わり, 引継ぎの区間の始まり)。復元は引継ぎ文書で始まったセッションの最初の「復元完了」、
-    引継ぎは最後の「引継ぎ開始」。印が無ければそれぞれ None。集計（`context_report`）と較正が同じ区間を使う。"""
+    """(復元の期間の終わり, 引継ぎの期間の始まり)。復元は引継ぎ文書で始まったセッションの最初の「復元完了」、
+    引継ぎは最後の「引継ぎ開始」。マーカーが無ければそれぞれ None。集計（`context_report`）と較正が同じセグメントを使う。"""
     restored = _mark_times(markers, MARK_RESTORED)
     handoffs = _mark_times(markers, MARK_HANDOFF)
     return (restored[0] if by_next and restored else None), (handoffs[-1] if handoffs else None)
 
 
 def _restore_sample(calls: list[dict[str, Any]], restore_end: Optional[float]) -> Optional[tuple[int, int]]:
-    """引継ぎ文書で始まり復元の印があるセッションの、最初の復元までの (直前のコンテキスト量, 呼び出し数)。"""
+    """引継ぎ文書で始まり復元のマーカーがあるセッションの、最初の復元までの (直前のコンテキスト量, 呼び出し数)。"""
     if restore_end is None:
         return None
     before = [c for c in calls if c["ts"] is not None and c["ts"] <= restore_end]
@@ -337,7 +337,7 @@ def _restore_sample(calls: list[dict[str, Any]], restore_end: Optional[float]) -
 
 
 def _handoff_sample(calls: list[dict[str, Any]], handoff_from: Optional[float]) -> Optional[tuple[int, int]]:
-    """最後の引継ぎの印から後の (呼び出し数, 出力 token の合計)。印が無ければ None。"""
+    """最後の引継ぎのマーカーから後の (呼び出し数, 出力 token の合計)。マーカーが無ければ None。"""
     if handoff_from is None:
         return None
     after = [c for c in calls if c["ts"] is not None and c["ts"] >= handoff_from]
@@ -345,7 +345,7 @@ def _handoff_sample(calls: list[dict[str, Any]], handoff_from: Optional[float]) 
 
 
 def _stage_segments(calls: list[dict[str, Any]], rows: list[dict[str, Any]]) -> list[tuple[str, int, int]]:
-    """「継続」の判定で区切った工程ごとの (工程, 呼び出し数, キャッシュ切れの数)。最後の区間と空の区間は除く。"""
+    """「継続」の判定で区切った工程ごとの (工程, 呼び出し数, キャッシュ切れの数)。最後のセグメントと空のセグメントは除く。"""
     launches = sorted((t, r["stage"]) for r in rows if r.get("stage") and r.get("verdict") == cp.CONTINUE and (t := parse_ts(r.get("at"))))
     out = []
     for (start, stage), nxt in zip(launches, [t for t, _ in launches[1:]] + [None]):

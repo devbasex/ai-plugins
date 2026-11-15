@@ -1,5 +1,5 @@
 {
-  "summary": "実体のある配る Skill（manifests/skills.json の行で skills/<名前>/SKILL.md があるもの）ごとの入出力。公開する Skill（エントリポイントの表の種類 skill・block の target）の引数と環境変数はエントリポイントの表が正本で、この表の行は args・env を持たない（持てば ndf check の spec-skill が落とす）",
+  "summary": "実体のある配る Skill（manifests/skills.json の行で skills/<名前>/SKILL.md があるもの）ごとの入出力。公開する Skill（エントリポイントの表の種類 skill・block の target）の引数と環境変数はエントリポイントの表が SSOT で、この表の行は args・env を持たない（持てば ndf check の spec-skill が落とす）",
   "owner": "D2（contracts/domains。行は Skill を移す子が足す。初版は #3518）",
   "shared_names": true,
   "columns": {
@@ -15,7 +15,7 @@
     },
     "ndf_settings": {
       "type": "array",
-      "summary": "Skill が読む宣言（domains/ndf-files の id）"
+      "summary": "Skill が読む設定（domains/ndf-files の id）"
     },
     "env": {
       "type": "array",
@@ -24,7 +24,7 @@
     },
     "result": {
       "type": "string",
-      "summary": "結果の形。block は応答の末尾の ndf-next ブロック、report は応答の末尾の区間の報告、none は決まった形を持たない"
+      "summary": "結果の形。block は応答の末尾の ndf-next ブロック、report は応答の末尾のセグメントの報告、none は決まった形を持たない"
     },
     "meaning": {
       "type": "string",
@@ -198,7 +198,7 @@
       "ndf_settings": [],
       "env": [],
       "result": "none",
-      "meaning": "文書の置き場（Google Drive・Notion・Confluence・SharePoint・リポジトリ）ごとの読み書きの手順を持つ"
+      "meaning": "文書の保存先（Google Drive・Notion・Confluence・SharePoint・リポジトリ）ごとの読み書きの手順を持つ"
     },
     {
       "id": "estimate",
@@ -465,7 +465,7 @@
       ],
       "env": [],
       "result": "none",
-      "meaning": "版を作り、開発版と本番へリリースする"
+      "meaning": "バージョンを作り、開発版と本番へリリースする"
     },
     {
       "id": "release-verification",
@@ -473,7 +473,7 @@
       "ndf_settings": [],
       "env": [],
       "result": "none",
-      "meaning": "リリースした版を実際に使って受け入れ条件を確かめる"
+      "meaning": "リリースしたバージョンを実際に使って受け入れ条件を確かめる"
     },
     {
       "id": "requirements-design",

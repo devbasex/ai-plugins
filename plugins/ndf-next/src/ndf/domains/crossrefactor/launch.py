@@ -1,7 +1,7 @@
 """殻: 工程の担当の 1 回の起動と、結果の回収（#750）。
 
 - 読み取りの工程（表 `loop-phases` の coding が偽）の担当は、読み取り用ディレクトリで読むだけの起動をする。ファイルを
-  書けないため、結果は標準出力の最後の JSON（`{<鍵>: [...]}`）で返し、起動の側がそれを回収先へ書く。claude は
+  書けないため、結果は標準出力の最後の JSON（`{<キー>: [...]}`）で返し、起動の側がそれを回収先へ書く。claude は
   読む Tool だけを許した起動で、`--output-format json` の外側の JSON の `result` の本文から結果を探す。ほかは
   ランタイムの表の `review_args` の起動である
 - コードを書く工程の担当（claude）は書き込み用の作業ディレクトリで動き、結果ファイルを作業ディレクトリの
@@ -34,7 +34,7 @@ CODE_TOOLS = "Read,Edit,MultiEdit,Write,Bash,Grep,Glob"
 
 @dataclass(frozen=True)
 class Request:
-    """1 回の起動の頼み。`key` は読み取りの工程の結果 JSON の並びの鍵（コードを書く工程では使わない）。"""
+    """1 回の起動の頼み。`key` は読み取りの工程の結果 JSON の並びのキー（コードを書く工程では使わない）。"""
 
     phase: str
     runtime: str
@@ -56,7 +56,7 @@ def location_of(req: Request, dirs: Dirs) -> launch_decide.ResultPlace:
 
 
 def phase_limit(phase: str) -> float:
-    """工程の監視の上限の秒（宣言 `monitor.phase.<工程>`）。"""
+    """工程の監視の上限の秒（設定 `monitor.phase.<工程>`）。"""
     return limits.seconds(f"monitor.phase.{phase}")
 
 

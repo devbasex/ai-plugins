@@ -87,7 +87,7 @@ def test_gate_steps_name_which_gate_they_are():
 
 def test_design_hands_the_review_result_to_the_gate_without_a_final_judge():
     # SF5: 設計の工程はレビューの結果をそのまま設計承認ゲートへ渡し、最後の判定を置かない。
-    # #2935: 承認は承認ゲートのステップの答え（gate-answer）で受け、ラベルの有無をステップの入力にしない
+    # #2935: 承認は承認ゲートのステップの回答（gate-answer）で受け、ラベルの有無をステップの入力にしない
     steps = definition.load_definition("standard").stage("設計").steps
     kinds = [st.kind for st in steps]
     assert kinds.index("gate") == kinds.index("review") + 1
@@ -97,7 +97,7 @@ def test_design_hands_the_review_result_to_the_gate_without_a_final_judge():
 
 
 def test_refactoring_suspension_is_not_a_code_constant():
-    # 受け入れ条件 3: リファクタリングの停止はコードの定数でなく宣言で表す
+    # 受け入れ条件 3: リファクタリングの停止はコードの定数でなく設定で表す
     import ndf.progress.command as command
     import ndf.progress.model as m
 
@@ -143,7 +143,7 @@ def test_output_that_breaks_the_contract_is_caught():
 def test_input_needs_the_declared_context_keys():
     stage = definition.load_definition("standard").stage("作業場所の用意")
     assert definition.validate_stage_input(stage, {"context": {"issues": [1]}}) == []
-    assert definition.validate_stage_input(stage, {"context": {}}) == ["context: 文脈の鍵 issues が無い"]
+    assert definition.validate_stage_input(stage, {"context": {}}) == ["context: 文脈のキー issues が無い"]
 
 
 def test_unknown_metadata_words_and_if_are_refused():
@@ -153,7 +153,7 @@ def test_unknown_metadata_words_and_if_are_refused():
     errs = _errors(_mode_doc([("行", "x")]), {"x": doc})
     assert any("要素の if は使わない" in e for e in errs)
     assert any("speed" in e for e in errs)
-    assert any("nope はスプリントの文脈の鍵に無い" in e for e in errs)
+    assert any("nope はスプリントの文脈のキーに無い" in e for e in errs)
 
 
 def test_review_needs_a_subject_and_other_steps_refuse_it():
@@ -241,7 +241,7 @@ def test_gate_stage_with_a_condition_is_refused():
     assert any("承認ゲート" in e and "行" in e for e in errs)
 
 
-# --- 承認ゲートの答えの選択肢（現状固定。I-018 の前に run.choices をエントリポイントとして固定する） ---------------------
+# --- 承認ゲートの回答の選択肢（現状固定。I-018 の前に run.choices をエントリポイントとして固定する） ---------------------
 
 
 def _listen_steps(mode: str) -> list[stages.StepDef]:
@@ -281,7 +281,7 @@ def test_current_listen_step_whose_contract_has_no_answer_enum_offers_nothing(re
 
 
 def test_current_non_listen_step_offers_the_known_routes_of_the_waiting_report():
-    # 現状固定: プランの承認ゲートは待っている結果の routes の鍵のうち、答えの語彙にあるものを鍵の順に返す
+    # 現状固定: プランの承認ゲートは待っている結果の routes のキーのうち、回答の語彙にあるものをキーの順に返す
     st = next(s for s in definition.load_definition("standard").steps() if s.call in invoke.CALLS and not invoke.is_listen(s))
     routes = {"request_changes": {}, "bogus": {}, "approved": {}}
     prog = run.StepProgress(waiting={"report": {"routes": routes}})

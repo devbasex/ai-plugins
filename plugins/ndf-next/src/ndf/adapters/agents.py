@@ -3,7 +3,7 @@
 - 監視: 利用上限の語は CLI が出す行の形（行頭）だけを読み、コメントの写しの中の語を拾わない（#1411）。
   早期の警告は種類ごとに 1 回ずつ出す（#2059）
 - kiro: 起動の前後でworktree の `.amazonq/cli-agents` を写して戻し、起動の間に増えた `.bak` を消す（#2448）
-- 起動の前: 学習に使わない設定の控えを読み（`training.refusal`。#3391）、重い起動の枠を取る（`launch_slot.held`。#3368）。2 つは `launch_slot.gate` の 1 か所が持つ
+- 起動の前: 学習に使わない設定のスナップショットを読み（`training.refusal`。#3391）、重い起動のスロットを取る（`launch_slot.held`。#3368）。2 つは `launch_slot.gate` の 1 か所が持つ
 """
 
 from __future__ import annotations
@@ -50,7 +50,7 @@ class AgentPaths:
     """1 回の起動のファイル。`out` は標準出力、`err` は標準エラー、`launch` は起動の記録（JSON）。
 
     `progress` は起動した担当が作業の途中で追記する進捗のファイル。完了まで標準出力へ何も出さない担当
-    （claude の `--output-format json`）の無進捗も、このファイルの増え方で測る。担当へは問いの中でこのパスを渡す。
+    （claude の `--output-format json`）の無進捗も、このファイルの増え方で測る。担当へは質問の中でこのパスを渡す。
     """
 
     out: Path
@@ -110,7 +110,7 @@ def _denials_warning(stdout: str) -> Optional[str]:
 
 
 def early_warnings(paths: AgentPaths) -> dict[str, str]:
-    """早期の警告を種類（stderr・denials）ごとに返す。警告の無い種類は鍵を持たない。"""
+    """早期の警告を種類（stderr・denials）ごとに返す。警告の無い種類はキーを持たない。"""
     found: dict[str, str] = {}
     err = tail(paths.err)
     m = EARLY_WARN.search(err)
@@ -156,12 +156,12 @@ class AgentState(StrEnum):
     TIMEOUT = "timeout"
     # 起動しなかった: 学習に使わない設定と確かめられていない（`ndf training check` で直る）
     REFUSED = "refused"
-    # 起動しなかった: 重い起動の枠が待ちの上限までに空かなかった
+    # 起動しなかった: 重い起動のスロットが待ちの上限までに空かなかった
     NO_SLOT = "no_slot"
 
 
 class AgentStatus(NamedTuple):
-    """監視の結果。`state` は `AgentState`、`restore` は kiro の控えの結果（`RestoreState`。kiro 以外は None）。"""
+    """監視の結果。`state` は `AgentState`、`restore` は kiro のバックアップの結果（`RestoreState`。kiro 以外は None）。"""
 
     agent: str
     state: str
@@ -300,7 +300,7 @@ def _not_started(spec: Launch, state: AgentState, detail: str) -> AgentStatus:
 def run_agent(spec: Launch, poll: Optional[float] = None) -> AgentStatus:
     """外部 CLI を起動して見る。kiro はworktree の `.amazonq/cli-agents` を起動の前後で守る。
 
-    学習に使わない設定と確かめられていなければ起動せず `AgentState.REFUSED`、重い起動の枠が空かなければ
+    学習に使わない設定と確かめられていなければ起動せず `AgentState.REFUSED`、重い起動のスロットが空かなければ
     `AgentState.NO_SLOT` を返す。
     """
     try:
@@ -325,7 +325,7 @@ BACKUP_SUFFIX = "-amazonq"
 
 
 class RestoreState(StrEnum):
-    """kiro の控えの結果。起動の記録（`paths.launch`）の `restore` にも同じ値を書く。"""
+    """kiro のバックアップの結果。起動の記録（`paths.launch`）の `restore` にも同じ値を書く。"""
 
     RESTORED = "restored"
     SKIPPED = "restore_skipped"
@@ -344,7 +344,7 @@ def _in_worktree(workdir: Path) -> bool:
 
 @dataclass(frozen=True)
 class _AgentsBackup:
-    """1 回の控え。`agents` は戻す先、`backup` は控えの置き場、`before_bak` は起動の前からある `.bak` の名前。"""
+    """1 回のバックアップ。`agents` は戻す先、`backup` はバックアップの保存先、`before_bak` は起動の前からある `.bak` の名前。"""
 
     agents: Path
     backup: Path
@@ -360,7 +360,7 @@ def _remove(path: Path) -> None:
 
 
 def _kind_changed(src: Path, dst: Path) -> bool:
-    """控え `src` と戻す先 `dst` で種類が違うか。リンクは控えの側でも戻す先でも作り直すので、違うとみなす
+    """バックアップ `src` と戻す先 `dst` で種類が違うか。リンクはバックアップの側でも戻す先でも作り直すので、違うとみなす
     （写しはリンクのある場所へ書けない）。"""
     return dst.is_symlink() or src.is_symlink() or dst.is_dir() != src.is_dir()
 
@@ -368,7 +368,7 @@ def _kind_changed(src: Path, dst: Path) -> bool:
 def _clear_replaced(backup: Path, agents: Path) -> None:
     """戻す先で、起動の間に種類が変わったもの（リンクへの置き換え・ファイルとディレクトリの入れ替え）を消す。
 
-    消さずに写すと、写しがリンクを辿ってリンク先（worktree の外の利用者のファイル）を控えの中身で上書きする。
+    消さずに写すと、写しがリンクを辿ってリンク先（worktree の外の利用者のファイル）をバックアップの中身で上書きする。
     """
     pairs = [(backup, agents)]
     while pairs:
@@ -403,23 +403,23 @@ def _guard_restore(paths: AgentPaths, backed: _AgentsBackup, kept: dict[str, Any
     except OSError as exc:
         kept.update(restore=RestoreState.FAILED, detail=str(exc), backup=str(backed.backup))
         with open(paths.err, "a", encoding="utf-8") as err:
-            err.write(f"kiro が書き換えた {backed.agents} を戻せない（控えは {backed.backup}）: {exc}\n")
+            err.write(f"kiro が書き換えた {backed.agents} を戻せない（バックアップは {backed.backup}）: {exc}\n")
         return
     shutil.rmtree(backed.backup, ignore_errors=True)
     kept["restore"] = RestoreState.RESTORED
 
 
 def _keep_unrestored(backup: Path) -> None:
-    """前の起動で戻せずに残った控えを、消さずに別名へ移す（唯一の元の設定のため）。"""
+    """前の起動で戻せずに残ったバックアップを、消さずに別名へ移す（唯一の元の設定のため）。"""
     if not backup.exists():
         return
     kept = backup.with_name(f"{backup.name}-unrestored-{time.time_ns()}")
     backup.rename(kept)
-    diag(f"前の kiro の起動で戻せなかった控えを {kept} へ移して残す（起動の前の {KIRO_AGENTS} の中身。戻すのは人の手で）", agent="kiro")
+    diag(f"前の kiro の起動で戻せなかったバックアップを {kept} へ移して残す（起動の前の {KIRO_AGENTS} の中身。戻すのは人の手で）", agent="kiro")
 
 
 def _backup_agents(workdir: Path, paths: AgentPaths) -> _AgentsBackup:
-    """worktree の `.amazonq/cli-agents` を控える。戻せずに残った前の控えは別名で残す。"""
+    """worktree の `.amazonq/cli-agents` をバックアップする。戻せずに残った前のバックアップは別名で残す。"""
     agents = workdir / KIRO_AGENTS
     backup = paths.launch.with_name(paths.launch.stem + BACKUP_SUFFIX)
     _keep_unrestored(backup)
@@ -431,9 +431,9 @@ def _backup_agents(workdir: Path, paths: AgentPaths) -> _AgentsBackup:
 
 @contextlib.contextmanager
 def kiro_guard(workdir: Path, paths: AgentPaths) -> Iterator[dict[str, Any]]:
-    """kiro の起動の前にworktree の `.amazonq/cli-agents` を控え、終わった後に戻して増えた `.bak` を消す。
+    """kiro の起動の前にworktree の `.amazonq/cli-agents` をバックアップ、終わった後に戻して増えた `.bak` を消す。
 
-    worktree でなければ控えずに起動し、`RestoreState.SKIPPED` を残す。戻せなければ控えを残し `RestoreState.FAILED` を残す。
+    worktree でなければバックアップずに起動し、`RestoreState.SKIPPED` を残す。戻せなければバックアップを残し `RestoreState.FAILED` を残す。
     結果（`restore`）は起動の記録（`paths.launch`）にも書く。
     """
     kept: dict[str, Any] = {"agent": "kiro", "restore": None}

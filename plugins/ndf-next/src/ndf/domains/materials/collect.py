@@ -20,7 +20,7 @@ from ndf.domains.relay import signals
 
 LINE_SUFFIX = re.compile(r":\d+(?:-\d+)?$")
 TEST_FORMS = ("test_{}.", "{}_test.", "{}.test.", "{}.spec.")
-# 設計文書の置き場（課題の番号ごと）と、触るファイルを持つ節
+# 設計文書の保存先（課題の番号ごと）と、触るファイルを持つ節
 DESIGN_FILE = re.compile(r"^issues/issue-(\d+)-design[^/]*\.md$")
 RESULTS_HEADING = "設計の結果"
 ISSUE_CELL = re.compile(r"^#(\d+)$")

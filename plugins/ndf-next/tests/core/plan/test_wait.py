@@ -42,7 +42,7 @@ def test_a_gate_carries_its_routes():
 
 
 def test_two_gates_keep_answer_keys_and_each_plan_keeps_its_routes():
-    """結果の routes の鍵は答えの語彙だけで、承認ゲートが 2 本あれば先頭の分にし、各行にそれぞれの分を残す。"""
+    """結果の routes のキーは回答の語彙だけで、承認ゲートが 2 本あれば先頭の分にし、各行にそれぞれの分を残す。"""
     out = _valid(attention("plan", [Watched("a", "gate", routes=_answer("a.json")), Watched("b", "gate", routes=_answer("b.json"))], AGAIN))
     assert out["routes"] == _answer("a.json")
     assert [i["routes"] for i in out["items"]] == [_answer("a.json"), _answer("b.json")]

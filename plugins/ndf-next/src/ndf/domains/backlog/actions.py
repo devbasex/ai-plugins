@@ -15,7 +15,7 @@ from ndf.domains.backlog import actions_decide as ad
 
 
 class Journal:
-    """記録（鍵 → 済んだ結果）。書くたびにファイルへ置き換えて残す。"""
+    """記録（キー → 済んだ結果）。書くたびにファイルへ置き換えて残す。"""
 
     def __init__(self, sd: Path) -> None:
         self.sd = sd

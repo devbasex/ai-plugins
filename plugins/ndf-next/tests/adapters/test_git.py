@@ -98,7 +98,7 @@ def _init_repo(tmp_path: Path, files: dict[str, str]) -> tuple[Path, str]:
 
 
 def _merge_branch(repo: Path, branch: str, files: dict[str, str]) -> str:
-    """`branch` を作ってファイルを書き、main へ --no-ff で取り込む。取り込みのコミットの SHA を返す。"""
+    """`branch` を作ってファイルを書き、main へ --no-ff でマージする。マージのコミットの SHA を返す。"""
     git_sandbox.sh(repo, "checkout", "-q", "-b", branch, "main", identity=True, strip=True)
     for name, text in files.items():
         (repo / name).write_text(text)
@@ -143,7 +143,7 @@ def test_checkout_detached_does_not_read_a_dash_ref_as_an_option(tmp_path: Path)
 
 
 def test_checkout_detached_passes_only_the_resolved_sha(tmp_path: Path) -> None:
-    # 3364-7: checkout は版によって --end-of-options を ref の側へ残すので、正しい ref は SHA へ解決して渡す
+    # 3364-7: checkout はバージョンによって --end-of-options を ref の側へ残すので、正しい ref は SHA へ解決して渡す
     repo, base = _init_repo(tmp_path, {"a.txt": "a\n"})
     done = git.Git(cwd=repo).checkout_detached("main")
     assert done.returncode == 0, done.stderr
@@ -167,7 +167,7 @@ def test_has_ref_and_fetch_do_not_read_a_dash_value_as_an_option(tmp_path: Path)
 
 
 def test_changed_lines_does_not_subtract_overlapping_release_changes_twice(tmp_path: Path) -> None:
-    # #3087: リリースの PR 2 本が同じ版のファイルを順に書き換え、範囲の間に機能の PR（19 行）が入る
+    # #3087: リリースの PR 2 本が同じバージョンのファイルを順に書き換え、範囲の間に機能の PR（19 行）が入る
     repo, base = _init_repo(tmp_path, {"VERSION": "1.0.0\n"})
     first = _merge_branch(repo, "release-1", {"VERSION": "1.0.1\n"})
     _merge_branch(repo, "feature", {"feature.txt": "".join(f"{i}\n" for i in range(19))})

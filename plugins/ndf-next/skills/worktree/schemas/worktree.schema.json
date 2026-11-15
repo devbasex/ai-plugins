@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/devbasex/ai-plugins/main/plugins/ndf/skills/worktree/schemas/worktree.schema.json",
-  "title": "NDF worktree 宣言ファイル",
-  "description": "リポジトリごとの差を持つ宣言。このファイルが無いリポジトリでは、worktree運用の仕組みは何もせずに終わる。",
+  "title": "NDF worktree 設定ファイル",
+  "description": "リポジトリごとの差を持つ設定。このファイルが無いリポジトリでは、worktree運用の仕組みは何もせずに終わる。",
   "type": "object",
   "required": [
     "version"
@@ -15,7 +15,7 @@
     },
     "version": {
       "type": "integer",
-      "description": "宣言の版。読み取り側が知らない版なら何もせずに終わる",
+      "description": "設定のバージョン。読み取り側が知らないバージョンなら何もせずに終わる",
       "enum": [
         1
       ]
@@ -31,11 +31,11 @@
     },
     "production_branch": {
       "type": "string",
-      "description": "リリースした版が常用する利用者へ届く本番チャネルのブランチ。この先へ進める操作は人手の承認を求める。開発の起点である base_branch とは別の鍵で、流用しない。未指定なら origin の HEAD が指すブランチを使う。指定した名前が origin にもローカルにも無いときは既定へ落とさず解決に失敗する"
+      "description": "リリースしたバージョンが常用する利用者へ届く本番チャネルのブランチ。この先へ進める操作は人手の承認を求める。開発の起点である base_branch とは別のキーで、流用しない。未指定なら origin の HEAD が指すブランチを使う。指定した名前が origin にもローカルにも無いときは既定へ落とさず解決に失敗する"
     },
     "branch_flow": {
       "type": "object",
-      "description": "ブランチ運用の宣言（#3121）。無ければ既定値の行（ベースブランチから切り、ベースブランチを丸ごと出す）",
+      "description": "ブランチ運用の設定（#3121）。無ければ既定値の行（ベースブランチから切り、ベースブランチを丸ごと出す）",
       "additionalProperties": false,
       "properties": {
         "start": {
@@ -268,7 +268,7 @@
         },
         "app_service": {
           "type": "string",
-          "description": "コードを載せるサービス名。照合と再読み込みの対象"
+          "description": "コードを載せるサービス名。検証と再読み込みの対象"
         },
         "src_target": {
           "type": "string",
@@ -310,7 +310,7 @@
         },
         "branch_probe": {
           "type": "string",
-          "description": "ローカル環境に載っているブランチ名を出力するコマンド。照合が使う"
+          "description": "ローカル環境に載っているブランチ名を出力するコマンド。検証が使う"
         },
         "isolated_services": {
           "type": "array",
@@ -328,7 +328,7 @@
         },
         "healthcheck": {
           "type": "string",
-          "description": "動作確認に使うコマンド。照合が通ったときだけ実行する"
+          "description": "動作確認に使うコマンド。検証が通ったときだけ実行する"
         }
       }
     },
@@ -475,7 +475,7 @@
             },
             "open_command": {
               "type": "string",
-              "description": "公開の口を開けるコマンド。宣言が無ければ公開しない。NDF_EXPOSE_URL / NDF_EXPOSE_HOST / NDF_EXPOSE_ENVIRONMENT / NDF_EXPOSE_SLOT が環境変数で渡る"
+              "description": "公開の口を開けるコマンド。設定が無ければ公開しない。NDF_EXPOSE_URL / NDF_EXPOSE_HOST / NDF_EXPOSE_ENVIRONMENT / NDF_EXPOSE_SLOT が環境変数で渡る"
             },
             "close_command": {
               "type": "string",

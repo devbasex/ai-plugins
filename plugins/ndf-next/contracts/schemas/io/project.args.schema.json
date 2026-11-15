@@ -59,7 +59,7 @@
         },
         "--out": {
           "type": "string",
-          "description": "測定の結果の置き場（リポジトリの外の一時ディレクトリ）"
+          "description": "測定の結果の保存先（リポジトリの外の一時ディレクトリ）"
         },
         "--budget": {
           "type": "number",
@@ -108,7 +108,7 @@
         },
         "--answers": {
           "type": "string",
-          "description": "問いの項目への答え（キー → {value} か {unknown}）"
+          "description": "質問の項目への回答（キー → {value} か {unknown}）"
         },
         "--dry-run": {
           "type": "boolean",

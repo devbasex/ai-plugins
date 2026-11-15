@@ -2,13 +2,13 @@
 
 - 提示（`present`）: 承認資料を、提示した先端の SHA を添えて PR へコメントする（会話のセッションが打つ）。資料が対象にした
   コミットが今の先端でなければ提示しない
-- 答え（`answer`）: 人の答えを証跡のコメントに書き、書いた後に PR を読み直して、答えが今の先端への判定として
-  届いたことを確かめる。届いていなければ `TrailError`（答えたつもりで止まり続けない）
+- 回答（`answer`）: 人の回答を証跡のコメントに書き、書いた後に PR を読み直して、回答が今の先端への判定として
+  届いたことを確かめる。届いていなければ `TrailError`（回答したつもりで止まり続けない）
 - 確かめ（`check`）: 証跡を読んで判定し、判定を commit status `approval_decide.STATUS_CONTEXT` に付ける（workflow が打つ）
 - 迂回の記録（`write_admin_record`）: 本番の PR を管理者の迂回でマージしたことを、照らした証跡を指すコメントで残す（#3506）。
-  印 `ADMIN_MARK` は証跡の印と別で、証跡の判定に数えない。旧いプラグイン（`release_lib/approval_trail.py`）と同じ印と行を持つ
+  マーカー `ADMIN_MARK` は証跡のマーカーと別で、証跡の判定に数えない。旧いプラグイン（`release_lib/approval_trail.py`）と同じマーカーと行を持つ
 
-答えは提示した先端へのもので、答えるときに先端が動いていれば書かずに断る（見ていないコミットを承認しない）。
+回答は提示した先端へのもので、回答するときに先端が動いていれば書かずに断る（見ていないコミットを承認しない）。
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ from ndf.adapters.github import Authored, GitHub, GitHubError, Pull
 from ndf.adapters.publish import Publisher
 from ndf.domains.release import approval_decide
 
-# 迂回の記録の印と行の見出し（旧いプラグインと同じ文字列。作り直しは旧いプラグインを読み込まないため別に持つ）
+# 迂回の記録のマーカーと行の見出し（旧いプラグインと同じ文字列。作り直しは旧いプラグインを読み込まないため別に持つ）
 ADMIN_MARK = f"<!-- {identity.FIXED_WORDS['workflow_namespace']}:admin-merge -->"
 ADMIN_SHA_LINE = "マージした先端:"
 ADMIN_TRAIL_LINE = "照らした承認の証跡:"
@@ -53,7 +53,7 @@ STATUS_STATE = {
 
 
 class TrailError(Exception):
-    """証跡を書けない・書いた答えが判定に届かない・先端が提示から動いた。"""
+    """証跡を書けない・書いた回答が判定に届かない・先端が提示から動いた。"""
 
 
 class Read(NamedTuple):
@@ -71,15 +71,15 @@ def _by_of(body: str) -> str | None:
 
 def _counts(hub: GitHub, c: Authored, human_only: bool) -> bool:
     """証跡の判定に数えるコメントか。信用する書き手が書き、作成の後に編集されていない（書き込みの権限を持つ人は他人の
-    コメントを編集できる）。`human_only` なら承認は担い手が利用者（`USER_BY`）と明示された証跡だけを数え、差し戻しは
-    担い手を問わず数える（利用者の承認の後の差し戻しを捨てて迂回しない。#3506 の I9）。"""
+    コメントを編集できる）。`human_only` なら承認は担い手が利用者（`USER_BY`）と明示された証跡だけを数え、変更要求は
+    担い手を問わず数える（利用者の承認の後の変更要求を捨てて迂回しない。#3506 の I9）。"""
     if c.edited or (human_only and _by_of(c.body) != USER_BY and not _rejects(c)):
         return False
     return hub.trusts(c)
 
 
 def _rejects(c: Authored) -> bool:
-    """コメントが差し戻し（`approval_decide.REJECTED`）の証跡か。"""
+    """コメントが変更要求（`approval_decide.REJECTED`）の証跡か。"""
     got = approval_decide.parse(0, c.author, c.body)
     return got is not None and got.answer == approval_decide.REJECTED
 
@@ -119,14 +119,14 @@ def present(hub: GitHub, number: int, material: str) -> str:
 
 
 def answer(hub: GitHub, number: int, value: str, by: str, presented: str) -> approval_decide.Judgment:
-    """答えを証跡に書き、届いたことを読み直して確かめる。"""
+    """回答を証跡に書き、届いたことを読み直して確かめる。"""
     pull = hub.pull(number)
     if pull.head_sha != presented:
         raise TrailError(f"#{number} の先端が提示した {presented[:12]} から {pull.head_sha[:12]} へ動いた（提示し直す）")
     Publisher(hub).comment(number, approval_decide.render_trail(value, pull.head_sha, by))
     after = read(hub, number)
     if after.judgment.state != value or after.pull.head_sha != pull.head_sha:
-        raise TrailError(f"#{number} へ書いた答え {value} が判定に届いていない（判定: {after.judgment.detail}）")
+        raise TrailError(f"#{number} へ書いた回答 {value} が判定に届いていない（判定: {after.judgment.detail}）")
     return after.judgment
 
 
@@ -148,12 +148,12 @@ def check(hub: GitHub, number: int, human_only: bool = False) -> Read:
 
 
 def render_admin_record(sha: str, trail_url: str) -> str:
-    """迂回の記録の本文（証跡の印を持たない）。"""
+    """迂回の記録の本文（証跡のマーカーを持たない）。"""
     if not _SHA.fullmatch(sha):
         raise ValueError(f"マージした先端は 40 桁の SHA（渡された値: {sha!r}）")
     return (
         f"{ADMIN_MARK}\n## 管理者の迂回でマージした\n\n{ADMIN_SHA_LINE} `{sha}`\n"
-        f"{ADMIN_TRAIL_LINE} {trail_url if trail_url else '（読めない）'}\n宣言: `{_PROJECT_FILE}` の `production_merge.admin`\n"
+        f"{ADMIN_TRAIL_LINE} {trail_url if trail_url else '（読めない）'}\n設定: `{_PROJECT_FILE}` の `production_merge.admin`\n"
     )
 
 
@@ -161,7 +161,7 @@ def write_admin_record(hub: GitHub, number: int, sha: str) -> tuple[bool, str]:
     """迂回の記録を置く。同じ先端の記録が既にあれば置かない（#3506 の I7）。(置いたか, コメントの URL)。
 
     既にある記録に数えるのは、信用する書き手（`GitHub.trusts`）が書き、編集されていないものだけ（コメントできる誰かが
-    印と SHA の入ったコメントを先に置いても、本物の記録を止められない）。
+    マーカーと SHA の入ったコメントを先に置いても、本物の記録を止められない）。
 
     照らした証跡は、利用者の証跡（`read` の `human_only`）の判定に使ったコメントの URL。読めない・書けなければ `TrailError`。
     """

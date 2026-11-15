@@ -1,15 +1,15 @@
-"""副命令 `ndf progress`: スプリントの進行表を作り、読み、conductor の操作で状態を変える。
+"""サブコマンド `ndf progress`: スプリントのステートマシンを作り、読み、conductor の操作で状態を変える。
 
 ndf progress new <スプリント名> --mode <モード> --issues <番号>... [--pace <進め方>] [--disable <工程>=<理由>]...
-                 [--requirements <要求と受け入れ条件の出力>] [--parent <親の進行表の ID>]
-ndf progress show <進行表の ID>
-ndf progress disable|enable|retry <進行表の ID> <工程> --reason <理由>
-ndf progress finish <進行表の ID> <工程> --output <出力のファイル> --reason <理由>
-ndf progress cancel <進行表の ID> --reason <理由>
-ndf progress restore --from <控え>
+                 [--requirements <要求と受け入れ条件の出力>] [--parent <親のステートマシンの ID>]
+ndf progress show <ステートマシンの ID>
+ndf progress disable|enable|retry <ステートマシンの ID> <工程> --reason <理由>
+ndf progress finish <ステートマシンの ID> <工程> --output <出力のファイル> --reason <理由>
+ndf progress cancel <ステートマシンの ID> --reason <理由>
+ndf progress restore --from <バックアップ>
 
-結果は結果 JSON の 1 行で返す。この副命令を打つのはレーンの conductor で、書く事象の書き手は conductor になる。
-工程を流す `next` と、承認ゲートの答えを書く `answer` は P1b（#3092）が足す。
+結果は結果 JSON の 1 行で返す。このサブコマンドを打つのはレーンの conductor で、書く事象の書き手は conductor になる。
+工程を流す `next` と、承認ゲートの回答を書く `answer` は P1b（#3092）が足す。
 """
 
 from __future__ import annotations
@@ -32,20 +32,20 @@ from ndf.contracts import causes, facts, result
 from ndf.core import durable
 from ndf.progress import definition, model, stages, store
 
-# 結果 JSON の tool の名前は副命令の名前（パッケージの名前）と同じ
+# 結果 JSON の tool の名前はサブコマンドの名前（パッケージの名前）と同じ
 TOOL = __package__.rpartition(".")[2]
 ACTOR = "conductor"
 # 番号のぶつかり（同時の追記）で読み直して書き直す回数
 APPEND_ATTEMPTS = 3
 PROJECT_FILE = identity.FIXED_WORDS["ndf_settings_dir"] + "/project.json"
-# 副命令 disable・enable が書く事象の種類
+# サブコマンド disable・enable が書く事象の種類
 TOGGLE_KINDS = {"disable": "disabled", "enable": "enabled"}
-# 進行表の作成の時点で済んでいる工程（要求と受け入れ条件）の終了の理由
-DONE_AT_CREATION = "進行表の作成の時点で済んでいる"
-REQUIREMENTS_STAGE = "要求と受け入れ条件"  # `--requirements` が終了の印を付ける工程（工程表の行名）
+# ステートマシンの作成の時点で済んでいる工程（要求と受け入れ条件）の終了の理由
+DONE_AT_CREATION = "ステートマシンの作成の時点で済んでいる"
+REQUIREMENTS_STAGE = "要求と受け入れ条件"  # `--requirements` が終了のマーカーを付ける工程（工程表の行名）
 
 
-# --- 置き場とリポジトリ ------------------------------------------------------------------
+# --- 保存先とリポジトリ ------------------------------------------------------------------
 
 
 def store_root_of(cwd: Path) -> Path:
@@ -62,7 +62,7 @@ def _without_userinfo(url: str) -> str:
 
 
 def repo_id(cwd: Path, root: Path) -> str:
-    """リポジトリの識別。origin の URL（userinfo を外す）、無ければメインディレクトリの絶対パス（置き場の 2 つ上の親）。"""
+    """リポジトリの識別。origin の URL（userinfo を外す）、無ければメインディレクトリの絶対パス（保存先の 2 つ上の親）。"""
     try:
         return _without_userinfo(Git(cwd).run("remote", "get-url", "origin").strip())
     except GitError:
@@ -79,7 +79,7 @@ def read_json(path: Path, failure: str = "を JSON として読めない") -> An
 
 
 def ndf_settings_path(cwd: Path, name: str) -> Path:
-    """リポジトリの根の宣言のファイルのパス。"""
+    """リポジトリの根の設定のファイルのパス。"""
     return Path(Git(cwd).run("rev-parse", "--show-toplevel").strip()) / name
 
 
@@ -89,12 +89,12 @@ def _read_ndf_settings(path: Path) -> dict[str, Any]:
 
 
 def ndf_settings(cwd: Path, name: str) -> dict[str, Any]:
-    """リポジトリの根の宣言のファイル。無いか、オブジェクトでなければ空。JSON として読めなければ `ContractError`。"""
+    """リポジトリの根の設定のファイル。無いか、オブジェクトでなければ空。JSON として読めなければ `ContractError`。"""
     return _read_ndf_settings(ndf_settings_path(cwd, name))
 
 
-# --- 工程の定義の条件（`when`）の語のうち、進行表の外（git の差分と宣言のファイル・スプリントの文脈）から求める語 ---
-# `ndf.progress.run` の `Env.facts` の既定（`facts_of`）。進行表から求める語（`run.TABLE_FACTS`）はここに無い。
+# --- 工程の定義の条件（`when`）の語のうち、ステートマシンの外（git の差分と設定のファイル・スプリントの文脈）から求める語 ---
+# `ndf.progress.run` の `Env.facts` の既定（`facts_of`）。ステートマシンから求める語（`run.TABLE_FACTS`）はここに無い。
 
 
 class FactUnknown(Exception):
@@ -108,7 +108,7 @@ class FactUnknown(Exception):
 WORKTREE_FILE = identity.FIXED_WORDS["ndf_settings_dir"] + "/worktree.json"
 DOC_FILES = ("**/*.md",)  # `.ndf/project.json` の `docs.files` を省いたときの文書のファイル
 BEHAVIOR_DOCS = ("**/skills/**/*.md", "**/agents/*.md")  # 同じく `docs.behavior`（振る舞いを決める文書）
-# 差分の語（`diff_kinds` の鍵）
+# 差分の語（`diff_kinds` のキー）
 DIFF_WORDS = ("code_in_diff", "docs_only_diff", "behavior_docs_in_diff")
 
 
@@ -123,7 +123,7 @@ def diff_kinds(files: set[str], docs: set[str], behavior: set[str]) -> dict[str,
 
 
 def _pathspecs(project: Mapping[str, Any], key: str, default: tuple[str, ...]) -> list[str]:
-    """宣言のパターン（根からのパス全体に当てる glob。`!` は前が当てたものを外す）を git の pathspec にする。"""
+    """設定のパターン（根からのパス全体に当てる glob。`!` は前が当てたものを外す）を git の pathspec にする。"""
     value = definition.dig(project, "docs", key)
     patterns = value if isinstance(value, list) and value and all(isinstance(p, str) for p in value) else default
     return [f":(exclude,glob){p[1:]}" if p.startswith("!") else f":(glob){p}" for p in patterns]
@@ -166,7 +166,7 @@ def sprint_diff_kinds(context: Mapping[str, Any], cwd: Path) -> dict[str, bool]:
 
 
 def facts_of(words: tuple[str, ...], context: Mapping[str, Any], cwd: Path) -> dict[str, bool]:
-    """工程の定義の条件（`when`）の語のうち、進行表の外から求める語の値。求められない語は `FactUnknown`。"""
+    """工程の定義の条件（`when`）の語のうち、ステートマシンの外から求める語の値。求められない語は `FactUnknown`。"""
     kinds = functools.cache(lambda: sprint_diff_kinds(context, cwd))
     known: dict[str, Callable[[], bool]] = {
         **{w: (lambda w=w: kinds()[w]) for w in DIFF_WORDS},
@@ -197,12 +197,12 @@ def _declared(cwd: Path) -> dict[str, Any]:
         return {}
     errs = [f"workflow.stages.{name}: {e}" for name, value in declared.items() for e in _ndf_settings_errors(value)]
     if errs:
-        raise contracts.ContractError(f"{path} の宣言が形に合わない: {'; '.join(errs)}")
+        raise contracts.ContractError(f"{path} の設定が形に合わない: {'; '.join(errs)}")
     return declared
 
 
 def _ndf_settings_errors(value: Any) -> list[str]:
-    """工程の宣言 1 つの形 `{"enabled": 真偽, "reason": 理由（無効のとき必須）}` を破る理由。"""
+    """工程の設定 1 つの形 `{"enabled": 真偽, "reason": 理由（無効のとき必須）}` を破る理由。"""
     if not isinstance(value, dict):
         return ['{"enabled": 真偽, "reason": 理由} の形でない']
     if not isinstance(value.get("enabled"), bool):
@@ -213,13 +213,13 @@ def _ndf_settings_errors(value: Any) -> list[str]:
     return []
 
 
-# --- 進行表の読み書き ---------------------------------------------------------------------
+# --- ステートマシンの読み書き ---------------------------------------------------------------------
 
 
 def read_current(conn: Any, machine_id: str) -> tuple[int, dict[str, Any], stages.Snapshot, list[model.Event]]:
-    """進行表の最新の改訂・定義の文書・定義・事象。進行表が無ければ `model.Refused`。"""
+    """ステートマシンの最新の改訂・定義の文書・定義・事象。ステートマシンが無ければ `model.Refused`。"""
     if store.read_machine(conn, machine_id) is None:
-        raise model.Refused(f"進行表 {machine_id} は無い")
+        raise model.Refused(f"ステートマシン {machine_id} は無い")
     rev, raw = store.read_definition(conn, machine_id)
     return rev, raw, stages.snapshot_from(raw), store.read_events(conn, machine_id)
 
@@ -269,7 +269,7 @@ def _rows(snap: stages.Snapshot, events: list[model.Event], rev: int) -> list[di
     return out
 
 
-# --- 副命令 ------------------------------------------------------------------------------
+# --- サブコマンド ------------------------------------------------------------------------------
 
 
 def _new_drafts(snap: stages.Snapshot, enabled: dict[str, stages.Enablement], finished: list[tuple[str, str]]) -> list[model.EventDraft]:
@@ -283,9 +283,9 @@ def _new_drafts(snap: stages.Snapshot, enabled: dict[str, stages.Enablement], fi
 
 
 def _requirements(snap: stages.Snapshot, path: str | None) -> list[tuple[str, str]]:
-    """`--requirements` の出力を要求と受け入れ条件の工程の出力の規約で確かめ、終了の印を付ける工程の一覧にする。
+    """`--requirements` の出力を要求と受け入れ条件の工程の出力の規約で確かめ、終了のマーカーを付ける工程の一覧にする。
 
-    その工程を持たないモードでは別の工程へ印を付けず、引数の誤りとして断る。"""
+    その工程を持たないモードでは別の工程へマーカーを付けず、引数の誤りとして断る。"""
     if path is None:
         return []
     found = [s for s in snap.stages if s.name == REQUIREMENTS_STAGE]
@@ -321,7 +321,7 @@ def _cmd_new(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any
         rev, _, _, events = read_current(conn, tid)
     rows = _rows(snap, events, rev)
     off = [r["stage"] for r in rows if r["state"] == "disabled"]
-    summary = f"進行表 {tid} を作った（{len(rows)} 行、無効 {len(off)} 行）"
+    summary = f"ステートマシン {tid} を作った（{len(rows)} 行、無効 {len(off)} 行）"
     return result.result(TOOL, result.OK, summary, items=rows, metrics={"machine_id": tid, "rows": len(rows), "disabled": off})
 
 
@@ -331,7 +331,7 @@ def _cmd_show(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, A
     rows = _rows(snap, events, rev)
     whole = model.table_state("sprint", events)
     metrics = {"machine_id": a.machine_id, "mode": snap.mode, "rev": rev, "state": whole, "history": [e.as_dict() for e in events]}
-    return result.result(TOOL, result.OK, f"進行表 {a.machine_id} は{model.label(whole)}（{len(rows)} 行）", items=rows, metrics=metrics)
+    return result.result(TOOL, result.OK, f"ステートマシン {a.machine_id} は{model.label(whole)}（{len(rows)} 行）", items=rows, metrics=metrics)
 
 
 def _changed(a: argparse.Namespace, st: store.Store, kind: str, payload: dict[str, Any] | None) -> dict[str, Any]:
@@ -343,7 +343,7 @@ def _changed(a: argparse.Namespace, st: store.Store, kind: str, payload: dict[st
 
     seqs = _append(st, a.machine_id, build)
     return result.result(
-        TOOL, result.OK, f"進行表 {a.machine_id} の {a.stage} に {kind} を書いた", metrics={"machine_id": a.machine_id, "seqs": seqs}
+        TOOL, result.OK, f"ステートマシン {a.machine_id} の {a.stage} に {kind} を書いた", metrics={"machine_id": a.machine_id, "seqs": seqs}
     )
 
 
@@ -367,7 +367,7 @@ def _cmd_finish(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str,
     dropped: list[str] = []
 
     def build(rev: int, _snap: stages.Snapshot, _events: list[model.Event]) -> list[model.EventDraft]:
-        """終了の印と、工程が流れたときと同じ形で出力を文脈へ書く事象（後の工程の入力になる）。"""
+        """終了のマーカーと、工程が流れたときと同じ形で出力を文脈へ書く事象（後の工程の入力になる）。"""
         draft, dropped[:] = stages.outputs_draft(stage, rev, output["outputs"] if "outputs" in output else {}, ACTOR)
         done = model.EventDraft("manual_finished", ACTOR, a.stage, reason=a.reason, payload={"output": a.output}, rev=rev)
         return [done, *([draft] if draft is not None else [])]
@@ -375,7 +375,7 @@ def _cmd_finish(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str,
     seqs = _append(st, a.machine_id, build)
     st.warnings.extend(dropped)
     return result.result(
-        TOOL, result.OK, f"進行表 {a.machine_id} の {a.stage} に manual_finished を書いた", metrics={"machine_id": a.machine_id, "seqs": seqs}
+        TOOL, result.OK, f"ステートマシン {a.machine_id} の {a.stage} に manual_finished を書いた", metrics={"machine_id": a.machine_id, "seqs": seqs}
     )
 
 
@@ -390,7 +390,7 @@ def _cmd_cancel(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str,
         seqs = _append(st, a.machine_id, build)
     rows = len(seqs) - 1
     return result.result(
-        TOOL, result.OK, f"進行表 {a.machine_id} を中止した（中止にした行 {rows}）", metrics={"machine_id": a.machine_id, "cancelled_rows": rows}
+        TOOL, result.OK, f"ステートマシン {a.machine_id} を中止した（中止にした行 {rows}）", metrics={"machine_id": a.machine_id, "cancelled_rows": rows}
     )
 
 
@@ -399,18 +399,18 @@ def _cmd_restore(a: argparse.Namespace, cwd: Path) -> dict[str, Any]:
     url = store.default_url(root)
     retired = store.restore(url, root, Path(a.source))
     items = [{"restored": str(store.sqlite_path(url)), "from": a.source, "retired": str(retired)}]
-    return result.result(TOOL, result.OK, f"進行表の DB を控え {a.source} から戻した", items=items)
+    return result.result(TOOL, result.OK, f"ステートマシンの DB をバックアップ {a.source} から戻した", items=items)
 
 
 Command = Callable[[argparse.Namespace, Path, store.Store], dict[str, Any]]
 
 
 def _answer_commands(handlers: tuple[Command, ...]) -> dict[str, Command]:
-    """止まった後に conductor が選ぶ手の副命令。名前は答えの語彙（表 answers）の行で、`_cmd_<答え>` が受ける。"""
+    """止まった後に conductor が選ぶ手のサブコマンド。名前は回答の語彙（表 answers）の行で、`_cmd_<回答>` が受ける。"""
     out = {a: h for h in handlers for a in facts.ids(result.ANSWERS) if h.__name__ == f"_cmd_{a}"}
     if len(out) != len(handlers):
         raise LookupError(
-            f"表 {result.ANSWERS} に無い答えの副命令: {sorted({h.__name__ for h in handlers} - {h.__name__ for h in out.values()})}"
+            f"表 {result.ANSWERS} に無い回答のサブコマンド: {sorted({h.__name__ for h in handlers} - {h.__name__ for h in out.values()})}"
         )
     return out
 
@@ -437,15 +437,15 @@ def _disable_item(value: str) -> str:
 def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog=f"ndf {TOOL}", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="action", required=True)
-    new = sub.add_parser("new", help="スプリントの進行表を作る")
+    new = sub.add_parser("new", help="スプリントのステートマシンを作る")
     new.add_argument("name", help="スプリント名")
     new.add_argument("--mode", required=True)
     new.add_argument("--issues", type=int, nargs="+", required=True)
     new.add_argument("--pace", default="normal")
     new.add_argument("--disable", type=_disable_item, action="append", default=[], help="<工程>=<理由>")
     new.add_argument("--requirements", help="要求と受け入れ条件の出力（工程の出力の規約に合う JSON）")
-    new.add_argument("--parent", help="親の進行表（レーンの進行表）の ID")
-    sub.add_parser("show", help="進行表を表示する").add_argument("machine_id")
+    new.add_argument("--parent", help="親のステートマシン（レーンのステートマシン）の ID")
+    sub.add_parser("show", help="ステートマシンを表示する").add_argument("machine_id")
     for name in ("disable", "enable", "retry", "finish"):
         p = sub.add_parser(name, help=f"工程に {name} を書く")
         p.add_argument("machine_id")
@@ -453,10 +453,10 @@ def parser() -> argparse.ArgumentParser:
         p.add_argument("--reason", required=True)
         if name == "finish":
             p.add_argument("--output", required=True, help="工程の出力の規約に合う JSON のファイル")
-    cancel = sub.add_parser("cancel", help="進行表を中止する")
+    cancel = sub.add_parser("cancel", help="ステートマシンを中止する")
     cancel.add_argument("machine_id")
     cancel.add_argument("--reason", required=True)
-    sub.add_parser("restore", help="控えから進行表の DB を戻す").add_argument("--from", dest="source", required=True)
+    sub.add_parser("restore", help="バックアップからステートマシンの DB を戻す").add_argument("--from", dest="source", required=True)
     return ap
 
 
@@ -468,10 +468,10 @@ def with_warnings(out: dict[str, Any], before: Sequence[str] = (), after: Sequen
 
 
 def with_store(cwd: Path, handler: Command, a: argparse.Namespace) -> dict[str, Any]:
-    """チェックアウトの置き場の進行表の DB を開いて `handler` を打ち、DB を開いた間の警告を結果の後ろへ足す。"""
+    """チェックアウトの保存先のステートマシンの DB を開いて `handler` を打ち、DB を開いた間の警告を結果の後ろへ足す。"""
     root = store_root_of(cwd)
     url = store.default_url(root)
-    store.sqlite_path(url)  # 受けない URL の形は、置き場を用意する前に断る
+    store.sqlite_path(url)  # 受けない URL の形は、保存先を用意する前に断る
     ready = durable.prepare_store(root, datetime.now(UTC))
     with store.open_store(url, ready.root) as st:
         return with_warnings(handler(a, cwd, st), after=st.warnings)
@@ -483,7 +483,7 @@ def _dispatch(a: argparse.Namespace, cwd: Path) -> dict[str, Any]:
     return with_store(cwd, COMMANDS[a.action], a)
 
 
-# 止まった理由へ変換する例外の種類（main が受け、stopped_from が理由へ変える）
+# 停止理由へ変換する例外の種類（main が受け、stopped_from が理由へ変える）
 STOPPABLE = (
     model.Refused,
     durable.StoreStopped,
@@ -497,7 +497,7 @@ STOPPABLE = (
 
 def _db_unusable(exc: Exception) -> dict[str, Any]:
     # store が包み直さなかった DB の誤り。本文は SQL・値・接続先を含みうるので種類の名前だけを出す
-    return result.stopped(TOOL, store.StoreUnreachable.kind, f"進行表の DB を使えない: {type(exc).__name__}")
+    return result.stopped(TOOL, store.StoreUnreachable.kind, f"ステートマシンの DB を使えない: {type(exc).__name__}")
 
 
 def _refused(exc: model.Refused) -> dict[str, Any]:
@@ -514,7 +514,7 @@ def _workflow_def_error(exc: definition.WorkflowDefError) -> dict[str, Any]:
 
 
 def _cause_only(cause: str) -> Callable[[Exception], dict[str, Any]]:
-    """付加情報を持たず、止まった理由の語だけが決まる例外の変換。"""
+    """付加情報を持たず、停止理由の語だけが決まる例外の変換。"""
     return lambda exc: result.stopped(TOOL, cause, str(exc))
 
 
@@ -532,15 +532,15 @@ _STOPPED_FROM: tuple[tuple[type[Exception], Callable[[Any], dict[str, Any]]], ..
 
 
 def stopped_from(exc: Exception) -> dict[str, Any]:
-    """STOPPABLE の種類を受け、結果 JSON の止まった理由にする。表に無い種類は CalledProcessError。"""
+    """STOPPABLE の種類を受け、結果 JSON の停止理由にする。表に無い種類は CalledProcessError。"""
     for kind, convert in _STOPPED_FROM:
         if isinstance(exc, kind):
             return convert(exc)
-    return result.stopped(TOOL, "precondition", f"git の中で打つ（チェックアウトの置き場を求められない）: {exc}")
+    return result.stopped(TOOL, "precondition", f"git の中で打つ（チェックアウトの保存先を求められない）: {exc}")
 
 
 def run_main(ap: argparse.ArgumentParser, dispatch: Callable[[argparse.Namespace, Path], dict[str, Any]], argv: list[str]) -> int:
-    """引数を読んで `dispatch` を打ち、結果 JSON を出す。STOPPABLE の例外は止まった理由にする。"""
+    """引数を読んで `dispatch` を打ち、結果 JSON を出す。STOPPABLE の例外は停止理由にする。"""
     try:
         a = ap.parse_args(argv)
     except SystemExit as exc:

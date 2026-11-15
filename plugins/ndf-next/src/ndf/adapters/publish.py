@@ -63,7 +63,7 @@ PRIVATE_ORIGIN = "非公開のリポジトリの課題"
 
 
 class DropKind(StrEnum):
-    """落とした所の種類（`Scrubbed.dropped`・`Published.dropped` の鍵）。"""
+    """落とした所の種類（`Scrubbed.dropped`・`Published.dropped` のキー）。"""
 
     SECRET = "secret"
     PRIVATE_REF = "private_ref"

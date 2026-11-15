@@ -2,25 +2,25 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "context.schema.json",
   "title": "スプリントの文脈",
-  "description": "工程の定義の inputs・outputs に書ける鍵と値の形（閉じた語彙）。工程の出力が文脈へ書き、後の工程の入力がそこから読む",
+  "description": "工程の定義の inputs・outputs に書けるキーと値の形（閉じた語彙）。工程の出力が文脈へ書き、後の工程の入力がそこから読む",
   "type": "object",
   "additionalProperties": false,
   "properties": {
-    "issues": {"type": "array", "items": {"type": "integer", "minimum": 1}, "uniqueItems": true, "description": "スプリントの課題の番号。進行表の作成が書く"},
+    "issues": {"type": "array", "items": {"type": "integer", "minimum": 1}, "uniqueItems": true, "description": "スプリントの課題の番号。ステートマシンの作成が書く"},
     "mode": {"enum": ["light", "operation", "legacy-refactor", "standard", "documentation"], "description": "モード。モード判定が書く"},
     "pace": {"enum": ["normal", "fast", "auto"], "description": "進め方。モード判定が書く"},
     "worktree": {"type": "string", "pattern": "^/[^\\u0000]*$", "description": "作業場所の絶対パス。作業場所の用意が書く。git と作業へ渡す前にこの形で確かめる（3364-7）"},
     "branch": {"type": "string", "pattern": "^(?!.*\\.\\.)(?!.*//)[A-Za-z0-9_][A-Za-z0-9._/-]*(?<![./])$", "description": "スプリントのブランチ。作業場所の用意が書く。先頭の - と .. を断る形で確かめてから渡す（3364-7）"},
     "design_pr": {"type": "integer", "minimum": 1, "description": "設計の Pull Request の番号"},
     "pr": {"type": "integer", "minimum": 1, "description": "スプリントの Pull Request の番号"},
-    "delivery": {"$ref": "#/$defs/delivery", "description": ".ndf/project.json の delivery の 1 行。デプロイが書く。デプロイの経路になる値なので、鍵の型と kind・channel の取りうる値を確かめてから渡す（3364-7）"},
-    "version": {"type": "string", "minLength": 1, "description": "出した版。デプロイが書く"},
-    "release_pr": {"type": "string", "minLength": 1, "description": "出した版のリリース記録を書いた Pull Request。まとめたリリースの答えをリリース承認ゲートが書き、閉じとリリース後テストはここから読む"}
+    "delivery": {"$ref": "#/$defs/delivery", "description": ".ndf/project.json の delivery の 1 行。デプロイが書く。デプロイの経路になる値なので、キーの型と kind・channel の取りうる値を確かめてから渡す（3364-7）"},
+    "version": {"type": "string", "minLength": 1, "description": "出したバージョン。デプロイが書く"},
+    "release_pr": {"type": "string", "minLength": 1, "description": "出したバージョンのリリース記録を書いた Pull Request。まとめたリリースの回答をリリース承認ゲートが書き、閉じとリリース後テストはここから読む"}
   },
   "$defs": {
     "delivery": {
       "type": "object",
-      "description": "delivery の 1 行の形。鍵と型は人と解析（M7）が書く宣言（.ndf/project.json の delivery）の行に合わせ、知らない鍵は断る。省ける鍵は null も受ける",
+      "description": "delivery の 1 行の形。キーと型は人と解析（M7）が書く設定（.ndf/project.json の delivery）の行に合わせ、知らないキーは断る。省けるキーは null も受ける",
       "additionalProperties": false,
       "required": ["target", "kind", "trigger", "versioned"],
       "properties": {

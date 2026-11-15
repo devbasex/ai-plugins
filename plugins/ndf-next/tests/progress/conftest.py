@@ -1,10 +1,10 @@
 """ndf.progress のテストが共有する fixture。
 
-進行表の DB の置き場は 2 つある。**ローカル（conductor の手元・CI の Runner）は SQLite、Factory は PostgreSQL の URL** を
-`NDF_PROGRESS_DB` で渡す。同じテストを両方の置き場で流すため、`progress_url` は SQLite と PostgreSQL の 2 つに
-パラメータで分かれる。PostgreSQL は使い捨ての DB を `initdb` と `pg_ctl` で起こす（GitHub Actions の ubuntu の Runner は
+ステートマシンの DB の保存先は 2 つある。**ローカル（conductor の手元・CI の Runner）は SQLite、Factory は PostgreSQL の URL** を
+`NDF_PROGRESS_DB` で渡す。同じテストを両方の保存先で流すため、`progress_url` は SQLite と PostgreSQL の 2 つに
+パラメータで分かれる。PostgreSQL は使い捨ての DB を `initdb` と `pg_ctl` で起動する（GitHub Actions の ubuntu の Runner は
 PostgreSQL を入れてある）。手元に無ければ PostgreSQL の側だけ飛ばし、CI（環境変数 `CI`）では落とす。
-SQLite に固有の検査・控え・戻し（P1-1・P1-2・P1-5）は `test_store_sqlite.py`、PostgreSQL で行わないことの確かめ（P1-4）は
+SQLite に固有の検査・バックアップ・戻し（P1-1・P1-2・P1-5）は `test_store_sqlite.py`、PostgreSQL で行わないことの確かめ（P1-4）は
 `test_store_pg.py` にある。
 """
 
@@ -45,7 +45,7 @@ def _no_progress_db(monkeypatch):
 
 @pytest.fixture
 def repo(tmp_path, monkeypatch):
-    """git で初めた空のリポジトリ（作業ディレクトリをそこへ移す）。終わったら置き場の共有のロックを放す。"""
+    """git で初めた空のリポジトリ（作業ディレクトリをそこへ移す）。終わったら保存先の共有のロックを放す。"""
     path = tmp_path / "work"
     path.mkdir()
     subprocess.run(["git", "init", "-q", str(path)], check=True)
@@ -56,7 +56,7 @@ def repo(tmp_path, monkeypatch):
 
 @pytest.fixture
 def st(repo):
-    """`repo` のチェックアウトの置き場の SQLite の進行表の DB。置き場を用意してから開く（`ndf progress` の副命令と同じ順）。"""
+    """`repo` のチェックアウトの保存先の SQLite のステートマシンの DB。保存先を用意してから開く（`ndf progress` のサブコマンドと同じ順）。"""
     root = durable.prepare_store(command.store_root_of(repo)).root
     with store.open_store(store.default_url(root), root) as opened:
         yield opened
@@ -64,7 +64,7 @@ def st(repo):
 
 @pytest.fixture
 def root(tmp_path):
-    """チェックアウトの置き場。終わったら `prepare_store` が持った共有のロックを放す。"""
+    """チェックアウトの保存先。終わったら `prepare_store` が持った共有のロックを放す。"""
     path = tmp_path / "repo" / ".git" / "ndf" / "state"
     path.mkdir(parents=True)
     yield path

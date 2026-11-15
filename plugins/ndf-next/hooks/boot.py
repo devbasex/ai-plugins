@@ -17,7 +17,7 @@ from typing import List
 def _load_entry():
     """隣の `hooks/entry.py`（標準ライブラリだけを読む）。読むと src がパスの先頭へ足される。
 
-    プラグインの置き場へ `hooks/__pycache__` を書かない（このファイルを起こしたときと同じに、entry.py の pyc を残さない）。
+    プラグインの保存先へ `hooks/__pycache__` を書かない（このファイルを起動したときと同じに、entry.py の pyc を残さない）。
     """
     spec = importlib.util.spec_from_file_location("_ndf_hooks_entry", str(Path(__file__).resolve().with_name("entry.py")))
     module = importlib.util.module_from_spec(spec)

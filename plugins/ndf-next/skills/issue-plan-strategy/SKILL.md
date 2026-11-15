@@ -13,11 +13,11 @@ allowed-tools:
 
 # issue → plan → multi-PR ワークフロー
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `parallel.py`（P3）・`worktree-setup.sh`（M8）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトのサブコマンドは新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `parallel.py`（P3）・`worktree-setup.sh`（M8）。移行先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 1 つの issue から plan を作る際、推奨される PR が複数に分かれることは日常的に発生する。本 skill はその際の **release ブランチ + 個別 PR ブランチ + Draft PR 先行作成 + git worktree 並行開発 + レビュー運用** の標準フローを規定する。
 
-本 skill は **plan の作成フェーズと plan の実行(実装)フェーズの両方** をカバーする。同じワークフローが「設計を起こす段階」と「設計に従って実装する段階」を貫通することで、作成者と実装者(あるいは将来の自分)が同じ手順を共有できる。
+本 skill は **plan の作成フェーズと plan の実行(実装)フェーズの両方** をカバーする。同じワークフローが「設計を起動する段階」と「設計に従って実装する段階」を貫通することで、作成者と実装者(あるいは将来の自分)が同じ手順を共有できる。
 
 ## 発動条件
 
@@ -25,7 +25,7 @@ allowed-tools:
 |---|---|---|
 | スラッシュコマンド (引数あり) | `/ndf:issue-plan-strategy issues/foo.md`、`/ndf:issue-plan-strategy https://github.com/org/repo/issues/123` | Step 0 から |
 | スラッシュコマンド (引数なし) | `/ndf:issue-plan-strategy` (現在ブランチで作業中の issue/plan を解析) | Step 0 から |
-| 自動発動 (作成系) | 「この issue の plan を作って」「設計書を起こして」「PLAN42 の設計を起こして」 | Step 1〜2 |
+| 自動発動 (作成系) | 「この issue の plan を作って」「設計書を起動して」「PLAN42 の設計を起動して」 | Step 1〜2 |
 | 自動発動 (実行系) | 「この plan を実装して」「PLAN42 を実行して」「multi-PR で進めて」「release branch を切って実装開始」 | Step 0 → 既存 plan を読み → Step 3 以降 |
 
 引数で渡された issue / plan は **ファイルパス / URL / 番号** いずれでも受け付ける:
@@ -40,7 +40,7 @@ allowed-tools:
 節・起動してよい本数を 1 つの表に置き、工程の終わりごとに読み直して、着手できる行を起動する。
 **課題が 1 件で Pull Request も 1 本のときは書かない。**
 
-置き場所（メインディレクトリの `issues/execution-plan-<キー>.md`、開いている間はコミットしない）・
+置く場所（メインディレクトリの `issues/execution-plan-<キー>.md`、開いている間はコミットしない）・
 行と測った値の形・見直す 5 つの契機と手順・閉じ方は
 [references/execution-plan.md](references/execution-plan.md) が持つ。
 
@@ -234,7 +234,7 @@ EOF
 
 ## Step 5: git worktree で並行開発
 
-並行可能 (依存なし or mock で先行可) な PR は **git worktree** で同時に開く。置き場所は
+並行可能 (依存なし or mock で先行可) な PR は **git worktree** で同時に開く。置く場所は
 `<メインディレクトリ>/.worktrees/<ブランチ名>` で、ブランチ名がそのままパスになる
 (`/ndf:worktree`)。
 
@@ -323,7 +323,7 @@ gh pr edit <release-pr-number> --title "..." --body "..."
 >   収束させてから release へ merge する。**release PR に対して直接は回さない** — ループ内の
 >   `/ndf:fix` が release PR を修正・Resolve してしまい、「個別 PR 範囲の指摘は個別 PR 側で解決する」
 >   原則 (Step 7) が崩れるため。
-> - **個別 PR が既に release へ merge 済み** (元の差分が release ブランチに取り込まれ、新規 PR には
+> - **個別 PR が既に release へ merge 済み** (元の差分が release ブランチにマージされ、新規 PR には
 >   乗らない): release PR に対して `/ndf:cross-review <release-pr-number>` を回し、**release PR 全体を
 >   改めてレビューする**（当該差分もその中に含まれる。個別差分だけを抽出しての再レビューにはならず、
 >   release PR 全体が対象になるぶん手戻りが大きい）。この場合ループ内の `/ndf:fix` は release ブランチを

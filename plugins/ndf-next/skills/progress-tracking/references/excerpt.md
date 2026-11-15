@@ -1,7 +1,7 @@
 <!-- ndf-excerpt: progress-tracking -->
 # progress-tracking の抜粋
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `progress-record.sh`（M7）・`projects-sync.sh`（M7）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトのサブコマンドは新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `progress-record.sh`（M7）・`projects-sync.sh`（M7）。移行先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 ## 呼び出し
 
@@ -19,7 +19,7 @@ bash "$SCRIPTS/projects-sync.sh" <課題番号> <キー> "<値>"
 
 | 終了コード | 意味 | 次にすること |
 | --- | --- | --- |
-| 0 | 本文へ記録した・変える内容が無かった。ボードも記録した（宣言が無ければ `items` の board が `not_declared`） | 先へ進む |
+| 0 | 本文へ記録した・変える内容が無かった。ボードも記録した（設定が無ければ `items` の board が `not_declared`） | 先へ進む |
 | 6 | 本文かボードのどれかを書けなかった（`gaps` に書けなかったものと理由） | `summary` と `gaps[].reason` を報告の「見つけたもの」へ載せて先へ進む |
 | 3 | `gh` が無い（通過記録は積んだ） | 同上 |
 | 1 | 何も書けなかった | 同上 |

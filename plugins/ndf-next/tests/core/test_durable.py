@@ -1,4 +1,4 @@
-"""DBOS の殻を通した判断のループ（耐久を通す代表）と、鍵の名前・アプリの版（決定 81・84）。"""
+"""DBOS の殻を通した判断のループ（耐久を通す代表）と、キーの名前・アプリのバージョン（決定 81・84）。"""
 
 from __future__ import annotations
 
@@ -121,7 +121,7 @@ def _crash_run(root: Path, log: Path, crash_at: int, plugin: Path) -> subprocess
 
 
 def test_recovery_continues_after_the_plugin_version_is_raised(tmp_path):
-    """I7: アプリの版は形の番号と鍵の名前だけで決まり、plugin.json の版を上げて起動し直しても途中の実行が回復する。"""
+    """I7: アプリのバージョンは形の番号とキーの名前だけで決まり、plugin.json のバージョンを上げて起動し直しても途中の実行が回復する。"""
     root = tmp_path / "state"
     plugin = tmp_path / "plugin"
     log = tmp_path / "acts.log"
@@ -144,7 +144,7 @@ def test_recovery_continues_after_the_plugin_version_is_raised(tmp_path):
 
 
 def test_session_waits_for_running_steps_before_it_releases_the_key(tmp_path):
-    """裏で走る耐久ステップが結果を記録し終えるまで、session は DBOS を閉じず、鍵のロックを放さない。"""
+    """裏で走る耐久ステップが結果を記録し終えるまで、session は DBOS を閉じず、キーのロックを放さない。"""
     root = tmp_path / "state"
     slow_started.clear()
     slow_finished.clear()

@@ -102,7 +102,7 @@ def test_issue_3128_verification_goes_to_the_record_pull_and_both_are_read() -> 
     # リリースの PR（main 宛て）はリリース記録を持たないので書かない
     with pytest.raises(record.RecordError):
         record.write_verification(hub, RELEASE, _verification())
-    # 別の版の記録も書かない・形の違う記録も書かない
+    # 別のバージョンの記録も書かない・形の違う記録も書かない
     with pytest.raises(record.RecordError):
         record.write_verification(hub, 11, _verification("9.9.9"))
     with pytest.raises(record.RecordError):
@@ -129,11 +129,11 @@ def test_read_skips_untrusted_writers() -> None:
 
 
 def test_body_without_json_block_is_not_a_record() -> None:
-    assert record_decide.parse_record(f"{record_decide.RECORD_MARK}\n対象の版: {VERSION}\n") is None
+    assert record_decide.parse_record(f"{record_decide.RECORD_MARK}\n対象のバージョン: {VERSION}\n") is None
     assert record_decide.parse_record('```json\n{"version": "1.2.4", "release": 1, "included": []}\n```') is None
 
 
-# 印とコードブロックを持つが JSON として読めないリリース記録
+# マーカーとコードブロックを持つが JSON として読めないリリース記録
 BROKEN = f'{record_decide.RECORD_MARK}\n## リリース記録\n\n```json\n{{"version": \n```\n'
 
 

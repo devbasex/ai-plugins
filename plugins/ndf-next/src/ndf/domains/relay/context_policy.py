@@ -40,7 +40,7 @@ class Resolved(NamedTuple):
 
 
 def setting_id() -> str:
-    """設定のファイルの、宣言のファイルの表（ndf-files）の id。"""
+    """設定のファイルの、設定のファイルの表（ndf-files）の id。"""
     return "context"
 
 

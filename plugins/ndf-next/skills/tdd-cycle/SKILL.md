@@ -5,12 +5,12 @@ description: "Write a failing test first, then the smallest implementation that 
 
 # テスト駆動のサイクル
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `projects-sync.sh`（M7）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトのサブコマンドは新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `projects-sync.sh`（M7）。移行先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 **失敗するテスト → 通す最小実装 → 整理** を 1 単位として進める。NDF ではこの Skill を
 テスト駆動の唯一の基準とし、他の Skill から重複した規則を持たせない。
 
-## 同じリリースで追加する Skill（本文の `※` 印）
+## 同じリリースで追加する Skill（本文の `※` マーカー）
 
 本文で `※` を付けた Skill 名は同じリリースで順次追加されるものであり、まだリリース対象に
 存在しないことがある。**見つからない場合は探し回らず、下表の代替でそのまま進める。**
@@ -53,7 +53,7 @@ cat Makefile 2>/dev/null | grep -n '^test'
 | --- | --- |
 | テスト実行コマンド | `pytest`、`npm test`、`go test ./...` |
 | 単一テストの絞り込み方 | `pytest -k name`、`npm test -- -t name` |
-| テストの置き場所と命名 | `tests/test_*.py`、`src/**/*.test.ts` |
+| テストの置く場所と命名 | `tests/test_*.py`、`src/**/*.test.ts` |
 | 既存のテストダブルの流儀 | fixture / factory / モックライブラリ |
 
 既存テストがそもそも通らない場合は、**先にそれを報告する**。壊れた状態を基準にすると、
@@ -104,7 +104,7 @@ E   ImportError: cannot import name 'validate'   ← 期待と違う。先にこ
 
 - まだテストがない分岐・設定・拡張点
 - 「あとで要るはず」の抽象化（差異が 1 つしかない時点で戦略や生成の仕組みを入れない）
-- 依頼範囲外の整形・改名
+- リクエスト範囲外の整形・改名
 
 変える関数は、Serena が使えるときは `find_symbol`（`include_body`）で本体だけを読み、`replace_symbol_body` で書き換える。ファイルを丸ごと読まない。
 
@@ -165,7 +165,7 @@ E   ImportError: cannot import name 'validate'   ← 期待と違う。先にこ
 ## 参照
 
 - [references/test-quality.md](references/test-quality.md) — 脆いテストの例と代替
-- [references/testing-levels.md](references/testing-levels.md) — 単体・結合・契約・端から端までの使い分け
+- [references/testing-levels.md](references/testing-levels.md) — 単体・結合・コントラクト・端から端までの使い分け
 - `/ndf:out-of-scope` — 対象の外で見つけた課題の起票と、起票先のリポジトリの判断
 
 この工程に入ったら進捗記録 `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "実装"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「進捗記録」を使う）。

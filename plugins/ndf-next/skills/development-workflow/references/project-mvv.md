@@ -1,11 +1,11 @@
 # プロジェクト MVV（`.ndf/mvv.md`・`.ndf/mvv.json`）
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `check-trigger.py`（M1）・`mvv-gate.py`（P2）・`project-mvv.py`（M7）・`sprint-state.py`（P1b）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトのサブコマンドは新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `check-trigger.py`（M1）・`mvv-gate.py`（P2）・`project-mvv.py`（M7）・`sprint-state.py`（P1b）。移行先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
-プロジェクト全体の Mission / Vision / Value と固有の「必ず人の承認が要る操作」（`P<番号>`）を宣言し、NDF が判断する地点
+プロジェクト全体の Mission / Vision / Value と固有の「必ず人の承認が要る操作」（`P<番号>`）を定義し、NDF が判断する地点
 （承認ゲートの MVV 判定・レビューの指摘と修正の可否・リファクタリングの提案の採否・judge のステップ・範囲外の起票）が
 それに従う。承認済みなら、どの `pace`（`normal` / `auto` / `fast`）でも要求・設計・実装の工程も MVV を判断の基準として読む。
-この文書は、手順 0 での扱い・策定・改訂・人へ示す文面の雛形・工程での読み方・記録の読み方を持つ。
+この文書は、手順 0 での扱い・策定・改訂・人へ示す文面のテンプレート・工程での読み方・記録の読み方を持つ。
 
 ## 例: ai-plugins でプロジェクト MVV を定め、承認ゲートがそれを読むまで
 
@@ -13,20 +13,20 @@
 2. `project-mvv.py collect` がコミット 3787 件・課題 574 件で履歴モードを選び、出典つきの材料 `materials.json` を
    リポジトリの外（`~/.claude/ndf/state/project-mvv/<根の名前>/`）へ書く（実測 6.2 秒）
 3. `project-mvv.py propose --materials <materials.json>` が候補 A・B と「利用者に決めてもらう点」を `candidates.md` に書く
-4. conductor が `candidates.md` を示し、分かれる点を `AskUserQuestion`（`metadata.source` は `ndf-ask:redline:C7`。`.ndf/mvv.*` を書くため）で問い、答えから本文を固める。
+4. conductor が `candidates.md` を示し、分かれる点を `AskUserQuestion`（`metadata.source` は `ndf-ask:redline:C7`。`.ndf/mvv.*` を書くため）で質問、回答から本文を固める。
    ai-plugins では利用者が承認した `issues/mvv-ai-plugins.md` の文面がそのまま本文になる。**ここまで `.ndf/` に何も書かない**
 5. `project-mvv.py vet --kind candidate --body <本文>` が「従う」（0）を返す
 6. 利用者が同じ本文を承認した後に `project-mvv.py approve --body <本文> --by <承認者>` を打つ。`.ndf/mvv.md`（本文）と
-   `.ndf/mvv.json`（版 1・sha256・日時・承認者・照合の記録）ができ、`check` が 0 を返す
-7. 次の承認ゲートの `mvv-gate.py check` が、NDF の共通原則 → プロジェクト MVV（版 1）→ スプリント MVV の順の材料で判定し、
+   `.ndf/mvv.json`（バージョン 1・sha256・日時・承認者・ MVV 判定の記録）ができ、`check` が 0 を返す
+7. 次の承認ゲートの `mvv-gate.py check` が、NDF の共通原則 → プロジェクト MVV（バージョン 1）→ スプリント MVV の順の材料で判定し、
    `mvv-gate.jsonl` に `"project_mvv": {"status": "approved", "version": 1, ...}` と `"basis": ["Value 1"]` を残す
 
-## 置き場と層
+## 保存先と層
 
-| 層 | 置き場 | 誰が変えるか |
+| 層 | 保存先 | 誰が変えるか |
 | --- | --- | --- |
 | NDF の共通原則（上位の原則・優先順位・AI の行動の 2 択・判断の範囲と記録・人と AI の対話・C1〜C8） | リリース対象の `scripts/data/ndf-common-principles.md` | NDF のリリースだけ。プロジェクトは上書きも除外もできない |
-| プロジェクト MVV（Mission / Vision / Value・固有の操作 `P<番号>`） | `.ndf/mvv.md`（本文）と `.ndf/mvv.json`（版の履歴。形は `schemas/mvv.schema.json`） | `project-mvv.py approve` だけ（利用者の承認の後） |
+| プロジェクト MVV（Mission / Vision / Value・固有の操作 `P<番号>`） | `.ndf/mvv.md`（本文）と `.ndf/mvv.json`（バージョンの履歴。形は `schemas/mvv.schema.json`） | `project-mvv.py approve` だけ（利用者の承認の後） |
 | スプリント MVV（`R<番号>` を含む） | スプリント状態ファイルの隣の `mvv.md` | `sprint-state.py init`（`fast` / `auto` は必須で、コピーできなければ止まる。`normal` は `--mvv` か `--milestone` からコピーできたときだけコピーし、止めない。[pace.md](pace.md)） |
 
 判断の地点へ渡す MVV の節は、共通原則の本文全体 → プロジェクト MVV（無ければ「MVV なし」とその理由）→ スプリント MVV →
@@ -44,33 +44,33 @@
 
 | 終了コード | 意味 | 次に行うこと |
 | --- | --- | --- |
-| 0 | 承認済みで、本文が最後の版と一致する | 進む |
+| 0 | 承認済みで、本文が最後のバージョンと一致する | 進む |
 | 2 | 無い | 止めずに進む。利用者が MVV を定めると決めたら下の「策定」へ入る（判断の地点は共通原則と「MVV なし」で動く） |
-| 3 | `.ndf/mvv.json` が壊れている | 出力を示して利用者に直してもらう。`approve` は壊れた宣言に版を足さない |
+| 3 | `.ndf/mvv.json` が壊れている | 出力を示して利用者に直してもらう。`approve` は壊れた設定にバージョンを足さない |
 | 4 | 承認と一致しない（`mvv.md` が承認の後に変わった）・未承認（`mvv.md` だけがある） | 本文を戻すか、「改訂」（未承認なら「策定」の 4 から）へ入る。直るまで MVV 判定は承認ゲートを省かない |
 
 ## 策定
 
 | 順 | 打つもの・すること | 失敗したとき |
 | --- | --- | --- |
-| 1 | `project-mvv.py collect [--request-file <依頼文>]` | 欠け（`git` が無い・`gh` が読めない）は `missing` に残り、集めた材料で進む。宣言の `settings` が壊れていれば 3 |
+| 1 | `project-mvv.py collect [--request-file <リクエスト文>]` | 欠け（`git` が無い・`gh` が読めない）は `missing` に残り、集めた材料で進む。設定の `settings` が壊れていれば 3 |
 | 2 | `project-mvv.py propose --materials <materials.json>` | 1: 候補の形が足りない・LLM が返さない。`materials.json` を示して利用者に直接問う |
-| 3 | `candidates.md` を示し、「利用者に決めてもらう点」を `AskUserQuestion`（`ndf-ask:redline:C7`）で問う（下のテンプレートの形） | 答えが割れたら問い直す |
-| 4 | 答えから本文を組み、作業ディレクトリ（リポジトリの外）に置く。候補ごとの本文の案は `candidate-<ID>.md` にある | — |
+| 3 | `candidates.md` を示し、「利用者に決めてもらう点」を `AskUserQuestion`（`ndf-ask:redline:C7`）で問う（下のテンプレートの形） | 回答が割れたら質問し直す |
+| 4 | 回答から本文を組み、作業ディレクトリ（リポジトリの外）に置く。候補ごとの本文の案は `candidate-<ID>.md` にある | — |
 | 5 | `project-mvv.py vet --kind candidate --body <本文>` | 10「反する疑い」: 箇所（`C4`・`priority` など）を示して本文を直し、5 をやり直す。10「判定できない」: 引き受けるかを利用者に問う（`ndf-ask:redline:C7`） |
 | 6 | 本文を示して承認を問う（`AskUserQuestion`。`ndf-ask:redline:C7`） | 承認されない: 3 へ戻る。`approve` を打たない |
-| 7 | `project-mvv.py approve --body <本文> --by <承認者> [--accept-unknown]` | 1: 照合が無い・本文が照合の後に変わった・形が足りない。5 から |
-| 8 | `.ndf/mvv.md`・`.ndf/mvv.json` をコミットし、通常の Pull Request で届ける | 宣言を変える Pull Request は MVV 判定で通らず、承認ゲートで利用者が見る（共通原則の C7）。7 の結果に `key: gitignore` の行があれば、コミットできない。除外している `.gitignore` の行を利用者へ示す（[project-analysis.md](project-analysis.md) の「`.ndf/` の追跡」） |
+| 7 | `project-mvv.py approve --body <本文> --by <承認者> [--accept-unknown]` | 1: MVV 判定が無い・本文が MVV 判定の後に変わった・形が足りない。5 から |
+| 8 | `.ndf/mvv.md`・`.ndf/mvv.json` をコミットし、通常の Pull Request で届ける | 設定を変える Pull Request は MVV 判定で通らず、承認ゲートで利用者が見る（共通原則の C7）。7 の結果に `key: gitignore` の行があれば、コミットできない。除外している `.gitignore` の行を利用者へ示す（[project-analysis.md](project-analysis.md) の「`.ndf/` の追跡」） |
 
-**承認の前に `.ndf/` へ書かない。** `collect` と `propose` の出力はリポジトリの外に置く。`approve` は同じ本文への直近の照合が
+**承認の前に `.ndf/` へ書かない。** `collect` と `propose` の出力はリポジトリの外に置く。`approve` は同じ本文への直近の MVV 判定が
 「従う」（か、人が引き受けた「判定できない」）のときだけ書く。「反する疑い」の本文は利用者が望んでも承認へ進めない
 （上位の原則が利用者の承認より上にある）。
 
 **履歴が少ないとき（傾向モード）。** コミット数と課題数の両方が閾値（既定 100 件・20 件。`.ndf/mvv.json` の
 `settings.trend_commits` / `trend_issues` か `--trend-commits` / `--trend-issues` で変える）に満たないと、
-README・指示書（`AGENTS.md` / `CLAUDE.md` など）・依頼文（`--request-file`）だけを材料にする。
+README・指示書（`AGENTS.md` / `CLAUDE.md` など）・リクエスト文（`--request-file`）だけを材料にする。
 
-**Claude Code 以外のランタイム。** `AskUserQuestion` が無ければ、同じテンプレートの文面を会話で示して問い、問いの先頭に区分の名前（`ndf-ask:redline:C7`）を書く。
+**Claude Code 以外のランタイム。** `AskUserQuestion` が無ければ、同じテンプレートの文面を会話で示して質問、質問の先頭に区分の名前（`ndf-ask:redline:C7`）を書く。
 
 ## 改訂
 
@@ -78,8 +78,8 @@ README・指示書（`AGENTS.md` / `CLAUDE.md` など）・依頼文（`--reques
 
 | 契機 | 出どころ |
 | --- | --- |
-| 振り返りの問い「MVV を見直すか」 | `retrospective` が `project-mvv.py signals` の集計を示して問う |
-| 改訂の兆候が閾値を超えた | `mvv-gate.py check` の結果の `items` の `kind: revise`（同じ版のもとで「判定できない」が `settings.unknown_streak` 件続いた。スプリント状態・承認ゲート・PR の組ごとに 1 件と数え、同じ依頼の判定の打ち直しは 1 件にまとめる。または `signals` の閾値を超えた） |
+| 振り返りの質問「MVV を見直すか」 | `retrospective` が `project-mvv.py signals` の集計を示して問う |
+| 改訂の兆候が閾値を超えた | `mvv-gate.py check` の結果の `items` の `kind: revise`（同じバージョンのもとで「判定できない」が `settings.unknown_streak` 件続いた。スプリント状態・承認ゲート・PR の組ごとに 1 件と数え、同じリクエストの判定の打ち直しは 1 件にまとめる。または `signals` の閾値を超えた） |
 | 利用者の指示 | — |
 
 | 順 | 打つもの・すること |
@@ -87,27 +87,27 @@ README・指示書（`AGENTS.md` / `CLAUDE.md` など）・依頼文（`--reques
 | 1 | 理由をファイルに書き、`project-mvv.py collect` → `project-mvv.py propose --materials <materials.json> --current --reason-file <理由>` |
 | 2 | 改訂案（`candidates.md`。末尾に現行との差分）を示し、分かれる点を問う |
 | 3 | `project-mvv.py vet --kind revision --body <本文>` |
-| 4 | 承認を問い、承認の後に `project-mvv.py approve --body <本文> --by <承認者> --reason <理由>` |
+| 4 | 承認を質問、承認の後に `project-mvv.py approve --body <本文> --by <承認者> --reason <理由>` |
 
-`approve` は版を 1 つ上げ、理由と前の版との差分（`changes`。項目の単位で added / changed / removed）を追記する。過去の版は
-書き換えない。`project-mvv.py show --version N` で版 N の本文を、`show --diff M` で版 M から現行への差分を出す。
+`approve` はバージョンを 1 つ上げ、理由と前のバージョンとの差分（`changes`。項目の単位で added / changed / removed）を追記する。過去のバージョンは
+書き換えない。`project-mvv.py show --version N` でバージョン N の本文を、`show --diff M` でバージョン M から現行への差分を出す。
 改訂で本文の sha256 が変わると、承認済みだったスプリントの `pace: fast` は次の `new sprint --pace fast` と承認ゲートで
 参照の食い違いを検出し、利用者の承認へ戻る。
 
-## 人へ示す文面の雛形（候補の提示・改訂の提案・承認ゲートの資料）
+## 人へ示す文面のテンプレート（候補の提示・改訂の提案・承認ゲートの資料）
 
 人に判断や承認を求める文面は、次の 4 節をこの順に先頭へ置く（共通原則の「人と AI の対話」）。`AskUserQuestion` で問うときは、
-入力の `metadata.source` に区分（承認ゲートの資料は `ndf-gate:<番号>`、MVV の候補・改訂は `ndf-ask:redline:C7`。正本は [asking.md](asking.md)）を付ける。`propose` の
+入力の `metadata.source` に区分（承認ゲートの資料は `ndf-gate:<番号>`、MVV の候補・改訂は `ndf-ask:redline:C7`。SSOT は [asking.md](asking.md)）を付ける。`propose` の
 `candidates.md` はこの形で出る。承認ゲートの資料と改訂の提案は conductor がこの形で組む。
 
 | 節 | 書くこと |
 | --- | --- |
 | 経緯 | なぜ今この判断が要るか・ここまでに何を決めたか |
-| 前提 | この答えで何が決まり、何が決まらないか |
+| 前提 | この回答で何が決まり、何が決まらないか |
 | 根拠 | 判断の材料（ファイルと行・課題の番号・コミットの件名・判定の記録）。URL とパスを省かない |
 | 選択肢 | 選べるものと、選んだときに決まること。推奨があれば理由を添える |
 
-内部の用語（MVV・版・照合・覆し・傾向モードなど）は言い換えるか、その場で 1 行の説明を付ける。
+内部の用語（MVV・バージョン・ MVV 判定・覆し・傾向モードなど）は言い換えるか、その場で 1 行の説明を付ける。
 
 ## 判断の地点と記録
 
@@ -119,13 +119,13 @@ README・指示書（`AGENTS.md` / `CLAUDE.md` など）・依頼文（`--reques
 | `requirements-design` | 下の「工程での読み方」 | 反する疑いは作業の報告の理由（根拠の項目つき） |
 | `design` | 下の「工程での読み方」 | 設計文書の決定ごとの「根拠:」の行。反する疑いは作業の報告の理由 |
 | `tdd-cycle` | 下の「工程での読み方」 | 反する疑いは作業の報告の理由（根拠の項目つき） |
-| cross-review の担当・修正担当・見送りの返信 | `init` が状態ファイルの `review_criteria.mvv_block` へコピーし、`reviewer_block` / `fixer_block` の後ろに付く | 状態の `review_criteria.project_mvv`。振り分けの `mvv_basis`・見送りの返信の末尾の「根拠: Value 1（MVV 版 1）」 |
+| cross-review の担当・修正担当・見送りの返信 | `init` が状態ファイルの `review_criteria.mvv_block` へコピーし、`reviewer_block` / `fixer_block` の後ろに付く | 状態の `review_criteria.project_mvv`。振り分けの `mvv_basis`・見送りの返信の末尾の「根拠: Value 1（MVV バージョン 1）」 |
 | cross-refactoring の提案とリファクタリング計画 | 状態の `project_mvv.block` を `RF_MVV` で | 状態の `project_mvv.ref`。候補・項目・見送りの `mvv_basis`（リファクタリング計画の見送りの表の「根拠（MVV）」） |
 | supervise の judge | プロンプトの先頭（`work` のステップと同じ節） | `state.json` の `project_mvv`・`log[].basis` |
-| 範囲外の起票（`out-of-scope`） | 3 択の前に `project-mvv.py context` を読む | 起票の本文の「由来」の節（範囲外とした理由）に根拠の項目と版 |
+| 範囲外の起票（`out-of-scope`） | 3 択の前に `project-mvv.py context` を読む | 起票の本文の「由来」の節（範囲外とした理由）に根拠の項目とバージョン |
 
 根拠の項目は `Mission` / `Vision` / `Value 3` / `C4` / `P1` / `R2` / `スプリント Value 4` の形で、本文に無い番号は落とす。
-返されなければ「根拠なし」、プロジェクト MVV が無ければ「MVV なし」と入り、欠けても止めない。宣言が 未承認・承認と一致しない・
+返されなければ「根拠なし」、プロジェクト MVV が無ければ「MVV なし」と入り、欠けても止めない。設定が 未承認・承認と一致しない・
 壊れている とき、mvv-gate は LLM を呼ばずに承認ゲートへ戻し（終了コード 10）、助言の MVV 判定は LLM も行も判定の記録も
 出さずに「MVV なし」（`verdict: none`）を返し、ほかの地点は「MVV なし」で進む。
 
@@ -138,8 +138,8 @@ README・指示書（`AGENTS.md` / `CLAUDE.md` など）・依頼文（`--reques
    スプリント MVV に勝つ
 3. 反する疑いがあれば、その判断を書かずに人へ戻す。supervise の worker は作業の報告を「結果: 判断が要る」で終え、理由と
    根拠の項目（両方の MVV に関わるなら両方。例: `スプリント Value 7` と `Value 2`）を書く。対話の中では `decision-request` の形で示す
-4. 根拠の行の形は見送りの返信と同じ「根拠: Value 6（MVV 版 1）」。スプリント MVV の項目があれば括弧にその sha256 の先頭 8 文字を
-   足す（「根拠: Value 6 / スプリント Value 4（MVV 版 1・スプリント MVV 3f9a1c2e）」）。当たる項目が無ければ「根拠: 根拠なし（MVV 版 1）」、
+4. 根拠の行の形は見送りの返信と同じ「根拠: Value 6（MVV バージョン 1）」。スプリント MVV の項目があれば括弧にその sha256 の先頭 8 文字を
+   足す（「根拠: Value 6 / スプリント Value 4（MVV バージョン 1・スプリント MVV 3f9a1c2e）」）。当たる項目が無ければ「根拠: 根拠なし（MVV バージョン 1）」、
    MVV が無ければ「（MVV なし）」
 
 ### 改訂の兆候
@@ -150,7 +150,7 @@ README・指示書（`AGENTS.md` / `CLAUDE.md` など）・依頼文（`--reques
 | 「判定できない」 | `mvv-gate.jsonl`（`pace` で進め方を分けられる。集計は分けずに数える） | `mvv-gate.py` |
 | 流出不具合 | 検査の記録の `kind: escape` | `check-trigger.py escape` |
 
-`project-mvv.py signals` は現行の版の承認の日時より後の記録だけを数え、`settings.revise_after`（既定 覆し 3・「判定できない」5・
-流出不具合 3）と比べる。照合の履歴は `~/.claude/ndf/state/project-mvv.jsonl` にある。記録の置き場は `NDF_MVV_STATE_DIR` で変えられる。
-LLM で判定した行は照合の入力の sha256（`input_sha256`）を持ち、`sprint-state.py init` がスプリント MVV の判定を再利用した行は
+`project-mvv.py signals` は現行のバージョンの承認の日時より後の記録だけを数え、`settings.revise_after`（既定 覆し 3・「判定できない」5・
+流出不具合 3）と比べる。MVV 判定の履歴は `~/.claude/ndf/state/project-mvv.jsonl` にある。記録の保存先は `NDF_MVV_STATE_DIR` で変えられる。
+LLM で判定した行は MVV 判定の入力の sha256（`input_sha256`）を持ち、`sprint-state.py init` がスプリント MVV の判定を再利用した行は
 `reused_from`（元の LLM の判定の時刻）を持ち、費用と秒を持たない（[pace.md](pace.md)）。

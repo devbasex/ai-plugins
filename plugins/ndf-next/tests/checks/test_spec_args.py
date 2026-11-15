@@ -1,4 +1,4 @@
-"""引数の取り出し（`ndf.checks.spec_args`）: 副命令の main を引数を読む直前で止め、argparse の定義から引数の木を作る。"""
+"""引数の取り出し（`ndf.checks.spec_args`）: サブコマンドの main を引数を読む直前で止め、argparse の定義から引数の木を作る。"""
 
 from __future__ import annotations
 

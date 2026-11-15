@@ -1,4 +1,4 @@
-"""副命令 `plan queue` を子プロセスで流す: 段と `--then`・承認ゲートを届ける段・作業場所の後片付け・`--resume`（#2876・#1886）。"""
+"""サブコマンド `plan queue` を子プロセスで流す: ステップと `--then`・承認ゲートを届けるステップ・作業場所の後片付け・`--resume`（#2876・#1886）。"""
 
 from __future__ import annotations
 
@@ -19,14 +19,14 @@ _WRITE = "import pathlib, sys; pathlib.Path(sys.argv[1]).write_text(sys.argv[2])
 
 
 def _gate_with_pr(sid: str, number: int) -> dict:
-    """承認の答えの行き先を持たずに承認ゲートで終わり、PR の番号を items に載せるステップ（開発版の提示）。"""
+    """承認の回答のルートを持たずに承認ゲートで終わり、PR の番号を items に載せるステップ（開発版の提示）。"""
     line = json.dumps({"tool": "t", "status": "gate", "summary": "本番の提示", "items": [{"kind": "pr", "number": number}]})
     return H.py_step(sid, f"print({line!r})")
 
 
 def test_a_gate_handing_stage_runs_and_fills_queue_prs(repo, tmp_path):
-    """#2876 の再現: 開発版のプランが本番の提示の承認ゲートで終わっても、承認ゲートを届ける段（リリースの依頼）が流れ、
-    `{queue_prs}` が前の段の PR で埋まる。キュー全体は承認ゲートで待つ。"""
+    """#2876 の再現: 開発版のプランが本番の提示の承認ゲートで終わっても、承認ゲートを届けるステップ（リリースのリクエスト）が流れ、
+    `{queue_prs}` が前のステップの PR で埋まる。キュー全体は承認ゲートで待つ。"""
     seen = tmp_path / "seen"
     dev = H.write_plan(repo, "dev", [_gate_with_pr("present", 11)], touches=["a.py"])
     ask = H.write_plan(
@@ -43,7 +43,7 @@ def test_a_gate_handing_stage_runs_and_fills_queue_prs(repo, tmp_path):
 
 
 def test_a_stage_without_the_gate_role_waits_for_the_gate(repo, tmp_path):
-    """承認ゲートを届ける役でない段は、前の段の承認ゲートの待ちを越えて流さない。"""
+    """承認ゲートを届ける役でないステップは、前のステップの承認ゲートの待ちを越えて流さない。"""
     dev = H.write_plan(repo, "dev", [_gate_with_pr("present", 11)], touches=["a.py"])
     after = H.write_plan(repo, "after", [H.count_step("s", tmp_path / "after")], touches=["b.py"])
     out = H.ndf(repo, "queue", dev, "--then", after)[1]
@@ -52,7 +52,7 @@ def test_a_stage_without_the_gate_role_waits_for_the_gate(repo, tmp_path):
 
 
 def test_a_queue_started_in_a_removed_worktree_runs_the_next_stage(repo, tmp_path):
-    """#1886 の再現: 作業場所から起動したキューで、前の段のプランが作業場所を後片付けで消しても、--then の段が流れる。"""
+    """#1886 の再現: 作業場所から起動したキューで、前のステップのプランが作業場所を後片付けで消しても、--then のステップが流れる。"""
     wt = tmp_path / "wt"
     git_sandbox.sh(repo, "worktree", "add", "-q", str(wt), "-b", "feat", identity=True)
     remove = {"id": "cleanup", "run": ["git", "-C", str(repo), "worktree", "remove", "--force", str(wt)], "in": "repo"}
@@ -173,7 +173,7 @@ def test_run_puts_overlapping_plans_of_a_stage_into_separate_waves(tmp_path, chi
 
 
 def test_run_launches_at_most_max_parallel_plans_at_once(tmp_path, children):
-    """枠の 3 本がそろって起動するまで子を終わらせない（子の即時完了と起動の順の競合で落ちない）。"""
+    """スロットの 3 本がそろって起動するまで子を終わらせない（子の即時完了と起動の順の競合で落ちない）。"""
     full = threading.Event()
     fake = children({n: _ok() for n in "abcd"})
     real = _FakeProc.communicate
@@ -199,7 +199,7 @@ def test_run_launches_at_most_max_parallel_plans_at_once(tmp_path, children):
 
 
 def test_run_starts_the_next_plan_when_one_finishes_without_waiting_for_the_rest(tmp_path, children):
-    """空いた枠へ次のプランを起動する（長引く 1 本が終わるのを待たない）。"""
+    """空いたスロットへ次のプランを起動する（長引く 1 本が終わるのを待たない）。"""
     release = threading.Event()
     fake = children({n: _ok() for n in "abc"})
     real = _FakeProc.communicate
@@ -240,7 +240,7 @@ def test_run_does_not_launch_a_stage_after_a_stopped_stage(tmp_path, children):
     qdir = tmp_path / "q"
     outs = queue_run.run([[a], [b]], qdir, tmp_path, queue_run.QueueOptions())
     assert [(o.name, o.status, o.kind, o.step) for o in outs] == [("a", "stopped", "check_failed", "s"), ("b", None, None, None)]
-    assert outs[1].detail == "前の段のプランが完了でない: a（stopped）"
+    assert outs[1].detail == "前のステップのプランが完了でない: a（stopped）"
     assert ("start", "b") not in fake.log
     assert set(_queue_rows(qdir)) == {"a"}
 

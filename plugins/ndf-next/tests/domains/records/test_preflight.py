@@ -69,7 +69,7 @@ def test_combine_rejects_a_different_order() -> None:
         pd.combine([a, a, a])
 
 
-# 現状固定（I-018 の前）: mvv_state が宣言と本文を読むときの分岐
+# 現状固定（I-018 の前）: mvv_state が設定と本文を読むときの分岐
 _SHA_X = hashlib.sha256(b"x").hexdigest()
 
 
@@ -107,7 +107,7 @@ def test_mvv_state_reads_the_ndf_settings_and_the_body(tmp_path: Path, decl: byt
     assert preflight.mvv_state(tmp_path) == state
 
 
-# NOTE: 現状固定。UTF-8 でない宣言は unreadable にならず、UnicodeDecodeError がそのまま出る
+# NOTE: 現状固定。UTF-8 でない設定は unreadable にならず、UnicodeDecodeError がそのまま出る
 def test_mvv_state_raises_on_a_ndf_settings_that_is_not_utf8(tmp_path: Path) -> None:
     (tmp_path / ".ndf").mkdir()
     (tmp_path / ".ndf" / "mvv.json").write_bytes(b"\xff")

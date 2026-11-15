@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "ndf-settings/projects.schema.json",
-  "title": "GitHub Projects の宣言（.ndf/projects.json）",
+  "title": "GitHub Projects の設定（.ndf/projects.json）",
   "description": "課題を載せる GitHub Projects のボードと、項目の名前",
   "type": "object",
   "additionalProperties": false,
@@ -20,11 +20,11 @@
       "enum": [
         1
       ],
-      "description": "宣言の形の版。読み手は知らない版を読まない"
+      "description": "設定の形のバージョン。読み手は知らないバージョンを読まない"
     },
     "owner": {
       "type": "string",
-      "description": "ボードの持ち主（組織か利用者の名前）",
+      "description": "ボードのオーナー（組織か利用者の名前）",
       "minLength": 1
     },
     "number": {
@@ -34,7 +34,7 @@
     },
     "fields": {
       "type": "object",
-      "description": "鍵（status など）→ ボードの項目の名前",
+      "description": "キー（status など）→ ボードの項目の名前",
       "additionalProperties": {
         "type": "string",
         "minLength": 1

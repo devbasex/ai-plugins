@@ -38,7 +38,7 @@ featureブランチに環境ブランチ(`qa/staging`等)を merge して confli
 |------|------------------|
 | feature に先に commit し cherry-pick で届ける | 3・6 |
 | 環境ブランチを feature に merge しない | 「なぜ必要か」 |
-| push 前にベースブランチを取り込む | 5 |
+| push 前にベースブランチをマージする | 5 |
 | マージ済みブランチには push しない | 2 |
 
 ## 処理フロー
@@ -49,10 +49,10 @@ featureブランチに環境ブランチ(`qa/staging`等)を merge して confli
 - 開発のベースブランチを決める。以降の手順はこの値を使う
 
 ```bash
-# 起点は開発の本流であって、既定ブランチとは限らない。宣言（`.ndf/worktree.json` の
+# 起点は開発の本流であって、既定ブランチとは限らない。設定（`.ndf/worktree.json` の
 # `base_branch`）を先に読み、その名前が実在することを確かめる。取得済みの参照に無ければ
 # origin へ問い合わせる（取得していないだけの場合を「無い」と読まないため）。実在しなければ
-# 既定ブランチへ落とさずに止まる。宣言が無ければ origin の HEAD が指す先を使い、それも
+# 既定ブランチへ落とさずに止まる。設定が無ければ origin の HEAD が指す先を使い、それも
 # 取れなければ慣例の名前のうちローカルにあるものへ落とす
 # （共通ライブラリ `wt_base_branch` と同じ順序）
 dev_base=$(jq -r 'select(.version == 1) | .base_branch | select(type == "string")' \
@@ -65,7 +65,7 @@ if [ -n "$dev_base" ]; then
   else
     # `git ls-remote` のパターンは参照名の末尾に一致する。問い合わせの成功だけを見ると
     # `refs/heads/x/refs/heads/<ベースブランチ>` のような別のブランチでも「ある」と読むため、
-    # 返った行の参照名そのものを照合する（共通ライブラリ `wt_branch_exists` と同じ形）
+    # 返った行の参照名そのものを検証する（共通ライブラリ `wt_branch_exists` と同じ形）
     dev_base_listing=$(GIT_TERMINAL_PROMPT=0 git ls-remote --heads origin \
       "refs/heads/$dev_base" 2>/dev/null)
     while IFS= read -r line; do
@@ -117,7 +117,7 @@ git log --oneline "origin/$dev_base"..HEAD
 
 ```bash
 git fetch origin <base-branch> || exit 1
-# 作れなければ（未マージの同名ブランチが残っている等）元のブランチの上で取り込みと
+# 作れなければ（未マージの同名ブランチが残っている等）元のブランチの上でマージと
 # cherry-pick を続けず、ここで止まる
 git checkout -b <current-branch>-for-<base-short-name> origin/<base-branch> || {
   echo "❌ 短命ブランチ <current-branch>-for-<base-short-name> を作れません。既存のブランチを確かめてください" >&2
@@ -130,14 +130,14 @@ git checkout -b <current-branch>-for-<base-short-name> origin/<base-branch> || {
 - `<base-short-name>`: 環境ブランチのスラッシュ以降（例: `qa/staging` → `staging`）
 - 例: `feature/add-auth-for-staging`
 
-### 5. ベースブランチを取り込む（必須）
+### 5. ベースブランチをマージする（必須）
 
 ```bash
 git fetch origin "$dev_base"
 git merge "origin/$dev_base" --no-edit
 ```
 
-CIで最新の起点必須のWorkflowがあるため、取り込み忘れるとconflictやCIエラーになる。
+CIで最新の起点必須のWorkflowがあるため、マージ忘れるとconflictやCIエラーになる。
 
 ### 6. cherry-pick 実行
 
@@ -184,5 +184,5 @@ git checkout <original-branch>
 
 - `ndf-policies` — 環境ブランチへの適用原則とブランチ汚染の回避（本 Skill の前提）
 - `/ndf:pr` — 通常のPR作成（宛先はベースブランチ）。環境ブランチ宛は本 Skill に誘導される
-- `/ndf:merged` — マージ後のブランチ整理と、現ブランチへのベースブランチの取り込み
+- `/ndf:merged` — マージ後のブランチ整理と、現ブランチへのベースブランチのマージ
 - `/ndf:deploy` — ブランチ全体を環境へデプロイ（cherry-pickとは別用途）

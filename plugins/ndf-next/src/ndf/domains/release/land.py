@@ -2,19 +2,19 @@
 
 1. 本番ブランチ宛ての PR は、証跡を読み直して今の先端が承認されていることを確かめる（commit status も付け直す）。
    書く token が記録の読み手に信用されなければ、本番ブランチへ入れる前に止まる（マージの後のリリース記録が必ず落ちる。#3487）
-2. 宛先のブランチの規則（ruleset）と従来の保護の必須のチェック（check run と commit status）が PR の先端で通るまで待つ。落ちたら打ち直さずに止まった理由で
+2. 宛先のブランチの規則（ruleset）と従来の保護の必須のチェック（check run と commit status）が PR の先端で通るまで待つ。落ちたら打ち直さずに停止理由で
    返す（同じ CI の失敗を読み直し続けない。#1983）
-3. 本番ブランチ宛ての PR は、待ちの後にもう一度証跡を読み直し、待つ前と同じ先端への最新の答えが承認のときだけ進む
-   （待つ間に足された差し戻しや消された承認を見落とさない）
+3. 本番ブランチ宛ての PR は、待ちの後にもう一度証跡を読み直し、待つ前と同じ先端への最新の回答が承認のときだけ進む
+   （待つ間に足された変更要求や消された承認を見落とさない）
 4. 先端の SHA を添えて merge commit でマージする（承認の後に先端が動いていれば GitHub が断る）。マージキューへ入れたら、
    予算の範囲で PR がマージされるまで待つ（待たずに返すと、戻す PR・リリース記録・タグが走らない）。待つ間も
    キューに残っているかと承認を読み直し、キューが外したらすぐに止まり、承認が失効したらキューから外して止まる
 5. 本番ブランチへ入れたら、本番ブランチからベースブランチ宛ての PR を作り（開いたものがあれば使い直す）、必須のチェックの
    後にマージする（版上げのコミットをベースブランチへ戻す）。マージ済みの PR で打ち直しても、ここから再開する
 
-迂回の宣言（`admin`。`.ndf/project.json` の `production_merge.admin`）があり、本番ブランチの規則の承認数が 1 以上と読めるときだけ、
+迂回の設定（`admin`。`.ndf/project.json` の `production_merge.admin`）があり、本番ブランチの規則の承認数が 1 以上と読めるときだけ、
 本番ブランチ宛ての PR を管理者の迂回でマージし（`GitHub.merge_as_admin`）、迂回の記録を置く（#3506 の I2b・I7）。そのときの
-証跡の照合は、担い手が MVV 判定の証跡を数えない（I9）。承認数が 0 か読めなければ迂回しない。
+証跡の検証は、担い手が MVV 判定の証跡を数えない（I9）。承認数が 0 か読めなければ迂回しない。
 """
 
 from __future__ import annotations
@@ -60,13 +60,13 @@ class Required(NamedTuple):
 
 
 class Landed(NamedTuple):
-    """マージの結果。止まったら `kind` に止まった理由の種類。"""
+    """マージの結果。止まったら `kind` に停止理由の種類。"""
 
     merged: bool
     kind: str | None
     detail: str
     sync_pr: int | None = None
-    # 本番ブランチへ入ったコミット（タグと GitHub Release を作る版。本番ブランチへ入れていなければ None）
+    # 本番ブランチへ入ったコミット（タグと GitHub Release を作るバージョン。本番ブランチへ入れていなければ None）
     production_sha: str | None = None
     # 本番の PR を管理者の迂回でマージしたか・迂回の記録の URL・記録を書けなかった理由（#3506）
     admin: bool = False
@@ -119,15 +119,15 @@ def _protection_checks(branch: dict) -> list[tuple[str, int | None]]:
 
 
 def _restricted(name: str, apps: dict[str, frozenset[int]]) -> list[frozenset[int]]:
-    """チェックの名前 `name` が `ci.read` の照合で当たる、発行元を指定された必須のチェックのアプリの集合の並び。"""
-    return [want for required, want in apps.items() if ci.fulfils(name, required)]  # noqa: NDF201 上限: 発行元を指定した必須のチェックの数（ci.fulfils は名前の照合だけで外へ出ない）
+    """チェックの名前 `name` が `ci.read` の検証で当たる、発行元を指定された必須のチェックのアプリの集合の並び。"""
+    return [want for required, want in apps.items() if ci.fulfils(name, required)]  # noqa: NDF201 上限: 発行元を指定した必須のチェックの数（ci.fulfils は名前の検証だけで外へ出ない）
 
 
 def _from_sources(runs: list[dict], apps: dict[str, frozenset[int]]) -> list[dict]:
     """発行元を指定された必須のチェックに当たる実行は、指定のアプリのもの（check run と、そのアプリの bot が書いた commit status）
     だけを残す（同じ名前の別の発行元を数えない。#3506）。
 
-    当たるかは `ci.read` と同じ照合（`ci.fulfils`）で決める。生の名前で絞ると、前置きや分割ジョブの末尾の付いた別の発行元の
+    当たるかは `ci.read` と同じ検証（`ci.fulfils`）で決める。生の名前で絞ると、前置きや分割ジョブの末尾の付いた別の発行元の
     実行（`other / pytest`）が絞り込みを抜け、`ci.read` が必須のチェックとして数える。同じ名前に別々のアプリが指定されていれば、
     1 つの実行では満たせないため残さない（待ちが止める）。"""
     return [r for r in runs if all(want == {_app_of(r)} for want in _restricted(text_of(r.get("name")), apps))]
@@ -148,7 +148,7 @@ class Lander:
     production: str
     budget: float
     wait: Callable[[Callable[[], ci.Reading], float], ci.WatchResult] | None = None
-    # 迂回の宣言（`ndf_settings.production_admin`）。偽なら今のマージのまま
+    # 迂回の設定（`ndf_settings.production_admin`）。偽なら今のマージのまま
     admin: bool = False
     clock: Callable[[], float] = time.monotonic
     sleep: Callable[[float], None] = time.sleep
@@ -173,7 +173,7 @@ class Lander:
         return _review_count(got) if isinstance(got, dict) else None
 
     def _bypass(self, pull: Pull) -> bool:
-        """この PR を管理者の迂回でマージするか（宣言があり、本番ブランチ宛てで、承認数が 1 以上と読める。#3506 の I2b）。"""
+        """この PR を管理者の迂回でマージするか（設定があり、本番ブランチ宛てで、承認数が 1 以上と読める。#3506 の I2b）。"""
         if not self.admin or pull.base_ref != self.production:
             return False
         n = self.approvals(pull.base_ref)
@@ -205,7 +205,7 @@ class Lander:
         """コミットの check run と commit status（check run の形にしたもの）の一覧。
 
         発行元を指定された必須のチェックがあれば、commit status を全件（書き手つき）で読み、それに当たる status には
-        書き手の bot のアプリを付ける（指定のアプリが付けた status を満たしたと数える。#3506）。`bots` は bot ごとのアプリの控え。"""
+        書き手の bot のアプリを付ける（指定のアプリが付けた status を満たしたと数える。#3506）。`bots` は bot ごとのアプリのバックアップ。"""
         if not apps:
             combined = self.hub.rest("GET", f"/repos/{self.hub.repo}/commits/{sha}/status", params={"per_page": 100})
             statuses = _list(combined, "statuses") if isinstance(combined, dict) else []
@@ -223,7 +223,7 @@ class Lander:
         return bots[login]
 
     def _watch(self, pull: Pull, deadline: float) -> str | None:
-        """必須のチェック（check run と commit status）を時刻 `deadline` まで待ち、止まった理由の種類（通れば None）。"""
+        """必須のチェック（check run と commit status）を時刻 `deadline` まで待ち、停止理由の種類（通れば None）。"""
         required = self.required(pull.base_ref)
         bots: dict[str, int | None] = {}
 
@@ -268,7 +268,7 @@ class Lander:
             return blocked
         if bypass:
             outcome: MergeOutcome = self.hub.merge_as_admin(pull.number, expect_head=pull.head_sha, method=MERGE_METHOD)
-            return Landed(outcome.merged, outcome.kind, outcome.detail)  # 迂回の印は _record が立てる
+            return Landed(outcome.merged, outcome.kind, outcome.detail)  # 迂回のマーカーは _record が立てる
         outcome = self.hub.merge(pull.number, expect_head=pull.head_sha, method=MERGE_METHOD, require_method=True)
         if outcome.kind == MERGE_QUEUE_PENDING:
             return self._await_queue(pull, deadline)

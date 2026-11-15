@@ -1,4 +1,4 @@
-"""push の前の closing keywords の照合（#3129）と、その副命令。"""
+"""push の前の closing keywords の検証（#3129）と、そのサブコマンド。"""
 
 from __future__ import annotations
 

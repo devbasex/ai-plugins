@@ -1,14 +1,14 @@
 # ラッパーでカットポイントを自動にする（Claude Code だけ）
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `handoff.py`（M7）・`hook.py`（M3a）・`mvv-gate.py`（P2）・`sprint-state.py`（P1b）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトのサブコマンドは新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `handoff.py`（M7）・`hook.py`（M3a）・`mvv-gate.py`（P2）・`sprint-state.py`（P1b）。移行先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 **`/ndf:development-workflow` のカットポイントで人が行っていた「`/exit`・起動し直し・
-次のコマンドの貼り付け」を、ラッパー（`ndf relay`）が行う。** 人が入力するのは承認ゲートの答えだけになる。
+次のコマンドの貼り付け」を、ラッパー（`ndf relay`）が行う。** 人が入力するのは承認ゲートの回答だけになる。
 
 例: 設計承認ゲートをまたいで実装へ進む。
 
 1. 利用者がいつもどおり `claude` と打つ（`/ndf:install-wrapper` で入れた関数がラッパーを挟む）。その中で `/ndf:development-workflow #895` を入力する
-2. conductor が設計承認ゲートで `AskUserQuestion`（`metadata.source` は `ndf-gate:1`）を出し、利用者が「承認」と答える
+2. conductor が設計承認ゲートで `AskUserQuestion`（`metadata.source` は `ndf-gate:1`）を出し、利用者が「承認」と回答する
 3. conductor が設計 Pull Request をマージし、最後の応答に次のブロックを出して応答を終える
 
    ```ndf-next
@@ -16,7 +16,7 @@
    ```
 
 4. ラッパーがそのブロックを拾い、claude へ `/exit` を入力して終え、プラグインを更新し、
-   区切りの 1 行（`── ndf-relay: 区間 2 ──`）を出して、同じ端末で `claude "<ブロックの中身>"` を起動する
+   区切りの 1 行（`── ndf-relay: セグメント 2 ──`）を出して、同じ端末で `claude "<ブロックの中身>"` を起動する
 
 ブロックの形は [context-window.md](context-window.md) の「新しい会話で戻す」が定める。
 
@@ -29,11 +29,11 @@
 
 | 置くもの | 中身 |
 | --- | --- |
-| 複製と根の指し先 | `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/` の下の起動の部品と `relay.root`（プラグインの根のパス 1 行）。部品は `relay.root` が指すプラグインの `bin/ndf relay` を呼ぶ。部品の中身はどの版でも同じである。プラグインを更新したときは `relay.root` を書き換えるだけで済む |
+| 複製と根の指し先 | `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/` の下の起動の部品と `relay.root`（プラグインの根のパス 1 行）。部品は `relay.root` が指すプラグインの `bin/ndf relay` を呼ぶ。部品の中身はどのバージョンでも同じである。プラグインを更新したときは `relay.root` を書き換えるだけで済む |
 | PATH のエントリポイント | `${XDG_BIN_HOME:-~/.local/bin}/ndf-relay`。複製を呼ぶ 2 行のシェルのスクリプト |
 
 - `ndf-relay run` と打つと、ラッパーを通って claude が起動する。`~/.local/bin` が PATH に無ければ、`install` の `warnings` が足す 1 行を示す
-- プラグインの更新で `relay.root` の指す版の置き場が消えたら、複製は同じ親の下の最も新しい版の置き場へ向け直す。見つからなければ理由と打ち直しのコマンドを 1 行出して止まる
+- プラグインの更新で `relay.root` の指すバージョンの保存先が消えたら、複製は同じ親の下の最も新しいバージョンの保存先へ向け直す。見つからなければ理由と打ち直しのコマンドを 1 行出して止まる
 - 旧い NDF（10.x）の複製は残す。旧いラッパーを止めてから `ndf relay install --replace-old` で置き換える
 - `/ndf11:install-wrapper status` で、複製と PATH のエントリポイントの有無と状態を見られる
 - **devbase では `~/.claude` が同じアカウントグループのコンテナで共有される。** 導入・取り外しの効果は同じグループの全コンテナに及ぶ
@@ -42,8 +42,8 @@
 
 | したいこと | 手段 |
 | --- | --- |
-| 外す | `/ndf11:install-wrapper uninstall`（`ndf relay uninstall`）。自分の印のある複製と PATH のエントリポイントだけを消す |
-| 過去の版へ戻した | `/ndf11:install-wrapper` を打ち直す（`relay.root` を今の版へ向ける） |
+| 外す | `/ndf11:install-wrapper uninstall`（`ndf relay uninstall`）。自分のマーカーのある複製と PATH のエントリポイントだけを消す |
+| 過去のバージョンへ戻した | `/ndf11:install-wrapper` を打ち直す（`relay.root` を今のバージョンへ向ける） |
 
 ## ラッパーを挟まない起動
 
@@ -53,13 +53,13 @@
 | 起動 | 例 |
 | --- | --- |
 | 非対話 | `claude -p ...`・`--help`・`--version` |
-| 副命令 | `claude mcp ...`・`claude doctor` など |
+| サブコマンド | `claude mcp ...`・`claude doctor` など |
 | 端末でない | パイプ・リダイレクト |
-| ラッパーの下 | conductor が Bash から起こす `claude -p` |
+| ラッパーの下 | conductor が Bash から起動する `claude -p` |
 | 止めた | `NDF_RELAY=0 claude` |
 
 擬似端末を作れない環境（Windows）と、導入済みのプラグインの一覧（`plugin list --json`）から ndf の
-名前と版を読めないときは、`ndf-relay: ラッパーを始めない（<理由>）…` の 1 行を出してからパススルーする。
+名前とバージョンを読めないときは、`ndf-relay: ラッパーを始めない（<理由>）…` の 1 行を出してからパススルーする。
 
 `ndf-next` のブロックを出さない普段の利用では、シグナルファイルが書かれないのでラッパーは何もせず、claude を終えると同じ
 終了コードでシェルへ戻る。
@@ -73,7 +73,7 @@
 | `touch <作業ディレクトリ>/stop` | 同じ（1 つのラッパーだけ） |
 | セッションの中で `/exit` か Ctrl-C を 2 回 | ラッパーも次のセッションを起動せずに終わる |
 
-副命令の一覧は `ndf relay --help` が、1 つの副命令の書式と役割は `ndf relay <副命令> --help` が出す（副命令は動かさない。`run --help` は claude の help）。
+サブコマンドの一覧は `ndf relay --help` が、1 つのサブコマンドの書式と役割は `ndf relay <サブコマンド> --help` が出す（サブコマンドは動かさない。`run --help` は claude の help）。
 
 作業ディレクトリは `${XDG_STATE_HOME:-~/.local/state}/ndf/relay/<時刻>-<pid>-<乱数>/` で、
 起動ごとに新しく作る。セッションの中では環境変数 `NDF_RELAY_DIR` が指す。
@@ -98,11 +98,11 @@
 | 操作 | 効き目 |
 | --- | --- |
 | リレーハブが居るときに端末で `claude` | リレーハブに起動を頼み、tmux の名前つきのラッパーへ結び付く。名前は `NDF_RELAY_NAME`、無ければ `t2`・`t3`… |
-| `ndf relay spawn --name <名前> -- <最初の入力>` | 端末の結び付いていない名前つきのラッパーを起動する。最初の区間の claude が入力を受け取る |
-| 応答の起動のブロック（情報文字列 `ndf-spawn <名前>`、中身が最初の入力） | Stop hook がリレーハブへ依頼を置く。置いた区間は止まらない。1 つの応答に複数置ける |
-| `ndf relay ls` | 名前・状態（`running` / `awaiting_approval` / `stopped`）・区間・費用（記録が無ければ空）・最後に動いた時刻・アカウント・端末の結び付き・リレーハブかを出す。結果は 1 行の JSON |
+| `ndf relay spawn --name <名前> -- <最初の入力>` | 端末の結び付いていない名前つきのラッパーを起動する。最初のセグメントの claude が入力を受け取る |
+| 応答の起動のブロック（情報文字列 `ndf-spawn <名前>`、中身が最初の入力） | Stop hook がリレーハブへリクエストを置く。置いたセグメントは止まらない。1 つの応答に複数置ける |
+| `ndf relay ls` | 名前・状態（`running` / `awaiting_approval` / `stopped`）・セグメント・費用（記録が無ければ空）・最後に動いた時刻・アカウント・端末の結び付き・リレーハブかを出す。結果は 1 行の JSON |
 | `tmux -L ndf-lanes attach -t <名前>` | 打った端末をそのラッパーへ結び付ける。端末を閉じてもラッパーは動き続ける |
-| `ndf relay restart <名前>` | 1 本を止め、最後の区間の入力と作業ディレクトリで起動し直す |
+| `ndf relay restart <名前>` | 1 本を止め、最後のセグメントの入力と作業ディレクトリで起動し直す |
 | `ndf relay stop <名前>` | 1 本だけを止める。すべては `ndf relay stop --all` |
 
 - **同時に動かす数の上限**は `NDF_RELAY_MAX_NAMED`（既定 3）。リレーハブ・名前つき・名前の無いラッパーを合わせて数え、
@@ -112,35 +112,35 @@
   `ndf-relay: 同時に動かすラッパーの上限 3 を超えて起動する（動いている: …）` の 1 行を出して起動し、リレーハブの記録
   （`hub-log.jsonl`）の `started` の行に `over_limit` を残す。一覧（`ndf relay ls`）には出る。`ndf relay restart` で起動し直すと AI の起動として数える
 - **リレーハブが落ちても**名前つきのラッパーは止まらない（tmux のサーバが親）。次に端末で打った `claude` がリレーハブになる。
-  リレーハブが `NDF_RELAY_HUB_WAIT`（既定 10 秒）答えなければ、2 本目は 1 行出して今の前景の起動になる
+  リレーハブが `NDF_RELAY_HUB_WAIT`（既定 10 秒）回答なければ、2 本目は 1 行出して今の前景の起動になる
 - **起動の確かめ**: リレーハブは `spawn`・`restart` でセッションを作った後、`NDF_RELAY_LAUNCH_CHECK`（既定 2 秒）待ってセッションが残っているかを見る。
   消えていれば登録せず `tmux-failed`・1 を返す
 - **tmux が PATH に無い**（`NDF_RELAY_TMUX` で実行ファイルを替えられる）ときは、2 本目は 1 行出して今の前景の起動になる
 - **承認待ちの知らせ**は各ラッパーの待ち通知が出し、名前つきのラッパーなら `ラッパー: <名前>（tmux -L ndf-lanes attach -t <名前>）` の 1 行が付く
-- tmux は専用のソケット `-L ndf-relay` だけを使い、利用者の tmux サーバに触れない。リレーハブの置き場は
-  `${XDG_STATE_HOME:-~/.local/state}/ndf/relay/hub/`（登録簿 `registry.json`・起動の依頼 `requests/`・結果 `results/`・
+- tmux は専用のソケット `-L ndf-relay` だけを使い、利用者の tmux サーバに触れない。リレーハブの保存先は
+  `${XDG_STATE_HOME:-~/.local/state}/ndf/relay/hub/`（登録簿 `registry.json`・起動のリクエスト `requests/`・結果 `results/`・
   記録 `hub-log.jsonl`。所有者だけが読み書きできる）
 
 ## 好きな時点で切り替える（`/ndf:restart`）
 
 **ラッパーの下で `/ndf:restart [再開コマンド]` を打つと、カットポイントと同じ経路で切り替わる。**
 claude が再開コマンドを `ndf-next` のブロックで出して応答を終え、ラッパーがアイドルを待ってから
-`/exit` → プラグインの更新 → 起動を行う。プラグインの更新を反映したいとき・文脈を切りたいときに使う。ラッパーは最初の起動でも更新してから起動する（更新に失敗したら今の版で起動する）。
+`/exit` → プラグインの更新 → 起動を行う。プラグインの更新を反映したいとき・文脈を切りたいときに使う。ラッパーは最初の起動でも更新してから起動する（更新に失敗したら今のバージョンで起動する）。
 引数が無ければ、課題番号・worktree・Pull Request を差し込む定型の 1 文で作る。
 ラッパーの外では、手順の 1 行と貼り付ける中身を示すだけで終わる。
 
 ## ラッパーの入れ替え
 
-**ラッパー自身も、カットポイントで更新後の版へ入れ替わる。** 子の claude が終わり、プラグインを更新した後、
+**ラッパー自身も、カットポイントで更新後のバージョンへ入れ替わる。** 子の claude が終わり、プラグインを更新した後、
 次のセッションを起動する前に、ラッパーは次の順で進む。
 
-1. 更新後のプラグインの導入先のファイルから、使うべきバージョンディレクトリの名前（`relay-<版>-<digest>`）を計算する。
+1. 更新後のプラグインの導入先のファイルから、使うべきバージョンディレクトリの名前（`relay-<バージョン>-<digest>`）を計算する。
    動いているものと同じなら何もせず次のセッションを起動する
 2. 違えば、更新後のプラグインの `ndf relay install`（SessionStart hook と同じ処理）を子プロセスで打ち、
    バージョンディレクトリと `relay.current` を置かせる（環境の用意を含む。上限は `NDF_RELAY_PREPARE_TIMEOUT`、既定 600 秒）
 3. 作業ディレクトリへ入れ替えの申し送り（`handover.json`。次のセッションの起動の入力とセッションの番号など。
    認証情報を持たず、権限は 0600）を書き、新しいバージョンディレクトリの環境の python でランチャーを `os.execve` する
-4. 新しい版のラッパーが申し送りを読んで消し、同じ PID・同じ作業ディレクトリのまま次のセッションを起動する。
+4. 新しいバージョンのラッパーが申し送りを読んで消し、同じ PID・同じ作業ディレクトリのまま次のセッションを起動する。
    セッションの番号は続く
 
 入れ替えないのは次のときである。
@@ -148,16 +148,16 @@ claude が再開コマンドを `ndf-next` のブロックで出して応答を�
 | 場合 | 振る舞い |
 | --- | --- |
 | プラグインの `bin/ndf relay run` を直接打って起動したラッパー | 判定しない |
-| 入れ替えの仕組みを持たない版（10.17.51 まで）で動いているラッパー | 入れ替わらない。`/exit` してから `claude` を 1 度打ち直すと、以後の更新で入れ替わる |
-| 用意・入れ替えに失敗した（下の `reexec_skipped` の `reason`） | 今の版のまま次のセッションを起動し、画面に 1 行出す |
+| 入れ替えの仕組みを持たないバージョン（10.17.51 まで）で動いているラッパー | 入れ替わらない。`/exit` してから `claude` を 1 度打ち直すと、以後の更新で入れ替わる |
+| 用意・入れ替えに失敗した（下の `reexec_skipped` の `reason`） | 今のバージョンのまま次のセッションを起動し、画面に 1 行出す |
 | 入れ替えた後に申し送りを読めない | 次のセッションを起動せず、手で打つ次のコマンドを示して止まる |
 
-動いているラッパーの版は、`/ndf:install-wrapper status` の「動いているラッパー」の行と、`log.jsonl` の
+動いているラッパーのバージョンは、`/ndf:install-wrapper status` の「動いているラッパー」の行と、`log.jsonl` の
 `start` の行の `relay_version_dir` で見られる。
 
 ## 承認ゲートを越えない守り
 
-**ラッパーは、質問（`AskUserQuestion`）の答えを代わりに送らない。** 質問の表示中にラッパーが書いた `\r` は
+**ラッパーは、質問（`AskUserQuestion`）の回答を代わりに送らない。** 質問の表示中にラッパーが書いた `\r` は
 選択肢 1 を決めるため、次のあいだは子の端末へ何も書かない。
 
 | 条件 | 見分け方 |
@@ -169,8 +169,8 @@ claude が再開コマンドを `ndf-next` のブロックで出して応答を�
 
 **本文で承認を待って終えた応答は、1 度止めて `AskUserQuestion` へ戻す。** ラッパーの直接の子の応答が `AskUserQuestion` を呼ばずに
 承認待ちの文（判定は `lib/wait_notice.py` の `classify_reply_wait` で、回答待ちか承認待ちに当たる文。Slack の待ち通知の `classify_text` より狭く、操作の案内は待ちに数えない）で
-終わると、Stop hook（`mark`）が Stop を止め、承認ゲートの問いなら `metadata.source` に `ndf-gate:<番号>` を付けて
-`AskUserQuestion` で出し直し、区分（[asking.md](asking.md)）に当たらない問いなら自分で決めて記録し続けるよう伝える。`/goal` の判定は本文の待ちでは
+終わると、Stop hook（`mark`）が Stop を止め、承認ゲートの質問なら `metadata.source` に `ndf-gate:<番号>` を付けて
+`AskUserQuestion` で出し直し、区分（[asking.md](asking.md)）に当たらない質問なら自分で決めて記録し続けるよう伝える。`/goal` の判定は本文の待ちでは
 止まらないためである。次のときは止めない。
 
 - 止めた直後の、同じセッションの次の Stop（作業ディレクトリの `wait-held.json` で見分ける。`stop_hook_active` は `/goal` の続きで常に真になるため使わない）
@@ -184,8 +184,8 @@ claude が再開コマンドを `ndf-next` のブロックで出して応答を�
 シグナルファイルを書いた後に質問が出たときだけシグナルファイルを消し、それ以外は前のシグナルファイルを残す。
 
 - `/exit` と改行は 1 回の write で書く。確かめ直しと write は、質問の hook と同じロック（`question.lock`）の中で行い、書いた後も 1 秒持つ。**ロックを 3 秒以内に取れない質問の hook は、その質問を拒否する**（モデルが呼び直す）
-- 書いた `/exit` が質問の答えの後に働く形になったら、質問が消えるまで SIGTERM までの秒を数えない。子が終わった後はシグナルファイルを読み直し、無ければ次のセッションを起動しない
-- 守りを変えた版は、ラッパーが次のカットポイントでその版へ入れ替わった後（「ラッパーの入れ替え」）から効く。入れ替わらない場合は、`/exit` でラッパーを抜けて `claude` と打ち直した後から効く
+- 書いた `/exit` が質問の回答の後に働く形になったら、質問が消えるまで SIGTERM までの秒を数えない。子が終わった後はシグナルファイルを読み直し、無ければ次のセッションを起動しない
+- 守りを変えたバージョンは、ラッパーが次のカットポイントでそのバージョンへ入れ替わった後（「ラッパーの入れ替え」）から効く。入れ替わらない場合は、`/exit` でラッパーを抜けて `claude` と打ち直した後から効く
 
 ## 上限
 
@@ -210,18 +210,18 @@ claude のアカウントを 2 つ以上登録しておくと、利用上限で�
 ## カットポイントの引継ぎ文書と ndf-next はスクリプトで作る
 
 **conductor は引継ぎ文書の「今の会話の進み」の表と `ndf-next` の文面を手で書かない。**
-引継ぎ文書の置き場（メインディレクトリの `.ndf/handoff/<名>.md`）・名・節の形・規則は [handoff.md](handoff.md) にある。
+引継ぎ文書の保存先（メインディレクトリの `.ndf/handoff/<名>.md`）・名・節の形・規則は [handoff.md](handoff.md) にある。
 `scripts/sprint-state.py` が、スプリント状態ファイル `sprint-state.json`（プランの出力先に置く）から作る。LLM は呼ばない。同じパスに別の形の JSON（`ndf progress new` の目録など）があると、`init` は上書きせずに終了コード 1 で止まる。
 
 例: セッション 7 の実装 3 本と開発版・本番を流す。
 
 1. プランを作った後に 1 度: `sprint-state.py init ~/.local/state/ndf/sv/r7/sprint-state.json --name <スプリント> --milestone 26 --plan 実装=<plan.json> ... --plan 開発版=<plan.json> --plan 本番=<plan.json> --done <queue の done> --dev <開発版> --prod <本番> --goal @<テンプレート>`（テンプレートは次のセッションの `/goal` の文面。`{heading}`・`{dev}`・`{prod}`・`{milestone}`・`{name}`・`{issues}` を差し込む）。**テンプレートには「`.ndf/handoff/sprint-{name}.md` の続きから」**（スプリント名が `sprint-<名>` の形に合わなければ `.ndf/handoff/milestone-{milestone}.md`）**を差し込みの語で必ず書く。** テンプレートは次のスプリントでも使うため、文書のパスを文字のまま書かない
-2. 承認ゲートで承認を得たら: `sprint-state.py gate <sprint-state.json> "リリース承認ゲート" --what "本番 <版>"`
+2. 承認ゲートで承認を得たら: `sprint-state.py gate <sprint-state.json> "リリース承認ゲート" --what "本番 <バージョン>"`
    - `pace: fast` と `pace: auto` のスプリントは、1 に `--pace <値> --milestone <M>`（MVV のコピー元。`--mvv <ファイル>` でもよい）を足し、利用者が
      `mvv.md` を承認した後に `sprint-state.py gate <sprint-state.json> MVV --what <要約>` を打つ。設計承認ゲート・リリース承認ゲートの記録は、MVV 判定が
      通したときは `mvv-gate.py` が `--by mvv --verdict --reasons --log` 付きで書く（`status` の行は「MVV 判定」）
 3. カットポイントでは、conductor が引継ぎ文書の「現在地」と「次にやること」を書き直してから、次の順に呼ぶ（`<名>` は `sprint-<スプリント名>` など。`<引継ぎ文書>` は `handoff.py path <名>` の `path`）:
-   - `ndf relay context record --event 引継ぎ開始 --work "<課題番号の並び>"`（文書を書き始める前に打つ。引継ぎの区間の起点になる。hook に止められて切るときは hook が打ったので打たない。[context-window.md](context-window.md) の「判定と再起動を記録する」）
+   - `ndf relay context record --event 引継ぎ開始 --work "<課題番号の並び>"`（文書を書き始める前に打つ。引継ぎの期間の起点になる。hook に止められて切るときは hook が打ったので打たない。[context-window.md](context-window.md) の「判定と再起動を記録する」）
    - `handoff.py init <名> --title <表示名>`（無ければテンプレートから作る。あれば変えない）
    - `sprint-state.py update <sprint-state.json> [--done <done>] [--next <plan.json>=<行の「次」>]`（done と報告から状態・PR・秒・費用を埋める。何度走らせても同じ）
    - `sprint-state.py render <sprint-state.json> <引継ぎ文書> --section 今の会話の進み`（節の本文だけを置き換える。新しいセッションなら `--demote 前の会話の進み --heading "今の会話の進み（<時刻>）"` で今の節を下げて新しい節を足す）
@@ -229,7 +229,7 @@ claude のアカウントを 2 つ以上登録しておくと、利用上限で�
    - `sprint-state.py next <sprint-state.json> --doc <引継ぎ文書> --replace`（「次に実行するコマンド」の節を置き換え、同じ `ndf-next` のブロックを最後の応答に出す）
    - `handoff.py check <名> --trim`（「前の会話の進み」を履歴へ移し、節の形と 300 行の上限を確かめる。1 か 5 のときの扱いは [handoff.md](handoff.md) の「作る・更新する」）
 
-**本番へのリリースの後は、カットポイントの呼び出しを本番のキューと同じバックグラウンドの Bash で続けて流す。** 流す前に conductor が `handoff.py init` を打ち、本番の後の「現在地」と「次にやること」を文書へ書く（パイプラインの中では書き直せない）。`check` が 1 か 5 ならパイプラインはブロックを出さずに止まり、conductor が完了の通知で終了コードを受けて扱ってからブロックを出す。リリース承認ゲートの承認から次のセッションの起動までに、conductor が組み立てる文は無くなる。conductor は完了の通知を受けたら `ndf relay notice` のアナウンスと、出力の `ndf-next` のブロックをそのまま出す。ラッパーがプラグインを本番の版へ更新し、次のセッションを起動する。本番のキューは、目録（`$O/sprint.json`）の `本番` のステージの `command` に `--done` を足したものである（例の `9` はステージの番号）。
+**本番へのリリースの後は、カットポイントの呼び出しを本番のキューと同じバックグラウンドの Bash で続けて流す。** 流す前に conductor が `handoff.py init` を打ち、本番の後の「現在地」と「次にやること」を文書へ書く（パイプラインの中では書き直せない）。`check` が 1 か 5 ならパイプラインはブロックを出さずに止まり、conductor が完了の通知で終了コードを受けて扱ってからブロックを出す。リリース承認ゲートの承認から次のセッションの起動までに、conductor が組み立てる文は無くなる。conductor は完了の通知を受けたら `ndf relay notice` のアナウンスと、出力の `ndf-next` のブロックをそのまま出す。ラッパーがプラグインを本番のバージョンへ更新し、次のセッションを起動する。本番のキューは、目録（`$O/sprint.json`）の `本番` のステージの `command` に `--done` を足したものである（例の `9` はステージの番号）。
 
 ```bash
 O=~/.local/state/ndf/sv/r7; M=plugins/ndf/scripts/sprint-state.py; H=plugins/ndf/scripts/handoff.py; N=sprint-<スプリント名>
@@ -245,7 +245,7 @@ python3 $H check $N --trim >/dev/null && sed -n '/^```ndf-next/,/^```$/p' $DOC
 
 **次のセッションを止めずに続けるには、`/goal` のテンプレートを特定の課題に縛らない。** テンプレートには「効果の順の残りから次のスプリントを選び、同じパイプラインで流し、最後に同じテンプレートで `ndf-next` を出す」ことを書く。止まるのは 2 つの承認ゲートだけになる。
 
-**再開したセッションの「復元完了」は hook が打つ。** 引継ぎ文書で始まったセッションで、エントリポイントの Skill を除く最初の工程を起動したときに 1 回だけ書き、復元の区間の終わりになる（[context-window.md](context-window.md) の「判定と再起動を記録する」）。conductor は打たない。hook が止めた後の「引継ぎ開始」も、ラッパーの下では hook が打つ。上の 3 の `record --event 引継ぎ開始` は、カットポイントで自分で切るときに打つ。`sprint-state.py next` は `ndf-next` を出すたびに判定「再起動」を記録する（理由は `--reason`。既定は直前の拒否の理由、無ければ現行方式はカットポイント・試行方式は手動）。
+**再開したセッションの「復元完了」は hook が打つ。** 引継ぎ文書で始まったセッションで、エントリポイントの Skill を除く最初の工程を起動したときに 1 回だけ書き、復元の期間の終わりになる（[context-window.md](context-window.md) の「判定と再起動を記録する」）。conductor は打たない。hook が止めた後の「引継ぎ開始」も、ラッパーの下では hook が打つ。上の 3 の `record --event 引継ぎ開始` は、カットポイントで自分で切るときに打つ。`sprint-state.py next` は `ndf-next` を出すたびに判定「再起動」を記録する（理由は `--reason`。既定は直前の拒否の理由、無ければ現行方式はカットポイント・試行方式は手動）。
 
 `sprint-state.py status <sprint-state.json>` は端末向けに 1 行ずつ（スプリント・状態・次）を出す。
 節が見つからないときは文書を変えずに `"status": "stopped"` と理由を返す。
@@ -256,8 +256,8 @@ python3 $H check $N --trim >/dev/null && sed -n '/^```ndf-next/,/^```$/p' $DOC
 
 | 1 行 | 状態 | 続け方 |
 | --- | --- | --- |
-| `次の区間を起動しない（<理由>）。このまま続けるか、/exit して示されたコマンドを手で入力する` | 上限・再起動ループ・停止シグナルファイル。今のセッションは動いたまま | そのまま続けるか、`/exit` してから conductor のブロックの中身で `claude` を起動する |
-| `次の区間を起動できない（<理由>）。次のコマンド:` の後に中身 | 更新か起動に失敗し、ラッパーは終わった（終了コード 2） | 表示された中身で `claude` を起動する |
+| `次のセグメントを起動しない（<理由>）。このまま続けるか、/exit して示されたコマンドを手で入力する` | 上限・再起動ループ・停止シグナルファイル。今のセッションは動いたまま | そのまま続けるか、`/exit` してから conductor のブロックの中身で `claude` を起動する |
+| `次のセグメントを起動できない（<理由>）。次のコマンド:` の後に中身 | 更新か起動に失敗し、ラッパーは終わった（終了コード 2） | 表示された中身で `claude` を起動する |
 
 ## fork したセッションで進めたとき
 
@@ -300,11 +300,11 @@ python3 $H check $N --trim >/dev/null && sed -n '/^```ndf-next/,/^```$/p' $DOC
 
 | `event` | いつ | 主なキー |
 | --- | --- | --- |
-| `start` | セッションを起動した | `section`・`pid`・`command`・`from_session`・`plugin_version`（起動の直前に読んだ版）・`cwd`（シグナルファイルの作業ディレクトリが消えていたら `cwd_fallback` に元の値）・`carried`（2 つ目以降のセッションだけ。ブロックの中身の前に付けた引数）・`account`（登録が 2 つ以上のときだけ。起動したアカウント。`metered` は従量の接続）・`relay_version_dir`（動いているラッパーのバージョンディレクトリ。プラグインのキャッシュから起動したら null。キーが無ければ入れ替えの仕組みを持たない版） |
-| `reexec` | ラッパーが更新後の版へ入れ替わった（入れ替えた後の版が、次の `start` の前に書く） | `section`（終わったセッション）・`from`・`to`（バージョンディレクトリの名前）・`prepare_seconds`（用意に掛かった秒）・`seconds`（申し送りを書いてから入れ替わるまで） |
-| `reexec_skipped` | 版が違ったが入れ替えなかった | `section`・`reason`（`startup-failed` / `not-placed` / `unreadable` / `no-env` / `no-handover` / `handover-write` / `exec-failed`）・`from`・`to`（分かれば）・`detail`・`seconds` |
+| `start` | セッションを起動した | `section`・`pid`・`command`・`from_session`・`plugin_version`（起動の直前に読んだバージョン）・`cwd`（シグナルファイルの作業ディレクトリが消えていたら `cwd_fallback` に元の値）・`carried`（2 つ目以降のセッションだけ。ブロックの中身の前に付けた引数）・`account`（登録が 2 つ以上のときだけ。起動したアカウント。`metered` は従量の接続）・`relay_version_dir`（動いているラッパーのバージョンディレクトリ。プラグインのキャッシュから起動したら null。キーが無ければ入れ替えの仕組みを持たないバージョン） |
+| `reexec` | ラッパーが更新後のバージョンへ入れ替わった（入れ替えた後のバージョンが、次の `start` の前に書く） | `section`（終わったセッション）・`from`・`to`（バージョンディレクトリの名前）・`prepare_seconds`（用意に掛かった秒）・`seconds`（申し送りを書いてから入れ替わるまで） |
+| `reexec_skipped` | バージョンが違ったが入れ替えなかった | `section`・`reason`（`startup-failed` / `not-placed` / `unreadable` / `no-env` / `no-handover` / `handover-write` / `exec-failed`）・`from`・`to`（分かれば）・`detail`・`seconds` |
 | `account` | アカウントを替えた・すべて上限で替えなかった | `section`・`reason`（`five_hour` / `seven_day` / `spend` / `unknown` / `auth` / `threshold` / `recovered` / `pinned` など）・`from`・`to`（替えなかったら null）・`earliest`（最も早く戻るアカウントと時刻）・`keys`（従量の接続へ移ったときの変数の名前）・`usage`（閾値のときの使用率） |
-| `metered_invalid` | 区間 1 の起動で、保存した従量の接続の宣言が壊れていた（宣言なしとして扱う） | `section`・`detail`（理由の 1 行） |
+| `metered_invalid` | セグメント 1 の起動で、保存した従量の接続の設定が壊れていた（設定なしとして扱う） | `section`・`detail`（理由の 1 行） |
 | `end` | セッションが終わった | `seconds`（起動からシグナルファイルを書くまで。シグナルファイルなしなら終わりまで）・`ended_by`（`mark` / `no-mark` / `sigterm` / `sigkill`） |
 | `prose_wait` | 本文で承認を待って終えた応答の Stop を止めた（「承認ゲートを越えない守り」） | `section`・`kind`（`承認待ち` / `回答待ち`）。本文と抜粋は書かない |
 | `stop` | 次のセッションを起動しないと決めた | `reason`（`stop-file` / `spin` / `update-failed` / `start-failed` / `error` / `handover`（入れ替えた後に申し送りを読めない）） |
@@ -314,7 +314,7 @@ cat ~/.local/state/ndf/relay/*/log.jsonl | jq -c 'select(.event == "stop")'
 cat ~/.local/state/ndf/relay/*/log.jsonl | jq -c 'select(.event == "prose_wait")'   # 止めた回数
 ```
 
-入出力の契約と決定の理由は、ai-plugins の確定仕様 `docs/specifications/ndf-relay-segment-restart.md` にある。
+入出力のコントラクトと決定の理由は、ai-plugins の確定仕様 `docs/specifications/ndf-relay-segment-restart.md` にある。
 
 ## 付則: `/goal` を付けた場合
 

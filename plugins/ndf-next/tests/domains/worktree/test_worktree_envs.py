@@ -118,7 +118,7 @@ def test_deps_refuses_dest_symlink(main_repo: Path, run_git: Callable, tmp_path:
 
 
 def test_deps_accepts_symlink_copied_before(main_repo: Path, run_git: Callable) -> None:
-    """複製元が symlink なら複製も symlink になる。印が効かない再実行でも、同じ先を指す複製は済みとして通す。"""
+    """複製元が symlink なら複製も symlink になる。マーカーが効かない再実行でも、同じ先を指す複製は済みとして通す。"""
     (main_repo / ".gitignore").write_text(".worktrees/\nlnk\n", encoding="utf-8")
     _declare(main_repo, run_git, {"deps": {"copy_as_real": ["lnk"]}})
     (main_repo / "lnk").symlink_to(".gitignore")
@@ -216,7 +216,7 @@ def test_testenv_assign_compose_and_down(main_repo: Path, run_git: Callable) -> 
     assert testenv.up(t) == 0
     assert testenv.down(t) == 0 and t.book.current(t.key) is None
     downs = [c[0] for c in fake.calls if "down" in c[0]]
-    assert downs and "--volumes" in downs[-1]  # 宣言が無ければボリュームも消す
+    assert downs and "--volumes" in downs[-1]  # 設定が無ければボリュームも消す
 
 
 def test_testenv_down_keeps_slot_when_discard_fails(main_repo: Path, run_git: Callable) -> None:
@@ -251,7 +251,7 @@ def test_testenv_reach_refuses_container_without_worktree(main_repo: Path, run_g
     testenv.assign(t)
     with pytest.raises(testenv.TestenvError):
         testenv.reach(t, "app")
-    assert not list((t.path / testenv.EVIDENCE).glob("reach-*"))  # 印は必ず消す
+    assert not list((t.path / testenv.EVIDENCE).glob("reach-*"))  # マーカーは必ず消す
 
 
 # 現状固定（I-008）: `testenv.test_values` の各分岐。期待値は今の実装の出力。
@@ -266,7 +266,7 @@ ROW = {"environment": "env-a", "ports": {"http": 20001, "api": 20002}}
 @pytest.mark.parametrize(
     ("kinds", "want"),
     [
-        ({}, {}),  # 種類の宣言が無い
+        ({}, {}),  # 種類の設定が無い
         ({"e2e": "not a dict"}, {}),
         ({"e2e": {"skip_reset": {"A": 1, 2: True}}}, {"A": "1", "2": "True"}),
         ({"e2e": {"skip_reset": ["A"]}}, {}),
@@ -306,7 +306,7 @@ def test_test_values_evidence_given_relative_and_absolute(main_repo: Path) -> No
 @pytest.mark.parametrize("out", [Path("../outside"), Path("/tmp"), Path(".")])
 def test_test_values_refuses_evidence_outside_worktree(main_repo: Path, out: Path) -> None:
     t = _values_target(main_repo, {"e2e": {"out_env": "OUT"}})
-    with pytest.raises(testenv.TestenvError, match="証跡の置き場が worktree の外を指す"):
+    with pytest.raises(testenv.TestenvError, match="証跡の保存先が worktree の外を指す"):
         testenv.test_values(t, "e2e", ROW, out)
 
 
@@ -341,7 +341,7 @@ def _le_raise(*args: object) -> None:
 def test_run_localenv_not_applicable(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(localenv, "target", lambda p: None)
     got = cli_env.run_localenv("t", argparse.Namespace(action="setup", worktree=None, cwd=Path("/")))
-    assert got == _le_ok("適用外（宣言か、その節が無い）")
+    assert got == _le_ok("適用外（設定か、その節が無い）")
 
 
 def test_run_localenv_setup_and_aim(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -377,7 +377,7 @@ def test_run_localenv_verify(monkeypatch: pytest.MonkeyPatch, verdict: str, want
     [
         (localenv_decide.MISMATCH, None, _le_stopped("check_failed", "text-mismatch")),
         (localenv_decide.NOT_RUNNING, None, _le_stopped("not_applicable", "text-not_running")),
-        (localenv_decide.MATCH, None, _le_ok("動作確認のコマンドが宣言されていない")),
+        (localenv_decide.MATCH, None, _le_ok("動作確認のコマンドが定義されていない")),
         (localenv_decide.MATCH, 0, _le_ok("動作確認が通った")),
         (localenv_decide.MATCH, 4, _le_stopped("check_failed", "動作確認のコマンドが失敗した（終了コード 4）")),
     ],
@@ -484,8 +484,8 @@ def _assigned(t: testenv.Target, tag: Optional[str] = "t1") -> None:
         ({**EXPOSE, "enabled": "yes"}, "拒否: testenv.expose.enabled が有効でない"),
         ({**EXPOSE, "public_tag": ""}, "拒否: testenv.expose.public_tag と base_domain が要る"),
         ({**EXPOSE, "base_domain": None}, "拒否: testenv.expose.public_tag と base_domain が要る"),
-        ({**EXPOSE, "open_command": ""}, "公開の手段が宣言されていない（testenv.expose.open_command と close_command が要る）"),
-        ({**EXPOSE, "close_command": ""}, "公開の手段が宣言されていない（testenv.expose.open_command と close_command が要る）"),
+        ({**EXPOSE, "open_command": ""}, "公開の手段が定義されていない（testenv.expose.open_command と close_command が要る）"),
+        ({**EXPOSE, "close_command": ""}, "公開の手段が定義されていない（testenv.expose.open_command と close_command が要る）"),
     ],
 )
 def test_expose_refuses_broken_config(tmp_path: Path, conf: object, message: str) -> None:
@@ -597,7 +597,7 @@ def test_unexpose_keeps_record_when_close_command_fails(tmp_path: Path) -> None:
     testenv_sweep.expose(t)
     with pytest.raises(testenv.TestenvError) as exc:
         testenv_sweep.unexpose(t)
-    assert str(exc.value) == "公開を閉じる手段が失敗した。台帳は閉じていない: env-x https://wt0.example.test"
+    assert str(exc.value) == "公開を閉じる手段が失敗した。割り当て表は閉じていない: env-x https://wt0.example.test"
     assert t.book.current(t.key)["expose"]["closed_at"] is None  # type: ignore[index]
 
 
@@ -618,7 +618,7 @@ def test_unexpose_without_close_command_keeps_record(tmp_path: Path) -> None:
     testenv_sweep.expose(t)
     without = {k: v for k, v in EXPOSE.items() if k != "close_command"}
     t2 = testenv.Target(t.path, t.main_dir, {"expose": without}, (), fake.shell(), t.book)
-    with pytest.raises(testenv.TestenvError, match="公開を閉じる手段が宣言されていない"):
+    with pytest.raises(testenv.TestenvError, match="公開を閉じる手段が定義されていない"):
         testenv_sweep.unexpose(t2)
     assert t.book.current(t.key)["expose"]["closed_at"] is None and len(fake.calls) == 1  # type: ignore[index]
 

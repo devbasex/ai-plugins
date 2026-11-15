@@ -1,16 +1,16 @@
-"""hook の登録（`hooks/<ランタイム>.json`）を、ランタイムの契約表と予算から作る（#3345 の決定 88〜90・IH1〜IH3）。
+"""hook の登録（`hooks/<ランタイム>.json`）を、ランタイムのコントラクト表と予算から作る（#3345 の決定 88〜90・IH1〜IH3）。
 
     ndf hooks render [--check]
 
-- 事象ごとに登録 1 行。事象はランタイムの契約表（`contracts/hooks/runtimes.json`）の並びで、どの登録にも予算
+- 事象ごとに登録 1 行。事象はランタイムのコントラクト表（`contracts/hooks/runtimes.json`）の並びで、どの登録にも予算
   （`limits.json` の `hook.budget.*`）の timeout を付ける。matcher は付けない（どの Tool の呼び出しでも起動し、guard の表が
   Tool で絞る）
 - 登録の command は `SCRIPT` を `sh -c` で打つ。引数は環境の python・`hooks/entry.py`・ランタイム・事象（決定 89）
-- 環境の python のパスは、`env.venv_python` と同じ置き場（プラグイン名と `uv.lock` の hash で決まる）を指す。キャッシュの根は
+- 環境の python のパスは、`env.venv_python` と同じ保存先（プラグイン名と `uv.lock` の hash で決まる）を指す。キャッシュの根は
   起動の時点の `XDG_CACHE_HOME`（無ければ `$HOME/.cache`）をシェルが展開する
-- プラグインの根は、ランタイムが hook の command へ渡す環境変数（契約表の `plugin_root_env`）をシェルが展開する
+- プラグインの根は、ランタイムが hook の command へ渡す環境変数（コントラクト表の `plugin_root_env`）をシェルが展開する
 
-登録はプラグイン名と lock の hash を文字で持つ生成物である。名前か lock を変えたら作り直す（CI のテストが作り直した結果と
+登録はプラグイン名と lock の hash を文文字列で持つ生成物である。名前か lock を変えたら作り直す（CI のテストが作り直した結果と
 照らす）。
 """
 
@@ -66,7 +66,7 @@ def text(runtime: str, plugin_root: Path = tables.PLUGIN_ROOT) -> str:
 
 
 def _wanted(plugin_root: Path) -> dict[Path, str]:
-    """登録のファイル → 書く文字（ランタイムの契約表の並び）。"""
+    """登録のファイル → 書く文字（ランタイムのコントラクト表の並び）。"""
     return {path_of(runtime, plugin_root): text(runtime, plugin_root) for runtime in tables.runtimes()}
 
 

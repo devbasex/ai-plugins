@@ -18,11 +18,11 @@ from ndf.domains.release import version_decide
 
 # リリース記録なし（閉じの引数の 0）
 RECORD_NONE = "0"
-# 閉じが本番の記録から番号を引く印（明示の番号が無く、届ける経路があるとき）
+# 閉じが本番の記録から番号を引くマーカー（明示の番号が無く、届ける経路があるとき）
 RECORD_FOUND = "{queue_record}"
 # 導入の確認を置く進め方（MVV の判定で進める進め方）
 MVV_PACES = ("fast", "auto")
-# 経路の段（届け方）。本番へ上げる・検査がマージする・手で届ける・届けない
+# 経路のステップ（届け方）。本番へ上げる・検査がマージする・手で届ける・届けない
 PROMOTE, MERGED_BY_CHECK, MANUAL, NONE = "promote", "merged-by-check", "manual", "none"
 ROUTE_STAGES = (PROMOTE, MERGED_BY_CHECK, MANUAL, NONE)
 # 閉じの手順の id（並びの順）
@@ -81,12 +81,12 @@ def closing_pace(pace: str) -> str:
 
 
 def verify_needed(pace: str, mvv: bool, promote: bool, merge: bool) -> bool:
-    """導入の確認の段を置くか。進め方が fast・auto で、MVV の判定があり、本番かマージの経路があるときだけ（#2967）。"""
+    """導入の確認のステップを置くか。進め方が fast・auto で、MVV の判定があり、本番かマージの経路があるときだけ（#2967）。"""
     return pace in MVV_PACES and mvv and (promote or merge)
 
 
 def prod_version(version: Optional[str]) -> Optional[str]:
-    """明示の開発版から本番の版（開発版の印を外したもの）。開発版が無ければ None（本番は版の記録から読む）。"""
+    """明示の開発版から本番のバージョン（開発版のマーカーを外したもの）。開発版が無ければ None（本番はバージョンの記録から読む）。"""
     return version_decide.base_of(version) if version else None
 
 
@@ -96,7 +96,7 @@ def close_plan(facts: CloseFacts, paces: Sequence[str]) -> ClosePlan:
         raise SprintError(f"進め方 {facts.pace!r} は {'・'.join(paces)} のどれでもない")
     unknown = [r for r in facts.routes if r not in ROUTE_STAGES]
     if unknown or not facts.routes:
-        raise SprintError(f"経路の段は {'・'.join(ROUTE_STAGES)} から 1 つ以上: {list(facts.routes)}")
+        raise SprintError(f"経路のステップは {'・'.join(ROUTE_STAGES)} から 1 つ以上: {list(facts.routes)}")
     record = record_pr_of(facts.record_pr, record_fallback(facts.routes))
     verify = verify_needed(facts.pace, facts.mvv, PROMOTE in facts.routes, MERGED_BY_CHECK in facts.routes)
     steps = [SPEC, PR, *([VERIFY] if has_record(record) else []), DEEP_DUE,

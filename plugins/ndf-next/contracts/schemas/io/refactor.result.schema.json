@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "refactor.result.schema.json",
   "title": "ndf refactor の結果 JSON",
-  "description": "ndf refactor が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果の契約（result.schema.json）が持ち、ここは metrics と items の形だけを足す。metrics と items の要素は閉じていて、載せた項目のほかの項目を持つと通らない",
+  "description": "ndf refactor が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果のコントラクト（result.schema.json）が持ち、ここは metrics と items の形だけを足す。metrics と items の要素は閉じていて、載せた項目のほかの項目を持つと通らない",
   "allOf": [
     {
       "$ref": "../result.schema.json"
@@ -79,7 +79,7 @@
         },
         "swept": {
           "type": "integer",
-          "description": "片付けた持ち主のいない lock の数（release）"
+          "description": "片付けたオーナーのいない lock の数（release）"
         },
         "items": {
           "type": "integer",
@@ -149,7 +149,7 @@
               "scope",
               "kept"
             ],
-            "description": "項目の種類（テストの枠の待ちで止まったときの退避の項目は持たない）"
+            "description": "項目の種類（テストのスロットの待ちで止まったときの退避の項目は持たない）"
           },
           "symbols": {
             "type": "object",
@@ -303,7 +303,7 @@
           },
           "retired_from": {
             "type": "string",
-            "description": "退避した旧い状態の置き場（状態の置き場の用意で退避したときだけ）"
+            "description": "退避した旧い状態の保存先（状態の保存先の用意で退避したときだけ）"
           },
           "retired_to": {
             "type": "string",

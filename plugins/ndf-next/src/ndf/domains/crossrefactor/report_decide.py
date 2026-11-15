@@ -25,7 +25,7 @@ def _cell(text: Any) -> str:
 
 
 def _field(row: Mapping[str, Any], key: str) -> Any:
-    """状態の行の鍵の値。無ければ空の文字列（表に空欄として出す）。"""
+    """状態の行のキーの値。無ければ空の文字列（表に空欄として出す）。"""
     return row[key] if key in row and row[key] is not None else ""
 
 

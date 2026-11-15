@@ -1,4 +1,4 @@
-"""中継の部品: ブロックの読み・シグナルファイル・中継の印・子の環境・アカウント・ラッパーの見分け・会話の記録。"""
+"""中継の部品: ブロックの読み・シグナルファイル・中継のマーカー・子の環境・アカウント・ラッパーの見分け・会話の記録。"""
 
 from __future__ import annotations
 
@@ -69,7 +69,7 @@ def test_question_and_locations_from_the_environment(tmp_path):
 
 
 def test_relay_mark_is_taken_once(tmp_path):
-    # 中継が送った入力では hook の数え手が数え直さない（決定 92）。hook は take で印を消す
+    # 中継が送った入力では hook の数え手が数え直さない（決定 92）。hook は take でマーカーを消す
     markers.mark(tmp_path, "sess-1")
     assert markers.take(tmp_path, "sess-1") is True
     assert markers.take(tmp_path, "sess-1") is False
@@ -81,7 +81,7 @@ def test_child_env_drops_editor_git_auth_and_sets_relay_values(tmp_path):
     parent = {"PATH": "/bin", "GIT_ASKPASS": "/vscode/askpass.sh", "VSCODE_GIT_IPC_HANDLE": "/tmp/x.sock", "VSCODE_GIT_ASKPASS_MAIN": "m"}
     got = session_env.child_env(parent, tmp_path)
     assert got["PATH"] == "/bin" and not set(facts.ids("env", child="drop")) & set(got)  # #2985
-    # Claude Code の中から起動しても、入れ子の起動の印と親のセッションの ID を子へ残さない
+    # Claude Code の中から起動しても、入れ子の起動のマーカーと親のセッションの ID を子へ残さない
     nested = session_env.child_env({**parent, "CLAUDECODE": "1", "CLAUDE_CODE_SESSION_ID": "parent"}, tmp_path)
     assert "CLAUDECODE" not in nested and "CLAUDE_CODE_SESSION_ID" not in nested
     assert got["CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION"] == "false"  # #2504
@@ -153,7 +153,7 @@ def test_screen_facts():
     assert not observe.auth_failed("all good")
 
 
-# 現状固定（I-001）: 書き込みはどれも親の置き場を作り、同じ置き場の一時の名前から置き換え、一時の名前を残さない
+# 現状固定（I-001）: 書き込みはどれも親の保存先を作り、同じ保存先の一時の名前から置き換え、一時の名前を残さない
 def _no_temporary(root: Path) -> list[Path]:
     return [p for p in root.rglob("*") if p.name.endswith(".tmp")]
 
@@ -173,9 +173,9 @@ def test_relay_writes_create_the_parent_and_leave_no_temporary_file(tmp_path, mo
     accounts.write_usages(state, [Usage("チーム", 1.5, False)])
     assert accounts.usage_path(state).read_text(encoding="utf-8") == '{"accounts": [{"name": "チーム", "percent": 1.5, "limited": false}]}'
     d = registry.wrapper_dir(state, "t1")
-    registry.write_state(d, {"state": "running", "reason": "区間 1"})
+    registry.write_state(d, {"state": "running", "reason": "セグメント 1"})
     assert (d / registry.STATE_FILE).read_text(encoding="utf-8") == (
-        '{"state": "running", "reason": "区間 1", "at": "2026-11-14T00:00:00+00:00"}'
+        '{"state": "running", "reason": "セグメント 1", "at": "2026-11-14T00:00:00+00:00"}'
     )
     registry.save_registry(hub.hub_dir(state), {"t1": {"cwd": "/w/作業"}})
     assert (hub.hub_dir(state) / registry.REGISTRY_FILE).read_text(
@@ -201,7 +201,7 @@ def test_install_writes_set_the_mode_and_leave_no_temporary_file(tmp_path):
     assert _no_temporary(tmp_path) == []
 
 
-# 現状固定（I-002）: 中継の置き場は状態の置き場の下にあり、宣言（locations・ndf-files）のパスと一致する
+# 現状固定（I-002）: 中継の保存先は状態の保存先の下にあり、設定（locations・ndf-files）のパスと一致する
 def test_relay_locations_match_the_declared_paths():
     from ndf.domains.relay import hub
 

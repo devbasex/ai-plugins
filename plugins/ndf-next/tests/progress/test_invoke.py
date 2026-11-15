@@ -50,12 +50,12 @@ def test_resolve_inputs_names_every_missing_key():
     ],
 )
 def test_resolve_inputs_refuses_values_of_the_wrong_shape(values):
-    # 3364-7: 次の工程の引数・作業ディレクトリになる値は、鍵があるかだけでなく形を確かめてから渡す
+    # 3364-7: 次の工程の引数・作業ディレクトリになる値は、キーがあるかだけでなく形を確かめてから渡す
     with pytest.raises(invoke.StageInputInvalid):
         invoke.resolve_inputs(_stage("コードレビュー"), values)
 
 
-# .ndf/project.json の delivery の 1 行（このリポジトリの宣言と同じ形）
+# .ndf/project.json の delivery の 1 行（このリポジトリの設定と同じ形）
 DELIVERY = {
     "target": "ndf プラグイン",
     "kind": "auto",
@@ -88,7 +88,7 @@ def test_delivery_of_the_declared_shape_passes():
     ],
 )
 def test_delivery_of_the_wrong_shape_is_refused(delivery):
-    # 3364-7: デプロイの経路になる値は、空でないかだけでなく鍵の型と kind・channel の取りうる値を確かめる
+    # 3364-7: デプロイの経路になる値は、空でないかだけでなくキーの型と kind・channel の取りうる値を確かめる
     assert invoke.value_errors({"delivery": delivery})
 
 
@@ -146,9 +146,9 @@ STEPS = [{"id": "a", "run": ["true"]}, {"id": "b", "run": ["true"]}]
 
 
 def _plan_template(monkeypatch, name: str = "design", params: tuple[str, ...] = ()) -> route.Template:
-    """ステップ a・b の雛形 1 本だけを `route.templates()` が返すようにする。`worktree` を受ければプランの作業場所へ差し込む。"""
+    """ステップ a・b のテンプレート 1 本だけを `route.templates()` が返すようにする。`worktree` を受ければプランの作業場所へ差し込む。"""
     plan = {"name": name, "steps": STEPS, **({"worktree": "{{worktree}}"} if "worktree" in params else {})}
-    t = route.Template(name, name, "試験の雛形", params, plan)
+    t = route.Template(name, name, "試験のテンプレート", params, plan)
     monkeypatch.setattr(route, "templates", lambda: {name: t})
     return t
 
@@ -176,7 +176,7 @@ def test_plan_argv_passes_inputs_and_the_answer(tmp_path, monkeypatch):
 
 
 def test_every_plan_a_stage_calls_has_a_route_template():
-    # #3474: 工程の定義の with.plan は C3 の雛形の名前（route.templates() の鍵）。どのモードのどの工程が呼ぶ名前も雛形にある
+    # #3474: 工程の定義の with.plan は C3 のテンプレートの名前（route.templates() のキー）。どのモードのどの工程が呼ぶ名前もテンプレートにある
     called = {
         (s.name, st.id, invoke.stage_run(s, st, {}).name)
         for mode in definition.modes()
@@ -190,8 +190,8 @@ def test_every_plan_a_stage_calls_has_a_route_template():
 
 
 def test_a_stage_calling_a_plan_run_in_the_worktree_takes_the_worktree_as_an_input():
-    # PR 3486 の指摘: 作業場所で打つ雛形（差し込みに worktree）を呼ぶ工程は、文脈の作業場所を入力に持つ。持たないと
-    # 雛形の差し込みがブランチ名から別の作業場所を推し、そこの HEAD を push する
+    # PR 3486 の指摘: 作業場所で打つテンプレート（差し込みに worktree）を呼ぶ工程は、文脈の作業場所を入力に持つ。持たないと
+    # テンプレートの差し込みがブランチ名から別の作業場所を推し、そこの HEAD を push する
     templates = route.templates()
     lacking = sorted(
         (mode, s.name, st.id)
@@ -219,14 +219,14 @@ def test_plan_gets_the_worktree_as_the_plans_location_and_not_as_a_set_value(tmp
 
 
 def test_a_template_that_cannot_be_filled_stops_as_invalid(tmp_path, monkeypatch):
-    # 差し込み worktree を受ける雛形に、作業場所も省いた作業場所を決めるブランチも無い
+    # 差し込み worktree を受けるテンプレートに、作業場所も省いた作業場所を決めるブランチも無い
     _plan_template(monkeypatch, params=("worktree",))
     got = invoke.invoke(_plan_run({"issues": [1]}), tmp_path, tmp_path / "w", runner=lambda *a: pytest.fail("打たない"))
     assert got.status == "stopped" and got.cause["kind"] == "invalid" and "worktree" in got.cause["detail"]
 
 
 def _sprint_repo(tmp_path: Path, project: dict | None = None) -> Path:
-    """ブランチ sprint/s1 に居る作業場所（リモート無し）。宛先は宣言の base_branch、`project` は `.ndf/project.json`。"""
+    """ブランチ sprint/s1 に居る作業場所（リモート無し）。宛先は設定の base_branch、`project` は `.ndf/project.json`。"""
     repo = tmp_path / "repo"
     subprocess.run(["git", "init", "-q", "-b", "sprint/s1", str(repo)], check=True)
     (repo / ".ndf").mkdir()
@@ -241,7 +241,7 @@ PROJECT = {
     "ci": {"required_checks": ["pytest", "lint"]},
     "workflow": {"launch": {"review": ["ndf-review"], "rebuild": ["ndf-rebuild"]}},
 }
-# 雛形 → 工程の入力（設計は issues・worktree、実装は issues・worktree・mode、設計のマージは設計の工程の入力）
+# テンプレート → 工程の入力（設計は issues・worktree、実装は issues・worktree・mode、設計のマージは設計の工程の入力）
 STAGE_INPUTS = {
     "design": ("issues", "worktree"),
     "impl": ("issues", "worktree", "mode"),
@@ -265,8 +265,8 @@ def _stage_run_of(name: str, repo: Path, issues: list[int]) -> invoke.StageRun:
     ],
 )
 def test_template_values_missing_from_every_source_stop_as_invalid_by_name(tmp_path, monkeypatch, name, missing):
-    # PR 3464 の指摘（#3092）: 雛形の必須の差し込みが工程の入力にも文脈にも既定にも無いと、実行の前に invalid で止まる。
-    # 出所（課題・宣言・既定）のどれからも決まらなければ、足りない名前と出所を挙げて止まる
+    # PR 3464 の指摘（#3092）: テンプレートの必須の差し込みが工程の入力にも文脈にも既定にも無いと、実行の前に invalid で止まる。
+    # 出所（課題・設定・既定）のどれからも決まらなければ、足りない名前と出所を挙げて止まる
     repo = _sprint_repo(tmp_path)
     monkeypatch.setattr(invoke, "issue_text", lambda *a: pytest.fail("課題が 2 つなら課題から写さない"))
     monkeypatch.setattr(route, "default_merge_method", lambda repo, base: "squash")
@@ -279,11 +279,11 @@ def test_template_values_missing_from_every_source_stop_as_invalid_by_name(tmp_p
 
 
 def _filled_plan(tmp_path, monkeypatch, name):
-    """雛形 `name` を、課題 #3092・宣言 `PROJECT`・差し替えた既定（worker と gate）で埋めたプランを組む。
+    """テンプレート `name` を、課題 #3092・設定 `PROJECT`・差し替えた既定（worker と gate）で埋めたプランを組む。
 
-    課題の題と本文は課題から、テストのコマンド・必須のチェック・レビューと組み直しの起動は宣言から、worker の起動は
+    課題の題と本文は課題から、テストのコマンド・必須のチェック・レビューと組み直しの起動は設定から、worker の起動は
     params.json の既定から埋め、ブランチは作業場所から決める（#3092）。プランと、その JSON の文字列・作業場所の根・
-    実行の置き場を返す。
+    実行の保存先を返す。
     """
     repo = _sprint_repo(tmp_path, PROJECT)
     defaults = {"worker": ["ndf-worker"], "gate": ["ndf-gate"]}
@@ -346,7 +346,7 @@ def test_template_values_fill_the_review_and_rebuild_launch_from_the_ndf_setting
 
 
 def test_template_values_pass_the_plan_gate_through_to_the_stage_gate(tmp_path, monkeypatch):
-    # プランの中の承認ゲートは工程の承認ゲートが決めるため、params.json の既定（人の答えを待つ）を使わずに待たずに通す
+    # プランの中の承認ゲートは工程の承認ゲートが決めるため、params.json の既定（人の回答を待つ）を使わずに待たずに通す
     # （PR 3496 の指摘。承認待ちを足さない）
     plan, text, _, _ = _filled_plan(tmp_path, monkeypatch, "design-merge")
     gates = [s for s in plan["steps"] if s["id"] == "merge-gate"]
@@ -354,7 +354,7 @@ def test_template_values_pass_the_plan_gate_through_to_the_stage_gate(tmp_path, 
 
 
 def test_test_command_joins_every_test_suite_in_declared_order():
-    # PR 3469（lr-flow の C3 の保留分）: テストの suite が複数あれば、宣言の順に && でつないだ 1 つのコマンドにする。
+    # PR 3469（lr-flow の C3 の保留分）: テストの suite が複数あれば、設定の順に && でつないだ 1 つのコマンドにする。
     # テストでない suite（kind が lint）と command の無い suite は入れない
     suites = [
         {"name": "unit", "command": "pytest -q tests/unit"},
@@ -368,8 +368,8 @@ def test_test_command_joins_every_test_suite_in_declared_order():
 
 
 def test_ci_only_ndf_settings_builds_the_impl_plan_without_local_tests(tmp_path, monkeypatch):
-    # #3473: テストを CI に寄せる宣言（test.ci.only）があれば、実装のプランは手元でテストを打たない。テストの suite が
-    # 宣言に無くても test_command を求めず、worker の後は push へ、CI の修正の後も push へ進む
+    # #3473: テストを CI に寄せる設定（test.ci.only）があれば、実装のプランは手元でテストを打たない。テストの suite が
+    # 設定に無くても test_command を求めず、worker の後は push へ、CI の修正の後も push へ進む
     project = {**PROJECT, "test": {"ci": {"only": True}, "suites": [{"name": "lint", "kind": "lint", "command": "ruff check"}]}}
     repo = _sprint_repo(tmp_path, project)
     held = route.params()
@@ -397,7 +397,7 @@ def test_the_impl_plan_checks_the_acceptance_records_of_the_issue_after_the_work
 
 
 def test_review_without_a_ndf_settings_runs_cross_review_with_the_pr_made_before_the_step(tmp_path, monkeypatch):
-    # #3489: 宣言に review が無ければ、設計のプランの review は pr のステップの後に、ブランチの PR の番号で cross-review run を打つ
+    # #3489: 設定に review が無ければ、設計のプランの review は pr のステップの後に、ブランチの PR の番号で cross-review run を打つ
     held = PROJECT["workflow"]
     monkeypatch.setitem(PROJECT, "workflow", {"launch": {"rebuild": held["launch"]["rebuild"]}})
     plan, _, _, _ = _filled_plan(tmp_path, monkeypatch, "design")
@@ -412,7 +412,7 @@ def test_review_without_a_ndf_settings_runs_cross_review_with_the_pr_made_before
 
 
 def test_review_without_a_ndf_settings_resolves_the_base_for_the_cross_review_template(tmp_path, monkeypatch):
-    # PR 3537 の指摘: cross-review の雛形は params に base を持たないので、宛先はリポジトリのブランチの運用から決める
+    # PR 3537 の指摘: cross-review のテンプレートは params に base を持たないので、宛先はリポジトリのブランチの運用から決める
     held = PROJECT["workflow"]
     monkeypatch.setitem(PROJECT, "workflow", {"launch": {"rebuild": held["launch"]["rebuild"]}})
     plan, _, _, _ = _filled_plan(tmp_path, monkeypatch, "cross-review")
@@ -447,7 +447,7 @@ def test_review_launch_stops_when_the_branch_has_no_pr(tmp_path):
 
 
 def test_workflow_ndf_settings_with_launch_and_stages_passes_the_schema(tmp_path):
-    # #3473 の受け入れ条件 3: workflow.launch の review・rebuild・refactor（語の並び）と stages を持つ宣言はスキーマの検査を通る
+    # #3473 の受け入れ条件 3: workflow.launch の review・rebuild・refactor（語の並び）と stages を持つ設定はスキーマの検査を通る
     launch = {"review": ["ndf", "review"], "rebuild": ["ndf", "rebuild"], "refactor": ["ndf", "refactor"]}
     stages_decl = {"design": {"enabled": True}, "release": {"enabled": False, "reason": "手で出す"}}
     project = {**PROJECT, "workflow": {"launch": launch, "stages": stages_decl}}
@@ -468,7 +468,7 @@ def test_workflow_ndf_settings_with_launch_and_stages_passes_the_schema(tmp_path
     ],
 )
 def test_workflow_ndf_settings_out_of_shape_stops_as_invalid(tmp_path, workflow):
-    # #3473: workflow の形が違う宣言は、値を黙って捨てずにプランを組む前に invalid で止まる
+    # #3473: workflow の形が違う設定は、値を黙って捨てずにプランを組む前に invalid で止まる
     repo = _sprint_repo(tmp_path, {**PROJECT, "workflow": workflow})
     with pytest.raises(route.RouteError, match="workflow"):
         invoke._project(repo)
@@ -492,8 +492,8 @@ def test_an_issue_by_an_untrusted_author_is_not_written_and_stops_as_invalid_by_
 
 
 def test_the_issue_is_read_once_and_later_calls_use_the_copy_in_the_work_dir(tmp_path, monkeypatch):
-    # PR 3469 の指摘: プランを描き直すたび（承認の答え・続き・打ち直し）に課題を GitHub から読み直さない。
-    # 途中で題が直されてもプランは同じで、終わっていない回へ同じ鍵で届く
+    # PR 3469 の指摘: プランを描き直すたび（承認の回答・続き・打ち直し）に課題を GitHub から読み直さない。
+    # 途中で題が直されてもプランは同じで、終わっていない回へ同じキーで届く
     repo = _sprint_repo(tmp_path, PROJECT)
     reads = []
 
@@ -568,7 +568,7 @@ def test_every_template_value_has_one_source():
 
 
 def test_a_stopped_plan_is_tried_again_from_the_step_it_stopped_at_in_a_new_round(tmp_path, monkeypatch):
-    # PR 3464 の指摘: 同じ引数で呼び直すと、プランは前の回の控えの失敗を返すだけ
+    # PR 3464 の指摘: 同じ引数で呼び直すと、プランは前の回のバックアップの失敗を返すだけ
     _plan_template(monkeypatch)
     work, root = tmp_path / "w", tmp_path / "root"
     work.mkdir()
@@ -584,7 +584,7 @@ def test_a_stopped_plan_is_tried_again_from_the_step_it_stopped_at_in_a_new_roun
     assert again[again.index("--from") + 1] == "b" and again.index("--from") < again.index("--state-dir")
     retried = plan_runner.prepare(root, plan, "b", str(work), tmp_path, plan_runner.RunOptions({"issues": "[1]"}))
     assert retried.key != inv.key and retried.round_no == inv.round_no + 1
-    # 新しい回が承認ゲートで待つ間（結果の控えが無い）は、答えを渡す呼び出しも同じ開始点で同じ回に届く
+    # 新しい回が承認ゲートで待つ間（結果のバックアップが無い）は、回答を渡す呼び出しも同じ開始点で同じ回に届く
     plan_runner._record_run(retried)
     assert invoke.plan_start(work) == "b"
 
@@ -599,7 +599,7 @@ def test_a_plan_that_finished_keeps_the_start_of_its_round(tmp_path):
 
 
 def _stop_at(root: Path, plan: Path, work: Path, argv: list[str], last: str = "b") -> plan_runner.Invocation:
-    """`argv` の呼び出しでプランの回を流し、ステップ `last` で止まった結果を控えに残す。"""
+    """`argv` の呼び出しでプランの回を流し、ステップ `last` で止まった結果をバックアップに残す。"""
     start = argv[argv.index("--from") + 1] if "--from" in argv else None
     sets = plan_cli._pairs([argv[i + 1] for i, a in enumerate(argv) if a == "--set"], "--set")
     inv = plan_runner.prepare(root, plan, start, str(work), work, plan_runner.RunOptions(sets))
@@ -610,7 +610,7 @@ def _stop_at(root: Path, plan: Path, work: Path, argv: list[str], last: str = "b
 
 
 def test_every_retry_of_a_plan_starts_a_new_round(tmp_path, monkeypatch):
-    # PR 3464 の指摘: 2 回目以降の打ち直しも、開始点と head が前の回と同じでプランが控えの結果を返すだけにならない
+    # PR 3464 の指摘: 2 回目以降の打ち直しも、開始点と head が前の回と同じでプランがバックアップの結果を返すだけにならない
     _plan_template(monkeypatch)
     work, root = tmp_path / "w", tmp_path / "root"
     work.mkdir()
@@ -623,13 +623,13 @@ def test_every_retry_of_a_plan_starts_a_new_round(tmp_path, monkeypatch):
         assert argv[argv.index("--from") + 1] == "b"
         keys.append(_stop_at(root, plan, work, argv).key)
     assert len(set(keys)) == 4
-    # 打ち直さない呼び出し（作業が落ちた後の続き・答え）は同じ回に届く
+    # 打ち直さない呼び出し（作業が落ちた後の続き・回答）は同じ回に届く
     argv = invoke.plan_argv(run, work, None, tmp_path)
     assert f"{invoke.ATTEMPT_SET}=3" in argv
 
 
 def _gate_ended(tmp_path: Path, monkeypatch) -> tuple[invoke.StageRun, Path]:
-    """プランの回がステップ a の承認ゲートで終わった（結果の控えが gate）置き場。"""
+    """プランの回がステップ a の承認ゲートで終わった（結果のバックアップが gate）保存先。"""
     _plan_template(monkeypatch)
     work = tmp_path / "w"
     work.mkdir()
@@ -644,7 +644,7 @@ def _gate_ended(tmp_path: Path, monkeypatch) -> tuple[invoke.StageRun, Path]:
 
 
 def test_an_answer_to_a_plan_that_ended_at_a_gate_starts_where_the_route_points(tmp_path, monkeypatch):
-    # PR 3464 の指摘: 終わった回へ --answer を渡すと、プランは控えの gate を返し続ける
+    # PR 3464 の指摘: 終わった回へ --answer を渡すと、プランはバックアップの gate を返し続ける
     run, work = _gate_ended(tmp_path, monkeypatch)
     argv = invoke.plan_argv(run, work, "approved", tmp_path)
     assert argv[argv.index("--from") + 1] == "b" and "--answer" not in argv
@@ -680,7 +680,7 @@ def test_same_run_tells_a_stored_result_of_the_same_round():
 
 
 def test_release_result_takes_the_version_from_the_outputs_of_the_plan_result(tmp_path):
-    # PR 3464 の指摘: プランの結果は版を outputs に集め、metrics には回とステップの数だけを載せる
+    # PR 3464 の指摘: プランの結果はバージョンを outputs に集め、metrics には回とステップの数だけを載せる
     work = tmp_path / "w"
     inv = plan_runner.prepare(tmp_path / "root", _plan_file(tmp_path, "release"), None, str(work), tmp_path)
     plan_records._add_outputs(work, {"version": "11.0.0"})
@@ -692,12 +692,12 @@ def test_release_result_takes_the_version_from_the_outputs_of_the_plan_result(tm
 
 
 def test_plan_without_a_template_stops_as_precondition(tmp_path, monkeypatch):
-    # 作業場所の用意の with.plan（worktree）に当たる雛形が無い
+    # 作業場所の用意の with.plan（worktree）に当たるテンプレートが無い
     monkeypatch.setattr(route, "templates", lambda: {})
     run = _run("作業場所の用意", inputs={"issues": [1]})
     got = invoke.invoke(run, tmp_path, tmp_path / "w", runner=lambda *a: pytest.fail("打たない"))
     assert got.status == "stopped" and got.cause["kind"] == "precondition"
-    assert got.cause["detail"] == f"プランの雛形 {run.name} が無い"
+    assert got.cause["detail"] == f"プランのテンプレート {run.name} が無い"
     assert not (tmp_path / "w").exists()
 
 
@@ -758,7 +758,7 @@ def test_skill_failures_map_to_causes(failure, kind):
     assert invoke._skill_cause(claude.Failure(failure) if failure else None) == kind
 
 
-# --- 現状固定: _call_skill（I-025。`invoke` の call_claude で差し替えた `claude -p` の呼び出しと、答えから結果への写し） ---------------------
+# --- 現状固定: _call_skill（I-025。`invoke` の call_claude で差し替えた `claude -p` の呼び出しと、回答から結果への写し） ---------------------
 
 
 def _skill_run() -> invoke.StageRun:
@@ -773,8 +773,8 @@ def _reply(**kw):
 
 @pytest.fixture
 def calls():
-    """`claude.call_claude` を差し替え、受けた引数を残す。答えは `calls.reply` に置く。"""
-    # 差し替えは `invoke` の `call_claude` へ偽物を渡して行う。答えは `box["reply"]` に置く
+    """`claude.call_claude` を差し替え、受けた引数を残す。回答は `calls.reply` に置く。"""
+    # 差し替えは `invoke` の `call_claude` へ偽物を渡して行う。回答は `box["reply"]` に置く
     seen: list[dict] = []
     box = {"reply": _reply()}
 
@@ -806,7 +806,7 @@ def test_skill_is_called_with_full_permission_the_result_schema_and_the_implemen
     want = claude.claude_args(claude.ClaudeCall(system=invoke.SKILL_SYSTEM, permission=claude.Permission.FULL, json_schema=schema))
     assert seen == [{"argv": want, "prompt": invoke.skill_prompt(run), "timeout": limits.seconds(invoke.SKILL_LIMIT), "cwd": tmp_path}]
     assert got.status == "ok" and got.outputs == {"pr": 3} and got.warnings == ()
-    # Skill の作業はプランの置き場を作らない
+    # Skill の作業はプランの保存先を作らない
     assert not (tmp_path / "w").exists()
 
 
@@ -831,12 +831,12 @@ def test_skill_answer_that_is_not_a_result_is_bad_report(tmp_path, calls, answer
     box["reply"] = _reply(answer=answer)
     got = invoke.invoke(_skill_run(), tmp_path, tmp_path, call_claude=fake)
     assert got.status == "stopped" and got.cause["kind"] == "bad_report" and got.outputs == {}
-    assert got.cause["detail"] == "作業 skill design が結果 JSON を返さない: 答えが結果 JSON の形に合わない"
+    assert got.cause["detail"] == "作業 skill design が結果 JSON を返さない: 回答が結果 JSON の形に合わない"
 
 
 def test_skill_answer_keeps_only_declared_outputs(tmp_path, calls):
     box, _, fake = calls
     box["reply"] = _reply(answer=result.result("skill", "ok", "済んだ", outputs={"pr": 3, "branch": "b"}))
     got = invoke.invoke(_skill_run(), tmp_path, tmp_path, call_claude=fake)
-    # outputs の鍵は文脈の閉じた語彙なので、宣言に無い鍵は語彙の中の別の鍵で確かめる
+    # outputs のキーは文脈の閉じた語彙なので、設定に無いキーは語彙の中の別のキーで確かめる
     assert got.outputs == {"pr": 3} and got.warnings and "branch" in got.warnings[0]

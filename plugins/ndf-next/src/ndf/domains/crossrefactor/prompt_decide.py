@@ -46,7 +46,7 @@ def _tiers() -> str:
 
 
 def _estimate_example() -> str:
-    """計画の担当へ示す見積りの形（予算の選び方が読む `budget_decide.ESTIMATE_PARTS` の鍵。値は分）。"""
+    """計画の担当へ示す見積りの形（予算の選び方が読む `budget_decide.ESTIMATE_PARTS` のキー。値は分）。"""
     return "{" + ", ".join(f'"{part}": <分>' for part in budget_decide.ESTIMATE_PARTS) + "}"
 
 
@@ -96,7 +96,7 @@ def flaky(pending: Mapping[str, Any]) -> str:
     back = "".join(f"\n前回の違反: {v['commit']} {v['detail']}" for v in pending["sendback"])
     return (
         "次のテストは打ち直すと通るフレーキーなテストである（<suite>:<ファイル>）。テストのファイルだけを直し、"
-        f"鍵ごとに 1 コミットにしてトレーラー `{flaky_decide.TRAILER}: <鍵>` を付ける（push しない）。\n"
+        f"キーごとに 1 コミットにしてトレーラー `{flaky_decide.TRAILER}: <キー>` を付ける（push しない）。\n"
         + "\n".join(f"- {k}" for k in pending["keys"])
         + back
         + "\n"

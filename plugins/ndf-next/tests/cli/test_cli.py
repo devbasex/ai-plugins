@@ -30,7 +30,7 @@ def broken_root(tmp_path, monkeypatch):
 
 @pytest.fixture
 def state_home(tmp_path_factory, monkeypatch):
-    """状態の置き場を一時ディレクトリへ向け、本物の置き場への書き込みを落とす（`ndf.testing.isolation`）。新しい状態の置き場を返す。"""
+    """状態の保存先を一時ディレクトリへ向け、本物の保存先への書き込みを落とす（`ndf.testing.isolation`）。新しい状態の保存先を返す。"""
     roots = isolation.protected_roots()
     base = tmp_path_factory.mktemp("ndf-state")
     for name, sub in isolation.REDIRECTED_ENV.items():
@@ -40,12 +40,12 @@ def state_home(tmp_path_factory, monkeypatch):
         monkeypatch.delenv(name, raising=False)
     with isolation.guarding(roots, (str(tmp_path_factory.getbasetemp()),)) as found:
         yield identity.load().state_dir
-    assert not found, f"テストが本物の状態の置き場へ書こうとした: {found}"
+    assert not found, f"テストが本物の状態の保存先へ書こうとした: {found}"
 
 
 def test_writer_through_the_entry_leaves_a_prepared_state_dir(state_home, last_result, capsys):
-    # #3432 のレビュー: 状態の置き場へ書く副命令をエントリポイントから打った後も、置き場は用意済み（format.json がある）で、
-    # 続けて用意しても新しい記録を旧い置き場と見なして退避しない
+    # #3432 のレビュー: 状態の保存先へ書くサブコマンドをエントリポイントから打った後も、保存先は用意済み（format.json がある）で、
+    # 続けて用意しても新しい記録を旧い保存先と見なして退避しない
     assert cli.main(["relay", "account", "use", "work"]) == 0
     assert last_result(capsys.readouterr().out)["status"] == "ok"
 
@@ -55,7 +55,7 @@ def test_writer_through_the_entry_leaves_a_prepared_state_dir(state_home, last_r
 
 
 def test_entry_writes_the_retired_locations_to_stderr(state_home, monkeypatch, capsys):
-    # 旧い置き場を退避したら、元と先を標準エラーへ 1 行ずつ書き、副命令はそのまま呼ぶ
+    # 旧い保存先を退避したら、元と先を標準エラーへ 1 行ずつ書き、サブコマンドはそのまま呼ぶ
     state_home.mkdir(parents=True)
     (state_home / "journal.jsonl").write_text("old")
     calls = []
@@ -71,7 +71,7 @@ def test_entry_writes_the_retired_locations_to_stderr(state_home, monkeypatch, c
 
 
 def test_entry_stops_without_calling_the_subcommand_when_preparing_fails(state_home, monkeypatch, capsys, last_result):
-    # 用意できなければ（ほかのプラグインの根から呼ばれ、旧い置き場を退避してよいと確かめられない）副命令を呼ばずに止まる
+    # 用意できなければ（ほかのプラグインの根から呼ばれ、旧い保存先を退避してよいと確かめられない）サブコマンドを呼ばずに止まる
     state_home.mkdir(parents=True)
     (state_home / "journal.jsonl").write_text("old")
     monkeypatch.setenv("NDF_CALLER_PLUGIN_ROOT", str(state_home.parent / "other-plugin"))
@@ -94,7 +94,7 @@ def test_entry_keeps_the_locations_retired_before_preparing_failed(monkeypatch, 
         raise identity.IdentityError("read-only", retired)
 
     monkeypatch.setattr(identity, "prepare_state_dir", fail)
-    _fake_subcommand(monkeypatch, lambda argv: pytest.fail("副命令を呼んだ"))
+    _fake_subcommand(monkeypatch, lambda argv: pytest.fail("サブコマンドを呼んだ"))
 
     assert cli.main(["fake"]) == causes.exit_code("config_broken")
 
@@ -130,13 +130,13 @@ def _fake_subcommand(monkeypatch, main):
 
 
 def _argparse_main(argv):
-    """引数を argparse で読むだけの偽の副命令の main。"""
+    """引数を argparse で読むだけの偽のサブコマンドの main。"""
     argparse.ArgumentParser(prog="fake").parse_args(argv)
     return 0
 
 
 def test_uncaught_exception_ends_with_an_unknown_result(monkeypatch, capsys, last_result):
-    # 3394-3: 副命令が捕まえない例外も、結果 JSON（stopped/unknown）で終わる
+    # 3394-3: サブコマンドが捕まえない例外も、結果 JSON（stopped/unknown）で終わる
     def boom(argv):
         raise RuntimeError("壊れた")
 
@@ -232,7 +232,7 @@ def test_entrypoint_without_uv_or_curl_stops_with_deps_missing(tmp_path, last_re
 
 
 def test_entrypoint_does_not_run_an_installer_whose_hash_differs(tmp_path, last_result):
-    # 取ったインストーラは、埋めたハッシュと照合してから実行する。違えば実行せず、一時の置き場も残さない
+    # 取ったインストーラは、埋めたハッシュと検証してから実行する。違えば実行せず、一時の保存先も残さない
     path_dir = _path_of(tmp_path, ("bash", "python3", "dirname", "readlink", "env", "tail", "mkdir", "mktemp", "rm", "mv", "sh"))
     mark = tmp_path / "ran"
     curl = path_dir / "curl"
@@ -285,7 +285,7 @@ def test_entrypoint_does_not_import_from_callers_directory(tmp_path):
 
 
 def test_every_subcommand_reports_its_table_name_as_tool():
-    # 3394-11: 結果 JSON の tool は副命令の表の名前を 1 つの求め方で引く
+    # 3394-11: 結果 JSON の tool はサブコマンドの表の名前を 1 つの求め方で引く
     import importlib
 
     for name, module in cli.COMMANDS.items():

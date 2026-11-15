@@ -1,4 +1,4 @@
-"""使用量の帳簿: 応答ごとの数え方（#1979）・JST の両端（#1978）・置き場（#2575）・停止の差（#2576）。"""
+"""使用量の使用量ログ: 応答ごとの数え方（#1979）・JST の両端（#1978）・保存先（#2575）・停止の差（#2576）。"""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ def test_period_is_applied_per_response_not_per_conversation() -> None:
     recs = [_line("m1", "2026-11-13T14:59:59Z", 5), _line("m2", "2026-11-13T15:00:00Z", 7)]
     a, b = ud.jst_bounds(date(2026, 11, 14), date(2026, 11, 14))
     assert ud.transcript_total(recs, a, b) == ud.Usage(1, 7, 0, 0)
-    # 読めた記録の期間内に応答が無ければ 0（UNKNOWN にして帳簿の行へ戻さない）
+    # 読めた記録の期間内に応答が無ければ 0（UNKNOWN にして使用量ログの行へ戻さない）
     assert ud.transcript_total(recs, a.replace(year=2030), None) == ud.Usage()
     assert ud.transcript_total([], a, b) == ud.UNKNOWN
 
@@ -132,7 +132,7 @@ def test_report_counts_transcript_once_and_the_last_response_missed_by_the_hook(
 
 
 class _SearchApi:
-    """GraphQL の検索だけに答えるクライアント（件数を文字列で返す）。"""
+    """GraphQL の検索だけに回答するクライアント（件数を文字列で返す）。"""
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict]] = []

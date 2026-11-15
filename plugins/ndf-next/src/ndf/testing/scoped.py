@@ -1,6 +1,6 @@
-"""範囲のテスト: 宣言の suite の `scope_command` の `{paths}` へファイルを入れて、範囲だけを打つコマンドを組む。
+"""範囲のテスト: 設定の suite の `scope_command` の `{paths}` へファイルを入れて、範囲だけを打つコマンドを組む。
 
-- 宣言（`.ndf/project.json` の `test.suites[]`）のうち、`scope_command` に `{paths}` を持つ suite が範囲を打てる
+- 設定（`.ndf/project.json` の `test.suites[]`）のうち、`scope_command` に `{paths}` を持つ suite が範囲を打てる
 - ファイルは suite の `paths`（ファイルかディレクトリの並び。省けば作業場所の全体）の中のものだけを当てる
 - CI の落ちたテストの id（pytest の node id の `<ファイル>::<名前>` など）は、ファイルの部分へ戻して当てる
 
@@ -24,7 +24,7 @@ NODE_SEPARATOR = "::"
 
 @dataclass(frozen=True)
 class Suite:
-    """範囲を打てる宣言の suite 1 件: 名前・`scope_command`・`paths`（省けば `.`）・テストか（`kind` が `lint` でない）。"""
+    """範囲を打てる設定の suite 1 件: 名前・`scope_command`・`paths`（省けば `.`）・テストか（`kind` が `lint` でない）。"""
 
     name: str
     template: str
@@ -42,7 +42,7 @@ class ScopedRun:
 
 
 def ci_only(test: Mapping[str, Any]) -> bool:
-    """宣言の `test` の節がテストを CI に寄せる（`ci.only` が真）か。"""
+    """設定の `test` の節がテストを CI に寄せる（`ci.only` が真）か。"""
     ci = test.get("ci")
     return isinstance(ci, dict) and ci.get("only") is True
 
@@ -70,7 +70,7 @@ def files_of(test_ids: Iterable[str]) -> list[str]:
 
 
 def suite_of(raw: Any) -> Suite | None:
-    """宣言の suite 1 件を読む。`scope_command` に `{paths}` を持たない suite と、dict でない要素は None。"""
+    """設定の suite 1 件を読む。`scope_command` に `{paths}` を持たない suite と、dict でない要素は None。"""
     if not isinstance(raw, dict):
         return None
     template = raw.get(SCOPE_KEY)
@@ -82,7 +82,7 @@ def suite_of(raw: Any) -> Suite | None:
 
 
 def scoped_runs(suites: Any, files: Sequence[str]) -> tuple[list[ScopedRun], list[str]]:
-    """`files` を、範囲を打てるテストの suite（宣言の順）へ当てたコマンドと、どの suite にも当たらないファイル。
+    """`files` を、範囲を打てるテストの suite（設定の順）へ当てたコマンドと、どの suite にも当たらないファイル。
 
     1 つのファイルは、当たる最初の suite だけへ入れる（同じテストを 2 度打たない）。当たるファイルの無い suite は打たない。
     """

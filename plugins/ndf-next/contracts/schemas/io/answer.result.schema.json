@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "answer.result.schema.json",
   "title": "ndf answer の結果 JSON",
-  "description": "ndf answer が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果の契約（result.schema.json）が持ち、ここは metrics と items の形だけを足す。metrics と items の要素は閉じていて、載せた項目のほかの項目を持つと通らない",
+  "description": "ndf answer が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果のコントラクト（result.schema.json）が持ち、ここは metrics と items の形だけを足す。metrics と items の要素は閉じていて、載せた項目のほかの項目を持つと通らない",
   "allOf": [
     {
       "$ref": "../result.schema.json"
@@ -19,7 +19,7 @@
       "properties": {
         "machine_id": {
           "type": "string",
-          "description": "進行表の ID"
+          "description": "ステートマシンの ID"
         },
         "rev": {
           "type": "integer",
@@ -30,7 +30,7 @@
             "string",
             "null"
           ],
-          "description": "進行表の状態（next・wait・work・show）"
+          "description": "ステートマシンの状態（next・wait・work・show）"
         },
         "move": {
           "type": "string",
@@ -49,7 +49,7 @@
             "object",
             "string"
           ],
-          "description": "承認ゲートの問い（gate で返すとき。ask は区分と表示名）か、承認ゲートの区分（head）"
+          "description": "承認ゲートの質問（gate で返すとき。ask は区分と表示名）か、承認ゲートの区分（head）"
         },
         "head": {
           "type": "string",
@@ -60,26 +60,26 @@
           "items": {
             "type": "integer"
           },
-          "description": "書いた事象の番号（答え）"
+          "description": "書いた事象の番号（回答）"
         },
         "gate_id": {
           "type": "string",
-          "description": "答えた問いの id（答え）"
+          "description": "回答した質問の id（回答）"
         },
         "carried_row": {
           "type": [
             "string",
             "null"
           ],
-          "description": "外した課題を入れたレーンの行（答え）"
+          "description": "外した課題を入れたレーンの行（回答）"
         },
         "replayed": {
           "type": "boolean",
-          "description": "同じ冪等の鍵の答えが書いてあったか（答え）"
+          "description": "同じ冪等のキーの回答が書いてあったか（回答）"
         },
         "release_request": {
           "type": "object",
-          "description": "出したリリースの依頼（リリース承認ゲートで返すとき）"
+          "description": "出したリリースのリクエスト（リリース承認ゲートで返すとき）"
         }
       }
     },
@@ -92,25 +92,25 @@
         "properties": {
           "seq": {
             "type": "integer",
-            "description": "答えの事象の番号（list）"
+            "description": "回答の事象の番号（list）"
           },
           "at": {
             "type": "string",
-            "description": "答えた時刻（list）"
+            "description": "回答した時刻（list）"
           },
           "stage": {
             "type": [
               "string",
               "null"
             ],
-            "description": "答えた工程（list）"
+            "description": "回答した工程（list）"
           },
           "step": {
             "type": [
               "string",
               "null"
             ],
-            "description": "答えたステップ（list）"
+            "description": "回答したステップ（list）"
           },
           "gate": {
             "type": [
@@ -124,18 +124,18 @@
               "string",
               "null"
             ],
-            "description": "問いの id（list）"
+            "description": "質問の id（list）"
           },
           "answer": {
             "type": "string",
-            "description": "答えの語（list）"
+            "description": "回答の語（list）"
           },
           "notes": {
             "type": [
               "string",
               "null"
             ],
-            "description": "差し戻しの指摘（list）"
+            "description": "変更要求の指摘（list）"
           },
           "head": {
             "type": [
@@ -149,11 +149,11 @@
               "string",
               "null"
             ],
-            "description": "答えの理由（list）"
+            "description": "回答の理由（list）"
           },
           "by": {
             "type": "string",
-            "description": "答えた者（list）"
+            "description": "回答した者（list）"
           }
         }
       }

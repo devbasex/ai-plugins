@@ -5,7 +5,7 @@ description: "Change structure without changing behavior, guarded by tests, judg
 
 # 安全なリファクタリング
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `projects-sync.sh`（M7）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトのサブコマンドは新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `projects-sync.sh`（M7）。移行先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 **リファクタリングはテストがあるときに限って行う。テストの無い書き換えは単なる編集として扱う。** 振る舞いが変わっていない
 ことを示す手段がない書き換えは、この Skill の対象外として扱う。

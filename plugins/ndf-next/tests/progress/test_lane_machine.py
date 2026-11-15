@@ -1,5 +1,5 @@
 """マシン全体のプランの本数の上限（#3097・#2999）。数え方と判定は値で、別のリポジトリの計画は一時のリポジトリの
-進行表（SQLite）で、同時の判定は起動の排他を 2 本のスレッドで取り合って確かめる。"""
+ステートマシン（SQLite）で、同時の判定は起動の排他を 2 本のスレッドで取り合って確かめる。"""
 
 from __future__ import annotations
 
@@ -28,14 +28,14 @@ OWN = machine.PlanLanes("plan:own", (("w-a", 2, False), ("w-b", 1, False)))
 
 
 def test_count_adds_the_lanes_that_run_a_row_or_a_wrapper_but_not_the_lane_to_launch():
-    """動いているレーンは、ラッパーが動いているか実行中の行を持つ（答えを待つ行を含む）レーン。起こすレーン自身は数えない。"""
+    """動いているレーンは、ラッパーが動いているか実行中の行を持つ（回答を待つ行を含む）レーン。起動するレーン自身は数えない。"""
     listed = {"o-a": _row(), "o-c": _row(running=False), "w-a": _row(plan_name="p6", cwd="/own")}
     got = machine.count([OTHER, OWN], listed, "w-a")
     assert got.total == 5 and got.lanes == ("o-a", "o-b") and got.unreadable == ()
 
 
 def test_a_lane_waits_while_the_machine_total_would_pass_the_cap_and_starts_once_it_fits():
-    """別のリポジトリで 5 本動いていれば plans 2 のレーンは待ち、4 本以下になれば起こす（受け入れ条件 4・5）。"""
+    """別のリポジトリで 5 本動いていれば plans 2 のレーンは待ち、4 本以下になれば起動する（受け入れ条件 4・5）。"""
     assert not machine.admit(5, 2, 6)
     assert machine.admit(4, 2, 6)
     wait = machine.waiting(machine.RULE, machine.Count(5, ("o-a",), ()), 2, 6)
@@ -66,7 +66,7 @@ def test_count_takes_the_first_ndf_settings_of_a_wrapper_named_in_two_plans_as_i
 
 
 def test_count_does_not_count_the_lanes_of_an_unreadable_plan_that_names_them_as_it_is_now():
-    """読めない計画の宣言に載ったラッパーは、宣言からも宣言にないラッパーとしても数えない（今の出力）。"""
+    """読めない計画の設定に載ったラッパーは、設定からも設定にないラッパーとしても数えない（今の出力）。"""
     broken = machine.PlanLanes("/other:q1", (("z", 4, True),), readable=False)
     listed = {"z": _row(), "x": _row()}
     assert machine.count([broken], listed, "") == machine.Count(1, ("x",), ("/other:q1",))
@@ -102,12 +102,12 @@ def other_repo(tmp_path):
 
 
 def test_machine_count_reads_the_plan_of_another_repository_from_its_checkout(other_repo):
-    """登録簿に載る別のリポジトリの計画の宣言を、そのチェックアウトの進行表から読んで数える（受け入れ条件 4）。"""
+    """登録簿に載る別のリポジトリの計画の設定を、そのチェックアウトのステートマシンから読んで数える（受け入れ条件 4）。"""
     path, repo = other_repo
     listed = {launch.wrapper_name(repo, "q1", "a"): _row(running=False, cwd=str(path))}
     got = machine.machine_count(OWN, listed, "w-a")
     assert got.total == 4 and got.unreadable == ()
-    # 進行表の DB の無いチェックアウトの計画は読めないとして、動いているラッパーを 1 本と数える
+    # ステートマシンの DB の無いチェックアウトの計画は読めないとして、動いているラッパーを 1 本と数える
     gone = {"z": _row(cwd=str(path.parent / "nowhere"))}
     got = machine.machine_count(OWN, gone, "w-a")
     assert got.total == 1 and len(got.unreadable) == 1
@@ -123,7 +123,7 @@ def state_home(tmp_path, monkeypatch):
 
 
 def test_two_admissions_at_once_do_not_pass_the_cap(state_home, monkeypatch):
-    """2 本の判定が同時に走っても、起動の排他の中で数えるので、起こした後の合計が上限を超えない（受け入れ条件 6）。"""
+    """2 本の判定が同時に走っても、起動の排他の中で数えるので、起動した後の合計が上限を超えない（受け入れ条件 6）。"""
     listed = {"o-a": _row()}
     plans = {"o-a": 3}
     monkeypatch.setattr(
@@ -138,7 +138,7 @@ def test_two_admissions_at_once_do_not_pass_the_cap(state_home, monkeypatch):
         def go():
             listed[name] = _row(plan_name="p6", cwd="/own")
             plans[name] = 2
-            return {"ok": True, "detail": "起こした"}
+            return {"ok": True, "detail": "起動した"}
 
         gate.wait()
         results[name] = machine.admitted(machine.PlanLanes("plan:own"), name, 2, lambda: dict(listed), go)
@@ -162,7 +162,7 @@ def test_a_held_lock_makes_the_launch_wait(state_home):
 
 def test_an_unreadable_list_decides_by_the_own_plan_alone(state_home):
     own = machine.PlanLanes("plan:own", (("w-b", 5, True),))
-    go = lambda: {"ok": True, "detail": "起こした"}  # noqa: E731
+    go = lambda: {"ok": True, "detail": "起動した"}  # noqa: E731
     assert machine.admitted(own, "w-a", 1, lambda: None, go)["ok"]
     held = machine.admitted(own, "w-a", 2, lambda: None, go)
     assert held["waiting"]["reason"] == machine.OBSERVE
@@ -201,7 +201,7 @@ def test_status_shows_a_lane_waiting_for_the_machine(opened, monkeypatch):
 
 
 def test_status_reads_the_other_plans_once_for_all_wakeable_lanes(opened, monkeypatch):
-    """起こせるレーンが複数あっても、登録簿の他の計画は status 1 回で 1 度だけ読む（処理の回数）。"""
+    """起動できるレーンが複数あっても、登録簿の他の計画は status 1 回で 1 度だけ読む（処理の回数）。"""
     with store.transaction(opened) as conn:
         pid = plan.create_plan(conn, REPO, doc(decl("a", [[1]], plans=2), decl("b", [[2]], touches=("src/b",))), True)
     listed = {f"x-{i}": _row() for i in range(5)}
@@ -221,7 +221,7 @@ def test_status_reads_the_other_plans_once_for_all_wakeable_lanes(opened, monkey
 
 
 def test_cap_reads_the_same_env_as_the_relay_hub():
-    """マシン全体の上限はリレーハブと同じ `NDF_RELAY_MAX_NAMED` で替わり、無ければ宣言の値。"""
+    """マシン全体の上限はリレーハブと同じ `NDF_RELAY_MAX_NAMED` で替わり、無ければ設定の値。"""
     assert machine.cap({}) == int(limits.value(*machine.CAP_POLICY))
     assert machine.cap({"NDF_RELAY_MAX_NAMED": "9"}) == 9
     with pytest.raises(limits.EnvError):

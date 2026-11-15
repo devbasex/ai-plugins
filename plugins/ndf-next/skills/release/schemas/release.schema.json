@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/devbasex/ai-plugins/main/plugins/ndf/skills/release/schemas/release.schema.json",
-  "title": "NDF リリースコマンドの宣言",
+  "title": "NDF リリースコマンドの設定",
   "description": "リポジトリ側の .ndf/release.json。release の手順 3 で release-steps.py が読み、デプロイの段階に合うコマンドを順に実行する。無ければ何もしない。",
   "type": "object",
   "required": ["version", "steps"],
@@ -11,7 +11,7 @@
       "type": "string",
       "description": "この定義ファイルへの参照。読み取り側は参照しない"
     },
-    "version": { "type": "integer", "enum": [1], "description": "宣言の形の版" },
+    "version": { "type": "integer", "enum": [1], "description": "設定の形のバージョン" },
     "steps": {
       "type": "array",
       "description": "コマンドの並び。書いた順に実行し、最初に落ちたコマンドで止める",
@@ -30,7 +30,7 @@
             "type": "array",
             "minItems": 1,
             "items": { "type": "string" },
-            "description": "引数の配列。シェルを通さず、リポジトリの根を作業ディレクトリにして実行する。{version} を配る版で置き換える（置き換えるのはこの 1 つだけ）"
+            "description": "引数の配列。シェルを通さず、リポジトリの根を作業ディレクトリにして実行する。{version} を配るバージョンで置き換える（置き換えるのはこの 1 つだけ）"
           },
           "writes": {
             "type": "array",

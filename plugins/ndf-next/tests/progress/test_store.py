@@ -1,8 +1,8 @@
-"""進行表の保存。同じテストを SQLite と PostgreSQL の両方で流す（受け入れ条件 9・10。P1-1）。
+"""ステートマシンの保存。同じテストを SQLite と PostgreSQL の両方で流す（受け入れ条件 9・10。P1-1）。
 
-テストの条件: ローカル（conductor の手元・CI の Runner の SQLite）は `sqlite:///<置き場>/progress.sqlite` か
+テストの条件: ローカル（conductor の手元・CI の Runner の SQLite）は `sqlite:///<保存先>/progress.sqlite` か
 `NDF_PROGRESS_DB` の SQLite の URL で、Factory は `NDF_PROGRESS_DB` に PostgreSQL の URL を渡して開く。
-fixture `progress_url` がこの 2 つの置き場にパラメータで分かれる（tests/progress/conftest.py）。
+fixture `progress_url` がこの 2 つの保存先にパラメータで分かれる（tests/progress/conftest.py）。
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ def _append(st: store.Store, tid: str, *drafts: model.EventDraft) -> list[int]:
 
 
 def test_progress_db_holds_only_the_progress_tables(opened):
-    # P1-1: 進行表の DB は DBOS の表を持たない
+    # P1-1: ステートマシンの DB は DBOS の表を持たない
     assert store.table_names(opened) == ["ndf_progress_definitions", "ndf_progress_events", "ndf_progress_machines", "ndf_progress_meta"]
 
 
@@ -106,7 +106,7 @@ def test_newer_table_version_is_not_touched(progress_url, root):
 
 
 def test_an_old_table_version_without_a_file_stops_without_changing_the_table(progress_url, root):
-    # PostgreSQL の接続先（ファイルの保存先を持たない）で版 1 の表を見つけたら、表を変えずに止まる。SQLite でも path を None にして模す
+    # PostgreSQL の接続先（ファイルの保存先を持たない）でバージョン 1 の表を見つけたら、表を変えずに止まる。SQLite でも path を None にして模す
     with store.open_store(progress_url, root) as st:
         with store.transaction(st) as conn:
             conn.execute(store.VERSIONS.update().values(value=store.SCHEMA_VERSION - 1))

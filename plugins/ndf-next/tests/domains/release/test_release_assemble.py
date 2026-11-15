@@ -76,7 +76,7 @@ def test_assemble_builds_branch_and_pull_with_materials(tmp_path: Path) -> None:
 
 
 def test_issue_2217_tests_only_change_is_not_released(tmp_path: Path) -> None:
-    """#2217: テストだけの変化は、宣言が無ければ版を上げず、ブランチも PR も作らない。"""
+    """#2217: テストだけの変化は、設定が無ければバージョンを上げず、ブランチも PR も作らない。"""
     work = _origin_with_change(tmp_path, test_only=True)
     hub = _hub()
     with pytest.raises(assemble.NothingToRelease):
@@ -105,7 +105,7 @@ def test_collect_current_behavior(tmp_path: Path) -> None:
 
 
 def test_collect_dev_channel_plans_dev_version(tmp_path: Path) -> None:
-    """現状固定（collect）: 開発版のチャネルは接尾辞の付いた次の版を計画する。"""
+    """現状固定（collect）: 開発版のチャネルは接尾辞の付いた次のバージョンを計画する。"""
     work = _origin_with_change(tmp_path, test_only=False)
     facts = assemble.collect(work, _hub(), assemble.Target("dev", "minor", "develop", "main"))
     assert list(facts.planned) == [version_decide.Planned("kit", "1.2.3", "1.3.0-dev.1")]
@@ -115,7 +115,7 @@ def test_collect_dev_channel_plans_dev_version(tmp_path: Path) -> None:
 def test_collect_without_bump_raises_with_span(tmp_path: Path) -> None:
     """現状固定（collect）: 上げるものが無ければ範囲を書いた `NothingToRelease`。"""
     work = _origin_with_change(tmp_path, test_only=True)
-    with pytest.raises(assemble.NothingToRelease, match="^origin/main..origin/develop に版を上げる変化が無い$"):
+    with pytest.raises(assemble.NothingToRelease, match="^origin/main..origin/develop にバージョンを上げる変化が無い$"):
         assemble.collect(work, _hub(), assemble.Target("production", "patch", "develop", "main"))
 
 
@@ -145,7 +145,7 @@ def test_gather_changes_current_behavior(tmp_path: Path, test_only: bool, expect
 
 
 def _develop_ahead(tmp_path: Path) -> Path:
-    """develop の版を 1.3.0 へ上げた origin の、main を取り出した clone。"""
+    """develop のバージョンを 1.3.0 へ上げた origin の、main を取り出した clone。"""
     work = _origin_with_change(tmp_path, test_only=False)
     write_json(work / "tools" / "kit" / ".claude-plugin" / "plugin.json", {"name": "kit", "version": "1.3.0"})
     git_sandbox.sh(work, "commit", "-q", "-am", "bump")
@@ -154,21 +154,21 @@ def _develop_ahead(tmp_path: Path) -> Path:
 
 
 def test_assemble_plans_from_base_tip_even_when_started_on_production(tmp_path: Path) -> None:
-    """既定ブランチ（main）で起動しても、版は範囲の先端（develop）から読んで計画する（版が逆行しない）。"""
+    """既定ブランチ（main）で起動しても、バージョンは範囲の先端（develop）から読んで計画する（バージョンが逆行しない）。"""
     work = _develop_ahead(tmp_path)
     built = assemble.assemble(work, _hub(), assemble.Target("production", "patch", "develop", "main"))
     assert built.version == "1.3.1"
 
 
 def test_collect_refuses_when_head_is_not_base_tip(tmp_path: Path) -> None:
-    """collect はworktreeが範囲の先端でなければ止まる（ほかのブランチの版から計画しない）。"""
+    """collect はworktreeが範囲の先端でなければ止まる（ほかのブランチのバージョンから計画しない）。"""
     work = _develop_ahead(tmp_path)
     with pytest.raises(assemble.AssembleError, match="origin/develop の先端でない"):
         assemble.collect(work, _hub(), assemble.Target("production", "patch", "develop", "main"))
 
 
 def _develop_at(tmp_path: Path, develop: str, main: str | None = None, tags: tuple[str, ...] = ()) -> Path:
-    """develop の版を `develop` にした origin の clone。`main` を渡せば本番ブランチの版もそれにし、`tags` のタグを origin に置く。"""
+    """develop のバージョンを `develop` にした origin の clone。`main` を渡せば本番ブランチのバージョンもそれにし、`tags` のタグを origin に置く。"""
     work = _origin_with_change(tmp_path, test_only=False)
     manifest = work / "tools" / "kit" / ".claude-plugin" / "plugin.json"
     write_json(manifest, {"name": "kit", "version": develop})
@@ -187,21 +187,21 @@ def _develop_at(tmp_path: Path, develop: str, main: str | None = None, tags: tup
 
 
 def test_issue_2554_production_skips_tagged_version(tmp_path: Path) -> None:
-    """#2554: develop の版の基底（1.2.4）が既にタグにあれば、その版数で組まず次に空いている版へ繰り上げる。"""
+    """#2554: develop のバージョンの基底（1.2.4）が既にタグにあれば、その版数で組まず次に空いているバージョンへ繰り上げる。"""
     work = _develop_at(tmp_path, "1.2.4-dev.2", tags=("kit--v1.2.4",))
     facts = assemble.collect(work, _hub(), assemble.Target("production", "patch", "develop", "main"))
     assert list(facts.planned) == [version_decide.Planned("kit", "1.2.4-dev.2", "1.2.5")]
 
 
 def test_issue_2554_reversed_reservation_stays_above_production(tmp_path: Path) -> None:
-    """#2554: 低い版を予約したレーンが後に出しても（本番 1.2.5、develop 1.2.4-dev.1）、本番の版より大きい版で組む。"""
+    """#2554: 低いバージョンを予約したレーンが後に出しても（本番 1.2.5、develop 1.2.4-dev.1）、本番のバージョンより大きいバージョンで組む。"""
     work = _develop_at(tmp_path, "1.2.4-dev.1", main="1.2.5")
     facts = assemble.collect(work, _hub(), assemble.Target("production", "patch", "develop", "main"))
     assert [p.next for p in facts.planned] == ["1.2.6"]
 
 
 def test_issue_2554_dev_channel_skips_shipped_base(tmp_path: Path) -> None:
-    """#2554: 開発版のチャネルも、出し済みの基底の接尾辞の版を組まない。"""
+    """#2554: 開発版のチャネルも、出し済みの基底の接尾辞のバージョンを組まない。"""
     work = _develop_at(tmp_path, "1.2.4-dev.2", tags=("kit--v1.2.4",))
     facts = assemble.collect(work, _hub(), assemble.Target("dev", "patch", "develop", "main"))
     assert [p.next for p in facts.planned] == ["1.2.5-dev.1"]
@@ -234,7 +234,7 @@ def test_issue_2441_builds_once_the_other_release_is_closed(tmp_path: Path) -> N
 
 
 def test_issue_2441_cli_reports_refused() -> None:
-    """#2441: 待ちは止まった理由の種類 refused で返す（呼び手は閉じた後に打ち直す）。"""
+    """#2441: 待ちは停止理由の種類 refused で返す（呼び手は閉じた後に打ち直す）。"""
     exc = assemble.ReleaseOpen("main 宛てのリリースの PR #41 が開いている")
     assert release_cli._stopped_of(exc)["cause"]["kind"] == "refused"
 
@@ -243,7 +243,7 @@ def test_issue_2441_cli_reports_refused() -> None:
 def test_issue_3172_no_empty_release_after_release_when_only_a_closed_pull_remains(tmp_path: Path, synced: bool) -> None:
     """#3172: 出した後にマージされずに閉じた PR しか無ければ（ベースブランチに新しい変化が無い）、何度打っても空のリリースを組まない。
 
-    組み立ては依頼の PR ではなく範囲（本番ブランチ...ベースブランチ）から読むため、閉じた PR は入らない。戻す PR を
+    組み立てはリクエストの PR ではなく範囲（本番ブランチ...ベースブランチ）から読むため、閉じた PR は入らない。戻す PR を
     マージする前（`synced` が偽）と後のどちらでも同じ。
     """
     work = _origin_with_change(tmp_path, test_only=False)

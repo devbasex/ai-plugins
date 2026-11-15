@@ -1,6 +1,6 @@
 # Codex CLI 固有の手順
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `external-ai.py`（AD3+）・`launch-cli.sh`（M4）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトのサブコマンドは新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `external-ai.py`（AD3+）・`launch-cli.sh`（M4）。移行先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 共通手順（プロンプトの書き出し、バックグラウンド起動、3 段階のフォールバック回収、待機間隔、
 プロンプトテンプレート）は [../SKILL.md](../SKILL.md) を参照。本ファイルは Codex CLI に固有の差分だけを扱う。
@@ -114,7 +114,7 @@ Codex は最終 message を返さなくても `apply_patch` でファイルを�
 stderr の `^tokens used$` sentinel と結果ファイルを脱出条件にし、上限（`--phase` の工程の値）で必ず終わる。
 進捗を覗くときは `tail -30 <metrics.stem>-err.log`。
 
-## 実例: レビュー依頼
+## 実例: レビューリクエスト
 
 ```bash
 FINAL=$TMP/codex-api-v2-review.md

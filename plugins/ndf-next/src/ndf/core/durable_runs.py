@@ -1,6 +1,6 @@
-"""URL（PostgreSQL）のときに NDF が起こした実行の鍵を書く台帳 `ndf_runs`（決定 83・I12・I13）。DBOS は import しない。
+"""URL（PostgreSQL）のときに NDF が起動した実行のキーを書く実行の一覧 `ndf_runs`（決定 83・I12・I13）。DBOS は import しない。
 
-台帳は進行表と同じ DB に置き、DBOS の表ではない。DBOS の殻（`ndf.core.durable`）が起動の前に鍵を書き、片付けで読んで消す。
+実行の一覧はステートマシンと同じ DB に置き、DBOS の表ではない。DBOS の殻（`ndf.core.durable`）が起動の前にキーを書き、片付けで読んで消す。
 """
 
 from __future__ import annotations
@@ -12,13 +12,13 @@ from datetime import datetime
 from ndf.core import durable_locks as locks
 from ndf.core.durable_locks import StoreBroken, sa
 
-# URL のとき、NDF が起こした鍵を書く台帳の表。進行表と同じ DB に置き、DBOS の表ではない（I12）
+# URL のとき、NDF が起動したキーを書く実行の一覧の表。ステートマシンと同じ DB に置き、DBOS の表ではない（I12）
 RUNS_TABLE = "ndf_runs"
 
 
 @dataclass(frozen=True)
 class RunRow:
-    """台帳 `ndf_runs` の 1 行。鍵の名前・実行の鍵・起こした時刻。"""
+    """実行の一覧 `ndf_runs` の 1 行。キーの名前・実行のキー・起動した時刻。"""
 
     run_name: str
     run_key: str
@@ -36,7 +36,7 @@ def _runs_table(metadata: sa.MetaData) -> sa.Table:
 
 
 def _ensure_runs_table(engine: sa.Engine, table: sa.Table) -> None:
-    """台帳の表を作る。別の鍵の起動が同時に作ると片方が重複で落ちるため、落ちても表があれば続ける。"""
+    """実行の一覧の表を作る。別のキーの起動が同時に作ると片方が重複で落ちるため、落ちても表があれば続ける。"""
     try:
         with engine.begin() as conn:
             table.create(conn, checkfirst=True)
@@ -47,7 +47,7 @@ def _ensure_runs_table(engine: sa.Engine, table: sa.Table) -> None:
 
 
 def _register_run(database_url: str, name: str, run_key: str, now: datetime) -> None:
-    """台帳 `ndf_runs` へ鍵を 1 行書く（既にあれば書かない）。書けなければ `StoreBroken`。"""
+    """実行の一覧 `ndf_runs` へキーを 1 行書く（既にあれば書かない）。書けなければ `StoreBroken`。"""
     with locks.open_engine(database_url) as engine:
         table = _runs_table(sa.MetaData())
         try:
@@ -55,17 +55,17 @@ def _register_run(database_url: str, name: str, run_key: str, now: datetime) -> 
             with engine.begin() as conn:
                 _insert_run(conn, table, name, run_key, now)
         except sa.exc.SQLAlchemyError as exc:
-            raise StoreBroken(f"台帳 {RUNS_TABLE} に鍵を書けない: {exc}") from exc
+            raise StoreBroken(f"実行の一覧 {RUNS_TABLE} にキーを書けない: {exc}") from exc
 
 
 def _insert_run(conn: sa.Connection, table: sa.Table, name: str, run_key: str, now: datetime) -> None:
-    """台帳に鍵 `name` の行が無ければ足す。"""
+    """実行の一覧にキー `name` の行が無ければ足す。"""
     if conn.execute(sa.select(table.c.run_name).where(table.c.run_name == name)).first() is None:
         conn.execute(table.insert().values(run_name=name, run_key=run_key, started_at=now))
 
 
 def _runs(database_url: str) -> list[RunRow]:
-    """台帳の行（鍵の名前・実行の鍵・起こした時刻）。表が無ければ空。"""
+    """実行の一覧の行（キーの名前・実行のキー・起動した時刻）。表が無ければ空。"""
     table = _runs_table(sa.MetaData())
     with locks.open_engine(database_url) as engine, engine.connect() as conn:
         if not sa.inspect(conn).has_table(RUNS_TABLE):

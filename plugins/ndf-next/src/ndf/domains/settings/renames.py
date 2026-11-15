@@ -19,7 +19,7 @@ from typing import Any, Optional
 
 from ndf.contracts import facts
 
-# 改名表（契約の表の名前）
+# 改名表（コントラクトの表の名前）
 RENAMES = "ndf-settings-renames"
 # 配列のすべての要素を指す参照トークン
 EVERY = "*"
@@ -142,7 +142,7 @@ def migrate(file: str, data: Mapping[str, Any]) -> tuple[dict[str, Any], list[di
 
 
 def legacy_detail(file: str, data: Mapping[str, Any], root: Path) -> Optional[str]:
-    """旧いキーが残れば、止まる理由の文（ファイル・旧いキーの位置 → 新しいキーの位置・打つコマンド）。無ければ `None`。"""
+    """旧いキーが残れば、停止理由の文（ファイル・旧いキーの位置 → 新しいキーの位置・打つコマンド）。無ければ `None`。"""
     found = legacy_keys(file, data)
     if not found:
         return None

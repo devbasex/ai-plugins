@@ -8,7 +8,7 @@ from ndf.adapters import claude, llm, run_log
 
 
 class FakeClaude:
-    """答えを順に返す偽の呼び出し。受けた引数と問いを残す。"""
+    """回答を順に返す偽の呼び出し。受けた引数と質問を残す。"""
 
     def __init__(self, *replies: claude.ClaudeReply) -> None:
         self.replies = list(replies)

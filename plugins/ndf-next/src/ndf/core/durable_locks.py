@@ -1,11 +1,11 @@
 """DBOS の殻が使うロックと、記録の DB（SQLite・PostgreSQL）への接続。DBOS は import しない。
 
-- 待つロックはすべて `LOCK_WAIT_SECONDS` を上限にし、当たれば持ち主を添えて `StoreInUse` で止まる（B11）。
-  排他で取ったプロセスは、ロックのファイルに持ち主（ホスト・pid・時刻）を書く。PostgreSQL の advisory lock は、
-  接続の `application_name` に持ち主を書く
-- PostgreSQL の接続は keepalive と idle_session_timeout を持つ。鍵のロックを持つ接続は間隔ごとに問い合わせを打ち、
+- 待つロックはすべて `LOCK_WAIT_SECONDS` を上限にし、当たればオーナーを添えて `StoreInUse` で止まる（B11）。
+  排他で取ったプロセスは、ロックのファイルにオーナー（ホスト・pid・時刻）を書く。PostgreSQL の advisory lock は、
+  接続の `application_name` にオーナーを書く
+- PostgreSQL の接続は keepalive と idle_session_timeout を持つ。キーのロックを持つ接続は間隔ごとに問い合わせを打ち、
   idle_session_timeout にロックを放させない
-- 置き場を使えずに止まった例外（`StoreStopped` とその子）の `kind` は、止まった理由の表の語である
+- 保存先を使えずに止まった例外（`StoreStopped` とその子）の `kind` は、停止理由の表の語である
 """
 
 from __future__ import annotations
@@ -54,25 +54,25 @@ else:
     # 殻のモジュール（durable・durable_runs）もこれを使う
     sa = _lazy("sqlalchemy")
 
-# 置き場のロックと、共有の目印の検査・走査のロック。どちらも state/ の親に置き、退避で動かない（I11）
+# 保存先のロックと、共有の目印の検査・走査のロック。どちらも state/ の親に置き、退避で動かない（I11）
 STORE_LOCK = "state.lock"
 MAINT_LOCK = "maint.lock"
-# URL のときの鍵のロック（pg_advisory_lock の 2 引数の形）の第 1 引数。値は "NDFR" の 4 バイト
+# URL のときのキーのロック（pg_advisory_lock の 2 引数の形）の第 1 引数。値は "NDFR" の 4 バイト
 RUN_LOCK_SPACE = 0x4E444652
 # SQLite の URL の接頭辞（この後ろがファイルの絶対パス）
 SQLITE_PREFIX = "sqlite:///"
-# ロックを待つ上限の秒と、待つ間に試す間隔の秒。上限に当たると持ち主を添えて `StoreInUse`（B11）
+# ロックを待つ上限の秒と、待つ間に試す間隔の秒。上限に当たるとオーナーを添えて `StoreInUse`（B11）
 LOCK_WAIT_SECONDS = 300.0
 LOCK_POLL_SECONDS = 0.05
 # PostgreSQL の接続の keepalive（相手が消えた接続を 60 秒ほどで切る）と、NDF の接続の idle_session_timeout（ミリ秒）
 PG_KEEPALIVE = {"keepalives": 1, "keepalives_idle": 30, "keepalives_interval": 10, "keepalives_count": 3}
 PG_IDLE_SESSION_MS = 600_000
-# 鍵のロックを持つ PostgreSQL の接続が、idle_session_timeout に切られないよう打つ問い合わせの間隔の秒
+# キーのロックを持つ PostgreSQL の接続が、idle_session_timeout に切られないよう打つ問い合わせの間隔の秒
 PG_HEARTBEAT_SECONDS = 60.0
 
 
 class StoreStopped(Exception):
-    """置き場を使えずに止まった。`kind` は止まった理由の表の語、`paths` は関わったパス。"""
+    """保存先を使えずに止まった。`kind` は停止理由の表の語、`paths` は関わったパス。"""
 
     kind = "store_broken"
 
@@ -88,19 +88,19 @@ class StoreInUse(StoreStopped):
 
 
 class StoreBroken(StoreStopped):
-    """記録のファイルが壊れていた・台帳に書けなかった。"""
+    """記録のファイルが壊れていた・実行の一覧に書けなかった。"""
 
     kind = "store_broken"
 
 
 class StoreFormatNewer(StoreStopped):
-    """置き場の形の番号が自分より大きい。何も書いていない。"""
+    """保存先の形の番号が自分より大きい。何も書いていない。"""
 
     kind = "format_newer"
 
 
 class StoreConfigBroken(StoreStopped):
-    """ロックのファイルを作れない（置き場が書き込めない）。"""
+    """ロックのファイルを作れない（保存先が書き込めない）。"""
 
     kind = "config_broken"
 
@@ -164,8 +164,8 @@ def try_flock(handle: IO[str], mode: int) -> bool:
 def lock(handle: IO[str], mode: int, wait: bool, path: Path) -> bool:
     """`wait` なら `LOCK_WAIT_SECONDS` まで待って真、そうでなければ待たずに試して取れたかを返す。
 
-    待って取れなければ持ち主（排他で持ったプロセスがファイルに書いたホスト・pid・時刻）を添えて `StoreInUse`。
-    排他で取れたら、自分を持ち主としてファイルに書く（B11）。
+    待って取れなければオーナー（排他で持ったプロセスがファイルに書いたホスト・pid・時刻）を添えて `StoreInUse`。
+    排他で取れたら、自分をオーナーとしてファイルに書く（B11）。
     """
     got = try_flock(handle, mode)
     if wait and not got:
@@ -174,7 +174,7 @@ def lock(handle: IO[str], mode: int, wait: bool, path: Path) -> bool:
             time.sleep(LOCK_POLL_SECONDS)
             got = try_flock(handle, mode)
         if not got:
-            raise StoreInUse(f"ロックを {LOCK_WAIT_SECONDS:g} 秒待っても取れない: {path}（持ち主: {lock_owner(path)}）", (path,))
+            raise StoreInUse(f"ロックを {LOCK_WAIT_SECONDS:g} 秒待っても取れない: {path}（オーナー: {lock_owner(path)}）", (path,))
     if got and mode == fcntl.LOCK_EX:
         write_owner(handle)
     return got
@@ -185,14 +185,14 @@ def _owner_text() -> str:
 
 
 def write_owner(handle: IO[str]) -> None:
-    """排他で持ったロックのファイルを、自分の持ち主の記録 1 行で置き換える（追記の口で開いているので先に空にする）。"""
+    """排他で持ったロックのファイルを、自分のオーナーの記録 1 行で置き換える（追記の口で開いているので先に空にする）。"""
     handle.truncate(0)
     handle.write(_owner_text() + "\n")
     handle.flush()
 
 
 def lock_owner(path: Path) -> str:
-    """ロックのファイルが持つ持ち主の記録（ホスト・pid・時刻）。無い・読めなければその旨。"""
+    """ロックのファイルが持つオーナーの記録（ホスト・pid・時刻）。無い・読めなければその旨。"""
     try:
         found = json.loads(path.read_text(encoding="utf-8").strip() or "null")
     except (OSError, ValueError):
@@ -208,13 +208,13 @@ def store_lock_path(root: Path) -> Path:
 
 @contextmanager
 def store_lock(root: Path, exclusive: bool) -> Iterator[Path]:
-    """置き場のロック（`state/` の隣の `state.lock`）。共有は上限まで待って取り、排他は待たずに試す（取れなければ `StoreInUse`）。"""
+    """保存先のロック（`state/` の隣の `state.lock`）。共有は上限まで待って取り、排他は待たずに試す（取れなければ `StoreInUse`）。"""
     path = store_lock_path(root)
     handle = open_lock_file(path)
     try:
         if exclusive:
             if not try_flock(handle, fcntl.LOCK_EX):
-                raise StoreInUse(f"置き場をほかのプロセスが使っている: {path}（持ち主: {lock_owner(path)}）", (path,))
+                raise StoreInUse(f"保存先をほかのプロセスが使っている: {path}（オーナー: {lock_owner(path)}）", (path,))
             write_owner(handle)
         else:
             lock(handle, fcntl.LOCK_SH, True, path)
@@ -225,7 +225,7 @@ def store_lock(root: Path, exclusive: bool) -> Iterator[Path]:
 
 @contextmanager
 def exclusive_lock(path: Path) -> Iterator[Path]:
-    """ファイル `path` の排他のロック。上限まで待ち、取れなければ持ち主を添えて `StoreInUse`。抜けるときに閉じる。"""
+    """ファイル `path` の排他のロック。上限まで待ち、取れなければオーナーを添えて `StoreInUse`。抜けるときに閉じる。"""
     handle = open_lock_file(path)
     try:
         lock(handle, fcntl.LOCK_EX, True, path)
@@ -236,9 +236,9 @@ def exclusive_lock(path: Path) -> Iterator[Path]:
 
 @contextmanager
 def maint_lock(root: Path, wait: bool) -> Iterator[Path | None]:
-    """共有の目印の検査・控え・走査を 1 プロセスに限るロック。`wait` が偽で取れなければ None を渡す。
+    """共有の目印の検査・バックアップ・走査を 1 プロセスに限るロック。`wait` が偽で取れなければ None を渡す。
 
-    `wait` が真なら上限まで待ち、取れなければ持ち主を添えて `StoreInUse`。
+    `wait` が真なら上限まで待ち、取れなければオーナーを添えて `StoreInUse`。
     """
     path = root.parent / MAINT_LOCK
     handle = open_lock_file(path)
@@ -252,13 +252,13 @@ def maint_lock(root: Path, wait: bool) -> Iterator[Path | None]:
 
 
 def lock_key(name: str) -> int:
-    """鍵の名前から、PostgreSQL の advisory lock の第 2 引数（符号付き 32 ビット）を求める。"""
+    """キーの名前から、PostgreSQL の advisory lock の第 2 引数（符号付き 32 ビット）を求める。"""
     return int.from_bytes(hashlib.sha256(name.encode()).digest()[:4], "big", signed=True)
 
 
 @contextmanager
 def file_run_lock(path: Path, wait: bool) -> Iterator[Path | None]:
-    """鍵のロックのファイル `path` の flock。`wait` が偽で取れなければ None を渡す。"""
+    """キーのロックのファイル `path` の flock。`wait` が偽で取れなければ None を渡す。"""
     while True:
         handle = open_lock_file(path)
         try:
@@ -286,9 +286,9 @@ def file_run_lock(path: Path, wait: bool) -> Iterator[Path | None]:
 
 @contextmanager
 def pg_run_lock(database_url: str, name: str, wait: bool) -> Iterator[str | None]:
-    """DB 側の鍵の advisory lock。待つときは `lock_timeout` を上限にし、当たれば持ち主を添えて `StoreInUse`（B11）。
+    """DB 側のキーの advisory lock。待つときは `lock_timeout` を上限にし、当たればオーナーを添えて `StoreInUse`（B11）。
 
-    接続の `application_name` に持ち主（ホスト・pid）を書き、ほかのプロセスが `pg_stat_activity` から読めるようにする。
+    接続の `application_name` にオーナー（ホスト・pid）を書き、ほかのプロセスが `pg_stat_activity` から読めるようにする。
     持つ間は `PG_HEARTBEAT_SECONDS` ごとに問い合わせを打ち、idle_session_timeout にロックを放させない。
     """
     owner = f"ndf-lock {socket.gethostname()} {os.getpid()}"
@@ -300,7 +300,7 @@ def pg_run_lock(database_url: str, name: str, wait: bool) -> Iterator[str | None
                 conn.execute(sa.text("SELECT pg_advisory_lock(:space, :key)"), params)
             except sa.exc.OperationalError as exc:
                 raise StoreInUse(
-                    f"鍵 {name} のロックを {LOCK_WAIT_SECONDS:g} 秒待っても取れない（持ち主: {_pg_lock_owner(database_url, params)}）"
+                    f"キー {name} のロックを {LOCK_WAIT_SECONDS:g} 秒待っても取れない（オーナー: {_pg_lock_owner(database_url, params)}）"
                 ) from exc
             conn.execute(sa.text("SET lock_timeout = 0"))
         elif not conn.execute(sa.text("SELECT pg_try_advisory_lock(:space, :key)"), params).scalar():
@@ -323,7 +323,7 @@ def _heartbeat(conn: sa.Connection, stop: threading.Event) -> None:
         try:
             conn.execute(sa.text("SELECT 1"))
         except sa.exc.SQLAlchemyError as exc:
-            log.warning("鍵のロックの接続が切れた", extra={"error": str(exc)})
+            log.warning("キーのロックの接続が切れた", extra={"error": str(exc)})
             return
 
 

@@ -1,15 +1,15 @@
-"""ブランチ運用の測定（`ndf project measure` の `branch_flow`）と、宣言とのずれ（`ndf project drift`。#3569。旧い
-`project_lib/measure_branch_flow.py` と `lib/branch_flow.py` の取り込み方の検査の移し先）。
+"""ブランチ運用の測定（`ndf project measure` の `branch_flow`）と、設定とのずれ（`ndf project drift`。#3569。旧い
+`project_lib/measure_branch_flow.py` と `lib/branch_flow.py` のリリース方式の検査の移し先）。
 
-測るのは宣言の 4 項目（`start`・`integrate`・`doc_prs`・`release_strategy`）で、項目ごとに推した値・確からしさ・根拠（打った
+測るのは設定の 4 項目（`start`・`integrate`・`doc_prs`・`release_strategy`）で、項目ごとに推した値・確からしさ・根拠（打った
 コマンドと結果の要約）を出す。根拠が足りない項目は値を出さず `unknown` と理由を出す。
 
 - 標本は直近のマージ済みの Pull Request（最大 100 件）と、origin のスプリントブランチである
 - 確からしさ: 推した値に合う標本の割合が 0.9 以上で `高`、0.6 以上で `中`。標本が 3 件未満か 0.6 未満なら `unknown`
 - 守らせている仕組み（ルールセット）は根拠の行としてだけ出す
 
-取り込み方の組み合わせは事実の表 `branch-flows`、値の形は `.ndf/worktree.json` のスキーマの `branch_flow` が正本である。
-レビューの単位（`branch_flow.reviews`）は、PR の種類ごとに直近の PR を最大 `REVIEW_SAMPLES` 件読み、印の有無から推す。
+リリース方式の組み合わせは事実の表 `branch-flows`、値の形は `.ndf/worktree.json` のスキーマの `branch_flow` が SSOT である。
+レビューの単位（`branch_flow.reviews`）は、PR の種類ごとに直近の PR を最大 `REVIEW_SAMPLES` 件読み、マーカーの有無から推す。
 """
 
 from __future__ import annotations
@@ -45,15 +45,15 @@ REVIEW_DEFAULTS: dict[str, dict[bool, dict[str, Any]]] = {
     "design": {True: {"checks": ["cross-review"], "diff": "pr"}, False: {"checks": ["cross-review"], "diff": "pr"}},
     "spec": {True: {"checks": [], "diff": "none"}, False: {"checks": [], "diff": "none"}},
 }
-# 掛けたレビューの印（書き手: cross-review の投稿の見出し・cross-refactoring の計画のコメント・振る舞いの確認の記録）
+# 掛けたレビューのマーカー（書き手: cross-review の投稿の見出し・cross-refactoring の計画のコメント・振る舞いの確認の記録）
 REVIEW_MARKS = (
     ("cross-review", "reviews", "## 🤖 cross-review"),
     ("cross-refactoring", "comments", "<!-- cross-refactoring plan"),
     ("behavior", "comments", f"<!-- {identity.FINAL_NAME}:behavior-check"),
 )
 PR_COMMAND = "gh api repos/<R>/pulls?state=closed&per_page=100（マージ済みだけを数える）"
-REVIEWS_COMMAND = "gh api repos/<R>/pulls/<N>/reviews と repos/<R>/issues/<N>/comments（印の有無だけを数える）"
-TABLE_COMMAND = "事実の表 branch-flows の取り込み方の行"
+REVIEWS_COMMAND = "gh api repos/<R>/pulls/<N>/reviews と repos/<R>/issues/<N>/comments（マーカーの有無だけを数える）"
+TABLE_COMMAND = "事実の表 branch-flows のリリース方式の行"
 
 
 class Branch:
@@ -71,19 +71,19 @@ def _rows() -> dict[str, dict[str, Any]]:
 
 
 def default_flow() -> dict[str, Any]:
-    """`branch_flow` の無い宣言が使う値（表の既定の行の各列の先頭）。"""
+    """`branch_flow` の無い設定が使う値（表の既定の行の各列の先頭）。"""
     row = next(r for r in facts.rows("branch-flows") if r["default"])
     return {"start": row["start"][0], "integrate": row["integrate"][0], "doc_prs": row["doc_prs"][0], "release_strategy": row["release_strategy"]}
 
 
 def review_allowed(kind: str) -> tuple[list[str], list[str]]:
-    """種類が許す `checks` と `diff`（宣言のスキーマの `branch_flow.reviews` の列挙）。"""
+    """種類が許す `checks` と `diff`（設定のスキーマの `branch_flow.reviews` の列挙）。"""
     props = contracts.load_json(WORKTREE_SCHEMA)["properties"]["branch_flow"]["properties"][REVIEWS_KEY]["properties"][kind]["properties"]
     return list(props["checks"]["items"]["enum"]), list(props["diff"]["enum"])
 
 
 def answer_problem(value: Any) -> Optional[str]:
-    """`branch_flow` の値が形（スキーマ）と取り込み方の表に合わなければその理由。合えば None。"""
+    """`branch_flow` の値が形（スキーマ）とリリース方式の表に合わなければその理由。合えば None。"""
     errs = contracts.schema_errors({"version": 1, ITEM: value}, WORKTREE_SCHEMA)
     if errs:
         return "; ".join(errs[:3])
@@ -103,7 +103,7 @@ def answer_problem(value: Any) -> Optional[str]:
 
 
 def bad_answer(ans: Any) -> Optional[str]:
-    """`write` の答え（`{"value": ...}`）が取り込み方の表に合わなければその理由。答えが無い・不明なら None。"""
+    """`write` の回答（`{"value": ...}`）がリリース方式の表に合わなければその理由。回答が無い・不明なら None。"""
     return answer_problem(ans["value"]) if isinstance(ans, dict) and "value" in ans else None
 
 
@@ -135,7 +135,7 @@ def infer_field(counts: Counter[str], command: str, what: str) -> dict[str, Any]
 
 
 def _start_from_table(starts: dict[str, Any], release_strategy: dict[str, Any]) -> dict[str, Any]:
-    """動いているスプリントブランチが少なければ、取り込み方の表が許す起点を、取り込み方の確からしさのまま出す。"""
+    """動いているスプリントブランチが少なければ、リリース方式の表が許す起点を、リリース方式の確からしさのまま出す。"""
     row = _rows().get(str(release_strategy.get("value")))
     if "unknown" not in starts or row is None or len(row["start"]) != 1:
         return starts
@@ -149,7 +149,7 @@ def _start_from_table(starts: dict[str, Any], release_strategy: dict[str, Any]) 
 
 
 def infer(prs: list[dict[str, str]], base: str, production: str, release_kinds: list[str], sprint_starts: list[str]) -> dict[str, Any]:
-    """4 項目を推す。`prs` はマージ済みの PR の `{"base", "head"}`、`release_kinds` は本番チャネル宛ての PR の取り込み方、
+    """4 項目を推す。`prs` はマージ済みの PR の `{"base", "head"}`、`release_kinds` は本番チャネル宛ての PR のリリース方式、
     `sprint_starts` は本番チャネルに含まれていない origin のスプリントブランチごとの起点のチャネル。"""
     integrate = Counter("check" for p in prs if p["head"].startswith(Branch.SPRINT) and p["base"] == base)
     docs = Counter(
@@ -173,7 +173,7 @@ def infer(prs: list[dict[str, str]], base: str, production: str, release_kinds: 
 
 
 def as_item(fields: dict[str, Any], extra_evidence: list[dict[str, Any]]) -> dict[str, Any]:
-    """測定の結果の 1 項目。4 項目すべてが `高` で組み合わせが取り込み方の表に合えば測った値、ほかは問い（候補は推した値）。"""
+    """測定の結果の 1 項目。4 項目すべてが `高` で組み合わせがリリース方式の表に合えば測った値、ほかは質問（候補は推した値）。"""
     fields = {k: {**v, "evidence": [*seq(v.get("evidence")), *(extra_evidence if k == "release_strategy" else [])]} for k, v in fields.items()}
     proposal = {k: v["value"] for k, v in fields.items() if "value" in v}
     unsure = any(v.get("confidence") != "高" for v in fields.values())
@@ -194,7 +194,7 @@ def _out(tree: Tree, *args: str) -> str:
 
 
 def classify_release(tree: Tree, merge_commit: str, head: str, base: str) -> Optional[str]:
-    """本番チャネル宛ての PR 1 件の取り込み方。head がベースブランチなら丸ごと。リリースブランチなら、その first-parent の列が
+    """本番チャネル宛ての PR 1 件のリリース方式。head がベースブランチなら丸ごと。リリースブランチなら、その first-parent の列が
     マージの前の本番チャネル（マージのコミットの第 1 親）へ届けば選んで集める、届かなければ丸ごと。"""
     if head == base:
         return "merge_base_branch"
@@ -207,7 +207,7 @@ def classify_release(tree: Tree, merge_commit: str, head: str, base: str) -> Opt
 
 
 def sprint_start(tree: Tree, ref: str, base: str, production: str) -> Optional[str]:
-    """本番チャネルに含まれていないスプリントブランチの起点のチャネル（`base` / `production`。旧いと同じ 3 段の判定）。"""
+    """本番チャネルに含まれていないスプリントブランチの起点のチャネル（`base` / `production`。旧いと同じ 3 ステップの判定）。"""
     prod, origin_base = f"origin/{production}", f"origin/{base}"
     if _succeeds(tree, "merge-base", "--is-ancestor", ref, prod):
         return None
@@ -278,7 +278,7 @@ def pr_kind(head: str, base_ref: str, base: str, production: str) -> Optional[st
 
 
 def markers_of(gh: Gh, number: int) -> frozenset[str]:
-    """PR のレビューとコメントから、掛けたレビューの印の組。読めなければ `GhUnavailable`（呼ぶ側が標本から外す）。"""
+    """PR のレビューとコメントから、掛けたレビューのマーカーの組。読めなければ `GhUnavailable`（呼ぶ側が標本から外す）。"""
     texts = {
         "reviews": [str(obj(r).get("body")) for r in seq(gh.get(f"repos/{gh.repo}/pulls/{number}/reviews?per_page=100"))],
         "comments": [str(obj(c).get("body")) for c in seq(gh.get(f"repos/{gh.repo}/issues/{number}/comments?per_page=100"))],
@@ -289,7 +289,7 @@ def markers_of(gh: Gh, number: int) -> frozenset[str]:
 
 
 def _review_diff(kind: str, checks: list[str], release_markers: dict[str, int]) -> str:
-    """推したレビューの対象の差分。レビューを掛けなければ none、リリースは cross-review の印の多い側。"""
+    """推したレビューの対象の差分。レビューを掛けなければ none、リリースは cross-review のマーカーの多い側。"""
     if not checks:
         return "none"
     if kind == "release":
@@ -300,11 +300,11 @@ def _review_diff(kind: str, checks: list[str], release_markers: dict[str, int]) 
 
 
 def _infer_kind(kind: str, got: list[frozenset[str]], release_markers: dict[str, int], unreadable: int) -> dict[str, Any]:
-    """1 つの種類の印の組から推す。`unreadable` は読めなかった PR の件数。並びはステップを置く順（スキーマの列挙の順）。"""
+    """1 つの種類のマーカーの組から推す。`unreadable` は読めなかった PR の件数。並びはステップを置く順（スキーマの列挙の順）。"""
     order = review_allowed("sprint")[0]
     allowed = frozenset(review_allowed(kind)[0])
     keys = ("+".join(c for c in order if c in m & allowed) for m in got)
-    est = infer_field(Counter(k if k else "(無し)" for k in keys), REVIEWS_COMMAND, f"{kind} の PR の印")
+    est = infer_field(Counter(k if k else "(無し)" for k in keys), REVIEWS_COMMAND, f"{kind} の PR のマーカー")
     if unreadable:
         est["evidence"].append({"command": REVIEWS_COMMAND, "text": f"読めない PR {unreadable} 件"})
     if "value" in est:
@@ -314,7 +314,7 @@ def _infer_kind(kind: str, got: list[frozenset[str]], release_markers: dict[str,
 
 
 def infer_reviews(samples: dict[str, list[frozenset[str]]], release_markers: dict[str, int], unreadable: dict[str, int]) -> dict[str, Any]:
-    """種類ごとの印の組から、掛けるレビュー・対象の差分・確からしさを推す。標本が足りない種類は `unknown` と理由。"""
+    """種類ごとのマーカーの組から、掛けるレビュー・対象の差分・確からしさを推す。標本が足りない種類は `unknown` と理由。"""
     return {
         k: _infer_kind(k, samples[k] if k in samples else [], release_markers, unreadable[k] if k in unreadable else 0) for k in REVIEW_KINDS
     }
@@ -323,7 +323,7 @@ def infer_reviews(samples: dict[str, list[frozenset[str]]], release_markers: dic
 def _pick_samples(
     pulls: list[dict[str, Any]], base: str, production: str
 ) -> tuple[dict[str, list[dict[str, Any]]], dict[str, dict[str, Any]]]:
-    """(種類ごとの直近のマージ済みの PR を最大 `REVIEW_SAMPLES` 件, 版ごとの衝突の解消のレビューの PR)。"""
+    """(種類ごとの直近のマージ済みの PR を最大 `REVIEW_SAMPLES` 件, バージョンごとの衝突の解消のレビューの PR)。"""
     chosen: dict[str, list[dict[str, Any]]] = {k: [] for k in REVIEW_KINDS}
     reviews: dict[str, dict[str, Any]] = {}
     for p in pulls:
@@ -343,7 +343,7 @@ def _sample(gh: Gh, kind: str, p: dict[str, Any], reviews: dict[str, dict[str, A
 
 
 def collect_reviews(gh: Gh, pulls: list[dict[str, Any]], base: str, production: str) -> dict[str, Any]:
-    """種類ごとに直近の PR を最大 `REVIEW_SAMPLES` 件選び、印を集めて推す。衝突の解消のレビューの PR は同じ版の本番チャネル宛の
+    """種類ごとに直近の PR を最大 `REVIEW_SAMPLES` 件選び、マーカーを集めて推す。衝突の解消のレビューの PR は同じバージョンの本番チャネル宛の
     PR の標本へ寄せる。"""
     chosen, reviews = _pick_samples(pulls, base, production)
     samples: dict[str, list[frozenset[str]]] = {k: [] for k in REVIEW_KINDS}
@@ -363,12 +363,12 @@ def collect_reviews(gh: Gh, pulls: list[dict[str, Any]], base: str, production: 
 
 
 def declared_flow(worktree: Optional[dict[str, Any]]) -> tuple[dict[str, Any], dict[str, Any], bool]:
-    """宣言（`.ndf/worktree.json`）の `branch_flow` を既定値で埋めた 4 項目・書いたレビューの行・書いたか。表に合わなければ `ValueError`。"""
+    """設定（`.ndf/worktree.json`）の `branch_flow` を既定値で埋めた 4 項目・書いたレビューの行・書いたか。表に合わなければ `ValueError`。"""
     raw = obj(worktree).get(ITEM)
     if raw is not None:
         problem = answer_problem(raw)
         if problem:
-            raise ValueError(f"branch_flow が取り込み方の表に合わない: {problem}")
+            raise ValueError(f"branch_flow がリリース方式の表に合わない: {problem}")
     flow = {**default_flow(), **{k: v for k, v in obj(raw).items() if k in FLOW_KEYS}}
     return flow, obj(obj(raw).get(REVIEWS_KEY)), raw is not None
 
@@ -387,7 +387,7 @@ def _drift_row(name: str, declared: Any, estimate: dict[str, Any], proposal: str
 
 
 def drift(worktree: Optional[dict[str, Any]], item: Optional[dict[str, Any]]) -> list[dict[str, Any]]:
-    """宣言（無ければ既定値の行）と測った値のずれ。測れなかった項目は比べない。ずれが無ければ空。"""
+    """設定（無ければ既定値の行）と測った値のずれ。測れなかった項目は比べない。ずれが無ければ空。"""
     want, reviews, _ = declared_flow(worktree)
     fields = obj(obj(item).get("fields"))
     rows = []

@@ -1,4 +1,4 @@
-"""マーケットプレイスと版の書き換え・宣言・タグと GitHub Release・worktree の後片付け・副命令。"""
+"""マーケットプレイスとバージョンの書き換え・設定・タグと GitHub Release・worktree の後片付け・サブコマンド。"""
 
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ def _repo(root: Path) -> Path:
 
 
 def test_issue_1756_plugins_come_from_the_marketplace(tmp_path: Path) -> None:
-    """#1756: 名前と置き場はマーケットプレイスの登録から読む（`plugins/<名前>` の形を仮定しない）。"""
+    """#1756: 名前と保存先はマーケットプレイスの登録から読む（`plugins/<名前>` の形を仮定しない）。"""
     root = _repo(tmp_path)
     found = plugins_mod.load(root)
     assert [(p.name, p.dir) for p in found] == [("kit", "tools/kit"), ("mcp-x", "plugins/mcp/x")]
@@ -128,7 +128,7 @@ def test_release_steps_is_registered_and_stops_with_cause(monkeypatch: pytest.Mo
 
 
 def _options(parser: argparse.ArgumentParser) -> dict[str, list[tuple]]:
-    """副命令ごとの引数の (名前, 必須, 既定, 選択肢, 型, 種類)。"""
+    """サブコマンドごとの引数の (名前, 必須, 既定, 選択肢, 型, 種類)。"""
     sub = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction))
     return {
         name: [
@@ -141,7 +141,7 @@ def _options(parser: argparse.ArgumentParser) -> dict[str, list[tuple]]:
 
 
 def test_release_steps_parser_current_behavior() -> None:
-    """現状固定（_parser）: 副命令の並びと、副命令ごとの引数の必須・既定・選択肢・型。"""
+    """現状固定（_parser）: サブコマンドの並びと、サブコマンドごとの引数の必須・既定・選択肢・型。"""
     common = [("--root", False, ".", None, None, "_StoreAction"), ("--repo", False, None, None, None, "_StoreAction")]
 
     def req(name: str, type_: type | None = None, choices: tuple | None = None) -> tuple:
@@ -181,7 +181,7 @@ def test_release_steps_parser_current_behavior() -> None:
 
 
 def test_release_steps_parser_parses_and_requires_a_command() -> None:
-    """現状固定（_parser）: 副命令は必須で、引数は名前空間の属性になる。"""
+    """現状固定（_parser）: サブコマンドは必須で、引数は名前空間の属性になる。"""
     parser = release_cli._parser()
     with pytest.raises(SystemExit):
         parser.parse_args([])
@@ -192,7 +192,7 @@ def test_release_steps_parser_parses_and_requires_a_command() -> None:
 
 
 def test_ndf_settings_parse_reads_every_key(tmp_path: Path) -> None:
-    """現状固定（_parse）: すべての鍵を読み、空の配列は既定でなく空のまま。生の宣言を `raw` に持つ。"""
+    """現状固定（_parse）: すべてのキーを読み、空の配列は既定でなく空のまま。生の設定を `raw` に持つ。"""
     raw = {
         "version": 1,
         "steps": [{"name": "a", "stage": "verify", "command": ["echo", "{version}"], "writes": ["x"], "timeout_seconds": 5}],
@@ -224,9 +224,9 @@ def test_ndf_settings_parse_accepts_bool_timeout_as_number(tmp_path: Path) -> No
 @pytest.mark.parametrize(
     ("raw", "message"),
     [
-        ({"version": 2}, "宣言の version が 1 でない: 2"),
-        ({}, "宣言の version が 1 でない: None"),
-        ({"version": "1"}, "宣言の version が 1 でない: '1'"),
+        ({"version": 2}, "設定の version が 1 でない: 2"),
+        ({}, "設定の version が 1 でない: None"),
+        ({"version": "1"}, "設定の version が 1 でない: '1'"),
         ({"version": 1, "steps": {}}, "steps は配列"),
         ({"version": 1, "bump_undistributed": "yes"}, "bump_undistributed は真偽、changelog は文字列"),
         ({"version": 1, "bump_undistributed": None}, "bump_undistributed は真偽、changelog は文字列"),
@@ -247,7 +247,7 @@ def test_ndf_settings_parse_accepts_bool_timeout_as_number(tmp_path: Path) -> No
     ],
 )
 def test_ndf_settings_parse_errors(tmp_path: Path, raw: dict, message: str) -> None:
-    """現状固定（_parse）: 形の違う宣言は、鍵ごとの文言の `NdfSettingsError`。"""
+    """現状固定（_parse）: 形の違う設定は、キーごとの文言の `NdfSettingsError`。"""
     write_json(decl_mod.path_of(tmp_path), raw)
     with pytest.raises(decl_mod.NdfSettingsError) as caught:
         decl_mod.load(tmp_path)
@@ -255,7 +255,7 @@ def test_ndf_settings_parse_errors(tmp_path: Path, raw: dict, message: str) -> N
 
 
 def test_ndf_settings_load_errors_name_the_file(tmp_path: Path) -> None:
-    """現状固定（load）: 読めない・オブジェクトでない宣言はファイルのパスを書いた `NdfSettingsError`。"""
+    """現状固定（load）: 読めない・オブジェクトでない設定はファイルのパスを書いた `NdfSettingsError`。"""
     path = decl_mod.path_of(tmp_path)
     assert path == tmp_path / ".ndf" / "release.json"
     path.parent.mkdir(parents=True, exist_ok=True)

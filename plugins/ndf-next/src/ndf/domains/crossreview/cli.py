@@ -1,15 +1,15 @@
-"""副命令 `cross-review`。どの命令も結果 JSON を 1 行出して終える。
+"""サブコマンド `cross-review`。どの命令も結果 JSON を 1 行出して終える。
 
     ndf cross-review target-repo [--repo R] [--state-dir D --pr N]       # 対象のリポジトリ（#1707）
     ndf cross-review head --pr N [--repo R]                        # PR の head（依存の欠けは deps_missing。#2447）
     ndf cross-review lock <worktree> --pr N [--tool T]             # 作った直後の lock（#3106）
     ndf cross-review check-worktree <worktree>                     # 管理情報の確かめ（#3109）
     ndf cross-review sync <worktree> --branch B                    # 流し直しの初めの origin への同期（#2440）
-    ndf cross-review push-fix <worktree> --branch B [--commit C]   # 修正の push。拒まれたら 1 回だけ取り込む（#2440）
+    ndf cross-review push-fix <worktree> --branch B [--commit C]   # 修正の push。拒まれたら 1 回だけマージする（#2440）
     ndf cross-review release <worktree> --repo-dir D               # NDF の lock だけを外して片付ける（#3106）
     ndf cross-review state-file --state-dir D --pr N [--current M]            # 巻き直しの後の番号から元の状態ファイル（#2770）
     ndf cross-review fix-gate --state-dir D --pr N [--findings F]  # ラウンドの前の修正の記録の要否（#2770）
-    ndf cross-review merge-fix --state-dir D --pr N --file F [--findings F] # 修正の結果を状態ファイルへ取り込む（#2770）
+    ndf cross-review merge-fix --state-dir D --pr N --file F [--findings F] # 修正の結果を状態ファイルへ読み込む（#2770）
     ndf cross-review review-scope <worktree> --state-dir D --pr N --purpose P --base B   # レビューの範囲（#3181）
     ndf cross-review finish --summary F [--findings F2]            # 終わり方から結果（#2370・#2444）
     ndf cross-review run --pr N --state-dir D --base B [--worktree W] [--branch B2] [--purpose P]
@@ -152,12 +152,12 @@ def cmd_push_fix(args: argparse.Namespace) -> int:
     got = push.push_fix(git.Git(Path(args.worktree)), args.branch, args.commit)
     item = {"kind": "push", **got._asdict(), "conflicts": list(got.conflicts)}
     if got.ok:
-        return _ok(f"修正を送った（取り込み {'あり' if got.rebased else '無し'}）: {got.head}", [item])
+        return _ok(f"修正を送った（マージ {'あり' if got.rebased else '無し'}）: {got.head}", [item])
     if got.reason == push.REJECTED_TWICE:
-        return _stop("transient", "取り込んだ後の送り直しも拒まれた（取り込みの間に別の push が入った）", items=[item])
+        return _stop("transient", "マージした後の送り直しも拒まれた（マージの間に別の push が入った）", items=[item])
     if got.reason == push.DIVERGED:
         again = result.command(TOOL, "sync", args.worktree, "--branch", args.branch)
-        return _stop("precondition", f"取り込みで衝突したので取り消した: {', '.join(got.conflicts)}", items=[item], next=again)
+        return _stop("precondition", f"マージで衝突したので取り消した: {', '.join(got.conflicts)}", items=[item], next=again)
     return _stop("precondition", f"報告された修正のコミット {args.commit} が HEAD の祖先でない", items=[item])
 
 
@@ -200,20 +200,20 @@ def cmd_fix_gate(args: argparse.Namespace) -> int:
 
 
 def cmd_ingest(args: argparse.Namespace) -> int:
-    """`run` と同じ取り込み（台帳へ反映し、結果ファイルを移す）を `drive.merge_fix` で行う。"""
+    """`run` と同じマージ（ジャーナルへ反映し、結果ファイルを移す）を `drive.merge_fix` で行う。"""
     try:
         round_no = drive.merge_fix(Path(args.state_dir), args.pr, Path(args.file), _handed(args.findings))
     except (store.FixResultMismatch, ValueError) as exc:
         return _stop("invalid", str(exc))
     ref = store.state_pr(Path(args.state_dir), args.pr)
-    return _ok(f"修正の結果を round {round_no} へ取り込んだ: {args.file}", [_ref_item(ref)])
+    return _ok(f"修正の結果を round {round_no} へマージした: {args.file}", [_ref_item(ref)])
 
 
 # --- 範囲と終わり方 ---------------------------------------------------------------------
 
 
 def _every_section(purpose: str) -> bool:
-    """節を詳細レビューへ必ず通す PR か（設計のプランの雛形の purpose。#3181）。"""
+    """節を詳細レビューへ必ず通す PR か（設計のプランのテンプレートの purpose。#3181）。"""
     return purpose == route.templates()["design"].purpose
 
 
@@ -342,14 +342,14 @@ def _run_parser(add: Callable[..., argparse.ArgumentParser]) -> None:
 
 
 def _with_branch(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
-    """worktree と PR のブランチを受ける副命令の共通の引数を足す。"""
+    """worktree と PR のブランチを受けるサブコマンドの共通の引数を足す。"""
     parser.add_argument("worktree")
     parser.add_argument("--branch", required=True)
     return parser
 
 
 def _with_state(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
-    """状態ファイルを読む副命令の共通の引数（--state-dir・--pr）を足す。"""
+    """状態ファイルを読むサブコマンドの共通の引数（--state-dir・--pr）を足す。"""
     parser.add_argument("--state-dir", required=True)
     parser.add_argument("--pr", type=int, required=True)
     return parser
@@ -357,7 +357,7 @@ def _with_state(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
 
 def _state_parsers(add: Callable[..., argparse.ArgumentParser]) -> None:
     _with_state(add("state-file")).add_argument("--current", type=int)
-    # --findings は run へ渡した足すべき内容。merge-fix がその id の決定も台帳の行にする
+    # --findings は run へ渡した足すべき内容。merge-fix がその id の決定もジャーナルの行にする
     _with_state(add("fix-gate")).add_argument("--findings")
     merge = _with_state(add("merge-fix"))
     merge.add_argument("--file", required=True)

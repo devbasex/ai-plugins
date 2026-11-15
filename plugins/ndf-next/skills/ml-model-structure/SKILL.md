@@ -12,16 +12,16 @@ allowed-tools:
 
 # ML モデル構築・API開発の標準構造
 
-機械学習モデルの学習コードと推論API(コンテナ)を、**版ごとに自己完結する構造**で配置するための基準。
+機械学習モデルの学習コードと推論API(コンテナ)を、**バージョンごとに自己完結する構造**で配置するための基準。
 連番スクリプト (`01_…` `10_…`) をプロジェクト直下にフラットに並べると「どれがデプロイ済みの正規コードか」
-「どれが旧版・ボツ実験か」が判別できなくなる。本構造はこれを **版 (version) 単位の実体ディレクトリ** で解決し、
+「どれが旧版・ボツ実験か」が判別できなくなる。本構造はこれを **バージョン (version) 単位の実体ディレクトリ** で解決し、
 将来 v2/v3 を champion/challenger・shadow で**並行運用**しても破綻しないようにする。
 
 ## 設計の核 (なぜこの形か)
 
-- **版ごとに自己完結**: 各版 `vN/` は独自の `features.py` / `train/` / `inference/` を持つ。
-  並行運用では特徴量ロジック自体が版ごとに進化するため、全版が単一の共通ライブラリを共有する設計は破綻する。
-  版を跨いだ共有 (`shared/`) や `current -> vN` の symlink は**作らない**。
+- **バージョンごとに自己完結**: 各版 `vN/` は独自の `features.py` / `train/` / `inference/` を持つ。
+  並行運用では特徴量ロジック自体がバージョンごとに進化するため、全版が単一の共通ライブラリを共有する設計は破綻する。
+  バージョンを跨いだ共有 (`shared/`) や `current -> vN` の symlink は**作らない**。
 - **版内 feature SSoT**: 同一版の学習 (`train/`)・推論 (`inference/`)・テストが **`vN/features.py` だけ** を参照する
   (import / Docker COPY)。train/serve skew (学習時と推論時で特徴量計算がずれる事故) は **版内で** 保証する。
   版間は独立でよい — v3 が別ロジックでも v2 に影響しない。
@@ -32,7 +32,7 @@ allowed-tools:
 
 ## 目標ディレクトリ構造
 
-モデルプロジェクト 1 つ (例: `analysis/<yyyymmdd>_<name>/`) を版で分割する。
+モデルプロジェクト 1 つ (例: `analysis/<yyyymmdd>_<name>/`) をバージョンで分割する。
 
 ```
 <model-project>/                     # 例: analysis/20260505_oac-prediction/
@@ -54,7 +54,7 @@ allowed-tools:
 │   │   └── README.md
 │   ├── .dockerignore                #   ★build context ルート (= vN/) に置く
 │   ├── export_model_to_s3.py        #   成果物を model.tar.gz 化してデプロイ
-│   ├── TRAIN_SPEC.md                #   train↔serve 契約書
+│   ├── TRAIN_SPEC.md                #   train↔serve コントラクト書
 │   └── README.md  *_report.md  executive_summary.md
 └── lab/                             # 版非依存・不採用の探索 (+ README)。「ボツにしたアイデア集」
 ```
@@ -90,20 +90,20 @@ flowchart LR
 ## train/ の規約
 
 - **canonical (本線)**: デプロイ済みモデルを再現する最小経路。`01_build_dataset.py` → `10_train_model.py`
-  → `export_model_to_s3.py`。版ディレクトリで版が自明なため、ファイル名から `_v2` 等の冗長な版接尾辞は外す
+  → `export_model_to_s3.py`。バージョンディレクトリでバージョンが自明なため、ファイル名から `_v2` 等の冗長な版接尾辞は外す
   (`10_v2_model.py` → `10_train_model.py`)。
-- **train/experiments/ (採用根拠系)**: その版の意思決定・解釈に寄与した実験 (ハイパラ探索・不均衡対策比較・
+- **train/experiments/ (採用根拠系)**: そのバージョンの意思決定・解釈に寄与した実験 (ハイパラ探索・不均衡対策比較・
   SHAP・リーク検証等) を版同梱する。連番は履歴安定のため維持。CI 非対象・参照専用を README に明記。
 - **train/data/・train/results/**: データは gitignore、成果物 (モデル本体・列順/dtype/統計 JSON) は追跡する。
 - **絶対パスと相対解決の使い分け**:
   - 出力先 `OUTPUT_DIR` は `…/<project>/vN/train` の**絶対パス**で固定 (symlink を使わず曖昧さを消す)。
   - `features.py` の解決は `__file__` からの**相対計算**にする (例: train 直下は `parent.parent`、
-    `train/experiments/` 配下は `parents[2]` が版ルート `vN/`)。階層を変えても import が壊れにくい。
+    `train/experiments/` 配下は `parents[2]` がバージョンルート `vN/`)。階層を変えても import が壊れにくい。
 
 ## inference/ の規約 (要点)
 
 - SageMaker 標準ハンドラ (`model_fn` / `input_fn` / `predict_fn` / `output_fn`) を実装する。
-- **build context は版ルート `vN/`** に固定し、Dockerfile は `COPY features.py …` で版内 SSoT を取り込む
+- **build context はバージョンルート `vN/`** に固定し、Dockerfile は `COPY features.py …` で版内 SSoT をマージする
   (`COPY ../…` は Docker 仕様上不可)。`inference/features.py` を**実体ファイルとして置かない**
   (build 時に COPY するのみ)。
 - **`.dockerignore` は build context ルート (= `vN/.dockerignore`) に置く**。BuildKit が読むのは context ルートの
@@ -116,18 +116,18 @@ flowchart LR
 
 ## lab/ と v1/ の扱い
 
-- **`lab/`**: その版が**採用しなかった**探索 (派生特徴量・別アルゴリズム等)。特定の版に属さないため
-  版ディレクトリの外 (プロジェクト直下) に置く。README に「不採用の結論」を残す。
+- **`lab/`**: そのバージョンが**採用しなかった**探索 (派生特徴量・別アルゴリズム等)。特定のバージョンに属さないため
+  バージョンディレクトリの外 (プロジェクト直下) に置く。README に「不採用の結論」を残す。
 - **`v1/` (旧版)**: 退役版は read-only アーカイブとして集約する。当時の `OUTPUT_DIR` 絶対パスは
   **書き換えない** (再現性の歴史的記録)。README に「read-only・再実行非想定・新版で全面置換済み」を明記。
 
-## TRAIN_SPEC.md (train↔serve 契約書)
+## TRAIN_SPEC.md (train↔serve コントラクト書)
 
-版ルートに置き、「学習で何がどう作られ、推論がそれをどう使うか」を 1 ファイルに集約する。
-推論コンテナ/エンドポイント/API結線の実装者が、学習コードを読まずに契約を把握できることが目的。
+バージョンルートに置き、「学習で何がどう作られ、推論がそれをどう使うか」を 1 ファイルに集約する。
+推論コンテナ/エンドポイント/API結線の実装者が、学習コードを読まずにコントラクトを把握できることが目的。
 章立てテンプレは [`references/inference-and-contract.md`](references/inference-and-contract.md)。
 
-## 新しい版を作る・既存を再編する手順
+## 新しいバージョンを作る・既存を再編する手順
 
 1. **新版 `vN/` を v(N-1) と対等な実体として作る** (既存版に触れない)。`features.py` / `train/` / `inference/`
    を独自に持たせ、独立してビルド・デプロイ・エンドポイント作成できる状態にする。旧版は並行稼働を続けられる。

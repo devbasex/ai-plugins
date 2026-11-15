@@ -4,6 +4,6 @@
 - `*_decide`: 判断の純粋な関数。遷移（`transition_decide`）・キュー（`queue_decide`）・組み立て（`assemble_decide`）・
   入力の確かめ（`inputs_decide`）・待ちの結果（`wait_decide`）
 - `steps`: ステップのコマンドを打ち、結果 JSON を読む。前の子のプロセスが止まったかを確かめる
-- `runner`: 耐久ワークフローの中で遷移の判断を回し、実行の回ごとに 1 つの鍵で DBOS を使う
-- `cli`: 副命令 `plan`
+- `runner`: 耐久ワークフローの中で遷移の判断を回し、実行の回ごとに 1 つのキーで DBOS を使う
+- `cli`: サブコマンド `plan`
 """

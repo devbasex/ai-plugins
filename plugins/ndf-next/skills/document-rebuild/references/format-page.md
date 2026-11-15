@@ -1,6 +1,6 @@
 # 文書形式: ページ
 
-**この形式別ガイドは、画面でスクロールして読ませるページ（Notion・Confluence・SharePoint）に当たる。** Notion・Confluence は置き場（`document-systems` のシステム）で、文書形式はどれもページである。
+**この形式別ガイドは、画面でスクロールして読ませるページ（Notion・Confluence・SharePoint）に当たる。** Notion・Confluence は保存先（`document-systems` のシステム）で、文書形式はどれもページである。
 
 ## 文章量の単位と目安
 
@@ -28,4 +28,4 @@
 | 版面（見出しの階層・1 画面の情報量） | `design` の `layout-page.md` |
 | 生成と区切り | `release` の `form-page.md` |
 | Notion の記法と、子ページを消さない編集 | `notion-writing` |
-| 置き場からの取得と投稿 | `document-systems` |
+| 保存先からの取得と投稿 | `document-systems` |

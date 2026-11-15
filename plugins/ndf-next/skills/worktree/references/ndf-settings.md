@@ -1,6 +1,6 @@
 # 設定ファイルの書き方
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `pr-steps.py`（M1）・`release-steps.py`（M2）・`worktree-deps.sh`（M8）・`worktree-localenv.sh`（M8）・`worktree-setup.sh`（M8）・`worktree-testenv.sh`（M8）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトのサブコマンドは新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `pr-steps.py`（M1）・`release-steps.py`（M2）・`worktree-deps.sh`（M8）・`worktree-localenv.sh`（M8）・`worktree-setup.sh`（M8）・`worktree-testenv.sh`（M8）。移行先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 worktree 運用の仕組みは、リポジトリごとの差を `.ndf/worktree.json` から読む。
 **このファイルが無いリポジトリでは、すべての仕組みが何もせずに終わる。**
@@ -100,7 +100,7 @@ worktree の起点がこのブランチになる（`follow_branch: true` のと�
 origin にもローカルにも無いときは、既定ブランチへは落ちず、解決が失敗する。** 落とすと、
 開発の変更が正式版から分岐したまま進む。
 
-## ブランチ運用を宣言するリポジトリ
+## ブランチ運用を定義するリポジトリ
 
 スプリントをどのブランチから切り、本番チャネルへ何をどう入れるかを `branch_flow` に書く。
 書かなければ既定値の行（ベースブランチから切り、設計 PR をベースブランチへ出し、ベースブランチを
@@ -111,16 +111,16 @@ origin にもローカルにも無いときは、既定ブランチへは落ち�
 | `start` | `base` / `production` | `base` | スプリントの起点。worktree の `create` の既定の起点もこれになる |
 | `integrate` | `check` | `check` | スプリントブランチをベースブランチへ入れる時点（検査の Pull Request のマージ） |
 | `doc_prs` | `base` / `sprint` | `base` | 設計 PR と確定仕様化の PR の宛先 |
-| `release_strategy` | `merge_base_branch` / `release_branch` | `merge_base_branch` | 本番への取り込み方 |
+| `release_strategy` | `merge_base_branch` / `release_branch` | `merge_base_branch` | 本番へのリリース方式 |
 
-取り込み方ごとに許す組み合わせは決まっている。
+リリース方式ごとに許す組み合わせは決まっている。
 
 | `release_strategy` | 許す `start` | 許す `doc_prs` | リリースの範囲 |
 | --- | --- | --- | --- |
 | `merge_base_branch` | `base` | `base` | 本番チャネル..提示したベースブランチのコミット |
 | `release_branch` | `production` | `sprint` | 前の本番のタグ..リリースブランチ（本番チャネルから切り、選んだスプリントブランチを集める）の先頭 |
 
-選んで集める取り込み方の例:
+選んで集めるリリース方式の例:
 
 ```json
 {
@@ -140,12 +140,12 @@ origin にもローカルにも無いときは、既定ブランチへは落ち�
   直すキーと許す値を出して終了コード 2 で止まる。既定値の行へは倒さない
 - スプリントを始めるときは、`branch_flow` をメインディレクトリの設定から読む（`production_branch` と同じ）
 - スプリントに属さないリリース（並列の計画のまとめたリリース・`ndf route render release`）は、本番チャネル宛の Pull Request の検査と同じく
-  本番チャネルの宣言（`origin/<本番チャネル>` の `.ndf/worktree.json`）の `branch_flow` で組む。ベースブランチの
-  Pull Request だけではリリースの範囲の決め方を変えられない。本番チャネルの宣言を読めなければ宣言の無いリポジトリと
+  本番チャネルの設定（`origin/<本番チャネル>` の `.ndf/worktree.json`）の `branch_flow` で組む。ベースブランチの
+  Pull Request だけではリリースの範囲の決め方を変えられない。本番チャネルの設定を読めなければ設定の無いリポジトリと
   同じく組み、`branch_flow` が壊れていれば止まる。ブランチの名前は、どちらでもメインディレクトリの設定から解く
-- 変えた宣言は、それから始めるスプリントにだけ効く。動いているスプリントは、開始時に目録（`sprint.json`）の
+- 変えた設定は、それから始めるスプリントにだけ効く。動いているスプリントは、開始時に目録（`sprint.json`）の
   `ブランチ運用` へ書いた値のまま進む
-- 既存のリポジトリの使い方から案を作るときは `ndf project measure` を打ち、宣言と実際の使い方のずれは
+- 既存のリポジトリの使い方から案を作るときは `ndf project measure` を打ち、設定と実際の使い方のずれは
   `ndf project drift` で見る（`development-workflow` の `references/project-analysis.md`）
 
 ### レビューの単位
@@ -190,7 +190,7 @@ origin にもローカルにも無いときは、既定ブランチへは落ち�
   キーは書かない種類（`branch_flow.reviews.<種類>`）で、その種類を書いて cross-review を掛けるかを決める。
   両方の行に書いた重なりは意図したものとして通す
 
-リファクタリングを止める条件（CI テストの宣言の無いリポジトリ・リファクタリングの無いモード）は宣言より先に効き、
+リファクタリングを止める条件（CI テストの設定の無いリポジトリ・リファクタリングの無いモード）は設定より先に効き、
 `cross-refactoring` を選んでも外れる。
 
 実装 PR で cross-review し、リリースブランチの PR では衝突の解消だけをレビューする例:
@@ -279,9 +279,9 @@ worktree が 1 つならそのブランチのコミットへ、0 個または複
 | `copy_as_real` | `copy_from_main` の中で、実行中に書き換えられるもの。ハードリンクだとメインディレクトリ側も変わる |
 | `branch_probe` | ローカル環境に載っているブランチ名を**標準出力へ 1 行で**返すコマンド。応答ヘッダやログへブランチ名を出す仕掛けを入れて読む |
 | `isolate_when` | 分離モードを促す変更パス。シェルのパターンで書く。`*` はパス区切りも越える |
-| `healthcheck` | 照合が通ったときだけ実行される。終了コードがそのまま返る |
+| `healthcheck` | 検証が通ったときだけ実行される。終了コードがそのまま返る |
 
-`branch_probe` は**照合の要になる**。返す値が worktree のブランチ名と一致するかで、
+`branch_probe` は**検証の要になる**。返す値が worktree のブランチ名と一致するかで、
 ローカル環境に載っているコードを判定する。値を返せないとき（ローカル環境が動いていない、仕掛けが
 入っていない）は「未起動または適用外」として扱われ、「不一致」とは区別される。
 
@@ -356,7 +356,7 @@ worktree ごとにテスト環境を立てるなら、`testenv` を足す。
 | --- | --- |
 | `port_band` | 他の用途と重ならない帯。スロット 1 つあたり 20 番を使う |
 | `port_roles` | 役割ごとの番号。ポートは `帯の下限 + スロット*20 + 役割番号` |
-| `discard_volumes` | `false` のとき、`worktree-testenv.sh down` がテスト環境のボリュームを残す。**無しと `true` では消し、消えたデータは戻せない。** 作り直せないデータを持つプロジェクトは `false` を書く。真偽値以外の値は残す側に倒す。メインディレクトリの宣言を読む |
+| `discard_volumes` | `false` のとき、`worktree-testenv.sh down` がテスト環境のボリュームを残す。**無しと `true` では消し、消えたデータは戻せない。** 作り直せないデータを持つプロジェクトは `false` を書く。真偽値以外の値は残す側に倒す。メインディレクトリの設定を読む |
 | `golden_tag_paths` | データ構造を定める資産。**内容が同じなら基準を焼き直さない** |
 | `test_kinds` | 種類ごとの選別と実行。**書かなければテスト実行の仕組みは何もせずに終わる** |
 | `skip_reset` | 初期化を抑止する環境変数。渡さないと最初のテストが全体を作り直す構成がある |
@@ -437,7 +437,7 @@ WT="$main_dir/.worktrees/<ブランチ名>"
 # 設定が読めているか（読めなければ何も出ない）
 bash "$SCRIPTS/worktree-localenv.sh" mode "$WT"
 
-# 照合の状態（0 一致 / 1 不一致 / 2 未起動または適用外）
+# 検証の状態（0 一致 / 1 不一致 / 2 未起動または適用外）
 bash "$SCRIPTS/worktree-localenv.sh" verify "$WT"; echo $?
 ```
 

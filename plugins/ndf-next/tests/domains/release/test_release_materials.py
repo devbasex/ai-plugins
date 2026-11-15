@@ -1,4 +1,4 @@
-"""承認資料（CI の数え方・資料の節）と、利用者の設定の控え。"""
+"""承認資料（CI の数え方・資料の節）と、利用者の設定のスナップショット。"""
 
 from __future__ import annotations
 
@@ -75,7 +75,7 @@ def test_user_config_masks_credentials_in_sources() -> None:
 
 
 def test_codex_entries_current_behavior() -> None:
-    """現状固定（codex_entries）: 取得元は宣言の順に 3 つの鍵を写し、プラグインは設定と置き場の和を名前の順に並べる。"""
+    """現状固定（codex_entries）: 取得元は設定の順に 3 つのキーを写し、プラグインは設定と保存先の和を名前の順に並べる。"""
     conf = {
         "marketplaces": {
             "m": {"source_type": "git", "source": "https://u:p@example.invalid/r.git", "ref": "main", "extra": 1},

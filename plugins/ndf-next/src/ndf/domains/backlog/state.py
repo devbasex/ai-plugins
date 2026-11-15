@@ -1,6 +1,6 @@
-"""棚卸しの状態の置き場と JSON の読み書き。
+"""棚卸しの状態の保存先と JSON の読み書き。
 
-置き場は 引数 → 環境変数（置き場の表 `backlog-state` の `env`）→ メインディレクトリ（既定ブランチの worktree）の
+保存先は 引数 → 環境変数（保存先の表 `backlog-state` の `env`）→ メインディレクトリ（既定ブランチの worktree）の
 `.ndf/backlog/state` の順に決め、その下の `<repo>/` に書く。どの worktree から打っても同じ位置になり、マシンを
 再起動しても消えない。一時ディレクトリへは倒さない（#1640・#1595 の関連 1）。
 
@@ -22,7 +22,7 @@ FILES = "ndf-files"
 
 
 class StateError(Exception):
-    """置き場を決められない・記録が壊れている。`kind` は止まった理由の種類。"""
+    """保存先を決められない・記録が壊れている。`kind` は停止理由の種類。"""
 
     def __init__(self, detail: str, kind: str) -> None:
         super().__init__(detail)
@@ -42,7 +42,7 @@ def main_dir(cwd: Path) -> Path:
 
 
 def repo_key(repo: str) -> str:
-    """リポジトリ（`<所有者>/<名前>`）の置き場の鍵。"""
+    """リポジトリ（`<所有者>/<名前>`）の保存先のキー。"""
     return repo.replace("/", "__")
 
 
@@ -59,7 +59,7 @@ def state_dir(cwd: Path, repo: str, arg: Optional[str] = None) -> Path:
     try:
         path.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
-        raise StateError(f"状態の置き場を作れない: {path}: {exc}", "precondition") from exc
+        raise StateError(f"状態の保存先を作れない: {path}: {exc}", "precondition") from exc
     return path
 
 

@@ -1,4 +1,4 @@
-"""使い捨ての PostgreSQL を `initdb` と `pg_ctl` で起こすテストの支援（fixture `start_postgres` の実体）。
+"""使い捨ての PostgreSQL を `initdb` と `pg_ctl` で起動するテストの支援（fixture `start_postgres` の実体）。
 
 GitHub Actions の ubuntu の Runner は PostgreSQL を入れてある（サービスは止まっている）。手元に無ければ飛ばし、
 CI（環境変数 `CI`）では落とす。`pyproject.toml` の pytest の `pythonpath` がこのディレクトリを持つので、
@@ -20,7 +20,7 @@ import pytest
 
 
 def _pg_bin() -> Path | None:
-    """`pg_ctl` のあるディレクトリ。PATH を先に見て、無ければ入っている版の最後のもの。"""
+    """`pg_ctl` のあるディレクトリ。PATH を先に見て、無ければ入っているバージョンの最後のもの。"""
     found = shutil.which("pg_ctl")
     if found:
         return Path(found).parent
@@ -36,13 +36,13 @@ def _free_port() -> int:
 
 @contextmanager
 def start_postgres(tmp_path_factory: pytest.TempPathFactory) -> Iterator[tuple[Path, str]]:
-    """PostgreSQL を起こし、（bin のディレクトリ, 末尾の DB 名を付けない URL）を渡して、抜けたら止める。"""
+    """PostgreSQL を起動し、（bin のディレクトリ, 末尾の DB 名を付けない URL）を渡して、抜けたら止める。"""
     bindir = _pg_bin()
     # initdb は root では動かない
     missing = "PostgreSQL（pg_ctl）が無い" if bindir is None else "root では initdb を打てない" if os.geteuid() == 0 else ""
     if missing:
         if os.environ.get("CI"):
-            pytest.fail(f"CI で PostgreSQL を起こせない: {missing}")
+            pytest.fail(f"CI で PostgreSQL を起動できない: {missing}")
         pytest.skip(missing)
     data = tmp_path_factory.mktemp("pgdata")
     port = _free_port()

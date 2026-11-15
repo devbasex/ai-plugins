@@ -1,4 +1,4 @@
-"""ラッパーの見回り: 区間の切り替え・上限でのアカウントの替え・認証の失敗・版の混ざり（#2438・#3337・#3243・3341-2）。
+"""ラッパーの見回り: セグメントの切り替え・上限でのアカウントの替え・認証の失敗・バージョンの混ざり（#2438・#3337・#3243・3341-2）。
 
 子は擬似端末の代わりにパイプを持つ偽物で、時計は呼ぶたびに 1 秒進む偽物である（擬似端末も壁時計も待たない。#2962）。
 """
@@ -50,7 +50,7 @@ class FakeChild:
 
 
 class Spawner:
-    """`markers` は起動の順番 → その子のセッションが Stop の hook で書く次の区間のブロック。"""
+    """`markers` は起動の順番 → その子のセッションが Stop の hook で書く次のセグメントのブロック。"""
 
     def __init__(self, children, markers=None):
         self.children = list(children)
@@ -121,12 +121,12 @@ def test_next_block_starts_a_new_session_with_the_block_and_a_relay_mark(tmp_pat
         accounts.write_usages(state, [Usage("team", 95.0, False), Usage("main", 10.0, False)])
         accounts.use(state, "team")
 
-    ended, spawn, w = _run(tmp_path, [FakeChild([b"working\r\n"], None), FakeChild([], 0)], prepare, markers={0: "/goal 次の区間"})
+    ended, spawn, w = _run(tmp_path, [FakeChild([b"working\r\n"], None), FakeChild([], 0)], prepare, markers={0: "/goal 次のセグメント"})
     assert ended.cause == "" and "書かずに終わった" in ended.reason
     (first, first_env), (second, second_env) = spawn.calls
     assert first[:2] == [wrapper.CLAUDE, "--session-id"] and first[3:] == ["--model", "x", "最初の 1 行"]
-    assert second[0:2] == [wrapper.CLAUDE, "--session-id"] and second[-1] == "/goal 次の区間" and second[2] != first[2]
-    # カットポイントで使用率が閾値を超えていれば、空いたアカウントで次の区間を始める（#3336）
+    assert second[0:2] == [wrapper.CLAUDE, "--session-id"] and second[-1] == "/goal 次のセグメント" and second[2] != first[2]
+    # カットポイントで使用率が閾値を超えていれば、空いたアカウントで次のセグメントを始める（#3336）
     assert (first_env["NDF_CLAUDE_ACCOUNT"], second_env["NDF_CLAUDE_ACCOUNT"]) == ("team", "main")
     assert first_env["NDF_RELAY_DIR"] == str(w.dir) and first_env["CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION"] == "false"
     assert markers.take(tmp_path / "state", second[2]) is True
@@ -174,7 +174,7 @@ def test_a_second_wrapper_with_the_same_name_is_refused(tmp_path):
 
 
 def test_old_ndf_wrapper_running_stops_the_new_wrapper(tmp_path):
-    # 旧い版のラッパーが動いていれば、新しい版のラッパーは動かずに止まる（3341-2）
+    # 旧いバージョンのラッパーが動いていれば、新しいバージョンのラッパーは動かずに止まる（3341-2）
     old = tmp_path / "old" / "relay" / "20261113T1"
     old.mkdir(parents=True)
     fd = os.open(old / registry.LOCK_FILE, os.O_RDWR | os.O_CREAT)
@@ -207,9 +207,9 @@ def test_stop_signal_lets_the_session_finish_and_starts_no_next_section(tmp_path
     stale.mkdir(parents=True)
     stop_signal.location_stop(stale)  # 前の実行の残りは始めたばかりの実行を止めない
     s = _settings(tmp_path)
-    # 出力の後に黙る見回り（b""）を置き、子が生きたまま静かな時間に入って次の区間を保留する形にする
+    # 出力の後に黙る見回り（b""）を置き、子が生きたまま静かな時間に入って次のセグメントを保留する形にする
     child = FakeChild([b"a\r\n", b"", b"", b"", b"", b"", b""], 0)
-    spawn = StopOnSpawn([child], {0: "/goal 次の区間"})
+    spawn = StopOnSpawn([child], {0: "/goal 次のセグメント"})
     out = io.BytesIO()
     w = wrapper.Wrapper(s, spawn=spawn, clock=_clock(), out=out)
     try:
@@ -305,10 +305,10 @@ def test_usage_measured_after_the_limit_line_resumes_on_the_same_account(tmp_pat
 
 
 def test_a_mark_left_by_an_earlier_run_is_dropped_not_used(tmp_path):
-    # 前の実行の印（セッションが違う）で、新しい子を終わらせて置き換えない
+    # 前の実行のマーカー（セッションが違う）で、新しい子を終わらせて置き換えない
     def prepare(d, state):
         d.mkdir(parents=True)
-        signals.write_next(d, "old-session", "/goal 古い区間", True, 0.1)
+        signals.write_next(d, "old-session", "/goal 古いセグメント", True, 0.1)
 
     ended, spawn, w = _run(tmp_path, [FakeChild([], 0)], prepare)
     assert len(spawn.calls) == 1 and ended.cause == "" and "書かずに終わった" in ended.reason
@@ -317,7 +317,7 @@ def test_a_mark_left_by_an_earlier_run_is_dropped_not_used(tmp_path):
 
 
 def test_next_mark_switches_once_its_quiet_time_has_passed_even_while_output_continues(tmp_path):
-    # /goal の未達の応答が続いて画面が静かにならなくても、印を最初に書いてから静かな時間が過ぎれば切り替える（#2438）
+    # /goal の未達の応答が続いて画面が静かにならなくても、マーカーを最初に書いてから静かな時間が過ぎれば切り替える（#2438）
     chatty = FakeChild([b"goal not met\r\n"] * 50, None)
     later = wrapper.WallClock(now=lambda: time.time() + 60.0)
     ended, spawn, _ = _run(tmp_path, [chatty, FakeChild([], 0)], markers={0: "/goal 次"}, wall=later, quiet=30.0)
@@ -357,12 +357,12 @@ def test_an_ended_pty_is_not_read_again_while_waiting(tmp_path, monkeypatch):
 
 
 def test_question_that_cannot_reach_the_plan_keeps_the_reason(tmp_path, monkeypatch):
-    # 計画の依頼へ載せられない問いは、理由を状態と log.jsonl に残してから消す（#3035）
+    # 計画のリクエストへ載せられない質問は、理由を状態と log.jsonl に残してから消す（#3035）
     asked = []
 
     def ask_plan(path):
         asked.append(json.loads(path.read_text(encoding="utf-8"))["questions"])
-        return "副命令 lanes question の結果を読めない（終了コード 2）: 壊れた"
+        return "サブコマンド lanes question の結果を読めない（終了コード 2）: 壊れた"
 
     def prepare(d, state):
         d.mkdir(parents=True, exist_ok=True)
@@ -379,5 +379,5 @@ def test_question_that_cannot_reach_the_plan_keeps_the_reason(tmp_path, monkeypa
     ended, _, w = _run(tmp_path, [FakeChild([b"q\r\n"], 0)], prepare, ask_plan=ask_plan)
     assert asked == [[{"question": "q"}]] and ended.cause == ""
     assert not signals.has_question(w.dir)
-    assert any(state == "waiting" and "計画の依頼へ載せられない" in reason for state, reason in states)
+    assert any(state == "waiting" and "計画のリクエストへ載せられない" in reason for state, reason in states)
     assert [(r["ok"], "壊れた" in r["reason"]) for r in _log(w) if r["kind"] == "plan_question"] == [(False, True)]

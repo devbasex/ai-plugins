@@ -20,7 +20,7 @@
     {
       "what": "計画",
       "result": "not_run",
-      "reason": "スプリントが手順 0 で旧いプラグインへ解決するため、並列の計画（parallel.py。行き先 P3 #3097 は開いている）は流していない"
+      "reason": "スプリントが手順 0 で旧いプラグインへ解決するため、並列の計画（parallel.py。移行先 P3 #3097 は開いている）は流していない"
     },
     {
       "what": "閉じる証拠（#2602・#2690・#2719 の再現しない記録）",
@@ -30,7 +30,7 @@
   ],
   "fixes": {
     "closed_children": {"issue": 3569, "children": ["X0", "C2", "D2+", "M3b", "P1a", "S1b"]},
-    "open_children": "ほかの failed の行は、行の to の子（開いている）が直す。行き先の子の Issue 番号は src/ndf/checks/children.json にある"
+    "open_children": "ほかの failed の行は、行の to の子（開いている）が直す。移行先の子の Issue 番号は src/ndf/checks/children.json にある"
   },
   "passed": []
 }

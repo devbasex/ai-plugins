@@ -1,6 +1,6 @@
-"""現状固定: 台帳 `ndf_runs` の読み書きと Engine の解放（_register_run・_runs・_forget_run）。
+"""現状固定: 実行の一覧 `ndf_runs` の読み書きと Engine の解放（_register_run・_runs・_forget_run）。
 
-台帳の SQL は SQLAlchemy の汎用の形なので、PostgreSQL の無い手元でも SQLite の URL で通す。
+実行の一覧の SQL は SQLAlchemy の汎用の形なので、PostgreSQL の無い手元でも SQLite の URL で通す。
 """
 
 from __future__ import annotations
@@ -68,7 +68,7 @@ def test_register_that_cannot_write_raises_store_broken_and_disposes(tmp_path, d
     with pytest.raises(locks.StoreBroken) as err:
         runs._register_run(_url(tmp_path), "run-a", "key-a", STARTED)
     assert err.value.kind == "store_broken"
-    assert str(err.value).startswith(f"台帳 {durable.RUNS_TABLE} に鍵を書けない: ")
+    assert str(err.value).startswith(f"実行の一覧 {durable.RUNS_TABLE} にキーを書けない: ")
     assert isinstance(err.value.__cause__, sa.exc.SQLAlchemyError)
     assert disposed == {"created": 1, "disposed": 1}
 

@@ -4,7 +4,7 @@
   表の行の順に並べる。修正担当（`claude -p` を打つランタイム）は相手役にしない。利用者が名指した相手役は
   `review_args` を持てば `default_seat` が偽でも入れる
 - 相手役は読むだけの起動で、指摘を最後の 1 行の JSON（`{"findings": [...]}`）で返す。起動の引数は表の
-  `review_args` が持つ（`{workdir}` は worktree に置き換える）。問いは最後の引数で渡す
+  `review_args` が持つ（`{workdir}` は worktree に置き換える）。質問は最後の引数で渡す
 """
 
 from __future__ import annotations

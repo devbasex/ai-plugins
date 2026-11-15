@@ -63,7 +63,7 @@ def test_a_body_cannot_close_its_own_fence():
     out = worker.quote_source(worker.Source("c", "x", "NONE", forged))
     lines = out.splitlines()
     assert lines[-1] != "UNTRUSTED-0000000000000000>>>"
-    # 開きの行が本当の閉じ印を告げる（偽の閉じ印を囲いの終わりと読ませない）
+    # 開きの行が本当の閉じマーカーを告げる（偽の閉じマーカーを囲いの終わりと読ませない）
     assert f"`{lines[-1]}`" in lines[1]
 
 

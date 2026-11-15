@@ -5,11 +5,11 @@
 
 行うのは次の 2 つだけで、ほかは出力なし・終了コード 0 で通す。
 
-- `strict` の guard の判定（止める答えなら契約表の形で出す）
+- `strict` の guard の判定（止める回答ならコントラクト表の形で出す）
 - SessionStart のとき、根の目印を書き、環境の用意を切り離して起動する（待たない）。前の用意が失敗していれば
   1 行の案内を出す
 
-版がシステムの `python3` の下限（`contracts/hooks/imports.json` の `boot.python`）より古ければ何もせずに 0。
+バージョンがシステムの `python3` の下限（`contracts/hooks/imports.json` の `boot.python`）より古ければ何もせずに 0。
 """
 
 from __future__ import annotations

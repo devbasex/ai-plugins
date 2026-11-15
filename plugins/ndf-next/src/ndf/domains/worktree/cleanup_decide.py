@@ -34,7 +34,7 @@ REASONS = {
     KEEP_NO_PR: "ブランチの PR が無い",
     KEEP_OPEN: "開いた PR がある",
     KEEP_UNMERGED: "PR がマージされずに閉じた（消すかは人が決める）",
-    KEEP_SPRINT: "選んで集める取り込み方のスプリントブランチで、本番チャネルに含まれるまで残す（merged_decide.sprint_keep）",
+    KEEP_SPRINT: "選んで集めるリリース方式のスプリントブランチで、本番チャネルに含まれるまで残す（merged_decide.sprint_keep）",
 }
 
 
@@ -42,7 +42,7 @@ REASONS = {
 class PullState:
     """判断に要る PR の状態（`adapters.github.Pull` の `state`・`merged`・`merge_sha` と同じ語）。
 
-    `merge_sha` は判断には使わず、消すときに退避の台帳へ書く（squash のマージでは先端と別）。
+    `merge_sha` は判断には使わず、消すときに退避のジャーナルへ書く（squash のマージでは先端と別）。
     """
 
     state: str

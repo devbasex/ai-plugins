@@ -1,14 +1,14 @@
-"""LLM の判断の呼び出し。答えを選択肢か JSON のスキーマで縛る（#1142 の AD3。SF6）。
+"""LLM の判断の呼び出し。回答を選択肢か JSON のスキーマで縛る（#1142 の AD3。SF6）。
 
-- 選択肢のモード（`choices`）: 答えは `{"decision", "reason", "basis"}` の形に合い、`decision` が選択肢の中にある（IS6a）
-- 任意の JSON のモード（`schema`）: 答えは渡したスキーマだけに合えばよい。`decision` は求めない（IS6b）
+- 選択肢のモード（`choices`）: 回答は `{"decision", "reason", "basis"}` の形に合い、`decision` が選択肢の中にある（IS6a）
+- 任意の JSON のモード（`schema`）: 回答は渡したスキーマだけに合えばよい。`decision` は求めない（IS6b）
 
-問いを `claude -p --json-schema` で渡し、答えを `jsonschema` で確かめ直す。合わなければ 1 回だけ打ち直し、
-なお合わなければ `needs_human` で人へ戻す（決定 60）。答えの文から近い選択肢を拾わない。
+質問を `claude -p --json-schema` で渡し、回答を `jsonschema` で確かめ直す。合わなければ 1 回だけ打ち直し、
+なお合わなければ `needs_human` で人へ戻す（決定 60）。回答の文から近い選択肢を拾わない。
 起動は判断の権限（`claude.Permission.JUDGE`。Tool を使わせない）で行う（#3364）。
 
-claude を起動できない・期限を超えた・利用上限・学習の設定の控えが無い・重い起動の枠が空かないは、打ち直しても直らないので打ち直さず、それぞれの止まった理由
-（`FAILURE_CAUSES`）で返す（#3394）。どの理由で止まるかと答えの形はこのモジュールが決め、呼び手の LLM に決めさせない。
+claude を起動できない・期限を超えた・利用上限・学習の設定のスナップショットが無い・重い起動のスロットが空かないは、打ち直しても直らないので打ち直さず、それぞれの停止理由
+（`FAILURE_CAUSES`）で返す（#3394）。どの理由で止まるかと回答の形はこのモジュールが決め、呼び手の LLM に決めさせない。
 """
 
 from __future__ import annotations
@@ -24,11 +24,11 @@ from jsonschema.exceptions import SchemaError
 from ndf.adapters import claude, run_log
 from ndf.contracts import causes
 
-# 打つ回数（最初の 1 回を含む）。上限の宣言ではなく決定 60 で固定した回数
+# 打つ回数（最初の 1 回を含む）。上限の設定ではなく決定 60 で固定した回数
 ATTEMPTS = 2
-# needs_human の説明に載せる、答えの先頭の字数
+# needs_human の説明に載せる、回答の先頭の字数
 ANSWER_HEAD = 200
-# 打ち直さない失敗の、止まった理由の種類（`contracts/causes.json`）
+# 打ち直さない失敗の、停止理由の種類（`contracts/causes.json`）
 FAILURE_CAUSES: dict[claude.Failure, str] = {
     claude.Failure.LAUNCH: "precondition",
     claude.Failure.TIMEOUT: "interrupted",
@@ -36,9 +36,9 @@ FAILURE_CAUSES: dict[claude.Failure, str] = {
     claude.Failure.REFUSED: "precondition",
     claude.Failure.NO_SLOT: "infra_wait",
 }
-SYSTEM = "あなたは判断の呼び出しに答える。渡したスキーマに合う JSON だけを返す。前置きや説明の文を足さない。"
+SYSTEM = "あなたは判断の呼び出しに回答する。渡したスキーマに合う JSON だけを返す。前置きや説明の文を足さない。"
 
-# 選択肢のモードの答えの形。`decision` の `enum` は呼ぶときに選択肢で埋める
+# 選択肢のモードの回答の形。`decision` の `enum` は呼ぶときに選択肢で埋める
 JUDGE_ANSWER: dict[str, Any] = {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",
@@ -51,18 +51,18 @@ JUDGE_ANSWER: dict[str, Any] = {
     },
 }
 
-# 1 回の呼び出し: (起動の引数, 問い, 上限の秒) -> 答え。テストは偽の呼び出しへ差し替える
+# 1 回の呼び出し: (起動の引数, 質問, 上限の秒) -> 回答。テストは偽の呼び出しへ差し替える
 Caller = Callable[[Sequence[str], str, float], claude.ClaudeReply]
 
 
 class AnswerSchemaError(Exception):
-    """答えのスキーマを組めない（引数の誤り・スキーマのファイルが読めない・スキーマとして正しくない）。"""
+    """回答のスキーマを組めない（引数の誤り・スキーマのファイルが読めない・スキーマとして正しくない）。"""
 
 
 class JudgeAnswer(NamedTuple):
     """判断の呼び出しの結果。`ok` が真なら `answer` はスキーマに合う。
 
-    偽なら `cause` の種類は、答えが 2 回とも合わなければ `needs_human`、打ち直さない失敗なら `FAILURE_CAUSES` の値。
+    偽なら `cause` の種類は、回答が 2 回とも合わなければ `needs_human`、打ち直さない失敗なら `FAILURE_CAUSES` の値。
     """
 
     ok: bool
@@ -73,7 +73,7 @@ class JudgeAnswer(NamedTuple):
 
 
 def answer_schema(choices: Optional[list[str]] = None, schema: Optional[str] = None) -> dict:
-    """答えのスキーマ。`choices` と `schema`（スキーマのファイルのパス）のどちらか 1 つだけを渡す。"""
+    """回答のスキーマ。`choices` と `schema`（スキーマのファイルのパス）のどちらか 1 つだけを渡す。"""
     if (choices is None) == (schema is None):
         raise AnswerSchemaError("choices と schema のどちらか 1 つだけを渡す")
     if choices is not None:
@@ -86,20 +86,20 @@ def answer_schema(choices: Optional[list[str]] = None, schema: Optional[str] = N
         loaded = json.loads(Path(schema).read_text(encoding="utf-8"))
         Draft202012Validator.check_schema(loaded)
     except (OSError, json.JSONDecodeError, SchemaError) as exc:
-        raise AnswerSchemaError(f"答えのスキーマを読めない: {schema}: {exc}") from exc
+        raise AnswerSchemaError(f"回答のスキーマを読めない: {schema}: {exc}") from exc
     return loaded
 
 
 def check_answer(answer: object, schema: dict) -> list[str]:
-    """答えをスキーマで確かめ、誤りを並べる。空なら合う。"""
+    """回答をスキーマで確かめ、誤りを並べる。空なら合う。"""
     found = Draft202012Validator(schema).iter_errors(answer)
     return sorted(f"{'/'.join(map(str, e.absolute_path)) or '(根)'}: {e.message}" for e in found)
 
 
 def _prompt(question: str, material: str, errors: list[str]) -> str:
-    parts = [f"# 問い\n{question}", f"# 材料\n{material}"]
+    parts = [f"# 質問\n{question}", f"# 材料\n{material}"]
     if errors:
-        parts.append("# 前の答えは形に合わなかった\n" + "\n".join(errors))
+        parts.append("# 前の回答は形に合わなかった\n" + "\n".join(errors))
     return "\n\n".join(parts)
 
 
@@ -109,9 +109,9 @@ def _head(reply: claude.ClaudeReply) -> str:
 
 
 def ask(question: str, material: str, schema: dict, timeout: float, call: Optional[Caller] = None) -> JudgeAnswer:
-    """問いと材料を `claude -p --json-schema` で渡し、答えを確かめる。合わなければ 1 回だけ打ち直す。
+    """質問と材料を `claude -p --json-schema` で渡し、回答を確かめる。合わなければ 1 回だけ打ち直す。
 
-    `schema` は `answer_schema` の値。2 回とも合わなければ `cause` が `needs_human` で、2 回の答えの先頭を
+    `schema` は `answer_schema` の値。2 回とも合わなければ `cause` が `needs_human` で、2 回の回答の先頭を
     `detail` に持つ。claude が誤りで終えた・出力が JSON でないときは 1 回の外れと数える。起動できない・期限切れ・
     利用上限はその回で止め、打ち直さない。
     """
@@ -133,5 +133,5 @@ def ask(question: str, material: str, schema: dict, timeout: float, call: Option
             return JudgeAnswer(True, reply.answer, None, attempt, cost)
         heads.append(f"{attempt} 回目: {_head(reply)}（{'; '.join(errors)}）")
     run_log.record("judge", attempts=ATTEMPTS, valid=False, cost=cost)
-    detail = f"判断の答えが {ATTEMPTS} 回とも形に合わなかった。" + " / ".join(heads)
+    detail = f"判断の回答が {ATTEMPTS} 回とも形に合わなかった。" + " / ".join(heads)
     return JudgeAnswer(False, None, causes.cause("needs_human", detail), ATTEMPTS, cost)

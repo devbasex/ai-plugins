@@ -1,4 +1,4 @@
-"""`ndf issues` の副命令（候補・順位・反映・戻し・深さ）と状態の置き場（#1640・#2064・#2423・#2540・#2701・#1595）。"""
+"""`ndf issues` のサブコマンド（候補・順位・反映・戻し・深さ）と状態の保存先（#1640・#2064・#2423・#2540・#2701・#1595）。"""
 
 from __future__ import annotations
 
@@ -64,7 +64,7 @@ def test_added_issues_are_kept_beyond_the_limit(repo_dir, fake, run_issues):
 
 
 def test_depth_limits_read_the_ndf_settings(repo_dir, run_issues):
-    # #2423: 宣言の depths.review.seconds 900 で 900、無ければ既定、形が違えば止まる
+    # #2423: 設定の depths.review.seconds 900 で 900、無ければ既定、形が違えば止まる
     assert run_issues("depth-limits", "review")["metrics"]["seconds"] == 1800
     decl = repo_dir / ".ndf" / "backlog.json"
     decl.parent.mkdir()

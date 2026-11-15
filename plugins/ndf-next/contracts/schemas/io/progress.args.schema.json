@@ -154,7 +154,7 @@
         },
         "--parent": {
           "type": "string",
-          "description": "親の進行表（レーンの進行表）の ID"
+          "description": "親のステートマシン（レーンのステートマシン）の ID"
         }
       },
       "required": [

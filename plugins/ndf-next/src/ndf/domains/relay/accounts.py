@@ -1,6 +1,6 @@
 """子の claude を起動するアカウントの指定と、使用率のキャッシュの読み取り（#2464・#3336・#3337）。
 
-指定は `<状態の置き場>/relay/accounts/pinned.json` に 1 つだけ持つ（`ndf relay account use <名前>`）。選ぶ順は
+指定は `<状態の保存先>/relay/accounts/pinned.json` に 1 つだけ持つ（`ndf relay account use <名前>`）。選ぶ順は
 環境変数 `NDF_CLAUDE_ACCOUNT` → 指定 → 無し（claude の既定）で、中継の起動と supervise の子の `claude -p` は
 どちらも `chosen` で選ぶ（`session_env.child_env` が子へ渡す）。指定のファイルが壊れていれば `AccountError` を
 送出し、呼び出し元が理由を出して止まる（読めない指定を黙って既定へ倒さない）。

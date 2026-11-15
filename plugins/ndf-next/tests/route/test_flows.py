@@ -1,4 +1,4 @@
-"""雛形から組んだプランの流れ（遷移の判断を台本の結果で回す）。各テストの docstring に確かめる Issue を書く。"""
+"""テンプレートから組んだプランの流れ（遷移の判断を台本の結果で回す）。各テストの docstring に確かめる Issue を書く。"""
 
 from __future__ import annotations
 
@@ -11,14 +11,14 @@ from ._flow import gate, plan_of, step_of, stopped, walk
 
 
 def test_fix_plan_runs_test_then_pr_then_merge_when_green():
-    """C3-1（#1142 の要求の不足 a）: 即時修正の雛形は、テスト → PR → merge-when-green を順に流して終わる。"""
+    """C3-1（#1142 の要求の不足 a）: 即時修正のテンプレートは、テスト → PR → merge-when-green を順に流して終わる。"""
     visited, state = walk(plan_of("immediate_fix"), {})
     assert visited == ["test", "push", "pr", "conflict-check", "ci", "merge"]
     assert state.status == OK
 
 
 def test_fix_plan_stops_on_failed_test_before_pr():
-    """C3-1: 即時修正のテストが落ちたら PR を作らずに止まる（行き先は conductor）。"""
+    """C3-1: 即時修正のテストが落ちたら PR を作らずに止まる（ルートは conductor）。"""
     visited, state = walk(plan_of("immediate_fix"), {"test": [stopped("test_failed")]})
     assert visited == ["test"]
     assert (state.status, state.kind) == (STOPPED, "test_failed")
@@ -55,7 +55,7 @@ def test_push_rejected_twice_goes_to_fix_push():
 
 
 def test_design_merge_returns_to_base_sync_on_conflict():
-    """#2273: 設計 PR のマージのプランは、宛先との衝突（DIRTY）で止まらず、取り込み → 直し → push → 確かめ直しへ戻る。"""
+    """#2273: 設計 PR のマージのプランは、宛先との衝突（DIRTY）で止まらず、マージ → 直し → push → 確かめ直しへ戻る。"""
     script = {"conflict-check": [stopped("base_conflict")], "base-sync": [stopped("base_conflict")], "merge-gate": [gate()]}
     visited, state = walk(plan_of("design_merge"), script, answers=["approved"])
     assert visited == ["conflict-check", "base-sync", "fix-base", "push", "conflict-check", "merge-gate", "merge"]
@@ -63,7 +63,7 @@ def test_design_merge_returns_to_base_sync_on_conflict():
 
 
 def test_conflicted_pr_is_synced_instead_of_waiting_for_ci():
-    """#2752・#2680: 衝突して CI の始まらない PR を待たない。CI の待ちの前に衝突を確かめ、宛先の取り込みへ進む。"""
+    """#2752・#2680: 衝突して CI の始まらない PR を待たない。CI の待ちの前に衝突を確かめ、宛先のマージへ進む。"""
     for purpose in ("implement", "check", "close"):
         visited, state = walk(plan_of(purpose), {"conflict-check": [stopped("base_conflict")]})
         i = visited.index("conflict-check")
@@ -112,7 +112,7 @@ def test_docs_only_check_skips_whole_tests():
 
 
 def test_merged_impl_plan_is_not_rerun():
-    """#2349: 取り込み済みの実装のプランを流し直しても、worker も PR の作成も打たずに終える。"""
+    """#2349: マージ済みの実装のプランを流し直しても、worker も PR の作成も打たずに終える。"""
     visited, state = walk(plan_of("implement"), {"done-check": [stopped("not_applicable")]})
     assert visited == ["done-check"]
     assert state.status == OK
@@ -147,7 +147,7 @@ def test_same_ci_failure_streak_stops_to_human():
     assert (state.status, state.kind) == (STOPPED, "fix_limit")
 
 
-# 現状固定（I-001）: 検査と設計 PR のマージの雛形が同じ形で持つマージの承認ゲートとマージ。
+# 現状固定（I-001）: 検査と設計 PR のマージのテンプレートが同じ形で持つマージの承認ゲートとマージ。
 # 部品へまとめても、埋めたプランのステップと遷移が変わらないことを確かめる。
 _MERGE_GATE = {"id": "merge-gate", "run": ["<gate>"], "on_answer": {"approved": "merge", "rejected": "end"}}
 
@@ -165,7 +165,7 @@ def test_merge_gate_and_merge_steps_are_fixed_in_check_and_design_merge():
 
 
 def test_merge_gate_rejected_ends_without_merge():
-    """現状固定: マージの承認ゲートで rejected と答えると、merge を打たずに ok で終わる。"""
+    """現状固定: マージの承認ゲートで rejected と回答すると、merge を打たずに ok で終わる。"""
     expected_tail = {"check": ["ci", "behavior-recheck", "merge-gate"], "design_merge": ["conflict-check", "merge-gate"]}
     for purpose, tail in expected_tail.items():
         visited, state = walk(plan_of(purpose), {"merge-gate": [gate()]}, answers=["rejected"])
@@ -175,7 +175,7 @@ def test_merge_gate_rejected_ends_without_merge():
 
 
 def test_merge_gate_approved_merges_then_ends():
-    """現状固定: マージの承認ゲートで approved と答えると、merge を打って終わる。"""
+    """現状固定: マージの承認ゲートで approved と回答すると、merge を打って終わる。"""
     for purpose in ("check", "design_merge"):
         visited, state = walk(plan_of(purpose), {"merge-gate": [gate()]}, answers=["approved"])
         assert visited[-2:] == ["merge-gate", "merge"], purpose

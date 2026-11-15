@@ -1,4 +1,4 @@
-"""副命令 `ndf ci` のエントリポイント。PR の CI の結果を読み（`watch`）、PR をマージし（`merge`）、止まった理由の種類で結果 JSON を返す。
+"""サブコマンド `ndf ci` のエントリポイント。PR の CI の結果を読み（`watch`）、PR をマージし（`merge`）、停止理由の種類で結果 JSON を返す。
 
 読み取り・分類・マージの前段の確かめは外部との接続の層（`ndf.adapters.ci`・`ndf.adapters.github`）が持ち、
 このエントリポイントは引数と出力だけを持つ。
@@ -17,17 +17,17 @@ from ndf.adapters.ci import Classifier, Reading, Watch, WatchResult, failed_test
 from ndf.adapters.github import GitHub
 from ndf.contracts import result
 
-# 結果 JSON の tool の名前は副命令の名前（正本は `cli.COMMANDS`）
+# 結果 JSON の tool の名前はサブコマンドの名前（SSOT は `cli.COMMANDS`）
 TOOL = cli.tool_of(__name__)
 
 
 def _parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="ndf ci", description="CI の結果を読み、止まった理由の種類で返す")
+    p = argparse.ArgumentParser(prog="ndf ci", description="CI の結果を読み、停止理由の種類で返す")
     sub = p.add_subparsers(dest="command", required=True)
     w = sub.add_parser("watch", help="PR の先端の必須のチェックの結論が出るまで待つ")
     w.add_argument("--pr", type=int, required=True)
     w.add_argument("--repo", help="<所有者>/<リポジトリ>。省けば作業場所の origin")
-    w.add_argument("--required", action="append", required=True, help="待つ必須のチェック（PR の先端の宣言から渡す）")
+    w.add_argument("--required", action="append", required=True, help="待つ必須のチェック（PR の先端の設定から渡す）")
     w.add_argument("--test", action="append", default=[], help="テストのチェックの名前（分割ジョブも数える）")
     w.add_argument("--budget", type=float, required=True, help="待ちの合計の秒（ランナーの割り当ての待ちは数えない）")
     w.add_argument("--after-merge", action="store_true", help="マージの段階が落ちた後の判定")
@@ -51,7 +51,7 @@ def _progress(reading: Reading, elapsed: float) -> None:
 
 
 def _item(name: str, outcome: str, test: bool, job: Optional[int] = None) -> dict:
-    """結果の項目 1 件（`outcome` は鍵 `result` の値）。`job` が無ければ鍵を置かない。"""
+    """結果の項目 1 件（`outcome` はキー `result` の値）。`job` が無ければキーを置かない。"""
     row: dict[str, Any] = {"kind": "check", "name": name, "result": outcome}
     if job is not None:
         row["job"] = job
@@ -95,7 +95,7 @@ def _watch(args: argparse.Namespace) -> dict:
 
 
 def _report(args: argparse.Namespace, pull: github_mod.Pull, hub: GitHub, watched: WatchResult, kind: Optional[str]) -> dict:
-    """待ちの結果と止まった理由の種類（通っていれば None）から結果 JSON を組む。"""
+    """待ちの結果と停止理由の種類（通っていれば None）から結果 JSON を組む。"""
     metrics: dict[str, Any] = {"rounds": watched.rounds, "elapsed": round(watched.elapsed, 1), "queued_for": round(watched.queued_for, 1)}
     if kind == "test_failed":
         metrics.update(_failed_nodes(hub, watched.reading))

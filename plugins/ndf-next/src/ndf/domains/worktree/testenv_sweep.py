@@ -2,10 +2,10 @@
 
 - `reap`: 最後に使った時刻から `idle` 秒を過ぎた割り当ての環境を `compose stop` で止める（データは残す）。テストの実行中
   （目印を握っている）の環境は止めない
-- `expose`: 宣言の `testenv.expose`（`enabled`・`public_tag`・`base_domain`・`open_command`）に従って、載っている基準が
-  公開を許す基準と同じ環境だけを公開する。公開できるのは同時に 1 本（台帳の排他の中で判定する）
+- `expose`: 設定の `testenv.expose`（`enabled`・`public_tag`・`base_domain`・`open_command`）に従って、載っている基準が
+  公開を許す基準と同じ環境だけを公開する。公開できるのは同時に 1 本（割り当て表の排他の中で判定する）
   開く手段が失敗したときも閉じる手段で閉じてから記録を閉じる（閉じられなければ公開中の記録を残す）
-- `unexpose`: 宣言の `close_command` で閉じてから台帳を閉じる。閉じる手段が無い・失敗したら台帳を閉じない
+- `unexpose`: 設定の `close_command` で閉じてから割り当て表を閉じる。閉じる手段が無い・失敗したら割り当て表を閉じない
   （口が開いたまま閉じたと記録すると、別の環境の公開とスロットの再利用が通る）
 - `close_for_removal`: worktree を外す前に公開を閉じ、テスト環境を破棄する（`merged` と `cleanup` が使う）
 """
@@ -25,7 +25,7 @@ from ndf.domains.worktree.testenv import Target, TestenvError
 
 # 公開の既定の期限
 DEFAULT_TTL = "8h"
-# 公開を開く・閉じる操作の排他（台帳の隣の置き場）と、その待ちの上限（秒。開く手段の所要を含む）
+# 公開を開く・閉じる操作の排他（割り当て表の隣の保存先）と、その待ちの上限（秒。開く手段の所要を含む）
 EXPOSE_LOCK = "expose.lock"
 EXPOSE_LOCK_WAIT = 300
 
@@ -35,7 +35,7 @@ def _age(stamp: Any) -> Optional[float]:
         return None
     try:
         return time.time() - calendar.timegm(time.strptime(stamp, allocations.STAMP))
-    except ValueError:  # noqa: NDF401 ファイル: 台帳の時刻が読めない行は止めない側へ倒す
+    except ValueError:  # noqa: NDF401 ファイル: 割り当て表の時刻が読めない行は止めない側へ倒す
         return None
 
 
@@ -79,7 +79,7 @@ def _config(t: Target) -> dict[str, Any]:
     if not conf.get("public_tag") or not conf.get("base_domain"):
         raise TestenvError("拒否: testenv.expose.public_tag と base_domain が要る")
     if not conf.get("open_command") or not conf.get("close_command"):
-        raise TestenvError("公開の手段が宣言されていない（testenv.expose.open_command と close_command が要る）")
+        raise TestenvError("公開の手段が定義されていない（testenv.expose.open_command と close_command が要る）")
     return conf
 
 
@@ -96,7 +96,7 @@ def _claim(t: Target, url: str, ttl: str) -> bool:
 
 
 def _expose_values(url: str, host: str, row: dict[str, Any]) -> dict[str, str]:
-    """公開の手段（宣言の `open_command`・`close_command`）へ渡す値。開く側と閉じる側が同じ名前で渡す。"""
+    """公開の手段（設定の `open_command`・`close_command`）へ渡す値。開く側と閉じる側が同じ名前で渡す。"""
     return {
         "NDF_EXPOSE_URL": url,
         "NDF_EXPOSE_HOST": host,
@@ -166,14 +166,14 @@ def _unexpose(t: Target) -> Optional[str]:
     command = conf.get("close_command") if isinstance(conf, dict) else None
     if not command:
         raise TestenvError(
-            f"公開を閉じる手段が宣言されていない（testenv.expose.close_command）。台帳は閉じていない: {row['environment']} {url}"
+            f"公開を閉じる手段が定義されていない（testenv.expose.close_command）。割り当て表は閉じていない: {row['environment']} {url}"
         )
     values = _expose_values(url, url.split("://", 1)[-1], row)
     where = t.path if t.path.is_dir() else t.main_dir
     if t.shell.sh(str(command), where, values).returncode != 0:
-        raise TestenvError(f"公開を閉じる手段が失敗した。台帳は閉じていない: {row['environment']} {url}")
+        raise TestenvError(f"公開を閉じる手段が失敗した。割り当て表は閉じていない: {row['environment']} {url}")
     if not t.book.update(t.key, _close, pick=allocations.exposing):
-        raise TestenvError(f"台帳を閉じられない。unexpose を打ち直す: {url}")
+        raise TestenvError(f"割り当て表を閉じられない。unexpose を打ち直す: {url}")
     return url
 
 

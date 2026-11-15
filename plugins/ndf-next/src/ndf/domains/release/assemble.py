@@ -2,14 +2,14 @@
 
 手順（`assemble`）:
 
-1. origin の本番ブランチとベースブランチを取り込み、範囲（本番ブランチの先端..ベースブランチの先端）を決める
-2. 変わったファイルから版を上げるプラグインと次の版を決める。上げるものが無ければ何もせずに `not_applicable`
-3. ベースブランチの先端から `release/v<版>` を作り、版を書き換え、本番の版なら CHANGELOG に節を足し、宣言の手順
+1. origin の本番ブランチとベースブランチをマージ、範囲（本番ブランチの先端..ベースブランチの先端）を決める
+2. 変わったファイルからバージョンを上げるプラグインと次のバージョンを決める。上げるものが無ければ何もせずに `not_applicable`
+3. ベースブランチの先端から `release/v<バージョン>` を作り、バージョンを書き換え、本番のバージョンなら CHANGELOG に節を足し、設定の手順
    （トークン消費の記録など）を流す
 4. 1 つのコミットにして push し、リリースの PR（本番は本番ブランチ宛て、開発版はベースブランチ宛て）を作り、承認資料を
    PR の本文に書く
 
-ブランチの名前の版は、版を上げるプラグインのうち `--plugin` で渡したもの（省けば登録の順の先頭）の版である。
+ブランチの名前のバージョンは、バージョンを上げるプラグインのうち `--plugin` で渡したもの（省けば登録の順の先頭）のバージョンである。
 
 本番のリリースは、本番ブランチ宛ての別のリリースの PR（head が `release/v` で始まるかベースブランチ）が開いている
 間は組まずに `ReleaseOpen` で止まる（同じリポジトリの別の組み立てと版数・ブランチがぶつからない。閉じた後に打ち直せば
@@ -32,7 +32,7 @@ from ndf.domains.release import plugins as plugins_mod
 
 
 class NothingToRelease(Exception):
-    """版を上げるプラグインが無い。"""
+    """バージョンを上げるプラグインが無い。"""
 
 
 class ReleaseOpen(Exception):
@@ -86,7 +86,7 @@ def _named(planned: Sequence[version_decide.Planned], plugin: str | None) -> ver
         return planned[0]
     hit = [p for p in planned if p.plugin == plugin]
     if not hit:
-        raise AssembleError(f"{plugin} は版を上げる対象に無い（上げるもの: {', '.join(p.plugin for p in planned)}）")
+        raise AssembleError(f"{plugin} はバージョンを上げる対象に無い（上げるもの: {', '.join(p.plugin for p in planned)}）")
     return hit[0]
 
 
@@ -104,7 +104,7 @@ def open_releases(hub: GitHub, target: Target) -> list[int]:
 
 
 def _write(root: Path, decl: decl_mod.NdfSettings, facts: materials_decide.Facts) -> None:
-    """版・CHANGELOG を書き換え、宣言の手順を流す。"""
+    """バージョン・CHANGELOG を書き換え、設定の手順を流す。"""
     found = plugins_mod.by_name(plugins_mod.load(root))
     entries = [changelog_decide.Entry(p.number, p.title) for p in facts.pulls]
     log_path = root / decl.changelog
@@ -145,7 +145,7 @@ def _facts(root: Path, hub: GitHub, target: Target, span: gather.Range) -> mater
         target.channel,
     )
     if not planned:
-        raise NothingToRelease(f"{span.since}..{span.until} に版を上げる変化が無い")
+        raise NothingToRelease(f"{span.since}..{span.until} にバージョンを上げる変化が無い")
     pulls = gather.pull_facts(hub, gather.included(repo_git, span, target.production))
     return materials_decide.Facts(
         target.channel,
@@ -160,8 +160,8 @@ def _facts(root: Path, hub: GitHub, target: Target, span: gather.Range) -> mater
 def collect(root: Path, hub: GitHub, target: Target) -> materials_decide.Facts:
     """承認資料の材料（版上げの計画を含む。ブランチは作らない）。上げるものが無ければ `NothingToRelease`。
 
-    宣言・マーケットプレイス・今の版はworktreeから読むため、worktreeの HEAD が範囲の先端（origin のベースブランチ）で
-    なければ `AssembleError` で止まる（ほかのブランチの版から計画すると版が逆行する）。
+    設定・マーケットプレイス・今のバージョンはworktreeから読むため、worktreeの HEAD が範囲の先端（origin のベースブランチ）で
+    なければ `AssembleError` で止まる（ほかのブランチのバージョンから計画するとバージョンが逆行する）。
     """
     repo_git = git_mod.Git(root)
     span = _span(repo_git, target)

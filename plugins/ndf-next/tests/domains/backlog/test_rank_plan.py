@@ -1,4 +1,4 @@
-"""順位の算出と plan の照合（#2232・#1595）。"""
+"""順位の算出と plan の検証（#2232・#1595）。"""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ def _board(ests: list[Estimate], location: dict[int, str | None], capacity: int 
 
 
 def test_boundary_skips_rows_waiting_for_a_decision():
-    # #2232: 順位 1〜4 が判断待ちで容量の宣言があるとき、境界は 5 位以降から取る
+    # #2232: 順位 1〜4 が判断待ちで容量の設定があるとき、境界は 5 位以降から取る
     ests = [_est(n, 20, waiting=True) for n in (1, 2, 3, 4)] + [_est(5, 8), _est(6, 5), _est(7, 3)]
     board = _board(ests, dict.fromkeys(range(1, 8), NEAR))
     released = rank_decide.released_counts(board.edges)
@@ -122,7 +122,7 @@ def test_stale_rejections_are_removed_by_apply():
     assert got == []
 
 
-# --- 現状固定: quality_slot（品質の枠）。リファクタリングの前の振る舞いをそのまま記録する ---
+# --- 現状固定: quality_slot（品質のクォータ）。リファクタリングの前の振る舞いをそのまま記録する ---
 
 QL = "quality"
 
@@ -181,7 +181,7 @@ def test_quality_slot_orders_harm_then_created_then_rank():
 def test_quality_slot_skips_rows_whose_dependency_is_not_taken():
     rows = [_row(1), _row(2), _row(3)]
     labels = {1: [QL], 2: [QL], 3: []}
-    # #1 は品質の枠に入らない #3 に依存し、#2 は #1 に依存する
+    # #1 は品質のクォータに入らない #3 に依存し、#2 は #1 に依存する
     board = _qboard(rows, 10, _q(ratio=1.0), labels=labels, edges={(1, 3), (2, 1)})
     got = rank_decide.quality_slot(rows, board, None, set())
     assert got["issues"] == [] and got["size_sum"] == 0
@@ -222,7 +222,7 @@ def test_quality_slot_min_skips_rows_beyond_room_and_continues():
     assert got["budget"] == 1 and got["issues"] == [2, 3] and got["size_sum"] == 3
 
 
-# --- 現状固定: large_slot（大きい課題の枠）。既定の large_slot_ratio=0.5・large_min_size=13 で記録する ---
+# --- 現状固定: large_slot（大きい課題のクォータ）。既定の large_slot_ratio=0.5・large_min_size=13 で記録する ---
 
 
 def _lboard(rows, capacity, sub_issues=None, edges=frozenset()) -> rank_decide.Board:
@@ -290,7 +290,7 @@ def test_large_slot_children_outside_rows_fall_back_to_the_issue_itself():
 
 
 def test_large_slot_skips_rows_held_back_and_does_not_use_their_size():
-    # 判断待ちの Size 13 を枠に当てない。境界は容量 40 を残りの課題に使う
+    # 判断待ちの Size 13 をスロットに当てない。境界は容量 40 を残りの課題に使う
     waiting = model.Row(1, 1, 1, 1, 13, 9, 9 / 13, True, False, False, {})
     rows = [waiting, _row(2, size=8)]
     slot, _, bnd = rank_decide.slots(_lboard(rows, 40), rows)
@@ -340,7 +340,7 @@ def test_cycle_across_milestones_is_refused():
 
 
 def test_quality_slot_leaves_room_for_the_large_slot():
-    # 容量 20・大きい課題の枠の ratio 0.8・品質の ratio 0.8: Size 13 の大きい課題を当てると、Size 13 の品質の課題は入らない
+    # 容量 20・大きい課題のクォータの ratio 0.8・品質の ratio 0.8: Size 13 の大きい課題を当てると、Size 13 の品質の課題は入らない
     rows = [_row(1, size=13, cod=20), _row(2, size=13)]
     board = _qboard(rows, 20, _q(ratio=0.8, minimum=0), labels={2: [QL]})
     slot = {"issue": 1, "slice": 1, "size": 13, "budget": 16, "status": model.SLOT_FIT}

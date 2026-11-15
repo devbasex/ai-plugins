@@ -1,10 +1,10 @@
-"""マージの後の後片付け: マージ済みの PR のブランチの worktree とローカルブランチを外し、メインディレクトリを取り込む。
+"""マージの後の後片付け: マージ済みの PR のブランチの worktree とローカルブランチを外し、メインディレクトリをマージする。
 
 PR 1 件ごとに、メインディレクトリの排他（`mainlock`）を取ってから次を行う（並列のレーンの間で 1 本ずつ）。
 
 1. PR を GitHub から読む（`adapters.github.GitHub.pulls`）。マージされていなければ何も消さない
 2. PR の head がベースブランチか本番チャネルなら何も消さない（`merged_decide.long_lived_keep`。develop から main への
-   リリースの PR）。スプリントブランチを残すかを決める（`merged_decide.sprint_keep`。開始時の記録 `flow_record` があればそれ、無ければ今の宣言）
+   リリースの PR）。スプリントブランチを残すかを決める（`merged_decide.sprint_keep`。開始時の記録 `flow_record` があればそれ、無ければ今の設定）
 3. ブランチを checkout した worktree を外す。追跡しているファイルに未コミットの変更があれば外さない。外す前に公開を閉じて
    テスト環境を破棄する（できなければ外さない）。locked の worktree は何も動かさずに残す。追跡していないファイル
    （無視したものを含む。`git worktree remove` は無視したファイルを黙って消す）があれば、先に退避（`trash.evacuate`）
@@ -14,9 +14,9 @@ PR 1 件ごとに、メインディレクトリの排他（`mainlock`）を取�
 4. ローカルブランチを `git branch -d` で消す（`-D` は使わない。git がマージ済みと認めなければ残して理由を返す）
 
 片付けの前に、メインディレクトリがベースブランチにいれば、`git fetch` で `refs/remotes/origin/<ベースブランチ>` を
-更新してから `git merge --ff-only origin/<ベースブランチ>` で取り込む（`git branch -d` は HEAD に含まれたブランチだけを消す）。
+更新してから `git merge --ff-only origin/<ベースブランチ>` でマージする（`git branch -d` は HEAD に含まれたブランチだけを消す）。
 最後に `git worktree prune` を打ち、worktree の消えた割り当てのテスト環境を回収する（`testenv.reclaim`）。
-`git pull` は使わない（`FETCH_HEAD` をほかのセッションの fetch と取り合い、取り込みが止まる。#3317）。
+`git pull` は使わない（`FETCH_HEAD` をほかのセッションの fetch と取り合い、マージが止まる。#3317）。
 """
 
 from __future__ import annotations
@@ -58,7 +58,7 @@ class Record:
 
 
 def _remove_worktree(main: Git, item: repo.Worktree, rec: Record, merge: str = "") -> bool:
-    """worktree を外す。外せたかを返す。`merge` は PR のマージコミット（退避の台帳へ書く）。"""
+    """worktree を外す。外せたかを返す。`merge` は PR のマージコミット（退避のジャーナルへ書く）。"""
     if item.path.is_dir():
         dirty = repo.dirty_paths(Git(item.path))
         if dirty:
@@ -141,14 +141,14 @@ def _one(main: Git, main_dir: Path, pull: Pull, flow: Optional[Mapping[str, Any]
 
 
 def sync_main(main: Git, base: Optional[str], rec: Record) -> None:
-    """メインディレクトリがベースブランチにいれば fast-forward で取り込む。失敗は `rec.stopped` に書く。"""
+    """メインディレクトリがベースブランチにいれば fast-forward でマージする。失敗は `rec.stopped` に書く。"""
     skip = merged_decide.pull_skip(repo.current_branch(main), base)
     if skip is not None:
         rec.add("main_dir", str(main.cwd), outcomes.KEPT, skip)
         return
     fetched = main.fetch_branch(ORIGIN, base)
     if fetched.returncode != 0:
-        rec.add("main_dir", str(main.cwd), outcomes.KEPT, f"git fetch が失敗した（取り込まない）: {fetched.stderr.strip()}")
+        rec.add("main_dir", str(main.cwd), outcomes.KEPT, f"git fetch が失敗した（マージしない）: {fetched.stderr.strip()}")
         return
     done = main.merge_ff(f"{ORIGIN}/{base}")
     if done.returncode == 0:
@@ -156,8 +156,8 @@ def sync_main(main: Git, base: Optional[str], rec: Record) -> None:
         return
     dirty = repo.dirty_paths(main)
     if dirty:
-        # 利用者の手元の変更には触れない（stash も checkout もしない）。取り込みだけを見送る
-        rec.add("main_dir", str(main.cwd), outcomes.KEPT, f"未コミットの変更（{len(dirty)} 件）が取り込みを塞いだため取り込まない")
+        # 利用者の手元の変更には触れない（stash も checkout もしない）。マージだけを見送る
+        rec.add("main_dir", str(main.cwd), outcomes.KEPT, f"未コミットの変更（{len(dirty)} 件）がマージを塞いだためマージしない")
         return
     rec.stopped = f"メインディレクトリの git merge --ff-only {ORIGIN}/{base} が失敗: {done.stderr.strip()}"
     rec.add("main_dir", str(main.cwd), outcomes.STOPPED, rec.stopped)
@@ -185,7 +185,7 @@ def after_merge(main_dir: Path, numbers: list[int], hub: PullsReader, flow_recor
     pulls = hub.pulls(numbers)
     rec = Record()
     base = repo.base_branch(main, decl)
-    # 先に取り込む: `git branch -d` はメインディレクトリの HEAD に含まれたブランチだけを消す
+    # 先にマージする: `git branch -d` はメインディレクトリの HEAD に含まれたブランチだけを消す
     with mainlock.held(main):
         sync_main(main, base, rec)
     for n in numbers:

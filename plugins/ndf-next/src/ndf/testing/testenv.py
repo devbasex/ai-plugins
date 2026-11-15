@@ -1,7 +1,7 @@
 """テスト環境の割り当ての回収の判定（#2798・#2964）。
 
-割り当ての行の worktree が消えたとき、その置き場を回収を打った位置から確かめられるか（`location_seen`）と、
-環境のコンテナの持ち主（`owner_of`）を決める。どちらもファイルシステムの属性を読むだけで、docker と台帳を呼ばない。
+割り当ての行の worktree が消えたとき、その保存先を回収を打った位置から確かめられるか（`location_seen`）と、
+環境のコンテナのオーナー（`owner_of`）を決める。どちらもファイルシステムの属性を読むだけで、docker と割り当て表を呼ばない。
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ def within(path: str, base: str) -> bool:
 
 
 def location_seen(worktree: Path, main_dir: Path) -> bool:
-    """消えた worktree の置き場が、回収を打った位置から確かめられるか。
+    """消えた worktree の保存先が、回収を打った位置から確かめられるか。
 
     メインディレクトリの下なら真。そうでなければ最も近い残っている祖先（親ごと消えていればさらに上）が
     メインディレクトリと同じファイルシステムなら真。残る祖先がファイルシステムの根だけか、別のファイルシステムなら
@@ -36,12 +36,12 @@ def location_seen(worktree: Path, main_dir: Path) -> bool:
         return False
     try:
         return ancestor.stat().st_dev == main_dir.stat().st_dev
-    except OSError:  # noqa: NDF401 ファイル: 置き場の属性を読めなければ確かめられないとして扱う
+    except OSError:  # noqa: NDF401 ファイル: 保存先の属性を読めなければ確かめられないとして扱う
         return False
 
 
 def owner_of(container_workdirs: Iterable[str], row_worktrees: Iterable[str]) -> tuple[str, str]:
-    """環境のコンテナの作業ディレクトリと行の worktree の一覧から、持ち主を決める。
+    """環境のコンテナの作業ディレクトリと行の worktree の一覧から、オーナーを決める。
 
     コンテナが無ければ `none`、すべての作業ディレクトリが行の worktree のどれかの下なら `own`、
     1 つでも外にあれば `foreign` と理由を返す。

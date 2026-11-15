@@ -1,4 +1,4 @@
-"""計画の進行表と副命令 `ndf lanes`（#3097 の受け入れ条件 1・4・5）。"""
+"""計画のステートマシンとサブコマンド `ndf lanes`（#3097 の受け入れ条件 1・4・5）。"""
 
 from __future__ import annotations
 
@@ -61,7 +61,7 @@ QUESTION = {"tool_use_id": "toolu_1", "session_id": "s1", "questions": [{"questi
 
 
 def test_lane_question_opens_one_request_until_the_organizer_closes_it(opened, refused):
-    # レーンの問いは計画の依頼になり、同じ問いは閉じるまで二重に載らない（#3035 の受け入れ条件 3）
+    # レーンの質問は計画のリクエストになり、同じ質問は閉じるまで二重に載らない（#3035 の受け入れ条件 3）
     pid = _two(opened)
     wrapper = launch.wrapper_name(REPO, "p6", "b")
     with store.transaction(opened) as conn:
@@ -181,7 +181,7 @@ def test_plan_completes_only_when_every_row_ended_and_no_request_is_open(opened)
 
 
 def test_a_batched_release_closes_every_request_and_keeps_its_answer(opened):
-    """まとめたリリースの答えは、まとめた依頼をすべて閉じ、各依頼に答え（版・リリース記録の PR）を残す（#2783・#3128・#3136）。"""
+    """まとめたリリースの回答は、まとめたリクエストをすべて閉じ、各リクエストに回答（バージョン・リリース記録の PR）を残す（#2783・#3128・#3136）。"""
     pid = _two(opened)
     with store.transaction(opened) as conn:
         ra = plan.open_request(conn, pid, {"lane": "a", "kind": "release"}, "リリースしたい", "workflow")
@@ -198,7 +198,7 @@ def test_a_batched_release_closes_every_request_and_keeps_its_answer(opened):
 
 
 def test_a_lane_reads_the_answer_of_its_closed_request_from_status(opened):
-    """閉じた依頼の答え（版・リリース記録の PR）を、レーンが status の closed_requests から読める（#3128）。"""
+    """閉じたリクエストの回答（バージョン・リリース記録の PR）を、レーンが status の closed_requests から読める（#3128）。"""
     pid = _two(opened)
     with store.transaction(opened) as conn:
         ra = plan.open_request(conn, pid, {"lane": "a", "kind": "release"}, "リリースしたい", "workflow")
@@ -241,12 +241,12 @@ def test_status_is_built_from_the_two_tables(opened):
     assert out["metrics"]["wakeable"] == [["a", "r2"], ["b", "r1"]] and out["metrics"]["complete"] is False
 
 
-# --- 副命令 ----------------------------------------------------------------------------------------
+# --- サブコマンド ----------------------------------------------------------------------------------------
 
 
 @pytest.fixture
 def detached(monkeypatch):
-    """`start` が切り離して起こす `lanes run` の呼び出し（起こさずに記録する）。"""
+    """`start` が切り離して起動する `lanes run` の呼び出し（起動せずに記録する）。"""
     calls = []
     monkeypatch.setattr(plan_run, "detach", lambda name, cwd: calls.append((name, cwd)) or 4242)
     return calls

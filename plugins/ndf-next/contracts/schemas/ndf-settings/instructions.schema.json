@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "ndf-settings/instructions.schema.json",
-  "title": "指示書の宣言（.ndf/instructions.json）",
-  "description": "指示書（AGENTS.md・CLAUDE.md など）のファイル・読み込みの許可・リリース済み版の取り出し方・予算。無ければ既定の判定だけが動く",
+  "title": "指示書の設定（.ndf/instructions.json）",
+  "description": "指示書（AGENTS.md・CLAUDE.md など）のファイル・読み込みの許可・リリース済みバージョンの取り出し方・予算。無ければ既定の判定だけが動く",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -18,7 +18,7 @@
       "enum": [
         1
       ],
-      "description": "宣言の形の版。読み手は知らない版を読まない"
+      "description": "設定の形のバージョン。読み手は知らないバージョンを読まない"
     },
     "files": {
       "type": "array",
@@ -40,7 +40,7 @@
     },
     "released": {
       "type": "object",
-      "description": "リリース済み版の取り出し方。pattern は名前付きの捕捉 (?P<version>…) を 1 つ持つ",
+      "description": "リリース済みバージョンの取り出し方。pattern は名前付きの捕捉 (?P<version>…) を 1 つ持つ",
       "required": [
         "source",
         "pattern"
@@ -70,7 +70,7 @@
     "pending_marker": {
       "type": "string",
       "minLength": 1,
-      "description": "版が決まる前の段落の目印（例: の次の版で）。空文字列は宣言の不正"
+      "description": "バージョンが決まる前の段落の目印（例: の次のバージョンで）。空文字列は設定の不正"
     },
     "budget": {
       "type": "object",
@@ -82,7 +82,7 @@
           "description": "ルート指示書 1 本あたりの読み込みの上限"
         }
       },
-      "description": "budget（このリポジトリの宣言にある最上位のキー）"
+      "description": "budget（このリポジトリの設定にある最上位のキー）"
     }
   },
   "x-ndf-location": "worktree",

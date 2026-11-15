@@ -1,9 +1,9 @@
-"""worktree の運用の宣言（`.ndf/worktree.json` と個人設定 `.ndf/worktree.local.json`）を読む。
+"""worktree の運用の設定（`.ndf/worktree.json` と個人設定 `.ndf/worktree.local.json`）を読む。
 
-宣言はメインディレクトリから読む（どの worktree から打っても同じ宣言になる）。置き場と名前は事実の表
+設定はメインディレクトリから読む（どの worktree から打っても同じ設定になる）。保存先と名前は事実の表
 （`ndf-files` の `worktree`・`worktree-local` と `locations` の `ndf`）から引き、写さない。
 
-- 共有設定が無ければ `None`（worktree の運用を使わないリポジトリ）。読めない・版が違えば `NdfSettingsError`
+- 共有設定が無ければ `None`（worktree の運用を使わないリポジトリ）。読めない・バージョンが違えば `NdfSettingsError`
 - 個人設定は `LOCAL_KEYS` の項目だけを重ねる（運用を決める項目は共有設定だけが持つ）。壊れていても共有の
   運用を止めず、反映しなかった項目と理由を `local_ignored` に載せる
 """
@@ -19,7 +19,7 @@ from ndf import identity
 from ndf.contracts import facts
 from ndf.domains.settings import renames
 
-# 読める宣言の版
+# 読める設定のバージョン
 VERSION = 1
 # 個人設定から重ねる項目と、その値の型
 # 節の名前（依存の用意・ローカルの動作検証・テスト環境）
@@ -29,7 +29,7 @@ TESTENV = "testenv"
 LOCAL_KEYS: dict[str, type] = {"follow_branch": bool, LOCALENV: dict, TESTENV: dict}
 # 個人設定で反映しない項目のうち、報告もしないもの
 LOCAL_SILENT = ("version", "$schema")
-# guard の許可パスの既定（宣言に guard.allow_paths の配列が無いとき）。知識と設定の置き場
+# guard の許可パスの既定（設定に guard.allow_paths の配列が無いとき）。知識と設定の保存先
 # git の無視の設定のファイルの名前
 GITIGNORE = ".gitignore"
 DEFAULT_ALLOW_PATHS = (
@@ -43,12 +43,12 @@ DEFAULT_ALLOW_PATHS = (
     identity.FIXED_WORDS["ndf_settings_dir"] + "/",
     GITIGNORE,
 )
-# branch_flow.start が取れる値（宣言の base_branch・production_branch のどちらを起点にするか）
+# branch_flow.start が取れる値（設定の base_branch・production_branch のどちらを起点にするか）
 START_CHANNELS = ("base", "production")
 
 
 class NdfSettingsError(Exception):
-    """共有設定が読めない（JSON でない・オブジェクトでない・版が違う・値の形が違う）。"""
+    """共有設定が読めない（JSON でない・オブジェクトでない・バージョンが違う・値の形が違う）。"""
 
 
 def _file(row: str, main_dir: Path) -> Path:
@@ -66,7 +66,7 @@ def local_file(main_dir: Path) -> Path:
 
 @dataclass(frozen=True)
 class NdfSettings:
-    """重ねた後の宣言。`raw` は共有設定に個人設定の許した項目を重ねた値。"""
+    """重ねた後の設定。`raw` は共有設定に個人設定の許した項目を重ねた値。"""
 
     raw: dict[str, Any]
     local_ignored: tuple[str, ...] = ()
@@ -82,7 +82,7 @@ class NdfSettings:
 
     @property
     def branch_flow(self) -> Optional[dict[str, Any]]:
-        """取り込み方の節（`branch_flow`）。無い・オブジェクトでなければ `None`。"""
+        """リリース方式の節（`branch_flow`）。無い・オブジェクトでなければ `None`。"""
         return self.section("branch_flow")
 
     @property
@@ -159,7 +159,7 @@ def _merge(base: dict[str, Any], over: dict[str, Any]) -> dict[str, Any]:
 
 
 def load(main_dir: Path) -> Optional[NdfSettings]:
-    """メインディレクトリの宣言。共有設定が無ければ `None`。旧いキーが残れば既定へ倒さずに `NdfSettingsError`。"""
+    """メインディレクトリの設定。共有設定が無ければ `None`。旧いキーが残れば既定へ倒さずに `NdfSettingsError`。"""
     shared = shared_file(main_dir)
     if not shared.exists():
         return None

@@ -76,7 +76,7 @@ def tests_for_change(work: Path, changed: Sequence[str]) -> tests_decide.PickedT
 
 
 def _nearest(work: Path, path: str) -> str | None:
-    """`path` から根へ向かって最初に在るテストの置き場所。"""
+    """`path` から根へ向かって最初に在るテストの置く場所。"""
     return next((d for d in range_decide.near_candidates(path) if (work / d).is_dir()), None)
 
 
