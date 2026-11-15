@@ -165,7 +165,7 @@ class FakeCi:
         self.waited.append(sha)
         return self.results.pop(0) if len(self.results) > 1 else self.results[0]
 
-    def failed_tests(self, hub: Any, watched: Watched) -> list[str]:
+    def failed_tests(self, hub: Any, watched: Watched, source: Any) -> list[str]:
         return ["tests/test_geo.py::test_area"]
 
     def port(self) -> final_gate.CiPort:

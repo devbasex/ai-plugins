@@ -7762,8 +7762,8 @@
     {
       "term": "同じ問い",
       "context": "ndf-workflow",
-      "meaning": "並列の計画で、同じ一時レーンの名前が送った依頼のうち、問いの区分と操作の対象（ブランチ名と先端のコミット、または課題・PR の番号）が同じもの。言い回しの違いは数えない",
-      "source": "docs/specifications/ndf-parallel-helper-confirmed-gate-and-launch-wait.md"
+      "meaning": "並列の計画で、一時レーンの区分つきの問いのうち、同じ一時レーンの名前・同じ区分・同じ問いの対象（ブランチなら先端のコミットの 40 桁まで）を持つもの。言い回しの違いは数えない。1 スプリントのレーンと開発ループのレーンの問いは比べず、問いの対象が空の問いはどの問いとも同じ問いにならない",
+      "pending_source": "issues/issue-3603-design.md"
     },
     {
       "term": "起き直し",
@@ -7774,14 +7774,26 @@
     {
       "term": "問いの対象",
       "context": "ndf-workflow",
-      "meaning": "並列の計画で、区分つきの問いが操作する対象を表す 1 つの文字列。`<ブランチ名>@<先端のコミットの 40 桁>` か `#<課題か PR の番号>`。一時レーンは問いの `metadata.target` にブランチ名か `#<番号>` だけを載せ、`request-ask` が先端のコミットを足して組み、計画の台帳の依頼の行の `target` に残す",
-      "source": "docs/specifications/ndf-parallel-helper-confirmed-gate-and-launch-wait.md"
+      "meaning": "並列の計画で、区分つきの問いが操作する対象を表す 1 つの文字列。`<ブランチ名>@<先端のコミットの 40 桁>` か `#<課題か PR の番号>`。`request-ask` が問いの文の対象の行から読み、ブランチの先端のコミットは問いを受けた時点に求めて足し、計画の台帳の依頼の行の `target` に残す",
+      "pending_source": "issues/issue-3603-design.md"
+    },
+    {
+      "term": "対象の行",
+      "context": "ndf-workflow",
+      "meaning": "区分つきの問いの最初の問いの文に置く `対象: <ブランチ名>` か `対象: #<番号>` の 1 行。`request-ask` が問いの対象を読む唯一の場所で、複数あれば最後の行を使う",
+      "pending_source": "issues/issue-3603-design.md"
+    },
+    {
+      "term": "承認の行",
+      "context": "ndf-workflow",
+      "meaning": "1 スプリントのレーンが設計 PR のマージの承認を求める区分 `ndf-gate:1` の問いの、最初の問いの文に置く `承認: #<設計 PR の番号>` の 1 行。`request-ask` が設計承認の依頼に組む問いを見分ける唯一の印で、問いの文のほかの場所で PR を指しても設計承認の依頼にならない",
+      "pending_source": "issues/issue-3603-design.md"
     },
     {
       "term": "答えの引き継ぎ",
       "context": "ndf-workflow",
-      "meaning": "起き直した一時レーンの同じ問いへ、前の起動で送った依頼の答えを当てること。新しい依頼を作らず、計画の台帳に `reused` の行で残る",
-      "source": "docs/specifications/ndf-parallel-helper-confirmed-gate-and-launch-wait.md"
+      "meaning": "起き直した一時レーンの同じ問いへ、前の起動で送った依頼の答えを当てるか、答え待ちの依頼の id を返すこと。どちらの場合も新しい依頼の行を書かず、計画の台帳に `reused` の行で残る",
+      "pending_source": "issues/issue-3603-design.md"
     },
     {
       "term": "一時レーンの空き待ち",
@@ -7818,20 +7830,20 @@
       "context": "ndf-workflow",
       "meaning": "CI のジョブが上げた artifact のうち、JUnit の XML を持つもの。設定ファイルの `test.ci.junit_artifacts` が名前の glob で指し、CI で落ちたテストをログより先に読む元になる",
       "code": "junit_artifacts",
-      "pending_source": "issues/issue-3616-requirements.md"
+      "source": "docs/specifications/ndf-next-ci-failed-tests-junit.md"
     },
     {
       "term": "ログのパーサー",
       "context": "ndf-workflow",
       "meaning": "1 つのテストランナー（suite の `runner`）の CI のログの形から、落ちたテストを `<テストのファイル>::<テストの名前>` の並びで読む部品。外部ライブラリを呼ぶ唯一のモジュールの意味の「アダプター」とは別",
-      "pending_source": "issues/issue-3616-requirements.md"
+      "source": "docs/specifications/ndf-next-ci-failed-tests-junit.md"
     },
     {
       "term": "収集の確かめ",
       "context": "ndf-cross-refactoring",
       "meaning": "cross-refactoring が、足したテストを全体の実行が収集するかを suite の `collect_command` で確かめる工程。成功と読む終了コードは suite の設定から読み、設定が無ければ 0 だけ",
       "code": "collect_command",
-      "pending_source": "issues/issue-3616-requirements.md"
+      "source": "docs/specifications/ndf-next-ci-failed-tests-junit.md"
     },
     {
       "term": "設定のキーの改名表",
@@ -7894,6 +7906,18 @@
       "context": "ndf-release",
       "meaning": "リリースの単位のバージョンを持つファイルと、その読み書きのアダプタ（`plugin`・`json` など）。`.ndf/release.json` の `version_store` で選ぶ",
       "pending_source": "issues/issue-3572-design.md"
+    },
+    {
+      "term": "設計承認の依頼",
+      "context": "ndf-workflow",
+      "meaning": "並列の計画のレーン（開発ループのレーンと 1 スプリントのレーン）が設計承認ゲートでオーガナイザーへ送る、設計 PR の承認の依頼。計画の台帳の `kind: gate1` の行で、`answer --approved` が設計 PR をマージし、MVV 判定と古い依頼の整理が掛かる",
+      "pending_source": "issues/issue-3603-design.md"
+    },
+    {
+      "term": "区分つきの問い",
+      "context": "ndf-workflow",
+      "meaning": "`metadata.source` に区分（`ndf-gate:<番号>`・`ndf-ask:<名前>`）を持つ `AskUserQuestion`。並列の計画のレーンと一時レーンが出すと、問いの hook が `parallel.py request-ask` でオーガナイザーへ送り、計画の台帳の `kind: ask` の行になる。1 スプリントのレーンの区分 `ndf-gate:1` の問いが、承認の行で承認ゲートで終わった設計 PR を 1 本だけ指し、その PR が開いていて先頭のコミットを読めたときは `kind: gate1` の行（設計承認の依頼）になる",
+      "pending_source": "issues/issue-3603-design.md"
     },
     {
       "term": "汎用性の後退",
