@@ -12,7 +12,8 @@ from jsonschema import Draft202012Validator
 from ndf import identity
 from ndf.domains.release import cli as release_cli
 from ndf.domains.release import declaration as decl_mod
-from ndf.domains.release import pr_check
+from ndf.domains.release import gather, pr_check
+from ndf.domains.release import plugins as plugins_mod
 
 from ._fakes import FakeHub, write_json
 from ._fakes import pull as fake_pull
@@ -154,3 +155,88 @@ def test_cli_pr_check_exits_1_with_the_items_and_0_outside_the_flow(monkeypatch,
     assert out["cause"]["kind"] == "check_failed" and out["items"] == [problem]
     monkeypatch.setattr(pr_check, "check", lambda *a: None)
     assert release_cli.main(["pr-check", "--root", str(tmp_path), "--pr", "7"]) == 0
+
+
+# --- 現状固定（I-001）: 検証の ref の名前の読み（pr_check と guard の両方）---
+
+VERIFY_ROW = {
+    "target": "検証版",
+    "kind": "auto",
+    "trigger": "wf",
+    "channel": "verify",
+    "versioned": False,
+    "verify": {"ref": "verify/next", "marketplace": "x-next"},
+}
+
+
+class _FakeGit:
+    """`check` が呼ぶ git の操作だけを持つ偽物。"""
+
+    def merge_base(self, a: str, b: str) -> str:
+        return "base"
+
+    def changed_files(self, base: str, head: str) -> list[str]:
+        return ["tools/kit/a.py"]
+
+
+def _check(monkeypatch, root: Path, head_ref: str) -> list[dict[str, str]] | None:
+    monkeypatch.setattr(gather, "fetch", lambda repo_git, name: None)
+    monkeypatch.setattr(gather, "fetch_pull", lambda repo_git, number: "refs/pull/7")
+    monkeypatch.setattr(plugins_mod, "load", lambda root: [])
+    hub = FakeHub(pulls={7: fake_pull(number=7, ref=head_ref, base="main")})
+    return pr_check.check(root, hub, _FakeGit(), 7)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    ("project", "head_ref", "kinds"),
+    [
+        ({"delivery": [VERIFY_ROW]}, "verify/next", ["verify-ref"]),
+        ({"delivery": [VERIFY_ROW]}, "sprint/x", []),
+        (None, "verify/next", []),  # 宣言が無い: 検証の ref を持たない
+        ({"delivery": []}, "verify/next", []),  # 検証の行が無い
+        ({"delivery": [VERIFY_ROW, VERIFY_ROW]}, "verify/next", []),  # 検証の行が 2 つ
+    ],
+)
+def test_characterize_check_reads_the_verify_ref_or_none(monkeypatch, tmp_path: Path, project, head_ref, kinds) -> None:
+    root = _decl(tmp_path, {"promotion": "direct"})
+    if project is not None:
+        write_json(root / ".ndf" / "project.json", project)
+    got = _check(monkeypatch, root, head_ref)
+    assert got is not None and [p["kind"] for p in got] == kinds
+
+
+def test_characterize_check_treats_an_unreadable_project_file_as_no_verify_ref(monkeypatch, tmp_path: Path) -> None:
+    root = _decl(tmp_path, {"promotion": "direct"})
+    (root / ".ndf" / "project.json").write_text("{not json", encoding="utf-8")
+    assert _check(monkeypatch, root, "verify/next") == []
+
+
+class _HeadHub(FakeHub):
+    def pulls_by_head(self, branches):
+        return {b: [p for p in self.pulls.values() if p.head_ref == b] for b in branches}
+
+
+@pytest.mark.parametrize(
+    ("project", "code", "status"),
+    [
+        ({"delivery": [VERIFY_ROW]}, 1, "refused"),
+        (None, 0, None),
+        ({"delivery": []}, 0, None),
+        ("{not json", 0, None),
+    ],
+)
+def test_characterize_guard_reads_the_verify_ref_or_none(monkeypatch, capsys, tmp_path: Path, project, code, status) -> None:
+    (tmp_path / ".ndf").mkdir()
+    if isinstance(project, str):
+        (tmp_path / ".ndf" / "project.json").write_text(project, encoding="utf-8")
+    elif project is not None:
+        write_json(tmp_path / ".ndf" / "project.json", project)
+    hub = _HeadHub(pulls={9: fake_pull(number=9, ref="verify/next", base="develop")})
+    monkeypatch.setattr(release_cli, "_hub", lambda args: hub)
+    got = release_cli.main(["guard", "--root", str(tmp_path), "--branch", "verify/next", "--production", "main"])
+    out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert got == code
+    if status is None:
+        assert out["status"] == "ok"
+    else:
+        assert out["cause"]["kind"] == status and out["cause"]["detail"] == "verify/next: 検証の ref は main へ戻さない（マージしない）"
