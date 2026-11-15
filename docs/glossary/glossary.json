@@ -7712,6 +7712,36 @@
       "context": "ndf-workflow",
       "meaning": "一時レーンの起動が、別の一時レーンが動いているために断られた後、耐久ワークフローが前の一時レーンが止まるまで区分 `spawn` の問いを立てずに待つこと。上限は既定 3,600 秒",
       "pending_source": "issues/issue-3597-design.md"
+    },
+    {
+      "term": "受け口",
+      "context": "ndf-workflow",
+      "meaning": "設定が受け付ける値の種類（リリース方式の表の行・delivery の種類・リリースの形など）。「受け口を減らす」は、今受け付けている値を受け付けなくすること、または既定の値を変えること",
+      "pending_source": "issues/issue-3618-requirements.md"
+    },
+    {
+      "term": "代表のリポジトリ",
+      "context": "ndf-workflow",
+      "meaning": "設計の振る舞いを確かめるために選ぶ、ai-plugins 以外のリポジトリの種類（Web サービス・モバイルアプリ・業務文書だけ など）",
+      "pending_source": "issues/issue-3618-requirements.md"
+    },
+    {
+      "term": "ai-plugins だけの事情",
+      "context": "ndf-workflow",
+      "meaning": "ai-plugins の運用で決めた値（ブランチの運用・リリースの形・マーケットプレイスの名前など）。NDF の既定や振る舞いへ入れず、ai-plugins の .ndf/ の設定に置く",
+      "pending_source": "issues/issue-3618-requirements.md"
+    },
+    {
+      "term": "製品の約束",
+      "context": "ndf-workflow",
+      "meaning": "NDF が利用者の多様なリポジトリへ約束する価値。ai-plugins の MVV の Value 1〜14 と Vision が持つ",
+      "pending_source": "issues/issue-3618-requirements.md"
+    },
+    {
+      "term": "設計の検査",
+      "context": "ndf-workflow",
+      "meaning": "設計文書を書いた後に工程が走らせる、言語モデルを呼ばない決まった検査",
+      "pending_source": "issues/issue-3618-requirements.md"
     }
   ]
 }
