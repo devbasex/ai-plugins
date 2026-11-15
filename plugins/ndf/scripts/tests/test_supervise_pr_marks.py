@@ -130,3 +130,12 @@ def test_the_pr_step_does_not_stop_for_new_plugin_only_diffs(monkeypatch, repo):
     commit(repo, "plugins/ndf-next/a.py")
     ok, _, _, _ = run_step(monkeypatch, repo, "")
     assert ok
+
+
+def test_the_pr_step_does_not_judge_prs_to_the_default_branch(monkeypatch, repo):
+    """CI は既定ブランチ（main）宛ての PR に起点を渡さず、I2・port を当てない。pr のステップも止めない。"""
+    git(repo, "remote", "set-head", "origin", "develop")
+    commit(repo, "plugins/ndf/a.py")
+    commit(repo, "plugins/ndf-next/a.py")
+    ok, _, _, cur = run_step(monkeypatch, repo, f"前の本文\n\n{PR_FOOTER}\n")
+    assert ok and "marks_missing" not in cur

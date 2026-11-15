@@ -13,7 +13,7 @@ import gh_sections
 import mdtable
 from pr_mode import stages_in, with_mode_line
 from release_lib.others import MIGRATION_HEADING
-from repo import defer_for_base
+from repo import default_branch, defer_for_base
 from supervise_lib.claude import TAIL
 from supervise_lib.paths import DECISIONS_SH
 from supervise_lib import pr_marks
@@ -222,7 +222,9 @@ class PrStep:
         ok, url = self._publish(ctx, base, branch, doc_title or title, body, retitle=doc_title is not None)
         if ok and url:
             ctx.state.cur["mode_stages"] = {"pr": url, "stages": stages}  # 本文へ書いた工程の並び（refresh_mode_line が読む）
-        lack = pr_marks.missing_marks(body, marks, pr_marks.marked_diff(ctx.cwd, base, marks)) if ok and marks else []
+        # 既定ブランチ（本番チャネル）宛ての PR は、CI の検査も起点を渡さず I2・port を当てない（ndf-next-checks.yml）
+        judge = ok and url and marks and base != default_branch(ctx.cwd)
+        lack = pr_marks.missing_marks(body, marks, pr_marks.marked_diff(ctx.cwd, base, marks)) if judge else []
         if lack:  # 出した後に止める。本文へ印を足して pr から再開すれば、上の引き継ぎが行を保つ
             msg = (
                 f"PR {url} の本文に ndf-next の検査の印が無い（{', '.join(k for k, _ in lack)}）。"
