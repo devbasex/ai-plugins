@@ -1,5 +1,5 @@
 {
-  "summary": "T2 #3411 の 2 回目の試走（2026-11-16）。#3569 の実装（PR #3590）の上で ndf-next だけを読む起動でスプリントを流した。手順 0 の $SCRIPTS は空のままで旧いプラグインへ解決せず、宣言の判定・測定・書き出しは ndf project で通り、判定結果の次のコマンド（ndf progress new）も ndf-next だけで打てた。行ごとの結果は対応表の trial の列にあり、python -m ndf.parity.trial.probe --write がこの記録の passed と本文の確かめから書く",
+  "summary": "T2 #3411 の 2 回目の試走（2026-11-16）。#3569 の実装（PR #3590）の上で ndf-next だけを読む起動でスプリントを流した。手順 0 の $SCRIPTS は空のままで旧いプラグインへ解決せず、宣言の判定・測定・書き出しは ndf project で通り、判定結果の次のコマンド（ndf progress new）も ndf-next だけで打てた。試走の後、本文から supervise.py・relay.py・test-run.py の呼び出しを外した 3067c1b83（手順 0 の本文は変えていない）で対応表を判定し直した（failed 109・passed 16・not_run 91）。行ごとの結果は対応表の trial の列にあり、python -m ndf.parity.trial.probe --write がこの記録の passed と本文の確かめから書く",
   "base": "sprint/lr-t2-3569 6c22947d6（PR #3590 の head。develop を取り込み済み。ndf-next 11.0.0-dev.8）",
   "runs": [
     {
