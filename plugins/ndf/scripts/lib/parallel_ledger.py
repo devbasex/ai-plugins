@@ -107,9 +107,8 @@ def append_ledger_row(
 
 
 class Sent(str):
-    """送った結果（#3597 の決定 5）。値は依頼の id で、今までの戻り値（id の文字列）のまま読める。`written` は台帳へ書いたか、
-    `same` は書いたか同じキーの行と中身（`at` を除いた `msg`）が同じか、`answered` は同じ id の答えの行があるか処理済みか、
-    `existing` は同じキーの行の id（書いたときは空）。"""
+    """送った結果（#3597 の決定 5）。値は依頼の id で、今までの戻り値（id の文字列）のまま読める。`written` は台帳へ書いたか、`same` は
+    書いたか同じキーの行と中身（`at` を除いた `msg`）が同じか、`answered` は同じ id の答えか処理済みか、`existing` は同じキーの行の id。"""
 
     written: bool
     same: bool
@@ -130,8 +129,7 @@ def _bare(msg) -> Optional[dict]:
 def resent(main: Path, name: str, key: str, msg: Optional[dict]) -> Sent:
     """`append_ledger_row` が同じキーで False を返した後に、同じキーの行と送ろうとした中身が同じか・答え済みかを判定する。
     最初の `opened` の行より前の行は数えない（`append_ledger_row` と同じ）。読めなければ `OSError`。"""
-    rows = read_ledger_rows(main, name).rows
-    since = first_opened(rows)
+    since = first_opened(rows := read_ledger_rows(main, name).rows)
     rows = [r for r in rows if r["_pos"] >= since]
     row = next((r for r in rows if r.get("key") == key), None)
     if row is None:  # 同じキーの行を読めない（起きない見込み。送ったと扱わない）
@@ -299,17 +297,15 @@ def settled_gates(rows: list[dict], earlier: list[dict] = ()) -> set[str]:
     """処理済みのリリース承認ゲートの ID（#3080 の I8）。`rows` は位置（`_pos`）を持つ台帳の行で、リリース承認ゲート（`gate2`）の
     行は、同じ連番の確定か締めの `resume` の行がそれより後にあれば処理済みとする。出し直しの提示の 2 回目は確定の後に届くため、
     連番の一致だけでは除かない（I9）。`earlier` は `rows` より前に届いた問い（チェックポイントの問い）で、`rows` に同じ連番の
-    確定か締めがあれば処理済みとする。
-    確定の後の依頼（`msg.after` が `confirmed`。#3597 の決定 4）は確定の行では処理済みにせず、同じ id の答えの行か、それより後の
-    同じ連番の締めの行があるときだけ処理済みとする。"""
+    確定か締めがあれば処理済みとする。確定の後の依頼（`msg.after` が `confirmed`。#3597 の決定 4）は確定の行では処理済みにせず、
+    同じ id の答えの行か、それより後の同じ連番の締めの行があるときだけ処理済みとする。"""
     done: dict[str, int] = {}  # 連番 → 確定か締めの最後の位置
     ends: dict[str, int] = {}  # 連番 → 締めの最後の位置（確定の後の依頼が読む）
     for r in rows:
         msg = r.get("msg") or {}
         if r["kind"] == "resume" and msg.get("phase") in SETTLING:
-            done[str(msg.get("n"))] = max(done.get(str(msg.get("n")), -1), r["_pos"])
-            if msg.get("phase") == "settle":
-                ends[str(msg.get("n"))] = max(ends.get(str(msg.get("n")), -1), r["_pos"])
+            for got in (done, ends) if msg.get("phase") == "settle" else (done,):
+                got[str(msg.get("n"))] = max(got.get(str(msg.get("n")), -1), r["_pos"])
     answers = {r["id"] for r in rows if r["kind"] == "answer"}
 
     def settled(q: dict, pos: int) -> bool:
