@@ -375,8 +375,9 @@ def test_restart_refuses_when_the_conversation_cannot_be_decided(dirs, tmp_path)
     assert hb.restart_input("a", {"args": [], "cwd": str(tmp_path)}, hb.by_name(hb.scan_wrappers())["a"]) is None
     # 前の誤った起こし直しが登録簿へ残した、再開の文だけの引数（区間 1）
     assert hb.restart_input("c", {"args": [RESUME], "cwd": str(tmp_path)}, None) is None
+    hb.ensure_dirs()
     hb.write_json_atomic(hb.hub_path(hb.REGISTRY), {"version": 1, "entries": {"a": {"session": "a", "args": []}}})
-    res = hb.Hub().process({"kind": "restart", "name": "a"})
+    res = hb.Hub(None).process({"kind": "restart", "name": "a"})
     assert res["status"] == "stopped" and "spawn --name a" in res["summary"]
 
 
