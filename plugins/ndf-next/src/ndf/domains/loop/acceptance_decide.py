@@ -94,15 +94,25 @@ def merged(body: str, pre_merge: Mapping[int, str], post_release: Iterable[int])
 
 
 def checks_table(checks: Mapping[int, Check]) -> str:
-    """`## 受け入れ条件の確認` の節の中身（番号の順の表）。"""
+    """`## 受け入れ条件の確認` の節の表（番号の順）。手段の `|` と改行は `inputs.cell` で書き、`read_checks` が元へ戻す。"""
     head = "| " + " | ".join(_head()) + " |"
     rule = "| " + " | ".join(":---" for _ in _head()) + " |"
-    rows = [f"| {n} | {c.kind} | {c.means if c.kind == PRE_MERGE else NO_MEANS} |" for n, c in sorted(checks.items())]
+    rows = [f"| {n} | {c.kind} | {inputs.cell(c.means) if c.kind == PRE_MERGE else NO_MEANS} |" for n, c in sorted(checks.items())]
     return "\n".join([head, rule, *rows])
 
 
+def _table_span(lines: list[str], start: int, end: int) -> Optional[tuple[int, int]]:
+    """節（`lines[start:end]`）の囲みの外の最初の表の行の範囲（終わりは含まない）。表が無ければ None。"""
+    first = next((start + i for i, line in inputs.outside_fences(lines[start:end]) if line.strip().startswith("|")), None)
+    if first is None:
+        return None
+    last = next((i for i in range(first, end) if not lines[i].strip().startswith("|")), end)
+    return first, last
+
+
 def recorded_body(body: str, pre_merge: Mapping[int, str], post_release: Iterable[int]) -> str:
-    """記録を書いた本文。節が無ければ末尾へ足し、あれば節の中の表だけを置き換える。節の外は変えない。"""
+    """記録を書いた本文。節が無ければ末尾へ足し、あれば節の中の表だけを置き換える（表が無ければ見出しの直後へ置く）。
+    節の中の説明文・小見出しと、節の外は変えない。"""
     table = checks_table(merged(body, pre_merge, post_release))
     lines = inputs.body_lines(body)
     at = inputs.heading_at(lines, inputs.CHECKS_HEADING)
@@ -110,5 +120,8 @@ def recorded_body(body: str, pre_merge: Mapping[int, str], post_release: Iterabl
         return body.rstrip("\n") + f"\n\n{inputs.CHECKS_HEADING}\n\n{table}\n"
     start = at + 1
     end = next((i for i in range(start, len(lines)) if inputs.SECTION_END.match(lines[i])), len(lines))
-    tail = lines[end:]
-    return "\n".join([*lines[:start], "", table, *([""] if tail else []), *tail])
+    span = _table_span(lines, start, end)
+    if span is not None:
+        return "\n".join([*lines[: span[0]], *table.split("\n"), *lines[span[1] :]])
+    rest = lines[start:]
+    return "\n".join([*lines[:start], "", *table.split("\n"), *([""] if rest and rest[0].strip() else []), *rest])

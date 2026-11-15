@@ -97,8 +97,21 @@ def section_lack(body: str) -> Optional[str]:
     return None
 
 
+# 表のセルの区切り（`\|` は区切りでなくセルの中の `|`）と、セルの中の改行の書き方
+_CELL_SEP = re.compile(r"(?<!\\)\|")
+_CELL_BREAK = "<br>"
+
+
+def cell(value: str) -> str:
+    """値を表の 1 つのセルへ書ける形にする（`|` は `\\|`、改行は `<br>`）。`cells` が元の値へ戻す。"""
+    return value.replace("\r\n", "\n").replace("|", "\\|").replace("\n", _CELL_BREAK)
+
+
 def cells(line: str) -> list[str]:
-    return [c.strip() for c in line.strip().strip("|").split("|")]
+    """表の 1 行のセル（`cell` で書いた `\\|` と `<br>` は元の `|` と改行へ戻す）。"""
+    inner = line.strip().removeprefix("|")
+    inner = inner[:-1] if inner.endswith("|") and not inner.endswith("\\|") else inner
+    return [c.strip().replace("\\|", "|").replace(_CELL_BREAK, "\n") for c in _CELL_SEP.split(inner)]
 
 
 def check_rows(body: str, head: Sequence[str]) -> list[tuple[int, list[str]]]:

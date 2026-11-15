@@ -242,7 +242,12 @@ PROJECT = {
     "workflow": {"launch": {"review": ["ndf-review"], "rebuild": ["ndf-rebuild"]}},
 }
 # 雛形 → 工程の入力（設計は issues・worktree、実装は issues・worktree・mode、設計のマージは設計の工程の入力）
-STAGE_INPUTS = {"design": ("issues", "worktree"), "impl": ("issues", "worktree", "mode"), "design-merge": ("issues", "worktree")}
+STAGE_INPUTS = {
+    "design": ("issues", "worktree"),
+    "impl": ("issues", "worktree", "mode"),
+    "design-merge": ("issues", "worktree"),
+    "quality-gates": ("issues", "worktree"),
+}
 
 
 def _stage_run_of(name: str, repo: Path, issues: list[int]) -> invoke.StageRun:
@@ -299,6 +304,20 @@ def test_template_values_fill_the_worker_from_the_default_and_the_branch_from_th
     plan, text, repo, _ = _filled_plan(tmp_path, monkeypatch, name)
     assert plan["worktree"] == str(repo) and "sprint/s1" in plan["name"]
     assert "ndf-worker" in text and "{{" not in text
+
+
+def test_quality_gates_builds_for_a_sprint_with_several_issues(tmp_path, monkeypatch):
+    # 完了判定の design-tests は工程の入力の課題の並びを読む。課題が 2 つ以上でも、課題を読まずにプランを組める
+    repo = _sprint_repo(tmp_path, PROJECT)
+    held = route.params()
+    monkeypatch.setattr(route, "params", lambda: {n: replace(p, default=["ndf-worker"]) if n == "worker" else p for n, p in held.items()})
+    monkeypatch.setattr(invoke, "issue_text", lambda *a: pytest.fail("完了判定は課題の題と本文を読まない"))
+    work = tmp_path / "w"
+    work.mkdir()
+    argv = invoke.plan_argv(_stage_run_of("quality-gates", repo, [1, 2]), work, None, repo)
+    plan = json.loads(Path(argv[argv.index("next") + 1]).read_text())
+    step = next(s for s in plan["steps"] if s.get("id") == "design-tests")
+    assert step["run"] == ["ndf", "loop", "design-tests", "--issue", "1", "2"]
 
 
 @pytest.mark.parametrize("name", ["design", "impl"])

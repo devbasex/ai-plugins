@@ -53,6 +53,24 @@ def test_recording_adds_the_table_and_a_pre_merge_row_without_means_counts_as_un
     assert [c.number for c in acc.unrecorded(no_means)] == [3]
 
 
+def test_means_with_a_pipe_or_a_newline_round_trip_through_the_table():
+    # パイプや改行を含むコマンドを表へそのまま埋めると、列と行が割れて手段が欠ける
+    means = "pytest tests/x.py -q | tail -3\ngrep 'a\\|b' x"
+    body = acc.recorded_body(BODY, {1: means}, [2])
+    assert acc.read_checks(body)[1] == acc.Check("マージ前", means)
+    again = acc.recorded_body(body, {3: "docker build で確かめた"}, [])
+    assert acc.read_checks(again)[1] == acc.Check("マージ前", means) and acc.unrecorded(again) == []
+
+
+def test_recording_keeps_the_text_around_the_table_in_the_checks_section():
+    # 確認の節の説明文・小見出しは利用者が書いたもので、表だけを置き換える
+    section = f"{inputs.CHECKS_HEADING}\n\n前提: arm64 の機械で確かめる\n\n| 条件 | 区分 | 手段 |\n| :--- | :--- | :--- |\n| 1 | マージ前 | pytest |\n\n### 証跡\n\n- ログは x に置いた\n"
+    body = acc.recorded_body(BODY + "\n" + section, {}, [2])
+    assert "前提: arm64 の機械で確かめる" in body and "### 証跡" in body and "- ログは x に置いた" in body
+    assert acc.read_checks(body) == {1: acc.Check("マージ前", "pytest"), 2: acc.Check("リリース後", "")}
+    assert body.count("| 条件 | 区分 | 手段 |") == 1
+
+
 @pytest.mark.parametrize(("pre", "post"), [({9: "x"}, []), ({1: "x"}, [1])])
 def test_recording_refuses_unknown_numbers_and_both_kinds(pre, post):
     with pytest.raises(acc.AcceptanceError):

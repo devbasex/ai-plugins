@@ -125,6 +125,15 @@ def test_a_worker_that_left_work_does_not_return_ok(tmp_path):
     assert got["gaps"][0]["reason"] == "できなかった"
 
 
+def test_a_malformed_gap_keeps_an_ok_report_from_passing(tmp_path):
+    # 形の違う gaps（文字列の配列・文字列・欠けた鍵）を捨てると、作業を残した ok が完了に化ける（#1682）
+    for gaps in (["3 を確かめられない"], "3 を確かめられない", [{"kind": "criterion", "name": "3"}]):
+        got = _outcome(tmp_path, {"status": "ok", "summary": "完了", "gaps": gaps})
+        assert got["status"] == "stopped" and got["cause"]["kind"] == "incomplete"
+        assert len(got["gaps"]) == 1 and "3" in got["gaps"][0]["reason"]
+    assert _outcome(tmp_path, {"status": "ok", "summary": "済んだ", "gaps": []})["status"] == "ok"
+
+
 def test_a_worker_that_asks_for_a_decision_returns_a_gate(tmp_path):
     got = _outcome(tmp_path, {"status": "gate", "summary": "判断が要る"})
     assert got["status"] == "gate" and "判断が要る" in got["summary"] and got["routes"]

@@ -116,6 +116,8 @@ WORK_RULES = (
     "確かめた条件は `--pre-merge '<番号>=<テスト名か打ったコマンド>'`、リリースの後でしか確かめられない条件は `--post-release <番号>`。"
     "要求の手動確認（マージ前）を行えなかった条件は記録せずに残し、結果ファイルの gaps に理由を書く（実装のプランは記録の無い条件が残れば完了で返さない）",
     "- 結果ファイルの status は、残した作業か確かめられなかった受け入れ条件があれば ok にしない",
+    "- 結果ファイルの status は `ok`（済んだ）・`gate`（判断が要る）・`stopped`（できなかった）のどれかにし、summary に要約を書く。"
+    "gaps は残した作業ごとに `kind`・`name`・`reason` を空でない文字列で持つオブジェクトの配列で書く（形の違う gap は残した作業として扱われる）",
 )
 
 # 期待値の直書きを探した記録の鍵（結果ファイルの metrics の下。#3188）
@@ -545,11 +547,23 @@ def _load_sources(path: Optional[str]) -> list[Source]:
         raise WorkerError("invalid", f"書き手の付いた本文 {path} が JSON でない: {exc}") from None
 
 
+_GAP_KEYS = ("kind", "name", "reason")
+
+
+def _gap_of(raw: object) -> dict[str, str]:
+    """gaps の要素 1 つ。形の違う要素（kind・name・reason が空でない文字列でない）も捨てず、中身を理由に写した欠けにする。"""
+    if isinstance(raw, dict) and all(isinstance(raw.get(k), str) and raw[k] for k in _GAP_KEYS):
+        return {k: raw[k] for k in _GAP_KEYS}
+    shown = json.dumps(raw, ensure_ascii=False, default=str)
+    return {"kind": "work", "name": "gap", "reason": f"形の違う gap（kind・name・reason を空でない文字列で書く）: {shown}"}
+
+
 def _gaps_of(report: Mapping[str, Any]) -> list[dict[str, str]]:
+    """結果ファイルの gaps。形の違う gaps を黙って捨てると、作業を残した ok が完了に化けるので、欠けとして残す。"""
     raw = report.get("gaps")
-    rows = raw if isinstance(raw, list) else []
-    keys = ("kind", "name", "reason")
-    return [{k: g[k] for k in keys} for g in rows if isinstance(g, dict) and all(isinstance(g.get(k), str) and g[k] for k in keys)]
+    if raw is None or raw == []:
+        return []
+    return [_gap_of(g) for g in (raw if isinstance(raw, list) else [raw])]
 
 
 def outcome_of(kind: str, result_file: Path, items: list[dict[str, Any]], metrics: dict[str, Any], attempts: int) -> dict[str, Any]:
