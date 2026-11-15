@@ -49,7 +49,7 @@ from ndf.domains.relay import account_login, account_metered, account_registry, 
 from ndf.domains.relay.tmux import Tmux
 
 # 結果 JSON の tool の名前は副命令の名前（正本は `cli.COMMANDS`）
-TOOL = next(name for name, module in cli.COMMANDS.items() if module == __name__)
+TOOL = cli.tool_of(__name__)
 COMMANDS = {
     "install": "中継の複製と PATH のエントリポイントを置く",
     "uninstall": "置いた複製と PATH のエントリポイントを消す",
