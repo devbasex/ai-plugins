@@ -104,20 +104,19 @@ def test_production_merge_rechecks_approval_after_waiting() -> None:
         return ci.WatchResult(ci_reading(False), 1, 0.0, 0.0)
 
     lander = release_lander(hub, False, [])
-    done = land.Lander(hub, lander.base, lander.production, lander.budget, wait=wait).land(7)
+    done = land.Lander(hub, lander.production, lander.budget, wait=wait).land(7)
     assert not done.merged and done.kind == "refused" and hub.merged == []
 
 
-def test_production_merge_then_sync_back_to_base() -> None:
-    hub = FakeHub(pulls={7: pull(), 8: pull(number=8, base="develop")}, comments_of={7: [trail_comment("approved", HEAD)]})
-    hub.responses[("POST", "/repos/o/r/pulls")] = {"number": 8}
+def test_production_merge_makes_no_sync_pr() -> None:
+    """受け入れ条件 13・I10: 本番の PR（head は sprint/）をマージした後に、同期の PR も次の版のブランチも作らない。"""
+    hub = FakeHub(pulls={7: pull(ref="sprint/lrel")}, comments_of={7: [trail_comment("approved", HEAD)]})
     done = release_lander(hub, False, []).land(7)
-    assert done.merged and done.sync_pr == 8 and hub.merged == [7, 8]
-    # 本番ブランチとベースブランチの祖先の関係を保つため、どちらも merge commit で入れる
-    assert hub.merge_methods == [land.MERGE_METHOD, land.MERGE_METHOD] == ["merge", "merge"]
-    # 本番へのマージは merge commit を必須とし、キューの方式が違えば入れない
-    assert hub.merge_required == [True, True]
-    assert land.Lander(hub, "develop", "main", 1.0).required("main").names == ["pytest"]
+    assert done.merged and hub.merged == [7]
+    assert not any(m == "POST" and (p.endswith("/pulls") or p.endswith("/git/refs")) for m, p, _ in hub.requests)
+    # 版上げのコミットの範囲を保つため merge commit で入れ、キューの方式が違えば入れない
+    assert hub.merge_methods == [land.MERGE_METHOD] == ["merge"] and hub.merge_required == [True]
+    assert land.Lander(hub, "main", 1.0).required("main").names == ["pytest"]
 
 
 def test_required_includes_classic_branch_protection() -> None:
@@ -126,7 +125,7 @@ def test_required_includes_classic_branch_protection() -> None:
     hub.responses[("GET", "/repos/o/r/branches/main")] = {
         "protection": {"required_status_checks": {"contexts": ["lint"], "checks": [{"context": "build"}]}}
     }
-    assert land.Lander(hub, "develop", "main", 1.0).required("main").names == ["build", "lint"]
+    assert land.Lander(hub, "main", 1.0).required("main").names == ["build", "lint"]
 
 
 def test_commit_status_counts_as_required_check() -> None:
@@ -142,7 +141,7 @@ def test_commit_status_counts_as_required_check() -> None:
     hub.responses[("GET", f"/repos/o/r/commits/{HEAD}/status")] = {
         "statuses": [{"context": "ext-ci", "state": "success", "updated_at": "t1", "created_at": "t0", "id": 3}]
     }
-    done = land.Lander(hub, "develop", "main", 1.0, wait=wait).land(8)
+    done = land.Lander(hub, "main", 1.0, wait=wait).land(8)
     reading = readers[0]()
     assert reading.missing == [] and reading.running == [] and done.merged and hub.merged == [8]
 
@@ -169,7 +168,7 @@ def test_required_check_with_a_named_app_counts_only_that_app() -> None:
     hub.responses[("GET", "/repos/o/r/branches/main")] = {
         "protection": {"required_status_checks": {"checks": [{"context": "build", "app_id": 7}, {"context": "lint", "app_id": -1}]}}
     }
-    lander = land.Lander(hub, "develop", "main", 1.0)
+    lander = land.Lander(hub, "main", 1.0)
     assert lander.required("main") == land.Required(["build", "lint", "pytest"], {"pytest": frozenset({15368}), "build": frozenset({7})})
     runs = [_run("pytest", 999, 1), _run("build", 7, 2), _run("lint", 42, 3)]
     hub.status_list = [_status("pytest", "someone", 4)]
@@ -182,7 +181,7 @@ def test_required_check_with_a_named_app_counts_only_that_app() -> None:
     hub.runs = runs
     hub.pulls = {7: pull()}
     hub.comments_of = {7: [trail_comment("approved", HEAD)]}
-    done = land.Lander(hub, "develop", "main", 1.0, wait=wait).land(7)
+    done = land.Lander(hub, "main", 1.0, wait=wait).land(7)
     assert readers[0]().missing == ["pytest"] and not done.merged and hub.merged == []
     hub.runs = [*runs, _run("pytest", 15368, 5)]
     assert readers[0]().missing == []
@@ -204,7 +203,7 @@ def _named_app_lander(hub: FakeHub) -> tuple[land.Lander, list[Callable[[], ci.R
         readers.append(reader)
         return ci.WatchResult(reader(), 1, 0.0, 0.0)
 
-    return land.Lander(hub, "develop", "main", 1.0, wait=wait), readers
+    return land.Lander(hub, "main", 1.0, wait=wait), readers
 
 
 def test_required_check_with_a_named_app_counts_that_apps_commit_status() -> None:
@@ -228,33 +227,12 @@ def test_named_app_check_is_matched_by_the_same_name_rule_as_the_wait(name: str)
     assert readers[0]().missing == []
 
 
-def test_sync_pr_uses_production_branch_as_head() -> None:
-    """戻す PR は本番ブランチを head にして作る（リリースのブランチはマージの後に消えることがある）。"""
-    hub = FakeHub(pulls={7: pull(), 8: pull(number=8, base="develop")}, comments_of={7: [trail_comment("approved", HEAD)]})
-    hub.responses[("POST", "/repos/o/r/pulls")] = {"number": 8}
-    release_lander(hub, False, []).land(7)
-    made = [payload for method, path, payload in hub.requests if (method, path) == ("POST", "/repos/o/r/pulls")]
-    assert [(m["head"], m["base"]) for m in made] == [("main", "develop")]
-
-
-def test_merged_release_resumes_sync_with_open_pr() -> None:
-    """本番 PR がマージ済みでも、開いている戻す PR を使い直してマージを再開する。"""
-    hub = FakeHub(pulls={7: pull(merged=True), 9: pull(number=9, base="develop")})
-    hub.responses[("GET", "/repos/o/r/pulls")] = [{"number": 9}]
-    done = release_lander(hub, False, []).land(7)
-    assert done.merged and done.sync_pr == 9 and hub.merged == [9]
-    assert not any((m, p) == ("POST", "/repos/o/r/pulls") for m, p, _ in hub.requests)
-
-
-def test_sync_without_diff_is_done_but_other_422_raises() -> None:
-    """差分が無い 422 だけを「戻す差分なし」とし、ほかの 422 は隠さない。"""
+def test_merged_production_pr_resumes_without_a_sync_pr() -> None:
+    """I10: マージ済みの本番の PR から打ち直しても、同期の PR を作らずマージも呼ばない。"""
     hub = FakeHub(pulls={7: pull(merged=True)})
-    hub.responses[("POST", "/repos/o/r/pulls")] = GitHubError("No commits between develop and main", 422)
     done = release_lander(hub, False, []).land(7)
-    assert done.merged and done.sync_pr is None and hub.merged == []
-    hub.responses[("POST", "/repos/o/r/pulls")] = GitHubError("Validation Failed: head invalid", 422)
-    with pytest.raises(GitHubError):
-        release_lander(hub, False, []).land(7)
+    assert done.merged and hub.merged == []
+    assert not any((m, p) == ("POST", "/repos/o/r/pulls") for m, p, _ in hub.requests)
 
 
 # --- #3506: 迂回の宣言（production_merge.admin）のある本番のマージ ------------------------------------
@@ -286,7 +264,7 @@ def _admin_lander(hub: FakeHub, admin: bool = True, approvals: int = 1, failed: 
     hub.responses[("GET", "/repos/o/r/rules/branches/main")] = [*rules, *([REVIEW_RULE] if approvals else [])]
     hub.responses[("GET", "/repos/o/r/branches/main/protection/required_pull_request_reviews")] = not_found()
     hub.responses[("POST", "/repos/o/r/pulls")] = {"number": 8}
-    return land.Lander(hub, base.base, base.production, base.budget, wait=wait if wait is not None else base.wait, admin=admin)
+    return land.Lander(hub, base.production, base.budget, wait=wait if wait is not None else base.wait, admin=admin)
 
 
 def _mvv_trail(sha: str = HEAD) -> Authored:
@@ -298,11 +276,11 @@ def _records(hub: FakeHub, number: int = 7) -> list[str]:
 
 
 def test_admin_declaration_merges_the_production_pr_with_the_bypass_and_records_it() -> None:
-    """受け入れ条件 8・I7・I8: 宣言があり承認数 1 なら、迂回でマージし、記録を置き、admin が真。戻す PR は迂回しない。"""
-    hub = AdminHub(pulls={7: pull(), 8: pull(number=8, base="develop")}, comments_of={7: [trail_comment("approved", HEAD)]})
+    """受け入れ条件 8・I7・I8: 宣言があり承認数 1 なら、迂回でマージし、記録を置き、admin が真。"""
+    hub = AdminHub(pulls={7: pull()}, comments_of={7: [trail_comment("approved", HEAD)]})
     done = _admin_lander(hub).land(7)
     assert done.merged and done.admin and done.admin_record == "https://example.invalid/7" and done.record_error is None
-    assert hub.admin_merged == [7] and hub.merged == [8] and hub.merge_methods == ["merge", "merge"]
+    assert hub.admin_merged == [7] and hub.merged == [] and hub.merge_methods == ["merge"]
     (record,) = _records(hub)
     assert HEAD in record and approval_decide.TRAIL_MARK not in record
 
@@ -384,15 +362,15 @@ def test_authored_from_rest_marks_edited_comments() -> None:
 @pytest.mark.parametrize("admin, approvals", [(False, 1), (True, 0)])
 def test_without_the_bypass_the_merge_stays_as_it_was(admin: bool, approvals: int) -> None:
     """受け入れ条件 8（迂回しない）・I2b: 宣言が無い・承認数 0 なら今のマージで、記録を置かず admin は偽。"""
-    hub = AdminHub(pulls={7: pull(), 8: pull(number=8, base="develop")}, comments_of={7: [trail_comment("approved", HEAD)]})
+    hub = AdminHub(pulls={7: pull()}, comments_of={7: [trail_comment("approved", HEAD)]})
     done = _admin_lander(hub, admin=admin, approvals=approvals).land(7)
     assert done.merged and not done.admin and done.admin_record is None
-    assert hub.admin_merged == [] and hub.merged == [7, 8] and _records(hub) == []
+    assert hub.admin_merged == [] and hub.merged == [7] and _records(hub) == []
 
 
 def test_approvals_reads_rules_then_protection_and_none_when_unreadable() -> None:
     hub = FakeHub()
-    lander = land.Lander(hub, "develop", "main", 1.0, admin=True)
+    lander = land.Lander(hub, "main", 1.0, admin=True)
     hub.responses[("GET", "/repos/o/r/rules/branches/main")] = [REVIEW_RULE]
     assert lander.approvals("main") == 1
     hub.responses[("GET", "/repos/o/r/rules/branches/main")] = []
@@ -406,12 +384,12 @@ def test_approvals_reads_rules_then_protection_and_none_when_unreadable() -> Non
 
 def test_merged_admin_release_resume_writes_the_missing_record_once() -> None:
     """I7: マージ済みの本番の PR の打ち直しは、利用者の証跡がマージした先端と一致し記録が無いときだけ書く。何度打っても 1 件。"""
-    hub = AdminHub(pulls={7: pull(merged=True), 9: pull(number=9, base="develop")}, comments_of={7: [trail_comment("approved", HEAD)]})
+    hub = AdminHub(pulls={7: pull(merged=True)}, comments_of={7: [trail_comment("approved", HEAD)]})
     hub.responses[("GET", "/repos/o/r/pulls")] = [{"number": 9}]
     first = _admin_lander(hub).land(7)
     second = _admin_lander(hub).land(7)
     assert first.admin and first.admin_record and second.admin and len(_records(hub)) == 1 and hub.admin_merged == []
-    hub = AdminHub(pulls={7: pull(merged=True), 9: pull(number=9, base="develop")}, comments_of={7: [trail_comment("approved", OTHER)]})
+    hub = AdminHub(pulls={7: pull(merged=True)}, comments_of={7: [trail_comment("approved", OTHER)]})
     hub.responses[("GET", "/repos/o/r/pulls")] = [{"number": 9}]
     done = _admin_lander(hub).land(7)
     assert not done.admin and _records(hub) == []
@@ -420,7 +398,7 @@ def test_merged_admin_release_resume_writes_the_missing_record_once() -> None:
 def test_admin_record_failure_is_reported_apart_from_the_merge() -> None:
     """決定 7: 記録を書けなければ、マージは済んだまま record_error に理由を残す。"""
     hub = AdminHub(
-        pulls={7: pull(), 8: pull(number=8, base="develop")}, comments_of={7: [trail_comment("approved", HEAD)]}, fail_record=True
+        pulls={7: pull()}, comments_of={7: [trail_comment("approved", HEAD)]}, fail_record=True
     )
     done = _admin_lander(hub).land(7)
     assert done.merged and done.admin and done.admin_record is None and done.record_error and hub.admin_merged == [7]
@@ -521,11 +499,11 @@ def test_decide_reads_the_route_and_does_not_carry_an_approval_to_another_head()
     assert merge_decide.decide(merge_decide.facts_of(_merged_raw(HEAD, merged=False)), []) is None
 
 
-def test_suggested_reruns_only_passing_stops_and_defers_the_rest() -> None:
-    """決定 3: 一時的な止まり方は打ち直し、直しの要る止まり方は次の版への回し。"""
+def test_suggested_reruns_only_passing_stops_and_rejects_the_rest() -> None:
+    """決定 3: 一時的な止まり方は打ち直し、直しの要る止まり方は差し戻し。"""
     assert merge_decide.suggested("ci_pending") == merge_decide.suggested("infra_wait") == merge_decide.RERUN
     for kind in ("test_failed", "check_failed", "refused", "no-such-kind"):
-        assert merge_decide.suggested(kind) == merge_decide.DEFER
+        assert merge_decide.suggested(kind) == merge_decide.REJECT
 
 
 def test_failed_required_check_stops_with_the_check_and_without_pushing_or_merging() -> None:
@@ -545,18 +523,19 @@ def _last(capsys) -> dict:
     return json.loads(capsys.readouterr().out.strip().splitlines()[-1])
 
 
-def test_cli_merge_reports_the_failed_check_and_three_next_moves(monkeypatch, capsys) -> None:
-    """受け入れ条件 4: 止まった結果は items に落ちたチェック、値の項目 moves に 3 つの手、既定の手は次の版への回し。"""
+def test_cli_merge_reports_the_failed_check_and_two_next_moves(monkeypatch, capsys, tmp_path) -> None:
+    """受け入れ条件 4: 止まった結果は items に落ちたチェック、値の項目 moves に 2 つの手、既定の手は差し戻し。"""
     hub = FakeHub(pulls={7: pull()}, comments_of={7: [trail_comment("approved", HEAD)]})
     lander = release_lander(hub, True, [])
     monkeypatch.setattr(release_cli, "_hub", lambda args: hub)
-    monkeypatch.setattr(land, "Lander", lambda h, b, p, budget, admin=False: lander)
-    code = release_cli.main(["merge", "--pr", "7", "--base", "develop", "--production", "main", "--budget", "1"])
+    monkeypatch.setattr(land, "Lander", lambda h, p, budget, admin=False: lander)
+    monkeypatch.setattr(release_cli.bump, "planned_for", lambda *a: None)
+    code = release_cli.main(["merge", "--pr", "7", "--root", str(tmp_path), "--production", "main", "--budget", "1"])
     out = _last(capsys)
     assert code != 0 and out["items"][0] == {"kind": "check", "name": "pytest", "outcome": "failure"}
     values = _values(out)
-    assert set(values["moves"]) == set(merge_decide.NEXT_MOVES) and values["suggested"] == "defer"
-    assert values["moves"]["defer"]["argv"][1:3] == ["release-steps", "defer"] and "next" not in out
+    assert set(values["moves"]) == set(merge_decide.NEXT_MOVES) == {"rerun", "reject"} and values["suggested"] == "reject"
+    assert values["moves"]["reject"]["argv"][1:3] == ["release-steps", "answer"] and "next" not in out
 
 
 def test_moved_head_after_the_approval_is_not_merged_and_names_both_heads() -> None:
@@ -568,9 +547,9 @@ def test_moved_head_after_the_approval_is_not_merged_and_names_both_heads() -> N
     assert trail.read(hub, 7).judgment.state == approval_decide.STALE
 
 
-def test_gate_approval_merge_reports_the_version_and_the_gate_route() -> None:
-    """受け入れ条件 5: 承認ゲートで承認した先端を、その先端との照合付きでマージし、結果に版と経路 gate を載せる。"""
-    hub = FakeHub(pulls={7: pull(), 8: pull(number=8, base="develop")}, comments_of={7: [_gate_trail(HEAD)]})
+def test_gate_approval_merge_reports_the_gate_route() -> None:
+    """受け入れ条件 5: 承認ゲートで承認した先端を、その先端との照合付きでマージし、結果に経路 gate を載せる。"""
+    hub = FakeHub(pulls={7: pull()}, comments_of={7: [_gate_trail(HEAD)]})
     hub.responses[("POST", "/repos/o/r/pulls")] = {"number": 8}
     hub.responses[("GET", "/repos/o/r/pulls/7")] = _merged_raw(HEAD, by="octocat")
     seen: list[str | None] = []
@@ -582,26 +561,25 @@ def test_gate_approval_merge_reports_the_version_and_the_gate_route() -> None:
 
     hub.merge = recorded  # type: ignore[method-assign]
     done = release_lander(hub, False, []).land(7)
-    assert done.merged and done.version == "1.2.4" and seen[0] == HEAD
+    assert done.merged and seen[0] == HEAD
     assert done.approval is not None and (done.approval.route, done.approval.approved_head) == ("gate", HEAD)
     assert done.merge_record is None and not [c for c in hub.comments(7) if trail.MERGE_MARK in c.body]
 
 
 def _resumed(comments: list[Authored], head: str) -> FakeHub:
-    hub = FakeHub(pulls={7: pull(head=head, merged=True), 9: pull(number=9, base="develop")}, comments_of={7: comments})
-    hub.responses[("GET", "/repos/o/r/pulls")] = [{"number": 9}]
+    hub = FakeHub(pulls={7: pull(head=head, merged=True)}, comments_of={7: comments})
     hub.responses[("GET", "/repos/o/r/pulls/7")] = _merged_raw(head)
     return hub
 
 
-def test_human_merge_while_the_gate_waits_is_recorded_and_synced_once() -> None:
-    """受け入れ条件 7: 人が先端 A でマージした PR の再開は、人のマージを記録し（マージした人・A・マージコミット）、戻すマージへ進む。"""
+def test_human_merge_while_the_gate_waits_is_recorded_once() -> None:
+    """受け入れ条件 7: 人が先端 A でマージした PR の再開は、人のマージを記録し（マージした人・A・マージコミット）、同期の PR を作らない。"""
     hub = _resumed([], HEAD)
     judgment, facts = trail.answer_merged(hub, 7, "main")
     assert judgment.approved and facts.by == "takemi"
     first = release_lander(hub, False, []).land(7)
     second = release_lander(hub, False, []).land(7)
-    assert first.merged and first.sync_pr == 9 and first.approval is not None
+    assert first.merged and first.approval is not None and hub.merged == []
     assert (first.approval.route, first.approval.by, first.approval.merged_head) == ("github-merge", "takemi", HEAD)
     records = [c.body for c in hub.comments(7) if trail.MERGE_MARK in c.body]
     assert len(records) == 1 and f"`{HEAD}`" in records[0] and f"`{MERGE_SHA}`" in records[0] and "takemi" in records[0]
@@ -659,21 +637,10 @@ def test_merge_record_is_written_once_per_head_by_a_trusted_author() -> None:
     assert not trail.write_merge_record(hub, 7, approval)[0]
 
 
-def test_defer_closes_the_production_pr_and_keeps_the_branch(monkeypatch, capsys) -> None:
-    """決定 3: 次の版への回しは本番の PR を閉じ、リリースブランチを消さない。閉じた PR・本番宛てでない PR は止まる。"""
-    hub = FakeHub(pulls={7: pull(), 8: pull(number=8, base="develop")})
-    monkeypatch.setattr(release_cli, "_hub", lambda args: hub)
-    assert release_cli.main(["defer", "--pr", "7", "--production", "main"]) == 0
-    assert _values(_last(capsys)) == {"closed": 7, "branch": "release/v1.2.4"}
-    assert [(m, p, b) for m, p, b in hub.requests if m != "GET"] == [("PATCH", "/repos/o/r/pulls/7", {"state": "closed"})]
-    assert not any(m == "DELETE" for m, _p, _b in hub.requests)
-    assert release_cli.main(["defer", "--pr", "8", "--production", "main"]) != 0
-    assert _last(capsys)["cause"]["kind"] == "precondition"
-
-
 def test_cli_answer_routes(monkeypatch, capsys) -> None:
     """--route を省けば gate（答え・提示・担い手が要る）。github-merge はマージされていなければ not_applicable。"""
     hub = _resumed([], HEAD)
+    monkeypatch.setattr(release_cli.bump, "planned_for", lambda *a: "1.2.4")
     hub.responses[("GET", "/repos/o/r/pulls/7")] = _merged_raw(HEAD, merged=False)
     monkeypatch.setattr(release_cli, "_hub", lambda args: hub)
     release_cli.main(["answer", "--pr", "7", "--answer", "approved"])
@@ -686,15 +653,16 @@ def test_cli_answer_routes(monkeypatch, capsys) -> None:
     assert _values(out) == {"state": "approved", "by": "takemi", "head": HEAD} and out["outputs"] == {"version": "1.2.4"}
 
 
-def test_cli_merge_of_an_approved_pr_writes_only_the_version_into_the_outputs(monkeypatch, capsys) -> None:
+def test_cli_merge_of_an_approved_pr_writes_only_the_version_into_the_outputs(monkeypatch, capsys, tmp_path) -> None:
     """結果の outputs はスプリントの文脈の語彙（版）だけで、承認と SHA は値の項目に載る（結果の契約に合う）。"""
-    hub = FakeHub(pulls={7: pull(), 8: pull(number=8, base="develop")}, comments_of={7: [_gate_trail(HEAD)]})
+    hub = FakeHub(pulls={7: pull()}, comments_of={7: [_gate_trail(HEAD)]})
     hub.responses[("POST", "/repos/o/r/pulls")] = {"number": 8}
     hub.responses[("GET", "/repos/o/r/pulls/7")] = _merged_raw(HEAD, by="octocat")
     lander = release_lander(hub, False, [])
     monkeypatch.setattr(release_cli, "_hub", lambda args: hub)
-    monkeypatch.setattr(land, "Lander", lambda h, b, p, budget, admin=False: lander)
-    assert release_cli.main(["merge", "--pr", "7", "--base", "develop", "--production", "main", "--budget", "1"]) == 0
+    monkeypatch.setattr(land, "Lander", lambda h, p, budget, admin=False: lander)
+    monkeypatch.setattr(release_cli.bump, "planned_for", lambda *a: "1.2.4")
+    assert release_cli.main(["merge", "--pr", "7", "--root", str(tmp_path), "--production", "main", "--budget", "1"]) == 0
     out = _last(capsys)
     assert out["outputs"] == {"version": "1.2.4"} and _values(out)["approval"]["route"] == "gate"
 
@@ -704,7 +672,7 @@ def test_cli_merge_of_an_approved_pr_writes_only_the_version_into_the_outputs(mo
 #       Lander を、決まった Landed を返す偽物に替え、cmd_merge の分岐（マージ済み・記録の失敗・止まった種類の有無・
 #       次の手の有無）と、Lander へ渡す引数（宣言から読む admin・宣言から読む本番ブランチ）だけを見る。
 
-_RERUN = ["ndf", "release-steps", "merge", "--pr", "7", "--base", "develop", "--budget", "30.0"]
+_RERUN = ["ndf", "release-steps", "merge", "--pr", "7", "--budget", "30.0"]
 _ADMIN_FALSE = {"kind": "value", "name": "admin", "value": False}
 
 
@@ -714,7 +682,6 @@ def _moves_items(target: list[str], suggested: str) -> list[dict]:
     moves = {
         "rerun": {"argv": [*_RERUN, *target]},
         "reject": reject,
-        "defer": {"argv": ["ndf", "release-steps", "defer", "--pr", "7", *target]},
     }
     return [{"kind": "value", "name": "moves", "value": moves}, {"kind": "value", "name": "suggested", "value": suggested}]
 
@@ -724,8 +691,8 @@ def _cli_merge(monkeypatch, capsys, done: land.Landed, root: Path, *extra: str) 
     seen: dict[str, Any] = {}
 
     class _Fixed:
-        def __init__(self, h, b, p, budget, admin=False) -> None:
-            seen.update(hub=h is hub, base=b, production=p, budget=budget, admin=admin)
+        def __init__(self, h, p, budget, admin=False) -> None:
+            seen.update(hub=h is hub, production=p, budget=budget, admin=admin)
 
         def land(self, pr: int) -> land.Landed:
             seen["pr"] = pr
@@ -733,13 +700,14 @@ def _cli_merge(monkeypatch, capsys, done: land.Landed, root: Path, *extra: str) 
 
     monkeypatch.setattr(release_cli, "_hub", lambda args: hub)
     monkeypatch.setattr(land, "Lander", _Fixed)
-    argv = ["merge", "--pr", "7", "--base", "develop", "--budget", "30", "--root", str(root), *extra]
+    monkeypatch.setattr(release_cli.bump, "planned_for", lambda *a: "1.2.4")
+    argv = ["merge", "--pr", "7", "--budget", "30", "--root", str(root), *extra]
     code = release_cli.main(argv)
     return code, _last(capsys), seen
 
 
 def _seen(admin: bool) -> dict:
-    return {"hub": True, "base": "develop", "production": "main", "budget": 30.0, "admin": admin, "pr": 7}
+    return {"hub": True, "production": "main", "budget": 30.0, "admin": admin, "pr": 7}
 
 
 def test_characterize_cli_merge_merged_lists_every_value_and_reads_admin_from_the_declaration(monkeypatch, capsys, tmp_path) -> None:
@@ -750,11 +718,9 @@ def test_characterize_cli_merge_merged_lists_every_value_and_reads_admin_from_th
         True,
         None,
         "マージした",
-        sync_pr=8,
         production_sha=MERGE_SHA,
         admin=True,
         admin_record="https://example.invalid/7",
-        version="1.2.4",
         approval=approval,
         merge_record="https://example.invalid/m",
     )
@@ -765,7 +731,6 @@ def test_characterize_cli_merge_merged_lists_every_value_and_reads_admin_from_th
         "status": "ok",
         "summary": "マージした",
         "items": [
-            {"kind": "value", "name": "sync_pr", "value": 8},
             {"kind": "value", "name": "production_sha", "value": MERGE_SHA},
             {"kind": "value", "name": "admin", "value": True},
             {"kind": "value", "name": "admin_record", "value": "https://example.invalid/7"},
@@ -778,7 +743,7 @@ def test_characterize_cli_merge_merged_lists_every_value_and_reads_admin_from_th
 
 
 def test_characterize_cli_merge_record_error_stops_as_unknown_without_moves(monkeypatch, capsys, tmp_path) -> None:
-    done = land.Landed(True, None, "マージした", version="1.2.4", record_error="書けない")
+    done = land.Landed(True, None, "マージした", record_error="書けない")
     code, out, seen = _cli_merge(monkeypatch, capsys, done, tmp_path, "--production", "main")
     detail = "マージした。記録を書けなかった（本番は出ている）: 書けない"
     assert code == 1 and seen == _seen(False)
@@ -795,23 +760,24 @@ def test_characterize_cli_merge_record_error_stops_as_unknown_without_moves(monk
 
 def test_merge_result_takes_the_landed_directly_and_matches_the_cli(monkeypatch, capsys, tmp_path) -> None:
     """結果の組み立て（`_merge_result`）へ Landed を直接渡した結果は、main 経由の出力と同じ。"""
-    done = land.Landed(True, None, "マージした", version="1.2.4", record_error="書けない")
+    done = land.Landed(True, None, "マージした", record_error="書けない")
     _code, out, _seen_args = _cli_merge(monkeypatch, capsys, done, tmp_path, "--production", "main")
-    args = release_cli._parser().parse_args(["merge", "--pr", "7", "--base", "develop", "--budget", "30", "--production", "main"])
-    assert release_cli._merge_result(args, done) == out
+    args = release_cli._parser().parse_args(["merge", "--pr", "7", "--budget", "30", "--root", str(tmp_path), "--production", "main"])
+    assert release_cli._merge_result(args, done, "1.2.4") == out
 
 
 def test_characterize_cli_merge_merged_with_a_kind_stops_with_that_kind_without_moves(monkeypatch, capsys, tmp_path) -> None:
-    done = land.Landed(True, "ci_pending", "戻す PR を待つ")
+    done = land.Landed(True, "ci_pending", "マージキューを待つ")
     code, out, seen = _cli_merge(monkeypatch, capsys, done, tmp_path, "--production", "main")
     assert code == 1 and seen == _seen(False)
     assert out == {
         "tool": "release-steps",
         "status": "stopped",
-        "summary": "戻す PR を待つ",
+        "summary": "マージキューを待つ",
         "items": [_ADMIN_FALSE],
         "metrics": {},
-        "cause": {"kind": "ci_pending", "detail": "戻す PR を待つ"},
+        "cause": {"kind": "ci_pending", "detail": "マージキューを待つ"},
+        "outputs": {"version": "1.2.4"},
     }
 
 
@@ -827,15 +793,16 @@ def test_characterize_cli_merge_unmerged_without_a_kind_is_unknown_and_reads_pro
         "tool": "release-steps",
         "status": "stopped",
         "summary": "止まった",
-        "items": [_ADMIN_FALSE, *_moves_items(["--root", str(tmp_path)], "defer")],
+        "items": [_ADMIN_FALSE, *_moves_items(["--root", str(tmp_path)], "reject")],
         "metrics": {},
         "cause": {"kind": "unknown", "detail": "止まった"},
+        "outputs": {"version": "1.2.4"},
     }
 
 
 def test_characterize_cli_merge_unmerged_lists_failed_checks_first_then_the_moves(monkeypatch, capsys, tmp_path) -> None:
     failed = (ci.Check("pytest", "done", "failure", 1),)
-    done = land.Landed(False, "ci_pending", "待ちきれない", version="1.2.4", failed=failed)
+    done = land.Landed(False, "ci_pending", "待ちきれない", failed=failed)
     code, out, seen = _cli_merge(monkeypatch, capsys, done, tmp_path, "--production", "main")
     assert code == 1 and seen == _seen(False)
     assert out == {
@@ -853,11 +820,47 @@ def test_characterize_cli_merge_unmerged_lists_failed_checks_first_then_the_move
     }
 
 
-def test_cli_merge_after_the_production_merge_offers_only_resuming_the_sync(monkeypatch, capsys, tmp_path) -> None:
-    """本番へのマージが済んで戻す PR だけが止まったら、本番の PR を閉じる手・差し戻す手を出さず、同期の再開（打ち直し）を既定にする。"""
-    done = land.Landed(False, "test_failed", "戻す PR の CI が落ちた", sync_pr=8, production_sha=MERGE_SHA)
+def test_cli_merge_after_the_production_merge_offers_only_resuming(monkeypatch, capsys, tmp_path) -> None:
+    """本番へのマージが済んで後の処理だけが止まったら、差し戻す手を出さず、マージ済みからの再開（打ち直し）を既定にする。"""
+    done = land.Landed(False, "test_failed", "後の処理が止まった", production_sha=MERGE_SHA)
     target = ["--root", str(tmp_path), "--repo", "o/r", "--production", "main"]
     code, out, _seen_args = _cli_merge(monkeypatch, capsys, done, tmp_path, "--repo", "o/r", "--production", "main")
     values = _values(out)
     assert code == 1 and out["cause"]["kind"] == "test_failed"
     assert values["moves"] == {"rerun": {"argv": [*_RERUN, *target]}} and values["suggested"] == "rerun"
+
+
+# --- #3572 の決定 7: 版上げの PR の迂回のマージ（land_bump） ------------------------------------------------
+
+
+def _bump_hub(**kw: Any) -> AdminHub:
+    return AdminHub(pulls={20: pull(number=20, ref="release/v1.3.0")}, **kw)
+
+
+def test_land_bump_merges_only_a_version_only_pr_with_the_bypass_and_the_head_match() -> None:
+    """版上げの PR は承認の証跡を読まず、差分が版だけでチェックが通れば、先端との照合付きの迂回で 1 回マージする。"""
+    hub = _bump_hub()
+    seen: list[str] = []
+    merge_as_admin = hub.merge_as_admin
+
+    def recorded(number: int, expect_head: str, method: str | None = None) -> MergeOutcome:
+        seen.append(expect_head)
+        return merge_as_admin(number, expect_head, method)
+
+    hub.merge_as_admin = recorded  # type: ignore[method-assign]
+    done = _admin_lander(hub).land_bump(20, lambda p: [])
+    assert done.merged and done.admin and hub.admin_merged == [20] and seen == [HEAD] and hub.merged == []
+
+
+def test_land_bump_refuses_paths_outside_the_version_files_and_stops_without_the_bypass() -> None:
+    hub = _bump_hub()
+    done = _admin_lander(hub).land_bump(20, lambda p: ["src/x.py"])
+    assert not done.merged and done.kind == "refused" and "src/x.py" in done.detail and hub.admin_merged == []
+    done = _admin_lander(hub, admin=False).land_bump(20, lambda p: [])
+    assert not done.merged and done.kind == "precondition" and "未決 3" in done.detail and hub.admin_merged == []
+
+
+def test_land_bump_stops_on_a_failed_check_without_merging() -> None:
+    hub = _bump_hub()
+    done = _admin_lander(hub, failed=True).land_bump(20, lambda p: [])
+    assert not done.merged and done.kind == "test_failed" and hub.admin_merged == [] and hub.merged == []

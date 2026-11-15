@@ -1,5 +1,5 @@
-"""本番のプランの形（#3572 の I1・I2・I8）: 雛形から組んだ本番のプランが承認の後に直しのステップを持たず、
-`merge` のプランは本番の PR を受け付けない。"""
+"""本番のプランの形（#3572 の I1・I2・I6・I10・I13）: 雛形から組んだ本番のプランが承認の後に直しのステップを持たず、
+`merge` の部品を持つ雛形は本番の PR をマージせずにデプロイの工程へ渡す。"""
 
 from __future__ import annotations
 
@@ -43,10 +43,11 @@ def test_the_merge_plan_marked_as_release_is_refused_for_its_fix_steps() -> None
     [
         {"id": "work", "run": ["{{worker}}", "release"]},
         {"use": "push"},
+        {"id": "prepare-next", "run": ["ndf", "release-steps", "prepare-next", "--pr", "{{pr}}"]},
     ],
 )
 def test_a_worker_or_push_step_put_back_into_the_release_plan_is_refused(step: dict) -> None:
-    """受け入れ条件 3・I2: worker か push を本番のプランへ戻すと行を返し、先頭に足せば最初のステップの行も返す。"""
+    """受け入れ条件 3・I2・I10: worker・push・次の版の用意を本番のプランへ戻すと行を返し、先頭に足せば最初のステップの行も返す。"""
     plan = _expanded("release")
     added = route._expand_step(step) if "use" in step else step
     plan["steps"] = [*plan["steps"], added]
@@ -56,33 +57,48 @@ def test_a_worker_or_push_step_put_back_into_the_release_plan_is_refused(step: d
 
 
 def test_the_rendered_release_plan_merges_the_approved_pr_first() -> None:
-    """受け入れ条件 5・I2: 組んだ本番のプランは merge → record → prepare-next で、最初のステップが --pr を渡すマージ。"""
+    """受け入れ条件 5・7・I2: 組んだ本番のプランは merge → confirm → record → cleanup で、最初のステップが --pr を渡すマージ。"""
     t = route.templates()["release"]
-    plan = route.render(t, {"repo": "/r", "pr": "41", "base": "develop"})
+    plan = route.render(t, {"repo": "/r", "pr": "41"})
     ids = [s["id"] for s in plan["steps"]]
-    assert ids == ["merge", "record", "prepare-next"]
+    assert ids == ["merge", "confirm", "record", "cleanup"]
     first = plan["steps"][0]["run"]
     assert first[:3] == list(release_plan.merge_run()) and first[first.index("--pr") + 1] == "41"
-    assert "worker" not in t.params
+    assert "worker" not in t.params and "base" not in t.params
 
 
-def test_the_merge_plan_starts_with_the_guard_that_has_no_way_onward() -> None:
-    """I8: merge の雛形の最初は release-guard で、refused の終了コードの原因 refused に行き先が無い。"""
-    plan = _expanded("merge")
-    assert release_plan.guard_first(plan) == []
-    assert plan["steps"][0]["exit_cause"] == {str(release_plan.GUARD_EXIT): release_plan.guard_cause()}
+@pytest.mark.parametrize("name", ["merge", "check", "close"])
+def test_the_merge_part_follows_the_guard_that_hands_the_production_pr_to_the_deploy_stage(name: str) -> None:
+    """I6・I13: merge の部品（check は merge-gate）の直前が release-guard で、原因 production_pr の行き先が end。"""
+    plan = _expanded(name)
+    assert release_plan.guard_before_merge(plan) == []
+    ids = [s["id"] for s in plan["steps"]]
+    first = min(ids.index(x) for x in release_plan.merge_part_ids() if x in ids)
+    guard = plan["steps"][first - 1]
+    assert guard["exit_cause"][str(release_plan.GUARD_EXIT)] == release_plan.guard_cause() == "production_pr"
+    assert release_plan.GUARD_EXIT == 3
+
+
+def test_a_plan_without_the_merge_part_needs_no_guard() -> None:
+    assert release_plan.guard_before_merge(_expanded("release")) == []
 
 
 def test_the_guard_check_names_each_broken_part() -> None:
-    """I8: 最初のステップを外す・原因を変える・refused に ci-fix への行き先を足すと、破れを返す。"""
+    """I13: release-guard を外す・先頭へ移す・原因を変える・production_pr を ci-fix へ流すと、破れを返す。"""
     plan = _expanded("merge")
-    assert release_plan.guard_first({**plan, "steps": plan["steps"][1:]}) == [f"最初のステップが {release_plan.GUARD_ID} でない"]
+    at = [s["id"] for s in plan["steps"]].index(release_plan.GUARD_ID)
+    without = copy.deepcopy(plan)
+    guard = without["steps"].pop(at)
+    assert len(release_plan.guard_before_merge(without)) == 1
+    moved = copy.deepcopy(without)
+    moved["steps"] = [guard, *moved["steps"]]
+    assert len(release_plan.guard_before_merge(moved)) == 1
     other = copy.deepcopy(plan)
-    other["steps"][0]["exit_cause"] = {str(release_plan.GUARD_EXIT): "precondition"}
-    assert len(release_plan.guard_first(other)) == 1
+    other["steps"][at]["exit_cause"] = {str(release_plan.GUARD_EXIT): "precondition"}
+    assert len(release_plan.guard_before_merge(other)) == 1
     routed = copy.deepcopy(plan)
-    routed["steps"][0]["on_cause"] = {"refused": "ci-fix"}
-    assert len(release_plan.guard_first(routed)) == 1
+    routed["steps"][at]["on_cause"] = {"production_pr": "ci-fix"}
+    assert len(release_plan.guard_before_merge(routed)) == 1
 
 
 def test_is_production_pr_compares_the_names_as_they_are() -> None:
@@ -105,15 +121,31 @@ def _guard(monkeypatch, capsys, hub: FakeHub, *extra: str) -> tuple[int, dict]:
     return code, json.loads(capsys.readouterr().out.strip().splitlines()[-1])
 
 
-def test_guard_stops_a_production_pr_as_refused(monkeypatch, capsys) -> None:
-    """I8: 本番の PR は refused（終了コードは止まった理由の表の値）で止まる（merge のプランはそこで止まり、直しのステップへ進まない）。"""
-    code, out = _guard(monkeypatch, capsys, _HeadHub(pulls={7: pull()}), "--production", "main")
-    assert code == release_plan.GUARD_EXIT and out["cause"]["kind"] == "refused" and "#7" in out["summary"]
+def test_guard_hands_a_production_pr_to_the_deploy_stage(monkeypatch, capsys) -> None:
+    """I6: 本番の PR（main 宛てのスプリントの PR）は production_pr（終了コード 3）で渡し、マージを呼ばない。"""
+    hub = _HeadHub(pulls={7: pull(ref="sprint/x")})
+    monkeypatch.setattr(release_cli, "_hub", lambda args: hub)
+    code = release_cli.main(["guard", "--branch", "sprint/x", "--production", "main"])
+    out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert code == release_plan.GUARD_EXIT == 3 and out["cause"]["kind"] == "production_pr" and "#7" in out["summary"]
+    assert hub.merged == []
+
+
+def test_guard_refuses_the_verify_ref(monkeypatch, capsys, tmp_path) -> None:
+    """受け入れ条件 14・I9: head が検証の ref なら refused（終了コード 1）で止まる。"""
+    (tmp_path / ".ndf").mkdir()
+    row = {"target": "検証版", "kind": "auto", "trigger": "wf", "channel": "verify", "versioned": False, "verify": {"ref": "verify/next", "marketplace": "x-next"}}
+    (tmp_path / ".ndf" / "project.json").write_text(json.dumps({"delivery": [row]}), encoding="utf-8")
+    hub = _HeadHub(pulls={9: pull(number=9, ref="verify/next")})
+    monkeypatch.setattr(release_cli, "_hub", lambda args: hub)
+    code = release_cli.main(["guard", "--root", str(tmp_path), "--branch", "verify/next", "--production", "main"])
+    out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert code == 1 and out["cause"]["kind"] == "refused" and "検証の ref は main へ戻さない" in out["cause"]["detail"]
 
 
 @pytest.mark.parametrize("pulls", [{8: pull(number=8, base="develop")}, {}])
 def test_guard_lets_a_base_pr_or_a_branch_without_pr_through(monkeypatch, capsys, pulls) -> None:
-    """I8: ベースブランチ宛ての PR と、開いた PR の無いブランチは終了コード 0 で通す。"""
+    """I6: ベースブランチ宛ての PR と、開いた PR の無いブランチは終了コード 0 で通す。"""
     code, out = _guard(monkeypatch, capsys, _HeadHub(pulls=pulls), "--production", "main")
     assert code == 0 and out["status"] == "ok"
 

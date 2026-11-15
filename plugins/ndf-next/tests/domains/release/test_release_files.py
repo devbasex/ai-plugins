@@ -151,15 +151,9 @@ def test_release_steps_parser_current_behavior() -> None:
         return (name, False, default, choices, None, "_StoreAction")
 
     production = opt("--production")
-    target = [
-        req("--base"),
-        production,
-        req("--channel", choices=("production", "dev")),
-        opt("--level", "patch", ("major", "minor", "patch")),
-        opt("--plugin"),
-        opt("--source", "base", ("base", "release")),
-    ]
     pr = req("--pr", int)
+    target = [pr, production, opt("--plugin")]
+    budget = req("--budget", float)
     answer = [
         opt("--route", "gate", ("gate", "github-merge")),
         opt("--answer", choices=("approved", "rejected")),
@@ -174,10 +168,12 @@ def test_release_steps_parser_current_behavior() -> None:
         "present": common + [pr, opt("--material")],
         "answer": common + [pr, *answer],
         "approval-check": common + [pr, production],
-        "merge": common + [pr, req("--base"), production, req("--budget", float)],
+        "merge": common + [pr, production, budget],
+        "confirm": common + [pr, production, budget],
         "guard": common + [branches, production],
-        "defer": common + [pr, production],
-        "prepare-next": common + [pr, production],
+        "bump": common + [production, budget],
+        "pr-check": common + [pr],
+        "verify-ref": common,
         "record": common + [pr, production],
         "verification-record": common + [pr, req("--record")],
         "records": common + [pr],
@@ -185,7 +181,7 @@ def test_release_steps_parser_current_behavior() -> None:
         "sync-base": common + [req("--main-dir"), req("--base")],
         "config-snapshot": common + [req("--out")],
         "config-check": common + [req("--before")],
-        "cleanup": common + [branches],
+        "cleanup": common + [("--branch", False, None, None, None, "_AppendAction"), (*opt("--pr")[:4], int, "_StoreAction")],
     }
     got = _options(release_cli._parser())
     assert list(got) == list(expected) == list(release_cli.HANDLERS)
@@ -198,9 +194,9 @@ def test_release_steps_parser_parses_and_requires_a_command() -> None:
     with pytest.raises(SystemExit):
         parser.parse_args([])
     args = parser.parse_args(["cleanup", "--branch", "a", "--branch", "b"])
-    assert vars(args) == {"command": "cleanup", "root": ".", "repo": None, "branch": ["a", "b"]}
-    args = parser.parse_args(["merge", "--pr", "3", "--base", "develop", "--production", "main", "--budget", "1.5"])
-    assert (args.pr, args.budget, args.base, args.production) == (3, 1.5, "develop", "main")
+    assert vars(args) == {"command": "cleanup", "root": ".", "repo": None, "branch": ["a", "b"], "pr": None}
+    args = parser.parse_args(["merge", "--pr", "3", "--production", "main", "--budget", "1.5"])
+    assert (args.pr, args.budget, args.production) == (3, 1.5, "main")
 
 
 def test_declaration_parse_reads_every_key(tmp_path: Path) -> None:
