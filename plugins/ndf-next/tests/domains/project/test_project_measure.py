@@ -317,3 +317,25 @@ def test_tree_words_and_its_readers(tmp_path):
     tree = _tree(path)
     assert measure_repo.default_branch(tree) is None
     assert measure_repo.measure_branches(tree)["status"] == "unknown"
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("on: push\njobs:\n  test:  # テスト\n    runs-on: x\n  lint:\n    runs-on: x\n", ["test", "lint"]),
+        # 引用した id・コメントの中の `#`・引用の中の `#`・空行とコメントだけの行
+        (
+            "jobs:\n\n  # 先頭のコメント\n  \"build-a\":\n    steps:\n      - run: echo '#x'\n  'b#c':\n    runs-on: x\n",
+            ["build-a", "b#c"],
+        ),
+        # 字下げの深い行・値を持つ行は id にしない。`jobs:` の後の根の行で終わる
+        ("jobs:\n    deep:\n      x: 1\n    two: {}\n    three:\nenv:\n  other:\n", ["deep", "three"]),
+        ("name: x\non:\n  jobs:\n    nope:\n", []),
+        ("jobs: # コメント\n  a:\n", ["a"]),
+        ("jobs:#x\n  a:\n", []),
+        ("", []),
+    ],
+)
+def test_job_ids_reads_ids_under_jobs(text, expected):
+    """現状固定（I-030）: `jobs:` の直下の job id を字下げで拾う規則。"""
+    assert measure_ci.job_ids(text) == expected
