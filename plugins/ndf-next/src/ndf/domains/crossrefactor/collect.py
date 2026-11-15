@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import subprocess
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -46,16 +47,23 @@ def _suite_of(path: str, suites: Sequence[Mapping[str, Any]]) -> Mapping[str, An
     return None
 
 
-def _group(paths: Sequence[str], suites: Sequence[Mapping[str, Any]]) -> tuple[dict[str, list[str]], dict[str, Mapping[str, Any]]]:
-    by_suite: dict[str, list[str]] = {}
-    decl: dict[str, Mapping[str, Any]] = {}
+@dataclass
+class _Group:
+    """収集を確かめる 1 つの suite の宣言（同じ名前なら最後に当たった宣言）と、当たった対象ファイル（渡した順）。"""
+
+    decl: Mapping[str, Any]
+    files: list[str] = field(default_factory=list)
+
+
+def _group(paths: Sequence[str], suites: Sequence[Mapping[str, Any]]) -> dict[str, _Group]:
+    groups: dict[str, _Group] = {}
     for path in paths:
         suite = _suite_of(path, suites)
         if suite is not None and isinstance(suite.get(COLLECT_KEY), str):
-            name = str(suite["name"])
-            by_suite.setdefault(name, []).append(path)
-            decl[name] = suite
-    return by_suite, decl
+            group = groups.setdefault(str(suite["name"]), _Group(suite))
+            group.files.append(path)
+            group.decl = suite
+    return groups
 
 
 def exit_codes_of(suite: Mapping[str, Any]) -> frozenset[int]:
@@ -81,11 +89,10 @@ def _collect(work: Path, name: str, command: str, timeout: float, ok: frozenset[
 
 def collected(work: Path, paths: Sequence[str], suites: Sequence[Mapping[str, Any]], timeout: float) -> tests_decide.CollectVerdict:
     """足したテストのファイル（作業場所からの相対パス）を、収集される・されない・判定できないに分ける。"""
-    by_suite, decl = _group(paths, suites)
     got: dict[str, frozenset[str] | None] = {}
-    for name, files in by_suite.items():
-        template = str(decl[name][COLLECT_KEY])
-        command = scoped.fill_paths(template, files) if scoped.PATHS_SLOT in template else template
-        found = _collect(work, name, command, timeout, exit_codes_of(decl[name]))
-        got.update({f: found for f in files})
+    for name, group in _group(paths, suites).items():
+        template = str(group.decl[COLLECT_KEY])
+        command = scoped.fill_paths(template, group.files) if scoped.PATHS_SLOT in template else template
+        found = _collect(work, name, command, timeout, exit_codes_of(group.decl))
+        got.update({f: found for f in group.files})
     return tests_decide.collect_verdict(paths, got)
