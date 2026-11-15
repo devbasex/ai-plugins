@@ -68,15 +68,30 @@ def gate_detail(done: str) -> Optional[tuple[str, Optional[int], str]]:
 
 
 def gate_step(done: Path) -> Optional[tuple[str, str]]:
-    """本番のプランの done から (承認ゲートで止まったプランの名前, 終了コード 10 を返した最後のステップの id)。読めなければ None。
-    打ち直しは `queue --resume --from <プラン>=<ステップ>` でこのステップから流す。開始を渡さないと、関門の後に流れて成功した
-    ステップ（承認資料の投稿など）だけが続きとして流れ、本番の PR をマージせずに完了と読まれる。"""
+    """本番のプランの done から (承認ゲートで止まったプランの名前, 終了コード 10 を返したステップのうちプランの並びで最も前の id)。
+    読めなければ None。打ち直しは `queue --resume --from <プラン>=<ステップ>` でこのステップから流す。開始を渡さないと、関門の後に
+    流れて成功したステップ（承認資料の投稿など）だけが続きとして流れ、本番の PR をマージせずに完了と読まれる。最後の 10 を選ばないのは、
+    CD のある本番のプランでは release の 10 の後に承認資料を組む facts も 10 を返し、facts から流すと release（マージ）を打ち直さずに
+    同じ問いを繰り返すためである。プランを読めなければ、progress.jsonl で最初の 10 の行を採る。"""
     item = gate_item(done)
     if item is None or not item.get("plan"):
         return None
-    rows = _gate_steps(Path(str(item.get("report") or "")).parent)
-    step = str(rows[-1].get("step") or "") if rows else ""
-    return (Path(str(item["plan"])).stem, step) if step else None
+    ids = [str(r.get("step") or "") for r in _gate_steps(Path(str(item.get("report") or "")).parent)]
+    ids = [i for i in ids if i]
+    if not ids:
+        return None
+    order = _plan_order(Path(str(item["plan"])))
+    step = min(ids, key=lambda i: order.get(i, len(order))) if order else ids[0]
+    return Path(str(item["plan"])).stem, step
+
+
+def _plan_order(plan: Path) -> dict[str, int]:
+    """プランのステップの id → 並びの位置。読めなければ空。"""
+    try:
+        steps = json.loads(plan.read_text(encoding="utf-8")).get("steps") or []
+    except (OSError, ValueError, AttributeError):
+        return {}
+    return {str(s["id"]): n for n, s in enumerate(steps) if isinstance(s, dict) and s.get("id")}
 
 
 def gate_item(done: Path) -> Optional[dict]:

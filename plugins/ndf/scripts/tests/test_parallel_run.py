@@ -444,12 +444,26 @@ def test_helper_task_confirmed_retry_resumes_from_the_step_that_gated(monkeypatc
     state = tmp_path / "state"
     state.mkdir(parents=True)
     d.mkdir(parents=True)
-    rows = [{"kind": "step", "step": "release", "exit": 10}, {"kind": "step", "step": "approval-post", "exit": 0}]
+    rows = [{"kind": "step", "step": "release", "exit": 10}, {"kind": "step", "step": "facts", "exit": 10},
+            {"kind": "step", "step": "approval-post", "exit": 0}]  # fmt: skip
     (state / "progress.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
     done = d / "release-done.json"
     done.write_text(json.dumps({"items": [{"plan": str(d / "release.json"), "result": "関門", "report": str(state / "report.md")}]}))
     got, _ = _helper_task_with(monkeypatch, tmp_path, CONFIRMED_11)
     assert f"{ph.SUPERVISE} queue --resume {done} --from release=release && {ph.SUPERVISE} wait {done}" in got["pipeline"]
+
+
+def test_gate_step_picks_the_earliest_gated_step_in_plan_order(tmp_path):
+    """前の打ち直しの行が残り、facts の 10 が release の 10 より前に並んでも、プランの並びで前の release から流す。"""
+    state = tmp_path / "state"
+    state.mkdir()
+    rows = [{"kind": "step", "step": "facts", "exit": 10}, {"kind": "step", "step": "release", "exit": 10}]
+    (state / "progress.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+    plan = tmp_path / "release.json"
+    plan.write_text(json.dumps({"steps": [{"id": "release"}, {"id": "facts"}, {"id": "approval-post"}]}))
+    done = tmp_path / "release-done.json"
+    done.write_text(json.dumps({"items": [{"plan": str(plan), "result": "関門", "report": str(state / "report.md")}]}))
+    assert pgate.gate_step(done) == ("release", "release")
 
 
 @pytest.mark.parametrize(
