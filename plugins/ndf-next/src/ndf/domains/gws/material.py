@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Sequence
 from pathlib import Path
 
-from ndf import identity
 from ndf.domains.records import files
 from ndf.domains.worktree import atomic
 
@@ -42,9 +41,9 @@ def render(*, package: str, package_url: str, command: Sequence[str], where: str
     )
 
 
-def write(text: str) -> Path:
-    """承認資料を状態の置き場の下へ置き換えで書き、そのパスを返す。"""
-    dest = files.path(identity.load().state_dir, "gws-install-material")
+def write(text: str, state_dir: Path) -> Path:
+    """承認資料を状態の置き場 `state_dir` の下へ置き換えで書き、そのパスを返す。"""
+    dest = files.path(state_dir, "gws-install-material")
     dest.parent.mkdir(parents=True, exist_ok=True)
     atomic.write_text(dest, text)
     return dest

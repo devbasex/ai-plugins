@@ -20,6 +20,7 @@ import shutil
 import subprocess
 from typing import Optional
 
+from ndf import identity
 from ndf.contracts import exit_codes, limits, result
 from ndf.domains.gws import GwsStop, Outcome, call, login_request, material, unauthenticated_gate
 from ndf.domains.gws import report_decide as rd
@@ -91,7 +92,7 @@ def _present(tool: str, npm: str) -> Outcome:
     where = f"`{prefix}`（`npm prefix -g` の値）" if prefix else "`npm prefix -g` が示す場所（値を読めなかった）"
     text = material.render(package=PACKAGE, package_url=PACKAGE_URL, command=("npm", *INSTALL_ARGS), where=where)
     try:
-        path = material.write(text)
+        path = material.write(text, identity.load().state_dir)
     except OSError as exc:
         raise GwsStop("unknown", f"導入の承認資料を書けない: {exc}") from exc
     routes = {"approved": result.command("gws", "check", "--install"), "rejected": None}
