@@ -19,6 +19,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from enum import StrEnum
 from typing import NamedTuple
 
@@ -239,6 +240,30 @@ def _existing_record(comments: list[Authored], hub: GitHub, mark: str, sha: str)
     return None
 
 
+def _write_once(
+    hub: GitHub,
+    number: int,
+    mark: str,
+    key: str,
+    render: Callable[[list[Authored]], str],
+    what: str,
+    errors: tuple[type[Exception], ...] = (GitHubError, ValueError),
+) -> tuple[bool, str]:
+    """印 `mark` と `key` の記録が既にあれば置かず、無ければ `render`（読んだコメントを受ける）の本文で置く。(置いたか, URL)。
+
+    既にある記録に数えるのは `_existing_record` が数えるものだけ。`errors` の例外は `TrailError` に包む（`what` は記録の呼び名）。
+    """
+    try:
+        found = hub.comments(number)
+        existing = _existing_record(found, hub, mark, key)
+        if existing is not None:
+            return False, existing
+        url = Publisher(hub).comment(number, render(found)).url
+    except errors as exc:
+        raise TrailError(f"#{number} に{what}を置けない: {exc}") from None
+    return True, url
+
+
 def _require_sha(value: str, what: str) -> None:
     """`value` が 40 桁の SHA でなければ `ValueError`（`what` は値の呼び名）。"""
     if not _SHA.fullmatch(value):
@@ -262,18 +287,14 @@ def write_admin_record(hub: GitHub, number: int, sha: str) -> tuple[bool, str]:
 
     照らした証跡は、利用者の証跡（`read` の `human_only`）の判定に使ったコメントの URL。読めない・書けなければ `TrailError`。
     """
-    try:
-        found = hub.comments(number)
-        existing = _existing_record(found, hub, ADMIN_MARK, sha)
-        if existing is not None:
-            return False, existing
+
+    def render(found: list[Authored]) -> str:
         judged = user_judgment_at(hub, number, sha)
         used = judged.trail.order if judged is not None and judged.trail is not None else None
         trail_url = found[used].url if used is not None and used < len(found) else ""
-        url = Publisher(hub).comment(number, render_admin_record(sha, trail_url)).url
-    except (GitHubError, ValueError) as exc:
-        raise TrailError(f"#{number} に迂回の記録を置けない: {exc}") from None
-    return True, url
+        return render_admin_record(sha, trail_url)
+
+    return _write_once(hub, number, ADMIN_MARK, sha, render, "迂回の記録")
 
 
 def render_merge_record(approval: merge_decide.Approval) -> str:
@@ -292,14 +313,7 @@ def write_merge_record(hub: GitHub, number: int, approval: merge_decide.Approval
 
     既にある記録に数えるのは、信用する書き手が書き、編集されていない、同じマージした先端のものだけ。
     """
-    try:
-        existing = _existing_record(hub.comments(number), hub, MERGE_MARK, approval.merged_head)
-        if existing is not None:
-            return False, existing
-        url = Publisher(hub).comment(number, render_merge_record(approval)).url
-    except (GitHubError, ValueError) as exc:
-        raise TrailError(f"#{number} に人のマージの記録を置けない: {exc}") from None
-    return True, url
+    return _write_once(hub, number, MERGE_MARK, approval.merged_head, lambda _found: render_merge_record(approval), "人のマージの記録")
 
 
 def render_version_record(version: str, tag: str, bump_pr: int) -> str:
@@ -314,14 +328,15 @@ def write_version_record(hub: GitHub, number: int, version: str, tag: str, bump_
 
     既にある記録に数えるのは、信用する書き手が書き、編集されていない、同じ版のものだけ。
     """
-    try:
-        existing = _existing_record(hub.comments(number), hub, VERSION_MARK, version)
-        if existing is not None:
-            return False, existing
-        url = Publisher(hub).comment(number, render_version_record(version, tag, bump_pr)).url
-    except (GitHubError, ValueError, version_decide.VersionError) as exc:
-        raise TrailError(f"#{number} に作った版の記録を置けない: {exc}") from None
-    return True, url
+    return _write_once(
+        hub,
+        number,
+        VERSION_MARK,
+        version,
+        lambda _found: render_version_record(version, tag, bump_pr),
+        "作った版の記録",
+        (GitHubError, ValueError, version_decide.VersionError),
+    )
 
 
 def read_version_record(hub: GitHub, number: int) -> str | None:
