@@ -7586,6 +7586,18 @@
       "context": "ndf-release",
       "meaning": "リリース承認ゲートで承認しない答え、または必須のチェックの落ちた本番の PR を出さずに止めること。直しを同じリリースブランチへ入れ、新しい先端で承認を取り直す",
       "pending_source": "issues/issue-3572-design.md"
+    },
+    {
+      "term": "次の版への回し",
+      "context": "ndf-release",
+      "meaning": "必須のチェックの落ちた本番の PR を閉じてこの時点では出さず、リリースブランチを残して後のスプリントと一緒に出すこと",
+      "pending_source": "issues/issue-3572-design.md"
+    },
+    {
+      "term": "リリースブランチ",
+      "context": "ndf-release",
+      "meaning": "版ごとに 1 本の `release/v<版>` のブランチ。前の版が出た直後に本番ブランチから用意し、本番の PR の head になる",
+      "pending_source": "issues/issue-3572-design.md"
     }
   ]
 }
