@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import git_sandbox
 
+from ndf.adapters import ci
 from ndf.adapters.github import Authored, GitHubError, MergeOutcome, Pull
+from ndf.domains.release import approval_decide, land, trail
 
 HEAD = "a" * 40
 OTHER = "b" * 40
@@ -111,6 +114,37 @@ class FakeHub:
 
 def not_found() -> GitHubError:
     return GitHubError("無い", 404)
+
+
+def trail_comment(answer: str, sha: str, author: str = "octocat") -> Authored:
+    """利用者が担い手の証跡のコメント。"""
+    return Authored(author, "OWNER", approval_decide.render_trail(answer, sha, trail.USER_BY))
+
+
+def ci_reading(failed: bool) -> ci.Reading:
+    """必須のチェックの読み（`failed` なら pytest が落ちている）。"""
+    bad = [ci.Check("pytest", "done", "failure", 1)] if failed else []
+    return ci.Reading(bad, [], [], [], [], [], True)
+
+
+def _fixed_wait(failed: bool, calls: list[int]) -> Callable[[Callable[[], ci.Reading], float], ci.WatchResult]:
+    def wait(reader: Callable[[], ci.Reading], budget: float) -> ci.WatchResult:
+        calls.append(1)
+        return ci.WatchResult(ci_reading(failed), 1, 0.0, 0.0)
+
+    return wait
+
+
+def release_lander(hub: FakeHub, failed: bool, calls: list[int]) -> land.Lander:
+    """本番ブランチ main（必須のチェック pytest）とベースブランチ develop の Lander。待ちは 1 回で `failed` の読みを返す。"""
+    hub.responses[("GET", "/repos/o/r/rules/branches/main")] = [
+        {
+            "type": "required_status_checks",
+            "parameters": {"required_status_checks": [{"context": "pytest"}, {"context": approval_decide.STATUS_CONTEXT}]},
+        }
+    ]
+    hub.responses[("GET", "/repos/o/r/rules/branches/develop")] = []
+    return land.Lander(hub, "develop", "main", 60.0, wait=_fixed_wait(failed, calls))
 
 
 def configure(path: Path) -> Path:
