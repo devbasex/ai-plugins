@@ -517,3 +517,44 @@ def test_collect_flow_current_behavior_pulls_unavailable_raises():
 
     with pytest.raises(measure_ci.GhUnavailable):
         measure_flow.collect_flow(_FlowTree(), _Down(), "develop", "main")
+
+
+# --- 現状固定: measure_repo.dependencies（I-021。言語ごとの依存の定義の読み方と処理系の版の行） ---
+
+
+def test_dependencies_current_behavior_reads_each_ecosystem(tmp_path):
+    files = {
+        "composer.json": '{"require": {"php": "^8.2", "laravel/framework": "^11"}, "require-dev": {"phpunit/phpunit": "^10"}}',
+        "web/package.json": '{"dependencies": {"react": "^18"}, "devDependencies": {"vitest": "1"}, "engines": {"node": ">=20"}}',
+        "a/b/package.json": '{"dependencies": {"deep": "1"}}',  # 2 段下は読まない
+        "pyproject.toml": (
+            '[project]\nrequires-python = ">=3.12"\ndependencies = ["Django>=5", "requests[socks]~=2.0"]\n'
+            '[project.optional-dependencies]\ndev = ["pytest==8"]\n[dependency-groups]\nlint = ["Ruff>=0.5"]\n'
+            '[tool.poetry.dependencies]\nFlask = "^3"\n[tool.poetry.group.test.dependencies]\nHypothesis = "*"\n'
+        ),
+        "requirements.txt": "# c\n-r other.txt\nDjango==4\nnumpy>=1 ; python_version>'3'\nhttps://x/y.whl\ngit+https://a/b\n\n",
+        "requirements-dev.txt": "black\n",
+    }
+    deps = measure_repo.dependencies(_tree(_small_repo(tmp_path, files)))
+    assert list(deps) == ["php", "javascript", "python"]
+    assert deps["php"] == {"php": "^8.2", "laravel/framework": "^11", "phpunit/phpunit": "^10"}
+    assert deps["javascript"] == {"react": "^18", "vitest": "1", "node": ">=20"}
+    assert deps["python"] == {
+        "django": "Django>=5",  # pyproject.toml が requirements*.txt より先
+        "requests": "requests[socks]~=2.0",
+        "pytest": "pytest==8",
+        "ruff": "Ruff>=0.5",
+        "flask": "^3",
+        "hypothesis": "*",
+        "python": ">=3.12",
+        "black": "black",
+        "numpy": "numpy>=1 ; python_version>'3'",
+    }
+
+
+@pytest.mark.parametrize(
+    "files",
+    [{"x.txt": "1"}, {"composer.json": "{bad", "pyproject.toml": "bad = = ="}],
+)
+def test_dependencies_current_behavior_empty_when_missing_or_broken(tmp_path, files):
+    assert measure_repo.dependencies(_tree(_small_repo(tmp_path, files))) == {"php": {}, "javascript": {}, "python": {}}
