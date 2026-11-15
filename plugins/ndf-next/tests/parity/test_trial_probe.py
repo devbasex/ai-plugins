@@ -48,6 +48,13 @@ def test_rows_passed_in_the_trial_and_not_built_rows_without_callers_pass(plugin
     assert got["entrypoint:scripts/old-name.py"]["result"] == "passed"
 
 
+def test_a_static_failure_wins_over_a_passed_record(plugin):
+    got = probe.judge(_features(), passed=["skill:merged", "skill:gone"], root=plugin, repo=plugin)
+    assert got["skill:merged"]["result"] == "failed"
+    assert got["skill:gone"]["result"] == "failed"
+    assert got["skill:merged"]["record"] == ""
+
+
 def test_a_missing_skill_or_destination_fails(plugin):
     (plugin / "src/m8").rmdir()
     got = probe.judge(_features(), root=plugin, repo=plugin)

@@ -163,9 +163,11 @@ def _by_workflow(row: Mapping[str, Any], repo: Path, scripts: Mapping[str, Mappi
 
 
 def judge_row(row: Mapping[str, Any], ctx: Mapping[str, Any]) -> dict[str, str]:
-    """1 行の試走の結果（`record` は除く）。`ctx` は places・calls・scripts・root・repo・passed を持つ。"""
-    if row["id"] in ctx["passed"]:
-        return {"result": "passed"}
+    """1 行の試走の結果（`record` は除く）。`ctx` は places・calls・scripts・root・repo・passed を持つ。
+
+    静的な確かめを記録より先に行う。記録の `passed` は `failed` でない行にだけ効く（旧いプラグインに頼って通った行・
+    通した後で本文が旧い呼び出しに戻った行を `passed` に残さない）。
+    """
     missing = _missing_places(row, ctx["places"], ctx["root"])
     if missing:
         return _failed(f"行き先 {row['to']} の置き場が無い: {'・'.join(missing)}")
@@ -179,6 +181,8 @@ def judge_row(row: Mapping[str, Any], ctx: Mapping[str, Any]) -> dict[str, str]:
         found = _by_script(row, ctx["calls"])
     if found:
         return found
+    if row["id"] in ctx["passed"]:
+        return {"result": "passed"}
     if "not_built" in row:
         return {"result": "passed", "reason": "作らない行。ndf-next の本文に呼び手が無い"}
     return _not_run()
