@@ -382,6 +382,16 @@ def cmd_request_ask(a) -> None:
     reply("ok", f"問いの依頼 {rid} を{_sent_verb(again, 'オーガナイザーへ送った')}{QUEUED if q else ''}", id=str(rid), **again, **q)
 
 
+def _send_gate2(main: Path, a) -> plg.Sent:
+    """リリース承認ゲートの依頼を送る: `--confirmed` なら done を先に読んでから確定の後の依頼、ほかは提示の依頼。"""
+    import parallel_gate2 as pg2
+
+    if a.confirmed:
+        json.loads(Path(a.done).read_text(encoding="utf-8"))  # 読めない done は台帳の誤りと分けて 2 で返す
+        return sent(pg2.request_confirmed, main, a.name, a.n, a.k, a.done)
+    return sent(pg2.request_gate2, main, a.name, a.n, a.k, a.report)
+
+
 def cmd_request_gate2(a) -> None:
     """提示（`--report`）か確定の後（`--confirmed --done`）のリリース承認ゲートの依頼を送る（#3597 の決定 1・決定 2）。"""
     import durable
@@ -392,11 +402,7 @@ def cmd_request_gate2(a) -> None:
     main = main_of()
     q = accepting(main, a.name)
     try:
-        if a.confirmed:
-            json.loads(Path(a.done).read_text(encoding="utf-8"))  # 読めない done は台帳の誤りと分けて 2 で返す
-            rid = sent(pg2.request_confirmed, main, a.name, a.n, a.k, a.done)
-        else:
-            rid = sent(pg2.request_gate2, main, a.name, a.n, a.k, a.report)
+        rid = _send_gate2(main, a)
     except pg2.NotConfirmed as exc:
         reply("stopped", str(exc), code=4)
     except (OSError, ValueError) as exc:
