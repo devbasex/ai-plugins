@@ -7,8 +7,10 @@
   `row start` は計画が記録した形の番号と自分のものを比べ、違えば `format_mismatch` で止まる（P3-1）。
   スプリント名は `<計画>-<レーン>-<行>-<要約>` にし、別の計画が同じレーン名を使っても、名前の区切りが曖昧な組
   （計画 `dev-api`／レーン `tests` と計画 `dev`／レーン `api-tests` など）でも重ならない
-- 起こせるのはスプリントの行（`kind: sprint`）だけで、開発ループの行（`kind: loop`）は起こす入力を組めないので
-  `Unsupported` で断る（ndf-next に開発ループを始めるコマンドがまだ無い）
+- 開発ループの行（`kind: loop`）は、レーン名をループの名前にして `ndf loop start <レーン> --session <S>` で始め、
+  スプリントの行と同じく `ndf lanes row start <計画> <レーン> <行> --sprint <レーン>` で行を実行中にする（行の ID は
+  レーン名）。`--session` は起きた conductor が自分のセッションで埋める。ほかの kind は起こす入力を組めないので
+  `Unsupported` で断る
 - 答えの後の next を打つ: `ndf lanes row resumed <スプリントの ID>` で答えの後の next の印を書いてから、
   `ndf progress next <スプリントの ID>` で承認ゲートの続きを流す（3346-5）
 - 止めた計画で実行中のスプリントを中止する: `ndf progress cancel <スプリントの ID> --reason <理由>` の後に
@@ -43,6 +45,9 @@ from ndf.contracts import result
 from ndf.progress import command
 from ndf.progress.lane import CANCELLED, LaneRow
 
+# 行の入力の kind（スプリントの行と開発ループの行）
+SPRINT_KIND = "sprint"
+LOOP_KIND = "loop"
 # 行の入力の args に --mode が無いときのモード
 DEFAULT_MODE = "standard"
 # レーンの conductor の役（ラッパーの登録簿の role）
@@ -99,10 +104,13 @@ def sprint_name(plan: str, lane: str, row: str) -> str:
 def start_commands(plan: str, lane: str, lane_table: str, row: LaneRow) -> list[dict[str, Any]]:
     """行を始めるコマンドの並び（`result.command` の形）。`--sprint` は打つ側が `new` の結果の ID で埋める。
 
-    スプリントの行でなければ `Unsupported`。
+    開発ループの行は `loop_commands`。スプリントの行でも開発ループの行でもなければ `Unsupported`。
     """
-    if row.input.get("kind") != "sprint":
-        raise Unsupported(f"行 {lane}/{row.key} は {row.input.get('kind')} の行で、起こす入力を組めない（起こせるのは sprint の行だけ）")
+    kind = row.input.get("kind")
+    if kind == LOOP_KIND:
+        return loop_commands(plan, lane, row)
+    if kind != SPRINT_KIND:
+        raise Unsupported(f"行 {lane}/{row.key} は {kind} の行で、起こす入力を組めない（起こせるのは sprint と loop の行だけ）")
     args = [str(a) for a in row.args]
     mode = [] if "--mode" in args else ["--mode", DEFAULT_MODE]
     issues = [str(i) for i in row.input["issues"]]
@@ -110,6 +118,13 @@ def start_commands(plan: str, lane: str, lane_table: str, row: LaneRow) -> list[
     new = result.command("progress", "new", name, *mode, "--issues", *issues, "--parent", lane_table, *args)
     start = result.command("lanes", "row", "start", plan, lane, row.key, "--sprint", ask=("sprint",))
     return [new, start]
+
+
+def loop_commands(plan: str, lane: str, row: LaneRow) -> list[dict[str, Any]]:
+    """開発ループの行を始めるコマンドの並び。ループの名前と行の ID はレーン名、`--session` は打つ側が埋める。"""
+    start = result.command("loop", "start", lane, ask=("session",))
+    row_start = result.command("lanes", "row", "start", plan, lane, row.key, "--sprint", lane)
+    return [start, row_start]
 
 
 def cancel_commands(sprint_id: str) -> list[dict[str, Any]]:

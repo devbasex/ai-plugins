@@ -21,7 +21,8 @@
 打ち直すと、プランは前の回の控えの結果を返すだけだからである。skill と script は入力の作業場所で打つ。
 
 工程の入力に無い差し込みは、値の性質ごとの出所（`FILL_SOURCES`）から埋める（#3092）。課題の題と本文は課題から写し、
-テストのコマンド・必須のチェック・レビューと組み直しとリファクタリングの起動は `.ndf/project.json` の宣言から読み、worker と承認ゲートの
+テストのコマンド・必須のチェック・レビューと組み直しとリファクタリングの起動は `.ndf/project.json` の宣言から読み（レビューは宣言が
+無ければ `ndf cross-review run` を、打つ時点のブランチの PR の番号で組む。`review_launch`）、worker と承認ゲートの
 起動は `params.json` の既定を使う。どこからも決まらない差し込みは、名前と出所を挙げて invalid で止める。
 """
 
@@ -322,6 +323,13 @@ FILL_SOURCES = {
     "gate": FROM_STAGE,
     "branch": FROM_WORKTREE,
 }
+# レーンの宣言に `workflow.launch.review` が無いときの `{{review}}`: 設計の雛形は purpose design、ほかは code の
+# `ndf cross-review run` を、ステップを打つ時点でブランチの PR の番号を読んで `--pr` に足して打つ。設計のプランは PR を
+# プランの中（pr のステップ）で作るため、組む時点に番号が無い。打つ時点で読めば、PR を作った後の番号で組める
+REVIEW_PURPOSE = {"design": "design"}
+REVIEW_DEFAULT_PURPOSE = "code"
+REVIEW_STATE = "{state_dir}/cross-review"
+REVIEW_WITH_PR = 'n=$(gh pr view "$0" --json number --jq .number) && [ -n "$n" ] || exit 1; exec "$@" --pr "$n"'
 # `.ndf/project.json` の宣言のうち、差し込みの値を持つ鍵の道（test_command は `test.suites` のテストの suite の command を宣言の順に ` && ` でつなぐ）
 PROJECT_KEYS = {
     "required": ("ci", "required_checks"),
@@ -446,6 +454,7 @@ def template_values(
     issued, untrusted = _fill_from_issue(run, work_dir, place, wanted)
     values = {**values, **issued, **_fill_from_project(project, wanted), **_fill_branch(run, wanted), **_fill_gate(wanted)}
     values = route.derived(t, values, cwd)
+    values = {**values, **_fill_review(t, values, wanted)}
     missing = _missing(names, values, {**FILL_SOURCES, **untrusted})
     if missing:
         raise TemplateValuesMissing(t.name, missing)
@@ -470,6 +479,24 @@ def _fill_from_project(project: Mapping[str, Any], wanted: Mapping[str, str]) ->
         return {}
     found = {name: _project_value(name, project) for name in (n for n, s in wanted.items() if s == FROM_PROJECT)}
     return {name: value for name, value in found.items() if value is not None}
+
+
+def review_launch(template_name: str, branch: str, base: str) -> list[str]:
+    """宣言が無いときの `{{review}}` の値（`REVIEW_WITH_PR`）。PR の番号は打つ時点にブランチから読んで `--pr` に足す。"""
+    purpose = REVIEW_PURPOSE.get(template_name, REVIEW_DEFAULT_PURPOSE)
+    entry = identity.FIXED_WORDS["entrypoint"]
+    review = [entry, "cross-review", "run", "--state-dir", REVIEW_STATE, "--base", base, "--purpose", purpose]
+    return ["sh", "-c", REVIEW_WITH_PR, branch, *review]
+
+
+def _fill_review(t: route.Template, values: Mapping[str, route.Value], wanted: Mapping[str, str]) -> dict[str, route.Value]:
+    """宣言に無い `{{review}}` の値（ブランチと宛先が決まらなければ含めない）。"""
+    if "review" not in wanted or "review" in values:
+        return {}
+    branch, base = values.get("branch"), values.get("base")
+    if not isinstance(branch, str) or not isinstance(base, str) or not branch or not base:
+        return {}
+    return {"review": review_launch(t.name, branch, base)}
 
 
 def _fill_branch(run: StageRun, wanted: Mapping[str, str]) -> dict[str, route.Value]:
