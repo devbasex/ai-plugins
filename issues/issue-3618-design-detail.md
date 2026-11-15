@@ -1,6 +1,6 @@
 # #3618 の詳細設計: 設定の受け口を減らす設計を設計承認の前に見つける
 
-設計文書 [issue-3618-design.md](issue-3618-design.md) の「構成要素」と「入出力の契約」を、ファイルと関数の粒度へ下ろした文書である。決定の番号（決定 1〜12）は [issue-3618-design-decisions.md](issue-3618-design-decisions.md) を、不変条件の番号（I1〜I6）は設計文書の「ドメインモデル」を指す。
+設計文書 [issue-3618-design.md](issue-3618-design.md) の「構成要素」と「入出力の契約」を、ファイルと関数の粒度へ下ろした文書である。決定の番号（決定 1〜12）は [issue-3618-design-decisions.md](issue-3618-design-decisions.md) を指す。不変条件の番号（I1〜I6）は設計文書の「ドメインモデル」を指す。
 
 この文書で使う語は設計文書の「用語」の表と同じである。とくに次の 3 語を使う。
 
@@ -51,7 +51,7 @@ plugins/ndf-next/
     └── checks/children.json           作り直しの子の表
 ```
 
-依存の向きは一方向で、循環は無い。`design-survey.py` が `lib/design_repos.py` を呼び、`design_repos.py` は `lib/md.py`・`lib/schema.py`・`lib/pathmatch.py`・`lib/deps.py` だけを読む。`design_repos.py` は `design-survey.py` を読まない（人へ残す判断の表の番号は呼ぶ側が切り出して渡す）。テンプレート・観点・データのファイルはコードから読まれる側で、ほかを読まない。
+依存の向きは一方向で、循環は無い。`design-survey.py` が `lib/design_repos.py` を呼ぶ。`design_repos.py` は `lib/md.py`・`lib/schema.py`・`lib/pathmatch.py`・`lib/deps.py` だけを読む。`design_repos.py` は `design-survey.py` を読まない（人へ残す判断の表の番号は呼ぶ側が切り出して渡す）。テンプレート・観点・データのファイルはコードから読まれる側で、ほかを読まない。
 
 | パス | 種類 | 役割 1 文 | 依存する先 |
 | --- | --- | --- | --- |
