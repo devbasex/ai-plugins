@@ -48,6 +48,21 @@ class Bumped(NamedTuple):
     landed: land.Landed | None = None
 
 
+class _Tip(NamedTuple):
+    """main の先端のプラグインの名前 → 版（定義が無ければ None）と、版のある全プラグインのタグが origin にあるか。"""
+
+    versions: dict[str, str | None]
+    tagged: bool
+
+
+class _Plan(NamedTuple):
+    """範囲にマージされた PR の番号・最も大きい上げ幅・版を上げる予定（出し済みの版より大きく繰り上げたもの）。"""
+
+    numbers: list[int]
+    level: str
+    planned: list[version_decide.Planned]
+
+
 def allowed_paths(root: Path, decl: decl_mod.Declaration) -> frozenset[str]:
     """版上げの PR が変えてよいパス（プラグインの定義・マーケットプレイス・宣言の `version_files`・CHANGELOG・手順の書き先）。"""
     paths = {plugins_mod.MARKETPLACE.as_posix(), decl.changelog, *decl.version_files}
@@ -285,30 +300,41 @@ class Bumper:
         state = "merged" if landed.merged else "stopped"
         return Bumped(state, version, level, number, landed)
 
-    def bump(self) -> Bumped:
-        """main の先端に合わせて版上げの PR を作るか進めるか置き換え、マージまで進める（I8・I11）。"""
-        decl_mod.require_github_flow(self.root)
-        repo_git = self._git
-        span = self._span()
-        found = plugins_mod.load(self.root)
+    def _tip(self, span: gather.Range, found: Sequence[plugins_mod.Plugin]) -> _Tip:
+        """main の先端のプラグインごとの版と、版のある全プラグインのタグが origin にあるか。"""
         tags = self._tags()
-        tip_versions = {p.name: gather.version_at(repo_git, p, span.until) for p in found}
-        tip_tagged = all(v is None or version_decide.tag_of(n, v) in tags for n, v in tip_versions.items())
+        versions = {p.name: gather.version_at(self._git, p, span.until) for p in found}
+        tagged = all(v is None or version_decide.tag_of(n, v) in tags for n, v in versions.items())
+        return _Tip(versions, tagged)
+
+    def _plan(self, span: gather.Range, found: Sequence[plugins_mod.Plugin]) -> _Plan:
+        """範囲にマージされた PR・その上げ幅・出し済みの版より大きく繰り上げた版を上げる予定。"""
+        repo_git = self._git
         numbers = gather.included(repo_git, span, self.production)
         level = bump_decide.widest([bump_decide.level_of(gather.labels_of(self.hub, n)) for n in numbers])
         decl = decl_mod.load(self.root)
         change_list = gather.changes(self._changed(span), found, decl)
         bumps = gather.plan_bumps(self.root, found, change_list, decl, level, version_decide.PRODUCTION)
         planned = gather.clear_shipped(bumps, gather.shipped(repo_git, found, self._tip_ref), level, version_decide.PRODUCTION)
+        return _Plan(numbers, level, planned)
+
+    def bump(self) -> Bumped:
+        """main の先端に合わせて版上げの PR を作るか進めるか置き換え、マージまで進める（I8・I11）。"""
+        decl_mod.require_github_flow(self.root)
+        span = self._span()
+        found = plugins_mod.load(self.root)
+        tip = self._tip(span, found)
+        plan = self._plan(span, found)
         opened = self._open_bump()
+        planned, level = plan.planned, plan.level
         version = planned[0].next if planned else None
-        act = bump_decide.action(tip_tagged, bool(planned), opened, version if version is not None else "")
+        act = bump_decide.action(tip.tagged, bool(planned), opened, version if version is not None else "")
         if act == bump_decide.PUBLISH:
-            shown = next((v for v in tip_versions.values() if v is not None), None)
+            shown = next((v for v in tip.versions.values() if v is not None), None)
             return Bumped("published", shown)
         if act == bump_decide.NOTHING or version is None:
             return Bumped("not_applicable")
-        pulls = gather.pull_facts(self.hub, numbers)
+        pulls = gather.pull_facts(self.hub, plan.numbers)
         if act == bump_decide.UPDATE and opened is not None:
             self._update(opened, span, pulls, planned)
             return self._merge(opened.number, version, level)
