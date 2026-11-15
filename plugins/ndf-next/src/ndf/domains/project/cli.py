@@ -83,17 +83,27 @@ class _Steps:
         return None
 
 
+def _instruction_notes(items: dict[str, Any]) -> list[str]:
+    """指示書の項目（`instructions`）の注記。測れなかった項目は空。"""
+    return list(seq(obj(obj(items.get("instructions")).get("value")).get("notes")))
+
+
+def _add_merge_evidence(items: dict[str, Any], merges: Optional[dict[str, int]]) -> None:
+    """問いの P6（`branches`）の根拠へ、直近のマージ先の数を足す。"""
+    if merges and obj(items.get(write.BRANCHES)).get("status") == "question":
+        counts = "・".join(f"{k} {v}" for k, v in sorted(merges.items(), key=lambda kv: -kv[1]))
+        items[write.BRANCHES]["evidence"].append({"text": f"直近 100 件のマージ先: {counts}"})
+
+
 def _ci_items(tree: measure_repo.Tree, step: _Steps, ctx: dict[str, Any]) -> list[str]:
     """`gh` と CI から測る項目を入れ、指示ファイルと CI の注記を返す。"""
     items = step.items
     ci_part = step("ci", lambda: measure_ci.measure(tree, ctx["gh_repo"], ctx["head"], step.deadline, os.environ))
-    notes = list(seq(obj(obj(items.get("instructions")).get("value")).get("notes")))
+    notes = _instruction_notes(items)
     if ci_part:
         items["ci"], items["test_duration"] = ci_part["ci"], ci_part["test_duration"]
         notes += ci_part["notes"]
-        if ci_part["merges"] and obj(items.get(write.BRANCHES)).get("status") == "question":
-            counts = "・".join(f"{k} {v}" for k, v in sorted(ci_part["merges"].items(), key=lambda kv: -kv[1]))
-            items[write.BRANCHES]["evidence"].append({"text": f"直近 100 件のマージ先: {counts}"})
+        _add_merge_evidence(items, ci_part["merges"])
     elif "test_duration" not in items:
         items["test_duration"] = items["ci"] if "ci" in items else unknown("時間切れ")
     flow = step(write.BRANCH_FLOW, lambda: measure_flow.measure(tree, ctx["gh_repo"], *ctx["flow_branches"]))
