@@ -7282,6 +7282,54 @@
       "pending_source": "issues/issue-1142-design-next.md"
     },
     {
+      "term": "旧いプラグイン",
+      "context": "ndf-workflow",
+      "meaning": "#1142 の作り直しの前から配っている NDF のプラグイン（`plugins/ndf/`）。作り直した `plugins/ndf-next/` と区別して呼ぶ",
+      "pending_source": "issues/issue-3569-requirements.md"
+    },
+    {
+      "term": "機能の対応表",
+      "context": "ndf-workflow",
+      "meaning": "旧いプラグインの機能 1 つを 1 行に持ち、行き先の子・作らない理由・試走の結果を持つ表（`plugins/ndf-next/src/ndf/parity/features.json`）",
+      "pending_source": "issues/issue-3569-requirements.md"
+    },
+    {
+      "term": "子の表",
+      "context": "ndf-workflow",
+      "meaning": "#1142 の作り直しの子の Issue を、記号ごとに番号・依存・順番・閉じたかで持つ表（`plugins/ndf-next/src/ndf/checks/children.json`）",
+      "pending_source": "issues/issue-3569-requirements.md"
+    },
+    {
+      "term": "入れ替えの前の試走",
+      "context": "ndf-workflow",
+      "meaning": "プラグインの入れ替え（S2 #3304）の前に、`plugins/ndf-next/` だけを読む起動でスプリントを流し、機能の対応表の行ごとに機能が届くかを確かめること（T2 #3411）",
+      "pending_source": "issues/issue-3569-requirements.md"
+    },
+    {
+      "term": "移す",
+      "context": "ndf-workflow",
+      "meaning": "旧いプラグインの関数の振る舞い（入力・判定・書くファイルの置き場と形）を変えずに、新しいプラグインのモジュールへ書き直すこと。旧いプラグインのファイルは変えない",
+      "pending_source": "issues/issue-3569-design-detail.md"
+    },
+    {
+      "term": "公開の関数",
+      "context": "ndf-workflow",
+      "meaning": "モジュールの外から呼ばれる関数。詳細設計の「関数の仕様」に書くのは公開の関数だけである",
+      "pending_source": "issues/issue-3569-design-detail.md"
+    },
+    {
+      "term": "非公開の関数",
+      "context": "ndf-workflow",
+      "meaning": "公開の関数だけが呼ぶ関数。名前が `_` で始まる",
+      "pending_source": "issues/issue-3569-design-detail.md"
+    },
+    {
+      "term": "旧い置き場",
+      "context": "ndf-workflow",
+      "meaning": "旧いプラグインが状態を書く置き場。入れ替えの前は、旧いプラグインと新しいプラグインの両方が同じ旧い置き場を読み書きする",
+      "pending_source": "issues/issue-3569-design-detail.md"
+    },
+    {
       "term": "新しいプラグイン",
       "context": "ndf-workflow",
       "meaning": "入れ替えまでの間、`plugins/ndf-next/` に作る作り直しの側のプラグイン。開発の間の名前は `ndf-next`",
