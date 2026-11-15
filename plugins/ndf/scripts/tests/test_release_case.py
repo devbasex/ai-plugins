@@ -54,18 +54,34 @@ def test_decide_case_with_the_admin_declaration(approvals, case):
 
 
 @pytest.mark.parametrize(
-    "case, has_cd, trail, admin, human, user_trail, mvv_trail",
+    "case, has_cd, trail, admin, human",
     [
-        (rc.NO_CD, False, False, False, False, False, False),
-        (rc.CD_NO_REVIEW, True, True, False, False, False, True),
-        (rc.CD_REVIEW, True, False, False, True, False, False),
-        (rc.CD_ADMIN, True, True, True, True, True, False),
+        (rc.NO_CD, False, False, False, False),
+        (rc.CD_NO_REVIEW, True, True, False, False),
+        (rc.CD_REVIEW, True, False, False, True),
+        (rc.CD_ADMIN, True, True, True, True),
     ],
 )
-def test_case_attributes(case, has_cd, trail, admin, human, user_trail, mvv_trail):
+def test_case_attributes(case, has_cd, trail, admin, human):
     c = rc.Case(case, "", "", "")
     assert (c.has_cd, c.trail_approval, c.admin_merge, c.human_approval) == (has_cd, trail, admin, human)
+
+
+@pytest.mark.parametrize(
+    "case, user_trail, mvv_trail",
+    [
+        (rc.NO_CD, False, False),
+        (rc.CD_NO_REVIEW, False, True),
+        (rc.CD_REVIEW, False, False),
+        (rc.CD_ADMIN, True, False),
+    ],
+)
+def test_case_trail_attributes(case, user_trail, mvv_trail):
+    """証跡の組み合わせは trail_approval と human_approval の積・差と一致する。"""
+    c = rc.Case(case, "", "", "")
     assert (c.user_trail_only, c.mvv_may_trail) == (user_trail, mvv_trail)
+    assert c.user_trail_only == (c.trail_approval and c.human_approval)
+    assert c.mvv_may_trail == (c.trail_approval and not c.human_approval)
 
 
 @pytest.mark.parametrize(
