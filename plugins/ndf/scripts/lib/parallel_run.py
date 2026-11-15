@@ -34,6 +34,7 @@ import parallel_release as pr
 import parallel_route as prt
 from parallel_files import RELAY
 from parallel_end import LaneEnding
+from parallel_gate2 import ConfirmedGate
 from parallel_helper import SUPERVISE, helper_spawn
 from parallel_launch import LaunchRouting
 from parallel_observe import _ask_helper, _asking_lanes, _plan_view, apply_observed_states
@@ -216,7 +217,7 @@ def render_progress(main: str, name: str, progress: dict) -> None:
 # ---- 耐久ワークフロー ----
 
 
-class _Run(LaneEnding, plg.RunState, prt.ReleaseRouting, AnswerRouting, ph.AnswerHold, LaunchRouting):
+class _Run(LaneEnding, plg.RunState, prt.ReleaseRouting, AnswerRouting, ph.AnswerHold, LaunchRouting, ConfirmedGate):
     """耐久ワークフローの中の値。打ち直すと記録から同じ値に戻る。レーンの終わりと版の要るまとめは `LaneEnding`（#3058）。"""
 
     write_hold, resume_lanes = staticmethod(step_answer_hold), staticmethod(step_resume_lanes)
@@ -383,7 +384,7 @@ class _Run(LaneEnding, plg.RunState, prt.ReleaseRouting, AnswerRouting, ph.Answe
         止まったものと数え、リリースの途中で止まった一時レーンならリリースを失敗として締める（依頼へ failed を答える）。
         リリースを組めない問いの「止める」は計画を止め、「直してから組み直す」は組み直しの依頼を入れ直す。保留したループの残りを流す
         一時レーンを起こせない問いの「止める」も計画を止める（保留の中身はループの記録に残る）。"""
-        if self.apply_end(q, choice):  # レーンの終わりの問いと版の要るまとめの一時レーンの問い（#3058）
+        if self.apply_end(q, choice) or self.apply_confirmed(q, choice):  # レーンの終わり・版の要るまとめ（#3058）・確定の後の依頼（#3597）
             return
         if q.get("kind") == "build":
             self.apply_build(q, choice)

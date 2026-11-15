@@ -22,7 +22,9 @@ sys.path.insert(0, str(SCRIPTS))
 import dbos  # noqa: E402,F401
 import durable  # noqa: E402
 import parallel_answer as pa  # noqa: E402
+import parallel_gate2 as pgate  # noqa: E402
 import parallel_lane as pl  # noqa: E402
+import parallel_ledger as plg  # noqa: E402
 import parallel_helper as ph  # noqa: E402
 import parallel_plan as pp  # noqa: E402
 import parallel_release as prl  # noqa: E402
@@ -523,7 +525,7 @@ def test_helper_task_follows_the_last_launch(env, tmp_path):
     )
     assert ph.helper_task(main, "p1", 1, 1)["gate2"].endswith("--report /r/issues/a.md")
     (d / "presented.json").write_text(json.dumps({"sha": "sha1", "prs": [10]}))
-    pl.request_gate2(main, "p1", 1, 1, str(d / "report.md"))
+    pgate.request_gate2(main, "p1", 1, 1, str(d / "report.md"))
     item = until(lambda: [i for i in questions(main)["items"] if i["kind"] == "gate2"])[0]
     assert item["id"] == "p1-p1-1" and item["stamp"] == "sha1"
     resume(main, {"n": 1, "phase": "confirm"}, "c1")
@@ -536,6 +538,138 @@ def test_helper_task_follows_the_last_launch(env, tmp_path):
         and "--from approve" in task["pipeline"]
         and f"queue {d / 'release.json'}" in task["pipeline"]
     )
+
+
+# ---- #3597: 確定の後の承認ゲート（受け入れ条件 1〜4・決定 2） ----
+
+
+def _gate_done(tmp_path, reason="有効な承認のレビューが無い", pr=3593):
+    """本番のプランが承認ゲートで終わった done（リリース 17 の形）。"""
+    st = tmp_path / "release-state"
+    st.mkdir(exist_ok=True)
+    out = {"tool": "release", "status": "gate", "summary": "リリース承認を待つ", "metrics": {"main_pr": pr, "reason": reason}}
+    (st / "11-release.out").write_text("log\n" + json.dumps(out, ensure_ascii=False) + "\n")
+    (st / "12-facts.out").write_text(json.dumps({"tool": "release", "status": "gate", "summary": "提示物を書いた", "metrics": {}}) + "\n")
+    rows = [
+        {"kind": "step", "step": "release", "exit": 10, "out": "11-release.out"},
+        {"kind": "step", "step": "facts", "exit": 10, "out": "12-facts.out"},
+    ]
+    (st / "progress.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+    done = tmp_path / "release-done.json"
+    done.write_text(json.dumps({"items": [{"plan": "release.json", "result": "関門", "exit": 10, "report": str(st / "report.md")}]}))
+    return done
+
+
+def _confirmed(env, tmp_path):
+    """提示 1 の依頼と確定の答えまで進めた計画。(main, リリースの依頼の id, 提示の承認資料のディレクトリ, 確定の起動の seq)。"""
+    main = env["main"]
+    start(main)
+    rid = pl.send_release_request(main, "p1", "la", [10], [1], tmp_path / "st")
+    until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "release")
+    d = prl.release_dir(main, "p1", 1, 1)
+    (d / "presented.json").write_text(json.dumps({"sha": "sha1", "prs": [10]}))
+    pgate.request_gate2(main, "p1", 1, 1, str(d / "report.md"))
+    until(lambda: [i for i in questions(main)["items"] if i["kind"] == "gate2"])
+    resume(main, {"n": 1, "phase": "confirm"}, "c1")
+    ev = until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "confirmed" and e)
+    until(lambda: not [i for i in questions(main)["items"] if i["kind"] == "gate2"])
+    return main, rid, d, ev["seq"]
+
+
+def _gate2_rows(main):
+    return [r for r in plg.read_ledger_rows(main, "p1").rows if r["kind"] == "gate2"]
+
+
+def test_a_gate_after_confirm_is_sent_as_a_new_request(env, tmp_path):
+    """受け入れ条件 1〜3: 確定の後の依頼は提示 1 と違う id で台帳へ 1 行増え、理由と本番の PR の番号を載せる。同じ依頼の再送は
+    送り済みで行が増えず、提示 1 の id で中身の違う依頼は送ったと返さない。"""
+    main, _, d, seq = _confirmed(env, tmp_path)
+    again = pgate.request_gate2(main, "p1", 1, 1, "other.md")  # リリース 17 の事象: 提示 1 の id で別の依頼を送った
+    assert (again.written, again.same, again.existing) == (False, False, "p1-p1-1")
+    done = _gate_done(tmp_path)
+    task = ph.helper_task(main, "p1", 1, 1)
+    assert task["phase"] == "confirmed" and "--confirmed --done" in task["gate2"] and "settle p1 1" in task["settle"]
+    got = pgate.request_confirmed(main, "p1", 1, 1, str(done))
+    assert got == f"p1-p1-1-c{seq}" and got.written
+    rows = _gate2_rows(main)
+    assert [r["id"] for r in rows] == ["p1-p1-1", got]
+    msg = rows[-1]["msg"]
+    assert (msg["after"], msg["reason"], msg["pr"], msg["options"]) == (
+        "confirmed",
+        "有効な承認のレビューが無い",
+        3593,
+        ["打ち直す", "差し戻す"],
+    )
+    item = until(lambda: [i for i in questions(main)["items"] if i["id"] == got])[0]
+    assert item["after"] == "confirmed" and "#3593" in item["question"]
+    same = pgate.request_confirmed(main, "p1", 1, 1, str(done))
+    assert (same.written, same.same, same.answered) == (False, True, False) and len(_gate2_rows(main)) == 2
+
+
+def test_request_confirmed_refuses_without_a_confirm_or_a_gate(env, tmp_path):
+    main = env["main"]
+    start(main)
+    pl.send_release_request(main, "p1", "la", [10], [1], tmp_path / "st")
+    until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "release")
+    with pytest.raises(pgate.NotConfirmed):
+        pgate.request_confirmed(main, "p1", 1, 1, str(_gate_done(tmp_path)))  # 確定の前
+    done = tmp_path / "ok-done.json"
+    done.write_text(json.dumps({"items": [{"result": "完了"}]}))
+    assert pgate.gate_detail(str(done)) is None
+
+
+def test_gate_detail_falls_back_to_the_path_when_outputs_are_missing(tmp_path):
+    done = _gate_done(tmp_path)
+    (tmp_path / "release-state" / "progress.jsonl").unlink()
+    reason, pr, report = pgate.gate_detail(str(done))
+    assert "承認ゲートの理由を読めない" in reason and pr is None and report.endswith("report.md")
+
+
+def test_retry_after_a_confirmed_gate_relaunches_the_confirm_with_a_new_seq(env, tmp_path):
+    """決定 2 の「打ち直す」: 同じ承認のまま、答えた問いの id を添えた新しい目的で確定の起動を流し直す。"""
+    main, _, _, seq = _confirmed(env, tmp_path)
+    rid = pgate.request_confirmed(main, "p1", 1, 1, str(_gate_done(tmp_path)))
+    until(lambda: [i for i in questions(main)["items"] if i["id"] == rid])
+    pl.send_answer(main, "p1", rid, "answered", choice=["打ち直す"])
+    ev = until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "confirmed" and e["seq"] > seq and e)
+    assert ev["purpose"].endswith(f"-a{rid}") and (ev["n"], ev["k"]) == (1, 1)
+    again = pgate.request_confirmed(main, "p1", 1, 1, str(_gate_done(tmp_path)))
+    assert again == f"p1-p1-1-c{ev['seq']}" and again != rid and again.written  # 打ち直した後の依頼は別の id
+
+
+def test_reject_after_a_confirmed_gate_settles_rejected_and_closes_the_pr(env, tmp_path, monkeypatch):
+    """決定 2 の「差し戻す」: 範囲のレーンの依頼へ settle --rejected と同じ rejected が返り、本番の PR を閉じる呼び出しが 1 回起きる。"""
+    import gh_call
+
+    closed = []
+    monkeypatch.setattr(gh_call, "RUNNER", lambda args, stdin=None, **kw: closed.append(args) or gh_call.GhResult(0, "", ""))
+    main, req, _, _ = _confirmed(env, tmp_path)
+    rid = pgate.request_confirmed(main, "p1", 1, 1, str(_gate_done(tmp_path)))
+    until(lambda: [i for i in questions(main)["items"] if i["id"] == rid])
+    pl.send_answer(main, "p1", rid, "answered", choice=["差し戻す"])
+    ans, _ = pl.read_answer(main, "p1", req, timeout=30)
+    assert ans["result"] == "rejected" and rid in ans["reason"]
+    assert [a[:3] for a in closed] == [["pr", "close", "3593"]] and rid in closed[0][-1]
+
+
+def test_close_release_pr_failure_is_returned_not_raised(monkeypatch):
+    import gh_call
+
+    monkeypatch.setattr(gh_call, "RUNNER", lambda args, stdin=None, **kw: gh_call.GhResult(1, "", "HTTP 401: Bad credentials\nmore"))
+    got = pgate.step_close_release_pr.__wrapped__("/m", 3593, "c")
+    assert got == {"closed": False, "reason": "HTTP 401: Bad credentials"}
+
+
+def test_a_stopped_helper_with_a_confirmed_gate_request_is_not_asked(env, tmp_path):
+    """受け入れ条件 4: 確定の後の依頼が問いの一覧にある一時レーンが止まっても、区分 helper の問いは立たない。"""
+    states = env["states"]
+    main, _, _, _ = _confirmed(env, tmp_path)
+    rid = pgate.request_confirmed(main, "p1", 1, 1, str(_gate_done(tmp_path)))
+    until(lambda: [i for i in questions(main)["items"] if i["id"] == rid])
+    helper_up(states, "p1-rel1")
+    set_state(states, "p1-rel1", "stopped")
+    time.sleep(1.5)  # 観測 2 回分より長く待つ（NDF_PARALLEL_POLL は 0.2 秒）
+    assert not [i for i in questions(main)["items"] if i["kind"] == "helper"]
 
 
 def test_request_ask_cli_refuses_a_sender_outside_the_plan_with_4(env, monkeypatch):

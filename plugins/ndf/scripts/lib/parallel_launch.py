@@ -138,7 +138,9 @@ class LaunchRouting:
 
     def _ask_launch(self, purpose: str, lane: str, text: str, spec: dict, extra: dict) -> None:
         """起動できないレーンの区分 `spawn` の問い（選択肢「起こし直す」「止める」）を立てる。同じ id は 1 回だけ立つ。"""
-        self.ask("spawn", f"{self.name}-launch-{purpose}", lane, text, list(RESTART[:1]) + ["止める"], purpose=purpose, launch=spec, **extra)
+        self.ask(
+            "spawn", f"{self.name}-launch-{purpose}", lane, text, list(RESTART[:1]) + ["止める"], purpose=purpose, launch=spec, **extra
+        )
 
     def launch_waiting(self, rows: dict) -> None:
         """空き待ち（`waiting`）の起動の記録を、ループの 1 回の観測（一覧の成功した行 `rows`）ごとに読み直す（#3597 の決定 10）。
@@ -169,7 +171,9 @@ class LaunchRouting:
                                           "waited": {"busy": busy, "seconds": waited}}  # fmt: skip
             else:
                 rec.update(**{k: got.get(k) for k in ("result", "attempts", "at", "reason")})
-                self._ask_launch(purpose, rec["lane"], f"レーン {rec['lane']} を 2 回起動しても立ち上がらない（{rec.get('reason')}）", spec, extra)
+                self._ask_launch(
+                    purpose, rec["lane"], f"レーン {rec['lane']} を 2 回起動しても立ち上がらない（{rec.get('reason')}）", spec, extra
+                )
 
     def launch_helper(self) -> None:
         """流れているリリースの最後の起動（`launch`）の一時レーンを起動する。立ち上がらなければ問いに `n` を添える（「止める」で締める）。"""

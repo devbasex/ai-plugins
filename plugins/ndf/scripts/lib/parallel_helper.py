@@ -83,6 +83,12 @@ def present_approval(d: Path) -> str:
     return shlex.quote(str(path if path.is_absolute() else Path(step.get("cwd") or ".") / path))
 
 
+def last_launch(main: Path, name: str) -> dict:
+    """最後の起動の指示: イベント `pause` が release / confirmed ならそれ、ほかのイベントならそれに添えた `release`、無ければ空。"""
+    ev = durable.event_from(pl.KIND, pl.record_identity(main, name), pl.workflow_id(name), "pause", 0, start=pl.record_start(main)) or {}
+    return ev if ev.get("action") in ("release", "confirmed") else ev.get("release") or {}
+
+
 def helper_task(main: Path, name: str, n: int, k: int) -> dict:
     """一時レーン（`--parallel-helper <計画名> <連番> <提示>`）が流すもの。最後の起動の指示（イベント `pause` か、
     リリースの途中の知らせに添えた `release`）が同じ連番と提示の `confirmed`（`carried` を持たない）なら確定の後の 3 手、
@@ -91,19 +97,26 @@ def helper_task(main: Path, name: str, n: int, k: int) -> dict:
     - 提示（`phase: present`）: `pipeline` は提示のプラン → 本番のプランの queue と待ち。終われば提示のプランがリリース承認ゲート で
       止まったかを見て、止まっていれば `gate2`（リリース承認ゲート の依頼を送る）、流れ切れば `settle` を打つ
     - 確定の後（`phase: confirmed`）: `pipeline` は答えの記録 → 提示のプランを `approve` から → 本番のプランの queue と待ち。
-      終われば `settle` を打つ。`approve` が承認ゲート（10）で終われば queue を打たずに問いとして送る"""
-    ev = durable.event_from(pl.KIND, pl.record_identity(main, name), pl.workflow_id(name), "pause", 0, start=pl.record_start(main)) or {}
-    launch = ev if ev.get("action") in ("release", "confirmed") else ev.get("release") or {}
+      終われば `settle` を打つ。`approve` が承認ゲート（10）で終われば queue を打たずに問いとして送る。本番のプランが承認ゲートで
+      終われば `gate2`（確定の後の依頼。#3597 の決定 2）を打つ
+
+    `asked` は自分の名前の一時レーンが送った依頼と答え（決定 8）。台帳を読めなければ `OSError`。"""
+    import parallel_ledger as plg
+    from parallel_question import asked_of
+
+    launch = last_launch(main, name)
     d = pr.release_dir(main, name, n, k)
     py = f"python3 {HERE / 'parallel.py'}"
-    out = {"n": n, "k": k, "dir": str(d), "gate2": f"{py} request-gate2 {name} {n} {k} --report {present_approval(d)}"}
+    rows = plg.read_ledger_rows(main, name).rows
+    asked = asked_of([r for r in rows if r["_pos"] >= plg.first_opened(rows)], pr.helper_name(name, n))
+    out = {"n": n, "k": k, "dir": str(d), "gate2": f"{py} request-gate2 {name} {n} {k} --report {present_approval(d)}", "asked": asked}
     # 出し直しを省いた確定（`carried`）は提示と同じ流し方にする。提示のプランが確かめ直して承認を書く（#3020 の決定 3）
     if launch.get("action") == "confirmed" and launch.get("n") == n and launch.get("k") == k and not launch.get("carried"):
         done = d / "release-done.json"
         gate = pr.record_answer_cmd(d, n, k)
         steps = [gate, f"{SUPERVISE} run {d / 'present.json'} --from approve", f"{SUPERVISE} queue {d / 'release.json'} --done {done}"]
         return {**out, "phase": "confirmed", "pipeline": " && ".join([*steps, f"{SUPERVISE} wait {done}"]),
-                "settle": f"{py} settle {name} {n} --done {done}"}  # fmt: skip
+                "gate2": f"{py} request-gate2 {name} {n} {k} --confirmed --done {done}", "settle": f"{py} settle {name} {n} --done {done}"}  # fmt: skip
     done = d / "done.json"
     return {**out, "phase": "present", "pipeline": f"{pr.pipeline_cmd(SUPERVISE, d)} && {SUPERVISE} wait {done}",
             "settle": f"{py} settle {name} {n} --done {done}"}  # fmt: skip

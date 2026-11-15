@@ -16,6 +16,7 @@ from test_parallel_run import calls, env, event, helper_spawns, helper_up, quest
 
 sys.path.insert(0, str(tpr.SCRIPTS / "lib"))
 import durable  # noqa: E402
+import parallel_gate2 as pgate  # noqa: E402
 import parallel_lane as pl  # noqa: E402
 import parallel_launch as plc  # noqa: E402
 import parallel_ledger as plg  # noqa: E402
@@ -151,7 +152,7 @@ def test_one_release_wakes_the_organizer_only_for_the_gate_and_the_end(env, tmp_
     helper_up(states, "p1-rel1")  # 提示の一時レーンは耐久ワークフローが起動する
     (prl.release_dir(main, "p1", 1, 1) / "presented.json").write_text(json.dumps({"sha": "sha1", "prs": [10]}))
     assert wait_once() is None  # 起動の知らせでオーガナイザーを起こさない
-    pl.request_gate2(main, "p1", 1, 1, "report.md")  # 一時レーンがリリース承認ゲートの依頼を送り、自分を止める
+    pgate.request_gate2(main, "p1", 1, 1, "report.md")  # 一時レーンがリリース承認ゲートの依頼を送り、自分を止める
     set_state(states, "p1-rel1", "stopped")
     out = until(wait_once)
     assert out["metrics"]["action"] == "questions" and [i["kind"] for i in out["items"]] == ["gate2"]
@@ -351,7 +352,7 @@ def test_waiting_past_the_limit_asks_with_the_running_helper_name(monkeypatch):
     run.seen_at = t0 + 600
     run.launch_waiting({"p6-rel17": {"state": "running"}})
     assert len(calls_) == 1 and run.launches["verify-x"]["result"] == "failed"
-    (kind, rid, lane, text, options, extra), = run.asked
+    ((kind, rid, lane, text, options, extra),) = run.asked
     assert (kind, rid, lane) == ("spawn", "p6-launch-verify-x", "p6-rel10v") and "同時に 1 本まで" in text and "p6-rel17" in text
     assert options == ["起こし直す", "止める"] and extra["n"] == 17 and extra["launch"]["argv"][0] == "spawn"
 
