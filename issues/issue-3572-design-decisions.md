@@ -1,15 +1,17 @@
 # #3572 の決定の記録: GitHub flow を土台にし、承認した先端だけを main へ入れ、承認の後に直しのステップを持たない
 
-設計文書 [issue-3572-design.md](issue-3572-design.md) の決定の記録である。不変条件（I1〜I10）・外部の調査（STD1〜STD6・PRD1・PRD2・LIB1・LIB2）・
+設計文書 [issue-3572-design.md](issue-3572-design.md) の決定の記録である。不変条件（I1〜I13）・外部の調査（STD1〜STD6・PRD1・PRD2・LIB1・LIB2）・
 用語は、設計文書の同じ名前の章の意味で使う。
 
 ## 決定の記録
 
-### 決定 1: 承認の外のコミットが積まれる経路を無くすため、本番のプランから worker を外し、副命令を並べた 3 ステップにする
+### 決定 1: 承認の外のコミットが積まれる経路を無くすため、本番のプランから worker を外し、副命令を並べた 4 ステップにする
 
 本番のプランの `work`（`{{worker}} release`）は、worker にリリースの作業全体を任せるため、CI が落ちたときにコードを直して push する
-判断も worker に残る。リリース 8・14 はこの裁量で起きた。ステップを `ndf release-steps` の `merge` → `record` → `cleanup` だけにすれば、
-承認の後にコードを変える主体がプランの中に居なくなる。手順書だけで止める形は 2 回とも止まらなかったため採らない（要求の「含まない」）。
+判断も worker に残る。リリース 8・14 はこの裁量で起きた。ステップを `ndf release-steps` の `merge` → `confirm` → `record` → `cleanup` だけにすれば、
+承認の後にコードを変える主体がプランの中に居なくなる。`confirm` は CD の版上げとタグを待って確かめるだけで、コードもブランチも変えない。
+要求の受け入れ条件 7 と E10・E11 の順（CD の確かめの後に後片付けと終わりの記録）に合わせ、`record` と `cleanup` を `confirm` の後に置く。
+手順書だけで止める形は 2 回とも止まらなかったため採らない（要求の「含まない」）。
 GitHub の ruleset でブランチをロックする形は、利用者の「ロックの方針」で採らない。承認した先端の外は先端の照合（STD1）が止める。
 承認するのは本番の PR の先端で、マージは先端の照合つき（`--match-head-commit` に当たる `expect_head`）で打つ。
 
@@ -87,7 +89,19 @@ GitHub flow ではスプリントの PR が本番の PR を兼ねるため、ス
 
 宣言（`.ndf/worktree.json`）は `base_branch` と `production_branch` を同じ main にする。`promote-whole`・`promote-selected` の 2 行は、
 ベースブランチが本番ブランチと違う運用（ベースブランチを丸ごと出す・選んで出す）を表し、ndf-next のリリースは同期の PR を作らない
-（決定 10）ため、表から外す。ベースブランチを持つリポジトリをどう扱うかは「未確認のまま残ること」に置き、範囲外の課題で決める。
+（決定 10）ため、ndf-next のリリースでは扱わない。ベースブランチを持つリポジトリをどう扱うかは「未確認のまま残ること」に置き、範囲外の課題で決める。
+
+表から 2 行を外す時点は、ai-plugins の宣言を `github-flow` へ書き換える 11.0.0 の入れ替え（#3304、決定 14）にそろえる。
+今の ai-plugins の宣言は `promotion: whole`・`base_branch: develop` で、入れ替えまでスプリントの経路（`domains/worktree`）はこの宣言を読む。
+この課題の実装で 2 行を外すと、表に合わない宣言は既定へ倒さずに止める取り込み方の表の規則（`branch-flows.json` の `summary`）により、
+ndf-next のスプリントの経路が入れ替えまで ai-plugins で止まる。そのため、入れ替えまでの扱いは次のとおりにする。
+
+| 時点 | 取り込み方の表 | ai-plugins の宣言 | ndf-next のリリースの副命令 |
+| --- | --- | --- | --- |
+| この課題の実装から入れ替えまで | 3 行（`github-flow` を既定に足し、2 行を残す） | `promote-whole`（今のまま） | 宣言の行が `github-flow` でなければ、原因 `precondition`・理由「取り込み方 <行> は ndf-next のリリースで扱わない」で止まる。既定の行へ倒さない。`pr-check` は 0 を返して何も見ない（決定 7） |
+| 入れ替え（#3304） | `github-flow` の 1 行 | `github-flow`（決定 14） | 宣言どおりに動く |
+
+入れ替えまでは、ndf-next のリリースの workflow も変数 `NDF_RELEASE_RUNNER` が ndf-next でないため動かない。止まる経路は、手で副命令を打ったときだけ通る。
 
 | 比べた候補 | 採否と理由 |
 | --- | --- |
@@ -117,17 +131,20 @@ GitHub flow ではスプリントの PR が本番の PR を兼ねるため、ス
 main の ruleset（2026-11-15 の API の応答）は、迂回を管理者の役割（`RepositoryRole` 5）だけに、形 `pull_request` で許す。PR を通さない main への
 push には迂回が効かず、承認 1 と必須のチェックが掛かる。そのため CD は版上げのコミットを main へ直接 push せず、版上げの PR で入れる。
 
-1. main への push で `bump` が動く。先端の版にタグがあり、前のタグからリリース対象の変化があれば、上げ幅を決める
-2. 上げ幅は、前のタグから main の先端までにマージされた PR のラベル（`release:major`・`release:minor`・`release:patch`）の最大で、
+1. main への push で `bump` が動く。先端の版にタグがあり、範囲（前の版上げのコミットの起点..main の先端。設計文書の「main へのマージの後（CD）」）にリリース対象の変化があれば、上げ幅を決める
+2. 上げ幅は、範囲にマージされた PR のラベル（`release:major`・`release:minor`・`release:patch`）の最大で、
    ラベルが無い PR は PATCH とする（要求の起票者の推定 S8 を採る。宣言の付け忘れでマージを止めないため）
 3. main の先端から `release/v<版>` を作り、`plugin.json` の `version` と CHANGELOG の版の節（決定 11）だけを変えたコミットを足し、
    `NDF_RELEASE_TOKEN` で版上げの PR を作る（`github.token` で作ると CI が起動しない）
 4. `bump_decide` が差分を版数の文字列と CHANGELOG の版の節に限られると判定し、必須のチェックの後に、迂回の宣言で照合付きでマージする
 5. 版上げの PR のマージの push で、`bump` は先端の版にタグが無いと読んで版を上げず、`publish` がタグと GitHub Release を作る
 
-同じ版の版上げの PR が開いていれば使い直し（I8）、`concurrency` で workflow を 1 本ずつ流す。1 つの PR に上げ幅のラベルが 2 つ以上あれば
-`pr-check` が PR の時点で落とす。PR の検査（`pr-check`）は宣言が `github-flow` のときだけ働く。今の ai-plugins の宣言（`promote-whole`）では
-今の NDF のリリースの PR が版を上げるため、11.0.0 の入れ替えまでは検査を掛けない。
+同じ版の版上げの PR が開いていれば使い直し（I8）、`concurrency` で workflow を 1 本ずつ流す。版上げの PR が開いている間に別の PR が main へ
+入ったときの進め方（版が同じなら同じ PR へ main を取り込み、版が変われば作り直す）と、CD が止まったときの扱いは、設計文書の
+「main へのマージの後（CD）」にある。1 つの PR に上げ幅のラベルが 2 つ以上あれば
+`pr-check` が PR の時点で落とす。PR の検査（`pr-check`）は宣言の行が `github-flow` のときだけ働き、ほかの行では 0 を返して何も見ない。
+11.0.0 の入れ替えまでは、取り込み方の表に `promote-whole` の行が残り（決定 5）、ai-plugins の宣言もその行である。この間は今の NDF の
+リリースの PR が版を上げるため、検査を掛けない。
 
 | 比べた候補 | 採否と理由 |
 | --- | --- |
@@ -163,10 +180,10 @@ GitHub flow ではマージがリリースになるため、試す場所をマ�
 | --- | --- | --- |
 | ref の名前 | `verify/next`（宣言 `.ndf/project.json` の `delivery` の検証の行の `verify.ref`） | 名前で用途が分かり、`release/v` と `sprint/` の名前の規則と重ならない |
 | マーケットプレイスの名前 | `ai-plugins-next`（同じ行の `verify.marketplace`） | 1 つの名前に 1 つの登録しか持てない（STD5）。正式版と同じ名前は登録できないことを確かめた |
-| 組む主体と時期 | `ndf-next-release.yml` が、main 宛ての PR の作成・更新・閉じと手動の起動で `verify-ref` を打つ | 人が組み直しを忘れない。PR の出来事が中身の変わる時点である |
+| 組む主体と時期 | `ndf-next-release.yml` が、main 宛ての PR の作成・更新・閉じ（引き金は `pull_request_target`）と手動の起動で `verify-ref` を打つ | 人が組み直しを忘れない。PR の出来事が中身の変わる時点である。`pull_request` は PR 側の workflow の定義で動き、秘密を持つジョブを PR が書き換えられるため採らない（設計文書の「非機能の実現方式」） |
 | 含める PR | main 宛ての開いた PR のうち、下書きでなく、head が検証の ref でも版上げの PR でもないもの（番号の順） | 「main へマージする前の PR を集めた」形。衝突すれば組まずに止め、衝突した PR を返す |
 | 検証の版 | `<main の版>-next.<組んだ時刻 UTC の YYYYMMDDHHMMSS>` | 版が変わらない ref の移動は利用者のキャッシュに残る（STD4） |
-| 進め方 | 前の検証の ref の先端を親に足したコミットで fast-forward だけで進める | 強制 push（C4）を使わない。main へは戻さない（I9） |
+| 進め方 | 前の検証の ref の先端を親に足したコミットで fast-forward だけで進める | 強制 push（C4）を使わない。main へは戻さない（I9・I12） |
 | 利用者の手順 | `claude plugin marketplace add devbasex/ai-plugins#verify/next` で登録し、試す間は `claude plugin disable ndf@ai-plugins` で正式版を止める | 同じ名前のプラグインが 2 つとも有効になることを確かめた |
 
 `marketplace.json` を置く場所は検証の ref の中で、`verify-ref` が組むたびに `name` を書き換える。main の `marketplace.json` は変えない。
@@ -188,7 +205,7 @@ develop が無く、main へ入った版上げのコミットを戻す先が無�
 
 ### 決定 11: `CHANGELOG.md` を残し、CD が版上げのコミットで版の節を書き、GitHub Release の本文を同じ節から作る
 
-PR は `CHANGELOG.md` を触らない。版上げのコミット（決定 7）で、範囲（前のタグ..main の先端）に入った PR から今の `changelog_decide` が版の節を組む。
+PR は `CHANGELOG.md` を触らない。版上げのコミット（決定 7）で、範囲（前の版上げのコミットの起点..main の先端）に入った PR から今の `changelog_decide` が版の節を組む。
 GitHub Release の本文は今の `tagging` のとおりその節から作り、同じ元から 2 つを作る。配らないもの（入れ替えの前の ndf-next）の節は書かない。
 
 | 観点 | 残して CD が書く | 廃止する |
@@ -246,7 +263,8 @@ GitHub Release の本文は今の `tagging` のとおりその節から作り、
 ### 決定 14: #3119 の設計の決定 21 を、ai-plugins の宣言を行 `github-flow` にする決定へ置き換える
 
 #3119 の設計の決定 21（常設のリリースブランチ `standing`）を、決定 5 の行 `github-flow` を ai-plugins の宣言にする決定へ書き換える。
-宣言の書き換えは 11.0.0 の入れ替えと同じ時点で行い、`base_branch` を main にする。差分は同じ設計 PR の `issues/issue-3119-design.md` と
+宣言の書き換えは 11.0.0 の入れ替えと同じ時点で行い、`base_branch` を main にする。取り込み方の表から `promote-whole`・`promote-selected` を
+外すのも同じ時点である（決定 5）。差分は同じ設計 PR の `issues/issue-3119-design.md` と
 `issues/issue-3119-design-detail.md` にある。
 
 - 作り方: 標準に倣う
@@ -262,7 +280,7 @@ GitHub Release の本文は今の `tagging` のとおりその節から作り、
 
 | 分け | ファイル | 何が残るか・何を外すか |
 | --- | --- | --- |
-| 残す | `contracts/templates/release.json`・`params.json` | 3 ステップのプラン。`prepare-next` を `cleanup` へ置き換える |
+| 残す | `contracts/templates/release.json`・`params.json` | 本番のプラン。`prepare-next` を `cleanup` へ置き換え、`merge` の後に `confirm` を足して 4 ステップにする |
 | 残す | `contracts/templates/merge.json` | `release-guard` を先頭からマージの直前へ移す（決定 2） |
 | 残す | `src/ndf/domains/release/release_plan.py`・`merge_decide.py`・`required_checks.py`・`shapes.py`・`trail.py` | 雛形の検査・人のマージの判定・必須のチェックの読み・人のマージの記録 |
 | 残す | `src/ndf/progress/gate/release.py`・`answering.py`・`asking.py` | 人のマージの検知 |

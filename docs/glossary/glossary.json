@@ -7626,13 +7626,7 @@
     {
       "term": "差し戻し",
       "context": "ndf-release",
-      "meaning": "リリース承認ゲートで承認しない答え、または必須のチェックの落ちた本番の PR を出さずに止めること。直しを同じリリースブランチへ入れ、新しい先端で承認を取り直す",
-      "pending_source": "issues/issue-3572-design.md"
-    },
-    {
-      "term": "次の版への回し",
-      "context": "ndf-release",
-      "meaning": "必須のチェックの落ちた本番の PR を閉じてこの時点では出さず、リリースブランチを残して後のスプリントと一緒に出すこと",
+      "meaning": "リリース承認ゲートで承認しない答え、または必須のチェックの落ちた本番の PR を出さずに止めること。直しを同じ本番の PR（スプリントの PR）へ入れ、新しい先端で承認を取り直す",
       "pending_source": "issues/issue-3572-design.md"
     },
     {
@@ -7650,13 +7644,13 @@
     {
       "term": "リリースブランチ",
       "context": "ndf-release",
-      "meaning": "本番の PR の head になる、版ごとに 1 本のリリースブランチ（`release/v<版>`）。前の版が出た直後に本番ブランチから用意する",
+      "meaning": "版上げの PR の head になるブランチ（`release/v<版>`）。main へのマージの後に CD が main の先端から作り、版上げの PR のマージで消える",
       "pending_source": "issues/issue-3572-design.md"
     },
     {
       "term": "版上げのコミット",
       "context": "ndf-release",
-      "meaning": "main へのマージの後に CD が作る、`plugin.json` の `version` と版の記録だけを変えるコミット。PR は版数を触らない",
+      "meaning": "main へのマージの後に CD が作り、版上げの PR を通して main へ入るコミット。`plugin.json` の `version` と CHANGELOG の版の節だけを変える。PR は版数を触らない",
       "pending_source": "issues/issue-3572-design.md"
     },
     {
