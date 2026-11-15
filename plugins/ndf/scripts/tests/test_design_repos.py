@@ -44,7 +44,9 @@ RESULTS = "## 設計の結果\n\n| 課題 | 扱い | 取り込み先 | 触るフ
 LEFT = "## 人へ残す判断\n\n| 判断 | 当たるレッドライン | なぜ当たるか |\n| --- | --- | --- |\n| {q} | {n} | 理由がある |\n"
 
 
-def doc(rows: str = ROWS_OK, own: str = OWN, header: str = HEADER, behavior: bool = True, touched: str = "plugins/ndf/a.py", left: str = "C7") -> str:
+def doc(
+    rows: str = ROWS_OK, own: str = OWN, header: str = HEADER, behavior: bool = True, touched: str = "plugins/ndf/a.py", left: str = "C7"
+) -> str:
     scope = "## 適用範囲\n\n- 働く範囲: すべて\n\n"
     if behavior:
         scope += "### 代表のリポジトリでの振る舞い\n\n" + header + rows + "\n"

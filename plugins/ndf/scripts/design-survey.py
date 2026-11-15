@@ -346,9 +346,7 @@ def cmd_check(a):
     items, metrics = judge_docs(docs, a.require_detail, settings)
     names = ", ".join(d.path for d in docs)
     if items:
-        summary = (
-            f"文書 {len(docs)} 件（{names}）。決定の作り方と比べた候補・人へ残す判断のレッドライン・詳細設計・代表のリポジトリの振る舞いに {len(items)} 件の指摘がある"
-        )
+        summary = f"文書 {len(docs)} 件（{names}）。決定の作り方と比べた候補・人へ残す判断のレッドライン・詳細設計・代表のリポジトリの振る舞いに {len(items)} 件の指摘がある"
         emit(result(TOOL, "stopped", summary, items, metrics), EXIT_VIOLATION)
     summary = f"文書 {len(docs)} 件（{names}）。自前で作る決定 {metrics['self_built']} 件・人へ残す判断・詳細設計 {metrics['detail_docs']} 件に指摘なし"
     emit(result(TOOL, "ok", summary, items, metrics), EXIT_OK)
