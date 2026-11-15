@@ -168,6 +168,8 @@ ALLOW_DIR = pathlib.Path(__file__).resolve().parent / "repo-assumptions-allow"
 ALLOW_KINDS = ("not-a-violation", "pending")
 
 RUNTIMES = ("claude", "codex")
+# 出力の行の接頭辞
+PREFIX = "[check-skill-repo-assumptions]"
 
 
 def canon(path: pathlib.Path | str) -> str:
@@ -611,14 +613,14 @@ def judge(rows: list[dict], result: ScanResult, skills_dirs: list[pathlib.Path],
 
 
 def print_unscanned(unscanned: list[pathlib.Path]) -> None:
-    print("[check-skill-repo-assumptions] manifest に載る Skill の本文を走査できない:", file=sys.stderr)
+    print(f"{PREFIX} manifest に載る Skill の本文を走査できない:", file=sys.stderr)
     for path in unscanned:
         print(f"  - {path}（ディレクトリか、走査の対象になる Markdown が無い）", file=sys.stderr)
     print("\n配らなくなったなら manifests/*-skills.txt からも外す。", file=sys.stderr)
 
 
 def print_problems(problems: list[str]) -> None:
-    print("[check-skill-repo-assumptions] 例外リストが成立していない:", file=sys.stderr)
+    print(f"{PREFIX} 例外リストが成立していない:", file=sys.stderr)
     for p in problems:
         print(f"  - {p}", file=sys.stderr)
 
@@ -633,7 +635,7 @@ def _suggested_file(h: Hit) -> str:
 
 
 def print_outside(outside: list[Hit]) -> None:
-    print("[check-skill-repo-assumptions] 対象リポジトリを仮定した記述がある:", file=sys.stderr)
+    print(f"{PREFIX} 対象リポジトリを仮定した記述がある:", file=sys.stderr)
     for h in outside:
         print(f"  {h}", file=sys.stderr)
     files = sorted({_suggested_file(h) for h in outside})
@@ -662,17 +664,17 @@ def main() -> int:
 
     skills_dirs = resolve_skills_dirs(args.skills_dir)
     if not skills_dirs:
-        print("[check-skill-repo-assumptions] チェック対象が見つからない", file=sys.stderr)
+        print(f"{PREFIX} チェック対象が見つからない", file=sys.stderr)
         return 2
     for d in skills_dirs:
         if not d.is_dir():
-            print(f"[check-skill-repo-assumptions] ディレクトリがない: {d}", file=sys.stderr)
+            print(f"{PREFIX} ディレクトリがない: {d}", file=sys.stderr)
             return 2
 
     try:
         result = scan_all(skills_dirs)
     except ScanError as e:
-        print(f"[check-skill-repo-assumptions] {e}", file=sys.stderr)
+        print(f"{PREFIX} {e}", file=sys.stderr)
         return 2
 
     # 走査の範囲が欠けたままの結果は、ヒットが 0 でも「無い」ことの根拠にならない。
@@ -687,7 +689,7 @@ def main() -> int:
     try:
         rows = read_allow(pathlib.Path(args.allow))
     except AllowError as e:
-        print(f"[check-skill-repo-assumptions] {e}", file=sys.stderr)
+        print(f"{PREFIX} {e}", file=sys.stderr)
         return 2
 
     problems, outside = judge(rows, result, skills_dirs, exhaustive=args.skills_dir is None)
