@@ -2,6 +2,6 @@
   "path": "plugins/ndf-next/contracts/schemas/declarations/project.schema.json",
   "name": "pytest",
   "kind": "not-a-violation",
-  "reason": "宣言の例（examples）の値。言語の表の行の 1 つを例に示す",
-  "count": 3
+  "reason": "宣言の例（examples）の値と、suite の項目の説明で pytest を例に出す（収集の終了コードの例）。言語の表の行の 1 つを例に示す",
+  "count": 4
 }
