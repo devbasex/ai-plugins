@@ -107,6 +107,13 @@ def run(a: argparse.Namespace) -> dict[str, Any]:
         return result.stopped(TOOL, "not_applicable", "設計文書が無い。設計に名前の出るテストの確かめは該当なし")
     dirs = {str(p) for f in files for p in PurePosixPath(f).parents if str(p) != "."}
     pairs = dt.renames(text for _, text in designs)
+    found, skipped = _collect(designs)
+    rows = [judge_found(it, pairs, files, dirs, _grep(g)) for it in found]
+    return _report(rows, [doc for doc, _ in designs], skipped)
+
+
+def _collect(designs: list[tuple[str, str]]) -> tuple[list[dt.Found], int]:
+    """全設計文書から拾った名前と、飛ばした数。同じ名前は文書をまたいで 1 度だけ拾う。"""
     seen: set[str] = set()
     found: list[dt.Found] = []
     skipped = 0
@@ -114,11 +121,15 @@ def run(a: argparse.Namespace) -> dict[str, Any]:
         got, sk = dt.extract(doc, text, seen)
         found += got
         skipped += sk
-    rows = [judge_found(it, pairs, files, dirs, _grep(g)) for it in found]
+    return found, skipped
+
+
+def _report(rows: list[dict[str, Any]], docs: list[str], skipped: int) -> dict[str, Any]:
+    """名前ごとの判定の行から結果の JSON を組む。"""
     kind, summary = dt.outcome(r["result"] for r in rows)
-    summary = f"設計文書 {len(designs)} 件（{', '.join(doc for doc, _ in designs)}）。{summary}"
+    summary = f"設計文書 {len(docs)} 件（{', '.join(docs)}）。{summary}"
     metrics = {
-        "designs": len(designs),
+        "designs": len(docs),
         "names": len(rows),
         "skipped": skipped,
         **{k.value: sum(r["result"] == k for r in rows) for k in (dt.Verdict.MISSING, dt.Verdict.UNVERIFIED, dt.Verdict.RENAMED)},
