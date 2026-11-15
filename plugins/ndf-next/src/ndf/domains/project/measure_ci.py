@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, Mapping, Optional
 
 from ndf.domains.project.items import measured, obj, question, seq, unknown
-from ndf.domains.project.measure_repo import CALL_LIMIT, Tree, url_hosts
+from ndf.domains.project.measure_repo import CALL_LIMIT, Tree, top_level_block, url_hosts
 from ndf.domains.relay import registry
 
 TEST_STEP = re.compile(r"(?<![a-z])test|pytest|phpunit|jest|vitest|rspec", re.I)
@@ -99,15 +99,11 @@ def _strip_comment(line: str) -> str:
 def job_ids(text: str) -> list[str]:
     """ワークフローの本文 → `jobs:` の直下の job id の並び（書いた順。YAML を読まずに字下げで拾う）。"""
     out: list[str] = []
-    inside, indent = False, None
-    for line in (_strip_comment(raw) for raw in text.splitlines()):
-        lead = len(line) - len(line.lstrip())
-        if line.strip() and lead == 0:
-            inside = line == "jobs:"
-        elif line.strip() and inside:
-            indent = lead if indent is None else indent
-            if lead == indent and line.endswith(":"):
-                out.append(line.strip()[:-1].strip().strip("\"'"))
+    indent = None
+    for lead, line in top_level_block(text, "jobs", _strip_comment):
+        indent = lead if indent is None else indent
+        if lead == indent and line.endswith(":"):
+            out.append(line.strip()[:-1].strip().strip("\"'"))
     return out
 
 

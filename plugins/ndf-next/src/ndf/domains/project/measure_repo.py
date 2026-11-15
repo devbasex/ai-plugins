@@ -311,17 +311,23 @@ def measure_languages(tree: Tree, deps: dict[str, dict[str, str]]) -> dict[str, 
     return measured(out)
 
 
-def _services_block_lines(text: str) -> Iterator[tuple[int, str]]:
-    """トップレベルの `services:` の中の行を (字下げ, 行) で返す（空行とコメントは除く）。"""
+def top_level_block(text: str, key: str, strip: Callable[[str], str]) -> Iterator[tuple[int, str]]:
+    """YAML を読まずに字下げで、トップレベルの `<key>:` の中の行を (字下げ, 行) で返す。各行へ先に `strip`（コメントの
+    落とし方）を当て、空になった行は飛ばす。"""
     inside = False
-    for line in text.splitlines():
-        if not line.strip() or line.lstrip().startswith("#"):
+    for line in (strip(raw) for raw in text.splitlines()):
+        if not line.strip():
             continue
         lead = len(line) - len(line.lstrip())
         if lead == 0:
-            inside = line.rstrip() == "services:"
+            inside = line.rstrip() == f"{key}:"
         elif inside:
             yield lead, line
+
+
+def _drop_comment_line(line: str) -> str:
+    """行頭のコメントの行を空にする（行末のコメントは残す）。"""
+    return "" if line.lstrip().startswith("#") else line
 
 
 def compose_services(text: str) -> list[tuple[str, str]]:
@@ -329,7 +335,7 @@ def compose_services(text: str) -> list[tuple[str, str]]:
     names: list[str] = []
     images: dict[str, str] = {}
     indent: Optional[int] = None
-    for lead, line in _services_block_lines(text):
+    for lead, line in top_level_block(text, "services", _drop_comment_line):
         indent = lead if indent is None else indent
         stripped = line.strip()
         if lead == indent and stripped.endswith(":"):
