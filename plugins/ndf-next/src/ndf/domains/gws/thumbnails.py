@@ -32,6 +32,12 @@ DEFAULT_SIZE = "LARGE"
 CURL = "curl"
 # curl が --max-time に当たったときの終了コード
 CURL_TIMEOUT_EXIT = 28
+# 項目の result の値（結果のスキーマ gws.result の items[].result の説明に並ぶ値）
+ITEM_SAVED = "saved"
+ITEM_UNAUTHENTICATED = "unauthenticated"
+ITEM_GWS_FAILED = "gws-failed"
+ITEM_UNREADABLE = "unreadable"
+ITEM_DOWNLOAD_FAILED = "download-failed"
 
 
 @dataclass(frozen=True)
@@ -62,7 +68,7 @@ def run(tool: str, presentation_id: str, out_dir: str, size: str) -> Outcome:
             tool,
             "gws が未認証。利用者に `gws auth login` を頼み、終えたら routes の retry を打つ",
             ("gws", "thumbnails", presentation_id, out_dir, "--size", size),
-            items=[{"name": login.what, "result": "unauthenticated", "detail": login.detail}],
+            items=[{"name": login.what, "result": ITEM_UNAUTHENTICATED, "detail": login.detail}],
         )
     metrics = {"pages": len(items), "size": size, "out_dir": str(out)}
     done = result.result(tool, result.OK, f"{len(items)} ページのサムネイルを保存した", items=items, metrics=metrics)
@@ -89,7 +95,7 @@ def _save_all(deck: _Deck, out: Path) -> list[dict[str, str]]:
     items: list[dict[str, str]] = []
     for no, oid in enumerate(_page_ids(deck), start=1):
         dest = _thumbnail(deck, no, oid, out)
-        items.append({"name": f"p{no}", "result": "saved", "objectId": oid, "detail": str(dest)})
+        items.append({"name": f"p{no}", "result": ITEM_SAVED, "objectId": oid, "detail": str(dest)})
     return items
 
 
@@ -103,13 +109,13 @@ def _gws(gws: str, args: Sequence[str], what: str) -> Any:
         raise GwsStop(
             "unknown",
             f"{what}: gws が終了コード {done.returncode} で終わった",
-            items=[{"name": what, "result": "gws-failed", "detail": out}],
+            items=[{"name": what, "result": ITEM_GWS_FAILED, "detail": out}],
         )
     try:
         return json.loads(done.stdout)
     except json.JSONDecodeError as exc:
         raise GwsStop(
-            "invalid", f"{what}: gws の応答が JSON でない", items=[{"name": what, "result": "unreadable", "detail": out}]
+            "invalid", f"{what}: gws の応答が JSON でない", items=[{"name": what, "result": ITEM_UNREADABLE, "detail": out}]
         ) from exc
 
 
@@ -160,5 +166,5 @@ def _download_thumbnail(url: str, dest: Path, what: str) -> None:
         raise GwsStop(
             "unknown",
             f"{what}: 画像を取れない（curl の終了コード {done.returncode}）",
-            items=[{"name": what, "result": "download-failed", "detail": rd.tail(done.stderr)}],
+            items=[{"name": what, "result": ITEM_DOWNLOAD_FAILED, "detail": rd.tail(done.stderr)}],
         )
