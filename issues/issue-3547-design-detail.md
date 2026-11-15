@@ -107,8 +107,8 @@ docs/glossary/glossary.json, docs/glossary.md  （リポジトリの根から）
 | `gws.cli._thumbnails` | `src/ndf/domains/gws/cli.py` | 新設 | `(args: argparse.Namespace) -> tuple[dict[str, Any], int]` | `thumbnails.run(TOOL, args.presentation_id, args.out_dir, args.size)` を呼ぶ（副作用は `thumbnails.run` が持つ） | 無し | `thumbnails.run` の戻り値をそのまま返す | 無し |
 | `gws.cli._emit_stop` | `src/ndf/domains/gws/cli.py` | 新設 | `(stop: GwsStop) -> int` | 止まる理由を `stopped` の結果 JSON にして出し、種類の終了コードを返す | 無し | 戻り値は `cause.kind` の終了コード（1・2・3） | 標準出力への書き出し |
 
-- `_gws_check` の引数 `limit` の既定値は文字列のまま置く。records の側（`ndf records gws-check`）が今の上限の名前を引数なしで使い続けるためである
-- `check._report` の `summary` は、未認証で `client_config_exists` が偽のとき「`gws auth login` の前に `gws auth setup` か OAuth クライアントの用意が要る」を持つ（設計文書の決定 10）
+- `records.gws.auth_status` の引数 `limit` の既定値は文字列のまま置く。records の側（`ndf records gws-check`）が今の上限の名前を引数なしで使い続けるためである
+- `check._report` の `summary` は、未認証で `client_config_exists` が偽のときに案内を持つ（設計文書の決定 10）。案内は「`gws auth login` の前に `gws auth setup` か OAuth クライアントの用意が要る」である
 
 ## 異常系の処理
 

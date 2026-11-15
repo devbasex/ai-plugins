@@ -2,8 +2,8 @@
 
 ## 目的
 
-- **今どうなっているか**: 新しい NDF（`plugins/ndf-next/`）の google-workspace の Skill 本文は、gws（Google Workspace CLI）の確認と Google Slides のサムネイルの保存を、今の NDF のスクリプト（`gws-check.py`・`slides-thumbnails.py`）の名前のまま指している。新しい NDF にはそのスクリプトも副命令も無く、入れ替えた後は Skill の流れの手順 1・2 とサムネイルの操作が打てない
-- **誰に効くか**: google-workspace の Skill で Google Drive・Docs・Slides を読み書きする利用者と、入れ替え（#3304）の前に機能の対応表を確かめる試走（#3411）
+- **今どうなっているか**: 新しい NDF（`plugins/ndf-next/`）の google-workspace の Skill 本文は、2 つの操作を今の NDF のスクリプトの名前のまま指している。gws（Google Workspace CLI）の確認（`gws-check.py`）と、Google Slides のサムネイルの保存（`slides-thumbnails.py`）である。新しい NDF にはそのスクリプトも副命令も無く、入れ替えた後は Skill の流れの手順 1・2 とサムネイルの操作が打てない
+- **誰に効くか**: google-workspace の Skill で Google Drive・Docs・Slides を読み書きする利用者。あわせて、入れ替え（#3304）の前に機能の対応表を確かめる試走（#3411）
 - **変えると何が成り立つか**: 新しいエントリポイントの `ndf gws check` と `ndf gws thumbnails` が今のスクリプトと同じ判定・同じ保存の結果を、新しい結果の契約で返す。Skill 本文は今のスクリプトのパスを 1 つも指さずに、確かめる → 同意のうえ入れる → 認証を案内する → 操作する の流れを通せる
 
 ## 適用範囲
@@ -20,7 +20,7 @@
 | 新しい NDF の結果の契約（`plugins/ndf-next/contracts/schemas/result.schema.json`）と終了コードの表（`plugins/ndf-next/docs/contracts/exit-codes.md`） | 既存の形に揃える | 承認ゲートの結果は `routes` が必須で、キーは答えの語彙、行き先の `argv` の先頭は `ndf`。`stopped` は `cause.kind` を持ち、終了コードは種類から決まる |
 | 「2 本を `bin/ndf` の副命令として作り直す」「結果は新しい契約の JSON」「今の `plugins/ndf/` は変えない」（#3547 の本文の「やること」と「進め方の決まり」） | 起票者の文 | 利用者の指示の原文ではない。レーン lrebuild の conductor と並列の計画 p6 のオーガナイザーが書いた |
 
-要求と受け入れ条件は #3547 の本文にある（コピーは [issues/issue-3547-requirements.md](issue-3547-requirements.md) ）。この文書は「どう作るか」だけを扱う。詳細設計（ファイルごとの関数と異常系）は後のステップが別のファイルに書く。
+要求と受け入れ条件は #3547 の本文にある（コピーは [issues/issue-3547-requirements.md](issue-3547-requirements.md) ）。この文書は「どう作るか」だけを扱う。詳細設計（ファイルごとの関数と異常系）は [issues/issue-3547-design-detail.md](issue-3547-design-detail.md) にある。
 
 用語の対応（説明文は左の語で書く）:
 
@@ -102,7 +102,10 @@
 
 ## 外部の調査
 
-省く: 判定・呼ぶ外部のコマンド（gws・npm・curl）・承認資料の中身は確定仕様（gws 0.22.5 の実測を含む）のまま移し、形は新しい NDF の結果の契約と副命令の仕組み（プロジェクトの中の取り決め）だけで決まるため。既存の部品の使い方を変えずに呼ぶ場所を増やす変更に当たる
+省く: 既存の部品の使い方を変えずに呼ぶ場所を増やす変更に当たるため。
+
+- 判定・呼ぶ外部のコマンド（gws・npm・curl）・承認資料の中身は、確定仕様（gws 0.22.5 の実測を含む）のまま移す
+- 形は、新しい NDF の結果の契約と副命令の仕組み（プロジェクトの中の取り決め）だけで決まる
 
 ## 機能一覧
 
@@ -139,7 +142,7 @@
 
 ### 要求の触る場所の外へ広げるもの
 
-要求の「進め方の決まり」（S9）が挙げる触る場所は `src/ndf/domains/gws/`・`tests/domains/gws/`・Skill 本文・機能の対応表で、副命令の登録とスキーマの置き場を設計に委ねている。そのほかに触るものと理由は次のとおりである。
+要求の「進め方の決まり」（S9）が挙げる触る場所は `src/ndf/domains/gws/`・`tests/domains/gws/`・Skill 本文・機能の対応表である。副命令の登録とスキーマの置き場は設計に委ねている。そのほかに触るものと理由は次のとおりである。
 
 | 触るもの | 理由 | 要求との関係 |
 | --- | --- | --- |
@@ -181,7 +184,7 @@ graph TD
 | `ndf gws check` | `--install`（boolean・任意）: 導入の同意の印。gws が無ければ npm で入れる |
 | `ndf gws thumbnails` | `presentation_id`（string・必須・位置）: プレゼンテーションの ID<br>`out_dir`（string・必須・位置）: 出力のディレクトリ（無ければ作る）<br>`--size`（string・任意・既定 `LARGE`）: `SMALL`・`MEDIUM`・`LARGE` のどれか |
 
-- 引数の誤り（足りない・知らない引数・3 つ以外の大きさ・下位の命令が無い）は、`ndf gws` の受付の argparse が終了コード 2 で止め、副命令の表の側（`ndf.cli`）が `stopped`（`invalid`）の結果 JSON を出す（受け入れ条件 9）
+- 引数の誤り（足りない・知らない引数・3 つ以外の大きさ・下位の命令が無い）は、`ndf gws` の受付の argparse が終了コード 2 で止める。結果 JSON は副命令の表の側（`ndf.cli`）が `stopped`（`invalid`）で出す（受け入れ条件 9）
 - 結果 JSON は標準出力の最後の 1 行に出す。`tool` は `gws`
 
 ### gws の確認の結果
@@ -220,7 +223,7 @@ graph TD
 
 ### 結果のスキーマ
 
-`contracts/schemas/io/gws.result.schema.json` は結果の契約を `allOf` で引き、`tool` を `gws` に固定し、`metrics` と `items` の要素を閉じる（載せた項目のほかを持つと通らない）。
+`contracts/schemas/io/gws.result.schema.json` は結果の契約を `allOf` で引き、`tool` を `gws` に固定する。`metrics` と `items` の要素は閉じる（載せた項目のほかを持つと通らない）。
 
 | 置き場 | 項目 |
 | --- | --- |
@@ -229,7 +232,11 @@ graph TD
 
 ### 互換性
 
-新しい NDF はまだ利用者へ配っていないため、壊れる呼び出し元は無い。今のスクリプトのパスで呼ぶ互換の経路は持たない（前提 3）。結果の `tool`（今は `google-workspace`・`slides-thumbnails`）と `next` の文は新しい契約の形に変わり、判定・終了コード・`metrics.state`・保存するファイルは変わらない。
+新しい NDF はまだ利用者へ配っていないため、壊れる呼び出し元は無い。今のスクリプトのパスで呼ぶ互換の経路は持たない（前提 3）。
+
+| 新しい契約の形に変わるもの | 変わらないもの |
+| --- | --- |
+| 結果の `tool`（今は `google-workspace`・`slides-thumbnails`）・`next` の文 | 判定・終了コード・`metrics.state`・保存するファイル |
 
 ## 処理の流れ
 
@@ -303,7 +310,7 @@ flowchart TD
 
 ### 決定 3: `gws auth status` を読む処理を 2 か所に持たないよう、records の gws の部品を使い、足すだけの変更で 3 つを渡せるようにする
 
-新しい NDF には `ndf records gws-check` のための認証の状態の読み取り（`records.gws.auth_status`）が既にあり、起動・終了コード・JSON・3 つのキーの確かめ方が今の `gws-check.py` と同じである。2 つ目を作ると、同じ確かめ方と 3 つのキーの集まりを 2 か所に持ち、事実の重複の規則（`const-fact`）が 3 つのキーの集まりを落とす。部品には次の 3 つを足す。
+新しい NDF には `ndf records gws-check` のための認証の状態の読み取り（`records.gws.auth_status`）が既にある。起動・終了コード・JSON・3 つのキーの確かめ方は、今の `gws-check.py` と同じである。2 つ目を作ると、同じ確かめ方と 3 つのキーの集まりを 2 か所に持ち、事実の重複の規則（`const-fact`）が 3 つのキーの集まりを落とす。部品には次の 3 つを足す。
 
 - 読めないときの誤り（`GwsError`）に gws の標準エラーを持たせる。確定仕様の失敗の形（`items` に標準エラーの末尾）を保つため
 - 3 つのキーの定数を公開の名前にする。gws の確認が `metrics` へ写すキーを同じ定数から引くため
@@ -324,7 +331,9 @@ flowchart TD
 
 ### 決定 4: 判定を変えないため、認証済みの判定は今の `gws-check.py` と同じ関数を新しく置き、2 つの副命令で使う
 
-認証の判定（`auth_decide`）は「`credential_source` が `none` でなければ認証済み」の 1 つで、gws の確認とサムネイルの保存の両方が使う（I10）。records の gws の部品の判定（`decide`）は、`credential_source` が `client_secret.json` のときも未認証とし、環境変数のトークンがあれば認証済みとする別の規則で、受け入れ条件 1・2 と合わない。判定の変更はこの課題の範囲の外であるため、records の判定は使わない。2 つの規則のどちらを正とし、いつ 1 つにまとめるかは、この課題では決めない。決めるには `client_secret.json` だけを置いた状態の実測が要り、まとめると `ndf records gws-check` の判定が変わる（M7 の範囲）。後続の Issue として起票し、「人へ残す判断」に挙げる。
+認証の判定（`auth_decide`）は「`credential_source` が `none` でなければ認証済み」の 1 つで、gws の確認とサムネイルの保存の両方が使う（I10）。records の gws の部品の判定（`decide`）は別の規則で、受け入れ条件 1・2 と合わない。`credential_source` が `client_secret.json` のときも未認証とし、環境変数のトークンがあれば認証済みとする。判定の変更はこの課題の範囲の外であるため、records の判定は使わない。
+
+2 つの規則のどちらを正とし、いつ 1 つにまとめるかは、この課題では決めない。決めるには `client_secret.json` だけを置いた状態の実測が要り、まとめると `ndf records gws-check` の判定が変わる（M7 の範囲）。後続の Issue として起票し、「人へ残す判断」に挙げる。
 
 `_decide.py` で終わる名前にし、副作用のある部品を読まない（`decide-pure` の規則）。出力の末尾の切り出しも純粋な処理で、同じモジュールに置く。
 
@@ -367,7 +376,19 @@ flowchart TD
 
 ### 決定 7: 承認資料をリポジトリの外でも書けるよう、状態の置き場の下の置き場 `gws` に、書くたびに置き換える 1 ファイルで書く
 
-gws の確認はリポジトリの外でも打たれるため、置き場はリポジトリでなく状態の置き場（`identity` の `state_dir`）の下にする。置き場の表に行 `gws`（起点 `state`・パス `gws`）、ファイルの表に行 `gws-install-material`（パス `install.md`・種類 `document`・書き手 S1d・消す時点 `replaced`）を足す。同じ名前に書き直すので、打つたびにファイルが増えない。中身は今の承認資料と同じ 4 つの節（対象を開くためのもの・承認の判断に使うもの・同意を求めること・戻し方）と項目（取得元・打つコマンド・入る先・Google の公式サポート外で版は 0.x・戻し方 `npm uninstall -g @googleworkspace/cli`）である。
+gws の確認はリポジトリの外でも打たれるため、置き場はリポジトリでなく状態の置き場（`identity` の `state_dir`）の下にする。次の 2 行を足す。同じ名前に書き直すので、打つたびにファイルが増えない。
+
+| 表 | 足す行 | 値 |
+| --- | --- | --- |
+| 置き場の表 | `gws` | 起点 `state`・パス `gws` |
+| ファイルの表 | `gws-install-material` | パス `install.md`・種類 `document`・書き手 S1d・消す時点 `replaced` |
+
+中身は今の承認資料と同じである。
+
+| 並び | 中身 |
+| --- | --- |
+| 4 つの節 | 対象を開くためのもの・承認の判断に使うもの・同意を求めること・戻し方 |
+| 項目 | 取得元・打つコマンド・入る先・Google の公式サポート外で版は 0.x・戻し方 `npm uninstall -g @googleworkspace/cli` |
 
 採らなかった案: 一時ディレクトリ（今の `NDF_PRESENTATION_DIR` か `/tmp/ndf`）に書く案。新しい NDF の置き場の表に無い置き場になり、ファイルの契約のページに載らない。
 
