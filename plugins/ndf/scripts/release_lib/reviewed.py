@@ -57,6 +57,18 @@ def refresh_release_pr_body(root, pr, body: Callable[[], str]):
         raise StepError(f"gh pr edit #{pr['number']}（本文の書き直し）が失敗: {p.stderr.strip()[:300]}")
 
 
+def ensure_no_port_line(root, pr):
+    """使い回す PR（前の版のスクリプトが作った -sync の PR など）の本文に NO_PORT_LINE が無ければ、本文の末尾へ足して pr を返す。
+    本文のほかの行（解いたパスなど）は残す。本文の編集（edited）で ndf-next の port 検査が打ち直される（#3343）。"""
+    n = str(pr["number"]) if pr else ""
+    body = ((gh_json(root, ["pr", "view", n, "--json", "body"], f"gh pr view #{n}") or {}).get("body") or "") if pr else NO_PORT_LINE
+    if NO_PORT_LINE not in body:
+        p = gh_parts.gh(["pr", "edit", n, "--body-file", "-"], f"{body.rstrip()}\n\n{NO_PORT_LINE}\n", cwd=root)
+        if p.returncode != 0:
+            raise StepError(f"gh pr edit #{n}（本文の書き直し）が失敗: {p.stderr.strip()[:300]}")
+    return pr
+
+
 def dev_workflow_of(root) -> str | None:
     """開発版の workflow のファイル名（`.ndf/supervise.json` の release.dev_workflow）。無ければ None（手元でマージする）。"""
     got = (delivery.load_delivery(root).release or {}).get("dev_workflow")
@@ -204,14 +216,14 @@ def _open_prod_pr(ctx: ReleaseCtx, items, metrics, ops: ProdOps, case=None) -> i
             items.append(row)
         ops.published(root, a, plugin, prod, done["number"], merge, items, metrics, back=admin_back())
     if done:
-        return done["number"]
+        return ensure_no_port_line(root, done)["number"]  # 前の版が作った本番の PR は port 検査の印を持たない
     if git(root, "rev-parse", "-q", "--verify", f"refs/tags/{release_tag(plugin, ver)}", check=False).returncode == 0:
         raise StepError(f"タグ {release_tag(plugin, ver)} は既にある")
     release_pr, merged_pr, _ = ops.merge_release_pr(root, a, plugin, plugins, branch, base)
     metrics.update({"release_pr": release_pr, "sync_pr": merged_pr if merged_pr != release_pr else None})
     repo_lib.restore_branch(root, branch, run_git=git)  # 開発版の PR のマージで消えた版上げのブランチを戻す
     title = f"Release: {plugin} v{ver} を {prod} へ"
-    body = f"{plugin} v{ver} を {prod} へ出す（開発版の PR #{release_pr}）。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+    body = f"{plugin} v{ver} を {prod} へ出す（開発版の PR #{release_pr}）。\n\n{NO_PORT_LINE}\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
     return ops.create_pr(root, prod, branch, title, body)
 
 
