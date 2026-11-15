@@ -24,8 +24,13 @@ def isolate_git(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv(key, value)
 
 
-def sh(cwd: Path, *args: str, strip: bool = False) -> str:
+IDENTITY = ("-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false")
+
+
+def sh(cwd: Path, *args: str, strip: bool = False, identity: bool = False) -> str:
     """git を打って標準出力を返す（テストの準備だけに使う）。"""
     # strip なら前後の空白を除く（_drive_world の sh だけが除いていた）
-    out = subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout
+    # identity なら作者を固定し署名しない（-c で前へ足す。環境の設定に依らずにコミットできる）
+    pre = IDENTITY if identity else ()
+    out = subprocess.run(["git", *pre, *args], cwd=cwd, check=True, capture_output=True, text=True).stdout
     return out.strip() if strip else out

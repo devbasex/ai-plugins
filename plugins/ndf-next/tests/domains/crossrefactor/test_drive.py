@@ -20,22 +20,19 @@ from ndf.domains.crossrefactor import drive, final_gate, store
 
 from ._drive_world import (
     BRANCH,
+    TESTS,
     FakeAgents,
     FakeHub,
     Watched,
     World,
+    base_acts,
     commit_at,
     commit_in,
     fake_ci,
     make_world,
-    no_plan,
     ports,
-    propose_area,
     sh,
 )
-
-TESTS = {"tests/test_geo.py": "from src.geo import area\n\n\ndef test_area():\n    assert area(2, 3) == 6\n"}
-NEW = {"src/geo.py": "def area(w, h):\n    product = w * h\n    return product\n\n\ndef untouched():\n    return 0\n"}
 
 
 @pytest.fixture
@@ -44,14 +41,7 @@ def world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> World:
 
 
 def _acts(**over):
-    acts = {
-        "propose": propose_area,
-        "plan": no_plan,
-        "add-tests": commit_at(TESTS, "テストを足す", {"tests": ["tests/test_geo.py"]}),
-        "implement": commit_at(NEW, "式に名前を付ける"),
-        "fix": no_plan,
-        "final-fix": no_plan,
-    }
+    acts = base_acts()
     acts.update(over)
     return acts
 

@@ -6,6 +6,7 @@ import json
 import sys
 from pathlib import Path
 
+import git_sandbox
 import pytest
 
 from ndf.core.plan import model, queue_run
@@ -52,7 +53,7 @@ def test_a_stage_without_the_gate_role_waits_for_the_gate(repo, tmp_path):
 def test_a_queue_started_in_a_removed_worktree_runs_the_next_stage(repo, tmp_path):
     """#1886 の再現: 作業場所から起動したキューで、前の段のプランが作業場所を後片付けで消しても、--then の段が流れる。"""
     wt = tmp_path / "wt"
-    H.git(repo, "worktree", "add", "-q", str(wt), "-b", "feat")
+    git_sandbox.sh(repo, "worktree", "add", "-q", str(wt), "-b", "feat", identity=True)
     remove = {"id": "cleanup", "run": ["git", "-C", str(repo), "worktree", "remove", "--force", str(wt)], "in": "repo"}
     first = H.write_plan(repo, "merge", [remove], touches=["a.py"])
     second = H.write_plan(repo, "close", [H.count_step("s", tmp_path / "close")], touches=["b.py"])

@@ -6,6 +6,7 @@ import os
 import subprocess
 from pathlib import Path
 
+import git_sandbox
 import pytest
 
 from ndf.adapters import git
@@ -84,35 +85,28 @@ def test_parse_shortstat_sums_insertions_and_deletions() -> None:
     assert git.parse_shortstat("") == 0
 
 
-def _git(repo: Path, *args: str) -> str:
-    env = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com"}
-    cmd = ["git", "-C", str(repo), "-c", "commit.gpgsign=false", *args]
-    done = subprocess.run(cmd, capture_output=True, text=True, check=True, env={**os.environ, **env})
-    return done.stdout.strip()
-
-
 def _init_repo(tmp_path: Path, files: dict[str, str]) -> tuple[Path, str]:
     """main に `files` を書いた base のコミットを 1 つ持つリポジトリを作る。リポジトリのパスと base の SHA を返す。"""
     repo = tmp_path / "repo"
     repo.mkdir()
-    _git(repo, "init", "-q", "-b", "main")
+    git_sandbox.sh(repo, "init", "-q", "-b", "main", identity=True, strip=True)
     for name, text in files.items():
         (repo / name).write_text(text)
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-q", "-m", "base")
-    return repo, _git(repo, "rev-parse", "HEAD")
+    git_sandbox.sh(repo, "add", "-A", identity=True, strip=True)
+    git_sandbox.sh(repo, "commit", "-q", "-m", "base", identity=True, strip=True)
+    return repo, git_sandbox.sh(repo, "rev-parse", "HEAD", identity=True, strip=True)
 
 
 def _merge_branch(repo: Path, branch: str, files: dict[str, str]) -> str:
     """`branch` を作ってファイルを書き、main へ --no-ff で取り込む。取り込みのコミットの SHA を返す。"""
-    _git(repo, "checkout", "-q", "-b", branch, "main")
+    git_sandbox.sh(repo, "checkout", "-q", "-b", branch, "main", identity=True, strip=True)
     for name, text in files.items():
         (repo / name).write_text(text)
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-q", "-m", branch)
-    _git(repo, "checkout", "-q", "main")
-    _git(repo, "merge", "-q", "--no-ff", "-m", f"merge {branch}", branch)
-    return _git(repo, "rev-parse", "HEAD")
+    git_sandbox.sh(repo, "add", "-A", identity=True, strip=True)
+    git_sandbox.sh(repo, "commit", "-q", "-m", branch, identity=True, strip=True)
+    git_sandbox.sh(repo, "checkout", "-q", "main", identity=True, strip=True)
+    git_sandbox.sh(repo, "merge", "-q", "--no-ff", "-m", f"merge {branch}", branch, identity=True, strip=True)
+    return git_sandbox.sh(repo, "rev-parse", "HEAD", identity=True, strip=True)
 
 
 @pytest.mark.parametrize(
@@ -145,7 +139,7 @@ def test_checkout_detached_does_not_read_a_dash_ref_as_an_option(tmp_path: Path)
     (repo / "a.txt").write_text("手元の変更\n")
     assert git.Git(cwd=repo).checkout_detached("--force").returncode != 0
     assert (repo / "a.txt").read_text() == "手元の変更\n"
-    assert _git(repo, "symbolic-ref", "HEAD") == "refs/heads/main"
+    assert git_sandbox.sh(repo, "symbolic-ref", "HEAD", identity=True, strip=True) == "refs/heads/main"
 
 
 def test_checkout_detached_passes_only_the_resolved_sha(tmp_path: Path) -> None:
@@ -153,7 +147,7 @@ def test_checkout_detached_passes_only_the_resolved_sha(tmp_path: Path) -> None:
     repo, base = _init_repo(tmp_path, {"a.txt": "a\n"})
     done = git.Git(cwd=repo).checkout_detached("main")
     assert done.returncode == 0, done.stderr
-    assert _git(repo, "rev-parse", "HEAD") == base
+    assert git_sandbox.sh(repo, "rev-parse", "HEAD", identity=True, strip=True) == base
 
 
 def test_merge_ff_puts_the_ref_after_end_of_options() -> None:
@@ -307,7 +301,7 @@ def test_run_git_raises_when_git_cannot_start(monkeypatch: pytest.MonkeyPatch) -
 
 def test_common_dir_is_real_main_git_dir_from_main_and_linked_worktree(tmp_path: Path) -> None:
     path, _ = _init_repo(tmp_path, {"a": "a\n"})
-    _git(path, "worktree", "add", "-q", "-b", "side", str(tmp_path / "side"))
+    git_sandbox.sh(path, "worktree", "add", "-q", "-b", "side", str(tmp_path / "side"), identity=True, strip=True)
     link = tmp_path / "link"
     link.symlink_to(path)
     want = Path(os.path.realpath(path / ".git"))
@@ -327,12 +321,12 @@ def test_changed_paths_reads_status_with_renames_and_untracked(tmp_path: Path) -
 
     repo, _ = _init_repo(tmp_path, {"keep.txt": "a\n", "mod.txt": "x\n", "old.txt": "old\n" * 20, "del.txt": "d\n"})
     (repo / "mod.txt").write_text("x\ny\n")
-    _git(repo, "mv", "old.txt", "新 名.txt")
+    git_sandbox.sh(repo, "mv", "old.txt", "新 名.txt", identity=True, strip=True)
     (repo / "del.txt").unlink()
     (repo / "u" / "v").mkdir(parents=True)
     (repo / "u" / "v" / "n.txt").write_text("n\n")
     (repo / "staged.txt").write_text("s\n")
-    _git(repo, "add", "staged.txt")
+    git_sandbox.sh(repo, "add", "staged.txt", identity=True, strip=True)
 
     # 改名は新しいパスの後に変更前のパス。追跡していないディレクトリは中のファイルまで
     assert localenv.changed_paths(repo) == ["del.txt", "mod.txt", "staged.txt", "新 名.txt", "old.txt", "u/v/n.txt"]
