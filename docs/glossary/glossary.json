@@ -7894,6 +7894,24 @@
       "context": "ndf-release",
       "meaning": "リリースの単位のバージョンを持つファイルと、その読み書きのアダプタ（`plugin`・`json` など）。`.ndf/release.json` の `version_store` で選ぶ",
       "pending_source": "issues/issue-3572-design.md"
+    },
+    {
+      "term": "GitHub flow",
+      "context": "ndf-release",
+      "meaning": "スプリントブランチを本番ブランチ（main）から切り、PR で main へマージし、マージをリリースとするブランチ戦略。設定の値と取り込み方の表の行の名前は `trunk`",
+      "pending_source": "issues/issue-3641-requirements.md"
+    },
+    {
+      "term": "同期の PR",
+      "context": "ndf-release",
+      "meaning": "今の NDF の行 `whole`・`selected` で、本番のリリースの後に main の変更をベースブランチ（develop）へ戻す PR（`release/v<版>-sync`）。戻すマージを運ぶ。GitHub flow の行では作らない",
+      "pending_source": "issues/issue-3641-requirements.md"
+    },
+    {
+      "term": "切り替えの手順",
+      "context": "ndf-release",
+      "meaning": "リポジトリのブランチ戦略を、develop と main の運用から GitHub flow へ切り替える一度きりの手順。利用者が新しい版へ移るときの「移行の手順」とは別",
+      "pending_source": "issues/issue-3641-requirements.md"
     }
   ]
 }

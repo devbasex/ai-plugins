@@ -1065,6 +1065,9 @@ release が走らせるリリースの種別・リリースコマンド・公開
 | バージョン上げ | — | main へのマージの後に CD がバージョンを上げること。書き換えるファイルと流すコマンドは `.ndf/release.json` の手順で決める | — | — | — |
 | キューへの投入 | — | 承認した head を `expectedHeadOid` に渡して、本番の PR を merge queue へ入れること（GraphQL の `enqueuePullRequest`）。PR の head が違えば GitHub が断る | — | — | — |
 | バージョンの置き場 | — | リリースの単位のバージョンを持つファイルと、その読み書きのアダプタ（`plugin`・`json` など）。`.ndf/release.json` の `version_store` で選ぶ | — | — | — |
+| GitHub flow | — | スプリントブランチを本番ブランチ（main）から切り、PR で main へマージし、マージをリリースとするブランチ戦略。設定の値と取り込み方の表の行の名前は `trunk` | — | — | — |
+| 同期の PR | — | 今の NDF の行 `whole`・`selected` で、本番のリリースの後に main の変更をベースブランチ（develop）へ戻す PR（`release/v<版>-sync`）。戻すマージを運ぶ。GitHub flow の行では作らない | — | — | — |
+| 切り替えの手順 | — | リポジトリのブランチ戦略を、develop と main の運用から GitHub flow へ切り替える一度きりの手順。利用者が新しい版へ移るときの「移行の手順」とは別 | — | — | — |
 
 ## NDF の指示書チェック（`ndf-instructions`）
 
