@@ -18,7 +18,9 @@ from pathlib import Path
 from typing import NamedTuple
 
 SETTINGS_PATH = ".ndf/design.json"
-RULES = ("repo_scope_missing", "repo_loss_unrouted")
+SCOPE_MISSING = "repo_scope_missing"
+LOSS_UNROUTED = "repo_loss_unrouted"
+RULES = (SCOPE_MISSING, LOSS_UNROUTED)
 SCOPE_TITLE = "適用範囲"
 BEHAVIOR_TITLE = "代表のリポジトリでの振る舞い"
 OWN_SUFFIX = "だけの事情"
@@ -218,9 +220,9 @@ def check_repos(path: str, text: str, settings: RepoSettings, left_ids: set[str]
         return {"name": f"{path}:{i + 1}", "rule": rule, "text": f"{reason}: {shown}" if shown else reason}
 
     problems, table = _scope_problems(text, settings)
-    found = [(i, item(i, RULES[0], why)) for i, why in problems]
+    found = [(i, item(i, SCOPE_MISSING, why)) for i, why in problems]
     if table is not None and settings.redline not in left_ids:
         lost, _ = _loss_rows(table)
         why = f"扱えなくなることがあるのに、人へ残す判断に {settings.redline} の行が無い"
-        found += [(i, item(i, RULES[1], why)) for i in lost]
+        found += [(i, item(i, LOSS_UNROUTED, why)) for i in lost]
     return [it for _, it in sorted(found, key=lambda x: x[0])]
