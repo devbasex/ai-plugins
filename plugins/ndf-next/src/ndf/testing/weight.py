@@ -155,10 +155,7 @@ def _classify_words(words: list[str], suites: list[Mapping[str, object]]) -> str
     if any(_matches_declared(words, s) for s in suites):
         return WHOLE
     for suite in suites:
-        runner = suite.get("runner")
-        if not isinstance(runner, str) or not runner:
-            continue
-        kind = _classify_runner(words, runner)
+        kind = _classify_runner(words, suite)
         if kind:
             return kind
     return None
@@ -179,15 +176,28 @@ def _matches_declared(target: str | list[str], suite: Mapping[str, object]) -> b
     return bool(commands) and target == commands[-1]
 
 
-def _classify_runner(words: list[str], runner: str) -> str | None:
-    """`runner` がコマンドの位置にあれば、並列の指定で SCOPE、対象が全体なら WHOLE。どちらでもなければ None。"""
-    pos = runner_position(words, runner)
-    if pos is None:
+def _runner_args(words: Sequence[str], suite: Mapping[str, object]) -> list[str] | None:
+    """suite の `runner`（空でない文字列）がコマンドの位置にあれば、その後ろの語。無ければ None。"""
+    runner = suite.get("runner")
+    if not isinstance(runner, str) or not runner:
         return None
-    args = words[pos + 1 :]
+    pos = runner_position(words, runner)
+    return None if pos is None else list(words[pos + 1 :])
+
+
+def _targets_whole(args: Sequence[str]) -> bool:
+    """対象が全体（無いか `.` だけ）か。"""
+    return all(t == "." for t in _targets(args))
+
+
+def _classify_runner(words: list[str], suite: Mapping[str, object]) -> str | None:
+    """`runner` がコマンドの位置にあれば、並列の指定で SCOPE、対象が全体なら WHOLE。どちらでもなければ None。"""
+    args = _runner_args(words, suite)
+    if args is None:
+        return None
     if _has_parallel(args):
         return SCOPE
-    if all(t == "." for t in _targets(args)):
+    if _targets_whole(args):
         return WHOLE
     return None
 
@@ -199,14 +209,11 @@ def is_whole(words: Sequence[str], suites: Iterable[Mapping[str, object]]) -> bo
     `scope_command` の `{paths}` へファイルを入れた範囲の実行は、対象がファイルなので偽になる。
     """
     target = list(words)
-    for suite in (s for s in suites if is_test_suite(s)):
-        if _matches_declared(target, suite):
-            return True
-        runner = suite.get("runner")
-        pos = runner_position(target, runner) if isinstance(runner, str) and runner else None
-        if pos is not None and all(t == "." for t in _targets(target[pos + 1 :])):
-            return True
-    return False
+    return any(
+        _matches_declared(target, s) or ((args := _runner_args(target, s)) is not None and _targets_whole(args))
+        for s in suites
+        if is_test_suite(s)
+    )
 
 
 def is_heavy(command: str | Sequence[str], suites: Iterable[Mapping[str, object]]) -> bool:
