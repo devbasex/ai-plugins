@@ -498,6 +498,20 @@ def test_dev_version_without_fetch_does_not_touch_origin(tmp_path, world, monkey
     assert parallel_repo.dev_version(world.repo, fetch=False) == "10.27.7" and "fetch" not in seen
 
 
+def test_dev_version_names_an_origin_fetch_failure_apart_from_an_unreadable_version(tmp_path, world, monkeypatch):
+    """取り直しに落ちたら、版を読めないという理由ではなく git の stderr を添えた取り直せない理由で止める。"""
+    import parallel_repo
+
+    (world.repo / ".ndf" / "supervise.json").write_text(json.dumps({"release": {"plugin": "ndf"}}))
+    world.publish("10.27.6", "develop", "main", tag=True)
+    real = rv._git_run
+    failed = subprocess.CompletedProcess(["git", "fetch"], 128, "", "fatal: unable to access origin")
+    monkeypatch.setattr(rv, "_git_run", lambda repo, *a: failed if a[0] == "fetch" else real(repo, *a))
+    with pytest.raises(parallel_repo.OriginUnfetchable, match="origin を取り直せない: fatal: unable to access origin"):
+        parallel_repo.dev_version(world.repo)
+    assert parallel_repo.dev_version(world.repo, fetch=False) == "10.27.7"
+
+
 # ---- observe の現状固定（I-002） ----
 
 
