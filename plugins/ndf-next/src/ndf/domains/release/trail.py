@@ -66,6 +66,12 @@ def read(hub: GitHub, number: int, human_only: bool = False) -> Read:
     return Read(pull, approval_decide.judge(approval_decide.trails(comments), pull.head_sha))
 
 
+def user_judgment_at(hub: GitHub, number: int, sha: str) -> approval_decide.Judgment | None:
+    """利用者の証跡（`read` の `human_only`）の判定。判定に使った証跡が `sha` へのものでなければ None。"""
+    judged = read(hub, number, human_only=True).judgment
+    return judged if judged.trail is not None and judged.trail.sha == sha else None
+
+
 def present(hub: GitHub, number: int, material: str) -> str:
     """承認資料を提示する。提示した先端の SHA を返す。
 
@@ -130,8 +136,8 @@ def write_admin_record(hub: GitHub, number: int, sha: str) -> tuple[bool, str]:
         for c in found:
             if ADMIN_MARK in c.body and f"`{sha}`" in c.body:
                 return False, c.url
-        judged = read(hub, number, human_only=True).judgment
-        used = judged.trail.order if judged.trail is not None and judged.trail.sha == sha else None
+        judged = user_judgment_at(hub, number, sha)
+        used = judged.trail.order if judged is not None and judged.trail is not None else None
         trail_url = found[used].url if used is not None and used < len(found) else ""
         url = Publisher(hub).comment(number, render_admin_record(sha, trail_url)).url
     except (GitHubError, ValueError) as exc:

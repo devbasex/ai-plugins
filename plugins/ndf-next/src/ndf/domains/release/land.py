@@ -249,10 +249,9 @@ class Lander:
         if pull.base_ref != self.production:
             return Landed(True, None, f"#{number} は既にマージされている")
         synced = self._sync(pull)
-        if self._bypass(pull):  # 再開: 利用者の証跡がマージした先端と一致すれば、迂回でマージしたとして記録を補う（I7）
-            judged = trail.read(self.hub, number, human_only=True).judgment
-            if judged.approved and judged.trail is not None and judged.trail.sha == pull.head_sha:
-                return self._record(pull, synced)
+        # 再開: 利用者の証跡がマージした先端への承認なら、迂回でマージしたとして記録を補う（I7）
+        if self._bypass(pull) and (judged := trail.user_judgment_at(self.hub, number, pull.head_sha)) is not None and judged.approved:
+            return self._record(pull, synced)
         return synced
 
     def land(self, number: int) -> Landed:
