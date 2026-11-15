@@ -10,7 +10,8 @@ import subprocess
 from collections.abc import Sequence
 from typing import Any, Optional
 
-from ndf.contracts import exit_codes, limits
+from ndf.contracts import exit_codes, limits, result
+from ndf.domains.gws import report_decide as rd
 
 # 結果の辞書と終了コードの組
 Outcome = tuple[dict[str, Any], int]
@@ -39,6 +40,25 @@ class GwsStop(Exception):
 def unauthenticated_code() -> int:
     """gws が未認証の承認ゲートの終了コード（承認ゲートの最初の値の次。導入の同意の承認ゲートと分ける）。"""
     return exit_codes.first_code(exit_codes.GATE) + 1
+
+
+def login_request(retry: str) -> str:
+    """利用者に `gws auth login` を頼む案内の文（Claude Code とほかのランタイムでのログインの打ち方）。`retry` は終えた後に打ち直すもの。"""
+    return f"利用者に `gws auth login` を頼み（Claude Code では `! gws auth login`、ほかのランタイムでは別の端末で打つ）、終えたら {retry} を打ち直す"
+
+
+def unauthenticated_gate(
+    tool: str,
+    summary: str,
+    retry_argv: Sequence[str],
+    *,
+    metrics: Optional[dict[str, Any]] = None,
+    items: Optional[list[dict[str, str]]] = None,
+) -> Outcome:
+    """gws が未認証の承認ゲートの結果（state・routes の retry と cancel）と終了コードを組む。`retry_argv` は `ndf` の後ろの引数。"""
+    routes = {"retry": result.command(*retry_argv), "cancel": None}
+    out = result.result(tool, result.GATE, summary, items=items, metrics={"state": rd.UNAUTHENTICATED, **(metrics or {})}, routes=routes)
+    return out, unauthenticated_code()
 
 
 def call(cmd: Sequence[str], limit_name: str, what: str, *, summary: Optional[str] = None) -> subprocess.CompletedProcess[str]:

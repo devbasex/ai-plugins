@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from ndf.contracts import exit_codes, limits, result
-from ndf.domains.gws import GwsStop, Outcome, call, unauthenticated_code
+from ndf.domains.gws import GwsStop, Outcome, call, unauthenticated_gate
 from ndf.domains.gws import report_decide as rd
 from ndf.domains.records import gws as records_gws
 
@@ -61,16 +61,12 @@ def run(tool: str, presentation_id: str, out_dir: str, size: str) -> Outcome:
             _thumbnail(gws, presentation_id, oid, size, dest, no)
             items.append({"name": f"p{no}", "result": "saved", "objectId": oid, "detail": str(dest)})
     except _NeedsLogin as login:
-        routes = {"retry": result.command("gws", "thumbnails", presentation_id, out_dir, "--size", size), "cancel": None}
-        gate = result.result(
+        return unauthenticated_gate(
             tool,
-            result.GATE,
             "gws が未認証。利用者に `gws auth login` を頼み、終えたら routes の retry を打つ",
+            ("gws", "thumbnails", presentation_id, out_dir, "--size", size),
             items=[{"name": login.what, "result": "unauthenticated", "detail": login.detail}],
-            metrics={"state": rd.UNAUTHENTICATED},
-            routes=routes,
         )
-        return gate, unauthenticated_code()
     metrics = {"pages": len(ids), "size": size, "out_dir": str(out)}
     done = result.result(tool, result.OK, f"{len(ids)} ページのサムネイルを保存した", items=items, metrics=metrics)
     return done, exit_codes.first_code(result.OK)

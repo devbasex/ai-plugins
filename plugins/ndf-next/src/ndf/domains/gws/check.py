@@ -21,7 +21,7 @@ import subprocess
 from typing import Optional
 
 from ndf.contracts import exit_codes, limits, result
-from ndf.domains.gws import GwsStop, Outcome, call, material, unauthenticated_code
+from ndf.domains.gws import GwsStop, Outcome, call, login_request, material, unauthenticated_gate
 from ndf.domains.gws import report_decide as rd
 from ndf.domains.records import gws as records_gws
 
@@ -32,8 +32,8 @@ INSTALL_ARGS = ("install", "-g", PACKAGE)
 # 上限の宣言（contracts/limits.json）の名前
 CALL_LIMIT = "google-workspace.call"
 INSTALL_LIMIT = "google-workspace.install"
-# Claude Code とほかのランタイムでのログインの打ち方
-_LOGIN = "利用者に `gws auth login` を頼み（Claude Code では `! gws auth login`、ほかのランタイムでは別の端末で打つ）、終えたら `ndf gws check` を打ち直す"
+# 利用者に `gws auth login` を頼む案内の文
+_LOGIN = login_request("`ndf gws check`")
 
 
 def run(tool: str, install: bool) -> Outcome:
@@ -81,9 +81,7 @@ def _report(tool: str) -> Outcome:
             "gws はあるが未認証で、OAuth クライアントが無い。先に `gws auth setup`（gcloud が要る）か、OAuth クライアントの "
             "client_secret.json の用意を利用者に案内する。そのうえで " + _LOGIN
         )
-    routes = {"retry": result.command("gws", "check"), "cancel": None}
-    out = result.result(tool, result.GATE, summary, metrics={"state": rd.UNAUTHENTICATED, **keys}, routes=routes)
-    return out, unauthenticated_code()
+    return unauthenticated_gate(tool, summary, ("gws", "check"), metrics=keys)
 
 
 def _present(tool: str, npm: str) -> Outcome:
