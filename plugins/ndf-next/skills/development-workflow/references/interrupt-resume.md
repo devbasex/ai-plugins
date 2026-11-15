@@ -46,7 +46,7 @@ python3 "$SCRIPTS/lib/transcript_agents.py" interrupted \
 | --- | --- | --- | --- |
 | worker | supervisor（失敗の通知）。supervisor も落ちていれば、起こされた supervisor が見る | supervisor（conductor が直接起動した worker なら conductor） | supervisor が動いていれば `SendMessage`。動いていなければ conductor → supervisor → worker の順 |
 | supervisor | conductor（失敗の通知） | conductor | `SendMessage`。続けられなければ `最後に記録した工程` の頭から新しい supervisor（`subagent_type` は起動の指示の `subagent_type` の欄で選ぶ） |
-| プラン | conductor（`wait` の終わり・キューの done・進捗ログ） | conductor | 進捗ログ（`<プラン>-state/progress.jsonl`）の最後のステップの id から `supervise.py run <プラン> --from <ステップの id>`。落ちたプランごとに打ち、終わったプランは流し直さない |
+| プラン | conductor（`wait` の終わり・キューの done・進捗ログ） | conductor | 進捗ログ（`<プラン>-state/progress.jsonl`）の最後のステップの id から `ndf plan next <プラン> --from <ステップの id>`。落ちたプランごとに打ち、終わったプランは流し直さない |
 | conductor | 人か Claude Code（自動継続） | conductor 自身 | 自動継続・人の 1 通・バックグラウンドの待ちの終わり（「解除を待つ手段」） |
 
 **3 層は同じ割り当てを共有するため、同時に落ちるのが普通である。** そのときは conductor が

@@ -13,6 +13,8 @@ allowed-tools:
 
 # クロスレビュー収束ループ
 
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `launch-reviewer.sh`（M5）・`measure.py`（M5）・`resolve.sh`（X0）・`rotate-pr.sh`（M5）・`state.py`（M5）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+
 PR を**既定の参加者プール（claude / codex / kiro とホスト）から選んだ 2 者**にレビューさせ、**新しい指摘が出なくなるまで**
 `/ndf:pr-review` と `/ndf:fix` を自動で回す。
 
@@ -46,8 +48,8 @@ PR を**既定の参加者プール（claude / codex / kiro とホスト）か�
 - [docs/06-evidence.md](docs/06-evidence.md) — 指摘に求める根拠と反証条件、独立発見の規約、効果の測定（4 つの集約方式と限界）
 - [docs/07-posts-and-records.md](docs/07-posts-and-records.md) — 状態ファイルの外へ書くもの（投稿の種別ごとの契約・投稿キュー・監視と計測が残すファイル。手順の途中では読まない）
 - [docs/08-review-categories.md](docs/08-review-categories.md) — 変更ファイルの分類から担当へ渡す自動レビュー観点の一覧（手順の途中では読まない）
-- [scripts/drive.py](scripts/drive.py) — 収束ループの駆動（LLM が要る地点で pause を返して止まる）
-- [scripts/state.py](scripts/state.py) — state.json 操作。起動・監視・巻き直しは `launch-reviewer.sh` / `monitor.py` / `rotate-pr.sh`、効果の測定は `measure.py`（状態を保存するたびに呼ばれる）
+- `ndf cross-review run` — 収束ループの駆動（LLM が要る地点で pause を返して止まる）
+- `scripts/state.py` — state.json 操作。起動・監視・巻き直しは `launch-reviewer.sh` / `monitor.py` / `rotate-pr.sh`、効果の測定は `measure.py`（状態を保存するたびに呼ばれる）
 
 ## 設計方針
 
@@ -139,12 +141,12 @@ PR を**既定の参加者プール（claude / codex / kiro とホスト）か�
 
 **対象のリポジトリの中（メインディレクトリか worktree）で**、次のブロックを打ち、最後の行の結果 JSON の `status` と終了コードを見る。
 駆動の位置は解決のエントリポイント（`resolve.sh`）が導入先から求める（[scripts-lookup.md](../development-workflow/references/scripts-lookup.md)）。
-駆動はリポジトリを作業ディレクトリから求めるため、**Skill のディレクトリへ `cd` しない**（`cd` したときは、`cd` する前の場所が作業ツリーならそこで続ける）。
+駆動はリポジトリを作業ディレクトリから求めるため、**Skill のディレクトリへ `cd` しない**（`cd` したときは、`cd` する前の場所がworktreeならそこで続ける）。
 シェルの変数は呼び出しをまたいで残らないため、各ブロックを 1 回の呼び出しとして打つ。**値のある引数だけを
 渡す**（再開で渡した引数の扱いは [docs/04-contracts.md](docs/04-contracts.md) の「再開で渡した引数の扱い」）。
 
 ```bash
-<入口を探すコマンド>   # scripts-lookup.md の「入口を探すコマンド」の for 文。$R を決める
+<エントリポイントを探すコマンド>   # scripts-lookup.md の「エントリポイントを探すコマンド」の for 文。$R を決める
 [ -n "$R" ] || exit 3
 CR=$(bash "$R/scripts/resolve.sh" scripts cross-review) || exit 3
 python3 "$CR/drive.py" <PR> [--rotate-mode light|squash] [--reopen] [--max-rounds N] [--rotate-after K] [--host H] [--only R] \
@@ -157,7 +159,7 @@ python3 "$CR/drive.py" <PR> [--rotate-mode light|squash] [--reopen] [--max-round
 
 ```bash
 # 起動（1 回の呼び出し）
-<入口を探すコマンド>   # scripts-lookup.md の「入口を探すコマンド」の for 文。$R を決める
+<エントリポイントを探すコマンド>   # scripts-lookup.md の「エントリポイントを探すコマンド」の for 文。$R を決める
 [ -n "$R" ] || exit 3
 CR=$(bash "$R/scripts/resolve.sh" scripts cross-review) || exit 3
 LIB=$(bash "$R/scripts/resolve.sh" scripts)/lib || exit 3
@@ -167,7 +169,7 @@ bash "$LIB/bg-wait.sh" run "$RC" -- python3 "$CR/drive.py" <PR> [上と同じ引
 
 ```bash
 # 待ち（124 が返るあいだ、別の呼び出しとして打ち直す）
-<入口を探すコマンド>   # scripts-lookup.md の「入口を探すコマンド」の for 文。$R を決める
+<エントリポイントを探すコマンド>   # scripts-lookup.md の「エントリポイントを探すコマンド」の for 文。$R を決める
 [ -n "$R" ] || exit 3
 LIB=$(bash "$R/scripts/resolve.sh" scripts)/lib || exit 3
 RC="${TMPDIR:-/tmp}/cross-review-drive-pr<PR>.rc"
@@ -193,7 +195,7 @@ JSON の形と終了コードの表は共通ライブラリの `scripts/lib/driv
 再開は同じコマンドを打ち直すだけである。進みは耐久の記録（`<git の共通ディレクトリ>/ndf/state/dbos/review-<鍵>.sqlite`）と state.json にあり、pause の
 結果ファイルがあればその続きから進む。`metrics` は state.json から数えた件数（`rounds` / `prs` / `findings` /
 `fixed` / `deferred` / `rejected` / `unresolved` / `final` / `review_status` / `ci` / `ci_reason`）である。`ci` は最後のラウンドの
-継続的統合の判定（`ci.verdict`。無ければ `null`）、`ci_reason` はその判定が `unverified`・`meta_only`・`pending` のときの理由
+CIの判定（`ci.verdict`。無ければ `null`）、`ci_reason` はその判定が `unverified`・`meta_only`・`pending` のときの理由
 （`unverified` の理由・`meta_only` の注記・未完了のチェックジョブの名前）で、ほかは `null` である。
 
 **終わったレビューにもう一度回すときも、同じコマンドを打ち直すだけである。** state.json を開かない・`mv` しない・
@@ -204,13 +206,13 @@ JSON の形と終了コードの表は共通ライブラリの `scripts/lib/driv
 
 ## レビュー出力の制約と運用の切り分け
 
-投稿の書式・継続的統合の失敗の分類・過去に踏んだ形は
+投稿の書式・CIの失敗の分類・過去に踏んだ形は
 [docs/03-review-output.md](docs/03-review-output.md) にある。読む場面は次のとおり。
 
 | 節 | 読む場面 |
 |---|---|
 | レビュー出力の制約 | レビュアーの起動プロンプトを変えるとき。投稿の書式と判定の付け方の規約 |
-| CI failure の分類 | 継続的統合の失敗で中断するかを決めるとき（Step 5 後段） |
+| CI failure の分類 | CIの失敗で中断するかを決めるとき（Step 5 後段） |
 | アンチパターン | 手順を変えるとき、または進行が止まったとき |
 | monitor.py が誤って kill する場合の手順 | 結果ファイルが生成されないとき |
 
@@ -228,7 +230,7 @@ JSON の形と終了コードの表は共通ライブラリの `scripts/lib/driv
 
 詳細は PR 上のインラインコメントと state.json に残っているため、本報告では繰り返さない。
 
-この工程に入ったら、起動指示の進捗記録で `実装レビュー` を 1 行記録する。設計だけを載せた
+この工程に入ったら、起動指示の進捗記録で `コードレビュー` を 1 行記録する。設計だけを載せた
 Pull Request で呼ばれたときは `ドキュメントレビュー` を記録する。
 
 ## 関連

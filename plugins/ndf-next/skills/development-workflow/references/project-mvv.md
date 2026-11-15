@@ -1,5 +1,7 @@
 # プロジェクト MVV（`.ndf/mvv.md`・`.ndf/mvv.json`）
 
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `check-trigger.py`（M1）・`mvv-gate.py`（P2）・`project-mvv.py`（M7）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+
 プロジェクト全体の Mission / Vision / Value と固有の「必ず人の承認が要る操作」（`P<番号>`）を宣言し、NDF が判断する地点
 （承認ゲートの MVV 判定・レビューの指摘と修正の可否・リファクタリングの提案の採否・judge のステップ・範囲外の起票）が
 それに従う。承認済みなら、どの `pace`（`normal` / `auto` / `fast`）でも要求・設計・実装の工程も MVV を判断の基準として読む。
@@ -25,7 +27,7 @@
 | --- | --- | --- |
 | NDF の共通原則（上位の原則・優先順位・AI の行動の 2 択・判断の範囲と記録・人と AI の対話・C1〜C8） | リリース対象の `scripts/data/ndf-common-principles.md` | NDF のリリースだけ。プロジェクトは上書きも除外もできない |
 | プロジェクト MVV（Mission / Vision / Value・固有の操作 `P<番号>`） | `.ndf/mvv.md`（本文）と `.ndf/mvv.json`（版の履歴。形は `schemas/mvv.schema.json`） | `project-mvv.py approve` だけ（利用者の承認の後） |
-| スプリント MVV（`R<番号>` を含む） | スプリント状態ファイルの隣の `mvv.md` | `sprint-state.py init`（`fast` / `auto` は必須で、コピーできなければ止まる。`normal` は `--mvv` か `--milestone` からコピーできたときだけコピーし、止めない。[pace.md](pace.md)） |
+| スプリント MVV（`R<番号>` を含む） | スプリント状態ファイルの隣の `mvv.md` | `ndf progress new`（`fast` / `auto` は必須で、コピーできなければ止まる。`normal` は `--mvv` か `--milestone` からコピーできたときだけコピーし、止めない。[pace.md](pace.md)） |
 
 判断の地点へ渡す MVV の節は、共通原則の本文全体 → プロジェクト MVV（無ければ「MVV なし」とその理由）→ スプリント MVV →
 判断の決まり（取れる行動は「進める」か「止めて人へ戻す（理由と根拠つき）」の 2 つ・根拠の項目の番号を返す）の順で、
@@ -76,7 +78,7 @@ README・指示書（`AGENTS.md` / `CLAUDE.md` など）・依頼文（`--reques
 
 | 契機 | 出どころ |
 | --- | --- |
-| 振り返りの問い「MVV を見直すか」 | `retrospective` が `project-mvv.py signals` の集計を示して問う |
+| 振り返りの問い「MVV を見直すか」 | `retrospective` が `ndf records mvv signals` の集計を示して問う |
 | 改訂の兆候が閾値を超えた | `mvv-gate.py check` の結果の `items` の `kind: revise`（同じ版のもとで「判定できない」が `settings.unknown_streak` 件続いた。スプリント状態・承認ゲート・PR の組ごとに 1 件と数え、同じ依頼の判定の打ち直しは 1 件にまとめる。または `signals` の閾値を超えた） |
 | 利用者の指示 | — |
 
@@ -112,13 +114,13 @@ README・指示書（`AGENTS.md` / `CLAUDE.md` など）・依頼文（`--reques
 | 地点 | MVV の節の渡り方 | 渡した事実と根拠の記録 |
 | --- | --- | --- |
 | 承認ゲートの MVV 判定（`auto` / `fast`） | `mvv-gate.py` の材料の先頭 | `mvv-gate.jsonl` の `project_mvv`・`basis`・`pace`・`sprint_mvv`。「従う」でレッドラインが無ければ状態の承認ゲートの記録（`by: mvv`） |
-| 承認ゲートの助言の MVV 判定（`normal` と `supervise.py new sprint --state`） | `mvv-gate.py check --advise` の材料の先頭 | `mvv-gate.jsonl` の `pace: normal` の行。判定の記録を設計承認ゲートでは設計 PR のコメント、リリース承認ゲートでは承認資料の末尾へ置く。承認ゲートの記録は書かない（承認は利用者） |
+| 承認ゲートの助言の MVV 判定（`normal` と `ndf route render sprint --state`） | `mvv-gate.py check --advise` の材料の先頭 | `mvv-gate.jsonl` の `pace: normal` の行。判定の記録を設計承認ゲートでは設計 PR のコメント、リリース承認ゲートでは承認資料の末尾へ置く。承認ゲートの記録は書かない（承認は利用者） |
 | supervise の `work` のステップ（要求・設計・実装・修正の worker） | worker のシステムプロンプトの末尾（プロジェクト MVV が承認済みのときだけ。プランの `スプリント状態` があればスプリント MVV も） | 記録しない（worker の判断は下の 3 行の記録に残る） |
 | `requirements-design` | 下の「工程での読み方」 | 反する疑いは作業の報告の理由（根拠の項目つき） |
 | `design` | 下の「工程での読み方」 | 設計文書の決定ごとの「根拠:」の行。反する疑いは作業の報告の理由 |
 | `tdd-cycle` | 下の「工程での読み方」 | 反する疑いは作業の報告の理由（根拠の項目つき） |
 | cross-review の担当・修正担当・見送りの返信 | `init` が状態ファイルの `review_criteria.mvv_block` へコピーし、`reviewer_block` / `fixer_block` の後ろに付く | 状態の `review_criteria.project_mvv`。振り分けの `mvv_basis`・見送りの返信の末尾の「根拠: Value 1（MVV 版 1）」 |
-| cross-refactoring の提案と改修計画 | 状態の `project_mvv.block` を `RF_MVV` で | 状態の `project_mvv.ref`。候補・項目・見送りの `mvv_basis`（改修計画の見送りの表の「根拠（MVV）」） |
+| cross-refactoring の提案とリファクタリング計画 | 状態の `project_mvv.block` を `RF_MVV` で | 状態の `project_mvv.ref`。候補・項目・見送りの `mvv_basis`（リファクタリング計画の見送りの表の「根拠（MVV）」） |
 | supervise の judge | プロンプトの先頭（`work` のステップと同じ節） | `state.json` の `project_mvv`・`log[].basis` |
 | 範囲外の起票（`out-of-scope`） | 3 択の前に `project-mvv.py context` を読む | 起票の本文の「由来」の節（範囲外とした理由）に根拠の項目と版 |
 
@@ -144,11 +146,11 @@ README・指示書（`AGENTS.md` / `CLAUDE.md` など）・依頼文（`--reques
 
 | 兆候 | 記録 | 書き手 |
 | --- | --- | --- |
-| 覆し（承認ゲートで「従う」を退けた `override_reject`・「反する疑い」か「判定できない」を通した `override_pass`） | `~/.claude/ndf/state/project-mvv-signals.jsonl` | `sprint-state.py gate <状態> <承認ゲート> --what <要約> --by user [--pr N] [--outcome approved\|rejected]`（直前の MVV 判定と食い違うときだけ 1 行。`--pr` を渡せばその PR の判定と比べる。助言の MVV 判定も同じ） |
+| 覆し（承認ゲートで「従う」を退けた `override_reject`・「反する疑い」か「判定できない」を通した `override_pass`） | `~/.claude/ndf/state/project-mvv-signals.jsonl` | `ndf answer <状態> <承認ゲート> --what <要約> --by user [--pr N] [--outcome approved\|rejected]`（直前の MVV 判定と食い違うときだけ 1 行。`--pr` を渡せばその PR の判定と比べる。助言の MVV 判定も同じ） |
 | 「判定できない」 | `mvv-gate.jsonl`（`pace` で進め方を分けられる。集計は分けずに数える） | `mvv-gate.py` |
 | 流出不具合 | 検査の記録の `kind: escape` | `check-trigger.py escape` |
 
-`project-mvv.py signals` は現行の版の承認の日時より後の記録だけを数え、`settings.revise_after`（既定 覆し 3・「判定できない」5・
+`ndf records mvv signals` は現行の版の承認の日時より後の記録だけを数え、`settings.revise_after`（既定 覆し 3・「判定できない」5・
 流出不具合 3）と比べる。照合の履歴は `~/.claude/ndf/state/project-mvv.jsonl` にある。記録の置き場は `NDF_MVV_STATE_DIR` で変えられる。
-LLM で判定した行は照合の入力の sha256（`input_sha256`）を持ち、`sprint-state.py init` がスプリント MVV の判定を再利用した行は
+LLM で判定した行は照合の入力の sha256（`input_sha256`）を持ち、`ndf progress new` がスプリント MVV の判定を再利用した行は
 `reused_from`（元の LLM の判定の時刻）を持ち、費用と秒を持たない（[pace.md](pace.md)）。

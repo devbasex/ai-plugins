@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/devbasex/ai-plugins/main/plugins/ndf/skills/worktree/schemas/worktree.schema.json",
   "title": "NDF worktree 宣言ファイル",
-  "description": "リポジトリごとの差を持つ宣言。このファイルが無いリポジトリでは、作業ツリー運用の仕組みは何もせずに終わる。",
+  "description": "リポジトリごとの差を持つ宣言。このファイルが無いリポジトリでは、worktree運用の仕組みは何もせずに終わる。",
   "type": "object",
   "required": [
     "version"
@@ -22,16 +22,16 @@
     },
     "base_branch": {
       "type": "string",
-      "description": "開発の起点ブランチ。作業ツリーの分岐元になり、follow_branch が true のときは主ディレクトリの追従先にもなる。未指定なら origin の HEAD が指すブランチを使う。指定した名前が origin にもローカルにも無いときは既定へ落とさず解決に失敗する"
+      "description": "開発の起点ブランチ。worktreeの分岐元になり、follow_branch が true のときはメインディレクトリの追従先にもなる。未指定なら origin の HEAD が指すブランチを使う。指定した名前が origin にもローカルにも無いときは既定へ落とさず解決に失敗する"
     },
     "follow_branch": {
       "type": "boolean",
       "default": false,
-      "description": "true のときだけ、セッション開始時の hook が主ディレクトリのブランチを稼働中の作業ツリーへ detached HEAD で追従させる。既定では主ディレクトリの HEAD を動かさない。真偽値以外は false と同じ"
+      "description": "true のときだけ、セッションセッション開始 hook がメインディレクトリのブランチを稼働中のworktreeへ detached HEAD で追従させる。既定ではメインディレクトリの HEAD を動かさない。真偽値以外は false と同じ"
     },
     "production_branch": {
       "type": "string",
-      "description": "リリースした版が常用する利用者へ届く本番のチャネルのブランチ。この先へ進める操作は人手の承認を求める。開発の起点である base_branch とは別の鍵で、流用しない。未指定なら origin の HEAD が指すブランチを使う。指定した名前が origin にもローカルにも無いときは既定へ落とさず解決に失敗する"
+      "description": "リリースした版が常用する利用者へ届く本番チャネルのブランチ。この先へ進める操作は人手の承認を求める。開発の起点である base_branch とは別の鍵で、流用しない。未指定なら origin の HEAD が指すブランチを使う。指定した名前が origin にもローカルにも無いときは既定へ落とさず解決に失敗する"
     },
     "branch_flow": {
       "type": "object",
@@ -224,7 +224,7 @@
       "properties": {
         "allow_paths": {
           "type": "array",
-          "description": "主ディレクトリで編集しても案内を出さないパス。末尾が / の項目は前方一致、それ以外は完全一致とその配下。空の配列は「何も許可しない」を意味する。未指定なら組み込みの既定を使う",
+          "description": "メインディレクトリで編集しても案内を出さないパス。末尾が / の項目は前方一致、それ以外は完全一致とその配下。空の配列は「何も許可しない」を意味する。未指定なら組み込みの既定を使う",
           "items": {
             "type": "string"
           }
@@ -294,7 +294,7 @@
         },
         "copy_from_main": {
           "type": "array",
-          "description": "作業ツリーへ複製する、追跡されないパス",
+          "description": "worktreeへ複製する、追跡されないパス",
           "items": {
             "type": "string"
           }
@@ -352,7 +352,7 @@
     },
     "deps": {
       "type": "object",
-      "description": "依存の用意。worktree を作った直後に、copy_from_main・copy_as_real・run の順に行う。無いか空なら何もしない。個人の宣言からは反映しない",
+      "description": "依存の用意。worktree を作った直後に、copy_from_main・copy_as_real・run の順に行う。無いか空なら何もしない。個人設定からは反映しない",
       "additionalProperties": true,
       "properties": {
         "copy_from_main": {
@@ -454,7 +454,7 @@
               },
               "base_url_env": {
                 "type": "string",
-                "description": "入口の URL を渡す環境変数名。URL は port_role（既定 http）の採番したポートから組み立てる"
+                "description": "エントリポイントの URL を渡す環境変数名。URL は port_role（既定 http）の採番したポートから組み立てる"
               },
               "out_env": {
                 "type": "string",
@@ -462,7 +462,7 @@
               },
               "port_role": {
                 "type": "string",
-                "description": "入口の URL を組み立てるときに使う port_roles の役割名。既定は http"
+                "description": "エントリポイントの URL を組み立てるときに使う port_roles の役割名。既定は http"
               },
               "service": {
                 "type": "string",

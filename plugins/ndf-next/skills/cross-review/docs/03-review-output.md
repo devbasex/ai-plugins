@@ -1,6 +1,8 @@
 # 03: レビュー出力の制約と運用の切り分け
 
-`SKILL.md` 本体から参照される、**投稿の書式・継続的統合の失敗の分類・過去に踏んだ形**の
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `launch-agy.sh`（M5）・`launch-codex.sh`（M5）・`rotate-pr.sh`（M5）・`state.py`（M5）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+
+`SKILL.md` 本体から参照される、**投稿の書式・CIの失敗の分類・過去に踏んだ形**の
 一次資料。実行の途中で読む必要は無く、規約を変えるときと進行が止まったときに読む。
 
 レビュー出力の制約は `scripts/launch-codex.sh` / `scripts/launch-agy.sh` の
@@ -70,7 +72,7 @@ body に書くのは **設計レベル・PR 横断の修正提案** のみ。
 
 ## CI failure の分類（誤中断防止）
 
-「CI 失敗 → 即 `final=error`」は乱暴。`scripts/state.py merge-fix` が
+「CI 失敗 → 即 `final=error`」は乱暴。`bin/ndf cross-review merge-fix` が
 fix 戻り値ファイル (`$TMP_DIR/fix-pr<PR>-result.json`) を受け取った際に
 `ci_failed_checks` を以下で分類する:
 

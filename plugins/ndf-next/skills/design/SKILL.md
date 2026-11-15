@@ -5,6 +5,8 @@ description: "Write the design document before coding: data structures, interfac
 
 # 設計
 
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `design-survey.py`（M7）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+
 実装を始める前に、**どう作るか**を文書として確定させる。担当する AI が変わっても同じ構成の
 成果物になるよう、作る文書と書く内容を規約で決める。
 
@@ -104,7 +106,7 @@ issue のことではない。
 [references/domain-model.md](references/domain-model.md) にある。
 
 **書いた後に語を用語集と突き合わせる。** `python3 "$SCRIPTS/glossary.py" check --file <設計文書>` を打ち、
-新しい語・意味の変わった語・廃止する語を、同じ変更の中で用語集へ反映して `glossary.py render` で文書を
+新しい語・意味の変わった語・廃止する語を、同じ変更の中で用語集へ反映して `ndf records glossary render` で文書を
 作り直す。構成要素の名前などを語として新しく使うときは、ドメインモデルの節の「用語」の表に書く。
 
 **タスクを機械的に導けるだけの情報を書く。** 導けない設計は、次の工程が成立しない。
@@ -182,7 +184,7 @@ issue のことではない。
 
 **出す前に、仕様のコピーが課題の本文と一致しているかを確かめる。**
 `python3 "$SCRIPTS/spec-copy.py" check <課題> issues/issue-<番号>-requirements.md` が 0 であること。1 なら
-本文が正なので、`spec-copy.py write` でコピーを作り直す。
+本文が正なので、`ndf records spec finalize` でコピーを作り直す。
 
 設計 PR の cross-review は、1 ラウンド目でドメインモデルの節だけを見て（モデルレビュー）、2 ラウンド目以降で
 残りを見る（詳細レビュー）。設計承認ゲートは詳細レビューの後の 1 回だけである。
@@ -255,7 +257,7 @@ API の記述を求めない。
 入るときに 1 つ目、手順 6（詳細設計を書く）に入るときに 2 つ目、手順 7（設計 Pull Request を出す）に入るときに
 3 つ目を打つ。`/ndf:design #<番号> 詳細設計` で呼ばれたときは 1 つ目を打たない（工程「設計」は前の段が記録した）。issue の本文の
 `## 進行` とボードの両方に残る（`$SCRIPTS` の決め方は `development-workflow` の
-`references/scripts-lookup.md`。3 層では起動指示にある進捗記録のコマンドをそのまま使う）。
+`references/scripts-lookup.md`。3 層では起動指示にある進捗進捗記録をそのまま使う）。
 
 ```bash
 bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "設計"

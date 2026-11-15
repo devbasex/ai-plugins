@@ -1,6 +1,7 @@
 """禁止語の規則: 用語集が廃止した語（各語の `deprecated`）と禁止語（`check.banned.words`）を書かない。
 
-用語集の置き場はリポジトリの用語集の設定（`.ndf/glossary.json` の `source`）から求める。用語集の設定が無い
+用語集の置き場はリポジトリの用語集の設定（`.ndf/glossary.json` の `source`）から求める。
+避ける語の例として廃止した語を挙げる文書は、規則のデータ `words.examples` にファイルと語を書いて外す。用語集の設定が無い
 リポジトリでは、この規則は何も見ない。
 """
 
@@ -63,6 +64,13 @@ def check(scope: Scope, rules: dict[str, Any]) -> list[Finding]:
     for src in scope.sources:
         if src.path.name in conf["skip_files"]:
             continue
+        allowed = _examples(conf["examples"], scope.plugin_rel(src))
         for no, line in enumerate(src.text.splitlines(), 1):
-            found += [Finding("banned-word", src.rel, no, f"「{m.group()}」: {words[m.group()]}") for m in found_pattern.finditer(line)]
+            hits = [m.group() for m in found_pattern.finditer(line) if m.group() not in allowed]
+            found += [Finding("banned-word", src.rel, no, f"「{w}」: {words[w]}") for w in hits]
     return found
+
+
+def _examples(examples: dict[str, dict[str, Any]], rel: str) -> set[str]:
+    """そのファイルが言い換える前の語の例として挙げてよい語（規則のデータ `words.examples`。プラグインの根からのパス）。"""
+    return set(examples[rel]["words"]) if rel in examples else set()

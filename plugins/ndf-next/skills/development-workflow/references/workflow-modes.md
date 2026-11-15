@@ -1,5 +1,7 @@
 # モード判定の境界事例
 
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `projects-sync.sh`（M7）・`refactor.py`（M4）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+
 `SKILL.md` の条件表で決まらない場合の判断材料。ここも**判定基準の一部**であり、判定基準を
 この Skill の外へコピーしない原則はここにも及ぶ。
 
@@ -101,7 +103,7 @@ flowchart TD
     F --> W[実装用の worktree を<br/>作り直す]
     W --> G[実装計画]
     G --> H[失敗するテスト → 最小実装 → 整理]
-    H --> R[構造改善]
+    H --> R[リファクタリング]
     R --> I[仕様適合レビュー]
     I --> J[コード品質レビュー]
     J --> K[限定的な検証・静的解析]
@@ -240,7 +242,7 @@ flowchart TD
 - **中間形式は Markdown である。** 版面・書体・色はソースへ埋めず、生成へ渡す入力として
   別に持つ。埋めると生成の経路が 1 つに固定される
 - **6 つのタイプのどれかを 続けて選ぶ**（判定は [document-types.md](document-types.md)）
-- **`構造改善` だけが対象外である。** 章立ての組み直しは `ドキュメント再構成` が担う
+- **`リファクタリング` だけが対象外である。** 章立ての組み直しは `ドキュメント再構成` が担う
 - `設計` は構成案と体裁設計の 2 つを作る。体裁設計は `design` の `layout-<出力の形>.md` が持つ
 - `デプロイ` は**生成と提出の 2 つの手順**である。生成は対になる下書き先へ行い、提出は本番の提出先へ
   承認した生成物を移す
@@ -276,13 +278,13 @@ flowchart TD
 
 ## リファクタリングの退避先
 
-工程表は `standard` と `legacy-refactor` のリファクタリング（`構造改善` の行）に `cross-refactoring` を置く。
+工程表は `standard` と `legacy-refactor` のリファクタリング（`リファクタリング` の行）に `cross-refactoring` を置く。
 `light` と `operation` は工程そのものが対象外である。**工程に入ったら、最初に
 `refactor.py assess` で飛ばしてよいかを見る。** 飛ばす条件と、`refactoring` 単独へ退避する
 条件は別である。
 
 ```bash
-BASE="<開発の起点>"   # worktree-setup.sh check の「開発の起点:」の行の名前
+BASE="<開発の起点>"   # ndf worktree check の「開発の起点:」の行の名前
 python3 "$RF/refactor.py" assess --base "origin/$BASE"; rc=$?; echo "exit=$rc"
 ```
 
@@ -302,8 +304,8 @@ python3 "$RF/refactor.py" assess --base "origin/$BASE"; rc=$?; echo "exit=$rc"
 
 | 記録先 | 何を残すか |
 | --- | --- |
-| 進捗記録 | 工程 `構造改善`（`projects-sync.sh <課題番号> stage "構造改善"`） |
-| Pull Request の本文 | `構造改善: 飛ばした（<assess の理由の行>）` の 1 行 |
+| 進捗記録 | 工程 `リファクタリング`（`projects-sync.sh <課題番号> stage "リファクタリング"`） |
+| Pull Request の本文 | `リファクタリング: 飛ばした（<assess の理由の行>）` の 1 行 |
 | フェーズレポート | 同じ 1 行を `理由` に含める |
 
 **`refactoring` 単独へ退避する。** `assess` が終了コード 0 で、次のいずれかに当たるとき。

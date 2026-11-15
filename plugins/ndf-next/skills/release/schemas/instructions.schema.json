@@ -19,7 +19,7 @@
     },
     "imports": {
       "type": "object",
-      "description": "許可する即時読み込み。キーは根からの相対パス、値は {参照先: 理由}。書けば許可の外を指摘する。{} は「許可が 1 つも無い」で、未指定とは別の値",
+      "description": "許可する@インポート。キーは根からの相対パス、値は {参照先: 理由}。書けば許可の外を指摘する。{} は「許可が 1 つも無い」で、未指定とは別の値",
       "additionalProperties": {
         "type": "object",
         "additionalProperties": { "type": "string", "description": "毎回読ませる理由" }
@@ -27,7 +27,7 @@
     },
     "released": {
       "type": "object",
-      "description": "出た版の取り出し方。pattern は名前付きの捕捉 (?P<version>…) を 1 つ持つ",
+      "description": "リリース済み版の取り出し方。pattern は名前付きの捕捉 (?P<version>…) を 1 つ持つ",
       "required": ["source", "pattern"],
       "additionalProperties": false,
       "properties": {
@@ -46,7 +46,7 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "bytes": { "type": "integer", "minimum": 1, "description": "根の指示書 1 本あたりの読み込みの上限" }
+        "bytes": { "type": "integer", "minimum": 1, "description": "ルート指示書 1 本あたりの読み込みの上限" }
       }
     },
     "scopes": {
@@ -88,7 +88,7 @@
     "import_syntax": {
       "type": "array",
       "items": { "type": "string" },
-      "description": "即時読み込みの記法を解釈する指示書。既定は [\"CLAUDE.md\"]"
+      "description": "@インポートの記法を解釈する指示書。既定は [\"CLAUDE.md\"]"
     },
     "import_depth": { "type": "integer", "minimum": 1, "description": "たどる深さの上限。既定 4" },
     "refresh_timeout_seconds": { "type": "integer", "minimum": 1, "description": "--refresh が出典 1 件を取りに行くときの待ち。既定 10" },

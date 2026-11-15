@@ -16,7 +16,7 @@
         "additionalProperties": true,
         "properties": {
           "id": { "type": "string", "description": "行の識別子" },
-          "worktree": { "type": "string", "description": "作業ツリーの絶対パス" },
+          "worktree": { "type": "string", "description": "worktreeの絶対パス" },
           "branch": { "type": "string", "description": "ブランチ名。detached HEAD の worktree は空文字" },
           "environment": {
             "type": "string",

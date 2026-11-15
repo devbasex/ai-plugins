@@ -9,7 +9,7 @@ allowed-tools:
 
 # ラッパーの導入・取り外し・状態
 
-**ラッパー（`relay.py`）を使うかは利用者が決める。** この Skill が、利用者のシェル設定を書き換える
+**ラッパー（`ndf relay`）を使うかは利用者が決める。** この Skill が、利用者のシェル設定を書き換える
 唯一のエントリポイントである。SessionStart hook はシェル設定を書かない。ラッパーの振る舞いは
 `development-workflow` の [references/relay.md](../development-workflow/references/relay.md) にある。
 
@@ -32,13 +32,13 @@ allowed-tools:
 
 ## 手順
 
-プラグインのルートを決め、`relay.py` の副命令を **1 回だけ** 実行して、出力と終了コードを
+プラグインのルートを決め、`ndf relay` の副命令を **1 回だけ** 実行して、出力と終了コードを
 そのまま示す。`<副命令>` は上の表で決めた値に置き換える。
 
 ```bash
 PLUGIN_ROOT='${CLAUDE_PLUGIN_ROOT}'
 case "$PLUGIN_ROOT" in '$'*) PLUGIN_ROOT= ;; esac
-RELAY="$PLUGIN_ROOT/scripts/relay.py"
+RELAY="$PLUGIN_ROOT/bin/ndf" relay
 [ -n "$PLUGIN_ROOT" ] && [ -f "$RELAY" ] || { echo "ndf のプラグインのルートを解決できない" >&2; exit 1; }
 python3 "$RELAY" <副命令>; echo "exit=$?"
 ```
@@ -57,7 +57,7 @@ python3 "$RELAY" <副命令>; echo "exit=$?"
 | もの | パス |
 | --- | --- |
 | コピー・コピーの版・ラッパーの rc | `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/relay.py`・`relay.version`・`shellrc` |
-| バージョンディレクトリ | `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/relay-<版>-<digest 8 字>/`（ラッパーの中身の `relay_lib/`・`lib/` の包み・`pyproject.toml` と `uv.lock`・その lock から `uv sync --frozen` で作った環境 `.venv/`・`MANIFEST`）と、使うものの名前を持つ `relay.current`。コピーの `relay.py` はこれを読むランチャーである。`install` と SessionStart hook が版ごとに作って `relay.current` を替え、指されず動いているラッパーも使っていない古いものは新しい 2 つを残して消す。`uninstall` はすべて消す |
+| バージョンディレクトリ | `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/relay-<版>-<digest 8 字>/`（ラッパーの中身の `relay_lib/`・`lib/` の包み・`pyproject.toml` と `uv.lock`・その lock から `uv sync --frozen` で作った環境 `.venv/`・`MANIFEST`）と、使うものの名前を持つ `relay.current`。コピーの `ndf relay` はこれを読むランチャーである。`install` と SessionStart hook が版ごとに作って `relay.current` を替え、指されず動いているラッパーも使っていない古いものは新しい 2 つを残して消す。`uninstall` はすべて消す |
 | 読み込みの 1 行 | `DEVBASE_SHELLRC_DIR` がディレクトリを指せば `$DEVBASE_SHELLRC_DIR/ndf-relay.sh`、無ければ `$SHELL` の設定（bash は `~/.bashrc`（macOS では `~/.bash_profile`）、zsh は `${ZDOTDIR:-~}/.zshrc`）の管理ブロック |
 | 記録 | `${XDG_STATE_HOME:-~/.local/state}/ndf/relay/`（`rc-added`・`rc-user` など） |
 

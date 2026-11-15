@@ -1,5 +1,7 @@
 # 設計との突き合わせ
 
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `pr-steps.py`（M1）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+
 `standard` の完了判定で、実装を設計文書・既存の確定仕様・要求と照らし、食い違いをマージの前に見えるようにする。
 確認は (a)(b)(c) の 3 つで、結果は実装 PR の本文の `## 設計と違う点` の節に残す。
 
@@ -26,7 +28,7 @@ python3 "$SCRIPTS/design-match.py" tests --issue 216
 | `light` / `operation` / `documentation` / `legacy-refactor` | 行わない。手順も所要も変えない |
 
 `standard` でも設計文書が無ければ（`tests` が終了コード 3）、3 つの確認を「該当なし（設計文書が無い）」と書いて満たし、
-`specs` は打たない。3 層（supervise.py）の実装プランは、範囲テストと PR の間で同じ 3 つを流す。
+`specs` は打たない。3 層（ndf plan）の実装プランは、範囲テストと PR の間で同じ 3 つを流す。
 
 ## 確認 (a): 設計に名前の出るテストが実在する
 
@@ -48,7 +50,7 @@ python3 "$SCRIPTS/design-match.py" tests --issue <番号>
 ## 確認 (b): 既存の確定仕様と変更履歴が変更後の振る舞いと合う
 
 ```bash
-python3 "$SCRIPTS/design-match.py" specs --base origin/<起点のブランチ>
+python3 "$SCRIPTS/design-match.py" specs --base origin/<ベースブランチ>
 ```
 
 起点との merge-base から HEAD までに変えたファイルのパスと、増減したシンボル（定義の名前と `_` を含む大文字の定数）を
@@ -77,8 +79,8 @@ python3 "$SCRIPTS/design-match.py" specs --base origin/<起点のブランチ>
 
 実装で受け入れ条件の前提を変えたら、課題の本文の条件を `requirements-design` の「変更の途中で要求が変わったとき」の形
 （取り消し線と変更の理由）に直す。本文は節ごとに `gh_parts.py body-section replace --issue <番号> --heading <節の見出し>`
-で差し替え、`gh issue edit --body-file` で本文全体を書き直さない（課題ごとの錠の中で書き、進行の記録と互いに消さない）。
-続けて `spec-copy.py write <番号> issues/issue-<番号>-requirements.md` で写しを作り直し、同じ PR でコミットする。
+で差し替え、`gh issue edit --body-file` で本文全体を書き直さない（課題ごとの錠の中で書き、進捗記録と互いに消さない）。
+続けて `ndf records spec finalize <番号> issues/issue-<番号>-requirements.md` で写しを作り直し、同じ PR でコミットする。
 
 ## 実装 PR の本文の節
 

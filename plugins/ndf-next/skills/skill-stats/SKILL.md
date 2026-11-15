@@ -8,6 +8,8 @@ allowed-tools:
 
 # Skill 利用統計スキル
 
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `skill-stats.py`（M7）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+
 Claude Code の transcript JSONL ファイル (`~/.claude/projects/*.jsonl`) を解析し、NDFプラグインのskill利用統計を算出する。
 
 ## 用途
@@ -107,7 +109,7 @@ transcript JSONL 先頭の `cwd` フィールドを優先してプロジェク�
 | 語 | 意味 |
 | --- | --- |
 | 固定費 | 作業を始める前に既に埋まっている量。**合成でない最初の応答の入力トークン**（`input_tokens` + `cache_read_input_tokens` + `cache_creation_input_tokens`） |
-| ピーク使用量 | 応答ごとの同じ合計の最大（出力の列は `最大充填`） |
+| ピーク使用量 | 応答ごとの同じ合計の最大（出力の列は `ピーク使用量`） |
 | 実作業 | ピーク使用量 − 固定費 |
 | 応答数 | 合成でない応答の `message.id` の異なる数（同じ id の行が並んでも 1 と数える） |
 | 終わり方 | `completed` / `in_progress` / `rate_limit` / `api_error` |

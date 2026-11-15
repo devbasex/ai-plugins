@@ -1,5 +1,7 @@
 # プロジェクトの宣言を解析する
 
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `glossary.py`（M7）・`project-decl.py`（D2+）・`project-mvv.py`（M7）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+
 **NDF は、使い始めたリポジトリを手順 0 で解析し、そのプロジェクトの形を `.ndf/project.json` に書き出す。**
 各 Skill とスクリプトは、ai-plugins の形（pytest を uv で・本番チャネルと別のベースブランチ宛て・版数を持つプラグインのデプロイ）を既定にせず、
 この宣言を読む。宣言に無い項目は、リポジトリから決まる値（origin の HEAD など）か「不明」として扱う。
@@ -18,7 +20,7 @@
 
 ## 手順 0 での扱い
 
-手順 0 は `worktree-setup.sh check` に続けて `project-decl.py check` を打つ（`decl=` の行）。`worktree-setup.sh check` が 3 のときは見ない。
+手順 0 は `ndf worktree check` に続けて `project-decl.py check` を打つ（`decl=` の行）。`ndf worktree check` が 3 のときは見ない。
 
 | `decl=` | 次に行うこと | `宣言:` の行に足す `解析:` の部分 |
 | --- | --- | --- |
@@ -113,7 +115,7 @@ clone した全員と CI で同じ値のまま効き、変える Pull Request �
 
 | 外すもの | 外し方 |
 | --- | --- |
-| 個人の値（`.ndf/worktree.local.json`） | `.ndf/.gitignore` に書く。`worktree` Skill の `worktree-setup.sh init` が作る |
+| 個人の値（`.ndf/worktree.local.json`） | `.ndf/.gitignore` に書く。`worktree` Skill の `ndf worktree init` が作る |
 | 実行時の出力（`.ndf/handoff/` など） | コミットしない。`handoff/` は `.gitignore` にも書かない（[handoff.md](handoff.md)） |
 
 ルートの `.gitignore` が `.ndf/` を丸ごと外しているときは、利用者が `.gitignore` を直す（NDF は `.gitignore` を書き換えない）。

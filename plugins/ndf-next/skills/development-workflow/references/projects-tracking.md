@@ -1,5 +1,7 @@
 # 進行をボードへ記録する
 
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `projects-sync.sh`（M7）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+
 工程の進行を GitHub Projects のボードへ残す。セッションが変わっても、いまどの工程にいるか・
 どのモードで判定したか・対応する worktree と実装計画のファイルがどれかを引き継げる。
 
@@ -42,7 +44,7 @@
 | --- | --- | --- | --- |
 | `stage` | `進行` | 単一選択 | 工程表の行名（下の対応表） |
 | `mode` | `モード` | 単一選択 | `light` / `operation` / `legacy-refactor` / `standard` |
-| `worktree` | `作業ツリー` | 文字列 | `.worktrees/<ブランチ名>` |
+| `worktree` | `worktree` | 文字列 | `.worktrees/<ブランチ名>` |
 | `plan` | `計画ファイル` | 文字列 | `issues/<ファイル名>` |
 | `status` | `Status` | 単一選択 | `Todo` / `In Progress` / `Done`（GitHub の既定） |
 
@@ -72,8 +74,8 @@ Pull Request が出る場合も、既定の `Linked pull requests` に並ぶた�
 | ドキュメントレビュー | `design` が `pr` / `cross-review` / `merged` を呼ぶ | `ドキュメントレビュー` |
 | 計画 | `implementation-plan` | `計画` |
 | 実装 | `tdd-cycle` | `実装` |
-| `構造改善` | `refactoring` / `cross-refactoring` | `構造改善` |
-| `実装レビュー` | `cross-review` / `pr-review` | `実装レビュー` |
+| `リファクタリング` | `refactoring` / `cross-refactoring` | `リファクタリング` |
+| `コードレビュー` | `cross-review` / `pr-review` | `コードレビュー` |
 | 完了判定 | `quality-gates` | `完了判定` |
 | Pull Request | `pr` | `Pull Request` |
 | 確定仕様化 | `plan-to-spec` | `確定仕様化` |
@@ -130,7 +132,7 @@ bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "<工程名>" "<工程名>"
 同じ形で書き、呼び方を 1 つに揃える。
 
 ```bash
-bash "$SCRIPTS/projects-sync.sh" 186 stage "実装レビュー" "Pull Request"
+bash "$SCRIPTS/projects-sync.sh" 186 stage "コードレビュー" "Pull Request"
 bash "$SCRIPTS/projects-sync.sh" 186 mode "standard"
 bash "$SCRIPTS/projects-sync.sh" 186 worktree ".worktrees/fix/issue-186"
 bash "$SCRIPTS/projects-sync.sh" 186 plan "issues/issue-186.md"

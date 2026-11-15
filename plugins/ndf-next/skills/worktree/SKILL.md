@@ -77,8 +77,8 @@ worktree 運用の仕組みは、リポジトリ側に `.ndf/worktree.json` が�
 - **作った設定ファイルはコミットする。** リポジトリの設定であり、他の開発者にも同じ
   運用が要る
 
-導入の状態は `worktree-setup.sh status` で見られる（設定ファイルの有無、`.worktrees/`
-の登録、稼働中の worktree 数）。**手順が分岐に使うなら `worktree-setup.sh check` を使う。**
+導入の状態は `ndf worktree list` で見られる（設定ファイルの有無、`.worktrees/`
+の登録、稼働中の worktree 数）。**手順が分岐に使うなら `ndf worktree check` を使う。**
 設定の状態を終了コードで返し（0 あり / 2 なし / 3 読めない / 1 判定できない）、ファイルを作らない。
 
 ローカル環境での動作検証やテスト実行の分離を使うときは `localenv` / `testenv` を足す。
@@ -99,7 +99,7 @@ worktree の中では `git rev-parse --show-toplevel` が worktree 自身を返�
 bash "$SCRIPTS/lib/worktree-common.sh" >/dev/null 2>&1  # 読み込みの確認のみ
 . "$SCRIPTS/lib/worktree-common.sh"
 wt_main_dir          # メインディレクトリの絶対パス
-wt_in_worktree && echo "作業ツリーの中" || echo "主ディレクトリ"
+wt_in_worktree && echo "worktreeの中" || echo "メインディレクトリ"
 ```
 
 `$SCRIPTS` は手順 0 で決めた値である。**シェルが変わったら決め直す。**
@@ -130,7 +130,7 @@ bash "$SCRIPTS/worktree-deps.sh" prepare "<作られた worktree のパス>"
 ```bash
 main_dir=$(wt_main_dir)
 if ! git -C "$main_dir" check-ignore -q .worktrees/ 2>/dev/null; then
-  printf '\n# 開発用の作業ツリー\n.worktrees/\n' >> "$main_dir/.gitignore"
+  printf '\n# 開発用のworktree\n.worktrees/\n' >> "$main_dir/.gitignore"
   git -C "$main_dir" add .gitignore
   git -C "$main_dir" commit -m "Chore: .worktrees/ を追跡対象から外す"
 fi
@@ -277,7 +277,7 @@ Claude Code 本体が Bash を走らせる直前に「git がメインディレ�
 
 | 状況 | どこで何を打つか |
 | --- | --- |
-| NDF の手順で worktree に入る | `worktree-setup.sh create` の後に `cd <worktree>` する（手順 2-3） |
+| NDF の手順で worktree に入る | `ndf worktree create` の後に `cd <worktree>` する（手順 2-3） |
 | 隔離の中で `… \| bash "$CLOSING"` の形が拒まれた | worktree の中で、スクリプトを変数でなくリテラルの絶対パスで書き、複合コマンドを 1 つずつに割る（`… \| bash /abs/…/lib/closing-issues.sh`） |
 | それでも拒まれる（`git -C <メインディレクトリ>` など） | `ExitWorktree` で隔離を外し、`cd <worktree>` してから同じコマンドを打つ |
 
@@ -288,7 +288,7 @@ Claude Code 本体が Bash を走らせる直前に「git がメインディレ�
 
 worktree は追跡されているファイルしか持たないため、`vendor/`・`node_modules/`・`.env` が無く、pre-commit や
 テストが落ちる。設定（`.ndf/worktree.json`）の `deps` に用意の仕方を書くと、NDF が worktree を作るとき
-（`worktree-setup.sh create`・3 層の run と queue・cross-review・cross-refactoring・落ちたテストの見分け）に
+（`ndf worktree create`・3 層の run と queue・cross-review・cross-refactoring・落ちたテストの見分け）に
 メインディレクトリから依存物を用意する。書き方は [references/declaration.md](references/declaration.md) の `deps` にある。
 
 ```json
@@ -364,7 +364,7 @@ worktree レジストリは共通の git ディレクトリ配下（`.git/ndf/wo
 中に置くと、削除した時点で割り当ての記録が消える。**解放しても行は消さず、解放の時刻を
 書き込む。**
 
-この工程に入ったら進捗記録のコマンド `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "作業場所の用意"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の進捗記録のコマンドを使う）。
+この工程に入ったら進捗進捗記録 `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "作業場所の用意"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の進捗進捗記録を使う）。
 
 
 ## 関連

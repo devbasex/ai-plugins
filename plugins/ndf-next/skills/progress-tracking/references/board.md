@@ -89,7 +89,7 @@ unknown owner type
 | --- | --- |
 | ボードを作る | `gh project create --owner <owner> --title <題名>` |
 | 単一選択のフィールドを作る | `gh project field-create <番号> --owner <owner> --name 進行 --data-type SINGLE_SELECT --single-select-options "<工程名をカンマ区切り>"` |
-| 文字列のフィールドを作る | `gh project field-create <番号> --owner <owner> --name 作業ツリー --data-type TEXT` |
+| 文字列のフィールドを作る | `gh project field-create <番号> --owner <owner> --name worktree --data-type TEXT` |
 
 `stage` の選択肢は工程表の行（`デプロイ` の行を含む）、`mode` はモード名を渡す。工程の名前が変わった選択肢は、新しい名前の選択肢が無ければ旧い選択肢へ書き、名前を変えるよう `NOTE:` で案内する（ボードの設定は利用者が直す）。いずれも
 `development-workflow` の工程表が基準である。

@@ -5,6 +5,8 @@ description: "Before asking the user to decide or approve, lay out the findings,
 
 # 判断を求める前に材料を示す
 
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `ask.py`（P2）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+
 **利用者に判断を求めるときは、先に判断の材料を示す。** 選択肢だけを並べて聞くと、利用者は
 何が起きたかを知らないまま選ぶことになるか、聞き返して材料を引き出すことになる。どちらも、
 材料を持っている側が先に出せば起きない。
@@ -95,4 +97,4 @@ description: "Before asking the user to decide or approve, lay out the findings,
 ## 関連
 
 - `investigation-rules` — 「無い」と言うときに検索を示す（材料の 2 と 3 に効く）
-- `development-workflow` — 承認ゲートで出す提示物の項目（この形に加えて求めるもの）
+- `development-workflow` — 承認ゲートで出す承認資料の項目（この形に加えて求めるもの）

@@ -12,6 +12,8 @@ hooks:
 
 # 開発ワークフローの振り分け
 
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `behavior-check.py`（M1）・`context-policy.py`（M3b）・`hook.py`（M3a）・`mvv-gate.py`（P2）・`parallel.py`（P3）・`project-decl.py`（D2+）・`relay.py`（M3b）・`release-steps.py`（M2）・`test-run.py`（C2）・`workflow-guard.sh`（M3a）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+
 変更内容をモードへ分類し、必要な工程だけを起動する。**全変更にフル工程を課さない。**
 判定の結果として返すもの（モード・必須工程・次のコマンド）の形は「3. 判定結果を出力する」にある。
 
@@ -146,8 +148,8 @@ pace: fast
 | ドキュメントレビュー | — | — | `pr` → `cross-review` → `merged`（設計 Pull Request を分けた場合） | `pr` → `cross-review` → `merged` | `pr` → `cross-review` → `merged` |
 | 計画 | — | `implementation-plan` | `implementation-plan` | `implementation-plan` | `implementation-plan`（執筆を分担する場合） |
 | 実装 | 直接編集 | 実行 → [operation-run.md](references/operation-run.md) | `refactoring` | `tdd-cycle` | `document-drafting` |
-| `構造改善` | — | — | `cross-refactoring` | `cross-refactoring` | — |
-| `実装レビュー` | `cross-review` | `cross-review` | `pr-review` | `cross-review` | `cross-review` |
+| `リファクタリング` | — | — | `cross-refactoring` | `cross-refactoring` | — |
+| `コードレビュー` | `cross-review` | `cross-review` | `pr-review` | `cross-review` | `cross-review` |
 | 完了判定 | `quality-gates` | `quality-gates` | `quality-gates` | `quality-gates` | `quality-gates` |
 | Pull Request | `pr` | `pr` | `pr` | `pr` | `pr` |
 | 確定仕様化 | — | `plan-to-spec`（実行で決まった設定が以後の判断の前提になる場合） | — | `plan-to-spec` | `plan-to-spec`（確定版を残す場合） |
@@ -180,8 +182,8 @@ pace: fast
 | ドキュメント再構成 | 書き上げた設計文書を章立てから組み直す。`document-rebuild` が決める・測る・組み直す・整える・測り直すの手順を持ち、整える手順で `document-style` のセルフチェックとキーワードの確かめを通す（`document-style` はこの工程で掛かり、工程表に別の行を持たない）。**レビューの前に置く。** 後に置くと、レビュー担当が構成の指摘と内容の指摘を同時に出し、どちらの指摘なのかが混ざる |
 | ドキュメントレビュー | 設計だけを載せた Pull Request を、実装より先にマージする。新しい Skill は使わず `pr` → `cross-review` → `merged` を順に呼ぶ。**マージには人間の承認が要る**（止まり方は「自走で工程を通す」）。head のブランチ名は `design/` で始め、マージした後は実装用の worktree を作り直す |
 | 実装（`operation`） | **実行そのものを指す。** 行は増やさない。呼ぶのは `tdd-cycle` でも `refactoring` でもなく、[references/operation-run.md](references/operation-run.md) が定める手順である。実行の範囲・記録・失敗したときの止め方はそちらが持つ。**「本番系へ届く操作」の承認ゲート（リリース承認ゲート）に当たる** |
-| 構造改善 | **CI テストの宣言（`.ndf/project.json` の `test.ci.only`）があるリポジトリだけ通す。** 宣言の無いリポジトリは手元のテストの負荷のため通さず、検査のプランは `assess`・`refactor` を持たずにコードレビューから始まる（`supervise_lib/templates.py` の `refactor_suspended`）。宣言のあるリポジトリの決まり: **差分にコードのファイルがあれば必ず通す。** `standard` と `legacy-refactor` のリファクタリングは `cross-refactoring` を通す。`fast` でも通し、時機だけをトリガーへ移す。**差分が文書のファイルだけなら飛ばし**、コードと文書が混ざった差分では範囲から文書のファイルを外す（条件は「差分の中身で選ぶ工程」） |
-| 実装レビュー | **5 つのモードとも通す。** Pull Request を出す以上、その差分は誰かがレビューする。`light` も、**変えないことの確認**が要る。**明示的に呼ぶ**（自然文で「レビューして」と依頼すると、Claude Code では組み込みの `code-review` が起動して判定の投稿経路が変わる） |
+| リファクタリング | **CI テストの宣言（`.ndf/project.json` の `test.ci.only`）があるリポジトリだけ通す。** 宣言の無いリポジトリは手元のテストの負荷のため通さず、検査のプランは `assess`・`refactor` を持たずにコードレビューから始まる（`supervise_lib/templates.py` の `refactor_suspended`）。宣言のあるリポジトリの決まり: **差分にコードのファイルがあれば必ず通す。** `standard` と `legacy-refactor` のリファクタリングは `cross-refactoring` を通す。`fast` でも通し、時機だけをトリガーへ移す。**差分が文書のファイルだけなら飛ばし**、コードと文書が混ざった差分では範囲から文書のファイルを外す（条件は「差分の中身で選ぶ工程」） |
+| コードレビュー | **5 つのモードとも通す。** Pull Request を出す以上、その差分は誰かがレビューする。`light` も、**変えないことの確認**が要る。**明示的に呼ぶ**（自然文で「レビューして」と依頼すると、Claude Code では組み込みの `code-review` が起動して判定の投稿経路が変わる） |
 | 完了判定 | **全体テストは差分にコードのファイルがあれば走らせる。** 文書のファイルだけなら飛ばし、テストが読む文書があれば対応するテストだけを走らせる。**振る舞いを決める文書を変えたら、コードレビューの後に振る舞いの確認を通す。** 静的解析と文書の検査はどの差分でも通す（条件は「差分の中身で選ぶ工程」） |
 | デプロイ | `release` は 5 つのモードすべてで通す。**環境へ届ける手順は CD が持ち、この工程が受け持つのは CD を起こすマージ・リリース承認ゲート・CD の結果の確かめである。** CD が無ければ CD の案内を出して手で行うステージへ進み、CD を置かない理由を記録したリポジトリには案内を出さない（`release`）。**マージは取り込みで、リリースに数えない。** **自動で進めてよいのは開発版のデプロイまでで、本番へのリリースは承認を得るまで進めない** |
 
@@ -216,7 +218,7 @@ CI でテストが走るリポジトリでは、手元でテストを走らせ�
 
 1. **宣言する。** 手順 0 の解析（`project-decl.py write`）は、テストの suite（`kind` が `test`）の `ci_jobs` のワークフローのファイルがリポジトリにあれば、`.ndf/project.json` に `test.ci.only: true` を書く。条件を満たさなくなれば解析が書いた値を消す。人が書いた値（`false` を含む）は書き換えない
 2. **手元でテストを走らせない。** 宣言があれば、実装と検査のプランは範囲テスト・全体テスト（`test-limited`・`test-all`）を持たない。`test-run.py scope` は静的解析だけを走らせる。worker と supervisor がテストの suite のコマンドを打つと hook が止める（`hook_lib/ci_test_guard.py`）。静的解析は手元で走らせる
-3. **CI の結果を待たずに監視して直す。** プランは `pr` の後・`doc-lint` の後・マージが落ちた後に `ci-watch.py peek` で CI のテストのチェックを 1 回だけ読む。落ちていれば `ci-fix` が直して push し、改修の回数が上限（`contracts/limits.json` の `supervise.ci-fix`）に当たれば止めて人へ戻す。マージはテストのチェックがすべて現れて通ったときだけ行う
+3. **CI の結果を待たずに監視して直す。** プランは `pr` の後・`doc-lint` の後・マージが落ちた後に `ndf ci watch` で CI のテストのチェックを 1 回だけ読む。落ちていれば `ci-fix` が直して push し、改修の回数が上限（`contracts/limits.json` の `supervise.ci-fix`）に当たれば止めて人へ戻す。マージはテストのチェックがすべて現れて通ったときだけ行う
 4. **PR を早く出す。** 宣言のあるリポジトリの実装のプランは、実装の直後に Draft の PR を出す（`pr-draft`）。以後の push のたびに CI が走る
 
 CI の結果の監視が読んだ結論と改修の回数は、プランの状態ディレクトリの `work/ci-watch.jsonl` に追記で残る。
@@ -251,7 +253,7 @@ CI の結果の監視が読んだ結論と改修の回数は、プランの状�
 
 **MVV 判定は `mvv-gate.py` が行う。** 「従う」でレッドラインに当たらないときだけ承認ゲートを通し、ほかは人の承認へ戻す。
 
-**`auto` と `fast` は、使ってよい条件を `supervise.py new sprint --pace <値>` が機械で確かめる。** 条件は
+**`auto` と `fast` は、使ってよい条件を `ndf route render sprint --pace <値>` が機械で確かめる。** 条件は
 開発版のチャネル・インストール確認・`.ndf/pace.json` の許可・モード・MVV の承認で、1 つでも欠ければ断る。
 そのときは `normal` で進める。進め方ごとのフロー・`fast` の工程の区分・条件・設定・トリガー・記録の読み方は
 [references/pace.md](references/pace.md) にある。
@@ -369,7 +371,7 @@ CD が無ければ今の `release` の工程のまま、マージの後に手で
 承認ゲート・区分のある問い・終わり・続けられないときは、最後の応答の末尾に区間の報告を置いて区間を終える（[asking.md](references/asking.md) の「人のいない実行」）。
 **判定結果を出したところは区間の終わりに当たらない。** `次のコマンド:` を打って続け、打たずに終えようとすると Stop の hook が差し戻す。
 
-**工程は 3 層（conductor / supervisor / worker）へ出し、既定はプラン（`supervise.py`）である。**
+**工程は 3 層（conductor / supervisor / worker）へ出し、既定はプラン（`ndf plan`）である。**
 conductor がフェーズごとにプランをキューで流す（[references/waiting.md](references/waiting.md) の「スプリントを流すコマンド」）。
 テンプレートか要る設定が無いときだけ、`Agent` で supervisor を起動する
 （[references/agent-layers.md](references/agent-layers.md) の「プランで流すか supervisor で回すか」）。
@@ -390,7 +392,7 @@ conductor がフェーズごとにプランをキューで流す（[references/w
 | --- | --- |
 | 止められたとき | `context-window.md` の 4 つのカットポイントと、コンテキスト量の hook（`hook.py` の token の guard）。試行方式（`context-window.md` の「再起動の方針」）では、カットポイントで `ndf-next` を出さずに次の工程を起動して hook に判定させ、独立性・手動のときだけ自分で切る |
 | 出すもの | 再開コマンド `/ndf:development-workflow #<課題>`（今のセッションを `/goal` で始めていたときだけ先頭に `/goal `）。情報文字列が `ndf-next` のコードブロック 1 つで出す |
-| 3 層で出す時点 | conductor がフェーズレポート（`## フェーズの報告`）かキューの done を受け取った時点（supervisor とプランは出さない）。`結果: 関門` なら、承認ゲートの承認と取り込みの後 |
+| 3 層で出す時点 | conductor がフェーズレポート（`## フェーズレポート`）かキューの done を受け取った時点（supervisor とプランは出さない）。`結果: 承認ゲート` なら、承認ゲートの承認と取り込みの後 |
 | 出す前に行うこと | 書き始める前に `context-policy.py record --event 引継ぎ開始` を打ち（ラッパーの下で hook に止められたときは hook が打ったので打たない）、引継ぎ文書（メインディレクトリの `.ndf/handoff/<名>.md`）を作るか更新する。対象の最後の工程（棚卸し。マイルストーンは閉じた後）の後に conductor が消す。規則は [references/handoff.md](references/handoff.md) |
 
 出す時点・アナウンス・新しい会話が状態を戻す手順は、`context-window.md` の「新しい会話で戻す」にある。

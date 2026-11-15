@@ -50,7 +50,7 @@ allowed-tools:
 
 1 つのリポジトリで複数の開発ループかスプリントを tmux のレーンとして同時に進めるときは、並列の計画を 1 度書く。
 レーンごとの名前・最初の入力・触る場所・プランの本数・依存を 1 つの文書に置き、レーンの数だけ引継ぎ文書を作る
-（`parallel.py init <計画名>`）。形と検査は [references/parallel-plan.md](references/parallel-plan.md) にある。
+（`ndf lanes init <計画名>`）。形と検査は [references/parallel-plan.md](references/parallel-plan.md) にある。
 
 ## Step 0: 作成フェーズか実行フェーズか判定
 
@@ -257,7 +257,7 @@ git worktree add "$main_dir/.worktrees/feature/<PLAN-ID>-ui"     feature/<PLAN-I
 - **競合は後からマージする側が解き、解いた後の head でレビューを収束させてからマージする**
 - 終わった worktree は `git worktree remove <path>` で片付ける。マージ後の後片付けは
   `/ndf:merged` が扱う
-- Claude Code から並行開発を指示する場合も、worktree は `worktree-setup.sh create` で作り、そのパスを渡す。
+- Claude Code から並行開発を指示する場合も、worktree は `ndf worktree create` で作り、そのパスを渡す。
   Agent tool の `isolation: "worktree"` は使わない（隔離の中では NDF のスクリプトが拒まれることがあり、
   依存の用意も走らない）
 

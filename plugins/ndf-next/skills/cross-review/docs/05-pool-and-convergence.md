@@ -1,5 +1,7 @@
 # 05: 参加者プールと終了基準
 
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `launch-reviewer.sh`（M5）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+
 **誰がレビューし、いつ止めるか**を定める。手順そのものは
 [01-state-and-review.md](01-state-and-review.md) にあり、この文書は Step 0（初期化）と
 Step 1（ラウンドの開始）と Step 3（判定）が読む基準を持つ。
@@ -183,9 +185,9 @@ REST の応答（`GET /repos/{repo}/pulls/{pr}`）の `base.sha` から読み、
 
 | `unavailable` | いつ |
 | --- | --- |
-| `no_head` | 作業ツリーの同期を飛ばし、head を記録していない |
+| `no_head` | worktreeの同期を飛ばし、head を記録していない |
 | `no_base` | PR の応答に `base.sha` が無い |
-| `base_missing` | base のコミットが作業ツリーに無く、`git fetch origin <base_sha>` でも取れない |
+| `base_missing` | base のコミットがworktreeに無く、`git fetch origin <base_sha>` でも取れない |
 | `diff_failed` | `git diff --name-only` が非 0 で終わった |
 
 範囲を求められなくてもラウンドは止めない。`launch-reviewer.sh` は `review_scope` に `unavailable` が
@@ -213,7 +215,7 @@ REST の応答（`GET /repos/{repo}/pulls/{pr}`）の `base.sha` から読み、
 通していない担当（`REQUEST_CHANGES`・重大な指摘のある `COMMENT`）は照らさない。
 
 収束の式（終了基準の層）を今のまま評価し、成り立ったうえで外れた担当がいれば収束させない。
-`verdict = scope_unmatched`・終了コード 2・`SCOPE_RETRY=1` を返し、`drive.py` は修正を挟まずに
+`verdict = scope_unmatched`・終了コード 2・`SCOPE_RETRY=1` を返し、`ndf cross-review run` は修正を挟まずに
 次のラウンドを開く。次のラウンドは席の輪番で組み直され、別の担当が全範囲を見る。ラウンドの上限は
 今のまま効く。収束の式が成り立たないラウンドは、照合をせずに修正へ回る。
 
@@ -223,7 +225,7 @@ REST の応答（`GET /repos/{repo}/pulls/{pr}`）の `base.sha` から読み、
 | --- | --- |
 | `review_scope.unavailable` の値 | 範囲を求められなかった |
 | `legacy` | `review_scope` を持たない前の版のラウンド |
-| `model_stage` | 設計 PR のモデルの段。指示どおりドメインモデルの節だけを読むため、照合すると誤って外す |
+| `model_stage` | 設計 PR のモデルレビュー。指示どおりドメインモデルの節だけを読むため、照合すると誤って外す |
 
 判定の出力と状態ファイル:
 

@@ -222,7 +222,7 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --roo
   承認の後にベースブランチが進んでいても、ベースブランチは比べる相手に入らないため止まらず、進んだ分は次のデプロイで出る。ただし差分がすべて許可リスト
   （`docs/`・`issues/`。`release_lib/approval.py` の `UNGATED`）の下に収まる外のコミット（設計文書・用語集だけの PR など）は止めずに通し、
   `items[]` に `result: outside_unshipped` で、件数を `metrics.tolerated` に残す。本番チャネルへは比べた先端だけを
-  マージし（`merged-steps.py merge-when-green --expect-head`）、CI 待ちの間に `release/v<版>` の先端が進んだときは比べ直す。進んだ分が
+  マージし（`ndf ci merge --expect-head`）、CI 待ちの間に `release/v<版>` の先端が進んだときは比べ直す。進んだ分が
   リリース対象に触れなければ比べ直した先端で入れ直し（3 回まで）、触れれば `gate` で止まる。
   `--channel dev` には渡さない（2）
 
@@ -288,9 +288,9 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --roo
 
 | 形 | 置き方 |
 | --- | --- |
-| Claude Code のプラグイン | `release-steps.py record --version <版> --prs <PR番号>...` が本番のリリースの Pull Request へコメントで書く |
-| リリースの Pull Request のマージで届くもの | `release-steps.py record --promote --head <ベースブランチ> --base <本番チャネル> --prs <PR番号>...` がリリースの Pull Request へコメントで書く。`版:` はマージのコミットである |
-| 本番チャネルへの直接のマージで CD が届けるもの | `release-steps.py record --merged --base <本番チャネル> --prs <PR番号>...` が最後の `--prs` の Pull Request へコメントで書く。`版:` はマージのコミットである |
+| Claude Code のプラグイン | `ndf release-steps record --version <版> --prs <PR番号>...` が本番のリリースの Pull Request へコメントで書く |
+| リリースの Pull Request のマージで届くもの | `ndf release-steps record --promote --head <ベースブランチ> --base <本番チャネル> --prs <PR番号>...` がリリースの Pull Request へコメントで書く。`版:` はマージのコミットである |
+| 本番チャネルへの直接のマージで CD が届けるもの | `ndf release-steps record --merged --base <本番チャネル> --prs <PR番号>...` が最後の `--prs` の Pull Request へコメントで書く。`版:` はマージのコミットである |
 | それ以外 | SKILL.md の「出力物」と同じ 3 行の `## リリース記録` を、デプロイした値で記録の Pull Request へコメントで足す |
 
 スプリントのプランでデプロイするときは、プランの `record` のステップがこれを打つ。

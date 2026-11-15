@@ -38,7 +38,7 @@ graph LR
 
 ```mermaid
 graph TD
-    subgraph 入口
+    subgraph エントリポイント
         A[要求を受ける]
     end
     subgraph 業務

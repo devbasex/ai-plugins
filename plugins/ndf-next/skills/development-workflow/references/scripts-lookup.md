@@ -1,7 +1,9 @@
 # `$SCRIPTS` を決める
 
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `projects-sync.sh`（M7）・`resolve.sh`（X0）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+
 プラグインの `scripts/` の位置は 4 ランタイムで別々である。**候補を順に試す処理は
-`scripts/resolve.sh`（解決のエントリポイント）1 本が持つ。** Skill はこの入口を探すコマンドだけを持ち、
+`scripts/resolve.sh`（解決のエントリポイント）1 本が持つ。** Skill はこのエントリポイントを探すコマンドだけを持ち、
 あとはエントリポイントに尋ねる。
 
 ```bash
@@ -13,8 +15,8 @@ SCRIPTS=$(bash "$R/scripts/resolve.sh" scripts fix)           # skills/<Skill名
 見つからなければ理由を標準エラーへ書き、終了コード 3 で終わる（引数の誤りは 2）。
 conductor が `$SCRIPTS` の下で直に使うエントリポイントは [conductor-entrypoints.md](conductor-entrypoints.md) にある。
 
-**この手順の値はボードの記録の外でも使う。** `worktree` は `worktree-setup.sh` /
-`worktree-localenv.sh` / `worktree-testenv.sh` の 3 本を呼ぶ。ボードの説明の中に置くと、
+**この手順の値はボードの記録の外でも使う。** `worktree` は `ndf worktree` /
+`ndf worktree localenv` / `ndf worktree testenv` の 3 本を呼ぶ。ボードの説明の中に置くと、
 ボードと無関係な読み手がその文書を開くことになる。
 
 ## 候補の並び
@@ -48,15 +50,15 @@ conductor が `$SCRIPTS` の下で直に使うエントリポイントは [condu
 入れない。** 版ごとにディレクトリが分かれ、`*` で受けると辞書順になって `10.10.0` が
 `10.2.0` より前に来る。版の比較をこの手順へ持ち込むと、手順そのものが読めない長さになる。
 
-## 入口を探すコマンド
+## エントリポイントを探すコマンド
 
 エントリポイントはプラグインルート直下の `scripts/` に置く。Skill の下に置くと、その Skill を配らない
 導入先のランタイム（agy）で届かない（`scripts/lib/README.md` の「プラグインルート直下に置く理由」）。
-入口を探すコマンドは、上の候補から「エントリポイントが 1 つあればよい」ところまで削った形である。どのエントリポイントが
+エントリポイントを探すコマンドは、上の候補から「エントリポイントが 1 つあればよい」ところまで削った形である。どのエントリポイントが
 当たっても、順序はエントリポイントの側が決め直す。
 
 ```bash
-# 解決の入口を探す。Claude Code は SKILL.md の ${CLAUDE_PLUGIN_ROOT} を絶対パスへ置き換える。
+# 解決のエントリポイントを探す。Claude Code は SKILL.md の ${CLAUDE_PLUGIN_ROOT} を絶対パスへ置き換える。
 # シングルクォートは、置き換わらなかったときにシェルへ展開させないためである。
 for R in '${CLAUDE_PLUGIN_ROOT}' "$(git rev-parse --show-toplevel 2>/dev/null)/plugins/ndf" \
   ~/.claude/plugins/cache/*/ndf/* .kiro/skills/*/../.. ~/.kiro/skills/*/../.. \
@@ -89,7 +91,7 @@ SKILL_DIR=$(bash "$R/scripts/resolve.sh" skill fix) || exit 3
 手順書がこの値を受け取る場合は、「この文書が受け取る値」の表で宣言する（`worktree` の
 `SKILL.md` がその形である）。
 
-「入口を探すコマンド」の bash はそのままテストの対象になっている。
+「エントリポイントを探すコマンド」の bash はそのままテストの対象になっている。
 `development-workflow/tests/test_projects_scripts_lookup.py` と
 `worktree/tests/test_scripts_reference.py` がこの節の bash のコードブロックを読み出し、
 4 ランタイムの配置を作った上で実行する。エントリポイントそのものの順序は

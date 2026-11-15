@@ -1,5 +1,7 @@
 # 自動反映の本番チャネルへのマージ（リリース承認ゲート）
 
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `merged-steps.py`（M8）・`release-steps.py`（M2）・`workflow-guard.sh`（M3a）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+
 `SKILL.md` の「本番系へ届く操作」のうち、Pull Request のマージがリリース承認ゲートに当たる場面の細部。条件そのもの
 （宛先が自動反映の本番チャネルのときだけ当たる）は `SKILL.md` にある。
 
@@ -15,7 +17,7 @@
 
 **設計 Pull Request の宛先が自動反映の本番チャネルなら、そのマージは本番への反映も起こす。** 設計承認ゲートの承認資料に
 「このマージで本番へ出る」ことを書き、1 回の承認（`AskUserQuestion` の `metadata.source` は `ndf-gate:1`）で両方を通す。承認を得たら conductor が
-`merged-steps.py merge-when-green <番号> --gate-approved user` でマージする。1 回のマージに 2 回の承認を求めない。
+`ndf ci merge <番号> --gate-approved user` でマージする。1 回のマージに 2 回の承認を求めない。
 
 ## リリースの場合ごとの承認の場所とマージの主体
 

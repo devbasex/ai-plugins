@@ -1,5 +1,7 @@
 # worktree でのテスト実行
 
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `test-run.py`（C2）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+
 必要な分離の範囲は、テストが自プロセスの外へ何を書き、誰がそれを叩くかで決まる。
 外部依存が無ければ worktree のファイルだけ、データ保存先へ書くならその実体ごと、画面を
 開くならアプリ一式、外から到達させるなら公開のエンドポイントを分ける。
@@ -76,7 +78,7 @@ worktree レジストリは共通の git ディレクトリ配下（`.git/ndf/wo
 記述の中に固定していると、名前を変える方式は成立しない。実測では、副系統を指す記述を含む
 スクリプトが 109 本と 15 本存在した。実体を分ければ名前を変えずに済む。
 
-1. **採番する** — `worktree-testenv.sh env "$WT"`
+1. **採番する** — `ndf worktree testenv env "$WT"`
 
 2. **依存物を持ち込む** — 手順は [`local-environment.md`](local-environment.md) と共通。
    ハードリンク複製を使い、書き換えられるディレクトリだけ実体を複製する。**symlink は
@@ -95,7 +97,7 @@ worktree レジストリは共通の git ディレクトリ配下（`.git/ndf/wo
    bash "$SCRIPTS/worktree-testenv.sh" bake --tag "$TAG"   # 2 なら同じタグの基準が既にある
    ```
 
-5. **復元して起動する** — `worktree-testenv.sh up "$WT" --profile core`。ホストポートは
+5. **復元して起動する** — `ndf worktree testenv up "$WT" --profile core`。ホストポートは
    公開しない。**定義に無いコンテナを削除する指定を付けない**（稼働中のプロジェクトに定義外の
    コンテナが属していることがある）
 
@@ -223,9 +225,9 @@ worktree を見ているかを確かめ（到達の確認）、見ていなけ�
 | 書く場所 | 何を書くか | 確かめる経路 |
 | --- | --- | --- |
 | `.ndf/project.json` の `test.suites[].container` | `service`（とテスト環境が無いときの `compose_files`） | `test-run.py`（3 層）・cross-refactoring の範囲テストと全体テスト |
-| `.ndf/worktree.json` の `testenv.test_kinds.<種類>.service` | サービス名 | `worktree-testenv.sh test` |
+| `.ndf/worktree.json` の `testenv.test_kinds.<種類>.service` | サービス名 | `ndf worktree testenv test` |
 
-確かめ方: worktree に探りの印（`.ndf-evidence/reach-<乱数>`）を置き、`worktree-testenv.sh compose-env` が出す
+確かめ方: worktree に探りの印（`.ndf-evidence/reach-<乱数>`）を置き、`ndf worktree testenv compose-env` が出す
 テスト環境の値（`NDF_*`・`COMPOSE_PROJECT_NAME`・`COMPOSE_FILE`）を付けて `docker compose exec -T <サービス> cat <印>`
 を打つ。中身が一致すれば、同じ値を付けてテストのコマンドを走らせる。印は共通の git ディレクトリの
 `info/exclude` へ `.ndf-evidence/` を登録してから置き、確かめた後に消す。
@@ -242,15 +244,15 @@ python3 "$SCRIPTS/lib/container_reach.py" probe "$WT" --service app; echo $?  # 
 | `test-run.py` | テスト環境を用意する。それでも届かなければ走らせずに 2（判断できない）で終わり、`summary` に理由を出す |
 | cross-refactoring | テスト環境を用意する。それでも届かなければ走らせずに止まる。着手前のテストでも既存失敗として記録しない |
 | 落ちたテストの見分け（着手前の HEAD の一時の worktree） | 見分けられないとして扱う（既存失敗とみなさない） |
-| `worktree-testenv.sh test` | 起こさない。走らせずに 1（実行系が無ければ 2）で終わり、起こし方（`worktree-testenv.sh up <worktree>`）を出す |
+| `ndf worktree testenv test` | 起こさない。走らせずに 1（実行系が無ければ 2）で終わり、起こし方（`ndf worktree testenv up <worktree>`）を出す |
 
 **テスト環境の用意の決まり。** `test-run.py` と cross-refactoring は、テストを走らせる前に宣言のすべてのサービスを
 確かめる。コンテナが動いていない・別のディレクトリを見ている・答えないサービスが 1 つでもあれば、次を 1 度だけ行い、
 全部を確かめ直す。既に届く worktree では起動のコマンドを打たない。
 
-1. `worktree-testenv.sh env` で割り当てを取る
+1. `ndf worktree testenv env` で割り当てを取る
 2. 同じプロジェクト名で残っているボリュームを読む（`testenv[].reused_volumes` へ載せる。テストは止めない）
-3. `worktree-testenv.sh up <worktree> --wait-service <サービス>` を上限 300 秒で打つ。`up -d` の後に、宣言のサービスと
+3. `ndf worktree testenv up <worktree> --wait-service <サービス>` を上限 300 秒で打つ。`up -d` の後に、宣言のサービスと
    その依存だけが準備できるのを待つ。依存の準備を待てるのは、依存が healthcheck を持つときである
 
 コンテナの実行系が無い・テスト環境の値を読めない・探りの印を置けないときは、起こしても直らないため起こさない。
@@ -263,7 +265,7 @@ python3 "$SCRIPTS/lib/container_reach.py" probe "$WT" --service app; echo $?  # 
 | --- | --- |
 | `testenv` の宣言が無い | `.ndf/worktree.json` への宣言を求める |
 | `localenv.compose_files` が無い | `.ndf/worktree.json` への宣言を求める |
-| 空きスロットが無い・起動の失敗 | サービス名と、`worktree-testenv.sh` の標準エラーの末尾 |
+| 空きスロットが無い・起動の失敗 | サービス名と、`ndf worktree testenv` の標準エラーの末尾 |
 | 上限の超過 | サービス名と上限の秒 |
 | 起こしても届かない | 2 度目の到達の確認の理由 |
 

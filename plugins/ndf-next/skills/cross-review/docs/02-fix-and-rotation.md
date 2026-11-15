@@ -1,11 +1,13 @@
 # 02: 修正 (Step 5) + PR ローテーション (Step 6) + 終了処理 (Step 8)
 
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `fix-steps.py`（M1）・`rotate-pr.sh`（M5）・`state.py`（M5）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+
 主要処理は `scripts/` 配下に切り出し済み:
 
 | script | 役割 |
 |---|---|
 | (Agent) | Step 5 — 修正サブエージェント起動（メインからの責務） |
-| `scripts/state.py merge-fix` | Step 5 後段 — fix 戻り値マージ + CI 分類 |
+| `bin/ndf cross-review merge-fix` | Step 5 後段 — fix 戻り値マージ + CI 分類 |
 | `scripts/state.py record-fix` | Step 5 の代わり — ホストが自分で直して送った修正を確かめて記録にする |
 | `scripts/state.py should-rotate` | Step 6 — rotate 要否判定 |
 | `scripts/rotate-pr.sh prepare` | Step 6a — 旧 PR の素材を `rotate-pr<STATE_PR>-prepare.json` に dump |
@@ -24,7 +26,7 @@
 `general-purpose` サブエージェントで起動する。
 
 **修正の手順・方針・戻り値ファイルの形は `/ndf:fix` が持つ**（`skills/fix/SKILL.md`）。駆動
-（`scripts/drive.py`）は fix で止まるとき、worker へ渡す指示を `prompt_file` に書く。指示が持つのは
+（`bin/ndf cross-review run`）は fix で止まるとき、worker へ渡す指示を `prompt_file` に書く。指示が持つのは
 `/ndf:fix <PR>` の呼び出しと PR 固有の値だけである。**自動で直すのは `critical` / `major` だけで、
 `minor` / `nit` は直さず見送りの返信を付けて閉じる**（振り分けの規則は `/ndf:fix` の「重要度の判定」、
 基準の正本は `scripts/lib/review_criteria.py`）。
@@ -38,7 +40,7 @@
 | 戻り値ファイル | `$TMP_DIR/fix-pr<PR>-result.json`。環境変数 `CROSS_REVIEW_TMP_DIR` を渡すと `/ndf:fix` がここへ書く |
 | 指摘の基準 | 環境変数 `CROSS_REVIEW_STATE=$TMP_DIR/cross-review-pr<STATE_PR>-state.json`。`fix-steps.py context` が状態ファイルの `review_criteria`（`init` がコピーした重点とレビューのプロファイル）を読み、担当と同じ基準で振り分ける |
 
-**送信・返信・決着・まとめは取り込み（`state.py merge-fix`）が行う**。worker は
+**送信・返信・決着・まとめは取り込み（`ndf cross-review merge-fix`）が行う**。worker は
 GitHub と git へ書かない。取り込みは現在の頭を指定して送り（`git push origin HEAD:<ブランチ名>`）、
 戻り値ファイルが報告したコミットが送り先に載ったことを確かめてから、`resolved_threads` /
 `deferred` / `rejected` の配列から返信と決着を、件数からまとめを組み立てて投稿キューで送る。
@@ -63,7 +65,7 @@ elif [ $? -eq 3 ]; then
 fi
 ```
 
-`state.py merge-fix` が内部で行う処理:
+`ndf cross-review merge-fix` が内部で行う処理:
 
 1. `$TMP_DIR/fix-pr<PR>-result.json` を読んで `state.rounds[-1].fix` にマージ（段階 `recorded`）
 2. `deferred` を `state.deferred_nits` に追記し、`finding_id` を持つ要素の決着を `state.body_settlements[]` へ記録する（`source: fix`。同じ `finding_id` は重ねない）
@@ -292,13 +294,13 @@ while ループ脱出後にメインが以下のプロンプトでサブエー�
 > **修正をコミットした場合は、対象リポジトリの検証を 1 度通すこと。** 何を実行するかは
 > 対象リポジトリを見て決める。**コマンドを推測して組み立てない。**
 >
-> 対象リポジトリに `.ndf/project.json` の `test` があれば、駆動（`drive.py`）がプロンプトに宣言の全体テスト
-> （テストと静的解析の両方の suite の `command`）を並べる。そのときは並んだコマンドを順に実行し、下の探し方は使わない。起動の引数 `--verify-command`（実行検証 Step 2.5 の許可の一覧）は、ここでは使わない。
+> 対象リポジトリに `.ndf/project.json` の `test` があれば、駆動（`ndf cross-review run`）がプロンプトに宣言の全体テスト
+> （テストと静的解析の両方の suite の `command`）を並べる。そのときは並んだコマンドを順に実行し、下の探し方は使わない。起動の引数 `--verify-command`（実行検証 Step 2.5 の例外リスト）は、ここでは使わない。
 > 宣言が無いときと、テストの無い宣言（`strategy` を書かず、どの suite も `command` と `scope_command` を持たない。`{"suites": []}` を含む）のときだけ次の手順で探す。
 >
 > 1. 実行手段を探す。`Makefile` の `test` / `lint` / `check` ターゲット、`package.json` の
 >    `scripts`、`pyproject.toml` の `[tool.pytest.ini_options]`、`composer.json` の
->    `scripts`、継続的統合の定義（`.github/workflows/*.yml`）が実行しているコマンド。
+>    `scripts`、CIの定義（`.github/workflows/*.yml`）が実行しているコマンド。
 >    **順序ではなく一覧である。** どれが最も強い検証かはリポジトリで変わるため、
 >    上から順に 1 つ見つけて打ち切らない
 > 2. 見つかったもののうち、**変更したファイルに掛かるもの**を実行する

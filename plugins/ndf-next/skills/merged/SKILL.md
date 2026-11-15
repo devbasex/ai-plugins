@@ -9,6 +9,8 @@ allowed-tools:
 
 # マージ後クリーンアップコマンド
 
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `release-steps.py`（M2）・`stage-check.sh`（P1a）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+
 PR マージ後の後始末をまとめて実行する。対象 PR のブランチ削除に加えて、残っているマージ済みブランチの整理とベースブランチの取り込みもこの Skill で扱う。
 
 ## 用途の切り分け（最初に判定する）
@@ -20,7 +22,7 @@ PR マージ後の後始末をまとめて実行する。対象 PR のブラン�
 | 作業中ブランチへ最新のベースブランチを取り込む | 「ベースブランチの取り込み」のみ（クリーンアップの手順は実行しない） |
 
 「クリーンアップの手順」以外を目的とする場合、対象 PR は未マージであるのが通常のため、
-マージの確認（`merged-steps.py cleanup`）を前提条件にしてはならない。「マージ済みブランチの整理」と
+マージの確認（`ndf worktree cleanup`）を前提条件にしてはならない。「マージ済みブランチの整理」と
 「ベースブランチの取り込み」はいずれも **単独で実行可能** で、PR のマージ状態に依存しない。
 
 ## 止まる条件
@@ -123,7 +125,7 @@ python3 "$SCRIPTS/merged-steps.py" cleanup <PR番号>... --root <メインディ
 - `items[]` の `result` は `removed`（worktree を外した）/ `deleted`（ブランチを消した。`restore` が戻し方）/ `absent`（ローカルに無い。削除済みとして扱う）/ `kept`（MERGED でない・メインディレクトリが checkout している など。`reason` を報告へ載せる）/ `stopped` / `pulled` を取る
 - worktree の未追跡・無視されたファイルは `<共通の git ディレクトリ>/ndf/worktree-trash/` へ退避してから外す。退避先は `reason` に載る（`退避先 <パス>`。退避するものが残らなければ `退避するものは無かった` で、退避先を作らない）
 - 作り直せる生成物（パスのどこかに `.venv`・`node_modules`・`__pycache__`・`.pytest_cache`・`.mypy_cache`・`.ruff_cache` のディレクトリがあるもの、同じ階層に `Cargo.toml`・`pom.xml`・`dbt_project.yml` がある `target` のディレクトリ）は退避せずに捨て、`reason` の `（捨てた: <相対パス>, …）` に載る。設定が隣に無い `target` は作り直せると決められないため通常の退避へ回す
-- **退避先は、そのブランチを含む版が本番へ出たときに `release` の後片付けが回収の候補として挙げ、人の承認（`ndf-ask:redline:C4`）を得てから消す**（`merged-steps.py sweep-trash --ref <本番に出たコミット>` が候補を挙げ、承認の後に `--yes --only <承認した退避先>...` を付けて、その名前の退避先だけを消す。候補を挙げた後に増えた退避先は消さない）。退避先は Git に無い利用者のファイルを含み消すと戻せないため、本番の承認だけでは消さない（共通原則の C3・C4）。それまでは残す。退避先とブランチの対応は退避先の隣の台帳 `<退避先>.json`（`branch`・`head`・`merge_commit`・`discarded`）が持ち、`head` か `merge_commit` が本番のコミットに含まれれば候補になる。台帳の無い退避先は消さずに件数だけを報告する
+- **退避先は、そのブランチを含む版が本番へ出たときに `release` の後片付けが回収の候補として挙げ、人の承認（`ndf-ask:redline:C4`）を得てから消す**（`ndf worktree trash --ref <本番に出たコミット>` が候補を挙げ、承認の後に `--yes --only <承認した退避先>...` を付けて、その名前の退避先だけを消す。候補を挙げた後に増えた退避先は消さない）。退避先は Git に無い利用者のファイルを含み消すと戻せないため、本番の承認だけでは消さない（共通原則の C3・C4）。それまでは残す。退避先とブランチの対応は退避先の隣の台帳 `<退避先>.json`（`branch`・`head`・`merge_commit`・`discarded`）が持ち、`head` か `merge_commit` が本番のコミットに含まれれば候補になる。台帳の無い退避先は消さずに件数だけを報告する
 - 追跡ファイルの未コミットの変更（modified / staged / 削除）は退避の対象でなく `--force` が消すため、残っていれば外さず `kept` にする（`reason` に件数とファイル名）。コミットするか捨ててから、もう一度実行する
 - worktree を外す直前に開いた公開を閉じ、テスト環境を破棄する（ボリュームも既定で消す。`.ndf/worktree.json` の `testenv.discard_volumes` が `false` なら残す）。公開を閉じられなければ `kept` で、`reason` に環境名・URL・打ち直しのコマンドが載る。破棄できなければ worktree は外れ、`reason` に環境名が載る
 - メインディレクトリの取り込みの後に、worktree の消えた割り当てのテスト環境を回収する（全体で 300 秒まで。ボリュームは上の破棄と同じ宣言に従う）。結果は `kind` が `testenv` の行で `items` に載り（`reclaimed` / `released` / `failed` / `foreign` / `exposed` / `deferred` / `unseen`）、件数は `metrics` の `reclaimed_testenvs`・`reclaim_failed`・`reclaim_deferred` に載る。走らなかったときは `kind` が `testenv-reclaim` で `result` が `not_run` の行が 1 つ載る。回収の失敗で `status` と終了コードは変わらない。結果の読み方は `worktree` の `references/test-execution.md` の「後片付け」にある
@@ -169,10 +171,10 @@ python3 "$SCRIPTS/merged-steps.py" merge-when-green <PR番号> --root <メイン
   再実行した同じチェックが再びスタックしたら `stopped`（1）で止まる（`items` の `result` は `stuck`）
 - ジョブが `queued` のままランナーを待つ間は、待ちの 1 周ごとに stderr へ
   `merge-when-green: CI のランナー待ち（待ち行列 N 件、待ち M 件）` を出す。最後に見たキューの件数は
-  `metrics.queued_runs` に残る。supervise.py の run のステップで動かすと、この行が `progress.jsonl` の
+  `metrics.queued_runs` に残る。ndf plan の run のステップで動かすと、この行が `progress.jsonl` の
   `alive` の行の `last_output` に載る
 
-**待ちが遅れたときの一次の調査は `probe` で行う。** supervise.py の `merge` と `release` のステップが、経過が
+**待ちが遅れたときの一次の調査は `probe` で行う。** ndf plan の `merge` と `release` のステップが、経過が
 想定を超えたときに打つ（ステップの `probe`）。
 
 ```bash

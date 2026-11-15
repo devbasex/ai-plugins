@@ -1,5 +1,7 @@
 # 記録の読み方と閾値の見直し（`pace`）
 
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `check-trigger.py`（M1）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+
 [pace.md](pace.md) の続きである。自動で通した承認ゲートの記録と、検査の記録（`check-trigger.py record` / `stats`）の読み方を持つ。
 
 **自動で通した承認ゲートは 3 か所に残る。** スプリント状態ファイルの `gates[]` に `by: mvv`（`verdict`・`reasons`・`log`）の行、
@@ -25,11 +27,11 @@
 
 | キー | 単位 |
 | --- | --- |
-| `applied`・`reverted` | 構造改善の改善項目 |
+| `applied`・`reverted` | リファクタリングの改善項目 |
 | `findings`・`fixed`・`deferred`・`rejected` | 修正担当が扱った指摘（`findings` = 直した + 見送った + 却下した。`findings` ≥ `fixed`） |
 | `comments` | レビュー担当が出したコメント（1 つに複数の指摘が入り、2 者が同じ所を指せば 2 件。指摘の数と比べない） |
 | `unresolved` | 解決されていないスレッド |
-| `rounds` | 実装レビューのラウンド |
+| `rounds` | コードレビューのラウンド |
 
 `comments` を持たない古い行の `findings` はコメントの数である。`stats` はそれを `comments` として出し、`findings` と
 `fixed` を空にする（行は書き換えない）。

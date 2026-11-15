@@ -5,6 +5,8 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 
 # 要求と受け入れ条件
 
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `spec-copy.py`（M7）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+
 実装を始める前に、**何を満たせば完了なのか**を観測可能な形へ確定させる。
 
 ## この Skill の責務
@@ -88,7 +90,7 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 2. 節が無い課題（節を求める前に起票された課題）では、本文の書き直しを求めずに、題・本文の条件を手順 1 の原文と
    突き合わせ、原文に無い条件を拾い出して書く。課題の本文の既存の部分は書き換えない
 3. 設計承認ゲートで利用者が推定を差し戻したら、その行を消さずに取り消し線と理由・日付を足し
-   （「変更の途中で要求が変わったとき」の形）、`spec-copy.py write` で写しを作り直す。承認された推定は、
+   （「変更の途中で要求が変わったとき」の形）、`ndf records spec finalize` で写しを作り直す。承認された推定は、
    利用者が確かめた条件として扱う
 
 ### 2. 曖昧語を検出して具体化する
@@ -234,5 +236,5 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 - [references/glossary-format.md](references/glossary-format.md) — 用語集の設定・用語集・人が読む文書の形と、用語チェックの規則
 - [references/document-requirements.md](references/document-requirements.md) — 読み手へ渡す文書の受け入れ条件
 
-この工程に入ったら進捗記録のコマンド `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "要求と受け入れ条件"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の進捗記録のコマンドを使う）。
+この工程に入ったら進捗進捗記録 `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "要求と受け入れ条件"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の進捗進捗記録を使う）。
 

@@ -10,6 +10,8 @@ allowed-tools:
 
 # 蓄積した課題を棚卸しする
 
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `ask.py`（P2）・`estimate.py`（P3）・`glossary.py`（M7）・`project-decl.py`（D2+）・`resolve.sh`（X0）・`sprint-close.py`（M1）・`upkeep.py`（M6）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+
 **変更をまたいで溜まった課題そのものを見直す。** 起票はその場で行い、その変更から出た
 取りこぼしは振り返りが拾うが、**一覧の全体を現状に合わせる手順**はどちらも持たない。
 
@@ -39,7 +41,7 @@ allowed-tools:
 まとめのプランは起動の判定（`depth due diff`）が起動を返した回だけ差分の棚卸しを流し、その後に大整理と見直しを起動の判定つきで流す。
 扱うループの 1 回と課題は振り返りの範囲（`upkeep.py depth scope --sprint <名前>`）から読む。`--loop` を使わないときは人が
 `--depth review` か `--depth overhaul` で呼べ、`depth due ... --manual` が起動の条件を `manual` で残す。
-まとめのプランは差分の棚卸しの行（深さの記録）へ、同じプランの進行の記録の棚卸しのステップの秒・ドル・言語モデルと、
+まとめのプランは差分の棚卸しの行（深さの記録）へ、同じプランの進捗記録の棚卸しのステップの秒・ドル・言語モデルと、
 開発ループの名前・ループの回の番号を写す。差分の棚卸しの所要は、デプロイした版のタグより後の行の中央値を基準と比べて確かめる:
 
 ```bash
@@ -481,7 +483,7 @@ python3 "$UPKEEP/upkeep.py" report
 
 **未設定の件数を報告へ残す。** 残った件数と理由が、次の棚卸しの材料になる。
 
-この工程に入ったら進捗記録のコマンド `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "棚卸し"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の進捗記録のコマンドを使う）。
+この工程に入ったら進捗進捗記録 `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "棚卸し"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の進捗進捗記録を使う）。
 
 ## 関連
 

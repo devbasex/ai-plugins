@@ -1,10 +1,12 @@
 # 04: 状態ファイルと入出力の契約
 
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `critique.sh`（M5）・`fetch-pr-comments.sh`（M1）・`launch-agy.sh`（M5）・`launch-reviewer.sh`（M5）・`measure.py`（M5）・`state.py`（M5）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+
 `cross-review` が持つ 2 つの契約を一次資料として残す。状態ファイル（`state.json`）の形式と、
 レビューを行う CLI へ渡す入出力の取り決めである。**手順の途中では読まず、形式を確かめる
 ときだけ開く。** 手順は [01-state-and-review.md](01-state-and-review.md) にある。
 
-**目次:** [状態ファイル](#状態ファイル) / [再開で渡した引数の扱い](#再開で渡した引数の扱い) / [record-fix](#record-fix) / [AI への入出力契約（両 launcher 共通）](#ai-への入出力契約両-launcher-共通) / [AI が書き出すファイル契約](#ai-が書き出すファイル契約) / [投稿と監視の記録](#投稿と監視の記録) / [ラウンドの開始時に担当へ渡すもの](#ラウンドの開始時に担当へ渡すもの) / [`<worktree-base>` の解決順](#worktree-base-の解決順) / [事前確認](#事前確認) / [自動レビュー観点テンプレート](#自動レビュー観点テンプレート)
+**目次:** [状態ファイル](#状態ファイル) / [再開で渡した引数の扱い](#再開で渡した引数の扱い) / [record-fix](#record-fix) / [AI への入出力契約（両 launcher 共通）](#ai-への入出力契約両-launcher-共通) / [AI が書き出すファイル契約](#ai-が書き出すファイル契約) / [投稿と監視ログ](#投稿と監視ログ) / [ラウンドの開始時に担当へ渡すもの](#ラウンドの開始時に担当へ渡すもの) / [`<worktree-base>` の解決順](#worktree-base-の解決順) / [事前確認](#事前確認) / [自動レビュー観点テンプレート](#自動レビュー観点テンプレート)
 
 ## 状態ファイル
 
@@ -223,7 +225,7 @@
 - `rounds[].fix.resolved_threads` — `resolveReviewThread` で resolve した**件数(int)**。
   ここ (state.json 側) は int だが、fix サブエージェントが返す戻り値ファイル
   (`fix-pr<PR>-result.json`) 側の `resolved_threads` は **list**（[02-fix-and-rotation.md](02-fix-and-rotation.md) の戻り値スキーマ参照）。
-  `state.py merge-fix` が fix結果の list を `len()` して state.json に int で保存する。
+  `ndf cross-review merge-fix` が fix結果の list を `len()` して state.json に int で保存する。
   混同して fix結果側に int を書くと過去 `merge-fix` が落ちていたため、現在は int/list 両受理
 - `rounds[].fix.ci_note` — コード無関係の CI 失敗時に「Assignees 未設定」等の理由を残す
 - `rounds[].verdict` — そのラウンドの判定（`approved` / `changes_requested`）。
@@ -263,7 +265,7 @@
   `.ndf/review.json`（レビューの宣言。下の「レビューの宣言」）を読んで書き直す。`status` は `declared` / `none` /
   `unreadable`（`error` に理由）、`focus` は重点の名前の列、`reviewer_block` はレビュー担当への節
   （正本 `scripts/lib/review_criteria.py` が組む）。`launch-reviewer.sh` が `reviewer_block` を指示へ
-  差し込み、空なら宣言を読まない既定の節（基準 3 の無い形）を使う。修正担当は `drive.py` が渡す
+  差し込み、空なら宣言を読まない既定の節（基準 3 の無い形）を使う。修正担当は `ndf cross-review run` が渡す
   `CROSS_REVIEW_STATE` から `status` と `focus` とプロファイルを読む。`init` の出力の `REVIEW_FOCUS=<status>` に同じ値が出る。プロファイルの項目（`profile_status` / `profile` / `profile_error` / `profile_name` / `profile_others`）と、`init` の出力の `REVIEW_PROFILE=` / `REVIEW_PROFILE_NAME=`（`version: 3` で選んだプロファイルの名前。ほかは空）と、`report` の要約のプロファイルの行（`profile_name` があるときだけ）は [02-fix-and-rotation.md](02-fix-and-rotation.md) の「レビューの宣言」にある
 - `auto_review_categories` — 観点を渡した分類の名前の列。プロファイルの分類の名前を含み、`replace_auto_categories` が真なら既定の分類の名前を含まない。`review_kind` は既定の分類から決める
 - `deferred_nits[].waived` — `/ndf:fix` が基準外として見送った指摘の種類。見送りの返信（`reply`）を
@@ -324,7 +326,7 @@ python3 scripts/state.py record-fix <PR> [--commit <SHA>] [--resolved-thread <ID
  "deferred": [], "rejected": [], "ci_status": null, "recorded_by": "record-fix"}
 ```
 
-`drive.py` の修正の止まり（終了コード 20）で `record-fix` を打った後に `drive.py` を打ち直すと、取り込みは済んでいる
+`ndf cross-review run` の修正の止まり（終了コード 20）で `record-fix` を打った後に `ndf cross-review run` を打ち直すと、取り込みは済んでいる
 ため `merge-fix` は記録した終了コードで戻る。
 
 ## AI への入出力契約（両 launcher 共通）
@@ -399,7 +401,7 @@ launcher が生成するプロンプトに以下を強制している:
 **落とすのは、書き込む中身が確定した後である。** 読めなかった再実行が、一度取り込めて
 いた記録を消さないようにする。
 
-## 投稿と監視の記録
+## 投稿と監視ログ
 
 投稿の種別ごとの契約と、監視と計測が残すファイルは
 [07-posts-and-records.md](07-posts-and-records.md) にある。

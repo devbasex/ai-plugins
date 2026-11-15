@@ -13,6 +13,8 @@ allowed-tools:
 
 # 多ランタイム・リファクタリング（実装の予算で選び、選んだ項目をやり通す 1 回のリファクタリング計画の実行）
 
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `launch-cli.sh`（M4）・`prepare-worktrees.sh`（M4）・`refactor.py`（M4）・`resolve.sh`（X0）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+
 **参加者の全員が 1 度だけ多面的に提案し、選ばれた 1 者が実装の予算に収まる分を
 リファクタリング計画・テスト追加・実装・検証する。** 実装の予算（`--budget-minutes`、既定 60 分）は何件を選ぶかを
 決めるためだけに使い、選んだ改善項目を時間で打ち切らない。止まるのは安全網の上限（既定で実効の予算の 2 倍）に
@@ -30,9 +32,9 @@ allowed-tools:
 - [docs/02-plan-and-implement.md](docs/02-plan-and-implement.md) — リファクタリング計画・テスト追加・実装
 - [docs/03-review-viewpoints.md](docs/03-review-viewpoints.md) — 最終ゲートの `cross-review` へ渡す観点
 - [docs/04-verify-and-report.md](docs/04-verify-and-report.md) — 検証/修正・危険フラグ・最終ゲート・配分テーブル・報告
-- [scripts/refactor.py](scripts/refactor.py) — 状態管理。外部パッケージ（`md` / `mdtable` のグループ）を import の前に `deps.require` で用意する（import できなければ uv の環境で起動し直す）
-- [scripts/prepare-worktrees.sh](scripts/prepare-worktrees.sh) — 作業ディレクトリ準備と Skill 配置
-- [scripts/launch-cli.sh](scripts/launch-cli.sh) — 手順ごとのプロンプト組み立てと CLI 起動
+- `scripts/refactor.py` — 状態管理。外部パッケージ（`md` / `mdtable` のグループ）を import の前に `deps.require` で用意する（import できなければ uv の環境で起動し直す）
+- `scripts/prepare-worktrees.sh` — 作業ディレクトリ準備と Skill 配置
+- `scripts/launch-cli.sh` — 手順ごとのプロンプト組み立てと CLI 起動
 - 監視と CLI 起動の実体は `../../scripts/lib/`（プラグインルート直下の収束ループの共通ライブラリ）
 
 ## この Skill で使う語
@@ -118,7 +120,7 @@ allowed-tools:
 合否は検査のプランの CI の結果の監視（`ci-peek`）とマージが確かめる。宣言の無いリポジトリでは、検査のプランが
 リファクタリングを通さない（手元のテストの負荷のため。`development-workflow` の「工程ごとの決まり」）。
 
-**継続的統合のジョブのうち宣言に無いものは、`init` が知らせる（止めない）**。宣言の `ci.provider` が `github-actions` のとき、
+**CIのジョブのうち宣言に無いものは、`init` が知らせる（止めない）**。宣言の `ci.provider` が `github-actions` のとき、
 作業ディレクトリの `.github/workflows/` のジョブを、suite の `ci_jobs` と `test.ci_exempt` に照らす。どちらにも無いジョブは
 手元の検証で走らないため、識別子（`<ワークフローのパス>#<job id>`）を挙げて状態ファイルの `ci_coverage` にも残す。
 手元で同じ検査を走らせる suite の `ci_jobs` に書くか、走らせない理由を添えて `test.ci_exempt`（`{"job", "reason"}`）に書く。
@@ -166,15 +168,15 @@ agy と kiro は取れないため、モデルを比べたいなら `--model agy
 - プロダクションコードの差分がある。起動の前に `assess` を打ち、飛ばしてよいかを見る（読み方は下の終了コードの表）
 
 シェルの変数は呼び出しをまたいで残らないため、この節と「実行」の各ブロックを 1 回の呼び出しとし、先頭で毎回 `$R` を
-決め直す。`<入口を探すコマンド>` の行は [scripts-lookup.md](../development-workflow/references/scripts-lookup.md) の
-「入口を探すコマンド」の for 文である（Codex / Kiro / agy では `${CLAUDE_PLUGIN_ROOT}` が置き換わらないため、この for 文で探す）。
+決め直す。`<エントリポイントを探すコマンド>` の行は [scripts-lookup.md](../development-workflow/references/scripts-lookup.md) の
+「エントリポイントを探すコマンド」の for 文である（Codex / Kiro / agy では `${CLAUDE_PLUGIN_ROOT}` が置き換わらないため、この for 文で探す）。
 スクリプトの位置は解決のエントリポイント（`resolve.sh`）が導入先から求める。
 
 ```bash
-<入口を探すコマンド>   # scripts-lookup.md の「入口を探すコマンド」の for 文。$R を決める
-[ -n "$R" ] || exit 2   # 入口を探せない = 判定できない（3 の「飛ばしてよい」と取り違えない）
+<エントリポイントを探すコマンド>   # scripts-lookup.md の「エントリポイントを探すコマンド」の for 文。$R を決める
+[ -n "$R" ] || exit 2   # エントリポイントを探せない = 判定できない（3 の「飛ばしてよい」と取り違えない）
 RF=$(bash "$R/scripts/resolve.sh" scripts cross-refactoring) || exit 2
-BASE="<開発の起点>"   # worktree-setup.sh check の「開発の起点:」の行の名前
+BASE="<開発の起点>"   # ndf worktree check の「開発の起点:」の行の名前
 python3 "$RF/refactor.py" assess --base "origin/$BASE"; echo "exit=$?"
 ```
 
@@ -216,7 +218,7 @@ flowchart TD
     Net["安全網の上限・打ち消しの衝突"]:::stop -.->|どの時点でも| Halt["取り消さずに止めて人へ渡す（gate）"]:::stop
     D -->|無い| Gate{"最終ゲート"}
     Gate -->|単独| CR["全体テスト → /ndf:cross-review"]
-    Gate -->|工程の 1 つ| Whole["全体テスト<br/>CI に任せる戦略・--ci-check なら継続的統合を待つ"]
+    Gate -->|工程の 1 つ| Whole["全体テスト<br/>CI に任せる戦略・--ci-check ならCIを待つ"]
     Whole -->|変更起因で落ちた| FF["最終ゲート修正（寄せた項目と原因の候補を依頼に載せる）"]:::phase --> Gate
     CR --> Fin["finalize: 通った実行だけ配分の履歴へ 1 行"]:::ok
     Whole -->|通る| Fin
@@ -238,7 +240,7 @@ flowchart TD
 待ちはコマンドの中で行う。Claude Code では `run_in_background` で起動し、完了通知を 1 回受ける。
 
 ```bash
-<入口を探すコマンド>   # scripts-lookup.md の「入口を探すコマンド」の for 文。$R を決める
+<エントリポイントを探すコマンド>   # scripts-lookup.md の「エントリポイントを探すコマンド」の for 文。$R を決める
 [ -n "$R" ] || exit 3
 RF=$(bash "$R/scripts/resolve.sh" scripts cross-refactoring) || exit 3
 python3 "$RF/drive.py" <PR> --scope <範囲...> [「引数」の表のうち値のあるもの]
@@ -249,7 +251,7 @@ Codex / Kiro / agy では共通ライブラリの `bg-wait.sh` でバックグ�
 
 ```bash
 # 起動（1 回の呼び出し）
-<入口を探すコマンド>   # scripts-lookup.md の「入口を探すコマンド」の for 文。$R を決める
+<エントリポイントを探すコマンド>   # scripts-lookup.md の「エントリポイントを探すコマンド」の for 文。$R を決める
 [ -n "$R" ] || exit 3
 RF=$(bash "$R/scripts/resolve.sh" scripts cross-refactoring) || exit 3
 LIB=$(bash "$R/scripts/resolve.sh" scripts)/lib || exit 3
@@ -259,7 +261,7 @@ bash "$LIB/bg-wait.sh" run "$RC" -- python3 "$RF/drive.py" <PR> --scope <範囲.
 
 ```bash
 # 待ち（124 が返るあいだ、別の呼び出しとして打ち直す）
-<入口を探すコマンド>   # scripts-lookup.md の「入口を探すコマンド」の for 文。$R を決める
+<エントリポイントを探すコマンド>   # scripts-lookup.md の「エントリポイントを探すコマンド」の for 文。$R を決める
 [ -n "$R" ] || exit 3
 LIB=$(bash "$R/scripts/resolve.sh" scripts)/lib || exit 3
 RC="${TMPDIR:-/tmp}/cross-refactoring-drive-pr<PR>.rc"
@@ -301,7 +303,7 @@ origin の head ブランチの `This reverts commit <SHA>` を読み、実装�
 「前提」と同じく対象のリポジトリの中で打つ（既定の置き場は対象のリポジトリの origin から決まる）。
 
 ```bash
-<入口を探すコマンド>   # scripts-lookup.md の「入口を探すコマンド」の for 文。$R を決める
+<エントリポイントを探すコマンド>   # scripts-lookup.md の「エントリポイントを探すコマンド」の for 文。$R を決める
 [ -n "$R" ] || exit 3
 RF=$(bash "$R/scripts/resolve.sh" scripts cross-refactoring) || exit 3
 python3 "$RF/refactor.py" plan-comment <PR> --scan-reverts
@@ -314,7 +316,7 @@ python3 "$RF/refactor.py" plan-comment <PR> --scan-reverts
 | 4 | 状態ファイルが無い・origin を取り込めない（コメントも状態も変えない） |
 
 最終ゲートの判定の相手は起動のされ方で変わる（[docs/04-verify-and-report.md](docs/04-verify-and-report.md)）。
-`--workflow-step` なら全体テスト（CI に任せる戦略か `--ci-check` なら継続的統合）で判定して finalize まで進み、単独起動なら
+`--workflow-step` なら全体テスト（CI に任せる戦略か `--ci-check` ならCI）で判定して finalize まで進み、単独起動なら
 cross-review の最終ステータスを受けてから finalize を呼ぶ。最終ゲート修正は前進している限り続け、修正担当を替えた後も停滞
 したら取り消さずに止めて人へ渡す（終了コード 10）。木が起点と同じでも確かめを省かない。
 
@@ -348,6 +350,6 @@ cross-review の最終ステータスを受けてから finalize を呼ぶ。最
   内訳は**リファクタリング計画の生の URL**
 - 着手前の全体テストの結果（通過か失敗・秒・HEAD）と、最終ゲートへ寄せた危険フラグと項目
 - 判断に Jev を使ったか（使わなかった理由・呼び出しの失敗の数）
-- 最終ゲートの結果（`cross-review` の収束、または全体テスト／継続的統合の合否）
+- 最終ゲートの結果（`cross-review` の収束、または全体テスト／CIの合否）
 - 監視が手順の上限で CLI を止めた手順と、固定のまま残した値（OS の後始末と通信の待ち）
 - 指標の測定（言語・ツール・版・ランナー・所要秒と、測れなかった言語と理由の識別子）。リファクタリング計画と同じ表

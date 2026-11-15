@@ -12,6 +12,8 @@ allowed-tools:
 
 # コードレビューコマンド
 
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `external-ai.py`（AD3+）・`resolve.sh`（X0）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+
 PR 差分、または `--branch` 指定時は現在のブランチの差分を、専門家としてレビューする。
 
 ## 引数
@@ -176,7 +178,7 @@ Claude 自身がレビューする（第二引数なし）:
 `metrics.by_severity`・総評の要約と PR URL を報告する。指摘の中身は PR 上にあるため繰り返さない。
 `--branch` では `metrics.report` の報告をセッション上に出す。レビュー結果は提案であり、最終判断は開発者が行う。
 
-この工程に入ったら進捗記録 `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "実装レビュー"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「進捗記録」を使う）。
+この工程に入ったら進捗記録 `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "コードレビュー"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「進捗記録」を使う）。
 
 ## 関連
 

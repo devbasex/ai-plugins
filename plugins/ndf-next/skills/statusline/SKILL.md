@@ -9,6 +9,8 @@ allowed-tools:
 
 # Statusline 切り替えコマンド
 
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `resolve.sh`（X0）・`statusline-switch.sh`（S1b）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+
 NDF 標準 statusline (project_dir + メインとサブエージェントのコンテキスト使用量) と
 既存のカスタム statusline を切り替える。
 
@@ -37,7 +39,7 @@ NDF 標準 statusline (project_dir + メインとサブエージェントのコ�
 引数に応じて以下のコマンドを実行する:
 
 ```bash
-# スクリプトの置き場所を解決の入口（scripts/resolve.sh）に尋ねる。入口を探すこのコマンドと
+# スクリプトの置き場所を解決のエントリポイント（scripts/resolve.sh）に尋ねる。エントリポイントを探すこのコマンドと
 # 候補の順序は development-workflow/references/scripts-lookup.md にある。
 for R in '${CLAUDE_PLUGIN_ROOT}' "$(git rev-parse --show-toplevel 2>/dev/null)/plugins/ndf" \
   ~/.claude/plugins/cache/*/ndf/* .kiro/skills/*/../.. ~/.kiro/skills/*/../.. \

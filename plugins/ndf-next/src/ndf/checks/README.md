@@ -104,7 +104,7 @@ data = os.environ.get("X", "")  # noqa: NDF502 利用者の入力: 未設定は�
 
 ## 禁止語の規則
 
-`banned-word` は、用語集が廃止した語（各語の `deprecated`）と禁止語（用語集の設定 `.ndf/glossary.json` の `check.banned.words`）を、プラグインの下の文字のファイルの行から拾う。用語集の置き場は用語集の設定の `source` から求める。ASCII の語とカタカナだけの語は、同じ字種の語の内側に当てない。
+`banned-word` は、用語集が廃止した語（各語の `deprecated`）と禁止語（用語集の設定 `.ndf/glossary.json` の `check.banned.words`）を、プラグインの下の文字のファイルの行から拾う。用語集の置き場は用語集の設定の `source` から求める。ASCII の語とカタカナだけの語は、同じ字種の語の内側に当てない。避ける語の例として廃止した語を挙げる文書は、`rules.json` の `words.examples` にファイル（プラグインの根からのパス）・外す語・理由を書き、そのファイルのその語だけを外す。
 
 ## 不変条件
 

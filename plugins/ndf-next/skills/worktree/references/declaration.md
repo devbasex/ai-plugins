@@ -1,5 +1,7 @@
 # 設定ファイルの書き方
 
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `pr-steps.py`（M1）・`project-decl.py`（D2+）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+
 worktree 運用の仕組みは、リポジトリごとの差を `.ndf/worktree.json` から読む。
 **このファイルが無いリポジトリでは、すべての仕組みが何もせずに終わる。**
 
@@ -134,10 +136,10 @@ origin にもローカルにも無いときは、既定ブランチへは落ち�
 }
 ```
 
-- 組み合わせが表に合わない・知らないキー・表に無い値は、読む側（`supervise.py new sprint` など）が
+- 組み合わせが表に合わない・知らないキー・表に無い値は、読む側（`ndf route render sprint` など）が
   直すキーと許す値を出して終了コード 2 で止まる。既定値の行へは倒さない
 - スプリントを始めるときは、`branch_flow` をメインディレクトリの設定から読む（`production_branch` と同じ）
-- スプリントに属さないリリース（並列の計画のまとめたリリース・`supervise.py new release`）は、本番チャネル宛の Pull Request の検査と同じく
+- スプリントに属さないリリース（並列の計画のまとめたリリース・`ndf route render release`）は、本番チャネル宛の Pull Request の検査と同じく
   本番チャネルの宣言（`origin/<本番チャネル>` の `.ndf/worktree.json`）の `branch_flow` で組む。ベースブランチの
   Pull Request だけではリリースの範囲の決め方を変えられない。本番チャネルの宣言を読めなければ宣言の無いリポジトリと
   同じく組み、`branch_flow` が壊れていれば止まる。ブランチの名前は、どちらでもメインディレクトリの設定から解く
@@ -176,7 +178,7 @@ origin にもローカルにも無いときは、既定ブランチへは落ち�
 | `design` | `cross-review` / `pr` | `cross-review` / `pr` |
 | `spec` | 掛けない | 掛けない |
 
-成り立たない組み合わせは、読む側（`supervise.py new sprint`・`project-decl.py check / write`）が直すキーと理由を
+成り立たない組み合わせは、読む側（`ndf route render sprint`・`project-decl.py check / write`）が直すキーと理由を
 1 件 1 行で出して終了コード 2 で止まる。
 
 - `diff` が `none` なのに `checks` を書いた・`none` 以外なのに `checks` が空
@@ -214,7 +216,7 @@ origin にもローカルにも無いときは、既定ブランチへは落ち�
 }
 ```
 
-- リリースブランチの PR のレビューは、開発版のデプロイのプランが承認資料より前に掛ける。`release-steps.py
+- リリースブランチの PR のレビューは、開発版のデプロイのプランが承認資料より前に掛ける。`ndf release-steps
   review-open` が一時の PR（衝突の解消のレビューの PR）を組み、レビューの直しは `review-close` がリリースブランチへ
   移す（`release` の `references/release-steps.md`）。衝突したマージが無ければレビューを打たずに進む
 - 動いているスプリントは、開始時に目録（`sprint.json`）の `ブランチ運用` の `reviews` へ書いた値のまま進む
@@ -286,7 +288,7 @@ worktree が 1 つならそのブランチのコミットへ、0 個または複
 ## 依存物を worktree へ用意するリポジトリ
 
 pre-commit やテストが `vendor/`・`node_modules/`・`.env` などの追跡されないファイルを使うなら、`deps` を足す。
-NDF が worktree を作った直後に、`copy_from_main`・`copy_as_real`・`run` の順に用意する（`worktree-deps.sh prepare`）。
+NDF が worktree を作った直後に、`copy_from_main`・`copy_as_real`・`run` の順に用意する（`ndf worktree deps`）。
 
 ```json
 {
@@ -354,7 +356,7 @@ worktree ごとにテスト環境を立てるなら、`testenv` を足す。
 | --- | --- |
 | `port_band` | 他の用途と重ならない帯。スロット 1 つあたり 20 番を使う |
 | `port_roles` | 役割ごとの番号。ポートは `帯の下限 + スロット*20 + 役割番号` |
-| `discard_volumes` | `false` のとき、`worktree-testenv.sh down` がテスト環境のボリュームを残す。**無しと `true` では消し、消えたデータは戻せない。** 作り直せないデータを持つプロジェクトは `false` を書く。真偽値以外の値は残す側に倒す。メインディレクトリの宣言を読む |
+| `discard_volumes` | `false` のとき、`ndf worktree testenv down` がテスト環境のボリュームを残す。**無しと `true` では消し、消えたデータは戻せない。** 作り直せないデータを持つプロジェクトは `false` を書く。真偽値以外の値は残す側に倒す。メインディレクトリの宣言を読む |
 | `golden_tag_paths` | データ構造を定める資産。**内容が同じなら基準を焼き直さない** |
 | `test_kinds` | 種類ごとの選別と実行。**書かなければテスト実行の仕組みは何もせずに終わる** |
 | `skip_reset` | 初期化を抑止する環境変数。渡さないと最初のテストが全体を作り直す構成がある |
@@ -385,8 +387,8 @@ worktree レジストリの定義は [`../schemas/registry.schema.json`](../sche
 ```
 
 `version` は共有設定と同じく必須で、値は `1` である。追跡から外す登録は
-`.ndf/.gitignore` が持ち、`worktree-setup.sh init` が共有設定と一緒に作る。**既に
-設定があるリポジトリでは作られない。** `worktree-setup.sh status` が登録の無い状態を
+`.ndf/.gitignore` が持ち、`ndf worktree init` が共有設定と一緒に作る。**既に
+設定があるリポジトリでは作られない。** `ndf worktree list` が登録の無い状態を
 1 行で伝えるので、その行が出たら `.ndf/.gitignore` へ `worktree.local.json` を足す。
 
 ### 上書きできる項目
@@ -399,7 +401,7 @@ worktree レジストリの定義は [`../schemas/registry.schema.json`](../sche
 
 **この 3 つ以外は反映しない。** `base_branch` / `production_branch` / `guard` と未知の
 項目は、書いても共有設定の値が使われる。個人設定は追跡されずレビューを通らないため、
-リポジトリの運用を個人が変えると、手元の動作と継続的統合の判定が食い違う。
+リポジトリの運用を個人が変えると、手元の動作とCIの判定が食い違う。
 `testenv.expose` も反映しない。追跡されないファイルから外部への公開を有効にできる状態を
 作らないためである。 **`expose` を落として空になった `testenv` は節ごと反映しない。**
 空の節を重ねると、`testenv` を設定していないリポジトリで試験環境の仕組みが有効に変わる。
@@ -425,7 +427,7 @@ worktree レジストリの定義は [`../schemas/registry.schema.json`](../sche
 bash "$SCRIPTS/worktree-setup.sh" status
 ```
 
-「個人の宣言:」の行が状態を、「個人の宣言で反映しない項目:」の行が無視した項目名を出す。
+「個人設定:」の行が状態を、「個人設定で反映しない項目:」の行が無視した項目名を出す。
 
 ## 確かめる
 
