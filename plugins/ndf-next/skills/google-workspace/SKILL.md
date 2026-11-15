@@ -3,51 +3,49 @@ name: google-workspace
 description: "Export, download, and upload Google Drive and Docs files with the gws CLI, installing it with consent and guiding login. Use when a file must be fetched from or published to Drive（Google Drive・Google Docs・Google Workspace・共有リンク・gws）."
 allowed-tools:
   - Read
-  - Bash(python3 *)
+  - Bash(ndf *)
   - Bash(gws *)
 ---
 
 # Google Workspace（gws）
-
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `gws-check.py`（副命令は #3547 で作る）・`slides-thumbnails.py`（副命令は #3547 で作る）。スクリプトはこの Skill の `scripts/` へ写していない。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 Google Workspace の操作は、すべて gws（Google Workspace CLI、npm の `@googleworkspace/cli`）で行う。
 gws は Google の公式サポート外の CLI で、版は 0.x である。
 
 ## 流れ
 
-1. **確かめる**: 確認のスクリプトを打ち、終了コードと JSON の `metrics.state` で次の手を選ぶ（`$SKILL_DIR` はこの Skill のディレクトリ）
+1. **確かめる**: gws の確認を打ち、終了コードと結果 JSON の `metrics.state` で次の手を選ぶ
 
    ```bash
-   python3 "$SKILL_DIR/scripts/gws-check.py"
+   ndf gws check
    ```
 
    | 終了コード | `metrics.state` | 次の手 |
    | --- | --- | --- |
    | 0 | `authenticated` | 4. の操作へ進む |
-   | 10 | `missing` | 2. 導入の同意を求める |
-   | 11 | `unauthenticated` | 3. 認証を案内する |
+   | 10 | `missing` | 2. 導入の同意を求める（`routes` の `approved` が打ち直しのコマンド） |
+   | 11 | `unauthenticated` | 3. 認証を案内する（`routes` の `retry` が打ち直しのコマンド） |
    | 3 | `uninstallable` | npm（Node.js）が無く導入できない。理由を示して止まる |
    | 1・2 | — | `summary` と `items` を示して止まる |
 
-2. **同意のうえ入れる**（`missing` のとき）: `presentation_path` の承認資料（取得元・打つコマンド `npm install -g @googleworkspace/cli`・入る先・戻し方）を利用者に示し、同意（`AskUserQuestion` の `metadata.source` は `ndf-ask:redline:C6`。利用者の環境へ入れるため）を得てから打ち直す
+2. **同意のうえ入れる**（`missing` のとき）: `presentation_path` の承認資料（取得元・打つコマンド `npm install -g @googleworkspace/cli`・入る先・戻し方）を利用者に示し、同意（`AskUserQuestion` の `metadata.source` は `ndf-ask:redline:C6`。利用者の環境へ入れるため）を得てから、`routes` の `approved`（導入の同意の印 `--install` を付けた打ち直し）を打つ
 
    ```bash
-   python3 "$SKILL_DIR/scripts/gws-check.py" --install
+   ndf gws check --install
    ```
 
    - 利用者が導入を含めて頼んだ（「gws を入れて」）ときは、その依頼を同意とみなす。そのときも承認資料は示す
    - 暗黙の依頼（「Drive から取って」）では、明示の同意を待つ
-   - 断られたとき・人がいない起動（`claude -p`、`pace: fast` / `auto` を含む）では入れずに止まる。gws の無い代わりの経路は持たない
-   - 失敗（終了コード 1）は出力を示して止まる。`sudo` で打ち直さない。`next` が `PATH` への追加を案内したら、それを利用者に伝えて止まる
+   - 断られたとき（`routes` の `rejected`）・人がいない起動（`claude -p`、`pace: fast` / `auto` を含む）では入れずに止まる。gws の無い代わりの経路は持たない
+   - 失敗（終了コード 1）は `summary` と `items`（npm の出力の末尾）を示して止まる。`sudo` で打ち直さない。`summary` が `PATH` への追加を案内したら、それを利用者に伝えて止まる
 
-   入った後はスクリプトが同じ起動の中で確かめ直し、その状態を返す（多くは `unauthenticated`）。
+   入った後は gws の確認が同じ起動の中で確かめ直し、その状態を返す（多くは `unauthenticated`）。
 
-3. **認証を案内する**（`unauthenticated` のとき）: ブラウザでの承認が要るため、エージェントは `gws auth login` を打たない。利用者に次を頼み（問うときの `metadata.source` は `ndf-ask:human-action`）、終えたと伝えられたら 1. から打ち直す
+3. **認証を案内する**（`unauthenticated` のとき）: ブラウザでの承認が要るため、エージェントは `gws auth login` を打たない。利用者に次を頼み（問うときの `metadata.source` は `ndf-ask:human-action`）、終えたと伝えられたら `routes` の `retry`（1. と同じ `ndf gws check`）を打つ
 
    - Claude Code: `! gws auth login`
    - ほかのランタイム: 別の端末で `gws auth login`
-   - `metrics.client_config_exists` が `false` のときは、その前に `gws auth setup`（gcloud が要る）か OAuth クライアントの `client_secret.json` の用意を頼む（`next` の文に従う）
+   - `metrics.client_config_exists` が `false` のときは、その前に `gws auth setup`（gcloud が要る）か OAuth クライアントの `client_secret.json` の用意を頼む（`summary` にも同じ案内がある）
 
    トークンは gws が自分の設定ディレクトリに置く。エージェントはトークンと `client_secret.json` を読まない・書かない。
 
@@ -65,7 +63,7 @@ gws は Google の公式サポート外の CLI で、版は 0.x である。
 | pptx を Google Slides へ変換する 2 手目（上げた pptx を `mimeType` を指定して複製する） | `gws drive files copy --params '{"fileId":"<上げた pptx の ID>","ignoreDefaultVisibility":true}' --json '{"name":"<名前>","mimeType":"application/vnd.google-apps.presentation"}'`（フォルダへは `"parents":["<フォルダの ID>"]` を足す） |
 | 既存の Google Slides を同じ URL のまま pptx で差し替える（pptx のあるディレクトリで打つ。`--upload` は作業ディレクトリの外のファイルを受けない） | `gws drive files update --params '{"fileId":"<Google Slides の ID>"}' --upload <ファイル>.pptx --upload-content-type application/vnd.openxmlformats-officedocument.presentationml.presentation` |
 | Google Slides のページの ID（ページ順） | `gws slides presentations get --params '{"presentationId":"<ID>","fields":"slides(objectId)"}'` |
-| Google Slides の全ページのサムネイル（`p<番号>.png`） | `python3 "$SKILL_DIR/scripts/slides-thumbnails.py" <ID> <出力のディレクトリ> [--size LARGE]`（終了コード 11 は未認証。3. へ） |
+| Google Slides の全ページのサムネイル（`p<番号>.png`） | `ndf gws thumbnails <ID> <出力のディレクトリ> --size LARGE`（大きさは `SMALL`・`MEDIUM`・`LARGE`、既定は `LARGE`。`items` にページごとの `objectId` と保存先。終了コード 11 は未認証で 3. へ、終えたら `routes` の `retry` を打つ） |
 | 公開リンクの付与（利用者が公開を明示したときだけ） | `gws drive permissions create --params '{"fileId":"<ID>"}' --json '{"type":"anyone","role":"reader"}'` |
 
 - **フォルダを指定しないアップロードは非公開である。** フォルダへ入れたファイルは、そのフォルダの共有権限を引き継ぐ。`permissions create` を打たなくても、公開のフォルダへ入れれば公開になる
