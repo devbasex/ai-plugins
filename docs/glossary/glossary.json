@@ -6857,7 +6857,7 @@
     {
       "term": "リリースブランチ",
       "context": "ndf-workflow",
-      "meaning": "本番チャネルへ入れる変更を集め、版を上げる、版ごとに 1 本のブランチ（`release/v<版>`）。前の版が出た直後に本番ブランチから用意し、本番の PR の head になる",
+      "meaning": "本番チャネルへ入れる変更を集め、版を上げるブランチ（`release/v<版>`）",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
@@ -7592,6 +7592,12 @@
       "context": "ndf-release",
       "meaning": "要求での直しのステップの呼び方。CI が落ちたときにコードを直して push するステップ（雛形の `ci-fix` とそれに続く `push`）",
       "pending_source": "issues/issue-3572-requirements.md"
+    },
+    {
+      "term": "リリースブランチ",
+      "context": "ndf-release",
+      "meaning": "本番の PR の head になる、版ごとに 1 本のリリースブランチ（`release/v<版>`）。前の版が出た直後に本番ブランチから用意する",
+      "pending_source": "issues/issue-3572-design.md"
     }
   ]
 }
