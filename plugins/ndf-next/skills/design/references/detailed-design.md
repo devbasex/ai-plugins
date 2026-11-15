@@ -61,7 +61,7 @@
 
 ## 設計のプランでの位置
 
-設計のプラン（`ndf route render design`）は、詳細設計を通るモードで次の順に段を並べる。
+設計のプラン（`ndf route render design`）は、詳細設計を通るモードで次の順にステップを並べる。
 
 1. `design`: 設計文書を書く（詳細設計は書かない）
 2. `design-review`: 設計文書と要求のコピーだけを 1 つの AI がレビューし、作業ディレクトリの `design-review.md` へ書く
