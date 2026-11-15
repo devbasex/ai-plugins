@@ -34,7 +34,7 @@ def check_md(root: Path, mapped: dict, requests: Iterable[dict]) -> list[str]:
     missing: list[int] = list(mapped["orphans"])
     for name, row in sorted(mapped["lanes"].items()):
         d = check_state_of(requests, row.get("requests") or [])
-        got = materials.read_check(d, root) if d is not None else (None, None, None)
+        got = materials.read_check(d, root)
         if not any(got):
             missing += row["prs"]
             continue
