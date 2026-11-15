@@ -109,11 +109,13 @@ def included_prs(found, extra) -> list[int]:
 
 # 通らなかったチェックがマージを止めなかった理由（#3585。含む PR はマージ済みのため、落ちたものは必須でない）
 CI_NOT_PASSED = {"skipping": "飛ばした", "fail": "必須でない失敗", "cancel": "必須でない取り消し", "pending": "必須でない未完了"}
+CI_NOT_PASSED_OTHER = "必須でない"  # CI_NOT_PASSED に無い bucket の理由
+CI_PASSED = "pass"  # 通ったとみなす bucket
 
 
 def ci_passed(checks: list[dict]) -> int:
     """通ったチェック（bucket が pass）の数。"""
-    return sum(1 for c in checks if c.get("bucket") == "pass")
+    return sum(1 for c in checks if c.get("bucket") == CI_PASSED)
 
 
 def ci_fact(checks: list[dict]) -> str:
@@ -121,8 +123,8 @@ def ci_fact(checks: list[dict]) -> str:
     passed = ci_passed(checks)
     by: dict[str, list[str]] = {}
     for c in checks:
-        if c.get("bucket") != "pass":
-            by.setdefault(CI_NOT_PASSED.get(str(c.get("bucket")), "必須でない"), []).append(str(c.get("name") or "?"))
+        if c.get("bucket") != CI_PASSED:
+            by.setdefault(CI_NOT_PASSED.get(str(c.get("bucket")), CI_NOT_PASSED_OTHER), []).append(str(c.get("name") or "?"))
     return "、".join([f"CI {passed}/{len(checks)}", *(f"{why}: {', '.join(names)}" for why, names in by.items())])
 
 
