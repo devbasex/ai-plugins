@@ -87,3 +87,60 @@ def test_ci_jobs_list_shape():
 )
 def test_ci_exempt_entry_shape(exempt: dict, ok: bool):
     assert valid(validator(PROJECT), project_with(exempt=[exempt])) is ok
+
+
+# ---- worktree.schema.json の branch_flow.reviews（I-016） ----
+# PR の種類（impl・sprint・release・design・spec）ごとに `{checks, diff}` を同じ形で書き、受ける値だけが違う
+
+KINDS = {
+    "impl": (["cross-refactoring", "cross-review", "behavior"], ["pr", "none"]),
+    "sprint": (["cross-refactoring", "cross-review", "behavior"], ["unchecked", "none"]),
+    "release": (["cross-review"], ["pr", "resolution", "none"]),
+    "design": (["cross-review"], ["pr", "none"]),
+    "spec": (["cross-review"], ["pr", "none"]),
+}
+ALL_CHECKS = ["cross-refactoring", "cross-review", "behavior"]
+ALL_DIFFS = ["pr", "none", "unchecked", "resolution"]
+
+
+def worktree_with(reviews: object) -> dict:
+    return {"version": 1, "branch_flow": {"reviews": reviews}}
+
+
+@pytest.mark.parametrize("kind", sorted(KINDS))
+@pytest.mark.parametrize("check", ALL_CHECKS)
+def test_review_checks_accepted_per_kind(kind: str, check: str):
+    checks, diffs = KINDS[kind]
+    doc = worktree_with({kind: {"checks": [check], "diff": diffs[0]}})
+    assert valid(validator(WORKTREE), doc) is (check in checks)
+
+
+@pytest.mark.parametrize("kind", sorted(KINDS))
+@pytest.mark.parametrize("diff", ALL_DIFFS)
+def test_review_diff_accepted_per_kind(kind: str, diff: str):
+    _, diffs = KINDS[kind]
+    doc = worktree_with({kind: {"checks": [], "diff": diff}})
+    assert valid(validator(WORKTREE), doc) is (diff in diffs)
+
+
+@pytest.mark.parametrize("kind", sorted(KINDS))
+def test_review_entry_shape(kind: str):
+    checks, diffs = KINDS[kind]
+    v = validator(WORKTREE)
+    ok = {"checks": checks, "diff": diffs[0]}
+    assert valid(v, worktree_with({kind: ok}))
+    assert not valid(v, worktree_with({kind: {"checks": checks}}))  # diff は必須
+    assert not valid(v, worktree_with({kind: {"diff": diffs[0]}}))  # checks は必須
+    assert not valid(v, worktree_with({kind: {**ok, "extra": 1}}))
+    assert not valid(v, worktree_with({kind: {"checks": [checks[0], checks[0]], "diff": diffs[0]}}))  # 重なりは落とす
+    assert not valid(v, worktree_with({kind: {"checks": checks[0], "diff": diffs[0]}}))
+    assert not valid(v, worktree_with({kind: []}))
+
+
+def test_reviews_object_shape():
+    v = validator(WORKTREE)
+    assert valid(v, worktree_with({}))
+    assert valid(v, {"version": 1, "branch_flow": {}})
+    assert valid(v, worktree_with({k: {"checks": c, "diff": d[-1]} for k, (c, d) in KINDS.items()}))
+    assert not valid(v, worktree_with({"hotfix": {"checks": [], "diff": "none"}}))
+    assert not valid(v, worktree_with([]))
