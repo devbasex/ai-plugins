@@ -52,6 +52,10 @@ _GH_REPO = "GH_REPO"
 _UNKNOWN_DIR_COMMANDS = frozenset({"pushd", "popd"})
 # ファイルのスクリプトを今のシェルで読む語
 _SOURCES = frozenset({"source", "."})
+# 前に付いても後ろのコマンドを打つ語
+_WRAPPERS = frozenset({"command", "env", "exec", "nohup", "time", "sudo", "doas", "xargs", "timeout", "nice", "ionice", "stdbuf", "setsid"})
+# 包む語の後ろで読み直す、打つコマンドの語
+_WRAPPED_TARGETS = _SHELLS | {"gh", "eval"}
 
 _MERGE_HELP = "NDF のマージの手順（宛先を確かめ、本番なら承認を求めてからマージする）で打つ"
 
@@ -289,27 +293,13 @@ def _command_words(words: List[str]) -> List[str]:
 
 def _is_wrapper(word: str) -> bool:
     """前に付いても後ろのコマンドを打つ語か（後ろの語のうち gh・シェル・eval から読み直す）。"""
-    return os.path.basename(word) in {
-        "command",
-        "env",
-        "exec",
-        "nohup",
-        "time",
-        "sudo",
-        "doas",
-        "xargs",
-        "timeout",
-        "nice",
-        "ionice",
-        "stdbuf",
-        "setsid",
-    }
+    return os.path.basename(word) in _WRAPPERS
 
 
 def _after_wrapper(words: List[str], start: int) -> int:
     """包む語の後ろで、打つコマンド（`gh`・シェル・`eval`）の位置。無ければ包む語の直後の語の位置。"""
     for j in range(start, len(words)):
-        if os.path.basename(words[j]) in _SHELLS | {"gh", "eval"}:
+        if os.path.basename(words[j]) in _WRAPPED_TARGETS:
             return j
     return start
 
