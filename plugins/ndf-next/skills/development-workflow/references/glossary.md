@@ -1,6 +1,6 @@
 # 開発ワークフローの用語集
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `check-trigger.py`（M1）・`doc-lint.py`（M7）・`glossary.py`（M7）・`handoff.py`（M7）・`mvv-gate.py`（P2）・`pr-review-steps.py`（M5）・`progress-record.sh`（M7）・`projects-sync.sh`（M7）・`relay.py`（M3b）・`release-steps.py`（M2）・`release-verification-steps.py`（M2）・`sprint-close.py`（M1）・`stage-check.sh`（P1a）・`state.py`（M5）・`upkeep.py`（M6）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `check-trigger.py`（M1）・`doc-lint.py`（M7）・`glossary.py`（M7）・`handoff.py`（M7）・`mvv-gate.py`（P2）・`pr-review-steps.py`（M5）・`progress-record.sh`（M7）・`projects-sync.sh`（M7）・`relay.py`（M3b）・`release-steps.py`（M2）・`release-verification-steps.py`（M2）・`sprint-close.py`（M1）・`sprint-state.py`（P1b）・`stage-check.sh`（P1a）・`state.py`（M5）・`supervise.py`（C2）・`upkeep.py`（M6）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 `development-workflow` と、そこから呼ぶ Skill・スクリプトで使う語を集める。**定義は各語の正本が持ち、
 この文書は 1 行の要約と正本への案内だけを持つ。** 食い違ったときは正本を正とする。
@@ -23,7 +23,7 @@
 7. リリースの Pull Request の待ちが【スタックしたチェック】で止まる不具合は、起票せず【即時修正】すると決めた。
    修正の Pull Request #1101 を足して、開発版を `10.17.22-dev.2` として出し直した
 8. 【リリース承認ゲート】で【MVV 判定】は【レッドライン】（`.github/workflows/` を触った）に当たり、利用者の承認へ戻った。利用者が承認した
-9. conductor は本番のキューと `ndf progress update → render → next` を 1 本のバックグラウンドの Bash で流し、【本番】へ【正式版】 `10.17.22` をリリースした
+9. conductor は本番のキューと `sprint-state.py update → render → next` を 1 本のバックグラウンドの Bash で流し、【本番】へ【正式版】 `10.17.22` をリリースした
 10. 最後に `relay.py notice` の【アナウンス】と ndf-next を出して応答を終え、ラッパーが次のセッションを起動した
 
 ## 大きさの関係
@@ -176,7 +176,7 @@ flowchart TB
 | 通過工程 | ある課題について、進捗記録が実際に書かれた工程の集合 | — | [stage-completeness.md](stage-completeness.md) の「用語」 |
 | 通過記録 | 通過工程を課題ごとに残したファイル | `stage-check.sh report <番号>` | [stage-completeness.md](stage-completeness.md) の「用語」 |
 | スプリント状態ファイル | スプリントのプラン・done・承認ゲートの記録・MVV・版を持つファイル。パスは呼ぶ側が決め、目録 `sprint.json` とは別のファイルにする。引継ぎ文書の表と ndf-next をここから作る | 例 `sprint-state.json`、`ndf progress new` / `update` / `gate` / `render` / `next` / `status` | `ndf progress` の docstring |
-| 引継ぎ文書 | 会話を切って新しいセッションで続けるための文書。メインディレクトリに置き、コミットしない。1 本が 1 つの引継ぎの対象を受け持つ。「今の会話の進み」と「次に実行するコマンド」の節はスクリプトが書く | `.ndf/handoff/<名>.md`、`handoff.py`、`ndf plan note` | [handoff.md](handoff.md) |
+| 引継ぎ文書 | 会話を切って新しいセッションで続けるための文書。メインディレクトリに置き、コミットしない。1 本が 1 つの引継ぎの対象を受け持つ。「今の会話の進み」と「次に実行するコマンド」の節はスクリプトが書く | `.ndf/handoff/<名>.md`、`handoff.py`、`supervise.py note` | [handoff.md](handoff.md) |
 | 引継ぎの対象 | 引継ぎ文書 1 本が受け持つ仕事のまとまり（スプリント・マイルストーン・課題のどれか）。名の頭になる | `sprint-` / `milestone-` / `issue-` | [handoff.md](handoff.md) の「置き場と名」 |
 | 引継ぎの履歴 | 引継ぎ文書の本体から終わった項目を移す文書。本体と同じ場所に置く | `<名>-history.md`、`ndf records handoff check --trim` | [handoff.md](handoff.md) の「作る・更新する」 |
 | ndf-next | 次のセッションの最初の入力を置く、情報文字列が `ndf-next` のコードブロック。最後の応答に 1 つだけ置く | フェンスの情報文字列 `ndf-next` | [context-window.md](context-window.md) の「新しい会話で戻す」 |

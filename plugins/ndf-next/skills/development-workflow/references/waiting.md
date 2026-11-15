@@ -1,6 +1,6 @@
 # 待ち方
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `hook.py`（M3a）・`release-steps.py`（M2）・`upkeep.py`（M6）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `hook.py`（M3a）・`release-steps.py`（M2）・`supervise.py`（C2）・`upkeep.py`（M6）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 **待つ間に状態を問い合わせる呼び出しを繰り返さない。** 待ち方の規約はこの文書だけが持ち、
 他の文書はコピーせずにここを指す。
@@ -61,7 +61,7 @@
 | `ndf plan next` | `report.md` が揃うか、`progress.jsonl` に `attention` の行が足されるまでの until ループを `run_in_background: true` で起動する（下の節） |
 | `ndf plan queue` | `ndf plan wait <done のパス>` を `run_in_background: true` で 1 回起動する。キューの終わり（done）か、キューが流すプランの `attention` の行で終わる（下の節）。done のパスは `queue --done` で渡した所（省けば最初のプランの `<プラン>-state/queue-done.json`） |
 | Pull Request の CI とマージ | `ndf ci merge <PR 番号>` を `run_in_background: true` で 1 回起動する。CI がまだ現れない間も待ち、緑になればマージする。マージの承認を得た後に限る。起動の前に `gh_parts.py pr-status <PR 番号>` で、直すもの（失敗したチェック・未解決のスレッド）と衝突が無いかを 1 回で確かめる。チェックの照会と `gh pr merge` を手でつながない |
-| 判断の要らない NDF の手順を続けて打つ（`queue` の後の `wait` など） | 1 行ずつ打たず、`ndf plan advance --step "<コマンド>" --step "<コマンド>"...` を 1 回打つ。結果 JSON が `ok` の間だけ次を打ち、`gate` か `stopped` で止まって、理由と続きのコマンド（`--from <番号>`）を `next` に返す。打てるのは NDF の `scripts/` と `skills/*/scripts/` だけ。長く待つ手順を含むなら `run_in_background: true` で起動する |
+| 判断の要らない NDF の手順を続けて打つ（`queue` の後の `wait` など） | 1 行ずつ打たず、`supervise.py advance --step "<コマンド>" --step "<コマンド>"...` を 1 回打つ。結果 JSON が `ok` の間だけ次を打ち、`gate` か `stopped` で止まって、理由と続きのコマンド（`--from <番号>`）を `next` に返す。打てるのは NDF の `scripts/` と `skills/*/scripts/` だけ。長く待つ手順を含むなら `run_in_background: true` で起動する |
 | キューの後に続けるプラン（リリースなど） | 手でパイプラインを組まず、`queue <実装のプラン>... --then <後続のプラン>` で渡す。後続は前のプランがすべて `完了` のときだけ流れ、1 本でも `止まった` / `承認ゲート` なら `流さなかった` と理由が結果に残る。リリースプランを `new release --prs-from-queue` で作れば、実装の PR の番号を知らずに渡せる |
 
 ### ndf plan の進捗ログ
@@ -158,7 +158,7 @@ plugins/ndf/bin/ndf plan wait q/done.json
    スプリントの PR（`--prs`）のブランチ・worktree を片付ける。`git branch -D` が要るブランチがあれば承認ゲートで止まる
 5. どこかのプランが止まったら、原因を直してから `queue --resume <パス>` と `wait <パス>` をバックグラウンドで起動する。
    止まったプランは終えたステップから続き、後続のステージも流れる。プランのファイルを写して作り直さない
-6. `wait` が 0 で終わったら、引継ぎ文書を `ndf plan note` で更新し、`ndf-next` を出す
+6. `wait` が 0 で終わったら、引継ぎ文書を `supervise.py note` で更新し、`ndf-next` を出す
 
 ### スプリントを流すコマンド
 
