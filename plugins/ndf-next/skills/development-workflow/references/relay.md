@@ -29,7 +29,7 @@
 
 | 置くもの | 中身 |
 | --- | --- |
-| 複製と根の指し先 | `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/` の下の起動の部品と `relay.root`（プラグインの根のパス 1 行）。部品は `relay.root` が指すプラグインの `bin/ndf relay` を呼ぶ。中身は版によらず同じで、プラグインを更新しても `relay.root` を書き換えるだけで済む |
+| 複製と根の指し先 | `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/` の下の起動の部品と `relay.root`（プラグインの根のパス 1 行）。部品は `relay.root` が指すプラグインの `bin/ndf relay` を呼ぶ。部品の中身はどの版でも同じである。プラグインを更新したときは `relay.root` を書き換えるだけで済む |
 | PATH のエントリポイント | `${XDG_BIN_HOME:-~/.local/bin}/ndf-relay`。複製を呼ぶ 2 行のシェルのスクリプト |
 
 - `ndf-relay run` と打つと、ラッパーを通って claude が起動する。`~/.local/bin` が PATH に無ければ、`install` の `warnings` が足す 1 行を示す
