@@ -7056,8 +7056,7 @@
       "term": "リリースの場合",
       "context": "ndf-release",
       "meaning": "CD の有無・本番チャネルの承認数・迂回の宣言で決まる 4 つの場合（CD があり、レビューなしでマージできる / CD があり、レビューが必須 / CD があり、レビューが必須で迂回の宣言がある / CD が無い）。承認を取る場所とマージの主体を決める",
-      "source": "docs/specifications/ndf-release-approval-on-pr.md",
-      "pending_source": "issues/issue-3506-design.md"
+      "source": "docs/specifications/ndf-release-production-admin-merge.md"
     },
     {
       "term": "承認資料のコメント",
@@ -7394,25 +7393,25 @@
       "term": "本番の PR",
       "context": "ndf-release",
       "meaning": "リリースのブランチから本番チャネルへ出す Pull Request。CD のある場合は、この PR のマージで本番へ届く",
-      "pending_source": "issues/issue-3506-requirements.md"
+      "source": "docs/specifications/ndf-release-production-admin-merge.md"
     },
     {
       "term": "管理者の迂回",
       "context": "ndf-release",
       "meaning": "ruleset が迂回を許した役割の人が、必須の承認レビューと必須のチェックを満たさずにマージすること。`gh pr merge --admin` で打つ",
-      "pending_source": "issues/issue-3506-requirements.md"
+      "source": "docs/specifications/ndf-release-production-admin-merge.md"
     },
     {
       "term": "迂回の宣言",
       "context": "ndf-release",
       "meaning": "本番の PR を管理者の迂回でマージすることを選ぶ、`.ndf/project.json` の `production_merge.admin` の値。`true` のときだけ宣言があるとみなし、無いときは迂回しない",
-      "pending_source": "issues/issue-3506-requirements.md"
+      "source": "docs/specifications/ndf-release-production-admin-merge.md"
     },
     {
       "term": "迂回の記録",
       "context": "ndf-release",
       "meaning": "本番の PR を管理者の迂回でマージしたことを示す、本番の PR へ置くコメント。マージした先端と照らした承認の証跡を指す。証跡とは別の印を持ち、承認の判定に数えない",
-      "pending_source": "issues/issue-3506-design.md"
+      "source": "docs/specifications/ndf-release-production-admin-merge.md"
     }
   ]
 }
