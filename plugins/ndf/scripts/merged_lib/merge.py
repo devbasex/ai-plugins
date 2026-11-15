@@ -85,6 +85,8 @@ def add_promote_args(pm):
 # --- リリース承認ゲート（自動反映の本番チャネルへのマージ。#1336） ------------------------
 
 GATE = "production-merge"
+# gh pr merge がベースブランチとの衝突でマージのコミットを作れなかったときの標準エラーの文言（#1917）
+CONFLICT_TEXT = "cannot be cleanly created"
 GATE_ROLLBACK = (
     "マージのコミットを revert する Pull Request を同じ宛先へマージする。本番系には revert が反映されるまで変更が残り、"
     "その間に利用者が触れた結果（データの書き込みなど）は revert で戻らない"
@@ -223,7 +225,7 @@ def _reread(root, n) -> dict:
 
 def _conflicted(stderr: str, info: dict) -> bool:
     """gh pr merge の拒否がベースブランチとの衝突か（標準エラーの文言か、読み直した mergeStateStatus が DIRTY。#1917）。"""
-    return "cannot be cleanly created" in stderr or info.get("mergeStateStatus") == "DIRTY"
+    return CONFLICT_TEXT in stderr or info.get("mergeStateStatus") == "DIRTY"
 
 
 def _moved_after_refusal(info: dict, sha: str | None) -> str | None:
@@ -242,8 +244,9 @@ def _merge_pr(root, a, n, watch, items, waits, trail_item=None):
     how = "gh pr merge（管理者の迂回なし）" if no_admin else "gh pr merge --admin"
     p = gh_parts.gh(["pr", "merge", str(n), *([] if no_admin else ["--admin"]), f"--{a.method}", *pin], cwd=root)
     if p.returncode != 0:
-        info = {} if "cannot be cleanly created" in (p.stderr or "") else _reread(root, n)
-        if _conflicted(p.stderr or "", info):
+        err = p.stderr or ""
+        info = {} if CONFLICT_TEXT in err else _reread(root, n)
+        if _conflicted(err, info):
             watch.stop_conflict("gh pr merge がマージのコミットを作れずに拒んだ")
         if moved := _moved_after_refusal(info, sha):
             emit(
