@@ -172,7 +172,7 @@ plugins/ndf-next/
 | `foundation_decide.parse_check` | `progress/epic/foundation_decide.py` | 新設 | `parse_check(cell: str) -> Check \| None` | 完了条件の確かめ方の欄を `issues`（番号の並び）か `command`（コマンドの文）に読む | 無し | どちらでもない・番号が 1 つも無い・コマンドが空なら None | 無し |
 | `foundation.spec` | `progress/epic/foundation.py` | 新設 | `spec() -> dict[str, Any]` | 土台の契約を読んで返す | 無し | 返す値は契約の形の検査を通っている | 契約のファイルを読む |
 | `foundation.read_text` | `progress/epic/foundation.py` | 新設 | `read_text(text: str, path: str) -> Foundation` | 文から見出し・表・行の種類を作り、`foundation_decide.parse` へ渡す | 無し | `parse` の事後条件と同じ | 無し |
-| `foundation.read_file` | `progress/epic/foundation.py` | 新設 | `read_file(root: Path, path: str) -> Foundation` | 作業ツリーの土台を読む（`ndf epic check` が使う） | `path` は `root` からの相対 | 読めなければ `FoundationError` | ファイルを読む |
+| `foundation.read_file` | `progress/epic/foundation.py` | 新設 | `read_file(root: Path, path: str) -> Foundation` | worktree の土台を読む（`ndf epic check` が使う） | `path` は `root` からの相対 | 読めなければ `FoundationError` | ファイルを読む |
 | `foundation.base_ref` | `progress/epic/foundation.py` | 新設 | `base_ref(root: Path) -> str` | ベースの版を指す参照 `origin/<ベースブランチ>` を返す | `root` は git のリポジトリの根 | ベースブランチは `ndf.core.route.default_base` の結果。決まらなければ `FoundationError` | git を読む（`symbolic-ref`） |
 | `foundation.fetch_base` | `progress/epic/foundation.py` | 新設 | `fetch_base(root: Path, ref: str) -> None` | ベースブランチを origin から取り込む | `ref` は `base_ref` の結果 | 成功すれば `ref` が origin の最新を指す | ネットワーク（`git fetch origin <ブランチ>`） |
 | `foundation.read_at` | `progress/epic/foundation.py` | 新設 | `read_at(root: Path, ref: str, path: str) -> tuple[Foundation, str] \| None` | ベースの版の土台と、その blob の識別子を返す | 無し | `ref` にファイルが無ければ None。識別子は `git rev-parse <ref>:<path>` の値 | git を読む（`rev-parse`・`cat-file`） |
@@ -351,8 +351,8 @@ plugins/ndf-next/
 | 耐久ワークフローのエピックの手と、オーガナイザーの副命令（`lane`・`row add`・`request` など） | 計画の進行表 | 既存のとおり、書く側が `lock_plan` を取り、`store.append_events` が最後の番号を確かめる。食い違えばトランザクションごと戻る | `write_tick` は最新の記録と比べて違うときだけ書くため、同じ入力で打ち直しても 2 回目は何も書かない。途中で落ちても、再開した耐久ワークフローが同じ手から打ち直す |
 | 耐久ワークフローの `Complete` と、オーガナイザーの行の追加 | 計画の進行表 | `complete_plan` は同じトランザクションで計画を読み直し、`rules.plan_complete` が真のときだけ依頼を閉じて完了を書く | 偽なら何も書かない。次の読み直しで判定し直す |
 | 1 つのレーンの `ndf progress next`・`wait` と `ndf lanes row resumed` | レーンの進行表 | 既存の `checked_write`（最後の番号の確かめ）と `retrying_transaction` | `notice_read` は読んだ最後の番号を持つ。同じ番号を 2 回書いても、未読の判定（最後の `notice_read` より後）は変わらない |
-| 耐久ワークフローの `gather`（git の読み取りと取り込み）と、同じマシンの `ndf lanes start` の `epic_gate` | 主ディレクトリの `.git` の参照 | 取らない。`git fetch` は参照の更新を git 自身の lock で守る。lock で落ちた側は失敗として扱う | 耐久ワークフローは次の間隔で打ち直す。`ndf lanes start` は `config_broken` で止まり、打ち直せる |
-| 確かめ方のコマンド（`command:`）と、主ディレクトリでの他の作業 | 主ディレクトリの作業ツリー | 取らない。コマンドは主ディレクトリで動かす | 確かめ方は読み取りだけのコマンドを書く、と参照（`epic-foundation.md`）に書く。書き込むコマンドで食い違う危険は「未確認・残リスク」に残す |
+| 耐久ワークフローの `gather`（git の読み取りと取り込み）と、同じマシンの `ndf lanes start` の `epic_gate` | メインディレクトリの `.git` の参照 | 取らない。`git fetch` は参照の更新を git 自身の lock で守る。lock で落ちた側は失敗として扱う | 耐久ワークフローは次の間隔で打ち直す。`ndf lanes start` は `config_broken` で止まり、打ち直せる |
+| 確かめ方のコマンド（`command:`）と、メインディレクトリでの他の作業 | メインディレクトリの worktree | 取らない。コマンドはメインディレクトリで動かす | 確かめ方は読み取りだけのコマンドを書く、と参照（`epic-foundation.md`）に書く。書き込むコマンドで食い違う危険は「未確認・残リスク」に残す |
 
 GitHub の読み取り（`states`）と DB の書き込みを同じトランザクションに入れない。`plan_epic.tick` は `gather`（DB の外の読み取り）の後に `write_tick`（DB の書き込み）を打つ。既存の `observe` が生死の材料をトランザクションの外で読む順と同じである。
 
@@ -430,7 +430,7 @@ GitHub の読み取り（`states`）と DB の書き込みを同じトランザ�
 | `foundation.read_file` | 読む | — | 無いパスで `FoundationError` |
 | `foundation.base_ref` | 宣言の `base_branch` を使う | 宣言が無く origin の既定ブランチを使う | どちらも無いとき `FoundationError` |
 | `foundation.fetch_base` | 一時のリポジトリの origin から取り込む | — | origin が無いとき `FoundationError` |
-| `foundation.read_at` | ベースの版の土台と識別子を返す | 作業ツリーにだけある土台で None（I9） | 参照が無いとき `FoundationError` |
+| `foundation.read_at` | ベースの版の土台と識別子を返す | worktree にだけある土台で None（I9） | 参照が無いとき `FoundationError` |
 | `foundation.read_blob` | 識別子から読む | — | 無い識別子で `FoundationError` |
 | `foundation.marked_files` | 印を持つ追跡中のファイルだけを返す | 2 行目の印は数えない | git でないとき `FoundationError` |
 | `verify.verify_rows` | 食い違いの無い行で 0 件 | `—` の行は照合しない | 3 種類それぞれの食い違いで `contract-mismatch`（受け入れ条件 3） |

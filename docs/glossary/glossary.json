@@ -2655,6 +2655,18 @@
       "pending_source": "issues/issue-3600-design.md"
     },
     {
+      "term": "完了条件待ち",
+      "context": "ndf-workflow",
+      "meaning": "エピックの欄を持つ並列の計画で、全レーンの行が終わり、ほかの依頼が無く、エピックの完了条件が残っている状態。Factory に計画の状態として出す。計画の状態の値として持たず、行と事象から出す",
+      "pending_source": "issues/issue-3600-design.md"
+    },
+    {
+      "term": "完了条件待ちの依頼",
+      "context": "ndf-workflow",
+      "meaning": "完了条件待ちに入ったときに計画の耐久ワークフローが開き、完了条件をすべて満たしたときに同じ耐久ワークフローが閉じる依頼。完了をオーガナイザーへ知らせるためのもので、完了の判定では答えていない依頼に数えない",
+      "pending_source": "issues/issue-3600-design.md"
+    },
+    {
       "term": "プロジェクト",
       "context": "ndf-workflow",
       "meaning": "主リポジトリ 1 つとサブリポジトリの集まり（Neural Development Factory の定義）。リポジトリが 1 本だけのときもその場合として含む。GitHub Projects・Claude Code の project など他のサービスの名前は、そのサービスの意味のまま使う",
