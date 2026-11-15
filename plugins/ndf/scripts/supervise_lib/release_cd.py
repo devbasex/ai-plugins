@@ -41,7 +41,7 @@ def cd_release_wait(a, case: str | None, on_exit: dict) -> dict:
     """CD のある場合の本番の release が承認を待つ 10 の行き先（承認資料の組み立て facts）。MVV 判定のプランで場合 1 なら承認ゲートに
     数えず（on_exit）、後の mvv の判定に任せる（承認の後にマージまで済めば結果は完了。済まなければ mvv が承認ゲートを返す）。
     場合 2 と cd-admin は MVV 判定で人の承認を代えられないため、MVV 判定のプランでも承認ゲート（gate_next）にする。"""
-    if getattr(a, "mvv", None) and case in release_case.TRAIL_APPROVAL - release_case.HUMAN_APPROVAL:  # cd-no-review だけ
+    if getattr(a, "mvv", None) and case in release_case.MVV_TRAIL:
         return {"on_exit": {**on_exit, str(EXIT_GATE): "facts"}}
     return {"gate_next": "facts"}
 

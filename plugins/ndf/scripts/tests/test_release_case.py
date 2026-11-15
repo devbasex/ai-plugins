@@ -54,17 +54,18 @@ def test_decide_case_with_the_admin_declaration(approvals, case):
 
 
 @pytest.mark.parametrize(
-    "case, has_cd, trail, admin, human",
+    "case, has_cd, trail, admin, human, user_trail, mvv_trail",
     [
-        (rc.NO_CD, False, False, False, False),
-        (rc.CD_NO_REVIEW, True, True, False, False),
-        (rc.CD_REVIEW, True, False, False, True),
-        (rc.CD_ADMIN, True, True, True, True),
+        (rc.NO_CD, False, False, False, False, False, False),
+        (rc.CD_NO_REVIEW, True, True, False, False, False, True),
+        (rc.CD_REVIEW, True, False, False, True, False, False),
+        (rc.CD_ADMIN, True, True, True, True, True, False),
     ],
 )
-def test_case_attributes(case, has_cd, trail, admin, human):
+def test_case_attributes(case, has_cd, trail, admin, human, user_trail, mvv_trail):
     c = rc.Case(case, "", "", "")
     assert (c.has_cd, c.trail_approval, c.admin_merge, c.human_approval) == (has_cd, trail, admin, human)
+    assert (c.user_trail_only, c.mvv_may_trail) == (user_trail, mvv_trail)
 
 
 @pytest.mark.parametrize(

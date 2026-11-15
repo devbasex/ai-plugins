@@ -43,7 +43,7 @@ def trail_before_merge(root, a, n, case) -> dict | None:
             EXIT_PRECONDITION,
         )
     redo = "リリース承認ゲートからやり直す: プランなら run <プラン> --from promote（fast / auto は --from verify）"
-    if case.trail_approval and case.human_approval and a.gate_approved != "user":
+    if case.user_trail_only and a.gate_approved != "user":
         what = f"リリースの場合 {case.case} では、MVV 判定で本番チャネルの承認レビューを代えない（利用者の承認が要る）"
         emit(result(TOOL, "gate", f"#{n} をマージしない: {what}", [], {"approved_sha": sha, "case": case.case}, None, redo), EXIT_GATE)
     try:

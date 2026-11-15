@@ -339,7 +339,7 @@ def approved_on_pr(repo: str, pr: int, head: str, case) -> "trail.Judgment":
         if got != head.lower():
             return trail.Judgment("failure", f"承認のレビュー {got[:7]} ≠ 先端 {head[:7]}")
         return trail.Judgment("success", f"承認のレビュー {got[:7]}")
-    return trail.judge_trails_on(repo, pr, head, "user" if case.human_approval and case.trail_approval else None)
+    return trail.judge_trails_on(repo, pr, head, "user" if case.user_trail_only else None)
 
 
 def _sha_on_pr(root, a) -> tuple[str, dict]:

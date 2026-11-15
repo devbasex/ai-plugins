@@ -33,6 +33,8 @@ NO_CD = "no-cd"
 TRAIL_APPROVAL = frozenset({CD_NO_REVIEW, CD_ADMIN})  # 承認を PR の上の証跡で取る
 ADMIN_MERGE = frozenset({CD_ADMIN})  # 本番の PR を管理者の迂回でマージする
 HUMAN_APPROVAL = frozenset({CD_REVIEW, CD_ADMIN})  # MVV 判定で承認ゲートを代えない（ruleset が人の承認を求める）
+USER_TRAIL = TRAIL_APPROVAL & HUMAN_APPROVAL  # 利用者が書いた証跡だけで照らす（cd-admin）
+MVV_TRAIL = TRAIL_APPROVAL - HUMAN_APPROVAL  # MVV 判定が証跡を書ける（cd-no-review）
 
 
 class Case(NamedTuple):
@@ -60,6 +62,16 @@ class Case(NamedTuple):
     def human_approval(self) -> bool:
         """MVV 判定で承認ゲートを代えず、利用者の承認が要る場合か。"""
         return self.case in HUMAN_APPROVAL
+
+    @property
+    def user_trail_only(self) -> bool:
+        """利用者が書いた証跡だけで承認を照らす場合か。"""
+        return self.case in USER_TRAIL
+
+    @property
+    def mvv_may_trail(self) -> bool:
+        """MVV 判定が承認の証跡を書ける場合か。"""
+        return self.case in MVV_TRAIL
 
 
 class CaseUnreadable(Exception):
