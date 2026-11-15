@@ -206,16 +206,13 @@ def _facts(root: Path, hub: GitHub, target: Target, span: gather.Range) -> mater
     found = plugins_mod.load(root)
     paths = repo_git.changed_files(span.since, span.until)
     change_list = gather.changes(paths, found, decl)
-    planned = gather.clear_shipped(
-        gather.plan_bumps(root, found, change_list, decl, target.level, target.channel),
-        gather.shipped(repo_git, found, span.since),
-        target.level,
-        target.channel,
-    )
+    bumps = gather.plan_bumps(root, found, change_list, decl, target.level, target.channel)
+    shipped = gather.shipped(repo_git, found, span.since)
+    planned = gather.clear_shipped(bumps, shipped, target.level, target.channel)
     if not planned:
         raise NothingToRelease(f"{span.since}..{span.until} に版を上げる変化が無い")
     if target.source == RELEASE_SOURCE:
-        planned = _from_shipped(planned, gather.shipped(repo_git, found, span.since), target)
+        planned = _from_shipped(planned, shipped, target)
     pulls = gather.pull_facts(hub, gather.included(repo_git, span, target.production))
     return materials_decide.Facts(
         target.channel,
