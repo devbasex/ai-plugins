@@ -58,6 +58,13 @@ def test_absolute_path_resolves_to_the_longest_tracked_suffix() -> None:
     # 受け入れ条件 3: 絶対パスの末尾に当たる追跡するファイルのうち、最も長いものを選ぶ
     tracked = frozenset({"UserTest.php", "tests/Unit/UserTest.php"})
     assert junit.resolve_file(["/home/runner/work/app/app/tests/Unit/UserTest.php"], tracked) == "tests/Unit/UserTest.php"
+    assert junit.resolve_file(["D:\\a\\app\\tests\\Unit\\UserTest.php"], tracked) == "tests/Unit/UserTest.php"
+
+
+def test_relative_path_does_not_take_a_shorter_tracked_suffix() -> None:
+    # 相対パスの候補は、末尾が同じ短い追跡ファイル（根の login.spec.ts）ではなく、候補を末尾に持つファイルへ決める
+    tracked = frozenset({"login.spec.ts", "web/e2e/login.spec.ts"})
+    assert junit.resolve_file(["e2e/login.spec.ts"], tracked) == "web/e2e/login.spec.ts"
 
 
 def test_resolve_file_normalizes_and_skips_ambiguous_candidates() -> None:

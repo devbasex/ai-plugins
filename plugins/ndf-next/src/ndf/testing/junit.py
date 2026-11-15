@@ -49,7 +49,7 @@ def resolve_file(candidates: Sequence[str], tracked: frozenset[str]) -> Optional
     | 候補と追跡するファイルの関係 | 使うファイル |
     | --- | --- |
     | 一致する | そのファイル |
-    | 候補が `/<ファイル>` で終わる（絶対パス） | 当たるうち最も長いファイル |
+    | 候補が絶対パスで `/<ファイル>` で終わる | 当たるうち最も長いファイル |
     | `/<候補>` で終わるファイルがちょうど 1 つ | そのファイル |
     """
     for raw in candidates:
@@ -62,11 +62,16 @@ def resolve_file(candidates: Sequence[str], tracked: frozenset[str]) -> Optional
     return None
 
 
+def _is_absolute(cand: str) -> bool:
+    """正規化した候補が絶対パス（`/` で始まるか、`C:/` のようにドライブ名で始まる）か。"""
+    return cand.startswith("/") or (len(cand) > 2 and cand[0].isalpha() and cand[1:3] == ":/")
+
+
 def _match_one(cand: str, tracked: frozenset[str]) -> Optional[str]:
     """候補 1 つを追跡するファイルへ照らす（`resolve_file` の表の 3 行を上から）。決まらなければ None。"""
     if cand in tracked:
         return cand
-    suffixes = [t for t in tracked if cand.endswith("/" + t)]
+    suffixes = [t for t in tracked if cand.endswith("/" + t)] if _is_absolute(cand) else []
     if suffixes:
         return max(suffixes, key=len)
     longer = [t for t in tracked if t.endswith("/" + cand)]
