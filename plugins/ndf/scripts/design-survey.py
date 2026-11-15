@@ -362,16 +362,16 @@ def cmd_check(a):
 
 def cmd_schema(a):
     text = design_repos.design_json_schema()
-    if a.out:
-        try:
-            Path(a.out).write_text(text, encoding="utf-8")
-        except OSError as exc:
-            raise StepError(f"スキーマを書けない: {a.out}: {exc}", EXIT_UNREADABLE) from None
+    if not a.out:
+        sys.stdout.write(text)
+        return 0
+    try:  # 書けないときは標準出力へ何も出さずに止める
+        Path(a.out).write_text(text, encoding="utf-8")
+    except OSError as exc:
+        raise StepError(f"スキーマを書けない: {a.out}: {exc}", EXIT_UNREADABLE) from None
     sys.stdout.write(text)
-    if a.out:
-        sys.stdout.flush()
-        emit(result(TOOL, "ok", f"schema を書いた: {a.out}"))
-    return 0
+    sys.stdout.flush()
+    emit(result(TOOL, "ok", f"schema を書いた: {a.out}"))
 
 
 def build_parser():
