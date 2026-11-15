@@ -26,7 +26,8 @@ from ndf.domains.loop import design_tests_decide as dt
 
 # 結果の tool は親の副命令 `ndf loop` の名前
 TOOL = cli.tool_of(f"{__package__}.cli")
-DESIGN_FILE = re.compile(r"^issues/issue-(\d+)-design[^/]*\.md$")
+# 複数の課題を 1 つの設計で扱う `issue-7-8-design.md` も、番号のどれかが指定と合えば読む（PR 3537 の指摘）
+DESIGN_FILE = re.compile(r"^issues/issue-(\d+(?:-\d+)*)-design[^/]*\.md$")
 
 Grep = Callable[[Sequence[str], Sequence[str]], Optional[set[str]]]
 
@@ -126,7 +127,7 @@ def _designs(g: git.Git, root: Path, a: argparse.Namespace) -> list[tuple[str, s
     rels = [
         r
         for r in g.run("ls-tree", "-r", "--name-only", "HEAD", "--", "issues").splitlines()
-        if (m := DESIGN_FILE.match(r)) and int(m.group(1)) in want
+        if (m := DESIGN_FILE.match(r)) and want & {int(n) for n in m.group(1).split("-")}
     ]
     return [(rel, g.run("show", f"HEAD:{rel}")) for rel in rels]
 

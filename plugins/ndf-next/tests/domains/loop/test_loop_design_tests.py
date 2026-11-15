@@ -102,6 +102,17 @@ def test_no_design_document_is_not_applicable(design_tests):
     assert got["status"] == "stopped" and got["cause"]["kind"] == "not_applicable"
 
 
+def test_a_design_over_several_issues_is_read_for_each_issue(design_tests, repo: Path):
+    # `issue-7-8-design.md` は 7 でも 8 でも読み、78 のような番号の一部とは合わせない
+    (repo / "issues" / "issue-7-8-design.md").write_text("## テスト設計\n\n`tests/test_kept.py::test_gone`\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-qm", "c3"], check=True)
+    for n in ("7", "8"):
+        got = design_tests("--issue", n)
+        assert got["status"] == "stopped" and got["cause"]["kind"] == "check_failed"
+    assert design_tests("--issue", "78")["cause"]["kind"] == "not_applicable"
+
+
 # --- 現状固定（I-001: design_tests.run の分割の前に、結果の形をそのまま記録する） ---
 
 
