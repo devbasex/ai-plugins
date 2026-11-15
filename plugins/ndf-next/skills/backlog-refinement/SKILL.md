@@ -10,7 +10,7 @@ allowed-tools:
 
 # 蓄積した課題を棚卸しする
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `ask.py`（P2）・`estimate.py`（P3）・`glossary.py`（M7）・`issue-items.py`（M6）・`project-decl.py`（S1e）・`projects-sync.sh`（M7）・`sprint-close.py`（M1）・`upkeep.py`（M6）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `ask.py`（P2）・`estimate.py`（P3）・`glossary.py`（M7）・`issue-items.py`（M6）・`projects-sync.sh`（M7）・`sprint-close.py`（M1）・`upkeep.py`（M6）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 **変更をまたいで溜まった課題そのものを見直す。** 起票はその場で行い、その変更から出た
 取りこぼしは振り返りが拾うが、**一覧の全体を現状に合わせる手順**はどちらも持たない。
@@ -118,7 +118,7 @@ python3 "$UPKEEP/upkeep.py" depth compare --since-ref <デプロイした版の�
 | 2C | 順位を算出する | しない | なし（記録だけ） |
 | 3 | 反映する | 依存の無いものだけ割る | あり |
 
-**ブランチ運用の宣言と実際の使い方のずれも見る。** `project-decl.py measure --out <一時ファイル>` の後に `project-decl.py drift --measure <一時ファイル>` を打ち、`items` に行があれば項目・根拠・更新の案を完了報告へ載せる。宣言を変えるかは利用者の設定の書き換え（共通原則 C7）なので、案として示し、自分では書き換えない（手順は `development-workflow` の [references/project-analysis.md](../development-workflow/references/project-analysis.md) の「ブランチ運用」）。
+**ブランチ運用の宣言と実際の使い方のずれも見る。** `ndf project measure --out <一時ファイル>` の後に `ndf project drift --measure <一時ファイル>` を打ち、`items` に行があれば項目・根拠・更新の案を完了報告へ載せる。宣言を変えるかは利用者の設定の書き換え（共通原則 C7）なので、案として示し、自分では書き換えない（手順は `development-workflow` の [references/project-analysis.md](../development-workflow/references/project-analysis.md) の「ブランチ運用」）。
 
 **手順 1 で対象が 0 件なら、そこで飛ばす。** 飛ばしたことを報告へ残す。
 

@@ -17,19 +17,52 @@
       "description": "ndf project の計測値",
       "additionalProperties": false,
       "properties": {
-        "inputs": {"type": "integer", "description": "宣言の解析の記録が持つ入力のファイルの数（check で新しいとき）"}
+        "inputs": {"type": "integer", "description": "宣言の解析の記録が持つ入力のファイルの数（check で新しいとき）"},
+        "measured": {"type": "integer", "description": "測った項目の数（measure）"},
+        "question": {"type": "integer", "description": "問いにした項目の数（measure）"},
+        "unknown": {"type": "integer", "description": "不明の項目の数（measure）"},
+        "elapsed_seconds": {"type": "number", "description": "測定にかかった秒（measure）"},
+        "out": {"type": "string", "description": "測定の結果を書いたパス（measure）"},
+        "written": {"type": "integer", "description": "書いた・書く予定のファイルの数（write）"},
+        "files": {"type": "array", "items": {"type": "string"}, "description": "書いた・書く予定のファイル（write）"},
+        "unknown_items": {"type": "array", "items": {"type": "string"}, "description": "不明のまま書いた項目の P の番号（write）"},
+        "dry_run": {"type": "boolean", "description": "書かずに差分だけを出した（write）"},
+        "drifted": {"type": "integer", "description": "ずれた項目の数（drift）"},
+        "declared": {"type": "boolean", "description": ".ndf/worktree.json に branch_flow を書いてある（drift。偽なら既定値の行と比べた）"}
       }
     },
     "items": {
       "type": "array",
-      "description": "判定の理由（check）か、書いたファイル（schema）",
+      "description": "判定の理由（check）・測った項目（measure）・項目ごとの出所と案内（write）・ずれ（drift）・書いたファイル（schema）",
       "items": {
         "type": "object",
-        "additionalProperties": false,
-        "required": ["kind", "reason"],
+        "required": ["kind"],
         "properties": {
-          "kind": {"type": "string", "enum": ["fresh", "missing", "stale", "broken", "schema"], "description": "判定の種類（check）か schema"},
-          "reason": {"type": "string", "description": "判定の理由（check）か、書いたパス（schema）"}
+          "kind": {
+            "type": "string",
+            "enum": [
+              "fresh", "missing", "stale", "broken", "schema",
+              "measured", "question", "unknown",
+              "written", "kept", "mismatch", "secret", "ignored", "note",
+              "drift"
+            ],
+            "description": "判定の種類（check）・測定の状態（measure）・出所の種類（write）・drift・schema"
+          },
+          "reason": {"type": "string", "description": "判定の理由（check）・不明の理由（measure・write）・書いたパス（schema）"},
+          "name": {"type": "string", "description": "測った項目（measure）・ずれたキー（drift）・除外されたファイル（write の gitignore）"},
+          "key": {"type": "string", "description": "宣言のキー（write。worktree.json#<キー> は .ndf/worktree.json のキー）"},
+          "origin": {"type": "string", "description": "書いた値の出所（write: 測った・判断した・不明）"},
+          "declared": {"description": "宣言の値（write の mismatch・drift）"},
+          "analyzed": {"description": "解析の値（write の mismatch）"},
+          "measured": {"description": "測った値（drift）"},
+          "confidence": {"type": ["string", "null"], "description": "確からしさ（drift: 高・中）"},
+          "evidence": {"type": "array", "description": "根拠の行（drift）"},
+          "proposal": {"type": "string", "description": "直し方の案（drift）"},
+          "text": {"type": "string", "description": "案内の文（write の note）"},
+          "kept_previous": {"type": "boolean", "description": "新しい解析が不明で前の値を残した（write）"},
+          "result": {"type": "string", "description": "gitignore の確かめの結果（write）"},
+          "source": {"type": "string", "description": "除外した .gitignore の行（write）"},
+          "pattern": {"type": "string", "description": "除外した .gitignore の型（write）"}
         }
       }
     }

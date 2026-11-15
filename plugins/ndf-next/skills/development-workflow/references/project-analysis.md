@@ -1,6 +1,6 @@
 # プロジェクトの宣言を解析する
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `glossary.py`（M7）・`project-decl.py`（S1e）・`project-mvv.py`（M7）・`worktree-setup.sh`（M8）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `glossary.py`（M7）・`project-mvv.py`（M7）・`worktree-setup.sh`（M8）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 **NDF は、使い始めたリポジトリを手順 0 で解析し、そのプロジェクトの形を `.ndf/project.json` に書き出す。**
 各 Skill とスクリプトは、ai-plugins の形（pytest を uv で・本番チャネルと別のベースブランチ宛て・版数を持つプラグインのデプロイ）を既定にせず、
@@ -9,12 +9,12 @@
 ## 例: carmo-system-console で手順 0 を通す
 
 1. `ndf project check` が 3 で終わる（`.ndf/project.json` が無い）
-2. conductor が `project-decl.py measure --out "$TMP/measure.json"` を打つ。言語（PHP 8.3・Laravel 10）・CI の JUnit の合計・
+2. conductor が `ndf project measure --out "$TMP/measure.json"` を打つ。言語（PHP 8.3・Laravel 10）・CI の JUnit の合計・
    ワークフロー・必須のチェック・compose の `mysql` を「測った値」として、テストの走らせ方・起点と本番・リリース・課題の正本・
    NDF の方針の検査を「問い」として、候補と根拠を付けて返す
 3. conductor が問いに答える。`AGENTS.md` の `docker compose exec app ./vendor/bin/phpunit` の行を根拠にテストを
    「PHPUnit・`app` のコンテナ越し」と決め、マージ先が `main` に揃っていることから起点と本番を `main` と決め、答えのファイルを書く
-4. `project-decl.py write` が `.ndf/project.json` を作り、`.ndf/worktree.json` に欠けていた `base_branch`・`production_branch` だけを足す。
+4. `ndf project write` が `.ndf/project.json` を作り、`.ndf/worktree.json` に欠けていた `base_branch`・`production_branch` だけを足す。
    書いた差分と、項目ごとの出所（測った / 判断した / 不明 / 手の値を保った）が出る
 5. 手順 0 の出力が `宣言: あり。解析: 作成した（.ndf/project.json・.ndf/worktree.json。不明 無し）` になる
 
@@ -36,10 +36,9 @@
 
 ```bash
 TMP="$(mktemp -d)"
-[ -n "${SCRIPTS:-}" ] || echo "project-decl.py measure・write・drift は S1e #3569 が副命令に置き換えるまで新しいプラグインだけでは打てない。飛ばした（解析: できなかった）"
-[ -n "${SCRIPTS:-}" ] && { python3 "$SCRIPTS/project-decl.py" measure --out "$TMP/measure.json"; echo "exit=$?"; }
+ndf project measure --out "$TMP/measure.json"; echo "exit=$?"
 # 測定の結果の status: question の項目に答え、"$TMP/answers.json" を書く（下の「答え方」）
-[ -n "${SCRIPTS:-}" ] && { python3 "$SCRIPTS/project-decl.py" write --measure "$TMP/measure.json" --answers "$TMP/answers.json"; echo "exit=$?"; }
+ndf project write --measure "$TMP/measure.json" --answers "$TMP/answers.json"; echo "exit=$?"
 ```
 
 | 手 | 終了コード | 次に行うこと |
@@ -48,7 +47,7 @@ TMP="$(mktemp -d)"
 | measure | 1 | `解析: できなかった（<理由>）` を出して手順 1 へ進む |
 | write | 0 | 出力の差分・出所・食い違い・案内を、手順 0 の `宣言:` の行と利用者への報告に載せる |
 | write | 1 | `解析: できなかった（書けない: <理由>）` を出して手順 1 へ進む |
-| write | 3 | 既存の宣言が壊れている。作り直さずに止まり、出力の箇所を利用者に直してもらう |
+| write | 2 | 既存の宣言が壊れている。作り直さずに止まり、出力の箇所を利用者に直してもらう |
 
 `measure` の締め切りは 120 秒（`--budget`）で、`gh` の 1 回の呼び出しは残りと 30 秒の小さい方で打ち切る。
 `measure` が書くのは `--out` だけで、リポジトリの中へは置けない。`gh` へは読む要求（`gh api --method GET`）だけを渡す。
@@ -120,7 +119,7 @@ clone した全員と CI で同じ値のまま効き、変える Pull Request �
 | 実行時の出力（`.ndf/handoff/` など） | コミットしない。`handoff/` は `.gitignore` にも書かない（[handoff.md](handoff.md)） |
 
 ルートの `.gitignore` が `.ndf/` を丸ごと外しているときは、利用者が `.gitignore` を直す（NDF は `.gitignore` を書き換えない）。
-宣言を書く・確かめるコマンド（`project-mvv.py approve` / `check`・`project-decl.py write`・`glossary.py init`）は、宣言が `.gitignore` の対象なら
+宣言を書く・確かめるコマンド（`project-mvv.py approve` / `check`・`ndf project write`・`glossary.py init`）は、宣言が `.gitignore` の対象なら
 `status: ok` のまま、除外している行（`<ファイル>:<行>` とパターン）と対象のファイルを `items`（`kind: note`・`key: gitignore`・`result: ignored`）と
 要約に出す。検出は `scripts/lib/ndf_tracking.py` が持つ。
 
@@ -155,9 +154,8 @@ Pull Request（最大 100 件）と origin のスプリントブランチで、�
 `measure` の後に `drift` を打ち、宣言（無ければ既定値の行）と測った値のずれを項目ごとに見る。ずれが無ければ `items` は空である。
 
 ```bash
-[ -n "${SCRIPTS:-}" ] || echo "project-decl.py measure・write・drift は S1e #3569 が副命令に置き換えるまで新しいプラグインだけでは打てない。飛ばした"
-[ -n "${SCRIPTS:-}" ] && python3 "$SCRIPTS/project-decl.py" measure --out "$TMP/measure.json"
-[ -n "${SCRIPTS:-}" ] && python3 "$SCRIPTS/project-decl.py" drift --measure "$TMP/measure.json"
+ndf project measure --out "$TMP/measure.json"
+ndf project drift --measure "$TMP/measure.json"
 ```
 
 宣言を変える・外すのは利用者の設定の書き換え（共通原則 C7）で、実装の中でコミットし、承認ゲートで人が見る。変えた宣言は

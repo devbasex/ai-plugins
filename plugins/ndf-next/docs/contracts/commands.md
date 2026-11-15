@@ -245,7 +245,10 @@
 | 呼び方 | 引数 |
 | --- | --- |
 | `ndf project check` | `--force`（boolean・任意）: 新しくても古いと判定する（手動の再解析）<br>`--root`（string・任意・既定 `"."`）: リポジトリの作業場所 |
+| `ndf project drift` | `--measure`（string・必須）: ndf project measure の測定の結果<br>`--root`（string・任意・既定 `"."`）: リポジトリの作業場所 |
+| `ndf project measure` | `--out`（string・必須）: 測定の結果の置き場（リポジトリの外の一時ディレクトリ）<br>`--budget`（number・任意・既定 `120.0`）: 締め切りの秒（既定 120）<br>`--root`（string・任意・既定 `"."`）: リポジトリの作業場所 |
 | `ndf project schema` | `--out`（string・任意）: 書く先。省けば標準出力 |
+| `ndf project write` | `--measure`（string・必須）: ndf project measure の測定の結果<br>`--answers`（string・任意）: 問いの項目への答え（キー → {value} か {unknown}）<br>`--dry-run`（boolean・任意）: 書かずに差分だけを出す<br>`--root`（string・任意・既定 `"."`）: リポジトリの作業場所 |
 
 結果の `metrics`: `inputs`（integer）。`items` の要素: `kind`（string）・`reason`（string）
 
