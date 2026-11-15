@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import fnmatch
 import graphlib
+import json
 import re
 import shlex
 from pathlib import Path
@@ -362,18 +363,17 @@ def plan_dir(main: Path, name: str) -> Path:
 
 def load_plan(main: Path, name: str) -> object:
     """`plan.json` の中身（JSON の値）。無ければ FileNotFoundError、読めなければ ValueError。"""
-    import json
-
     return json.loads((plan_dir(main, name) / "plan.json").read_text(encoding="utf-8"))
 
 
-# 上限を外して読む（上限は計画を作るときに見る。読むときは書かれた計画をそのまま受ける）
-_NO_LIMIT = {"max_plans": 10**6, "max_named": 10**6}
+_NO_LIMIT = {"max_plans": 10**6, "max_named": 10**6}  # 上限を外して読む（上限は作るときに見る。読むときは書かれた計画を受ける）
 
 
 def load_valid_plan(main: Path, name: str) -> ParallelPlan:
-    """`plan.json` を上限を外して検証した計画。例外は `load_plan` と検証のものをそのまま投げる。"""
-    return ParallelPlan.model_validate(load_plan(main, name), context=_NO_LIMIT)
+    """`plan.json` を上限を外して検証した計画。終わったレーンは書く側と同じく重なりに数えない（#3553）。例外はそのまま投げる。"""
+    import parallel_ledger as plg  # parallel_ledger が読み込み時にこのモジュールを読むため、ここで読む
+
+    return ParallelPlan.model_validate(load_plan(main, name), context={**_NO_LIMIT, "ended": plg.ended_lanes(main, name)})
 
 
 def waiting_text(w: Optional[dict]) -> Optional[str]:
@@ -461,8 +461,6 @@ def write_all(main: Path, plan: ParallelPlan, raw: dict) -> list[Path]:
     """`plan.json`・`plan.md`・引継ぎ文書を書く。在る引継ぎ文書・在る計画があれば 1 つも書かずに FileExistsError（I5）。
 
     引継ぎ文書の置き場と書き込みは handoff.py（`paths_of`・`write_doc`）に任せる。"""
-    import json
-
     import handoff
 
     d = plan_dir(main, plan.name)
