@@ -162,7 +162,8 @@ def test_release_steps_parser_current_behavior() -> None:
         "assemble": common + target,
         "materials": common + target + [opt("--out")],
         "present": common + [pr, opt("--material")],
-        "answer": common + [pr, req("--answer", choices=("approved", "rejected")), req("--presented"), req("--by")],
+        "answer": common
+        + [pr, req("--answer", choices=("approved", "rejected")), req("--presented"), req("--by", choices=("user", "mvv"))],
         "approval-check": common + [pr, req("--production")],
         "merge": common + [pr, req("--base"), req("--production"), req("--budget", float)],
         "record": common + [pr, req("--production")],

@@ -109,13 +109,20 @@ def cmd_approval_check(args: argparse.Namespace) -> dict:
 
 
 def cmd_merge(args: argparse.Namespace) -> dict:
-    done = land.Lander(_hub(args), args.base, args.production, args.budget).land(args.pr)
+    admin = decl_mod.production_admin(Path(args.root))
+    done = land.Lander(_hub(args), args.base, args.production, args.budget, admin=admin).land(args.pr)
     outputs: dict[str, Any] = {"sync_pr": done.sync_pr} if done.sync_pr is not None else {}
     if done.production_sha is not None:
         outputs["production_sha"] = done.production_sha
-    if done.merged and done.kind is None:
-        return result.result(TOOL, result.OK, done.detail, outputs=outputs)
-    return result.stopped(TOOL, done.kind if done.kind else "unknown", done.detail, outputs=outputs)
+    outputs["admin"] = done.admin
+    if done.admin_record is not None:
+        outputs["admin_record"] = done.admin_record
+    detail = done.detail
+    if done.record_error is not None:  # 本番は出ている。記録だけを打ち直しで書く（#3506 の決定 7）
+        detail = f"{detail}。迂回の記録を書けなかった（本番は出ている）: {done.record_error}"
+    if done.merged and done.kind is None and done.record_error is None:
+        return result.result(TOOL, result.OK, detail, outputs=outputs)
+    return result.stopped(TOOL, done.kind if done.kind else "unknown", detail, outputs=outputs)
 
 
 def cmd_record(args: argparse.Namespace) -> dict:
@@ -219,7 +226,9 @@ def _material(p: argparse.ArgumentParser) -> None:
 def _answer_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--answer", choices=approval_decide.ANSWERS, required=True)
     p.add_argument("--presented", required=True, help="提示した先端の SHA（present の outputs.head）")
-    p.add_argument("--by", required=True, help="答えた人")
+    p.add_argument(
+        "--by", required=True, choices=trail.BY_CHOICES, help="答えた担い手（利用者 user / MVV 判定 mvv。迂回は user だけを数える）"
+    )
 
 
 def _materials_out(p: argparse.ArgumentParser) -> None:

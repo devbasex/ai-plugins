@@ -11,6 +11,10 @@
    キューに残っているかと承認を読み直し、キューが外したらすぐに止まり、承認が失効したらキューから外して止まる
 5. 本番ブランチへ入れたら、本番ブランチからベースブランチ宛ての PR を作り（開いたものがあれば使い直す）、必須のチェックの
    後にマージする（版上げのコミットをベースブランチへ戻す）。マージ済みの PR で打ち直しても、ここから再開する
+
+迂回の宣言（`admin`。`.ndf/project.json` の `production_merge.admin`）があり、本番ブランチの規則の承認数が 1 以上と読めるときだけ、
+本番ブランチ宛ての PR を管理者の迂回でマージし（`GitHub.merge_as_admin`）、迂回の記録を置く（#3506 の I2b・I7）。そのときの
+証跡の照合は、担い手が MVV 判定の証跡を数えない（I9）。承認数が 0 か読めなければ迂回しない。
 """
 
 from __future__ import annotations
@@ -36,10 +40,23 @@ UNPROCESSABLE = HTTPStatus.UNPROCESSABLE_ENTITY
 NOTHING_TO_SYNC_TEXT = "No commits between"
 # 従来の保護（branch protection）が無いときの状態
 NOT_FOUND = HTTPStatus.NOT_FOUND
+# 承認レビューの規則の種類（ruleset）
+REVIEW_RULE = "pull_request"
+REVIEW_COUNT = "required_approving_review_count"
 # 結論の出ていない状態（事実の表 ci-outcomes の pending。commit status の `pending` を含む）
 PENDING_STATES = frozenset(facts.ids("ci-outcomes", outcome="pending"))
 # マージキューへ入れた PR がマージされたかを読み直す間隔（秒）
 QUEUE_POLL_SECONDS = 30.0
+# 従来の保護の `app_id` で「どの発行元でもよい」を表す値
+ANY_APP = -1
+
+
+class Required(NamedTuple):
+    """宛先の必須のチェック。`names` は名前（重複なく整列）、`apps` は発行元のアプリ（ruleset の `integration_id`・
+    従来の保護の `app_id`）を指定された名前ごとのアプリの ID（#3506）。"""
+
+    names: list[str]
+    apps: dict[str, frozenset[int]]
 
 
 class Landed(NamedTuple):
@@ -51,13 +68,17 @@ class Landed(NamedTuple):
     sync_pr: int | None = None
     # 本番ブランチへ入ったコミット（タグと GitHub Release を作る版。本番ブランチへ入れていなければ None）
     production_sha: str | None = None
+    # 本番の PR を管理者の迂回でマージしたか・迂回の記録の URL・記録を書けなかった理由（#3506）
+    admin: bool = False
+    admin_record: str | None = None
+    record_error: str | None = None
 
 
-def _status_run(status: dict) -> dict:
-    """commit status 1 件を check run の形にする（`ci.read` に渡す）。"""
+def _status_run(status: dict, app: int | None = None) -> dict:
+    """commit status 1 件を check run の形にする（`ci.read` に渡す）。`app` は書き手の GitHub App（分かれば `app.id` に入れる）。"""
     state = text_of(status["state"]).lower()
     conclusion = "" if state in PENDING_STATES else state
-    return {
+    run = {
         "name": text_of(status["context"]),
         "status": "completed" if conclusion else "in_progress",
         "conclusion": conclusion,
@@ -65,6 +86,15 @@ def _status_run(status: dict) -> dict:
         "started_at": text_of(status["created_at"]),
         "id": int(status["id"]),
     }
+    if app is not None:
+        run["app"] = {"id": app}
+    return run
+
+
+def _review_count(raw: dict) -> int:
+    """規則か従来の保護の承認数（`required_approving_review_count`）。数でなければ 0。"""
+    value = raw.get(REVIEW_COUNT)
+    return value if isinstance(value, int) else 0
 
 
 def _list(raw: dict, key: str) -> list:
@@ -73,14 +103,40 @@ def _list(raw: dict, key: str) -> list:
     return got if isinstance(got, list) else []
 
 
-def _protection_checks(branch: dict) -> list[str]:
-    """`GET /branches/<名前>` の従来の保護の必須のチェックの名前。"""
+def _app(value: object) -> int | None:
+    """発行元のアプリの ID（指定が無い・どれでもよい（-1）なら None）。"""
+    return value if isinstance(value, int) and not isinstance(value, bool) and value != ANY_APP and value > 0 else None
+
+
+def _protection_checks(branch: dict) -> list[tuple[str, int | None]]:
+    """`GET /branches/<名前>` の従来の保護の必須のチェック（名前, 発行元）。`contexts` は発行元を持たない。"""
     protection = branch.get("protection")
     checks = protection.get("required_status_checks") if isinstance(protection, dict) else None
     if not isinstance(checks, dict):
         return []
-    contexts = [text_of(c) for c in _list(checks, "contexts")]
-    return contexts + [text_of(c["context"]) for c in _list(checks, "checks") if isinstance(c, dict)]
+    contexts: list[tuple[str, int | None]] = [(text_of(c), None) for c in _list(checks, "contexts")]
+    return contexts + [(text_of(c["context"]), _app(c.get("app_id"))) for c in _list(checks, "checks") if isinstance(c, dict)]
+
+
+def _restricted(name: str, apps: dict[str, frozenset[int]]) -> list[frozenset[int]]:
+    """チェックの名前 `name` が `ci.read` の照合で当たる、発行元を指定された必須のチェックのアプリの集合の並び。"""
+    return [want for required, want in apps.items() if ci.fulfils(name, required)]  # noqa: NDF201 上限: 発行元を指定した必須のチェックの数（ci.fulfils は名前の照合だけで外へ出ない）
+
+
+def _from_sources(runs: list[dict], apps: dict[str, frozenset[int]]) -> list[dict]:
+    """発行元を指定された必須のチェックに当たる実行は、指定のアプリのもの（check run と、そのアプリの bot が書いた commit status）
+    だけを残す（同じ名前の別の発行元を数えない。#3506）。
+
+    当たるかは `ci.read` と同じ照合（`ci.fulfils`）で決める。生の名前で絞ると、前置きや分割ジョブの末尾の付いた別の発行元の
+    実行（`other / pytest`）が絞り込みを抜け、`ci.read` が必須のチェックとして数える。同じ名前に別々のアプリが指定されていれば、
+    1 つの実行では満たせないため残さない（待ちが止める）。"""
+    return [r for r in runs if all(want == {_app_of(r)} for want in _restricted(text_of(r.get("name")), apps))]
+
+
+def _app_of(run: dict) -> object:
+    """実行の発行元のアプリの ID（`app` が無い commit status は None）。"""
+    app = run.get("app")
+    return app.get("id") if isinstance(app, dict) else None
 
 
 @dataclass(frozen=True)
@@ -92,16 +148,43 @@ class Lander:
     production: str
     budget: float
     wait: Callable[[Callable[[], ci.Reading], float], ci.WatchResult] | None = None
+    # 迂回の宣言（`declaration.production_admin`）。偽なら今のマージのまま
+    admin: bool = False
     clock: Callable[[], float] = time.monotonic
     sleep: Callable[[float], None] = time.sleep
 
-    def required(self, branch: str) -> list[str]:
-        """宛先のブランチの規則（ruleset）と従来の保護の必須のチェックの名前（承認の commit status を除く）。"""
-        rules = self.hub.rest("GET", f"/repos/{self.hub.repo}/rules/branches/{branch}")
-        names = [
-            text_of(check["context"])
-            for rule in (rules if isinstance(rules, list) else [])
-            if isinstance(rule, dict) and rule.get("type") == REQUIRED_RULE
+    def approvals(self, branch: str) -> int | None:
+        """宛先のブランチの承認数。ruleset の承認の規則があればその最大、無ければ従来の保護、保護が無ければ 0、読めなければ None。"""
+        try:
+            rules = self.hub.branch_rules(branch)
+        except GitHubError:  # noqa: NDF401 ネットワーク: 承認数を読めなければ迂回しない（#3506 の I2b）
+            return None
+        found = [
+            _review_count(rule["parameters"])
+            for rule in rules
+            if rule.get("type") == REVIEW_RULE and isinstance(rule.get("parameters"), dict)
+        ]
+        if found:
+            return max(found)
+        try:
+            got = self.hub.rest("GET", f"/repos/{self.hub.repo}/branches/{branch}/protection/required_pull_request_reviews")
+        except GitHubError as exc:
+            return 0 if exc.status == NOT_FOUND else None
+        return _review_count(got) if isinstance(got, dict) else None
+
+    def _bypass(self, pull: Pull) -> bool:
+        """この PR を管理者の迂回でマージするか（宣言があり、本番ブランチ宛てで、承認数が 1 以上と読める。#3506 の I2b）。"""
+        if not self.admin or pull.base_ref != self.production:
+            return False
+        n = self.approvals(pull.base_ref)
+        return n is not None and n >= 1
+
+    def required(self, branch: str) -> Required:
+        """宛先のブランチの規則（ruleset。全ページ）と従来の保護の必須のチェック（承認の commit status を除く）。"""
+        pairs: list[tuple[str, int | None]] = [
+            (text_of(check["context"]), _app(check.get("integration_id")))
+            for rule in self.hub.branch_rules(branch)
+            if rule.get("type") == REQUIRED_RULE
             for check in rule["parameters"]["required_status_checks"]
         ]
         try:
@@ -110,49 +193,94 @@ class Lander:
             if exc.status != NOT_FOUND:
                 raise
             got = {}
-        names += _protection_checks(got if isinstance(got, dict) else {})
-        return sorted({n for n in names if n != approval_decide.STATUS_CONTEXT})
+        pairs += _protection_checks(got if isinstance(got, dict) else {})
+        pairs = [(n, app) for n, app in pairs if n != approval_decide.STATUS_CONTEXT]
+        apps: dict[str, set[int]] = {}
+        for name, app in pairs:
+            if app is not None:
+                apps.setdefault(name, set()).add(app)
+        return Required(sorted({n for n, _ in pairs}), {k: frozenset(v) for k, v in apps.items()})
 
-    def _runs(self, sha: str) -> list[dict]:
-        """コミットの check run と commit status（check run の形にしたもの）の一覧。"""
-        combined = self.hub.rest("GET", f"/repos/{self.hub.repo}/commits/{sha}/status", params={"per_page": 100})
-        statuses = _list(combined, "statuses") if isinstance(combined, dict) else []
-        return self.hub.check_runs(sha) + [_status_run(s) for s in statuses if isinstance(s, dict)]
+    def _runs(self, sha: str, apps: dict[str, frozenset[int]], bots: dict[str, int | None]) -> list[dict]:
+        """コミットの check run と commit status（check run の形にしたもの）の一覧。
+
+        発行元を指定された必須のチェックがあれば、commit status を全件（書き手つき）で読み、それに当たる status には
+        書き手の bot のアプリを付ける（指定のアプリが付けた status を満たしたと数える。#3506）。`bots` は bot ごとのアプリの控え。"""
+        if not apps:
+            combined = self.hub.rest("GET", f"/repos/{self.hub.repo}/commits/{sha}/status", params={"per_page": 100})
+            statuses = _list(combined, "statuses") if isinstance(combined, dict) else []
+            return self.hub.check_runs(sha) + [_status_run(s) for s in statuses if isinstance(s, dict)]
+        return self.hub.check_runs(sha) + [_status_run(s, self._status_app(s, apps, bots)) for s in self.hub.statuses(sha)]
+
+    def _status_app(self, status: dict, apps: dict[str, frozenset[int]], bots: dict[str, int | None]) -> int | None:
+        """発行元を指定された必須のチェックに当たる commit status の書き手のアプリ（当たらない・bot でなければ None）。"""
+        if not _restricted(text_of(status.get("context")), apps):
+            return None
+        creator = status.get("creator")
+        login = text_of(creator.get("login")) if isinstance(creator, dict) else ""
+        if login not in bots:
+            bots[login] = self.hub.bot_app(login)
+        return bots[login]
 
     def _watch(self, pull: Pull, deadline: float) -> str | None:
         """必須のチェック（check run と commit status）を時刻 `deadline` まで待ち、止まった理由の種類（通れば None）。"""
         required = self.required(pull.base_ref)
+        bots: dict[str, int | None] = {}
 
         def reader() -> ci.Reading:
-            return ci.read(self._runs(pull.head_sha), required, [])
+            return ci.read(_from_sources(self._runs(pull.head_sha, required.apps, bots), required.apps), required.names, [])
 
         left = max(0.0, deadline - self.clock())
         watched = self.wait(reader, left) if self.wait is not None else ci.Watch(reader, left).run()
         return watched.cause([])
 
-    def _refusal(self, pull: Pull) -> Landed | None:
-        """本番ブランチ宛ての PR の証跡を読み直し、`pull` の先端が承認されていなければ止まった結果（承認されていれば None）。"""
+    def _refusal(self, pull: Pull, human_only: bool = False) -> Landed | None:
+        """本番ブランチ宛ての PR の証跡を読み直し、`pull` の先端が承認されていなければ止まった結果（承認されていれば None）。
+        `human_only` なら担い手が MVV 判定の証跡を数えない（迂回の前提。#3506 の I9）。"""
         if pull.base_ref != self.production:
             return None
-        got = trail.check(self.hub, pull.number)
+        got = trail.check(self.hub, pull.number, human_only)
         if got.pull.head_sha != pull.head_sha:
             return Landed(False, "refused", f"#{pull.number} の先端が {pull.head_sha[:12]} から {got.pull.head_sha[:12]} へ動いた")
         if not got.judgment.approved:
             return Landed(False, "refused", f"#{pull.number} は承認されていない: {got.judgment.detail}")
         return None
 
-    def _merge(self, pull: Pull, deadline: float) -> Landed:
-        """必須のチェックの後に `pull` をマージする。待ちは時刻 `deadline`（`land` が 1 度だけ決める）まで。"""
+    def _blocker(self, pull: Pull, deadline: float, bypass: bool = False) -> Landed | None:
+        """マージの前の停止条件を順に確かめ、止まった結果（進めてよければ None）。
+
+        証跡の読み直し → 必須のチェックの待ち（時刻 `deadline` まで）→ 待ちの後の証跡の読み直し（本番ブランチ宛てでなければ
+        読み直しは素通り）。
+        """
+        refused = self._refusal(pull, bypass)
+        if refused is not None:
+            return refused
         kind = self._watch(pull, deadline)
         if kind is not None:
             return Landed(False, kind, f"#{pull.number} の必須のチェックが通らない（{kind}。打ち直さずに人へ戻す）")
-        refused = self._refusal(pull)
-        if refused is not None:
-            return refused
-        outcome: MergeOutcome = self.hub.merge(pull.number, expect_head=pull.head_sha, method=MERGE_METHOD, require_method=True)
+        return self._refusal(pull, bypass)
+
+    def _merge(self, pull: Pull, deadline: float, bypass: bool = False) -> Landed:
+        """停止条件（`_blocker`）を確かめた後にマージする。待ちは時刻 `deadline`（`land` が 1 度だけ決める）まで。
+        `bypass` なら管理者の迂回で打つ（戻す PR は常に偽）。迂回でなくマージキューへ入れたら、マージされるまで待つ。"""
+        blocked = self._blocker(pull, deadline, bypass)
+        if blocked is not None:
+            return blocked
+        if bypass:
+            outcome: MergeOutcome = self.hub.merge_as_admin(pull.number, expect_head=pull.head_sha, method=MERGE_METHOD)
+            return Landed(outcome.merged, outcome.kind, outcome.detail)  # 迂回の印は _record が立てる
+        outcome = self.hub.merge(pull.number, expect_head=pull.head_sha, method=MERGE_METHOD, require_method=True)
         if outcome.kind == MERGE_QUEUE_PENDING:
             return self._await_queue(pull, deadline)
         return Landed(outcome.merged, outcome.kind, outcome.detail)
+
+    def _record(self, pull: Pull, done: Landed) -> Landed:
+        """迂回でマージした結果に、迂回の記録の URL か、書けなかった理由を足す（#3506 の I7・決定 7）。"""
+        try:
+            _wrote, url = trail.write_admin_record(self.hub, pull.number, pull.head_sha)
+        except trail.TrailError as exc:
+            return done._replace(admin=True, record_error=str(exc))
+        return done._replace(admin=True, admin_record=url)
 
     def _queued_refusal(self, pull: Pull, now: Pull) -> Landed | None:
         """キューで待つ本番ブランチ宛ての PR の証跡を読み直し、承認が失効していれば止まった結果（承認のままなら None）。
@@ -242,6 +370,16 @@ class Lander:
         detail = f"#{pull.number} をマージした。戻す PR: {synced.detail}"
         return synced._replace(sync_pr=number, detail=detail, production_sha=landed)
 
+    def _resume_merged(self, number: int, pull: Pull, deadline: float) -> Landed:
+        """マージ済みの PR からの再開。本番ブランチ宛てならベースブランチへ戻し、迂回の記録が無ければ補う。"""
+        if pull.base_ref != self.production:
+            return Landed(True, None, f"#{number} は既にマージされている")
+        synced = self._sync(pull, deadline)
+        # 再開: 利用者の証跡がマージした先端への承認なら、迂回でマージしたとして記録を補う（I7）
+        if self._bypass(pull) and (judged := trail.user_judgment_at(self.hub, number, pull.head_sha)) is not None and judged.approved:
+            return self._record(pull, synced)
+        return synced
+
     def land(self, number: int) -> Landed:
         """リリースの PR をマージする。本番ブランチへ入れた後（マージ済みからの再開を含む）は、ベースブランチへ戻す。
 
@@ -251,9 +389,7 @@ class Lander:
         deadline = self.clock() + self.budget
         pull = self.hub.pull(number)
         if pull.merged:
-            if pull.base_ref == self.production:
-                return self._sync(pull, deadline)
-            return Landed(True, None, f"#{number} は既にマージされている")
+            return self._resume_merged(number, pull, deadline)
         version_decide.version_of_branch(pull.head_ref)
         if pull.base_ref == self.production and not self.hub.token_trusted():
             return Landed(
@@ -262,10 +398,9 @@ class Lander:
                 f"#{number} を {self.production} へ入れる token の書き手が write 以上の権限を持つ利用者でなく、マージの後の"
                 "リリース記録が読まれない。利用者の token（workflow では secrets.NDF_RELEASE_TOKEN）でマージする",
             )
-        refused = self._refusal(pull)
-        if refused is not None:
-            return refused
-        done = self._merge(pull, deadline)
+        bypass = self._bypass(pull)
+        done = self._merge(pull, deadline, bypass)
         if not done.merged or pull.base_ref != self.production:
             return done
-        return self._sync(pull, deadline)
+        synced = self._sync(pull, deadline)
+        return self._record(pull, synced) if bypass else synced

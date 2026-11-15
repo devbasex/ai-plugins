@@ -508,3 +508,43 @@ def test_workflow_gives_write_only_to_the_publish_job_and_no_new_secret():
     text = (ROOT / ".github" / "workflows" / "release-cd.yml").read_text(encoding="utf-8")
     assert "secrets." not in text and "github.token" in text
     assert 'release-steps.py publish --root . --revision "$GITHUB_SHA"' in text
+
+
+# --- #3506: 迂回の宣言（cd-admin）の本番のプランの部品 ------------------------------------------
+
+
+def _cd_steps(case, mvv, tmp_path):
+    import argparse
+
+    import release_case
+    from supervise_lib import release_cd
+
+    case = release_case.Case(case, "", "", "")
+    state = tmp_path / "state"
+    a = argparse.Namespace(mvv=str(state) if mvv else None, mode="standard", production_branch="main", state=str(state))
+    approval = [{"id": "facts", "next": "explain"}, {"id": "others", "next": "end"}]
+    steps = release_cd.cd_prod_steps(a, "1.2.3", "9", None, "approval.md", approval, case)
+    return {s["id"]: s for s in steps}, release_cd.cd_release_wait(a, case, {})
+
+
+@pytest.mark.parametrize("mvv", [True, False])
+def test_cd_admin_plan_gates_for_the_user_and_writes_the_trail_by_user(tmp_path, mvv):
+    """#3506 の決定 8・I9: cd-admin は MVV 判定のプランでも承認ゲートで止まり、approve-pr を --by user で置く。"""
+    steps, wait = _cd_steps("cd-admin", mvv, tmp_path)
+    assert wait == {"gate_next": "facts"}
+    assert "--by user" in steps["approve-pr"]["cmd"] and steps["approve-pr"]["next"] == "release"
+    assert steps["note" if mvv else "approval-post"]["next"] == "end"
+
+
+def test_cd_no_review_and_cd_review_plans_stay_as_they_were(tmp_path):
+    steps, wait = _cd_steps("cd-no-review", True, tmp_path)
+    assert "--by mvv" in steps["approve-pr"]["cmd"] and steps["note"]["next"] == "approve-pr" and "on_exit" in wait
+    steps, wait = _cd_steps("cd-review", True, tmp_path)
+    assert "approve-pr" not in steps and steps["note"]["next"] == "end" and wait == {"gate_next": "facts"}
+
+
+def test_model_accepts_the_production_merge_declaration():
+    model.validate_decl({"version": 1, "production_merge": {"admin": True}})
+    model.validate_decl({"version": 1, "production_merge": {"unknown": "決めていない"}})
+    with pytest.raises(Exception):
+        model.validate_decl({"version": 1, "production_merge": {"admin": "true"}})
