@@ -24,7 +24,8 @@ import parallel_release as prl
 from parallel_helper import is_confirmed_launch, last_launch
 from step_read import last_json
 
-CONFIRMED_OPTIONS = ("打ち直す", "差し戻す")  # 確定の後の依頼の選択肢。依頼の `options` と答えの当て方が読む（決定 2）
+RETRY, REJECT = "打ち直す", "差し戻す"  # 確定の後の依頼の答え（決定 2）
+CONFIRMED_OPTIONS = (RETRY, REJECT)  # 確定の後の依頼の選択肢。依頼の `options` と答えの当て方が読む（決定 2）
 
 
 class NotConfirmed(Exception):
@@ -134,17 +135,21 @@ class ConfirmedGate:
         rel = self.current
         if rel is None or q.get("n") != rel["n"]:
             return True
-        if CONFIRMED_OPTIONS[0] in choice and self.launch and self.launch.get("purpose"):
+        if RETRY in choice and self.launch and self.launch.get("purpose"):
             fields = {k: v for k, v in self.launch.items() if k not in ("seq", "action")}
             self.pause("confirmed", **{**fields, "purpose": f"{fields['purpose']}-a{q.get('id')}"})
             self.helper_asked = None
             self.launch_helper()
-        elif CONFIRMED_OPTIONS[1] in choice:
-            reason = f"承認の後の承認ゲートで差し戻した（依頼 {q.get('id')}: {q.get('reason') or '-'}）"
-            if q.get("pr"):
-                got = step_close_release_pr(self.main, int(q["pr"]), f"{reason}。直しは次のリリースの提示から新しい PR で承認を取り直す")
-                reason += "" if got.get("closed") else f"。本番の PR #{q['pr']} を閉じられない（{got.get('reason')}）"
-            else:
-                reason += "。本番の PR の番号を読めないため閉じていない"
-            self.settle(rel, {"result": "rejected", "reason": reason})
+        elif REJECT in choice:
+            self._reject(rel, q)
         return True
+
+    def _reject(self, rel: dict, q: dict) -> None:
+        """差し戻す: 本番の PR を閉じてから（番号を読めなければ閉じない）、理由を組んで `settle` の `rejected` を通す。"""
+        reason = f"承認の後の承認ゲートで差し戻した（依頼 {q.get('id')}: {q.get('reason') or '-'}）"
+        if q.get("pr"):
+            got = step_close_release_pr(self.main, int(q["pr"]), f"{reason}。直しは次のリリースの提示から新しい PR で承認を取り直す")
+            reason += "" if got.get("closed") else f"。本番の PR #{q['pr']} を閉じられない（{got.get('reason')}）"
+        else:
+            reason += "。本番の PR の番号を読めないため閉じていない"
+        self.settle(rel, {"result": "rejected", "reason": reason})
