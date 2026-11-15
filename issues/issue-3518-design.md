@@ -2,7 +2,7 @@
 
 ## 目的
 
-- **今どうなっているか**: ndf-next の `.ndf/` の宣言のキーと、副命令・環境変数・受け渡しのファイル・hook・Skill の入出力が、置き場の表・環境変数の表・hook の表・5 種だけの JSON Schema・各副命令のコードに分かれている。宣言のキーの一覧（置き場の表の `keys`）は、読み手のコードが読むキー（例: worktree の宣言の `deps`・`localenv`・`testenv`・`follow_branch`）を欠く
+- **今どうなっているか**: ndf-next の `.ndf/` の宣言のキーと、副命令・環境変数・受け渡しのファイル・hook・Skill の入出力は、1 か所にまとまっていない。置き場の表・環境変数の表・hook の表・5 種だけの JSON Schema・各副命令のコードに分かれている。宣言のキーの一覧（置き場の表の `keys`）は、読み手のコードが読むキー（例: worktree の宣言の `deps`・`localenv`・`testenv`・`follow_branch`）を欠く
 - **誰に効くか**: 設定ページを作る連携システム、NDF を呼び出しの形で検証する連携システム、Skill の本文から `ndf` を打つ AI
 - **変えると何が成り立つか**: 宣言はファイルごとの JSON Schema と生成した文書で、入出力は面ごとの生成した文書と副命令ごとの JSON Schema で引ける。ndf-next の子が宣言・副命令・Skill を変えて文書を生成し直さなければ、`ndf check` が落ちる
 
@@ -69,7 +69,7 @@
 | I15 | 生成した規約 | 公開する面の表は種類 `spec` の行を、契約のページ・宣言のスキーマ・入出力のスキーマの 3 つの置き場について 1 つずつ持ち、各行の `target` がプラグインの中に実在するディレクトリを指す | 欠けた置き場・実在しない `target` を出して落ちる |
 | I11 | 生成した規約 | `bin/` のファイルはすべて起動スクリプトの表に行を持つ | 無いファイルの名前を出して落ちる |
 
-hook の登録のファイル（`hooks/claude.json`・`codex.json`）の事象が hook の表に載ることは、この課題の不変条件に持たない。登録のファイルは hook の表から生成する生成物で、既存のテスト `tests/domains/hooks/test_registration.py` の `test_registration_files_are_what_render_makes`（`registration.stale` が生成し直した中身との差分を出す）が既に縛っている（`src/ndf/domains/hooks/registration.py:1-13`）。
+hook の登録のファイル（`hooks/claude.json`・`codex.json`）の事象が hook の表に載ることは、この課題の不変条件に持たない。登録のファイルは hook の表から生成する生成物である（`src/ndf/domains/hooks/registration.py:1-13`）。既存のテスト `tests/domains/hooks/test_registration.py` の `test_registration_files_are_what_render_makes` が、既に縛っている。このテストは、`registration.stale` が生成し直した中身との差分を出す。
 
 ### ドメインイベント
 
@@ -174,6 +174,8 @@ hook の登録のファイル（`hooks/claude.json`・`codex.json`）の事象�
 | 全副命令の出力の検査（`tests/conftest.py`・`tests/cli/test_every_output.py`） | テストの間に出た結果 JSON と終了コードの組を結果の契約で、結果 JSON を副命令の結果のスキーマで確かめ、実行の終わりに、ok の出力が 1 度も確かめられなかった副命令を落とす（I5・I14） |
 | 契約のページ（`docs/contracts/` の 8 ページ） | `index.md`（面の一覧と公開か内部かの約束）・`declarations.md`・`commands.md`・`exit-codes.md`（終了コードと止まった理由）・`env.md`・`files.md`・`hooks.md`・`skills.md`（Skill と起動スクリプト）。すべて生成する |
 | 行き先の表（`docs/ndf-swap-doc-destinations.md`） | 契約のページ・宣言のスキーマ・入出力のスキーマの 3 行（扱い・持ち主・時期）を足す |
+
+### エントリポイントの表の種類に `spec` を足す
 
 **値の集合へ値を足す変更が 1 つある。** エントリポイントの表の種類（`kind`）に `spec` を足す。種類で分岐する既存の規則を集め、当てはまらないものを次のとおり変える。
 

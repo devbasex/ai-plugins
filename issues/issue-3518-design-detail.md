@@ -1,6 +1,6 @@
 # #3518 の詳細設計: ndf-next の宣言と入出力の規約の生成と検査
 
-設計文書 [issue-3518-design.md](issue-3518-design.md) の「構成要素」と「構造」を、ファイルと関数の粒度へ下ろした文書である。決定の番号（決定 1〜13）は [issue-3518-design-decisions.md](issue-3518-design-decisions.md) を、不変条件の番号（I1〜I15）は設計文書の「不変条件」の表を指す。パスは断りの無い限り `plugins/ndf-next/` からの相対パスである。
+設計文書 [issue-3518-design.md](issue-3518-design.md) の「構成要素」と「構造」を、ファイルと関数の粒度へ下ろした文書である。決定の番号（決定 1〜13）は [issue-3518-design-decisions.md](issue-3518-design-decisions.md) を指す。不変条件の番号（I1〜I15）は、設計文書の「不変条件」の表を指す。パスは断りの無い限り `plugins/ndf-next/` からの相対パスである。
 
 ### 用語の対応
 
@@ -16,7 +16,7 @@
 | 規約の生成物 | 契約のページ（`docs/contracts/*.md` の 8 ページ）と引数のスキーマ（`contracts/schemas/io/*.args.schema.json` の 22 個） |
 | 宣言の行 | 置き場の表のうち、種類（`kind`）が `declaration` で置き場（`place`）が `ndf` の 19 行 |
 
-**宣言の行を `place` が `ndf` の行に絞る。** 置き場の表で `kind` が `declaration` の行は 2026-11-14 時点で 20 行あり、`relay-pinned-account`（置き場 `relay-accounts`、状態の置き場の下の `pinned.json`）は利用者のリポジトリの `.ndf/` に置く宣言ではない。この行は設定ページの対象でなく、受け渡しのファイルのページに載る。設計文書の「19 行」「スキーマ 18 個と形の表 1 個」はこの絞り方で数えた値である。
+**宣言の行を `place` が `ndf` の行に絞る。** 置き場の表で `kind` が `declaration` の行は、2026-11-14 時点で 20 行ある。そのうち `relay-pinned-account`（置き場 `relay-accounts`、状態の置き場の下の `pinned.json`）は、利用者のリポジトリの `.ndf/` に置く宣言ではない。この行は設定ページの対象でなく、受け渡しのファイルのページに載る。設計文書の「19 行」「スキーマ 18 個と形の表 1 個」はこの絞り方で数えた値である。
 
 ## ファイル配置
 
@@ -53,7 +53,7 @@ plugins/ndf-next/
     └── domains/test_entrypoints.py     （accepts に spec の枝を足す）
 ```
 
-**依存は一方向で、輪は無い。** `run.py` → `spec_docs.py` → `spec_render.py` → `spec_model.py` → `spec_args.py` の順に下へだけ向く。`spec_model.py` は既存の `ndf.contracts`（`facts`・`causes`・`exit_codes`）と `ndf.cli`（副命令の表）を読み、`ndf.checks.model`（`Finding`・`CheckError`・`Scope`）を型として使う。`ndf.cli` と `ndf.contracts` は `ndf.checks` を読まないため、輪にならない。`tests/conftest.py` は `ndf.contracts.result` と `ndf.checks.spec_model` の `validator` を読む。
+**依存は一方向で、輪は無い。** `run.py` → `spec_docs.py` → `spec_render.py` → `spec_model.py` → `spec_args.py` の順に下へだけ向く。`spec_model.py` は、既存の `ndf.contracts`（`facts`・`causes`・`exit_codes`）と `ndf.cli`（副命令の表）を読む。型には `ndf.checks.model`（`Finding`・`CheckError`・`Scope`）を使う。`ndf.cli` と `ndf.contracts` は `ndf.checks` を読まないため、輪にならない。`tests/conftest.py` は `ndf.contracts.result` と `ndf.checks.spec_model` の `validator` を読む。
 
 | パス | 種類 | 役割 1 文 | 依存する先 |
 | --- | --- | --- | --- |
