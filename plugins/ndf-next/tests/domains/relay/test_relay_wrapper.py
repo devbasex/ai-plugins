@@ -324,3 +324,30 @@ def test_an_ended_pty_is_not_read_again_while_waiting(tmp_path, monkeypatch):
     finally:
         child.close()
     assert len(reads) == 1 and w.section.eof is True
+
+
+def test_question_that_cannot_reach_the_plan_keeps_the_reason(tmp_path, monkeypatch):
+    # 計画の依頼へ載せられない問いは、理由を状態と log.jsonl に残してから消す（#3035）
+    asked = []
+
+    def ask_plan(path):
+        asked.append(json.loads(path.read_text(encoding="utf-8"))["questions"])
+        return "副命令 lanes question の結果を読めない（終了コード 2）: 壊れた"
+
+    def prepare(d, state):
+        d.mkdir(parents=True, exist_ok=True)
+        signals.write_question(d / signals.QUESTION_FILE, "s1", {"tool_input": {"questions": [{"question": "q"}]}}, 0.1)
+
+    states = []
+    real = wrapper.Wrapper._write_state
+
+    def spy(self, state, reason):
+        states.append((state, reason))
+        return real(self, state, reason)
+
+    monkeypatch.setattr(wrapper.Wrapper, "_write_state", spy)
+    ended, _, w = _run(tmp_path, [FakeChild([b"q\r\n"], 0)], prepare, ask_plan=ask_plan)
+    assert asked == [[{"question": "q"}]] and ended.cause == ""
+    assert not signals.has_question(w.dir)
+    assert any(state == "waiting" and "計画の依頼へ載せられない" in reason for state, reason in states)
+    assert [(r["ok"], "壊れた" in r["reason"]) for r in _log(w) if r["kind"] == "plan_question"] == [(False, True)]

@@ -244,6 +244,44 @@ def open_request(conn: sa.Connection, pid: str, body: dict[str, Any], reason: st
     return key
 
 
+# レーンの問い（AskUserQuestion）の依頼の種類（中継のラッパーが `ndf lanes question` で書く。#3035）
+QUESTION_KIND = "lane_question"
+
+
+def lane_of_wrapper(view: lane.PlanView, wrapper: str) -> Optional[str]:
+    """ラッパーの名前（`launch.wrapper_name`）から計画のレーン名を引く。計画のレーンのラッパーでなければ None。"""
+    return next((name for name in view.lanes if launch.wrapper_name(str(view.repo), view.name, name) == wrapper), None)
+
+
+def _same_question(r: lane.Request, name: str, question: dict[str, Any]) -> bool:
+    body = r.body
+    return (
+        body.get("kind") == QUESTION_KIND
+        and r.lane == name
+        and body.get("tool_use_id") == question.get("tool_use_id")
+        and body.get("questions") == question.get("questions")
+    )
+
+
+def ask_request(conn: sa.Connection, pid: str, wrapper: str, question: dict[str, Any]) -> tuple[str, bool]:
+    """レーンの問い（hook が書いた `question.json` の中身）を計画の依頼として開く。依頼の鍵と、新しく開いたかを返す。
+
+    同じ問い（同じレーン・`tool_use_id`・問いの中身）の開いた依頼があれば使い直し、二重に載せない。
+    計画のレーンのラッパーでなければ断る。依頼はオーガナイザーが答えて `ndf lanes request close` で閉じる。
+    """
+    lane.lock_plan(conn, pid)
+    view, _ = lane.read_plan(conn, pid)
+    name = lane_of_wrapper(view, wrapper)
+    if name is None:
+        raise model.Refused(f"ラッパー {wrapper} は計画 {view.name} のレーンのものでない")
+    held = next((r for r in view.open_requests() if _same_question(r, name, question)), None)
+    if held is not None:
+        return held.key, False
+    fields = ("tool_use_id", "session_id", "questions", "cwd", "at")
+    body = {"kind": QUESTION_KIND, "lane": name, "wrapper": wrapper, **{k: question.get(k) for k in fields}}
+    return open_request(conn, pid, body, f"レーン {name} の問い（AskUserQuestion）", model.WORKFLOW_ACTOR), True
+
+
 def close_request(conn: sa.Connection, pid: str, key: str, reason: str, actor: str = "organizer") -> None:
     """答えていない依頼を採らずに閉じる（オーガナイザー。止まりの知らせはレーンが動き出したら耐久ワークフローが閉じる）。"""
     view, _ = lane.read_plan(conn, pid)
