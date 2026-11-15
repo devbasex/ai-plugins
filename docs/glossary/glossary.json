@@ -7562,6 +7562,30 @@
       "context": "ndf-release",
       "meaning": "差し戻しの後に、ベースブランチの先端から新しいリリースブランチと本番の PR を作り、承認を取り直すこと",
       "pending_source": "issues/issue-3572-requirements.md"
+    },
+    {
+      "term": "承認した先端",
+      "context": "ndf-release",
+      "meaning": "リリース承認ゲートの承認の答えか、利用者の GitHub でのマージが対象にした本番の PR の先端のコミット。本番ブランチへ入れてよいのはこの先端だけである",
+      "pending_source": "issues/issue-3572-design.md"
+    },
+    {
+      "term": "先端の照合",
+      "context": "ndf-release",
+      "meaning": "マージの API に承認した先端を渡し、PR の先端が違えば GitHub に断らせることと、マージの前に承認の証跡を読み直すこと",
+      "pending_source": "issues/issue-3572-design.md"
+    },
+    {
+      "term": "承認の経路",
+      "context": "ndf-release",
+      "meaning": "本番の PR の承認がどこで与えられたか。リリース承認ゲート（`gate`）か、利用者の GitHub でのマージ（`github-merge`）のどちらか",
+      "pending_source": "issues/issue-3572-design.md"
+    },
+    {
+      "term": "差し戻し",
+      "context": "ndf-release",
+      "meaning": "リリース承認ゲートで承認しない答え、または必須のチェックの落ちた本番の PR を出さずに止めること。直しを同じリリースブランチへ入れ、新しい先端で承認を取り直す",
+      "pending_source": "issues/issue-3572-design.md"
     }
   ]
 }
