@@ -22,11 +22,11 @@ import jsonio
 import limits
 import locks
 import parallel_plan as pp
+from parallel_files import LEDGER  # 台帳のファイル名の正本
 from secret_redact import redact_text
 from usage_ledger import ndf_version, now_utc
 
 VERSION = 1
-LEDGER = "ledger.jsonl"
 CHECKPOINT = "checkpoint.json"
 ENDS = ("lane_end", "lane_halt", "verify", "verified")  # レーンの終わりと版の要るまとめの行（#3058。`_Run.take_end`）
 TAKE = ("request", "gate1", "gate2", "ask", "unmatched", "answer", "stop", "left_stopped", "lanes_changed", *ENDS)  # `_Run.take` へ渡す

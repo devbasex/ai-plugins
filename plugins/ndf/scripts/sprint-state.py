@@ -289,8 +289,7 @@ def gate_locked(a) -> dict:
         if stop:
             return stop
         entry.update(judged)
-        # MVV 判定の承認にも答えた PR を残す（設計 PR のマージのプランが PR ごとに引く。#3603 の I9）
-        if a.pr:  # --pr を渡さない今の呼び出しの記録は今と同じ形（outcome を載せない）
+        if a.pr:  # 答えた PR と承認を残す（設計 PR のマージのプランが PR ごとに引く。#3603 の I9）。--pr が無ければ今の形
             entry.update({"pr": a.pr, **({"outcome": "approved"} if a.outcome == "approved" else {})})
     m["gates"] = gates = [g for g in m.get("gates", []) if not gate_answer.replaces(g, a.name, entry.get("pr"))] + [entry]
     jsonio.write_atomic(a.sprint, m, indent=1)
@@ -552,17 +551,9 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--verdict", help="--by mvv: 判定")
     s.add_argument("--reasons", help="--by mvv: 理由（JSON の配列）")
     s.add_argument("--log", help="--by mvv: 判定のログ（mvv-gate.jsonl）のパス")
-    s.add_argument(
-        "--outcome",
-        choices=("approved", "rejected"),
-        help="答え（省くと approved。記録に outcome を書かない。--by mvv は --pr と併せたときだけ approved を記録に残す）",
-    )
+    s.add_argument("--outcome", choices=("approved", "rejected"), help="答え（省くと approved で、記録に書かない）")
     s.add_argument("--mvv-log", default=str(pm.gate_log_path()), help="--by user: 直前の MVV 判定を読むログ（既定 mvv-gate.jsonl）")
-    s.add_argument(
-        "--pr",
-        type=int,
-        help="答えた Pull Request（--by user: 渡すとその PR の MVV 判定だけを直前の判定として比べる。--by mvv: 記録に pr を残す）",
-    )
+    s.add_argument("--pr", type=int, help="答えた Pull Request（--by user はその PR の判定と比べ、--by mvv は承認と記録に残す）")
     s.add_argument("--root", help="覆しと差し戻しの記録の repo を読むリポジトリの根（既定はカレント）")
     s.add_argument("--withdraw", action="store_true", help="同じ名前の承認ゲートの MVV 判定の記録（by: mvv）を外す（無ければ何もしない）")
 

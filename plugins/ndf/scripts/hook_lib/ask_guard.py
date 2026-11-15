@@ -165,12 +165,12 @@ def held_text(out: dict, plan: str) -> str:
 
 def held_after_timeout(home: Path, plan: str, ledger_id: str) -> dict | None:
     """上限の秒を過ぎた後に台帳を 1 回読み、判定の記録の id の行があればその種類の deny を返す（I10）。無い・読めなければ None。"""
-    import parallel_ledger as plg
+    import parallel_files
     import parallel_question as pq
     from hook_lib.token_guard import deny
 
     try:
-        got = pq.outcome_of(plg.rows_since_opened(plg.read_ledger_rows(home, plan).rows), ledger_id)
+        got = pq.outcome_of(parallel_files.ledger_rows_light(home, plan), ledger_id)
     except OSError:
         return None
     return deny(held_text(got, plan)) if got and got.get("id") else None

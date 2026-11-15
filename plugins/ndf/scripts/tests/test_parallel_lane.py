@@ -11,6 +11,7 @@ import pytest
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS / "lib"))
 sys.path.insert(0, str(SCRIPTS))
+import parallel_ask as pask  # noqa: E402
 import parallel_lane as pl  # noqa: E402
 import parallel_plan as pp  # noqa: E402
 
@@ -443,15 +444,15 @@ Q = "後片付けで sprint/lr-t2 を git branch -D で消してよいか。\n�
 
 def test_sender_kind_reads_the_plan_lanes(tmp_path):
     main = _main(tmp_path)
-    assert pl.sender_kind(main, "p1", "la") == "sprint"
-    assert pl.sender_kind(main, "p1", "p1-rel1") == "helper"
-    assert pl.sender_kind(tmp_path / "none", "p1", "la") == "helper"
+    assert pask.sender_kind(main, "p1", "la") == "sprint"
+    assert pask.sender_kind(main, "p1", "p1-rel1") == "helper"
+    assert pask.sender_kind(tmp_path / "none", "p1", "la") == "helper"
 
 
 def test_ask_target_adds_the_tip_and_keeps_numbers(tmp_path):
     """受け入れ条件 17・18: ブランチ名は先端の 40 桁を足し、#<番号> はそのまま、形に合わない・無いブランチは空。"""
     repo, sha = _repo(tmp_path)
-    t = lambda q: pl.ask_target({"questions": [{"question": q}]}, str(repo)).target  # noqa: E731
+    t = lambda q: pask.ask_target({"questions": [{"question": q}]}, str(repo)).target  # noqa: E731
     assert t(Q) == f"sprint/lr-t2@{sha}"
     assert t("対象: #3603") == "#3603"
     assert t("対象: no/such") == "" and t("対象: bad..name") == "" and t("対象の行が無い") == ""
@@ -465,8 +466,8 @@ def test_record_reused_writes_one_row_and_no_notice(tmp_path, monkeypatch):
     seen = []
     monkeypatch.setattr(pl, "record_exists", lambda main, name: seen.append(name) or False)
     prior = pq.Prior("p1-rel1-qa", None)
-    assert pl.record_reused(tmp_path, "p1", "p1-rel1", prior, "ndf-ask:cost", "#1", "L1")
-    assert pl.record_reused(tmp_path, "p1", "p1-rel1", prior, "ndf-ask:cost", "#1", "L1")
+    assert pask.record_reused(tmp_path, "p1", "p1-rel1", prior, "ndf-ask:cost", "#1", "L1")
+    assert pask.record_reused(tmp_path, "p1", "p1-rel1", prior, "ndf-ask:cost", "#1", "L1")
     rows = _rows(plg, tmp_path, "reused")
     assert len(rows) == 1 and rows[0]["msg"]["answered"] is False and seen == []
     assert "reused" in plg.RECORD
@@ -480,7 +481,7 @@ def test_record_reused_returns_false_when_the_ledger_is_unwritable(tmp_path, mon
         raise OSError("ro")
 
     monkeypatch.setattr(plg, "append_ledger_row", broken)
-    assert not pl.record_reused(tmp_path, "p1", "p1-rel1", pq.Prior("x", None), "s", "#1", "L1")
+    assert not pask.record_reused(tmp_path, "p1", "p1-rel1", pq.Prior("x", None), "s", "#1", "L1")
 
 
 def test_a_helper_reuses_the_answer_of_the_same_question(monkeypatch, tmp_path, capsys):
@@ -609,6 +610,5 @@ def test_a_passed_deadline_writes_nothing(monkeypatch, tmp_path, capsys):
 
 
 @pytest.mark.parametrize("deadline, now, want", [(None, 5, False), ("9", 5, False), (10, 5, False), (10, 10, True), (10, 11, True)])
-def test_expired(monkeypatch, tmp_path, deadline, now, want):
-    mod, _ = _cli(monkeypatch, tmp_path)
-    assert mod._expired(deadline, lambda: now) is want
+def test_expired(deadline, now, want):
+    assert pask.expired(deadline, lambda: now) is want

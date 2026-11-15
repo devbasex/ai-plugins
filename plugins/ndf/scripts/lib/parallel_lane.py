@@ -27,7 +27,6 @@ from typing import Optional
 import parallel_external as pe
 import parallel_ledger as plg
 import parallel_plan as pp
-from parallel_question import AskTarget, Prior, target_line
 from parallel_request_form import REQUEST_ID_RE, request_errors  # noqa: F401  依頼の形（契約の検査と外のレーンが読む）
 from parallel_files import helper_plan_of, lane_name_in_plans, plan_home, plans_in, resolved_path  # noqa: F401  ファイルだけで読む判定（問いの hook も使う）
 
@@ -423,52 +422,6 @@ def request_ask(main: Path, name: str, lane: str, tool_input: dict, cwd: str, le
         "at": pe.utc_stamp(),
     }
     return send_inbox(main, name, msg, rid)
-
-
-def sender_kind(main: Path, name: str, lane: str) -> str:
-    """送り手の種類: 計画 `name` の宣言の 1 スプリントのレーン（`sprint`）・開発ループのレーン（`loop`）・一時レーン（`helper`）。
-    宣言に `lane` が無い・読めなければ `helper`（`sender_of` が一時レーンと認めたときだけ同じ問いの判定に入る。I5）。"""
-    import parallel_hold as ph
-
-    got = ph.lane_input(main, name, lane)
-    if got is None:
-        return "helper"
-    return "loop" if got.get("kind") == "loop" else "sprint"
-
-
-def ask_target(tool_input: dict, cwd: str) -> AskTarget:
-    """対象の行の値から問いの対象を作る（#3603 の決定 7）。ブランチ名は `git check-ref-format --branch` を通り、`cwd` で
-    `refs/heads/<名>` の先端の 40 桁を読めたときだけ `<名>@<40 桁>`、`#<番号>` はそのまま。ほかは空（前の依頼と比べない。I6）。"""
-    import re
-
-    raw = target_line(tool_input)
-    if re.fullmatch(r"#\d+", raw):
-        return AskTarget(raw, raw)
-    if not raw or raw.startswith("-"):
-        return AskTarget(raw, "")
-    try:
-        ok = subprocess.run(["git", "check-ref-format", "--branch", raw], capture_output=True, text=True, cwd=cwd or None)
-        got = subprocess.run(
-            ["git", "-C", cwd, "rev-parse", "--verify", "--quiet", f"refs/heads/{raw}^{{commit}}"], capture_output=True, text=True
-        ) if ok.returncode == 0 else None  # fmt: skip
-    except OSError:
-        return AskTarget(raw, "")
-    sha = got.stdout.strip() if got is not None and got.returncode == 0 else ""
-    return AskTarget(raw, f"{raw}@{sha}" if re.fullmatch(r"[0-9a-f]{40}", sha) else "")
-
-
-def record_reused(main: Path, name: str, lane: str, prior: Prior, source: str, target: str, ledger_id: str) -> bool:
-    """答えの引き継ぎの `reused` の行を 1 行書く（耐久ワークフローへは知らせない。I8）。鍵は `reused:<判定の記録の id>` で、
-    同じ鍵の行が既にあれば書かずに真。書けなければ偽（呼び出し元は答えを使わずに新しい依頼を送る）。"""
-    msg = {
-        "kind": "reused", "id": prior.id, "lane": lane, "source": source, "target": target, "ledger_id": ledger_id,
-        "answered": prior.answer is not None, "at": pe.utc_stamp(),
-    }  # fmt: skip
-    try:
-        plg.append_ledger_row(main, name, "reused", f"reused:{ledger_id}", msg, by=lane)
-    except OSError:
-        return False
-    return True
 
 
 def request_gate1(

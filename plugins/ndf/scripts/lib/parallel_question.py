@@ -38,7 +38,7 @@ def asked_of(rows: list[dict], lane: str, settled: set = frozenset()) -> list[di
     答えの中身（`answer`）を載せるのは、id で問いの決まる `gate2` と、問いの対象（`target`）を持つ `ask` である（#3603 の決定 9）。
     対象を持たない `ask` は、前の答えを今の問いへ当てられないため、答えがあっても `answered: true` だけを付ける（戻せない操作の答えを、
     対象の分からない問いへ当てない）。判定の正本は `request-ask` の同じ問いの判定（`prior_of`）である。"""
-    answers = _answers(rows)
+    answers = answers_by_id(rows)
     out = []
     for r in rows:
         msg = r.get("msg") or {}
@@ -56,7 +56,7 @@ def asked_of(rows: list[dict], lane: str, settled: set = frozenset()) -> list[di
     return out
 
 
-def _answers(rows: list[dict]) -> dict[str, dict]:
+def answers_by_id(rows: list[dict]) -> dict[str, dict]:
     """依頼の id ごとの答えの中身 `{result, choice}`（同じ id の答えは 1 行だけ）。"""
     return {
         r.get("id"): {"result": (r.get("msg") or {}).get("result"), "choice": list((r.get("msg") or {}).get("choice") or [])}
@@ -113,7 +113,7 @@ def prior_of(rows: list[dict], lane: str, source: str, target: str) -> Prior | N
             hit = r
     if hit is None:
         return None
-    return Prior(str(hit.get("id") or ""), _answers(rows).get(hit.get("id")))
+    return Prior(str(hit.get("id") or ""), answers_by_id(rows).get(hit.get("id")))
 
 
 def outcome_of(rows: list[dict], ledger_id: str) -> dict | None:
@@ -131,6 +131,6 @@ def outcome_of(rows: list[dict], ledger_id: str) -> dict | None:
     out = {"kind": hit["kind"], "id": str(msg.get("id") or hit.get("id") or ""), "target": msg.get("target")}
     if hit["kind"] == "gate1":
         out["sprint_state"] = msg.get("sprint_state")
-    if hit["kind"] == "reused" and msg.get("answered") and (a := _answers(rows).get(out["id"])) is not None:
+    if hit["kind"] == "reused" and msg.get("answered") and (a := answers_by_id(rows).get(out["id"])) is not None:
         out["answer"] = a
     return out

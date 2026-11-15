@@ -1,6 +1,6 @@
 """1 スプリントのレーンの設計承認の依頼（#3603）: 区分 `ndf-gate:1` の問いから設計承認の依頼の中身を組み、その答えをスプリント状態へ書く。
 
-- `design_gate`: `parallel.py request-ask` が呼ぶ。問いの最初の問いの文の承認の行（`承認: #<番号>`）がちょうど 1 行で、その番号が
+- `design_gate`: `parallel.py request-ask` の送り分け（`parallel_ask.route`）が呼ぶ。問いの最初の問いの文の承認の行（`承認: #<番号>`）がちょうど 1 行で、その番号が
   レーンのスプリントで承認ゲートで終わった設計のプランの設計 PR で、PR が開いていて先頭を読めたときだけ中身を返す（I1・決定 2・3）。
   ほかは None（今どおり `kind: ask` で送る）
 - `answer_design`: `parallel.py design-answer` が呼ぶ。起き直したレーンが、答えを読み、利用者が設計承認ゲートで答えたときと同じ記録を
@@ -22,7 +22,6 @@ from typing import Callable
 
 import design_pr_merge
 import gate1_requests as g1
-import run_state
 
 GATE1_SOURCE = "ndf-gate:1"  # 設計承認の区分
 RETURNED_SUFFIX = "-r"  # MVV 判定で承認した後に開いたまま問い直された依頼の id の接尾辞の頭（I4）
@@ -139,8 +138,18 @@ def next_gate1_id(rows: list[dict], base: str) -> tuple[str, bool, str]:
     return f"{base}{RETURNED_SUFFIX}{n + 1}", True, str((got.get("merge") or {}).get("reason") or "")
 
 
+def pr_state_of(root: Path, pr: int, run: Callable[..., tuple[int, str, str]] = design_pr_merge.run_cmd) -> dict | None:
+    """設計 PR の状態と先頭（`gh pr view --json state,headRefOid`）。読めなければ None。"""
+    code, so, _ = run(["gh", "pr", "view", str(pr), "--json", "state,headRefOid"], cwd=str(root))
+    try:
+        got = json.loads(so) if code == 0 else None
+    except ValueError:
+        return None
+    return got if isinstance(got, dict) else None
+
+
 def design_gate(
-    main: Path, name: str, lane: str, tool_input: dict, rows: list[dict], view: Callable[[Path, int], dict | None] = run_state.view_pr
+    main: Path, name: str, lane: str, tool_input: dict, rows: list[dict], view: Callable[[Path, int], dict | None] = pr_state_of
 ) -> DesignGate | None:
     """I1 を満たす問いなら設計承認の依頼の中身、満たさなければ None。送り手は計画 `name` の 1 スプリントのレーン `lane`。"""
     import parallel_answer as pa
@@ -183,17 +192,20 @@ def _answer_row(rows: list[dict], rid: str) -> dict | None:
 
 
 def _merge_resume(sprint: Path | None) -> str:
-    """スプリントの設計 PR のマージのステージの `resume`（無ければ設計のステージの `resume`）。読めなければ空。"""
-    from supervise_lib.sprint import MERGE_STAGE
-
+    """設計のステージの後で最初に `resume` を持つステージ（設計 PR のマージのステージ）の `resume`。無ければ設計のステージの `resume`。
+    読めなければ空。"""
     if sprint is None:
         return ""
     try:
         stages = json.loads((Path(sprint) / "sprint.json").read_text(encoding="utf-8")).get("ステージ") or []
     except (OSError, ValueError, AttributeError):
         return ""
-    by = {s.get("name"): s for s in stages if isinstance(s, dict)}
-    return str((by.get(MERGE_STAGE) or by.get(DESIGN_STAGE) or {}).get("resume") or "")
+    stages = [s for s in stages if isinstance(s, dict)]
+    at = next((i for i, s in enumerate(stages) if s.get("name") == DESIGN_STAGE), None)
+    if at is None:
+        return ""
+    later = next((s.get("resume") for s in stages[at + 1 :] if s.get("resume")), None)
+    return str(later or stages[at].get("resume") or "")
 
 
 def _has_gate(state: Path, pr: int, by: str, outcome: str) -> bool:

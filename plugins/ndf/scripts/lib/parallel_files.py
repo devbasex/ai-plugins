@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Optional
 
 PARALLEL_DIR = Path(".ndf") / "parallel"
+LEDGER = "ledger.jsonl"  # 計画の台帳のファイル名（正本。`parallel_ledger` が読む）
 ROLE_FILE = (
     "role.json"  # リレーハブの作業ディレクトリの役割のファイル（relay_lib.hub.ROLE_FILE と同じ公開の形。リレーハブを import しない）
 )
@@ -116,3 +117,22 @@ def lane_plans_in(main: Path, name: Optional[str], relay_dir: Optional[str]) -> 
             out.append(plan)
     helper = helper_plan_of(relay_dir)
     return [*out, helper] if helper and helper not in out else out
+
+
+def ledger_rows_light(home: Path, plan: str) -> list[dict]:
+    """計画の台帳の、最初の `opened` の行から後の読める行（問いの hook が上限の秒を過ぎた後に 1 回だけ読む。#3603 の I10）。
+    `parallel_ledger` を読まずに済ませる（hook の起動を軽く保つ）。台帳が無ければ空。読めなければ `OSError`。"""
+    try:
+        data = (Path(home) / PARALLEL_DIR / plan / LEDGER).read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return []
+    rows = []
+    for line in data.splitlines():
+        try:
+            row = json.loads(line) if line.strip() else None
+        except ValueError:
+            continue
+        if isinstance(row, dict):
+            rows.append(row)
+    since = next((i for i, r in enumerate(rows) if r.get("kind") == "opened"), 0)
+    return rows[since:]
