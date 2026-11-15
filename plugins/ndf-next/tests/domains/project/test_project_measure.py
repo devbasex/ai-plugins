@@ -97,6 +97,29 @@ def test_compose_services_reads_names_and_images():
     assert measure_repo.compose_services(text) == [("web", "nginx"), ("redis", "")]
 
 
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        # 空行・行頭のコメントの行（字下げの有無を問わず）は飛ばす。行末のコメントは落とさないため、`web:  # …` は名前にならない
+        (
+            'services:\n\n  # 先頭のコメント\n  web:  # 行末のコメント\n    image: nginx  # 版\n  "db":\n    image: "postgres:16"\n'
+            "#root comment\n  cache:\n    image: redis\n",
+            [("db", "postgres:16"), ("cache", "redis")],
+        ),
+        # `services:` の行末の空白は無視する。次の根の行で終わる
+        ("version: 3\nservices:   \n  a:\n    image: x\nvolumes:\n  data:\n", [("a", "x")]),
+        ("x:\n  services:\n    nope:\n", []),
+        ("services: # コメント\n  a:\n", []),
+        # 最初の行の字下げを直下とし、値を持つ行は名前にしない
+        ("services:\n    deep:\n      image: i\n    two: {}\n", [("deep", "i")]),
+        ("", []),
+    ],
+)
+def test_compose_services_skips_blank_and_comment_lines(text, expected):
+    """現状固定（I-030）: `services:` の中の空行・コメントの行・行末のコメントの扱い。"""
+    assert measure_repo.compose_services(text) == expected
+
+
 def test_ci_reading_parts(repo):
     assert measure_ci.workflow_jobs(_tree(repo)) == {".github/workflows/ci.yml": 2}
     rules = [
