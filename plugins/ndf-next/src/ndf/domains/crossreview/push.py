@@ -63,7 +63,7 @@ def push_fix(g: git.Git, head_branch: str, fix_commit: Optional[str]) -> PushRes
     if fix_commit and not g.is_ancestor(fix_commit, "HEAD"):
         return PushResult(False, False, None, None, NOT_ANCESTOR, ())
     head = g.rev_parse("HEAD")
-    remote = g.remote()  # 入口で 1 回だけ求める（送り直しの経路で `git worktree list` を打ち直さない）
+    remote = g.remote()  # エントリポイントで 1 回だけ求める（送り直しの経路で `git worktree list` を打ち直さない）
     first = _push(g, head_branch, remote)
     if first.returncode == 0:
         return PushResult(True, False, None, head, None, ())

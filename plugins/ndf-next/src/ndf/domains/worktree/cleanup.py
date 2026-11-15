@@ -128,7 +128,7 @@ def cleanup(main_dir: Path, cwd: Path, hub: PullReader, dry_run: bool = False, g
     """片付けを行い、worktree ごとの結果を返す。"""
     g = git if git is not None else Git(main_dir)
     flow = repo.declared_flow(declaration.load(main_dir))
-    remote = g.remote()  # 入口で 1 回だけ求める（worktree ごとに `git worktree list` を打たない）
+    remote = g.remote()  # エントリポイントで 1 回だけ求める（worktree ごとに `git worktree list` を打たない）
     out: list[Outcome] = []
     for item, facts in survey(main_dir, cwd, hub, g):
         verdict = cleanup_decide.decide(facts)

@@ -638,7 +638,7 @@ def _cmd_run(a: argparse.Namespace) -> int:
     else:
         out = outcome_of(handoff.kind, handoff.result_file, items, metrics, done.attempts)
     if done.notice is not None:
-        out["warnings"] = [*out.get("warnings", []), done.notice]
+        out.setdefault("warnings", []).append(done.notice)
     return result.emit(out)
 
 

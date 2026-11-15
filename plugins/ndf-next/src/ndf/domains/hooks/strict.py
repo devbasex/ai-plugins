@@ -32,6 +32,7 @@ from ndf import identity
 from ndf.adapters import git as git_mod
 from ndf.domains.hooks import strict_shell, tables
 from ndf.domains.hooks.verdict import Verdict, deny
+from ndf.testing import weight
 
 # 宛先のリポジトリの宣言（delivery を読む）
 _PROJECT_FILE = identity.FIXED_WORDS["declaration_dir"] + "/project.json"
@@ -53,7 +54,8 @@ _UNKNOWN_DIR_COMMANDS = frozenset({"pushd", "popd"})
 # ファイルのスクリプトを今のシェルで読む語
 _SOURCES = frozenset({"source", "."})
 # 前に付いても後ろのコマンドを打つ語
-_WRAPPERS = frozenset({"command", "env", "exec", "nohup", "time", "sudo", "doas", "xargs", "timeout", "nice", "ionice", "stdbuf", "setsid"})
+# 重い処理の判定のラッパー（`weight.WRAPPERS`）に、権限と端末を変えて後ろを打つ語を足す
+_WRAPPERS = weight.WRAPPERS | {"sudo", "doas", "setsid"}
 # 包む語の後ろで読み直す、打つコマンドの語
 _WRAPPED_TARGETS = _SHELLS | {"gh", "eval"}
 

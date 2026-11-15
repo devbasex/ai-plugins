@@ -103,7 +103,7 @@ def test_issue_2440_push_rejected_again_after_taking_in_stops_with_rejected_twic
     got = push.push_fix(git.Git(Path("."), script), BRANCH, None)
     assert (got.ok, got.rebased, got.reason) == (False, True, push.REJECTED_TWICE)
     assert script.answers == []
-    assert sum(c[:2] == ["worktree", "list"] for c in script.calls) == 1  # リモート名は入口で 1 回だけ求める
+    assert sum(c[:2] == ["worktree", "list"] for c in script.calls) == 1  # リモート名はエントリポイントで 1 回だけ求める
     assert not any("--force" in c or "-f" in c for c in script.calls)
 
 

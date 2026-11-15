@@ -91,7 +91,7 @@ def declared_flow(decl: Optional[declaration.Declaration]) -> Optional[dict[str,
 def contained_in_production(main: Git, branch: str, flow: Optional[Mapping[str, Any]], remote: str) -> Optional[bool]:
     """ブランチが `<remote>/<本番チャネル>` に含まれるか（`flow` の `production_branch`）。確かめられなければ `None`。
 
-    リモート名は呼び手が入口で 1 回求めて渡す（`Git.remote()` は呼ぶたびに `git worktree list` を打つ）。
+    リモート名は呼び手がエントリポイントで 1 回求めて渡す（`Git.remote()` は呼ぶたびに `git worktree list` を打つ）。
     """
     production = flow.get("production_branch") if flow is not None else None
     if not production:

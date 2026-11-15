@@ -324,9 +324,9 @@ class Git:
         done = self.attempt("symbolic-ref", "--quiet", "--short", f"refs/remotes/{remote}/HEAD")
         name = done.stdout.strip() if done.returncode == 0 else ""
         prefix = remote + "/"
-        if not name.startswith(prefix):
+        if not name.startswith(prefix) or name == prefix:
             return None
-        return name[len(prefix) :] or None
+        return name[len(prefix) :]
 
     def status_paths(self) -> list[str]:
         """未コミットの変更のパス（追跡していないファイルは中まで含める）。改名と複製は変更前のパスも含める。"""

@@ -549,7 +549,7 @@ def _library_seeds(deps: dict[str, dict[str, str]]) -> tuple[list[dict[str, Any]
     libraries: list[dict[str, Any]] = []
     analytics: list[dict[str, Any]] = []
     for lang, names in deps.items():
-        eco = ECOSYSTEM.get(lang, lang)
+        eco = ECOSYSTEM[lang] if lang in ECOSYSTEM else lang
         for name in sorted(n for n in names if n not in RUNTIME_ROWS):
             if any(w in name.lower() for w in ANALYTICS):
                 analytics.append({"text": f"{eco}: {name}"})

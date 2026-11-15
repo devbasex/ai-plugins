@@ -23,7 +23,7 @@
     },
     "allocation_minutes": {
       "type": "object",
-      "description": "cross-refactoring の配分の 1 件あたりの分を種類ごとに上書きする。省いた種類は初期値（skills/cross-refactoring/data/allocation-defaults.json）を使う。初期値に無い種類は止める",
+      "description": "cross-refactoring の配分の 1 件あたりの分を種類ごとに上書きする。省いた種類は初期値（skills/cross-refactoring/data/allocation-defaults.json）を使う。初期値に無い種類は止める。まだ読まない（M4 で読む。配分を決める処理は M4 #3298 で入る）",
       "additionalProperties": {
         "type": "number",
         "exclusiveMinimum": 0
