@@ -292,6 +292,39 @@ def test_helper_wait_seconds_reads_the_env_or_the_declared_limit(monkeypatch, va
     assert plc.helper_wait_seconds() == want
 
 
+# ---- 現状固定（上限の秒を環境変数から読む 2 つの関数。I-005 の抽出の前に今の振る舞いを固定する） ----
+
+SECONDS_INPUTS = ["12", "-3", "0", " 7 ", "1e1", "x", "", "nan"]
+
+
+@pytest.mark.parametrize(
+    "fn, var, default, declared",
+    [
+        (plc.launch_seconds, "NDF_PARALLEL_LAUNCH_SECONDS", "LAUNCH_SECONDS", 120.0),
+        (plc.helper_wait_seconds, "NDF_PARALLEL_HELPER_WAIT_SECONDS", "HELPER_WAIT", 3600.0),
+    ],
+)
+def test_limit_seconds_current_read_the_env_or_the_declared_limit(monkeypatch, fn, var, default, declared):
+    """数として読めれば 0 以上へ丸め、空・読めない値・未設定なら limits.json の既定。NaN は 0 になる。"""
+    assert getattr(plc, default) == declared
+    monkeypatch.delenv(var, raising=False)
+    assert fn() == declared
+    got = []
+    for value in SECONDS_INPUTS:
+        monkeypatch.setenv(var, value)
+        got.append(fn())
+    assert got == [12.0, 0.0, 0.0, 7.0, 10.0, declared, declared, 0.0]
+
+
+def test_limit_seconds_current_read_only_their_own_env(monkeypatch):
+    monkeypatch.setenv("NDF_PARALLEL_LAUNCH_SECONDS", "3")
+    monkeypatch.delenv("NDF_PARALLEL_HELPER_WAIT_SECONDS", raising=False)
+    assert (plc.launch_seconds(), plc.helper_wait_seconds()) == (3.0, 3600.0)
+    monkeypatch.delenv("NDF_PARALLEL_LAUNCH_SECONDS")
+    monkeypatch.setenv("NDF_PARALLEL_HELPER_WAIT_SECONDS", "4")
+    assert (plc.launch_seconds(), plc.helper_wait_seconds()) == (120.0, 4.0)
+
+
 class _Routing(plc.LaunchRouting):
     """`_Run` の代わり: 起動の部品が読む値だけを持つ。"""
 
