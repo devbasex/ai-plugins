@@ -25,15 +25,36 @@ def find_setting(cwd: Path, name: str) -> Path | None:
     return None
 
 
-def test_section(cwd: Path) -> dict[str, object]:
-    """宣言（`.ndf/project.json`）の `test` の節。宣言が無い・読めない・形が違えば空の辞書。"""
+class DeclarationError(Exception):
+    """宣言のファイルを読めない（JSON として読めないか、ファイルを開けない）。`path` と元の例外 `cause` を持つ。"""
+
+    def __init__(self, path: Path, cause: Exception) -> None:
+        super().__init__(f"{path}: {cause}")
+        self.path = path
+        self.cause = cause
+
+
+def read_declaration(cwd: Path) -> tuple[Path, object] | None:
+    """`cwd` から根へ探した宣言（`.ndf/project.json`）のパスと JSON の値。見つからなければ None。
+
+    見つかったが読めなければ `DeclarationError`。値の形は確かめない（呼び手ごとに扱いが違う）。
+    """
     path = find_setting(cwd, PROJECT_FILE)
     if path is None:
-        return {}
+        return None
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):  # noqa: NDF401 ファイル: 読めない宣言は節が無いとして扱う
+        return path, json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise DeclarationError(path, exc) from exc
+
+
+def test_section(cwd: Path) -> dict[str, object]:
+    """宣言（`.ndf/project.json`）の `test` の節。宣言が無い・読めない・形が違えば空の辞書。"""
+    try:
+        found = read_declaration(cwd)
+    except DeclarationError:  # noqa: NDF401 ファイル: 読めない宣言は節が無いとして扱う
         return {}
+    data = found[1] if found is not None else None
     test = data.get("test") if isinstance(data, dict) else None
     return test if isinstance(test, dict) else {}
 
