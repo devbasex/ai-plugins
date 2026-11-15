@@ -622,27 +622,33 @@ class GitHub:
         動いていれば GitHub が断る。`method` は宣言のマージの方式で、省けば基底のブランチで許された方式から選ぶ。
         許されていない方式は要求を送らずに断る（3378-2）。
         """
-        pull = self.pull(number)
-        early = _preflight(pull, number, expect_head)
-        if early is not None:
-            return early
-        allowed = self.allowed_merge_methods(pull.base_ref)
-        chosen = pick_merge_method(method, allowed)
-        if chosen is None:
-            return _method_refusal(pull, number, method, allowed)
-        try:
-            self.rest("PUT", f"/repos/{self.repo}/pulls/{number}/merge", {"sha": pull.head_sha, "merge_method": chosen})
-        except GitHubError as exc:
-            if exc.status not in MERGE_REFUSED_STATUS:
-                raise
-            after = self.pull(number)
-            return MergeOutcome(False, refusal_kind(after, pull.head_sha), str(exc), after.head_sha)
-        return MergeOutcome(True, None, f"#{number} を {chosen} でマージした", pull.head_sha)
+        return self._merge_with(number, expect_head, method, self._send_rest_merge, lambda exc: exc.status in MERGE_REFUSED_STATUS, "")
 
     def merge_as_admin(self, number: int, expect_head: str, method: Optional[str] = None) -> MergeOutcome:
         """PR を管理者の迂回でマージする（#3506 の決定 5）。`merge` と同じ先の確認を通り、GraphQL の `mergePullRequest` を
         読んだ先端（`expectedHeadOid`）を添えて打つ。断られたら PR を読み直して種類を返し、届かない・上限は投げ直す。
         """
+        return self._merge_with(number, expect_head, method, self._send_admin_merge, _refused_by_graphql, "管理者の迂回で")
+
+    def _send_rest_merge(self, number: int, pull: Pull, chosen: str) -> None:
+        self.rest("PUT", f"/repos/{self.repo}/pulls/{number}/merge", {"sha": pull.head_sha, "merge_method": chosen})
+
+    def _send_admin_merge(self, number: int, pull: Pull, chosen: str) -> None:
+        node = self.repository(_PULL_ID, {"number": int(number)})["pullRequest"]
+        variables = {"id": text_of(node["id"]), "head": pull.head_sha, "method": GRAPHQL_MERGE_METHODS[chosen]}
+        self.graphql(_ADMIN_MERGE, variables)
+
+    def _merge_with(
+        self,
+        number: int,
+        expect_head: Optional[str],
+        method: Optional[str],
+        send: Callable[[int, Pull, str], None],
+        refused: Callable[[GitHubError], bool],
+        how: str,
+    ) -> MergeOutcome:
+        """`merge`・`merge_as_admin` の共通の手順。先の確認と方式の選択を通り、`send` で要求を打つ。`refused` が真と
+        みなした誤りは PR を読み直して種類を返し、ほかは投げ直す。`how` は成功の文に添える迂回の印。"""
         pull = self.pull(number)
         early = _preflight(pull, number, expect_head)
         if early is not None:
@@ -652,15 +658,13 @@ class GitHub:
         if chosen is None:
             return _method_refusal(pull, number, method, allowed)
         try:
-            node = self.repository(_PULL_ID, {"number": int(number)})["pullRequest"]
-            variables = {"id": text_of(node["id"]), "head": pull.head_sha, "method": GRAPHQL_MERGE_METHODS[chosen]}
-            self.graphql(_ADMIN_MERGE, variables)
+            send(number, pull, chosen)
         except GitHubError as exc:
-            if not _refused_by_graphql(exc):
+            if not refused(exc):
                 raise
             after = self.pull(number)
             return MergeOutcome(False, refusal_kind(after, pull.head_sha), str(exc), after.head_sha)
-        return MergeOutcome(True, None, f"#{number} を {chosen} で管理者の迂回でマージした", pull.head_sha)
+        return MergeOutcome(True, None, f"#{number} を {chosen} で{how}マージした", pull.head_sha)
 
 
 def _issue_filter(labels: Sequence[str], state: str) -> dict[str, Any]:
