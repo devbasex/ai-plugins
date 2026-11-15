@@ -2639,8 +2639,20 @@
     {
       "term": "エピックの完了条件",
       "context": "ndf-workflow",
-      "meaning": "エピックが終わったと判定する、観測できる条件の一覧。並列の計画に書き、status が進み具合を出す",
+      "meaning": "エピックが終わったと判定する、観測できる条件の一覧。定義は土台の表に置き、並列の計画は番号で指す。status が進み具合を出す",
       "pending_source": "issues/issue-3600-requirements.md"
+    },
+    {
+      "term": "規模の判定",
+      "context": "ndf-workflow",
+      "meaning": "依頼をスプリント 1 つで進めるか、エピックとして進めるかを決める判定。モード判定の手前で行い、判定結果に規模の行を出す",
+      "pending_source": "issues/issue-3600-design.md"
+    },
+    {
+      "term": "土台の知らせ",
+      "context": "ndf-workflow",
+      "meaning": "エピックの土台の変更を、触る場所の重なるレーンへ計画の進行表の事象として渡すもの。レーンが読んだ印を書くまで未読で残る",
+      "pending_source": "issues/issue-3600-design.md"
     },
     {
       "term": "プロジェクト",
