@@ -339,11 +339,19 @@ def _split_defaults(base: pathlib.Path, rels: list[str]) -> tuple[list[Hit], lis
 
 def scan_contracts(base: pathlib.Path, rels: list[str], matchers: list[tuple[str, re.Pattern[str]]]) -> list[Hit]:
     """JSON を `scan` と同じく走査し、語 `remote-origin` の当たりのうち `"default": "<値>"` の値の中にあるものを除く。"""
+    return scan_contracts_with_defaults(base, rels, matchers)[0]
+
+
+def scan_contracts_with_defaults(
+    base: pathlib.Path, rels: list[str], matchers: list[tuple[str, re.Pattern[str]]]
+) -> tuple[list[Hit], list[tuple[str, int]]]:
+    """(`scan_contracts` のヒット, `remote_defaults` の当たり) を、`default` の値の内外を 1 回だけ分けて返す。"""
     others = [(w, r) for w, r in matchers if w != REMOTE_WORD]
     hits = scan(base, rels, others)
+    remote_hits, defaults = _split_defaults(base, rels)
     if any(w == REMOTE_WORD for w, _ in matchers):
-        hits += _split_defaults(base, rels)[0]
-    return hits
+        hits += remote_hits
+    return hits, defaults
 
 
 def remote_defaults(base: pathlib.Path, rels: list[str]) -> list[tuple[str, int]]:
@@ -554,8 +562,9 @@ def _scan_next_code(
     scanned = {canon(root / rel) for rel in src + contracts}
     scanned.update(canon(hooks_dir / rel) for rel in hook_code)
     hits = scan(root, src, code_matchers) + scan(hooks_dir, hook_code, code_matchers)
-    hits += scan_contracts(root, contracts, code_matchers)
-    problems = default_problems(remote_defaults(root, contracts), root)
+    contract_hits, defaults = scan_contracts_with_defaults(root, contracts, code_matchers)
+    hits += contract_hits
+    problems = default_problems(defaults, root)
     code = f" / src {len(src)} 本 / contracts {len(contracts)} 本"
     return scanned, hits, problems, hook_code, code
 
