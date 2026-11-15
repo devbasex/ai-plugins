@@ -11,11 +11,9 @@
 
 from __future__ import annotations
 
-import json
 import subprocess
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Any
 
 from ndf.adapters import git
 from ndf.contracts import limits
@@ -27,23 +25,9 @@ from ndf.testing import scoped, slots
 RUN_POLICY = "test-run.test"
 
 
-def _read_declaration(path: Path) -> Any:
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):  # noqa: NDF401 ファイル: 読めない宣言は suite が無いとして扱う
-        return None
-
-
-def _declaration(work: Path) -> Mapping[str, Any]:
-    path = declared.find_setting(work, declared.PROJECT_FILE)
-    data = _read_declaration(path) if path is not None else None
-    test = data.get("test") if isinstance(data, dict) else None
-    return test if isinstance(test, dict) else {}
-
-
 def suites(work: Path) -> list[scoped.Suite]:
     """検証に使う suite。テストを CI に寄せる宣言があれば検査の suite だけ。"""
-    decl = _declaration(work)
+    decl = declared.test_section(work)
     ci_only = scoped.ci_only(decl)
     raws = decl.get("suites")
     found = [s for s in (scoped.suite_of(r) for r in (raws if isinstance(raws, list) else [])) if s is not None]

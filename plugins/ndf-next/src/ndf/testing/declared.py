@@ -25,17 +25,22 @@ def find_setting(cwd: Path, name: str) -> Path | None:
     return None
 
 
-def load_suites(cwd: Path) -> list[dict[str, object]]:
-    """宣言（`.ndf/project.json` の `test.suites`）のうちテストの suite。読めなければ空の一覧。"""
+def test_section(cwd: Path) -> dict[str, object]:
+    """宣言（`.ndf/project.json`）の `test` の節。宣言が無い・読めない・形が違えば空の辞書。"""
     path = find_setting(cwd, PROJECT_FILE)
     if path is None:
-        return []
+        return {}
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return []
+    except (OSError, ValueError):  # noqa: NDF401 ファイル: 読めない宣言は節が無いとして扱う
+        return {}
     test = data.get("test") if isinstance(data, dict) else None
-    suites = test.get("suites") if isinstance(test, dict) else None
+    return test if isinstance(test, dict) else {}
+
+
+def load_suites(cwd: Path) -> list[dict[str, object]]:
+    """宣言（`.ndf/project.json` の `test.suites`）のうちテストの suite。読めなければ空の一覧。"""
+    suites = test_section(cwd).get("suites")
     if not isinstance(suites, list):
         return []
     return [s for s in suites if isinstance(s, dict) and weight.is_test_suite(s)]
