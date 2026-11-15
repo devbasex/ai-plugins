@@ -50,11 +50,9 @@ def _check(args: argparse.Namespace) -> int:
 
 def _gh_repo(repo: git.Git) -> Optional[str]:
     try:
-        remote = repo.remote()
-    except git.GitError:  # noqa: NDF401 外部コマンド: リモート名を決められなければリポジトリは不明
+        return git.repo_of_url(repo.remote_url())
+    except git.GitError:  # noqa: NDF401 外部コマンド: リモート名か URL を決められなければリポジトリは不明
         return None
-    done = repo.attempt("remote", "get-url", "--", remote)
-    return git.repo_of_url(done.stdout.strip()) if done.returncode == 0 else None
 
 
 def _flow_branches(tree: measure_repo.Tree, worktree: Optional[dict[str, Any]]) -> tuple[Optional[str], Optional[str]]:

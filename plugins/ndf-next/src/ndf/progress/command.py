@@ -65,8 +65,7 @@ def _without_userinfo(url: str) -> str:
 def repo_id(cwd: Path, root: Path) -> str:
     """リポジトリの識別。リモート名のリモートの URL（userinfo を外す）、無ければメインディレクトリの絶対パス（置き場の 2 つ上の親）。"""
     try:
-        git = Git(cwd)
-        return _without_userinfo(git.run("remote", "get-url", "--", git.remote()).strip())
+        return _without_userinfo(Git(cwd).remote_url())
     except GitError:
         # リモートの無いリポジトリはメインディレクトリで識別する
         return str(root.parents[2])
