@@ -7774,8 +7774,14 @@
     {
       "term": "問いの対象",
       "context": "ndf-workflow",
-      "meaning": "並列の計画で、区分つきの問いが操作する対象を表す 1 つの文字列。`<ブランチ名>@<先端のコミットの 40 桁>` か `#<課題か PR の番号>`。先端のコミットは `request-ask` が問いを受けた時点に求めて足し、計画の台帳の依頼の行の `target` に残す。問いの入力から対象を届ける形は #3603 の設計が決める（`AskUserQuestion` の `metadata` は `source` しか通さない）",
-      "pending_source": "issues/issue-3603-requirements.md"
+      "meaning": "並列の計画で、区分つきの問いが操作する対象を表す 1 つの文字列。`<ブランチ名>@<先端のコミットの 40 桁>` か `#<課題か PR の番号>`。`request-ask` が問いの文の対象の行から読み、ブランチの先端のコミットは問いを受けた時点に求めて足し、計画の台帳の依頼の行の `target` に残す",
+      "pending_source": "issues/issue-3603-design.md"
+    },
+    {
+      "term": "対象の行",
+      "context": "ndf-workflow",
+      "meaning": "区分つきの問いの最初の問いの文に置く `対象: <ブランチ名>` か `対象: #<番号>` の 1 行。`request-ask` が問いの対象を読む唯一の場所で、複数あれば最後の行を使う",
+      "pending_source": "issues/issue-3603-design.md"
     },
     {
       "term": "答えの引き継ぎ",
@@ -7840,8 +7846,8 @@
     {
       "term": "設計承認の依頼",
       "context": "ndf-workflow",
-      "meaning": "並列の計画のレーンが設計承認ゲートでオーガナイザーへ送る、設計 PR の承認の依頼。計画の台帳の `kind: gate1` の行で、`answer --approved` が設計 PR をマージし、MVV 判定と古い依頼の整理が掛かる",
-      "pending_source": "issues/issue-3603-requirements.md"
+      "meaning": "並列の計画のレーン（開発ループのレーンと 1 スプリントのレーン）が設計承認ゲートでオーガナイザーへ送る、設計 PR の承認の依頼。計画の台帳の `kind: gate1` の行で、`answer --approved` が設計 PR をマージし、MVV 判定と古い依頼の整理が掛かる",
+      "pending_source": "issues/issue-3603-design.md"
     },
     {
       "term": "区分つきの問い",
