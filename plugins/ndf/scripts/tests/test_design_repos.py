@@ -184,14 +184,16 @@ def test_loss_with_redline_row_is_routed():
 
 
 def test_loss_rows_split_none_and_empty():
-    import md
-
     text = doc(rows=LOSS.replace("| 無し（今と同じ） |", "|  |"))
-    table = dr._behavior_table(text, md.section_named(text, "代表のリポジトリでの振る舞い"))
-    lost, empty = dr._loss_rows(table)
+    got = dr.check_repos("d.md", text, S, set())
     lines = text.splitlines()
-    assert [lines[i].split("|")[1].strip() for i in lost] == ["Web サービス・設定なし（carmo）"]
-    assert [lines[i].split("|")[1].strip() for i in empty] == ["業務文書だけ"]
+
+    def row_name(it: dict) -> str:
+        return lines[int(it["name"].rsplit(":", 1)[1]) - 1].split("|")[1].strip()
+
+    assert [row_name(it) for it in got if it["rule"] == "repo_loss_unrouted"] == ["Web サービス・設定なし（carmo）"]
+    empty = [it for it in got if it["rule"] == "repo_scope_missing" and it["text"].startswith("扱えなくなることが空")]
+    assert [row_name(it) for it in empty] == ["業務文書だけ"]
 
 
 # --- design-survey.py check ------------------------------------------------
