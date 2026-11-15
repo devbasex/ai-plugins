@@ -127,6 +127,26 @@ def _protection_checks(branch: dict) -> list[tuple[str, int | None]]:
     return contexts + [(text_of(c["context"]), _app(c.get("app_id"))) for c in _list(checks, "checks") if isinstance(c, dict)]
 
 
+def _ruleset_checks(rules: list[dict]) -> list[tuple[str, int | None]]:
+    """宛先のブランチの規則（ruleset）の必須のチェック（名前, 発行元）。"""
+    return [
+        (text_of(check["context"]), _app(check.get("integration_id")))
+        for rule in rules
+        if rule.get("type") == REQUIRED_RULE
+        for check in rule["parameters"]["required_status_checks"]
+    ]
+
+
+def _required_of(pairs: list[tuple[str, int | None]]) -> Required:
+    """必須のチェック（名前, 発行元）の並びを、承認の commit status を除いて名前と発行元のアプリへ集める。"""
+    pairs = [(n, app) for n, app in pairs if n != approval_decide.STATUS_CONTEXT]
+    apps: dict[str, set[int]] = {}
+    for name, app in pairs:
+        if app is not None:
+            apps.setdefault(name, set()).add(app)
+    return Required(sorted({n for n, _ in pairs}), {k: frozenset(v) for k, v in apps.items()})
+
+
 def _restricted(name: str, apps: dict[str, frozenset[int]]) -> list[frozenset[int]]:
     """チェックの名前 `name` が `ci.read` の照合で当たる、発行元を指定された必須のチェックのアプリの集合の並び。"""
     return [want for required, want in apps.items() if ci.fulfils(name, required)]  # noqa: NDF201 上限: 発行元を指定した必須のチェックの数（ci.fulfils は名前の照合だけで外へ出ない）
@@ -190,25 +210,14 @@ class Lander:
 
     def required(self, branch: str) -> Required:
         """宛先のブランチの規則（ruleset。全ページ）と従来の保護の必須のチェック（承認の commit status を除く）。"""
-        pairs: list[tuple[str, int | None]] = [
-            (text_of(check["context"]), _app(check.get("integration_id")))
-            for rule in self.hub.branch_rules(branch)
-            if rule.get("type") == REQUIRED_RULE
-            for check in rule["parameters"]["required_status_checks"]
-        ]
+        pairs = _ruleset_checks(self.hub.branch_rules(branch))
         try:
             got = self.hub.rest("GET", f"/repos/{self.hub.repo}/branches/{branch}")
         except GitHubError as exc:
             if exc.status != NOT_FOUND:
                 raise
             got = {}
-        pairs += _protection_checks(got if isinstance(got, dict) else {})
-        pairs = [(n, app) for n, app in pairs if n != approval_decide.STATUS_CONTEXT]
-        apps: dict[str, set[int]] = {}
-        for name, app in pairs:
-            if app is not None:
-                apps.setdefault(name, set()).add(app)
-        return Required(sorted({n for n, _ in pairs}), {k: frozenset(v) for k, v in apps.items()})
+        return _required_of(pairs + _protection_checks(got if isinstance(got, dict) else {}))
 
     def _runs(self, sha: str, apps: dict[str, frozenset[int]], bots: dict[str, int | None]) -> list[dict]:
         """コミットの check run と commit status（check run の形にしたもの）の一覧。
