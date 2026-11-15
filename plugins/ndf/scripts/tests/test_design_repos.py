@@ -270,6 +270,7 @@ HEAD_ROW = "| 代表のリポジトリ | 設定の要点 | 直した後に起き
 SCOPE_AT = "d.md:7"
 OWN_GAP = "このリポジトリだけの事情の欄が無い: ## 適用範囲"
 MISS = "repo_scope_missing"
+OWN_EMPTY_TABLE = "### このリポジトリだけの事情\n\n| 値 | 置く所 | 持つ Issue |\n| --- | --- | --- |\n"  # 雛形のまま
 UNROUTED = "扱えなくなることがあるのに、人へ残す判断に P2 の行が無い: "
 _OK = ROWS_OK.splitlines(keepends=True)
 
@@ -320,6 +321,8 @@ _OK = ROWS_OK.splitlines(keepends=True)
         (doc(own=""), [(SCOPE_AT, MISS, OWN_GAP)]),
         (doc(own="### このリポジトリだけの事情\n\n"), [(SCOPE_AT, MISS, OWN_GAP)]),
         (doc(own="### このリポジトリだけの事情\n\n```\nx\n```\n"), [(SCOPE_AT, MISS, OWN_GAP)]),
+        (doc(own=OWN_EMPTY_TABLE), [(SCOPE_AT, MISS, OWN_GAP)]),
+        (doc(own=OWN_EMPTY_TABLE + "| `ndf.x` | `.ndf/x.json` | #1 |\n"), []),
         (
             doc(rows=LOSS),
             [
@@ -356,6 +359,8 @@ _OK = ROWS_OK.splitlines(keepends=True)
         "no-own",
         "empty-own",
         "fenced-own",
+        "template-empty-table-own",
+        "table-row-own",
         "loss-unrouted",
         "every-gap-in-line-order",
     ],

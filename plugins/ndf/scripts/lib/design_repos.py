@@ -176,13 +176,20 @@ def _table_problems(table, kinds: tuple[str, ...]) -> tuple[list[tuple[int, str]
 
 
 def _has_own_note(text: str, inner: list) -> bool:
-    """「このリポジトリだけの事情」の節のどれかに、コードブロックの外の空でない行があるか。"""
+    """「このリポジトリだけの事情」の節のどれかに、コードブロックの外の空でない行があるか。
+
+    データ行の無い表（雛形の見出しと区切りだけの表）の行は空として扱う。
+    """
     import md
 
     lines = text.splitlines()
-    fenced = md.fenced_lines(text)
+    blank = list(md.fenced_lines(text))
     own = [s for s in inner if s.heading.title.endswith(OWN_SUFFIX)]
-    return any(any(not fenced[i] and lines[i].strip() for i in range(s.start, min(s.end, len(lines)))) for s in own)
+    for t in md.tables_in(text, own):
+        if not t.rows:
+            for i in range(t.start, min(t.end, len(blank))):
+                blank[i] = True
+    return any(any(not blank[i] and lines[i].strip() for i in range(s.start, min(s.end, len(lines)))) for s in own)
 
 
 def _scope_problems(text: str, settings: RepoSettings):

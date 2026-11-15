@@ -56,7 +56,18 @@ def _required_groups(argv: list[str]) -> tuple[str, ...]:
         root = _probe_root(known.root)
     except Exception:  # noqa: BLE001 - 根を決められなければ設定なしとして求め、本体が同じ誤りで止まる
         root = None
+    _PROBED.update(key=(known.root, Path.cwd()), root=root)
     return design_repos.dep_groups(root, known.cmd == "schema")
+
+
+_PROBED: dict = {}  # 依存の判定で決めた根。本体が同じ引数とカレントで git を打ち直さないために使う
+
+
+def _root(arg) -> Path:
+    """`--root` の根。依存の判定で同じ引数とカレントから決めていればそれを使う（git の起動を 1 回にする）。"""
+    if _PROBED.get("root") is not None and _PROBED.get("key") == (arg, Path.cwd()):
+        return _PROBED["root"]
+    return git_root(arg)
 
 
 deps.require("md", *_required_groups(sys.argv[1:]))  # md は静的に並べ、設定で増える分は dep_groups が決める
@@ -355,7 +366,7 @@ def judge_docs(docs: list[Doc], require_detail: bool, settings: design_repos.Rep
 
 
 def cmd_check(a):
-    root = git_root(a.root)
+    root = _root(a.root)
     if a.issue:
         require_repo(root)
         texts = find_closed(root, [str(n) for n in a.issue])
