@@ -120,18 +120,21 @@ def _default(action: argparse.Action) -> Any:
     return None if isinstance(value, (list, tuple)) else str(value)
 
 
+def _name_and_aliases(action: argparse.Action) -> tuple[str, tuple[str, ...]]:
+    """名前と別名。位置引数は dest で別名を持たず、オプションは最も長い `--` の名前（無ければ最初の名前）で残りが別名。"""
+    if not action.option_strings:
+        return action.dest, ()
+    longs = [o for o in action.option_strings if o.startswith("--")]
+    name = max(longs, key=len) if longs else action.option_strings[0]
+    return name, tuple(o for o in action.option_strings if o != name)
+
+
 def arg_of(action: argparse.Action) -> Arg | None:
     """1 つの action を `Arg` にする。help・version・下位の命令の action は `None`。"""
     if isinstance(action, _SKIPPED):
         return None
     positional = not action.option_strings
-    if positional:
-        name = action.dest
-        aliases: tuple[str, ...] = ()
-    else:
-        longs = [o for o in action.option_strings if o.startswith("--")]
-        name = max(longs, key=len) if longs else action.option_strings[0]
-        aliases = tuple(o for o in action.option_strings if o != name)
+    name, aliases = _name_and_aliases(action)
     word = _type_word(action)
     array = _is_array(action) and word != "boolean"
     required = bool(action.required) if not positional else action.nargs not in ("?", "*")
