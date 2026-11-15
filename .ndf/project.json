@@ -1064,6 +1064,17 @@
         "tests": [
           "plugins/playwright-kit/skills/playwright-planning/tests/test_plan_skeleton.py"
         ]
+      },
+      {
+        "paths": [
+          "docs/glossary.md",
+          ".ndf/mvv.md"
+        ],
+        "tests": [
+          "plugins/ndf-next/tests/domains/records/test_glossary.py",
+          "plugins/ndf-next/tests/domains/records/test_preflight.py",
+          "plugins/ndf-next/tests/domains/records/test_spec.py"
+        ]
       }
     ]
   },
