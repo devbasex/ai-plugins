@@ -21,7 +21,11 @@
 | --- | --- |
 | 先端が組む起点の祖先（前の版の直後に用意したブランチなど） | fast-forward で進める |
 | 開いた本番の PR の head（差し戻しの後の組み直し） | `--source base` は組む起点を取り込みのマージで入れる。PR を作らずに本文の承認資料を新しい先端で書き直す |
-| 祖先でなく、開いた本番の PR も無い | `AssembleError` で止まる |
+| マージせずに閉じた本番の PR の head（`release-steps defer` の次の版への回し） | `--source base` は組む起点を取り込みのマージで入れ、新しい本番の PR を作る |
+| 祖先でなく、開いた本番の PR も閉じた本番の PR も無い | `AssembleError` で止まる |
+
+取り込みのマージで衝突してよいのは、後で書き直す版のファイル（マニフェスト・マーケットプレイス・宣言の `version_files`）と
+CHANGELOG だけで、起点の側を取る。ほかのファイル（コード）が衝突すればマージをやめて止まる（リリースブランチの直しを捨てない）。
 | 前の版の直後に用意した名前（PATCH）で、計画した版と違う | 本番の PR が無ければ計画した版の名前へ改名する。あれば改名せずに `AssembleError` |
 
 `--source release`（常設のリリースブランチ）は、範囲の先端を origin のリリースブランチ（出し済みの版より大きい最小の版の
@@ -31,7 +35,7 @@ push は先端を進めるだけで、強制 push を使わない。
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -289,11 +293,46 @@ def _existing(run: _Run, branch: str) -> tuple[str | None, int | None]:
     return found, number
 
 
-def _advance(repo_git: git_mod.Git, branch: str, until: str, source: str, reopen: bool) -> None:
+def _deferred(run: _Run, branch: str) -> bool:
+    """`branch` を head にした本番ブランチ宛ての PR が、マージされずに閉じているか（`release-steps defer` の次の版への回し）。"""
+    found = run.hub.pulls_by_head([branch])[branch]
+    return any(p.state == "closed" and not p.merged and p.base_ref == run.target.production for p in found)
+
+
+def _rewritten(root: Path, decl: decl_mod.Declaration, facts: materials_decide.Facts) -> frozenset[str]:
+    """組み立てが後で書き直すファイル（版を上げるプラグインのマニフェスト・マーケットプレイス・`version_files`・CHANGELOG）。"""
+    found = plugins_mod.by_name(plugins_mod.load(root))
+    paths = {plugins_mod.MARKETPLACE.as_posix(), decl.changelog, *decl.version_files}
+    for p in facts.planned:
+        paths |= {m.relative_to(root).as_posix() for m in found[p.plugin].manifests(root)}
+    return frozenset(paths)
+
+
+def _merge_in(repo_git: git_mod.Git, branch: str, until: str, rewritten: frozenset[str]) -> None:
+    """起点 `until` を取り込みのマージで入れる。衝突が後で書き直すファイルだけなら起点の側を取り、ほかの衝突は止まる。"""
+    if repo_git.attempt("merge", "--quiet", "--no-edit", until).returncode == 0:
+        return
+    conflicted = repo_git.run("diff", "--name-only", "--diff-filter=U").split()
+    code = [c for c in conflicted if c not in rewritten]
+    if not conflicted or code:
+        repo_git.attempt("merge", "--abort")
+        listed = ", ".join(code) if code else "衝突のファイルを読めない"
+        raise git_mod.GitError(f"{until} を {branch} へ取り込めない（衝突: {listed}。直しを入れてから打ち直す）")
+    try:
+        repo_git.run("checkout", "--theirs", "--", *conflicted)
+        repo_git.run("add", "--", *conflicted)
+        repo_git.run("commit", "--quiet", "--no-edit")
+    except git_mod.GitError:
+        repo_git.attempt("merge", "--abort")
+        raise
+
+
+def _advance(repo_git: git_mod.Git, branch: str, until: str, source: str, reopen: Callable[[], bool], rewritten: frozenset[str]) -> None:
     """既にあるリリースブランチを、先端を戻さずに組む起点まで進めた状態で取り出す。
 
-    `base`: origin の先端が起点の祖先なら起点を取り出す（fast-forward）。祖先でなく開いた本番の PR の組み直しなら、
-    起点を取り込みのマージで入れる（衝突は起点の側を取り、版と CHANGELOG は後で書き直す）。どちらでもなければ `AssembleError`。
+    `base`: origin の先端が起点の祖先なら起点を取り出す（fast-forward）。祖先でなく、本番の PR の組み直しか次の版への回し
+    （`reopen` が真）なら、起点を取り込みのマージで入れる（`_merge_in`）。どちらでもなければ `AssembleError`。
+    `reopen` は祖先でないときだけ呼ぶ（GitHub を読むのはその場合だけ）。
     `release`: origin の先端（範囲の先端）をそのまま取り出す。
     """
     gather.fetch(repo_git, branch)
@@ -302,13 +341,11 @@ def _advance(repo_git: git_mod.Git, branch: str, until: str, source: str, reopen
         start = remote if source == RELEASE_SOURCE else until
         repo_git.run("switch", "--quiet", "-C", branch, start)
         return
-    if not reopen:
+    if not reopen():
         tips = f"{repo_git.rev_parse(remote)[:12]} と {repo_git.rev_parse(until)[:12]}"
-        raise AssembleError(f"origin の {branch} の先端が組む起点の祖先でなく、開いた本番の PR も無い（{tips}）")
+        raise AssembleError(f"origin の {branch} の先端が組む起点の祖先でなく、開いた本番の PR も閉じた本番の PR も無い（{tips}）")
     repo_git.run("switch", "--quiet", "-C", branch, remote)
-    if repo_git.attempt("merge", "--quiet", "--no-edit", "-X", "theirs", until).returncode != 0:
-        repo_git.attempt("merge", "--abort")
-        raise git_mod.GitError(f"{until} を {branch} へ取り込めない（衝突。直しを入れてから打ち直す）")
+    _merge_in(repo_git, branch, until, rewritten)
 
 
 def _rename(hub: GitHub, old: str, new: str) -> None:
@@ -321,7 +358,7 @@ def _reassemble(hub: GitHub, number: int, facts: materials_decide.Facts) -> None
     Publisher(hub).edit_body(number, materials_decide.render(facts))
 
 
-def _checkout(run: _Run, branch: str, until: str) -> tuple[int | None, str | None]:
+def _checkout(run: _Run, branch: str, until: str, rewritten: frozenset[str]) -> tuple[int | None, str | None]:
     """組むリリースブランチを取り出す。(開いた本番の PR の番号, 改名した前の名前)。開発版は今のまま新しく作る。"""
     repo_git, target = run.repo_git, run.target
     found, number = _existing(run, branch) if target.is_production else (None, None)
@@ -334,7 +371,7 @@ def _checkout(run: _Run, branch: str, until: str) -> tuple[int | None, str | Non
     if found != branch:
         _rename(run.hub, found, branch)
         renamed = found
-    _advance(repo_git, branch, until, target.source, number is not None)
+    _advance(repo_git, branch, until, target.source, lambda: number is not None or _deferred(run, branch), rewritten)
     return number, renamed
 
 
@@ -347,7 +384,7 @@ def assemble(root: Path, hub: GitHub, target: Target) -> Built:
     facts = _facts(run, span)
     named = _named(facts.planned, target.plugin)
     branch = version_decide.branch_of(named.next)
-    number, renamed = _checkout(run, branch, facts.head)
+    number, renamed = _checkout(run, branch, facts.head, _rewritten(root, decl_mod.load(root), facts))
     _write(root, decl_mod.load(root), facts)
     title = f"Release: {named.plugin} v{named.next}"
     facts = facts._replace(head=_commit_and_push(repo_git, branch, title))

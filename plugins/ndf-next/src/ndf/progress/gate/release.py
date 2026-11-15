@@ -43,8 +43,6 @@ MERGE_ACTOR = "service:github-merge"
 MERGE_KEY = "github-merge"
 # マージされていないときの副命令の止まった理由（待ちを残す）
 NOT_MERGED_KIND = "not_applicable"
-# 宣言の本番ブランチの鍵（`ndf.domains.release.declaration.PRODUCTION_KEY` と同じ 1 鍵。領域を import しない）
-PRODUCTION_KEY = "production_branch"
 
 
 def _reply_values(report: Mapping[str, Any]) -> dict[str, Any]:
@@ -170,8 +168,8 @@ def _off_production(now: Target, cwd: Path) -> bool:
     if now.base is None:
         return False
     try:
-        production = command.declaration(cwd, command.WORKTREE_FILE).get(PRODUCTION_KEY)
-    except (GitError, ContractError):  # noqa: NDF401 宣言を読めなければ省かず、副命令が理由を添えて止まる
+        production = command.declaration(cwd, command.WORKTREE_FILE).get("production_branch")
+    except (GitError, ContractError):  # noqa: NDF401 ファイル: 宣言を読めなければ省かず、副命令が理由を添えて止まる
         return False
     return isinstance(production, str) and bool(production) and now.base != production
 

@@ -46,9 +46,14 @@ class FakeHub:
     # マージキューに入っている PR と、キューから外した PR
     queued: set[int] = field(default_factory=set)
     dequeued: list[int] = field(default_factory=list)
+    # head のブランチごとの PR（`pulls_by_head` が返す）
+    heads: dict[str, list[Pull]] = field(default_factory=dict)
 
     def pull(self, number: int) -> Pull:
         return self.pulls[number]
+
+    def pulls_by_head(self, branches) -> dict[str, list[Pull]]:
+        return {b: list(self.heads.get(b, [])) for b in branches}
 
     def comments(self, number: int) -> list[Authored]:
         return list(self.comments_of.get(number, []))

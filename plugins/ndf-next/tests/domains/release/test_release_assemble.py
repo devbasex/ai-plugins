@@ -16,6 +16,7 @@ from ndf.domains.release import declaration as decl_mod
 from ndf.domains.release import plugins as plugins_mod
 
 from ._fakes import FakeHub, clone, init_repo, write_json
+from ._fakes import pull as fake_pull
 
 
 def _node(number: int, title: str, conclusion: str) -> dict:
@@ -338,6 +339,33 @@ def test_issue_3572_rebuilds_the_open_production_pr_on_the_new_head(tmp_path: Pa
     assert len(names) == 1
     stale = approval_decide.judge([approval_decide.Trail(0, "octocat", "approved", first.facts.head)], again.facts.head)
     assert stale.state == approval_decide.STALE
+
+
+def test_issue_3587_a_deferred_branch_is_reassembled_with_a_new_pr(tmp_path: Path) -> None:
+    """#3587: defer で本番の PR を閉じたリリースブランチ（版上げのコミットが develop の祖先でない）も、後の直しを取り込みの
+    マージで入れて進め、新しい本番の PR を作る（決定 3 の「止まった → 用意済み」）。"""
+    work = _origin_with_change(tmp_path, test_only=False)
+    first = assemble.assemble(work, _hub(), assemble.Target("production", "patch", "develop", "main"))
+    _commit_on(work, "develop", "tools/kit/fix.py", "fixed = 1\n")
+    hub = _hub()
+    hub.heads["release/v1.2.4"] = [fake_pull(9, first.facts.head, ref="release/v1.2.4")._replace(state="closed")]
+    again = assemble.assemble(work, hub, assemble.Target("production", "patch", "develop", "main"))
+    assert (again.branch, again.pr, again.reassembled) == ("release/v1.2.4", 9, False) and len(_created_pulls(hub)) == 1
+    assert git_sandbox.sh(work, "merge-base", "--is-ancestor", first.facts.head, again.facts.head) == ""
+    assert "fixed = 1" in git_sandbox.sh(work, "show", f"{again.facts.head}:tools/kit/fix.py")
+
+
+def test_issue_3587_a_code_conflict_in_the_reassembly_stops_without_dropping_the_release_fix(tmp_path: Path) -> None:
+    """#3587: 組み直しの取り込みでコードが衝突すれば、起点の側で上書きせずに止まり、push しない（リリース側の直しを捨てない）。"""
+    work = _origin_with_change(tmp_path, test_only=False)
+    target = assemble.Target("production", "patch", "develop", "main")
+    assemble.assemble(work, _hub(), target)
+    _commit_on(work, "release/v1.2.4", "tools/kit/a.py", "x = 2  # リリース側の直し\n")
+    _commit_on(work, "develop", "tools/kit/a.py", "x = 3\n")
+    before = _remote_tip(work, "release/v1.2.4")
+    with pytest.raises(git_mod.GitError, match="tools/kit/a.py"):
+        assemble.assemble(work, _open_pulls(_hub(), (9, "release/v1.2.4")), target)
+    assert _remote_tip(work, "release/v1.2.4") == before
 
 
 @dataclass
