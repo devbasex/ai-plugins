@@ -320,9 +320,14 @@ class FailedTestRead(NamedTuple):
     check: str
     run_id: Optional[int]
     runner: Optional[str]
-    source: str
+    source: ReadSource
     found: int
     reason: str
+
+    @classmethod
+    def unread(cls, check: str, run_id: Optional[int], runner: Optional[str], reason: str) -> FailedTestRead:
+        """読めなかった記録（読み元 `none`・0 件）。"""
+        return cls(check, run_id, runner, ReadSource.NONE, 0, reason)
 
     def as_metric(self) -> dict:
         return {
@@ -475,17 +480,17 @@ class _Assembly:
             job = self.github.job(check.job)
         except GitHubError as exc:
             self.job_errors.append(str(exc))
-            return FailedTestRead(check.name, None, None, ReadSource.NONE, 0, str(exc))
+            return FailedTestRead.unread(check.name, None, None, str(exc))
         try:
             run_id = int(job["run_id"])
         except (KeyError, TypeError, ValueError):
             why = f"ジョブ {check.job} の応答に run_id が無い"
             self.job_errors.append(why)
-            return FailedTestRead(check.name, None, None, ReadSource.NONE, 0, why)
+            return FailedTestRead.unread(check.name, None, None, why)
         run = self._run(run_id)
         if run.error:
             self.job_errors.append(run.error)
-            return FailedTestRead(check.name, run_id, None, ReadSource.NONE, 0, run.error)
+            return FailedTestRead.unread(check.name, run_id, None, run.error)
         if run.junit is not None and run.junit.ok:
             self.nodes.update(run.junit.nodes)
             return FailedTestRead(check.name, run_id, run.runner, ReadSource.JUNIT, len(run.junit.nodes), "")
@@ -494,15 +499,15 @@ class _Assembly:
     def _read_log(self, check: Check, run_id: int, run: _Run) -> FailedTestRead:
         art = run.junit.reason if run.junit is not None else ""
         if run.runner is None:
-            return FailedTestRead(check.name, run_id, None, ReadSource.NONE, 0, _joined(art, run.runner_reason))
+            return FailedTestRead.unread(check.name, run_id, None, _joined(art, run.runner_reason))
         parser = ci_logs.parser_of(run.runner)
         if parser is None:
             reason = _joined(art, f"runner {run.runner} のログのパーサーが無い")
-            return FailedTestRead(check.name, run_id, run.runner, ReadSource.NONE, 0, reason)
+            return FailedTestRead.unread(check.name, run_id, run.runner, reason)
         try:
             log_text = self.github.job_log(check.job)
         except GitHubError as exc:
-            return FailedTestRead(check.name, run_id, run.runner, ReadSource.NONE, 0, _joined(art, f"ログを読めない: {exc}"))
+            return FailedTestRead.unread(check.name, run_id, run.runner, _joined(art, f"ログを読めない: {exc}"))
         found = parser(log_text)
         self.nodes.update(found)
         return FailedTestRead(check.name, run_id, run.runner, ReadSource.LOG, len(found), art)
@@ -521,7 +526,7 @@ def failed_tests_of(github: GitHub, checks: Iterable[Check], source: FailedTestS
     # 上限: ジョブ github.failed-logs 件まで（limits.json）
     reads = [assembly.read(c) for c in listed[:cap]]
     over = f"読むチェックの上限 github.failed-logs（{cap} 件）を超えた"
-    reads += [FailedTestRead(c.name, None, None, ReadSource.NONE, 0, over) for c in listed[cap:]]
+    reads += [FailedTestRead.unread(c.name, None, None, over) for c in listed[cap:]]
     return FailedTests(sorted(assembly.nodes), reads, assembly.job_errors)
 
 
