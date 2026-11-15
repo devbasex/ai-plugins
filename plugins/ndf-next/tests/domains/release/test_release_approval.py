@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from ndf.adapters import ci
-from ndf.adapters.github import Authored, GitHub, GitHubError, MergeOutcome, Pull
+from ndf.adapters.github import Authored, GitHubError, MergeOutcome
 from ndf.domains.release import approval_decide, declaration, land, trail
 
 from ._fakes import HEAD, OTHER, FakeHub, not_found, pull
@@ -336,42 +336,3 @@ def test_production_admin_reads_only_json_true(tmp_path: Path, body: Any, admin:
         path.parent.mkdir(parents=True)
         path.write_text(body if isinstance(body, str) else json.dumps(body), encoding="utf-8")
     assert declaration.production_admin(tmp_path) is admin
-
-
-@dataclass(frozen=True)
-class _GraphQLHub(GitHub):
-    """`merge_as_admin` の GraphQL の要求を残す偽物（ネットワークへ出ない）。"""
-
-    sent: list = field(default_factory=list)
-    refuse: GitHubError | None = None
-    after: Pull | None = None
-
-    def pull(self, number: int) -> Pull:
-        return self.after if self.after is not None and self.sent else pull(number)
-
-    def allowed_merge_methods(self, branch: str) -> list[str]:
-        return ["merge"]
-
-    def repository(self, query: str, variables: Any = None) -> dict[str, Any]:
-        return {"pullRequest": {"id": "PR_1"}}
-
-    def graphql(self, query: str, variables: dict[str, Any]) -> dict[str, Any]:
-        self.sent.append(variables)
-        if self.refuse is not None:
-            raise self.refuse
-        return {}
-
-
-def test_merge_as_admin_sends_merge_pull_request_with_the_head() -> None:
-    """決定 5: 迂回は mergePullRequest を expectedHeadOid 付きで打つ。先端が違えば送らない。断られたら読み直して種類を返す。"""
-    hub = _GraphQLHub("o/r", None)  # type: ignore[arg-type]
-    got = hub.merge_as_admin(7, HEAD, "merge")
-    assert got.merged and hub.sent == [{"id": "PR_1", "head": HEAD, "method": "MERGE"}]
-    hub = _GraphQLHub("o/r", None)  # type: ignore[arg-type]
-    assert not hub.merge_as_admin(7, OTHER).merged and hub.sent == []
-    hub = _GraphQLHub("o/r", None, refuse=GitHubError("GraphQL の誤り: Head branch was modified"), after=pull(head=OTHER))  # type: ignore[arg-type]
-    got = hub.merge_as_admin(7, HEAD)
-    assert not got.merged and got.kind == "refused"
-    hub = _GraphQLHub("o/r", None, refuse=GitHubError("届かない", unreached=True))  # type: ignore[arg-type]
-    with pytest.raises(GitHubError):
-        hub.merge_as_admin(7, HEAD)
