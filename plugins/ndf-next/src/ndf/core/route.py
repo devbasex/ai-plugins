@@ -616,6 +616,28 @@ def _scoped_plan(ci_result: Path, cwd: Path) -> tuple[list[str], list[scoped.Sco
     return nodes, runs
 
 
+def _run_scoped(runs: Sequence[scoped.ScopedRun]) -> tuple[Optional[int], list[dict[str, Any]]]:
+    """範囲のテストを順に打った合否の並び。枠自身かシグナルで止まれば、そこで止めた終了コードを先頭に返す。"""
+    items: list[dict[str, Any]] = []
+    for run in runs:
+        code, own = _run_passing([*TEST_SLOT, run.command])
+        if _passed_through(code, own):
+            return code, items
+        passed = code == exit_codes.code_of("ok")
+        items.append({"kind": "test_run", "suite": run.suite, "command": run.command, "exit_code": code, "passed": passed})
+    return None, items
+
+
+def _failed_from_result(nodes: list[str], items: list[dict[str, Any]]) -> dict[str, Any]:
+    """CI で落ちたテストを手元で打った合否の結果 JSON（1 本でも落ちれば `test_failed`）。"""
+    failed = [i for i in items if not i["passed"]]
+    metrics = {"failed_tests": nodes, "runs": len(items), "failed_runs": len(failed)}
+    if failed:
+        detail = f"CI で落ちたテストを手元で打ち、{len(items)} 本のうち {len(failed)} 本が落ちた: {failed[0]['command']}"
+        return result.stopped(TOOL, "test_failed", detail, items=items, metrics=metrics)
+    return result.result(TOOL, OK, f"CI で落ちたテストを手元で {len(items)} 本のコマンドで打ち、通った", items, metrics)
+
+
 def _cmd_failed_from(a: argparse.Namespace) -> int:
     try:
         nodes, runs = _scoped_plan(Path(a.failed_from), Path.cwd())
@@ -625,20 +647,10 @@ def _cmd_failed_from(a: argparse.Namespace) -> int:
         found = result.stopped(TOOL, "precondition", str(exc), metrics={"failed_tests": exc.nodes})
         _write_result(a.result, found)
         return result.emit(found)
-    items: list[dict[str, Any]] = []
-    for run in runs:
-        code, own = _run_passing([*TEST_SLOT, run.command])
-        if _passed_through(code, own):
-            return code
-        passed = code == exit_codes.code_of("ok")
-        items.append({"kind": "test_run", "suite": run.suite, "command": run.command, "exit_code": code, "passed": passed})
-    failed = [i for i in items if not i["passed"]]
-    metrics = {"failed_tests": nodes, "runs": len(items), "failed_runs": len(failed)}
-    if failed:
-        detail = f"CI で落ちたテストを手元で打ち、{len(items)} 本のうち {len(failed)} 本が落ちた: {failed[0]['command']}"
-        found = result.stopped(TOOL, "test_failed", detail, items=items, metrics=metrics)
-    else:
-        found = result.result(TOOL, OK, f"CI で落ちたテストを手元で {len(items)} 本のコマンドで打ち、通った", items, metrics)
+    code, items = _run_scoped(runs)
+    if code is not None:
+        return code
+    found = _failed_from_result(nodes, items)
     _write_result(a.result, found)
     return result.emit(found)
 
