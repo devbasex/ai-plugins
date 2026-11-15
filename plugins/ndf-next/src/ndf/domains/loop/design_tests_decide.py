@@ -108,6 +108,23 @@ def _outside_fences(text: str) -> list[tuple[int, str]]:
     return out
 
 
+def _next_section(heading: re.Match[str], section: Optional[str]) -> Optional[str]:
+    """見出しの後の節。`##` の見出しなら拾う節かを決め直し、他の深さでは今の節のまま。"""
+    if len(heading.group(1)) == 2:
+        return heading.group(2) if heading.group(2) in NAME_SECTIONS else None
+    return section
+
+
+def _starts_rejected(line: str) -> bool:
+    """採らなかった案の範囲を始める行か。"""
+    return _LIST_MARK.sub("", line).lstrip().startswith(REJECTED)
+
+
+def _is_skipped(line: str, section: Optional[str], rejected: bool) -> bool:
+    """拾わない行か（拾う節の外・採らなかった案の中・引用）。"""
+    return section is None or rejected or line.lstrip().startswith(">")
+
+
 def target_lines(text: str) -> list[tuple[str, int, str]]:
     """拾う節の、囲み・引用・採らなかった案の外の行を `(節, 行番号 1 始まり, 行)` で返す。"""
     out: list[tuple[str, int, str]] = []
@@ -117,13 +134,12 @@ def target_lines(text: str) -> list[tuple[str, int, str]]:
         h = _HEADING.match(line)
         if h:
             rejected = False
-            if len(h.group(1)) == 2:
-                section = h.group(2) if h.group(2) in NAME_SECTIONS else None
+            section = _next_section(h, section)
             continue
-        if _LIST_MARK.sub("", line).lstrip().startswith(REJECTED):
-            rejected = True
-        if section is None or rejected or line.lstrip().startswith(">"):
+        rejected = rejected or _starts_rejected(line)
+        if _is_skipped(line, section, rejected):
             continue
+        assert section is not None
         out.append((section, lineno, line))
     return out
 
