@@ -1264,6 +1264,11 @@ def _exits(monkeypatch, target):
     return seen
 
 
+# 本番の PR（find_pr の答え）。開いたものは承認の照合へ、マージ済みは再開へ進む
+OPEN_PROD_PR = {"number": 9, "state": "OPEN"}
+MERGED_PROD_PR = {"number": 9, "state": "MERGED"}
+
+
 def _reviewed_prod(monkeypatch, tmp_path, case, state, found=None, wait_and_merge=None, record=None, backs=None):
     """reviewed.release_prod を git と gh を差し替えて流し、(結果, 終了コード, wait_and_merge の引数, 公開した PR) を返す。
     `record` は迂回の記録の書き込みの差し替え（呼ばれた引数を足す並びか、投げる例外）。`backs` は公開の後の (items, back) を足す。"""
@@ -1328,7 +1333,7 @@ def test_reviewed_prod_stops_at_the_gate_until_the_approval_matches(monkeypatch,
 @pytest.mark.parametrize("case", ["cd-no-review", "cd-review"])
 def test_reviewed_prod_merges_the_approved_head_without_the_bypass(monkeypatch, tmp_path, case):
     """受け入れ条件 2・12・I7: 承認が先端と一致すれば、その先端に固定して --admin なしでマージし、公開の後へ進む。"""
-    _, _, merged, published, _ = _reviewed_prod(monkeypatch, tmp_path, case, "success", found={"number": 9, "state": "OPEN"})
+    _, _, merged, published, _ = _reviewed_prod(monkeypatch, tmp_path, case, "success", found=OPEN_PROD_PR)
     assert merged == [{"expect": HEAD, "ci_wait": 60.0, "gate_approved": "user", "no_admin": True}] and published == [9]
 
 
@@ -1337,7 +1342,7 @@ def test_reviewed_prod_merges_cd_admin_with_the_bypass_and_records_it(monkeypatc
     結果の行の admin が true になり、照らした証跡を指す迂回の記録を 1 件書く。"""
     record, backs = [], []
     out, _, merged, published, _ = _reviewed_prod(
-        monkeypatch, tmp_path, "cd-admin", "success", found={"number": 9, "state": "OPEN"}, record=record, backs=backs
+        monkeypatch, tmp_path, "cd-admin", "success", found=OPEN_PROD_PR, record=record, backs=backs
     )
     assert merged == [{"expect": HEAD, "ci_wait": 60.0, "gate_approved": "user", "no_admin": False}] and published == [9]
     assert {"kind": "pr", "name": "#9", "result": "merged", "base": "main", "admin": True} in out["items"]
@@ -1351,7 +1356,7 @@ def test_reviewed_prod_merges_cd_admin_with_the_bypass_and_records_it(monkeypatc
 def test_reviewed_prod_without_the_declaration_writes_admin_false_and_no_record(monkeypatch, tmp_path, case):
     """#3506 の受け入れ条件 7: 宣言の無い場合は迂回なしで、結果の行の admin が false、迂回の記録を書かない。"""
     record = []
-    out, *_ = _reviewed_prod(monkeypatch, tmp_path, case, "success", found={"number": 9, "state": "OPEN"}, record=record)
+    out, *_ = _reviewed_prod(monkeypatch, tmp_path, case, "success", found=OPEN_PROD_PR, record=record)
     assert {"kind": "pr", "name": "#9", "result": "merged", "base": "main", "admin": False} in out["items"] and record == []
 
 
@@ -1371,7 +1376,7 @@ def test_reviewed_prod_cd_admin_stops_at_the_gate_when_the_head_moves(monkeypatc
 
     record = []
     out, code, _, published, _ = _reviewed_prod(
-        monkeypatch, tmp_path, "cd-admin", "success", found={"number": 9, "state": "OPEN"}, wait_and_merge=moved, record=record
+        monkeypatch, tmp_path, "cd-admin", "success", found=OPEN_PROD_PR, wait_and_merge=moved, record=record
     )
     assert code == 10 and out["status"] == "gate" and published == [] and record == []
 
@@ -1386,9 +1391,7 @@ def test_reviewed_prod_cd_admin_does_not_merge_when_the_checks_fail(monkeypatch,
 
     record = []
     with pytest.raises(StepError) as e:
-        _reviewed_prod(
-            monkeypatch, tmp_path, "cd-admin", "success", found={"number": 9, "state": "OPEN"}, wait_and_merge=failed, record=record
-        )
+        _reviewed_prod(monkeypatch, tmp_path, "cd-admin", "success", found=OPEN_PROD_PR, wait_and_merge=failed, record=record)
     assert e.value.code == code and record == []
 
 
@@ -1402,7 +1405,7 @@ def test_reviewed_prod_reports_an_unwritten_record_apart_from_the_release(monkey
         tmp_path,
         "cd-admin",
         "success",
-        found={"number": 9, "state": "OPEN"},
+        found=OPEN_PROD_PR,
         record=approval_trail.TrailError("unreadable", "書けない"),
         backs=backs,
     )
@@ -1427,9 +1430,7 @@ def test_reviewed_prod_resume_writes_the_missing_admin_record(monkeypatch, tmp_p
 
     monkeypatch.setattr(rv.approval_trail, "judge_trails_on", judge)
     record = []
-    out, _, merged, published, _ = _reviewed_prod(
-        monkeypatch, tmp_path, "cd-admin", "failure", found={"number": 9, "state": "MERGED"}, record=record
-    )
+    out, _, merged, published, _ = _reviewed_prod(monkeypatch, tmp_path, "cd-admin", "failure", found=MERGED_PROD_PR, record=record)
     assert merged == [] and published == [9] and record == [(9, HEAD, "https://t/2")] and bys == ["user"]
 
 
@@ -1506,7 +1507,7 @@ def test_release_selected_writes_admin_on_the_production_row(monkeypatch, tmp_pa
 
 
 def test_reviewed_prod_resumes_after_the_merge(monkeypatch, tmp_path):
-    _, _, merged, published, _ = _reviewed_prod(monkeypatch, tmp_path, "cd-no-review", "failure", found={"number": 9, "state": "MERGED"})
+    _, _, merged, published, _ = _reviewed_prod(monkeypatch, tmp_path, "cd-no-review", "failure", found=MERGED_PROD_PR)
     assert merged == [] and published == [9]
 
 
