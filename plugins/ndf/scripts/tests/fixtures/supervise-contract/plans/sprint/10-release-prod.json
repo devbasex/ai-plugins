@@ -15,8 +15,8 @@
     "明示": "1.2.0",
     "系列": null
   },
-  "規則": "利用者はリリース承認ゲートを承認した。run のステップが落ちたら、直せるもの（版数の書き漏れ・文書の形）は fix。外部の待ち（CI・ネットワーク）の揺れなら同じステップをもう一度。タグの重複・権限の不足は stop。",
-  "上限": 106,
+  "規則": "利用者はリリース承認ゲートを承認した。run のステップが落ちたら、外部の待ち（CI・ネットワーク）の揺れなら同じステップをもう一度。タグの重複・権限の不足と、コードや設定に原因があるもの（版数の書き漏れ・文書の形）は stop。",
+  "上限": 12,
   "steps": [
     {
       "id": "approve",
@@ -93,9 +93,9 @@
       "type": "run",
       "stage": "デプロイ",
       "timeout": 7920,
+      "cwd": "<TMP>/repo",
       "cmd": "python3 <NDF>/scripts/release-steps.py cd-result --base main --head release/v1.2.0 --out {state_dir}/work/cd-result.json",
-      "next": "record",
-      "cwd": "<TMP>/repo"
+      "next": "record"
     },
     {
       "id": "record",
@@ -104,11 +104,11 @@
       "timeout": 300,
       "cmd": "python3 <NDF>/scripts/release-steps.py record --version 1.2.0 --prs {queue_pr:check} --cd-result {state_dir}/work/cd-result.json",
       "pr_from": "release_pr_url",
-      "on_fail": "judge-record",
-      "next": "verify",
       "on_exit": {
         "5": "stop"
-      }
+      },
+      "on_fail": "judge-record",
+      "next": "verify"
     },
     {
       "id": "verify",
