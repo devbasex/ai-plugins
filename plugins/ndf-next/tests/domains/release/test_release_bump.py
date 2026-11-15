@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -10,9 +11,11 @@ from typing import Any
 import git_sandbox
 import pytest
 
+from ndf.adapters import ci
 from ndf.adapters import git as git_mod
 from ndf.adapters.github import MergeOutcome
-from ndf.domains.release import bump, bump_decide, version_decide
+from ndf.domains.release import bump, bump_decide, land, version_decide
+from ndf.domains.release import cli as release_cli
 from ndf.domains.release import declaration as decl_mod
 
 from ._fakes import FakeHub, clone, init_repo, release_lander, write_json
@@ -238,3 +241,87 @@ def test_the_origin_line_round_trips_and_only_bump_names_outside_paths() -> None
 )
 def test_action_follows_the_table(tagged: bool, changed: bool, opened: bump_decide.OpenBump | None, action: str) -> None:
     assert bump_decide.action(tagged, changed, opened, "1.3.0") == action
+
+
+# --- 現状固定（I-018）: release-steps bump の結果 JSON（止まった版上げと、進んだ版上げ）---
+
+
+def _cli_bump(monkeypatch, capsys, tmp_path: Path, made: bump.Bumped) -> tuple[int, dict, FakeHub]:
+    hub = FakeHub()
+    monkeypatch.setattr(release_cli, "_hub", lambda args: hub)
+
+    class _Bumper:
+        def __init__(self, *args: object) -> None:
+            pass
+
+        def bump(self) -> bump.Bumped:
+            return made
+
+    monkeypatch.setattr(bump, "Bumper", _Bumper)
+    code = release_cli.main(["bump", "--root", str(tmp_path), "--production", "main", "--budget", "0"])
+    return code, json.loads(capsys.readouterr().out.strip().splitlines()[-1]), hub
+
+
+def _posted(hub: FakeHub) -> list[tuple[str, Any]]:
+    return [(path, payload) for method, path, payload in hub.requests if method == "POST"]
+
+
+def test_characterize_cli_bump_stopped_with_a_landed_failure_comments_on_the_bump_pr(monkeypatch, capsys, tmp_path: Path) -> None:
+    landed = land.Landed(False, "test_failed", "テストが落ちた", failed=(ci.Check("unit", "done", "failure", 1),))
+    made = bump.Bumped("stopped", version="1.3.0", level="minor", pr=12, landed=landed)
+    code, out, hub = _cli_bump(monkeypatch, capsys, tmp_path, made)
+    assert code != 0 and out["status"] == "stopped"
+    assert (out["cause"]["kind"], out["cause"]["detail"]) == ("test_failed", "テストが落ちた")
+    assert out["summary"] == "テストが落ちた"
+    assert out["items"] == [
+        {"kind": "check", "name": "unit", "outcome": "failure"},
+        {"kind": "value", "name": "state", "value": "stopped"},
+        {"kind": "value", "name": "level", "value": "minor"},
+        {"kind": "value", "name": "pr_url", "value": "https://github.com/o/r/pull/12"},
+    ]
+    assert out["outputs"] == {"version": "1.3.0", "pr": 12}
+    assert _posted(hub) == [("/repos/o/r/issues/12/comments", {"body": "版上げが止まった（test_failed）: テストが落ちた"})]
+
+
+@pytest.mark.parametrize(
+    ("landed", "detail"),
+    [(None, "版上げが止まった"), ("empty-kind", "読めない")],
+)
+def test_characterize_cli_bump_stopped_without_a_kind_is_unknown(monkeypatch, capsys, tmp_path: Path, landed, detail: str) -> None:
+    got = land.Landed(False, None, detail) if landed else None
+    code, out, hub = _cli_bump(monkeypatch, capsys, tmp_path, bump.Bumped("stopped", landed=got))
+    assert code != 0 and out["status"] == "stopped"
+    assert (out["cause"]["kind"], out["cause"]["detail"]) == ("unknown", detail)
+    assert out["items"] == [{"kind": "value", "name": "state", "value": "stopped"}]
+    assert "outputs" not in out
+    assert _posted(hub) == []
+
+
+def test_characterize_cli_bump_stopped_with_a_pr_but_no_landed_still_comments(monkeypatch, capsys, tmp_path: Path) -> None:
+    code, out, hub = _cli_bump(monkeypatch, capsys, tmp_path, bump.Bumped("stopped", pr=5))
+    assert code != 0 and out["cause"]["kind"] == "unknown"
+    assert out["outputs"] == {"pr": 5}
+    assert out["items"] == [
+        {"kind": "value", "name": "state", "value": "stopped"},
+        {"kind": "value", "name": "pr_url", "value": "https://github.com/o/r/pull/5"},
+    ]
+    assert _posted(hub) == [("/repos/o/r/issues/5/comments", {"body": "版上げが止まった（unknown）: 版上げが止まった"})]
+
+
+def test_characterize_cli_bump_ok_states(monkeypatch, capsys, tmp_path: Path) -> None:
+    landed = land.Landed(True, None, "マージした", production_sha="f" * 40)
+    made = bump.Bumped("merged", version="1.3.0", level="minor", pr=12, landed=landed)
+    code, out, hub = _cli_bump(monkeypatch, capsys, tmp_path, made)
+    assert code == 0 and out["status"] == "ok"
+    assert out["summary"] == "版上げ: merged（版 1.3.0・版上げの PR #12）"
+    assert out["items"] == [
+        {"kind": "value", "name": "state", "value": "merged"},
+        {"kind": "value", "name": "level", "value": "minor"},
+        {"kind": "value", "name": "production_sha", "value": "f" * 40},
+    ]
+    assert out["outputs"] == {"version": "1.3.0", "pr": 12}
+    assert _posted(hub) == []
+    code, out, _unused = _cli_bump(monkeypatch, capsys, tmp_path, bump.Bumped("not_applicable"))
+    assert code == 0 and out["summary"] == "版上げ: not_applicable（版 無し・版上げの PR 無し）"
+    assert out["items"] == [{"kind": "value", "name": "state", "value": "not_applicable"}]
+    assert "outputs" not in out
