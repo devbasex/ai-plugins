@@ -86,3 +86,101 @@ def test_collected_files_reads_node_ids_and_plain_paths():
 def test_every_path_lands_in_exactly_one_group():
     got = tests_decide.collect_verdict(["a", "b", "c"], {"a": frozenset({"a"}), "b": frozenset({"a"})})
     assert (got.collected, got.uncollected, got.undecided) == (("a",), ("b",), ("c",))
+
+
+# 現状固定（I-008）: 足したテストのファイルを suite ごとにまとめる経路（collect._group）を、公開の collect.collected から固定する。
+# 記録用のスクリプトが、呼ばれた印（タグ）と受けた引数を calls.log へ書き、引数のファイルを収集したものとして出す。
+RECORDER = (
+    "import sys\n"
+    "with open('calls.log', 'a', encoding='utf-8') as fh:\n"
+    "    fh.write(' '.join(sys.argv[1:]) + '\\n')\n"
+    "print('\\n'.join(sys.argv[2:]))\n"
+)
+
+
+def _recorder(tag: str, slot: bool = True) -> str:
+    return f"{sys.executable} recorder.py {tag}" + (" {paths}" if slot else " fixed.py")
+
+
+def _calls(gitwork) -> list[str]:
+    log = gitwork.work / "calls.log"
+    return log.read_text(encoding="utf-8").splitlines() if log.exists() else []
+
+
+def test_group_current_behavior_sends_each_suite_its_own_files_in_order(gitwork):
+    gitwork.make({"recorder.py": RECORDER})
+    suites = [
+        {"name": "py", "paths": ["tests"], "collect_command": _recorder("PY")},
+        {"name": "web", "paths": ["web"], "collect_command": _recorder("WEB")},
+    ]
+    paths = ["web/b.test.ts", "tests/test_b.py", "tests/test_a.py", "web/a.test.ts"]
+    got = collect.collected(gitwork.work, paths, suites, 120)
+    # suite は最初に現れたファイルの順に 1 度ずつ呼ばれ、ファイルは渡した順のまま入る
+    assert _calls(gitwork) == ["WEB web/b.test.ts web/a.test.ts", "PY tests/test_b.py tests/test_a.py"]
+    assert got.collected == ("tests/test_a.py", "tests/test_b.py", "web/a.test.ts", "web/b.test.ts")
+    assert (got.uncollected, got.undecided) == ((), ())
+
+
+def test_group_current_behavior_first_matching_suite_wins(gitwork):
+    # 範囲が重なれば、並びで先の suite がファイルを受け持つ（後の suite は呼ばれない）
+    gitwork.make({"recorder.py": RECORDER})
+    suites = [
+        {"name": "first", "paths": ["tests/unit"], "collect_command": _recorder("FIRST")},
+        {"name": "second", "paths": ["tests"], "collect_command": _recorder("SECOND")},
+    ]
+    got = collect.collected(gitwork.work, ["tests/unit/test_a.py", "tests/test_b.py"], suites, 120)
+    assert _calls(gitwork) == ["FIRST tests/unit/test_a.py", "SECOND tests/test_b.py"]
+    assert got.collected == ("tests/test_b.py", "tests/unit/test_a.py")
+
+
+def test_group_current_behavior_first_match_without_collect_command_is_undecided(gitwork):
+    # 先に当たった suite に collect_command が無ければ、後の suite が宣言を持っていても判定できない
+    gitwork.make({"recorder.py": RECORDER})
+    suites = [
+        {"name": "bare", "paths": ["tests"]},
+        {"name": "all", "paths": ["."], "collect_command": _recorder("ALL")},
+    ]
+    got = collect.collected(gitwork.work, ["tests/test_a.py", "other/test_c.py"], suites, 120)
+    assert _calls(gitwork) == ["ALL other/test_c.py"]
+    assert (got.collected, got.undecided) == (("other/test_c.py",), ("tests/test_a.py",))
+
+
+def test_group_current_behavior_paths_default_and_unusable_declarations(gitwork):
+    # paths を省いた suite は全体（.）を受け持つ。paths が並びでない suite は飛ばす。collect_command が文字列でなければ宣言なし
+    gitwork.make({"recorder.py": RECORDER})
+    suites = [
+        {"name": "broken", "paths": "tests", "collect_command": _recorder("BROKEN")},
+        {"name": "nonstr", "paths": ["lib"], "collect_command": ["not", "a", "string"]},
+        {"name": "rest", "collect_command": _recorder("REST")},
+    ]
+    got = collect.collected(gitwork.work, ["tests/test_a.py", "lib/test_l.py"], suites, 120)
+    assert _calls(gitwork) == ["REST tests/test_a.py"]
+    assert (got.collected, got.uncollected, got.undecided) == (("tests/test_a.py",), (), ("lib/test_l.py",))
+
+
+def test_group_current_behavior_path_outside_every_suite_is_undecided(gitwork):
+    gitwork.make({"recorder.py": RECORDER})
+    got = collect.collected(gitwork.work, ["src/test_x.py"], [{"name": "py", "paths": ["tests"], "collect_command": _recorder("PY")}], 120)
+    assert _calls(gitwork) == []
+    assert (got.collected, got.uncollected, got.undecided) == ((), (), ("src/test_x.py",))
+
+
+def test_group_current_behavior_template_without_slot_runs_as_is(gitwork):
+    # {paths} の無いテンプレートはそのまま打つ（ファイルを渡さない）。出力に無いファイルは収集されない
+    gitwork.make({"recorder.py": RECORDER})
+    suites = [{"name": "py", "paths": ["tests"], "collect_command": _recorder("PY", slot=False)}]
+    got = collect.collected(gitwork.work, ["tests/test_a.py"], suites, 120)
+    assert _calls(gitwork) == ["PY fixed.py"]
+    assert got.uncollected == ("tests/test_a.py",)
+
+
+def test_group_current_behavior_same_name_suites_share_one_call_with_the_last_declaration(gitwork):
+    # 同じ名前の suite は 1 つの組にまとまり、打つコマンドと終了コードは後に当たった suite の宣言を使う
+    gitwork.make({"recorder.py": RECORDER})
+    suites = [
+        {"name": "py", "paths": ["a"], "collect_command": _recorder("A")},
+        {"name": "py", "paths": ["b"], "collect_command": _recorder("B")},
+    ]
+    got = collect.collected(gitwork.work, ["a/test_1.py", "b/test_2.py"], suites, 120)
+    assert _calls(gitwork) == ["B a/test_1.py b/test_2.py"]
+    assert got.collected == ("a/test_1.py", "b/test_2.py")
