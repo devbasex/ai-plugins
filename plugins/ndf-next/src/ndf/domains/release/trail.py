@@ -86,16 +86,21 @@ def _rejects(c: Authored) -> bool:
 
 def read(hub: GitHub, number: int, human_only: bool = False) -> Read:
     """PR と、信用する書き手の証跡からの判定。`human_only` なら利用者の証跡だけを数える（迂回の前提。#3506 の I9）。"""
-    pull = hub.pull(number)
-    found = hub.comments(number)
-    comments = [(c.author, c.body, _counts(hub, c, human_only)) for c in found]
+    return judged(hub, hub.pull(number), human_only)
+
+
+def judged(hub: GitHub, pull: Pull, human_only: bool = False) -> Read:
+    """読んだ PR `pull` と、信用する書き手の証跡からの判定（PR を読み直さない。読んだばかりの呼び手が使う）。
+    `human_only` は `read` と同じ。"""
+    number = pull.number
+    comments = [(c.author, c.body, _counts(hub, c, human_only)) for c in hub.comments(number)]
     return Read(pull, approval_decide.judge(approval_decide.trails(comments), pull.head_sha))
 
 
 def user_judgment_at(hub: GitHub, number: int, sha: str) -> approval_decide.Judgment | None:
     """利用者の証跡（`read` の `human_only`）の判定。判定に使った証跡が `sha` へのものでなければ None。"""
-    judged = read(hub, number, human_only=True).judgment
-    return judged if judged.trail is not None and judged.trail.sha == sha else None
+    got = read(hub, number, human_only=True).judgment
+    return got if got.trail is not None and got.trail.sha == sha else None
 
 
 def present(hub: GitHub, number: int, material: str) -> str:

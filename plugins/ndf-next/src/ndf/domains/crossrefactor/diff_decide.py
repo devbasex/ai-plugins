@@ -53,12 +53,3 @@ def file_changes(diff_text: str) -> Mapping[str, FileChange]:
             lines |= _hunk_lines(hunk)
         out[pf.path] = FileChange(pf.path, frozenset(lines), added=pf.is_added_file, removed=pf.is_removed_file)
     return out
-
-
-def in_scope(path: str, scope: tuple[str, ...]) -> bool:
-    """`path` が範囲（ファイルかディレクトリの並び）の中か。`.` は作業場所の全体。"""
-    for loc in scope:
-        base = loc.rstrip("/")
-        if base in ("", ".") or path == base or path.startswith(base + "/"):
-            return True
-    return False
