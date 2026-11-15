@@ -443,7 +443,7 @@ def read_allow(path: pathlib.Path) -> list[dict]:
 
 @dataclasses.dataclass
 class ScanResult:
-    """全 family を走査した結果。走査した正規形・ヒット・報告行・走査できない Skill をまとめる。"""
+    """family を走査した結果。走査した正規形・ヒット・報告行・走査できない Skill・既定の問題をまとめる。"""
 
     scanned: set[str] = dataclasses.field(default_factory=set)
     hits: list[Hit] = dataclasses.field(default_factory=list)
@@ -455,6 +455,14 @@ class ScanResult:
     def counts(self) -> collections.Counter:
         """語とファイルの組ごとのヒットの数。走査を終えてから読む。"""
         return collections.Counter(h.key for h in self.hits)
+
+    def merge(self, other: ScanResult) -> None:
+        """`other`（1 family の結果）を足す。`counts` を読む前（走査を終える前）にだけ呼ぶ。"""
+        self.scanned |= other.scanned
+        self.hits.extend(other.hits)
+        self.report_lines.extend(other.report_lines)
+        self.unscanned.extend(other.unscanned)
+        self.default_problems.extend(other.default_problems)
 
 
 def validate_allow(rows: list[dict], result: ScanResult, skills_dirs: list[pathlib.Path], exhaustive: bool) -> list[str]:
@@ -497,8 +505,8 @@ def resolve_skills_dirs(given: list[str] | None) -> list[pathlib.Path]:
     return found
 
 
-def scan_family(skills_dir: pathlib.Path) -> tuple[set[str], list[Hit], str, list[pathlib.Path], list[str]]:
-    """1 つの family の本文・スクリプト・hook を走査し、(走査した正規形, ヒット, 報告行, 走査できない Skill, 既定の問題) を返す。
+def scan_family(skills_dir: pathlib.Path) -> ScanResult:
+    """1 つの family の本文・スクリプト・hook を走査し、その family の `ScanResult`（報告行は 1 行）を返す。
 
     ndf-next の形の family は、追加の語を掛け、`src/`・`contracts/`・`hooks/*.py` も走査する。ほかの family の
     走査の対象・ヒット・報告行は今と同じ（I3）。走査の範囲を決められなければ `ScanError`。"""
@@ -533,7 +541,7 @@ def scan_family(skills_dir: pathlib.Path) -> tuple[set[str], list[Hit], str, lis
         hits += next_hits
         hooks = hooks + hook_code
     report_line = _report_line(skills_dir, names, docs, scripts, skill_scripts, code, hooks, agents, hits)
-    return scanned, hits, report_line, unscanned, problems
+    return ScanResult(scanned, hits, [report_line], unscanned, problems)
 
 
 def _scan_next_code(
@@ -592,12 +600,7 @@ def scan_all(skills_dirs: list[pathlib.Path]) -> ScanResult:
     """family ごとに走査し、結果を 1 つにまとめる。"""
     result = ScanResult()
     for skills_dir in skills_dirs:
-        family_scanned, hits, report_line, family_unscanned, problems = scan_family(skills_dir)
-        result.scanned |= family_scanned
-        result.hits.extend(hits)
-        result.report_lines.append(report_line)
-        result.unscanned.extend(family_unscanned)
-        result.default_problems.extend(problems)
+        result.merge(scan_family(skills_dir))
     return result
 
 

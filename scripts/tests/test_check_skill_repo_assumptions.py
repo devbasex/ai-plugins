@@ -638,7 +638,8 @@ def test_characterize_scan_family_returns_scanned_hits_report_and_unscanned(tmp_
     mod = load_checker()
     skills = build_family(tmp_path)
     family = skills.parent
-    scanned, hits, report_line, unscanned, problems = mod.scan_family(skills)
+    got = mod.scan_family(skills)
+    scanned, hits, (report_line,), unscanned, problems = got.scanned, got.hits, got.report_lines, got.unscanned, got.default_problems
     assert problems == []
 
     assert sorted(Path(p).relative_to(family.resolve()).as_posix() for p in scanned) == [
@@ -678,7 +679,8 @@ def test_characterize_scan_family_of_an_empty_family(tmp_path: Path) -> None:
     mod = load_checker()
     skills = tmp_path / "plugins" / "fx" / "skills"
     skills.mkdir(parents=True)
-    scanned, hits, report_line, unscanned, problems = mod.scan_family(skills)
+    got = mod.scan_family(skills)
+    scanned, hits, (report_line,), unscanned, problems = got.scanned, got.hits, got.report_lines, got.unscanned, got.default_problems
     assert problems == []
     assert (scanned, hits, unscanned) == (set(), [], [])
     assert report_line == (
