@@ -192,8 +192,10 @@ worktree・チーム・公開・[pace.schema.json](../../contracts/schemas/decla
 | `areas` | array of object | — | — | 任意 | 共通の層の範囲の並び |
 | `auto` | object | — | — | 任意 | 進め方の許可 |
 | `boundary_paths` | array of string | — | — | 任意 | レッドラインのパス（触れる変更は人の承認が要る）の glob |
+| `business_hours` | object | — | — | 任意 | 業務時間（日をまたがない）。不正なら警告して宣言なしとして扱う |
 | `fast` | object | — | — | 任意 | 進め方の許可 |
 | `loop` | object | — | — | 任意 | 開発ループの設定 |
+| `parallel` | object | — | — | 任意 | 並列の計画の設定 |
 | `triggers` | object | — | — | 任意 | 進め方を切り替える閾値 |
 | `version` | integer | — | `1` | 必須 | 宣言の形の版。読み手は知らない版を読まない |
 
@@ -201,7 +203,7 @@ worktree・チーム・公開・[pace.schema.json](../../contracts/schemas/decla
 
 ## `.ndf/project.json`（project）
 
-worktree（印のキーはメインディレクトリ）・チーム・公開・[project.schema.json](../../contracts/schemas/declarations/project.schema.json)。読む工程: `ndf records preflight`（工程の前の確かめで、知らないキーを数える）・`ndf release-steps`（本番のマージで production_merge をメインディレクトリから読む）・`ndf refactor`（リファクタリングで test.suites の収集のコマンドを読む）
+worktree（印のキーはメインディレクトリ）・チーム・公開・[project.schema.json](../../contracts/schemas/declarations/project.schema.json)。読む工程: `ndf records preflight`（工程の前の確かめで、知らないキーを数える）・`ndf release-steps`（本番のマージで production_merge をメインディレクトリから読む）・`ndf refactor`（リファクタリングで test.suites の収集のコマンドを読む）・`ndf progress`（進行表を作るときに workflow.stages の工程の有効・無効を読む）
 
 言語・テスト・CI・リリースの経路・課題の置き場の宣言。人と解析（M7）が書く。無ければ既定で動く
 
@@ -223,6 +225,7 @@ worktree（印のキーはメインディレクトリ）・チーム・公開・
 | `test` | Test か Unknown か null | — | — | 任意 | テストの戦略（suites）。テストのコマンドの正本 |
 | `test_duration`（非推奨。読み手は読まない） | TestDuration か Unknown か null | — | — | 任意 | 読み手は読まない（今の版の読み手が読む値。11.0.0 の後に消す） |
 | `version` | integer | — | `1` | 必須 | 宣言の形の版。読み手は知らない版を読まない |
+| `workflow` | object | — | — | 任意 | 工程の有効・無効の宣言（stages） |
 
 例: `{"version": 1, "test": {"suites": [{"name": "pytest", "runner": "pytest", "command": "uv run pytest -q"}]}, "production_merge": {"admin": false}}`
 
