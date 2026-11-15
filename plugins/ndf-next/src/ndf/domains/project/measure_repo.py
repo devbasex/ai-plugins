@@ -94,6 +94,8 @@ MAX_LIBRARIES = 15
 ANALYTICS = ("analytics", "gtag", "sentry", "datadog", "mixpanel", "amplitude", "posthog", "segment", "newrelic", "bugsnag", "rollbar")
 # 依存の言語と、その依存の置き場の組
 ECOSYSTEM = (("php", "packagist"), ("javascript", "npm"), ("python", "pypi"))
+# 依存を集める言語（`dependencies` の返す言語の組と、測れなかったときの既定）
+DEP_LANGUAGES = tuple(lang for lang, _ in ECOSYSTEM)
 # 依存の表へ処理系の版を書く行の名前（依存ではない）
 PHP_ROW, NODE_ROW, PYTHON_ROW = "php", "node", "python"
 RUNTIME_ROWS = (PHP_ROW, PYTHON_ROW, NODE_ROW)
@@ -268,7 +270,8 @@ def _py_dependencies(tree: Tree) -> dict[str, str]:
 
 def dependencies(tree: Tree) -> dict[str, dict[str, str]]:
     """言語 → {依存の名前: 版の指定}。根と 1 段下の依存の定義から集める。"""
-    return {"php": _php_dependencies(tree), "javascript": _js_dependencies(tree), "python": _py_dependencies(tree)}
+    readers = (_php_dependencies, _js_dependencies, _py_dependencies)  # DEP_LANGUAGES の順
+    return {lang: read(tree) for lang, read in zip(DEP_LANGUAGES, readers, strict=True)}
 
 
 def _spec(deps: dict[str, dict[str, str]], lang: str, name: str) -> str:
@@ -553,7 +556,7 @@ def measure(tree: Tree, step: Step, items: dict[str, Any]) -> dict[str, Any]:
     """git の木から測る項目を `items` へ入れ、リポジトリの中の課題の置き場（`issues` の材料）を返す。"""
     dep = step("languages", lambda: dependencies(tree))
     if dep is None:
-        dep = {"php": {}, "javascript": {}, "python": {}}
+        dep = {lang: {} for lang in DEP_LANGUAGES}
     else:
         got = step("languages", lambda: measure_languages(tree, dep))
         if got is not None:
