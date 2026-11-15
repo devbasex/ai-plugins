@@ -5,7 +5,7 @@
     "X0": ["bin/ndf", "src/ndf/identity.py", "src/ndf/cli.py"],
     "X0+": ["bin/ndf", "src/ndf/identity.py"],
     "X1+": ["src/ndf/checks/"],
-    "X3": ["src/ndf/parity/"],
+    "X3": ["../../scripts/ndf-next-parity/parity/"],
     "D1": ["contracts/facts/", "contracts/causes.json", "contracts/limits.json", "contracts/schemas/", "src/ndf/contracts/"],
     "D1+": ["contracts/schemas/", "src/ndf/contracts/"],
     "D2": ["contracts/domains/"],

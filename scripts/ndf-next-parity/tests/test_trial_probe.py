@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from ndf.parity.trial import probe
+from parity.trial import probe
 
 
 def _features():
@@ -120,3 +120,17 @@ def test_rows_passed_in_a_later_record_pass_and_name_that_record(tmp_path, plugi
     got = probe.judge(_features(), passed, latest, root=plugin, repo=plugin)
     assert got["skill:tidy"] == {"result": "passed", "record": "trial/2026-11-20.json"}
     assert got["skill:merged"]["record"] == "trial/2026-11-25.json"
+
+
+def test_main_refuses_a_missing_plugin_root(tmp_path):
+    """読むプラグインの根は引数で受け、無い根では書かずに止まる（#3617 の受け入れ条件 19）。"""
+    assert probe.main(["--plugin-root", str(tmp_path / "none")]) == 2
+
+
+def test_texts_read_under_the_given_root(plugin):
+    got = probe.texts(_features()["places"], plugin)
+    assert "skills/merged/SKILL.md" in got and all(not p.endswith(".py") for p in got)
+
+
+def test_default_plugin_root_is_ndf_next_of_this_repository():
+    assert (probe.PLUGIN_ROOT / "manifests" / "skills.json").is_file()

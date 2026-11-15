@@ -7,7 +7,7 @@
 1. PR の差分（merge-base..head）が版数と説明だけ。版上げの PR（release/v<版> → develop）
 2. PR の差分が文書のファイルだけ（NDF の差分の分類 `lib/diff_kinds.py`。宣言は `.ndf/project.json` の `docs`）。
    テストが読む文書があれば `docs_tests` に対応するテストを出し、文書のテストのジョブが走らせる
-2b. PR の差分のうち文書でないファイルが、作り直しのディレクトリ（`SELF_TESTED`。#1142 の `plugins/ndf-next/`）と
+2b. PR の差分のうち文書でないファイルが、作り直しのディレクトリ（`SELF_TESTED`。#1142 の `plugins/ndf-next/` と、その機能の対応表の `scripts/ndf-next-parity/`）と
    その workflow だけ。そのディレクトリは自分の workflow（`ndf-next.yml`）のテストと検査で確かめ、根のテストと
    runtime smoke はそのディレクトリを読まない（マーケットプレイスに載せていない。#1142 の決定 74）。
    入れ替え（#1142 の S2）で ndf-next.yml と一緒に `SELF_TESTED` を消す
@@ -50,7 +50,12 @@ import diff_kinds  # noqa: E402
 
 BEHAVIOR_AS_CODE = {"runtime-plugin-smoke.yml"}
 # 自分の workflow で確かめるディレクトリと、その workflow（規則 2b）
-SELF_TESTED = ("plugins/ndf-next/", ".github/workflows/ndf-next.yml", ".github/workflows/ndf-next-checks.yml")
+SELF_TESTED = (
+    "plugins/ndf-next/",
+    "scripts/ndf-next-parity/",
+    ".github/workflows/ndf-next.yml",
+    ".github/workflows/ndf-next-checks.yml",
+)
 MANIFEST_RE = re.compile(
     r"^(\.claude-plugin/marketplace\.json"
     r"|plugins/.+/(\.claude-plugin/|\.codex-plugin/)?plugin\.json)$"

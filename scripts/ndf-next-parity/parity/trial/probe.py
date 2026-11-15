@@ -9,7 +9,7 @@ ndf-next だけでは動かない（`failed`）。呼んでいなくても、試
 名前でなく `now` のパスで区別する。本文が名前だけで書いていれば、本文の置かれた Skill の下のスクリプト・根の `scripts/`・
 同じ名前が 1 つだけのときのそれ、の順に解決する（`resolve`）。
 
-    依存の環境で: python -m ndf.parity.trial.probe [--write]
+    ndf-next の依存の環境で（scripts/ndf-next-parity から）: python -m parity.trial.probe [--write] [--plugin-root <根>]
 
 `--write` は対応表の `trial` の列を書き換える。書かないときは判定の一覧を標準出力へ出すだけである。
 """
@@ -19,15 +19,17 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 from collections import Counter
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
-from ndf.parity import table
+from parity import table
 
-ROOT = Path(__file__).resolve().parents[4]
-REPO = ROOT.parents[1]
+# リポジトリの根と、既定のプラグインの根（対応表の places と本文はプラグインの根からの相対）
+REPO = Path(__file__).resolve().parents[4]
+PLUGIN_ROOT = REPO / "plugins" / "ndf-next"
 # 旧いスクリプトを呼ぶ本文を探す置き場は、本文を移した子（Skill・エージェント・hook・配る表）の places から引く
 TEXT_CHILDREN = ("S1a", "S1b")
 # 試走の記録の置き場（対応表のディレクトリからの相対。中の `<日付>.json` を名前の順に読む）
@@ -38,7 +40,7 @@ STALLED = (
 )
 
 
-def texts(places: Mapping[str, Any], root: Path = ROOT) -> dict[str, str]:
+def texts(places: Mapping[str, Any], root: Path) -> dict[str, str]:
     """本文の置き場の文字のファイル（プラグインの根からの相対 → 中身）。Python のコードは本文に数えない。"""
     found = {}
     for place in sorted({p for child in TEXT_CHILDREN for p in places[child]}):
@@ -192,7 +194,7 @@ def judge(
     features: Mapping[str, Any],
     passed: Mapping[str, str] | Iterable[str] = (),
     record: str = "",
-    root: Path = ROOT,
+    root: Path = PLUGIN_ROOT,
     repo: Path = REPO,
 ) -> dict[str, dict[str, str]]:
     """行の id → 試走の結果。`passed` は試走で実際に通した行の id（→ 通した記録）。`record` はほかの行の記録。"""
@@ -242,10 +244,14 @@ def write_trials(path: Path, results: Mapping[str, Mapping[str, str]]) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--write", action="store_true", help="対応表の trial の列を書き換える")
+    parser.add_argument("--plugin-root", type=Path, default=PLUGIN_ROOT, help="本文を読むプラグインの根（既定はリポジトリの plugins/ndf-next）")
     args = parser.parse_args(argv)
+    if not args.plugin_root.is_dir():
+        print(f"プラグインの根が無い: {args.plugin_root}", file=sys.stderr)
+        return 2
     features = table.load("features")
     passed, latest = records(table.HERE)
-    results = judge(features, passed, latest)
+    results = judge(features, passed, latest, root=args.plugin_root)
     if args.write:
         write_trials(table.HERE / "features.json", results)
     counts = Counter(t["result"] for t in results.values())
