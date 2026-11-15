@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
+
 from ndf.adapters import claude
+from ndf.contracts import result
 from ndf.core import worker
 
 
@@ -75,7 +78,7 @@ def test_run_resolves_relative_paths_from_the_launcher(tmp_path, monkeypatch, ca
 
     def fake_delegate(handoff, system, root=None):
         seen["handoff"] = handoff
-        handoff.result_file.write_text("{}", encoding="utf-8")
+        handoff.result_file.write_text('{"status": "ok", "summary": "済んだ"}', encoding="utf-8")
         return worker.Delivery(attempts=1, session="s")
 
     monkeypatch.setattr(worker, "delegate", fake_delegate)
@@ -84,3 +87,37 @@ def test_run_resolves_relative_paths_from_the_launcher(tmp_path, monkeypatch, ca
     h = seen["handoff"]
     assert (h.result_file, h.cwd, h.state_dir) == (tmp_path / "out.json", tmp_path / "work", tmp_path / "state")
     assert '"result_file": "' + str(tmp_path / "out.json") in capsys.readouterr().out
+
+
+def _outcome(tmp_path, report):
+    path = tmp_path / "result.json"
+    if report is not None:
+        path.write_text(report if isinstance(report, str) else json.dumps(report, ensure_ascii=False), encoding="utf-8")
+    got = worker.outcome_of("impl", path, [], {}, 1)
+    assert result.errors(got) == []
+    return got
+
+
+def test_a_worker_that_left_work_does_not_return_ok(tmp_path):
+    # #1682: 手動確認を行えなかった worker の「できなかった」と、欠けの付いた ok は、欠けを付けた incomplete になる
+    gap = {"kind": "criterion", "name": "3", "reason": "arm64 で建てられず手動確認（マージ前）を行えない"}
+    got = _outcome(tmp_path, {"status": "stopped", "summary": "base を建てられない", "gaps": [gap]})
+    assert got["status"] == "stopped" and got["cause"]["kind"] == "incomplete" and got["gaps"] == [gap]
+    got = _outcome(tmp_path, {"status": "ok", "summary": "完了", "gaps": [gap]})
+    assert got["status"] == "stopped" and got["gaps"] == [gap]
+    got = _outcome(tmp_path, {"status": "stopped", "summary": "できなかった"})
+    assert got["gaps"][0]["reason"] == "できなかった"
+
+
+def test_a_worker_that_asks_for_a_decision_returns_a_gate(tmp_path):
+    got = _outcome(tmp_path, {"status": "gate", "summary": "判断が要る"})
+    assert got["status"] == "gate" and "判断が要る" in got["summary"] and got["routes"]
+
+
+def test_a_worker_that_finished_returns_ok_and_an_unreadable_report_is_bad_report(tmp_path):
+    assert _outcome(tmp_path, {"status": "ok", "summary": "済んだ"})["status"] == "ok"
+    for i, bad in enumerate(("{}", "壊れた", None)):
+        place = tmp_path / f"b{i}"
+        place.mkdir()
+        got = _outcome(place, bad)
+        assert got["status"] == "stopped" and got["cause"]["kind"] == "bad_report"

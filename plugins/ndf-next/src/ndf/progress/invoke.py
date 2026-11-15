@@ -314,6 +314,7 @@ STAGE_GATE = ["true"]
 FILL_SOURCES = {
     "title": FROM_ISSUE,
     "body_file": FROM_ISSUE,
+    "issue": FROM_ISSUE,
     "test_command": FROM_PROJECT,
     "required": FROM_PROJECT,
     "review": FROM_PROJECT,
@@ -392,7 +393,7 @@ def _project(place: Path) -> dict[str, Any]:
 
 
 def _issue_values(run: StageRun, work_dir: Path, place: Path) -> Optional[dict[str, route.Value]]:
-    """課題が 1 つなら、その題（title）と本文を書いたファイル（body_file）。課題が 1 つでなければ空。
+    """課題が 1 つなら、その題（title）・本文を書いたファイル（body_file）・番号（issue）。課題が 1 つでなければ空。
 
     題と本文は置き場へ初回に 1 度だけ写し（`ISSUE_BODY_FILE`・`ISSUE_TITLE_FILE`）、以後の呼び出し（承認の答え・続き・
     打ち直し）はその写しを使う。読み直すと GitHub を毎回呼び、途中で題が直されるとプランが変わって、終わっていない回へ
@@ -409,14 +410,14 @@ def _issue_values(run: StageRun, work_dir: Path, place: Path) -> Optional[dict[s
     copy = work_dir / ISSUE_TITLE_FILE.format(number=number)
     held = plan_files.read_json(copy)
     if held is not None and isinstance(held.get("title"), str) and out.is_file():
-        return {"title": held["title"], "body_file": str(out)}
+        return {"title": held["title"], "body_file": str(out), "issue": str(number)}
     found = issue_text(place, number)
     if found is None:
         return None
     title, body = found
     out.write_text(body, encoding="utf-8")
     plan_files.write_json(copy, {"title": title})
-    return {"title": title, "body_file": str(out)}
+    return {"title": title, "body_file": str(out), "issue": str(number)}
 
 
 def _branch_of(run: StageRun) -> Optional[str]:

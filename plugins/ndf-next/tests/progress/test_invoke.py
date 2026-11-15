@@ -254,7 +254,7 @@ def _stage_run_of(name: str, repo: Path, issues: list[int]) -> invoke.StageRun:
     ("name", "missing"),
     [
         ("design", {"title", "body_file", "worker", "rebuild", "required"}),
-        ("impl", {"title", "body_file", "test_command", "worker", "required"}),
+        ("impl", {"title", "body_file", "issue", "test_command", "worker", "required"}),
         ("design-merge", {"worker"}),
     ],
 )
@@ -363,7 +363,17 @@ def test_ci_only_declaration_builds_the_impl_plan_without_local_tests(tmp_path, 
     assert not {"test", "ci-local"} & set(ids)
     assert not any(s["run"][:3] == ["ndf", "route", "test"] for s in plan["steps"])
     by_id = {s["id"]: s for s in plan["steps"]}
-    assert ids[ids.index("work") + 1] == "push" and by_id["fix"]["next"] == "push" and by_id["ci-fix"]["next"] == "push"
+    assert ids[ids.index("work") + 1] == "acceptance" and ids[ids.index("acceptance") + 1] == "push"
+    assert by_id["fix"]["next"] == "push" and by_id["ci-fix"]["next"] == "push"
+
+
+def test_the_impl_plan_checks_the_acceptance_records_of_the_issue_after_the_worker(tmp_path, monkeypatch):
+    # #1682: 実装のプランは worker の後に、課題の受け入れ条件の確認の区分を照らす（記録の無い条件が残れば止まる）
+    plan, _, _, _ = _filled_plan(tmp_path, monkeypatch, "impl")
+    ids = [s["id"] for s in plan["steps"]]
+    check = next(s for s in plan["steps"] if s["id"] == "acceptance")
+    assert ids[ids.index("work") + 1] == "acceptance"
+    assert check["run"] == ["ndf", "loop", "acceptance", "check", "--issue", "3092"]
 
 
 def test_review_without_a_declaration_runs_cross_review_with_the_pr_made_before_the_step(tmp_path, monkeypatch):
