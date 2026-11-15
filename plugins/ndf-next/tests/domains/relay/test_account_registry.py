@@ -168,3 +168,76 @@ def test_cli_add_asks_for_the_code_and_refuses_bad_names(tmp_path, fake_claude, 
     got = _last(capsys)
     assert got["cause"]["kind"] == "input_missing" and got["items"][0]["url"].startswith("https://")
     account_login.discard_pending(tmp_path / "store", "work1")
+
+
+def test_list_rows_states_saved_metered_and_key_rows(tmp_path):
+    """現状固定（I-004）: アカウントの状態・保存した従量の宣言・API キーの行の形と並び。"""
+    _account(tmp_path, "a-relogin", needs_relogin=True, org_name="Org", capacity={"five_hour": 10, "seven_day": 0})
+    _account(tmp_path, "b-unknown")
+    _account(tmp_path, "c-limited")
+    (tmp_path / "d-noaccount").mkdir()  # account.json の無い置き場は並べない
+    reg.save_metered(tmp_path, "bedrock", {"AWS_REGION": "us-east-1"}, {"region": "us-east-1"}, 0.0)
+    book = {
+        "version": 1,
+        "use": "off",
+        "keys": {"k2": {"key": "sk-2", "account": "x"}, "k1": {"key": "sk-1", "monthly_usd": 0}, "k3": "not a dict"},
+    }
+    reg.write(reg.book_path(tmp_path), book)
+    usage = [account_decide.Usage(name="c-limited", percent=100.0, limited=True), account_decide.Usage(name="a-relogin", percent=5.0, limited=False)]
+    rows, warnings = reg.list_rows(tmp_path, {}, None, usage)
+    assert warnings == []
+    assert rows == [
+        {
+            "name": "a-relogin",
+            "kind": "oauth",
+            "email": "a-relogin@example.com",
+            "org_name": "Org",
+            "pinned": False,
+            "percent": 5.0,
+            "capacity_declared": {"five_hour": 10.0, "seven_day": None},
+            "state": "再登録が要る",
+        },
+        {
+            "name": "b-unknown",
+            "kind": "oauth",
+            "email": "b-unknown@example.com",
+            "org_name": None,
+            "pinned": False,
+            "percent": None,
+            "capacity_declared": {"five_hour": None, "seven_day": None},
+            "state": "残量不明",
+        },
+        {
+            "name": "c-limited",
+            "kind": "oauth",
+            "email": "c-limited@example.com",
+            "org_name": None,
+            "pinned": False,
+            "percent": 100.0,
+            "capacity_declared": {"five_hour": None, "seven_day": None},
+            "state": "上限",
+        },
+        {
+            "name": "metered",
+            "kind": "metered",
+            "source": "saved",
+            "provider": "bedrock",
+            "details": {"region": "us-east-1"},
+            "state": "保存した宣言",
+        },
+        {"name": "k1", "kind": "api_key", "account": None, "monthly_usd": None, "state": "月の額が未宣言"},
+        {"name": "k2", "kind": "api_key", "account": "x", "monthly_usd": None, "state": "月の額が未宣言"},
+    ]
+
+
+def test_list_rows_broken_metered_broken_book_and_empty_env(tmp_path):
+    """現状固定（I-004）: 壊れた保存の宣言・壊れた登録簿・空の環境変数の宣言。"""
+    reg.make_store(tmp_path)
+    reg.metered_path(tmp_path).write_text("[]")
+    reg.book_path(tmp_path).write_text('{"keys": []}')
+    rows, warnings = reg.list_rows(tmp_path, {}, None, [])
+    assert rows == [{"name": "metered", "kind": "metered", "source": "saved", "state": "壊れている（宣言なしとして扱う）"}]
+    assert len(warnings) == 1 and warnings[0].endswith("（API キーを使わずに動く）")
+    rows, _ = reg.list_rows(tmp_path, {"NDF_SUPERVISE_CLAUDE_FALLBACK": ""}, None, [])
+    assert rows == []
+    assert reg.list_rows(tmp_path / "none", {}, "x", []) == ([], [])
