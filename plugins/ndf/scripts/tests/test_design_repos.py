@@ -184,6 +184,17 @@ def test_loss_with_redline_row_is_routed():
 
 
 def test_loss_rows_split_none_and_empty():
+    import md
+
+    text = doc(rows=LOSS.replace("| 無し（今と同じ） |", "|  |"))
+    table = dr._behavior_table(text, md.section_named(text, "代表のリポジトリでの振る舞い"))
+    lost, empty = dr._loss_rows(table)
+    lines = text.splitlines()
+    assert [lines[i].split("|")[1].strip() for i in lost] == ["Web サービス・設定なし（carmo）"]
+    assert [lines[i].split("|")[1].strip() for i in empty] == ["業務文書だけ"]
+
+
+def test_check_repos_splits_loss_and_empty_findings():
     text = doc(rows=LOSS.replace("| 無し（今と同じ） |", "|  |"))
     got = dr.check_repos("d.md", text, S, set())
     lines = text.splitlines()
