@@ -1,6 +1,6 @@
 """1 スプリントのレーンの設計承認の依頼（#3603）: 区分 `ndf-gate:1` の問いから設計承認の依頼の中身を組み、その答えをスプリント状態へ書く。
 
-- `design_gate`: `parallel.py request-ask` の送り分け（`parallel_ask.route`）が呼ぶ。問いの最初の問いの文の承認の行（`承認: #<番号>`）がちょうど 1 行で、その番号が
+- `design_gate`: `parallel.py request-ask` の送り分け（`parallel_ask.route_ask`）が呼ぶ。問いの最初の問いの文の承認の行（`承認: #<番号>`）がちょうど 1 行で、その番号が
   レーンのスプリントで承認ゲートで終わった設計のプランの設計 PR で、PR が開いていて先頭を読めたときだけ中身を返す（I1・決定 2・3）。
   ほかは None（今どおり `kind: ask` で送る）
 - `answer_design`: `parallel.py design-answer` が呼ぶ。起き直したレーンが、答えを読み、利用者が設計承認ゲートで答えたときと同じ記録を

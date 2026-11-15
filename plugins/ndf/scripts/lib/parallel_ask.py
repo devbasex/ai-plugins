@@ -88,7 +88,7 @@ class Routed:
     sent: Optional[plg.Sent] = None
 
 
-def route(main: Path, name: str, lane: str, got: dict, rows: list[dict]) -> Routed:
+def route_ask(main: Path, name: str, lane: str, got: dict, rows: list[dict]) -> Routed:
     """問いを 3 つの分岐の最初に当たったものへ送る。台帳へ書けなければ `OSError`（呼び出し元が 2 で終える）。"""
     import parallel_design_gate as pdg
 
