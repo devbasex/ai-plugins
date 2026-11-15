@@ -32,10 +32,8 @@ from typing import NamedTuple
 
 from ndf.adapters import ci
 from ndf.adapters.github import MERGE_COMMIT, MERGE_QUEUE_PENDING, GitHub, GitHubError, MergeOutcome, Pull
-from ndf.domains.release import merge_decide, release_plan, trail
-
-# 必須のチェックの解決は `required_checks` が持つ（`land.Required` は従来の import 先として残す）
-from ndf.domains.release.required_checks import NOT_FOUND, Required, RequiredChecks, from_sources
+from ndf.domains.release import merge_decide, release_plan, required_checks, trail
+from ndf.domains.release.required_checks import NOT_FOUND, RequiredChecks, from_sources
 
 # 本番の PR と版上げの PR のマージの方式。版上げのコミットの起点と範囲（版上げの PR の第 2 親）を保つため merge commit に限る
 # （squash・rebase では範囲の PR が読めなくなる）。許されていなければ GitHub へ送らずに止まる
@@ -149,7 +147,7 @@ class Lander:
         """必須のチェックの解決とチェックの実行の読み（`required_checks.RequiredChecks`。状態を持たない）。"""
         return RequiredChecks(self.hub)
 
-    def required(self, branch: str) -> Required:
+    def required(self, branch: str) -> required_checks.Required:
         """宛先のブランチの規則（ruleset。全ページ）と従来の保護の必須のチェック（承認の commit status を除く）。"""
         return self._checks.required(branch)
 

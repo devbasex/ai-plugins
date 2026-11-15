@@ -13,7 +13,7 @@ from typing import Any
 
 from ndf.adapters import ci
 from ndf.adapters.github import Authored, GitHubError, MergeOutcome
-from ndf.domains.release import approval_decide, declaration, land, merge_decide, trail
+from ndf.domains.release import approval_decide, declaration, land, merge_decide, required_checks, trail
 from ndf.domains.release import cli as release_cli
 
 from ._fakes import HEAD, OTHER, FakeHub, ci_reading, not_found, pull, release_lander, trail_comment
@@ -169,7 +169,9 @@ def test_required_check_with_a_named_app_counts_only_that_app() -> None:
         "protection": {"required_status_checks": {"checks": [{"context": "build", "app_id": 7}, {"context": "lint", "app_id": -1}]}}
     }
     lander = land.Lander(hub, "main", 1.0)
-    assert lander.required("main") == land.Required(["build", "lint", "pytest"], {"pytest": frozenset({15368}), "build": frozenset({7})})
+    assert lander.required("main") == required_checks.Required(
+        ["build", "lint", "pytest"], {"pytest": frozenset({15368}), "build": frozenset({7})}
+    )
     runs = [_run("pytest", 999, 1), _run("build", 7, 2), _run("lint", 42, 3)]
     hub.status_list = [_status("pytest", "someone", 4)]
     readers: list[Callable[[], ci.Reading]] = []
