@@ -69,6 +69,17 @@ def _review_count(raw: dict) -> int:
     return value if isinstance(value, int) else 0
 
 
+def _failed_listing(failed: tuple[ci.Check, ...]) -> str:
+    """止まった理由の文に添える落ちたチェックの並び（無ければ空）。"""
+    names = "、".join(c.name for c in failed)
+    return f"。落ちたチェック: {names}" if names else ""
+
+
+def _sha_or_none(sha: str | None) -> str | None:
+    """マージコミットの SHA（空なら None）。"""
+    return sha if sha else None
+
+
 def _judged_refusal(pull: Pull, got: trail.Read, moved: str, unapproved: str) -> Landed | None:
     """読み直した証跡 `got` の先端が `pull` から動いていれば `moved`、承認されていなければ `unapproved` で止まった結果
     （どちらでもなければ None）。"""
@@ -188,9 +199,7 @@ class Lander:
             return refused
         kind, failed = self._watch(pull, deadline)
         if kind is not None:
-            names = "、".join(c.name for c in failed)
-            listed = f"。落ちたチェック: {names}" if names else ""
-            detail = f"#{pull.number} の必須のチェックが通らない（{kind}。コードを直さずに止まる{listed}）"
+            detail = f"#{pull.number} の必須のチェックが通らない（{kind}。コードを直さずに止まる{_failed_listing(failed)}）"
             return Landed(False, kind, detail, failed=failed)
         return self._refusal(pull, bypass)
 
@@ -272,7 +281,7 @@ class Lander:
     def _released(self, pull: Pull, done: Landed) -> Landed:
         """本番ブランチへ入れた結果に、マージコミットと承認（人のマージなら記録も）を足す。版は CD が決める（決定 7）。"""
         merged_sha = self.hub.pull(pull.number).merge_sha
-        done = done._replace(production_sha=merged_sha if merged_sha else None)
+        done = done._replace(production_sha=_sha_or_none(merged_sha))
         approval = self._approval(pull.number)
         return self._record_merge(pull.number, done, approval) if approval is not None else done
 
@@ -319,7 +328,7 @@ class Lander:
         deadline = self.clock() + self.budget
         pull = self.hub.pull(number)
         if pull.merged:
-            return Landed(True, None, f"#{number} は既にマージされている", production_sha=pull.merge_sha if pull.merge_sha else None)
+            return Landed(True, None, f"#{number} は既にマージされている", production_sha=_sha_or_none(pull.merge_sha))
         outside = allowed(pull)
         if outside:
             return Landed(False, "refused", f"#{number} の差分が版のファイルと CHANGELOG の外に及ぶ: {', '.join(outside)}")
@@ -332,11 +341,9 @@ class Lander:
             )
         kind, failed = self._watch(pull, deadline)
         if kind is not None:
-            names = "、".join(c.name for c in failed)
-            listed = f"。落ちたチェック: {names}" if names else ""
-            return Landed(False, kind, f"#{number} の必須のチェックが通らない（{kind}{listed}）", failed=failed)
+            return Landed(False, kind, f"#{number} の必須のチェックが通らない（{kind}{_failed_listing(failed)}）", failed=failed)
         outcome = self.hub.merge_as_admin(number, expect_head=pull.head_sha, method=MERGE_METHOD)
         if not outcome.merged:
             return Landed(False, outcome.kind, outcome.detail)
         merged_sha = self.hub.pull(number).merge_sha
-        return Landed(True, None, f"#{number} を迂回でマージした", production_sha=merged_sha if merged_sha else None, admin=True)
+        return Landed(True, None, f"#{number} を迂回でマージした", production_sha=_sha_or_none(merged_sha), admin=True)
