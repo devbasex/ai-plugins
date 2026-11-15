@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "lanes.result.schema.json",
   "title": "ndf lanes の結果 JSON",
-  "description": "ndf lanes が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果の契約（result.schema.json）が持ち、ここは metrics と items の形だけを足す。載せた項目のほかの項目は受け流す",
+  "description": "ndf lanes が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果の契約（result.schema.json）が持ち、ここは metrics と items の形だけを足す。metrics と items の要素は閉じていて、載せた項目のほかの項目を持つと通らない",
   "allOf": [
     {
       "$ref": "../result.schema.json"
@@ -15,14 +15,279 @@
     "metrics": {
       "type": "object",
       "description": "ndf lanes の計測値",
-      "properties": {}
+      "additionalProperties": false,
+      "properties": {
+        "plan_id": {
+          "type": "string",
+          "description": "計画の進行表の ID（init・start・status）"
+        },
+        "plan": {
+          "type": "string",
+          "description": "計画の名前（init・start・status）"
+        },
+        "state": {
+          "type": "string",
+          "description": "計画の状態（init・start・status・wait）"
+        },
+        "run_pid": {
+          "type": "integer",
+          "description": "切り離して起こした耐久ワークフローの pid（start）"
+        },
+        "lane_table_id": {
+          "type": "string",
+          "description": "足したレーンの進行表の ID（lane add）"
+        },
+        "changes": {
+          "type": "object",
+          "description": "変えた値（set・limits）"
+        },
+        "row": {
+          "type": "string",
+          "description": "行の鍵（move・row add・row move・row cancel・row carry・row start）"
+        },
+        "running": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "実行中のスプリントの ID（stop）"
+        },
+        "request": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "依頼の鍵（request close・question）"
+        },
+        "opened": {
+          "type": "boolean",
+          "description": "問いを新しく載せたか（question）"
+        },
+        "requests": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "答えを記録した依頼の鍵（release）"
+        },
+        "result": {
+          "type": "string",
+          "description": "まとめたリリースの答え（release）"
+        },
+        "seq": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "載せた事象の番号（answered・row resumed）"
+        },
+        "sprint_id": {
+          "type": "string",
+          "description": "実行中にしたスプリントの ID（row start）"
+        },
+        "next_row": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "description": "次に起こす行（row end）"
+        },
+        "max_lanes": {
+          "type": "integer",
+          "description": "レーンの数の上限（status）"
+        },
+        "max_plans": {
+          "type": "integer",
+          "description": "1 レーンのプランの本数の上限（status）"
+        },
+        "wakeable": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "description": "起こせるレーンと行（status）"
+        },
+        "open_requests": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          },
+          "description": "開いている依頼（status）"
+        },
+        "closed_requests": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          },
+          "description": "閉じた依頼と答え（status）"
+        },
+        "complete": {
+          "type": "boolean",
+          "description": "計画が終わったか（status）"
+        },
+        "stalled": {
+          "type": "integer",
+          "description": "止まりの数（status）"
+        },
+        "releases": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "description": "リリースの答え → 依頼の数（status）"
+        },
+        "outcome": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "耐久ワークフローの終わり方（run）"
+        },
+        "launched": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "起こした起動の鍵（run）"
+        },
+        "failed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "起こせなかった起動の鍵（run）"
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "耐久ワークフローの誤り（run）"
+        },
+        "last_seq": {
+          "type": "integer",
+          "description": "読んだ最後の事象の番号（wait）"
+        },
+        "stalls": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "止まりの鍵 <レーン>/<行>（wait）"
+        },
+        "new_stalls": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "新しい止まりの鍵（wait）"
+        },
+        "current_id": {
+          "type": "string",
+          "description": "既にある進行表の ID（refused で止まったときだけ）"
+        }
+      }
     },
     "items": {
       "type": "array",
       "description": "ndf lanes の項目の並び",
       "items": {
         "type": "object",
-        "properties": {}
+        "additionalProperties": false,
+        "properties": {
+          "lane": {
+            "type": "string",
+            "description": "レーンの名前（status）"
+          },
+          "state": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "レーンの状態（status）か事象の後の状態（wait）"
+          },
+          "after": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "先に終わるレーン（status）"
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            },
+            "description": "レーンの行（status）"
+          },
+          "liveness": {
+            "type": "object",
+            "description": "実行中の行の生死（status。生死を読んだときだけ）"
+          },
+          "machine_wait": {
+            "type": "object",
+            "description": "マシンのプランの本数の上限の待ち（status。待つときだけ）"
+          },
+          "sprint_id": {
+            "type": "string",
+            "description": "実行中のスプリントの ID（stop）"
+          },
+          "next": {
+            "type": "object",
+            "description": "スプリントを止めるコマンド（stop --now）"
+          },
+          "path": {
+            "type": "string",
+            "description": "進行表の置き場のパス（置き場を使えずに止まったとき）"
+          },
+          "seq": {
+            "type": "integer",
+            "description": "事象の番号（wait）"
+          },
+          "at": {
+            "type": "string",
+            "description": "事象を書いた時刻（wait）"
+          },
+          "rev": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "スプリントの定義の改訂（wait）"
+          },
+          "row_key": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "事象の行（wait）"
+          },
+          "kind": {
+            "type": "string",
+            "description": "事象の種類（wait）"
+          },
+          "actor": {
+            "type": "string",
+            "description": "事象を書いた担い手（wait）"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "事象の理由（wait）"
+          },
+          "payload": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "事象の中身（wait）"
+          }
+        }
       }
     }
   }

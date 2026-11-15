@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "issues.result.schema.json",
   "title": "ndf issues の結果 JSON",
-  "description": "ndf issues が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果の契約（result.schema.json）が持ち、ここは metrics と items の形だけを足す。載せた項目のほかの項目は受け流す",
+  "description": "ndf issues が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果の契約（result.schema.json）が持ち、ここは metrics と items の形だけを足す。metrics と items の要素は閉じていて、載せた項目のほかの項目を持つと通らない",
   "allOf": [
     {
       "$ref": "../result.schema.json"
@@ -15,12 +15,276 @@
     "metrics": {
       "type": "object",
       "description": "ndf issues の計測値",
+      "additionalProperties": false,
       "properties": {
+        "repo": {
+          "type": "string",
+          "description": "対象のリポジトリ（candidates・rank・apply・settle）"
+        },
+        "open": {
+          "type": "integer",
+          "description": "open の課題の数（candidates）"
+        },
+        "candidates": {
+          "type": "integer",
+          "description": "候補の数（candidates）"
+        },
+        "limit": {
+          "type": "integer",
+          "description": "候補の上限（candidates）"
+        },
         "depth": {
-          "description": "コードが出す項目 depth（値の無い経路では null）"
+          "type": "string",
+          "description": "深さ（candidates・rank・depth-limits・depth-record・due）"
+        },
+        "since_ref": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "差分の起点（candidates）"
+        },
+        "deferred": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "上限を超えて持ち越した課題（candidates）"
+        },
+        "carry": {
+          "type": "integer",
+          "description": "見直しの起動の材料にする持ち越しの数（candidates）"
+        },
+        "deferred_unscored": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "見積の欠けか経路 all だけで持ち越した課題（candidates）"
+        },
+        "carried": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "前回から持ち越して open のままの課題（candidates）"
+        },
+        "by_route": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "description": "経路 → 候補の数（candidates）"
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "収集の注記（candidates）"
+        },
+        "order": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "着手の順のマイルストーンの題（rank）"
+        },
+        "forward": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          },
+          "description": "前倒しの候補（rank）"
+        },
+        "backward": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          },
+          "description": "後ろ倒しの候補（rank）"
+        },
+        "dropped": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          },
+          "description": "却下で外した候補（rank）"
+        },
+        "rejected_stale": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          },
+          "description": "古い却下（rank）"
+        },
+        "excluded": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          },
+          "description": "見積から外した課題と理由（rank）"
+        },
+        "sized": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "見積もりの記録から Size を決めた課題（rank）"
+        },
+        "digest": {
+          "type": "string",
+          "description": "metrics と表を合わせた要約値。plan が照らす（rank）"
+        },
+        "applied": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "判定を反映した課題（apply）"
+        },
+        "unchanged": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "変える内容が無かった課題（apply）"
+        },
+        "already": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "前の打ち直しで反映済みの課題（apply）"
+        },
+        "skipped_changed": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "plan の後に書き換わって飛ばした課題（apply）"
+        },
+        "needs_approval": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "承認待ちの課題（apply）"
+        },
+        "returned": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "人へ返した課題（apply）"
+        },
+        "closed": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "閉じた課題（apply）"
+        },
+        "created": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          },
+          "description": "起票した課題（apply）"
+        },
+        "create_rejected": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          },
+          "description": "形が違って起票しなかった項目（apply）"
+        },
+        "moved": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "マイルストーンを移した課題（apply）"
+        },
+        "held": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "承認を待つ移動の課題（apply）"
+        },
+        "reparented": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "親を付け直した課題（apply）"
+        },
+        "failed": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          },
+          "description": "失敗した行（apply・revert）"
+        },
+        "before": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "付け直しの前の状態のパス（apply）"
+        },
+        "tables": {
+          "type": "object",
+          "description": "順位の表の書き込みの結果（apply）"
+        },
+        "next_steps": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "次にすること（apply が gate で返すときだけ）"
+        },
+        "reverted": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "親を戻した課題（revert）"
         },
         "seconds": {
-          "description": "コードが出す項目 seconds（値の無い経路では null）"
+          "type": "number",
+          "description": "深さの 1 回の秒の上限（depth-limits）"
+        },
+        "at": {
+          "type": "string",
+          "description": "記録した時刻（depth-record）"
+        },
+        "event": {
+          "type": "string",
+          "description": "記録した事象（depth-record）"
+        },
+        "left": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "打ち切りで残った課題（depth-record）"
+        },
+        "trigger": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "起動する理由（due）"
+        },
+        "values": {
+          "type": "object",
+          "description": "起動の判定に使った値（due）"
+        },
+        "base": {
+          "type": "string",
+          "description": "基底のブランチ（settle）"
         }
       }
     },
@@ -29,7 +293,108 @@
       "description": "ndf issues の項目の並び",
       "items": {
         "type": "object",
-        "properties": {}
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "issue",
+            "description": "項目の種類（candidates・apply・settle）"
+          },
+          "name": {
+            "type": "string",
+            "description": "課題の名前（#<番号>）"
+          },
+          "result": {
+            "type": "string",
+            "description": "候補か、反映・閉じる操作の区分"
+          },
+          "number": {
+            "type": "integer",
+            "description": "課題の番号"
+          },
+          "title": {
+            "type": "string",
+            "description": "課題（candidates）かマイルストーン（rank）の題"
+          },
+          "routes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "候補に入った経路（candidates）"
+          },
+          "updated_at": {
+            "type": "string",
+            "description": "課題の更新の時刻（candidates）"
+          },
+          "digest": {
+            "type": "string",
+            "description": "課題の要約値（candidates）"
+          },
+          "order": {
+            "type": "integer",
+            "description": "マイルストーンの着手の順（rank）"
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            },
+            "description": "マイルストーンの順位の行（rank）"
+          },
+          "large_slot": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "大きい課題の枠（rank）"
+          },
+          "boundary": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "切り出しの境界（rank）"
+          },
+          "over_scale": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            },
+            "description": "尺度を超えた課題（rank）"
+          },
+          "quality_slot": {
+            "type": "object",
+            "description": "品質の枠（rank。枠があるときだけ）"
+          },
+          "verdict": {
+            "type": "string",
+            "description": "plan の判定（apply）"
+          },
+          "reason": {
+            "type": "string",
+            "description": "反映の中身か、閉じられない理由（apply・settle）"
+          },
+          "error": {
+            "type": "string",
+            "description": "失敗の理由（revert）"
+          },
+          "index": {
+            "type": "integer",
+            "description": "形の違う入力の位置（settle）"
+          },
+          "issue": {
+            "description": "閉じる課題の番号（settle。形の違う入力では入力の値のまま）"
+          },
+          "child": {
+            "type": "string",
+            "description": "解消した子の課題（settle）"
+          },
+          "evidence": {
+            "type": "string",
+            "description": "証拠の種類（settle）"
+          }
+        }
       }
     }
   }

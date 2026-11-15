@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "relay.result.schema.json",
   "title": "ndf relay の結果 JSON",
-  "description": "ndf relay が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果の契約（result.schema.json）が持ち、ここは metrics と items の形だけを足す。載せた項目のほかの項目は受け流す",
+  "description": "ndf relay が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果の契約（result.schema.json）が持ち、ここは metrics と items の形だけを足す。metrics と items の要素は閉じていて、載せた項目のほかの項目を持つと通らない",
   "allOf": [
     {
       "$ref": "../result.schema.json"
@@ -15,6 +15,7 @@
     "metrics": {
       "type": "object",
       "description": "ndf relay の計測値",
+      "additionalProperties": false,
       "properties": {}
     },
     "items": {
@@ -22,16 +23,116 @@
       "description": "ndf relay の項目の並び",
       "items": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {
-          "account": {
-            "description": "コードが出す項目 account（値の無い経路では null）"
-          },
           "path": {
-            "description": "コードが出す項目 path（値の無い経路では null）",
+            "type": "string",
+            "description": "複製・エントリポイント・中継の印のパス（install・mark）"
+          },
+          "state": {
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "複製・エントリポイントの状態（install）か、ラッパーの状態（hub ls）"
+          },
+          "account": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "選ばれるアカウント（account）か、次に使うアカウント（decide）"
+          },
+          "kind": {
+            "type": "string",
+            "description": "次の手の種類（decide）か、待ちを抱えた実行の種類（pending）"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "次の手の理由（decide）か、ラッパーの状態の理由（hub ls）"
+          },
+          "prompt": {
+            "type": "string",
+            "description": "子へ送る 1 行（decide）"
+          },
+          "name": {
+            "type": "string",
+            "description": "名前つきのラッパー（hub）"
+          },
+          "running": {
+            "type": "boolean",
+            "description": "ラッパーが動いているか（hub ls）"
+          },
+          "cwd": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "ラッパーの作業場所（hub ls）"
+          },
+          "args": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "ラッパーへ渡す引数（hub ls）"
+          },
+          "role": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "ラッパーの役（hub ls）"
+          },
+          "plan": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "ラッパーの計画（hub ls）"
+          },
+          "starts": {
+            "type": "object",
+            "description": "その日の起動の回数（hub ls）"
+          },
+          "version": {
+            "type": "string",
+            "description": "ラッパーを起こしたプラグインの版（hub ls）"
+          },
+          "pending": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "description": "止める前に待ちを抱えていた実行（hub restart。読めなければ null）"
+          },
+          "run": {
+            "type": "string",
+            "description": "実行の名前（pending）か回の ID（next）"
+          },
+          "workflow": {
+            "type": "string",
+            "description": "耐久ワークフローの ID（pending）"
+          },
+          "status": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "耐久ワークフローの状態（pending）か、プランの終わり方（wait・queue。流れていれば null）"
+          },
+          "updated_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "最後に更新した時刻（pending）"
           }
         }
       }

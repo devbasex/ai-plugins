@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "training.result.schema.json",
   "title": "ndf training の結果 JSON",
-  "description": "ndf training が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果の契約（result.schema.json）が持ち、ここは metrics と items の形だけを足す。載せた項目のほかの項目は受け流す",
+  "description": "ndf training が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果の契約（result.schema.json）が持ち、ここは metrics と items の形だけを足す。metrics と items の要素は閉じていて、載せた項目のほかの項目を持つと通らない",
   "allOf": [
     {
       "$ref": "../result.schema.json"
@@ -15,6 +15,7 @@
     "metrics": {
       "type": "object",
       "description": "ndf training の計測値",
+      "additionalProperties": false,
       "properties": {}
     },
     "items": {
@@ -22,11 +23,34 @@
       "description": "ndf training の項目の並び",
       "items": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {
-          "args": {
-            "description": "コードが出す項目 args（値の無い経路では null）"
+          "runtime": {
+            "type": "string",
+            "description": "担当（claude・codex など）"
+          },
+          "training": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "学習に使う設定か（真なら使う。確かめられなければ null）"
+          },
+          "reason": {
+            "type": "string",
+            "description": "読んだ結果か、確かめられない理由"
+          },
+          "checked_at": {
+            "type": "string",
+            "description": "確かめた時刻（ISO 8601）"
           }
-        }
+        },
+        "required": [
+          "runtime",
+          "training",
+          "reason",
+          "checked_at"
+        ]
       }
     }
   }

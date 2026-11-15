@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "plan.result.schema.json",
   "title": "ndf plan の結果 JSON",
-  "description": "ndf plan が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果の契約（result.schema.json）が持ち、ここは metrics と items の形だけを足す。載せた項目のほかの項目は受け流す",
+  "description": "ndf plan が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果の契約（result.schema.json）が持ち、ここは metrics と items の形だけを足す。metrics と items の要素は閉じていて、載せた項目のほかの項目を持つと通らない",
   "allOf": [
     {
       "$ref": "../result.schema.json"
@@ -15,13 +15,43 @@
     "metrics": {
       "type": "object",
       "description": "ndf plan の計測値",
+      "additionalProperties": false,
       "properties": {
+        "round": {
+          "type": "integer",
+          "description": "回の番号（next）"
+        },
+        "steps": {
+          "type": "integer",
+          "description": "流したステップの数（next）"
+        },
+        "plans": {
+          "type": "integer",
+          "description": "プランの数（wait・queue・check）"
+        },
+        "stopped": {
+          "type": "integer",
+          "description": "止まったプランの数（wait）"
+        },
+        "gates": {
+          "type": "integer",
+          "description": "承認ゲートで待つプランの数（wait）"
+        },
         "waited_seconds": {
-          "description": "コードが出す項目 waited_seconds（値の無い経路では null）",
-          "type": [
-            "number",
-            "null"
-          ]
+          "type": "number",
+          "description": "待った秒（wait が上限に当たったとき）"
+        },
+        "ok": {
+          "type": "integer",
+          "description": "終わったプランの数（queue）"
+        },
+        "pending": {
+          "type": "integer",
+          "description": "待ちを抱えた実行の数（pending）"
+        },
+        "waves": {
+          "type": "integer",
+          "description": "同時に流せる組の数（check）"
         }
       }
     },
@@ -30,7 +60,92 @@
       "description": "ndf plan の項目の並び",
       "items": {
         "type": "object",
-        "properties": {}
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "plan",
+              "pr",
+              "run",
+              "wave",
+              "violation",
+              "path"
+            ],
+            "description": "項目の種類"
+          },
+          "name": {
+            "type": "string",
+            "description": "プランの名前（plan）"
+          },
+          "step": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "止まったか承認を待つステップ（plan）"
+          },
+          "gate": {
+            "type": "boolean",
+            "description": "承認の答えを待つか（plan）"
+          },
+          "detail": {
+            "type": "string",
+            "description": "プランの結果の要約（queue の plan）"
+          },
+          "cause": {
+            "type": "object",
+            "description": "止まった理由（wait の plan）"
+          },
+          "routes": {
+            "type": "object",
+            "description": "答えごとのコマンド（wait・queue の plan）"
+          },
+          "number": {
+            "type": "integer",
+            "description": "PR の番号（pr）"
+          },
+          "run": {
+            "type": "string",
+            "description": "実行の名前（pending）か回の ID（next）"
+          },
+          "workflow": {
+            "type": "string",
+            "description": "耐久ワークフローの ID（pending）"
+          },
+          "status": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "耐久ワークフローの状態（pending）か、プランの終わり方（wait・queue。流れていれば null）"
+          },
+          "updated_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "最後に更新した時刻（pending）"
+          },
+          "plans": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "同時に流せるプラン（wave）"
+          },
+          "reason": {
+            "type": "string",
+            "description": "プランの誤り（violation）"
+          },
+          "path": {
+            "type": "string",
+            "description": "置き場のパス（path）"
+          }
+        },
+        "required": [
+          "kind"
+        ]
       }
     }
   }

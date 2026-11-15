@@ -13,6 +13,7 @@ import pytest
 
 from ndf import cli
 from ndf.adapters import training
+from ndf.checks import spec_model
 from ndf.domains.release import verify
 
 # 副命令の名前 → ok を出す引数（どれもプラグインの実物を読むだけで、書き換えない）
@@ -62,3 +63,17 @@ def test_training_check_ok_output(tmp_path, monkeypatch, capsys, last_result):
     client = httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(200, json={"grove_enabled": False})))
     monkeypatch.setattr(training.httpx, "Client", lambda: client)
     _ok(["training", "check", "--runtime", "claude"], capsys, last_result)
+
+
+# 結果のスキーマに無い項目の名前（どの副命令の書き手も出さない）
+UNKNOWN_KEY = "not_in_schema"
+
+
+@pytest.mark.parametrize("name", sorted(cli.COMMANDS))
+def test_result_schema_rejects_unknown_metrics_and_items(name):
+    """結果のスキーマは metrics と items の要素を閉じる。載せていない項目を出す書き手は、出力の確かめで落ちる。"""
+    validator = spec_model.result_validator(name)
+    assert validator is not None
+    for part, value in (("metrics", {UNKNOWN_KEY: 1}), ("items", [{UNKNOWN_KEY: 1}])):
+        errors = list(validator.iter_errors({"tool": name, part: value}))
+        assert any(UNKNOWN_KEY in e.message for e in errors), (name, part)

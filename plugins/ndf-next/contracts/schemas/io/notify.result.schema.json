@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "notify.result.schema.json",
   "title": "ndf notify の結果 JSON",
-  "description": "ndf notify が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果の契約（result.schema.json）が持ち、ここは metrics と items の形だけを足す。載せた項目のほかの項目は受け流す",
+  "description": "ndf notify が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果の契約（result.schema.json）が持ち、ここは metrics と items の形だけを足す。metrics と items の要素は閉じていて、載せた項目のほかの項目を持つと通らない",
   "allOf": [
     {
       "$ref": "../result.schema.json"
@@ -15,18 +15,41 @@
     "metrics": {
       "type": "object",
       "description": "ndf notify の計測値",
-      "properties": {}
+      "additionalProperties": false,
+      "properties": {
+        "sent": {
+          "type": "integer",
+          "description": "送った件数"
+        },
+        "duplicate": {
+          "type": "integer",
+          "description": "送り済みで飛ばした件数"
+        },
+        "stale": {
+          "type": "integer",
+          "description": "古くて送らずに消した件数"
+        },
+        "unconfigured": {
+          "type": "integer",
+          "description": "送り先の設定が無く送らなかった件数"
+        },
+        "failed": {
+          "type": "integer",
+          "description": "送れなかった件数"
+        },
+        "left": {
+          "type": "integer",
+          "description": "送信待ちに残した件数"
+        }
+      }
     },
     "items": {
       "type": "array",
       "description": "ndf notify の項目の並び",
       "items": {
         "type": "object",
-        "properties": {
-          "args": {
-            "description": "コードが出す項目 args（値の無い経路では null）"
-          }
-        }
+        "additionalProperties": false,
+        "properties": {}
       }
     }
   }

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "cross-review.result.schema.json",
   "title": "ndf cross-review の結果 JSON",
-  "description": "ndf cross-review が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果の契約（result.schema.json）が持ち、ここは metrics と items の形だけを足す。載せた項目のほかの項目は受け流す",
+  "description": "ndf cross-review が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果の契約（result.schema.json）が持ち、ここは metrics と items の形だけを足す。metrics と items の要素は閉じていて、載せた項目のほかの項目を持つと通らない",
   "allOf": [
     {
       "$ref": "../result.schema.json"
@@ -15,32 +15,155 @@
     "metrics": {
       "type": "object",
       "description": "ndf cross-review の計測値",
-      "properties": {}
+      "additionalProperties": false,
+      "properties": {
+        "rounds": {
+          "type": "integer",
+          "description": "終えたラウンドの数（run）"
+        },
+        "findings": {
+          "type": "integer",
+          "description": "指摘の数（run）"
+        }
+      }
     },
     "items": {
       "type": "array",
       "description": "ndf cross-review の項目の並び",
       "items": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {
           "kind": {
-            "description": "コードが出す項目 kind（値の無い経路では null）",
+            "type": "string",
+            "enum": [
+              "repo",
+              "pr",
+              "worktree",
+              "sync",
+              "push",
+              "state",
+              "fix_result",
+              "ingest",
+              "scope",
+              "finding"
+            ],
+            "description": "項目の種類"
+          },
+          "slug": {
+            "type": "string",
+            "description": "対象のリポジトリ <所有者>/<名前>（repo）"
+          },
+          "source": {
+            "type": "string",
+            "description": "リポジトリを決めた出所（repo）"
+          },
+          "number": {
+            "type": "integer",
+            "description": "PR の番号（pr）"
+          },
+          "head": {
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "PR の head の SHA（pr）か、送った HEAD（push。送れなければ null）"
+          },
+          "branch": {
+            "type": "string",
+            "description": "PR の head のブランチ（pr）"
           },
           "path": {
-            "description": "コードが出す項目 path（値の無い経路では null）"
+            "type": "string",
+            "description": "worktree・状態ファイル・結果ファイルのパス"
           },
           "points_to": {
-            "description": "コードが出す項目 points_to（値の無い経路では null）",
+            "type": "string",
+            "description": "管理情報の無い worktree が指す先（worktree）"
+          },
+          "locked": {
+            "type": "string",
+            "description": "lock の理由（worktree）"
+          },
+          "before": {
+            "type": "string",
+            "description": "同期の前の HEAD（sync）"
+          },
+          "after": {
+            "type": "string",
+            "description": "同期の後の HEAD（sync）"
+          },
+          "replayed": {
+            "type": "integer",
+            "description": "載せ直したコミットの数（sync）"
+          },
+          "conflicts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "衝突したファイル（sync・push）"
+          },
+          "ok": {
+            "type": "boolean",
+            "description": "送れたか（push）"
+          },
+          "rebased": {
+            "type": "boolean",
+            "description": "取り込んだか（push）"
+          },
+          "origin_head": {
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "取り込んだ origin の先頭（push）"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "送れなかった理由（push）"
+          },
+          "origin_pr": {
+            "type": "integer",
+            "description": "元の PR の番号（state）"
+          },
+          "current_pr": {
+            "type": "integer",
+            "description": "今の PR の番号（state）"
+          },
+          "scope": {
+            "type": "string",
+            "description": "ラウンドの範囲の種類（scope）"
+          },
+          "base": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "差分の起点（scope）"
+          },
+          "unreviewed": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "詳細レビューを通らない節（scope）"
+          },
+          "id": {
+            "type": "string",
+            "description": "指摘の id（finding）"
+          },
+          "outcome": {
+            "type": "string",
+            "description": "指摘の扱い（finding）"
           }
-        }
+        },
+        "required": [
+          "kind"
+        ]
       }
     }
   }

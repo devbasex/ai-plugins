@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "refactor.result.schema.json",
   "title": "ndf refactor の結果 JSON",
-  "description": "ndf refactor が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果の契約（result.schema.json）が持ち、ここは metrics と items の形だけを足す。載せた項目のほかの項目は受け流す",
+  "description": "ndf refactor が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果の契約（result.schema.json）が持ち、ここは metrics と items の形だけを足す。metrics と items の要素は閉じていて、載せた項目のほかの項目を持つと通らない",
   "allOf": [
     {
       "$ref": "../result.schema.json"
@@ -15,14 +15,301 @@
     "metrics": {
       "type": "object",
       "description": "ndf refactor の計測値",
-      "properties": {}
+      "additionalProperties": false,
+      "properties": {
+        "symbols": {
+          "type": "integer",
+          "description": "触る関数の数（touched）"
+        },
+        "whole_files": {
+          "type": "integer",
+          "description": "ファイル単位で触るファイルの数（touched）"
+        },
+        "scope_tests": {
+          "type": "integer",
+          "description": "範囲テストのファイルの数（touched）"
+        },
+        "files": {
+          "type": "integer",
+          "description": "範囲テストのファイルの数（tests）"
+        },
+        "unmapped": {
+          "type": "integer",
+          "description": "対応するテストの無いソースの数（tests）"
+        },
+        "unreadable": {
+          "type": "integer",
+          "description": "読めなかったソースの数（tests）"
+        },
+        "collected": {
+          "type": "integer",
+          "description": "全体の実行に収集されるテストのファイルの数（collected）"
+        },
+        "uncollected": {
+          "type": "integer",
+          "description": "収集されないテストのファイルの数（collected）"
+        },
+        "undecided": {
+          "type": "integer",
+          "description": "判定できないテストのファイルの数（collected）"
+        },
+        "open": {
+          "type": "integer",
+          "description": "未着手の項目の数（state・run）"
+        },
+        "adopted": {
+          "type": "integer",
+          "description": "採った項目の数（state・run）"
+        },
+        "reverted": {
+          "type": "integer",
+          "description": "戻した項目の数（state・run）"
+        },
+        "deferred": {
+          "type": "integer",
+          "description": "見送った項目の数（state・run）"
+        },
+        "paths": {
+          "type": "integer",
+          "description": "範囲の数（scope-args）"
+        },
+        "kept": {
+          "type": "integer",
+          "description": "残した作業場所の数（release）"
+        },
+        "swept": {
+          "type": "integer",
+          "description": "片付けた持ち主のいない lock の数（release）"
+        },
+        "items": {
+          "type": "integer",
+          "description": "項目の数（run）"
+        },
+        "skipped": {
+          "type": "integer",
+          "description": "範囲外か予算で見送った提案の数（run）"
+        },
+        "fix_rounds": {
+          "type": "integer",
+          "description": "直しのラウンドの数（run）"
+        },
+        "budget_minutes": {
+          "type": "number",
+          "description": "予算の分（run）"
+        },
+        "safety_net_minutes": {
+          "type": "number",
+          "description": "安全網の分（run）"
+        },
+        "coding_minutes": {
+          "type": "number",
+          "description": "実装に使った分（run）"
+        },
+        "judged": {
+          "type": "integer",
+          "description": "成立の判定の数（run）"
+        },
+        "flaky_fixed": {
+          "type": "integer",
+          "description": "フレーキーの直しを残した数（run）"
+        },
+        "report": {
+          "type": "string",
+          "description": "完了報告のパス（run）"
+        },
+        "plan_comment": {
+          "type": "string",
+          "enum": [
+            "skipped",
+            "unchanged",
+            "written",
+            "failed"
+          ],
+          "description": "計画のコメントを書いたか（run）"
+        }
+      }
     },
     "items": {
       "type": "array",
       "description": "ndf refactor の項目の並び",
       "items": {
         "type": "object",
-        "properties": {}
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "touched",
+              "scope_tests",
+              "tests",
+              "collect",
+              "state",
+              "item",
+              "final",
+              "scope",
+              "kept"
+            ],
+            "description": "項目の種類（テストの枠の待ちで止まったときの退避の項目は持たない）"
+          },
+          "symbols": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "description": "ファイル → 触る関数（touched）"
+          },
+          "whole_files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "ファイル単位で触るファイル（touched）"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "範囲テストのファイル（scope_tests・tests）"
+          },
+          "unmapped": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "対応するテストの無いソース（tests）"
+          },
+          "unreadable": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "読めなかったソース（tests）"
+          },
+          "collected": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "収集されるテストのファイル（collect）"
+          },
+          "uncollected": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "収集されないテストのファイル（collect）"
+          },
+          "undecided": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "判定できないテストのファイル（collect）"
+          },
+          "path": {
+            "type": "string",
+            "description": "状態ファイルのパス（state）か、項目のファイル（item）"
+          },
+          "phases": {
+            "type": "object",
+            "description": "工程ごとの記録（state）"
+          },
+          "final": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "最終ゲートの記録（state。まだ無ければ null）"
+          },
+          "id": {
+            "type": "string",
+            "description": "項目の番号（item）"
+          },
+          "symbol": {
+            "type": "string",
+            "description": "項目の関数（item）"
+          },
+          "title": {
+            "type": "string",
+            "description": "項目の要約（item）"
+          },
+          "status": {
+            "type": "string",
+            "description": "項目の状態（item）か最終ゲートの状態（final）"
+          },
+          "reason": {
+            "type": "string",
+            "description": "項目の理由（item）か残した理由（kept）"
+          },
+          "by": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "提案した担当（state の item）"
+          },
+          "tier": {
+            "type": "string",
+            "description": "計画の担当が付けたグレード（state の item）"
+          },
+          "estimate": {
+            "type": "object",
+            "description": "計画の担当が付けた見積り（state の item）"
+          },
+          "feasibility": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            },
+            "description": "成立の判定（state の item）"
+          },
+          "history": {
+            "type": "array",
+            "description": "直しのラウンド（state の item）"
+          },
+          "inherited": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "引き継いだ指摘（state の item）"
+          },
+          "start": {
+            "type": "string",
+            "description": "項目に着手したときの HEAD（state の item）"
+          },
+          "rounds": {
+            "type": "integer",
+            "description": "最終ゲートのラウンドの数（final）"
+          },
+          "head": {
+            "type": "string",
+            "description": "最終ゲートの HEAD（final）"
+          },
+          "outside_failures": {
+            "type": "object",
+            "description": "範囲外の落ちたテストとファイル（final）"
+          },
+          "paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "範囲（scope）"
+          },
+          "retired_from": {
+            "type": "string",
+            "description": "退避した旧い状態の置き場（状態の置き場の用意で退避したときだけ）"
+          },
+          "retired_to": {
+            "type": "string",
+            "description": "退避した先"
+          }
+        }
       }
     }
   }

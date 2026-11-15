@@ -12,7 +12,7 @@
 | --- | --- |
 | `ndf answer` | `table_id`（string・必須・位置）: 答える進行表の ID<br>`--gate`（string・必須）: 問いの id（承認ゲートの結果の metrics.gate.id）<br>`--result`（string・必須）: 答えの語（承認ゲートの結果の routes のキー）<br>`--reason`（string・必須）<br>`--by`（string・必須）: 答えた者（human・conductor・organizer か service:<主体>）<br>`--key`（string・必須）: 冪等の鍵（同じ鍵の答え直しは書かない）<br>`--notes`（string・任意）: 差し戻し（revise）の指摘ファイル<br>`--head`（string・任意）: 見た PR の head の SHA<br>`--material-sha256`（string・任意）: 見た承認資料の sha256<br>`--drop`（array of integer・任意）: 設計承認ゲートで外す課題の番号 |
 
-結果の `metrics`: `gate`（—）・`head`（—）・`table_id`（—）。`items` の要素: 決まった項目を持たない
+結果の `metrics`: `carried_row`（string か null）・`gate`（object か string）・`gate_id`（string）・`head`（string）・`move`（string）・`release_request`（object）・`replayed`（boolean）・`rev`（integer）・`seqs`（array of integer）・`stage`（string）・`state`（string か null）・`step`（string）・`table_id`（string）。`items` の要素: `answer`（string）・`at`（string）・`by`（string）・`gate`（string か null）・`gate_id`（string か null）・`head`（string か null）・`notes`（string か null）・`reason`（string か null）・`seq`（integer）・`stage`（string か null）・`step`（string か null）
 
 ## `ndf check`
 
@@ -33,7 +33,7 @@
 | `ndf ci merge` | `--branch`（string・必須）: PR の head のブランチ<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば作業場所の origin<br>`--method`（string・任意）: マージの方式（squash・merge・rebase）。省けば基底のブランチで許された方式の先頭 |
 | `ndf ci watch` | `--pr`（integer・必須）<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば作業場所の origin<br>`--required`（array of string・必須）: 待つ必須のチェック（PR の先端の宣言から渡す）<br>`--test`（array of string・任意）: テストのチェックの名前（分割ジョブも数える）<br>`--budget`（number・必須）: 待ちの合計の秒（ランナーの割り当ての待ちは数えない）<br>`--after-merge`（boolean・任意）: マージの段階が落ちた後の判定<br>`--merge-failed`（array of string・任意）: マージの段階が落ちたと読んだチェックの名前 |
 
-結果の `metrics`: 決まった項目を持たない。`items` の要素: `kind`（string か null）・`number`（—）
+結果の `metrics`: `elapsed`（number）・`failed_tests`（array of string）・`log_error`（string）・`queued_for`（number）・`rounds`（integer）・`test_files`（array of string）。`items` の要素: `job`（integer）・`kind`（string）・`name`（string）・`number`（integer）・`result`（string）・`test`（boolean）
 
 ## `ndf contracts`
 
@@ -46,7 +46,7 @@
 | `ndf contracts fact-ids` | `table`（string・必須・位置）<br>`where`（array of string・任意・位置） |
 | `ndf contracts fact-value` | `table`（string・必須・位置）<br>`id`（string・必須・位置）<br>`column`（string・必須・位置） |
 
-結果の `metrics`: `fact_tables`（integer か null）。`items` の要素: 決まった項目を持たない
+結果の `metrics`: `fact_tables`（integer）。`items` の要素: `kind`（const "violation"）・`reason`（string）
 
 ## `ndf cross-review`
 
@@ -68,7 +68,7 @@
 | `ndf cross-review sync` | `worktree`（string・必須・位置）<br>`--branch`（string・必須） |
 | `ndf cross-review target-repo` | `--repo`（string・任意）<br>`--state-dir`（string・任意）<br>`--pr`（integer・任意） |
 
-結果の `metrics`: 決まった項目を持たない。`items` の要素: `kind`（string か null）・`path`（—）・`points_to`（string か null）
+結果の `metrics`: `findings`（integer）・`rounds`（integer）。`items` の要素: `after`（string）・`base`（string か null）・`before`（string）・`branch`（string）・`conflicts`（array of string）・`current_pr`（integer）・`head`（string か null）・`id`（string）・`kind`（string）・`locked`（string）・`number`（integer）・`ok`（boolean）・`origin_head`（string か null）・`origin_pr`（integer）・`outcome`（string）・`path`（string）・`points_to`（string）・`reason`（string か null）・`rebased`（boolean）・`replayed`（integer）・`scope`（string）・`slug`（string）・`source`（string）・`unreviewed`（array of string）
 
 ## `ndf hooks`
 
@@ -81,7 +81,7 @@
 | `ndf hooks render` | `--check`（boolean・任意）: 書かずに、作り直した結果と違えば stopped |
 | `ndf hooks stats` | `--days`（number・任意・既定 `14.0`） |
 
-結果の `metrics`: `days`（—）。`items` の要素: `path`（string か null）
+結果の `metrics`: `days`（number）。`items` の要素: `events`（object）・`guards`（object）・`path`（string）
 
 ## `ndf issues`
 
@@ -98,7 +98,7 @@
 | `ndf issues revert` | `--repo`（string・任意）: <所有者>/<名前>（省けば origin）<br>`--state-dir`（string・任意）: 状態の置き場（省けば環境変数の置き場かメインディレクトリの既定の置き場）<br>`--run`（string・必須） |
 | `ndf issues settle` | `--repo`（string・任意）: <所有者>/<名前>（省けば origin）<br>`--state-dir`（string・任意）: 状態の置き場（省けば環境変数の置き場かメインディレクトリの既定の置き場）<br>`--file`（string・必須）: 入力（{"settle": [...]}）<br>`--base`（string・任意）: 基底のブランチ（省けば既定のブランチ）<br>`--dry-run`（boolean・任意）: 確かめるだけで閉じない |
 
-結果の `metrics`: `depth`（—）・`seconds`（—）。`items` の要素: 決まった項目を持たない
+結果の `metrics`: `already`（array of integer）・`applied`（array of integer）・`at`（string）・`backward`（array of object）・`base`（string）・`before`（string か null）・`by_route`（object）・`candidates`（integer）・`carried`（array of integer）・`carry`（integer）・`closed`（array of integer）・`create_rejected`（array of object）・`created`（array of object）・`deferred`（array of integer）・`deferred_unscored`（array of integer）・`depth`（string）・`digest`（string）・`dropped`（array of object）・`event`（string）・`excluded`（array of object）・`failed`（array of object）・`forward`（array of object）・`held`（array of integer）・`left`（array of integer）・`limit`（integer）・`moved`（array of integer）・`needs_approval`（array of integer）・`next_steps`（array of string）・`notes`（array of string）・`open`（integer）・`order`（array of string）・`rejected_stale`（array of object）・`reparented`（array of integer）・`repo`（string）・`returned`（array of integer）・`reverted`（array of integer）・`seconds`（number）・`since_ref`（string か null）・`sized`（array of integer）・`skipped_changed`（array of integer）・`tables`（object）・`trigger`（array of string）・`unchanged`（array of integer）・`values`（object）。`items` の要素: `boundary`（object か null）・`child`（string）・`digest`（string）・`error`（string）・`evidence`（string）・`index`（integer）・`issue`（—）・`kind`（const "issue"）・`large_slot`（object か null）・`name`（string）・`number`（integer）・`order`（integer）・`over_scale`（array of integer）・`quality_slot`（object）・`reason`（string）・`result`（string）・`routes`（array of string）・`rows`（array of object）・`title`（string）・`updated_at`（string）・`verdict`（string）
 
 ## `ndf lanes`
 
@@ -128,7 +128,7 @@
 | `ndf lanes stop` | `plan`（string・必須・位置）<br>`--now`（boolean・任意）: 区切りを待たずに中止する（未着手の行を中止にし、実行中のスプリントを中止させる）<br>`--reason`（string・必須） |
 | `ndf lanes wait` | `plan`（string・必須・位置）<br>`--after`（integer・任意・既定 `0`）: 計画の進行表の事象の番号（前の wait の next が渡す）<br>`--known-stalls`（array of string・任意）: 知らせ済みの止まり（<レーン>/<行>） |
 
-結果の `metrics`: 決まった項目を持たない。`items` の要素: 決まった項目を持たない
+結果の `metrics`: `changes`（object）・`closed_requests`（array of object）・`complete`（boolean）・`current_id`（string）・`errors`（array of string）・`failed`（array of string）・`lane_table_id`（string）・`last_seq`（integer）・`launched`（array of string）・`max_lanes`（integer）・`max_plans`（integer）・`new_stalls`（array of string）・`next_row`（object か null）・`open_requests`（array of object）・`opened`（boolean）・`outcome`（string か null）・`plan`（string）・`plan_id`（string）・`releases`（object）・`request`（string か null）・`requests`（array of string）・`result`（string）・`row`（string）・`run_pid`（integer）・`running`（array of string）・`seq`（integer か null）・`sprint_id`（string）・`stalled`（integer）・`stalls`（array of string）・`state`（string）・`wakeable`（array of array of string）。`items` の要素: `actor`（string）・`after`（array of string）・`at`（string）・`kind`（string）・`lane`（string）・`liveness`（object）・`machine_wait`（object）・`next`（object）・`path`（string）・`payload`（object か null）・`reason`（string か null）・`rev`（integer か null）・`row_key`（string か null）・`rows`（array of object）・`seq`（integer）・`sprint_id`（string）・`state`（string か null）
 
 ## `ndf launch-args`
 
@@ -138,7 +138,7 @@
 | --- | --- |
 | `ndf launch-args` | 引数を受けない |
 
-結果の `metrics`: 決まった項目を持たない。`items` の要素: `args`（—）
+結果の `metrics`: 決まった項目を持たない。`items` の要素: `args`（array of string）
 
 ## `ndf loop`
 
@@ -164,7 +164,7 @@
 | `ndf loop start` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`name`（string・必須・位置）<br>`--session`（string・必須）: 打ったセッションの識別子 |
 | `ndf loop stop` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`name`（string・必須・位置）<br>`--by`（string・必須・値 `human`・`organizer`）<br>`--reason`（string・任意・既定 `""`）<br>`--now`（boolean・任意）: 周の境を待たずにその場で止める |
 
-結果の `metrics`: `answer`（—）・`head`（—）・`lap`（—）・`outcome`（—）・`remaining`（array か null）・`streak`（—）。`items` の要素: 決まった項目を持たない
+結果の `metrics`: `answer`（string）・`designs`（integer）・`head`（string）・`lap`（integer）・`missing`（integer）・`names`（integer）・`outcome`（string）・`pace`（string）・`record_pr`（string）・`remaining`（array of integer）・`renamed`（integer）・`skipped`（integer）・`status`（string）・`streak`（integer）・`unverified`（integer）・`verify`（boolean）。`items` の要素: `chosen`（boolean）・`created`（array of integer）・`current`（object か null）・`doc`（string）・`holder`（string か null）・`issue`（integer）・`kind`（string）・`laps`（array of object）・`line`（integer）・`means`（string）・`name`（string）・`reason`（string か null）・`rejections`（array of object）・`renamed_to`（string）・`result`（string）・`review`（array of string）・`section`（string か null）・`status`（string）・`steps`（array of string）・`stop`（object か null）・`text`（string）
 
 ## `ndf manifests`
 
@@ -174,7 +174,7 @@
 | --- | --- |
 | `ndf manifests render` | `--check`（boolean・任意）: 書かずに、作り直した結果と違えば stopped |
 
-結果の `metrics`: 決まった項目を持たない。`items` の要素: 決まった項目を持たない
+結果の `metrics`: 決まった項目を持たない。`items` の要素: `path`（string）
 
 ## `ndf notify`
 
@@ -184,7 +184,7 @@
 | --- | --- |
 | `ndf notify send` | 引数を受けない |
 
-結果の `metrics`: 決まった項目を持たない。`items` の要素: `args`（—）
+結果の `metrics`: `duplicate`（integer）・`failed`（integer）・`left`（integer）・`sent`（integer）・`stale`（integer）・`unconfigured`（integer）。`items` の要素: 決まった項目を持たない
 
 ## `ndf plan`
 
@@ -198,7 +198,7 @@
 | `ndf plan queue` | `plans`（array of string・必須・位置）<br>`--then`（array of array of string・任意）<br>`--from`（array of string・任意）<br>`--resume`（boolean・任意）<br>`--fresh`（boolean・任意）<br>`--queue-dir`（string・任意） |
 | `ndf plan wait` | `plans`（array of string・必須・位置）<br>`--state-dir`（string・任意）<br>`--timeout`（number・任意・既定 `600.0`） |
 
-結果の `metrics`: `waited_seconds`（number か null）。`items` の要素: 決まった項目を持たない
+結果の `metrics`: `gates`（integer）・`ok`（integer）・`pending`（integer）・`plans`（integer）・`round`（integer）・`steps`（integer）・`stopped`（integer）・`waited_seconds`（number）・`waves`（integer）。`items` の要素: `cause`（object）・`detail`（string）・`gate`（boolean）・`kind`（string）・`name`（string）・`number`（integer）・`path`（string）・`plans`（array of string）・`reason`（string）・`routes`（object）・`run`（string）・`status`（string か null）・`step`（string か null）・`updated_at`（string か null）・`workflow`（string）
 
 ## `ndf progress`
 
@@ -215,7 +215,7 @@
 | `ndf progress retry` | `table_id`（string・必須・位置）<br>`stage`（string・必須・位置）: 工程の名前（工程表の行名）<br>`--reason`（string・必須） |
 | `ndf progress show` | `table_id`（string・必須・位置） |
 
-結果の `metrics`: `gate`（—）・`head`（—）・`table_id`（—）。`items` の要素: 決まった項目を持たない
+結果の `metrics`: `answer`（string）・`cancelled_rows`（integer）・`current_id`（string）・`disabled`（array of string）・`history`（array of object）・`mode`（string）・`move`（string）・`rev`（integer）・`rows`（integer）・`seq`（integer）・`seqs`（array of integer）・`stage`（string）・`state`（string か null）・`step`（string）・`table_id`（string）。`items` の要素: `at`（string か null）・`changed`（boolean）・`error`（string）・`from`（string）・`gates`（array of string）・`key`（string）・`kind`（string）・`label`（string）・`number`（integer）・`path`（string）・`phase`（string）・`reason`（string か null）・`restored`（string）・`retired`（string）・`source`（string）・`stage`（string）・`state`（string か null）
 
 ## `ndf records`
 
@@ -236,7 +236,7 @@
 | `ndf records usage report` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`--since`（string・必須）<br>`--until`（string・必須） |
 | `ndf records usage stop` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ） |
 
-結果の `metrics`: 決まった項目を持たない。`items` の要素: 決まった項目を持たない
+結果の `metrics`: `bytes`（integer）・`commit`（string）・`lines`（integer）・`revise`（boolean）。`items` の要素: `agent_id`（string）・`at`（string）・`broken_rows`（integer）・`caller`（string）・`cause`（object）・`closable`（boolean）・`closed_issues`（integer）・`context`（string）・`files`（array of string）・`gate`（—）・`issue`（integer）・`kind`（string）・`lines`（integer）・`missing_path`（string）・`moved`（string）・`name`（string）・`overrides`（integer）・`path`（string）・`pr`（—）・`reason`（string）・`repo`（string）・`result`（string）・`since`（string）・`state`（—）・`status`（string）・`summary`（string）・`term`（string）・`transcript`（string）・`unknown`（integer）・`unknown_pass`（integer）・`unknown_rows`（integer）・`until`（string）・`usage`（object か string）・`version`（integer か null）・`violation`（string）・`warnings`（array of string）・`word`（string）
 
 ## `ndf refactor`
 
@@ -252,7 +252,7 @@
 | `ndf refactor tests` | `--changed`（array of string・必須）<br>`--work`（string・任意・既定 `"."`） |
 | `ndf refactor touched` | `--base`（string・必須）<br>`--head`（string・任意・既定 `"HEAD"`）<br>`--scope`（array of string・必須）<br>`--symbols`（array of string・任意）<br>`--work`（string・任意・既定 `"."`） |
 
-結果の `metrics`: 決まった項目を持たない。`items` の要素: 決まった項目を持たない
+結果の `metrics`: `adopted`（integer）・`budget_minutes`（number）・`coding_minutes`（number）・`collected`（integer）・`deferred`（integer）・`files`（integer）・`fix_rounds`（integer）・`flaky_fixed`（integer）・`items`（integer）・`judged`（integer）・`kept`（integer）・`open`（integer）・`paths`（integer）・`plan_comment`（string）・`report`（string）・`reverted`（integer）・`safety_net_minutes`（number）・`scope_tests`（integer）・`skipped`（integer）・`swept`（integer）・`symbols`（integer）・`uncollected`（integer）・`undecided`（integer）・`unmapped`（integer）・`unreadable`（integer）・`whole_files`（integer）。`items` の要素: `by`（array of string）・`collected`（array of string）・`estimate`（object）・`feasibility`（array of object）・`files`（array of string）・`final`（object か null）・`head`（string）・`history`（array）・`id`（string）・`inherited`（array of string）・`kind`（string）・`outside_failures`（object）・`path`（string）・`paths`（array of string）・`phases`（object）・`reason`（string）・`retired_from`（string）・`retired_to`（string）・`rounds`（integer）・`start`（string）・`status`（string）・`symbol`（string）・`symbols`（object）・`tier`（string）・`title`（string）・`uncollected`（array of string）・`undecided`（array of string）・`unmapped`（array of string）・`unreadable`（array of string）・`whole_files`（array of string）
 
 ## `ndf relay`
 
@@ -275,7 +275,7 @@
 | `ndf relay stop` | `name`（string・必須・位置） |
 | `ndf relay uninstall` | 引数を受けない |
 
-結果の `metrics`: 決まった項目を持たない。`items` の要素: `account`（—）・`path`（string か null）
+結果の `metrics`: 決まった項目を持たない。`items` の要素: `account`（string か null）・`args`（array か null）・`cwd`（string か null）・`kind`（string）・`name`（string）・`path`（string）・`pending`（array か null）・`plan`（string か null）・`prompt`（string）・`reason`（string か null）・`role`（string か null）・`run`（string）・`running`（boolean）・`starts`（object）・`state`（string か null）・`status`（string か null）・`updated_at`（string か null）・`version`（string）・`workflow`（string）
 
 ## `ndf release-steps`
 
@@ -298,7 +298,7 @@
 | `ndf release-steps sync-base` | `--root`（string・任意・既定 `"."`）: リポジトリの根<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば origin<br>`--main-dir`（string・必須）<br>`--base`（string・必須） |
 | `ndf release-steps verification-record` | `--root`（string・任意・既定 `"."`）: リポジトリの根<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば origin<br>`--pr`（integer・必須）<br>`--record`（string・必須）: リリース後テストの記録の JSON（スキーマ release-verification） |
 
-結果の `metrics`: 決まった項目を持たない。`items` の要素: 決まった項目を持たない
+結果の `metrics`: 決まった項目を持たない。`items` の要素: `change`（string）・`checks`（integer）・`checks_passed`（integer）・`checks_skipped`（integer）・`failed`（array of string）・`kind`（string）・`name`（string）・`number`（integer）・`path`（string）・`reason`（string）・`result`（string）
 
 ## `ndf route`
 
@@ -312,7 +312,7 @@
 | `ndf route templates` | 引数を受けない |
 | `ndf route test` | `--result`（string・任意）<br>`--failed-from`（string・任意）<br>`command`（string・任意・位置） |
 
-結果の `metrics`: `failed_tests`（—）。`items` の要素: 決まった項目を持たない
+結果の `metrics`: `exit_code`（integer）・`failed_runs`（integer）・`failed_tests`（array of string）・`runs`（integer）・`same_cause`（integer）・`streak`（integer）・`templates`（integer）。`items` の要素: `command`（string）・`exit_code`（integer）・`kind`（string）・`name`（string）・`params`（array of string）・`passed`（boolean）・`path`（string）・`purpose`（string）・`suite`（string）
 
 ## `ndf test-slot`
 
@@ -323,7 +323,7 @@
 | `ndf test-slot report` | `--since`（string・任意・既定 `"7d"`）: 期間（既定 7d） |
 | `ndf test-slot run` | `--wait-limit`（integer・任意）: 枠とメモリを待つ上限の秒（既定は設定の値）<br>`command`（array of string・任意・位置）: -- の後ろにシェルのコマンド 1 つ |
 
-結果の `metrics`: `available_mib`（—）・`waited_seconds`（number か null）。`items` の要素: 決まった項目を持たない
+結果の `metrics`: `available_mib`（integer か null）・`gave_up`（integer）・`memory_stopped`（integer）・`oom_kill_increase`（integer）・`runs`（integer）・`waited_runs`（integer）・`waited_seconds`（number）。`items` の要素: `detail`（string）・`retired_from`（string）・`retired_to`（string）
 
 ## `ndf training`
 
@@ -333,7 +333,7 @@
 | --- | --- |
 | `ndf training check` | `--runtime`（array of string・任意・値 `claude`・`codex`）: 確かめる担当（既定は確かめる口のある担当すべて） |
 
-結果の `metrics`: 決まった項目を持たない。`items` の要素: `args`（—）
+結果の `metrics`: 決まった項目を持たない。`items` の要素: `checked_at`（string）・`reason`（string）・`runtime`（string）・`training`（boolean か null）
 
 ## `ndf worker`
 
@@ -347,7 +347,7 @@
 | `ndf worker plan-edits` | `plans`（array of string・必須・位置）<br>`--state-dir`（string・任意） |
 | `ndf worker run` | `--kind`（string・必須）<br>`--prompt-file`（string・必須）<br>`--result-file`（string・必須）<br>`--cwd`（string・必須）<br>`--state-dir`（string・必須）<br>`--sources`（string・任意）<br>`--timeout`（number・任意・既定 `3600.0`） |
 
-結果の `metrics`: `failed_tests`（—）・`waited_seconds`（number か null）。`items` の要素: 決まった項目を持たない
+結果の `metrics`: `attempts`（integer）・`attention`（integer）・`edits`（integer）・`expectation_search`（object か null）。`items` の要素: `at`（—）・`backup`（string）・`diff`（string か null）・`kind`（string）・`plan`（string か null）・`reason`（string か null）・`result_file`（string）・`session`（string か null）・`sha`（string）・`state`（string）・`subject`（string）・`text`（—）・`words`（array of string）
 
 ## `ndf worktree`
 
@@ -368,4 +368,4 @@
 | `ndf worktree testenv` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`action`（string・必須・位置・値 `env`・`tag`・`bake`・`up`・`stop`・`down`・`test`・`compose-env`・`reap`・`reclaim`・`expose`・`unexpose`）<br>`worktree`（string・任意・位置）<br>`--profile`（string・任意）<br>`--tag`（string・任意）<br>`--kind`（string・任意）<br>`--out`（string・任意）<br>`--idle`（string・任意）<br>`--volumes`（boolean・任意）<br>`--wait-service`（array of string・任意） |
 | `ndf worktree trash` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`--ref`（string・必須）: 本番に出たコミット（タグ・本番チャネル）<br>`--yes`（boolean・任意）: --only の退避先を消す。人が候補を見て承認したときだけ付ける<br>`--only`（array of string・任意） |
 
-結果の `metrics`: `created`（—）・`existing`（—）・`exit`（—）・`tag`（—）・`url`（—）。`items` の要素: 決まった項目を持たない
+結果の `metrics`: `branch`（string か null）・`branch:deleted`（integer）・`branch:kept`（integer）・`branches_deleted`（integer）・`candidates`（integer）・`count`（integer）・`created`（integer）・`dirty`（integer）・`environment`（string）・`existing`（integer）・`exit`（integer）・`followed`（boolean）・`ports`（object）・`present`（boolean）・`removed`（integer）・`result`（string）・`seconds`（number）・`skipped`（boolean）・`slot`（integer）・`steps`（integer）・`tag`（string）・`url`（string）・`values`（integer）・`worktree`（string）・`worktree:kept`（integer）・`worktree:removed`（integer）・`worktrees`（integer）。`items` の要素: `base`（string）・`base_branch`（string か null）・`branch`（string か null）・`branch_deleted`（boolean）・`context`（string）・`declaration`（string）・`detail`（string）・`environment`（string）・`head`（string）・`key`（string）・`kind`（string）・`line`（string）・`local_ignored`（array of string）・`locked`（boolean）・`name`（string）・`new_branch`（boolean）・`note`（string）・`path`（string）・`ports`（object）・`production_branch`（string か null）・`prunable`（boolean）・`reason`（string）・`released`（boolean）・`removed`（boolean）・`restore`（string）・`result`（string）・`sha`（string）・`slot`（integer）・`start_ref`（string）・`value`（string）・`verdict`（string）・`worktree`（string）・`written`（boolean）

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "records.result.schema.json",
   "title": "ndf records の結果 JSON",
-  "description": "ndf records が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果の契約（result.schema.json）が持ち、ここは metrics と items の形だけを足す。載せた項目のほかの項目は受け流す",
+  "description": "ndf records が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果の契約（result.schema.json）が持ち、ここは metrics と items の形だけを足す。metrics と items の要素は閉じていて、載せた項目のほかの項目を持つと通らない",
   "allOf": [
     {
       "$ref": "../result.schema.json"
@@ -15,14 +15,191 @@
     "metrics": {
       "type": "object",
       "description": "ndf records の計測値",
-      "properties": {}
+      "additionalProperties": false,
+      "properties": {
+        "commit": {
+          "type": "string",
+          "description": "確定仕様化のコミット（spec --message）"
+        },
+        "lines": {
+          "type": "integer",
+          "description": "引継ぎ文書の行の数（handoff）"
+        },
+        "bytes": {
+          "type": "integer",
+          "description": "引継ぎ文書のバイト数（handoff）"
+        },
+        "revise": {
+          "type": "boolean",
+          "description": "MVV の改訂を提案する兆候があるか（mvv signals）"
+        }
+      }
     },
     "items": {
       "type": "array",
       "description": "ndf records の項目の並び",
       "items": {
         "type": "object",
-        "properties": {}
+        "additionalProperties": false,
+        "properties": {
+          "context": {
+            "type": "string",
+            "description": "用語の文脈（glossary）"
+          },
+          "term": {
+            "type": "string",
+            "description": "用語（glossary meanings・spec）"
+          },
+          "word": {
+            "type": "string",
+            "description": "意味の説明に残った廃止した語（glossary meanings）"
+          },
+          "lines": {
+            "type": "integer",
+            "description": "文脈の文書の行の数（glossary render が上限で止まったとき）"
+          },
+          "path": {
+            "type": "string",
+            "description": "書いた・今と違うファイルか、コミットに入れるパス（glossary render・spec）"
+          },
+          "reason": {
+            "type": "string",
+            "description": "語を決められない理由（spec）か、記録・判定の理由（cleanup-stage・close-check）"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "語を含む確定仕様（spec）"
+          },
+          "violation": {
+            "type": "string",
+            "description": "引継ぎ文書の違反（handoff）"
+          },
+          "missing_path": {
+            "type": "string",
+            "description": "引継ぎ文書が指す無いパス（handoff）"
+          },
+          "moved": {
+            "type": "string",
+            "description": "退避した節の見出し（handoff --trim）"
+          },
+          "at": {
+            "type": "string",
+            "description": "書いた時刻（usage stop・mvv answer）"
+          },
+          "caller": {
+            "type": "string",
+            "description": "使用量の呼び手（usage stop）"
+          },
+          "agent_id": {
+            "type": "string",
+            "description": "サブエージェントの id（usage stop）"
+          },
+          "transcript": {
+            "type": "string",
+            "description": "会話の記録のパス（usage stop）"
+          },
+          "usage": {
+            "type": [
+              "object",
+              "string"
+            ],
+            "description": "使用量（読めなければ unknown）（usage stop・usage report）"
+          },
+          "since": {
+            "type": "string",
+            "description": "集計の始め（usage report）"
+          },
+          "until": {
+            "type": "string",
+            "description": "集計の終わり（usage report）"
+          },
+          "unknown_rows": {
+            "type": "integer",
+            "description": "使用量の分からない行の数（usage report）"
+          },
+          "broken_rows": {
+            "type": "integer",
+            "description": "壊れた行の数（usage report）"
+          },
+          "closed_issues": {
+            "type": "integer",
+            "description": "期間に閉じた課題の数（usage report）"
+          },
+          "version": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "MVV の宣言の版（mvv signals・mvv answer）"
+          },
+          "overrides": {
+            "type": "integer",
+            "description": "覆しの数（mvv signals）"
+          },
+          "unknown_pass": {
+            "type": "integer",
+            "description": "判定できないを人が通した数（mvv signals）"
+          },
+          "unknown": {
+            "type": "integer",
+            "description": "判定できないの数（mvv signals）"
+          },
+          "kind": {
+            "type": "string",
+            "description": "改訂の兆候の種類（mvv answer）"
+          },
+          "repo": {
+            "type": "string",
+            "description": "リポジトリの鍵（mvv answer）"
+          },
+          "state": {
+            "description": "承認ゲートの答えの state（mvv answer。答えの値のまま）"
+          },
+          "gate": {
+            "description": "承認ゲートの答えの gate（mvv answer。答えの値のまま）"
+          },
+          "pr": {
+            "description": "PR の番号（cleanup-stage）か承認ゲートの答えの pr（mvv answer。答えの値のまま）"
+          },
+          "issue": {
+            "type": "integer",
+            "description": "課題の番号（cleanup-stage・close-check）"
+          },
+          "result": {
+            "type": "string",
+            "description": "工程の記録の結果（cleanup-stage）"
+          },
+          "closable": {
+            "type": "boolean",
+            "description": "閉じてよいか（close-check）"
+          },
+          "name": {
+            "type": "string",
+            "description": "確かめの名前（preflight）"
+          },
+          "status": {
+            "type": "string",
+            "description": "確かめの結果の status（preflight）"
+          },
+          "summary": {
+            "type": "string",
+            "description": "確かめの結果の要約（preflight）"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "確かめの警告（preflight）"
+          },
+          "cause": {
+            "type": "object",
+            "description": "確かめが止まった理由（preflight）"
+          }
+        }
       }
     }
   }

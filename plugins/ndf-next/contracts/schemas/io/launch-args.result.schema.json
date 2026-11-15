@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "launch-args.result.schema.json",
   "title": "ndf launch-args の結果 JSON",
-  "description": "ndf launch-args が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果の契約（result.schema.json）が持ち、ここは metrics と items の形だけを足す。載せた項目のほかの項目は受け流す",
+  "description": "ndf launch-args が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果の契約（result.schema.json）が持ち、ここは metrics と items の形だけを足す。metrics と items の要素は閉じていて、載せた項目のほかの項目を持つと通らない",
   "allOf": [
     {
       "$ref": "../result.schema.json"
@@ -15,6 +15,7 @@
     "metrics": {
       "type": "object",
       "description": "ndf launch-args の計測値",
+      "additionalProperties": false,
       "properties": {}
     },
     "items": {
@@ -22,9 +23,14 @@
       "description": "ndf launch-args の項目の並び",
       "items": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {
           "args": {
-            "description": "コードが出す項目 args（値の無い経路では null）"
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "full の起動で claude に足す引数の並び"
           }
         }
       }
