@@ -1,6 +1,6 @@
 {
   "summary": "argparse を使わない副命令の呼び方（下位の命令の道ごとに 1 行）と引数。規約の生成が引数のスキーマを作る入力で、argparse から引数を取り出せる副命令はこの表に行を持たない（持てば ndf check の spec-io が落とす）",
-  "owner": "副命令を持つ子（初版は #3518。ndf.checks.spec_args）",
+  "owner": "D2（contracts/domains。行は argparse を使わない副命令を持つ子が足す。初版は #3518）",
   "columns": {
     "command": {
       "type": "string",

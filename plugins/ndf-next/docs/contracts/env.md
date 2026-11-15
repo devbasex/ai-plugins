@@ -52,7 +52,6 @@ NDF が読む環境変数と、NDF が子のプロセスへ渡す環境変数で
 | `NDF_VERSION` | service | string | — | サービスの実行ジョブが入れた NDF の版（開発版は <version>@<コミットの SHA>） | 公開 |
 | `SLACK_BOT_TOKEN` | user | string | 秘密 | Slack の通知のトークン。無ければ通知しない | 内部（予告なく変えてよい） |
 | `SLACK_CHANNEL_ID` | user | string | — | Slack の通知の宛先のチャンネル | 内部（予告なく変えてよい） |
-| `UV_PROJECT_ENVIRONMENT` | ndf | path | — | bin/ndf と hook の依存の環境の用意が uv へ渡す、依存の環境の置き場（uv が読む）。NDF は読まない | 内部（予告なく変えてよい） |
 | `VSCODE_GIT_ASKPASS_EXTRA_ARGS` | user | string | — | VS Code の git 認証の部品。中継が起動するセッションへ渡さない | 内部（予告なく変えてよい） |
 | `VSCODE_GIT_ASKPASS_MAIN` | user | path | — | VS Code の git 認証の部品。中継が起動するセッションへ渡さない | 内部（予告なく変えてよい） |
 | `VSCODE_GIT_ASKPASS_NODE` | user | path | — | VS Code の git 認証の部品。中継が起動するセッションへ渡さない | 内部（予告なく変えてよい） |

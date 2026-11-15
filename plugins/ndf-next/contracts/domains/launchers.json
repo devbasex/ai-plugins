@@ -1,6 +1,6 @@
 {
   "summary": "プラグインの bin/ のファイルごとの種類。launcher は利用者と AI が打つ起動スクリプト、part は起動スクリプトが起こす内部の部品で、AI は直接打たない。bin/ のファイルはすべてこの表に行を持つ（ndf check の spec-io）",
-  "owner": "起動スクリプトを足す子（初版は #3518。ndf.checks.spec_model）",
+  "owner": "D2（contracts/domains。行は起動スクリプトを足す子が足す。初版は #3518）",
   "columns": {
     "kind": {
       "type": "string",

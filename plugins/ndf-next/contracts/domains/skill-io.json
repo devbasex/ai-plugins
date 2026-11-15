@@ -1,6 +1,6 @@
 {
   "summary": "実体のある配る Skill（manifests/skills.json の行で skills/<名前>/SKILL.md があるもの）ごとの入出力。公開する Skill（エントリポイントの表の種類 skill・block の target）の引数と環境変数はエントリポイントの表が正本で、この表の行は args・env を持たない（持てば ndf check の spec-skill が落とす）",
-  "owner": "Skill を移す子（初版は #3518。ndf.checks.spec_model）",
+  "owner": "D2（contracts/domains。行は Skill を移す子が足す。初版は #3518）",
   "columns": {
     "args": {
       "type": "array",
