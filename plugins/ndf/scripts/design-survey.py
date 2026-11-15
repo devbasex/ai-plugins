@@ -83,7 +83,7 @@ def _required_groups(argv: list[str]) -> tuple[str, ...]:
 _PROBED: dict = {}  # 依存の判定で決めた根。本体が同じ引数とカレントで git を打ち直さないために使う
 
 
-def _root(arg) -> Path:
+def _check_root(arg) -> Path:
     """`--root` の根。依存の判定で同じ引数とカレントから決めていればそれを使う（git の起動を 1 回にする）。"""
     if _PROBED.get("root") is not None and _PROBED.get("key") == (arg, Path.cwd()):
         return _PROBED["root"]
@@ -387,7 +387,7 @@ def judge_docs(docs: list[Doc], require_detail: bool, settings: design_repos.Rep
 
 
 def cmd_check(a):
-    root = _root(a.root)
+    root = _check_root(a.root)
     if a.issue:
         require_repo(root)
         texts = find_closed(root, [str(n) for n in a.issue])

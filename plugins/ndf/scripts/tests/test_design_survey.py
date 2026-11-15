@@ -582,6 +582,10 @@ def test_root_passed_by_the_parent_is_reused(tmp_path, same_key, code):
     鍵（引数とカレント）が違えば git で根を探して 2 になる。"""
     (tmp_path / "d.md").write_text("# 設計\n", encoding="utf-8")
     key = [None, str(tmp_path) if same_key else str(tmp_path / "other")]
-    env = {**os.environ, "NDF_DESIGN_SURVEY_ROOT": json.dumps({"key": key, "root": str(tmp_path)}), "GIT_CEILING_DIRECTORIES": str(tmp_path.parent)}
+    env = {
+        **os.environ,
+        "NDF_DESIGN_SURVEY_ROOT": json.dumps({"key": key, "root": str(tmp_path)}),
+        "GIT_CEILING_DIRECTORIES": str(tmp_path.parent),
+    }
     p = subprocess.run([sys.executable, str(SCRIPT), "check", "--file", "d.md"], cwd=tmp_path, env=env, capture_output=True, text=True)
     assert p.returncode == code, p.stderr
