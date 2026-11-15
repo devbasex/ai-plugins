@@ -10,6 +10,9 @@ from pathlib import Path
 
 import pytest
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from survey_run import run_survey_check  # noqa: E402
+
 SCRIPT = Path(__file__).resolve().parents[1] / "design-survey.py"
 REPO = Path(__file__).resolve().parents[4]
 
@@ -31,12 +34,6 @@ def repo(tmp_path, files: dict[str, str]) -> Path:
     git(root, "add", "-A")
     git(root, "commit", "-q", "-m", "base")
     return root
-
-
-def run(root, *args):
-    p = subprocess.run([sys.executable, str(SCRIPT), "check", *args, "--root", str(root)], capture_output=True, text=True)
-    out = json.loads(p.stdout.strip().splitlines()[-1]) if p.stdout.strip() else None
-    return p.returncode, out
 
 
 def rules(out) -> list[str]:
@@ -81,7 +78,7 @@ def decisions(*ds: str) -> str:
 
 def test_self_built_without_candidates_is_flagged(tmp_path):
     root = repo(tmp_path, {"issues/issue-1-design.md": design(SURVEY, decisions(decision(1, "自前で作る", None)))})
-    code, out = run(root, "--issue", "1")
+    code, out = run_survey_check(root, "--issue", "1")
     assert code == 1
     assert rules(out) == ["no_candidates"]
     assert out["metrics"]["self_built"] == 1
@@ -95,8 +92,8 @@ def test_candidates_resolved_or_survey_skipped_pass(tmp_path):
             "issues/issue-2-design.md": design(SKIP, decisions(decision(1, "自前で作る", None))),
         },
     )
-    assert run(root, "--issue", "1")[0] == 0
-    assert run(root, "--issue", "2")[0] == 0
+    assert run_survey_check(root, "--issue", "1")[0] == 0
+    assert run_survey_check(root, "--issue", "2")[0] == 0
 
 
 def test_split_files_share_survey_and_skip(tmp_path):
@@ -109,8 +106,8 @@ def test_split_files_share_survey_and_skip(tmp_path):
             "issues/issue-4-design-decisions.md": design(decisions(decision(1, "自前で作る", "LIB1"))),
         },
     )
-    assert run(root, "--issue", "3")[0] == 0
-    assert run(root, "--issue", "4")[0] == 0
+    assert run_survey_check(root, "--issue", "3")[0] == 0
+    assert run_survey_check(root, "--issue", "4")[0] == 0
 
 
 @pytest.mark.parametrize("issues", [["7"], ["8"], ["7", "8"]])
@@ -123,7 +120,7 @@ def test_multi_number_docs_form_one_group(tmp_path, issues):
             "issues/issue-8-design.md": design("## 概要\n\n本文\n"),
         },
     )
-    code, out = run(root, "--issue", *issues)
+    code, out = run_survey_check(root, "--issue", *issues)
     assert code == 0, out
     assert out["metrics"]["docs"] == 3
     assert out["items"] == []
@@ -140,7 +137,7 @@ def test_candidates_resolve_across_the_group(tmp_path, issues):
             "issues/issue-8-design.md": design(survey8),
         },
     )
-    code, out = run(root, "--issue", *issues)
+    code, out = run_survey_check(root, "--issue", *issues)
     assert code == 0, out
     assert out["items"] == []
 
@@ -155,7 +152,7 @@ def test_candidates_do_not_resolve_in_another_group(tmp_path):
             "issues/issue-6-design.md": design(SURVEY),
         },
     )
-    code, out = run(root, "--issue", "5", "6")
+    code, out = run_survey_check(root, "--issue", "5", "6")
     assert code == 1
     assert rules(out) == ["unknown_candidate"]
 
@@ -168,29 +165,29 @@ def test_unknown_method_and_combined_method(tmp_path):
             "issues/issue-2-design.md": design(SURVEY, decisions(decision(1, "自前で作る・標準に倣う", None))),
         },
     )
-    code, out = run(root, "--issue", "1")
+    code, out = run_survey_check(root, "--issue", "1")
     assert code == 1 and rules(out) == ["unknown_method"]
-    code, out = run(root, "--issue", "2")
+    code, out = run_survey_check(root, "--issue", "2")
     assert code == 1 and rules(out) == ["no_candidates"]
 
 
 def test_code_blocks_are_not_read(tmp_path):
     body = design(SURVEY, decisions("### 決定 1: 例を示す\n\n```markdown\n- 作り方: 自前で作る\n```\n"))
     root = repo(tmp_path, {"issues/issue-1-design.md": body})
-    code, out = run(root, "--issue", "1")
+    code, out = run_survey_check(root, "--issue", "1")
     assert code == 0, out
     assert out["metrics"]["with_method"] == 0
 
 
 def test_file_without_issue_number_is_its_own_group(tmp_path):
     root = repo(tmp_path, {"notes/run.md": design(decisions(decision(1, "自前で作る", None)))})
-    code, out = run(root, "--file", "notes/run.md")
+    code, out = run_survey_check(root, "--file", "notes/run.md")
     assert code == 1 and rules(out) == ["no_candidates"]
 
 
 def test_no_documents_for_issue_returns_3(tmp_path):
     root = repo(tmp_path, {"README.md": "x\n"})
-    assert run(root, "--issue", "99")[0] == 3
+    assert run_survey_check(root, "--issue", "99")[0] == 3
 
 
 def test_works_without_ndf_declarations(tmp_path):
@@ -198,7 +195,7 @@ def test_works_without_ndf_declarations(tmp_path):
     files = {"issues/issue-1-design.md": design(SURVEY, decisions(decision(1, "自前で作る", None)))}
     bare = repo(tmp_path / "a", files)
     with_mvv = repo(tmp_path / "b", {**files, ".ndf/mvv.md": "# MVV\n\n## Value\n\n1. 調べる\n"})
-    assert run(bare, "--issue", "1")[1]["items"] == run(with_mvv, "--issue", "1")[1]["items"]
+    assert run_survey_check(bare, "--issue", "1")[1]["items"] == run_survey_check(with_mvv, "--issue", "1")[1]["items"]
 
 
 def test_existing_issue_documents_pass():
@@ -209,7 +206,7 @@ def test_existing_issue_documents_pass():
     """
     files = [f for f in git(REPO, "ls-files", "issues/").splitlines() if f.endswith(".md")]
     assert files
-    _, out = run(REPO, "--file", *files)
+    _, out = run_survey_check(REPO, "--file", *files)
     survey = [it for it in out["items"] if it["rule"] != "unnamed_redline" and not it["rule"].startswith("repo_")]
     assert survey == [], survey[:5]
 
@@ -219,7 +216,7 @@ def test_this_design_document_passes():
     files = ["issues/issue-2912-design.md", "issues/issue-2912-requirements.md"]
     if not all((REPO / f).exists() for f in files):
         pytest.skip("#2912 の設計文書が無い")
-    code, out = run(REPO, "--file", *files)
+    code, out = run_survey_check(REPO, "--file", *files)
     assert code == 0, out["items"]
 
 
@@ -315,7 +312,7 @@ def test_delegating_line_without_redline_is_flagged(tmp_path, word):
     line = f"既定値を 3 にするかは{word}。"
     body = design(decisions(f"### 決定 1: 既定値を決める\n\n{line}\n"))
     root = repo(tmp_path, {"issues/issue-1-design.md": body})
-    code, out = run(root, "--file", "issues/issue-1-design.md")
+    code, out = run_survey_check(root, "--file", "issues/issue-1-design.md")
     assert code == 1
     assert unnamed(out) == [line]
     name = out["items"][0]["name"]
@@ -327,7 +324,7 @@ def test_delegating_line_without_redline_is_flagged(tmp_path, word):
 def test_delegating_line_is_flagged_in_each_section(tmp_path, title):
     body = design(f"{title}\n\n| 項目 | 内容 |\n| --- | --- |\n| 既定値 | 利用者が決める |\n")
     root = repo(tmp_path, {"notes/d.md": body})
-    code, out = run(root, "--file", "notes/d.md")
+    code, out = run_survey_check(root, "--file", "notes/d.md")
     assert code == 1
     assert len(unnamed(out)) == 1
 
@@ -341,7 +338,7 @@ def test_left_table_rows_need_number_and_reason(tmp_path):
         )
     )
     root = repo(tmp_path, {"notes/d.md": body})
-    code, out = run(root, "--file", "notes/d.md")
+    code, out = run_survey_check(root, "--file", "notes/d.md")
     assert code == 1
     assert unnamed(out) == ["| 既定値を 3 にするか | 無し | 何となく |", "| 鍵を入れ替えるか | C1 |  |"]
 
@@ -361,7 +358,7 @@ def test_left_table_rows_need_number_and_reason(tmp_path):
 )
 def test_documents_without_unnamed_delegation_pass(tmp_path, body):
     root = repo(tmp_path, {"notes/d.md": body})
-    code, out = run(root, "--file", "notes/d.md")
+    code, out = run_survey_check(root, "--file", "notes/d.md")
     assert code == 0, out["items"]
     assert out["metrics"]["unnamed_redline"] == 0
 
@@ -375,7 +372,7 @@ def test_unnamed_redline_is_judged_per_document(tmp_path):
             "issues/issue-1-design-decisions.md": design(decisions("### 決定 1: x\n\n範囲は利用者が選ぶ。\n")),
         },
     )
-    code, out = run(root, "--issue", "1")
+    code, out = run_survey_check(root, "--issue", "1")
     assert code == 1
     assert [it["name"].split(":")[0] for it in out["items"]] == ["issues/issue-1-design-decisions.md"]
 
@@ -435,7 +432,7 @@ def detail_rules(out) -> list[str]:
 
 def test_a_complete_detail_document_passes(tmp_path):
     root = repo(tmp_path, {"issues/issue-7-design.md": HEAD, "issues/issue-7-design-detail.md": detail_doc()})
-    code, out = run(root, "--issue", "7", "--require-detail")
+    code, out = run_survey_check(root, "--issue", "7", "--require-detail")
     assert code == 0, out["items"]
     assert out["metrics"]["detail_docs"] == 1
 
@@ -446,7 +443,7 @@ def test_every_section_may_be_skipped_with_a_reason(tmp_path):
 
     skipped = {title: f"省く: {title}は当たらない" for title in detail_sections()}
     root = repo(tmp_path, {"issues/issue-7-design.md": LEGACY_HEAD, "issues/issue-7-design-detail.md": detail_doc(**skipped)})
-    code, out = run(root, "--issue", "7")
+    code, out = run_survey_check(root, "--issue", "7")
     assert code == 0, out["items"]
 
 
@@ -463,7 +460,7 @@ def test_every_section_may_be_skipped_with_a_reason(tmp_path):
 )
 def test_each_detail_rule_flags_its_gap(tmp_path, over, rule):
     root = repo(tmp_path, {"issues/issue-7-design.md": HEAD, "issues/issue-7-design-detail.md": detail_doc(**over)})
-    code, out = run(root, "--issue", "7")
+    code, out = run_survey_check(root, "--issue", "7")
     assert code == 1
     assert detail_rules(out) == [rule], out["items"]
 
@@ -471,31 +468,31 @@ def test_each_detail_rule_flags_its_gap(tmp_path, over, rule):
 def test_the_spec_table_needs_kind_and_side_effect_columns(tmp_path):
     spec = "| 関数 | 置き場 |\n| --- | --- |\n| `f` | `src/a.py` |"
     root = repo(tmp_path, {"issues/issue-7-design.md": HEAD, "issues/issue-7-design-detail.md": detail_doc(**{"関数の仕様": spec})})
-    _, out = run(root, "--issue", "7")
+    _, out = run_survey_check(root, "--issue", "7")
     assert detail_rules(out) == ["detail_section", "detail_section"]
 
 
 def test_the_file_rule_follows_the_head_document(tmp_path):
     outside = {"ファイル配置": "| パス | 種類 |\n| --- | --- |\n| `src/z.py` | 新設 |"}
     legacy = repo(tmp_path / "l", {"issues/issue-7-design.md": LEGACY_HEAD, "issues/issue-7-design-detail.md": detail_doc(**outside)})
-    assert run(legacy, "--issue", "7")[0] == 0
+    assert run_survey_check(legacy, "--issue", "7")[0] == 0
     neither = repo(
         tmp_path / "n", {"issues/issue-7-design.md": "# 設計\n\n## 構成要素\n\nなにか\n", "issues/issue-7-design-detail.md": detail_doc()}
     )
-    _, out = run(neither, "--issue", "7")
+    _, out = run_survey_check(neither, "--issue", "7")
     assert [(it["rule"], it["name"].split()[-1]) for it in out["items"]] == [("detail_file", "設計の結果")]
     alone = repo(tmp_path / "a", {"issues/issue-7-design-detail.md": detail_doc()})
-    _, out = run(alone, "--file", str(alone / "issues/issue-7-design-detail.md"))
+    _, out = run_survey_check(alone, "--file", str(alone / "issues/issue-7-design-detail.md"))
     assert detail_rules(out) == ["detail_file"]
 
 
 def test_require_detail_flags_a_missing_detail_document(tmp_path):
     root = repo(tmp_path, {"issues/issue-7-design.md": HEAD})
-    code, out = run(root, "--issue", "7", "--require-detail")
+    code, out = run_survey_check(root, "--issue", "7", "--require-detail")
     assert code == 1
     assert [(it["rule"], it["name"]) for it in out["items"]] == [("detail_missing", "#7")]
-    assert run(root, "--issue", "7")[0] == 0
-    code, out = run(root, "--file", str(root / "issues/issue-7-design.md"), "--require-detail")
+    assert run_survey_check(root, "--issue", "7")[0] == 0
+    code, out = run_survey_check(root, "--file", str(root / "issues/issue-7-design.md"), "--require-detail")
     assert detail_rules(out) == ["detail_missing"]
 
 
@@ -551,7 +548,7 @@ def test_findings_of_every_kind_keep_their_order_and_metrics(tmp_path):
             "issues/issue-7-design-detail.md": detail_doc(**gap),
         },
     )
-    code, out = run(root, "--issue", "1", "7", "--require-detail")
+    code, out = run_survey_check(root, "--issue", "1", "7", "--require-detail")
     assert code == 1
     assert [(it["rule"], it["name"]) for it in out["items"]] == [
         ("no_candidates", "issues/issue-1-design.md:21 決定 1"),

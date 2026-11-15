@@ -17,8 +17,10 @@ SCRIPTS = Path(__file__).resolve().parents[1]
 SCRIPT = SCRIPTS / "design-survey.py"
 SCHEMA = SCRIPTS.parent / "skills" / "design" / "schemas" / "design.schema.json"
 sys.path.insert(0, str(SCRIPTS / "lib"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import deps  # noqa: E402
+from survey_run import run_survey_check  # noqa: E402
 
 deps.require("md", "schema", "pathmatch")
 import design_repos as dr  # noqa: E402
@@ -195,12 +197,6 @@ def test_loss_rows_split_none_and_empty():
 # --- design-survey.py check ------------------------------------------------
 
 
-def _run(root: Path, *args: str):
-    p = subprocess.run([sys.executable, str(SCRIPT), "check", *args, "--root", str(root)], capture_output=True, text=True)
-    out = json.loads(p.stdout.strip().splitlines()[-1]) if p.stdout.strip() else None
-    return p.returncode, out
-
-
 def _repo(tmp_path: Path, text: str, settings=SETTINGS) -> Path:
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
     if settings is not None:
@@ -213,7 +209,7 @@ def _repo(tmp_path: Path, text: str, settings=SETTINGS) -> Path:
 
 def test_check_flags_head_design_without_table(tmp_path):
     root = _repo(tmp_path, doc(behavior=False, own=""))
-    code, out = _run(root, "--file", "issues/issue-16-design.md", "issues/issue-16-design-decisions.md")
+    code, out = run_survey_check(root, "--file", "issues/issue-16-design.md", "issues/issue-16-design-decisions.md")
     assert code == 1
     assert {it["rule"] for it in out["items"]} == {"repo_scope_missing"}
     assert all(it["name"].startswith("issues/issue-16-design.md:") for it in out["items"])
@@ -222,28 +218,28 @@ def test_check_flags_head_design_without_table(tmp_path):
 
 def test_check_passes_design_outside_paths(tmp_path):
     root = _repo(tmp_path, doc(behavior=False, own="", touched="plugins/mcp/x.json"))
-    code, out = _run(root, "--file", "issues/issue-16-design.md")
+    code, out = run_survey_check(root, "--file", "issues/issue-16-design.md")
     assert code == 0 and out["metrics"]["repo_scope_missing"] == 0
 
 
 def test_check_routes_loss_through_left_table(tmp_path):
     root = _repo(tmp_path, doc(rows=LOSS))
-    code, out = _run(root, "--file", "issues/issue-16-design.md")
+    code, out = run_survey_check(root, "--file", "issues/issue-16-design.md")
     assert code == 1 and [it["rule"] for it in out["items"]] == ["repo_loss_unrouted"]
     root2 = _repo(tmp_path / "b", doc(rows=LOSS, left="`P2`"))
-    code, out = _run(root2, "--file", "issues/issue-16-design.md")
+    code, out = run_survey_check(root2, "--file", "issues/issue-16-design.md")
     assert code == 0, out["items"]
 
 
 def test_check_without_settings_is_unchanged(tmp_path):
     root = _repo(tmp_path, doc(behavior=False, own=""), settings=None)
-    code, out = _run(root, "--file", "issues/issue-16-design.md")
+    code, out = run_survey_check(root, "--file", "issues/issue-16-design.md")
     assert code == 0 and "repo_scope_missing" not in out["metrics"]
 
 
 def test_check_stops_on_broken_settings(tmp_path):
     root = _repo(tmp_path, doc(), settings={"version": 1, "representative_repos": {"kinds": [], "redline": "P2"}})
-    code, out = _run(root, "--file", "issues/issue-16-design.md")
+    code, out = run_survey_check(root, "--file", "issues/issue-16-design.md")
     assert code == 2 and out["status"] == "stopped" and "design.json" in out["summary"]
 
 
