@@ -173,7 +173,7 @@ lroot2 の変更もまとめて出た。そのため lroot2 が出していた�
 | `plugins/ndf/scripts/lib/parallel_hold_cli.py` | `parallel.py park` の本体 |
 | `plugins/ndf/scripts/lib/parallel_launch.py` | 起動の耐久ステップ `parallel.launch`（一時レーンの起動と止まったレーンの再起動を 1 回打ち、立ち上がりを確かめ、立ち上がらなければ 1 回だけ打ち直す。別の一時レーンが動いているための断りは打ち直さずに空き待ち `waiting` で返す。失敗は結果で返す）と、起動の目的ごとに 1 回だけ流して起動の記録（`launches`）へ残し、2 回とも立ち上がらなければ区分 `spawn` の問いを立て、空き待ちはループの 1 回ごとに読み直す割り振り（`LaunchRouting`。`launch_waiting`）。`_Run` が継ぐ |
 | `plugins/ndf/scripts/lib/parallel_status.py` | `parallel.py status` の本体: 計画の宣言・レーンの状態の一覧・ループの記録・計画の台帳を読み合わせ、レーンごとに 1 行を返す。読めない欄は `null` にする |
-| `plugins/ndf/scripts/lib/parallel_helper.py` | 一時レーンの組み立て: 起動の入力（`helper_spawn`。`relay.py` へ渡す引数の列と打つ場所）・承認資料の場所（`present_approval`）・流すもの（`helper_task`） |
+| `plugins/ndf/scripts/lib/parallel_helper.py` | 一時レーンの組み立て: 起動の入力（`helper_spawn`。`relay.py` へ渡す引数の列と打つ場所）・承認資料の場所（`present_approval`）・流すもの（`helper_task`。自分の名前で送った依頼と答えの一覧 `asked` を添える）・最後の起動の指示（`last_launch`） |
 | `plugins/ndf/scripts/lib/delivery.py` | 宣言とリリースの経路からリリースの組み方と理由を返す（`release_way`） |
 | `plugins/ndf/scripts/lib/parallel_release.py` | まとめたリリース: 範囲の Pull Request をレーンへ対応づける（`present`・`map_lanes`）、先頭が進んだかを比べる 1 つの関数（`moved`）、加わった範囲が文書だけかの判定（`carry_check`）、範囲で答えられる依頼（`answerable`）、提示のプランと本番のプランの組み立て（`build_plans`・`present_gate_steps`・引き継ぐ提示 2 の `carried_gate_steps`）、リリースの依頼のプラン（`plan_release_request`） |
 | `plugins/ndf/scripts/lib/parallel_lane.py` | レーンの側: 自分が属する計画の判定（`lane_of`）・送り手の資格（`sender_of`）・本番チャネルにあるかの判定（`merged_on_production`）・依頼を送る（`send_release_request`・`request_gate1`・`request_ask`。リリース承認ゲートの依頼は `lib/parallel_gate2.py` の `request_gate2`・`request_confirmed`）・答えを読む（`read_answer`・`answers_of`）・プランの本数（`lane_plans`・`queue_max`） |
