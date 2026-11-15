@@ -7,16 +7,54 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 from pathlib import Path
 
 import design_pr_merge
 import jsonio
+import project_mvv as pm
 import step_read
 from sprint_loop_names import LOOP_DIR
 
 SPRINT_STATE = Path(__file__).resolve().parents[1] / "sprint-state.py"
 HEAD_LEN = 12  # 依頼の id に入れる SHA の桁
+
+
+def pr_numbers(value) -> list[int]:
+    """判定の記録の `pr`（mvv-gate.py の `--pr` の並び。古い記録や手で渡した値は 1 つの数）を番号の並びにする。"""
+    items = value if isinstance(value, list) else [value]
+    out = []
+    for x in items:
+        m = re.search(r"(\d+)\s*$", str(x if x is not None else ""))
+        if m:
+            out.append(int(m.group(1)))
+    return out
+
+
+def report_pr(item: dict) -> int | None:
+    """done の項目の報告にある計画の Pull Request の番号（設計のプランなら設計 PR）。読めなければ None。"""
+    try:
+        text = Path(item.get("report") or "").read_text(encoding="utf-8")
+    except OSError:
+        return None
+    m = re.search(r"^- Pull Request: (.*)$", text, re.M)
+    nums = pr_numbers(m.group(1).strip()) if m else []
+    return nums[0] if nums else None
+
+
+def last_verdict(state_path: str, gate: str, pr: int | None = None) -> dict:
+    """MVV 判定の記録（状態の置き場の jsonl）の、このループの 1 回の状態の最後の判定の行（承認ゲートの種類は design / release）。pr を渡せば、その PR を判定した行に
+    絞る（並行の設計で別の課題の判定を写さない）。無ければ空。"""
+    try:
+        rows = jsonio.read_jsonl(pm.gate_log_path(), missing=[], skip_broken=True)
+    except jsonio.JsonReadError:
+        rows = []
+    sp = str(Path(state_path).resolve())
+    hits = [r for r in rows if r.get("gate") == gate and str(Path(r.get("sprint") or "").resolve()) == sp]
+    if pr is not None:
+        hits = [r for r in hits if pr in pr_numbers(r.get("pr"))]
+    return hits[-1] if hits else {}
 
 
 def design_pr_head(run, main: str | Path, pr: int) -> str:
