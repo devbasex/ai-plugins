@@ -84,8 +84,9 @@ scripts/
 | `plugins/ndf/scripts/lib/project_decl.py` | 変更 | マージの方式の値を読む関数を足す | `project_lib/model.py`（今の読み方のまま） |
 | `plugins/ndf/scripts/lib/diff_kinds.py` | 変更 | `scripts/ci-heavy-skip.py` にある「差分が版数と説明だけか」の判定を移し、プラグインの中から呼べる正本にする | 無し |
 | `scripts/ci-heavy-skip.py` | 変更 | 移した判定を `diff_kinds` から読む。判定の振る舞いは変えない | `lib/diff_kinds.py` |
-| `plugins/ndf/scripts/release_lib/trunk_cd.py` | 新設 | main のバージョンの集約の書き手。範囲・上げ幅・版上げの PR の作成と取り込み・CD の確かめ・版上げの PR の見分け（I3） | `lib/diff_kinds.py`・`lib/gh_call.py`・`release-steps.py`（サブプロセス） |
-| `plugins/ndf/scripts/release_lib/merge_method.py` | 新設 | main へのマージの集約のただ 1 つの書き手。再開・照合・方式と ruleset の照合・投入・マージ・待ち（I4・I5・I6・I11・I13・I14） | `release_lib/trunk_cd.py`・`lib/branch_flow.py`・`lib/project_decl.py`・`lib/gh_call.py` |
+| `plugins/ndf/scripts/merged_lib/required_checks.py` | 変更 | 本番ブランチの ruleset の読み（merge queue の規則の有無・`strict_required_status_checks_policy`・`required_approving_review_count`）を 1 つの関数に足し、`merge_method` と `trunk_cd` が同じ読みを使う | 今のまま |
+| `plugins/ndf/scripts/release_lib/trunk_cd.py` | 新設 | main のバージョンの集約の書き手。範囲・上げ幅・版上げの PR の作成と取り込み・CD の確かめ・版上げの PR の見分け（I3）・版上げの PR の承認の数の確かめ（I14） | `lib/diff_kinds.py`・`lib/gh_call.py`・`merged_lib/required_checks.py`・`release-steps.py`（サブプロセス） |
+| `plugins/ndf/scripts/release_lib/merge_method.py` | 新設 | main へのマージの集約のただ 1 つの書き手。再開・照合・方式と ruleset の照合・投入・マージ・待ち（I4・I5・I6・I11・I13・I14） | `release_lib/trunk_cd.py`・`merged_lib/required_checks.py`・`lib/branch_flow.py`・`lib/project_decl.py`・`lib/gh_call.py` |
 | `plugins/ndf/scripts/trunk-steps.py` | 新設 | サブコマンド `facts`・`land`・`confirm`・`cd`・`pr-check` の引数を読み、モジュールを呼んで結果 JSON にする | `release_lib/merge_method.py`・`release_lib/trunk_cd.py`・`lib/approved_commit.py`・`lib/step_result.py` |
 | `plugins/ndf/contracts/entrypoints/plugins__ndf__scripts__trunk-steps.py.json` | 新設 | `trunk-steps.py` の入出力の契約（サブコマンド・引数・終了コード・読む設定） | 無し |
 | `plugins/ndf/contracts/index.md` | 変更 | 契約の一覧に `trunk-steps.py` の行を足す | 無し |
@@ -123,6 +124,7 @@ scripts/
 | `plugins/ndf/scripts/lib/branch_flow.py` | モジュール | `_resolved`（新設）・`from_snapshot`（変更）・`PROMOTIONS` と `INTEGRATE_POINTS` の値（変更） |
 | `plugins/ndf/scripts/project_lib/model.py` | `ProductionMerge` | 欄 `method` を足し、`admin` を省けるようにする（変更） |
 | `plugins/ndf/scripts/lib/project_decl.py` | モジュール | `production_method`（新設） |
+| `plugins/ndf/scripts/merged_lib/required_checks.py` | モジュール | `branch_rules`（新設） |
 | `plugins/ndf/scripts/lib/diff_kinds.py` | モジュール | `manifest_lines_only`・`changed_kinds`・`version_only`（`scripts/ci-heavy-skip.py` から移す。`kinds_of` は `changed_kinds` へ名前を変える）、`MANIFEST_RE`・`MANIFEST_LINE_RE`（移す） |
 | `scripts/ci-heavy-skip.py` | モジュール | `version_only` と `kinds_of` の呼び出しを `diff_kinds` へ替える（関数の定義を消す） |
 | `plugins/ndf/scripts/release_lib/trunk_cd.py` | `CdOutcome`・`ConfirmOutcome`・`CdStop`（新設） | — |
@@ -149,6 +151,7 @@ scripts/
 | `from_snapshot` | `plugins/ndf/scripts/lib/branch_flow.py` | 変更 | `(snap: dict \| None, base: str \| None, production: str \| None) -> ResolvedFlow` | 目録のスナップショットを `_resolved` で読む（I1 を検査に足す） | 今のまま | `_resolved` の事後条件 | 無し |
 | `production_method` | `plugins/ndf/scripts/lib/project_decl.py` | 新設 | `(root) -> str \| None` | `.ndf/project.json` の `production_merge.method` を返す | 無し | 値が `merge-queue`・`strict` のどれかなら値、キーが無い・型が違う・読めないなら `None`（既定の方式へ倒さない。倒すかは呼び手が決める） | ファイルの読み |
 | `version_only` | `plugins/ndf/scripts/lib/diff_kinds.py` | 変更 | `(root: str, a: str, b: str, behavior_as_code: bool = False) -> tuple[bool, str]` | `a..b` の差分が版数と説明だけかを返す（`scripts/ci-heavy-skip.py` から置き場だけを移す） | `a`・`b` は `root` で解けるコミット | 判定と省かない理由が移す前と同じ | 外部コマンド（`git diff`） |
+| `branch_rules` | `plugins/ndf/scripts/merged_lib/required_checks.py` | 新設 | `(root, branch: str) -> dict` | 本番ブランチの ruleset から、merge queue の規則の有無・`strict_required_status_checks_policy`・求める承認の数を読む（I6・I14 の正本） | 無し | `{merge_queue: bool, strict: bool, approvals: int}`。複数の規則があれば、真の値と承認の数の最大を採る。読めなければ `None` を返す（承認が要らないとみなさない。呼び手が止める） | ネットワーク（`GET /repos/{o}/{r}/rules/branches/{branch}`） |
 | `is_bump_pr` | `plugins/ndf/scripts/release_lib/trunk_cd.py` | 新設 | `(root, base: str, head: str, head_ref: str) -> tuple[bool, str]` | 版数を変えてよい PR（版上げの PR）かを返す（I3 の例外の唯一の判定） | `base`・`head` は `root` で解けるコミット | head のブランチが `release/v` で始まり、かつ `version_only(root, base, head)` が真のときだけ真。偽なら理由を返す | 外部コマンド（`git diff`） |
 | `pr_check` | `plugins/ndf/scripts/release_lib/trunk_cd.py` | 新設 | `(root, base: str, head: str, head_ref: str) -> tuple[int, str]` | 本番ブランチ宛ての PR がバージョンの置き場を変えていないかを判定する（I3） | 同上 | `plugins/*/.claude-plugin/plugin.json` の `version` の行が `base..head` で変わらなければ 0、変わっていて `is_bump_pr` が偽なら 1 と理由「バージョンは CD がマージの後に上げる」 | 外部コマンド（`git diff`） |
 | `last_bump_commit` | `plugins/ndf/scripts/release_lib/trunk_cd.py` | 新設 | `(root, plugin: str, tip: str) -> str` | 範囲の起点（`tip` から辿れる、配るプラグインのバージョンを最後に書いたコミット）を返す | `tip` は解けるコミット | `git log -1 --format=%H -G '"version"' <tip> -- plugins/<plugin>/.claude-plugin/plugin.json` の結果。マージコミットではなく版上げのコミットを指す | 外部コマンド（`git log`） |
@@ -156,15 +159,15 @@ scripts/
 | `bump_level` | `plugins/ndf/scripts/release_lib/trunk_cd.py` | 新設 | `(root, a: str, b: str) -> str` | 範囲にマージされた PR のラベルから上げ幅を決める | 同上 | `release:major` > `release:minor` > `release:patch` の最大。ラベルの無い PR は `patch`。PR が 1 本も無ければ `patch` | 外部コマンド（`git log --first-parent --merges`）・ネットワーク（`gh pr view --json labels`） |
 | `planned_version` | `plugins/ndf/scripts/release_lib/trunk_cd.py` | 新設 | `(root, plugin: str, level: str, ref: str) -> str` | `ref` の版に上げ幅を当てた予定のバージョンを返す（承認資料と版上げの PR が使う） | `ref` に `plugin` の `plugin.json` がある | `semver` の `bump_<level>` の結果 | ファイルの読み（`git show`） |
 | `open_bump_pr` | `plugins/ndf/scripts/release_lib/trunk_cd.py` | 新設 | `(root, production: str) -> dict \| None` | 開いた版上げの PR（head が `release/v` で始まり、宛先が本番ブランチ）を返す | 無し | 最も番号の小さい 1 本の `{number, headRefName, headRefOid}`、無ければ `None` | ネットワーク（`gh pr list`） |
-| `create_bump_pr` | `plugins/ndf/scripts/release_lib/trunk_cd.py` | 新設 | `(root, tip: str, plugins: dict[str, str], range_: tuple[str, str], token: str) -> int` | main の先端から版上げのブランチを作り、版上げと CHANGELOG の節のコミットを足して PR を作り、自動マージを頼む | `token` が空でない。`tip` は本番ブランチの先端。`plugins` は名前 → 新しいバージョン | `release/v<配るプラグインのバージョン>` が origin にあり、版数と説明と CHANGELOG だけを変える PR が開いていて、自動マージかキューへの投入が依頼されている。PR の番号を返す | 外部コマンド（`release-steps.py bump`・`changelog` のサブプロセス、`git commit`・`git push`）・ネットワーク（`gh pr create`・`gh pr merge --merge --match-head-commit`） |
-| `update_bump_pr` | `plugins/ndf/scripts/release_lib/trunk_cd.py` | 新設 | `(root, pr: dict, token: str) -> bool` | `strict` で、開いた版上げの PR が main の先端を含まなければ main を取り込み、新しい head で自動マージを頼み直す | `pr` は `open_bump_pr` の値。`token` が空でない | 取り込んだら真、取り込む必要が無ければ偽。真のとき PR の head は main の先端を祖先に持ち、自動マージはその head で依頼されている | ネットワーク（`GET compare`・`PUT update-branch`・`gh pr view`・`gh pr merge`） |
+| `create_bump_pr` | `plugins/ndf/scripts/release_lib/trunk_cd.py` | 新設 | `(root, tip: str, plugins: dict[str, str], range_: tuple[str, str], token: str) -> int` | main の先端から版上げのブランチを作り、版上げと CHANGELOG の節のコミットを足して PR を作り、自動マージを頼む | `token` が空でない。`tip` は本番ブランチの先端。`plugins` は名前 → 新しいバージョン | `release/v<配るプラグインのバージョン>` が origin にあり、版数と説明と CHANGELOG だけを変える PR が開いていて、自動マージかキューへの投入が依頼されている。PR の番号を返す。依頼の後に `branch_rules` の承認の数が 1 以上なら `CdStop("precondition")` を投げ、理由に求める承認の数と PR の番号を持つ（I14） | 外部コマンド（`release-steps.py bump`・`changelog` のサブプロセス、`git commit`・`git push`）・ネットワーク（`gh pr create`・`gh pr merge --merge --match-head-commit`・`branch_rules`） |
+| `update_bump_pr` | `plugins/ndf/scripts/release_lib/trunk_cd.py` | 新設 | `(root, pr: dict, token: str) -> bool` | `strict` で、開いた版上げの PR が main の先端を含まなければ main を取り込み、新しい head で自動マージを頼み直す | `pr` は `open_bump_pr` の値。`token` が空でない | 取り込んだら真、取り込む必要が無ければ偽。真のとき PR の head は main の先端を祖先に持ち、自動マージはその head で依頼されている。頼み直した後に `branch_rules` の承認の数が 1 以上で PR の `reviewDecision` が `APPROVED` でなければ `CdStop("precondition")`（I14。`create_bump_pr` と同じ理由） | ネットワーク（`GET compare`・`PUT update-branch`・`gh pr view`・`gh pr merge`・`branch_rules`） |
 | `run_cd` | `plugins/ndf/scripts/release_lib/trunk_cd.py` | 新設 | `(root, revision: str, method: str \| None, token: str \| None) -> CdOutcome` | CD の 1 回の実行（設計文書の「処理の流れ」の手順 1〜5）を順に行う | `revision` は本番ブランチへの push の先端。行が `trunk` | タグが足りなければ作られている。版上げの PR は開いたものが高々 1 本（I9）。結果の `cause` と `summary` が止まった理由を持つ | 外部コマンド（`release-steps.py publish` のサブプロセス）・ほかは `create_bump_pr`・`update_bump_pr` と同じ |
 | `confirm` | `plugins/ndf/scripts/release_lib/trunk_cd.py` | 新設 | `(root, merge_commit: str, budget: int) -> ConfirmOutcome` | マージコミットを含む main の先端にタグと GitHub Release がそろうのを待つ | `merge_commit` は main に入ったコミット | そろえば `ok` と版、CD が変化なしで終われば `ok` と空の版、CD の失敗なら `cd_failed`、上限を超えれば `ci_pending` | ネットワーク（`gh run list`・`gh run view`・`gh api` のタグと Release の照会） |
 | `applies` | `plugins/ndf/scripts/release_lib/merge_method.py` | 新設 | `(root, base_ref: str) -> bool` | この PR のマージを `merge_method` が持つか（行が `trunk` で、宛先が本番ブランチ）を返す | 無し | 宣言が読めないときは偽（今のマージへ渡す。設定の誤りは `land` と `check_method` が止める） | ファイルの読み |
 | `read_pr` | `plugins/ndf/scripts/release_lib/merge_method.py` | 新設 | `(root, n: int) -> PrState` | PR の状態を GraphQL 1 回で読む | 無し | `PrState` の欄がすべて埋まる | ネットワーク（`gh api graphql`） |
 | `record_user_merge` | `plugins/ndf/scripts/release_lib/merge_method.py` | 新設 | `(root, pr: PrState, approved: str \| None, method: str \| None) -> bool` | 人が GitHub でマージした PR に、人のマージの記録をコメントで 1 回だけ書く（I11） | `pr.merged` が真 | 印（`MERGE_MARKER`）のあるコメントが PR に 1 本ある。書いたら真、既にあれば偽 | ネットワーク（`gh pr view --json comments`・`gh pr comment`） |
-| `check_method` | `plugins/ndf/scripts/release_lib/merge_method.py` | 新設 | `(root, method: str \| None, branch: str, pr: PrState) -> None` | 設定の方式と本番ブランチの ruleset とレビューの承認を照らす（I6・I14） | 無し | 戻れば、方式が表にあり、ruleset と一致し、要るレビューの承認がある | ネットワーク（`GET /repos/{o}/{r}/rules/branches/{branch}`・GraphQL `mergeQueue(branch)`） |
-| `ungated_changes` | `plugins/ndf/scripts/release_lib/merge_method.py` | 新設 | `(root, pr: PrState) -> list[str]` | 承認ゲートを通らずに入れてはいけない変化（配るプラグインの中身と、利用者の設定 `.ndf/` の下・指示書 `AGENTS.md`・`CLAUDE.md`）を返す（I5・C7） | `pr.base_oid`・`pr.head_oid` が解ける | 版上げの PR（`trunk_cd.is_bump_pr` が真）なら空。それ以外は `trunk_cd.changed_plugins(merge-base, head)` のプラグインと、差分にある設定と指示書のパス | 外部コマンド（`git fetch`・`git merge-base`・`git diff`） |
+| `check_method` | `plugins/ndf/scripts/release_lib/merge_method.py` | 新設 | `(root, method: str \| None, branch: str, pr: PrState) -> None` | 設定の方式と本番ブランチの ruleset とレビューの承認を照らす（I6・I14） | 無し | 戻れば、方式が表にあり、ruleset と一致し、要るレビューの承認がある。ruleset は `branch_rules` で読む | ネットワーク（`branch_rules`・GraphQL `mergeQueue(branch)`） |
+| `ungated_changes` | `plugins/ndf/scripts/release_lib/merge_method.py` | 新設 | `(root, pr: PrState) -> list[str]` | 承認ゲートを通らずに入れてはいけない変化（配るプラグインの中身と、利用者の設定 `.ndf/` の下・指示書）を返す（I5・C7） | `pr.base_oid`・`pr.head_oid` が解ける | 指示書は、どの深さでもファイル名が `AGENTS.md`・`CLAUDE.md` のパスである（Claude Code と Codex は下位のディレクトリの指示書も読むため）。先に差分にある設定と指示書のパスを集め、版上げの PR（`trunk_cd.is_bump_pr` が真）でもそれを返す。版上げの PR で設定と指示書の変化が無ければ空。それ以外の PR は、設定と指示書のパスに `trunk_cd.changed_plugins(merge-base, head)` のプラグインを足して返す | 外部コマンド（`git fetch`・`git merge-base`・`git diff`） |
 | `ungated_allowed` | `plugins/ndf/scripts/release_lib/merge_method.py` | 新設 | `(root, info: dict) -> bool` | 承認ゲートを通らないマージで、行 `trunk` の本番ブランチ宛ての PR を通してよいかを判定する（I5） | `info` はマージの部品が最初に読んだ PR の情報 | `applies` が偽なら偽（今の承認ゲートの判定へ戻す）。真のとき、`ungated_changes` が空なら真、空でなければ `MergeStop` | 外部コマンドとネットワーク（`ungated_changes`） |
 | `enqueue` | `plugins/ndf/scripts/release_lib/merge_method.py` | 新設 | `(root, pr: PrState, head: str) -> None` | 承認した head を `expectedHeadOid` に渡してキューへ入れ、入ったことを PR の状態で確かめる（決定 6） | `check_method` を通った | 戻れば PR はキューにある。入っていなければ自動マージを外して `MergeStop("not_enqueued")` | ネットワーク（GraphQL `enqueuePullRequest`・`disablePullRequestAutoMerge`・`read_pr`） |
 | `merge_strict` | `plugins/ndf/scripts/release_lib/merge_method.py` | 新設 | `(root, pr: PrState, head: str) -> None` | head が本番ブランチの先端を祖先に持つかを確かめ、承認した head を `sha` に渡して迂回せずにマージする | `check_method` を通った | 戻れば GitHub がマージを受けた。含まなければ `MergeStop("behind")`、head の不一致（409）なら `MergeStop("head_moved")` | ネットワーク（`GET compare`・`PUT /pulls/{n}/merge`） |
@@ -206,7 +209,9 @@ scripts/
 | `update_bump_pr` | 取り込みが落ちる | `update-branch` の 422（衝突・`expected_head_sha` の不一致） | `update_bump_pr` | 止める（`CdStop("precondition")`） | `summary` に API の誤りの文 | 版上げの PR は残る。次の push の実行が読み直して再試行する |
 | `run_cd` | 秘密が無い | `NDF_RELEASE_TOKEN` が空 | `run_cd` の手順 2 の前 | 止める（タグの作成までは済ませる） | `::error::cause=precondition 秘密 NDF_RELEASE_TOKEN が無い`、終了コード 1 | マージは止まらない。秘密を置いた後の push で残りの範囲が版上げへ進む |
 | `run_cd` | タグか Release の作成が落ちる | `release-steps.py publish` の終了コードが 0 でない | `run_cd` の手順 1 | 止める | `::error::cause=precondition` と `publish` の出力の末尾、終了コード 1 | workflow の再実行で `publish` は足りないものだけを作る（冪等） |
-| `confirm` | CD が失敗した | そのマージか版上げの PR のマージの push の CD の実行が失敗で終わった | `confirm` の実行の照会 | 止める（`cd_failed`） | 結果 JSON の `summary` に実行の URL と、注釈の `cause` と理由。終了コード 1 | 原因を直して workflow を再実行した後、`confirm` を打ち直せる |
+| `create_bump_pr`・`update_bump_pr` | 承認が要る | `branch_rules` の承認の数が 1 以上で、版上げの PR に承認が無い | 自動マージの依頼の後 | 止める（`CdStop("precondition")`。PR と自動マージの依頼は残す） | `::error::cause=precondition 版上げの PR #N は承認が M 件要る`、終了コード 1 | 人が GitHub で版上げの PR を承認すれば、残した自動マージの依頼でマージされる。`confirm` は打ち直せる |
+| `branch_rules` | ruleset を読めない | `GET rules/branches` の失敗（ネットワーク・権限） | `branch_rules` | 呼び出し元へ返す（`None`） | 呼び手が `precondition` で止まる（`check_method` は `MergeStop`、`trunk_cd` は `CdStop`） | 何も書いていない。再実行できる |
+| `confirm` | CD が失敗した | そのマージか版上げの PR のマージの push の CD の実行が失敗で終わった（承認が要る版上げの PR の `precondition` を含む） | `confirm` の実行の照会 | 止める（`cd_failed`） | 結果 JSON の `summary` に実行の URL と、注釈の `cause` と理由。終了コード 1 | 原因を直して workflow を再実行した後、`confirm` を打ち直せる |
 | `confirm` | 上限を超えた | 版上げの PR のチェックかキューが `budget` の秒で終わらない | `confirm` の待ち | 止める（`ci_pending`） | `summary` に版上げの PR の番号と、チェックかキューのどちらで待つか。終了コード 1 | 打ち直せる（読むだけで書かない） |
 | `read_pr` | 読めない | GraphQL の失敗・PR が無い | `read_pr` | 再試行の後に止める（`MergeStop("precondition")`） | `land` の結果 JSON | 何も書いていないので再実行できる |
 | `record_user_merge` | コメントが書けない | 権限・ネットワーク | `record_user_merge` | 呼び出し元へ返す（`land` は `ok` のまま、`items` に `result: comment_failed`） | `summary` に「人のマージの記録を書けなかった」 | 再実行で印が無いため書き直す |
@@ -218,6 +223,7 @@ scripts/
 | `enqueue` | キューに入らない | すぐに入れられない PR で GitHub が自動マージに倒れた・誤りを返した | 投入の後の `read_pr` | 止める（`not_enqueued`）。`autoMergeRequest` があれば `disablePullRequestAutoMerge` で外す | `summary` に GitHub の誤りの文か「キューに無い」 | 自動マージは外してある。必須のチェックがそろってから再実行できる |
 | `merge_strict` | 先端を含まない | `compare` の `behind_by` が 1 以上 | `merge_strict` | 止める（`behind`） | `summary` に `behind_by` の値と「main を取り込んで承認を取り直す」 | スプリントの経路で main を取り込み、新しい head で承認を取り直す |
 | `merge_strict` | head の不一致 | マージの API の 409 | `merge_strict` | 止める（`head_moved`） | `land` と同じ | `land` と同じ |
+| `merge_strict` | ruleset がマージを拒む | マージの API の 405・422（必須のチェックや承認がそろわない） | `merge_strict` | 止める（`MergeStop("precondition")`）。`--admin` を付けて打ち直さない（I13） | `summary` に「方式があるため `--admin` を使わない」と GitHub の誤りの文。終了コード 1 | マージしていない。チェックか承認がそろってから `land` を打ち直せる |
 | `wait_landed` | キューから外れた | 組み合わせのチェックの失敗・衝突 | `wait_landed` | 止める（`queue_removed`）。同じ head で入れ直さない | `summary` に外れた PR の番号 | スプリントの経路へ差し戻す |
 | `wait_landed` | 上限を超えた | キューかチェックが `budget` の秒で終わらない | `wait_landed` | 止める（`ci_pending`） | `summary` に PR の番号とキューの位置 | キューに残っている。`land` を打ち直すとマージ済みか待ちの続きから進む |
 | `cmd_land` | 承認の記録が無い | `--approval` の資料に承認の記録が無い | `cmd_land`（`approved_commit.recorded_sha`） | 止める（`precondition`） | `summary` に資料のパスと「リリース承認ゲートの承認を記録する」。終了コード 1 | 承認の記録を書いてから再実行できる |
@@ -244,7 +250,7 @@ scripts/
 | `land` | 一致・方式 `strict` | `merge_strict` → `wait_landed` → `ok`（`by: ndf`） |
 | `land` | `gated` が偽（承認ゲートを通らない）・`ungated_changes` が空でない | `precondition`（I5） |
 | `ungated_allowed` | `applies` が偽 | 偽（今の `gate_stop` の判定へ戻す） |
-| `ungated_allowed` | `applies` が真・`ungated_changes` が空（設定と指示書を含まない文書だけ・版上げの PR） | 真（承認ゲートで止めずにマージへ進む） |
+| `ungated_allowed` | `applies` が真・`ungated_changes` が空（設定と指示書を含まない文書だけ・設定と指示書を変えない版上げの PR） | 真（承認ゲートで止めずにマージへ進む） |
 | `ungated_allowed` | `applies` が真・`ungated_changes` が空でない | `MergeStop("precondition")` |
 | `merge_when_green` の承認ゲートの判定 | `verdict.stops` が真・`a.gate_approved` が無い・`ungated_allowed` が偽 | 今の `gate_stop` |
 | `merge_when_green` の承認ゲートの判定 | `verdict.stops` が真・`a.gate_approved` が無い・`ungated_allowed` が真 | 止めずに緑を待つ |
@@ -256,6 +262,7 @@ scripts/
 | `run_cd` | 開いた PR が無い・`changed_plugins(last_bump_commit..先端)` が空 | 手順 3: 終わる（`ok`、版上げなし） |
 | `run_cd` | 開いた PR が無い・変化がある・秘密が無い | `precondition` |
 | `run_cd` | 開いた PR が無い・変化がある・秘密がある | 手順 4〜5: `create_bump_pr` |
+| `run_cd` | 版上げの PR を作るか取り込んだ・`branch_rules` の承認の数が 1 以上・PR に承認が無い | `precondition`（注釈に求める承認の数と PR の番号。I14） |
 | `confirm` | 先端の版のタグと GitHub Release があり、`merge_commit` がタグの祖先 | `ok`（版） |
 | `confirm` | そのマージの push の CD の実行が成功で終わり、開いた版上げの PR が無く、タグの版が変わらない | `ok`（空の版。終了コード 3） |
 | `confirm` | どちらかの push の CD の実行が失敗で終わった | `cd_failed` |
@@ -339,7 +346,7 @@ scripts/
 | `applies` | `merged_lib/merge.py` の `delivery.judge_target` | `merged_lib/merge.py` を読んだ | 一部を使う。宛先が本番ブランチかは同じ宣言から読み、行の判定を足す |
 | `read_pr` | `merged_lib/pr_info.py` | `grep -n "^def" merged_lib/pr_info.py` | 使えない。`isInMergeQueue`・`autoMergeRequest`・`id` を読まない |
 | `record_user_merge` | `release_lib/record.py` の `post_comment` | `grep -n "^def" release_lib/record.py` | 使う（コメントの投稿） |
-| `check_method` | `merged_lib/required_checks.py` の ruleset の読み | `grep -n "rules/branches" -r plugins/ndf/scripts` | 一部を使う。ruleset の取得を同じ関数で行い、merge queue と `strict` の欄の読みを足す |
+| `check_method`・`create_bump_pr`・`update_bump_pr` | `merged_lib/required_checks.py` の ruleset の読み | `grep -n "rules/branches" -r plugins/ndf/scripts` | 一部を使う。ruleset の取得を同じ関数で行い、merge queue・`strict`・承認の数の欄の読みを `branch_rules` に足す。`merge_method` と `trunk_cd` は同じ関数を呼ぶ |
 | `ungated_changes` | `trunk_cd.is_bump_pr`・`trunk_cd.changed_plugins` | この文書の関数 | 使う。判定を 2 か所に持たない |
 | `ungated_allowed` | `ungated_changes` | 同上 | 使う |
 | `enqueue` | `gh pr merge --match-head-commit` | 決定 6 | 使えない。チェックの前なら自動マージに倒れ、`land` の外でマージが起きる |
@@ -373,7 +380,7 @@ scripts/
 | `bump_level` | `release:minor` と無ラベルで `minor` | PR が無い範囲で `patch` | 照会の失敗 → `CdStop` |
 | `planned_version` | `10.27.71` と `minor` で `10.28.0` | `major` | 版が semver でない → `CdStop` |
 | `open_bump_pr` | 開いた `release/v` の PR を返す | 2 本あれば番号の小さい方 | 照会の失敗 → `CdStop` |
-| `create_bump_pr` | PR を作り、自動マージを頼む | `merge-queue` と `strict` で同じ依頼 | `bump` の失敗・push の失敗 → `CdStop`、自動マージの失敗は PR を残して返す |
+| `create_bump_pr` | PR を作り、自動マージを頼む | `merge-queue` と `strict` で同じ依頼。承認の数 0 で止まらない | `bump` の失敗・push の失敗 → `CdStop`、自動マージの失敗は PR を残して返す。承認の数 1 で承認が無い → PR を残して `CdStop("precondition")` と数と番号 |
 | `update_bump_pr` | 先端を含まない PR に読んだ head を渡して取り込み、新しい head で頼み直す | 含む PR では何もしない | 422 → `CdStop` |
 | `run_cd` | 変化のある範囲で版上げの PR を 1 本作る | 開いた PR があると作らない・文書だけの範囲で作らない | 秘密が無い → タグを作って `precondition`、終了コード 1 と注釈 |
 | `confirm` | タグと Release がそろうと `ok` と版 | 変化なしの成功で空の版 | 実行の失敗で `cd_failed` と URL、上限で `ci_pending` と版上げの PR の番号 |
@@ -381,10 +388,10 @@ scripts/
 | `read_pr` | 偽の GraphQL の応答から欄を埋める | マージ済みの PR | 照会の失敗 → `MergeStop` |
 | `record_user_merge` | 印の無い PR に 1 本書く | 印のある PR に書かない | 書けないと偽と項目 |
 | `check_method` | 方式と ruleset が一致すれば戻る | `strict` の承認 0 | 方式が無い・食い違い・承認が無い → `precondition` と 2 つの値 |
-| `ungated_changes` | プラグイン・設定・指示書の変化を返す | 版上げの PR で空。`.ndf/` か `AGENTS.md` だけを変える PR で空でない | 差分を取れない → `MergeStop` |
+| `ungated_changes` | プラグイン・設定・指示書の変化を返す | 設定と指示書を変えない版上げの PR で空。`.ndf/` か `AGENTS.md` だけを変える PR・`plugins/x/CLAUDE.md` だけを変える PR・`AGENTS.md` を変える版上げの PR で空でない | 差分を取れない → `MergeStop` |
 | `ungated_allowed` | 文書だけの PR で真 | 行 `trunk` でない宛先で偽 | プラグインを変える PR で `MergeStop` |
 | `enqueue` | 承認した head を `expectedHeadOid` に渡す | 既にキューにある PR | 応答が成功でもキューに無い → 自動マージを外して `not_enqueued` |
-| `merge_strict` | `behind_by` 0 で `sha` 付きのマージ | `behind_by` 0 で `admin` が真でも迂回しない | `behind_by` 1 → `behind`、409 → `head_moved` |
+| `merge_strict` | `behind_by` 0 で `sha` 付きのマージ | `behind_by` 0 で `admin` が真でも迂回しない | `behind_by` 1 → `behind`、409 → `head_moved`、405・422 → `precondition`（`--admin` で打ち直さない） |
 | `wait_landed` | マージで戻る | 上限ちょうど | 外れた → `queue_removed`（入れ直さない）、上限超え → `ci_pending` |
 | `land` | 一致でキューへ入れてマージ済みで `ok` | マージ済みで `ok`、投入もマージも打たない | head の不一致 → `head_moved`、投入もマージも打たない |
 | `merge_from_watch` | 方式に従ってマージし、項目の `admin` が偽 | `merge-queue` と `strict` | `MergeStop` を結果 JSON の `stopped` にする |
