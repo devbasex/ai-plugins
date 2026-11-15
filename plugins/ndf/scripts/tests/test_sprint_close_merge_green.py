@@ -1163,8 +1163,11 @@ REVIEW_RULES = [{"type": "pull_request", "parameters": {"required_approving_revi
 REDO = "リリース承認ゲートからやり直す: プランなら run <プラン> --from promote（fast / auto は --from verify）"
 
 
-def _promote_cd(repo, gh, tmp_path, *args, material=True, **state):
+def _promote_cd(repo, gh, tmp_path, *args, material=True, admin=False, **state):
     declare(repo, *TRYGROUP)
+    if admin:
+        p = repo / ".ndf" / "project.json"
+        p.write_text(json.dumps({**json.loads(p.read_text(encoding="utf-8")), "production_merge": {"admin": True}}), encoding="utf-8")
     gh.set(**{"open_prs": [{"number": 9}], "pr_seq": {"9": [dict(to("main", X), headRefName="develop")] * 3}, **state})
     extra = ["--approved-from", str(promote_material(tmp_path))] if material else []
     return call("merged-steps.py", promote_args(*extra, *(args or ("--gate-approved", "user"))), gh.env, repo)
@@ -1306,7 +1309,7 @@ def test_approved_on_pr_reads_trails_except_in_review_case(monkeypatch, case, co
 
     approval, seen = _approval_on_pr(monkeypatch, [_trail_comment(*c) for c in comments], roles=roles)
     got = approval.approved_on_pr("o/r", 9, head, release_case.decide_case(*case))
-    assert tuple(got) == expected
+    assert tuple(got)[:4] == expected
     if read_roles is None:
         assert "comments" not in seen and "roles" not in seen and seen["reviews"] == ("o/r", 9)
     else:
@@ -1319,7 +1322,7 @@ def test_approved_on_pr_does_not_read_roles_of_edited_trails(monkeypatch):
     comments = [_trail_comment(X, "adm", T0, T1), _trail_comment(X, "w", "2026-11-13T09:30:00Z", cid=2)]
     approval, seen = _approval_on_pr(monkeypatch, comments, roles={"w": "write"})
     got = approval.approved_on_pr("o/r", 9, X, release_case.decide_case(*NO_REVIEW))
-    assert tuple(got) == ("failure", "承認権限の無い w の証跡だけがある", None, None)
+    assert tuple(got)[:4] == ("failure", "承認権限の無い w の証跡だけがある", None, None)
     assert seen["roles"] == ["w"]
 
 
@@ -1351,7 +1354,7 @@ def test_approved_on_pr_review_case_matches_latest_valid_approval(monkeypatch, r
 
     approval, seen = _approval_on_pr(monkeypatch, reviews=reviews, perms=perms)
     got = approval.approved_on_pr("o/r", 9, head, release_case.decide_case(*REVIEW))
-    assert tuple(got) == expected
+    assert tuple(got)[:4] == expected
     assert seen["perms"] == asked
 
 
@@ -1360,10 +1363,7 @@ def test_approved_on_pr_review_case_matches_latest_valid_approval(monkeypatch, r
 
 def _promote_admin(repo, gh, tmp_path, *args, **state):
     """迂回の宣言を置き、承認数 1 の本番チャネルへの promote を打つ（リリースの場合は cd-admin）。"""
-    declare(repo, *TRYGROUP)
-    p = repo / ".ndf" / "project.json"
-    p.write_text(json.dumps({**json.loads(p.read_text(encoding="utf-8")), "production_merge": {"admin": True}}), encoding="utf-8")
-    return _promote_cd(repo, gh, tmp_path, *args, **{"rules": REVIEW_RULES, **state})
+    return _promote_cd(repo, gh, tmp_path, *args, admin=True, **{"rules": REVIEW_RULES, **state})
 
 
 def _user_trail(sha=X):

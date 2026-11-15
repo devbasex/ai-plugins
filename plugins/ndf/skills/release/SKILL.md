@@ -27,10 +27,8 @@ CD はブランチへのマージを起点に環境へ反映する、NDF の工�
 
 ### リリースの場合
 
-**リリース承認を取る場所とマージする主体は、CD の有無・レビュー必須の有無・迂回の宣言で決まる。** 判定は `release-steps.py release-case` が出す
-（`metrics.case`。正本は `scripts/lib/release_case.py`）。CD の有無は `delivery` の本番チャネルへのマージで届く `kind: auto` の行、
-レビュー必須かは本番チャネルの ruleset の承認数で読む。ruleset を読めなければ「CD があり、レビューなしでマージできる」として扱う。
-迂回の宣言は `.ndf/project.json` の `production_merge.admin`（`true` のときだけ宣言あり）。
+**リリース承認を取る場所とマージする主体は、CD の有無・レビュー必須の有無・迂回の宣言で決まる。** 判定は `release-steps.py release-case` が出す（`metrics.case`。正本は `scripts/lib/release_case.py`）。
+CD の有無は `delivery` の本番チャネルへのマージで届く `kind: auto` の行、レビュー必須かは本番チャネルの ruleset の承認数で読む。ruleset を読めなければ「CD があり、レビューなしでマージできる」として扱う。迂回の宣言は `.ndf/project.json` の `production_merge.admin`（`true` のときだけ宣言あり）。
 
 | 場合（`case`） | リリース承認を取る場所 | マージする主体 |
 | --- | --- | --- |
