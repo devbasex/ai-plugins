@@ -1139,12 +1139,13 @@ def test_the_production_merge_carries_who_approved(monkeypatch, tmp_path, by, us
         mod.ac.record_approval(material, sha, by, "2026-11-07T10:00")
     seen = []
     monkeypatch.setattr(mod, "find_pr", lambda *a, **k: None)
-    monkeypatch.setattr(mod, "create_pr", lambda *a: 9)
+    monkeypatch.setattr(mod, "create_pr", lambda *a: seen.append(a[-1]) or 9)
     monkeypatch.setattr(mod, "wait_and_merge", lambda r, n, **kw: seen.append(kw) or "m")
     a = argparse.Namespace(version="1.2.3", ci_wait=60.0, approval=str(material) if use_material else None)
     verdict = mod.ac.Verdict(True, sha, "b" * 40, "match")
     mod._merge_prod_pr(tmp_path, a, "ndf", "release/v1.2.3", "main", 7, sha, None, verdict, [], {})
-    assert seen[0]["gate_approved"] == expected and seen[0]["expect"] == "b" * 40
+    # 本番の PR も旧いプラグインの変更を運ぶので、本文に ndf-next の port 検査の印を持つ
+    assert mod.reviewed.NO_PORT_LINE in seen[0] and seen[1]["gate_approved"] == expected and seen[1]["expect"] == "b" * 40
 
 
 def _record(monkeypatch, root, **args):
@@ -1282,6 +1283,7 @@ def _reviewed_prod(monkeypatch, tmp_path, case, state, found=None, wait_and_merg
         rv, "git", lambda r, *a, check=True: subprocess.CompletedProcess(a, 1 if a[:2] == ("rev-parse", "-q") else 0, "", "")
     )
     monkeypatch.setattr(rv.repo_lib, "restore_branch", lambda *a, **k: None)
+    monkeypatch.setattr(rv, "ensure_no_port_line", lambda root, pr: pr)  # 印の足し方は test_ensure_no_port_line_* が確かめる
     monkeypatch.setattr(rv, "repo_or_stop", lambda r: "o/r")
     monkeypatch.setattr(rv.approval_trail, "read_head", lambda repo, n: (HEAD, "main", "open"))
     monkeypatch.setattr(
