@@ -2,6 +2,7 @@
 
 事実の表（`contracts/facts/*.json` と `contracts/domains/*.json`）がある事実は、表から読む。表の形は `contracts/facts/fact.schema.json`（I-DT2・DC1）と列の宣言から作る行の形を
 `jsonschema`（draft 2020-12）で確かめる（設計の決定 46・47。実行時の読み手は形を検査しない）。表の `id` を定数へ写したものも重複に数える。
+ただし `shared_names` が真の表は、`id` が他の名前空間と共有する名前なので、定数との照合（`table-set`・`table-str`）から外す（形は確かめる）。
 """
 
 from __future__ import annotations
@@ -158,7 +159,7 @@ def shape_errors(data: object, common: Draft202012Validator) -> list[str]:
 
 
 def _table_rows(path: Path, rel: str, common: Draft202012Validator) -> tuple[list[str], list[Finding]]:
-    """事実の表 1 本の `id` の並びと、形の違反。形が違えば `id` を返さない。"""
+    """事実の表 1 本の照合に使う `id` の並びと、形の違反。形が違うか、`shared_names` が真なら `id` を返さない。"""
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
@@ -168,7 +169,7 @@ def _table_rows(path: Path, rel: str, common: Draft202012Validator) -> tuple[lis
         return [], bad
     ids = [r["id"] for r in data["rows"]]
     dups = sorted({i for i in ids if ids.count(i) > 1})
-    return ids, [Finding("fact-table", rel, 1, f"`id` の重なり: {d}") for d in dups]
+    return [] if data.get("shared_names") is True else ids, [Finding("fact-table", rel, 1, f"`id` の重なり: {d}") for d in dups]
 
 
 def _table_paths(scope: Scope, contracts_dir: str) -> list[Path]:
@@ -185,6 +186,7 @@ def tables(scope: Scope, contracts_dir: str) -> tuple[dict[str, list[str]], list
     """事実の表（`<contracts_dir>/facts/` と `<contracts_dir>/domains/`）を読み、表の名前 → `id` の並びと、形の違反を返す。
 
     表が無ければ空。2 つの置き場が同じ名前の表を持てば、後の置き場の表を違反にする（読み手は名前だけで引く）。
+    `shared_names` が真の表は形だけを確かめ、返す `id` の対応に含めない（定数との照合をしない）。
     """
     paths = _table_paths(scope, contracts_dir)
     found: list[Finding] = []
@@ -192,11 +194,15 @@ def tables(scope: Scope, contracts_dir: str) -> tuple[dict[str, list[str]], list
     if not paths:
         return ids, found
     common = table_validator(scope.plugin_root / contracts_dir / FACTS_DIR / SCHEMA_FILE)
+    seen: set[str] = set()
     for path in paths:
-        if path.stem in ids:
+        if path.stem in seen:
             found.append(Finding("fact-table", scope.rel(path), 1, f"表の名前 {path.stem} が別の置き場の表と重なる"))
             continue
-        ids[path.stem], bad = _table_rows(path, scope.rel(path), common)
+        seen.add(path.stem)
+        rows, bad = _table_rows(path, scope.rel(path), common)
+        if rows:
+            ids[path.stem] = rows
         found += bad
     return ids, found
 

@@ -71,7 +71,7 @@ Skill の本文の呼び出しは `ndf answer <ゲート> <番号>` のように
 
 ### 決定 6: Skill の入出力を 1 か所で持つため、事実の表 `skill-io` を置き、公開する Skill の引数と環境変数はエントリポイントの表から読む
 
-Skill の入出力の表（`contracts/domains/skill-io.json`）は、事実の表の形（`fact.schema.json`）で書く。既存の検査（規則 `fact-table`・`const-fact`）が、そのまま形と重複を見る。公開する Skill（エントリポイントの表の種類 `skill`・`block` の `target`）の引数と環境変数は、エントリポイントの表が正本である。`skill-io` の行は `args`・`env` を持たず、持てば規約の検査が落とす。
+Skill の入出力の表（`contracts/domains/skill-io.json`）は、事実の表の形（`fact.schema.json`）で書く。表の形と `id` の重なりは、既存の規則 `fact-table` が見る。Skill の名前は、工程 id・副命令名・作業の種類と同じ字を設計上持つ。そのため表は `shared_names` を宣言し、規則 `const-fact` のうち表との照合（`table-set`・`table-str`）からは外す。コードの定数どうしの重複は、今どおり `const-fact` が見る。公開する Skill（エントリポイントの表の種類 `skill`・`block` の `target`）の引数と環境変数は、エントリポイントの表が正本である。`skill-io` の行は `args`・`env` を持たず、持てば規約の検査が落とす。
 
 Skill の frontmatter に持つ形は採らない。Skill の本文は S1a #3303 が移す途中で、本文の書き換えはこの課題の範囲の外である。frontmatter の検査（`scripts/check-skill-frontmatter.py`）は、今の版のものである。ndf-next の事実の表の検査とは別の仕組みになる。
 
