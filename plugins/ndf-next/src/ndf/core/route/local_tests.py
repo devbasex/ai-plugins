@@ -10,7 +10,7 @@ import argparse
 import json
 import subprocess
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Optional, Union
 
@@ -45,9 +45,15 @@ def read_result(path: Union[str, Path], label: str, error: type[Exception] = Loc
         raise error(f"{label} {path} を読めない: {exc.strerror or exc}") from None
 
 
+def _metrics_of(found: Mapping[str, Any]) -> Mapping[str, Any]:
+    """結果 JSON の `metrics`。無いか形が違えば空。"""
+    metrics = found.get("metrics")
+    return metrics if isinstance(metrics, Mapping) else {}
+
+
 def failed_tests_in(found: Mapping[str, Any]) -> list[str]:
     """結果 JSON の落ちたテスト（`metrics.failed_tests`）。無いか形が違えば空。"""
-    metrics = found.get("metrics") if isinstance(found.get("metrics"), Mapping) else {}
+    metrics = _metrics_of(found)
     tests = metrics.get("failed_tests") if isinstance(metrics.get("failed_tests"), list) else []
     return [str(t) for t in tests]
 
@@ -63,22 +69,26 @@ def _read_ci_result(path: Path) -> tuple[list[str], dict[str, Any]]:
     return failed_tests_in(found), found
 
 
+def _listed(reads: Sequence[Any], render: Callable[[Mapping[str, Any]], str], sep: str) -> str:
+    """読み取りの記録の Mapping の要素だけを `render` して `sep` で繋ぐ。無ければ『読んだチェックが無い』。"""
+    parts = [render(r) for r in reads if isinstance(r, Mapping)]
+    return sep.join(parts) if parts else "読んだチェックが無い"
+
+
+def _runner_label(read: Mapping[str, Any]) -> str:
+    runner = read.get("runner")
+    label = runner if isinstance(runner, str) and runner else "当たる suite が無い"
+    return f"{label}（チェック {read.get('check')}）"
+
+
 def _unread_runners(reads: Sequence[Any]) -> str:
     """読み取りの記録から、ログを読めなかった suite の `runner` とチェックの名前を並べる。"""
-    parts = []
-    for read in reads:
-        if not isinstance(read, Mapping):
-            continue
-        runner = read.get("runner")
-        label = runner if isinstance(runner, str) and runner else "当たる suite が無い"
-        parts.append(f"{label}（チェック {read.get('check')}）")
-    return "、".join(parts) if parts else "読んだチェックが無い"
+    return _listed(reads, _runner_label, "、")
 
 
 def _check_reasons(reads: Sequence[Any]) -> str:
     """読み取りの記録から、チェックごとの読めなかった理由を並べる。"""
-    parts = [f"{r.get('check')}: {r.get('reason')}" for r in reads if isinstance(r, Mapping)]
-    return "; ".join(parts) if parts else "読んだチェックが無い"
+    return _listed(reads, lambda r: f"{r.get('check')}: {r.get('reason')}", "; ")
 
 
 def unread_detail(found: Mapping[str, Any], path: Path) -> str:
@@ -89,7 +99,7 @@ def unread_detail(found: Mapping[str, Any], path: Path) -> str:
     """
     if causes.kind_of(found.get("cause")) != "test_failed":
         return f"CI の結果 {path} に落ちたテストが無い（全体テストは打たずに止まる）"
-    metrics = found.get("metrics") if isinstance(found.get("metrics"), Mapping) else {}
+    metrics = _metrics_of(found)
     reads = metrics.get("failed_test_reads")
     if not isinstance(reads, list):
         raise LocalTestError(f"CI の結果 {path} に読み取りの記録（metrics.failed_test_reads）が無い（ndf ci watch の結果でない）")
