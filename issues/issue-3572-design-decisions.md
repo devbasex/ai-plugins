@@ -24,8 +24,13 @@
 
 ### 決定 2: 本番の PR を fix の worker のあるプランでマージしないため、`merge` の部品の直前に `release-guard` を置き、テンプレートの検査で縛る
 
-`release_plan.forbidden(plan)` は、`release: true` のプランについて、worker を起動するステップ・`push` を使うステップ
-（`push`・`fix-push`・`ci-fix`・`fix-base`・`base-sync`）・次のバージョンの用意のステップ・最初が `ndf release-steps merge` でないことを返す。
+`release_plan.forbidden(plan)` は、`release: true` のプランについて次の 4 つを返す。
+
+- worker を起動するステップ
+- `push` を使うステップ（`push`・`fix-push`・`ci-fix`・`fix-base`・`base-sync`）
+- 次のバージョンの用意のステップ
+- 最初が `ndf release-steps merge` でないこと
+
 `release: true` でないテンプレートについては、`merge` の部品（`check.json` では `merge-gate`）の直前に `release-guard` が無いことを返す。
 
 `trunk` の行ではスプリントの PR が本番の PR を兼ね、今の行ではリリースブランチの PR が本番の PR である。どちらも宛先が本番ブランチの PR で、
@@ -66,7 +71,7 @@
 リリース承認ゲートの待ちは、答えの確認のために本番の PR を GitHub から読み直している（`github_observe`）。この読み直しで PR が
 マージ済みなら、マージした head への承認（経路 `github-merge`、答えた者は `merged_by` のログイン）とする。キューへ入れてマージされた PR では、
 `merged_by` はキューへ入れた人である（確かめ 7）。キューへ入れただけでまだマージされていない PR は承認として扱わず、待ちを続ける。
-判定は `merge_decide` が持つ。承認ゲートは `release-steps answer --route github-merge` を呼んで承認の記録を書かせ、本番のプランは
+判定は `merge_decide` が持つ。承認ゲートは `release-steps answer --route github-merge` を呼んで承認の記録を書かせる。本番のプランは
 最初の `merge` でマージ済みの PR から再開し（`land._resume_merged`）、人のマージの記録を行う。`pull_request` の `closed` で動く workflow は、
 承認ゲートの答えを書く経路を持たないため採らない。人のマージは、承認ゲートで別の head へ与えた承認を引き継がない（受け入れ条件 8）。
 
@@ -184,8 +189,8 @@ push には迂回が効かず、承認 1 と必須のチェックが掛かる。
 
 ### 決定 10: `trunk` の行では同期の PR を作らない
 
-develop が無く、main へ入ったバージョン上げのコミットを戻す先が無いため、`trunk` の行では `land._sync`（本番ブランチからベースブランチ宛ての PR）を
-呼ばず、結果に `sync_pr` を出さない。今の行（ベースブランチが本番ブランチと違う）では今のまま作る（要求の前提 9。決定 16）。
+`trunk` の行では `land._sync`（本番ブランチからベースブランチ宛ての PR）を呼ばず、結果に `sync_pr` を出さない。
+develop が無く、main へ入ったバージョン上げのコミットを戻す先が無いためである。今の行（ベースブランチが本番ブランチと違う）では今のまま作る（要求の前提 9。決定 16）。
 
 - 作り方: 標準に倣う
 - 比べた候補: STD3
@@ -293,8 +298,8 @@ ai-plugins の設定ファイルの値である。既定の行（`branch_flow` �
 そのため、main への push で `bump` と `publish` を打つ workflow の仕事を今の行にも当て、今の行のタグの作り手を `publish` にする。`publish` は
 あるタグを作らないため、手動の起動（`step=publish`）と重なっても 1 つしか作らない。
 
-今の行でマージの方式を必須にしないのは、本番の PR がリリースブランチの PR で 1 度に 1 つしか開かず、組み合わせはベースブランチ（か選んで集めた
-リリースブランチ）で既に CI を通っているためである。
+今の行ではマージの方式を必須にしない。本番の PR はリリースブランチの PR で、1 度に 1 つしか開かない。組み合わせはベースブランチ（か選んで集めた
+リリースブランチ）で既に CI を通っている。
 
 | 比べた候補 | 採否と理由 |
 | --- | --- |
@@ -309,9 +314,9 @@ ai-plugins の設定ファイルの値である。既定の行（`branch_flow` �
 
 ### 決定 17: 同時に承認された PR の組み合わせを確かめてから入れるため、マージの方式を `.ndf/project.json` の `production_merge.method` で選び、本番ブランチの ruleset と照らす
 
-GitHub flow ではスプリントの PR が直接本番ブランチへ入るため、ほぼ同時に承認された A と B のうち後の B は、`strict` が偽なら A を取り込まずにマージでき、
-A+B の組み合わせが CI を通らずに本番へ出る（確かめ 6）。組み合わせの確かめは GitHub の merge queue に任せ（LIB3）、使えないリポジトリ
-（STD9: Organization の public か Enterprise Cloud の private でない）には `strict`（最新の取り込みを必須にする）を同じ設定の別の値として持たせる。
+GitHub flow ではスプリントの PR が直接本番ブランチへ入る。ほぼ同時に承認された A と B のうち後の B は、`strict` が偽なら A を取り込まずにマージできる。
+そのため A+B の組み合わせが CI を通らずに本番へ出る（確かめ 6）。組み合わせの確かめは GitHub の merge queue に任せる（LIB3）。
+merge queue を使えないリポジトリ（STD9: Organization の public か Enterprise Cloud の private でない）には、`strict`（最新の取り込みを必須にする）を同じ設定の別の値として持たせる。
 
 | 値 | 本番ブランチの ruleset に要るもの | `land` の動き |
 | --- | --- | --- |
@@ -328,8 +333,8 @@ ruleset の読み取りは `GET /repos/{o}/{r}/rules/branches/{branch}`（本番
 NDF の承認ゲートの承認は PR のコメントで、GitHub のレビューの承認ではない。そのため、本番ブランチの PR の規則が承認 1 以上を求めると、
 迂回を使わない（I17）`land` は投入もマージもできない。マージの方式を使うリポジトリは、本番ブランチの PR の規則の承認の数を 0 にする
 （ai-plugins は 11.0.0 の入れ替えのとき。決定 23・設計文書の「人へ残す判断」の C2 の行）。人の承認は、リリース承認ゲートと、それと等価な人の GitHub でのマージが持つ。
-`land` は照らし合わせで、規則の `required_approving_review_count` が 1 以上で、PR の `reviewDecision` が `APPROVED` でなければ、原因 `precondition`・
-理由に「本番ブランチの規則がレビューの承認を求め、PR に承認が無い」を出して投入もマージもせずに止まる（I15）。承認の数を残したまま、
+`land` は照らし合わせで、規則の `required_approving_review_count` が 1 以上で、PR の `reviewDecision` が `APPROVED` でないかを見る。
+そのときは投入もマージもせずに止まり、原因 `precondition`・理由に「本番ブランチの規則がレビューの承認を求め、PR に承認が無い」を出す（I15）。承認の数を残したまま、
 ほかの人が GitHub のレビューで承認するリポジトリは、承認が付けば通る。
 
 | 承認の数を満たす候補 | 採否と理由 |
@@ -352,7 +357,8 @@ NDF の承認ゲートの承認は PR のコメントで、GitHub のレビュ�
 
 ### 決定 18: `merge-queue` では承認した head を `expectedHeadOid` に渡してキューへ入れ、マージかキューから外れるのを待ち、外れたら `reject` だけを返す
 
-`land` は承認の記録の読み直しと ruleset の照らし合わせの後、PR の必須のチェックを待ち、`enqueuePullRequest(pullRequestId, expectedHeadOid=<承認した head>)` を打つ（STD10・確かめ 4）。
+`land` は承認の記録の読み直しと ruleset の照らし合わせの後、PR の必須のチェックを待つ。
+その後に `enqueuePullRequest(pullRequestId, expectedHeadOid=<承認した head>)` を打つ（STD10・確かめ 4）。
 GitHub は PR の head が違えば投入を断り、`land` は `refused` で止まる。投入の後は `ci_budget` の秒まで、PR の `merged`・`isInMergeQueue`・`mergeQueueEntry.state` を読む。
 
 | 読んだ状態 | `land` の扱い |
@@ -448,9 +454,9 @@ ruleset の `dismiss_stale_reviews_on_push` が偽でも（確かめ 6）、NDF 
 `gather.version_at` も同じである。`marketplace.json` を持たないリポジトリでは、ここで `PluginsError` が原因 `precondition` になる（#3615 の点検 1）。
 設定ファイルの手順（`steps`）と `version_files` は既にリポジトリごとの書き換えを受けるが、今のバージョンを読む元とリリースの単位がプラグインに決め打たれている。
 
-バージョンの置き場をアダプタの口にし、設定ファイルで選ぶ。
+バージョンの置き場をアダプタのインタフェースにし、設定ファイルで選ぶ。
 
-| 口 | 意味 |
+| メソッド | 意味 |
 | --- | --- |
 | `units()` | リリースの単位（名前と、変化を数える根のディレクトリ）の一覧 |
 | `read(ref, unit)` | ある ref の単位のバージョン |
@@ -463,19 +469,19 @@ ruleset の `dismiss_stale_reviews_on_push` が偽でも（確かめ 6）、NDF 
 | `json` | `path`・`key`・`name`。1 つの JSON のファイルの 1 つの鍵（`package.json`・`composer.json`・`app.json` など） | 作る（受け入れ条件 21） |
 | ほか（`pubspec.yaml`・Gradle・タグだけ など） | — | #3615 が足す |
 
-`bump`・`pr-check`・`confirm`・`planned_for` は口だけを呼び、`plugins.py` を直接呼ばない（I18）。置き場が無ければ `trunk` の `bump` は止まる。
-設定ファイルの手順（`steps` の `production`）は口の `write` の後に今のまま流れ、`package-lock.json` のような付随のファイルを書き換える。
+`bump`・`pr-check`・`confirm`・`planned_for` はインタフェースだけを呼び、`plugins.py` を直接呼ばない（I18）。置き場が無ければ `trunk` の `bump` は止まる。
+設定ファイルの手順（`steps` の `production`）はインタフェースの `write` の後に今のまま流れ、`package-lock.json` のような付随のファイルを書き換える。
 
 **#3615 との境。**
 
 | 決めること | 持ち主 |
 | --- | --- |
 | いつ・誰がバージョンを上げるか（`trunk` の CD・バージョン上げの PR・キューとの関係） | #3572（決定 7・20） |
-| バージョンの置き場のアダプタの口と、設定のキー `version_store` | #3572（この決定） |
+| バージョンの置き場のアダプタのインタフェースと、設定のキー `version_store` | #3572（この決定） |
 | アダプタ `plugin`・`json` | #3572 |
 | ほかのリリースの形のアダプタ（今の NDF のリリースの形 11 種との対応） | #3615 |
 | タグ・CHANGELOG の見出し・リリースブランチの名前の形を設定ファイルで変えること | #3615（それまでは今の `<名前>--v<バージョン>` の形） |
-| 今の行の承認資料・リリースブランチの組み立て・タグ（`assemble`・`gather`・`tagging`）をアダプタの口へ移すこと | #3615（この課題では今のまま） |
+| 今の行の承認資料・リリースブランチの組み立て・タグ（`assemble`・`gather`・`tagging`）をアダプタのインタフェースへ移すこと | #3615（この課題では今のまま） |
 | リリースを利用者のリポジトリから起動する経路（workflow のテンプレート） | #3615 |
 
 この課題の範囲で CD を起動する workflow は ai-plugins の `.github/workflows/ndf-next-release.yml` だけである。そのため要求の受け入れ条件 21
@@ -489,7 +495,7 @@ ruleset の `dismiss_stale_reviews_on_push` が偽でも（確かめ 6）、NDF 
 | `version_files` と手順だけで受け、置き場のアダプタを作らない | 採らない。今のバージョンを読む元とリリースの単位が残り、`marketplace.json` を読む処理が消えない |
 | release-please の release type（PRD1）をそのまま使う | 採らない。上げ幅をコミットの書式から読む（LIB1）。種類で選ぶ形だけを倣う |
 | リリースの形のアダプタ一式をこの課題で作る | 採らない。#3615 の範囲で、11 種との対応の表を持たずに作ると #3615 と食い違う |
-| 口と 2 つのアダプタをこの課題で作り、残りを #3615 へ | 採る |
+| インタフェースと 2 つのアダプタをこの課題で作り、残りを #3615 へ | 採る |
 
 - 作り方: 自前で作る・標準に倣う
 - 比べた候補: PRD1 / LIB1
@@ -504,7 +510,7 @@ PR の本文や宛先を読むチェック（`pr-body-decisions-check`・`guard`
 キューに入れられるのは PR の時点で必須のチェックを満たした PR だけだからである（STD7）。
 
 ruleset の書き換えは、ai-plugins の設定ファイルを `trunk`・`merge-queue` へ書き換える入れ替えの PR と同じ時点にする。キューを先に足すと、
-今の NDF のリリース（develop から main への PR を `production_merge.admin` で迂回してマージする）がキューの規則に当たり、11.0.0 まで今の運用を
+今の NDF のリリース（develop から main への PR を `production_merge.admin` で迂回してマージする）がキューの規則に当たる。これは 11.0.0 まで今の運用を
 変えない前提（要求の前提 10）と食い違う。実行は承認ゲートを通らない外部の系の設定の変更で、実行の前に止めて人へ戻す（設計文書の「人へ残す判断」の C2 の行）。
 
 足す設定の案:
@@ -529,7 +535,7 @@ ruleset の書き換えは、ai-plugins の設定ファイルを `trunk`・`merg
 
 #3587（宛先 develop、head d7d5fe0b1、66 ファイル・73 コミット。`git diff --stat origin/develop...origin/sprint/lrel-lock` と
 `git log --oneline origin/develop..origin/sprint/lrel-lock | wc -l`、2026-11-15）は、決定 1〜4・6〜8・10〜12 の実装と、取り込み方の表の 3 行
-（`trunk`・`merge_base_branch`・`release_branch`）を既に持ち、cross-review と cross-refactoring を通った。閉じて出し直すと、残す部分の
+（`trunk`・`merge_base_branch`・`release_branch`）を既に持つ。この差分は cross-review と cross-refactoring を通った。閉じて出し直すと、残す部分の
 レビューとリファクタリングをやり直す。ndf-next は 11.0.0 の入れ替えまで develop で開発するため、宛先 develop も変えない。
 次の変更を同じ PR へ足し、変わった差分を再びレビューへ通す。
 
@@ -541,7 +547,7 @@ ruleset の書き換えは、ai-plugins の設定ファイルを `trunk`・`merg
 | 4 | アダプタの `enqueue`・`queue_entry`、`land` のキューへの投入と待ち、原因 `queue_removed`、次の手の表 | 3・18 |
 | 5 | `land` の先端の取り込みの確かめ、原因 `behind` | 19 |
 | 6 | `land` で `merge-queue` の本番の PR に迂回を呼ばない。`land_bump` の迂回の条件にバージョンの置き場の判定を使う | 20 |
-| 7 | `version_store.py`（口と `plugin`・`json`）、`release.json` のスキーマの `version_store`。`bump.py`・`pr_check.py`・`cli._plugin_of`・`planned_for` を口へ移す | 22 |
+| 7 | `version_store.py`（インタフェースと `plugin`・`json`）、`release.json` のスキーマの `version_store`。`bump.py`・`pr_check.py`・`cli._plugin_of`・`planned_for` をインタフェースへ移す | 22 |
 | 8 | `delivery` の検証の行の `verify.kind`、`verify_ref` の `deploy` の配り方 | 21 |
 | 9 | 必須のチェックを出す workflow へ `merge_group` を足し、PR の本文を読むチェックの引き継ぎ | 23 |
 | 10 | テストを足す（設計文書の「テスト設計」の受け入れ条件 18・20〜26 の行）。今の行のテスト（リリースブランチの組み立て・同期の PR）を develop から戻す | 16〜23 |
@@ -559,10 +565,12 @@ ruleset の書き換えは、ai-plugins の設定ファイルを `trunk`・`merg
 
 ### 決定 25: #3119 の設計の決定 21 を、ai-plugins の設定ファイルが `trunk` の行を選び、表は 3 行を残す決定へ見直す
 
-#3119 の決定 21 は、ai-plugins の設定ファイルを行 `trunk` にすることを決めている。見直すのは 3 点で、
-(1) 取り込み方の表は `merge_base_branch`・`release_branch` を残し、`trunk` は選ぶ行の 1 つであること（決定 16）、
-(2) マージの前の検証は ai-plugins が選ぶ検証環境の種類 `marketplace` であること（決定 21）、
-(3) ai-plugins のマージの方式は `merge-queue` で、ruleset の変更は入れ替えの PR と同じ時点に人の承認の後に行うこと（決定 23）である。
+#3119 の決定 21 は、ai-plugins の設定ファイルを行 `trunk` にすることを決めている。見直すのは次の 3 点である。
+
+1. 取り込み方の表は `merge_base_branch`・`release_branch` を残し、`trunk` は選ぶ行の 1 つである（決定 16）
+2. マージの前の検証は、ai-plugins が選ぶ検証環境の種類 `marketplace` である（決定 21）
+3. ai-plugins のマージの方式は `merge-queue` で、ruleset の変更は入れ替えの PR と同じ時点に人の承認の後に行う（決定 23）
+
 設定ファイルの書き換えを 11.0.0 の入れ替えと同じ時点にすることは変えない。差分は同じ設計 PR の `issues/issue-3119-design.md` の決定 21 にある。
 
 - 作り方: 標準に倣う
@@ -572,9 +580,14 @@ ruleset の書き換えは、ai-plugins の設定ファイルを `trunk`・`merg
 
 ### 決定 26: ブランチ戦略のキーと値は #3613 の改名の後の名前で書き、改名と移行は #3613 が持つ
 
-ブランチ戦略のキーは `.ndf/worktree.json` の `branch_flow.release_strategy`、値と取り込み方の表の行の名前は `merge_base_branch`（ベースブランチを丸ごと本番ブランチへマージする）・
-`release_branch`（承認したスプリントだけを本番ブランチから作ったリリースブランチで出す）・`trunk`（スプリントの PR を直接本番ブランチへ入れる）である
-（利用者の決定、2026-11-16。#3613）。この設計の文書は、どの節もこの名前で書く。
+ブランチ戦略のキーは `.ndf/worktree.json` の `branch_flow.release_strategy` である。値と取り込み方の表の行の名前は次の 3 つである
+（利用者の決定、2026-11-16。#3613）。
+
+- `merge_base_branch`: ベースブランチを丸ごと本番ブランチへマージする
+- `release_branch`: 承認したスプリントだけを、本番ブランチから作ったリリースブランチで出す
+- `trunk`: スプリントの PR を直接本番ブランチへ入れる
+
+この設計の文書は、どの節もこの名前で書く。
 
 | 何を決めるか | 持つ課題 |
 | --- | --- |

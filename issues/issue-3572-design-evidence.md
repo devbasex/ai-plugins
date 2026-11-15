@@ -41,7 +41,7 @@ Replacing the existing marketplace clone…
 
 **確かめ 3: 正式版の登録が変わらない**
 
-`exp-plugins` の `marketplace.json` の SHA-256 は作り直しの前後とも `89aeee40…5265f7`、head は `2b72bc9 main1`、登録の取得元は
+`exp-plugins` の `marketplace.json` の SHA-256 は、作り直しの前後とも `89aeee40…5265f7` だった。head は `2b72bc9 main1`、登録の取得元は
 `{'source': 'git', 'url': 'https://127.0.0.1:18443/repo.git'}` のままだった。
 
 **あわせて確かめたこと: 名前を正式版と同じにした ref は登録できない**
@@ -139,7 +139,7 @@ $ gh api repos/microsoft/vscode/pulls/348333 --jq '{merged_by:.merged_by.login, 
 vscode のマージは squash で、一時のコミットの親は 1 つである。ai-plugins の ruleset は `merge` だけを許すため、キューの一時のコミットは
 main と PR の head を親に持つマージコミットになる見込みで、これは実装のときの確かめで見る。
 
-**GitHub Docs の記述（STD7〜STD9）**: キューの一時のコミットで必須のチェックが落ちるか、本番ブランチと衝突すると、PR はキューから外れ、
-タイムラインに理由が出る（「if there are failed required status checks or conflicts with the base branch, the pull request will be removed from
+**GitHub Docs の記述（STD7〜STD9）**: キューの一時のコミットで必須のチェックが落ちるか、本番ブランチと衝突すると、PR はキューから外れる。
+タイムラインには理由が出る（「if there are failed required status checks or conflicts with the base branch, the pull request will be removed from
 the queue」）。外れる理由は、チェックの失敗・チェックの待ちの時間切れ・API か画面からの取り外し・自動で解けない保護の違反の 4 つである。
 キューへ入れられるのは、PR が保護の条件（承認・必須のチェック）をすべて満たした後で、書き込みの権限を持つ利用者である。

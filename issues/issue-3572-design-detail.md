@@ -9,7 +9,7 @@
 決定 24 のとおり、この PR を閉じずに直す。「変更」「削除」は d7d5fe0b1 の時点のコードに対する差分を、「develop から戻す」は
 #3587 が外した develop（2026-11-15 の `origin/develop`）の関数を今の行のために戻すことを指す。
 
-**インタフェース。** バージョンの置き場のインタフェースは、決定 22 の「口」の表（`units`・`read`・`write`・`paths`）を指す。この文書は `changes` を足した 5 つで書く。
+**インタフェース。** バージョンの置き場のインタフェースは、決定 22 のインタフェースの表（`units`・`read`・`write`・`paths`）を指す。この文書は `changes` を足した 5 つで書く。
 
 **名前。** ブランチ戦略のキーと値は #3613 の改名の後の名前（`branch_flow.release_strategy`・`merge_base_branch`・`release_branch`・`trunk`）で書く。
 d7d5fe0b1 のコードは改名の前の名前を持つ。#3613 が develop へ入った後に develop を取り込み、名前をそろえる（決定 24 の 11 行目・決定 26）。
@@ -75,7 +75,7 @@ docs/versioning-and-distribution.md
 **依存の向き。** 一方向で、循環は無い。純粋な判定（`merge_method`・`verify_decide`・d7d5fe0b1 の `bump_decide`・`merge_decide`）は
 GitHub と git のアダプタを読まない。`version_store` は `plugins`・`changes_decide`・`version_decide`・`gather`（バージョンとタグの読みだけ）と git のアダプタに依存し、
 `bump`・`land` を import しない。`gather` は `version_store` を import しない。GitHub と git を読み書きするモジュール（`land`・`assemble`・`bump`・`confirm`・`pr_check`・
-`verify_ref`・`tagging`）が判定と `version_store` を呼び、サブコマンドのエントリポイント（`cli`）がそれらを呼ぶ。`bump` はバージョン上げの PR の
+`verify_ref`・`tagging`）が判定と `version_store` を呼ぶ。サブコマンドのエントリポイント（`cli`）がそれらを呼ぶ。`bump` はバージョン上げの PR の
 マージに `land.Lander` を使い、`land` は `bump` を import しない。`assemble` の今の行の経路は `bump.write_bump` を使い、`bump` は `assemble` を
 import しない。ruleset と merge queue の語は `adapters/github.py` と `merge_method` の中に閉じる（設計文書の「コンテキスト」の腐敗防止層）。
 
@@ -129,7 +129,7 @@ import しない。ruleset と merge queue の語は `adapters/github.py` と `m
 
 ## クラスと関数の構造
 
-型の関係は設計文書の「構成要素」の図を指し、ここでは描き直さない。
+型の関係は設計文書の「構造」の図を指し、ここでは描き直さない。
 
 | 置き場 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- |
@@ -388,7 +388,7 @@ workflow `ndf-next-release.yml` のジョブは、d7d5fe0b1 の表から次の 2
 | `verify-ref` | 検証の行が無ければ `not_applicable` で通る。種類 `deploy` のコマンドは、本番ブランチから取り出した設定ファイルのものだけを流す（設計文書の「非機能の実現方式」） |
 
 必須のチェックを出す workflow には `merge_group:`（`types: [checks_requested]`）を足す。PR の本文か宛先を読む `pr-base-guard.yml` と `pr-body-decisions.yml` の
-ジョブは、`github.event_name == 'merge_group'` のときに PR を読まず、「キューの一時のコミットは PR の時点の結論を引き継ぐ」と出して 0 で終わる（決定 23）。
+ジョブは、`github.event_name == 'merge_group'` のときに PR を読まない。「キューの一時のコミットは PR の時点の結論を引き継ぐ」と出して 0 で終わる（決定 23）。
 
 ## 並行と排他
 

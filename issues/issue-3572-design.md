@@ -2,14 +2,14 @@
 
 ## 目的
 
-- **今どうなっているか**: ndf-next の本番のプラン（テンプレート `release.json`）は承認ゲートの後に worker 1 つへリリースを任せ、worker は CI が落ちるとコードを直して本番の PR へ push できる（今の NDF でリリース 8・14 に同じ形が 2 回起きた）。ほぼ同時に承認された 2 つの PR は、main の必須のチェックが最新の取り込みを求めない（`strict` が偽）ため、組み合わせを CI に通さずに本番へ入る
+- **今どうなっているか**: ndf-next の本番のプラン（テンプレート `release.json`）は、承認ゲートの後に worker 1 つへリリースを任せる。worker は CI が落ちるとコードを直して本番の PR へ push できる（今の NDF でリリース 8・14 に同じ形が 2 回起きた）。ほぼ同時に承認された 2 つの PR は、main の必須のチェックが最新の取り込みを求めない（`strict` が偽）ため、組み合わせを CI に通さずに本番へ入る
 - **誰に効くか**: ndf-next を使うすべてのリポジトリ（Web サービス・アプリ・プラグイン）の、本番のリリースを承認する利用者と、リリースを流すオーガナイザー・一時レーン
 - **変えると何が成り立つか**: 承認の後にコードを直すステップが無くなり、承認した head だけが本番へ入る。利用者の GitHub でのマージも承認として扱われる。ブランチ戦略・マージの方式・検証環境・バージョンの置き場はリポジトリごとに設定ファイルで選び、develop と main を分けるリポジトリは今の行のまま動く。GitHub flow を選んだリポジトリでは、同時に承認された PR の組み合わせを merge queue（使えなければ最新の取り込みの必須）で確かめてから main へ入れる
 
 ## 適用範囲
 
 - **働く範囲**: ndf-next（`plugins/ndf-next/`）を使う利用者のリポジトリ。リリースのサブコマンド（NDF の内部の呼び名は「副命令」）`ndf release-steps` と本番のプランのテンプレート、ndf-next のリリースの workflow（`.github/workflows/ndf-next-release.yml`）が働く。今の NDF（`plugins/ndf/`）と今の CD（`.github/workflows/release-cd.yml`）は 11.0.0 の入れ替えまで変えない
-- **リポジトリごとに違うもの（設定ファイルで受ける）**: ブランチ戦略は `.ndf/worktree.json` の `branch_flow`、マージの方式は `.ndf/project.json` の `production_merge.method`、検証環境は `.ndf/project.json` の `delivery` の検証の行、バージョンの置き場は `.ndf/release.json` の `version_store` で受ける（形は「設定ファイルの形」）。必須のチェックの待ちの秒は引数 `ci_budget` で受ける
+- **リポジトリごとに違うもの（設定ファイルで受ける）**: ブランチ戦略は `.ndf/worktree.json` の `branch_flow`、マージの方式は `.ndf/project.json` の `production_merge.method` で受ける。検証環境は `.ndf/project.json` の `delivery` の検証の行、バージョンの置き場は `.ndf/release.json` の `version_store` で受ける（形は「設定ファイルの形」）。必須のチェックの待ちの秒は引数 `ci_budget` で受ける
 - **ai-plugins だけの事情（設定ファイルの値へ移すもの）**: `trunk` の行・`merge-queue`・検証用マーケットプレイス `ai-plugins-next` と検証用ブランチ `verify/next`・バージョンの置き場 `plugin`・タグ `ndf--v<バージョン>`。どれも ai-plugins の設定ファイルの値で、ndf-next のコードに決め打たない
 - **キーと値の名前**: ブランチ戦略のキーと値は #3613 の改名の後の名前（`branch_flow.release_strategy` と `merge_base_branch`・`release_branch`・`trunk`）で書く。値と取り込み方の表の行の名前は同じである。改名と移行のコマンドは #3613 が持つ（決定 26）。要求（ [issue-3572-requirements.md](issue-3572-requirements.md) ）と利用者の指示の原文は改名の前の名前で書かれており、下の読み替えの表で読む
 - **当たるモード**: リリース承認ゲートを通る本番のリリース（デプロイの工程）と、その前後のスプリントの PR・検証環境の更新・CD のバージョン上げ
@@ -74,7 +74,7 @@
 リリースが供給者、承認ゲートとプランのテンプレートとスプリントの経路が顧客である（**顧客 / 供給者**）。承認ゲートはリリースの公開する判定
 （PR がマージ済みか、誰がどの head をマージしたか）を読み、本番の PR へ書くことはサブコマンド `release-steps answer` を呼んで行う。
 テンプレートはサブコマンドを並べるだけで判定を持たない。取り込み方の表は**公表された言語**で、リリースとスプリントの経路が同じ行を読む。
-GitHub との間は**腐敗防止層**で、ruleset と merge queue の語はアダプタ（`adapters/github.py`）とリリースの読み分け（`merge_method`）の中に閉じ、
+GitHub との間は**腐敗防止層**である。ruleset と merge queue の語はアダプタ（`adapters/github.py`）とリリースの読み分け（`merge_method`）の中に閉じ、
 ほかのコンテキストへ出さない。スプリントの経路はスプリントの PR（`trunk` では本番の PR を兼ねる）を作って上げ幅のラベルを書き、head へコミットを足す。
 リリースは PR の head とラベルを読むだけで、スプリントブランチへ書かない。
 必須のチェックは GitHub の merge queue に**順応者**として従い、`merge_group` の出来事の形（一時のコミットの SHA とブランチ）をそのまま受けて結論を報告する。
@@ -145,8 +145,8 @@ GitHub との間は**腐敗防止層**で、ruleset と merge queue の語はア
 | E10 | CD がバージョン上げ・タグ・GitHub Release を作った | CD（`bump` がバージョン上げの PR をマージし、その push で `publish`） | `confirm`・リリース後テスト |
 | E11 | 後片付けと終わりの記録を行った | 本番のプランの `record`・`cleanup` | リリース後テスト（終わりの記録の承認の経路・承認した人・承認した head・マージした head・作ったバージョンを読む。決定 8） |
 
-番号は要求のドメインイベントと同じ意味で使う。`trunk` の行で要求の E10 は、バージョン上げの PR のマージと、その後のタグと GitHub Release の作成の
-2 回に分かれる（main の ruleset が PR を通さない push を断るため。決定 7）。今の行の E10 は今のまま（リリースブランチでバージョンを上げ、マージの後にタグ）である。
+番号は要求のドメインイベントと同じ意味で使う。`trunk` の行で要求の E10 は 2 回に分かれる。バージョン上げの PR のマージと、
+その後のタグと GitHub Release の作成である（main の ruleset が PR を通さない push を断るため。決定 7）。今の行の E10 は今のまま（リリースブランチでバージョンを上げ、マージの後にタグ）である。
 
 ### 用語
 
@@ -216,23 +216,6 @@ GitHub との間は**腐敗防止層**で、ruleset と merge queue の語はア
 
 調べた量: 候補 18 件・取得の試み 20 回。
 
-## 本番の PR を流すプランと、承認の後に通るステップ（受け入れ条件 2）
-
-ndf-next で本番の PR を扱うプランを、テンプレートと工程の定義から特定した結果である（develop の 154c4e507 と #3587 の d7d5fe0b1 の時点）。
-
-| プラン | どこから流れるか | 承認の後に通るステップ（今） | 承認の後に通るステップ（変更後） |
-| --- | --- | --- | --- |
-| `release`（`contracts/templates/release.json`。`release: true`） | 工程「デプロイ」の `release-gate` の答えの後の `call ndf.plan release` | `work`（`{{worker}} release`）の 1 つ。worker がサブコマンドとコードの直しを自分の判断で打つ | `merge` → `confirm` → `record` → `cleanup`（どの行・どのマージの方式でも同じ 4 つ） |
-| `merge`・`check`・`close`（`merge` の部品を持つテンプレート） | 本番の PR を `ndf route merge` などで流したとき | `ci` →（落ちたら）`repeat-check` → `ci-fix` → `ci-local` → `push` → … → `merge` | 承認の前の `ci` と直しは残る。`merge` の直前の `release-guard` が本番の PR なら `end` へ進め、デプロイの工程へ渡す。承認の後に通るステップは無い |
-
-`merge` のステップの中の振る舞いは、マージの方式で分かれる。
-
-| マージの方式 | `merge`（`land`）の中の順 | 止まるところ |
-| --- | --- | --- |
-| `merge-queue` | 承認の記録の読み直し → 設定ファイルと ruleset の照らし合わせ → PR の必須のチェックの待ち → キューへの投入（`expectedHeadOid` = 承認した head）→ マージかキューから外れるのを待つ → マージした head とマージコミットの記録 | head が動いた（`refused`）・ruleset と食い違う（`precondition`）・PR のチェックが落ちた（`test_failed`・`check_failed`）・キューから外れた（`queue_removed`）・待ちの時間切れ（`ci_pending`） |
-| `strict` | 承認の記録の読み直し → 照らし合わせ → head が本番ブランチの先端を含むかの確かめ → 必須のチェックの待ち → マージ（`expect_head` = 承認した head） | 上の `queue_removed` の代わりに、head が先端を含まない（`behind`） |
-| 方式なし（今の行だけ） | 今と同じ（承認の記録の読み直し → 必須のチェックの待ち → マージ → 今の行の同期の PR） | 今と同じ |
-
 ## 機能一覧
 
 | # | 機能 | 誰が使うか |
@@ -262,7 +245,7 @@ ndf-next で本番の PR を扱うプランを、テンプレートと工程の�
 | 承認資料 `domains/release/assemble.py`（変更） | `trunk` の行ではブランチを作らず、本番の PR の範囲（main の先端..PR の head）から承認資料を組んで本文の節へ書く。今の行ではリリースブランチを今のまま組む |
 | CD の確かめ `domains/release/confirm.py`（新設） | `trunk` の行で、マージコミットを含む main に、バージョン上げの PR のマージ・タグ・GitHub Release がそろうのを `ci_budget` の秒まで待つ。今の行ではタグと GitHub Release を待つ |
 | バージョン上げ `domains/release/bump.py`・`bump_decide.py`（新設） | `trunk` の行で、範囲の PR のラベルから上げ幅を決め、バージョンの置き場のアダプタでバージョンを書き、CHANGELOG と手順を流し、バージョン上げの PR を作ってマージする（I7・I8・I11・I17・I18） |
-| バージョンの置き場 `domains/release/version_store.py`（新設） | アダプタの口（リリースの単位の一覧・ある ref のバージョンの読み・新しいバージョンの書き・書き換えるパスの一覧）と、2 つのアダプタ `plugin`（今の `plugins.py` を包む）と `json`（JSON のファイルの 1 つの鍵）。設定ファイルの値でアダプタを選び、無い値で止まる（I18） |
+| バージョンの置き場 `domains/release/version_store.py`（新設） | アダプタのインタフェース（リリースの単位の一覧・ある ref のバージョンの読み・新しいバージョンの書き・書き換えるパスの一覧）と、2 つのアダプタ `plugin`（今の `plugins.py` を包む）と `json`（JSON のファイルの 1 つの鍵）。設定ファイルの値でアダプタを選び、無い値で止まる（I18） |
 | PR の検査 `domains/release/pr_check.py`（新設） | `trunk` の行で、バージョンの置き場のバージョンを変えていないか、上げ幅のラベルが 2 つ以上無いか、head が検証用ブランチでないかを見る（I7・I9）。PR の種類ごとのレビューの単位の行も見る（#3119 の I2） |
 | 検証環境 `domains/release/verify_ref.py`・`verify_decide.py`（新設） | `verify_decide` は含める PR の並びと検証のバージョンを決める。`verify_ref` は検証用ブランチを組んで fast-forward で push し、種類が `marketplace` なら `marketplace.json` の名前とバージョンを書き換え、`deploy` なら設定ファイルのコマンドを流す（I9・I12） |
 | 設定ファイルの読み分け `domains/release/declaration.py`（変更） | 取り込み方の行（`flow_of`）・マージの方式・検証の行・バージョンの置き場を読む。`require_github_flow` を外し、行ごとの振る舞いの選択に置き換える |
@@ -275,6 +258,8 @@ ndf-next で本番の PR を扱うプランを、テンプレートと工程の�
 | 承認ゲートの待ち `progress/gate/release.py`（変更） | 待ちの読み直しで本番の PR がマージ済みなら `release-steps answer --route github-merge` を呼ぶ（E7） |
 | workflow `.github/workflows/ndf-next-release.yml`（変更） | main への push で `bump` と `publish`、本番ブランチ宛ての PR の出来事で `pr-check` と `verify-ref` を打つ |
 | 必須のチェックを出す workflow（変更） | `merge_group`（`checks_requested`）を引き金に足す。PR の本文や宛先を読むチェックは、キューの一時のコミットでは PR の時点の結論を引き継いで通す（決定 23） |
+
+## 構造
 
 呼び出しの関係（リリースの領域の中核だけを描く。図に含めない要素は、テンプレートの検査 `release_plan`（テストが呼ぶ）・`assemble`・`confirm`・
 `pr_check`・`record`・`materials_decide`・`tagging`・`causes.json`・設定ファイルのスキーマ・スプリントの経路・必須のチェックを出す workflow で、
@@ -331,6 +316,23 @@ graph TD
 
 ## 処理の流れ
 
+### 本番の PR を流すプランと、承認の後に通るステップ（受け入れ条件 2）
+
+ndf-next で本番の PR を扱うプランを、テンプレートと工程の定義から特定した結果である（develop の 154c4e507 と #3587 の d7d5fe0b1 の時点）。
+
+| プラン | どこから流れるか | 承認の後に通るステップ（今） | 承認の後に通るステップ（変更後） |
+| --- | --- | --- | --- |
+| `release`（`contracts/templates/release.json`。`release: true`） | 工程「デプロイ」の `release-gate` の答えの後の `call ndf.plan release` | `work`（`{{worker}} release`）の 1 つ。worker がサブコマンドとコードの直しを自分の判断で打つ | `merge` → `confirm` → `record` → `cleanup`（どの行・どのマージの方式でも同じ 4 つ） |
+| `merge`・`check`・`close`（`merge` の部品を持つテンプレート） | 本番の PR を `ndf route merge` などで流したとき | `ci` →（落ちたら）`repeat-check` → `ci-fix` → `ci-local` → `push` → … → `merge` | 承認の前の `ci` と直しは残る。`merge` の直前の `release-guard` が本番の PR なら `end` へ進め、デプロイの工程へ渡す。承認の後に通るステップは無い |
+
+`merge` のステップの中の振る舞いは、マージの方式で分かれる。
+
+| マージの方式 | `merge`（`land`）の中の順 | 止まるところ |
+| --- | --- | --- |
+| `merge-queue` | 承認の記録の読み直し → 設定ファイルと ruleset の照らし合わせ → PR の必須のチェックの待ち → キューへの投入（`expectedHeadOid` = 承認した head）→ マージかキューから外れるのを待つ → マージした head とマージコミットの記録 | head が動いた（`refused`）・ruleset と食い違う（`precondition`）・PR のチェックが落ちた（`test_failed`・`check_failed`）・キューから外れた（`queue_removed`）・待ちの時間切れ（`ci_pending`） |
+| `strict` | 承認の記録の読み直し → 照らし合わせ → head が本番ブランチの先端を含むかの確かめ → 必須のチェックの待ち → マージ（`expect_head` = 承認した head） | 上の `queue_removed` の代わりに、head が先端を含まない（`behind`） |
+| 方式なし（今の行だけ） | 今と同じ（承認の記録の読み直し → 必須のチェックの待ち → マージ → 今の行の同期の PR） | 今と同じ |
+
 ### スプリントから main へのマージまで（経路 (a)、`trunk`・`merge-queue`）
 
 ```mermaid
@@ -366,11 +368,14 @@ A が落ちて外れると、B は「main + B」で確かめ直される（GitHu
 
 ### 今の行（`merge_base_branch`・`release_branch`）
 
-本番の PR はリリースブランチの PR で、組み立て（`assemble`）・マージ・同期の PR は今の振る舞いのまま動く。変わるのは 3 つで、
-承認の後のプランが 4 ステップ（fix の worker なし）になること、マージの方式を書いたリポジトリでは `land` が方式と ruleset を照らしてから
-マージすること、タグと GitHub Release を作るのが main への push で動く workflow の `publish` になることである。
+本番の PR はリリースブランチの PR で、組み立て（`assemble`）・マージ・同期の PR は今の振る舞いのまま動く。変わるのは次の 3 つである。
+
+- 承認の後のプランが 4 ステップ（fix の worker なし）になる
+- マージの方式を書いたリポジトリでは、`land` が方式と ruleset を照らしてからマージする
+- タグと GitHub Release を作るのが、main への push で動く workflow の `publish` になる
+
 今の workflow は自分の run の中でマージした後に `publish` を続けるが、承認の後のマージはプランの `merge` が打つため、その run が無い。
-そのため、main への push で `bump` と `publish` を打つ workflow を今の行でも同じに動かす。今の行の `bump` は何もせず（`not_applicable`）、
+そのため、main への push で `bump` と `publish` を打つ workflow を今の行でも同じに動かす。今の行の `bump` は何もしない（`not_applicable`）。
 `publish` はリリースブランチで上げたバージョンでマージコミットにタグと GitHub Release を作る（今の `tagging.publish` のまま。あれば作らない）。
 `confirm` はそれがそろうのを待つ（決定 16 の表）。
 
@@ -405,6 +410,8 @@ workflow は main への push の run を `concurrency`（グループ 1 つ・`
 | タグがあり、範囲にリリース対象の変化がある | 開いたバージョン上げの PR があれば下の表のとおり進め、無ければ作る |
 | タグがあり、範囲に変化が無い | 何もしない（`not_applicable`） |
 
+### バージョン上げの PR の競合・迂回・止まったとき（CD、`trunk`）
+
 | バージョン上げの PR が開いている間に別の PR が main へ入った | `bump` の動き |
 | --- | --- |
 | 決め直したバージョンが同じ | main をバージョン上げのブランチへマージするコミットと、節を組み直したコミットを足し（強制 push を使わない）、必須のチェックを待ち直す |
@@ -420,8 +427,8 @@ workflow は main への push の run を `concurrency`（グループ 1 つ・`
 
 **CD が止まったとき。** バージョン上げの PR のチェックが落ちた・迂回が断られた・取り込みが衝突したときは、`bump` はタグを作らずに止まり、
 workflow の結果とバージョン上げの PR のコメントに理由を書く。`confirm` は `ci_budget` まで待って `stopped` になり、「本番はマージ済み」と
-理由を出す。次の手は `rerun` の 1 つで、足りないものが `bump` なら手動の起動 `step=bump`、タグか GitHub Release なら `step=publish`
-（入力 `revision` に `outputs.bump_revision`）を打ち直した後に `confirm` を打ち直す。
+理由を出す。次の手は `rerun` の 1 つである。足りないものが `bump` なら手動の起動 `step=bump` を打ち直す。
+タグか GitHub Release なら `step=publish`（入力 `revision` に `outputs.bump_revision`）を打ち直す。どちらも、その後に `confirm` を打ち直す。
 
 ### 人が GitHub でマージした（経路 (b)）
 
@@ -465,7 +472,7 @@ head が動いた（`refused`）・キューから外れた（`queue_removed`）
 1. 設定ファイルの検証の行を読む。行が無ければ `not_applicable` で終わる。種類が表に無ければ止まる
 2. 本番ブランチ宛ての開いた PR のうち、下書きでなく、head が検証用ブランチでもバージョン上げの PR でもフォークでもないものを番号の順に並べる
 3. 本番ブランチの先端から作業用のブランチを作り、PR の head を順にマージする。衝突すればそこで止め、衝突した PR を結果に出し、検証用ブランチを動かさない
-4. 種類が `marketplace` なら、`.claude-plugin/marketplace.json` の `name` を検証用マーケットプレイスの名前へ、リリース対象のバージョンを `<main のバージョン>-next.<組んだ時刻 UTC の YYYYMMDDHHMMSS>` へ書き換えたコミットを足す。`deploy` なら書き換えない
+4. 種類が `marketplace` なら、2 つを書き換えたコミットを足す。`.claude-plugin/marketplace.json` の `name` は検証用マーケットプレイスの名前へ、リリース対象のバージョンは `<main のバージョン>-next.<組んだ時刻 UTC の YYYYMMDDHHMMSS>` へ書き換える。`deploy` なら書き換えない
 5. 前の検証用ブランチの head を親に足したコミットを fast-forward で push する
 6. 種類が `deploy` なら、`{ref}`・`{head}` を置き換えたコマンドを `timeout_seconds` まで流す。失敗すれば理由を結果に出す（検証用ブランチは 5 のまま残す）
 
@@ -564,9 +571,9 @@ head が動いた（`refused`）・キューから外れた（`queue_removed`）
 | #3576 | 閉じる | — | — |
 
 #3572 の実装は #3587 に足す（決定 24）。#3576 を閉じる理由は決定 13 にある。#3119 は設計の決定 21 を見直す（決定 25）。差分は同じ設計 PR の `issues/issue-3119-design.md` にあり、
-実装の差分を持たないためこの表に行を置かない。必須のチェックを出す workflow の一覧は実装のときに ruleset の 17 個の名前から引き直す
-（上の表の workflow は 2026-11-15 の名前から引いた候補で、1 つの workflow が複数のチェックを出す）。`.ndf/project.json`・`.ndf/release.json`・
-`.ndf/worktree.json` の ai-plugins の値の書き換えは 11.0.0 の入れ替え（#3304）の PR で行い、この課題の実装では設定ファイルのスキーマと
+実装の差分を持たないためこの表に行を置かない。必須のチェックを出す workflow の一覧は、実装のときに ruleset の 17 個の名前から引き直す。
+上の表の workflow は 2026-11-15 の名前から引いた候補で、1 つの workflow が複数のチェックを出す。`.ndf/project.json`・`.ndf/release.json`・
+`.ndf/worktree.json` の ai-plugins の値の書き換えは、11.0.0 の入れ替え（#3304）の PR で行う。この課題の実装では、設定ファイルのスキーマと
 読み分けだけを入れる（決定 23）。#3587 で消した `prepare.py` は戻さない（次のバージョンのリリースブランチの用意は、今の行でも ndf-next の
 工程が持たない）。
 
