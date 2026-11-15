@@ -13,8 +13,8 @@ PR 1 件ごとに、メインディレクトリの排他（`mainlock`）を取�
    （`--force` は戻せない削除で人の承認が要るため、この経路では使わない。C4）
 4. ローカルブランチを `git branch -d` で消す（`-D` は使わない。git がマージ済みと認めなければ残して理由を返す）
 
-片付けの前に、メインディレクトリがベースブランチにいれば、`git fetch` で `refs/remotes/origin/<ベースブランチ>` を
-更新してから `git merge --ff-only origin/<ベースブランチ>` で取り込む（`git branch -d` は HEAD に含まれたブランチだけを消す）。
+片付けの前に、メインディレクトリがベースブランチにいれば、`git fetch` で `refs/remotes/<リモート名>/<ベースブランチ>` を
+更新してから `git merge --ff-only <リモート名>/<ベースブランチ>` で取り込む（`git branch -d` は HEAD に含まれたブランチだけを消す）。
 最後に `git worktree prune` を打ち、worktree の消えた割り当てのテスト環境を回収する（`testenv.reclaim`）。
 `git pull` は使わない（`FETCH_HEAD` をほかのセッションの fetch と取り合い、取り込みが止まる。#3317）。
 """
@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional, Protocol
 
-from ndf.adapters.git import ORIGIN, Git
+from ndf.adapters.git import Git
 from ndf.adapters.github import Pull
 from ndf.domains.worktree import declaration, mainlock, merged_decide, outcomes, repo, testenv, testenv_sweep, trash
 
@@ -132,7 +132,7 @@ def _one(main: Git, main_dir: Path, pull: Pull, flow: Optional[Mapping[str, Any]
     production = flow.get("production_branch") if flow is not None else None
     keep = merged_decide.long_lived_keep(branch, base, production if isinstance(production, str) else None)
     if keep is None:
-        keep = merged_decide.sprint_keep(branch, flow, repo.contained_in_production(main, branch, flow), ORIGIN)
+        keep = merged_decide.sprint_keep(branch, flow, repo.contained_in_production(main, branch, flow), main.remote())
     if keep is not None:
         rec.add("branch", branch, outcomes.KEPT, keep)
         return
@@ -145,11 +145,12 @@ def sync_main(main: Git, base: Optional[str], rec: Record) -> None:
     if skip is not None:
         rec.add("main_dir", str(main.cwd), outcomes.KEPT, skip)
         return
-    fetched = main.fetch_branch(ORIGIN, base)
+    remote = main.remote()
+    fetched = main.fetch_branch(remote, base)
     if fetched.returncode != 0:
         rec.add("main_dir", str(main.cwd), outcomes.KEPT, f"git fetch が失敗した（取り込まない）: {fetched.stderr.strip()}")
         return
-    done = main.merge_ff(f"{ORIGIN}/{base}")
+    done = main.merge_ff(f"{remote}/{base}")
     if done.returncode == 0:
         rec.add("main_dir", str(main.cwd), outcomes.PULLED)
         return
@@ -158,7 +159,7 @@ def sync_main(main: Git, base: Optional[str], rec: Record) -> None:
         # 利用者の手元の変更には触れない（stash も checkout もしない）。取り込みだけを見送る
         rec.add("main_dir", str(main.cwd), outcomes.KEPT, f"未コミットの変更（{len(dirty)} 件）が取り込みを塞いだため取り込まない")
         return
-    rec.stopped = f"メインディレクトリの git merge --ff-only {ORIGIN}/{base} が失敗: {done.stderr.strip()}"
+    rec.stopped = f"メインディレクトリの git merge --ff-only {remote}/{base} が失敗: {done.stderr.strip()}"
     rec.add("main_dir", str(main.cwd), outcomes.STOPPED, rec.stopped)
 
 

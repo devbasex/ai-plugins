@@ -1,7 +1,5 @@
 # 人へ問うか、AI が決めるか（問い合わせの区分）
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `ask.py`（P2）・`hook.py`（M3a）・`parallel.py`（P3）・`sprint-state.py`（P1b）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
-
 この文書が、`AskUserQuestion` で人へ問ってよい場面と、問いに付ける区分の正本である。承認資料の中身は `approval-request.md`、判断を求めるときの材料の示し方は `decision-request` の Skill が持つ。どちらも区分の表を写さずにここを指す。
 
 ## 例

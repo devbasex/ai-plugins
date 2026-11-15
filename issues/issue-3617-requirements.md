@@ -46,7 +46,7 @@ plugins/ndf-next/skills: 公開する Skill 0 個 / Markdown 0 本 / スクリ�
 | 2 | `domains/release/__init__.py`・`.github/workflows/ndf-next-release.yml` | リリースの実行の場が ai-plugins の workflow だけ | 壊れる | #3615 |
 | 3 | `adapters/ci.py:58`・`core/route/__init__.py:35-39`・`parts/steps.json:73` | 落ちたテストを pytest の形だけで読む | 壊れる | #3616 |
 | 4 | `issues/issue-3572-design-decisions.md` 決定 5・14 | 取り込み方の表から develop→main の行を外す | 壊れる（設計） | #3572（やり直し中） |
-| 5 | 同 決定 9 | 検証の場が 検証用マーケットプレイスだけ | 壊れる（設計） | #3572 |
+| 5 | 同 決定 9 | 検証の場が 2 つ目のマーケットプレイスだけ | 壊れる（設計） | #3572 |
 | 6 | 同 決定 7 | バージョンを上げる PR を迂回でマージ、`plugin.json` を書き換える | 壊れる（設計） | #3572・#3615 |
 | 7 | `scripts/check-skill-repo-assumptions.py:172-178` | 走査が `manifests/*-skills.txt` 前提で ndf-next を見ない | 検査の穴 | この Issue |
 | 8 | `domains/release/changes_decide.py:22` | 配らないファイルの既定が Python のテストだけ | 既定 | #3615 |
@@ -138,7 +138,7 @@ plugins/ndf-next/skills: 公開する Skill 0 個 / Markdown 0 本 / スクリ�
 - [ ] 9. リモート名の設定が無いリポジトリでは、今と同じく `origin` を使う（退行しない）
 - [ ] 10. `.ndf/` の設定で文書だけとみなすパスを書いたリポジトリで、変えたファイルがすべてそのパスに当たる差分は全体テストとリファクタリングを飛ばし、1 つでも外れる差分は飛ばさない
 - [ ] 11. 文書だけとみなすパスの設定が無いリポジトリでは、前提 3 の既定のとおり、`.md` だけの差分を飛ばす（退行しない）
-- [ ] 12. 配分の初期値のファイルが、値が初期値であることを持ち、`.ndf/` の設定に配分の値を書いたリポジトリでは設定の値で配分する
+- [ ] 12. 配分の初期値のファイルが、値が初期値であることを持ち、`.ndf/` の設定に配分の値を書いたリポジトリでは設定の値で配分する（後半の「設定の値で配分する」の端から端の確認は、呼び手を作る #3643 で行う。呼び手を任せた M4 #3298 が配分の表を作らずに閉じたため。この Issue は配分の値を決める部品と宣言を置く）
 - [ ] 13. Skill を回す起動（full）で外す旧い NDF の登録が、`ndf@ai-plugins` のハードコードではなく、導入されている登録から決まる。旧い NDF が `ndf@<別の名前>` で登録された環境でその登録が外れ、旧い NDF が無い環境では何も外さない
 - [ ] 14. `ndf-next-release.yml` が、`.ndf/worktree.json` に `base_branch`・`production_branch` が無いとき、スキーマのとおり origin の既定ブランチ（HEAD）を使う
 

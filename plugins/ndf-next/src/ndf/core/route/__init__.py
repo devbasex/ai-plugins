@@ -20,7 +20,7 @@
         雛形を選んで埋め、プランのファイルを書く。`--add` は並びの名前へ値を 1 つ足す。`repo` を省けば打った場所の
         git の根、`worktree` を省けば根の `.worktrees/<branch>` にする（サブモジュールでもそのworktreeの根。#2054）。
         省いた作業場所が使えなければ書かずに止まる。`base` を省けば根の `.ndf/worktree.json` の `base_branch`、
-        宣言が無ければ `origin` の既定ブランチにする。`merge_method` を省けば `base` のブランチで許された方式
+        宣言が無ければリモート名（`.ndf/worktree.json` の `remote`）のリモートの既定ブランチにする。`merge_method` を省けば `base` のブランチで許された方式
         （ruleset とリポジトリの設定）の先頭にし、読めなければ無い差し込みとして止まる。`repo` の宣言
         （`.ndf/project.json`）がテストを CI に寄せる（`test.ci.only`）なら、手元のテストのステップを外す
     ndf route run <依頼の種類> --out <plan.json> [--set ...] [--add ...]
@@ -397,7 +397,7 @@ def repo_root(cwd: Path) -> str:
 
 
 def default_base(repo: Path) -> Optional[str]:
-    """宛先のブランチの既定: ブランチの運用の宣言の `base_branch`、無ければ `origin` の既定ブランチ（決まらなければ None）。"""
+    """宛先のブランチの既定: ブランチの運用の宣言の `base_branch`、無ければリモート名のリモートの既定ブランチ（決まらなければ None）。"""
     try:
         declared = json.loads((repo / BRANCH_DECLARATION).read_text(encoding="utf-8")).get(BASE_KEY)
     except (OSError, ValueError, AttributeError):
@@ -405,10 +405,11 @@ def default_base(repo: Path) -> Optional[str]:
     if isinstance(declared, str) and declared:
         return declared
     try:
-        ref = git.Git(repo).run("symbolic-ref", "--short", "refs/remotes/origin/HEAD").strip()
-    except git.GitError:  # noqa: NDF401 外部コマンド: origin の既定ブランチを持たないリポジトリ
+        remote = git.remote_of(repo)
+        ref = git.Git(repo).run("symbolic-ref", "--short", f"refs/remotes/{remote}/HEAD").strip()
+    except git.GitError:  # noqa: NDF401 外部コマンド: リモートの既定ブランチを持たないか宣言の remote が誤り
         return None
-    branch = ref.removeprefix("origin/")
+    branch = ref.removeprefix(f"{remote}/")
     return branch if branch else None
 
 
@@ -428,10 +429,15 @@ def _omitted(t: Template, out: Mapping[str, Value], name: str) -> bool:
 
 
 def derived(t: Template, given: Mapping[str, Value], cwd: Path) -> dict[str, Value]:
-    """省いた `repo`・`worktree`・`base`・`merge_method` を打った場所から決めて足す（決まらなければ足さない）。"""
+    """省いた `repo`・`worktree`・`remote`・`base`・`merge_method` を打った場所から決めて足す（決まらなければ足さない）。"""
     out = dict(given)
     if _omitted(t, out, "repo"):
         out["repo"] = repo_root(cwd)
+    if _omitted(t, out, "remote") and "repo" in out:
+        try:
+            out["remote"] = git.remote_of(Path(str(out["repo"])))
+        except git.RemoteError as exc:
+            raise RouteError(str(exc)) from None
     if _omitted(t, out, "worktree") and isinstance(out.get("branch"), str):
         out["worktree"] = str(Path(str(out["repo"])) / WORKTREES / out["branch"])
     if _omitted(t, out, "base") and "repo" in out:

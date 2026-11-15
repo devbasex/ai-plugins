@@ -93,13 +93,14 @@ def inputs(repo: git.Git, tracked: Optional[dict[str, str]] = None) -> dict[str,
 
 
 def branch_state(repo: git.Git, declared: tuple[str, ...] = ()) -> dict[str, Any]:
-    """origin の HEAD の指す先と、main・master・develop と宣言した名前のうち origin にあるもの。"""
-    head_done = repo.attempt("symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+    """リモート名のリモートの HEAD の指す先と、既知のブランチ名と宣言した名前のうちそのリモートにあるもの。"""
+    remote = repo.remote()
+    head_done = repo.attempt("symbolic-ref", "--short", f"refs/remotes/{remote}/HEAD")
     head = head_done.stdout.strip() if head_done.returncode == 0 else ""
-    refs_done = repo.attempt("for-each-ref", "--format=%(refname:short)", "refs/remotes/origin")
+    refs_done = repo.attempt("for-each-ref", "--format=%(refname:short)", f"refs/remotes/{remote}")
     refs = refs_done.stdout.split() if refs_done.returncode == 0 else []
     names = set(KNOWN_BRANCHES) | {d for d in declared if d}
-    present = sorted(n for n in names if f"origin/{n}" in refs)
+    present = sorted(n for n in names if f"{remote}/{n}" in refs)
     return {"head": head.split("/", 1)[-1] if head else None, "present": present}
 
 

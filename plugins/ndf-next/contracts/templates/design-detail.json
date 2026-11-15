@@ -2,7 +2,7 @@
   "template": "design-detail",
   "purpose": "design_detail",
   "summary": "詳細設計: worker の詳細設計 → push。push が拒まれたら worker が直して push し直す",
-  "params": ["repo", "worktree", "branch", "worker"],
+  "params": ["repo", "worktree", "branch", "remote", "worker"],
   "plan": {
     "name": "design-detail-{{branch}}",
     "repo": "{{repo}}",

@@ -2,7 +2,7 @@
   "template": "cross-review",
   "purpose": "review",
   "summary": "レビュー: レビューの起動 → push（レビューが直したコミットを載せる）。レビューが終わり切らなくても（incomplete）push まで進める",
-  "params": ["repo", "worktree", "branch", "review", "worker"],
+  "params": ["repo", "worktree", "branch", "remote", "review", "worker"],
   "plan": {
     "name": "cross-review-{{branch}}",
     "repo": "{{repo}}",

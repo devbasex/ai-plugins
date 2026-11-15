@@ -49,7 +49,11 @@ def _check(args: argparse.Namespace) -> int:
 
 
 def _gh_repo(repo: git.Git) -> Optional[str]:
-    done = repo.attempt("remote", "get-url", "origin")
+    try:
+        remote = repo.remote()
+    except git.GitError:  # noqa: NDF401 外部コマンド: リモート名を決められなければリポジトリは不明
+        return None
+    done = repo.attempt("remote", "get-url", "--", remote)
     return git.repo_of_url(done.stdout.strip()) if done.returncode == 0 else None
 
 

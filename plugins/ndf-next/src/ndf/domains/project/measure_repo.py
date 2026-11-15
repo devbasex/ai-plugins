@@ -86,7 +86,7 @@ DEPLOY_WORDS = re.compile(r"deploy|release|publish|デプロイ|リリース|本
 IMPORT_TOKEN = re.compile(r"(?:^|\s)@([\w./-]+\.md)\b")
 DEP_NAME = re.compile(r"[\s<>=!~\[;]")
 REQ_NAME = re.compile(r"[\s<>=!~\[;#]")
-# 本番チャネルの候補（origin の HEAD が無いときに既定ブランチとして当てる名前）
+# 本番チャネルの候補（リモートの HEAD が無いときに既定ブランチとして当てる名前）
 DEFAULT_BRANCH_CANDIDATES = check.KNOWN_BRANCHES[:2]
 
 # 素材の宣言の案（#2315）
@@ -111,6 +111,7 @@ class Tree:
     def __init__(self, root: Path, deadline: float) -> None:
         self.root = root
         self.deadline = deadline
+        self.remote = git.remote_of(root)
         self.files = check.tree(git.Git(root))
         self.skipped: list[str] = sorted(p for p in self.files if is_secret_path(p))
 
@@ -415,8 +416,8 @@ def measure_test(tree: Tree, deps: dict[str, dict[str, str]], services: list[str
 
 
 def default_branch(tree: Tree) -> Optional[str]:
-    """既定ブランチ。origin の HEAD の指す先 → ローカルの main・master の順。どれも無ければ `None`。"""
-    head = tree.git("symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+    """既定ブランチ。リモート名のリモートの HEAD の指す先 → ローカルの main・master の順。どれも無ければ `None`。"""
+    head = tree.git("symbolic-ref", "--short", f"refs/remotes/{tree.remote}/HEAD")
     if head and head.strip():
         return head.strip().split("/", 1)[-1]
     local = tree.refs("refs/heads")
@@ -429,15 +430,15 @@ def measure_branches(tree: Tree) -> dict[str, Any]:
     evidence: list[dict[str, Any]] = []
     names: list[str] = []
     for b in check.KNOWN_BRANCHES:
-        ref = f"origin/{b}" if b in state["present"] else (b if b in local else None)
+        ref = f"{tree.remote}/{b}" if b in state["present"] else (b if b in local else None)
         if ref:
             names.append(b)
             last = tree.git("log", "-1", "--format=%cI", ref)
             evidence.append({"text": f"{ref} の最後のコミット: {last.strip() if last else None}"})
     if state["head"]:
-        evidence.insert(0, {"text": f"origin の HEAD: {state['head']}"})
+        evidence.insert(0, {"text": f"{tree.remote} の HEAD: {state['head']}"})
     if not names and not state["head"]:
-        return unknown(f"origin の HEAD も {'・'.join(check.KNOWN_BRANCHES)} も無い")
+        return unknown(f"{tree.remote} の HEAD も {'・'.join(check.KNOWN_BRANCHES)} も無い")
     base = [state["head"]] if state["head"] else []
     base += [b for b in names if b not in base]
     production = [b for b in DEFAULT_BRANCH_CANDIDATES if b in names] or base[:1]

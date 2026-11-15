@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf-next/src/ndf/checks/spec_model.py",
+  "name": "quoted-main",
+  "kind": "not-a-violation",
+  "reason": "宣言の置き場の種類の名前（main はメインディレクトリ）。ブランチ名でない",
+  "count": 1
+}

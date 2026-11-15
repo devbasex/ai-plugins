@@ -397,7 +397,7 @@ def _sprint_branch(repo: Path, *changed: str) -> None:
     [
         (["src/a.py", "README.md"], (True, False, False)),
         (["docs/a.md"], (False, True, False)),
-        (["plugins/x/skills/y/SKILL.md", "docs/a.md"], (False, False, True)),
+        (["plugins/x/skills/y/SKILL.md", "docs/a.md"], (False, True, False)),  # 振る舞いの文書の既定は無し（#3617）
         ([], (False, False, False)),
     ],
 )

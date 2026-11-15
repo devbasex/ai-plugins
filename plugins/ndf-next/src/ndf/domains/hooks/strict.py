@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import List, NamedTuple, Optional, Tuple, Union
 
 from ndf import identity
+from ndf.adapters import git as git_mod
 from ndf.domains.hooks import strict_shell, tables
 from ndf.domains.hooks.verdict import Verdict, deny
 
@@ -346,7 +347,7 @@ def _judge(here: Optional[Path], call: MergeCall) -> Optional[Verdict]:
     if repo_root is None:
         return deny(f"マージの宛先のリポジトリを {here} から決められない。宛先の clone へ cd してから打つか、{_MERGE_HELP}")
     if call.repo:
-        origin = _origin_slug(repo_root)
+        origin = _remote_slug(repo_root)
         if origin is None or origin.lower() != call.repo.lower():
             return deny(
                 f"宛先 {call.repo}（-R・--repo・GH_REPO か Pull Request の URL）は作業ディレクトリ {repo_root} のリポジトリ（{origin or '不明'}）と違い、"
@@ -393,19 +394,20 @@ def _git_dir(repo_root: Path) -> Optional[Path]:
     return (gitdir / common).resolve()
 
 
-def _origin_slug(repo_root: Path) -> Optional[str]:
-    """`origin` の URL の `owner/repo`。読めなければ None。"""
+def _remote_slug(repo_root: Path) -> Optional[str]:
+    """リモート名（`.ndf/worktree.json` の `remote`、無ければ既定）の URL の `owner/repo`。読めなければ None。"""
     git_dir = _git_dir(repo_root)
     try:
+        header = f'[remote "{git_mod.remote_of(repo_root)}"]'
         text = (git_dir / "config").read_text(encoding="utf-8") if git_dir else ""
-    except OSError:  # noqa: NDF401 ファイル: 設定を読めなければ origin は不明
+    except (OSError, git_mod.RemoteError):  # noqa: NDF401 ファイル: 設定か宣言を読めなければリモートは不明
         return None
     section = ""
     for raw in text.splitlines():
         line = raw.strip()
         if line.startswith("["):
             section = line
-        elif section == '[remote "origin"]' and line.replace(" ", "").startswith("url="):
+        elif section == header and line.replace(" ", "").startswith("url="):
             return slug_of_url(line.split("=", 1)[1].strip())
     return None
 

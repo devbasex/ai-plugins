@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf-next/contracts/schemas/declarations/project.schema.json",
+  "name": "pytest",
+  "kind": "not-a-violation",
+  "reason": "宣言の例（examples）の値。言語の表の行の 1 つを例に示す",
+  "count": 3
+}

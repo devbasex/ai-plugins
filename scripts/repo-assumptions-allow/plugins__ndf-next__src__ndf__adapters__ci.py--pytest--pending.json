@@ -1,0 +1,8 @@
+{
+  "path": "plugins/ndf-next/src/ndf/adapters/ci.py",
+  "name": "pytest",
+  "kind": "pending",
+  "reason": "落ちたテストを pytest の形だけで読む（点検の一覧 3）。JUnit の形で受けるのは #3616 の受け持ち",
+  "count": 7,
+  "issue": 3616
+}

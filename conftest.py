@@ -58,7 +58,7 @@ pytest_plugins = ["pytester", "pytest_child_cleanup"]
 # 自分の workflow（ndf-next.yml）で確かめる（scripts/ci-heavy-skip.py の `SELF_TESTED`）。
 # 根から収集すると、`tests/__init__.py` を持つ束どうし（playwright-kit-ops）の conftest が
 # 同じ `tests.conftest` になって収集が止まる。入れ替え（#1142 の S2）で `SELF_TESTED` と一緒に消す。
-collect_ignore_glob = ["plugins/*/dev.agy", "plugins/ndf-next"]
+collect_ignore_glob = ["plugins/*/dev.agy", "plugins/ndf-next", "scripts/ndf-next-parity"]
 
 # 束ごとに要る外部コマンド（前提のコマンドの一覧）。**束によって前提が違う**ため、一覧は
 # 1 か所に置きつつ収集した束にだけ適用する。全体へ課すと、必要のないコマンドを求めることになる。

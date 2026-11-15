@@ -244,9 +244,10 @@ def conflicted_files(g: git.Git) -> tuple[str, ...]:
 
 
 def fetch_head(g: git.Git, head_branch: str) -> str:
-    """origin の PR のブランチを取り、その先頭のコミットを返す。"""
-    g.run("fetch", "origin", f"+refs/heads/{head_branch}:refs/remotes/origin/{head_branch}")
-    return g.rev_parse(f"refs/remotes/origin/{head_branch}")
+    """リモート名のリモートの PR のブランチを取り、その先頭のコミットを返す。"""
+    remote = g.remote()
+    g.run("fetch", "--", remote, f"+refs/heads/{head_branch}:refs/remotes/{remote}/{head_branch}")
+    return g.rev_parse(f"refs/remotes/{remote}/{head_branch}")
 
 
 def own_commits(g: git.Git, remote: str, head: str) -> list[str]:

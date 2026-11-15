@@ -17,11 +17,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from ndf.adapters.git import ORIGIN, Git
+from ndf.adapters.git import Git
 from ndf.domains.worktree import declaration, repo
 
 # 取得するリモート
-REMOTE = ORIGIN
 
 
 class CreateError(Exception):
@@ -74,16 +73,18 @@ def _check_place(git: Git, main_dir: Path, target: Path) -> None:
 
 
 def _fetch(git: Git) -> list[str]:
-    done = git.attempt("fetch", "-q", REMOTE)
-    return [] if done.returncode == 0 else [f"git fetch {REMOTE} が失敗した（取得済みの参照で続けた）: {done.stderr.strip()}"]
+    remote = git.remote()
+    done = git.attempt("fetch", "-q", "--", remote)
+    return [] if done.returncode == 0 else [f"git fetch {remote} が失敗した（取得済みの参照で続けた）: {done.stderr.strip()}"]
 
 
 def _start_ref(git: Git, base: str) -> str:
-    if git.has_ref(f"refs/remotes/{REMOTE}/{base}"):
-        return f"{REMOTE}/{base}"
+    remote = git.remote()
+    if git.has_ref(f"refs/remotes/{remote}/{base}"):
+        return f"{remote}/{base}"
     if git.has_ref(f"refs/heads/{base}"):
         return base
-    raise CreateError("precondition", f"ベースブランチが origin にもローカルにも無い: {base}")
+    raise CreateError("precondition", f"ベースブランチがリモート {remote} にもローカルにも無い: {base}")
 
 
 def create(main_dir: Path, branch: str, start: Optional[str] = None, git: Optional[Git] = None) -> Created:

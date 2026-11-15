@@ -1,20 +1,18 @@
 # プロジェクト MVV（`.ndf/mvv.md`・`.ndf/mvv.json`）
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `check-trigger.py`（M1）・`mvv-gate.py`（P2）・`project-mvv.py`（M7）・`sprint-state.py`（P1b）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
-
 プロジェクト全体の Mission / Vision / Value と固有の「必ず人の承認が要る操作」（`P<番号>`）を宣言し、NDF が判断する地点
 （承認ゲートの MVV 判定・レビューの指摘と修正の可否・リファクタリングの提案の採否・judge のステップ・範囲外の起票）が
 それに従う。承認済みなら、どの `pace`（`normal` / `auto` / `fast`）でも要求・設計・実装の工程も MVV を判断の基準として読む。
 この文書は、手順 0 での扱い・策定・改訂・人へ示す文面の雛形・工程での読み方・記録の読み方を持つ。
 
-## 例: ai-plugins でプロジェクト MVV を定め、承認ゲートがそれを読むまで
+## 例: NDF のリポジトリでプロジェクト MVV を定め、承認ゲートがそれを読むまで
 
 1. 手順 0 で `project-mvv.py check` が終了コード 2（「プロジェクト MVV が無い」）を返す。LLM も `gh` も呼ばず、何も書かない
 2. `project-mvv.py collect` がコミット 3787 件・課題 574 件で履歴モードを選び、出典つきの材料 `materials.json` を
    リポジトリの外（`~/.claude/ndf/state/project-mvv/<根の名前>/`）へ書く（実測 6.2 秒）
 3. `project-mvv.py propose --materials <materials.json>` が候補 A・B と「利用者に決めてもらう点」を `candidates.md` に書く
 4. conductor が `candidates.md` を示し、分かれる点を `AskUserQuestion`（`metadata.source` は `ndf-ask:redline:C7`。`.ndf/mvv.*` を書くため）で問い、答えから本文を固める。
-   ai-plugins では利用者が承認した `issues/mvv-ai-plugins.md` の文面がそのまま本文になる。**ここまで `.ndf/` に何も書かない**
+   この例では、利用者が承認した `issues/` の MVV の草案の文面がそのまま本文になる。**ここまで `.ndf/` に何も書かない**
 5. `project-mvv.py vet --kind candidate --body <本文>` が「従う」（0）を返す
 6. 利用者が同じ本文を承認した後に `project-mvv.py approve --body <本文> --by <承認者>` を打つ。`.ndf/mvv.md`（本文）と
    `.ndf/mvv.json`（版 1・sha256・日時・承認者・照合の記録）ができ、`check` が 0 を返す

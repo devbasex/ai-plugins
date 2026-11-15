@@ -88,6 +88,30 @@
         "current_id": {
           "type": "string",
           "description": "既にある進行表の ID（refused で止まったときだけ）"
+        },
+        "code_in_diff": {
+          "type": "integer",
+          "enum": [
+            0,
+            1
+          ],
+          "description": "差分に文書でないファイルがあれば 1（docs-only）"
+        },
+        "docs_only_diff": {
+          "type": "integer",
+          "enum": [
+            0,
+            1
+          ],
+          "description": "差分が文書だけなら 1（docs-only）"
+        },
+        "behavior_docs_in_diff": {
+          "type": "integer",
+          "enum": [
+            0,
+            1
+          ],
+          "description": "差分に振る舞いを決める文書があれば 1（docs-only）"
         }
       }
     },

@@ -5,8 +5,6 @@ description: "Write the design document before coding: data structures, interfac
 
 # 設計
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `design-survey.py`（M7）・`glossary.py`（M7）・`projects-sync.sh`（M7）・`spec-copy.py`（M7）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
-
 実装を始める前に、**どう作るか**を文書として確定させる。担当する AI が変わっても同じ構成の
 成果物になるよう、作る文書と書く内容を規約で決める。
 

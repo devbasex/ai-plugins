@@ -1,5 +1,5 @@
 {
-  "summary": "T2 #3411 の 1 回目の試走（2026-11-15）。ndf-next だけを読む起動でスプリントを流したが、手順 0 で $SCRIPTS が旧いプラグインの scripts/ へ解決し、ndf-next だけでは先へ進めなかった。行ごとの結果は対応表の trial の列にあり、python -m ndf.parity.trial.probe --write がこの記録の passed と本文の確かめから書く",
+  "summary": "T2 #3411 の 1 回目の試走（2026-11-15）。ndf-next だけを読む起動でスプリントを流したが、手順 0 で $SCRIPTS が旧いプラグインの scripts/ へ解決し、ndf-next だけでは先へ進めなかった。行ごとの結果は対応表の trial の列にあり、python -m parity.trial.probe --write がこの記録の passed と本文の確かめから書く",
   "base": "develop 10ca124c7（ndf-next 11.0.0-dev.8）",
   "runs": [
     {

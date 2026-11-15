@@ -1,7 +1,5 @@
 # 引継ぎ文書
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `handoff.py`（M7）・`sprint-state.py`（P1b）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
-
 会話を切って新しいセッションで続けるための引継ぎ文書の、置き場・名・節の形・作る／読む／更新する／消す規則の正本。
 `restart`・[context-window.md](context-window.md)・[relay.md](relay.md)・用語集はここを指す。
 

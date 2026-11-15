@@ -5,15 +5,8 @@ from __future__ import annotations
 import pytest
 
 from ndf.domains.manifests import table
-from ndf.parity import table as parity
 
 from ._manifests import ROOT, _write_table
-
-
-def test_the_table_lists_the_skills_s1a_moves():
-    # 配る Skill の表は、S1a で移す Skill の名前の一覧（機能の対応表の Skill の行）から作った
-    moved = {r["id"].split(":", 1)[1] for r in parity.load("features")["rows"] if r["kind"] == "skill" and r["to"] == "S1a"}
-    assert {s.name for s in table.load(ROOT).skills} == moved
 
 
 def test_skills_not_sent_to_every_runtime_say_why():
