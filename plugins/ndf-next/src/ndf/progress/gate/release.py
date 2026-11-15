@@ -195,12 +195,22 @@ def take_reply(
             return None
         place = cwd if cwd is not None else Path.cwd()
         return _merge_answer(st, table_id, q, observe, runner if runner is not None else invoke.run_command, place)
+    return _organizer_answer(st, table_id, q, reply, observe)
+
+
+def _seen_target(root: Path, q: Question) -> Target:
+    """依頼を出したときに見た対象（承認資料の隣のファイル。無ければ `Target.from_dict(None)`）。"""
+    seen_file = _seen_path(root, q)
+    seen = json.loads(seen_file.read_text(encoding="utf-8")) if seen_file.exists() else None
+    return Target.from_dict(seen)
+
+
+def _organizer_answer(st: store.Store, table_id: str, q: Question, reply: Mapping[str, Any], observe: Observe) -> Optional[dict[str, Any]]:
+    """オーガナイザーの答え `reply` を承認ゲートの答え（`organizer`）として書いた結果を返す（問いが選べない答えなら None）。"""
     value = ORGANIZER_ANSWERS[str(reply["result"])]
     if value not in q.choices:
         return None
-    seen_file = _seen_path(st.root, q)
-    seen = json.loads(seen_file.read_text(encoding="utf-8")) if seen_file.exists() else None
+    target = _seen_target(st.root, q)
     reason = str(reply["reason"]) if reply.get("reason") else f"オーガナイザーのリリースの答え（{reply['result']}）"
-    target = Target.from_dict(seen)
     given = Answer(q.id, value, reason, "organizer", f"organizer:{request_id(q)}", seen=target, outputs=_released(reply, value))
     return answer(st, table_id, given, observe)
