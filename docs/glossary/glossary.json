@@ -7652,6 +7652,30 @@
       "context": "ndf-release",
       "meaning": "本番の PR の head になる、版ごとに 1 本のリリースブランチ（`release/v<版>`）。前の版が出た直後に本番ブランチから用意する",
       "pending_source": "issues/issue-3572-design.md"
+    },
+    {
+      "term": "確定の後の承認ゲート",
+      "context": "ndf-workflow",
+      "meaning": "並列の計画で、リリース承認ゲートの承認（確定）を受けた後に、本番のプランが承認ゲート（終了コード 10）で終わること",
+      "pending_source": "issues/issue-3597-requirements.md"
+    },
+    {
+      "term": "依頼",
+      "context": "ndf-workflow",
+      "meaning": "並列の計画のレーンか一時レーンがオーガナイザーへ送る問い・承認の求め。台帳に 1 行で残り、id を持つ",
+      "pending_source": "issues/issue-3597-requirements.md"
+    },
+    {
+      "term": "同じ問い",
+      "context": "ndf-workflow",
+      "meaning": "並列の計画で、同じ一時レーンの名前が送った依頼のうち、問いの区分と操作の対象（ブランチ名と先端のコミット、または課題・PR の番号）が同じもの。言い回しの違いは数えない",
+      "pending_source": "issues/issue-3597-requirements.md"
+    },
+    {
+      "term": "起き直し",
+      "context": "ndf-workflow",
+      "meaning": "止まった一時レーンを、耐久ワークフローが同じ名前で起動し直すこと",
+      "pending_source": "issues/issue-3597-requirements.md"
     }
   ]
 }
