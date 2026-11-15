@@ -53,6 +53,23 @@ class _NeedsLogin(Exception):
 
 def run(tool: str, presentation_id: str, out_dir: str, size: str) -> Outcome:
     """全ページのサムネイルを `p<番号>.png` で保存し、サムネイルの保存の結果と終了コードを返す。"""
+    gws, out = _prepare(out_dir)
+    try:
+        items = _save_all(_Deck(gws, presentation_id, size), out)
+    except _NeedsLogin as login:
+        return unauthenticated_gate(
+            tool,
+            "gws が未認証。利用者に `gws auth login` を頼み、終えたら routes の retry を打つ",
+            ("gws", "thumbnails", presentation_id, out_dir, "--size", size),
+            items=[{"name": login.what, "result": "unauthenticated", "detail": login.detail}],
+        )
+    metrics = {"pages": len(items), "size": size, "out_dir": str(out)}
+    done = result.result(tool, result.OK, f"{len(items)} ページのサムネイルを保存した", items=items, metrics=metrics)
+    return done, exit_codes.first_code(result.OK)
+
+
+def _prepare(out_dir: str) -> tuple[str, Path]:
+    """gws と curl が PATH にあるかを確かめ、出力のディレクトリを作る。gws の実行ファイルと出力のディレクトリを返す。"""
     gws = shutil.which("gws")
     if not gws:
         raise GwsStop("precondition", "gws が PATH に無い", summary="gws が PATH に無い。`ndf gws check` で確かめる")
@@ -63,23 +80,16 @@ def run(tool: str, presentation_id: str, out_dir: str, size: str) -> Outcome:
         out.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
         raise GwsStop("unknown", f"出力のディレクトリを作れない: {exc}") from exc
-    deck = _Deck(gws, presentation_id, size)
+    return gws, out
+
+
+def _save_all(deck: _Deck, out: Path) -> list[dict[str, str]]:
+    """全ページのサムネイルをページ順に保存し、ページごとの saved の項目を返す（最初の失敗で止まる）。"""
     items: list[dict[str, str]] = []
-    try:
-        ids = _page_ids(deck)
-        for no, oid in enumerate(ids, start=1):
-            dest = _thumbnail(deck, no, oid, out)
-            items.append({"name": f"p{no}", "result": "saved", "objectId": oid, "detail": str(dest)})
-    except _NeedsLogin as login:
-        return unauthenticated_gate(
-            tool,
-            "gws が未認証。利用者に `gws auth login` を頼み、終えたら routes の retry を打つ",
-            ("gws", "thumbnails", presentation_id, out_dir, "--size", size),
-            items=[{"name": login.what, "result": "unauthenticated", "detail": login.detail}],
-        )
-    metrics = {"pages": len(ids), "size": size, "out_dir": str(out)}
-    done = result.result(tool, result.OK, f"{len(ids)} ページのサムネイルを保存した", items=items, metrics=metrics)
-    return done, exit_codes.first_code(result.OK)
+    for no, oid in enumerate(_page_ids(deck), start=1):
+        dest = _thumbnail(deck, no, oid, out)
+        items.append({"name": f"p{no}", "result": "saved", "objectId": oid, "detail": str(dest)})
+    return items
 
 
 def _gws(gws: str, args: Sequence[str], what: str) -> Any:
