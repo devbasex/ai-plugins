@@ -157,7 +157,7 @@ def test_branch_defaults_running_out_of_time_leave_the_item_unknown(monkeypatch)
     monkeypatch.setattr(measure_ci, "measure", lambda *a: None)
     monkeypatch.setattr(measure_ci, "measure_issues", lambda *a: unknown("x"))
     step = cli._Steps(time.monotonic() + 60)
-    cli._ci_items(object(), step, {"gh_repo": None, "head": None, "repo_issues": None, "worktree": None})
+    cli._ci_items(object(), step, cli.MeasurementContext(gh_repo=None, head=None, repo_issues=None, worktree=None))
     assert step.items[write.BRANCH_FLOW] == unknown("時間切れ")
 
 
@@ -321,14 +321,14 @@ def test_row_line_formats_each_kind():
 _REPO_ISSUES = {"markdown_files": 2, "templates": [], "hosts": []}
 
 
-def _ci_ctx(**over) -> dict:
+def _ci_ctx(**over) -> cli.MeasurementContext:
     ctx = {
         "gh_repo": "o/r",
         "head": "abc",
         "repo_issues": _REPO_ISSUES,
         "worktree": {"base_branch": "develop", "production_branch": "main"},
     }
-    return {**ctx, **over}
+    return cli.MeasurementContext(**{**ctx, **over})
 
 
 def _patch_ci(monkeypatch, ci, flow, calls: list) -> None:

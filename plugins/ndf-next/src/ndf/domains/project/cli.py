@@ -21,7 +21,7 @@ import argparse
 import os
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, NamedTuple, Optional
 
 from ndf import cli, contracts
 from ndf.adapters import git
@@ -65,6 +65,15 @@ def _flow_branches(tree: measure_repo.Tree, worktree: Optional[dict[str, Any]]) 
     return base, production
 
 
+class MeasurementContext(NamedTuple):
+    """`gh` と CI の項目を測る文脈。リモートの GitHub のリポジトリ・リモートの既定ブランチ・リポジトリの中の課題の置き場・`.ndf/worktree.json`。"""
+
+    gh_repo: Optional[str]
+    head: Optional[str]
+    repo_issues: Optional[dict[str, Any]]
+    worktree: Optional[dict[str, Any]]
+
+
 class _Steps:
     """項目ごとの測定。締め切りを越えた・失敗した項目を不明にし、1 項目の失敗で測定を止めない。"""
 
@@ -97,10 +106,10 @@ def _add_merge_evidence(items: dict[str, Any], merges: Optional[dict[str, int]])
         items[write.BRANCHES]["evidence"].append({"text": f"直近 100 件のマージ先: {counts}"})
 
 
-def _ci_items(tree: measure_repo.Tree, step: _Steps, ctx: dict[str, Any]) -> list[str]:
+def _ci_items(tree: measure_repo.Tree, step: _Steps, ctx: MeasurementContext) -> list[str]:
     """`gh` と CI から測る項目を入れ、指示ファイルと CI の注記を返す。"""
     items = step.items
-    ci_part = step("ci", lambda: measure_ci.measure(tree, ctx["gh_repo"], ctx["head"], step.deadline, os.environ))
+    ci_part = step("ci", lambda: measure_ci.measure(tree, ctx.gh_repo, ctx.head, step.deadline, os.environ))
     notes = _instruction_notes(items)
     if ci_part:
         items["ci"], items["test_duration"] = ci_part["ci"], ci_part["test_duration"]
@@ -108,11 +117,11 @@ def _ci_items(tree: measure_repo.Tree, step: _Steps, ctx: dict[str, Any]) -> lis
         _add_merge_evidence(items, ci_part["merges"])
     elif "test_duration" not in items:
         items["test_duration"] = items["ci"] if "ci" in items else unknown("時間切れ")
-    flow = step(write.BRANCH_FLOW, lambda: measure_flow.measure(tree, ctx["gh_repo"], *_flow_branches(tree, ctx["worktree"])))
+    flow = step(write.BRANCH_FLOW, lambda: measure_flow.measure(tree, ctx.gh_repo, *_flow_branches(tree, ctx.worktree)))
     if flow is not None:
         items[write.BRANCH_FLOW] = flow
     if "issues" not in items:
-        items["issues"] = measure_ci.measure_issues(ctx["repo_issues"], ci_part if ci_part else {})
+        items["issues"] = measure_ci.measure_issues(ctx.repo_issues, ci_part if ci_part else {})
     return notes
 
 
@@ -125,7 +134,7 @@ def measure_project(root: Path, budget: float) -> dict[str, Any]:
     repo_issues = measure_repo.measure(tree, step, step.items)
     _, worktree = check.load(main)
     head = check.branch_state(repo)["head"]
-    ctx = {"gh_repo": _gh_repo(repo), "head": head, "repo_issues": repo_issues, "worktree": worktree}
+    ctx = MeasurementContext(gh_repo=_gh_repo(repo), head=head, repo_issues=repo_issues, worktree=worktree)
     notes = _ci_items(tree, step, ctx)
     if tree.skipped:
         notes.append(f"秘密の名前のファイルを開かなかった: {'・'.join(tree.skipped[:10])}")
