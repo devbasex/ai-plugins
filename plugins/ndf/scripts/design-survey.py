@@ -312,27 +312,45 @@ def _count_rules(items: list[dict], rules: tuple[str, ...]) -> dict[str, int]:
     return {r: sum(1 for it in items if it["rule"] == r) for r in rules}
 
 
+def _survey_results(groups: list[list[Doc]]) -> tuple[list[dict], dict]:
+    """まとまりごとの外部の調査の指摘と、決定・作り方・自前で作る・省いたまとまりの件数。"""
+    items: list[dict] = []
+    counts = {"decisions": 0, "with_method": 0, "self_built": 0, "skipped": 0}
+    for g in groups:
+        got, c = judge_group(g)
+        items += got
+        for k, v in c.items():
+            counts[k] += v
+    return items, counts
+
+
+def _detail_results(docs: list[Doc], groups: list[list[Doc]], require_detail: bool) -> tuple[list[dict], dict]:
+    """まとまりごとの詳細設計の指摘と、詳細設計の文書の数・規則ごとの件数。"""
+    detail = [it for g in groups for it in detail_items(g, require_detail)]
+    return detail, {"detail_docs": sum(1 for d in docs if is_detail(d.path)), **_count_rules(detail, (*RULES, "detail_missing"))}
+
+
+def _repo_results(groups: list[list[Doc]], settings: design_repos.RepoSettings) -> tuple[list[dict], dict]:
+    """まとまりごとの代表のリポジトリの指摘と、規則ごとの件数。"""
+    repos = [it for g in groups for it in repo_items(g, settings)]
+    return repos, _count_rules(repos, design_repos.RULES)
+
+
 def judge_docs(docs: list[Doc], require_detail: bool, settings: design_repos.RepoSettings | None = None) -> tuple[list[dict], dict]:
     """文書の並びに調査・レッドライン・詳細設計・代表のリポジトリの判定を当て、指摘（判定の順）と metrics を返す。"""
     groups = survey_groups(docs)
-    items: list[dict] = []
-    metrics = {"docs": len(docs), "decisions": 0, "with_method": 0, "self_built": 0, "skipped": 0}
-    for g in groups:
-        got, counts = judge_group(g)
-        items += got
-        for k, v in counts.items():
-            metrics[k] += v
+    items, counts = _survey_results(groups)
+    metrics = {"docs": len(docs), **counts}
     unnamed = [it for d in docs for it in d.unnamed]
     items += unnamed
     metrics["unnamed_redline"] = len(unnamed)
-    detail = [it for g in groups for it in detail_items(g, require_detail)]
+    detail, detail_metrics = _detail_results(docs, groups, require_detail)
     items += detail
-    metrics["detail_docs"] = sum(1 for d in docs if is_detail(d.path))
-    metrics.update(_count_rules(detail, (*RULES, "detail_missing")))
+    metrics.update(detail_metrics)
     if settings is not None:  # 設定の無いリポジトリの結果は今と同じ（#3618 の I3）
-        repos = [it for g in groups for it in repo_items(g, settings)]
+        repos, repo_metrics = _repo_results(groups, settings)
         items += repos
-        metrics.update(_count_rules(repos, design_repos.RULES))
+        metrics.update(repo_metrics)
     return items, metrics
 
 
