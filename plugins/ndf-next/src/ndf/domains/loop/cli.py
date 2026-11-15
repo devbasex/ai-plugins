@@ -36,7 +36,7 @@ from ndf import cli, contracts, identity
 from ndf.adapters import git, github
 from ndf.adapters.git import GitError
 from ndf.contracts import limits, result
-from ndf.domains.loop import acceptance, design_tests
+from ndf.domains.loop import acceptance, acceptance_decide, design_tests
 from ndf.domains.loop import control_decide as ctl
 from ndf.domains.loop import lap_decide, select_decide, sprint_decide, store
 from ndf.domains.loop import record_decide as rec
@@ -247,8 +247,8 @@ def _parser() -> argparse.ArgumentParser:
 def _run(a: argparse.Namespace) -> dict[str, Any]:
     a.cwd = Path(os.path.realpath(a.cwd if a.cwd is not None else Path.cwd()))
     try:
-        return acceptance.run(a) if a.command == "acceptance" else a.handler(a)
-    except (select_decide.CandidateError, sprint_decide.SprintError, store.StoreError) as exc:
+        return a.handler(a)
+    except (select_decide.CandidateError, sprint_decide.SprintError, store.StoreError, acceptance_decide.AcceptanceError) as exc:
         return result.stopped(TOOL, ctl.INVALID, str(exc))
     except Timeout as exc:
         return result.stopped(TOOL, "store_in_use", f"開発ループの記録の排他を取れない: {exc}")

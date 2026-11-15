@@ -110,11 +110,3 @@ def add_parsers(sub: Any) -> None:
     inner.add_parser("check", help="記録の無い受け入れ条件があれば incomplete で止まる").set_defaults(handler=_check)
     for name in ("record", "show", "check"):
         inner.choices[name].add_argument("--issue", type=int, required=True)
-
-
-def run(a: argparse.Namespace) -> dict[str, Any]:
-    """副命令を打つ。引数の誤りは invalid で返す。"""
-    try:
-        return a.handler(a)
-    except acc.AcceptanceError as exc:
-        return result.stopped(TOOL, "invalid", str(exc))
