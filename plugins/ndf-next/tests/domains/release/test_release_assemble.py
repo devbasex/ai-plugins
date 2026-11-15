@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
 
 import git_sandbox
 import pytest
 
 from ndf.adapters import git as git_mod
-from ndf.domains.release import assemble, changes_decide, checks_decide, gather, materials_decide, version_decide
+from ndf.domains.release import approval_decide, assemble, changes_decide, checks_decide, gather, materials_decide, version_decide
 from ndf.domains.release import cli as release_cli
 from ndf.domains.release import declaration as decl_mod
 from ndf.domains.release import plugins as plugins_mod
@@ -264,3 +265,109 @@ def test_issue_3172_no_empty_release_after_release_when_only_a_closed_pull_remai
         with pytest.raises(assemble.NothingToRelease):
             assemble.assemble(work, hub, assemble.Target("production", "patch", "develop", "main"))
         assert hub.requests == []
+
+
+# --- #3572: 既にあるリリースブランチを進め、開いた本番の PR を組み直す ---------------------------------------
+
+
+def _remote_tip(work: Path, branch: str) -> str:
+    return git_sandbox.sh(work, "ls-remote", "origin", f"refs/heads/{branch}").split("\t")[0]
+
+
+def _push_at(work: Path, branch: str, ref: str) -> None:
+    git_sandbox.sh(work, "push", "-q", "origin", f"{ref}:refs/heads/{branch}")
+
+
+def _commit_on(work: Path, branch: str, rel: str, text: str) -> None:
+    """origin の `branch` の先端に 1 コミット足して push する（取り出しは develop へ戻す）。"""
+    git_sandbox.sh(work, "fetch", "-q", "origin", branch)
+    git_sandbox.sh(work, "switch", "-q", "--detach", f"origin/{branch}")
+    (work / rel).parent.mkdir(parents=True, exist_ok=True)
+    (work / rel).write_text(text, encoding="utf-8")
+    git_sandbox.sh(work, "add", "-A")
+    git_sandbox.sh(work, "commit", "-q", "-m", f"fix {rel}")
+    git_sandbox.sh(work, "push", "-q", "origin", f"HEAD:refs/heads/{branch}")
+    git_sandbox.sh(work, "switch", "-q", "--force", "develop")
+
+
+def _created_pulls(hub: FakeHub) -> list[dict]:
+    return [p for m, path, p in hub.requests if (m, path) == ("POST", "/repos/o/r/pulls")]
+
+
+def test_a_prepared_branch_is_advanced_by_fast_forward_and_not_rebuilt(tmp_path: Path) -> None:
+    """受け入れ条件 10・I6: 前の版の直後に本番ブランチから用意したブランチを、作り直さずに fast-forward で進めて PR を作る。"""
+    work = _origin_with_change(tmp_path, test_only=False)
+    _push_at(work, "release/v1.2.4", "origin/main")
+    prepared = _remote_tip(work, "release/v1.2.4")
+    built = assemble.assemble(work, _hub(), assemble.Target("production", "patch", "develop", "main"))
+    assert (built.branch, built.reassembled, built.renamed_from) == ("release/v1.2.4", False, None)
+    assert git_sandbox.sh(work, "merge-base", "--is-ancestor", prepared, built.facts.head) == ""
+
+
+def test_a_foreign_branch_without_an_open_pr_stops_the_base_assembly(tmp_path: Path) -> None:
+    """I6: 先端が組む起点の祖先でなく、開いた本番の PR も無いブランチは進めずに止まる（push しない）。"""
+    work = _origin_with_change(tmp_path, test_only=False)
+    _push_at(work, "release/v1.2.4", "origin/main")
+    _commit_on(work, "release/v1.2.4", "stray.txt", "x\n")
+    before = _remote_tip(work, "release/v1.2.4")
+    with pytest.raises(assemble.AssembleError, match="祖先でなく"):
+        assemble.assemble(work, _hub(), assemble.Target("production", "patch", "develop", "main"))
+    assert _remote_tip(work, "release/v1.2.4") == before
+
+
+@pytest.mark.parametrize("source", ["base", "release"])
+def test_issue_3572_rebuilds_the_open_production_pr_on_the_new_head(tmp_path: Path, source: str) -> None:
+    """受け入れ条件 9・I7: 開いた本番の PR のブランチへ直しが入れば、同じブランチと PR を組み直し（新しいブランチと PR を作らず、
+    強制 push をせず）、承認資料の対象を新しい先端 C にする。A への承認は stale になる。"""
+    work = _origin_with_change(tmp_path, test_only=False)
+    if source == "release":
+        _push_at(work, "release/v1.2.4", "origin/develop")
+    target = assemble.Target("production", "patch", "develop", "main", source=source)
+    first = assemble.assemble(work, _hub(), target)
+    _commit_on(work, "develop" if source == "base" else "release/v1.2.4", "tools/kit/fix.py", "fixed = 1\n")
+    hub = _open_pulls(_hub(), (9, "release/v1.2.4"))
+    again = assemble.assemble(work, hub, target)
+    assert (again.branch, again.version, again.pr, again.reassembled) == ("release/v1.2.4", "1.2.4", 9, True)
+    assert _created_pulls(hub) == [] and again.facts.head != first.facts.head
+    assert git_sandbox.sh(work, "merge-base", "--is-ancestor", first.facts.head, again.facts.head) == ""
+    assert "fixed = 1" in git_sandbox.sh(work, "show", f"{again.facts.head}:tools/kit/fix.py")
+    assert json.loads(git_sandbox.sh(work, "show", f"{again.facts.head}:tools/kit/.claude-plugin/plugin.json"))["version"] == "1.2.4"
+    body = next(p for m, path, p in hub.requests if (m, path) == ("PATCH", "/repos/o/r/issues/9"))["body"]
+    assert f"`{again.facts.head}`" in body and f"`{first.facts.head}`" not in body
+    names = git_sandbox.sh(work, "ls-remote", "--heads", "origin", "release/*").splitlines()
+    assert len(names) == 1
+    stale = approval_decide.judge([approval_decide.Trail(0, "octocat", "approved", first.facts.head)], again.facts.head)
+    assert stale.state == approval_decide.STALE
+
+
+@dataclass
+class _RenamingHub(FakeHub):
+    """改名の REST を、手元の bare の origin のブランチの改名で受ける偽物。"""
+
+    origin: Path = Path()
+
+    def rest(self, method, path, payload=None, params=None):
+        if method == "POST" and path.endswith("/rename"):
+            old = path.removeprefix("/repos/o/r/branches/").removesuffix("/rename")
+            git_sandbox.sh(self.origin, "branch", "-m", old, payload["new_name"])
+        return super().rest(method, path, payload, params)
+
+
+def test_issue_3572_a_larger_bump_renames_the_prepared_branch_before_the_pr(tmp_path: Path) -> None:
+    """決定 5: 計画した版の上げ幅が用意した PATCH より大きく、本番の PR が無ければ、PR を作る前に改名する。"""
+    work = _origin_with_change(tmp_path, test_only=False)
+    _push_at(work, "release/v1.2.4", "origin/main")
+    hub = _RenamingHub(node_data=_hub().node_data, responses=dict(_hub().responses), origin=tmp_path / "origin.git")
+    built = assemble.assemble(work, hub, assemble.Target("production", "minor", "develop", "main"))
+    assert (built.branch, built.renamed_from) == ("release/v1.3.0", "release/v1.2.4")
+    assert _remote_tip(work, "release/v1.2.4") == "" and _created_pulls(hub)[0]["head"] == "release/v1.3.0"
+
+
+def test_issue_3572_a_larger_bump_with_an_open_pr_stops_without_renaming(tmp_path: Path) -> None:
+    """決定 5: 本番の PR を作った後に上げ幅が変われば、改名せずに止まる（改名すると head の PR が閉じる）。"""
+    work = _origin_with_change(tmp_path, test_only=False)
+    _push_at(work, "release/v1.2.4", "origin/main")
+    hub = _open_pulls(_hub(), (9, "release/v1.2.4"))
+    with pytest.raises(assemble.AssembleError, match="defer"):
+        assemble.assemble(work, hub, assemble.Target("production", "minor", "develop", "main"))
+    assert not [r for r in hub.requests if r[0] == "POST"]

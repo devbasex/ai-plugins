@@ -130,8 +130,9 @@ def cmd_answer(args: argparse.Namespace) -> dict:
 def cmd_approval_check(args: argparse.Namespace) -> dict:
     hub = _hub(args)
     pull = hub.pull(args.pr)
-    if pull.base_ref != args.production:
-        return result.stopped(TOOL, "not_applicable", f"#{args.pr} は本番ブランチ {args.production} 宛てでない（{pull.base_ref}）")
+    production = _production_of(args)
+    if pull.base_ref != production:
+        return result.stopped(TOOL, "not_applicable", f"#{args.pr} は本番ブランチ {production} 宛てでない（{pull.base_ref}）")
     got = trail.check(hub, args.pr)
     return result.result(
         TOOL, result.OK, f"#{args.pr} の承認の判定: {got.judgment.detail}", outputs={"state": got.judgment.state, "head": got.pull.head_sha}
@@ -176,9 +177,9 @@ def cmd_merge(args: argparse.Namespace) -> dict:
     items = [{"kind": "check", "name": c.name, "outcome": c.conclusion} for c in done.failed]
     if done.merged:
         return result.stopped(TOOL, kind, detail, items=items, outputs=outputs)
-    moves = _moves(args, kind)
-    outputs.update(moves)
-    return result.stopped(TOOL, kind, detail, items=items, outputs=outputs, next=moves["moves"][moves["suggested"]])
+    # 次の手は打つ側が選ぶ（既定の手を next にすると、打つ側が問わずに本番の PR を閉じる）
+    outputs.update(_moves(args, kind))
+    return result.stopped(TOOL, kind, detail, items=items, outputs=outputs)
 
 
 def cmd_guard(args: argparse.Namespace) -> dict:

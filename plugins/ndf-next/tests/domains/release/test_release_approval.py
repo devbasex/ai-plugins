@@ -13,7 +13,8 @@ from typing import Any
 
 from ndf.adapters import ci
 from ndf.adapters.github import MERGE_QUEUE_PENDING, Authored, GitHubError, MergeOutcome, Pull
-from ndf.domains.release import approval_decide, declaration, land, trail
+from ndf.domains.release import approval_decide, declaration, land, merge_decide, trail
+from ndf.domains.release import cli as release_cli
 
 from ._fakes import HEAD, OTHER, FakeHub, not_found, pull
 
@@ -589,3 +590,207 @@ def test_merge_queue_dequeues_when_approval_is_revoked_while_waiting() -> None:
     now = [0.0]
     done = _queue_lander(hub, now, 3600.0, on_poll=lambda: hub.comments_of[7].append(_trail("rejected", HEAD))).land(7)
     assert not done.merged and done.kind == "refused" and hub.dequeued == [7] and 7 not in hub.queued
+
+
+# --- #3572: 承認した先端だけを本番ブランチへ入れ、承認の後にコードを直さない -----------------------------
+
+MERGE_SHA = "c" * 40
+
+
+def _gate_trail(sha: str) -> Authored:
+    """承認ゲートの答えの証跡（`trail.answer` が書く形）。"""
+    body = f"{approval_decide.render_trail('approved', sha, trail.USER_BY)}{trail.ROUTE_LINE} {merge_decide.GATE_ROUTE}\n"
+    return Authored("octocat", "OWNER", body)
+
+
+def _merged_raw(head: str, by: str = "takemi", merged: bool = True) -> dict:
+    return {
+        "merged": merged,
+        "merged_by": {"login": by} if merged else None,
+        "merge_commit_sha": MERGE_SHA if merged else None,
+        "head": {"sha": head, "ref": "release/v1.2.4"},
+        "base": {"ref": "main"},
+    }
+
+
+def _approved(order: int, sha: str, route: str, by: str = "octocat") -> merge_decide.Approved:
+    return merge_decide.Approved(order, "octocat", sha, route, by)
+
+
+def test_facts_of_reads_who_merged_which_head() -> None:
+    got = merge_decide.facts_of(_merged_raw(HEAD))
+    assert got == merge_decide.MergeFacts(True, "takemi", HEAD, MERGE_SHA, "main", "release/v1.2.4")
+    assert merge_decide.facts_of({**_merged_raw(HEAD), "merged_by": None}).by == ""
+    assert not merge_decide.facts_of(_merged_raw(HEAD, merged=False)).merged
+
+
+def test_decide_reads_the_route_and_does_not_carry_an_approval_to_another_head() -> None:
+    """受け入れ条件 7・8・I5: 承認ゲートの承認の先端でマージすれば gate。別の先端（B）を人がマージすれば、B への承認として
+    github-merge と記録し、承認ゲートの承認の先端（A）を gate_head に残す。"""
+    on_head = merge_decide.facts_of(_merged_raw(HEAD))
+    gated = merge_decide.decide(on_head, [_approved(0, HEAD, merge_decide.GATE_ROUTE)])
+    assert gated == merge_decide.Approval("gate", "octocat", HEAD, HEAD, MERGE_SHA, HEAD)
+    moved = merge_decide.decide(merge_decide.facts_of(_merged_raw(OTHER)), [_approved(0, HEAD, merge_decide.GATE_ROUTE)])
+    assert moved == merge_decide.Approval("github-merge", "takemi", OTHER, OTHER, MERGE_SHA, HEAD)
+    nothing = merge_decide.decide(on_head, [])
+    assert nothing is not None and (nothing.route, nothing.gate_head) == ("github-merge", None)
+    by_merge = merge_decide.decide(on_head, [_approved(1, HEAD, merge_decide.MERGE_ROUTE, by="takemi")])
+    assert by_merge is not None and (by_merge.route, by_merge.by, by_merge.gate_head) == ("github-merge", "takemi", None)
+    assert merge_decide.decide(merge_decide.facts_of(_merged_raw(HEAD, merged=False)), []) is None
+
+
+def test_suggested_reruns_only_passing_stops_and_defers_the_rest() -> None:
+    """決定 3: 一時的な止まり方は打ち直し、直しの要る止まり方は次の版への回し。"""
+    assert merge_decide.suggested("ci_pending") == merge_decide.suggested("infra_wait") == merge_decide.RERUN
+    for kind in ("test_failed", "check_failed", "refused", "no-such-kind"):
+        assert merge_decide.suggested(kind) == merge_decide.DEFER
+
+
+def test_failed_required_check_stops_with_the_check_and_without_pushing_or_merging() -> None:
+    """受け入れ条件 4・I4: 必須のチェックが落ちたら、落ちたチェックを結果に載せて止まり、push もマージもしない。"""
+    hub = FakeHub(pulls={7: pull()}, comments_of={7: [_trail("approved", HEAD)]})
+    done = _lander(hub, True, []).land(7)
+    assert not done.merged and done.kind == "test_failed" and [c.name for c in done.failed] == ["pytest"]
+    assert hub.merged == [] and not [r for r in hub.requests if r[0] in ("POST", "PATCH", "PUT") and "/git/" in r[1]]
+    assert hub.pulls[7].head_sha == HEAD
+
+
+def test_cli_merge_reports_the_failed_check_and_three_next_moves(monkeypatch, capsys) -> None:
+    """受け入れ条件 4: 止まった結果は items に落ちたチェック、outputs.moves に 3 つの手、既定の手は次の版への回し。"""
+    hub = FakeHub(pulls={7: pull()}, comments_of={7: [_trail("approved", HEAD)]})
+    lander = _lander(hub, True, [])
+    monkeypatch.setattr(release_cli, "_hub", lambda args: hub)
+    monkeypatch.setattr(land, "Lander", lambda h, b, p, budget, admin=False: lander)
+    code = release_cli.main(["merge", "--pr", "7", "--base", "develop", "--production", "main", "--budget", "1"])
+    out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert code != 0 and out["items"] == [{"kind": "check", "name": "pytest", "outcome": "failure"}]
+    assert set(out["outputs"]["moves"]) == set(merge_decide.NEXT_MOVES) and out["outputs"]["suggested"] == "defer"
+    assert out["outputs"]["moves"]["defer"]["argv"][1:3] == ["release-steps", "defer"] and "next" not in out
+
+
+def test_moved_head_after_the_approval_is_not_merged_and_names_both_heads() -> None:
+    """受け入れ条件 6・I3: 承認の後に先端が A から B へ動けば、マージせずに止まり、2 つの先端を理由に出す。"""
+    hub = FakeHub(pulls={7: pull(head=OTHER)}, comments_of={7: [_gate_trail(HEAD)]})
+    done = _lander(hub, False, []).land(7)
+    assert not done.merged and done.kind == "refused" and hub.merged == []
+    assert HEAD[:12] in done.detail and OTHER[:12] in done.detail
+    assert trail.read(hub, 7).judgment.state == approval_decide.STALE
+
+
+def test_gate_approval_merge_reports_the_version_and_the_gate_route() -> None:
+    """受け入れ条件 5: 承認ゲートで承認した先端を、その先端との照合付きでマージし、結果に版と経路 gate を載せる。"""
+    hub = FakeHub(pulls={7: pull(), 8: pull(number=8, base="develop")}, comments_of={7: [_gate_trail(HEAD)]})
+    hub.responses[("POST", "/repos/o/r/pulls")] = {"number": 8}
+    hub.responses[("GET", "/repos/o/r/pulls/7")] = _merged_raw(HEAD, by="octocat")
+    seen: list[str | None] = []
+    merge = hub.merge
+
+    def recorded(number, expect_head=None, method=None, require_method=False):
+        seen.append(expect_head)
+        return merge(number, expect_head, method, require_method)
+
+    hub.merge = recorded  # type: ignore[method-assign]
+    done = _lander(hub, False, []).land(7)
+    assert done.merged and done.version == "1.2.4" and seen[0] == HEAD
+    assert done.approval is not None and (done.approval.route, done.approval.approved_head) == ("gate", HEAD)
+    assert done.merge_record is None and not [c for c in hub.comments(7) if trail.MERGE_MARK in c.body]
+
+
+def _resumed(comments: list[Authored], head: str) -> FakeHub:
+    hub = FakeHub(pulls={7: pull(head=head, merged=True), 9: pull(number=9, base="develop")}, comments_of={7: comments})
+    hub.responses[("GET", "/repos/o/r/pulls")] = [{"number": 9}]
+    hub.responses[("GET", "/repos/o/r/pulls/7")] = _merged_raw(head)
+    return hub
+
+
+def test_human_merge_while_the_gate_waits_is_recorded_and_synced_once() -> None:
+    """受け入れ条件 7: 人が先端 A でマージした PR の再開は、人のマージを記録し（マージした人・A・マージコミット）、戻すマージへ進む。"""
+    hub = _resumed([], HEAD)
+    judgment, facts = trail.answer_merged(hub, 7, "main")
+    assert judgment.approved and facts.by == "takemi"
+    first = _lander(hub, False, []).land(7)
+    second = _lander(hub, False, []).land(7)
+    assert first.merged and first.sync_pr == 9 and first.approval is not None
+    assert (first.approval.route, first.approval.by, first.approval.merged_head) == ("github-merge", "takemi", HEAD)
+    records = [c.body for c in hub.comments(7) if trail.MERGE_MARK in c.body]
+    assert len(records) == 1 and f"`{HEAD}`" in records[0] and f"`{MERGE_SHA}`" in records[0] and "takemi" in records[0]
+    assert second.merged and second.merge_record is not None
+
+
+def test_human_merge_of_a_moved_head_keeps_both_heads() -> None:
+    """受け入れ条件 8: A の承認の後に B が積まれ、人が B をマージしたら、B への承認として記録し、A を承認ゲートの先端に残す。"""
+    hub = _resumed([_gate_trail(HEAD)], OTHER)
+    done = _lander(hub, False, []).land(7)
+    assert done.approval == merge_decide.Approval("github-merge", "takemi", OTHER, OTHER, MERGE_SHA, HEAD)
+    (record,) = [c.body for c in hub.comments(7) if trail.MERGE_MARK in c.body]
+    assert f"{trail.GATE_HEAD_LINE} `{HEAD}`" in record and f"{trail.MERGED_HEAD_LINE} `{OTHER}`" in record
+
+
+def test_merge_record_failure_keeps_the_merge_and_reports_it(monkeypatch, capsys) -> None:
+    """I5: 人のマージの記録を書けなければ、本番は出たまま record_error に理由を置く。"""
+    hub = _resumed([], HEAD)
+
+    def broken(*args, **kwargs):
+        raise trail.TrailError("書けない")
+
+    monkeypatch.setattr(trail, "write_merge_record", broken)
+    done = _lander(hub, False, []).land(7)
+    assert done.merged and done.record_error == "書けない" and done.approval is not None
+
+
+def test_answer_merged_writes_one_trail_and_refuses_unmerged_or_other_bases() -> None:
+    hub = _resumed([], HEAD)
+    trail.answer_merged(hub, 7, "main")
+    trail.answer_merged(hub, 7, "main")
+    found = trail.approvals(hub, 7)
+    assert [(a.route, a.by, a.sha) for a in found] == [("github-merge", "takemi", HEAD)]
+    with pytest.raises(trail.TrailError):
+        trail.answer_merged(hub, 7, "production")
+    hub.responses[("GET", "/repos/o/r/pulls/7")] = _merged_raw(HEAD, merged=False)
+    with pytest.raises(trail.NotMerged):
+        trail.answer_merged(hub, 7, "main")
+
+
+def test_approvals_reads_old_trails_as_the_gate_and_skips_rejections_and_untrusted() -> None:
+    comments = [_trail("approved", HEAD), _trail("rejected", HEAD), _trail("approved", HEAD, author="mallory")]
+    hub = FakeHub(pulls={7: pull()}, comments_of={7: comments})
+    assert [(a.order, a.route, a.by) for a in trail.approvals(hub, 7)] == [(0, "gate", "octocat")]
+
+
+def test_merge_record_is_written_once_per_head_by_a_trusted_author() -> None:
+    approval = merge_decide.Approval("github-merge", "takemi", HEAD, HEAD, MERGE_SHA, None)
+    assert "（無し）" in trail.render_merge_record(approval) and approval_decide.TRAIL_MARK not in trail.render_merge_record(approval)
+    with pytest.raises(ValueError):
+        trail.render_merge_record(approval._replace(merge_sha="x"))
+    forged = Authored("mallory", "NONE", trail.render_merge_record(approval))
+    hub = FakeHub(pulls={7: pull()}, comments_of={7: [forged]})
+    assert trail.write_merge_record(hub, 7, approval)[0]
+    assert not trail.write_merge_record(hub, 7, approval)[0]
+
+
+def test_defer_closes_the_production_pr_and_keeps_the_branch(monkeypatch, capsys) -> None:
+    """決定 3: 次の版への回しは本番の PR を閉じ、リリースブランチを消さない。閉じた PR・本番宛てでない PR は止まる。"""
+    hub = FakeHub(pulls={7: pull(), 8: pull(number=8, base="develop")})
+    monkeypatch.setattr(release_cli, "_hub", lambda args: hub)
+    assert release_cli.main(["defer", "--pr", "7", "--production", "main"]) == 0
+    out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert out["outputs"] == {"closed": 7, "branch": "release/v1.2.4"}
+    assert [(m, p, b) for m, p, b in hub.requests if m != "GET"] == [("PATCH", "/repos/o/r/pulls/7", {"state": "closed"})]
+    assert not any(m == "DELETE" for m, _p, _b in hub.requests)
+    assert release_cli.main(["defer", "--pr", "8", "--production", "main"]) != 0
+    assert json.loads(capsys.readouterr().out.strip().splitlines()[-1])["cause"]["kind"] == "precondition"
+
+
+def test_cli_answer_routes(monkeypatch, capsys) -> None:
+    """--route を省けば gate（答え・提示・担い手が要る）。github-merge はマージされていなければ not_applicable。"""
+    hub = _resumed([], HEAD)
+    hub.responses[("GET", "/repos/o/r/pulls/7")] = _merged_raw(HEAD, merged=False)
+    monkeypatch.setattr(release_cli, "_hub", lambda args: hub)
+    release_cli.main(["answer", "--pr", "7", "--answer", "approved"])
+    assert json.loads(capsys.readouterr().out.strip().splitlines()[-1])["cause"]["kind"] == "invalid"
+    release_cli.main(["answer", "--pr", "7", "--route", "github-merge", "--production", "main"])
+    assert json.loads(capsys.readouterr().out.strip().splitlines()[-1])["cause"]["kind"] == "not_applicable"
+    hub.responses[("GET", "/repos/o/r/pulls/7")] = _merged_raw(HEAD)
+    assert release_cli.main(["answer", "--pr", "7", "--route", "github-merge", "--production", "main"]) == 0
+    out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])["outputs"]
+    assert out == {"state": "approved", "by": "takemi", "head": HEAD, "version": "1.2.4"}

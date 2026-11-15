@@ -158,7 +158,7 @@ def _merge_answer(
     head = str(merged["head"]) if merged.get("head") else ""
     reason = f"利用者 {merged.get('by')} が GitHub で本番の PR #{q.pr} を {head[:12]} でマージした（リリース承認とみなす）"
     outputs = {"version": str(merged["version"])} if merged.get("version") else {}
-    outputs["release_pr"] = str(q.pr)
+    outputs["release_pr"] = q.pr_url if q.pr_url else str(q.pr)
     given = Answer(q.id, run.APPROVED, reason, MERGE_ACTOR, f"{MERGE_KEY}:{q.id}", seen=observe(q), outputs=outputs)
     return answer(st, table_id, given, observe)
 

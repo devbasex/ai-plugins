@@ -92,7 +92,7 @@ def test_merge_plan_fixes_non_test_check_failures_and_pushes():
     落ちたテストが無いので、手元のテスト（ci-local）を打たずに push する。
     """
     visited, state = walk(plan_of("merge"), {"ci": [stopped("check_failed")]})
-    assert visited == ["conflict-check", "ci", "check-repeat", "check-fix", "push", "conflict-check", "ci", "merge"]
+    assert visited == ["release-guard", "conflict-check", "ci", "check-repeat", "check-fix", "push", "conflict-check", "ci", "merge"]
     assert state.status == OK
 
 

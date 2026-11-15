@@ -150,30 +150,42 @@ def test_release_steps_parser_current_behavior() -> None:
     def opt(name: str, default: str | None = None, choices: tuple | None = None) -> tuple:
         return (name, False, default, choices, None, "_StoreAction")
 
+    production = opt("--production")
     target = [
         req("--base"),
-        req("--production"),
+        production,
         req("--channel", choices=("production", "dev")),
         opt("--level", "patch", ("major", "minor", "patch")),
         opt("--plugin"),
+        opt("--source", "base", ("base", "release")),
     ]
     pr = req("--pr", int)
+    answer = [
+        opt("--route", "gate", ("gate", "github-merge")),
+        opt("--answer", choices=("approved", "rejected")),
+        opt("--presented"),
+        opt("--by", choices=("user", "mvv")),
+        production,
+    ]
+    branches = ("--branch", True, None, None, None, "_AppendAction")
     expected = {
         "assemble": common + target,
         "materials": common + target + [opt("--out")],
         "present": common + [pr, opt("--material")],
-        "answer": common
-        + [pr, req("--answer", choices=("approved", "rejected")), req("--presented"), req("--by", choices=("user", "mvv"))],
-        "approval-check": common + [pr, req("--production")],
-        "merge": common + [pr, req("--base"), req("--production"), req("--budget", float)],
-        "record": common + [pr, req("--production")],
+        "answer": common + [pr, *answer],
+        "approval-check": common + [pr, production],
+        "merge": common + [pr, req("--base"), production, req("--budget", float)],
+        "guard": common + [branches, production],
+        "defer": common + [pr, production],
+        "prepare-next": common + [pr, production],
+        "record": common + [pr, production],
         "verification-record": common + [pr, req("--record")],
         "records": common + [pr],
         "publish": common + [req("--revision")],
         "sync-base": common + [req("--main-dir"), req("--base")],
         "config-snapshot": common + [req("--out")],
         "config-check": common + [req("--before")],
-        "cleanup": common + [("--branch", True, None, None, None, "_AppendAction")],
+        "cleanup": common + [branches],
     }
     got = _options(release_cli._parser())
     assert list(got) == list(expected) == list(release_cli.HANDLERS)
