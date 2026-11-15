@@ -148,12 +148,12 @@ E8 は E7 より前に起きうる。そのときは答え待ちの同じ問い�
 | --- | --- |
 | 依頼の送り（`lib/parallel_lane.py` の `deliver_message`） | 台帳へ書いた結果（書いた / 同じキーの行があった）を呼び出し元へ返す。返さずに捨てない |
 | 台帳の判定（`lib/parallel_ledger.py`） | 同じキーの行と中身（`at` を除いた `msg`）が同じかを判定し、同じなら答え済みか処理済みかを返す。行の種類 `reused` を足す。処理済みのリリース承認ゲートの判定（`settled_gates`）は、確定の後の依頼（`after: confirmed`）を確定の行では処理済みにせず、その id の答えの行かそれより後の締めの行があるときだけ処理済みにする |
-| 確定の後の依頼（`lib/parallel_gate2.py` を新設。`request_gate2` を `parallel_lane.py` から移す） | 提示の依頼と、確定の後の依頼の id と中身を組む。`parallel_lane.py` は 499 行で、足すと行数の検査の上限 500 行を超えるため分ける |
+| 確定の後の依頼（`lib/parallel_gate2.py` を新設。`request_gate2` を `parallel_lane.py` から移す） | 提示の依頼と、確定の後の依頼の id と中身を組む。確定の後の依頼への答えの当て方（`_Run` が継ぐ部品）と、本番の PR を閉じる耐久ステップも持つ。`parallel_lane.py` は 499 行、`parallel_run.py` は行数の例外の 840 行で、足すと行数の検査の上限を超えるため分ける |
 | 同じ問いの判定（`lib/parallel_question.py`） | 問いの対象を読み、同じ一時レーンの名前・区分・対象の最新の依頼と、その答えを台帳から引く。純粋な関数で、台帳の行を受け取る |
 | 依頼のコマンド（`parallel.py` の `request`・`request-ask`・`request-gate2`・`answer`・`confirm`・`settle`） | 送った結果に応じて終了コードと結果を返す。`request-ask` は、`metadata.target` のブランチ名へ問いを受けた時点の先端のコミットを `git rev-parse` で求めて問いの対象を組み、同じ問いを先に引く |
 | 問いの hook（`hook_lib/ask_guard.py`） | `request-ask` が答えを引き継いだら、答えを拒否の理由に載せて返す。答え待ちの同じ問いなら、その id で保留の手順を返す。対象を組むのは `request-ask` で、hook は `metadata` をそのまま渡す |
 | 一時レーンの流すもの（`lib/parallel_helper.py` の `helper_task`） | `phase: confirmed` で、確定の後の依頼の 1 行（`gate2`）を返す。自分の名前の前の依頼と答え（`asked`）を返す |
-| 耐久ワークフローの答えの当て方（`lib/parallel_run.py` の `apply_own`） | 確定の後の依頼の「打ち直す」で確定の起動を新しい目的で流し直す。「差し戻す」で、締めの再開（`settle`）と同じメソッド `settle` を `result: rejected` で呼んでリリースを差し戻しとして締め、本番の PR を閉じる。締めは `parallel.py settle --rejected` と同じく `_release_result`（本番のプランの done を読む部品）を通らない |
+| 耐久ワークフローの答えの当て方（`lib/parallel_run.py` の `apply_own` から `parallel_gate2.py` の部品を呼ぶ） | 確定の後の依頼の「打ち直す」で確定の起動を新しい目的で流し直す。「差し戻す」で、締めの再開（`settle`）と同じメソッド `settle` を `result: rejected` で呼んでリリースを差し戻しとして締め、本番の PR を閉じる。締めは `parallel.py settle --rejected` と同じく `_release_result`（本番のプランの done を読む部品）を通らない |
 | 途中停止の問いの判定（`lib/parallel_observe.py` の `_ask_helper`） | 変えない。今の判定は問いの一覧に同じ連番の種類 `gate2` の問いがあれば問いを立てず、id と `after` を見ないため、確定の後の依頼でも立たない（決定 4）。テストで縛る |
 | 起動の部品（`lib/parallel_launch.py` の `LaunchRouting`） | `helper-busy` の断りを 2 回目を打たずに返し、起動の記録を空き待ちにする。ループの 1 回ごとに空き待ちを読み直し、前の一時レーンが止まれば打ち直し、上限を過ぎれば区分 `spawn` の問いを立てる。起動の記録の値を書き換える唯一の部品で、記録のある目的を打ち直さない今の決まり（`launch_once`）の例外は `waiting` だけにする |
 | リレーハブ（`relay_lib/hub.py` の `Hub.judge`） | 一時レーンの同時数の断りを結果の値 `helper-busy` で返し、動いている一時レーンの名前を載せる。全体の上限の断りは `limit` のまま |
@@ -360,7 +360,7 @@ stateDiagram-v2
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #3597 | 実装する | — | `plugins/ndf/scripts/parallel.py`、`plugins/ndf/scripts/lib/parallel_lane.py`、`plugins/ndf/scripts/lib/parallel_gate2.py`（新設）、`plugins/ndf/scripts/lib/parallel_ledger.py`、`plugins/ndf/scripts/lib/parallel_question.py`、`plugins/ndf/scripts/lib/parallel_helper.py`、`plugins/ndf/scripts/lib/parallel_run.py`、`plugins/ndf/scripts/lib/parallel_launch.py`、`plugins/ndf/scripts/lib/parallel_args.py`、`plugins/ndf/scripts/relay_lib/hub.py`、`plugins/ndf/scripts/hook_lib/ask_guard.py`、`plugins/ndf/contracts/limits.json`、`plugins/ndf/skills/development-workflow/references/parallel.md`、`plugins/ndf/skills/development-workflow/references/asking.md`、`plugins/ndf/scripts/tests/test_parallel_lane.py`、`plugins/ndf/scripts/tests/test_parallel_ledger.py`、`plugins/ndf/scripts/tests/test_parallel_launch.py`、`plugins/ndf/scripts/tests/test_parallel_run.py`、`plugins/ndf/scripts/tests/test_ask_guard.py`、`plugins/ndf/scripts/tests/test_relay_hub.py` |
+| #3597 | 実装する | — | `plugins/ndf/scripts/parallel.py`、`plugins/ndf/scripts/lib/parallel_lane.py`、`plugins/ndf/scripts/lib/parallel_gate2.py`（新設）、`plugins/ndf/scripts/lib/parallel_ledger.py`、`plugins/ndf/scripts/lib/parallel_question.py`、`plugins/ndf/scripts/lib/parallel_helper.py`、`plugins/ndf/scripts/lib/parallel_run.py`、`plugins/ndf/scripts/lib/parallel_launch.py`、`plugins/ndf/scripts/lib/parallel_args.py`、`plugins/ndf/scripts/lib/parallel_answer.py`、`scripts/script-structure-allow/plugins__ndf__scripts__lib__parallel_run.py--lines.json`、`plugins/ndf/scripts/relay_lib/hub.py`、`plugins/ndf/scripts/hook_lib/ask_guard.py`、`plugins/ndf/contracts/limits.json`、`plugins/ndf/skills/development-workflow/references/parallel.md`、`plugins/ndf/skills/development-workflow/references/asking.md`、`plugins/ndf/scripts/tests/test_parallel_lane.py`、`plugins/ndf/scripts/tests/test_parallel_ledger.py`、`plugins/ndf/scripts/tests/test_parallel_launch.py`、`plugins/ndf/scripts/tests/test_parallel_run.py`、`plugins/ndf/scripts/tests/test_ask_guard.py`、`plugins/ndf/scripts/tests/test_relay_hub.py` |
 
 途中停止の問いの判定（`plugins/ndf/scripts/lib/parallel_observe.py`）は変えず、受け入れ条件 4 のテストは `test_parallel_run.py` に置く。
 
