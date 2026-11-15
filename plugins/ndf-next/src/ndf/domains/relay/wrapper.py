@@ -29,7 +29,18 @@ from typing import Any, BinaryIO, Callable, ClassVar, Mapping, NamedTuple, Optio
 from ptyprocess import PtyProcess
 
 from ndf.adapters.claude import CLAUDE
-from ndf.domains.relay import account_decide, accounts, hub_decide, marks, observe, registry, session_env, signals, switch_decide
+from ndf.domains.relay import (
+    account_decide,
+    accounts,
+    hub_decide,
+    marks,
+    observe,
+    registry,
+    session_env,
+    signals,
+    stop_signal,
+    switch_decide,
+)
 from ndf.domains.relay.lane_question import AskPlan
 
 # 画面の末尾として残すバイト数（上限と認証の失敗の行を探す範囲）
@@ -156,7 +167,7 @@ class Wrapper:
             return self._loop(prompt)
 
     def _loop(self, prompt: str) -> Ended:
-        signals.drop(self.dir, signals.STOP_FILE)  # 前の実行が残したシグナルファイルで、始めたばかりの実行を止めない
+        stop_signal.drop_stop(self.dir)  # 前の実行が残したシグナルファイルで、始めたばかりの実行を止めない
         halt_shown = False
         self._start(Launch(1, str(uuid.uuid4()), accounts.chosen(self.s.environ, self.s.state_dir), prompt, resume=False))
         while True:
@@ -167,12 +178,12 @@ class Wrapper:
                 self._stop_child()
                 return self._end(Ended("config_broken", str(exc)))
             self._note(step)
-            if step.kind in STOP_HELD and signals.has_stop(self.dir):
+            if step.kind in STOP_HELD and stop_signal.has_stop(self.dir):
                 if self._current().child.isalive():
                     # 停止シグナルファイルの後は、今のセッションへ入力を送らず・替えず、利用者が終えるのを待つ
                     halt_shown = halt_shown or self._show_halt()
                     continue
-                signals.drop(self.dir, signals.STOP_FILE)
+                stop_signal.drop_stop(self.dir)
                 return self._end(Ended("", STOP_REASON))
             ended = self._act(step)
             if ended is not None:

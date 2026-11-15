@@ -6,30 +6,34 @@ conductor が自分で打つ NDF のスクリプトはこの一覧に限る。**
 コピーしない。** ここに無い操作を手で組み立てそうになったら、先に一覧の中の近いプランを探す。
 
 例: マージ済みの PR #1211 の不具合を即時修正すると決めたときは、`gh` を手で打たずに次の 3 行で流す。
+差し込みは雛形（`contracts/templates/fix.json` の `params`）が受ける名前だけで、課題の番号は PR の題と本文へ書く。
+作業場所（`worktree`）を省けばリポジトリの根の `.worktrees/<branch>` を使い、並びの差し込み（`required`・`tests`）は `--add` で 1 つずつ足す。
 
 ```bash
-ndf route render immediate_fix --set issues=1211 --out <プラン>.json
+ndf route render immediate_fix --set branch=fix/1211 --set title="Fix: ...（#1211）" --set body_file=<本文>.md \
+  --set test_command="<テストのコマンド>" --add required=<待つ必須のチェック> --out <プラン>.json
 ndf plan queue <プラン>.json
 ndf plan wait <プラン>.json
 ```
 
-`$SCRIPTS` の決め方は [scripts-lookup.md](scripts-lookup.md) にある。表のパスは旧いプラグインの根からの
-相対で、新しいプラグインだけの起動では `$SCRIPTS` が空のため打てない。引数は各副命令の `--help` が正である。
+**`ndf` で始まる行は PATH 上のコマンド `ndf` で打つ**（`$SCRIPTS` は要らない）。それ以外の `scripts/` で始まる行は
+旧いプラグインの根からの相対で、`$SCRIPTS/` の下にある（決め方は [scripts-lookup.md](scripts-lookup.md)）。
+新しいプラグインだけの起動では `$SCRIPTS` が空のため、`scripts/` の行は打てない。引数は各副命令の `--help` が正である。
 
 ## プランを作って流す
 
 | エントリポイント | 使うとき |
 | --- | --- |
-| `scripts/ndf progress new` | スプリントの工程を 1 本のプランにする |
-| `scripts/ndf route render implement` | worker の実装から始まるプランを作る |
-| `scripts/ndf route render immediate_fix` | 即時修正（テスト → PR → `merge-when-green`）のプランを作る。条件は [pace.md](pace.md) |
-| `scripts/ndf route render check` | 検査のプランを作る |
-| `scripts/ndf route render release` | デプロイ（開発版・本番）のプランを作る |
-| `scripts/ndf route render close` | スプリントを閉じるプランを作る |
-| `scripts/ndf plan queue` | プランを同時に `--max` 本まで順に流す |
-| `scripts/ndf plan wait` | queue の終わりか attention の行まで待つ。待ち方は [waiting.md](waiting.md) |
-| `scripts/ndf plan next` | プランを 1 本だけフォアグラウンドで流す |
-| `scripts/引継ぎ文書の表への追記（M7 #3302 が `ndf` の副命令に足す。新しいプラグインだけではまだ打てない）` | フェーズレポートから引継ぎ文書の表へ 1 行を足す |
+| `ndf progress new` | スプリントの工程を 1 本のプランにする |
+| `ndf route render implement` | worker の実装から始まるプランを作る |
+| `ndf route render immediate_fix` | 即時修正（テスト → PR → `merge-when-green`）のプランを作る。条件は [pace.md](pace.md) |
+| `ndf route render check` | 検査のプランを作る |
+| `ndf route render release` | デプロイ（開発版・本番）のプランを作る |
+| `ndf route render close` | スプリントを閉じるプランを作る |
+| `ndf plan queue` | プランを同時に `--max` 本まで順に流す |
+| `ndf plan wait` | queue の終わりか attention の行まで待つ。待ち方は [waiting.md](waiting.md) |
+| `ndf plan next` | プランを 1 本だけフォアグラウンドで流す |
+| （無し。M7 #3302 が `ndf` の副命令に足す。新しいプラグインだけではまだ打てない） | フェーズレポートから引継ぎ文書の表へ 1 行を足す |
 | `scripts/parallel-measure.py capacity` | 並列に起動してよい本数を出す |
 
 ## スプリントの状態と承認ゲート
@@ -66,8 +70,8 @@ ndf plan wait <プラン>.json
 
 | エントリポイント | 使うとき |
 | --- | --- |
-| `scripts/ndf relay notice` | 切り替えの前に、利用者へ出す案内を得る。仕組みは [relay.md](relay.md) |
-| `scripts/ndf relay status` | ラッパーの導入の状態を確かめる |
+| `ndf relay notice` | 切り替えの前に、利用者へ出す案内を得る。仕組みは [relay.md](relay.md) |
+| `ndf relay status` | ラッパーの導入の状態を確かめる |
 | `scripts/handoff.py path` | 引継ぎ文書の本体と履歴の、メインディレクトリの絶対パスを得る（`--exists` で本体の有無）。規則は [handoff.md](handoff.md) |
 | `scripts/handoff.py init` | 引継ぎ文書が無ければテンプレートから作る |
 | `scripts/handoff.py find` | 名指しの無い再開で、入力の語に一致する引継ぎ文書を探す |

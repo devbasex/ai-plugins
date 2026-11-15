@@ -54,7 +54,7 @@ NDF が読む環境変数と、NDF が子のプロセスへ渡す環境変数で
 | `NDF_RUNTIME_SESSION` | user | string | — | ランタイムのセッションを <pid>:<開始時刻> で指定する（テストと CI）。無ければ祖先のプロセスから探す | 内部（予告なく変えてよい） |
 | `NDF_SHARED_CONFIG_DIR` | ndf | path | — | アカウントの子の中で、元の CLAUDE_CONFIG_DIR を持つ（空なら ~/.claude）。アカウントの登録の置き場を決める | 内部（予告なく変えてよい） |
 | `NDF_STATE_HOME` | user | path | — | 状態の置き場の根。置き場は <値>/<プラグイン名>（XDG_STATE_HOME と同じ読み方。入れ替えの前に旧い NDF と同じ値を渡されても、旧い置き場を退避しない）。無ければ XDG_STATE_HOME の下 | 公開 |
-| `NDF_SUPERVISE_CLAUDE_FALLBACK` | user | string | — | 従量の接続の宣言（KEY=VALUE を空白区切り）。定義されていれば保存した宣言（metered.json）より先に読む | 内部（予告なく変えてよい） |
+| `NDF_SUPERVISE_CLAUDE_FALLBACK` | user | string | 秘密 | 従量の接続の宣言（KEY=VALUE を空白区切り）。定義されていれば保存した宣言（metered.json）より先に読む | 内部（予告なく変えてよい） |
 | `NDF_UPKEEP_STATE_DIR` | user | path | — | 棚卸しの状態（候補・順位・却下・見積・付け直しの前の状態・深さの記録）の置き場。無ければメインディレクトリの .ndf/backlog/state | 内部（予告なく変えてよい） |
 | `NDF_USAGE_DIR` | user | path | — | 使用量の帳簿（usage.jsonl）の置き場。hook から書いてもスクリプトから書いても同じ置き場になる。無ければ状態の置き場の usage | 内部（予告なく変えてよい） |
 | `NDF_VERSION` | service | string | — | サービスの実行ジョブが入れた NDF の版（開発版は <version>@<コミットの SHA>） | 公開 |

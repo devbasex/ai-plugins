@@ -228,7 +228,7 @@ glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。どの
 | 開発版 | `release`（`facts` は `gate_as_ok`） | 次の `--then` |
 | 本番 | `release-prod`（先頭が `mvv` のステップ） | 最後の `--then`。`承認ゲート` ならキューの結果が `gate` になり、承認の後に `resume` に `--from release-prod=bump` を足して続ける |
 
-**スプリントの終わり**は `ndf route render close --set issues=N --out <プラン>` が組む。まとめ（`spec` 確定仕様化 → Pull Request → ready →（リリース記録があれば `release-verify` リリース後テスト →）
+**スプリントの終わり**は `ndf route render close --set branch=<ブランチ> --set title=<題> --set body_file=<本文> --add required=<待つ必須のチェック> --add worker=<起動の引数> --out <プラン>` が組む（差し込みは雛形 `contracts/templates/close.json` の `params` だけ。`issues` は受けない）。まとめ（`spec` 確定仕様化 → Pull Request → ready →（リリース記録があれば `release-verify` リリース後テスト →）
 `deep-due` 起動の判定 →（起動する回だけ `retro` 振り返り → `refine` 棚卸し →）`merge` 確定仕様化の Pull Request のマージ → `close` 後片付け）→
 最終の検査（実行条件 `eval --final --sprint <M> --issue <課題>...`）→ 開発版と本番（実行条件 `changed --id <M>-final`。最終の検査で変更があったときだけ）
 を `--then` のステージで流す。最終の検査を確定仕様化のマージの後に置くのは、スプリントの検査の後に入った確定仕様化の差分まで拾うためである。

@@ -7,13 +7,15 @@
 | --- | --- | --- |
 | `next.json` | Stop の hook（`relay-mark`） | 次の区間のブロック。中継が読んで次の区間を始める |
 | `question.json` | PreToolUse の hook（`ask-forward`） | AskUserQuestion の問い。中継が人かオーガナイザーへ回す |
-| `stop` | `ndf relay stop --all`・利用者の `touch` | 停止シグナルファイル（中身は空）。中継は次の区間を始めず、今のセッションが終わると終わる |
 
 オーガナイザーのレーン（`NDF_ORGANIZER_DIR` と `NDF_ORGANIZER_LANE`）では、問いを `questions/<レーン>.json` へも書く
 （#3035）。どれも一時の名前で書いて名前を変える。
 
 `next.json` は Stop のたびに書き直されても、最初に書いた時刻 `first_written_at` を保つ。`/goal` の目標が未達で
 Stop が続いても、中継は最初の印から数えた静かな時間で切り替える（#2438）。
+
+中継と `ndf relay stop` の間の停止シグナルファイルは `stop_signal` が持つ（hook は読まない。事実の表を引くため、
+hook の経路へ入れない）。
 """
 
 from __future__ import annotations
@@ -28,12 +30,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator, Mapping, Optional
 
-from ndf.contracts import facts
-
 NEXT_FILE = "next.json"
 QUESTION_FILE = "question.json"
-# 停止シグナルファイルの名前は工程が書くファイルの表（`ndf-files` の `relay-stop`）から引く。利用者が `touch` する名前でもある
-STOP_FILE = Path(facts.value("ndf-files", "relay-stop", "path")).name
 # レーン・ラッパー・アカウントの名前の形（中継の名前はどれもこの形）
 NAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 
@@ -192,15 +190,6 @@ def write_question(path: Path, session_id: str, payload: Mapping[str, Any], wait
 
 def has_question(directory: Path) -> bool:
     return (directory / QUESTION_FILE).is_file()
-
-
-def has_stop(directory: Path) -> bool:
-    return (directory / STOP_FILE).is_file()
-
-
-def place_stop(directory: Path) -> None:
-    """停止シグナルファイルを置く。ラッパーの置き場が無ければ `OSError`（作らない）。"""
-    (directory / STOP_FILE).touch(mode=0o600)
 
 
 def drop(directory: Path, name: str) -> None:

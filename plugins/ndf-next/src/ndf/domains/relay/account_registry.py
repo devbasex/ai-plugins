@@ -24,6 +24,7 @@ from typing import Any, Iterator, Mapping, NamedTuple, Optional
 
 from filelock import FileLock, Timeout
 
+from ndf import identity
 from ndf.adapters import training, training_cache
 from ndf.contracts import limits
 from ndf.domains.relay import signals
@@ -89,8 +90,12 @@ def iso_utc(at: float) -> str:
     return datetime.fromtimestamp(at, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def store_dir(environ: Mapping[str, str], plugin: str) -> Path:
-    """旧い置き場。`NDF_ACCOUNTS_DIR` → `<NDF_SHARED_CONFIG_DIR か CLAUDE_CONFIG_DIR か ~/.claude>/<プラグインの名前>/accounts`。"""
+def store_dir(environ: Mapping[str, str]) -> Path:
+    """旧い置き場。`NDF_ACCOUNTS_DIR` → `<NDF_SHARED_CONFIG_DIR か CLAUDE_CONFIG_DIR か ~/.claude>/ndf/accounts`。
+
+    `ndf` は旧い NDF のプラグイン名（入れ替えの後の名前 `identity.FINAL_NAME` と同じ。#1142 の決定 73）で、今の
+    プラグイン名（入れ替えの前は `ndf11`）から求めない。旧い `relay.py account` と登録・API キー・排他を共有するためである。
+    """
     forced = environ.get("NDF_ACCOUNTS_DIR")
     if forced:
         return Path(forced)
@@ -99,7 +104,7 @@ def store_dir(environ: Mapping[str, str], plugin: str) -> Path:
         base = Path(shared) if shared else Path.home() / ".claude"
     else:
         base = signals.claude_config_root(environ)
-    return base / plugin / "accounts"
+    return base / identity.FINAL_NAME / "accounts"
 
 
 def account_dir(store: Path, name: str) -> Path:

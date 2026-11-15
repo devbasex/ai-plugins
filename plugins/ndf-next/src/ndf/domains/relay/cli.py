@@ -41,7 +41,7 @@ from ndf.domains.relay import (
     notice,
     pending,
     registry,
-    signals,
+    stop_signal,
     switch_decide,
     wrapper,
 )
@@ -215,7 +215,7 @@ def _stop_all(ctx: hub.Context) -> int:
 
 def _stop_one(ctx: hub.Context, name: str) -> hub.Outcome:
     try:
-        signals.place_stop(registry.wrapper_dir(ctx.state_dir, name))
+        stop_signal.place_stop(registry.wrapper_dir(ctx.state_dir, name))
     except (OSError, registry.RegistryError) as exc:
         return hub.Outcome(False, f"停止シグナルファイルを置けない: {exc}", "refused")
     if ctx.tmux.has(name):

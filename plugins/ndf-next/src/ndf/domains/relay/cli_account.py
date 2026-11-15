@@ -156,7 +156,7 @@ ACCOUNT_REGISTRY_HANDLERS = {sub.name: sub.handler for sub in ACCOUNT_REGISTRY}
 def _account_registry(args: argparse.Namespace) -> int:
     """登録の副命令を動かす。使い方の誤りは invalid、待ちきれない排他は store_in_use、書けない置き場は unknown で止まる。"""
     try:
-        return ACCOUNT_REGISTRY_HANDLERS[args.account_action](account_registry.store_dir(os.environ, identity.load().name), args)
+        return ACCOUNT_REGISTRY_HANDLERS[args.account_action](account_registry.store_dir(os.environ), args)
     except account_metered.MeteredError as exc:
         return result.emit(result.stopped(TOOL, exc.kind, str(exc), items=exc.items))
     except account_login.LoginError as exc:

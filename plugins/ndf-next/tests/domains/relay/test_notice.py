@@ -6,7 +6,7 @@ import math
 import os
 
 from ndf import identity
-from ndf.domains.relay import cli, hub, notice, registry, signals
+from ndf.domains.relay import cli, hub, notice, registry, stop_signal
 from ndf.domains.relay.tmux import Tmux
 
 
@@ -82,7 +82,7 @@ def test_stop_all_signals_every_running_wrapper(monkeypatch, capsys, last_result
     assert cli.main(["stop", "--all"]) == 1
     got = last_result(capsys.readouterr().out)
     assert asked == ["a", "b"]  # tmux の外の c と置き場の無い gone へは名前つきの停止を頼まない
-    assert all(signals.has_stop(registry.wrapper_dir(state_dir, n)) for n in ("a", "b", "c"))
+    assert all(stop_signal.has_stop(registry.wrapper_dir(state_dir, n)) for n in ("a", "b", "c"))
     assert got["metrics"] == {"stopped": 2}
     assert [i["name"] for i in got["items"] if not i["ok"]] == ["b", "gone"]
     assert got["cause"]["kind"] == "refused"

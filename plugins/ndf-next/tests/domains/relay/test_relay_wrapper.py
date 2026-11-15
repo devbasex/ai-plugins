@@ -13,7 +13,7 @@ import time
 from datetime import date
 from pathlib import Path
 
-from ndf.domains.relay import accounts, marks, registry, signals, wrapper
+from ndf.domains.relay import accounts, marks, registry, signals, stop_signal, wrapper
 from ndf.domains.relay.account_decide import Usage
 
 VERSION = "11.0.0-dev.4"
@@ -198,16 +198,17 @@ class StopOnSpawn(Spawner):
 
     def __call__(self, argv, env, cwd):
         child = super().__call__(argv, env, cwd)
-        signals.place_stop(Path(env["NDF_RELAY_DIR"]))
+        stop_signal.place_stop(Path(env["NDF_RELAY_DIR"]))
         return child
 
 
 def test_stop_signal_lets_the_session_finish_and_starts_no_next_section(tmp_path):
     stale = registry.wrapper_dir(tmp_path / "state", "t1")
     stale.mkdir(parents=True)
-    signals.place_stop(stale)  # 前の実行の残りは始めたばかりの実行を止めない
+    stop_signal.place_stop(stale)  # 前の実行の残りは始めたばかりの実行を止めない
     s = _settings(tmp_path)
-    child = FakeChild([b"a\r\n", b"b\r\n", b"c\r\n", b"d\r\n"], 0)
+    # 出力の後に黙る見回り（b""）を置き、子が生きたまま静かな時間に入って次の区間を保留する形にする
+    child = FakeChild([b"a\r\n", b"", b"", b"", b"", b"", b""], 0)
     spawn = StopOnSpawn([child], {0: "/goal 次の区間"})
     out = io.BytesIO()
     w = wrapper.Wrapper(s, spawn=spawn, clock=_clock(), out=out)
@@ -218,7 +219,7 @@ def test_stop_signal_lets_the_session_finish_and_starts_no_next_section(tmp_path
     assert (ended.cause, ended.reason) == ("", wrapper.STOP_REASON)
     assert len(spawn.calls) == 1 and child.exitstatus == 0 and child.written == []  # 替えず・入力も送らず・殺さない
     assert out.getvalue().decode().count(wrapper.HALT_LINE) == 1  # 案内の 1 行は保留の間に一度だけ出る
-    assert not signals.has_stop(w.dir)
+    assert not stop_signal.has_stop(w.dir)
 
 
 def test_broken_next_mark_stops_with_the_reason(tmp_path):
