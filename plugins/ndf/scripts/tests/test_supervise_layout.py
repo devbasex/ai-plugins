@@ -43,6 +43,7 @@ MODULES = [
     "progress_watch",  # 実装のステップの進みの観測（#2505）
     "rerun",  # ステップの打ち直しの同じ原因の上限（#2343）
     "procedures",  # 単発とスプリントの雛形が共有する手順の定義（#1485）
+    "pr_marks",
     "pr_materials",
     "design_stage",
     "paths",
