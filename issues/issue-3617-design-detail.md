@@ -215,6 +215,8 @@ plugins/ndf-next/
 | `git.Git.remote_repo` | リモートが無い・GitHub でない | 宣言の名前のリモートが無い | `git remote get-url` の終了コード | `GitError` を呼び出し元へ返す（今と同じ） | 呼び出し元の今の扱いのまま | 同上 |
 | `claude.list_plugins` | 一覧を読めない | `claude` が無い・終了コードが 0 でない・時間切れ・JSON でない・要素の形が違う | `run` の戻り値と `json.loads` | 既定値で続ける（`None` を返す） | 無し（`plugin_args` が知らせにする） | 後始末なし。次の起動で読み直す |
 | `claude.plugin_args` | 一覧を読めない | `list_plugins` が `None` | 戻り値 | 既定値で続ける（外す登録を空にし、`notice` に理由を入れる） | `ndf launch-args` の `items` に `{"kind": "notice", "reason": "導入済みのプラグインの一覧を読めず、旧い NDF を外さずに起動する"}`。終了コード 0 | 後始末なし |
+| `claude.claude_launch` | 一覧を読めない | full の起動で `plugin_args` の `notice` が `None` でない | 戻り値 | 既定値で続ける（引数はそのまま返し、`notice` を呼び手へ渡す） | 無し（呼び手の `worker.delegate`・`invoke._call_skill` が `warnings` に載せる） | 後始末なし |
+| `worker.delegate`・`invoke._call_skill` | 一覧を読めない | `claude_launch` の `notice` が `None` でない | 戻り値 | 既定値で続ける（起動はそのまま行う） | worker は `worker run` の結果の `warnings`、Skill の工程は `StageResult.warnings` に知らせの文を載せる。`status` は変えない | 後始末なし |
 | `cli.main` | 引数を作れない | `identity.load` の失敗 | `identity.IdentityError` | 止める（今と同じ） | 止まった結果、`config_broken` の終了コード | 今と同じ |
 | `route.default_base` | 既定ブランチを読めない | リモートの HEAD が無い・宣言の `remote` が違う | `git.GitError` | 既定値で続ける（`None`。今と同じ。宣言の誤りもここでは `None` になり、後の手順の `remote` の解決で止まる） | 無し（後の手順が「base が決まらない」で止まる） | 宣言を直して再実行できる |
 | `route.derived` | `remote` を決められない | 宣言の `remote` が違う | `git.RemoteError` | 止める（`RouteError` に替える） | `ndf route` の止まった結果（`.ndf/worktree.json の remote を直す`） | 同上 |
@@ -337,6 +339,7 @@ plugins/ndf-next/
 | `claude.list_plugins` | `adapters/agents.py` の起動の部品・`_run_claude` | `grep -n '^def ' plugins/ndf-next/src/ndf/adapters/agents.py plugins/ndf-next/src/ndf/adapters/claude.py` | 使えない理由: 起動の枠（`launch_slot`）と結果の読み手はプロンプトを渡す起動のもので、一覧を 1 回読む CLI には重い。`subprocess.run` を差し替えられる引数で受ける |
 | `claude.disabled_plugins` | `identity.name_of`・`identity.FINAL_NAME` | `grep -n 'FINAL_NAME\|def name_of' plugins/ndf-next/src/ndf/identity.py` | 使う（旧い NDF の名前と自分の名前をここから読む） |
 | `claude.PluginArgs` | 無し | — | 新しく持つ |
+| `claude.claude_launch` | 同じファイルの `claude_args`・`plugin_args` | 同じファイルを読んだ | 使う（`claude_args` の組み立てをここへ移し、`claude_args` は `claude_launch(...).args` を返す。知らせは `plugin_args` の `notice` をそのまま渡す） |
 | `command.docs_only` | `range_diff_kinds`・`diff_kinds` | 同じファイルを読んだ | 使う（判定を別に持たない。I8a） |
 | `command._cmd_docs_only` | `_cmd_restore` の store を使わない分岐 | 同じファイルの `_dispatch` を読んだ | 使う（`restore` と同じく store を開かずに受ける） |
 | `allocation_decide.decide` | `domains/crossrefactor/budget_decide.py` | `grep -n '^def ' plugins/ndf-next/src/ndf/domains/crossrefactor/*_decide.py` | 使えない理由: 予算の判断で、種類ごとの分を重ねる関数が無い |
