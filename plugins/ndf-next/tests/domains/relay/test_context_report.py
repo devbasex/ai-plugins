@@ -88,3 +88,67 @@ def test_cli_report_rejects_bad_times(tmp_path, monkeypatch, capsys):
     capsys.readouterr()
     assert cli.main(["context", "report", "--all"]) == 0
     assert json.loads(capsys.readouterr().out.strip().splitlines()[-1])["metrics"]["works"] == 0
+
+
+def _session(tmp_path, first_user: str) -> str:
+    return _transcript(
+        tmp_path / "t.jsonl",
+        [
+            {"type": "user", "message": {"content": first_user}},
+            _call(0, "2026-11-15T01:00:00Z"),
+            _call(1, "2026-11-15T01:10:00Z"),
+            _call(2, "2026-11-15T01:20:00Z"),
+            _call(3, "2026-11-15T01:30:00Z"),
+            _call(4, "2026-11-15T01:40:00Z"),
+        ],
+    )
+
+
+def _mark(at: str, event: str) -> dict:
+    return {"at": at, "session_id": "s", "work": "#1", "event": event}
+
+
+def test_mark_bounds_take_first_restored_and_last_handoff_and_skip_bad_times(tmp_path):
+    """現状固定（I-002）: 復元の終わりは最初の「復元完了」、引継ぎの始まりは最後の「引継ぎ開始」。読めない時刻の印は無視する。"""
+    t = _session(tmp_path, "続きは .ndf/handoff/x.md を読む")
+    rows = [
+        {"at": "2026-11-15T00:59:00Z", "session_id": "s", "transcript": t, "work": "#1"},
+        _mark("2026-11-15T01:05:00Z", context_records.MARK_RESTORED),
+        _mark("2026-11-15T01:15:00Z", context_records.MARK_RESTORED),
+        _mark("2026-11-15T01:25:00Z", context_records.MARK_HANDOFF),
+        _mark("2026-11-15T01:35:00Z", context_records.MARK_HANDOFF),
+        _mark("読めない", context_records.MARK_RESTORED),
+        _mark("読めない", context_records.MARK_HANDOFF),
+    ]
+    got = context_report.report("#1", rows, [], None)
+    parts = got["parts"]
+    assert (parts["restore"]["calls"], parts["conductor"]["calls"], parts["handoff"]["calls"]) == (1, 3, 1)
+    assert got["restores"] == [{"context": 100, "calls": 1}]
+    assert got["unknown_parts"] == {"restore": 0, "handoff": 0}
+
+
+def test_mark_bounds_ignore_restored_when_not_started_by_handoff(tmp_path):
+    """現状固定（I-002）: 引継ぎ文書で始まらないセッションでは「復元完了」の印を使わない。"""
+    t = _session(tmp_path, "始める")
+    rows = [
+        {"at": "2026-11-15T00:59:00Z", "session_id": "s", "transcript": t, "work": "#1"},
+        _mark("2026-11-15T01:05:00Z", context_records.MARK_RESTORED),
+        _mark("2026-11-15T01:35:00Z", context_records.MARK_HANDOFF),
+    ]
+    got = context_report.report("#1", rows, [], None)
+    parts = got["parts"]
+    assert (parts["restore"]["calls"], parts["conductor"]["calls"], parts["handoff"]["calls"]) == (0, 4, 1)
+    assert got["restores"] == []
+    assert got["unknown_parts"] == {"restore": 0, "handoff": 0}
+
+
+def test_mark_bounds_unknown_when_started_by_handoff_without_marks(tmp_path):
+    """現状固定（I-002）: 引継ぎ文書で始まり印が無ければ、復元の区間は不明・再起動したのに引継ぎの印が無ければ不明。"""
+    t = _session(tmp_path, "続きは .ndf/handoff/x.md を読む")
+    rows = [
+        {"at": "2026-11-15T00:59:00Z", "session_id": "s", "transcript": t, "work": "#1"},
+        {"at": "2026-11-15T01:50:00Z", "session_id": "s", "work": "#1", "verdict": "再起動", "reason": "手動"},
+    ]
+    got = context_report.report("#1", rows, [], None)
+    assert got["parts"]["conductor"]["calls"] == 5
+    assert got["unknown_parts"] == {"restore": 1, "handoff": 1}
