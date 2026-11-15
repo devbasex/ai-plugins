@@ -68,8 +68,7 @@ def _merge_pulls(work: git_mod.Git, pulls: Sequence[verify_decide.OpenPull]) -> 
     """PR の先端を順に取り込みのマージで入れる。衝突すれば `merge --abort` の後に `VerifyConflict`。"""
     for p in pulls:
         ref = gather.fetch_pull(work, p.number)
-        if work.attempt("merge", "--quiet", "--no-edit", "--no-verify", git_mod.END_OF_OPTIONS, ref).returncode != 0:
-            work.attempt("merge", "--abort")
+        if not gather.merge_or_abort(work, ("--quiet", "--no-edit", "--no-verify", git_mod.END_OF_OPTIONS, ref)):
             raise VerifyConflict(p.number, f"#{p.number} を検証の ref へ取り込めない（ほかの PR と衝突する）")
 
 
@@ -83,7 +82,7 @@ def _commit_on_top(work: git_mod.Git, previous: str | None, message: str) -> str
 
 def _previous(repo_git: git_mod.Git, ref: str) -> str | None:
     """origin の検証の ref の先端（無ければ None）。"""
-    if repo_git.attempt("ls-remote", "--exit-code", "--heads", "--", git_mod.ORIGIN, ref).returncode != 0:
+    if not gather.remote_has_branch(repo_git, ref):
         return None
     gather.fetch(repo_git, ref)
     return repo_git.rev_parse(f"{git_mod.ORIGIN}/{ref}")

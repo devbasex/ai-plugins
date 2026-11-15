@@ -229,7 +229,7 @@ class Bumper:
         repo_git = self._git
         branch = version_decide.branch_of(version)
         decl = decl_mod.load(self.root)
-        if repo_git.attempt("ls-remote", "--exit-code", "--heads", "--", git_mod.ORIGIN, branch).returncode == 0:
+        if gather.remote_has_branch(repo_git, branch):
             gather.fetch(repo_git, branch)
             remote = f"{git_mod.ORIGIN}/{branch}"
             outside = bump_decide.only_bump(repo_git.changed_files(span.until, remote), allowed_paths(self.root, decl))
@@ -264,9 +264,12 @@ class Bumper:
         gather.fetch(repo_git, opened.head_ref)
         repo_git.run("switch", "--quiet", "-C", opened.head_ref, f"{git_mod.ORIGIN}/{opened.head_ref}")
         before = repo_git.rev_parse("HEAD")
-        if repo_git.attempt("merge", "--quiet", "--no-edit", git_mod.END_OF_OPTIONS, span.until).returncode != 0:
-            conflicted = repo_git.attempt("diff", "--name-only", "--diff-filter=U").stdout.split()
-            repo_git.attempt("merge", "--abort")
+        conflicted: list[str] = []
+
+        def read_conflicted() -> None:
+            conflicted.extend(repo_git.attempt("diff", "--name-only", "--diff-filter=U").stdout.split())
+
+        if not gather.merge_or_abort(repo_git, ("--quiet", "--no-edit", git_mod.END_OF_OPTIONS, span.until), read_conflicted):
             raise BumpConflict(f"{span.until[:12]} を {opened.head_ref} へ取り込めない（衝突: {', '.join(conflicted) or '読めない'}）")
         write_bump(self.root, decl_mod.load(self.root), planned, pulls, self.today)
         committed = self._commit(bump_decide.message_of(planned[0].plugin, opened.version, span.until))

@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from http import HTTPStatus
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -53,6 +53,21 @@ def resource_exists(hub: GitHub, path: str) -> bool:
             raise
         return False
     return True
+
+
+def remote_has_branch(repo_git: git_mod.Git, branch: str) -> bool:
+    """origin にブランチ `branch` があるか（`ls-remote --exit-code` の終了コード）。"""
+    return repo_git.attempt("ls-remote", "--exit-code", "--heads", "--", git_mod.ORIGIN, branch).returncode == 0
+
+
+def merge_or_abort(repo_git: git_mod.Git, merge_args: Sequence[str], before_abort: Callable[[], None] | None = None) -> bool:
+    """`git merge <merge_args>` を打ち、失敗したら `before_abort`（衝突を読む関数）を呼んでから `merge --abort` して偽。"""
+    if repo_git.attempt("merge", *merge_args).returncode == 0:
+        return True
+    if before_abort is not None:
+        before_abort()
+    repo_git.attempt("merge", "--abort")
+    return False
 
 
 def pull_ref(number: int) -> str:
