@@ -56,7 +56,7 @@ plugins/ndf-next/
 | パス | 種類 | 役割 1 文 | 依存する先 |
 | --- | --- | --- | --- |
 | `plugins/ndf/scripts/lib/design_repos.py` | 新設 | 代表のリポジトリの設定を読んで形を確かめ、頭の設計文書 1 本に 2 規則を当てて指摘を返す | `lib/md.py`・`lib/schema.py`・`lib/pathmatch.py`・`lib/deps.py` |
-| `plugins/ndf/scripts/design-survey.py` | 変更 | 設定を 1 回読み、まとまりの頭の設計文書ごとに 2 規則を呼んで指摘と件数を結果に足す。サブコマンド `schema` で設定のスキーマを出す | `lib/design_repos.py` |
+| `plugins/ndf/scripts/design-survey.py` | 変更 | 設定を 1 回読み、課題ごとの設計文書の一式の頭の設計文書ごとに 2 規則を呼んで指摘と件数を結果に足す。サブコマンド `schema` で設定のスキーマを出す | `lib/design_repos.py` |
 | `plugins/ndf/scripts/lib/README.md` | 変更 | `design_repos.py` の行を「置いてあるもの」の表に足す | 無し |
 | `plugins/ndf/skills/design/schemas/design.schema.json` | 新設 | `.ndf/design.json` の JSON Schema。`design_json_schema()` の出力をそのまま置く | 無し |
 | `plugins/ndf/scripts/supervise_lib/procedures.py` | 変更 | `survey_steps` の直しの指示に 2 規則の直し方を足す | 無し |
@@ -101,7 +101,7 @@ plugins/ndf-next/
 | `check_repos` | `plugins/ndf/scripts/lib/design_repos.py` | 新設 | `check_repos(path: str, text: str, settings: RepoSettings, left_ids: set[str]) -> list[dict]` | 頭の設計文書 1 本に 2 規則を当て、指摘の並びを返す | `applies` が真を返した文書である。`left_ids` は同じ文書の「人へ残す判断」の表の番号のセルから切り出したレッドラインの番号の集合 | 指摘はそれぞれ `name`（`<パス>:<行>`）・`rule`（2 規則のどちらか）・`text` を持ち、文書の行の順に並ぶ。表と事情の欄がそろい、扱えなくなることの行が無いか番号の行があれば空 | 無し |
 | `_scope_problems` | `plugins/ndf/scripts/lib/design_repos.py` | 新設 | `_scope_problems(text: str, settings: RepoSettings) -> tuple[list[tuple[int, str]], Table \| None]` | 「適用範囲」の節・振る舞いの表・種類ごとの行・事情の欄の欠けを（行, 理由）で並べ、見つけた表を返す | `text` は頭の設計文書の本文 | 欠けが無ければ並びは空。表が見つからなければ 2 つ目は `None` | 無し |
 | `_loss_rows` | `plugins/ndf/scripts/lib/design_repos.py` | 新設 | `_loss_rows(table: Table) -> tuple[list[int], list[int]]` | 振る舞いの表の行を「扱えなくなることがある行」と「扱えなくなることが空の行」に分け、文書の中の行番号で返す | `table` は `_behavior_table` が返した表 | セルが `無し` で始まる行はどちらにも入らない | 無し |
-| `repo_items` | `plugins/ndf/scripts/design-survey.py` | 新設 | `repo_items(group: list[Doc], settings: RepoSettings \| None) -> list[dict]` | まとまりの頭の設計文書ごとに、当てる範囲を決めて 2 規則を呼ぶ | `group` は `survey_groups` の 1 まとまり | `settings` が `None` なら空。そうでなければ、当てる頭の設計文書ごとの `check_repos` の結果をつないだもの | 無し |
+| `repo_items` | `plugins/ndf/scripts/design-survey.py` | 新設 | `repo_items(group: list[Doc], settings: RepoSettings \| None) -> list[dict]` | 課題ごとの設計文書の一式の頭の設計文書ごとに、当てる範囲を決めて 2 規則を呼ぶ | `group` は `survey_groups` の 1 まとまり | `settings` が `None` なら空。そうでなければ、当てる頭の設計文書ごとの `check_repos` の結果をつないだもの | 無し |
 | `judge_docs` | `plugins/ndf/scripts/design-survey.py` | 変更 | `judge_docs(docs: list[Doc], require_detail: bool, settings: RepoSettings \| None = None) -> tuple[list[dict], dict]` | 文書の並びに調査・レッドライン・詳細設計・代表のリポジトリの判定を当て、指摘と件数を返す | 今と同じ | 今の指摘と件数に加え、`metrics` に `repo_scope_missing`・`repo_loss_unrouted` の件数（`settings` が `None` なら 0）がある。今の指摘の並びと件数は変わらない（I3） | 無し |
 | `cmd_check` | `plugins/ndf/scripts/design-survey.py` | 変更 | `cmd_check(a: argparse.Namespace) -> None` | 文書を読み、設定を 1 回読んで判定し、結果の 1 行の JSON を出す | 今と同じ | 終了コードの意味は今と同じ（0 / 1 / 2 / 3）。設定が壊れていれば 2 | 標準出力。`load_settings` のファイルの読み取り |
 | `cmd_schema` | `plugins/ndf/scripts/design-survey.py` | 新設 | `cmd_schema(a: argparse.Namespace) -> int` | 設定のスキーマを標準出力へ出し、`--out` があればそのパスにも書く | 無し | 標準出力にスキーマがある。`--out` を渡したときはそのファイルの中身が標準出力と同じ | 標準出力。`--out` のファイルの書き込み |
@@ -144,7 +144,7 @@ plugins/ndf-next/
 
 セルの字面は、両端の空白と `` ` ``・`*`・`_` を外してから比べる（`_read_survey` と同じ外し方）。種類の名前との比べ方は前方一致で、`Web サービス・設定なし（…）` は種類 `Web サービス` の行として数える。
 
-- 繰り返しの終わる条件: 表の行・種類・まとまりの文書はどれも有限の並びで、1 回ずつ見る
+- 繰り返しの終わる条件: 表の行・種類・設計文書の一式はどれも有限の並びで、1 回ずつ見る
 - 計算量の注意: 文書 1 本ごとに `md.md_sections`・`md.tables` を 1 回ずつ呼ぶ（`md` は内部で字句の解析を覚えておく）。種類の数 × 表の行の数の比べは、種類 3・行 5 程度で問題にならない
 
 ## 内部のデータと定数

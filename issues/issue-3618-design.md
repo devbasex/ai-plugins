@@ -2,9 +2,9 @@
 
 ## 目的
 
-- **今どうなっているか**: NDF を変える設計が、ある種類のリポジトリ（develop を経て本番へ出す運用・プラグイン以外のリリースの形 など）を NDF で扱えなくしても、設計の検査・cross-review・MVV 判定のどれも止めない。#3596 のやり直す前の設計（develop→main の行を外す決定 5）は、設計の検査が終了コード 0、助言の MVV 判定が「従う」で通る（「受け入れ条件 7 の確かめ」の基準値）
+- **今どうなっているか**: NDF を変える設計が、ある種類のリポジトリを NDF で扱えなくしても、設計の検査・cross-review・MVV 判定のどれも止めない。扱えなくなりうる種類の例は、develop を経て本番へ出す運用・プラグイン以外のリリースの形である。#3596 のやり直す前の設計（develop→main の行を外す決定 5）は、設計の検査が終了コード 0、助言の MVV 判定が「従う」で通る（「受け入れ条件 7 の確かめ」の基準値）
 - **誰に効くか**: NDF を使う利用者のリポジトリ（言語・テストのツール・ブランチの運用・リリースの方法がそれぞれ違う）と、NDF を変える設計を承認する人
-- **変えると何が成り立つか**: 代表のリポジトリの種類のどれかを扱えなくする設計（汎用性の後退）は、(1) 設計を書く時点で振る舞いの表の「この種類で扱えなくなること」の列に現れ、(2) 設計の検査がその行を「人へ残す判断」へ結ぶまで通さず、(3) 設計承認ゲートで人がその行を読む
+- **変えると何が成り立つか**: 代表のリポジトリの種類のどれかを扱えなくする設計（汎用性の後退）は、次の順で人に届く。(1) 設計を書く時点で振る舞いの表の「この種類で扱えなくなること」の列に現れ、(2) 設計の検査がその行を「人へ残す判断」へ結ぶまで通さず、(3) 設計承認ゲートで人がその行を読む
 - **止めないもの**: 普及のフェーズに入るまで、NDF は後方互換を求めない。設定のキーの改名・値の作り直し・旧い形のサポートの打ち切り・既定の変更は、同じ種類のリポジトリが別の形で扱えるなら「扱えなくなること」に当たらず、人へ戻さない
 
 ## 適用範囲
@@ -15,7 +15,7 @@
 
 ### 代表のリポジトリでの振る舞い
 
-この設計の後に、それぞれのリポジトリで何が起きるか。材料は 2026-11-15 に各リポジトリの `.ndf/` を読んだ結果である（要求の前提 6）。モバイルアプリは実物が手元に無く（要求の前提 5）、Flutter・`flutter test`・TestFlight への手動のリリースを設定した仮のリポジトリとして書く。設定のキー `promotion` は #3613 で `release_strategy` へ改名される（値 `whole` → `merge_base_branch`、`selected` → `release_branch`）。
+この設計の後に、それぞれのリポジトリで何が起きるか。材料は 2026-11-15 に各リポジトリの `.ndf/` を読んだ結果である（要求の前提 6）。モバイルアプリは実物が手元に無く（要求の前提 5）、Flutter・`flutter test`・TestFlight への手動のリリースを設定した仮のリポジトリとして書く。設定のキー `promotion` は #3613 で `release_strategy` へ改名される。値は `whole` が `merge_base_branch` に、`selected` が `release_branch` になる。
 
 | 代表のリポジトリ | 設定の要点 | 直した後に起きること | この種類で扱えなくなること |
 | --- | --- | --- | --- |
@@ -92,7 +92,7 @@ ai-plugins の運用で決める値で、NDF の既定や振る舞いへ入れ�
 | cross-review | 設計文書の節の形を、汎用性の観点で問う材料として読む |
 | 課題の棚卸し | 要求の方針の分け方の節の形を、起票の項目へ写す |
 
-公開された言語が決めるのは、下流が上流の形式を読む向きだけである。この Issue は、下流の cross-review と課題の棚卸しが持つ集約（cross-review の観点・起票の項目。下の「集約」）も書き換える。その書き換えは、上流から下流を書き換えるものではなく、それぞれの下流のコンテキストの中の変更として、下流の持ち主の Skill の決まり（cross-review の観点は `review_focus.py`、起票の項目は `issue-items.json` とその読み手のテスト）に従って同じ実装の Pull Request で行う。
+公開された言語が決めるのは、下流が上流の形式を読む向きだけである。この Issue は、下流の cross-review と課題の棚卸しが持つ集約（cross-review の観点・起票の項目。下の「集約」）も書き換える。その書き換えは、上流から下流を書き換えるものではなく、それぞれの下流のコンテキストの中の変更である。下流の持ち主の Skill の決まりに従い、同じ実装の Pull Request で行う。決まりは、cross-review の観点では `review_focus.py`、起票の項目では `issue-items.json` とその読み手のテストが持つ。
 
 ### 集約
 
@@ -146,6 +146,15 @@ ai-plugins の運用で決める値で、NDF の既定や振る舞いへ入れ�
 
 要求の工程で用語集に足した、設定が受け付ける値の種類を指す語は廃止する（直訳の和語で、守る単位を値に置く語のため。決定 10）。指していたものは「サポートする選択肢」、守る対象は「汎用性の後退」が持つ。
 
+## MVV と共通原則の改訂の文
+
+**ai-plugins の MVV（`.ndf/mvv.md`）を版 7 から版 8 へ改訂する。共通原則（`plugins/ndf/scripts/data/ndf-common-principles.md`）は改訂しない**（理由は決定 2）。改訂の文は設計承認ゲートで人が承認し、実装の Pull Request で `project-mvv.py approve` を通して入れる（I5）。
+
+| # | 箇所 | 改訂の前 | 改訂の後 |
+| --- | --- | --- | --- |
+| M1 | Value 4 | `4. **どのプロジェクトでもそのまま使える**` の下の 2 行（`.ndf/mvv.md` の 51〜52 行目。設定か引数を渡せば同じ工程が使えること、ai-plugins の流儀を使う側へ持ち込まないこと） | 2 行の後に 2 行を足す: 「NDF は、代表のリポジトリの種類（Web サービス・モバイルアプリ・業務文書だけ）のどれも扱えることを保つ。設定のキーと値の改名・作り直し・既定の変更は自由に行い、ある種類を代わりの形なしに扱えなくする設計だけを人の承認に回す（P2）」と「普及のフェーズに入るまで、後方互換は求めない。旧い設定の形を残す互換の仕組みを持たず、移行のコマンドできれいな最終形へ移す」 |
+| M2 | 必ず人の承認が要る操作の「このプロジェクトが足す操作」の表 | P1 の 1 行だけ | P1 の後に 1 行を足す: `\| P2 \| 代表のリポジトリの種類のどれかを、NDF で扱えなくする（運用・リリースの形・テストのツール・CI などの、その種類に要る選択肢を、代わりの形なしに無くす）。既定の変更と、代わりの形のある値の削除・改名は当たらない \| その種類のリポジトリは、NDF の版を戻すか NDF を使うのをやめるほかに手段が無くなる \|` |
+
 ## 防ぐ案の採否
 
 要求の「防ぐ案」の 7 層の採否である。理由の詳細は決定の記録にある。
@@ -159,15 +168,6 @@ ai-plugins の運用で決める値で、NDF の既定や振る舞いへ入れ�
 | E レビュー | 採る | 汎用性の観点は、その設計の後に使う側のリポジトリの種類のどれかを扱えなくなるかを問う、どのリポジトリの設計にも当たる一般の観点である。観点の 1 行を足すだけで、ラウンドと CLI の数は変わらない | 決定 6 |
 | F 機械の検査 | 採る（境界だけを持つ） | 検査の実装は #3617 が持つ。この Issue は語の定義と設計の側の欄を持つ | 決定 7 |
 | G 試験 | 採る（種類と確かめる項目だけを持つ） | 試走の実行は #3411 が持つ。この Issue は試走に加える種類と項目を決め、リクエストで渡す | 決定 8 |
-
-## MVV と共通原則の改訂の文
-
-**ai-plugins の MVV（`.ndf/mvv.md`）を版 7 から版 8 へ改訂する。共通原則（`plugins/ndf/scripts/data/ndf-common-principles.md`）は改訂しない**（理由は決定 2）。改訂の文は設計承認ゲートで人が承認し、実装の Pull Request で `project-mvv.py approve` を通して入れる（I5）。
-
-| # | 箇所 | 改訂の前 | 改訂の後 |
-| --- | --- | --- | --- |
-| M1 | Value 4 | `4. **どのプロジェクトでもそのまま使える**` の下の 2 行（`.ndf/mvv.md` の 51〜52 行目。設定か引数を渡せば同じ工程が使えること、ai-plugins の流儀を使う側へ持ち込まないこと） | 2 行の後に 2 行を足す: 「NDF は、代表のリポジトリの種類（Web サービス・モバイルアプリ・業務文書だけ）のどれも扱えることを保つ。設定のキーと値の改名・作り直し・既定の変更は自由に行い、ある種類を代わりの形なしに扱えなくする設計だけを人の承認に回す（P2）」と「普及のフェーズに入るまで、後方互換は求めない。旧い設定の形を残す互換の仕組みを持たず、移行のコマンドできれいな最終形へ移す」 |
-| M2 | 必ず人の承認が要る操作の「このプロジェクトが足す操作」の表 | P1 の 1 行だけ | P1 の後に 1 行を足す: `\| P2 \| 代表のリポジトリの種類のどれかを、NDF で扱えなくする（運用・リリースの形・テストのツール・CI などの、その種類に要る選択肢を、代わりの形なしに無くす）。既定の変更と、代わりの形のある値の削除・改名は当たらない \| その種類のリポジトリは、NDF の版を戻すか NDF を使うのをやめるほかに手段が無くなる \|` |
 
 ## 外部の調査
 
@@ -224,7 +224,7 @@ ai-plugins の運用で決める値で、NDF の既定や振る舞いへ入れ�
 | 要素 | 責務 |
 | --- | --- |
 | 代表のリポジトリの規則（新設 `plugins/ndf/scripts/lib/design_repos.py`） | 設定を読んで形を確かめ、頭の設計文書の「適用範囲」と「人へ残す判断」の表を読み、規則 `repo_scope_missing`・`repo_loss_unrouted` の指摘を返す。ファイルを書かない |
-| 設計の検査（`plugins/ndf/scripts/design-survey.py`） | 新しい規則をまとまりごとに呼び、指摘と件数を結果 JSON に足す。設定が壊れていれば終了コード 2 |
+| 設計の検査（`plugins/ndf/scripts/design-survey.py`） | 新しい規則を 1 つの課題の設計文書の一式ごとに呼び、指摘と件数を結果 JSON に足す。設定が壊れていれば終了コード 2 |
 | 設定のスキーマ（新設 `plugins/ndf/skills/design/schemas/design.schema.json`） | `.ndf/design.json` の形（`representative_repos.kinds`・`representative_repos.redline`） |
 | 直しのステップの指示（`plugins/ndf/scripts/supervise_lib/procedures.py` の `survey_steps`） | 新しい規則の指摘の直し方を、直しの worker への指示に足す |
 | 設計文書のテンプレート（`plugins/ndf/skills/design/references/design-template.md` と ndf-next のコピー） | 「適用範囲」に振る舞いの表と事情の欄の形を置く |
@@ -309,7 +309,7 @@ sequenceDiagram
   participant M as MVV 判定
   participant H as 利用者
   W->>S: 頭の設計文書を書いてコミットした
-  S->>R: 設定とまとまりの文書
+  S->>R: 設定と設計文書の一式
   R-->>S: 指摘（無ければ空）
   alt 指摘あり（終了コード 1）
     S->>F: 指摘
@@ -359,23 +359,9 @@ sequenceDiagram
 
 ## 受け入れ条件 7 の確かめ
 
-#3596 のやり直す前の設計文書を入力にして、採った B・C・E が汎用性の後退を捕まえるかを確かめる。捕まえる対象は、その設計の決定 5 の「`promote-whole`・`promote-selected` の 2 行を外す」ことで、develop を経て本番へ出す運用（Web サービスの 1 つの種類）を代わりの形なしに扱えなくする。あわせて、値の改名だけの設計を人へ戻さないこと（B2）を確かめる。実装の後に打ち、記録を実装の Pull Request に残す（受け入れ条件 13）。
+#3596 のやり直す前の設計文書を入力にして、採った B・C・E が汎用性の後退を捕まえるかを確かめる。捕まえる対象は、その設計の決定 5 の「`promote-whole`・`promote-selected` の 2 行を外す」ことである。この決定は、develop を経て本番へ出す運用（Web サービスの 1 つの種類）を代わりの形なしに扱えなくする。あわせて、値の改名だけの設計を人へ戻さないこと（B2）を確かめる。実装の後に打ち、記録を実装の Pull Request に残す（受け入れ条件 13）。
 
-**準備**（2026-11-15 に打ち、終了コード 0 を確かめた）:
-
-```bash
-T=.ndf/tmp/3618-replay; mkdir -p "$T"
-for f in issue-3572-design.md issue-3572-design-decisions.md issue-3572-requirements.md; do
-  git show 4faa3a04:issues/$f > "$T/$f"
-done
-python3 plugins/ndf/scripts/sprint-state.py init "$T/sprint.json" --name replay-3618 --pace normal --root .
-```
-
-C と C2 の期待値は、やり直す前の設計文書の「設計の結果」の触るファイルが ai-plugins の設定の `paths` に当たることを前提にする。2026-11-15 に次を打ち、終了コード 0 で `touched 45 hit 41`（先頭は `plugins/ndf-next/contracts/templates/release.json`）を得た。照らし合わせは Python の `fnmatch` で、実装の照らし合わせ（詳細設計の `applies`）と `**` の扱いが違えば実装の後に打ち直す。
-
-```bash
-git show 4faa3a04:issues/issue-3572-design.md | grep -E '^\| #3572 \| 実装する' | grep -oE '`[^`]+`' | tr -d '`' | python3 -c "import sys,fnmatch; f=sys.stdin.read().split(); h=[x for x in f if any(fnmatch.fnmatch(x,p) for p in ['plugins/ndf/**','plugins/ndf-next/**','.claude-plugin/marketplace.json'])]; print('touched',len(f),'hit',len(h),h[0])"
-```
+### 確かめる項目と期待値
 
 | 案 | コマンド | 基準値（2026-11-15・実装の前） | 期待値（実装の後） |
 | --- | --- | --- | --- |
@@ -387,7 +373,30 @@ git show 4faa3a04:issues/issue-3572-design.md | grep -E '^\| #3572 \| 実装す�
 
 C は表が無いことを、C2 は表に書いた扱えなくなることが人へ残す判断へ届かないことを捕まえる。扱えなくなることを `無し` と書いた表は C・C2 のどちらも通るため（「処理の流れ」の限り）、その場合は B と E の期待値が受け入れ条件 7 を満たす。
 
-C2 の入力（2026-11-15 に打ち、終了コード 0 と、表が 1 つ入ることを確かめた）:
+B・B2・E は言語モデルの判定で、結果は実行ごとに揺れうる。期待値に合わなければ 1 回だけ打ち直し、2 回とも合わなければ実装の Pull Request で人へ戻す。
+
+
+### 準備
+
+2026-11-15 に打ち、終了コード 0 を確かめた。
+
+```bash
+T=.ndf/tmp/3618-replay; mkdir -p "$T"
+for f in issue-3572-design.md issue-3572-design-decisions.md issue-3572-requirements.md; do
+  git show 4faa3a04:issues/$f > "$T/$f"
+done
+python3 plugins/ndf/scripts/sprint-state.py init "$T/sprint.json" --name replay-3618 --pace normal --root .
+```
+
+C と C2 の期待値は、やり直す前の設計文書の「設計の結果」の触るファイルが ai-plugins の設定の `paths` に当たることを前提にする。2026-11-15 に次を打ち、終了コード 0 で `touched 45 hit 41` を得た。当たった先頭のファイルは `plugins/ndf-next/contracts/templates/release.json` である。照らし合わせは Python の `fnmatch` で、実装の照らし合わせ（詳細設計の `applies`）と `**` の扱いが違えば実装の後に打ち直す。
+
+```bash
+git show 4faa3a04:issues/issue-3572-design.md | grep -E '^\| #3572 \| 実装する' | grep -oE '`[^`]+`' | tr -d '`' | python3 -c "import sys,fnmatch; f=sys.stdin.read().split(); h=[x for x in f if any(fnmatch.fnmatch(x,p) for p in ['plugins/ndf/**','plugins/ndf-next/**','.claude-plugin/marketplace.json'])]; print('touched',len(f),'hit',len(h),h[0])"
+```
+
+### C2 の入力
+
+2026-11-15 に打ち、終了コード 0 と、表が 1 つ入ることを確かめた。
 
 ```bash
 mkdir -p "$T/c2"; cp "$T/issue-3572-design-decisions.md" "$T/issue-3572-requirements.md" "$T/c2/"
@@ -416,7 +425,9 @@ open(dst, "w", encoding="utf-8").write("".join(out))
 EOF
 ```
 
-B2 の入力（2026-11-15 に打ち、終了コード 0 を確かめた）:
+### B2 の入力
+
+2026-11-15 に打ち、終了コード 0 を確かめた。
 
 ```bash
 mkdir -p "$T/b2"; cat > "$T/b2/design.md" <<'EOF'
@@ -438,14 +449,14 @@ mkdir -p "$T/b2"; cat > "$T/b2/design.md" <<'EOF'
 EOF
 ```
 
-E のコマンド（観点の出し方は 2026-11-15 に打って確かめた。`claude -p` の行は実装の後に打つ）:
+### E のコマンド
+
+観点の出し方は 2026-11-15 に打って確かめた。`claude -p` の行は実装の後に打つ。
 
 ```bash
 (cd plugins/ndf/skills/cross-review/scripts && python3 -c "from review_lib import review_focus as r; print(r.CATEGORY_TEMPLATES['design'])") > "$T/focus.md"
 claude -p "$(cat "$T/focus.md")"$'\n\n次の設計文書をこの観点でレビューし、指摘を箇条書きで返す。\n\n'"$(cat "$T/issue-3572-design.md" "$T/issue-3572-design-decisions.md")" > "$T/review.md"
 ```
-
-B・B2・E は言語モデルの判定で、結果は実行ごとに揺れうる。期待値に合わなければ 1 回だけ打ち直し、2 回とも合わなければ実装の Pull Request で人へ戻す。
 
 ## 設計の結果
 
