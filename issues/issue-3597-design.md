@@ -235,13 +235,13 @@ parallel.py request-gate2 <計画名> <連番> <提示> --confirmed --done <本�
 
 ### 問いの入力
 
-一時レーンが操作の対象を持つ区分つきの問い（`ndf-ask:redline:*` と `ndf-ask:irreversible`）を出すときは、`metadata` に `target` としてブランチ名か `#<番号>` を載せる。先端のコミットは書かない。
+操作の対象を持つ区分つきの問いは `ndf-ask:redline:*` と `ndf-ask:irreversible` である。一時レーンはこれらの問いを出すとき、`metadata` の `target` にブランチ名か `#<番号>` を載せる。先端のコミットは書かない。
 
 ```json
 {"metadata": {"source": "ndf-ask:redline:C4", "target": "sprint/lr-t2"}}
 ```
 
-`request-ask` は、問いを出した作業ディレクトリでブランチ名の先端を `git rev-parse --verify` で求め、`sprint/lr-t2@81d3baa54ee35f6fc217376a78ed3820df8612e9` の形の問いの対象を組む。`#<番号>` はそのまま対象にする。
+`request-ask` は、問いを出した作業ディレクトリでブランチ名の先端を `git rev-parse --verify` で求める。組んだ問いの対象は `sprint/lr-t2@81d3baa54ee35f6fc217376a78ed3820df8612e9` の形になる。`#<番号>` はそのまま対象にする。
 
 | 一時レーンの載せ方 | 起きること |
 | --- | --- |
@@ -283,9 +283,14 @@ sequenceDiagram
     end
 ```
 
-「差し戻す」の締めは、`parallel.py settle --rejected` が送る締めの再開と同じメソッド（`_Run.settle` から `_answer_settled`）を通る。範囲のレーンの依頼へは、提示の差し戻しと同じ `rejected` と理由が返る。今の `_release_result` が確定の後の締めを終了コード 4 で断るのは、本番のプランの done を読んで `settle` を送るコマンドの側で、耐久ワークフローの中の締めは通らない。
+「差し戻す」の締めは、`parallel.py settle --rejected` が送る締めの再開と同じメソッド（`_Run.settle` から `_answer_settled`）を通る。範囲のレーンの依頼へは、提示の差し戻しと同じ `rejected` と理由が返る。今の `_release_result` が確定の後の締めを終了コード 4 で断るのは、本番のプランの done を読んで `settle` を送るコマンドの側である。耐久ワークフローの中の締めはそこを通らない。
 
-本番の PR（リリース 17 では PR #3593）は、耐久ワークフローが `gh pr close` で閉じ、コメントに差し戻しの理由と依頼の id を残す。閉じた PR は開き直せるため、戻せない操作（C4）に当たらない。次のリリースの本番のプランは、開いている本番の PR だけを使い回す（`release-steps.py` の `_merge_prod_pr` が `find_pr(..., states=("OPEN",))` で探す）ため、閉じた PR を使い回さずに新しい PR を作り、提示から承認を取り直す。PR を閉じられなかったときも締めは進め、閉じられなかったことを締めの理由に足す。
+本番の PR（リリース 17 では PR #3593）の扱いは次のとおりである。
+
+- 耐久ワークフローが `gh pr close` で閉じ、コメントに差し戻しの理由と依頼の id を残す
+- 閉じた PR は開き直せるため、戻せない操作（C4）に当たらない
+- 次のリリースの本番のプランは、閉じた PR を使い回さずに新しい PR を作り、提示から承認を取り直す。開いている本番の PR だけを使い回すためである（`release-steps.py` の `_merge_prod_pr` が `find_pr(..., states=("OPEN",))` で探す）
+- PR を閉じられなかったときも締めは進め、閉じられなかったことを締めの理由に足す
 
 ### 同じ問いの引き継ぎ
 
