@@ -1,6 +1,6 @@
 """main 宛ての PR の検査（workflow が PR の出来事で打つ。#3572 の I7・I9）。
 
-宣言の取り込み方の行が `github-flow` のときだけ働き、ほかの行では何も見ない（11.0.0 の入れ替えまでは今の NDF の
+宣言の取り込み方の行が `github-flow` で、PR が本番ブランチ宛てのときだけ働き、ほかでは何も見ない（11.0.0 の入れ替えまでは今の NDF の
 リリースの PR が版を上げるため。決定 7）。`problems` の判定:
 
 | PR | 破れ |
@@ -73,10 +73,12 @@ def _verify_ref(root: Path) -> str | None:
 
 
 def check(root: Path, hub: GitHub, repo_git: git_mod.Git, number: int) -> list[dict[str, str]] | None:
-    """宣言の行が `github-flow` のときだけ PR の事実を集めて破れを返す（ほかの行では None で何も見ない）。"""
+    """宣言の行が `github-flow` で、PR が本番ブランチ宛てのときだけ PR の事実を集めて破れを返す（ほかは None で何も見ない）。"""
     if decl_mod.flow_of(root) != decl_mod.GITHUB_FLOW:
         return None
     pull = hub.pull(number)
+    if pull.base_ref != decl_mod.production_branch(root):
+        return None
     gather.fetch(repo_git, pull.base_ref)
     head = gather.fetch_pull(repo_git, number)
     base = repo_git.merge_base(f"{git_mod.ORIGIN}/{pull.base_ref}", head)

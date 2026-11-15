@@ -13,6 +13,7 @@ from ndf.domains.release import declaration as decl_mod
 from ndf.domains.release import pr_check
 
 from ._fakes import FakeHub, write_json
+from ._fakes import pull as fake_pull
 
 MANIFEST = "tools/kit/.claude-plugin/plugin.json"
 ALLOWED = frozenset({MANIFEST, "CHANGELOG.md", ".claude-plugin/marketplace.json"})
@@ -61,6 +62,8 @@ def _decl(root: Path, flow: dict[str, Any] | None) -> Path:
 def test_check_does_nothing_outside_the_github_flow(tmp_path: Path) -> None:
     """決定 7: 取り込み方の行が github-flow でなければ何も見ない（入れ替えまでは今の NDF の PR が版を上げる）。"""
     assert pr_check.check(_decl(tmp_path, {"promotion": "whole"}), FakeHub(), None, 7) is None  # type: ignore[arg-type]
+    hub = FakeHub(pulls={7: fake_pull(number=7, base="feature/x")})
+    assert pr_check.check(_decl(tmp_path, {"promotion": "direct"}), hub, None, 7) is None  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize(

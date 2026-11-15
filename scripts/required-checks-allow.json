@@ -1,6 +1,8 @@
 {
   "version": 1,
   "not_required": [
+    {"name": "pr-check", "reason": "ndf-next のリリースの PR の検査（ndf-next-pr.yml）。11.0.0 の入れ替え（#3304）までは変数 NDF_RELEASE_RUNNER が ndf-next でないため動かず、必須にすると全 PR が塞がる。入れ替えで ruleset の必須へ足す（#3572）"},
+    {"name": "verify-ref", "reason": "検証の ref の組み直し（ndf-next-pr.yml）で、PR の合否ではない。衝突で止まっても PR のマージを塞がない（#3572 の決定 9）"},
     {"name": "pytest (0/2)", "reason": "分けたジョブの結果は pytest が 1 つにまとめる。必須は pytest が持つ"},
     {"name": "pytest (1/2)", "reason": "分けたジョブの結果は pytest が 1 つにまとめる。必須は pytest が持つ"},
     {"name": "pytest (文書)", "reason": "文書だけの PR でテストが読む文書のテストを回す（#2925）。結果は pytest が 1 つにまとめる。必須は pytest が持つ"},
