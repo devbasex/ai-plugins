@@ -43,6 +43,14 @@ class Verified(NamedTuple):
     included: tuple[tuple[int, str], ...]
 
 
+def _open_pull(raw: dict) -> verify_decide.OpenPull:
+    """GitHub の PR の行 1 件を `OpenPull` にする（head の repo が読めなければリポジトリの名前は空）。"""
+    head = raw["head"]
+    repo = head.get("repo") if isinstance(head, dict) else None
+    full = text_of(repo["full_name"]) if isinstance(repo, dict) and "full_name" in repo else ""
+    return verify_decide.OpenPull(int(raw["number"]), text_of(head["sha"]), text_of(head["ref"]), full, bool(raw.get("draft")))
+
+
 def _open_pulls(hub: GitHub, production: str) -> list[verify_decide.OpenPull]:
     """main 宛ての開いた PR を全ページ読む。"""
     out: list[verify_decide.OpenPull] = []
@@ -50,11 +58,7 @@ def _open_pulls(hub: GitHub, production: str) -> list[verify_decide.OpenPull]:
     while True:
         rows = hub.rest("GET", f"/repos/{hub.repo}/pulls", params={"state": "open", "base": production, "per_page": PER_PAGE, "page": page})
         found = [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
-        for r in found:
-            head = r["head"]
-            repo = head.get("repo") if isinstance(head, dict) else None
-            full = text_of(repo["full_name"]) if isinstance(repo, dict) and "full_name" in repo else ""
-            out.append(verify_decide.OpenPull(int(r["number"]), text_of(head["sha"]), text_of(head["ref"]), full, bool(r.get("draft"))))
+        out.extend(_open_pull(r) for r in found)
         if len(found) < PER_PAGE:
             return out
         page += 1
