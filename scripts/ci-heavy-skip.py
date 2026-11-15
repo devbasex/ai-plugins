@@ -103,7 +103,11 @@ def kinds_of(root: str, a: str, b: str, behavior_as_code: bool = False) -> diff_
 
 def version_only(root: str, a: str, b: str, behavior_as_code: bool = False) -> tuple[bool, str]:
     """a..b の差分が版数と説明だけか。(判定, 省かない理由) を返す。"""
-    k = kinds_of(root, a, b, behavior_as_code)
+    return _version_only_of(root, a, b, kinds_of(root, a, b, behavior_as_code))
+
+
+def _version_only_of(root: str, a: str, b: str, k: diff_kinds.DiffKinds) -> tuple[bool, str]:
+    """分類済みの a..b の差分 `k` が版数と説明だけか。(判定, 省かない理由) を返す。"""
     if k.unknown:
         return False, k.unknown
     untested = set(k.docs) - set(k.tested)
@@ -214,7 +218,7 @@ def decide(
     found = _docs_or_self_tested(k, as_code)
     if found is not None:
         return found
-    ok, why = version_only(root, mb_sha, head, as_code)
+    ok, why = _version_only_of(root, mb_sha, head, k)
     if ok:
         return Decision(True, "差分が版数と説明だけ")
     return _promotion_decision(root, mb_sha, base, head, repo, workflow, branch, as_code, why, api)
