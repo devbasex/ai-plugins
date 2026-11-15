@@ -17,7 +17,7 @@ from ndf.adapters import git
 ARG = "arg"
 STATE = "state_file"
 # cwd のリモート名のリモート
-ORIGIN = "remote"
+REMOTE = "remote"
 
 
 class RepoUnresolved(Exception):
@@ -25,7 +25,7 @@ class RepoUnresolved(Exception):
 
 
 class RepoTarget(NamedTuple):
-    """対象のリポジトリ（`<所有者>/<リポジトリ>`）と、決めた出所（`ARG`・`STATE`・`ORIGIN`）。"""
+    """対象のリポジトリ（`<所有者>/<リポジトリ>`）と、決めた出所（`ARG`・`STATE`・`REMOTE`）。"""
 
     slug: str
     source: str
@@ -36,7 +36,7 @@ def _valid(slug: str) -> bool:
     return bool(owner) and bool(name) and "/" not in name
 
 
-def _from_origin(cwd: Path, make: Callable[[Path], git.Git]) -> RepoTarget:
+def _from_remote(cwd: Path, make: Callable[[Path], git.Git]) -> RepoTarget:
     g = make(cwd)
     try:
         inside = g.run("rev-parse", "--is-inside-work-tree").strip() == "true"
@@ -45,7 +45,7 @@ def _from_origin(cwd: Path, make: Callable[[Path], git.Git]) -> RepoTarget:
     if not inside:
         raise RepoUnresolved(f"cwd（{cwd}）が worktree の中でない。対象のリポジトリで打つか --repo を渡す")
     try:
-        return RepoTarget(g.remote_repo(), ORIGIN)
+        return RepoTarget(g.remote_repo(), REMOTE)
     except git.GitError as exc:
         raise RepoUnresolved(f"cwd（{cwd}）のリモートから GitHub のリポジトリを決められない。--repo を渡す: {exc}") from None
 
@@ -60,4 +60,4 @@ def resolve_target_repo(
         if not _valid(value):
             raise RepoUnresolved(f"{source} のリポジトリの形が <所有者>/<リポジトリ> でない: {value!r}")
         return RepoTarget(value, source)
-    return _from_origin(cwd, make)
+    return _from_remote(cwd, make)

@@ -30,7 +30,7 @@ def test_issue_1707_origin_of_the_target_repository_is_used(repos: Repos, monkey
     monkeypatch.chdir(repos.main)
     code, got = run_cli(capsys, "target-repo")
     assert code == 0
-    assert got["items"][0] == {"kind": "repo", "slug": "acme/app", "source": repo.ORIGIN}
+    assert got["items"][0] == {"kind": "repo", "slug": "acme/app", "source": repo.REMOTE}
 
 
 def test_arg_and_state_come_before_origin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys) -> None:
