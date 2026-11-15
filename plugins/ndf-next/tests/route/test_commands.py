@@ -222,6 +222,61 @@ def test_ci_local_stops_without_running_whole_tests_when_failed_tests_are_unknow
     assert not seen.exists()
 
 
+def _ci_test_failed(path, metrics):
+    """`ndf ci watch` が test_failed で止まった結果（落ちたテストは空）。"""
+    found = {
+        "tool": "ci", "status": "stopped", "summary": "落ちた", "items": [],
+        "cause": {"kind": "test_failed", "detail": "CI: test_failed"},
+        "metrics": {"failed_tests": [], "test_files": [], **metrics},
+    }  # fmt: skip
+    path.write_text(json.dumps(found) + "\n", encoding="utf-8")
+
+
+def _read(check, runner, reason):
+    return {"check": check, "run_id": 9, "runner": runner, "source": "none", "found": 0, "reason": reason}
+
+
+def test_ci_local_names_the_missing_junit_key_and_the_unread_runner(tmp_path, monkeypatch, capsys, last_result):
+    """受け入れ条件 10: glob の設定が無く一覧が空なら、打たずに precondition で止まり、キーと runner を出す。"""
+    _declare(monkeypatch, tmp_path)
+    seen = _slots(monkeypatch, tmp_path, "exit 0")
+    ci = tmp_path / "ci.json"
+    _ci_test_failed(
+        ci, {"failed_test_reads": [_read("factory-check", "vitest", "runner vitest のログのパーサーが無い"), _read("e2e", None, "x")]}
+    )
+    _failed_from(ci, tmp_path / "ci-local.json")
+    found = last_result(capsys.readouterr().out)
+    assert found["cause"]["kind"] == "precondition"
+    detail = found["cause"]["detail"]
+    assert "test.ci.junit_artifacts" in detail and "vitest（チェック factory-check）" in detail and "当たる suite が無い" in detail
+    assert not seen.exists()
+
+
+def test_ci_local_names_the_glob_and_the_reasons_when_neither_source_reads(tmp_path, monkeypatch, capsys, last_result):
+    """受け入れ条件 11: glob があって成果物とログのどちらでも読めなければ、glob と理由を出す。"""
+    _declare(monkeypatch, tmp_path)
+    seen = _slots(monkeypatch, tmp_path, "exit 0")
+    ci = tmp_path / "ci.json"
+    reads = [_read("pytest (0/2)", "pytest", "成果物 junit-0 を読めない: 410; ログを読めない: 403")]
+    _ci_test_failed(ci, {"junit_artifacts": "junit-*", "failed_test_reads": reads})
+    _failed_from(ci, tmp_path / "ci-local.json")
+    found = last_result(capsys.readouterr().out)
+    assert found["cause"]["kind"] == "precondition"
+    assert "junit-*" in found["cause"]["detail"] and "410" in found["cause"]["detail"] and "403" in found["cause"]["detail"]
+    assert not seen.exists()
+
+
+def test_ci_local_refuses_a_test_failed_result_without_read_records(tmp_path, monkeypatch, capsys, last_result):
+    """test_failed なのに読み取りの記録が無い結果は ndf ci watch の結果でないとして invalid（テストを打たない）。"""
+    _declare(monkeypatch, tmp_path)
+    seen = _slots(monkeypatch, tmp_path, "exit 0")
+    ci = tmp_path / "ci.json"
+    _ci_test_failed(ci, {})
+    assert _failed_from(ci, tmp_path / "ci-local.json") == causes.exit_code("invalid")
+    assert "failed_test_reads" in last_result(capsys.readouterr().out)["cause"]["detail"]
+    assert not seen.exists()
+
+
 def test_ci_local_stops_as_invalid_when_ci_result_is_unreadable(tmp_path, monkeypatch, capsys, last_result):
     """CI の結果を読めないときは、テストを打たずに invalid の結果 JSON で止まる（テストの落ちの終了コードと衝突しない）。"""
     _declare(monkeypatch, tmp_path)

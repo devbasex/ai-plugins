@@ -176,5 +176,7 @@
 | [ndf-next-declarations-and-io-contracts.md](ndf-next-declarations-and-io-contracts.md) | ndf-next の宣言と入出力の規約（.ndf/ の宣言の JSON Schema・副命令の引数と結果のスキーマ・生成する契約のページ docs/contracts/・ndf check の規則 spec-docs/spec-decl/spec-io/spec-skill/spec-public と --write-spec・全副命令の出力の検査・公開と内部の区別。#3518・#3519） |
 | [ndf-next-gws-subcommands.md](ndf-next-gws-subcommands.md) | ndf-next の `ndf gws`（gws の確認とサムネイルの保存の副命令・状態ごとの結果と終了コード・止まった理由の種類・記録の gws の部品と共有する認証済みの判定・承認資料の置き場・決定の理由。#3547）。手順は ndf-next の `google-workspace` の SKILL.md が正 |
 | [ndf-next-closed-children-subcommands.md](ndf-next-closed-children-subcommands.md) | ndf-next の閉じた子の 10 本の機能の副命令（$SCRIPTS を決めず ndf を名前で呼ぶ手順 0・既にある副命令への置き換え・ndf project/statusline/materials と ndf relay の notice・stop --all・account・context・旧い実装と並ぶ間の排他・作らない機能と開いている子へ回した機能の対応表の行。#3569） |
+| [ndf-parallel-helper-confirmed-gate-and-launch-wait.md](ndf-parallel-helper-confirmed-gate-and-launch-wait.md) | 並列の計画の一時レーンが、確定の後に本番のプランが承認ゲートで終わったときに「打ち直す」「差し戻す」の依頼を送ること、台帳に書かなかった依頼を送ったと返さないこと（送り済み・終了コード 1）、別の一時レーンが動いているための起動の断り（helper-busy）を空き待ちにして前の一時レーンが止まってから打ち直すことの常に成り立つ条件・契約・決定の理由・テスト観点。手順は development-workflow の references/parallel.md が正 |
+| [ndf-next-ci-failed-tests-junit.md](ndf-next-ci-failed-tests-junit.md) | ndf-next が CI で落ちたテストを JUnit の成果物を先に、suite の runner のログのパーサーを後に読むこと、手元の確かめが止まるときの文、収集の確かめの成功の終了コード（collect_exit_codes） |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。

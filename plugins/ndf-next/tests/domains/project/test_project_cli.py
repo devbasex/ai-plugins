@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from ndf import contracts
 from ndf.domains.project import check, cli, measure_ci, measure_repo, write
 from ndf.domains.project.items import unknown
 
@@ -414,3 +415,21 @@ def test_ci_items_current_behavior_past_deadline_marks_unknown(monkeypatch):
     assert step.items["test_duration"] == unknown("時間切れ")
     assert step.items[write.BRANCH_FLOW] == unknown("時間切れ")
     assert step.items["issues"] == measure_ci.measure_issues(_REPO_ISSUES, {})
+
+
+SUITE_SCHEMA = contracts.schema_path("declarations/project") + "#/$defs/Suite"
+BASE_SUITE = {"name": "pytest", "runner": "pytest", "command": "pytest"}
+
+
+@pytest.mark.parametrize("codes", [["5"], 5, [1.5], [True], []])
+def test_collect_exit_codes_must_be_a_list_of_integers(codes):
+    # 受け入れ条件 14: 整数の並び以外は設定ファイルのスキーマの検査で落ちる
+    assert contracts.schema_errors({**BASE_SUITE, "collect_command": "pytest --collect-only -q", "collect_exit_codes": codes}, SUITE_SCHEMA)
+
+
+def test_collect_exit_codes_need_a_collect_command():
+    assert contracts.schema_errors({**BASE_SUITE, "collect_exit_codes": [0, 5]}, SUITE_SCHEMA)
+    assert (
+        contracts.schema_errors({**BASE_SUITE, "collect_command": "pytest --collect-only -q", "collect_exit_codes": [0, 5]}, SUITE_SCHEMA)
+        == []
+    )

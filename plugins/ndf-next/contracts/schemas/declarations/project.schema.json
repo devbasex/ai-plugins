@@ -1189,7 +1189,7 @@
     },
     "Suite": {
       "additionalProperties": false,
-      "description": "テストの 1 まとまり。`scope_command` の `{paths}`（引用の外の、空白で区切った 1 語）に、シェルの引用で守った範囲の\nパスの並びが入る。入るパスの種類は場所で違う: cross-refactoring の改修の範囲テストではテストのファイルのパス\n（計画の `test_targets` の `::` より前）、全体テストを CI に任せる戦略の着手前のテストでは `--scope` のテストの置き場所\n（ディレクトリかファイル）、静的解析（`kind: lint`）では変更したファイルのパス。テストの `scope_command` はテストの\nファイルのパスを受けるコマンドで書く（unittest なら `discover -s {paths}` ではなく `python3 -m unittest {paths}`）。\nファイルを受けない `scope_command` は、cross-refactoring の `init` がテストのファイルを入れた試走で見分け、改修の前に\n止める。`command` と `scope_command` はシェルで走らせる。\n`junit` はコマンドが JUnit XML を書く作業ディレクトリからの相対パス（無ければ落ちたテストの見分けは走らせ直しへ落ちる）。\n`kind` は種別で、`test`（テスト）か `lint`（静的解析。整形の検査を含む）。書かなければ `test`。静的解析の suite の範囲は\n変更したファイルのうち `paths` に当たるもの。`paths` の要素は接頭辞（ディレクトリ）か glob（`*.sh` など）で、空ならすべて。\n`ci_jobs` はこの suite が同じ検査を手元で走らせるCIのジョブの識別子で、cross-refactoring の `init` が\n宣言に無いジョブを知らせるときに見る。",
+      "description": "テストの 1 まとまり。`scope_command` の `{paths}`（引用の外の、空白で区切った 1 語）に、シェルの引用で守った範囲の\nパスの並びが入る。入るパスの種類は場所で違う: cross-refactoring の改修の範囲テストではテストのファイルのパス\n（計画の `test_targets` の `::` より前）、全体テストを CI に任せる戦略の着手前のテストでは `--scope` のテストの置き場所\n（ディレクトリかファイル）、静的解析（`kind: lint`）では変更したファイルのパス。テストの `scope_command` はテストの\nファイルのパスを受けるコマンドで書く（unittest なら `discover -s {paths}` ではなく `python3 -m unittest {paths}`）。\nファイルを受けない `scope_command` は、cross-refactoring の `init` がテストのファイルを入れた試走で見分け、改修の前に\n止める。`command` と `scope_command` はシェルで走らせる。\n`junit` はコマンドが JUnit XML を書く作業ディレクトリからの相対パス（無ければ落ちたテストの見分けは走らせ直しへ落ちる）。\n`kind` は種別で、`test`（テスト）か `lint`（静的解析。整形の検査を含む）。書かなければ `test`。静的解析の suite の範囲は\n変更したファイルのうち `paths` に当たるもの。`paths` の要素は接頭辞（ディレクトリ）か glob（`*.sh` など）で、空ならすべて。\n`ci_jobs` はこの suite が同じ検査を手元で走らせるCIのジョブの識別子で、cross-refactoring の `init` が\n宣言に無いジョブを知らせるときと、`ndf ci watch` が落ちたテストのチェックに当たる suite（ワークフローのファイルの照合。`#` より後は見ない）を決めるときに見る。\n`runner` は CI のログから落ちたテストを読むパーサーを選ぶ（登録の無い `runner` のログは読まない）。\n`collect_command` は cross-refactoring が足したテストを全体の実行が収集するかを確かめるコマンドで、収集したテストを 1 行ずつ出す。\n`collect_exit_codes` は収集の確かめで成功と読む終了コード（書かなければ 0 だけ。pytest の「収集が 0 件」を受けるなら `[0, 5]`）。書くには `collect_command` が要る。",
       "properties": {
         "name": {
           "title": "Name",
@@ -1271,7 +1271,33 @@
           },
           "title": "Ci Jobs",
           "type": "array"
+        },
+        "collect_command": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Collect Command"
+        },
+        "collect_exit_codes": {
+          "items": {
+            "type": "integer"
+          },
+          "minItems": 1,
+          "title": "Collect Exit Codes",
+          "type": "array",
+          "uniqueItems": true
         }
+      },
+      "dependentRequired": {
+        "collect_exit_codes": [
+          "collect_command"
+        ]
       },
       "required": [
         "name",
@@ -1337,7 +1363,7 @@
     },
     "TestCi": {
       "additionalProperties": false,
-      "description": "全体テストを CI に任せるときに見る先。`check` は待つチェックの名前（空なら `ci.required_checks` のすべて）、\n`junit_artifacts` は JUnit を持つ成果物の名前の glob（空なら解析と同じ名前の規則）。\n`only` は CI テストの宣言（#3056）。`true` なら手元でテストを走らせず、合否を PR の CI の結果で決める。解析の書き出しが\n`ci_tests.declare` で書く・消す。`false` は人が明示して手元で走らせる指定で、解析は書き換えない。",
+      "description": "全体テストを CI に任せるときに見る先。`check` は待つチェックの名前（空なら `ci.required_checks` のすべて）、\n`junit_artifacts` は JUnit を持つ成果物の名前の glob（`fnmatch` の形。例: `junit-*`）。書いたときだけ `ndf ci watch` が落ちたテストを成果物から先に読み、\n読めなければ suite の `runner` のログのパーサーで読む。書かなければ成果物を読まない。\n`only` は CI テストの宣言（#3056）。`true` なら手元でテストを走らせず、合否を PR の CI の結果で決める。解析の書き出しが\n`ci_tests.declare` で書く・消す。`false` は人が明示して手元で走らせる指定で、解析は書き換えない。",
       "properties": {
         "only": {
           "anyOf": [
