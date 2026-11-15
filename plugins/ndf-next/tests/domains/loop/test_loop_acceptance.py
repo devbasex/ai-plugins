@@ -9,6 +9,7 @@ from typing import Any, Callable
 import pytest
 
 from ndf.contracts import result
+from ndf.core.plan import inputs_decide as inputs
 from ndf.domains.loop import acceptance
 from ndf.domains.loop import acceptance_decide as acc
 from ndf.domains.loop import cli as loop_cli
@@ -47,7 +48,7 @@ def test_recording_adds_the_table_and_a_pre_merge_row_without_means_counts_as_un
     assert [c.number for c in acc.unrecorded(body)] == [3]
     assert body.startswith(BODY.rstrip("\n")) and acc.criteria(body) == acc.criteria(BODY)
     again = acc.recorded_body(body, {3: "docker build で確かめた"}, [])
-    assert acc.unrecorded(again) == [] and again.count(acc.CHECKS_HEADING) == 1
+    assert acc.unrecorded(again) == [] and again.count(inputs.CHECKS_HEADING) == 1
     no_means = again.replace("docker build で確かめた", "—")
     assert [c.number for c in acc.unrecorded(no_means)] == [3]
 
