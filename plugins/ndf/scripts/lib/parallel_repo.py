@@ -41,20 +41,16 @@ def git_head(main: Path) -> str:
 
 
 def dev_version(main: Path) -> str:
-    """ベースブランチの配るプラグインの `plugin.json` の開発版の版数から接尾辞を外した版（出す版）。決まらなければ空。"""
-    import re
-
-    from release_version import plugin_json_rel
+    """まとめたリリースで出す版。ベースブランチの配るプラグインの `plugin.json` の版から接尾辞を外した版で、それが既に出した
+    最新の正式版のタグ以下なら、そのタグの次の PATCH（#3551。同期の PR が出した版へ揃えた後に、出した版で組まない）。
+    決まらなければ空。"""
+    import release_version as rv
 
     ref, plugin = base_tracking_ref(main), release_plugin(main)
-    rel = plugin_json_rel(main, ref, plugin) if ref and plugin else None
+    rel = rv.plugin_json_rel(main, ref, plugin) if ref and plugin else None
     if not rel:
         return ""
-    got = subprocess.run(["git", "show", f"{ref}:{rel}"], cwd=main, capture_output=True, text=True)
-    try:
-        return re.sub(r"-.*$", "", json.loads(got.stdout).get("version") or "") if got.returncode == 0 else ""
-    except ValueError:
-        return ""
+    return rv.collected_release(rv.observe(main, plugin, ref.removeprefix("origin/"), None, rel=rel)) or ""
 
 
 def loop_records(main: Path, name: str) -> list[tuple]:

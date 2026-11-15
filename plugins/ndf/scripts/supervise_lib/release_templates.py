@@ -404,7 +404,7 @@ def plan_release_package_plugin(a) -> dict:
     steps += [release_branch_step(a, repo, base, units, reviews[0]["id"] if reviews else after_branch), *reviews] if dev and units else []
     ctx = _KindArgs(a, repo, approval, prs, rts, v, base, units, cd)
     steps += kind.approval_steps(ctx)
-    steps += judge_fix_steps(run_ids, after_notes)
+    steps += judge_fix_steps(run_ids, after_notes, fix=dev)  # 本番は承認の外のコミットを積まない（#3572）
     if not dev:
         steps.append(judge_record_step())
     kind.add_gate(steps, ctx)  # CD のある場合の承認ゲートは approval-post の後に置く（release_cd.cd_prod_steps）

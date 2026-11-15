@@ -970,7 +970,7 @@ def included_pr_facts(prs, data, checks, repo):
                 "no_change": included.no_change(d),
             }
         )
-        facts = [str(d.get("state", "")), oid[:8] if oid else "—", f"CI {passed}/{len(pr_checks)}"]
+        facts = [str(d.get("state", "")), oid[:8] if oid else "—", included.ci_fact(pr_checks)]
         rows.append(included.included_row(n, d.get("title", ""), facts, p.via, included.no_change(d)))
     return items, rows
 

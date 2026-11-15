@@ -226,3 +226,19 @@ def test_notes_stop_without_the_included_cell(monkeypatch, world, tmp_path):
     with pytest.raises(mod.StepError) as e:
         notes(mod, world, path, [13])
     assert e.value.code == 3 and path.read_bytes() == before
+
+
+def test_ci_fact_names_checks_that_did_not_pass_with_the_reason():
+    """含む PR の CI が全部は通っていなければ、通らなかったチェックの名前と止めなかった理由を載せる（#3585）。"""
+    for p in (SCRIPT.parent, SCRIPT.parent / "lib"):
+        sys.path.insert(0, str(p))
+    from release_lib import included
+
+    checks = [
+        {"name": "pytest", "bucket": "pass"},
+        {"name": "smoke", "bucket": "skipping"},
+        {"name": "lint", "bucket": "skipping"},
+        {"name": "latest", "bucket": "fail"},
+    ]
+    assert included.ci_fact(checks) == "CI 1/4、飛ばした: smoke, lint、必須でない失敗: latest"
+    assert included.ci_fact([{"name": "pytest", "bucket": "pass"}]) == "CI 1/1"

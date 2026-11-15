@@ -46,8 +46,19 @@ def _same_but_versions(a: list[str], b: list[str], allowed: set[str]) -> bool:
     return True
 
 
+def _newer(x: str, y: str) -> str:
+    """版数だけが違う 2 行のうち、版数の大きい側（#3551）。起点のブランチの側（y）の版数がどれも同じか大きく、1 つでも大きければ y、
+    ほかは x（release/v<版> の側）。同期の PR が起点のブランチの開発版の版数（10.27.69-dev.1）を本番の版（10.27.68）へ戻さない。"""
+    import versions
+
+    pairs = [(v, w) for v, w in zip(VERSION_RE.findall(x), VERSION_RE.findall(y)) if v != w]
+    later = [versions.compare_versions(w, v) for v, w in pairs]
+    return y if later and all(c >= 0 for c in later) and any(c > 0 for c in later) else x
+
+
 def resolve_text(text: str, allowed: set[str]) -> str | None:
-    """衝突の印を持つ本文の塊がすべて allowed の版数の違いだけなら、こちら（release/v<版>）の側を取った本文。違えば None。"""
+    """衝突の印を持つ本文の塊がすべて allowed の版数の違いだけなら、行ごとに版数の大きい側を取った本文（`_newer`。多くは
+    こちら（release/v<版>）の側）。違えば None。"""
     out: list[str] = []
     ours: list[str] | None = None
     theirs: list[str] | None = None
@@ -68,7 +79,7 @@ def resolve_text(text: str, allowed: set[str]) -> str | None:
         elif bare.startswith(_THEIRS):
             if not _same_but_versions(ours, theirs, allowed):
                 return None
-            out.extend(ours)
+            out.extend(_newer(x, y) for x, y in zip(ours, theirs))
             ours = theirs = None
         else:
             theirs.append(line)

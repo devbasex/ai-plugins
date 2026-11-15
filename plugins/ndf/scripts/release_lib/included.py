@@ -96,6 +96,20 @@ def included_prs(found, extra) -> list[int]:
     return sorted({*(p.number if isinstance(p, IncludedPr) else p for p in found), *extra})
 
 
+# 通らなかったチェックがマージを止めなかった理由（#3585。含む PR はマージ済みのため、落ちたものは必須でない）
+CI_NOT_PASSED = {"skipping": "飛ばした", "fail": "必須でない失敗", "cancel": "必須でない取り消し", "pending": "必須でない未完了"}
+
+
+def ci_fact(checks: list[dict]) -> str:
+    """「含む PR」の CI の欄。`CI <通った>/<全部>` に、通らなかったチェックの名前を理由ごとに足す（#3585）。"""
+    passed = sum(1 for c in checks if c.get("bucket") == "pass")
+    by: dict[str, list[str]] = {}
+    for c in checks:
+        if c.get("bucket") != "pass":
+            by.setdefault(CI_NOT_PASSED.get(str(c.get("bucket")), "必須でない"), []).append(str(c.get("name") or "?"))
+    return "、".join([f"CI {passed}/{len(checks)}", *(f"{why}: {', '.join(names)}" for why, names in by.items())])
+
+
 def included_row(n: int, title: str, facts: list[str], via: int | None, no_change: bool) -> str:
     """「含む PR」の 1 行。行の頭は `#<番号>`、括弧の中は facts（状態・merge commit・CI）の後に印を足す。"""
     marks = [*facts, *([VIA.format(via)] if via else []), *([NO_CHANGE] if no_change else [])]

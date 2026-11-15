@@ -450,3 +450,37 @@ def test_plan_finished_reads_the_result_of_the_report(tmp_path, world, report, w
         (sd / "report.md").write_text(report)
     assert queue_fill.plan_finished(str(plan)) is want
     assert queue_fill.plan_finished(None) is False
+
+
+# ---- 並列の計画のまとめたリリースの版（#3551） ----
+
+
+@pytest.mark.parametrize(
+    ("base", "latest", "want"),
+    [
+        ("10.27.67-dev.1", "10.27.66", "10.27.67"),  # 開発版の版上げが入った後（今と同じ）
+        ("10.27.66", "10.27.66", "10.27.67"),  # 同期の PR が出した版へ揃えた後（#3551 の事象）
+        ("10.27.66-dev.3", "10.27.66", "10.27.67"),  # 系列のタグがもうある
+        ("10.27.65", "10.27.66", "10.27.67"),  # ベースブランチが最新のタグより古い
+        ("10.27.5", None, "10.27.5"),  # タグが 1 つも無い
+    ],
+)
+def test_collected_release_is_above_the_latest_tag(base, latest, want):
+    assert rv.collected_release(obs(base, latest)) == want
+
+
+def test_collected_release_does_not_decide_when_something_is_unreadable():
+    o = obs("10.27.66", "10.27.66")
+    o.unreadable = ["tags"]
+    assert rv.collected_release(o) is None
+
+
+def test_dev_version_of_the_parallel_plan_skips_a_released_version(tmp_path, world):
+    """同期の PR で develop が出した版（タグあり）へ揃った後でも、まとめたリリースは次の版で組む（#3551）。"""
+    import parallel_repo
+
+    (world.repo / ".ndf" / "supervise.json").write_text(json.dumps({"release": {"plugin": "ndf"}}))
+    world.publish("10.27.6", "develop", "main", tag=True)
+    assert parallel_repo.dev_version(world.repo) == "10.27.7"
+    world.publish("10.27.7-dev.1", "develop")
+    assert parallel_repo.dev_version(world.repo) == "10.27.7"

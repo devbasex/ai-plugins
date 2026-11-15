@@ -39,6 +39,7 @@
 | `answers-sent-json` | `answers-sent.json` | state | main | `plugins/ndf/scripts/parallel.py` | — |
 | `applied-json` | `*.applied.json` | state | state-dir | `plugins/ndf/scripts/context-policy.py`<br>`plugins/ndf/scripts/hook.py`<br>`plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/skills/skill-stats/scripts/skill-stats.py` | — |
 | `apply-json` | `apply.json` | result | tmp | `plugins/ndf/skills/backlog-refinement/scripts/upkeep.py` | — |
+| `approval-md` | `approval-*.md` | report | main | `plugins/ndf/scripts/lib/parallel_present.py:put_checks` | — |
 | `approved-txt` | `approved.txt` | result | state-dir | `plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/pr-steps.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` | — |
 | `before-json` | `before.json` | record | main | `plugins/ndf/skills/backlog-refinement/scripts/upkeep.py` | — |
 | `breakdown-md` | `breakdown.md` | report | main | `plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/pr-steps.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/scripts/supervise.py` | — |

@@ -6,6 +6,7 @@
 - `observe(repo, plugin, base, production)`: `git fetch -q origin --tags` の後に、origin のベースブランチと本番のブランチの
   `plugin.json` の版と、`<plugin>--v<版>` の正式版のタグを読む。読めなかったものは `unreadable` に名前で入れる
 - `decide_dev(obs, level)`: 次に空いている開発版
+- `collected_release(obs)`: 並列の計画のまとめたリリースで出す正式版（最新のタグより大きい版）
 - `taken(obs, version)`: その版がもう出ているか（開発版はベースブランチの版が同じか大きい、正式版は同じ版のタグがある）
 - `own_released(repo, branch, base)`: `branch` → `base` のマージ済みの PR があるか（照会できなければ None）
 
@@ -130,6 +131,17 @@ def decide_dev(obs: Observed, level: str = "patch") -> Decision:
     else:
         v = f"{versions.next_version(_max_base([obs.latest_tag, obs.production_version, b]), level)}-dev.1"
     return Decision(v, versions.release_base(v), "decided", observed=obs.as_dict())
+
+
+def collected_release(obs: Observed) -> str | None:
+    """並列の計画のまとめたリリースで出す正式版（#3551）。ベースブランチの版の基底が最新のタグより大きければその基底、
+    同じか小さければ（同期の PR が出した版へ揃えた後など）最新のタグの次の PATCH。読めないものがあれば決めない。"""
+    if obs.unreadable or not obs.base_version:
+        return None
+    b = versions.release_base(obs.base_version)
+    if obs.latest_tag and versions.compare_versions(b, obs.latest_tag) <= 0:
+        return versions.next_patch(obs.latest_tag)
+    return b
 
 
 def taken(obs: Observed, version: str, how: str = "explicit", level: str = "patch") -> Decision:
