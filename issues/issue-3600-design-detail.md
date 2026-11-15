@@ -101,7 +101,7 @@ plugins/ndf-next/
 | `plugins/ndf-next/contracts/limits.json` | 変更 | エピックのアクションの間隔（`lanes.epic-recheck`）・ベースブランチの取得が続けて失敗してよい回数（`lanes.epic-fetch-failures`）・検証と確認方法のコマンドの上限（`epic.command`）の 3 行を足す | 無し |
 | `plugins/ndf-next/contracts/workflow/context.schema.json` | 変更 | 任意のキー `scale`（`value`・`reason`）を足す | 無し |
 | `plugins/ndf-next/contracts/workflow/parallel-plan.schema.json` | 変更 | 任意のフィールド `epic`（`name`・`foundation`・`done`）を足す | 無し |
-| `plugins/ndf-next/contracts/workflow/progress.json` | 変更 | 計画のイベント `done_checked`・`foundation_noticed` とレーンのイベント `notice_read` を足す | 無し |
+| `plugins/ndf-next/contracts/workflow/progress.json` | 変更 | 計画のイベント `done_checked`・`foundation_noticed` とレーンのイベント `notice_read` を足す。既存のイベントの中身の変更は 2 つで、`plan_started` に任意の `foundation_rev`、`request_opened` に完了条件待ちのリクエストだけの `kind: epic_done_wait` と `remaining`（残りの完了条件の番号の配列）が足される。`request_opened` の行（書き手 `organizer`・`workflow`）は変えない | 無し |
 | `plugins/ndf-next/docs/contracts/commands.md` | 変更 | サブコマンドの一覧の生成物。`ndf check --write-spec` で描き直す | `plugins/ndf-next/src/ndf/cli.py` |
 | `plugins/ndf-next/skills/design/SKILL.md` | 変更 | 触る領域の表にアーキテクチャ設計書のガイドの 1 行を足す | `plugins/ndf-next/skills/design/references/epic-foundation.md` |
 | `plugins/ndf-next/skills/design/references/epic-foundation.md` | 新設 | アーキテクチャ設計書の書き方・規模の目安・#1142 の例。セクションの表はコントラクトから生成する | `plugins/ndf-next/contracts/epic/foundation.schema.json` |

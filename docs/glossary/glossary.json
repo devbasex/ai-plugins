@@ -2649,6 +2649,12 @@
       "pending_source": "issues/issue-3600-design.md"
     },
     {
+      "term": "エピックのフロー",
+      "context": "ndf-workflow",
+      "meaning": "規模の判定がエピックと出た作業が進む工程。アーキテクチャ設計書のガイドを読み、ndf epic init から始める。プログラムのエントリポイントとは呼び分ける",
+      "pending_source": "issues/issue-3600-design.md"
+    },
+    {
       "term": "アーキテクチャ設計書の変更通知",
       "context": "ndf-workflow",
       "meaning": "エピックのアーキテクチャ設計書の変更を、触るファイルの重なるレーンへ、計画のワークフロー状態（用語集の進行表）のイベントとして渡すもの。レーンが既読フラグを書くまで未読で残る",
