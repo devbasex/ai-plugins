@@ -314,23 +314,37 @@ def settled_gates(rows: list[dict], earlier: list[dict] = ()) -> set[str]:
     連番の一致だけでは除かない（I9）。`earlier` は `rows` より前に届いた問い（チェックポイントの問い）で、`rows` に同じ連番の
     確定か締めがあれば処理済みとする。確定の後の依頼（`msg.after` が `confirmed`。#3597 の決定 4）は確定の行では処理済みにせず、
     同じ id の答えの行か、それより後の同じ連番の締めの行があるときだけ処理済みとする。"""
-    done: dict[str, int] = {}  # 連番 → 確定か締めの最後の位置
-    ends: dict[str, int] = {}  # 連番 → 締めの最後の位置（確定の後の依頼が読む）
+    done, ends = _last_settling(rows)
+    answers = {r["id"] for r in rows if r["kind"] == "answer"}
+    out = {
+        r["id"]
+        for r in rows
+        if r["kind"] == "gate2" and _gate_settled({**(r.get("msg") or {}), "id": r["id"]}, r["_pos"], done, ends, answers)
+    }
+    return out | {str(q.get("id")) for q in earlier if q.get("kind") == "gate2" and _gate_settled(q, -1, done, ends, answers)}
+
+
+def _last_settling(rows: list[dict]) -> tuple[dict[str, int], dict[str, int]]:
+    """連番ごとの (確定か締めの `resume` の行の最後の位置, 締めの行の最後の位置)。後者は確定の後の依頼が読む。"""
+    done: dict[str, int] = {}
+    ends: dict[str, int] = {}
     for r in rows:
         msg = r.get("msg") or {}
-        if r["kind"] == "resume" and msg.get("phase") in SETTLING:
-            for got in (done, ends) if msg.get("phase") == "settle" else (done,):
-                got[str(msg.get("n"))] = max(got.get(str(msg.get("n")), -1), r["_pos"])
-    answers = {r["id"] for r in rows if r["kind"] == "answer"}
+        if r["kind"] != "resume" or msg.get("phase") not in SETTLING:
+            continue
+        n = str(msg.get("n"))
+        done[n] = max(done.get(n, -1), r["_pos"])
+        if msg.get("phase") == "settle":
+            ends[n] = max(ends.get(n, -1), r["_pos"])
+    return done, ends
 
-    def settled(q: dict, pos: int) -> bool:
-        n = str(q.get("n"))
-        if q.get("after") == "confirmed":
-            return str(q.get("id")) in answers or ends.get(n, -1) > pos
-        return done.get(n, -1) > pos
 
-    out = {r["id"] for r in rows if r["kind"] == "gate2" and settled({**(r.get("msg") or {}), "id": r["id"]}, r["_pos"])}
-    return out | {str(q.get("id")) for q in earlier if q.get("kind") == "gate2" and settled(q, -1)}
+def _gate_settled(q: dict, pos: int, done: dict[str, int], ends: dict[str, int], answers: set) -> bool:
+    """位置 `pos` のリリース承認ゲートの問い `q` が処理済みか。確定の後の依頼は同じ id の答えか、より後の同じ連番の締めでだけ処理済み。"""
+    n = str(q.get("n"))
+    if q.get("after") == "confirmed":
+        return str(q.get("id")) in answers or ends.get(n, -1) > pos
+    return done.get(n, -1) > pos
 
 
 def pending_questions(main: Path, name: str) -> list[dict]:
