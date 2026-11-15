@@ -1,7 +1,8 @@
-"""CD のある場合（`lib/release_case.py` の cd-no-review / cd-review）のリリースの経路（#2773。`release-steps.py` の release・
+"""CD のある場合（`lib/release_case.py` の cd-no-review / cd-review / cd-admin）のリリースの経路（#2773。`release-steps.py` の release・
 approval-check・approval-post・release-case から分けた）。
 
-- 本番: 開発版の PR → 本番の PR → CI の待ち → PR の上の承認（証跡かレビュー）と先端の照合 → 管理者の迂回なしのマージ → 公開の後
+- 本番: 開発版の PR → 本番の PR → CI の待ち → PR の上の承認（証跡かレビュー）と先端の照合 → マージ → 公開の後。
+  マージは `cd-admin` だけ管理者の迂回で打ち、迂回したら本番の PR に迂回の記録を置く（#3506）。ほかの場合は迂回なし
 - 開発版: 宣言 `release.dev_workflow` の workflow に開発版の PR をマージさせ、結果を待つ
 - 証跡のチェック: 証跡を判定して PR の先端へ commit status を付ける（同じ先端の PR が並べば落とす。I10）
 
@@ -33,6 +34,10 @@ from release_lib.names import release_tag
 from step_result import EXIT_GATE, EXIT_INFRA_WAIT, EXIT_PRECONDITION, EXIT_UNREADABLE, StepError, emit, gh_json, git, git_root, result
 
 TOOL = approval.TOOL
+# 迂回の記録の行（items の `record`。#3506 の I7）
+ADMIN_RECORD = "admin_merge"
+# 迂回の記録を書けなかったときに、本番の完了と分けて報告する文（#3506 の決定 7）
+UNWRITTEN_NOTE = "迂回の記録を書けなかった（本番は出ている）"
 
 
 release_case_or_stop = release_case.case_or_stop  # release-steps.py と merged_lib が同じ止め方を使う
@@ -86,15 +91,15 @@ class ProdOps:
     create_pr: Callable  # (root, base, head, title, body) -> int
     merge_commit_of: Callable  # (root, n) -> str | None
     merge_release_pr: Callable  # (root, a, plugin, plugins, branch, base) -> (release_pr, merged_pr, commit)
-    published: Callable  # (root, a, plugin, prod, main_pr, merge, items, metrics) 公開の後。結果を出して終わる
+    published: Callable  # (root, a, plugin, prod, main_pr, merge, items, metrics, back=None) 公開の後。結果を出して終わる
     wait_and_merge: Callable  # (root, n, *, expect, ci_wait, gate_approved, no_admin) -> マージコミット
     pr_check_buckets: Callable  # (root, n) -> チェックの並び
 
 
 def release_prod(ctx: ReleaseCtx, case, ops: ProdOps):
-    """場合 1・2 の本番: 開発版の PR → 本番の PR → CI の待ち → 承認の照合 → 迂回なしのマージ → 公開の後（#2773）。
+    """CD のある場合の本番: 開発版の PR → 本番の PR → CI の待ち → 承認の照合 → マージ（`cd-admin` だけ迂回）→ 公開の後（#2773・#3506）。
     承認が先端と一致しなければ本番の PR を開いたまま承認ゲート（10）で止める。"""
-    root, a, plugin, plugins, branch, base, prod = ctx.root, ctx.a, ctx.plugin, ctx.plugins, ctx.branch, ctx.base, ctx.prod
+    root, a, plugin, plugins, prod = ctx.root, ctx.a, ctx.plugin, ctx.plugins, ctx.prod
     ver = a.version
     metrics = {
         "channel": "prod",
@@ -108,14 +113,14 @@ def release_prod(ctx: ReleaseCtx, case, ops: ProdOps):
         "plugins": ",".join(plugins),
     }
     items: list[dict] = []
-    main_pr = _open_prod_pr(root, a, plugin, plugins, branch, base, prod, items, metrics, ops)
+    main_pr = _open_prod_pr(ctx, items, metrics, ops, case)
     repo = repo_or_stop(root)
 
     def waiting(head, judged):
         how = (
             f"release-steps.py approval-post --pr {main_pr} --approval <承認資料> で承認資料を置いて承認を求め、承認を得たら "
             f"release-steps.py approve --pr {main_pr} --approved-sha {head} --by user で証跡を書いて"
-            if case.case == release_case.CD_NO_REVIEW
+            if case.trail_approval
             else f"PR #{main_pr} の先端 {head[:8]} のレビューの承認を得て"
         )
         nxt = f"{how}、release-steps.py release --version {ver} --channel prod を打ち直す"
@@ -129,13 +134,65 @@ def release_prod(ctx: ReleaseCtx, case, ops: ProdOps):
     merge = merge_on_pr_approval(
         root, repo, a, case, main_pr, prod, items, metrics, ops, waiting=waiting, moved=moved, waiting_items=awaiting
     )
-    items.append({"kind": "pr", "name": f"#{main_pr}", "result": "merged", "base": prod, "admin": False})
+    items.append({"kind": "pr", "name": f"#{main_pr}", "result": "merged", "base": prod, "admin": case.admin_merge})
     git(root, "fetch", "-q", "origin")
-    ops.published(root, a, plugin, prod, main_pr, merge or git(root, "rev-parse", f"origin/{prod}").stdout.strip(), items, metrics)
+    merge = merge or git(root, "rev-parse", f"origin/{prod}").stdout.strip()
+    ops.published(root, a, plugin, prod, main_pr, merge, items, metrics, back=admin_back())
 
 
-def _open_prod_pr(root, a, plugin, plugins, branch, base, prod, items, metrics, ops: ProdOps) -> int:
+def _unwritten(pr: int, e: Exception) -> dict:
+    """迂回の記録を書けなかった行。"""
+    return {"kind": "comment", "name": f"#{pr}", "result": "unwritten", "record": ADMIN_RECORD, "reason": str(e)[:200]}
+
+
+def admin_record_item(repo: str, pr: int, sha: str, trail_url: str) -> dict:
+    """迂回の記録を書き、結果の行を返す（#3506 の I7）。書けなければ `unwritten` の行を返し、例外を上げない（決定 7）。"""
+    try:
+        wrote, url = approval_trail.write_admin_record(repo, pr, sha, trail_url)
+    except (approval_trail.TrailError, ValueError) as e:
+        return _unwritten(pr, e)
+    return {"kind": "comment", "name": url or f"#{pr}", "result": "written" if wrote else "kept", "record": ADMIN_RECORD}
+
+
+def admin_record_on_resume(root, repo: str, case, pr: int) -> dict | None:
+    """マージ済みの本番の PR に、迂回でマージしたのに記録が無ければ書く（#3506 の I7）。迂回する場合でなければ None。
+    「迂回でマージしたか」はマージのときと同じ入力（場合と、利用者の証跡が先端と一致すること）で決め直し、PR のレビューの判定は読まない。"""
+    if not case.admin_merge:
+        return None
+    try:
+        head = str((gh_json(root, ["pr", "view", str(pr), "--json", "headRefOid"], "gh pr view") or {}).get("headRefOid") or "")
+        judged = approval_trail.judge_trails_on(repo, pr, head, "user") if head else None
+    except (StepError, approval_trail.TrailError) as e:
+        return _unwritten(pr, e)
+    if judged is None or judged.state != "success":
+        return None  # 利用者の承認と先端が一致しない: NDF の迂回でマージしたと言えないため記録しない
+    return admin_record_item(repo, pr, head, judged.url or "")
+
+
+def admin_unwritten(items: list[dict]) -> bool:
+    """迂回の記録を書けなかった行があるか。"""
+    return any(i.get("record") == ADMIN_RECORD and i.get("result") == "unwritten" for i in items if isinstance(i, dict))
+
+
+def admin_back(back=None):
+    """公開の後に打つ関数（`release-steps.py` の `_published` の `back`）。`back`（戻すマージ）を先に打ち、迂回の記録を書けなかった行が
+    あれば本番の完了と分けて止まりとして報告する（#3506 の決定 7）。打ち直すと再開の経路が記録だけを書く。"""
+
+    def run(items: list[dict], metrics: dict, done: str) -> tuple[str, int, str]:
+        status, code, done = back(items, metrics, done) if back else ("ok", None, done)
+        if not admin_unwritten(items):
+            return status, code, done
+        note = f"{done}。{UNWRITTEN_NOTE}"
+        if status != "ok":  # 戻すマージが止まっていればその終了コード（無ければ 1）
+            return "stopped", code or 1, note
+        return "stopped", 1, note
+
+    return run
+
+
+def _open_prod_pr(ctx: ReleaseCtx, items, metrics, ops: ProdOps, case=None) -> int:
     """本番の PR を引くか作り、その番号を返す。マージ済みなら公開の後へ進む（再開）。無ければ開発版の PR をマージしてから作る。"""
+    root, a, plugin, plugins, branch, base, prod = ctx.root, ctx.a, ctx.plugin, ctx.plugins, ctx.branch, ctx.base, ctx.prod
     ver = a.version
     git(root, "fetch", "-q", "origin", "--tags")
     done = ops.find_pr(root, branch, prod, states=("MERGED", "OPEN"))
@@ -143,7 +200,9 @@ def _open_prod_pr(root, a, plugin, plugins, branch, base, prod, items, metrics, 
         git(root, "fetch", "-q", "origin")
         merge = ops.merge_commit_of(root, done["number"]) or git(root, "rev-parse", f"origin/{prod}").stdout.strip()
         items.append({"kind": "pr", "name": f"#{done['number']}", "result": "already_merged", "base": prod})
-        ops.published(root, a, plugin, prod, done["number"], merge, items, metrics)
+        if case is not None and (row := admin_record_on_resume(root, repo_or_stop(root), case, done["number"])):
+            items.append(row)
+        ops.published(root, a, plugin, prod, done["number"], merge, items, metrics, back=admin_back())
     if done:
         return done["number"]
     if git(root, "rev-parse", "-q", "--verify", f"refs/tags/{release_tag(plugin, ver)}", check=False).returncode == 0:
@@ -158,7 +217,8 @@ def _open_prod_pr(root, a, plugin, plugins, branch, base, prod, items, metrics, 
 
 def merge_on_pr_approval(root, repo, a, case, main_pr, prod, items, metrics, ops, *, waiting, moved, waiting_items=()):
     """CD のある場合（#2773 の決定 7）の照合とマージ: 本番の PR の先端が PR の上の承認（証跡かレビュー）と完全に一致するときだけ、
-    迂回なしで 1 回だけマージする。承認が無ければ CI を待って承認ゲート（10）で止め、承認の後に先端が動いても同じゲートで止める。
+    1 回だけマージする。迂回は `cd-admin` だけで、迂回したら迂回の記録を書き、その行を items へ足す（#3506）。
+    承認が無ければ CI を待って承認ゲート（10）で止め、承認の後に先端が動いても同じゲートで止める。
     `waiting(head, judged)` と `moved(head)` は承認ゲートの (要約, 次の手) を返す。`waiting_items` は承認待ちのときだけ items に足す。
     マージコミット（読めなければ None）を返す。"""
     try:
@@ -171,13 +231,16 @@ def merge_on_pr_approval(root, repo, a, case, main_pr, prod, items, metrics, ops
         wait_ci_except(root, main_pr, (approval_trail.STATUS_CONTEXT,), a.ci_wait, ops)
         summary, nxt = waiting(head, judged)
         emit(result(TOOL, "gate", summary, items + list(waiting_items), metrics, None, nxt), EXIT_GATE)
-    if case.case == release_case.CD_NO_REVIEW:
+    if case.trail_approval:
         wait_trail_status(root, repo, prod, head, limits.policy("release-steps.trail-status").seconds)
     try:
-        return ops.wait_and_merge(root, main_pr, expect=head, ci_wait=a.ci_wait, gate_approved="user", no_admin=True)
+        merge = ops.wait_and_merge(root, main_pr, expect=head, ci_wait=a.ci_wait, gate_approved="user", no_admin=not case.admin_merge)
     except HeadMoved:
         summary, nxt = moved(head)
         emit(result(TOOL, "gate", summary, items, metrics, None, nxt), EXIT_GATE)
+    if case.admin_merge:
+        items.append(admin_record_item(repo, main_pr, head, judged.url or ""))
+    return merge
 
 
 def wait_ci_except(root, n, skip, timeout, ops):
@@ -329,6 +392,34 @@ def judge_pr(repo, pr, head, prod):
     return approval_trail.judge_trails_on(repo, pr, head)
 
 
+def _pr_to_judge(a, root, repo: str, prod: str, head: str, base: str, state: str) -> int:
+    """証跡を判定する PR の番号。本番チャネル宛てでない・レビューで承認する場合・閉じて同じ先端の開いた PR が無いときは、
+    何も付けずに ok で終える。閉じた PR は同じ先端の開いた PR を判定し直す（I10）。"""
+    if base != prod:
+        emit(result(TOOL, "ok", f"PR #{a.pr} の宛先 {base} が本番チャネルでない（何も付けない）", [], {"pr": a.pr, "base": base}))
+    if (case := release_case_or_stop(root)).case == release_case.CD_REVIEW and not trail_required(root, repo, prod):
+        msg = f"リリースの場合が {case.case}（レビューで承認する）で、証跡のチェックを付けない"
+        emit(result(TOOL, "ok", msg, [], {"pr": a.pr, "case": case.case}))
+    if state == "open":
+        return a.pr
+    same = approval_trail.open_prs_at(repo, head, prod)
+    if not same:
+        emit(result(TOOL, "ok", f"PR #{a.pr} は閉じていて、同じ先端の開いた PR が無い（何も付けない）", [], {"pr": a.pr}))
+    return same[0]
+
+
+def _judge_and_post(repo: str, pr: int, head: str, prod: str):
+    """証跡を判定して先端へ commit status を付ける。承認なら並んだ実行が同じ先端の PR を開いていないかを読み直す（I10）。"""
+    j = judge_pr(repo, pr, head, prod)
+    approval_trail.post_status(repo, head, j)
+    if j.state == "success":
+        again = judge_pr(repo, pr, head, prod)
+        if again.state != "success":
+            approval_trail.post_status(repo, head, again)
+            j = again
+    return j
+
+
 def approval_check(a):
     """PR の承認の証跡を判定し、先端へ commit status を付ける（証跡のチェックの workflow が打つ。#2773 の F4）。
     レビューが必須の場合（cd-review）は証跡を書かないため何も付けない（I8。付けると証跡が無い failure でマージが止まる）。
@@ -339,24 +430,8 @@ def approval_check(a):
     repo, head = repo_or_stop(root), None
     try:
         head, base, state = approval_trail.read_head(repo, a.pr)
-        if base != prod:
-            emit(result(TOOL, "ok", f"PR #{a.pr} の宛先 {base} が本番チャネルでない（何も付けない）", [], {"pr": a.pr, "base": base}))
-        if (case := release_case_or_stop(root)).case == release_case.CD_REVIEW and not trail_required(root, repo, prod):
-            msg = f"リリースの場合が {case.case}（レビューで承認する）で、証跡のチェックを付けない"
-            emit(result(TOOL, "ok", msg, [], {"pr": a.pr, "case": case.case}))
-        pr = a.pr
-        if state != "open":  # 閉じた PR の先端を持つ開いた PR を判定し直す（I10）
-            same = approval_trail.open_prs_at(repo, head, prod)
-            if not same:
-                emit(result(TOOL, "ok", f"PR #{a.pr} は閉じていて、同じ先端の開いた PR が無い（何も付けない）", [], {"pr": a.pr}))
-            pr = same[0]
-        j = judge_pr(repo, pr, head, prod)
-        approval_trail.post_status(repo, head, j)
-        if j.state == "success":  # 並んだ実行が同じ先端の PR を開いていないかを読み直す（I10）
-            again = judge_pr(repo, pr, head, prod)
-            if again.state != "success":
-                approval_trail.post_status(repo, head, again)
-                j = again
+        pr = _pr_to_judge(a, root, repo, prod, head, base, state)
+        j = _judge_and_post(repo, pr, head, prod)
     except approval_trail.TrailError as e:
         if head:
             try:

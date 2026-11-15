@@ -32,6 +32,7 @@
       "keys": [
         "docs",
         "ndf_policies",
+        "production_merge",
         "test"
       ]
     },

@@ -66,7 +66,8 @@
     {
       "file": "project.json",
       "keys": [
-        "ndf_policies"
+        "ndf_policies",
+        "production_merge"
       ]
     },
     {

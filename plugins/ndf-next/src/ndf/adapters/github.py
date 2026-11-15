@@ -21,6 +21,7 @@ import subprocess
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from http import HTTPStatus
 from typing import Any, NamedTuple, Optional, TypeVar
 from urllib.parse import quote
 
@@ -43,10 +44,18 @@ PULL_FIELDS = (
 PULLS_PER_HEAD = 5
 # 一覧の 1 ページの件数（REST と GraphQL の上限。ページ数の上限は limits.json の github.check-runs・github.list-pages）
 PER_PAGE = 100
+# GitHub App の bot の login の末尾（`<アプリの slug>[bot]`。commit status の書き手からアプリを引く。#3506）
+BOT_SUFFIX = "[bot]"
 # 上限に当たった枠（`GitHubError.quota`）
 REST, GRAPHQL = "rest", "graphql"
 # マージの要求を GitHub が断ったときの HTTP の状態（405: 規則・衝突、409: 先端が変わった、422: 形）
 MERGE_REFUSED_STATUS = (405, 409, 422)
+# PR の node の ID と、迂回のマージ（`gh pr merge --admin` が呼ぶのと同じ mergePullRequest を、先端を添えて打つ。#3506 の決定 5）
+_PULL_ID = "query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { id } } }"
+_ADMIN_MERGE = (
+    "mutation($id: ID!, $head: GitObjectID!, $method: PullRequestMergeMethod!) {"
+    " mergePullRequest(input: {pullRequestId: $id, expectedHeadOid: $head, mergeMethod: $method}) { pullRequest { merged } } }"
+)
 # マージの拒否を、拒否の後に読み直した `mergeStateStatus` で種類へ分ける（SF4）。標準エラーの文は読まない
 _REFUSAL_KINDS = {"dirty": "base_conflict", "blocked": "not_ci", "behind": "not_ci", "draft": "not_ci"}
 # マージキューが必須の基底で直接のマージを断る状態（GitHub は 405 で返す）。このときはキューへ入れ、待ちとして返す
@@ -77,19 +86,22 @@ MERGE_COMMIT = "merge"
 
 class _MergeMethod(NamedTuple):
     """マージの方式 1 つ。`landing` は基底に含まれたかの確かめ方、`setting` はリポジトリの設定の許可の鍵
-    （ruleset に許す方式の指定が無いときに読む）。"""
+    （ruleset に許す方式の指定が無いときに読む）、`graphql` は GraphQL の mergePullRequest の方式（PullRequestMergeMethod。#3506）。"""
 
     landing: str
     setting: str
+    graphql: str
 
 
 # マージの方式の唯一の定義（並びは宣言が無いときに選ぶ順）。`MERGE_METHODS` は方式 → 確かめ方
 _MERGE_METHOD_SPECS = {
-    "squash": _MergeMethod(MERGED, "allow_squash_merge"),
-    MERGE_COMMIT: _MergeMethod(ANCESTRY, "allow_merge_commit"),
-    "rebase": _MergeMethod(MERGED, "allow_rebase_merge"),
+    "squash": _MergeMethod(MERGED, "allow_squash_merge", "SQUASH"),
+    MERGE_COMMIT: _MergeMethod(ANCESTRY, "allow_merge_commit", "MERGE"),
+    "rebase": _MergeMethod(MERGED, "allow_rebase_merge", "REBASE"),
 }
 MERGE_METHODS = {name: spec.landing for name, spec in _MERGE_METHOD_SPECS.items()}
+# GraphQL の mergePullRequest のマージの方式（REST の merge_method → GraphQL の PullRequestMergeMethod。#3506）
+GRAPHQL_MERGE_METHODS = {name: spec.graphql for name, spec in _MERGE_METHOD_SPECS.items()}
 # 信用の区分（#3364）。OWNER はリポジトリの持ち主でそのまま信用する。MEMBER・COLLABORATOR は所属を表すだけで
 # write を保証しない（read・triage もある）ため、対象リポジトリでの権限を読んで write 以上のときだけ信用する。
 # ほかの値（CONTRIBUTOR・FIRST_TIME_CONTRIBUTOR・FIRST_TIMER・MANNEQUIN・NONE と知らない値）の本文は信用しない入力
@@ -191,10 +203,17 @@ class Authored(NamedTuple):
     author: str
     association: str
     body: str
+    # コメントの URL（REST の `html_url`。迂回の記録が照らした証跡を指す。#3506）。無ければ空
+    url: str = ""
+    # 作成の後に編集されたか（REST の `updated_at` が `created_at` と違う）。編集された証跡は承認に数えない（#3506）
+    edited: bool = False
 
     @classmethod
     def from_rest(cls, raw: dict) -> Authored:
-        return cls(_login(raw["user"]), text_of(raw["author_association"]).upper(), text_of(raw["body"]))
+        url = text_of(raw["html_url"]) if isinstance(raw.get("html_url"), str) else ""
+        created, updated = raw.get("created_at"), raw.get("updated_at")
+        edited = isinstance(created, str) and isinstance(updated, str) and updated != created
+        return cls(_login(raw["user"]), text_of(raw["author_association"]).upper(), text_of(raw["body"]), url, edited)
 
 
 class Pull(NamedTuple):
@@ -309,6 +328,22 @@ def refusal_kind(after: Pull, sent_sha: str) -> str:
     if after.head_sha != sent_sha:
         return "refused"
     return _REFUSAL_KINDS.get(after.merge_state, "unknown")  # noqa: NDF502 ネットワーク: 表に無い mergeStateStatus（clean・unstable・unknown）は種類を決められない
+
+
+@dataclass(frozen=True)
+class _MergeRoute:
+    """マージの要求の打ち方。`send` が要求を打ち、`refused` が真とみなした誤りは断られたとして扱う。`how` は成功の文に
+    添える迂回の印。`require_method` が真なら、キューの方式が選んだ方式と違うときキューへ入れずに断る。"""
+
+    send: Callable[[int, "Pull", str], None]
+    refused: Callable[["GitHubError"], bool]
+    how: str
+    require_method: bool = False
+
+
+def _refused_by_graphql(exc: GitHubError) -> bool:
+    """GraphQL の誤りが GitHub の断り（届いて断られた。上限でない）か。届かなかった・上限なら偽（呼び手が投げ直す）。"""
+    return exc.status == 0 and not exc.unreached and exc.quota is None
 
 
 def _preflight(pull: Pull, number: int, expect_head: Optional[str]) -> Optional[MergeOutcome]:
@@ -593,6 +628,11 @@ class GitHub:
                 return rows
         raise _too_many_pages(f"{path} が", pages, "github.list-pages")
 
+    def branch_rules(self, branch: str) -> list[dict]:
+        """ブランチに当たる規則（`GET /rules/branches/<名前>`）を全ページ読む。`github.list-pages` ページを超えたら `GitHubError`
+        （必須のチェックの規則が後ろのページにあっても落とさない。#3506）。"""
+        return [r for r in self._pages(f"/repos/{self.repo}/rules/branches/{quote(branch, safe='')}") if isinstance(r, dict)]
+
     def count_issues(self, labels: Sequence[str] = (), state: str = "OPEN") -> int:
         """ラベルと状態の Issue（PR を除く）の件数を `totalCount` で数える。既定の件数の上限で切れない（#3393）。"""
         query = (
@@ -657,6 +697,24 @@ class GitHub:
                 return runs
         raise _too_many_pages(f"{sha} のチェックが", pages, "github.check-runs")
 
+    def statuses(self, sha: str) -> list[dict]:
+        """コミットの commit status の全件（`GET /commits/<sha>/statuses`。書き手の `creator` を持つ。#3506）。"""
+        return [s for s in self._pages(f"/repos/{self.repo}/commits/{sha}/statuses") if isinstance(s, dict)]
+
+    def bot_app(self, login: str) -> Optional[int]:
+        """GitHub App の bot（`<slug>[bot]`）が属するアプリの ID。bot でない・アプリが無ければ None（#3506）。"""
+        slug = login.removesuffix(BOT_SUFFIX)
+        if slug == login or not slug:
+            return None
+        try:
+            got = self.rest("GET", f"/apps/{quote(slug, safe='')}")
+        except GitHubError as exc:
+            if exc.status == HTTPStatus.NOT_FOUND:
+                return None
+            raise
+        app_id = got.get("id") if isinstance(got, dict) else None
+        return app_id if isinstance(app_id, int) and not isinstance(app_id, bool) else None
+
     def job_log(self, job_id: int) -> str:
         """Actions のジョブのログの本文。"""
         body = self.rest("GET", f"/repos/{self.repo}/actions/jobs/{int(job_id)}/logs")
@@ -673,6 +731,26 @@ class GitHub:
         `require_method` が真の呼び手（merge commit を必須とする本番へのマージ）だけ、キューの方式が `method` と
         違えばキューへ入れずに断る。偽なら（プランの merge ステップ。方式は自動で決めた既定値）キューの方式に従う。
         """
+        route = _MergeRoute(self._send_rest_merge, lambda exc: exc.status in MERGE_REFUSED_STATUS, "", require_method)
+        return self._merge_with(number, expect_head, method, route)
+
+    def merge_as_admin(self, number: int, expect_head: str, method: Optional[str] = None) -> MergeOutcome:
+        """PR を管理者の迂回でマージする（#3506 の決定 5）。`merge` と同じ先の確認を通り、GraphQL の `mergePullRequest` を
+        読んだ先端（`expectedHeadOid`）を添えて打つ。断られたら PR を読み直して種類を返し、届かない・上限は投げ直す。
+        """
+        return self._merge_with(number, expect_head, method, _MergeRoute(self._send_admin_merge, _refused_by_graphql, "管理者の迂回で"))
+
+    def _send_rest_merge(self, number: int, pull: Pull, chosen: str) -> None:
+        self.rest("PUT", f"/repos/{self.repo}/pulls/{number}/merge", {"sha": pull.head_sha, "merge_method": chosen})
+
+    def _send_admin_merge(self, number: int, pull: Pull, chosen: str) -> None:
+        node = self.repository(_PULL_ID, {"number": int(number)})["pullRequest"]
+        variables = {"id": text_of(node["id"]), "head": pull.head_sha, "method": GRAPHQL_MERGE_METHODS[chosen]}
+        self.graphql(_ADMIN_MERGE, variables)
+
+    def _merge_with(self, number: int, expect_head: Optional[str], method: Optional[str], route: "_MergeRoute") -> MergeOutcome:
+        """`merge`・`merge_as_admin` の共通の手順。先の確認と方式の選択を通り、`route.send` で要求を打つ。`route.refused` が
+        真とみなした誤りは PR を読み直して種類を返し、ほかは投げ直す（`route` の各項目は `_MergeRoute`）。"""
         pull = self.pull(number)
         early = _preflight(pull, number, expect_head)
         if early is not None:
@@ -682,17 +760,17 @@ class GitHub:
         if chosen is None:
             return _method_refusal(pull, number, method, allowed)
         try:
-            self.rest("PUT", f"/repos/{self.repo}/pulls/{number}/merge", {"sha": pull.head_sha, "merge_method": chosen})
+            route.send(number, pull, chosen)
         except GitHubError as exc:
-            if exc.status not in MERGE_REFUSED_STATUS:
+            if not route.refused(exc):
                 raise
-            required = chosen if require_method else None
+            required = chosen if route.require_method else None
             queued = self._enqueue(pull, required) if exc.status == MERGE_QUEUE_REFUSED_STATUS else None
             if queued is not None:
                 return queued
             after = self.pull(number)
             return MergeOutcome(False, refusal_kind(after, pull.head_sha), str(exc), after.head_sha)
-        return MergeOutcome(True, None, f"#{number} を {chosen} でマージした", pull.head_sha)
+        return MergeOutcome(True, None, f"#{number} を {chosen} で{route.how}マージした", pull.head_sha)
 
     def _enqueue(self, pull: Pull, method: Optional[str]) -> Optional[MergeOutcome]:
         """基底がマージキューを持てば PR を先端のままキューへ入れ、待ち（`ci_pending`）を返す。持たなければ None。

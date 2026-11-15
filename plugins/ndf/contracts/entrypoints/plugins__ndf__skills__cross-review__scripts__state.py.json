@@ -167,6 +167,7 @@
       "file": "project.json",
       "keys": [
         "ndf_policies",
+        "production_merge",
         "test"
       ]
     },

@@ -475,6 +475,34 @@ def test_comments_read_every_page_and_stop_over_the_limit(monkeypatch: pytest.Mo
         _hub(full).comments(7)
 
 
+def test_branch_rules_read_every_page_and_stop_over_the_limit() -> None:
+    """#3506: 必須のチェックの規則が 2 ページ目にあっても落とさない。上限を超えたら途中で切らずに止まる。"""
+    review = {"type": "pull_request", "parameters": {"required_approving_review_count": 1}}
+    checks = {"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": "must"}]}}
+    path = f"/repos/{REPO}/rules/branches/main"
+    server = Server({("GET", path): [httpx.Response(200, json=[review] * 100), httpx.Response(200, json=[checks])]})
+    rules = _hub(server).branch_rules("main")
+    assert len(rules) == 101 and rules[-1] == checks
+    assert [r.url.params["page"] for r in server.seen] == ["1", "2"]
+    full = Server({("GET", path): [httpx.Response(200, json=[review] * 100)]})
+    with pytest.raises(github.GitHubError, match="github.list-pages"):
+        _hub(full).branch_rules("main")
+
+
+def test_bot_app_reads_the_app_of_a_bot_and_none_otherwise() -> None:
+    """#3506: commit status の書き手が GitHub App の bot（`<slug>[bot]`）ならアプリの ID、bot でない・アプリが無ければ None。"""
+    server = Server(
+        {
+            ("GET", "/apps/github-actions"): [httpx.Response(200, json={"id": 15368, "slug": "github-actions"})],
+            ("GET", "/apps/gone"): [httpx.Response(404, json={"message": "Not Found"})],
+        }
+    )
+    hub = _hub(server)
+    assert hub.bot_app("github-actions[bot]") == 15368
+    assert hub.bot_app("gone[bot]") is None and hub.bot_app("octocat") is None and hub.bot_app("[bot]") is None
+    assert [r.url.path for r in server.seen] == ["/apps/github-actions", "/apps/gone"]
+
+
 def _issue_page(numbers: list[int], total: int, more: bool) -> dict:
     conn = {"totalCount": total, "pageInfo": {"hasNextPage": more, "endCursor": "c"}, "nodes": [{"number": n} for n in numbers]}
     return {"data": {"repository": {"issues": conn}}}
@@ -792,3 +820,131 @@ def test_pull_reads_merge_commit() -> None:
            "mergeStateStatus": "UNKNOWN", "author": None, "authorAssociation": "MEMBER"}  # fmt: skip
     assert github.Pull.from_graphql({**raw, "mergeCommit": {"oid": "m"}}).merge_sha == "m"
     assert github.Pull.from_graphql({**raw, "mergeCommit": None}).merge_sha == ""
+
+
+# 現状固定（I-007）: `GitHub.merge_as_admin` を HTTP の境界（`httpx.MockTransport`）で固定する。期待値は今の実装の出力である
+
+_PULL_PATH = ("GET", f"/repos/{REPO}/pulls/7")
+_PULL_ID_ANSWER = {"data": {"repository": {"pullRequest": {"id": "PR_1"}}}}
+_ADMIN_MERGED = {"data": {"mergePullRequest": {"pullRequest": {"merged": True}}}}
+
+
+def _graphql_sent(server: Server) -> list[dict]:
+    return [json.loads(r.content) for r in server.seen if r.url.path == "/graphql"]
+
+
+@pytest.mark.parametrize(("method", "expect", "chosen"), [("merge", HEAD, "MERGE"), (None, "2bb66a6c1", "SQUASH")])
+def test_merge_as_admin_sends_merge_pull_request_with_the_head(method: str | None, expect: str, chosen: str) -> None:
+    server = Server({
+        _PULL_PATH: [httpx.Response(200, json=_pull())],
+        ("POST", "/graphql"): [httpx.Response(200, json=_PULL_ID_ANSWER), httpx.Response(200, json=_ADMIN_MERGED)],
+    })  # fmt: skip
+    out = _hub(server).merge_as_admin(7, expect, method)
+    name = chosen.lower()
+    assert out == github.MergeOutcome(True, None, f"#7 を {name} で管理者の迂回でマージした", HEAD)
+    first, second = _graphql_sent(server)
+    assert first["variables"] == {"owner": "devbasex", "name": "ai-plugins", "number": 7}
+    assert "pullRequest(number: $number) { id }" in first["query"]
+    assert "mergePullRequest(input: {pullRequestId: $id, expectedHeadOid: $head, mergeMethod: $method})" in second["query"]
+    assert second["variables"] == {"id": "PR_1", "head": HEAD, "method": chosen}
+
+
+@pytest.mark.parametrize(
+    ("pull", "expect", "outcome"),
+    [
+        (_pull(), OTHER, github.MergeOutcome(False, "refused", f"#7 の先端が {OTHER} でない（今は {HEAD}）", HEAD)),
+        (_pull(merged=True), HEAD, github.MergeOutcome(True, None, "#7 は既にマージ済み", HEAD)),
+    ],
+)
+def test_merge_as_admin_returns_early_without_graphql(pull: dict, expect: str, outcome: github.MergeOutcome) -> None:
+    server = Server({_PULL_PATH: [httpx.Response(200, json=pull)]})
+    assert _hub(server).merge_as_admin(7, expect) == outcome
+    assert [r.url.path for r in server.seen] == [_PULL_PATH[1]]
+
+
+def test_merge_as_admin_refuses_a_method_the_branch_does_not_allow() -> None:
+    only_squash = {"allow_squash_merge": True, "allow_merge_commit": False, "allow_rebase_merge": False}
+    server = Server({_PULL_PATH: [httpx.Response(200, json=_pull())], ("GET", f"/repos/{REPO}"): [httpx.Response(200, json=only_squash)]})
+    out = _hub(server).merge_as_admin(7, HEAD, "merge")
+    assert out == github.MergeOutcome(False, "refused", "#7 のマージの方式 merge は develop で許されていない（許す方式: squash）", HEAD)
+    assert _graphql_sent(server) == []
+
+
+@pytest.mark.parametrize(
+    ("after", "message", "outcome"),
+    [
+        (
+            _pull(head=OTHER),
+            "Head branch was modified",
+            github.MergeOutcome(False, "refused", "GraphQL の誤り: Head branch was modified", OTHER),
+        ),
+        (_pull(mergeable_state="dirty"), "conflict", github.MergeOutcome(False, "base_conflict", "GraphQL の誤り: conflict", HEAD)),
+    ],
+)
+def test_merge_as_admin_rereads_the_pull_when_graphql_refuses(after: dict, message: str, outcome: github.MergeOutcome) -> None:
+    refused = {"data": None, "errors": [{"type": "UNPROCESSABLE", "message": message}]}
+    server = Server({
+        _PULL_PATH: [httpx.Response(200, json=_pull()), httpx.Response(200, json=after)],
+        ("POST", "/graphql"): [httpx.Response(200, json=_PULL_ID_ANSWER), httpx.Response(200, json=refused)],
+    })  # fmt: skip
+    assert _hub(server).merge_as_admin(7, HEAD) == outcome
+    assert [r.url.path for r in server.seen].count(_PULL_PATH[1]) == 2
+
+
+def test_merge_as_admin_raises_when_graphql_is_unreached() -> None:
+    server = Server({_PULL_PATH: [httpx.Response(200, json=_pull())]})
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/graphql":
+            raise httpx.ConnectError("down", request=request)
+        return server(request)
+
+    with pytest.raises(github.GitHubError) as err:
+        _hub(handler).merge_as_admin(7, HEAD)
+    assert (str(err.value), err.value.status, err.value.unreached) == ("GitHub へ届かない: graphql: down", 0, True)
+
+
+class _GraphQLRecorder:
+    """`merge_as_admin` の GraphQL の要求を残す偽物（ネットワークへ出ない）。"""
+
+    def __init__(self, refuse: str | None = None, after: dict | None = None, unreached: bool = False) -> None:
+        self.sent: list[dict] = []
+        self.refuse, self.after, self.unreached = refuse, after, unreached
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path == "/graphql":
+            return self._graphql(request)
+        if path == "/repos/o/r/pulls/7":
+            return httpx.Response(200, json=self.after if self.after is not None and self.sent else _pull())
+        if path == "/repos/o/r/rules/branches/develop":
+            return httpx.Response(200, json=[])
+        if path == "/repos/o/r":
+            return httpx.Response(200, json={"allow_squash_merge": False, "allow_merge_commit": True, "allow_rebase_merge": False})
+        raise AssertionError(f"想定外の要求: {request.method} {path}")
+
+    def _graphql(self, request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        if "mergePullRequest" not in body["query"]:
+            return httpx.Response(200, json=_PULL_ID_ANSWER)
+        self.sent.append(body["variables"])
+        if self.unreached:
+            raise httpx.ConnectError("届かない", request=request)
+        if self.refuse is not None:
+            return httpx.Response(200, json={"data": None, "errors": [{"type": "UNPROCESSABLE", "message": self.refuse}]})
+        return httpx.Response(200, json=_ADMIN_MERGED)
+
+
+def test_merge_as_admin_keeps_the_release_contract() -> None:
+    """決定 5: 迂回は mergePullRequest を expectedHeadOid 付きで打つ。先端が違えば送らない。断られたら読み直して種類を返す。"""
+    server = _GraphQLRecorder()
+    got = hub("o/r", server).merge_as_admin(7, HEAD, "merge")
+    assert got.merged and server.sent == [{"id": "PR_1", "head": HEAD, "method": "MERGE"}]
+    server = _GraphQLRecorder()
+    assert not hub("o/r", server).merge_as_admin(7, OTHER).merged and server.sent == []
+    server = _GraphQLRecorder(refuse="Head branch was modified", after=_pull(head=OTHER))
+    got = hub("o/r", server).merge_as_admin(7, HEAD)
+    assert not got.merged and got.kind == "refused"
+    server = _GraphQLRecorder(unreached=True)
+    with pytest.raises(github.GitHubError):
+        hub("o/r", server).merge_as_admin(7, HEAD)
