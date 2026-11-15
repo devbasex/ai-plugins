@@ -14,6 +14,7 @@ from ndf import cli
 from ndf.adapters import github
 from ndf.contracts import causes
 from ndf.core import route
+from ndf.core.route import local_tests
 from ndf.core.plan import model, steps
 
 from ._flow import fake_bin, git, plan_of, repo_with_base, run_step, step_of, values
@@ -93,7 +94,7 @@ def _slot(monkeypatch, tmp_path, body):
     """`ndf route test` が打つ枠（test-slot）を偽のコマンドへ差し替え、受けた引数を書くファイルを返す。"""
     seen = tmp_path / "seen.txt"
     bindir = fake_bin(tmp_path, "slot", f'printf "%s\\n" "$@" > {shlex.quote(str(seen))}\n{body}')
-    monkeypatch.setattr(route, "TEST_SLOT", (str(bindir / "slot"),))
+    monkeypatch.setattr(local_tests, "TEST_SLOT", (str(bindir / "slot"),))
     return seen
 
 
@@ -163,7 +164,7 @@ def _slots(monkeypatch, tmp_path, body):
     """`_slot` と同じだが、打つたびに受けたコマンドを 1 行ずつ足す（suite ごとに打つ回数を数える）。"""
     seen = tmp_path / "seen.txt"
     bindir = fake_bin(tmp_path, "slot", f'printf "%s\\n" "$@" >> {shlex.quote(str(seen))}\n{body}')
-    monkeypatch.setattr(route, "TEST_SLOT", (str(bindir / "slot"),))
+    monkeypatch.setattr(local_tests, "TEST_SLOT", (str(bindir / "slot"),))
     return seen
 
 
