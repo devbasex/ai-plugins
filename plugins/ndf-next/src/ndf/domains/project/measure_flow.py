@@ -236,20 +236,35 @@ def _rulesets(gh: Gh) -> dict[str, str]:
 def collect_flow(tree: Tree, gh: Gh, base: str, production: str) -> dict[str, Any]:
     """git と gh で標本を集めて推す。gh が使えなければ `GhUnavailable`（呼ぶ側が項目を不明にする）。"""
     pulls = [p for p in seq(gh.get(f"repos/{gh.repo}/pulls?state=closed&per_page={PR_LIMIT}")) if isinstance(p, dict)]
-    prs = [
+    prs = _merged_prs(pulls)
+    item = as_item(_infer_flow(tree, prs, base, production), [_rulesets(gh)])
+    item[REVIEWS_KEY] = _reviews(gh, pulls, base, production)
+    return item
+
+
+def _merged_prs(pulls: list[dict[str, Any]]) -> list[dict[str, str]]:
+    """REST の Pull Request のうちマージ済みのものを、推す標本の `{"base", "head", "merge"}` にする。"""
+    return [
         {"base": p["base"]["ref"], "head": p["head"]["ref"], "merge": str(p["merge_commit_sha"]) if p.get("merge_commit_sha") else ""}
         for p in pulls
         if p.get("merged_at")
     ]
+
+
+def _infer_flow(tree: Tree, prs: list[dict[str, str]], base: str, production: str) -> dict[str, Any]:
+    """git で本番チャネル宛ての PR の取り込み方とスプリントブランチの起点を採り、4 項目を推す。"""
     kinds = [classify_release(tree, p["merge"], p["head"], base) for p in prs if p["base"] == production and p["merge"]]
     refs = tree.refs(f"refs/remotes/{tree.remote}/{Branch.SPRINT}")
     starts = [sprint_start(tree, r, base, production) for r in refs]
-    item = as_item(infer(prs, base, production, [k for k in kinds if k], [s for s in starts if s]), [_rulesets(gh)])
+    return infer(prs, base, production, [k for k in kinds if k], [s for s in starts if s])
+
+
+def _reviews(gh: Gh, pulls: list[dict[str, Any]], base: str, production: str) -> dict[str, Any]:
+    """レビューの単位の項目。gh で読めなければ各項目を不明にする（4 項目の測定を止めない）。"""
     try:
-        item[REVIEWS_KEY] = mask(collect_reviews(gh, pulls, base, production))
+        return mask(collect_reviews(gh, pulls, base, production))
     except GhUnavailable as exc:  # レビューの単位は 4 項目の測定を止めない
-        item[REVIEWS_KEY] = {k: {"unknown": f"読めない: {str(exc)[:120]}", "evidence": []} for k in REVIEW_KINDS}
-    return item
+        return {k: {"unknown": f"読めない: {str(exc)[:120]}", "evidence": []} for k in REVIEW_KINDS}
 
 
 def measure(tree: Tree, gh_repo: Optional[str], base: Optional[str], production: Optional[str]) -> dict[str, Any]:
