@@ -126,7 +126,7 @@ def disabled_plugins(listed: Sequence[Mapping[str, Any]], own: Optional[str]) ->
 def plugin_args(root: Path, listed: Optional[Callable[[], Optional[list[dict[str, Any]]]]] = None) -> PluginArgs:
     """入っている旧い NDF を外し、`root` のプラグインを読む `claude` の引数。
 
-    外す登録は導入済みの一覧（`listed`。省けば `list_plugins`）から決め、`root` の `plugin.json` の名前と同じ名前の
+    外す登録は導入済みの一覧（`listed`。省けば `list_plugins`）から決め、`root` のプラグインの名前（`identity.name_of`）と同じ名前の
     登録は外さない（入れ替えの後に自分を外さない）。一覧を読めなければ外さずに起動し、`notice` に理由を入れる（I10a）。
     外す登録が無ければ `--settings` を付けない。
     """

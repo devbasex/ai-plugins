@@ -1021,7 +1021,7 @@
     },
     "NdfPolicies": {
       "additionalProperties": false,
-      "description": "ai-plugins の方針の検査を掛けるか。キーが無ければどちらも掛けない（決定 8）。",
+      "description": "NDF 自身の開発の方針の検査を掛けるか。キーが無ければどちらも掛けない（決定 8）。",
       "properties": {
         "doc_lint": {
           "title": "Doc Lint",
@@ -1446,7 +1446,7 @@
     },
     "Unknown": {
       "additionalProperties": false,
-      "description": "測れなかった・決められなかった項目。ai-plugins の値も既定の値も入れない。",
+      "description": "測れなかった・決められなかった項目。特定のリポジトリの値も既定の値も入れない。",
       "properties": {
         "unknown": {
           "minLength": 1,

@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf-next/src/ndf/adapters/github.py",
+  "name": "origin-develop",
+  "kind": "not-a-violation",
+  "reason": "引数 base_ref の値の例を示す docstring。リモート名とブランチ名は呼び手が渡す",
+  "count": 1
+}

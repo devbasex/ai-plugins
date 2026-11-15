@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf-next/src/ndf/core/plan/steps.py",
+  "name": "remote-origin",
+  "kind": "not-a-violation",
+  "reason": "プランの形を説明する docstring の例。テンプレートの送信はリモート名の差し込み {{remote}} で打つ",
+  "count": 1
+}
