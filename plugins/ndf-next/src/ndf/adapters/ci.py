@@ -15,15 +15,19 @@
 
 from __future__ import annotations
 
+import fnmatch
 import re
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import NamedTuple, Optional, TypeVar
+from pathlib import Path
+from typing import Any, NamedTuple, Optional, TypeVar
 
-from ndf.adapters.github import GitHub, text_of
+from ndf.adapters import git
+from ndf.adapters.github import GitHub, GitHubError, text_of
 from ndf.contracts import facts, limits
+from ndf.testing import ci_logs, declared, junit
 
 T = TypeVar("T")
 
@@ -54,8 +58,6 @@ PASSING = frozenset(facts.ids("ci-outcomes", outcome="passed"))
 QUEUED_STATES = frozenset(facts.ids("ci-outcomes", outcome="pending")) - {"in_progress", "expected"}
 # 分割ジョブの名前の末尾（`pytest (0/2)`）
 _SHARD = re.compile(r"\s*\(\d+/\d+\)$")
-# pytest の落ちた行（ログの各行の先頭の時刻を除いた後）。`FAILED <パス>::<名前> - <理由>`・`ERROR <パス>`
-_PYTEST_FAILED = re.compile(r"(?:^|\s)(?:FAILED|ERROR) (?P<node>[^\s:]+\.py(?:::[^\s]+)?)")
 # 読んだ結果（`Reading.verdict`）→ 止まった理由の種類。`passed` は通常 None、マージの後なら `not_ci`
 _VERDICT_KINDS = {
     Verdict.TEST_FAILED: "test_failed",
@@ -262,23 +264,257 @@ def cause_of(reading: Reading, tests: Iterable[str], merge_failed: Optional[Iter
     return Classifier(tests, merge_failed).cause(reading)
 
 
-def failed_test_nodes(log_text: str) -> list[str]:
-    """CI のジョブのログから、pytest が落とした（`FAILED`・`ERROR`）テストの node id を並べる（重ねない・昇順）。"""
-    return sorted({m.group("node") for m in _PYTEST_FAILED.finditer(log_text)})
-
-
 def files_of(nodes: Iterable[str]) -> list[str]:
     """node id のテストのファイル（重ねない・昇順）。CI の修正が push の前に手元で打つ範囲（#3188）。"""
     return sorted({n.partition("::")[0] for n in nodes})
 
 
-def failed_test_nodes_of(github: GitHub, checks: Iterable[Check]) -> list[str]:
-    """落ちたテストのチェックのジョブのログから、落ちたテストの node id を集める（`github.failed-logs` ジョブまで）。"""
+class ReadSource(StrEnum):
+    """落ちたテストの読み元（読み取りの記録の `source`）。"""
+
+    JUNIT = "junit"
+    LOG = "log"
+    NONE = "none"
+
+
+@dataclass(frozen=True)
+class FailedTestSource:
+    """落ちたテストの組み立ての入力。
+
+    `junit_artifacts` は JUnit の成果物の名前の glob（設定に無ければ None）、`suites` はテストの suite（`runner` と `ci_jobs`）、
+    `tracked` は作業ディレクトリが追跡するファイル（根からの相対パス）。
+    """
+
+    junit_artifacts: Optional[str] = None
+    suites: tuple[Mapping[str, Any], ...] = ()
+    tracked: frozenset[str] = frozenset()
+
+    @classmethod
+    def from_work(cls, cwd: Path) -> FailedTestSource:
+        """作業場所から根へ探した設定ファイルの glob と suite、リポジトリ全体の追跡するファイルを読む。
+
+        設定ファイルを読めなければ glob も suite も無いとして、git を読めなければ追跡するファイルを空として続ける。
+        """
+        ci_section = declared.test_section(cwd).get("ci")
+        glob = ci_section.get("junit_artifacts") if isinstance(ci_section, dict) else None
+        try:
+            listed = git.Git(cwd).run("ls-files", "-z", "--full-name", ":/")
+        except git.GitError:  # git でない場所は JUnit のファイルを決めず、ログへ移る
+            listed = ""
+        return cls(
+            junit_artifacts=glob if isinstance(glob, str) and glob else None,
+            suites=tuple(declared.load_suites(cwd)),
+            tracked=frozenset(p for p in listed.split("\0") if p),
+        )
+
+
+class FailedTestRead(NamedTuple):
+    """落ちたテストのチェック 1 件の読み取りの記録（CI の結果 JSON の `metrics.failed_test_reads` の 1 要素）。
+
+    `run_id` はジョブが属するワークフローの実行、`runner` は当たる suite の `runner`、`found` は読めた件数
+    （読み元 `junit` なら実行の成果物から読めた件数）、`reason` は読めなかった理由（読めたときは空）。
+    """
+
+    check: str
+    run_id: Optional[int]
+    runner: Optional[str]
+    source: str
+    found: int
+    reason: str
+
+    def as_metric(self) -> dict:
+        return {
+            "check": self.check,
+            "run_id": self.run_id,
+            "runner": self.runner,
+            "source": str(self.source),
+            "found": self.found,
+            "reason": self.reason,
+        }
+
+
+class FailedTests(NamedTuple):
+    """組み立ての出力。`nodes` は落ちたテスト（重ねない・昇順）、`reads` はチェックごとの記録（入力の順）、
+    `job_errors` はジョブかワークフローの実行を読めなかった理由。"""
+
+    nodes: list[str]
+    reads: list[FailedTestRead]
+    job_errors: list[str]
+
+
+class _RunJunit(NamedTuple):
+    """1 つのワークフローの実行の成果物の読み取り。`ok` は「成果物から読めた」、`fetched` は取得を試みた ZIP の本数。"""
+
+    nodes: tuple[str, ...]
+    ok: bool
+    reason: str
+    fetched: int
+
+
+class _Run(NamedTuple):
+    """実行ごとに 1 回だけ読む事実。`error` はワークフローの実行を読めなかった理由。"""
+
+    error: str
+    runner: Optional[str]
+    runner_reason: str
+    junit: Optional[_RunJunit]
+
+
+def _workflow_file(path: str) -> str:
+    """ワークフローの実行の `path`（`.github/workflows/<ファイル>@<ref>`）から `@` 以降を外す。"""
+    return path.partition("@")[0]
+
+
+def runner_of(workflow_file: str, suites: Sequence[Mapping[str, Any]]) -> tuple[Optional[str], str]:
+    """ワークフローのファイルに `ci_jobs`（`#` より前）が当たる suite の `runner` を 1 つに決める。
+
+    返すのは (`runner`, 理由)。当たらないか `runner` が 2 種類以上なら `runner` は None で、理由を持つ。
+    """
+    runners: set[str] = set()
+    for suite in suites:
+        jobs = suite.get("ci_jobs")
+        if not isinstance(jobs, list) or not any(isinstance(j, str) and j.partition("#")[0] == workflow_file for j in jobs):
+            continue
+        runner = suite.get("runner")
+        runners.add(runner if isinstance(runner, str) else "")
+    if not runners:
+        return None, f"ワークフロー {workflow_file} に当たる suite が無い（ci_jobs）"
+    if len(runners) > 1:
+        return None, f"ワークフロー {workflow_file} に runner の違う suite が当たる: {'・'.join(sorted(runners))}"
+    only = runners.pop()
+    return (only, "") if only else (None, f"ワークフロー {workflow_file} に当たる suite に runner が無い")
+
+
+def _artifact_size(art: Mapping[str, Any]) -> int:
+    size = art.get("size_in_bytes")
+    return size if isinstance(size, int) and not isinstance(size, bool) else 0
+
+
+def _read_zips(github: GitHub, hits: list[dict], tracked: frozenset[str]) -> _RunJunit:
+    """当たる成果物を順に取得して読む。読めなければ `ok` 偽で理由を返す。"""
+    nodes: set[str] = set()
+    unresolved: list[str] = []
+    fetched = 0
+    for art in hits:  # noqa: NDF201 上限: 成果物は取得の枠（github.failed-logs）の残り本数まで（呼び手が比べ済み）
+        fetched += 1
+        name = text_of(art.get("name"))
+        try:
+            for xml in junit.xml_members(github.artifact_zip(int(art["id"]))):
+                got = junit.junit_failures(xml, tracked)
+                nodes.update(got.nodes)
+                unresolved.extend(got.unresolved)
+        except (GitHubError, junit.JunitError) as exc:
+            return _RunJunit((), False, f"成果物 {name} を読めない: {exc}", fetched)
+    if unresolved:
+        rest = f" ほか {len(unresolved) - 3} 件" if len(unresolved) > 3 else ""
+        return _RunJunit((), False, "; ".join(unresolved[:3]) + rest, fetched)
+    if not nodes:
+        return _RunJunit((), False, "成果物に落ちたテストが無い", fetched)
+    return _RunJunit(tuple(sorted(nodes)), True, "", fetched)
+
+
+def _read_run_junit(github: GitHub, run_id: int, glob: str, tracked: frozenset[str], room: int) -> _RunJunit:
+    """1 つのワークフローの実行の成果物から落ちたテストを読み、その実行を「成果物から読めた」とするかを決める。
+
+    当たる成果物が残りの取得の枠 `room` を超えれば、ZIP を 1 本も取得しない（一部だけ読んでも使わない）。
+    """
+    try:
+        arts = github.run_artifacts(run_id)
+    except GitHubError as exc:
+        return _RunJunit((), False, f"成果物の一覧を読めない: {exc}", 0)
+    hits = [a for a in arts if fnmatch.fnmatchcase(text_of(a.get("name")), glob) and not a.get("expired")]
+    if not hits:
+        return _RunJunit((), False, f"JUnit の成果物（{glob}）に当たる成果物が無い", 0)
+    if len(hits) > room:
+        return _RunJunit((), False, f"当たる成果物 {len(hits)} 本が取得の枠の残り {room} 本を超える（上限 github.failed-logs）", 0)
+    big = [a for a in hits if _artifact_size(a) > junit.MAX_ARTIFACT_BYTES]
+    if big:
+        name = text_of(big[0].get("name"))
+        return _RunJunit((), False, f"成果物 {name} が {_artifact_size(big[0])} バイトで上限 {junit.MAX_ARTIFACT_BYTES} を超える", 0)
+    return _read_zips(github, hits, tracked)
+
+
+def _joined(*reasons: str) -> str:
+    return "; ".join(r for r in reasons if r)
+
+
+class _Assembly:
+    """`failed_tests_of` の 1 回の組み立ての途中の状態（実行ごとの読み取りと、残りの取得の枠）。"""
+
+    def __init__(self, github: GitHub, source: FailedTestSource, room: int) -> None:
+        self.github = github
+        self.source = source
+        self.room = room
+        self.runs: dict[int, _Run] = {}
+        self.nodes: set[str] = set()
+        self.job_errors: list[str] = []
+
+    def _run(self, run_id: int) -> _Run:
+        """実行の事実（ワークフローのファイル・`runner`・成果物の読み取り）を 1 回だけ読む。"""
+        if run_id in self.runs:
+            return self.runs[run_id]
+        try:
+            path = text_of(self.github.workflow_run(run_id).get("path"))
+        except GitHubError as exc:
+            found = _Run(str(exc), None, "", None)
+        else:
+            runner, why = runner_of(_workflow_file(path), self.source.suites)
+            got = None
+            if self.source.junit_artifacts is not None:
+                got = _read_run_junit(self.github, run_id, self.source.junit_artifacts, self.source.tracked, self.room)
+                self.room -= got.fetched
+            found = _Run("", runner, why, got)
+        self.runs[run_id] = found
+        return found
+
+    def read(self, check: Check) -> FailedTestRead:
+        """チェック 1 件を、成果物を先に、ログを後に読む。"""
+        try:
+            run_id = int(self.github.job(check.job)["run_id"])
+        except GitHubError as exc:
+            self.job_errors.append(str(exc))
+            return FailedTestRead(check.name, None, None, ReadSource.NONE, 0, str(exc))
+        run = self._run(run_id)
+        if run.error:
+            self.job_errors.append(run.error)
+            return FailedTestRead(check.name, run_id, None, ReadSource.NONE, 0, run.error)
+        if run.junit is not None and run.junit.ok:
+            self.nodes.update(run.junit.nodes)
+            return FailedTestRead(check.name, run_id, run.runner, ReadSource.JUNIT, len(run.junit.nodes), "")
+        return self._read_log(check, run_id, run)
+
+    def _read_log(self, check: Check, run_id: int, run: _Run) -> FailedTestRead:
+        art = run.junit.reason if run.junit is not None else ""
+        if run.runner is None:
+            return FailedTestRead(check.name, run_id, None, ReadSource.NONE, 0, _joined(art, run.runner_reason))
+        parser = ci_logs.parser_of(run.runner)
+        if parser is None:
+            reason = _joined(art, f"runner {run.runner} のログのパーサーが無い")
+            return FailedTestRead(check.name, run_id, run.runner, ReadSource.NONE, 0, reason)
+        try:
+            log_text = self.github.job_log(check.job)
+        except GitHubError as exc:
+            return FailedTestRead(check.name, run_id, run.runner, ReadSource.NONE, 0, _joined(art, f"ログを読めない: {exc}"))
+        found = parser(log_text)
+        self.nodes.update(found)
+        return FailedTestRead(check.name, run_id, run.runner, ReadSource.LOG, len(found), art)
+
+
+def failed_tests_of(github: GitHub, checks: Iterable[Check], source: FailedTestSource) -> FailedTests:
+    """落ちたテストのチェックごとに、JUnit の成果物を先に、ログを後に読み、落ちたテストと読み取りの記録を組む。
+
+    - 読むチェックと取得する ZIP の本数は、どちらも `github.failed-logs` の件数まで。超えたチェックは読み元 `none`
+    - 成果物の読み元は実行ごとに決める（成果物は実行に付き、どのジョブの XML かは分からない）
+    - ジョブかワークフローの実行を読めないチェックだけを読み元 `none` にし、ほかのチェックは読み続ける（`GitHubError` を外へ投げない）
+    """
     cap = int(limits.value("github.failed-logs", "count"))
-    found: set[str] = set()
-    for check in list(checks)[:cap]:  # noqa: NDF201 上限: ジョブ github.failed-logs 件まで（limits.json）
-        found.update(failed_test_nodes(github.job_log(check.job)))
-    return sorted(found)
+    listed = list(checks)
+    assembly = _Assembly(github, source, cap)
+    # 上限: ジョブ github.failed-logs 件まで（limits.json）
+    reads = [assembly.read(c) for c in listed[:cap]]
+    over = f"読むチェックの上限 github.failed-logs（{cap} 件）を超えた"
+    reads += [FailedTestRead(c.name, None, None, ReadSource.NONE, 0, over) for c in listed[cap:]]
+    return FailedTests(sorted(assembly.nodes), reads, assembly.job_errors)
 
 
 @dataclass
