@@ -30,7 +30,7 @@
     },
     "branch_flow": {
       "type": "object",
-      "description": "ブランチ運用の宣言（#3121）。無ければ既定値の行（ベースブランチから切り、ベースブランチを丸ごと出す）",
+      "description": "ブランチ運用の宣言。無ければ既定値の行（ベースブランチから切り、ベースブランチを丸ごと出す）",
       "additionalProperties": false,
       "properties": {
         "start": {
