@@ -116,7 +116,7 @@ def _read_survey(text: str, sections: list, prose: list[tuple[int, str]]) -> tup
     candidates: set[str] = set()
     for t in md.tables_in(text, surveys):
         for row in t.rows:
-            cell = row[0].strip().strip("`*_ ") if row else ""
+            cell = design_repos.strip_marks(row[0]) if row else ""
             if CANDIDATE_ID.fullmatch(cell):
                 candidates.add(cell)
     return skipped, candidates
@@ -167,7 +167,7 @@ def unnamed_redlines(path: str, text: str) -> list[dict]:
         if DELEGATE.search(INLINE_CODE.sub("", ln)) and not REDLINE_ID.search(ln):
             flagged[i] = ln
     for i, ln, num, why in _left_table_rows(text, sections):
-        if not REDLINE_ID.search(num) or not why.strip("`*_ "):
+        if not REDLINE_ID.search(num) or not design_repos.strip_marks(why):
             flagged[i] = ln
     return [{"name": f"{path}:{i + 1}", "rule": "unnamed_redline", "text": ln.strip()} for i, ln in sorted(flagged.items())]
 

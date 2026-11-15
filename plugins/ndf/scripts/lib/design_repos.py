@@ -121,12 +121,12 @@ def applies(settings: RepoSettings, touched: set[str] | None) -> bool:
     return any(pathmatch.path_matches(f, settings.paths) for f in touched)
 
 
-def _strip_marks(cell: str) -> str:
+def strip_marks(cell: str) -> str:
     return cell.strip().strip("`*_ ").strip()
 
 
 def _col(header: list[str], name: str) -> int | None:
-    return next((k for k, h in enumerate(header) if _strip_marks(h) == name), None)
+    return next((k for k, h in enumerate(header) if strip_marks(h) == name), None)
 
 
 def _behavior_table(text: str, section):
@@ -140,7 +140,7 @@ def _behavior_table(text: str, section):
 
 
 def _row_cell(row: list[str], col: int) -> str:
-    return _strip_marks(row[col]) if col < len(row) else ""
+    return strip_marks(row[col]) if col < len(row) else ""
 
 
 def _loss_rows(table) -> tuple[list[int], list[int]]:
