@@ -75,7 +75,7 @@
 | I2 | 用語集 | 廃止した語・単独で照合する廃止した語は、どのコンテキストの生きた語とも重ならず、語の項目と意味の欄に出ない（例として挙げる行を除く） | 構造の検査の `schema`・`deprecated_meaning` が落とす |
 | I3 | 禁止語の規則 | 単独で照合する廃止した語は、前後が漢字の出現に当たらない（「開発版」「出版」「問い合わせ」に当たらない） | 禁止語の規則の単体テストが落とす |
 | I4 | 禁止語の規則 | ndf-next のファイルに、対応表で置き換えると決めた語が `words.examples` の箇所の外に 0 件である | `ndf check` の `banned-word` が終了コード 1 で落とす |
-| I9 | 設定のキーの改名表 | 改名表の新しいキーの位置は、どれも設定のスキーマにあり、旧いキーの位置はどれもスキーマに無い。1 つの旧いキーの位置に、新しいキーの位置は 1 つだけある | 改名表とスキーマを突き合わせる単体テストが落とす |
+| I9 | 設定のキーの改名表 | 改名表の新しいキーの位置は、どれも設定のスキーマにあり、旧いキーの位置はどれもスキーマに無い。1 つの旧いキーの位置に、新しいキーの位置は 1 つだけある。`old` と `new` が同じ行は無い | 改名表とスキーマを突き合わせる単体テストが落とす |
 | I10 | 利用者の設定 | 移行のコマンドが書き換えるのは、利用者が承認した差分と今の差分が一致するときだけで、書き換えた結果は新しいスキーマに通る（受け入れ条件 12） | 移行のコマンドの単体テストが落とす |
 | I11 | 利用者の設定 | 1 つの期間に利用者の代わりに書くプログラムは、上の期間の表の 1 つだけである。ndf-next は入れ替えまで利用者の `.ndf/` を書かない | ndf-next の `.ndf/` を書くコードの単体テストが、入れ替えの前の設定（旧いキーを持つ設定）へ書こうとすると止まることを確かめる。書く側を作るまでは、書くコードが無いことで満たす |
 
@@ -128,7 +128,7 @@
 | --- | --- | --- | --- | --- |
 | STD1 | GitHub の Pull Request のレビュー（日本語版の文書と REST API） | レビューの判定の 1 つを日本語版で「変更を要求する」、API の値で `REQUEST_CHANGES` と呼ぶ | 差し戻し（直しを求める判定）の日本語を「変更要求」にする。識別子 `revise` は Factory のサービスが読む記録の値のため変えない（決定 11） | https://docs.github.com/ja/pull-requests/collaborating-with-pull-requests/reviewing-changes-in-pull-requests/about-pull-request-reviews ・ https://docs.github.com/ja/rest/pulls/reviews （2026-11-15） |
 | STD2 | JSON Pointer（RFC 6901） | JSON の中の 1 つの値を指す文字列の形（`/branch_flow/promotion`） | 改名表の旧いキーと新しいキーの位置を JSON Pointer で書く。規約の規則（spec-decl）がすでに誤りの位置を JSON Pointer で示している | https://www.rfc-editor.org/rfc/rfc6901 （2026-11-16） |
-| STD3 | JSON Patch（RFC 6902） | JSON の変更を操作の列で書く形。操作は `add`・`remove`・`replace`・`move`・`copy`・`test` | 移行のコマンドが示す差分を、ファイルごとの JSON Patch の操作の列（`move` と `replace`）で出す。読み手は差分を機械でも人でも読める | https://www.rfc-editor.org/rfc/rfc6902.txt の 185〜187 行目（2026-11-16） |
+| STD3 | JSON Patch（RFC 6902） | JSON の変更を操作の列で書く形。操作は `add`・`remove`・`replace`・`move`・`copy`・`test` | 移行のコマンドが示す差分を、ファイルごとの JSON Patch の操作の列（`test`・`move`・`replace`）で出す。読み手は差分を機械でも人でも読める | https://www.rfc-editor.org/rfc/rfc6902.txt の 185〜187 行目（2026-11-16） |
 
 ### 主要な製品
 
@@ -147,7 +147,7 @@
 | LIB2 | textlint（16.0.0）と textlint-rule-prh | 6.1.1 | MIT | 2026-10-16（textlint は 2026-11-15） | 無し | `.md` の検査はできる。`.py`・`.json` の行を見る ndf-next の禁止語の規則の範囲を覆わない。Node.js の実行環境が要る | https://registry.npmjs.org/textlint-rule-prh ・ https://registry.npmjs.org/textlint （2026-11-15） |
 | LIB3 | ndf-next の禁止語の規則（`words.py`）と用語集 | — | リポジトリの一部 | — | 無し | プラグインの下のすべての文字のファイルを見る。用語集の `deprecated` だけを読み、`deprecated_standalone` を読まない | `plugins/ndf-next/src/ndf/checks/words.py` ・ `plugins/ndf-next/src/ndf/checks/README.md` （2026-11-15） |
 | LIB4 | SudachiPy（日本語の形態素解析） | 0.7.0 | PyPI の license の欄が空（未確認） | 2026-09-24 | 無し | 語の境界を形態素で決められる。辞書の取得が要り、検査の依存が増える。前後が漢字かで決める規則で受け入れ条件 9 を満たせる | https://pypi.org/pypi/sudachipy/json （2026-11-15） |
-| LIB5 | jsonpatch（JSON Patch の Python の実装） | 1.47 | BSD-3-Clause | 2026-11-11 | 無し | JSON Patch の操作の列を作って当てられる。jsonpointer に依存し、ndf-next の依存が 2 つ増える。移行で使う操作は `move` と値の `replace` の 2 つで、標準ライブラリの辞書の操作で書ける | https://pypi.org/pypi/jsonpatch/json （2026-11-16） |
+| LIB5 | jsonpatch（JSON Patch の Python の実装） | 1.47 | BSD-3-Clause | 2026-11-11 | 無し | JSON Patch の操作の列を作って当てられる。jsonpointer に依存し、ndf-next の依存が 2 つ増える。移行で使う操作は `test`・`move`・値の `replace` の 3 つで、標準ライブラリの辞書の操作で書ける | https://pypi.org/pypi/jsonpatch/json （2026-11-16） |
 | LIB6 | ndf-next の依存にある jsonschema（4.26.0） | 4.26.0 | MIT | — | 無し | 書き換えた結果を新しいスキーマで確かめられる。規約の規則（spec-decl）がすでに使っている | `plugins/ndf-next/pyproject.toml` の 23 行目・`plugins/ndf-next/src/ndf/checks/spec_docs.py` の `_real_errors`（2026-11-16） |
 
 ### 確かめられなかったこと
@@ -363,8 +363,8 @@ classDiagram
   migrate_cli ..> renames
 ```
 
-- `legacy_keys` は、設定の中身に残る旧いキーを返す。`versions[]` のような配列の要素は、要素ごとの位置（`/versions/0/vet`）で返す
-- `migrate` は、変換した中身と JSON Patch の操作の列（STD3）を返す。キーは `move`、値の対応は `replace` で書く。表に無いキーとキーの並び以外の値は変えない
+- `legacy_keys` は、設定の今の中身に実在する旧いキーを返す。`versions[]` のような配列の要素は、要素ごとの位置（`/versions/0/vet`）で返す
+- `migrate` は、変換した中身と JSON Patch の操作の列（STD3）を返す。キーは `move`、値の対応は `replace` で書き、どちらの直前にも元の位置の今の値を持つ `test` を置く。表に無いキーとキーの並び以外の値は変えない
 - `plan` は差分と差分のハッシュを返し、ファイルを書かない。`apply` は今の差分のハッシュが渡したハッシュと一致し、変換した中身が新しいスキーマに通るときだけ書く
 
 ## データ構造
@@ -415,9 +415,10 @@ MVV 判定の記録（読み手に `service` を持たない）も改名する�
 | `.ndf/mvv.json` | `/versions/*/vet` | `/versions/*/validation` | — |
 | `.ndf/mvv.json` | `/versions/*/vet/verdict` | `/versions/*/validation/result` | `follow` → `pass`、`unknown` → `unknown` |
 | `.ndf/mvv.json` | `/versions/*/vet/at` | `/versions/*/validation/checked_at` | — |
-| `.ndf/mvv.json` | `/versions/*/vet/accepted_unknown` | `/versions/*/validation/accepted_unknown` | — |
 
-この表を改名表（`contracts/domains/ndf-settings-renames.json`）の行として持つ。列は `id`・`file`（表 `ndf-files` の ID）・`old`・`new`（JSON Pointer。`*` は配列のすべての要素）・`values`（旧い値 → 新しい値。無ければ値を変えない）である。行は親のキーの改名（`vet` → `validation`）を先に置き、子の行（`verdict` → `result`）はその後に親を改めた位置で当てる。改名表の行の数は 5 で、要求の前提 6 のとおり表に無いキー（`revise_after` など）を持たない。
+この表を改名表（`contracts/domains/ndf-settings-renames.json`）の行として持つ。列は `id`・`file`（表 `ndf-files` の ID）・`old`・`new`（JSON Pointer。`*` は配列のすべての要素）・`values`（旧い値 → 新しい値。無ければ値を変えない）である。行は親のキーの改名（`vet` → `validation`）を先に置き、子の行（`verdict` → `result`）はその後に親を改めた位置で当てる。子の行の `old` も親を改めた後の位置（`/versions/*/validation/verdict`）で書く。名前を変えない子のキー（`accepted_unknown`）は親の `move` で新しい位置へ移るため、行を持たない。`old` と `new` が同じ行は持たない（I9）。改名表の行の数は 4 で、要求の前提 6 のとおり表に無いキー（`revise_after` など）を持たない。
+
+旧いキーを探すときは、各行の `old` を設定の今の中身にそのまま当て、実在する位置だけを返す。未移行の MVV の設定では親の行（`/versions/0/vet`）だけが当たり、子の行は親を移した後の中身（`/versions/0/validation/verdict` が残る設定）でだけ当たる。止める理由の文と移行のコマンドの差分は、この同じ規則で並ぶ。
 
 取り込み方の表（`contracts/domains/branch-flows.json`）は次のとおりにする。
 
@@ -659,9 +660,9 @@ python3 plugins/ndf/scripts/glossary.py check --rules structure
 1. `--apply` なしで打つと、差分と差分のハッシュを出し、ファイルを書かない
 2. 利用者が差分を承認した後に、`--apply <差分のハッシュ>` で打つ。今の差分を作り直してハッシュが一致するときだけ書く
 
-示した後に設定が変わると、ハッシュが一致せず書かない。利用者が見ていない差分は書かれない。差分は JSON Patch（STD3）の操作の列で出す。書く前に、変換した中身を新しいスキーマ（LIB6 の jsonschema）で確かめる。
+示した後に設定が変わると、ハッシュが一致せず書かない。利用者が見ていない差分は書かれない。差分は JSON Patch（STD3）の操作の列で出す。`move` と `replace` の直前には、元の位置の今の値を持つ `test` を置く。`move` の操作は移す値を持たないため、`test` が無いと、示した後に移す値（`vet` の `at` など）を変えても差分とハッシュが変わらない。`test` を置くと、移す値が差分に表示され、ハッシュに入る。書く前に、変換した中身を新しいスキーマ（LIB6 の jsonschema）で確かめる。
 
-`--yes` のような承認の旗だけで書く形は採らない。旗は差分を見たかを表さず、示した後の変更も書く。JSON Patch の実装（LIB5）は採らない。移行で使う操作は `move` と値の `replace` の 2 つで、依存を 2 つ増やすほどの量が無い。
+`--yes` のような承認の旗だけで書く形は採らない。旗は差分を見たかを表さず、示した後の変更も書く。JSON Patch の実装（LIB5）は採らない。移行で使う操作は `test`・`move`・値の `replace` の 3 つで、依存を 2 つ増やすほどの量が無い。
 
 - 作り方: 自前で作る
 - 比べた候補: LIB5 / LIB6
@@ -763,7 +764,7 @@ ndf-next には、原因の種類の値 `validation`（`contracts/causes.json` �
 | 受け入れ条件 8 | 単体テスト: 用語集に「副命令」を廃止した語として持つと、Skill の本文の「副命令」の 1 行に禁止語の 1 件を返す | `deprecated` を読まないように壊すと 0 件になり落ちる |
 | 受け入れ条件 9 / I3 | 単体テスト: 「版」を単独で照合する廃止した語に持つと、「版の記録」に 1 件、「開発版」「出版」に 0 件を返す | 前後の漢字の条件を外すと「開発版」に当たり落ちる。`deprecated_standalone` を読まないと「版の記録」が 0 件で落ちる |
 | 受け入れ条件 10 / I7 | `git diff --stat origin/develop -- plugins/ndf` が空 | `plugins/ndf/` を 1 行変えると空でない |
-| 受け入れ条件 11 / I9 | 単体テスト: 改名表の新しいキーの位置がどれもスキーマにあり、旧いキーの位置がどれもスキーマに無い。取り込み方の表の列が `release_strategy` で、行の値が改名表の値の対応の右側だけである | スキーマに `promotion` を残すと、旧いキーの位置がスキーマにあるとして落ちる。表の行の値を `whole` に戻すと落ちる |
+| 受け入れ条件 11 / I9 | 単体テスト: 改名表の新しいキーの位置がどれもスキーマにあり、旧いキーの位置がどれもスキーマに無い。`old` と `new` が同じ行が無い。取り込み方の表の列が `release_strategy` で、行の値が改名表の値の対応の右側だけである | スキーマに `promotion` を残すと、旧いキーの位置がスキーマにあるとして落ちる。表の行の値を `whole` に戻すと落ちる |
 | 受け入れ条件 12 / I10 | 単体テスト: 旧いキーを持つ 2 つの設定に対し、`--apply` なしでは内容が 1 バイトも変わらず差分を返す。返したハッシュで `--apply` すると要求の受け入れ条件 12 の値になり、新しいスキーマに通る。もう一度打つと差分が 0 件。表に無いキーとキーの並び以外の値は変わらない | ハッシュを確かめずに書くと、示した後に変えた設定でも書いて落ちる。表に無いキーを消すと落ちる |
 | 受け入れ条件 13 / I6 | 単体テスト: worktree の設定と MVV の設定を読む各関数に旧いキーの残る設定を渡すと、旧いキーと新しいキーの位置と移行のコマンドを理由に出し、`cause: precondition` で止まる | 旧いキーを見ても既定の行へ倒すと、止まらずに進んで落ちる |
 | 決定 13 | 単体テスト: 規約の規則 spec-decl が、旧いキーを持つ実物（改名表の旧いキーの位置と旧い値から組み立てた設定。テストの中に旧いキーの名前を書かない）を指摘しない。旧いキーと別の誤り（型の違う値）を持つ実物には、その誤りを示す | 変換をしないと、このリポジトリの実物で指摘が出て落ちる |
