@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import git_sandbox
 import pytest
 
 from ndf.adapters import git as git_mod
@@ -13,7 +14,7 @@ from ndf.domains.release import cli as release_cli
 from ndf.domains.release import declaration as decl_mod
 from ndf.domains.release import plugins as plugins_mod
 
-from ._fakes import FakeHub, clone, git, init_repo, write_json
+from ._fakes import FakeHub, clone, init_repo, write_json
 
 
 def _node(number: int, title: str, conclusion: str) -> dict:
@@ -32,22 +33,22 @@ def _origin_with_change(tmp_path: Path, test_only: bool, extra: tuple[str, ...] 
     )
     write_json(seed / "tools" / "kit" / ".claude-plugin" / "plugin.json", {"name": "kit", "version": "1.2.3"})
     (seed / "CHANGELOG.md").write_text("# 変更履歴\n\n## [kit 1.2.3] - 2026-01-01\n\n- 前\n", encoding="utf-8")
-    git(seed, "add", "-A")
-    git(seed, "commit", "-q", "-m", "init")
-    git(seed, "branch", "main")
-    git(seed, "switch", "-q", "-c", "feat/x")
+    git_sandbox.sh(seed, "add", "-A")
+    git_sandbox.sh(seed, "commit", "-q", "-m", "init")
+    git_sandbox.sh(seed, "branch", "main")
+    git_sandbox.sh(seed, "switch", "-q", "-c", "feat/x")
     changed = seed / "tools" / "kit" / ("tests/test_a.py" if test_only else "a.py")
     changed.parent.mkdir(parents=True, exist_ok=True)
     changed.write_text("x = 1\n", encoding="utf-8")
     for rel in extra:
         (seed / rel).parent.mkdir(parents=True, exist_ok=True)
         (seed / rel).write_text("{}\n", encoding="utf-8")
-    git(seed, "add", "-A")
-    git(seed, "commit", "-q", "-m", "change")
-    git(seed, "switch", "-q", "develop")
-    git(seed, "merge", "-q", "--no-ff", "feat/x", "-m", "Merge pull request #5 from o/feat/x")
+    git_sandbox.sh(seed, "add", "-A")
+    git_sandbox.sh(seed, "commit", "-q", "-m", "change")
+    git_sandbox.sh(seed, "switch", "-q", "develop")
+    git_sandbox.sh(seed, "merge", "-q", "--no-ff", "feat/x", "-m", "Merge pull request #5 from o/feat/x")
     origin = tmp_path / "origin.git"
-    git(tmp_path, "clone", "-q", "--bare", str(seed), str(origin))
+    git_sandbox.sh(tmp_path, "clone", "-q", "--bare", str(seed), str(origin))
     return clone(tmp_path, origin, "work")
 
 
@@ -63,15 +64,15 @@ def test_assemble_builds_branch_and_pull_with_materials(tmp_path: Path) -> None:
     hub = _hub()
     built = assemble.assemble(work, hub, assemble.Target("production", "patch", "develop", "main"))
     assert (built.branch, built.version, built.pr) == ("release/v1.2.4", "1.2.4", 9)
-    shown = git(work, "show", "origin/release/v1.2.4:tools/kit/.claude-plugin/plugin.json")
+    shown = git_sandbox.sh(work, "show", "origin/release/v1.2.4:tools/kit/.claude-plugin/plugin.json")
     assert json.loads(shown)["version"] == "1.2.4"
-    log = git(work, "show", "origin/release/v1.2.4:CHANGELOG.md")
+    log = git_sandbox.sh(work, "show", "origin/release/v1.2.4:CHANGELOG.md")
     assert log.index("## [kit 1.2.4]") < log.index("## [kit 1.2.3]") and "- 直した（#5）" in log
     create = next(p for m, path, p in hub.requests if (m, path) == ("POST", "/repos/o/r/pulls"))
     assert (create["head"], create["base"]) == ("release/v1.2.4", "main")
     body = next(p for m, path, p in hub.requests if m == "PATCH")["body"]
     assert "- #5 直した（CI 2/2（スキップ 1））" in body and f"`{built.facts.head}`" in body
-    assert built.facts.head == git(work, "rev-parse", "HEAD").strip()
+    assert built.facts.head == git_sandbox.sh(work, "rev-parse", "HEAD").strip()
 
 
 def test_issue_2217_tests_only_change_is_not_released(tmp_path: Path) -> None:
@@ -96,11 +97,11 @@ def test_collect_current_behavior(tmp_path: Path) -> None:
         (materials_decide.PullFact(5, "直した", checks_decide.Tally(2, 1, (), ())),),
         (changes_decide.Change("kit", ("tools/kit/a.py",), ()),),
         (),
-        git(work, "rev-parse", "origin/develop").strip(),
+        git_sandbox.sh(work, "rev-parse", "origin/develop").strip(),
     )
     assert hub.requests == []
-    assert git(work, "branch", "--list").strip() == "* develop"
-    assert git(work, "status", "--porcelain") == ""
+    assert git_sandbox.sh(work, "branch", "--list").strip() == "* develop"
+    assert git_sandbox.sh(work, "status", "--porcelain") == ""
 
 
 def test_collect_dev_channel_plans_dev_version(tmp_path: Path) -> None:
@@ -147,8 +148,8 @@ def _develop_ahead(tmp_path: Path) -> Path:
     """develop の版を 1.3.0 へ上げた origin の、main を取り出した clone。"""
     work = _origin_with_change(tmp_path, test_only=False)
     write_json(work / "tools" / "kit" / ".claude-plugin" / "plugin.json", {"name": "kit", "version": "1.3.0"})
-    git(work, "commit", "-q", "-am", "bump")
-    git(work, "push", "-q", "origin", "develop")
+    git_sandbox.sh(work, "commit", "-q", "-am", "bump")
+    git_sandbox.sh(work, "push", "-q", "origin", "develop")
     return clone(tmp_path, tmp_path / "origin.git", "on-main", branch="main")
 
 
@@ -171,17 +172,17 @@ def _develop_at(tmp_path: Path, develop: str, main: str | None = None, tags: tup
     work = _origin_with_change(tmp_path, test_only=False)
     manifest = work / "tools" / "kit" / ".claude-plugin" / "plugin.json"
     write_json(manifest, {"name": "kit", "version": develop})
-    git(work, "commit", "-q", "-am", "dev bump")
-    git(work, "push", "-q", "origin", "develop")
+    git_sandbox.sh(work, "commit", "-q", "-am", "dev bump")
+    git_sandbox.sh(work, "push", "-q", "origin", "develop")
     if main is not None:
-        git(work, "switch", "-q", "main")
+        git_sandbox.sh(work, "switch", "-q", "main")
         write_json(manifest, {"name": "kit", "version": main})
-        git(work, "commit", "-q", "-am", "released")
-        git(work, "push", "-q", "origin", "main")
-        git(work, "switch", "-q", "develop")
+        git_sandbox.sh(work, "commit", "-q", "-am", "released")
+        git_sandbox.sh(work, "push", "-q", "origin", "main")
+        git_sandbox.sh(work, "switch", "-q", "develop")
     for tag in tags:
-        git(work, "tag", tag, "origin/main")
-        git(work, "push", "-q", "origin", tag)
+        git_sandbox.sh(work, "tag", tag, "origin/main")
+        git_sandbox.sh(work, "push", "-q", "origin", tag)
     return work
 
 
@@ -219,7 +220,7 @@ def test_issue_2441_production_waits_while_another_release_is_open(tmp_path: Pat
     with pytest.raises(assemble.ReleaseOpen, match="#41"):
         assemble.assemble(work, hub, assemble.Target("production", "patch", "develop", "main"))
     assert not [r for r in hub.requests if r[0] == "POST"]
-    assert git(work, "ls-remote", "--heads", "origin", "release/v1.2.4") == ""
+    assert git_sandbox.sh(work, "ls-remote", "--heads", "origin", "release/v1.2.4") == ""
 
 
 def test_issue_2441_builds_once_the_other_release_is_closed(tmp_path: Path) -> None:
@@ -246,18 +247,18 @@ def test_issue_3172_no_empty_release_after_release_when_only_a_closed_pull_remai
     マージする前（`synced` が偽）と後のどちらでも同じ。
     """
     work = _origin_with_change(tmp_path, test_only=False)
-    git(work, "switch", "-q", "-c", "release/v1.2.4")
+    git_sandbox.sh(work, "switch", "-q", "-c", "release/v1.2.4")
     write_json(work / "tools" / "kit" / ".claude-plugin" / "plugin.json", {"name": "kit", "version": "1.2.4"})
-    git(work, "commit", "-q", "-am", "Release: kit v1.2.4")
-    git(work, "switch", "-q", "main")
-    git(work, "merge", "-q", "--no-ff", "release/v1.2.4", "-m", "Merge pull request #9 from o/release/v1.2.4")
-    git(work, "push", "-q", "origin", "main")
-    git(work, "tag", "kit--v1.2.4")
-    git(work, "push", "-q", "origin", "kit--v1.2.4")
-    git(work, "switch", "-q", "develop")
+    git_sandbox.sh(work, "commit", "-q", "-am", "Release: kit v1.2.4")
+    git_sandbox.sh(work, "switch", "-q", "main")
+    git_sandbox.sh(work, "merge", "-q", "--no-ff", "release/v1.2.4", "-m", "Merge pull request #9 from o/release/v1.2.4")
+    git_sandbox.sh(work, "push", "-q", "origin", "main")
+    git_sandbox.sh(work, "tag", "kit--v1.2.4")
+    git_sandbox.sh(work, "push", "-q", "origin", "kit--v1.2.4")
+    git_sandbox.sh(work, "switch", "-q", "develop")
     if synced:
-        git(work, "merge", "-q", "--no-ff", "main", "-m", "Merge pull request #10 from o/main")
-        git(work, "push", "-q", "origin", "develop")
+        git_sandbox.sh(work, "merge", "-q", "--no-ff", "main", "-m", "Merge pull request #10 from o/main")
+        git_sandbox.sh(work, "push", "-q", "origin", "develop")
     for _ in range(2):
         hub = _hub()
         with pytest.raises(assemble.NothingToRelease):

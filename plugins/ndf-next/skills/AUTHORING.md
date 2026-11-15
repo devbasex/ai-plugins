@@ -1,0 +1,487 @@
+# Skill 執筆規約
+
+`plugins/ndf/skills/` は Claude Code と Codex へ配る Skill の編集元である。Kiro と agy へは配らないが、
+cross-refactoring が担当の worktree へ写す手順書（`refactoring` など）を相手役の Kiro・agy が Skill として読むため、
+下の表の Kiro・agy の列（可搬性の規則）は残す。ここでは frontmatter の書き方を規約として定める。本文の書き方は各 `SKILL.md`
+に委ねるが、**本文のうち、実行先のリポジトリに依存する部分は規約が扱う**（「対象リポジトリを
+仮定しない」）。手順の中身が正しいかと、その手順が ai-plugins でしか成立しないかは別の問題で、
+後者は Skill を書く人ごとに判断が分かれるためである。
+Skill を配る対象へ載せる手順（manifests・生成物・数の記載）は [開発ガイドの「既存プラグインへ Skill を足す」](../../../docs/plugin-development-guide.md#既存プラグインへ-skill-を足す) にある。サブエージェントへ本文の代わりに渡す抜粋の形と規則は [EXCERPTS.md](EXCERPTS.md) にある。
+
+本規約のうち機械的に判定できる項目は `scripts/check-skill-frontmatter.py` がチェックし、
+継続的インテグレーションで実行する（`scripts/build-runtime-plugins.sh --check` /
+`scripts/validate-runtime-plugins.sh` / `scripts/check-markdown-links.py` と同じワークフロー）。
+
+```bash
+python3 scripts/check-skill-frontmatter.py           # チェック
+python3 scripts/check-skill-frontmatter.py --report  # 実測値の一覧
+```
+
+本文については `scripts/check-skill-repo-assumptions.py` が「対象リポジトリを仮定しない」の
+うち機械的に判定できる部分（ai-plugins に固有の語が本文へ現れていないか）だけをチェックする。
+
+```bash
+python3 scripts/check-skill-repo-assumptions.py           # チェック
+python3 scripts/check-skill-repo-assumptions.py --report  # 走査の規模とヒットの一覧
+```
+
+判定が本質的に近似になる項目（`description` 先頭のトリガ語、`when_to_use` の追加トリガ、
+既知の外部 Skill 名との衝突）は警告にとどまり、`--strict` を付けたときだけ失敗する。
+
+利用実績と維持・統合・削除の判定は
+[docs/specifications/ndf-skill-inventory/](../../../docs/specifications/ndf-skill-inventory/01-ledger-and-criteria.md)
+に記録する。
+
+## `description` を単一の真実とする
+
+読む 4 ランタイムに共通する土台は Agent Skills 仕様の 6 項目（`name` / `description` / `license` /
+`compatibility` / `metadata` / `allowed-tools`）である。ただし共通に効く度合いは項目ごとに異なる。
+
+| 項目 | 4 ランタイムでの扱い |
+| --- | --- |
+| `name` / `description` | いずれも解釈する。発動判定に効くのは `description` |
+| `license` / `compatibility` / `metadata` | 解釈されるが発動には関与しない |
+| `allowed-tools` | 仕様上 experimental。**利用制限ではなく事前承認**（下記「`allowed-tools` の意味と付け方」）。Claude Code は解釈するが、Kiro と agy は frontmatter 一覧に載せておらず解釈は保証されない。事前承認の扱いは実装差がある前提で書く |
+
+`when_to_use` は Claude Code 独自の項目で、Codex と Kiro と agy は文書化していない。仕様は
+未知の項目を無視すると定めているため壊れはしないが、**残る 3 ランタイムでは `description`
+だけで発動が判定される**。
+
+したがって **発動判定に必要な情報はすべて `description` に入れる**。Claude Code 独自項目は
+その上乗せとして扱う。
+
+```yaml
+---
+name: pr-review
+description: "Review a PR or local branch diff and post an approve/changes verdict. Use when asked to review a PR, check a diff before merge, or self-review a branch (PRレビュー / PR確認 / マージ前チェック)."
+when_to_use: "Claude Code 向けの追加トリガのみ。description で足りるなら付けない"
+---
+```
+
+規則:
+
+- `description` は「何をするか」と「いつ使うか」の両方を書く
+- **主要な用途とトリガ語を最初の 1 文に置く。** Claude Code は一覧の 1 項目あたり 250 文字を
+  超えた分を切り詰め、Codex は初期一覧が予算を超えると `description` を先頭から残して短縮する。
+  どちらも後半へ置いたトリガ語は暗黙起動の判定に届かない
+- `description` は二重引用符で囲む。`:` に空白が続く文字列を未引用で書くと YAML はマッピングと
+  解釈して構文エラーになり、Kiro はその Skill を検出対象から落とす
+  （[kirodotdev/Kiro#8329](https://github.com/kirodotdev/Kiro/issues/8329)）
+- frontmatter に `<` と `>` を含めない。Agent Skills 仕様がシステムプロンプトへの注入リスクと
+  して警告している
+- `when_to_use` は Claude Code 向けの**追加**トリガが要る Skill にだけ付ける。`description` の
+  言い換えにしない。未設定であること自体は不備ではない
+
+### トリガ語の書式
+
+トリガ語は **`Use when` の文末の全角丸括弧に `・` 区切りで並べる**。
+
+```yaml
+description: "Delete merged branches and worktrees, stopping only where git refuses, then update the base branch. Use when a PR was merged（マージ後の後片付け・ブランチを整理・worktreeを削除）."
+```
+
+**旧書式（`Triggers: 'a', 'b'` / `明示トリガ:`）は廃止した。** 残っていると
+`scripts/check-skill-frontmatter.py` が失敗する。ラベルと引用符の分だけ長いうえ、実測では
+`description` 末尾の列挙は暗黙起動へ届きにくかった（1 Skill あたり 50〜100 文字の差、
+`merged` 241 → 144 文字）。
+
+書式を変えても暗黙起動は落ちない。実測は
+[docs/specifications/ndf-skill-inventory/](../../../docs/specifications/ndf-skill-inventory/02-frontmatter-and-triggers.md)
+「トリガ書式の変更の実測」に記録している。
+
+規則:
+
+- トリガ語は 2〜4 個。`Use when` の条件と重複する語は入れない
+- 括弧内は**日本語のみ**にする。英語のトリガ語は `Use when` の条件文へ埋め込む
+  （チェックは「末尾の全角括弧かつ日本語を含む」ものだけをトリガ宣言と見なす。英語の補足
+  `(Codex/agy)` をトリガと誤認しないための条件）
+- 括弧は全角 `（）`。半角丸括弧は本文の補足に使うため、宣言と区別できなくなる
+
+## `allowed-tools` の意味と付け方
+
+**`allowed-tools` は利用制限ではなく、事前承認（確認プロンプトのスキップ）である。**
+
+> Tools Claude can use without asking permission when this skill is active.
+> — [Claude Code 公式リファレンス](../../../docs/claude-code-skills-official-reference/01-frontmatter-and-description.md)
+
+したがって、外すと「その Skill が使えるツールが減る」のではなく、**Skill の手順の途中で
+利用者に確認を求める回数が増える**。ファイル編集を伴う Skill から `Write` / `Edit` を外すと、
+手順のたびに承認が要る。
+
+規則:
+
+- **その Skill の手順が実際に使うツールを列挙する。** 使わないツールを足さない（事前承認の
+  範囲が広がるだけで、利用者が意図しない操作まで無確認になる）
+- `Bash` はコマンドが限られるならコマンド単位で絞る（`Bash(python *)` / `Bash(gh *)`）
+- MCP ツールは **1 つずつ列挙する**。`mcp__playwright` のようなサーバ名の指定が個別ツール
+  （`mcp__playwright__browser_navigate` 等）へ前方一致するかは仕様上自明でなく、確認できて
+  いない。前方一致しなければ MCP ツールが 1 つも事前承認されない
+- **実行前確認が要る操作を無確認にしない。** 事前承認は確認プロンプトを飛ばす仕組みなので、
+  「実行前確認の要否を決める 3 つの問い」で確認が要ると決まった操作は「対象を提示して同意を
+  取る」手順を本文へ必ず置き、その問いの区分（`AskUserQuestion` の `metadata.source`。正本は `development-workflow` の
+  `references/asking.md`）を書く。区分に当たらない操作には同意の手順を置かない（区分の無い問いは hook が止める）（frontmatter で守れるのは承認プロンプトの有無だけで、Kiro と Codex には対応する項目がない）
+
+量が問題になるのは MCP ツールを多用する Skill だけである（`playwright-authoring` は 43 個の
+列挙で 1,916 文字）。この種の Skill は本体プラグインからの分離を検討する。
+
+## 発動制御の 5 分類
+
+| 分類 | Claude Code | Codex | Kiro | agy | 対象 |
+| --- | --- | --- | --- | --- | --- |
+| 自動発動（既定） | 追加トリガがあれば `when_to_use` を併記 | 既定で暗黙起動可 | 自動ロード | 自動ロード | 知識・判断基準・ワークフロー |
+| パス限定自動発動 | 上記 + `paths` | `paths` 無効 | `paths` 無効 | `paths` 無効 | 特定ディレクトリでのみ意味を持つもの |
+| 明示指示専用 | `disable-model-invocation: true`（引数を取るなら + `argument-hint`） | `agents/openai.yaml` の `policy.allow_implicit_invocation: false`。加えて `description` に明示指示専用である旨を記載する | 制御手段なし。`description` に「利用者が明示的に指示したときのみ実行する」と記載 | 制御手段なし。Kiro と同じく `description` へ記載する | 取り消しが難しく、かつ明示起動が定着している操作 |
+| 常時注入のみ | `user-invocable: false` | 相当機能なし | 相当機能なし | 相当機能なし | `ndf-policies` |
+| 工程から呼ぶ専用 | `user-invocable: false`（スラッシュコマンドの一覧と `/<name>` の入力から外れ、モデルからは呼べる）。`description` に「工程と AI から呼ぶ」と書く | 相当機能なし | 相当機能なし | 相当機能なし | 工程と他の Skill から呼ばれ、利用者が単独で呼ぶ場面の無いもの（`document-drafting`・`document-sources`・`document-systems`）。`document-style` は利用者が単独で呼ぶ場面がある（書いた文章を直す）ため自動発動（既定）に置く。利用者のエントリポイントは `document-rebuild` |
+
+- Codex の相当機能は `<Skill 名>/agents/openai.yaml` の `policy.allow_implicit_invocation: false`
+  である。`scripts/build-runtime-plugins.sh` が `disable-model-invocation: true` の Skill に対して
+  このファイルを自動生成するため、共通編集元では frontmatter だけを書けばよい
+  （[棚卸の計画](../../../issues/old/ndf-development-skills/07-tasks.md) の Task 0-8）
+- 「常時注入のみ」に相当する機能は Codex と Kiro と agy にない。3 つとも
+  `user-invocable: false` を解釈せず、この分類の Skill も通常の Skill として扱う。唯一の対象で
+  ある `ndf-policies` は Codex へもデプロイしている（`plugins/ndf/manifests/`）ため、
+  Codex では暗黙起動されうる。したがってこの分類の Skill は `description` に**「知識として参照する。手順として
+  実行しない」旨を明記する**（[棚卸の計画](../../../issues/old/ndf-development-skills/07-tasks.md) の Task 0-10）
+- **Claude Code では** `disable-model-invocation: true` の Skill は `description` がコンテキスト
+  へ載らず、`user-invocable: false` は載る。Codex と Kiro と agy にはこのキーがなく
+  `description` は常に読まれるため、明示指示専用にする Skill は `description` 自体へ「利用者が明示的に指示した
+  ときのみ実行する」と書き残す
+- 「工程から呼ぶ専用」は「常時注入のみ」と同じ `user-invocable: false` を使う。違いは `description` で、常時注入のみは知識として参照する旨、工程から呼ぶ専用は工程と AI から呼ぶ旨を書く。Codex と Kiro と agy では通常の Skill として一覧に出る。Claude Code での振る舞い（一覧から外れ、Claude は呼べる）は [Claude Code の Skills の文書](https://code.claude.com/docs/en/skills) の `user-invocable` の行にある
+- `disable-model-invocation: true` と `user-invocable: false` を同時に指定しない。誰も起動
+  できなくなる
+- 「引数を取るなら + `argument-hint`」の引数の有無は `scripts/check-skill-frontmatter.py` が
+  `SKILL.md` から機械的に判定する。frontmatter の `arguments`、本文の `$ARGUMENTS`、本文の
+  「引数」への言及（節見出しでも散文でもよい）のいずれかがあれば引数を取るとみなす。
+  引数を取るのに本文がそれに一切触れていないと判定から漏れるため、引数の説明は本文に書く
+
+### 実行前確認の要否を決める 3 つの問い
+
+破壊的操作・外部への書き込みを含む Skill の守り方は 3 つある。**取り消しの難しさでは決まらない。**
+決めるのは次の 3 つで、**どれか 1 つでも「はい」なら実行前確認を置く**。すべて「いいえ」なら置かず、事後に対象と戻し方を報告する。
+
+| # | 問い | 「はい」の例 |
+| --- | --- | --- |
+| 1 | **失うと戻せないものを、git やサービスが拒まずに消すか** | `git branch -D`、`git worktree remove --force`、本番への反映 |
+| 2 | **他者が読む新しい内容を外へ出すか** | push と Pull Request の作成、課題の起票、外部リポジトリの取得と配置 |
+| 3 | **操作そのものが判断を問うか** | 「やらない」と判断して閉じる、範囲外として起票する |
+
+**git が拒む操作と、事後の復元の手段がある操作は対象から外す。** 拒否そのものが止まる理由になり、
+`git branch <名前> <ハッシュ>`・Restore branch・`gh issue reopen` で戻せる操作を止めても二重の確認が残るだけである。
+**課題を閉じることは問い 3 に当たらない**（判断はスプリントの工程を通った時点で済んでいる）。`backlog-refinement` の「やらない」は閉じること自体が判断であり、そこが違う。
+
+| 守り方 | 選ぶ条件 | 実装 |
+| --- | --- | --- |
+| 明示指示専用 | 問いのどれかが「はい」で、**利用者が `/ndf:<name>` で明示起動する運用が定着している**（自然文での依頼がほぼない） | `disable-model-invocation: true` + `description` に明示指示専用と明記（Codex の `openai.yaml` はビルドで自動生成） |
+| 自動発動 + 実行前確認 | 問いのどれかが「はい」で、**日常的に自然文で依頼される**。明示指示専用にすると Skill が使われず、エージェントが独自手順で同じ操作を実行してしまう | 暗黙起動を許し、その手順の**直前に対象の一覧提示と利用者の同意**を必須手順として `SKILL.md` 本文へ固定し、同意の問いの区分を書く。`description` にも確認を取る旨を書く |
+| 自動発動 + 事後の報告 | **3 つとも「いいえ」** | 実行前確認を置かない。**止まる条件（git やサービスの拒否）だけを本文へ書き、消した対象と戻し方を完了報告の必須項目にする** |
+
+前 2 つの選び分けの材料は
+[棚卸台帳](../../../docs/specifications/ndf-skill-inventory/01-ledger-and-criteria.md)の実測起動数と、そのうち明示起動が占める割合である。
+明示起動がほぼ全数なら前者、自然文の依頼が多い、あるいは Skill を使わず独自手順で実行された形跡があるなら後者を選ぶ。
+**実行前確認を置く Skill では、安全性の担保を frontmatter ではなく本文の手順と `description` に置く**（Codex と Kiro は `disable-model-invocation` を解釈せず、Claude Code でもそれは発動制御であって実行前確認ではない）。提示するのは**何を消すか / 何を外部へ書き込むか**の一覧で、対象を示さない「実行してよいですか」は同意になっていない。
+
+現時点の適用:
+
+| Skill | 守り方 | 対象の操作 | 当たる問い |
+| --- | --- | --- | --- |
+| `deploy` / `cherry-pick-pr` / `statusline` | 明示指示専用 | 本番デプロイ / 環境ブランチへの push / 利用者の設定ファイルの書き換え | 1（いずれも明示起動の運用が定着） |
+| `merged` | 自動発動 + 事後の報告 | worktree・ローカルブランチ・Pull Request の head のリモートブランチの削除 | なし（拒まれた対象だけ 1 に当たり、そこで止まる） |
+| `pr` | 自動発動 + 実行前確認 | push / Pull Request の作成 | 2 |
+| `release` | 自動発動 + 実行前確認 | 本番へのリリース（リリース承認ゲート） | 1・2 |
+| `out-of-scope` | 自動発動 + 実行前確認 | 起票 | 2・3 |
+| `backlog-refinement` | 自動発動 + 実行前確認 | やらないと判断して閉じる・承認の要る前倒しと後ろ倒しを反映する | 3 |
+| `official-skills-autoloader` | 自動発動 + 実行前確認 | 外部リポジトリの取得と symlink の作成 | 2 |
+
+## 命名の規則
+
+Skill 名は、自動発動（トリガ語）とは別に **明示起動の入力コスト**を決める。利用者が
+`/` メニューで名前の一部を打つと、その語を含む候補がすべて並ぶためである。
+
+### 外部 Skill 名の末尾要素にしない
+
+**Skill 名を、ランタイム組み込みや主要プラグインの Skill 名の末尾要素にしない。**
+末尾要素になっていると、その語を打ったとき外部側の候補に埋もれて選べない。
+
+実例（2026-08-12 実測、[#83](https://github.com/devbasex/ai-plugins/issues/83)）:
+
+| NDF の Skill 名 | 同じ語を末尾に持つ外部 Skill（`/` メニューでの表示名 → Skill 名） | 結果 |
+| --- | --- | --- |
+| 旧 `review` | `code-review`（組み込み）→ `code-review`、`security-review`（組み込み）→ `security-review`、`coderabbit:code-review` → `code-review`、`coderabbit:coderabbit-review` → `coderabbit-review`、`superpowers:requesting-code-review` → `requesting-code-review`、`superpowers:receiving-code-review` → `receiving-code-review` | `/review` では候補に埋もれ、`/ndf:` から辿るしかなかった |
+| `fix` | なし | `/fix` で一意に決まる |
+
+表の左側が `/` メニューでの表示名、右側が名前空間（`coderabbit:` などのプラグイン接頭辞）を
+除いた Skill 名である。
+
+`review` は v6.0.0 で **`pr-review`** へ改名して解消した。`/pr-rev` まで打てば一意に決まり、
+`pr` / `pr-tests` / `pr-review` と接頭辞も揃う。
+
+逆に、外部名を**末尾に含む**のは問題ない。`cross-review` は `code-review` の末尾要素では
+ないため、`/cross` の時点で一意に決まる。
+
+`scripts/check-skill-frontmatter.py` が既知の外部名との衝突を警告する。チェックが突き合わせる
+一覧（`KNOWN_EXTERNAL_SKILL_NAMES`）は**名前空間を除いた Skill 名**で持つ。組み込み Skill は
+そもそも名前空間を持たず、また `/` メニューで埋もれるかどうかを決めるのは名前空間ではなく
+Skill 名の部分だからである。ただし導入先のランタイムに何が入っているかはチェック時点で分からないため、
+**一覧は手で更新する best-effort** であり網羅ではない。新しい Skill を足すときは、実際に
+`/` メニューで名前を打って確認する。
+
+### 名前と親ディレクトリ名を一致させる
+
+`name` と親ディレクトリ名を揃える（[上限値](#上限値)の表を参照）。改名するときは
+ディレクトリ・`name`・3 つの manifest・各 `plugin.json` を同時に直す。
+
+## トリガ語の規則
+
+### 一意であること
+
+トリガ語は Skill 間で重複させない。重複すると、同じ依頼に対して複数の Skill が起動を競い、
+どちらが選ばれるかが依頼文の細部に左右される。
+
+重複を見つけたら、次のどちらかで解消する。
+
+1. 機能が重複しているなら Skill 自体を統合する
+2. 機能が異なるなら、区別できるところまでトリガ語を具体化する
+
+### チェックできるのは NDF 内の重複だけ
+
+`scripts/check-skill-frontmatter.py` の重複チェックは NDF の Skill 同士しか見ない。
+**ランタイム組み込みの Skill や他プラグインとの競合はチェックできない。** デプロイ先の環境に
+何が入っているかに依存するためである。
+
+実例: 旧 `review`（現 `pr-review`）は `disable-model-invocation` を外して自動発動できる
+ようにしたが、Claude Code 組み込みの `code-review` が同じ用途を持つため、「レビューして」の
+ような依頼では常に組み込み側が選ばれる（実測は
+[08-verification.md](../../../issues/old/ndf-development-skills/08-verification.md)
+「自然文からの発動の実測」）。同名・同用途の組み込み Skill があるランタイムでは、
+`description` を差別化しても勝てないことがある。明示起動で使う前提に切り替えるか、
+用途が重ならない名前へ寄せる。この Skill は後者を採り、v6.0.0 で `pr-review` へ改名した。
+
+### 広すぎるトリガを置かない
+
+ほぼ全セッションに一致するトリガ語は、その Skill を発動させる代わりに他 Skill の発動を
+埋もれさせる。実測では次の例が問題になった。
+
+| Skill | 問題のあるトリガ | 機会 | 具体化した例 |
+| --- | --- | ---: | --- |
+| `python-execution` | `python`、`スクリプト` | 1,207 | `uv run`、`venv が見つからない` |
+| `git-gh-operations` | `git add`、`git commit` | 1,840 | `fatal:`、`non-fast-forward` |
+| `investigation-rules` | `調査` | 1,271 | `調査レポートを書く` |
+
+目安として、**その語が出たときに必ずその Skill を使ってほしいか**を基準にする。「使うことも
+ある」程度の語はトリガにしない。
+
+## 上限値
+
+| 項目 | 上限 | 根拠 |
+| --- | --- | --- |
+| `name` | 64 文字。小文字英数とハイフンのみ。先頭末尾ハイフン不可、連続ハイフン不可 | Agent Skills 仕様（必須） |
+| `name` と親ディレクトリ名 | 一致させる | プロジェクト規約。仕様上は任意（Claude Code は `name` 省略時にディレクトリ名を使う） |
+| `description` | 1,024 文字。運用目標は 300 文字以内 | 仕様上限 / 運用目標 |
+| `description` + `when_to_use` | 1,536 文字 | Claude Code。超えると一覧で切り詰められる |
+| `compatibility` | 500 文字 | Agent Skills 仕様 |
+| `SKILL.md` 行数 | 500 行。超えるものは補助ファイルへ分割 | 仕様の推奨、コンパクション対策 |
+| `SKILL.md` 本文 | 5,000 トークン | 仕様の推奨 |
+| Claude Code の初期 Skill 一覧の合計 | **27,900 文字**（10,000 トークン = コンテキストの 1%）。1 項目は `description` + `when_to_use` を合わせて 1,536 文字で切り詰め | Claude Code 公式ドキュメント。既定モデル Opus 5 のコンテキスト 1,000,000 から算出。文字数は較正した換算比による |
+| Codex の初期 Skill 一覧の合計 | **15,177 文字**（5,440 トークン = コンテキストの 2%） | Codex 公式ドキュメント。既定モデル gpt-5.6-sol のコンテキスト 272,000 から算出。**導入先のランタイムの 2 ランタイムで厳しい側で、実質の制約になる** |
+| 全 Skill の frontmatter 合計 | 20,000 文字（**警告のみ**） | リポジトリ固有の目安。ランタイムが課す制約ではないため、超過しても警告にとどめる。**plugin family をまたいだ合計**。値は Codex の予算から逆算する（[目安の決め方](#frontmatter-合計の目安は-codex-の予算から逆算する)） |
+
+### 予算はトークンで効く
+
+比率が掛かるのは**コンテキスト長（トークン）**であって文字数ではない。Claude Code で
+実測して確かめた（2026-08-15）。
+
+```console
+$ claude -p "/context" --output-format json                    # 既定予算
+| Skills | 5.1k | 0.5% |
+$ SLASH_COMMAND_TOOL_CHAR_BUDGET=200000 claude -p "/context"   # 予算を 20 倍
+| Skills | 5.1k | 0.5% |                                       # 変わらない
+$ SLASH_COMMAND_TOOL_CHAR_BUDGET=1000 claude -p "/context"     # 予算を絞る
+| Skills | 2.3k | 0.2% |                                       # 切り詰められる
+```
+
+予算を上げても増えないので、**既定の予算では全量が載っており切り詰めが起きていない**。
+このとき一覧の全量は 5.1k トークン（本書の文字数計測で 16,000 文字相当）で、
+文字数として 1% = 10,000 を当てると超過するはずだが切り詰めは起きていない。
+
+そこで**トークンで予算を持ち、文字数へ換算して判定する**。
+
+### 換算比は Claude Code の実測を基準にする
+
+**Skill 単位のトークン数を出せるのは Claude Code だけ**である。Codex の `/skills` は一覧
+だけで使用量を出さず、Kiro の `/context show` は 4 区分（Context files / Tools /
+Kiro responses / Your prompts）までで Skill 単位に割れない。実測できる唯一のランタイムに
+合わせるのが最も確からしい。
+
+```bash
+python3 scripts/check-skill-frontmatter.py --calibrate
+```
+
+`claude -p "/context"` を実行し、**Skill 名が一致するものだけ**で実測トークンと文字数計測を
+突き合わせて比を求め、`scripts/skill-listing-calibration.json` に保存する。以後のチェックは
+その値を使う。実測環境と本リポジトリで Skill の版や構成が違っても、名前が一致する分だけを
+使うので影響しない。較正していない環境では安全側の既定（2.5 文字/トークン）を使う。
+
+Skill を増減したときや、既定モデルが変わったときに再実行する。
+
+### 初期一覧の予算は Codex が最も厳しい
+
+| ランタイム | 既定モデル | コンテキスト | 規定 | 予算（トークン） | 予算（文字換算） |
+| --- | --- | ---: | --- | ---: | ---: |
+| Claude Code | Opus 5 | 1,000,000 | 1% | 10,000 | 27,900 |
+| Codex | gpt-5.6-sol | 272,000 | 2% | 5,440 | 15,177 |
+
+文字換算は較正値（2026-09-01 実測で 2.79 文字/トークン）による。`--calibrate` を実行すると
+この値は更新される。
+
+### frontmatter 合計の目安は Codex の予算から逆算する
+
+frontmatter 合計はランタイムが課す制約ではない。Skill を無制限に増やさないための目安であり、
+**実質の制約（Codex の初期一覧の予算）へ達する手前で気づける位置**に置く。
+
+2026-09-01 の実測は次のとおりだった。
+
+| 測ったもの | 値 | 予算 | 消費率 |
+| --- | ---: | ---: | ---: |
+| frontmatter 合計 | 12,570 文字 | 20,000 文字 | 63% |
+| Codex の初期一覧 | 6,961 文字 | 15,177 文字 | 46% |
+| Claude Code の初期一覧 | 6,393 文字 | 27,900 文字 | 23% |
+| Kiro の初期一覧 | 7,143 文字 | 27,900 文字 | 26% |
+
+frontmatter と Codex の一覧の比は 12,570 / 6,961 = 1.81 で、Codex が予算へ達するときの
+frontmatter は約 27,400 文字にあたる。その 75%（予算に 4 分の 1 の余裕を残す位置）を目安とする。
+
+```text
+27,400 × 0.75 ≒ 20,000
+```
+
+**起動直後のコンテキストにも余裕がある。** 同じ日に測った内訳である。
+
+```console
+$ claude -p "/context" --output-format json
+**Tokens:** 33.9k / 1m (3%)
+
+| Category | Tokens | Percentage |
+| System prompt | 3.9k | 0.4% |
+| Memory files | 17.2k | 1.7% |
+| Skills | 7.4k | 0.7% |
+```
+
+Skill の一覧 7.4k は、他のプラグインと組み込みを含む全量である。frontmatter が目安まで
+増えても、Claude Code の一覧は 2.3k から 3.6k トークンへ増えるだけで、コンテキスト全体では
+0.1% の増加にとどまる。
+
+**引き上げは実測を取り直してから行う。** `--calibrate` で換算比を、`claude -p "/context"` で
+コンテキストの内訳を測り、上の表を差し替えたうえで値を決める。据え置いたまま Skill を足すと
+警告が出続け、目安として働かなくなる。
+
+**コンテキストが最も長い Claude Code ではなく、Codex が全体の制約になる。** 比率が 2 倍でも
+コンテキストが 1/3.7 のため、予算は Claude Code の約半分にしかならない。Skill を増やすときは
+Codex の 5,440 文字を基準に考える。
+
+Claude Code 側は `skillListingBudgetFraction` 設定または `SLASH_COMMAND_TOOL_CHAR_BUDGET`
+環境変数で予算を引き上げられるが、**デプロイ先の環境に依存する設定に頼らない**。
+
+### 一覧に載るものはランタイムで違う
+
+| ランタイム | `name` | `description` | `when_to_use` | ファイルパス |
+| --- | :-: | :-: | :-: | :-: |
+| Claude Code | ○ | ○ | ○（`description` と合算して 1,536 文字で切り詰め） | **×** |
+| Codex | ○ | ○ | × | **○** |
+
+パスを載せるのは Codex だけである（*"In Codex, the initial list also includes each skill's
+file path."*）。Claude Code の公式記述は *"a listing of skill names and descriptions"* で
+パスに触れていない。**パスは 1 Skill あたり 30 文字前後あり、30 個なら 900 文字に達する**ので、
+どちらで数えるかで結論が変わる。
+
+### 予算は plugin family をまたいだ合計で判定する
+
+利用者の環境には複数のプラグインが同時に入るため、family 単位で見ると超過を見逃す。
+ただし片方しか入れない利用者もいるので、`--report` は family 別の内訳も出す。
+Skill ごとの実測値は [`issues/old/skill-frontmatter-by-runtime.csv`](../../../issues/old/skill-frontmatter-by-runtime.csv)
+にある。
+
+運用目標の 300 文字は仕様上限より厳しい。全 Skill 分の `description` が常時注入されるため、
+仕様上限は 1 個で使い切ってよい量ではない。
+
+Codex は起動時に全 Skill の `name` と `description` とファイルパスを一覧として読み込み、この
+一覧に総量予算を設けている。予算を超えると Codex はまず `description` を短縮し、それでも
+収まらない場合は一部の Skill を一覧から省略して警告を表示する。**300 文字は 1 個あたりの
+上限であって、全 Skill に一律で使ってよい枠ではない。** 総量が予算へ収まることを条件に配分し、
+超過分を逃がす。
+
+逃がし先は導入先のランタイムで選ぶ。Claude Code だけに配る Skill は `when_to_use` へ移してよい。
+一方 `when_to_use` は Codex では読まれないため、Codex へもデプロイする
+Skill のトリガ語を `when_to_use` へ移すと、Codex では一覧に載らず暗黙起動に効かなくなる。
+Codex へも配る Skill はトリガ語を `description` に残したまま要約し、手順の説明を
+本文へ逃がす。
+
+Claude Code のコンパクション後は、呼び出し済み Skill の先頭 5,000 トークンのみが再添付され、
+全体で 25,000 トークンの共通予算を新しい順に消費する。480 行級の Skill は圧縮後に後半が
+失われるため、500 行上限は推奨ではなく必須条件として扱う。
+
+## 項目の使い分け
+
+| 項目 | 使いどころ |
+| --- | --- |
+| `paths` | 特定ディレクトリを扱うときだけ意味を持つ Skill。Claude Code 独自 |
+| `context: fork` + `background: false` | 長時間実行をメインコンテキストから隔離したい Skill。`background: false` がないと結果が非同期で返る。組み込みの `/goal` と併用する Skill には使わない（セッション単位の Stop フックとして動く評価器が分離実行では働かない） |
+| `effort: high` | 判断の質が結果を大きく左右する設計レビュー系 |
+| `arguments` | `argument-hint` を持つ Skill。引数の手動解析を名前付き引数に置き換える |
+| `license` / `metadata` | 上流の Skill を参考にした場合に、参照元名・固定コミット・ライセンスを記録する |
+
+## 導入先のランタイムを広げる際の制約
+
+`when_to_use` / `argument-hint` / `arguments` / `disable-model-invocation` / `user-invocable` /
+`paths` は Claude Code 独自である。仕様準拠のランタイムは未知の項目を無視するが、claude.ai への
+アップロードや Skills API 経由では `Unexpected key(s) in SKILL.md frontmatter` のエラーになる。
+現在の導入先のランタイム 3 種では問題にならないが、導入先のランタイムを広げる際の制約として記録する。
+
+## 対象リポジトリを仮定しない
+
+**Skill は任意のリポジトリに対して実行される。** 対象リポジトリが ai-plugins であるときに
+だけ成立する操作・パス・値を、条件を付けずに実行させない。成立しないリポジトリでは、担当した
+AI が自分の判断で別のものへ振り替える。**振り替えた事実は完了報告に残らない**ため、何を
+確かめたのかが後から分からなくなる（#292）。
+
+| 項目 | 内容 |
+| --- | --- |
+| 適用対象 | 公開する Skill の本文（`SKILL.md` と、そこから読ませる `docs/` `references/` `prompts/`）が、対象リポジトリに対して実行を指示する記述 |
+| 求めること | **対象リポジトリに無い場合の振る舞いを、コマンドとセットで書く** |
+| 書き方 | 探して決める、または形で分岐する（下記） |
+| 適用外 | 記述の主題が NDF 自身の配置・デプロイであるもの |
+
+**書き方は 2 つある。**
+
+- **探して決める。** 見つけ方と、見つからないときの振る舞いを書く。見つけ方は**順序ではなく
+  一覧**で示す。順序を固定すると、上位の候補を持たないリポジトリで下位を取り逃がす。既存の形は
+  `tdd-cycle`（テスト手段を対象リポジトリから確定させる）と `quality-gates`（閾値は対象
+  プロジェクトの設定を唯一の基準とする）にある
+- **形で分岐する。** その形のときだけ読む参照へ置く。既存の形は
+  `release/references/form-*.md`（リリース対象の形ごとに 1 ファイル）と
+  `refactoring/references/lang-*.md`（言語ごとに 1 ファイル）にある
+
+**「利用者のリポジトリで動くか」ではなく「対象リポジトリを指しているか」で分ける。**
+`out-of-scope` の起票先の解決は利用者のリポジトリで動くが、`marketplace.json` を見る箇所が
+指しているのは NDF の clone であって対象リポジトリではない。これは適用外である。
+
+機械のチェックは `scripts/check-skill-repo-assumptions.py` が行う。走査するのは manifest に載る Skill の
+Markdown と `scripts/`、family の `scripts/`、`hooks/*.json` で、Markdown とスクリプトには別の語の表を掛ける。
+検知するのは語の有無だけで、書き方が正しいかは判定しない。
+
+既知の当たりは例外リスト `scripts/repo-assumptions-allow/` に 1 項目 1 ファイルで宣言する。項目は語とファイルの組
+ごとに当たりの数を持つ。`kind` は違反でない当たりが `not-a-violation`（`reason` に理由を書く）、直すまで残す
+当たりが `pending`（`issue` に直す課題の番号も書く）である。**数を超えた当たりは新しい箇所としてチェックが落ち、
+数より少ないと項目の直し忘れとしてチェック自体が失敗する。** 語を消したら同じ変更で項目を直す。
+
+**項目の `path` は `--skills-dir` に渡すのと同じ書き方（plugin family を含むパス）で書く。**
+`--skills-dir` は family を 1 つだけ指定でき、突き合わせは**指定した family に属する項目だけ**へ
+掛かる。Skill ディレクトリからの相対パスで書くと、どの family の項目かが判別できず、
+指定しなかった family の項目まで「実在しない」と読んでチェックを落とす。
+
+## 参照
+
+- [Agent Skills Specification](https://agentskills.io/specification)
+- [Claude Code — Skills](https://code.claude.com/docs/en/skills)
+- [Codex — Build skills](https://learn.chatgpt.com/docs/build-skills)
+- [Kiro — Skills](https://kiro.dev/docs/skills/)

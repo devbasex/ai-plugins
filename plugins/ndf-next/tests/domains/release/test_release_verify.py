@@ -5,38 +5,39 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import git_sandbox
 import pytest
 
 from ndf.domains.release import sync_decide, verify
 
-from ._fakes import clone, git, init_repo
+from ._fakes import clone, init_repo
 
 
 def _setup(tmp_path: Path) -> tuple[Path, Path]:
     """origin（bare）と、メインディレクトリの clone と、origin の develop を 1 つ進める別の clone。"""
     seed = init_repo(tmp_path / "seed")
     (seed / "plugin.json").write_text('{"version": "1.0.0"}\n', encoding="utf-8")
-    git(seed, "add", "-A")
-    git(seed, "commit", "-q", "-m", "init")
-    git(seed, "branch", "main")
+    git_sandbox.sh(seed, "add", "-A")
+    git_sandbox.sh(seed, "commit", "-q", "-m", "init")
+    git_sandbox.sh(seed, "branch", "main")
     origin = tmp_path / "origin.git"
-    git(tmp_path, "clone", "-q", "--bare", str(seed), str(origin))
+    git_sandbox.sh(tmp_path, "clone", "-q", "--bare", str(seed), str(origin))
     main_dir = clone(tmp_path, origin, "main")
     other = clone(tmp_path, origin, "other")
     (other / "plugin.json").write_text('{"version": "1.0.1"}\n', encoding="utf-8")
-    git(other, "commit", "-q", "-am", "bump")
-    git(other, "push", "-q", "origin", "develop")
+    git_sandbox.sh(other, "commit", "-q", "-am", "bump")
+    git_sandbox.sh(other, "push", "-q", "origin", "develop")
     return main_dir, other
 
 
 def test_issue_2140_main_dir_on_production_branch_still_moves_base(tmp_path: Path) -> None:
     """#2140: メインディレクトリが本番ブランチにいても、取り出さずにベースブランチの参照を進める。"""
     main_dir, other = _setup(tmp_path)
-    git(main_dir, "switch", "-q", "main")
+    git_sandbox.sh(main_dir, "switch", "-q", "main")
     plan = verify.sync_base(main_dir, "develop")
     assert plan.action == sync_decide.UPDATE_REF
-    assert git(main_dir, "rev-parse", "develop") == git(other, "rev-parse", "HEAD")
-    assert git(main_dir, "branch", "--show-current").strip() == "main"
+    assert git_sandbox.sh(main_dir, "rev-parse", "develop") == git_sandbox.sh(other, "rev-parse", "HEAD")
+    assert git_sandbox.sh(main_dir, "branch", "--show-current").strip() == "main"
 
 
 def test_issue_3108_leftover_version_file_with_landed_content_is_restored(tmp_path: Path) -> None:
@@ -45,8 +46,8 @@ def test_issue_3108_leftover_version_file_with_landed_content_is_restored(tmp_pa
     (main_dir / "plugin.json").write_text('{"version": "1.0.1"}\n', encoding="utf-8")
     plan = verify.sync_base(main_dir, "develop")
     assert plan == sync_decide.Plan(sync_decide.RESTORE_THEN_FF, ("plugin.json",))
-    assert git(main_dir, "rev-parse", "HEAD") == git(other, "rev-parse", "HEAD")
-    assert git(main_dir, "status", "--porcelain") == ""
+    assert git_sandbox.sh(main_dir, "rev-parse", "HEAD") == git_sandbox.sh(other, "rev-parse", "HEAD")
+    assert git_sandbox.sh(main_dir, "status", "--porcelain") == ""
 
 
 def test_user_change_that_differs_from_origin_stops(tmp_path: Path) -> None:

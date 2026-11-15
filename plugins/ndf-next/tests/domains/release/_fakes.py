@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
-import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+import git_sandbox
 
 from ndf.adapters.github import Authored, GitHubError, MergeOutcome, Pull
 
@@ -112,29 +113,24 @@ def not_found() -> GitHubError:
     return GitHubError("無い", 404)
 
 
-def git(cwd: Path, *args: str) -> str:
-    done = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True)
-    return done.stdout
-
-
 def configure(path: Path) -> Path:
     """コミットの作者と署名なしを、そのリポジトリだけに設定する。"""
-    git(path, "config", "user.email", "t@example.invalid")
-    git(path, "config", "user.name", "t")
-    git(path, "config", "commit.gpgsign", "false")
+    git_sandbox.sh(path, "config", "user.email", "t@example.invalid")
+    git_sandbox.sh(path, "config", "user.name", "t")
+    git_sandbox.sh(path, "config", "commit.gpgsign", "false")
     return path
 
 
 def init_repo(path: Path) -> Path:
     path.mkdir(parents=True, exist_ok=True)
-    git(path, "init", "-q", "-b", "develop")
+    git_sandbox.sh(path, "init", "-q", "-b", "develop")
     return configure(path)
 
 
 def clone(tmp_path: Path, origin: Path, name: str, branch: str = "develop") -> Path:
     """origin のブランチを `tmp_path/<name>` へ clone し、設定する。"""
     path = tmp_path / name
-    git(tmp_path, "clone", "-q", "-b", branch, str(origin), str(path))
+    git_sandbox.sh(tmp_path, "clone", "-q", "-b", branch, str(origin), str(path))
     return configure(path)
 
 

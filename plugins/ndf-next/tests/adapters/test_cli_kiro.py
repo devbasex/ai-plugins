@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
-import subprocess
 import sys
 from pathlib import Path
+
+import git_sandbox
 
 from ndf.adapters import agents
 
@@ -16,21 +17,14 @@ FAKE_KIRO = (
 )
 
 
-def git(cwd: Path, *args: str) -> str:
-    done = subprocess.run(
-        ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", *args], cwd=cwd, capture_output=True, text=True, check=True
-    )
-    return done.stdout
-
-
 def worktree(tmp_path: Path) -> Path:
     work = tmp_path / "work"
     agents_dir = work / ".amazonq" / "cli-agents"
     agents_dir.mkdir(parents=True)
     (agents_dir / "x.json").write_text('{"original": true}')
-    git(work, "init", "-q")
-    git(work, "add", ".")
-    git(work, "commit", "-q", "-m", "init")
+    git_sandbox.sh(work, "init", "-q", identity=True)
+    git_sandbox.sh(work, "add", ".", identity=True)
+    git_sandbox.sh(work, "commit", "-q", "-m", "init", identity=True)
     return work
 
 
@@ -41,7 +35,7 @@ def kiro(work: Path, tmp_path: Path) -> agents.Launch:
 def test_kiro_rewrites_are_restored_and_new_bak_removed(tmp_path):
     work = worktree(tmp_path)
     (work / ".amazonq" / "cli-agents" / "mine.bak").write_text("利用者の控え")
-    before = git(work, "status", "--porcelain", "--", ".amazonq")
+    before = git_sandbox.sh(work, "status", "--porcelain", "--", ".amazonq", identity=True)
 
     status = agents.run_agent(kiro(work, tmp_path), poll=0.05)
 
@@ -50,7 +44,7 @@ def test_kiro_rewrites_are_restored_and_new_bak_removed(tmp_path):
     assert (agents_dir / "x.json").read_text() == '{"original": true}'
     assert not (agents_dir / "x.json.bak").exists()
     assert (agents_dir / "mine.bak").read_text() == "利用者の控え"
-    assert git(work, "status", "--porcelain", "--", ".amazonq") == before
+    assert git_sandbox.sh(work, "status", "--porcelain", "--", ".amazonq", identity=True) == before
     assert json.loads((tmp_path / "run" / "kiro-launch.json").read_text())["restore"] == "restored"
     assert not (tmp_path / "run" / "kiro-launch-amazonq").exists()
 

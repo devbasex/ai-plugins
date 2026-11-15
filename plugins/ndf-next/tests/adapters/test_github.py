@@ -9,6 +9,7 @@ from collections.abc import Callable
 from datetime import timedelta
 from pathlib import Path
 
+import git_sandbox
 import httpx
 import pytest
 from githubkit.exception import RateLimitExceeded, RequestFailed
@@ -770,26 +771,22 @@ def test_merge_refuses_a_declared_method_the_branch_does_not_allow() -> None:
     assert server.sent("PUT") == []
 
 
-def _git(cwd: Path, *args: str) -> str:
-    return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
-
-
 def _squashed_repo(tmp_path: Path) -> tuple[git.Git, str]:
     """feat の 2 コミットを develop へ squash で取り込んだリポジトリと、feat の先端の SHA。"""
-    _git(tmp_path, "init", "-q", "-b", "develop")
-    _git(tmp_path, "config", "user.email", "t@example.invalid")
-    _git(tmp_path, "config", "user.name", "t")
+    git_sandbox.sh(tmp_path, "init", "-q", "-b", "develop", strip=True)
+    git_sandbox.sh(tmp_path, "config", "user.email", "t@example.invalid", strip=True)
+    git_sandbox.sh(tmp_path, "config", "user.name", "t", strip=True)
     (tmp_path / "a").write_text("0\n")
-    _git(tmp_path, "add", "a")
-    _git(tmp_path, "commit", "-qm", "base")
-    _git(tmp_path, "switch", "-qc", "feat")
+    git_sandbox.sh(tmp_path, "add", "a", strip=True)
+    git_sandbox.sh(tmp_path, "commit", "-qm", "base", strip=True)
+    git_sandbox.sh(tmp_path, "switch", "-qc", "feat", strip=True)
     for n in ("1", "2"):
         (tmp_path / "a").write_text(f"{n}\n")
-        _git(tmp_path, "commit", "-qam", n)
-    head = _git(tmp_path, "rev-parse", "HEAD")
-    _git(tmp_path, "switch", "-q", "develop")
-    _git(tmp_path, "merge", "-q", "--squash", "feat")
-    _git(tmp_path, "commit", "-qm", "squash")
+        git_sandbox.sh(tmp_path, "commit", "-qam", n, strip=True)
+    head = git_sandbox.sh(tmp_path, "rev-parse", "HEAD", strip=True)
+    git_sandbox.sh(tmp_path, "switch", "-q", "develop", strip=True)
+    git_sandbox.sh(tmp_path, "merge", "-q", "--squash", "feat", strip=True)
+    git_sandbox.sh(tmp_path, "commit", "-qm", "squash", strip=True)
     return git.Git(tmp_path), head
 
 
@@ -806,7 +803,7 @@ def test_landed_reads_each_merge_method_in_its_own_way(tmp_path: Path, method: s
 
 def test_landed_by_merge_commit_reads_ancestry(tmp_path: Path) -> None:
     repo, head = _squashed_repo(tmp_path)
-    _git(tmp_path, "merge", "-q", "--no-ff", "-m", "merge", "feat")
+    git_sandbox.sh(tmp_path, "merge", "-q", "--no-ff", "-m", "merge", "feat", strip=True)
     assert github.landed(github.Pull.from_rest(_pull(head=head, merged=True)), "merge", "develop", repo)
     with pytest.raises(ValueError, match="知らないマージの方式"):
         github.landed(github.Pull.from_rest(_pull(head=head)), "fast-forward", "develop", repo)

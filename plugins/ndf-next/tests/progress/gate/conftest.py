@@ -12,7 +12,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ndf.progress import command, lane, plan, run, store
+from ndf.progress import command, gate, lane, plan, run, store
 from plan_decls import REPO
 from plan_decls import decl as _decl
 from plan_decls import doc as _doc
@@ -61,6 +61,22 @@ def new_table(capsys):
 def flow(repo, st, env):
     """`next` を打ち、起こした作業を同じプロセスで流す。`with_env` は既定の偽の作業の代わりに使う `Env`。"""
     return SimpleNamespace(turn=lambda tid, with_env=None: lanes.turn(st, tid, repo, with_env if with_env is not None else env))
+
+
+@pytest.fixture
+def release_question(st, flow):
+    """設計承認ゲートを承認してリリース承認ゲートまで進め、その問いを返す関数。"""
+
+    def make(tid: str):
+        flow.turn(tid)
+        q = gate.waiting(run.read(st, tid))
+        gate.answer(st, tid, gate.Answer(q.id, "approved", "設計を承認", "human:reviewer", "k-design", seen=gate.Target(head="d1")))
+        flow.turn(tid)
+        q = gate.waiting(run.read(st, tid))
+        assert q is not None and q.gate == "release"
+        return q
+
+    return make
 
 
 @pytest.fixture
