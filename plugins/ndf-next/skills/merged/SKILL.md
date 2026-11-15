@@ -268,7 +268,7 @@ git push origin --delete <branch>        # 先端が headRefOid と一致した�
 引き継がれない。スクリプトの出力をそのまま完了報告へ貼る。
 
 ```bash
-bash "$SCRIPTS/../skills/development-workflow/scripts/stage-check.sh" report <issue番号>
+ndf progress show <進行表の ID>   # ID は ndf progress new の結果にある
 ```
 
 - 記録が無ければ 1 行だけ返る。**すべての工程を欠落として並べない**
@@ -295,7 +295,7 @@ bash "$SCRIPTS/../skills/development-workflow/scripts/stage-check.sh" report <is
 あわせて次も載せる。
 
 - 実行サマリー（PR タイトル、マージコミット、現在のブランチ）
-- **通過工程の報告**（前節の `stage-check.sh report` の出力をそのまま貼る）
+- **通過工程の報告**（前節の `ndf progress show` の結果の工程の並びをそのまま貼る）
 - ベースブランチの状態
 - 復元していない stash が残っている場合はその旨と `git stash list` の該当エントリ
 - PR URL

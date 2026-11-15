@@ -224,7 +224,7 @@ worktree を見ているかを確かめ（到達の確認）、見ていなけ�
 
 | 書く場所 | 何を書くか | 確かめる経路 |
 | --- | --- | --- |
-| `.ndf/project.json` の `test.suites[].container` | `service`（とテスト環境が無いときの `compose_files`） | `test-run.py`（3 層）・cross-refactoring の範囲テストと全体テスト |
+| `.ndf/project.json` の `test.suites[].container` | `service`（とテスト環境が無いときの `compose_files`） | `ndf route test`・cross-refactoring の範囲テストと全体テスト |
 | `.ndf/worktree.json` の `testenv.test_kinds.<種類>.service` | サービス名 | `worktree-testenv.sh test` |
 
 確かめ方: worktree に探りの印（`.ndf-evidence/reach-<乱数>`）を置き、`worktree-testenv.sh compose-env` が出す
@@ -241,12 +241,12 @@ python3 "$SCRIPTS/lib/container_reach.py" probe "$WT" --service app; echo $?  # 
 
 | 経路 | 扱い |
 | --- | --- |
-| `test-run.py` | テスト環境を用意する。それでも届かなければ走らせずに 2（判断できない）で終わり、`summary` に理由を出す |
+| `ndf route test` | テスト環境を用意する。それでも届かなければ走らせずに 2（判断できない）で終わり、`summary` に理由を出す |
 | cross-refactoring | テスト環境を用意する。それでも届かなければ走らせずに止まる。着手前のテストでも既存失敗として記録しない |
 | 落ちたテストの見分け（着手前の HEAD の一時の worktree） | 見分けられないとして扱う（既存失敗とみなさない） |
 | `worktree-testenv.sh test` | 起こさない。走らせずに 1（実行系が無ければ 2）で終わり、起こし方（`worktree-testenv.sh up <worktree>`）を出す |
 
-**テスト環境の用意の決まり。** `test-run.py` と cross-refactoring は、テストを走らせる前に宣言のすべてのサービスを
+**テスト環境の用意の決まり。** `ndf route test` と cross-refactoring は、テストを走らせる前に宣言のすべてのサービスを
 確かめる。コンテナが動いていない・別のディレクトリを見ている・答えないサービスが 1 つでもあれば、次を 1 度だけ行い、
 全部を確かめ直す。既に届く worktree では起動のコマンドを打たない。
 
@@ -256,7 +256,7 @@ python3 "$SCRIPTS/lib/container_reach.py" probe "$WT" --service app; echo $?  # 
    その依存だけが準備できるのを待つ。依存の準備を待てるのは、依存が healthcheck を持つときである
 
 コンテナの実行系が無い・テスト環境の値を読めない・探りの印を置けないときは、起こしても直らないため起こさない。
-用意の秒はテストの上限へ数えず、プランのステップの `timeout` へ 300 秒足す。起こした結果は `test-run.py` の結果の
+用意の秒はテストの上限へ数えず、プランのステップの `timeout` へ 300 秒足す。起こした結果は `ndf route test` の結果の
 `items[].testenv` に環境名・結果（`woken` / `failed`）・秒・理由を持つ。
 
 起こせないときの `summary`:

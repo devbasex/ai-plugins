@@ -290,7 +290,7 @@ NDF が起動した分・引継ぎの区間・復元の区間で、同じ呼び�
 | --- | --- | --- |
 | 0 | 引継ぎ文書（入力が名指ししたもの。無ければ入力の語に一致する 1 本。見つけ方と一致しないときの扱いは [handoff.md](handoff.md) の「読む」） | 次にやることの 1 つ目。状態は 1〜5 で確かめ、食い違えば 1〜5 を正とする |
 | 1 | 課題の本文の `## 進行`（`gh issue view <番号> --json body`） | モード・worktree・計画ファイル・通った工程 |
-| 2 | `bash <この Skill のディレクトリ>/scripts/stage-check.sh report <番号>`（プラグインの `scripts/` に無く、`development-workflow` の `scripts/` にある） | 通過記録。本文と食い違えば通過記録を正とする |
+| 2 | `ndf progress show <進行表の ID>`（ID は `ndf progress new` の結果にある） | 通過記録。本文と食い違えば通過記録を正とする |
 | 3 | 1 の worktree（`.worktrees/<ブランチ名>`）のブランチ名で `gh pr list --head <ブランチ名> --state all`。実装の Pull Request は `gh issue view <番号> --json closedByPullRequestsReferences` でも引く | 設計・実装の Pull Request と状態 |
 | 4 | 引継ぎ文書の「今の会話の進み」が指す目録（`<out>/sprint.json`。無ければ改名の前の `<out>/mission.json`）の `ステージ` と、ステージごとのキューの done（`wait <done>` の結果）。プランの途中で止まっていれば、その `<プラン>-state/progress.jsonl` の最後のステップ | 終わったステージ・`gate` で止まったステージ・途中のプランとステップ |
 | 5 | 1〜4 から、チェックの付いていない最初の必須の工程 | 次に打つコマンド。プランのあるフェーズは次のステージの `command`（途中のプランは `supervise.py run <プラン> --from <ステップの id>`）、テンプレートの無い工程は起動する supervisor |

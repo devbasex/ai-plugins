@@ -12,7 +12,7 @@
 
 1. `sprint-state.py loop start l20261025` が使ってよい条件を確かめ、`.ndf/loop/l20261025/loop.json` を作る
 2. `loop select l20261025` が `upkeep.py rank` を打ち、#11 と #12 を選ぶ。#13 は「順位（切り出しの境界の外）」で外す
-3. conductor が `mode-materials.py --issue 11 12 --out .ndf/loop/l20261025/lap-1/judgments.json` を打ち、課題ごとの判定の材料
+3. conductor が `ndf materials --issue 11 12 --out .ndf/loop/l20261025/lap-1/judgments.json` を打ち、課題ごとの判定の材料
    （触るファイルの候補・公開インタフェースの変更の有無・テストのファイル）と判定の根拠のファイルの下書きを受ける
 4. conductor が材料を読んで判定表の行を選ぶ。#11 は `loop sprint` の引数を変える（順 3 `standard`、条件「公開インタフェースの
    追加・変更・削除」）。#12 は手順書の文言だけを直す（順 5 `light`）。下書きの `row`・`mode`・`condition`・`files` を埋め、
@@ -50,7 +50,7 @@
 | 順 | 打つもの | conductor の判断 |
 | --- | --- | --- |
 | 1 | `$SS loop start <名> [--milestones ...] [--budget-* ...] [--outside-plan <理由>]` | 1 なら断った理由と 1 スプリントの起動の形（`metrics.next`）を示して終える。3 で `metrics.blocked` が `true` なら、動いている並列の計画の外のセッションとして止まった。`items` と `next` を示して人へ戻す（レーンの足し方は [parallel.md](parallel.md) の「レーンの動き方」。`--outside-plan` は人が理由を示したときだけ付ける）。ほかの 3 なら下の「止まったとき」。`in_lap` なら引継ぎ文書 `loop-<名>` の「次にやること」から続ける |
-| 2 | `$SS loop select <名>` → `python3 <NDF のスクリプト>/mode-materials.py --issue <選んだ課題> --out <判定の根拠のファイル>` | 選んだ課題（`metrics.selected`）ごとに、材料を読んで判定表（手順 2）の行を選び、下書きの `row`・`mode`・`condition`・`files` を埋める。候補が 0 件（`files_found: 0`）なら本文から触るファイルを読んで書く。決められなければ理由を添えて人へ戻す。`auto` が許さないモード・MVV に反する疑いの課題は `$SS loop exclude <名> <課題> --reason <理由>` で外す（選定をやり直し、材料を集め直す） |
+| 2 | `$SS loop select <名>` → `ndf materials --issue <選んだ課題> --out <判定の根拠のファイル>` | 選んだ課題（`metrics.selected`）ごとに、材料を読んで判定表（手順 2）の行を選び、下書きの `row`・`mode`・`condition`・`files` を埋める。候補が 0 件（`files_found: 0`）なら本文から触るファイルを読んで書く。決められなければ理由を添えて人へ戻す。`auto` が許さないモード・MVV に反する疑いの課題は `$SS loop exclude <名> <課題> --reason <理由>` で外す（選定をやり直し、材料を集め直す） |
 | 3 | `$SS loop sprint <名> --judgments <判定の根拠のファイル> [--mode <モード>] [-- <new sprint に足す引数>]` | スプリントのモードは根拠のうち判定表で最も上の行のモードに決まる。`--mode` は照合だけに使い、違えば断る。1 で断られたら `items` の理由を直して打ち直す（下の「判定の根拠で断られたとき」）。通れば返った `metrics.pipeline` をそのまま流す。上げ幅は `-- --level <上げ幅>` で渡す。特定の版で出す必要があるときだけ `--dev <開発版> [--prod <本番の版>]` を足す（`--prod` だけは断る） |
 | 4 | `metrics.pipeline`（`supervise.py queue ... --done <D>` → `wait <D>` → `loop lap <名> --done <D>`）。`wait` と並べて `metrics.research`（待ち時間の調査）を背景で打つ | `wait` が attention を返したら、今の `supervise.py` の手順で扱う。調査の結果は読まない（見直しが読む） |
 | 5 | `loop lap` の結果 | 0 で `metrics.ndf_next` があれば、それを出してセッションを切る。0 で `metrics.pipeline` があれば（設計承認ゲートで課題を外した続き）それを流す。3 なら下の「止まったとき」 |

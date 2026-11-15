@@ -120,7 +120,7 @@ Pull Request の番号はまだ無い。工程表では `Pull Request` はモー
 | --- | --- |
 | 通過記録の名前 | `<所有者>__<リポジトリ>__<課題番号>.json` |
 | 通過記録の JSON | `.repo` / `.issue` / `.mode` / `.stages` |
-| `stage-check.sh` | `record <課題番号> <stage\|mode> <値>` / `report <課題番号>` |
+| `ndf progress show` | `<進行表の ID>` |
 | `projects-sync.sh` | `<課題番号> <キー> <値>`（ボードの項目は課題である）。`stage` は `<課題番号> stage <工程名>...` |
 
 **記録が食い違うときは、記録の誤りである。** 1 本の Pull Request が閉じる課題の通過記録に
@@ -138,23 +138,13 @@ Pull Request の番号はまだ無い。工程表では `Pull Request` はモー
 ## 呼び方
 
 ```bash
-bash "$SCRIPTS/../skills/development-workflow/scripts/stage-check.sh" report <課題番号>
+ndf progress show <進行表の ID>   # ID は ndf progress new の結果にある
 ```
 
-`$SCRIPTS` の決め方は [scripts-lookup.md](scripts-lookup.md) に
-ある。この Skill のスクリプトは、その 1 つ上（プラグインの根）から辿る。
+通過記録は進行表が持つ。`ndf progress show` は進行表の工程ごとの通過を結果 JSON で返す。
 
-| 呼び方 | 出力 | 終了コード |
-| --- | --- | --- |
-| `record <課題番号> <stage\|mode\|pace> <値>` | 無し。排他を取れなかったときだけ標準エラーへ 1 行。`pace` は `normal` / `fast` / `auto` | 0 |
-| `report <課題番号>`（記録が無い） | 記録が無い旨の 1 行 | 0 |
-| `report <課題番号>`（欠落が無い） | 通過工程の一覧 | 0 |
-| `report <課題番号>`（欠落がある） | 通過工程の一覧と、記録の無い必須の工程 | 0 |
-| 引数の誤り | 標準エラーへ 1 行 | 2 |
-
-**終了コードで工程を止めない。** `stage-check.sh` は呼び出し側の誤りだけを 2 で返す。`projects-sync.sh` は
-書けなかったときも 0 以外（6・3・1）を結果 JSON で返すが、呼ぶ側はそれでも止まらず、`summary` と
-`gaps[].reason` を報告へ載せて先へ進む（`progress-tracking` の抜粋の「結果の読み方」）。`record` は進捗記録のスクリプトが同じ処理を自分で行うため、手で呼ぶのは `report` だけである。
+**終了コードで工程を止めない。** `projects-sync.sh` は書けなかったときも 0 以外（6・3・1）を結果 JSON で返すが、呼ぶ側はそれでも止まらず、`summary` と
+`gaps[].reason` を報告へ載せて先へ進む（`progress-tracking` の抜粋の「結果の読み方」）。
 
 ## 報告の読み方
 
