@@ -300,6 +300,10 @@ worktree・チーム・公開・[supervise.schema.json](../../contracts/schemas/
 | --- | --- | --- | --- | --- | --- |
 | `$schema` | string | — | — | 任意 | 編集のときの補完に使うスキーマの位置。読み手は参照しない |
 | `format` | array of object | — | — | 任意 | 整形のコマンドの並び。チェックの前に打つ |
+| `impl_stall_seconds` | integer か null | — | — | 任意 | 実装の無進捗の許容時間（秒）。引数が先に効く。null は書かないのと同じ |
+| `impl_timeout` | integer か null | — | — | 任意 | 実装の上限（秒）。引数が先に効く。null は書かないのと同じ |
+| `queue` | object | — | — | 任意 | プランを流す待ち行列の資源の枠と共有の一覧。無ければ既定（graphql の枠 2 本・共有の一覧は無し） |
+| `refactor_budget_minutes` | integer か null | — | — | 任意 | リファクタリングの想定最大時間（分）。引数が先に効く。null は書かないのと同じ |
 | `release` | object | — | — | 任意 | リリースの形 |
 | `sync_checks` | array of object | — | — | 任意 | 同期とチェックのコマンドの並び。書いた順に打ち、落ちたら止める |
 | `test`（非推奨。読み手は読まない） | object | — | — | 任意 | 読み手は読まない（今の版の読み手が読む値。テストのコマンドは project.json の test が持つ） |
