@@ -22,6 +22,7 @@ from ndf.checks.spec_model import (
     SPEC_KIND,
     CommandSpec,
     DeclarationSpec,
+    SkillSpec,
     SpecModel,
     opt,
     surface_of,
@@ -459,21 +460,29 @@ def page_hooks(model: SpecModel) -> str:
     return _page("hooks.md", intro, body)
 
 
+def _skill_args_text(skill: SkillSpec) -> str:
+    """引数の形の並び。空の並びは引数を受けない、空文字の形は引数なしで呼べる。"""
+    if not skill.args:
+        return "引数を受けない"
+    return "<br>".join(code(a) if a else "（引数なし）" for a in skill.args)
+
+
+def _skill_row(skill: SkillSpec) -> list[str]:
+    return [
+        code(skill.name) + ("" if skill.present else "（skills/ へ移す前）"),
+        SURFACE_WORDS[skill.surface],
+        _skill_args_text(skill),
+        skill.goal_end if skill.goal_end else NONE,
+        "・".join(code(d) for d in skill.declarations),
+        "・".join(code(e) for e in skill.env),
+        skill.result if skill.result else NONE,
+        skill.meaning,
+    ]
+
+
 def page_skills(model: SpecModel) -> str:
     """Skill ごとの入出力と、起動スクリプトの表の launcher の行。"""
-    rows = [
-        [
-            code(s.name) + ("" if s.present else "（skills/ へ移す前）"),
-            SURFACE_WORDS[s.surface],
-            "<br>".join(code(a) if a else "（引数なし）" for a in s.args) if s.args else "引数を受けない",
-            s.goal_end if s.goal_end else NONE,
-            "・".join(code(d) for d in s.declarations),
-            "・".join(code(e) for e in s.env),
-            s.result if s.result else NONE,
-            s.meaning,
-        ]
-        for s in model.skills
-    ]
+    rows = [_skill_row(s) for s in model.skills]
     reports = [
         [code(r["target"]), "・".join(code(a) for a in opt(r, "args")), "・".join(code(e) for e in r["env"])]
         for r in model.entrypoints
