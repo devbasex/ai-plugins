@@ -226,11 +226,25 @@ def _has_gate(state: Path, pr: int, by: str, outcome: str) -> bool:
     return gate_answer.design_gate_record(state, pr, by, outcome) is not None
 
 
-def _write_gate(run, state: Path, pr: int, by: str, outcome: str, what: str, repo: Path, msg: dict) -> str | None:
+@dataclass(frozen=True)
+class GateRecord:
+    """`_write_gate` が書く設計承認ゲートの記録の入力。`msg` は依頼の行の中身（MVV 判定の記録が読めないときの代わり）。"""
+
+    state: Path
+    pr: int
+    by: str
+    outcome: str
+    what: str
+    repo: Path
+    msg: dict
+
+
+def _write_gate(run, rec: GateRecord) -> str | None:
     """`sprint-state.py gate` で設計承認ゲートの記録を書く。書けなければ子の要約を返す。"""
     import gate_answer
     import project_mvv as pm
 
+    state, pr, by, outcome, what, repo, msg = rec.state, rec.pr, rec.by, rec.outcome, rec.what, rec.repo, rec.msg
     cmd = [sys.executable, str(SPRINT_STATE), "gate", str(state), gate_answer.DESIGN_GATE, "--what", what, "--pr", str(pr)]
     cmd += ["--by", by, "--outcome", outcome]
     if by == "mvv":
@@ -323,7 +337,9 @@ def answer_design(
 
 def _answer_approved(run, state: Path, pr: int, by: str, what: str, repo: Path, msg: dict, sprint: Path | None, metrics: dict) -> Answered:
     """承認の答え: 設計承認ゲートの記録が無ければ書き、設計 PR のマージのステージの `resume` を続きにする。"""
-    if not _has_gate(state, pr, by, "approved") and (err := _write_gate(run, state, pr, by, "approved", what, repo, msg)):
+    if not _has_gate(state, pr, by, "approved") and (
+        err := _write_gate(run, GateRecord(state=state, pr=pr, by=by, outcome="approved", what=what, repo=repo, msg=msg))
+    ):
         return Answered("stopped", f"設計承認ゲートの記録を書けない: {err}", 2, metrics)
     nxt = _merge_resume(sprint)
     return Answered("ok", f"設計 PR #{pr} の承認（{by}）を記録した。続きを流す", 0, {**metrics, "next": nxt})
@@ -346,7 +362,7 @@ def _answer_rejected(run, state: Path, pr: int, rid: str, what: str, repo: Path,
 
     mark = work / REJECTED_MARK.format(pr=pr)
     if jsonio.read(mark, missing={}, broken={}, want=dict).get("id") != rid:
-        if err := _write_gate(run, state, pr, "user", "rejected", what, repo, msg):
+        if err := _write_gate(run, GateRecord(state=state, pr=pr, by="user", outcome="rejected", what=what, repo=repo, msg=msg)):
             return Answered("stopped", f"設計承認ゲートの差し戻しを書けない: {err}", 2, metrics)
         try:
             _write_atomic(mark, json.dumps({"id": rid, "pr": pr}, ensure_ascii=False) + "\n")
