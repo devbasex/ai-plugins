@@ -114,7 +114,7 @@ def helper_task(main: Path, name: str, n: int, k: int) -> dict:
     d = pr.release_dir(main, name, n, k)
     py = f"python3 {HERE / 'parallel.py'}"
     rows = plg.read_ledger_rows(main, name).rows
-    asked = asked_of([r for r in rows if r["_pos"] >= plg.first_opened(rows)], pr.helper_name(name, n))
+    asked = asked_of(plg.rows_since_opened(rows), pr.helper_name(name, n))
     out = {"n": n, "k": k, "dir": str(d), "gate2": f"{py} request-gate2 {name} {n} {k} --report {present_approval(d)}", "asked": asked}
     # 出し直しを省いた確定（`carried`）は提示と同じ流し方にする。提示のプランが確かめ直して承認を書く（#3020 の決定 3）
     if is_confirmed_launch(launch, n, k):

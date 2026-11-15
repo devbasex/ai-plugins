@@ -126,16 +126,20 @@ def _bare(msg) -> Optional[dict]:
     return {k: v for k, v in msg.items() if k != "at"} if isinstance(msg, dict) else msg
 
 
+def _stored_form(msg: Optional[dict]) -> Optional[dict]:
+    """`msg` を台帳の行として読み戻したときの形: `append_ledger_row` が書くのと同じく認証情報を伏せ、JSON を往復させたもの。"""
+    return json.loads(json.dumps(_redact(msg), ensure_ascii=False)) if msg is not None else None
+
+
 def resent(main: Path, name: str, key: str, msg: Optional[dict]) -> Sent:
     """`append_ledger_row` が同じキーで False を返した後に、同じキーの行と送ろうとした中身が同じか・答え済みかを判定する。
     最初の `opened` の行より前の行は数えない（`append_ledger_row` と同じ）。読めなければ `OSError`。"""
-    since = first_opened(rows := read_ledger_rows(main, name).rows)
-    rows = [r for r in rows if r["_pos"] >= since]
+    rows = rows_since_opened(read_ledger_rows(main, name).rows)
     row = next((r for r in rows if r.get("key") == key), None)
     if row is None:  # 同じキーの行を読めない（起きない見込み。送ったと扱わない）
         return Sent(str((msg or {}).get("id") or ""), written=False, same=False)
     rid = str(row.get("id") or "")
-    same = _bare(row.get("msg")) == _bare(json.loads(json.dumps(_redact(msg), ensure_ascii=False)) if msg is not None else None)
+    same = _bare(row.get("msg")) == _bare(_stored_form(msg))
     answered = bool(rid) and (any(r["kind"] == "answer" and r.get("id") == rid for r in rows) or rid in settled_gates(rows))
     return Sent(rid, written=False, same=same, answered=answered, existing=rid)
 
@@ -219,6 +223,12 @@ def save_checkpoint(main: Path, name: str, state: dict) -> None:
 def first_opened(rows: list[dict], default: int = 0) -> int:
     """最初の `opened` の行の位置。それより前の行は台帳を読まない途中の記録（古い耐久ワークフロー）が処理したもので、戻さない。"""
     return next((r["_pos"] for r in rows if r["kind"] == "opened"), default)
+
+
+def rows_since_opened(rows: list[dict]) -> list[dict]:
+    """最初の `opened` の行（`first_opened`）より後の行。それより前の行は古い途中の記録が処理したもので、数えない。"""
+    since = first_opened(rows)
+    return [r for r in rows if r["_pos"] >= since]
 
 
 def restore(main: Path, name: str, opening: bool = False) -> dict:
