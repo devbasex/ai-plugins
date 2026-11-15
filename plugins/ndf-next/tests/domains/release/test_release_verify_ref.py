@@ -104,3 +104,58 @@ def test_version_of_and_marketplace_of() -> None:
     assert verify_decide.version_of("11.0.0", NOW) == "11.0.0-next.20261115120000"
     assert verify_decide.marketplace_of({"name": "a", "plugins": []}, "a-next") == {"name": "a-next", "plugins": []}
     assert verify_decide.marketplace_of({"plugins": []}, "a-next")["name"] == "a-next"
+
+
+# --- 現状固定（I-003）: main 宛ての開いた PR の読み（ページ送り・行の形）---
+
+
+class _PagedHub(FakeHub):
+    """`pulls` の GET をページの番号で返し、送った params を残す偽物。"""
+
+    def __init__(self, pages: dict[int, object]) -> None:
+        super().__init__()
+        self.pages = pages
+        self.params: list[dict] = []
+
+    def rest(self, method: str, path: str, payload=None, params=None):
+        if method == "GET" and path == "/repos/o/r/pulls":
+            self.params.append(dict(params))
+            return self.pages.get(params["page"], [])
+        return super().rest(method, path, payload, params)
+
+
+def _drafts(start: int, count: int) -> list[dict]:
+    return [_row(n, draft=True) for n in range(start, start + count)]
+
+
+def test_characterize_open_pulls_reads_the_next_page_while_a_page_is_full(tmp_path: Path) -> None:
+    """100 行のページの次も読み、draft の鍵が無い行は draft でない・head の repo が無い行は fork と同じに外れる。"""
+    work = _origin(tmp_path, {1: ("a.txt", "a\n")})
+    one = _row(1)
+    del one["draft"]
+    no_repo = {"number": 3, "head": {"sha": "b" * 40, "ref": "feat/3", "repo": None}}
+    hub = _PagedHub({1: _drafts(100, 100), 2: [one, "not a row", no_repo]})
+    built = verify_ref.build(work, hub, DECL, NOW)
+    assert [n for n, _h in built.included] == [1]
+    assert built.included[0][1] == "a" * 40
+    assert hub.params == [
+        {"state": "open", "base": "main", "per_page": 100, "page": 1},
+        {"state": "open", "base": "main", "per_page": 100, "page": 2},
+    ]
+
+
+def test_characterize_open_pulls_does_not_count_non_object_rows_toward_a_full_page(tmp_path: Path) -> None:
+    """オブジェクトでない行はページの行数に数えない（99 行＋1 つの文字列なら次のページを読まない）。"""
+    work = _origin(tmp_path, {1: ("a.txt", "a\n")})
+    hub = _PagedHub({1: [*_drafts(100, 99), "x"], 2: [_row(1)]})
+    built = verify_ref.build(work, hub, DECL, NOW)
+    assert built.included == ()
+    assert [p["page"] for p in hub.params] == [1]
+
+
+def test_characterize_open_pulls_reads_a_non_list_response_as_no_pulls(tmp_path: Path) -> None:
+    work = _origin(tmp_path, {1: ("a.txt", "a\n")})
+    hub = _PagedHub({1: {"message": "not a list"}})
+    built = verify_ref.build(work, hub, DECL, NOW)
+    assert built.included == () and built.version == "1.2.3-next.20261115120000"
+    assert [p["page"] for p in hub.params] == [1]
