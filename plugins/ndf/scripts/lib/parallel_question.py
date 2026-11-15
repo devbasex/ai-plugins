@@ -9,8 +9,10 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 
+FULL_SHA = re.compile(r"[0-9a-f]{40}")  # コミットの 40 桁の SHA（`fullmatch` で使う）
 KIND_GATE1, KIND_REUSED, KIND_ASK = "gate1", "reused", "ask"  # 送り分けの結果の種類（台帳の行の kind と同じ。`parallel_ask.route_ask`）
 
 

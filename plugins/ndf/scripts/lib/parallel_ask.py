@@ -25,7 +25,7 @@ import parallel_external as pe
 from gate1_ids import gate1_id
 import parallel_lane as pl
 import parallel_ledger as plg
-from parallel_question import KIND_ASK, KIND_GATE1, KIND_REUSED, AskTarget, Prior, prior_of, target_line
+from parallel_question import FULL_SHA, KIND_ASK, KIND_GATE1, KIND_REUSED, AskTarget, Prior, prior_of, target_line
 
 KIND_LATE = "late"  # 上限の秒が尽きて台帳へ書かなかった送り分けの結果
 
@@ -57,7 +57,7 @@ def ask_target(tool_input: dict, cwd: str) -> AskTarget:
     except OSError:
         return AskTarget(raw, "")
     sha = got.stdout.strip() if got is not None and got.returncode == 0 else ""
-    return AskTarget(raw, f"{raw}@{sha}" if re.fullmatch(r"[0-9a-f]{40}", sha) else "")
+    return AskTarget(raw, f"{raw}@{sha}" if FULL_SHA.fullmatch(sha) else "")
 
 
 def record_reused(main: Path, name: str, lane: str, prior: Prior, source: str, target: str, ledger_id: str) -> bool:

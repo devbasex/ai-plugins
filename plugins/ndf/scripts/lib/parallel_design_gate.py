@@ -22,6 +22,7 @@ from typing import Callable
 
 import design_pr_merge
 import gate1_requests as g1
+from parallel_question import FULL_SHA
 
 GATE1_SOURCE = "ndf-gate:1"  # 設計承認の区分
 RETURNED_SUFFIX = "-r"  # MVV 判定で承認した後に開いたまま問い直された依頼の id の接尾辞の頭（I4）
@@ -179,7 +180,7 @@ def design_gate(
         return None
     got = view(repo, pr) or {}
     stamp = str(got.get("headRefOid") or "")
-    if got.get("state") != "OPEN" or not re.fullmatch(r"[0-9a-f]{40}", stamp):
+    if got.get("state") != "OPEN" or not FULL_SHA.fullmatch(stamp):
         return None  # 開いていない・先頭を読めない設計 PR へ承認を当てない（決定 3）
     state = sprint_state_of(sprint)
     row = g1.last_verdict(state, "design", pr) if state else {}
