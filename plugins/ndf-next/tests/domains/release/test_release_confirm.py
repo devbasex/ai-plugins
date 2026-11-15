@@ -181,7 +181,7 @@ def test_current_row_waits_for_the_tag_of_the_merge_commit_and_records_it_once(t
     hub.responses[("GET", f"/repos/o/r/git/ref/tags/{tag}")] = {}
     hub.responses[("GET", f"/repos/o/r/releases/tags/{tag}")] = {}
     watch, _slept = _watch()
-    got = confirm.confirm(hub, _ReleaseGit(set()), PR, "main", _kit, watch, "promote-whole", _Store())  # type: ignore[arg-type]
+    got = confirm.confirm_release_branch(hub, _ReleaseGit(set()), PR, "main", _Store(), watch)  # type: ignore[arg-type]
     assert (got.kind, got.version, got.tag, got.bump_pr) == (None, "1.2.4", tag, PR)
     assert len(_records(hub)) == 1
 
@@ -190,5 +190,5 @@ def test_current_row_without_the_tag_stops_naming_publish() -> None:
     hub = FakeHub(pulls={PR: pull(number=PR, ref="release/v1.2.4", merged=True)._replace(merge_sha=MERGE)})
     hub.responses[("GET", "/repos/o/r/git/ref/tags/kit--v1.2.4")] = not_found()
     watch, _slept = _watch(0.0)
-    got = confirm.confirm(hub, _ReleaseGit(set()), PR, "main", _kit, watch, "promote-whole", _Store())  # type: ignore[arg-type]
+    got = confirm.confirm_release_branch(hub, _ReleaseGit(set()), PR, "main", _Store(), watch)  # type: ignore[arg-type]
     assert got.kind == confirm.DEPLOY_FAILED and got.missing == confirm.MISSING_PUBLISH and _records(hub) == []

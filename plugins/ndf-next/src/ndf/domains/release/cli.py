@@ -317,9 +317,12 @@ def _unit_of(root: Path, store: version_store.VersionStore) -> confirm.UnitOf:
 
 def cmd_confirm(args: argparse.Namespace) -> dict:
     root, hub, production = Path(args.root), _hub(args), _production_of(args)
-    flow, store = decl_mod.flow_of(root), _store_of(root)
+    store, repo_git = _store_of(root), git_mod.Git(root)
     watch = confirm.Watch(args.budget, time.monotonic, time.sleep)
-    got = confirm.confirm(hub, git_mod.Git(root), args.pr, production, _unit_of(root, store), watch, flow, store)
+    if decl_mod.flow_of(root) == decl_mod.GITHUB_FLOW:
+        got = confirm.confirm(hub, repo_git, args.pr, production, _unit_of(root, store), watch)
+    else:
+        got = confirm.confirm_release_branch(hub, repo_git, args.pr, production, store, watch)
     outputs = {"version": got.version} if got.version is not None else None
     values = _values(tag=got.tag, bump_pr=got.bump_pr, bump_revision=got.bump_revision)
     if got.kind is None:

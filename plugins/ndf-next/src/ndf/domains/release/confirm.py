@@ -20,7 +20,6 @@ from typing import NamedTuple
 from ndf.adapters import git as git_mod
 from ndf.adapters.github import PER_PAGE, GitHub, text_of
 from ndf.domains.release import gather, land, records_trail, version_decide, version_store
-from ndf.domains.release.declaration import GITHUB_FLOW
 from ndf.domains.release.version_store import VersionStore
 
 # 読み直しの間隔（秒。マージキューの読み直しと同じ値）
@@ -132,29 +131,38 @@ def _read_release_branch(hub: GitHub, repo_git: git_mod.Git, number: int, merge_
     return Confirmed(version, tag, number, bump_revision=merge_sha)
 
 
-def confirm(
-    hub: GitHub,
-    repo_git: git_mod.Git,
-    number: int,
-    production: str,
-    plugin_of: UnitOf,
-    watch: Watch,
-    flow: str = GITHUB_FLOW,
-    store: VersionStore | None = None,
-) -> Confirmed:
-    """本番の PR `number` のマージの後の CD を `watch.budget` 秒まで待ち、作った版を記録する（`github-flow` でない行は `store` が要る）。"""
+def _merge_sha(hub: GitHub, number: int) -> str:
+    """本番の PR のマージコミット。マージされていなければ `ConfirmError`。"""
     pull = hub.pull(number)
     if not pull.merged or not pull.merge_sha:
         raise ConfirmError(f"#{number} はまだマージされていない（release-steps merge の後に打つ）")
-    if flow != GITHUB_FLOW and store is None:
-        raise ConfirmError(f"取り込み方 {flow} の確かめにはバージョンの置き場が要る")
+    return pull.merge_sha
+
+
+def confirm(hub: GitHub, repo_git: git_mod.Git, number: int, production: str, plugin_of: UnitOf, watch: Watch) -> Confirmed:
+    """`github-flow` の行で、本番の PR `number` のマージを含む版上げの PR のマージ・タグ・GitHub Release を待ち、作った版を記録する。"""
+    merge_sha = _merge_sha(hub, number)
+    return _wait(hub, number, watch, lambda: _read(hub, repo_git, merge_sha, production, plugin_of))
+
+
+def confirm_release_branch(
+    hub: GitHub, repo_git: git_mod.Git, number: int, production: str, store: VersionStore, watch: Watch
+) -> Confirmed:
+    """今の行で、本番の PR `number` のマージコミットのバージョンのタグと GitHub Release を待ち、作った版を記録する。"""
+    merge_sha = _merge_sha(hub, number)
+
+    def read() -> Confirmed:
+        gather.fetch(repo_git, production)
+        return _read_release_branch(hub, repo_git, number, merge_sha, store)
+
+    return _wait(hub, number, watch, read)
+
+
+def _wait(hub: GitHub, number: int, watch: Watch, read: Callable[[], Confirmed]) -> Confirmed:
+    """`read` を `watch.budget` 秒まで読み直し、そろえば作った版の記録を 1 回だけ書く。"""
     deadline = watch.clock() + watch.budget
     while True:
-        if flow == GITHUB_FLOW or store is None:
-            got = _read(hub, repo_git, pull.merge_sha, production, plugin_of)
-        else:
-            gather.fetch(repo_git, production)
-            got = _read_release_branch(hub, repo_git, number, pull.merge_sha, store)
+        got = read()
         if got.kind is None and got.version is not None and got.tag is not None and got.bump_pr is not None:
             records_trail.write_version_record(hub, number, got.version, got.tag, got.bump_pr)
             return got._replace(detail=f"#{number} の版 v{got.version}（タグ {got.tag}・版上げの PR #{got.bump_pr}）を確かめた")

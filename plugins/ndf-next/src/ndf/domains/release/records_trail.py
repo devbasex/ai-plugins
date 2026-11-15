@@ -193,7 +193,8 @@ def queued_heads(hub: GitHub, number: int) -> frozenset[str]:
     for c in comments:
         if QUEUE_MARK not in c.body or c.edited or not hub.trusts(c):
             continue
-        got = _SHA.search(trail._line_of(c.body, QUEUE_HEAD_LINE) or "")
+        line = trail._line_of(c.body, QUEUE_HEAD_LINE)
+        got = _SHA.search(line) if line is not None else None
         if got:
             found.add(got.group(1))
     return frozenset(found)

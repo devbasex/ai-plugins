@@ -242,7 +242,7 @@ class Lander:
             review = self.hub.review_decision(pull.number) if self.method is not None and facts.review_count >= 1 else None
         except GitHubError as exc:
             return None, Landed(False, "precondition", f"#{pull.number} の宛先 {pull.base_ref} の ruleset を読めない: {exc}")
-        chosen = merge_method.decide(self.flow or "", self.method, facts, review, GITHUB_FLOW)
+        chosen = merge_method.decide(self.flow, self.method, facts, review, GITHUB_FLOW)
         if chosen.problem is None:
             return chosen.value, None
         declared = chosen.declared if chosen.declared is not None else "（無し）"
@@ -471,6 +471,11 @@ class Lander:
             return stopped
         if method is not None:
             return self._bump_by_method(pull, method, deadline)
+        return self._bump_plain(pull, deadline)
+
+    def _bump_plain(self, pull: Pull, deadline: float) -> Landed:
+        """マージの方式が無いとき、承認数 0 なら普通のマージ、1 以上なら迂回でバージョン上げの PR をマージする。"""
+        number = pull.number
         plain = self._is_production(pull) and self.approvals(pull.base_ref) == 0
         if not plain and not self._bypass(pull):
             return Landed(

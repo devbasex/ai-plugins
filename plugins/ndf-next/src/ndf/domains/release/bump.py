@@ -83,7 +83,6 @@ def allowed_paths(store: VersionStore, decl: decl_mod.Declaration) -> frozenset[
 
 
 def write_bump(
-    root: Path,
     store: VersionStore,
     decl: decl_mod.Declaration,
     planned: Sequence[version_decide.Planned],
@@ -91,10 +90,11 @@ def write_bump(
     today: str,
     channel: str = version_decide.PRODUCTION,
 ) -> frozenset[str]:
-    """バージョンと（本番のチャネルなら）CHANGELOG のバージョンの節を書き、チャネルの手順を流す。書いたパスを返す。
+    """バージョンと（本番チャネルなら）CHANGELOG のバージョンの節を書き、チャネルの手順を流す。書いたパスを返す。
 
-    `root` は書く作業場所（`store` の作業場所と同じ）。CHANGELOG の見出しは単位の名前。
+    書く作業場所は置き場の `root`。CHANGELOG の見出しは単位の名前。
     """
+    root = store.root
     units = {u.name: u for u in store.units()}
     entries = [changelog_decide.Entry(p.number, p.title) for p in pulls]
     log_path = root / decl.changelog
@@ -268,7 +268,7 @@ class Bumper:
                 raise BumpError(f"origin に {branch} が既にあり、main の先端の版上げだけを持つブランチでない（人が見てから打ち直す）")
         else:
             repo_git.run("switch", "--quiet", "-C", branch, span.until)
-            write_bump(self.root, store, decl, planned, pulls, self.today)
+            write_bump(store, decl, planned, pulls, self.today)
             self._commit(bump_decide.message_of(planned[0].plugin, version, span.until))
             self._push(branch)
         made = self.hub.rest(
@@ -310,7 +310,7 @@ class Bumper:
 
         if not gather.merge_or_abort(repo_git, ("--quiet", "--no-edit", git_mod.END_OF_OPTIONS, span.until), read_conflicted):
             raise BumpConflict(f"{span.until[:12]} を {opened.head_ref} へ取り込めない（衝突: {', '.join(conflicted) or '読めない'}）")
-        write_bump(self.root, self._store, decl, planned, pulls, self.today)
+        write_bump(self._store, decl, planned, pulls, self.today)
         committed = self._commit(bump_decide.message_of(planned[0].plugin, opened.version, span.until))
         if committed or repo_git.rev_parse("HEAD") != before:
             self._push(opened.head_ref)

@@ -259,6 +259,7 @@ worktree・チーム・公開・[release.schema.json](../../contracts/schemas/de
 | `undistributed` | array of string | — | — | 任意 | リリース対象に関わらないファイルの形（プラグインの根からの gitignore の形）。無ければテスト |
 | `version` | integer | — | `1` | 必須 | 宣言の形の版。読み手は知らない版を読まない |
 | `version_files` | array of string | `[]` | — | 任意 | 版上げで、プラグインの名前を含む行の版を書き換えるファイル |
+| `version_store` | object | — | — | 任意 | バージョンの置き場（#3572 の決定 22）。kind が plugin ならマーケットプレイスの登録とプラグインの定義（と version_files）、json なら path の JSON のファイルの key の値を name の単位のバージョンにする。ブランチ戦略が github-flow なら要る。書かなければ、ほかの行では plugin を使う。読み手は ndf.domains.release.version_store.of |
 
 例: `{"version": 1, "steps": [{"name": "記録", "stage": "production", "command": ["python3", "scripts/record.py"], "writes": ["docs/metrics/"]}]}`
 

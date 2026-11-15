@@ -366,7 +366,7 @@ def optional_verify(root: Path) -> VerifyDecl | None:
     command = verify.get("command")
     if not isinstance(command, list) or not command or not all(isinstance(c, str) and c for c in command):
         raise DeclarationError(f"{path} の検証の行（{kind}）の verify.command は空でない文字列の配列")
-    timeout = verify.get("timeout_seconds", DEFAULT_TIMEOUT)
+    timeout = _value(verify, "timeout_seconds", DEFAULT_TIMEOUT)
     if not isinstance(timeout, int) or isinstance(timeout, bool) or timeout <= 0:
         raise DeclarationError(f"{path} の検証の行（{kind}）の verify.timeout_seconds は正の整数")
     return VerifyDecl(str(kind), ref, command=tuple(command), timeout_seconds=timeout)

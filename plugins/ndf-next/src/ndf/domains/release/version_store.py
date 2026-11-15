@@ -43,9 +43,10 @@ class Unit(NamedTuple):
 
 
 class VersionStore(Protocol):
-    """バージョンの置き場のインタフェース。"""
+    """バージョンの置き場のインタフェース（`root` は読み書きする作業場所）。"""
 
     kind: str
+    root: Path
 
     def units(self) -> list[Unit]: ...
 
@@ -165,7 +166,8 @@ def of(root: Path, decl: decl_mod.Declaration, flow: str) -> VersionStore:
     raw = decl.version_store
     if raw is None:
         if flow == decl_mod.GITHUB_FLOW:
-            raise VersionStoreError(f"取り込み方 {flow} では .ndf/release.json の version_store が要る（取れる種類: {', '.join(KINDS)}）")
+            where = decl_mod.path_of(root).relative_to(root).as_posix()
+            raise VersionStoreError(f"取り込み方 {flow} では {where} の version_store が要る（取れる種類: {', '.join(KINDS)}）")
         return PluginStore(root, decl.version_files)
     kind = raw.get("kind") if isinstance(raw, dict) else None
     if kind == KINDS[0]:
@@ -205,7 +207,7 @@ def bumped(store: VersionStore, repo_git: git_mod.Git, revision: str) -> list[Un
     """コミット `revision` で（第 1 親と比べて）バージョンが変わった単位。親が読めなければ空。"""
     try:
         parent = repo_git.rev_parse(f"{revision}^1")
-    except git_mod.GitError:  # noqa: NDF401 外部コマンド: 根のコミットは親を持たず、バージョンを上げた単位は無い
+    except git_mod.GitError:  # 根のコミットは親を持たず、バージョンを上げた単位は無い
         return []
     return [u for u in store.units() if store.read(repo_git, parent, u) != store.read(repo_git, revision, u)]
 

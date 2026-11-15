@@ -40,25 +40,47 @@ Codex は全ブランチを取得するが、登録した ref を基準にする
 
 ## 11.0.0 からの運用（GitHub flow）
 
-11.0.0 の入れ替えから、作り直しの NDF（`plugins/ndf-next/`）は GitHub flow を土台にする。
-入れ替えまでは、この節の上下の develop と main の運用のままである。
+11.0.0 の入れ替えから、ai-plugins は作り直しの NDF（`plugins/ndf-next/`）のブランチ戦略 `github-flow` を選ぶ
+（`.ndf/worktree.json` の `branch_flow`）。入れ替えまでは、この節の上下の develop と main の運用のままである。
+ブランチ戦略はリポジトリごとの設定の値で、ndf-next は develop と main を分ける行（`promote-whole`・`promote-selected`）も
+そのまま扱う。下の表は ai-plugins が `github-flow` を選んだときの答えである。
 
 | 問い | 答え |
 | --- | --- |
-| マージした変更はいつ利用者へ届くか | **main へのマージの時点**。スプリントブランチを main から切り、スプリントの PR（本番の PR）を承認した先端との照合付きで main へマージする。マージ＝リリース承認＝マージ承認で、承認ゲートでの承認と、利用者の GitHub でのマージのどちらも承認として扱う |
-| 版数とタグは誰がいつ作るか | **CD がマージの時点に作る**（`.github/workflows/ndf-next-release.yml`）。PR は版数と `CHANGELOG.md` を触らない。main への push で CD が版上げの PR（head は `release/v<版>`、差分は版数の文字列と CHANGELOG の版の節だけ）を作ってマージし、その push でタグ `ndf--v<版>` と GitHub Release を作る |
-| マージの前の中身を試すには | **2 つ目のマーケットプレイス（`ai-plugins-next`）を登録する**。main 宛ての開いた PR を集めた検証の ref（`verify/next`）を指す |
+| マージした変更はいつ利用者へ届くか | **main へのマージの時点**。スプリントブランチを main から切り、スプリントの PR（本番の PR）を承認した head との一致の確認付きで main へ入れる。マージ＝リリース承認＝マージ承認で、承認ゲートでの承認と、利用者の GitHub でのマージ（merge queue へ入れる操作を含む）のどちらも承認として扱う |
+| 版数とタグは誰がいつ作るか | **CD がマージの時点に作る**（`.github/workflows/ndf-next-release.yml`）。PR は版数と `CHANGELOG.md` を触らない。main への push で CD がバージョン上げの PR（head は `release/v<版>`、差分は版数の文字列と CHANGELOG の版の節だけ）を作って入れ、その push でタグ `ndf--v<版>` と GitHub Release を作る |
+| マージの前の中身を試すには | **検証用マーケットプレイス（`ai-plugins-next`）を登録する**。main 宛ての開いた PR を集めた検証用ブランチ（`verify/next`）を指す |
+| 同時に承認された PR の組み合わせはどう確かめるか | **merge queue が確かめる**。承認した PR を承認した head のままキューへ入れ、GitHub が main の先端と前に並ぶ PR を合わせた一時のコミットで必須のチェックを回し、通ったものだけを順にマージする。キューから外れた PR は同じ head で入れ直さず、直しを入れた head で承認を取り直す |
 
-**上げ幅は PR のラベルで宣言する。** `release:major`・`release:minor`・`release:patch` のどれか 1 つで、無ければ PATCH。
-1 つの PR に 2 つ以上あれば PR の検査（`ndf release-steps pr-check`）が落とす。前の版上げから main へ入った PR のうち
-最も大きい上げ幅を採る。main の ruleset は PR を通さない push を断るため、版上げは PR で main へ入れる。そのため
-main へのマージから版上げの PR のマージまでは、版数が前の版のまま新しいコードが載る。
+ai-plugins の設定の値（入れ替えの PR で書く）:
+
+| 設定 | 値 | 意味 |
+| --- | --- | --- |
+| `.ndf/worktree.json` の `branch_flow.promotion` | `direct`（行 `github-flow`） | スプリントの PR を main へ直接入れる |
+| `.ndf/project.json` の `production_merge.method` | `merge-queue` | 本番の PR とバージョン上げの PR を merge queue で入れる。main の ruleset と照らし、食い違えば入れずに止まる |
+| `.ndf/project.json` の `delivery` の検証の行の `verify` | `kind: marketplace`・`ref: verify/next`・`marketplace: ai-plugins-next` | 検証環境は検証用マーケットプレイス |
+| `.ndf/release.json` の `version_store` | `kind: plugin` | バージョンはマーケットプレイスの登録とプラグインの定義に置く |
+
+ほかのリポジトリは同じ設定で別の値を選べる。merge queue を使えないリポジトリはマージの方式に `strict`（最新の取り込みを必須にする
+規則で、head が main の先端を含まなければ止まり、取り込んだ head で承認を取り直す）を選び、Web のリポジトリは検証環境に
+`kind: deploy`（検証用ブランチを push した後に、書いたコマンドで staging 環境へ配る）を、バージョンの置き場に
+`kind: json`（`package.json` の `version` など）を選ぶ。
+
+**main の ruleset へ merge queue を足すのは入れ替えの PR と同じ時点である。** 先に足すと、今の NDF のリリース（develop から
+main への PR を管理者の迂回でマージする）がキューの規則に当たる。あわせて PR の規則の承認の数を 0 にする（NDF の承認ゲートの
+承認は GitHub のレビューの承認ではなく、承認 1 のままではキューへ入れられない）。人の承認はリリース承認ゲートと人のマージが持つ。
+必須のチェックを出す workflow は `merge_group` で起動し、キューの一時のコミットにもチェックを出す。
+
+**上げ幅は PR のラベルで示す。** `release:major`・`release:minor`・`release:patch` のどれか 1 つで、無ければ PATCH。
+1 つの PR に 2 つ以上あれば PR の検査（`ndf release-steps pr-check`）が落とす。前のバージョン上げから main へ入った PR のうち
+最も大きい上げ幅を採る。main の ruleset は PR を通さない push を断るため、バージョン上げは PR で main へ入れる。そのため
+main へのマージからバージョン上げの PR のマージまでは、版数が前の版のまま新しいコードが載る。
 
 **#188（2026-08-31）で main と develop に分けた理由は、マージした時点で常用する利用者へ届くことだった。** GitHub flow では
-マージがリリースになるため、試す場所をマージの前へ移し、検証の ref で受ける。Claude Code にはリリースチャネルの概念が無く、
+マージがリリースになるため、試す場所をマージの前へ移し、検証用ブランチで受ける。Claude Code にはリリースチャネルの概念が無く、
 名前の違う 2 つのマーケットプレイスが違う ref を指す形を公式に勧めている。名前が違うので正式版と両方を登録でき、
-登録し直しが要らない。検証の ref は main 宛ての PR の作成・更新・閉じのたびに CD（`.github/workflows/ndf-next-pr.yml`）が
-fast-forward で組み直し、版を `<main の版>-next.<組んだ時刻 UTC>` にする（版が変わらないと更新が入らない）。検証の ref は main へ戻さない。
+登録し直しが要らない。検証用ブランチは main 宛ての PR の作成・更新・閉じのたびに CD（`.github/workflows/ndf-next-pr.yml`）が
+fast-forward で組み直し、版を `<main の版>-next.<組んだ時刻 UTC>` にする（版が変わらないと更新が入らない）。検証用ブランチは main へ戻さない。
 
 ```bash
 claude plugin marketplace add 'https://github.com/devbasex/ai-plugins.git#verify/next'   # ai-plugins-next として登録される
@@ -66,7 +88,7 @@ claude plugin disable ndf@ai-plugins                                            
 claude plugin marketplace update ai-plugins-next                                        # 組み直した中身を入れる
 ```
 
-試し終えたら `claude plugin enable ndf@ai-plugins` で正式版へ戻す。Codex での 2 つ目のマーケットプレイスの登録の形は、
+試し終えたら `claude plugin enable ndf@ai-plugins` で正式版へ戻す。Codex での検証用マーケットプレイスの登録の形は、
 入れ替えの前に確かめる。
 
 ## 版の付け方と開発版のデプロイ

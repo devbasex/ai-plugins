@@ -97,6 +97,13 @@ class _Run:
         return self.flow == decl_mod.GITHUB_FLOW
 
 
+def _pr_of(run: _Run) -> int:
+    """`github-flow` の本番の PR の番号（`_run_of` が確かめた後に読む）。"""
+    if run.target.pr is None:
+        raise AssembleError(f"取り込み方 {run.flow} では --pr（本番の PR）が要る")
+    return run.target.pr
+
+
 def _run_of(root: Path, hub: GitHub, target: Target) -> _Run:
     """公開のエントリポイントの引数から `_Run` を作る。行に合わない引数なら `AssembleError`。"""
     run = _Run(root, git_mod.Git(root), hub, target, decl_mod.flow_of(root))
@@ -153,7 +160,7 @@ def _trunk_facts(run: _Run, span: gather.Range) -> materials_decide.Facts:
     """`github-flow` の材料。上げ幅は PR のラベルから、今のバージョンは本番ブランチの先端から読む（バージョンの置き場を介す）。"""
     decl = decl_mod.load(run.root)
     store = version_store.of(run.root, decl, run.flow)
-    level = bump_decide.level_of(gather.labels_of(run.hub, int(run.target.pr or 0)))
+    level = bump_decide.level_of(gather.labels_of(run.hub, _pr_of(run)))
     paths = run.repo_git.changed_files(span.since, span.until)
     planned = version_store.plan(store, run.repo_git, paths, decl, level, span.since)
     return _materials(run, span, version_decide.PRODUCTION, planned, store.changes(paths, decl), paths)
@@ -235,7 +242,7 @@ def _assemble_branch(run: _Run, span: gather.Range) -> Built:
     repo_git.run("switch", "--quiet", "--create", branch, facts.head)
     decl = decl_mod.load(root)
     store = version_store.of(root, decl, run.flow)
-    bump.write_bump(root, store, decl, facts.planned, facts.pulls, date.today().isoformat(), facts.channel)
+    bump.write_bump(store, decl, facts.planned, facts.pulls, date.today().isoformat(), facts.channel)
     title = f"Release: {named.plugin} v{named.next}"
     facts = facts._replace(head=_commit_and_push(repo_git, branch, title))
     number, url = _open_pr(hub, branch, target.pr_base, title, materials_decide.render(facts))
@@ -249,7 +256,7 @@ def assemble(root: Path, hub: GitHub, target: Target) -> Built:
     run.repo_git.run("switch", "--quiet", "--detach", span.until)
     if not run.trunk:
         return _assemble_branch(run, span)
-    number = int(target.pr or 0)
+    number = _pr_of(run)
     facts = _trunk_facts(run, span)
     named = _named(facts.planned, target.plugin)
     body = materials_decide.splice(hub.pull(number).body, materials_decide.render(facts))

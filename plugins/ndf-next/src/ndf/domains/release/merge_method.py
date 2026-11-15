@@ -94,10 +94,10 @@ def _mismatch(declared: str, facts: RulesFacts) -> str | None:
     return None
 
 
-def decide(flow: str, declared: str | None, facts: RulesFacts, review: str | None, required_flow: str) -> Method:
+def decide(flow: str | None, declared: str | None, facts: RulesFacts, review: str | None, required_flow: str) -> Method:
     """取り込み方の行・宣言の方式・ruleset の事実・PR のレビューの判定から、使う方式か止まる理由を決める（I15）。
 
-    `required_flow` は方式の宣言を必須にする取り込み方の行（`github-flow`）。
+    `flow` は取り込み方の行の id（None は既定の行）、`required_flow` は方式の宣言を必須にする行（`github-flow`）。
     """
     actual = _actual(facts)
     if declared is None:
