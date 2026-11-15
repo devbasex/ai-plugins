@@ -410,14 +410,32 @@ def test_helper_task_current_confirmed_for_the_same_release(monkeypatch, tmp_pat
 
 
 def test_helper_task_current_confirmed_retry_resumes_the_gated_release_queue(monkeypatch, tmp_path):
-    """打ち直す（#3597 の決定 2）: 前の本番のプランの done が残れば、同じ queue（関門の記録を返す）でなく queue --resume で流し直す。"""
+    """打ち直す（#3597 の決定 2）: 前の本番のプランの done が残れば、同じ queue（関門の記録を返す）でなく queue --resume で流し直す。
+    関門の無い done（失敗で終えた）は開始を渡さずに流し直す。"""
     d = prl.release_dir(tmp_path, "p1", 1, 1)
     d.mkdir(parents=True)
     done = d / "release-done.json"
-    done.write_text(json.dumps({"items": [{"result": "関門"}]}))
+    done.write_text(json.dumps({"items": [{"result": "失敗"}]}))
     got, _ = _helper_task_with(monkeypatch, tmp_path, CONFIRMED_11)
     assert f"{ph.SUPERVISE} queue --resume {done} && {ph.SUPERVISE} wait {done}" in got["pipeline"]
     assert f"queue {d / 'release.json'}" not in got["pipeline"]
+
+
+def test_helper_task_confirmed_retry_refuses_when_the_gated_step_is_unknown(monkeypatch, tmp_path):
+    """関門で止まった done から開始のステップを決められなければ、--from 無しの resume を組まずに error を返す（マージせずに完了と読ませない）。"""
+    d = prl.release_dir(tmp_path, "p1", 1, 1)
+    d.mkdir(parents=True)
+    (d / "release-done.json").write_text(json.dumps({"items": [{"plan": str(d / "release.json"), "result": "関門", "report": ""}]}))
+    got, _ = _helper_task_with(monkeypatch, tmp_path, CONFIRMED_11)
+    assert got["phase"] == "confirmed" and got["error"] and "pipeline" not in got and "settle" not in got
+
+
+def test_helper_task_marks_an_ask_merged_into_another_as_answered(monkeypatch, tmp_path):
+    """同じ原因として別レーンの問いへまとめられた ask は、台帳の answer が代表の id にしか無くても、自分の id の答えで answered になる。"""
+    rows = [{"kind": "opened", "id": "o"}, {"kind": "ask", "id": "m", "msg": {"lane": "p1-rel1", "source": "s"}, "at": "t1"}]
+    monkeypatch.setattr(ph.pl, "answers_of", lambda main, name, ids: {i: {"answer": {"result": "answered"}, "defer": None} for i in ids})
+    got, _ = _helper_task_with(monkeypatch, tmp_path, {}, rows)
+    assert got["asked"] == [{"id": "m", "kind": "ask", "source": "s", "target": None, "at": "t1", "answered": True}]
 
 
 def test_helper_task_confirmed_retry_resumes_from_the_step_that_gated(monkeypatch, tmp_path):

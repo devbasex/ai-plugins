@@ -450,6 +450,8 @@ def cmd_helper(a) -> None:
         task = parallel_helper.helper_task(main, a.name, a.n, a.k)
     except OSError as exc:  # 台帳を読めなければ問いを送らずに止まる（#3597 の決定 8）
         reply("stopped", f"計画の台帳を読めない: {exc}", code=2)
+    if task.get("error"):  # 確定の後の打ち直しで関門から流し直す開始を決められない。--from 無しで流すとマージせずに完了と読まれる
+        reply("stopped", f"一時レーンの仕事を組めない: {task['error']}", code=2, **task)
     reply("ok", f"一時レーンの仕事: リリース {a.n} の提示 {a.k}（{task['phase']}）", **task)
 
 

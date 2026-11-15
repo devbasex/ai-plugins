@@ -95,6 +95,14 @@ def is_confirmed_launch(launch: dict, n: int, k: int) -> bool:
     return launch.get("action") == "confirmed" and launch.get("n") == n and launch.get("k") == k and not launch.get("carried")
 
 
+def merged_answers(main: Path, name: str, asked: list[dict]) -> list[dict]:
+    """台帳に答えの無い `ask` に、依頼の id ごとの答え（`answer-<依頼>`）があれば `answered: true` を付ける。同じ原因として代表の問いへ
+    まとめた依頼（異常系 5）は、台帳の `answer` の行が代表の id にしか無く、答えは耐久ワークフローが依頼ごとに立てるため。"""
+    ids = [a["id"] for a in asked if a.get("kind") == "ask" and not a.get("answered") and a.get("id")]
+    got = pl.answers_of(main, name, ids) if ids else {}
+    return [{**a, "answered": True} if (got.get(a.get("id")) or {}).get("answer") is not None else a for a in asked]
+
+
 def helper_task(main: Path, name: str, n: int, k: int) -> dict:
     """一時レーン（`--parallel-helper <計画名> <連番> <提示>`）が流すもの。最後の起動の指示（イベント `pause` か、
     リリースの途中の知らせに添えた `release`）が同じ連番と提示の `confirmed`（`carried` を持たない）なら確定の後の 3 手、
@@ -107,6 +115,8 @@ def helper_task(main: Path, name: str, n: int, k: int) -> dict:
       終われば `gate2`（確定の後の依頼。#3597 の決定 2）を打つ。前の起動の `release-done.json` があれば（打ち直す）、本番のプランは
       `queue --resume --from <プラン>=<関門を返したステップ>` で関門から流し直す
 
+    確定の後で、前の本番のプランが承認ゲートで止まったのに開始のステップを決められなければ、流すものを組まずに `error` を返す。
+
     `asked` は自分の名前の一時レーンが送った依頼と答え（決定 8）。台帳を読めなければ `OSError`。"""
     import parallel_ledger as plg
     from parallel_question import asked_of
@@ -116,7 +126,7 @@ def helper_task(main: Path, name: str, n: int, k: int) -> dict:
     py = f"python3 {HERE / 'parallel.py'}"
     rows = plg.read_ledger_rows(main, name).rows
     since = plg.rows_since_opened(rows)
-    asked = asked_of(since, pr.helper_name(name, n), plg.settled_gates(since))
+    asked = merged_answers(main, name, asked_of(since, pr.helper_name(name, n), plg.settled_gates(since)))
     out = {"n": n, "k": k, "dir": str(d), "gate2": f"{py} request-gate2 {name} {n} {k} --report {present_approval(d)}", "asked": asked}
     # 出し直しを省いた確定（`carried`）は提示と同じ流し方にする。提示のプランが確かめ直して承認を書く（#3020 の決定 3）
     if is_confirmed_launch(launch, n, k):
@@ -127,9 +137,13 @@ def helper_task(main: Path, name: str, n: int, k: int) -> dict:
         # 渡さないと、関門の後に成功したステップ（承認資料の投稿など）だけが続きとして流れ、マージせずに完了と読まれる
         queue = f"{SUPERVISE} queue {d / 'release.json'} --done {done}"
         if done.exists():
-            from parallel_gate2 import gate_step
+            from parallel_gate2 import gate_item, gate_step
 
             at = gate_step(done)
+            if at is None and gate_item(done) is not None:
+                # 関門で止まったのに開始のステップを決められない（report が空・progress.jsonl を読めない・終了コード 10 の行が無い）。
+                # `--from` 無しの resume は関門の後に成功したステップだけを流してマージせずに完了と読まれるため、流すものを組まない
+                return {**out, "phase": "confirmed", "error": f"本番のプランが承認ゲートで止まった位置を {done} から決められない"}
             queue = f"{SUPERVISE} queue --resume {done}" + (f" --from {at[0]}={at[1]}" if at else "")
         steps = [gate, f"{SUPERVISE} run {d / 'present.json'} --from approve", queue]
         return {**out, "phase": "confirmed", "pipeline": " && ".join([*steps, f"{SUPERVISE} wait {done}"]),

@@ -71,16 +71,22 @@ def gate_step(done: Path) -> Optional[tuple[str, str]]:
     """本番のプランの done から (承認ゲートで止まったプランの名前, 終了コード 10 を返した最後のステップの id)。読めなければ None。
     打ち直しは `queue --resume --from <プラン>=<ステップ>` でこのステップから流す。開始を渡さないと、関門の後に流れて成功した
     ステップ（承認資料の投稿など）だけが続きとして流れ、本番の PR をマージせずに完了と読まれる。"""
-    try:
-        got = json.loads(Path(done).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    item = next((i for i in got.get("items") or [] if isinstance(i, dict) and i.get("result") == "関門"), None)
+    item = gate_item(done)
     if item is None or not item.get("plan"):
         return None
     rows = _gate_steps(Path(str(item.get("report") or "")).parent)
     step = str(rows[-1].get("step") or "") if rows else ""
     return (Path(str(item["plan"])).stem, step) if step else None
+
+
+def gate_item(done: Path) -> Optional[dict]:
+    """本番のプランの done のうち、承認ゲートで止まった（`result: 関門`）最初の項目。done を読めないか関門が無ければ None。"""
+    try:
+        got = json.loads(Path(done).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    items = got.get("items") if isinstance(got, dict) else None
+    return next((i for i in items or [] if isinstance(i, dict) and i.get("result") == "関門"), None)
 
 
 def _gate_steps(state: Path) -> list[dict]:
