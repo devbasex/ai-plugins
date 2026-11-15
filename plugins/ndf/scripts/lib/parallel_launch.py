@@ -52,7 +52,7 @@ def helper_wait_seconds() -> float:
     return _env_seconds(os.environ.get("NDF_PARALLEL_HELPER_WAIT_SECONDS"), HELPER_WAIT)
 
 
-def _outcome(got: dict) -> dict:
+def _launch_outcome(got: dict) -> dict:
     """起動の結果 `got` のうち、起動の記録へ写す値（`OUTCOME_KEYS`）。"""
     return {k: got.get(k) for k in OUTCOME_KEYS}
 
@@ -135,7 +135,7 @@ class LaunchRouting:
         if purpose in self.launches:
             return self.launches[purpose]
         got = step_launch(self.main, list(argv), lane, cwd, fresh)
-        rec = {"lane": lane, **_outcome(got)}
+        rec = {"lane": lane, **_launch_outcome(got)}
         self.launches[purpose] = rec
         self.helper_seen.pop(lane, None)  # 止まりの観測は今の起動から数え直す（I4）
         spec = {"argv": list(argv), "cwd": cwd, "fresh": fresh}
@@ -183,9 +183,9 @@ class LaunchRouting:
         if got.get("result") == "waiting":
             rec["busy"] = got.get("busy")  # 別の一時レーンが先に立ち上がった: 最初に断られた時刻のまま待ちを続ける
         elif got.get("result") == "up":
-            self.launches[purpose] = {"lane": rec["lane"], **_outcome(got), "waited": {"busy": busy, "seconds": waited}}
+            self.launches[purpose] = {"lane": rec["lane"], **_launch_outcome(got), "waited": {"busy": busy, "seconds": waited}}
         else:
-            rec.update(**_outcome(got))
+            rec.update(**_launch_outcome(got))
             self._ask_not_up(purpose, rec["lane"], rec.get("reason"), spec, extra)
 
     def launch_helper(self) -> None:
