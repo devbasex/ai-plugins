@@ -67,11 +67,13 @@ plugins/ndf-next/
 │           ├── context_policy.py *
 │           ├── context_records.py *
 │           └── context_report.py *
-└── tests/domains/
-    ├── project/{test_project_cli.py,test_project_measure.py} *
-    ├── statusline/test_statusline_cli.py *
-    ├── materials/test_materials_cli.py *
-    └── relay/{test_notice.py,test_account_registry.py,test_account_metered.py,test_context_policy.py,test_context_report.py} *
+└── tests/
+    ├── domains/
+    │   ├── project/{test_project_cli.py,test_project_measure.py} *
+    │   ├── statusline/test_statusline_cli.py *
+    │   ├── materials/test_materials_cli.py *
+    │   └── relay/{test_notice.py,test_account_registry.py,test_account_metered.py,test_context_policy.py,test_context_report.py} *
+    └── skills/test_scripts_lookup.py *
 ```
 
 **依存の向きは一方向で、循環は無い。** 依存は次の順に一方向へ進む。
@@ -132,6 +134,7 @@ plugins/ndf-next/
 | `plugins/ndf-next/tests/domains/relay/test_account_metered.py` | 新設 | 従量の接続の単体テスト | `relay` |
 | `plugins/ndf-next/tests/domains/relay/test_context_policy.py` | 新設 | 方針の解決・記録・較正の単体テスト | `relay` |
 | `plugins/ndf-next/tests/domains/relay/test_context_report.py` | 新設 | 作業ごとの集計の単体テスト | `relay` |
+| `plugins/ndf-next/tests/skills/test_scripts_lookup.py` | 新設 | `development-workflow/references/scripts-lookup.md` の呼び方を決める 1 行を取り出し、`PATH` から `ndf` を外した `bash -c` で打つ単体テスト（不変条件 I10） | 無し |
 
 次のファイルは、関数を持たないためこの表に並べない。どれも設計文書の「設計の結果」の触るファイルにある。
 
@@ -479,3 +482,4 @@ filelock と `flock` コマンドが同じファイルで互いに待つこと�
 | `context_records.calibrate` | 見込みが書かれ標本の数を返す | 標本 0 件 | 書けなければ 1 で前の見込みが残る |
 | `context_report.load_ledger` | 台帳の行を返す | 台帳が無ければ空 | 壊れた台帳で空 |
 | `context_report.report` | 旧い実装の固定の入力と同じ値 | 期間の指定で区間を切る | 台帳が空なら台帳の分が `None` |
+| `scripts-lookup.md` の呼び方を決める 1 行 | 偽の `ndf` を置いた `PATH` で終了コード 0、標準エラーが空 | ファイルの中の ```` ```bash ```` のブロックのうち `command -v ndf` を含む 1 行だけを取り出す。該当の行が 1 つでなければテストが落ちる | `ndf` を含まない `PATH`（`/usr/bin:/bin`）の `bash -c` で終了コード 3、標準エラーに `ndf が PATH に無い` が出る |
