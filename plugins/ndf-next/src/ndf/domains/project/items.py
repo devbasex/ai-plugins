@@ -9,18 +9,21 @@ from __future__ import annotations
 from typing import Any
 
 MAX_EVIDENCE = 20
+# 項目の測定の状態（`status` の値）
+MEASURED, QUESTION, UNKNOWN = "measured", "question", "unknown"
+STATUSES = (MEASURED, QUESTION, UNKNOWN)
 
 
 def measured(value: Any) -> dict[str, Any]:
-    return {"status": "measured", "value": value}
+    return {"status": MEASURED, "value": value}
 
 
 def question(candidates: Any, evidence: list[dict[str, Any]]) -> dict[str, Any]:
-    return {"status": "question", "candidates": candidates, "evidence": evidence[:MAX_EVIDENCE]}
+    return {"status": QUESTION, "candidates": candidates, "evidence": evidence[:MAX_EVIDENCE]}
 
 
 def unknown(reason: str) -> dict[str, Any]:
-    return {"status": "unknown", "reason": reason}
+    return {"status": UNKNOWN, "reason": reason}
 
 
 def obj(value: Any) -> dict[str, Any]:

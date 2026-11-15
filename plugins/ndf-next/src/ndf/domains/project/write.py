@@ -24,7 +24,7 @@ from ndf import contracts
 from ndf.adapters import git
 from ndf.domains.project import check, measure_flow
 from ndf.domains.records import files
-from ndf.domains.project.items import obj, seq
+from ndf.domains.project.items import MEASURED, QUESTION, obj, seq
 from ndf.domains.project.secret import has_secret, redact
 
 # 解析が測る宣言の項目（スキーマの並びの順）。外すのは人が書く項目・解析の記録・形の版
@@ -105,9 +105,9 @@ def resolve_item(key: str, m: Optional[dict[str, Any]], answers: dict[str, Any],
     if not m:
         return {"unknown": "測定の結果に無い"}, "不明"
     status = m.get("status")
-    if status == "measured":
+    if status == MEASURED:
         return m.get("value"), "測った"
-    if status != "question":
+    if status != QUESTION:
         return {"unknown": str(m["reason"]) if m.get("reason") else "測れない"}, "不明"
     ans = answers.get(key)
     if not isinstance(ans, dict):
@@ -441,7 +441,7 @@ def plan(inp: Inputs) -> Plan:
     bad = measure_flow.bad_answer(inp.answers.get(BRANCH_FLOW))
     if bad:
         raise WriteError(f"ブランチ運用の答えが取り込み方の表に合わないため書かない: {bad}")
-    questions = {k for k, m in obj(inp.measure.get("items")).items() if obj(m).get("status") == "question"}
+    questions = {k for k, m in obj(inp.measure.get("items")).items() if obj(m).get("status") == QUESTION}
     rows = [{"kind": "ignored", "key": k} for k in inp.answers if k not in questions]
     written_before = written_digests(inp.existing)
     out, wt_rows, wt_written, declared, names = _worktree_part(inp, written_before)

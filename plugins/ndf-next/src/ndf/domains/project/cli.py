@@ -27,7 +27,7 @@ from ndf import cli, contracts
 from ndf.adapters import git
 from ndf.contracts import result
 from ndf.domains.project import check, measure_ci, measure_flow, measure_repo, secret, write
-from ndf.domains.project.items import obj, seq, unknown
+from ndf.domains.project.items import QUESTION, STATUSES, obj, seq, unknown
 from ndf.domains.records import files, jsonfile
 from ndf.domains.relay import signals
 
@@ -90,7 +90,7 @@ def _instruction_notes(items: dict[str, Any]) -> list[str]:
 
 def _add_merge_evidence(items: dict[str, Any], merges: Optional[dict[str, int]]) -> None:
     """問いの P6（`branches`）の根拠へ、直近のマージ先の数を足す。"""
-    if merges and obj(items.get(write.BRANCHES)).get("status") == "question":
+    if merges and obj(items.get(write.BRANCHES)).get("status") == QUESTION:
         counts = "・".join(f"{k} {v}" for k, v in sorted(merges.items(), key=lambda kv: -kv[1]))
         items[write.BRANCHES]["evidence"].append({"text": f"直近 100 件のマージ先: {counts}"})
 
@@ -152,7 +152,7 @@ def _measure(args: argparse.Namespace) -> int:
         signals.replace_text(out, write.dumps(data))
     except OSError as exc:
         return result.emit(result.stopped(TOOL, "check_failed", f"--out を書けない: {exc}"))
-    counts = {s: sum(1 for m in data["items"].values() if m["status"] == s) for s in ("measured", "question", "unknown")}
+    counts = {s: sum(1 for m in data["items"].values() if m["status"] == s) for s in STATUSES}
     print(f"測定の結果: {out}（{data['elapsed_seconds']} 秒）")
     items = []
     for key, m in data["items"].items():
