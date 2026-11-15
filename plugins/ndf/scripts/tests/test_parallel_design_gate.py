@@ -187,19 +187,20 @@ def lane(tmp_path, monkeypatch):
 
 def test_answer_design_without_answer_is_3(lane):
     main, sprint = lane
-    assert pdg.answer_design(main, "p1", "la-g12-0123456789ab", sprint / "state.json", run=Run())[2] == 3
+    assert pdg.answer_design(main, "p1", "la-g12-0123456789ab", sprint / "state.json", run=Run()).code == 3
 
 
 def test_answer_design_rejects_a_non_gate1_id(lane):
     main, sprint = lane
-    assert pdg.answer_design(main, "p1", "la-qX", sprint / "state.json", run=Run())[2] == 1
+    assert pdg.answer_design(main, "p1", "la-qX", sprint / "state.json", run=Run()).code == 1
 
 
 def test_answer_design_user_approval_writes_the_gate_record(lane):
     main, sprint = lane
     _answer(main, "approved")
     run = Run()
-    status, _, code, m = pdg.answer_design(main, "p1", "la-g12-0123456789ab", sprint / "state.json", run=run)
+    got = pdg.answer_design(main, "p1", "la-g12-0123456789ab", sprint / "state.json", run=run)
+    status, _, code, m = got.status, got.summary, got.code, got.metrics
     assert (status, code) == ("ok", 0) and m["next"].endswith("queue --resume d") and m["merge"]["result"] == "merged"
     cmd = run.calls[0]
     assert cmd[cmd.index("gate") + 2] == "設計承認ゲート" and cmd[cmd.index("--by") + 1] == "user"
@@ -212,7 +213,8 @@ def test_answer_design_mvv_approval_writes_one_record(lane):
     _answer(main, "approved", by="mvv")
     state = sprint / "state.json"
     for _ in range(2):
-        status, summary, code, _m = pdg.answer_design(main, "p1", "la-g12-0123456789ab", state, run=design_pr_merge.run_cmd)
+        got = pdg.answer_design(main, "p1", "la-g12-0123456789ab", state, run=design_pr_merge.run_cmd)
+        summary, code = got.summary, got.code
         assert code == 0, summary
     gates = json.loads(state.read_text())["gates"]
     assert [(g["by"], g["pr"], g["outcome"]) for g in gates] == [("mvv", 12, "approved")]
@@ -222,7 +224,8 @@ def test_answer_design_revise_writes_the_note_and_does_not_record_approval(lane,
     main, sprint = lane
     _answer(main, "revise", note="図を直す")
     run = Run()
-    status, _, code, m = pdg.answer_design(main, "p1", "la-g12-0123456789ab", sprint / "state.json", run=run)
+    got = pdg.answer_design(main, "p1", "la-g12-0123456789ab", sprint / "state.json", run=run)
+    status, _, code, m = got.status, got.summary, got.code, got.metrics
     assert (status, code, run.calls) == ("gate", 10, [])
     assert Path(m["note"]).read_text() == "図を直す" and "--from reject" in m["next"]
 
@@ -232,7 +235,8 @@ def test_answer_design_rejected_records_once(lane):
     _answer(main, "rejected")
     run = Run()
     for _ in range(2):
-        status, _, code, _m = pdg.answer_design(main, "p1", "la-g12-0123456789ab", sprint / "state.json", run=run)
+        got = pdg.answer_design(main, "p1", "la-g12-0123456789ab", sprint / "state.json", run=run)
+        status, _, code, _m = got.status, got.summary, got.code, got.metrics
         assert (status, code) == ("gate", 10)
     assert len(run.calls) == 1 and run.calls[0][run.calls[0].index("--outcome") + 1] == "rejected"
 
@@ -240,17 +244,18 @@ def test_answer_design_rejected_records_once(lane):
 def test_answer_design_stops_when_the_record_cannot_be_written(lane):
     main, sprint = lane
     _answer(main, "approved")
-    status, summary, code, _m = pdg.answer_design(main, "p1", "la-g12-0123456789ab", sprint / "state.json", run=Run(code=2))
+    got = pdg.answer_design(main, "p1", "la-g12-0123456789ab", sprint / "state.json", run=Run(code=2))
+    status, summary, code, _m = got.status, got.summary, got.code, got.metrics
     assert (status, code) == ("stopped", 2) and "失敗した" in summary
 
 
 def test_answer_design_stops_on_an_unreadable_state(lane):
     main, sprint = lane
     _answer(main, "approved")
-    assert pdg.answer_design(main, "p1", "la-g12-0123456789ab", sprint / "none.json", run=Run())[2] == 2
+    assert pdg.answer_design(main, "p1", "la-g12-0123456789ab", sprint / "none.json", run=Run()).code == 2
 
 
 def test_answer_design_rejects_other_answers(lane):
     main, sprint = lane
     pl.send_answer(main, "p1", "la-g12-0123456789ab", "answered", choice=["x"])
-    assert pdg.answer_design(main, "p1", "la-g12-0123456789ab", sprint / "state.json", run=Run())[2] == 1
+    assert pdg.answer_design(main, "p1", "la-g12-0123456789ab", sprint / "state.json", run=Run()).code == 1

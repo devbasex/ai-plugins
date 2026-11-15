@@ -401,9 +401,9 @@ def cmd_design_answer(a) -> None:
     """設計承認の依頼の答えを読み、スプリント状態へ承認ゲートの記録を書いて続きを返す（#3603 の決定 4）。"""
     import parallel_design_gate as pdg
 
-    status, summary, code, metrics = pdg.answer_design(main_of(), a.name, a.id, Path(a.state))
-    nxt = metrics.get("next") if status == "gate" else None
-    reply(status, summary, code=code or None, next_step=nxt, **metrics)
+    got = pdg.answer_design(main_of(), a.name, a.id, Path(a.state))
+    nxt = got.metrics.get("next") if got.status == "gate" else None
+    reply(got.status, got.summary, code=got.code or None, next_step=nxt, **got.metrics)
 
 
 def _send_gate2(main: Path, a) -> plg.Sent:

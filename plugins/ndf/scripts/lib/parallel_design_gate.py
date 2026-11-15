@@ -49,6 +49,16 @@ class DesignGate:
     returned: bool = False
 
 
+@dataclass(frozen=True)
+class Answered:
+    """`answer_design` の結果。`status` は ok / gate / stopped、`code` は終了コード、`metrics` は出力へ足す値（`next` は続き）。"""
+
+    status: str
+    summary: str
+    code: int
+    metrics: dict = field(default_factory=dict)
+
+
 def approval_prs(tool_input: dict) -> list[int]:
     """最初の問いの文の承認の行の番号を、行ごとに出現順で返す。問いの文のほかの場所と選択肢の PR の URL・`#<番号>` は読まない。"""
     from parallel_question import first_question
@@ -278,31 +288,31 @@ def _revise_step(sprint: Path | None, pr: int) -> str:
 
 def answer_design(
     main: Path, name: str, rid: str, state: Path, run: Callable[..., tuple[int, str, str]] = design_pr_merge.run_cmd
-) -> tuple[str, str, int, dict]:
-    """設計承認の依頼 `rid` の答えを読み、答えの種類ごとの記録を書いて (状態, 要約, 終了コード, metrics) を返す。"""
+) -> Answered:
+    """設計承認の依頼 `rid` の答えを読み、答えの種類ごとの記録を書いて結果（`Answered`）を返す。"""
     import jsonio
     import parallel_ledger as plg
 
     try:
         rows = plg.current_rows(main, name)
     except OSError as exc:
-        return "stopped", f"計画の台帳を読めない: {exc}", 2, {}
+        return Answered("stopped", f"計画の台帳を読めない: {exc}", 2, {})
     row = _gate1_row(rows, rid)
     if row is None:
-        return "stopped", f"依頼 {rid} は設計承認の依頼（gate1）でない", 1, {}
+        return Answered("stopped", f"依頼 {rid} は設計承認の依頼（gate1）でない", 1, {})
     msg = row.get("msg") or {}
     pr, lane = int(msg.get("pr") or 0), str(msg.get("lane") or "")
     ans = _answer_row(rows, rid)
     if ans is None:
-        return "stopped", f"依頼 {rid} の答えがまだ無い（耐久ワークフローが答えの後に起こす）", 3, {"pr": pr}
+        return Answered("stopped", f"依頼 {rid} の答えがまだ無い（耐久ワークフローが答えの後に起こす）", 3, {"pr": pr})
     result, by = ans.get("result"), str(ans.get("by") or "user")
     metrics = {"result": result, "by": by, "merge": ans.get("merge"), "pr": pr}
     if result not in ("approved", "revise", "rejected"):
-        return "stopped", f"依頼 {rid} の答え（{result}）は承認・直し・差し戻しのどれでもない", 1, metrics
+        return Answered("stopped", f"依頼 {rid} の答え（{result}）は承認・直し・差し戻しのどれでもない", 1, metrics)
     try:
         jsonio.read(state, want=dict)
     except (OSError, jsonio.JsonReadError) as exc:
-        return "stopped", f"スプリント状態を読めない: {exc}", 2, metrics
+        return Answered("stopped", f"スプリント状態を読めない: {exc}", 2, metrics)
     repo, sprint = lane_sprint(main, name, lane)  # design_gate と同じ探し方
     what = f"設計 PR #{pr} の承認（並列の計画 {name} の依頼 {rid}）"
     if result == "approved":
@@ -313,39 +323,37 @@ def answer_design(
     return _answer_rejected(run, state, pr, rid, what, repo, msg, work, metrics)
 
 
-def _answer_approved(
-    run, state: Path, pr: int, by: str, what: str, repo: Path, msg: dict, sprint: Path | None, metrics: dict
-) -> tuple[str, str, int, dict]:
+def _answer_approved(run, state: Path, pr: int, by: str, what: str, repo: Path, msg: dict, sprint: Path | None, metrics: dict) -> Answered:
     """承認の答え: 設計承認ゲートの記録が無ければ書き、設計 PR のマージのステージの `resume` を続きにする。"""
     if not _has_gate(state, pr, by, "approved") and (err := _write_gate(run, state, pr, by, "approved", what, repo, msg)):
-        return "stopped", f"設計承認ゲートの記録を書けない: {err}", 2, metrics
+        return Answered("stopped", f"設計承認ゲートの記録を書けない: {err}", 2, metrics)
     nxt = _merge_resume(sprint)
-    return "ok", f"設計 PR #{pr} の承認（{by}）を記録した。続きを流す", 0, {**metrics, "next": nxt}
+    return Answered("ok", f"設計 PR #{pr} の承認（{by}）を記録した。続きを流す", 0, {**metrics, "next": nxt})
 
 
-def _answer_revise(work: Path, pr: int, ans: dict, sprint: Path | None, metrics: dict) -> tuple[str, str, int, dict]:
+def _answer_revise(work: Path, pr: int, ans: dict, sprint: Path | None, metrics: dict) -> Answered:
     """直しの答え: 指摘ファイルを書き、直して流し直す続きを返す。"""
     note = work / REVISE_NOTE.format(pr=pr)
     try:
         _write_atomic(note, str(ans.get("note") or ""))
     except OSError as exc:
-        return "stopped", f"指摘ファイルを書けない: {exc}", 2, metrics
+        return Answered("stopped", f"指摘ファイルを書けない: {exc}", 2, metrics)
     nxt = f"指摘 {note} を読んで設計を直し、{_revise_step(sprint, pr)}"
-    return "gate", f"設計 PR #{pr} は直して出し直す（指摘 {note}）", 10, {**metrics, "note": str(note), "next": nxt}
+    return Answered("gate", f"設計 PR #{pr} は直して出し直す（指摘 {note}）", 10, {**metrics, "note": str(note), "next": nxt})
 
 
-def _answer_rejected(
-    run, state: Path, pr: int, rid: str, what: str, repo: Path, msg: dict, work: Path, metrics: dict
-) -> tuple[str, str, int, dict]:
+def _answer_rejected(run, state: Path, pr: int, rid: str, what: str, repo: Path, msg: dict, work: Path, metrics: dict) -> Answered:
     """差し戻しの答え: 同じ依頼の印が無ければ差し戻しを記録して印を書く（2 回打っても 1 件）。"""
     import jsonio
 
     mark = work / REJECTED_MARK.format(pr=pr)
     if jsonio.read(mark, missing={}, broken={}, want=dict).get("id") != rid:
         if err := _write_gate(run, state, pr, "user", "rejected", what, repo, msg):
-            return "stopped", f"設計承認ゲートの差し戻しを書けない: {err}", 2, metrics
+            return Answered("stopped", f"設計承認ゲートの差し戻しを書けない: {err}", 2, metrics)
         try:
             _write_atomic(mark, json.dumps({"id": rid, "pr": pr}, ensure_ascii=False) + "\n")
         except OSError as exc:
-            return "stopped", f"差し戻しの印を書けない: {exc}", 2, metrics
-    return "gate", f"設計 PR #{pr} は差し戻された（課題 #{msg.get('issue')} を進めない）", 10, {**metrics, "next": "課題を進めない"}
+            return Answered("stopped", f"差し戻しの印を書けない: {exc}", 2, metrics)
+    return Answered(
+        "gate", f"設計 PR #{pr} は差し戻された（課題 #{msg.get('issue')} を進めない）", 10, {**metrics, "next": "課題を進めない"}
+    )
