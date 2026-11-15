@@ -71,6 +71,9 @@ PARTS_FILE = "parts/steps.json"
 USE = "use"
 # 手元でテストを打つステップの id。CI テストの宣言（`test.ci.only`）があるリポジトリのプランからは外す（#3473）
 LOCAL_TEST_STEPS = ("test", "test-all", "ci-local")
+# ステップの行き先の鍵: 1 つの行き先を持つ鍵と、場合 → 行き先の対応表を持つ鍵（ステップを外すときに付け替える）
+TARGET_KEYS = ("next", "on_fail")
+TARGET_TABLE_KEYS = ("on_cause", "on_answer")
 # 同じ原因の続きの上限の宣言
 REPEAT_LIMIT = "supervise.step-rerun"
 # 作業場所を省いたときの置き場（リポジトリの根の下）
@@ -187,15 +190,20 @@ def _successors(found: Sequence[Mapping[str, Any]], drop: frozenset[str]) -> dic
     return out
 
 
+def _moved(target: Any, moved: Mapping[str, str]) -> Any:
+    """行き先 `target` が外したステップなら代わりの行き先、そうでなければそのまま。"""
+    return moved[target] if target in moved else target
+
+
 def _retarget(step: Mapping[str, Any], moved: Mapping[str, str]) -> dict[str, Any]:
     """ステップの行き先（`next`・`on_fail`・`on_cause`・`on_answer`）のうち外したステップを代わりの行き先へ置き換える。"""
     out = dict(step)
-    for key in ("next", "on_fail"):
-        if key in out and out[key] in moved:
-            out[key] = moved[out[key]]
-    for key in ("on_cause", "on_answer"):
+    for key in TARGET_KEYS:
+        if key in out:
+            out[key] = _moved(out[key], moved)
+    for key in TARGET_TABLE_KEYS:
         if isinstance(out.get(key), Mapping):
-            out[key] = {k: moved[v] if v in moved else v for k, v in out[key].items()}
+            out[key] = {k: _moved(v, moved) for k, v in out[key].items()}
     return out
 
 
