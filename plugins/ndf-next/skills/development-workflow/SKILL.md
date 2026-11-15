@@ -223,7 +223,7 @@ pace: fast
 CI でテストが走るリポジトリでは、手元でテストを走らせず、合否を PR の CI の結果で決める。
 
 1. **宣言する。** 手順 0 の解析（宣言の書き出し）は、テストの suite（`kind` が `test`）の `ci_jobs` のワークフローのファイルがリポジトリにあれば、`.ndf/project.json` に `test.ci.only: true` を書く。条件を満たさなくなれば解析が書いた値を消す。人が書いた値（`false` を含む）は書き換えない
-2. **手元でテストを走らせない。** 宣言があれば、実装と検査のプランは範囲テスト・全体テスト（`test-limited`・`test-all`）を持たない。`ndf route test` は宣言から静的解析を選ばないため、静的解析の suite のコマンドを `ndf route test -- <静的解析のコマンド>` の形で自分で渡す（渡したコマンドはそのまま走るので、テストの suite のコマンドを渡さない）。worker と supervisor がテストの suite のコマンドを打つと hook が止める（`hook_lib/ci_test_guard.py`）。静的解析は手元で走らせる
+2. **手元でテストを走らせない。** 宣言があれば、実装と検査のプランは範囲テスト・全体テスト（`test-limited`・`test-all`）を持たない。`ndf route test` は宣言から静的解析を選ばないため、静的解析の suite のコマンドを `ndf route test "<静的解析のコマンド>"` の形（コマンドを 1 つの引数として引用符で囲む）で自分で渡す（渡したコマンドはそのまま走るので、テストの suite のコマンドを渡さない）。worker と supervisor がテストの suite のコマンドを打つと hook が止める（`hook_lib/ci_test_guard.py`）。静的解析は手元で走らせる
 3. **CI の結果を待たずに監視して直す。** プランは `pr` の後・`doc-lint` の後・マージが落ちた後に `ci-watch.py peek` で CI のテストのチェックを 1 回だけ読む。落ちていれば `ci-fix` が直して push し、改修の回数が上限（`contracts/limits.json` の `supervise.ci-fix`）に当たれば止めて人へ戻す。マージはテストのチェックがすべて現れて通ったときだけ行う
 4. **PR を早く出す。** 宣言のあるリポジトリの実装のプランは、実装の直後に Draft の PR を出す（`pr-draft`）。以後の push のたびに CI が走る
 
