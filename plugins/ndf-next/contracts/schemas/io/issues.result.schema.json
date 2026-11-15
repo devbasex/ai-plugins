@@ -17,10 +17,10 @@
       "description": "ndf issues の計測値",
       "properties": {
         "depth": {
-          "description": "結果の depth"
+          "description": "コードが出す項目 depth（値の無い経路では null）"
         },
         "seconds": {
-          "description": "結果の seconds"
+          "description": "コードが出す項目 seconds（値の無い経路では null）"
         }
       }
     },

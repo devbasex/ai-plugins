@@ -33,7 +33,7 @@
 | `ndf ci merge` | `--branch`（string・必須）: PR の head のブランチ<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば作業場所の origin<br>`--method`（string・任意）: マージの方式（squash・merge・rebase）。省けば基底のブランチで許された方式の先頭 |
 | `ndf ci watch` | `--pr`（integer・必須）<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば作業場所の origin<br>`--required`（array of string・必須）: 待つ必須のチェック（PR の先端の宣言から渡す）<br>`--test`（array of string・任意）: テストのチェックの名前（分割ジョブも数える）<br>`--budget`（number・必須）: 待ちの合計の秒（ランナーの割り当ての待ちは数えない）<br>`--after-merge`（boolean・任意）: マージの段階が落ちた後の判定<br>`--merge-failed`（array of string・任意）: マージの段階が落ちたと読んだチェックの名前 |
 
-結果の `metrics`: 決まった項目を持たない。`items` の要素: `kind`（string）・`number`（—）
+結果の `metrics`: 決まった項目を持たない。`items` の要素: `kind`（string か null）・`number`（—）
 
 ## `ndf contracts`
 
@@ -46,7 +46,7 @@
 | `ndf contracts fact-ids` | `table`（string・必須・位置）<br>`where`（array of string・任意・位置） |
 | `ndf contracts fact-value` | `table`（string・必須・位置）<br>`id`（string・必須・位置）<br>`column`（string・必須・位置） |
 
-結果の `metrics`: `fact_tables`（integer）。`items` の要素: 決まった項目を持たない
+結果の `metrics`: `fact_tables`（integer か null）。`items` の要素: 決まった項目を持たない
 
 ## `ndf cross-review`
 
@@ -68,7 +68,7 @@
 | `ndf cross-review sync` | `worktree`（string・必須・位置）<br>`--branch`（string・必須） |
 | `ndf cross-review target-repo` | `--repo`（string・任意）<br>`--state-dir`（string・任意）<br>`--pr`（integer・任意） |
 
-結果の `metrics`: 決まった項目を持たない。`items` の要素: `kind`（string）・`path`（—）・`points_to`（string）
+結果の `metrics`: 決まった項目を持たない。`items` の要素: `kind`（string か null）・`path`（—）・`points_to`（string か null）
 
 ## `ndf hooks`
 
@@ -81,7 +81,7 @@
 | `ndf hooks render` | `--check`（boolean・任意）: 書かずに、作り直した結果と違えば stopped |
 | `ndf hooks stats` | `--days`（number・任意・既定 `14.0`） |
 
-結果の `metrics`: `days`（—）。`items` の要素: `path`（string）
+結果の `metrics`: `days`（—）。`items` の要素: `path`（string か null）
 
 ## `ndf issues`
 
@@ -159,7 +159,7 @@
 | `ndf loop start` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`name`（string・必須・位置）<br>`--session`（string・必須）: 打ったセッションの識別子 |
 | `ndf loop stop` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`name`（string・必須・位置）<br>`--by`（string・必須・値 `human`・`organizer`）<br>`--reason`（string・任意・既定 `""`）<br>`--now`（boolean・任意）: 周の境を待たずにその場で止める |
 
-結果の `metrics`: `answer`（—）・`head`（—）・`lap`（—）・`outcome`（—）・`remaining`（array）・`streak`（—）。`items` の要素: 決まった項目を持たない
+結果の `metrics`: `answer`（—）・`head`（—）・`lap`（—）・`outcome`（—）・`remaining`（array か null）・`streak`（—）。`items` の要素: 決まった項目を持たない
 
 ## `ndf manifests`
 
@@ -193,7 +193,7 @@
 | `ndf plan queue` | `plans`（array of string・必須・位置）<br>`--then`（array of string・任意）<br>`--from`（array of string・任意）<br>`--resume`（boolean・任意）<br>`--fresh`（boolean・任意）<br>`--queue-dir`（string・任意） |
 | `ndf plan wait` | `plans`（array of string・必須・位置）<br>`--state-dir`（string・任意）<br>`--timeout`（number・任意・既定 `600.0`） |
 
-結果の `metrics`: `waited_seconds`（number）。`items` の要素: 決まった項目を持たない
+結果の `metrics`: `waited_seconds`（number か null）。`items` の要素: 決まった項目を持たない
 
 ## `ndf progress`
 
@@ -270,7 +270,7 @@
 | `ndf relay stop` | `name`（string・必須・位置） |
 | `ndf relay uninstall` | 引数を受けない |
 
-結果の `metrics`: 決まった項目を持たない。`items` の要素: `account`（—）・`path`（string）
+結果の `metrics`: 決まった項目を持たない。`items` の要素: `account`（—）・`path`（string か null）
 
 ## `ndf release-steps`
 
@@ -318,7 +318,7 @@
 | `ndf test-slot report` | `--since`（string・任意・既定 `"7d"`）: 期間（既定 7d） |
 | `ndf test-slot run` | `--wait-limit`（integer・任意）: 枠とメモリを待つ上限の秒（既定は設定の値）<br>`command`（string・必須・位置）: -- の後ろにシェルのコマンド 1 つ |
 
-結果の `metrics`: `available_mib`（—）・`waited_seconds`（number）。`items` の要素: 決まった項目を持たない
+結果の `metrics`: `available_mib`（—）・`waited_seconds`（number か null）。`items` の要素: 決まった項目を持たない
 
 ## `ndf training`
 
@@ -342,7 +342,7 @@
 | `ndf worker plan-edits` | `plans`（array of string・必須・位置）<br>`--state-dir`（string・任意） |
 | `ndf worker run` | `--kind`（string・必須）<br>`--prompt-file`（string・必須）<br>`--result-file`（string・必須）<br>`--cwd`（string・必須）<br>`--state-dir`（string・必須）<br>`--sources`（string・任意）<br>`--timeout`（number・任意・既定 `3600.0`） |
 
-結果の `metrics`: `failed_tests`（—）・`waited_seconds`（number）。`items` の要素: 決まった項目を持たない
+結果の `metrics`: `failed_tests`（—）・`waited_seconds`（number か null）。`items` の要素: 決まった項目を持たない
 
 ## `ndf worktree`
 

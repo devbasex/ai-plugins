@@ -17,19 +17,19 @@
       "description": "ndf worktree の計測値",
       "properties": {
         "created": {
-          "description": "結果の created"
+          "description": "コードが出す項目 created（値の無い経路では null）"
         },
         "existing": {
-          "description": "結果の existing"
+          "description": "コードが出す項目 existing（値の無い経路では null）"
         },
         "exit": {
-          "description": "結果の exit"
+          "description": "コードが出す項目 exit（値の無い経路では null）"
         },
         "tag": {
-          "description": "結果の tag"
+          "description": "コードが出す項目 tag（値の無い経路では null）"
         },
         "url": {
-          "description": "結果の url"
+          "description": "コードが出す項目 url（値の無い経路では null）"
         }
       }
     },

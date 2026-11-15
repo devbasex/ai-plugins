@@ -17,7 +17,7 @@
       "description": "ndf hooks の計測値",
       "properties": {
         "days": {
-          "description": "結果の days"
+          "description": "コードが出す項目 days（値の無い経路では null）"
         }
       }
     },
@@ -28,8 +28,11 @@
         "type": "object",
         "properties": {
           "path": {
-            "description": "結果の path",
-            "type": "string"
+            "description": "コードが出す項目 path（値の無い経路では null）",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       }

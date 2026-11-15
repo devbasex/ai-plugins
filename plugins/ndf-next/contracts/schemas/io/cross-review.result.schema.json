@@ -24,15 +24,21 @@
         "type": "object",
         "properties": {
           "kind": {
-            "description": "結果の kind",
-            "type": "string"
+            "description": "コードが出す項目 kind（値の無い経路では null）",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "path": {
-            "description": "結果の path"
+            "description": "コードが出す項目 path（値の無い経路では null）"
           },
           "points_to": {
-            "description": "結果の points_to",
-            "type": "string"
+            "description": "コードが出す項目 points_to（値の無い経路では null）",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       }

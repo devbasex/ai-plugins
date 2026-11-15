@@ -17,8 +17,11 @@
       "description": "ndf contracts の計測値",
       "properties": {
         "fact_tables": {
-          "description": "結果の fact_tables",
-          "type": "integer"
+          "description": "コードが出す項目 fact_tables（値の無い経路では null）",
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       }
     },

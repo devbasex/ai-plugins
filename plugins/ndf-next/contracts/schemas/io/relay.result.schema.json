@@ -24,11 +24,14 @@
         "type": "object",
         "properties": {
           "account": {
-            "description": "結果の account"
+            "description": "コードが出す項目 account（値の無い経路では null）"
           },
           "path": {
-            "description": "結果の path",
-            "type": "string"
+            "description": "コードが出す項目 path（値の無い経路では null）",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       }

@@ -17,8 +17,11 @@
       "description": "ndf plan の計測値",
       "properties": {
         "waited_seconds": {
-          "description": "結果の waited_seconds",
-          "type": "number"
+          "description": "コードが出す項目 waited_seconds（値の無い経路では null）",
+          "type": [
+            "number",
+            "null"
+          ]
         }
       }
     },

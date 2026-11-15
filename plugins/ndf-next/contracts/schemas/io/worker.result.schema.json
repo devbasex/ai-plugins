@@ -17,11 +17,14 @@
       "description": "ndf worker の計測値",
       "properties": {
         "failed_tests": {
-          "description": "結果の failed_tests"
+          "description": "コードが出す項目 failed_tests（値の無い経路では null）"
         },
         "waited_seconds": {
-          "description": "結果の waited_seconds",
-          "type": "number"
+          "description": "コードが出す項目 waited_seconds（値の無い経路では null）",
+          "type": [
+            "number",
+            "null"
+          ]
         }
       }
     },

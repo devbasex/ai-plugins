@@ -209,7 +209,9 @@ def page_index(model: SpecModel) -> str:
         "skills.md": _count([s.surface for s in model.skills]),
     }
     rows = [[f"[{PAGES[name]}]({name})", text] for name, text in counts.items()]
-    spec = [[code(r["id"]), code(r["target"]), "・".join(code(f) for f in opt(r, "files"))] for r in model.entrypoints if r["kind"] == SPEC_KIND]
+    spec = [
+        [code(r["id"]), code(r["target"]), "・".join(code(f) for f in opt(r, "files"))] for r in model.entrypoints if r["kind"] == SPEC_KIND
+    ]
     caller = [[code(r["id"]), r["kind"], code(r["target"]), r["source"]] for r in model.entrypoints if r["order"] == CALLER_FIRST]
     intro = (
         "NDF を外から呼ぶ面（宣言・副命令・環境変数・受け渡しのファイル・hook・Skill・起動スクリプト）の規約である。"
@@ -249,7 +251,16 @@ def _key_rows(decl: DeclarationSpec) -> list[list[str]]:
     for key in sorted(props):
         p = props[key]
         mark = (MAIN_MARK if key in decl.main_keys else "") + (DEPRECATED_MARK if p.get("deprecated") else "")
-        rows.append([code(key) + mark, type_word(p), _value(p.get("default")), _enum(p), "必須" if key in required else "任意", opt(p, "description", "")])
+        rows.append(
+            [
+                code(key) + mark,
+                type_word(p),
+                _value(p.get("default")),
+                _enum(p),
+                "必須" if key in required else "任意",
+                opt(p, "description", ""),
+            ]
+        )
     return rows
 
 
@@ -257,7 +268,10 @@ def _declaration(decl: DeclarationSpec) -> list[str]:
     meta = f"{_place_word(decl)}・{SCOPE_WORDS[decl.tracked]}・{SURFACE_WORDS[decl.surface]}・{_schema_link(decl)}。読む工程: {_read_by(decl.read_by)}\n"
     head = [f"## `{DECL_DIR}/{decl.path}`（{decl.id}）\n", meta]
     if decl.sections is not None:
-        rows = [[str(r["order"]), "#" * r["level"] + " " + r["heading"], "必須" if r["required"] else "任意", r["meaning"]] for r in decl.sections]
+        rows = [
+            [str(r["order"]), "#" * r["level"] + " " + r["heading"], "必須" if r["required"] else "任意", r["meaning"]]
+            for r in decl.sections
+        ]
         return [*head, "Markdown の宣言。節の並び:\n", md_table(["順", "見出し", "必須か", "持つもの"], rows)]
     if decl.schema is None:
         return [*head, "スキーマが無い（`ndf check` の spec-decl が落とす）。\n"]
@@ -306,7 +320,10 @@ def _command(command: CommandSpec) -> list[str]:
     out = [f"## `{ENTRY} {command.name}`\n", f"{SURFACE_WORDS[command.surface]}。{links}\n"]
     if command.args is None:
         return [*out, "引数を取り出せない（`ndf check` の spec-io が落とす）。\n"]
-    rows = [[code(" ".join((ENTRY, command.name, *path))), "<br>".join(_arg_text(a) for a in args) if args else "引数を受けない"] for path, args in leaves(command.args)]
+    rows = [
+        [code(" ".join((ENTRY, command.name, *path))), "<br>".join(_arg_text(a) for a in args) if args else "引数を受けない"]
+        for path, args in leaves(command.args)
+    ]
     props = opt(command.result_schema, "properties", {}) if command.result_schema is not None else {}
     result = f"結果の `metrics`: {_props_text(opt(props, 'metrics', None))}。`items` の要素: {_props_text(opt(opt(props, 'items', {}), 'items', None))}\n"
     return [*out, md_table(["呼び方", "引数"], rows), result]
@@ -328,16 +345,31 @@ def page_commands(model: SpecModel) -> str:
 def page_exit_codes(model: SpecModel) -> str:
     """終了コードの表と止まった理由の表の全行。"""
     codes = {r["id"]: r for r in model.exit_codes}
-    ranges = [[code(r["id"]), str(r["code"]) + (f"〜{r['last']}" if "last" in r else ""), r["status"], r["label"]] for r in model.exit_codes]
+    ranges = [
+        [code(r["id"]), str(r["code"]) + (f"〜{r['last']}" if "last" in r else ""), r["status"], r["label"]] for r in model.exit_codes
+    ]
     causes = [
-        [code(c["kind"]), c["meaning"], c["std_type"], f"{codes[c['exit']]['code']}（{c['exit']}）" if c["exit"] in codes else c["exit"], c["route"], c["retry"] if c.get("retry") else NONE, c["exhausted"] if c.get("exhausted") else NONE]
+        [
+            code(c["kind"]),
+            c["meaning"],
+            c["std_type"],
+            f"{codes[c['exit']]['code']}（{c['exit']}）" if c["exit"] in codes else c["exit"],
+            c["route"],
+            c["retry"] if c.get("retry") else NONE,
+            c["exhausted"] if c.get("exhausted") else NONE,
+        ]
         for c in model.causes
     ]
     intro = (
         "結果 JSON の `status` と終了コードの区分、`stopped` の `cause.kind`（止まった理由）である。正本は `contracts/facts/exit-codes.json` と `contracts/causes.json`。"
         "行き先は `cause.kind` だけで選び、終了コードは `status` の区分を表すだけである"
     )
-    body = ["## 終了コード\n", md_table(["区分", "終了コード", "status", "見出し"], ranges), "## 止まった理由\n", md_table(["種類", "意味", "標準の型", "終了コード", "行き先", "再試行の方針", "尽きたとき"], causes)]
+    body = [
+        "## 終了コード\n",
+        md_table(["区分", "終了コード", "status", "見出し"], ranges),
+        "## 止まった理由\n",
+        md_table(["種類", "意味", "標準の型", "終了コード", "行き先", "再試行の方針", "尽きたとき"], causes),
+    ]
     return _page("exit-codes.md", intro, body)
 
 
@@ -351,7 +383,10 @@ def file_surface(model: SpecModel, ident: str) -> str:
 
 def page_env(model: SpecModel) -> str:
     """環境変数の表の全行。値が秘密の行も名前と意味だけで、値の例の列を持たない。"""
-    rows = [[code(r["id"]), r["set_by"], r["type"], "秘密" if r["secret"] else NONE, r["meaning"], SURFACE_WORDS[env_surface(model, r["id"])]] for r in model.env]
+    rows = [
+        [code(r["id"]), r["set_by"], r["type"], "秘密" if r["secret"] else NONE, r["meaning"], SURFACE_WORDS[env_surface(model, r["id"])]]
+        for r in model.env
+    ]
     intro = (
         "NDF が読む環境変数と、NDF が子のプロセスへ渡す環境変数である。正本は `contracts/domains/env.json`。"
         "公開は、公開する面の表のエントリポイントの `env` に載る変数である。値が秘密の変数は値をログ・結果・記録へ出さない"
@@ -370,15 +405,34 @@ def _place(model: SpecModel, place: str) -> str:
 def page_files(model: SpecModel) -> str:
     """置き場の表の全行と、公開する行の項目（列 `fields`）。"""
     rows = [
-        [code(r["id"]), _place(model, r["place"]), code(r["path"]), r["kind"], "追跡" if r["tracked"] else NONE, r["writer"], r["ends"], SURFACE_WORDS[file_surface(model, r["id"])]]
+        [
+            code(r["id"]),
+            _place(model, r["place"]),
+            code(r["path"]),
+            r["kind"],
+            "追跡" if r["tracked"] else NONE,
+            r["writer"],
+            r["ends"],
+            SURFACE_WORDS[file_surface(model, r["id"])],
+        ]
         for r in model.files
     ]
-    public = [[code(r["id"]), opt(r, "reader", NONE), "・".join(code(f) for f in opt(r, "fields"))] for r in model.files if file_surface(model, r["id"]) == PUBLIC]
+    public = [
+        [code(r["id"]), opt(r, "reader", NONE), "・".join(code(f) for f in opt(r, "fields"))]
+        for r in model.files
+        if file_surface(model, r["id"]) == PUBLIC
+    ]
     intro = (
         "NDF の工程が書くファイル（宣言・計測値・実行の記録・文書・受け渡し）である。正本は `contracts/domains/ndf-files.json` と置き場の表 `contracts/domains/places.json`。"
         "形（項目）を約束するのは公開する行だけで、内部の行は置き場と種類だけを載せる"
     )
-    body = ["## 一覧\n", md_table(["行", "置き場", "パス", "種類", "追跡", "書き手", "消す時点", "公開か"], rows), "## 公開する行の項目\n", "書き手は項目の名前と意味を変えない。ほかの項目は足してよく、読み手は知らない項目を受け流す。\n", md_table(["行", "読む外の呼び手", "項目"], public)]
+    body = [
+        "## 一覧\n",
+        md_table(["行", "置き場", "パス", "種類", "追跡", "書き手", "消す時点", "公開か"], rows),
+        "## 公開する行の項目\n",
+        "書き手は項目の名前と意味を変えない。ほかの項目は足してよく、読み手は知らない項目を受け流す。\n",
+        md_table(["行", "読む外の呼び手", "項目"], public),
+    ]
     return _page("files.md", intro, body)
 
 
@@ -391,7 +445,12 @@ def page_hooks(model: SpecModel) -> str:
     body: list[str] = []
     for hook in model.hooks:
         body.append(f"## {hook.runtime}: `{hook.event}`\n")
-        body.append(md_table(["読む入力の鍵", "無くてよい鍵", "公開か"], [["・".join(code(k) for k in hook.reads), "・".join(code(k) for k in hook.optional), SURFACE_WORDS[hook.surface]]]))
+        body.append(
+            md_table(
+                ["読む入力の鍵", "無くてよい鍵", "公開か"],
+                [["・".join(code(k) for k in hook.reads), "・".join(code(k) for k in hook.optional), SURFACE_WORDS[hook.surface]]],
+            )
+        )
         for verdict in sorted(hook.outputs):
             body.append(f"判定 `{verdict}` の出力:\n\n```json\n{dumps(hook.outputs[verdict])}```\n")
         if not hook.outputs:
@@ -414,7 +473,11 @@ def page_skills(model: SpecModel) -> str:
         ]
         for s in model.skills
     ]
-    reports = [[code(r["target"]), "・".join(code(a) for a in opt(r, "args")), "・".join(code(e) for e in r["env"])] for r in model.entrypoints if r["kind"] == "report"]
+    reports = [
+        [code(r["target"]), "・".join(code(a) for a in opt(r, "args")), "・".join(code(e) for e in r["env"])]
+        for r in model.entrypoints
+        if r["kind"] == "report"
+    ]
     launchers = [[code(r["id"]), r["passes_to"], r["meaning"]] for r in model.launchers if r["kind"] == "launcher"]
     intro = (
         "配る Skill（`manifests/skills.json` の行で `skills/<名前>/SKILL.md` があるもの）と、公開する面に載る Skill の入出力である。"

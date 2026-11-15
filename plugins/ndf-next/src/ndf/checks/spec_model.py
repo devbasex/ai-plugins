@@ -305,7 +305,9 @@ def commands(public: frozenset[tuple[str, str]] | set[tuple[str, str]]) -> list[
     return out
 
 
-def skills(plugin_root: Path, public: frozenset[tuple[str, str]] | set[tuple[str, str]], entrypoints: list[dict[str, Any]]) -> list[SkillSpec]:
+def skills(
+    plugin_root: Path, public: frozenset[tuple[str, str]] | set[tuple[str, str]], entrypoints: list[dict[str, Any]]
+) -> list[SkillSpec]:
     """実体のある配る Skill と、公開する面に載る Skill に、Skill の入出力の表の行を付ける。"""
     # 配る Skill の表と実体の置き場（持ち主は S1b の ndf.domains.manifests。検査は持ち主のパッケージを読まず、同じファイルを読む）
     listed = [s["name"] for s in _read_json(plugin_root / "manifests" / "skills.json")["skills"]]

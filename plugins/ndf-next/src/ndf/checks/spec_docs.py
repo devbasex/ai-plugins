@@ -161,7 +161,9 @@ def _env_name(node: ast.AST) -> str | None:
         return _const(node.slice)
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.args:
         func = node.func
-        reads = (func.attr == "get" and _is_environ(func.value)) or (func.attr == "getenv" and isinstance(func.value, ast.Name) and func.value.id == "os")
+        reads = (func.attr == "get" and _is_environ(func.value)) or (
+            func.attr == "getenv" and isinstance(func.value, ast.Name) and func.value.id == "os"
+        )
         return _const(node.args[0]) if reads else None
     if isinstance(node, ast.Compare) and len(node.comparators) == 1 and isinstance(node.ops[0], (ast.In, ast.NotIn)):
         return _const(node.left) if _is_environ(node.comparators[0]) else None
@@ -181,11 +183,17 @@ def io_findings(model: SpecModel, scope: Scope, rel: Any) -> list[Finding]:
         found += [Finding(IO, io_rel, 1, f"副命令 {command.name}: {e}") for e in _source_errors(command) + _result_errors(command)]
     known = {r["id"] for r in model.env}
     for src in scope.code():
-        found += [Finding(IO, src.rel, line, f"環境変数 {name} が環境変数の表（env）に無い") for line, name in env_reads(src.tree) if name not in known]
+        found += [
+            Finding(IO, src.rel, line, f"環境変数 {name} が環境変数の表（env）に無い")
+            for line, name in env_reads(src.tree)
+            if name not in known
+        ]
     rows = {r["id"] for r in model.launchers}
     launchers_rel = rel(f"{CONTRACTS}/domains/launchers.json")
     found += [Finding(IO, launchers_rel, 1, f"bin/{n} が起動スクリプトの表（launchers）に無い") for n in model.bin_files if n not in rows]
-    found += [Finding(IO, launchers_rel, 1, f"起動スクリプトの表の行 {n} のファイルが bin/ に無い") for n in sorted(rows - set(model.bin_files))]
+    found += [
+        Finding(IO, launchers_rel, 1, f"起動スクリプトの表の行 {n} のファイルが bin/ に無い") for n in sorted(rows - set(model.bin_files))
+    ]
     return found
 
 
@@ -303,7 +311,11 @@ def public_findings(model: SpecModel, plugin_root: Path, rel: Any) -> list[Findi
     found = []
     env = {r["id"] for r in model.env}
     for row in model.entrypoints:
-        found += [Finding(PUBLIC, ep_rel, 1, f"公開する面の行 {row['id']} の環境変数 {e} が環境変数の表に無い") for e in row["env"] if e not in env]
+        found += [
+            Finding(PUBLIC, ep_rel, 1, f"公開する面の行 {row['id']} の環境変数 {e} が環境変数の表に無い")
+            for e in row["env"]
+            if e not in env
+        ]
         if row["kind"] == spec_model.SPEC_KIND or row["order"] == spec_model.CALLER_FIRST:
             continue
         if not _hits(model, row):
@@ -315,7 +327,9 @@ def public_findings(model: SpecModel, plugin_root: Path, rel: Any) -> list[Findi
             found.append(Finding(PUBLIC, ep_rel, 1, f"規約の置き場 {target} を指す種類 spec の行が {n} 行（1 行にする）"))
     for r in spec:
         if r["target"] not in SPEC_TARGETS or not (plugin_root / r["target"]).is_dir():
-            found.append(Finding(PUBLIC, ep_rel, 1, f"種類 spec の行 {r['id']} の置き場 {r['target']} が規約の置き場でないか、ディレクトリが無い"))
+            found.append(
+                Finding(PUBLIC, ep_rel, 1, f"種類 spec の行 {r['id']} の置き場 {r['target']} が規約の置き場でないか、ディレクトリが無い")
+            )
     return found
 
 
@@ -349,7 +363,10 @@ def docs_findings(rendered: dict[str, str], plugin_root: Path, patterns: list[st
             continue
         if have != rendered[path]:
             found.append(Finding(DOCS, rel(path), _first_diff(rendered[path], have), "生成し直した中身と違う" + hint))
-    found += [Finding(DOCS, rel(p), 1, "生成されないファイルが生成物の置き場に残る" + hint) for p in sorted(_generated(plugin_root, patterns) - set(rendered))]
+    found += [
+        Finding(DOCS, rel(p), 1, "生成されないファイルが生成物の置き場に残る" + hint)
+        for p in sorted(_generated(plugin_root, patterns) - set(rendered))
+    ]
     return found
 
 

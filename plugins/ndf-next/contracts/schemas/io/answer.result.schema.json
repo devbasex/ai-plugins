@@ -17,13 +17,13 @@
       "description": "ndf answer の計測値",
       "properties": {
         "gate": {
-          "description": "結果の gate"
+          "description": "コードが出す項目 gate（値の無い経路では null）"
         },
         "head": {
-          "description": "結果の head"
+          "description": "コードが出す項目 head（値の無い経路では null）"
         },
         "table_id": {
-          "description": "結果の table_id"
+          "description": "コードが出す項目 table_id（値の無い経路では null）"
         }
       }
     },

@@ -24,7 +24,7 @@
         "type": "object",
         "properties": {
           "args": {
-            "description": "結果の args"
+            "description": "コードが出す項目 args（値の無い経路では null）"
           }
         }
       }

@@ -93,7 +93,9 @@ def check(scope: Scope, rules: dict[str, Any], write_spec: bool = False, written
     return sorted(found, key=lambda f: (f.path, f.line, f.rule, f.detail))
 
 
-def select(scope: Scope, rules: dict[str, Any], only: list[str] | None, write_spec: bool = False, written: list[str] | None = None) -> list[Finding]:
+def select(
+    scope: Scope, rules: dict[str, Any], only: list[str] | None, write_spec: bool = False, written: list[str] | None = None
+) -> list[Finding]:
     """`only` の規則の指摘だけを返す（無ければすべての規則）。
 
     `only` が差分の規則（`invariants.DIFF_RULES`）だけなら、ファイルを集めず構文木も作らずに差分と PR 本文だけを見る

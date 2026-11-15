@@ -17,23 +17,26 @@
       "description": "ndf loop の計測値",
       "properties": {
         "answer": {
-          "description": "結果の answer"
+          "description": "コードが出す項目 answer（値の無い経路では null）"
         },
         "head": {
-          "description": "結果の head"
+          "description": "コードが出す項目 head（値の無い経路では null）"
         },
         "lap": {
-          "description": "結果の lap"
+          "description": "コードが出す項目 lap（値の無い経路では null）"
         },
         "outcome": {
-          "description": "結果の outcome"
+          "description": "コードが出す項目 outcome（値の無い経路では null）"
         },
         "remaining": {
-          "description": "結果の remaining",
-          "type": "array"
+          "description": "コードが出す項目 remaining（値の無い経路では null）",
+          "type": [
+            "array",
+            "null"
+          ]
         },
         "streak": {
-          "description": "結果の streak"
+          "description": "コードが出す項目 streak（値の無い経路では null）"
         }
       }
     },

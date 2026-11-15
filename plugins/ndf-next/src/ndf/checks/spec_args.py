@@ -102,7 +102,9 @@ def _type_word(action: argparse.Action) -> str:
 
 
 def _is_array(action: argparse.Action) -> bool:
-    return isinstance(action, (argparse._AppendAction, argparse._ExtendAction)) or action.nargs in ("*", "+") or isinstance(action.nargs, int)
+    return (
+        isinstance(action, (argparse._AppendAction, argparse._ExtendAction)) or action.nargs in ("*", "+") or isinstance(action.nargs, int)
+    )
 
 
 def _default(action: argparse.Action) -> Any:

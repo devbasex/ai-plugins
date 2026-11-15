@@ -24,11 +24,14 @@
         "type": "object",
         "properties": {
           "kind": {
-            "description": "結果の kind",
-            "type": "string"
+            "description": "コードが出す項目 kind（値の無い経路では null）",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "number": {
-            "description": "結果の number"
+            "description": "コードが出す項目 number（値の無い経路では null）"
           }
         }
       }

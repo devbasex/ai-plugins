@@ -17,7 +17,7 @@
       "description": "ndf route の計測値",
       "properties": {
         "failed_tests": {
-          "description": "結果の failed_tests"
+          "description": "コードが出す項目 failed_tests（値の無い経路では null）"
         }
       }
     },
