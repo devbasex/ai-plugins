@@ -16,15 +16,13 @@ from ndf.domains.relay import subcommand
 
 # 問いのファイル → 載せられなかった理由（載せたら空）
 AskPlan = Callable[[Path], str]
-# 計画の名前を渡す環境変数（書く側は hub.spawn_env）
-PLAN_ENV = "NDF_RELAY_PLAN"
 
 
 def plan_asker(
     environ: Mapping[str, str], name: str, cwd: Path, plugin_root: Path, timeout: float, runner: Any = subprocess.run
 ) -> Optional[AskPlan]:
     """計画のレーンの中継なら、問いを計画の依頼として載せる手。計画のレーンでなければ None。"""
-    plan = environ.get(PLAN_ENV)
+    plan = environ.get("NDF_RELAY_PLAN")
     if not plan:
         return None
 

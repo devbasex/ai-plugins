@@ -52,7 +52,7 @@ def test_section(cwd: Path) -> dict[str, object]:
     """宣言（`.ndf/project.json`）の `test` の節。宣言が無い・読めない・形が違えば空の辞書。"""
     try:
         found = read_declaration(cwd)
-    except DeclarationError:  # noqa: NDF401 ファイル: 読めない宣言は節が無いとして扱う
+    except DeclarationError:  # 読めない宣言は節が無いとして扱う
         return {}
     data = found[1] if found is not None else None
     test = data.get("test") if isinstance(data, dict) else None
