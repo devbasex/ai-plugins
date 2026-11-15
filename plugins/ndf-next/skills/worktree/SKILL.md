@@ -9,7 +9,7 @@ allowed-tools:
 
 # worktree で開発する
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `projects-sync.sh`（M7）・`worktree-localenv.sh`（M8）・`worktree-setup.sh`（M8）・`worktree-testenv.sh`（M8）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `projects-sync.sh`（M7）・`worktree-deps.sh`（M8）・`worktree-localenv.sh`（M8）・`worktree-setup.sh`（M8）・`worktree-testenv.sh`（M8）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 開発の変更は、git の worktree の中で行い、リポジトリを clone したディレクトリには加えない。
 並行して複数の作業を進めても、互いの変更が同じ作業ディレクトリで混ざらない状態を保つ。
@@ -121,7 +121,7 @@ wt_in_worktree && echo "worktreeの中" || echo "メインディレクトリ"
 手順 3 へ進む。含まれていなければ 2-2 へ進む。
 
 ```bash
-ndf worktree deps "<作られた worktree のパス>"
+bash "$SCRIPTS/worktree-deps.sh" prepare "<作られた worktree のパス>"
 ```
 
 ### 2-2. `.worktrees/` の登録を確かめる
@@ -157,7 +157,7 @@ base=$(wt_base_branch "$main_dir") || exit 1
 start="origin/$base"
 git -C "$main_dir" show-ref --verify --quiet "refs/remotes/origin/$base" || start="$base"
 git -C "$main_dir" worktree add -b "$branch" "$main_dir/.worktrees/$branch" "$start"
-ndf worktree deps "$main_dir/.worktrees/$branch"
+bash "$SCRIPTS/worktree-deps.sh" prepare "$main_dir/.worktrees/$branch"
 cd "$main_dir/.worktrees/$branch"
 ```
 
@@ -301,8 +301,8 @@ worktree は追跡されているファイルしか持たないため、`vendor/
 出力の末尾を出して 0 以外で終わる。**worktree は消さない。** 直してから手で打ち直す。
 
 ```bash
-ndf worktree deps "$WT"                  # 印を見ずにやり直す
-ndf worktree deps "$WT" --if-unprepared  # 用意が済んでいなければ用意する
+bash "$SCRIPTS/worktree-deps.sh" prepare "$WT"                  # 印を見ずにやり直す
+bash "$SCRIPTS/worktree-deps.sh" prepare "$WT" --if-unprepared  # 用意が済んでいなければ用意する
 ```
 
 用意が済むと worktree ごとの git の管理ディレクトリに印（`ndf-deps`）を書く。印は用意した時の HEAD と宣言の

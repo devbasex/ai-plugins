@@ -74,8 +74,24 @@
         "words": ["入口"],
         "reason": "避ける語の表と、避ける語を探す grep の例が、言い換える前の語として挙げる"
       },
+      "skills/pr-review/SKILL.md": {
+        "words": ["実装レビュー"],
+        "reason": "旧 projects-sync.sh（M7）が受ける工程名。入れ替えまでは呼び先の工程表の名前を渡す"
+      },
+      "skills/refactoring/SKILL.md": {
+        "words": ["構造改善"],
+        "reason": "旧 projects-sync.sh（M7）が受ける工程名。入れ替えまでは呼び先の工程表の名前を渡す"
+      },
+      "skills/development-workflow/references/projects-tracking.md": {
+        "words": ["実装レビュー"],
+        "reason": "旧 projects-sync.sh（M7）が受ける工程名。入れ替えまでは呼び先の工程表の名前を渡す"
+      },
+      "skills/development-workflow/references/workflow-modes.md": {
+        "words": ["構造改善"],
+        "reason": "旧 projects-sync.sh（M7）が受ける工程名。入れ替えまでは呼び先の工程表の名前を渡す"
+      },
       "src/ndf/checks/rules.json": {
-        "words": ["入口"],
+        "words": ["入口", "実装レビュー", "構造改善"],
         "reason": "この除外のデータそのものが、外す語を持つ"
       }
     }

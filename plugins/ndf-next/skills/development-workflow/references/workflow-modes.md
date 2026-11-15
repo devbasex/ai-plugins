@@ -304,7 +304,7 @@ python3 "$RF/refactor.py" assess --base "origin/$BASE"; rc=$?; echo "exit=$rc"
 
 | 記録先 | 何を残すか |
 | --- | --- |
-| 進捗記録 | 工程 `リファクタリング`（`projects-sync.sh <課題番号> stage "リファクタリング"`） |
+| 進捗記録 | 工程 `構造改善`（`projects-sync.sh <課題番号> stage "構造改善"`） |
 | Pull Request の本文 | `リファクタリング: 飛ばした（<assess の理由の行>）` の 1 行 |
 | フェーズレポート | 同じ 1 行を `理由` に含める |
 

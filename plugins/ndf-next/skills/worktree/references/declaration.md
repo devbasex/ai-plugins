@@ -1,6 +1,6 @@
 # 設定ファイルの書き方
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `pr-steps.py`（M1）・`project-decl.py`（D2+）・`release-steps.py`（M2）・`supervise.py`（C2）・`worktree-localenv.sh`（M8）・`worktree-setup.sh`（M8）・`worktree-testenv.sh`（M8）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `pr-steps.py`（M1）・`project-decl.py`（D2+）・`release-steps.py`（M2）・`supervise.py`（C2）・`worktree-deps.sh`（M8）・`worktree-localenv.sh`（M8）・`worktree-setup.sh`（M8）・`worktree-testenv.sh`（M8）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 worktree 運用の仕組みは、リポジトリごとの差を `.ndf/worktree.json` から読む。
 **このファイルが無いリポジトリでは、すべての仕組みが何もせずに終わる。**
@@ -288,7 +288,7 @@ worktree が 1 つならそのブランチのコミットへ、0 個または複
 ## 依存物を worktree へ用意するリポジトリ
 
 pre-commit やテストが `vendor/`・`node_modules/`・`.env` などの追跡されないファイルを使うなら、`deps` を足す。
-NDF が worktree を作った直後に、`copy_from_main`・`copy_as_real`・`run` の順に用意する（`ndf worktree deps`）。
+NDF が worktree を作った直後に、`copy_from_main`・`copy_as_real`・`run` の順に用意する（`worktree-deps.sh prepare`）。
 
 ```json
 {

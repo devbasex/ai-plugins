@@ -132,7 +132,7 @@ bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "<工程名>" "<工程名>"
 同じ形で書き、呼び方を 1 つに揃える。
 
 ```bash
-bash "$SCRIPTS/projects-sync.sh" 186 stage "コードレビュー" "Pull Request"
+bash "$SCRIPTS/projects-sync.sh" 186 stage "実装レビュー" "Pull Request"
 bash "$SCRIPTS/projects-sync.sh" 186 mode "standard"
 bash "$SCRIPTS/projects-sync.sh" 186 worktree ".worktrees/fix/issue-186"
 bash "$SCRIPTS/projects-sync.sh" 186 plan "issues/issue-186.md"
