@@ -143,16 +143,32 @@ def cmd_approval_check(args: argparse.Namespace) -> dict:
     )
 
 
-def _moves(args: argparse.Namespace, kind: str) -> dict[str, Any]:
-    """止まったマージの次の手（打ち直し・差し戻し・次の版への回し）と既定の手（#3572 の決定 3）。"""
-    pr = str(args.pr)
-    rerun = ["merge", "--pr", pr, "--base", args.base, "--budget", str(args.budget)]
+def _same_target(args: argparse.Namespace) -> list[str]:
+    """元の呼び出しの対象（`--root`・`--repo`・`--production`）。次の手が別のリポジトリ・本番ブランチを対象にしないように引き継ぐ。"""
+    found = ["--root", str(args.root)]
+    if args.repo:
+        found += ["--repo", args.repo]
     if args.production:
-        rerun += ["--production", args.production]
+        found += ["--production", args.production]
+    return found
+
+
+def _moves(args: argparse.Namespace, kind: str, released: bool) -> dict[str, Any]:
+    """止まったマージの次の手（打ち直し・差し戻し・次の版への回し）と既定の手（#3572 の決定 3）。
+
+    本番へのマージが済んで戻す PR だけが止まった（`released`）ときは、本番の PR は閉じても差し戻してもいけないため、
+    戻す PR からの再開（打ち直し）だけを返す。
+    """
+    pr = str(args.pr)
+    target = _same_target(args)
+    rerun = result.command(TOOL, "merge", "--pr", pr, "--base", args.base, "--budget", str(args.budget), *target)
+    if released:
+        return {"moves": {merge_decide.RERUN: rerun}, "suggested": merge_decide.RERUN}
+    answer_args = ("answer", "--pr", pr, "--answer", approval_decide.REJECTED, *target)
     moves = {
-        merge_decide.RERUN: result.command(TOOL, *rerun),
-        merge_decide.REJECT: result.command(TOOL, "answer", "--pr", pr, "--answer", approval_decide.REJECTED, ask=("--presented", "--by")),
-        merge_decide.DEFER: result.command(TOOL, "defer", "--pr", pr),
+        merge_decide.RERUN: rerun,
+        merge_decide.REJECT: result.command(TOOL, *answer_args, ask=("--presented", "--by")),
+        merge_decide.DEFER: result.command(TOOL, "defer", "--pr", pr, *target),
     }
     return {"moves": moves, "suggested": merge_decide.suggested(kind)}
 
@@ -182,8 +198,10 @@ def _merge_result(args: argparse.Namespace, done: land.Landed) -> dict:
     if done.merged and done.kind is None and done.record_error is None:
         return result.result(TOOL, result.OK, detail, items, outputs=outputs)
     kind = done.kind if done.kind else "unknown"
-    if not done.merged:  # 次の手は打つ側が選ぶ（既定の手を next にすると、打つ側が問わずに本番の PR を閉じる）
-        items += _values(**_moves(args, kind))
+    # 次の手は打つ側が選ぶ（既定の手を next にすると、打つ側が問わずに本番の PR を閉じる）。`merged` は戻す PR の成否でも
+    # 偽になるため、本番へ出たかは `production_sha` で分ける
+    if not done.merged:
+        items += _values(**_moves(args, kind, released=done.production_sha is not None))
     return result.stopped(TOOL, kind, detail, items=items, outputs=outputs)
 
 

@@ -705,13 +705,17 @@ def test_cli_merge_of_an_approved_pr_writes_only_the_version_into_the_outputs(mo
 #       次の手の有無）と、Lander へ渡す引数（宣言から読む admin・宣言から読む本番ブランチ）だけを見る。
 
 _RERUN = ["ndf", "release-steps", "merge", "--pr", "7", "--base", "develop", "--budget", "30.0"]
-_REJECT = {"argv": ["ndf", "release-steps", "answer", "--pr", "7", "--answer", "rejected"], "ask": ["--presented", "--by"]}
-_DEFER = {"argv": ["ndf", "release-steps", "defer", "--pr", "7"]}
 _ADMIN_FALSE = {"kind": "value", "name": "admin", "value": False}
 
 
-def _moves_items(rerun: list[str], suggested: str) -> list[dict]:
-    moves = {"rerun": {"argv": rerun}, "reject": _REJECT, "defer": _DEFER}
+def _moves_items(target: list[str], suggested: str) -> list[dict]:
+    """次の手の値の項目。どの手も元の呼び出しの対象 `target`（`--root`・`--repo`・`--production`）を引き継ぐ。"""
+    reject = {"argv": ["ndf", "release-steps", "answer", "--pr", "7", "--answer", "rejected", *target], "ask": ["--presented", "--by"]}
+    moves = {
+        "rerun": {"argv": [*_RERUN, *target]},
+        "reject": reject,
+        "defer": {"argv": ["ndf", "release-steps", "defer", "--pr", "7", *target]},
+    }
     return [{"kind": "value", "name": "moves", "value": moves}, {"kind": "value", "name": "suggested", "value": suggested}]
 
 
@@ -823,7 +827,7 @@ def test_characterize_cli_merge_unmerged_without_a_kind_is_unknown_and_reads_pro
         "tool": "release-steps",
         "status": "stopped",
         "summary": "止まった",
-        "items": [_ADMIN_FALSE, *_moves_items(_RERUN, "defer")],
+        "items": [_ADMIN_FALSE, *_moves_items(["--root", str(tmp_path)], "defer")],
         "metrics": {},
         "cause": {"kind": "unknown", "detail": "止まった"},
     }
@@ -841,9 +845,19 @@ def test_characterize_cli_merge_unmerged_lists_failed_checks_first_then_the_move
         "items": [
             {"kind": "check", "name": "pytest", "outcome": "failure"},
             _ADMIN_FALSE,
-            *_moves_items([*_RERUN, "--production", "main"], "rerun"),
+            *_moves_items(["--root", str(tmp_path), "--production", "main"], "rerun"),
         ],
         "metrics": {},
         "cause": {"kind": "ci_pending", "detail": "待ちきれない"},
         "outputs": {"version": "1.2.4"},
     }
+
+
+def test_cli_merge_after_the_production_merge_offers_only_resuming_the_sync(monkeypatch, capsys, tmp_path) -> None:
+    """本番へのマージが済んで戻す PR だけが止まったら、本番の PR を閉じる手・差し戻す手を出さず、同期の再開（打ち直し）を既定にする。"""
+    done = land.Landed(False, "test_failed", "戻す PR の CI が落ちた", sync_pr=8, production_sha=MERGE_SHA)
+    target = ["--root", str(tmp_path), "--repo", "o/r", "--production", "main"]
+    code, out, _seen_args = _cli_merge(monkeypatch, capsys, done, tmp_path, "--repo", "o/r", "--production", "main")
+    values = _values(out)
+    assert code == 1 and out["cause"]["kind"] == "test_failed"
+    assert values["moves"] == {"rerun": {"argv": [*_RERUN, *target]}} and values["suggested"] == "rerun"
