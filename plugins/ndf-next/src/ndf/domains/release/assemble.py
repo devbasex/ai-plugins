@@ -97,6 +97,21 @@ class Built:
     renamed_from: str | None = None
 
 
+@dataclass(frozen=True)
+class _Run:
+    """1 回の組み立て（か材料の収集）で持ち回る、worktree の根・その git・GitHub・組み立ての指定。"""
+
+    root: Path
+    repo_git: git_mod.Git
+    hub: GitHub
+    target: Target
+
+
+def _run_of(root: Path, hub: GitHub, target: Target) -> _Run:
+    """公開のエントリポイント（`assemble`・`collect`）の引数から `_Run` を作る（git は `root` で打つ）。"""
+    return _Run(root, git_mod.Git(root), hub, target)
+
+
 def _remote_releases(repo_git: git_mod.Git) -> list[tuple[str, str]]:
     """origin のリリースブランチ（開発版を除く）の (版, 名前)。"""
     out = repo_git.run("ls-remote", "--heads", "--", git_mod.ORIGIN, f"refs/heads/{version_decide.BRANCH_PREFIX}*")
@@ -112,11 +127,12 @@ def _version_or_none(branch: str) -> str | None:
         return None
 
 
-def _shipped_of(root: Path, repo_git: git_mod.Git, target: Target) -> str | None:
+def _shipped_of(run: _Run) -> str | None:
     """名前に版を使うプラグインの出し済みの版（無ければ None）。"""
-    found = plugins_mod.load(root)
+    target = run.target
+    found = plugins_mod.load(run.root)
     name = target.plugin if target.plugin is not None else found[0].name if found else None
-    shipped = gather.shipped(repo_git, found, f"{git_mod.ORIGIN}/{target.production}")
+    shipped = gather.shipped(run.repo_git, found, f"{git_mod.ORIGIN}/{target.production}")
     return shipped[name] if name in shipped else None
 
 
@@ -128,19 +144,20 @@ def _standing(repo_git: git_mod.Git, shipped: str | None) -> str | None:
     return later[0][1] if later else None
 
 
-def _prepared(root: Path, repo_git: git_mod.Git, target: Target) -> str | None:
+def _prepared(run: _Run) -> str | None:
     """前の版の直後に用意した常設のリリースブランチ（出し済みの版より大きい最小の版。無ければ None）。"""
-    return _standing(repo_git, _shipped_of(root, repo_git, target))
+    return _standing(run.repo_git, _shipped_of(run))
 
 
-def _span(root: Path, repo_git: git_mod.Git, target: Target) -> gather.Range:
+def _span(run: _Run) -> gather.Range:
     """範囲（本番ブランチの先端..範囲の先端）。`release` なら範囲の先端は常設のリリースブランチ。"""
+    repo_git, target = run.repo_git, run.target
     for name in (target.base, target.production):
         gather.fetch(repo_git, name)
     since = f"{git_mod.ORIGIN}/{target.production}"
     if target.source != RELEASE_SOURCE:
         return gather.Range(since, f"{git_mod.ORIGIN}/{target.base}")
-    branch = _prepared(root, repo_git, target)
+    branch = _prepared(run)
     if branch is None:
         raise AssembleError("origin に常設のリリースブランチが無い（前の版の後の release-steps prepare-next を先に打つ）")
     gather.fetch(repo_git, branch)
@@ -199,9 +216,9 @@ def _open_pr(hub: GitHub, branch: str, base: str, title: str, body: str) -> tupl
     return number, str(made["html_url"])
 
 
-def _facts(root: Path, hub: GitHub, target: Target, span: gather.Range) -> materials_decide.Facts:
+def _facts(run: _Run, span: gather.Range) -> materials_decide.Facts:
     """worktree（範囲の先端を取り出したもの）から材料を読む。上げるものが無ければ `NothingToRelease`。"""
-    repo_git = git_mod.Git(root)
+    root, repo_git, hub, target = run.root, run.repo_git, run.hub, run.target
     decl = decl_mod.load(root)
     found = plugins_mod.load(root)
     paths = repo_git.changed_files(span.since, span.until)
@@ -239,25 +256,27 @@ def collect(root: Path, hub: GitHub, target: Target) -> materials_decide.Facts:
     宣言・マーケットプレイス・今の版はworktreeから読むため、worktreeの HEAD が範囲の先端（origin のベースブランチ）で
     なければ `AssembleError` で止まる（ほかのブランチの版から計画すると版が逆行する）。
     """
-    repo_git = git_mod.Git(root)
-    span = _span(root, repo_git, target)
+    run = _run_of(root, hub, target)
+    repo_git = run.repo_git
+    span = _span(run)
     if repo_git.rev_parse("HEAD") != repo_git.rev_parse(span.until):
         raise AssembleError(f"worktreeの HEAD が {span.until} の先端でない（範囲の先端で打つ）")
-    return _facts(root, hub, target, span)
+    return _facts(run, span)
 
 
 def _on_origin(repo_git: git_mod.Git, branch: str) -> bool:
     return repo_git.attempt("ls-remote", "--exit-code", "--heads", "--", git_mod.ORIGIN, branch).returncode == 0
 
 
-def _existing(root: Path, repo_git: git_mod.Git, hub: GitHub, target: Target, branch: str) -> tuple[str | None, int | None]:
+def _existing(run: _Run, branch: str) -> tuple[str | None, int | None]:
     """組むべき既にあるリリースブランチ（計画した版の名前か、前の版の直後に用意した名前）と、その開いた本番の PR の番号。
 
     別のブランチの開いた本番の PR があれば `ReleaseOpen`。用意した名前の PR があり計画した版と違えば `AssembleError`。
     """
-    prepared = _prepared(root, repo_git, target)
-    found = branch if _on_origin(repo_git, branch) else prepared
-    heads = open_release_heads(hub, target)
+    target = run.target
+    prepared = _prepared(run)
+    found = branch if _on_origin(run.repo_git, branch) else prepared
+    heads = open_release_heads(run.hub, target)
     others = sorted(n for n, ref in heads.items() if ref != found)
     if others:
         listed = ", ".join(f"#{n}" for n in others)
@@ -302,9 +321,10 @@ def _reassemble(hub: GitHub, number: int, facts: materials_decide.Facts) -> None
     Publisher(hub).edit_body(number, materials_decide.render(facts))
 
 
-def _checkout(root: Path, repo_git: git_mod.Git, hub: GitHub, target: Target, branch: str, until: str) -> tuple[int | None, str | None]:
+def _checkout(run: _Run, branch: str, until: str) -> tuple[int | None, str | None]:
     """組むリリースブランチを取り出す。(開いた本番の PR の番号, 改名した前の名前)。開発版は今のまま新しく作る。"""
-    found, number = _existing(root, repo_git, hub, target, branch) if target.is_production else (None, None)
+    repo_git, target = run.repo_git, run.target
+    found, number = _existing(run, branch) if target.is_production else (None, None)
     if found is None:
         if _on_origin(repo_git, branch):
             raise AssembleError(f"origin に {branch} が既にある（前の組み立ての PR を先に片付ける）")
@@ -312,7 +332,7 @@ def _checkout(root: Path, repo_git: git_mod.Git, hub: GitHub, target: Target, br
         return None, None
     renamed = None
     if found != branch:
-        _rename(hub, found, branch)
+        _rename(run.hub, found, branch)
         renamed = found
     _advance(repo_git, branch, until, target.source, number is not None)
     return number, renamed
@@ -320,13 +340,14 @@ def _checkout(root: Path, repo_git: git_mod.Git, hub: GitHub, target: Target, br
 
 def assemble(root: Path, hub: GitHub, target: Target) -> Built:
     """リリースのブランチを組み立てて PR を作る（開いた本番の PR があれば組み直す）。材料は範囲の先端を取り出してから読む。"""
-    repo_git = git_mod.Git(root)
-    span = _span(root, repo_git, target)
+    run = _run_of(root, hub, target)
+    repo_git = run.repo_git
+    span = _span(run)
     repo_git.run("switch", "--quiet", "--detach", span.until)
-    facts = _facts(root, hub, target, span)
+    facts = _facts(run, span)
     named = _named(facts.planned, target.plugin)
     branch = version_decide.branch_of(named.next)
-    number, renamed = _checkout(root, repo_git, hub, target, branch, facts.head)
+    number, renamed = _checkout(run, branch, facts.head)
     _write(root, decl_mod.load(root), facts)
     title = f"Release: {named.plugin} v{named.next}"
     facts = facts._replace(head=_commit_and_push(repo_git, branch, title))
