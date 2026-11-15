@@ -550,13 +550,18 @@ def merge_commit_of(root, n):
     return ((d.get("mergeCommit") or {}).get("oid")) or None
 
 
+def _base_contains_head(root, base) -> bool:
+    """origin のベースブランチを取り直し、HEAD がその祖先か（マージ済みの PR を使い回してよいかの根拠）。"""
+    git(root, "fetch", "-q", "origin", base)
+    return git(root, "merge-base", "--is-ancestor", "HEAD", f"origin/{base}", check=False).returncode == 0
+
+
 def _reusable_release_pr(root, branch, base):
     """開発版の PR（release/v<版> → ベースブランチ）のうち使い回せるものを返す。無ければ None。"""
     pr = find_pr(root, branch, base, states=("OPEN", "MERGED"))
     if pr and pr["state"] == "MERGED":
         # マージ済みの PR へ後から積んだコミットは GitHub が開き直さずベースブランチに入らない。入っていなければ PR を作り直す
-        git(root, "fetch", "-q", "origin", base)
-        pr = pr if git(root, "merge-base", "--is-ancestor", "HEAD", f"origin/{base}", check=False).returncode == 0 else None
+        pr = pr if _base_contains_head(root, base) else None
     return pr
 
 
@@ -606,8 +611,7 @@ def _merged_sync_pr(root, branch, base):
     pr = find_pr(root, f"{branch}-sync", base, states=("MERGED",))
     if pr is None:
         return None
-    git(root, "fetch", "-q", "origin", base)
-    return pr["number"] if git(root, "merge-base", "--is-ancestor", "HEAD", f"origin/{base}", check=False).returncode == 0 else None
+    return pr["number"] if _base_contains_head(root, base) else None
 
 
 def _merge_sync_pr(root, a, plugin, branch, base, release_pr, lead=None, sections=False, merge=None):
