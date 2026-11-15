@@ -720,7 +720,9 @@ class GitHub:
         `require_method` が真の呼び手（merge commit を必須とする本番へのマージ）だけ、キューの方式が `method` と
         違えばキューへ入れずに断る。偽なら（プランの merge ステップ。方式は自動で決めた既定値）キューの方式に従う。
         """
-        return self._merge_with(number, expect_head, method, self._send_rest_merge, lambda exc: exc.status in MERGE_REFUSED_STATUS, "")
+        return self._merge_with(
+            number, expect_head, method, self._send_rest_merge, lambda exc: exc.status in MERGE_REFUSED_STATUS, "", require_method
+        )
 
     def merge_as_admin(self, number: int, expect_head: str, method: Optional[str] = None) -> MergeOutcome:
         """PR を管理者の迂回でマージする（#3506 の決定 5）。`merge` と同じ先の確認を通り、GraphQL の `mergePullRequest` を
@@ -744,9 +746,11 @@ class GitHub:
         send: Callable[[int, Pull, str], None],
         refused: Callable[[GitHubError], bool],
         how: str,
+        require_method: bool = False,
     ) -> MergeOutcome:
         """`merge`・`merge_as_admin` の共通の手順。先の確認と方式の選択を通り、`send` で要求を打つ。`refused` が真と
-        みなした誤りは PR を読み直して種類を返し、ほかは投げ直す。`how` は成功の文に添える迂回の印。"""
+        みなした誤りは PR を読み直して種類を返し、ほかは投げ直す。`how` は成功の文に添える迂回の印。
+        `require_method` が真なら、キューの方式が選んだ方式と違うときキューへ入れずに断る。"""
         pull = self.pull(number)
         early = _preflight(pull, number, expect_head)
         if early is not None:
