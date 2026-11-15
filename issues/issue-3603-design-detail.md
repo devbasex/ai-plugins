@@ -43,10 +43,16 @@ docs/
 ```
 
 依存の向きは一方向である。エントリポイント（`parallel.py`・`hook_lib/ask_guard.py`）が `lib/` の部品を呼び、`lib/` の部品はエントリポイントを読まない。
-新設の `parallel_design_gate.py` は `parallel_lane.py`・`parallel_ledger.py`・`gate1_requests.py`・`parallel_hold_sprint.py`・`run_state.py` を読み、
-これらのどれからも読まれない（読むのは `parallel.py` だけ）。`parallel_question.py` は純粋な関数だけを持ち、ほかの `lib/` を読まない。
-`report_pr`・`last_verdict`・`pr_numbers` を `sprint_loop_gate.py` から `gate1_requests.py` へ移し、`sprint_loop_gate.py` が `gate1_requests.py` を読む
-（今も `carried_over` などを読む向きと同じ）。`gate1_requests.py` は `sprint_loop_gate.py` を読まないため、輪はできない。
+新設の `parallel_design_gate.py` が読む部品と、それを読む側は次のとおりである。`parallel_question.py` は純粋な関数だけを持ち、ほかの `lib/` を読まない。
+
+| 向き | 部品 |
+| --- | --- |
+| `parallel_design_gate.py` が読む | `parallel_lane.py`・`parallel_ledger.py`・`gate1_requests.py`・`parallel_hold_sprint.py`・`run_state.py` |
+| `parallel_design_gate.py` を読む | `parallel.py` だけ（上の部品のどれからも読まれない） |
+
+`report_pr`・`last_verdict`・`pr_numbers` は `sprint_loop_gate.py` から `gate1_requests.py` へ移す。
+移した後は `sprint_loop_gate.py` が `gate1_requests.py` を読む（今も `carried_over` などを読む向きと同じ）。
+`gate1_requests.py` は `sprint_loop_gate.py` を読まないため、輪はできない。
 
 | パス | 種類 | 役割 1 文 | 依存する先 |
 | --- | --- | --- | --- |
@@ -179,7 +185,7 @@ docs/
 | `cmd_design_approved` | どちらも無く、PR が `MERGED` でないか `mvv_approval` が無い | 今どおり 10 |
 
 - 繰り返しの終わる条件: `forward_to_organizer` の候補の繰り返しは今と同じ（候補が尽きるか全体の上限の秒）。`held_after_timeout` は台帳を 1 回だけ読み、繰り返さない
-- 計算量の注意: `cmd_request_ask` は台帳を 1 回だけ読み、その行を `next_gate1_id`・`prior_of`・既存の行の確かめに使い回す。台帳の行数に比例する。`gh pr view` は名指しが 1 本に決まった後の 1 回だけ
+- 計算量の注意: `cmd_request_ask` は台帳を 1 回だけ読む。読んだ行は `next_gate1_id`・`prior_of`・既存の行の確かめに使い回す。台帳の行数に比例する。`gh pr view` は名指しが 1 本に決まった後の 1 回だけ
 
 ## 内部のデータと定数
 
