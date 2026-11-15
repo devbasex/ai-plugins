@@ -21,6 +21,7 @@ import time
 from typing import NamedTuple
 
 from . import claude as cl
+from . import switch as sw
 from . import tmux
 from .common import (
     LOCK_FILE,
@@ -64,6 +65,7 @@ BAD_NAME = "bad-name"
 NAME_TAKEN = "name-taken"
 LIMIT = "limit"
 NOT_FOUND = "not-found"
+NO_SESSION = "no-session"  # 再開する会話を決められない（#3555）
 NO_TMUX = "no-tmux"
 TMUX_FAILED = "tmux-failed"
 
@@ -279,16 +281,30 @@ def live(ws: list[Wrapper], registry: dict[str, dict], sessions: dict[str, dict]
     return Live(len(names) - helpers - humans - organizer, names, taken | set(sessions), helpers, humans)
 
 
-def restart_input(name: str, row: dict, w: Wrapper | None) -> tuple[str, list[str]]:
+def _resumed(start: dict) -> bool:
+    """その区間が前の会話を `--resume` で続けたか。印（`resumed`）の無い古い行は、入力が再開の文かで見る（#3555）。"""
+    return bool(start.get("resumed")) or start.get("command") in sw.RESUME_TEXTS
+
+
+def restart_input(name: str, row: dict, w: Wrapper | None) -> tuple[str, list[str]] | None:
     """やり直しの (cwd, 引数)。区間 1 なら登録簿の引数、2 以降は最後の start の行の入力（決定 10）。
-    cwd は最後の start の行のもの（区間の切り替えで worktree へ移っている）。"""
+    cwd は最後の start の行のもの（区間の切り替えで worktree へ移っている）。
+
+    最後の区間が前の会話を続けた区間（上限での切り替え）なら、その会話を `--resume` で再開する。再開の文は会話の外では
+    意味を持たず、新しい会話へ打つと別の役目の作業を拾う（#3555）。会話を決められなければ None（起こさない）。"""
     args = [a for a in row.get("args") or [] if isinstance(a, str)]
     start = w.start if w else None
     cwd = (start or {}).get("cwd") or row.get("cwd") or os.path.expanduser("~")
     if not os.path.isdir(cwd):
         cwd = fallback_cwd(cwd)
     if start and isinstance(start.get("section"), int) and start["section"] >= 2 and start.get("command"):
-        args = [*cl.carried_args(args), start["command"]]
+        args = cl.carried_args(args)
+        if not _resumed(start):
+            return cwd, [*args, start["command"]]
+        sid = start.get("from_session")
+        return (cwd, [*args, "--resume", sid, start["command"]]) if isinstance(sid, str) and sid else None
+    if args and args[-1] in sw.RESUME_TEXTS and "--resume" not in args:
+        return None  # 前の起こし直しが登録簿へ残した、会話の無い再開の文
     return cwd, args
 
 
@@ -422,7 +438,11 @@ class Hub:
             row = registry.get(name) if isinstance(name, str) else None
             if row is None:
                 return Refusal(NOT_FOUND, f"その名前は無い: {name}", 3)
-            cwd, args = restart_input(name, row, by_name(ws).get(name))
+            got = restart_input(name, row, by_name(ws).get(name))
+            if got is None:
+                why = f"{name} の再開する会話を決められない。relay.py spawn --name {name} -- <引継ぎ文書の次に実行するコマンド> で新しい会話として起こす"
+                return Refusal(NO_SESSION, why, 3)
+            cwd, args = got
             return name, cwd, args, (row.get("role") if row.get("role") == "helper" else None)
         if kind == "spawn":
             cwd, args = spawn_input(req)
