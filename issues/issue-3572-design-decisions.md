@@ -359,7 +359,9 @@ NDF の承認ゲートの承認は PR のコメントで、GitHub のレビュ�
 
 `land` は承認の記録の読み直しと ruleset の照らし合わせの後、PR の必須のチェックを待つ。
 その後に `enqueuePullRequest(pullRequestId, expectedHeadOid=<承認した head>)` を打つ（STD10・確かめ 4）。
-GitHub は PR の head が違えば投入を断り、`land` は `refused` で止まる。投入の後は `ci_budget` の秒まで、PR の `merged`・`isInMergeQueue`・`mergeQueueEntry.state` を読む。
+GitHub は PR の head が違えば投入を断り、`land` は `refused` で止まる。投入が通ったら、入れた head を本番の PR のキューへの投入の記録のコメントに残す。
+`land` は始めにこの記録を読み、承認した head の記録があり、PR がマージされておらずキューにも無ければ、入れ直さずに `queue_removed` で止まる（I16）。
+`ci_pending` の後の `rerun` で始まった `land` は、今のキューの所属と承認だけでは初めての投入と見分けられないため、記録で見分ける。投入の後は `ci_budget` の秒まで、PR の `merged`・`isInMergeQueue`・`mergeQueueEntry.state` を読む。
 
 | 読んだ状態 | `land` の扱い |
 | --- | --- |
@@ -397,13 +399,14 @@ ruleset の `dismiss_stale_reviews_on_push` が偽でも（確かめ 6）、NDF 
 
 バージョン上げの PR は人の承認を持たない。決定 17 で本番ブランチの承認の数を 0 にすればキューへ入れられるが、キューを通すとキューの CI がもう 1 回走り、リリースとバージョンの間の時間（設計文書の
 「main へのマージの後（CD）」）が延びる。一方、迂回しても組み合わせの確かめは抜けない。`land_bump` は main の先端がバージョン上げの PR の head の
-祖先であるときだけマージするため、マージした後の main は、バージョン上げの PR の必須のチェックが確かめた木と同じになる。
+祖先であるときだけ、main の ref を head へ fast-forward で進める更新（`force` なし）で入れる。確かめた後にキューが別の PR を main へ入れても、
+GitHub が fast-forward でない更新を断るため、main はバージョン上げの PR の必須のチェックが確かめた head そのものにしかならない。
 
 | 守り | どこで守るか |
 | --- | --- |
 | 迂回するのはバージョン上げの PR だけ | `land` はマージの方式（`merge-queue`・`strict`）のある本番の PR で、`production_merge.admin` が真でも `merge_as_admin` を呼ばない（I17）。迂回は必須のチェックと最新の取り込みの規則も越え、`strict` でも I14 が破れるためである。マージの方式の無い今の行の本番の PR は今の規則のまま |
 | バージョン上げの PR にコードが混ざらない | `bump_decide` が、差分がバージョンの置き場（決定 22）・CHANGELOG・手順の書き先に限られると判定したときだけ迂回する |
-| 確かめた木がそのまま入る | main の先端が head の祖先であることを確かめてから、`expect_head` 付きで迂回する |
+| 確かめた木がそのまま入る | main の先端が head の祖先であることを確かめてから、main の ref を head へ fast-forward で進める（`force` なし）。確かめの後に main が動けば GitHub が断り、`land_bump` は `refused` で止まって次の push の `bump` に任せる |
 | 迂回の許し | 設定ファイルの `production_merge.admin` が真のときだけ（#3506 の今の規則） |
 
 人が GitHub の画面で管理者の迂回を使ってコードの PR をマージすることは、利用者の操作（経路 (b)）で、工程は止めない。人のマージの記録に

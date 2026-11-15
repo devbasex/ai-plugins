@@ -984,7 +984,7 @@ release が走らせるリリースの種別・リリースコマンド・公開
 | 補足の表 | — | リリース後テストの記録のうち、課題の表でない表（例: 主なテストの実行の表）。課題を閉じる判定にも承認資料にも使わない | — | — | `docs/specifications/ndf-sprint-close-acceptance-criteria.md` |
 | 版数を上げないリリース | — | 版数を変えず、既定ブランチへのマージかコミットの反映で本番へ届けるリリース | 版数を上げない配布 | — | `docs/specifications/ndf-production-release-record.md` |
 | 範囲の PR | — | 直前の正式版のタグから範囲の終点までに、ベースブランチへ merge commit か squash merge で入った PR と、スプリント経由の PR の和。`--prs` で渡した番号は、マージコミットが範囲の終点の祖先であるものだけを含む。版上げの PR と、PR でない番号（squash の件名の `(#N)` が課題を指すもの）は含まない | — | — | `docs/specifications/ndf-release-approval-included-prs.md` |
-| 版上げの PR | — | head のブランチが `release/` で始まる PR。版数と CHANGELOG だけを変え、中身の変更を持たない | — | — | `docs/specifications/ndf-release-approval-included-prs.md` |
+| 版上げの PR | — | 今の NDF では、head のブランチが `release/` で始まる PR。版数と CHANGELOG だけを変え、中身の変更を持たない。ndf-next の取り込み方の行 `trunk` では、main へのマージの後に CD の `bump` が main の先端から作る main 宛ての PR で、head のブランチの名前（`release/v<バージョン>`）と、差分がバージョンの置き場・CHANGELOG のバージョンの節・`.ndf/release.json` の手順の書き先に限られることの両方で見分ける。名前が `release/` で始まるだけの PR は含まない | — | — | `docs/specifications/ndf-release-approval-included-prs.md` |
 | 合格の行 | — | リリース後テストの表で、`結果` の列が `合格` で始まる行 | — | — | `docs/specifications/ndf-sprint-close-acceptance-criteria.md` |
 | 手で足した節 | — | 承認資料の `## ` の節のうち、デプロイのステップ（approval-facts・notes --approval・changed-plugins --approval）が書く見出しに当たらないもの。作り直しの後も見出しと中身が残る | — | — | `plugins/ndf/skills/release/references/release-steps.md` |
 | 置き換える箇条 | — | 後の PR の本文の `## 置き換える箇条` の節に書く行。同じ版に含む前の PR の「利用者向けの変化」の箇条を指し、その箇条を CHANGELOG と承認資料の「配る中身」から除く | — | — | `plugins/ndf/skills/release/references/release-steps.md` |

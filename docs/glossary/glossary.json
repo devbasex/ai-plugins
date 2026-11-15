@@ -3987,7 +3987,7 @@
     {
       "term": "版上げの PR",
       "context": "ndf-release",
-      "meaning": "head のブランチが `release/` で始まる PR。版数と CHANGELOG だけを変え、中身の変更を持たない",
+      "meaning": "今の NDF では、head のブランチが `release/` で始まる PR。版数と CHANGELOG だけを変え、中身の変更を持たない。ndf-next の取り込み方の行 `trunk` では、main へのマージの後に CD の `bump` が main の先端から作る main 宛ての PR で、head のブランチの名前（`release/v<バージョン>`）と、差分がバージョンの置き場・CHANGELOG のバージョンの節・`.ndf/release.json` の手順の書き先に限られることの両方で見分ける。名前が `release/` で始まるだけの PR は含まない",
       "source": "docs/specifications/ndf-release-approval-included-prs.md"
     },
     {
