@@ -141,7 +141,7 @@ sequenceDiagram
 
 プランの並びは `cd-no-review` と同じで、承認資料を置いた所で承認ゲートとして終える。MVV 判定のプランでも判定の記録を置いた所で承認ゲートとして終え、利用者の承認の後に `run <計画> --from approve-pr` で証跡を `--by user` で書く。`release` は利用者の証跡と先端を照らし、`ndf/release-approval` の success と CI の通過を待ってから `merge-when-green` へ迂回ありで頼む。マージの後に迂回の記録を置く。
 
-作り直し（`plugins/ndf-next/`）の `release-steps merge` も同じ宣言を読む。宣言があり本番ブランチの承認数が 1 以上と読めるときだけ、GraphQL の `mergePullRequest` を先端（`expectedHeadOid`）付きで打ち、迂回の記録を置いて出力に `admin` と `admin_record` を書く。
+作り直し（`plugins/ndf-next/`）の `release-steps merge` も同じ宣言を読む。宣言があり本番ブランチの承認数が 1 以上と読めるときだけ、GraphQL の `mergePullRequest` を先端（`expectedHeadOid`）付きで打ち、迂回の記録を置いて結果の値の項目に `admin` と `admin_record` を書く。
 
 ### リリースの PR で届く経路（`merged-steps.py promote`）
 
