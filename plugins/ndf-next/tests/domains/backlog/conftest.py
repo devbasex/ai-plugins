@@ -5,10 +5,10 @@ from __future__ import annotations
 import base64
 import json
 import re
-import subprocess
 from pathlib import Path
 from typing import Any
 
+import git_sandbox
 import httpx
 import pytest
 from githubkit import GitHub as Client
@@ -196,21 +196,17 @@ def fake(monkeypatch: pytest.MonkeyPatch) -> FakeHub:
     return hub
 
 
-def _git(cwd: Path, *args: str) -> str:
-    return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout
-
-
 @pytest.fixture
 def repo_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """コミットを 1 つ持つ git のリポジトリ（作業ディレクトリをここへ移す）。"""
     root = tmp_path / "repo"
     root.mkdir()
-    _git(root, "init", "-q", "-b", "develop")
-    _git(root, "config", "user.email", "t@example.com")
-    _git(root, "config", "user.name", "t")
+    git_sandbox.sh(root, "init", "-q", "-b", "develop")
+    git_sandbox.sh(root, "config", "user.email", "t@example.com")
+    git_sandbox.sh(root, "config", "user.name", "t")
     (root / "README").write_text("x\n")
-    _git(root, "add", ".")
-    _git(root, "commit", "-q", "-m", "init")
+    git_sandbox.sh(root, "add", ".")
+    git_sandbox.sh(root, "commit", "-q", "-m", "init")
     monkeypatch.chdir(root)
     monkeypatch.delenv("NDF_UPKEEP_STATE_DIR", raising=False)
     return root
@@ -230,4 +226,4 @@ def run_issues(capsys: pytest.CaptureFixture[str], last_result):
 @pytest.fixture
 def git_in():
     """`git` を作業ディレクトリで打つ関数。"""
-    return _git
+    return git_sandbox.sh
