@@ -432,6 +432,20 @@ def _given_remote(out: Mapping[str, Value]) -> Optional[str]:
     return remote if isinstance(remote, str) and remote else None
 
 
+def _remote_of_repo(repo: Path) -> str:
+    """省いた `remote` の値（I7: 宣言の `remote`、無ければスキーマの既定）。誤りは `RouteError`。
+
+    git の作業場所では、linked worktree から打ってもメインディレクトリの宣言を読む（`Git.remote`。取得・レビューの経路と
+    同じ宛先）。git の作業場所でない場所（`.git` が無い）にはメインディレクトリが無いため、git を起動せず `repo` の宣言を読む。
+    """
+    try:
+        if not (repo / ".git").exists():
+            return git.remote_of(repo)
+        return git.Git(repo).remote()
+    except git.GitError as exc:
+        raise RouteError(str(exc)) from None
+
+
 def _omitted(t: Template, out: Mapping[str, Value], name: str) -> bool:
     """雛形が差し込み `name` を使い、まだ値が無いか。"""
     return name in t.params and name not in out
@@ -443,11 +457,7 @@ def derived(t: Template, given: Mapping[str, Value], cwd: Path) -> dict[str, Val
     if _omitted(t, out, "repo"):
         out["repo"] = repo_root(cwd)
     if _omitted(t, out, "remote") and "repo" in out:
-        try:
-            # linked worktree から打っても、メインディレクトリの宣言を読む（`Git.remote`。取得・レビューの経路と同じ宛先）
-            out["remote"] = git.Git(Path(str(out["repo"]))).remote()
-        except git.GitError as exc:
-            raise RouteError(str(exc)) from None
+        out["remote"] = _remote_of_repo(Path(str(out["repo"])))
     if _omitted(t, out, "worktree") and isinstance(out.get("branch"), str):
         out["worktree"] = str(Path(str(out["repo"])) / WORKTREES / out["branch"])
     if _omitted(t, out, "base") and "repo" in out:

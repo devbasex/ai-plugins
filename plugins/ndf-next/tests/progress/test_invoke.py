@@ -793,11 +793,13 @@ def test_skill_calls_claude_call_claude_by_default():
     assert inspect.signature(invoke.invoke).parameters["call_claude"].default is claude.call_claude
 
 
-def test_skill_is_called_with_full_permission_the_result_schema_and_the_implement_limit(tmp_path, calls):
+def test_skill_is_called_with_full_permission_the_result_schema_and_the_implement_limit(tmp_path, calls, monkeypatch):
     from ndf import contracts
     from ndf.adapters import claude
     from ndf.contracts import limits
 
+    # 導入済みの一覧を読めた（外す登録が無い）起動に固定する。読めないときの知らせは次のテストが見る
+    monkeypatch.setattr(claude, "list_plugins", lambda **k: [])
     box, seen, fake = calls
     run = _skill_run()
     box["reply"] = _reply(answer=result.result("skill", "ok", "済んだ", outputs={"pr": 3}))

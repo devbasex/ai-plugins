@@ -20,7 +20,9 @@
     "ndf.domains.hooks.strict",
     "ndf.domains.hooks.strict_shell",
     "ndf.domains.hooks.env",
-    "ndf.domains.hooks.boot"
+    "ndf.domains.hooks.boot",
+    "ndf.testing",
+    "ndf.testing.weight"
   ],
   "stdlib_roots": ["ndf.domains.hooks.strict", "ndf.domains.hooks.env", "ndf.domains.hooks.boot"],
   "scripts": ["hooks/boot.py", "hooks/prepare.py"],
