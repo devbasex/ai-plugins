@@ -24,16 +24,26 @@
         "--pr": {
           "type": "integer"
         },
+        "--route": {
+          "type": "string",
+          "enum": [
+            "gate",
+            "github-merge"
+          ],
+          "default": "gate",
+          "description": "承認の経路（承認ゲート gate / 人の GitHub でのマージ github-merge。github-merge は答えた者と対象をマージから読む）"
+        },
         "--answer": {
           "type": "string",
           "enum": [
             "approved",
             "rejected"
-          ]
+          ],
+          "description": "答え（gate で要る）"
         },
         "--presented": {
           "type": "string",
-          "description": "提示した先端の SHA（present の outputs.head）"
+          "description": "提示した先端の SHA（present の outputs.head。gate で要る）"
         },
         "--by": {
           "type": "string",
@@ -41,15 +51,16 @@
             "user",
             "mvv"
           ],
-          "description": "答えた担い手（利用者 user / MVV 判定 mvv。迂回は user だけを数える）"
+          "description": "答えた担い手（利用者 user / MVV 判定 mvv。迂回は user だけを数える。gate で要る）"
+        },
+        "--production": {
+          "type": "string",
+          "description": "本番ブランチ（省けば宣言 worktree.json の production_branch）"
         }
       },
       "required": [
         "subcommand",
-        "--pr",
-        "--answer",
-        "--presented",
-        "--by"
+        "--pr"
       ]
     },
     {
@@ -73,13 +84,13 @@
           "type": "integer"
         },
         "--production": {
-          "type": "string"
+          "type": "string",
+          "description": "本番ブランチ（省けば宣言 worktree.json の production_branch）"
         }
       },
       "required": [
         "subcommand",
-        "--pr",
-        "--production"
+        "--pr"
       ]
     },
     {
@@ -105,7 +116,7 @@
         },
         "--production": {
           "type": "string",
-          "description": "本番ブランチ（宣言 worktree.json の production_branch）"
+          "description": "本番ブランチ（省けば宣言 worktree.json の production_branch）"
         },
         "--channel": {
           "type": "string",
@@ -126,12 +137,20 @@
         "--plugin": {
           "type": "string",
           "description": "ブランチの名前に版を使うプラグイン（省けば登録の順の先頭）"
+        },
+        "--source": {
+          "type": "string",
+          "enum": [
+            "base",
+            "release"
+          ],
+          "default": "base",
+          "description": "範囲の先端（ベースブランチ base / 常設のリリースブランチ release）"
         }
       },
       "required": [
         "subcommand",
         "--base",
-        "--production",
         "--channel"
       ]
     },
@@ -221,6 +240,69 @@
       "additionalProperties": false,
       "properties": {
         "subcommand": {
+          "const": "defer",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--root": {
+          "type": "string",
+          "default": ".",
+          "description": "リポジトリの根"
+        },
+        "--repo": {
+          "type": "string",
+          "description": "<所有者>/<リポジトリ>。省けば origin"
+        },
+        "--pr": {
+          "type": "integer"
+        },
+        "--production": {
+          "type": "string",
+          "description": "本番ブランチ（省けば宣言 worktree.json の production_branch）"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--pr"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "guard",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--root": {
+          "type": "string",
+          "default": ".",
+          "description": "リポジトリの根"
+        },
+        "--repo": {
+          "type": "string",
+          "description": "<所有者>/<リポジトリ>。省けば origin"
+        },
+        "--branch": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "--production": {
+          "type": "string",
+          "description": "本番ブランチ（省けば宣言 worktree.json の production_branch）"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--branch"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
           "const": "materials",
           "description": "下位の命令（入れ子は空白でつなぐ）"
         },
@@ -239,7 +321,7 @@
         },
         "--production": {
           "type": "string",
-          "description": "本番ブランチ（宣言 worktree.json の production_branch）"
+          "description": "本番ブランチ（省けば宣言 worktree.json の production_branch）"
         },
         "--channel": {
           "type": "string",
@@ -261,6 +343,15 @@
           "type": "string",
           "description": "ブランチの名前に版を使うプラグイン（省けば登録の順の先頭）"
         },
+        "--source": {
+          "type": "string",
+          "enum": [
+            "base",
+            "release"
+          ],
+          "default": "base",
+          "description": "範囲の先端（ベースブランチ base / 常設のリリースブランチ release）"
+        },
         "--out": {
           "type": "string",
           "description": "承認資料を書くファイル（省けば標準出力）"
@@ -269,7 +360,6 @@
       "required": [
         "subcommand",
         "--base",
-        "--production",
         "--channel"
       ]
     },
@@ -299,7 +389,7 @@
         },
         "--production": {
           "type": "string",
-          "description": "本番ブランチ（宣言 worktree.json の production_branch）"
+          "description": "本番ブランチ（省けば宣言 worktree.json の production_branch）"
         },
         "--budget": {
           "type": "number",
@@ -310,8 +400,37 @@
         "subcommand",
         "--pr",
         "--base",
-        "--production",
         "--budget"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "prepare-next",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--root": {
+          "type": "string",
+          "default": ".",
+          "description": "リポジトリの根"
+        },
+        "--repo": {
+          "type": "string",
+          "description": "<所有者>/<リポジトリ>。省けば origin"
+        },
+        "--pr": {
+          "type": "integer"
+        },
+        "--production": {
+          "type": "string",
+          "description": "本番ブランチ（省けば宣言 worktree.json の production_branch）"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--pr"
       ]
     },
     {
@@ -391,13 +510,13 @@
           "type": "integer"
         },
         "--production": {
-          "type": "string"
+          "type": "string",
+          "description": "本番ブランチ（省けば宣言 worktree.json の production_branch）"
         }
       },
       "required": [
         "subcommand",
-        "--pr",
-        "--production"
+        "--pr"
       ]
     },
     {

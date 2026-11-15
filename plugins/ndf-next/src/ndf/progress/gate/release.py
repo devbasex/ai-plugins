@@ -2,17 +2,22 @@
 
 依頼は外のオーガナイザーの下ならファイル（`external`）、計画の進行表のレーンなら依頼の事象（`plan.open_request`）で出し、
 依頼への答えを承認ゲートの答え（`organizer`）として書く。
+
+答えが無いまま利用者が GitHub で本番の PR をマージしたら、それを承認ゲートの承認にする（リリース承認とマージは等価。
+#3572 の決定 4）。証跡はリリースの副命令 `ndf release-steps answer --route github-merge` を子プロセスで打って書かせ、
+ここでは承認ゲートの答えの状態だけを書く（リリースの領域を import せず、本番の PR のコメントを直接書かない）。
 """
 
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Optional
 
-from ndf.progress import lane, model, plan, run, store
+from ndf.progress import invoke, lane, model, plan, run, store
 from ndf.progress.gate.answering import Answer, Observe, answer, no_observe
 from ndf.progress.gate.asking import (
     RELEASE_GATE,
@@ -31,6 +36,11 @@ from ndf.progress.plan import external
 ORGANIZER_ANSWERS = {plan.RELEASED: run.APPROVED, plan.REJECTED: run.REJECTED}
 # 依頼を出したときに見た対象の置き場（承認資料の隣）
 SEEN_SUFFIX = ".seen.json"
+# 人の GitHub でのマージを承認ゲートの答えにするときの答えた者と冪等の鍵の頭（マージした人のログインは理由に書く）
+MERGE_ACTOR = "service:github-merge"
+MERGE_KEY = "github-merge"
+# マージされていないときの副命令の止まった理由（待ちを残す）
+NOT_MERGED_KIND = "not_applicable"
 
 
 def _request_fields(v: run.View, q: Question, lane_name: Optional[str]) -> dict[str, Any]:
@@ -116,17 +126,66 @@ def _released(reply: Mapping[str, Any], value: str) -> dict[str, Any]:
     return {name: str(reply[key]) for key, name in RELEASED_OUTPUTS.items() if reply.get(key)}
 
 
-def take_reply(st: store.Store, table_id: str, env: Mapping[str, str], observe: Observe = no_observe) -> Optional[dict[str, Any]]:
+def _merged_reply(q: Question, runner: invoke.Runner, cwd: Path) -> Optional[dict[str, Any]]:
+    """副命令 `answer --route github-merge` を打ち、本番の PR がマージ済みなら結果の `outputs` を返す（まだなら None）。
+
+    ほかの止まり方・結果 JSON を読めない・起動できないときは `model.Refused`（待ちは残る）。
+    """
+    argv = invoke.ndf_command("release-steps", "answer", "--root", str(cwd), "--pr", str(q.pr), "--route", MERGE_KEY)
+    try:
+        done = runner(argv, cwd, invoke.ndf_env(os.environ))
+    except OSError as exc:
+        raise model.Refused(f"人のマージを読む副命令を起動できない: {exc}") from None
+    got = invoke.read_report(done.stdout)
+    if got is None:
+        first = done.stderr.strip().splitlines()[:1]
+        raise model.Refused(f"人のマージを読む副命令の結果 JSON を読めない（終了コード {done.returncode}）: {''.join(first)}")
+    if got["status"] == "ok" and isinstance(got.get("outputs"), dict):
+        return dict(got["outputs"])
+    cause = got["cause"] if isinstance(got.get("cause"), dict) else {}
+    if cause.get("kind") == NOT_MERGED_KIND:
+        return None
+    raise model.Refused(f"人のマージを承認の証跡にできない: {got.get('summary')}")
+
+
+def _merge_answer(
+    st: store.Store, table_id: str, q: Question, observe: Observe, runner: invoke.Runner, cwd: Path
+) -> Optional[dict[str, Any]]:
+    """本番の PR がマージ済みなら、承認ゲートの答えを承認にして書いた結果を返す（マージされていなければ None）。"""
+    merged = _merged_reply(q, runner, cwd)
+    if merged is None or merged.get("state") != run.APPROVED or run.APPROVED not in q.choices:
+        return None
+    head = str(merged["head"]) if merged.get("head") else ""
+    reason = f"利用者 {merged.get('by')} が GitHub で本番の PR #{q.pr} を {head[:12]} でマージした（リリース承認とみなす）"
+    outputs = {"version": str(merged["version"])} if merged.get("version") else {}
+    outputs["release_pr"] = str(q.pr)
+    given = Answer(q.id, run.APPROVED, reason, MERGE_ACTOR, f"{MERGE_KEY}:{q.id}", seen=observe(q), outputs=outputs)
+    return answer(st, table_id, given, observe)
+
+
+def take_reply(
+    st: store.Store,
+    table_id: str,
+    env: Mapping[str, str],
+    observe: Observe = no_observe,
+    runner: Optional[invoke.Runner] = None,
+    cwd: Optional[Path] = None,
+) -> Optional[dict[str, Any]]:
     """リリース承認ゲートが待つ依頼に答えがあれば、承認ゲートの答え（`organizer`）として書く。書いた結果を返す。
 
     見た対象は依頼を出したときの対象で、その後に PR の head が変わっていれば答えは断られる（今の対象との照合は `answer`）。
+    答えが無く、問いが PR を持ち、本番の PR がマージ済みなら、人のマージを承認の答えとして書く（E6）。GitHub を読まない
+    呼び出し（`observe` が `no_observe` で `runner` も無い）は人のマージを読まない。
     """
     q = waiting(run.read(st, table_id))
     if q is None or q.gate != RELEASE_GATE:
         return None
     reply = _organizer_reply(st, q, env)
     if reply is None or reply.get("result") not in ORGANIZER_ANSWERS:
-        return None
+        if q.pr is None or (runner is None and observe is no_observe):
+            return None
+        place = cwd if cwd is not None else Path.cwd()
+        return _merge_answer(st, table_id, q, observe, runner if runner is not None else invoke.run_command, place)
     value = ORGANIZER_ANSWERS[str(reply["result"])]
     if value not in q.choices:
         return None

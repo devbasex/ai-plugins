@@ -27,7 +27,7 @@
         "properties": {
           "kind": {
             "type": "string",
-            "description": "項目の種類（pull・tag・release・path・config・worktree）"
+            "description": "項目の種類（pull・tag・release・path・config・worktree・check）"
           },
           "number": {
             "type": "integer",
@@ -58,7 +58,11 @@
           },
           "name": {
             "type": "string",
-            "description": "タグか GitHub Release の名前（tag・release）"
+            "description": "タグか GitHub Release の名前（tag・release）か、落ちたチェックの名前（check。本番の PR のマージが止まったとき）"
+          },
+          "outcome": {
+            "type": "string",
+            "description": "落ちたチェックの結論（check）"
           },
           "path": {
             "type": "string",

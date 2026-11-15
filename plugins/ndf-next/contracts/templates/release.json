@@ -1,14 +1,16 @@
 {
   "template": "release",
   "purpose": "release",
-  "summary": "デプロイ: worker が承認済みの PR（入力の pr）を本番へ出し、結果の outputs に delivery と version を返す",
-  "params": ["repo", "worker"],
+  "summary": "デプロイ: 承認ゲートで承認した本番の PR（入力の pr）を、承認した先端との照合付きでマージし（ndf release-steps merge）、含めた PR へリリース記録を書き、次の版のリリースブランチを本番ブランチから用意する。承認の後にコードを変えるステップ（worker・直しのステップ）を持たず、必須のチェックが落ちたら直さずに止まって次の手を返す",
+  "params": ["repo", "pr", "base", "ci_budget"],
   "plan": {
     "name": "release",
     "repo": "{{repo}}",
     "release": true,
     "steps": [
-      {"id": "work", "run": ["{{worker}}", "release"]}
+      {"id": "merge", "run": ["ndf", "release-steps", "merge", "--root", "{{repo}}", "--pr", "{{pr}}", "--base", "{{base}}", "--budget", "{{ci_budget}}"]},
+      {"id": "record", "run": ["ndf", "release-steps", "record", "--root", "{{repo}}", "--pr", "{{pr}}"]},
+      {"id": "prepare-next", "run": ["ndf", "release-steps", "prepare-next", "--root", "{{repo}}", "--pr", "{{pr}}"], "next": "end"}
     ]
   }
 }
