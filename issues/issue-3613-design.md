@@ -167,7 +167,7 @@
 | W19 | 照合 | 214 | 本文が MVV に従うかを言語モデルに判定させること | MVV 判定 | 廃止した語 | `vet`（変えない。決定 4） |
 | W19 | 照合 | （同上） | 2 つの値・内容を突き合わせて確かめること | 検証 | （同上） | — |
 | W19 | 照合 | （同上） | パターンに一致するかを見ること | マッチ | （同上） | — |
-| W20 | 差し戻し・差し戻す | 145 | 承認・レビューで直しを求める判定（STD1） | 変更要求 | 廃止した語（差し戻し・差し戻す・差し戻さ・差し戻せ） | `revise` → `request_changes` |
+| W20 | 差し戻し・差し戻す | 145 | 承認・レビューで直しを求める判定（STD1） | 変更要求 | 廃止した語（差し戻し・差し戻す・差し戻さ・差し戻せ） | `revise` → `request_changes`（承認ゲートの回答の値）。MVV の改訂の兆候の `revise` は `revision_due`。`.ndf/mvv.json` のキー `revise_after` は変えない（決定 4） |
 | W21 | 土台 | 2 | 共通の部品・仕組み | 基盤 | 廃止した語 | — |
 
 「完了条件」は対応表に置き換えの行を持たない（S3）。
@@ -181,7 +181,7 @@
 | W24 | 区間 | 150 | 置き換える | 中継の下で 1 回の起動から切り替えまで → セグメント。測る時間の範囲（復元の区間・引継ぎの区間）→ 期間 | — |
 | W25 | 止まる理由・止まった理由 | 5 | 置き換える | 停止理由 | `cause`（変えない） |
 | W26 | 提示 | 145 | 残す | 「示す」の意味の一般語で、指す対象が文脈で変わらない。公式の文書の日本語でも使われる語である | — |
-| W27 | 台帳 | 115 | 置き換える | 追記で状態を持つ記録（計画の台帳・反映の記録）→ ジャーナル。環境の割り当ての一覧 → 割り当て表 | `ledger` → `journal`・`allocations` |
+| W27 | 台帳 | 115 | 置き換える | 追記で状態を持つ記録（計画の台帳・反映の記録）→ ジャーナル。環境の割り当ての一覧 → 割り当て表。PostgreSQL のときに起動した実行のキーを書き、片付けで消す表（`ndf_runs`）→ 実行の一覧 | `ledger` → `journal`・`allocations`、`durable_ledger` → `durable_runs` |
 | W28 | 帳簿 | 58 | 置き換える | 使用量ログ | `usage_ledger` → `usage_log`、`ledger_path` → `usage_log_path` |
 | W29 | 一時レーン | 41 | 残す | レーンは NDF の定義済みの語で、「一時」は修飾として説明なしで通じる | `helper`（変えない） |
 
@@ -240,15 +240,21 @@ graph TD
 
 ```mermaid
 classDiagram
+  class BannedWords {
+    +reasons dict
+    +standalone frozenset
+  }
   class words {
-    +banned_words(repo_root, config_name) dict
+    +banned_words(repo_root, config_name) BannedWords
     -_words_from(config, glossary) dict
     -_standalone_from(glossary) dict
     +pattern(words, standalone) Pattern
     -_part(word, standalone) str
   }
+  words ..> BannedWords
 ```
 
+- `banned_words` は、語ごとの理由と、単独で照合する語の集合をまとめた値（`BannedWords`）を返す
 - `_words_from` は今と同じく `deprecated` と禁止語を返す
 - 新しく足す `_standalone_from` は `deprecated_standalone` を返す
 - `pattern` は単独の語にだけ「前後が漢字でない」の条件を付ける。漢字の範囲は CJK 統合漢字と「々」で、今の NDF の用語の検査（`glossary_words.is_kanji_edged`）と同じ字の範囲にする。ndf-next は今の NDF のモジュールを読まないため、範囲は `words.py` に持つ
@@ -256,6 +262,8 @@ classDiagram
 ## データ構造
 
 **ndf-next の状態のデータベースの列 `table_id` を `machine_id` へ改名する**（`plugins/ndf-next/src/ndf/progress/store.py` の 81・89 行目の 2 つの表）。データベースはチェックアウトの保存先にあり、その先頭の `format.json` が形の番号（`ndf.core.durable.STORE_FORMAT`、今は 1）を持つ。番号を 2 に上げると、番号の古い保存先は既存の経路（`durable._retire_store`）で `<名前>.v1-<日付>` へ退避され、新しい形で作り直される。ndf-next は未公開で、移行のコードを持たない（S2）。
+
+PostgreSQL の接続先（URL）を使うときは、チェックアウトの保存先の退避が効かない。表の版（`ndf.progress.store.SCHEMA_VERSION`）も 1 から 2 に上げ、版 1 の表を見つけたら、表を作り直す手順を添えて止める（列を変える移行のコードは持たない）。
 
 保存先のファイル名のうち `ledger` を含むものも改名する。
 
@@ -425,7 +433,7 @@ sys.exit(1 if missing else 0)' 版 置き場 宣言 副命令 進行表 土台  
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #3613 | 実装する | — | `docs/glossary/glossary.json`、`docs/glossary.md`、`plugins/ndf-next/src/ndf/checks/words.py`、`plugins/ndf-next/src/ndf/checks/rules.json`、`plugins/ndf-next/src/ndf/checks/marks.py`、`plugins/ndf-next/src/ndf/identity.py`、`plugins/ndf-next/src/ndf/core/durable.py`、`plugins/ndf-next/src/ndf/progress/store.py`、`plugins/ndf-next/tests/checks/test_words.py`、`plugins/ndf-next/tests/checks/test_marks.py`、`plugins/ndf-next/contracts/domains/ndf-files.json`、`plugins/ndf-next/docs/contracts/declarations.md`、`plugins/ndf-next/skills/`、`plugins/ndf-next/agents/`、`plugins/ndf-next/contracts/`、`plugins/ndf-next/docs/contracts/`、`plugins/ndf-next/src/`、`plugins/ndf-next/tests/`、`plugins/ndf-next/bin/`、`plugins/ndf-next/hooks/`、`plugins/ndf-next/manifests/`、`plugins/ndf-next/pyproject.toml` |
+| #3613 | 実装する | — | `docs/glossary/glossary.json`、`docs/glossary.md`、`plugins/ndf-next/src/ndf/checks/words.py`、`plugins/ndf-next/src/ndf/checks/rules.json`、`plugins/ndf-next/src/ndf/checks/README.md`、`plugins/ndf-next/src/ndf/checks/marks.py`、`plugins/ndf-next/src/ndf/checks/suppressions.py`、`plugins/ndf-next/src/ndf/checks/smells.py`、`plugins/ndf-next/src/ndf/identity.py`、`plugins/ndf-next/src/ndf/core/durable.py`、`plugins/ndf-next/src/ndf/core/durable_ledger.py`、`plugins/ndf-next/src/ndf/core/durable_runs.py`、`plugins/ndf-next/src/ndf/core/durable_sweep.py`、`plugins/ndf-next/src/ndf/progress/store.py`、`plugins/ndf-next/src/ndf/progress/model.py`、`plugins/ndf-next/src/ndf/progress/run.py`、`plugins/ndf-next/src/ndf/domains/relay/marks.py`、`plugins/ndf-next/src/ndf/domains/relay/markers.py`、`plugins/ndf-next/src/ndf/domains/worktree/ledger.py`、`plugins/ndf-next/src/ndf/domains/worktree/allocations.py`、`plugins/ndf-next/src/ndf/domains/worktree/declaration.py`、`plugins/ndf-next/src/ndf/domains/worktree/ndf_settings.py`、`plugins/ndf-next/src/ndf/domains/release/declaration.py`、`plugins/ndf-next/src/ndf/domains/release/ndf_settings.py`、`plugins/ndf-next/src/ndf/domains/records/usage.py`、`plugins/ndf-next/src/ndf/domains/records/mvv_decide.py`、`plugins/ndf-next/src/ndf/domains/crossreview/drive.py`、`plugins/ndf-next/tests/checks/test_words.py`、`plugins/ndf-next/tests/checks/test_marks.py`、`plugins/ndf-next/tests/checks/test_suppressions.py`、`plugins/ndf-next/tests/core/test_durable_store.py`、`plugins/ndf-next/contracts/domains/ndf-files.json`、`plugins/ndf-next/contracts/domains/places.json`、`plugins/ndf-next/contracts/domains/locations.json`、`plugins/ndf-next/contracts/facts/answers.json`、`plugins/ndf-next/contracts/schemas/declarations/`、`plugins/ndf-next/contracts/schemas/ndf-settings/`、`plugins/ndf-next/docs/contracts/declarations.md`、`plugins/ndf-next/docs/contracts/ndf-settings.md`、`plugins/ndf-next/skills/`、`plugins/ndf-next/agents/`、`plugins/ndf-next/contracts/`、`plugins/ndf-next/docs/contracts/`、`plugins/ndf-next/src/`、`plugins/ndf-next/tests/`、`plugins/ndf-next/bin/`、`plugins/ndf-next/hooks/`、`plugins/ndf-next/manifests/`、`plugins/ndf-next/pyproject.toml` |
 
 ## 人へ残す判断
 
