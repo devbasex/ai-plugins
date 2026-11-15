@@ -434,6 +434,18 @@ def test_a_design_approval_request_is_held_with_the_design_answer_step(proj, mon
     assert "design-answer p1 la-g12-0123456789ab --state /w/state.json" in out and "設計承認の依頼" in out
 
 
+def test_the_design_answer_step_keeps_a_path_with_spaces_as_one_argument():
+    """空白を含むスプリント状態のパスも、再開コマンドの 1 つの引数のまま返す。"""
+    import shlex
+
+    from hook_lib import ask_guard
+
+    text = ask_guard.design_hold_text("la-g12-0123456789ab", "p1", "/workspace/My Project/.ndf/sprint-s1/state.json")
+    line = next(s for s in text.splitlines() if "design-answer" in s)
+    words = shlex.split(line[line.index("python3") : line.index(" と依頼")])
+    assert words[words.index("--state") + 1] == "/workspace/My Project/.ndf/sprint-s1/state.json"
+
+
 def test_a_reused_answer_is_returned_in_the_deny(proj, monkeypatch):
     """受け入れ条件 13: 同じ問いの前の答えは、その答えを載せた deny で返す（人へ問い直さない）。"""
     lane_plan(proj)

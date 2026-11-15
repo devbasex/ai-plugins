@@ -131,8 +131,11 @@ def hold_text(rid: str, plan: str) -> str:
 
 def design_hold_text(rid: str, plan: str, state: str) -> str:
     """設計承認の依頼の保留の手順（正本: asking.md の「並列の計画のレーン」。#3603 の決定 4）。"""
+    import shlex  # パスが空白を含んでも 1 語のまま打てるよう、コマンドの引数を引用する
+
     stop = _stop_command()
-    answer = f'python3 "{PARALLEL_PY}" design-answer {plan} {rid} --state {state or "<スプリント状態>"}'
+    where = shlex.quote(state) if state else "<スプリント状態>"
+    answer = f"python3 {shlex.quote(str(PARALLEL_PY))} design-answer {shlex.quote(plan)} {shlex.quote(rid)} --state {where}"
     return "\n".join(
         [
             f"ndf: 並列の計画 {plan} のレーンの設計承認を、設計承認の依頼としてオーガナイザーへ送った（依頼 {rid}）。この作業を保留する。",

@@ -238,9 +238,9 @@ def test_answer_design_user_approval_writes_the_gate_record(lane):
     assert cmd[cmd.index("--pr") + 1] == "12" and cmd[cmd.index("--outcome") + 1] == "approved"
 
 
-@pytest.mark.parametrize("res", ["head_moved", "no_stamp"])
-def test_answer_design_approval_for_a_moved_head_reasks_without_a_record(lane, res):
-    """承認の後に先端が動いた（マージが head_moved / no_stamp）答えは、承認の記録を書かず問い直しへ戻す。"""
+@pytest.mark.parametrize("res", ["head_moved", "no_stamp", "not_green", "conflict", "failed", "production"])
+def test_answer_design_approval_for_an_unmerged_pr_reasks_without_a_record(lane, res):
+    """マージ済み（merged / already_merged）でない答えは、承認の記録を書かず問い直しへ戻す（未承認の先端を後のマージで通さない）。"""
     main, sprint = lane
     pl.send_answer(main, "p1", "la-g12-0123456789ab", "approved", by="user", merge={"result": res, "reason": "動いた"})
     run = Run()

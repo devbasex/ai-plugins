@@ -319,7 +319,9 @@ def _revise_step(sprint: Path | None, pr: int) -> str:
         except (OSError, ValueError, AttributeError):
             steps = []
         if any(isinstance(s, dict) and s.get("id") == "reject" for s in steps):
-            return f"python3 {SUPERVISE} run {hit['plan']} --from reject"
+            import shlex  # パスが空白を含んでも 1 語のまま打てるよう引用する
+
+            return f"python3 {shlex.quote(str(SUPERVISE))} run {shlex.quote(str(hit['plan']))} --from reject"
     return "設計のプランを直して流し直す"
 
 
@@ -362,15 +364,19 @@ def answer_design(
 
 def _answer_approved(run, state: Path, pr: int, by: str, what: str, repo: Path, msg: dict, sprint: Path | None, metrics: dict) -> Answered:
     """承認の答え: 設計承認ゲートの記録が無ければ書き、設計 PR のマージのステージの `resume` を続きにする。
-    答えに載ったマージの結果が、承認した先端を今の先端に当てられないもの（`REASK_MERGE`）なら記録を書かず、
-    新しい先端で設計承認を問い直す（承認していない先端を、続く `design-approved` とマージのプランで通さない）。"""
+    答えにマージの結果が載り、それがマージ済み（`MERGED_RESULTS`）でなければ記録を書かない。続く `design-approved` と
+    `--expect-head` の無いマージのプランが、承認していない先端（CI を直す push・衝突を解く取り込み）を通さないためである。
+    承認した先端を今の先端に当てられないもの（`REASK_MERGE`）は新しい先端で問い直し、ほかはマージを止めた原因を解いてから問い直す。"""
     merge = metrics.get("merge") if isinstance(metrics.get("merge"), dict) else {}
-    if merge.get("result") in REASK_MERGE:
+    if merge and merge.get("result") not in design_pr_merge.MERGED_RESULTS:
         why = str(merge.get("reason") or merge.get("result"))
-        nxt = f"設計 PR #{pr} の今の先端で設計承認を問い直す（同じ承認の問いを出し直すと、新しい先端の依頼が送られる）"
-        return Answered(
-            "gate", f"設計 PR #{pr} の承認は今の先端に当てられない（{why}）。記録を書かずに問い直す", 10, {**metrics, "next": nxt}
-        )
+        if merge.get("result") in REASK_MERGE:
+            nxt = f"設計 PR #{pr} の今の先端で設計承認を問い直す（同じ承認の問いを出し直すと、新しい先端の依頼が送られる）"
+            head = f"設計 PR #{pr} の承認は今の先端に当てられない（{why}）"
+        else:
+            nxt = f"設計 PR #{pr} のマージを止めた原因（{merge.get('result')}: {why}）を解き、今の先端で設計承認を問い直す"
+            head = f"設計 PR #{pr} をマージできなかった（{merge.get('result')}: {why}）"
+        return Answered("gate", f"{head}。記録を書かずに問い直す", 10, {**metrics, "next": nxt})
     if not _has_gate(state, pr, by, "approved") and (
         err := _write_gate(run, GateRecord(state=state, pr=pr, by=by, outcome="approved", what=what, repo=repo, msg=msg))
     ):
