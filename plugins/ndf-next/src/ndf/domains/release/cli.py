@@ -28,11 +28,12 @@ import argparse
 import json
 import time
 from datetime import datetime, timezone
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
 from ndf import cli
+from ndf.adapters import ci
 from ndf.adapters import git as git_mod
 from ndf.adapters import github as github_mod
 from ndf.adapters.github import GitHub
@@ -188,11 +189,22 @@ def cmd_merge(args: argparse.Namespace) -> dict:
     return _merge_result(args, done, bump.planned_for(root, hub, args.pr, production))
 
 
+def _check_items(failed: Sequence[ci.Check]) -> list[dict[str, Any]]:
+    """落ちたチェックの項目（種類 `check`・名前・結論）。"""
+    return [{"kind": "check", "name": c.name, "outcome": c.conclusion} for c in failed]
+
+
+def _bump_outputs(made: bump.Bumped) -> dict[str, Any] | None:
+    """版上げの結果の outputs（版と版上げの PR のうち値のあるもの。どちらも無ければ None）。"""
+    outputs = {k: v for k, v in (("version", made.version), ("pr", made.pr)) if v is not None}
+    return outputs if outputs else None
+
+
 def _merge_result(args: argparse.Namespace, done: land.Landed, version: str | None = None) -> dict:
     """マージの結果 `done` と予定の版を結果 JSON（items・outputs・止まった理由・記録の失敗の説明・止まったときの次の手）にする。"""
     outputs = {"version": version} if version is not None else None
     approval = done.approval.as_json() if done.approval is not None else None
-    items = [{"kind": "check", "name": c.name, "outcome": c.conclusion} for c in done.failed]
+    items = _check_items(done.failed)
     items += _values(
         production_sha=done.production_sha,
         admin=done.admin,
@@ -240,10 +252,9 @@ def _bump_stopped(hub: GitHub, made: bump.Bumped) -> dict:
     detail = landed.detail if landed is not None else "版上げが止まった"
     if made.pr is not None:
         hub.rest("POST", f"/repos/{hub.repo}/issues/{made.pr}/comments", {"body": f"版上げが止まった（{kind}）: {detail}"})
-    items = [{"kind": "check", "name": c.name, "outcome": c.conclusion} for c in (landed.failed if landed else ())]
+    items = _check_items(landed.failed if landed else ())
     items += _values(state=made.state, level=made.level, pr_url=f"https://github.com/{hub.repo}/pull/{made.pr}" if made.pr else None)
-    outputs = {k: v for k, v in (("version", made.version), ("pr", made.pr)) if v is not None}
-    return result.stopped(TOOL, kind, detail, items=items, outputs=outputs if outputs else None)
+    return result.stopped(TOOL, kind, detail, items=items, outputs=_bump_outputs(made))
 
 
 def cmd_bump(args: argparse.Namespace) -> dict:
@@ -253,10 +264,9 @@ def cmd_bump(args: argparse.Namespace) -> dict:
     made = bump.Bumper(root, hub, lander, production, today).bump()
     if made.state not in bump_decide.bump_states():
         return _bump_stopped(hub, made)
-    outputs = {k: v for k, v in (("version", made.version), ("pr", made.pr)) if v is not None}
     items = _values(state=made.state, level=made.level, production_sha=made.landed.production_sha if made.landed else None)
     detail = f"版上げ: {made.state}（版 {made.version or '無し'}・版上げの PR {f'#{made.pr}' if made.pr else '無し'}）"
-    return result.result(TOOL, result.OK, detail, items, outputs=outputs if outputs else None)
+    return result.result(TOOL, result.OK, detail, items, outputs=_bump_outputs(made))
 
 
 def cmd_confirm(args: argparse.Namespace) -> dict:
