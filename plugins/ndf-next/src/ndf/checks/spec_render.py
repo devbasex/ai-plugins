@@ -15,6 +15,7 @@ from ndf.checks.spec_model import (
     CALLER_FIRST,
     CONTRACTS,
     DECL_SCHEMA_DIR,
+    INTERNAL,
     IO_SCHEMA_DIR,
     PAGES_DIR,
     PUBLIC,
@@ -23,6 +24,7 @@ from ndf.checks.spec_model import (
     DeclarationSpec,
     SpecModel,
     opt,
+    surface_of,
 )
 
 # エントリポイントの短い名前と宣言の置き場（`identity` の固定の語）
@@ -32,7 +34,7 @@ JSON_SCHEMA = "https://json-schema.org/draft/2020-12/schema"
 # 範囲の語（置き場の表の列 tracked から導く）
 SCOPE_WORDS = {True: "チーム", False: "個人"}
 # 公開か内部かの語
-SURFACE_WORDS = {PUBLIC: "公開", "internal": "内部（予告なく変えてよい）"}
+SURFACE_WORDS = {PUBLIC: "公開", INTERNAL: "内部（予告なく変えてよい）"}
 GENERATED = "<!-- ndf check --write-spec が生成する。手で直さない（正本は各節の出典） -->\n"
 NONE = "—"
 MAIN_MARK = "（メインディレクトリから読む）"
@@ -203,8 +205,8 @@ def page_index(model: SpecModel) -> str:
         "declarations.md": _count([d.surface for d in model.declarations]),
         "commands.md": _count([c.surface for c in model.commands]),
         "exit-codes.md": f"終了コード {len(model.exit_codes)}・止まった理由 {len(model.causes)}",
-        "env.md": _count([env_surface(model, r["id"]) for r in model.env]),
-        "files.md": _count([file_surface(model, r["id"]) for r in model.files]),
+        "env.md": _count([surface_of(model.public, "env", r["id"]) for r in model.env]),
+        "files.md": _count([surface_of(model.public, "file", r["id"]) for r in model.files]),
         "hooks.md": _count([h.surface for h in model.hooks]),
         "skills.md": _count([s.surface for s in model.skills]),
     }
@@ -373,18 +375,17 @@ def page_exit_codes(model: SpecModel) -> str:
     return _page("exit-codes.md", intro, body)
 
 
-def env_surface(model: SpecModel, name: str) -> str:
-    return PUBLIC if ("env", name) in model.public else "internal"
-
-
-def file_surface(model: SpecModel, ident: str) -> str:
-    return PUBLIC if ("file", ident) in model.public else "internal"
-
-
 def page_env(model: SpecModel) -> str:
     """環境変数の表の全行。値が秘密の行も名前と意味だけで、値の例の列を持たない。"""
     rows = [
-        [code(r["id"]), r["set_by"], r["type"], "秘密" if r["secret"] else NONE, r["meaning"], SURFACE_WORDS[env_surface(model, r["id"])]]
+        [
+            code(r["id"]),
+            r["set_by"],
+            r["type"],
+            "秘密" if r["secret"] else NONE,
+            r["meaning"],
+            SURFACE_WORDS[surface_of(model.public, "env", r["id"])],
+        ]
         for r in model.env
     ]
     intro = (
@@ -413,14 +414,14 @@ def page_files(model: SpecModel) -> str:
             "追跡" if r["tracked"] else NONE,
             r["writer"],
             r["ends"],
-            SURFACE_WORDS[file_surface(model, r["id"])],
+            SURFACE_WORDS[surface_of(model.public, "file", r["id"])],
         ]
         for r in model.files
     ]
     public = [
         [code(r["id"]), opt(r, "reader", NONE), "・".join(code(f) for f in opt(r, "fields"))]
         for r in model.files
-        if file_surface(model, r["id"]) == PUBLIC
+        if surface_of(model.public, "file", r["id"]) == PUBLIC
     ]
     intro = (
         "NDF の工程が書くファイル（宣言・計測値・実行の記録・文書・受け渡し）である。正本は `contracts/domains/ndf-files.json` と置き場の表 `contracts/domains/places.json`。"
