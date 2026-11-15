@@ -9,6 +9,18 @@
 **開発版（接尾辞の付いた版）は載せない。** `9.8.0` は `9.8.0-dev.1` までしか出ておらず、
 その内容は `10.0.0` で届いている。
 
+## [ndf 10.27.71] - 2026-11-15
+
+- ndf-next で、ステータスラインの表示と承認資料の準備を `ndf statusline` と `ndf materials` で行える（#3588）（#3590）
+- ndf-next で、プロジェクト宣言の確認・スキーマの表示・測定・書き出し・宣言と実態のずれの検出を `ndf project`（`check`・`schema`・`measure`・`write`・`drift`）で行える（#3588）（#3590）
+- ndf-next で、中継の通知と全セッションの停止を `ndf relay notice` と `stop --all` で行える（#3588）（#3590）
+- ndf-next で、コンテキスト方針の解決・記録・較正・報告を `ndf relay context`（`resolve`・`record`・`calibrate`・`report`）で行える（#3588）（#3590）
+- ndf-next で、アカウントの登録と管理を `ndf relay account` の 9 つの副命令（`add`・`add-bedrock`・`add-api-key`・`api-key-monthly`・`api-key-use`・`list`・`capacity`・`remove`・`check`）で行える（#3588）（#3590）
+
+### 移行の手順
+
+- 無し（ndf-next は開発版で利用者へ配っていないため、旧いスクリプトの名前から移る操作は要らない）（#3588）（#3590）
+
 ## [ndf 10.27.70] - 2026-11-15
 
 - Fix: relay.py restart が上限で替えた区間を、そのレーンの会話の再開として起こす（#3555）（#3589）

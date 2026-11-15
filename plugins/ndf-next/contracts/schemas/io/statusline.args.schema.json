@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/io/statusline.args.schema.json",
+  "title": "ndf statusline の引数",
+  "description": "ndf statusline が受ける引数。キーは引数の名前（オプションは -- の名前、位置引数は名前）。規約の生成が作り、手で直さない",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "ensure",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "restore",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "set",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "status",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    }
+  ]
+}

@@ -12,7 +12,7 @@ allowed-tools:
 
 # コードレビューコマンド
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `external-ai.py`（AD3+）・`pr-review-steps.py`（M5）・`projects-sync.sh`（M7）・`resolve.sh`（X0）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `external-ai.py`（AD3+）・`pr-review-steps.py`（M5）・`projects-sync.sh`（M7）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 PR 差分、または `--branch` 指定時は現在のブランチの差分を、専門家としてレビューする。
 
@@ -153,12 +153,13 @@ PR 差分、または `--branch` 指定時は現在のブランチの差分を�
 
 ## 手順
 
-集める・判定する・投稿するはスクリプトが行い、LLM はレビューだけを行う。`$R` の決め方は
+集める・判定する・投稿するはスクリプトが行い、LLM はレビューだけを行う。`ndf` の確かめと旧いスクリプトの置き場の扱いは
 `development-workflow/references/scripts-lookup.md`。`status` が `stopped` なら `summary` と `items` を
 報告して止まる。
 
 ```bash
-PRR=$(bash "$R/scripts/resolve.sh" scripts pr-review) || exit 3
+PRR=   # 旧いスクリプトの置き場。新しいプラグインだけの起動では空（scripts-lookup.md）
+[ -n "${PRR:-}" ] || { echo "pr-review-steps.py は M5 #3299 が副命令に置き換えるまで新しいプラグインだけでは打てない" >&2; exit 3; }
 ```
 
 Claude 自身がレビューする（第二引数なし）:

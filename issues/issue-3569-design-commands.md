@@ -209,7 +209,7 @@ now='—'
 
 | 状態 | 書き手 | 読み手 | 同時に書いたときの扱い（旧い実装の取り方。新しい副命令も同じにする） |
 | --- | --- | --- | --- |
-| アカウントの登録（アカウントの置き場のアカウントごとのファイル） | 旧い `relay.py account`・新しい `ndf relay account` | 両方の中継の起動・`account list` | アカウントごとの排他（`<置き場>/.locks/<名前>.lock`。filelock）を取ってから書き、一時ファイルからの置き換え（`os.replace`）で書く。排他のパスが同じため、旧いと新しいの書き手は互いに待つ。待ちの上限を超えたら書かずに失敗として返し（旧い `claude_accounts._with_lock` の `on_fail`）、新しい副命令は終了コード 1 で終わる |
+| アカウントの登録（アカウントの置き場のアカウントごとのファイル） | 旧い `relay.py account`・新しい `ndf relay account` | 両方の中継の起動・`account list` | アカウントごとの排他（`<置き場>/.locks/<名前>.lock`。filelock）を取ってから書き、一時ファイルからの置き換え（`os.replace`）で書く。排他のパスが同じため、旧いと新しいの書き手は互いに待つ。待ちの上限を超えたら書かずに失敗として返し（旧い `claude_accounts._with_lock` の `on_fail`）、新しい副命令は止まった理由 `store_in_use`（終了コード 3。statusline の排他と同じ。打ち直さずに人へ戻す）で終わる |
 | 再起動の方針の判定の記録（`<状態の置き場>/decisions/<リポジトリ>.decisions.jsonl`） | 旧い `context-policy.py record` と hook・新しい `ndf relay context record` | 両方の `report`・`calibrate` | 追記だけで書く（1 回の書き込みで 1 行）。読み手は読めない行を飛ばす（旧い `context_decisions.append_decision`・`read_decisions`）。追記どうしは行の順が入れ替わってもよく、読み手が `at` で並べ直す |
 | 再起動の見込み（`<状態の置き場>/estimates/<リポジトリ>.cost-estimates.json`） | 旧い `context-policy.py calibrate`・新しい `ndf relay context calibrate` | 両方の `resolve` | 一時ファイルからの置き換えで書く（旧い `jsonio.write_atomic`）。後に書いた方が残る。どちらも同じ判定の記録から作るため、後勝ちで値は食い違わない |
 | statusline の控え（`.ndf-statusline-backup.json`）と `settings.json` の `statusLine` | 旧い `statusline-switch.sh`・新しい `ndf statusline` | 両方の `status`・`restore` | 排他のファイル（`.ndf-statusline.lock`）に排他のロックを取ってから書く。旧い実装は `flock`（コマンド）で、新しい副命令は同じファイルに filelock（`fcntl.flock`）で取るため、両者は互いに待つ。`settings.json` は一時ファイルからの置き換えで書く |

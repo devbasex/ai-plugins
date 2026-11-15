@@ -43,6 +43,7 @@ def test_env_names_and_secrets():
         "GH_TOKEN",
         "GOOGLE_WORKSPACE_CLI_TOKEN",
         "NDF_PROGRESS_DB",
+        "NDF_SUPERVISE_CLAUDE_FALLBACK",
         "SLACK_BOT_TOKEN",
     }
 
