@@ -19,10 +19,10 @@ NDF プラグインの版数の付け方と、正式版のリリース・開発�
 | 正式版 | `main`（既定ブランチ） | 正式版として承認された版だけが載る | 常用する利用者 |
 | 開発版 | `develop` | マージされた変更がそのまま載る | 開発者と、検証に参加する利用者 |
 
-**正式版を既定ブランチへ載せるのは、利用者の取得手順を変えないためである。** 取得元の登録に
-ref は保存されず（Claude Code の `known_marketplaces.json` は URL だけを持つ）、登録した時点の
-ref がそのまま基準になる。そのため**既定ブランチを別の名前へ移しても、すでに登録した利用者は
-`main` を追い続ける**。正式版を `main` に置けば、既存の利用者も新しい利用者も登録し直さなくてよい。
+**正式版を既定ブランチへ載せるのは、利用者の取得手順を変えないためである。** ref を付けずに登録した
+取得元は ref を持たず（Claude Code の `known_marketplaces.json` は URL だけを持つ。`#<ref>` を付けて登録したときだけ
+`ref` が残る）、登録した時点の既定ブランチがそのまま基準になる。そのため**既定ブランチを別の名前へ移しても、
+すでに登録した利用者は `main` を追い続ける**。正式版を `main` に置けば、既存の利用者も新しい利用者も登録し直さなくてよい。
 
 **clone が取得する範囲はランタイムで違う。** 結論は同じだが、根拠となる値は別である。
 
@@ -37,6 +37,37 @@ Codex は全ブランチを取得するが、登録した ref を基準にする
 **1 人の利用者は片方のチャネルしか持てない。** 取得元は名前ごとに 1 つしか登録できないため
 （後述）、正式版と開発版を同時には入れられない。常用する利用者が開発版を試すときは、一時的に
 登録し直すか、`claude --plugin-dir` で読み込む。
+
+## 11.0.0 からの運用（GitHub flow）
+
+11.0.0 の入れ替えから、作り直しの NDF（`plugins/ndf-next/`）は GitHub flow を土台にする。
+入れ替えまでは、この節の上下の develop と main の運用のままである。
+
+| 問い | 答え |
+| --- | --- |
+| マージした変更はいつ利用者へ届くか | **main へのマージの時点**。スプリントブランチを main から切り、スプリントの PR（本番の PR）を承認した先端との照合付きで main へマージする。マージ＝リリース承認＝マージ承認で、承認ゲートでの承認と、利用者の GitHub でのマージのどちらも承認として扱う |
+| 版数とタグは誰がいつ作るか | **CD がマージの時点に作る**（`.github/workflows/ndf-next-release.yml`）。PR は版数と `CHANGELOG.md` を触らない。main への push で CD が版上げの PR（head は `release/v<版>`、差分は版数の文字列と CHANGELOG の版の節だけ）を作ってマージし、その push でタグ `ndf--v<版>` と GitHub Release を作る |
+| マージの前の中身を試すには | **2 つ目のマーケットプレイス（`ai-plugins-next`）を登録する**。main 宛ての開いた PR を集めた検証の ref（`verify/next`）を指す |
+
+**上げ幅は PR のラベルで宣言する。** `release:major`・`release:minor`・`release:patch` のどれか 1 つで、無ければ PATCH。
+1 つの PR に 2 つ以上あれば PR の検査（`ndf release-steps pr-check`）が落とす。前の版上げから main へ入った PR のうち
+最も大きい上げ幅を採る。main の ruleset は PR を通さない push を断るため、版上げは PR で main へ入れる。そのため
+main へのマージから版上げの PR のマージまでは、版数が前の版のまま新しいコードが載る。
+
+**#188（2026-08-31）で main と develop に分けた理由は、マージした時点で常用する利用者へ届くことだった。** GitHub flow では
+マージがリリースになるため、試す場所をマージの前へ移し、検証の ref で受ける。Claude Code にはリリースチャネルの概念が無く、
+名前の違う 2 つのマーケットプレイスが違う ref を指す形を公式に勧めている。名前が違うので正式版と両方を登録でき、
+登録し直しが要らない。検証の ref は main 宛ての PR の作成・更新・閉じのたびに CD（`.github/workflows/ndf-next-pr.yml`）が
+fast-forward で組み直し、版を `<main の版>-next.<組んだ時刻 UTC>` にする（版が変わらないと更新が入らない）。検証の ref は main へ戻さない。
+
+```bash
+claude plugin marketplace add 'https://github.com/devbasex/ai-plugins.git#verify/next'   # ai-plugins-next として登録される
+claude plugin disable ndf@ai-plugins                                                    # 試す間は正式版を止める
+claude plugin marketplace update ai-plugins-next                                        # 組み直した中身を入れる
+```
+
+試し終えたら `claude plugin enable ndf@ai-plugins` で正式版へ戻す。Codex での 2 つ目のマーケットプレイスの登録の形は、
+入れ替えの前に確かめる。
 
 ## 版の付け方と開発版のデプロイ
 
