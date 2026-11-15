@@ -17,6 +17,7 @@ from ndf.domains.release import (
     checks_decide,
     gather,
     materials_decide,
+    records_trail,
     trail,
     version_decide,
 )
@@ -232,6 +233,6 @@ def test_splice_replaces_only_the_section_and_drops_a_broken_mark() -> None:
 
 
 def test_the_version_record_refuses_a_suffixed_version() -> None:
-    assert trail.VERSION_MARK in trail.render_version_record("1.3.0", "kit--v1.3.0", 20)
+    assert records_trail.VERSION_MARK in records_trail.render_version_record("1.3.0", "kit--v1.3.0", 20)
     with pytest.raises(ValueError):
-        trail.render_version_record("1.3.0-next.1", "kit--v1.3.0", 20)
+        records_trail.render_version_record("1.3.0-next.1", "kit--v1.3.0", 20)

@@ -32,7 +32,7 @@ from typing import NamedTuple
 
 from ndf.adapters import ci
 from ndf.adapters.github import MERGE_COMMIT, MERGE_QUEUE_PENDING, GitHub, GitHubError, MergeOutcome, Pull
-from ndf.domains.release import merge_decide, release_plan, required_checks, trail
+from ndf.domains.release import merge_decide, records_trail, release_plan, required_checks, trail
 from ndf.domains.release.required_checks import NOT_FOUND, RequiredChecks, from_sources
 
 # 本番の PR と版上げの PR のマージの方式。版上げのコミットの起点と範囲（版上げの PR の第 2 親）を保つため merge commit に限る
@@ -220,7 +220,7 @@ class Lander:
     def _record_admin(self, pull: Pull, done: Landed) -> Landed:
         """迂回でマージした結果に、迂回の記録の URL か、書けなかった理由を足す（#3506 の I7・決定 7）。"""
         try:
-            _wrote, url = trail.write_admin_record(self.hub, pull.number, pull.head_sha)
+            _wrote, url = records_trail.write_admin_record(self.hub, pull.number, pull.head_sha)
         except trail.TrailError as exc:
             return done._replace(admin=True, record_error=str(exc))
         return done._replace(admin=True, admin_record=url)
@@ -273,7 +273,7 @@ class Lander:
         if approval.route != merge_decide.MERGE_ROUTE:
             return done
         try:
-            _wrote, url = trail.write_merge_record(self.hub, number, approval)
+            _wrote, url = records_trail.write_merge_record(self.hub, number, approval)
         except trail.TrailError as exc:
             return done._replace(record_error=str(exc))
         return done._replace(merge_record=url)

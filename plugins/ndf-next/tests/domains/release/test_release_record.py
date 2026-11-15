@@ -6,7 +6,7 @@ import pytest
 
 from ndf.adapters.github import Authored
 from ndf.domains.release import cli as release_cli
-from ndf.domains.release import record, record_decide, trail
+from ndf.domains.release import record, record_decide, records_trail
 
 from ._fakes import FakeHub, pull
 
@@ -34,7 +34,7 @@ MERGE = "e" * 40
 
 def _version_record(version: str = VERSION, author: str = "octocat") -> Authored:
     """confirm が本番の PR へ書く作った版の記録。"""
-    return Authored(author, "OWNER", trail.render_version_record(version, f"ndf--v{version}", 60))
+    return Authored(author, "OWNER", records_trail.render_version_record(version, f"ndf--v{version}", 60))
 
 
 def _hub() -> FakeHub:

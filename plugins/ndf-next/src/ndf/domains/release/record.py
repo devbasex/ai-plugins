@@ -1,7 +1,7 @@
 """リリース記録を含めた PR の各々へ書き、リリース後テストの記録を同じ PR へ書く（#3487。元の事象は #2783・#3128）。
 
 - 書く時点は、本番の PR を本番ブランチへマージし、CD の版上げを確かめた後（本番のプランの `confirm` の後）。版は
-  `confirm` が本番の PR へ書いた作った版の記録（`trail.read_version_record`）から読み、head の名前を読まない（#3572）
+  `confirm` が本番の PR へ書いた作った版の記録（`records_trail.read_version_record`）から読み、head の名前を読まない（#3572）
 - 含めた PR は、リリースの PR のコミットを先端から first-parent で辿った件名から、承認資料と同じ規則
   （`included_decide`）で決める（承認資料の範囲 `<前のリリース>..<ベースブランチ>` と同じ範囲）
 - 同じ版のリリース記録が既にある PR には書かない（打ち直しで重ねない）。既にあるかは信用する書き手
@@ -22,7 +22,7 @@ from typing import Any, NamedTuple
 from ndf import contracts
 from ndf.adapters.github import GitHub, Pull
 from ndf.adapters.publish import Publisher
-from ndf.domains.release import included_decide, record_decide, trail
+from ndf.domains.release import included_decide, record_decide, records_trail
 
 # リリース後テストの記録のスキーマ
 VERIFICATION_SCHEMA = contracts.schema_path("release-verification")
@@ -75,7 +75,7 @@ def released(hub: GitHub, number: int, production: str) -> tuple[Pull, record_de
     pull = hub.pull(number)
     if not pull.merged or pull.base_ref != production:
         raise NotReleased(f"#{number} は {production} へマージしたリリースの PR でない（{pull.base_ref}・merged={pull.merged}）")
-    version = trail.read_version_record(hub, number)
+    version = records_trail.read_version_record(hub, number)
     if version is None:
         raise NotReleased(f"#{number} に作った版の記録が無い（release-steps confirm を先に打つ）")
     return pull, record_decide.Record(version, number, tuple(included_of(hub, pull, production)))

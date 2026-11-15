@@ -13,7 +13,7 @@ from typing import Any
 
 from ndf.adapters import ci
 from ndf.adapters.github import Authored, GitHubError, MergeOutcome
-from ndf.domains.release import approval_decide, declaration, land, merge_decide, required_checks, trail
+from ndf.domains.release import approval_decide, declaration, land, merge_decide, records_trail, required_checks, trail
 from ndf.domains.release import cli as release_cli
 
 from ._fakes import HEAD, OTHER, FakeHub, ci_reading, not_found, pull, release_lander, trail_comment
@@ -250,7 +250,7 @@ class AdminHub(FakeHub):
     fail_record: bool = False
 
     def rest(self, method: str, path: str, payload: Any = None, params: Any = None) -> Any:
-        if self.fail_record and method == "POST" and path.endswith("/comments") and trail.ADMIN_MARK in payload["body"]:
+        if self.fail_record and method == "POST" and path.endswith("/comments") and records_trail.ADMIN_MARK in payload["body"]:
             raise GitHubError("書けない", 403)
         return super().rest(method, path, payload, params)
 
@@ -274,7 +274,7 @@ def _mvv_trail(sha: str = HEAD) -> Authored:
 
 
 def _records(hub: FakeHub, number: int = 7) -> list[str]:
-    return [c.body for c in hub.comments_of.get(number, []) if trail.ADMIN_MARK in c.body]
+    return [c.body for c in hub.comments_of.get(number, []) if records_trail.ADMIN_MARK in c.body]
 
 
 def test_admin_declaration_merges_the_production_pr_with_the_bypass_and_records_it() -> None:
@@ -343,16 +343,16 @@ def test_admin_declaration_counts_only_unedited_user_trails(comment: Authored) -
 
 def test_admin_record_ignores_records_by_untrusted_or_edited_comments() -> None:
     """I7: 信用しない書き手か編集された、印と先端の SHA を持つコメントがあっても、本物の記録を書く。"""
-    fake = trail.render_admin_record(HEAD, "")
+    fake = records_trail.render_admin_record(HEAD, "")
     hub = AdminHub(
         pulls={7: pull()},
         comments_of={
             7: [trail_comment("approved", HEAD), Authored("mallory", "NONE", fake), Authored("octocat", "OWNER", fake, edited=True)]
         },
     )
-    wrote, url = trail.write_admin_record(hub, 7, HEAD)
+    wrote, url = records_trail.write_admin_record(hub, 7, HEAD)
     assert wrote and url == "https://example.invalid/7" and len(_records(hub)) == 3
-    assert trail.write_admin_record(hub, 7, HEAD)[0] is False
+    assert records_trail.write_admin_record(hub, 7, HEAD)[0] is False
 
 
 def test_authored_from_rest_marks_edited_comments() -> None:
@@ -563,7 +563,7 @@ def test_gate_approval_merge_reports_the_gate_route() -> None:
     done = release_lander(hub, False, []).land(7)
     assert done.merged and seen[0] == HEAD
     assert done.approval is not None and (done.approval.route, done.approval.approved_head) == ("gate", HEAD)
-    assert done.merge_record is None and not [c for c in hub.comments(7) if trail.MERGE_MARK in c.body]
+    assert done.merge_record is None and not [c for c in hub.comments(7) if records_trail.MERGE_MARK in c.body]
 
 
 def _resumed(comments: list[Authored], head: str) -> FakeHub:
@@ -581,7 +581,7 @@ def test_human_merge_while_the_gate_waits_is_recorded_once() -> None:
     second = release_lander(hub, False, []).land(7)
     assert first.merged and first.approval is not None and hub.merged == []
     assert (first.approval.route, first.approval.by, first.approval.merged_head) == ("github-merge", "takemi", HEAD)
-    records = [c.body for c in hub.comments(7) if trail.MERGE_MARK in c.body]
+    records = [c.body for c in hub.comments(7) if records_trail.MERGE_MARK in c.body]
     assert len(records) == 1 and f"`{HEAD}`" in records[0] and f"`{MERGE_SHA}`" in records[0] and "takemi" in records[0]
     assert second.merged and second.merge_record is not None
 
@@ -591,8 +591,8 @@ def test_human_merge_of_a_moved_head_keeps_both_heads() -> None:
     hub = _resumed([_gate_trail(HEAD)], OTHER)
     done = release_lander(hub, False, []).land(7)
     assert done.approval == merge_decide.Approval("github-merge", "takemi", OTHER, OTHER, MERGE_SHA, HEAD)
-    (record,) = [c.body for c in hub.comments(7) if trail.MERGE_MARK in c.body]
-    assert f"{trail.GATE_HEAD_LINE} `{HEAD}`" in record and f"{trail.MERGED_HEAD_LINE} `{OTHER}`" in record
+    (record,) = [c.body for c in hub.comments(7) if records_trail.MERGE_MARK in c.body]
+    assert f"{records_trail.GATE_HEAD_LINE} `{HEAD}`" in record and f"{records_trail.MERGED_HEAD_LINE} `{OTHER}`" in record
 
 
 def test_merge_record_failure_keeps_the_merge_and_reports_it(monkeypatch, capsys) -> None:
@@ -602,7 +602,7 @@ def test_merge_record_failure_keeps_the_merge_and_reports_it(monkeypatch, capsys
     def broken(*args, **kwargs):
         raise trail.TrailError("書けない")
 
-    monkeypatch.setattr(trail, "write_merge_record", broken)
+    monkeypatch.setattr(records_trail, "write_merge_record", broken)
     done = release_lander(hub, False, []).land(7)
     assert done.merged and done.record_error == "書けない" and done.approval is not None
 
@@ -628,13 +628,15 @@ def test_approvals_reads_old_trails_as_the_gate_and_skips_rejections_and_untrust
 
 def test_merge_record_is_written_once_per_head_by_a_trusted_author() -> None:
     approval = merge_decide.Approval("github-merge", "takemi", HEAD, HEAD, MERGE_SHA, None)
-    assert "（無し）" in trail.render_merge_record(approval) and approval_decide.TRAIL_MARK not in trail.render_merge_record(approval)
+    assert "（無し）" in records_trail.render_merge_record(
+        approval
+    ) and approval_decide.TRAIL_MARK not in records_trail.render_merge_record(approval)
     with pytest.raises(ValueError):
-        trail.render_merge_record(approval._replace(merge_sha="x"))
-    forged = Authored("mallory", "NONE", trail.render_merge_record(approval))
+        records_trail.render_merge_record(approval._replace(merge_sha="x"))
+    forged = Authored("mallory", "NONE", records_trail.render_merge_record(approval))
     hub = FakeHub(pulls={7: pull()}, comments_of={7: [forged]})
-    assert trail.write_merge_record(hub, 7, approval)[0]
-    assert not trail.write_merge_record(hub, 7, approval)[0]
+    assert records_trail.write_merge_record(hub, 7, approval)[0]
+    assert not records_trail.write_merge_record(hub, 7, approval)[0]
 
 
 def test_cli_answer_routes(monkeypatch, capsys) -> None:

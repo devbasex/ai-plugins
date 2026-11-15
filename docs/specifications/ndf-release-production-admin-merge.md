@@ -179,7 +179,7 @@ sequenceDiagram
 ```
 
 - 印 `ndf:admin-merge` は証跡の印（`ndf:release-approval`）と別で、証跡の判定と `release-approval.yml` の起動の条件に掛からない
-- 書き手は `approval_trail.write_admin_record`（作り直しは `trail.write_admin_record`）で、同じ先端の記録があれば置かない
+- 書き手は `approval_trail.write_admin_record`（作り直しは `records_trail.write_admin_record`）で、同じ先端の記録があれば置かない
 - 作り直しは旧いプラグインを読み込まないため、同じ印と行を別に持つ。両者が揃っていることは両方のテストが同じ本文の形で縛る
 - 置き場を本番の PR にするのは、誰がどの先端を承認し、それをどう通したかを 1 つの画面で読めるためである
 

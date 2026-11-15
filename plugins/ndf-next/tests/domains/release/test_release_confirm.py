@@ -10,7 +10,7 @@ import pytest
 
 from ndf.adapters.github import GitHubError
 from ndf.domains.release import cli as release_cli
-from ndf.domains.release import confirm, trail
+from ndf.domains.release import confirm, records_trail
 
 from ._fakes import FakeHub, not_found, pull
 
@@ -61,7 +61,7 @@ def _confirm(hub: FakeHub, budget: float = 60.0) -> tuple[confirm.Confirmed, lis
 
 
 def _records(hub: FakeHub) -> list[str]:
-    return [c.body for c in hub.comments(PR) if trail.VERSION_MARK in c.body]
+    return [c.body for c in hub.comments(PR) if records_trail.VERSION_MARK in c.body]
 
 
 def test_confirm_returns_the_version_and_writes_the_record_once() -> None:
@@ -70,7 +70,7 @@ def test_confirm_returns_the_version_and_writes_the_record_once() -> None:
     assert (got.kind, got.version, got.tag, got.bump_pr, got.bump_revision) == (None, "1.3.0", TAG, 20, BUMP_MERGE) and slept == []
     again, _ = _confirm(hub)
     assert again.kind is None and len(_records(hub)) == 1
-    assert trail.read_version_record(hub, PR) == "1.3.0"
+    assert records_trail.read_version_record(hub, PR) == "1.3.0"
 
 
 def test_confirm_without_the_bump_merge_stops_after_the_budget_with_bump_missing() -> None:

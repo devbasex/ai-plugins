@@ -11,7 +11,7 @@ PR の検査と検証の ref は `.github/workflows/ndf-next-pr.yml` が持つ�
 | --- | --- |
 | 材料を集める | `plugins`（マーケットプレイスと版）・`declaration`（宣言と宣言の手順）・`gather` |
 | 承認資料 | `assemble`（本番の PR の本文の承認資料の節。ブランチを作らない） |
-| 提示と承認 | `materials_decide`（承認資料）・`approval_decide`（証跡の判定）・`trail`（証跡・人のマージ・作った版の記録の読み書き）・`merge_decide`（承認の経路） |
+| 提示と承認 | `materials_decide`（承認資料）・`approval_decide`（証跡の判定）・`trail`（証跡の読み書きと判定）・`records_trail`（迂回・人のマージ・作った版の記録の読み書き）・`merge_decide`（承認の経路） |
 | マージ | `land`（証跡の後の照合付きのマージ。同期の PR を作らない）・`required_checks`（宛先の必須のチェックの解決）・`cleanup`（worktree の後片付け） |
 | 本番のプランの形 | `release_plan`（承認の後に直しのステップを置かない・`merge` の部品の前の `release-guard`） |
 | 版上げ（CD） | `bump_decide`（上げ幅・起点・動き）・`bump`（版上げの PR）・`confirm`（版上げの PR のマージ・タグ・GitHub Release の確かめ） |

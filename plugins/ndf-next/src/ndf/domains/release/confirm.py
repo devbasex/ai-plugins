@@ -17,7 +17,7 @@ from typing import NamedTuple
 
 from ndf.adapters import git as git_mod
 from ndf.adapters.github import PER_PAGE, GitHub, text_of
-from ndf.domains.release import gather, land, trail, version_decide
+from ndf.domains.release import gather, land, records_trail, version_decide
 
 # 読み直しの間隔（秒。マージキューの読み直しと同じ値）
 CONFIRM_POLL_SECONDS = land.QUEUE_POLL_SECONDS
@@ -119,7 +119,7 @@ def confirm(
     while True:
         got = _read(hub, repo_git, pull.merge_sha, production, plugin)
         if got.kind is None and got.version is not None and got.tag is not None and got.bump_pr is not None:
-            trail.write_version_record(hub, number, got.version, got.tag, got.bump_pr)
+            records_trail.write_version_record(hub, number, got.version, got.tag, got.bump_pr)
             return got._replace(detail=f"#{number} の版 v{got.version}（タグ {got.tag}・版上げの PR #{got.bump_pr}）を確かめた")
         left = deadline - watch.clock()
         if left <= 0:
