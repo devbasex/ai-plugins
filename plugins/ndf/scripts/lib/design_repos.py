@@ -155,6 +155,34 @@ def _loss_rows(table) -> tuple[list[int], list[int]]:
     return lost, empty
 
 
+def _table_problems(table, kinds: tuple[str, ...]) -> list[tuple[int, str]]:
+    """振る舞いの表の欠け（種類の行・扱えなくなることの空・直した後に起きることの列と空）を（行, 理由）で並べる。"""
+    problems: list[tuple[int, str]] = []
+    repo_col = _col(table.header, REPO_COL)
+    names = [_row_cell(r, repo_col) for r in table.rows]
+    for kind in kinds:
+        if not any(n.startswith(kind) for n in names):
+            problems.append((table.start, f"種類 {kind} の行が無い"))
+    _, empty = _loss_rows(table)
+    problems += [(i, "扱えなくなることが空") for i in empty]
+    after_col = _col(table.header, AFTER_COL)
+    if after_col is None:
+        problems.append((table.start, f"振る舞いの表に {AFTER_COL} の列が無い"))
+    else:
+        problems += [(table.body_line(k), f"{AFTER_COL}が空") for k, r in enumerate(table.rows) if not _row_cell(r, after_col)]
+    return problems
+
+
+def _has_own_note(text: str, inner: list) -> bool:
+    """「このリポジトリだけの事情」の節のどれかに、コードブロックの外の空でない行があるか。"""
+    import md
+
+    lines = text.splitlines()
+    fenced = md.fenced_lines(text)
+    own = [s for s in inner if s.heading.title.endswith(OWN_SUFFIX)]
+    return any(any(not fenced[i] and lines[i].strip() for i in range(s.start, min(s.end, len(lines)))) for s in own)
+
+
 def _scope_problems(text: str, settings: RepoSettings):
     """「適用範囲」の欠けを（行, 理由）で並べ、見つけた振る舞いの表（無ければ None）を返す。"""
     import md
@@ -175,22 +203,8 @@ def _scope_problems(text: str, settings: RepoSettings):
         if table is None:
             problems.append((behavior.heading.line, f"振る舞いの表に {REPO_COL} と {LOSS_COL} の列が無い"))
     if table is not None:
-        repo_col = _col(table.header, REPO_COL)
-        names = [_row_cell(r, repo_col) for r in table.rows]
-        for kind in settings.kinds:
-            if not any(n.startswith(kind) for n in names):
-                problems.append((table.start, f"種類 {kind} の行が無い"))
-        _, empty = _loss_rows(table)
-        problems += [(i, "扱えなくなることが空") for i in empty]
-        after_col = _col(table.header, AFTER_COL)
-        if after_col is None:
-            problems.append((table.start, f"振る舞いの表に {AFTER_COL} の列が無い"))
-        else:
-            problems += [(table.body_line(k), f"{AFTER_COL}が空") for k, r in enumerate(table.rows) if not _row_cell(r, after_col)]
-    lines = text.splitlines()
-    fenced = md.fenced_lines(text)
-    own = [s for s in inner if s.heading.title.endswith(OWN_SUFFIX)]
-    if not any(any(not fenced[i] and lines[i].strip() for i in range(s.start, min(s.end, len(lines)))) for s in own):
+        problems += _table_problems(table, settings.kinds)
+    if not _has_own_note(text, inner):
         problems.append((head_line, f"このリポジトリ{OWN_SUFFIX}の欄が無い"))
     return problems, table
 
