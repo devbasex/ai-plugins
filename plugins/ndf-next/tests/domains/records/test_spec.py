@@ -56,7 +56,7 @@ def test_commit_paths_keep_every_spec() -> None:
 
 def _repo(tmp_path: Path) -> Path:
     (tmp_path / ".ndf").mkdir()
-    decl = {"source": "glossary.json", "document": "docs/glossary.md"}
+    decl = {"source": "glossary.json", "document": "docs/words.md"}
     (tmp_path / ".ndf" / "glossary.json").write_text(json.dumps(decl), encoding="utf-8")
     (tmp_path / "glossary.json").write_text(json.dumps(G, ensure_ascii=False), encoding="utf-8")
     (tmp_path / "docs").mkdir()
@@ -70,7 +70,7 @@ def _repo(tmp_path: Path) -> Path:
 def test_finalize_moves_the_source_renders_and_removes_the_design(tmp_path: Path) -> None:
     root = _repo(tmp_path)
     paths = spec.finalize(root, ["docs/a.md", "docs/b.md"], ["issues/d.md"], {})
-    assert paths[:2] == ["docs/a.md", "docs/b.md"] and "issues/d.md" in paths and "docs/glossary.md" in paths
+    assert paths[:2] == ["docs/a.md", "docs/b.md"] and "issues/d.md" in paths and "docs/words.md" in paths
     assert not (root / "issues" / "d.md").exists()
     g = json.loads((root / "glossary.json").read_text(encoding="utf-8"))
     assert g["terms"][0]["source"] == "docs/a.md"
@@ -122,8 +122,8 @@ def test_cli_finalize_lists_the_paths_without_committing(git_repo: Path, capsys,
         {"path": "docs/a.md"},
         {"path": "docs/b.md"},
         {"path": "glossary.json"},
-        {"path": "docs/glossary.md"},
-        {"path": "docs/glossary/c.md"},
+        {"path": "docs/words.md"},
+        {"path": "docs/words/c.md"},
         {"path": "issues/d.md"},
     ]
     assert git_sandbox.sh(git_repo, "log", "-1", "--format=%s", strip=True) == "init"

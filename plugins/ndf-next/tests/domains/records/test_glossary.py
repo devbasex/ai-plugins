@@ -10,7 +10,7 @@ import pytest
 from ndf.domains.records import glossary
 from ndf.domains.records import glossary_decide as gd
 
-LAYOUT = gd.Layout("glossary.json", "docs/glossary.md", "docs/glossary", 50)
+LAYOUT = gd.Layout("glossary.json", "docs/words.md", "docs/words", 50)
 
 
 def _g(n_terms: int = 2) -> dict:
@@ -22,9 +22,9 @@ def _g(n_terms: int = 2) -> dict:
 
 def test_render_files_writes_one_file_per_context_and_an_index() -> None:
     got = gd.render_files(_g(), LAYOUT)
-    assert sorted(got) == ["docs/glossary.md", "docs/glossary/empty.md", "docs/glossary/flow.md"]
-    assert "語1" in got["docs/glossary/flow.md"] and "語1" not in got["docs/glossary.md"]
-    assert "docs/glossary/empty.md" in got["docs/glossary.md"]
+    assert sorted(got) == ["docs/words.md", "docs/words/empty.md", "docs/words/flow.md"]
+    assert "語1" in got["docs/words/flow.md"] and "語1" not in got["docs/words.md"]
+    assert "docs/words/empty.md" in got["docs/words.md"]
 
 
 def test_render_files_stops_without_files_when_a_context_is_over_the_limit() -> None:
@@ -54,7 +54,7 @@ def test_deprecated_in_meanings_skips_code_live_terms_and_kanji_neighbours() -> 
 
 def _root(tmp_path: Path, g: dict, **decl: object) -> Path:
     (tmp_path / ".ndf").mkdir()
-    base = {"source": "glossary.json", "document": "docs/glossary.md"}
+    base = {"source": "glossary.json", "document": "docs/words.md"}
     (tmp_path / ".ndf" / "glossary.json").write_text(json.dumps({**base, **decl}), encoding="utf-8")
     (tmp_path / "glossary.json").write_text(json.dumps(g, ensure_ascii=False), encoding="utf-8")
     return tmp_path
@@ -64,13 +64,13 @@ def test_render_writes_then_check_reports_nothing(tmp_path: Path) -> None:
     root = _root(tmp_path, _g())
     assert glossary.render(root, check=True) != []
     written = glossary.render(root, check=False)
-    assert {r["path"] for r in written} == {"docs/glossary.md", "docs/glossary/flow.md", "docs/glossary/empty.md"}
+    assert {r["path"] for r in written} == {"docs/words.md", "docs/words/flow.md", "docs/words/empty.md"}
     assert glossary.render(root, check=True) == []
 
 
 def test_layout_reads_document_dir_and_max_lines(tmp_path: Path) -> None:
     root = _root(tmp_path, _g(), document_dir="docs/terms", max_lines=10)
-    assert glossary.layout(root) == gd.Layout("glossary.json", "docs/glossary.md", "docs/terms", 10)
+    assert glossary.layout(root) == gd.Layout("glossary.json", "docs/words.md", "docs/terms", 10)
 
 
 def test_layout_without_declaration_raises(tmp_path: Path) -> None:
