@@ -41,6 +41,8 @@ class Arg:
     aliases: tuple[str, ...] = ()
     # オプションが後ろから取る値の語の数（`None` は次のオプションまでの語をすべて）
     takes: int | None = 1
+    # 位置引数が残りの語をすべて取る（`nargs=argparse.REMAINDER`）
+    remainder: bool = False
 
 
 @dataclass(frozen=True)
@@ -168,6 +170,7 @@ def arg_of(action: argparse.Action) -> Arg | None:
         items=word if array else None,
         aliases=aliases,
         takes=_takes(action, word),
+        remainder=positional and action.nargs == argparse.REMAINDER,
     )
 
 

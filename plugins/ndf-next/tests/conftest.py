@@ -79,9 +79,14 @@ def _checked_emit(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureReques
 
 
 def is_full_run(config: pytest.Config) -> bool:
-    """全体の実行（引数のパスがプラグインの根だけで、絞り込みが無い）か。"""
-    paths = [Path(a.split("::")[0]).resolve() for a in config.args]
-    if any(p != PLUGIN_ROOT for p in paths):
+    """全体の実行（引数のパスがプラグインの根か `testpaths` のディレクトリだけで、絞り込みが無い）か。
+
+    引数を書かずに流すと、pytest は `testpaths`（`pyproject.toml` の `["tests"]`）を引数にする。
+    """
+    whole = {PLUGIN_ROOT} | {(config.rootpath / t).resolve() for t in config.getini("testpaths")}
+    base = config.invocation_params.dir
+    paths = [(base / a.split("::")[0]).resolve() for a in config.args]
+    if any(p not in whole for p in paths):
         return False
     return not any(getattr(config.option, name, None) for name in NARROWING_OPTIONS)
 

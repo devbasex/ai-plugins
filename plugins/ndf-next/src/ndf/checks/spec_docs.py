@@ -266,6 +266,8 @@ def call_errors(words: list[str], commands: dict[str, CommandSpec]) -> list[str]
     """呼び出しの語を副命令・下位の命令・引数の名前で引数の木に当て、当たらない語を返す（値の型は見ない）。
 
     オプションの値の語は、そのオプションが取る数（`Arg.takes`）だけ読み飛ばしてから下位の命令を辿る。
+    残りの語をすべて取る位置引数（`Arg.remainder`）に達するか、それを持つ命令で `--` に達したら、
+    それより後ろの語は照合しない（argparse がその位置引数へ渡す語で、引数の名前ではない）。
     """
     name = words[0]
     if name not in commands:
@@ -276,21 +278,35 @@ def call_errors(words: list[str], commands: dict[str, CommandSpec]) -> list[str]
     allowed = _options(tree)
     errs = []
     rest = words[1:]
+    seen = 0
     while rest:
         word, rest = rest[0], rest[1:]
         if _is_placeholder(word):
             continue
+        if word == "--" and _remainder_at(tree, None):
+            break
         if word.startswith("-"):
             errs += _flag_error(word, allowed)
             rest = _skip_values(word, allowed, rest)
             continue
+        if _remainder_at(tree, seen):
+            break
         sub = _descend(tree, word)
         if sub is None:
             errs.append(f"下位の命令 {word} が無い")
             break
+        seen = seen + 1 if sub is tree else 0
         tree = sub
         allowed |= _options(tree)
     return errs
+
+
+def _remainder_at(tree: ArgTree, seen: int | None) -> bool:
+    """`seen` 個の位置の語を読んだ次の位置引数が残りの語をすべて取るか（`None` はどの位置でも）。下位の命令を持つ木は偽。"""
+    if tree.subcommands:
+        return False
+    positionals = [a for a in tree.options if a.positional]
+    return any(a.remainder for a in (positionals if seen is None else positionals[seen : seen + 1]))
 
 
 def _flag_error(word: str, allowed: dict[str, Arg]) -> list[str]:

@@ -136,6 +136,10 @@ def test_written_calls_and_call_errors(copy):
     assert spec_docs.call_errors(["contracts", "nosuch"], commands) == ["下位の命令 nosuch が無い"]
     assert spec_docs.call_errors(["nosuch"], commands) == ["副命令 nosuch が無い"]
     assert spec_docs.call_errors(["worktree", "--cwd", "/tmp/example", "list"], commands) == []
+    # 残りの語をすべて取る位置引数（REMAINDER）の後ろの語は、引数の名前として照合しない
+    assert spec_docs.call_errors(["test-slot", "run", "--", "uv", "run", "pytest", "-q"], commands) == []
+    assert spec_docs.call_errors(["relay", "run", "--name", "a", "claude", "-p", "x"], commands) == []
+    assert spec_docs.call_errors(["test-slot", "run", "--nope", "--", "x"], commands) == ["引数 --nope が無い"]
 
 
 def test_a_written_call_with_an_unknown_argument_names_the_file_and_line(copy):

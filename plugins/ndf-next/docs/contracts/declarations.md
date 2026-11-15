@@ -268,16 +268,14 @@ worktree・チーム・公開・[review.schema.json](../../contracts/schemas/dec
 
 メインディレクトリ（既定ブランチの worktree）（印のキーはメインディレクトリ）・チーム・公開・[runtime-policy.schema.json](../../contracts/schemas/declarations/runtime-policy.schema.json)。読む工程: `工程: ランタイムの起動`（ランタイムを起動する前に宣言の外の名前を止めるとき）
 
-起動してよいランタイムと cross-review の固定の組。認可に関わるため、メインディレクトリから読む
+起動してよいランタイムと cross-review の固定の組。認可に関わるため、メインディレクトリから読む。読み手は allowed・review_seats のほかのキー（version・$schema を含む）を知らないキーとして止める
 
 | キー | 型 | 既定値 | 取りうる値 | 必須か | 説明 |
 | --- | --- | --- | --- | --- | --- |
-| `$schema` | string | — | — | 任意 | 編集のときの補完に使うスキーマの位置。読み手は参照しない |
 | `allowed`（メインディレクトリから読む） | array of string | — | `"claude"`・`"codex"`・`"agy"`・`"kiro"` | 必須 | 起動してよいランタイム（1 つ以上、重複なし） |
 | `review_seats`（メインディレクトリから読む） | array of string | — | — | 任意 | cross-review の固定の組（2 つの異なる席の名前。どちらのランタイムも allowed にある） |
-| `version` | integer | — | `1` | 任意 | 宣言の形の版。読み手は知らない版を読まない |
 
-例: `{"version": 1, "allowed": ["claude"], "review_seats": ["claude", "claude-2"]}`
+例: `{"allowed": ["claude"], "review_seats": ["claude", "claude-2"]}`
 
 ## `.ndf/supervise.json`（supervise）
 
