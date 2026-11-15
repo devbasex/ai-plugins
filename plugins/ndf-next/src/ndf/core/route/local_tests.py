@@ -45,14 +45,14 @@ def read_result(path: Union[str, Path], label: str, error: type[Exception] = Loc
         raise error(f"{label} {path} を読めない: {exc.strerror or exc}") from None
 
 
-def failed_tests_of(found: Mapping[str, Any]) -> list[str]:
+def failed_tests_in(found: Mapping[str, Any]) -> list[str]:
     """結果 JSON の落ちたテスト（`metrics.failed_tests`）。無いか形が違えば空。"""
     metrics = found.get("metrics") if isinstance(found.get("metrics"), Mapping) else {}
     tests = metrics.get("failed_tests") if isinstance(metrics.get("failed_tests"), list) else []
     return [str(t) for t in tests]
 
 
-def _failed_nodes(path: Path) -> tuple[list[str], dict[str, Any]]:
+def _read_ci_result(path: Path) -> tuple[list[str], dict[str, Any]]:
     """CI の結果 JSON の落ちたテストの node id（`metrics.failed_tests`）と、結果 JSON そのもの。
 
     読めない・結果 JSON でなければ `LocalTestError`。
@@ -60,7 +60,7 @@ def _failed_nodes(path: Path) -> tuple[list[str], dict[str, Any]]:
     found = read_result(path, "CI の結果")
     if found is None:
         raise LocalTestError(f"CI の結果 {path} は結果 JSON でない")
-    return failed_tests_of(found), found
+    return failed_tests_in(found), found
 
 
 def _unread_runners(reads: Sequence[Any]) -> str:
@@ -150,7 +150,7 @@ class _NotRunnable(Exception):
 
 def _scoped_plan(ci_result: Path, cwd: Path) -> tuple[list[str], list[scoped.ScopedRun]]:
     """CI の落ちたテストと、それを打つ範囲のテスト。打てなければ `_NotRunnable`、読めなければ `LocalTestError`。"""
-    nodes, found = _failed_nodes(ci_result)
+    nodes, found = _read_ci_result(ci_result)
     files = scoped.files_of(nodes)
     if not files:
         raise _NotRunnable(unread_detail(found, ci_result), nodes)
