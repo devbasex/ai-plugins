@@ -412,18 +412,23 @@ def default_merge_method(repo: Path, base: str) -> Optional[str]:
     return github.pick_merge_method(None, allowed)
 
 
+def _omitted(t: Template, out: Mapping[str, Value], name: str) -> bool:
+    """雛形が差し込み `name` を使い、まだ値が無いか。"""
+    return name in t.params and name not in out
+
+
 def derived(t: Template, given: Mapping[str, Value], cwd: Path) -> dict[str, Value]:
     """省いた `repo`・`worktree`・`base`・`merge_method` を打った場所から決めて足す（決まらなければ足さない）。"""
     out = dict(given)
-    if "repo" in t.params and "repo" not in out:
+    if _omitted(t, out, "repo"):
         out["repo"] = repo_root(cwd)
-    if "worktree" in t.params and "worktree" not in out and isinstance(out.get("branch"), str):
+    if _omitted(t, out, "worktree") and isinstance(out.get("branch"), str):
         out["worktree"] = str(Path(str(out["repo"])) / WORKTREES / out["branch"])
-    if "base" in t.params and "base" not in out and "repo" in out:
+    if _omitted(t, out, "base") and "repo" in out:
         base = default_base(Path(str(out["repo"])))
         if base is not None:
             out["base"] = base
-    if "merge_method" in t.params and "merge_method" not in out and "repo" in out and isinstance(out.get("base"), str):
+    if _omitted(t, out, "merge_method") and "repo" in out and isinstance(out.get("base"), str):
         method = default_merge_method(Path(str(out["repo"])), str(out["base"]))
         if method is not None:
             out["merge_method"] = method
