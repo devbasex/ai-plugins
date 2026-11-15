@@ -30,3 +30,9 @@ def policy(root, name: str) -> bool:
     """`ndf_policies.<name>` が `true` か。キーが無い・不明・読めないときは掛けない（`False`。決定 8）。"""
     v = read_project_decl(root).get("ndf_policies")
     return isinstance(v, dict) and v.get(name) is True
+
+
+def production_admin(root) -> bool:
+    """迂回の宣言（`production_merge.admin`）が `true` か。キーが無い・不明・型の違い・読めないときは迂回しない（`False`。#3506 の I1）。"""
+    v = read_project_decl(root).get("production_merge")
+    return isinstance(v, dict) and v.get("admin") is True

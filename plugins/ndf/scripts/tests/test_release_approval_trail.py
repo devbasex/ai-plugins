@@ -210,6 +210,41 @@ def test_write_trail(monkeypatch):
     assert e.value.kind == "head_moved"
 
 
+def test_write_trail_does_not_reuse_a_trail_of_another_actor(monkeypatch):
+    """#3506 の I9: 同じ人・同じ SHA でも担い手が mvv の証跡は、利用者の承認（user）として使い回さず書き足す。"""
+    monkeypatch.setattr(at, "read_head", lambda repo, pr: (A, "main", "open"))
+    monkeypatch.setattr(at.gh_rest, "viewer_login", lambda: "boss")
+    posted = []
+
+    class Ok:
+        ok, error, value = True, "", {"url": "https://x/c/2"}
+
+    monkeypatch.setattr(at.gh_rest, "comment", lambda repo, n, body: posted.append(body) or Ok())
+    monkeypatch.setattr(at, "read_comments", lambda repo, pr: [comment(at.render_trail(A, "mvv"), login="boss")])
+    assert at.write_trail("o/r", 5, A, "user") == (True, "https://x/c/2")
+    assert at.parse_by(posted[0]) == "user"
+
+
+@pytest.mark.parametrize(
+    "perm, updated, wrote",
+    [("admin", None, False), ("write", None, False), ("read", None, True), (None, None, True), ("admin", "2026-11-14T00:00:00Z", True)],
+)
+def test_write_admin_record_counts_only_records_by_writers(monkeypatch, perm, updated, wrote):
+    """#3506 の I7: 既にある迂回の記録に数えるのは、書き込みの権限を持つ人が書いた編集されていないものだけ。"""
+    posted = []
+
+    class Ok:
+        ok, error, value = True, "", {"url": "https://x/c/9"}
+
+    monkeypatch.setattr(at.gh_rest, "comment", lambda repo, n, body: posted.append(body) or Ok())
+    old = {**comment(at.render_admin_record(A, "u"), login="someone", updated=updated), "html_url": "https://x/c/1"}
+    monkeypatch.setattr(at, "read_comments", lambda repo, pr: [old])
+    monkeypatch.setattr(at, "read_permissions", lambda repo, logins: {"someone": perm})
+    got = at.write_admin_record("o/r", 5, A, "https://x/c/3")
+    assert got == ((True, "https://x/c/9") if wrote else (False, "https://x/c/1"))
+    assert len(posted) == int(wrote)
+
+
 def _workflow(name):
     return (ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8")
 

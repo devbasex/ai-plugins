@@ -11,9 +11,10 @@
 | 組み立て | `assemble`（版上げ・CHANGELOG・宣言の手順・PR） |
 | 提示と承認 | `materials_decide`（承認資料）・`approval_decide`（証跡の判定）・`trail`（証跡の読み書き） |
 | マージ | `land`（証跡の後のマージとベースブランチへ戻す PR）・`cleanup`（worktree の後片付け） |
+| リリース記録 | `record_decide`（記録の本文と読み方）・`record`（含めた PR の各々へ書く・同じ PR へリリース後テストの記録を書く） |
 | タグと GitHub Release | `tagging` |
 | リリース後テスト | `verify`（ベースブランチのそろえと利用者の設定の控え） |
 
 名前が `_decide.py` で終わるモジュールは副作用の無い判断（版・変化・CHANGELOG・CI の数え方・証跡・同期の手・
-設定の控えの行・含む PR）で、単体で確かめる。副命令は `cli`。
+設定の控えの行・含む PR・記録の本文）で、単体で確かめる。副命令は `cli`。
 """

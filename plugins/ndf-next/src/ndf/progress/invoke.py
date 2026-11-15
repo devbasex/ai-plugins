@@ -46,7 +46,7 @@ from ndf.core.plan import files as plan_files
 from ndf.core.plan import runner as plan_runner
 from ndf.progress import definition, model, stages
 from ndf.progress.command import PROJECT_FILE, declaration
-from ndf.testing import weight
+from ndf.testing import scoped, weight
 
 # 作業種別と、工程の定義の call → 作業種別（plan は副命令 `ndf plan` の名前）
 PLAN = plan_cli.TOOL
@@ -329,6 +329,8 @@ PROJECT_KEYS = {
     "rebuild": ("workflow", "launch", "rebuild"),
     "refactor": ("workflow", "launch", "refactor"),
 }
+# 宣言の `workflow`（launch・stages）の形。旧いプラグインの宣言のスキーマへ足さず、読む側のここに置く（#3473）
+WORKFLOW_SCHEMA = contracts.schema_path("project-workflow")
 # 課題の本文を書き出す置き場のファイルと、題の写し（プランの実行の置き場の下）
 ISSUE_BODY_FILE = "issue-{number}-body.md"
 ISSUE_TITLE_FILE = "issue-{number}-title.json"
@@ -366,13 +368,19 @@ def _project_value(name: str, project: Mapping[str, Any]) -> Optional[route.Valu
 
 
 def _project(place: Path) -> dict[str, Any]:
-    """作業場所のリポジトリの `.ndf/project.json`。git の根が決まらなければ空。読めなければ `route.RouteError`。"""
+    """作業場所のリポジトリの `.ndf/project.json`。git の根が決まらなければ空。
+
+    読めないか、`workflow` が形（`WORKFLOW_SCHEMA`）に合わなければ `route.RouteError`。
+    """
     try:
-        return declaration(place, PROJECT_FILE)
+        project = declaration(place, PROJECT_FILE)
+        if "workflow" in project:
+            contracts.require_schema(project["workflow"], WORKFLOW_SCHEMA, contracts.ContractError, f"{PROJECT_FILE} の workflow")
     except GitError:
         return {}
     except contracts.ContractError as exc:
         raise route.RouteError(str(exc)) from None
+    return project
 
 
 def _issue_values(run: StageRun, work_dir: Path, place: Path) -> Optional[dict[str, route.Value]]:
@@ -415,18 +423,30 @@ def _branch_of(run: StageRun) -> Optional[str]:
     return branch if branch else None
 
 
-def template_values(t: route.Template, run: StageRun, work_dir: Path, cwd: Path) -> dict[str, route.Value]:
+def ci_only(project: Mapping[str, Any]) -> bool:
+    """宣言（`_project` が読んだもの）がテストを CI に寄せる（`test.ci.only` が真）か（#3473）。"""
+    test = definition.dig(project, "test")
+    return scoped.ci_only(test if isinstance(test, Mapping) else {})
+
+
+def template_values(
+    t: route.Template, run: StageRun, work_dir: Path, cwd: Path, *, project: Mapping[str, Any], local_tests: bool
+) -> dict[str, route.Value]:
     """雛形の差し込みの値。工程の入力 → 出所の表（`FILL_SOURCES`）→ 打った場所（`route.derived`）の順に決める。
 
-    既定も無く決まらない差し込みは、名前と出所を挙げて `TemplateValuesMissing`。
+    既定も無く決まらない差し込みは、名前と出所を挙げて `TemplateValuesMissing`。手元のテストのステップを外したプランを
+    組むとき（`local_tests` が偽。テストを CI に寄せる宣言 `ci_only` がある）は、そこだけが使う差し込み
+    （`test_command` など）は求めない。`project` は呼び手が 1 度だけ読んだ宣言（`_project`）で、CI に寄せるかの判定と
+    宣言の出所の差し込みが同じものを使う（読み直すと git・ファイル・形の検査が 2 回ずつ走る。PR 3525 の指摘）。
     """
-    values = {k: _param_value(v) for k, v in run.inputs.items() if k in t.params}
-    wanted = {n: FILL_SOURCES[n] for n in t.params if n not in values and n in FILL_SOURCES}
     place = work_place(run, cwd)
+    names = route.needed(t, local_tests=local_tests)
+    values = {k: _param_value(v) for k, v in run.inputs.items() if k in t.params}
+    wanted = {n: FILL_SOURCES[n] for n in names if n not in values and n in FILL_SOURCES}
     issued, untrusted = _fill_from_issue(run, work_dir, place, wanted)
-    values = {**values, **issued, **_fill_from_project(place, wanted), **_fill_branch(run, wanted), **_fill_gate(wanted)}
+    values = {**values, **issued, **_fill_from_project(project, wanted), **_fill_branch(run, wanted), **_fill_gate(wanted)}
     values = route.derived(t, values, cwd)
-    missing = _missing(t, values, {**FILL_SOURCES, **untrusted})
+    missing = _missing(names, values, {**FILL_SOURCES, **untrusted})
     if missing:
         raise TemplateValuesMissing(t.name, missing)
     return values
@@ -444,11 +464,10 @@ def _fill_from_issue(
     return {k: v for k, v in issued.items() if k in wanted}, {}
 
 
-def _fill_from_project(place: Path, wanted: Mapping[str, str]) -> dict[str, route.Value]:
+def _fill_from_project(project: Mapping[str, Any], wanted: Mapping[str, str]) -> dict[str, route.Value]:
     """宣言の出所の差し込みの値（宣言に無いか形が違う差し込みは含めない）。"""
     if FROM_PROJECT not in wanted.values():
         return {}
-    project = _project(place)
     found = {name: _project_value(name, project) for name in (n for n, s in wanted.items() if s == FROM_PROJECT)}
     return {name: value for name, value in found.items() if value is not None}
 
@@ -464,10 +483,10 @@ def _fill_gate(wanted: Mapping[str, str]) -> dict[str, route.Value]:
     return {"gate": list(STAGE_GATE)} if "gate" in wanted else {}
 
 
-def _missing(t: route.Template, values: Mapping[str, route.Value], sources: Mapping[str, str]) -> dict[str, str]:
-    """既定も無く決まらない差し込み → 出所（出所の表に無ければ工程の入力）。"""
+def _missing(names: Sequence[str], values: Mapping[str, route.Value], sources: Mapping[str, str]) -> dict[str, str]:
+    """プランが使う差し込み `names` のうち、既定も無く決まらないもの → 出所（出所の表に無ければ工程の入力）。"""
     defs = route.params()
-    return {n: (sources[n] if n in sources else FROM_INPUT) for n in t.params if n not in values and defs[n].default is None}
+    return {n: (sources[n] if n in sources else FROM_INPUT) for n in names if n not in values and defs[n].default is None}
 
 
 def plan_path(run: StageRun, work_dir: Path, cwd: Path) -> Path:
@@ -479,7 +498,10 @@ def plan_path(run: StageRun, work_dir: Path, cwd: Path) -> Path:
     t = template(run.name)
     if t is None:
         raise model.Refused(f"プランの雛形 {run.name} が無い")
-    plan = route.render(t, template_values(t, run, work_dir, cwd))
+    project = _project(work_place(run, cwd))
+    local_tests = not ci_only(project)
+    values = template_values(t, run, work_dir, cwd, project=project, local_tests=local_tests)
+    plan = route.render(t, values, local_tests=local_tests)
     out = work_dir / f"{run.name}.json"
     out.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return out
