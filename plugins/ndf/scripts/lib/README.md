@@ -115,8 +115,8 @@
 | [drive_pause.py](drive_pause.py) | 収束ループの駆動が止まるときの結果の形（pause の 1 行 JSON）と終了コードの表（0 完了 / 20 fix / 21 sweep / 22 newtext / 23 cross-review / 1 中断） | 収束ループの 2 つの `drive.py` |
 | [revise_note.py](revise_note.py) | 出し直しの指摘の読み取りと項目の数え方の唯一の実装。すべてのループの記録から課題の回を集める・入力ファイルの書き出しと読み込み・起動指示の文面・指摘への対応の表の突き合わせ・自動の出し直しの上限・履歴の 1 回分の文面 | `sprint_loop.py` / `sprint_loop_gate.py` / `revise-note.py` / `mvv-gate.py` / `supervise_lib/sprint_revise.py` |
 | [gate1_requests.py](gate1_requests.py) | 設計の承認の依頼の部品。設計 PR の先頭の読み取り・取り込みのコミットだけかの判定・前のループの待ちの読み出しと依頼の形・前のループへの答えの当て方（`loop answer` を打つ。記録を直接書かない）・設計のプランの報告の PR の番号と MVV 判定の記録の読み取り | `sprint_loop_gate.py` / `sprint_loop_select.py` / `parallel_run.py` / `parallel_design_gate.py` |
-| [parallel_ask.py](parallel_ask.py) | `parallel.py request-ask` の送り分け（#3603）。送り手の種類・問いの対象（対象の行と先端）・設計承認の依頼／同じ問いの答えの引き継ぎ（`reused` の行）／`ask` の依頼の順の振り分けと、台帳へ書く直前の上限の秒の確かめ | `parallel.py` |
-| [parallel_design_gate.py](parallel_design_gate.py) | 1 スプリントのレーンの設計承認の依頼（#3603）。承認の行の読み取り・承認ゲートで終わった設計 PR の突き合わせ・依頼の中身と問い直しの id、答えを読んでスプリント状態へ承認ゲートの記録を書く（副命令 `design-answer`） | `parallel.py` |
+| [parallel_ask.py](parallel_ask.py) | `parallel.py request-ask` の送り分け。送り手の種類・問いの対象（対象の行と先端）・設計承認の依頼／同じ問いの答えの引き継ぎ（`reused` の行）／`ask` の依頼の順の振り分けと、台帳へ書く直前の上限の秒の確かめ | `parallel.py` |
+| [parallel_design_gate.py](parallel_design_gate.py) | 1 スプリントのレーンの設計承認の依頼。承認の行の読み取り・承認ゲートで終わった設計 PR の突き合わせ・依頼の中身と問い直しの id、答えを読んでスプリント状態へ承認ゲートの記録を書く（副命令 `design-answer`） | `parallel.py` |
 | [parallel_reply.py](parallel_reply.py) | 並列の計画の答えの届け方。同じ行の問いの置き換え・置き換えた依頼への答え・前のループの待ち・当たらなかった答え・止まった持ち主を起こす対象 | `parallel_run.py`（`_Run` が継ぐ） |
 | [parallel_end.py](parallel_end.py) | 1 スプリントのレーンの終わり。終わりの記録・猶予の後に止める耐久ステップ・止められなかったレーンと終わりの記録の無い停止と終わった後の差し戻しの問い・`released` の後の版の要るまとめの待ちと一時レーン。副命令 `end`・`verified` | `parallel_run.py`（`_Run` が継ぐ）/ `parallel.py` |
 | [lap_cost.py](lap_cost.py) | ループの 1 回の費用: 使用量の帳簿の和とスプリントの報告の和の大きい方と、内訳 | `sprint_loop_gate` |
