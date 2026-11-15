@@ -261,6 +261,29 @@ def _human(name: str | None, registry: dict[str, dict], sessions: dict[str, dict
     return bool(row) and row.get("by") == TERMINAL and row.get("session", name) in sessions
 
 
+class _Seen(NamedTuple):
+    """`live` が数える 1 本のラッパー: 名前（無ければ `-`）・役割・人の起動か。"""
+
+    name: str
+    role: str | None
+    human: bool
+
+    @property
+    def helper(self) -> bool:
+        """役割 `helper` か（`helpers` に数える）。"""
+        return self.role == "helper"
+
+    @property
+    def counted_human(self) -> bool:
+        """`humans` に数える人の起動か。`helper` は `helpers` に数えるため外す（1 本を 2 回外さない。#2862 の I1）。"""
+        return self.human and not self.helper
+
+    @property
+    def unattended_organizer(self) -> bool:
+        """人の起動でないオーガナイザーか（`count` から 1 本だけ外す）。"""
+        return self.role == "organizer" and not self.human
+
+
 def live(ws: list[Wrapper], registry: dict[str, dict], sessions: dict[str, dict]) -> Live:
     """`relay.lock` が取られている作業ディレクトリと、登録簿の行のうち tmux のセッションが在るのに同じ名前の
     作業ディレクトリがまだ `relay.lock` を取っていないもの（起動した直後）の和。重複は名前で除く。
@@ -271,14 +294,14 @@ def live(ws: list[Wrapper], registry: dict[str, dict], sessions: dict[str, dict]
     running = [w for w in ws if w.running]
     taken = {w.name for w in running if w.name}
     pending = sorted(n for n, row in registry.items() if n not in taken and row.get("session", n) in sessions)
-    names = [w.name or "-" for w in running] + pending
-    roles = [_role_of(w, registry) for w in running] + [registry[n].get("role") for n in pending]
-    human = [_human(n, registry, sessions) for n in [w.name for w in running] + pending]
+    seen = [_Seen(w.name or "-", _role_of(w, registry), _human(w.name, registry, sessions)) for w in running]
+    seen += [_Seen(n, registry[n].get("role"), _human(n, registry, sessions)) for n in pending]
+    names = [x.name for x in seen]
     # tmux のセッションの名前も重ねない（tmux が `duplicate session` で断る）
-    helper_names = tuple(n for n, r in zip(names, roles) if r == "helper")
+    helper_names = tuple(x.name for x in seen if x.helper)
     helpers = len(helper_names)
-    humans = sum(1 for h, r in zip(human, roles) if h and r != "helper")
-    organizer = 1 if any(r == "organizer" and not h for h, r in zip(human, roles)) else 0
+    humans = sum(1 for x in seen if x.counted_human)
+    organizer = 1 if any(x.unattended_organizer for x in seen) else 0
     return Live(len(names) - helpers - humans - organizer, names, taken | set(sessions), helpers, humans, helper_names)
 
 
