@@ -47,8 +47,6 @@ PER_PAGE = 100
 REST, GRAPHQL = "rest", "graphql"
 # マージの要求を GitHub が断ったときの HTTP の状態（405: 規則・衝突、409: 先端が変わった、422: 形）
 MERGE_REFUSED_STATUS = (405, 409, 422)
-# GraphQL の mergePullRequest のマージの方式（REST の merge_method → GraphQL の PullRequestMergeMethod。#3506）
-GRAPHQL_MERGE_METHODS = {"merge": "MERGE", "squash": "SQUASH", "rebase": "REBASE"}
 # PR の node の ID と、迂回のマージ（`gh pr merge --admin` が呼ぶのと同じ mergePullRequest を、先端を添えて打つ。#3506 の決定 5）
 _PULL_ID = "query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { id } } }"
 _ADMIN_MERGE = (
@@ -67,19 +65,22 @@ MERGE_COMMIT = "merge"
 
 class _MergeMethod(NamedTuple):
     """マージの方式 1 つ。`landing` は基底に含まれたかの確かめ方、`setting` はリポジトリの設定の許可の鍵
-    （ruleset に許す方式の指定が無いときに読む）。"""
+    （ruleset に許す方式の指定が無いときに読む）、`graphql` は GraphQL の mergePullRequest の方式（PullRequestMergeMethod。#3506）。"""
 
     landing: str
     setting: str
+    graphql: str
 
 
 # マージの方式の唯一の定義（並びは宣言が無いときに選ぶ順）。`MERGE_METHODS` は方式 → 確かめ方
 _MERGE_METHOD_SPECS = {
-    "squash": _MergeMethod(MERGED, "allow_squash_merge"),
-    MERGE_COMMIT: _MergeMethod(ANCESTRY, "allow_merge_commit"),
-    "rebase": _MergeMethod(MERGED, "allow_rebase_merge"),
+    "squash": _MergeMethod(MERGED, "allow_squash_merge", "SQUASH"),
+    MERGE_COMMIT: _MergeMethod(ANCESTRY, "allow_merge_commit", "MERGE"),
+    "rebase": _MergeMethod(MERGED, "allow_rebase_merge", "REBASE"),
 }
 MERGE_METHODS = {name: spec.landing for name, spec in _MERGE_METHOD_SPECS.items()}
+# GraphQL の mergePullRequest のマージの方式（REST の merge_method → GraphQL の PullRequestMergeMethod。#3506）
+GRAPHQL_MERGE_METHODS = {name: spec.graphql for name, spec in _MERGE_METHOD_SPECS.items()}
 # 信用の区分（#3364）。OWNER はリポジトリの持ち主でそのまま信用する。MEMBER・COLLABORATOR は所属を表すだけで
 # write を保証しない（read・triage もある）ため、対象リポジトリでの権限を読んで write 以上のときだけ信用する。
 # ほかの値（CONTRIBUTOR・FIRST_TIME_CONTRIBUTOR・FIRST_TIMER・MANNEQUIN・NONE と知らない値）の本文は信用しない入力
