@@ -205,28 +205,35 @@ def test_issue_3487_production_merge_stops_before_merging_with_untrusted_token()
 
 
 class _QueueHub(FakeHub):
-    """マージをキューへ入れ、`merge_after` 回読み直した後にマージ済みにする。"""
+    """マージをキューへ入れ、`merge_after` 回の待ちの後にマージ済みにする（`leave_after` 回の待ちの後にキューが外す）。"""
 
     merge_after: int = 2
+    leave_after: int = 10**6
+    polls: int = 0
 
     def merge(self, number: int, expect_head: str | None = None, method: str | None = None) -> MergeOutcome:
         self.merged.append(number)
+        self.queued.add(number)
         return MergeOutcome(False, MERGE_QUEUE_PENDING, "キューへ入れた", self.pulls[number].head_sha)
 
     def pull(self, number: int) -> Pull:
         got = self.pulls[number]
-        if number in self.merged and got.number == 7:
-            self.merge_after -= 1
-            if self.merge_after < 0:
-                return got._replace(merged=True, merge_sha="c" * 40)
+        if number in self.merged and self.polls >= self.merge_after:
+            self.queued.discard(number)
+            return got._replace(merged=True, merge_sha="c" * 40)
+        if self.polls >= self.leave_after:
+            self.queued.discard(number)
         return got
 
 
-def _queue_lander(hub: FakeHub, now: list[float], budget: float) -> land.Lander:
+def _queue_lander(hub: _QueueHub, now: list[float], budget: float, on_poll: Callable[[], None] | None = None) -> land.Lander:
     base = _lander(hub, False, [])
 
     def sleep(seconds: float) -> None:
         now[0] += seconds
+        hub.polls += 1
+        if on_poll is not None:
+            on_poll()
 
     return land.Lander(hub, base.base, base.production, budget, wait=base.wait, clock=lambda: now[0], sleep=sleep)
 
@@ -248,3 +255,22 @@ def test_merge_queue_stops_with_rerun_hint_when_budget_runs_out() -> None:
     done = _queue_lander(hub, now, 45.0).land(7)
     assert not done.merged and done.kind == MERGE_QUEUE_PENDING and "release-steps merge" in done.detail
     assert now[0] == 45.0
+
+
+def test_merge_queue_stops_at_once_when_the_queue_drops_the_pull() -> None:
+    """キューが PR を外したら（merge_group の CI の失敗など）、予算を使い切らずに not_ci で止まる。"""
+    hub = _QueueHub(pulls={7: pull()}, comments_of={7: [_trail("approved", HEAD)]})
+    hub.merge_after, hub.leave_after = 10**6, 1
+    now = [0.0]
+    done = _queue_lander(hub, now, 3600.0).land(7)
+    assert not done.merged and done.kind == "not_ci" and "merge_group" in done.detail
+    assert now[0] == land.QUEUE_POLL_SECONDS
+
+
+def test_merge_queue_dequeues_when_approval_is_revoked_while_waiting() -> None:
+    """キューの待ちの間に差し戻しが足されたら、キューから外して止まる（前の承認のままマージしない）。"""
+    hub = _QueueHub(pulls={7: pull()}, comments_of={7: [_trail("approved", HEAD)]})
+    hub.merge_after = 10**6
+    now = [0.0]
+    done = _queue_lander(hub, now, 3600.0, on_poll=lambda: hub.comments_of[7].append(_trail("rejected", HEAD))).land(7)
+    assert not done.merged and done.kind == "refused" and hub.dequeued == [7] and 7 not in hub.queued

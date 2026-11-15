@@ -54,13 +54,19 @@ MERGE_QUEUE_REFUSED_STATUS = 405
 # マージキューへ入れた後の止まった理由の種類（実際のマージまでは CI の待ちとして扱う）
 MERGE_QUEUE_PENDING = "ci_pending"
 _MERGE_QUEUE_STATE = (
+    "query($owner: String!, $name: String!, $number: Int!, $branch: String!) { repository(owner: $owner, name: $name) {"
+    " pullRequest(number: $number) { id isMergeQueueEnabled isInMergeQueue }"
+    " mergeQueue(branch: $branch) { configuration { mergeMethod } } } }"
+)
+_IN_MERGE_QUEUE = (
     "query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) {"
-    " pullRequest(number: $number) { id isMergeQueueEnabled isInMergeQueue } } }"
+    " pullRequest(number: $number) { id isInMergeQueue } } }"
 )
 _ENQUEUE = (
     "mutation($id: ID!, $head: GitObjectID!) {"
     " enqueuePullRequest(input: {pullRequestId: $id, expectedHeadOid: $head}) { clientMutationId } }"
 )
+_DEQUEUE = "mutation($id: ID!) { dequeuePullRequest(input: {id: $id}) { clientMutationId } }"
 # マージの方式 → 「基底に含まれたか」の確かめ方（3378-2）。ancestry は head が基底の祖先か、merged は PR がマージ済み
 # （`merged_at` がある）か。squash と rebase は新しいコミットを作り、head は基底の祖先にならない。
 # 並びは、宣言が無いときに許された方式から選ぶ順
@@ -660,24 +666,55 @@ class GitHub:
         except GitHubError as exc:
             if exc.status not in MERGE_REFUSED_STATUS:
                 raise
-            queued = self._enqueue(number, pull.head_sha) if exc.status == MERGE_QUEUE_REFUSED_STATUS else None
+            queued = self._enqueue(pull, method) if exc.status == MERGE_QUEUE_REFUSED_STATUS else None
             if queued is not None:
                 return queued
             after = self.pull(number)
             return MergeOutcome(False, refusal_kind(after, pull.head_sha), str(exc), after.head_sha)
         return MergeOutcome(True, None, f"#{number} を {chosen} でマージした", pull.head_sha)
 
-    def _enqueue(self, number: int, head_sha: str) -> Optional[MergeOutcome]:
-        """基底がマージキューを持てば PR を先端 `head_sha` のままキューへ入れ、待ち（`ci_pending`）を返す。持たなければ None。
+    def _enqueue(self, pull: Pull, method: Optional[str]) -> Optional[MergeOutcome]:
+        """基底がマージキューを持てば PR を先端のままキューへ入れ、待ち（`ci_pending`）を返す。持たなければ None。
 
         直接のマージを 405 で断られたときだけ読む（キューの無い基底の要求の回数を増やさない）。既にキューにあれば入れ直さない。
+        `method` を指定したときは、キューのマージの方式が同じでなければ（読めないときも）キューへ入れずに断る
+        （キューは自分の方式でマージし、merge commit を求めた呼び手の祖先の関係が壊れる）。
         """
-        node = self.repository(_MERGE_QUEUE_STATE, {"number": int(number)})["pullRequest"]
+        repo = self.repository(_MERGE_QUEUE_STATE, {"number": int(pull.number), "branch": pull.base_ref})
+        node = repo["pullRequest"]
         if not isinstance(node, dict) or not node["isMergeQueueEnabled"]:
             return None
+        if method is not None:
+            queue_method = _queue_merge_method(repo.get("mergeQueue"))
+            if queue_method != method:
+                return MergeOutcome(
+                    False,
+                    "refused",
+                    f"#{pull.number} の基底 {pull.base_ref} のマージキューは {queue_method or '（読めない）'} でマージし、"
+                    f"求めた {method} と違う。キューへ入れずに止める（キューのマージの方式を {method} にする）",
+                    pull.head_sha,
+                )
         if not node["isInMergeQueue"]:
-            self.graphql(_ENQUEUE, {"id": node["id"], "head": head_sha})
-        return MergeOutcome(False, MERGE_QUEUE_PENDING, f"#{number} をマージキューへ入れた（マージキューの待ち）", head_sha)
+            self.graphql(_ENQUEUE, {"id": node["id"], "head": pull.head_sha})
+        return MergeOutcome(False, MERGE_QUEUE_PENDING, f"#{pull.number} をマージキューへ入れた（マージキューの待ち）", pull.head_sha)
+
+    def in_merge_queue(self, number: int) -> bool:
+        """PR `number` が今マージキューに入っているか（キューが外したら偽）。"""
+        node = self.repository(_IN_MERGE_QUEUE, {"number": int(number)})["pullRequest"]
+        return isinstance(node, dict) and node["isInMergeQueue"] is True
+
+    def dequeue(self, number: int) -> None:
+        """PR `number` をマージキューから外す（入っていなければ何もしない）。"""
+        node = self.repository(_IN_MERGE_QUEUE, {"number": int(number)})["pullRequest"]
+        if isinstance(node, dict) and node["isInMergeQueue"]:
+            self.graphql(_DEQUEUE, {"id": node["id"]})
+
+
+def _queue_merge_method(queue: Any) -> Optional[str]:
+    """`mergeQueue { configuration { mergeMethod } }` のマージの方式（`MERGE_METHODS` の名前。読めなければ None）。"""
+    config = queue.get("configuration") if isinstance(queue, dict) else None
+    got = config.get("mergeMethod") if isinstance(config, dict) else None
+    return got.lower() if isinstance(got, str) else None
 
 
 def _issue_filter(labels: Sequence[str], state: str) -> dict[str, Any]:

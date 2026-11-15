@@ -34,6 +34,9 @@ class FakeHub:
     node_data: dict[int, dict] = field(default_factory=dict)
     runs: list[dict] = field(default_factory=list)
     commits_of: dict[int, list[dict]] = field(default_factory=dict)
+    # マージキューに入っている PR と、キューから外した PR
+    queued: set[int] = field(default_factory=set)
+    dequeued: list[int] = field(default_factory=list)
 
     def pull(self, number: int) -> Pull:
         return self.pulls[number]
@@ -76,6 +79,13 @@ class FakeHub:
         self.merged.append(number)
         self.merge_methods.append(method)
         return MergeOutcome(True, None, f"#{number} をマージした", self.pulls[number].head_sha)
+
+    def in_merge_queue(self, number: int) -> bool:
+        return number in self.queued
+
+    def dequeue(self, number: int) -> None:
+        self.queued.discard(number)
+        self.dequeued.append(number)
 
 
 def not_found() -> GitHubError:

@@ -142,6 +142,22 @@ def test_merge_enqueues_when_base_requires_merge_queue(in_queue: bool, enqueued:
         assert mutations[0]["variables"] == {"id": "PR_7", "head": HEAD}
 
 
+@pytest.mark.parametrize(("queue_method", "kind", "enqueued"), [("MERGE", "ci_pending", 1), ("SQUASH", "refused", 0), (None, "refused", 0)])
+def test_merge_refuses_queue_with_another_merge_method(queue_method: str | None, kind: str, enqueued: int) -> None:
+    # merge commit を求めたのにキューが squash でマージするなら、キューへ入れずに断る（祖先の関係を壊さない）
+    config = {"configuration": {"mergeMethod": queue_method}} if queue_method else None
+    pr = {"id": "PR_7", "isMergeQueueEnabled": True, "isInMergeQueue": False}
+    state = {"data": {"repository": {"pullRequest": pr, "mergeQueue": config}}}
+    server = Server({
+        ("GET", f"/repos/{REPO}/pulls/7"): [httpx.Response(200, json=_pull())],
+        ("PUT", f"/repos/{REPO}/pulls/7/merge"): [httpx.Response(405, json={"message": "merge queue"})],
+        ("POST", "/graphql"): [httpx.Response(200, json=state), httpx.Response(200, json={"data": {"enqueuePullRequest": {}}})],
+    })  # fmt: skip
+    out = _hub(server).merge(7, method="merge")
+    assert (out.merged, out.kind) == (False, kind)
+    assert len([r for r in server.sent("POST") if b"enqueuePullRequest" in r.content]) == enqueued
+
+
 def test_merge_raises_on_server_error() -> None:
     server = Server({
         ("GET", f"/repos/{REPO}/pulls/7"): [httpx.Response(200, json=_pull())],

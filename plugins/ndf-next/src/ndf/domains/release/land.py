@@ -7,7 +7,8 @@
 3. 本番ブランチ宛ての PR は、待ちの後にもう一度証跡を読み直し、待つ前と同じ先端への最新の答えが承認のときだけ進む
    （待つ間に足された差し戻しや消された承認を見落とさない）
 4. 先端の SHA を添えて merge commit でマージする（承認の後に先端が動いていれば GitHub が断る）。マージキューへ入れたら、
-   予算の範囲で PR がマージされるまで待つ（待たずに返すと、戻す PR・リリース記録・タグが走らない）
+   予算の範囲で PR がマージされるまで待つ（待たずに返すと、戻す PR・リリース記録・タグが走らない）。待つ間も
+   キューに残っているかと承認を読み直し、キューが外したらすぐに止まり、承認が失効したらキューから外して止まる
 5. 本番ブランチへ入れたら、本番ブランチからベースブランチ宛ての PR を作り（開いたものがあれば使い直す）、必須のチェックの
    後にマージする（版上げのコミットをベースブランチへ戻す）。マージ済みの PR で打ち直しても、ここから再開する
 """
@@ -150,25 +151,55 @@ class Lander:
             return refused
         outcome: MergeOutcome = self.hub.merge(pull.number, expect_head=pull.head_sha, method=MERGE_METHOD)
         if outcome.kind == MERGE_QUEUE_PENDING:
-            return self._await_queue(pull.number, deadline)
+            return self._await_queue(pull, deadline)
         return Landed(outcome.merged, outcome.kind, outcome.detail)
 
-    def _await_queue(self, number: int, deadline: float) -> Landed:
-        """マージキューへ入れた PR `number` がマージされるまで、時刻 `deadline`（`clock` の値）まで読み直す。
+    def _queued_refusal(self, pull: Pull) -> Landed | None:
+        """キューで待つ本番ブランチ宛ての PR の証跡を読み直し、承認が失効していれば止まった結果（承認のままなら None）。
 
+        待ちの間は commit status を付け直さない（読み直しのたびに書かない）。
+        """
+        if pull.base_ref != self.production:
+            return None
+        got = trail.read(self.hub, pull.number)
+        if got.pull.head_sha != pull.head_sha:
+            return Landed(False, "refused", f"#{pull.number} の先端がキューの待ちの間に {got.pull.head_sha[:12]} へ動いた")
+        if not got.judgment.approved:
+            return Landed(False, "refused", f"#{pull.number} の承認がキューの待ちの間に失効した: {got.judgment.detail}")
+        return None
+
+    def _await_queue(self, pull: Pull, deadline: float) -> Landed:
+        """マージキューへ入れた PR `pull` がマージされるまで、時刻 `deadline`（`clock` の値）まで読み直す。
+
+        読み直すたびに、キューに残っているかと（本番ブランチ宛てなら）承認を確かめる。キューが外したら `not_ci` で
+        すぐに止まり、承認が失効したらキューから外して `refused` で止まる（前の承認のままキューがマージしない）。
         予算の内にマージされなければ `ci_pending` で止まり、キューがマージした後の打ち直しを促す（`land` はマージ済みの
         本番ブランチ宛ての PR から、戻す PR へ再開する）。
         """
+        number = pull.number
         while True:
-            got = self.hub.pull(number)
-            if got.merged:
+            if self.hub.pull(number).merged:
                 return Landed(True, None, f"#{number} をマージキューがマージした")
+            refused = self._queued_refusal(pull)
+            if refused is not None:
+                self.hub.dequeue(number)
+                return refused._replace(detail=f"{refused.detail}。マージキューから外した")
+            if not self.hub.in_merge_queue(number):
+                # 読み直しの間にキューがマージしていれば、外されたのではない
+                if self.hub.pull(number).merged:
+                    return Landed(True, None, f"#{number} をマージキューがマージした")
+                return Landed(
+                    False,
+                    "not_ci",
+                    f"#{number} はマージされずにマージキューから外された。merge_group の必須のチェック（または衝突）を"
+                    "確かめて人へ戻す（打ち直してもキューへ入れ直すだけになる）",
+                )
             left = deadline - self.clock()
-            if got.state != "open" or left <= 0:
+            if left <= 0:
                 return Landed(
                     False,
                     MERGE_QUEUE_PENDING,
-                    f"#{number} はマージキューに入れたが、待ちの内にマージされない（{got.state}）。"
+                    f"#{number} はマージキューに入れたが、待ちの内にマージされない。"
                     "キューがマージした後に `ndf release-steps merge` を打ち直す（戻す PR・リリース記録・タグへ進む）",
                 )
             self.sleep(min(QUEUE_POLL_SECONDS, left))
