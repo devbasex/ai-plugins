@@ -125,11 +125,11 @@ sequenceDiagram
 
 作り直しの `release-steps merge`（`domains/release/cli.py` の `cmd_merge`）は、`declaration.production_admin` で同じ宣言を読み、`Lander` へ渡す。
 
-- `Lander._bypass` は、宣言があり、宛先が本番ブランチで、`Lander.approvals` が 1 以上のときだけ真を返す。戻す PR は常に迂回しない
+- `Lander._bypass` は、宣言があり、宛先が本番ブランチで、`Lander.approvals` が 1 以上のときだけ真を返す
 - `Lander.approvals` は ruleset の承認の規則の最大を返す。規則が無ければ従来の保護の承認数、保護が無ければ 0、読めなければ `None` を返す
 - 迂回するときは、既存の順（チェックの待ち → 証跡の読み直し → 先端を添えたマージ）で進め、マージを `adapters/github.py` の `GitHub.merge_as_admin` で打つ。迂回しないときは同期の REST のマージのままである
 - `merge_as_admin` は GraphQL の `mergePullRequest` を `expectedHeadOid` 付きで打つ。`merge` と同じ先の確認とマージの方式の選択を通り、断られたら PR を読み直して `refusal_kind` の種類を返す。届かない誤り・上限は投げ直す（`_refused_by_graphql`）
-- 迂回でマージしたら、戻す PR の後に `Lander._record` が迂回の記録を置く。記録は戻す PR の結果に依らず書く
+- 迂回でマージしたら、`Lander._record_admin` が迂回の記録を置く。本番ブランチへ入れた後に、ベースブランチへ戻す同期の PR は作らない
 
 迂回に `mergePullRequest` を使うのは、`gh pr merge --admin` も同じ呼び出しを迂回の引数なしで打っており、要件を満たさない PR をマージできると `gh` の文書が書いているためである。同期の REST のマージが迂回を認めるかは文書に記述が無い。非同期のマージ（`bypass_rules`）は結果が後から届き、先端を添えたマージの結果を同じ呼び出しで受けられない。
 
@@ -204,7 +204,7 @@ sequenceDiagram
 | GitHub が迂回のマージを断った | PR を読み直す（`merge._moved_after_refusal`）。先端が動いていれば `head_moved`、衝突なら 4、ほかは 1 | 本番の経路は `head_moved` を 10 にする |
 | 迂回の記録を書けない（旧いプラグイン） | 本番は出ているため公開の後の手順は止めず、`reviewed.admin_back` が本番の完了と分けて報告する | `stopped`・1。要約に「迂回の記録を書けなかった（本番は出ている）」。戻すマージも止まっていればその終了コード |
 | 迂回の記録を書けない（`promote`） | `after_merge` が文を返す | `stopped`・1「#<番号> をマージした。迂回の記録を書けなかった（本番は出ている）」 |
-| 迂回の記録を書けない（作り直し） | `Landed.record_error` に理由を入れる | `stopped`。要約に「記録を書けなかった（本番は出ている）: <理由>」を足す。`production_sha` は出力に残り、workflow の publish へ渡る |
+| 迂回の記録を書けない（作り直し） | `Landed.record_error` に理由を入れる | `stopped`。要約に「記録を書けなかった（本番は出ている）: <理由>」を足す。`production_sha` は出力に残る。タグと GitHub Release は、CD が版上げの PR のマージの後に作る |
 
 記録はマージした事実を書くため、マージの前には書けない。そのため、記録を書けないことを理由にマージを止めない。
 
@@ -216,7 +216,7 @@ sequenceDiagram
 | --- | --- | --- |
 | `release --channel prod`（選んで集める取り込み方を含む） | 既存のマージ済みからの再開 | `reviewed.admin_record_on_resume` |
 | `promote --gate-approved user` | `merge_when_green` の待ちがマージ済みを見て `already_merged` の項目を置く | `merge_when_green` が結果を出す前に呼ぶ `after_merge` |
-| 作り直しの `release-steps merge` | `Lander.land` がマージ済みの本番の PR を見る | 戻す PR の後。`_bypass` が真で、利用者の証跡がマージした先端と一致するとき |
+| 作り直しの `release-steps merge` | `Lander.land` がマージ済みの本番の PR を見る | `Lander._resume_merged`。`_bypass` が真で、利用者の証跡がマージした先端と一致するとき |
 
 PR の `reviewDecision` を条件に使わないのは、承認レビューがそろった PR も `cd-admin` では迂回でマージするためである。
 
