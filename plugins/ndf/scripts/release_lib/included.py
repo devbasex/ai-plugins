@@ -183,15 +183,19 @@ def pr_fields(numbers, cwd: str | None = None, comments: bool = False) -> tuple[
         if not isinstance(data, dict):
             return None, ("gh が無い" if r.returncode == 127 else (r.stderr or r.stdout).strip()[:300] or "応答を読めない")
         for n in chunk:
-            d = data.get(f"p{n}")
-            if isinstance(d, dict):
-                d = {
-                    **d,
-                    "closingIssuesReferences": list((d.get("closingIssuesReferences") or {}).get("nodes") or []),
-                    **({"comments": list((d.get("comments") or {}).get("nodes") or [])} if comments else {}),
-                }
-            out[n] = d if isinstance(d, dict) else None
+            out[n] = _as_pr_view(data.get(f"p{n}"), comments)
     return out, ""
+
+
+def _as_pr_view(d, comments: bool) -> dict | None:
+    """GraphQL の PR 1 件を `gh pr view --json` と同じ形へ（接続の nodes をリストへ）。dict でなければ None。"""
+    if not isinstance(d, dict):
+        return None
+    return {
+        **d,
+        "closingIssuesReferences": list((d.get("closingIssuesReferences") or {}).get("nodes") or []),
+        **({"comments": list((d.get("comments") or {}).get("nodes") or [])} if comments else {}),
+    }
 
 
 def read_prs(root: Path, prs, view, fields: str = "title,body,state", comments: bool = False) -> dict[int, dict]:
