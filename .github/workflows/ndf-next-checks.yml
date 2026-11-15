@@ -1,0 +1,73 @@
+name: ndf-next-checks
+
+# 作り直しの NDF（plugins/ndf-next/。#1142）の検査。入れ替え（S2）の PR がこのファイルを消す。
+# 検査の I2 と port は PR 本文の印を読むため、本文の編集（edited）でも打ち直す。テストは ndf-next.yml にあり、
+# edited で起動しない（同じワークフローに置くと、edited の実行でテストのチェックが skipped になり失敗を隠す。#3445）。
+# plugins/ndf/** の PR でも打つ（規則 port: 移す先の Issue か移さない理由を本文に持つ。#3343）。そのときは port だけを当てる
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+    paths:
+      - ".github/workflows/ndf-next.yml"
+      - ".github/workflows/ndf-next-checks.yml"
+      - "plugins/ndf-next/**"
+      - "plugins/ndf/**"
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - ".github/workflows/ndf-next.yml"
+      - ".github/workflows/ndf-next-checks.yml"
+      - "plugins/ndf-next/**"
+
+permissions:
+  contents: read
+
+env:
+  # 新しいプラグインを変えたかを見るパス（リポジトリの根から）。ndf-next.yml にも同じ値がある
+  NEXT_PATHS: plugins/ndf-next .github/workflows/ndf-next.yml .github/workflows/ndf-next-checks.yml
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    working-directory: plugins/ndf-next
+
+jobs:
+  ndf-next-checks:
+    runs-on: ubuntu-latest
+    steps:
+      # 検査の I2 が起点との merge-base を求めるため、履歴をすべて取る
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          enable-cache: true
+          cache-dependency-glob: plugins/ndf-next/uv.lock
+      # lock が宣言と食い違っていないか
+      - run: uv lock --check --project .
+      # Claude Code 用と Codex 用の定義が同じ名前と版を持つか
+      - run: >-
+          python3 -c 'import json, sys;
+          a, b = (json.load(open(p)) for p in (".claude-plugin/plugin.json", ".codex-plugin/plugin.json"));
+          diff = [k for k in ("name", "version") if a.get(k) != b.get(k)];
+          sys.exit(f"plugin.json の食い違い: {diff}" if diff else 0)'
+      - run: bash -n bin/ndf && bash -n bin/ndf-claude
+      # 新しいプラグインだけを見る検査（src/ndf/checks/README.md）。Pull Request では起点からの差分（I2）も見る。
+      # PR 本文（即時修正の印）は GitHub が渡す GITHUB_EVENT_PATH から読む。
+      # main へのリリースの PR は develop で I2 を通った差分を束ねるだけなので、I2 を当てない。
+      # 新しいプラグインを変えていない PR（plugins/ndf だけ）は port だけを当てる。本文の編集（edited）でも
+      # 判定が要るので、ここで NEXT_PATHS の差分を見る
+      - run: |
+          if [ -n "${GITHUB_BASE_REF:-}" ] && [ "$GITHUB_BASE_REF" != main ]; then
+            only=()
+            # shellcheck disable=SC2086 # NEXT_PATHS はパスを空白で区切った一覧
+            git -C "$GITHUB_WORKSPACE" diff --name-only "origin/$GITHUB_BASE_REF...HEAD" -- $NEXT_PATHS | grep -q . || only=(--only port)
+            bin/ndf check --base "origin/$GITHUB_BASE_REF" "${only[@]}"
+          else
+            bin/ndf check
+          fi

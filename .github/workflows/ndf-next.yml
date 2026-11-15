@@ -1,15 +1,16 @@
 name: ndf-next
 
-# 作り直しの NDF（plugins/ndf-next/。#1142）のテストと検査。入れ替え（S2）の PR がこのファイルを消す。
+# 作り直しの NDF（plugins/ndf-next/。#1142）のテスト。入れ替え（S2）の PR がこのファイルを消す。
 # 必須のチェックにしないため、Pull Request でも paths で絞る（変えていない PR で回さない）。
-# plugins/ndf/** の PR でも検査を打つ（規則 port: 移す先の Issue か移さない理由を本文に持つ。#3343）。
-# そのときテストと一時コピーは ndf-next-scope が飛ばし、検査は port だけを当てる（新しいプラグインの側に残る違反で落とさない）
-# edited: 検査の I2 と port は PR 本文の印を読むため、本文を直したときも打ち直す
+# plugins/ndf/** の PR でも起動し、テストと一時コピーは ndf-next-scope が飛ばす（新しいプラグインを変えていない）。
+# PR 本文を読む検査（I2・port）は ndf-next-checks.yml にある。このワークフローは本文の編集では起動しない。
+# 起動すると同じ名前のテストのチェックが skipped で並び、push の実行の失敗が一覧から消える（#3445）
 on:
   pull_request:
-    types: [opened, synchronize, reopened, edited]
+    types: [opened, synchronize, reopened]
     paths:
       - ".github/workflows/ndf-next.yml"
+      - ".github/workflows/ndf-next-checks.yml"
       - "plugins/ndf-next/**"
       - "plugins/ndf/**"
   push:
@@ -18,18 +19,18 @@ on:
       - develop
     paths:
       - ".github/workflows/ndf-next.yml"
+      - ".github/workflows/ndf-next-checks.yml"
       - "plugins/ndf-next/**"
 
 permissions:
   contents: read
 
 env:
-  # 新しいプラグインを変えたかを見るパス（リポジトリの根から）。ndf-next-scope と ndf-next-checks が読む
-  NEXT_PATHS: plugins/ndf-next .github/workflows/ndf-next.yml
+  # 新しいプラグインを変えたかを見るパス（リポジトリの根から）。ndf-next-checks.yml にも同じ値がある
+  NEXT_PATHS: plugins/ndf-next .github/workflows/ndf-next.yml .github/workflows/ndf-next-checks.yml
 
 concurrency:
-  # 本文の編集（edited）は検査だけを打ち直すため、push の実行（テストを含む）を取り消さないよう別の組にする
-  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}-${{ github.event.action == 'edited' }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 defaults:
@@ -38,9 +39,7 @@ defaults:
 
 jobs:
   # 新しいプラグイン（とこの定義）を変えたか。plugins/ndf だけの PR ではテストと一時コピーを打たない
-  # 本文の編集（edited）では出力を読むジョブがどれも飛ぶので、判定も打たない
   ndf-next-scope:
-    if: github.event.action != 'edited'
     runs-on: ubuntu-latest
     outputs:
       next: ${{ steps.diff.outputs.next }}
@@ -61,9 +60,8 @@ jobs:
   # 依存の環境は plugins/ndf-next/pyproject.toml と uv.lock が固定する（決定 78）。
   # 起点を plugins/ndf-next に置き、テストの基準のディレクトリを根の pytest.ini から切り離す
   ndf-next-tests:
-    # PR 本文を読まないので、本文の編集では流し直さない
     needs: ndf-next-scope
-    if: github.event.action != 'edited' && needs.ndf-next-scope.outputs.next == 'true'
+    if: needs.ndf-next-scope.outputs.next == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -73,47 +71,12 @@ jobs:
           cache-dependency-glob: plugins/ndf-next/uv.lock
       - run: uv run --frozen --project . pytest -q -n auto
 
-  ndf-next-checks:
-    runs-on: ubuntu-latest
-    steps:
-      # 検査の I2 が起点との merge-base を求めるため、履歴をすべて取る
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-      - uses: astral-sh/setup-uv@v10.3.3
-        with:
-          enable-cache: true
-          cache-dependency-glob: plugins/ndf-next/uv.lock
-      # lock が宣言と食い違っていないか
-      - run: uv lock --check --project .
-      # Claude Code 用と Codex 用の定義が同じ名前と版を持つか
-      - run: >-
-          python3 -c 'import json, sys;
-          a, b = (json.load(open(p)) for p in (".claude-plugin/plugin.json", ".codex-plugin/plugin.json"));
-          diff = [k for k in ("name", "version") if a.get(k) != b.get(k)];
-          sys.exit(f"plugin.json の食い違い: {diff}" if diff else 0)'
-      - run: bash -n bin/ndf && bash -n bin/ndf-claude
-      # 新しいプラグインだけを見る検査（src/ndf/checks/README.md）。Pull Request では起点からの差分（I2）も見る。
-      # PR 本文（即時修正の印）は GitHub が渡す GITHUB_EVENT_PATH から読む。
-      # main へのリリースの PR は develop で I2 を通った差分を束ねるだけなので、I2 を当てない。
-      # 新しいプラグインを変えていない PR（plugins/ndf だけ）は port だけを当てる。本文の編集（edited）でも
-      # 判定が要るので、ndf-next-scope の出力（edited では飛ぶ）を読まずにここで NEXT_PATHS の差分を見る
-      - run: |
-          if [ -n "${GITHUB_BASE_REF:-}" ] && [ "$GITHUB_BASE_REF" != main ]; then
-            only=()
-            # shellcheck disable=SC2086 # NEXT_PATHS はパスを空白で区切った一覧
-            git -C "$GITHUB_WORKSPACE" diff --name-only "origin/$GITHUB_BASE_REF...HEAD" -- $NEXT_PATHS | grep -q . || only=(--only port)
-            bin/ndf check --base "origin/$GITHUB_BASE_REF" "${only[@]}"
-          else
-            bin/ndf check
-          fi
-
   # 名前を入れ替えの後の形（ディレクトリ plugins/ndf・plugin.json の name は identity.FINAL_NAME）にした一時コピーで、
   # 検査とテストを打つ（#3347 の決定 101・IG3）。I1 の指摘の集合（プラグインの根からの相対パスと行）が元と一致し、
   # テストが通ることを確かめる。ディレクトリ名を組み立てた文字列のパスは、コピーの中でテストが落とす
   ndf-next-copy:
     needs: ndf-next-scope
-    if: github.event.action != 'edited' && needs.ndf-next-scope.outputs.next == 'true'
+    if: needs.ndf-next-scope.outputs.next == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
