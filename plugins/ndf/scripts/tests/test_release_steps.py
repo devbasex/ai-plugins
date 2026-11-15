@@ -1774,6 +1774,24 @@ def test_release_dev_runs_the_declared_workflow_only_for_an_open_pr(monkeypatch,
     assert [n for n, _ in refreshed] == ["4"] and rv.NO_PORT_LINE in refreshed[0][1]
 
 
+@pytest.mark.parametrize("has_line", [False, True])
+def test_ensure_no_port_line_appends_the_mark_to_a_reused_pr(monkeypatch, tmp_path, has_line):
+    """前の版が作った -sync の PR を使い回すとき、本文に port 検査の印が無ければ、ほかの行を残して末尾へ足す（#3343）。"""
+    from release_lib import reviewed as rv
+
+    body = "解いたパス: README.md" + (f"\n\n{rv.NO_PORT_LINE}" if has_line else "")
+    monkeypatch.setattr(rv, "gh_json", lambda root, args, what: {"body": body})
+    edited = []
+    monkeypatch.setattr(
+        rv.gh_parts, "gh", lambda args, stdin=None, cwd=None: edited.append((args[2], stdin)) or SimpleNamespace(returncode=0, stderr="")
+    )
+    rv.ensure_no_port_line(tmp_path, 7)
+    if has_line:
+        assert edited == []
+    else:
+        assert [n for n, _ in edited] == ["7"] and edited[0][1].startswith("解いたパス: README.md") and rv.NO_PORT_LINE in edited[0][1]
+
+
 @pytest.mark.parametrize("synced", [None, 6])
 def test_release_dev_takes_a_conflicting_pr_through_the_sync_pr(monkeypatch, tmp_path, synced):
     """開発版の PR がベースブランチと衝突していれば -sync の PR で取り込み、そのマージも workflow に任せる。

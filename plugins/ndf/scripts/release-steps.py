@@ -634,6 +634,8 @@ def _merge_sync_pr(root, a, plugin, branch, base, release_pr, lead=None, section
             f"{head}、本番の版を取って取り込む（解いたパス: {', '.join(resolved) or 'なし'}）。\n\n{reviewed.NO_PORT_LINE}\n\n"
             "🤖 Generated with [Claude Code](https://claude.com/claude-code)"
         )
+        if found:
+            reviewed.ensure_no_port_line(root, found["number"])
         n = found["number"] if found else create_pr(root, base, sync, f"Release: {plugin} v{a.version} の版数を {base} へ揃える", body)
         try:
             return n, merge(n) if merge else wait_and_merge(root, n, ci_wait=a.ci_wait)
