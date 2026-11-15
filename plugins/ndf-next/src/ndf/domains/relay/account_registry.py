@@ -369,8 +369,8 @@ def _state(acc: Account, usage: Any) -> str:
     return "上限" if usage.limited else "使える"
 
 
-def list_rows(store: Path, environ: Mapping[str, str], pinned: Optional[str], usages: list[Any]) -> tuple[list[dict[str, Any]], list[str]]:
-    """登録したアカウント・従量の接続・API キーを 1 件ずつ並べる（キーの値とトークンを含まない）。壊れた登録は警告へ。"""
+def _oauth_rows(store: Path, pinned: Optional[str], usages: list[Any]) -> tuple[list[dict[str, Any]], list[str]]:
+    """OAuth で登録したアカウントの行と、壊れた登録の警告。"""
     rows: list[dict[str, Any]] = []
     warnings: list[str] = []
     by_name = _usage_by_name(usages)
@@ -396,7 +396,13 @@ def list_rows(store: Path, environ: Mapping[str, str], pinned: Optional[str], us
                 "state": _state(acc, u),
             }
         )
-    rows += _metered_rows(store, environ)
+    return rows, warnings
+
+
+def _api_key_rows(store: Path) -> tuple[list[dict[str, Any]], list[str]]:
+    """API キーの登録簿の行（キーの値を含まない）と、登録簿が壊れているときの警告。"""
+    rows: list[dict[str, Any]] = []
+    warnings: list[str] = []
     try:
         book = read_book(store)
     except AccountError as exc:
@@ -416,6 +422,14 @@ def list_rows(store: Path, environ: Mapping[str, str], pinned: Optional[str], us
                 }
             )
     return rows, warnings
+
+
+def list_rows(store: Path, environ: Mapping[str, str], pinned: Optional[str], usages: list[Any]) -> tuple[list[dict[str, Any]], list[str]]:
+    """登録したアカウント・従量の接続・API キーを 1 件ずつ並べる（キーの値とトークンを含まない）。壊れた登録は警告へ。"""
+    oauth, oauth_warnings = _oauth_rows(store, pinned, usages)
+    metered = _metered_rows(store, environ)
+    keys, key_warnings = _api_key_rows(store)
+    return oauth + metered + keys, oauth_warnings + key_warnings
 
 
 def _metered_rows(store: Path, environ: Mapping[str, str]) -> list[dict[str, Any]]:
