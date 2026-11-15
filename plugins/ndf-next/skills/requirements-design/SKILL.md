@@ -58,7 +58,7 @@ description: "Turn a vague request into verifiable acceptance criteria before im
    - 1 件以上（既に文書かコードのあるプロジェクト）: 候補から領域の語を選び、語・意味・コンテキストの案を添えて
      利用者へ一覧で示す
    - 0 件（スクラッチのプロジェクト）: 依頼文から語とコンテキストを大まかに起こし、同じ形で示す
-4. 利用者が採った語だけを用語集のファイルへ書き、`"${CLAUDE_PLUGIN_ROOT}/bin/ndf" records glossary render` で文書を作り直す。
+4. 利用者が採った語だけを用語集のファイルへ書き、`ndf records glossary render` で文書を作り直す。
    採る語が 0 件でもよい（ほぼ空の用語集のまま設計へ進める）
 
 ### 1. 依頼を要約せずに写す
@@ -90,7 +90,7 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 2. 節が無い課題（節を求める前に起票された課題）では、本文の書き直しを求めずに、題・本文の条件を手順 1 の原文と
    突き合わせ、原文に無い条件を拾い出して書く。課題の本文の既存の部分は書き換えない
 3. 設計承認ゲートで利用者が推定を差し戻したら、その行を消さずに取り消し線と理由・日付を足し
-   （「変更の途中で要求が変わったとき」の形）、`ndf records spec finalize` で写しを作り直す。承認された推定は、
+   （「変更の途中で要求が変わったとき」の形）、`spec-copy.py write` で写しを作り直す。承認された推定は、
    利用者が確かめた条件として扱う
 
 ### 2. 曖昧語を検出して具体化する
@@ -193,7 +193,7 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 
 `standard` では、設計と要求を同じ差分でレビューするために、本文のコピー（仕様のコピー）を `issues/` に置く。
 
-1. `"${CLAUDE_PLUGIN_ROOT}/bin/ndf" records spec finalize <課題> issues/issue-<番号>-requirements.md` でコピーを作る
+1. `python3 "$SCRIPTS/spec-copy.py" write <課題> issues/issue-<番号>-requirements.md` でコピーを作る
    （本文の `## 進行` より前の全文）
 2. コピーは設計 PR と一緒にコミットする。本文を直したら `write` でコピーを作り直す（手で直さない）
 3. 設計 PR を出す前に `spec-copy.py check <課題> <写し>` が 0 であることを確かめる（`design` の手順 7）

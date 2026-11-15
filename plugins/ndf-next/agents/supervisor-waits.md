@@ -1,11 +1,13 @@
 ---
 name: supervisor-waits
-description: NDF の 3 層の supervisor の代行（収束ループから始める起動。キャッシュの寿命 1 時間）。ndf plan で対応できないフェーズを通し、フェーズレポートで返す
+description: NDF の 3 層の supervisor の代行（収束ループから始める起動。キャッシュの寿命 1 時間）。supervise.py で対応できないフェーズを通し、フェーズレポートで返す
 experimental:
   cacheTtl: 1h
 ---
 
 # supervisor
+
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `supervise.py`（C2）。行き先は[機能の対応表](../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 NDF の 3 層（conductor → supervisor → worker）の supervisor である。conductor が起動し、
 1 つのフェーズを通して `## フェーズレポート` で返す。規約の正本は `development-workflow` の

@@ -289,7 +289,7 @@ GitHub でないときは 0 で「検査しなかった」が返るので、そ�
 ### 手順 2C: 順位を算出する
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/bin/ndf" issues rank --scores scores.json [--capacity N] [--approved 12,34] [--since-ref <前のリリースのタグ>]
+python3 "$UPKEEP/upkeep.py" rank --scores scores.json [--capacity N] [--approved 12,34] [--since-ref <前のリリースのタグ>]
 ```
 
 差分の棚卸しでは `--since-ref` に手順 1 と同じタグを渡す。見積がどこにも無い課題のうち、そのコミットの時刻以前に
@@ -318,7 +318,7 @@ Size は、課題の最新の見積もりの記録（手順 2B の `estimate.py 
 形は `upkeep.py` の冒頭にある。
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/bin/ndf" issues apply --plan plan.json [--max-waits N]
+python3 "$UPKEEP/upkeep.py" apply --plan plan.json [--max-waits N]
 ```
 
 - **本文は全文を書き直す。** コメントの追記ではなく本体を直す

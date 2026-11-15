@@ -1,6 +1,6 @@
 # リリースコマンドを走らせる
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `release-steps.py`（M2）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `merged-steps.py`（M8）・`release-steps.py`（M2）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 **リポジトリに固有のリリースの手順は、リポジトリのリリースの設定 `.ndf/release.json` が
 リリースコマンドとして持つ。** `release` は手順 3 で、設定されたコマンドを 1 行のコマンドで走らせるだけである。
@@ -224,7 +224,7 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --roo
   承認の後にベースブランチが進んでいても、ベースブランチは比べる相手に入らないため止まらず、進んだ分は次のデプロイで出る。ただし差分がすべて許可リスト
   （`docs/`・`issues/`。`release_lib/approval.py` の `UNGATED`）の下に収まる外のコミット（設計文書・用語集だけの PR など）は止めずに通し、
   `items[]` に `result: outside_unshipped` で、件数を `metrics.tolerated` に残す。本番チャネルへは比べた先端だけを
-  マージし（`ndf ci merge --expect-head`）、CI 待ちの間に `release/v<版>` の先端が進んだときは比べ直す。進んだ分が
+  マージし（`merged-steps.py merge-when-green --expect-head`）、CI 待ちの間に `release/v<版>` の先端が進んだときは比べ直す。進んだ分が
   リリース対象に触れなければ比べ直した先端で入れ直し（3 回まで）、触れれば `gate` で止まる。
   `--channel dev` には渡さない（2）
 
@@ -290,9 +290,9 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --roo
 
 | 形 | 置き方 |
 | --- | --- |
-| Claude Code のプラグイン | `ndf release-steps record --version <版> --prs <PR番号>...` が本番のリリースの Pull Request へコメントで書く |
-| リリースの Pull Request のマージで届くもの | `ndf release-steps record --promote --head <ベースブランチ> --base <本番チャネル> --prs <PR番号>...` がリリースの Pull Request へコメントで書く。`版:` はマージのコミットである |
-| 本番チャネルへの直接のマージで CD が届けるもの | `ndf release-steps record --merged --base <本番チャネル> --prs <PR番号>...` が最後の `--prs` の Pull Request へコメントで書く。`版:` はマージのコミットである |
+| Claude Code のプラグイン | `release-steps.py record --version <版> --prs <PR番号>...` が本番のリリースの Pull Request へコメントで書く |
+| リリースの Pull Request のマージで届くもの | `release-steps.py record --promote --head <ベースブランチ> --base <本番チャネル> --prs <PR番号>...` がリリースの Pull Request へコメントで書く。`版:` はマージのコミットである |
+| 本番チャネルへの直接のマージで CD が届けるもの | `release-steps.py record --merged --base <本番チャネル> --prs <PR番号>...` が最後の `--prs` の Pull Request へコメントで書く。`版:` はマージのコミットである |
 | それ以外 | SKILL.md の「出力物」と同じ 3 行の `## リリース記録` を、デプロイした値で記録の Pull Request へコメントで足す |
 
 スプリントのプランでデプロイするときは、プランの `record` のステップがこれを打つ。
@@ -328,8 +328,8 @@ python3 "$SCRIPTS/release-steps.py" cd-result --base <本番チャネル> [--hea
 開発版のデプロイでは打たない。
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/bin/ndf" worktree trash --ref <本番に出たコミット>        # 候補を挙げるだけ（消さない）
-"${CLAUDE_PLUGIN_ROOT}/bin/ndf" worktree trash --ref <本番に出たコミット> --yes --only <承認した退避先>...  # 承認した名前だけを消す
+python3 "$SCRIPTS/merged-steps.py" sweep-trash --ref <本番に出たコミット>        # 候補を挙げるだけ（消さない）
+python3 "$SCRIPTS/merged-steps.py" sweep-trash --ref <本番に出たコミット> --yes --only <承認した退避先>...  # 承認した名前だけを消す
 ```
 
 候補の件数（`metrics.sweep_candidates`）・消した退避先（`metrics.swept_trash`）・台帳が無いため残した件数

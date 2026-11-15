@@ -1,6 +1,6 @@
 # 設定ファイルの書き方
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `pr-steps.py`（M1）・`project-decl.py`（D2+）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `pr-steps.py`（M1）・`project-decl.py`（D2+）・`release-steps.py`（M2）・`supervise.py`（C2）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 worktree 運用の仕組みは、リポジトリごとの差を `.ndf/worktree.json` から読む。
 **このファイルが無いリポジトリでは、すべての仕組みが何もせずに終わる。**
@@ -22,7 +22,7 @@ worktree 運用の仕組みは、リポジトリごとの差を `.ndf/worktree.j
 ## 作る
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/bin/ndf" worktree init
+ndf worktree init
 ```
 
 `/ndf:worktree` を起動すると、手順 0 としてこれが走る。既にあるファイルは上書きしない。
@@ -136,10 +136,10 @@ origin にもローカルにも無いときは、既定ブランチへは落ち�
 }
 ```
 
-- 組み合わせが表に合わない・知らないキー・表に無い値は、読む側（`ndf route render sprint` など）が
+- 組み合わせが表に合わない・知らないキー・表に無い値は、読む側（`supervise.py new sprint` など）が
   直すキーと許す値を出して終了コード 2 で止まる。既定値の行へは倒さない
 - スプリントを始めるときは、`branch_flow` をメインディレクトリの設定から読む（`production_branch` と同じ）
-- スプリントに属さないリリース（並列の計画のまとめたリリース・`ndf route render release`）は、本番チャネル宛の Pull Request の検査と同じく
+- スプリントに属さないリリース（並列の計画のまとめたリリース・`supervise.py new release`）は、本番チャネル宛の Pull Request の検査と同じく
   本番チャネルの宣言（`origin/<本番チャネル>` の `.ndf/worktree.json`）の `branch_flow` で組む。ベースブランチの
   Pull Request だけではリリースの範囲の決め方を変えられない。本番チャネルの宣言を読めなければ宣言の無いリポジトリと
   同じく組み、`branch_flow` が壊れていれば止まる。ブランチの名前は、どちらでもメインディレクトリの設定から解く
@@ -178,7 +178,7 @@ origin にもローカルにも無いときは、既定ブランチへは落ち�
 | `design` | `cross-review` / `pr` | `cross-review` / `pr` |
 | `spec` | 掛けない | 掛けない |
 
-成り立たない組み合わせは、読む側（`ndf route render sprint`・`project-decl.py check / write`）が直すキーと理由を
+成り立たない組み合わせは、読む側（`supervise.py new sprint`・`project-decl.py check / write`）が直すキーと理由を
 1 件 1 行で出して終了コード 2 で止まる。
 
 - `diff` が `none` なのに `checks` を書いた・`none` 以外なのに `checks` が空
@@ -216,7 +216,7 @@ origin にもローカルにも無いときは、既定ブランチへは落ち�
 }
 ```
 
-- リリースブランチの PR のレビューは、開発版のデプロイのプランが承認資料より前に掛ける。`ndf release-steps
+- リリースブランチの PR のレビューは、開発版のデプロイのプランが承認資料より前に掛ける。`release-steps.py
   review-open` が一時の PR（衝突の解消のレビューの PR）を組み、レビューの直しは `review-close` がリリースブランチへ
   移す（`release` の `references/release-steps.md`）。衝突したマージが無ければレビューを打たずに進む
 - 動いているスプリントは、開始時に目録（`sprint.json`）の `ブランチ運用` の `reviews` へ書いた値のまま進む
@@ -424,7 +424,7 @@ worktree レジストリの定義は [`../schemas/registry.schema.json`](../sche
 気づけるよう、置いた直後に状態を確かめる。
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/bin/ndf" worktree list
+ndf worktree list
 ```
 
 「個人設定:」の行が状態を、「個人設定で反映しない項目:」の行が無視した項目名を出す。
@@ -435,10 +435,10 @@ worktree レジストリの定義は [`../schemas/registry.schema.json`](../sche
 WT="$main_dir/.worktrees/<ブランチ名>"
 
 # 設定が読めているか（読めなければ何も出ない）
-"${CLAUDE_PLUGIN_ROOT}/bin/ndf" worktree localenv mode "$WT"
+ndf worktree localenv mode "$WT"
 
 # 照合の状態（0 一致 / 1 不一致 / 2 未起動または適用外）
-"${CLAUDE_PLUGIN_ROOT}/bin/ndf" worktree localenv verify "$WT"; echo $?
+ndf worktree localenv verify "$WT"; echo $?
 ```
 
 対象の worktree は引数で渡す。省略すると現在地が対象になる。

@@ -72,7 +72,7 @@ body に書くのは **設計レベル・PR 横断の修正提案** のみ。
 
 ## CI failure の分類（誤中断防止）
 
-「CI 失敗 → 即 `final=error`」は乱暴。`bin/ndf cross-review merge-fix` が
+「CI 失敗 → 即 `final=error`」は乱暴。`scripts/state.py merge-fix` が
 fix 戻り値ファイル (`$TMP_DIR/fix-pr<PR>-result.json`) を受け取った際に
 `ci_failed_checks` を以下で分類する:
 

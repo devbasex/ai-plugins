@@ -184,7 +184,7 @@ issue のことではない。
 
 **出す前に、仕様のコピーが課題の本文と一致しているかを確かめる。**
 `python3 "$SCRIPTS/spec-copy.py" check <課題> issues/issue-<番号>-requirements.md` が 0 であること。1 なら
-本文が正なので、`ndf records spec finalize` でコピーを作り直す。
+本文が正なので、`spec-copy.py write` でコピーを作り直す。
 
 設計 PR の cross-review は、1 ラウンド目でドメインモデルの節だけを見て（モデルレビュー）、2 ラウンド目以降で
 残りを見る（詳細レビュー）。設計承認ゲートは詳細レビューの後の 1 回だけである。

@@ -1,6 +1,6 @@
 # リリースの形: パッケージ・プラグイン
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `release-steps.py`（M2）・`release-verification-steps.py`（M2）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `release-steps.py`（M2）・`release-verification-steps.py`（M2）・`supervise.py`（C2）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 利用者が取得の操作をして受け取るもの。**取得先の作りで 2 つに分かれる。**
 
@@ -29,7 +29,7 @@
 版はパッケージごとに独立するため、スプリントで複数の版を上げるときは、起点も大小の判断も
 パッケージごとに分ける。
 
-**本番のリリースプラン（`ndf route render release --channel prod`）は、宣言の `release.plugin` の後に、
+**本番のリリースプラン（`supervise.py new release --channel prod`）は、宣言の `release.plugin` の後に、
 差分のある他のプラグインの版を、承認資料の「版を上げる他のプラグイン」の表の上げ幅で上げる（`bump-others`
 のステップ。`release-steps.py changed-plugins --decided`）。** 対象は前の本番のタグ（`<release.plugin>--v<版>`。
 `--prev-tag` で指定できる）からの差分にあるプラグインのうち、差分の中でまだ版を上げていないものである。表を
@@ -43,13 +43,13 @@
 
 **本番のリリースプランは、リリース（`release`）の後に `cd-result` で CD の結果を読み、`record` のステップで本番のリリースの PR
 （`release/v<版>` → ベースブランチ）へリリース記録をコメントで書く。** 並びは `release` → `cd-result` → `record` → `verify` →
-`cleanup` で、`record` は `ndf release-steps record` を打つ。本番チャネルへ自動で届く行が無ければ `cd-result` は `none` を書き、記録に CD の行は入らない。
+`cleanup` で、`record` は `release-steps.py record` を打つ。本番チャネルへ自動で届く行が無ければ `cd-result` は `none` を書き、記録に CD の行は入らない。
 タグと GitHub Release を CD が作ると宣言した行（`publishes_release`）があれば、その存在の照会は CD の結果に置き換わる。それ以外でタグと GitHub Release が無ければ書かずに止まり、同じ記録が
 既にあれば書かない。CD の結果が失敗なら `段階: 反映失敗` を書いて終了コード 5 で止まる。落ちたときは `judge-record` が `record` のやり直しか停止だけを選び、デプロイはやり直さない。書けたら
 本番のリリースの PR がプランの報告の `Pull Request` に載り、まとめの `close` ステップが `--record-pr` に受け取る。
 開発版のプランは記録を書かない。
 
-**リリースの手順（`ndf release-steps`・`release-verification-steps.py`）は、次の値を宣言と origin から読む。** リポジトリごとの値を
+**リリースの手順（`release-steps.py`・`release-verification-steps.py`）は、次の値を宣言と origin から読む。** リポジトリごとの値を
 スクリプトに埋め込まない。
 
 | 値 | 出所 |
@@ -225,7 +225,7 @@ rm -rf "$ISO"
 
 ### リリースタグを打つ
 
-**公開の処理は `ndf release-steps publish --revision <SHA>` が持つ。** `--revision` のコミットの `plugin.json` の版で、リリースタグと
+**公開の処理は `release-steps.py publish --revision <SHA>` が持つ。** `--revision` のコミットの `plugin.json` の版で、リリースタグと
 GitHub Release（題は `<プラグイン> v<版>`、本文は変更履歴の版の節、Latest）のうち足りないものを作り、そろっていれば何も変えない。
 版に接尾辞があるとき、同じ名前のタグが別のコミットにあるときは何も作らず 1 で終わり、既存のタグを書き換えない。
 CD のワークフローはこのコマンドを呼び、CD を外したときは手元で同じコマンドを打つ。
@@ -235,7 +235,7 @@ CD のワークフローはこのコマンドを呼び、CD を外したとき�
 手で打つときの形（`claude plugin tag` で手元の HEAD へ打たない。CD の公開が別のコミットを指すタグで止まる）:
 
 ```bash
-plugins/ndf/bin/ndf release-steps publish --root . --revision <本番チャネルのコミット>
+python3 plugins/ndf/scripts/release-steps.py publish --root . --revision <本番チャネルのコミット>
 ```
 
 タグは起点の決定（この文書の前半）と、利用者が過去の版へ戻るときの目印を兼ねる。
@@ -265,7 +265,7 @@ git rev-parse HEAD                            # 送ったコミット
 
 `delivery` の行が `publishes_release: true` のリポジトリでは、CD を外す手順も承認資料の「取り消しの手段」へ書く。
 ワークフローを無効にし、`.ndf/project.json` の `delivery` を手動の行へ戻し、手元で
-`plugins/ndf/bin/ndf release-steps publish --root . --revision <SHA>` を打つ。
+`python3 plugins/ndf/scripts/release-steps.py publish --root . --revision <SHA>` を打つ。
 この手順はリリースタグと GitHub Release の作り方を戻すもので、利用者へ届いた版は戻らない。
 
 ```json

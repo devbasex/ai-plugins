@@ -12,7 +12,7 @@
    メインディレクトリの `.ndf/handoff/milestone-26.md` が無ければテンプレートから作る（worktree の `.ndf/` には書かない）
 2. 「現在地」と「次にやること」を書き直す。状態のコピーは書かず、課題と Pull Request の URL を書く
 3. 再開コマンドを `/goal /ndf:development-workflow .ndf/handoff/milestone-26.md の続きから` と決め、
-   `handoff.py next milestone-26` に標準入力で渡す。`ndf records handoff check milestone-26 --trim` で形と行数を確かめる
+   `handoff.py next milestone-26` に標準入力で渡す。`handoff.py check milestone-26 --trim` で形と行数を確かめる
 4. 同じ中身の `ndf-next` のブロックを出して終える。次のセッションは文書の「次にやること」の 1 つ目から始める
 
 スクリプトはプラグインの `scripts/handoff.py`（副命令と終了コードはその先頭の表）。conductor だけが打つ。
@@ -32,7 +32,7 @@
 
 | 引継ぎの対象 | 名 |
 | --- | --- |
-| 開発ループ（`--loop`。`ndf loop` が作り、現在地と次のコマンドだけを持つ。ループの 1 回の記録は `.ndf/loop/<ループ名>/laps.md`） | `loop-<ループ名>`（英数字・`-`・`_`） |
+| 開発ループ（`--loop`。`sprint-state.py loop` が作り、現在地と次のコマンドだけを持つ。ループの 1 回の記録は `.ndf/loop/<ループ名>/laps.md`） | `loop-<ループ名>`（英数字・`-`・`_`） |
 | スプリント状態ファイルを使う会話のスプリント（名が下の形に合うときだけ） | `sprint-<スプリント名>`（英数字・`-`・`_`） |
 | `/goal` の目標か会話が進めているマイルストーン | `milestone-<番号>` |
 | 会話の課題 | `issue-<最初の番号>` |
@@ -49,7 +49,7 @@
 | 課題の順 | ○ | 着手の順と状態。状態は課題の URL を添えて 1 語で | conductor |
 | 現在地 | ○ | 本番の版・動いているプランの状態ディレクトリのパス・利用者の側で残っていること | conductor が書き直す |
 | 次にやること | ○ | 番号付き。1 つ目が次のセッションの最初の作業 | conductor が書き直す |
-| 今の会話の進み | — | プランごとの行の表 | `ndf progress show`・`supervise.py note` |
+| 今の会話の進み | — | プランごとの行の表 | `sprint-state.py render`・`supervise.py note` |
 | 運用の知見 | — | その対象で繰り返し効いた手順と落とし穴。対象をまたいで効くものは Skill か課題へ移す | conductor |
 | 次に実行するコマンド | ○ | `ndf-next` のブロック 1 つ（形は [context-window.md](context-window.md) の「新しい会話で戻す」） | `handoff.py next`・`sprint-state.py next --replace` |
 
@@ -67,12 +67,12 @@
 1. 「現在地」と「次にやること」を**書き直す**（追記を積まない）。見出しに時点を足してよい
    **承認待ち（承認ゲートの問い）と質問待ちは「次にやること」に保留として残す。** 新しいセッションが問いを出し直すためで、
    書かないと問いが答えのないまま消える（[context-window.md](context-window.md) の「どちらの方針でも変わらないこと」）
-2. スプリント状態ファイルがあれば `ndf progress show` で「今の会話の進み」を置く（[relay.md](relay.md) のカットポイントの手順）
+2. スプリント状態ファイルがあれば `sprint-state.py render` で「今の会話の進み」を置く（[relay.md](relay.md) のカットポイントの手順）
 3. 再開コマンドを「次に実行するコマンド」に置く。`handoff.py next <名>` に標準入力で渡すか、スプリント状態ファイルが
    あれば `sprint-state.py next --doc <本体> --replace`。**再開コマンドは文書のパス（`.ndf/handoff/<名>.md`）を含める。**
-   `ndf progress new --goal` のテンプレートには「`.ndf/handoff/sprint-{name}.md` の続きから」（スプリント名が名の形に合わなければ
+   `sprint-state.py init --goal` のテンプレートには「`.ndf/handoff/sprint-{name}.md` の続きから」（スプリント名が名の形に合わなければ
    `.ndf/handoff/milestone-{milestone}.md`）と差し込みの語で書く。テンプレートは次のスプリントでも使うため、パスを文字のまま書かない
-4. `ndf records handoff check <名> --trim` を打つ。`--trim` は「前の会話の進み」の節を履歴の末尾へ移す
+4. `handoff.py check <名> --trim` を打つ。`--trim` は「前の会話の進み」の節を履歴の末尾へ移す
 
 | `check` の終了コード | conductor のすること |
 | --- | --- |

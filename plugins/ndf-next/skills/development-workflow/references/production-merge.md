@@ -17,7 +17,7 @@
 
 **設計 Pull Request の宛先が自動反映の本番チャネルなら、そのマージは本番への反映も起こす。** 設計承認ゲートの承認資料に
 「このマージで本番へ出る」ことを書き、1 回の承認（`AskUserQuestion` の `metadata.source` は `ndf-gate:1`）で両方を通す。承認を得たら conductor が
-`ndf ci merge <番号> --gate-approved user` でマージする。1 回のマージに 2 回の承認を求めない。
+`merged-steps.py merge-when-green <番号> --gate-approved user` でマージする。1 回のマージに 2 回の承認を求めない。
 
 ## リリースの場合ごとの承認の場所とマージの主体
 

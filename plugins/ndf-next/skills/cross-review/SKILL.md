@@ -13,7 +13,7 @@ allowed-tools:
 
 # クロスレビュー収束ループ
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `launch-reviewer.sh`（M5）・`measure.py`（M5）・`resolve.sh`（X0）・`rotate-pr.sh`（M5）・`state.py`（M5）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `drive.py`（M5）・`launch-reviewer.sh`（M5）・`measure.py`（M5）・`resolve.sh`（X0）・`rotate-pr.sh`（M5）・`state.py`（M5）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 PR を**既定の参加者プール（claude / codex / kiro とホスト）から選んだ 2 者**にレビューさせ、**新しい指摘が出なくなるまで**
 `/ndf:pr-review` と `/ndf:fix` を自動で回す。
@@ -48,7 +48,7 @@ PR を**既定の参加者プール（claude / codex / kiro とホスト）か�
 - [docs/06-evidence.md](docs/06-evidence.md) — 指摘に求める根拠と反証条件、独立発見の規約、効果の測定（4 つの集約方式と限界）
 - [docs/07-posts-and-records.md](docs/07-posts-and-records.md) — 状態ファイルの外へ書くもの（投稿の種別ごとの契約・投稿キュー・監視と計測が残すファイル。手順の途中では読まない）
 - [docs/08-review-categories.md](docs/08-review-categories.md) — 変更ファイルの分類から担当へ渡す自動レビュー観点の一覧（手順の途中では読まない）
-- `ndf cross-review run` — 収束ループの駆動（LLM が要る地点で pause を返して止まる）
+- [scripts/drive.py](scripts/drive.py) — 収束ループの駆動（LLM が要る地点で pause を返して止まる）
 - `scripts/state.py` — state.json 操作。起動・監視・巻き直しは `launch-reviewer.sh` / `monitor.py` / `rotate-pr.sh`、効果の測定は `measure.py`（状態を保存するたびに呼ばれる）
 
 ## 設計方針
@@ -146,9 +146,11 @@ PR を**既定の参加者プール（claude / codex / kiro とホスト）か�
 渡す**（再開で渡した引数の扱いは [docs/04-contracts.md](docs/04-contracts.md) の「再開で渡した引数の扱い」）。
 
 ```bash
-# 対象のリポジトリの中で打つ。リポジトリは --repo → 状態ファイル → 作業ディレクトリの origin の順に決まる
-"${CLAUDE_PLUGIN_ROOT}/bin/ndf" cross-review run --pr <PR> --state-dir <状態ディレクトリ> --base <ベースブランチ> \
-  [--worktree PATH] [--branch NAME] [--purpose PURPOSE] [--reviewer NAME] [--max-rounds N] [--findings PATH]
+<エントリポイントを探すコマンド>   # scripts-lookup.md の「エントリポイントを探すコマンド」の for 文。$R を決める
+[ -n "$R" ] || exit 3
+CR=$(bash "$R/scripts/resolve.sh" scripts cross-review) || exit 3
+python3 "$CR/drive.py" <PR> [--rotate-mode light|squash] [--reopen] [--max-rounds N] [--rotate-after K] [--host H] [--only R] \
+  [--exclude N] [--include N] [--require-all] [--focus TEXT] [--extra-instructions-file PATH] [--verify-command CMD] [--verify-exit-code N]
 ```
 
 待ちはコマンドの中で行う（1 ラウンドで 20 分を超えうる）。Claude Code では `run_in_background` で起動し、
@@ -160,8 +162,9 @@ PR を**既定の参加者プール（claude / codex / kiro とホスト）か�
 <エントリポイントを探すコマンド>   # scripts-lookup.md の「エントリポイントを探すコマンド」の for 文。$R を決める
 [ -n "$R" ] || exit 3
 LIB=$(bash "$R/scripts/resolve.sh" scripts)/lib || exit 3
+CR=$(bash "$R/scripts/resolve.sh" scripts cross-review) || exit 3
 RC="${TMPDIR:-/tmp}/cross-review-drive-pr<PR>.rc"
-bash "$LIB/bg-wait.sh" run "$RC" -- "${CLAUDE_PLUGIN_ROOT}/bin/ndf" cross-review run [上と同じ引数]
+bash "$LIB/bg-wait.sh" run "$RC" -- python3 "$CR/drive.py" <PR> [上と同じ引数]
 ```
 
 ```bash

@@ -1,6 +1,6 @@
 # 05: 参加者プールと終了基準
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `launch-reviewer.sh`（M5）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `drive.py`（M5）・`launch-reviewer.sh`（M5）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 **誰がレビューし、いつ止めるか**を定める。手順そのものは
 [01-state-and-review.md](01-state-and-review.md) にあり、この文書は Step 0（初期化）と
@@ -215,7 +215,7 @@ REST の応答（`GET /repos/{repo}/pulls/{pr}`）の `base.sha` から読み、
 通していない担当（`REQUEST_CHANGES`・重大な指摘のある `COMMENT`）は照らさない。
 
 収束の式（終了基準の層）を今のまま評価し、成り立ったうえで外れた担当がいれば収束させない。
-`verdict = scope_unmatched`・終了コード 2・`SCOPE_RETRY=1` を返し、`ndf cross-review run` は修正を挟まずに
+`verdict = scope_unmatched`・終了コード 2・`SCOPE_RETRY=1` を返し、`drive.py` は修正を挟まずに
 次のラウンドを開く。次のラウンドは席の輪番で組み直され、別の担当が全範囲を見る。ラウンドの上限は
 今のまま効く。収束の式が成り立たないラウンドは、照合をせずに修正へ回る。
 

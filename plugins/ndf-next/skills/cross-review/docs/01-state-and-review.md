@@ -1,6 +1,6 @@
 # 01: 状態管理 + レビュー実行 (Step 0〜4)
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `fetch-pr-comments.sh`（M1）・`launch-cli.sh`（M4）・`launch-reviewer.sh`（M5）・`resolve.sh`（X0）・`state.py`（M5）・`wait-review.sh`（M5）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `drive.py`（M5）・`fetch-pr-comments.sh`（M1）・`launch-cli.sh`（M4）・`launch-reviewer.sh`（M5）・`resolve.sh`（X0）・`state.py`（M5）・`wait-review.sh`（M5）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 `SKILL.md` 本体から呼び出される **状態ファイル初期化 / ラウンド開始 /
 並列レビュー / 判定 / 振動検知** までの詳細手順。
@@ -112,7 +112,7 @@ cd "$WORKTREE"
 | 上限・巻き直し・振動検知 | `base_round` より後のラウンドだけで数える。`--max-rounds` を渡せばその数で数え直す |
 | 足す前のラウンドの後始末のチェック | 最後の足した記録の `sweep` が `verified: true` かつ `remaining_open: 0` のときだけ当てない。それ以外は今と同じく当てる |
 
-`ndf cross-review run` から打つときは、終わりの時点の PR の head と今の head が違うか、結果を変える引数（`--worktree` を除く
+`drive.py` から打つときは、終わりの時点の PR の head と今の head が違うか、結果を変える引数（`--worktree` を除く
 `state.py init` の引数）が完了の時点と違うか、`--reopen` があれば新しい実行の回を始め、その `init` がラウンドを足す。
 head と引数が同じなら前回の結果を返す。比べられない項目（head か引数を持たない古い記録・今の head を取れない）は
 飛ばし、`ℹ head を比べられないため前回の結果を返す（足すなら --reopen）`・`ℹ 完了の記録が引数を持たないため、引数を比べない（足すなら --reopen）` を出す。
@@ -286,11 +286,11 @@ eval "$JUDGE_VARS"
 なる**ためである。呼び出し側は 8 を受けたら `flush` を試し、流し切れたら判定をもう一度
 実行する（`SKILL.md` のループ）。
 
-`scope_unmatched` は修正するものが無いため、`ndf cross-review run` は修正の工程を通さずに次のラウンドを開く。
+`scope_unmatched` は修正するものが無いため、`drive.py` は修正の工程を通さずに次のラウンドを開く。
 `start-round` の後始末のチェックは `changes_requested` だけに修正の記録を求めるため、記録なしで開ける。
 照合の規則は [05-pool-and-convergence.md](05-pool-and-convergence.md) の「範囲の照合」にある。
 
-`ndf cross-review run` は 8 を受けると段階 `posts` へ移り、**担当を起動し直さず、新しいラウンドも開かずに**
+`drive.py` は 8 を受けると段階 `posts` へ移り、**担当を起動し直さず、新しいラウンドも開かずに**
 投稿キューを流し直す。
 
 | `state.py flush` の結果 | 扱い |

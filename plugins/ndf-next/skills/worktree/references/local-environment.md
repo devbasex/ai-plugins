@@ -43,7 +43,7 @@ flowchart TD
 （省略すると現在地が対象になる）。
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/bin/ndf" worktree localenv mode "$WT"   # 0 相乗り / 1 分離
+ndf worktree localenv mode "$WT"   # 0 相乗り / 1 分離
 ```
 
 既存の定義の書き換えやコードの中に直接書かれた操作は条件で拾えない。**最終判断は
@@ -79,7 +79,7 @@ docker exec "$APP" sh -lc "readlink '$SRC_TARGET' || echo 'symlink ではない'
 作った直後に、追跡されない設定と依存物を持ち込む。
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/bin/ndf" worktree localenv setup "$MAIN/.worktrees/feature/x"
+ndf worktree localenv setup "$MAIN/.worktrees/feature/x"
 ```
 
 複製対象は設定の `copy_from_main` と `copy_as_real` が持つ。
@@ -112,7 +112,7 @@ docker exec -w "$WT" "$APP" <検証コマンド>
 コードが画面に出ない。**
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/bin/ndf" worktree localenv aim "$WT"
+ndf worktree localenv aim "$WT"
 ```
 
 このコマンドは設定に従って、資産のビルド → コードの位置の切り替え → 再読み込みの
@@ -129,7 +129,7 @@ docker exec -w "$WT" "$APP" <検証コマンド>
 ### 切り替えたことを確かめる
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/bin/ndf" worktree localenv verify "$WT"; echo $?
+ndf worktree localenv verify "$WT"; echo $?
 ```
 
 | 終了コード | 意味 | 次の手 |

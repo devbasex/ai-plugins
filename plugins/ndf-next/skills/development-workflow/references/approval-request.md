@@ -1,6 +1,6 @@
 # 承認を求めるときに提示するもの
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `gate-rejections.py`（P2）・`pr-body-decisions.sh`（M7）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `gate-rejections.py`（P2）・`pr-body-decisions.sh`（M7）・`sprint-state.py`（P1b）・`supervise.py`（C2）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 工程の途中で人間の承認を求める場面は 2 つある。**設計 Pull Request のマージ**の前と、
 **本番系へ届く操作**の前である。**どちらも、この会話の中で利用者に判断を求める
@@ -212,8 +212,8 @@ gh api repos/<所有者>/<リポジトリ>/rules/branches/<起点> \
 
 | 進め方 | 承認 | 差し戻し |
 | --- | --- | --- |
-| `reject` のステップを持つプランで止まった | `"${CLAUDE_PLUGIN_ROOT}/bin/ndf" answer <状態ファイル> "<設計承認ゲートか リリース承認ゲート>" --what <要約> --by user --outcome approved [--pr <N>]` | 直してから `ndf plan next <プラン> --from reject`（`reject` が差し戻しを書いて再提示する） |
-| スプリントの状態ファイルがある（`reject` の無いプラン） | 同上 | `"${CLAUDE_PLUGIN_ROOT}/bin/ndf" answer <状態ファイル> "<設計承認ゲートか リリース承認ゲート>" --what <要約> --by user --outcome rejected [--pr <N>]` |
+| `reject` のステップを持つプランで止まった | `python3 "$SCRIPTS/sprint-state.py" gate <状態ファイル> "<設計承認ゲートか リリース承認ゲート>" --what <要約> --by user --outcome approved [--pr <N>]` | 直してから `supervise.py run <プラン> --from reject`（`reject` が差し戻しを書いて再提示する） |
+| スプリントの状態ファイルがある（`reject` の無いプラン） | 同上 | `python3 "$SCRIPTS/sprint-state.py" gate <状態ファイル> "<設計承認ゲートか リリース承認ゲート>" --what <要約> --by user --outcome rejected [--pr <N>]` |
 | 状態ファイルが無い（単発の変更など） | 下の `gate-rejections.py record --outcome approved` | 下の `gate-rejections.py record` |
 
 ```bash
@@ -222,6 +222,6 @@ python3 "$SCRIPTS/gate-rejections.py" record --gate "リリース承認ゲート
 python3 "$SCRIPTS/gate-rejections.py" record --gate "設計承認ゲート" --what "<要約>" --issue <N> --outcome approved   # 承認
 ```
 
-`--gate` には `設計承認ゲート` / `リリース承認ゲート` だけを書く（`ndf progress` の記録の名前と同じで、`count` がこの名前で設計承認ゲート・リリース承認ゲートに
+`--gate` には `設計承認ゲート` / `リリース承認ゲート` だけを書く（`sprint-state.py` の記録の名前と同じで、`count` がこの名前で設計承認ゲート・リリース承認ゲートに
 仕分ける）。終了コードが 1（記録を書けない）なら、書けなかったことと `summary` を conductor の報告に出して先へ進む。
 設計承認ゲートで起票者の推定が差し戻されたときの仕様の直し方は `requirements-design` の手順 1a にある。

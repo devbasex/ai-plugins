@@ -10,6 +10,8 @@ allowed-tools:
 
 > 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `handoff.py`（M7）・`relay.py`（M3b）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
+**ラッパー（`relay.py`）の下では、この応答の最後に出す `ndf-next` のブロック 1 つで、claude の
+
 **ラッパー（`ndf relay`）の下では、この応答の最後に出す `ndf-next` のブロック 1 つで、claude の
 終了・プラグインの更新・起動し直し・再開コマンドの入力までが人の入力なしで進む。** 経路は
 カットポイントと同じである（[relay.md](../development-workflow/references/relay.md)）。
@@ -46,7 +48,7 @@ case "$PLUGIN_ROOT" in '$'*) PLUGIN_ROOT= ;; esac
 
 1 行目が判定（`relay` / `outside`）、2 行目がアナウンスの 1 文である。`NDF_RELAY_DIR` があるだけでは
 決めない。ラッパーが動いていて、この claude がその直接の子のときだけ 1 行目が `relay` になる。
-1 行しか出なかったとき（`ndf relay` を呼べなかった）はラッパーの外として扱う。
+1 行しか出なかったとき（`relay.py` を呼べなかった）はラッパーの外として扱う。
 
 ### 2. 引継ぎ文書を作る・更新する
 
@@ -69,7 +71,7 @@ case "$PLUGIN_ROOT" in '$'*) PLUGIN_ROOT= ;; esac
 
    ```bash
    printf '%s\n' "<再開コマンド>" | python3 "${CLAUDE_PLUGIN_ROOT}/scripts/handoff.py" next <名>
-   "${CLAUDE_PLUGIN_ROOT}/bin/ndf" records handoff check <名> --trim
+   python3 "${CLAUDE_PLUGIN_ROOT}/scripts/handoff.py" check <名> --trim
    ```
 
 **引数で渡された再開コマンドも文書に置く**（中身は書き換えない。文書なしのときは置かずにそのまま出す）。

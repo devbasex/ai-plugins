@@ -1,6 +1,6 @@
 # 待ち方
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `hook.py`（M3a）・`release-steps.py`（M2）・`supervise.py`（C2）・`upkeep.py`（M6）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `hook.py`（M3a）・`merged-steps.py`（M8）・`relay.py`（M3b）・`release-steps.py`（M2）・`sprint-state.py`（P1b）・`supervise.py`（C2）・`upkeep.py`（M6）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 **待つ間に状態を問い合わせる呼び出しを繰り返さない。** 待ち方の規約はこの文書だけが持ち、
 他の文書はコピーせずにここを指す。
@@ -58,18 +58,18 @@
 | 既に起動したプロセス・書き終わりを待つファイル | 終わりを待つ until ループ（例: `until [ -s out.md ]; do sleep 5; done`）を `run_in_background: true` で起動する |
 | Pull Request のチェック | 今の状態は `lib/gh_parts.py pr-status <番号>` を 1 回打って読む。`metrics.action` が次の 1 手（`wait` 待つ・`fix` 直す・`merge` マージへ進める・`escalate` 人へ戻す）で、`next` に打つコマンドが載る。待つときは下の `merge-when-green` を `run_in_background: true` で起動する。PR の表示とチェックの照会を別々に続けて打たない |
 | 新しいコメントを 1 件ずつ | `Monitor` |
-| `ndf plan next` | `report.md` が揃うか、`progress.jsonl` に `attention` の行が足されるまでの until ループを `run_in_background: true` で起動する（下の節） |
-| `ndf plan queue` | `ndf plan wait <done のパス>` を `run_in_background: true` で 1 回起動する。キューの終わり（done）か、キューが流すプランの `attention` の行で終わる（下の節）。done のパスは `queue --done` で渡した所（省けば最初のプランの `<プラン>-state/queue-done.json`） |
-| Pull Request の CI とマージ | `ndf ci merge <PR 番号>` を `run_in_background: true` で 1 回起動する。CI がまだ現れない間も待ち、緑になればマージする。マージの承認を得た後に限る。起動の前に `gh_parts.py pr-status <PR 番号>` で、直すもの（失敗したチェック・未解決のスレッド）と衝突が無いかを 1 回で確かめる。チェックの照会と `gh pr merge` を手でつながない |
+| `supervise.py run` | `report.md` が揃うか、`progress.jsonl` に `attention` の行が足されるまでの until ループを `run_in_background: true` で起動する（下の節） |
+| `supervise.py queue` | `supervise.py wait <done のパス>` を `run_in_background: true` で 1 回起動する。キューの終わり（done）か、キューが流すプランの `attention` の行で終わる（下の節）。done のパスは `queue --done` で渡した所（省けば最初のプランの `<プラン>-state/queue-done.json`） |
+| Pull Request の CI とマージ | `merged-steps.py merge-when-green <PR 番号>` を `run_in_background: true` で 1 回起動する。CI がまだ現れない間も待ち、緑になればマージする。マージの承認を得た後に限る。起動の前に `gh_parts.py pr-status <PR 番号>` で、直すもの（失敗したチェック・未解決のスレッド）と衝突が無いかを 1 回で確かめる。チェックの照会と `gh pr merge` を手でつながない |
 | 判断の要らない NDF の手順を続けて打つ（`queue` の後の `wait` など） | 1 行ずつ打たず、`supervise.py advance --step "<コマンド>" --step "<コマンド>"...` を 1 回打つ。結果 JSON が `ok` の間だけ次を打ち、`gate` か `stopped` で止まって、理由と続きのコマンド（`--from <番号>`）を `next` に返す。打てるのは NDF の `scripts/` と `skills/*/scripts/` だけ。長く待つ手順を含むなら `run_in_background: true` で起動する |
 | キューの後に続けるプラン（リリースなど） | 手でパイプラインを組まず、`queue <実装のプラン>... --then <後続のプラン>` で渡す。後続は前のプランがすべて `完了` のときだけ流れ、1 本でも `止まった` / `承認ゲート` なら `流さなかった` と理由が結果に残る。リリースプランを `new release --prs-from-queue` で作れば、実装の PR の番号を知らずに渡せる |
 
-### ndf plan の進捗ログ
+### supervise.py の進捗ログ
 
-**フェーズを `ndf plan next` / `queue` で回すとき、conductor は `report.md` が揃うか、
+**フェーズを `supervise.py run` / `queue` で回すとき、conductor は `report.md` が揃うか、
 `progress.jsonl` に conductor 向けの行が足されるまでを 1 回のバックグラウンドの待ちで待つ。**
 `progress.jsonl` はプランの状態ディレクトリ（`<プラン>-state/`）に置かれ、1 行が 1 つの JSON である。
-書くのは ndf plan と worker で、LLM は使わない。
+書くのは supervise.py と worker で、LLM は使わない。
 
 | `kind` | 書く時点 | 中身 | conductor の読み方 |
 | --- | --- | --- | --- |
@@ -82,14 +82,14 @@
 - `host` は負荷とメモリの値とマシンの上の pytest の数である（`load`（1・5・15 分の load average）・`mem_available_mib`・
   `swap_total_mib`・`swap_free_mib`・`pytest`（本体の数）・`pytest_workers`（xdist の作業プロセスの数））。並列の上限を決め直す
   材料で、待ちの判断には使わない。読めない値は鍵ごと省く
-- **conductor 向けの行は `attention` だけである。** ndf plan が worker の行の語（`止まった`・`承認ゲート`・
+- **conductor 向けの行は `attention` だけである。** supervise.py が worker の行の語（`止まった`・`承認ゲート`・
   `失敗`）と繰り返し、ステップの結果からスクリプトで分ける。`step` / `alive` / `worker` / `slow` は起こさない
   （起こすたびに conductor の文脈の全体を読み直すため）
 - `queue` は `attention` の行を標準出力の 1 行 `{"tool": "supervise-queue", "event": "attention", ...}`
   で知らせる。最後の行は結果の JSON のままである
 - `attention` で起きたら、その行と `progress.jsonl` の末尾だけを読み、止めるか続けるかを決める。
   続けるなら同じ待ちを起動し直す。フェーズレポートは `report.md` で読む
-- **遅れの監視は ndf plan がステップの待ちの中で行う。** 想定は同じステップ（フェーズ, ステップの id）の直近 10 回の
+- **遅れの監視は supervise.py がステップの待ちの中で行う。** 想定は同じステップ（フェーズ, ステップの id）の直近 10 回の
   所要の中央値 × 3（下限 300 秒。履歴が 3 回未満なら 900 秒）。超えたら一次の調査を流し、決まった手
   （待ち直し・取り残しの再実行）で解けなければ Tool なしの `claude -p` が retry / fix / stop / wait を選ぶ。
   `attention`（reason `遅れ`）は、調査が手を打ったとき・判定へ回したとき・ステップを打ち切ったとき・判定の
@@ -108,20 +108,20 @@ bash -c 'c() { cat "$1/progress.jsonl" 2>/dev/null | grep -c "\"kind\": \"attent
 until [ -s "$1/report.md" ] || [ "$(c "$1")" -gt "$2" ]; do [ "$SECONDS" -lt "$3" ] || exit 124; sleep 5; done' _ "$S" "$n" 3600; rc=$?; echo "exit=$rc"; exit "$rc"
 ```
 
-- `queue` で流すときは、この until ループの代わりに `ndf plan wait` で待つ（次の節）
+- `queue` で流すときは、この until ループの代わりに `supervise.py wait` で待つ（次の節）
 - 起きたら `attention` の行と `progress.jsonl` の末尾だけを読む。続けるなら数を取り直して同じ待ちを起動する
 - 124（上限の 3600 秒）で終わったら、`progress.jsonl` の最後の行（`alive` ならステップと経過）を 1 度読み、
   同じ待ちを起動し直す
 
-### キューの待ち（ndf plan wait）
+### キューの待ち（supervise.py wait）
 
-**conductor はキューをバックグラウンドで起動し、`ndf plan wait <done のパス>` を `run_in_background: true` で
+**conductor はキューをバックグラウンドで起動し、`supervise.py wait <done のパス>` を `run_in_background: true` で
 1 回起動する。** 待ちの監視（until ループ・`attention` の読み取り・上限）を手で書かない。
 
 ```bash
 # どちらも Bash の run_in_background: true で起動する。queue を起動した後に wait を打つ
-plugins/ndf/bin/ndf plan queue plan-1101.json plan-1102.json --then plan-release-dev.json --done q/done.json
-plugins/ndf/bin/ndf plan wait q/done.json
+python3 plugins/ndf/scripts/supervise.py queue plan-1101.json plan-1102.json --then plan-release-dev.json --done q/done.json
+python3 plugins/ndf/scripts/supervise.py wait q/done.json
 ```
 
 | 終わり方 | 終了コード | 次にすること |
@@ -148,13 +148,13 @@ plugins/ndf/bin/ndf plan wait q/done.json
    先行の報告に Pull Request が 1 件も無ければ、リリースプランは `流さなかった` になる
 2. `queue <実装のプラン>... --then <開発版のプラン> --done <パス>` と `wait <パス>` をバックグラウンドで起動する
 3. `wait` が 0 で終わり、キューの結果が `gate`（開発版の facts のステップのリリース承認ゲート）なら、承認資料を添えて本番の承認（`ndf-gate:2`）を取る。
-   利用者が答えたら `ndf answer <状態> "リリース承認ゲート" --what <要約> --by user --outcome approved|rejected` を打つ
+   利用者が答えたら `sprint-state.py gate <状態> "リリース承認ゲート" --what <要約> --by user --outcome approved|rejected` を打つ
 4. 承認の後、本番のプランを `new release --channel prod --dev-state <開発版のプランの状態ディレクトリ> --state <状態>` で作り、
    `queue <本番のプラン> --done <パス>` と `wait <パス>` をバックグラウンドで起動する。本番のプランの先頭の `approve` が、
    開発版の facts の承認したコミットと 3 の記録を照らして承認資料へ承認の記録を書く（記録が無い・facts の後に承認資料が
    書き直されていれば、書かずに承認ゲートで止まり `release` へ進まない）。状態のファイルが無いときは、`approve` の前に
    `release-steps.py approve --approval <承認資料> --approved-sha <SHA> --by user` で承認の記録を書いておく。
-   本番のプランのステップの最後は後片付け（`ndf worktree cleanup`）で、リリースの PR（`release/v<版>` → main）と
+   本番のプランのステップの最後は後片付け（`merged-steps.py cleanup`）で、リリースの PR（`release/v<版>` → main）と
    スプリントの PR（`--prs`）のブランチ・worktree を片付ける。`git branch -D` が要るブランチがあれば承認ゲートで止まる
 5. どこかのプランが止まったら、原因を直してから `queue --resume <パス>` と `wait <パス>` をバックグラウンドで起動する。
    止まったプランは終えたステップから続き、後続のステージも流れる。プランのファイルを写して作り直さない
@@ -165,7 +165,7 @@ plugins/ndf/bin/ndf plan wait q/done.json
 **`normal` の 1 スプリント（設計 → 設計承認ゲート→ 設計 PR のマージ → 設計の結果 → スプリントブランチ → 実装 → 検査 →
 開発版 → リリース承認ゲート→ 本番）で、設計承認ゲートの後に conductor が打つのはキュー 1 回と `wait` 1 回である（リリース承認ゲートの
 後も同じ）。** 例はスプリント `m6`（課題 1052・1053、設計 Pull Request は 1052）で、
-`sv() { "${CLAUDE_PLUGIN_ROOT}/bin/ndf" plan "$@"; }`、`O=<作業ディレクトリ>/sprint-m6`、`S=<スプリントの状態>` とする。
+`sv() { python3 "$SCRIPTS/supervise.py" "$@"; }`、`O=<作業ディレクトリ>/sprint-m6`、`S=<スプリントの状態>` とする。
 キューと `wait` はバックグラウンドで起動し、キューはリポジトリの根から起動する。打つコマンドは `sprint.json` の
 ステージの `command` と `resume` をそのまま写す。
 
@@ -175,14 +175,14 @@ plugins/ndf/bin/ndf plan wait q/done.json
    設計の前に別の課題を取り込むと決めていれば `--absorb <課題>:<取り込み先>` を足す（取り込んだ課題は設計のプランを持たない）
 2. 設計: `sv queue $O/1-design-1052.json --max 3 --done $O/done-1.json` と `sv wait $O/done-1.json`
 3. 設計承認ゲート: キューの結果が `gate` なら、設計 Pull Request をまとめて 1 回の承認に載せる。利用者が答えたら、設計 PR ごとに
-   `ndf answer $S "設計承認ゲート" --what <要約> --by user --pr <設計 PR> --outcome approved|rejected` を打つ
+   `sprint-state.py gate $S "設計承認ゲート" --what <要約> --by user --pr <設計 PR> --outcome approved|rejected` を打つ
 4. 設計 PR のマージから開発版まで: `sv queue $O/3-design-merge-1052.json --max 3 --done $O/done-3.json
    --then $O/4-design-results.json --then $O/5-sprint-branch.json --then $O/6-impl-1052.json $O/6-impl-1053.json
    --then $O/7-check.json --then $O/8-release.json` と `sv wait $O/done-3.json`。マージのプランは 3 の記録を見て承認ラベルを
    付けてからマージする（記録が無ければ承認ゲートで止まる）。設計の結果のプランがマージした設計文書の「設計の結果」の表を
    実装のプランへ写し、検査のプランがスプリントの Pull Request をベースブランチへマージし、開発版のリリースプランが続けて流れる
 5. リリース承認ゲート: キューの結果が `gate`（開発版の facts のステップ）なら、`sprint.json` の `リリース承認ゲート` のステージの `gate` に沿って
-   承認資料（版は `$O/8-release-state/version.json` の `base`）を添えて本番の承認（`ndf-gate:2`）を取る。利用者が答えたら `ndf answer $S "リリース承認ゲート" --what <要約> --by user --outcome approved|rejected`
+   承認資料（版は `$O/8-release-state/version.json` の `base`）を添えて本番の承認（`ndf-gate:2`）を取る。利用者が答えたら `sprint-state.py gate $S "リリース承認ゲート" --what <要約> --by user --outcome approved|rejected`
    を打つ。差し戻されたら 6 を打たない
 6. 本番: `sv queue $O/10-release-prod.json --max 3 --done $O/done-10.json` と `sv wait $O/done-10.json`。先頭の `approve` が
    5 の記録を見て承認資料へ承認の記録を書き、出す PR は検査の報告から埋まる。最後のステップが後片付けを行う
@@ -255,8 +255,8 @@ bash -c 'until [ -e "$1.done" ]; do [ "$SECONDS" -lt "$2" ] || exit 124; sleep 5
 一致しない。確かめる側の `grep -v pgrep` は、`pgrep` を含む待ちのコマンド行ごと結果から除く）。
 止まったかは完了通知（`failed` / `killed`）で確かめる。
 
-バックグラウンドの作業が残っていると、ラッパーの Stop hook（`ndf relay mark`）は `ndf-next` のシグナルファイルを書かない。そのときは
-Stop を 1 度だけ止め、動いている作業を並べて知らせる。supervisor や `ndf plan queue` のように
+バックグラウンドの作業が残っていると、ラッパーの Stop hook（`relay.py mark`）は `ndf-next` のシグナルファイルを書かない。そのときは
+Stop を 1 度だけ止め、動いている作業を並べて知らせる。supervisor や `supervise.py queue` のように
 止めてはいけない作業なら、止めずに終わりを待ってから `ndf-next` を出し直す。
 
 ## hook

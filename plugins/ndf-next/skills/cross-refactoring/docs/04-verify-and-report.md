@@ -1,6 +1,6 @@
 # 検証/修正・最終ゲート・配分テーブル・報告
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `launch-cli.sh`（M4）・`refactor.py`（M4）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `drive.py`（M4）・`launch-cli.sh`（M4）・`refactor.py`（M4）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 [← SKILL.md](../SKILL.md)
 
@@ -313,7 +313,7 @@ Pull Request に残る。**修正の回数はここでは進めない。** 進�
 `scripts/lib/loop_drive.py` の `review_status` だけが cross-review の状態ファイルから決め、cross-review の駆動が
 結果の `metrics.review_status` に載せる。`finalize` は `approved` のときだけ配分の履歴へ 1 行を足す。
 
-`ndf refactor run` はこの地点で `pause: cross-review` を返して止まる。`items[0].command` は cross-review の駆動に
+`drive.py` はこの地点で `pause: cross-review` を返して止まる。`items[0].command` は cross-review の駆動に
 `--result-file <回答ファイル>` を付けたもので、`items[0].cwd`（対象のリポジトリの根）で打つ。駆動が ok で終わると、
 その最終ステータスを回答ファイル（`items[0].result_file`）へ `{"review_status": "<値>"}` として書く（LLM は書かない）。打ち直すと
 `finalize <ID> --review-status <値>` を呼んで終わる。Draft を解除するのは、結果 JSON の `metrics.review_status` が

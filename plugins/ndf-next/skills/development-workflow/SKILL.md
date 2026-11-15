@@ -12,7 +12,7 @@ hooks:
 
 # 開発ワークフローの振り分け
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `behavior-check.py`（M1）・`context-policy.py`（M3b）・`hook.py`（M3a）・`mvv-gate.py`（P2）・`parallel.py`（P3）・`project-decl.py`（D2+）・`project-mvv.py`（M7）・`relay.py`（M3b）・`release-steps.py`（M2）・`test-run.py`（C2）・`workflow-guard.sh`（M3a）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `behavior-check.py`（M1）・`context-policy.py`（M3b）・`hook.py`（M3a）・`mvv-gate.py`（P2）・`parallel.py`（P3）・`project-decl.py`（D2+）・`project-mvv.py`（M7）・`relay.py`（M3b）・`release-steps.py`（M2）・`supervise.py`（C2）・`test-run.py`（C2）・`workflow-guard.sh`（M3a）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 変更内容をモードへ分類し、必要な工程だけを起動する。**全変更にフル工程を課さない。**
 判定の結果として返すもの（モード・必須工程・次のコマンド）の形は「3. 判定結果を出力する」にある。
@@ -58,7 +58,7 @@ hooks:
 
 ```bash
 # 起動したら手順 1 より先に実行する。$SCRIPTS を決めてから。決められなくても止めない
-if [ -n "${SCRIPTS:-}" ]; then "${CLAUDE_PLUGIN_ROOT}/bin/ndf" worktree check; rc=$?; echo "exit=$rc"; case $rc in 0|2) python3 "$SCRIPTS/project-decl.py" check; echo "decl=$?"; python3 "$SCRIPTS/project-mvv.py" check; echo "mvv=$?";; esac
+if [ -n "${SCRIPTS:-}" ]; then ndf worktree check; rc=$?; echo "exit=$rc"; case $rc in 0|2) python3 "$SCRIPTS/project-decl.py" check; echo "decl=$?"; python3 "$SCRIPTS/project-mvv.py" check; echo "mvv=$?";; esac
 else echo "exit=判定できない（scripts を解決できない）"; fi
 ```
 
@@ -118,7 +118,7 @@ pace: fast
   → plan-to-spec（仕様が変わった場合） → merged → release
   → release-verification（マージ前に実施できなかった受け入れ条件がある場合）
   → retrospective
-次のコマンド: "${CLAUDE_PLUGIN_ROOT}/bin/ndf" route render sprint --name m6 --worktree <リポジトリの根>
+次のコマンド: python3 "$SCRIPTS/supervise.py" new sprint --name m6 --worktree <リポジトリの根>
   --issue 1052 1053 --design 1052 --version 10.18.0-dev.1 --out <作業ディレクトリ>/sprint-m6
 ```
 
@@ -253,7 +253,7 @@ CI の結果の監視が読んだ結論と改修の回数は、プランの状�
 
 **MVV 判定は `mvv-gate.py` が行う。** 「従う」でレッドラインに当たらないときだけ承認ゲートを通し、ほかは人の承認へ戻す。
 
-**`auto` と `fast` は、使ってよい条件を `ndf route render sprint --pace <値>` が機械で確かめる。** 条件は
+**`auto` と `fast` は、使ってよい条件を `supervise.py new sprint --pace <値>` が機械で確かめる。** 条件は
 開発版のチャネル・インストール確認・`.ndf/pace.json` の許可・モード・MVV の承認で、1 つでも欠ければ断る。
 そのときは `normal` で進める。進め方ごとのフロー・`fast` の工程の区分・条件・設定・トリガー・記録の読み方は
 [references/pace.md](references/pace.md) にある。
@@ -371,7 +371,7 @@ CD が無ければ今の `release` の工程のまま、マージの後に手で
 承認ゲート・区分のある問い・終わり・続けられないときは、最後の応答の末尾に区間の報告を置いて区間を終える（[asking.md](references/asking.md) の「人のいない実行」）。
 **判定結果を出したところは区間の終わりに当たらない。** `次のコマンド:` を打って続け、打たずに終えようとすると Stop の hook が差し戻す。
 
-**工程は 3 層（conductor / supervisor / worker）へ出し、既定はプラン（`ndf plan`）である。**
+**工程は 3 層（conductor / supervisor / worker）へ出し、既定はプラン（`supervise.py`）である。**
 conductor がフェーズごとにプランをキューで流す（[references/waiting.md](references/waiting.md) の「スプリントを流すコマンド」）。
 テンプレートか要る設定が無いときだけ、`Agent` で supervisor を起動する
 （[references/agent-layers.md](references/agent-layers.md) の「プランで流すか supervisor で回すか」）。
