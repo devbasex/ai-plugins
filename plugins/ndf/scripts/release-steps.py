@@ -708,33 +708,45 @@ def cmd_release(a):
     git(root, "fetch", "-q", "origin", "--tags")
     done = find_pr(root, branch, prod, states=("MERGED", "OPEN"))
     if done and done["state"] == "MERGED":
-        # 再開: 本番チャネルへのマージは済んでいる（取り消せない）。比べ直さず、無いものだけを作って続ける
         main_pr = done["number"]
-        git(root, "fetch", "-q", "origin")
-        merge = merge_commit_of(root, main_pr) or git(root, "rev-parse", f"origin/{prod}").stdout.strip()
-        if git(root, "merge-base", "--is-ancestor", approved, merge, check=False).returncode != 0:
-            raise StepError(f"マージ済みの本番の PR #{main_pr} のコミット {merge[:8]} が承認したコミット {approved[:8]} を含まない")
-        metrics["approved_sha"] = approved
-        items.append({"kind": "pr", "name": f"#{main_pr}", "result": "already_merged", "base": prod})
+        merge = _resume_merged_prod(ctx, approved, main_pr, items, metrics)
     else:
-        if git(root, "rev-parse", "-q", "--verify", f"refs/tags/{tag}", check=False).returncode == 0:
-            raise StepError(f"タグ {tag} は既にある")
-        # 承認したコミットの後に、版上げの外のコミットが release/v<版> に無いか（#815・#2436 の R2）。
-        # 照合に渡すのは元の release/v<版> の PR で、-sync の PR は渡さない（承認の後のベースブランチの変更を含むため）
-        allowed = approval.release_pr_allowed(root, release_pr, pr_view)
-        # 開発版の PR のマージで消えた release/v<版> を戻す。本番の照合と本番の PR の head はこの枝を読む
-        repo_lib.restore_branch(root, branch, run_git=git)
-        verdict = approval.check_approved(root, approved, branch, allowed)
-        if not verdict.ok:
-            emit(approval.gate(root, a, plugin, branch, verdict, items, metrics), EXIT_GATE)
-        metrics.update({"approved_sha": approved, "compared_head": verdict.tip, "tolerated": len(verdict.tolerated)})
-        main_pr, merge, verdict = _merge_prod_pr(root, a, plugin, branch, prod, release_pr, approved, allowed, verdict, items, metrics)
-        metrics.update({"compared_head": verdict.tip, "tolerated": len(verdict.tolerated)})
-        items += approval.tolerated_items(verdict)
-        items.append({"kind": "pr", "name": f"#{main_pr}", "result": "merged", "base": prod})
-        git(root, "fetch", "-q", "origin")
-        merge = merge or git(root, "rev-parse", f"origin/{prod}").stdout.strip()
+        main_pr, merge = _merge_new_prod(ctx, approved, release_pr, tag, items, metrics)
     _published(root, a, plugin, prod, main_pr, merge, items, metrics)
+
+
+def _resume_merged_prod(ctx, approved, main_pr, items, metrics):
+    """再開: 本番チャネルへのマージは済んでいる（取り消せない）。比べ直さず、無いものだけを作って続ける。マージコミットを返す。"""
+    root, prod = ctx.root, ctx.prod
+    git(root, "fetch", "-q", "origin")
+    merge = merge_commit_of(root, main_pr) or git(root, "rev-parse", f"origin/{prod}").stdout.strip()
+    if git(root, "merge-base", "--is-ancestor", approved, merge, check=False).returncode != 0:
+        raise StepError(f"マージ済みの本番の PR #{main_pr} のコミット {merge[:8]} が承認したコミット {approved[:8]} を含まない")
+    metrics["approved_sha"] = approved
+    items.append({"kind": "pr", "name": f"#{main_pr}", "result": "already_merged", "base": prod})
+    return merge
+
+
+def _merge_new_prod(ctx, approved, release_pr, tag, items, metrics):
+    """本番の PR を承認と照らしてマージする。(本番の PR 番号, マージコミット) を返す。"""
+    root, a, plugin, branch, prod = ctx.root, ctx.a, ctx.plugin, ctx.branch, ctx.prod
+    if git(root, "rev-parse", "-q", "--verify", f"refs/tags/{tag}", check=False).returncode == 0:
+        raise StepError(f"タグ {tag} は既にある")
+    # 承認したコミットの後に、版上げの外のコミットが release/v<版> に無いか（#815・#2436 の R2）。
+    # 照合に渡すのは元の release/v<版> の PR で、-sync の PR は渡さない（承認の後のベースブランチの変更を含むため）
+    allowed = approval.release_pr_allowed(root, release_pr, pr_view)
+    # 開発版の PR のマージで消えた release/v<版> を戻す。本番の照合と本番の PR の head はこの枝を読む
+    repo_lib.restore_branch(root, branch, run_git=git)
+    verdict = approval.check_approved(root, approved, branch, allowed)
+    if not verdict.ok:
+        emit(approval.gate(root, a, plugin, branch, verdict, items, metrics), EXIT_GATE)
+    metrics.update({"approved_sha": approved, "compared_head": verdict.tip, "tolerated": len(verdict.tolerated)})
+    main_pr, merge, verdict = _merge_prod_pr(root, a, plugin, branch, prod, release_pr, approved, allowed, verdict, items, metrics)
+    metrics.update({"compared_head": verdict.tip, "tolerated": len(verdict.tolerated)})
+    items += approval.tolerated_items(verdict)
+    items.append({"kind": "pr", "name": f"#{main_pr}", "result": "merged", "base": prod})
+    git(root, "fetch", "-q", "origin")
+    return main_pr, merge or git(root, "rev-parse", f"origin/{prod}").stdout.strip()
 
 
 def _prod_ops() -> reviewed.ProdOps:
