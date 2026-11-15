@@ -18,6 +18,9 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from release_lib.version_merge import CHANGELOG  # noqa: E402
 from release_repo import seed_release_repo  # noqa: E402
 
 SCRIPT = Path(__file__).resolve().parents[1] / "release-steps.py"
@@ -65,7 +68,7 @@ def add_sprint(root: Path) -> None:
 
 def make_world(tmp_path: Path) -> dict:
     origin, seed = seed_release_repo(tmp_path)
-    (seed / "CHANGELOG.md").write_text("# Changelog\n\n## [foo 1.0.0] - 2026-10-01\n\n- 前の版\n", encoding="utf-8")
+    (seed / CHANGELOG).write_text("# Changelog\n\n## [foo 1.0.0] - 2026-10-01\n\n- 前の版\n", encoding="utf-8")
     commit_file(seed, "plugins/foo/.claude-plugin/plugin.json")
     commit_file(seed, "plugins/playwright-kit/.claude-plugin/plugin.json")
     (seed / "plugins/playwright-kit/.claude-plugin/plugin.json").write_text(json.dumps({"version": "2.0.6"}))
@@ -153,7 +156,7 @@ def facts(mod, w, prs):
 
 
 def section(w) -> str:
-    text = (w["work"] / "CHANGELOG.md").read_text(encoding="utf-8")
+    text = (w["work"] / CHANGELOG).read_text(encoding="utf-8")
     start = text.index("## [foo 1.0.1]")
     return text[start : text.index("## [foo 1.0.0]")]
 
