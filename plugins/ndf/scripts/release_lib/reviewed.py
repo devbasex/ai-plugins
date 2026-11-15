@@ -57,15 +57,16 @@ def refresh_release_pr_body(root, pr, body: Callable[[], str]):
         raise StepError(f"gh pr edit #{pr['number']}（本文の書き直し）が失敗: {p.stderr.strip()[:300]}")
 
 
-def ensure_no_port_line(root, number):
-    """使い回す PR（前の版のスクリプトが作った -sync の PR など）の本文に NO_PORT_LINE が無ければ、本文の末尾へ足す。
+def ensure_no_port_line(root, pr):
+    """使い回す PR（前の版のスクリプトが作った -sync の PR など）の本文に NO_PORT_LINE が無ければ、本文の末尾へ足して pr を返す。
     本文のほかの行（解いたパスなど）は残す。本文の編集（edited）で ndf-next の port 検査が打ち直される（#3343）。"""
-    body = (gh_json(root, ["pr", "view", str(number), "--json", "body"], f"gh pr view #{number}") or {}).get("body") or ""
-    if NO_PORT_LINE in body:
-        return
-    p = gh_parts.gh(["pr", "edit", str(number), "--body-file", "-"], f"{body.rstrip()}\n\n{NO_PORT_LINE}\n", cwd=root)
-    if p.returncode != 0:
-        raise StepError(f"gh pr edit #{number}（本文の書き直し）が失敗: {p.stderr.strip()[:300]}")
+    n = str(pr["number"]) if pr else ""
+    body = ((gh_json(root, ["pr", "view", n, "--json", "body"], f"gh pr view #{n}") or {}).get("body") or "") if pr else NO_PORT_LINE
+    if NO_PORT_LINE not in body:
+        p = gh_parts.gh(["pr", "edit", n, "--body-file", "-"], f"{body.rstrip()}\n\n{NO_PORT_LINE}\n", cwd=root)
+        if p.returncode != 0:
+            raise StepError(f"gh pr edit #{n}（本文の書き直し）が失敗: {p.stderr.strip()[:300]}")
+    return pr
 
 
 def dev_workflow_of(root) -> str | None:

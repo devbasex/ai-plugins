@@ -1785,7 +1785,7 @@ def test_ensure_no_port_line_appends_the_mark_to_a_reused_pr(monkeypatch, tmp_pa
     monkeypatch.setattr(
         rv.gh_parts, "gh", lambda args, stdin=None, cwd=None: edited.append((args[2], stdin)) or SimpleNamespace(returncode=0, stderr="")
     )
-    rv.ensure_no_port_line(tmp_path, 7)
+    assert rv.ensure_no_port_line(tmp_path, {"number": 7}) == {"number": 7} and rv.ensure_no_port_line(tmp_path, None) is None
     if has_line:
         assert edited == []
     else:

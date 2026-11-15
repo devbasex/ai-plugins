@@ -628,14 +628,12 @@ def _merge_sync_pr(root, a, plugin, branch, base, release_pr, lead=None, section
             msg = f"Merge {base} into {sync}（{plugin} v{a.version} の版数の衝突を本番の版で解く）"
             commit, resolved = version_merge.sync_commit(root, ours, f"origin/{base}", msg, sections=sections)
             git(root, "push", "-q", "origin", f"{commit}:refs/heads/{sync}")
-        found = find_pr(root, sync, base, states=("OPEN",))
+        found = reviewed.ensure_no_port_line(root, find_pr(root, sync, base, states=("OPEN",)))
         head = lead or f"{plugin} v{a.version} の release/v{a.version} → {base}（#{release_pr}）が版数を持つ箇所で衝突したため"
         body = (
             f"{head}、本番の版を取って取り込む（解いたパス: {', '.join(resolved) or 'なし'}）。\n\n{reviewed.NO_PORT_LINE}\n\n"
             "🤖 Generated with [Claude Code](https://claude.com/claude-code)"
         )
-        if found:
-            reviewed.ensure_no_port_line(root, found["number"])
         n = found["number"] if found else create_pr(root, base, sync, f"Release: {plugin} v{a.version} の版数を {base} へ揃える", body)
         try:
             return n, merge(n) if merge else wait_and_merge(root, n, ci_wait=a.ci_wait)
