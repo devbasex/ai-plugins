@@ -173,6 +173,26 @@ def _app_of(run: dict) -> object:
     return app.get("id") if isinstance(app, dict) else None
 
 
+def _dequeued(number: int) -> Landed:
+    """マージされずにマージキューから外された PR `number` の止まった結果。"""
+    return Landed(
+        False,
+        "not_ci",
+        f"#{number} はマージされずにマージキューから外された。merge_group の必須のチェック（または衝突）を"
+        "確かめて人へ戻す（打ち直してもキューへ入れ直すだけになる）",
+    )
+
+
+def _queue_timeout(number: int) -> Landed:
+    """マージキューへ入れた PR `number` が待ちの内にマージされなかった止まった結果。"""
+    return Landed(
+        False,
+        MERGE_QUEUE_PENDING,
+        f"#{number} はマージキューに入れたが、待ちの内にマージされない。"
+        "キューがマージした後に `ndf release-steps merge` を打ち直す（戻す PR・リリース記録・タグへ進む）",
+    )
+
+
 @dataclass(frozen=True)
 class Lander:
     """1 つのリポジトリのリリースの PR をマージする。`wait` は必須のチェックの待ちを組む関数（テストが差し替える）。"""
@@ -336,32 +356,21 @@ class Lander:
         本番ブランチ宛ての PR から、戻す PR へ再開する）。
         """
         number = pull.number
+        queued_merged = Landed(True, None, f"#{number} をマージキューがマージした")
         while True:
             now = self.hub.pull(number)
             if now.merged:
-                return Landed(True, None, f"#{number} をマージキューがマージした")
+                return queued_merged
             refused = self._queued_refusal(pull, now)
             if refused is not None:
                 self.hub.dequeue(number)
                 return refused._replace(detail=f"{refused.detail}。マージキューから外した")
             if not self.hub.in_merge_queue(number):
                 # 読み直しの間にキューがマージしていれば、外されたのではない
-                if self.hub.pull(number).merged:
-                    return Landed(True, None, f"#{number} をマージキューがマージした")
-                return Landed(
-                    False,
-                    "not_ci",
-                    f"#{number} はマージされずにマージキューから外された。merge_group の必須のチェック（または衝突）を"
-                    "確かめて人へ戻す（打ち直してもキューへ入れ直すだけになる）",
-                )
+                return queued_merged if self.hub.pull(number).merged else _dequeued(number)
             left = deadline - self.clock()
             if left <= 0:
-                return Landed(
-                    False,
-                    MERGE_QUEUE_PENDING,
-                    f"#{number} はマージキューに入れたが、待ちの内にマージされない。"
-                    "キューがマージした後に `ndf release-steps merge` を打ち直す（戻す PR・リリース記録・タグへ進む）",
-                )
+                return _queue_timeout(number)
             self.sleep(min(QUEUE_POLL_SECONDS, left))
 
     def _open_sync(self) -> int | None:
