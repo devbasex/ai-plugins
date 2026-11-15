@@ -1218,8 +1218,10 @@ def test_owner_is_woken_by_the_lane_side_wait_record(monkeypatch, tmp_path):
     (pp.plan_dir(tmp_path, "p1") / "plan.json").write_text(json.dumps(data))
     items = [{"id": "qa", "kind": "ask", "lane": "la"}, {"id": "qb", "kind": "ask", "lane": "lb"}]
     monkeypatch.setattr(durable, "event_from", lambda *_a, **_k: {"items": items})
+    import parallel_repo
+
     monkeypatch.setattr(
-        prun, "relay", lambda *_a, **_k: (0, {"items": [{"name": "la", "state": "running"}, {"name": "lb", "state": "running"}]})
+        parallel_repo, "relay", lambda *_a, **_k: (0, {"items": [{"name": "la", "state": "running"}, {"name": "lb", "state": "running"}]})
     )
     loop = tmp_path / ".ndf" / "loop" / "l1"
     loop.mkdir(parents=True)
