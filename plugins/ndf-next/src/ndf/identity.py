@@ -50,6 +50,8 @@ log = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[2]
 # 入れ替え（S2）の後のプラグイン名（#3347 の決定 101）。検査の I1 は今の名前とこの名前の両方を照合する
 FINAL_NAME = "ndf"
+# worker（`ndf worker run`）が起動する子へ作業種別を渡す環境変数。hook の guard はこれで worker の中かを見分ける（#3112）
+WORKER_KIND_ENV = "NDF_WORKER_KIND"
 # プラグイン名から求めない固定の語の表（#3347 の決定 101）。I1 はこの表の定義の行だけを通し、コードはここから引く
 FIXED_WORDS = {
     # 利用先のリポジトリの宣言の置き場（`.ndf/project.json` など）

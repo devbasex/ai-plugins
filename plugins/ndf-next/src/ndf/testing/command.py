@@ -27,6 +27,7 @@ from types import FrameType
 
 from ndf import cli, identity, process_group
 from ndf.contracts import causes, result
+from ndf.testing import declared
 from ndf.testing import limits as limits_mod
 from ndf.testing import machine, records, slots, weight
 
@@ -110,7 +111,7 @@ def _run(command: str, wait_limit: int | None) -> int:
     except limits_mod.SlotConfigError as exc:
         return _stopped("invalid", str(exc), items=[{"detail": item} for item in exc.items])
     # 枠の記録の種類は AI の直接の実行（direct）。重くなければ枠を取らない（宣言の suites を空で渡す）
-    kind = slots.DIRECT if weight.is_heavy(command, limits_mod.load_suites(cwd)) else None
+    kind = slots.DIRECT if weight.is_heavy(command, declared.load_suites(cwd)) else None
     started: list[subprocess.Popen] = []
     with _forwarding_signals(lambda: started[-1] if started else None) as interrupted:
         options = slots.GateOptions(kind=kind, suites=[], limits=limits, interrupted=lambda: bool(interrupted))

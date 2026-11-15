@@ -423,3 +423,73 @@ def test_design_head_check_compares_pr_head_with_local_head(tmp_path):
     assert run_step(step, repo, behind)["kind"] == "precondition"
     broken = fake_bin(tmp_path / "x", "gh", "exit 1")
     assert run_step(step, repo, broken)["kind"] == "precondition"
+
+
+# --- 現状固定（I-017: declared.load_suites と local_tests._declared_suites の重複を寄せる前に、両方の読み方を記録する） ---
+
+_DECLARED_CASES = {
+    "壊れた JSON": "{",
+    "根が配列": "[1]",
+    "test が無い": json.dumps({"x": 1}),
+    "test が配列": json.dumps({"test": [1]}),
+    "suites が無い": json.dumps({"test": {}}),
+    "suites が辞書": json.dumps({"test": {"suites": {"a": 1}}}),
+    "混在": json.dumps({"test": {"suites": [{"name": "py"}, "s", {"name": "l", "kind": "lint"}, {"name": "w", "kind": "test"}, 3]}}),
+}
+
+
+def _declared_at(tmp_path, content):
+    """`tmp_path/.ndf/project.json` に `content` を置き、2 段下の場所を返す（根へ向かって探すことを通す）。"""
+    sub = tmp_path / "a" / "b"
+    sub.mkdir(parents=True)
+    if content is not None:
+        (tmp_path / ".ndf").mkdir()
+        (tmp_path / ".ndf" / "project.json").write_text(content, encoding="utf-8")
+    return sub
+
+
+def _both(sub):
+    from ndf.testing import declared
+
+    try:
+        raw = local_tests._declared_suites(sub)
+    except local_tests.LocalTestError as exc:
+        raw = ("LocalTestError", str(exc))
+    return declared.load_suites(sub), raw
+
+
+def test_current_declared_suites_without_a_declaration(tmp_path):
+    assert _both(_declared_at(tmp_path, None)) == ([], [])
+
+
+def test_current_declared_suites_over_each_shape(tmp_path):
+    got = {}
+    for i, (name, content) in enumerate(_DECLARED_CASES.items()):
+        got[name] = _both(_declared_at(tmp_path / str(i), content))
+    path = tmp_path.resolve() / "0" / ".ndf" / "project.json"
+    broken = got.pop("壊れた JSON")
+    assert broken[0] == [] and broken[1][0] == "LocalTestError"
+    assert broken[1][1].startswith(f"宣言 {path} を読めない: ")
+    assert got == {
+        "根が配列": ([], None),
+        "test が無い": ([], None),
+        "test が配列": ([], None),
+        "suites が無い": ([], None),
+        "suites が辞書": ([], {"a": 1}),
+        "混在": (
+            [{"name": "py"}, {"name": "w", "kind": "test"}],
+            [{"name": "py"}, "s", {"name": "l", "kind": "lint"}, {"name": "w", "kind": "test"}, 3],
+        ),
+    }
+
+
+def test_current_declared_suites_take_the_nearest_declaration(tmp_path):
+    outer = json.dumps({"test": {"suites": [{"name": "outer"}]}})
+    sub = _declared_at(tmp_path, outer)
+    (sub.parent / ".ndf").mkdir()
+    (sub.parent / ".ndf" / "project.json").write_text(json.dumps({"test": {"suites": [{"name": "inner"}]}}), encoding="utf-8")
+    assert _both(sub) == ([{"name": "inner"}], [{"name": "inner"}])
+    # 近い側の project.json がファイルでなければ、根の側の宣言を読む
+    other = _declared_at(tmp_path / "x", outer)
+    (other / ".ndf" / "project.json").mkdir(parents=True)
+    assert _both(other) == ([{"name": "outer"}], [{"name": "outer"}])

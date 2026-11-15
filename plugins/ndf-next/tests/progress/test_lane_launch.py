@@ -55,9 +55,18 @@ def test_sprint_names_of_two_plans_with_the_same_lane_do_not_collide():
     assert launch.sprint_name("p6", "a", "r1").startswith("p6-a-r1-")
 
 
-def test_a_loop_row_is_refused_instead_of_failing_on_missing_issues():
+def test_a_loop_row_starts_the_loop_named_after_the_lane():
+    # #3489: 開発ループの行は、レーン名をループの名前と行の ID にして `ndf loop start` で始める
     row = LaneRow(key="r1", input={"kind": "loop", "loop": "backlog"}, state="pending")
-    with pytest.raises(launch.Unsupported, match="loop"):
+    start, row_start = launch.start_commands("p6", "lr-tail", "lane-id", row)
+    assert start["argv"][1:] == ["loop", "start", "lr-tail"] and start["ask"] == ["session"]
+    assert row_start["argv"][1:] == ["lanes", "row", "start", "p6", "lr-tail", "r1", "--sprint", "lr-tail"]
+    assert "ask" not in row_start
+
+
+def test_a_row_of_an_unknown_kind_is_refused_instead_of_failing_on_missing_issues():
+    row = LaneRow(key="r1", input={"kind": "other"}, state="pending")
+    with pytest.raises(launch.Unsupported, match="other"):
         launch.start_commands("p6", "a", "lane-id", row)
 
 

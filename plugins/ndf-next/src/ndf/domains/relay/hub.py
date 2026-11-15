@@ -252,14 +252,23 @@ def stop(ctx: Context, name: str) -> Outcome:
     return Outcome(True, f"{name} を止めた")
 
 
+def spawn_env(environ: Mapping[str, str], state_dir: Path, name: str, entry: Mapping[str, Any]) -> dict[str, str]:
+    """名前つきのラッパーへ渡す環境（子のセッションの環境に、名前・役割・計画の名前を足す）。
+
+    計画の名前（`NDF_RELAY_PLAN`）があれば、ラッパーは子の問いを計画の依頼として載せる（`lane_question`。#3035）。
+    """
+    env = session_env.child_env(environ, state_dir)
+    extra = {"NDF_RELAY_NAME": name, "NDF_RELAY_SPAWNED": "1", "NDF_RELAY_ROLE": entry.get("role"), "NDF_RELAY_PLAN": entry.get("plan")}
+    env.update({k: str(v) for k, v in extra.items() if v})
+    return env
+
+
 def _launch(ctx: Context, name: str, entry: Mapping[str, Any]) -> Outcome:
     ndf = identity.entrypoint(ctx.plugin_root)
     if not ndf.is_file():
         facts = hub_decide.Started(False, False, False)
         return Outcome(False, hub_decide.started(facts, name).reason, "precondition")
-    env = session_env.child_env(ctx.environ, ctx.state_dir)
-    extra = {"NDF_RELAY_NAME": name, "NDF_RELAY_SPAWNED": "1", "NDF_RELAY_ROLE": entry.get("role"), "NDF_RELAY_PLAN": entry.get("plan")}
-    env.update({k: str(v) for k, v in extra.items() if v})
+    env = spawn_env(ctx.environ, ctx.state_dir, name, entry)
     cwd = Path(str(entry.get("cwd") or ctx.state_dir))
     args = [str(a) for a in entry.get("args") or []]  # noqa: NDF501 利用者の入力: 引数が無ければ claude の既定
     started = ctx.tmux.start(name, cwd, [str(ndf), "relay", "run", "--name", name, "--", *args], env)

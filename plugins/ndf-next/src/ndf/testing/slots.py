@@ -39,6 +39,7 @@ from pathlib import Path
 from filelock import Timeout
 
 from ndf import identity, process_group, slot_pool
+from ndf.testing import declared
 from ndf.testing import limits as limits_mod
 from ndf.testing import machine, records, weight
 
@@ -296,13 +297,26 @@ def gate(
         yield Held()
         return
     cwd = Path(cwd)
-    suites = options.suites
-    kind = options.kind or weight.classify(command, limits_mod.load_suites(cwd) if suites is None else suites)
+    kind = _heavy_kind(command, cwd, options)
     if kind is None:
         yield Held()
         return
     limits = options.limits or limits_mod.load_limits(cwd)
-    prepared = _prepare_directory(options, env)
+    yield from _hold_prepared(_prepare_directory(options, env), cwd, limits, options, kind)
+
+
+def _heavy_kind(command: str | Sequence[str], cwd: Path, options: GateOptions) -> str | None:
+    """枠を取る種類。`options.kind` が無ければ宣言の suite から判定する（宣言は要るときだけ読む）。重くなければ None。"""
+    if options.kind:
+        return options.kind
+    suites = declared.load_suites(cwd) if options.suites is None else options.suites
+    return weight.classify(command, suites)
+
+
+def _hold_prepared(
+    prepared: tuple[Path, list[dict[str, str]]] | Held, cwd: Path, limits: limits_mod.Limits, options: GateOptions, kind: str
+) -> Iterator[Held]:
+    """用意した置き場で枠を取って保つ。置き場を使えなければ枠を取らない形を渡す。退避の後の中断は `Interrupted` にする。"""
     retired = prepared.retired if isinstance(prepared, Held) else prepared[1]
     try:
         if isinstance(prepared, Held):

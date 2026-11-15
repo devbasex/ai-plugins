@@ -765,8 +765,8 @@ def test_a_paused_plan_ends_its_workflow_and_a_resumed_plan_continues_with_a_new
 
 
 def test_the_workflow_reports_a_lane_it_cannot_launch_to_the_plan_table(where, monkeypatch):
-    """起こせないレーン（開発ループの行）は、計画の進行表の依頼として wait へ届く。"""
-    loop_lane = {"name": "a", "plans": 1, "touches": ["src/a"], "after": [], "rows": [{"kind": "loop", "loop": "backlog"}]}
+    """起こせないレーン（起こす入力を組めない kind の行）は、計画の進行表の依頼として wait へ届く。"""
+    loop_lane = {"name": "a", "plans": 1, "touches": ["src/a"], "after": [], "rows": [{"kind": "unknown"}]}
     with store.open_store(where.url, where.root) as st:
         pid = _create(st, _doc(loop_lane, _decl("b", [[3]], touches=("src/b",))))
 

@@ -12,7 +12,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from typing import NamedTuple, Optional
 
 HEADING = "## 受け入れ条件"
@@ -21,6 +21,8 @@ CHECKS_HEAD = ("条件", "区分")
 KINDS = ("マージ前", "リリース後")
 _BOX = re.compile(r"- \[[ xX]\](?=[ \t\r]|$)\s*(.*)")
 _FENCE = re.compile(r"^(```|~~~)")
+# 節の終わり（`#` か `##` の見出し）
+SECTION_END = re.compile(r"^#{1,2} ")
 _CODE = re.compile(r"`([^`]+)`")
 _LINK = re.compile(r"\[[^\]]*\]\(([^)\s]+\.md)(?:#[^)]*)?\)")
 
@@ -44,61 +46,100 @@ def files_cell(cell: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
     return files, links
 
 
-def _section(body: str, heading: str) -> Optional[list[str]]:
+def body_lines(body: str) -> list[str]:
+    """本文を行へ分ける（CRLF は LF とみなす）。"""
+    return body.replace("\r\n", "\n").split("\n")
+
+
+def heading_at(lines: Sequence[str], heading: str) -> Optional[int]:
+    """行全体（行末の空白を除く）が `heading` と一致する最初の行の添字。無ければ None。"""
+    return next((i for i, line in enumerate(lines) if line.rstrip() == heading), None)
+
+
+def section_lines(body: str, heading: str) -> Optional[list[str]]:
     """見出しの節の行（コードブロックの外）。節が無ければ None。見出しは行全体が一致するものだけ。"""
-    lines = body.replace("\r\n", "\n").split("\n")
-    heads = [i for i, line in enumerate(lines) if line.rstrip() == heading]
-    if not heads:
+    lines = body_lines(body)
+    at = heading_at(lines, heading)
+    if at is None:
         return None
-    out, fenced = [], False
-    for line in lines[heads[0] + 1 :]:
-        if _FENCE.match(line):
+    out = []
+    for _, line in outside_fences(lines[at + 1 :]):
+        if SECTION_END.match(line):
+            break
+        out.append(line)
+    return out
+
+
+def outside_fences(lines: Iterable[str], fence: re.Pattern[str] = _FENCE) -> Iterator[tuple[int, str]]:
+    """囲み（`fence` に当たる行で開いて閉じる）の外の行を `(添字 0 始まり, 行)` で返す。囲みの行そのものは返さない。"""
+    fenced = False
+    for i, line in enumerate(lines):
+        if fence.match(line):
             fenced = not fenced
             continue
-        if not fenced and re.match(r"^#{1,2} ", line):
-            break
         if not fenced:
-            out.append(line)
-    return out
+            yield i, line
 
 
 def criteria(body: str) -> list[str]:
     """受け入れ条件の節のチェックボックスの文（上から）。節が無ければ空。"""
-    found = _section(body, HEADING)
+    found = section_lines(body, HEADING)
     matches = [_BOX.match(line) for line in found] if found is not None else []
     return [m.group(1).strip() for m in matches if m]
 
 
 def section_lack(body: str) -> Optional[str]:
     """受け入れ条件の節が無い・空なら理由。あれば None。"""
-    if _section(body, HEADING) is None:
+    if section_lines(body, HEADING) is None:
         return f"本文に {HEADING} の節が無い"
     if not criteria(body):
         return f"{HEADING} の節にチェックボックスの条件が無い"
     return None
 
 
-def _cells(line: str) -> list[str]:
-    return [c.strip() for c in line.strip().strip("|").split("|")]
+# 表のセルの区切り（`\|` は区切りでなくセルの中の `|`）と、セルの中の改行の書き方
+_CELL_SEP = re.compile(r"(?<!\\)\|")
+_CELL_BREAK = "<br>"
+
+
+def cell(value: str) -> str:
+    """値を表の 1 つのセルへ書ける形にする（`|` は `\\|`、改行は `<br>`）。`cells` が元の値へ戻す。"""
+    return value.replace("\r\n", "\n").replace("|", "\\|").replace("\n", _CELL_BREAK)
+
+
+def cells(line: str) -> list[str]:
+    """表の 1 行のセル（`cell` で書いた `\\|` と `<br>` は元の `|` と改行へ戻す）。"""
+    inner = line.strip().removeprefix("|")
+    inner = inner[:-1] if inner.endswith("|") and not inner.endswith("\\|") else inner
+    return [c.strip().replace("\\|", "|").replace(_CELL_BREAK, "\n") for c in _CELL_SEP.split(inner)]
+
+
+def check_rows(body: str, head: Sequence[str]) -> list[tuple[int, list[str]]]:
+    """`## 受け入れ条件の確認` の表のデータ行を、(条件の番号, `head` の列の順に並べたセル) で上から返す。
+
+    `head` の先頭は番号の列。表の最初の行を見出し、次の行を区切りとして読む。節・表が無いか、見出しに `head` の列が
+    1 つでも無ければ空。番号が読めない行・列が足りない行は飛ばす。
+    """
+    section = section_lines(body, CHECKS_HEADING)
+    rows = [line for line in section if line.strip().startswith("|")] if section is not None else []
+    if len(rows) < 2:
+        return []
+    found_head = cells(rows[0])
+    if any(h not in found_head for h in head):
+        return []
+    cols = [found_head.index(h) for h in head]
+    out = []
+    for row in rows[2:]:
+        found = cells(row)
+        num = re.match(r"^(\d+)", found[cols[0]]) if len(found) > max(cols) else None
+        if num:
+            out.append((int(num.group(1)), [found[i] for i in cols]))
+    return out
 
 
 def check_kinds(body: str) -> dict[int, str]:
     """`## 受け入れ条件の確認` の表の {条件の番号: 区分}。表が無ければ空。区分の語が違う行は読まない。"""
-    section = _section(body, CHECKS_HEADING)
-    rows = [line for line in section if line.strip().startswith("|")] if section is not None else []
-    if len(rows) < 2:
-        return {}
-    head = _cells(rows[0])
-    if any(h not in head for h in CHECKS_HEAD):
-        return {}
-    num_at, kind_at = head.index(CHECKS_HEAD[0]), head.index(CHECKS_HEAD[1])
-    out: dict[int, str] = {}
-    for row in rows[2:]:
-        cells = _cells(row)
-        num = re.match(r"^(\d+)", cells[num_at]) if len(cells) > max(num_at, kind_at) else None
-        if num and cells[kind_at] in KINDS:
-            out[int(num.group(1))] = cells[kind_at]
-    return out
+    return {n: row[1] for n, row in check_rows(body, CHECKS_HEAD) if row[1] in KINDS}
 
 
 def kinds_lack(body: str) -> list[int]:

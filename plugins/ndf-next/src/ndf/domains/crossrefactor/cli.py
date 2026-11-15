@@ -36,7 +36,7 @@ from ndf.adapters import git, github
 from ndf.contracts import causes, limits, result
 from ndf.core.converge import participants, worktree
 from ndf.domains.crossrefactor import collect, drive, final_gate, items_decide, scope, store, workspace
-from ndf.testing import limits as test_limits
+from ndf.testing import declared
 from ndf.testing import slots
 
 TOOL = cli.tool_of(__name__)
@@ -63,7 +63,7 @@ def _tests(a: argparse.Namespace) -> dict[str, Any]:
 def _collected(a: argparse.Namespace) -> dict[str, Any]:
     work = Path(a.work)
     timeout = a.timeout if a.timeout is not None else limits.seconds(collect.COLLECT_POLICY)
-    got = collect.collected(work, a.paths, test_limits.load_suites(work), timeout)
+    got = collect.collected(work, a.paths, declared.load_suites(work), timeout)
     items = [{"kind": "collect", "collected": list(got.collected), "uncollected": list(got.uncollected), "undecided": list(got.undecided)}]
     metrics = {"collected": len(got.collected), "uncollected": len(got.uncollected), "undecided": len(got.undecided)}
     if got.uncollected:
