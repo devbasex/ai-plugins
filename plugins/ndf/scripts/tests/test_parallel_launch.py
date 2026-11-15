@@ -1,6 +1,6 @@
 """一時レーンの起動とレーンの再起動を耐久ワークフローが打つ（#2936 の受け入れ条件 1〜7、I1〜I6）。
 
-本物の DBOS と、起動に失敗する回数を `FAKE_DOWN` で指定できる偽の `relay.py`（`test_parallel_run.FAKE`）で流す。
+本物の DBOS と、起動に失敗する回数を `FAKE_DOWN` で指定できる偽の `relay.py`（`parallel_run_world.FAKE`）で流す。
 """
 
 from __future__ import annotations
@@ -11,10 +11,10 @@ import time
 
 import pytest
 
-import test_parallel_run as tpr
-from test_parallel_run import calls, env, event, helper_spawns, helper_up, questions, set_state, start, until  # noqa: F401  env は fixture
+import parallel_run_world as prw
+from parallel_run_world import calls, env, event, helper_spawns, helper_up, questions, set_state, start, until  # noqa: F401  env は fixture
 
-sys.path.insert(0, str(tpr.SCRIPTS / "lib"))
+sys.path.insert(0, str(prw.SCRIPTS / "lib"))
 import durable  # noqa: E402
 import parallel_gate2 as pgate  # noqa: E402
 import parallel_lane as pl  # noqa: E402
@@ -78,8 +78,8 @@ def test_a_stall_answer_restarts_the_lane_that_still_looks_running(env, monkeypa
     """I3: 区分 stall の「起こし直す」は、動いて観えるまま止まったレーンへ一覧を見ずに restart を打つ。答えに 1 行は付かない。"""
     main, log, states = env["main"], env["log"], env["states"]
     start(main)
-    until(lambda: tpr.spawned(log) == ["la"])
-    states.write_text(json.dumps({"la": {"state": "running", "at": tpr.OLD}}))
+    until(lambda: prw.spawned(log) == ["la"])
+    states.write_text(json.dumps({"la": {"state": "running", "at": prw.OLD}}))
     q = until(lambda: [i for i in questions(main)["items"] if i["kind"] == "stall"])[0]
     pl.send_answer(main, "p1", q["id"], "answered", choice=["起こし直す"])
     until(lambda: ["restart", "la"] in calls(log, "restart"))
@@ -97,8 +97,8 @@ def pa_next(main, q):
 def test_a_stall_answer_to_stop_stops_the_lane(env):  # noqa: F811
     main, log, states = env["main"], env["log"], env["states"]
     start(main)
-    until(lambda: tpr.spawned(log) == ["la"])
-    states.write_text(json.dumps({"la": {"state": "running", "at": tpr.OLD}}))
+    until(lambda: prw.spawned(log) == ["la"])
+    states.write_text(json.dumps({"la": {"state": "running", "at": prw.OLD}}))
     q = until(lambda: [i for i in questions(main)["items"] if i["kind"] == "stall"])[0]
     pl.send_answer(main, "p1", q["id"], "answered", choice=["止める"])
     until(lambda: ["stop", "la", "--json"] in calls(log, "stop"))
@@ -165,7 +165,7 @@ def test_one_release_wakes_the_organizer_only_for_the_gate_and_the_end(env, tmp_
     set_state(states, "p1-rel1", "stopped")  # settle の後に helper-done を出して自分を止める
     until(lambda: pl.read_answer(main, "p1", rid)[0])
     set_state(states, "la", "stopped")
-    until(lambda: "lb" in tpr.spawned(log))
+    until(lambda: "lb" in prw.spawned(log))
     time.sleep(0.6)
     set_state(states, "lb", "stopped")
     until(lambda: wait_once() and seen[-1] == "finished")
@@ -210,7 +210,7 @@ def test_status_returns_one_row_per_lane_with_the_attach_line(env, monkeypatch, 
     ]
     rec.write_text(json.dumps({"status": "running", "laps": laps}))
     states.write_text(json.dumps({"la": "running", "lb": "awaiting_approval", "p1-rel3": {"state": "stopped", "role": "helper"}}))
-    pl.request_ask(main, "p1", "la", tpr.ASK, str(main), "s1")
+    pl.request_ask(main, "p1", "la", prw.ASK, str(main), "s1")
     code, out = _status(main, monkeypatch, capsys)
     rows = {r["lane"]: r for r in out["items"]}
     assert code == 0 and list(rows) == ["la", "lb", "p1-rel3"]

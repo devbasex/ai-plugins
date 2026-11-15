@@ -14,7 +14,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import test_parallel_run as tpr  # noqa: E402
+import parallel_run_world as prw  # noqa: E402
 
 import deps  # noqa: E402
 import durable  # noqa: E402
@@ -26,9 +26,9 @@ import parallel_run as prun  # noqa: E402
 
 deps.require("pathmatch")
 
-env = tpr.env
-event, until, start, resume, read, build_question = tpr.event, tpr.until, tpr.start, tpr.resume, tpr.read, tpr.build_question
-SCRIPTS = tpr.SCRIPTS
+env = prw.env
+event, until, start, resume, read, build_question = prw.event, prw.until, prw.start, prw.resume, prw.read, prw.build_question
+SCRIPTS = prw.SCRIPTS
 
 
 # ---- 判定（carry_check） ----
@@ -244,7 +244,7 @@ def test_build_failure_after_carry_answers_failed_and_asks(env, tmp_path, carry,
     def boom(*_a, **_k):
         raise RuntimeError("組み立ての失敗")
 
-    monkeypatch.setattr(prl, "build_plans", lambda m, n, s, k, v, builder_=None, **kw: boom() if k == 2 else tpr._build(
+    monkeypatch.setattr(prl, "build_plans", lambda m, n, s, k, v, builder_=None, **kw: boom() if k == 2 else prw._build(
         m, n, s, k, v, lambda *_a, **_k: ({"steps": []}, {"steps": []}), **kw))  # fmt: skip
     rid = to_confirm(env, tmp_path)
     ans = read(main, rid)
