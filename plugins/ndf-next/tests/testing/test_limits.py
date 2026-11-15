@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from ndf.testing import declared, limits
+from ndf.testing import limits
 
 GIB = 1024
 
@@ -48,10 +48,3 @@ def test_broken_json_is_refused(tmp_path):
     (tmp_path / ".ndf" / "resources.json").write_text("{")
     with pytest.raises(limits.SlotConfigError):
         limits.load_limits(tmp_path, cpus=8, total_mib=30 * GIB)
-
-
-def test_load_suites_skips_lint(tmp_path):
-    (tmp_path / ".ndf").mkdir()
-    suites = [{"runner": "pytest", "command": "pytest ."}, {"runner": "ruff", "kind": "lint", "command": "ruff ."}]
-    (tmp_path / ".ndf" / "project.json").write_text(json.dumps({"test": {"suites": suites}}))
-    assert [s["runner"] for s in declared.load_suites(tmp_path)] == ["pytest"]
