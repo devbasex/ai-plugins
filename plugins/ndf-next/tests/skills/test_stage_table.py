@@ -28,7 +28,7 @@ def _table() -> tuple[list[str], list[list[str]]]:
     lines = SKILL.read_text(encoding="utf-8").splitlines()
     start = lines.index(HEADING)
     rows = []
-    for line in lines[start + 1:]:
+    for line in lines[start + 1 :]:
         if rows and not line.startswith("|"):
             break
         if line.startswith("|"):
