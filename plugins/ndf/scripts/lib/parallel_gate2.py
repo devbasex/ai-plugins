@@ -28,6 +28,12 @@ RETRY, REJECT = "打ち直す", "差し戻す"  # 確定の後の依頼の答え
 CONFIRMED_OPTIONS = (RETRY, REJECT)  # 確定の後の依頼の選択肢。依頼の `options` と答えの当て方が読む（決定 2）
 
 
+def is_confirmed_gate(q: dict) -> bool:
+    """確定の後の依頼（`gate2` で `after` が `confirmed`。#3597 の決定 4）か。答えは `ConfirmedGate.apply_confirmed` だけが当て、
+    一般の持ち主の再起動（`wake_owners`）へ入れない（差し戻しで PR を閉じる前・打ち直しで新しい起動を書く前に、前の一時レーンを起こさない）。"""
+    return q.get("kind") == "gate2" and q.get("after") == "confirmed"
+
+
 class NotConfirmed(Exception):
     """確定の後の依頼を送らない（最後の起動が同じ提示の確定でない・本番のプランが承認ゲートで止まっていない）。"""
 
@@ -130,7 +136,7 @@ class ConfirmedGate:
 
         - 打ち直す: 同じ承認のまま、答えた問いの id を添えた新しい目的で確定の起動を流し直す（新しい seq）
         - 差し戻す: 本番の PR を閉じてから、`parallel.py settle --rejected` と同じ締め（`settle` の `rejected`）を通す"""
-        if q.get("kind") != "gate2" or q.get("after") != "confirmed":
+        if not is_confirmed_gate(q):
             return False
         rel = self.current
         if rel is None or q.get("n") != rel["n"]:

@@ -23,9 +23,14 @@ def cause_of(msg: dict) -> str:
     return f"{msg.get('source')}|{json.dumps(msg.get('options') or [], ensure_ascii=False)}|{' '.join(text.split())}"
 
 
-def asked_of(rows: list[dict], lane: str) -> list[dict]:
+def asked_of(rows: list[dict], lane: str, settled: set = frozenset()) -> list[dict]:
     """一時レーン `lane` が送った依頼（`gate2`・`ask`）と、その答えの一覧（台帳の順。#3597 の決定 8）。`rows` は台帳の行で、
-    最初の `opened` の行より後のものを渡す。起き直した一時レーンは、答えのある問いを出し直さずにこの答えで進む。"""
+    最初の `opened` の行より後のものを渡す。`settled` は処理済みのリリース承認ゲートの id（`parallel_ledger.settled_gates`）で、
+    確定か締め（`answer` の行を持たない処理）で済んだ `gate2` に `settled: true` を付ける。
+
+    答えの中身（`answer`）を載せるのは id で問いの決まる `gate2` だけである。`ask` は対象（`target`）が入るまで（#3608）
+    前の答えを今の問いへ当てられないため、答えがあっても `answered: true` だけを付ける（設計の決定 6。戻せない操作の答えを、
+    対象の分からない問いへ当てない）。起き直した一時レーンは、答えのある `gate2` をその答えで進め、`ask` は新しい依頼として送る。"""
     answers = {r.get("id"): r.get("msg") or {} for r in rows if r.get("kind") == "answer"}
     out = []
     for r in rows:
@@ -34,6 +39,11 @@ def asked_of(rows: list[dict], lane: str) -> list[dict]:
             continue
         item = {"id": r.get("id"), "kind": r.get("kind"), "source": msg.get("source"), "target": msg.get("target"), "at": r.get("at")}
         if (a := answers.get(r.get("id"))) is not None:
-            item["answer"] = {"result": a.get("result"), "choice": list(a.get("choice") or [])}
+            if r.get("kind") == "gate2":
+                item["answer"] = {"result": a.get("result"), "choice": list(a.get("choice") or [])}
+            else:
+                item["answered"] = True
+        if r.get("kind") == "gate2" and r.get("id") in settled:
+            item["settled"] = True
         out.append(item)
     return out

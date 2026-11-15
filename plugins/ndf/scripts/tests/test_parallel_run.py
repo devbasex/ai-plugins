@@ -409,6 +409,17 @@ def test_helper_task_current_confirmed_for_the_same_release(monkeypatch, tmp_pat
                    "phase": "confirmed", "pipeline": " && ".join(steps), "settle": f"{py} settle p1 1 --done {done}"}  # fmt: skip
 
 
+def test_helper_task_current_confirmed_retry_resumes_the_gated_release_queue(monkeypatch, tmp_path):
+    """打ち直す（#3597 の決定 2）: 前の本番のプランの done が残れば、同じ queue（関門の記録を返す）でなく queue --resume で流し直す。"""
+    d = prl.release_dir(tmp_path, "p1", 1, 1)
+    d.mkdir(parents=True)
+    done = d / "release-done.json"
+    done.write_text(json.dumps({"items": [{"result": "関門"}]}))
+    got, _ = _helper_task_with(monkeypatch, tmp_path, CONFIRMED_11)
+    assert f"{ph.SUPERVISE} queue --resume {done} && {ph.SUPERVISE} wait {done}" in got["pipeline"]
+    assert f"queue {d / 'release.json'}" not in got["pipeline"]
+
+
 @pytest.mark.parametrize(
     "launch",
     [
@@ -426,7 +437,8 @@ def test_helper_task_current_is_present_unless_the_same_uncarried_confirm(monkey
 
 
 def test_helper_task_current_present_reads_the_approval_and_asked_after_opened(monkeypatch, tmp_path):
-    """提示の gate2 は承認資料のパスを添える。asked は最初の opened の行から後の、自分の名前の一時レーンの依頼と答え。"""
+    """提示の gate2 は承認資料のパスを添える。asked は最初の opened の行から後の、自分の名前の一時レーンの依頼と答え。
+    答えの中身は gate2 だけに載せ、ask は answered だけ（#3608 まで対象を比べられない）。確定で済んだ gate2 は settled。"""
     d = prl.release_dir(tmp_path, "p1", 1, 1)
     d.mkdir(parents=True)
     (d / "present.json").write_text(json.dumps({"steps": [{"id": "present", "cwd": "/r", "cmd": "x --approval issues/a.md"}]}))
@@ -437,15 +449,19 @@ def test_helper_task_current_present_reads_the_approval_and_asked_after_opened(m
         {"kind": "ask", "id": "a", "msg": {"lane": "p1-rel2", "source": "s"}, "at": "t2"},
         {"kind": "ask", "id": "b", "msg": {"lane": "p1-rel1", "source": "s", "target": "t"}, "at": "t3"},
         {"kind": "answer", "id": "g", "msg": {"result": "answered", "choice": ["c"]}},
+        {"kind": "answer", "id": "b", "msg": {"result": "answered", "choice": ["消す"]}},
+        {"kind": "gate2", "id": "h", "msg": {"lane": "p1-rel1", "n": "1"}, "at": "t4"},
+        {"kind": "resume", "id": "r", "msg": {"phase": "confirm", "n": "1"}},
     ]
     got, _ = _helper_task_with(monkeypatch, tmp_path, {}, rows)
     assert got["gate2"].endswith("request-gate2 p1 1 1 --report /r/issues/a.md")
     assert got["asked"] == [
         {"id": "g", "kind": "gate2", "source": None, "target": None, "at": "t1", "answer": {"result": "answered", "choice": ["c"]}},
-        {"id": "b", "kind": "ask", "source": "s", "target": "t", "at": "t3"},
+        {"id": "b", "kind": "ask", "source": "s", "target": "t", "at": "t3", "answered": True},
+        {"id": "h", "kind": "gate2", "source": None, "target": None, "at": "t4", "settled": True},
     ]
     got, _ = _helper_task_with(monkeypatch, tmp_path, CONFIRMED_11, rows)
-    assert got["gate2"].endswith("--confirmed --done " + str(d / "release-done.json")) and len(got["asked"]) == 2
+    assert got["gate2"].endswith("--confirmed --done " + str(d / "release-done.json")) and len(got["asked"]) == 3
 
 
 @pytest.mark.parametrize(

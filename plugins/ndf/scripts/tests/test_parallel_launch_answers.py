@@ -172,6 +172,17 @@ def test_answering_a_restart_question_does_not_add_the_lane_to_the_wake_list(run
     assert run.wake == [] and run.revive == []
 
 
+def test_answering_a_confirmed_gate_does_not_restart_the_helper(run, monkeypatch):
+    """確定の後の依頼（#3597）への答えは、一般の持ち主の再起動で一時レーンを起こさない（apply_confirmed だけが当てる）。"""
+    launched = []
+    monkeypatch.setattr(plc, "step_launch", lambda *a, **kw: launched.append(a) or {"result": "up", "attempts": 1, "at": "t", "reason": ""})
+    run.current = {"n": 1}
+    run.wake_owners({"kind": "gate2", "id": "p1-p1-1-c7", "lane": "p1-rel1", "n": 1, "k": 1, "after": "confirmed"})
+    assert launched == [] and run.wake == [] and run.revive == []
+    run.wake_owners({"kind": "gate2", "id": "p1-p1-1", "lane": "p1-rel1", "n": 1, "k": 1})
+    assert len(launched) == 1  # 提示の依頼の答えは今までどおり一時レーンを起こす
+
+
 def test_an_old_record_hands_the_launch_lines_to_the_organizer(run):
     """起動の印の無い古い記録では、知らせに起動の 1 行（spawn）と起こす 1 行（wake）を載せ、wait がそれを返す。"""
     run.launching = False
