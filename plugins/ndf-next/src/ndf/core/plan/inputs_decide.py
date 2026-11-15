@@ -44,7 +44,7 @@ def files_cell(cell: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
     return files, links
 
 
-def _section(body: str, heading: str) -> Optional[list[str]]:
+def section_lines(body: str, heading: str) -> Optional[list[str]]:
     """見出しの節の行（コードブロックの外）。節が無ければ None。見出しは行全体が一致するものだけ。"""
     lines = body.replace("\r\n", "\n").split("\n")
     heads = [i for i, line in enumerate(lines) if line.rstrip() == heading]
@@ -64,40 +64,40 @@ def _section(body: str, heading: str) -> Optional[list[str]]:
 
 def criteria(body: str) -> list[str]:
     """受け入れ条件の節のチェックボックスの文（上から）。節が無ければ空。"""
-    found = _section(body, HEADING)
+    found = section_lines(body, HEADING)
     matches = [_BOX.match(line) for line in found] if found is not None else []
     return [m.group(1).strip() for m in matches if m]
 
 
 def section_lack(body: str) -> Optional[str]:
     """受け入れ条件の節が無い・空なら理由。あれば None。"""
-    if _section(body, HEADING) is None:
+    if section_lines(body, HEADING) is None:
         return f"本文に {HEADING} の節が無い"
     if not criteria(body):
         return f"{HEADING} の節にチェックボックスの条件が無い"
     return None
 
 
-def _cells(line: str) -> list[str]:
+def cells(line: str) -> list[str]:
     return [c.strip() for c in line.strip().strip("|").split("|")]
 
 
 def check_kinds(body: str) -> dict[int, str]:
     """`## 受け入れ条件の確認` の表の {条件の番号: 区分}。表が無ければ空。区分の語が違う行は読まない。"""
-    section = _section(body, CHECKS_HEADING)
+    section = section_lines(body, CHECKS_HEADING)
     rows = [line for line in section if line.strip().startswith("|")] if section is not None else []
     if len(rows) < 2:
         return {}
-    head = _cells(rows[0])
+    head = cells(rows[0])
     if any(h not in head for h in CHECKS_HEAD):
         return {}
     num_at, kind_at = head.index(CHECKS_HEAD[0]), head.index(CHECKS_HEAD[1])
     out: dict[int, str] = {}
     for row in rows[2:]:
-        cells = _cells(row)
-        num = re.match(r"^(\d+)", cells[num_at]) if len(cells) > max(num_at, kind_at) else None
-        if num and cells[kind_at] in KINDS:
-            out[int(num.group(1))] = cells[kind_at]
+        found = cells(row)
+        num = re.match(r"^(\d+)", found[num_at]) if len(found) > max(num_at, kind_at) else None
+        if num and found[kind_at] in KINDS:
+            out[int(num.group(1))] = found[kind_at]
     return out
 
 
