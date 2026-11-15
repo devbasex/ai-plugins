@@ -7866,6 +7866,12 @@
       "pending_source": "issues/issue-3572-requirements.md"
     },
     {
+      "term": "行の名前",
+      "context": "ndf-release",
+      "meaning": "取り込み方の表の行の id。#3613 の改名の後は `merge_base_branch`（今の `promote-whole`）・`release_branch`（今の `promote-selected`）・`trunk`（GitHub flow の行）で、ブランチ戦略の節の `release_strategy` の値と同じ",
+      "pending_source": "issues/issue-3572-requirements.md"
+    },
+    {
       "term": "merge queue",
       "context": "ndf-release",
       "meaning": "GitHub のマージキュー。キューへ入れた PR を、main の先端と前に並ぶ PR を合わせた一時のコミット（`gh-readonly-queue/main/...`）で必須のチェックに通し、通ったものだけを順にマージする",

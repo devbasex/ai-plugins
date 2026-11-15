@@ -154,13 +154,13 @@ the queue」である。外れる理由は、チェックの失敗・チェッ�
 
 ### スキーマの案
 
-スキーマの案は、実装（#3587）で次のパスに置く形の下書きである: `plugins/ndf-next/contracts/schemas/declarations/branch-strategy.schema.json` 。
+スキーマの案は、実装（#3587）で次のパスに置く形の下書きである: `plugins/ndf-next/contracts/schemas/ndf-settings/branch-strategy.schema.json` 。
 `$defs.reviews` は今の `worktree.schema.json` の `branch_flow.reviews` をそのまま使った。取り出しは `jq '.properties.branch_flow.properties.reviews'` で行った。
 
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "declarations/branch-strategy.schema.json",
+  "$id": "ndf-settings/branch-strategy.schema.json",
   "title": "ブランチ戦略の設定（.ndf/branch-strategy.json）",
   "type": "object",
   "additionalProperties": false,

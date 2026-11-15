@@ -14,6 +14,8 @@ PR https://github.com/devbasex/ai-plugins/pull/3636 のマージ）である。�
 84e6c33b4 のコードは改名の前の名前を持つ。キーと値は `promotion`・`direct`・`whole`・`selected`、行の id は `github-flow`・`promote-whole`・`promote-selected` である。
 #3613 の改名が develop へ入った後に develop を取り込み、名前をそろえてからこの文書の変更を入れる（決定 24 の 11 の行・決定 26）。
 定数 `TRUNK` は、そろえた後の行 `trunk` の id を指す（84e6c33b4 の `GITHUB_FLOW`）。
+ファイルのパスも改名の後の名前で書く。設定のスキーマは `contracts/schemas/ndf-settings/`（84e6c33b4 の `contracts/schemas/declarations/`）に、
+その契約の文書は `docs/contracts/ndf-settings.md`（84e6c33b4 の `declarations.md`）に置く。
 
 **取り込みの順序。** この文書の変更は、#3613 の続きの PR（移す行と改名表の列 `to_file`・`where`・`pick`）と一緒に develop へ入る。続きの PR は
 #3587 の head ブランチを宛先にする（決定 29）。
@@ -41,14 +43,14 @@ plugins/ndf-next/
 ├── contracts/
 │   ├── domains/{branch-flows,ndf-files}.json
 │   └── schemas/
-│       ├── declarations/{branch-strategy *,worktree,project,release}.schema.json
+│       ├── ndf-settings/{branch-strategy *,worktree,project,release}.schema.json
 │       └── io/{project.result,worktree.args}.schema.json
-├── docs/contracts/{commands,declarations,files}.md
+├── docs/contracts/{commands,ndf-settings,files}.md
 ├── skills/
 │   ├── development-workflow/{references/*.md,schemas/project.schema.json}
 │   ├── merged/SKILL.md
 │   ├── release/{SKILL.md,references/release-steps.md}
-│   └── worktree/{SKILL.md,references/declaration.md,schemas/worktree.schema.json}
+│   └── worktree/{SKILL.md,references/ndf-settings.md,schemas/worktree.schema.json}
 ├── src/ndf/
 │   ├── core/
 │   │   ├── branch_strategy.py *
@@ -65,10 +67,8 @@ plugins/ndf-next/
 
 **依存の向き。** 一方向で、循環は無い。新設の `core/branch_strategy.py` が依存するのは 2 つだけである。
 
-| 依存する先 | 何を読むか |
-| --- | --- |
-| `ndf.contracts` | スキーマと事実の表 |
-| `ndf.adapters.git` | メインディレクトリと既定ブランチ |
+- `ndf.contracts`: スキーマと事実の表を読む
+- `ndf.adapters.git`: メインディレクトリと既定ブランチを読む
 
 節を読む 5 つの領域は `core/branch_strategy` を呼び、互いを呼ばない。5 つは、リリース `domains/release`・スプリントの経路 `domains/worktree`・
 宛先の既定 `core/route`・リポジトリの解析 `domains/project`・工程の記録 `progress` である。
@@ -81,15 +81,15 @@ git grep -l 'from ndf.domains' origin/sprint/lrel-lock -- plugins/ndf-next/src/n
 | パス | 種類 | 役割 1 文 | 依存する先 |
 | --- | --- | --- | --- |
 | `plugins/ndf-next/src/ndf/core/branch_strategy.py` | 新設 | `.ndf/branch-strategy.json` をメインディレクトリから読み、節のスキーマで確かめ、既定を埋めた値を返す。節を読むどの領域もこれだけを通す | `ndf.contracts`・`ndf.contracts.facts`・`ndf.adapters.git` |
-| `plugins/ndf-next/contracts/schemas/declarations/branch-strategy.schema.json` | 新設 | 節のキーと組み合わせの検査（行が許す値・`trunk` の行で必須のキー・読まれない値）を持つ。中身は確かめ 8 の案（決定 28） | 無し |
+| `plugins/ndf-next/contracts/schemas/ndf-settings/branch-strategy.schema.json` | 新設 | 節のキーと組み合わせの検査（行が許す値・`trunk` の行で必須のキー・読まれない値）を持つ。中身は確かめ 8 の案（決定 28） | 無し |
 | `plugins/ndf-next/contracts/domains/ndf-files.json` | 変更 | 行 `branch-strategy`（`path: branch-strategy.json`・`keys`・`main_keys` が `["branch_strategy"]`）を足し、`worktree`・`project`・`release` の行の `keys`・`main_keys` から移したキーを外す | 無し |
 | `plugins/ndf-next/contracts/domains/branch-flows.json` | 変更 | 列 `start`・`doc_prs`・`integrate`・`review_kinds` を外し、`summary` の置き場の記述を節へ直す（決定 24 の 13 の行） | 無し |
-| `plugins/ndf-next/contracts/schemas/declarations/worktree.schema.json` | 変更 | `base_branch`・`production_branch`・`branch_flow` を外す | 無し |
-| `plugins/ndf-next/contracts/schemas/declarations/project.schema.json` | 変更 | `production_merge` と `$defs.DeliveryVerify`・`delivery` の行の `verify` と `channel` の値 `verify` を外す | 無し |
-| `plugins/ndf-next/contracts/schemas/declarations/release.schema.json` | 変更 | `version_store` を外す（決定 27） | 無し |
+| `plugins/ndf-next/contracts/schemas/ndf-settings/worktree.schema.json` | 変更 | `base_branch`・`production_branch`・`branch_flow` を外す | 無し |
+| `plugins/ndf-next/contracts/schemas/ndf-settings/project.schema.json` | 変更 | `production_merge` と `$defs.DeliveryVerify`・`delivery` の行の `verify` と `channel` の値 `verify` を外す | 無し |
+| `plugins/ndf-next/contracts/schemas/ndf-settings/release.schema.json` | 変更 | `version_store` を外す（決定 27） | 無し |
 | `plugins/ndf-next/contracts/schemas/io/project.result.schema.json` | 変更 | 解析の書き出しの行の説明の置き場を節のファイルへ直す | 無し |
 | `plugins/ndf-next/contracts/schemas/io/worktree.args.schema.json` | 変更 | `--flow-record` の説明を「節のコピー」へ直す | 無し |
-| `plugins/ndf-next/docs/contracts/declarations.md` | 変更 | 契約のスキーマと置き場の表から生成し直す（`ndf check` の spec-docs が差分を落とす） | 生成元のスキーマ |
+| `plugins/ndf-next/docs/contracts/ndf-settings.md` | 変更 | 契約のスキーマと置き場の表から生成し直す（`ndf check` の spec-docs が差分を落とす） | 生成元のスキーマ |
 | `plugins/ndf-next/docs/contracts/files.md` | 変更 | 同上（置き場の表の行 `branch-strategy`） | 生成元の表 |
 | `plugins/ndf-next/docs/contracts/commands.md` | 変更 | サブコマンドの説明のうち、設定ファイルの名前を書いた行を節のファイルへ直す | 無し |
 | `plugins/ndf-next/src/ndf/domains/release/declaration.py` | 変更 | 取り込み方の行・本番ブランチ・ベースブランチ・マージの方式・迂回の設定・検証環境・バージョンの置き場を節から読む | `ndf.core.branch_strategy`・`ndf.contracts.facts` |
@@ -106,7 +106,7 @@ git grep -l 'from ndf.domains' origin/sprint/lrel-lock -- plugins/ndf-next/src/n
 | `plugins/ndf-next/src/ndf/domains/project/measure_flow.py` | 変更 | 行が許す値・既定・レビューの単位の形を、取り込み方の表と `worktree.schema.json` の代わりに節のスキーマから読む | `ndf.core.branch_strategy` |
 | `plugins/ndf-next/src/ndf/domains/project/write.py` | 変更 | 起点・本番・ブランチ運用の書き出し先を節のファイルにする | `ndf.core.branch_strategy`・`measure_flow` |
 | `plugins/ndf-next/skills/worktree/SKILL.md` | 変更 | ブランチ戦略の設定の置き場の説明を節のファイルへ直す | 無し |
-| `plugins/ndf-next/skills/worktree/references/declaration.md` | 変更 | `.ndf/worktree.json` の説明から移したキーを外し、節のファイルへの案内を置く | 無し |
+| `plugins/ndf-next/skills/worktree/references/ndf-settings.md` | 変更 | `.ndf/worktree.json` の説明から移したキーを外し、節のファイルへの案内を置く | 無し |
 | `plugins/ndf-next/skills/worktree/schemas/worktree.schema.json` | 変更 | 移したキーを外す（契約のスキーマとは別のファイル。2 つの `diff` は一致しない） | 無し |
 | `plugins/ndf-next/skills/development-workflow/schemas/project.schema.json` | 変更 | `production_merge` と検証環境の行を外す（同上） | 無し |
 | `plugins/ndf-next/skills/development-workflow/references/production-merge.md` | 変更 | マージの方式と迂回の設定の置き場を節のキーへ直す | 無し |
@@ -140,7 +140,7 @@ git grep -l -E 'branch_flow|"production_branch"|production_branch=|"base_branch"
 | --- |
 | `domains/project/test_project_cli.py`・`domains/project/test_project_measure.py` |
 | `domains/release/test_release_approval.py`・`test_release_assemble.py`・`test_release_bump.py`・`test_release_confirm.py`・`test_release_files.py`・`test_release_merge_method.py`・`test_release_plan.py`・`test_release_pr_check.py`・`test_release_verify_ref.py`・`test_release_version_store.py` |
-| `domains/test_branch_flows.py`・`domains/test_declarations.py` |
+| `domains/test_branch_flows.py`・`domains/test_ndf_settings.py` |
 | `domains/worktree/conftest.py`・`test_worktree_decide.py`・`test_worktree_env_decide.py`・`test_worktree_envs.py`・`test_worktree_git.py`・`test_worktree_merged.py` |
 | `progress/gate/test_gate_release.py`・`progress/test_invoke.py`・`progress/test_run.py`・`progress/test_sprint_templates.py` |
 | `route/test_cli.py`・`route/test_flows.py`・`skills/test_schema_refs.py` |
@@ -287,7 +287,7 @@ git grep -l -E 'branch_flow|"production_branch"|production_branch=|"base_branch"
 | --- | --- | --- | --- |
 | `FILE_ROW` | 定数 | `core/branch_strategy.py` | `"branch-strategy"`（置き場の表の行の id。パスは表から引く） |
 | `SECTION` | 定数 | `core/branch_strategy.py` | `"branch_strategy"`（置き場の表の行の `keys` の唯一の値と同じ。契約のテストが一致を確かめる） |
-| `SCHEMA` | 定数 | `core/branch_strategy.py` | `contracts.schema_path("declarations/branch-strategy")` |
+| `SCHEMA` | 定数 | `core/branch_strategy.py` | `contracts.schema_path("ndf-settings/branch-strategy")` |
 | `BranchStrategy` | 型（`declared: bool`・`base_branch: str \| None`・`production_branch: str \| None`・`release_strategy: str`・`start: str`・`doc_prs: str`・`integrate: str`・`reviews: Mapping[str, Any]`・`merge_method: str \| None`・`admin: bool`・`verify: Mapping[str, Any] \| None`・`version_store: Mapping[str, Any] \| None`・`raw: Mapping[str, Any]`） | `core/branch_strategy.py` | `raw` は書いたままの節（解析の書き出しとずれの比べが使う） |
 | `BranchStrategyError` | 型（`contracts.ContractError` の子。`path: Path`・`reason: str`） | `core/branch_strategy.py` | — |
 | 置き場の表の行 `branch-strategy` | 設定値 | `contracts/domains/ndf-files.json` | `{"id": "branch-strategy", "place": "ndf", "path": "branch-strategy.json", "kind": "declaration", "tracked": true, "writer": "人と解析（M7）", "ends": "kept", "keys": ["branch_strategy"], "main_keys": ["branch_strategy"]}` |

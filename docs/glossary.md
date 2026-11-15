@@ -1060,6 +1060,7 @@ release が走らせるリリースの種別・リリースコマンド・公開
 | ブランチ戦略 | — | リポジトリがどのブランチから作業を切り、どこへマージし、どこから本番へ出すかの決まり。ndf-next では、リポジトリごとにブランチ戦略の節（`.ndf/branch-strategy.json` の `branch_strategy`）の `release_strategy` で、取り込み方の表の行を選ぶ | — | — | — |
 | ブランチ戦略の節 | — | ndf-next で、ブランチ戦略・マージの方式・検証環境・バージョンの置き場をまとめて書く、`.ndf/branch-strategy.json` の節 `branch_strategy`。利用者はこの節だけを読めば、スプリントの起点・PR の宛先・リリースの形・マージの方式・マージの前に試す場所・バージョンの上げ方が分かる。組み合わせの検査は節のスキーマが持つ | — | — | — |
 | 取り込み方の表 | — | ndf-next がブランチ戦略として選べる行の一覧（`plugins/ndf-next/contracts/domains/branch-flows.json`）。`merge_base_branch`・`release_branch` と、スプリントブランチを main から切って main へマージする `trunk` の行を持つ（行の名前はブランチ戦略の節の `release_strategy` の値と同じ）。行ごとの振る舞いの列を持ち、行が許す値は節のスキーマが持つ | — | — | — |
+| 行の名前 | — | 取り込み方の表の行の id。#3613 の改名の後は `merge_base_branch`（今の `promote-whole`）・`release_branch`（今の `promote-selected`）・`trunk`（GitHub flow の行）で、ブランチ戦略の節の `release_strategy` の値と同じ | — | — | — |
 | merge queue | — | GitHub のマージキュー。キューへ入れた PR を、main の先端と前に並ぶ PR を合わせた一時のコミット（`gh-readonly-queue/main/...`）で必須のチェックに通し、通ったものだけを順にマージする | — | — | — |
 | マージの方式 | — | 承認した複数の PR の組み合わせを確かめてから本番ブランチへマージする方式。`merge-queue`（merge queue を使う）か `strict`（最新の main の取り込みを必須にし、head が動けば承認を取り直す）。リポジトリごとに設定ファイルで選ぶ | — | — | — |
 | 検証環境 | — | マージの前に変更を試す場所。リポジトリごとに設定ファイルで種類を選ぶ。プラグインなら検証用マーケットプレイス、Web なら staging 環境 | — | — | — |
