@@ -12,7 +12,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from typing import NamedTuple, Optional
 
 HEADING = "## 受け入れ条件"
@@ -62,16 +62,23 @@ def section_lines(body: str, heading: str) -> Optional[list[str]]:
     at = heading_at(lines, heading)
     if at is None:
         return None
-    out, fenced = [], False
-    for line in lines[at + 1 :]:
-        if _FENCE.match(line):
+    out = []
+    for _, line in outside_fences(lines[at + 1 :]):
+        if SECTION_END.match(line):
+            break
+        out.append(line)
+    return out
+
+
+def outside_fences(lines: Iterable[str], fence: re.Pattern[str] = _FENCE) -> Iterator[tuple[int, str]]:
+    """囲み（`fence` に当たる行で開いて閉じる）の外の行を `(添字 0 始まり, 行)` で返す。囲みの行そのものは返さない。"""
+    fenced = False
+    for i, line in enumerate(lines):
+        if fence.match(line):
             fenced = not fenced
             continue
-        if not fenced and SECTION_END.match(line):
-            break
         if not fenced:
-            out.append(line)
-    return out
+            yield i, line
 
 
 def criteria(body: str) -> list[str]:

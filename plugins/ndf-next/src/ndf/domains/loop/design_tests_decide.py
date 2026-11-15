@@ -19,6 +19,8 @@ from enum import Enum
 from pathlib import PurePosixPath
 from typing import NamedTuple, Optional
 
+from ndf.core.plan import inputs_decide as inputs
+
 NAME_SECTIONS = ("決定の記録", "テスト設計", "構成要素")
 BARE_SECTION = "テスト設計"
 REJECTED = "採らなかった案"
@@ -108,14 +110,8 @@ def classify(span: str, section: str) -> Optional[Span]:
 
 
 def _outside_fences(text: str) -> list[tuple[int, str]]:
-    out, fenced = [], False
-    for i, line in enumerate(text.splitlines()):
-        if _FENCE.match(line):
-            fenced = not fenced
-            continue
-        if not fenced:
-            out.append((i + 1, line))
-    return out
+    """囲みの外の行を `(行番号 1 始まり, 行)` で返す。囲みは字下げ 3 つまでを許す（`_FENCE`）。"""
+    return [(i + 1, line) for i, line in inputs.outside_fences(text.splitlines(), _FENCE)]
 
 
 def _next_section(heading: re.Match[str], section: Optional[str]) -> Optional[str]:
