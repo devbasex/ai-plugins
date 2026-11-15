@@ -375,9 +375,14 @@ def _runner_configs(tree: Tree, runner: str, configs: tuple[str, ...]) -> list[s
     return [p for p in tree.files if p.count("/") <= 2 and any(fnmatch.fnmatchcase(p.rsplit("/", 1)[-1], c) for c in configs)]
 
 
+def instruction_files(tree: Tree) -> list[str]:
+    """木にある指示書（`INSTRUCTION_FILES` の順）。"""
+    return [p for p in INSTRUCTION_FILES if p in tree.files]
+
+
 def docs_of(tree: Tree) -> list[str]:
     """指示書と根・1 段下の README。"""
-    return [p for p in INSTRUCTION_FILES if p in tree.files] + tree.shallow("README*.md")
+    return instruction_files(tree) + tree.shallow("README*.md")
 
 
 def measure_test(tree: Tree, deps: dict[str, dict[str, str]], services: list[str]) -> dict[str, Any]:
@@ -473,7 +478,7 @@ def measure_checks(tree: Tree, deps: dict[str, dict[str, str]]) -> dict[str, Any
 
 
 def measure_policies(tree: Tree) -> dict[str, Any]:
-    evidence = tree.grep([p for p in INSTRUCTION_FILES if p in tree.files], POLICY_WORDS)
+    evidence = tree.grep(instruction_files(tree), POLICY_WORDS)
     candidates = [{"doc_lint": False, "reject_md_wording_tests": False}, {"doc_lint": True, "reject_md_wording_tests": True}]
     return question(candidates, evidence)
 
@@ -500,7 +505,7 @@ def _old_guide_notes(tree: Tree, files: list[str], imports: list[dict[str, str]]
 
 
 def measure_instructions(tree: Tree) -> dict[str, Any]:
-    files = [p for p in INSTRUCTION_FILES if p in tree.files]
+    files = instruction_files(tree)
     imports = [
         {"from": f, "to": _normalize(str(PurePosixPath(f).parent / m.group(1)))} for f in files for m in IMPORT_TOKEN.finditer(tree.text(f))
     ]
