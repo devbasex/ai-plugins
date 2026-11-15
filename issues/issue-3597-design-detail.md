@@ -44,24 +44,6 @@ plugins/ndf/
 scripts/script-structure-allow/plugins__ndf__scripts__lib__parallel_run.py--lines.json
 ```
 
-**依存の向き。** 下の層から上の層へ一方向に読み、循環は無い。
-
-| 層 | モジュール | 持つもの |
-| ---: | --- | --- |
-| 1 | `parallel_question` | 台帳の行だけを受け取る純粋な関数 |
-| 2 | `parallel_ledger` | 台帳のファイル |
-| 3 | `parallel_lane` | 台帳へ書いて耐久ワークフローへ知らせる |
-| 4 | `parallel_helper`・`parallel_gate2` | 一時レーンの流すものと確定の後の依頼 |
-| 5 | `parallel_launch`・`parallel_run` | 耐久ワークフロー |
-| 6 | `parallel.py` | CLI |
-
-- `parallel_gate2` は `parallel_lane`・`parallel_ledger`・`parallel_helper`・`parallel_release`・`durable`・`gh_call` を読む。`parallel_run` だけが `parallel_gate2` を読む
-- `parallel_question` は `parallel_ledger` を読まない（行は呼ぶ側が渡す）
-- `relay_lib/hub.py` は `lib/` の並列の計画のモジュールを読まない
-- `parallel_launch` も `relay_lib` を読まない（断りの結果の欄 `busy` の有無だけで分ける）
-
-**`parallel.py` は `parallel_gate2` を `cmd_request_gate2` の中で読む。** `parallel_gate2` は耐久の部品（DBOS）を読み込むため、問いの hook が打つ `request-ask` の起動に載せない。`parallel_helper` を `cmd_helper` の中で読む今の形と同じである。
-
 | パス | 種類 | 役割 1 文 | 依存する先 |
 | --- | --- | --- | --- |
 | `plugins/ndf/scripts/lib/parallel_ledger.py` | 変更 | 送った結果の型と、同じキーの行の中身の判定を持ち、処理済みのリリース承認ゲートの判定を確定の後の依頼に合わせ、行の種類 `reused` を知る | `parallel_plan`・`locks`・`limits` |
@@ -86,6 +68,24 @@ scripts/script-structure-allow/plugins__ndf__scripts__lib__parallel_run.py--line
 | `plugins/ndf/scripts/tests/test_parallel_run.py` | 変更 | 確定の後の依頼への答え（打ち直す・差し戻す）と途中停止の問いが立たないことを縛る | `parallel_run`・`parallel_gate2` |
 | `plugins/ndf/scripts/tests/test_ask_guard.py` | 変更 | 引き継いだ答えと答え待ちの id が hook の拒否の理由に載ることを縛る | `hook_lib/ask_guard` |
 | `plugins/ndf/scripts/tests/test_relay_hub.py` | 変更 | `helper-busy` と動いている名前の断りを縛る | `relay_lib/hub` |
+
+**依存の向き。** 下の層から上の層へ一方向に読み、循環は無い。
+
+| 層 | モジュール | 持つもの |
+| ---: | --- | --- |
+| 1 | `parallel_question` | 台帳の行だけを受け取る純粋な関数 |
+| 2 | `parallel_ledger` | 台帳のファイル |
+| 3 | `parallel_lane` | 台帳へ書いて耐久ワークフローへ知らせる |
+| 4 | `parallel_helper`・`parallel_gate2` | 一時レーンの流すものと確定の後の依頼 |
+| 5 | `parallel_launch`・`parallel_run` | 耐久ワークフロー |
+| 6 | `parallel.py` | CLI |
+
+- `parallel_gate2` は `parallel_lane`・`parallel_ledger`・`parallel_helper`・`parallel_release`・`durable`・`gh_call` を読む。`parallel_run` だけが `parallel_gate2` を読む
+- `parallel_question` は `parallel_ledger` を読まない（行は呼ぶ側が渡す）
+- `relay_lib/hub.py` は `lib/` の並列の計画のモジュールを読まない
+- `parallel_launch` も `relay_lib` を読まない（断りの結果の欄 `busy` の有無だけで分ける）
+
+**`parallel.py` は `parallel_gate2` を `cmd_request_gate2` の中で読む。** `parallel_gate2` は耐久の部品（DBOS）を読み込むため、問いの hook が打つ `request-ask` の起動に載せない。`parallel_helper` を `cmd_helper` の中で読む今の形と同じである。
 
 **`parallel_run.py` の行数。** 今は行数の例外の 840 行ちょうどである。確定の後の依頼への答えの部品は `parallel_gate2.py` に置く。`parallel_run.py` に足すのは、import の 1 行と、観測の後に空き待ちを読み直す 1 行だけである。`apply_own` の呼び出しは、今の `apply_end` の条件の行へ `or` で足し、行を増やさない。842 行になるため、例外の行数を同じ変更で 842 にする。
 
