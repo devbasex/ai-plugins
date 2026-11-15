@@ -253,3 +253,105 @@ def test_schema_subcommand_writes_out(tmp_path):
     assert p.returncode == 0 and p.stdout.startswith(out.read_text(encoding="utf-8"))
     p = subprocess.run([sys.executable, str(SCRIPT), "schema", "--out", str(tmp_path / "no" / "s.json")], capture_output=True, text=True)
     assert p.returncode == 2
+
+
+# --- 現状固定: check_repos の指摘の行・規則・理由と並び（I-001。_scope_problems の分割の前に置く） ---
+
+HEAD_ROW = "| 代表のリポジトリ | 設定の要点 | 直した後に起きること | この種類で扱えなくなること |"
+SCOPE_AT = "d.md:7"
+OWN_GAP = "このリポジトリだけの事情の欄が無い: ## 適用範囲"
+MISS = "repo_scope_missing"
+UNROUTED = "扱えなくなることがあるのに、人へ残す判断に P2 の行が無い: "
+_OK = ROWS_OK.splitlines(keepends=True)
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        (doc(), []),
+        (doc().replace("## 適用範囲", "## 範囲"), [("d.md:0", MISS, "適用範囲の節が無い")]),
+        (doc().replace("## 適用範囲", "### 適用範囲"), [("d.md:0", MISS, "適用範囲の節が無い")]),
+        (doc(behavior=False), [(SCOPE_AT, MISS, "代表のリポジトリでの振る舞いの節が無い: ## 適用範囲")]),
+        (
+            doc(header="| 種類 | 何が起きるか |\n| --- | --- |\n", rows="| Web サービス | 今と同じ |\n"),
+            [
+                (
+                    "d.md:11",
+                    MISS,
+                    "振る舞いの表に 代表のリポジトリ と この種類で扱えなくなること の列が無い: ### 代表のリポジトリでの振る舞い",
+                )
+            ],
+        ),
+        (doc(rows=_OK[0] + _OK[2]), [("d.md:13", MISS, f"種類 モバイルアプリ の行が無い: {HEAD_ROW}")]),
+        (
+            doc(rows=ROWS_OK.replace("| 無し（今と同じ） |", "|  |")),
+            [("d.md:17", MISS, "扱えなくなることが空: | 業務文書だけ | Markdown | 今と同じ |  |")],
+        ),
+        (
+            doc(header=HEADER.replace("| 直した後に起きること ", "| 起きること ")),
+            [
+                (
+                    "d.md:13",
+                    MISS,
+                    "振る舞いの表に 直した後に起きること の列が無い: | 代表のリポジトリ | 設定の要点 | 起きること | この種類で扱えなくなること |",
+                )
+            ],
+        ),
+        (
+            doc(rows=ROWS_OK.replace("| Flutter | 今と同じ |", "| Flutter |  |")),
+            [("d.md:16", MISS, "直した後に起きることが空: | モバイルアプリ | Flutter |  | `無し` |")],
+        ),
+        (
+            doc(rows="| Web サービス | x |\n" + _OK[1] + _OK[2]),
+            [
+                ("d.md:15", MISS, "扱えなくなることが空: | Web サービス | x |"),
+                ("d.md:15", MISS, "直した後に起きることが空: | Web サービス | x |"),
+            ],
+        ),
+        (doc(own=""), [(SCOPE_AT, MISS, OWN_GAP)]),
+        (doc(own="### このリポジトリだけの事情\n\n"), [(SCOPE_AT, MISS, OWN_GAP)]),
+        (doc(own="### このリポジトリだけの事情\n\n```\nx\n```\n"), [(SCOPE_AT, MISS, OWN_GAP)]),
+        (
+            doc(rows=LOSS),
+            [
+                (
+                    "d.md:15",
+                    "repo_loss_unrouted",
+                    UNROUTED + "| Web サービス・設定なし（carmo） | develop→main | 外す | develop を経て本番へ出す運用（代わりが無い） |",
+                )
+            ],
+        ),
+        (
+            doc(rows="| Web サービス | a |  |  |\n| 他 | b | 起きる | 失う |\n", own=""),
+            [
+                (SCOPE_AT, MISS, OWN_GAP),
+                ("d.md:13", MISS, f"種類 モバイルアプリ の行が無い: {HEAD_ROW}"),
+                ("d.md:13", MISS, f"種類 業務文書だけ の行が無い: {HEAD_ROW}"),
+                ("d.md:15", MISS, "扱えなくなることが空: | Web サービス | a |  |  |"),
+                ("d.md:15", MISS, "直した後に起きることが空: | Web サービス | a |  |  |"),
+                ("d.md:16", "repo_loss_unrouted", UNROUTED + "| 他 | b | 起きる | 失う |"),
+            ],
+        ),
+    ],
+    ids=[
+        "complete",
+        "no-scope",
+        "scope-not-h2",
+        "no-behavior",
+        "wrong-columns",
+        "missing-kind",
+        "empty-loss",
+        "no-after-col",
+        "empty-after",
+        "short-row",
+        "no-own",
+        "empty-own",
+        "fenced-own",
+        "loss-unrouted",
+        "every-gap-in-line-order",
+    ],
+)
+def test_check_repos_items_are_fixed(text, expected):
+    """現状固定: 指摘の name（行）・rule・text と、行の順（同じ行は見つけた順）。"""
+    got = dr.check_repos("d.md", text, S, set())
+    assert [(it["name"], it["rule"], it["text"]) for it in got] == expected
