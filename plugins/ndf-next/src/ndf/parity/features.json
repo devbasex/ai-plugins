@@ -38,14 +38,14 @@
     "S1d": ["src/ndf/domains/gws/"]
   },
   "rows": [
-    {"id": "entrypoint:scripts/acceptance-check.py", "kind": "entrypoint", "feature": "受け入れ条件の確認の区分を課題の本文へ記録する・読む（#2144。完了判定 `quality-gates` が呼ぶ）。", "now": "scripts/acceptance-check.py", "to": "M1", "trial": null, "unowned": true},
+    {"id": "entrypoint:scripts/acceptance-check.py", "kind": "entrypoint", "feature": "受け入れ条件の確認の区分を課題の本文へ記録する・読む（#2144。完了判定 `quality-gates` が呼ぶ）。", "now": "scripts/acceptance-check.py", "to": "M1", "trial": null},
     {"id": "entrypoint:scripts/ask.py", "kind": "entrypoint", "feature": "問い合わせの記録の副命令（#2206）。記録の置き場と形は `lib/ask_ledger.py` にある。", "now": "scripts/ask.py", "to": "P2", "trial": null, "conductor": true},
     {"id": "entrypoint:scripts/behavior-check.py", "kind": "entrypoint", "feature": "振る舞いを決める文書を変えた Pull Request の、振る舞いの確認の対象・記録・確認（#2925 の決定 6）。", "now": "scripts/behavior-check.py", "to": "M1", "trial": null, "unowned": true},
     {"id": "entrypoint:scripts/bundle-close.py", "kind": "entrypoint", "feature": "旧名のエントリポイント（#1407）。案内を stderr に 1 行出し、引数をそのまま新しい名前のスクリプトへ渡す。", "now": "scripts/bundle-close.py", "not_built": "sprint-close.py の旧名の中継（#1407）。新しい側は旧名を読み替えない（#1142 の決定 65・76）", "trial": null},
     {"id": "entrypoint:scripts/check-trigger.py", "kind": "entrypoint", "feature": "検査（リファクタリングとコードレビュー）のトリガーを判定し、検査の範囲の用意と後始末と記録を持つ（#1078）。", "now": "scripts/check-trigger.py", "to": "M1", "trial": null, "conductor": true},
     {"id": "entrypoint:scripts/ci-watch.py", "kind": "entrypoint", "feature": "CI の結果の監視。PR の CI のテストのチェックを待たずに 1 回だけ読む（#3056）。", "now": "scripts/ci-watch.py", "to": "AD1+", "trial": null},
     {"id": "entrypoint:scripts/context-policy.py", "kind": "entrypoint", "feature": "再起動の方針の適用値・判定の記録・費用の見込み・作業ごとの集計（#2262）。LLM を呼ばない。", "now": "scripts/context-policy.py", "to": "M3b", "trial": null, "unowned": true, "conductor": true},
-    {"id": "entrypoint:scripts/design-match.py", "kind": "entrypoint", "feature": "完了判定の設計との突き合わせのうち、機械で行う 2 つ（#1241）。LLM を呼ばず、読むだけ。", "now": "scripts/design-match.py", "to": "M1", "trial": null, "unowned": true},
+    {"id": "entrypoint:scripts/design-match.py", "kind": "entrypoint", "feature": "完了判定の設計との突き合わせのうち、機械で行う 2 つ（#1241）。LLM を呼ばず、読むだけ。", "now": "scripts/design-match.py", "to": "M1", "trial": null},
     {"id": "entrypoint:scripts/design-survey.py", "kind": "entrypoint", "feature": "設計文書の自前で作る決定に、外部の調査で比べた候補があるかを確かめる（#2519）。LLM を呼ばず、読むだけ。", "now": "scripts/design-survey.py", "to": "M7", "trial": null, "unowned": true},
     {"id": "entrypoint:scripts/doc-lint.py", "kind": "entrypoint", "feature": "追加した行だけに、文書の書き方のチェックを掛ける（#870 B2）。", "now": "scripts/doc-lint.py", "to": "M7", "trial": null, "unowned": true, "conductor": true},
     {"id": "entrypoint:scripts/ensure-retention.sh", "kind": "entrypoint", "feature": "NDF plugin: Claude Code の設定の置き場（CLAUDE_CONFIG_DIR、無ければ ~/.claude）の settings.json の cleanupPeriodDays を最低 90 日に保つ。", "now": "scripts/ensure-retention.sh", "to": "M3a", "trial": null, "unowned": true},

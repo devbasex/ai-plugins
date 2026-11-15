@@ -13,6 +13,7 @@ from ndf import cli, identity
 from ndf.contracts import causes
 from ndf.core import durable
 from ndf.progress import lane, model, plan, store
+from ndf.progress.lane import launch
 from ndf.progress.plan import cli as plan_cli
 from ndf.progress.plan import run as plan_run
 from plan_decls import REPO, doc
@@ -54,6 +55,29 @@ def test_lane_added_to_a_running_plan_answers_the_request(opened):
     view, rows = _view(opened, pid)
     assert list(view.lanes) == ["a", "b", "c"] and [r.key for r in rows["c"]] == ["r1"]
     assert view.open_requests() == [] and view.requests[req].closed
+
+
+QUESTION = {"tool_use_id": "toolu_1", "session_id": "s1", "questions": [{"question": "設計を承認するか"}], "cwd": "/w", "at": "t"}
+
+
+def test_lane_question_opens_one_request_until_the_organizer_closes_it(opened, refused):
+    # レーンの問いは計画の依頼になり、同じ問いは閉じるまで二重に載らない（#3035 の受け入れ条件 3）
+    pid = _two(opened)
+    wrapper = launch.wrapper_name(REPO, "p6", "b")
+    with store.transaction(opened) as conn:
+        key, new = plan.ask_request(conn, pid, wrapper, QUESTION)
+        again, again_new = plan.ask_request(conn, pid, wrapper, QUESTION)
+        other, other_new = plan.ask_request(conn, pid, wrapper, {**QUESTION, "tool_use_id": "toolu_2"})
+    assert (new, again, again_new, other_new) == (True, key, False, True) and other != key
+    view, _ = _view(opened, pid)
+    body = view.requests[key].body
+    assert view.requests[key].lane == "b" and body["kind"] == plan.QUESTION_KIND and body["questions"] == QUESTION["questions"]
+    with store.transaction(opened) as conn:
+        plan.close_request(conn, pid, key, "承認する")
+        reopened, reopened_new = plan.ask_request(conn, pid, wrapper, QUESTION)
+    assert reopened_new is True and reopened not in (key, other)
+    reason = refused(opened, lambda conn: plan.ask_request(conn, pid, launch.wrapper_name(REPO, "p7", "b"), QUESTION))
+    assert "レーンのものでない" in reason
 
 
 def test_lane_that_breaks_a_rule_is_not_added(opened, refused):

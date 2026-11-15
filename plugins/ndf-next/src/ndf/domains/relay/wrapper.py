@@ -10,6 +10,8 @@
 - 切り替えない理由は、前の見回りと変わったときだけ `log.jsonl` へ 1 行書く（同じ理由を見回りごとに書かない）
 - 状態（`running`・`waiting`・`stalled`・`stopped`）と理由を `wrapper.json` に書き、一覧と耐久ワークフローが読む
   （認証の失敗で `/goal` が外れたレーンを running のまま扱わない。#3243）
+- 計画のレーンの中継（設定の `ask_plan` がある）は、hook が書いた問いを計画の進行表の依頼として載せてから消す
+  （`lane_question`。#3035）。載せられなければ理由を状態と `log.jsonl` に書く
 """
 
 from __future__ import annotations
@@ -28,6 +30,7 @@ from ptyprocess import PtyProcess
 
 from ndf.adapters.claude import CLAUDE
 from ndf.domains.relay import account_decide, accounts, hub_decide, marks, observe, registry, session_env, signals, switch_decide
+from ndf.domains.relay.lane_question import AskPlan
 
 # 画面の末尾として残すバイト数（上限と認証の失敗の行を探す範囲）
 SCREEN_KEEP = 65536
@@ -37,7 +40,10 @@ DEFAULT_DIMS = (40, 120)
 
 @dataclass(frozen=True)
 class Settings:
-    """ラッパー 1 本の設定。値は上限の宣言と環境変数から `cli` が組む。"""
+    """ラッパー 1 本の設定。値は上限の宣言と環境変数から `cli` が組む。
+
+    `ask_plan` は計画のレーンの問いを計画の依頼として載せる手（`lane_question.plan_asker`。計画のレーンでなければ None）。
+    """
 
     state_dir: Path
     version: str
@@ -52,6 +58,7 @@ class Settings:
     context_limit: int
     usage_threshold: float
     transcript_bytes: int
+    ask_plan: Optional[AskPlan] = None
 
 
 @dataclass(frozen=True)
@@ -216,10 +223,21 @@ class Wrapper:
         return action(self, step, sec) if action is not None else None
 
     def _on_wait_like(self, step: switch_decide.Step, sec: Section) -> Optional[Ended]:
+        reason = step.reason
         if step.kind == "forward":
+            note = self._ask_plan()
+            reason = f"{reason}。計画の依頼へ載せられない: {note}" if note else reason
             signals.drop(self.dir, signals.QUESTION_FILE)
-        self._write_state("stalled" if step.kind == "stalled" else "waiting", step.reason)
+        self._write_state("stalled" if step.kind == "stalled" else "waiting", reason)
         return None
+
+    def _ask_plan(self) -> str:
+        """計画のレーンなら問いを計画の依頼として載せ、載せられなかった理由を返す（載せた・計画のレーンでなければ空）。"""
+        if self.s.ask_plan is None:
+            return ""
+        note = self.s.ask_plan(self.dir / signals.QUESTION_FILE)
+        self._log({"kind": "plan_question", "ok": not note, "reason": note or "問いを計画の依頼へ載せた"})
+        return note
 
     def _on_switch(self, step: switch_decide.Step, sec: Section) -> Optional[Ended]:
         account = self._account_for_next(sec.account)
