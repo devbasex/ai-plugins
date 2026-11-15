@@ -427,8 +427,9 @@ class Bumper:
         """main の先端に合わせて版上げの PR を作るか進めるか置き換え、マージまで進める（I8・I11）。`github-flow` でなければ何もしない。"""
         if self._flow != decl_mod.GITHUB_FLOW:
             return Bumped(bump_decide.NOT_APPLICABLE)
-        store = self._store
+        # 宣言（置き場）は main の先端を取り出した後に読む（worktree の今の木は信頼しない）
         span = self._span()
+        store = self._store
         tip = self._tip(span, store)
         plan = self._plan(span, store)
         opened = self._open_bump()

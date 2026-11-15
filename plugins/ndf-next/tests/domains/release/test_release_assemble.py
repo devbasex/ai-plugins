@@ -159,7 +159,7 @@ def test_collect_mixed_range_splits_changes_and_instructions(tmp_path: Path) -> 
 def test_collect_refuses_when_head_is_not_the_pr_head(tmp_path: Path) -> None:
     work = _origin(tmp_path)
     git_sandbox.sh(work, "switch", "-q", "--detach", "origin/main")
-    with pytest.raises(assemble.AssembleError, match=f"#{PR} の先端でない"):
+    with pytest.raises(assemble.AssembleError, match=f"origin/pull/{PR} の先端でない"):
         assemble.collect(work, _hub(), _target())
 
 

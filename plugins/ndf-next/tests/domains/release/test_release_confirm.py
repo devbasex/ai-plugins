@@ -125,6 +125,11 @@ def test_cli_confirm_stops_with_one_rerun_move(monkeypatch, capsys, tmp_path) ->
     (tmp_path / ".claude-plugin" / "marketplace.json").write_text(
         json.dumps({"plugins": [{"name": "kit", "source": "./kit"}]}), encoding="utf-8"
     )
+    # 行 github-flow と置き場 plugin の宣言（既定の行は merge_base_branch。#3572 の決定 16・22）
+    write_json(
+        tmp_path / ".ndf" / "worktree.json", {"base_branch": "main", "production_branch": "main", "branch_flow": {"promotion": "direct"}}
+    )
+    write_json(tmp_path / ".ndf" / "release.json", {"version": 1, "version_store": {"kind": "plugin"}})
     hub = _hub(bumped=False)
     monkeypatch.setattr(release_cli, "_hub", lambda args: hub)
     monkeypatch.setattr(release_cli.git_mod, "Git", lambda root: FakeGit(set()))

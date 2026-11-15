@@ -259,7 +259,15 @@ def test_release_steps_parser_current_behavior() -> None:
 
     production = opt("--production")
     pr = req("--pr", int)
-    target = [pr, production, opt("--plugin")]
+    # 本番の PR は github-flow の行だけで要り、ほかの行はチャネル・上げ幅・ベースブランチを渡す（#3572 の決定 16）
+    target = [
+        (*opt("--pr")[:4], int, "_StoreAction"),
+        production,
+        opt("--plugin"),
+        opt("--channel", choices=("production", "dev")),
+        opt("--level", "patch", ("major", "minor", "patch")),
+        opt("--base"),
+    ]
     budget = req("--budget", float)
     answer = [
         opt("--route", "gate", ("gate", "github-merge")),
