@@ -213,3 +213,16 @@ def test_tail_and_pick() -> None:
     assert rd.tail("\n".join(lines[: rd.DETAIL_LINES])).splitlines() == lines[: rd.DETAIL_LINES]
     assert rd.tail(None) == "" and rd.tail("") == ""
     assert rd.pick({"a": 1, "b": 2, "token": "t"}, ("a", "b")) == {"a": 1, "b": 2}
+
+
+def test_states_match_the_result_schema_enum() -> None:
+    # 4 つの状態の値は結果のスキーマ gws.result の metrics.state の列挙と同じ（並びも含む）
+    schema_path = Path(__file__).resolve().parents[3] / "contracts" / "schemas" / "io" / "gws.result.schema.json"
+    enum = json.loads(schema_path.read_text(encoding="utf-8"))["properties"]["metrics"]["properties"]["state"]["enum"]
+    assert [rd.AUTHENTICATED, rd.MISSING, rd.UNAUTHENTICATED, rd.UNINSTALLABLE] == enum
+    assert (rd.AUTHENTICATED, rd.MISSING, rd.UNAUTHENTICATED, rd.UNINSTALLABLE) == (
+        "authenticated",
+        "missing",
+        "unauthenticated",
+        "uninstallable",
+    )
