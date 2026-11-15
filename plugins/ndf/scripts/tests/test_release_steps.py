@@ -1784,14 +1784,47 @@ def test_ensure_no_port_line_appends_the_mark_to_a_reused_pr(monkeypatch, tmp_pa
     body = "解いたパス: README.md" + (f"\n\n{rv.NO_PORT_LINE}" if has_line else "")
     monkeypatch.setattr(rv, "gh_json", lambda root, args, what: {"body": body})
     edited = []
-    monkeypatch.setattr(
-        rv.gh_parts, "gh", lambda args, stdin=None, cwd=None: edited.append((args[2], stdin)) or SimpleNamespace(returncode=0, stderr="")
-    )
+
+    def gh(args, stdin=None, cwd=None):
+        if args[1] == "checks":
+            return SimpleNamespace(returncode=0, stdout="[]", stderr="")
+        edited.append((args[2], stdin))
+        return SimpleNamespace(returncode=0, stderr="")
+
+    monkeypatch.setattr(rv.gh_parts, "gh", gh)
     assert rv.ensure_no_port_line(tmp_path, {"number": 7}) == {"number": 7} and rv.ensure_no_port_line(tmp_path, None) is None
     if has_line:
         assert edited == []
     else:
         assert [n for n, _ in edited] == ["7"] and edited[0][1].startswith("解いたパス: README.md") and rv.NO_PORT_LINE in edited[0][1]
+
+
+def test_ensure_no_port_line_waits_until_the_failed_check_is_rerun(monkeypatch, tmp_path):
+    """編集の前に落ちていたチェックは、本文の編集で打ち直されて落ちた状態から外れるまで待ってから戻る（#3573）。
+    待たずに戻ると、続く CI の待ちが打ち直す前の失敗を読んで止まる。"""
+    import json as _json
+
+    from release_lib import reviewed as rv
+
+    monkeypatch.setattr(rv, "gh_json", lambda root, args, what: {"body": "解いたパス: README.md"})
+    reads = iter(
+        [
+            [{"name": "ndf-next-checks", "bucket": "fail"}, {"name": "test", "bucket": "pass"}],  # 編集の前
+            [{"name": "ndf-next-checks", "bucket": "fail"}, {"name": "test", "bucket": "pass"}],  # 打ち直しがまだ登録されていない
+            [{"name": "ndf-next-checks", "bucket": "pending"}, {"name": "test", "bucket": "pass"}],
+        ]
+    )
+    calls = []
+
+    def gh(args, stdin=None, cwd=None):
+        calls.append(args[1])
+        stdout = _json.dumps(next(reads)) if args[1] == "checks" else ""
+        return SimpleNamespace(returncode=0, stdout=stdout, stderr="")
+
+    monkeypatch.setattr(rv.gh_parts, "gh", gh)
+    monkeypatch.setattr(rv.waits, "wait_until", lambda read, done, policy: _Waited(read, done))
+    assert rv.ensure_no_port_line(tmp_path, {"number": 7}) == {"number": 7}
+    assert calls == ["checks", "edit", "checks", "checks"]
 
 
 @pytest.mark.parametrize("synced", [None, 6])
