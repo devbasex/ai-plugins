@@ -165,14 +165,22 @@ def issue_kind(body: str) -> Optional[str]:
     return next((x.strip() for x in lines if x.strip()), None)
 
 
+def _interface_cell(rows: list[list[str]]) -> Optional[str]:
+    """表の行のうち最初の `公開インタフェース` の行の 2 列目（前後の空白を落とす）。行が無ければ None（空のセルと区別する）。"""
+    return next((row[1].strip() for row in rows if len(row) >= 2 and row[0].strip() == INTERFACE_ROW), None)
+
+
+def _interface_value(cell: str) -> dict[str, str]:
+    """セルを値（書き出しが `INTERFACE_VALUES` のどれか。どれでもなければ `記載なし`）とセルの組にする。"""
+    return {"value": next((v for v in INTERFACE_VALUES if cell.startswith(v)), NOT_STATED), "cell": cell}
+
+
 def public_interface(body: str) -> dict[str, str]:
     """本文の「影響」の表の `公開インタフェース` の行の 2 列目。無ければ `記載なし`。"""
     for table in _section_tables(_tokens(body), IMPACT_HEADING):
-        for row in table.rows:
-            if len(row) >= 2 and row[0].strip() == INTERFACE_ROW:
-                cell = row[1].strip()
-                value = next((v for v in INTERFACE_VALUES if cell.startswith(v)), NOT_STATED)
-                return {"value": value, "cell": cell}
+        cell = _interface_cell(table.rows)
+        if cell is not None:
+            return _interface_value(cell)
     return {"value": NOT_STATED, "cell": ""}
 
 
