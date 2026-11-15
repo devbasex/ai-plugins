@@ -9,7 +9,7 @@ allowed-tools:
 
 # Google Workspace（gws）
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `slides-thumbnails.py`（S1a）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `gws-check.py`（S1a）・`slides-thumbnails.py`（S1a）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 Google Workspace の操作は、すべて gws（Google Workspace CLI、npm の `@googleworkspace/cli`）で行う。
 gws は Google の公式サポート外の CLI で、版は 0.x である。
@@ -19,7 +19,7 @@ gws は Google の公式サポート外の CLI で、版は 0.x である。
 1. **確かめる**: 確認のスクリプトを打ち、終了コードと JSON の `metrics.state` で次の手を選ぶ（`$SKILL_DIR` はこの Skill のディレクトリ）
 
    ```bash
-   "${CLAUDE_PLUGIN_ROOT}/bin/ndf" records gws-check
+   python3 "$SKILL_DIR/scripts/gws-check.py"
    ```
 
    | 終了コード | `metrics.state` | 次の手 |
@@ -33,7 +33,7 @@ gws は Google の公式サポート外の CLI で、版は 0.x である。
 2. **同意のうえ入れる**（`missing` のとき）: `presentation_path` の承認資料（取得元・打つコマンド `npm install -g @googleworkspace/cli`・入る先・戻し方）を利用者に示し、同意（`AskUserQuestion` の `metadata.source` は `ndf-ask:redline:C6`。利用者の環境へ入れるため）を得てから打ち直す
 
    ```bash
-   "${CLAUDE_PLUGIN_ROOT}/bin/ndf" records gws-check --install
+   python3 "$SKILL_DIR/scripts/gws-check.py" --install
    ```
 
    - 利用者が導入を含めて頼んだ（「gws を入れて」）ときは、その依頼を同意とみなす。そのときも承認資料は示す
