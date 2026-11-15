@@ -68,8 +68,12 @@ def repo_key(root: Optional[Path]) -> str:
     return f"{m.group(1)}__{m.group(2)}" if m else "unknown"
 
 
+def _decisions_dir(environ: Mapping[str, str]) -> Path:
+    return context_dir(environ) / "decisions"
+
+
 def decisions_path(repo: str, environ: Mapping[str, str]) -> Path:
-    return context_dir(environ) / "decisions" / f"{repo}.decisions.jsonl"
+    return _decisions_dir(environ) / f"{repo}.decisions.jsonl"
 
 
 def estimates_path(repo: str, environ: Mapping[str, str]) -> Path:
@@ -153,8 +157,8 @@ def append(repo: str, row: Mapping[str, Any], environ: Mapping[str, str]) -> Pat
 
 def read(repo: Optional[str], environ: Mapping[str, str]) -> tuple[list[dict[str, Any]], int]:
     """判定の記録の行（`at` の順）と飛ばした行の数。repo を省くと全リポジトリ。読めなければ `OSError`。"""
-    d = context_dir(environ) / "decisions"
-    paths = [d / f"{repo}.decisions.jsonl"] if repo else sorted(d.glob("*.decisions.jsonl")) if d.is_dir() else []
+    d = _decisions_dir(environ)
+    paths = [decisions_path(repo, environ)] if repo else sorted(d.glob("*.decisions.jsonl")) if d.is_dir() else []
     rows: list[dict[str, Any]] = []
     skipped = 0
     for p in paths:
