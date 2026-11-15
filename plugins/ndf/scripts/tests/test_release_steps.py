@@ -1451,6 +1451,41 @@ def test_admin_back_keeps_the_merge_back_code():
     assert rv.admin_back()([], {}, "done") == ("ok", None, "done")
 
 
+# 現状固定（I-023）: admin_back の分岐（戻すマージの有無・状態・終了コード × 書けなかった迂回の記録の有無）。期待値は今の実装の出力である
+_UNWRITTEN = {"record": "admin_merge", "result": "unwritten"}
+_STOPPED_TAIL = "。迂回の記録を書けなかった（本番は出ている）"
+
+
+@pytest.mark.parametrize(
+    "back, items, expected",
+    [
+        (None, [], ("ok", None, "done")),
+        (None, [_UNWRITTEN], ("stopped", 1, "done" + _STOPPED_TAIL)),
+        (None, [{"record": "admin_merge", "result": "written"}], ("ok", None, "done")),
+        (None, ["x", {"record": "admin_merge"}], ("ok", None, "done")),
+        (lambda i, m, d: ("ok", 0, d), [], ("ok", 0, "done")),
+        (lambda i, m, d: ("ok", 0, d), [_UNWRITTEN], ("stopped", 1, "done" + _STOPPED_TAIL)),
+        (lambda i, m, d: ("ok", None, d), [_UNWRITTEN], ("stopped", 1, "done" + _STOPPED_TAIL)),
+        (lambda i, m, d: ("stopped", 4, d + "。X"), [], ("stopped", 4, "done。X")),
+        (lambda i, m, d: ("stopped", 4, d + "。X"), [_UNWRITTEN], ("stopped", 4, "done。X" + _STOPPED_TAIL)),
+        (lambda i, m, d: ("stopped", 0, d + "。X"), [_UNWRITTEN], ("stopped", 1, "done。X" + _STOPPED_TAIL)),
+        (lambda i, m, d: ("stopped", None, d), [_UNWRITTEN], ("stopped", 1, "done" + _STOPPED_TAIL)),
+    ],
+)
+def test_admin_back_branches(back, items, expected):
+    from release_lib import reviewed as rv
+
+    assert rv.admin_back(back)(list(items), {}, "done") == expected
+
+
+def test_admin_back_sees_the_rows_the_merge_back_appended():
+    from release_lib import reviewed as rv
+
+    items: list = []
+    got = rv.admin_back(lambda i, m, d: (i.append(dict(_UNWRITTEN)), ("ok", 0, d))[1])(items, {}, "done")
+    assert got == ("stopped", 1, "done" + _STOPPED_TAIL) and items == [_UNWRITTEN]
+
+
 def test_release_selected_writes_admin_on_the_production_row(monkeypatch, tmp_path):
     """#3506 の I8: 選んで集める取り込み方でも、本番の PR の行に迂回の有無を書く。"""
     import argparse
