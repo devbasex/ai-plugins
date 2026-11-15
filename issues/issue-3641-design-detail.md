@@ -158,10 +158,10 @@ scripts/
 | `changed_plugins` | `plugins/ndf/scripts/release_lib/trunk_cd.py` | 新設 | `(root, a: str, b: str) -> list[str]` | 範囲 `a..b` で中身が変わった配るプラグインの名前を返す | 同上 | `.claude-plugin/marketplace.json` に載るプラグインのうち、`plugins/<名前>/` の下のファイルが変わったものの名前を、`marketplace.json` の並びの順で返す | 外部コマンド（`git diff --name-only`）・ファイルの読み |
 | `bump_level` | `plugins/ndf/scripts/release_lib/trunk_cd.py` | 新設 | `(root, a: str, b: str) -> str` | 範囲にマージされた PR のラベルから上げ幅を決める | 同上 | `release:major` > `release:minor` > `release:patch` の最大。ラベルの無い PR は `patch`。PR が 1 本も無ければ `patch` | 外部コマンド（`git log --first-parent --merges`）・ネットワーク（`gh pr view --json labels`） |
 | `planned_version` | `plugins/ndf/scripts/release_lib/trunk_cd.py` | 新設 | `(root, plugin: str, level: str, ref: str) -> str` | `ref` の版に上げ幅を当てた予定のバージョンを返す（承認資料と版上げの PR が使う） | `ref` に `plugin` の `plugin.json` がある | `semver` の `bump_<level>` の結果 | ファイルの読み（`git show`） |
-| `open_bump_pr` | `plugins/ndf/scripts/release_lib/trunk_cd.py` | 新設 | `(root, production: str) -> dict \| None` | 開いた版上げの PR（head が `release/v` で始まり、宛先が本番ブランチ）を返す | 無し | 最も番号の小さい 1 本の `{number, headRefName, headRefOid}`、無ければ `None` | ネットワーク（`gh pr list`） |
+| `open_bump_pr` | `plugins/ndf/scripts/release_lib/trunk_cd.py` | 新設 | `(root, production: str) -> dict \| None` | 開いた版上げの PR（head が `release/v` で始まり、宛先が本番ブランチ）を返す | 無し | 最も番号の小さい 1 本の `{number, headRefName, headRefOid, reviewDecision}`、無ければ `None` | ネットワーク（`gh pr list`） |
 | `create_bump_pr` | `plugins/ndf/scripts/release_lib/trunk_cd.py` | 新設 | `(root, tip: str, plugins: dict[str, str], range_: tuple[str, str], token: str) -> int` | main の先端から版上げのブランチを作り、版上げと CHANGELOG の節のコミットを足して PR を作り、自動マージを頼む | `token` が空でない。`tip` は本番ブランチの先端。`plugins` は名前 → 新しいバージョン | `release/v<配るプラグインのバージョン>` が origin にあり、版数と説明と CHANGELOG だけを変える PR が開いていて、自動マージかキューへの投入が依頼されている。PR の番号を返す。依頼の後に `branch_rules` の承認の数が 1 以上なら `CdStop("precondition")` を投げ、理由に求める承認の数と PR の番号を持つ（I14） | 外部コマンド（`release-steps.py bump`・`changelog` のサブプロセス、`git commit`・`git push`）・ネットワーク（`gh pr create`・`gh pr merge --merge --match-head-commit`・`branch_rules`） |
 | `update_bump_pr` | `plugins/ndf/scripts/release_lib/trunk_cd.py` | 新設 | `(root, pr: dict, token: str) -> bool` | `strict` で、開いた版上げの PR が main の先端を含まなければ main を取り込み、新しい head で自動マージを頼み直す | `pr` は `open_bump_pr` の値。`token` が空でない | 取り込んだら真、取り込む必要が無ければ偽。真のとき PR の head は main の先端を祖先に持ち、自動マージはその head で依頼されている。頼み直した後に `branch_rules` の承認の数が 1 以上で PR の `reviewDecision` が `APPROVED` でなければ `CdStop("precondition")`（I14。`create_bump_pr` と同じ理由） | ネットワーク（`GET compare`・`PUT update-branch`・`gh pr view`・`gh pr merge`・`branch_rules`） |
-| `run_cd` | `plugins/ndf/scripts/release_lib/trunk_cd.py` | 新設 | `(root, revision: str, method: str \| None, token: str \| None) -> CdOutcome` | CD の 1 回の実行（設計文書の「処理の流れ」の手順 1〜5）を順に行う | `revision` は本番ブランチへの push の先端。行が `trunk` | タグが足りなければ作られている。版上げの PR は開いたものが高々 1 本（I9）。結果の `cause` と `summary` が止まった理由を持つ | 外部コマンド（`release-steps.py publish` のサブプロセス）・ほかは `create_bump_pr`・`update_bump_pr` と同じ |
+| `run_cd` | `plugins/ndf/scripts/release_lib/trunk_cd.py` | 新設 | `(root, revision: str, method: str \| None, token: str \| None) -> CdOutcome` | CD の 1 回の実行（設計文書の「処理の流れ」の手順 1〜5）を順に行う | `revision` は本番ブランチへの push の先端。行が `trunk` | タグが足りなければ作られている。版上げの PR は開いたものが高々 1 本（I9）。開いた版上げの PR を見つけて何もしないときも、`branch_rules` の承認の数が 1 以上で PR の `reviewDecision` が `APPROVED` でなければ `CdStop("precondition")` で止まり、注釈に求める承認の数と PR の番号を書く（I14）。結果の `cause` と `summary` が止まった理由を持つ | 外部コマンド（`release-steps.py publish` のサブプロセス）・ネットワーク（`branch_rules`）・ほかは `create_bump_pr`・`update_bump_pr` と同じ |
 | `confirm` | `plugins/ndf/scripts/release_lib/trunk_cd.py` | 新設 | `(root, merge_commit: str, budget: int) -> ConfirmOutcome` | マージコミットを含む main の先端にタグと GitHub Release がそろうのを待つ | `merge_commit` は main に入ったコミット | そろえば `ok` と版、CD が変化なしで終われば `ok` と空の版、CD の失敗なら `cd_failed`、上限を超えれば `ci_pending` | ネットワーク（`gh run list`・`gh run view`・`gh api` のタグと Release の照会） |
 | `applies` | `plugins/ndf/scripts/release_lib/merge_method.py` | 新設 | `(root, base_ref: str) -> bool` | この PR のマージを `merge_method` が持つか（行が `trunk` で、宛先が本番ブランチ）を返す | 無し | 宣言が読めないときは偽（今のマージへ渡す。設定の誤りは `land` と `check_method` が止める） | ファイルの読み |
 | `read_pr` | `plugins/ndf/scripts/release_lib/merge_method.py` | 新設 | `(root, n: int) -> PrState` | PR の状態を GraphQL 1 回で読む | 無し | `PrState` の欄がすべて埋まる | ネットワーク（`gh api graphql`） |
@@ -209,7 +209,7 @@ scripts/
 | `update_bump_pr` | 取り込みが落ちる | `update-branch` の 422（衝突・`expected_head_sha` の不一致） | `update_bump_pr` | 止める（`CdStop("precondition")`） | `summary` に API の誤りの文 | 版上げの PR は残る。次の push の実行が読み直して再試行する |
 | `run_cd` | 秘密が無い | `NDF_RELEASE_TOKEN` が空 | `run_cd` の手順 2 の前 | 止める（タグの作成までは済ませる） | `::error::cause=precondition 秘密 NDF_RELEASE_TOKEN が無い`、終了コード 1 | マージは止まらない。秘密を置いた後の push で残りの範囲が版上げへ進む |
 | `run_cd` | タグか Release の作成が落ちる | `release-steps.py publish` の終了コードが 0 でない | `run_cd` の手順 1 | 止める | `::error::cause=precondition` と `publish` の出力の末尾、終了コード 1 | workflow の再実行で `publish` は足りないものだけを作る（冪等） |
-| `create_bump_pr`・`update_bump_pr` | 承認が要る | `branch_rules` の承認の数が 1 以上で、版上げの PR に承認が無い | 自動マージの依頼の後 | 止める（`CdStop("precondition")`。PR と自動マージの依頼は残す） | `::error::cause=precondition 版上げの PR #N は承認が M 件要る`、終了コード 1 | 人が GitHub で版上げの PR を承認すれば、残した自動マージの依頼でマージされる。`confirm` は打ち直せる |
+| `create_bump_pr`・`update_bump_pr`・`run_cd` | 承認が要る | `branch_rules` の承認の数が 1 以上で、版上げの PR に承認が無い | 自動マージの依頼の後。`run_cd` では開いた版上げの PR を見つけて何もしないとき | 止める（`CdStop("precondition")`。PR と自動マージの依頼は残す） | `::error::cause=precondition 版上げの PR #N は承認が M 件要る`、終了コード 1 | 人が GitHub で版上げの PR を承認すれば、残した自動マージの依頼でマージされる。`confirm` は打ち直せる |
 | `branch_rules` | ruleset を読めない | `GET rules/branches` の失敗（ネットワーク・権限） | `branch_rules` | 呼び出し元へ返す（`None`） | 呼び手が `precondition` で止まる（`check_method` は `MergeStop`、`trunk_cd` は `CdStop`） | 何も書いていない。再実行できる |
 | `confirm` | CD が失敗した | そのマージか版上げの PR のマージの push の CD の実行が失敗で終わった（承認が要る版上げの PR の `precondition` を含む） | `confirm` の実行の照会 | 止める（`cd_failed`） | 結果 JSON の `summary` に実行の URL と、注釈の `cause` と理由。終了コード 1 | 原因を直して workflow を再実行した後、`confirm` を打ち直せる |
 | `confirm` | 上限を超えた | 版上げの PR のチェックかキューが `budget` の秒で終わらない | `confirm` の待ち | 止める（`ci_pending`） | `summary` に版上げの PR の番号と、チェックかキューのどちらで待つか。終了コード 1 | 打ち直せる（読むだけで書かない） |
@@ -258,7 +258,8 @@ scripts/
 | `merge_when_green` のマージ | `applies` が偽 | 今の `_merge_pr` |
 | `run_cd` | 先端の版にタグが無い | 手順 1: `publish` を打つ |
 | `run_cd` | 開いた版上げの PR がある・方式 `strict`・PR が先端を含まない | 手順 2: `update_bump_pr` を打って終わる |
-| `run_cd` | 開いた版上げの PR がある・それ以外 | 手順 2: 何もせずに終わる（I9） |
+| `run_cd` | 開いた版上げの PR がある・それ以外・`branch_rules` の承認の数が 0 か PR の `reviewDecision` が `APPROVED` | 手順 2: 何もせずに終わる（I9） |
+| `run_cd` | 開いた版上げの PR がある・それ以外・`branch_rules` の承認の数が 1 以上・PR の `reviewDecision` が `APPROVED` でない | `precondition`（注釈に求める承認の数と PR の番号。I14） |
 | `run_cd` | 開いた PR が無い・`changed_plugins(last_bump_commit..先端)` が空 | 手順 3: 終わる（`ok`、版上げなし） |
 | `run_cd` | 開いた PR が無い・変化がある・秘密が無い | `precondition` |
 | `run_cd` | 開いた PR が無い・変化がある・秘密がある | 手順 4〜5: `create_bump_pr` |
@@ -382,7 +383,7 @@ scripts/
 | `open_bump_pr` | 開いた `release/v` の PR を返す | 2 本あれば番号の小さい方 | 照会の失敗 → `CdStop` |
 | `create_bump_pr` | PR を作り、自動マージを頼む | `merge-queue` と `strict` で同じ依頼。承認の数 0 で止まらない | `bump` の失敗・push の失敗 → `CdStop`、自動マージの失敗は PR を残して返す。承認の数 1 で承認が無い → PR を残して `CdStop("precondition")` と数と番号 |
 | `update_bump_pr` | 先端を含まない PR に読んだ head を渡して取り込み、新しい head で頼み直す | 含む PR では何もしない | 422 → `CdStop` |
-| `run_cd` | 変化のある範囲で版上げの PR を 1 本作る | 開いた PR があると作らない・文書だけの範囲で作らない | 秘密が無い → タグを作って `precondition`、終了コード 1 と注釈 |
+| `run_cd` | 変化のある範囲で版上げの PR を 1 本作る | 開いた PR があると作らない・文書だけの範囲で作らない・開いた PR が承認済みなら承認の数 1 でも止まらない | 秘密が無い → タグを作って `precondition`、終了コード 1 と注釈。開いた版上げの PR があり承認の数 1 で承認が無い → 何も作らずに `precondition` と数と番号 |
 | `confirm` | タグと Release がそろうと `ok` と版 | 変化なしの成功で空の版 | 実行の失敗で `cd_failed` と URL、上限で `ci_pending` と版上げの PR の番号 |
 | `applies` | 行 `trunk`・宛先 main で真 | 宛先がほかのブランチで偽 | 宣言が読めないと偽 |
 | `read_pr` | 偽の GraphQL の応答から欄を埋める | マージ済みの PR | 照会の失敗 → `MergeStop` |
