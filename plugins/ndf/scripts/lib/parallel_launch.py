@@ -30,6 +30,7 @@ LAUNCH_SECONDS = float(limits.seconds("parallel-launch.up"))  # 立ち上がり�
 INTERVAL = float(limits.value("parallel-launch.up", "interval"))  # 一覧を読む間隔
 HELPER_WAIT = float(limits.seconds("parallel-launch.helper-wait"))  # 一時レーンの空き待ちの上限の既定（#3597 の決定 10）
 RESTART = ("起こし直す", "続きから起こし直す")
+OUTCOME_KEYS = ("result", "attempts", "at", "reason")  # 起動の結果（`step_launch` の値）から起動の記録へ写す鍵
 
 
 def launch_seconds() -> float:
@@ -46,6 +47,11 @@ def helper_wait_seconds() -> float:
         return max(0.0, float(os.environ.get("NDF_PARALLEL_HELPER_WAIT_SECONDS") or HELPER_WAIT))
     except ValueError:
         return HELPER_WAIT
+
+
+def _outcome(got: dict) -> dict:
+    """起動の結果 `got` のうち、起動の記録へ写す値（`OUTCOME_KEYS`）。"""
+    return {k: got.get(k) for k in OUTCOME_KEYS}
 
 
 def _launch_stamp(t: float) -> str:
@@ -126,15 +132,19 @@ class LaunchRouting:
         if purpose in self.launches:
             return self.launches[purpose]
         got = step_launch(self.main, list(argv), lane, cwd, fresh)
-        rec = {"lane": lane, **{k: got.get(k) for k in ("result", "attempts", "at", "reason")}}
+        rec = {"lane": lane, **_outcome(got)}
         self.launches[purpose] = rec
         self.helper_seen.pop(lane, None)  # 止まりの観測は今の起動から数え直す（I4）
         spec = {"argv": list(argv), "cwd": cwd, "fresh": fresh}
         if rec["result"] == "waiting":
             rec.update(since=got.get("at"), busy=got.get("busy"), limit=got.get("limit"), launch=spec, extra=dict(extra))
         elif rec["result"] != "up":
-            self._ask_launch(purpose, lane, f"レーン {lane} を 2 回起動しても立ち上がらない（{rec.get('reason')}）", spec, extra)
+            self._ask_not_up(purpose, lane, rec.get("reason"), spec, extra)
         return rec
+
+    def _ask_not_up(self, purpose: str, lane: str, reason: Optional[str], spec: dict, extra: dict) -> None:
+        """2 回起動しても立ち上がらないレーンの区分 `spawn` の問いを立てる（`reason` は立ち上がらなかった理由）。"""
+        self._ask_launch(purpose, lane, f"レーン {lane} を 2 回起動しても立ち上がらない（{reason}）", spec, extra)
 
     def _ask_launch(self, purpose: str, lane: str, text: str, spec: dict, extra: dict) -> None:
         """起動できないレーンの区分 `spawn` の問い（選択肢「起こし直す」「止める」）を立てる。同じ id は 1 回だけ立つ。"""
@@ -170,13 +180,10 @@ class LaunchRouting:
         if got.get("result") == "waiting":
             rec["busy"] = got.get("busy")  # 別の一時レーンが先に立ち上がった: 最初に断られた時刻のまま待ちを続ける
         elif got.get("result") == "up":
-            self.launches[purpose] = {"lane": rec["lane"], **{k: got.get(k) for k in ("result", "attempts", "at", "reason")},
-                                      "waited": {"busy": busy, "seconds": waited}}  # fmt: skip
+            self.launches[purpose] = {"lane": rec["lane"], **_outcome(got), "waited": {"busy": busy, "seconds": waited}}
         else:
-            rec.update(**{k: got.get(k) for k in ("result", "attempts", "at", "reason")})
-            self._ask_launch(
-                purpose, rec["lane"], f"レーン {rec['lane']} を 2 回起動しても立ち上がらない（{rec.get('reason')}）", spec, extra
-            )
+            rec.update(**_outcome(got))
+            self._ask_not_up(purpose, rec["lane"], rec.get("reason"), spec, extra)
 
     def launch_helper(self) -> None:
         """流れているリリースの最後の起動（`launch`）の一時レーンを起動する。立ち上がらなければ問いに `n` を添える（「止める」で締める）。"""
