@@ -33,6 +33,8 @@
 | `docs/specifications/` | 固定の URL へ向ける | S2 | 11.0.0 |
 | `docs/specifications/` の中身 | 書き直す（確定仕様化と測り直し） | S3 | 11.x |
 | `docs/scripts-map/` | archive へ移す（今のプラグインの `scripts/` の地図で、入れ替えで当たらなくなる） | S2 | 11.0.0 |
+| `plugins/ndf/scripts/lib/README.md` | archive へ移す（今のプラグインの `scripts/lib/` の部品と契約の説明で、入れ替えで当たらなくなる。契約の索引を事実の表から生成するのは M7 #3302） | S2・M7 | 11.0.0（索引の生成は M7） |
+| Skill の references（`plugins/ndf/skills/*/references/`） | そのまま移す（Skill 本文とともに新しいプラグインの `skills/*/references/` へ。スクリプトのパスとコマンドだけを直す） | S1a | 11.0.0 |
 | `docs/glossary.md`・`docs/glossary/` | 固定の URL へ向ける。語ごとの中身の入れ替えは M7 #3302（3382-5） | S2・M7 | 11.0.0（中身は 11.x） |
 | `docs/development-history/`・`docs/articles/`・`docs/presentations/`・`docs/archive/`・`docs/changelog/` | 固定の URL へ向ける（記録で、中身は書いた時点のまま） | S2 | 11.0.0 |
 | `docs/metrics/`・`docs/claude-code-skills-official-reference/`・`docs/claude-code-skills-survey/` | そのまま（今のプラグインへのリンクを持たない） | — | — |
