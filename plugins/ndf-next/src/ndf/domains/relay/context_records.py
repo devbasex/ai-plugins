@@ -57,12 +57,12 @@ def toplevel(cwd: Optional[Path]) -> Optional[Path]:
 
 
 def repo_key(root: Optional[Path]) -> str:
-    """`<owner>__<repo>`（origin の URL から。旧い `usage_ledger.repo_key` と同じ）。git の外は `_local`。"""
+    """`<owner>__<repo>`（リモート名のリモートの URL から。旧い `usage_ledger.repo_key` と同じ）。git の外は `_local`。"""
     if root is None:
         return LOCAL
     try:
-        done = git.run_git(["config", "--get", "remote.origin.url"], root)
-    except git.GitError:  # noqa: NDF401 外部コマンド: origin を読めなければ旧いと同じ unknown
+        done = git.run_git(["config", "--get", f"remote.{git.remote_of(root)}.url"], root)
+    except git.GitError:  # noqa: NDF401 外部コマンド: リモートか宣言を読めなければ旧いと同じ unknown
         return "unknown"
     m = _SLUG.search(done.stdout.strip())
     return f"{m.group(1)}__{m.group(2)}" if m else "unknown"

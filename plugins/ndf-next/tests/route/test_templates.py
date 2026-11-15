@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+import subprocess
+
 import pytest
 
 from ndf.core import route
@@ -61,6 +64,33 @@ def test_base_has_no_fixed_default():
     del given["base"]
     with pytest.raises(route.RouteError, match="差し込みの値が無い: base"):
         route.render(t, given)
+
+
+def _repo(tmp_path, declaration=None):
+    subprocess.run(["git", "init", "-q", "-b", "main", str(tmp_path)], check=True)
+    if declaration is not None:
+        (tmp_path / ".ndf").mkdir()
+        (tmp_path / ".ndf" / "worktree.json").write_text(json.dumps(declaration), encoding="utf-8")
+    return tmp_path
+
+
+def test_omitted_remote_reads_the_declaration_then_the_default(tmp_path):
+    """remote を省けば宣言の remote、無ければスキーマの既定（#3617 の受け入れ条件 8・9）。"""
+    t = route.choose("immediate_fix")
+    plain = _repo(tmp_path / "plain")
+    given = {"repo": str(plain), "worktree": str(plain), "branch": "fix/x", "base": "main"}
+    assert route.derived(t, given, plain)["remote"] == "origin"
+    fork = _repo(tmp_path / "fork", {"version": 1, "remote": "upstream"})
+    plan = route.render(t, {**values("immediate_fix"), **route.derived(t, {**given, "repo": str(fork)}, fork)})
+    push = next(s for s in plan["steps"] if s["id"] == "push")
+    assert push["run"][:4] == ["git", "push", "--", "upstream"]
+
+
+def test_broken_remote_declaration_is_refused(tmp_path):
+    t = route.choose("immediate_fix")
+    repo = _repo(tmp_path, {"version": 1, "remote": "-x"})
+    with pytest.raises(route.RouteError, match="remote"):
+        route.derived(t, {"repo": str(repo), "worktree": str(repo), "branch": "fix/x", "base": "main"}, repo)
 
 
 def test_list_values_expand_per_element_and_vanish_when_empty():

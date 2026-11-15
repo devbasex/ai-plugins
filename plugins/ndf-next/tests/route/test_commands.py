@@ -70,8 +70,8 @@ def test_changes_check_finds_no_changes_since_work_start(tmp_path):
 
 
 def test_assess_detects_docs_only_diff(tmp_path):
-    """#3023: 差分が文書（.md）だけなら not_applicable（全体テストを飛ばす）。コードを含めば ok。"""
-    step = step_of(plan_of("check", base="develop"), "assess")
+    """#3023: 差分が文書（既定は .md）だけなら not_applicable（全体テストを飛ばす）。コードを含めば ok。"""
+    step = step_of(plan_of("check", base="develop", remote="origin"), "assess")
     docs = repo_with_base(tmp_path / "a", {"guide.md": "# g\n"})
     assert run_step(step, docs)["kind"] == "not_applicable"
     code = repo_with_base(tmp_path / "b", {"guide.md": "# g\n", "a.py": "a = 1\n"})
@@ -80,7 +80,7 @@ def test_assess_detects_docs_only_diff(tmp_path):
 
 def test_assess_stops_as_precondition_when_base_is_not_fetched(tmp_path):
     """差分を取れない（`origin/<base>` が無い）ときは文書だけと読まず precondition で止まる（全体テストを黙って飛ばさない）。"""
-    step = step_of(plan_of("check", base="main"), "assess")
+    step = step_of(plan_of("check", base="main", remote="origin"), "assess")
     repo = repo_with_base(tmp_path / "a", {"a.py": "a = 1\n"})
     assert run_step(step, repo)["kind"] == "precondition"
 

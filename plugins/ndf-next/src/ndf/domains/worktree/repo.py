@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional
 
 from ndf import identity
-from ndf.adapters.git import ORIGIN, Git, GitError, WorktreeEntry
+from ndf.adapters.git import Git, GitError, WorktreeEntry
 from ndf.contracts import facts
 from ndf.domains.worktree import declaration
 
@@ -69,14 +69,15 @@ def dev_worktrees(main_dir: Path, items: Iterable[Worktree]) -> list[Worktree]:
 
 
 def default_branch(git: Git) -> Optional[str]:
-    """origin の既定ブランチ（取得済みの `refs/remotes/origin/HEAD`）。無ければ `None`。"""
-    done = git.attempt("symbolic-ref", "--quiet", "--short", f"refs/remotes/{ORIGIN}/HEAD")
+    """リモート名のリモートの既定ブランチ（取得済みの `refs/remotes/<リモート名>/HEAD`）。無ければ `None`。"""
+    remote = git.remote()
+    done = git.attempt("symbolic-ref", "--quiet", "--short", f"refs/remotes/{remote}/HEAD")
     name = done.stdout.strip() if done.returncode == 0 else ""
-    return name[len(ORIGIN) + 1 :] if name.startswith(ORIGIN + "/") else None
+    return name[len(remote) + 1 :] if name.startswith(remote + "/") else None
 
 
 def base_branch(git: Git, decl: Optional[declaration.Declaration]) -> Optional[str]:
-    """ベースブランチ: 宣言の `base_branch`、無ければ origin の既定ブランチ。"""
+    """ベースブランチ: 宣言の `base_branch`、無ければリモート名のリモートの既定ブランチ。"""
     return decl.base_branch if decl is not None and decl.base_branch else default_branch(git)
 
 
@@ -91,12 +92,12 @@ def declared_flow(decl: Optional[declaration.Declaration]) -> Optional[dict[str,
 
 
 def contained_in_production(main: Git, branch: str, flow: Optional[Mapping[str, Any]]) -> Optional[bool]:
-    """ブランチが `<origin>/<本番チャネル>` に含まれるか（`flow` の `production_branch`）。確かめられなければ `None`。"""
+    """ブランチが `<リモート名>/<本番チャネル>` に含まれるか（`flow` の `production_branch`）。確かめられなければ `None`。"""
     production = flow.get("production_branch") if flow is not None else None
     if not production:
         return None
     try:
-        return main.is_ancestor(f"refs/heads/{branch}", f"refs/remotes/{ORIGIN}/{production}")
+        return main.is_ancestor(f"refs/heads/{branch}", f"refs/remotes/{main.remote()}/{production}")
     except GitError:  # noqa: NDF401 外部コマンド: 参照が無い（取得していない本番チャネル）なら確かめられないとして残す側へ倒す
         return None
 

@@ -349,7 +349,9 @@ Pull Request に残る。**修正の回数はここでは進めない。** 進�
 | `verify` | 直近 10 行の Σ秒 ÷ Σ検証した改善項目 | 初期値 |
 | `fix` | 直近 10 行の Σ秒 ÷ Σ起動 | 初期値 |
 
-初期値は `data/allocation-defaults.json` にあり、出所（#917 の記録の URL）と式を持つ。
+初期値は `data/allocation-defaults.json` にあり、初期値であること（`initial`）と出所（#917 の記録の URL）と式を持つ。
+値は ai-plugins の実測なので、利用先は `.ndf/estimate.json` の `allocation_minutes` で種類ごとに上書きできる
+（省いた種類は初期値）。
 **担当の申告ではなく適用の CLI の実測の秒を件数で割った値**である（決定 9）。履歴が
 無い・読めないときは初期値でリファクタリング計画し、1 行知らせる（`plan.table_source` が `defaults`）。
 

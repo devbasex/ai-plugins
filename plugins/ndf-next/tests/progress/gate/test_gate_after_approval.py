@@ -55,6 +55,8 @@ def _commit(repo, name, text):
 
 
 def test_git_docs_only_splits_the_range_like_the_sprint_diff(repo):
+    (repo / ".ndf").mkdir()
+    (repo / ".ndf" / "project.json").write_text('{"docs": {"behavior": ["**/skills/**/*.md"]}}')
     base = _commit(repo, "src/a.py", "x = 1\n")
     doc = _commit(repo, "docs/a.md", "# a\n")
     skill = _commit(repo, "skills/s/SKILL.md", "# s\n")

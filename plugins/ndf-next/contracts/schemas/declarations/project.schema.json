@@ -652,7 +652,7 @@
     },
     "Docs": {
       "additionalProperties": false,
-      "description": "差分の文書のファイルの分け方（#2925）。項目を省くと既定（`lib/diff_kinds.py`）で補う。利用者が手で書き、解析は書かない。",
+      "description": "差分の文書のファイルの分け方（#2925）。項目を省くと既定で補う。利用者が手で書き、解析は書かない。",
       "properties": {
         "files": {
           "anyOf": [
@@ -668,6 +668,7 @@
             }
           ],
           "default": null,
+          "description": "文書のファイルのパス（glob）。変えたファイルがすべて当たり behavior に 1 件も当たらない差分を文書だけとみなし、全体テストとリファクタリングを飛ばす。省くと **/*.md",
           "title": "Files"
         },
         "behavior": {
@@ -684,6 +685,7 @@
             }
           ],
           "default": null,
+          "description": "振る舞いを決める文書のパス（glob）。files の部分集合として読む。省くと振る舞いの文書は無し（文書だけの差分の判定でどの文書も振る舞いとして扱わない）",
           "title": "Behavior"
         },
         "tested": {

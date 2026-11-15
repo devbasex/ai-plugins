@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Optional, Protocol
 
-from ndf.adapters.git import ORIGIN, Git, GitError
+from ndf.adapters.git import Git, GitError
 from ndf.adapters.github import Pull
 from ndf.domains.worktree import cleanup_decide, declaration, merged_decide, repo, testenv_sweep, trash
 from ndf.domains.worktree.cleanup_decide import KEEP_SPRINT, REMOVE, Facts, PullState
@@ -121,7 +121,7 @@ def _sprint_keep(g: Git, item: repo.Worktree, flow: Optional[dict]) -> Optional[
     branch = str(item.branch)
     if not branch.startswith(merged_decide.SPRINT_PREFIX):  # スプリントでなければ本番チャネルを読まない
         return None
-    return merged_decide.sprint_keep(branch, flow, repo.contained_in_production(g, branch, flow), ORIGIN)
+    return merged_decide.sprint_keep(branch, flow, repo.contained_in_production(g, branch, flow), g.remote())
 
 
 def cleanup(main_dir: Path, cwd: Path, hub: PullReader, dry_run: bool = False, git: Optional[Git] = None) -> list[Outcome]:

@@ -1,7 +1,7 @@
 """レビューの対象のリポジトリを決める（#1707）。
 
-順は `--repo` → 状態ファイルの `repo` → cwd の origin の 1 つだけである。どれでも決まらなければ `RepoUnresolved` を
-投げ、cwd が git リポジトリでないか・origin が GitHub でないかを理由に書く。`gh repo view` のような、cwd の外の
+順は `--repo` → 状態ファイルの `repo` → cwd のリモート名のリモートの 1 つだけである。どれでも決まらなければ `RepoUnresolved` を
+投げ、cwd が git リポジトリでないか・そのリモートが GitHub でないかを理由に書く。`gh repo view` のような、cwd の外の
 既定へ落ちる道は持たない（Skill のディレクトリで打つと別のリポジトリを指しうる）。
 """
 
@@ -16,8 +16,8 @@ from ndf.adapters import git
 # 決めた出所
 ARG = "arg"
 STATE = "state_file"
-# cwd の origin（リモートの名前と同じ語）
-ORIGIN = git.ORIGIN
+# cwd のリモート名のリモート
+ORIGIN = "remote"
 
 
 class RepoUnresolved(Exception):
@@ -47,13 +47,13 @@ def _from_origin(cwd: Path, make: Callable[[Path], git.Git]) -> RepoTarget:
     try:
         return RepoTarget(g.remote_repo(), ORIGIN)
     except git.GitError as exc:
-        raise RepoUnresolved(f"cwd（{cwd}）の origin から GitHub のリポジトリを決められない。--repo を渡す: {exc}") from None
+        raise RepoUnresolved(f"cwd（{cwd}）のリモートから GitHub のリポジトリを決められない。--repo を渡す: {exc}") from None
 
 
 def resolve_target_repo(
     repo_arg: Optional[str], state_repo: Optional[str], cwd: Path, make: Callable[[Path], git.Git] = git.Git
 ) -> RepoTarget:
-    """対象のリポジトリを `--repo`・状態ファイル・cwd の origin の順で決める。形の誤った値は `RepoUnresolved`。"""
+    """対象のリポジトリを `--repo`・状態ファイル・cwd のリモート名のリモートの順で決める。形の誤った値は `RepoUnresolved`。"""
     for value, source in ((repo_arg, ARG), (state_repo, STATE)):
         if not value:
             continue

@@ -34,7 +34,7 @@ class PushResult(NamedTuple):
 
 
 def _push(g: git.Git, head_branch: str) -> git.Completed:
-    return g.runner(["push", "origin", f"HEAD:refs/heads/{head_branch}"], g.cwd)
+    return g.runner(["push", "--", g.remote(), f"HEAD:refs/heads/{head_branch}"], g.cwd)
 
 
 def _failed(done: git.Completed) -> git.GitError:

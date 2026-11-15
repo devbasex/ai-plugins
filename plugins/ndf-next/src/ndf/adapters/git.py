@@ -6,6 +6,8 @@ git を起動するのはこのモジュールの `Git` だけで、呼ぶ側は
 
 from __future__ import annotations
 
+import functools
+import json
 import os
 import re
 import subprocess
@@ -13,6 +15,8 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple, Optional
+
+from ndf import identity
 
 # 完全な SHA と、照合に使える短い SHA（git の既定の短縮の長さ以上）
 FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
@@ -25,8 +29,10 @@ _REMOTE = re.compile(r"github\.com[:/](?P<owner>[^/]+)/(?P<name>[^/]+?)(?:\.git)
 _COMMIT_MARK = "@"
 # ブランチの参照の接頭辞（`git worktree list --porcelain` の branch の行）
 HEADS = "refs/heads/"
-# 取得と照合に使うリモートの名前
-ORIGIN = "origin"
+# リモート名の既定を持つ唯一の置き場（スキーマの `default`）。値はここに書かない（#3617 の I7a）
+REMOTE_SCHEMA = ("contracts/schemas/declarations/worktree.schema.json", ("properties", "remote", "default"))
+# リモート名を書く宣言（メインディレクトリからの相対）
+WORKTREE_DECLARATION = ".ndf/worktree.json"
 # git が認証の入力を端末へ求めないようにする環境変数（取得と送信が人の入力を待って止まらない）
 NO_PROMPT = {"GIT_TERMINAL_PROMPT": "0"}
 # ref・リモートの名前を option として読ませない区切り（3364-7）。`--` が pathspec の区切りになるサブコマンド
@@ -37,6 +43,50 @@ END_OF_OPTIONS = "--end-of-options"
 
 class GitError(Exception):
     """git が失敗した・出力が読めない・引数が誤り。"""
+
+
+class RemoteError(GitError):
+    """リモート名を決められない（宣言の値の誤り・スキーマの既定が読めない）。"""
+
+
+@functools.lru_cache(maxsize=1)
+def default_remote() -> str:
+    """リモート名の既定（`worktree.schema.json` の `/properties/remote/default`）。1 回だけ読む。"""
+    rel, pointer = REMOTE_SCHEMA
+    path = identity.ROOT / rel
+    try:
+        node = json.loads(path.read_text(encoding="utf-8"))
+        for key in pointer:
+            node = node[key]
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise RemoteError(f"{path} の /{'/'.join(pointer)} を読めない: {exc}") from None
+    if not isinstance(node, str) or not node:
+        raise RemoteError(f"{path} の /{'/'.join(pointer)} が空でない文字列でない: {node!r}")
+    return node
+
+
+def remote_of(main_dir: Path) -> str:
+    """`<main_dir>/.ndf/worktree.json` の `remote`。宣言か鍵が無ければ `default_remote()`。誤りは `RemoteError`。"""
+    path = Path(main_dir) / WORKTREE_DECLARATION
+    if not path.is_file():
+        return default_remote()
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise RemoteError(f"{path} を読めない: {exc}") from None
+    if not isinstance(doc, dict) or "remote" not in doc:
+        return default_remote()
+    value = doc["remote"]
+    if not isinstance(value, str) or not value or value.startswith("-"):
+        raise RemoteError(f"{WORKTREE_DECLARATION} の remote を直す: {value!r}")
+    return value
+
+
+def __getattr__(name: str) -> str:
+    """`ORIGIN` は既定のリモート名を遅れて読む（#3615 がリリースの部品から消すまでの名前。#3617 の決定 5）。"""
+    if name == "ORIGIN":
+        return default_remote()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 class Completed(NamedTuple):
@@ -244,8 +294,16 @@ class Git:
         common = self.run("rev-parse", "--path-format=absolute", "--git-common-dir").strip()
         return Path(os.path.realpath(common))
 
-    def remote_repo(self, remote: str = ORIGIN) -> str:
-        """リモートの `<所有者>/<リポジトリ>`。GitHub の URL でなければ `GitError`。"""
+    def remote(self) -> str:
+        """この作業場所のリモート名（メインディレクトリの宣言の `remote`、無ければ既定）。"""
+        entries = self.worktrees()
+        if not entries:
+            raise GitError("メインディレクトリを求められない（git worktree list が空）")
+        return remote_of(entries[0].path)
+
+    def remote_repo(self, remote: Optional[str] = None) -> str:
+        """リモートの `<所有者>/<リポジトリ>`。`remote` を省けばこの作業場所のリモート名。GitHub の URL でなければ `GitError`。"""
+        remote = remote if remote is not None else self.remote()
         url = self.run("remote", "get-url", "--", remote).strip()
         repo = repo_of_url(url)
         if repo is None:
