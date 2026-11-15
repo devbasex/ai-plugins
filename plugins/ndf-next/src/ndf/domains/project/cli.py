@@ -56,11 +56,10 @@ def _gh_repo(repo: git.Git) -> Optional[str]:
 def _flow_branches(tree: measure_repo.Tree, worktree: Optional[dict[str, Any]]) -> tuple[Optional[str], Optional[str]]:
     """ブランチ運用を測るベースブランチと本番チャネル（宣言の値、無ければ既定ブランチ）。"""
     wt = obj(worktree)
-    default = None
-    if not isinstance(wt.get("base_branch"), str) or not isinstance(wt.get("production_branch"), str):
+    base, production = (v if isinstance(v, str) else None for v in (wt.get("base_branch"), wt.get("production_branch")))
+    if base is None or production is None:
         default = measure_repo.default_branch(tree)
-    base = wt["base_branch"] if isinstance(wt.get("base_branch"), str) else default
-    production = wt["production_branch"] if isinstance(wt.get("production_branch"), str) else default
+        return (default if base is None else base), (default if production is None else production)
     return base, production
 
 
