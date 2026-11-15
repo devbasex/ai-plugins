@@ -56,6 +56,8 @@ class Verdict(StrEnum):
 PASSING = frozenset(facts.ids("ci-outcomes", outcome="passed"))
 # ランナーの割り当てを待つ状態（ランナーの待ちは呼ぶ側の待ちの予算に数えない。#2719）。待つ状態のうち実行中と結果の届いていない状態を除く
 QUEUED_STATES = frozenset(facts.ids("ci-outcomes", outcome="pending")) - {"in_progress", "expected"}
+# ファイルを決められない testcase の理由を、理由の文に並べる件数（残りは「ほか N 件」）
+UNRESOLVED_SHOWN = 3
 # 分割ジョブの名前の末尾（`pytest (0/2)`）
 _SHARD = re.compile(r"\s*\(\d+/\d+\)$")
 # 読んだ結果（`Reading.verdict`）→ 止まった理由の種類。`passed` は通常 None、マージの後なら `not_ci`
@@ -406,8 +408,8 @@ def _read_zips(github: GitHub, hits: list[dict], tracked: frozenset[str]) -> _Ru
         except (GitHubError, junit.JunitError) as exc:
             return _RunJunit((), False, f"成果物 {name} を読めない: {exc}", fetched)
     if unresolved:
-        rest = f" ほか {len(unresolved) - 3} 件" if len(unresolved) > 3 else ""
-        return _RunJunit((), False, "; ".join(unresolved[:3]) + rest, fetched)
+        rest = f" ほか {len(unresolved) - UNRESOLVED_SHOWN} 件" if len(unresolved) > UNRESOLVED_SHOWN else ""
+        return _RunJunit((), False, "; ".join(unresolved[:UNRESOLVED_SHOWN]) + rest, fetched)
     if not nodes:
         return _RunJunit((), False, "成果物に落ちたテストが無い", fetched)
     return _RunJunit(tuple(sorted(nodes)), True, "", fetched)
