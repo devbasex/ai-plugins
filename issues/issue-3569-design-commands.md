@@ -25,8 +25,8 @@
 | --- | --- | --- | --- |
 | `new sprint` | 置き換える | `ndf progress new <スプリント名> --mode <モード> --issues <番号>...` | スプリントは進行表で流す（P1a）。テンプレートに sprint は無い（`ndf route templates`） |
 | `new <impl・fix・check・release・close>` | 置き換える | `ndf route render <目的> --out <プラン>` | テンプレートは C3 が持つ（`ndf route templates`） |
-| `queue` | 置き換える | `ndf plan queue <プラン>... [--then] [--from] [--resume] [--queue-dir]` | `--max`・`--done`・`--poll` は持ち込まない（決定 2） |
-| `run` | 置き換える | `ndf plan next <プラン> [--from] [--state-dir] [--answer]` | `--slow` は持ち込まない |
+| `queue` | 置き換える | `ndf plan queue <プラン>... [--then] [--from] [--resume] [--queue-dir]` | `--max`・`--done`・`--poll` は持ち込まない（決定 2。行 `from-issue:3569-supervise-options`） |
+| `run` | 置き換える | `ndf plan next <プラン> [--from] [--state-dir] [--answer]` | `--slow` は持ち込まない（行 `from-issue:3569-supervise-options`） |
 | `wait` | 置き換える | `ndf plan wait <プラン>... [--state-dir] [--timeout]` | 渡すのは結果のファイルでなくプランである |
 | `advance` | 置き換える | `ndf plan next <プラン>` | 判断の要らない手順を承認ゲートか止まるまで続けて打つのは `next` の役目である |
 | `note` | 回す | `from-issue:3569-handoff-note`（`to: M7`） | 引継ぎの記録は M7 #3302 の領分（`ndf records`） |
@@ -37,7 +37,7 @@
 | 旧い | 種類 | 新しい | 根拠 |
 | --- | --- | --- | --- |
 | `scope` | 置き換える | `ndf route test [<コマンド>] [--failed-from] [--result]` | 範囲のコマンドは `ndf.testing.scoped` が宣言から組む |
-| `whole` | 置き換える | `ndf ci watch` | 全体テストは CI が持つ。手元の全体テストと落ちの 3 分類（フレーキー・既存の失敗・変更が起こした失敗）は作らない（決定 2）。落ちたテストの打ち直しは `ndf route test --failed-from` |
+| `whole` | 置き換える | `ndf ci watch` | 全体テストは CI が持つ。手元の全体テストと落ちの 3 分類（フレーキー・既存の失敗・変更が起こした失敗）は作らない（決定 2。行 `from-issue:3569-test-run-whole`）。落ちたテストの打ち直しは `ndf route test --failed-from` |
 | 名前だけの言及（`worktree/references/test-execution.md`） | 置き換える | `ndf route test` | — |
 
 ### `project-decl.py`（行き先 D2+ から S1e へ。呼ぶ本文 6）
@@ -63,12 +63,12 @@
 | `account use <名前>`・`use --clear` | 置き換える | `ndf relay account use <名前>`・`ndf relay account clear` | M3b が作った |
 | `account add`・`add-bedrock`・`add-api-key`・`api-key-monthly`・`api-key-use`・`list`・`capacity`・`remove`・`check` | 作る | `ndf relay account <同じ名前>` | 新しい `account` は `use`・`show`・`clear` だけを持つ。人へ残す判断（C1・C2） |
 | `notice` | 作る | `ndf relay notice` | 新しいプラグインに無い |
-| `is-child` | 作らない | `ndf relay notice` の結果の `metrics.inside` | 判定は `notice` の 1 行目と同じである |
+| `is-child` | 作らない | `ndf relay notice` の結果の `metrics.inside` | 判定は `notice` の 1 行目と同じである（行 `from-issue:3569-relay-hook-bodies`） |
 | `cap` | 置き換える | `ndf lanes limits <計画> [--max-lanes] [--max-plans] --reason` | 上限は計画ごとに `ndf lanes` が持ち、レーン数の既定は事実の表 `relay.max-named` が持つ |
 | `role` | 置き換える | `ndf relay spawn --role <役割> --plan <計画名>` | 役割は起動の時に渡す（`hub.py`） |
-| `attach <名前>` | 作らない | `tmux -L ndf-lanes attach -t <名前>` | 端末を tmux のセッションへ結び付ける操作で、結果 JSON を返す副命令の形に合わない。ソケットの名前は `domains/relay/tmux.py` の `SOCKET` |
-| `mark`（Stop の hook の本体） | 作らない | Stop の hook の guard（`hooks/guards/relay_mark.py`） | 本文の言及は guard の説明へ書き換える |
-| `startup`（SessionStart の hook の本体） | 作らない | `ndf relay install` | 複製を今の版で置き直す働きは `install` が持つ |
+| `attach <名前>` | 作らない | `tmux -L ndf-lanes attach -t <名前>` | 端末を tmux のセッションへ結び付ける操作で、結果 JSON を返す副命令の形に合わない。ソケットの名前は `domains/relay/tmux.py` の `SOCKET`（行 `from-issue:3569-relay-attach`） |
+| `mark`（Stop の hook の本体） | 作らない | Stop の hook の guard（`hooks/guards/relay_mark.py`） | 本文の言及は guard の説明へ書き換える（行 `from-issue:3569-relay-hook-bodies`） |
+| `startup`（SessionStart の hook の本体） | 作らない | `ndf relay install` | 複製を今の版で置き直す働きは `install` が持つ（行 `from-issue:3569-relay-hook-bodies`） |
 
 ### `mode-materials.py`（行き先 P1a から S1e へ。呼ぶ本文 1）
 
@@ -102,11 +102,30 @@
 | `entrypoint:scripts/install-official-skills.sh` | `to` を外し、`not_built`: 「公式 Skill はプラグインのマーケットプレイスで配られる（anthropics/skills）。導入は Claude Code のプラグインの導入が持つ」 |
 | `entrypoint:scripts/project-decl.py`・`entrypoint:scripts/statusline-switch.sh`・`entrypoint:scripts/statusline.sh`・`entrypoint:scripts/mode-materials.py` | `to` を S1e にする（決定 7） |
 | `entrypoint:scripts/supervise.py`・`test-run.py`・`context-policy.py`・`relay.py`・`skills/development-workflow/scripts/stage-check.sh` | 変えない（C2・M3b・P1a のまま） |
-| `from-issue:3569-handoff-note` | 足す。`kind: from-issue`・`now: "scripts/supervise.py"`・`feature`: 「報告から引継ぎ文書の表へ 1 行足す（旧い supervise.py note）」・`to: M7`・`unowned: true`・`source: "#3569"` |
-| `from-issue:3569-design-results` | 足す。`kind: from-issue`・`now: "scripts/supervise.py"`・`feature`: 「マージした設計 PR の設計の結果から実装のプランを書き換える（旧い supervise.py design-results）」・`to: P1b`・`unowned: true`・`source: "#3569"` |
+| `from-issue:3569-handoff-note` | 足す。`kind: from-issue`・`now: "—"`・`feature`: 「報告から引継ぎ文書の表へ 1 行足す（旧い supervise.py note）」・`to: M7`・`unowned: true`・`source: "#3569"` |
+| `from-issue:3569-design-results` | 足す。`kind: from-issue`・`now: "—"`・`feature`: 「マージした設計 PR の設計の結果から実装のプランを書き換える（旧い supervise.py design-results）」・`to: P1b`・`unowned: true`・`source: "#3569"` |
+| `from-issue:3569-supervise-options` | 足す。`kind: from-issue`・`now: "—"`・`feature`: 「旧い supervise.py の queue の `--max`・`--done`・`--poll` と run の `--slow`」・`not_built`: 「同じ働きを 2 つの名前で持たない。本文の呼び出しは `ndf plan queue`・`ndf plan next` の引数へ書き換える（決定 2）」・`source: "#3569"` |
+| `from-issue:3569-test-run-whole` | 足す。`kind: from-issue`・`now: "—"`・`feature`: 「旧い test-run.py whole の手元の全体テストと、落ちの 3 分類（フレーキー・既存の失敗・変更が起こした失敗）」・`not_built`: 「全体テストは CI が持つ（`ndf ci watch`）。落ちたテストの打ち直しは `ndf route test --failed-from`」・`source: "#3569"` |
+| `from-issue:3569-relay-attach` | 足す。`kind: from-issue`・`now: "—"`・`feature`: 「旧い relay.py attach（端末をレーンの tmux のセッションへ結び付ける）」・`not_built`: 「結果 JSON を返す副命令の形に合わない。`tmux -L ndf-lanes attach -t <名前>` で足りる」・`source: "#3569"` |
+| `from-issue:3569-relay-hook-bodies` | 足す。`kind: from-issue`・`now: "—"`・`feature`: 「旧い relay.py の mark・startup・is-child」・`not_built`: 「役目は Stop の hook の guard・`ndf relay install`・`ndf relay notice` の `metrics.inside` が持つ」・`source: "#3569"` |
+| `from-issue:3569-context-report-table` | 足す。`kind: from-issue`・`now: "—"`・`feature`: 「旧い context-policy.py report の `--format table`」・`not_built`: 「結果 JSON の `items` を表として読むのは呼び手である」・`source: "#3569"` |
 | `places` | `S1e` を足す（決定 7） |
 
-足す 2 行の `now` は旧い `supervise.py` を指すため、判定はこの 2 行を旧いスクリプトの行として読む（`probe._is_script`）。本文に `supervise.py` の名前が残らなければ、2 行は `not_run` になる。
+足す 7 行の `now` は `—` にする（決定 5）。`now` を `scripts/supervise.py` にした場合と `—` にした場合を、今の対応表に回す 2 行を足して判定（`probe.judge`）で比べた結果は次のとおりである（2026-11-15、このブランチ。本文の置き換えの前）。
+
+```text
+$ PYTHONPATH=src uv run --frozen --project . python <対応表に 2 行を足して probe.judge を打つスクリプト>
+now='scripts/supervise.py'
+  from-issue:3569-handoff-note {'result': 'failed', 'reason': 'ndf-next の 28 ファイルがまだ旧い scripts/supervise.py を呼ぶ（例 agents/supervisor-waits.md）。行き先 M7 が新しいエントリポイントの副命令に置き換えていない'}
+  from-issue:3569-design-results {'result': 'failed', 'reason': '... 行き先 P1b が新しいエントリポイントの副命令に置き換えていない'}
+  agent:supervisor {'result': 'failed', 'reason': '本文が旧いプラグインのスクリプトを呼ぶ: supervise.py（P1b）。...'}
+now='—'
+  from-issue:3569-handoff-note {'result': 'not_run', 'reason': '試走のスプリントは手順 0 で $SCRIPTS が旧いプラグインの scripts/ へ解決したため、...'}
+  from-issue:3569-design-results {'result': 'not_run', ...}
+  agent:supervisor {'result': 'failed', 'reason': '本文が旧いプラグインのスクリプトを呼ぶ: supervise.py（C2）。...'}
+```
+
+`now` が `—` なら、2 行は本文の呼び出しに依らず `not_run` になり、理由に 10 本の名前が出ない。M7 と P1b の置き場（`src/ndf/domains/records/`・`src/ndf/progress/run.py`・`src/ndf/progress/invoke.py`）は実在するため、置き場が無いことで `failed` にもならない（`probe._missing_places`）。`not_built` を持つ 5 行は、同じ判定で `passed`（理由「作らない行。ndf-next の本文に呼び手が無い」）になり、形の確かめ（`table.shape_errors`）は誤り 0 件である（`from-issue:3569-test-run-whole` を足して打った結果）。上の `agent:supervisor` の `failed` は、本文の置き換えの前の状態であり、置き換えの後に消える。
 
 ## 新しい副命令の契約
 
@@ -173,9 +192,24 @@
 
 **キーの値・認可コード・アクセストークンを、結果 JSON・標準エラー・記録へ書かない。** 旧い実装の取り扱い（保存の置き場・ファイルの権限・表示の伏せ方）をそのまま移す。人へ残す判断（C1・C2）は頭の設計文書にある。
 
-`context record` の理由の値（7 つ）と印の値（2 つ）以外は、使い方の誤りとして argparse の `choices` で拒む（旧いでは終了コード 2）。`context report` の `--format table` は持ち込まない。結果 JSON の `items` を表として読むのは呼び手である。
+`context record` の理由の値（7 つ）と印の値（2 つ）以外は、使い方の誤りとして argparse の `choices` で拒む（旧いでは終了コード 2）。`context report` の `--format table` は持ち込まない。結果 JSON の `items` を表として読むのは呼び手である（行 `from-issue:3569-context-report-table`）。
 
 旧い `context-policy.py` が書く記録と見込みのファイルの置き場は、旧いと同じ状態の置き場の下にする。1 回目の版の記録を新しい版の `report` と `calibrate` が読めるためである。
+
+## 旧い実装と並ぶ間の状態の書き手
+
+入れ替えの前は、旧いプラグインで動く利用者のセッションと、新しいプラグインだけの起動（試走）が同じ手元で並ぶ。同じ置き場の状態を両方が書くため、状態ごとに書き手と読み手、同時に書いたときの扱いを次のとおりに決める。どの状態も、**新しい副命令は旧い実装と同じ排他の取り方と同じ書き方を使い、形（キー・値の型）を足さない・変えない。** 形を足すと、旧い実装がその値を読めずに捨てる・壊れたものとして扱うためである。
+
+| 状態 | 書き手 | 読み手 | 同時に書いたときの扱い（旧い実装の取り方。新しい副命令も同じにする） |
+| --- | --- | --- | --- |
+| アカウントの登録（アカウントの置き場のアカウントごとのファイル） | 旧い `relay.py account`・新しい `ndf relay account` | 両方の中継の起動・`account list` | アカウントごとの排他（`<置き場>/.locks/<名前>.lock`。filelock）を取ってから書き、一時ファイルからの置き換え（`os.replace`）で書く。排他のパスが同じため、旧いと新しいの書き手は互いに待つ。待ちの上限を超えたら書かずに失敗として返し（旧い `claude_accounts._with_lock` の `on_fail`）、新しい副命令は終了コード 1 で終わる |
+| 再起動の方針の判定の記録（`<状態の置き場>/decisions/<リポジトリ>.decisions.jsonl`） | 旧い `context-policy.py record` と hook・新しい `ndf relay context record` | 両方の `report`・`calibrate` | 追記だけで書く（1 回の書き込みで 1 行）。読み手は読めない行を飛ばす（旧い `context_decisions.append_decision`・`read_decisions`）。追記どうしは行の順が入れ替わってもよく、読み手が `at` で並べ直す |
+| 再起動の見込み（`<状態の置き場>/estimates/<リポジトリ>.cost-estimates.json`） | 旧い `context-policy.py calibrate`・新しい `ndf relay context calibrate` | 両方の `resolve` | 一時ファイルからの置き換えで書く（旧い `jsonio.write_atomic`）。後に書いた方が残る。どちらも同じ判定の記録から作るため、後勝ちで値は食い違わない |
+| statusline の控え（`.ndf-statusline-backup.json`）と `settings.json` の `statusLine` | 旧い `statusline-switch.sh`・新しい `ndf statusline` | 両方の `status`・`restore` | 排他のファイル（`.ndf-statusline.lock`）に排他のロックを取ってから書く。旧い実装は `flock`（コマンド）で、新しい副命令は同じファイルに filelock（`fcntl.flock`）で取るため、両者は互いに待つ。`settings.json` は一時ファイルからの置き換えで書く |
+| 表示の本体（`~/.claude/ndf-statusline.sh`） | 旧い `ensure`・`set`、新しい `ensure`・`set` | Claude Code の statusline | 上の排他の中で置き換える。新しい側は旧い `statusline.sh` を振る舞いを変えずに移すため、後勝ちで表示は変わらない |
+| プロジェクトの宣言（`.ndf/project.json`） | 旧い `project-decl.py write`・新しい `ndf project write` | 両方の `check`・`drift`、宣言を読む副命令 | 一時ファイルからの置き換えで書く（旧い `jsonio.write_atomic`）。後に書いた方が残る。どちらも同じ測定と答えの取り込み方の表から書く |
+
+排他の上限の秒数と、filelock と `flock`（コマンド）が同じファイルで互いに待つことは、実装の単体テストで確かめる（未確認）。
 
 ## 本文の書き換えの形
 
@@ -183,7 +217,7 @@
 | --- | --- |
 | 冒頭の注記（「今の名前のまま残した」） | 10 本の名前を並びから外す。残る名前が無くなった注記は消す |
 | 置き場を探すコマンド（`for R in ... resolve.sh ...` の 12 ファイル） | `command -v ndf >/dev/null 2>&1 \|\| { echo "ndf が PATH に無い: <理由と直し方>" >&2; exit 3; }` の 1 行にする。正本は `development-workflow/references/scripts-lookup.md` で、ほかのファイルはこの節を指す |
-| `$SCRIPTS` の後に開いている子の旧いスクリプトを呼ぶ行 | 残す。`$SCRIPTS` が空なら打たない形（`[ -n "${SCRIPTS:-}" ]` の確かめ）か、空であることを理由に止まる形にし、旧いプラグインを候補に書かない |
+| `$SCRIPTS` の後に開いている子の旧いスクリプトを呼ぶ行 | 残す。旧いプラグインを候補に書かない。既定は、`$SCRIPTS` が空なら打たずに飛ばし、「<スクリプト名> は <子の記号> #<番号> が副命令に置き換えるまで新しいプラグインだけでは打てない。飛ばした」の 1 行を出す形（`[ -n "${SCRIPTS:-}" ]` の確かめ）にする。止まる形（理由を標準エラーへ書いて終了コード 3）は、後の手順がそのスクリプトの出力（書くファイル・終了コード）を入力にしていて、飛ばすと誤った入力で進む行だけに使う。止まる形を使う行は、実装のプランに行ごとに理由を書く |
 | 10 本の呼び出し | 上の「旧い副命令の行き先」の「新しい」の列の呼び出しへ書き換える |
 | 回す 2 機能の呼び出し | 「この機能は <子の記号> #<番号> が `ndf` の副命令に足す。新しいプラグインだけではまだ打てない」の 1 文にする |
 | `development-workflow` の手順 0 | `ndf project check` を `$SCRIPTS` の有無に依らず打ち、`decl=` に終了コードを出す。worktree の設定の確かめ（`worktree-setup.sh`）と MVV の確かめ（`project-mvv.py`）は `$SCRIPTS` が空なら飛ばし、`宣言:` の行に理由を書く |
