@@ -148,20 +148,25 @@ def pr_state_of(root: Path, pr: int, run: Callable[..., tuple[int, str, str]] = 
     return got if isinstance(got, dict) else None
 
 
-def design_gate(
-    main: Path, name: str, lane: str, tool_input: dict, rows: list[dict], view: Callable[[Path, int], dict | None] = pr_state_of
-) -> DesignGate | None:
-    """I1 を満たす問いなら設計承認の依頼の中身、満たさなければ None。送り手は計画 `name` の 1 スプリントのレーン `lane`。"""
+def lane_sprint(main: Path, name: str, lane: str) -> tuple[Path, Path | None]:
+    """計画 `name` の 1 スプリントのレーン `lane` のリポジトリと、そこで見つけたレーンのスプリント（無ければ None）。"""
     import parallel_answer as pa
     import parallel_hold as ph
     import parallel_hold_sprint as phs
 
+    repo = pa.lane_repo(main, name, lane)
+    return repo, phs.find_sprint(repo, (ph.lane_input(main, name, lane) or {}).get("issues") or [])
+
+
+def design_gate(
+    main: Path, name: str, lane: str, tool_input: dict, rows: list[dict], view: Callable[[Path, int], dict | None] = pr_state_of
+) -> DesignGate | None:
+    """I1 を満たす問いなら設計承認の依頼の中身、満たさなければ None。送り手は計画 `name` の 1 スプリントのレーン `lane`。"""
     prs = approval_prs(tool_input)
     if len(prs) != 1:
         return None
     pr = prs[0]
-    repo = pa.lane_repo(main, name, lane)
-    sprint = phs.find_sprint(repo, (ph.lane_input(main, name, lane) or {}).get("issues") or [])
+    repo, sprint = lane_sprint(main, name, lane)
     hit = gated_design_prs(sprint).get(pr) if sprint is not None else None
     if hit is None or hit.get("issue") is None:
         return None
@@ -281,9 +286,6 @@ def answer_design(
 ) -> tuple[str, str, int, dict]:
     """設計承認の依頼 `rid` の答えを読み、答えの種類ごとの記録を書いて (状態, 要約, 終了コード, metrics) を返す。"""
     import jsonio
-    import parallel_answer as pa
-    import parallel_hold as ph
-    import parallel_hold_sprint as phs
     import parallel_ledger as plg
 
     try:
@@ -306,8 +308,7 @@ def answer_design(
         jsonio.read(state, want=dict)
     except (OSError, jsonio.JsonReadError) as exc:
         return "stopped", f"スプリント状態を読めない: {exc}", 2, metrics
-    repo = pa.lane_repo(main, name, lane)
-    sprint = phs.find_sprint(repo, (ph.lane_input(main, name, lane) or {}).get("issues") or [])  # design_gate と同じ探し方
+    repo, sprint = lane_sprint(main, name, lane)  # design_gate と同じ探し方
     what = f"設計 PR #{pr} の承認（並列の計画 {name} の依頼 {rid}）"
     if result == "approved":
         return _answer_approved(run, state, pr, by, what, repo, msg, sprint, metrics)
