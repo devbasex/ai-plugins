@@ -183,10 +183,10 @@ def issue_materials(number: int, body: str, files: list[str], designs: list[tupl
     for path, section in raw_candidates(body):
         if path in seen:
             continue
-        if exists_in(path, files, fileset):
-            seen[path] = {"path": path, "exists": True, "source": "本文", "section": section}
-        elif looks_new(path):
-            seen[path] = {"path": path, "exists": False, "source": "本文", "section": section}
+        exists = exists_in(path, files, fileset)
+        if not exists and not looks_new(path):
+            continue
+        seen[path] = {"path": path, "exists": exists, "source": "本文", "section": section}
     for doc, paths in designs:
         for path in paths:
             if path not in seen:
