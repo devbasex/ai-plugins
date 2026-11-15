@@ -145,7 +145,7 @@ import しない。ruleset と merge queue の語は `adapters/github.py` と `m
 | `plugins/ndf-next/src/ndf/domains/release/bump.py` | `Bumper`・モジュール | `allowed_paths`・`write_bump`・`planned_for`・`Bumper.bump`・`Bumper._tip`・`Bumper._plan`・`Bumper._outside`（変更）。欄 `Bumper.store` を足す |
 | `plugins/ndf-next/src/ndf/domains/release/pr_check.py` | モジュール | `check`・`_versions`（変更） |
 | `plugins/ndf-next/src/ndf/domains/release/confirm.py` | `Confirmed`・モジュール | `confirm`（変更）・`_read_release_branch`（新設）。型 `PluginOf` を `UnitOf` へ改名 |
-| `plugins/ndf-next/src/ndf/domains/release/tagging.py` | モジュール | `bumped`・`publish`（変更）。`_released`・`_late` は `bumped` の引数だけが変わる |
+| `plugins/ndf-next/src/ndf/domains/release/tagging.py` | モジュール | `bumped`・`publish`（変更）・`overtaken`（新設）。`_released`・`_late` は `bumped` の引数だけが変わる |
 | `plugins/ndf-next/src/ndf/domains/release/verify_decide.py` | モジュール | `command_of`（新設） |
 | `plugins/ndf-next/src/ndf/domains/release/verify_ref.py` | `Verified`・モジュール | `build`（変更）・`_deploy`（新設）。欄 `Verified.kind` を足し、`Verified.version` を `str \| None` にする |
 | `plugins/ndf-next/src/ndf/domains/release/assemble.py` | `Target`・`Built`・`ReleaseOpen`・モジュール | `assemble`・`collect`（変更）・`_assemble_branch`・`_branch_facts`・`open_releases`・`_commit_and_push`・`_open_pr`（新設。develop から戻す）。`Target` に欄 `channel`・`level`・`base` を戻し、`pr` を `int \| None` にする。`Built` に欄 `branch` を戻す |
@@ -165,7 +165,7 @@ import しない。ruleset と merge queue の語は `adapters/github.py` と `m
 | `rules_of` | `merge_method.py` | 新設 | `rules_of(rules: Sequence[Mapping[str, Any]], queue: QueueConfig \| None) -> RulesFacts` | 本番ブランチに効く規則の一覧と merge queue の設定から、照らし合わせに使う事実を取り出す | `rules` は `GET /rules/branches/{branch}` の応答の行 | `queue` が None でなければ `queue_enabled` が真。型 `required_status_checks` の行があれば `strict` はその `parameters.strict_required_status_checks_policy` の真偽、無ければ None（読めない）。`review_count` は型 `pull_request` の行の `required_approving_review_count` の最大（無ければ 0） | 無し |
 | `decide` | `merge_method.py` | 新設 | `decide(flow: str, declared: str \| None, facts: RulesFacts, review: str \| None) -> Method` | 行・設定ファイルの方式・ruleset の事実・PR のレビューの判定から、使う方式か止まる理由を決める（I15） | `flow` は取り込み方の表の行の id | 「処理の手順」の判定表のとおり。`Method.problem` が None のときだけ `Method.value` を使ってよい。`value` は `QUEUE`・`STRICT`・None のどれか | 無し |
 | `GitHub.merge_queue` | `github.py` | 新設 | `merge_queue(self, branch: str) -> QueueConfig \| None` | 本番ブランチの merge queue の設定を GraphQL `repository.mergeQueue(branch)` で読む | 無し | キューが無ければ None。あれば `merge_method`（小文字）を持つ | GitHub の GraphQL（照会） |
-| `GitHub.enqueue` | `github.py` | 新設 | `enqueue(self, number: int, expect_head: str) -> MergeOutcome` | 承認した head を `expectedHeadOid` に渡して PR をキューへ入れる（STD10） | `expect_head` は 40 桁の SHA | 既に入っていれば入れ直さずに待ち（`MERGE_QUEUE_PENDING`）。入れたら待ち。PR の head が違えば要求を送らずに `refused`、GitHub が断れば読み直した head とともに `refused` | GitHub の GraphQL（照会・`enqueuePullRequest`） |
+| `GitHub.enqueue` | `github.py` | 新設 | `enqueue(self, number: int, expect_head: str, jump: bool = False) -> MergeOutcome` | 承認した head を `expectedHeadOid` に渡して PR をキューへ入れる。`jump` が真なら `jump` を渡してキューの先頭へ入れる（STD10） | `expect_head` は 40 桁の SHA | 既に入っていれば入れ直さずに待ち（`MERGE_QUEUE_PENDING`）。入れたら待ち。PR の head が違えば要求を送らずに `refused`、GitHub が断れば読み直した head とともに `refused` | GitHub の GraphQL（照会・`enqueuePullRequest`） |
 | `GitHub.queue_entry` | `github.py` | 新設 | `queue_entry(self, number: int) -> QueueEntry` | PR の `merged`・`headRefOid`・`isInMergeQueue`・`mergeQueueEntry.state` を 1 回の照会で読む | 無し | 4 つの値を持つ。キューに無ければ `state` は None | GitHub の GraphQL（照会） |
 | `GitHub.review_decision` | `github.py` | 新設 | `review_decision(self, number: int) -> str \| None` | PR の `reviewDecision` を読む | 無し | `APPROVED`・`CHANGES_REQUESTED`・`REVIEW_REQUIRED` のどれか。レビューを求めない規則なら None | GitHub の GraphQL（照会） |
 | `GitHub.behind_by` | `github.py` | 新設 | `behind_by(self, base: str, head: str) -> int` | `GET /compare/{base}...{head}` の `behind_by` を読む | 無し | 0 以上の整数。0 なら head は base の先端を祖先に持つ | GitHub の REST（照会） |
@@ -198,7 +198,7 @@ import しない。ruleset と merge queue の語は `adapters/github.py` と `m
 | 関数 | 置き場 | 種類 | シグネチャ | 責務 1 文 | 事前条件 | 事後条件 | 副作用 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `Lander.land` | `land.py` | 変更 | `land(self, number: int) -> Landed` | 本番の PR を行とマージの方式に合った経路で入れ、承認を結果に載せる | `Lander.flow` と `Lander.method` は設定ファイルから読んだ値 | マージ済みなら `_resume_merged` の結果。本番の PR なら `_method_of` を通り、`QUEUE` は `_land_queue`、`STRICT` は `_land_strict`、None は d7d5fe0b1 の `_merge` の結果。今の行で本番ブランチへ入れたら `_sync` の結果（`sync_pr` を持つ）。`Landed.method` に使った方式 | GitHub の REST・GraphQL |
-| `Lander._method_of` | `land.py` | 新設 | `_method_of(self, pull: Pull) -> tuple[str \| None, Landed \| None]` | ruleset と設定ファイルを照らし、方式か止まった結果を返す | `pull` は本番の PR | `decide` の `problem` があれば `(None, Landed(False, "precondition", 理由))`。理由は設定の値と ruleset の値を並べる。ruleset を読めなければ同じく `precondition` | GitHub の REST（規則）・GraphQL（キュー・レビューの判定） |
+| `Lander._method_of` | `land.py` | 新設 | `_method_of(self, pull: Pull) -> tuple[str \| None, Landed \| None]` | ruleset と設定ファイルを照らし、方式か止まった結果を返す | `pull` は本番の PR かバージョン上げの PR | `decide` の `problem` があれば `(None, Landed(False, "precondition", 理由))`。理由は設定の値と ruleset の値を並べる。ruleset を読めなければ同じく `precondition` | GitHub の REST（規則）・GraphQL（キュー・レビューの判定） |
 | `render_queue_record` | `trail.py` | 新設 | `render_queue_record(sha: str) -> str` | キューへの投入の記録の本文を組む | 無し | 本文は印 `QUEUE_MARK`・見出し・行 `QUEUE_HEAD_LINE` と `` `sha` `` を持ち、承認の証跡の印を持たない。`sha` が 40 桁の SHA でなければ `ValueError` | 無し |
 | `write_queue_record` | `trail.py` | 新設 | `write_queue_record(hub: GitHub, number: int, sha: str) -> tuple[bool, str]` | キューへ入れた head を本番の PR のコメントに 1 回だけ残す（I16） | `sha` はキューへ入れた head | 同じ head の記録（信用する書き手が書き、編集されていないもの）があれば書かずに `(False, その URL)`。無ければ `render_queue_record(sha)` を投稿して `(True, URL)`。読めない・書けなければ `TrailError` | GitHub の REST（コメントの一覧・作成） |
 | `queued_heads` | `trail.py` | 新設 | `queued_heads(hub: GitHub, number: int) -> frozenset[str]` | 本番の PR へキューへ入れた head の集合を読む（I16） | 無し | 印 `QUEUE_MARK` を持ち、信用する書き手（`GitHub.trusts`）が書き、作成の後に編集されていないコメントの行 `QUEUE_HEAD_LINE` の SHA だけを数える（`write_admin_record` の数え方と同じ）。無ければ空。読めなければ `TrailError` | GitHub の REST（コメントの一覧） |
@@ -210,7 +210,7 @@ import しない。ruleset と merge queue の語は `adapters/github.py` と `m
 | `Lander._bypass` | `land.py` | 変更 | `_bypass(self, pull: Pull) -> bool` | 管理者の迂回でマージするかを決める | 無し | `Lander.method` が None でなければ、本番の PR でもバージョン上げの PR でも常に偽（I17）。ほかは d7d5fe0b1 のまま | GitHub の REST（承認の数） |
 | `Lander._open_sync` | `land.py` | 変更 | `_open_sync(self) -> int \| None` | 本番ブランチからベースブランチへ戻す同期の PR を使い直すか作る（develop から戻す） | `Lander.flow` が `TRUNK` でない | develop の `_open_sync` と同じ | GitHub の REST（PR の一覧・作成） |
 | `Lander._sync` | `land.py` | 変更 | `_sync(self, pull: Pull, deadline: float) -> Landed` | 本番ブランチへ入れた変更を同期の PR でベースブランチへ戻す（develop から戻す） | 同上 | develop の `_sync` と同じ。`trunk` の行では呼ばれない（I10） | GitHub の REST |
-| `Lander.land_bump` | `land.py` | 変更 | `land_bump(self, number: int, allowed: Callable[[Pull], list[str]]) -> Landed` | バージョン上げの PR を、本番の PR と同じマージの方式で迂回せずに入れる（決定 20） | `allowed` はバージョンの置き場・CHANGELOG・手順の書き先の外のパスを返す | `allowed` が空でなければ、入れずに d7d5fe0b1 のまま止まる。`Lander.method` が `QUEUE` なら `enqueue(number, pull.head_sha)` で入れ、`_await_queue(pull, deadline, judge=False)` の結果（外れたら `queue_removed`）。`STRICT` なら `_behind` が止めれば `behind`、止めなければ `merge(expect_head=pull.head_sha, require_method=True)` を 1 回打つ。どちらも `production_merge.admin` が真でも `merge_as_admin` を呼ばない（I17）。方式が None なら d7d5fe0b1 のまま（承認の数が 0 なら普通のマージ、ほかは迂回の設定で PR のマージの迂回）。待ちの締め切りは d7d5fe0b1 の `land_bump` と同じ | GitHub の REST・GraphQL |
+| `Lander.land_bump` | `land.py` | 変更 | `land_bump(self, number: int, allowed: Callable[[Pull], list[str]]) -> Landed` | バージョン上げの PR を、本番の PR と同じマージの方式で迂回せずに入れる（決定 20） | `allowed` はバージョンの置き場・CHANGELOG・手順の書き先の外のパスを返す | `allowed` が空でなければ、入れずに d7d5fe0b1 のまま止まる。続けて `_method_of(pull)` で設定ファイルの方式と ruleset を照らし、止めれば `precondition`（`land` と同じ判定。`trunk` で方式が無い・食い違う・ruleset を読めない・本番ブランチの規則がレビューの承認を求める、のどれでも入れない。I14・I15）。方式が `QUEUE` なら `_behind` が止めれば `behind`、止めなければ `enqueue(number, pull.head_sha, jump=True)` でキューの先頭へ入れ、`_await_queue(pull, deadline, judge=False)` の結果（外れたら `queue_removed`）。先頭へ入れるのは、キューで前に並んだ PR がバージョン上げのマージコミットの祖先に入り、タグの範囲から外れることを防ぐためである（追い越されたときの守りは `tagging.overtaken`）。`STRICT` なら `_behind` が止めれば `behind`、止めなければ `merge(expect_head=pull.head_sha, require_method=True)` を 1 回打つ。どちらも `production_merge.admin` が真でも `merge_as_admin` を呼ばない（I17）。方式が None（`trunk` でない行の `decide` の値）なら d7d5fe0b1 のまま（承認の数が 0 なら普通のマージ、ほかは迂回の設定で PR のマージの迂回）。待ちの締め切りは d7d5fe0b1 の `land_bump` と同じ | GitHub の REST・GraphQL |
 
 ### バージョン上げ・PR の検査・CD の確かめ・タグ
 
@@ -220,15 +220,16 @@ import しない。ruleset と merge queue の語は `adapters/github.py` と `m
 | `write_bump` | `bump.py` | 変更 | `write_bump(root: Path, store: VersionStore, decl: Declaration, planned: Sequence[Planned], pulls: Sequence[PullFact], today: str) -> frozenset[str]` | バージョンと CHANGELOG のバージョンの節を書き、手順を流す | `root` は書く作業場所 | 単位ごとに `store.write` を呼び、CHANGELOG の見出しは単位の名前。書いたパスを返す | ファイルの書き込み・手順の外部コマンド |
 | `planned_for` | `bump.py` | 変更 | `planned_for(root: Path, hub: GitHub, number: int, production: str, store: VersionStore) -> str \| None` | 本番の PR の予定のバージョンをインタフェースで読んで求める | 無し | 単位の先頭のバージョンを `store.read` で読み、ラベルの上げ幅で上げた値。読めなければ None | git（show）・GitHub の REST（ラベル） |
 | `Bumper.bump` | `bump.py` | 変更 | `bump(self) -> Bumped` | `trunk` の行で、main の先端に合わせてバージョン上げの PR を進める | 無し | 行が `TRUNK` でなければ何も読まずに `not_applicable`。`require_github_flow` を呼ばない。ほかは d7d5fe0b1 のまま（読み書きは `self.store`） | git・GitHub の REST |
-| `Bumper._tip` | `bump.py` | 変更 | `_tip(self, span: Range) -> _Tip` | main の先端の単位ごとのバージョンとタグの有無をインタフェースで読む | 無し | d7d5fe0b1 と同じ形。単位は `store.units()`、変わった単位は `version_store.bumped` | git |
+| `Bumper._tip` | `bump.py` | 変更 | `_tip(self, span: Range) -> _Tip` | main の先端の単位ごとのバージョンとタグの有無をインタフェースで読む | 無し | d7d5fe0b1 と同じ形。単位は `store.units()`、変わった単位は `version_store.bumped`。欄 `overtaken` に、最後のバージョン上げのコミットへの `tagging.overtaken` の値を足す。真なら `tagged` を偽にし、範囲の起点をそのコミットの行 `起点: <SHA>` にする | git |
 | `Bumper._plan` | `bump.py` | 変更 | `_plan(self, span: Range) -> _Plan` | 範囲の PR・上げ幅・予定をインタフェースで決める | 無し | 予定は `version_store.plan` の値 | git・GitHub の REST（ラベル） |
 | `Bumper._outside` | `bump.py` | 変更 | `_outside(self, base: str, head: str, decl: Declaration) -> list[str]` | バージョン上げの PR の差分のうち、バージョン上げでない変更を返す（I17） | 無し | d7d5fe0b1 と同じ判定。バージョンの対は `store.read` で読む | git |
 | `check` | `pr_check.py` | 変更 | `check(root: Path, hub: GitHub, repo_git: Git, number: int) -> list[dict[str, str]] \| None` | 行 `trunk` の本番ブランチ宛ての PR だけを検査する（I7・I9） | 無し | 行が `TRUNK` でなければ None。バージョンの変更を許すのは、head のブランチが `release/v` で始まり、差分がバージョンの置き場・CHANGELOG・手順の書き先に限られる PR だけ（`bump._outside` と同じ判定。I7）。置き場が読めなければ `VersionStoreError` を返す側へ渡す。比べは `_versions` の値 | git・GitHub の REST |
 | `_versions` | `pr_check.py` | 変更 | `_versions(repo_git: Git, store: VersionStore, ref: str) -> dict[str, str \| None]` | 単位ごとのバージョンを、単位の名前を鍵にして読む | 無し | `{unit.name: store.read(repo_git, ref, unit)}` | git（show） |
 | `confirm` | `confirm.py` | 変更 | `confirm(hub: GitHub, repo_git: Git, number: int, production: str, flow: str, unit_of: UnitOf, watch: Watch) -> Confirmed` | 行に合わせて CD がそろうのを待ち、作ったバージョンを記録する | 本番の PR がマージ済み | `TRUNK` は d7d5fe0b1 のまま。ほかは `_read_release_branch` を読み直し、そろえば記録を 1 回書く（バージョン上げの PR の欄は本番の PR の番号） | GitHub の REST・git |
 | `_read_release_branch` | `confirm.py` | 新設 | `_read_release_branch(hub: GitHub, repo_git: Git, merge_sha: str, unit_of: UnitOf, store: VersionStore) -> Confirmed` | 今の行で、マージコミットのバージョンのタグと GitHub Release を 1 回読む | 無し | マージコミットのバージョンを `store.read` で読み、タグと GitHub Release があれば `kind` が None。無ければ `missing` が `publish` | GitHub の REST（参照・Release）・git（show） |
-| `bumped` | `tagging.py` | 変更 | `bumped(store: VersionStore, root: Path, revision: str) -> list[Unit]` | タグを作る単位をインタフェースで読む | 無し | `version_store.bumped(store, Git(root), revision)` | git |
-| `publish` | `tagging.py` | 変更 | `publish(root: Path, hub: GitHub, revision: str, store: VersionStore) -> list[Made]` | 足りないタグと GitHub Release を作る | `revision` は main のコミット | d7d5fe0b1 のまま。単位とバージョンは `store` から読む。タグの形は `<単位の名前>--v<バージョン>` | GitHub の REST・git |
+| `bumped` | `tagging.py` | 変更 | `bumped(store: VersionStore, root: Path, revision: str) -> list[Unit]` | タグを作る単位をインタフェースで読む | 無し | `overtaken(Git(root), revision)` が真なら空。ほかは `version_store.bumped(store, Git(root), revision)` | git |
+| `overtaken` | `tagging.py` | 新設 | `overtaken(repo_git: Git, revision: str) -> bool` | バージョン上げのマージコミットが、キューで前に並んだ PR に追い越されたかを返す | `revision` はバージョン上げのコミット | 親が 2 つで、第 1 親（マージの直前の main の先端）が第 2 親（バージョン上げの PR の head）の祖先でなければ真。親が 1 つなら偽。真のとき、第 1 親に入った PR はこのコミットのバージョンの範囲に含まれていない | git（`rev-list --parents`・`merge-base --is-ancestor`） |
+| `publish` | `tagging.py` | 変更 | `publish(root: Path, hub: GitHub, revision: str, store: VersionStore) -> list[Made]` | 足りないタグと GitHub Release を作る | `revision` は main のコミット | d7d5fe0b1 のまま。単位とバージョンは `store` から読む。`overtaken` が真のコミットには、タグも GitHub Release も作らない（`bumped` が空）。タグの形は `<単位の名前>--v<バージョン>` | GitHub の REST・git |
 
 ### 検証環境・承認資料・サブコマンド
 
@@ -296,8 +297,11 @@ import しない。ruleset と merge queue の語は `adapters/github.py` と `m
 | `Lander._bypass` | 承認の数を読めない | 権限 | `approvals` が None | 既定値で続ける（偽） | 迂回しない（今の規則） | 無し |
 | `Lander._open_sync` | 同期の PR を作れない | 権限・GitHub の誤り | `GitHubError`（差分なしの 422 を除く） | 呼び出し元へ返す | `stopped`・`unknown`・「本番は出ている」 | 本番は出ている。打ち直すとマージ済みからの再開で同期の PR へ進む |
 | `Lander._sync` | 同期の PR のチェックが落ちた | ベースブランチとの衝突など | `_merge` | 止める | `stopped`・種類・`outputs.sync_pr` | 本番は出ている。同期の PR を人が見る |
+| `Lander.land_bump` | 設定ファイルの方式と ruleset が食い違う・ruleset を読めない・`trunk` で方式が無い | 設定ファイルか ruleset の誤り | `_method_of` | 止める | `stopped`・`precondition`・理由に設定の値と ruleset の値。`bump` はタグを作らない | 入れていない。バージョン上げの PR は開いたまま。設定か ruleset を直し、`step=bump` で打ち直す |
+| `Lander.land_bump` | 本番ブランチの規則がレビューの承認を求める | ruleset の承認の数が 1 以上で、バージョン上げの PR は承認を持たない（決定 17） | `_method_of`（`decide` の承認の行） | 止める（迂回は使わない。I17） | `stopped`・`precondition`・「本番ブランチの規則がレビューの承認を求め、承認を持たないバージョン上げの PR を入れられない。承認の数を 1 以上に残す限り、main への push ごとの `bump` が毎回ここで止まる」。workflow の結果とバージョン上げの PR のコメントに同じ理由を書き、人へ戻す | 入れていない。承認の数を 0 にするか（決定 17）、マージの方式を外すかを人が決める。直すまで打ち直しても同じ理由で止まる |
+| `Lander.land_bump` | キューへ入れられない | 確かめの後のバージョン上げのブランチへの push による head の食い違い・保護の条件を満たさない・キューの先頭へ入れる権限が token に無い | `enqueue` の `refused` | 止める | `stopped`・`refused`・GitHub の理由。`bump` はタグを作らない | 入れていない。バージョン上げの PR は開いたまま。head の食い違いは、次の main への push の `bump` が PR を進める。保護の条件と権限は、人が ruleset と token の役割を見る（設計文書の「未確認のまま残ること」の行） |
 | `Lander.land_bump` | キューから外れた | キューの一時のコミットでチェックが落ちた・衝突 | `_await_queue` | 止める | `stopped`・`queue_removed`。`bump` はタグを作らない | バージョン上げの PR は開いたまま。次の main への push の `bump` が取り込みを足すか作り直す（バージョン上げの PR は承認を持たず I16 の対象外。`step=bump` の打ち直しは同じ head を入れ直す） |
-| `Lander.land_bump` | head が main の先端を含まない・マージを断られた | `strict` で、確かめの前か後に別の PR が main へ入った | `_behind`・`merge` の断り | 止める | `stopped`・`behind` | マージしていない。次の main への push の `bump` が main を取り込むコミットを足す |
+| `Lander.land_bump` | head が main の先端を含まない・マージを断られた | `strict` で確かめの前か後に別の PR が main へ入った・`merge-queue` で投入の前に別の PR が main へ入った | `_behind`・`merge` の断り | 止める | `stopped`・`behind` | マージしていない。次の main への push の `bump` が main を取り込むコミットを足す |
 | `allowed_paths` | 置き場のパスを読めない | 置き場の誤り | `VersionStoreError` | 呼び出し元へ返す | `stopped`・`precondition` | 何も変えていない |
 | `write_bump` | 置き場へ書けない・手順が落ちた | 置き場の誤り・手順のコマンドの失敗 | `VersionStoreError`・`StepFailed` | 呼び出し元へ返す | `stopped`・`precondition` か `check_failed` | push していない。取り出しを捨てる |
 | `planned_for` | 置き場かラベルを読めない | 置き場の誤り・GitHub の誤り | `VersionStoreError`・`GitHubError`・`VersionError` | 既定値で続ける（None） | `outputs.version` が無い | 無し。バージョンは `confirm` が確定する |
@@ -309,6 +313,8 @@ import しない。ruleset と merge queue の語は `adapters/github.py` と `m
 | `_versions` | 置き場を読めない | 同上 | `VersionStoreError` | 呼び出し元へ返す | 同上 | 同上 |
 | `confirm` | 待ちの内にそろわない | `bump` か `publish` が止まった・遅れた | 締め切り | 止める | `stopped`・`deploy_failed`・「本番はマージ済み」と足りないもの。次の手は `rerun` の 1 つ | 何も書いていない。workflow を打ち直してから `confirm` を打ち直す |
 | `_read_release_branch` | マージコミットのバージョンを読めない | 置き場の誤り | `VersionStoreError` | 呼び出し元へ返す | `stopped`・`precondition` | 何も書いていない |
+| `overtaken` | 親か祖先の関係を読めない | git の誤り | `GitError` | 呼び出し元へ返す | `bump`・`publish` が `precondition` | 何も作っていない。打ち直せる |
+| `Bumper.bump` | 最後のバージョン上げのコミットが追い越された | `merge-queue` で、キューで前に並んだ PR が先に main へ入った（先頭へ入れた後に組み直しが間に合わなかったとき） | `_tip` の `overtaken` | 既定値で続ける（タグを作らずに上げ直す） | `outputs` に追い越されたコミット。範囲（そのコミットの起点..先端）でバージョン上げの PR を作る。新しいバージョンは `plan` の規則で、そのコミットのバージョンより大きい（そのコミットのバージョンにはタグを作らない） | タグを作っていない。打ち直しても同じ判定になる |
 | `tagging.bumped` | 置き場を読めない | 置き場の誤り | `VersionStoreError` | 呼び出し元へ返す | `publish` が `precondition` | 何も作っていない |
 | `publish` | タグか GitHub Release を作れない | GitHub の誤り | `GitHubError` | 呼び出し元へ返す（d7d5fe0b1 のまま） | `stopped`・`infra_wait` か `unknown` | 作れた分は残る。打ち直すと足りない分だけを作る |
 | `build` | PR の取り込みが衝突した | 2 本の PR が同じ箇所を変えた | `VerifyConflict` | 止める（d7d5fe0b1 のまま） | `stopped`・`base_conflict`・衝突した PR | 検証用ブランチを動かしていない |
@@ -352,7 +358,9 @@ import しない。ruleset と merge queue の語は `adapters/github.py` と `m
 | `Lander._await_queue` | `merged` が偽・`isInMergeQueue` が偽 | 読み直して `merged` なら `merged`、偽なら `queue_removed` |
 | `Lander._await_queue` | キューの中・承認が失効 | キューから外して `refused` |
 | `Lander._await_queue` | キューの中・締め切りの前 / 後 | `QUEUE_POLL_SECONDS` 待つ / `ci_pending` |
-| `Lander.land_bump` | 方式 `QUEUE` / `STRICT` / None で承認の数 0 / None でそれ以外 | 承認なしの `enqueue` と待ち（`judge` が偽） / 先端を含めば head の一致の確認付きのマージ、含まなければ `behind` / 普通のマージ（キューへ倒れたら止める） / d7d5fe0b1 のまま PR のマージの迂回 |
+| `Lander.land_bump` | `_method_of` が止める | `precondition`（`enqueue` も `merge` も呼ばない） |
+| `Lander.land_bump` | 方式 `QUEUE` / `STRICT` / None で承認の数 0 / None でそれ以外 | 先端を含めば承認なしで先頭への `enqueue` と待ち（`judge` が偽）、含まなければ `behind` / 先端を含めば head の一致の確認付きのマージ、含まなければ `behind` / 普通のマージ（キューへ倒れたら止める） / d7d5fe0b1 のまま PR のマージの迂回 |
+| `tagging.overtaken` | 親が 1 つ / 親が 2 つで第 1 親が第 2 親の祖先 / 祖先でない | 偽 / 偽 / 真（`bumped` が空、`_tip` が上げ直す） |
 | `version_store.of` | 置き場あり / 置き場なし・`TRUNK` でない / 置き場なし・`TRUNK` | 種類のアダプタ / `PluginStore` / `VersionStoreError` |
 | `Bumper.bump`・`check` | 行が `TRUNK` でない | 何も読まない（`not_applicable` / None） |
 | `confirm` | 行が `TRUNK` / でない | バージョン上げの PR・タグ・Release を待つ / マージコミットのバージョンのタグと Release を待つ |
@@ -410,7 +418,7 @@ workflow `ndf-next-release.yml` のジョブは、d7d5fe0b1 の表から次の 2
 | `land` の `strict` のマージと、別の PR のマージ | main の先端 | GitHub の最新の取り込みの規則が後のマージを断る。`land` は迂回しない（I17） | 断られたら `behind` で止まる。取り込んだ head の承認の後に打ち直す |
 | 本番のプランの `merge` と、人の GitHub でのマージかキューへの投入 | 本番の PR | head の一致の確認（STD1・STD10）。先にマージした側が勝つ | 打ち直すと、マージ済みからの再開で経路を head で見分ける（I5） |
 | main への push ごとの `bump` と `publish` | バージョン上げのブランチ・タグ | workflow の `concurrency`（`ndf-next-release-main`、`cancel-in-progress: false`） | d7d5fe0b1 のまま。`publish` はあるタグを作らない |
-| バージョン上げの PR のマージと、本番の PR のマージ | main の先端 | `merge-queue` は両方をキューへ入れ、GitHub が組み合わせと順を決める（STD7）。`strict` は最新の取り込みの規則が後のマージを断る。どちらも迂回しない（I17） | キューから外れれば `queue_removed`、遅れていれば `behind` で止まる。次の push の `bump` が取り込みを足す |
+| バージョン上げの PR のマージと、本番の PR のマージ | main の先端 | `merge-queue` は head が main の先端を含むときだけバージョン上げの PR をキューの先頭へ入れ（`jump`）、前に並んだ PR を祖先に含めない。間に合わずに追い越されたコミットには `overtaken` でタグを作らず、`bump` が上げ直す。`strict` は最新の取り込みの規則が後のマージを断る。どちらも迂回しない（I17） | キューから外れれば `queue_removed`、遅れていれば `behind` で止まる。次の push の `bump` が取り込みを足す |
 | `verify-ref` の組み直しどうし | 検証用ブランチ | workflow の `concurrency`（`ndf-next-verify`）と fast-forward の push | d7d5fe0b1 のまま。`deploy` のコマンドは同じグループの中で 1 本ずつ流れる |
 | `confirm` と CD | バージョン上げの PR・タグ | 排他を取らない。`confirm` は読むだけで、書くのは作ったバージョンの記録 1 件 | 同じバージョンの記録があれば書かない |
 
@@ -477,7 +485,7 @@ workflow `ndf-next-release.yml` のジョブは、d7d5fe0b1 の表から次の 2
 | `rules_of` | キュー・`strict` 真・承認 1 の規則から 3 つの値 | 規則が空で `strict` が None・承認 0 | 型の違う行を数えない |
 | `decide` | 判定表の 8 行をそれぞれ返す | 今の行で方式 None は問題なし | `trunk` で方式 None・キューなし・`strict` 偽・承認が要るのに無い、のそれぞれで `problem` |
 | `GitHub.merge_queue` | 設定を読む | キューが無ければ None | 照会の誤りが届く |
-| `GitHub.enqueue` | 承認した head を `expectedHeadOid` に渡す（記録した変数で見る） | 既に入っていれば投入を呼ばない | head が違えば投入を呼ばずに `refused`。GraphQL の断りで `refused` |
+| `GitHub.enqueue` | 承認した head を `expectedHeadOid` に渡す（記録した変数で見る）。`jump` が真なら変数 `jump` を渡す | 既に入っていれば投入を呼ばない | head が違えば投入を呼ばずに `refused`。GraphQL の断りで `refused` |
 | `GitHub.queue_entry` | 4 つの値を読む | キューに無ければ `state` が None | 照会の誤りが届く |
 | `GitHub.review_decision` | `APPROVED` を返す | null で None | 照会の誤りが届く |
 | `GitHub.behind_by` | 遅れの数 | 0 | 照会の誤りが届く |
@@ -512,12 +520,13 @@ workflow `ndf-next-release.yml` のジョブは、d7d5fe0b1 の表から次の 2
 | `Lander._bypass` | 方式なしの今の行で d7d5fe0b1 のまま | — | 方式のある本番の PR で偽 |
 | `Lander._open_sync` | develop のテストを戻す | 差分なしで None | 422 以外の誤りが届く |
 | `Lander._sync` | develop のテストを戻す | — | 同期の PR のチェックが落ちて止まる |
-| `Lander.land_bump` | 方式 `QUEUE` でバージョン上げの PR の head を渡して `enqueue` を 1 回呼び、承認を照会せずに待つ。`STRICT` で先端を含む head を `merge` する | 方式なし・承認 0 で普通のマージ | `QUEUE`・`STRICT` で迂回の設定が真でも `merge_as_admin` を呼ばない（受け入れ条件 26）。置き場の外のパスで `enqueue` も `merge` も呼ばない。`STRICT` で先端を含まなければ `merge` を呼ばずに `behind`。外れたら `queue_removed` |
+| `Lander.land_bump` | 方式 `QUEUE` で先端を含むバージョン上げの PR の head を渡し、`jump` を真にして `enqueue` を 1 回呼び、承認を照会せずに待つ。`STRICT` で先端を含む head を `merge` する | 方式なし・承認 0 で普通のマージ | `QUEUE`・`STRICT` で迂回の設定が真でも `merge_as_admin` を呼ばない（受け入れ条件 26）。置き場の外のパスで `enqueue` も `merge` も呼ばない。`QUEUE`・`STRICT` で先端を含まなければ `enqueue` も `merge` も呼ばずに `behind`。外れたら `queue_removed`。ruleset が設定ファイルと食い違う（宣言 `strict` で ruleset の `strict` が偽など）・承認の数が 1 以上なら `enqueue` も `merge` も呼ばずに `precondition`。`enqueue` が断れば `refused` |
 | `allowed_paths` | 置き場 `json` で `package.json` と手順の書き先 | — | `plugins.load` を呼ばない（アダプタの差し替えで記録した読み取りで見る。I18） |
 | `write_bump` | 置き場 `json` で `package.json` だけを上げ、手順で `package-lock.json` を書く | CHANGELOG が無ければバージョンだけ | 置き場の誤りが届く |
 | `planned_for` | 置き場から読んだ予定 | — | 読めなければ None |
 | `Bumper.bump` | 置き場 `json` で MINOR のバージョン上げの PR（受け入れ条件 21） | 今の行で `not_applicable` | `trunk` で置き場なしは `precondition` |
-| `Bumper._tip` | 単位ごとのバージョン | バージョン上げの履歴が無ければ `tagged` が真 | — |
+| `Bumper._tip` | 単位ごとのバージョン | バージョン上げの履歴が無ければ `tagged` が真 | 最後のバージョン上げのコミットが追い越されていれば `tagged` が偽、起点がそのコミットの起点 |
+| `overtaken` | 第 1 親が第 2 親の祖先のマージコミットで偽 | 親が 1 つで偽 | キューで前の PR を祖先に含むマージコミット（第 1 親が第 2 親の祖先でない）で真。`publish` がそのコミットにタグを作らない |
 | `Bumper._plan` | 範囲の PR の最大の上げ幅 | 変化なしで空 | ラベル 2 つで誤りが届く |
 | `Bumper._outside` | バージョンの行だけの差分で空 | — | 置き場の中のバージョン以外の変更を返す |
 | `check` | 置き場 `json` で `package.json` のバージョンの変更を破れにする | 今の行で None | 置き場の誤りが届く |

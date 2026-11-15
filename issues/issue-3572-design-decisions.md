@@ -407,8 +407,9 @@ ruleset の `dismiss_stale_reviews_on_push` が偽でも（確かめ 6）、NDF 
 | 守り | どこで守るか |
 | --- | --- |
 | マージの方式があるとき、迂回のマージを打たない | `land` と `land_bump` は、`production_merge.admin` が真でも `merge_as_admin` を呼ばない（I17）。方式の無い今の行は今の規則のまま |
+| キューで前に並んだ PR がバージョンの範囲から外れない | 先頭へ入れても追い越されたマージコミット（第 1 親がバージョン上げの PR の head の祖先でない）には、`publish` がタグを作らず、`bump` がそのコミットの起点からの範囲で上げ直す（`tagging.overtaken`） |
 | バージョン上げの PR にコードが混ざらない | `bump_decide` が、差分がバージョンの置き場（決定 22）・CHANGELOG・手順の書き先に限られると判定したときだけ入れる |
-| 確かめた組み合わせだけが入る | `merge-queue` では head を `expectedHeadOid` に渡してキューへ入れ、キューの一時のコミットで必須のチェックが走る。`strict` では head が main の先端を含むときだけ `expect_head` 付きでマージし、確かめの後に main が動けば GitHub が断る。外れた・断られたら `land_bump` は `queue_removed` か `behind` で止まり、次の push の `bump` に任せる |
+| 確かめた組み合わせだけが入る | `land_bump` も `land` と同じく設定ファイルの方式と ruleset を照らし、食い違えば `precondition` で止まる。`merge-queue` では head が main の先端を含むときだけ head を `expectedHeadOid` に渡してキューの先頭へ入れ（`jump`）、キューの一時のコミットで必須のチェックが走る。`strict` では head が main の先端を含むときだけ `expect_head` 付きでマージし、確かめの後に main が動けば GitHub が断る。外れた・断られたら `land_bump` は `queue_removed` か `behind` で止まり、次の push の `bump` に任せる |
 
 キューを通すと、main へのマージからタグまでに CI がもう 1 回（キューの一時のコミットの分）走り、リリースとバージョンの間の時間
 （設計文書の「main へのマージの後（CD）」）が延びる。この費用は、確かめていない組み合わせを main へ入れないために払う。
