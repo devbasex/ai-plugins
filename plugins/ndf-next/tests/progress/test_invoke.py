@@ -272,11 +272,13 @@ def test_template_values_missing_from_every_source_stop_as_invalid_by_name(tmp_p
     assert named.get("worker") == invoke.FROM_DEFAULT and named.get("title", invoke.FROM_ISSUE) == invoke.FROM_ISSUE
 
 
-@pytest.mark.parametrize("name", ["design", "impl", "design-merge"])
-def test_template_values_are_filled_from_the_issue_the_declaration_and_the_defaults(tmp_path, monkeypatch, name):
-    # #3092: 課題の題と本文は課題から、テストのコマンド・必須のチェック・レビューと組み直しの起動は宣言から、
-    # worker の起動は params.json の既定から埋め、ブランチは作業場所から決める。プランの中の承認ゲートは工程の承認ゲートが
-    # 決めるため、params.json の既定（人の答えを待つ）を使わずに待たずに通す（PR 3496 の指摘。承認待ちを足さない）
+def _filled_plan(tmp_path, monkeypatch, name):
+    """雛形 `name` を、課題 #3092・宣言 `PROJECT`・差し替えた既定（worker と gate）で埋めたプランを組む。
+
+    課題の題と本文は課題から、テストのコマンド・必須のチェック・レビューと組み直しの起動は宣言から、worker の起動は
+    params.json の既定から埋め、ブランチは作業場所から決める（#3092）。プランと、その JSON の文字列・作業場所の根・
+    実行の置き場を返す。
+    """
     repo = _sprint_repo(tmp_path, PROJECT)
     defaults = {"worker": ["ndf-worker"], "gate": ["ndf-gate"]}
     held = route.params()
@@ -289,23 +291,46 @@ def test_template_values_are_filled_from_the_issue_the_declaration_and_the_defau
     run = _stage_run_of(name, repo, [3092])
     argv = invoke.plan_argv(run, work, None, repo)
     plan = json.loads(Path(argv[argv.index("next") + 1]).read_text())
-    text = json.dumps(plan, ensure_ascii=False)
+    return plan, json.dumps(plan, ensure_ascii=False), repo, work
+
+
+@pytest.mark.parametrize("name", ["design", "impl", "design-merge"])
+def test_template_values_fill_the_worker_from_the_default_and_the_branch_from_the_place(tmp_path, monkeypatch, name):
+    plan, text, repo, _ = _filled_plan(tmp_path, monkeypatch, name)
     assert plan["worktree"] == str(repo) and "sprint/s1" in plan["name"]
     assert "ndf-worker" in text and "{{" not in text
-    t = route.templates()[name]
-    if "title" in t.params:
-        assert "#3092 の題" in text
-        body = work / invoke.ISSUE_BODY_FILE.format(number=3092)
-        assert body.read_text() == "#3092 の本文" and str(body) in text
-    if "test_command" in t.params:
-        assert "pytest -q" in text and "ruff check" not in text
-    if "required" in t.params:
-        assert "--required=pytest" in text and "--required=lint" in text
-    if "review" in t.params:
-        assert "ndf-review" in text and "ndf-rebuild" in text
-    if "gate" in t.params:
-        gates = [s for s in plan["steps"] if s["id"] == "merge-gate"]
-        assert "ndf-gate" not in text and gates and all(s["run"] == invoke.STAGE_GATE for s in gates)
+
+
+@pytest.mark.parametrize("name", ["design", "impl"])
+def test_template_values_fill_the_title_and_the_body_file_from_the_issue(tmp_path, monkeypatch, name):
+    _, text, _, work = _filled_plan(tmp_path, monkeypatch, name)
+    assert "#3092 の題" in text
+    body = work / invoke.ISSUE_BODY_FILE.format(number=3092)
+    assert body.read_text() == "#3092 の本文" and str(body) in text
+
+
+def test_template_values_fill_the_test_command_from_the_test_suites_of_the_declaration(tmp_path, monkeypatch):
+    _, text, _, _ = _filled_plan(tmp_path, monkeypatch, "impl")
+    assert "pytest -q" in text and "ruff check" not in text
+
+
+@pytest.mark.parametrize("name", ["design", "impl"])
+def test_template_values_fill_the_required_checks_from_the_declaration(tmp_path, monkeypatch, name):
+    _, text, _, _ = _filled_plan(tmp_path, monkeypatch, name)
+    assert "--required=pytest" in text and "--required=lint" in text
+
+
+def test_template_values_fill_the_review_and_rebuild_launch_from_the_declaration(tmp_path, monkeypatch):
+    _, text, _, _ = _filled_plan(tmp_path, monkeypatch, "design")
+    assert "ndf-review" in text and "ndf-rebuild" in text
+
+
+def test_template_values_pass_the_plan_gate_through_to_the_stage_gate(tmp_path, monkeypatch):
+    # プランの中の承認ゲートは工程の承認ゲートが決めるため、params.json の既定（人の答えを待つ）を使わずに待たずに通す
+    # （PR 3496 の指摘。承認待ちを足さない）
+    plan, text, _, _ = _filled_plan(tmp_path, monkeypatch, "design-merge")
+    gates = [s for s in plan["steps"] if s["id"] == "merge-gate"]
+    assert "ndf-gate" not in text and gates and all(s["run"] == invoke.STAGE_GATE for s in gates)
 
 
 def test_test_command_joins_every_test_suite_in_declared_order():
