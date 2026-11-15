@@ -2,7 +2,7 @@
 
 ## 目的
 
-- **今どうなっているか**: 直訳調の内部の呼び名（版・置き場・宣言・副命令・進行表など 29 語）が、ndf-next（`plugins/ndf-next/`）の 1,061 ファイル中 828 ファイルに出る。出る先は Skill・契約の文書・出力・コードである。印・枠・区間などは 1 語が 2〜3 の意味を持つ
+- **今どうなっているか**: ndf-next（`plugins/ndf-next/`）では、直訳調の内部の呼び名 29 語（版・置き場・宣言・副命令・進行表など）が、1,061 ファイル中 828 ファイルに出る。出る先は Skill・契約の文書・出力・コードである。印・枠・区間などは 1 語が 2〜3 の意味を持つ
 - **誰に効くか**: 11.0 から ndf-next を使う利用者と、ndf-next を直す開発者
 - **変えると何が成り立つか**: 利用者が読む文書と出力が、説明なしで分かる業界の語で書かれ、1 語が 1 つの意味を指す。旧い語を書いた行は検査が落とすため、旧い語が戻らない。利用者が書く設定（`.ndf/`）のキーも、何を決めるかが名前から読める形になる
 
@@ -35,7 +35,10 @@
 | NDF の工程（`ndf-workflow` ほか、語の項目が属する既存のコンテキスト） | 置き換えた後の語（バージョン・設定・サブコマンドなど） |
 | 利用者の設定（`.ndf/` の設定ファイル） | 設定のキーと値の名前（リリース方式・MVV の各版の確かめの記録） |
 
-用語集が上流、ndf-next の禁止語の規則が下流で、関係は公開された言語である。共通の形式は用語集の JSON の形（`terms[].deprecated`・`terms[].deprecated_standalone`）である。この形を、今の NDF の用語の検査（`plugins/ndf/scripts/glossary.py`）と ndf-next の禁止語の規則（`plugins/ndf-next/src/ndf/checks/words.py`）が別々に読む。
+用語集が上流、ndf-next の禁止語の規則が下流で、関係は公開された言語である。共通の形式は用語集の JSON の形（`terms[].deprecated`・`terms[].deprecated_standalone`）である。この形を次の 2 つが別々に読む。
+
+- 今の NDF の用語の検査（`plugins/ndf/scripts/glossary.py`）
+- ndf-next の禁止語の規則（`plugins/ndf-next/src/ndf/checks/words.py`）
 
 用語集を読むほかのコンテキストとの関係は次のとおりである。
 
@@ -221,13 +224,13 @@
 
 **`ledger` はほかに、クロスレビューの指摘の記録（`FindingLedger`）にも使われる。** 指摘を追記する記録なので `FindingJournal` にする。`ledger` の名前は、Factory のサービスが読む ID（`ask-ledger`。I8）を除いて ndf-next に残さない。
 
-**`marks` は 2 つの意味で使われ、意味ごとに別の名前へ改名する。** 兆候の検査の抑制コメント（`checks/marks.py`）は `suppressions`、中継のマーカーのファイル（`domains/relay/marks.py` と保存先 `relay/marks/<セッション>.json`）は `markers` にする（W14 の 2 行。決定 6）。
+**`marks` は 2 つの意味で使われ、意味ごとに別の名前へ改名する。** 兆候の検査の抑制コメント（`checks/marks.py`）は `suppressions` にする。中継のマーカーのファイル（`domains/relay/marks.py` と保存先 `relay/marks/<セッション>.json`）は `markers` にする（W14 の 2 行。決定 6）。
 
 ### 意味ごとに分けた語
 
 印・枠・区間・`ledger` に加えて、取り込み・行き先・控え・照合・宣言・起こす・問い も調べた出現に意味が 2〜4 つあった（上の表の「意味」の列）。受け入れ条件 5 の「意味ごとに別の語」を、この 7 語にも当てる。
 
-**廃止した語は部分文字列で当たるため、表の「意味」の列に無い一般の用法にも当たる。** 起こす・控えるは、`git grep -oP '.{0,6}起こ[すしさせ]' -- plugins/ndf-next` などで出現を見て、上の表に意味の行を足した（起票する・トリガーする・原因になる・メモする）。出現は「起こす」系 465 回・「控え」230 回で、すべての行の意味は確かめていない。実装では、禁止語の規則が示した行の意味が表に無ければ、置き換える前に表（用語集の語の項目）へ意味の行を足す。当たった行には必ず表のどれか 1 つの置き換え先がある状態を保つ（I1・受け入れ条件 5）。
+**廃止した語は部分文字列で当たるため、表の「意味」の列に無い一般の用法にも当たる。** 起こす・控えるは、出現を `git grep -oP '.{0,6}起こ[すしさせ]' -- plugins/ndf-next` などで見た。見た出現から、上の表に意味の行を足した（起票する・トリガーする・原因になる・メモする）。出現は「起こす」系 465 回・「控え」230 回で、すべての行の意味は確かめていない。実装では、禁止語の規則が示した行の意味が表に無ければ、置き換える前に表（用語集の語の項目）へ意味の行を足す。当たった行には必ず表のどれか 1 つの置き換え先がある状態を保つ（I1・受け入れ条件 5）。
 
 ## 機能一覧
 
@@ -263,6 +266,8 @@
 | 規約の規則 spec-decl（`checks/spec_docs.py` の `_real_errors`） | 実物の設定に旧いキーがあれば、設定の改名の関数で変換した中身をスキーマと突き合わせる（決定 13） |
 | 入れ替えの課題（#3304）の本文 | 移行のコマンドを利用者のリポジトリごとに打つステップを足す（受け入れ条件 14。実装の Pull Request をマージした後に本文を書き直す） |
 
+### 語の置き換えの構成要素の関係
+
 ```mermaid
 graph TD
   subgraph 用語集
@@ -284,6 +289,8 @@ graph TD
   S -->|write-spec| C
 ```
 
+### 設定のキーの改名の構成要素の関係
+
 設定のキーの改名に関わる構成要素の関係である。
 
 ```mermaid
@@ -299,6 +306,8 @@ graph TD
 ```
 
 ## 構造
+
+### 禁止語の規則
 
 禁止語の規則の、変える関数だけを示す。
 
@@ -322,6 +331,8 @@ classDiagram
 - `_words_from` は今と同じく `deprecated` と禁止語を返す
 - 新しく足す `_standalone_from` は `deprecated_standalone` を返す
 - `pattern` は単独の語にだけ「前後が漢字でない」の条件を付ける。漢字の範囲は CJK 統合漢字と「々」で、今の NDF の用語の検査（`glossary_words.is_kanji_edged`）と同じ字の範囲にする。ndf-next は今の NDF のモジュールを読まないため、範囲は `words.py` に持つ
+
+### 設定の改名の関数と移行のコマンド
 
 設定の改名の関数と移行のコマンドの関係である。
 
@@ -375,7 +386,7 @@ PostgreSQL の接続先（URL）を使うときは、チェックアウトの保
 
 ### Factory のサービスが読む記録
 
-表 `ndf-files` で読み手が `service` の記録は 9 件である。表の `fields` の列と、書く側のコードを見て、対応表で改名する識別子（`place`・`declaration`・`table_id`・`marks`・`ledger`・`revise`・`vet`・`promotion`）が中身のキーか値に出るかを確かめた。
+表 `ndf-files` で読み手が `service` の記録は 9 件である。表の `fields` の列と書く側のコードを見て、対応表で改名する識別子が中身のキーか値に出るかを確かめた。識別子は `place`・`declaration`・`table_id`・`marks`・`ledger`・`revise`・`vet`・`promotion` の 8 つである。
 
 | 記録の ID | ファイル | 中身に出る改名の対象 | 扱い |
 | --- | --- | --- | --- |
@@ -386,9 +397,13 @@ PostgreSQL の接続先（URL）を使うときは、チェックアウトの保
 
 `gate-rejections` の欄 `sprint` は値に `table_id` の中身を入れるが、キーは `sprint` で改名の対象ではない。`fields` を持たない記録（`loop-record`・`ask-ledger`・`gate-rejections`）の、事象の種類ごとのすべての欄は確かめていない。実装では、識別子を改名するたびに、この 9 件の記録を書くコードがその識別子をキーか値として書いていないかを確かめ、書いていればこの表へ足して改名から外す。
 
-承認ゲートの回答の値 `revise` を変えないため、対応表の W20 の「変更要求」は日本語の語だけを置き換える。回答の値の一覧（`contracts/facts/answers.json` の id）・承認ゲートの出力の enum（`contracts/workflow/stage-io.schema.json`）・`ndf progress answer` の引数も `revise` のままにする。
+承認ゲートの回答の値 `revise` を変えないため、対応表の W20 の「変更要求」は日本語の語だけを置き換える。次の 3 つも `revise` のままにする。
 
-MVV 判定の記録（読み手に `service` を持たない）も改名する: ID `mvv-vet` → `mvv-validation`、ファイル名 `mvv-vet.jsonl` → `mvv-validation.jsonl`（決定 16）。
+- 回答の値の一覧（`contracts/facts/answers.json` の id）
+- 承認ゲートの出力の enum（`contracts/workflow/stage-io.schema.json`）
+- `ndf progress answer` の引数
+
+MVV 判定の記録（読み手に `service` を持たない）も改名する（決定 16）。ID は `mvv-vet` → `mvv-validation`、ファイル名は `mvv-vet.jsonl` → `mvv-validation.jsonl` にする。
 
 ### 利用者の設定のキーと値の改名
 
@@ -428,7 +443,12 @@ MVV 判定の記録（読み手に `service` を持たない）も改名する: 
 | 機械が読む日本語の見出しと値 | 旧い語を含むもの（例: 「区間の報告」）を、書く Skill の本文と読むコードで同じ語にする | 11.0 の入れ替えはスプリントの境で行い、今の NDF が書いた途中の成果物を ndf-next が読まない前提（未確認 2） |
 | 旧いキーの残る設定を読んだときの止まり方 | 設定を読む側が、ファイル・旧いキーの位置・新しいキーの位置と、打つコマンド `ndf settings migrate --root <リポジトリ>` を理由の文に出し、`cause: precondition` で止まる（行き先は人、終了コード 3。下の表） | 既定の値へ倒さない（受け入れ条件 13） |
 
-止まり方の原因の種類は、どれも `contracts/causes.json` の既存の行で、終了コードは `contracts/facts/exit-codes.json` の行が決める。確かめたコマンドは `grep -n '"refused"\|"invalid"\|"precondition"' plugins/ndf-next/contracts/causes.json` と `grep -n '"id"' plugins/ndf-next/contracts/facts/exit-codes.json` である（2026-11-15）。
+止まり方の原因の種類は、どれも `contracts/causes.json` の既存の行で、終了コードは `contracts/facts/exit-codes.json` の行が決める。確かめたコマンドは次の 2 つである（2026-11-15）。
+
+```bash
+grep -n '"refused"\|"invalid"\|"precondition"' plugins/ndf-next/contracts/causes.json
+grep -n '"id"' plugins/ndf-next/contracts/facts/exit-codes.json
+```
 
 | 原因の種類 | `causes.json` の行 | `exit` | 行き先（`route`） | 終了コード（`exit-codes.json`） | どこで使うか |
 | --- | --- | --- | --- | --- | --- |
@@ -437,6 +457,8 @@ MVV 判定の記録（読み手に `service` を持たない）も改名する: 
 | `precondition` | 16 行目「前提が無い（宣言・認証・対象のファイル）」 | `precondition` | `human` | 3（14 行目） | 旧いキーの残る設定を読んだ（受け入れ条件 13 の「0 以外」） |
 
 ## 処理の流れ
+
+### 実装の Pull Request の順序
 
 実装の Pull Request の順序である。1 つの語の登録と置き換えは同じ Pull Request に入れる（E5）。
 
@@ -448,7 +470,13 @@ graph TD
   D -->|0 件| E[受け入れ条件 1〜10 を確かめる]
 ```
 
-1. 禁止語の規則が `deprecated_standalone` を読むようにする。用語集はすでに単独で照合する廃止した語を 2 語持つ（「`段`」はステップ・ステージの項目、「`字で持`」は文字列の項目。`docs/glossary/glossary.json` の 1818・1828・7260 行目）。規則が読み始めると、ndf-next の「`段`」の 75 行（34 ファイル）と「`字で持`」の 1 行が当たる（`git grep -P '(?<![\x{4E00}-\x{9FFF}々])段(?![\x{4E00}-\x{9FFF}々])' -- plugins/ndf-next | wc -l` → 75）。同じ Pull Request で、「`段`」の行を用語集がすでに決めた置き換え先（ステップかステージ）へ置き換える。単独で照合する廃止した語を例として挙げる行は、`words.examples` で外さず、用語集に登録していない語を使った例へ書き換えて消す（`words.examples` で外すのは前提 5 の箇所だけ）。この行には、「`字で持`」の 1 行である `skills/requirements-design/references/glossary-format.md` の 83 行目（`deprecated_standalone` の欄の説明の例）などが当たる。件数は実装の時点の禁止語の規則の出力で確かめる
+1. 禁止語の規則が `deprecated_standalone` を読むようにする。用語集はすでに単独で照合する廃止した語を 2 語持つ（「`段`」はステップ・ステージの項目、「`字で持`」は文字列の項目。`docs/glossary/glossary.json` の 1818・1828・7260 行目）。規則が読み始めると、ndf-next の「`段`」の 75 行（34 ファイル）と「`字で持`」の 1 行が当たる。「`段`」の行数は次のコマンドで数えた（→ 75）。
+
+   ```bash
+   git grep -P '(?<![\x{4E00}-\x{9FFF}々])段(?![\x{4E00}-\x{9FFF}々])' -- plugins/ndf-next | wc -l
+   ```
+
+   同じ Pull Request で、「`段`」の行を用語集がすでに決めた置き換え先（ステップかステージ）へ置き換える。単独で照合する廃止した語を例として挙げる行は、`words.examples` で外さない。用語集に登録していない語を使った例へ書き換えて消す（`words.examples` で外すのは前提 5 の箇所だけ）。この行には、`skills/requirements-design/references/glossary-format.md` の 83 行目などが当たる。83 行目は「`字で持`」の 1 行で、`deprecated_standalone` の欄の説明の例である。件数は実装の時点の禁止語の規則の出力で確かめる
 2. 語のまとまり（例: W1〜W5）ごとに 1 つの Pull Request で、次の順にコミットする
    1. 用語集へ置き換え先の項目と廃止した語を足し、`glossary.py render` する（E1）
    2. まとまりに含まれる語の識別子を決定 6 の基準で改名する（E4）。W11 のまとまりでは、チェックアウトの保存先の形の番号を 2 に上げる
@@ -462,6 +490,8 @@ graph TD
 まとまりの分け方と Pull Request の数は実装計画が決める。
 
 設定のキーの改名は、W9 と W19 のまとまりの Pull Request に入れる。同じ Pull Request で、改名表・設定の改名の関数・スキーマ・取り込み方の表・読む側の止める検査・移行のコマンド・規約の規則の変換を変える。スキーマだけを先に変えると、このリポジトリの `.ndf/` の実物が規約の規則に通らなくなる（決定 13）。実装の Pull Request をマージした後に、#3304 の本文へ移行のステップを足す（受け入れ条件 14）。
+
+### 入れ替えのときの移行の流れ
 
 入れ替え（#3304）のときの移行の流れである。この課題では実装とテストまでを行い、利用者のリポジトリでは打たない（要求の前提 7）。
 
@@ -589,15 +619,21 @@ prh と textlint（LIB1・LIB2）は採らない。用語集と別の辞書を�
 
 ### 決定 10: 11.0 の入れ替えまで、今の NDF の文書の語と用語集の語の食い違いを許す
 
-用語集の語の項目のうち、出典が `plugins/ndf/` の下の 167 件（`grep -c '"source": "plugins/ndf/' docs/glossary/glossary.json` → 167）も新しい名前へ改める。今の NDF の文書は直さない。今の NDF は 11.0 で ndf-next へ入れ替わり、今の NDF を直すと受け入れ条件 10 に反する。食い違いは入れ替えまでの間だけである。
+用語集の語の項目のうち、出典が `plugins/ndf/` の下の 167 件も新しい名前へ改める。件数は `grep -c '"source": "plugins/ndf/' docs/glossary/glossary.json` → 167 で数えた。今の NDF の文書は直さない。今の NDF は 11.0 で ndf-next へ入れ替わり、今の NDF を直すと受け入れ条件 10 に反する。食い違いは入れ替えまでの間だけである。
 
 用語集の検査は、語の項目と出典のファイルの中身を突き合わせない。確かめたのは次の 3 点である（2026-11-15）。
 
-- 規則の一覧: `grep -n '"rule"' plugins/ndf/scripts/glossary.py` と `STRUCTURE_RULES` の定義（53 行目）から、規則は `schema`・`duplicate`・`stale_document`・`deprecated_meaning`・`unregistered`・`deprecated`・`deprecated_code`・`banned`・`unconfirmed_source` の 9 つである
-- 出典を見る規則は `unconfirmed_source` だけで、出典のパスが `.ndf/glossary.json` の `check.source_paths` に当たるかを見る（`_term_schema_findings`）。出典のファイルを開かない
-- 本文を見る規則（`unregistered`・`deprecated`・`deprecated_code`）は、`--diff` では追加した行だけを見る（`_collect_targets` が `added_lines` を使う）。今の NDF のファイルは変えないため、追加した行に入らない
+- 規則の一覧: 規則は `schema`・`duplicate`・`stale_document`・`deprecated_meaning`・`unregistered`・`deprecated`・`deprecated_code`・`banned`・`unconfirmed_source` の 9 つである。`grep -n '"rule"' plugins/ndf/scripts/glossary.py` と `STRUCTURE_RULES` の定義（53 行目）から数えた
+- 出典を見る規則は `unconfirmed_source` だけである。出典のパスが `.ndf/glossary.json` の `check.source_paths` に当たるかを見て（`_term_schema_findings`）、出典のファイルを開かない
+- 本文を見る規則は `unregistered`・`deprecated`・`deprecated_code` である。`--diff` では追加した行だけを見る（`_collect_targets` が `added_lines` を使う）。今の NDF のファイルは変えないため、追加した行に入らない
 
-今の用語集で `python3 plugins/ndf/scripts/glossary.py check --rules structure` を打った出力は `{"status": "ok", "summary": "当たりなし"}` である。語の項目を改めた後の出力は、実装の Pull Request の CI で確かめる。
+今の用語集で次のコマンドを打った出力は `{"status": "ok", "summary": "当たりなし"}` である。
+
+```bash
+python3 plugins/ndf/scripts/glossary.py check --rules structure
+```
+
+語の項目を改めた後の出力は、実装の Pull Request の CI で確かめる。
 
 廃止した語の登録を 11.0 の入れ替えの後へ回す形は採らない。登録までの間、ndf-next に旧い語が戻っても検査が落とさない。今の NDF の文書の参照を直す形も採らない。受け入れ条件 10 に反し、入れ替えで消えるファイルへ手を入れる。
 
@@ -605,7 +641,10 @@ prh と textlint（LIB1・LIB2）は採らない。用語集と別の辞書を�
 
 ### 決定 11: Factory のサービスが読む ID `ask-ledger` と承認ゲートの回答の値 `revise` は改名せず、受け入れ条件 6 の例外にする
 
-表 `ndf-files` で読み手が `service` の記録は、ID・ファイル名・中身のキーと値を変えない（I8・「データ構造」の「Factory のサービスが読む記録」）。承認ゲートの回答の値 `revise` は `gate-rejections.jsonl` と `loop.json` に書かれるため、同じく変えない。サービスは別のリポジトリにあり、ID で引くかをこの設計の時点で確かめていない（「未確認のまま残ること」の 4）。改名しなければ、どちらで引いても結合は変わらない。受け入れ条件 6 の `git grep -w ledger` に残る `ask-ledger` と、`git grep -w revise` に残る回答の値（MVV の改訂の兆候を `revision_due` へ改名した後の残り）は、前提 5 の箇所と同じく例外として受け入れの手順で外す。
+表 `ndf-files` で読み手が `service` の記録は、ID・ファイル名・中身のキーと値を変えない（I8・「データ構造」の「Factory のサービスが読む記録」）。承認ゲートの回答の値 `revise` は `gate-rejections.jsonl` と `loop.json` に書かれるため、同じく変えない。サービスは別のリポジトリにあり、ID で引くかをこの設計の時点で確かめていない（「未確認のまま残ること」の 4）。改名しなければ、どちらで引いても結合は変わらない。次の 2 つは、前提 5 の箇所と同じく例外として受け入れの手順で外す。
+
+- 受け入れ条件 6 の `git grep -w ledger` に残る `ask-ledger`
+- `git grep -w revise` に残る回答の値（MVV の改訂の兆候を `revision_due` へ改名した後の残り）
 
 改名してサービスの側の対応を別のリポジトリの課題に足す形は採らない。ndf-next の語の置き換えのために、別のリポジトリの変更と公開の順序の調整が要る。
 
@@ -631,7 +670,7 @@ prh と textlint（LIB1・LIB2）は採らない。用語集と別の辞書を�
 
 ### 決定 13: 入れ替えまでこのリポジトリの CI を通すため、規約の規則 spec-decl は旧いキーの残る実物を改名表で変換してから確かめる
 
-規約の規則 spec-decl は、検査を打つリポジトリの `.ndf/` の実物をスキーマで確かめる（`checks/spec_docs.py` の `_real_errors`）。このリポジトリの `.ndf/worktree.json` は `promotion: whole` を持ち（`.ndf/worktree.json` の 22 行目）、入れ替えまで今の NDF のために旧いキーのまま残す（要求の前提 7）。スキーマだけを改名すると、実装の Pull Request の CI がこの実物で落ちる。
+規約の規則 spec-decl は、検査を打つリポジトリの `.ndf/` の実物をスキーマで確かめる（`checks/spec_docs.py` の `_real_errors`）。このリポジトリの `.ndf/worktree.json` は `promotion: whole` を持つ（`.ndf/worktree.json` の 22 行目）。入れ替えまで、今の NDF のために旧いキーのまま残す（要求の前提 7）。スキーマだけを改名すると、実装の Pull Request の CI がこの実物で落ちる。
 
 spec-decl は、実物に旧いキーがあれば、設定の改名の関数で変換した中身をスキーマと突き合わせる。変換で直らない誤りはこれまでどおり示す。旧いキーが残ること自体は spec-decl の指摘にしない。止めるのは ndf-next の設定を読む側である（I6）。
 
@@ -640,7 +679,7 @@ spec-decl は、実物に旧いキーがあれば、設定の改名の関数で�
 - 改名表（`contracts/domains/ndf-settings-renames.json`）: 移行のコマンドと旧いキーを読んで止める検査が、旧いキーの名前として読むデータである。受け入れ条件 6 の例外の「移行のコマンド・旧いキーを読んで止める検査」に含める
 - 移行のコマンド・止める検査・それらのテスト（受け入れ条件 6 の例外のとおり）
 
-spec-decl のコードとテストは、旧いキーの名前を文字として持たない。spec-decl の単体テストの入力（旧いキーを持つ実物）は、改名表の行の `old` と `values` の旧い値から組み立てる（例: 改名表の `/branch_flow/release_strategy` の行を逆に当てた設定）。改名表の名前を変えればテストの入力も変わる。このリポジトリの `.ndf/worktree.json` は `plugins/ndf-next` の外にあり、`git grep -w promotion -- plugins/ndf-next` に当たらない。
+spec-decl のコードとテストは、旧いキーの名前を文字として持たない。spec-decl の単体テストの入力（旧いキーを持つ実物）は、改名表の行の `old` と `values` の旧い値から組み立てる。例は、改名表の `/branch_flow/release_strategy` の行を逆に当てた設定である。改名表の名前を変えればテストの入力も変わる。このリポジトリの `.ndf/worktree.json` は `plugins/ndf-next` の外にある。そのため `git grep -w promotion -- plugins/ndf-next` に当たらない。
 
 このリポジトリの `.ndf/` を実装の Pull Request で書き換える形は採らない。今の NDF が新しいキーを読めず、ai-plugins の開発が止まる。spec-decl で実物の確かめを外す形も採らない。旧いキー以外の誤りを見なくなる。
 
@@ -676,7 +715,7 @@ spec-decl のコードとテストは、旧いキーの名前を文字として�
 
 ### 決定 16: MVV 判定の内部の識別子を、設定のキー `validation` にそろえて `mvv_validation` の系列へ改名する
 
-設定のキーを `vet` から `validation` へ改名すると（決定 4）、ndf-next の内部の `vet`（`vet_sprint`・`vet_key`・`VET_SPRINT`・`MvvVet`・`last_vet`、MVV 判定の記録の ID `mvv-vet`）だけが旧い名前で残る。同じ事実を 2 つの名前で指すことになるため、内部も改名する。
+設定のキーを `vet` から `validation` へ改名すると（決定 4）、ndf-next の内部の `vet` だけが旧い名前で残る。内部の `vet` は、`vet_sprint`・`vet_key`・`VET_SPRINT`・`MvvVet`・`last_vet` と、MVV 判定の記録の ID `mvv-vet` である。同じ事実を 2 つの名前で指すことになるため、内部も改名する。
 
 | 今 | 改名した後 |
 | --- | --- |
@@ -697,7 +736,7 @@ ndf-next には、原因の種類の値 `validation`（`contracts/causes.json` �
 
 要求の前提 4 は、2 文字以上の語を廃止した語（部分文字列で当たる）で登録すると定める。「問い」を廃止した語にすると、ndf-next の「問い合わせ」62 回（`git grep -o 問い合わせ -- plugins/ndf-next | wc -l` → 62）にも当たる。「問い合わせ」は業界で使う語で、置き換える対象ではない。そこで「問い」は、前提 4 から外れて単独で照合する廃止した語に登録する。この外れ方は、設計承認ゲートで人が見る。
 
-単独で照合すると、「問い」の直後が漢字の出現をすべて外す。外れる用法のうち旧い語の用法は、ndf-next の中に次の 3 つがある（`git grep -oP '問い.' -- plugins/ndf-next | sort | uniq -c` の、直後が漢字の行）。
+単独で照合すると、「問い」の直後が漢字の出現をすべて外す。外れる用法のうち旧い語の用法は、ndf-next の中に次の 3 つがある。数えたのは `git grep -oP '問い.' -- plugins/ndf-next | sort | uniq -c` の、直後が漢字の行である。
 
 | 用法 | 回数 | 置き換え先 | 登録する欄 |
 | --- | ---: | --- | --- |

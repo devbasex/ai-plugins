@@ -85,7 +85,24 @@ plugins/ndf-next/
     └── domains/settings/              *（test_renames.py・test_cli.py）
 ```
 
-依存の向きは、層の並び（`rules.json` の `structure.layers`: `ndf.contracts` → `ndf.adapters` → `ndf.core` → `ndf.progress` → `ndf.domains`。下の層は上の層を読まない）に従う。新設する `ndf.domains.settings` は `ndf.contracts`（`facts`・`schema_errors`・`result`）と、同じ層の `ndf.domains.records.files`（設定ファイルのパスを解く）・`ndf.domains.worktree.atomic`（半端なファイルを残さない書き込み）だけを読む。改名表を読む関数（`settings/renames.py`）は `ndf.domains.records.files` と `ndf.contracts.facts` のほかを読まないため、`worktree/ndf_settings.py`・`records/mvv.py`・`records/preflight.py` と `checks/spec_docs.py` がこれを読んでも循環は生じない（`renames.py` は読む側のどれも import しない）。`ndf.checks` は層の並びに入らず、今も `ndf.domains` 以外の層を読んでいる。`spec_docs.py` が `ndf.domains.settings.renames` を読むのは、この規則が許す範囲である。承認ゲート（`ndf.progress.gate`）は `ndf.domains` より下の層なので、改名表を読まない（「既存の部品の再利用」の最後の行）。禁止語の規則は用語集のデータと規則のデータ（`rules.json`）を読むだけで、新しく足す漢字の範囲の定数は `words.py` に置き、今の NDF（`plugins/ndf/`）のモジュールを読まない。
+### 依存の向き
+
+依存の向きは、層の並びに従う。層の並びは `rules.json` の `structure.layers` が持つ。順は `ndf.contracts` → `ndf.adapters` → `ndf.core` → `ndf.progress` → `ndf.domains` である。下の層は上の層を読まない。
+
+新設する `ndf.domains.settings` が読むのは次の 3 つだけである。
+
+- `ndf.contracts`（`facts`・`schema_errors`・`result`）
+- 同じ層の `ndf.domains.records.files`（設定ファイルのパスを解く）
+- 同じ層の `ndf.domains.worktree.atomic`（半端なファイルを残さない書き込み）
+
+改名表を読む関数（`settings/renames.py`）は、`ndf.domains.records.files` と `ndf.contracts.facts` のほかを読まない。そのため、次の読む側がこれを読んでも循環は生じない（`renames.py` は読む側のどれも import しない）。
+
+- `worktree/ndf_settings.py`・`records/mvv.py`・`records/preflight.py`
+- `checks/spec_docs.py`
+
+`ndf.checks` は層の並びに入らず、今も `ndf.domains` 以外の層を読んでいる。`spec_docs.py` が `ndf.domains.settings.renames` を読むのは、この規則が許す範囲である。承認ゲート（`ndf.progress.gate`）は `ndf.domains` より下の層なので、改名表を読まない（「既存の部品の再利用」の最後の行）。禁止語の規則は用語集のデータと規則のデータ（`rules.json`）を読むだけで、新しく足す漢字の範囲の定数は `words.py` に置き、今の NDF（`plugins/ndf/`）のモジュールを読まない。
+
+### ファイルごとの役割
 
 | パス | 種類 | 役割 1 文 | 依存する先 |
 | --- | --- | --- | --- |
@@ -154,7 +171,12 @@ plugins/ndf-next/
 | `plugins/ndf-next/bin/` | 変更 | 起動のスクリプトのコメントと出力の文を置き換える | 無し |
 | `plugins/ndf-next/hooks/` | 変更 | hook の設定の説明を置き換える | 無し |
 
-**`release-steps release` の引数 `--promotion` は、ndf-next のコードに無い。** `git grep -n -- '--promotion' -- plugins/ndf-next/src` は 0 件で、出現は Skill の本文（`skills/release/references/release-steps.md` の 124・135 行目と `skills/development-workflow/references/production-merge.md` の 66 行目）だけである（2026-11-16）。設計文書の「入出力の契約」の `--release-strategy release_branch` は、この Skill の本文の書き換えで満たす。引数を ndf-next の `release-steps` に作るのは、その機能を移す課題が行う。
+**`release-steps release` の引数 `--promotion` は、ndf-next のコードに無い。** `git grep -n -- '--promotion' -- plugins/ndf-next/src` は 0 件である。出現は、Skill の本文の次の箇所だけである（2026-11-16）。
+
+- `skills/release/references/release-steps.md` の 124・135 行目
+- `skills/development-workflow/references/production-merge.md` の 66 行目
+
+設計文書の「入出力の契約」の `--release-strategy release_branch` は、この Skill の本文の書き換えで満たす。引数を ndf-next の `release-steps` に作るのは、その機能を移す課題が行う。
 
 ### 改名の一覧
 
@@ -186,7 +208,16 @@ plugins/ndf-next/
 
 **改名だけの関数は「関数の仕様」に書かない。** 引数の型・責務・失敗の扱いを変えず、名前と引数の名前だけを変えるためである（`detailed-design.md` の「書く範囲」）。呼び出し元は `git grep -w <旧い名前>` が 0 件になるまで直す（受け入れ条件 6）。
 
-**改名しない名前**: 承認ゲートの回答の値 `revise`・`REVISE`・`ndf progress answer` の引数（Factory のサービスが読む記録の値。I8・決定 11）、Factory のサービスが読む `ask-ledger`（I8）、`.ndf/mvv.json` のキー `revise_after`（要求の前提 6）、言語モデルの判定の答えの欄 `verdict` と値 `follow`（決定 16）、表 `ndf_runs`（英語として通じる）、中継の関数 `mark`・`take`（動詞として通じる）。同等性の表（`src/ndf/parity/features.json`）が今の NDF のファイル名（`revise-note.py` など）を引いた箇所も、今の NDF の名前なので変えない（前提 5）。
+**改名しない名前**は次のとおりである。
+
+- 承認ゲートの回答の値 `revise`・`REVISE`・`ndf progress answer` の引数（Factory のサービスが読む記録の値。I8・決定 11）
+- Factory のサービスが読む `ask-ledger`（I8）
+- `.ndf/mvv.json` のキー `revise_after`（要求の前提 6）
+- 言語モデルの判定の答えの欄 `verdict` と値 `follow`（決定 16）
+- 表 `ndf_runs`（英語として通じる）
+- 中継の関数 `mark`・`take`（動詞として通じる）
+
+同等性の表（`src/ndf/parity/features.json`）が今の NDF のファイル名（`revise-note.py` など）を引いた箇所も、今の NDF の名前なので変えない（前提 5）。
 
 ## クラスと関数の構造
 
@@ -309,9 +340,9 @@ plugins/ndf-next/
 
 **単独の語の条件を、語の先頭か末尾が漢字かに依らず両側に付ける。** 今の NDF の用語の検査（`glossary_words.standalone_part`）は、先頭が漢字なら前に、末尾が漢字なら後ろにだけ条件を付ける。ndf-next の対応表の「問い」は末尾がひらがなで、今の NDF の形では「問い合わせ」に当たる。対応表が「問い合わせ」を外すと決めたため（W12・決定 17）、両側に付ける。両側に付けても「版の記録」「`段を足す`」のように前後が漢字でない出現には当たる。
 
-**差分のハッシュは、ファイルの ID の順に並べた `[{"file": <ID>, "path": <相対パス>, "patch": <操作の列>}]` を、キーを並べ替えた区切りの空白の無い JSON（`json.dumps(sort_keys=True, ensure_ascii=False, separators=(",", ":"))`）にして sha256 を取った 64 桁の 16 進である。** 操作の列が同じなら、打つマシンと時刻に依らず同じハッシュになる。`--root` の絶対パスはハッシュに入れない（同じリポジトリの別の clone で示した差分も、中身が同じなら同じハッシュになる）。
+**差分のハッシュは、差分を並べた JSON の sha256 を取った 64 桁の 16 進である。** 並べる値は、ファイルの ID の順に並べた `[{"file": <ID>, "path": <相対パス>, "patch": <操作の列>}]` である。これを、キーを並べ替えた区切りの空白の無い JSON にする（`json.dumps(sort_keys=True, ensure_ascii=False, separators=(",", ":"))`）。 操作の列が同じなら、打つマシンと時刻に依らず同じハッシュになる。`--root` の絶対パスはハッシュに入れない（同じリポジトリの別の clone で示した差分も、中身が同じなら同じハッシュになる）。
 
-**書くときの JSON の形は、インデント 2・`ensure_ascii=False`・末尾の改行 1 つにする。** 今の NDF と人が書いた `.ndf/` の実物（このリポジトリの `.ndf/worktree.json`）はインデント 2 である。インデントの違うファイルは書き換えの後にインデント 2 へそろい、差分に空白の行が出る。差分の JSON Patch には空白の変化が載らないため、`plan` は差分の各ファイルの `items` に「インデントがそろう」を 1 行添える（`json.dumps(data, indent=2, ensure_ascii=False) + "\n"` と今の中身が違うとき）。
+**書くときの JSON の形は、インデント 2・`ensure_ascii=False`・末尾の改行 1 つにする。** 今の NDF と人が書いた `.ndf/` の実物（このリポジトリの `.ndf/worktree.json`）はインデント 2 である。インデントの違うファイルは書き換えの後にインデント 2 へそろい、差分に空白の行が出る。差分の JSON Patch には空白の変化が載らない。そのため `plan` は、差分の各ファイルの `items` に「インデントがそろう」を 1 行添える。添えるのは、`json.dumps(data, indent=2, ensure_ascii=False) + "\n"` と今の中身が違うときである。
 
 - 繰り返しの終わる条件: `check` はプラグインの下の文字のファイルを 1 回ずつ読み、各ファイルの行を 1 回ずつ見る（今と同じ）。`migrate` は改名表の行を 1 回ずつ当て、`*` は配列の要素の数だけ広げる
 - 計算量の注意: 禁止語の語の数は、廃止した語の登録で今の数十から数百へ増える。正規表現は語を `|` で並べた 1 つにまとめ、ファイルの行ごとに 1 回だけ当てる（今と同じ）。語ごとにファイルを読み直さない。改名表は 5 行、設定の `versions` は MVV の改訂の回数（数十）で、計算量の注意は無い
