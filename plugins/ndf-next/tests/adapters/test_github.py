@@ -153,9 +153,23 @@ def test_merge_refuses_queue_with_another_merge_method(queue_method: str | None,
         ("PUT", f"/repos/{REPO}/pulls/7/merge"): [httpx.Response(405, json={"message": "merge queue"})],
         ("POST", "/graphql"): [httpx.Response(200, json=state), httpx.Response(200, json={"data": {"enqueuePullRequest": {}}})],
     })  # fmt: skip
-    out = _hub(server).merge(7, method="merge")
+    out = _hub(server).merge(7, method="merge", require_method=True)
     assert (out.merged, out.kind) == (False, kind)
     assert len([r for r in server.sent("POST") if b"enqueuePullRequest" in r.content]) == enqueued
+
+
+def test_merge_follows_queue_method_when_method_is_not_required() -> None:
+    # プランの merge ステップ（ndf ci merge）は自動で決めた方式を渡すが、キューの基底ではキューの方式に従って入れる
+    pr = {"id": "PR_7", "isMergeQueueEnabled": True, "isInMergeQueue": False}
+    state = {"data": {"repository": {"pullRequest": pr, "mergeQueue": {"configuration": {"mergeMethod": "MERGE"}}}}}
+    server = Server({
+        ("GET", f"/repos/{REPO}/pulls/7"): [httpx.Response(200, json=_pull())],
+        ("PUT", f"/repos/{REPO}/pulls/7/merge"): [httpx.Response(405, json={"message": "merge queue"})],
+        ("POST", "/graphql"): [httpx.Response(200, json=state), httpx.Response(200, json={"data": {"enqueuePullRequest": {}}})],
+    })  # fmt: skip
+    out = _hub(server).merge(7, method="squash")
+    assert (out.merged, out.kind) == (False, "ci_pending")
+    assert len([r for r in server.sent("POST") if b"enqueuePullRequest" in r.content]) == 1
 
 
 def test_merge_raises_on_server_error() -> None:
@@ -208,6 +222,20 @@ def test_check_runs_refuses_more_pages_than_the_limit() -> None:
     server = Server({("GET", f"/repos/{REPO}/commits/{HEAD}/check-runs"): [full]})
     with pytest.raises(github.GitHubError, match="github.check-runs"):
         _hub(server).check_runs(HEAD)
+
+
+def test_compare_commits_reads_pages_beyond_250_until_total() -> None:
+    # pulls/<番号>/commits は 250 件で切れる。compare はページ送りで total_commits まで読む
+    pages = [httpx.Response(200, json={"total_commits": 260, "commits": [{"sha": str(i)} for i in range(n)]}) for n in (100, 100, 60)]
+    server = Server({("GET", f"/repos/{REPO}/compare/{OTHER}...{HEAD}"): pages})
+    assert len(_hub(server).compare_commits(OTHER, HEAD)) == 260
+    assert [r.url.params["page"] for r in server.seen] == ["1", "2", "3"]
+
+
+def test_commit_parents_lists_first_parent_first() -> None:
+    body = {"sha": HEAD, "parents": [{"sha": OTHER}, {"sha": "1" * 40}]}
+    server = Server({("GET", f"/repos/{REPO}/git/commits/{HEAD}"): [httpx.Response(200, json=body)]})
+    assert _hub(server).commit_parents(HEAD) == [OTHER, "1" * 40]
 
 
 def _pr_node(number: int) -> dict:

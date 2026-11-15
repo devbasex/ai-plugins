@@ -137,6 +137,8 @@ def test_production_merge_then_sync_back_to_base() -> None:
     assert done.merged and done.sync_pr == 8 and hub.merged == [7, 8]
     # 本番ブランチとベースブランチの祖先の関係を保つため、どちらも merge commit で入れる
     assert hub.merge_methods == [land.MERGE_METHOD, land.MERGE_METHOD] == ["merge", "merge"]
+    # 本番へのマージは merge commit を必須とし、キューの方式が違えば入れない
+    assert hub.merge_required == [True, True]
     assert land.Lander(hub, "develop", "main", 1.0).required("main") == ["pytest"]
 
 

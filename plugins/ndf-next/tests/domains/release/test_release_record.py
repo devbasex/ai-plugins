@@ -28,9 +28,13 @@ COMMITS = [
 ]
 
 
+# リリースの PR を本番ブランチへ入れたマージコミット
+MERGE = "e" * 40
+
+
 def _hub() -> FakeHub:
-    released = pull(RELEASE, head="r" * 40, base="main", ref=f"release/v{VERSION}", merged=True)
-    return FakeHub(pulls={RELEASE: released}, commits_of={RELEASE: list(COMMITS)})
+    released = pull(RELEASE, head="r" * 40, base="main", ref=f"release/v{VERSION}", merged=True)._replace(merge_sha=MERGE)
+    return FakeHub(pulls={RELEASE: released}, commits_of={"r" * 40: list(COMMITS)})
 
 
 def _written(hub: FakeHub, number: int) -> list[record_decide.Record]:
@@ -67,9 +71,19 @@ def test_dev_or_unmerged_release_writes_nothing() -> None:
     assert hub.comments_of == {}
 
 
-def test_range_that_github_truncates_is_refused() -> None:
+def test_range_is_read_from_the_merge_parent_beyond_250_commits() -> None:
+    # pulls/<番号>/commits の 250 件で切れず、マージ前の本番ブランチから先端までを読み切る
     hub = _hub()
-    hub.commits_of[RELEASE] = [_commit(f"{i:040d}", "c", f"{i + 1:040d}") for i in range(record.PULL_COMMITS_CAP)]
+    filler = [_commit(f"{i:040d}", "c", f"{i + 1:040d}") for i in range(300)]
+    hub.commits_of["r" * 40] = [*COMMITS[:-1], _commit("s" * 40, "Merge pull request #9 from o/main", f"{0:040d}", "m" * 40), *filler]
+    made, _ = record.write(hub, RELEASE, "main")
+    assert made.included == (11, 12)
+    assert hub.compared == [(f"parent-of-{MERGE}", "r" * 40)]
+
+
+def test_release_without_merge_commit_is_refused() -> None:
+    hub = _hub()
+    hub.pulls[RELEASE] = hub.pulls[RELEASE]._replace(merge_sha="")
     with pytest.raises(record.RecordError):
         record.write(hub, RELEASE, "main")
 

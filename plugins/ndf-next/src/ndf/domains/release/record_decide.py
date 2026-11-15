@@ -122,7 +122,7 @@ def verifications(bodies: Iterable[str]) -> list[dict[str, Any]]:
 
 
 def first_parent_subjects(commits: Sequence[Mapping[str, Any]], head: str) -> list[str]:
-    """PR のコミット（REST の `pulls/<番号>/commits` の形）を、先端 `head` から first-parent で辿った件名（新しい順）。
+    """PR のコミット（REST の `compare` の `commits` の形）を、先端 `head` から first-parent で辿った件名（新しい順）。
 
     辿るのは PR のコミットの中だけで、PR の外（base から辿れるコミット）に出たら止まる。範囲は承認資料の
     「含む PR」（`<前のリリース>..<ベースブランチ>` の first-parent）と同じになる。

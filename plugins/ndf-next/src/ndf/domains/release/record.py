@@ -24,8 +24,6 @@ from ndf.adapters.github import GitHub, Pull
 from ndf.adapters.publish import Publisher
 from ndf.domains.release import included_decide, record_decide, version_decide
 
-# GitHub が PR のコミットを返す上限（これだけ返れば、範囲を読み切れたか確かめられない）
-PULL_COMMITS_CAP = 250
 # リリース後テストの記録のスキーマ
 VERIFICATION_SCHEMA = contracts.schema_path("release-verification")
 # 書いた結果（PR ごと）
@@ -37,7 +35,7 @@ class NotReleased(Exception):
 
 
 class RecordError(Exception):
-    """記録を書けない（範囲を読み切れない・記録の形が違う・書き先が同じ版のリリース記録を持たない）。"""
+    """記録を書けない（マージコミットが読めない・記録の形が違う・書き先が同じ版のリリース記録を持たない）。"""
 
 
 class Written(NamedTuple):
@@ -58,10 +56,17 @@ class Records(NamedTuple):
 
 
 def included_of(hub: GitHub, pull: Pull, production: str) -> list[int]:
-    """リリースの PR `pull` に含めた PR の番号（小さい順）。コミットが上限まで返れば `RecordError`。"""
-    commits = hub.pull_commits(pull.number)
-    if len(commits) >= PULL_COMMITS_CAP:
-        raise RecordError(f"#{pull.number} のコミットが {PULL_COMMITS_CAP} 件以上あり、含めた PR を読み切れない")
+    """リリースの PR `pull` に含めた PR の番号（小さい順）。マージコミットが読めなければ `RecordError`。
+
+    PR のコミットは `pulls/<番号>/commits`（250 件で切れる）ではなく、マージコミットの第 1 親（マージ前の本番
+    ブランチ）からリリースの先端までの compare をページ送りで読み切る。
+    """
+    if not pull.merge_sha:
+        raise RecordError(f"#{pull.number} のマージコミットが読めず、含めた PR を決められない")
+    parents = hub.commit_parents(pull.merge_sha)
+    if not parents:
+        raise RecordError(f"#{pull.number} のマージコミット {pull.merge_sha} が親を持たない")
+    commits = hub.compare_commits(parents[0], pull.head_sha)
     return included_decide.numbers(record_decide.first_parent_subjects(commits, pull.head_sha), (production,))
 
 

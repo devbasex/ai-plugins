@@ -562,9 +562,25 @@ class GitHub:
         """Issue（か PR）のコメントを古い順にすべて読む（`github.list-pages` ページまで。超えたら `GitHubError`）。"""
         return [Authored.from_rest(c) for c in self._pages(f"/repos/{self.repo}/issues/{int(number)}/comments")]
 
-    def pull_commits(self, number: int) -> list[dict]:
-        """PR のコミット（head から辿れて base から辿れないもの）を REST の形のまま読む。GitHub は 250 件までしか返さない。"""
-        return self._pages(f"/repos/{self.repo}/pulls/{int(number)}/commits")
+    def commit_parents(self, sha: str) -> list[str]:
+        """コミット `sha` の親の SHA（第 1 親から順）。"""
+        body = self.rest("GET", f"/repos/{self.repo}/git/commits/{quote(sha, safe='')}")
+        return [text_of(p["sha"]) for p in body["parents"]]
+
+    def compare_commits(self, base: str, head: str) -> list[dict]:
+        """`head` から辿れて `base` から辿れないコミットを REST の形のまま、`total_commits` に届くまで読む。
+
+        `pulls/<番号>/commits` と違い 250 件で切れない。`github.list-pages` ページを超えたら途中で切らずに止まる。
+        """
+        pages = _page_cap("github.list-pages")
+        path = f"/repos/{self.repo}/compare/{quote(base, safe='')}...{quote(head, safe='')}"
+        rows: list[dict] = []
+        for page in range(1, pages + 1):
+            body = self.rest("GET", path, params={"per_page": PER_PAGE, "page": page})
+            rows.extend(body["commits"])
+            if len(rows) >= int(body["total_commits"]) or not body["commits"]:
+                return rows
+        raise _too_many_pages(f"{base}...{head} のコミットが", pages, "github.list-pages")
 
     def _pages(self, path: str) -> list[dict]:
         """配列を返す REST の一覧を、短いページが来るまで読む。`github.list-pages` ページを超えたら途中で切らずに止まる。"""
@@ -646,12 +662,16 @@ class GitHub:
         body = self.rest("GET", f"/repos/{self.repo}/actions/jobs/{int(job_id)}/logs")
         return body if isinstance(body, str) else ""
 
-    def merge(self, number: int, expect_head: Optional[str] = None, method: Optional[str] = None) -> MergeOutcome:
+    def merge(
+        self, number: int, expect_head: Optional[str] = None, method: Optional[str] = None, require_method: bool = False
+    ) -> MergeOutcome:
         """PR をマージする。先端の食い違い・決めていない残リスクは要求を送らずに断り、拒否は種類で返す（SF4）。
 
         `expect_head` は完全か短い SHA（#2041）。要求には読んだ先端の完全な SHA を添え、その後に先端が
         動いていれば GitHub が断る。`method` は宣言のマージの方式で、省けば基底のブランチで許された方式から選ぶ。
-        許されていない方式は要求を送らずに断る（3378-2）。
+        許されていない方式は要求を送らずに断る（3378-2）。基底がマージキューを持てば、キューは自分の方式でマージする。
+        `require_method` が真の呼び手（merge commit を必須とする本番へのマージ）だけ、キューの方式が `method` と
+        違えばキューへ入れずに断る。偽なら（プランの merge ステップ。方式は自動で決めた既定値）キューの方式に従う。
         """
         pull = self.pull(number)
         early = _preflight(pull, number, expect_head)
@@ -666,7 +686,8 @@ class GitHub:
         except GitHubError as exc:
             if exc.status not in MERGE_REFUSED_STATUS:
                 raise
-            queued = self._enqueue(pull, method) if exc.status == MERGE_QUEUE_REFUSED_STATUS else None
+            required = chosen if require_method else None
+            queued = self._enqueue(pull, required) if exc.status == MERGE_QUEUE_REFUSED_STATUS else None
             if queued is not None:
                 return queued
             after = self.pull(number)
@@ -677,8 +698,8 @@ class GitHub:
         """基底がマージキューを持てば PR を先端のままキューへ入れ、待ち（`ci_pending`）を返す。持たなければ None。
 
         直接のマージを 405 で断られたときだけ読む（キューの無い基底の要求の回数を増やさない）。既にキューにあれば入れ直さない。
-        `method` を指定したときは、キューのマージの方式が同じでなければ（読めないときも）キューへ入れずに断る
-        （キューは自分の方式でマージし、merge commit を求めた呼び手の祖先の関係が壊れる）。
+        `method`（方式を必須とする呼び手だけが渡す）を指定したときは、キューのマージの方式が同じでなければ
+        （読めないときも）キューへ入れずに断る（キューは自分の方式でマージし、merge commit を求めた呼び手の祖先の関係が壊れる）。
         """
         repo = self.repository(_MERGE_QUEUE_STATE, {"number": int(pull.number), "branch": pull.base_ref})
         node = repo["pullRequest"]

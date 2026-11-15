@@ -149,7 +149,7 @@ class Lander:
         refused = self._refusal(pull)
         if refused is not None:
             return refused
-        outcome: MergeOutcome = self.hub.merge(pull.number, expect_head=pull.head_sha, method=MERGE_METHOD)
+        outcome: MergeOutcome = self.hub.merge(pull.number, expect_head=pull.head_sha, method=MERGE_METHOD, require_method=True)
         if outcome.kind == MERGE_QUEUE_PENDING:
             return self._await_queue(pull, deadline)
         return Landed(outcome.merged, outcome.kind, outcome.detail)
