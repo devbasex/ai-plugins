@@ -167,6 +167,21 @@ class SpecModel:
         """エントリポイントの id → 列 `order`。"""
         return {r["id"]: r["order"] for r in self.entrypoints}
 
+    @property
+    def env_ids(self) -> frozenset[str]:
+        """環境変数の表の id。"""
+        return frozenset(r["id"] for r in self.env)
+
+    @property
+    def file_ids(self) -> frozenset[str]:
+        """置き場の表の行の id。"""
+        return frozenset(r["id"] for r in self.files)
+
+    @property
+    def skill_names(self) -> frozenset[str]:
+        """規約に載る Skill の名前。"""
+        return frozenset(s.name for s in self.skills)
+
 
 def surface_of(public: frozenset[tuple[str, str]] | set[tuple[str, str]], face: str, ident: str) -> str:
     return PUBLIC if (face, ident) in public else INTERNAL

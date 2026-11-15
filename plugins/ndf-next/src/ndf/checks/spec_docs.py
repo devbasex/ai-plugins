@@ -181,7 +181,7 @@ def io_findings(model: SpecModel, scope: Scope, rel: Any) -> list[Finding]:
     found = []
     for command in model.commands:
         found += [Finding(IO, io_rel, 1, f"副命令 {command.name}: {e}") for e in _source_errors(command) + _result_errors(command)]
-    known = {r["id"] for r in model.env}
+    known = model.env_ids
     for src in scope.code():
         found += [
             Finding(IO, src.rel, line, f"環境変数 {name} が環境変数の表（env）に無い")
@@ -265,9 +265,9 @@ def call_errors(words: list[str], commands: dict[str, CommandSpec]) -> list[str]
 
 
 def _row_errors(model: SpecModel) -> list[str]:
-    decls = {r["id"] for r in model.files}
-    env = {r["id"] for r in model.env}
-    names = {s.name for s in model.skills}
+    decls = model.file_ids
+    env = model.env_ids
+    names = model.skill_names
     errs = [f"Skill {s.name} が Skill の入出力の表（skill-io）に行を持たない" for s in model.skills if s.present and not s.row]
     errs += [f"公開する Skill {s.name} の行が args か env を持つ（正本はエントリポイントの表）" for s in model.skills if s.row_has_args_env]
     errs += [f"Skill の入出力の表の行 {i} の Skill に実体が無い" for i in model.skill_io_ids if i not in names]
@@ -296,11 +296,11 @@ def _hits(model: SpecModel, row: dict[str, Any]) -> bool:
     """公開する面の行が規約の項目に当たるか。"""
     kind, target = row["kind"], row["target"]
     if kind == "file":
-        return target in model.places and set(opt(row, "files")) <= {r["id"] for r in model.files}
+        return target in model.places and set(opt(row, "files")) <= model.file_ids
     face = spec_model.face_of(kind)
     # 面ごとの項目の名前（report は規約の項目を持たず、行があれば当たる）
     names = {
-        "skill": {s.name for s in model.skills},
+        "skill": model.skill_names,
         "command": {c.name for c in model.commands},
         "hook": {h.event for h in model.hooks},
     }
@@ -312,7 +312,7 @@ def _hits(model: SpecModel, row: dict[str, Any]) -> bool:
 def public_findings(model: SpecModel, plugin_root: Path, rel: Any) -> list[Finding]:
     ep_rel = rel(f"{CONTRACTS}/domains/entrypoints.json")
     found = []
-    env = {r["id"] for r in model.env}
+    env = model.env_ids
     for row in model.entrypoints:
         found += [
             Finding(PUBLIC, ep_rel, 1, f"公開する面の行 {row['id']} の環境変数 {e} が環境変数の表に無い")
