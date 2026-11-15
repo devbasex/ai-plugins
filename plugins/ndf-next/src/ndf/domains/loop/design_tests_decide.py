@@ -78,18 +78,28 @@ def looks_like_test_file(s: str) -> bool:
     return bool(parts) and (any(p in TEST_DIRS for p in parts) or bool(TEST_FILE.match(parts[-1])))
 
 
+def _classify_shape(s: str) -> Optional[Span]:
+    """形の説明（`<名前>` など）の字面。テストの名前の形なら kind が skipped、対象外なら None。"""
+    probe = re.sub(r"[<>{}*…]+", "x", s)
+    return Span(Kind.SHAPE, None, ()) if ("::" in s or looks_like_test_file(probe) or BARE_TEST.match(probe)) else None
+
+
+def _classify_function(s: str) -> Optional[Span]:
+    """`<パス>::<名前>` の字面。パスがテストのファイルで名前がそろえば関数、対象外なら None。"""
+    path, *names = s.split("::")
+    names = [ARGS.sub("", n).strip() for n in names]
+    if looks_like_test_file(path) and names and all(names):
+        return Span(Kind.FUNCTION, path.removeprefix("./"), tuple(names))
+    return None
+
+
 def classify(span: str, section: str) -> Optional[Span]:
     """字面 → 形。形の説明（`<名前>` など）なら kind が skipped、対象外なら None。"""
     s = span.strip()
     if any(c in s for c in SHAPE_CHARS):
-        probe = re.sub(r"[<>{}*…]+", "x", s)
-        return Span(Kind.SHAPE, None, ()) if ("::" in s or looks_like_test_file(probe) or BARE_TEST.match(probe)) else None
+        return _classify_shape(s)
     if "::" in s:
-        path, *names = s.split("::")
-        names = [ARGS.sub("", n).strip() for n in names]
-        if looks_like_test_file(path) and names and all(names):
-            return Span(Kind.FUNCTION, path.removeprefix("./"), tuple(names))
-        return None
+        return _classify_function(s)
     if looks_like_test_file(s):
         return Span(Kind.FILE, s.removeprefix("./").rstrip("/"), ())
     if section == BARE_SECTION and BARE_TEST.match(s):
