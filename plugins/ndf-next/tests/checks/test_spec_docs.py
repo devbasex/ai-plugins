@@ -152,6 +152,10 @@ def test_written_calls_and_call_errors(copy):
     assert spec_docs.call_errors(["test-slot", "run", "--", "uv", "run", "pytest", "-q"], commands) == []
     assert spec_docs.call_errors(["relay", "run", "--name", "a", "claude", "-p", "x"], commands) == []
     assert spec_docs.call_errors(["test-slot", "run", "--nope", "--", "x"], commands) == ["引数 --nope が無い"]
+    # argparse が足す -h / --help は引数として取り出さないが、呼び出しには書いてよい
+    assert spec_docs.call_errors(["worktree", "--help"], commands) == []
+    assert spec_docs.call_errors(["check", "-h"], commands) == []
+    assert spec_docs.call_errors(["contracts", "check", "--help"], commands) == []
 
 
 def test_a_written_call_with_an_unknown_argument_names_the_file_and_line(copy):

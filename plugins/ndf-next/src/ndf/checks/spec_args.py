@@ -53,6 +53,8 @@ class ArgTree:
 
     options: tuple[Arg, ...] = ()
     subcommands: dict[str, ArgTree] = field(default_factory=dict)
+    # argparse が足す `-h` / `--help` の名前（`add_help=False` の parser と手書きの表は空）。引数としては取り出さない
+    help_flags: tuple[str, ...] = ()
 
 
 class _Captured(Exception):
@@ -97,9 +99,10 @@ def tree_of(parser: argparse.ArgumentParser) -> ArgTree:
         actions = list(parser._actions)
         options = tuple(a for a in (arg_of(x) for x in actions) if a is not None)
         choices = {name: sub for a in actions if isinstance(a, argparse._SubParsersAction) for name, sub in a.choices.items()}
+        helps = tuple(s for a in actions if isinstance(a, argparse._HelpAction) for s in a.option_strings)
     except AttributeError as exc:
         raise CheckError(f"argparse の定義を読めない（内部の属性が変わった）: {exc}") from exc
-    return ArgTree(options, {name: tree_of(choices[name]) for name in sorted(choices)})
+    return ArgTree(options, {name: tree_of(choices[name]) for name in sorted(choices)}, helps)
 
 
 def _type_word(action: argparse.Action) -> str:

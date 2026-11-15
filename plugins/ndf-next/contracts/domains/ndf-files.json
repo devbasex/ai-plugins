@@ -26,7 +26,7 @@
     {"id": "mvv-body", "place": "ndf", "path": "mvv.md", "kind": "declaration", "tracked": true, "writer": "人の承認（M7）", "ends": "kept"},
     {"id": "pace", "place": "ndf", "path": "pace.json", "kind": "declaration", "tracked": true, "writer": "人", "ends": "kept", "keys": ["fast", "auto", "areas", "boundary_paths", "triggers", "loop"]},
     {"id": "review", "place": "ndf", "path": "review.json", "kind": "declaration", "tracked": true, "writer": "人", "ends": "kept", "keys": ["focus"]},
-    {"id": "backlog", "place": "ndf", "path": "backlog.json", "kind": "declaration", "tracked": true, "writer": "人", "ends": "kept", "keys": ["quality", "depths"]},
+    {"id": "backlog", "place": "ndf", "path": "backlog.json", "kind": "declaration", "tracked": true, "writer": "人", "ends": "kept", "keys": ["scale", "margin_steps", "auto_threshold", "capacity", "dependents_steps", "size_exponent", "large_slot_ratio", "large_min_size", "label_floor", "quality", "depths"]},
     {"id": "backlog-candidates", "place": "backlog-state", "path": "<repo>/candidates.json", "kind": "record", "tracked": false, "writer": "棚卸し（M6）", "ends": "replaced"},
     {"id": "backlog-rank", "place": "backlog-state", "path": "<repo>/rank.json", "kind": "record", "tracked": false, "writer": "棚卸し（M6）", "ends": "replaced"},
     {"id": "backlog-rejected", "place": "backlog-state", "path": "<repo>/rejected.json", "kind": "record", "tracked": false, "writer": "棚卸し（M6）", "ends": "kept"},

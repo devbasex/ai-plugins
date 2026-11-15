@@ -258,6 +258,11 @@ def _options(tree: ArgTree) -> dict[str, Arg]:
     return {n: a for a in tree.options if not a.positional for n in (a.name, *a.aliases)}
 
 
+def _flags(tree: ArgTree) -> set[str]:
+    """呼び出しに書いてよいオプションの名前（引数の名前・別名と、argparse が足す `-h` / `--help`）。"""
+    return set(_options(tree)) | set(tree.help_flags)
+
+
 def _is_placeholder(word: str) -> bool:
     return word.startswith(("<", "$", "{", "[")) or word in ("...", "…")
 
@@ -276,6 +281,7 @@ def call_errors(words: list[str], commands: dict[str, CommandSpec]) -> list[str]
     if tree is None:
         return []
     allowed = _options(tree)
+    flags = _flags(tree)
     errs = []
     rest = words[1:]
     seen = 0
@@ -286,7 +292,7 @@ def call_errors(words: list[str], commands: dict[str, CommandSpec]) -> list[str]
         if word == "--" and _remainder_at(tree, None):
             break
         if word.startswith("-"):
-            errs += _flag_error(word, allowed)
+            errs += _flag_error(word, flags)
             rest = _skip_values(word, allowed, rest)
             continue
         if _remainder_at(tree, seen):
@@ -298,6 +304,7 @@ def call_errors(words: list[str], commands: dict[str, CommandSpec]) -> list[str]
         seen = seen + 1 if sub is tree else 0
         tree = sub
         allowed |= _options(tree)
+        flags |= _flags(tree)
     return errs
 
 
@@ -309,10 +316,10 @@ def _remainder_at(tree: ArgTree, seen: int | None) -> bool:
     return any(a.remainder for a in (positionals if seen is None else positionals[seen : seen + 1]))
 
 
-def _flag_error(word: str, allowed: dict[str, Arg]) -> list[str]:
-    """オプションの語（`--名前` か `--名前=値`）の名前が、ここまでの命令の引数に無ければその指摘。"""
+def _flag_error(word: str, flags: set[str]) -> list[str]:
+    """オプションの語（`--名前` か `--名前=値`）の名前が、ここまでの命令で書いてよい名前に無ければその指摘。"""
     flag = word.split("=", 1)[0]
-    return [] if flag in allowed else [f"引数 {flag} が無い"]
+    return [] if flag in flags else [f"引数 {flag} が無い"]
 
 
 def _skip_values(word: str, allowed: dict[str, Arg], rest: list[str]) -> list[str]:

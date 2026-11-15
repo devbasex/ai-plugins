@@ -25,16 +25,26 @@ worktree・チーム・公開・[ask.schema.json](../../contracts/schemas/declar
 
 worktree・チーム・公開・[backlog.schema.json](../../contracts/schemas/declarations/backlog.schema.json)。読む工程: `ndf issues`（棚卸しの順位を付けるときと、深さの秒の上限を決めるとき）
 
-棚卸しの品質の枠と、深さごとの頻度・閾値・上限
+棚卸しの順位の設定（容量・ラベルの下限・尺度ほか）と品質の枠、深さごとの頻度・閾値・上限
 
 | キー | 型 | 既定値 | 取りうる値 | 必須か | 説明 |
 | --- | --- | --- | --- | --- | --- |
 | `$schema` | string | — | — | 任意 | 編集のときの補完に使うスキーマの位置。読み手は参照しない |
+| `auto_threshold` | integer | `8` | — | 任意 | 自動で進める閾値（尺度の値） |
+| `capacity` | integer | — | — | 任意 | 容量（引数の --capacity が上書きする）。無ければ容量で区切らない |
+| `dependents_steps` | array of array of integer | `[[0, 1], [1, 5], [2, 8], [3, 13], [5, 20]]` | — | 任意 | [被依存の数の下限, 段階（尺度の値）] の列（下限の昇順） |
 | `depths` | object | — | — | 任意 | 深さ（review・overhaul・research など）→ その深さの設定 |
-| `quality` | object | — | — | 任意 | 品質の枠。無ければ枠を取らない |
+| `label_floor` | object | `{}` | — | 任意 | ラベル → 段階（尺度の値）の下限 |
+| `large_min_size` | integer | — | — | 任意 | 大きな課題とみなす最小の大きさ（尺度の値）。無ければ尺度の最後から 2 番目 |
+| `large_slot_ratio` | number | `0.5` | — | 任意 | 大きな課題の枠の割合（0 以上 1 未満） |
+| `margin_steps` | integer | `1` | — | 任意 | 前倒しの閾値の余白（尺度の段の数） |
+| `quality` | object | — | — | 任意 | 品質の枠。無ければ枠を取らない。書いた枠の省略した項目は既定値 |
+| `scale` | array of integer | `[1, 2, 3, 5, 8, 13, 20]` | — | 任意 | 尺度（2 個以上の正の整数の狭義の昇順） |
+| `size_exponent` | number | `0.3` | — | 任意 | 大きさの指数 |
 | `version` | integer | — | `1` | 任意 | 宣言の形の版。読み手は知らない版を読まない |
 
 例: `{"quality": {"label": "quality", "ratio": 0.2, "min": 1}}`
+例: `{"capacity": 1, "label_floor": {"bug": 13}}`
 
 ## `.ndf/code-metrics.json`（code-metrics）
 
