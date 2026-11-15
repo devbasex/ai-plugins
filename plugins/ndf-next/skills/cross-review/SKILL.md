@@ -13,8 +13,6 @@ allowed-tools:
 
 # クロスレビュー収束ループ
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `drive.py`（M5）・`launch-reviewer.sh`（M5）・`measure.py`（M5）・`rotate-pr.sh`（M5）・`state.py`（M5）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
-
 PR を**既定の参加者プール（claude / codex / kiro とホスト）から選んだ 2 者**にレビューさせ、**新しい指摘が出なくなるまで**
 `/ndf:pr-review` と `/ndf:fix` を自動で回す。
 

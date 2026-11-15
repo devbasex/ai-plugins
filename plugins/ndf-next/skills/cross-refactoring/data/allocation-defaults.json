@@ -1,6 +1,6 @@
 {
   "initial": true,
-  "summary": "cross-refactoring の配分の初期値（1 件あたりの分）。履歴が無いときだけ使う。値は ai-plugins の実測（#917）なので、合わなければ利用先の .ndf/estimate.json の allocation_minutes で種類ごとに上書きする",
+  "summary": "cross-refactoring の配分の初期値（1 件あたりの分）。履歴が無いときだけ使う。値は NDF のリポジトリの実測（#917）なので、合わなければ利用先の .ndf/estimate.json の allocation_minutes で種類ごとに上書きする",
   "source": {
     "url": "https://github.com/devbasex/ai-plugins/pull/917#issuecomment-5796914428",
     "note": "#917 の実行の要約（launches の実測）から、適用の CLI の実測の秒を件数で割った値。担当の申告は使わない。提案と採否の時間は含めない（#933 決定 9）"

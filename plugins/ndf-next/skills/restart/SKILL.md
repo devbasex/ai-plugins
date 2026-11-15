@@ -8,8 +8,6 @@ allowed-tools:
 
 # 再起動して続きから始める
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `handoff.py`（M7）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
-
 **ラッパー（`ndf relay`）の下では、この応答の最後に出す `ndf-next` のブロック 1 つで、claude の
 
 **ラッパー（`ndf relay`）の下では、この応答の最後に出す `ndf-next` のブロック 1 つで、claude の

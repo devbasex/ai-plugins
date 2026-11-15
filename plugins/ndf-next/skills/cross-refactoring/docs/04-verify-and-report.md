@@ -1,7 +1,5 @@
 # 検証/修正・最終ゲート・配分テーブル・報告
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `drive.py`（M4）・`launch-cli.sh`（M4）・`refactor.py`（M4）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
-
 [← SKILL.md](../SKILL.md)
 
 **目次:** [検証と修正](#検証と修正) / [最終ゲート](#最終ゲート) / [配分テーブル](#配分テーブル) / [報告](#報告)
@@ -350,7 +348,7 @@ Pull Request に残る。**修正の回数はここでは進めない。** 進�
 | `fix` | 直近 10 行の Σ秒 ÷ Σ起動 | 初期値 |
 
 初期値は `data/allocation-defaults.json` にあり、初期値であること（`initial`）と出所（#917 の記録の URL）と式を持つ。
-値は ai-plugins の実測なので、利用先は `.ndf/estimate.json` の `allocation_minutes` で種類ごとに上書きできる
+値は NDF のリポジトリの実測なので、利用先は `.ndf/estimate.json` の `allocation_minutes` で種類ごとに上書きできる
 （省いた種類は初期値）。
 **担当の申告ではなく適用の CLI の実測の秒を件数で割った値**である（決定 9）。履歴が
 無い・読めないときは初期値でリファクタリング計画し、1 行知らせる（`plan.table_source` が `defaults`）。

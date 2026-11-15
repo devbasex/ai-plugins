@@ -1,7 +1,5 @@
 # 04: 状態ファイルと入出力の契約
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `critique.sh`（M5）・`drive.py`（M5）・`fetch-pr-comments.sh`（M1）・`launch-agy.sh`（M5）・`launch-reviewer.sh`（M5）・`measure.py`（M5）・`state.py`（M5）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
-
 `cross-review` が持つ 2 つの契約を一次資料として残す。状態ファイル（`state.json`）の形式と、
 レビューを行う CLI へ渡す入出力の取り決めである。**手順の途中では読まず、形式を確かめる
 ときだけ開く。** 手順は [01-state-and-review.md](01-state-and-review.md) にある。

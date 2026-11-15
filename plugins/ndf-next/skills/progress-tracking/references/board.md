@@ -58,7 +58,7 @@ $ gh api graphql -f query='{ repository(owner:"acme", name:"demo") {
 1 コマンドである。載っていない課題は進行が一切記録されない。
 
 ```console
-$ gh project item-add 1 --owner devbasex --url https://github.com/devbasex/ai-plugins/issues/372
+$ gh project item-add 1 --owner <owner> --url https://github.com/<owner>/<repo>/issues/372
 PVTI_lADOEIyqkc4Bh-5Mzg5eaBA
 ```
 
@@ -72,7 +72,7 @@ PVTI_lADOEIyqkc4Bh-5Mzg5eaBA
 $ gh api graphql -f query='{viewer{login}}'
 {"errors":[{"type":"RATE_LIMIT","code":"graphql_rate_limit", ...}]}
 
-$ gh project item-list 1 --owner devbasex --limit 3 --format json
+$ gh project item-list 1 --owner <owner> --limit 3 --format json
 unknown owner type
 ```
 
