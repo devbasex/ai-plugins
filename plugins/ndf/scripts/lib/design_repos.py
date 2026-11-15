@@ -157,22 +157,22 @@ def _loss_rows(table) -> tuple[list[int], list[int]]:
     return lost, empty
 
 
-def _table_problems(table, kinds: tuple[str, ...]) -> list[tuple[int, str]]:
-    """振る舞いの表の欠け（種類の行・扱えなくなることの空・直した後に起きることの列と空）を（行, 理由）で並べる。"""
+def _table_problems(table, kinds: tuple[str, ...]) -> tuple[list[tuple[int, str]], list[int]]:
+    """振る舞いの表の欠け（種類の行・扱えなくなることの空・直した後に起きることの列と空）を（行, 理由）で並べ、扱えなくなることがある行と返す。"""
     problems: list[tuple[int, str]] = []
     repo_col = _col(table.header, REPO_COL)
     names = [_row_cell(r, repo_col) for r in table.rows]
     for kind in kinds:
         if not any(n.startswith(kind) for n in names):
             problems.append((table.start, f"種類 {kind} の行が無い"))
-    _, empty = _loss_rows(table)
+    lost, empty = _loss_rows(table)
     problems += [(i, "扱えなくなることが空") for i in empty]
     after_col = _col(table.header, AFTER_COL)
     if after_col is None:
         problems.append((table.start, f"振る舞いの表に {AFTER_COL} の列が無い"))
     else:
         problems += [(table.body_line(k), f"{AFTER_COL}が空") for k, r in enumerate(table.rows) if not _row_cell(r, after_col)]
-    return problems
+    return problems, lost
 
 
 def _has_own_note(text: str, inner: list) -> bool:
@@ -186,17 +186,18 @@ def _has_own_note(text: str, inner: list) -> bool:
 
 
 def _scope_problems(text: str, settings: RepoSettings):
-    """「適用範囲」の欠けを（行, 理由）で並べ、見つけた振る舞いの表（無ければ None）を返す。"""
+    """「適用範囲」の欠けを（行, 理由）で並べ、振る舞いの表の扱えなくなることがある行（表が無ければ空）と返す。"""
     import md
 
     sections = md.md_sections(text)
     scope = next((s for s in sections if s.heading.level == 2 and s.heading.title == SCOPE_TITLE), None)
     if scope is None:
-        return [(-1, f"{SCOPE_TITLE}の節が無い")], None
+        return [(-1, f"{SCOPE_TITLE}の節が無い")], []
     inner = [s for s in sections if scope.start <= s.heading.line < scope.end and s.heading.level == 3]
     head_line = scope.heading.line
     problems: list[tuple[int, str]] = []
     table = None
+    lost: list[int] = []
     behavior = next((s for s in inner if s.heading.title == BEHAVIOR_TITLE), None)
     if behavior is None:
         problems.append((head_line, f"{BEHAVIOR_TITLE}の節が無い"))
@@ -205,10 +206,11 @@ def _scope_problems(text: str, settings: RepoSettings):
         if table is None:
             problems.append((behavior.heading.line, f"振る舞いの表に {REPO_COL} と {LOSS_COL} の列が無い"))
     if table is not None:
-        problems += _table_problems(table, settings.kinds)
+        found, lost = _table_problems(table, settings.kinds)
+        problems += found
     if not _has_own_note(text, inner):
         problems.append((head_line, f"このリポジトリ{OWN_SUFFIX}の欄が無い"))
-    return problems, table
+    return problems, lost
 
 
 def check_repos(path: str, text: str, settings: RepoSettings, left_ids: set[str]) -> list[dict]:
@@ -219,10 +221,9 @@ def check_repos(path: str, text: str, settings: RepoSettings, left_ids: set[str]
         shown = lines[i].strip() if 0 <= i < len(lines) else ""
         return {"name": f"{path}:{i + 1}", "rule": rule, "text": f"{reason}: {shown}" if shown else reason}
 
-    problems, table = _scope_problems(text, settings)
+    problems, lost = _scope_problems(text, settings)
     found = [(i, item(i, SCOPE_MISSING, why)) for i, why in problems]
-    if table is not None and settings.redline not in left_ids:
-        lost, _ = _loss_rows(table)
+    if lost and settings.redline not in left_ids:
         why = f"扱えなくなることがあるのに、人へ残す判断に {settings.redline} の行が無い"
         found += [(i, item(i, LOSS_UNROUTED, why)) for i in lost]
     return [it for _, it in sorted(found, key=lambda x: x[0])]
