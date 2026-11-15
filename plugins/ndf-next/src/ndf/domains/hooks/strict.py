@@ -66,6 +66,13 @@ class MergeCall(NamedTuple):
     repo: Optional[str]
 
 
+class ShellContext(NamedTuple):
+    """文を打つシェルの環境。作業ディレクトリ `here`（決められなければ None）と宛先 `gh_repo`（`GH_REPO` の値、無ければ None）。"""
+
+    here: Optional[Path]
+    gh_repo: Optional[str]
+
+
 def judge(payload: dict, off: frozenset) -> Tuple[Optional[Verdict], Optional[float]]:
     """エントリポイントが呼ぶ判定と所要のミリ秒。`NDF_HOOK_OFF` で止めていれば `(None, None)`。"""
     if tables.is_off(GUARD_NAME, off):
@@ -80,18 +87,18 @@ def check(raw_payload: object, root: str, gh_repo: Optional[str] = None) -> Opti
     text = _command_text(raw_payload)
     if text is None or not _mentions_merge(text):
         return None
-    return _script_denial(text, Path(root), 0, gh_repo)
+    return _script_denial(text, ShellContext(Path(root), gh_repo), 0)
 
 
-def _script_denial(text: str, here: Optional[Path], depth: int, gh_repo: Optional[str] = None) -> Optional[Verdict]:
-    """スクリプト 1 つの判定。読めない・深すぎるときは止める。`here` が None なら作業ディレクトリを決められない。"""
+def _script_denial(text: str, ctx: ShellContext, depth: int) -> Optional[Verdict]:
+    """スクリプト 1 つの判定。読めない・深すぎるときは止める。`ctx.here` が None なら作業ディレクトリを決められない。"""
     if depth > _MAX_DEPTH:
         return deny(f"入れ子のスクリプトが深く、本番チャネルへのマージかを確かめられない。{_MERGE_HELP}")
     try:
         parts = list(strict_shell.parts(text))
     except ValueError:
         return deny(f"シェルの字句を読めず、本番チャネルへのマージかを確かめられない。{_MERGE_HELP}")
-    return _first_denial(parts, here, depth, gh_repo)
+    return _first_denial(parts, ctx, depth)
 
 
 def _mentions_merge(text: str) -> bool:
@@ -99,58 +106,53 @@ def _mentions_merge(text: str) -> bool:
     return "gh" in text and "merge" in text
 
 
-def _first_denial(
-    parts: List[Union[List[str], str]], here: Optional[Path], depth: int = 0, gh_repo: Optional[str] = None
-) -> Optional[Verdict]:
+def _first_denial(parts: List[Union[List[str], str]], ctx: ShellContext, depth: int = 0) -> Optional[Verdict]:
     """`cd` で作業ディレクトリを、`export GH_REPO=...` で宛先を移しながら、最初に止める `gh pr merge` の判定。無ければ None。
 
     サブシェルの `(` で今の値を退避して `)` で戻す。パイプラインと `&` のコマンドの移動は後の文へ持ち越さない。
     """
-    saved: List[Tuple[Optional[Path], Optional[str]]] = []
+    saved: List[ShellContext] = []
     for i, raw in enumerate(parts):
         if isinstance(raw, str):
-            here, gh_repo = _subshell_step(raw, saved, here, gh_repo)
+            ctx = _subshell_step(raw, saved, ctx)
             continue
         words = _command_words(raw)
-        moved = _moved(here, gh_repo, raw, words)
+        moved = _moved(ctx, raw, words)
         if moved is not None:
             if not _in_own_shell(parts, i):
-                here, gh_repo = moved
+                ctx = moved
             continue
-        env_repo = _assigned_gh_repo(raw[: len(raw) - len(words)], gh_repo)
-        verdict = _statement_denial(here, raw, words, depth, env_repo)
+        # 文の前の一時的な代入（`GH_REPO=x gh ...`）はその文だけの環境にし、後の文へ持ち越さない
+        call_ctx = ctx._replace(gh_repo=_assigned_gh_repo(raw[: len(raw) - len(words)], ctx.gh_repo))
+        verdict = _statement_denial(call_ctx, raw, words, depth)
         if verdict is not None:
             return verdict
     return None
 
 
-def _subshell_step(
-    raw: str, saved: List[Tuple[Optional[Path], Optional[str]]], here: Optional[Path], gh_repo: Optional[str]
-) -> Tuple[Optional[Path], Optional[str]]:
+def _subshell_step(raw: str, saved: List[ShellContext], ctx: ShellContext) -> ShellContext:
     """区切りの字句 1 つの処理。`(` で今の値を `saved` へ退避し、`)` で戻す（退避が無ければ作業ディレクトリを決められない）。"""
     if raw == "(":
-        saved.append((here, gh_repo))
+        saved.append(ctx)
     elif raw == ")":
-        return saved.pop() if saved else (None, gh_repo)
-    return here, gh_repo
+        return saved.pop() if saved else ctx._replace(here=None)
+    return ctx
 
 
-def _statement_denial(here: Optional[Path], raw: List[str], words: List[str], depth: int, env_repo: Optional[str]) -> Optional[Verdict]:
+def _statement_denial(ctx: ShellContext, raw: List[str], words: List[str], depth: int) -> Optional[Verdict]:
     """文 1 つの判定（読めないスクリプト → 中のスクリプト → `gh pr merge` の呼び出しの順）。止めなければ None。"""
-    return _unreadable_script_denial(words) or _inner_denial(here, raw, words, depth, env_repo) or _call_verdict(here, words, env_repo)
+    return _unreadable_script_denial(words) or _inner_denial(ctx, raw, words, depth) or _call_verdict(ctx, words)
 
 
-def _moved(
-    here: Optional[Path], gh_repo: Optional[str], raw: List[str], words: List[str]
-) -> Optional[Tuple[Optional[Path], Optional[str]]]:
+def _moved(ctx: ShellContext, raw: List[str], words: List[str]) -> Optional[ShellContext]:
     """作業ディレクトリか宛先を移す文（`cd`・`pushd`・`popd`・代入だけ・`export`・`unset GH_REPO`）なら移った後の値。ほかは None。"""
     head = words[:1]
     if head == ["cd"] or head and head[0] in _UNKNOWN_DIR_COMMANDS:
-        return _cd(here, words), gh_repo
+        return ctx._replace(here=_cd(ctx.here, words))
     if not words or head == ["export"]:
-        return here, _assigned_gh_repo(raw, gh_repo)
+        return ctx._replace(gh_repo=_assigned_gh_repo(raw, ctx.gh_repo))
     if head == ["unset"] and _GH_REPO in words[1:]:
-        return here, None
+        return ctx._replace(gh_repo=None)
     return None
 
 
@@ -214,11 +216,11 @@ def _without_redirections(words: List[str]) -> List[str]:
     return kept
 
 
-def _inner_denial(here: Optional[Path], raw: List[str], words: List[str], depth: int, gh_repo: Optional[str]) -> Optional[Verdict]:
+def _inner_denial(ctx: ShellContext, raw: List[str], words: List[str], depth: int) -> Optional[Verdict]:
     """`bash -c`・`eval`・コマンド置換の中のスクリプトの判定。中に `gh` と `merge` が無ければ None。"""
     for inner in _inner_scripts(raw, words):
         if _mentions_merge(inner):
-            verdict = _script_denial(inner, here, depth + 1, gh_repo)
+            verdict = _script_denial(inner, ctx, depth + 1)
             if verdict is not None:
                 return verdict
     return None
@@ -264,9 +266,9 @@ def _shell_script(words: List[str]) -> Optional[str]:
     return None
 
 
-def _call_verdict(here: Optional[Path], words: List[str], gh_repo: Optional[str]) -> Optional[Verdict]:
-    call = _merge_call(words, gh_repo)
-    return None if call is None else _judge(here, call)
+def _call_verdict(ctx: ShellContext, words: List[str]) -> Optional[Verdict]:
+    call = _merge_call(words, ctx.gh_repo)
+    return None if call is None else _judge(ctx.here, call)
 
 
 def _command_text(raw: object) -> Optional[str]:
