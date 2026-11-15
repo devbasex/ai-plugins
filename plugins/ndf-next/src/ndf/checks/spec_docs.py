@@ -19,6 +19,7 @@ from __future__ import annotations
 import ast
 import json
 import shlex
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -41,9 +42,11 @@ CALL_DIRS = ("skills/", "agents/")
 CALL_STOPS = frozenset({"|", "||", "&&", ";", ">", ">>", "2>&1", "&", ")", "<"})
 # 呼び出しの先頭の語（エントリポイントの短い名前か、末尾がそのファイルのパス）
 ENTRY = identity.FIXED_WORDS["entrypoint"]
+# プラグインの根からの相対パス → リポジトリの根からの相対パス（指摘の置き場）
+Rel = Callable[[str], str]
 
 
-def _table_rel(rel: Any, name: str) -> str:
+def _table_rel(rel: Rel, name: str) -> str:
     """事実の表 `name` のリポジトリの根からの相対パス（置き場の facts/ か domains/ は `facts.place` が決める）。"""
     return rel(f"{CONTRACTS}/{facts.place(name)}")
 
@@ -119,7 +122,7 @@ def _real_errors(decl: DeclarationSpec, path: Path) -> list[str]:
     return sorted(f"/{'/'.join(str(p) for p in e.absolute_path)}: {e.message}" for e in errs)
 
 
-def decl_findings(model: SpecModel, repo_root: Path, rel: Any) -> list[Finding]:
+def decl_findings(model: SpecModel, repo_root: Path, rel: Rel) -> list[Finding]:
     files_rel = _table_rel(rel, "ndf-files")
     decl_dir = repo_root / model.places[spec_model.decl_place(model.places)]["path"]
     found = []
@@ -182,7 +185,7 @@ def env_reads(tree: ast.Module) -> list[tuple[int, str]]:
     return sorted(found)
 
 
-def io_findings(model: SpecModel, scope: Scope, rel: Any) -> list[Finding]:
+def io_findings(model: SpecModel, scope: Scope, rel: Rel) -> list[Finding]:
     io_rel = rel(f"{CONTRACTS}/{IO_SCHEMA_DIR}")
     found = []
     for command in model.commands:
@@ -283,7 +286,7 @@ def _row_errors(model: SpecModel) -> list[str]:
     return errs
 
 
-def skill_findings(model: SpecModel, scope: Scope, rel: Any) -> list[Finding]:
+def skill_findings(model: SpecModel, scope: Scope, rel: Rel) -> list[Finding]:
     table_rel = _table_rel(rel, "skill-io")
     found = [Finding(SKILL, table_rel, 1, e) for e in _row_errors(model)]
     commands = {c.name: c for c in model.commands}
@@ -315,7 +318,7 @@ def _hits(model: SpecModel, row: dict[str, Any]) -> bool:
     return face == "report"
 
 
-def public_findings(model: SpecModel, plugin_root: Path, rel: Any) -> list[Finding]:
+def public_findings(model: SpecModel, plugin_root: Path, rel: Rel) -> list[Finding]:
     ep_rel = _table_rel(rel, "entrypoints")
     found = []
     env = model.env_ids
@@ -367,7 +370,7 @@ def _first_diff(want: str, have: str) -> int:
     return min(len(want.splitlines()), len(have.splitlines())) + 1
 
 
-def docs_findings(rendered: dict[str, str], plugin_root: Path, patterns: list[str], rel: Any) -> list[Finding]:
+def docs_findings(rendered: dict[str, str], plugin_root: Path, patterns: list[str], rel: Rel) -> list[Finding]:
     """描画した中身とコミットされた生成物の違い（無い・違う・読めない）と、描画に無い生成物の残り。"""
     hint = "。ndf check --write-spec で生成し直す"
     found = []
