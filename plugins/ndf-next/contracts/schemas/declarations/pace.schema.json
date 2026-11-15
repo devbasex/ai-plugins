@@ -1,0 +1,257 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "declarations/pace.schema.json",
+  "title": "進め方の宣言（.ndf/pace.json）",
+  "description": "進め方（fast・auto）の許可と、共通の層の範囲・レッドラインのパス・閾値・開発ループの設定",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "編集のときの補完に使うスキーマの位置。読み手は参照しない"
+    },
+    "version": {
+      "type": "integer",
+      "enum": [
+        1
+      ],
+      "description": "宣言の形の版。読み手は知らない版を読まない"
+    },
+    "fast": {
+      "type": "object",
+      "description": "進め方の許可",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "この進め方を使ってよいか",
+          "default": false
+        },
+        "modes": {
+          "type": "array",
+          "description": "この進め方を使ってよいモード",
+          "items": {
+            "type": "string"
+          }
+        },
+        "verify": {
+          "type": "string",
+          "description": "この進め方で出した後に打つ導入の確かめのコマンド"
+        }
+      },
+      "additionalProperties": false
+    },
+    "auto": {
+      "type": "object",
+      "description": "進め方の許可",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "この進め方を使ってよいか",
+          "default": false
+        },
+        "modes": {
+          "type": "array",
+          "description": "この進め方を使ってよいモード",
+          "items": {
+            "type": "string"
+          }
+        },
+        "verify": {
+          "type": "string",
+          "description": "この進め方で出した後に打つ導入の確かめのコマンド"
+        }
+      },
+      "additionalProperties": false
+    },
+    "areas": {
+      "type": "array",
+      "description": "共通の層の範囲の並び",
+      "items": {
+        "type": "object",
+        "description": "範囲 1 つ",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "範囲の名前"
+          },
+          "common": {
+            "type": "boolean",
+            "description": "共通の層か"
+          },
+          "paths": {
+            "type": "array",
+            "description": "範囲の glob",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "paths"
+        ]
+      }
+    },
+    "boundary_paths": {
+      "type": "array",
+      "description": "レッドラインのパス（触れる変更は人の承認が要る）の glob",
+      "items": {
+        "type": "string"
+      }
+    },
+    "triggers": {
+      "type": "object",
+      "description": "進め方を切り替える閾値",
+      "properties": {
+        "score": {
+          "type": "integer",
+          "description": "点数の閾値"
+        },
+        "common_weight": {
+          "type": "integer",
+          "description": "共通の層の重み"
+        },
+        "lines": {
+          "type": "integer",
+          "description": "変更の行数の閾値"
+        },
+        "escapes": {
+          "type": "integer",
+          "description": "すり抜けの件数の閾値"
+        },
+        "hours": {
+          "type": "integer",
+          "description": "時間の閾値"
+        }
+      },
+      "additionalProperties": false
+    },
+    "loop": {
+      "type": "object",
+      "description": "開発ループの設定",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "開発ループを使ってよいか",
+          "default": false
+        },
+        "budget": {
+          "type": "object",
+          "description": "開発ループの予算",
+          "properties": {
+            "laps": {
+              "type": "integer",
+              "description": "周回の上限"
+            },
+            "hours": {
+              "type": "integer",
+              "description": "時間の上限"
+            },
+            "usd": {
+              "type": "number",
+              "description": "費用の上限（USD）"
+            }
+          },
+          "additionalProperties": false
+        },
+        "reorder_width": {
+          "type": "integer",
+          "description": "選定で並べ替えの対象にする候補の件数",
+          "minimum": 0,
+          "default": 0
+        },
+        "parallel": {
+          "type": "object",
+          "description": "並列の計画の答え待ちの閾値",
+          "properties": {
+            "plan": {
+              "type": "integer",
+              "description": "計画の閾値",
+              "minimum": 1,
+              "default": 8
+            },
+            "lane": {
+              "type": "integer",
+              "description": "レーンの閾値",
+              "minimum": 1,
+              "default": 3
+            }
+          },
+          "additionalProperties": false
+        },
+        "business_hours": {
+          "type": "object",
+          "description": "業務時間",
+          "properties": {
+            "timezone": {
+              "type": "string",
+              "description": "IANA の時間帯の名前"
+            },
+            "days": {
+              "type": "array",
+              "description": "曜日",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "mon",
+                  "tue",
+                  "wed",
+                  "thu",
+                  "fri",
+                  "sat",
+                  "sun"
+                ]
+              }
+            },
+            "start": {
+              "type": "string",
+              "description": "始まり（HH:MM）",
+              "pattern": "^[0-2][0-9]:[0-5][0-9]$"
+            },
+            "end": {
+              "type": "string",
+              "description": "終わり（HH:MM）",
+              "pattern": "^[0-2][0-9]:[0-5][0-9]$"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "x-ndf-read-by": [
+    {
+      "by": "ndf answer",
+      "when": "承認ゲートでレッドラインのパスを照らすとき"
+    },
+    {
+      "by": "ndf loop",
+      "when": "開発ループの選定と予算を決めるとき"
+    }
+  ],
+  "examples": [
+    {
+      "version": 1,
+      "fast": {
+        "enabled": true,
+        "modes": [
+          "light"
+        ]
+      },
+      "boundary_paths": [
+        ".github/workflows/**"
+      ],
+      "loop": {
+        "enabled": true,
+        "budget": {
+          "laps": 10
+        }
+      }
+    }
+  ]
+}

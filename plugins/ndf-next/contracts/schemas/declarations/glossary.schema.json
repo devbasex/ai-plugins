@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "declarations/glossary.schema.json",
+  "title": "用語集の宣言（.ndf/glossary.json）",
+  "description": "用語集の正本と生成する文書の置き場、検査の範囲",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "編集のときの補完に使うスキーマの位置。読み手は参照しない"
+    },
+    "version": {
+      "type": "integer",
+      "enum": [
+        1
+      ],
+      "description": "宣言の形の版。読み手は知らない版を読まない"
+    },
+    "format": {
+      "type": "string",
+      "description": "正本の形",
+      "enum": [
+        "json"
+      ],
+      "default": "json"
+    },
+    "source": {
+      "type": "string",
+      "description": "用語集の正本のパス（リポジトリの根から）"
+    },
+    "document": {
+      "type": "string",
+      "description": "生成する索引の文書のパス"
+    },
+    "document_dir": {
+      "type": "string",
+      "description": "領域ごとに分けて生成する文書の置き場"
+    },
+    "max_lines": {
+      "type": "integer",
+      "description": "生成する文書 1 本の行数の上限",
+      "minimum": 1
+    },
+    "check": {
+      "type": "object",
+      "description": "検査の範囲",
+      "properties": {
+        "paths": {
+          "type": "array",
+          "description": "語を照らす文書の glob",
+          "items": {
+            "type": "string"
+          }
+        },
+        "term_sections": {
+          "type": "array",
+          "description": "用語の節の見出し",
+          "items": {
+            "type": "string"
+          }
+        },
+        "source_paths": {
+          "type": "array",
+          "description": "語の出所として読む文書の glob",
+          "items": {
+            "type": "string"
+          }
+        },
+        "banned": {
+          "type": "object",
+          "description": "使わない語",
+          "properties": {
+            "words": {
+              "type": "array",
+              "description": "使わない語",
+              "items": {
+                "type": "string"
+              }
+            },
+            "paths": {
+              "type": "array",
+              "description": "照らす glob",
+              "items": {
+                "type": "string"
+              }
+            },
+            "exclude": {
+              "type": "array",
+              "description": "外す glob",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "x-ndf-read-by": [
+    {
+      "by": "ndf records glossary",
+      "when": "用語集の生成と検査のとき"
+    },
+    {
+      "by": "ndf records spec",
+      "when": "確定仕様化で用語を照らすとき"
+    }
+  ],
+  "examples": [
+    {
+      "version": 1,
+      "format": "json",
+      "source": "docs/glossary/glossary.json",
+      "document": "docs/glossary.md"
+    }
+  ]
+}

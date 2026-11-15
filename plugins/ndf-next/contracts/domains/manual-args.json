@@ -1,0 +1,33 @@
+{
+  "summary": "argparse を使わない副命令の下位の命令と引数（規約の生成が引数のスキーマを作る入力）。argparse から引数を取り出せる副命令はこの表に行を持たない（持てば ndf check の spec-io が落とす）",
+  "owner": "副命令を持つ子（初版は #3518。ndf.checks.spec_args）",
+  "columns": {
+    "subcommands": {
+      "type": "array",
+      "summary": "下位の命令の名前の並び。無ければ下位の命令を持たない",
+      "optional": true
+    },
+    "args": {
+      "type": "array",
+      "summary": "引数の並び。1 つは <下位の命令>:<名前>:<型>:<required か optional>:<説明>（下位の命令に属さない引数は <下位の命令> を空にする。型は JSON Schema の type）",
+      "optional": true
+    },
+    "meaning": {
+      "type": "string",
+      "summary": "副命令が引数をどう受けるか"
+    }
+  },
+  "rows": [
+    {
+      "id": "launch-args",
+      "meaning": "引数を受けない。引数があれば invalid で止まる"
+    },
+    {
+      "id": "notify",
+      "subcommands": [
+        "send"
+      ],
+      "meaning": "下位の命令 send だけを受ける（引数は持たない）。ほかの並びは invalid で止まる"
+    }
+  ]
+}

@@ -1,0 +1,136 @@
+{
+  "summary": "実体のある配る Skill（manifests/skills.json の行で skills/<名前>/SKILL.md があるもの）ごとの入出力。公開する Skill（エントリポイントの表の種類 skill・block の target）の引数と環境変数はエントリポイントの表が正本で、この表の行は args・env を持たない（持てば ndf check の spec-skill が落とす）",
+  "owner": "Skill を移す子（初版は #3518。ndf.checks.spec_model）",
+  "columns": {
+    "args": {
+      "type": "array",
+      "summary": "Skill が受ける引数の形（正規表現。どれか 1 つに全体が一致する）。空の並びは引数を受けない。公開する Skill は持たない",
+      "optional": true
+    },
+    "goal_end": {
+      "type": "string",
+      "summary": "/goal の終わりの条件（Skill が /goal で回るとき）。無ければ /goal で回らない",
+      "optional": true
+    },
+    "declarations": {
+      "type": "array",
+      "summary": "Skill が読む宣言（domains/ndf-files の id）"
+    },
+    "env": {
+      "type": "array",
+      "summary": "Skill が読む環境変数（domains/env の id）。公開する Skill は持たない",
+      "optional": true
+    },
+    "result": {
+      "type": "string",
+      "summary": "結果の形。block は応答の末尾の ndf-next ブロック、report は応答の末尾の区間の報告、none は決まった形を持たない"
+    },
+    "meaning": {
+      "type": "string",
+      "summary": "Skill が何をするか"
+    }
+  },
+  "rows": [
+    {
+      "id": "cherry-pick-pr",
+      "args": [
+        "[^ ]+"
+      ],
+      "declarations": [
+        "worktree"
+      ],
+      "env": [],
+      "result": "none",
+      "meaning": "マージ済みの修正を環境ブランチへ cherry-pick する Pull Request を作る。引数は環境ブランチの名前"
+    },
+    {
+      "id": "chrome-cdp",
+      "args": [],
+      "declarations": [],
+      "env": [],
+      "result": "none",
+      "meaning": "開発コンテナから利用者の Chrome へ CDP で繋ぎ、ログインと目視の確かめをする"
+    },
+    {
+      "id": "deploy",
+      "args": [
+        "[^ ]+"
+      ],
+      "declarations": [
+        "worktree"
+      ],
+      "env": [],
+      "result": "none",
+      "meaning": "環境ブランチへのデプロイの Pull Request を作る。引数は環境ブランチの名前"
+    },
+    {
+      "id": "docker-container-access",
+      "args": [],
+      "declarations": [],
+      "env": [],
+      "result": "none",
+      "meaning": "コンテナへの接続と localhost の経路の失敗を調べる"
+    },
+    {
+      "id": "document-systems",
+      "args": [],
+      "declarations": [],
+      "env": [],
+      "result": "none",
+      "meaning": "文書の置き場（Google Drive・Notion・Confluence・SharePoint・リポジトリ）ごとの読み書きの手順を持つ"
+    },
+    {
+      "id": "investigation-rules",
+      "args": [],
+      "declarations": [],
+      "env": [],
+      "result": "none",
+      "meaning": "調べた手段を示さずに「無い」と書かないための規則"
+    },
+    {
+      "id": "logging-guidelines",
+      "args": [],
+      "declarations": [],
+      "env": [],
+      "result": "none",
+      "meaning": "ログのレベルの選び方と、秘密と個人の情報をログに出さない規則"
+    },
+    {
+      "id": "ml-model-structure",
+      "args": [],
+      "declarations": [],
+      "env": [],
+      "result": "none",
+      "meaning": "機械学習の学習と推論のコードの置き方"
+    },
+    {
+      "id": "ndf-policies",
+      "args": [],
+      "declarations": [
+        "worktree"
+      ],
+      "env": [],
+      "result": "none",
+      "meaning": "ブランチの運用と Pull Request の運用の基準（知識として読むだけ）"
+    },
+    {
+      "id": "notion-writing",
+      "args": [],
+      "declarations": [],
+      "env": [],
+      "result": "none",
+      "meaning": "Notion のページの書き方"
+    },
+    {
+      "id": "pr-tests",
+      "args": [
+        "",
+        "[1-9][0-9]*"
+      ],
+      "declarations": [],
+      "env": [],
+      "result": "none",
+      "meaning": "Pull Request の本文のテストの計画を流し、結果を Pull Request のコメントに書く。引数は Pull Request の番号（無ければ今のブランチの Pull Request）"
+    }
+  ]
+}

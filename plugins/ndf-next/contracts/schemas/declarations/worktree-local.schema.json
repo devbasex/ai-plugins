@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "declarations/worktree-local.schema.json",
+  "title": "worktree の個人の宣言（.ndf/worktree.local.json）",
+  "description": "各自の機械の値。git が追跡しない。共有の宣言（worktree.json）の follow_branch・localenv・testenv だけを重ね、ほかのキーは反映しない",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "編集のときの補完に使うスキーマの位置。読み手は参照しない"
+    },
+    "version": {
+      "type": "integer",
+      "enum": [
+        1
+      ],
+      "description": "宣言の形の版。読み手は知らない版を読まない"
+    },
+    "follow_branch": {
+      "type": "boolean",
+      "description": "true のときだけ、セッションの開始の hook が主ディレクトリのブランチを稼働中の worktree へ追従させる",
+      "default": false
+    },
+    "localenv": {
+      "type": "object",
+      "description": "ローカルの動作の確かめの個人の値（共有の宣言の localenv に重ねる）"
+    },
+    "testenv": {
+      "type": "object",
+      "description": "テスト環境の個人の値（共有の宣言の testenv に重ねる）"
+    }
+  },
+  "x-ndf-read-by": [
+    {
+      "by": "ndf worktree",
+      "when": "worktree の運用の宣言を読むとき（共有の宣言に重ねる）"
+    }
+  ],
+  "examples": [
+    {
+      "version": 1,
+      "follow_branch": true
+    }
+  ]
+}
