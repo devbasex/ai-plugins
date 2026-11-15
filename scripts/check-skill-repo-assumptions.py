@@ -329,13 +329,23 @@ def _split_defaults(base: pathlib.Path, rels: list[str]) -> tuple[list[Hit], lis
     defaults: list[tuple[str, int]] = []
     for rel in rels:
         for lineno, line in iter_matching_lines(_read(base / rel), regex, False):
-            spans = [m.span(1) for m in DEFAULT_VALUE.finditer(line)]
-            for m in regex.finditer(line):
-                if any(a <= m.start() and m.end() <= b for a, b in spans):
-                    defaults.append((rel, lineno))
-                else:
-                    hits.append(Hit(base, rel, lineno, REMOTE_WORD, m.group(0), line))
+            outside, inside = _split_line(line, regex)
+            hits += [Hit(base, rel, lineno, REMOTE_WORD, word, line) for word in outside]
+            defaults += [(rel, lineno)] * inside
     return hits, defaults
+
+
+def _split_line(line: str, regex: re.Pattern[str]) -> tuple[list[str], int]:
+    """1 行の `regex` の一致を、`default` の値の外の一致した文字列（行の順）と、値の中の一致の数に分ける。"""
+    spans = [m.span(1) for m in DEFAULT_VALUE.finditer(line)]
+    outside: list[str] = []
+    inside = 0
+    for m in regex.finditer(line):
+        if any(a <= m.start() and m.end() <= b for a, b in spans):
+            inside += 1
+        else:
+            outside.append(m.group(0))
+    return outside, inside
 
 
 def scan_contracts(base: pathlib.Path, rels: list[str], matchers: list[tuple[str, re.Pattern[str]]]) -> list[Hit]:
