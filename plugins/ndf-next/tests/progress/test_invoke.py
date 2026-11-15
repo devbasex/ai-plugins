@@ -214,7 +214,7 @@ def test_plan_gets_the_worktree_as_the_plans_place_and_not_as_a_set_value(tmp_pa
     plan = Path(argv[argv.index("next") + 1])
     assert plan.parent == work and json.loads(plan.read_text())["worktree"] == place
     # プランの実行は同じ引数を断らずに受け、作業場所はプランの作業場所に入る
-    inv = plan_runner.prepare(tmp_path / "root", plan, None, str(work), tmp_path, plan_cli._pairs(sets, "--set"))
+    inv = plan_runner.prepare(tmp_path / "root", plan, None, str(work), tmp_path, plan_runner.RunOptions(plan_cli._pairs(sets, "--set")))
     assert inv.plan.worktree == place and inv.values["worktree"] == place
 
 
@@ -272,11 +272,13 @@ def test_template_values_missing_from_every_source_stop_as_invalid_by_name(tmp_p
     assert named.get("worker") == invoke.FROM_DEFAULT and named.get("title", invoke.FROM_ISSUE) == invoke.FROM_ISSUE
 
 
-@pytest.mark.parametrize("name", ["design", "impl", "design-merge"])
-def test_template_values_are_filled_from_the_issue_the_declaration_and_the_defaults(tmp_path, monkeypatch, name):
-    # #3092: 課題の題と本文は課題から、テストのコマンド・必須のチェック・レビューと組み直しの起動は宣言から、
-    # worker の起動は params.json の既定から埋め、ブランチは作業場所から決める。プランの中の承認ゲートは工程の承認ゲートが
-    # 決めるため、params.json の既定（人の答えを待つ）を使わずに待たずに通す（PR 3496 の指摘。承認待ちを足さない）
+def _filled_plan(tmp_path, monkeypatch, name):
+    """雛形 `name` を、課題 #3092・宣言 `PROJECT`・差し替えた既定（worker と gate）で埋めたプランを組む。
+
+    課題の題と本文は課題から、テストのコマンド・必須のチェック・レビューと組み直しの起動は宣言から、worker の起動は
+    params.json の既定から埋め、ブランチは作業場所から決める（#3092）。プランと、その JSON の文字列・作業場所の根・
+    実行の置き場を返す。
+    """
     repo = _sprint_repo(tmp_path, PROJECT)
     defaults = {"worker": ["ndf-worker"], "gate": ["ndf-gate"]}
     held = route.params()
@@ -289,23 +291,46 @@ def test_template_values_are_filled_from_the_issue_the_declaration_and_the_defau
     run = _stage_run_of(name, repo, [3092])
     argv = invoke.plan_argv(run, work, None, repo)
     plan = json.loads(Path(argv[argv.index("next") + 1]).read_text())
-    text = json.dumps(plan, ensure_ascii=False)
+    return plan, json.dumps(plan, ensure_ascii=False), repo, work
+
+
+@pytest.mark.parametrize("name", ["design", "impl", "design-merge"])
+def test_template_values_fill_the_worker_from_the_default_and_the_branch_from_the_place(tmp_path, monkeypatch, name):
+    plan, text, repo, _ = _filled_plan(tmp_path, monkeypatch, name)
     assert plan["worktree"] == str(repo) and "sprint/s1" in plan["name"]
     assert "ndf-worker" in text and "{{" not in text
-    t = route.templates()[name]
-    if "title" in t.params:
-        assert "#3092 の題" in text
-        body = work / invoke.ISSUE_BODY_FILE.format(number=3092)
-        assert body.read_text() == "#3092 の本文" and str(body) in text
-    if "test_command" in t.params:
-        assert "pytest -q" in text and "ruff check" not in text
-    if "required" in t.params:
-        assert "--required=pytest" in text and "--required=lint" in text
-    if "review" in t.params:
-        assert "ndf-review" in text and "ndf-rebuild" in text
-    if "gate" in t.params:
-        gates = [s for s in plan["steps"] if s["id"] == "merge-gate"]
-        assert "ndf-gate" not in text and gates and all(s["run"] == invoke.STAGE_GATE for s in gates)
+
+
+@pytest.mark.parametrize("name", ["design", "impl"])
+def test_template_values_fill_the_title_and_the_body_file_from_the_issue(tmp_path, monkeypatch, name):
+    _, text, _, work = _filled_plan(tmp_path, monkeypatch, name)
+    assert "#3092 の題" in text
+    body = work / invoke.ISSUE_BODY_FILE.format(number=3092)
+    assert body.read_text() == "#3092 の本文" and str(body) in text
+
+
+def test_template_values_fill_the_test_command_from_the_test_suites_of_the_declaration(tmp_path, monkeypatch):
+    _, text, _, _ = _filled_plan(tmp_path, monkeypatch, "impl")
+    assert "pytest -q" in text and "ruff check" not in text
+
+
+@pytest.mark.parametrize("name", ["design", "impl"])
+def test_template_values_fill_the_required_checks_from_the_declaration(tmp_path, monkeypatch, name):
+    _, text, _, _ = _filled_plan(tmp_path, monkeypatch, name)
+    assert "--required=pytest" in text and "--required=lint" in text
+
+
+def test_template_values_fill_the_review_and_rebuild_launch_from_the_declaration(tmp_path, monkeypatch):
+    _, text, _, _ = _filled_plan(tmp_path, monkeypatch, "design")
+    assert "ndf-review" in text and "ndf-rebuild" in text
+
+
+def test_template_values_pass_the_plan_gate_through_to_the_stage_gate(tmp_path, monkeypatch):
+    # プランの中の承認ゲートは工程の承認ゲートが決めるため、params.json の既定（人の答えを待つ）を使わずに待たずに通す
+    # （PR 3496 の指摘。承認待ちを足さない）
+    plan, text, _, _ = _filled_plan(tmp_path, monkeypatch, "design-merge")
+    gates = [s for s in plan["steps"] if s["id"] == "merge-gate"]
+    assert "ndf-gate" not in text and gates and all(s["run"] == invoke.STAGE_GATE for s in gates)
 
 
 def test_test_command_joins_every_test_suite_in_declared_order():
@@ -320,6 +345,55 @@ def test_test_command_joins_every_test_suite_in_declared_order():
     got = invoke._project_value("test_command", {"test": {"suites": suites}})
     assert got == "pytest -q tests/unit && pytest -q tests/e2e"
     assert invoke._project_value("test_command", {"test": {"suites": suites[1:3]}}) is None
+
+
+def test_ci_only_declaration_builds_the_impl_plan_without_local_tests(tmp_path, monkeypatch):
+    # #3473: テストを CI に寄せる宣言（test.ci.only）があれば、実装のプランは手元でテストを打たない。テストの suite が
+    # 宣言に無くても test_command を求めず、worker の後は push へ、CI の修正の後も push へ進む
+    project = {**PROJECT, "test": {"ci": {"only": True}, "suites": [{"name": "lint", "kind": "lint", "command": "ruff check"}]}}
+    repo = _sprint_repo(tmp_path, project)
+    held = route.params()
+    monkeypatch.setattr(route, "params", lambda: {n: replace(p, default=["ndf-worker"]) if n == "worker" else p for n, p in held.items()})
+    monkeypatch.setattr(invoke, "issue_text", lambda place, n: (f"#{n} の題", f"#{n} の本文"))
+    work = tmp_path / "w"
+    work.mkdir()
+    argv = invoke.plan_argv(_stage_run_of("impl", repo, [3473]), work, None, repo)
+    plan = json.loads(Path(argv[argv.index("next") + 1]).read_text())
+    ids = [s["id"] for s in plan["steps"]]
+    assert not {"test", "ci-local"} & set(ids)
+    assert not any(s["run"][:3] == ["ndf", "route", "test"] for s in plan["steps"])
+    by_id = {s["id"]: s for s in plan["steps"]}
+    assert ids[ids.index("work") + 1] == "push" and by_id["fix"]["next"] == "push" and by_id["ci-fix"]["next"] == "push"
+
+
+def test_workflow_declaration_with_launch_and_stages_passes_the_schema(tmp_path):
+    # #3473 の受け入れ条件 3: workflow.launch の review・rebuild・refactor（語の並び）と stages を持つ宣言はスキーマの検査を通る
+    launch = {"review": ["ndf", "review"], "rebuild": ["ndf", "rebuild"], "refactor": ["ndf", "refactor"]}
+    stages_decl = {"design": {"enabled": True}, "release": {"enabled": False, "reason": "手で出す"}}
+    project = {**PROJECT, "workflow": {"launch": launch, "stages": stages_decl}}
+    repo = _sprint_repo(tmp_path, project)
+    assert invoke._project(repo)["workflow"]["launch"] == launch
+
+
+@pytest.mark.parametrize(
+    "workflow",
+    [
+        {"launch": {"review": []}},
+        {"launch": {"rebuild": [""]}},
+        {"launch": {"review": "ndf review"}},
+        {"launch": {"other": ["x"]}},
+        {"stages": {"release": {"enabled": False}}},
+        {"stages": {"release": {"enabled": "no", "reason": "x"}}},
+        {"other": {}},
+    ],
+)
+def test_workflow_declaration_out_of_shape_stops_as_invalid(tmp_path, workflow):
+    # #3473: workflow の形が違う宣言は、値を黙って捨てずにプランを組む前に invalid で止まる
+    repo = _sprint_repo(tmp_path, {**PROJECT, "workflow": workflow})
+    with pytest.raises(route.RouteError, match="workflow"):
+        invoke._project(repo)
+    got = invoke.invoke(_stage_run_of("design", repo, [1, 2]), repo, tmp_path / "w", runner=lambda *a: pytest.fail("打たない"))
+    assert got.status == "stopped" and got.cause["kind"] == "invalid" and "workflow" in got.cause["detail"]
 
 
 def test_an_issue_by_an_untrusted_author_is_not_written_and_stops_as_invalid_by_name(tmp_path, monkeypatch):
@@ -422,13 +496,13 @@ def test_a_stopped_plan_is_tried_again_from_the_step_it_stopped_at_in_a_new_roun
     first = invoke.plan_argv(run, work, None, tmp_path)
     assert "--from" not in first
     plan = Path(first[first.index("next") + 1])
-    inv = plan_runner.prepare(root, plan, None, str(work), tmp_path, {"issues": "[1]"})
+    inv = plan_runner.prepare(root, plan, None, str(work), tmp_path, plan_runner.RunOptions({"issues": "[1]"}))
     plan_runner._record_run(inv)
     final = {"status": result.STOPPED, "kind": "test_failed", "detail": "落ちた", "last": "b", "count": 2}
     plan_files.write_json(inv.result_path, plan_runner.final_result(inv, final, "SUCCESS"))
     again = invoke.plan_argv(run, work, None, tmp_path)
     assert again[again.index("--from") + 1] == "b" and again.index("--from") < again.index("--state-dir")
-    retried = plan_runner.prepare(root, plan, "b", str(work), tmp_path, {"issues": "[1]"})
+    retried = plan_runner.prepare(root, plan, "b", str(work), tmp_path, plan_runner.RunOptions({"issues": "[1]"}))
     assert retried.key != inv.key and retried.round_no == inv.round_no + 1
     # 新しい回が承認ゲートで待つ間（結果の控えが無い）は、答えを渡す呼び出しも同じ開始点で同じ回に届く
     plan_runner._record_run(retried)
@@ -448,7 +522,7 @@ def _stop_at(root: Path, plan: Path, work: Path, argv: list[str], last: str = "b
     """`argv` の呼び出しでプランの回を流し、ステップ `last` で止まった結果を控えに残す。"""
     start = argv[argv.index("--from") + 1] if "--from" in argv else None
     sets = plan_cli._pairs([argv[i + 1] for i, a in enumerate(argv) if a == "--set"], "--set")
-    inv = plan_runner.prepare(root, plan, start, str(work), work, sets)
+    inv = plan_runner.prepare(root, plan, start, str(work), work, plan_runner.RunOptions(sets))
     plan_runner._record_run(inv)
     final = {"status": result.STOPPED, "kind": "test_failed", "detail": "落ちた", "last": last, "count": 2}
     plan_files.write_json(inv.result_path, plan_runner.final_result(inv, final, "SUCCESS"))
@@ -482,7 +556,7 @@ def _gate_ended(tmp_path: Path, monkeypatch) -> tuple[invoke.StageRun, Path]:
     run = _plan_run({"issues": [1]})
     argv = invoke.plan_argv(run, work, None, tmp_path)
     plan = Path(argv[argv.index("next") + 1])
-    inv = plan_runner.prepare(tmp_path / "root", plan, None, str(work), work, {"issues": "[1]"})
+    inv = plan_runner.prepare(tmp_path / "root", plan, None, str(work), work, plan_runner.RunOptions({"issues": "[1]"}))
     plan_runner._record_run(inv)
     final = {"status": "gate", "kind": None, "detail": "判断を待つ", "last": "a", "count": 1}
     plan_files.write_json(inv.result_path, plan_runner.final_result(inv, final, "SUCCESS"))

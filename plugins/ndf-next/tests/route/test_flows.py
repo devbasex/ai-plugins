@@ -158,7 +158,10 @@ def test_merge_gate_and_merge_steps_are_fixed_in_check_and_design_merge():
     assert found["check"] == found["design_merge"]
     gate_step, merge = found["check"]
     assert gate_step == _MERGE_GATE
-    assert (merge["run"][-2:], merge["next"]) == (["<branch>", "<merge_method>"], "end")
+    assert (merge["run"], merge["next"]) == (
+        ["ndf", "ci", "merge", "--branch", "<branch>", "--method", "<merge_method>"],
+        "end",
+    )
 
 
 def test_merge_gate_rejected_ends_without_merge():

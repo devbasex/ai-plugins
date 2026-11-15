@@ -13,6 +13,7 @@ name: ndf-next release
 # - workflow_dispatch（step=assemble）: リリースのブランチを組み立てて PR を作る。channel=dev は承認なしで続けてマージする
 # - workflow_dispatch（step=merge）: 指定の PR を、証跡（本番ブランチ宛てのとき）と必須のチェックの後にマージする
 # - issue_comment: 証跡の印を含むコメントの作成・編集・削除で、判定を commit status へ付け、承認ならマージする
+# - merge・approval の後: 本番ブランチへ入れた版に含めた PR の各々へリリース記録を書く（release-steps record）
 # - publish ジョブ: 本番ブランチへマージしたコミットの版で、足りないタグと GitHub Release を作る（merge・approval の後に
 #   同じ run で続ける。本番ブランチの名前は宣言から読み、push の出来事の絞り込みに写さない）
 # - workflow_dispatch（step=publish）: 起動したコミット（本番ブランチを ref にして打つ）で publish だけを打ち直す
@@ -20,7 +21,8 @@ name: ndf-next release
 # ブランチの名前は宣言 .ndf/worktree.json の base_branch・production_branch から読む（ここに写さない）。
 # リリースの PR とベースブランチへ戻す PR で CI を起動するため、PR・ブランチの作成とマージは利用者の token
 # （secrets.NDF_RELEASE_TOKEN）で行う（GITHUB_TOKEN の操作では CI が起動しない）。無ければ github.token で行い、CI は手で
-# 起動し直す。
+# 起動し直す。本番ブランチへのマージは NDF_RELEASE_TOKEN を必須にする（github.token の書いたリリース記録は読み手に信用
+# されないため、release-steps merge が本番ブランチへ入れる前に止まる）。
 on:
   workflow_dispatch:
     inputs:
@@ -176,6 +178,14 @@ jobs:
           # 戻す PR で止まっても本番ブランチへ入れた版は publish へ渡す（書き出してから止まった終了コードで失敗させる）
           echo "production_sha=$(tail -n 1 "$RUNNER_TEMP/merge.json" | jq -r '.outputs.production_sha // ""')" >> "$GITHUB_OUTPUT"
           exit "${code:-0}"
+      - name: Write the release record on each included pull request
+        # 本番ブランチへ入れた版に含めた PR の各々へリリース記録を書く（戻す PR で止まっても書く。同じ版の記録は重ねない）
+        if: always() && steps.merge.outputs.production_sha != ''
+        env:
+          GH_TOKEN: ${{ secrets.NDF_RELEASE_TOKEN || github.token }}
+          PR: ${{ inputs.pr }}
+          PRODUCTION: ${{ needs.branches.outputs.production }}
+        run: '"$NDF" release-steps record --root . --pr "$PR" --production "$PRODUCTION"'
 
   approval:
     # 証跡の印を含むコメントの作成・編集・削除だけで起動する。編集は前の本文も見る（印を消した編集でも判定し直す）。
@@ -225,6 +235,14 @@ jobs:
           # 戻す PR で止まっても本番ブランチへ入れた版は publish へ渡す（書き出してから止まった終了コードで失敗させる）
           echo "production_sha=$(tail -n 1 "$RUNNER_TEMP/merge.json" | jq -r '.outputs.production_sha // ""')" >> "$GITHUB_OUTPUT"
           exit "${code:-0}"
+      - name: Write the release record on each included pull request
+        # 本番ブランチへ入れた版に含めた PR の各々へリリース記録を書く（戻す PR で止まっても書く。同じ版の記録は重ねない）
+        if: always() && steps.merge.outputs.production_sha != ''
+        env:
+          GH_TOKEN: ${{ secrets.NDF_RELEASE_TOKEN || github.token }}
+          PR: ${{ github.event.issue.number }}
+          PRODUCTION: ${{ needs.branches.outputs.production }}
+        run: '"$NDF" release-steps record --root . --pr "$PR" --production "$PRODUCTION"'
 
   publish:
     # 本番ブランチへマージした run の後（merge・approval の出力に本番ブランチへ入ったコミットがあるとき）か、

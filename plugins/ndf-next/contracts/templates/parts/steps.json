@@ -72,7 +72,7 @@
     },
     "ci-local": {
       "id": "ci-local",
-      "run": ["ndf", "route", "test", "--nodes-from", "{state_dir}/ci.json", "--", "{{test_command}}"],
+      "run": ["ndf", "route", "test", "--failed-from", "{state_dir}/ci.json", "--result", "{state_dir}/ci-local.json"],
       "on_cause": {"test_failed": "repeat-check"},
       "next": "push"
     },
@@ -100,13 +100,8 @@
     },
     "merge": {
       "id": "merge",
-      "run": [
-        "sh", "-c",
-        "h=$(git rev-parse HEAD) || exit 2; gh pr merge \"$0\" \"--$1\" --match-head-commit \"$h\" >&2 || exit 1; s=$(gh pr view \"$0\" --json state --jq .state) || exit 1; [ \"$s\" = MERGED ] && exit 0; printf '{\"status\": \"stopped\", \"summary\": \"PR はまだマージされていない（%s。マージキューの待ち）\", \"cause\": {\"kind\": \"ci_pending\", \"detail\": \"マージキューの待ち\"}}\\n' \"$s\"; exit 1",
-        "{{branch}}", "{{merge_method}}"
-      ],
-      "probe": ["sh", "-c", "test \"$(gh pr view \"$0\" --json state --jq .state)\" = MERGED", "{{branch}}"],
-      "exit_cause": {"2": "precondition"}
+      "run": ["ndf", "ci", "merge", "--branch", "{{branch}}", "--method", "{{merge_method}}"],
+      "probe": ["sh", "-c", "test \"$(gh pr view \"$0\" --json state --jq .state)\" = MERGED", "{{branch}}"]
     }
   }
 }
