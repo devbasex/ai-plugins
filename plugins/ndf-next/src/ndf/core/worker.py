@@ -120,9 +120,11 @@ WORK_RULES = (
 
 # 期待値の直書きを探した記録の鍵（結果ファイルの metrics の下。#3188）
 SEARCH_RECORD = "expectation_search"
+# CI の修正の作業種別
+CI_FIX = "ci-fix"
 # 作業種別 → 規則文へ足す手順。CI の修正は、変えた定義を期待値に直書きしたテストを探して一緒に直す（#3188）
 KIND_RULES: dict[str, tuple[str, ...]] = {
-    "ci-fix": (
+    CI_FIX: (
         "## CI の修正の手順",
         "- 落ちたテストが期待値に持つ定義（工程の並び・定数・語の一覧など）のうち、この変更で変えたものを、作業の前のコミットとの差分から特定する",
         "- 変えた定義の値（足した・外した・並べ替えた語や要素）を `git grep -n` でテストの置き場から探し、期待値に直書きしているテストを"
@@ -131,7 +133,7 @@ KIND_RULES: dict[str, tuple[str, ...]] = {
     ),
 }
 # 結果ファイルに探した記録（`SEARCH_RECORD`）を要る作業種別
-RECORD_KINDS = frozenset({"ci-fix"})
+RECORD_KINDS = frozenset({CI_FIX})
 # 結果ファイルに探した記録が無いときに起こし直す文
 RECORD_PROMPT = (
     f"結果ファイルの metrics.{SEARCH_RECORD} に、期待値の直書きを探した語（terms）と見つけたテストのファイル（files）が無い。"
