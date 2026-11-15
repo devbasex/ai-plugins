@@ -12,7 +12,6 @@ _release_pr_body）。出す（emit）のはここで、終了コードは `step
 
 from __future__ import annotations
 
-import json
 import os
 import re
 from dataclasses import dataclass
@@ -32,6 +31,7 @@ from release_lib import approval, approval_trail
 from release_lib.approval import HeadMoved
 from release_lib.context import ReleaseCtx
 from release_lib.names import release_tag
+from release_lib.port_mark import NO_PORT_LINE, ensure_no_port_line
 from step_result import EXIT_GATE, EXIT_INFRA_WAIT, EXIT_PRECONDITION, EXIT_UNREADABLE, StepError, emit, gh_json, git, git_root, result
 
 TOOL = approval.TOOL
@@ -43,10 +43,6 @@ UNWRITTEN_NOTE = "迂回の記録を書けなかった（本番は出ている�
 
 release_case_or_stop = release_case.case_or_stop  # release-steps.py と merged_lib が同じ止め方を使う
 
-# 旧いプラグインを変える PR に ndf-next の検査（規則 port。#3343）が求める行。印は plugins/ndf-next/src/ndf/checks/rules.json の
-# no_port_mark。リリースの PR は版数と CHANGELOG を上げて取り込み済みの PR を運ぶだけで、移す変更は元の PR が持つ
-NO_PORT_LINE = "移さない理由（ndf-next）: リリースの PR は版数と CHANGELOG を上げて取り込み済みの PR を運ぶだけで、移す変更は元の PR が持つ"
-
 
 def refresh_release_pr_body(root, pr, body: Callable[[], str]):
     """使い回す開いた開発版の PR の本文を `body()`（今の版の本文）へ書き直す。作ったばかりの PR と閉じた PR は触らない。
@@ -56,38 +52,6 @@ def refresh_release_pr_body(root, pr, body: Callable[[], str]):
     p = gh_parts.gh(["pr", "edit", str(pr["number"]), "--body-file", "-"], body(), cwd=root)
     if p.returncode != 0:
         raise StepError(f"gh pr edit #{pr['number']}（本文の書き直し）が失敗: {p.stderr.strip()[:300]}")
-
-
-_FAILED_BUCKETS = ("fail", "cancel")
-
-
-def _failed_checks(root, n) -> set[str]:
-    """PR のチェックのうち、今落ちている（fail / cancel）ものの名前。読めなければ空。"""
-    p = gh_parts.gh(["pr", "checks", n, "--json", "name,bucket"], cwd=root)
-    try:
-        rows = json.loads(p.stdout or "[]") or []
-    except (TypeError, ValueError):
-        return set()
-    return {str(r.get("name")) for r in rows if isinstance(r, dict) and r.get("bucket") in _FAILED_BUCKETS}
-
-
-def ensure_no_port_line(root, pr):
-    """使い回す PR（前の版のスクリプトが作った -sync の PR など）の本文に NO_PORT_LINE が無ければ、本文の末尾へ足して pr を返す。
-    本文のほかの行（解いたパスなど）は残す。本文の編集（edited）で ndf-next の port 検査が打ち直される（#3343）。
-    編集の前に落ちていたチェックは、打ち直しが登録されて落ちた状態から外れるまで待つ（上限は `release-steps.port-rerun`）。
-    待たずに戻ると、続く CI の待ちが打ち直す前の失敗を読んで止まる。上限まで外れなければ、そのまま CI の待ちに判定を任せる。"""
-    n = str(pr["number"]) if pr else ""
-    body = ((gh_json(root, ["pr", "view", n, "--json", "body"], f"gh pr view #{n}") or {}).get("body") or "") if pr else NO_PORT_LINE
-    if NO_PORT_LINE not in body:
-        before = _failed_checks(root, n)
-        p = gh_parts.gh(["pr", "edit", n, "--body-file", "-"], f"{body.rstrip()}\n\n{NO_PORT_LINE}\n", cwd=root)
-        if p.returncode != 0:
-            raise StepError(f"gh pr edit #{n}（本文の書き直し）が失敗: {p.stderr.strip()[:300]}")
-        if before:
-            waits.wait_until(
-                lambda: _failed_checks(root, n), lambda now: not (now & before), policy=limits.policy("release-steps.port-rerun")
-            )
-    return pr
 
 
 def dev_workflow_of(root) -> str | None:

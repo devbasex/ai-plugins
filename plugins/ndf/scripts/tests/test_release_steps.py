@@ -1145,7 +1145,7 @@ def test_the_production_merge_carries_who_approved(monkeypatch, tmp_path, by, us
     verdict = mod.ac.Verdict(True, sha, "b" * 40, "match")
     mod._merge_prod_pr(tmp_path, a, "ndf", "release/v1.2.3", "main", 7, sha, None, verdict, [], {})
     # 本番の PR も旧いプラグインの変更を運ぶので、本文に ndf-next の port 検査の印を持つ
-    assert mod.reviewed.NO_PORT_LINE in seen[0] and seen[1]["gate_approved"] == expected and seen[1]["expect"] == "b" * 40
+    assert mod.port_mark.NO_PORT_LINE in seen[0] and seen[1]["gate_approved"] == expected and seen[1]["expect"] == "b" * 40
 
 
 def _record(monkeypatch, root, **args):
@@ -1773,16 +1773,16 @@ def test_release_dev_runs_the_declared_workflow_only_for_an_open_pr(monkeypatch,
         assert e.value.code["metrics"]["dev_workflow"] == "release-dev.yml"
     assert runs == [("release-dev.yml", 4)]
     # 使い回す開いた PR だけ、本文を今の版の本文（ndf-next の port 検査の印を持つ）へ書き直す（#3343）
-    assert [n for n, _ in refreshed] == ["4"] and rv.NO_PORT_LINE in refreshed[0][1]
+    assert [n for n, _ in refreshed] == ["4"] and mod.port_mark.NO_PORT_LINE in refreshed[0][1]
 
 
 @pytest.mark.parametrize("has_line", [False, True])
 def test_ensure_no_port_line_appends_the_mark_to_a_reused_pr(monkeypatch, tmp_path, has_line):
     """前の版が作った -sync の PR を使い回すとき、本文に port 検査の印が無ければ、ほかの行を残して末尾へ足す（#3343）。"""
-    from release_lib import reviewed as rv
+    from release_lib import port_mark as pm
 
-    body = "解いたパス: README.md" + (f"\n\n{rv.NO_PORT_LINE}" if has_line else "")
-    monkeypatch.setattr(rv, "gh_json", lambda root, args, what: {"body": body})
+    body = "解いたパス: README.md" + (f"\n\n{pm.NO_PORT_LINE}" if has_line else "")
+    monkeypatch.setattr(pm, "gh_json", lambda root, args, what: {"body": body})
     edited = []
 
     def gh(args, stdin=None, cwd=None):
@@ -1791,12 +1791,12 @@ def test_ensure_no_port_line_appends_the_mark_to_a_reused_pr(monkeypatch, tmp_pa
         edited.append((args[2], stdin))
         return SimpleNamespace(returncode=0, stderr="")
 
-    monkeypatch.setattr(rv.gh_parts, "gh", gh)
-    assert rv.ensure_no_port_line(tmp_path, {"number": 7}) == {"number": 7} and rv.ensure_no_port_line(tmp_path, None) is None
+    monkeypatch.setattr(pm.gh_parts, "gh", gh)
+    assert pm.ensure_no_port_line(tmp_path, {"number": 7}) == {"number": 7} and pm.ensure_no_port_line(tmp_path, None) is None
     if has_line:
         assert edited == []
     else:
-        assert [n for n, _ in edited] == ["7"] and edited[0][1].startswith("解いたパス: README.md") and rv.NO_PORT_LINE in edited[0][1]
+        assert [n for n, _ in edited] == ["7"] and edited[0][1].startswith("解いたパス: README.md") and pm.NO_PORT_LINE in edited[0][1]
 
 
 def test_ensure_no_port_line_waits_until_the_failed_check_is_rerun(monkeypatch, tmp_path):
@@ -1804,9 +1804,9 @@ def test_ensure_no_port_line_waits_until_the_failed_check_is_rerun(monkeypatch, 
     待たずに戻ると、続く CI の待ちが打ち直す前の失敗を読んで止まる。"""
     import json as _json
 
-    from release_lib import reviewed as rv
+    from release_lib import port_mark as pm
 
-    monkeypatch.setattr(rv, "gh_json", lambda root, args, what: {"body": "解いたパス: README.md"})
+    monkeypatch.setattr(pm, "gh_json", lambda root, args, what: {"body": "解いたパス: README.md"})
     reads = iter(
         [
             [{"name": "ndf-next-checks", "bucket": "fail"}, {"name": "test", "bucket": "pass"}],  # 編集の前
@@ -1821,9 +1821,9 @@ def test_ensure_no_port_line_waits_until_the_failed_check_is_rerun(monkeypatch, 
         stdout = _json.dumps(next(reads)) if args[1] == "checks" else ""
         return SimpleNamespace(returncode=0, stdout=stdout, stderr="")
 
-    monkeypatch.setattr(rv.gh_parts, "gh", gh)
-    monkeypatch.setattr(rv.waits, "wait_until", lambda read, done, policy: _Waited(read, done))
-    assert rv.ensure_no_port_line(tmp_path, {"number": 7}) == {"number": 7}
+    monkeypatch.setattr(pm.gh_parts, "gh", gh)
+    monkeypatch.setattr(pm.waits, "wait_until", lambda read, done, policy: _Waited(read, done))
+    assert pm.ensure_no_port_line(tmp_path, {"number": 7}) == {"number": 7}
     assert calls == ["checks", "edit", "checks", "checks"]
 
 
