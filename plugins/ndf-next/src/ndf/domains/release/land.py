@@ -234,18 +234,22 @@ class Lander:
         detail = f"#{pull.number} をマージした。戻す PR: {synced.detail}"
         return synced._replace(sync_pr=number, detail=detail, production_sha=landed)
 
+    def _resume_merged(self, number: int, pull: Pull) -> Landed:
+        """マージ済みの PR からの再開。本番ブランチ宛てならベースブランチへ戻し、迂回の記録が無ければ補う。"""
+        if pull.base_ref != self.production:
+            return Landed(True, None, f"#{number} は既にマージされている")
+        synced = self._sync(pull)
+        if self._bypass(pull):  # 再開: 利用者の証跡がマージした先端と一致すれば、迂回でマージしたとして記録を補う（I7）
+            judged = trail.read(self.hub, number, human_only=True).judgment
+            if judged.approved and judged.trail is not None and judged.trail.sha == pull.head_sha:
+                return self._record(pull, synced)
+        return synced
+
     def land(self, number: int) -> Landed:
         """リリースの PR をマージする。本番ブランチへ入れた後（マージ済みからの再開を含む）は、ベースブランチへ戻す。"""
         pull = self.hub.pull(number)
         if pull.merged:
-            if pull.base_ref != self.production:
-                return Landed(True, None, f"#{number} は既にマージされている")
-            synced = self._sync(pull)
-            if self._bypass(pull):  # 再開: 利用者の証跡がマージした先端と一致すれば、迂回でマージしたとして記録を補う（I7）
-                judged = trail.read(self.hub, number, human_only=True).judgment
-                if judged.approved and judged.trail is not None and judged.trail.sha == pull.head_sha:
-                    return self._record(pull, synced)
-            return synced
+            return self._resume_merged(number, pull)
         version_decide.version_of_branch(pull.head_ref)
         bypass = self._bypass(pull)
         refused = self._refusal(pull, bypass)
