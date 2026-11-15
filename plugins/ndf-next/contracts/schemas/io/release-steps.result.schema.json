@@ -27,7 +27,7 @@
         "properties": {
           "kind": {
             "type": "string",
-            "description": "項目の種類（pull・tag・release・path・config・worktree・check・value・cd・version・level・verify-ref・reviews・conflict）"
+            "description": "項目の種類（pull・tag・release・path・config・worktree・check・value・cd・version・level・verify-ref・reviews・conflict・queue・method・deploy）"
           },
           "number": {
             "type": "integer",
@@ -58,11 +58,11 @@
           },
           "name": {
             "type": "string",
-            "description": "タグか GitHub Release の名前（tag・release）か、落ちたチェックの名前（check。本番の PR のマージが止まったとき）か、値の名前（value）か、CD の足りないもの（cd。bump か publish）か、破れたパス・ラベル・ref・レビューの単位（version・level・verify-ref・reviews）か、衝突した PR（conflict。#<番号>）"
+            "description": "タグか GitHub Release の名前（tag・release）か、落ちたチェックの名前（check。本番の PR のマージが止まったとき）か、値の名前（value）か、CD の足りないもの（cd。bump か publish）か、破れたパス・ラベル・ref・レビューの単位（version・level・verify-ref・reviews）か、衝突した PR（conflict。#<番号>）か、キューから外れたこと（queue。removed）か、宣言のマージの方式（method）か、検証環境へ配るコマンドの終了コード（deploy）"
           },
           "detail": {
             "type": "string",
-            "description": "止まった理由と破れの理由（cd・version・level・verify-ref・reviews）"
+            "description": "止まった理由と破れの理由（cd・version・level・verify-ref・reviews・queue・deploy）か、本番ブランチの ruleset の値（method）"
           },
           "value": {
             "description": "値の項目（value）の値。outputs（スプリントの文脈の閉じた語彙）に無い値を name の名前で返す（承認・次の手・SHA・タグ・版上げの PR・bump の state・上げ幅・検証用ブランチなど）"
