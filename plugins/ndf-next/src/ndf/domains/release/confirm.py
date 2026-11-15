@@ -27,6 +27,10 @@ MISSING_BUMP, MISSING_PUBLISH = "bump", "publish"
 DEPLOY_FAILED = "deploy_failed"
 
 
+# 版上げの PR のマージコミットと版 → タグを確かめるプラグインの名前
+PluginOf = Callable[[str, str], str]
+
+
 class ConfirmError(Exception):
     """確かめの前提が無い（本番の PR がマージされていない・閉じた版上げの PR を読み切れない）。"""
 
@@ -88,14 +92,16 @@ def _has_release(hub: GitHub, tag: str) -> bool:
     return gather.resource_exists(hub, f"/repos/{hub.repo}/releases/tags/{tag}")
 
 
-def _read(hub: GitHub, repo_git: git_mod.Git, merge_sha: str, production: str, plugin: str) -> Confirmed:
-    """1 回の読み直し。そろっていれば `kind` が None の結果、そろわなければ足りないものを持つ結果。"""
+def _read(hub: GitHub, repo_git: git_mod.Git, merge_sha: str, production: str, plugin_of: PluginOf) -> Confirmed:
+    """1 回の読み直し。そろっていれば `kind` が None の結果、そろわなければ足りないものを持つ結果。
+
+    確かめるタグのプラグインは、版上げの PR のマージコミットと版から `plugin_of` が決める（マーケットプレイスの先頭に限らない）。"""
     gather.fetch(repo_git, production)
     found = _bump_containing(hub, repo_git, merge_sha, production)
     if found is None:
         return Confirmed(None, None, None, DEPLOY_FAILED, MISSING_BUMP, "版上げの PR がまだマージされていない")
     number, version, sha = found
-    tag = version_decide.tag_of(plugin, version)
+    tag = version_decide.tag_of(plugin_of(sha, version), version)
     if not _tagged(hub, tag):
         return Confirmed(version, tag, number, DEPLOY_FAILED, MISSING_PUBLISH, f"タグ {tag} がまだ無い", sha)
     if not _has_release(hub, tag):
@@ -108,7 +114,7 @@ def confirm(
     repo_git: git_mod.Git,
     number: int,
     production: str,
-    plugin: str,
+    plugin_of: PluginOf,
     watch: Watch,
 ) -> Confirmed:
     """本番の PR `number` のマージを含む版上げの PR のマージ・タグ・GitHub Release を `watch.budget` 秒まで待ち、作った版を記録する。"""
@@ -117,7 +123,7 @@ def confirm(
         raise ConfirmError(f"#{number} はまだマージされていない（release-steps merge の後に打つ）")
     deadline = watch.clock() + watch.budget
     while True:
-        got = _read(hub, repo_git, pull.merge_sha, production, plugin)
+        got = _read(hub, repo_git, pull.merge_sha, production, plugin_of)
         if got.kind is None and got.version is not None and got.tag is not None and got.bump_pr is not None:
             records_trail.write_version_record(hub, number, got.version, got.tag, got.bump_pr)
             return got._replace(detail=f"#{number} の版 v{got.version}（タグ {got.tag}・版上げの PR #{got.bump_pr}）を確かめた")

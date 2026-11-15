@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import git_sandbox
 import pytest
 
 from ndf.adapters.github import GitHubError
 from ndf.domains.release import cli as release_cli
 from ndf.domains.release import confirm, records_trail
+from ndf.domains.release import plugins as plugins_mod
 
-from ._fakes import FakeHub, not_found, pull
+from ._fakes import FakeHub, init_repo, not_found, pull, write_json
 
 PR = 7
 MERGE = "e" * 40
@@ -55,9 +58,13 @@ def _watch(budget: float = 60.0) -> tuple[confirm.Watch, list[float]]:
     return confirm.Watch(budget, lambda: now[0], sleep), slept
 
 
+def _kit(revision: str, version: str) -> str:
+    return "kit"
+
+
 def _confirm(hub: FakeHub, budget: float = 60.0) -> tuple[confirm.Confirmed, list[float]]:
     watch, slept = _watch(budget)
-    return confirm.confirm(hub, FakeGit({(MERGE, BUMP_MERGE)}), PR, "main", "kit", watch), slept
+    return confirm.confirm(hub, FakeGit({(MERGE, BUMP_MERGE)}), PR, "main", _kit, watch), slept
 
 
 def _records(hub: FakeHub) -> list[str]:
@@ -100,7 +107,7 @@ def test_confirm_picks_the_smallest_bump_containing_the_merge() -> None:
     rows = hub.responses[("GET", "/repos/o/r/pulls")]
     rows.append({"number": 21, "head": {"ref": "release/v1.4.0"}, "merged_at": "t", "merge_commit_sha": "9" * 40})
     watch, _ = _watch()
-    got = confirm.confirm(hub, FakeGit({(MERGE, BUMP_MERGE), (MERGE, "9" * 40)}), PR, "main", "kit", watch)
+    got = confirm.confirm(hub, FakeGit({(MERGE, BUMP_MERGE), (MERGE, "9" * 40)}), PR, "main", _kit, watch)
     assert (got.version, got.bump_pr) == ("1.3.0", 20)
 
 
@@ -125,3 +132,19 @@ def test_cli_confirm_stops_with_one_rerun_move(monkeypatch, capsys, tmp_path) ->
     assert {"kind": "cd", "name": "bump", "detail": out["cause"]["detail"]} in out["items"]
     values = {i["name"]: i["value"] for i in out["items"] if i["kind"] == "value"}
     assert list(values["moves"]) == ["rerun"] and values["moves"]["rerun"]["argv"][1:3] == ["release-steps", "confirm"]
+
+
+def test_the_confirmed_plugin_is_the_one_the_bump_merge_changed(tmp_path: Path) -> None:
+    """マーケットプレイスの 2 番目だけを出した版上げでは、確かめるタグのプラグインは先頭でなく定義の変わった 2 番目。"""
+    root = init_repo(tmp_path / "repo")
+    listed = [{"name": "kit", "source": "./kit"}, {"name": "other", "source": "./other"}]
+    write_json(root / ".claude-plugin" / "marketplace.json", {"plugins": listed})
+    write_json(root / "kit" / ".claude-plugin" / "plugin.json", {"name": "kit", "version": "1.2.3"})
+    write_json(root / "other" / ".claude-plugin" / "plugin.json", {"name": "other", "version": "0.1.0"})
+    git_sandbox.sh(root, "add", "-A")
+    git_sandbox.sh(root, "commit", "-q", "-m", "init")
+    write_json(root / "other" / ".claude-plugin" / "plugin.json", {"name": "other", "version": "0.2.0"})
+    git_sandbox.sh(root, "commit", "-q", "-am", "Release: other v0.2.0")
+    sha = git_sandbox.sh(root, "rev-parse", "HEAD").strip()
+    plugin_of = release_cli._plugin_of(root, plugins_mod.load(root))
+    assert plugin_of(sha, "0.2.0") == "other"

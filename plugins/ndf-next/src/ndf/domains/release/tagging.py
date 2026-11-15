@@ -55,13 +55,19 @@ def _release(hub: GitHub, tag: str, title: str, notes: str) -> Made:
     return Made(RELEASE, tag, CREATED)
 
 
+def bumped(root: Path, revision: str) -> list[plugins_mod.Plugin]:
+    """そのコミット（第 1 親との差分）でプラグインの定義が変わった（版を上げた）プラグイン（登録の順）。
+
+    タグを作る対象（`publish`）と、版上げがタグを待つ対象（`bump.Bumper` の先端の判定）の正本。"""
+    changed = set(git_mod.Git(root).changed_files(f"{revision}^1", revision))
+    return [p for p in plugins_mod.load(root) if any(m.relative_to(root).as_posix() in changed for m in p.manifests(root))]
+
+
 def _released(root: Path, revision: str) -> Iterator[tuple[plugins_mod.Plugin, str]]:
     """そのコミットで定義が変わり（版を上げた）、版に接尾辞が無いプラグインと版（登録の順。1 件ずつ読む）。"""
-    changed = set(git_mod.Git(root).changed_files(f"{revision}^1", revision))
-    for plugin in plugins_mod.load(root):
+    for plugin in bumped(root, revision):
         ver = plugins_mod.version(root, plugin)
-        bumped = any(m.relative_to(root).as_posix() in changed for m in plugin.manifests(root))
-        if bumped and not version_decide.is_dev(ver):
+        if not version_decide.is_dev(ver):
             yield plugin, ver
 
 

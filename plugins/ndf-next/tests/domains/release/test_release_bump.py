@@ -31,6 +31,15 @@ class BumpHub(FakeHub):
 
     admin_merged: list[int] = field(default_factory=list)
     created: list[dict] = field(default_factory=list)
+    # 版上げの PR の先端を origin の実物から読む clone（無ければ偽の先端のまま）
+    work: Path | None = None
+
+    def pull(self, number: int) -> Any:
+        got = super().pull(number)
+        if self.work is None:
+            return got
+        found = git_sandbox.sh(self.work, "ls-remote", "origin", f"refs/heads/{got.head_ref}").split()
+        return got._replace(head_sha=found[0]) if found else got
 
     def rest(self, method: str, path: str, payload: Any = None, params: Any = None) -> Any:
         if (method, path) == ("POST", "/repos/o/r/pulls"):
@@ -46,12 +55,16 @@ class BumpHub(FakeHub):
         return MergeOutcome(True, None, f"#{number} を迂回でマージした", expect_head)
 
 
-def _origin(tmp_path: Path, test_only: bool = False, tagged: bool = True) -> Path:
-    """kit 1.2.3（タグあり）の main へ、スプリントの PR #5 をマージした origin と、main を取り出した clone。"""
+def _origin(tmp_path: Path, test_only: bool = False, tagged: bool = True, other: bool = False) -> Path:
+    """kit 1.2.3（タグあり）の main へ、スプリントの PR #5 をマージした origin と、main を取り出した clone。
+
+    `other` なら、版はあるがタグの無い 2 つ目のプラグイン other 0.1.0 も登録する。"""
     seed = init_repo(tmp_path / "seed")
-    write_json(
-        seed / ".claude-plugin" / "marketplace.json", {"plugins": [{"name": "kit", "source": "./tools/kit", "description": "Kit (v1.2.3)"}]}
-    )
+    listed = [{"name": "kit", "source": "./tools/kit", "description": "Kit (v1.2.3)"}]
+    if other:
+        listed.append({"name": "other", "source": "./tools/other", "description": "Other"})
+        write_json(seed / "tools" / "other" / ".claude-plugin" / "plugin.json", {"name": "other", "version": "0.1.0"})
+    write_json(seed / ".claude-plugin" / "marketplace.json", {"plugins": listed})
     write_json(seed / "tools" / "kit" / ".claude-plugin" / "plugin.json", {"name": "kit", "version": "1.2.3"})
     (seed / "CHANGELOG.md").write_text("# 変更履歴\n\n## [kit 1.2.3] - 2026-01-01\n\n- 前\n", encoding="utf-8")
     git_sandbox.sh(seed, "add", "-A")
@@ -82,6 +95,7 @@ def _bumper(work: Path, hub: BumpHub, failed: bool = False) -> bump.Bumper:
     lander = release_lander(hub, failed, [])
     rules = hub.responses[("GET", "/repos/o/r/rules/branches/main")]
     hub.responses[("GET", "/repos/o/r/rules/branches/main")] = [*rules, REVIEW_RULE]
+    hub.work = work
     return bump.Bumper(work, hub, dataclasses.replace(lander, admin=True), "main", "2026-11-15")
 
 
@@ -148,6 +162,73 @@ def test_an_untagged_tip_version_goes_to_publish(tmp_path: Path) -> None:
     hub = _hub()
     made = _bumper(work, hub).bump()
     assert (made.state, made.version) == ("published", "1.2.3") and hub.created == []
+
+
+def test_an_untagged_plugin_that_the_last_bump_did_not_change_does_not_go_to_publish(tmp_path: Path) -> None:
+    """タグを待つのは直前の版上げで定義を変えたプラグイン（無ければ先頭）だけ。タグの無いほかのプラグインで PUBLISH に倒れない。"""
+    work = _origin(tmp_path, other=True)
+    made = _bumper(work, _hub()).bump()
+    assert (made.state, made.version) == ("merged", "1.3.0")
+
+
+def _merge_bump_and_add_a_sprint(work: Path) -> str:
+    """版上げの PR（release/v1.3.0）を main へマージし、その後に次のスプリントを main へ入れる。マージコミットを返す。"""
+    git_sandbox.sh(work, "switch", "-q", "--detach", "origin/main")
+    git_sandbox.sh(work, "merge", "-q", "--no-ff", "origin/release/v1.3.0", "-m", "Merge pull request #20 from o/release/v1.3.0")
+    merged = git_sandbox.sh(work, "rev-parse", "HEAD").strip()
+    (work / "tools" / "kit" / "b.py").write_text("y = 1\n", encoding="utf-8")
+    git_sandbox.sh(work, "add", "-A")
+    git_sandbox.sh(work, "commit", "-q", "-m", "next")
+    git_sandbox.sh(work, "push", "-q", "origin", "HEAD:refs/heads/main")
+    return merged
+
+
+def test_publish_takes_the_bump_merge_even_after_the_next_sprint_lands(tmp_path: Path) -> None:
+    """版上げの PR のマージの後に次のスプリントが main へ入っても、タグを打つコミットは版上げの PR のマージコミット。"""
+    work = _origin(tmp_path)
+    _bumper(work, _hub()).bump()
+    merged = _merge_bump_and_add_a_sprint(work)
+    made = _bumper(work, _hub()).bump()
+    assert (made.state, made.version, made.revision) == ("published", "1.3.0", merged)
+
+
+def test_a_bump_pr_that_changes_more_than_the_version_in_an_allowed_file_is_refused(tmp_path: Path) -> None:
+    """I7: 許したパス（plugin.json）の中でも、版の外の変更（hook の追加）があれば承認なしでマージしない。"""
+    work = _origin(tmp_path)
+    tip = git_sandbox.sh(work, "rev-parse", "origin/main").strip()
+    git_sandbox.sh(work, "switch", "-q", "-c", "release/v1.3.0", tip)
+    write_json(work / "tools" / "kit" / ".claude-plugin" / "plugin.json", {"name": "kit", "version": "1.3.0", "hooks": "x"})
+    git_sandbox.sh(work, "commit", "-q", "-am", "Release: kit v1.3.0")
+    git_sandbox.sh(work, "push", "-q", "origin", "HEAD:refs/heads/release/v1.3.0")
+    hub = _hub()
+    hub.pulls[BUMP_PR] = fake_pull(number=BUMP_PR, ref="release/v1.3.0")
+    got = _bumper(work, hub)._merge(BUMP_PR, "1.3.0", "minor")
+    assert got.state == "stopped" and got.landed is not None and got.landed.kind == "refused"
+    assert "plugin.json（版の外の変更）" in got.landed.detail and hub.admin_merged == []
+
+
+def test_a_bump_pr_whose_head_moved_after_the_fetch_is_refused(tmp_path: Path) -> None:
+    """差分の検査はマージへ渡す先端そのもので行う。取り込んだ先端と PR の先端が違えばマージしない。"""
+    work = _origin(tmp_path)
+    hub = _hub()
+    _bumper(work, hub).bump()
+    hub.pulls[BUMP_PR] = fake_pull(number=BUMP_PR, ref="release/v1.3.0")
+    bumper = _bumper(work, hub)
+    hub.work = None
+    got = bumper._merge(BUMP_PR, "1.3.0", "minor")
+    assert got.state == "stopped" and got.landed is not None and "先端が" in got.landed.detail
+
+
+def test_version_only_checks_take_only_the_version_strings() -> None:
+    pairs = [("1.2.3", "1.3.0")]
+    diff = "diff --git a/v b/v\n--- a/v\n+++ b/v\n@@ -1 +1 @@\n-version = 1.2.3\n+version = 1.3.0\n"
+    assert bump_decide.diff_lines(diff) == (["version = 1.2.3"], ["version = 1.3.0"])
+    assert bump_decide.version_lines_only(["version = 1.2.3"], ["version = 1.3.0"], pairs)
+    assert not bump_decide.version_lines_only(["version = 1.2.3"], ["version = 1.3.0", "hook = x"], pairs)
+    assert bump_decide.json_version_only({"v": "1.2.3", "d": "K (v1.2.3)"}, {"v": "1.3.0", "d": "K (v1.3.0)"}, pairs)
+    assert not bump_decide.json_version_only({"v": "1.2.3"}, {"v": "1.3.0", "hooks": "x"}, pairs)
+    swap = [("1.2.3", "1.3.0"), ("1.3.0", "1.4.0")]
+    assert bump_decide.version_lines_only(["a 1.2.3 b 1.3.0"], ["a 1.3.0 b 1.4.0"], swap)
 
 
 def test_two_open_bump_prs_stop(tmp_path: Path) -> None:

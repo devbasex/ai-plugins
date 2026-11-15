@@ -45,6 +45,7 @@ from ndf.domains.release import (
     bump_decide,
     cleanup,
     confirm,
+    gather,
     land,
     materials_decide,
     merge_decide,
@@ -264,9 +265,23 @@ def cmd_bump(args: argparse.Namespace) -> dict:
     made = bump.Bumper(root, hub, lander, production, today).bump()
     if made.state not in bump_decide.bump_states():
         return _bump_stopped(hub, made)
-    items = _values(state=made.state, level=made.level, production_sha=made.landed.production_sha if made.landed else None)
+    production_sha = made.landed.production_sha if made.landed else None
+    items = _values(state=made.state, level=made.level, production_sha=production_sha, revision=made.revision)
     detail = f"版上げ: {made.state}（版 {made.version or '無し'}・版上げの PR {f'#{made.pr}' if made.pr else '無し'}）"
     return result.result(TOOL, result.OK, detail, items, outputs=_bump_outputs(made))
+
+
+def _plugin_of(root: Path, found: Sequence[plugins_mod.Plugin]) -> confirm.PluginOf:
+    """版上げの PR のマージコミットで定義が変わったプラグインのうち、そのコミットの版が版上げの版と同じもの
+    （無ければ定義が変わった先頭、それも無ければマーケットプレイスの先頭）。publish がタグを作る対象と同じ規則。"""
+
+    def plugin_of(revision: str, version: str) -> str:
+        changed = tagging.bumped(root, revision)
+        repo_git = git_mod.Git(root)
+        hits = [p for p in changed if gather.version_at(repo_git, p, revision) == version]
+        return (hits or changed or list(found))[0].name
+
+    return plugin_of
 
 
 def cmd_confirm(args: argparse.Namespace) -> dict:
@@ -274,9 +289,8 @@ def cmd_confirm(args: argparse.Namespace) -> dict:
     found = plugins_mod.load(root)
     if not found:
         return result.stopped(TOOL, "precondition", "マーケットプレイスにプラグインが無い")
-    got = confirm.confirm(
-        hub, git_mod.Git(root), args.pr, production, found[0].name, confirm.Watch(args.budget, time.monotonic, time.sleep)
-    )
+    watch = confirm.Watch(args.budget, time.monotonic, time.sleep)
+    got = confirm.confirm(hub, git_mod.Git(root), args.pr, production, _plugin_of(root, found), watch)
     outputs = {"version": got.version} if got.version is not None else None
     values = _values(tag=got.tag, bump_pr=got.bump_pr, bump_revision=got.bump_revision)
     if got.kind is None:
@@ -512,6 +526,7 @@ _ERRORS: tuple[tuple[type[Exception], str], ...] = (
     (confirm.ConfirmError, "precondition"),
     (bump_decide.LevelError, "invalid"),
     (trail.TrailError, "refused"),
+    (verify_ref.VerifyEscape, "refused"),
     (record.NotReleased, "not_applicable"),
     (record.RecordError, "precondition"),
     (record_decide.UnreadableRecord, "invalid"),

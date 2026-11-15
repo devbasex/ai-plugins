@@ -112,7 +112,9 @@ jobs:
           set -o pipefail
           "$NDF" release-steps bump --root . --production "$PRODUCTION" --budget "$CHECK_BUDGET" | tee "$RUNNER_TEMP/bump.json" || code=$?
           echo "state=$(tail -n 1 "$RUNNER_TEMP/bump.json" | jq -r '[.items[]? | select(.kind == "value" and .name == "state") | .value][0] // ""')" >> "$GITHUB_OUTPUT"
-          echo "revision=$(git rev-parse "origin/$PRODUCTION")" >> "$GITHUB_OUTPUT"
+          # published のときは、その未公開の版を作った版上げの PR のマージコミット（bump の値 revision）でタグを打つ
+          revision="$(tail -n 1 "$RUNNER_TEMP/bump.json" | jq -r '[.items[]? | select(.kind == "value" and .name == "revision") | .value][0] // ""')"
+          echo "revision=${revision:-$(git rev-parse "origin/$PRODUCTION")}" >> "$GITHUB_OUTPUT"
           exit "${code:-0}"
 
   publish:

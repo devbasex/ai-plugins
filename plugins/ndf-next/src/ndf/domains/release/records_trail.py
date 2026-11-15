@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
+from dataclasses import dataclass
 
 from ndf import identity
 from ndf.adapters.github import Authored, GitHub, GitHubError
@@ -48,27 +49,34 @@ def _existing_record(comments: list[Authored], hub: GitHub, mark: str, sha: str)
     return None
 
 
+@dataclass(frozen=True)
+class _Record:
+    """置く記録の印（`mark`）・照合の鍵（`key`）・呼び名（`what`）。"""
+
+    mark: str
+    key: str
+    what: str
+
+
 def _write_once(
     hub: GitHub,
     number: int,
-    mark: str,
-    key: str,
+    record: _Record,
     render: Callable[[list[Authored]], str],
-    what: str,
     errors: tuple[type[Exception], ...] = (GitHubError, ValueError),
 ) -> tuple[bool, str]:
-    """印 `mark` と `key` の記録が既にあれば置かず、無ければ `render`（読んだコメントを受ける）の本文で置く。(置いたか, URL)。
+    """印 `record.mark` と `record.key` の記録が既にあれば置かず、無ければ `render`（読んだコメントを受ける）の本文で置く。(置いたか, URL)。
 
-    既にある記録に数えるのは `_existing_record` が数えるものだけ。`errors` の例外は `TrailError` に包む（`what` は記録の呼び名）。
+    既にある記録に数えるのは `_existing_record` が数えるものだけ。`errors` の例外は `TrailError` に包む。
     """
     try:
         found = hub.comments(number)
-        existing = _existing_record(found, hub, mark, key)
+        existing = _existing_record(found, hub, record.mark, record.key)
         if existing is not None:
             return False, existing
         url = Publisher(hub).comment(number, render(found)).url
     except errors as exc:
-        raise trail.TrailError(f"#{number} に{what}を置けない: {exc}") from None
+        raise trail.TrailError(f"#{number} に{record.what}を置けない: {exc}") from None
     return True, url
 
 
@@ -102,7 +110,7 @@ def write_admin_record(hub: GitHub, number: int, sha: str) -> tuple[bool, str]:
         trail_url = found[used].url if used is not None and used < len(found) else ""
         return render_admin_record(sha, trail_url)
 
-    return _write_once(hub, number, ADMIN_MARK, sha, render, "迂回の記録")
+    return _write_once(hub, number, _Record(ADMIN_MARK, sha, "迂回の記録"), render)
 
 
 def render_merge_record(approval: merge_decide.Approval) -> str:
@@ -121,7 +129,9 @@ def write_merge_record(hub: GitHub, number: int, approval: merge_decide.Approval
 
     既にある記録に数えるのは、信用する書き手が書き、編集されていない、同じマージした先端のものだけ。
     """
-    return _write_once(hub, number, MERGE_MARK, approval.merged_head, lambda _found: render_merge_record(approval), "人のマージの記録")
+    return _write_once(
+        hub, number, _Record(MERGE_MARK, approval.merged_head, "人のマージの記録"), lambda _found: render_merge_record(approval)
+    )
 
 
 def render_version_record(version: str, tag: str, bump_pr: int) -> str:
@@ -139,10 +149,8 @@ def write_version_record(hub: GitHub, number: int, version: str, tag: str, bump_
     return _write_once(
         hub,
         number,
-        VERSION_MARK,
-        version,
+        _Record(VERSION_MARK, version, "作った版の記録"),
         lambda _found: render_version_record(version, tag, bump_pr),
-        "作った版の記録",
         (GitHubError, ValueError, version_decide.VersionError),
     )
 

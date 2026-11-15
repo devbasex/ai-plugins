@@ -18,6 +18,7 @@ main への push の `bump` が進める）。同じ main の先端で 2 回打�
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,7 +26,7 @@ from typing import NamedTuple
 
 from ndf.adapters import git as git_mod
 from ndf.adapters.github import PER_PAGE, GitHub, Pull, text_of
-from ndf.domains.release import bump_decide, changelog_decide, gather, land, materials_decide, version_decide
+from ndf.domains.release import bump_decide, changelog_decide, gather, land, materials_decide, tagging, version_decide
 from ndf.domains.release import declaration as decl_mod
 from ndf.domains.release import plugins as plugins_mod
 
@@ -46,13 +47,18 @@ class Bumped(NamedTuple):
     level: str | None = None
     pr: int | None = None
     landed: land.Landed | None = None
+    # `published` のときにタグを打つコミット（直前の版上げの PR のマージ。無ければ main の先端）
+    revision: str | None = None
 
 
 class _Tip(NamedTuple):
-    """main の先端のプラグインの名前 → 版（定義が無ければ None）と、版のある全プラグインのタグが origin にあるか。"""
+    """main の先端のプラグインの名前 → 版（定義が無ければ None）、タグを待つプラグインのタグが origin にあるか、
+    タグを待つ先頭のプラグインの版（`shown`）、タグを打つコミット（`revision`）。"""
 
     versions: dict[str, str | None]
     tagged: bool
+    shown: str | None
+    revision: str
 
 
 class _Plan(NamedTuple):
@@ -168,19 +174,21 @@ class Bumper:
         tip = repo_git.rev_parse(self._tip_ref)
         return gather.Range(self._origin(tip), tip)
 
+    def _bump_merge(self, tip: str) -> str | None:
+        """main の先端 `tip` の祖先にある、直前の版上げの PR のマージコミット（無ければ None）。"""
+        last = self._last_bump(tip)
+        if last is None:
+            return None
+        chain = self._git.run("rev-list", "--first-parent", "--ancestry-path", git_mod.END_OF_OPTIONS, f"{last}..{tip}").split()
+        return chain[-1] if chain else None
+
     def _changed(self, span: gather.Range) -> list[str]:
         """範囲で変わったファイル。前の版上げの PR のマージ（M）が範囲にあれば、その版上げ自身の変更を数えない
         （起点..M の第 1 親 と M..main の先端 の和）。"""
         repo_git = self._git
-        last = self._last_bump(span.until)
-        chain = (
-            repo_git.run("rev-list", "--first-parent", "--ancestry-path", git_mod.END_OF_OPTIONS, f"{last}..{span.until}").split()
-            if last is not None
-            else []
-        )
-        if not chain:
+        merged = self._bump_merge(span.until)
+        if merged is None:
             return repo_git.changed_files(span.since, span.until)
-        merged = chain[-1]
         before = repo_git.changed_files(span.since, f"{merged}^1")
         after = repo_git.changed_files(merged, span.until)
         return sorted(set(before) | set(after))
@@ -232,7 +240,7 @@ class Bumper:
         if gather.remote_has_branch(repo_git, branch):
             gather.fetch(repo_git, branch)
             remote = f"{git_mod.ORIGIN}/{branch}"
-            outside = bump_decide.only_bump(repo_git.changed_files(span.until, remote), allowed_paths(self.root, decl))
+            outside = self._outside(span.until, remote, decl)
             if repo_git.rev_parse(f"{remote}^1") != span.until or outside:
                 raise BumpError(f"origin に {branch} が既にあり、main の先端の版上げだけを持つブランチでない（人が見てから打ち直す）")
         else:
@@ -292,22 +300,70 @@ class Bumper:
         gather.fetch(repo_git, pull.head_ref)
         if not repo_git.is_ancestor(self._tip_ref, f"{git_mod.ORIGIN}/{pull.head_ref}"):
             return Bumped(bump_decide.REUSED, version, level, number)
-        allowed = allowed_paths(self.root, decl_mod.load(self.root))
+        decl = decl_mod.load(self.root)
 
         def outside(p: Pull) -> list[str]:
-            base = repo_git.merge_base(self._tip_ref, f"{git_mod.ORIGIN}/{p.head_ref}")
-            return bump_decide.only_bump(repo_git.changed_files(base, f"{git_mod.ORIGIN}/{p.head_ref}"), allowed)
+            # マージへ渡す先端（`p.head_sha`）そのものを検査する（取り込んだブランチの後に先端が動いても、検査していない
+            # コミットを照合付きでマージしない）
+            gather.fetch(repo_git, p.head_ref)
+            head = repo_git.rev_parse(f"{git_mod.ORIGIN}/{p.head_ref}")
+            if head != p.head_sha:
+                return [f"（#{p.number} の先端が {p.head_sha[:12]} から {head[:12]} へ動いた）"]
+            if not repo_git.is_ancestor(self._tip_ref, head):
+                return [f"（{head[:12]} が {self._tip_ref} を含まない）"]
+            return self._outside(repo_git.merge_base(self._tip_ref, head), head, decl)
 
         landed = self.lander.land_bump(number, outside)
         state = bump_decide.MERGED if landed.merged else bump_decide.STOPPED
         return Bumped(state, version, level, number, landed)
 
+    def _outside(self, base: str, head: str, decl: decl_mod.Declaration) -> list[str]:
+        """`base..head` の差分のうち、版上げの変更でないもの（許したパスの外と、許したパスの中の版の外の変更。I7）。"""
+        repo_git = self._git
+        paths = repo_git.changed_files(base, head)
+        allowed = allowed_paths(self.root, decl)
+        outside = bump_decide.only_bump(paths, allowed)
+        generated = {w for step in decl.for_stage(version_decide.PRODUCTION) for w in step.writes}
+        pairs = [
+            (old, new)
+            for p in plugins_mod.load(self.root)
+            if (old := gather.version_at(repo_git, p, base)) is not None
+            and (new := gather.version_at(repo_git, p, head)) is not None
+            and old != new
+        ]
+        for path in paths:
+            if path in allowed and path not in generated and not self._version_only(base, head, path, decl.changelog, pairs):
+                outside.append(f"{path}（版の外の変更）")
+        return outside
+
+    def _version_only(self, base: str, head: str, path: str, changelog: str, pairs: Sequence[tuple[str, str]]) -> bool:
+        """`path` の `base..head` の変更が版上げだけか（CHANGELOG は足した行だけ、JSON は版の文字列だけ、ほかは版の行だけ）。"""
+        repo_git = self._git
+        if path.endswith(".json"):
+            before, after = (repo_git.attempt("show", f"{ref}:{path}") for ref in (base, head))
+            if before.returncode != 0 or after.returncode != 0:
+                return False
+            try:
+                return bump_decide.json_version_only(json.loads(before.stdout), json.loads(after.stdout), pairs)
+            except ValueError:  # noqa: NDF401 ファイル: JSON として読めない変更は版上げとして扱わない
+                return False
+        diff = repo_git.run("diff", "-U0", "--no-color", "--no-ext-diff", base, head, git_mod.END_OF_OPTIONS, path)
+        removed, added = bump_decide.diff_lines(diff)
+        return not removed if path == changelog else bump_decide.version_lines_only(removed, added, pairs)
+
     def _tip(self, span: gather.Range, found: Sequence[plugins_mod.Plugin]) -> _Tip:
-        """main の先端のプラグインごとの版と、版のある全プラグインのタグが origin にあるか。"""
+        """main の先端のプラグインごとの版と、タグを待つプラグインのタグが origin にあるか。
+
+        タグを待つのは、直前の版上げの PR のマージで定義が変わったプラグイン（`tagging.bumped`。publish がタグを作る対象と
+        同じ）。版上げの PR のマージが無ければ先頭のプラグイン。ほかのプラグインのタグの有無は数えない。"""
         tags = self._tags()
         versions = {p.name: gather.version_at(self._git, p, span.until) for p in found}
-        tagged = all(v is None or version_decide.tag_of(n, v) in tags for n, v in versions.items())
-        return _Tip(versions, tagged)
+        merged = self._bump_merge(span.until)
+        waiting = [p.name for p in tagging.bumped(self.root, merged)] if merged is not None else [p.name for p in found[:1]]
+        targets = [(n, v) for n in waiting if (v := versions.get(n)) is not None and not version_decide.is_dev(v)]
+        tagged = all(version_decide.tag_of(n, v) in tags for n, v in targets)
+        shown = targets[0][1] if targets else None
+        return _Tip(versions, tagged, shown, merged if merged is not None else span.until)
 
     def _plan(self, span: gather.Range, found: Sequence[plugins_mod.Plugin]) -> _Plan:
         """範囲にマージされた PR・その上げ幅・出し済みの版より大きく繰り上げた版を上げる予定。"""
@@ -332,8 +388,7 @@ class Bumper:
         version = planned[0].next if planned else None
         act = bump_decide.action(tip.tagged, bool(planned), opened, version if version is not None else "")
         if act == bump_decide.PUBLISH:
-            shown = next((v for v in tip.versions.values() if v is not None), None)
-            return Bumped(bump_decide.PUBLISHED, shown)
+            return Bumped(bump_decide.PUBLISHED, tip.shown, revision=tip.revision)
         if act == bump_decide.NOTHING or version is None:
             return Bumped(bump_decide.NOT_APPLICABLE)
         pulls = gather.pull_facts(self.hub, plan.numbers)

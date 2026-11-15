@@ -34,6 +34,10 @@ class VerifyConflict(Exception):
         self.number = number
 
 
+class VerifyEscape(Exception):
+    """PR を取り込んだ木の書き換え先（定義・マーケットプレイス・`version_files`）が一時の worktree の外を指す。"""
+
+
 class Verified(NamedTuple):
     """組んだ検証の ref。`included` は含めた PR の (番号, 先端)。"""
 
@@ -88,6 +92,19 @@ def _previous(repo_git: git_mod.Git, ref: str) -> str | None:
     return repo_git.rev_parse(f"{git_mod.ORIGIN}/{ref}")
 
 
+def _contained(work_root: Path) -> None:
+    """書き換える前に、書き換え先の実体（絶対パス・`..`・シンボリックリンクを解いたもの）が一時の worktree の中にあるかを
+    確かめる。外を指せば `VerifyEscape`（承認前の PR の宣言で、利用者のファイルを書き換えない）。"""
+    top = work_root.resolve()
+    decl = decl_mod.load(work_root)
+    targets = [work_root / plugins_mod.MARKETPLACE, *(work_root / rel for rel in decl.version_files)]
+    for p in plugins_mod.load(work_root):
+        targets += [work_root / p.dir / m for m in plugins_mod.MANIFESTS]
+    outside = [str(t) for t in targets if not t.resolve().is_relative_to(top)]
+    if outside:
+        raise VerifyEscape(f"検証の ref の書き換え先が一時の worktree の外を指す（書き換えない）: {', '.join(outside)}")
+
+
 def _rewrite(work_root: Path, marketplace: str, now: datetime) -> str:
     """`marketplace.json` の名前と、プラグインの版を検証の版へ書き換え、先頭のプラグインの検証の版を返す。"""
     found = plugins_mod.load(work_root)
@@ -117,6 +134,7 @@ def build(root: Path, hub: GitHub, decl: decl_mod.VerifyDecl, now: datetime) -> 
     try:
         work = git_mod.Git(path)
         _merge_pulls(work, pulls)
+        _contained(path)
         version = _rewrite(path, decl.marketplace, now)
         message = f"Verify: {decl.ref} を組み直した（{version}。含めた PR: {', '.join(f'#{p.number}' for p in pulls) or '無し'}）"
         work.run("add", "--all")

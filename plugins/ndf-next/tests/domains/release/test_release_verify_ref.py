@@ -159,3 +159,21 @@ def test_characterize_open_pulls_reads_a_non_list_response_as_no_pulls(tmp_path:
     built = verify_ref.build(work, hub, DECL, NOW)
     assert built.included == () and built.version == "1.2.3-next.20261115120000"
     assert [p["page"] for p in hub.params] == [1]
+
+
+def test_rewrite_targets_outside_the_temporary_worktree_are_refused(tmp_path: Path) -> None:
+    """PR 側の宣言の絶対パス・`..`・外向きのシンボリックリンクを追って一時の worktree の外を書き換えない。"""
+    work = tmp_path / "work"
+    victim = tmp_path / "victim.json"
+    victim.write_text('{"name": "kit", "version": "1.0.0"}\n', encoding="utf-8")
+    write_json(work / ".claude-plugin" / "marketplace.json", {"plugins": [{"name": "kit", "source": "./kit"}]})
+    (work / "kit" / ".claude-plugin").mkdir(parents=True)
+    (work / "kit" / ".claude-plugin" / "plugin.json").symlink_to(victim)
+    with pytest.raises(verify_ref.VerifyEscape, match="victim.json"):
+        verify_ref._contained(work)
+    (work / "kit" / ".claude-plugin" / "plugin.json").unlink()
+    write_json(work / "kit" / ".claude-plugin" / "plugin.json", {"name": "kit", "version": "1.0.0"})
+    verify_ref._contained(work)
+    write_json(decl_mod.path_of(work), {"version": decl_mod.READABLE_VERSION, "version_files": ["../victim.json"]})
+    with pytest.raises(verify_ref.VerifyEscape, match="victim.json"):
+        verify_ref._contained(work)

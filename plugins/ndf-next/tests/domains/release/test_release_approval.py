@@ -863,6 +863,13 @@ def test_land_bump_refuses_paths_outside_the_version_files_and_stops_without_the
     assert not done.merged and done.kind == "precondition" and "未決 3" in done.detail and hub.admin_merged == []
 
 
+def test_land_bump_merges_plainly_when_the_production_branch_needs_no_approval() -> None:
+    """承認数 0 の本番ブランチでは、迂回の宣言が無くても普通のマージ（先端との照合付き）で版上げの PR を入れる。"""
+    hub = _bump_hub()
+    done = _admin_lander(hub, admin=False, approvals=0).land_bump(20, lambda p: [])
+    assert done.merged and not done.admin and hub.merged == [20] and hub.admin_merged == []
+
+
 def test_land_bump_stops_on_a_failed_check_without_merging() -> None:
     hub = _bump_hub()
     done = _admin_lander(hub, failed=True).land_bump(20, lambda p: [])

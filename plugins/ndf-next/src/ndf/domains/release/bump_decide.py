@@ -95,6 +95,52 @@ def only_bump(paths: Sequence[str], allowed: frozenset[str]) -> list[str]:
     return [p for p in paths if p not in allowed]
 
 
+def diff_lines(diff: str) -> tuple[list[str], list[str]]:
+    """`git diff -U0` の出力の消した行と足した行（ファイルの見出しの行を除く。入力の順）。"""
+    removed: list[str] = []
+    added: list[str] = []
+    in_hunk = False
+    for line in diff.splitlines():
+        if line.startswith("@@"):
+            in_hunk = True
+        elif in_hunk and line.startswith("-"):
+            removed.append(line[1:])
+        elif in_hunk and line.startswith("+"):
+            added.append(line[1:])
+        elif line.startswith("diff --git"):
+            in_hunk = False
+    return removed, added
+
+
+def _swap(text: str, pairs: Sequence[tuple[str, str]]) -> str:
+    """`text` の前の版を後の版へ一度に置き換える（置き換えた後の版を再び置き換えない）。"""
+    mapping = dict(pairs)
+    if not mapping:
+        return text
+    pattern = re.compile("|".join(re.escape(old) for old in sorted(mapping, key=len, reverse=True)))
+    return pattern.sub(lambda m: mapping[m.group(0)], text)
+
+
+def version_lines_only(removed: Sequence[str], added: Sequence[str], pairs: Sequence[tuple[str, str]]) -> bool:
+    """消した行の版（`pairs` の前の版）を後の版へ置き換えると足した行になる変更だけか（版の行だけの書き換え。I7）。"""
+    return len(removed) == len(added) and all(_swap(r, pairs) == a for r, a in zip(removed, added))
+
+
+def json_version_only(before: object, after: object, pairs: Sequence[tuple[str, str]]) -> bool:
+    """JSON の値 `before` の文字列の版（`pairs`）を後の版へ置き換えると `after` になるか（書式の違いは問わない。I7）。"""
+
+    def swapped(value: object) -> object:
+        if isinstance(value, str):
+            return _swap(value, pairs)
+        if isinstance(value, list):
+            return [swapped(v) for v in value]
+        if isinstance(value, dict):
+            return {k: swapped(v) for k, v in value.items()}
+        return value
+
+    return swapped(before) == after
+
+
 def action(tip_tagged: bool, changed: bool, opened: OpenBump | None, version: str) -> str:
     """main の先端の状態から `bump` の動きを決める（モジュールの説明の表）。"""
     if not tip_tagged:

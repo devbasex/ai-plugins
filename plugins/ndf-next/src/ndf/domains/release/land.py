@@ -320,10 +320,11 @@ class Lander:
         return self._record_admin(pull, released) if bypass else released
 
     def land_bump(self, number: int, allowed: Callable[[Pull], list[str]]) -> Landed:
-        """版上げの PR を、承認の証跡を読まずに、差分の判定と必須のチェックの後に照合付きの迂回でマージする（#3572 の決定 7）。
+        """版上げの PR を、承認の証跡を読まずに、差分の判定と必須のチェックの後に先端との照合付きでマージする（#3572 の決定 7）。
 
-        `allowed` は版のファイルと CHANGELOG の外に及ぶ差分のパスを返す（空なら版上げだけ）。迂回の宣言が無い・承認数を
-        読めない・迂回が断られたときは、ruleset を変えずに済む手段が無いとして止まる（要求の未決 3）。
+        `allowed` は版のファイルと CHANGELOG の外に及ぶ差分のパスを返す（空なら版上げだけ）。宛先の承認数が 0 と読めれば
+        普通のマージで、1 以上なら迂回でマージする。承認が要るのに迂回の宣言が無い・承認数を読めない・マージが断られたときは、
+        ruleset を変えずに済む手段が無いとして止まる（要求の未決 3）。
         """
         deadline = self.clock() + self.budget
         pull = self.hub.pull(number)
@@ -332,7 +333,8 @@ class Lander:
         outside = allowed(pull)
         if outside:
             return Landed(False, "refused", f"#{number} の差分が版のファイルと CHANGELOG の外に及ぶ: {', '.join(outside)}")
-        if not self._bypass(pull):
+        plain = self._is_production(pull) and self.approvals(pull.base_ref) == 0
+        if not plain and not self._bypass(pull):
             return Landed(
                 False,
                 "precondition",
@@ -342,8 +344,12 @@ class Lander:
         kind, failed = self._watch(pull, deadline)
         if kind is not None:
             return Landed(False, kind, f"#{number} の必須のチェックが通らない（{kind}{_failed_listing(failed)}）", failed=failed)
-        outcome = self.hub.merge_as_admin(number, expect_head=pull.head_sha, method=MERGE_METHOD)
+        if plain:
+            outcome = self.hub.merge(number, expect_head=pull.head_sha, method=MERGE_METHOD, require_method=True)
+        else:
+            outcome = self.hub.merge_as_admin(number, expect_head=pull.head_sha, method=MERGE_METHOD)
         if not outcome.merged:
             return Landed(False, outcome.kind, outcome.detail)
         merged_sha = self.hub.pull(number).merge_sha
-        return Landed(True, None, f"#{number} を迂回でマージした", production_sha=_sha_or_none(merged_sha), admin=True)
+        how = "マージした" if plain else "迂回でマージした"
+        return Landed(True, None, f"#{number} を{how}", production_sha=_sha_or_none(merged_sha), admin=not plain)
