@@ -91,6 +91,37 @@ def test_gated_design_prs_without_sprint_json_is_empty(tmp_path):
     assert pdg.gated_design_prs(tmp_path) == {}
 
 
+def test_gated_design_prs_reads_plans_written_with_a_relative_out(tmp_path):
+    """`new sprint --out .ndf/sprint-s1` は目録へ `.ndf/sprint-s1/<プラン>` を載せる。スプリントのパスを重ねずに読む。"""
+    sprint = _sprint(tmp_path, {7: (12, "関門")})
+    manifest = json.loads((sprint / "sprint.json").read_text(encoding="utf-8"))
+    manifest["ステージ"][0]["plans"] = [".ndf/sprint-s1/design-7.json"]
+    (sprint / "sprint.json").write_text(json.dumps(manifest, ensure_ascii=False))
+    assert list(pdg.gated_design_prs(sprint)) == [12]
+
+
+def _merge_stage(sprint: Path, started: bool) -> str:
+    """設計 PR のマージのステージに command と resume を書き、`started` ならキューの前の起動の一覧を置く。command を返す。"""
+    done = sprint / "done-3.json"
+    command = f"python3 supervise.py queue 3-design-merge-7.json --done {done}"
+    stages = [
+        {"name": "設計", "plans": []},
+        {"name": "設計 PR のマージ", "plans": [], "command": command, "resume": f"python3 supervise.py queue --resume {done}"},
+    ]
+    (sprint / "sprint.json").write_text(json.dumps({"ステージ": stages}, ensure_ascii=False))
+    if started:
+        done.with_suffix(".plans.json").write_text("{}")
+    return command
+
+
+@pytest.mark.parametrize("started", [False, True])
+def test_merge_resume_starts_the_merge_queue_until_it_has_run(tmp_path, started):
+    """マージのキューをまだ起動していなければ command、起動済みなら resume（`queue --resume` は前の起動の一覧が要る）。"""
+    command = _merge_stage(tmp_path, started)
+    got = pdg._merge_resume(tmp_path)
+    assert (got == command) is not started and got.endswith(f"--resume {tmp_path / 'done-3.json'}") is started
+
+
 # ---- 依頼の id（I2・I4） ----
 
 

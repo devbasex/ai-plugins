@@ -41,8 +41,12 @@ def sprint_manifest(sprint: Path) -> dict:
 
 
 def stage_plans(sprint: Path, stage: dict) -> list[Path]:
-    """ステージの `plans` のパス。相対パスはスプリントのディレクトリから解く。"""
-    return [Path(p) if Path(p).is_absolute() else Path(sprint) / p for p in stage.get("plans") or []]
+    """ステージの `plans` のパス。相対パスはスプリントのディレクトリの直下のファイル名として解く。
+
+    `supervise.py new sprint` はプランを `<--out>/<番号>-<鍵>.json` へ書き、目録には `--out` のままのパス（相対なら
+    打った場所から見たパス。例 `.ndf/sprint-s1/1-design-7.json`）を載せる。プランは常に目録と同じディレクトリにあるため、
+    相対パスへスプリントのパスを前置せず、ファイル名だけを使う。"""
+    return [Path(p) if Path(p).is_absolute() else Path(sprint) / Path(p).name for p in stage.get("plans") or []]
 
 
 def _result(plan: Path) -> str:

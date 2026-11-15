@@ -205,9 +205,32 @@ def _answer_row(rows: list[dict], rid: str) -> dict | None:
     return next((r.get("msg") or {} for r in rows if r.get("kind") == "answer" and r.get("id") == rid), None)
 
 
+def _resume_started(resume: str) -> bool:
+    """`queue --resume <done>` の前の起動の一覧（done の隣の `.plans.json`）があるか。読めない形なら偽。"""
+    import shlex
+
+    from supervise_lib.paths import queue_plans_path
+
+    try:
+        words = shlex.split(resume)
+        done = words[words.index("--resume") + 1]
+    except (ValueError, IndexError):
+        return False
+    return queue_plans_path(Path(done)).is_file()
+
+
+def _stage_next(stage: dict) -> str:
+    """ステージの続きのコマンド: キューを起動済み（前の起動の一覧がある）なら `resume`、まだなら `command`（無ければ `resume`）。"""
+    resume = str(stage.get("resume") or "")
+    if resume and (_resume_started(resume) or not stage.get("command")):
+        return resume
+    return str(stage.get("command") or resume)
+
+
 def _merge_resume(sprint: Path | None) -> str:
-    """設計のステージの後で最初に `resume` を持つステージ（設計 PR のマージのステージ）の `resume`。無ければ設計のステージの `resume`。
-    読めなければ空。"""
+    """設計のステージの後で最初に `resume` を持つステージ（設計 PR のマージのステージ）の続き。無ければ設計のステージの続き。
+    マージのキューをまだ起動していなければ（normal の最初の設計承認）`resume` は「前の起動の一覧が無い」で止まるため、
+    そのステージの `command` を返す（`_stage_next`）。読めなければ空。"""
     import parallel_hold_sprint as phs
 
     if sprint is None:
@@ -216,8 +239,8 @@ def _merge_resume(sprint: Path | None) -> str:
     at = next((i for i, s in enumerate(stages) if s.get("name") == DESIGN_STAGE), None)
     if at is None:
         return ""
-    later = next((s.get("resume") for s in stages[at + 1 :] if s.get("resume")), None)
-    return str(later or stages[at].get("resume") or "")
+    later = next((s for s in stages[at + 1 :] if s.get("resume")), None)
+    return _stage_next(later or stages[at])
 
 
 def _has_gate(state: Path, pr: int, by: str, outcome: str) -> bool:

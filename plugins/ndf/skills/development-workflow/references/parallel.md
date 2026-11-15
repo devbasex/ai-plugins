@@ -349,7 +349,7 @@ python3 "$NDF_SCRIPTS/parallel.py" design-answer p1 ls-g3640-0123456789ab --stat
 
 | 答え | 終了コード | 続き |
 | --- | --- | --- |
-| 承認 | 0 | スプリント状態へ設計承認ゲートの記録（`--pr`・答えの `by`）を書き、`metrics.next`（設計 PR のマージのステージの `queue --resume`）を流す。設計 PR はマージ済みで、MVV 判定の承認の記録でも承認の確かめ（`design-approved`）を通る |
+| 承認 | 0 | スプリント状態へ設計承認ゲートの記録（`--pr`・答えの `by`）を書き、`metrics.next`（設計 PR のマージのステージの `queue --resume`。そのキューをまだ起動していなければステージの `command`）を流す。設計 PR はマージ済みで、MVV 判定の承認の記録でも承認の確かめ（`design-approved`）を通る |
 | 直して出し直す | 10 | 指摘を設計のプランの `work/design-revise-<設計 PR>.md` へ書く。`metrics.next` のとおり直して出し直す |
 | やらない | 10 | 差し戻しを記録する。課題を進めない |
 | まだ無い | 3 | 同じ保留の手順で止まり直す |
