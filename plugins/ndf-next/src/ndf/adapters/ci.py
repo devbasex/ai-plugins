@@ -470,10 +470,16 @@ class _Assembly:
     def read(self, check: Check) -> FailedTestRead:
         """チェック 1 件を、成果物を先に、ログを後に読む。"""
         try:
-            run_id = int(self.github.job(check.job)["run_id"])
+            job = self.github.job(check.job)
         except GitHubError as exc:
             self.job_errors.append(str(exc))
             return FailedTestRead(check.name, None, None, ReadSource.NONE, 0, str(exc))
+        try:
+            run_id = int(job["run_id"])
+        except (KeyError, TypeError, ValueError):
+            why = f"ジョブ {check.job} の応答に run_id が無い"
+            self.job_errors.append(why)
+            return FailedTestRead(check.name, None, None, ReadSource.NONE, 0, why)
         run = self._run(run_id)
         if run.error:
             self.job_errors.append(run.error)

@@ -354,6 +354,17 @@ def test_unreadable_job_is_recorded_and_other_checks_are_still_read() -> None:
     assert got.nodes == ci_logs.pytest_failures(LOG)
 
 
+def test_a_job_answer_without_run_id_is_unreadable_and_other_checks_are_still_read() -> None:
+    # 応答の形が違うジョブ（run_id が無い）も、外へ投げずに読み元 none にする
+    hub = FakeHub({2: 9}, {9: ".github/workflows/pytest.yml"}, logs={2: LOG})
+    real_job = hub.job
+    hub.job = lambda job_id: {"id": job_id} if job_id == 1 else real_job(job_id)  # type: ignore[method-assign]
+    got = ci.failed_tests_of(hub, [_check(1), _check(2)], _source())  # type: ignore[arg-type]
+    assert [(r.source, r.run_id) for r in got.reads] == [("none", None), ("log", 9)]
+    assert "run_id" in got.reads[0].reason and len(got.job_errors) == 1
+    assert got.nodes == ci_logs.pytest_failures(LOG)
+
+
 def test_unreadable_log_keeps_the_artifact_and_log_reasons() -> None:
     hub = FakeHub({1: 9}, {9: ".github/workflows/pytest.yml"}, artifacts={9: []})
     got = ci.failed_tests_of(hub, [_check(1)], _source("junit-*"))  # type: ignore[arg-type]
