@@ -5,7 +5,7 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 
 # 要求と受け入れ条件
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `spec-copy.py`（M7）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `glossary.py`（M7）・`projects-sync.sh`（M7）・`spec-copy.py`（M7）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 実装を始める前に、**何を満たせば完了なのか**を観測可能な形へ確定させる。
 
@@ -58,7 +58,7 @@ description: "Turn a vague request into verifiable acceptance criteria before im
    - 1 件以上（既に文書かコードのあるプロジェクト）: 候補から領域の語を選び、語・意味・コンテキストの案を添えて
      利用者へ一覧で示す
    - 0 件（スクラッチのプロジェクト）: 依頼文から語とコンテキストを大まかに起こし、同じ形で示す
-4. 利用者が採った語だけを用語集のファイルへ書き、`python3 "$SCRIPTS/glossary.py" render` で文書を作り直す。
+4. 利用者が採った語だけを用語集のファイルへ書き、`"${CLAUDE_PLUGIN_ROOT}/bin/ndf" records glossary render` で文書を作り直す。
    採る語が 0 件でもよい（ほぼ空の用語集のまま設計へ進める）
 
 ### 1. 依頼を要約せずに写す
@@ -193,7 +193,7 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 
 `standard` では、設計と要求を同じ差分でレビューするために、本文のコピー（仕様のコピー）を `issues/` に置く。
 
-1. `python3 "$SCRIPTS/spec-copy.py" write <課題> issues/issue-<番号>-requirements.md` でコピーを作る
+1. `"${CLAUDE_PLUGIN_ROOT}/bin/ndf" records spec finalize <課題> issues/issue-<番号>-requirements.md` でコピーを作る
    （本文の `## 進行` より前の全文）
 2. コピーは設計 PR と一緒にコミットする。本文を直したら `write` でコピーを作り直す（手で直さない）
 3. 設計 PR を出す前に `spec-copy.py check <課題> <写し>` が 0 であることを確かめる（`design` の手順 7）

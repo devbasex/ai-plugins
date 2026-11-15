@@ -243,7 +243,7 @@ claude のアカウントを 2 つ以上登録しておくと、利用上限で�
    - `ndf progress update <sprint-state.json> [--done <done>] [--next <plan.json>=<行の「次」>]`（done と報告から状態・PR・秒・費用を埋める。何度走らせても同じ）
    - `ndf progress show <sprint-state.json> <引継ぎ文書> --section 今の会話の進み`（節の本文だけを置き換える。新しいセッションなら `--demote 前の会話の進み --heading "今の会話の進み（<時刻>）"` で今の節を下げて新しい節を足す）
    - `ndf progress show <sprint-state.json> [--field <JSON Pointer>]`（読むだけ。計画ごとの状態と、最初の終わっていない計画の次の欄を `next` に返す。状態ファイルをその場の Python の 1 行で読み直さない）
-   - `ndf plan next <sprint-state.json> --doc <引継ぎ文書> --replace`（「次に実行するコマンド」の節を置き換え、同じ `ndf-next` のブロックを最後の応答に出す）
+   - `ndf progress next <sprint-state.json> --doc <引継ぎ文書> --replace`（「次に実行するコマンド」の節を置き換え、同じ `ndf-next` のブロックを最後の応答に出す）
    - `ndf records handoff check <名> --trim`（「前の会話の進み」を履歴へ移し、節の形と 300 行の上限を確かめる。1 か 5 のときの扱いは [handoff.md](handoff.md) の「作る・更新する」）
 
 **本番へのリリースの後は、カットポイントの呼び出しを本番のキューと同じバックグラウンドの Bash で続けて流す。** 流す前に conductor が `handoff.py init` を打ち、本番の後の「現在地」と「次にやること」を文書へ書く（パイプラインの中では書き直せない）。`check` が 1 か 5 ならパイプラインはブロックを出さずに止まり、conductor が完了の通知で終了コードを受けて扱ってからブロックを出す。リリース承認ゲートの承認から次のセッションの起動までに、conductor が組み立てる文は無くなる。conductor は完了の通知を受けたら `relay.py notice` のアナウンスと、出力の `ndf-next` のブロックをそのまま出す。ラッパーがプラグインを本番の版へ更新し、次のセッションを起動する。本番のキューは、目録（`$O/sprint.json`）の `本番` のステージの `command` に `--done` を足したものである（例の `9` はステージの番号）。
@@ -262,7 +262,7 @@ python3 $H check $N --trim >/dev/null && sed -n '/^```ndf-next/,/^```$/p' $DOC
 
 **次のセッションを止めずに続けるには、`/goal` のテンプレートを特定の課題に縛らない。** テンプレートには「効果の順の残りから次のスプリントを選び、同じパイプラインで流し、最後に同じテンプレートで `ndf-next` を出す」ことを書く。止まるのは 2 つの承認ゲートだけになる。
 
-**再開したセッションの「復元完了」は hook が打つ。** 引継ぎ文書で始まったセッションで、エントリポイントの Skill を除く最初の工程を起動したときに 1 回だけ書き、復元の区間の終わりになる（[context-window.md](context-window.md) の「判定と再起動を記録する」）。conductor は打たない。hook が止めた後の「引継ぎ開始」も、ラッパーの下では hook が打つ。上の 3 の `record --event 引継ぎ開始` は、カットポイントで自分で切るときに打つ。`ndf plan next` は `ndf-next` を出すたびに判定「再起動」を記録する（理由は `--reason`。既定は直前の拒否の理由、無ければ現行方式はカットポイント・試行方式は手動）。
+**再開したセッションの「復元完了」は hook が打つ。** 引継ぎ文書で始まったセッションで、エントリポイントの Skill を除く最初の工程を起動したときに 1 回だけ書き、復元の区間の終わりになる（[context-window.md](context-window.md) の「判定と再起動を記録する」）。conductor は打たない。hook が止めた後の「引継ぎ開始」も、ラッパーの下では hook が打つ。上の 3 の `record --event 引継ぎ開始` は、カットポイントで自分で切るときに打つ。`ndf progress next` は `ndf-next` を出すたびに判定「再起動」を記録する（理由は `--reason`。既定は直前の拒否の理由、無ければ現行方式はカットポイント・試行方式は手動）。
 
 `ndf progress show <sprint-state.json>` は端末向けに 1 行ずつ（スプリント・状態・次）を出す。
 節が見つからないときは文書を変えずに `"status": "stopped"` と理由を返す。

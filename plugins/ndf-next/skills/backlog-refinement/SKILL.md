@@ -10,7 +10,7 @@ allowed-tools:
 
 # 蓄積した課題を棚卸しする
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `ask.py`（P2）・`estimate.py`（P3）・`glossary.py`（M7）・`project-decl.py`（D2+）・`resolve.sh`（X0）・`sprint-close.py`（M1）・`upkeep.py`（M6）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `ask.py`（P2）・`estimate.py`（P3）・`glossary.py`（M7）・`issue-items.py`（M6）・`project-decl.py`（D2+）・`projects-sync.sh`（M7）・`resolve.sh`（X0）・`sprint-close.py`（M1）・`upkeep.py`（M6）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 **変更をまたいで溜まった課題そのものを見直す。** 起票はその場で行い、その変更から出た
 取りこぼしは振り返りが拾うが、**一覧の全体を現状に合わせる手順**はどちらも持たない。
@@ -289,7 +289,7 @@ GitHub でないときは 0 で「検査しなかった」が返るので、そ�
 ### 手順 2C: 順位を算出する
 
 ```bash
-python3 "$UPKEEP/upkeep.py" rank --scores scores.json [--capacity N] [--approved 12,34] [--since-ref <前のリリースのタグ>]
+"${CLAUDE_PLUGIN_ROOT}/bin/ndf" issues rank --scores scores.json [--capacity N] [--approved 12,34] [--since-ref <前のリリースのタグ>]
 ```
 
 差分の棚卸しでは `--since-ref` に手順 1 と同じタグを渡す。見積がどこにも無い課題のうち、そのコミットの時刻以前に
@@ -318,7 +318,7 @@ Size は、課題の最新の見積もりの記録（手順 2B の `estimate.py 
 形は `upkeep.py` の冒頭にある。
 
 ```bash
-python3 "$UPKEEP/upkeep.py" apply --plan plan.json [--max-waits N]
+"${CLAUDE_PLUGIN_ROOT}/bin/ndf" issues apply --plan plan.json [--max-waits N]
 ```
 
 - **本文は全文を書き直す。** コメントの追記ではなく本体を直す

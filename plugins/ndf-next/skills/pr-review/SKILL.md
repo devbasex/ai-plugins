@@ -12,7 +12,7 @@ allowed-tools:
 
 # コードレビューコマンド
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `external-ai.py`（AD3+）・`resolve.sh`（X0）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `external-ai.py`（AD3+）・`pr-review-steps.py`（M5）・`projects-sync.sh`（M7）・`resolve.sh`（X0）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 PR 差分、または `--branch` 指定時は現在のブランチの差分を、専門家としてレビューする。
 

@@ -51,7 +51,7 @@
 | 次にやること | ○ | 番号付き。1 つ目が次のセッションの最初の作業 | conductor が書き直す |
 | 今の会話の進み | — | プランごとの行の表 | `ndf progress show`・`ndf plan note` |
 | 運用の知見 | — | その対象で繰り返し効いた手順と落とし穴。対象をまたいで効くものは Skill か課題へ移す | conductor |
-| 次に実行するコマンド | ○ | `ndf-next` のブロック 1 つ（形は [context-window.md](context-window.md) の「新しい会話で戻す」） | `handoff.py next`・`ndf plan next --replace` |
+| 次に実行するコマンド | ○ | `ndf-next` のブロック 1 つ（形は [context-window.md](context-window.md) の「新しい会話で戻す」） | `handoff.py next`・`ndf progress next --replace` |
 
 任意の 2 節は、使わなければ見出しごと消してよい。テンプレートに無い節・同じ節の 2 つ目・順の逆は `check` が終了コード 1 で返す。
 
@@ -69,7 +69,7 @@
    書かないと問いが答えのないまま消える（[context-window.md](context-window.md) の「どちらの方針でも変わらないこと」）
 2. スプリント状態ファイルがあれば `ndf progress show` で「今の会話の進み」を置く（[relay.md](relay.md) のカットポイントの手順）
 3. 再開コマンドを「次に実行するコマンド」に置く。`handoff.py next <名>` に標準入力で渡すか、スプリント状態ファイルが
-   あれば `ndf plan next --doc <本体> --replace`。**再開コマンドは文書のパス（`.ndf/handoff/<名>.md`）を含める。**
+   あれば `ndf progress next --doc <本体> --replace`。**再開コマンドは文書のパス（`.ndf/handoff/<名>.md`）を含める。**
    `ndf progress new --goal` のテンプレートには「`.ndf/handoff/sprint-{name}.md` の続きから」（スプリント名が名の形に合わなければ
    `.ndf/handoff/milestone-{milestone}.md`）と差し込みの語で書く。テンプレートは次のスプリントでも使うため、パスを文字のまま書かない
 4. `ndf records handoff check <名> --trim` を打つ。`--trim` は「前の会話の進み」の節を履歴の末尾へ移す

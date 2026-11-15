@@ -8,10 +8,10 @@ conductor が自分で打つ NDF のスクリプトはこの一覧に限る。**
 例: マージ済みの PR #1211 の不具合を即時修正すると決めたときは、`gh` を手で打たずに次の 3 行で流す。
 
 ```bash
-python3 "$SCRIPTS/supervise.py" new fix --worktree <作業場所> --tests <テストのパス> \
+"${CLAUDE_PLUGIN_ROOT}/bin/ndf" route render fix --worktree <作業場所> --tests <テストのパス> \
   --title "Fix: ..." --issue 1211 --escape-of 1211 --out <プラン>.json
-python3 "$SCRIPTS/supervise.py" queue <プラン>.json
-python3 "$SCRIPTS/supervise.py" wait <プラン>-state/queue-done.json
+"${CLAUDE_PLUGIN_ROOT}/bin/ndf" plan queue <プラン>.json
+"${CLAUDE_PLUGIN_ROOT}/bin/ndf" plan wait <プラン>-state/queue-done.json
 ```
 
 `$SCRIPTS` の決め方は [scripts-lookup.md](scripts-lookup.md) にある。表のパスは `plugins/ndf/` からの
@@ -45,7 +45,7 @@ python3 "$SCRIPTS/supervise.py" wait <プラン>-state/queue-done.json
 | `scripts/gate-rejections.py count` | 承認ゲートの差し戻しを、スプリント・課題・PR ごとに設計承認ゲート・リリース承認ゲートに分けて数える（読めなければ件数は「不明」、範囲に答えの行が無ければ「未記録」） |
 | `scripts/project-mvv.py` | プロジェクト MVV の判定（`check`）・材料（`collect`）・候補（`propose`）・照合（`vet`）・承認の書き込み（`approve`）・版（`show`）・節（`context`）・改訂の兆候（`signals`）。手順は [project-mvv.md](project-mvv.md) |
 | `bin/ndf progress show` | 今の状態を出す |
-| `bin/ndf plan next` | 切れ目で引継ぎ文書へ置く ndf-next のブロックを作る |
+| `bin/ndf progress next` | 切れ目で引継ぎ文書へ置く ndf-next のブロックを作る |
 | `bin/ndf progress show` | 状態を表に書き出す |
 | `scripts/mvv-gate.py check` | 承認ゲートの前に MVV の判定を行う（`--advise` は `normal` の助言の MVV 判定。[pace.md](pace.md) の「MVV 判定」） |
 | `scripts/glossary.py gate` | 設計の工程の始めに用語集があるかを確かめる |

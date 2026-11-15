@@ -1,6 +1,6 @@
 # 初期化・再開・提案
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `launch-cli.sh`（M4）・`refactor.py`（M4）・`resolve.sh`（X0）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `launch-cli.sh`（M4）・`prepare-worktrees.sh`（M4）・`refactor.py`（M4）・`resolve.sh`（X0）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 [← SKILL.md](../SKILL.md)
 

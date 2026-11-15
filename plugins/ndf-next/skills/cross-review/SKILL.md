@@ -146,11 +146,9 @@ PR を**既定の参加者プール（claude / codex / kiro とホスト）か�
 渡す**（再開で渡した引数の扱いは [docs/04-contracts.md](docs/04-contracts.md) の「再開で渡した引数の扱い」）。
 
 ```bash
-<エントリポイントを探すコマンド>   # scripts-lookup.md の「エントリポイントを探すコマンド」の for 文。$R を決める
-[ -n "$R" ] || exit 3
-CR=$(bash "$R/scripts/resolve.sh" scripts cross-review) || exit 3
-python3 "$CR/drive.py" <PR> [--rotate-mode light|squash] [--reopen] [--max-rounds N] [--rotate-after K] [--host H] [--only R] \
-  [--exclude N] [--include N] [--require-all] [--focus TEXT] [--extra-instructions-file PATH] [--verify-command CMD] [--verify-exit-code N]
+# 対象のリポジトリの中で打つ。リポジトリは --repo → 状態ファイル → 作業ディレクトリの origin の順に決まる
+"${CLAUDE_PLUGIN_ROOT}/bin/ndf" cross-review run --pr <PR> --state-dir <状態ディレクトリ> --base <ベースブランチ> \
+  [--worktree PATH] [--branch NAME] [--purpose PURPOSE] [--reviewer NAME] [--max-rounds N] [--findings PATH]
 ```
 
 待ちはコマンドの中で行う（1 ラウンドで 20 分を超えうる）。Claude Code では `run_in_background` で起動し、
@@ -161,10 +159,9 @@ python3 "$CR/drive.py" <PR> [--rotate-mode light|squash] [--reopen] [--max-round
 # 起動（1 回の呼び出し）
 <エントリポイントを探すコマンド>   # scripts-lookup.md の「エントリポイントを探すコマンド」の for 文。$R を決める
 [ -n "$R" ] || exit 3
-CR=$(bash "$R/scripts/resolve.sh" scripts cross-review) || exit 3
 LIB=$(bash "$R/scripts/resolve.sh" scripts)/lib || exit 3
 RC="${TMPDIR:-/tmp}/cross-review-drive-pr<PR>.rc"
-bash "$LIB/bg-wait.sh" run "$RC" -- python3 "$CR/drive.py" <PR> [上と同じ引数]
+bash "$LIB/bg-wait.sh" run "$RC" -- "${CLAUDE_PLUGIN_ROOT}/bin/ndf" cross-review run [上と同じ引数]
 ```
 
 ```bash

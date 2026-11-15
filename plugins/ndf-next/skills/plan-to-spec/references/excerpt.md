@@ -1,6 +1,8 @@
 <!-- ndf-excerpt: plan-to-spec -->
 # plan-to-spec の抜粋
 
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `plan-to-spec-steps.py`（M7）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+
 ## 呼び出し
 
 python3 "$SCRIPTS/plan-to-spec-steps.py" spec-finalize --spec <仕様書> --design <元 plan・設計>... [--title <索引の説明>] --root .

@@ -9,7 +9,7 @@ allowed-tools:
 
 # マージ後クリーンアップコマンド
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `release-steps.py`（M2）・`stage-check.sh`（P1a）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `merged-steps.py`（M8）・`projects-sync.sh`（M7）・`release-steps.py`（M2）・`stage-check.sh`（P1a）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 PR マージ後の後始末をまとめて実行する。対象 PR のブランチ削除に加えて、残っているマージ済みブランチの整理とベースブランチの取り込みもこの Skill で扱う。
 
@@ -111,7 +111,7 @@ fi
 引数が無ければ、自身が作成した最新の PR の番号を渡す。
 
 ```bash
-python3 "$SCRIPTS/merged-steps.py" cleanup <PR番号>... --root <メインディレクトリ>
+"${CLAUDE_PLUGIN_ROOT}/bin/ndf" worktree cleanup <PR番号>... --root <メインディレクトリ>
 ```
 
 出力は 1 行の JSON（形と状態の意味は `$SCRIPTS/lib/README.md` の「手順のスクリプトの結果」）。終了コードを見て次を決める。
@@ -139,7 +139,7 @@ python3 "$SCRIPTS/merged-steps.py" cleanup <PR番号>... --root <メインディ
 コマンドを承認の代わりにしない。
 
 ```bash
-python3 "$SCRIPTS/merged-steps.py" merge-when-green <PR番号> --root <メインディレクトリ> \
+"${CLAUDE_PLUGIN_ROOT}/bin/ndf" ci merge <PR番号> --root <メインディレクトリ> \
   [--gate-approved user|mvv] [--method merge|squash|rebase] [--interval 10] [--recheck 5] [--no-checks-after 60] [--timeout 3600] \
   [--stale-after 300] [--no-cleanup] [--no-admin]
 ```

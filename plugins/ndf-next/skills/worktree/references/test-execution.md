@@ -52,7 +52,7 @@ flowchart TD
 ## 採番
 
 ```bash
-bash "$SCRIPTS/worktree-testenv.sh" env "$WT"
+"${CLAUDE_PLUGIN_ROOT}/bin/ndf" worktree testenv env "$WT"
 ```
 
 環境名・スロット・ポートを出力し、worktree レジストリへ記録する。**同じ worktree には常に同じ値が返る。**
@@ -93,8 +93,8 @@ worktree レジストリは共通の git ディレクトリ配下（`.git/ndf/wo
    決まる。同じ内容なら焼き直しは発生しない
 
    ```bash
-   TAG=$(bash "$SCRIPTS/worktree-testenv.sh" tag "$WT")
-   bash "$SCRIPTS/worktree-testenv.sh" bake --tag "$TAG"   # 2 なら同じタグの基準が既にある
+   TAG=$("${CLAUDE_PLUGIN_ROOT}/bin/ndf" worktree testenv tag "$WT")
+   "${CLAUDE_PLUGIN_ROOT}/bin/ndf" worktree testenv bake --tag "$TAG"   # 2 なら同じタグの基準が既にある
    ```
 
 5. **復元して起動する** — `ndf worktree testenv up "$WT" --profile core`。ホストポートは
@@ -125,7 +125,7 @@ worktree レジストリは共通の git ディレクトリ配下（`.git/ndf/wo
    最初のテストが全体を作り直す構成がある（実測では 1,790 本の定義を流し直した）
 
    ```bash
-   bash "$SCRIPTS/worktree-testenv.sh" test "$WT" --kind stateful
+   "${CLAUDE_PLUGIN_ROOT}/bin/ndf" worktree testenv test "$WT" --kind stateful
    ```
 
 `test` は**実行したコマンドの終了コードをそのまま返す**。テストの成否を包み隠さないためである。
@@ -152,7 +152,7 @@ worktree レジストリは共通の git ディレクトリ配下（`.git/ndf/wo
    `port_role` で指定する（既定は `http`）
 
    ```bash
-   bash "$SCRIPTS/worktree-testenv.sh" test "$WT" --kind browser
+   "${CLAUDE_PLUGIN_ROOT}/bin/ndf" worktree testenv test "$WT" --kind browser
    ```
 
 証跡の置き場所は、その worktree 限りの除外設定（`.git/info/exclude`）へ自動で登録される。
@@ -167,8 +167,8 @@ worktree レジストリは共通の git ディレクトリ配下（`.git/ndf/wo
 **公開するのは、マスク済みデータで焼いた基準を載せたテスト環境だけとする。**
 
 ```bash
-bash "$SCRIPTS/worktree-testenv.sh" expose "$WT"     # 0 完了 / 1 条件を満たさず拒否
-bash "$SCRIPTS/worktree-testenv.sh" unexpose "$WT"
+"${CLAUDE_PLUGIN_ROOT}/bin/ndf" worktree testenv expose "$WT"     # 0 完了 / 1 条件を満たさず拒否
+"${CLAUDE_PLUGIN_ROOT}/bin/ndf" worktree testenv unexpose "$WT"
 ```
 
 拒否する条件は次の 3 つで、1 つでも該当すれば公開しない（終了コード 1）。どれに当たったかは
@@ -233,7 +233,7 @@ worktree を見ているかを確かめ（到達の確認）、見ていなけ�
 `info/exclude` へ `.ndf-evidence/` を登録してから置き、確かめた後に消す。
 
 ```bash
-bash "$SCRIPTS/worktree-testenv.sh" compose-env "$WT"   # 割り当て済みのテスト環境へ向ける値（割り当てを新しく取らない）
+"${CLAUDE_PLUGIN_ROOT}/bin/ndf" worktree testenv compose-env "$WT"   # 割り当て済みのテスト環境へ向ける値（割り当てを新しく取らない）
 python3 "$SCRIPTS/lib/container_reach.py" probe "$WT" --service app; echo $?  # 0 届いた / 1 届かない / 2 実行系が無い
 ```
 
@@ -337,7 +337,7 @@ docker volume ls -q --filter label=com.docker.compose.project=<環境名> | xarg
 `down` と同じく宣言で決め、`--volumes` は宣言より優先する。手で確かめるときはリポジトリの中から打つ。
 
 ```bash
-bash "$SCRIPTS/worktree-testenv.sh" reclaim <メインディレクトリ>  # 結果を 1 行の JSON で出す
+"${CLAUDE_PLUGIN_ROOT}/bin/ndf" worktree testenv reclaim <メインディレクトリ>  # 結果を 1 行の JSON で出す
 ```
 
 環境ごとの結果は `items[].result` に載る。終了コードを 1 にするのは `failed` と、何も回収しなかったとき（`not_run`）だけである。

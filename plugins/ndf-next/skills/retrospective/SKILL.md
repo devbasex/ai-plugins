@@ -12,7 +12,7 @@ allowed-tools:
 
 # 振り返り
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `ask.py`（P2）・`gate-rejections.py`（P2）・`glossary.py`（M7）・`project-decl.py`（D2+）・`skill-stats.py`（M7）・`upkeep.py`（M6）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `ask.py`（P2）・`gate-rejections.py`（P2）・`glossary.py`（M7）・`issue-file.py`（M6）・`project-decl.py`（D2+）・`projects-sync.sh`（M7）・`skill-stats.py`（M7）・`upkeep.py`（M6）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 **進め方のうち次に変えることを決めて残し、起票の取りこぼしを拾う。**
 
@@ -100,7 +100,7 @@ python3 "$SCRIPTS/issue-file.py" by-origin --origin "issue #<起点>" --origin "
 | context window | `/ndf:skill-stats --agents --session <conductor のセッション>` | 層ごとの固定費と実作業、束ねる候補・割る候補・worker を使いすぎの目印 |
 | 用語集 | `python3 "$SCRIPTS/glossary.py" diff --base <起点> --head <終点>` | その変更で足された語・廃止された語・意味の変わった語（コンテキストごと） |
 | 承認ゲートの差し戻し | `python3 "$SCRIPTS/gate-rejections.py" count --sprint <状態ファイル>`（状態ファイルが無ければ `--issue <N>` か `--pr <N>` を繰り返す） | 設計承認ゲート・リリース承認ゲートで利用者が差し戻した件数（`metrics` の `gate_1`・`gate_2`）と、何を差し戻したか（`items` の `what`）。終了コード 2 なら件数を 0 でなく「不明」、終了コード 3（範囲に承認ゲートの答えの行が無い）なら「未記録」と書く |
-| MVV を見直すか | `python3 "$SCRIPTS/project-mvv.py" signals` | 現行の版のもとで、人が AI の判断を覆した回数・「判定できない」の回数・流出不具合の件数と閾値。`items` に改訂の提案があるか |
+| MVV を見直すか | `"${CLAUDE_PLUGIN_ROOT}/bin/ndf" records mvv signals` | 現行の版のもとで、人が AI の判断を覆した回数・「判定できない」の回数・流出不具合の件数と閾値。`items` に改訂の提案があるか |
 
 **用語集の変化は、その変更の起点と終点の 2 つの版で `glossary.py diff` を打って取る。** 起点と終点は
 「Pull Request の番号を特定する」で決めた Pull Request の base と merge のコミットである。用語集の設定の無い

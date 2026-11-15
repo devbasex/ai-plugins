@@ -9,7 +9,7 @@ allowed-tools:
 
 # リリース
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `mvv-gate.py`（P2）・`release-steps.py`（M2）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `instructions-check.py`（M7）・`mvv-gate.py`（P2）・`projects-sync.sh`（M7）・`release-steps.py`（M2）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 **マージした変更を、利用者が受け取れる状態にする。**
 

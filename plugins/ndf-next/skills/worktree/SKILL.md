@@ -9,6 +9,8 @@ allowed-tools:
 
 # worktree で開発する
 
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `projects-sync.sh`（M7）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+
 開発の変更は、git の worktree の中で行い、リポジトリを clone したディレクトリには加えない。
 並行して複数の作業を進めても、互いの変更が同じ作業ディレクトリで混ざらない状態を保つ。
 
@@ -57,7 +59,7 @@ allowed-tools:
 ```bash
 # 「$SCRIPTS を決める」の手順でパスを決めてから実行する。
 [ -n "${SCRIPTS:-}" ] || { echo "NDF の scripts/ を解決できない" >&2; exit 1; }
-bash "$SCRIPTS/worktree-setup.sh" init; echo "exit=$?"
+"${CLAUDE_PLUGIN_ROOT}/bin/ndf" worktree init; echo "exit=$?"
 ```
 
 worktree 運用の仕組みは、リポジトリ側に `.ndf/worktree.json` があるときだけ動く。
@@ -119,7 +121,7 @@ wt_in_worktree && echo "worktreeの中" || echo "メインディレクトリ"
 手順 3 へ進む。含まれていなければ 2-2 へ進む。
 
 ```bash
-bash "$SCRIPTS/worktree-deps.sh" prepare "<作られた worktree のパス>"
+"${CLAUDE_PLUGIN_ROOT}/bin/ndf" worktree deps "<作られた worktree のパス>"
 ```
 
 ### 2-2. `.worktrees/` の登録を確かめる
@@ -155,7 +157,7 @@ base=$(wt_base_branch "$main_dir") || exit 1
 start="origin/$base"
 git -C "$main_dir" show-ref --verify --quiet "refs/remotes/origin/$base" || start="$base"
 git -C "$main_dir" worktree add -b "$branch" "$main_dir/.worktrees/$branch" "$start"
-bash "$SCRIPTS/worktree-deps.sh" prepare "$main_dir/.worktrees/$branch"
+"${CLAUDE_PLUGIN_ROOT}/bin/ndf" worktree deps "$main_dir/.worktrees/$branch"
 cd "$main_dir/.worktrees/$branch"
 ```
 
@@ -167,9 +169,9 @@ cd "$main_dir/.worktrees/$branch"
 
 ```bash
 # スプリントブランチ。起点はスプリントの起点
-bash "$SCRIPTS/worktree-setup.sh" create sprint/<名前>
+"${CLAUDE_PLUGIN_ROOT}/bin/ndf" worktree create sprint/<名前>
 # 課題の worktree。起点はスプリントブランチ
-bash "$SCRIPTS/worktree-setup.sh" create feat/issue-<番号>-<名前> --from sprint/<名前>
+"${CLAUDE_PLUGIN_ROOT}/bin/ndf" worktree create feat/issue-<番号>-<名前> --from sprint/<名前>
 ```
 
 `create` は `.worktrees/` の登録を確かめ、`origin` を取得してから作り、worktree のパスと
@@ -299,8 +301,8 @@ worktree は追跡されているファイルしか持たないため、`vendor/
 出力の末尾を出して 0 以外で終わる。**worktree は消さない。** 直してから手で打ち直す。
 
 ```bash
-bash "$SCRIPTS/worktree-deps.sh" prepare "$WT"                  # 印を見ずにやり直す
-bash "$SCRIPTS/worktree-deps.sh" prepare "$WT" --if-unprepared  # 用意が済んでいなければ用意する
+"${CLAUDE_PLUGIN_ROOT}/bin/ndf" worktree deps "$WT"                  # 印を見ずにやり直す
+"${CLAUDE_PLUGIN_ROOT}/bin/ndf" worktree deps "$WT" --if-unprepared  # 用意が済んでいなければ用意する
 ```
 
 用意が済むと worktree ごとの git の管理ディレクトリに印（`ndf-deps`）を書く。印は用意した時の HEAD と宣言の
@@ -321,7 +323,7 @@ bash "$SCRIPTS/worktree-deps.sh" prepare "$WT" --if-unprepared  # 用意が済�
 無い。手順は [references/local-environment.md](references/local-environment.md) にある。
 
 ```bash
-NDF="$SCRIPTS/worktree-localenv.sh"
+NDF="${CLAUDE_PLUGIN_ROOT}/bin/ndf" worktree localenv
 WT="$main_dir/.worktrees/<ブランチ名>"
 bash "$NDF" setup "$WT"       # 設定と依存物を持ち込む
 bash "$NDF" mode "$WT"        # 相乗り(0) か 分離(1) かを提示
@@ -345,7 +347,7 @@ bash "$NDF" verify "$WT"; echo $?  # 0 一致 / 1 不一致 / 2 未起動
 立てて分ける。手順は [references/test-execution.md](references/test-execution.md) にある。
 
 ```bash
-TE="$SCRIPTS/worktree-testenv.sh"
+TE="${CLAUDE_PLUGIN_ROOT}/bin/ndf" worktree testenv
 bash "$TE" env "$WT"                        # 環境名・スロット・ポートを採番し worktree レジストリへ記録
 bash "$TE" bake --tag "$(bash "$TE" tag "$WT")"  # 基準を作る（内容が同じなら焼き直さない）
 bash "$TE" up "$WT" --profile core          # 起動する

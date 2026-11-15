@@ -9,6 +9,8 @@ allowed-tools:
 
 # ラッパーの導入・取り外し・状態
 
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `relay.py`（M3b）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+
 **ラッパー（`ndf relay`）を使うかは利用者が決める。** この Skill が、利用者のシェル設定を書き換える
 唯一のエントリポイントである。SessionStart hook はシェル設定を書かない。ラッパーの振る舞いは
 `development-workflow` の [references/relay.md](../development-workflow/references/relay.md) にある。

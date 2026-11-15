@@ -1,6 +1,6 @@
 # 並列開発のオーガナイザー（`--parallel <計画名>`）
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `context-policy.py`（M3b）・`handoff.py`（M7）・`mvv-gate.py`（P2）・`parallel.py`（P3）・`relay.py`（M3b）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `context-policy.py`（M3b）・`handoff.py`（M7）・`mvv-gate.py`（P2）・`parallel.py`（P3）・`relay.py`（M3b）・`sprint-state.py`（P1b）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 並列の計画（[issue-plan-strategy の parallel-plan.md](../../issue-plan-strategy/references/parallel-plan.md) で作る）を、
 1 行で始める。

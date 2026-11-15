@@ -5,6 +5,8 @@ description: "Write a failing test first, then the smallest implementation that 
 
 # テスト駆動のサイクル
 
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `projects-sync.sh`（M7）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+
 **失敗するテスト → 通す最小実装 → 整理** を 1 単位として進める。NDF ではこの Skill を
 テスト駆動の唯一の基準とし、他の Skill から重複した規則を持たせない。
 

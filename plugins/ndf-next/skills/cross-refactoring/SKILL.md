@@ -13,7 +13,7 @@ allowed-tools:
 
 # 多ランタイム・リファクタリング（実装の予算で選び、選んだ項目をやり通す 1 回のリファクタリング計画の実行）
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `launch-cli.sh`（M4）・`prepare-worktrees.sh`（M4）・`refactor.py`（M4）・`resolve.sh`（X0）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `drive.py`（M5）・`launch-cli.sh`（M4）・`prepare-worktrees.sh`（M4）・`refactor.py`（M4）・`resolve.sh`（X0）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 **参加者の全員が 1 度だけ多面的に提案し、選ばれた 1 者が実装の予算に収まる分を
 リファクタリング計画・テスト追加・実装・検証する。** 実装の予算（`--budget-minutes`、既定 60 分）は何件を選ぶかを

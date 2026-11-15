@@ -1,5 +1,7 @@
 # リリースコマンドを走らせる
 
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `release-steps.py`（M2）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+
 **リポジトリに固有のリリースの手順は、リポジトリのリリースの設定 `.ndf/release.json` が
 リリースコマンドとして持つ。** `release` は手順 3 で、設定されたコマンドを 1 行のコマンドで走らせるだけである。
 リリースの設定が無いリポジトリでは何も起きない。
@@ -326,8 +328,8 @@ python3 "$SCRIPTS/release-steps.py" cd-result --base <本番チャネル> [--hea
 開発版のデプロイでは打たない。
 
 ```bash
-python3 "$SCRIPTS/merged-steps.py" sweep-trash --ref <本番に出たコミット>        # 候補を挙げるだけ（消さない）
-python3 "$SCRIPTS/merged-steps.py" sweep-trash --ref <本番に出たコミット> --yes --only <承認した退避先>...  # 承認した名前だけを消す
+"${CLAUDE_PLUGIN_ROOT}/bin/ndf" worktree trash --ref <本番に出たコミット>        # 候補を挙げるだけ（消さない）
+"${CLAUDE_PLUGIN_ROOT}/bin/ndf" worktree trash --ref <本番に出たコミット> --yes --only <承認した退避先>...  # 承認した名前だけを消す
 ```
 
 候補の件数（`metrics.sweep_candidates`）・消した退避先（`metrics.swept_trash`）・台帳が無いため残した件数

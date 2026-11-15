@@ -1,6 +1,6 @@
 # context window を単位として扱う
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `context-policy.py`（M3b）・`hook.py`（M3a）・`relay.py`（M3b）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `context-policy.py`（M3b）・`hook.py`（M3a）・`relay.py`（M3b）・`stage-check.sh`（P1a）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 **工程はスプリント単位で 1 回ずつ通し、中の設計と実装は課題ごとに並列に回す**が、その単位に
 **context window は入っていない**。そのため 1 つの会話でスプリント全体を通せてしまう。長い context window では
@@ -193,7 +193,7 @@ Codex / Kiro / agy には hook を置かない。4 つのカットポイント�
 
 **試行方式でも conductor が自分で切ってよい理由は 2 つある。** 独立した視点が要るレビューを親の文脈ごと
 新しくしたいとき（独立性）と、利用者が切ると決めたとき（手動）である。切るときは
-`ndf plan next --reason 独立性` か `--reason 手動` でブロックを出す。
+`ndf progress next --reason 独立性` か `--reason 手動` でブロックを出す。
 
 **どちらの方針でも変わらないこと。** 承認ゲートの前に `ndf-next` を出さない。動いているプランと supervisor を
 止めずに報告を待ってから引継ぎ文書を作る。新しいセッションは引継ぎ文書から状態を確かめ直す。承認待ちと
@@ -211,7 +211,7 @@ Codex / Kiro / agy には hook を置かない。4 つのカットポイント�
 hook は工程の起動ごとに 1 行（方針・値・工程・文脈の量・窓・帯・判定・理由・欠けた値・作業の識別子）を
 状態ディレクトリ（`NDF_CONTEXT_DIR` → `${XDG_STATE_HOME}/ndf/context` → `~/.local/state/ndf/context`）の
 `decisions/<owner>__<repo>.decisions.jsonl` へ追記する。作業の識別子は課題番号の昇順の並び（`#829 #830`）である。
-`ndf plan next` は `ndf-next` を出すたびに判定「再起動」を書き、費用の見込みを較正し直す。
+`ndf progress next` は `ndf-next` を出すたびに判定「再起動」を書き、費用の見込みを較正し直す。
 
 **印「引継ぎ開始」と「復元完了」は、Claude Code では hook が打つ。** conductor が打つのは、hook が打たない場面だけである。
 

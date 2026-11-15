@@ -56,7 +56,7 @@ GitHub と git へ書かない。取り込みは現在の頭を指定して送�
 ### Step 5 後段: fix 戻り値マージ + CI 分類
 
 ```bash
-if "$SCRIPTS/state.py" merge-fix "$STATE_PR"; then
+if "${CLAUDE_PLUGIN_ROOT}/bin/ndf" cross-review merge-fix "$STATE_PR"; then
   : # exit 0 = continue
 elif [ $? -eq 3 ]; then
   exit 3  # final=error（コード関連 CI 失敗 or fix 戻り値ファイル欠落）

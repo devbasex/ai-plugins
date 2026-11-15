@@ -1,6 +1,6 @@
 # 開発ループ（`--loop`）
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `merged-steps.py`（M8）・`mode-materials.py`（P1a）・`mvv-gate.py`（P2）・`relay.py`（M3b）・`revise-note.py`（P2）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `merged-steps.py`（M8）・`mode-materials.py`（P1a）・`mvv-gate.py`（P2）・`relay.py`（M3b）・`revise-note.py`（P2）・`sprint-state.py`（P1b）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 スプリントを 1 つ終えるたびに、棚卸しの順位から次のスプリントを機械で選び、`pace: auto` でループの 1 回を続ける進め方の手順。
 決定の理由・契約・テスト観点は、ai-plugins の確定仕様 `docs/specifications/ndf-workflow-development-loop.md` にある。

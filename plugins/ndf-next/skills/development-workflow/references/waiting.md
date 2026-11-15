@@ -165,7 +165,7 @@ plugins/ndf/bin/ndf plan wait q/done.json
 **`normal` の 1 スプリント（設計 → 設計承認ゲート→ 設計 PR のマージ → 設計の結果 → スプリントブランチ → 実装 → 検査 →
 開発版 → リリース承認ゲート→ 本番）で、設計承認ゲートの後に conductor が打つのはキュー 1 回と `wait` 1 回である（リリース承認ゲートの
 後も同じ）。** 例はスプリント `m6`（課題 1052・1053、設計 Pull Request は 1052）で、
-`sv() { python3 "$SCRIPTS/supervise.py" "$@"; }`、`O=<作業ディレクトリ>/sprint-m6`、`S=<スプリントの状態>` とする。
+`sv() { "${CLAUDE_PLUGIN_ROOT}/bin/ndf" plan "$@"; }`、`O=<作業ディレクトリ>/sprint-m6`、`S=<スプリントの状態>` とする。
 キューと `wait` はバックグラウンドで起動し、キューはリポジトリの根から起動する。打つコマンドは `sprint.json` の
 ステージの `command` と `resume` をそのまま写す。
 

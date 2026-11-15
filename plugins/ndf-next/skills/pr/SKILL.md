@@ -11,7 +11,7 @@ allowed-tools:
 
 # PR作成
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `ask.py`（P2）・`pr-body-decisions.sh`（M7）・`pr-steps.py`（M1）・`release-steps.py`（M2）・`revise-note.py`（P2）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `ask.py`（P2）・`pr-body-decisions.sh`（M7）・`pr-steps.py`（M1）・`projects-sync.sh`（M7）・`release-steps.py`（M2）・`revise-note.py`（P2）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 このプロジェクトのコードを commit, push し、GitHub で Pull Request を作る。既に PR があれば本文を最新の変更内容に書き直す。
 
