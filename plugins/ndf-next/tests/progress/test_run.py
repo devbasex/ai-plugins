@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 
+import git_sandbox
 import pytest
 
 from ndf import contracts
@@ -376,21 +377,17 @@ def test_facts_of_reads_a_declaration_that_is_not_an_object_as_empty_and_refuses
         command.facts_of(("ci_declared",), {}, repo)
 
 
-def _git(repo: Path, *args: str) -> None:
-    subprocess.run(["git", "-C", str(repo), "-c", "user.email=t@example.com", "-c", "user.name=t", *args], check=True, capture_output=True)
-
-
 def _sprint_branch(repo: Path, *changed: str) -> None:
     """ベースブランチ develop から sprint/s1 を切り、`changed` のファイルを足すコミットを積む。"""
-    _git(repo, "checkout", "-q", "-b", "develop")
-    _git(repo, "commit", "-q", "--allow-empty", "-m", "base")
-    _git(repo, "checkout", "-q", "-b", "sprint/s1")
+    git_sandbox.sh(repo, "checkout", "-q", "-b", "develop", identity=True)
+    git_sandbox.sh(repo, "commit", "-q", "--allow-empty", "-m", "base", identity=True)
+    git_sandbox.sh(repo, "checkout", "-q", "-b", "sprint/s1", identity=True)
     for name in changed:
         (repo / name).parent.mkdir(parents=True, exist_ok=True)
         (repo / name).write_text("x\n")
     if changed:
-        _git(repo, "add", "--", *changed)
-    _git(repo, "commit", "-q", "--allow-empty", "-m", "change")
+        git_sandbox.sh(repo, "add", "--", *changed, identity=True)
+    git_sandbox.sh(repo, "commit", "-q", "--allow-empty", "-m", "change", identity=True)
     (repo / ".ndf").mkdir(exist_ok=True)
     (repo / ".ndf" / "worktree.json").write_text(json.dumps({"base_branch": "develop"}))
 
