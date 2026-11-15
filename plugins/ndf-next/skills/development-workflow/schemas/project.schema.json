@@ -145,9 +145,8 @@
       "description": "手元の検証で走らせないと宣言したCIのジョブ（除外したジョブ）。`reason` は空にしない（I2）。",
       "properties": {
         "job": {
-          "pattern": "^[^#\\s]+\\.ya?ml(#[^#\\s]+)?$",
-          "title": "Job",
-          "type": "string"
+          "$ref": "#/$defs/ciJobRef",
+          "title": "Job"
         },
         "reason": {
           "minLength": 1,
@@ -949,8 +948,7 @@
         "ci_jobs": {
           "default": [],
           "items": {
-            "pattern": "^[^#\\s]+\\.ya?ml(#[^#\\s]+)?$",
-            "type": "string"
+            "$ref": "#/$defs/ciJobRef"
           },
           "title": "Ci Jobs",
           "type": "array"
@@ -1232,6 +1230,11 @@
       ],
       "title": "Workflow",
       "type": "object"
+    },
+    "ciJobRef": {
+      "description": "CI のジョブの指し方（<ワークフロー>.yml[#<ジョブ>]）",
+      "pattern": "^[^#\\s]+\\.ya?ml(#[^#\\s]+)?$",
+      "type": "string"
     }
   },
   "additionalProperties": false,
