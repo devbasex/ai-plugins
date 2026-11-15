@@ -12,7 +12,7 @@ import subprocess
 import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 from ndf import cli, contracts, identity
 from ndf.contracts import exit_codes, result
@@ -37,17 +37,27 @@ def _invalid(detail: str) -> int:
     return result.emit(result.stopped(TOOL, "invalid", detail))
 
 
+def read_result(path: Union[str, Path], label: str, error: type[Exception] = LocalTestError) -> Optional[dict[str, Any]]:
+    """結果ファイルの最後の結果 JSON（無ければ None）。読めなければ `error`（『{label} {path} を読めない: ...』）。"""
+    try:
+        return steps.last_json(Path(path).read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise error(f"{label} {path} を読めない: {exc.strerror or exc}") from None
+
+
+def failed_tests_of(found: Mapping[str, Any]) -> list[str]:
+    """結果 JSON の落ちたテスト（`metrics.failed_tests`）。無いか形が違えば空。"""
+    metrics = found.get("metrics") if isinstance(found.get("metrics"), Mapping) else {}
+    tests = metrics.get("failed_tests") if isinstance(metrics.get("failed_tests"), list) else []
+    return [str(t) for t in tests]
+
+
 def _failed_nodes(path: Path) -> list[str]:
     """CI の結果 JSON の落ちたテストの node id（`metrics.failed_tests`）。読めない・結果 JSON でなければ `LocalTestError`。"""
-    try:
-        found = steps.last_json(path.read_text(encoding="utf-8"))
-    except OSError as exc:
-        raise LocalTestError(f"CI の結果 {path} を読めない: {exc.strerror or exc}") from None
+    found = read_result(path, "CI の結果")
     if found is None:
         raise LocalTestError(f"CI の結果 {path} は結果 JSON でない")
-    metrics = found.get("metrics") if isinstance(found.get("metrics"), Mapping) else {}
-    nodes = metrics.get("failed_tests") if isinstance(metrics.get("failed_tests"), list) else []
-    return [str(n) for n in nodes]
+    return failed_tests_of(found)
 
 
 def _run_passing(argv: Sequence[str]) -> tuple[int, Optional[dict[str, Any]]]:

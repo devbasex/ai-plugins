@@ -360,9 +360,7 @@ def cause_key(found: Mapping[str, Any]) -> Optional[str]:
     kind = causes.kind_of(found.get("cause"))
     if found.get("status") != exit_codes.STOPPED or kind is None:
         return None
-    metrics = found.get("metrics") if isinstance(found.get("metrics"), Mapping) else {}
-    tests = metrics.get("failed_tests") if isinstance(metrics.get("failed_tests"), list) else []
-    return json.dumps([kind, sorted(str(t) for t in tests)], ensure_ascii=False)
+    return json.dumps([kind, sorted(local_tests.failed_tests_of(found))], ensure_ascii=False)
 
 
 def streak(history: Sequence[str], key: str) -> int:
@@ -504,10 +502,7 @@ def _invalid(detail: str) -> int:
 
 def _stopped_key(a: argparse.Namespace) -> str:
     """結果ファイルの同じ原因の鍵。読めない・止まった結果でなければ `RouteError`。"""
-    try:
-        found = steps.last_json(Path(a.result).read_text(encoding="utf-8"))
-    except OSError as exc:
-        raise RouteError(f"結果 {a.result} を読めない: {exc.strerror or exc}") from None
+    found = local_tests.read_result(a.result, "結果", RouteError)
     key = cause_key(found) if found is not None else None
     if key is None:
         raise RouteError(f"結果 {a.result} は止まった結果でない")
