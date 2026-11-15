@@ -847,3 +847,12 @@ def test_split_defaults_current_behavior_unreadable_file_raises(tmp_path: Path) 
     mod = load_checker()
     with pytest.raises(mod.ScanError, match="を読めない"):
         mod.remote_defaults(tmp_path, ["missing.json"])
+
+
+def test_split_defaults_current_behavior_two_defaults_on_one_line(tmp_path: Path) -> None:
+    """同じ行の 2 つの `"default"` の値の当たりは 1 件にまとめず 2 件、外の当たりは行の順にヒットへ残る。"""
+    mod = load_checker()
+    (tmp_path / "d.json").write_text('{"default": "origin", "a": "origin", "default": "origin"}\n', encoding="utf-8")
+    hits = mod.scan_contracts(tmp_path, ["d.json"], mod.NEXT_CODE_MATCHERS)
+    assert [(h.rel, h.lineno, h.word_id, h.word) for h in hits] == [("d.json", 1, "remote-origin", '"origin"')]
+    assert mod.remote_defaults(tmp_path, ["d.json"]) == [("d.json", 1), ("d.json", 1)]
