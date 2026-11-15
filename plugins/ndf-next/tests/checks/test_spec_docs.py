@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import ast
+import dataclasses
 import json
 import shutil
 from pathlib import Path
@@ -187,3 +188,68 @@ def test_plugin_without_contracts_is_not_checked(tmp_path):
     root.mkdir(parents=True)
     scope = Scope(tmp_path / "repo", root, "p")
     assert spec_docs.check(scope, load_rules()) == []
+
+
+# --- 現状固定: spec-decl のキーと注釈の指摘（_key_errors を decl_findings 経由で通す） ---
+
+
+def _decl_only(copy, decl):
+    """実物のモデルの宣言を 1 つに差し替え、spec-decl の指摘を (rule, path, line, detail) で返す。"""
+    model = dataclasses.replace(spec_model.load(copy.root), declarations=(decl,))
+    found = spec_docs.decl_findings(model, copy.repo, lambda p: f"plugins/p/{p}")
+    return [(f.rule, f.path, f.line, f.detail) for f in found]
+
+
+def _decl(schema, read_by=({"skill": "s"},)):
+    return spec_model.DeclarationSpec(
+        id="zz",
+        path="zz.json",
+        tracked=True,
+        keys=tuple(k for k in sorted(schema.get("properties", {})) if k != "version"),
+        main_keys=(),
+        surface="public",
+        schema=schema,
+        read_by=read_by,
+    )
+
+
+def test_key_errors_pins_every_message_and_its_order(copy):
+    schema = {
+        "properties": {
+            "b_no_type": {"description": "d"},
+            "a_no_desc": {"type": "string"},
+            "c_not_dict": "x",
+            "d_ok_ref": {"description": "d", "$ref": "#/x"},
+        },
+        "x-ndf-place": "elsewhere",
+    }
+    path = "plugins/p/contracts/schemas/declarations/zz.schema.json"
+    assert _decl_only(copy, _decl(schema, read_by=())) == [
+        (spec_docs.DECL, path, 1, "宣言 zz: キー a_no_desc に説明（description）が無い"),
+        (spec_docs.DECL, path, 1, "宣言 zz: キー b_no_type に型が無い"),
+        (spec_docs.DECL, path, 1, "宣言 zz: キー c_not_dict に説明（description）が無い"),
+        (spec_docs.DECL, path, 1, "宣言 zz: 注釈 x-ndf-place は main か worktree"),
+        (spec_docs.DECL, path, 1, "宣言 zz: 注釈 x-ndf-read-by（読む工程）が無い"),
+        (spec_docs.DECL, path, 1, "宣言 zz: 例（examples）が無い"),
+    ]
+
+
+@pytest.mark.parametrize("word", spec_docs.TYPE_WORDS)
+def test_key_errors_accepts_each_type_word(copy, word):
+    schema = {"properties": {"k": {"description": "d", word: "x"}}, "x-ndf-place": "worktree", "examples": [{}]}
+    assert _decl_only(copy, _decl(schema)) == []
+
+
+@pytest.mark.parametrize("place", ["main", "worktree"])
+def test_key_errors_without_properties_and_with_a_valid_place_has_no_findings(copy, place):
+    assert _decl_only(copy, _decl({"x-ndf-place": place, "examples": [{}]})) == []
+
+
+def test_key_errors_missing_place_and_empty_examples_are_findings(copy):
+    found = _decl_only(copy, _decl({"examples": []}))
+    assert [d for *_, d in found] == ["宣言 zz: 注釈 x-ndf-place は main か worktree", "宣言 zz: 例（examples）が無い"]
+
+
+def test_key_errors_are_not_run_for_a_declaration_without_schema(copy):
+    decl = dataclasses.replace(_decl({}), schema=None, sections=({"id": "s"},))
+    assert _decl_only(copy, decl) == []
