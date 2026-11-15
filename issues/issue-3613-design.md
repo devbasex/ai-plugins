@@ -67,7 +67,8 @@
 | 入れ替えのとき | すべて | 移行のコマンド（`ndf settings migrate --apply`） | 旧いキーを新しいキーへ書き換え、ブランチ戦略の節へ移すキーを `.ndf/branch-strategy.json` へ移す。利用者が承認した差分だけ（決定 12） | 今の NDF は入れ替えで外れ、ndf-next の書く側はまだ書かない |
 | 入れ替えの後 | `.ndf/mvv.json` | ndf-next の MVV の版を書く側（「未確認のまま残ること」の 9） | 新しいキーだけ | 移行のコマンドは差分が 0 件になり、書かない |
 | 入れ替えの後 | `.ndf/branch-strategy.json` | ndf-next のリポジトリの解析（`domains/project/write.py`。#3572 の集約「ブランチ戦略の節」） | キーの無い項目と、前の解析の書き出しの値のままの項目だけ | 移行のコマンドは差分が 0 件になり、書かない |
-| 入れ替えの後 | `.ndf/worktree.json`・`.ndf/project.json`・`.ndf/release.json` | この設計では決めない。決めるまで ndf-next は書かない | — | 移行のコマンドは差分が 0 件になり、書かない |
+| 入れ替えの後 | `.ndf/project.json` | ndf-next のリポジトリの解析（`domains/project/write.py` の `merge_project`） | 解析が測る項目（人が書く `docs`・`production_merge`・`workflow` を除く項目。`delivery` を含む）のうち、キーの無い項目と、前の解析の書き出しの値のまま（`analysis.written` の指紋が一致する）の項目だけ。あわせて解析の記録 `analysis`（指紋 `analysis.written` を含む）を書く | 移行のコマンドは差分が 0 件になり、書かない |
+| 入れ替えの後 | `.ndf/worktree.json`・`.ndf/release.json` | この設計では決めない。決めるまで ndf-next は書かない | — | 移行のコマンドは差分が 0 件になり、書かない |
 
 ### 不変条件
 
