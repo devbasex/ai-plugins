@@ -2,6 +2,7 @@
 """design-survey.py: 設計文書の検査。自前で作る決定に外部の調査で比べた候補があるかと、人へ残す判断がレッドラインを名指すかを確かめる。LLM を呼ばず、読むだけ。
 
     python3 design-survey.py check (--issue N... | --file PATH...) [--require-detail] [--root DIR]
+    python3 design-survey.py schema [--out PATH]
 
 - `--issue`: HEAD の `issues/` から、名前の番号の並びにその番号を含む `issue-<番号>-design*.md` と
   `issue-<番号>-requirements.md` を読む。読んだ文書の名前のほかの番号もたどり、新しい番号が出なくなるまで読み足す
@@ -22,6 +23,10 @@
 （`detail_section`・`detail_failure`・`detail_reuse`・`detail_file`）を当てる。`--require-detail` を渡すと、詳細設計の
 文書の無いまとまりを `detail_missing` で指摘する（詳細設計を通る `standard`・`legacy-refactor` の設計のプランが渡す）。
 
+根に代表のリポジトリの設定（`.ndf/design.json` の `representative_repos`。#3618）があれば、頭の設計文書に
+`lib/design_repos.py` の 2 規則（`repo_scope_missing`・`repo_loss_unrouted`）を当てる。設定が壊れていれば終了コード 2。
+`schema` は設定の JSON Schema を出す（`skills/design/schemas/design.schema.json` の正本はこの出力）。
+
 終了コードは 0 = 指摘なし（作り方の行が 0 件の文書を含む）/ 1 = 指摘あり / 2 = 文書か git・契約・雛形を読めない /
 3 = `--issue` で文書が 1 つも見つからない。結果は lib/step_result.py の形の 1 行の JSON。
 手順は design の references/external-survey.md にある。
@@ -30,14 +35,64 @@
 from __future__ import annotations
 
 import argparse
+import json
+import os
 import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import deps  # noqa: E402
+from proc import git_root as _probe_root  # noqa: E402
 
-deps.require("md")
+
+_ROOT_ENV = "NDF_DESIGN_SURVEY_ROOT"  # 依存の判定で決めた根を、uv の環境へ起動し直した子へ渡す（git の起動を 1 回にする）
+
+
+def _passed_root(key: list) -> Path | None:
+    """起動し直す前の親が同じ引数とカレントで決めた根。無いか鍵が違えば None。印は孫へ継がせない。"""
+    raw = os.environ.pop(_ROOT_ENV, None)
+    try:
+        passed = json.loads(raw) if raw else None
+    except ValueError:
+        return None
+    return Path(passed["root"]) if isinstance(passed, dict) and passed.get("key") == key else None
+
+
+def _required_groups(argv: list[str]) -> tuple[str, ...]:
+    """外部パッケージを読む前に、`--root` とサブコマンドの名前だけを読んで要る依存のグループを決める。"""
+    import design_repos  # 標準ライブラリだけで読める（外部パッケージは使う関数の中で読む）
+
+    ap = argparse.ArgumentParser(add_help=False)
+    ap.add_argument("--root", default=None)
+    ap.add_argument("cmd", nargs="?")
+    known, _ = ap.parse_known_args(argv)
+    key = [known.root, str(Path.cwd())]
+    root = _passed_root(key)
+    if root is None:
+        try:
+            root = _probe_root(known.root)
+        except Exception:  # noqa: BLE001 - 根を決められなければ設定なしとして求め、本体が同じ誤りで止まる
+            root = None
+    _PROBED.update(key=(known.root, Path.cwd()), root=root)
+    if root is not None:  # deps.require が起動し直すと _PROBED は消えるため、子へは環境変数で渡す
+        os.environ[_ROOT_ENV] = json.dumps({"key": key, "root": str(root)})
+    return design_repos.dep_groups(root, known.cmd == "schema")
+
+
+_PROBED: dict = {}  # 依存の判定で決めた根。本体が同じ引数とカレントで git を打ち直さないために使う
+
+
+def _check_root(arg) -> Path:
+    """`--root` の根。依存の判定で同じ引数とカレントから決めていればそれを使う（git の起動を 1 回にする）。"""
+    if _PROBED.get("root") is not None and _PROBED.get("key") == (arg, Path.cwd()):
+        return _PROBED["root"]
+    return git_root(arg)
+
+
+deps.require("md", *_required_groups(sys.argv[1:]))  # md は静的に並べ、設定で増える分は dep_groups が決める
+os.environ.pop(_ROOT_ENV, None)  # 起動し直さずに戻ったときは、本体が起動する子のプロセスへ継がせない
+import design_repos  # noqa: E402
 import md  # noqa: E402
 import doc_kinds  # noqa: E402
 from design_detail import RULES, DetailTemplateError, check_detail, is_detail  # noqa: E402
@@ -93,7 +148,7 @@ def _read_survey(text: str, sections: list, prose: list[tuple[int, str]]) -> tup
     candidates: set[str] = set()
     for t in md.tables_in(text, surveys):
         for row in t.rows:
-            cell = row[0].strip().strip("`*_ ") if row else ""
+            cell = design_repos.strip_marks(row[0]) if row else ""
             if CANDIDATE_ID.fullmatch(cell):
                 candidates.add(cell)
     return skipped, candidates
@@ -144,13 +199,13 @@ def unnamed_redlines(path: str, text: str) -> list[dict]:
         if DELEGATE.search(INLINE_CODE.sub("", ln)) and not REDLINE_ID.search(ln):
             flagged[i] = ln
     for i, ln, num, why in _left_table_rows(text, sections):
-        if not REDLINE_ID.search(num) or not why.strip("`*_ "):
+        if not REDLINE_ID.search(num) or not design_repos.strip_marks(why):
             flagged[i] = ln
     return [{"name": f"{path}:{i + 1}", "rule": "unnamed_redline", "text": ln.strip()} for i, ln in sorted(flagged.items())]
 
 
 class Doc:
-    """1 つの文書から、外部の調査の節（省いたか・候補の番号）と決定の 2 行と、名指しの無い委ねる行を読んだもの。"""
+    """1 つの文書から、外部の調査の節（省いたか・候補の番号）と決定の 2 行と、名指しの無い委ねる行と、人へ残す判断の表の番号を読んだもの。"""
 
     def __init__(self, path: str, text: str):
         self.path = path
@@ -163,6 +218,7 @@ class Doc:
         self.skipped, self.candidates = _read_survey(text, sections, prose)
         self.decisions = _read_decisions(sections, prose)
         self.unnamed = unnamed_redlines(path, text)
+        self.left_ids = {i for _, _, num, _ in _left_table_rows(text, sections) for i in REDLINE_ID.findall(num)}
 
 
 def survey_groups(docs: list[Doc]) -> list[list[Doc]]:
@@ -239,9 +295,14 @@ def _result_files(head: Doc | None) -> tuple[set[str] | None, str]:
     return None, f"頭の設計文書 {head.path} の設計の結果の表を読めない"
 
 
+def _is_head(d: Doc) -> bool:
+    """種類が `design` の頭の設計文書か。"""
+    return doc_kinds.doc_kind(d.path, placed=False) == "design"
+
+
 def _head_of(detail: Doc, group: list[Doc]) -> Doc | None:
     """詳細設計の文書と同じ番号を持つ、種類が `design` の設計文書。"""
-    return next((d for d in group if d.nums == detail.nums and doc_kinds.doc_kind(d.path, placed=False) == "design"), None)
+    return next((d for d in group if d.nums == detail.nums and _is_head(d)), None)
 
 
 def detail_items(group: list[Doc], require: bool) -> list[dict]:
@@ -263,29 +324,70 @@ def detail_items(group: list[Doc], require: bool) -> list[dict]:
         raise StepError(str(exc), EXIT_UNREADABLE) from None
 
 
-def judge_docs(docs: list[Doc], require_detail: bool) -> tuple[list[dict], dict]:
-    """文書の並びに調査・レッドライン・詳細設計の判定を当て、指摘（判定の順）と metrics を返す。"""
-    groups = survey_groups(docs)
+def repo_items(group: list[Doc], settings: design_repos.RepoSettings) -> list[dict]:
+    """まとまりの頭の設計文書ごとに、当てる範囲を決めて代表のリポジトリの 2 規則を当てる。"""
+    try:
+        heads = [d for d in group if _is_head(d)]
+    except doc_kinds.DocKindsError as exc:
+        raise StepError(str(exc), EXIT_UNREADABLE) from None
     items: list[dict] = []
-    metrics = {"docs": len(docs), "decisions": 0, "with_method": 0, "self_built": 0, "skipped": 0}
+    for d in heads:
+        touched, _ = _result_files(d)
+        if not design_repos.applies(settings, touched):
+            continue
+        items += design_repos.check_repos(d.path, d.text, settings, d.left_ids)
+    return items
+
+
+def _count_rules(items: list[dict], rules: tuple[str, ...]) -> dict[str, int]:
+    """規則の並びごとに、指摘の件数を数える。"""
+    return {r: sum(1 for it in items if it["rule"] == r) for r in rules}
+
+
+def _survey_results(groups: list[list[Doc]]) -> tuple[list[dict], dict]:
+    """まとまりごとの外部の調査の指摘と、決定・作り方・自前で作る・省いたまとまりの件数。"""
+    items: list[dict] = []
+    counts = {"decisions": 0, "with_method": 0, "self_built": 0, "skipped": 0}
     for g in groups:
-        got, counts = judge_group(g)
+        got, c = judge_group(g)
         items += got
-        for k, v in counts.items():
-            metrics[k] += v
+        for k, v in c.items():
+            counts[k] += v
+    return items, counts
+
+
+def _detail_results(docs: list[Doc], groups: list[list[Doc]], require_detail: bool) -> tuple[list[dict], dict]:
+    """まとまりごとの詳細設計の指摘と、詳細設計の文書の数・規則ごとの件数。"""
+    detail = [it for g in groups for it in detail_items(g, require_detail)]
+    return detail, {"detail_docs": sum(1 for d in docs if is_detail(d.path)), **_count_rules(detail, (*RULES, "detail_missing"))}
+
+
+def _repo_results(groups: list[list[Doc]], settings: design_repos.RepoSettings) -> tuple[list[dict], dict]:
+    """まとまりごとの代表のリポジトリの指摘と、規則ごとの件数。"""
+    repos = [it for g in groups for it in repo_items(g, settings)]
+    return repos, _count_rules(repos, design_repos.RULES)
+
+
+def judge_docs(docs: list[Doc], require_detail: bool, settings: design_repos.RepoSettings | None = None) -> tuple[list[dict], dict]:
+    """文書の並びに調査・レッドライン・詳細設計・代表のリポジトリの判定を当て、指摘（判定の順）と metrics を返す。"""
+    groups = survey_groups(docs)
+    items, counts = _survey_results(groups)
+    metrics = {"docs": len(docs), **counts}
     unnamed = [it for d in docs for it in d.unnamed]
     items += unnamed
     metrics["unnamed_redline"] = len(unnamed)
-    detail = [it for g in groups for it in detail_items(g, require_detail)]
+    detail, detail_metrics = _detail_results(docs, groups, require_detail)
     items += detail
-    metrics["detail_docs"] = sum(1 for d in docs if is_detail(d.path))
-    for rule in (*RULES, "detail_missing"):
-        metrics[rule] = sum(1 for it in detail if it["rule"] == rule)
+    metrics.update(detail_metrics)
+    if settings is not None:  # 設定の無いリポジトリの結果は今と同じ（#3618 の I3）
+        repos, repo_metrics = _repo_results(groups, settings)
+        items += repos
+        metrics.update(repo_metrics)
     return items, metrics
 
 
 def cmd_check(a):
-    root = git_root(a.root)
+    root = _check_root(a.root)
     if a.issue:
         require_repo(root)
         texts = find_closed(root, [str(n) for n in a.issue])
@@ -294,16 +396,32 @@ def cmd_check(a):
             emit(result(TOOL, "stopped", f"設計文書が無い（{nums}）", metrics={"docs": 0}), EXIT_PRECONDITION)
     else:
         texts = read_files(root, a.file)
+    try:
+        settings = design_repos.load_settings(root)
+    except design_repos.RepoSettingsError as exc:
+        raise StepError(str(exc), EXIT_UNREADABLE) from None
     docs = [Doc(p, t) for p, t in texts]
-    items, metrics = judge_docs(docs, a.require_detail)
+    items, metrics = judge_docs(docs, a.require_detail, settings)
     names = ", ".join(d.path for d in docs)
     if items:
-        summary = (
-            f"文書 {len(docs)} 件（{names}）。決定の作り方と比べた候補・人へ残す判断のレッドライン・詳細設計に {len(items)} 件の指摘がある"
-        )
+        summary = f"文書 {len(docs)} 件（{names}）。決定の作り方と比べた候補・人へ残す判断のレッドライン・詳細設計・代表のリポジトリの振る舞いに {len(items)} 件の指摘がある"
         emit(result(TOOL, "stopped", summary, items, metrics), EXIT_VIOLATION)
     summary = f"文書 {len(docs)} 件（{names}）。自前で作る決定 {metrics['self_built']} 件・人へ残す判断・詳細設計 {metrics['detail_docs']} 件に指摘なし"
     emit(result(TOOL, "ok", summary, items, metrics), EXIT_OK)
+
+
+def cmd_schema(a):
+    text = design_repos.design_json_schema()
+    if not a.out:
+        sys.stdout.write(text)
+        return 0
+    try:  # 書けないときは標準出力へ何も出さずに止める
+        Path(a.out).write_text(text, encoding="utf-8")
+    except OSError as exc:
+        raise StepError(f"スキーマを書けない: {a.out}: {exc}", EXIT_UNREADABLE) from None
+    sys.stdout.write(text)
+    sys.stdout.flush()
+    emit(result(TOOL, "ok", f"schema を書いた: {a.out}"))
 
 
 def build_parser():
@@ -316,6 +434,9 @@ def build_parser():
     g.add_argument("--file", nargs="+", help="読む文書のパス（worktree から読む）")
     p.add_argument("--require-detail", action="store_true", help="詳細設計の文書の無いまとまりを detail_missing で指摘する")
     p.set_defaults(func=cmd_check)
+    s = sub.add_parser("schema", parents=[common], help="代表のリポジトリの設定（.ndf/design.json）の JSON Schema を出す")
+    s.add_argument("--out", help="スキーマを書くパス（標準出力にも出す）")
+    s.set_defaults(func=cmd_schema)
     return ap
 
 

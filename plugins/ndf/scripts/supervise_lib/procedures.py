@@ -223,7 +223,9 @@ def survey_steps(n: int, next_id: str, require_detail: bool = False) -> list:
     """設計のプランの外部の調査の検査（survey-check / fix-survey / survey-recheck。#2519 の決定 7）。
 
     レビューの直しで決定が変わった後に確かめる。直しは 1 回だけ試み、残れば `on_fail` を置かずにプランを止める。
-    `require_detail`（詳細設計を通るモード。#3144）なら検査に `--require-detail` を付け、詳細設計の文書の形も確かめる。"""
+    `require_detail`（詳細設計を通るモード。#3144）なら検査に `--require-detail` を付け、詳細設計の文書の形も確かめる。
+    検査の終了コード 2（代表のリポジトリの設定が壊れている・文書や契約を読めない）は直しの worker へ回さず止める。
+    直しの worker が利用者の設定（`.ndf/design.json`）を書き換えないためである（#3618 の C7）。"""
     check = f"{DESIGN_SURVEY_PY} check --issue {n}" + (" --require-detail" if require_detail else "")
     detail_fix = (
         "detail_* の指摘は詳細設計の文書（issues/issue-<番号>-design-detail.md）を直す: 雛形の節を足すか `省く: <理由>` を書く・"
@@ -232,16 +234,28 @@ def survey_steps(n: int, next_id: str, require_detail: bool = False) -> list:
         if require_detail
         else ""
     )
-    return [
-        {
-            "id": "survey-check",
+    repo_fix = (
+        "repo_* の指摘は頭の設計文書の適用範囲を直す: `### 代表のリポジトリでの振る舞い` の表に設定の種類ごとの行を足す・"
+        "`### <名前>だけの事情` の欄を書く・扱えなくなることがある行は、人へ残す判断の表に設定が名指す番号の行を足す。"
+        "扱えなくなることを `無し` へ書き換えて指摘を消さない。`無し` と書いてよいのは、同じ種類が改名後の設定か別の選択肢で"
+        "同じ運用を続けられるときだけ。"
+    )
+
+    def run_check(id_: str, **extra) -> dict:
+        """検査のステップ。終了コード 2 は直しへ回さず止め、通れば next_id へ進む（`extra` は cmd と on_exit の間へ入る）。"""
+        return {
+            "id": id_,
             "type": "run",
             "stage": "ドキュメントレビュー",
             "timeout": 120,
             "cmd": check,
-            "on_fail": "fix-survey",
+            **extra,
+            "on_exit": {"2": "stop"},
             "next": next_id,
-        },
+        }
+
+    return [
+        run_check("survey-check", on_fail="fix-survey"),
         {
             "id": "fix-survey",
             "type": "work",
@@ -252,9 +266,9 @@ def survey_steps(n: int, next_id: str, require_detail: bool = False) -> list:
             "next": "survey-recheck",
             "prompt": "入力は外部の調査の検査（design-survey.py）の指摘である。指摘の行の決定の `作り方:` と `比べた候補:` を"
             "直すか、外部の調査の表へ出典つきの候補の行を足してコミットする（push しない）。比べずには直せない指摘"
-            "（候補を調べ直さないと決まらないもの）は直さずに「判断が要る」と報告する。" + detail_fix,
+            "（候補を調べ直さないと決まらないもの）は直さずに「判断が要る」と報告する。" + detail_fix + repo_fix,
         },
-        {"id": "survey-recheck", "type": "run", "stage": "ドキュメントレビュー", "timeout": 120, "cmd": check, "next": next_id},
+        run_check("survey-recheck"),
     ]
 
 
