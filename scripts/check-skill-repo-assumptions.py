@@ -70,6 +70,7 @@ from collections.abc import Iterator
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
 from allowlist import AllowError, allow_file_name, load_allow  # noqa: E402
+from json_pointer import walk  # noqa: E402
 
 # --- 検知する語 -------------------------------------------------------------
 # 語の ID → 正規表現。ai-plugins にしか無い操作・ディレクトリ・ファイルを指す語で、例外リストの
@@ -367,10 +368,8 @@ def default_problems(defaults: list[tuple[str, int]], plugin_root: pathlib.Path)
     if len(defaults) != 1 or defaults[0][0] != rel:
         return [f"リモート名の既定が {len(defaults)} か所にある: {places or '無し'}（{where}）"]
     try:
-        node = json.loads((plugin_root / rel).read_text(encoding="utf-8"))
-        for key in pointer:
-            node = node[key]
-    except (OSError, ValueError, KeyError, TypeError):
+        walk(json.loads((plugin_root / rel).read_text(encoding="utf-8")), pointer)
+    except (OSError, ValueError, LookupError):
         return [f"リモート名の既定が {places} にあるが、/{'/'.join(pointer)} ではない（{where}）"]
     return []
 

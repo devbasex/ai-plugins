@@ -23,6 +23,9 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+from json_pointer import walk  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[1]
 BASELINE = "scripts/ndf-choices.json"
 VERSION = 1
@@ -121,16 +124,11 @@ def _pointer(doc: Any, pointer: str) -> Any:
     """JSON Pointer（RFC 6901）の先の値。無ければ `SourceError`。"""
     if pointer and not pointer.startswith("/"):
         raise SourceError(f"JSON Pointer が / で始まらない: {pointer}")
-    node = doc
-    for raw in pointer.split("/")[1:]:
-        key = raw.replace("~1", "/").replace("~0", "~")
-        if isinstance(node, list) and key.isdigit() and int(key) < len(node):
-            node = node[int(key)]
-        elif isinstance(node, dict) and key in node:
-            node = node[key]
-        else:
-            raise SourceError(f"JSON Pointer の先が無い: {pointer}")
-    return node
+    keys = [raw.replace("~1", "/").replace("~0", "~") for raw in pointer.split("/")[1:]]
+    try:
+        return walk(doc, keys)
+    except LookupError:
+        raise SourceError(f"JSON Pointer の先が無い: {pointer}") from None
 
 
 def _read_json(path: Path) -> Any:
