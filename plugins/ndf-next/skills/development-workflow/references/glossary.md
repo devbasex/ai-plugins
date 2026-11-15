@@ -201,7 +201,7 @@ flowchart TB
 | ブランチ運用の宣言 | スプリントの起点・ベースブランチへ入れる時点・文書の Pull Request の宛先・本番への取り込み方を書いた設定。無ければベースブランチから切り、ベースブランチを丸ごと出す | `.ndf/worktree.json` の `branch_flow` | [worktree の ndf_settings.md](../../worktree/references/ndf-settings.md) の「ブランチ運用を宣言するリポジトリ」 |
 | スプリントの起点 | スプリントブランチと worktree を切る元のブランチ。ベースブランチか本番チャネルをチャネルの名前で指す | `branch_flow.start`（`base` / `production`） | 同上 |
 | 文書の Pull Request の宛先 | 設計 PR と確定仕様化の PR の宛先。ベースブランチかスプリントブランチ | `branch_flow.doc_prs`（`base` / `sprint`） | 同上 |
-| 本番への取り込み方 | 本番チャネルへ何をどう入れるか。ベースブランチを丸ごと出すか、選んだリリースの単位を集めるか | `branch_flow.release_strategy`（`whole` / `selected`） | 同上 |
+| 本番への取り込み方 | 本番チャネルへ何をどう入れるか。ベースブランチを丸ごと出すか、選んだリリースの単位を集めるか | `branch_flow.release_strategy`（`merge_base_branch` / `release_branch`） | 同上 |
 | リリースブランチ | 本番チャネルへ入れる変更を集め、版を上げるブランチ | `release/v<版>` | [release-steps.md](../../release/references/release-steps.md) |
 | リリースの単位 | 選んで集める取り込み方で、リリースが選ぶ 1 つのブランチ。本番チャネルに含まれていないコミットを持つスプリントブランチ | `sprint/<名前>` | [worktree の ndf_settings.md](../../worktree/references/ndf-settings.md) の「ブランチ運用を宣言するリポジトリ」 |
 | スプリントブランチ | 課題の Pull Request を集め、ベースブランチへの Pull Request をスプリントで 1 本にするブランチ。`fast` では作らない | `sprint/<名前>` | [parallel-work.md](parallel-work.md) の「スプリントの中の並列の 4 つの形」 |

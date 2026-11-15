@@ -21,6 +21,7 @@ from ndf.domains.records import files, jsonl
 from ndf.domains.records import mvv_decide as md
 from ndf.domains.records import mvv_material_decide as mm
 from ndf.domains.records import usage_decide as ud
+from ndf.domains.settings import renames
 from ndf.progress.gate.checks import Changed, MvvFacts
 
 # LLM の判定の関数: 照合の入力を受け、判定の語と費用・秒の実測値を返す
@@ -72,7 +73,15 @@ def decl_at(root: Path, ref: str) -> dict[str, Any]:
         raise MvvError(f"{ref} の MVV の宣言を読めない: {exc}") from exc
     if not isinstance(raw, dict):
         raise MvvError(f"{ref} の MVV の宣言が object でない")
+    _refuse_legacy(raw, root)
     return raw
+
+
+def _refuse_legacy(raw: Mapping[str, Any], root: Path) -> None:
+    """旧いキーが残る MVV の設定なら `MvvError`（既定へ倒さない）。"""
+    legacy = renames.legacy_detail("mvv", raw, root)
+    if legacy is not None:
+        raise MvvError(legacy)
 
 
 def signals(root: Path, base_branch: str) -> md.Signals:
@@ -90,6 +99,7 @@ def worktree_version(root: Path) -> Optional[int]:
         raise MvvError(f"worktree の MVV の宣言を読めない: {exc}") from exc
     if not isinstance(raw, dict):
         raise MvvError("worktree の MVV の宣言が object でない")
+    _refuse_legacy(raw, root)
     return md.current_version(raw)
 
 

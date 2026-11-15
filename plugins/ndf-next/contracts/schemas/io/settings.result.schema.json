@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "settings.result.schema.json",
+  "title": "ndf settings の結果 JSON",
+  "description": "ndf settings が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果の契約（result.schema.json）が持ち、ここは metrics と items の形だけを足す",
+  "allOf": [
+    {
+      "$ref": "../result.schema.json"
+    }
+  ],
+  "properties": {
+    "tool": {
+      "const": "settings"
+    },
+    "metrics": {
+      "type": "object",
+      "description": "ndf settings の計測値",
+      "additionalProperties": false,
+      "properties": {
+        "files": {"type": "integer", "description": "差分のある設定ファイルの数（--apply のときは書いたファイルの数）"},
+        "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$", "description": "差分のハッシュ（差分を示したときだけ）。承認した後に --apply へ渡す"}
+      }
+    },
+    "items": {
+      "type": "array",
+      "description": "設定ファイルごとの差分か、書いた設定ファイル",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "file", "path"],
+        "properties": {
+          "kind": {"const": "settings-file"},
+          "file": {"type": "string", "description": "設定ファイル（表 ndf-files の ID）"},
+          "path": {"type": "string", "description": "リポジトリの根からの相対パス"},
+          "legacy_keys": {"type": "integer", "description": "旧いキーの位置の数（差分を示したときだけ）"},
+          "patch": {
+            "type": "array",
+            "description": "JSON Patch（RFC 6902）の操作の列（差分を示したときだけ）。move と replace の直前に元の位置の今の値を持つ test を置く",
+            "items": {
+              "type": "object",
+              "required": ["op", "path"],
+              "properties": {
+                "op": {"enum": ["test", "move", "replace"]},
+                "path": {"type": "string"},
+                "from": {"type": "string"},
+                "value": {}
+              }
+            }
+          },
+          "reindent": {"type": "boolean", "description": "書き換えるとインデントが 2 にそろう（差分の操作の列には載らない空白の変化）"},
+          "operations": {"type": "integer", "description": "当てた操作の数（--apply のときだけ）"}
+        }
+      }
+    }
+  }
+}

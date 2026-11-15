@@ -59,7 +59,7 @@ def test_one_default_row_and_values_come_from_the_table():
 
 
 def test_selected_flow_of_another_repository():
-    decl = {"release_strategy": "selected", "start": "production", "doc_prs": "sprint", "reviews": {"release": {"checks": ["cross-review"]}}}
+    decl = {"release_strategy": "release_branch", "start": "production", "doc_prs": "sprint", "reviews": {"release": {"checks": ["cross-review"]}}}
     assert flow_of(decl) == {"row": "release-branch", "start": "production", "doc_prs": "sprint", "integrate": "check"}
     assert facts.value(FLOWS, "release-branch", "keeps_sprint") is True
     assert facts.value(FLOWS, "release-branch", "release_from") == "production"
@@ -68,10 +68,10 @@ def test_selected_flow_of_another_repository():
 @pytest.mark.parametrize(
     "decl",
     [
-        {"release_strategy": "selected", "start": "base"},
-        {"release_strategy": "whole", "reviews": {"release": {}}},
+        {"release_strategy": "release_branch", "start": "base"},
+        {"release_strategy": "merge_base_branch", "reviews": {"release": {}}},
         {"release_strategy": "merge"},
-        {"release_strategy": "whole", "squash": True},
+        {"release_strategy": "merge_base_branch", "squash": True},
     ],
 )
 def test_ndf_settings_outside_the_table_stop(decl):

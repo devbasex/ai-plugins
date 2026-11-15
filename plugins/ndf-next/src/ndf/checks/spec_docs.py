@@ -31,6 +31,7 @@ from ndf.checks.model import CheckError, Finding, Scope
 from ndf.checks.spec_args import Arg, ArgTree
 from ndf.checks.spec_model import CONTRACTS, DECL_SCHEMA_DIR, IO_SCHEMA_DIR, CommandSpec, NdfSettingsSpec, SpecModel, opt
 from ndf.contracts import facts
+from ndf.domains.settings import renames
 
 DOCS, DECL, IO, SKILL, PUBLIC = "spec-docs", "spec-decl", "spec-io", "spec-skill", "spec-public"
 # キーの型の語（どれか 1 つを持てば型がある）
@@ -111,13 +112,19 @@ def _keys_errors(decl: NdfSettingsSpec) -> list[str]:
 
 
 def _real_errors(decl: NdfSettingsSpec, path: Path) -> list[str]:
-    """`.ndf/` の実物をスキーマで確かめる。無いファイルは確かめない。"""
+    """`.ndf/` の実物をスキーマで確かめる。無いファイルは確かめない。
+
+    旧いキー（改名表の old）が残る実物は、改名表で変換した中身を確かめる。11.0 の入れ替えまでは今の NDF のために
+    旧いキーのまま残すため、旧いキーそのものは誤りにしない（止めるのは ndf-next の設定を読む側）。
+    """
     if decl.schema is None or not path.is_file():
         return []
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         return [f"JSON として読めない: {exc}"]
+    if isinstance(data, dict):
+        data, _ = renames.migrate(decl.id, data)
     errs = Draft202012Validator(decl.schema).iter_errors(data)
     return sorted(f"/{'/'.join(str(p) for p in e.absolute_path)}: {e.message}" for e in errs)
 

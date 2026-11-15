@@ -17,6 +17,7 @@ from typing import Any, Optional
 
 from ndf import identity
 from ndf.contracts import facts
+from ndf.domains.settings import renames
 
 # 読める宣言の版
 VERSION = 1
@@ -158,11 +159,14 @@ def _merge(base: dict[str, Any], over: dict[str, Any]) -> dict[str, Any]:
 
 
 def load(main_dir: Path) -> Optional[NdfSettings]:
-    """メインディレクトリの宣言。共有設定が無ければ `None`。"""
+    """メインディレクトリの宣言。共有設定が無ければ `None`。旧いキーが残れば既定へ倒さずに `NdfSettingsError`。"""
     shared = shared_file(main_dir)
     if not shared.exists():
         return None
     data = read_object(shared)
+    legacy = renames.legacy_detail("worktree", data, main_dir)
+    if legacy is not None:
+        raise NdfSettingsError(legacy)
     if data.get("version") != VERSION:
         raise NdfSettingsError(f"{shared} の version が {VERSION} でない: {data.get('version')!r}")
     over, ignored = _local_overrides(local_file(main_dir))

@@ -6,7 +6,7 @@ import pytest
 
 from ndf.domains.worktree import localenv_decide, merged_decide, session_decide, testenv_decide, write_target
 
-SELECTED = {"release_strategy": "selected", "production_branch": "main"}
+SELECTED = {"release_strategy": "release_branch", "production_branch": "main"}
 
 
 @pytest.mark.parametrize(
@@ -16,10 +16,10 @@ SELECTED = {"release_strategy": "selected", "production_branch": "main"}
         ("sprint/s1", SELECTED, False, True),  # 選んで集める取り込み方では本番に含まれるまで残す
         ("sprint/s1", SELECTED, True, False),
         ("sprint/s1", SELECTED, None, True),  # 含まれるかを確かめられなければ残す
-        ("sprint/s1", {"release_strategy": "whole", "production_branch": "main"}, False, False),
+        ("sprint/s1", {"release_strategy": "merge_base_branch", "production_branch": "main"}, False, False),
         ("sprint/s1", None, False, False),  # 記録も宣言も無ければ既定の行（whole）
         ("sprint/s1", {"release_strategy": "nope", "production_branch": "main"}, True, True),  # 表に無い取り込み方は残す
-        ("sprint/s1", {"release_strategy": "selected"}, False, False),  # 本番チャネルが無ければ比べる先が無い
+        ("sprint/s1", {"release_strategy": "release_branch"}, False, False),  # 本番チャネルが無ければ比べる先が無い
     ],
 )
 def test_sprint_keep(branch: str, flow: dict | None, contained: bool | None, kept: bool) -> None:

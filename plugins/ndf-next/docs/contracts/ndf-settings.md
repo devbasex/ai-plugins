@@ -161,7 +161,7 @@ worktree・チーム・公開・[mvv.schema.json](../../contracts/schemas/ndf-se
 | `version` | integer | — | `1` | 必須 | 宣言の形の版。読み手は知らない版を読まない |
 | `versions` | array of MvvVersion | — | — | 必須 | versions（このリポジトリの宣言にある最上位のキー） |
 
-例: `{"version": 1, "body": "mvv.md", "settings": {"revise_after": {"overrides": 3}}, "versions": [{"version": 1, "sha256": "0000000000000000000000000000000000000000000000000000000000000000", "approved_at": "2026-01-01T00:00:00+00:00", "approved_by": "example", "reason": "初版", "vet": {"verdict": "follow", "at": "2026-01-01T00:00:00+00:00"}, "changes": [], "body": "# 例のプロジェクト MVV\n"}]}`
+例: `{"version": 1, "body": "mvv.md", "settings": {"revise_after": {"overrides": 3}}, "versions": [{"version": 1, "sha256": "0000000000000000000000000000000000000000000000000000000000000000", "approved_at": "2026-01-01T00:00:00+00:00", "approved_by": "example", "reason": "初版", "validation": {"result": "pass", "checked_at": "2026-01-01T00:00:00+00:00"}, "changes": [], "body": "# 例のプロジェクト MVV\n"}]}`
 
 ## `.ndf/mvv.md`（mvv-body）
 
@@ -334,7 +334,7 @@ worktree・チーム・公開・[supervise.schema.json](../../contracts/schemas/
 | `testenv` | object | — | — | 任意 | テスト環境（ポートの採番・ゴールデンのタグ・リセット）の宣言。個人設定の値を重ねる |
 | `version` | integer | — | `1` | 必須 | 宣言の形の版。読み手は知らない版を読まない |
 
-例: `{"version": 1, "base_branch": "develop", "production_branch": "main", "branch_flow": {"start": "base", "release_strategy": "whole"}, "guard": {"allow_paths": ["issues/", "docs/"]}}`
+例: `{"version": 1, "base_branch": "develop", "production_branch": "main", "branch_flow": {"start": "base", "release_strategy": "merge_base_branch"}, "guard": {"allow_paths": ["issues/", "docs/"]}}`
 
 ## `.ndf/worktree.local.json`（worktree-local）
 

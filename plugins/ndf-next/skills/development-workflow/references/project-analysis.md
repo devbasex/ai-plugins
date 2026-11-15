@@ -144,7 +144,7 @@ Pull Request（最大 100 件）と origin のスプリントブランチで、�
 | `start` | 本番チャネルに入っていないスプリントブランチの分岐点。本番チャネルにだけあるコミットなら `production`、ベースブランチにだけあるコミットなら `base`。丸ごとのリリースで後から本番に入った分岐点は、本番チャネルの first-parent の列に無ければ `base`。少なければ `release_strategy` の行が許す値 |
 | `integrate` | head がスプリントブランチで宛先がベースブランチの Pull Request |
 | `doc_prs` | 設計 PR（`design/*`）と確定仕様化の PR（`spec/*`）の宛先 |
-| `release_strategy` | 本番チャネル宛ての Pull Request の head。ベースブランチそのもの・リリースブランチの first-parent の列がマージ前の本番チャネルへ届かないなら `whole`、届けば `selected` |
+| `release_strategy` | 本番チャネル宛ての Pull Request の head。ベースブランチそのもの・リリースブランチの first-parent の列がマージ前の本番チャネルへ届かないなら `merge_base_branch`、届けば `release_branch` |
 
 答えは `branch_flow` に `{"value": {"start": ..., "integrate": ..., "doc_prs": ..., "release_strategy": ...}}` で書く。取り込み方の表
 （[worktree の ndf_settings.md](../../worktree/references/ndf-settings.md) の「ブランチ運用を宣言するリポジトリ」）に合わない答えは、

@@ -11,7 +11,7 @@ NDF を外から呼ぶ面（宣言・副命令・環境変数・受け渡しの�
 | ページ | 件数 |
 | --- | --- |
 | [宣言（.ndf/）](ndf-settings.md) | 公開 18・内部 1 |
-| [副命令の引数と結果](commands.md) | 公開 0・内部 27 |
+| [副命令の引数と結果](commands.md) | 公開 0・内部 28 |
 | [終了コードと止まった理由](exit-codes.md) | 終了コード 11・止まった理由 32 |
 | [環境変数](env.md) | 公開 10・内部 50 |
 | [受け渡しのファイル](files.md) | 公開 12・内部 56 |
@@ -22,8 +22,8 @@ NDF を外から呼ぶ面（宣言・副命令・環境変数・受け渡しの�
 
 | 行 | 置き場 | 公開する宣言 |
 | --- | --- | --- |
-| `spec-ndf_settings` | `contracts/schemas/ndf-settings` | `project`・`supervise`・`release`・`worktree`・`glossary`・`instructions`・`mvv`・`mvv-body`・`pace`・`review`・`backlog`・`runtime-policy`・`ask`・`context`・`estimate`・`issue-items`・`projects`・`code-metrics` |
 | `spec-io` | `contracts/schemas/io` | — |
+| `spec-ndf_settings` | `contracts/schemas/ndf-settings` | `project`・`supervise`・`release`・`worktree`・`glossary`・`instructions`・`mvv`・`mvv-body`・`pace`・`review`・`backlog`・`runtime-policy`・`ask`・`context`・`estimate`・`issue-items`・`projects`・`code-metrics` |
 | `spec-pages` | `docs/contracts` | — |
 
 ## 呼び手と合わせる前の行

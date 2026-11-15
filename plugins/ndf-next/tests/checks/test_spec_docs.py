@@ -401,3 +401,16 @@ def test_page_skills_pins_the_rows_of_skills_reports_and_launchers(copy):
         "| `t2` | — | — |",
         "| `l1` | p | mm |",
     ]
+
+
+def test_the_real_settings_with_legacy_keys_is_checked_after_the_renames(copy):
+    """旧いキーの残る実物（改名表の old と旧い値から組み立てる）は、変換した中身で確かめる（#3613 の決定 13）。"""
+    import settings_legacy as legacy
+
+    (copy.repo / ".ndf").mkdir()
+    (copy.repo / ".ndf" / "worktree.json").write_text(json.dumps(legacy.worktree()), encoding="utf-8")
+    assert [f for f in copy.findings() if f.rule == spec_docs.DECL] == []
+    broken = {**legacy.worktree(), "base_branch": 7}
+    (copy.repo / ".ndf" / "worktree.json").write_text(json.dumps(broken), encoding="utf-8")
+    found = [f for f in copy.findings() if f.rule == spec_docs.DECL]
+    assert [f.detail.split(":")[0] for f in found] == ["/base_branch"]

@@ -150,7 +150,7 @@ def test_ndf_record_takes_the_median_of_run_rows(tmp_path):
 
 def test_flow_infer_and_table():
     prs = [{"base": "main", "head": "sprint/a"} for _ in range(3)] + [{"base": "main", "head": "design/x"} for _ in range(3)]
-    got = measure_flow.infer(prs, "main", "main", ["whole"] * 3, [])
+    got = measure_flow.infer(prs, "main", "main", ["merge_base_branch"] * 3, [])
     assert got["integrate"]["value"] == "check" and got["integrate"]["confidence"] == "高"
     assert got["doc_prs"]["value"] == "base"
     assert got["start"]["value"] == "base"  # 動いているスプリントブランチが無ければ取り込み方の表が許す起点
@@ -161,19 +161,19 @@ def test_flow_infer_and_table():
 
 
 def test_flow_answer_problem():
-    assert measure_flow.answer_problem({"start": "base", "integrate": "check", "doc_prs": "base", "release_strategy": "whole"}) is None
-    assert "start" in measure_flow.answer_problem({"start": "production", "release_strategy": "whole"})
-    assert "reviews.release" in measure_flow.answer_problem({"release_strategy": "whole", "reviews": {"release": {"checks": [], "diff": "none"}}})
+    assert measure_flow.answer_problem({"start": "base", "integrate": "check", "doc_prs": "base", "release_strategy": "merge_base_branch"}) is None
+    assert "start" in measure_flow.answer_problem({"start": "production", "release_strategy": "merge_base_branch"})
+    assert "reviews.release" in measure_flow.answer_problem({"release_strategy": "merge_base_branch", "reviews": {"release": {"checks": [], "diff": "none"}}})
     assert measure_flow.answer_problem({"release_strategy": "nope"}) is not None
     assert measure_flow.bad_answer({"unknown": "x"}) is None
 
 
 def test_flow_drift_against_default_and_reviews():
-    item = {"fields": {"release_strategy": {"value": "selected", "confidence": "高", "evidence": []}, "start": {"unknown": "x"}}}
+    item = {"fields": {"release_strategy": {"value": "release_branch", "confidence": "高", "evidence": []}, "start": {"unknown": "x"}}}
     item["reviews"] = {"impl": {"value": {"checks": ["cross-review"], "diff": "pr"}}, "design": {"value": {"checks": [], "diff": "none"}}}
     rows = measure_flow.drift(None, item)
     assert [r["name"] for r in rows] == ["branch_flow.release_strategy", "branch_flow.reviews.design"]
-    assert rows[0]["declared"] == "whole"
+    assert rows[0]["declared"] == "merge_base_branch"
     with pytest.raises(ValueError):
         measure_flow.drift({"branch_flow": {"release_strategy": "nope"}}, item)
 
@@ -255,7 +255,7 @@ def test_flow_drift_rows_for_fields_and_reviews():
             "start": {"value": "base"},
             "integrate": {"value": "x", "confidence": "低", "evidence": [{"path": "a"}]},
             "doc_prs": {"confidence": "高"},
-            "release_strategy": {"value": "selected", "evidence": "not a list"},
+            "release_strategy": {"value": "release_branch", "evidence": "not a list"},
         },
         "reviews": {
             "impl": {"value": {"checks": ["cross-review"], "diff": "pr"}, "confidence": "中"},
@@ -277,11 +277,11 @@ def test_flow_drift_rows_for_fields_and_reviews():
         {
             "kind": "drift",
             "name": "branch_flow.release_strategy",
-            "declared": "whole",
-            "measured": "selected",
+            "declared": "merge_base_branch",
+            "measured": "release_branch",
             "confidence": None,
             "evidence": [],
-            "proposal": "branch_flow.release_strategy を selected にする（同じ release_strategy の行が許す組み合わせに揃えてから write で書く）",
+            "proposal": "branch_flow.release_strategy を release_branch にする（同じ release_strategy の行が許す組み合わせに揃えてから write で書く）",
         },
         {
             "kind": "drift",

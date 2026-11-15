@@ -27,6 +27,7 @@ from typing import Any, Iterable, Mapping, Optional, Protocol
 
 from ndf.adapters.git import ORIGIN, Git
 from ndf.adapters.github import Pull
+from ndf.domains.settings import renames
 from ndf.domains.worktree import ndf_settings, mainlock, merged_decide, outcomes, repo, testenv, testenv_sweep, trash
 
 # 未コミットの変更を理由に並べるパスの上限
@@ -163,10 +164,17 @@ def sync_main(main: Git, base: Optional[str], rec: Record) -> None:
 
 
 def read_flow_record(path: Optional[Path]) -> Optional[dict[str, Any]]:
-    """開始時の記録（`branch_flow` の写しに `production_branch` を足した JSON のオブジェクト）。読めなければ `NdfSettingsError`。"""
+    """開始時の記録（`branch_flow` の写しに `production_branch` を足した JSON のオブジェクト）。読めなければ `NdfSettingsError`。
+
+    写しに旧いキーが残れば `NdfSettingsError` で止まる。旧いキーを読まずに既定の行へ倒すと、残すはずのブランチを消す。
+    """
     if path is None:
         return None
-    return ndf_settings.read_object(path)
+    record = ndf_settings.read_object(path)
+    legacy = renames.legacy_detail("worktree", {"branch_flow": record}, path.parent)
+    if legacy is not None:
+        raise ndf_settings.NdfSettingsError(legacy)
+    return record
 
 
 def after_merge(main_dir: Path, numbers: list[int], hub: PullsReader, flow_record: Optional[Mapping[str, Any]] = None) -> Record:

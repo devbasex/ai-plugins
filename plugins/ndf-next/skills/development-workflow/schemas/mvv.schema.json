@@ -116,7 +116,7 @@
           "default": null,
           "title": "Reason"
         },
-        "vet": {
+        "validation": {
           "$ref": "#/$defs/MvvValidation"
         },
         "changes": {
@@ -137,7 +137,7 @@
         "sha256",
         "approved_at",
         "approved_by",
-        "vet",
+        "validation",
         "changes",
         "body"
       ],
@@ -147,16 +147,16 @@
     "MvvValidation": {
       "additionalProperties": false,
       "properties": {
-        "verdict": {
+        "result": {
           "enum": [
-            "follow",
+            "pass",
             "unknown"
           ],
-          "title": "Verdict",
+          "title": "Result",
           "type": "string"
         },
-        "at": {
-          "title": "At",
+        "checked_at": {
+          "title": "Checked At",
           "type": "string"
         },
         "accepted_unknown": {
@@ -166,8 +166,8 @@
         }
       },
       "required": [
-        "verdict",
-        "at"
+        "result",
+        "checked_at"
       ],
       "title": "MvvValidation",
       "type": "object"

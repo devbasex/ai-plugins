@@ -21,6 +21,7 @@ from ndf.contracts import causes, facts, limits, result
 from ndf.domains.records import files, jsonfile
 from ndf.domains.records import mvv_decide as md
 from ndf.domains.records import preflight_decide as pd
+from ndf.domains.settings import renames
 
 # 子プロセスの結果 JSON を返す関数（引数の列 → 結果）
 Runner = Callable[[list[str], Path], Mapping[str, Any]]
@@ -78,8 +79,12 @@ def mvv_state(root: Path) -> str:
 
 
 def mvv_checked(root: Path) -> pd.Checked:
-    """MVV の状態を確かめる。本文が承認の記録と違う・読めなければ止まる。"""
+    """MVV の状態を確かめる。旧いキーが残る・本文が承認の記録と違う・読めなければ止まる。旧いキーは本文より先に見る。"""
     state = mvv_state(root)
+    if state not in (md.State.UNREADABLE, md.State.ABSENT):
+        legacy = renames.legacy_detail("mvv", jsonfile.read_object(files.path(root, "mvv")), root)
+        if legacy is not None:
+            return pd.Checked(pd.MVV, result.stopped(TOOL, "precondition", legacy))
     if state in (md.State.MISMATCH, md.State.UNREADABLE):
         detail = f"プロジェクト MVV の状態が {state}（本文を承認し直すか、承認した本文へ戻す）"
         return pd.Checked(pd.MVV, result.stopped(TOOL, "precondition", detail))

@@ -111,14 +111,14 @@ origin にもローカルにも無いときは、既定ブランチへは落ち�
 | `start` | `base` / `production` | `base` | スプリントの起点。worktree の `create` の既定の起点もこれになる |
 | `integrate` | `check` | `check` | スプリントブランチをベースブランチへ入れる時点（検査の Pull Request のマージ） |
 | `doc_prs` | `base` / `sprint` | `base` | 設計 PR と確定仕様化の PR の宛先 |
-| `release_strategy` | `whole` / `selected` | `whole` | 本番への取り込み方 |
+| `release_strategy` | `merge_base_branch` / `release_branch` | `merge_base_branch` | 本番への取り込み方 |
 
 取り込み方ごとに許す組み合わせは決まっている。
 
 | `release_strategy` | 許す `start` | 許す `doc_prs` | リリースの範囲 |
 | --- | --- | --- | --- |
-| `whole` | `base` | `base` | 本番チャネル..提示したベースブランチのコミット |
-| `selected` | `production` | `sprint` | 前の本番のタグ..リリースブランチ（本番チャネルから切り、選んだスプリントブランチを集める）の先頭 |
+| `merge_base_branch` | `base` | `base` | 本番チャネル..提示したベースブランチのコミット |
+| `release_branch` | `production` | `sprint` | 前の本番のタグ..リリースブランチ（本番チャネルから切り、選んだスプリントブランチを集める）の先頭 |
 
 選んで集める取り込み方の例:
 
@@ -131,7 +131,7 @@ origin にもローカルにも無いときは、既定ブランチへは落ち�
     "start": "production",
     "integrate": "check",
     "doc_prs": "sprint",
-    "release_strategy": "selected"
+    "release_strategy": "release_branch"
   }
 }
 ```
@@ -164,7 +164,7 @@ origin にもローカルにも無いときは、既定ブランチへは落ち�
 | --- | --- | --- | --- |
 | `impl` | 3 つすべて | `pr` / `none` | 常に |
 | `sprint` | 3 つすべて | `unchecked` / `none` | 常に |
-| `release` | `cross-review` | `pr` / `resolution` / `none` | `release_strategy` が `selected` のとき |
+| `release` | `cross-review` | `pr` / `resolution` / `none` | `release_strategy` が `release_branch` のとき |
 | `design` | `cross-review` | `pr` / `none` | 常に |
 | `spec` | `cross-review` | `pr` / `none` | 常に |
 
@@ -182,7 +182,7 @@ origin にもローカルにも無いときは、既定ブランチへは落ち�
 1 件 1 行で出して終了コード 2 で止まる。
 
 - `diff` が `none` なのに `checks` を書いた・`none` 以外なのに `checks` が空
-- `release_strategy` が `whole` なのに `release` を書いた
+- `release_strategy` が `merge_base_branch` なのに `release` を書いた
 - 実装の差分がどの PR でも cross-review されない。実装の差分を覆うのは `impl` の `pr`・`sprint` の `unchecked`・
   `release` の `pr` の 3 つで、`release` の `resolution` は衝突の解消の差分しか見ないため数えない。書かない種類を
   既定値で埋め、まとまりの記録の有無の両方で確かめる
@@ -204,7 +204,7 @@ origin にもローカルにも無いときは、既定ブランチへは落ち�
     "start": "production",
     "integrate": "check",
     "doc_prs": "sprint",
-    "release_strategy": "selected",
+    "release_strategy": "release_branch",
     "reviews": {
       "impl": {"checks": ["cross-review"], "diff": "pr"},
       "sprint": {"checks": ["cross-refactoring", "behavior"], "diff": "unchecked"},

@@ -185,7 +185,7 @@ def test_write_creates_then_keeps_hand_values(repo, tmp_path, capsys, last_resul
 
 def test_write_refuses_bad_flow_answer_and_broken_ndf_settings(repo, tmp_path, capsys, last_result):
     measured = _measure_file(tmp_path, {})
-    bad = _answers(tmp_path, {"branch_flow": {"value": {"release_strategy": "whole", "start": "production"}}})
+    bad = _answers(tmp_path, {"branch_flow": {"value": {"release_strategy": "merge_base_branch", "start": "production"}}})
     assert cli.main(["write", "--root", str(repo), "--measure", str(measured), "--answers", str(bad)]) == 1
     assert last_result(capsys.readouterr().out)["cause"]["kind"] == "check_failed"
     (repo / ".ndf").mkdir()
@@ -207,7 +207,7 @@ def test_write_adds_missing_branches_to_worktree(repo, tmp_path, capsys, last_re
 
 
 def test_drift_compares_with_the_default_row(repo, tmp_path, capsys, last_result):
-    flow = {"fields": {"release_strategy": {"value": "selected", "confidence": "高", "evidence": []}}}
+    flow = {"fields": {"release_strategy": {"value": "release_branch", "confidence": "高", "evidence": []}}}
     measured = _measure_file(tmp_path, {"branch_flow": flow})
     assert cli.main(["drift", "--root", str(repo), "--measure", str(measured)]) == 0
     got = last_result(capsys.readouterr().out)

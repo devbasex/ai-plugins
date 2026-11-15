@@ -59,10 +59,10 @@
         "release_strategy": {
           "type": "string",
           "enum": [
-            "whole",
-            "selected"
+            "merge_base_branch",
+            "release_branch"
           ],
-          "default": "whole"
+          "default": "merge_base_branch"
         },
         "reviews": {
           "type": "object",
@@ -502,7 +502,7 @@
       "production_branch": "main",
       "branch_flow": {
         "start": "base",
-        "release_strategy": "whole"
+        "release_strategy": "merge_base_branch"
       },
       "guard": {
         "allow_paths": [

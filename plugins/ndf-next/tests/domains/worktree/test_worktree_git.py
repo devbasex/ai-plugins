@@ -168,7 +168,7 @@ def test_cleanup_restores_evacuated_files_when_git_refuses(main_repo: Path, run_
 
 def test_cleanup_keeps_selected_sprint_until_production(main_repo: Path, run_git: Callable) -> None:
     """選んで集める取り込み方のスプリントは、merged と同じく本番チャネルに含まれるまで cleanup でも消さない。"""
-    decl = {"version": 1, "base_branch": "develop", "production_branch": "main", "branch_flow": {"release_strategy": "selected"}}
+    decl = {"version": 1, "base_branch": "develop", "production_branch": "main", "branch_flow": {"release_strategy": "release_branch"}}
     (main_repo / ".ndf" / "worktree.json").write_text(json.dumps(decl), encoding="utf-8")
     run_git(main_repo, "add", "-A")
     run_git(main_repo, "commit", "-q", "-m", "declare")

@@ -55,8 +55,8 @@ def _words_from(config: dict[str, Any], glossary: dict[str, Any]) -> dict[str, s
     同じ廃止した語を複数の項目が持つときは、用語集で先に出る項目の語を理由に書く。
     """
     words: dict[str, str] = {}
-    for term in glossary["terms"]:
-        for w in term.get("deprecated", []):
+    for term in (t for t in glossary["terms"] if "deprecated" in t):
+        for w in term["deprecated"]:
             words.setdefault(w, f"廃止した語。「{term['term']}」と書く")
     banned = config["check"]["banned"]["words"] if "banned" in config["check"] else []
     words.update({w: "禁止語" for w in banned})
@@ -66,8 +66,8 @@ def _words_from(config: dict[str, Any], glossary: dict[str, Any]) -> dict[str, s
 def _standalone_from(glossary: dict[str, Any]) -> dict[str, str]:
     """単独でマッチする廃止した語（`deprecated_standalone`）→ 理由。同じ語は先に出る項目の語を理由に書く。"""
     words: dict[str, str] = {}
-    for term in glossary["terms"]:
-        for w in term.get("deprecated_standalone", []):
+    for term in (t for t in glossary["terms"] if "deprecated_standalone" in t):
+        for w in term["deprecated_standalone"]:
             words.setdefault(w, f"廃止した語（単独の出現）。「{term['term']}」と書く")
     return words
 

@@ -4,13 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ndf.contracts import facts
+from ndf.domains.settings import renames
 
 
 def relpath(file_id: str) -> str:
-    """宣言のファイルのパス（根からの相対。`<locations の path>/<ndf-files の path>`）。"""
-    location = facts.value("ndf-files", file_id, "location")
-    return f"{facts.value('locations', location, 'path')}/{facts.value('ndf-files', file_id, 'path')}"
+    """宣言のファイルのパス（根からの相対。`<locations の path>/<ndf-files の path>`）。解き方は `renames.relpath` が持つ。"""
+    return renames.relpath(file_id)
 
 
 def path(root: Path, file_id: str) -> Path:

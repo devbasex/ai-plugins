@@ -197,13 +197,13 @@ def classify_release(tree: Tree, merge_commit: str, head: str, base: str) -> Opt
     """本番チャネル宛ての PR 1 件の取り込み方。head がベースブランチなら丸ごと。リリースブランチなら、その first-parent の列が
     マージの前の本番チャネル（マージのコミットの第 1 親）へ届けば選んで集める、届かなければ丸ごと。"""
     if head == base:
-        return "whole"
+        return "merge_base_branch"
     tip, before = f"{merge_commit}^2", f"{merge_commit}^1"
     if not head.startswith(Branch.RELEASE) or not _succeeds(tree, "rev-parse", "--verify", "--quiet", tip):
         return None
     chain = _out(tree, "rev-list", "--first-parent", "--max-count=200", tip).split()
     first = _out(tree, "rev-parse", before).strip()
-    return "selected" if first and first in chain else "whole"
+    return "release_branch" if first and first in chain else "merge_base_branch"
 
 
 def sprint_start(tree: Tree, ref: str, base: str, production: str) -> Optional[str]:

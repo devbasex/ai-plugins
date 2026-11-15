@@ -80,7 +80,7 @@ def test_after_merge_keeps_tracked_changes_and_main_dir_off_base(main_repo: Path
 def test_sprint_branch_uses_start_record_over_ndf_settings(main_repo: Path, run_git: Callable) -> None:
     """宣言（whole）を変えても、開始時の記録（selected）で始めたスプリントブランチは本番に入るまで残す（#3310）。"""
     wt = _land(main_repo, run_git, "sprint/s1")
-    record = {"release_strategy": "selected", "production_branch": "main"}
+    record = {"release_strategy": "release_branch", "production_branch": "main"}
     rec = merged.after_merge(main_repo, [2], FakeHub({2: _pull(2, "sprint/s1", True)}), flow_record=record)
     assert [i["result"] for i in rec.items if i["kind"] == "branch"] == ["kept"] and wt.exists()
     rec = merged.after_merge(main_repo, [2], FakeHub({2: _pull(2, "sprint/s1", True)}))
@@ -89,8 +89,8 @@ def test_sprint_branch_uses_start_record_over_ndf_settings(main_repo: Path, run_
 
 def test_read_flow_record(tmp_path: Path) -> None:
     path = tmp_path / "flow.json"
-    path.write_text(json.dumps({"release_strategy": "selected"}), encoding="utf-8")
-    assert merged.read_flow_record(path) == {"release_strategy": "selected"}
+    path.write_text(json.dumps({"release_strategy": "release_branch"}), encoding="utf-8")
+    assert merged.read_flow_record(path) == {"release_strategy": "release_branch"}
     assert merged.read_flow_record(None) is None
 
 
