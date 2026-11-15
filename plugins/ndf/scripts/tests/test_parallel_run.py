@@ -540,6 +540,94 @@ def test_helper_task_follows_the_last_launch(env, tmp_path):
     )
 
 
+# ---- 現状固定（helper_task と request_confirmed の「確定の後」の判定。I-002 の重複の統合の前に今の振る舞いを固定する） ----
+
+
+def _helper_task_with(monkeypatch, tmp_path, launch, rows=()):
+    """最後の起動 launch と台帳の行 rows を差し替えて helper_task(main, "p1", 1, 1) を呼ぶ。(結果, リリースのディレクトリ)。"""
+    monkeypatch.setattr(ph, "last_launch", lambda main, name: dict(launch))
+    rows = [{**r, "_pos": i} for i, r in enumerate(rows)]
+    monkeypatch.setattr(plg, "read_ledger_rows", lambda main, name, offset=0: plg.Read(rows, 0, [], 0))
+    return ph.helper_task(tmp_path, "p1", 1, 1), prl.release_dir(tmp_path, "p1", 1, 1)
+
+
+def _present_task(d):
+    py = f"python3 {ph.HERE / 'parallel.py'}"
+    return {"n": 1, "k": 1, "dir": str(d), "gate2": f"{py} request-gate2 p1 1 1 --report ", "asked": [], "phase": "present",
+            "pipeline": f"{ph.SUPERVISE} queue {d / 'present.json'} --then {d / 'release.json'} --done {d / 'done.json'} && {ph.SUPERVISE} wait {d / 'done.json'}",
+            "settle": f"{py} settle p1 1 --done {d / 'done.json'}"}  # fmt: skip
+
+
+CONFIRMED_11 = {"action": "confirmed", "n": 1, "k": 1, "seq": 4, "purpose": "x"}
+
+
+def test_helper_task_current_confirmed_for_the_same_release(monkeypatch, tmp_path):
+    got, d = _helper_task_with(monkeypatch, tmp_path, CONFIRMED_11)
+    py = f"python3 {ph.HERE / 'parallel.py'}"
+    done = d / "release-done.json"
+    steps = [prl.record_answer_cmd(d, 1, 1), f"{ph.SUPERVISE} run {d / 'present.json'} --from approve",
+             f"{ph.SUPERVISE} queue {d / 'release.json'} --done {done}", f"{ph.SUPERVISE} wait {done}"]  # fmt: skip
+    assert got == {"n": 1, "k": 1, "dir": str(d), "gate2": f"{py} request-gate2 p1 1 1 --confirmed --done {done}", "asked": [],
+                   "phase": "confirmed", "pipeline": " && ".join(steps), "settle": f"{py} settle p1 1 --done {done}"}  # fmt: skip
+
+
+@pytest.mark.parametrize(
+    "launch",
+    [
+        {},
+        {**CONFIRMED_11, "carried": True},
+        {**CONFIRMED_11, "n": 2},
+        {**CONFIRMED_11, "k": 2},
+        {**CONFIRMED_11, "action": "release"},
+        {"action": "confirmed", "n": "1", "k": 1},
+    ],
+)
+def test_helper_task_current_is_present_unless_the_same_uncarried_confirm(monkeypatch, tmp_path, launch):
+    got, d = _helper_task_with(monkeypatch, tmp_path, launch)
+    assert got == _present_task(d)
+
+
+def test_helper_task_current_present_reads_the_approval_and_asked_after_opened(monkeypatch, tmp_path):
+    """提示の gate2 は承認資料のパスを添える。asked は最初の opened の行から後の、自分の名前の一時レーンの依頼と答え。"""
+    d = prl.release_dir(tmp_path, "p1", 1, 1)
+    d.mkdir(parents=True)
+    (d / "present.json").write_text(json.dumps({"steps": [{"id": "present", "cwd": "/r", "cmd": "x --approval issues/a.md"}]}))
+    rows = [
+        {"kind": "gate2", "id": "old", "msg": {"lane": "p1-rel1"}, "at": "t0"},
+        {"kind": "opened", "id": "o"},
+        {"kind": "gate2", "id": "g", "msg": {"lane": "p1-rel1"}, "at": "t1"},
+        {"kind": "ask", "id": "a", "msg": {"lane": "p1-rel2", "source": "s"}, "at": "t2"},
+        {"kind": "ask", "id": "b", "msg": {"lane": "p1-rel1", "source": "s", "target": "t"}, "at": "t3"},
+        {"kind": "answer", "id": "g", "msg": {"result": "answered", "choice": ["c"]}},
+    ]
+    got, _ = _helper_task_with(monkeypatch, tmp_path, {}, rows)
+    assert got["gate2"].endswith("request-gate2 p1 1 1 --report /r/issues/a.md")
+    assert got["asked"] == [
+        {"id": "g", "kind": "gate2", "source": None, "target": None, "at": "t1", "answer": {"result": "answered", "choice": ["c"]}},
+        {"id": "b", "kind": "ask", "source": "s", "target": "t", "at": "t3"},
+    ]
+    got, _ = _helper_task_with(monkeypatch, tmp_path, CONFIRMED_11, rows)
+    assert got["gate2"].endswith("--confirmed --done " + str(d / "release-done.json")) and len(got["asked"]) == 2
+
+
+@pytest.mark.parametrize(
+    "launch",
+    [{}, {**CONFIRMED_11, "carried": True}, {**CONFIRMED_11, "n": 2}, {**CONFIRMED_11, "k": 2}, {**CONFIRMED_11, "action": "release"}],
+)
+def test_request_confirmed_current_refuses_unless_the_same_uncarried_confirm(monkeypatch, tmp_path, launch):
+    monkeypatch.setattr(pgate, "last_launch", lambda main, name: dict(launch))
+    with pytest.raises(pgate.NotConfirmed, match="最後の起動が確定でない"):
+        pgate.request_confirmed(tmp_path, "p1", 1, 1, str(_gate_done(tmp_path)))
+
+
+def test_request_confirmed_current_refuses_a_done_without_a_gate(monkeypatch, tmp_path):
+    monkeypatch.setattr(pgate, "last_launch", lambda main, name: dict(CONFIRMED_11))
+    done = tmp_path / "ok-done.json"
+    done.write_text(json.dumps({"items": [{"result": "完了"}]}))
+    with pytest.raises(pgate.NotConfirmed, match="承認ゲートで止まっていない"):
+        pgate.request_confirmed(tmp_path, "p1", 1, 1, str(done))
+
+
 # ---- #3597: 確定の後の承認ゲート（受け入れ条件 1〜4・決定 2） ----
 
 
