@@ -146,7 +146,7 @@ plugins/ndf-next/
 | --- | --- | --- |
 | `adapters/markdown.py` | モジュール | 新設: `Table`（型）・`tables` |
 | `progress/epic/foundation_decide.py` | モジュール | 新設: `Foundation`・`Section`・`ContractRow`・`DoneRow`・`Finding`（型）・`parse`・`shape_errors`・`unknown_done`・`ci_files`・`ci_check_missing`・`changed_sections`・`places_of`・`template`・`parse_verify`・`parse_check` |
-| `progress/epic/foundation.py` | モジュール | 新設: `FoundationError`・`FetchFailed`・`WorkdirLeft`（例外。後の 2 つは `FoundationError` の子）・`spec`・`read_text`・`read_file`・`issues_on_github`・`base_ref`・`fetch_base`・`read_at`・`read_paths_at`・`read_blob`・`checkout`・`left`・`marked_files` |
+| `progress/epic/foundation.py` | モジュール | 新設: `FoundationError`・`FetchFailed`・`WorkdirLeft`（例外。後の 2 つは `FoundationError` の子）・`spec`・`read_text`・`read_file`・`issues_on_github`・`base_ref`・`fetch_base`・`read_at`・`read_paths_at`・`read_blob`・`checkout`・`left`・`drop_stale`・`marked_files` |
 | `progress/epic/verify.py` | モジュール | 新設: `DoneVerdict`（型）・`verify_rows`・`verify_one`・`load_doc`・`done_verdicts`・`run_command` |
 | `progress/epic/cli.py` | モジュール | 新設: `parser`・`main`・`_cmd_init`・`_cmd_check` |
 | `cli.py` | モジュール | 変更: 表 `COMMANDS` に 1 行（関数は変えない） |
@@ -186,8 +186,9 @@ plugins/ndf-next/
 | `foundation.read_at` | `progress/epic/foundation.py` | 新設 | `read_at(root: Path, commit: str, path: str) -> tuple[Foundation, str] \| None` | コミットにあるアーキテクチャ設計書と、その blob の識別子を返す | `commit` は `fetch_base` の結果か、記録した `done_checked` の `commit` | `commit` にファイルが無ければ None。識別子は `git rev-parse <commit>:<path>` の値 | git を読む（`rev-parse`・`cat-file`） |
 | `foundation.read_paths_at` | `progress/epic/foundation.py` | 新設 | `read_paths_at(root: Path, commit: str, paths: Sequence[str]) -> dict[str, str \| None]` | コミットにある複数のファイルの中身を返す（CI の定義の確かめに使う） | 無し | コミットに無いファイルと UTF-8 で読めないファイルの値は None | git を読む（`cat-file`） |
 | `foundation.read_blob` | `progress/epic/foundation.py` | 新設 | `read_blob(root: Path, blob: str) -> Foundation` | blob の識別子から過去のリビジョンのアーキテクチャ設計書を読む（変更通知の比較元と、`status` の項目の文） | 無し | 読めなければ `FoundationError` | git を読む（`cat-file`） |
-| `foundation.checkout` | `progress/epic/foundation.py` | 新設 | `checkout(root: Path, plan_id: str, commit: str) -> ContextManager[Path]` | 判定のコミットを判定の作業ディレクトリへ切り出し、ブロックを抜けたら消す | 無し | 配置先は `ndf.core.converge.place.work_root(<git>, "epic-<計画の ID>")`。配置先がディレクトリとして残っていれば作らずに `WorkdirLeft`（配置先を持つ）を出す。ディレクトリが消えて git の登録だけが残る配置先は、呼ぶ前に `gather` が `--force` を付けない `git worktree prune` で消しているため、`worktree add` は断られない。抜けるときは `--force` を付けない `worktree remove` で消し、消せなければ配置先を残して呼び手へ返す（`gather` が `TickInput.workdir_left` に入れる）。消せた後は配置先が無く、`git worktree list` にも残らない | git を書く（`worktree add --detach`・`worktree remove`（`--force` を付けない）・`worktree prune`）・ファイルを書く |
-| `foundation.left` | `progress/epic/foundation.py` | 新設 | `left(root: Path, plan_id: str) -> str \| None` | 判定の作業ディレクトリの配置先が残っているかを返す | `gather` が先に `--force` を付けない `git worktree prune` を打っている | 配置先（`checkout` と同じ式）がディレクトリとして在るときだけ配置先、無ければ None。`git worktree list` は見ない（人が `rm -rf` で消した後の登録だけの配置先を残っていると返さないため）。消さない | ファイルを読む |
+| `foundation.checkout` | `progress/epic/foundation.py` | 新設 | `checkout(root: Path, plan_id: str, commit: str) -> ContextManager[Path]` | 判定のコミットを判定の作業ディレクトリへ切り出し、ブロックを抜けたら消す | 無し | 配置先は `ndf.core.converge.place.work_root(<git>, "epic-<計画の ID>")`。配置先がディレクトリとして残っていれば作らずに `WorkdirLeft`（配置先を持つ）を出す。ディレクトリが消えて git の登録だけが残る配置先は、呼ぶ前に `gather` が `foundation.drop_stale` で配置先の登録だけを消しているため、`worktree add` は断られない。抜けるときは `--force` を付けない `worktree remove` で消し、消せなければ配置先を残して呼び手へ返す（`gather` が `TickInput.workdir_left` に入れる）。消せた後は配置先が無く、`git worktree list` にも残らない | git を書く（`worktree add --detach`・`worktree remove`（`--force` を付けない））・ファイルを書く |
+| `foundation.left` | `progress/epic/foundation.py` | 新設 | `left(root: Path, plan_id: str) -> str \| None` | 判定の作業ディレクトリの配置先が残っているかを返す | `gather` が先に `foundation.drop_stale` を呼んでいる | 配置先（`checkout` と同じ式）がディレクトリとして在るときだけ配置先、無ければ None。`git worktree list` は見ない（人が `rm -rf` で消した後の登録だけの配置先を残っていると返さないため）。消さない | ファイルを読む |
+| `foundation.drop_stale` | `progress/epic/foundation.py` | 新設 | `drop_stale(root: Path, plan_id: str) -> bool` | ディレクトリが消えて git の登録だけが残った判定の作業ディレクトリの登録を、その配置先の 1 件だけ消す | 無し | 配置先は `checkout` と同じ式。`git worktree list --porcelain` を読み、`worktree` の行が配置先（`resolve()` した絶対パス）と一致する登録だけを見る。その登録に `prunable` で始まる行があり `locked` で始まる行が無いときだけ、`--force` を付けない `git worktree remove <配置先>` を打ち、真を返す。一致する登録が無い・ディレクトリが在る・`locked` の行がある（人が掛けた lock）ときは何もせず偽。ほかの登録は読み飛ばし、消さない（利用者が作った作業ディレクトリの管理情報を残す）。`git worktree prune` は打たない（配置先に絞れず、リポジトリの全ての登録が対象になるため） | git を書く（`worktree remove`（`--force` を付けない））・git を読む（`worktree list --porcelain`） |
 | `foundation.marked_files` | `progress/epic/foundation.py` | 新設 | `marked_files(root: Path) -> list[str]` | 追跡している Markdown のうち、先頭の行がマーカーのものを返す | 無し | パスは `root` からの相対で、辞書順 | git を読む（`ls-files`）・ファイルを読む |
 | `verify.verify_rows` | `progress/epic/verify.py` | 新設 | `verify_rows(root: Path, f: Foundation, timeout: float) -> list[Finding]` | 検証方法を持つコントラクトの行をすべて検証し、食い違いを指摘にする | `f` に `shape` の指摘が無い | 指摘は `contract-mismatch`。種類 `none` の行は検証しない | ファイルを読む・外部コマンド（`generated:`・`command:`） |
 | `verify.verify_one` | `progress/epic/verify.py` | 新設 | `verify_one(root: Path, row: ContractRow, timeout: float) -> str \| None` | コントラクトの行 1 つを検証し、食い違いの文を返す | `row.verify` が None でない | 食い違いが無ければ None。判定は「処理の手順」の検証方法の表のとおり | ファイルを読む・外部コマンド（`generated:`・`command:`） |
@@ -247,11 +248,11 @@ plugins/ndf-next/
 | `foundation.read_at` | git が読めない | リポジトリでない・壊れた参照 | `GitError` | 呼び出し元へ返す（`FoundationError`） | `config_broken`・終了コード 2。Durable Workflow は失敗の回（`cause` は「アーキテクチャ設計書の読み取り」） | 後始末は無い |
 | `foundation.read_paths_at` | 名指した CI の定義がコミットに無い | パスの誤り・CI の定義がまだマージされていない | `git cat-file` の失敗 | そのパスの値を None にして続ける | 呼び手の `ci_check_missing` が指摘 `missing-ci-check`（詳細にパス）にする・終了コード 1 | 後始末は無い。直して再実行できる |
 | `foundation.read_paths_at` | git が読めない | リポジトリでない・壊れた参照 | `GitError` | 呼び出し元へ返す（`FoundationError`） | `config_broken`・終了コード 2 | 後始末は無い |
-| `foundation.checkout` | 判定の作業ディレクトリを作れない | ディスク・権限 | `git worktree add` の失敗 | 呼び出し元へ返す（`FoundationError`） | Durable Workflow はその回を失敗の回（`cause` は「判定の作業ディレクトリの作成」）にし、`run.log` に 1 行。前の判定は `done_checked` の今の値として残る | 作りかけの配置先は `--force` を付けない `worktree remove` と `worktree prune` で消す。消せなければ次の行と同じ扱い。次の回で作り直す |
+| `foundation.checkout` | 判定の作業ディレクトリを作れない | ディスク・権限 | `git worktree add` の失敗 | 呼び出し元へ返す（`FoundationError`） | Durable Workflow はその回を失敗の回（`cause` は「判定の作業ディレクトリの作成」）にし、`run.log` に 1 行。前の判定は `done_checked` の今の値として残る | 作りかけの配置先は `--force` を付けない `worktree remove` で消す。ディレクトリが消えて登録だけが残れば、次の回の `drop_stale` が消す。消せなければ次の行と同じ扱い。次の回で作り直す |
 | `foundation.checkout` | 前の回の判定の作業ディレクトリが残っていて作れない | 人がまだ中身を確かめて消していない | 配置先の存在 | 呼び出し元へ返す（`WorkdirLeft`）。強制では消さない（共通原則 C4） | 判定のコミットが `command_settled` と違う回は失敗の回（`cause` は「判定の作業ディレクトリの作成」）で、`workdir_left` に配置先が入る。`workdir-left:<workdir_streak_seq>` のリクエストが開いているため `judge-failed` は開かない（設計文書の「計画の終了判定」） | 人が中身を確かめて消した後の回に作って判定する |
 | `foundation.checkout` | 判定の作業ディレクトリを消せない | `command:` がファイルを書き換えたか残した・中のプロセスがファイルを開いている・権限 | `--force` を付けない `git worktree remove` の失敗 | 強制では消さない（共通原則 C4）。配置先を残し、`TickInput.workdir_left` に入れる | その回の判定を有効とし、`ok` を偽にしない。`command:` の行がすべて `met: true` なら、そのコミットを `command_settled` に書く。`write_tick` が `workdir-left:<workdir_streak_seq>` のリクエストを開く（理由に配置先と「`--force` を付けない削除が断られた」）。作業ディレクトリが残る間は `epic_blockers` に `workdir-left` が出て計画は完了にならない（I14）。`run.log` に 1 行 | 判定のコミットが `command_settled` と同じ回は、`command:` を実行せずに記録した判定を使い、作業ディレクトリを作らず、`foundation.left` で残りを確かめる。人が消した後の回は `workdir_left` を空にした `epic_judged` が書かれ、リクエストが閉じて完了できる。その後の回で作業ディレクトリがまた残ると、`workdir_streak_seq` が新しい番号になり、新しい `epic_key` のリクエストが開く。`command_settled` はワークフロー状態のイベントなので、再開しても同じコミットでは実行し直さない。配置先は計画ごとに 1 つで、増え続けない |
 | `foundation.read_blob` | 比較元の blob が無い | 記録した識別子のオブジェクトが gc された | `git cat-file` の失敗 | 呼び出し元へ返す（`FoundationError`） | Durable Workflow は比較元を空のアーキテクチャ設計書として扱い、すべてのセクションを違うセクションにして通知する（`run.log` に理由）。`status` は項目の文を null にする | 変更通知を 1 件書けば、比較元はその `to_rev` に進む |
-| `plan_epic.gather` | 登録だけが残った判定の作業ディレクトリを消せない | git でない・`git worktree prune` の失敗 | `GitError` | `gather` の中で受ける | `gather` が失敗の回（`cause` は「判定の作業ディレクトリの作成」）にし、`workdir_left` は最後の `epic_judged` の値を引き継ぐ（開いている `workdir-left:` を閉じないため）。`run.log` に 1 行 | `prune` はディレクトリの消えた登録だけを消すため、戻せない削除に当たらない（共通原則 C4）。次の回で打ち直す |
+| `plan_epic.gather` | 登録だけが残った判定の作業ディレクトリを消せない | git でない・`git worktree list --porcelain` か `git worktree remove` の失敗 | `GitError` | `gather` の中で受ける | `gather` が失敗の回（`cause` は「判定の作業ディレクトリの作成」）にし、`workdir_left` は最後の `epic_judged` の値を引き継ぐ（開いている `workdir-left:` を閉じないため）。`run.log` に 1 行 | 消すのは、この計画の配置先の登録で、ディレクトリが消えて `prunable` が付き、lock の無いものだけである。利用者が作ったほかの作業ディレクトリの登録（未接続のドライブの上・移動したもの）には触れない（Value 6・共通原則 C3・C4）。次の回で打ち直す |
 | `foundation.marked_files` | 追跡しているファイルを列挙できない | git でない | `GitError` | 呼び出し元へ返す | `config_broken`・終了コード 2 | 後始末は無い |
 | `verify.verify_rows` | 検証の対象が無い | `schema:`・`exists:` の glob に当たるファイルが 0 件 | glob の結果 | 指摘にする | 指摘 `contract-mismatch`（詳細「検証の対象が無い: <glob>」）・終了コード 1 | 後始末は無い |
 | `verify.verify_one` | スキーマか検証の対象が読めない | 正本のパスの誤り・JSON か YAML の誤り・JSON Schema でない | `load_doc` の `ValueError`・jsonschema の `SchemaError` | 指摘にする | 指摘 `contract-mismatch`（詳細に正本のパスと理由。JSON Schema でない正本は `command:` で書くこと）・終了コード 1 | 後始末は無い |
@@ -305,7 +306,7 @@ plugins/ndf-next/
 
 | 順 | 読むもの | 失敗したとき |
 | --- | --- | --- |
-| 1 | `rules.rows_mark`。続けて `--force` を付けない `git worktree prune` を打ち、`foundation.left`（残った判定の作業ディレクトリ） | `prune` の失敗は `cause` を「判定の作業ディレクトリの作成」にし、`workdir_left` は最後の `epic_judged` の値を引き継ぐ。止めるのは 3 まで読んだ後で、変更通知は届ける |
+| 1 | `rules.rows_mark`。続けて `foundation.drop_stale`（配置先の登録だけの後始末）、`foundation.left`（残った判定の作業ディレクトリ） | `drop_stale` の失敗は `cause` を「判定の作業ディレクトリの作成」にし、`workdir_left` は最後の `epic_judged` の値を引き継ぐ。止めるのは 3 まで読んだ後で、変更通知は届ける |
 | 2 | `base_ref`・`fetch_base` で判定のコミット | `cause` が「ベースブランチの取得」で止める |
 | 3 | `read_at` で判定のコミットのアーキテクチャ設計書と blob の識別子。比較元（「比較元のリビジョン」）を `read_blob` で読む | 無ければ `cause` が「アーキテクチャ設計書の読み取り」で止める。比較元が読めなければ空のアーキテクチャ設計書を比較元にして続ける（異常系の表の `read_blob` の行）。判定のコミットのアーキテクチャ設計書を読めたら `TickInput.foundation_read` を真にする |
 | 4 | 計画の番号の行を引き、無い番号を `unknown` に並べる | 止めない |
@@ -481,8 +482,9 @@ GitHub の読み取り（`states`）と DB の書き込みを同じトランザ�
 | `foundation.read_at` | `ndf.domains.records.mvv.decl_at`（`git show <ref>:<path>`） | `sed -n 66,76p src/ndf/domains/records/mvv.py` | 同じ形を `Git.run` で書く。`mvv` は層が上で読めない |
 | `foundation.read_paths_at` | `Git.run` | `grep -nE 'def ' src/ndf/adapters/git.py` | 使う（`run("cat-file", "-p", "<コミット>:<パス>")` をパスごとに） |
 | `foundation.read_blob` | `Git.run` | 同上 | 使う（`run("cat-file", "-p", <識別子>)`） |
-| `foundation.checkout` | `ndf.domains.crossrefactor.workspace._add`（`worktree add --detach`）、`ndf.core.converge.place.work_root` | `sed -n 34,37p src/ndf/core/converge/place.py`・`sed -n 63,69p src/ndf/domains/crossrefactor/workspace.py` | `work_root` を配置先に使う。`crossrefactor.workspace` は層が上で読めず、lock を掛けて残す前提なので使わない。`Git.run` で `worktree add --detach`・`worktree remove`・`worktree prune` を打つ。`--force` は付けない（共通原則 C4） |
-| `foundation.left` | `ndf.core.converge.place.work_root`、`ndf.adapters.git.Git.run` | `sed -n 34,37p src/ndf/core/converge/place.py`・`grep -n 'def run' src/ndf/adapters/git.py` | 使う。配置先は `checkout` と同じ式で求め、ディレクトリとして在るかだけを見る。`git worktree list` と突き合わせない（登録だけの配置先は `gather` が先に `Git.run("worktree", "prune")` で消す）。配置先の計算は `checkout` と 1 か所で共有する |
+| `foundation.checkout` | `ndf.domains.crossrefactor.workspace._add`（`worktree add --detach`）、`ndf.core.converge.place.work_root` | `sed -n 34,37p src/ndf/core/converge/place.py`・`sed -n 63,69p src/ndf/domains/crossrefactor/workspace.py` | `work_root` を配置先に使う。`crossrefactor.workspace` は層が上で読めず、lock を掛けて残す前提なので使わない。`Git.run` で `worktree add --detach`・`worktree remove` を打つ。`--force` は付けない（共通原則 C4） |
+| `foundation.left` | `ndf.core.converge.place.work_root`、`ndf.adapters.git.Git.run` | `sed -n 34,37p src/ndf/core/converge/place.py`・`grep -n 'def run' src/ndf/adapters/git.py` | 使う。配置先は `checkout` と同じ式で求め、ディレクトリとして在るかだけを見る。`git worktree list` と突き合わせない（登録だけの配置先は `gather` が先に `drop_stale` で消す）。配置先の計算は `checkout` と 1 か所で共有する |
+| `foundation.drop_stale` | `ndf.adapters.git.Git.run`、`ndf.core.converge.place.work_root` | 下の「登録の後始末の実測」・[git-worktree](https://git-scm.com/docs/git-worktree) の `prune`・`remove`・`lock`・`list` の節（2026-11-15） | 使う（`run("worktree", "list", "--porcelain")` と `run("worktree", "remove", <配置先>)`）。`git worktree prune` は配置先を指定できず、ディレクトリの見えない登録を全て消すため使わない |
 | `foundation.marked_files` | `ndf.adapters.git.Git.run` | 同上 | 使う（`run("ls-files", "*.md")`） |
 | `verify.verify_rows` | jsonschema（依存済み）、`ndf.contracts.schema_errors` | `grep -rn 'def schema_errors' src/ndf/contracts` | `schema:` は jsonschema を直に使う（利用者のスキーマで、NDF のコントラクトの配置先に無い） |
 | `verify.verify_one` | 同上 | 同上 | 同上 |
@@ -510,6 +512,36 @@ GitHub の読み取り（`states`）と DB の書き込みを同じトランザ�
 | `rules.notice_targets` | `rules.touch_hit`・`rules.lane_state` | `sed -n 87,110p src/ndf/progress/lane/rules.py` | 使う |
 | `types.epic_key` | `Request.body` | `sed -n 35,45p src/ndf/progress/lane/types.py` | 中身の辞書から読むだけで、部品は要らない |
 
+**登録の後始末の実測。** `drop_stale` の形は、git 2.53.0 で次を実行して決めた（2026-11-15）。配置先 `epic-p1` と利用者の作業ディレクトリ `user-wt` を作り、どちらのディレクトリも `rm -rf` で消した後の結果である。
+
+```text
+$ git worktree add -q --detach ../epic-p1; git worktree add -q --detach ../user-wt
+$ rm -rf ../epic-p1 ../user-wt
+$ git worktree list --porcelain
+worktree /tmp/tmp.0xGpEzziET/epic-p1
+HEAD dd3f0c40d7e9dc46c36c7becc01f7ee531bdc1d5
+detached
+prunable gitdir file points to non-existent location
+（メインディレクトリの行は略す。user-wt の 4 行も同じ形で出る）
+$ git worktree remove ../epic-p1; echo "exit=$?"
+exit=0
+$ ls .git/worktrees
+user-wt
+$ git worktree add -q --detach ../epic-p2; git worktree lock ../epic-p2; rm -rf ../epic-p2
+$ git worktree remove ../epic-p2; echo "exit=$?"
+fatal: cannot remove a locked working tree;
+use 'remove -f -f' to override or unlock first
+exit=128
+$ git worktree add -q --detach ../epic-p1   # 登録だけが残った配置先へ作り直すと
+fatal: '../epic-p1' is a missing but already registered worktree;
+use 'add -f' to override, or 'prune' or 'remove' to clear
+```
+
+- `--force` を付けない `git worktree remove` は、ディレクトリの消えた登録を 1 件だけ消し（終了コード 0）、利用者の `user-wt` の登録は残る
+- lock の掛かった登録は消さずに断る（終了コード 128）。`drop_stale` は `locked` の行を先に見て、この呼び出しをしない
+- 登録だけが残ると `worktree add` が断られるため、`checkout` の前に配置先の登録を消す手順が要る
+- `git worktree prune` は、公式の説明（ https://git-scm.com/docs/git-worktree の `prune`）のとおり、ディレクトリの見えない全ての登録の管理情報を消す。配置先を指定する引数は無い。そのため使わない
+
 ## 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
@@ -534,7 +566,8 @@ GitHub の読み取り（`states`）と DB の書き込みを同じトランザ�
 | `foundation.read_at` | コミットのアーキテクチャ設計書と識別子を返す | worktree にだけあるアーキテクチャ設計書で None（I9） | 参照が無いとき `FoundationError` |
 | `foundation.read_paths_at` | 複数のファイルを読む | コミットに無いファイルで None | git でないとき `FoundationError` |
 | `foundation.checkout` | 判定のコミットの作業ディレクトリを渡し、抜けた後に配置先も `git worktree list` の行も残らない | — | ブロックの中で例外が出ても消す。追跡外のファイルが残ると `--force` を付けずに断られ、配置先を残して返す。前の回の残りがあれば作らずに `WorkdirLeft` |
-| `foundation.left` | ディレクトリとして残った配置先を返す | ディレクトリを `rm -rf` で消し、git の登録だけが残る配置先は、`gather` の `git worktree prune` の後に None を返し、続く `checkout` の `worktree add` が通る | 配置先がディレクトリでないとき None |
+| `foundation.left` | ディレクトリとして残った配置先を返す | ディレクトリを `rm -rf` で消し、git の登録だけが残る配置先は、`gather` の `drop_stale` の後に None を返し、続く `checkout` の `worktree add` が通る | 配置先がディレクトリでないとき None |
+| `foundation.drop_stale` | ディレクトリを `rm -rf` で消した配置先の登録を消して真を返し、`git worktree list --porcelain` に配置先の行が残らない | 配置先の登録が無い・ディレクトリが在るとき何もせず偽 | 同じリポジトリに、ディレクトリを消した利用者の作業ディレクトリ（lock 無し）と lock を掛けて消した配置先を置くと、利用者の作業ディレクトリの登録（`.git/worktrees/<名前>` の HEAD・index）は残り、lock の配置先も消さずに偽を返す |
 | `foundation.read_blob` | 識別子から読む | — | 無い識別子で `FoundationError` |
 | `foundation.marked_files` | マーカーを持つ追跡中のファイルだけを返す | 2 行目のマーカーは数えない | git でないとき `FoundationError` |
 | `verify.verify_rows` | 食い違いの無い行で 0 件 | `—` の行は検証しない | 4 種類それぞれの食い違いで `contract-mismatch`（受け入れ条件 3） |
