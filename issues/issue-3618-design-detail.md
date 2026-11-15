@@ -1,4 +1,4 @@
-# #3618 の詳細設計: 設定の受け口を減らす設計を設計承認の前に見つける
+# #3618 の詳細設計: 代表のリポジトリの種類を扱えなくする設計を設計承認の前に見つける
 
 設計文書 [issue-3618-design.md](issue-3618-design.md) の「構成要素」と「入出力の契約」を、ファイルと関数の粒度へ下ろした文書である。決定の番号（決定 1〜12）は [issue-3618-design-decisions.md](issue-3618-design-decisions.md) を指す。不変条件の番号（I1〜I6）は設計文書の「ドメインモデル」を指す。
 
@@ -76,7 +76,7 @@ plugins/ndf-next/
 | `.ndf/design.json` | 新設 | ai-plugins の代表のリポジトリの 3 種・表を求めるパス・番号 P2 | `plugins/ndf/skills/design/schemas/design.schema.json` |
 | `.ndf/mvv.md` | 変更 | MVV 版 8 の本文（改訂の文 M1・M2） | 無し |
 | `.ndf/mvv.json` | 変更 | 版 8 の承認の記録（`project-mvv.py approve` が書く） | 無し |
-| `docs/glossary/glossary.json` | 変更 | 4 語（受け口・代表のリポジトリ・代表のリポジトリの設定・このリポジトリだけの事情）は設計の工程で足してある。実装で語の意味が実装と食い違ったときだけ直す | 無し |
+| `docs/glossary/glossary.json` | 変更 | 用語集の語（汎用性の後退・サポートする選択肢・代表のリポジトリの種類・代表のリポジトリ・代表のリポジトリの設定・このリポジトリだけの事情）は設計の工程で反映してある。実装で語の意味が実装と食い違ったときだけ直す | 無し |
 | `docs/glossary.md` | 変更 | `glossary.json` を直したときだけ `glossary.py render` で作り直す | `docs/glossary/glossary.json` |
 
 ## クラスと関数の構造
