@@ -173,12 +173,12 @@
 | 工程の進行の読み出し（`ndf progress next`・`wait`、変更） | 実行中のレーンのスプリントなら、そのレーンの未読の土台の知らせを結果の `notices` に載せ、レーンの進行表に `notice_read` を書く |
 | 土台の参照（`design/references/epic-foundation.md`、新設） | 土台の書き方・必須の節・規模の目安。#1142 を例にする。エピックのエントリポイントに入ったときだけ読む |
 | 土台の契約（`contracts/epic/foundation.schema.json`、新設） | 必須の節と該当時の節の名前、契約の行と完了条件の行の列の形。テンプレート・検査・参照の唯一の正本 |
-| 土台の読み取り（`ndf.epic.foundation`、新設） | 土台の Markdown を読み、節・契約の行・完了条件の行を値として返す。純粋な処理で、終了コードを持たない |
+| 土台の読み取り（`ndf.progress.epic.foundation` と判断の `foundation_decide`、新設） | 土台の Markdown を読み、節・契約の行・完了条件の行を値として返す。判断の側は純粋な処理で、終了コードを持たない。並列の計画（`ndf.progress`）から読むため、層は `ndf.progress` に置く |
 | 土台の副命令（`ndf epic init`・`ndf epic check`、新設） | テンプレートの生成と、節・表の形・照合の検査。結果 JSON と終了コードを返す |
-| 照合（`ndf.epic.verify`、新設） | 契約の行ごとの照合の指定を実行し、食い違いを返す |
+| 照合（`ndf.progress.epic.verify`、新設） | 契約の行ごとの照合の指定を実行し、食い違いを返す |
 | 並列の計画の宣言（`parallel-plan.schema.json`、変更） | 任意の欄 `epic`（名前・土台のパス・完了条件の番号）を足す |
 | 計画の作成と起動（`ndf lanes init`・`start`、変更） | 欄があれば、ベースブランチの土台を読み、節と表の形を検査し、計画の完了条件の番号を土台と照らす。`start` は起動の時点の土台の版を `plan_started` の値に残す |
-| 計画の耐久ワークフロー（`ndf.progress.plan.run`、変更） | 完了条件の判定を記録し、完了の条件に完了条件を足す。完了条件待ちの依頼を開き、満たしたら閉じる。ベースブランチの土台の変更を見つけて知らせを書く |
+| 計画の耐久ワークフロー（`ndf.progress.plan.run`・`run_decide`、変更。エピックの手は `ndf.progress.plan.epic` に新設） | 完了条件の判定を記録し、完了の条件に完了条件を足す。完了条件待ちの依頼を開き、満たしたら閉じる。ベースブランチの土台の変更を見つけて知らせを書く |
 | 計画の規則（`ndf.progress.lane.rules`、変更） | 完了の判定（I16）に完了条件を足す。知らせの宛先を触る場所の重なり（既存の `touch_hit`）で選ぶ |
 | 計画の状態（`ndf lanes status`、変更） | 完了条件ごとの満たした・残りと、満たした件数 / 全件数を出す |
 | レーンの進行表の読み出し（`ndf lanes row start`・`resumed`、変更） | 未読の土台の知らせを出力に載せ、レーンの進行表に読んだ印を書く |
@@ -516,9 +516,9 @@ Factory の課題は起票しない（前提 7）。以下は Factory の設計�
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #3600 | 実装する | — | `plugins/ndf-next/skills/development-workflow/SKILL.md`、`plugins/ndf-next/skills/design/SKILL.md`、`plugins/ndf-next/skills/design/references/epic-foundation.md`、`plugins/ndf-next/skills/issue-plan-strategy/references/parallel-plan.md`、`plugins/ndf-next/contracts/epic/foundation.schema.json`、`plugins/ndf-next/contracts/workflow/parallel-plan.schema.json`、`plugins/ndf-next/contracts/workflow/progress.json`、`plugins/ndf-next/contracts/limits.json`、`plugins/ndf-next/src/ndf/epic/__init__.py`、`plugins/ndf-next/src/ndf/epic/foundation.py`、`plugins/ndf-next/src/ndf/epic/verify.py`、`plugins/ndf-next/src/ndf/epic/cli.py`、`plugins/ndf-next/src/ndf/cli.py`、`plugins/ndf-next/src/ndf/progress/plan/__init__.py`、`plugins/ndf-next/src/ndf/progress/plan/cli.py`、`plugins/ndf-next/src/ndf/progress/plan/run.py`、`plugins/ndf-next/src/ndf/progress/plan/run_decide.py`、`plugins/ndf-next/src/ndf/progress/lane/rules.py`、`plugins/ndf-next/src/ndf/progress/lane/types.py`、`plugins/ndf-next/src/ndf/progress/command.py`、`plugins/ndf-next/src/ndf/progress/run.py`、`plugins/ndf-next/contracts/workflow/context.schema.json`、`plugins/ndf-next/docs/contracts/commands.md`、`.github/workflows/ndf-next-checks.yml`、`docs/glossary/glossary.json`、`docs/glossary.md`、`plugins/ndf-next/tests/test_epic_foundation.py`、`plugins/ndf-next/tests/test_epic_cli.py`、`plugins/ndf-next/tests/test_plan_epic.py` |
+| #3600 | 実装する | — | `plugins/ndf-next/skills/development-workflow/SKILL.md`、`plugins/ndf-next/skills/design/SKILL.md`、`plugins/ndf-next/skills/design/references/epic-foundation.md`、`plugins/ndf-next/skills/issue-plan-strategy/references/parallel-plan.md`、`plugins/ndf-next/contracts/epic/foundation.schema.json`、`plugins/ndf-next/contracts/workflow/parallel-plan.schema.json`、`plugins/ndf-next/contracts/workflow/progress.json`、`plugins/ndf-next/contracts/workflow/context.schema.json`、`plugins/ndf-next/contracts/limits.json`、`plugins/ndf-next/src/ndf/cli.py`、`plugins/ndf-next/src/ndf/adapters/markdown.py`、`plugins/ndf-next/src/ndf/progress/epic/__init__.py`、`plugins/ndf-next/src/ndf/progress/epic/foundation.py`、`plugins/ndf-next/src/ndf/progress/epic/foundation_decide.py`、`plugins/ndf-next/src/ndf/progress/epic/verify.py`、`plugins/ndf-next/src/ndf/progress/epic/cli.py`、`plugins/ndf-next/src/ndf/progress/plan/__init__.py`、`plugins/ndf-next/src/ndf/progress/plan/cli.py`、`plugins/ndf-next/src/ndf/progress/plan/epic.py`、`plugins/ndf-next/src/ndf/progress/plan/run.py`、`plugins/ndf-next/src/ndf/progress/plan/run_decide.py`、`plugins/ndf-next/src/ndf/progress/lane/__init__.py`、`plugins/ndf-next/src/ndf/progress/lane/fold.py`、`plugins/ndf-next/src/ndf/progress/lane/rules.py`、`plugins/ndf-next/src/ndf/progress/lane/types.py`、`plugins/ndf-next/src/ndf/progress/command.py`、`plugins/ndf-next/src/ndf/progress/run.py`、`plugins/ndf-next/docs/contracts/commands.md`、`.github/workflows/ndf-next-checks.yml`、`docs/glossary/glossary.json`、`docs/glossary.md`、`plugins/ndf-next/tests/adapters/test_markdown.py`、`plugins/ndf-next/tests/progress/test_epic_foundation.py`、`plugins/ndf-next/tests/progress/test_epic_verify.py`、`plugins/ndf-next/tests/progress/test_epic_cli.py`、`plugins/ndf-next/tests/progress/test_plan_epic.py`、`plugins/ndf-next/tests/progress/test_command.py`、`plugins/ndf-next/tests/progress/test_run.py` |
 
-触るファイルは 11.0 の構造（2026-11-15 の `plugins/ndf-next/`）に対する見込みである。ファイルと関数の粒度は詳細設計（`issue-3600-design-detail.md`）が決め、11.0（#1142）が閉じた後の構造で書き直す。
+触るファイルは 11.0 の構造（2026-11-15 の `plugins/ndf-next/`）に対するものである。ファイルと関数の粒度は詳細設計（[issue-3600-design-detail.md](issue-3600-design-detail.md) ）が決める。
 
 ## 人へ残す判断
 
@@ -528,8 +528,11 @@ Factory の課題は起票しない（前提 7）。以下は Factory の設計�
 
 | 項目 | 内容 |
 | --- | --- |
-| 11.0 の構造の確定 | 詳細設計のファイル配置・関数の責務は 11.0（#1142）が閉じるまで変わりうる。詳細設計は後のステップで書き、11.x の着手の前に 11.0 の構造へ合わせ直す |
+| 11.0 の構造の確定 | 詳細設計のファイル配置・関数の責務は 2026-11-15 の `plugins/ndf-next/` に対して書いた。11.0（#1142）が閉じるまでに置き場や関数の名前が変わりうる。11.x の着手の前に、詳細設計の「ファイル配置」の表のパスがあるかを確かめ、違えば詳細設計を直す |
 | 規模の判定の効き目 | 本文の 4 行で、3 レーン規模の依頼が実際にエピックへ回るか。実装の PR で `claude -p` の比べ（受け入れ条件 1）を流して分かる |
 | 照合の指定 3 つで足りるか | `exists:`・`schema:`・`generated:` で利用者のリポジトリの契約を覆えるか。11.x の最初のエピックで土台を書いたときに、照合できない契約の行（`—` のまま残る行）の数で分かる |
 | 実行中のレーンへの知らせが届く時点 | 実行中のレーンは次の `ndf progress next`（工程の境）か `wait`（待ち）で知らせを読む。その間に古い土台で作った差分がどれだけ出るかは、11.x のエピックの試走で分かる |
 | Factory の開発計画の画面が事象を読めるか | Factory が計画の進行表の事象を受け取る経路（進捗の受け口）に、計画の事象が今届いているか。Factory の開発計画の設計で分かる |
+| 確かめ方のコマンドが作業ツリーを書き換える | `command:` は主ディレクトリで動く。書き込むコマンドを書かれると、主ディレクトリの作業と食い違う。参照に「読み取りだけのコマンドを書く」と書くが、機械で縛らない |
+| 主ディレクトリがベースブランチに追従しているか | `command:` の結果は主ディレクトリのチェックアウトの版に依る。ベースの版と違う版で判定しうる。`follow_branch` の宣言の無いリポジトリでどれだけずれるかは、11.x の最初のエピックの試走で分かる |
+| 11.0 の関数の名前の変更 | `plan_payload`・`snapshot_of`・`_after_observe` などの既存の関数は、11.0 が閉じるまでに名前や分け方が変わりうる。着手の前に詳細設計の「クラスと関数の構造」の表の名前があるかを確かめる |
