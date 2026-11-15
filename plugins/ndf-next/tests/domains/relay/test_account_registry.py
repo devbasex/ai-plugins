@@ -241,3 +241,67 @@ def test_list_rows_broken_metered_broken_book_and_empty_env(tmp_path):
     rows, _ = reg.list_rows(tmp_path, {"NDF_SUPERVISE_CLAUDE_FALLBACK": ""}, None, [])
     assert rows == []
     assert reg.list_rows(tmp_path / "none", {}, "x", []) == ([], [])
+
+
+STATUS_CLAUDE = """#!/bin/sh
+# claude auth の代わり。status は資格情報があれば環境変数 FAKE_STATUS をそのまま出す
+if [ "$2" = "login" ]; then
+  echo "Open https://claude.ai/oauth/authorize?x=1"
+  read code
+  echo '{"claudeAiOauth": {"accessToken": "t"}}' > "$CLAUDE_CONFIG_DIR/.credentials.json"
+  exit 0
+fi
+if [ "$2" = "status" ]; then
+  [ -f "$CLAUDE_CONFIG_DIR/.credentials.json" ] && printf '%s' "$FAKE_STATUS" || echo '{"loggedIn": false}'
+  exit 0
+fi
+exit 1
+"""
+
+
+@pytest.fixture
+def status_claude(tmp_path, monkeypatch):
+    bin_dir = tmp_path / "sbin"
+    bin_dir.mkdir()
+    exe = bin_dir / "claude"
+    exe.write_text(STATUS_CLAUDE)
+    exe.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}:/usr/bin:/bin")
+    return exe
+
+
+def _add_with_status(store: Path, name: str, status: str):
+    env = dict(os.environ) | {"FAKE_STATUS": status}
+    account_login.add(store, name, None, env)
+    return account_login.add(store, name, "code", env)
+
+
+@pytest.mark.parametrize(
+    "status",
+    ["not json", "[1]", '{"loggedIn": false, "email": "a@example.com"}', '{"loggedIn": true, "email": 1}', '{"loggedIn": true}'],
+)
+def test_add_refuses_when_status_has_no_identity(tmp_path, status_claude, status):
+    """現状固定（I-025）: `claude auth status` から本人を読めなければ登録しない。"""
+    store = tmp_path / "store"
+    with pytest.raises(account_login.LoginError, match="ログインが通らなかった") as exc:
+        _add_with_status(store, "work1", status)
+    assert exc.value.kind == "refused"
+    assert reg.names(store) == [] and not (store / ".pending-work1").exists()
+
+
+def test_add_reads_email_and_org_from_status(tmp_path, status_claude):
+    """現状固定（I-025）: 組織の ID・名前が文字列でなければ空として扱い、組織の分からない登録は同じ組織とみなす。"""
+    store = tmp_path / "store"
+    no_org = _add_with_status(store, "work1", '{"loggedIn": true, "email": "b@example.com", "orgId": 5, "orgName": null}')
+    assert no_org == account_login.Added("work1", needs_code=False, email="b@example.com", org_name=None)
+    row = json.loads((store / "work1" / reg.ACCOUNT_FILE).read_text())
+    assert row["email"] == "b@example.com" and "org_id" not in row and "org_name" not in row
+    with pytest.raises(account_login.LoginError, match="同じメールアドレスと組織で登録済み: work1"):
+        _add_with_status(store, "work2", '{"loggedIn": true, "email": "B@example.com", "orgId": "o2", "orgName": "Org2"}')
+    with_org = _add_with_status(store, "work3", '{"loggedIn": true, "email": "c@example.com", "orgId": "o2", "orgName": "Org2"}')
+    assert (with_org.email, with_org.org_name) == ("c@example.com", "Org2")
+    row = json.loads((store / "work3" / reg.ACCOUNT_FILE).read_text())
+    assert (row["org_id"], row["org_name"]) == ("o2", "Org2")
+    other_org = _add_with_status(store, "work4", '{"loggedIn": true, "email": "c@example.com", "orgId": "o3", "orgName": ""}')
+    assert (other_org.email, other_org.org_name) == ("c@example.com", None)
+    assert reg.names(store) == ["work1", "work3", "work4"]
