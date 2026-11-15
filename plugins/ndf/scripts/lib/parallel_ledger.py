@@ -121,6 +121,11 @@ class Sent(str):
         return got
 
 
+def already_fields(s) -> dict:
+    """送った結果 `s` から出力へ足す値: 同じキーの行が既にあった（`Sent` で書かなかった）なら `already`、ほかは空。"""
+    return {"already": True} if isinstance(s, Sent) and not s.written else {}
+
+
 def _bare(msg) -> Optional[dict]:
     """比べる中身: 送るたびに変わる `at` を除いた `msg`。"""
     return {k: v for k, v in msg.items() if k != "at"} if isinstance(msg, dict) else msg

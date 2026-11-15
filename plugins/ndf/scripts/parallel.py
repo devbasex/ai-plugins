@@ -158,7 +158,7 @@ def sent(fn, *args, **kw):
 
 
 def _request_resent_fields(s: plg.Sent) -> dict:
-    """依頼を送った結果から出力へ足す値。書いたなら空、同じキーで中身が同じ再送なら `already`・`answered`（#3597 の決定 5）。
+    """依頼（release・ask・gate2）を送った結果から出力へ足す値。書いたなら空、同じキーで中身が同じ再送なら `already`・`answered`（#3597 の決定 5）。
     同じキーで中身の違う依頼は送ったと返さず、既にある id と理由を添えて 1（失敗）で終える。終了コード 5 は全体で「CD の結果が失敗」の
     見出しを持つため使わない（`exit_codes.EXIT_LABELS`）。"""
     if s.written:
@@ -175,8 +175,8 @@ def _sent_verb(already, fresh: str = "送った") -> str:
 
 
 def _resent_fields(s) -> dict:
-    """答え・確定・締め・止める指示の行が既にあったか（終了コードは変えない）。"""
-    return {"already": True} if isinstance(s, plg.Sent) and not s.written else {}
+    """答え・確定・締め・止める指示を送った結果から出力へ足す値（`plg.already_fields`）。依頼と違い、中身が違っても終了コードは変えない。"""
+    return plg.already_fields(s)
 
 
 def cmd_run(a) -> None:

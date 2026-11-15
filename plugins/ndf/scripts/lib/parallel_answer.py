@@ -214,6 +214,7 @@ def answer_with_merge(main: Path, name: str, q: dict, result: str, items: list[d
     前に送ったが受け手がまだ外していない答えの依頼を除いたもの（`after_items`）に、`wait` と同じ業務時間外の振り分け
     （`parallel_defer.route`）を通したもの。業務時間外は溜めた `gate1`・`ask` を `after` へ出さず、`deferred` に件数を載せる（#2913）。"""
     import parallel_defer as pdf
+    import parallel_ledger as plg
 
     earlier = sent_answers(main, name, items)
     merge = merge_design(main, q, name) if result == "approved" else None
@@ -221,7 +222,7 @@ def answer_with_merge(main: Path, name: str, q: dict, result: str, items: list[d
     remember_answers(main, name, [*earlier, q])
     tail, extra = merge_note(merge)
     after, kept = pdf.route(main, name, after_items(items, q, earlier), pdf.hours_of(main))
-    return tail, {**extra, **kept, "after": after, **({"already": True} if not getattr(got, "written", True) else {})}
+    return tail, {**extra, **kept, "after": after, **plg.already_fields(got)}
 
 
 def merge_note(merge: dict | None) -> tuple[str, dict]:
