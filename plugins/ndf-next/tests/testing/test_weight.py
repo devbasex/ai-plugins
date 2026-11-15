@@ -122,3 +122,26 @@ RUNNERS = [{"runner": "pytest"}, {"runner": "vitest"}]
 )
 def test_classify_word_list_current_behavior(words, suites, kind):
     assert weight.classify(words, suites) == kind
+
+
+# --- 現状固定テスト（I-010: _targets を段に分ける前に、並列の指定の値と選択肢の値の読み飛ばしを記録する） ---
+
+
+@pytest.mark.parametrize(
+    ("args", "targets"),
+    [
+        (["-n", "4", "."], ["."]),
+        (["--tb", "-n", "4", "short"], []),  # 並列の指定とその値は、直前の選択肢の値の待ちを切らない
+        (["-n"], []),
+        (["-n", "-n", "x"], ["x"]),  # 並列の指定の直後の語は、並列の指定でも値として読み飛ばす
+        (["--jobs", "3", "b"], ["b"]),
+        (["--tb", "short", "a"], ["a"]),
+        (["-q", "b", "c"], ["c"]),  # 選択肢の直後のパスに見えない語は値
+        (["-k", "a.py"], ["a.py"]),  # パスに見える語は選択肢の直後でも対象
+        (["-x=1", "b"], ["b"]),  # = を含む選択肢は値を待たない
+        (["K=V", "b"], ["b"]),
+        ([], []),
+    ],
+)
+def test_targets_current_behavior(args, targets):
+    assert weight._targets(args) == targets
