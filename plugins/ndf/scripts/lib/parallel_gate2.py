@@ -105,12 +105,16 @@ def gate_item(done: Path) -> Optional[dict]:
 
 
 def _gate_steps(state: Path) -> list[dict]:
-    """状態 `state` の `progress.jsonl` のうち、終了コード 10 のステップ（`kind: step`・`exit: 10`）の行。読めなければ空。"""
+    """状態 `state` の `progress.jsonl` のうち、最後の実行（最後の `kind: run` の行より後）の終了コード 10 のステップ
+    （`kind: step`・`exit: 10`）の行。読めなければ空。progress.jsonl は実行をまたいで追記されるため、前の実行の 10 の行
+    （今回は通ったステップ）を候補に入れると、2 回目以降の打ち直しでマージ済みの release などから流し直す。"""
     try:
         rows = [json.loads(x) for x in (state / "progress.jsonl").read_text(encoding="utf-8").splitlines() if x.strip().startswith("{")]
     except (OSError, ValueError):
         rows = []
-    return [r for r in rows if isinstance(r, dict) and r.get("kind") == "step" and r.get("exit") == 10]
+    rows = [r for r in rows if isinstance(r, dict)]
+    cut = max((i for i, r in enumerate(rows) if r.get("kind") == "run"), default=-1)
+    return [r for r in rows[cut + 1 :] if r.get("kind") == "step" and r.get("exit") == 10]
 
 
 def _step_out(state: Path, row: dict) -> dict:
