@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import stat
 import subprocess
 from pathlib import Path
 
@@ -82,6 +83,15 @@ def test_set_backs_up_and_restore_returns(tmp_path, home, capsys, last_result):
     data = json.loads(_settings(tmp_path).read_text())
     assert data == {"statusLine": user, "theme": "dark"}
     assert not (_settings(tmp_path).parent / settings.BACKUP_NAME).exists()
+
+
+def test_switching_keeps_a_private_settings_file_private(tmp_path, home):
+    path = _settings(tmp_path)
+    _write(path, {"statusLine": {"type": "command", "command": "bash ~/mine.sh"}, "env": {"TOKEN": "x"}})
+    path.chmod(0o600)
+    assert cli.main(["set"]) == 0
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert stat.S_IMODE((path.parent / settings.BACKUP_NAME).stat().st_mode) == 0o600
 
 
 def test_restore_without_backup_removes_only_the_ndf_line(tmp_path, home, capsys, last_result):

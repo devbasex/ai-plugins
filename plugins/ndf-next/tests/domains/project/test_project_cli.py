@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
 
-from ndf.domains.project import check, cli
+from ndf.domains.project import check, cli, measure_ci, measure_repo, write
+from ndf.domains.project.items import unknown
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -136,6 +138,27 @@ def test_measure_writes_outside_the_repo_only(repo, tmp_path, capsys, last_resul
     assert data["items"]["ci"]["status"] == "unknown"  # origin が GitHub でない
     assert data["items"]["languages"]["status"] == "measured"
     assert got["metrics"]["out"] == str(out)
+
+
+def test_measure_masks_secrets_before_writing(repo, tmp_path, monkeypatch, capsys):
+    token = "ghp_" + "A" * 24
+    data = {"elapsed_seconds": 0.1, "items": {"materials": {"status": "measured", "value": {"readme": f"key {token}"}}}}
+    monkeypatch.setattr(cli, "measure_project", lambda root, budget: data)
+    out = tmp_path / "out" / "m.json"
+    assert cli.main(["measure", "--root", str(repo), "--out", str(out)]) == 0
+    assert token not in out.read_text(encoding="utf-8") and token not in capsys.readouterr().out
+
+
+def test_branch_defaults_running_out_of_time_leave_the_item_unknown(monkeypatch):
+    def time_up(tree):
+        raise measure_repo.TimeUp
+
+    monkeypatch.setattr(measure_repo, "default_branch", time_up)
+    monkeypatch.setattr(measure_ci, "measure", lambda *a: None)
+    monkeypatch.setattr(measure_ci, "measure_issues", lambda *a: unknown("x"))
+    step = cli._Steps(time.monotonic() + 60)
+    cli._ci_items(object(), step, {"gh_repo": None, "head": None, "repo_issues": None, "worktree": None})
+    assert step.items[write.BRANCH_FLOW] == unknown("時間切れ")
 
 
 def test_write_creates_then_keeps_hand_values(repo, tmp_path, capsys, last_result):

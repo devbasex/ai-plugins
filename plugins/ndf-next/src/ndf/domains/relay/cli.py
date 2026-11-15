@@ -41,6 +41,7 @@ from ndf.domains.relay import (
     notice,
     pending,
     registry,
+    signals,
     switch_decide,
     wrapper,
 )
@@ -191,12 +192,16 @@ def _hub(args: argparse.Namespace) -> int:
 
 
 def _stop_all(ctx: hub.Context) -> int:
-    """動いている名前つきのラッパーのすべてへ、名前つきの停止を依頼する。断られたものがあれば止まった結果。"""
+    """動いているラッパーのすべてへ停止の合図を置き、tmux のセッションで動くものは名前つきの停止も依頼する。
+
+    端末から直接起動したラッパー（`ndf-relay run`）は tmux のセッションを持たないため、合図だけで止める（今の
+    セッションが終わると次の区間を始めずに終わる）。合図を置けない・止められないものがあれば止まった結果。
+    """
     names = [r.name for r in registry.running(ctx.state_dir)]
     items: list[dict[str, Any]] = []
     refused: list[str] = []
     for name in names:
-        got = hub.submit(ctx, {"kind": "stop", "name": name})
+        got = _stop_one(ctx, name)
         items.append({"name": name, "ok": got.ok, "summary": got.summary})
         if not got.ok:
             refused.append(name)
@@ -206,6 +211,16 @@ def _stop_all(ctx: hub.Context) -> int:
             result.stopped(TOOL, "refused", f"止められないラッパーがある: {'・'.join(refused)}", items=items, metrics=metrics)
         )
     return result.emit(result.result(TOOL, result.OK, f"ラッパーを {len(names)} 本止めた", items=items, metrics=metrics))
+
+
+def _stop_one(ctx: hub.Context, name: str) -> hub.Outcome:
+    try:
+        signals.place_stop(registry.wrapper_dir(ctx.state_dir, name))
+    except (OSError, registry.RegistryError) as exc:
+        return hub.Outcome(False, f"停止の合図を置けない: {exc}", "refused")
+    if ctx.tmux.has(name):
+        return hub.submit(ctx, {"kind": "stop", "name": name})
+    return hub.Outcome(True, f"{name} へ停止の合図を置いた（tmux の外。今のセッションが終わると止まる）")
 
 
 def _notice() -> int:

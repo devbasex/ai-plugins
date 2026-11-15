@@ -187,8 +187,9 @@ ndf plan wait plan-1101.json plan-1102.json plan-release-dev.json
 6. 本番: `sv queue $O/10-release-prod.json` と `sv wait $O/10-release-prod.json`。先頭の `approve` が
    5 の記録を見て承認資料へ承認の記録を書き、出す PR は検査の報告から埋まる。最後のステップが後片付けを行う
 
-- どこかで止まったら（CI の古い失敗・衝突・手動確認の印の待ち・承認の証跡の無さ）、原因を片付けてからそのステージの
-  `resume`（`sv queue --resume $O/3-design-merge-1052.json` など）と `sv wait` を打つ。止まったプランは終えたステップから続き、後続の
+- どこかで止まったら（CI の古い失敗・衝突・手動確認の印の待ち・承認の証跡の無さ）、原因を片付けてから止まった結果 JSON の
+  `next`（元の全プランと `--then` の区切りを保った `sv queue … --resume`）と、同じプランの並びで `sv wait` を打つ。プラン 1 本だけに
+  `--resume` を付けて打つと後続のステージが戻らない。止まったプランは終えたステップから続き、後続の
   ステージは前のステージがすべて完了のときだけ流れる。承認の後に別のエントリポイントから入るステップ（`merge-approved`・`promote-approved`）
   は `--from <プラン名>=<ステップ>` を足す
 - ステージの番号とプランのファイル名は `new sprint` の出力（`sprint.json` の `ステージ`）が正である

@@ -24,9 +24,9 @@ allowed-tools:
 
 | 引数 | 副命令 | すること |
 | --- | --- | --- |
-| 無し・`install` | `ndf relay install` | 複製と PATH のエントリポイントを置く（あれば今の版で置き直す）。旧い NDF の複製があれば残して警告する。旧いラッパーを止めた後に `ndf relay install --replace-old` で置き換える |
-| `uninstall` | `ndf relay uninstall` | 置いた複製と PATH のエントリポイントを消す。利用者が置いた同じ名前のファイルは消さない |
-| `status` | `ndf relay status` | 複製と PATH のエントリポイントの有無と状態を示す。今のセッションがラッパーの直接の子かは `ndf relay notice` の `metrics.inside` で示す。何も書かない |
+| 無し・`install` | `install` | 複製と PATH のエントリポイントを置く（あれば今の版で置き直す）。旧い NDF の複製があれば残して警告する。旧いラッパーを止めた後に `ndf relay install --replace-old` で置き換える |
+| `uninstall` | `uninstall` | 置いた複製と PATH のエントリポイントを消す。利用者が置いた同じ名前のファイルは消さない |
+| `status` | `status` | 複製と PATH のエントリポイントの有無と状態を示す。今のセッションがラッパーの直接の子かは `ndf relay notice` の `metrics.inside` で示す。何も書かない |
 
 それ以外の引数では、この表を示して何もしない。
 

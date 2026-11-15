@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from ndf.contracts import causes
 from ndf.domains.relay import account_decide, account_login, cli
 from ndf.domains.relay import account_registry as reg
 
@@ -90,6 +91,27 @@ def test_locked_gives_up_when_another_writer_holds_it(tmp_path, hold_lock):
             pass
     finally:
         os.close(fd)
+
+
+def test_capacity_refuses_names_outside_the_store(tmp_path):
+    outside = tmp_path / "outside"
+    for name in (str(outside), "../outside", "metered"):
+        with pytest.raises(reg.AccountError):
+            reg.set_capacity(tmp_path / "store", name, 1, 1)
+    assert not outside.exists() and not (tmp_path / "store" / reg.LOCKS_DIR).exists()
+
+
+def test_cli_lock_timeout_stops_for_a_human_without_retry(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("NDF_ACCOUNTS_DIR", str(tmp_path))
+    _account(tmp_path, "work1")
+
+    def busy(*_args):
+        raise reg.AccountLockTimeout("排他を取れない")
+
+    monkeypatch.setattr(reg, "set_capacity", busy)
+    assert cli.main(["account", "capacity", "work1", "1", "1"]) == causes.exit_code("store_in_use")
+    got = _last(capsys)
+    assert got["cause"]["kind"] == "store_in_use" and causes.policy_of("store_in_use") is None
 
 
 def test_list_rows_hide_secrets_and_mark_broken(tmp_path):

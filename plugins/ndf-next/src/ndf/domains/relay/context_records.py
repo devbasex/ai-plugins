@@ -269,11 +269,13 @@ class _Calls:
 
     def __init__(self, seen: set[Any]) -> None:
         self.seen, self.calls, self.here = seen, [], {}
-        self.compacts, self.first_user = 0, None
+        self.compacts: list[Optional[float]] = []  # 自動圧縮の時刻（無ければ直前の呼び出しの時刻）
+        self.first_user = None
 
     def take(self, e: Mapping[str, Any]) -> None:
         if _is_auto_compact(e):
-            self.compacts += 1
+            at = parse_ts(e.get("timestamp"))
+            self.compacts.append(at if at is not None else (self.calls[-1]["ts"] if self.calls else None))
             return
         if self.first_user is None:
             self.first_user = _user_text(e)
@@ -295,8 +297,8 @@ class _Calls:
             self.calls.append(call)
 
 
-def read_calls(path: Any, seen: Optional[set[Any]] = None) -> tuple[list[dict[str, Any]], Optional[int], bool]:
-    """会話の記録の API 呼び出しと、自動圧縮の回数と、引継ぎ文書で始まったか。読めなければ ([], None, False)。
+def read_calls(path: Any, seen: Optional[set[Any]] = None) -> tuple[list[dict[str, Any]], Optional[list[Optional[float]]], bool]:
+    """会話の記録の API 呼び出しと、自動圧縮の時刻の並びと、引継ぎ文書で始まったか。読めなければ ([], None, False)。
     `seen` に前のファイルで数えた id があれば、このファイルでは数えない。"""
     entries = _entries(path) if path else None
     if entries is None:

@@ -237,7 +237,8 @@ def register(store: Path, name: str, staging: Path, who: Identity, now: float) -
 
 
 def set_capacity(store: Path, name: str, five: Optional[float], seven: Optional[float]) -> dict[str, Any]:
-    """枠の大きさの宣言を書く（None はその枠の宣言を外す）。登録が無ければ `AccountError`。"""
+    """枠の大きさの宣言を書く（None はその枠の宣言を外す）。名前の形が違うか登録が無ければ `AccountError`。"""
+    check_name(name)  # 置き場の外（絶対パス・..）のパスと排他を作らない
     with locked(store, name):
         path = account_dir(store, name) / ACCOUNT_FILE
         a = _read(path)

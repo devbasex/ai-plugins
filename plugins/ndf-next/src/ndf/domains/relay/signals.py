@@ -7,6 +7,7 @@
 | --- | --- | --- |
 | `next.json` | Stop の hook（`relay-mark`） | 次の区間のブロック。中継が読んで次の区間を始める |
 | `question.json` | PreToolUse の hook（`ask-forward`） | AskUserQuestion の問い。中継が人かオーガナイザーへ回す |
+| `stop` | `ndf relay stop --all`・利用者の `touch` | 停止の合図（中身は空）。中継は次の区間を始めず、今のセッションが終わると終わる |
 
 オーガナイザーのレーン（`NDF_ORGANIZER_DIR` と `NDF_ORGANIZER_LANE`）では、問いを `questions/<レーン>.json` へも書く
 （#3035）。どれも一時の名前で書いて名前を変える。
@@ -29,6 +30,7 @@ from typing import Any, Iterator, Mapping, Optional
 
 NEXT_FILE = "next.json"
 QUESTION_FILE = "question.json"
+STOP_FILE = "stop"
 # レーン・ラッパー・アカウントの名前の形（中継の名前はどれもこの形）
 NAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 
@@ -95,12 +97,19 @@ def held(path: Path, wait: float) -> Iterator[bool]:
 
 
 def replace_text(path: Path, text: str, mode: Optional[int] = None) -> None:
-    """親の置き場を作り、同じ置き場の一時の名前（`.<名前>.<pid>.tmp`）へ書いてから名前を変える。"""
+    """親の置き場を作り、同じ置き場の一時の名前（`.<名前>.<pid>.tmp`）へ書いてから名前を変える。
+
+    `mode` を渡すと、一時のファイルを 0600 で作って書く前にその権限にする（秘密を持つ中身が一時でも広い権限で置かれない）。
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    tmp.write_text(text, encoding="utf-8")
-    if mode is not None:
-        tmp.chmod(mode)
+    if mode is None:
+        tmp.write_text(text, encoding="utf-8")
+    else:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            os.fchmod(f.fileno(), mode)
+            f.write(text)
     os.replace(tmp, path)
 
 
@@ -180,6 +189,15 @@ def write_question(path: Path, session_id: str, payload: Mapping[str, Any], wait
 
 def has_question(directory: Path) -> bool:
     return (directory / QUESTION_FILE).is_file()
+
+
+def has_stop(directory: Path) -> bool:
+    return (directory / STOP_FILE).is_file()
+
+
+def place_stop(directory: Path) -> None:
+    """停止の合図を置く。ラッパーの置き場が無ければ `OSError`（作らない）。"""
+    (directory / STOP_FILE).touch(mode=0o600)
 
 
 def drop(directory: Path, name: str) -> None:

@@ -44,7 +44,8 @@ def test_buckets_split_by_handoff_mark_and_dedupe_message_ids(tmp_path):
 
 
 def test_work_windows_do_not_double_count_two_works_in_one_session(tmp_path):
-    t = _transcript(tmp_path / "t.jsonl", [_call(0, "2026-11-15T01:00:00Z"), _call(1, "2026-11-15T02:00:00Z")])
+    compact = {"type": "system", "timestamp": "2026-11-15T01:10:00Z", "subtype": "compact_boundary", "compactMetadata": {"trigger": "auto"}}
+    t = _transcript(tmp_path / "t.jsonl", [_call(0, "2026-11-15T01:00:00Z"), compact, _call(1, "2026-11-15T02:00:00Z")])
     rows = [
         {"at": "2026-11-15T00:59:00Z", "session_id": "s", "transcript": t, "work": "#1"},
         {"at": "2026-11-15T01:30:00Z", "session_id": "s", "work": "#2"},
@@ -52,15 +53,18 @@ def test_work_windows_do_not_double_count_two_works_in_one_session(tmp_path):
     one = context_report.report("#1", rows, [], None)
     two = context_report.report("#2", rows, [], None)
     assert one["parts"]["conductor"]["calls"] == 1 and two["parts"]["conductor"]["calls"] == 1
+    assert (one["auto_compacts"], two["auto_compacts"]) == (1, 0)  # 圧縮は起きた作業の区間でだけ数える
     assert context_report.works(rows) == ["#1", "#2"]
 
 
 def test_span_cuts_calls_and_rows(tmp_path):
-    t = _transcript(tmp_path / "t.jsonl", [_call(0, "2026-11-15T01:00:00Z"), _call(1, "2026-11-15T03:00:00Z")])
+    compact = {"type": "system", "subtype": "compact_boundary", "compactMetadata": {"trigger": "auto"}}  # 時刻が無ければ直前の呼び出し
+    t = _transcript(tmp_path / "t.jsonl", [_call(0, "2026-11-15T01:00:00Z"), compact, _call(1, "2026-11-15T03:00:00Z")])
     rows = [{"at": "2026-11-15T00:59:00Z", "session_id": "s", "transcript": t, "work": "#1"}]
     lo, hi = context_records.parse_ts("2026-11-15T02:00:00Z"), context_records.parse_ts("2026-11-15T04:00:00Z")
     got = context_report.report("#1", rows, [], (lo, hi))
     assert got["parts"]["conductor"]["calls"] == 1
+    assert got["auto_compacts"] == 0
 
 
 def test_ledger_rows_go_to_the_ndf_bucket_and_missing_ledger_is_empty(tmp_path):

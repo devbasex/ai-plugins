@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import re
+import stat
 from pathlib import Path
 from typing import Any, Mapping, NamedTuple, Optional
 
@@ -91,8 +92,10 @@ def _read_settings(p: Paths) -> dict[str, Any]:
 
 
 def _write(path: Path, data: Mapping[str, Any]) -> None:
+    """置き換える。今のファイルの権限を保ち、無ければ 0600（`env` などの秘密を持ちうるため広げない）。"""
     try:
-        signals.replace_text(path, json.dumps(dict(data), ensure_ascii=False, indent=2) + "\n")
+        mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else 0o600
+        signals.replace_text(path, json.dumps(dict(data), ensure_ascii=False, indent=2) + "\n", mode=mode)
     except OSError as exc:
         raise StatuslineError("unknown", f"{path} を書けない: {exc}") from exc
 

@@ -6,7 +6,8 @@ import math
 import os
 
 from ndf import identity
-from ndf.domains.relay import cli, hub, notice, registry
+from ndf.domains.relay import cli, hub, notice, registry, signals
+from ndf.domains.relay.tmux import Tmux
 
 
 def _tree(table: dict[int, tuple[int, str]]):
@@ -63,9 +64,13 @@ def test_notice_subcommand_reports_outside(monkeypatch, capsys, last_result):
     assert got["items"][0]["position"] == notice.NO_DIR
 
 
-def test_stop_all_asks_every_running_wrapper(monkeypatch, capsys, last_result):
-    running = [hub.hub_decide.Running("a", "1"), hub.hub_decide.Running("b", "1")]
+def test_stop_all_signals_every_running_wrapper(monkeypatch, capsys, last_result):
+    running = [hub.hub_decide.Running(n, "1") for n in ("a", "b", "c", "gone")]
     monkeypatch.setattr(registry, "running", lambda state_dir: running)
+    state_dir = identity.load().state_dir
+    for n in ("a", "b", "c"):
+        registry.wrapper_dir(state_dir, n).mkdir(parents=True)
+    monkeypatch.setattr(Tmux, "has", lambda self, name: name != "c")  # c は端末から直接起動したラッパー
     asked: list[str] = []
 
     def submit(ctx, req):
@@ -76,13 +81,14 @@ def test_stop_all_asks_every_running_wrapper(monkeypatch, capsys, last_result):
     monkeypatch.setattr(cli, "plugin_version", lambda root: "0")
     assert cli.main(["stop", "--all"]) == 1
     got = last_result(capsys.readouterr().out)
-    assert asked == ["a", "b"]
-    assert got["metrics"] == {"stopped": 1}
+    assert asked == ["a", "b"]  # tmux の外の c と置き場の無い gone へは名前つきの停止を頼まない
+    assert all(signals.has_stop(registry.wrapper_dir(state_dir, n)) for n in ("a", "b", "c"))
+    assert got["metrics"] == {"stopped": 2}
+    assert [i["name"] for i in got["items"] if not i["ok"]] == ["b", "gone"]
     assert got["cause"]["kind"] == "refused"
     monkeypatch.setattr(registry, "running", lambda state_dir: [])
     assert cli.main(["stop", "--all"]) == 0
     assert last_result(capsys.readouterr().out)["metrics"] == {"stopped": 0}
-    assert identity.load().state_dir
 
 
 def test_stop_needs_a_name_or_all_but_not_both():

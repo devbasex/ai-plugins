@@ -36,6 +36,8 @@ from ndf.domains.relay.lane_question import AskPlan
 SCREEN_KEEP = 65536
 READ_SIZE = 65536
 DEFAULT_DIMS = (40, 120)
+# 停止の合図（`ndf relay stop --all`）があるときに打たない手（区間を替える・起こし直す・引継ぎを頼む）
+STOP_HELD = frozenset({"switch", "account", "restart", "handover"})
 
 
 @dataclass(frozen=True)
@@ -151,6 +153,7 @@ class Wrapper:
             return self._loop(prompt)
 
     def _loop(self, prompt: str) -> Ended:
+        signals.drop(self.dir, signals.STOP_FILE)  # 前の実行が残した合図で、始めたばかりの実行を止めない
         self._start(Launch(1, str(uuid.uuid4()), accounts.chosen(self.s.environ, self.s.state_dir), prompt, resume=False))
         while True:
             self._pump(self.s.tick)
@@ -160,6 +163,11 @@ class Wrapper:
                 self._stop_child()
                 return self._end(Ended("config_broken", str(exc)))
             self._note(step)
+            if step.kind in STOP_HELD and signals.has_stop(self.dir):
+                if self._current().child.isalive():
+                    continue  # 停止の合図の後は、今のセッションへ入力を送らず・替えず、利用者が終えるのを待つ
+                signals.drop(self.dir, signals.STOP_FILE)
+                return self._end(Ended("", "停止の合図がある"))
             ended = self._act(step)
             if ended is not None:
                 return self._end(ended)

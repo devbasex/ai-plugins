@@ -106,7 +106,7 @@ def _ci_items(tree: measure_repo.Tree, step: _Steps, ctx: dict[str, Any]) -> lis
         _add_merge_evidence(items, ci_part["merges"])
     elif "test_duration" not in items:
         items["test_duration"] = items["ci"] if "ci" in items else unknown("時間切れ")
-    flow = step(write.BRANCH_FLOW, lambda: measure_flow.measure(tree, ctx["gh_repo"], *ctx["flow_branches"]))
+    flow = step(write.BRANCH_FLOW, lambda: measure_flow.measure(tree, ctx["gh_repo"], *_flow_branches(tree, ctx["worktree"])))
     if flow is not None:
         items[write.BRANCH_FLOW] = flow
     if "issues" not in items:
@@ -123,7 +123,7 @@ def measure_project(root: Path, budget: float) -> dict[str, Any]:
     repo_issues = measure_repo.measure(tree, step, step.items)
     _, worktree = check.load(main)
     head = check.branch_state(repo)["head"]
-    ctx = {"gh_repo": _gh_repo(repo), "head": head, "repo_issues": repo_issues, "flow_branches": _flow_branches(tree, worktree)}
+    ctx = {"gh_repo": _gh_repo(repo), "head": head, "repo_issues": repo_issues, "worktree": worktree}
     notes = _ci_items(tree, step, ctx)
     if tree.skipped:
         notes.append(f"秘密の名前のファイルを開かなかった: {'・'.join(tree.skipped[:10])}")
@@ -145,7 +145,7 @@ def _measure(args: argparse.Namespace) -> int:
     if out.is_relative_to(root):
         return result.emit(result.stopped(TOOL, "check_failed", f"--out はリポジトリの外（一時ディレクトリ）に置く: {out}"))
     try:
-        data = measure_project(root, args.budget)
+        data = secret.mask(measure_project(root, args.budget))  # 素材の README の冒頭・テストの scripts の値も伏せてから書く
     except (check.CheckError, jsonfile.JsonFileError) as exc:
         return result.emit(result.stopped(TOOL, "unknown", f"測れない: {exc}"))
     try:

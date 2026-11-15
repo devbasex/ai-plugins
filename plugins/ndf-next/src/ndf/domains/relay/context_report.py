@@ -196,7 +196,7 @@ def session_parts(sid: str, transcript: Optional[str], marks: list[dict[str, Any
     return {
         "parts": parts,
         "restore": {"context": restored[-1]["context"], "calls": len(restored)} if restored else None,
-        "compacts": compacts,
+        "compacts": None if compacts is None else sum(1 for at in compacts if _within(at, windows)),  # 作業の区間の圧縮だけ
         "restore_known": not by_next or restore_end is not None,
         "handoff_known": handoff_from is not None,
     }

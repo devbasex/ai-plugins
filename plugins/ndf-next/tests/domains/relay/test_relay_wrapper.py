@@ -192,6 +192,32 @@ def test_crashed_child_is_resumed_until_the_daily_limit(tmp_path):
     assert [argv[1] for argv, _ in spawn.calls] == ["--session-id", "--resume", "--resume"]
 
 
+class StopOnSpawn(Spawner):
+    """子を起動したすぐ後に停止の合図を置く（`ndf relay stop --all` が別の端末から置いた形）。"""
+
+    def __call__(self, argv, env, cwd):
+        child = super().__call__(argv, env, cwd)
+        signals.place_stop(Path(env["NDF_RELAY_DIR"]))
+        return child
+
+
+def test_stop_signal_lets_the_session_finish_and_starts_no_next_section(tmp_path):
+    stale = registry.wrapper_dir(tmp_path / "state", "t1")
+    stale.mkdir(parents=True)
+    signals.place_stop(stale)  # 前の実行の残りは始めたばかりの実行を止めない
+    s = _settings(tmp_path)
+    child = FakeChild([b"a\r\n", b"b\r\n", b"c\r\n", b"d\r\n"], 0)
+    spawn = StopOnSpawn([child], {0: "/goal 次の区間"})
+    w = wrapper.Wrapper(s, spawn=spawn, clock=_clock())
+    try:
+        ended = w.run("最初の 1 行")
+    finally:
+        child.close()
+    assert (ended.cause, ended.reason) == ("", "停止の合図がある")
+    assert len(spawn.calls) == 1 and child.exitstatus == 0 and child.written == []  # 替えず・入力も送らず・殺さない
+    assert not signals.has_stop(w.dir)
+
+
 def test_broken_next_mark_stops_with_the_reason(tmp_path):
     def prepare(d, state):
         d.mkdir(parents=True)
