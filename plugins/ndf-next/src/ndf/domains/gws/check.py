@@ -18,7 +18,8 @@ from __future__ import annotations
 
 import shutil
 import subprocess
-from typing import Optional
+from collections.abc import Mapping
+from typing import Any, Optional
 
 from ndf import identity
 from ndf.contracts import exit_codes, limits, result
@@ -65,25 +66,34 @@ def run(tool: str, install: bool) -> Outcome:
 
 def _report(tool: str) -> Outcome:
     """認証の状態を読み、records の gws の部品の判定で authenticated か unauthenticated の結果を組む。"""
-    try:
-        status = records_gws.auth_status(CALL_LIMIT)
-    except records_gws.GwsError as exc:
-        stderr = rd.tail(exc.stderr)
-        items = [{"name": "gws auth status の標準エラーの末尾", "result": "stderr", "detail": stderr}] if stderr else None
-        raise GwsStop("invalid", f"gws の認証の状態を読めない: {exc}", items=items) from exc
+    status = _read_status()
     # 結果へ写すのは 3 つのキーだけ（ほかのキーは写さない）
     keys = {key: status[key] for key in records_gws.STATUS_KEYS}
     if records_gws.authenticated(status):
         return result.result(tool, result.OK, "gws は認証済み", metrics={"state": rd.AUTHENTICATED, **keys}), exit_codes.first_code(
             result.OK
         )
-    summary = "gws はあるが未認証。" + _LOGIN
+    return unauthenticated_gate(tool, _unauthenticated_summary(keys), ("gws", "check"), metrics=keys)
+
+
+def _read_status() -> dict[str, Any]:
+    """`gws auth status` を読む。読めなければ標準エラーの末尾を添えて `GwsStop`（invalid）。"""
+    try:
+        return records_gws.auth_status(CALL_LIMIT)
+    except records_gws.GwsError as exc:
+        stderr = rd.tail(exc.stderr)
+        items = [{"name": "gws auth status の標準エラーの末尾", "result": "stderr", "detail": stderr}] if stderr else None
+        raise GwsStop("invalid", f"gws の認証の状態を読めない: {exc}", items=items) from exc
+
+
+def _unauthenticated_summary(keys: Mapping[str, Any]) -> str:
+    """未認証の案内の文。OAuth クライアントが無ければ、その用意を先に案内する。"""
     if not keys["client_config_exists"]:
-        summary = (
+        return (
             "gws はあるが未認証で、OAuth クライアントが無い。先に `gws auth setup`（gcloud が要る）か、OAuth クライアントの "
             "client_secret.json の用意を利用者に案内する。そのうえで " + _LOGIN
         )
-    return unauthenticated_gate(tool, summary, ("gws", "check"), metrics=keys)
+    return "gws はあるが未認証。" + _LOGIN
 
 
 def _present(tool: str, npm: str) -> Outcome:
