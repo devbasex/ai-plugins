@@ -19,7 +19,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any, Mapping, NamedTuple, Optional
+from typing import Any, Callable, Mapping, NamedTuple, Optional
 
 import psutil
 
@@ -29,6 +29,7 @@ from ndf.contracts import limits
 from ndf.domains.relay import account_registry as reg
 
 PENDING_TTL = 600.0  # 登録の途中の状態の期限（秒。旧いと同じ）
+POLL_INTERVAL = 0.1  # 締め切りまで条件を見直す間隔（秒）
 PENDING_CONFIG, PENDING_FIFO, PENDING_OUT, PENDING_FILE = "config", "code.fifo", "login.out", "pending.json"
 URL_RE = re.compile(r"https://[^\s\x1b\"'<>]+")
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
@@ -161,9 +162,7 @@ def discard_pending(store: Path, name: str) -> None:
                 os.killpg(p["pid"], sig)
             except OSError:
                 break
-            deadline = time.monotonic() + limits.seconds("procs.stop-tree")
-            while time.monotonic() < deadline and _alive(p):
-                time.sleep(0.1)
+            _wait_until(lambda: not _alive(p), limits.seconds("procs.stop-tree"))
             if not _alive(p):
                 break
     reg.discard(pending_dir(store, name))
@@ -198,7 +197,7 @@ def _read_url(out: Path, proc: subprocess.Popen) -> Optional[str]:
             return next((u for u in urls if "oauth" in u), urls[0])
         if proc.poll() is not None:
             return None
-        time.sleep(0.1)
+        time.sleep(POLL_INTERVAL)
     return None
 
 
@@ -238,13 +237,18 @@ def _start(store: Path, name: str, environ: Mapping[str, str], now: float) -> Ad
     return Added(name, needs_code=True, url=url, expires_at=reg.iso_utc(expires))
 
 
-def _wait_exit(p: dict[str, Any]) -> bool:
-    deadline = time.monotonic() + limits.seconds("relay.login-exit")
+def _wait_until(done: Callable[[], bool], seconds: float) -> bool:
+    """締め切り（今から `seconds` 秒）まで `POLL_INTERVAL` ごとに `done` を見る。成り立てば真、締め切りを越えたら偽。"""
+    deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
-        if not _alive(p):
+        if done():
             return True
-        time.sleep(0.1)
+        time.sleep(POLL_INTERVAL)
     return False
+
+
+def _wait_exit(p: dict[str, Any]) -> bool:
+    return _wait_until(lambda: not _alive(p), limits.seconds("relay.login-exit"))
 
 
 def _register(store: Path, claude: str, name: str, config_dir: Path, environ: Mapping[str, str], now: float) -> Added:
