@@ -484,3 +484,61 @@ def test_dev_version_of_the_parallel_plan_skips_a_released_version(tmp_path, wor
     assert parallel_repo.dev_version(world.repo) == "10.27.7"
     world.publish("10.27.7-dev.1", "develop")
     assert parallel_repo.dev_version(world.repo) == "10.27.7"
+
+
+# ---- observe の現状固定（I-002） ----
+
+
+def test_observe_reads_base_production_and_release_tags(world):
+    """正式版のタグだけを拾い、接尾辞つき・semver でない・別のプラグインのタグは外す。"""
+    world.publish("10.27.6", "develop", "main", tag=True)
+    for t in ("ndf--v10.27.7-dev.1", "ndf--vbroken", "other--v99.0.0"):
+        git(world.repo, "tag", t)
+    git(world.repo, "push", "-q", "origin", "--tags")
+    o = rv.observe(world.repo, "ndf", "develop", "main")
+    assert (o.plugin, o.base_ref, o.base_version, o.production_ref, o.production_version) == (
+        "ndf",
+        "origin/develop",
+        "10.27.6",
+        "origin/main",
+        "10.27.6",
+    )
+    assert sorted(o.tags) == ["10.27.5", "10.27.6"] and o.latest_tag == "10.27.6"
+    assert o.unreadable == []
+
+
+def test_observe_without_production_does_not_read_it(world):
+    o = rv.observe(world.repo, "ndf", "develop", None)
+    assert o.production_ref == "" and o.production_version is None
+    assert o.base_version == "10.27.5" and o.unreadable == []
+
+
+def test_observe_counts_missing_branches_as_unreadable(world):
+    o = rv.observe(world.repo, "ndf", "nosuch", "gone")
+    assert (o.base_ref, o.production_ref) == ("origin/nosuch", "origin/gone")
+    assert o.base_version is None and o.production_version is None
+    assert o.unreadable == ["origin/nosuch", "origin/gone"]
+    assert o.tags == ["10.27.5"]
+
+
+def test_observe_uses_the_given_rel_and_counts_a_wrong_one_as_unreadable(world):
+    ok = rv.observe(world.repo, "ndf", "develop", "main", rel="plugins/ndf/.claude-plugin/plugin.json")
+    assert (ok.base_version, ok.production_version, ok.unreadable) == ("10.27.5", "10.27.5", [])
+    bad = rv.observe(world.repo, "ndf", "develop", "main", rel="nope/plugin.json")
+    assert bad.base_version is None and bad.production_version is None
+    assert bad.unreadable == ["origin/develop", "origin/main"]
+
+
+def test_observe_without_tags_is_not_unreadable(world):
+    git(world.repo, "tag", "-d", "ndf--v10.27.5")
+    o = rv.observe(world.repo, "ndf", "develop", "main", fetch=False)
+    assert o.tags == [] and o.latest_tag is None and o.unreadable == []
+
+
+def test_observe_counts_a_failed_fetch_as_origin_unreadable(world):
+    """取り直しに落ちても手元の origin/* は読む。fetch=False なら取り直さず、読めないにも数えない。"""
+    git(world.repo, "fetch", "-q", "origin")
+    git(world.repo, "remote", "set-url", "origin", str(world.origin) + "-missing")
+    o = rv.observe(world.repo, "ndf", "develop", "main")
+    assert o.unreadable == ["origin"] and o.base_version == "10.27.5" and o.tags == ["10.27.5"]
+    assert rv.observe(world.repo, "ndf", "develop", "main", fetch=False).unreadable == []
