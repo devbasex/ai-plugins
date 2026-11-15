@@ -140,6 +140,34 @@
       "additionalProperties": false,
       "properties": {
         "subcommand": {
+          "const": "question",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "plan": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "--wrapper": {
+          "type": "string",
+          "description": "問いを出したレーンのラッパーの名前（NDF_RELAY_NAME）"
+        },
+        "--question": {
+          "type": "string",
+          "description": "hook が書いた問いのファイル（question.json）"
+        }
+      },
+      "required": [
+        "subcommand",
+        "plan",
+        "--wrapper",
+        "--question"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
           "const": "release",
           "description": "下位の命令（入れ子は空白でつなぐ）"
         },

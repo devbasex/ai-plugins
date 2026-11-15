@@ -111,6 +111,7 @@
 | `ndf lanes lane add` | `plan`（string・必須・位置）<br>`lane_file`（string・必須・位置）<br>`--request`（string・任意） |
 | `ndf lanes limits` | `plan`（string・必須・位置）<br>`--max-lanes`（integer・任意）<br>`--max-plans`（integer・任意）<br>`--reason`（string・必須） |
 | `ndf lanes move` | `plan`（string・必須・位置）<br>`from_lane`（string・必須・位置）<br>`row`（string・必須・位置）<br>`to_lane`（string・必須・位置）<br>`--reason`（string・必須） |
+| `ndf lanes question` | `plan`（string・必須・位置）<br>`--wrapper`（string・必須）: 問いを出したレーンのラッパーの名前（NDF_RELAY_NAME）<br>`--question`（string・必須）: hook が書いた問いのファイル（question.json） |
 | `ndf lanes release` | `plan`（string・必須・位置）<br>`requests`（array of string・必須・位置）<br>`--result`（string・必須・値 `released`・`rejected`）<br>`--reason`（string・必須）<br>`--version`（string・任意）<br>`--release`（string・任意） |
 | `ndf lanes request close` | `plan`（string・必須・位置）<br>`request`（string・必須・位置）<br>`--reason`（string・必須） |
 | `ndf lanes row add` | `plan`（string・必須・位置）<br>`lane`（string・必須・位置）<br>`--issues`（array of integer・必須）<br>`--index`（integer・任意）: 並びの位置（0 が先頭）<br>`--args`（array of string・任意）<br>`--reason`（string・必須） |
@@ -145,9 +146,13 @@
 
 | 呼び方 | 引数 |
 | --- | --- |
+| `ndf loop acceptance check` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`--issue`（integer・必須） |
+| `ndf loop acceptance record` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`--pre-merge`（array of string・任意）: '<条件の番号>=<手段（テスト名・実行したコマンド）>'<br>`--post-release`（array of integer・任意）: リリースの後でしか確かめられない条件の番号<br>`--issue`（integer・必須） |
+| `ndf loop acceptance show` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`--issue`（integer・必須） |
 | `ndf loop answer` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`name`（string・必須・位置）<br>`--pr`（integer・必須）<br>`--answer`（string・必須・値 `approved`・`revise`・`rejected`）<br>`--note`（string・任意・既定 `""`）: 差し戻しの理由など |
 | `ndf loop close-plan` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`--pace`（string・必須）<br>`--route`（array of string・必須・値 `promote`・`merged-by-check`・`manual`・`none`）<br>`--mvv`（boolean・任意）: MVV の判定がある<br>`--record-pr`（integer・任意）: リリース記録の PR の番号（0 は記録なし）<br>`--retrospective-due`（boolean・任意） |
 | `ndf loop created` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`name`（string・必須・位置）<br>`issues`（array of integer・必須・位置） |
+| `ndf loop design-tests` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`--issue`（array of integer・任意）: HEAD の issues/issue-<N>-design*.md を読む<br>`--design`（array of string・任意）: 作業場所の設計文書のパス |
 | `ndf loop exclude` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`name`（string・必須・位置）<br>`--session`（string・必須）: 打ったセッションの識別子<br>`--issue`（integer・必須）<br>`--reason`（string・必須） |
 | `ndf loop gate` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`name`（string・必須・位置）<br>`--pr`（integer・必須） |
 | `ndf loop get` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`name`（string・必須・位置）<br>`--field`（string・任意・値 `status`・`stop`・`holder`・`laps`・`current`・`rejections`・`created`） |
@@ -264,8 +269,8 @@
 | `ndf relay mark` | `session_id`（string・必須・位置） |
 | `ndf relay pending` | 引数を受けない |
 | `ndf relay restart` | `name`（string・必須・位置） |
-| `ndf relay run` | `--name`（string・任意）<br>`rest`（string・必須・位置）<br>`--prompt`（string・任意） |
-| `ndf relay spawn` | `--name`（string・任意）<br>`rest`（string・必須・位置）<br>`--cwd`（string・任意）<br>`--role`（string・任意）<br>`--plan`（string・任意） |
+| `ndf relay run` | `--name`（string・任意）<br>`rest`（array of string・任意・位置）<br>`--prompt`（string・任意） |
+| `ndf relay spawn` | `--name`（string・任意）<br>`rest`（array of string・任意・位置）<br>`--cwd`（string・任意）<br>`--role`（string・任意）<br>`--plan`（string・任意） |
 | `ndf relay status` | 引数を受けない |
 | `ndf relay stop` | `name`（string・必須・位置） |
 | `ndf relay uninstall` | 引数を受けない |
@@ -316,7 +321,7 @@
 | 呼び方 | 引数 |
 | --- | --- |
 | `ndf test-slot report` | `--since`（string・任意・既定 `"7d"`）: 期間（既定 7d） |
-| `ndf test-slot run` | `--wait-limit`（integer・任意）: 枠とメモリを待つ上限の秒（既定は設定の値）<br>`command`（string・必須・位置）: -- の後ろにシェルのコマンド 1 つ |
+| `ndf test-slot run` | `--wait-limit`（integer・任意）: 枠とメモリを待つ上限の秒（既定は設定の値）<br>`command`（array of string・任意・位置）: -- の後ろにシェルのコマンド 1 つ |
 
 結果の `metrics`: `available_mib`（—）・`waited_seconds`（number か null）。`items` の要素: 決まった項目を持たない
 

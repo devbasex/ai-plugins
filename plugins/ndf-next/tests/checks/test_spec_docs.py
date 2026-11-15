@@ -135,6 +135,7 @@ def test_written_calls_and_call_errors(copy):
     assert spec_docs.call_errors(["contracts", "check", "--nope"], commands) == ["引数 --nope が無い"]
     assert spec_docs.call_errors(["contracts", "nosuch"], commands) == ["下位の命令 nosuch が無い"]
     assert spec_docs.call_errors(["nosuch"], commands) == ["副命令 nosuch が無い"]
+    assert spec_docs.call_errors(["worktree", "--cwd", "/tmp/example", "list"], commands) == []
 
 
 def test_a_written_call_with_an_unknown_argument_names_the_file_and_line(copy):

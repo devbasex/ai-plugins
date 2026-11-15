@@ -22,13 +22,13 @@ from ndf.checks.spec_model import (
     PUBLIC,
     SCHEMA_SUFFIX,
     SECTIONS_SUFFIX,
-    SPEC_KIND,
     CommandSpec,
     DeclarationSpec,
     SkillSpec,
     SpecModel,
     decl_schema_rel,
     io_schema_rel,
+    is_spec,
     opt,
     surface_of,
 )
@@ -217,9 +217,7 @@ def page_index(model: SpecModel) -> str:
         "skills.md": _count([s.surface for s in model.skills]),
     }
     rows = [[f"[{PAGES[name]}]({name})", text] for name, text in counts.items()]
-    spec = [
-        [code(r["id"]), code(r["target"]), "・".join(code(f) for f in opt(r, "files"))] for r in model.entrypoints if r["kind"] == SPEC_KIND
-    ]
+    spec = [[code(r["id"]), code(r["target"]), "・".join(code(f) for f in opt(r, "files"))] for r in model.entrypoints if is_spec(r)]
     caller = [[code(r["id"]), r["kind"], code(r["target"]), r["source"]] for r in model.entrypoints if r["order"] == CALLER_FIRST]
     intro = (
         "NDF を外から呼ぶ面（宣言・副命令・環境変数・受け渡しのファイル・hook・Skill・起動スクリプト）の規約である。"

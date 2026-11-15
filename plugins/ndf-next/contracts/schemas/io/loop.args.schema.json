@@ -9,6 +9,83 @@
       "additionalProperties": false,
       "properties": {
         "subcommand": {
+          "const": "acceptance check",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        },
+        "--issue": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--issue"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "acceptance record",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        },
+        "--pre-merge": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "'<条件の番号>=<手段（テスト名・実行したコマンド）>'"
+        },
+        "--post-release": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "リリースの後でしか確かめられない条件の番号"
+        },
+        "--issue": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--issue"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "acceptance show",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        },
+        "--issue": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--issue"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
           "const": "answer",
           "description": "下位の命令（入れ子は空白でつなぐ）"
         },
@@ -117,6 +194,37 @@
         "subcommand",
         "name",
         "issues"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "design-tests",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        },
+        "--issue": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "HEAD の issues/issue-<N>-design*.md を読む"
+        },
+        "--design": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "作業場所の設計文書のパス"
+        }
+      },
+      "required": [
+        "subcommand"
       ]
     },
     {

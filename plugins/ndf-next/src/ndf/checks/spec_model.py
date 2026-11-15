@@ -46,8 +46,7 @@ RESULT_REF = "../result.schema.json"
 # 公開か内部か
 PUBLIC = "public"
 INTERNAL = "internal"
-# エントリポイントの表の種類と順番
-SPEC_KIND = "spec"
+# エントリポイントの表の順番（種類 spec は `is_spec`）
 CALLER_FIRST = "caller-first"
 # 宣言のスキーマの注釈 x-ndf-place が取る値（宣言を読む置き場）
 DECL_PLACES = ("main", "worktree")
@@ -73,6 +72,14 @@ def decl_place(places: dict[str, dict[str, Any]]) -> str:
     if len(found) != 1:
         raise CheckError(f"置き場の表に宣言の置き場がちょうど 1 行ない: {found}")
     return found[0]
+
+
+def is_spec(row: dict[str, Any]) -> bool:
+    """エントリポイントの表の行が種類 spec（規約の置き場を指す行）か。
+
+    種類の語を最上位の定数に置くと、テストの置き場の語（`spec`）の集まりと const-fact に数えられる。
+    """
+    return row["kind"] == "spec"
 
 
 def face_of(kind: str) -> str | None:
@@ -245,7 +252,7 @@ def public_ids(entrypoints: list[dict[str, Any]], files: list[dict[str, Any]]) -
     for row in entrypoints:
         kind = row["kind"]
         out |= {("env", name) for name in row["env"]}
-        if kind == SPEC_KIND:
+        if is_spec(row):
             out |= {(DECL_KIND, f) for f in opt(row, "files")}
             continue
         out |= {("file", f) for f in opt(row, "files")}

@@ -152,7 +152,10 @@
           "type": "string"
         },
         "rest": {
-          "type": "string",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
           "x-ndf-positional": true
         },
         "--prompt": {
@@ -160,8 +163,7 @@
         }
       },
       "required": [
-        "subcommand",
-        "rest"
+        "subcommand"
       ]
     },
     {
@@ -176,7 +178,10 @@
           "type": "string"
         },
         "rest": {
-          "type": "string",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
           "x-ndf-positional": true
         },
         "--cwd": {
@@ -190,8 +195,7 @@
         }
       },
       "required": [
-        "subcommand",
-        "rest"
+        "subcommand"
       ]
     },
     {

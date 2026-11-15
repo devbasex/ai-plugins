@@ -35,14 +35,16 @@
           "description": "枠とメモリを待つ上限の秒（既定は設定の値）"
         },
         "command": {
-          "type": "string",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
           "description": "-- の後ろにシェルのコマンド 1 つ",
           "x-ndf-positional": true
         }
       },
       "required": [
-        "subcommand",
-        "command"
+        "subcommand"
       ]
     }
   ]

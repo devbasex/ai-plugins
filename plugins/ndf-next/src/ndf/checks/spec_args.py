@@ -20,6 +20,10 @@ from typing import Any
 from ndf.checks.model import CheckError
 
 _SKIPPED = (argparse._HelpAction, argparse._VersionAction, argparse._SubParsersAction)
+# 値を 0 個から取れる nargs（位置引数でも省略できる。REMAINDER は残りの引数の配列）
+_OPTIONAL_NARGS = ("?", "*", argparse.REMAINDER)
+# 値を配列で取る nargs
+_ARRAY_NARGS = ("*", "+", argparse.REMAINDER)
 
 
 @dataclass(frozen=True)
@@ -35,6 +39,8 @@ class Arg:
     help: str = ""
     items: str | None = None
     aliases: tuple[str, ...] = ()
+    # オプションが後ろから取る値の語の数（`None` は次のオプションまでの語をすべて）
+    takes: int | None = 1
 
 
 @dataclass(frozen=True)
@@ -103,8 +109,19 @@ def _type_word(action: argparse.Action) -> str:
 
 def _is_array(action: argparse.Action) -> bool:
     return (
-        isinstance(action, (argparse._AppendAction, argparse._ExtendAction)) or action.nargs in ("*", "+") or isinstance(action.nargs, int)
+        isinstance(action, (argparse._AppendAction, argparse._ExtendAction))
+        or action.nargs in _ARRAY_NARGS
+        or isinstance(action.nargs, int)
     )
+
+
+def _takes(action: argparse.Action, word: str) -> int | None:
+    """オプションが後ろから取る値の語の数。真偽の旗と数える旗は 0、`nargs` が数ならその数、可変なら `None`。"""
+    if word == "boolean" or isinstance(action, argparse._CountAction) or action.nargs == 0:
+        return 0
+    if isinstance(action.nargs, int):
+        return action.nargs
+    return None if action.nargs in _ARRAY_NARGS else 1
 
 
 def _default(action: argparse.Action) -> Any:
@@ -137,7 +154,7 @@ def arg_of(action: argparse.Action) -> Arg | None:
     name, aliases = _name_and_aliases(action)
     word = _type_word(action)
     array = _is_array(action) and word != "boolean"
-    required = bool(action.required) if not positional else action.nargs not in ("?", "*")
+    required = bool(action.required) if not positional else action.nargs not in _OPTIONAL_NARGS
     choices = tuple(str(c) for c in action.choices) if action.choices is not None else None
     help_text = "" if action.help in (None, argparse.SUPPRESS) else str(action.help)
     return Arg(
@@ -150,6 +167,7 @@ def arg_of(action: argparse.Action) -> Arg | None:
         help=help_text,
         items=word if array else None,
         aliases=aliases,
+        takes=_takes(action, word),
     )
 
 
@@ -172,4 +190,5 @@ def from_manual(rows: list[dict[str, Any]]) -> ArgTree:
 
 def _manual_arg(spec: str) -> Arg:
     name, kind, need, help_text = spec.split(":", 3)
-    return Arg(name=name, positional=not name.startswith("-"), type=kind, required=need == "required", help=help_text)
+    takes = 0 if kind == "boolean" else 1
+    return Arg(name=name, positional=not name.startswith("-"), type=kind, required=need == "required", help=help_text, takes=takes)

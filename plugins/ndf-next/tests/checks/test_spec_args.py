@@ -66,6 +66,12 @@ def test_arg_of_skips_help_and_drops_suppressed_default():
     assert spec_args.arg_of(action).default is None
 
 
+def test_remainder_positional_is_an_optional_array():
+    parser = argparse.ArgumentParser()
+    got = spec_args.arg_of(parser.add_argument("rest", nargs=argparse.REMAINDER))
+    assert (got.type, got.items, got.required) == ("array", "string", False)
+
+
 def test_from_manual_builds_the_tree_from_rows():
     rows = [{"id": "n send", "command": "n", "path": "send", "args": ["--to:string:required:宛先"], "meaning": "m"}]
     tree = spec_args.from_manual(rows)

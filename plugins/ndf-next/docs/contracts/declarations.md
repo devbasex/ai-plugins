@@ -241,8 +241,12 @@ worktree・チーム・公開・[release.schema.json](../../contracts/schemas/de
 | キー | 型 | 既定値 | 取りうる値 | 必須か | 説明 |
 | --- | --- | --- | --- | --- | --- |
 | `$schema` | string | — | — | 任意 | 編集のときの補完に使うスキーマの位置。読み手は参照しない |
-| `steps` | array of object | — | — | 必須 | コマンドの並び。書いた順に実行し、最初に落ちたコマンドで止める |
+| `bump_undistributed` | boolean | `false` | — | 任意 | リリース対象に関わらない変化だけのプラグインも版を上げるか |
+| `changelog` | string | `"CHANGELOG.md"` | — | 任意 | CHANGELOG のファイル（リポジトリの根から） |
+| `steps` | array of object | — | — | 任意 | コマンドの並び。書いた順に実行し、最初に落ちたコマンドで止める。無ければ手順なし |
+| `undistributed` | array of string | — | — | 任意 | リリース対象に関わらないファイルの形（プラグインの根からの gitignore の形）。無ければテスト |
 | `version` | integer | — | `1` | 必須 | 宣言の形の版。読み手は知らない版を読まない |
+| `version_files` | array of string | `[]` | — | 任意 | 版上げで、プラグインの名前を含む行の版を書き換えるファイル |
 
 例: `{"version": 1, "steps": [{"name": "記録", "stage": "production", "command": ["python3", "scripts/record.py"], "writes": ["docs/metrics/"]}]}`
 

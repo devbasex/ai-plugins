@@ -6,8 +6,7 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "version",
-    "steps"
+    "version"
   ],
   "properties": {
     "$schema": {
@@ -23,14 +22,13 @@
     },
     "steps": {
       "type": "array",
-      "description": "コマンドの並び。書いた順に実行し、最初に落ちたコマンドで止める",
+      "description": "コマンドの並び。書いた順に実行し、最初に落ちたコマンドで止める。無ければ手順なし",
       "items": {
         "type": "object",
         "required": [
           "name",
           "stage",
-          "command",
-          "writes"
+          "command"
         ],
         "additionalProperties": false,
         "properties": {
@@ -43,10 +41,10 @@
             "type": "string",
             "enum": [
               "production",
-              "verification",
-              "any"
+              "dev",
+              "verify"
             ],
-            "description": "走らせる段階。production はリリース、verification は開発版のデプロイ、any は両方"
+            "description": "走らせる段階。production は本番の組み立て、dev は開発版の組み立て、verify はリリース後のテスト"
           },
           "command": {
             "type": "array",
@@ -62,7 +60,8 @@
               "type": "string",
               "minLength": 1
             },
-            "description": "書いてよいパスの前置き（根からの相対。絶対パスと .. は使えない）。外を変えたらコマンドは失敗になる。[] は何も書かないコマンド"
+            "description": "書いてよいパスの前置き（根からの相対。絶対パスと .. は使えない）。外を変えたらコマンドは失敗になる。[] は何も書かないコマンド",
+            "default": []
           },
           "guide": {
             "type": "string",
@@ -77,6 +76,31 @@
           }
         }
       }
+    },
+    "undistributed": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "リリース対象に関わらないファイルの形（プラグインの根からの gitignore の形）。無ければテスト"
+    },
+    "bump_undistributed": {
+      "type": "boolean",
+      "default": false,
+      "description": "リリース対象に関わらない変化だけのプラグインも版を上げるか"
+    },
+    "version_files": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": [],
+      "description": "版上げで、プラグインの名前を含む行の版を書き換えるファイル"
+    },
+    "changelog": {
+      "type": "string",
+      "default": "CHANGELOG.md",
+      "description": "CHANGELOG のファイル（リポジトリの根から）"
     }
   },
   "x-ndf-place": "worktree",

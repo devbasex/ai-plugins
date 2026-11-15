@@ -28,7 +28,7 @@ from jsonschema import Draft202012Validator
 from ndf import identity
 from ndf.checks import spec_model, spec_render
 from ndf.checks.model import CheckError, Finding, Scope
-from ndf.checks.spec_args import ArgTree
+from ndf.checks.spec_args import Arg, ArgTree
 from ndf.checks.spec_model import CONTRACTS, DECL_SCHEMA_DIR, IO_SCHEMA_DIR, CommandSpec, DeclarationSpec, SpecModel, opt
 from ndf.contracts import facts
 
@@ -253,8 +253,9 @@ def written_calls(text: str) -> list[tuple[int, list[str]]]:
     return out
 
 
-def _names(tree: ArgTree) -> set[str]:
-    return {n for a in tree.options for n in (a.name, *a.aliases) if not a.positional}
+def _options(tree: ArgTree) -> dict[str, Arg]:
+    """オプションの名前（別名を含む）から引数への対応。"""
+    return {n: a for a in tree.options if not a.positional for n in (a.name, *a.aliases)}
 
 
 def _is_placeholder(word: str) -> bool:
@@ -262,34 +263,50 @@ def _is_placeholder(word: str) -> bool:
 
 
 def call_errors(words: list[str], commands: dict[str, CommandSpec]) -> list[str]:
-    """呼び出しの語を副命令・下位の命令・引数の名前で引数の木に当て、当たらない語を返す（値の型は見ない）。"""
+    """呼び出しの語を副命令・下位の命令・引数の名前で引数の木に当て、当たらない語を返す（値の型は見ない）。
+
+    オプションの値の語は、そのオプションが取る数（`Arg.takes`）だけ読み飛ばしてから下位の命令を辿る。
+    """
     name = words[0]
     if name not in commands:
         return [f"副命令 {name} が無い"]
     tree = commands[name].args
     if tree is None:
         return []
-    allowed = _names(tree)
+    allowed = _options(tree)
     errs = []
-    for word in words[1:]:
+    rest = words[1:]
+    while rest:
+        word, rest = rest[0], rest[1:]
         if _is_placeholder(word):
             continue
         if word.startswith("-"):
             errs += _flag_error(word, allowed)
+            rest = _skip_values(word, allowed, rest)
             continue
         sub = _descend(tree, word)
         if sub is None:
             errs.append(f"下位の命令 {word} が無い")
             break
         tree = sub
-        allowed |= _names(tree)
+        allowed |= _options(tree)
     return errs
 
 
-def _flag_error(word: str, allowed: set[str]) -> list[str]:
+def _flag_error(word: str, allowed: dict[str, Arg]) -> list[str]:
     """オプションの語（`--名前` か `--名前=値`）の名前が、ここまでの命令の引数に無ければその指摘。"""
     flag = word.split("=", 1)[0]
     return [] if flag in allowed else [f"引数 {flag} が無い"]
+
+
+def _skip_values(word: str, allowed: dict[str, Arg], rest: list[str]) -> list[str]:
+    """オプションの語の後ろから、そのオプションの値の語を除いた残り。`--名前=値` と知らない名前は値を取らない。"""
+    if "=" in word or word not in allowed:
+        return rest
+    takes = allowed[word].takes
+    if takes is None:
+        takes = next((i for i, w in enumerate(rest) if w.startswith("-")), len(rest))
+    return rest[takes:]
 
 
 def _descend(tree: ArgTree, word: str) -> ArgTree | None:
@@ -354,7 +371,7 @@ def public_findings(model: SpecModel, plugin_root: Path, rel: Rel) -> list[Findi
             for e in row["env"]
             if e not in env
         ]
-        if row["kind"] == spec_model.SPEC_KIND or row["order"] == spec_model.CALLER_FIRST:
+        if spec_model.is_spec(row) or row["order"] == spec_model.CALLER_FIRST:
             continue
         if not _hits(model, row):
             found.append(Finding(PUBLIC, ep_rel, 1, f"公開する面の行 {row['id']} が規約のどの項目にも当たらない"))
@@ -364,7 +381,7 @@ def public_findings(model: SpecModel, plugin_root: Path, rel: Rel) -> list[Findi
 def _spec_place_findings(model: SpecModel, plugin_root: Path, ep_rel: str) -> list[Finding]:
     """種類 spec の行が規約の置き場ごとにちょうど 1 行あり、どの行も実在の規約の置き場を指すか。"""
     found = []
-    spec = [r for r in model.entrypoints if r["kind"] == spec_model.SPEC_KIND]
+    spec = [r for r in model.entrypoints if spec_model.is_spec(r)]
     for target in SPEC_TARGETS:
         n = sum(1 for r in spec if r["target"] == target)
         if n != 1:
