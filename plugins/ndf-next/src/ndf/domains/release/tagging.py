@@ -5,10 +5,13 @@
 - タグ（`<プラグイン名>--v<版>`）が無ければ、そのコミットを指す参照として作る。あれば作らず、別のコミットを指していても
   動かさない（前のリリースのタグ）
 - GitHub Release が無ければ、CHANGELOG のその版の節を本文にして作る。節が無ければ `<プラグイン名> v<版>` の 1 行
+- `revision` が版上げの PR のマージコミットなら、タグを打つコミットに含まれ版の節に載らない PR（版上げの PR を組んだ後に
+  main へ入った PR。次の版の節に載る）を本文の末尾の節 `LATE_HEADING` に並べる（#3572。`_late`）
 """
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator
 from http import HTTPStatus
 from pathlib import Path
@@ -16,7 +19,7 @@ from typing import NamedTuple
 
 from ndf.adapters import git as git_mod
 from ndf.adapters.github import GitHub, GitHubError
-from ndf.domains.release import changelog_decide, version_decide
+from ndf.domains.release import bump_decide, changelog_decide, included_decide, version_decide
 from ndf.domains.release import declaration as decl_mod
 from ndf.domains.release import plugins as plugins_mod
 
@@ -25,6 +28,9 @@ NOT_FOUND = HTTPStatus.NOT_FOUND
 # 結果の語と種類の語（`Made.result`・`Made.kind`）
 CREATED, EXISTS = "created", "exists"
 TAG, RELEASE = "tag", "release"
+# 次の版の節に載る PR を並べる本文の節の見出し
+LATE_HEADING = "## 次の版の節に載る PR"
+_NUMBER = re.compile(r"#(\d+)")
 
 
 class Made(NamedTuple):
@@ -73,6 +79,27 @@ def _released(root: Path, revision: str) -> Iterator[tuple[plugins_mod.Plugin, s
             yield plugin, ver
 
 
+def _late(root: Path, revision: str, notes: str) -> list[int]:
+    """タグを打つコミット `revision`（版上げの PR のマージ）に含まれ、版の節 `notes` に載らない PR の番号。
+
+    範囲は第 2 親（版上げのコミット）の起点から第 1 親（マージ前の main）まで。起点が読めなければ空。
+    """
+    repo_git = git_mod.Git(root)
+    done = repo_git.attempt("log", "-1", "--format=%B", git_mod.END_OF_OPTIONS, f"{revision}^2")
+    origin = bump_decide.origin_of(done.stdout) if done.returncode == 0 else None
+    if origin is None:
+        return []
+    subjects = repo_git.run("log", "--first-parent", "--format=%s", git_mod.END_OF_OPTIONS, f"{origin}..{revision}^1")
+    listed = [int(n) for n in _NUMBER.findall(notes)]
+    return bump_decide.late(included_decide.numbers(subjects.splitlines()), listed)
+
+
+def _with_late(notes: str, late: list[int]) -> str:
+    if not late:
+        return notes
+    return f"{notes.rstrip()}\n\n{LATE_HEADING}\n\n" + "".join(f"- #{n}\n" for n in late)
+
+
 def publish(root: Path, hub: GitHub, revision: str) -> list[Made]:
     """足りないタグと GitHub Release を作り、1 件ずつの結果を返す。"""
     decl = decl_mod.load(root)
@@ -83,6 +110,7 @@ def publish(root: Path, hub: GitHub, revision: str) -> list[Made]:
         tag = version_decide.tag_of(plugin.name, ver)
         title = f"{plugin.name} v{ver}"
         notes = changelog_decide.notes(log_text, plugin.name, ver)
+        body = notes if notes else title
         out.append(_tag(hub, tag, revision))
-        out.append(_release(hub, tag, title, notes if notes else title))
+        out.append(_release(hub, tag, title, _with_late(body, _late(root, revision, body))))
     return out

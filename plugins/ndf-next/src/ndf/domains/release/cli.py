@@ -2,28 +2,32 @@
 
 | 副命令 | 打つもの | 段階のモジュール |
 | --- | --- | --- |
-| `assemble` | workflow | `assemble`（ブランチの組み立てと PR） |
-| `materials` | 会話のセッション・workflow | `assemble.collect`（ブランチを作らずに承認資料を組む） |
+| `assemble` | workflow・スプリントのプラン | `assemble`（本番の PR の本文の承認資料の節を書く。ブランチを作らない） |
+| `materials` | 会話のセッション・workflow | `assemble.collect`（承認資料を組んで出す。本文を書かない） |
 | `present` | 会話のセッション | `trail.present`（承認資料の提示。承認ゲート） |
 | `answer` | 会話のセッション・承認ゲートの待ち | `trail.answer`（答えを証跡に書き、届いたかを確かめる）。`--route github-merge` は `trail.answer_merged`（人のマージを承認の証跡にする） |
 | `approval-check` | workflow | `trail.check`（証跡の判定を commit status へ） |
-| `merge` | 本番のプラン・workflow | `land`（証跡の後のマージと、ベースブランチへ戻す PR。止まったら次の手を値の項目 `moves` に出す） |
-| `guard` | `merge` のプラン | `release_plan.is_production_pr`（本番の PR を直しのステップのあるプランで流さない） |
-| `defer` | オーガナイザー・一時レーン | 本番の PR を閉じ、リリースブランチを残す（次の版への回し） |
-| `prepare-next` | 本番のプラン | `prepare.prepare_next`（次の版のリリースブランチを本番ブランチから用意する） |
-| `record` | workflow | `record.write`（含めた PR の各々へリリース記録を書く。本番ブランチへのマージの後） |
+| `merge` | 本番のプラン・workflow | `land`（証跡の後の照合付きのマージ。同期の PR を作らない。止まったら次の手を値の項目 `moves` に出す） |
+| `confirm` | 本番のプラン | `confirm`（CD の版上げの PR のマージ・タグ・GitHub Release を待ち、作った版を記録する） |
+| `guard` | `merge`・`check`・`close` のプラン | `release_plan.is_production_pr`（本番の PR をマージせずにデプロイの工程へ渡す。検証の ref を main へ入れない） |
+| `bump` | workflow（main への push） | `bump`（版上げの PR を作り・進め・置き換え、照合付きでマージする） |
+| `pr-check` | workflow（main 宛ての PR） | `pr_check.check`（版数・上げ幅のラベル・検証の ref・レビューの単位の検査） |
+| `verify-ref` | workflow（main 宛ての PR の出来事） | `verify_ref.build`（検証の ref を組み直す） |
+| `record` | 本番のプラン・workflow | `record.write`（含めた PR の各々へリリース記録を書く。`confirm` の後） |
 | `verification-record` | 会話のセッション | `record.write_verification`（リリース後テストの記録を、リリース記録と同じ PR へ書く） |
 | `records` | 会話のセッション | `record.read`（PR のリリース記録とリリース後テストの記録を読む） |
 | `publish` | workflow | `tagging`（タグと GitHub Release） |
 | `sync-base` | 会話のセッション | `verify.sync_base`（メインディレクトリのベースブランチをそろえる） |
 | `config-snapshot`・`config-check` | 会話のセッション | `verify.snapshot`（利用者の設定の控えと比べ） |
-| `cleanup` | 会話のセッション | `cleanup.sweep`（マージしたブランチの worktree を外す） |
+| `cleanup` | 本番のプラン・会話のセッション | `cleanup.sweep`（マージしたブランチの worktree を外す。`--pr` なら PR の head のブランチ） |
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import time
+from datetime import datetime, timezone
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -36,11 +40,14 @@ from ndf.contracts import result
 from ndf.domains.release import (
     approval_decide,
     assemble,
+    bump,
+    bump_decide,
     cleanup,
+    confirm,
     land,
     materials_decide,
     merge_decide,
-    prepare,
+    pr_check,
     record,
     record_decide,
     release_plan,
@@ -49,6 +56,7 @@ from ndf.domains.release import (
     trail,
     user_config_decide,
     verify,
+    verify_ref,
     version_decide,
 )
 from ndf.domains.release import declaration as decl_mod
@@ -77,15 +85,15 @@ def _production_of(args: argparse.Namespace) -> str:
 
 
 def _target(args: argparse.Namespace) -> assemble.Target:
-    return assemble.Target(args.channel, args.level, args.base, _production_of(args), args.plugin, args.source)
+    return assemble.Target(_production_of(args), args.pr, args.plugin)
 
 
 def cmd_assemble(args: argparse.Namespace) -> dict:
     built = assemble.assemble(Path(args.root), _hub(args), _target(args))
-    outputs = {"pr": built.pr, "branch": built.branch, "version": built.version}
-    items = materials_decide.items(built.facts) + _values(url=built.url, reassembled=built.reassembled, renamed_from=built.renamed_from)
-    verb = "の承認資料を新しい先端で書き直した" if built.reassembled else "を作った"
-    return result.result(TOOL, result.OK, f"{built.branch} の PR #{built.pr} {verb}: {built.url}", items, outputs=outputs)
+    outputs = {"pr": built.pr, "version": built.version}
+    items = materials_decide.items(built.facts) + _values(url=built.url, head=built.facts.head)
+    detail = f"#{built.pr} の本文の承認資料を {built.facts.head[:12]} で書いた（予定の版 v{built.version}）: {built.url}"
+    return result.result(TOOL, result.OK, detail, items, outputs=outputs)
 
 
 def cmd_materials(args: argparse.Namespace) -> dict:
@@ -115,7 +123,7 @@ def _answer_merged(args: argparse.Namespace) -> dict:
         judgment, facts = trail.answer_merged(_hub(args), args.pr, _production_of(args))
     except trail.NotMerged as exc:
         return result.stopped(TOOL, "not_applicable", str(exc))
-    version = land.release_version(facts.head_ref)
+    version = bump.planned_for(Path(args.root), _hub(args), args.pr, _production_of(args))
     items = _values(state=judgment.state, by=facts.by, head=facts.head)
     detail = f"#{args.pr} の人のマージを承認の証跡にした: {judgment.detail}"
     return result.result(TOOL, result.OK, detail, items, outputs={"version": version} if version else None)
@@ -154,38 +162,38 @@ def _same_target(args: argparse.Namespace) -> list[str]:
 
 
 def _moves(args: argparse.Namespace, kind: str, released: bool) -> dict[str, Any]:
-    """止まったマージの次の手（打ち直し・差し戻し・次の版への回し）と既定の手（#3572 の決定 3）。
+    """止まったマージの次の手（打ち直し・差し戻し）と既定の手（#3572 の決定 3）。
 
-    本番へのマージが済んで戻す PR だけが止まった（`released`）ときは、本番の PR は閉じても差し戻してもいけないため、
-    戻す PR からの再開（打ち直し）だけを返す。
+    本番へのマージが済んで記録だけが止まった（`released`）ときは、本番の PR を差し戻してはいけないため、
+    マージ済みからの再開（打ち直し）だけを返す。
     """
     pr = str(args.pr)
     target = _same_target(args)
-    rerun = result.command(TOOL, "merge", "--pr", pr, "--base", args.base, "--budget", str(args.budget), *target)
+    rerun = result.command(TOOL, "merge", "--pr", pr, "--budget", str(args.budget), *target)
     if released:
         return {"moves": {merge_decide.RERUN: rerun}, "suggested": merge_decide.RERUN}
     answer_args = ("answer", "--pr", pr, "--answer", approval_decide.REJECTED, *target)
     moves = {
         merge_decide.RERUN: rerun,
         merge_decide.REJECT: result.command(TOOL, *answer_args, ask=("--presented", "--by")),
-        merge_decide.DEFER: result.command(TOOL, "defer", "--pr", pr, *target),
     }
     return {"moves": moves, "suggested": merge_decide.suggested(kind)}
 
 
 def cmd_merge(args: argparse.Namespace) -> dict:
-    admin = decl_mod.production_admin(Path(args.root))
-    done = land.Lander(_hub(args), args.base, _production_of(args), args.budget, admin=admin).land(args.pr)
-    return _merge_result(args, done)
+    root, hub, production = Path(args.root), _hub(args), _production_of(args)
+    decl_mod.require_github_flow(root)
+    admin = decl_mod.production_admin(root)
+    done = land.Lander(hub, production, args.budget, admin=admin).land(args.pr)
+    return _merge_result(args, done, bump.planned_for(root, hub, args.pr, production))
 
 
-def _merge_result(args: argparse.Namespace, done: land.Landed) -> dict:
-    """マージの結果 `done` を結果 JSON（items・outputs・止まった理由・記録の失敗の説明・止まったときの次の手）にする。"""
-    outputs = {"version": done.version} if done.version is not None else None
+def _merge_result(args: argparse.Namespace, done: land.Landed, version: str | None = None) -> dict:
+    """マージの結果 `done` と予定の版を結果 JSON（items・outputs・止まった理由・記録の失敗の説明・止まったときの次の手）にする。"""
+    outputs = {"version": version} if version is not None else None
     approval = done.approval.as_json() if done.approval is not None else None
     items = [{"kind": "check", "name": c.name, "outcome": c.conclusion} for c in done.failed]
     items += _values(
-        sync_pr=done.sync_pr,
         production_sha=done.production_sha,
         admin=done.admin,
         admin_record=done.admin_record,
@@ -198,14 +206,25 @@ def _merge_result(args: argparse.Namespace, done: land.Landed) -> dict:
     if done.merged and done.kind is None and done.record_error is None:
         return result.result(TOOL, result.OK, detail, items, outputs=outputs)
     kind = done.kind if done.kind else "unknown"
-    # 次の手は打つ側が選ぶ（既定の手を next にすると、打つ側が問わずに本番の PR を閉じる）。`merged` は戻す PR の成否でも
-    # 偽になるため、本番へ出たかは `production_sha` で分ける
+    # 次の手は打つ側が選ぶ（既定の手を next にすると、打つ側が問わずに差し戻す）。本番へ出たかは `production_sha` で分ける
     if not done.merged:
         items += _values(**_moves(args, kind, released=done.production_sha is not None))
     return result.stopped(TOOL, kind, detail, items=items, outputs=outputs)
 
 
+def _verify_ref_of(root: Path) -> str | None:
+    """宣言の検証の ref の名前（検証の行が無ければ None）。"""
+    try:
+        return decl_mod.verify_of(root).ref
+    except decl_mod.DeclarationError:  # noqa: NDF401 ファイル: 検証の行の無いリポジトリは検証の ref を持たない
+        return None
+
+
 def cmd_guard(args: argparse.Namespace) -> dict:
+    verify_ref_name = _verify_ref_of(Path(args.root))
+    if verify_ref_name is not None and verify_ref_name in args.branch:
+        detail = f"{verify_ref_name} は検証の ref で、main へ戻さない（マージしない）"
+        return result.stopped(TOOL, "refused", detail)
     try:
         production = _production_of(args)
     except decl_mod.DeclarationError as exc:  # 本番ブランチを宣言しないリポジトリの merge のプランを止めない
@@ -217,28 +236,74 @@ def cmd_guard(args: argparse.Namespace) -> dict:
     hits = [p for p in opened if release_plan.is_production_pr(p.base_ref, production)]
     if hits:
         listed = ", ".join(f"#{p.number}" for p in hits)
-        detail = f"{listed} は本番ブランチ {production} 宛ての本番の PR で、直しのステップのある merge のプランで流さない（release のプランで流す）"
+        detail = f"{listed} は本番ブランチ {production} 宛ての本番の PR で、このプランではマージしない（デプロイの工程で流す）"
         return result.stopped(TOOL, release_plan.guard_cause(), detail)
     return result.result(TOOL, result.OK, f"{', '.join(f'#{p.number}' for p in opened)} は本番の PR でない")
 
 
-def cmd_defer(args: argparse.Namespace) -> dict:
-    hub = _hub(args)
-    production = _production_of(args)
-    pull = hub.pull(args.pr)
-    if pull.state != "open" or not release_plan.is_production_pr(pull.base_ref, production):
-        return result.stopped(TOOL, "precondition", f"#{args.pr} は開いた本番の PR でない（{pull.state}・{pull.base_ref}）")
-    hub.rest("PATCH", f"/repos/{hub.repo}/pulls/{args.pr}", {"state": "closed"})
-    detail = f"#{args.pr} を閉じ、{pull.head_ref} を残した（直しと後のスプリントを入れてから組み直す）"
-    return result.result(TOOL, result.OK, detail, _values(closed=args.pr, branch=pull.head_ref))
+def _bump_stopped(hub: GitHub, made: bump.Bumped) -> dict:
+    """止まった版上げの結果。版上げの PR があれば理由をコメントで残す。"""
+    landed = made.landed
+    kind = landed.kind if landed is not None and landed.kind else "unknown"
+    detail = landed.detail if landed is not None else "版上げが止まった"
+    if made.pr is not None:
+        hub.rest("POST", f"/repos/{hub.repo}/issues/{made.pr}/comments", {"body": f"版上げが止まった（{kind}）: {detail}"})
+    items = [{"kind": "check", "name": c.name, "outcome": c.conclusion} for c in (landed.failed if landed else ())]
+    items += _values(state=made.state, level=made.level, pr_url=f"https://github.com/{hub.repo}/pull/{made.pr}" if made.pr else None)
+    outputs = {k: v for k, v in (("version", made.version), ("pr", made.pr)) if v is not None}
+    return result.stopped(TOOL, kind, detail, items=items, outputs=outputs or None)
 
 
-def cmd_prepare_next(args: argparse.Namespace) -> dict:
-    made = prepare.prepare_next(_hub(args), args.pr, _production_of(args))
-    verb = "を用意した" if made.created else "は既にある"
-    # 版とブランチは出した版のものではないため outputs（スプリントの文脈）へ書かない
-    items = _values(branch=made.branch, version=made.version, created=made.created)
-    return result.result(TOOL, result.OK, f"次の版のリリースブランチ {made.branch} {verb}", items)
+def cmd_bump(args: argparse.Namespace) -> dict:
+    root, hub, production = Path(args.root), _hub(args), _production_of(args)
+    lander = land.Lander(hub, production, args.budget, admin=decl_mod.production_admin(root))
+    today = datetime.now(timezone.utc).date().isoformat()
+    made = bump.Bumper(root, hub, lander, production, today).bump()
+    if made.state not in bump_decide.BUMP_STATES:
+        return _bump_stopped(hub, made)
+    outputs = {k: v for k, v in (("version", made.version), ("pr", made.pr)) if v is not None}
+    items = _values(state=made.state, level=made.level, production_sha=made.landed.production_sha if made.landed else None)
+    detail = f"版上げ: {made.state}（版 {made.version or '無し'}・版上げの PR {f'#{made.pr}' if made.pr else '無し'}）"
+    return result.result(TOOL, result.OK, detail, items, outputs=outputs or None)
+
+
+def cmd_confirm(args: argparse.Namespace) -> dict:
+    root, hub, production = Path(args.root), _hub(args), _production_of(args)
+    found = plugins_mod.load(root)
+    if not found:
+        return result.stopped(TOOL, "precondition", "マーケットプレイスにプラグインが無い")
+    got = confirm.confirm(hub, git_mod.Git(root), args.pr, production, found[0].name, args.budget, time.monotonic, time.sleep)
+    outputs = {"version": got.version} if got.version is not None else None
+    values = _values(tag=got.tag, bump_pr=got.bump_pr, bump_revision=got.bump_revision)
+    if got.kind is None:
+        return result.result(TOOL, result.OK, got.detail, values, outputs=outputs)
+    # 次の手は CD を打ち直した後の confirm の打ち直しの 1 つ（routes は答えの語彙を持つため、merge と同じく値の項目 moves で返す）
+    rerun = result.command(TOOL, "confirm", "--pr", str(args.pr), "--budget", str(args.budget), *_same_target(args))
+    items = [{"kind": "cd", "name": got.missing or confirm.MISSING_BUMP, "detail": got.detail}, *values]
+    items += _values(moves={merge_decide.RERUN: rerun}, suggested=merge_decide.RERUN)
+    return result.stopped(TOOL, got.kind, got.detail, items=items, outputs=outputs)
+
+
+def cmd_pr_check(args: argparse.Namespace) -> dict:
+    root = Path(args.root)
+    found = pr_check.check(root, _hub(args), git_mod.Git(root), args.pr)
+    if found is None:
+        return result.result(TOOL, result.OK, f"取り込み方が {decl_mod.GITHUB_FLOW} でないので #{args.pr} を検査しない")
+    if found:
+        return result.stopped(TOOL, "check_failed", f"#{args.pr} の検査で {len(found)} 件の破れがある", items=found)
+    return result.result(TOOL, result.OK, f"#{args.pr} の検査に破れは無い")
+
+
+def cmd_verify_ref(args: argparse.Namespace) -> dict:
+    root = Path(args.root)
+    try:
+        built = verify_ref.build(root, _hub(args), decl_mod.verify_of(root), datetime.now(timezone.utc))
+    except verify_ref.VerifyConflict as exc:
+        return result.stopped(TOOL, "base_conflict", str(exc), items=[{"kind": "conflict", "name": f"#{exc.number}"}])
+    included = [{"number": n, "head": h} for n, h in built.included]
+    items = _values(ref=built.ref, head=built.head, included=included)
+    detail = f"{built.ref} を {built.head[:12]} へ組み直した（{built.version}。含めた PR {len(included)} 本）"
+    return result.result(TOOL, result.OK, detail, items, outputs={"version": built.version})
 
 
 def cmd_record(args: argparse.Namespace) -> dict:
@@ -301,8 +366,11 @@ def cmd_config_check(args: argparse.Namespace) -> dict:
 
 
 def cmd_cleanup(args: argparse.Namespace) -> dict:
+    if not args.branch and args.pr is None:
+        return result.stopped(TOOL, "invalid", "--branch か --pr のどちらかが要る")
+    branches = args.branch if args.branch else [_hub(args).pull(args.pr).head_ref]
     repo_git = git_mod.Git(Path(args.root))
-    swept = cleanup.sweep(repo_git.worktrees(), args.branch, cleanup.git_remover(repo_git))
+    swept = cleanup.sweep(repo_git.worktrees(), branches, cleanup.git_remover(repo_git))
     items = [{"kind": "worktree", "path": str(p), "result": "removed"} for p in swept.removed]
     items += [{"kind": "worktree", "path": str(p), "result": "kept", "reason": why} for p, why in swept.kept]
     return result.result(
@@ -319,22 +387,10 @@ def _common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--repo", help="<所有者>/<リポジトリ>。省けば origin")
 
 
-def _branches(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--base", required=True, help="ベースブランチ（宣言 worktree.json の base_branch）")
-    _production(p)
-
-
 def _target_args(p: argparse.ArgumentParser) -> None:
-    _branches(p)
-    p.add_argument("--channel", choices=version_decide.CHANNELS, required=True)
-    p.add_argument("--level", choices=version_decide.LEVELS, default="patch")
-    p.add_argument("--plugin", help="ブランチの名前に版を使うプラグイン（省けば登録の順の先頭）")
-    p.add_argument(
-        "--source",
-        choices=assemble.SOURCES,
-        default=assemble.BASE_SOURCE,
-        help="範囲の先端（ベースブランチ base / 常設のリリースブランチ release）",
-    )
+    _pr(p)
+    _production(p)
+    p.add_argument("--plugin", help="予定の版を出すプラグイン（省けば登録の順の先頭）")
 
 
 def _pr(p: argparse.ArgumentParser) -> None:
@@ -400,6 +456,11 @@ def _branch(p: argparse.ArgumentParser) -> None:
     p.add_argument("--branch", action="append", required=True)
 
 
+def _cleanup_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--branch", action="append", help="worktree を外すブランチ（省けば --pr の head のブランチ）")
+    p.add_argument("--pr", type=int, help="head のブランチの worktree を外す PR")
+
+
 # 副命令のハンドラー → 引数を足す関数（並びは足す順。どの副命令にも先に `_common` を足す）
 ARGS: dict[Callable[[argparse.Namespace], dict], tuple[Callable[[argparse.ArgumentParser], None], ...]] = {
     cmd_assemble: (_target_args,),
@@ -407,10 +468,12 @@ ARGS: dict[Callable[[argparse.Namespace], dict], tuple[Callable[[argparse.Argume
     cmd_present: (_pr, _material),
     cmd_answer: (_pr, _answer_args),
     cmd_approval_check: (_pr, _production),
-    cmd_merge: (_pr, _branches, _budget),
+    cmd_merge: (_pr, _production, _budget),
+    cmd_confirm: (_pr, _production, _budget),
     cmd_guard: (_branch, _production),
-    cmd_defer: (_pr, _production),
-    cmd_prepare_next: (_pr, _production),
+    cmd_bump: (_production, _budget),
+    cmd_pr_check: (_pr,),
+    cmd_verify_ref: (),
     cmd_record: (_pr, _production),
     cmd_verification_record: (_pr, _verification),
     cmd_records: (_pr,),
@@ -418,7 +481,7 @@ ARGS: dict[Callable[[argparse.Namespace], dict], tuple[Callable[[argparse.Argume
     cmd_sync_base: (_main_dir, _base),
     cmd_config_snapshot: (_snapshot_out,),
     cmd_config_check: (_before,),
-    cmd_cleanup: (_branch,),
+    cmd_cleanup: (_cleanup_args,),
 }
 
 # 副命令の名前 → ハンドラー。名前はハンドラーの名前（`cmd_<名前>` の `_` を `-` にしたもの）から作り、写さない
@@ -440,8 +503,10 @@ def _parser() -> argparse.ArgumentParser:
 _ERRORS: tuple[tuple[type[Exception], str], ...] = (
     (assemble.NothingToRelease, "not_applicable"),
     (assemble.AssembleError, "precondition"),
-    (assemble.ReleaseOpen, "refused"),
-    (prepare.PrepareError, "precondition"),
+    (bump.BumpError, "precondition"),
+    (bump.BumpConflict, "base_conflict"),
+    (confirm.ConfirmError, "precondition"),
+    (bump_decide.LevelError, "invalid"),
     (trail.TrailError, "refused"),
     (record.NotReleased, "not_applicable"),
     (record.RecordError, "precondition"),

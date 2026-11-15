@@ -109,6 +109,12 @@ def _production_version(repo_git: git_mod.Git, plugin: plugins_mod.Plugin, produ
     return [value] if isinstance(value, str) else []
 
 
+def version_at(repo_git: git_mod.Git, plugin: plugins_mod.Plugin, ref: str) -> str | None:
+    """コミット `ref` のプラグインの定義（先頭）の版（定義が無ければ None）。"""
+    found = _production_version(repo_git, plugin, ref)
+    return found[0] if found else None
+
+
 def shipped(repo_git: git_mod.Git, found: Sequence[plugins_mod.Plugin], production_ref: str) -> dict[str, str]:
     """プラグインごとの出し済みの版（本番ブランチの版とタグの版のうち基底が最も大きいもの。無いプラグインは入れない）。
 
