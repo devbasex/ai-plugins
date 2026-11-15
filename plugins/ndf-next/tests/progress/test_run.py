@@ -17,7 +17,6 @@ import pytest
 from ndf import contracts
 from ndf.adapters.github import GitHubError
 from ndf.contracts import causes, result
-from ndf.core import durable
 from ndf.progress import command, definition, invoke, model, run, stages, store
 
 ISSUE = 3092
@@ -40,17 +39,10 @@ def _main(capsys, fn, *argv: str) -> tuple[int, dict]:
     return code, json.loads(capsys.readouterr().out.strip().splitlines()[-1])
 
 
-def _new(capsys, mode: str = "light", *extra: str) -> str:
+def _new(capsys, mode: str = "standard", *extra: str) -> str:
     code, out = _main(capsys, command.main, "new", "s1", "--mode", mode, "--issues", str(ISSUE), *extra)
     assert code == 0, out
     return out["metrics"]["table_id"]
-
-
-@pytest.fixture
-def st(repo):
-    root = durable.prepare_store(command.store_root_of(repo)).root  # 置き場を用意してから開く（`ndf progress` の副命令と同じ順）
-    with store.open_store(store.default_url(root), root) as opened:
-        yield opened
 
 
 class Fake:
@@ -107,7 +99,7 @@ def _labels(st, tid) -> dict[str, str]:
 
 
 def _approve(st, tid, stage, value="approved", notes=None):
-    return run.answer(st, tid, stage, value, "人が答えた", notes)
+    return lanes.answer(st, tid, stage, value, "人が答えた", notes)
 
 
 def test_next_starts_the_first_pending_row_and_returns_wait(repo, st, env, capsys):
@@ -144,8 +136,8 @@ def test_answers_carry_the_sprint_to_completion_and_the_records_follow_the_marks
     assert done["status"] == "ok" and done["metrics"]["state"] == "completed"
     assert set(_labels(st, tid).values()) == {"finished"}
     body = env.records.bodies[ISSUE]
-    assert body.startswith("本文\n\n## 進行\n\nモード: light\n")
-    assert body.count("- [x] ") == 10 and "- [ ] " not in body
+    assert body.startswith("本文\n\n## 進行\n\nモード: standard\n")
+    assert body.count("- [x] ") == len(run.read(st, tid).snap.stages) and "- [ ] " not in body
     assert "## 通した工程" in env.records.bodies[8]
     # 揃え直しは何度打っても同じ（3377-9）
     writes = env.records.writes
@@ -161,7 +153,8 @@ def test_finished_steps_are_not_run_again_after_the_gate(repo, st, env, capsys):
     before = len(env.fake.calls)
     _approve(st, tid, "設計")
     lanes.turn(st, tid, repo, env.env)
-    assert [c.step for c in env.fake.calls[before:]][:2] == ["design-merge", "implement"]
+    after = [c.step for c in env.fake.calls[before:]]
+    assert after[0] == "design-merge" and not {"design", "design-review"} & set(after)
 
 
 def test_rejected_gate_fails_the_row_and_returns_the_conductor_routes(repo, st, env, capsys):
@@ -465,6 +458,34 @@ def test_retro_enabled_needs_a_finished_retrospective_row():
     assert not run.TABLE_FACTS["retro_enabled"](view("finished", (other,)))
 
 
+@pytest.mark.parametrize("mode", ["light", "operation"])
+def test_the_design_of_light_and_operation_has_no_design_gate(mode):
+    # #3425: 設計承認ゲートが掛かるモードは工程の定義（ステップの modes）が持つ
+    steps = definition.load_definition(mode).stage("設計").steps
+    assert "design-gate" not in [st.id for st in steps] and steps[-1].id == "design-merge"
+
+
+@pytest.mark.parametrize("mode", ["standard", "legacy-refactor", "documentation"])
+def test_the_design_of_the_other_modes_keeps_the_design_gate(mode):
+    assert definition.load_definition(mode).stage("設計").gates == ("design",)
+
+
+def test_a_step_naming_an_unknown_mode_is_refused():
+    docs = {
+        p.stem: contracts.load_json(f"workflow/stages/{p.name}") for p in (contracts.contracts_dir() / "workflow/stages").glob("*.json")
+    }
+    docs["design"]["do"][2]["design-gate"]["metadata"]["ndf"]["modes"] = ["heavy"]
+    with pytest.raises(definition.WorkflowDefError, match="heavy は定義の無いモード"):
+        definition.build(contracts.load_json("workflow/modes/standard.json"), docs)
+
+
+def test_light_flows_the_design_to_the_merge_without_asking(repo, st, env, capsys):
+    tid = _new(capsys, "light")
+    out = lanes.turn(st, tid, repo, env.env)
+    assert out["status"] == "gate" and out["metrics"]["stage"] == "デプロイ"
+    assert "design-merge" in [c.step for c in env.fake.calls]
+
+
 def test_missing_input_does_not_start_the_row(repo, st, env, capsys):
     tid = _new(capsys, "light", "--disable", "作業場所の用意=手で用意した")
     out = lanes.turn(st, tid, repo, env.env)
@@ -593,6 +614,25 @@ def test_append_rebuilds_after_a_conflict_and_raises_when_the_attempts_run_out(r
     with pytest.raises(store.Conflict):
         run.append(st, tid, lambda v: builds.append(v) or _started(v))
     assert calls["n"] == run.APPEND_ATTEMPTS and len(builds) == run.APPEND_ATTEMPTS
+
+
+def test_append_runs_after_in_the_same_transaction_and_a_failure_rolls_the_append_back(repo, st, capsys):
+    tid = _new(capsys)
+    before = run.read(st, tid).events[-1].seq
+    seen: list[int] = []
+
+    def after_sees(conn):
+        seen.append(store.read_events(conn, tid)[-1].seq)
+
+    seqs = run.append(st, tid, _started, after=after_sees)
+    assert seen == seqs and run.read(st, tid).events[-1].seq == seqs[0]
+
+    def after_fails(_conn):
+        raise model.Refused("後で断る")
+
+    with pytest.raises(model.Refused, match="後で断る"):
+        run.append(st, tid, _started, after=after_fails)
+    assert run.read(st, tid).events[-1].seq == seqs[0] != before
 
 
 def test_append_lets_refusals_through_without_retrying(repo, st, capsys):

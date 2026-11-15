@@ -22,9 +22,12 @@ REPO = "devbasex/ai-plugins"
 HEAD = "2bb66a6c14a618cbac108b61737ad49cfb1ac48b"
 OTHER = "0" * 40
 ALL_METHODS = {"allow_squash_merge": True, "allow_merge_commit": True, "allow_rebase_merge": True}
+NO_QUEUE = {"data": {"repository": {"pullRequest": {"id": "PR_7", "isMergeQueueEnabled": False, "isInMergeQueue": False}}}}
 MERGE_SETTINGS = {
     ("GET", f"/repos/{REPO}/rules/branches/develop"): [httpx.Response(200, json=[])],
     ("GET", f"/repos/{REPO}"): [httpx.Response(200, json=ALL_METHODS)],
+    # 405 の後に読む基底のマージキューの有無（既定はキューなし）
+    ("POST", "/graphql"): [httpx.Response(200, json=NO_QUEUE)],
 }
 
 
@@ -122,6 +125,53 @@ def test_merge_refusal_is_classified_from_merge_state(status: int, after: dict, 
     assert (out.merged, out.kind) == (False, kind)
 
 
+@pytest.mark.parametrize(("in_queue", "enqueued"), [(False, 1), (True, 0)])
+def test_merge_enqueues_when_base_requires_merge_queue(in_queue: bool, enqueued: int) -> None:
+    # キュー必須の基底は直接のマージを 405 で断る。先端のままキューへ入れ、実際のマージまでは ci_pending で待つ
+    state = {"data": {"repository": {"pullRequest": {"id": "PR_7", "isMergeQueueEnabled": True, "isInMergeQueue": in_queue}}}}
+    server = Server({
+        ("GET", f"/repos/{REPO}/pulls/7"): [httpx.Response(200, json=_pull())],
+        ("PUT", f"/repos/{REPO}/pulls/7/merge"): [httpx.Response(405, json={"message": "merge queue"})],
+        ("POST", "/graphql"): [httpx.Response(200, json=state), httpx.Response(200, json={"data": {"enqueuePullRequest": {}}})],
+    })  # fmt: skip
+    out = _hub(server).merge(7)
+    assert (out.merged, out.kind) == (False, "ci_pending")
+    mutations = [json.loads(r.content) for r in server.sent("POST") if b"enqueuePullRequest" in r.content]
+    assert len(mutations) == enqueued
+    if enqueued:
+        assert mutations[0]["variables"] == {"id": "PR_7", "head": HEAD}
+
+
+@pytest.mark.parametrize(("queue_method", "kind", "enqueued"), [("MERGE", "ci_pending", 1), ("SQUASH", "refused", 0), (None, "refused", 0)])
+def test_merge_refuses_queue_with_another_merge_method(queue_method: str | None, kind: str, enqueued: int) -> None:
+    # merge commit を求めたのにキューが squash でマージするなら、キューへ入れずに断る（祖先の関係を壊さない）
+    config = {"configuration": {"mergeMethod": queue_method}} if queue_method else None
+    pr = {"id": "PR_7", "isMergeQueueEnabled": True, "isInMergeQueue": False}
+    state = {"data": {"repository": {"pullRequest": pr, "mergeQueue": config}}}
+    server = Server({
+        ("GET", f"/repos/{REPO}/pulls/7"): [httpx.Response(200, json=_pull())],
+        ("PUT", f"/repos/{REPO}/pulls/7/merge"): [httpx.Response(405, json={"message": "merge queue"})],
+        ("POST", "/graphql"): [httpx.Response(200, json=state), httpx.Response(200, json={"data": {"enqueuePullRequest": {}}})],
+    })  # fmt: skip
+    out = _hub(server).merge(7, method="merge", require_method=True)
+    assert (out.merged, out.kind) == (False, kind)
+    assert len([r for r in server.sent("POST") if b"enqueuePullRequest" in r.content]) == enqueued
+
+
+def test_merge_follows_queue_method_when_method_is_not_required() -> None:
+    # プランの merge ステップ（ndf ci merge）は自動で決めた方式を渡すが、キューの基底ではキューの方式に従って入れる
+    pr = {"id": "PR_7", "isMergeQueueEnabled": True, "isInMergeQueue": False}
+    state = {"data": {"repository": {"pullRequest": pr, "mergeQueue": {"configuration": {"mergeMethod": "MERGE"}}}}}
+    server = Server({
+        ("GET", f"/repos/{REPO}/pulls/7"): [httpx.Response(200, json=_pull())],
+        ("PUT", f"/repos/{REPO}/pulls/7/merge"): [httpx.Response(405, json={"message": "merge queue"})],
+        ("POST", "/graphql"): [httpx.Response(200, json=state), httpx.Response(200, json={"data": {"enqueuePullRequest": {}}})],
+    })  # fmt: skip
+    out = _hub(server).merge(7, method="squash")
+    assert (out.merged, out.kind) == (False, "ci_pending")
+    assert len([r for r in server.sent("POST") if b"enqueuePullRequest" in r.content]) == 1
+
+
 def test_merge_raises_on_server_error() -> None:
     server = Server({
         ("GET", f"/repos/{REPO}/pulls/7"): [httpx.Response(200, json=_pull())],
@@ -172,6 +222,20 @@ def test_check_runs_refuses_more_pages_than_the_limit() -> None:
     server = Server({("GET", f"/repos/{REPO}/commits/{HEAD}/check-runs"): [full]})
     with pytest.raises(github.GitHubError, match="github.check-runs"):
         _hub(server).check_runs(HEAD)
+
+
+def test_compare_commits_reads_pages_beyond_250_until_total() -> None:
+    # pulls/<番号>/commits は 250 件で切れる。compare はページ送りで total_commits まで読む
+    pages = [httpx.Response(200, json={"total_commits": 260, "commits": [{"sha": str(i)} for i in range(n)]}) for n in (100, 100, 60)]
+    server = Server({("GET", f"/repos/{REPO}/compare/{OTHER}...{HEAD}"): pages})
+    assert len(_hub(server).compare_commits(OTHER, HEAD)) == 260
+    assert [r.url.params["page"] for r in server.seen] == ["1", "2", "3"]
+
+
+def test_commit_parents_lists_first_parent_first() -> None:
+    body = {"sha": HEAD, "parents": [{"sha": OTHER}, {"sha": "1" * 40}]}
+    server = Server({("GET", f"/repos/{REPO}/git/commits/{HEAD}"): [httpx.Response(200, json=body)]})
+    assert _hub(server).commit_parents(HEAD) == [OTHER, "1" * 40]
 
 
 def _pr_node(number: int) -> dict:
@@ -377,6 +441,19 @@ def test_unreadable_permission_is_untrusted(status: int) -> None:
     # 3364-1: 権限を読めない書き手は信用しない（読めないことを write と見なさない）
     server = Server({("GET", f"/repos/{REPO}/collaborators/someone/permission"): [httpx.Response(status, json={"message": "no"})]})
     assert _hub(server).trusts(github.Authored("someone", "MEMBER", "x")) is False
+
+
+@pytest.mark.parametrize(
+    ("user", "permission", "trusted"),
+    [(httpx.Response(200, json={"login": "someone"}), "write", True), (httpx.Response(200, json={"login": "someone"}), "read", False),
+     (httpx.Response(403, json={"message": "Resource not accessible by integration"}), None, False)],
+)  # fmt: skip
+def test_token_trusted_follows_the_writer_permission(user: httpx.Response, permission: str | None, trusted: bool) -> None:
+    # #3487: 利用者を持たない token（Actions の github.token）の書き手は、読み手に信用されない
+    routes = {("GET", "/user"): [user]}
+    if permission is not None:
+        routes[("GET", f"/repos/{REPO}/collaborators/someone/permission")] = [httpx.Response(200, json={"permission": permission})]
+    assert _hub(Server(routes)).token_trusted() is trusted
 
 
 def test_deleted_author_is_untrusted() -> None:

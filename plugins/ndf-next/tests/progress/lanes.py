@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from ndf.contracts import result
-from ndf.progress import command, invoke, model, run, store
+from ndf.progress import command, gate, invoke, model, run, store
 
 
 def values(cwd: Path, branch: str) -> dict:
@@ -29,6 +29,17 @@ def ok_result(r: invoke.StageRun, values: dict) -> invoke.StageResult:
     """宣言した出力を `values` から持つ ok の結果。"""
     outputs = {k: values[k] for k in r.outputs}
     return invoke.finished(r, result.result("plan", "ok", f"{r.step} を終えた", outputs=outputs or None))
+
+
+def answer(st: store.Store, tid: str, stage: str, value: str, reason: str, notes: Path | None = None) -> dict:
+    """待っている手へ答える。承認ゲート（`ndf.listen`）は問いの id を添えた `ndf answer`、ほかの待ちは `ndf progress answer`。"""
+    v = run.read(st, tid)
+    m = run.decide(v)
+    if m.action != run.Action.GATE or m.step is None or not invoke.is_listen(m.step):
+        return run.answer(st, tid, stage, value, reason, notes)
+    q = gate.question(v, m)
+    key = f"test-{q.id}-{value}"
+    return gate.answer(st, tid, gate.Answer(q.id, value, reason, "human:test", key, notes))
 
 
 def turn(st: store.Store, tid: str, cwd: Path, env: run.Env) -> dict:
@@ -65,7 +76,7 @@ def _sprint(st: store.Store, tid: str, cwd: Path, env: run.Env) -> int:
         try:
             out = turn(st, tid, cwd, env)
             if out["status"] == "gate":
-                run.answer(st, tid, out["metrics"]["stage"], "approved", "レーンの試験", None)
+                answer(st, tid, out["metrics"]["stage"], "approved", "レーンの試験")
             elif out["metrics"].get("state") == "completed" or out["metrics"].get("move") == "done":
                 return busy
         except store.StoreBusy:

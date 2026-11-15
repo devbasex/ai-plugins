@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ndf.contracts import causes
-from ndf.domains.crossrefactor.diff_decide import in_scope
+from ndf.testing.scoped import in_scope
 
 CONFLICT_MERGEABLE = frozenset({"CONFLICTING"})
 CONFLICT_STATES = frozenset({"DIRTY"})

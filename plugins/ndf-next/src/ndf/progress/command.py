@@ -112,12 +112,6 @@ BEHAVIOR_DOCS = ("**/skills/**/*.md", "**/agents/*.md")  # 同じく `docs.behav
 DIFF_WORDS = ("code_in_diff", "docs_only_diff", "behavior_docs_in_diff")
 
 
-def _dig(node: Any, *keys: str) -> Any:
-    for key in keys:
-        node = node.get(key) if isinstance(node, dict) else None
-    return node
-
-
 def diff_kinds(files: set[str], docs: set[str], behavior: set[str]) -> dict[str, bool]:
     """差分の語の値。振る舞いを決める文書は文書の部分集合。文書だけは、文書が 1 件以上でコードと振る舞いの文書が 0 件。"""
     code, behavior = files - docs, behavior & docs
@@ -130,14 +124,14 @@ def diff_kinds(files: set[str], docs: set[str], behavior: set[str]) -> dict[str,
 
 def _pathspecs(project: Mapping[str, Any], key: str, default: tuple[str, ...]) -> list[str]:
     """宣言のパターン（根からのパス全体に当てる glob。`!` は前が当てたものを外す）を git の pathspec にする。"""
-    value = _dig(project, "docs", key)
+    value = definition.dig(project, "docs", key)
     patterns = value if isinstance(value, list) and value and all(isinstance(p, str) for p in value) else default
     return [f":(exclude,glob){p[1:]}" if p.startswith("!") else f":(glob){p}" for p in patterns]
 
 
 def _sprint_range(context: Mapping[str, Any], cwd: Path) -> tuple[Git, str]:
     """スプリントブランチとベースブランチ（`.ndf/worktree.json` の `base_branch`。手元に無ければ `origin/`）の分岐点からの範囲。"""
-    base = _dig(declaration(cwd, WORKTREE_FILE), "base_branch")
+    base = definition.dig(declaration(cwd, WORKTREE_FILE), "base_branch")
     if not isinstance(base, str) or not base or base.startswith("-"):
         raise FactUnknown(f"差分を求められない: {WORKTREE_FILE} の base_branch が無いか、- で始まる")
     git = Git(Path(context.get("worktree") or cwd))
@@ -154,14 +148,19 @@ def _diff_names(git: Git, rng: str, specs: list[str]) -> set[str]:
     return {p for p in git.run("diff", "--name-only", "-z", rng, "--", *specs).split("\0") if p}
 
 
-def sprint_diff_kinds(context: Mapping[str, Any], cwd: Path) -> dict[str, bool]:
-    """スプリントの差分を、`.ndf/project.json` の `docs.files`・`docs.behavior`（省けば既定）で分ける。"""
+def range_diff_kinds(git: Git, rng: str, cwd: Path) -> dict[str, bool]:
+    """範囲 `rng` の差分を、`.ndf/project.json` の `docs.files`・`docs.behavior`（省けば既定）で分ける。git が読めなければ `GitError`。"""
     project = declaration(cwd, PROJECT_FILE)
+    files = _diff_names(git, rng, [])
+    docs = _diff_names(git, rng, _pathspecs(project, "files", DOC_FILES))
+    return diff_kinds(files, docs, _diff_names(git, rng, _pathspecs(project, "behavior", BEHAVIOR_DOCS)))
+
+
+def sprint_diff_kinds(context: Mapping[str, Any], cwd: Path) -> dict[str, bool]:
+    """スプリントの差分を分ける（`range_diff_kinds`）。"""
     try:
         git, rng = _sprint_range(context, cwd)
-        files = _diff_names(git, rng, [])
-        docs = _diff_names(git, rng, _pathspecs(project, "files", DOC_FILES))
-        return diff_kinds(files, docs, _diff_names(git, rng, _pathspecs(project, "behavior", BEHAVIOR_DOCS)))
+        return range_diff_kinds(git, rng, cwd)
     except GitError as exc:
         raise FactUnknown(f"差分を求められない: {exc}") from exc
 
@@ -171,8 +170,8 @@ def facts_of(words: tuple[str, ...], context: Mapping[str, Any], cwd: Path) -> d
     kinds = functools.cache(lambda: sprint_diff_kinds(context, cwd))
     known: dict[str, Callable[[], bool]] = {
         **{w: (lambda w=w: kinds()[w]) for w in DIFF_WORDS},
-        "ci_declared": lambda: _dig(declaration(cwd, PROJECT_FILE), "test", "ci", "only") is True,
-        "prod_branch": lambda: bool(_dig(declaration(cwd, WORKTREE_FILE), "production_branch")),
+        "ci_declared": lambda: definition.dig(declaration(cwd, PROJECT_FILE), "test", "ci", "only") is True,
+        "prod_branch": lambda: bool(definition.dig(declaration(cwd, WORKTREE_FILE), "production_branch")),
         "release_record": lambda: "version" in context,
         "design_pr": lambda: "design_pr" in context,
     }
@@ -217,27 +216,37 @@ def _declaration_errors(value: Any) -> list[str]:
 # --- 進行表の読み書き ---------------------------------------------------------------------
 
 
-def _current(conn: Any, table_id: str) -> tuple[int, stages.Snapshot, list[model.Event]]:
+def read_current(conn: Any, table_id: str) -> tuple[int, dict[str, Any], stages.Snapshot, list[model.Event]]:
+    """進行表の最新の改訂・定義の文書・定義・事象。進行表が無ければ `model.Refused`。"""
     if store.read_table(conn, table_id) is None:
         raise model.Refused(f"進行表 {table_id} は無い")
     rev, raw = store.read_definition(conn, table_id)
-    return rev, stages.snapshot_from(raw), store.read_events(conn, table_id)
+    return rev, raw, stages.snapshot_from(raw), store.read_events(conn, table_id)
+
+
+def retrying_transaction(st: store.Store, write: Callable[[Any], list[int]]) -> list[int]:
+    """`write(conn)` を 1 つのトランザクションで打つ。番号がぶつかれば（`store.Conflict`）APPEND_ATTEMPTS 回まで打ち直す。"""
+    for attempt in range(1, APPEND_ATTEMPTS + 1):
+        try:
+            with store.transaction(st) as conn:
+                return write(conn)
+        except store.Conflict:
+            if attempt == APPEND_ATTEMPTS:
+                raise
+    raise AssertionError("到達しない")
 
 
 def _append(
     st: store.Store, table_id: str, build: Callable[[int, stages.Snapshot, list[model.Event]], list[model.EventDraft]]
 ) -> list[int]:
     """今の改訂と事象を読み、`build` が作った下書きを追記する。番号がぶつかれば読み直して作り直す。"""
-    for attempt in range(1, APPEND_ATTEMPTS + 1):
-        try:
-            with store.transaction(st) as conn:
-                rev, snap, events = _current(conn, table_id)
-                drafts = build(rev, snap, events)
-                return store.append_events(conn, table_id, drafts, events[-1].seq if events else 0)
-        except store.Conflict:
-            if attempt == APPEND_ATTEMPTS:
-                raise
-    raise AssertionError("到達しない")
+
+    def write(conn: Any) -> list[int]:
+        rev, _, snap, events = read_current(conn, table_id)
+        drafts = build(rev, snap, events)
+        return store.append_events(conn, table_id, drafts, events[-1].seq if events else 0)
+
+    return retrying_transaction(st, write)
 
 
 def _rows(snap: stages.Snapshot, events: list[model.Event], rev: int) -> list[dict[str, Any]]:
@@ -309,7 +318,7 @@ def _cmd_new(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any
     doc, drafts = _prepare_new(a, cwd, snap)
     with store.transaction(st) as conn:
         tid = store.create_table(conn, ("sprint", repo_id(cwd, st.root), a.name), a.parent, doc, drafts)
-        rev, _, events = _current(conn, tid)
+        rev, _, _, events = read_current(conn, tid)
     rows = _rows(snap, events, rev)
     off = [r["stage"] for r in rows if r["state"] == "disabled"]
     summary = f"進行表 {tid} を作った（{len(rows)} 行、無効 {len(off)} 行）"
@@ -318,7 +327,7 @@ def _cmd_new(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any
 
 def _cmd_show(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, Any]:
     with store.transaction(st) as conn:
-        rev, snap, events = _current(conn, a.table_id)
+        rev, _, snap, events = read_current(conn, a.table_id)
     rows = _rows(snap, events, rev)
     whole = model.table_state("sprint", events)
     metrics = {"table_id": a.table_id, "mode": snap.mode, "rev": rev, "state": whole, "history": [e.as_dict() for e in events]}
@@ -350,7 +359,7 @@ def _cmd_retry(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, 
 def _cmd_finish(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, Any]:
     output = read_json(Path(a.output))
     with store.transaction(st) as conn:
-        _, snap, _ = _current(conn, a.table_id)
+        _, _, snap, _ = read_current(conn, a.table_id)
     stage = snap.stage(a.stage)
     errs = definition.validate_stage_output(stage, output)
     if errs:

@@ -14,7 +14,8 @@
     "design_pr": {"type": "integer", "minimum": 1, "description": "設計の Pull Request の番号"},
     "pr": {"type": "integer", "minimum": 1, "description": "スプリントの Pull Request の番号"},
     "delivery": {"$ref": "#/$defs/delivery", "description": ".ndf/project.json の delivery の 1 行。デプロイが書く。デプロイの経路になる値なので、鍵の型と kind・channel の取りうる値を確かめてから渡す（3364-7）"},
-    "version": {"type": "string", "minLength": 1, "description": "出した版。デプロイが書く"}
+    "version": {"type": "string", "minLength": 1, "description": "出した版。デプロイが書く"},
+    "release_pr": {"type": "string", "minLength": 1, "description": "出した版のリリース記録を書いた Pull Request。まとめたリリースの答えをリリース承認ゲートが書き、閉じとリリース後テストはここから読む"}
   },
   "$defs": {
     "delivery": {

@@ -35,7 +35,15 @@
   "do": [
     {
       "release-gate": {
-        "call": "ndf.listen",
+        "listen": {
+          "to": {
+            "one": {
+              "with": {
+                "type": "answered"
+              }
+            }
+          }
+        },
         "metadata": {
           "ndf": {
             "kind": "gate",

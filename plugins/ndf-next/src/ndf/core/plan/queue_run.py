@@ -6,6 +6,7 @@
 - 段は、前の段がすべて完了したときに流す。承認ゲートで待つプランがあっても、段のプランがすべて承認ゲートを人へ届ける役
   （`accepts_gate`）なら流す（#2876）。`{queue_prs}` は前の段で完了したプランの PR の番号で埋める
 - キューの記録 `queue.json` に、プランごとの結果を書く。`--resume` は完了したプランを流さずに続ける
+- `--fresh` は子の `ndf plan next` へ渡し、各プランを前の回に戻らず先頭から流す（#1592）。打ち直し（next）には渡さない
 """
 
 from __future__ import annotations
@@ -79,12 +80,14 @@ def _outcome(entry: Entry, out: dict[str, Any]) -> queue_decide.Outcome:
     )
 
 
-def _child_args(entry: Entry, sets: dict[str, str]) -> list[str]:
+def _child_args(entry: Entry, sets: dict[str, str], fresh: bool = False) -> list[str]:
     args = [sys.executable, "-m", _PACKAGE, "plan", "next", str(entry.path)]
     if entry.start is not None:
         args += ["--from", entry.start]
     for name, value in sets.items():
         args += ["--set", f"{name}={value}"]
+    if fresh:
+        args.append("--fresh")
     return args
 
 
@@ -113,13 +116,22 @@ def _needs_blocked(entry: Entry, order: list[str], done: dict[str, queue_decide.
     return None if reason is None else queue_decide.Outcome(entry.plan.name, STOPPED, "precondition", reason)
 
 
+@dataclass(frozen=True)
+class QueueOptions:
+    """キューの選択肢。`resume` は完了したプランを流さずに続け、`fresh` は子の `ndf plan next` へ `--fresh` を渡す（#1592）。"""
+
+    resume: bool = False
+    fresh: bool = False
+
+
 class _QueueExecution:
     """1 回のキューの実行の状態。`done` は流した・止めたプランの結果、`prior` は前の段までの結果（段を流し終えてから足す）。"""
 
-    def __init__(self, stages: list[list[Entry]], qdir: Path, cwd: Path, resume: bool) -> None:
+    def __init__(self, stages: list[list[Entry]], qdir: Path, cwd: Path, options: QueueOptions) -> None:
         self.qdir = qdir
         self.cwd = cwd
-        self.recorded = _recorded(qdir) if resume else {}
+        self.options = options
+        self.recorded = _recorded(qdir) if options.resume else {}
         self.order = [e.plan.name for stage in stages for e in stage]
         self.done: dict[str, queue_decide.Outcome] = {}
         self.prior: list[queue_decide.Outcome] = []
@@ -161,14 +173,19 @@ class _QueueExecution:
             if refused is not None:
                 started.append((entry, None, refused))
                 continue
-            proc = subprocess.Popen(_child_args(entry, sets), cwd=self.cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            proc = subprocess.Popen(
+                _child_args(entry, sets, self.options.fresh), cwd=self.cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+            )
             started.append((entry, proc, None))
         return [early if proc is None else _read_child(entry, proc) for entry, proc, early in started]
 
 
-def run(stages: list[list[Entry]], qdir: Path, cwd: Path, resume: bool) -> list[queue_decide.Outcome]:
-    """段ごとに流し、すべてのプランの結果をキューの並びで返す。流さなかったプランは status が None。"""
-    return _QueueExecution(stages, qdir, cwd, resume).run(stages)
+def run(stages: list[list[Entry]], qdir: Path, cwd: Path, options: QueueOptions) -> list[queue_decide.Outcome]:
+    """段ごとに流し、すべてのプランの結果をキューの並びで返す。流さなかったプランは status が None。
+
+    `options.fresh` は子の `ndf plan next` へ `--fresh` を渡す（#1592）。
+    """
+    return _QueueExecution(stages, qdir, cwd, options).run(stages)
 
 
 def _finished(recorded: dict[str, dict[str, Any]], entry: Entry) -> bool:

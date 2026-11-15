@@ -55,6 +55,14 @@ def repo(tmp_path, monkeypatch):
 
 
 @pytest.fixture
+def st(repo):
+    """`repo` のチェックアウトの置き場の SQLite の進行表の DB。置き場を用意してから開く（`ndf progress` の副命令と同じ順）。"""
+    root = durable.prepare_store(command.store_root_of(repo)).root
+    with store.open_store(store.default_url(root), root) as opened:
+        yield opened
+
+
+@pytest.fixture
 def root(tmp_path):
     """チェックアウトの置き場。終わったら `prepare_store` が持った共有のロックを放す。"""
     path = tmp_path / "repo" / ".git" / "ndf" / "state"
