@@ -124,3 +124,35 @@ def test_issue_is_required():
     with pytest.raises(SystemExit) as exc:
         cli.main([])
     assert exc.value.code == 2
+
+
+def _impact(*rows: str, after: str = "") -> str:
+    table = "| 項目 | 内容 |\n| --- | --- |\n" + "".join(f"{r}\n" for r in rows)
+    return f"# 題\n\n## 影響\n\n{table}{after}"
+
+
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        (_impact("| 公開インタフェース | 変わる（引数を足す） |"), {"value": "変わる", "cell": "変わる（引数を足す）"}),
+        (_impact("| 公開インタフェース | 変わらない（内部だけ） |"), {"value": "変わらない", "cell": "変わらない（内部だけ）"}),
+        (_impact("| 公開インタフェース | 未定 |"), {"value": "記載なし", "cell": "未定"}),
+        (_impact("| ほか | 変わる |"), {"value": "記載なし", "cell": ""}),
+        (_impact("|  公開インタフェース  |  変わる  |", "| 公開インタフェース | 変わらない |"), {"value": "変わる", "cell": "変わる"}),
+        # 「影響」の節が無ければ、ほかの表に行があっても読まない
+        ("# 題\n\n## 背景\n\n| 項目 | 内容 |\n| --- | --- |\n| 公開インタフェース | 変わる |\n", {"value": "記載なし", "cell": ""}),
+        # 下の水準の見出しは節に含み、同じ水準の次の見出しから後は含まない
+        ("## 影響\n\n### 内訳\n\n| a | b |\n| --- | --- |\n| 公開インタフェース | 変わる |\n", {"value": "変わる", "cell": "変わる"}),
+        ("## 影響\n\nなし\n\n## 次\n\n| a | b |\n| --- | --- |\n| 公開インタフェース | 変わる |\n", {"value": "記載なし", "cell": ""}),
+        # 節の中の 2 つ目の表も読む。コードの囲みの中の表は読まない
+        (
+            "## 影響\n\n```\n| 公開インタフェース | 変わる |\n```\n\n| a | b |\n| --- | --- |\n| x | y |\n\n"
+            "| a | b |\n| --- | --- |\n| 公開インタフェース | 変わらない |\n",
+            {"value": "変わらない", "cell": "変わらない"},
+        ),
+        ("", {"value": "記載なし", "cell": ""}),
+    ],
+)
+def test_public_interface_reads_the_impact_table(body, expected):
+    """現状固定（I-026）: 「影響」の節の表の `公開インタフェース` の行の読み方。"""
+    assert collect.public_interface(body) == expected
