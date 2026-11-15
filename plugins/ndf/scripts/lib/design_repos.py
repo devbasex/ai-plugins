@@ -51,7 +51,7 @@ def dep_groups(root: Path | None, schema: bool) -> tuple[str, ...]:
     return tuple(groups)
 
 
-def _models():
+def _settings_model():
     """設定の型（`lib/schema.py` の `Shape`）。pydantic は呼ぶ側が依存を求めた後に読む。"""
     from typing import Annotated, Literal, Optional
 
@@ -69,7 +69,7 @@ def _models():
         version: Literal[1]
         representative_repos: Optional[RepresentativeRepos] = None
 
-    return DesignSettings, RepresentativeRepos
+    return DesignSettings
 
 
 def load_settings(root: Path) -> RepoSettings | None:
@@ -87,7 +87,7 @@ def load_settings(root: Path) -> RepoSettings | None:
         raise RepoSettingsError(f"{SETTINGS_PATH} を JSON として読めない: {exc.lineno}:{exc.colno}") from None
     import schema
 
-    model, _ = _models()
+    model = _settings_model()
     try:
         shape = schema.load_shape(model, data)
     except schema.ShapeError as exc:
@@ -105,7 +105,7 @@ def load_settings(root: Path) -> RepoSettings | None:
 
 def design_json_schema() -> str:
     """設定の JSON Schema の文字列（末尾の改行つき）。"""
-    model, _ = _models()
+    model = _settings_model()
     s = model.model_json_schema()
     s["$schema"] = "https://json-schema.org/draft/2020-12/schema"
     s["title"] = "NDF の代表のリポジトリの設定（.ndf/design.json）"
