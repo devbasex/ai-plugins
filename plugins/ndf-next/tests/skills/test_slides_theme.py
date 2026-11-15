@@ -154,7 +154,7 @@ def test_first_bad_item_in_order_wins():
 
 
 def test_load_theme_via_create_deck_reads_theme_file(tmp_path: Path):
-    """`loadTheme` の分岐（未指定・オブジェクト・無いファイル・JSON でない）も theme の入口として固定する。"""
+    """`loadTheme` の分岐（未指定・オブジェクト・無いファイル・JSON でない）も theme のエントリポイントとして固定する。"""
     fake_pptx(tmp_path)
     (tmp_path / "theme.json").write_text('{"font": "F1"}', encoding="utf-8")
     (tmp_path / "broken.json").write_text("{", encoding="utf-8")
