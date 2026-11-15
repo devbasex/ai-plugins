@@ -99,6 +99,25 @@ def test_ready_lanes_waits_for_dependency():
     assert [ln.name for ln in pp.ready_lanes(plan, {"lroot", "lflow"}, {"lflow"})] == ["lfac"]
 
 
+def test_load_valid_plan_skips_ended_lanes_in_overlaps(tmp_path):
+    """読む側も終わったレーンを課題の重なり（I19）に数えない。lane add が通した計画を status などが読める（#3553）。"""
+    import parallel_ledger as plg
+    from pydantic import ValidationError
+
+    d = variant(
+        x=lambda d: d["lanes"].append({"name": "lnew", "input": {"kind": "sprint", "issues": [2400]}, "plans": 1, "touches": ["api/"]})
+    )
+    pdir = pp.plan_dir(tmp_path, "p1")
+    pdir.mkdir(parents=True)
+    (pdir / "plan.json").write_text(json.dumps(d), encoding="utf-8")
+    with pytest.raises(ValidationError):  # lfac が終わっていなければ重なる
+        pp.load_valid_plan(tmp_path, "p1")
+    assert plg.append_ledger_row(
+        tmp_path, "p1", "lane_end", "lane_end:lfac", {"kind": "lane_end", "id": "lfac", "lane": "lfac"}, rid="lfac"
+    )
+    assert [ln.name for ln in pp.load_valid_plan(tmp_path, "p1").lanes] == ["lroot", "lflow", "lfac", "lnew"]
+
+
 def test_a_sprint_lane_ends_on_its_end_record_and_a_loop_lane_keeps_its_end():
     """1 スプリントのレーンの最初の入力は終わりの記録の行を「終わり」に持ち、開発ループのレーンは今のまま（#3058 の A1・A8）。"""
     sprint = pp.Lane(name="la", input={"kind": "sprint", "issues": [1, 2]}, plans=1, touches=[])
