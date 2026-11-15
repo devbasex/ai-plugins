@@ -157,7 +157,7 @@ class Lander:
     def _queued_refusal(self, pull: Pull, now: Pull) -> Landed | None:
         """キューで待つ本番ブランチ宛ての PR の証跡を読み直し、承認が失効していれば止まった結果（承認のままなら None）。
 
-        `now` はこの周回で読んだ PR で、読み直さずに判定へ渡す（周回ごとの照会を 1 回に保つ）。
+        `now` はこのループの 1 回で読んだ PR で、読み直さずに判定へ渡す（ループの 1 回ごとの照会を 1 回に保つ）。
         待ちの間は commit status を付け直さない（読み直しのたびに書かない）。
         """
         if pull.base_ref != self.production:
@@ -245,7 +245,7 @@ class Lander:
     def land(self, number: int) -> Landed:
         """リリースの PR をマージする。本番ブランチへ入れた後（マージ済みからの再開を含む）は、ベースブランチへ戻す。
 
-        待ちの予算（`budget`）は入口で 1 つの締め切りにし、本番の PR と戻す PR のチェックの待ち・マージキューの待ちで
+        待ちの予算（`budget`）はエントリポイントで 1 つの締め切りにし、本番の PR と戻す PR のチェックの待ち・マージキューの待ちで
         分け合う（PR ごとに取り直すと合計が予算の倍になり、workflow の時間の上限を超えて取り消される）。
         """
         deadline = self.clock() + self.budget

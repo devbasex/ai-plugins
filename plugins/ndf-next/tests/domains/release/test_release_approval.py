@@ -258,12 +258,12 @@ def test_merge_queue_stops_with_rerun_hint_when_budget_runs_out() -> None:
     done = _queue_lander(hub, now, 45.0).land(7)
     assert not done.merged and done.kind == MERGE_QUEUE_PENDING and "release-steps merge" in done.detail
     assert now[0] == 45.0
-    # 周回ごとに PR を 1 回だけ読み、承認の判定にもその PR を使う（0 秒・30 秒・45 秒の 3 周）
+    # ループの 1 回ごとに PR を 1 回だけ読み、承認の判定にもその PR を使う（0 秒・30 秒・45 秒の 3 回）
     assert hub.reads == 3
 
 
 def test_one_budget_is_shared_by_the_release_pr_and_the_sync_pr() -> None:
-    """待ちの予算は land の入口で 1 つに決め、戻す PR のチェックの待ちには本番の PR の待ちの残りだけを渡す。"""
+    """待ちの予算は land のエントリポイントで 1 つに決め、戻す PR のチェックの待ちには本番の PR の待ちの残りだけを渡す。"""
     hub = _QueueHub(pulls={7: pull(), 8: pull(number=8, base="develop")}, comments_of={7: [_trail("approved", HEAD)]})
     hub.responses[("POST", "/repos/o/r/pulls")] = {"number": 8}
     now = [0.0]
