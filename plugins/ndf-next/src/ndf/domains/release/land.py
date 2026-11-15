@@ -120,7 +120,7 @@ def _protection_checks(branch: dict) -> list[tuple[str, int | None]]:
 
 def _restricted(name: str, apps: dict[str, frozenset[int]]) -> list[frozenset[int]]:
     """チェックの名前 `name` が `ci.read` の照合で当たる、発行元を指定された必須のチェックのアプリの集合の並び。"""
-    return [want for required, want in apps.items() if ci.fulfils(name, required)]
+    return [want for required, want in apps.items() if ci.fulfils(name, required)]  # noqa: NDF201 上限: 発行元を指定した必須のチェックの数（ci.fulfils は名前の照合だけで外へ出ない）
 
 
 def _from_sources(runs: list[dict], apps: dict[str, frozenset[int]]) -> list[dict]:
@@ -130,7 +130,13 @@ def _from_sources(runs: list[dict], apps: dict[str, frozenset[int]]) -> list[dic
     当たるかは `ci.read` と同じ照合（`ci.fulfils`）で決める。生の名前で絞ると、前置きや分割ジョブの末尾の付いた別の発行元の
     実行（`other / pytest`）が絞り込みを抜け、`ci.read` が必須のチェックとして数える。同じ名前に別々のアプリが指定されていれば、
     1 つの実行では満たせないため残さない（待ちが止める）。"""
-    return [r for r in runs if all(want == {(r.get("app") or {}).get("id")} for want in _restricted(text_of(r.get("name")), apps))]
+    return [r for r in runs if all(want == {_app_of(r)} for want in _restricted(text_of(r.get("name")), apps))]
+
+
+def _app_of(run: dict) -> object:
+    """実行の発行元のアプリの ID（`app` が無い commit status は None）。"""
+    app = run.get("app")
+    return app.get("id") if isinstance(app, dict) else None
 
 
 @dataclass(frozen=True)

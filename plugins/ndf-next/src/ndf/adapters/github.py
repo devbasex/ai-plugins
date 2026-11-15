@@ -330,6 +330,17 @@ def refusal_kind(after: Pull, sent_sha: str) -> str:
     return _REFUSAL_KINDS.get(after.merge_state, "unknown")  # noqa: NDF502 ネットワーク: 表に無い mergeStateStatus（clean・unstable・unknown）は種類を決められない
 
 
+@dataclass(frozen=True)
+class _MergeRoute:
+    """マージの要求の打ち方。`send` が要求を打ち、`refused` が真とみなした誤りは断られたとして扱う。`how` は成功の文に
+    添える迂回の印。`require_method` が真なら、キューの方式が選んだ方式と違うときキューへ入れずに断る。"""
+
+    send: Callable[[int, "Pull", str], None]
+    refused: Callable[["GitHubError"], bool]
+    how: str
+    require_method: bool = False
+
+
 def _refused_by_graphql(exc: GitHubError) -> bool:
     """GraphQL の誤りが GitHub の断り（届いて断られた。上限でない）か。届かなかった・上限なら偽（呼び手が投げ直す）。"""
     return exc.status == 0 and not exc.unreached and exc.quota is None
@@ -720,15 +731,14 @@ class GitHub:
         `require_method` が真の呼び手（merge commit を必須とする本番へのマージ）だけ、キューの方式が `method` と
         違えばキューへ入れずに断る。偽なら（プランの merge ステップ。方式は自動で決めた既定値）キューの方式に従う。
         """
-        return self._merge_with(
-            number, expect_head, method, self._send_rest_merge, lambda exc: exc.status in MERGE_REFUSED_STATUS, "", require_method
-        )
+        route = _MergeRoute(self._send_rest_merge, lambda exc: exc.status in MERGE_REFUSED_STATUS, "", require_method)
+        return self._merge_with(number, expect_head, method, route)
 
     def merge_as_admin(self, number: int, expect_head: str, method: Optional[str] = None) -> MergeOutcome:
         """PR を管理者の迂回でマージする（#3506 の決定 5）。`merge` と同じ先の確認を通り、GraphQL の `mergePullRequest` を
         読んだ先端（`expectedHeadOid`）を添えて打つ。断られたら PR を読み直して種類を返し、届かない・上限は投げ直す。
         """
-        return self._merge_with(number, expect_head, method, self._send_admin_merge, _refused_by_graphql, "管理者の迂回で")
+        return self._merge_with(number, expect_head, method, _MergeRoute(self._send_admin_merge, _refused_by_graphql, "管理者の迂回で"))
 
     def _send_rest_merge(self, number: int, pull: Pull, chosen: str) -> None:
         self.rest("PUT", f"/repos/{self.repo}/pulls/{number}/merge", {"sha": pull.head_sha, "merge_method": chosen})
@@ -738,19 +748,9 @@ class GitHub:
         variables = {"id": text_of(node["id"]), "head": pull.head_sha, "method": GRAPHQL_MERGE_METHODS[chosen]}
         self.graphql(_ADMIN_MERGE, variables)
 
-    def _merge_with(
-        self,
-        number: int,
-        expect_head: Optional[str],
-        method: Optional[str],
-        send: Callable[[int, Pull, str], None],
-        refused: Callable[[GitHubError], bool],
-        how: str,
-        require_method: bool = False,
-    ) -> MergeOutcome:
-        """`merge`・`merge_as_admin` の共通の手順。先の確認と方式の選択を通り、`send` で要求を打つ。`refused` が真と
-        みなした誤りは PR を読み直して種類を返し、ほかは投げ直す。`how` は成功の文に添える迂回の印。
-        `require_method` が真なら、キューの方式が選んだ方式と違うときキューへ入れずに断る。"""
+    def _merge_with(self, number: int, expect_head: Optional[str], method: Optional[str], route: "_MergeRoute") -> MergeOutcome:
+        """`merge`・`merge_as_admin` の共通の手順。先の確認と方式の選択を通り、`route.send` で要求を打つ。`route.refused` が
+        真とみなした誤りは PR を読み直して種類を返し、ほかは投げ直す（`route` の各項目は `_MergeRoute`）。"""
         pull = self.pull(number)
         early = _preflight(pull, number, expect_head)
         if early is not None:
@@ -760,17 +760,17 @@ class GitHub:
         if chosen is None:
             return _method_refusal(pull, number, method, allowed)
         try:
-            send(number, pull, chosen)
+            route.send(number, pull, chosen)
         except GitHubError as exc:
-            if not refused(exc):
+            if not route.refused(exc):
                 raise
-            required = chosen if require_method else None
+            required = chosen if route.require_method else None
             queued = self._enqueue(pull, required) if exc.status == MERGE_QUEUE_REFUSED_STATUS else None
             if queued is not None:
                 return queued
             after = self.pull(number)
             return MergeOutcome(False, refusal_kind(after, pull.head_sha), str(exc), after.head_sha)
-        return MergeOutcome(True, None, f"#{number} を {chosen} で{how}マージした", pull.head_sha)
+        return MergeOutcome(True, None, f"#{number} を {chosen} で{route.how}マージした", pull.head_sha)
 
     def _enqueue(self, pull: Pull, method: Optional[str]) -> Optional[MergeOutcome]:
         """基底がマージキューを持てば PR を先端のままキューへ入れ、待ち（`ci_pending`）を返す。持たなければ None。
