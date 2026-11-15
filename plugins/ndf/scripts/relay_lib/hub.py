@@ -62,6 +62,7 @@ RESULT_TTL = 600  # 結果のファイルを残す秒数（頼む側が読まず
 BAD_NAME = "bad-name"
 NAME_TAKEN = "name-taken"
 LIMIT = "limit"
+HELPER_BUSY = "helper-busy"  # 一時レーンの同時数の断り（#3597 の決定 9）。耐久ワークフローは待ってから打ち直す
 NOT_FOUND = "not-found"
 NO_SESSION = "no-session"  # 再開する会話を決められない（#3555）
 NO_TMUX = "no-tmux"
@@ -243,6 +244,7 @@ class Live(NamedTuple):
     taken: set[str]  # 名前つきで動いている・起動した直後の名前
     helpers: int = 0  # 役割 `helper` の動いているラッパーの数（#2436 の I13）
     humans: int = 0  # 人の起動（`by: terminal`）で動いていて `count` から外したラッパーの数（#2862）
+    helper_names: tuple = ()  # 動いている役割 `helper` のラッパーの名前（#3597。断りの `busy` に載せる）
 
 
 def _role_of(w: Wrapper, registry: dict[str, dict]) -> str | None:
@@ -259,6 +261,29 @@ def _human(name: str | None, registry: dict[str, dict], sessions: dict[str, dict
     return bool(row) and row.get("by") == TERMINAL and row.get("session", name) in sessions
 
 
+class _Seen(NamedTuple):
+    """`live` が数える 1 本のラッパー: 名前（無ければ `-`）・役割・人の起動か。"""
+
+    name: str
+    role: str | None
+    human: bool
+
+    @property
+    def helper(self) -> bool:
+        """役割 `helper` か（`helpers` に数える）。"""
+        return self.role == "helper"
+
+    @property
+    def counted_human(self) -> bool:
+        """`humans` に数える人の起動か。`helper` は `helpers` に数えるため外す（1 本を 2 回外さない。#2862 の I1）。"""
+        return self.human and not self.helper
+
+    @property
+    def unattended_organizer(self) -> bool:
+        """人の起動でないオーガナイザーか（`count` から 1 本だけ外す）。"""
+        return self.role == "organizer" and not self.human
+
+
 def live(ws: list[Wrapper], registry: dict[str, dict], sessions: dict[str, dict]) -> Live:
     """`relay.lock` が取られている作業ディレクトリと、登録簿の行のうち tmux のセッションが在るのに同じ名前の
     作業ディレクトリがまだ `relay.lock` を取っていないもの（起動した直後）の和。重複は名前で除く。
@@ -269,14 +294,15 @@ def live(ws: list[Wrapper], registry: dict[str, dict], sessions: dict[str, dict]
     running = [w for w in ws if w.running]
     taken = {w.name for w in running if w.name}
     pending = sorted(n for n, row in registry.items() if n not in taken and row.get("session", n) in sessions)
-    names = [w.name or "-" for w in running] + pending
-    roles = [_role_of(w, registry) for w in running] + [registry[n].get("role") for n in pending]
-    human = [_human(n, registry, sessions) for n in [w.name for w in running] + pending]
-    helpers = roles.count("helper")
-    humans = sum(1 for h, r in zip(human, roles) if h and r != "helper")
-    organizer = 1 if any(r == "organizer" and not h for h, r in zip(human, roles)) else 0
+    seen = [_Seen(w.name or "-", _role_of(w, registry), _human(w.name, registry, sessions)) for w in running]
+    seen += [_Seen(n, registry[n].get("role"), _human(n, registry, sessions)) for n in pending]
+    names = [x.name for x in seen]
     # tmux のセッションの名前も重ねない（tmux が `duplicate session` で断る）
-    return Live(len(names) - helpers - humans - organizer, names, taken | set(sessions), helpers, humans)
+    helper_names = tuple(x.name for x in seen if x.helper)
+    helpers = len(helper_names)
+    humans = sum(1 for x in seen if x.counted_human)
+    organizer = 1 if any(x.unattended_organizer for x in seen) else 0
+    return Live(len(names) - helpers - humans - organizer, names, taken | set(sessions), helpers, humans, helper_names)
 
 
 def spawn_input(req: dict) -> tuple[str, list[str]]:
@@ -310,6 +336,19 @@ class Refusal(NamedTuple):
     reason: str
     message: str
     code: int
+    busy: str = ""  # 断りの元の動いている一時レーンの名前（`helper-busy` のときだけ）
+
+
+class _Launch(NamedTuple):
+    """`Hub.process` が決めた起動内容（`Hub.launch` が起こす）。`role`・`plan` は役割 `helper` のときだけ環境と登録簿へ載る。"""
+
+    kind: str
+    name: str
+    cwd: str
+    args: list[str]
+    by: str
+    role: str | None = None
+    plan: str | None = None
 
 
 class Hub:
@@ -401,7 +440,8 @@ class Hub:
         if refusal := self.judge(name, now, role, by):
             return self.refuse(kind, name, refusal)
         plan = req.get("plan") if isinstance(req.get("plan"), str) else (registry.get(name) or {}).get("plan")
-        return self.launch(kind, name, cwd, args, by, registry, role, plan, self._over_limit(by, now))
+        spec = _Launch(kind=kind, name=name, cwd=cwd, args=args, by=by, role=role, plan=plan)
+        return self.launch(spec, registry, self._over_limit(by, now))
 
     def _launch_input(self, kind, req: dict, registry: dict, ws, now: Live) -> tuple | Refusal:
         name = req.get("name")  # 依頼の種類ごとの起動の入力 (name, cwd, args, role)。決められなければ Refusal
@@ -444,14 +484,17 @@ class Hub:
         cap = max_named()
         if role == "helper":
             if now.helpers >= 1:
-                return Refusal(LIMIT, "一時レーン（役割 helper）は同時に 1 本まで", 3)
+                busy = next(iter(now.helper_names), "")
+                return Refusal(HELPER_BUSY, f"一時レーン（役割 helper）は同時に 1 本まで（動いている: {busy or '-'}）", 3, busy)
         elif by != TERMINAL and now.count >= cap:
             return Refusal(LIMIT, f"同時に動かすラッパーの上限 {cap} に達した（動いている: {', '.join(now.names)}）", 3)
         if tmux.binary() is None:
             return Refusal(NO_TMUX, "tmux が PATH に無い", 3)
         return None
 
-    def launch(self, kind: str, name: str, cwd: str, args: list[str], by: str, registry: dict, role=None, plan=None, over=None) -> dict:
+    def launch(self, spec: _Launch, registry: dict, over=None) -> dict:
+        """起動内容 `spec` を tmux のセッションで起こし、登録簿 `registry` へ書く。`over` は上限を超えた人の起動の記録と通知。"""
+        kind, name, cwd, args, by, role, plan = spec
         py, switched = launch_python()  # 置き場が消えたら relay.current の仮想環境。どちらも無ければ下の確かめで落ちる
         if switched:
             hub_log("version-switched", name, f"{sys.executable} が無いため {switched} の仮想環境で起こす")
@@ -480,11 +523,11 @@ class Hub:
     @staticmethod
     def refuse(kind, name, r: Refusal) -> dict:
         hub_log("refused", name if isinstance(name, str) else None, r.reason)
-        return hub_result(kind, "stopped", r.message, name, r.reason, r.code)
+        return hub_result(kind, "stopped", r.message, name, r.reason, r.code, r.busy)
 
 
-def hub_result(kind, status: str, summary: str, name, result: str, code: int) -> dict:
-    """依頼の結果（step_result の形。`metrics.exit_code` は頼む側が終える終了コード）。"""
+def hub_result(kind, status: str, summary: str, name, result: str, code: int, busy: str | None = None) -> dict:
+    """依頼の結果（step_result の形。`metrics.exit_code` は頼む側が終える終了コード）。`busy` は断りの元の一時レーンの名前。"""
     tool = f"relay-{kind}" if kind in ("spawn", "restart") else "relay-hub"
-    item = {"name": name if isinstance(name, str) else None, "result": result}
+    item = {"name": name if isinstance(name, str) else None, "result": result, **({"busy": busy} if busy else {})}
     return {"tool": tool, "status": status, "summary": summary, "items": [item], "metrics": {"exit_code": code}}

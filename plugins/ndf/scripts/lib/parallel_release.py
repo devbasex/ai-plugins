@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Callable, Iterable, Optional
 
 import parallel_plan as pp
+import parallel_present as ppr
 
 MAX_HELPER_SEQ = 9999  # 一時レーンの名前 `<計画名>-rel<連番>` を 32 字に収める（I1）
 # 共通原則 C7（利用者の設定と指示書）のファイル。文書だけの範囲でも承認を引き継がず出し直す（#3020）
@@ -111,17 +112,19 @@ def answerable(pending: Iterable[dict], prs: Iterable[int], done: Iterable[int] 
 
 def breakdown_md(mapped: dict, added: Optional[dict] = None) -> str:
     """承認資料へ足すレーンの内訳の節。出し直しなら加わった範囲を載せる。"""
+    from release_lib.included import pr_refs
+
     lines = ["", "## レーンの内訳", "", "| レーン | 依頼 | Pull Request |", "| --- | --- | --- |"]
     for name, row in sorted(mapped["lanes"].items()):
-        lines.append(f"| {name} | {'あり' if row['requested'] else 'なし'} | {', '.join(f'#{n}' for n in row['prs'])} |")
+        lines.append(f"| {name} | {'あり' if row['requested'] else 'なし'} | {pr_refs(row['prs'], ', ')} |")
     if mapped["orphans"]:
-        lines.append(f"| （レーンの無い Pull Request） | - | {', '.join(f'#{n}' for n in mapped['orphans'])} |")
+        lines.append(f"| （レーンの無い Pull Request） | - | {pr_refs(mapped['orphans'], ', ')} |")
     if added:
         lines += ["", "### 出し直しで加わった範囲", "", "| レーン | Pull Request |", "| --- | --- |"]
         for name, row in sorted(added["lanes"].items()):
-            lines.append(f"| {name} | {', '.join(f'#{n}' for n in row['prs'])} |")
+            lines.append(f"| {name} | {pr_refs(row['prs'], ', ')} |")
         if added["orphans"]:
-            lines.append(f"| （レーンの無い Pull Request） | {', '.join(f'#{n}' for n in added['orphans'])} |")
+            lines.append(f"| （レーンの無い Pull Request） | {pr_refs(added['orphans'], ', ')} |")
     return "\n".join(lines) + "\n"
 
 
@@ -169,7 +172,8 @@ def present(
 ) -> dict:
     """承認資料から提示したコミットと含む Pull Request を読み、レーンへ対応づける。
 
-    書くのは提示の置き場 `d`（`releases/<連番>/<提示>/`）の決まった名前だけである: `presented.json`、承認資料へ足す
+    書くのは承認資料の `## 検査の結果` の節（レーンごとの検査のプランの結果。#3585）と、提示の置き場 `d`
+    （`releases/<連番>/<提示>/`）の決まった名前だけである: `presented.json`、承認資料へ足す
     内訳 `breakdown.md`、提示のプランの状態ディレクトリ（`present_state_dir`）の `work/prs.txt`・`work/approved.txt`
     （本番のプランが `{queue_prs:present}`・`{queue_approved:present}` で読む）。承認資料へ内訳を足すのはプランのコマンドである。
     `first` は出し直しのときの提示 1 の `presented.json`（加わった範囲を載せる）。承認資料に承認したコミットが無ければ ValueError。"""
@@ -192,6 +196,7 @@ def present(
     (d / "breakdown.md").write_text(breakdown_md(mapped, added), encoding="utf-8")
     (work / "prs.txt").write_text(" ".join(str(n) for n in prs) + "\n", encoding="utf-8")
     (work / "approved.txt").write_text(sha + "\n", encoding="utf-8")
+    ppr.put_checks(approval, ppr.check_md(root, mapped, requests))  # 含む PR ごとの検査の結果（#3585）
     return data
 
 

@@ -1630,9 +1630,8 @@ def test_new_release_dev_and_prod(tmp_path):
         "verify",
         "cleanup",
         "judge",
-        "fix",
         "judge-record",
-    ]
+    ]  # 本番は直しの段を持たない（#3572。judge はやり直すか止めるかだけを選ぶ）
     # 導入の確認だけのステップは「リリース後テスト」と記録しない。それは仕上げの release-verify が担う（#2288 の AC1）
     assert "--ref main" in st["verify"]["cmd"] and st["verify"]["stage"] == "デプロイ"
     assert not [s for s in plan["steps"] if s.get("stage") == "リリース後テスト"]
@@ -3184,7 +3183,7 @@ def test_step_with_a_leftover_queue_placeholder_stops_without_running(tmp_path):
 # このリポジトリの宣言（sync_checks あり・単位を選ばない取り込み方）で組み、CD の有無は release_case.case_at で決める）
 _BASE_DEV = ["bump", "changelog", "notes", "sync", "release", "verify"]
 _BASE_PROD = ["bump", "bump-others", "changelog", "notes", "snapshot", "sync", "release", "cd-result", "record", "verify", "cleanup"]
-_TAIL_PROD = ["judge", "fix", "judge-record"]
+_TAIL_PROD = ["judge", "judge-record"]  # 本番は直しの段を持たない（#3572）
 _APPROVAL = ["facts", "explain", "others"]
 
 
@@ -3226,7 +3225,12 @@ def test_release_package_plugin_plan_shape_by_channel_cd_and_mvv(tmp_path, monke
     assert got["branch"] == f"release/v{version}" and "起点のコミット" not in got
     steps = {s["id"]: s for s in got["steps"]}
     assert {i for i, s in steps.items() if s.get("gate_as_ok")} == ({"facts"} if (channel, cd, mvv) == ("dev", False, True) else set())
-    assert steps["fix"]["next"] == "sync" and steps["judge"].get("next") is None
+    assert steps["judge"].get("next") is None
+    if channel == "dev":
+        assert steps["fix"]["next"] == "sync" and "fix" in steps["judge"]["choices"]
+    else:  # 本番は承認の外のコミットを積まない。judge はやり直すか止めるかだけ（#3572）
+        assert "fix" not in steps and "fix" not in steps["judge"]["choices"] and "stop" in steps["judge"]["choices"]
+        assert "fix" not in got["規則"]
     assert steps["notes"]["next"] == ("snapshot" if channel == "prod" else "sync") and steps["sync"]["next"] == "release"
 
 

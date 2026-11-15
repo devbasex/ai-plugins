@@ -77,6 +77,7 @@ BEFORE = {
     "monitor-types.thread-join": {"seconds": 1},
     "notify.slack": {"seconds": 10},
     "parallel-launch.up": {"seconds": 120, "interval": 5},
+    "parallel-launch.helper-wait": {"seconds": 3600},  # #3597 で足した一時レーンの空き待ちの上限
     "parallel-repo.stall": {"seconds": 3600},
     "parallel-machine.admit-lock": {"seconds": 10},  # #2999 で足したレーンの起動の判定の排他
     "parallel-switch.long-wait": {"seconds": 14400},

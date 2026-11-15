@@ -15,7 +15,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import test_parallel_hold_flow as tph  # noqa: E402
-import test_parallel_run as tpr  # noqa: E402
+import parallel_run_world as prw  # noqa: E402
 
 import context_policy as cp  # noqa: E402
 import durable  # noqa: E402
@@ -24,7 +24,7 @@ import parallel_plan as pp  # noqa: E402
 import parallel_switch as psw  # noqa: E402
 import parallel_status as pst  # noqa: E402
 
-env = tpr.env
+env = prw.env
 HOUR = 3600.0
 # 実測（計画 p5 の最初の会話）: 最後の文脈 474,303・最初の文脈 46,000・Opus 5.5
 BIG, BASE, OPUS = 474_303, 46_000, "claude-opus-5-5"
@@ -203,7 +203,7 @@ def test_unreadable_ledger_and_relay_become_missing_materials(env, monkeypatch):
 def test_an_unanswered_question_in_the_ledger_is_counted(env, monkeypatch):
     """決定 6: 計画の台帳の答えていない問いを `status` と同じ一覧で数える。"""
     main = env["main"]
-    pl.request_ask(main, "p1", "la", tpr.ASK, str(main), "s1")
+    pl.request_ask(main, "p1", "la", prw.ASK, str(main), "s1")
     x = psw.read_inputs(main, "p1", 1800)
     assert x.unanswered == 1 and x.elapsed_s is not None and x.elapsed_s < 60
 

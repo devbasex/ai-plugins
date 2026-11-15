@@ -21,7 +21,8 @@
         git の根、`worktree` を省けば根の `.worktrees/<branch>` にする（サブモジュールでもそのworktreeの根。#2054）。
         省いた作業場所が使えなければ書かずに止まる。`base` を省けば根の `.ndf/worktree.json` の `base_branch`、
         宣言が無ければ `origin` の既定ブランチにする。`merge_method` を省けば `base` のブランチで許された方式
-        （ruleset とリポジトリの設定）の先頭にし、読めなければ無い差し込みとして止まる
+        （ruleset とリポジトリの設定）の先頭にし、読めなければ無い差し込みとして止まる。`repo` の宣言
+        （`.ndf/project.json`）がテストを CI に寄せる（`test.ci.only`）なら、手元のテストのステップを外す
     ndf route run <依頼の種類> --out <plan.json> [--set ...] [--add ...]
         render の後に同じプランを `ndf plan next` で流す（即時修正をテスト → PR → merge-when-green の 1 つの
         エントリポイントで流す）
@@ -61,6 +62,7 @@ from ndf.contracts.routing import END
 from ndf.core.route import local_tests
 from ndf.core.plan import cli as plan_cli
 from ndf.core.plan import model, steps
+from ndf.testing import declared, scoped
 
 TOOL = cli.tool_of(__name__)
 # 雛形の置き場（contracts/ の下）と、雛形でない決まった名前のファイル
@@ -471,12 +473,22 @@ def _pairs(sets: Optional[list[str]], adds: Optional[list[str]]) -> dict[str, Va
     return {**values, **lists}
 
 
+def _declared_ci_only(values: Mapping[str, Value]) -> bool:
+    """埋める先のリポジトリ（`repo`、無ければ打った場所）の宣言がテストを CI に寄せる（`test.ci.only` が真）か。
+
+    工程から組むプラン（`ndf.progress.invoke.plan_path`）と同じく、宣言があれば手元のテストのステップを外す（PR 3590 の指摘）。
+    """
+    repo = values.get("repo")
+    place = Path(repo) if isinstance(repo, str) and repo else Path.cwd()
+    return scoped.ci_only(declared.test_section(place))
+
+
 def _write_plan(a: argparse.Namespace) -> tuple[Template, Path]:
     t = choose(a.purpose)
     given = _pairs(a.sets, a.adds)
     values = derived(t, given, Path.cwd())
     _check_worktree(t, given, values)
-    plan = render(t, values)
+    plan = render(t, values, local_tests=not _declared_ci_only(values))
     out = Path(a.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

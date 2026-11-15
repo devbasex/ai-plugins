@@ -2,7 +2,7 @@
 レーンの問い・終わりの記録の無い停止の問い・終わった後の差し戻し・版の要るまとめの待ちと一時レーン・副命令 end と verified。
 
 耐久ワークフローの中の値は `_Run` を耐久ワークフローの外で組んで確かめ（知らせは捨てる）、止める耐久ステップは
-`test_parallel_run` の偽の relay.py（`env`）で流す。
+`parallel_run_world` の偽の relay.py（`env`）で流す。
 """
 
 from __future__ import annotations
@@ -19,14 +19,14 @@ SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS / "lib"))
 sys.path.insert(0, str(SCRIPTS))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import test_parallel_run as tpr  # noqa: E402
+import parallel_run_world as prw  # noqa: E402
 
 import durable  # noqa: E402
 import parallel_end as pend  # noqa: E402
 import parallel_ledger as plg  # noqa: E402
 import parallel_run as prun  # noqa: E402
 
-env = tpr.env
+env = prw.env
 RID = "la-r000000000001"
 LANES = [{"name": "la", "input": {"kind": "sprint"}}, {"name": "lb", "input": {"kind": "sprint"}, "after": ["la"]}]
 

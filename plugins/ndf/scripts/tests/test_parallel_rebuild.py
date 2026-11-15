@@ -10,7 +10,7 @@ import threading
 
 import pytest
 
-from test_parallel_run import SCRIPTS, calls, env, event, helper_spawns, lanes_spawned, questions, read, spawned, start, until  # noqa: F401,E501  env は fixture
+from parallel_run_world import SCRIPTS, calls, env, event, helper_spawns, lanes_spawned, questions, read, spawned, start, until  # noqa: F401,E501  env は fixture
 import durable  # noqa: E402
 import parallel_lane as pl  # noqa: E402
 import parallel_ledger as plg  # noqa: E402

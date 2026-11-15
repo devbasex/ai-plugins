@@ -157,6 +157,28 @@ def sent(fn, *args, **kw):
         reply("stopped", f"計画の台帳へ書けない: {exc}", code=2)
 
 
+def _request_resent_fields(s: plg.Sent) -> dict:
+    """依頼（release・ask・gate2）を送った結果から出力へ足す値。書いたなら空、同じキーで中身が同じ再送なら `already`・`answered`（#3597 の決定 5）。
+    同じキーで中身の違う依頼は送ったと返さず、既にある id と理由を添えて 1（失敗）で終える。終了コード 5 は全体で「CD の結果が失敗」の
+    見出しを持つため使わない（`exit_codes.EXIT_LABELS`）。"""
+    if s.written:
+        return {}
+    if not s.same:
+        why = "同じ id で中身の違う依頼が台帳にある（送らない）"
+        reply("stopped", f"依頼 {s.existing or '-'} を送らない: {why}", code=1, existing=s.existing, reason=why)
+    return {"already": True, "answered": s.answered}
+
+
+def _sent_verb(already, fresh: str = "送った") -> str:
+    """要約の動詞: 同じキーの行が既にあった（`already` が真）なら「送り済み」、書いたなら `fresh`（#3597 の決定 5）。"""
+    return "送り済み" if already else fresh
+
+
+def _resent_fields(s) -> dict:
+    """答え・確定・締め・止める指示を送った結果から出力へ足す値（`plg.already_fields`）。依頼と違い、中身が違っても終了コードは変えない。"""
+    return plg.already_fields(s)
+
+
 def cmd_run(a) -> None:
     px.refuse_in_factory_run(reply)
     main = main_of()
@@ -242,8 +264,10 @@ def cmd_compose(a) -> None:
 def cmd_confirm(a) -> None:
     main = main_of()
     q = accepting(main, a.name)
-    sent(pl.resume_plan, main, a.name, {"n": a.n, "phase": "confirm", "take": a.take}, f"confirm:{a.n}:{a.take or '-'}")
-    reply("ok", f"リリース {a.n} の承認を送った{QUEUED if q else ''}", n=a.n, take=a.take, **q)
+    got = _resent_fields(
+        sent(pl.resume_plan, main, a.name, {"n": a.n, "phase": "confirm", "take": a.take}, f"confirm:{a.n}:{a.take or '-'}")
+    )
+    reply("ok", f"リリース {a.n} の承認を{_sent_verb(got)}{QUEUED if q else ''}", n=a.n, take=a.take, **got, **q)
 
 
 def _release_result(path: str) -> tuple[str, str | None]:
@@ -267,8 +291,8 @@ def cmd_settle(a) -> None:
     q = accepting(main, a.name)
     res, version = ("rejected", None) if a.rejected else _release_result(a.done)
     msg = {"n": a.n, "phase": "settle", "result": res, "version": version, "reason": a.reason}
-    sent(pl.resume_plan, main, a.name, msg, f"settle:{a.n}")
-    reply("ok", f"リリース {a.n} の結果 {res} を送った{QUEUED if q else ''}", result=res, version=version, **q)
+    got = _resent_fields(sent(pl.resume_plan, main, a.name, msg, f"settle:{a.n}"))
+    reply("ok", f"リリース {a.n} の結果 {res} を{_sent_verb(got)}{QUEUED if q else ''}", result=res, version=version, **got, **q)
 
 
 def cmd_stop(a) -> None:
@@ -278,16 +302,16 @@ def cmd_stop(a) -> None:
     plan, items, _ = checked_plan(main, a.name)
     if plan is None:
         reply("stopped", f"並列の計画 {a.name} の検査に誤りがある", items, 1)
-    st = plg.plan_state(main, a.name, pl.run_status(main, a.name))
+    st, got = plg.plan_state(main, a.name, pl.run_status(main, a.name)), {}
     if st == "running":
         msg, key = ({"kind": "stop", "force": True}, "stop:force") if a.force else ({"kind": "stop"}, "stop")
-        sent(pl.deliver_message, main, a.name, msg, "inbox", key)
+        got = _resent_fields(sent(pl.deliver_message, main, a.name, msg, "inbox", key))
     elif st == "lost":  # 失われた計画は閉じる（作り直さない。I11）
         sent(plg.append_ledger_row, main, a.name, "closed", "closed", by="organizer")
     left = [ln.name for ln in plan.lanes if pr_run.relay(main, "stop", ln.name, "--json")[0] not in (0, 3)]
     if left:
         reply("stopped", f"止まらないレーンがある: {', '.join(left)}", [{"lane": n} for n in left], 1, not_stopped=left)
-    reply("ok", f"並列の計画 {a.name} のレーン {len(plan.lanes)} 本へ停止を打った", [{"lane": ln.name} for ln in plan.lanes])
+    reply("ok", f"並列の計画 {a.name} のレーン {len(plan.lanes)} 本へ停止を打った", [{"lane": ln.name} for ln in plan.lanes], **got)
 
 
 # ---- レーンの側 ----
@@ -305,10 +329,11 @@ def cmd_request(a) -> None:
         _ = a.verify_plan and sent(send_verify, main, a.name, a.lane, Path(a.state), a.verify_plan, version)
         reply("ok", "自分の Pull Request はすでに本番チャネルにある。依頼を送らずに続きへ進む", result="released", version=version)
     rid = sent(pl.send_release_request, main, a.name, a.lane, a.prs, a.issues, Path(a.state), a.verify_plan)
+    again = _request_resent_fields(rid)  # 中身の違う同じ id の依頼は 1 で終え、依頼の記録を書かない
     pl.write_request(Path(a.state), {"id": rid, "plan": a.name, "lane": a.lane, "prs": a.prs})
     nxt = f"python3 {SELF} await {a.name} --from {Path(a.state) / 'work' / 'request.txt'}"
-    summary = f"リリースの依頼 {rid} を送った（リリース待ち）。答えは parallel.py await で読む{QUEUED if q else ''}"
-    reply("gate", summary, code=10, next_step=nxt, id=rid, result="requested", **q)
+    summary = f"リリースの依頼 {rid} を{_sent_verb(again)}（リリース待ち）。答えは parallel.py await で読む{QUEUED if q else ''}"
+    reply("gate", summary, code=10, next_step=nxt, id=str(rid), result="requested", **again, **q)
 
 
 def cmd_await(a) -> None:
@@ -353,14 +378,40 @@ def cmd_request_ask(a) -> None:
     rid = sent(
         pl.request_ask, main, a.name, a.lane, got.get("tool_input") or {}, got.get("cwd") or os.getcwd(), str(got.get("ledger_id") or "")
     )
-    reply("ok", f"問いの依頼 {rid} をオーガナイザーへ送った{QUEUED if q else ''}", id=rid, **q)
+    again = _request_resent_fields(rid)
+    reply("ok", f"問いの依頼 {rid} を{_sent_verb(again, 'オーガナイザーへ送った')}{QUEUED if q else ''}", id=str(rid), **again, **q)
+
+
+def _send_gate2(main: Path, a) -> plg.Sent:
+    """リリース承認ゲートの依頼を送る: `--confirmed` なら done を先に読んでから確定の後の依頼、ほかは提示の依頼。"""
+    import parallel_gate2 as pg2
+
+    if a.confirmed:
+        json.loads(Path(a.done).read_text(encoding="utf-8"))  # 読めない done は台帳の誤りと分けて 2 で返す
+        return sent(pg2.request_confirmed, main, a.name, a.n, a.k, a.done)
+    return sent(pg2.request_gate2, main, a.name, a.n, a.k, a.report)
 
 
 def cmd_request_gate2(a) -> None:
+    """提示（`--report`）か確定の後（`--confirmed --done`）のリリース承認ゲートの依頼を送る（#3597 の決定 1・決定 2）。"""
+    import durable
+    import parallel_gate2 as pg2
+
+    if bool(a.report) == bool(a.confirmed) or (a.confirmed and not a.done):
+        reply("stopped", "--report か、--confirmed と --done のどちらか一方が要る", code=1)
     main = main_of()
     q = accepting(main, a.name)
-    rid = sent(pl.request_gate2, main, a.name, a.n, a.k, a.report)
-    reply("ok", f"リリース承認ゲートの依頼 {rid} をオーガナイザーへ送った。答えを待つ間は止まる{QUEUED if q else ''}", id=rid, **q)
+    try:
+        rid = _send_gate2(main, a)
+    except pg2.NotConfirmed as exc:
+        reply("stopped", str(exc), code=4)
+    except (OSError, ValueError) as exc:
+        reply("stopped", f"done を読めない: {exc}", code=2)
+    except durable.DurableError as exc:
+        reply("stopped", f"耐久の記録を読めない: {exc}", code=2)
+    again = _request_resent_fields(rid)
+    what = _sent_verb(again, "オーガナイザーへ送った")
+    reply("ok", f"リリース承認ゲートの依頼 {rid} を{what}。答えを待つ間は止まる{QUEUED if q else ''}", id=str(rid), **again, **q)
 
 
 def cmd_answer(a) -> None:
@@ -382,7 +433,7 @@ def cmd_answer(a) -> None:
     extra.update(
         id=a.id, result=result, next=nxt, seq=seq, **({"held_owners": held} if held else {}), **pa.not_listed(a.id, items), **queued
     )
-    reply("ok", f"依頼 {a.id} へ答え（{result}）を送った{tail}{QUEUED if queued else ''}", **extra)
+    reply("ok", f"依頼 {a.id} へ答え（{result}）を{_sent_verb(extra.get('already'))}{tail}{QUEUED if queued else ''}", **extra)
 
 
 def cmd_park(a) -> None:
@@ -395,7 +446,12 @@ def cmd_helper(a) -> None:
     main = main_of()
     if pl.run_status(main, a.name) not in pl.RUNNING:
         reply("stopped", f"並列の計画 {a.name} が動いていない", code=1)
-    task = parallel_helper.helper_task(main, a.name, a.n, a.k)
+    try:
+        task = parallel_helper.helper_task(main, a.name, a.n, a.k)
+    except OSError as exc:  # 台帳を読めなければ問いを送らずに止まる（#3597 の決定 8）
+        reply("stopped", f"計画の台帳を読めない: {exc}", code=2)
+    if task.get("error"):  # 確定の後の打ち直しで関門から流し直す開始を決められない。--from 無しで流すとマージせずに完了と読まれる
+        reply("stopped", f"一時レーンの仕事を組めない: {task['error']}", code=2, **task)
     reply("ok", f"一時レーンの仕事: リリース {a.n} の提示 {a.k}（{task['phase']}）", **task)
 
 

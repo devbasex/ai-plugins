@@ -34,7 +34,7 @@ TEXT_CHILDREN = ("S1a", "S1b")
 RECORDS = "trial"
 ROW_PREFIX = '    {"id": '
 STALLED = (
-    "試走のスプリントは手順 0 で $SCRIPTS が旧いプラグインの scripts/ へ解決したため、この行の振る舞いまで ndf-next だけで流せていない"
+    "試走のスプリントがこの行の振る舞いまで届いておらず、ndf-next だけで通したことをまだ確かめていない（止まった所は最新の記録の runs）"
 )
 
 

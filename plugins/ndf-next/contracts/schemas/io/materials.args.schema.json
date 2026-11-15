@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/io/materials.args.schema.json",
+  "title": "ndf materials の引数",
+  "description": "ndf materials が受ける引数。キーは引数の名前（オプションは -- の名前、位置引数は名前）。規約の生成が作り、手で直さない",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "--issue": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "課題の番号（1 つ以上）"
+        },
+        "--root": {
+          "type": "string",
+          "default": ".",
+          "description": "リポジトリの作業場所"
+        },
+        "--out": {
+          "type": "string",
+          "description": "判定の根拠のファイルの下書きを書く先"
+        }
+      },
+      "required": [
+        "--issue"
+      ]
+    }
+  ]
+}

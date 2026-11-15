@@ -2,19 +2,25 @@
 
     ndf relay install [--replace-old] | uninstall | status   # 複製 ~/.claude/ndf/relay.py と PATH のエントリポイント ndf-relay
     ndf relay account use <名前> | show | clear               # 子の claude を起動するアカウントの指定（#2464）
+    ndf relay account add | add-bedrock | add-api-key | api-key-monthly | api-key-use | list | capacity | remove | check
+                                                              # アカウントと従量の接続の登録（旧い置き場と同じ。#3569）
     ndf relay run --name <名前> [--prompt <1 行>] [-- <claude の引数>]   # ラッパーを今の端末で動かす
     ndf relay spawn [--name <名前>] [--cwd <dir>] [--role <役割>] [--plan <計画>] [-- <claude の引数>]
-    ndf relay restart <名前> | stop <名前> | ls                # リレーハブへの依頼と一覧
+    ndf relay restart <名前> | stop <名前> | stop --all | ls   # リレーハブへの依頼と一覧
+    ndf relay notice                                          # カットポイントのアナウンス（ラッパーの直接の子か）
+    ndf relay context resolve | record | calibrate | report   # 再起動の方針の適用値・判定の記録・見込み・作業ごとの集計
     ndf relay pending                                         # 再起動の前に載せる、待ちを抱えた実行の一覧（決定 86）
     ndf relay mark <session_id>                               # 子へ入力を送る前に中継の印を立てる（決定 92）
     ndf relay decide < 区間の状態の JSON                       # 区間を切り替えるかの判断（#2962）
 
-副命令の説明は `COMMANDS`・`ACCOUNT_COMMANDS` の表から作り、`--help` の一覧と実装が食い違わない（#2898）。
+副命令の説明は `COMMANDS` と `cli_account` の `ACCOUNT_COMMANDS`・`ACCOUNT_REGISTRY`、`cli_context` の `CONTEXT_COMMANDS` の表から作り、`--help` の一覧と実装が食い違わない（#2898）。
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import json
 import os
 import sys
@@ -25,47 +31,41 @@ from typing import Any, Callable, Mapping
 
 from ndf import cli, identity
 from ndf.contracts import causes, limits, result
-from ndf.domains.relay import account_decide, accounts, hub, install, lane_question, marks, pending, registry, switch_decide, wrapper
+from ndf.domains.relay import (
+    account_decide,
+    accounts,
+    hub,
+    install,
+    lane_question,
+    marks,
+    notice,
+    pending,
+    registry,
+    stop_signal,
+    switch_decide,
+    wrapper,
+)
+from ndf.domains.relay import account_registry, cli_account, cli_context
 from ndf.domains.relay.tmux import Tmux
 
 # 結果 JSON の tool の名前は副命令の名前（正本は `cli.COMMANDS`）
-TOOL = next(name for name, module in cli.COMMANDS.items() if module == __name__)
+TOOL = cli.tool_of(__name__)
 COMMANDS = {
     "install": "中継の複製と PATH のエントリポイントを置く",
     "uninstall": "置いた複製と PATH のエントリポイントを消す",
     "status": "複製と PATH のエントリポイントの有無",
-    "account": "子の claude を起動するアカウントの指定",
+    "account": "子の claude を起動するアカウントの指定と、アカウント・従量の接続の登録",
     "run": "ラッパーを今の端末で動かす",
     "spawn": "名前つきのラッパーを tmux で起動する",
     "restart": "名前つきのラッパーを起こし直す（止める前に上限を判定する）",
-    "stop": "名前つきのラッパーを止める",
+    "stop": "名前つきのラッパーを止める（--all ですべて）",
     "ls": "名前つきのラッパーの一覧と状態",
     "pending": "再起動の前に、待ちを抱えた実行の一覧を出す",
     "mark": "子へ入力を送る前に中継の印を立てる",
     "decide": "区間の状態の JSON（標準入力）から次の手を出す",
+    "notice": "カットポイントのアナウンスの 1 文を出す（呼び手がラッパーの直接の子か）",
+    "context": "再起動の方針の適用値・判定の記録・費用の見込み・作業ごとの集計",
 }
-ACCOUNT_COMMANDS = {
-    "use": "子の claude を起動するアカウントを指定する",
-    "show": "今選ばれるアカウント（環境変数 → 指定）を出す",
-    "clear": "指定を消す",
-}
-
-
-class EnvError(ValueError):
-    """上限を替える環境変数の値の形が違う。"""
-
-
-def _env_number(environ: Mapping[str, str], name: str, policy: str, key: str) -> float:
-    raw = environ.get(name)
-    if not raw:
-        return limits.value(policy, key)
-    try:
-        got = float(raw)
-    except ValueError as exc:
-        raise EnvError(f"{name} の値が数でない: {raw}") from exc
-    if got <= 0:
-        raise EnvError(f"{name} の値は 0 より大きくする: {raw}")
-    return got
 
 
 def plugin_version(root: Path) -> str:
@@ -105,18 +105,6 @@ def _install_run(args: argparse.Namespace) -> int:
     return got if isinstance(got, int) else _emit_installed(got, foreign_warning=True)
 
 
-def _account(args: argparse.Namespace) -> int:
-    state_dir = identity.load().state_dir
-    if args.account_action == "use":
-        accounts.use(state_dir, args.name)
-        return result.emit(result.result(TOOL, result.OK, f"アカウント {args.name} を指定した"))
-    if args.account_action == "clear":
-        done = accounts.clear(state_dir)
-        return result.emit(result.result(TOOL, result.OK, "指定を消した" if done else "指定は無かった"))
-    name = accounts.chosen(os.environ, state_dir)
-    return result.emit(result.result(TOOL, result.OK, f"選ばれるアカウント: {name or '（claude の既定）'}", items=[{"account": name}]))
-
-
 def _pending_read(root: Path) -> pending.Pending:
     return pending.read(root, limits.seconds("relay.pending"))
 
@@ -152,14 +140,14 @@ def hub_context(environ: Mapping[str, str]) -> hub.Context:
         version=plugin_version(ident.root),
         environ=environ,
         tmux=Tmux(environ, limits.seconds("relay.tmux")),
-        max_named=int(_env_number(environ, "NDF_RELAY_MAX_NAMED", "relay.max-named", "count")),
-        max_starts=int(_env_number(environ, "NDF_RELAY_MAX_STARTS", "relay.max-starts", "attempts")),
+        max_named=int(limits.from_env(environ, "NDF_RELAY_MAX_NAMED", "relay.max-named", "count")),
+        max_starts=int(limits.from_env(environ, "NDF_RELAY_MAX_STARTS", "relay.max-starts", "attempts")),
         started=hub.Wait(limits.seconds("relay.started"), limits.value("relay.started", "interval")),
         stop_wait=hub.Wait(
-            _env_number(environ, "NDF_RELAY_STOP_WAIT", "relay.stop-wait", "seconds"), limits.value("relay.stop-wait", "interval")
+            limits.from_env(environ, "NDF_RELAY_STOP_WAIT", "relay.stop-wait", "seconds"), limits.value("relay.stop-wait", "interval")
         ),
         hub_wait=hub.Wait(
-            _env_number(environ, "NDF_RELAY_HUB_WAIT", "relay.hub-wait", "seconds"), limits.value("relay.hub-poll", "interval")
+            limits.from_env(environ, "NDF_RELAY_HUB_WAIT", "relay.hub-wait", "seconds"), limits.value("relay.hub-poll", "interval")
         ),
         pending=lambda: _pending_read(ident.root)._asdict(),
     )
@@ -179,9 +167,51 @@ def _hub(args: argparse.Namespace) -> int:
     if args.action == "spawn":
         cwd = str(Path(args.cwd).resolve()) if args.cwd else os.getcwd()
         req = {"kind": "spawn", "name": args.name, "cwd": cwd, "role": args.role, "plan": args.plan, "args": args.rest}
+    elif args.action == "stop" and args.all:
+        return _stop_all(ctx)
     else:
         req = {"kind": args.action, "name": args.name}
     return _outcome(hub.submit(ctx, req))
+
+
+def _stop_all(ctx: hub.Context) -> int:
+    """動いているラッパーのすべてへ停止シグナルファイルを置き、tmux のセッションで動くものは名前つきの停止も依頼する。
+
+    端末から直接起動したラッパー（`ndf-relay run`）は tmux のセッションを持たないため、シグナルファイルだけで止める（今の
+    セッションが終わると次の区間を始めずに終わる）。シグナルファイルを置けない・止められないものがあれば止まった結果。
+    """
+    names = [r.name for r in registry.running(ctx.state_dir)]
+    items: list[dict[str, Any]] = []
+    refused: list[str] = []
+    for name in names:
+        got = _stop_one(ctx, name)
+        items.append({"name": name, "ok": got.ok, "summary": got.summary})
+        if not got.ok:
+            refused.append(name)
+    metrics = {"stopped": len(names) - len(refused)}
+    if refused:
+        return result.emit(
+            result.stopped(TOOL, "refused", f"止められないラッパーがある: {'・'.join(refused)}", items=items, metrics=metrics)
+        )
+    return result.emit(result.result(TOOL, result.OK, f"ラッパーを {len(names)} 本止めた", items=items, metrics=metrics))
+
+
+def _stop_one(ctx: hub.Context, name: str) -> hub.Outcome:
+    try:
+        stop_signal.place_stop(registry.wrapper_dir(ctx.state_dir, name))
+    except (OSError, registry.RegistryError) as exc:
+        return hub.Outcome(False, f"停止シグナルファイルを置けない: {exc}", "refused")
+    if ctx.tmux.has(name):
+        return hub.submit(ctx, {"kind": "stop", "name": name})
+    return hub.Outcome(True, f"{name} へ停止シグナルファイルを置いた（tmux の外。今のセッションが終わると止まる）")
+
+
+def _notice() -> int:
+    pos = notice.position(os.environ, os.getppid())
+    got = notice.lines(pos, limits.seconds("relay.quiet"))
+    return result.emit(
+        result.result(TOOL, result.OK, got.text, items=[{"text": got.text, "position": pos.kind}], metrics={"inside": got.inside})
+    )
 
 
 def wrapper_settings(name: str, rest: list[str]) -> wrapper.Settings:
@@ -198,7 +228,7 @@ def wrapper_settings(name: str, rest: list[str]) -> wrapper.Settings:
         tick=limits.value("relay.tick", "interval"),
         quiet=limits.seconds("relay.quiet"),
         stall=limits.seconds("relay.stall"),
-        max_starts=int(_env_number(environ, "NDF_RELAY_MAX_STARTS", "relay.max-starts", "attempts")),
+        max_starts=int(limits.from_env(environ, "NDF_RELAY_MAX_STARTS", "relay.max-starts", "attempts")),
         context_limit=int(limits.value("relay.context", "count")),
         usage_threshold=limits.value("relay.usage-guard", "count"),
         transcript_bytes=int(limits.value("relay.transcript-tail", "count")),
@@ -226,30 +256,28 @@ def _run(args: argparse.Namespace) -> int:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog=f"ndf {TOOL}", description="中継（区間の切り替え・レーンの起動）")
     sub = parser.add_subparsers(dest="action", required=True)
-    p = {name: sub.add_parser(name, help=text, description=text) for name, text in COMMANDS.items() if name != "account"}
+    p = {name: sub.add_parser(name, help=text, description=text) for name, text in COMMANDS.items() if name not in ("account", "context")}
+    cli_context.parser(sub, COMMANDS["context"])
     p["install"].add_argument("--replace-old", action="store_true", help="旧い NDF の複製を置き換える（旧いラッパーが動いていれば断る）")
-    acc = sub.add_parser(
-        "account", help=COMMANDS["account"], description="副命令: " + " / ".join(f"{k}（{v}）" for k, v in ACCOUNT_COMMANDS.items())
-    )
-    acc_sub = acc.add_subparsers(dest="account_action", required=True)
-    for name, text in ACCOUNT_COMMANDS.items():
-        a = acc_sub.add_parser(name, help=text)
-        if name == "use":
-            a.add_argument("name")
+    cli_account.parser(sub, COMMANDS["account"])
     for name in ("run", "spawn"):
         p[name].add_argument("--name")
         p[name].add_argument("rest", nargs=argparse.REMAINDER)
     p["run"].add_argument("--prompt")
     for opt in ("--cwd", "--role", "--plan"):
         p["spawn"].add_argument(opt)
-    for name in ("restart", "stop"):
-        p[name].add_argument("name")
+    p["restart"].add_argument("name")
+    stop = p["stop"].add_mutually_exclusive_group(required=True)
+    stop.add_argument("name", nargs="?", help="止めるラッパーの名前")
+    stop.add_argument("--all", action="store_true", help="動いている名前つきのラッパーをすべて止める")
     p["mark"].add_argument("session_id")
     return parser
 
 
 def _parse(argv: list[str]) -> argparse.Namespace:
     args = _parser().parse_args(argv)
+    if args.action == "context" and args.context_action == "record" and (args.verdict is not None) != (args.reason is not None):
+        _parser().error("--verdict 再起動 には --reason を、--event には --reason を付けない")
     if getattr(args, "rest", None) and args.rest[0] == "--":
         args.rest = args.rest[1:]
     return args
@@ -259,7 +287,7 @@ HANDLERS: dict[str, Callable[[argparse.Namespace], int]] = {
     "install": _install_run,
     "uninstall": lambda a: _emit_installed(install.uninstall(os.environ, _missing_code()), foreign_warning=False),
     "status": lambda a: _emit_installed(install.status(os.environ, _missing_code()), foreign_warning=False),
-    "account": _account,
+    "account": cli_account.run,
     "run": _run,
     "spawn": _hub,
     "restart": _hub,
@@ -268,15 +296,21 @@ HANDLERS: dict[str, Callable[[argparse.Namespace], int]] = {
     "pending": lambda a: _pending(),
     "mark": lambda a: _mark(a.session_id),
     "decide": lambda a: _decide(),
+    "notice": lambda a: _notice(),
+    "context": lambda a: cli_context.CONTEXT_HANDLERS[a.context_action](a),
 }
 
 
 def main(argv: list[str]) -> int:
+    secret_args = argv[:2] == ["account", "add-api-key"]
     try:
-        args = _parse(argv)
+        with contextlib.redirect_stderr(io.StringIO()) if secret_args else contextlib.nullcontext():
+            args = _parse(argv)
     except SystemExit as exc:
+        if exc.code and secret_args:  # 余った引数はキーの値でありうるので、引数を写さない
+            print("引数を読めない（引数は表示しない）。キーの値は標準入力か --key-file で渡す", file=sys.stderr)
         return causes.exit_code("invalid") if exc.code else 0
     try:
         return HANDLERS[args.action](args)
-    except (accounts.AccountError, marks.MarkError, registry.RegistryError, EnvError) as exc:
+    except (accounts.AccountError, account_registry.AccountError, marks.MarkError, registry.RegistryError, limits.EnvError) as exc:
         return result.emit(result.stopped(TOOL, "invalid", str(exc)))

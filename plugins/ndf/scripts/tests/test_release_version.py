@@ -450,3 +450,121 @@ def test_plan_finished_reads_the_result_of_the_report(tmp_path, world, report, w
         (sd / "report.md").write_text(report)
     assert queue_fill.plan_finished(str(plan)) is want
     assert queue_fill.plan_finished(None) is False
+
+
+# ---- 並列の計画のまとめたリリースの版（#3551） ----
+
+
+@pytest.mark.parametrize(
+    ("base", "latest", "want"),
+    [
+        ("10.27.67-dev.1", "10.27.66", "10.27.67"),  # 開発版の版上げが入った後（今と同じ）
+        ("10.27.66", "10.27.66", "10.27.67"),  # 同期の PR が出した版へ揃えた後（#3551 の事象）
+        ("10.27.66-dev.3", "10.27.66", "10.27.67"),  # 系列のタグがもうある
+        ("10.27.65", "10.27.66", "10.27.67"),  # ベースブランチが最新のタグより古い
+        ("10.27.5", None, "10.27.5"),  # タグが 1 つも無い
+    ],
+)
+def test_collected_release_is_above_the_latest_tag(base, latest, want):
+    assert rv.collected_release(obs(base, latest)) == want
+
+
+def test_collected_release_does_not_decide_when_something_is_unreadable():
+    o = obs("10.27.66", "10.27.66")
+    o.unreadable = ["tags"]
+    assert rv.collected_release(o) is None
+
+
+def test_dev_version_of_the_parallel_plan_skips_a_released_version(tmp_path, world):
+    """同期の PR で develop が出した版（タグあり）へ揃った後でも、まとめたリリースは次の版で組む（#3551）。"""
+    import parallel_repo
+
+    (world.repo / ".ndf" / "supervise.json").write_text(json.dumps({"release": {"plugin": "ndf"}}))
+    world.publish("10.27.6", "develop", "main", tag=True)
+    assert parallel_repo.dev_version(world.repo) == "10.27.7"
+    world.publish("10.27.7-dev.1", "develop")
+    assert parallel_repo.dev_version(world.repo) == "10.27.7"
+
+
+def test_dev_version_without_fetch_does_not_touch_origin(tmp_path, world, monkeypatch):
+    """起動の前の検査は origin を取り直さず、手元の追跡ブランチとタグで版を決める。"""
+    import parallel_repo
+
+    (world.repo / ".ndf" / "supervise.json").write_text(json.dumps({"release": {"plugin": "ndf"}}))
+    world.publish("10.27.6", "develop", "main", tag=True)
+    real = rv._git_run
+    seen = []
+    monkeypatch.setattr(rv, "_git_run", lambda repo, *a: seen.append(a[0]) or real(repo, *a))
+    assert parallel_repo.dev_version(world.repo, fetch=False) == "10.27.7" and "fetch" not in seen
+
+
+def test_dev_version_names_an_origin_fetch_failure_apart_from_an_unreadable_version(tmp_path, world, monkeypatch):
+    """取り直しに落ちたら、版を読めないという理由ではなく git の stderr を添えた取り直せない理由で止める。"""
+    import parallel_repo
+
+    (world.repo / ".ndf" / "supervise.json").write_text(json.dumps({"release": {"plugin": "ndf"}}))
+    world.publish("10.27.6", "develop", "main", tag=True)
+    real = rv._git_run
+    failed = subprocess.CompletedProcess(["git", "fetch"], 128, "", "fatal: unable to access origin")
+    monkeypatch.setattr(rv, "_git_run", lambda repo, *a: failed if a[0] == "fetch" else real(repo, *a))
+    with pytest.raises(parallel_repo.OriginUnfetchable, match="origin を取り直せない: fatal: unable to access origin"):
+        parallel_repo.dev_version(world.repo)
+    assert parallel_repo.dev_version(world.repo, fetch=False) == "10.27.7"
+
+
+# ---- observe の現状固定（I-002） ----
+
+
+def test_observe_reads_base_production_and_release_tags(world):
+    """正式版のタグだけを拾い、接尾辞つき・semver でない・別のプラグインのタグは外す。"""
+    world.publish("10.27.6", "develop", "main", tag=True)
+    for t in ("ndf--v10.27.7-dev.1", "ndf--vbroken", "other--v99.0.0"):
+        git(world.repo, "tag", t)
+    git(world.repo, "push", "-q", "origin", "--tags")
+    o = rv.observe(world.repo, "ndf", "develop", "main")
+    assert (o.plugin, o.base_ref, o.base_version, o.production_ref, o.production_version) == (
+        "ndf",
+        "origin/develop",
+        "10.27.6",
+        "origin/main",
+        "10.27.6",
+    )
+    assert sorted(o.tags) == ["10.27.5", "10.27.6"] and o.latest_tag == "10.27.6"
+    assert o.unreadable == []
+
+
+def test_observe_without_production_does_not_read_it(world):
+    o = rv.observe(world.repo, "ndf", "develop", None)
+    assert o.production_ref == "" and o.production_version is None
+    assert o.base_version == "10.27.5" and o.unreadable == []
+
+
+def test_observe_counts_missing_branches_as_unreadable(world):
+    o = rv.observe(world.repo, "ndf", "nosuch", "gone")
+    assert (o.base_ref, o.production_ref) == ("origin/nosuch", "origin/gone")
+    assert o.base_version is None and o.production_version is None
+    assert o.unreadable == ["origin/nosuch", "origin/gone"]
+    assert o.tags == ["10.27.5"]
+
+
+def test_observe_uses_the_given_rel_and_counts_a_wrong_one_as_unreadable(world):
+    ok = rv.observe(world.repo, "ndf", "develop", "main", rel="plugins/ndf/.claude-plugin/plugin.json")
+    assert (ok.base_version, ok.production_version, ok.unreadable) == ("10.27.5", "10.27.5", [])
+    bad = rv.observe(world.repo, "ndf", "develop", "main", rel="nope/plugin.json")
+    assert bad.base_version is None and bad.production_version is None
+    assert bad.unreadable == ["origin/develop", "origin/main"]
+
+
+def test_observe_without_tags_is_not_unreadable(world):
+    git(world.repo, "tag", "-d", "ndf--v10.27.5")
+    o = rv.observe(world.repo, "ndf", "develop", "main", fetch=False)
+    assert o.tags == [] and o.latest_tag is None and o.unreadable == []
+
+
+def test_observe_counts_a_failed_fetch_as_origin_unreadable(world):
+    """取り直しに落ちても手元の origin/* は読む。fetch=False なら取り直さず、読めないにも数えない。"""
+    git(world.repo, "fetch", "-q", "origin")
+    git(world.repo, "remote", "set-url", "origin", str(world.origin) + "-missing")
+    o = rv.observe(world.repo, "ndf", "develop", "main")
+    assert o.unreadable == ["origin"] and o.base_version == "10.27.5" and o.tags == ["10.27.5"]
+    assert rv.observe(world.repo, "ndf", "develop", "main", fetch=False).unreadable == []

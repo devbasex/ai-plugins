@@ -1,6 +1,6 @@
 # 設定ファイルの書き方
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `pr-steps.py`（M1）・`project-decl.py`（D2+）・`release-steps.py`（M2）・`supervise.py`（C2）・`worktree-deps.sh`（M8）・`worktree-localenv.sh`（M8）・`worktree-setup.sh`（M8）・`worktree-testenv.sh`（M8）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `pr-steps.py`（M1）・`release-steps.py`（M2）・`worktree-deps.sh`（M8）・`worktree-localenv.sh`（M8）・`worktree-setup.sh`（M8）・`worktree-testenv.sh`（M8）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 worktree 運用の仕組みは、リポジトリごとの差を `.ndf/worktree.json` から読む。
 **このファイルが無いリポジトリでは、すべての仕組みが何もせずに終わる。**
@@ -136,17 +136,17 @@ origin にもローカルにも無いときは、既定ブランチへは落ち�
 }
 ```
 
-- 組み合わせが表に合わない・知らないキー・表に無い値は、読む側（`supervise.py new sprint` など）が
+- 組み合わせが表に合わない・知らないキー・表に無い値は、読む側（`ndf progress new` など）が
   直すキーと許す値を出して終了コード 2 で止まる。既定値の行へは倒さない
 - スプリントを始めるときは、`branch_flow` をメインディレクトリの設定から読む（`production_branch` と同じ）
-- スプリントに属さないリリース（並列の計画のまとめたリリース・`supervise.py new release`）は、本番チャネル宛の Pull Request の検査と同じく
+- スプリントに属さないリリース（並列の計画のまとめたリリース・`ndf route render release`）は、本番チャネル宛の Pull Request の検査と同じく
   本番チャネルの宣言（`origin/<本番チャネル>` の `.ndf/worktree.json`）の `branch_flow` で組む。ベースブランチの
   Pull Request だけではリリースの範囲の決め方を変えられない。本番チャネルの宣言を読めなければ宣言の無いリポジトリと
   同じく組み、`branch_flow` が壊れていれば止まる。ブランチの名前は、どちらでもメインディレクトリの設定から解く
 - 変えた宣言は、それから始めるスプリントにだけ効く。動いているスプリントは、開始時に目録（`sprint.json`）の
   `ブランチ運用` へ書いた値のまま進む
-- 既存のリポジトリの使い方から案を作るときは `project-decl.py measure` を打ち、宣言と実際の使い方のずれは
-  `project-decl.py drift` で見る（`development-workflow` の `references/project-analysis.md`）
+- 既存のリポジトリの使い方から案を作るときは `ndf project measure` を打ち、宣言と実際の使い方のずれは
+  `ndf project drift` で見る（`development-workflow` の `references/project-analysis.md`）
 
 ### レビューの単位
 
@@ -178,7 +178,7 @@ origin にもローカルにも無いときは、既定ブランチへは落ち�
 | `design` | `cross-review` / `pr` | `cross-review` / `pr` |
 | `spec` | 掛けない | 掛けない |
 
-成り立たない組み合わせは、読む側（`supervise.py new sprint`・`project-decl.py check / write`）が直すキーと理由を
+成り立たない組み合わせは、読む側（`ndf progress new`・`ndf project check`・`ndf project write`）が直すキーと理由を
 1 件 1 行で出して終了コード 2 で止まる。
 
 - `diff` が `none` なのに `checks` を書いた・`none` 以外なのに `checks` が空

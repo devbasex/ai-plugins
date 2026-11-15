@@ -34,7 +34,7 @@ ID_LENGTH = 16
 # 承認しなかった答え（差し戻しの記録に数える）
 REJECTING = (run.REVISE, run.REJECTED)
 # 承認資料の置き場（進行表ごとの作業の置き場の下。名前は問いの id）
-MATERIAL_DIR = "materials"
+MATERIAL_DIR = "gate-materials"
 
 
 # --- 問い --------------------------------------------------------------------------------------

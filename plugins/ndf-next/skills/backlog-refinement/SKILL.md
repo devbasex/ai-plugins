@@ -10,7 +10,7 @@ allowed-tools:
 
 # 蓄積した課題を棚卸しする
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `ask.py`（P2）・`estimate.py`（P3）・`glossary.py`（M7）・`issue-items.py`（M6）・`project-decl.py`（D2+）・`projects-sync.sh`（M7）・`resolve.sh`（X0）・`sprint-close.py`（M1）・`upkeep.py`（M6）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `ask.py`（P2）・`estimate.py`（P3）・`glossary.py`（M7）・`issue-items.py`（M6）・`projects-sync.sh`（M7）・`sprint-close.py`（M1）・`upkeep.py`（M6）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 **変更をまたいで溜まった課題そのものを見直す。** 起票はその場で行い、その変更から出た
 取りこぼしは振り返りが拾うが、**一覧の全体を現状に合わせる手順**はどちらも持たない。
@@ -118,17 +118,18 @@ python3 "$UPKEEP/upkeep.py" depth compare --since-ref <デプロイした版の�
 | 2C | 順位を算出する | しない | なし（記録だけ） |
 | 3 | 反映する | 依存の無いものだけ割る | あり |
 
-**ブランチ運用の宣言と実際の使い方のずれも見る。** `project-decl.py measure --out <一時ファイル>` の後に `project-decl.py drift --measure <一時ファイル>` を打ち、`items` に行があれば項目・根拠・更新の案を完了報告へ載せる。宣言を変えるかは利用者の設定の書き換え（共通原則 C7）なので、案として示し、自分では書き換えない（手順は `development-workflow` の [references/project-analysis.md](../development-workflow/references/project-analysis.md) の「ブランチ運用」）。
+**ブランチ運用の宣言と実際の使い方のずれも見る。** `ndf project measure --out <一時ファイル>` の後に `ndf project drift --measure <一時ファイル>` を打ち、`items` に行があれば項目・根拠・更新の案を完了報告へ載せる。宣言を変えるかは利用者の設定の書き換え（共通原則 C7）なので、案として示し、自分では書き換えない（手順は `development-workflow` の [references/project-analysis.md](../development-workflow/references/project-analysis.md) の「ブランチ運用」）。
 
 **手順 1 で対象が 0 件なら、そこで飛ばす。** 飛ばしたことを報告へ残す。
 
 **候補の収集（手順 1）・順位の算出（手順 2C）・反映（手順 3）・報告の値は `upkeep.py` が持ち、区分と見積の段階の
-決定（手順 2A / 2B）だけを LLM が持つ。** スクリプトの置き場所 `$R` の決め方は `development-workflow/references/scripts-lookup.md`
-にある。出力はどれも 1 行の JSON（形は `$R/scripts/lib/README.md`）で、記録は
+決定（手順 2A / 2B）だけを LLM が持つ。** `ndf` の確かめと旧いスクリプトの置き場の扱いは `development-workflow/references/scripts-lookup.md`
+にある。出力はどれも 1 行の結果 JSON で、記録は
 `$NDF_UPKEEP_STATE_DIR`（既定は一時ディレクトリの `ndf/backlog-refinement/`）の下にリポジトリごとに置く。
 
 ```bash
-UPKEEP=$(bash "$R/scripts/resolve.sh" scripts backlog-refinement) || exit 3
+UPKEEP=   # 旧いスクリプトの置き場。新しいプラグインだけの起動では空（scripts-lookup.md）
+[ -n "${UPKEEP:-}" ] || { echo "upkeep.py は M6 #3301 が副命令に置き換えるまで新しいプラグインだけでは打てない" >&2; exit 3; }
 ```
 
 状態と終了コードの意味は `$SCRIPTS/lib/README.md` の「手順のスクリプトの結果」にある。
