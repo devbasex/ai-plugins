@@ -320,6 +320,12 @@ def public_findings(model: SpecModel, plugin_root: Path, rel: Any) -> list[Findi
             continue
         if not _hits(model, row):
             found.append(Finding(PUBLIC, ep_rel, 1, f"公開する面の行 {row['id']} が規約のどの項目にも当たらない"))
+    return found + _spec_place_findings(model, plugin_root, ep_rel)
+
+
+def _spec_place_findings(model: SpecModel, plugin_root: Path, ep_rel: str) -> list[Finding]:
+    """種類 spec の行が規約の置き場ごとにちょうど 1 行あり、どの行も実在の規約の置き場を指すか。"""
+    found = []
     spec = [r for r in model.entrypoints if r["kind"] == spec_model.SPEC_KIND]
     for target in SPEC_TARGETS:
         n = sum(1 for r in spec if r["target"] == target)
