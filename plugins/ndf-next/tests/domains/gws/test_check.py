@@ -8,7 +8,6 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -18,19 +17,7 @@ from ndf.domains.gws import report_decide as rd
 from ndf.domains.records import cli as records_cli
 from ndf.domains.records import gws as records_gws
 
-from . import Fakes, assert_routes, run_gws
-
-
-@pytest.fixture
-def fakes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Fakes:
-    return Fakes.on_path(tmp_path, monkeypatch)
-
-
-def _status(source: str, method: str = "none", client: bool = True, **extra: Any) -> dict[str, Any]:
-    return {
-        "prefix": ["auth", "status"],
-        "out": json.dumps({"credential_source": source, "auth_method": method, "client_config_exists": client, **extra}),
-    }
+from . import Fakes, assert_routes, run_gws, status_rule
 
 
 def test_gws_is_in_the_command_table() -> None:
@@ -38,7 +25,7 @@ def test_gws_is_in_the_command_table() -> None:
 
 
 def test_authenticated_by_token_source(fakes: Fakes, capsys, last_result) -> None:
-    fakes.add("gws", [_status("token_env_var", client=False)])
+    fakes.add("gws", [status_rule("token_env_var", client=False)])
     code, got = run_gws(capsys, last_result, "check")
     assert (code, got["status"]) == (0, "ok")
     assert got["metrics"] == {
@@ -50,7 +37,7 @@ def test_authenticated_by_token_source(fakes: Fakes, capsys, last_result) -> Non
 
 
 def test_token_in_env_is_authenticated_even_when_source_is_none(fakes: Fakes, capsys, last_result, monkeypatch) -> None:
-    fakes.add("gws", [_status("none")])
+    fakes.add("gws", [status_rule("none")])
     monkeypatch.setenv("GOOGLE_WORKSPACE_CLI_TOKEN", "t")
     code, got = run_gws(capsys, last_result, "check")
     assert (code, got["metrics"]["state"]) == (0, "authenticated")
@@ -62,7 +49,7 @@ def test_token_in_env_is_authenticated_even_when_source_is_none(fakes: Fakes, ca
     ids=["no-token", "no-client", "client-secret-only-2067"],
 )
 def test_unauthenticated_is_gate_11(fakes: Fakes, capsys, last_result, source: str, client: bool) -> None:
-    fakes.add("gws", [_status(source, client=client)])
+    fakes.add("gws", [status_rule(source, client=client)])
     code, got = run_gws(capsys, last_result, "check")
     assert (code, got["status"], got["metrics"]["state"]) == (11, "gate", "unauthenticated")
     assert got["metrics"]["client_config_exists"] is client
@@ -72,7 +59,7 @@ def test_unauthenticated_is_gate_11(fakes: Fakes, capsys, last_result, source: s
 
 
 def test_client_secret_only_matches_records_gws_check(fakes: Fakes, capsys, last_result) -> None:
-    fakes.add("gws", [_status("client_secret.json")])
+    fakes.add("gws", [status_rule("client_secret.json")])
     gws_code, _ = run_gws(capsys, last_result, "check")
     records = records_cli._gws_check(argparse.Namespace(), Path("."))
     assert gws_code == 11 and records["status"] == "stopped" and records["cause"]["kind"] == "precondition"
@@ -111,7 +98,7 @@ def test_uninstallable_without_npm(fakes: Fakes, capsys, last_result) -> None:
 
 
 def test_install_then_rechecks(fakes: Fakes, capsys, last_result) -> None:
-    gws = fakes.add("gws", [_status("token_cache")], staged=True)
+    gws = fakes.add("gws", [status_rule("token_cache")], staged=True)
     fakes.add("npm", [{"prefix": ["install"], "copy": [str(gws), str(fakes.bin / "gws")]}])
     code, got = run_gws(capsys, last_result, "check", "--install")
     assert (code, got["metrics"]["state"]) == (0, "authenticated")
@@ -120,7 +107,7 @@ def test_install_then_rechecks(fakes: Fakes, capsys, last_result) -> None:
 
 
 def test_install_when_gws_present_does_nothing(fakes: Fakes, capsys, last_result) -> None:
-    fakes.add("gws", [_status("none")])
+    fakes.add("gws", [status_rule("none")])
     fakes.add("npm", [])
     code, _ = run_gws(capsys, last_result, "check", "--install")
     assert code == 11 and fakes.calls("npm") == []
@@ -182,14 +169,14 @@ def test_status_over_the_limit_stops_with_2_and_uses_the_call_limit(fakes: Fakes
 
 
 def test_does_not_copy_other_keys(fakes: Fakes, capsys, last_result) -> None:
-    fakes.add("gws", [_status("token_cache", token="secret-value", token_cache_exists=True)])
+    fakes.add("gws", [status_rule("token_cache", token="secret-value", token_cache_exists=True)])
     _, got = run_gws(capsys, last_result, "check")
     assert set(got["metrics"]) == {"state", *records_gws.STATUS_KEYS}
     assert "secret-value" not in json.dumps(got)
 
 
 def test_unknown_argument_is_rejected(fakes: Fakes, capsys, last_result) -> None:
-    fakes.add("gws", [_status("token_cache")])
+    fakes.add("gws", [status_rule("token_cache")])
     code, got = run_gws(capsys, last_result, "check", "--login")
     assert (code, got["cause"]["kind"]) == (2, "invalid") and fakes.calls("gws") == []
     code, _ = run_gws(capsys, last_result)

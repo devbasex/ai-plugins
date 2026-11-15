@@ -15,17 +15,12 @@ import pytest
 from ndf.contracts import limits
 from ndf.domains.gws import report_decide as rd
 
-from . import Fakes, assert_routes, run_gws
+from . import Fakes, assert_routes, run_gws, status_rule
 
 PID = "pres-1"
 GET = ["slides", "presentations", "get"]
 THUMB = ["slides", "presentations", "pages", "getThumbnail"]
 AUTH = ["auth", "status"]
-
-
-@pytest.fixture
-def fakes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Fakes:
-    return Fakes.on_path(tmp_path, monkeypatch)
 
 
 def _pages(*ids: str) -> dict[str, Any]:
@@ -34,10 +29,6 @@ def _pages(*ids: str) -> dict[str, Any]:
 
 def _thumb(url: str = "https://example.invalid/t.png") -> dict[str, Any]:
     return {"prefix": THUMB, "out": json.dumps({"contentUrl": url})}
-
-
-def _status(source: str) -> dict[str, Any]:
-    return {"prefix": AUTH, "out": json.dumps({"credential_source": source, "auth_method": "none", "client_config_exists": True})}
 
 
 def _curl(code: int = 0) -> list[dict[str, Any]]:
@@ -85,7 +76,7 @@ def test_bad_arguments_return_2(fakes: Fakes, capsys, last_result, argv: list[st
 
 @pytest.mark.parametrize("source", ["none", "client_secret.json"], ids=["no-token", "client-secret-only-2067"])
 def test_unauthenticated_returns_11(fakes: Fakes, tmp_path: Path, capsys, last_result, source: str) -> None:
-    fakes.add("gws", [_status(source), {"prefix": GET, "code": 1, "err": "401 Unauthorized\n"}])
+    fakes.add("gws", [status_rule(source), {"prefix": GET, "code": 1, "err": "401 Unauthorized\n"}])
     fakes.add("curl", _curl())
     out = str(tmp_path / "out")
     code, got = run_gws(capsys, last_result, "thumbnails", PID, out)
@@ -98,7 +89,7 @@ def test_unauthenticated_returns_11(fakes: Fakes, tmp_path: Path, capsys, last_r
 
 def test_gws_failure_stops_with_1_and_shows_the_tail(fakes: Fakes, tmp_path: Path, capsys, last_result) -> None:
     err = "".join(f"e{n}\n" for n in range(30))
-    fakes.add("gws", [_status("token_cache"), {"prefix": GET, "code": 1, "err": err}])
+    fakes.add("gws", [status_rule("token_cache"), {"prefix": GET, "code": 1, "err": err}])
     fakes.add("curl", _curl())
     code, got = run_gws(capsys, last_result, "thumbnails", PID, str(tmp_path / "out"))
     assert (code, got["cause"]["kind"], got["items"][0]["result"]) == (1, "unknown", "gws-failed")
