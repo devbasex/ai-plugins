@@ -1012,6 +1012,8 @@ release が走らせるリリースの種別・リリースコマンド・公開
 | 管理者の迂回 | — | ruleset が迂回を許した役割の人が、必須の承認レビューと必須のチェックを満たさずにマージすること。`gh pr merge --admin` で打つ | — | — | `docs/specifications/ndf-release-production-admin-merge.md` |
 | 迂回の宣言 | — | 本番の PR を管理者の迂回でマージすることを選ぶ、`.ndf/project.json` の `production_merge.admin` の値。`true` のときだけ宣言があるとみなし、無いときは迂回しない | — | — | `docs/specifications/ndf-release-production-admin-merge.md` |
 | 迂回の記録 | — | 本番の PR を管理者の迂回でマージしたことを示す、本番の PR へ置くコメント。マージした先端と照らした承認の証跡を指す。証跡とは別の印を持ち、承認の判定に数えない | — | — | `docs/specifications/ndf-release-production-admin-merge.md` |
+| リリースブランチのロック | — | リリース承認ゲートの承認の後、GitHub の側でそのリリースブランチ 1 本への push と更新を断らせる状態。マージか差し戻しの後に外す | — | — | — |
+| リリースブランチの組み直し | — | 差し戻しの後に、ベースブランチの先端から新しいリリースブランチと本番の PR を作り、承認を取り直すこと | — | — | — |
 
 ## NDF の指示書チェック（`ndf-instructions`）
 

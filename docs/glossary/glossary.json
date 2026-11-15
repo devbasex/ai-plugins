@@ -7550,6 +7550,18 @@
       "context": "ndf-workflow",
       "meaning": "11.0.0 を出した後に着手する子の Issue。記号は Z<数> で、ラベル rebuild-1142 を付けない（#3388）",
       "pending_source": "issues/issue-3388-design.md"
+    },
+    {
+      "term": "リリースブランチのロック",
+      "context": "ndf-release",
+      "meaning": "リリース承認ゲートの承認の後、GitHub の側でそのリリースブランチ 1 本への push と更新を断らせる状態。マージか差し戻しの後に外す",
+      "pending_source": "issues/issue-3572-requirements.md"
+    },
+    {
+      "term": "リリースブランチの組み直し",
+      "context": "ndf-release",
+      "meaning": "差し戻しの後に、ベースブランチの先端から新しいリリースブランチと本番の PR を作り、承認を取り直すこと",
+      "pending_source": "issues/issue-3572-requirements.md"
     }
   ]
 }
