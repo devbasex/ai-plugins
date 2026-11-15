@@ -337,3 +337,43 @@ def test_io_findings_of_the_real_model_is_empty(copy):
     scope = Scope(copy.repo, copy.root, "p")
     scope.sources = run.collect(copy.root, copy.repo)
     assert spec_docs.io_findings(spec_model.load(copy.root), scope, lambda p: f"plugins/p/{p}") == []
+
+
+# --- 現状固定: Skill のページの行（page_skills の Skill・報告・起動スクリプトの行） ---
+
+
+def test_page_skills_pins_the_rows_of_skills_reports_and_launchers(copy):
+    skill = spec_model.SkillSpec
+    skills = (
+        skill(name="a-moved", surface=spec_model.INTERNAL, present=False, row=False),
+        skill(
+            name="b-full",
+            surface=spec_model.PUBLIC,
+            present=True,
+            row=True,
+            args=("", "run .+"),
+            goal_end="done",
+            declarations=("d1", "d2"),
+            env=("E1",),
+            result="R",
+            meaning="m|x",
+        ),
+    )
+    entrypoints = (
+        {"id": "r", "kind": "report", "target": "tgt", "args": ["x", "y"], "env": ["E2"], "order": "kept"},
+        {"id": "r2", "kind": "report", "target": "t2", "env": [], "order": "kept"},
+        {"id": "s", "kind": "skill", "target": "b-full", "args": [], "env": [], "order": "kept"},
+    )
+    launchers = (
+        {"id": "l1", "kind": "launcher", "passes_to": "p", "meaning": "mm"},
+        {"id": "l2", "kind": "other", "passes_to": "q", "meaning": "nn"},
+    )
+    model = dataclasses.replace(spec_model.load(copy.root), skills=skills, entrypoints=entrypoints, launchers=launchers)
+    page = spec_render.page_skills(model)
+    assert [line for line in page.splitlines() if line.startswith("| `")] == [
+        "| `a-moved`（skills/ へ移す前） | 内部（予告なく変えてよい） | 引数を受けない | — | — | — | — | — |",
+        "| `b-full` | 公開 | （引数なし）<br>`run .+` | done | `d1`・`d2` | `E1` | R | m\\|x |",
+        "| `tgt` | `x`・`y` | `E2` |",
+        "| `t2` | — | — |",
+        "| `l1` | p | mm |",
+    ]
