@@ -11,6 +11,9 @@
 
 const { readScript, DeckError, EXIT_INPUT } = require("./deck-frame");
 
+const DEFAULT_WPM = 350; // 1 分あたりの字数の既定
+const USAGE = `usage: node lib/script-time.js <台本> [--wpm ${DEFAULT_WPM}] [--limit <分>] [--json]`;
+
 function count(reading) {
   return [...reading.replace(/\s/g, "")].length;
 }
@@ -43,7 +46,7 @@ function table(m) {
 }
 
 function parseArgs(argv) {
-  const a = { file: null, wpm: 350, limit: null, json: false };
+  const a = { file: null, wpm: DEFAULT_WPM, limit: null, json: false };
   for (let i = 0; i < argv.length; i++) {
     const v = argv[i];
     if (v === "--json") a.json = true;
@@ -55,7 +58,7 @@ function parseArgs(argv) {
     else if (!a.file) a.file = v;
     else throw new DeckError(`台本は 1 つだけ渡す: ${v}`, EXIT_INPUT);
   }
-  if (!a.file) throw new DeckError("usage: node lib/script-time.js <台本> [--wpm 350] [--limit <分>] [--json]", EXIT_INPUT);
+  if (!a.file) throw new DeckError(USAGE, EXIT_INPUT);
   return a;
 }
 
