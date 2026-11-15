@@ -322,13 +322,13 @@ class Lander:
             return blocked
         if bypass:
             outcome: MergeOutcome = self.hub.merge_as_admin(pull.number, expect_head=pull.head_sha, method=MERGE_METHOD)
-            return Landed(outcome.merged, outcome.kind, outcome.detail)  # 迂回の印は _record が立てる
+            return Landed(outcome.merged, outcome.kind, outcome.detail)  # 迂回の印は _record_admin が立てる
         outcome = self.hub.merge(pull.number, expect_head=pull.head_sha, method=MERGE_METHOD, require_method=True)
         if outcome.kind == MERGE_QUEUE_PENDING:
             return self._await_queue(pull, deadline)
         return Landed(outcome.merged, outcome.kind, outcome.detail)
 
-    def _record(self, pull: Pull, done: Landed) -> Landed:
+    def _record_admin(self, pull: Pull, done: Landed) -> Landed:
         """迂回でマージした結果に、迂回の記録の URL か、書けなかった理由を足す（#3506 の I7・決定 7）。"""
         try:
             _wrote, url = trail.write_admin_record(self.hub, pull.number, pull.head_sha)
@@ -442,7 +442,7 @@ class Lander:
         synced = self._released(pull, self._sync(pull, deadline))
         # 再開: 利用者の証跡がマージした先端への承認なら、迂回でマージしたとして記録を補う（I7）
         if self._bypass(pull) and (judged := trail.user_judgment_at(self.hub, number, pull.head_sha)) is not None and judged.approved:
-            return self._record(pull, synced)
+            return self._record_admin(pull, synced)
         return synced
 
     def land(self, number: int) -> Landed:
@@ -468,4 +468,4 @@ class Lander:
         if not done.merged or not self._is_production(pull):
             return done
         synced = self._released(pull, self._sync(pull, deadline))
-        return self._record(pull, synced) if bypass else synced
+        return self._record_admin(pull, synced) if bypass else synced
