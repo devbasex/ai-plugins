@@ -37,6 +37,7 @@
       "items": {
         "type": "object",
         "required": ["kind"],
+        "additionalProperties": false,
         "properties": {
           "kind": {
             "type": "string",

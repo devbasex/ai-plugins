@@ -278,6 +278,10 @@ def report(work: str, rows: list[dict[str, Any]], ledger: list[dict[str, Any]], 
     excluded = {sid for r in ledger if (sid := _ledger_sid(r))}
     every, mine, windows = work_scope(work, rows, span)
     sessions = cr.sessions_of(every)
+    # 会話の記録のパスは、セッションの最初の行（別の作業の行のことがある）だけが持つ
+    known = cr.sessions_of(rows)
+    for sid, s in sessions.items():
+        s["transcript"] = s["transcript"] or known[sid]["transcript"]
     by_session = cr.attach_marks([r for r in every if r.get("event") in cr.MARKS], _session_spans(sessions, excluded, windows))
     restarted = {r.get("session_id") for r in mine if r.get("verdict") == cp.RESTART}
     summed = _sum_sessions(sessions, by_session, _Scope(ledger, excluded, set()), windows, restarted)
