@@ -19,7 +19,7 @@ from pathlib import PurePosixPath
 from typing import Any
 
 from ndf.contracts import facts
-from ndf.testing.scoped import in_scope
+from ndf.testing.scoped import NODE_SEPARATOR, in_scope
 from ndf.domains.crossrefactor.symbols_decide import PYTHON_SUFFIX
 
 TABLE = "test-files"
@@ -146,9 +146,10 @@ def collected_files(output: str) -> frozenset[str]:
     files: set[str] = set()
     for raw in output.splitlines():
         line = raw.strip()
-        if not line or " " in line.split("::", 1)[0]:
+        file = line.split(NODE_SEPARATOR, 1)[0]
+        if not line or " " in file:
             continue
-        files.add(line.split("::", 1)[0])
+        files.add(file)
     return frozenset(files)
 
 
