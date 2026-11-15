@@ -17,6 +17,7 @@ from collections.abc import Callable
 
 from ndf import cli
 from ndf.contracts import limits, result
+from ndf.domains.project import secret
 from ndf.domains.relay import signals
 from ndf.domains.statusline import settings
 
@@ -32,7 +33,10 @@ def _item(sw: settings.Switched) -> dict[str, object]:
 
 
 def _ok(sw: settings.Switched, warnings: list[str] | None = None) -> int:
-    return result.emit(result.result(TOOL, result.OK, sw.message, items=[_item(sw)], warnings=warnings))
+    # 利用者の statusLine.command に秘密が入っていることがあるため、要約・項目・警告を出す直前に伏せる
+    return result.emit(
+        result.result(TOOL, result.OK, secret.mask(sw.message), items=secret.mask([_item(sw)]), warnings=secret.mask(warnings))
+    )
 
 
 def _skipped(reason: str) -> int:
@@ -68,7 +72,7 @@ def _run(name: str, p: settings.Paths) -> int:
     try:
         sw = handlers[name](p) if name == "status" else _locked(p, handlers[name])
     except settings.StatuslineError as exc:
-        return result.emit(result.stopped(TOOL, exc.kind, exc.detail))
+        return result.emit(result.stopped(TOOL, exc.kind, secret.mask(exc.detail)))
     return _ok(sw)
 
 

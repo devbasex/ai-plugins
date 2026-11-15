@@ -399,8 +399,10 @@ CI の失敗・衝突・版数の衝突は、リリースプランの直しの�
    「レーンごとに決めること」。別のリポジトリなら `repo` を書く）
 2. `python3 "$NDF_SCRIPTS/parallel.py" lane p1 add --from <JSON>` を打つ。上限を超えるときは何も書かずに 1 で終わり、`items` に
    `ndf lanes limits <計画> --max-lanes <n> --reason <理由>` の 1 行が出る
-3. 人の指示を受けて `ndf lanes limits <計画> --max-lanes <n> --reason <理由>` を打つ（マシンの設定 `<状態の根>/relay/hub/limits.json` に書き、
-   リレーハブも計画の検査も次の判定から同じ値を読む。リレーハブを起動し直さない）。`ndf lanes limits` だけなら今の値と出所を読む
+3. 人の指示を受けて `ndf lanes limits <計画> --max-lanes <n> --reason <理由>` を打つ（計画の DB の上限の行を変え、計画の検査は次の判定から
+   その値を読む）。リレーハブの名前つきのラッパーの数の上限は別の値で、`ndf relay` を打つ環境の `NDF_RELAY_MAX_NAMED`（無ければ
+   `contracts/limits.json` の `relay.max-named`）を毎回読む。`<n>` がその上限を超えるなら、`ndf relay spawn` を打つ環境で
+   `NDF_RELAY_MAX_NAMED=<n>` を渡す（リレーハブを起動し直さない）
 4. もう一度 2 を打つ。通ると `plan.json`・`plan.md`・引継ぎ文書を書き、耐久ワークフローへ知らせる。耐久ワークフローが計画を読み直し、
    足したレーンを起動の候補に入れる。計画がまだ動いていなければ、次の `start` で起動する
 

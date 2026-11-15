@@ -46,13 +46,13 @@ allowed-tools:
 `development-workflow` の `references/asking.md`）。
 
 公式 Skill は、Anthropic のマーケットプレイス `anthropic-agent-skills`（GitHub の `anthropics/skills`）が
-プラグインとして配る。`docx`・`pptx`・`xlsx`・`pdf` はプラグイン `document-skills`、ほかはプラグイン `example-skills` にある。
+プラグインとして配る。`docx`・`pptx`・`xlsx`・`pdf` はプラグイン `document-skills`、`claude-api` はプラグイン `claude-api`、ほかはプラグイン `example-skills` にある（取得元の `.claude-plugin/marketplace.json`、2026-11-15 に確認）。
 
 | 提示する項目 | 値 |
 |---|---|
 | 対象 Skill 名 | ステップ1 で特定した名前（複数なら全件） |
 | 取得元 | マーケットプレイス `anthropics/skills`（https://github.com/anthropics/skills ） |
-| 入れるプラグイン | `document-skills@anthropic-agent-skills` か `example-skills@anthropic-agent-skills` |
+| 入れるプラグイン | `document-skills@anthropic-agent-skills`・`claude-api@anthropic-agent-skills`・`example-skills@anthropic-agent-skills` のどれか |
 | 導入の範囲 | `user`（既定。`~/.claude/` の下）。プロジェクトに限るなら `project` |
 
 提示例:
@@ -81,7 +81,7 @@ allowed-tools:
 
 ### ステップ1: 対象Skillを特定
 
-ユーザーの発話から上記マッピングで対象Skill名を1つ決定し、入れるプラグイン（`document-skills` か `example-skills`）を決める。
+ユーザーの発話から上記マッピングで対象Skill名を1つ決定し、入れるプラグイン（`document-skills`・`claude-api`・`example-skills` のどれか）を決める。
 曖昧な場合は依頼に最も合う 1 つを AI が選び、選んだ理由を `ask.py decide --question` で記録する。
 
 ### ステップ2: インストール状態を確認
@@ -89,7 +89,7 @@ allowed-tools:
 以下のBashコマンドで確認:
 
 ```bash
-PLUGIN="<document-skills か example-skills>@anthropic-agent-skills"
+PLUGIN="<document-skills・claude-api・example-skills のどれか>@anthropic-agent-skills"
 if claude plugin list 2>/dev/null | grep -Fq "$PLUGIN"; then
   echo "INSTALLED"
 else
@@ -103,7 +103,7 @@ fi
 同意が得られていない状態でこのブロックを実行してはならない。
 
 ```bash
-PLUGIN="<document-skills か example-skills>@anthropic-agent-skills"
+PLUGIN="<document-skills・claude-api・example-skills のどれか>@anthropic-agent-skills"
 claude plugin marketplace add anthropics/skills
 claude plugin install "$PLUGIN"   # プロジェクトに限るなら --scope project を足す
 ```

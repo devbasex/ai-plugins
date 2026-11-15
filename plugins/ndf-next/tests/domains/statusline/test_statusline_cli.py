@@ -85,6 +85,16 @@ def test_set_backs_up_and_restore_returns(tmp_path, home, capsys, last_result):
     assert not (_settings(tmp_path).parent / settings.BACKUP_NAME).exists()
 
 
+def test_results_mask_a_secret_in_the_user_command(tmp_path, home, capsys):
+    user = {"type": "command", "command": "API_KEY=xxxxxxxxxxxx bash ~/mine.sh"}
+    _write(_settings(tmp_path), {"statusLine": user})
+    for command in ("status", "set", "restore"):
+        assert cli.main([command]) == 0
+        out = capsys.readouterr().out
+        assert "xxxxxxxxxxxx" not in out, command
+    assert _line(_settings(tmp_path)) == user
+
+
 def test_switching_keeps_a_private_settings_file_private(tmp_path, home):
     path = _settings(tmp_path)
     _write(path, {"statusLine": {"type": "command", "command": "bash ~/mine.sh"}, "env": {"TOKEN": "x"}})

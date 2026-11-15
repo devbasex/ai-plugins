@@ -192,7 +192,7 @@ glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。どの
 
 | ステージ | プラン | 流し方 |
 | --- | --- | --- |
-| 設計 | `design-<N>`（review と用語チェックの後に `mvv` → `approve`（ラベル `design-approved` と判定のコメント）→ `merge`） | `command`: `queue <設計>... --then <設計の結果> --then <スプリントブランチ> --then <実装>... --then <検査> --then <開発版> --then <本番>` |
+| 設計 | `design-<N>`（review と用語チェックの後に `mvv` → `approve`（ラベル `design-approved` と判定のコメント）→ `merge`） | `command`: `queue <設計>... --max 3 --then <設計の結果> --then <スプリントブランチ> --then <実装>... --then <検査> --then <開発版> --then <本番>` |
 | 設計承認ゲート | 無し。設計のプランの MVV 判定が通せばマージ済みで通過する | — |
 | 設計の結果 | `design-results`（設計文書の「設計の結果」の表を読み、実装のプランへ触るファイルと取り込んだ課題を書く） | 1 つ目の `--then` |
 | スプリントブランチ | `sprint-branch` | 2 つ目の `--then` |
@@ -222,7 +222,7 @@ glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。どの
 | 設計 | `design-<N>`（review の後に `mvv` → `approve`（ラベル `design-approved` と判定のコメント）→ `merge`） | `queue` |
 | 設計承認ゲート | 無し。設計のプランがすべて `完了` なら通過し、`承認ゲート` を返したプランの Pull Request だけ利用者の承認（`ndf-gate:1`）を取ってマージする | conductor |
 | 設計の結果 | `design-results`（設計文書の「設計の結果」の表を読み、実装のプランへ触るファイルと取り込んだ課題を書く） | `queue <設計の結果> --then <実装>... --then <検査> --then <コードレビュー> --then <開発版> --then <本番>` |
-| 実装 | `impl-<N>`（`base` はベースブランチ。手動確認の節は実装の Pull Request に載る） | 1 つ目の `--then`（設計の課題が無ければ `queue <実装>... --then <検査> ...` の `command`） |
+| 実装 | `impl-<N>`（`base` はベースブランチ。手動確認の節は実装の Pull Request に載る） | 1 つ目の `--then`（設計の課題が無ければ `queue <実装>... --max 3 --then <検査> ...` の `command`） |
 | 検査 | `check`（実行条件 `check-trigger.py eval --id <スプリント>-1`） | 次の `--then` |
 | コードレビュー | `review`（`new check --since-last --review-only`。実行条件 `eval --id <スプリント>-review --review`） | 次の `--then`。検査が立った回は範囲が空になり流れない |
 | 開発版 | `release`（`facts` は `gate_as_ok`） | 次の `--then` |

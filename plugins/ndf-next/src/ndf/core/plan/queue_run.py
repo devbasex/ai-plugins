@@ -7,6 +7,7 @@
   （`accepts_gate`）なら流す（#2876）。`{queue_prs}` は前の段で完了したプランの PR の番号で埋める
 - キューの記録 `queue.json` に、プランごとの結果を書く。`--resume` は完了したプランを流さずに続ける
 - `--fresh` は子の `ndf plan next` へ渡し、各プランを前の回に戻らず先頭から流す（#1592）。打ち直し（next）には渡さない
+- `--max <n>` は同時に流すプランの本数の上限。触るファイルの重ならない組を `n` 本ずつに分けて順に流す。打ち直しにも渡す
 """
 
 from __future__ import annotations
@@ -118,10 +119,14 @@ def _needs_blocked(entry: Entry, order: list[str], done: dict[str, queue_decide.
 
 @dataclass(frozen=True)
 class QueueOptions:
-    """キューの選択肢。`resume` は完了したプランを流さずに続け、`fresh` は子の `ndf plan next` へ `--fresh` を渡す（#1592）。"""
+    """キューの選択肢。`resume` は完了したプランを流さずに続け、`fresh` は子の `ndf plan next` へ `--fresh` を渡す（#1592）。
+
+    `max_parallel` は同時に流すプランの本数の上限（None は組の本数まで）。
+    """
 
     resume: bool = False
     fresh: bool = False
+    max_parallel: Optional[int] = None
 
 
 class _QueueExecution:
@@ -150,7 +155,8 @@ class _QueueExecution:
         current: list[queue_decide.Outcome] = []
         queued = [queue_decide.Queued(e.plan.name, e.plan.touches, e.plan.needs) for e in stage]
         for names in queue_decide.waves(queued, {o.name for o in self.prior}):
-            current += self._run_group(stage, names)
+            for chunk in _chunks(names, self.options.max_parallel):
+                current += self._run_group(stage, chunk)
         self.prior += current
 
     def _run_group(self, stage: list[Entry], names: list[str]) -> list[queue_decide.Outcome]:
@@ -194,7 +200,9 @@ def _finished(recorded: dict[str, dict[str, Any]], entry: Entry) -> bool:
     return row is not None and row["status"] == OK and entry.start is None
 
 
-def queue_result(tool: str, outcomes: list[queue_decide.Outcome], stages: list[list[Entry]], qdir: Path) -> dict[str, Any]:
+def queue_result(
+    tool: str, outcomes: list[queue_decide.Outcome], stages: list[list[Entry]], qdir: Path, max_parallel: Optional[int] = None
+) -> dict[str, Any]:
     """キューの結果。next は `--resume` の打ち直し。
 
     承認ゲートで待つプランの routes は各行（items）に残し、結果の routes は先頭の 1 本の分にする（結果の routes の鍵は
@@ -205,7 +213,7 @@ def queue_result(tool: str, outcomes: list[queue_decide.Outcome], stages: list[l
     items = [_item(o) for o in outcomes]
     metrics = {"plans": len(outcomes), "ok": sum(o.status == OK for o in outcomes)}
     stopped_at = {o.name: o.step for o in outcomes if o.status == STOPPED and o.step is not None}
-    resume = result.command(*again_args(stages, qdir, stopped_at), "--resume")
+    resume = result.command(*again_args(stages, qdir, stopped_at, max_parallel), "--resume")
     if status == STOPPED and first is not None:
         return _stopped_result(tool, first, items, metrics, resume)
     if status == GATE:
@@ -239,10 +247,19 @@ def _item(o: queue_decide.Outcome) -> dict[str, Any]:
     return item
 
 
-def again_args(stages: list[list[Entry]], qdir: Path, starts: Optional[dict[str, str]] = None) -> list[str]:
+def _chunks(names: list[str], size: Optional[int]) -> list[list[str]]:
+    """組を `size` 本ずつに分ける（None なら分けない）。"""
+    if size is None:
+        return [names]
+    return [names[i : i + size] for i in range(0, len(names), size)]
+
+
+def again_args(
+    stages: list[list[Entry]], qdir: Path, starts: Optional[dict[str, str]] = None, max_parallel: Optional[int] = None
+) -> list[str]:
     """このキューを打ち直す引数（エントリポイントの名前の後ろ。絶対のパスで、作業場所の外から打っても同じキューを指す）。
 
-    `starts` は開始点の上書き。
+    `starts` は開始点の上書き。`max_parallel` があれば `--max` で渡す。
     """
     starts = starts if starts is not None else {}
     args = [runner.TOOL, "queue", *(str(e.path) for e in stages[0])]
@@ -252,6 +269,8 @@ def again_args(stages: list[list[Entry]], qdir: Path, starts: Optional[dict[str,
         start = starts[e.plan.name] if e.plan.name in starts else e.start
         if start is not None:
             args += ["--from", f"{e.plan.name}={start}"]
+    if max_parallel is not None:
+        args += ["--max", str(max_parallel)]
     return [*args, "--queue-dir", str(qdir)]
 
 
