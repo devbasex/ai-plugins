@@ -92,14 +92,15 @@ def decide_case(has_cd: bool, approvals: int | None, why: str, admin: bool = Fal
     """承認数が 0 か読めないときは、迂回の宣言があっても迂回しない（#3506 の I2a）。"""
     if not has_cd:
         return Case(NO_CD, "手元の承認資料", "NDF", why or "本番チャネルへのマージで届く CD の行が無い")
-    if approvals is not None and approvals >= 1 and admin:
+    reviewed = approvals is not None and approvals >= 1
+    if reviewed and admin:
         return Case(
             CD_ADMIN,
             "リリースの PR の証跡のコメント",
             "利用者のアカウント（管理者の迂回）",
             why or f"本番チャネルの承認数が {approvals} で、迂回の宣言がある",
         )
-    if approvals is not None and approvals >= 1:
+    if reviewed:
         return Case(CD_REVIEW, "PR のレビューの承認", "利用者のアカウント", why or f"本番チャネルの承認数が {approvals}")
     return Case(CD_NO_REVIEW, "リリースの PR の証跡のコメント", "利用者のアカウント", why or "本番チャネルの承認数が 0")
 
