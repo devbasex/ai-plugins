@@ -55,7 +55,7 @@ from ndf.domains.crossrefactor import (
     verify_decide,
     workspace,
 )
-from ndf.testing import limits as test_limits
+from ndf.testing import declared
 from ndf.testing import scoped, slots
 
 Status = items_decide.Status
@@ -307,7 +307,7 @@ def _add_tests(run: _Run, item: dict[str, Any]) -> bool:
     tests = [str(t) for t in got["tests"]] if isinstance(got.get("tests"), list) else []
     if not tests:
         return True
-    got_collect = collect.collected(run.ws.work, tests, test_limits.load_suites(run.ws.work), limits.seconds(collect.COLLECT_POLICY))
+    got_collect = collect.collected(run.ws.work, tests, declared.load_suites(run.ws.work), limits.seconds(collect.COLLECT_POLICY))
     if got_collect.uncollected:
         _undo_item(run, item, Status.REVERTED, f"足したテストが全体の実行に収集されない: {', '.join(got_collect.uncollected)}")
         return False

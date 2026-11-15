@@ -39,6 +39,7 @@ from pathlib import Path
 from filelock import Timeout
 
 from ndf import identity, process_group, slot_pool
+from ndf.testing import declared
 from ndf.testing import limits as limits_mod
 from ndf.testing import machine, records, weight
 
@@ -297,7 +298,7 @@ def gate(
         return
     cwd = Path(cwd)
     suites = options.suites
-    kind = options.kind or weight.classify(command, limits_mod.load_suites(cwd) if suites is None else suites)
+    kind = options.kind or weight.classify(command, declared.load_suites(cwd) if suites is None else suites)
     if kind is None:
         yield Held()
         return
