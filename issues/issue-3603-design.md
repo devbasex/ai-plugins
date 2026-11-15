@@ -260,6 +260,7 @@ classDiagram
 | 答え | 書くもの | 状態と終了コード | `metrics.next` |
 | --- | --- | --- | --- |
 | `approved` | スプリント状態へ `設計承認ゲート` の記録（`--pr <P> --by <答えの by> --outcome approved`） | `ok`・0 | 続くステージの `supervise.py queue --resume` の 1 行（そのキューをまだ起動していなければステージの `command`） |
+| `approved` で、答えに載ったマージの結果が `head_moved` か `no_stamp`（承認した先端を今の先端に当てられない） | 書かない | `gate`・10 | 今の先端で設計承認を問い直す（開発ループの問い直しと同じ） |
 | `revise` | 指摘をプランの状態ディレクトリの `work/design-revise-<P>.md` へ書く | `gate`・10 | 利用者が設計承認ゲートで直しを選んだときと同じ工程（`approval-request.md` の「利用者が承認ゲートで答えたら」の表） |
 | `rejected` | スプリント状態へ `--outcome rejected` の記録 | `gate`・10 | 課題を進めない（同じ表の差し戻し） |
 | まだ無い | 書かない | `stopped`・3 | 無し（耐久ワークフローが答えの後に起こす） |

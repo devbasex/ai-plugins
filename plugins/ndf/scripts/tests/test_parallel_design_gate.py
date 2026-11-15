@@ -238,6 +238,16 @@ def test_answer_design_user_approval_writes_the_gate_record(lane):
     assert cmd[cmd.index("--pr") + 1] == "12" and cmd[cmd.index("--outcome") + 1] == "approved"
 
 
+@pytest.mark.parametrize("res", ["head_moved", "no_stamp"])
+def test_answer_design_approval_for_a_moved_head_reasks_without_a_record(lane, res):
+    """承認の後に先端が動いた（マージが head_moved / no_stamp）答えは、承認の記録を書かず問い直しへ戻す。"""
+    main, sprint = lane
+    pl.send_answer(main, "p1", "la-g12-0123456789ab", "approved", by="user", merge={"result": res, "reason": "動いた"})
+    run = Run()
+    got = pdg.answer_design(main, "p1", "la-g12-0123456789ab", sprint / "state.json", run=run)
+    assert (got.status, got.code) == ("gate", 10) and run.calls == [] and "問い直す" in got.metrics["next"]
+
+
 def test_answer_design_mvv_approval_writes_one_record(lane):
     """受け入れ条件 3・I9: MVV 判定の承認は by: mvv・pr・outcome の記録を 1 件だけ書く（2 回打っても 1 件）。"""
     main, sprint = lane
