@@ -1169,14 +1169,14 @@ def cmd_notes(a):
     reps, bad = [], []
     data = pr_many(root, [p.number for p in prs], "title,body,state,closingIssuesReferences", comments=True) if path else None
     notes = pr_notes(root, prs, skipped, reps, bad, data, to, extra_out, outside)
-    before = {n: items for n, items, *_ in notes}
+    before = {x.number: x.changes for x in notes}
     after, rep_items = replaced.apply(before, reps)  # 後の PR が置き換えた箇条を除く（#1834）
     rep_items += bad
     gone = sum(len(before[n]) - len(after[n]) for n in before)
-    bullets = [f"- {i}" for n, *_ in notes for i in after[n]]
-    risks = [f"- {i}" for _, _, rs, *_ in notes for i in rs]
-    migration = [f"- {i}" for *_, ms in notes for i in ms]
-    fallback = sum(1 for *_, by_title, _ in notes if by_title)
+    bullets = [f"- {i}" for x in notes for i in after[x.number]]
+    risks = [f"- {i}" for x in notes for i in x.risks]
+    migration = [f"- {i}" for x in notes for i in x.migration]
+    fallback = sum(1 for x in notes if x.by_title)
     if path:
         _emit_approval_notes(root, a, path, prs, data, notes, bullets, risks, migration, skipped, rep_items, gone)
         return
