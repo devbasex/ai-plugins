@@ -15,6 +15,7 @@ import json
 import shutil
 import subprocess
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +31,15 @@ DEFAULT_SIZE = "LARGE"
 CURL = "curl"
 # curl が --max-time に当たったときの終了コード
 CURL_TIMEOUT_EXIT = 28
+
+
+@dataclass(frozen=True)
+class _Deck:
+    """操作するプレゼンテーション（gws の実行ファイル・プレゼンテーションの ID・サムネイルの大きさ）。"""
+
+    gws: str
+    presentation_id: str
+    size: str
 
 
 class _NeedsLogin(Exception):
@@ -53,12 +63,12 @@ def run(tool: str, presentation_id: str, out_dir: str, size: str) -> Outcome:
         out.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
         raise GwsStop("unknown", f"出力のディレクトリを作れない: {exc}") from exc
+    deck = _Deck(gws, presentation_id, size)
     items: list[dict[str, str]] = []
     try:
-        ids = _page_ids(gws, presentation_id)
+        ids = _page_ids(deck)
         for no, oid in enumerate(ids, start=1):
-            dest = out / f"p{no}.png"
-            _thumbnail(gws, presentation_id, oid, size, dest, no)
+            dest = _thumbnail(deck, no, oid, out)
             items.append({"name": f"p{no}", "result": "saved", "objectId": oid, "detail": str(dest)})
     except _NeedsLogin as login:
         return unauthenticated_gate(
@@ -101,10 +111,10 @@ def _unauthenticated() -> bool:
     return not records_gws.authenticated(status)
 
 
-def _page_ids(gws: str, presentation_id: str) -> list[str]:
+def _page_ids(deck: _Deck) -> list[str]:
     """ページの ID をページ順に取る。読めなければ `GwsStop`（invalid）。"""
-    params = json.dumps({"presentationId": presentation_id, "fields": "slides(objectId)"})
-    data = _gws(gws, ["slides", "presentations", "get", "--params", params], "ページの ID の取得")
+    params = json.dumps({"presentationId": deck.presentation_id, "fields": "slides(objectId)"})
+    data = _gws(deck.gws, ["slides", "presentations", "get", "--params", params], "ページの ID の取得")
     slides = data.get("slides") if isinstance(data, dict) else None
     ids = [s.get("objectId") for s in slides or [] if isinstance(s, dict)]  # noqa: NDF501 外部コマンド: slides の無い応答は下で止める
     if not ids or not all(isinstance(i, str) and i for i in ids):
@@ -112,11 +122,12 @@ def _page_ids(gws: str, presentation_id: str) -> list[str]:
     return ids
 
 
-def _thumbnail(gws: str, presentation_id: str, object_id: str, size: str, dest: Path, no: int) -> None:
-    """1 ページのサムネイルの URL を取り、curl で `dest` へ保存する。"""
+def _thumbnail(deck: _Deck, no: int, object_id: str, out: Path) -> Path:
+    """`no` ページ目のサムネイルの URL を取り、curl で `out` の下の `p<番号>.png` へ保存し、そのパスを返す。"""
     what = f"p{no}（{object_id}）のサムネイル"
-    params = {"presentationId": presentation_id, "pageObjectId": object_id, "thumbnailProperties.thumbnailSize": size}
-    data = _gws(gws, ["slides", "presentations", "pages", "getThumbnail", "--params", json.dumps(params)], what)
+    dest = out / f"p{no}.png"
+    params = {"presentationId": deck.presentation_id, "pageObjectId": object_id, "thumbnailProperties.thumbnailSize": deck.size}
+    data = _gws(deck.gws, ["slides", "presentations", "pages", "getThumbnail", "--params", json.dumps(params)], what)
     url = data.get("contentUrl") if isinstance(data, dict) else None
     if not isinstance(url, str) or not url:
         raise GwsStop("invalid", f"{what}: 応答に contentUrl が無い")
@@ -134,3 +145,4 @@ def _thumbnail(gws: str, presentation_id: str, object_id: str, size: str, dest: 
             f"{what}: 画像を取れない（curl の終了コード {done.returncode}）",
             items=[{"name": what, "result": "download-failed", "detail": rd.tail(done.stderr)}],
         )
+    return dest
