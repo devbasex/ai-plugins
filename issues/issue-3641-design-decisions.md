@@ -21,7 +21,7 @@
 ### 決定 2: 文書だけでリリースが起きないよう、文書の PR は main へ入れ、承認ゲートを通らないマージには配るプラグインを変える PR を通さない
 
 `trunk` の行の文書の PR の宛先は `base`（= main）にする。#3572 の `trunk` の行は `sprint`（スプリントブランチ）だけを許すが、今の NDF のまとめのステージ（確定仕様化の PR）はスプリントの PR のマージの後に流れ、`trunk` の行ではその時点でスプリントブランチが消えている。宛先を `sprint` にすると確定仕様化の PR の宛先が無くなる。
-文書だけの PR が main へ入っても、CD はリリース対象のプラグインに変化が無ければバージョンを上げない（I9）。そこで、承認ゲートを通らないマージ（`merge-when-green` の `--gate-approved` の無いマージ）が、配るプラグインの中身を変える PR を止める（I5）。バージョン上げの PR は版数と説明だけの差分で通す（`ci-heavy-skip.py` の `version_only` と同じ判定を使う）。
+文書だけの PR が main へ入っても、CD はリリース対象のプラグインに変化が無ければバージョンを上げない（I9）。そこで、承認ゲートを通らないマージ（`merge-when-green` の `--gate-approved` の無いマージ）が、配るプラグインの中身を変える PR を止める（I5）。版上げの PR は版数と説明だけの差分で通す（`ci-heavy-skip.py` の `version_only` と同じ判定を使う）。
 11.0 の移行では、`trunk` の行に限って `doc_prs` を `base` から `sprint` へ書き換える行が #3613 の改名表に要る（設計文書の「影響」）。
 
 設計 PR をスプリントブランチへ入れ、確定仕様化をスプリントの PR の中で行う形は採らない。スプリントのステージの並び（設計 PR のマージ → スプリントブランチ → … → まとめ）を `trunk` だけ組み替えることになり、最小限の範囲を超える。
@@ -31,7 +31,7 @@
 ### 決定 3: main へのマージをそのままリリースにするため、スプリントの PR を本番の PR にし、検査のプランのマージを外して本番のステージへ渡す
 
 `trunk` の行では、検査のステージ（`plan_sprint_check`）は main 宛てのスプリントの PR を作り、リファクタリング（cross-refactoring）と cross-review を通し、マージのステップ（`merge-gate`・`merge`）を持たない。リリース承認ゲートの後の本番のステージが、その PR（`{queue_pr:check}`）を本番の PR として承認・マージする。
-開発版のステージは、どの進め方（`normal`・`auto`）でも置かない。main 以外に変更の載るブランチが無いためである。
+開発版のステージは、どの進め方（`normal`・`auto`）でも置かない。開発版チャネルはベースブランチに載るチャネルで、行 `trunk` ではベースブランチが本番ブランチと同じ（I1）であり、main 以外に変更の載るブランチが無いためである。開発版を外す層は取り込み方の行で、リポジトリごとの設定の値ではない（I8・I12）。行 `whole`・`selected` の開発版のデプロイの機能は変えない。
 並列のレーンは、`selected` と同じくまとめたリリースへ依頼を送らず（`sprint.py` の `release_lane` が `None` を返す）、自分の本番のプランで出す。まとめたリリースは develop からリリースブランチを組む形で、`trunk` の行には当てはまらない。
 進め方 `fast` は断る（`fast_flow_refusal`）。`fast` はスプリントブランチを作らずに起点へ直接入れ、`trunk` では起点が main のため、承認ゲートの前に main へ入る。
 即時修正のプランなど、スプリントの外のプランが main 宛てにコードの PR を出したときは、マージの部品が I5 で止め、本番のプラン（`trunk` の種類、PR の番号を受ける）へ戻す。
@@ -45,7 +45,7 @@
 
 本番のプランの種類 `trunk` の並びは、承認資料 → リリース承認ゲート → `trunk-steps.py land` → `trunk-steps.py confirm` → 導入の確かめ（`release-verification-steps.py verify-install --ref <本番ブランチ>`）→ 記録 → 後片付けである。作業のステップ（`type: work`）と直しのステップを持たない（I7）。
 CI が落ちた・キューから外れた・head が動いたときは止まり、スプリントの経路（実装と検査のプラン）へ差し戻す。#3592 で今の NDF の本番のプランから直しのステップを外した形（`judge_fix_steps(fix=False)`）を引き継ぐ。
-承認資料の範囲は「main の先端..本番の PR の head」で、リリースブランチもバージョン上げのコミットも組まない。予定のバージョンは上げ幅のラベルから出し、確定のバージョンは CD が決める。
+承認資料の範囲は「main の先端..本番の PR の head」で、リリースブランチも版上げのコミットも組まない。予定のバージョンは上げ幅のラベルから出し、確定のバージョンは CD が決める。
 
 根拠: Value 3 / Value 13（MVV 版 7）
 
@@ -55,13 +55,13 @@ CI が落ちた・キューから外れた・head が動いたときは止まり
 組み合わせの確かめは GitHub の merge queue に任せる（LIB1）。merge queue を使えないリポジトリ（Organization の public でも GitHub Enterprise Cloud の private でもない）のために、`strict` を同じ設定の別の値として持たせる。キーは #3572 の決定 17 と同じ `production_merge.method` で、11.0 の移行でキーの位置を変えずに読める。
 `trunk` の行では方式の記述を必須にし、無い・表に無い値・ruleset と食い違う、のどれでもマージの前に止まる（I6）。既定の方式へ倒さないのは、倒した先が ruleset の実際と食い違えば、組み合わせの確かめが黙って抜けるためである。
 
-ai-plugins は `merge-queue` を選ぶ。`strict` では、CD のバージョン上げの PR がマージされるたびに、開いて承認を待つほかのスプリントの PR がすべて main の先端を含まなくなり、取り込みと承認の取り直しが要る。並列のレーンは最大 6 本で、人の承認の回数がリリースの回数に比例して増える（Value 1）。merge queue は作者の取り込みなしで同じ確かめを行う（STD3）。
+ai-plugins は `merge-queue` を選ぶ。`strict` では、CD の版上げの PR がマージされるたびに、開いて承認を待つほかのスプリントの PR がすべて main の先端を含まなくなり、取り込みと承認の取り直しが要る。並列のレーンは最大 6 本で、人の承認の回数がリリースの回数に比例して増える（Value 1）。merge queue は作者の取り込みなしで同じ確かめを行う（STD3）。
 
 | 比べた候補 | 採否と理由 |
 | --- | --- |
 | 自前で組み合わせのブランチを組んで確かめる | 採らない。merge queue が同じことを持つ（STD3） |
 | 設定を書かせず ruleset から方式を推す | 採らない。リポジトリの持ち主の意図と ruleset の食い違いを検出できない |
-| `merge-queue` だけを作る | 採らない。merge queue を使えない GitHub flow のリポジトリ（代表のリポジトリの表の Web サービス）が選べない |
+| `merge-queue` だけを作る | 採らない。merge queue を使えない GitHub flow のリポジトリ（Organization の public でも GitHub Enterprise Cloud の private でもないもの）が選べない |
 
 - 作り方: ライブラリやサービスを使う・自前で作る
 - 比べた候補: LIB1 / STD3 / STD1
@@ -72,23 +72,24 @@ ai-plugins は `merge-queue` を選ぶ。`strict` では、CD のバージョン
 
 `land` は始めに PR の状態を読む。マージ済みなら人のマージとして、マーカーのあるコメントが無いときだけ人のマージの記録（承認した head・マージコミット・方式）を書いて `ok` にする（I11）。人の GitHub でのマージはリリース承認と同じ扱いである。
 マージされていなければ、PR の head と承認した head を比べ、違えば `head_moved` で止まる（I4）。続けて設定の方式と ruleset（`GET /repos/{o}/{r}/rules/branches/{branch}` と GraphQL の `mergeQueue(branch)`）を照らし、ruleset がレビューの承認を求め（`required_approving_review_count` が 1 以上）PR の `reviewDecision` が `APPROVED` でなければ `precondition` で止まる（I6）。
-`merge-queue` では `enqueuePullRequest(expectedHeadOid=<承認した head>)` を打ち（STD7）、GitHub は head が違えば断る。投入の後は `ci_budget` の秒まで PR の `merged`・`isInMergeQueue` を読み、外れたら `queue_removed` で止まって差し戻す。同じ head で入れ直さない（外れた理由が組み合わせの失敗なら、同じ組み合わせで落ちる）。
+`merge-queue` では `enqueuePullRequest(expectedHeadOid=<承認した head>)` を打つ（STD7）。投入の成否は応答の形に頼らず、投入の後の PR の `isInMergeQueue` で読む。すぐに入れられない PR に `enqueuePullRequest` が誤りを返すか、自動マージに倒れて成功を返すかは頁に書かれていない（設計文書の「未確認のまま残ること」）。キューに無ければ、`autoMergeRequest` があるとき `disablePullRequestAutoMerge` で外し、`not_enqueued` で止まる。投入の後は `ci_budget` の秒まで PR の `merged`・`isInMergeQueue` を読み、外れたら `queue_removed` で止まって差し戻す。同じ head で入れ直さない（外れた理由が組み合わせの失敗なら、同じ組み合わせで落ちる）。
 `strict` では head が main の先端を祖先に持つか（`compare` の `behind_by` が 0）を確かめ、含まなければ `behind` で止まる。含めば承認した head を `sha` に渡して（STD1）マージする。
 どちらの方式でも、`production_merge.admin` が真でも `--admin` を打たない。迂回は必須のチェックと最新の取り込みの規則も越え、確かめていない組み合わせが入る（STD6）。
 
-`gh pr merge --match-head-commit` に本番の PR のキューへの投入を任せることは採らない。キューへ入れられないとき自動マージに倒れ、`land` が投入の成否を読めない（STD4）。
+`gh pr merge --match-head-commit` に本番の PR のキューへの投入を任せることは採らない。チェックの前なら自動マージを有効にする（STD8）ため、`land` の終わりの後に GitHub が入れることになり、`land` の待ちと止まった理由の外でマージが起きる。
 
 - 作り方: ライブラリやサービスを使う・自前で作る
-- 比べた候補: STD1 / STD4 / STD7 / LIB1
+- 比べた候補: STD1 / STD4 / STD7 / STD8 / LIB1
 
 根拠: Value 3 / Value 7 / C2（MVV 版 7）
 
-### 決定 7: PR がバージョンを触らずに済むよう、CD がマージの後にバージョン上げの PR を作り、自動マージで入れてからタグを作る
+### 決定 7: PR がバージョンを触らずに済むよう、CD がマージの後に版上げの PR を作り、自動マージで入れてからタグを作る
 
-main への push で `trunk-steps.py cd` が動く（設計文書の「処理の流れ」の CD の 1 回の実行）。先端のバージョンにタグが無ければ今の `publish` でタグと GitHub Release を作り、範囲（最後のバージョン上げのコミット..先端）にリリース対象の変化があり、開いたバージョン上げの PR が無ければ、main の先端から `release/v<バージョン>` を作る。
-書き換えは今の版上げ（`release-steps.py` の `plan_bump` が書く `plugin.json`・`marketplace.json`・README の表）と CHANGELOG の節（決定 11）で、今のリリースブランチのバージョン上げのコミットと同じファイルである。上げ幅は範囲の PR のラベルの最大で、ラベルの無い PR は PATCH にする（#3572 の決定 7。付け忘れでマージを止めない）。
-PR を作った後に `gh pr merge --merge --match-head-commit <SHA>` で自動マージを依頼する。キューのあるブランチでは、必須のチェックの後に GitHub がキューへ入れる（LIB4）。CD の実行は PR のチェックを待たずに終わる。
-バージョン上げの PR は人の承認を持たない。中身は版数と説明だけで（I5 の判定）、PR の検査（I3）がバージョン上げの PR に限って版数の変更を通す。
+main への push で `trunk-steps.py cd` が動く（設計文書の「処理の流れ」の CD の 1 回の実行）。先端のバージョンにタグが無ければ今の `publish` でタグと GitHub Release を作り、範囲（最後の版上げのコミット..先端）にリリース対象の変化があり、開いた版上げの PR が無ければ、main の先端から `release/v<バージョン>` を作る。
+書き換えは今の版上げ（`release-steps.py` の `plan_bump` が書く `plugin.json`・`marketplace.json`・README の表）と CHANGELOG の節（決定 11）で、今のリリースブランチの版上げのコミットと同じファイルである。上げ幅は範囲の PR のラベルの最大で、ラベルの無い PR は PATCH にする（#3572 の決定 7。付け忘れでマージを止めない）。
+PR を作った後に `gh pr merge --merge --match-head-commit <SHA>` で自動マージを依頼する。キューのあるブランチでは、必須のチェックの前なら自動マージが有効になり、後ならキューへ入る（STD8・LIB4）。CD の実行は PR のチェックを待たずに終わる。
+`strict` では、版上げの PR が開いている間に main が進むと、版上げの PR が main の先端を含まなくなり、マージされない。そこで main への push ごとの CD の実行が、範囲の判定の前に、開いた版上げの PR へ main を取り込み（`update-branch` に読んだ head を渡す）、新しい head で自動マージを頼み直す（設計文書の「処理の流れ」の手順 2）。版上げの PR へ書くのは CD の実行だけで、`concurrency` の `release-cd` が 1 本ずつ流すため、書き手が重ならない。
+版上げの PR は人の承認を持たない。中身は版数と説明だけで（I5 の判定）、PR の検査（I3）が版上げの PR に限って版数の変更を通す。
 
 | 比べた候補 | 採否と理由 |
 | --- | --- |
@@ -99,15 +100,15 @@ PR を作った後に `gh pr merge --merge --match-head-commit <SHA>` で自動�
 | 今の版上げと CHANGELOG の書き換えを使い、PR を CD が作る | 採る |
 
 - 作り方: 標準に倣う・自前で作る
-- 比べた候補: PRD1 / PRD2 / LIB2 / LIB3 / LIB4 / STD6
+- 比べた候補: PRD1 / PRD2 / LIB2 / LIB3 / LIB4 / STD6 / STD8
 
 根拠: Value 3 / Value 11 / P1（MVV 版 7）
 
-### 決定 8: バージョン上げの PR の CI を起こすため、秘密 `NDF_RELEASE_TOKEN` を足す
+### 決定 8: 版上げの PR の CI を起こすため、秘密 `NDF_RELEASE_TOKEN` を足す
 
-`GITHUB_TOKEN` で作った PR では、`pull_request` の実行が承認待ちの状態で作られ、必須のチェックが自動で走らない（STD5）。そのためバージョン上げの PR の作成と push は、別のトークンで行う。
+`GITHUB_TOKEN` で作った PR では、`pull_request` の実行が承認待ちの状態で作られ、必須のチェックが自動で走らない（STD5）。そのため版上げの PR の作成と push は、別のトークンで行う。
 ai-plugins にはリポジトリの秘密も Organization の秘密も無い（`gh api repos/devbasex/ai-plugins/actions/secrets --jq .total_count` と `.../actions/organization-secrets --jq .total_count` がどちらも `0`、2026-11-16）。要求の非機能の条件が挙げる `secrets.NDF_RELEASE_TOKEN` は、`ndf-next-release.yml` が参照するが置かれていない。この課題で同じ名前の秘密を 1 つ足し、11.0 の ndf-next のリリース（#3572 の決定 7）も同じ秘密を使う。
-種類は fine-grained PAT にし、対象をこのリポジトリだけ、権限を `contents` と `pull_requests` の書き込みに限る。秘密が無ければ `cd` はタグの作成までを済ませ、バージョン上げの PR を作らずに `precondition` で止まり、理由に秘密の名前を出す。マージそのものは止まらず、秘密を置いた後の push で残りの範囲がバージョン上げへ進む。
+種類は fine-grained PAT にし、対象をこのリポジトリだけ、権限を `contents` と `pull_requests` の書き込みに限る。秘密が無ければ `cd` はタグの作成までを済ませ、版上げの PR を作らずに `precondition` で止まり、理由に秘密の名前を出す。マージそのものは止まらず、秘密を置いた後の push で残りの範囲が版上げへ進む。
 
 GitHub App のトークン（App の ID と鍵の 2 つの秘密）は採らない。秘密が 2 つになり、#3572 の workflow が参照する名前とも合わない。
 
@@ -125,22 +126,22 @@ merge queue は `merge_group` で起動しない workflow のチェックを受�
 
 ### 決定 10: 11.0 で置き換える範囲を 1 か所で外せるよう、GitHub flow の処理を新しいエントリポイント `trunk-steps.py` と新設のモジュールに置き、ai-plugins の設定の書き換えは別の PR にする
 
-`release-steps.py` は行数の上限の例外（1425 行）ちょうどで、`merged_lib/merge.py` は 500 行である。どちらも足すと構造の検査（`scripts/check-script-structure.py` の `lines`）が落ちる。`land`・`confirm`・`cd`・`pr-check` は `trunk-steps.py` に置き、処理は `release_lib/trunk_land.py`・`trunk_cd.py`・`merge_method.py` に置く。既存の 2 ファイルには呼び出しだけを足す。11.0 の入れ替えで ndf-next の `land`・`bump` に置き換わるとき、外すのは新設のファイルと呼び出しの行になる。
+`release-steps.py` は行数の上限の例外（1425 行）ちょうどで、`merged_lib/merge.py` は 500 行である。どちらも足すと構造の検査（`scripts/check-script-structure.py` の `lines`）が落ちる。`land`・`confirm`・`cd`・`pr-check` は `trunk-steps.py` に置き、処理は `release_lib/merge_method.py`（main へのマージ）・`trunk_cd.py`（main のバージョン）に置く。既存の 2 ファイルには呼び出しだけを足す。11.0 の入れ替えで ndf-next の `land`・`bump` に置き換わるとき、外すのは新設のファイルと呼び出しの行になる。
 版上げ・CHANGELOG・`publish`・承認の記録の読みは、今の `release-steps.py`・`release_lib/` の関数を呼び、写さない。
 
 ai-plugins の設定（`.ndf/worktree.json`・`.ndf/project.json`・`.ndf/supervise.json`）・`AGENTS.md`・`CONTRIBUTING.md`・`docs/versioning-and-distribution.md`・開発版の workflow（`release-dev.yml`）の削除は、実装の PR に入れない。実装の PR は develop へ入り、develop の設定が `trunk` へ変わると、main へ移る前に新しいスプリントが main から切られる。設定の PR は切り替えの手順で、最後のリリースの後に main 宛てに出す（ [issue-3641-design-switch.md](issue-3641-design-switch.md) の手順 4）。
 
 根拠: Value 9 / Value 10 / Value 11 / C7（MVV 版 7）
 
-### 決定 11: CHANGELOG を残し、CD がバージョン上げのコミットでバージョンの節を書く
+### 決定 11: CHANGELOG を残し、CD が版上げのコミットでバージョンの節を書く
 
-PR は `CHANGELOG.md` を触らない。バージョン上げのコミットで、範囲に入った PR から今の CHANGELOG の書き換え（`release-steps.py` の `cmd_changelog`・`cmd_notes` の関数）がバージョンの節を組む。GitHub Release の本文は今の `publish` のとおりその節から作る。
+PR は `CHANGELOG.md` を触らない。版上げのコミットで、範囲に入った PR から今の CHANGELOG の書き換え（`release-steps.py` の `cmd_changelog`・`cmd_notes` の関数）がバージョンの節を組む。GitHub Release の本文は今の `publish` のとおりその節から作る。
 CHANGELOG を読むスクリプトは、テストを除いて今の NDF だけで 14 ファイルある（#3572 の決定 11 の表）。廃止すると 11.0 までに読み手をすべて書き換えることになる。
 
 | 比べた候補 | 採否と理由 |
 | --- | --- |
 | CHANGELOG をやめ、GitHub Release を正本にする | 採らない。読み手の書き換えが最小限の範囲を超える |
-| 今の書き換えの関数をバージョン上げのコミットで呼ぶ | 採る |
+| 今の書き換えの関数を版上げのコミットで呼ぶ | 採る |
 
 - 作り方: 標準に倣う
 - 比べた候補: PRD1
