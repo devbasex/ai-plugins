@@ -48,7 +48,7 @@ $ grep -c '"source": "ndf-gate:1"' .ndf/parallel/p6/ledger.jsonl
 
 2026-11-15 のリリース 17（ndf v10.27.69）で、一時レーン p6-rel17 が後片付けの `git branch -D sprint/lr-t2` の可否を依頼 `p6-rel17-qac5be1b083b1` で送り、オーガナイザーが答え「消す」を送った（台帳 361 行目）。起き直した p6-rel17 は、同じ対象（先端 81d3baa5）の同じ問いを新しい依頼 `p6-rel17-qa2ff3992386d` で送り直した。戻せない操作（`-D`）の可否を人へ 2 回問うことになった。
 
-#3597 の設計（`issues/issue-3597-design-decisions.md` の決定 6・7）は、問いの対象のブランチ名を `AskUserQuestion` の入力の `metadata.target` で受ける形だった。実装の最初に確かめたところ、`AskUserQuestion` の `metadata` のスキーマは `source` だけを持ち `additionalProperties: false` で、`metadata.target` は入力の検証で落ちて hook へ届かない。決定 6 の取り決めどおり条件 5〜8 の実装を止めて人へ戻し、利用者の決定「5〜8 を分けて出す」で #3608 へ分けた。#3597 で入ったのは、起き直した一時レーンが前の依頼と答えを読む場所（`parallel.py helper` の結果の `asked`）までで、`ask` の答えの中身は載らない（`plugins/ndf/scripts/lib/parallel_question.py` の `asked_of`）。
+#3597 の設計（[issues/issue-3597-design-decisions.md](https://github.com/devbasex/ai-plugins/blob/97ac31b2b0ad74e078fd48c554abfaefb0fe5774/issues/issue-3597-design-decisions.md) の決定 6・7）は、問いの対象のブランチ名を `AskUserQuestion` の入力の `metadata.target` で受ける形だった。実装の最初に確かめたところ、`AskUserQuestion` の `metadata` のスキーマは `source` だけを持ち `additionalProperties: false` で、`metadata.target` は入力の検証で落ちて hook へ届かない。決定 6 の取り決めどおり条件 5〜8 の実装を止めて人へ戻し、利用者の決定「5〜8 を分けて出す」で #3608 へ分けた。#3597 で入ったのは、起き直した一時レーンが前の依頼と答えを読む場所（`parallel.py helper` の結果の `asked`）までで、`ask` の答えの中身は載らない（`plugins/ndf/scripts/lib/parallel_question.py` の `asked_of`）。
 
 ## 期待する結果
 
@@ -265,7 +265,7 @@ plugins/ndf/scripts/lib/sprint_loop_gate.py:422:        rid = parallel_lane.requ
 
 ## 関連
 
-- #3597 の設計: `issues/issue-3597-design.md`・`issues/issue-3597-design-decisions.md`（決定 6・7・8）・`issues/issue-3597-requirements.md`
+- #3597 の設計: [issues/issue-3597-design.md](https://github.com/devbasex/ai-plugins/blob/97ac31b2b0ad74e078fd48c554abfaefb0fe5774/issues/issue-3597-design.md)・[issues/issue-3597-design-decisions.md](https://github.com/devbasex/ai-plugins/blob/97ac31b2b0ad74e078fd48c554abfaefb0fe5774/issues/issue-3597-design-decisions.md)（決定 6・7・8）・[issues/issue-3597-requirements.md](https://github.com/devbasex/ai-plugins/blob/97ac31b2b0ad74e078fd48c554abfaefb0fe5774/issues/issue-3597-requirements.md)
 - #2507（承認した設計のマージ）、#2436（並列の計画の問いの転送）
 
 ## 依頼（原文）
