@@ -166,10 +166,14 @@ class LaunchRouting:
                 self._launch_waiting_one(purpose, rec, rows)
 
     def _launch_waiting_one(self, purpose: str, rec: dict, rows: dict) -> None:
-        """空き待ちの起動の記録 `rec` を 1 件読み直す。待つ相手が動いて観えれば時間切れだけを扱い、観えなければ打ち直す。"""
+        """空き待ちの起動の記録 `rec` を 1 件読み直す。待つ相手が動いて観えれば時間切れだけを扱い、観えなければ打ち直す。
+        待ちの間に、記録が添えたリリース（`n`）か版の要るまとめ（`verify`）が締められていれば、打たずに `failed` にする（問わない）。"""
         import clock
 
         busy, spec, extra = str(rec.get("busy") or ""), rec.get("launch") or {}, dict(rec.get("extra") or {})
+        if self._waiting_stale(extra):
+            rec.update(result="failed", reason="待ちの間にリリースが締められた")
+            return
         since = clock.parse(rec.get("since"), naive="utc") if rec.get("since") else None
         waited = max(0.0, self.seen_at - since.timestamp()) if since else 0.0
         if (rows.get(busy) or {}).get("state") in UP:
@@ -187,6 +191,13 @@ class LaunchRouting:
         else:
             rec.update(**_launch_outcome(got))
             self._ask_not_up(purpose, rec["lane"], rec.get("reason"), spec, extra)
+
+    def _waiting_stale(self, extra: dict) -> bool:
+        """空き待ちの記録の添え（`extra`）が、もう流れていないリリース（`n` が今のリリースの連番と違う）か版の要るまとめ
+        （`verify` が流している待ちの依頼と違う）を指すか。打ち直すと、締めた後のリリースの一時レーンが本番のプランを流しうる。"""
+        if extra.get("n") is not None and (self.current is None or self.current.get("n") != extra["n"]):
+            return True
+        return extra.get("verify") is not None and getattr(self, "verifying", None) != extra["verify"]
 
     def launch_helper(self) -> None:
         """流れているリリースの最後の起動（`launch`）の一時レーンを起動する。立ち上がらなければ問いに `n` を添える（「止める」で締める）。"""

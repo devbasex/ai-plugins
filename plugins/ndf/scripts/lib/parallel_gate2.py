@@ -67,6 +67,22 @@ def gate_detail(done: str) -> Optional[tuple[str, Optional[int], str]]:
     return reason or summary or f"承認ゲートの理由を読めない（{state / 'progress.jsonl'}）", pr, report
 
 
+def gate_step(done: Path) -> Optional[tuple[str, str]]:
+    """本番のプランの done から (承認ゲートで止まったプランの名前, 終了コード 10 を返した最後のステップの id)。読めなければ None。
+    打ち直しは `queue --resume --from <プラン>=<ステップ>` でこのステップから流す。開始を渡さないと、関門の後に流れて成功した
+    ステップ（承認資料の投稿など）だけが続きとして流れ、本番の PR をマージせずに完了と読まれる。"""
+    try:
+        got = json.loads(Path(done).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    item = next((i for i in got.get("items") or [] if isinstance(i, dict) and i.get("result") == "関門"), None)
+    if item is None or not item.get("plan"):
+        return None
+    rows = _gate_steps(Path(str(item.get("report") or "")).parent)
+    step = str(rows[-1].get("step") or "") if rows else ""
+    return (Path(str(item["plan"])).stem, step) if step else None
+
+
 def _gate_steps(state: Path) -> list[dict]:
     """状態 `state` の `progress.jsonl` のうち、終了コード 10 のステップ（`kind: step`・`exit: 10`）の行。読めなければ空。"""
     try:

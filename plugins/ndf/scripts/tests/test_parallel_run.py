@@ -420,6 +420,20 @@ def test_helper_task_current_confirmed_retry_resumes_the_gated_release_queue(mon
     assert f"queue {d / 'release.json'}" not in got["pipeline"]
 
 
+def test_helper_task_confirmed_retry_resumes_from_the_step_that_gated(monkeypatch, tmp_path):
+    """打ち直しは関門を返したステップから流す（`--from`）。関門の後に成功したステップ（承認資料の投稿）だけを続けて完了にしない。"""
+    d = prl.release_dir(tmp_path, "p1", 1, 1)
+    state = tmp_path / "state"
+    state.mkdir(parents=True)
+    d.mkdir(parents=True)
+    rows = [{"kind": "step", "step": "release", "exit": 10}, {"kind": "step", "step": "approval-post", "exit": 0}]
+    (state / "progress.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+    done = d / "release-done.json"
+    done.write_text(json.dumps({"items": [{"plan": str(d / "release.json"), "result": "関門", "report": str(state / "report.md")}]}))
+    got, _ = _helper_task_with(monkeypatch, tmp_path, CONFIRMED_11)
+    assert f"{ph.SUPERVISE} queue --resume {done} --from release=release && {ph.SUPERVISE} wait {done}" in got["pipeline"]
+
+
 @pytest.mark.parametrize(
     "launch",
     [
@@ -1247,6 +1261,15 @@ def test_a_helper_that_stopped_after_asking_is_not_asked_about(monkeypatch):
     prun._ask_helper(run, rows)
     q = run.questions[0]
     assert (q["kind"], q["purpose"], q["launch"]["argv"], q["n"]) == ("helper", "rel-1-1-present", ["spawn", "x"], 1)
+
+
+def test_a_helper_whose_restart_waits_for_a_free_slot_is_not_asked_about(monkeypatch):
+    """答えの後の再起動が空き待ち（`waiting`）の間は、止まって観えても「リリースの途中で止まった」を問わない。"""
+    run, helper = _helper_run(monkeypatch)
+    run.launches[f"ans-{helper}-q1"] = {"lane": helper, "result": "waiting", "at": LAUNCHED}
+    for _ in range(3):
+        prun._ask_helper(run, {helper: {"state": "stopped", "at": AFTER}})
+    assert run.questions == [] and helper not in run.helper_seen
 
 
 LAUNCHED, BEFORE, AFTER = "2026-11-10T00:00:10Z", "2026-11-10T00:00:00.000Z", "2026-11-10T00:01:00.000Z"

@@ -105,7 +105,7 @@ def helper_task(main: Path, name: str, n: int, k: int) -> dict:
     - 確定の後（`phase: confirmed`）: `pipeline` は答えの記録 → 提示のプランを `approve` から → 本番のプランの queue と待ち。
       終われば `settle` を打つ。`approve` が承認ゲート（10）で終われば queue を打たずに問いとして送る。本番のプランが承認ゲートで
       終われば `gate2`（確定の後の依頼。#3597 の決定 2）を打つ。前の起動の `release-done.json` があれば（打ち直す）、本番のプランは
-      `queue --resume` で関門から流し直す
+      `queue --resume --from <プラン>=<関門を返したステップ>` で関門から流し直す
 
     `asked` は自分の名前の一時レーンが送った依頼と答え（決定 8）。台帳を読めなければ `OSError`。"""
     import parallel_ledger as plg
@@ -123,8 +123,14 @@ def helper_task(main: Path, name: str, n: int, k: int) -> dict:
         done = d / "release-done.json"
         gate = pr.record_answer_cmd(d, n, k)
         # 打ち直し（決定 2）では前の本番のプランが承認ゲートで終えた done が残る。同じ queue は耐久の記録の関門をそのまま返すため、
-        # done があれば `queue --resume` で関門のプランを新しい実行の回として流し直す
-        queue = f"{SUPERVISE} queue --resume {done}" if done.exists() else f"{SUPERVISE} queue {d / 'release.json'} --done {done}"
+        # done があれば `queue --resume` で関門のプランを新しい実行の回として流し直す。開始は関門を返したステップ（`--from`）にする。
+        # 渡さないと、関門の後に成功したステップ（承認資料の投稿など）だけが続きとして流れ、マージせずに完了と読まれる
+        queue = f"{SUPERVISE} queue {d / 'release.json'} --done {done}"
+        if done.exists():
+            from parallel_gate2 import gate_step
+
+            at = gate_step(done)
+            queue = f"{SUPERVISE} queue --resume {done}" + (f" --from {at[0]}={at[1]}" if at else "")
         steps = [gate, f"{SUPERVISE} run {d / 'present.json'} --from approve", queue]
         return {**out, "phase": "confirmed", "pipeline": " && ".join([*steps, f"{SUPERVISE} wait {done}"]),
                 "gate2": f"{py} request-gate2 {name} {n} {k} --confirmed --done {done}", "settle": f"{py} settle {name} {n} --done {done}"}  # fmt: skip

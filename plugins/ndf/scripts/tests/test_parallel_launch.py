@@ -331,6 +331,7 @@ class _Routing(plc.LaunchRouting):
     def __init__(self):
         self.main, self.name, self.launching = "/m", "p6", True
         self.launches, self.helper_seen, self.seen_at, self.asked = {}, {}, 0.0, []
+        self.current, self.verifying = None, None
 
     def ask(self, kind, rid, lane, text, options, **extra):
         if all(a[1] != rid for a in self.asked):
@@ -354,6 +355,7 @@ def _waiting_run(monkeypatch, results):
 
     monkeypatch.setattr(plc, "step_launch", fake)
     run = _Routing()
+    run.current = {"n": 17}
     rec = run.launch_once("verify-x", "p6-rel10v", ["spawn", "--name", "p6-rel10v"], n=17)
     return run, rec, calls_, t0
 
@@ -403,6 +405,29 @@ def test_waiting_retry_that_fails_otherwise_asks(monkeypatch):
     run.seen_at = t0 + 5
     run.launch_waiting({})
     assert run.launches["verify-x"]["result"] == "failed" and [a[0] for a in run.asked] == ["spawn"]
+
+
+@pytest.mark.parametrize("current", [None, {"n": 18}])
+def test_waiting_for_a_release_settled_meanwhile_is_not_hit_again(monkeypatch, current):
+    """待ちの間に記録の連番のリリースが締められたら、待つ相手が止まっても打ち直さず、問わずに failed にする。"""
+    run, _, calls_, t0 = _waiting_run(monkeypatch, ["waiting", "up"])
+    run.current, run.seen_at = current, t0 + 5
+    run.launch_waiting({})
+    rec = run.launches["verify-x"]
+    assert len(calls_) == 1 and rec["result"] == "failed" and "締められた" in rec["reason"] and run.asked == []
+
+
+def test_waiting_for_a_verify_no_longer_running_is_not_hit_again(monkeypatch):
+    """版の要るまとめの待ちは、流している待ちの依頼（`verifying`）が記録の依頼と違えば打ち直さない。"""
+    calls_ = []
+    monkeypatch.setattr(plc, "step_launch", lambda *a, **k: calls_.append(a) or {"result": "waiting", "attempts": 1, "at": _stamp(time.time()),
+                                                                              "reason": "x", "busy": "p6-rel17", "limit": 600.0})  # fmt: skip
+    run = _Routing()
+    run.verifying = "r1"
+    run.launch_once("verify-r1", "p6-rel1v", ["spawn"], verify="r1")
+    run.verifying = None
+    run.launch_waiting({})
+    assert len(calls_) == 1 and run.launches["verify-r1"]["result"] == "failed" and run.asked == []
 
 
 def test_waiting_does_not_sleep_in_one_loop(monkeypatch):
