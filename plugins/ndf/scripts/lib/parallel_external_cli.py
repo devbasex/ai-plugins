@@ -85,13 +85,13 @@ def present_external(main: Path, a, reply: Callable) -> None:
 
 def compose_external(main: Path, reply: Callable) -> None:
     """リリースの実行（`--parallel-helper --external`）が `batch.json` の手で流すもの（#2439）。"""
-    from parallel_repo import dev_version
+    from parallel_repo import OriginUnfetchable, dev_version
     from supervise_lib.paths import PARALLEL_PY, SELF
 
     d = external_dir(reply)
     try:
         task = pe.compose(main, d, pe.read_batch(d), f"python3 {SELF}", PARALLEL_PY, dev_version)
-    except ValueError as exc:
+    except (ValueError, OriginUnfetchable) as exc:  # 取り直しの失敗も答えの JSON で返す（traceback で落とさない）
         reply("stopped", f"まとめたリリースを組めない: {exc}", code=1)
     except OSError as exc:
         reply("stopped", f"書けない: {exc}", code=2)

@@ -1,6 +1,6 @@
 """release-steps.py: 版の節と承認資料に、出す版のコミット（範囲の終点）に入った PR だけを載せる（#2555）。
 
-test_release_range.py の一時リポジトリ（タグ foo--v1.0.0・直接の PR #21 #22・スプリント PR #30）を使い、
+release_range_world.py の一時リポジトリ（タグ foo--v1.0.0・直接の PR #21 #22・スプリント PR #30）を使い、
 worktree（work）を承認したコミットに置いたまま、ベースブランチ（trunk）へ後から PR をマージする。
 """
 
@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from test_release_range import changelog, facts, git, included_rows, load, make_world, merge_into, merge_oid, notes, numbers  # noqa: E402
+from release_range_world import changelog, facts, git, included_rows, load, make_world, merge_into, merge_oid, notes, numbers  # noqa: E402
 
 
 @pytest.fixture

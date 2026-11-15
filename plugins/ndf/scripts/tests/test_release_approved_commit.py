@@ -296,8 +296,9 @@ def test_release_with_a_commit_that_is_not_an_ancestor_stops_at_the_gate(monkeyp
 
 
 def test_release_with_a_version_conflict_merges_through_the_sync_branch(monkeypatch, world):
-    """#2436 の版数の衝突: 起点の版数が上がっていれば release/v<版>-sync で本番の版を取って取り込み、
-    照合には元の release/v<版> の PR を使い、本番の PR の head は release/v<版> のまま。"""
+    """#2436 の版数の衝突: 起点の版数が上がっていれば release/v<版>-sync で取り込み、
+    照合には元の release/v<版> の PR を使い、本番の PR の head は release/v<版> のまま。
+    #3551: 衝突は行ごとに大きい版数を取るため、起点の開発版（1.2.4-dev.1）を本番の版へ戻さない。"""
     out, code, merged, _, created = run_release(monkeypatch, world, dev_bump="1.2.4-dev.1\n", approved_sha=world["approved"])
     tip = git(world["origin"], "rev-parse", f"release/v{VER}")
     assert (out["status"], code) == ("ok", None)
@@ -305,7 +306,7 @@ def test_release_with_a_version_conflict_merges_through_the_sync_branch(monkeypa
     assert created == [("trunk", f"release/v{VER}"), ("trunk", SYNC), ("live", f"release/v{VER}")]
     assert (out["metrics"]["release_pr"], out["metrics"]["sync_pr"]) == (1, 3)
     assert git(world["origin"], "merge-base", "--is-ancestor", tip, "trunk") == ""  # R1: release/v<版> の先頭は起点の祖先
-    assert git(world["origin"], "show", "trunk:version.txt") == VER  # 本番の版を取った
+    assert git(world["origin"], "show", "trunk:version.txt") == "1.2.4-dev.1"  # 起点の大きい版を残した（#3551）
     assert git(world["origin"], "rev-parse", f"{SYNC}^1") == tip  # release/v<版> そのものへは起点を取り込まない
     assert git(world["origin"], "show", "live:version.txt") == VER
 

@@ -586,7 +586,7 @@ def test_prod_release_records_after_the_release_and_never_goes_back_to_it(tmp_pa
     assert "release-steps.py record --version 1.0.1 --prs 1 --cd-result {state_dir}/work/cd-result.json" in rec["cmd"]
     assert rec["pr_from"] == "release_pr_url" and rec["on_exit"] == {"5": "stop"}
     assert rec["on_fail"] == "judge-record" and steps["judge-record"]["choices"] == ["record", "stop"]
-    assert "record" not in steps["judge"]["choices"] and "record" not in steps["fix"]["inputs"]
+    assert "record" not in steps["judge"]["choices"] and "fix" not in steps  # #3572: 本番は直しの段を持たない
     dev = release_steps_of(root, tmp_path, "dev", "1.0.1-dev.1")
     assert "record" not in dev and "judge-record" not in dev and dev["release"]["next"] == "verify"
 

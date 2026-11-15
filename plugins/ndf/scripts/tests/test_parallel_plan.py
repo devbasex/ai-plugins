@@ -318,7 +318,7 @@ def _declare(main, delivery=None, form=False):
 def test_check_items_warns_when_a_release_cannot_be_built(tmp_path, monkeypatch, rows, form, at):
     import parallel_route as prt
 
-    monkeypatch.setattr(prt, "dev_version", lambda _m: "")
+    monkeypatch.setattr(prt, "dev_version", lambda _m, fetch=True: "")
     _declare(_git_main(tmp_path), rows, form)
     got = prt.check_items(tmp_path)
     assert [(g["level"], g["rule"], g["at"]) for g in got] == [("warning", "release", at)] and got[0]["message"]
@@ -328,7 +328,7 @@ def test_check_items_warns_when_a_release_cannot_be_built(tmp_path, monkeypatch,
 def test_check_items_is_silent_when_a_release_can_be_answered(tmp_path, monkeypatch, rows, form):
     import parallel_route as prt
 
-    monkeypatch.setattr(prt, "dev_version", lambda _m: "1.2.3")
+    monkeypatch.setattr(prt, "dev_version", lambda _m, fetch=True: "1.2.3")
     _declare(_git_main(tmp_path), rows, form)
     assert prt.check_items(tmp_path) == []
 

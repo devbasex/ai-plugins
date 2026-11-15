@@ -1,7 +1,7 @@
 """release-steps.py notes --approval が承認の材料（レビュー・リファクタリング・全体テスト・設計文書の未確認・
 未実施のリリース後テスト）を承認資料へ集める（#1488）。
 
-範囲の PR の世界は `test_release_range.py` を使う。検査のプランの状態ディレクトリは実物の出力の形（結果 JSON が
+範囲の PR の世界は `release_range_world.py` を使う。検査のプランの状態ディレクトリは実物の出力の形（結果 JSON が
 最後の行）で置き、課題の本文と設計文書は gh の代役とベースブランチのコミットで置く。
 """
 
@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import test_release_range as rr  # noqa: E402
+import release_range_world as rr  # noqa: E402
 
 ISSUE = "## 受け入れ条件\n\n- [ ] 条件 A\n- [ ] 条件 B\n- [x] 条件 C（印あり）\n- [ ] 条件 D\n"
 DESIGN = (
