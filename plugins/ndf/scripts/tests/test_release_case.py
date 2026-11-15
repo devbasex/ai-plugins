@@ -170,3 +170,70 @@ def test_ai_plugins_declaration_is_cd_admin(monkeypatch):
     run, _ = fake({"rules/branches/main": (0, json.dumps([pr_rule(1)]))})
     monkeypatch.setattr(gh_call, "RUNNER", run)
     assert rc.case_of(".").case == rc.CD_ADMIN
+
+
+# 現状固定（I-002）: decide_case が返す Case の全項目と、case_at・case_or_stop の経路。
+_NO_CD = ("手元の承認資料", "NDF")
+_TRAIL = ("リリースの PR の証跡のコメント", "利用者のアカウント")
+
+
+@pytest.mark.parametrize(
+    "has_cd, approvals, admin, expected",
+    [
+        (False, None, False, rc.Case(rc.NO_CD, *_NO_CD, "本番チャネルへのマージで届く CD の行が無い")),
+        (False, 2, True, rc.Case(rc.NO_CD, *_NO_CD, "本番チャネルへのマージで届く CD の行が無い")),
+        (
+            True,
+            2,
+            True,
+            rc.Case(
+                rc.CD_ADMIN,
+                "リリースの PR の証跡のコメント",
+                "利用者のアカウント（管理者の迂回）",
+                "本番チャネルの承認数が 2 で、迂回の宣言がある",
+            ),
+        ),
+        (True, 1, False, rc.Case(rc.CD_REVIEW, "PR のレビューの承認", "利用者のアカウント", "本番チャネルの承認数が 1")),
+        (True, 0, False, rc.Case(rc.CD_NO_REVIEW, *_TRAIL, "本番チャネルの承認数が 0")),
+        (True, None, True, rc.Case(rc.CD_NO_REVIEW, *_TRAIL, "本番チャネルの承認数が 0")),
+    ],
+)
+def test_decide_case_full_fields(has_cd, approvals, admin, expected):
+    assert rc.decide_case(has_cd, approvals, "", admin=admin) == expected
+
+
+@pytest.mark.parametrize(
+    "has_cd, approvals, admin, case",
+    [(False, None, False, rc.NO_CD), (True, 1, True, rc.CD_ADMIN), (True, 1, False, rc.CD_REVIEW), (True, None, False, rc.CD_NO_REVIEW)],
+)
+def test_decide_case_why_overrides_reason(has_cd, approvals, admin, case):
+    got = rc.decide_case(has_cd, approvals, "渡した理由", admin=admin)
+    assert (got.case, got.reason) == (case, "渡した理由")
+
+
+def test_case_at_without_repository(tmp_path):
+    expected = rc.Case(rc.NO_CD, *_NO_CD, "リポジトリが無い")
+    assert rc.case_at(None) == expected
+    assert rc.case_at("") == expected
+    assert rc.case_at(tmp_path / "無い") == expected
+
+
+def test_case_at_on_unreadable_declaration(monkeypatch, tmp_path):
+    monkeypatch.setattr(delivery, "load_delivery", lambda root: delivery.DeliveryDecl(problems=["壊れた"]))
+    assert rc.case_at(tmp_path) == rc.Case(rc.NO_CD, *_NO_CD, "宣言を読めない")
+    with pytest.raises(rc.CaseUnreadable):
+        rc.case_at(tmp_path, strict=True)
+
+
+def test_case_at_delegates_to_case_of(monkeypatch, tmp_path):
+    monkeypatch.setattr(delivery, "load_delivery", lambda root: _decl([AUTO]))
+    run, _ = fake({"rules/branches/main": (0, json.dumps([pr_rule(0)]))})
+    monkeypatch.setattr(gh_call, "RUNNER", run)
+    assert rc.case_at(tmp_path) == rc.Case(rc.CD_NO_REVIEW, *_TRAIL, "本番チャネルの承認数が 0")
+
+
+def test_case_or_stop_raises_precondition(monkeypatch):
+    monkeypatch.setattr(delivery, "load_delivery", lambda root: delivery.DeliveryDecl(problems=["壊れた"]))
+    with pytest.raises(rc.StepError) as e:
+        rc.case_or_stop(".")
+    assert e.value.code == rc.EXIT_PRECONDITION and "壊れた" in str(e.value)
