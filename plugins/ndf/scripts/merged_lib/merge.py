@@ -424,6 +424,35 @@ def _pin_expect_head(a, reader, path, what):
         raise StepError(f"{what}を読めないため本番チャネルへ入れない: {e}", EXIT_UNREADABLE) from e
 
 
+def _stop_without_approved_from(a) -> None:
+    """--gate-approved user に照合の材料（--approved-from）が無いときに止める（#2104 の I3〜I5）。"""
+    emit(
+        result(
+            TOOL,
+            "stopped",
+            "--gate-approved user に照合の材料（--approved-from のリリースの承認資料）が無いため本番チャネルへ入れない",
+            next=(
+                f"promote --head {a.head} --base {a.base} --gate-approved user --approved-from <承認資料> で打つ"
+                "（プランなら run <プラン> --from promote から流し直し、リリース承認ゲートを取り直す）"
+            ),
+        ),
+        EXIT_UNREADABLE,
+    )
+
+
+def _cd_trail_and_admin(root, a, n):
+    """CD のある場合は cd-admin だけ迂回でマージし、証跡で承認を取る場合は先に証跡を書く（#2773 の決定 14・#3506）。
+    (照らした証跡かレビューの項目, 迂回の記録を書く処理) を返す。CD が無ければどちらも None。"""
+    trail_item = after_merge = None
+    case = release_case.case_or_stop(root)
+    if case.has_cd:
+        trail_item = promote_trail.trail_before_merge(root, a, n, case)
+        a.no_admin = not case.admin_merge
+        if case.admin_merge:
+            after_merge = promote_trail.admin_after_for(root, case, n, a.expect_head, trail_item)
+    return trail_item, after_merge
+
+
 def promote(a, cleanup):
     """ベースブランチ（--head）から本番チャネル（--base）へのリリースの Pull Request を作り（あれば使い）、リリース承認ゲートの後にマージする。
     head はベースブランチなので、マージの後に後片付けをしない（#1336 の I7）。
@@ -437,18 +466,7 @@ def promote(a, cleanup):
     approved_from = getattr(a, "approved_from", None)
     moved_next = None
     if a.gate_approved == "user" and not approved_from:
-        emit(
-            result(
-                TOOL,
-                "stopped",
-                "--gate-approved user に照合の材料（--approved-from のリリースの承認資料）が無いため本番チャネルへ入れない",
-                next=(
-                    f"promote --head {a.head} --base {a.base} --gate-approved user --approved-from <承認資料> で打つ"
-                    "（プランなら run <プラン> --from promote から流し直し、リリース承認ゲートを取り直す）"
-                ),
-            ),
-            EXIT_UNREADABLE,
-        )
+        _stop_without_approved_from(a)
     if approved_from:
         _pin_expect_head(a, approved_commit.material_sha, approved_from, "承認したコミット")
         moved_next = (
@@ -460,14 +478,7 @@ def promote(a, cleanup):
     item = {"kind": "pr", "name": f"#{n}", "result": "created" if created else "found", "base": a.base, "head_branch": a.head}
     if a.prepare:
         _prepare_promote(root, a, n, item)
-    trail_item = after_merge = None
-    if a.gate_approved:
-        case = release_case.case_or_stop(root)
-        if case.has_cd:  # CD のある場合は cd-admin だけ迂回でマージし、証跡で承認を取る場合は先に証跡を書く（#2773 の決定 14・#3506）
-            trail_item = promote_trail.trail_before_merge(root, a, n, case)
-            a.no_admin = not case.admin_merge
-            if case.admin_merge:
-                after_merge = promote_trail.admin_after_for(root, case, n, a.expect_head, trail_item)
+    trail_item, after_merge = _cd_trail_and_admin(root, a, n) if a.gate_approved else (None, None)
     a.pr, a.no_cleanup = n, True
     approve = f"promote --head {a.head} --base {a.base} --gate-approved user --approved-from "
     opts = MergeOptions(
