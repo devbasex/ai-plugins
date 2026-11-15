@@ -173,6 +173,16 @@ def _app_of(run: dict) -> object:
     return app.get("id") if isinstance(app, dict) else None
 
 
+def _judged_refusal(pull: Pull, got: trail.Read, moved: str, unapproved: str) -> Landed | None:
+    """読み直した証跡 `got` の先端が `pull` から動いていれば `moved`、承認されていなければ `unapproved` で止まった結果
+    （どちらでもなければ None）。"""
+    if got.pull.head_sha != pull.head_sha:
+        return Landed(False, "refused", moved)
+    if not got.judgment.approved:
+        return Landed(False, "refused", unapproved)
+    return None
+
+
 def _dequeued(number: int) -> Landed:
     """マージされずにマージキューから外された PR `number` の止まった結果。"""
     return Landed(
@@ -291,11 +301,8 @@ class Lander:
         if not self._is_production(pull):
             return None
         got = trail.check(self.hub, pull.number, human_only)
-        if got.pull.head_sha != pull.head_sha:
-            return Landed(False, "refused", f"#{pull.number} の先端が {pull.head_sha[:12]} から {got.pull.head_sha[:12]} へ動いた")
-        if not got.judgment.approved:
-            return Landed(False, "refused", f"#{pull.number} は承認されていない: {got.judgment.detail}")
-        return None
+        moved = f"#{pull.number} の先端が {pull.head_sha[:12]} から {got.pull.head_sha[:12]} へ動いた"
+        return _judged_refusal(pull, got, moved, f"#{pull.number} は承認されていない: {got.judgment.detail}")
 
     def _blocker(self, pull: Pull, deadline: float, bypass: bool = False) -> Landed | None:
         """マージの前の停止条件を順に確かめ、止まった結果（進めてよければ None）。
@@ -345,11 +352,8 @@ class Lander:
         if not self._is_production(pull):
             return None
         got = trail.judged(self.hub, now)
-        if got.pull.head_sha != pull.head_sha:
-            return Landed(False, "refused", f"#{pull.number} の先端がキューの待ちの間に {got.pull.head_sha[:12]} へ動いた")
-        if not got.judgment.approved:
-            return Landed(False, "refused", f"#{pull.number} の承認がキューの待ちの間に失効した: {got.judgment.detail}")
-        return None
+        moved = f"#{pull.number} の先端がキューの待ちの間に {got.pull.head_sha[:12]} へ動いた"
+        return _judged_refusal(pull, got, moved, f"#{pull.number} の承認がキューの待ちの間に失効した: {got.judgment.detail}")
 
     def _await_queue(self, pull: Pull, deadline: float) -> Landed:
         """マージキューへ入れた PR `pull` がマージされるまで、時刻 `deadline`（`clock` の値）まで読み直す。
