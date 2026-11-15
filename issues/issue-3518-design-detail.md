@@ -191,7 +191,7 @@ plugins/ndf-next/
 | `pytest_configure` | `tests/conftest.py` | 新設 | `pytest_configure(config: pytest.Config) -> None` | 印 `ndf_bad_result`（形の誤った結果を意図して作るテスト）を登録する | 無し | `--strict-markers` でも印を使える | 無し |
 | `pytest_testnodedown` | `tests/conftest.py` | 新設 | `pytest_testnodedown(node: Any, error: Any) -> None` | 並列の実行で、終わった worker の記録（`node.workeroutput["ndf_ok_tools"]`）を集める | pytest-xdist の controller で呼ばれる | 集めた名前が controller の記録に加わる | 無し |
 | `pytest_sessionfinish` | `tests/conftest.py` | 新設 | `pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None` | worker では記録を `workeroutput` へ渡し、controller か並列でない実行では、全体の実行のときだけ ok の出力の無い副命令で落とす | 無し | 落とすときは副命令の名前を標準エラーへ出し、`session.exitstatus` を 1 にする | 標準エラーへ書く |
-| `is_full_run` | `tests/conftest.py` | 新設 | `is_full_run(config: pytest.Config) -> bool` | 実行が全体のテスト（プラグインの根を指し、絞り込みが無い）かを返す | 無し | 引数のパスがプラグインの根だけで、`-k`・`-m`・`--deselect`・`--lf` が無いときだけ真 | 無し |
+| `is_full_run` | `tests/conftest.py` | 新設 | `is_full_run(config: pytest.Config) -> bool` | 実行が全体テスト（プラグインの根を指し、絞り込みが無い）かを返す | 無し | 引数のパスがプラグインの根だけで、`-k`・`-m`・`--deselect`・`--lf` が無いときだけ真 | 無し |
 | `test_ok_output` | `tests/cli/test_every_output.py` | 新設 | `test_ok_output(name: str, tmp_path: Path) -> None`（副命令ごとに parametrize） | 既存のテストが ok の出力を出さない副命令を、ok を出す引数で呼ぶ | 呼ぶ副命令と引数は表 `CALLS` が持つ | 呼んだ副命令の終了コードが 0 | 副命令が書く `tmp_path` の下のファイル |
 
 ## 異常系の処理
@@ -273,7 +273,7 @@ plugins/ndf-next/
 | 範囲の語 | 定数 | `src/ndf/checks/spec_render.py` | `tracked` が真なら「チーム」、偽なら「個人」 |
 | 公開か内部かの語 | 定数 | `src/ndf/checks/spec_render.py` | 「公開」・「内部（予告なく変えてよい）」 |
 | `ndf_ok_tools` | `workeroutput` の鍵 | `tests/conftest.py` | — |
-| `CALLS` | 表（副命令の名前 → 引数と用意） | `tests/cli/test_every_output.py` | 実装で全体のテストを流して決める（設計の「未確認のまま残ること」） |
+| `CALLS` | 表（副命令の名前 → 引数と用意） | `tests/cli/test_every_output.py` | 実装で全体テストを流して決める（設計の「未確認のまま残ること」） |
 
 **副命令の表と、置き場・環境変数・hook の表の値を写さない。** 規約のモデルは `ndf.cli.COMMANDS` と `ndf.contracts.facts` を毎回読み、名前の一覧を定数に持たない。生成物の置き場は `rules.json` の `generated` だけが持ち、`write` と `docs_findings` は同じ値を読む。
 
