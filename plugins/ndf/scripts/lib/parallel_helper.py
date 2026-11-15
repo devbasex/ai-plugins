@@ -89,6 +89,12 @@ def last_launch(main: Path, name: str) -> dict:
     return ev if ev.get("action") in ("release", "confirmed") else ev.get("release") or {}
 
 
+def is_confirmed_launch(launch: dict, n: int, k: int) -> bool:
+    """最後の起動 `launch` が連番 `n`・提示 `k` の確定（`action: confirmed`）で、`carried` を持たないか。`carried` は出し直しを省いた確定で、
+    提示と同じ流し方にする（提示のプランが確かめ直して承認を書く。#3020 の決定 3）ため、確定の後としては扱わない。"""
+    return launch.get("action") == "confirmed" and launch.get("n") == n and launch.get("k") == k and not launch.get("carried")
+
+
 def helper_task(main: Path, name: str, n: int, k: int) -> dict:
     """一時レーン（`--parallel-helper <計画名> <連番> <提示>`）が流すもの。最後の起動の指示（イベント `pause` か、
     リリースの途中の知らせに添えた `release`）が同じ連番と提示の `confirmed`（`carried` を持たない）なら確定の後の 3 手、
@@ -111,7 +117,7 @@ def helper_task(main: Path, name: str, n: int, k: int) -> dict:
     asked = asked_of([r for r in rows if r["_pos"] >= plg.first_opened(rows)], pr.helper_name(name, n))
     out = {"n": n, "k": k, "dir": str(d), "gate2": f"{py} request-gate2 {name} {n} {k} --report {present_approval(d)}", "asked": asked}
     # 出し直しを省いた確定（`carried`）は提示と同じ流し方にする。提示のプランが確かめ直して承認を書く（#3020 の決定 3）
-    if launch.get("action") == "confirmed" and launch.get("n") == n and launch.get("k") == k and not launch.get("carried"):
+    if is_confirmed_launch(launch, n, k):
         done = d / "release-done.json"
         gate = pr.record_answer_cmd(d, n, k)
         steps = [gate, f"{SUPERVISE} run {d / 'present.json'} --from approve", f"{SUPERVISE} queue {d / 'release.json'} --done {done}"]

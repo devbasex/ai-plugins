@@ -21,7 +21,7 @@ import parallel_external as pe
 import parallel_lane as pl
 import parallel_ledger as plg
 import parallel_release as prl
-from parallel_helper import last_launch
+from parallel_helper import is_confirmed_launch, last_launch
 from step_read import last_json
 
 CONFIRMED_OPTIONS = ("打ち直す", "差し戻す")  # 確定の後の依頼の選択肢。依頼の `options` と答えの当て方が読む（決定 2）
@@ -95,7 +95,7 @@ def request_confirmed(main: Path, name: str, n: int, k: int, done: str) -> plg.S
     """確定の後に本番のプランが承認ゲートで終わったときの依頼を組んで送る（決定 1・決定 2）。最後の起動が同じ連番・提示の確定
     （`carried` を持たない）でなければ、また done が承認ゲートで止まっていなければ `NotConfirmed`。"""
     launch = last_launch(main, name)
-    if not (launch.get("action") == "confirmed" and launch.get("n") == n and launch.get("k") == k and not launch.get("carried")):
+    if not is_confirmed_launch(launch, n, k):
         raise NotConfirmed("最後の起動が確定でない（送らない）")
     got = gate_detail(done)
     if got is None:
