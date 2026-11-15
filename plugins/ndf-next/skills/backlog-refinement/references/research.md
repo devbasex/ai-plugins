@@ -48,7 +48,7 @@
 
 ## 待ち時間の調査
 
-開発ループの `loop sprint` は、`supervise.py wait` と並べて背景で打つ 1 行を `metrics.research` に返す。
+開発ループの `loop sprint` は、`ndf plan wait` と並べて背景で打つ 1 行を `metrics.research` に返す。
 
 ```bash
 # Bash の run_in_background: true で、wait と並べて起動する

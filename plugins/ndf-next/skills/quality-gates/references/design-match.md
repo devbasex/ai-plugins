@@ -28,7 +28,7 @@ python3 "$SCRIPTS/design-match.py" tests --issue 216
 | `light` / `operation` / `documentation` / `legacy-refactor` | 行わない。手順も所要も変えない |
 
 `standard` でも設計文書が無ければ（`tests` が終了コード 3）、3 つの確認を「該当なし（設計文書が無い）」と書いて満たし、
-`specs` は打たない。3 層（supervise.py）の実装プランは、範囲テストと PR の間で同じ 3 つを流す。
+`specs` は打たない。3 層（`ndf plan`）の実装プランは、範囲テストと PR の間で同じ 3 つを流す。
 
 ## 確認 (a): 設計に名前の出るテストが実在する
 

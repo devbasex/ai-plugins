@@ -49,7 +49,7 @@
 | 課題の順 | ○ | 着手の順と状態。状態は課題の URL を添えて 1 語で | conductor |
 | 現在地 | ○ | 本番の版・動いているプランの状態ディレクトリのパス・利用者の側で残っていること | conductor が書き直す |
 | 次にやること | ○ | 番号付き。1 つ目が次のセッションの最初の作業 | conductor が書き直す |
-| 今の会話の進み | — | プランごとの行の表 | `sprint-state.py render`・`supervise.py note` |
+| 今の会話の進み | — | プランごとの行の表 | `sprint-state.py render`・引継ぎ文書の表への追記（M7 #3302 が `ndf` の副命令に足す。新しいプラグインだけではまだ打てない） |
 | 運用の知見 | — | その対象で繰り返し効いた手順と落とし穴。対象をまたいで効くものは Skill か課題へ移す | conductor |
 | 次に実行するコマンド | ○ | `ndf-next` のブロック 1 つ（形は [context-window.md](context-window.md) の「新しい会話で戻す」） | `handoff.py next`・`sprint-state.py next --replace` |
 

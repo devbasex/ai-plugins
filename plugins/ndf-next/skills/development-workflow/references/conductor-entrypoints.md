@@ -8,10 +8,9 @@ conductor が自分で打つ NDF のスクリプトはこの一覧に限る。**
 例: マージ済みの PR #1211 の不具合を即時修正すると決めたときは、`gh` を手で打たずに次の 3 行で流す。
 
 ```bash
-python3 "$SCRIPTS/supervise.py" new fix --worktree <作業場所> --tests <テストのパス> \
-  --title "Fix: ..." --issue 1211 --escape-of 1211 --out <プラン>.json
-python3 "$SCRIPTS/supervise.py" queue <プラン>.json
-python3 "$SCRIPTS/supervise.py" wait <プラン>-state/queue-done.json
+ndf route render immediate_fix --set issues=1211 --out <プラン>.json
+ndf plan queue <プラン>.json
+ndf plan wait <プラン>.json
 ```
 
 `$SCRIPTS` の決め方は [scripts-lookup.md](scripts-lookup.md) にある。表のパスは旧いプラグインの根からの
@@ -21,16 +20,16 @@ python3 "$SCRIPTS/supervise.py" wait <プラン>-state/queue-done.json
 
 | エントリポイント | 使うとき |
 | --- | --- |
-| `scripts/supervise.py new sprint` | スプリントの工程を 1 本のプランにする |
-| `scripts/supervise.py new impl` | worker の実装から始まるプランを作る |
-| `scripts/supervise.py new fix` | 即時修正（テスト → PR → `merge-when-green`）のプランを作る。条件は [pace.md](pace.md) |
-| `scripts/supervise.py new check` | 検査のプランを作る |
-| `scripts/supervise.py new release` | デプロイ（開発版・本番）のプランを作る |
-| `scripts/supervise.py new close` | スプリントを閉じるプランを作る |
-| `scripts/supervise.py queue` | プランを同時に `--max` 本まで順に流す |
-| `scripts/supervise.py wait` | queue の終わりか attention の行まで待つ。待ち方は [waiting.md](waiting.md) |
-| `scripts/supervise.py run` | プランを 1 本だけフォアグラウンドで流す |
-| `scripts/supervise.py note` | フェーズレポートから引継ぎ文書の表へ 1 行を足す |
+| `scripts/ndf progress new` | スプリントの工程を 1 本のプランにする |
+| `scripts/ndf route render implement` | worker の実装から始まるプランを作る |
+| `scripts/ndf route render immediate_fix` | 即時修正（テスト → PR → `merge-when-green`）のプランを作る。条件は [pace.md](pace.md) |
+| `scripts/ndf route render check` | 検査のプランを作る |
+| `scripts/ndf route render release` | デプロイ（開発版・本番）のプランを作る |
+| `scripts/ndf route render close` | スプリントを閉じるプランを作る |
+| `scripts/ndf plan queue` | プランを同時に `--max` 本まで順に流す |
+| `scripts/ndf plan wait` | queue の終わりか attention の行まで待つ。待ち方は [waiting.md](waiting.md) |
+| `scripts/ndf plan next` | プランを 1 本だけフォアグラウンドで流す |
+| `scripts/引継ぎ文書の表への追記（M7 #3302 が `ndf` の副命令に足す。新しいプラグインだけではまだ打てない）` | フェーズレポートから引継ぎ文書の表へ 1 行を足す |
 | `scripts/parallel-measure.py capacity` | 並列に起動してよい本数を出す |
 
 ## スプリントの状態と承認ゲート
@@ -39,7 +38,7 @@ python3 "$SCRIPTS/supervise.py" wait <プラン>-state/queue-done.json
 | --- | --- |
 | `scripts/sprint-state.py init` | スプリントの状態ファイルを作る |
 | `scripts/sprint-state.py update` | 終えたプランと次のプランを状態ファイルへ書く |
-| `scripts/sprint-state.py gate` | 承認ゲートの判定（利用者か MVV）を状態ファイルへ書く。利用者の答えは `--what <要約> --by user [--pr <設計 PR>] --outcome approved\|rejected`（承認も差し戻しも差し戻しの記録へ 1 行書く。差し戻しは承認ゲートを通さない。`reject` のステップを持つプランの差し戻しは `supervise.py run <プラン> --from reject` が書く） |
+| `scripts/sprint-state.py gate` | 承認ゲートの判定（利用者か MVV）を状態ファイルへ書く。利用者の答えは `--what <要約> --by user [--pr <設計 PR>] --outcome approved\|rejected`（承認も差し戻しも差し戻しの記録へ 1 行書く。差し戻しは承認ゲートを通さない。`reject` のステップを持つプランの差し戻しは `ndf plan next <プラン> --from reject` が書く） |
 | `scripts/gate-rejections.py record` | 状態ファイルの無い進め方で、承認ゲートの差し戻しを差し戻しの記録へ 1 行書く。打つ場面は [approval-request.md](approval-request.md) の「答えを記録する」 |
 | `scripts/gate-rejections.py count` | 承認ゲートの差し戻しを、スプリント・課題・PR ごとに設計承認ゲート・リリース承認ゲートに分けて数える（読めなければ件数は「不明」、範囲に答えの行が無ければ「未記録」） |
 | `scripts/project-mvv.py` | プロジェクト MVV の判定（`check`）・材料（`collect`）・候補（`propose`）・照合（`vet`）・承認の書き込み（`approve`）・版（`show`）・節（`context`）・改訂の兆候（`signals`）。手順は [project-mvv.md](project-mvv.md) |

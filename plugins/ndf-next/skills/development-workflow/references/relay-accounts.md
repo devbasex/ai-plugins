@@ -67,7 +67,7 @@ gmail  b@example.com  -       2%    -             no        210 / 1,100*   -    
 
 **今のアカウントが最良の候補と同じ組にあれば替えない（切り替えの余裕）。** 替えるのは組が変わったときだけである
 （5 時間の枠がリセットされたアカウントが組 1 へ戻った・今のアカウントの週の使用率が T を超えた・今のアカウントが上限に当たった）。
-選び直すのは区切り（ラッパーの区間の起動）と `supervise.py` の起動のたびで、戻るためだけに使用率を取りに行ったり区切りを早めたりしない。
+選び直すのは区切り（ラッパーの区間の起動）と `ndf plan` の起動のたびで、戻るためだけに使用率を取りに行ったり区切りを早めたりしない。
 復帰先や戻り待ちの印は持たず、その時点の観測だけで決める。
 
 「枠の大きさ」と「残り」の列は表示だけで、選び方には使わない。枠の大きさは `account capacity` の宣言（`*` 付き）→
@@ -112,11 +112,11 @@ symlink にする。会話の記録（`projects`）・設定（`settings.json`�
 | --- | --- |
 | `CLAUDE_CONFIG_DIR` | アカウントの設定ディレクトリ（`<置き場>/<名前>`） |
 | `NDF_CLAUDE_ACCOUNT` | アカウントの名前 |
-| `NDF_SHARED_CONFIG_DIR` | 元の `CLAUDE_CONFIG_DIR`（無かったら空文字）。子の中の `supervise.py` が共有の設定ディレクトリを求める |
+| `NDF_SHARED_CONFIG_DIR` | 元の `CLAUDE_CONFIG_DIR`（無かったら空文字）。子の中の `ndf plan` が共有の設定ディレクトリを求める |
 | `CLAUDE_CODE_PLUGIN_CACHE_DIR` | `<共有>/plugins`（元にあればその値）。子が導入したプラグインの記録を共有側のパスにする |
 | `CLAUDE_CODE_OAUTH_TOKEN`・`CLAUDE_CODE_OAUTH_SCOPES` | 渡さない（元の環境にあっても外す） |
 
-起動の前に、ラッパーと `supervise.py` はアカウントの設定ディレクトリを用意する。共有側に増えた項目の symlink を足し、
+起動の前に、ラッパーと `ndf plan` はアカウントの設定ディレクトリを用意する。共有側に増えた項目の symlink を足し、
 共有の `~/.claude.json` の `projects`（プロジェクトの信頼・MCP サーバーの許可）と `mcpServers` をアカウント側の `.claude.json` へ
 コピーする（`oauthAccount` はアカウントごとのまま）。ラッパーは、セッションの切れ目と終了時に、アカウント側で変わった分を共有の
 `~/.claude.json` へ書き戻す。claude.ai のコネクタは、claude が認証ファイルのスコープを自分で読んで取りに行く。従量の接続の子は
@@ -145,7 +145,7 @@ symlink にする。会話の記録（`projects`）・設定（`settings.json`�
 共有側に無くアカウント側にだけある項目は、アカウントを替えた先から見えない。`account_dir` の行の `local_only` に名前が出るので、
 共有したいものは共有の `~/.claude/` へ移す（次の起動で symlink になる）。登録を外しても（`account remove`）共有側は消えない。
 
-| いつ | ラッパー | `supervise.py`（プランの claude -p） |
+| いつ | ラッパー | `ndf plan`（プランの claude -p） |
 | --- | --- | --- |
 | 起動 | `account use` の指定が使えればそれを使う。無ければ区間ごとに選ぶ順の組で選び直し、今のアカウントが最良の候補と同じ組にあれば替えない | 起動したときのアカウント（`NDF_CLAUDE_ACCOUNT`）から始め、起動のたびに同じ規則で選び直す |
 | 利用上限（5 時間・7 日・支出上限） | 子の応答が上限で終わると（`StopFailure` hook の `limit.json`）、次の区間を別のアカウントで `claude --resume <会話> "<最初の入力>"` として起動する。最初の入力は `ndf-next` があればそれ、無ければ未達の `/goal <条件>`、それも無ければ切り替えの理由に合う定型の文（例: `利用上限でアカウントを替えた。中断したところから続ける`）。**バックグラウンドの作業が残っている間は子を終えない** | 待たずに別のアカウントで同じ呼び出しをやり直す |
@@ -170,7 +170,7 @@ python3 ~/.claude/ndf/relay.py account remove metered     # 保存した宣言�
 宣言はアカウントの置き場の `metered.json`（0600）に保存し、次の起動から効く。シェルの設定ファイルは書き換えない。
 保存するのは変数の名前と値（`CLAUDE_CODE_USE_BEDROCK`・`AWS_PROFILE`・`AWS_REGION`・`ANTHROPIC_MODEL`）だけで、AWS の鍵は
 `~/.aws/` に残る。保存した宣言で起動する子からは、環境の AWS の鍵の変数を外す。宣言は 1 つだけで、置き換えは確認
-（`--yes`）が要る。保存先が壊れていれば、ラッパーは区間 1 の起動で、`supervise.py` は最初の呼び出しの前に 1 行出し、
+（`--yes`）が要る。保存先が壊れていれば、ラッパーは区間 1 の起動で、`ndf plan` は最初の呼び出しの前に 1 行出し、
 宣言なしとして扱う。
 
 **環境変数で上書きする場合は `NDF_SUPERVISE_CLAUDE_FALLBACK` を定義する**（`KEY=VALUE` を空白区切り。値はリポジトリに
@@ -181,7 +181,7 @@ export NDF_SUPERVISE_CLAUDE_FALLBACK='CLAUDE_CODE_USE_BEDROCK=1 AWS_PROFILE=<名
 ```
 
 従量の接続で起動する子にはアカウントの設定ディレクトリを渡さず、アカウントで起動する子には宣言の変数を渡さない（混ぜない）。記録と画面に
-出るのは変数の名前だけである。**登録が 1 つ以下なら今と同じ**（ラッパーは上限で何もしない。`supervise.py` は宣言を
+出るのは変数の名前だけである。**登録が 1 つ以下なら今と同じ**（ラッパーは上限で何もしない。`ndf plan` は宣言を
 呼び出しごとに 1 度だけ試してから上限待ち）。切り替えに LLM は使わない。
 
 | 設定 | 既定 | 意味 |
@@ -194,7 +194,7 @@ export NDF_SUPERVISE_CLAUDE_FALLBACK='CLAUDE_CODE_USE_BEDROCK=1 AWS_PROFILE=<名
 
 ## worker の claude -p を API キーで動かす
 
-**サブスクリプション（Max・Ultra・Team）にリンクした Console 組織の API キーを登録すると、`supervise.py` が起動する
+**サブスクリプション（Max・Ultra・Team）にリンクした Console 組織の API キーを登録すると、`ndf plan` が起動する
 `claude -p`（work・worker・判定・遅れの判定・Pull Request）を月の API クレジットで動かせる。** API クレジットは
 利用上限（5 時間・週）と別枠なので、使った分だけ利用上限の消費を逃がせる。ラッパーが起こす対話のセッションには使わない
 （対話の Claude Code は API クレジットで払えない）。cross-review の担当の CLI にも使わない。Console 組織の作成・

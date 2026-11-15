@@ -29,7 +29,7 @@
 版はパッケージごとに独立するため、スプリントで複数の版を上げるときは、起点も大小の判断も
 パッケージごとに分ける。
 
-**本番のリリースプラン（`supervise.py new release --channel prod`）は、宣言の `release.plugin` の後に、
+**本番のリリースプラン（`ndf route render release --set channel=prod`）は、宣言の `release.plugin` の後に、
 差分のある他のプラグインの版を、承認資料の「版を上げる他のプラグイン」の表の上げ幅で上げる（`bump-others`
 のステップ。`release-steps.py changed-plugins --decided`）。** 対象は前の本番のタグ（`<release.plugin>--v<版>`。
 `--prev-tag` で指定できる）からの差分にあるプラグインのうち、差分の中でまだ版を上げていないものである。表を

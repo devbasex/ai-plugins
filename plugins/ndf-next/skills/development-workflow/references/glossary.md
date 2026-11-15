@@ -65,9 +65,9 @@ flowchart TB
 | スプリント課題 | 「スプリントを閉じる」が閉じる対象にする課題。スプリントに含まれる Pull Request の本文が GitHub の closing keywords（PR 本文に `Closes #123` のように書くと、マージ時にその課題を自動で閉じる機能）か閉じる予定の参照（`最終工程の後に閉じる: #N`）で指す課題と、`--issues` で渡した課題の和 | `sprint-close.py` が閉じる | [progress-tracking](../../progress-tracking/SKILL.md) |
 | 工程 | 工程表（モードごとに起動する Skill の表）の 1 行。要求と受け入れ条件・設計・実装・リリースなど | 進捗記録の `stage` | [../SKILL.md](../SKILL.md) の「モードごとに起動する Skill」 |
 | フェーズ | supervisor 1 つ（またはプラン 1 本）が通す、連続する工程のグループ。設計・実装・検査・取り込み・仕上げ・リリースの 6 つ | プランの `"フェーズ"`、Agent の `description` の先頭語 | [agent-layers.md](agent-layers.md) の「フェーズ」 |
-| プラン | `supervise.py` が流す 1 本の JSON。フェーズの手順をステップの列として持つ | `plan.json`、`supervise.py new impl` / `check` / `release` / `sprint` / `close` | `supervise.py` の docstring |
-| ステップ | プランの `steps` の 1 要素。型は run / work / drive / judge / pr の 5 つ | `"id"`・`"type"`・`"next"`、`supervise.py run <プラン> --from <ステップの id>` | `supervise.py` の docstring |
-| キュー | プランを空いた枠へ順に流す副命令。同時に `--max` 本まで流し、終わると結果を done へ書く | `supervise.py queue <plan.json>... --max 3 --then <plan.json>... --done <パス>` | `supervise.py` の docstring |
+| プラン | `ndf plan` が流す 1 本の JSON。フェーズの手順をステップの列として持つ | `plan.json`、`ndf route render implement` / `check` / `release` / `sprint` / `close` | `ndf plan` の docstring |
+| ステップ | プランの `steps` の 1 要素。型は run / work / drive / judge / pr の 5 つ | `"id"`・`"type"`・`"next"`、`ndf plan next <プラン> --from <ステップの id>` | `ndf plan` の docstring |
+| キュー | プランを空いた枠へ順に流す副命令 | `ndf plan queue <plan.json>... --then <plan.json>...` | `ndf plan` の docstring |
 | パイプライン | キューが `--then` でつないだプランの列（実装 → 開発版 → 本番） | `--then`、`new release --prs-from-queue` | [relay.md](relay.md) の「カットポイントの引継ぎ文書と ndf-next はスクリプトで作る」 |
 | ステージ | パイプラインの中のプランのグループ 1 つ。中はキューで並列に流し、前のステージがすべて完了したときだけ次のステージが流れる。`new sprint` はステージごとにプランを書き出す（設計・設計承認ゲート・実装・検査・開発版・本番） | `--then` の 1 回分、`then_of` | [pace.md](pace.md) の「プランのステージ」 |
 | セッション | ラッパーが起動する claude の 1 回の起動（1 つの会話）。番号を付けて「セッション 4」と呼ぶ。ndf-next のブロックで次のセッションへ切り替わる | セッションの境の行 `── ndf-relay: 区間 2 ──`、`log.jsonl` の `section` | [relay.md](relay.md) |
@@ -96,17 +96,17 @@ flowchart TB
 | 語 | 意味 | 英語や識別子 | 正本 |
 | --- | --- | --- | --- |
 | モード | 変更の目的物で決める工程の振り分け。上から `operation` / `documentation` / `standard` / `legacy-refactor` / `light` | モード判定の結果の `mode:` | [../SKILL.md](../SKILL.md) の「判定の手順」、[workflow-modes.md](workflow-modes.md) |
-| pace | モードとは別の軸で、工程をどう通すかを決める。ウォーターフォールで人の承認を取る `normal`（既定）、`normal` の承認だけを MVV 判定にする `auto`、実践投入の中で検証しながら MVV で自動に進める `fast` の 3 つ | `pace:`、`supervise.py new sprint --pace fast|auto`、`.ndf/pace.json` | [pace.md](pace.md) |
+| pace | モードとは別の軸で、工程をどう通すかを決める。ウォーターフォールで人の承認を取る `normal`（既定）、`normal` の承認だけを MVV 判定にする `auto`、実践投入の中で検証しながら MVV で自動に進める `fast` の 3 つ | `pace:`、`ndf progress new --pace fast|auto`、`.ndf/pace.json` | [pace.md](pace.md) |
 | MVV | スプリントの Mission / Vision / Value。マイルストーンの説明からコピーし、利用者が 1 回承認する。`fast` と `auto` で設計承認ゲート・リリース承認ゲートの事前の許可になる | `mvv.md`、`mvv.sha256`、承認ゲートの記録 `MVV` | [pace.md](pace.md) の「スプリントを始める」 |
 | スプリント MVV | スプリント単位の MVV。プロジェクト MVV の範囲での具体化 | `sprint-state.py init --milestone` / `--mvv` でコピーする | [project-mvv.md](project-mvv.md) |
 | MVV 判定 | 承認ゲートのエビデンスが MVV に従うかの判定。「従う」でレッドラインが無いときだけ承認ゲートを省き、記録を残す | `mvv-gate.py check`、`verdict`（follow / not_follow / unknown）、終了コード 0 / 10 | [pace.md](pace.md) の「MVV 判定」 |
 | レッドライン | 当たれば MVV 判定が「従う」でも利用者の承認を求める範囲。秘密・認証認可・利用者のデータ・戻せない操作・他のリポジトリへの公開・対象外のモード・承認後に変わった MVV | `.ndf/pace.json` の `boundary_paths`、`boundary` | [pace.md](pace.md) の「レッドライン」 |
 | トリガー | `fast` でリファクタリングとコードレビューを流す条件。点数・行数・流出不具合・経過時間・最終の 5 つ | `check-trigger.py eval`（立つ 0 / 立たない 3 / 読めない 2）、`triggers.*` | [pace.md](pace.md) の「検査のトリガー」 |
-| 実行条件 | プランを流す前に打つコマンド。`skip_code` を返せば worktree を作らずに完了とする | プランの `"実行条件"` | `supervise.py` の docstring |
+| 実行条件 | プランを流す前に打つコマンド。`skip_code` を返せば worktree を作らずに完了とする | プランの `"実行条件"` | `ndf plan` の docstring |
 | 流出不具合 | マージ済みの変更に見つかった不具合。直した Pull Request が触った領域を記録し、トリガーに数える | `new impl --escape-of <PR>`、記録の `kind: escape` | [pace.md](pace.md) の「流出不具合の記録」 |
 | 重点領域 | 領域のうち、触った Pull Request の点数を重くするもの | `areas[].common`、`common_weight` | [pace.md](pace.md) の「設定」 |
-| judge のステップ | 結果ファイルと規則の抜粋だけを渡し、次のステップを LLM に決めさせるステップ。Tool を持たない | `"type": "judge"` | `supervise.py` の docstring |
-| 決定 | judge のステップが返す、次に取る手 | `decision`（`choices` のどれか） | `supervise.py` の docstring |
+| judge のステップ | 結果ファイルと規則の抜粋だけを渡し、次のステップを LLM に決めさせるステップ。Tool を持たない | `"type": "judge"` | `ndf plan` の docstring |
+| 決定 | judge のステップが返す、次に取る手 | `decision`（`choices` のどれか） | `ndf plan` の docstring |
 | 区分 | `backlog-refinement` が課題ごとに決める 8 つ（そのまま・追記が要る・書き直しが要る・閉じてよい・やらない・重複・ルートコーズ・要判断） | `plan.json` の `verdict` | [backlog-refinement](../../backlog-refinement/SKILL.md) の「用語」 |
 
 ## 承認ゲートと承認
@@ -124,9 +124,9 @@ flowchart TB
 
 | 語 | 意味 | 英語や識別子 | 正本 |
 | --- | --- | --- | --- |
-| デプロイ | 開発・本番を問わず、環境へ変更を届けること。本番へのデプロイだけをリリースと呼ぶ。工程の名前でもある | `/ndf:release`、`supervise.py new release`、工程表の行と進捗記録の `stage` の値は `デプロイ` | [release](../../release/SKILL.md) |
+| デプロイ | 開発・本番を問わず、環境へ変更を届けること。本番へのデプロイだけをリリースと呼ぶ。工程の名前でもある | `/ndf:release`、`ndf route render release`、工程表の行と進捗記録の `stage` の値は `デプロイ` | [release](../../release/SKILL.md) |
 | リリース | 本番へのデプロイ。フェーズの名前でもある | プランの `"フェーズ"` の値は `リリース` | [release](../../release/SKILL.md) |
-| リリースプラン | リリースの手順をステップの列として持つプラン | `supervise.py new release`、`--channel dev` / `prod` | `supervise.py` の docstring |
+| リリースプラン | リリースの手順をステップの列として持つプラン | `ndf route render release`、`--channel dev` / `prod` | `ndf plan` の docstring |
 | 開発版 | ベースブランチに載るチャネルと、そこへ出す接尾辞付きの版。マージされた変更がそのまま載る。手動反映の本番系の形では、`production: false` の行（検証の環境）へ届くことも開発版に当たる | `<版>-dev.<n>`、`new release --channel dev` | [release](../../release/SKILL.md) の「リリース種別」 |
 | 本番 | 利用者が現に使っているチャネル・環境・外部サービス（本番系）。プラグインのリリースでは本番のブランチ | `.ndf/worktree.json` の `production_branch`（無ければ既定ブランチ）、`--channel prod` | [../SKILL.md](../SKILL.md) の「本番系へ届く操作」 |
 | 正式版 | 本番チャネルへ出す、接尾辞の無い版。出したらリリースタグを打つ | タグ `<plugin>--v<版>` | [release](../../release/SKILL.md) の「リリース種別」 |
@@ -151,13 +151,13 @@ flowchart TB
 | リファクタリング計画 | `cross-refactoring` が採る改善項目を決め、見送った提案と理由を残す出力 | — | [cross-refactoring](../../cross-refactoring/SKILL.md) の「この Skill で使う語」 |
 | バッファ | `cross-refactoring` の見積りで、想定最大時間から経過を引いた後に残しておく時間 | 「想定最大時間 − 経過 − バッファ」 | [cross-refactoring](../../cross-refactoring/SKILL.md) の「この Skill で使う語」 |
 | 完了判定 | コマンドの証跡で完了を判定する工程。スクラムの完了の定義に当たる | `/ndf:quality-gates` | [quality-gates](../../quality-gates/SKILL.md) |
-| 範囲テスト | 変更が触った範囲に限って走らせるテスト | `new impl --tests`、プランの `test-limited` のステップ、`cross-refactoring` の `test_targets` | `supervise.py` の docstring、[cross-refactoring](../../cross-refactoring/SKILL.md) の「この Skill で使う語」 |
+| 範囲テスト | 変更が触った範囲に限って走らせるテスト | `new impl --tests`、プランの `test-limited` のステップ、`cross-refactoring` の `test_targets` | `ndf plan` の docstring、[cross-refactoring](../../cross-refactoring/SKILL.md) の「この Skill で使う語」 |
 | ラウンドテスト | `cross-refactoring` の `round-only` で、項目ごとにそのまま走らせるコマンド（`{paths}` を含まない `--round-test`、または `scope_command` の無い suite の `command`。suite ごとに別のシェルで 1 本ずつ走らせる） | `--round-test`、`round_test` | [cross-refactoring](../../cross-refactoring/SKILL.md) の「引数」 |
 | 範囲テストのテンプレート | `{paths}` を引用の外の 1 字句として含むテストのコマンド（宣言の `scope_command` か、`{paths}` を含む引数）。`{paths}` をシェルの引用で守った対象の並びへ置き換え、シェルで走らせる | `scope_command` | [project-analysis.md](project-analysis.md) の P2 |
 | suite の種別 | テストの宣言の suite がテスト（`test`）か静的解析（`lint`。整形の検査を含む）か。書かなければテスト。テストの suite の範囲は対象のテスト、静的解析の suite の範囲は変更したファイルのうち `paths` に当たるもの | `.ndf/project.json` の `test.suites[].kind`、引数 `--test-kind` | [project-analysis.md](project-analysis.md) の P2 |
 | 起動の失敗 | テストのコマンドのプロセスを起動できない、またはシェルが終了コード 126 / 127 を返したこと。テストが落ちたこととは別に扱い、その時点で止まる | `launch_failed`、`launch_failure` | [cross-refactoring](../../cross-refactoring/SKILL.md) の「この Skill で使う語」 |
 | JUnit の置き場 | テストのコマンドが JUnit XML を書くファイルの、作業ディレクトリからの相対パス（宣言の `suites[].junit`）。NDF はコマンドへ引数を足さず、このファイルから落ちたテストの ID を読む | `junit` | [project-analysis.md](project-analysis.md) の P2 |
-| 全体テスト | リポジトリ全体を範囲にするテストか静的解析。テストは宣言の `command`、無ければ範囲テストのテンプレートの `{paths}` を `.` にしたもの（その旨を注記 `WHOLE_FROM_TEMPLATE` に残す）。静的解析は宣言の `command`、無ければテンプレートの `{paths}` を範囲のパスで埋めたもの（範囲のパスが無ければ組まず、注記 `NO_LINT_WHOLE` を残す）。戦略が `local-scoped-ci-whole` なら手元で走らせず CI の結果で見る | プランの `test-all` のステップ、`.ndf/project.json` の `test.suites[].command` | `supervise.py` の docstring |
+| 全体テスト | リポジトリ全体を範囲にするテストか静的解析。テストは宣言の `command`、無ければ範囲テストのテンプレートの `{paths}` を `.` にしたもの（その旨を注記 `WHOLE_FROM_TEMPLATE` に残す）。静的解析は宣言の `command`、無ければテンプレートの `{paths}` を範囲のパスで埋めたもの（範囲のパスが無ければ組まず、注記 `NO_LINT_WHOLE` を残す）。戦略が `local-scoped-ci-whole` なら手元で走らせず CI の結果で見る | プランの `test-all` のステップ、`.ndf/project.json` の `test.suites[].command` | `ndf plan` の docstring |
 | 危険フラグ | `cross-refactoring` で、範囲テストでは覆えない変更（D1〜D5）。立てば全体テストを 1 度走らせる | D1〜D5 | [cross-refactoring](../../cross-refactoring/SKILL.md) の「この Skill で使う語」 |
 | グレード | `cross-refactoring` が候補ごとに付ける適用の価値（high / medium / low）。改善項目の順位の最初のキー | `tier` | [cross-refactoring](../../cross-refactoring/SKILL.md) の「この Skill で使う語」 |
 | コメントのスナップショット | `cross-review` が取る既存コメントの一覧。2 ラウンド目以降は取り直す | `state.py init` | [cross-review](../../cross-review/SKILL.md) |
@@ -176,7 +176,7 @@ flowchart TB
 | 通過工程 | ある課題について、進捗記録が実際に書かれた工程の集合 | — | [stage-completeness.md](stage-completeness.md) の「用語」 |
 | 通過記録 | 通過工程を課題ごとに残したファイル | `ndf progress show <進行表の ID>` | [stage-completeness.md](stage-completeness.md) の「用語」 |
 | スプリント状態ファイル | スプリントのプラン・done・承認ゲートの記録・MVV・版を持つファイル。パスは呼ぶ側が決め、目録 `sprint.json` とは別のファイルにする。引継ぎ文書の表と ndf-next をここから作る | 例 `sprint-state.json`、`sprint-state.py init` / `update` / `gate` / `render` / `next` / `status` | `sprint-state.py` の docstring |
-| 引継ぎ文書 | 会話を切って新しいセッションで続けるための文書。メインディレクトリに置き、コミットしない。1 本が 1 つの引継ぎの対象を受け持つ。「今の会話の進み」と「次に実行するコマンド」の節はスクリプトが書く | `.ndf/handoff/<名>.md`、`handoff.py`、`supervise.py note` | [handoff.md](handoff.md) |
+| 引継ぎ文書 | 会話を切って新しいセッションで続けるための文書。メインディレクトリに置き、コミットしない。1 本が 1 つの引継ぎの対象を受け持つ。「今の会話の進み」と「次に実行するコマンド」の節はスクリプトが書く | `.ndf/handoff/<名>.md`、`handoff.py`、引継ぎ文書の表への追記（M7 #3302 が `ndf` の副命令に足す。新しいプラグインだけではまだ打てない） | [handoff.md](handoff.md) |
 | 引継ぎの対象 | 引継ぎ文書 1 本が受け持つ仕事のまとまり（スプリント・マイルストーン・課題のどれか）。名の頭になる | `sprint-` / `milestone-` / `issue-` | [handoff.md](handoff.md) の「置き場と名」 |
 | 引継ぎの履歴 | 引継ぎ文書の本体から終わった項目を移す文書。本体と同じ場所に置く | `<名>-history.md`、`handoff.py check --trim` | [handoff.md](handoff.md) の「作る・更新する」 |
 | ndf-next | 次のセッションの最初の入力を置く、情報文字列が `ndf-next` のコードブロック。最後の応答に 1 つだけ置く | フェンスの情報文字列 `ndf-next` | [context-window.md](context-window.md) の「新しい会話で戻す」 |
@@ -184,9 +184,9 @@ flowchart TB
 | アナウンス | ndf-next のブロックの直前にそのまま置く 1 文。1 行目がラッパーの内か外かを示す | `relay.py notice`（1 行目 `relay` / `outside`、2 行目がアナウンス） | [context-window.md](context-window.md) の「新しい会話で戻す」 |
 | アイドル | シグナルファイル・会話の記録・利用者の入力が動かない秒数。この秒数がたつまでラッパーは `/exit` を入力しない | `NDF_RELAY_QUIET`（既定 5） | [relay.md](relay.md) の「上限」 |
 | パススルー | ラッパーを挟まず、本物の claude をそのまま起動すること | `NDF_RELAY=0`、`claude -p` | [relay.md](relay.md) の「ラッパーを挟まない起動」 |
-| 進捗ログ | プランの実行中に 1 行 1 つの JSON で追記する記録。LLM を使わない | `<state-dir>/progress.jsonl` | `supervise.py` の docstring |
-| step / alive / worker / attention | 進捗ログの行の種類。ステップの切り替わり・動きの無い間の生存・worker の進み・conductor の判断が要る出来事（止まった・承認ゲート・同じ失敗の繰り返し・judge のステップで stop が出そう） | `"kind"`、`alive` の間隔は `report_interval`（既定 600 秒） | `supervise.py` の docstring |
-| done | キューが終わったときに書く結果の JSON。`wait` は done か attention の行まで待つ | `queue-done.json`、`wait` の終了コード done = 0 / attention = 20 / 上限 = 3 | `supervise.py` の docstring |
+| 進捗ログ | プランの実行中に 1 行 1 つの JSON で追記する記録。LLM を使わない | `<state-dir>/progress.jsonl` | `ndf plan` の docstring |
+| step / alive / worker / attention | 進捗ログの行の種類。ステップの切り替わり・動きの無い間の生存・worker の進み・conductor の判断が要る出来事（止まった・承認ゲート・同じ失敗の繰り返し・judge のステップで stop が出そう） | `"kind"`、`alive` の間隔は `report_interval`（既定 600 秒） | `ndf plan` の docstring |
+| done | 回が終わったときに書く結果の JSON。`ndf plan wait` は止まり・承認ゲート・終わりまで待つ | `ndf plan wait <プラン>...` | `ndf plan` の docstring |
 | フェーズレポート | supervisor（またはプラン）が最後に返す報告。conductor は見出しの有無と `結果` だけを見る | `## フェーズレポート`、`report.md`、`結果` は `完了` / `承認ゲート` / `止まった` / `スイッチポイント` | [agent-layers.md](agent-layers.md) の「フェーズレポート」 |
 | 結果 JSON | 手順のスクリプトが返す 1 行の JSON。`status` で読む | `status` は ok / gate / stopped | [result.py](../../../src/ndf/contracts/result.py) |
 

@@ -50,24 +50,31 @@ hooks:
 
 | 変数 | 値 | 決め方 |
 | --- | --- | --- |
-| `$SCRIPTS` | プラグインの `scripts/` の絶対パス | [references/scripts-lookup.md](references/scripts-lookup.md)。シェルが変わったら決め直す |
+| `$SCRIPTS` | 旧いスクリプトの置き場。新しいプラグインだけの起動では空 | [references/scripts-lookup.md](references/scripts-lookup.md)。シェルが変わったら決め直す |
 
 ## 判定の手順
 
 ### 0. worktree の設定を確かめる
 
 ```bash
-# 起動したら手順 1 より先に実行する。$SCRIPTS を決めてから。決められなくても止めない
-if [ -n "${SCRIPTS:-}" ]; then bash "$SCRIPTS/worktree-setup.sh" check; rc=$?; echo "exit=$rc"; case $rc in 0|2) python3 "$SCRIPTS/project-decl.py" check; echo "decl=$?"; python3 "$SCRIPTS/project-mvv.py" check; echo "mvv=$?";; esac
-else echo "exit=判定できない（scripts を解決できない）"; fi
+# 起動したら手順 1 より先に実行する。ndf が無ければ止まる（references/scripts-lookup.md）
+command -v ndf >/dev/null 2>&1 || { echo "ndf が PATH に無い" >&2; exit 3; }
+SCRIPTS=
+if [ -n "${SCRIPTS:-}" ]; then bash "$SCRIPTS/worktree-setup.sh" check; rc=$?
+else rc=0; echo "worktree-setup.sh は M8 #3408 が副命令に置き換えるまで新しいプラグインだけでは打てない。飛ばした"; fi
+echo "exit=$rc"
+case $rc in 0|2) ndf project check
+  echo "decl=$?"
+  if [ -n "${SCRIPTS:-}" ]; then python3 "$SCRIPTS/project-mvv.py" check; echo "mvv=$?"
+  else echo "mvv=飛ばした（project-mvv.py は M7 #3302 が副命令に置き換えるまで新しいプラグインだけでは打てない）"; fi;; esac
 ```
 
 | 終了コード | 次に行うこと | 判定結果の出力の `宣言:` の行 |
 | --- | --- | --- |
-| 0 | `decl=` を [references/project-analysis.md](references/project-analysis.md)、`mvv=`（判断の基準のプロジェクト MVV。2 でも止めない）を [references/project-mvv.md](references/project-mvv.md) の「手順 0 での扱い」に従って扱い、手順 1 へ進む | `宣言: あり。解析: <結果>` |
+| 0 | `decl=` を [references/project-analysis.md](references/project-analysis.md)、`mvv=`（判断の基準のプロジェクト MVV。2 でも止めない）を [references/project-mvv.md](references/project-mvv.md) の「手順 0 での扱い」に従って扱い、手順 1 へ進む。worktree の設定の確かめを飛ばしたときは、その旨を `宣言:` の行に添える | `宣言: あり。解析: <結果>`（飛ばしたときは `宣言: あり。解析: <結果>。worktree と MVV の確かめは飛ばした（<理由>）`） |
 | 2 | `worktree` の「0. 設定ファイルを用意する」を通し、`check` が 0 を返してから、`decl=` を同じく扱って手順 1 へ進む | `宣言: 作成した（起点 <名前> / 本番 <名前>。未宣言なら既定ブランチ）` |
 | 3 | **先へ進まない。** `init --force` を実行せず、`check` の出力を示して利用者に直してもらう | 出さない（判定まで進まない） |
-| 1、または `$SCRIPTS` を決められない | 止めずに手順 1 へ進む | `宣言: 判定できない（<理由>）` |
+| 1 | 止めずに手順 1 へ進む | `宣言: 判定できない（<理由>）` |
 
 **拒否しない。** 起動の時点には止める引き金が無い（hook は次のコマンドでしか働かない）。
 4 ランタイムで同じに働かせるには、本文に置くしかない。frontmatter の `hooks` は発火していない疑いもある。
@@ -118,8 +125,7 @@ pace: fast
   → plan-to-spec（仕様が変わった場合） → merged → release
   → release-verification（マージ前に実施できなかった受け入れ条件がある場合）
   → retrospective
-次のコマンド: python3 "$SCRIPTS/supervise.py" new sprint --name m6 --worktree <リポジトリの根>
-  --issue 1052 1053 --design 1052 --version 10.18.0-dev.1 --out <作業ディレクトリ>/sprint-m6
+次のコマンド: ndf progress new m6 --mode standard --issues 1052 1053
 ```
 
 - 工程の並びは「モードごとに起動する Skill」の表から読む。この例は出力の形だけを示す
@@ -216,7 +222,7 @@ pace: fast
 
 CI でテストが走るリポジトリでは、手元でテストを走らせず、合否を PR の CI の結果で決める。
 
-1. **宣言する。** 手順 0 の解析（`project-decl.py write`）は、テストの suite（`kind` が `test`）の `ci_jobs` のワークフローのファイルがリポジトリにあれば、`.ndf/project.json` に `test.ci.only: true` を書く。条件を満たさなくなれば解析が書いた値を消す。人が書いた値（`false` を含む）は書き換えない
+1. **宣言する。** 手順 0 の解析（宣言の書き出し）は、テストの suite（`kind` が `test`）の `ci_jobs` のワークフローのファイルがリポジトリにあれば、`.ndf/project.json` に `test.ci.only: true` を書く。条件を満たさなくなれば解析が書いた値を消す。人が書いた値（`false` を含む）は書き換えない
 2. **手元でテストを走らせない。** 宣言があれば、実装と検査のプランは範囲テスト・全体テスト（`test-limited`・`test-all`）を持たない。`ndf route test` は静的解析だけを走らせる。worker と supervisor がテストの suite のコマンドを打つと hook が止める（`hook_lib/ci_test_guard.py`）。静的解析は手元で走らせる
 3. **CI の結果を待たずに監視して直す。** プランは `pr` の後・`doc-lint` の後・マージが落ちた後に `ci-watch.py peek` で CI のテストのチェックを 1 回だけ読む。落ちていれば `ci-fix` が直して push し、改修の回数が上限（`contracts/limits.json` の `supervise.ci-fix`）に当たれば止めて人へ戻す。マージはテストのチェックがすべて現れて通ったときだけ行う
 4. **PR を早く出す。** 宣言のあるリポジトリの実装のプランは、実装の直後に Draft の PR を出す（`pr-draft`）。以後の push のたびに CI が走る
@@ -253,7 +259,7 @@ CI の結果の監視が読んだ結論と改修の回数は、プランの状�
 
 **MVV 判定は `mvv-gate.py` が行う。** 「従う」でレッドラインに当たらないときだけ承認ゲートを通し、ほかは人の承認へ戻す。
 
-**`auto` と `fast` は、使ってよい条件を `supervise.py new sprint --pace <値>` が機械で確かめる。** 条件は
+**`auto` と `fast` は、使ってよい条件を `ndf progress new --pace <値>` が機械で確かめる。** 条件は
 開発版のチャネル・インストール確認・`.ndf/pace.json` の許可・モード・MVV の承認で、1 つでも欠ければ断る。
 そのときは `normal` で進める。進め方ごとのフロー・`fast` の工程の区分・条件・設定・トリガー・記録の読み方は
 [references/pace.md](references/pace.md) にある。
@@ -371,7 +377,7 @@ CD が無ければ今の `release` の工程のまま、マージの後に手で
 承認ゲート・区分のある問い・終わり・続けられないときは、最後の応答の末尾に区間の報告を置いて区間を終える（[asking.md](references/asking.md) の「人のいない実行」）。
 **判定結果を出したところは区間の終わりに当たらない。** `次のコマンド:` を打って続け、打たずに終えようとすると Stop の hook が差し戻す。
 
-**工程は 3 層（conductor / supervisor / worker）へ出し、既定はプラン（`supervise.py`）である。**
+**工程は 3 層（conductor / supervisor / worker）へ出し、既定はプラン（`ndf plan`）である。**
 conductor がフェーズごとにプランをキューで流す（[references/waiting.md](references/waiting.md) の「スプリントを流すコマンド」）。
 テンプレートか要る設定が無いときだけ、`Agent` で supervisor を起動する
 （[references/agent-layers.md](references/agent-layers.md) の「プランで流すか supervisor で回すか」）。

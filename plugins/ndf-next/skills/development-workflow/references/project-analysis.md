@@ -8,7 +8,7 @@
 
 ## 例: carmo-system-console で手順 0 を通す
 
-1. `project-decl.py check` が 2 で終わる（`.ndf/project.json` が無い）
+1. `ndf project check` が 3 で終わる（`.ndf/project.json` が無い）
 2. conductor が `project-decl.py measure --out "$TMP/measure.json"` を打つ。言語（PHP 8.3・Laravel 10）・CI の JUnit の合計・
    ワークフロー・必須のチェック・compose の `mysql` を「測った値」として、テストの走らせ方・起点と本番・リリース・課題の正本・
    NDF の方針の検査を「問い」として、候補と根拠を付けて返す
@@ -20,14 +20,14 @@
 
 ## 手順 0 での扱い
 
-手順 0 は `worktree-setup.sh check` に続けて `project-decl.py check` を打つ（`decl=` の行）。`worktree-setup.sh check` が 3 のときは見ない。
+手順 0 は `worktree-setup.sh check` に続けて `ndf project check` を打つ（`decl=` の行）。`worktree-setup.sh check` が 3 のときは見ない。
 
 | `decl=` | 次に行うこと | `宣言:` の行に足す `解析:` の部分 |
 | --- | --- | --- |
 | 0 | 手順 1 へ進む | `解析: 不要（新しい）` |
-| 2 | 下の 3 手（measure → 答え → write）を通し、手順 1 へ進む | `解析: 作成した（<書いたファイル>。不明 <P 番号>）` / `解析: 更新した（変わった入力 <パス>）` / `解析: 更新した（手動）` / `解析: できなかった（<理由>）` |
-| 3 | **先へ進まない。** `check` の出力を示して利用者に直してもらう | 出さない |
-| 1、または `$SCRIPTS` を決められない | 手順 1 へ進む | `解析: 判定できない（<理由>）` |
+| 3 | 下の 3 手（measure → 答え → write）を通し、手順 1 へ進む | `解析: 作成した（<書いたファイル>。不明 <P 番号>）` / `解析: 更新した（変わった入力 <パス>）` / `解析: 更新した（手動）` / `解析: できなかった（<理由>）` |
+| 2 | **先へ進まない。** `check` の出力を示して利用者に直してもらう | 出さない |
+| 1 | 手順 1 へ進む | `解析: 判定できない（<理由>）` |
 
 `宣言:` の行は `宣言: <worktree の結果>。解析: <解析の結果>` の形にする。解析が失敗した・時間を超えたときも工程を止めない。
 書き出した宣言はコミットしない限り取り消せるので、承認を求めない。
@@ -36,9 +36,10 @@
 
 ```bash
 TMP="$(mktemp -d)"
-python3 "$SCRIPTS/project-decl.py" measure --out "$TMP/measure.json"; echo "exit=$?"
+[ -n "${SCRIPTS:-}" ] || echo "project-decl.py measure・write・drift は S1e #3569 が副命令に置き換えるまで新しいプラグインだけでは打てない。飛ばした（解析: できなかった）"
+[ -n "${SCRIPTS:-}" ] && { python3 "$SCRIPTS/project-decl.py" measure --out "$TMP/measure.json"; echo "exit=$?"; }
 # 測定の結果の status: question の項目に答え、"$TMP/answers.json" を書く（下の「答え方」）
-python3 "$SCRIPTS/project-decl.py" write --measure "$TMP/measure.json" --answers "$TMP/answers.json"; echo "exit=$?"
+[ -n "${SCRIPTS:-}" ] && { python3 "$SCRIPTS/project-decl.py" write --measure "$TMP/measure.json" --answers "$TMP/answers.json"; echo "exit=$?"; }
 ```
 
 | 手 | 終了コード | 次に行うこと |
@@ -106,7 +107,7 @@ CI の壁時計（`ci.workflows[].wall_seconds`）とテストの所要の `ci-s
 - 解析の結果が前と同じなら、ファイルを書かない
 - 宣言はメインディレクトリの `.ndf/` に書く。コミットするかは下の「`.ndf/` の追跡」に従う。`.gitignore` の対象なら、そのことが出力に出る
 
-宣言の形は [../schemas/project.schema.json](../schemas/project.schema.json) にある（`project-decl.py schema` の生成物）。
+宣言の形は [../schemas/project.schema.json](../schemas/project.schema.json) にある（`ndf project schema` の生成物）。
 
 ## `.ndf/` の追跡
 
@@ -150,12 +151,13 @@ Pull Request（最大 100 件）と origin のスプリントブランチで、�
 （[worktree の declaration.md](../../worktree/references/declaration.md) の「ブランチ運用を宣言するリポジトリ」）に合わない答えは、
 `write` が書かずに 1 で終わる。`write` が書くのは `worktree.json` に `branch_flow` が無いときと、前の `write` の値のままのときだけである。
 
-**ずれの検出は `drift` が行う。** `check` は `gh` を呼ばないため、`branch_flow` の形の誤り（3）だけを見る。振り返りと棚卸しは
+**ずれの検出は `drift` が行う。** `check` は `gh` を呼ばないため、`.ndf/worktree.json` が読めない誤り（2）だけを見る。振り返りと棚卸しは
 `measure` の後に `drift` を打ち、宣言（無ければ既定値の行）と測った値のずれを項目ごとに見る。ずれが無ければ `items` は空である。
 
 ```bash
-python3 "$SCRIPTS/project-decl.py" measure --out "$TMP/measure.json"
-python3 "$SCRIPTS/project-decl.py" drift --measure "$TMP/measure.json"
+[ -n "${SCRIPTS:-}" ] || echo "project-decl.py measure・write・drift は S1e #3569 が副命令に置き換えるまで新しいプラグインだけでは打てない。飛ばした"
+[ -n "${SCRIPTS:-}" ] && python3 "$SCRIPTS/project-decl.py" measure --out "$TMP/measure.json"
+[ -n "${SCRIPTS:-}" ] && python3 "$SCRIPTS/project-decl.py" drift --measure "$TMP/measure.json"
 ```
 
 宣言を変える・外すのは利用者の設定の書き換え（共通原則 C7）で、実装の中でコミットし、承認ゲートで人が見る。変えた宣言は
@@ -167,7 +169,7 @@ python3 "$SCRIPTS/project-decl.py" drift --measure "$TMP/measure.json"
 
 ### 自動の再解析
 
-`check` は、解析が読んだ入力の指紋（下の表のファイルの HEAD の blob・ブランチの構成・解析器の版）が記録と違えば 2 を返し、
+`check` は、解析が読んだ入力の指紋（下の表のファイルの HEAD の blob・ブランチの構成・解析器の版）が記録と違えば 3 を返し、
 `変わった入力: <パス>` を出す。手順 0 はそのまま 3 手を通し、`解析: 更新した（変わった入力 <パス>）` を出す。
 自動の再解析は手順 0 でだけ走る。ほかの工程は、始めに宣言をそのまま読む。
 
@@ -188,9 +190,9 @@ python3 "$SCRIPTS/project-decl.py" drift --measure "$TMP/measure.json"
 次の 1 つのコマンドで始める。
 
 ```bash
-python3 "$SCRIPTS/project-decl.py" check --force
+ndf project check --force
 ```
 
-`--force` は宣言が新しくても 2 を返し、`変わった入力: 強制（--force）` を出す。壊れた宣言（3）と判定できない（1）は変わらず、
-ファイルも書かない。2 を受けた後は、上の 3 手を通す。答えを書くのは conductor で、利用者が `check --force` だけを打っても宣言は変わらない。
+`--force` は宣言が新しくても 3 を返し、`変わった入力: 強制（--force）` を出す。壊れた宣言（2）と判定できない（1）は変わらず、
+ファイルも書かない。3 を受けた後は、上の 3 手を通す。答えを書くのは conductor で、利用者が `check --force` だけを打っても宣言は変わらない。
 手順 0 の `解析:` の部分は `更新した（手動）` にする。

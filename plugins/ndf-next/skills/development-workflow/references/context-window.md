@@ -276,7 +276,7 @@ NDF が起動した分・引継ぎの区間・復元の区間で、同じ呼び�
 - **バックグラウンドの作業が残っているとラッパーは切り替わらない。** ラッパーの Stop hook はシグナルファイルを書かず、Stop を 1 度だけ
   止めて動いている作業の id とコマンドの先頭を知らせる。監視のように止めてよい作業は `TaskStop <task id>`
   で止め、止まったかは完了通知（`failed` / `killed`）で確かめてからブロックを出し直す。supervisor や
-  `supervise.py queue` は止めずに終わりを待ってから出し直す（[waiting.md](waiting.md) の「バックグラウンドの作業を止める」）
+  `ndf plan queue` は止めずに終わりを待ってから出し直す（[waiting.md](waiting.md) の「バックグラウンドの作業を止める」）
 - **カットポイントの再起動は承認ゲートに数えない。** 引継ぎ文書を更新したら、承認・確認（`AskUserQuestion`
   を含む）を挟まずにアナウンスとブロックを出して応答を終える。状態は課題の本文と Pull Request に残り、
   取り消せるためである。ラッパーの外でも挟まない（確認の答えと貼り付けで入力が 2 度になる）。
@@ -293,7 +293,7 @@ NDF が起動した分・引継ぎの区間・復元の区間で、同じ呼び�
 | 2 | `ndf progress show <進行表の ID>`（ID は `ndf progress new` の結果にある） | 通過記録。本文と食い違えば通過記録を正とする |
 | 3 | 1 の worktree（`.worktrees/<ブランチ名>`）のブランチ名で `gh pr list --head <ブランチ名> --state all`。実装の Pull Request は `gh issue view <番号> --json closedByPullRequestsReferences` でも引く | 設計・実装の Pull Request と状態 |
 | 4 | 引継ぎ文書の「今の会話の進み」が指す目録（`<out>/sprint.json`。無ければ改名の前の `<out>/mission.json`）の `ステージ` と、ステージごとのキューの done（`wait <done>` の結果）。プランの途中で止まっていれば、その `<プラン>-state/progress.jsonl` の最後のステップ | 終わったステージ・`gate` で止まったステージ・途中のプランとステップ |
-| 5 | 1〜4 から、チェックの付いていない最初の必須の工程 | 次に打つコマンド。プランのあるフェーズは次のステージの `command`（途中のプランは `supervise.py run <プラン> --from <ステップの id>`）、テンプレートの無い工程は起動する supervisor |
+| 5 | 1〜4 から、チェックの付いていない最初の必須の工程 | 次に打つコマンド。プランのあるフェーズは次のステージの `command`（途中のプランは `ndf plan next <プラン> --from <ステップの id>`）、テンプレートの無い工程は起動する supervisor |
 
 **Pull Request は番号の全文検索で引かない。** 同じ番号に触れただけの別の Pull Request も返す
 ためである。設計の Pull Request は GitHub の closing keywords（PR 本文に `Closes #123` のように書くと、マージ時にその課題を自動で閉じる機能）を持たないため、課題との結び付きでは引けず、
