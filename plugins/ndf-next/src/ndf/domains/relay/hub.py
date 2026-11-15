@@ -24,7 +24,7 @@ from typing import Any, Callable, Mapping, NamedTuple, Optional
 
 from ndf import identity
 from ndf.contracts import facts
-from ndf.domains.relay import hub_decide, registry, session_env, signals
+from ndf.domains.relay import hub_decide, lane_question, registry, session_env, signals
 from ndf.domains.relay.tmux import Tmux
 
 LOCK_FILE = "hub.lock"
@@ -258,7 +258,12 @@ def spawn_env(environ: Mapping[str, str], state_dir: Path, name: str, entry: Map
     計画の名前（`NDF_RELAY_PLAN`）があれば、ラッパーは子の問いを計画の依頼として載せる（`lane_question`。#3035）。
     """
     env = session_env.child_env(environ, state_dir)
-    extra = {"NDF_RELAY_NAME": name, "NDF_RELAY_SPAWNED": "1", "NDF_RELAY_ROLE": entry.get("role"), "NDF_RELAY_PLAN": entry.get("plan")}
+    extra = {
+        "NDF_RELAY_NAME": name,
+        "NDF_RELAY_SPAWNED": "1",
+        "NDF_RELAY_ROLE": entry.get("role"),
+        lane_question.PLAN_ENV: entry.get("plan"),
+    }
     env.update({k: str(v) for k, v in extra.items() if v})
     return env
 
