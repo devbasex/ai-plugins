@@ -65,13 +65,7 @@ def _gh_out(args: list[str]) -> tuple[int, str]:
 
 def mvv_approval(state: str | None, pr: int) -> dict | None:
     """スプリント状態の設計承認ゲートの `pr` の MVV 判定の承認の記録（`by: mvv`・`outcome: approved`）の最後の 1 件。無ければ None。"""
-    if not state:
-        return None
-    hits = [
-        g for g in gate_answer.gates_of(state)
-        if gate_answer.canonical(g.get("name")) == DESIGN_GATE and g.get("pr") == pr and g.get("by") == "mvv" and g.get("outcome") == "approved"
-    ]  # fmt: skip
-    return hits[-1] if hits else None
+    return gate_answer.design_gate_record(state, pr, "mvv", "approved")
 
 
 def cmd_design_approved(pr: int, state: str | None, gh: Callable[[list[str]], tuple[int, str]] = _gh_out) -> tuple[dict, int]:

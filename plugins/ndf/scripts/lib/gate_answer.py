@@ -79,6 +79,18 @@ def gates_of(state: str | Path) -> list[dict]:
     return [g for g in gates or [] if isinstance(g, dict)]
 
 
+def design_gate_record(state: str | Path | None, pr: int, by: str, outcome: str) -> dict | None:
+    """スプリント状態の設計承認ゲートの記録のうち、`pr`・`by`・`outcome` が一致する最後の 1 件。無ければ None。
+    `parallel.py design-answer` が書く前に確かめ、`supervise.py design-approved` が MVV 判定の承認を読む（同じ条件で読み書きする）。"""
+    if not state:
+        return None
+    hits = [
+        g for g in gates_of(state)
+        if canonical(g.get("name")) == DESIGN_GATE and g.get("pr") == pr and g.get("by") == by and g.get("outcome") == outcome
+    ]  # fmt: skip
+    return hits[-1] if hits else None
+
+
 def approved(state: str | Path | None, gate: str, pr: int | None = None, after: str | None = None) -> Answer | None:
     """承認ゲート `gate` の利用者の承認の記録。旧名の記録も同じ承認ゲートとして読む。`pr` を渡せばその PR の記録だけ、`after`（ISO 8601）を渡せば
     それより後に書かれた記録だけを数える。無ければ None（状態のファイルが無い・読めないときも None）。"""

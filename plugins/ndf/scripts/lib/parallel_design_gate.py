@@ -222,11 +222,7 @@ def _merge_resume(sprint: Path | None) -> str:
 def _has_gate(state: Path, pr: int, by: str, outcome: str) -> bool:
     import gate_answer
 
-    return any(
-        gate_answer.canonical(g.get("name")) == gate_answer.DESIGN_GATE and g.get("pr") == pr and g.get("by") == by
-        and g.get("outcome") == outcome
-        for g in gate_answer.gates_of(state)
-    )  # fmt: skip
+    return gate_answer.design_gate_record(state, pr, by, outcome) is not None
 
 
 def _write_gate(run, state: Path, pr: int, by: str, outcome: str, what: str, repo: Path, msg: dict) -> str | None:
