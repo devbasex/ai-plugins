@@ -43,15 +43,16 @@ def commit(root, rel, text="x\n"):
 
 @pytest.fixture
 def repo(tmp_path):
-    """rules.json を持ち、origin の develop から切った feat/x の作業場所。"""
+    """rules.json を持ち、origin の develop から切った feat/x の作業場所。origin の HEAD は main を指す（既定ブランチは
+    develop でない。新しい git の fetch は origin/HEAD を作る）。"""
     origin = tmp_path / "origin.git"
-    subprocess.run(["git", "init", "-q", "--bare", "-b", "develop", str(origin)], check=True)
+    subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(origin)], check=True)
     root = tmp_path / "wt"
     root.mkdir()
     git(root, "init", "-q", "-b", "develop")
     commit(root, str(pr_marks.RULES), json.dumps({"invariants": CONF}, ensure_ascii=False))
     git(root, "remote", "add", "origin", str(origin))
-    git(root, "push", "-q", "origin", "develop")
+    git(root, "push", "-q", "origin", "develop", "develop:main")
     git(root, "fetch", "-q", "origin")
     git(root, "checkout", "-q", "-b", "feat/x")
     return root
