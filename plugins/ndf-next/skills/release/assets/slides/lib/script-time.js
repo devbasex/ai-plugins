@@ -45,18 +45,27 @@ function table(m) {
   return lines.join("\n");
 }
 
+function readPositive(name, raw) {
+  const n = Number(raw);
+  if (!(n > 0)) throw new DeckError(`${name} は正の数`, EXIT_INPUT);
+  return n;
+}
+
 function parseArgs(argv) {
   const a = { file: null, wpm: DEFAULT_WPM, limit: null, json: false };
   for (let i = 0; i < argv.length; i++) {
     const v = argv[i];
-    if (v === "--json") a.json = true;
-    else if (v === "--wpm" || v === "--limit") {
-      const n = Number(argv[++i]);
-      if (!(n > 0)) throw new DeckError(`${v} は正の数`, EXIT_INPUT);
-      a[v.slice(2)] = n;
-    } else if (v.startsWith("--")) throw new DeckError(`知らない引数: ${v}`, EXIT_INPUT);
-    else if (!a.file) a.file = v;
-    else throw new DeckError(`台本は 1 つだけ渡す: ${v}`, EXIT_INPUT);
+    if (v === "--json") {
+      a.json = true;
+      continue;
+    }
+    if (v === "--wpm" || v === "--limit") {
+      a[v.slice(2)] = readPositive(v, argv[++i]);
+      continue;
+    }
+    if (v.startsWith("--")) throw new DeckError(`知らない引数: ${v}`, EXIT_INPUT);
+    if (a.file) throw new DeckError(`台本は 1 つだけ渡す: ${v}`, EXIT_INPUT);
+    a.file = v;
   }
   if (!a.file) throw new DeckError(USAGE, EXIT_INPUT);
   return a;
