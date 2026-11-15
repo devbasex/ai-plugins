@@ -308,3 +308,170 @@ def test_exact_match_gates_any_commit_added_after_the_approval(monkeypatch, stat
     with pytest.raises(SystemExit):
         promotion._merge_exact(Path("."), a, "ndf", (BRANCH, "main"), 30, case, [], {}, ops)
     assert codes == [10] and ops.merged == []
+
+
+# --- 現状固定（I-003）: release_selected の経路ごとの戻り値・items・metrics・止まり方 -----------------------------------
+
+from types import SimpleNamespace  # noqa: E402
+
+_APPROVED, _MERGED, _PROD_TIP, _EXACT = "a" * 40, "m" * 40, "p" * 40, "e" * 40
+_BASE_METRICS = {
+    "channel": "prod",
+    "version": "1.1.0",
+    "release_pr": None,
+    "sync_pr": None,
+    "main_pr": None,
+    "tag": None,
+    "merge_commit": None,
+    "plugins": "ndf,pk",
+    "promotion": "selected",
+}
+
+
+class _SelOps:
+    def __init__(self, found=None, merge_commit=_MERGED):
+        self.found, self.merge_commit, self.created = found, merge_commit, []
+
+    def find_pr(self, root, branch, prod, states=()):
+        return self.found
+
+    def merge_commit_of(self, root, n):
+        return self.merge_commit
+
+    def create_pr(self, root, base, head, title, body):
+        self.created.append((base, head, title, body))
+        return 41
+
+
+@pytest.fixture
+def selected(monkeypatch):
+    """git・本番の PR のマージ・戻すマージを差し替えた release_selected。`run(approved, ops, case, ancestor=, tag=)`。"""
+    from release_lib import reviewed
+
+    monkeypatch.setattr(promotion, "merge_back_after", lambda root, a, plugin, br, pr, ops: ("back", br, pr))
+    monkeypatch.setattr(reviewed, "admin_back", lambda back: ("admin_back", back))
+    monkeypatch.setattr(promotion.repo_lib, "owner_repo", lambda r: "o/r")
+    monkeypatch.setattr(
+        reviewed,
+        "admin_record_on_resume",
+        lambda root, repo, case, pr: {"kind": "comment", "name": f"#{pr}", "record": "admin_merge"} if case.admin_merge else None,
+    )
+    monkeypatch.setattr(
+        promotion, "_merge_exact", lambda root, a, plugin, refs, pr, case, items, metrics, ops: (items.append({"exact": refs}), _EXACT)[1]
+    )
+    verdict = SimpleNamespace(tip="t" * 40, tolerated=[SimpleNamespace(sha="s1", subject="版上げ")])
+    monkeypatch.setattr(promotion, "_merge_approved", lambda root, a, plugin, branch, pr, approved, items, metrics, ops: ("", verdict))
+    from release_lib.context import ReleaseCtx
+
+    def run(approved, ops, case=None, ancestor=0, tag=1, channel="prod"):
+        def git(root, *args, check=True):
+            if args[0] == "merge-base":
+                return SimpleNamespace(returncode=ancestor, stdout="")
+            if args[:3] == ("rev-parse", "-q", "--verify"):
+                return SimpleNamespace(returncode=tag, stdout="")
+            if args[0] == "rev-parse":
+                return SimpleNamespace(returncode=0, stdout=_PROD_TIP + "\n")
+            return SimpleNamespace(returncode=0, stdout="")
+
+        monkeypatch.setattr(promotion, "git", git)
+        a = SimpleNamespace(channel=channel, version="1.1.0", promotion="selected")
+        ctx = ReleaseCtx(Path("."), a, "ndf", ["ndf", "pk"], BRANCH, "develop", "main")
+        return promotion.release_selected(ctx, approved, ops, case)
+
+    return run
+
+
+def _back(pr):
+    return ("admin_back", ("back", promotion.ReleaseBranches(BRANCH, "develop", "main"), pr))
+
+
+def test_release_selected_refuses_a_non_prod_channel(selected):
+    from step_result import EXIT_UNREADABLE, StepError
+
+    with pytest.raises(StepError) as e:
+        selected(_APPROVED, _SelOps(), channel="dev")
+    assert e.value.code == EXIT_UNREADABLE and "--channel prod だけ" in str(e.value)
+
+
+def test_release_selected_resumes_a_merged_production_pr(selected):
+    ops = _SelOps(found={"state": "MERGED", "number": 7})
+    assert selected(_APPROVED, ops) == (
+        7,
+        _MERGED,
+        [{"kind": "pr", "name": "#7", "result": "already_merged", "base": "main"}],
+        {**_BASE_METRICS, "approved_sha": _APPROVED},
+        _back(7),
+    )
+    assert ops.created == []
+
+
+def test_release_selected_resume_falls_back_to_the_production_tip(selected):
+    got = selected("", _SelOps(found={"state": "MERGED", "number": 7}, merge_commit=""))
+    assert got[:2] == (7, _PROD_TIP) and got[3] == {**_BASE_METRICS, "approved_sha": ""}
+
+
+def test_release_selected_resume_stops_when_the_merge_lacks_the_approval(selected):
+    from step_result import StepError
+
+    with pytest.raises(StepError) as e:
+        selected(_APPROVED, _SelOps(found={"state": "MERGED", "number": 7}), ancestor=1)
+    assert e.value.code == 1 and str(e.value) == "マージ済みの本番の PR #7 のコミット mmmmmmmm が承認したコミット aaaaaaaa を含まない"
+
+
+def test_release_selected_resume_writes_the_admin_record(selected):
+    import release_case
+
+    case = release_case.decide_case(True, 1, "", admin=True)
+    _, _, items, metrics, _ = selected(_APPROVED, _SelOps(found={"state": "MERGED", "number": 7}), case)
+    assert items == [
+        {"kind": "pr", "name": "#7", "result": "already_merged", "base": "main"},
+        {"kind": "comment", "name": "#7", "record": "admin_merge"},
+    ]
+    assert "case" not in metrics
+
+
+def test_release_selected_stops_when_the_tag_exists(selected):
+    from step_result import StepError
+
+    with pytest.raises(StepError) as e:
+        selected(_APPROVED, _SelOps(), tag=0)
+    assert e.value.code == 1 and str(e.value) == "タグ ndf--v1.1.0 は既にある"
+
+
+def test_release_selected_creates_the_pr_and_merges_the_approved_commit(selected):
+    ops = _SelOps()
+    assert selected(_APPROVED, ops) == (
+        41,
+        _PROD_TIP,
+        [
+            {"kind": "commit", "name": "s1", "result": "outside_unshipped", "subject": "版上げ"},
+            {"kind": "pr", "name": "#41", "result": "merged", "base": "main", "admin": False},
+        ],
+        {**_BASE_METRICS, "approved_sha": _APPROVED, "compared_head": "t" * 40, "tolerated": 1},
+        _back(41),
+    )
+    assert ops.created == [
+        (
+            "main",
+            BRANCH,
+            "Release: ndf v1.1.0 を main へ",
+            "ndf v1.1.0 を main へ出す（選んだスプリントブランチを main から組んだリリースブランチ）。\n\n"
+            "🤖 Generated with [Claude Code](https://claude.com/claude-code)",
+        )
+    ]
+
+
+@pytest.mark.parametrize("approvals, admin, case_name, merged_admin", [(1, True, "cd-admin", True), (0, False, "cd-no-review", False)])
+def test_release_selected_reuses_the_open_pr_with_exact_match(selected, approvals, admin, case_name, merged_admin):
+    import release_case
+
+    ops = _SelOps(found={"state": "OPEN", "number": 9})
+    case = release_case.decide_case(True, approvals, "", admin=admin)
+    assert selected("", ops, case) == (
+        9,
+        _EXACT,
+        [{"exact": (BRANCH, "main")}, {"kind": "pr", "name": "#9", "result": "merged", "base": "main", "admin": merged_admin}],
+        {**_BASE_METRICS, "approved_sha": "", "case": case_name},
+        _back(9),
+    )
+    assert ops.created == []
