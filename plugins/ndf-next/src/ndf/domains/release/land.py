@@ -8,6 +8,10 @@
 4. 先端の SHA を添えて merge commit でマージする（承認の後に先端が動いていれば GitHub が断る）
 5. 本番ブランチへ入れたら、本番ブランチからベースブランチ宛ての PR を作り（開いたものがあれば使い直す）、必須のチェックの
    後にマージする（版上げのコミットをベースブランチへ戻す）。マージ済みの PR で打ち直しても、ここから再開する
+
+迂回の宣言（`admin`。`.ndf/project.json` の `production_merge.admin`）があり、本番ブランチの規則の承認数が 1 以上と読めるときだけ、
+本番ブランチ宛ての PR を管理者の迂回でマージし（`GitHub.merge_as_admin`）、迂回の記録を置く（#3506 の I2b・I7）。そのときの
+証跡の照合は、担い手が MVV 判定の証跡を数えない（I9）。承認数が 0 か読めなければ迂回しない。
 """
 
 from __future__ import annotations
@@ -32,6 +36,9 @@ UNPROCESSABLE = HTTPStatus.UNPROCESSABLE_ENTITY
 NOTHING_TO_SYNC_TEXT = "No commits between"
 # 従来の保護（branch protection）が無いときの状態
 NOT_FOUND = HTTPStatus.NOT_FOUND
+# 承認レビューの規則の種類（ruleset）
+REVIEW_RULE = "pull_request"
+REVIEW_COUNT = "required_approving_review_count"
 # 結論の出ていない状態（事実の表 ci-outcomes の pending。commit status の `pending` を含む）
 PENDING_STATES = frozenset(facts.ids("ci-outcomes", outcome="pending"))
 
@@ -45,6 +52,10 @@ class Landed(NamedTuple):
     sync_pr: int | None = None
     # 本番ブランチへ入ったコミット（タグと GitHub Release を作る版。本番ブランチへ入れていなければ None）
     production_sha: str | None = None
+    # 本番の PR を管理者の迂回でマージしたか・迂回の記録の URL・記録を書けなかった理由（#3506）
+    admin: bool = False
+    admin_record: str | None = None
+    record_error: str | None = None
 
 
 def _status_run(status: dict) -> dict:
@@ -59,6 +70,12 @@ def _status_run(status: dict) -> dict:
         "started_at": text_of(status["created_at"]),
         "id": int(status["id"]),
     }
+
+
+def _review_count(raw: dict) -> int:
+    """規則か従来の保護の承認数（`required_approving_review_count`）。数でなければ 0。"""
+    value = raw.get(REVIEW_COUNT)
+    return value if isinstance(value, int) else 0
 
 
 def _list(raw: dict, key: str) -> list:
@@ -86,6 +103,34 @@ class Lander:
     production: str
     budget: float
     wait: Callable[[Callable[[], ci.Reading], float], ci.WatchResult] | None = None
+    # 迂回の宣言（`declaration.production_admin`）。偽なら今のマージのまま
+    admin: bool = False
+
+    def approvals(self, branch: str) -> int | None:
+        """宛先のブランチの承認数。ruleset の承認の規則があればその最大、無ければ従来の保護、保護が無ければ 0、読めなければ None。"""
+        try:
+            rules = self.hub.rest("GET", f"/repos/{self.hub.repo}/rules/branches/{branch}")
+        except GitHubError:  # noqa: NDF401 ネットワーク: 承認数を読めなければ迂回しない（#3506 の I2b）
+            return None
+        found = [
+            _review_count(rule["parameters"])
+            for rule in (rules if isinstance(rules, list) else [])
+            if isinstance(rule, dict) and rule.get("type") == REVIEW_RULE and isinstance(rule.get("parameters"), dict)
+        ]
+        if found:
+            return max(found)
+        try:
+            got = self.hub.rest("GET", f"/repos/{self.hub.repo}/branches/{branch}/protection/required_pull_request_reviews")
+        except GitHubError as exc:
+            return 0 if exc.status == NOT_FOUND else None
+        return _review_count(got) if isinstance(got, dict) else None
+
+    def _bypass(self, pull: Pull) -> bool:
+        """この PR を管理者の迂回でマージするか（宣言があり、本番ブランチ宛てで、承認数が 1 以上と読める。#3506 の I2b）。"""
+        if not self.admin or pull.base_ref != self.production:
+            return False
+        n = self.approvals(pull.base_ref)
+        return n is not None and n >= 1
 
     def required(self, branch: str) -> list[str]:
         """宛先のブランチの規則（ruleset）と従来の保護の必須のチェックの名前（承認の commit status を除く）。"""
@@ -121,26 +166,37 @@ class Lander:
         watched = self.wait(reader, self.budget) if self.wait is not None else ci.Watch(reader, self.budget).run()
         return watched.cause([])
 
-    def _refusal(self, pull: Pull) -> Landed | None:
-        """本番ブランチ宛ての PR の証跡を読み直し、`pull` の先端が承認されていなければ止まった結果（承認されていれば None）。"""
+    def _refusal(self, pull: Pull, human_only: bool = False) -> Landed | None:
+        """本番ブランチ宛ての PR の証跡を読み直し、`pull` の先端が承認されていなければ止まった結果（承認されていれば None）。
+        `human_only` なら担い手が MVV 判定の証跡を数えない（迂回の前提。#3506 の I9）。"""
         if pull.base_ref != self.production:
             return None
-        got = trail.check(self.hub, pull.number)
+        got = trail.check(self.hub, pull.number, human_only)
         if got.pull.head_sha != pull.head_sha:
             return Landed(False, "refused", f"#{pull.number} の先端が {pull.head_sha[:12]} から {got.pull.head_sha[:12]} へ動いた")
         if not got.judgment.approved:
             return Landed(False, "refused", f"#{pull.number} は承認されていない: {got.judgment.detail}")
         return None
 
-    def _merge(self, pull: Pull) -> Landed:
+    def _merge(self, pull: Pull, bypass: bool = False) -> Landed:
+        """チェックの待ち・証跡の読み直しの後にマージする。`bypass` なら管理者の迂回で打つ（戻す PR は常に偽）。"""
         kind = self._watch(pull)
         if kind is not None:
             return Landed(False, kind, f"#{pull.number} の必須のチェックが通らない（{kind}。打ち直さずに人へ戻す）")
-        refused = self._refusal(pull)
+        refused = self._refusal(pull, bypass)
         if refused is not None:
             return refused
-        outcome: MergeOutcome = self.hub.merge(pull.number, expect_head=pull.head_sha, method=MERGE_METHOD)
-        return Landed(outcome.merged, outcome.kind, outcome.detail)
+        merge = self.hub.merge_as_admin if bypass else self.hub.merge
+        outcome: MergeOutcome = merge(pull.number, expect_head=pull.head_sha, method=MERGE_METHOD)
+        return Landed(outcome.merged, outcome.kind, outcome.detail, admin=bypass and outcome.merged)
+
+    def _record(self, pull: Pull, done: Landed) -> Landed:
+        """迂回でマージした結果に、迂回の記録の URL か、書けなかった理由を足す（#3506 の I7・決定 7）。"""
+        try:
+            _wrote, url = trail.write_admin_record(self.hub, pull.number, pull.head_sha)
+        except trail.TrailError as exc:
+            return done._replace(admin=True, record_error=str(exc))
+        return done._replace(admin=True, admin_record=url)
 
     def _open_sync(self) -> int | None:
         """本番ブランチからベースブランチへ戻す PR の番号（開いたものがあれば使い直し、無ければ作る。差分が無ければ None）。
@@ -182,14 +238,21 @@ class Lander:
         """リリースの PR をマージする。本番ブランチへ入れた後（マージ済みからの再開を含む）は、ベースブランチへ戻す。"""
         pull = self.hub.pull(number)
         if pull.merged:
-            if pull.base_ref == self.production:
-                return self._sync(pull)
-            return Landed(True, None, f"#{number} は既にマージされている")
+            if pull.base_ref != self.production:
+                return Landed(True, None, f"#{number} は既にマージされている")
+            synced = self._sync(pull)
+            if self._bypass(pull):  # 再開: 利用者の証跡がマージした先端と一致すれば、迂回でマージしたとして記録を補う（I7）
+                judged = trail.read(self.hub, number, human_only=True).judgment
+                if judged.approved and judged.trail is not None and judged.trail.sha == pull.head_sha:
+                    return self._record(pull, synced)
+            return synced
         version_decide.version_of_branch(pull.head_ref)
-        refused = self._refusal(pull)
+        bypass = self._bypass(pull)
+        refused = self._refusal(pull, bypass)
         if refused is not None:
             return refused
-        done = self._merge(pull)
+        done = self._merge(pull, bypass)
         if not done.merged or pull.base_ref != self.production:
             return done
-        return self._sync(pull)
+        synced = self._sync(pull)
+        return self._record(pull, synced) if bypass else synced

@@ -57,7 +57,8 @@
       "file": "project.json",
       "keys": [
         "docs",
-        "ndf_policies"
+        "ndf_policies",
+        "production_merge"
       ]
     },
     {

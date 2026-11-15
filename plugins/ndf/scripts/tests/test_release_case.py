@@ -17,7 +17,10 @@ SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS / "lib"))
 import delivery  # noqa: E402
 import gh_call  # noqa: E402
+import project_decl  # noqa: E402
 import release_case as rc  # noqa: E402
+
+REPO = SCRIPTS.parents[2]
 
 
 def pr_rule(n):
@@ -39,9 +42,46 @@ def test_decide_case(has_cd, approvals, case):
     assert got.case == case and got.reason
 
 
-@pytest.mark.parametrize("case, has_cd", [(rc.NO_CD, False), (rc.CD_NO_REVIEW, True), (rc.CD_REVIEW, True)])
-def test_has_cd_is_true_for_the_cd_cases(case, has_cd):
-    assert rc.Case(case, "", "", "").has_cd is has_cd
+@pytest.mark.parametrize(
+    "approvals, case",
+    [(1, rc.CD_ADMIN), (2, rc.CD_ADMIN), (0, rc.CD_NO_REVIEW), (None, rc.CD_NO_REVIEW)],
+)
+def test_decide_case_with_the_admin_declaration(approvals, case):
+    """#3506 の I2a: 迂回の宣言があっても、承認数が 1 以上と読めるときだけ cd-admin。"""
+    got = rc.decide_case(True, approvals, "", admin=True)
+    assert got.case == case and got.reason
+    assert rc.decide_case(False, approvals, "", admin=True).case == rc.NO_CD
+
+
+@pytest.mark.parametrize(
+    "case, has_cd, trail, admin, human",
+    [
+        (rc.NO_CD, False, False, False, False),
+        (rc.CD_NO_REVIEW, True, True, False, False),
+        (rc.CD_REVIEW, True, False, False, True),
+        (rc.CD_ADMIN, True, True, True, True),
+    ],
+)
+def test_case_attributes(case, has_cd, trail, admin, human):
+    c = rc.Case(case, "", "", "")
+    assert (c.has_cd, c.trail_approval, c.admin_merge, c.human_approval) == (has_cd, trail, admin, human)
+
+
+@pytest.mark.parametrize(
+    "decl, admin",
+    [
+        ({"production_merge": {"admin": True}}, True),
+        ({}, False),
+        ({"production_merge": {"admin": False}}, False),
+        ({"production_merge": {"admin": "true"}}, False),
+        ({"production_merge": {"unknown": "決めていない"}}, False),
+        ({"production_merge": True}, False),
+    ],
+)
+def test_production_admin_is_true_only_for_json_true(monkeypatch, decl, admin):
+    """#3506 の I1: `production_merge.admin` が JSON の true のときだけ迂回の宣言があるとみなす。"""
+    monkeypatch.setattr(project_decl, "read_project_decl", lambda root: decl)
+    assert project_decl.production_admin(".") is admin
 
 
 def fake(table):
@@ -103,3 +143,30 @@ def test_case_of_raises_on_broken_decl(monkeypatch):
     monkeypatch.setattr(delivery, "load_delivery", lambda root: delivery.DeliveryDecl(problems=["壊れた"]))
     with pytest.raises(rc.CaseUnreadable):
         rc.case_of(".")
+
+
+@pytest.mark.parametrize("admin, case", [(True, rc.CD_ADMIN), (False, rc.CD_REVIEW)])
+def test_case_of_reads_the_admin_declaration(monkeypatch, admin, case):
+    monkeypatch.setattr(delivery, "load_delivery", lambda root: _decl([AUTO]))
+    monkeypatch.setattr(project_decl, "production_admin", lambda root: admin)
+    run, _ = fake({"rules/branches/main": (0, json.dumps([pr_rule(1)]))})
+    monkeypatch.setattr(gh_call, "RUNNER", run)
+    assert rc.case_of(".").case == case
+
+
+def test_case_of_stays_cd_no_review_when_approvals_are_unreadable(monkeypatch):
+    monkeypatch.setattr(delivery, "load_delivery", lambda root: _decl([AUTO]))
+    monkeypatch.setattr(project_decl, "production_admin", lambda root: True)
+    run, _ = fake({})
+    monkeypatch.setattr(gh_call, "RUNNER", run)
+    assert rc.case_of(".").case == rc.CD_NO_REVIEW
+
+
+def test_ai_plugins_declaration_is_cd_admin(monkeypatch):
+    """受け入れ条件 9: ai-plugins の宣言を場合の判定に通すと、承認数 1 で cd-admin になる。"""
+    decl = json.loads((REPO / ".ndf" / "project.json").read_text(encoding="utf-8"))
+    monkeypatch.setattr(project_decl, "read_project_decl", lambda root: decl)
+    monkeypatch.setattr(delivery, "load_delivery", lambda root: _decl([AUTO]))
+    run, _ = fake({"rules/branches/main": (0, json.dumps([pr_rule(1)]))})
+    monkeypatch.setattr(gh_call, "RUNNER", run)
+    assert rc.case_of(".").case == rc.CD_ADMIN
