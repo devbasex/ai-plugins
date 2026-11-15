@@ -526,21 +526,47 @@ def scan_family(skills_dir: pathlib.Path) -> tuple[set[str], list[Hit], str, lis
     code = ""
     problems: list[str] = []
     if nxt:
-        root = skills_dir.parent
-        src, contracts, hook_code = collect_code(skills_dir)
-        scanned.update(canon(root / rel) for rel in src + contracts)
-        scanned.update(canon(hooks_dir / rel) for rel in hook_code)
-        hits += scan(root, src, code_matchers) + scan(hooks_dir, hook_code, code_matchers)
-        hits += scan_contracts(root, contracts, code_matchers)
-        problems = default_problems(remote_defaults(root, contracts), root)
-        code = f" / src {len(src)} 本 / contracts {len(contracts)} 本"
+        next_scanned, next_hits, problems, hook_code, code = _scan_next_code(skills_dir, code_matchers)
+        scanned.update(next_scanned)
+        hits += next_hits
         hooks = hooks + hook_code
-    report_line = (
+    report_line = _report_line(skills_dir, names, docs, scripts, skill_scripts, code, hooks, agents, hits)
+    return scanned, hits, report_line, unscanned, problems
+
+
+def _scan_next_code(
+    skills_dir: pathlib.Path, code_matchers: list[tuple[str, re.Pattern[str]]]
+) -> tuple[set[str], list[Hit], list[str], list[str], str]:
+    """ndf-next の形の family の `src/`・`hooks/*.py`・`contracts/` を走査し、(走査した正規形, ヒット, 既定の問題, hook のコード, 報告行の追記) を返す。"""
+    root = skills_dir.parent
+    hooks_dir = root / "hooks"
+    src, contracts, hook_code = collect_code(skills_dir)
+    scanned = {canon(root / rel) for rel in src + contracts}
+    scanned.update(canon(hooks_dir / rel) for rel in hook_code)
+    hits = scan(root, src, code_matchers) + scan(hooks_dir, hook_code, code_matchers)
+    hits += scan_contracts(root, contracts, code_matchers)
+    problems = default_problems(remote_defaults(root, contracts), root)
+    code = f" / src {len(src)} 本 / contracts {len(contracts)} 本"
+    return scanned, hits, problems, hook_code, code
+
+
+def _report_line(
+    skills_dir: pathlib.Path,
+    names: set[str],
+    docs: list[str],
+    scripts: list[str],
+    skill_scripts: list[str],
+    code: str,
+    hooks: list[str],
+    agents: list[str],
+    hits: list[Hit],
+) -> str:
+    """`--report` に出す 1 family の走査の規模の行。"""
+    return (
         f"{skills_dir}: 公開する Skill {len(names)} 個 / Markdown {len(docs)} 本 / "
         f"スクリプト {len(scripts) + len(skill_scripts)} 本（family {len(scripts)}・Skill {len(skill_scripts)}）{code} / "
         f"hook {len(hooks)} 本 / エージェント {len(agents)} 本 / ヒット {len(hits)} 件"
     )
-    return scanned, hits, report_line, unscanned, problems
 
 
 def print_report(report_lines: list[str], rows: list[dict], all_hits: list[Hit], outside: list[Hit]) -> None:
