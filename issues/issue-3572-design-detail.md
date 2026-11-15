@@ -1,6 +1,6 @@
 # #3572 の詳細設計: 承認した先端だけを本番ブランチへ入れ、承認の後に直しのステップを持たない
 
-設計文書 [issue-3572-design.md](issue-3572-design.md) の「構成要素」と「構造」を、ファイルと関数の粒度へ下ろした文書である。
+設計文書 [issue-3572-design.md](issue-3572-design.md) の「構成要素」を、ファイルと関数の粒度へ下ろした文書である。
 置き場のパスはすべて `plugins/ndf-next/` からの相対で書く。語（承認した先端・先端の照合・承認の経路・差し戻し・次の版への回し・
 直しのステップ）は設計文書の「用語」の表の意味で使う。
 
@@ -42,9 +42,9 @@ plugins/ndf-next/
 
 依存の向きは一方向で、循環は無い。純粋な判定（`release_plan`・`merge_decide`）は GitHub と git のアダプタを読まず、
 `version_decide` だけに依存する。GitHub を読み書きするモジュール（`land`・`trail`・`prepare`・`assemble`）が判定を呼び、副命令の
-エントリポイント（`cli`）がそれらを呼ぶ。承認ゲートの待ち（`progress/gate/release.py`）はリリースの領域のモジュールを import せず、
-副命令 `ndf release-steps answer` を子プロセスで打ち、結果 JSON だけを読む（コンテキストの関係の顧客 / 供給者を、import の向きでも
-守る）。雛形（`contracts/templates/`）はコードを持たず、副命令を並べるだけである。
+エントリポイント（`cli`）がそれらを呼ぶ。承認ゲートの待ち（`progress/gate/release.py`）はリリースの領域のモジュールを import しない。
+副命令 `ndf release-steps answer` を子プロセスで打ち、結果 JSON だけを読む。コンテキストの関係の顧客 / 供給者を、import の向きでも
+守るためである。雛形（`contracts/templates/`）はコードを持たず、副命令を並べるだけである。
 
 | パス | 種類 | 役割 1 文 | 依存する先 |
 | --- | --- | --- | --- |
@@ -237,14 +237,22 @@ plugins/ndf-next/
  ]}
 ```
 
-`merge.json` の最初に足すステップは
-`{"id": "release-guard", "run": ["ndf", "release-steps", "guard", "--root", "{{repo}}", "--branch", "{{branch}}"], "exit_cause": {"3": "refused"}}`
-である。`refused` は止まった理由の表（`contracts/causes.json`）の既存の種類で、表を変えない。
+`merge.json` の最初に足すステップは次のとおりである。
+
+```json
+{"id": "release-guard", "run": ["ndf", "release-steps", "guard", "--root", "{{repo}}", "--branch", "{{branch}}"], "exit_cause": {"3": "refused"}}
+```
+
+`refused` は止まった理由の表（`contracts/causes.json`）の既存の種類で、表を変えない。
 
 工程「デプロイ」の出力 `delivery` は、本番のプランのどのステップも返さない。工程の出力は定義の鍵のうち返されたものだけを書く
-（`ndf.progress.stages.outputs_draft` の `keep_declared`）ため、欠けても誤りにならない。`delivery` を読む側は、
-`grep -rln delivery contracts/workflow/stages/ contracts/templates/ src/ndf/progress` の結果が `deploy.json` と `release.json` の 2 件
-だけで、工程の定義と雛形の外に読み手は無い。
+（`ndf.progress.stages.outputs_draft` の `keep_declared`）ため、欠けても誤りにならない。`delivery` を読む側を次のコマンドで探した結果は、`deploy.json` と `release.json` の 2 件だけである。
+
+```bash
+grep -rln delivery contracts/workflow/stages/ contracts/templates/ src/ndf/progress
+```
+
+工程の定義と雛形の外に読み手は無い。
 
 ## 並行と排他
 
