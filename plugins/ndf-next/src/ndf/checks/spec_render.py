@@ -116,7 +116,8 @@ def result_rel(name: str) -> str:
 def _arg_schema(arg: Arg) -> dict[str, Any]:
     out: dict[str, Any] = {"type": arg.type}
     if arg.items is not None:
-        out["items"] = {"type": arg.items} | ({"enum": list(arg.choices)} if arg.choices else {})
+        values = {"type": arg.items} | ({"enum": list(arg.choices)} if arg.choices else {})
+        out["items"] = {"type": "array", "items": values} if arg.repeated else values
     elif arg.choices:
         out["enum"] = list(arg.choices)
     if arg.default is not None:
@@ -306,7 +307,7 @@ def page_declarations(model: SpecModel) -> str:
 def _arg_text(arg: Arg) -> str:
     """引数 1 つを 1 行の文にする（名前・型・必須か・既定値・取りうる値・説明）。細部は引数のスキーマが持つ。"""
     name = arg.name if not arg.aliases else f"{arg.name}（{'・'.join(arg.aliases)}）"
-    kind = arg.type if arg.items is None else f"array of {arg.items}"
+    kind = arg.type if arg.items is None else f"array of {'array of ' if arg.repeated else ''}{arg.items}"
     parts = [kind, "必須" if arg.required else "任意"] + (["位置"] if arg.positional else [])
     if arg.default is not None:
         parts.append(f"既定 {_value(arg.default)}")

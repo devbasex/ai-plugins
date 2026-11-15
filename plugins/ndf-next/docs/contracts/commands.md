@@ -42,7 +42,7 @@
 | 呼び方 | 引数 |
 | --- | --- |
 | `ndf contracts check` | 引数を受けない |
-| `ndf contracts emit` | `--tool`（string・必須）<br>`--status`（string・必須・値 `ok`・`gate`・`stopped`）<br>`--summary`（string・必須）<br>`--cause`（array of string・任意）<br>`--cause-instance`（string・任意）<br>`--retry-after`（number・任意）<br>`--route`（array of string・任意）: CMD は {"argv": ["ndf", ...]} の JSON。- なら何も打たない<br>`--gap`（array of string・任意）<br>`--item`（array of string・任意）: items の 1 要素（JSON のオブジェクト）<br>`--metrics`（string・任意）: metrics（JSON のオブジェクト）<br>`--next`（string・任意）: 次に打つコマンド（{"argv": ["ndf", ...], "ask": [...]} の JSON）<br>`--outputs`（string・任意）: 工程どうしで渡す値（JSON のオブジェクト）<br>`--run-id`（string・任意）<br>`--presentation-path`（string・任意）<br>`--code`（integer・任意）: 終了コード（省けば status と cause.kind から決める）<br>`--out`（string・任意）: 結果を 1 行で書くファイル（形が合うときだけ書く） |
+| `ndf contracts emit` | `--tool`（string・必須）<br>`--status`（string・必須・値 `ok`・`gate`・`stopped`）<br>`--summary`（string・必須）<br>`--cause`（array of string・任意）<br>`--cause-instance`（string・任意）<br>`--retry-after`（number・任意）<br>`--route`（array of array of string・任意）: CMD は {"argv": ["ndf", ...]} の JSON。- なら何も打たない<br>`--gap`（array of array of string・任意）<br>`--item`（array of string・任意）: items の 1 要素（JSON のオブジェクト）<br>`--metrics`（string・任意）: metrics（JSON のオブジェクト）<br>`--next`（string・任意）: 次に打つコマンド（{"argv": ["ndf", ...], "ask": [...]} の JSON）<br>`--outputs`（string・任意）: 工程どうしで渡す値（JSON のオブジェクト）<br>`--run-id`（string・任意）<br>`--presentation-path`（string・任意）<br>`--code`（integer・任意）: 終了コード（省けば status と cause.kind から決める）<br>`--out`（string・任意）: 結果を 1 行で書くファイル（形が合うときだけ書く） |
 | `ndf contracts fact-ids` | `table`（string・必須・位置）<br>`where`（array of string・任意・位置） |
 | `ndf contracts fact-value` | `table`（string・必須・位置）<br>`id`（string・必須・位置）<br>`column`（string・必須・位置） |
 
@@ -195,7 +195,7 @@
 | `ndf plan check` | `plans`（array of string・必須・位置） |
 | `ndf plan next` | `plan`（string・必須・位置）<br>`--from`（string・任意）<br>`--state-dir`（string・任意）<br>`--answer`（string・任意）<br>`--set`（array of string・任意）<br>`--fresh`（boolean・任意） |
 | `ndf plan pending` | 引数を受けない |
-| `ndf plan queue` | `plans`（array of string・必須・位置）<br>`--then`（array of string・任意）<br>`--from`（array of string・任意）<br>`--resume`（boolean・任意）<br>`--fresh`（boolean・任意）<br>`--queue-dir`（string・任意） |
+| `ndf plan queue` | `plans`（array of string・必須・位置）<br>`--then`（array of array of string・任意）<br>`--from`（array of string・任意）<br>`--resume`（boolean・任意）<br>`--fresh`（boolean・任意）<br>`--queue-dir`（string・任意） |
 | `ndf plan wait` | `plans`（array of string・必須・位置）<br>`--state-dir`（string・任意）<br>`--timeout`（number・任意・既定 `600.0`） |
 
 結果の `metrics`: `waited_seconds`（number か null）。`items` の要素: 決まった項目を持たない

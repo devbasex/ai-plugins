@@ -72,6 +72,15 @@ def test_remainder_positional_is_an_optional_array():
     assert (got.type, got.items, got.required) == ("array", "string", False)
 
 
+def test_append_with_many_values_is_an_array_of_arrays():
+    parser = argparse.ArgumentParser()
+    staged = spec_args.arg_of(parser.add_argument("--then", action="append", nargs="+"))
+    flat = spec_args.arg_of(parser.add_argument("--tag", action="append"))
+    assert (staged.type, staged.items, staged.repeated) == ("array", "string", True)
+    assert (flat.type, flat.items, flat.repeated) == ("array", "string", False)
+    assert parser.parse_args(["--then", "a", "b", "--then", "c"]).then == [["a", "b"], ["c"]]
+
+
 def test_from_manual_builds_the_tree_from_rows():
     rows = [{"id": "n send", "command": "n", "path": "send", "args": ["--to:string:required:宛先"], "meaning": "m"}]
     tree = spec_args.from_manual(rows)

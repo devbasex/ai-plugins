@@ -43,6 +43,8 @@ class Arg:
     takes: int | None = 1
     # 位置引数が残りの語をすべて取る（`nargs=argparse.REMAINDER`）
     remainder: bool = False
+    # 繰り返すたびに値の配列を 1 つ足す（`action="append"` と複数の値の `nargs`。値は配列の配列）
+    repeated: bool = False
 
 
 @dataclass(frozen=True)
@@ -117,6 +119,11 @@ def _is_array(action: argparse.Action) -> bool:
     )
 
 
+def _is_repeated(action: argparse.Action) -> bool:
+    """繰り返しごとに値の配列を取る（`action="append"` で `nargs` が `*`・`+`・数）。値は 1 回分の配列の配列になる。"""
+    return isinstance(action, argparse._AppendAction) and (action.nargs in ("*", "+") or isinstance(action.nargs, int))
+
+
 def _takes(action: argparse.Action, word: str) -> int | None:
     """オプションが後ろから取る値の語の数。真偽の旗と数える旗は 0、`nargs` が数ならその数、可変なら `None`。"""
     if word == "boolean" or isinstance(action, argparse._CountAction) or action.nargs == 0:
@@ -171,6 +178,7 @@ def arg_of(action: argparse.Action) -> Arg | None:
         aliases=aliases,
         takes=_takes(action, word),
         remainder=positional and action.nargs == argparse.REMAINDER,
+        repeated=array and _is_repeated(action),
     )
 
 

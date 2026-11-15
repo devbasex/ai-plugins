@@ -54,14 +54,20 @@
         "--route": {
           "type": "array",
           "items": {
-            "type": "string"
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           },
           "description": "CMD は {\"argv\": [\"ndf\", ...]} の JSON。- なら何も打たない"
         },
         "--gap": {
           "type": "array",
           "items": {
-            "type": "string"
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
         "--item": {

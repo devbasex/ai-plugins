@@ -10,6 +10,8 @@ import dataclasses
 import json
 import shutil
 from pathlib import Path
+from urllib.parse import urljoin, urlparse
+from urllib.request import url2pathname
 
 import pytest
 
@@ -101,6 +103,16 @@ def test_the_real_declaration_is_checked_with_a_json_pointer(copy):
     found = [f for f in copy.findings() if f.rule == spec_docs.DECL]
     assert [f.path for f in found] == [".ndf/review.json"]
     assert found[0].detail.startswith("/focus:")
+
+
+def test_result_schemas_reach_the_result_contract_from_their_own_file():
+    """結果のスキーマの `$id` はファイルの置き場から解いて自分を指し、結果の契約への `$ref` は実在のファイルへ解ける。"""
+    paths = sorted((PLUGIN_ROOT / "contracts" / spec_model.IO_SCHEMA_DIR).glob(f"*.result{spec_model.SCHEMA_SUFFIX}"))
+    assert paths
+    for path in paths:
+        base = urljoin(path.as_uri(), json.loads(path.read_text(encoding="utf-8"))["$id"])
+        assert base == path.as_uri(), path.name
+        assert Path(url2pathname(urlparse(urljoin(base, spec_model.RESULT_REF)).path)).is_file(), path.name
 
 
 def test_io_findings_for_bin_result_schema_and_manual_rows(copy):
