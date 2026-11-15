@@ -105,7 +105,9 @@ def test_load_valid_plan_skips_ended_lanes_in_overlaps(tmp_path):
     from pydantic import ValidationError
 
     d = variant(
-        x=lambda d: d["lanes"].append({"name": "lnew", "input": {"kind": "sprint", "issues": [2400]}, "plans": 1, "touches": ["api/"]})
+        x=lambda d: d["lanes"].append(
+            {"name": "lnew", "input": {"kind": "sprint", "issues": [2400]}, "plans": 1, "touches": ["api/"], "handoff": "sprint-lnew"}
+        )
     )
     pdir = pp.plan_dir(tmp_path, "p1")
     pdir.mkdir(parents=True)
