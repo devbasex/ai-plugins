@@ -50,32 +50,23 @@ def _head() -> tuple[str, ...]:
     return (*inputs.CHECKS_HEAD, MEANS)
 
 
-def _parse_row(cells: list[str], cols: tuple[int, ...]) -> Optional[tuple[int, Check]]:
-    if len(cells) <= max(cols):
+def _parse_row(kind: str, means: str) -> Optional[Check]:
+    """区分と手段のセルから Check を作る。区分の語が違う行と、手段の無いマージ前の行は読まない。"""
+    if kind not in inputs.KINDS:
         return None
-    num, kind, means = re.match(r"^(\d+)", cells[cols[0]]), cells[cols[1]], cells[cols[2]].strip("`").strip()
-    if not num or kind not in inputs.KINDS:
+    stripped = means.strip("`").strip()
+    if kind == PRE_MERGE and (not stripped or stripped == NO_MEANS):
         return None
-    if kind == PRE_MERGE and (not means or means == NO_MEANS):
-        return None
-    return int(num.group(1)), Check(kind, "" if kind == POST_RELEASE else cells[cols[2]])
+    return Check(kind, "" if kind == POST_RELEASE else means)
 
 
 def read_checks(body: str) -> dict[int, Check]:
     """`## 受け入れ条件の確認` の表を {条件の番号: Check} で返す。節・表・列が無ければ空。"""
-    section = inputs.section_lines(body, inputs.CHECKS_HEADING)
-    rows = [line for line in section if line.strip().startswith("|")] if section is not None else []
-    if len(rows) < 2:
-        return {}
-    head = inputs.cells(rows[0])
-    if any(h not in head for h in _head()):
-        return {}
-    cols = tuple(head.index(h) for h in _head())
     out: dict[int, Check] = {}
-    for row in rows[2:]:
-        parsed = _parse_row(inputs.cells(row), cols)
-        if parsed is not None:
-            out[parsed[0]] = parsed[1]
+    for num, (_, kind, means) in inputs.check_rows(body, _head()):
+        check = _parse_row(kind, means)
+        if check is not None:
+            out[num] = check
     return out
 
 

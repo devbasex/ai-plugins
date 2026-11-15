@@ -82,23 +82,32 @@ def cells(line: str) -> list[str]:
     return [c.strip() for c in line.strip().strip("|").split("|")]
 
 
-def check_kinds(body: str) -> dict[int, str]:
-    """`## 受け入れ条件の確認` の表の {条件の番号: 区分}。表が無ければ空。区分の語が違う行は読まない。"""
+def check_rows(body: str, head: Sequence[str]) -> list[tuple[int, list[str]]]:
+    """`## 受け入れ条件の確認` の表のデータ行を、(条件の番号, `head` の列の順に並べたセル) で上から返す。
+
+    `head` の先頭は番号の列。表の最初の行を見出し、次の行を区切りとして読む。節・表が無いか、見出しに `head` の列が
+    1 つでも無ければ空。番号が読めない行・列が足りない行は飛ばす。
+    """
     section = section_lines(body, CHECKS_HEADING)
     rows = [line for line in section if line.strip().startswith("|")] if section is not None else []
     if len(rows) < 2:
-        return {}
-    head = cells(rows[0])
-    if any(h not in head for h in CHECKS_HEAD):
-        return {}
-    num_at, kind_at = head.index(CHECKS_HEAD[0]), head.index(CHECKS_HEAD[1])
-    out: dict[int, str] = {}
+        return []
+    found_head = cells(rows[0])
+    if any(h not in found_head for h in head):
+        return []
+    cols = [found_head.index(h) for h in head]
+    out = []
     for row in rows[2:]:
         found = cells(row)
-        num = re.match(r"^(\d+)", found[num_at]) if len(found) > max(num_at, kind_at) else None
-        if num and found[kind_at] in KINDS:
-            out[int(num.group(1))] = found[kind_at]
+        num = re.match(r"^(\d+)", found[cols[0]]) if len(found) > max(cols) else None
+        if num:
+            out.append((int(num.group(1)), [found[i] for i in cols]))
     return out
+
+
+def check_kinds(body: str) -> dict[int, str]:
+    """`## 受け入れ条件の確認` の表の {条件の番号: 区分}。表が無ければ空。区分の語が違う行は読まない。"""
+    return {n: row[1] for n, row in check_rows(body, CHECKS_HEAD) if row[1] in KINDS}
 
 
 def kinds_lack(body: str) -> list[int]:
