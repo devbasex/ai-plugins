@@ -456,7 +456,7 @@ def test_helper_task_confirmed_retry_resumes_from_the_step_that_gated(monkeypatc
 def test_gate_step_picks_the_earliest_gated_step_in_plan_order(tmp_path):
     """最後の実行の中では、facts の 10 が release の 10 より前に並んでも、プランの並びで前の release から流す。"""
     rows = [{"kind": "run", "from": None}, {"kind": "step", "step": "facts", "exit": 10}, {"kind": "step", "step": "release", "exit": 10}]
-    assert pgate.gate_step(_gate_done(tmp_path, rows)) == ("release", "release")
+    assert pgate.gate_step(_gate_rows_done(tmp_path, rows)) == ("release", "release")
 
 
 def test_gate_step_ignores_gated_rows_of_a_previous_run(tmp_path):
@@ -464,10 +464,10 @@ def test_gate_step_ignores_gated_rows_of_a_previous_run(tmp_path):
     rows = [{"kind": "run", "from": None}, {"kind": "step", "step": "release", "exit": 10},
             {"kind": "run", "from": "release"}, {"kind": "step", "step": "release", "exit": 0},
             {"kind": "step", "step": "verify", "exit": 10}]  # fmt: skip
-    assert pgate.gate_step(_gate_done(tmp_path, rows)) == ("release", "verify")
+    assert pgate.gate_step(_gate_rows_done(tmp_path, rows)) == ("release", "verify")
 
 
-def _gate_done(tmp_path, rows):
+def _gate_rows_done(tmp_path, rows):
     """progress.jsonl に rows を書いた状態と、release → verify → facts → approval-post のプランを指す関門の done。"""
     state = tmp_path / "state"
     state.mkdir()
