@@ -76,15 +76,17 @@ CD はリリースのコンテキストの版上げ・CHANGELOG・`publish` の�
 | 取り込み方の表 | ブランチ戦略の表（`lib/branch_flow.py` の `PROMOTIONS`） | 行 | — | 行の値（許す起点・宛先・文書の宛先・残すか・集めるか） |
 | スプリントブランチとスプリントの PR | スプリントの経路（`supervise_lib/sprint_waves.py` の検査のプラン） | スプリントの PR | コミット | head・宛先・上げ幅のラベル |
 | 本番のプラン | 本番のプランの組み立て（`supervise_lib/release_templates.py`） | 本番のプランの種類 `trunk` | ステップ | ステップの並び |
-| main へのマージ | main へのマージ（`release_lib/merge_method.py`） | main 宛ての PR | 人のマージの記録 | 承認した head・マージの方式・承認ゲートを通ったか・マージコミット |
+| main へのマージ | main へのマージ（`release_lib/merge_method.py`） | main 宛ての PR（版上げの PR を除く） | 人のマージの記録 | 承認した head・マージの方式・承認ゲートを通ったか・マージコミット |
 | main のバージョン | CD（`release_lib/trunk_cd.py`） | 版上げの PR | タグ・GitHub Release | バージョン・上げ幅・範囲 |
 
-**main へのマージの書き手は `merge_method.py` 1 つにする。** main 宛ての PR をマージする・キューへ入れる・人のマージの記録を書く API の呼び出しは、このモジュールだけが打つ。I4・I5・I6・I11 はこのモジュールの中で守る。次の 2 つは、このモジュールを呼ぶだけで、マージの API を直接打たない。
+**main へのマージの書き手は `merge_method.py` 1 つにする。** main 宛ての PR（版上げの PR を除く）をマージする・キューへ入れる・人のマージの記録を書く API の呼び出しは、このモジュールだけが打つ。I4・I5・I6・I11・I13・I14 はこのモジュールの中で守る。次の 2 つは、このモジュールを呼ぶだけで、マージの API を直接打たない。
 
 | 呼び手 | 渡すもの |
 | --- | --- |
 | `trunk-steps.py land` | 承認した head と、承認ゲートを通ったこと |
 | `merge-when-green` の `merge.py` | 承認ゲートを通ったか（`--gate-approved` から） |
+
+**版上げの PR の自動マージの依頼は、main のバージョンの集約の書き手 `trunk_cd.py` が打つ。** 版上げの PR は main のバージョンの集約の根であり、main へのマージの集約に含めない。`trunk_cd.py` が `merge_method.py` を呼ぶと、`merge_method.py` が版上げの PR の見分け（I3）で `trunk_cd.py` を呼ぶのと合わせて依存が輪になるためである。この経路では I4 と I5 を `trunk_cd.py` が守る。I4 は、自分が作るか取り込んだ後に読み直した head を `gh pr merge --merge --match-head-commit <SHA>` へ渡して守る。I5 は、依頼の前に I3 の判定（head のブランチが `release/v` で始まり、差分が版数と説明だけ）を通った PR にだけ依頼して守る。チェックの後のキューへの投入とマージは GitHub が行う（STD8）。
 
 **main のバージョンを変えてよいかの判定は `trunk_cd.py` に置く。** PR の検査（`pr-check`）と I5 の判定（版上げの PR を通すか）は、この判定の関数を呼ぶ。
 承認の記録そのもの（`lib/approved_commit.py` の `record_approval`）は、今のリリース承認ゲートが書く。`land` は読むだけである。
@@ -97,14 +99,16 @@ CD はリリースのコンテキストの版上げ・CHANGELOG・`publish` の�
 | I2 | スプリントブランチとスプリントの PR | 行 `trunk` では、スプリントブランチは `origin/<本番ブランチ>` から切り、スプリントの PR の宛先は本番ブランチである | 起点か宛先が違えば worktree の用意か PR の作成が止まる |
 | I3 | main のバージョン | 行 `trunk` で、本番ブランチ宛ての PR はバージョンの置き場（`plugin.json` の `version`）を変えない。例外は版上げの PR だけで、head のブランチが `release/v` で始まり、差分が版数と説明だけ（`scripts/ci-heavy-skip.py` の `version_only` と同じ判定）であることで見分ける | PR の検査（`guard`）が落ち、理由に「バージョンは CD がマージの後に上げる」を出す |
 | I4 | main へのマージ | 本番ブランチへ入れる head は、承認した head だけである。キューへの投入とマージは承認した head を GitHub へ渡して打つ | head が違えば投入もマージもせずに止まり、承認を取り直すよう理由を返す |
-| I5 | main へのマージ | 行 `trunk` で、リリース承認ゲートを通らずに本番ブランチへ入る PR（設計 PR・確定仕様化の PR・版上げの PR）は、配るプラグインの中身を変えない。版上げの PR は版数と説明だけを変える | マージが止まり、理由に「リリース対象を変える PR は本番のプランを通す」と変わったプラグインを出す |
-| I6 | main へのマージ | 行 `trunk` ではマージの方式の記述が必須で、設定の方式と本番ブランチの ruleset（merge queue の規則の有無・`strict_required_status_checks_policy`）が一致する。方式があるとき迂回のマージ（`--admin`）を打たない。ruleset がレビューの承認を求め、PR に承認が無ければ止まる | マージの前に止まり、設定の値と ruleset の値を理由に出す |
+| I5 | main へのマージ | 行 `trunk` で、リリース承認ゲートを通らずに本番ブランチへ入る PR（設計 PR・確定仕様化の PR・版上げの PR）は、配るプラグインの中身と、利用者の設定（`.ndf/` の下）・指示書（`AGENTS.md`・`CLAUDE.md`）を変えない（C7）。版上げの PR は版数と説明だけを変える（`trunk_cd.py` が自動マージの依頼の前に確かめる） | マージが止まり、理由に「リリース対象・利用者の設定・指示書を変える PR は本番のプランを通す」と変わったプラグインとファイルを出す。設定と指示書の変更は、リリース承認ゲートか人の GitHub でのマージで人が見る |
+| I6 | main へのマージ | 行 `trunk` ではマージの方式の記述が必須で、設定の方式と本番ブランチの ruleset（merge queue の規則の有無・`strict_required_status_checks_policy`）が一致する | マージの前に止まり、設定の値と ruleset の値を理由に出す |
 | I7 | 本番のプラン | 行 `trunk` の本番のプランは、リリース承認ゲートの後にコードを変えて本番の PR へ push するステップ（作業のステップ・直しのステップ）を持たない | テンプレートを組む関数がそのステップを含めたらテストが落ちる |
-| I8 | 本番のプラン | 行 `trunk` の本番のプランは、同期の PR・次のバージョンのブランチ・開発版のデプロイ（`--channel dev`・`verify-install --ref <ベースブランチ>`）のステップを持たない | 行の値で分けた振る舞いをテストが見る |
+| I8 | 本番のプラン | 行 `trunk` の本番のプランは、同期の PR・次のバージョンのブランチ・開発版のデプロイ（`--channel dev` と、開発版のステージでの導入の確かめ `verify-install --ref <ベースブランチ>`）のステップを持たない。本番ブランチへの導入の確かめ（`verify-install --ref <本番ブランチ>`）は持つ。行 `trunk` では 2 つの ref が同じブランチになるが（I1）、禁止するのは開発版のステージに置く確かめだけである | 行の値で分けた振る舞いをテストが見る |
 | I9 | main のバージョン | CD はリリース対象の変化が範囲にあるときだけバージョンを上げ、開いた版上げの PR があれば新しく作らない | 変化が無い・開いた PR があるときは版上げの PR を作らずに成功で終わる |
 | I10 | 取り込み方の表 | 行 `whole`・`selected`・宣言の無い既定の振る舞いを変えない | 今のテストが落ちる |
 | I11 | main へのマージ | 人が GitHub で本番の PR をマージした後に工程を再開すると、マージ済みとして後の工程へ進み、もう一度マージしない。人のマージの記録は PR のコメントに 1 回だけ書く | マージ済みの PR へマージかキューへの投入を打てばテストが落ちる |
 | I12 | スプリントブランチとスプリントの PR | 行 `trunk` のスプリントのステージは、開発版のステージを置かない | 行の値で分けた振る舞いをテストが見る |
+| I13 | main へのマージ | 行 `trunk` で方式があるとき、`production_merge.admin` が真でも迂回のマージ（`--admin`）を打たない。迂回すると ruleset の必須のチェックと承認を飛ばし、承認の外の head が main へ入りうるためである | `--admin` を付けずにマージかキューへの投入へ進む。ruleset が拒めば止まり、理由に「方式があるため `--admin` を使わない」と ruleset が拒んだ理由を出す |
+| I14 | main へのマージ | 行 `trunk` で本番ブランチの ruleset がレビューの承認を求めるとき、PR に求める数の承認が無ければマージもキューへの投入もしない。投入しても GitHub が受け付けず、待ちが終わらないためである | マージの前に止まり、理由に ruleset が求める承認の数と PR の承認の数を出し、GitHub で PR を承認するよう返す |
 
 ### ドメインイベント
 
@@ -131,10 +135,13 @@ E9 は 2 回の push に分かれる。スプリントの PR のマージの pus
 | スプリントの PR | スプリントブランチから宛先へ出す、検査のプランの PR。取り込み方 `trunk` では宛先が本番ブランチで、本番の PR を兼ねる | 意味の変更（`trunk` の行の宛先を足した） |
 | 本番の PR | 本番チャネル（main）へ入れる Pull Request。取り込み方 `trunk` ではスプリントの PR が兼ね、版上げの PR は含まない | 意味の変更（今の NDF の `trunk` の行を足した） |
 | 版上げの PR | 取り込み方 `trunk` で、main へのマージの後に CD が main の先端から作る、版数と説明だけを変える main 宛ての PR（head は `release/v<バージョン>`） | 意味の変更（今の NDF の `trunk` の行の意味を足した） |
+| GitHub flow | スプリントブランチを本番ブランチ（main）から切り、PR で main へマージし、マージをリリースとするブランチ戦略。設定の値と取り込み方の表の行の名前は `trunk` | 足す語 |
+| 同期の PR | 今の NDF の行 `whole`・`selected` で、本番のリリースの後に main の変更をベースブランチ（develop）へ戻す PR（`release/v<版>-sync`）。GitHub flow の行では作らない | 足す語 |
+| 切り替えの手順 | リポジトリのブランチ戦略を、develop と main の運用から GitHub flow へ切り替える一度きりの手順。利用者が新しい版へ移るときの「移行の手順」とは別 | 足す語 |
 
-4 語の意味の変更は、この設計と同じ PR で用語集（`docs/glossary.md`・`docs/glossary/glossary.json`）へ反映する。この文書・決定の記録・切り替えの手順は、この対象を「版上げの PR」、そのコミットを「版上げのコミット」（用語集の今の行）とだけ呼ぶ。
+4 語の意味の変更と 3 語の追加は、この設計と同じ PR で用語集（`docs/glossary.md`・`docs/glossary/glossary.json`）へ反映する。この文書・決定の記録・切り替えの手順は、この対象を「版上げの PR」、そのコミットを「版上げのコミット」（用語集の今の行）とだけ呼ぶ。
 
-GitHub flow・同期の PR・切り替えの手順・merge queue・マージの方式・承認した head・ブランチ戦略は、用語集の今の行の意味のまま使う。
+merge queue・マージの方式・承認した head・ブランチ戦略は、用語集の今の行の意味のまま使う。
 
 ## 外部の調査
 
@@ -206,8 +213,8 @@ GitHub flow・同期の PR・切り替えの手順・merge queue・マージの�
 | スプリントのステージ `supervise_lib/sprint.py`・`sprint_waves.py`（変更） | `trunk` では検査のプランからマージのステップを外し、開発版のステージを置かず、本番のステージにスプリントの PR を渡す。並列のレーンはまとめたリリースへ依頼を送らない。進め方 `fast` を断る |
 | 本番のプランの組み立て `supervise_lib/release_templates.py`・`release_flow.py`（変更） | 本番のプランの種類 `trunk` を足す。並びは承認資料 → リリース承認ゲート → `land` → `confirm` → 導入の確かめ（`--ref <本番ブランチ>`）→ 記録 → 後片付けで、作業のステップと直しのステップを持たない（I7・I8） |
 | GitHub flow のエントリポイント `trunk-steps.py`（新設） | サブコマンド `land`・`confirm`・`cd`・`pr-check` を持つ。行が `trunk` でなければ `not_applicable` で何もしない。`land` は承認の記録（`lib/approved_commit.py`）を読み、承認した head と承認ゲートを通ったことを `merge_method.py` へ渡して、結果を結果 JSON にするだけで、マージの API を打たない |
-| main へのマージ `release_lib/merge_method.py`（新設） | main へのマージの集約のただ 1 つの書き手。マージ済みからの再開と人のマージの記録（I11）、承認した head の照合（I4）、承認ゲートを通らない PR が配るプラグインを変えていないかの判定（I5。版上げの PR の見分けは `trunk_cd.py` の判定を呼ぶ）、設定の方式と ruleset の照合（I6）、`merge-queue` の投入（`enqueuePullRequest`）と `strict` の祖先の確かめとマージ、マージかキューから外れるまでの待ち。`land` と `merge-when-green` が呼ぶ |
-| CD の版上げ `release_lib/trunk_cd.py`（新設） | main のバージョンの集約の書き手。範囲の読み・上げ幅（ラベル）・版上げの PR の作成と自動マージの依頼・`strict` での版上げの PR への main の取り込み・タグの作成（今の `publish` を呼ぶ）・CD の確かめ（`confirm`）。版数を変えてよい PR かの判定（I3。版上げの PR の見分け）を持ち、`pr-check` と `merge_method.py` に使わせる |
+| main へのマージ `release_lib/merge_method.py`（新設） | main へのマージの集約のただ 1 つの書き手。マージ済みからの再開と人のマージの記録（I11）、承認した head の照合（I4）、承認ゲートを通らない PR が配るプラグイン・利用者の設定・指示書を変えていないかの判定（I5。版上げの PR の見分けは `trunk_cd.py` の判定を呼ぶ）、設定の方式と ruleset の照合（I6）、迂回のマージを打たないこと（I13）、承認の数の確かめ（I14）、`merge-queue` の投入（`enqueuePullRequest`）と `strict` の祖先の確かめとマージ、マージかキューから外れるまでの待ち。`land` と `merge-when-green` が呼ぶ |
+| CD の版上げ `release_lib/trunk_cd.py`（新設） | main のバージョンの集約の書き手。範囲の読み・上げ幅（ラベル）・版上げの PR の作成と自動マージの依頼（版上げの PR は main へのマージの集約の外で、I3 の判定を通った PR へ読んだ head を渡して頼む）・`strict` での版上げの PR への main の取り込み・タグの作成（今の `publish` を呼ぶ）・CD の確かめ（`confirm`）。版数を変えてよい PR かの判定（I3。版上げの PR の見分け）を持ち、`pr-check` と `merge_method.py` に使わせる |
 | マージの部品 `merged_lib/merge.py`（変更） | 行 `trunk` で本番ブランチ宛てのとき、マージを `merge_method.py` へ渡し、自分ではマージの API を打たない。`--gate-approved` の有無を承認ゲートを通ったかとして渡す |
 | PR の宛先の検査 `scripts/check-pr-base.sh`（変更） | 宛先の設定が `trunk` なら、head の名前を問わず通し、`trunk-steps.py pr-check` を打つ（I3） |
 | CD の workflow `.github/workflows/release-cd.yml`（変更） | main への push で `trunk-steps.py cd` を打つ。行が `trunk` でなければ今の `publish` だけが働く |
@@ -289,7 +296,7 @@ flowchart TB
 | `trunk-steps.py confirm --merge-commit <SHA> --out <CD の結果のファイル>` | 新設。`--out` には今の CD の結果のファイルの形（`release_lib/cd_result.py` の `save_result`）で書く。範囲にリリース対象の変化が無く版が空のときは終了コード 3。マージコミットを含む main の先端にタグと GitHub Release がそろうのを、`ci_budget` の秒まで待つ。`status` は `ok` か `stopped`。`ok` はタグと GitHub Release がそろった（`outputs.version` に出したバージョン）か、そのマージの push の CD の実行が成功で終わり、範囲にリリース対象の変化が無かった（`outputs.version` は空、`summary` に「リリース対象の変化が無い」）。止まった理由の原因は `cd_failed`（そのマージの push か版上げの PR のマージの push の CD の実行が失敗で終わった。`cd` が `precondition` で止まった場合を含む。`summary` に実行の URL と、実行の注釈に `cd` が書いた原因と理由を出す）・`ci_pending`（`ci_budget` の秒を超えた。`summary` に版上げの PR の番号と、そのチェックかキューのどこで待っているかを出す）。`outputs` に `bump_pr`（版上げの PR の番号。無ければ空） | 新設 |
 | `trunk-steps.py cd --revision <SHA>` | 新設。`release-cd.yml` が打つ。足りないタグの作成（今の `publish`）→ リリース対象の変化があり開いた版上げの PR が無ければ、版上げの PR の作成と自動マージの依頼。`strict` では、開いた版上げの PR が main の先端を含まなければ取り込む（「処理の流れ」の手順 2）。秘密 `NDF_RELEASE_TOKEN` が無ければタグの作成までを済ませ、`stopped`（原因 `precondition`）で終わる。止まったときは終了コード 1 で実行を失敗にし、原因と理由（秘密の名前）を実行の注釈（`::error::`）に書く。`confirm` はこの注釈を読む | 新設 |
 | `trunk-steps.py pr-check --base <SHA> --head <SHA> --head-ref <名前>` | 新設。`check-pr-base.sh` が打つ。バージョンの置き場を変えた PR に終了コード 1 と理由「バージョンは CD がマージの後に上げる」 | 新設 |
-| `merged-steps.py merge-when-green` | 行 `trunk` で本番ブランチ宛てのとき、マージを `merge_method` へ渡す。承認ゲートの承認（`--gate-approved`）が無い PR が配るプラグインを変えていれば止める（I5） | あり。`whole`・`selected` では今のまま |
+| `merged-steps.py merge-when-green` | 行 `trunk` で本番ブランチ宛てのとき、マージを `merge_method` へ渡す。承認ゲートの承認（`--gate-approved`）が無い PR が配るプラグイン・利用者の設定・指示書を変えていれば止める（I5） | あり。`whole`・`selected` では今のまま |
 | `release-cd.yml` | `publish` の代わりに `trunk-steps.py cd` を打つ。秘密 `NDF_RELEASE_TOKEN` を環境に渡す。`pull-requests: write` の権限を足す | あり。`trunk` でなければ `cd` は今の `publish` だけを行う |
 
 上げ幅は、範囲にマージされた PR のラベル（`release:major`・`release:minor`・`release:patch`）の最大である。ラベルの無い PR は PATCH とする（#3572 の決定 7 と同じ）。
@@ -389,18 +396,19 @@ stateDiagram-v2
 | 受け入れ条件 7・I7 | `trunk` の本番のプランに、作業のステップと直しのステップが無い | テンプレートに `judge_fix_steps(fix=True)` を使うと落ちる |
 | 受け入れ条件 8 | `merge-queue` で `enqueuePullRequest` に承認した head を渡し、キューから外れた PR を `queue_removed` で止める（偽の GraphQL の応答）。実物は切り替えの手順の確かめで見る | 外れた PR を入れ直すと落ちる |
 | 受け入れ条件 9・I6 | 方式 `merge-queue` で ruleset に merge queue が無い、`strict` で `strict_required_status_checks_policy` が偽、方式が無い、のそれぞれで `precondition` と 2 つの値を出して止まる | 既定の方式へ倒すと落ちる |
-| I6（迂回） | 方式があるとき、`production_merge.admin` が真でも `--admin` を打たない | `--admin` を付けると落ちる |
+| I13 | 方式があるとき、`production_merge.admin` が真でも `--admin` を打たない | `--admin` を付けると落ちる |
+| I14 | ruleset が承認を 1 件求め PR の承認が 0 件のとき、マージもキューへの投入も打たずに `precondition` と 2 つの数を出して止まる（偽の GitHub の応答） | 承認の無い PR を投入すると落ちる |
 | 受け入れ条件 10・I8 | `trunk` の本番のプランと `cd` の結果に、同期の PR と次のバージョンのブランチが出ない | `_merge_sync_pr` を呼ぶと落ちる |
-| 受け入れ条件 11・I8・I12 | `trunk` のスプリントのステージに開発版のステージが無く、本番のプランに `--channel dev`・`verify-install --ref <ベースブランチ>` が無い | 開発版のステージを置くと落ちる |
+| 受け入れ条件 11・I8・I12 | `trunk` のスプリントのステージに開発版のステージが無く、本番のプランに `--channel dev` が無く、`verify-install` は `confirm` の後の本番ブランチへの導入の確かめ（`--ref <本番ブランチ>`）の 1 つだけである | 開発版のステージを置く・本番ブランチへの導入の確かめを外すと落ちる |
 | 受け入れ条件 12・I10 | `selected` の今のテスト（起点・宛先・リリースブランチの組み立て・同期の PR）が変えずに通る | 行の判定を `trunk` と共有して壊すと落ちる |
 | 受け入れ条件 13・I10 | `release-steps release --channel dev` の今のテストが変えずに通る | 開発版の経路に `trunk` の分岐を入れると落ちる |
 | 受け入れ条件 14・I10 | 宣言の無いリポジトリが `whole` で動く今のテストが変えずに通る | 既定を `trunk` にすると落ちる |
 | I1 | 行 `trunk` でベースブランチと本番ブランチが違う設定は `FlowError` | 検査を外すと落ちる |
 | 受け入れ条件 3（`strict` の取り込み） | `strict` で、開いた版上げの PR が main の先端を含まない push（文書だけの範囲を含む）の `cd` が、読んだ head を渡して取り込み、新しい head で自動マージを頼み直し、版上げの PR を 2 本目に作らない（偽の GitHub の応答） | 開いた PR で早く終わり取り込まない・古い head で頼み直すと落ちる |
 | 受け入れ条件 8（投入の成否） | `enqueuePullRequest` が誤りを返さず PR がキューに無い（自動マージに倒れた）応答で、`land` が `not_enqueued` で止まり、自動マージを外す | 応答だけで成功とみなすと落ちる |
-| I4・I5（書き手が 1 つ） | `land` と `merge-when-green` の `trunk` の経路が、マージとキューへの投入の API を `merge_method.py` を通してだけ打つ | `merge.py` か `trunk-steps.py` から `gh pr merge` を直接打つと落ちる |
+| I4・I5（書き手が 1 つ） | `land` と `merge-when-green` の `trunk` の経路が、マージとキューへの投入の API を `merge_method.py` を通してだけ打つ。`trunk_cd.py` は I3 の判定を通った版上げの PR にだけ、読んだ head を `--match-head-commit` へ渡して自動マージを頼む | `merge.py` か `trunk-steps.py` から `gh pr merge` を直接打つ・`trunk_cd.py` が版上げの PR でない PR か古い head で頼むと落ちる |
 | 非機能（運用・保守性） | `confirm` が、`ci_budget` を超えると `ci_pending` と版上げの PR の番号を、CD の実行の失敗（`precondition` の注釈を含む）で `cd_failed` と実行の URL を返す | 待ちの上限で `ok` を返す・原因を空にすると落ちる |
-| I5 | 行 `trunk` で承認ゲートの承認の無い PR がプラグインを変えていれば `merge-when-green` が止まり、文書だけの PR と版上げの PR は通る | 判定を外すと落ちる |
+| I5 | 行 `trunk` で承認ゲートの承認の無い PR がプラグイン・`.ndf/` の下・`AGENTS.md`・`CLAUDE.md` のどれかを変えていれば `merge-when-green` が止まり、文書だけの PR と版上げの PR は通る | 判定を外す・設定か指示書だけを変える PR を通すと落ちる |
 | 受け入れ条件 15〜19 | 設計文書の表で見る（この文書と [issue-3641-design-switch.md](issue-3641-design-switch.md) ） | — （設計の記述で、コードのテストにしない） |
 
 ## 設計の結果
