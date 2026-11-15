@@ -54,7 +54,7 @@ def test_a_result_that_is_not_a_listen_gate_is_left_as_it_is(st, repo, new_table
 
 
 def _hub(head):
-    return SimpleNamespace(pull=lambda n: SimpleNamespace(head_sha=head))
+    return SimpleNamespace(pull=lambda n: SimpleNamespace(head_sha=head, merged=False))
 
 
 def _answered(st, tid, head):

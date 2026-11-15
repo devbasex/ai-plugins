@@ -42,10 +42,15 @@ MATERIAL_DIR = "materials"
 
 @dataclass(frozen=True)
 class Target:
-    """見る対象。`head` は PR の head の SHA、`material` は承認資料の sha256。分からなければ None。"""
+    """見る対象。`head` は PR の head の SHA、`material` は承認資料の sha256。分からなければ None。
+
+    `merged` は読んだ時点で PR がマージ済みか（読んでいなければ None）。照合と記録の形には入れない（人のマージを読むかの
+    判断にだけ使い、まだマージされていない待ちで副命令を起動しないため。#3587）。
+    """
 
     head: Optional[str] = None
     material: Optional[str] = None
+    merged: Optional[bool] = field(default=None, compare=False)
 
     def differs(self, seen: Target) -> list[str]:
         """答えた者が見た対象 `seen` と今の対象の違い（今の側が分かる項目だけを比べる）。"""

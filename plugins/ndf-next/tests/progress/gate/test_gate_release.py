@@ -333,6 +333,16 @@ def test_an_unmerged_production_pr_keeps_the_release_gate_waiting(st, lane_sprin
     assert gate.waiting(run.read(st, tid)) is not None
 
 
+def test_an_unmerged_pr_read_by_the_recheck_does_not_start_the_merge_check(st, lane_sprint, flow, tmp_path):
+    """待ちの読み直しで本番の PR が未マージと分かれば、人のマージを読む副命令を起動しない（待ちの度に CLI を起動しない）。"""
+    _pid, tid = lane_sprint()
+    _at_release(st, tid, flow)
+    calls: list = []
+    unmerged = lambda _q: gate.Target(head=MERGED_HEAD, merged=False)  # noqa: E731
+    assert gate.take_reply(st, tid, {}, unmerged, runner=_runner(MERGED_REPORT, calls), cwd=tmp_path) is None
+    assert calls == [] and gate.waiting(run.read(st, tid)) is not None
+
+
 def test_a_broken_reply_of_the_merge_check_is_refused_and_the_gate_keeps_waiting(st, lane_sprint, flow, tmp_path):
     _pid, tid = lane_sprint()
     _at_release(st, tid, flow)

@@ -184,7 +184,8 @@ def take_reply(
 
     見た対象は依頼を出したときの対象で、その後に PR の head が変わっていれば答えは断られる（今の対象との照合は `answer`）。
     答えが無く、問いが PR を持ち、本番の PR がマージ済みなら、人のマージを承認の答えとして書く（E6）。GitHub を読まない
-    呼び出し（`observe` が `no_observe` で `runner` も無い）は人のマージを読まない。
+    呼び出し（`observe` が `no_observe` で `runner` も無い）は人のマージを読まない。読み直し（`observe`）が未マージと
+    返せば副命令を起動しない（待ちの読み直しの度に CLI を起動しない）。
     """
     q = waiting(run.read(st, table_id))
     if q is None or q.gate != RELEASE_GATE:
@@ -192,6 +193,8 @@ def take_reply(
     reply = _organizer_reply(st, q, env)
     if reply is None or reply.get("result") not in ORGANIZER_ANSWERS:
         if q.pr is None or (runner is None and observe is no_observe):
+            return None
+        if observe(q).merged is False:  # 読み直しで未マージと分かれば、人のマージを読む副命令を起動しない
             return None
         place = cwd if cwd is not None else Path.cwd()
         return _merge_answer(st, table_id, q, observe, runner if runner is not None else invoke.run_command, place)
