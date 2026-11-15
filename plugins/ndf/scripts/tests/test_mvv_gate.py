@@ -410,3 +410,34 @@ def test_an_unreadable_revise_note_returns_to_the_gate(sprint):
 def test_a_gate_without_notes_has_no_revise_rule(sprint):
     run(sprint, FOLLOW)
     assert "出し直しの指摘" not in (sprint["tmp"] / "prompt.txt").read_text(encoding="utf-8")
+
+
+P2_ROW = "| P2 | 代表のリポジトリの種類のどれかを、NDF で扱えなくする | 戻す手段が無くなる |"
+MVV_WITH_P2 = (
+    "# MVV\n\n## Mission\n届ける\n\n## Vision\n止まらない\n\n## Value\n\n4. **どのプロジェクトでもそのまま使える**\n\n"
+    "## 必ず人の承認が要る操作\n\n| # | 操作 | 理由 |\n| --- | --- | --- |\n"
+    "| P1 | 配布物の取得元を変える | 利用者全員に効く |\n" + P2_ROW + "\n"
+)
+
+
+def test_the_p2_row_of_the_project_mvv_goes_into_the_prompt_and_the_basis():
+    """#3618 の受け入れ条件 9（B）の材料: P2 の行を持つ MVV は、判定の指示と根拠の番号に P2 を渡す。"""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("mvv_gate_for_p2", SCRIPT)
+    gate = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(gate)
+    project = gate.pm.ProjectMvv("approved", version=8, sha256=sha(MVV_WITH_P2), body=MVV_WITH_P2)
+    prompt = gate.build_prompt(project, None, "design", ["# 設計\n"])
+    assert P2_ROW in prompt
+    assert gate.pm.basis(["P2", "Value 4"], project) == ["P2", "Value 4"]
+
+
+def test_design_naming_p2_never_skips_the_gate_even_when_it_follows(sprint):
+    """#3618 の受け入れ条件 9（B）: 判定が follow でも、boundary が P2 を名指せば承認ゲートを省かない。"""
+    named = "P2: develop を経て本番へ出す運用を代わりの形なしに扱えなくする"
+    text = json.dumps({"verdict": "follow", "reasons": ["Value 4"], "boundary": [named], "basis": ["P2"]}, ensure_ascii=False)
+    code, out, rows = run_design(sprint, ["issues/x-design.md"], text=text)
+    assert (code, out["status"]) == (10, "gate")
+    assert rows[-1]["passed"] is False and rows[-1]["boundary"] == [named]
+    assert "設計承認ゲート" not in gates(sprint)
