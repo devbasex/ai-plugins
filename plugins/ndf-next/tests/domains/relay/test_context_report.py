@@ -152,3 +152,53 @@ def test_mark_bounds_unknown_when_started_by_handoff_without_marks(tmp_path):
     got = context_report.report("#1", rows, [], None)
     assert got["parts"]["conductor"]["calls"] == 5
     assert got["unknown_parts"] == {"restore": 1, "handoff": 1}
+
+
+def _read_call(i: int, ts: str, read: int) -> dict:
+    usage = {"input_tokens": 1, "output_tokens": 1, "cache_read_input_tokens": read}
+    return {"type": "assistant", "timestamp": ts, "message": {"id": f"r{i}", "model": "claude-x", "usage": usage}}
+
+
+def test_sum_sessions_adds_parts_rounds_and_counts_unknowns(tmp_path):
+    """現状固定（I-029）: セッションごとの区分の合算・費用と秒の丸め・自動圧縮・復元・印の無い区間の数え方。"""
+    compact = {"type": "system", "subtype": "compact_boundary", "compactMetadata": {"trigger": "auto"}}
+    a = _transcript(
+        tmp_path / "a.jsonl",
+        [
+            {"type": "user", "message": {"content": "続きは .ndf/handoff/x.md を読む"}},
+            _call(0, "2026-11-15T01:00:00Z"),
+            _call(1, "2026-11-15T01:00:10Z"),
+            _call(2, "2026-11-15T01:00:25Z"),
+            compact,
+        ],
+    )
+    b = _transcript(
+        tmp_path / "b.jsonl",
+        [
+            _read_call(0, "2026-11-15T02:00:00Z", 3),
+            _read_call(1, "2026-11-15T02:00:00.400Z", 3),
+            compact,
+            compact,
+        ],
+    )
+    rows = [
+        {"at": "2026-11-15T00:59:00Z", "session_id": "a", "transcript": a, "work": "#1"},
+        {"at": "2026-11-15T01:00:05Z", "session_id": "a", "work": "#1", "event": context_records.MARK_RESTORED},
+        {"at": "2026-11-15T01:59:00Z", "session_id": "b", "transcript": b, "work": "#1"},
+        {"at": "2026-11-15T02:30:00Z", "session_id": "b", "work": "#1", "verdict": "再起動", "reason": "手動"},
+    ]
+    got = context_report.report("#1", rows, [], None)
+    assert got["sessions"] == 2
+    assert got["parts"] == {
+        "conductor": {"inp": 202, "out": 22, "read": 6, "w5": 0, "w1h": 0, "calls": 4, "seconds": 15, "cost": 313},
+        "ndf": {"inp": 0, "out": 0, "read": 0, "w5": 0, "w1h": 0, "calls": 0, "seconds": 0, "cost": 0},
+        "handoff": {"inp": 0, "out": 0, "read": 0, "w5": 0, "w1h": 0, "calls": 0, "seconds": 0, "cost": 0},
+        "restore": {"inp": 100, "out": 10, "read": 0, "w5": 0, "w1h": 0, "calls": 1, "seconds": 0, "cost": 150},
+    }
+    assert got["restores"] == [{"context": 100, "calls": 1}]
+    assert got["unknown_parts"] == {"restore": 0, "handoff": 1}
+    assert got["auto_compacts"] == 3
+    rows.append({"at": "2026-11-15T03:00:00Z", "session_id": "c", "transcript": str(tmp_path / "missing.jsonl"), "work": "#1"})
+    missing = context_report.report("#1", rows, [], None)
+    assert missing["sessions"] == 3 and missing["auto_compacts"] == context_records.UNKNOWN
+    assert context_report.report("#9", rows, [], None)["auto_compacts"] == context_records.UNKNOWN
