@@ -251,6 +251,11 @@ def test_build_failure_after_carry_answers_failed_and_asks(env, tmp_path, carry,
     assert ans["result"] == "failed" and "組み立ての失敗" in ans["reason"] and build_question(main)["kind"] == "build"
 
 
+def test_world_keeps_original_build_without_patching_release_module():
+    """補助モジュールは差し替える前の build_plans を自分の定数に持ち、本番のモジュールへ属性を足さない。"""
+    assert prw.ORIG_BUILD is prl.build_plans and not hasattr(prl, "_orig_build")
+
+
 def test_answer_to_the_second_presentation_does_not_check_and_drops_carried(env, tmp_path, carry):
     """受け入れ条件 10・I3・I8: 確かめ直しが文書だけでなく提示 2 の問いへ答えたら、判定せず `take` で確定し、`added` は空。"""
     main = env["main"]
