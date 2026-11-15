@@ -142,12 +142,29 @@ jobs:
       - uses: astral-sh/setup-uv@v10.3.3
         with:
           enable-cache: true
-          cache-dependency-glob: uv.lock
+          cache-dependency-glob: |
+            uv.lock
+            plugins/ndf-next/uv.lock
       - env:
           DOCS_TESTS: ${{ needs.ci-scope.outputs.docs_tests }}
+        # plugins/ndf-next のテストは根の環境では読めない（conftest がプラグインの pythonpath を前提にする）。
+        # ndf-next.yml と同じく、プラグインの根を起点にその依存の環境で流す
         run: |
           read -ra tests <<< "$DOCS_TESTS"
-          uv run --frozen --project . --all-extras pytest "${tests[@]}" -q -n auto
+          root=(); next=()
+          for t in "${tests[@]}"; do
+            case "$t" in
+              plugins/ndf-next/*) next+=("${t#plugins/ndf-next/}") ;;
+              *) root+=("$t") ;;
+            esac
+          done
+          if [ ${#root[@]} -gt 0 ]; then
+            uv run --frozen --project . --all-extras pytest "${root[@]}" -q -n auto
+          fi
+          if [ ${#next[@]} -gt 0 ]; then
+            cd plugins/ndf-next
+            uv run --frozen --project . pytest "${next[@]}" -q -n auto
+          fi
 
   # ruleset の必須のチェックは `pytest` という名前の結果を 1 つ待つ。分けたジョブの結果を
   # ここで 1 つにまとめる。名前を変えると ruleset の変更が要る。
