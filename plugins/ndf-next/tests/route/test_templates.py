@@ -151,3 +151,18 @@ def test_unknown_shared_step_is_refused():
 def test_worker_steps_expand_to_fixed_shape(template, step, expected):
     found = [s for s in route.expanded(route.templates()[template])["steps"] if s["id"] == step]
     assert found == [expected]
+
+
+def test_omitted_remote_in_a_linked_worktree_reads_the_main_declaration(tmp_path):
+    """linked worktree から打っても、メインディレクトリの宣言の remote を使う（作業場所の古い宣言を読まない）。"""
+    t = route.choose("immediate_fix")
+    main = _repo(tmp_path / "main", {"version": 1, "remote": "origin"})
+    commit = ["git", "-C", str(main), "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m", "a"]
+    subprocess.run(commit, check=True)
+    linked = tmp_path / "linked"
+    subprocess.run(["git", "-C", str(main), "worktree", "add", "-q", "--detach", str(linked)], check=True)
+    (linked / ".ndf").mkdir(exist_ok=True)
+    (linked / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "remote": "origin"}), encoding="utf-8")
+    (main / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "remote": "upstream"}), encoding="utf-8")
+    given = {"worktree": str(linked), "branch": "fix/x", "base": "main"}
+    assert route.derived(t, given, linked)["remote"] == "upstream"

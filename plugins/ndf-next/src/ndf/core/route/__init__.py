@@ -405,7 +405,7 @@ def default_base(repo: Path) -> Optional[str]:
     if isinstance(declared, str) and declared:
         return declared
     try:
-        return git.Git(repo).remote_default_branch(git.remote_of(repo))
+        return git.Git(repo).remote_default_branch()
     except git.GitError:  # noqa: NDF401 外部コマンド: 宣言の remote が誤り
         return None
 
@@ -432,8 +432,9 @@ def derived(t: Template, given: Mapping[str, Value], cwd: Path) -> dict[str, Val
         out["repo"] = repo_root(cwd)
     if _omitted(t, out, "remote") and "repo" in out:
         try:
-            out["remote"] = git.remote_of(Path(str(out["repo"])))
-        except git.RemoteError as exc:
+            # linked worktree から打っても、メインディレクトリの宣言を読む（`Git.remote`。取得・レビューの経路と同じ宛先）
+            out["remote"] = git.Git(Path(str(out["repo"]))).remote()
+        except git.GitError as exc:
             raise RouteError(str(exc)) from None
     if _omitted(t, out, "worktree") and isinstance(out.get("branch"), str):
         out["worktree"] = str(Path(str(out["repo"])) / WORKTREES / out["branch"])
