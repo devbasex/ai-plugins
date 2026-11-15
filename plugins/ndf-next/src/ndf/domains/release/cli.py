@@ -71,11 +71,6 @@ def _hub(args: argparse.Namespace) -> GitHub:
     return GitHub(repo, github_mod.client())
 
 
-def _version_of(ref: str) -> str | None:
-    """リリースブランチの名前の版（リリースブランチでなければ None）。"""
-    return version_decide.version_of_branch(ref) if ref.startswith(version_decide.BRANCH_PREFIX) else None
-
-
 def _production_of(args: argparse.Namespace) -> str:
     """`--production` があればそれ、無ければ宣言（`.ndf/worktree.json` の `production_branch`）の本番ブランチ。"""
     return args.production if args.production else decl_mod.production_branch(Path(args.root))
@@ -120,7 +115,7 @@ def cmd_answer(args: argparse.Namespace) -> dict:
             judgment, facts = trail.answer_merged(_hub(args), args.pr, _production_of(args))
         except trail.NotMerged as exc:
             return result.stopped(TOOL, "not_applicable", str(exc))
-        version = _version_of(facts.head_ref)
+        version = land.release_version(facts.head_ref)
         items = _values(state=judgment.state, by=facts.by, head=facts.head)
         detail = f"#{args.pr} の人のマージを承認の証跡にした: {judgment.detail}"
         return result.result(TOOL, result.OK, detail, items, outputs={"version": version} if version else None)

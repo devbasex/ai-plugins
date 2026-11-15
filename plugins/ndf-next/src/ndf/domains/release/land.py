@@ -83,6 +83,11 @@ class Landed(NamedTuple):
     merge_record: str | None = None
 
 
+def release_version(ref: str) -> str | None:
+    """リリースブランチ `ref` の名前の版（リリースブランチでなければ None）。本番の PR の head から出した版を読む。"""
+    return version_decide.version_of_branch(ref) if ref.startswith(version_decide.BRANCH_PREFIX) else None
+
+
 def _status_run(status: dict, app: int | None = None) -> dict:
     """commit status 1 件を check run の形にする（`ci.read` に渡す）。`app` は書き手の GitHub App（分かれば `app.id` に入れる）。"""
     state = text_of(status["state"]).lower()
@@ -412,9 +417,7 @@ class Lander:
 
     def _released(self, pull: Pull, done: Landed) -> Landed:
         """本番ブランチへ入れた結果に、版と承認（人のマージなら記録も）を足す。"""
-        ref = pull.head_ref
-        version = version_decide.version_of_branch(ref) if ref.startswith(version_decide.BRANCH_PREFIX) else None
-        done = done._replace(version=version)
+        done = done._replace(version=release_version(pull.head_ref))
         approval = self._approval(pull.number)
         return self._record_merge(pull.number, done, approval) if approval is not None else done
 
