@@ -7530,7 +7530,7 @@
     {
       "term": "本番の PR",
       "context": "ndf-release",
-      "meaning": "本番チャネル（main）へ入れる Pull Request。CD のある場合は、この PR のマージで本番へ届く。ndf-next（GitHub flow）では main 宛てのスプリントの PR が兼ね、CD が作る版上げの PR は含まない。今の NDF では、リリースのブランチから本番チャネルへ出す PR を指す",
+      "meaning": "本番チャネル（main）へ入れる Pull Request。CD のある場合は、この PR のマージで本番へ届く。ndf-next の取り込み方の行 `github-flow` では main 宛てのスプリントの PR が兼ね、CD が作る版上げの PR は含まない。行 `promote-whole`・`promote-selected` と今の NDF では、リリースのブランチから本番チャネルへ出す PR を指す",
       "source": "docs/specifications/ndf-release-production-admin-merge.md"
     },
     {
@@ -7650,13 +7650,13 @@
     {
       "term": "リリースブランチ",
       "context": "ndf-release",
-      "meaning": "版上げの PR の head になるブランチ（`release/v<版>`）。main へのマージの後に CD が main の先端から作り、版上げの PR のマージで消える",
+      "meaning": "ndf-next の取り込み方の行 `github-flow` では、版上げの PR の head になるブランチ（`release/v<バージョン>`）。main へのマージの後に CD が main の先端から作り、版上げの PR のマージで消える。行 `promote-whole`・`promote-selected` では `ndf-workflow` の同じ語の意味（本番チャネルへ入れる変更を集めるブランチ）",
       "pending_source": "issues/issue-3572-design.md"
     },
     {
       "term": "版上げのコミット",
       "context": "ndf-release",
-      "meaning": "main へのマージの後に CD が作り、版上げの PR を通して main へ入るコミット。`plugin.json` の `version` と CHANGELOG の版の節だけを変える。PR は版数を触らない",
+      "meaning": "取り込み方の行 `github-flow` で、main へのマージの後に CD が作り、版上げの PR を通して main へ入るコミット。バージョンの置き場のファイル・CHANGELOG のバージョンの節・`.ndf/release.json` の手順の書き先だけを変える。PR はバージョンを触らない",
       "pending_source": "issues/issue-3572-design.md"
     },
     {
@@ -7763,6 +7763,18 @@
       "context": "ndf-release",
       "meaning": "main へのマージの後に CD がバージョンを上げること。書き換えるファイルと流すコマンドは `.ndf/release.json` の手順で決める",
       "pending_source": "issues/issue-3572-requirements.md"
+    },
+    {
+      "term": "キューへの投入",
+      "context": "ndf-release",
+      "meaning": "承認した head を `expectedHeadOid` に渡して、本番の PR を merge queue へ入れること（GraphQL の `enqueuePullRequest`）。PR の head が違えば GitHub が断る",
+      "pending_source": "issues/issue-3572-design.md"
+    },
+    {
+      "term": "バージョンの置き場",
+      "context": "ndf-release",
+      "meaning": "リリースの単位のバージョンを持つファイルと、その読み書きのアダプタ（`plugin`・`json` など）。`.ndf/release.json` の `version_store` で選ぶ",
+      "pending_source": "issues/issue-3572-design.md"
     }
   ]
 }

@@ -149,7 +149,7 @@ docs/
 | 名前 | 種類 | 置き場 | 既定値 |
 | --- | --- | --- | --- |
 | `branch_flow.start` | 設定値 | `.ndf/worktree.json` | `production`（スプリントを `main` から切る） |
-| `branch_flow.integrate` | 設定値 | `.ndf/worktree.json` | `release`（スプリントの PR の `main` へのマージがリリースになる。マージの前は検証の ref で試す） |
+| `branch_flow.integrate` | 設定値 | `.ndf/worktree.json` | `release`（スプリントの PR の `main` へのマージがリリースになる。マージの前は検証用ブランチで試す） |
 | `branch_flow.doc_prs` | 設定値 | `.ndf/worktree.json` | `sprint`（設計 PR と確定仕様化の PR の宛先はスプリントブランチ） |
 | `branch_flow.promotion` | 設定値 | `.ndf/worktree.json` | `direct`（スプリントの PR を `main` へ直接マージする。develop と常設のリリースブランチを持たない） |
 | `branch_flow.reviews` | 設定値 | `.ndf/worktree.json` | 4 種類の行（`impl`・`sprint`・`design`・`spec`。決定 1・決定 2） |

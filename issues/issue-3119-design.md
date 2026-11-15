@@ -4,7 +4,7 @@
 
 - **今どうなっているか**: ai-plugins のスプリントは開発版のブランチ（`develop`）から切り、リリースは `develop` を丸ごと正式版のブランチ（`main`）へ入れる。並列の計画では、承認していないスプリントもリリースに載る（2026-11-12 のリリース 9 に計画の外のスプリントが入った）
 - **誰に効くか**: ai-plugins で開発を進める conductor・レーンと、リリースを担うオーガナイザー・一時レーン
-- **変えると何が成り立つか**: スプリントを `main` から切り、スプリントの PR を `main` へマージしてリリースする（GitHub flow）。`develop` と常設のリリースブランチを持たず、マージの前の検証は 2 つ目のマーケットプレイスで行う（決定 21）。PR の種類ごとに掛けるレビューが 1 つの宣言で決まり、同じ差分を 2 度レビューすることも、どこでもレビューされない実装の差分も生じない
+- **変えると何が成り立つか**: スプリントを `main` から切り、スプリントの PR を `main` へマージしてリリースする（GitHub flow）。`develop` と常設のリリースブランチを持たず、マージの前の検証は検証用マーケットプレイスで行う（決定 21。取り込み方の表は develop を持つリポジトリ向けの 2 行も残し、ai-plugins が `github-flow` を選ぶ）。PR の種類ごとに掛けるレビューが 1 つの宣言で決まり、同じ差分を 2 度レビューすることも、どこでもレビューされない実装の差分も生じない
 - **要求との差**: 要求の目的は「どこでもレビューされない差分」を生じさせないことで、実装の差分に限っていない。この設計では、確定仕様化の PR の差分（文書）を cross-review する PR が無い（決定 1）。この差を残すかは設計承認ゲートで確かめる（「人へ残す判断」）
 
 ## 適用範囲
@@ -370,13 +370,14 @@ conductor が決めた。設計承認ゲートの承認資料に載せる。
 
 根拠: Value 7 / Value 13（MVV 版 7）
 
-### 決定 21: 利用者の方針（GitHub flow）にそろえるため、ai-plugins の宣言を取り込み方の行 `github-flow`（`direct`）にし、実装を ndf-next（11.0.0）で行う
+### 決定 21: ai-plugins のブランチ戦略を設定ファイルで選ぶため、ai-plugins の設定ファイルを取り込み方の行 `github-flow`（`direct`）にし、実装を ndf-next（11.0.0）で行う
 
-利用者の方針は、GitHub flow を土台にし、スプリントブランチを `main` から切って PR で `main` へマージし、`develop` と常設のリリースブランチを
-持たない、というものである（#3572 の課題の本文の「方針の転換: GitHub flow を土台にする」、2026-11-15）。マージがそのままリリースで、版数と
-タグは CD がマージの時点に作り、マージの前の検証は名前の違う 2 つ目のマーケットプレイスで行う。決定 1〜10 が前提にした `promotion: selected` は
-スプリントを `develop` へ入れ、リリースの時点で選んで集めるため、この方針と違う。ai-plugins の宣言は、#3572 が ndf-next の取り込み方の表へ
-足す次の行の値にし、`base_branch` を `main` にする（行の意味と理由は [issue-3572-design-decisions.md](issue-3572-design-decisions.md) の決定 5）。
+ブランチ戦略はリポジトリごとに設定ファイルで選ぶ（#3121 の「リポジトリの決まりは設定の値で受け、NDF の制約にしない」）。ai-plugins は GitHub flow を選び、
+スプリントブランチを `main` から切って PR で `main` へマージし、`develop` と常設のリリースブランチを持たない（#3572 の課題の本文の「方針の転換」と
+「設計のやり直し」、2026-11-15・2026-11-16）。マージがそのままリリースで、バージョンとタグは CD がマージの時点に作る。決定 1〜10 が前提にした
+`promotion: selected` はスプリントを `develop` へ入れ、リリースの時点で選んで集めるため、ai-plugins の選ぶ運用と違う。
+ai-plugins の設定ファイルは、#3572 が ndf-next の取り込み方の表へ足す次の行の値にし、`base_branch` を `main` にする（行の意味と理由は
+[issue-3572-design-decisions.md](issue-3572-design-decisions.md) の決定 5・16）。
 
 | 列 | 値 |
 | --- | --- |
@@ -388,16 +389,22 @@ conductor が決めた。設計承認ゲートの承認資料に載せる。
 | `release_from` | `production` |
 | `release_units` | `false` |
 
-この取り込み方は今の NDF（`plugins/ndf/`）の宣言の表に無いため、宣言の書き換え（受け入れ条件 1）は ndf-next への入れ替え（11.0.0）と同じ時点で行う。
+**取り込み方の表は `promote-whole`・`promote-selected` の 2 行を残す。** `github-flow` は選べる行の 1 つで、ai-plugins がそれを選ぶのは ai-plugins の
+設定ファイルの値である。develop と main を分けるリポジトリは今の 2 行を選び続け、既定の行も `promote-whole` のままである（#3572 の決定 16）。
+ai-plugins のほかの選択も設定ファイルの値で受ける。マージの前の検証は検証環境の種類 `marketplace`（検証用マーケットプレイス、#3572 の決定 21）、
+同時に承認された PR の組み合わせの確かめはマージの方式 `merge-queue`（#3572 の決定 17）で、main の ruleset へ merge queue を足すのは入れ替えの
+PR と同じ時点に人の承認の後に行う（#3572 の決定 23）。
+
+この取り込み方は今の NDF（`plugins/ndf/`）の取り込み方の表に無いため、設定ファイルの書き換え（受け入れ条件 1）は ndf-next への入れ替え（11.0.0）と同じ時点で行う。
 `selected` への途中の切り替えは行わない（切り替えを 2 回にすると、`selected` の間に始めたスプリントの宛先を付け直す手間が残る）。
 「処理の流れ」の切り替えの順序・決定 10・I7・I8 は `selected` への切り替えを前提にしており、GitHub flow への 1 回の切り替えとして詳細設計の工程で書き直す。
-今の NDF の宣言の読み取り（`plugins/ndf/scripts/lib/branch_flow.py` の `parse_flow`）は `promotion` に `whole`・`selected` だけを持ち、`direct` の宣言を断る。
-そのため I1・I2 のうちどのプロジェクトにも掛かる検査は ndf-next の部品（#3572 の詳細設計の `declaration.flow_of`・`declaration.review_problems` と宣言のスキーマ）が持つ。
+今の NDF の読み取り（`plugins/ndf/scripts/lib/branch_flow.py` の `parse_flow`）は `promotion` に `whole`・`selected` だけを持ち、`direct` の設定を断る。
+そのため I1・I2 のうちどのプロジェクトにも掛かる検査は ndf-next の部品（#3572 の `declaration.flow_of`・`declaration.review_problems` と設定ファイルのスキーマ）が持つ。
 ai-plugins の値（`base_branch` と `production_branch` が `main`・`reviews` が 4 種類の行を持つ）は、ndf-next の部品へ持ち込まず、実装 PR の確認の手順で見る（NDF の側は ai-plugins の値を前提にしない）。
-レビューの単位（決定 1）は、リリースブランチの PR の行（`release`）を持たない。GitHub flow ではスプリントの PR が本番の PR を兼ね、集めたときに
-生じる衝突の解消の差分が無いためである。承認した先端でのマージ・版上げ・検証の ref・同期の PR を作らないことは #3572 の設計
-（[issue-3572-design.md](issue-3572-design.md) の決定 1〜15）が持つ。詳細設計（[issue-3119-design-detail.md](issue-3119-design-detail.md)）の
-宣言の値（「`.ndf/worktree.json` の書き換え」「内部のデータと定数」）はこの決定の値にしてある。運用の文書（`AGENTS.md`・
+レビューの単位（決定 1）は、リリースブランチの PR の行（`release`）を持たない。`github-flow` の行ではスプリントの PR が本番の PR を兼ね、集めたときに
+生じる衝突の解消の差分が無いためである。承認した head でのマージ・バージョン上げ・検証環境・同期の PR の扱いは #3572 の設計
+（[issue-3572-design.md](issue-3572-design.md) の決定 1〜25）が持つ。詳細設計（[issue-3119-design-detail.md](issue-3119-design-detail.md)）の
+設定ファイルの値（「`.ndf/worktree.json` の書き換え」「内部のデータと定数」）はこの決定の値にしてある。運用の文書（`AGENTS.md`・
 `docs/versioning-and-distribution.md`）の書き換えは #3572 の決定 12 が持ち、詳細設計の節ごとの変更の表は #3572 の詳細設計の工程でそれに合わせる。
 
 根拠: Value 4 / P1（MVV 版 7）
