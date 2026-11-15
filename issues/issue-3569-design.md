@@ -2,7 +2,7 @@
 
 ## 目的
 
-- **今どうなっているか**: 新しいプラグイン（`plugins/ndf-next/`）だけを読む起動で Skill の手順 0 を流すと、スクリプトの置き場（`$SCRIPTS`）が旧いプラグインの `plugins/ndf/scripts` に決まり、旧いスクリプトが走る。行き先の子が閉じた 10 本のスクリプトに `bin/ndf` の副命令が無く、Skill とエージェントの本文の 49 ファイルがまだ旧い名前で呼ぶ
+- **今どうなっているか**: 新しいプラグイン（`plugins/ndf-next/`）だけを読む起動で Skill の手順 0 を流すと、スクリプトの置き場（`$SCRIPTS`）が旧いプラグインに決まる。決まる先は `plugins/ndf/scripts` で、旧いスクリプトが走る。行き先の子が閉じた 10 本のスクリプトには `bin/ndf` の副命令が無い。Skill とエージェントの本文の 49 ファイルは、まだ旧い名前で呼ぶ
 - **誰に効くか**: 入れ替え（S2 #3304）の判定が読む試走（T2 #3411）と、入れ替えの後に新しいプラグインを使うすべての利用者
 - **変えると何が成り立つか**: 本文が呼ぶ 10 本の機能が、`ndf <副命令>` か、作らない理由を持つ行のどちらかになる。新しいプラグインだけの起動で、旧いプラグインのスクリプトへ解決する経路が無くなる
 
@@ -22,7 +22,11 @@
 | `python -m ndf.parity.trial.probe` の判定（2026-11-15、#3569 の本文の「事象」） | 実測 | 10 本の行・その名前だけを理由に落ちる 4 行・両方を理由に落ちる 17 行が `failed` である |
 | `grep -rlE '<10 本の名前>' skills agents hooks manifests`（2026-11-15、このブランチ） | 実測 | 10 本のどれかの名前を書いた本文は 49 ファイルある。`hooks/` と `manifests/` には 0 件 |
 
-要求と受け入れ条件は #3569 の本文にある（コピーは [issues/issue-3569-requirements.md](issue-3569-requirements.md) ）。この文書は「どう作るか」だけを扱う。旧い副命令ごとの行き先と、新しい副命令の引数・結果の契約は [issues/issue-3569-design-commands.md](issue-3569-design-commands.md) にある。
+要求と受け入れ条件は #3569 の本文にある（コピーは [issues/issue-3569-requirements.md](issue-3569-requirements.md) ）。この文書は「どう作るか」だけを扱う。
+
+| 何を | どこにあるか |
+| --- | --- |
+| 旧い副命令ごとの行き先・新しい副命令の引数と結果の契約 | [issues/issue-3569-design-commands.md](issue-3569-design-commands.md) |
 
 ## ドメインモデル
 
@@ -158,7 +162,7 @@
 | 子の表（`src/ndf/checks/children.json`） | S1e の行を足し、T2 の `needs` に S1e を足す |
 | 試走の記録（`src/ndf/parity/trial/`） | 2 回目の試走の記録を新しいファイルで足す |
 
-旧い副命令ごとの行き先（置き換える・作る・作らない・ほかの子へ回す）は [issue-3569-design-commands.md の「旧い副命令の行き先」](issue-3569-design-commands.md#旧い副命令の行き先) にある。
+旧い副命令ごとの行き先は [issue-3569-design-commands.md の「旧い副命令の行き先」](issue-3569-design-commands.md#旧い副命令の行き先) にある。行き先は、置き換える・作る・作らない・ほかの子へ回すの 4 つである。
 
 ### 構成要素図
 
@@ -181,7 +185,12 @@ graph TD
 
 ### 手順 0 の呼び方の決まり方
 
-`development-workflow` の手順 0 は、旧いスクリプトの置き場を探さずに `ndf` の有無だけを確かめる。宣言の判定は `ndf project check` で行い、`decl=` に終了コードを出す。開いている子が持つ旧いスクリプト（worktree の設定の確かめの `worktree-setup.sh`（M8）と、MVV の確かめの `project-mvv.py`（M7））は、置き場が無いことを理由に飛ばし、判定結果の出力の `宣言:` の行に理由を書く。
+`development-workflow` の手順 0 は、旧いスクリプトの置き場を探さずに `ndf` の有無だけを確かめる。宣言の判定は `ndf project check` で行い、`decl=` に終了コードを出す。開いている子が持つ旧いスクリプトは、置き場が無いことを理由に飛ばし、判定結果の出力の `宣言:` の行に理由を書く。
+
+| 飛ばす旧いスクリプト | 何を確かめるか | 持つ子 |
+| --- | --- | --- |
+| `worktree-setup.sh` | worktree の設定 | M8 |
+| `project-mvv.py` | MVV | M7 |
 
 ```mermaid
 flowchart TD
@@ -195,7 +204,9 @@ flowchart TD
     D --> Next["手順 1 へ進む"]
 ```
 
-新しいプラグインだけの起動では `$SCRIPTS` はいつも空である（決定 1）。「空でない」の枝は、開いている子が副命令へ置き換えるまでの間の本文の形を表す。`decl=` の値の読み方（`project-analysis.md`）は、`ndf project check` の終了コード（[issue-3569-design-commands.md の `ndf project`](issue-3569-design-commands.md#ndf-project)）で書き直す。
+新しいプラグインだけの起動では `$SCRIPTS` はいつも空である（決定 1）。「空でない」の枝は、開いている子が副命令へ置き換えるまでの間の本文の形を表す。
+
+`decl=` の値の読み方（`project-analysis.md`）は、`ndf project check` の終了コードで書き直す。終了コードの値は [issue-3569-design-commands.md の `ndf project`](issue-3569-design-commands.md#ndf-project) にある。
 
 ### 2 回目の試走までの順序
 
@@ -217,9 +228,17 @@ flowchart LR
 
 ### 決定 1: 旧いプラグインへ倒れる経路を無くすため、置き場の解決のエントリポイントを作らず、本文は `ndf` を名前で呼ぶ
 
-旧い `resolve.sh` は、4 つのランタイムのどこにプラグインがあるかを探して `scripts/` の置き場を返す。新しいプラグインの機能は `bin/ndf` の副命令であり、Claude Code は有効なプラグインの `bin/` を `PATH` に載せる（PRD1）。Codex と端末は `PATH` 上の `bin/ndf` へのリンクで呼ぶ（`bin/ndf` の冒頭の注記）。呼び手が置き場を知る必要が無いため、`resolve.sh` の行は `not_built` にし、理由に「`ndf` は名前で見つかる（X0 の `bin/ndf`）。本文は置き場を決めない」と書く。
+`resolve.sh` の行は `not_built` にし、理由に「`ndf` は名前で見つかる（X0 の `bin/ndf`）。本文は置き場を決めない」と書く。呼び手が置き場を知る必要が無いためである。
 
-本文の `$SCRIPTS` の決め方（`development-workflow/references/scripts-lookup.md` と、同じ探索を持つ 11 ファイル）は、`command -v ndf` で `ndf` の有無を確かめ、無ければ理由を標準エラーへ書いて終了コード 3 で止まる形にする。`$SCRIPTS` は決めず空にする。開いている子の旧いスクリプトを `$SCRIPTS` の下で呼ぶ行は、それぞれの子が副命令へ置き換えるまで残る。新しいプラグインだけの起動では、既定は「打たずに飛ばし、置き場が無いことを理由として 1 行出す」形にする。止まる形は、飛ばすと後の手順がその旧いスクリプトの出力を入力にして誤った値で進む場合だけに使う（[issue-3569-design-commands.md の「本文の書き換えの形」](issue-3569-design-commands.md#本文の書き換えの形)）。どちらの形でも本文に旧いスクリプトの名前が残るため、その子の行は判定で `failed` として見える（要求の前提 2）。飛ばす形を既定にするのは、試走が手順の終わりまで進み、受け入れ条件 9 の一覧が試走の全体から取れるためである。
+- 旧い `resolve.sh` は、4 つのランタイムのどこにプラグインがあるかを探して `scripts/` の置き場を返す
+- 新しいプラグインの機能は `bin/ndf` の副命令である。Claude Code は有効なプラグインの `bin/` を `PATH` に載せる（PRD1）
+- Codex と端末は `PATH` 上の `bin/ndf` へのリンクで呼ぶ（`bin/ndf` の冒頭の注記）
+
+本文の `$SCRIPTS` の決め方は、`command -v ndf` で `ndf` の有無を確かめる形にする。無ければ理由を標準エラーへ書いて終了コード 3 で止まる。`$SCRIPTS` は決めず空にする。書き換えるのは `development-workflow/references/scripts-lookup.md` と、同じ探索を持つ 11 ファイルである。
+
+開いている子の旧いスクリプトを `$SCRIPTS` の下で呼ぶ行は、それぞれの子が副命令へ置き換えるまで残る。新しいプラグインだけの起動では、既定は「打たずに飛ばし、置き場が無いことを理由として 1 行出す」形にする。止まる形は、飛ばすと誤った値で進む場合だけに使う。誤った値で進むのは、後の手順がその旧いスクリプトの出力を入力にしている場合である（[issue-3569-design-commands.md の「本文の書き換えの形」](issue-3569-design-commands.md#本文の書き換えの形)）。
+
+どちらの形でも本文に旧いスクリプトの名前が残るため、その子の行は判定で `failed` として見える（要求の前提 2）。飛ばす形を既定にするのは、試走が手順の終わりまで進み、受け入れ条件 9 の一覧が試走の全体から取れるためである。
 
 新しいプラグインに解決のエントリポイントを置く形は採らない。置くと、旧いスクリプトが無い新しいプラグインで「置き場」を返す処理が残り、開いている子が置き換えた後に消す手間が増える。
 
@@ -230,11 +249,37 @@ flowchart LR
 
 ### 決定 2: 同じ機能を 2 か所に持たないため、既にある副命令で足りる旧い副命令はそこへ置き換え、旧いオプションの形は持ち込まない
 
-`supervise.py` の `new`・`queue`・`run`・`wait`・`advance` は C2・C3・P1a が作った `ndf route render`・`ndf plan queue`・`ndf plan next`・`ndf plan wait`・`ndf progress new` へ、`test-run.py` は `ndf route test`・`ndf ci watch` へ、`stage-check.sh report` は `ndf progress show` へ、`relay.py` の `run`・`spawn`・`restart`・`ls`・`status`・`install`・`stop <名前>`・`account use`・`role` は `ndf relay` へ、`cap` は `ndf lanes limits` へ置き換える。新しい副命令に無いオプション（`queue` の `--max`・`--done`、`run` の `--slow` など）は足さず、本文の呼び出しを新しい副命令の引数へ書き換える。要求の前提 4（後方互換は持たない）に従う。
+旧い副命令は、既にある副命令へ置き換える。`supervise.py` の置き換え先は C2・C3・P1a が作った。
 
-置き換え先の無い下位の命令のうち、新しい仕組みが役目を持つものは作らない。`relay.py mark` は Stop の hook の guard（`hooks/guards/relay_mark.py`）が、`relay.py startup` は `ndf relay install` が、`relay.py is-child` は `ndf relay notice` の結果が、`relay.py attach` は `tmux attach` が持つ。`test-run.py whole` の手元の全体テストと落ちの分類は作らず、全体テストは CI が持つ（`ndf ci watch`）。
+| 旧い | 置き換え先 |
+| --- | --- |
+| `supervise.py` の `new`・`queue`・`run`・`wait`・`advance` | `ndf route render`・`ndf plan queue`・`ndf plan next`・`ndf plan wait`・`ndf progress new` |
+| `test-run.py` | `ndf route test`・`ndf ci watch` |
+| `stage-check.sh report` | `ndf progress show` |
+| `relay.py` の `run`・`spawn`・`restart`・`ls`・`status`・`install`・`stop <名前>`・`account use`・`role` | `ndf relay` |
+| `relay.py cap` | `ndf lanes limits` |
 
-作らない下位の命令とオプションは、機能を対応表から消さないため（I8）、旧いスクリプトの行とは別の行として対応表に足し、`not_built` に作らない理由を書く。旧いスクリプトの 10 行は、置き換える下位の命令の行き先として `to` のまま残す。1 行に `to` と `not_built` を両方持たせないため（I1）、作らない部分は行を分ける。足す行は、`supervise.py` の持ち込まないオプション・`test-run.py whole`・`relay.py attach`・`relay.py` の hook の本体（`mark`・`startup`・`is-child`）・`context-policy.py report` の `--format table` の 5 行である（[issue-3569-design-commands.md の「機能の対応表の変更」](issue-3569-design-commands.md#機能の対応表の変更)）。
+新しい副命令に無いオプション（`queue` の `--max`・`--done`、`run` の `--slow` など）は足さない。本文の呼び出しを新しい副命令の引数へ書き換える。要求の前提 4（後方互換は持たない）に従う。
+
+置き換え先の無い下位の命令のうち、新しい仕組みが役目を持つものは作らない。
+
+| 作らない旧い下位の命令 | 役目を持つもの |
+| --- | --- |
+| `relay.py mark` | Stop の hook の guard（`hooks/guards/relay_mark.py`） |
+| `relay.py startup` | `ndf relay install` |
+| `relay.py is-child` | `ndf relay notice` の結果 |
+| `relay.py attach` | `tmux attach` |
+| `test-run.py whole` の手元の全体テストと落ちの分類 | CI（`ndf ci watch`） |
+
+作らない下位の命令とオプションは、旧いスクリプトの行とは別の行として対応表に足し、`not_built` に作らない理由を書く。機能を対応表から消さないためである（I8）。旧いスクリプトの 10 行は、置き換える下位の命令の行き先として `to` のまま残す。1 行に `to` と `not_built` を両方持たせないため（I1）、作らない部分は行を分ける。
+
+足す行は次の 5 行である（[issue-3569-design-commands.md の「機能の対応表の変更」](issue-3569-design-commands.md#機能の対応表の変更)）。
+
+- `supervise.py` の持ち込まないオプション
+- `test-run.py whole`
+- `relay.py attach`
+- `relay.py` の hook の本体（`mark`・`startup`・`is-child`）
+- `context-policy.py report` の `--format table`
 
 行き先の一覧は [issue-3569-design-commands.md](issue-3569-design-commands.md#旧い副命令の行き先) にある。
 
@@ -244,7 +289,12 @@ flowchart LR
 
 ### 決定 3: 閉じた子の機能を入れ替えの前に届けるため、置き換え先の無い 4 本と中継の足りない操作は、旧い実装を新しい副命令へ移す
 
-`project-decl.py`・`statusline-switch.sh`・`mode-materials.py` と、`context-policy.py`・`relay.py` の足りない下位の命令は、新しいプラグインに同じ働きの部品が無い（[issue-3569-design-commands.md](issue-3569-design-commands.md#旧い副命令の行き先) の根拠の列）。どれも利用者か conductor が手順で打つ機能で、作り直しの同等版はその振る舞いを持つ必要がある。旧い実装の振る舞い（引数・判定・書くファイルの置き場と形）を変えずに、新しいプラグインの副命令の形（結果 JSON・終了コードの表・argparse）へ移す。入れ替えの前に旧い実装と同じ状態を書く間の排他と形の一致は、[issue-3569-design-commands.md の「旧い実装と並ぶ間の状態の書き手」](issue-3569-design-commands.md#旧い実装と並ぶ間の状態の書き手) にある。
+旧い実装の振る舞い（引数・判定・書くファイルの置き場と形）を変えずに、新しいプラグインの副命令の形（結果 JSON・終了コードの表・argparse）へ移す。移すのは下の表の 5 つで、移す理由は次の 2 つである。
+
+- 新しいプラグインに同じ働きの部品が無い（[issue-3569-design-commands.md](issue-3569-design-commands.md#旧い副命令の行き先) の根拠の列）
+- どれも利用者か conductor が手順で打つ機能で、作り直しの同等版はその振る舞いを持つ必要がある
+
+入れ替えの前は、旧い実装と同じ状態を新しい副命令も書く。その間の排他と形の一致は、[issue-3569-design-commands.md の「旧い実装と並ぶ間の状態の書き手」](issue-3569-design-commands.md#旧い実装と並ぶ間の状態の書き手) にある。
 
 | 旧い | 新しい副命令 | 置き場 | パッケージの持ち主 |
 | --- | --- | --- | --- |
@@ -254,7 +304,7 @@ flowchart LR
 | `context-policy.py` | `ndf relay context` | `src/ndf/domains/relay/` | M3b |
 | `relay.py` の `notice`・`stop`（すべて）・`account` の 9 つ | `ndf relay` | `src/ndf/domains/relay/` | M3b |
 
-表示の本体（旧い `scripts/statusline.sh`、対応表の S1b の行）は、`ndf statusline set` が `~/.claude/ndf-statusline.sh` へ置く元として同じパッケージへ移す。statusline の Skill の働きに要るためである。再起動の方針と中継の操作を `ndf relay` に置くのは、旧い対応表がどちらも M3b を行き先にしており、中継の置き場（`signals.relay_dir`）と設定を読む部品を共有するためである。
+表示の本体（旧い `scripts/statusline.sh`、対応表の S1b の行）は、同じパッケージへ移す。`ndf statusline set` が `~/.claude/ndf-statusline.sh` へ置く元になり、statusline の Skill の働きに要るためである。再起動の方針と中継の操作を `ndf relay` に置くのは、旧い対応表がどちらも M3b を行き先にしており、中継の置き場（`signals.relay_dir`）と設定を読む部品を共有するためである。
 
 引数の定義は既存の副命令と同じ argparse で書く（LIB1）。click・typer へ移す形は採らない。規約の生成（`spec_args.py`）が argparse の定義を読むため、生成の作り直しが要る。
 
@@ -265,7 +315,14 @@ flowchart LR
 
 ### 決定 4: 自前の導入を持たないため、公式 Skill の導入は作らず、プラグインのマーケットプレイスで入れる
 
-旧い `install-official-skills.sh` は `anthropics/skills` を clone し、Skill のディレクトリを `~/.claude/skills/` へ置く。公式 Skill は今はプラグインのマーケットプレイスとして配られている（PRD4）。`official-skills-autoloader` の本文は、取得元を示して同意を得た後に `claude plugin marketplace add anthropics/skills` と `claude plugin install document-skills@anthropic-agent-skills` を打つ手順へ書き換える。行は `not_built` にし、理由に「公式 Skill はプラグインのマーケットプレイスで提供される（anthropics/skills）。導入は Claude Code のプラグインの導入が持つ」と書く。
+`install-official-skills.sh` の行は `not_built` にし、理由に「公式 Skill はプラグインのマーケットプレイスで提供される（anthropics/skills）。導入は Claude Code のプラグインの導入が持つ」と書く。旧い `install-official-skills.sh` は `anthropics/skills` を clone し、Skill のディレクトリを `~/.claude/skills/` へ置く。公式 Skill は今はプラグインのマーケットプレイスとして配られている（PRD4）。
+
+`official-skills-autoloader` の本文は、取得元を示して同意を得た後に次の 2 つを打つ手順へ書き換える。
+
+```bash
+claude plugin marketplace add anthropics/skills
+claude plugin install document-skills@anthropic-agent-skills
+```
 
 clone して置く形を新しい副命令に移す形は採らない。提供元が更新の仕組みを持つプラグインを、自前のコピーで置き換えることになる。
 
@@ -276,9 +333,16 @@ clone して置く形を新しい副命令に移す形は採らない。提供�
 
 ### 決定 5: 機能を対応表から消さないため、開いている子の領分の 2 機能は、その子を行き先にした行を足して回す
 
-`supervise.py note`（報告から引継ぎ文書の表へ 1 行足す）は引継ぎの記録を持つ M7 #3302 の、`supervise.py design-results`（マージした設計 PR の「設計の結果」から実装のプランを書き換える）はスプリントの工程を流す P1b #3092 の領分である。開いている子のパッケージを並行して書き換えると、その子の変更と衝突する。対応表に `from-issue:3569-handoff-note`（`to: M7`）と `from-issue:3569-design-results`（`to: P1b`）の 2 行を `unowned: true`・`now: "—"` で足し、本文の呼び出しの行は「この機能は <子> が `ndf` の副命令に足す。新しいプラグインだけではまだ打てない」の形へ書き換える。オーガナイザーが行き先の子の本文へ足す（`parity/README.md` の `unowned`）。
+対応表に 2 行を `unowned: true`・`now: "—"` で足す。開いている子のパッケージを並行して書き換えると、その子の変更と衝突するためである。
 
-`now` を `scripts/supervise.py` にしない。判定は `now` を鍵に旧いスクリプトの行を引く（`probe.old_scripts`）ため、同じ `now` の行が 3 つになると後の行が鍵を上書きし、本文に `supervise.py` が残る間は、2 行が `failed` になり理由に `supervise.py` が出る（受け入れ条件 3 に反する）。Skill・エージェントの行の理由の行き先の子も C2 から P1b へ変わる。置き場の無い行の `now` を `—` にする形は、既にある `from-issue` の 3 行と同じである（`parity/README.md` の `now`）。判定を打った結果は [issue-3569-design-commands.md の「機能の対応表の変更」](issue-3569-design-commands.md#機能の対応表の変更) にある。
+| 旧い | 働き | 領分の子 | 足す行 |
+| --- | --- | --- | --- |
+| `supervise.py note` | 報告から引継ぎ文書の表へ 1 行足す | 引継ぎの記録を持つ M7 #3302 | `from-issue:3569-handoff-note`（`to: M7`） |
+| `supervise.py design-results` | マージした設計 PR の「設計の結果」から実装のプランを書き換える | スプリントの工程を流す P1b #3092 | `from-issue:3569-design-results`（`to: P1b`） |
+
+本文の呼び出しの行は「この機能は <子> が `ndf` の副命令に足す。新しいプラグインだけではまだ打てない」の形へ書き換える。オーガナイザーが行き先の子の本文へ足す（`parity/README.md` の `unowned`）。
+
+`now` を `scripts/supervise.py` にしない。判定は `now` を鍵に旧いスクリプトの行を引く（`probe.old_scripts`）。同じ `now` の行が 3 つになると、後の行が鍵を上書きする。すると本文に `supervise.py` が残る間は、2 行が `failed` になり理由に `supervise.py` が出る（受け入れ条件 3 に反する）。Skill・エージェントの行の理由の行き先の子も C2 から P1b へ変わる。置き場の無い行の `now` を `—` にする形は、既にある `from-issue` の 3 行と同じである（`parity/README.md` の `now`）。判定を打った結果は [issue-3569-design-commands.md の「機能の対応表の変更」](issue-3569-design-commands.md#機能の対応表の変更) にある。
 
 この課題で 2 機能を作る形は採らない。開いている子の設計がまだ形を決めていない領分を、先に決めることになる。
 
@@ -294,7 +358,13 @@ clone して置く形を新しい副命令に移す形は採らない。提供�
 
 ### 決定 7: 移した先と対応表の行き先を一致させるため、新しいパッケージへ移した 4 行の `to` を S1e にする
 
-`project-decl.py`・`statusline-switch.sh`・`statusline.sh`・`mode-materials.py` の行の `to` を S1e にし、`places` に `S1e: ["src/ndf/domains/project/", "src/ndf/domains/statusline/", "src/ndf/domains/materials/"]` を足す。判定は `to` の `places` が実在するかを見る（`probe._missing_places`）ため、置き場と行き先が食い違うと正しく判定できない。`relay.py`・`context-policy.py`・`supervise.py`・`test-run.py`・`stage-check.sh` の行は、副命令を持つ子（M3b・C2・P1a）のまま残す。`parity/README.md` の「行き先の子が自分の行の `to` を書き直す（子を分けた・寄せた）」に当たる。
+`project-decl.py`・`statusline-switch.sh`・`statusline.sh`・`mode-materials.py` の行の `to` を S1e にする。`places` には次を足す。
+
+```json
+"S1e": ["src/ndf/domains/project/", "src/ndf/domains/statusline/", "src/ndf/domains/materials/"]
+```
+
+判定は `to` の `places` が実在するかを見る（`probe._missing_places`）ため、置き場と行き先が食い違うと正しく判定できない。`relay.py`・`context-policy.py`・`supervise.py`・`test-run.py`・`stage-check.sh` の行は、副命令を持つ子（M3b・C2・P1a）のまま残す。`parity/README.md` の「行き先の子が自分の行の `to` を書き直す（子を分けた・寄せた）」に当たる。
 
 根拠: Value 8（MVV 版 7）
 

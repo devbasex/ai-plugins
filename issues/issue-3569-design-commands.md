@@ -4,7 +4,7 @@
 
 ## 旧い副命令の行き先
 
-「呼ぶ本文」は、`plugins/ndf-next/` の `skills/`・`agents/` の下でその下位の命令を書いたファイルの数である（2026-11-15、このブランチで `grep -rlE '<名前>"? <下位の命令>'` を打った結果）。行き先の種類は次の 4 つである。
+「呼ぶ本文」は、`plugins/ndf-next/` の `skills/`・`agents/` の下でその下位の命令を書いたファイルの数である。数は、2026-11-15 にこのブランチで `grep -rlE '<名前>"? <下位の命令>'` を打った結果である。行き先の種類は次の 4 つである。
 
 | 種類 | 意味 |
 | --- | --- |
@@ -111,7 +111,7 @@
 | `from-issue:3569-context-report-table` | 足す。`kind: from-issue`・`now: "—"`・`feature`: 「旧い context-policy.py report の `--format table`」・`not_built`: 「結果 JSON の `items` を表として読むのは呼び手である」・`source: "#3569"` |
 | `places` | `S1e` を足す（決定 7） |
 
-足す 7 行の `now` は `—` にする（決定 5）。`now` を `scripts/supervise.py` にした場合と `—` にした場合を、今の対応表に回す 2 行を足して判定（`probe.judge`）で比べた結果は次のとおりである（2026-11-15、このブランチ。本文の置き換えの前）。
+足す 7 行の `now` は `—` にする（決定 5）。今の対応表に回す 2 行を足し、`now` を `scripts/supervise.py` にした場合と `—` にした場合を判定（`probe.judge`）で比べた。結果は次のとおりである（2026-11-15、このブランチ。本文の置き換えの前）。
 
 ```text
 $ PYTHONPATH=src uv run --frozen --project . python <対応表に 2 行を足して probe.judge を打つスクリプト>
@@ -125,7 +125,9 @@ now='—'
   agent:supervisor {'result': 'failed', 'reason': '本文が旧いプラグインのスクリプトを呼ぶ: supervise.py（C2）。...'}
 ```
 
-`now` が `—` なら、2 行は本文の呼び出しに依らず `not_run` になり、理由に 10 本の名前が出ない。M7 と P1b の置き場（`src/ndf/domains/records/`・`src/ndf/progress/run.py`・`src/ndf/progress/invoke.py`）は実在するため、置き場が無いことで `failed` にもならない（`probe._missing_places`）。`not_built` を持つ 5 行は、同じ判定で `passed`（理由「作らない行。ndf-next の本文に呼び手が無い」）になり、形の確かめ（`table.shape_errors`）は誤り 0 件である（`from-issue:3569-test-run-whole` を足して打った結果）。上の `agent:supervisor` の `failed` は、本文の置き換えの前の状態であり、置き換えの後に消える。
+`now` が `—` なら、2 行は本文の呼び出しに依らず `not_run` になり、理由に 10 本の名前が出ない。M7 と P1b の置き場は実在するため、置き場が無いことで `failed` にもならない（`probe._missing_places`）。実在する置き場は `src/ndf/domains/records/`・`src/ndf/progress/run.py`・`src/ndf/progress/invoke.py` である。
+
+`not_built` を持つ 5 行は、同じ判定で `passed`（理由「作らない行。ndf-next の本文に呼び手が無い」）になる。形の確かめ（`table.shape_errors`）は誤り 0 件である（`from-issue:3569-test-run-whole` を足して打った結果）。上の `agent:supervisor` の `failed` は、本文の置き換えの前の状態であり、置き換えの後に消える。
 
 ## 新しい副命令の契約
 
@@ -135,7 +137,12 @@ now='—'
 
 ### `ndf project`
 
-旧い `project-decl.py` の判定・測定・書き出しを移す。宣言はメインディレクトリの `.ndf/project.json`、スキーマは新しいプラグインの `contracts/schemas/declarations/project.schema.json` を正本にする。
+旧い `project-decl.py` の判定・測定・書き出しを移す。正本は次の 2 つである。
+
+| 何の正本か | 置き場 |
+| --- | --- |
+| 宣言 | メインディレクトリの `.ndf/project.json` |
+| スキーマ | 新しいプラグインの `contracts/schemas/declarations/project.schema.json` |
 
 | 下位の命令 | 引数 | 結果の `items` | 結果の `metrics` | 終了コード |
 | --- | --- | --- | --- | --- |
@@ -149,7 +156,7 @@ now='—'
 
 ### `ndf statusline`
 
-旧い `statusline-switch.sh` と表示の本体（旧い `statusline.sh`）を移す。`settings.json` は Claude Code と同じく `CLAUDE_CONFIG_DIR`（無ければ `~/.claude`）の下を読み書きし、symlink なら参照先へ書く（旧い #1576 の振る舞い）。表示の本体は `~/.claude/ndf-statusline.sh` へ置き、`statusLine.command` は `bash ~/.claude/ndf-statusline.sh` にする。
+旧い `statusline-switch.sh` と表示の本体（旧い `statusline.sh`）を移す。`settings.json` は Claude Code と同じく `CLAUDE_CONFIG_DIR`（無ければ `~/.claude`）の下を読み書きする。symlink なら参照先へ書く（旧い #1576 の振る舞い）。表示の本体は `~/.claude/ndf-statusline.sh` へ置き、`statusLine.command` は `bash ~/.claude/ndf-statusline.sh` にする。
 
 | 下位の命令 | 引数 | 結果の `items` | 結果の `metrics` | 終了コード |
 | --- | --- | --- | --- | --- |

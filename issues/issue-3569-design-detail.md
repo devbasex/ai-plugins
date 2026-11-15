@@ -1,6 +1,9 @@
 # #3569 の詳細設計: 閉じた子の 10 本の機能を `ndf` の副命令で呼ぶ
 
-設計文書 [issues/issue-3569-design.md](issue-3569-design.md) の「構成要素」と「構造」を、ファイルと関数の粒度へ下ろした文書である。旧い副命令ごとの行き先と、新しい副命令の引数・結果・終了コードの契約は [issues/issue-3569-design-commands.md](issue-3569-design-commands.md) にあり、ここでは写さない。
+設計文書 [issues/issue-3569-design.md](issue-3569-design.md) の「構成要素」と「構造」を、ファイルと関数の粒度へ下ろした文書である。次のものは [issues/issue-3569-design-commands.md](issue-3569-design-commands.md) にあり、ここでは写さない。
+
+- 旧い副命令ごとの行き先
+- 新しい副命令の引数・結果・終了コードの契約
 
 この文書のパスは、断りが無ければ `plugins/ndf-next/` からの相対パスである。旧いプラグインのパスは `plugins/ndf/` から書く。
 
@@ -71,7 +74,20 @@ plugins/ndf-next/
     └── relay/{test_notice.py,test_account_registry.py,test_account_metered.py,test_context_policy.py,test_context_report.py} *
 ```
 
-**依存の向き。** 依存は「副命令の表（`cli.py`）→ 各パッケージの `cli.py` → 判定と測定のモジュール → 既存の部品（`ndf.contracts`・`ndf.adapters`・`ndf.domains.records`・`ndf.domains.worktree.declaration`）」の一方向である。3 つの新しいパッケージ（`project`・`statusline`・`materials`）は互いに読まない。`relay` の中では、`cli.py` が `notice`・`account_*`・`context_*` を読み、`account_login` と `account_metered` は `account_registry` を読み、`context_report` と `context_policy` は `context_records` を読む。逆向きの読みと、`account_*` と `context_*` の間の読みは無いため、循環は無い。新しいモジュールは旧いプラグインのモジュールを import しない（旧いプラグインのファイルの置き場を知らない）。
+**依存の向きは一方向で、循環は無い。** 依存は次の順に一方向へ進む。
+
+1. 副命令の表（`cli.py`）
+2. 各パッケージの `cli.py`
+3. 判定と測定のモジュール
+4. 既存の部品（`ndf.contracts`・`ndf.adapters`・`ndf.domains.records`・`ndf.domains.worktree.declaration`）
+
+3 つの新しいパッケージ（`project`・`statusline`・`materials`）は互いに読まない。`relay` の中の読みは次のとおりである。
+
+- `cli.py` は `notice`・`account_*`・`context_*` を読む
+- `account_login` と `account_metered` は `account_registry` を読む
+- `context_report` と `context_policy` は `context_records` を読む
+
+逆向きの読みと、`account_*` と `context_*` の間の読みは無いため、循環は無い。新しいモジュールは旧いプラグインのモジュールを import しない（旧いプラグインのファイルの置き場を知らない）。
 
 | パス | 種類 | 役割 1 文 | 依存する先 |
 | --- | --- | --- | --- |
@@ -117,7 +133,11 @@ plugins/ndf-next/
 | `plugins/ndf-next/tests/domains/relay/test_context_policy.py` | 新設 | 方針の解決・記録・較正の単体テスト | `relay` |
 | `plugins/ndf-next/tests/domains/relay/test_context_report.py` | 新設 | 作業ごとの集計の単体テスト | `relay` |
 
-生成のファイル（`<副命令>.args.schema.json`・`docs/contracts/commands.md`・`docs/contracts/env.md`）と試走の記録（`src/ndf/parity/trial/<日付>.json`）、本文の 49 ファイルは、設計文書の「設計の結果」の触るファイルにあり、関数を持たないためこの表に並べない。
+次のファイルは、関数を持たないためこの表に並べない。どれも設計文書の「設計の結果」の触るファイルにある。
+
+- 生成のファイル（`<副命令>.args.schema.json`・`docs/contracts/commands.md`・`docs/contracts/env.md`）
+- 試走の記録（`src/ndf/parity/trial/<日付>.json`）
+- 本文の 49 ファイル
 
 ## クラスと関数の構造
 
@@ -338,7 +358,7 @@ plugins/ndf-next/
 | `ndf relay stop --all` と、リレーハブの別の依頼 | リレーハブの依頼の置き場 | 既存の `hub.submit` の排他に任せる | 停止の依頼は冪等。止まった後の依頼は「動いていない」で返る |
 | `ndf relay notice` | ラッパーの状態のファイル | 読むだけで排他を取らない（`relay.lock` は持たれているかを見るだけ） | 副作用が無いため冪等 |
 
-filelock と `flock` コマンドが同じファイルで互いに待つことは、`test_statusline_cli.py` で、子プロセスの `flock` が持つ間に `settings.locked` が待つことを確かめる。
+filelock と `flock` コマンドが同じファイルで互いに待つことは、`test_statusline_cli.py` で確かめる。子プロセスの `flock` が持つ間に、`settings.locked` が待つことを見る。
 
 ## ログと記録の出力
 
