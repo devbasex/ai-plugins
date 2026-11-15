@@ -130,6 +130,12 @@ def _pathspecs(project: Mapping[str, Any], key: str, default: tuple[str, ...]) -
     return [f":(exclude,glob){p[1:]}" if p.startswith("!") else f":(glob){p}" for p in patterns]
 
 
+def behavior_declared(cwd: Path) -> bool:
+    """`.ndf/project.json` が `docs.behavior`（振る舞いを決める文書のパターンの並び）を宣言しているか。"""
+    value = definition.dig(declaration(cwd, PROJECT_FILE), "docs", "behavior")
+    return isinstance(value, list) and all(isinstance(p, str) for p in value)
+
+
 def _sprint_range(context: Mapping[str, Any], cwd: Path) -> tuple[Git, str]:
     """スプリントブランチとベースブランチ（`.ndf/worktree.json` の `base_branch`。手元に無ければ `<リモート名>/`）の分岐点からの範囲。"""
     base = definition.dig(declaration(cwd, WORKTREE_FILE), "base_branch")

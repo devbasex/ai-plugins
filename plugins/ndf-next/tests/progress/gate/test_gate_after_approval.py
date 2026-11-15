@@ -69,6 +69,15 @@ def test_git_docs_only_splits_the_range_like_the_sprint_diff(repo):
     assert docs_only("0" * 40, doc) is False  # 読めない
 
 
+def test_git_docs_only_asks_again_when_behavior_docs_are_not_declared(repo):
+    base = _commit(repo, "src/a.py", "x = 1\n")
+    doc = _commit(repo, "docs/a.md", "# a\n")
+    skill = _commit(repo, "skills/s/SKILL.md", "# s\n")
+    docs_only = gate.git_docs_only(repo)
+    assert docs_only(base, doc) is False  # 振る舞いを決める文書が分からない
+    assert docs_only(doc, skill) is False
+
+
 def test_the_approved_head_is_the_head_seen_by_the_last_release_answer(st, repo, new_table, capsys, release_question):
     tid = new_table()
     q = release_question(tid)
