@@ -398,6 +398,20 @@ def test_comments_read_every_page_and_stop_over_the_limit(monkeypatch: pytest.Mo
         _hub(full).comments(7)
 
 
+def test_branch_rules_read_every_page_and_stop_over_the_limit() -> None:
+    """#3506: 必須のチェックの規則が 2 ページ目にあっても落とさない。上限を超えたら途中で切らずに止まる。"""
+    review = {"type": "pull_request", "parameters": {"required_approving_review_count": 1}}
+    checks = {"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": "must"}]}}
+    path = f"/repos/{REPO}/rules/branches/main"
+    server = Server({("GET", path): [httpx.Response(200, json=[review] * 100), httpx.Response(200, json=[checks])]})
+    rules = _hub(server).branch_rules("main")
+    assert len(rules) == 101 and rules[-1] == checks
+    assert [r.url.params["page"] for r in server.seen] == ["1", "2"]
+    full = Server({("GET", path): [httpx.Response(200, json=[review] * 100)]})
+    with pytest.raises(github.GitHubError, match="github.list-pages"):
+        _hub(full).branch_rules("main")
+
+
 def _issue_page(numbers: list[int], total: int, more: bool) -> dict:
     conn = {"totalCount": total, "pageInfo": {"hasNextPage": more, "endCursor": "c"}, "nodes": [{"number": n} for n in numbers]}
     return {"data": {"repository": {"issues": conn}}}

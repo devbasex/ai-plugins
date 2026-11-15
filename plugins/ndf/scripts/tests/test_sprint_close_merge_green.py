@@ -115,8 +115,18 @@ elif a[:3] == ["api", "-X", "PATCH"]:
 elif a[:3] == ["api", "-X", "POST"] and a[4].endswith("/comments"):  # 承認の証跡のコメント（#2773）
     st.setdefault("comments", []).append(json.load(sys.stdin)["body"])
     out = 'HTTP/2.0 201 Created\n\n{{"html_url": "https://github.com/o/r/pull/9#c1"}}'
+elif a[:1] == ["api"] and "--paginate" in a and "rules/branches/" in a[-1] and "rules_pages" in st:  # 規則の全ページ
+    if st.get("rules_fail"):
+        code = 1
+        sys.stderr.write("gh: Server Error (HTTP 502)\n")
+    else:
+        out = "".join(json.dumps(p) for p in st["rules_pages"])
 elif a[:1] == ["api"] and "rules/branches/" in a[-1]:
     out = json.dumps(st.get("rules", []))
+elif a[:1] == ["api"] and "/check-runs?" in a[-1]:  # 発行元を指定された必須のチェックの照合（#3506）
+    q = __import__("urllib.parse").parse.parse_qs(a[-1].split("?", 1)[1])
+    runs = [r for r in st.get("check_runs", []) if r.get("name") == q.get("check_name", [""])[0]]
+    out = json.dumps({{"total_count": len(runs), "check_runs": runs}})
 elif a[:1] == ["api"] and "/branches/" in a[-1] and "branch_protection" in st:  # 従来の保護（迂回の必須のチェック）
     out = json.dumps({{"protection": st["branch_protection"]}})
 elif a[:1] == ["api"] and __import__("re").search(r"/branches/[^/]+$", a[-1]):
@@ -1432,6 +1442,51 @@ def test_promote_admin_case_waits_for_every_required_check_of_the_base(repo, gh,
     )
     assert code == 1 and out["status"] == "stopped", (out, err)
     assert "must（現れない）" in out["summary"] and merges(gh) == []
+
+
+ADMIN_ARGS = ("--gate-approved", "user", "--timeout", "0")
+MUST_RULE = [{"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": "must"}]}}]
+
+
+def test_promote_admin_case_reads_every_page_of_the_rules(repo, gh, tmp_path):
+    """#3506: 必須のチェックの規則が 2 ページ目にあっても読み、先端に現れなければ迂回でマージしない。"""
+    passed = dict(to("main", X), headRefName="develop", statusCheckRollup=[run_("other")])
+    code, out, err = _promote_admin(repo, gh, tmp_path, *ADMIN_ARGS, rules_pages=[REVIEW_RULES, MUST_RULE], pr_seq={"9": [passed] * 3})
+    assert code == 1 and "must（現れない）" in out["summary"] and merges(gh) == [], (out, err)
+
+
+def test_promote_admin_case_stops_when_a_page_of_the_rules_fails(repo, gh, tmp_path):
+    """#3506: 規則の全ページを読めなければ、迂回の前提を読めないとして止まり、マージしない。"""
+    passed = dict(to("main", X), headRefName="develop", statusCheckRollup=[run_("other")])
+    code, out, err = _promote_admin(
+        repo, gh, tmp_path, *ADMIN_ARGS, rules_pages=[REVIEW_RULES], rules_fail=True, pr_seq={"9": [passed] * 3}
+    )
+    assert code != 0 and out["status"] == "stopped" and "全ページを読めない" in out["summary"] and merges(gh) == [], (out, err)
+
+
+def _check_run(name, app, run_id=1, conclusion="success"):
+    return {"id": run_id, "name": name, "status": "completed", "conclusion": conclusion, "app": {"id": app}}
+
+
+@pytest.mark.parametrize(
+    ("runs", "merged"),
+    [
+        ([_check_run("must", 999)], False),  # 同じ名前の別のアプリの成功は数えない
+        ([_check_run("must", 15368, 1), _check_run("must", 15368, 2, "failure")], False),  # 指定のアプリの最新が落ちている
+        ([_check_run("must", 999, 1), _check_run("must", 15368, 2)], True),
+    ],
+)
+def test_promote_admin_case_checks_the_app_named_by_the_rule(repo, gh, tmp_path, runs, merged):
+    """#3506: 規則が発行元（integration_id）を指定した必須のチェックは、指定のアプリの check run が先端で通ったときだけ迂回でマージする。"""
+    must = {"context": "must", "integration_id": 15368}
+    rules = [*REVIEW_RULES, {"type": "required_status_checks", "parameters": {"required_status_checks": [must]}}]
+    passed = dict(to("main", X), headRefName="develop", statusCheckRollup=[run_("must")])
+    code, out, err = _promote_admin(repo, gh, tmp_path, rules_pages=[rules], rules=rules, check_runs=runs, pr_seq={"9": [passed] * 3})
+    if merged:
+        assert code == 0 and merges(gh) == [["pr", "merge", "9", "--admin", "--merge", "--match-head-commit", X]], (out, err)
+    else:
+        assert code == 1 and merges(gh) == [], (out, err)
+        assert {"kind": "check", "name": "must（アプリ 15368）", "result": "unmet_source"} in out["items"]
 
 
 def test_promote_admin_case_resume_writes_the_missing_record(repo, gh, tmp_path):

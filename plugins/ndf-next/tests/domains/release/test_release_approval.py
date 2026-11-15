@@ -142,7 +142,7 @@ def test_production_merge_then_sync_back_to_base() -> None:
     assert done.merged and done.sync_pr == 8 and hub.merged == [7, 8]
     # 本番ブランチとベースブランチの祖先の関係を保つため、どちらも merge commit で入れる
     assert hub.merge_methods == [land.MERGE_METHOD, land.MERGE_METHOD] == ["merge", "merge"]
-    assert land.Lander(hub, "develop", "main", 1.0).required("main") == ["pytest"]
+    assert land.Lander(hub, "develop", "main", 1.0).required("main").names == ["pytest"]
 
 
 def test_required_includes_classic_branch_protection() -> None:
@@ -151,7 +151,7 @@ def test_required_includes_classic_branch_protection() -> None:
     hub.responses[("GET", "/repos/o/r/branches/main")] = {
         "protection": {"required_status_checks": {"contexts": ["lint"], "checks": [{"context": "build"}]}}
     }
-    assert land.Lander(hub, "develop", "main", 1.0).required("main") == ["build", "lint"]
+    assert land.Lander(hub, "develop", "main", 1.0).required("main").names == ["build", "lint"]
 
 
 def test_commit_status_counts_as_required_check() -> None:
@@ -170,6 +170,49 @@ def test_commit_status_counts_as_required_check() -> None:
     done = land.Lander(hub, "develop", "main", 1.0, wait=wait).land(8)
     reading = readers[0]()
     assert reading.missing == [] and reading.running == [] and done.merged and hub.merged == [8]
+
+
+def _run(name: str, app: int, run_id: int = 1) -> dict:
+    return {
+        "name": name,
+        "status": "completed",
+        "conclusion": "success",
+        "completed_at": "t1",
+        "started_at": "t0",
+        "id": run_id,
+        "app": {"id": app},
+    }
+
+
+def test_required_check_with_a_named_app_counts_only_that_app() -> None:
+    """#3506: 規則が発行元（ruleset の integration_id・従来の保護の app_id）を指定していれば、同じ名前でも別のアプリの
+    check run と commit status を数えない（迂回で GitHub が拒むマージを通さない）。app_id の -1 は発行元を問わない。"""
+    hub = FakeHub()
+    hub.responses[("GET", "/repos/o/r/rules/branches/main")] = [
+        {"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": "pytest", "integration_id": 15368}]}}
+    ]
+    hub.responses[("GET", "/repos/o/r/branches/main")] = {
+        "protection": {"required_status_checks": {"checks": [{"context": "build", "app_id": 7}, {"context": "lint", "app_id": -1}]}}
+    }
+    lander = land.Lander(hub, "develop", "main", 1.0)
+    assert lander.required("main") == land.Required(["build", "lint", "pytest"], {"pytest": frozenset({15368}), "build": frozenset({7})})
+    runs = [_run("pytest", 999, 1), _run("build", 7, 2), _run("lint", 42, 3)]
+    hub.responses[("GET", f"/repos/o/r/commits/{HEAD}/status")] = {
+        "statuses": [{"context": "pytest", "state": "success", "updated_at": "t1", "created_at": "t0", "id": 4}]
+    }
+    readers: list[Callable[[], ci.Reading]] = []
+
+    def wait(reader: Callable[[], ci.Reading], budget: float) -> ci.WatchResult:
+        readers.append(reader)
+        return ci.WatchResult(reader(), 1, 0.0, 0.0)
+
+    hub.runs = runs
+    hub.pulls = {7: pull()}
+    hub.comments_of = {7: [_trail("approved", HEAD)]}
+    done = land.Lander(hub, "develop", "main", 1.0, wait=wait).land(7)
+    assert readers[0]().missing == ["pytest"] and not done.merged and hub.merged == []
+    hub.runs = [*runs, _run("pytest", 15368, 5)]
+    assert readers[0]().missing == []
 
 
 def test_sync_pr_uses_production_branch_as_head() -> None:

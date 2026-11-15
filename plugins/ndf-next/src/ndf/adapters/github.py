@@ -548,6 +548,11 @@ class GitHub:
                 return rows
         raise _too_many_pages(f"{path} が", pages, "github.list-pages")
 
+    def branch_rules(self, branch: str) -> list[dict]:
+        """ブランチに当たる規則（`GET /rules/branches/<名前>`）を全ページ読む。`github.list-pages` ページを超えたら `GitHubError`
+        （必須のチェックの規則が後ろのページにあっても落とさない。#3506）。"""
+        return [r for r in self._pages(f"/repos/{self.repo}/rules/branches/{quote(branch, safe='')}") if isinstance(r, dict)]
+
     def count_issues(self, labels: Sequence[str] = (), state: str = "OPEN") -> int:
         """ラベルと状態の Issue（PR を除く）の件数を `totalCount` で数える。既定の件数の上限で切れない（#3393）。"""
         query = (

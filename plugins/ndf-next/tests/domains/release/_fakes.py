@@ -58,6 +58,10 @@ class FakeHub:
             raise got
         return got if got is not None else {}
 
+    def branch_rules(self, branch: str) -> list[dict]:
+        got = self.rest("GET", f"/repos/{self.repo}/rules/branches/{branch}")
+        return got if isinstance(got, list) else []
+
     def nodes(self, numbers: Any, node: str, fields: str) -> dict[int, dict]:
         return {int(n): self.node_data.get(int(n), {}) for n in numbers}
 

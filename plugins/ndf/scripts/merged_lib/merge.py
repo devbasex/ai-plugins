@@ -21,7 +21,7 @@ import project_decl
 import release_case
 import test_strategy
 from merged_lib import promote_trail
-from merged_lib.required_checks import admin_required_checks
+from merged_lib.required_checks import admin_required_checks, check_sources
 from merged_lib.checks import TOOL, GreenWatch, pr_state
 from step_result import EXIT_UNREADABLE, StepError, approval_present, emit, git_root, result
 
@@ -330,7 +330,9 @@ def merge_when_green(a, cleanup, opts: MergeOptions = MergeOptions()):
         verdict = delivery.judge_target(decl, info.get("baseRefName") or "")
         judged["verdict"] = verdict
         if not getattr(a, "no_admin", False) and verdict.value != delivery.NOT_PRODUCTION:
-            watch.required_checks = admin_required_checks(root, n, info.get("baseRefName") or "")
+            required = admin_required_checks(root, n, info.get("baseRefName") or "")
+            judged["required"] = required
+            watch.required_checks = required.names
         if verdict.stops and not a.gate_approved:
             sha = _gate_head(info) if opts.gate_head else None
             gate_stop(n, verdict, info, opts, sha, getattr(a, "out", None) if opts.gate_head else None)
@@ -342,6 +344,8 @@ def merge_when_green(a, cleanup, opts: MergeOptions = MergeOptions()):
     gate_metrics = {"verdict": verdict.value, "target": verdict.target} if verdict else {}
 
     if not any(i["kind"] == "pr" and i["result"] == "already_merged" for i in items):
+        if not getattr(a, "no_admin", False) and (required := judged.get("required")):
+            check_sources(root, n, watch.last_sha, required, items)  # 迂回の前に、発行元を指定された必須のチェックを照らす
         _merge_pr(root, a, n, watch, items, waits, opts)
     if opts.after_merge and (why := opts.after_merge(items)):
         emit(result(TOOL, "stopped", f"#{n} をマージした。{why}", items, {"waits": waits, "queued_runs": queued_runs, **gate_metrics}))
