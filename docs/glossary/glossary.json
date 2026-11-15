@@ -7712,6 +7712,18 @@
       "context": "ndf-workflow",
       "meaning": "一時レーンの起動が、別の一時レーンが動いているために断られた後、耐久ワークフローが前の一時レーンが止まるまで区分 `spawn` の問いを立てずに待つこと。上限は既定 3,600 秒",
       "pending_source": "issues/issue-3597-design.md"
+    },
+    {
+      "term": "ハードコード",
+      "context": "ndf-workflow",
+      "meaning": "ai-plugins 固有の名前（リポジトリ名・組織名・ブランチ名・タグの形・マーケットプレイスの登録名など）を、設定から読まずに ndf-next のコード・コントラクト・Skill の本文へ直接書くこと。検査が例外リストの外の件数を数えて落とす",
+      "pending_source": "issues/issue-3617-requirements.md"
+    },
+    {
+      "term": "設定で選べる値",
+      "context": "ndf-workflow",
+      "meaning": "`.ndf/` の設定ファイルに書ける値の選択肢（取り込み方の表の行・delivery の種類・リリースの形）。コントラクトから数え、Issue の番号のある例外なしに減ると検査が落ちる",
+      "pending_source": "issues/issue-3617-requirements.md"
     }
   ]
 }
