@@ -33,20 +33,23 @@ RESTART = ("起こし直す", "続きから起こし直す")
 OUTCOME_KEYS = ("result", "attempts", "at", "reason")  # 起動の結果（`step_launch` の値）から起動の記録へ写す鍵
 
 
+def _env_seconds(raw: Optional[str], default: float) -> float:
+    """環境変数の値 `raw` を秒として読む。負は 0、空か読めなければ `default`。読む環境変数の名前は呼び手が字句で書く
+    （契約のチェックが名前を拾えるようにする。`check-ndf-contracts.py`）。"""
+    try:
+        return max(0.0, float(raw or default))
+    except ValueError:
+        return default
+
+
 def launch_seconds() -> float:
     """立ち上がりを待つ上限の秒（`NDF_PARALLEL_LAUNCH_SECONDS` で変えられる。既定 120 秒）。"""
-    try:
-        return max(0.0, float(os.environ.get("NDF_PARALLEL_LAUNCH_SECONDS") or LAUNCH_SECONDS))
-    except ValueError:
-        return LAUNCH_SECONDS
+    return _env_seconds(os.environ.get("NDF_PARALLEL_LAUNCH_SECONDS"), LAUNCH_SECONDS)
 
 
 def helper_wait_seconds() -> float:
     """一時レーンの空き待ちの上限の秒（`NDF_PARALLEL_HELPER_WAIT_SECONDS` で変えられる。既定 3,600 秒）。"""
-    try:
-        return max(0.0, float(os.environ.get("NDF_PARALLEL_HELPER_WAIT_SECONDS") or HELPER_WAIT))
-    except ValueError:
-        return HELPER_WAIT
+    return _env_seconds(os.environ.get("NDF_PARALLEL_HELPER_WAIT_SECONDS"), HELPER_WAIT)
 
 
 def _outcome(got: dict) -> dict:
