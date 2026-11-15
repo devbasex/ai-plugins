@@ -9,6 +9,9 @@ merge-gate は、PR 本文の手動確認（マージ前）に印の無い行が
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any
 
 import approved_commit
 import delivery
@@ -103,12 +106,32 @@ def _judge_rows(verdict):
     return [("判定", verdict.value), ("理由", verdict.reason), *[(i["name"], i["result"]) for i in verdict.items]]
 
 
-def gate_stop(n, verdict, info=None, next_cmd=None, plan_step="merge-approved", approved_sha=None, out=None):
+@dataclass(frozen=True)
+class MergeOptions:
+    """merge_when_green の承認ゲートとマージの前後の選択（既定は merge-when-green の CLI のまま。promote が組んで渡す）。
+
+    `next_cmd` は承認ゲートで止まるときの打ち方（文字列か、書いた承認資料のパスを受けて打ち方を返す関数）、`plan_step` はプランの
+    続け方のステップ。`gate_head` なら止まるときに最初の読みの先端を承認資料へ載せる（promote。#2104）。`moved_next` は、先端が
+    --expect-head と違って止まるときに next へ載せる続け方。`ci_tests` なら、CI テストの宣言のあるリポジトリでテストのチェックが
+    すべて現れて通るまでマージしない。`trail_item` は promote が照らした承認の証跡かレビューの項目で、マージの記録の前に items へ
+    足す。`after_merge(items)` は、マージの後かマージ済みを見たときに結果を出す前に呼ぶ（promote の迂回の記録。#3506）。"""
+
+    next_cmd: Any = None
+    plan_step: str = "merge-approved"
+    gate_head: bool = False
+    moved_next: str | None = None
+    ci_tests: bool = True
+    trail_item: dict | None = None
+    after_merge: Callable[[list[dict]], str | None] | None = None
+
+
+def gate_stop(n, verdict, info=None, opts: MergeOptions = MergeOptions(), approved_sha=None, out=None):
     """承認の無い本番系へのマージを止める結果（status: gate・終了コード 10）を出して終える。承認資料を書く。
     approved_sha（リリースの Pull Request の先端。#2104）があれば、判断の表の先頭へ「承認したコミット」の行を置き、
     metrics.approved_sha と gate の items[].head にも載せる。out は承認資料の置き場（無ければ既定の置き場）。
-    next_cmd は文字列か、書いた承認資料のパスを受けて打ち方を返す関数。"""
+    打ち方は opts の next_cmd と plan_step。"""
     info = info or {}
+    next_cmd, plan_step = opts.next_cmd, opts.plan_step
     target = verdict.target or "（不明）"
     what = f"#{n}" if n else f"宛先 {target} へのマージ"
     lead = (
@@ -234,10 +257,10 @@ def _moved_after_refusal(info: dict, sha: str | None) -> str | None:
     return head if sha and head and head != sha else None
 
 
-def _merge_pr(root, a, n, watch, items, waits, trail_item=None):
+def _merge_pr(root, a, n, watch, items, waits, opts: MergeOptions):
     """緑を確かめた先頭で gh pr merge を走らせ、マージの記録を items へ足す。失敗すれば stopped を emit する。
     断られた後に PR を読み直し、先端が動いていれば head_moved の項目で止める（#3506 の I6b）。マージした行には迂回の有無を
-    `admin` で必ず書く（I8）。`trail_item` は promote が照らした承認の証跡かレビューの項目（#2773）で、マージできたときだけ items へ足す。"""
+    `admin` で必ず書く（I8）。opts の `trail_item` は promote が照らした承認の証跡かレビューの項目（#2773）で、マージできたときだけ items へ足す。"""
     sha = watch.last_sha  # --expect-head があれば、GreenWatch が読むたびにこれと比べている
     pin = ["--match-head-commit", sha] if sha else []  # 緑を確かめた先頭（--expect-head なら比べた先端）だけをマージする
     no_admin = getattr(a, "no_admin", False)
@@ -270,8 +293,8 @@ def _merge_pr(root, a, n, watch, items, waits, trail_item=None):
             )
         )
     merged = {"kind": "pr", "name": f"#{n}", "result": "merged", "method": a.method, "head": sha, "admin": not no_admin}
-    if trail_item:
-        items.append(trail_item)
+    if opts.trail_item:
+        items.append(opts.trail_item)
     if a.gate_approved:
         merged["gate_approved"] = a.gate_approved  # 誰がリリース承認ゲートを通したか（監査で辿る。#1336 の I8）
     items.append(merged)
@@ -291,28 +314,14 @@ def test_checks_of(root) -> list[str] | None:
     return test_strategy.ci_checks(project) if test_strategy.declares_ci_only(project) else None
 
 
-def merge_when_green(
-    a,
-    cleanup,
-    next_cmd=None,
-    plan_step="merge-approved",
-    gate_head=False,
-    moved_next=None,
-    ci_tests=True,
-    trail_item=None,
-    after_merge=None,
-):
-    """gate_head なら、リリース承認ゲートで止まるときに最初の読みの先端を承認資料へ載せる（promote。#2104）。
-    moved_next は、先端が --expect-head と違って止まるときに next へ載せる続け方。`ci_tests` なら、CI テストの宣言の
-    あるリポジトリでテストのチェックがすべて現れて通るまでマージしない（リリースの Pull Request の promote は渡さない）。
-    `trail_item` は promote が照らした承認の証跡かレビューの項目で、マージの記録の前に items へ足す。
-    `after_merge(items)` は、マージの後かマージ済みを見たときに結果を出す前に呼ぶ（promote の迂回の記録。#3506）。
-    文を返せばマージは済んだまま stopped（1）で出す。"""
+def merge_when_green(a, cleanup, opts: MergeOptions = MergeOptions()):
+    """緑を確かめてマージする。選択は `opts`（MergeOptions。リリースの Pull Request の promote は `ci_tests` を偽にする）。
+    `after_merge` が文を返せばマージは済んだまま stopped（1）で出す。"""
     root = git_root(a.root)
     n = a.pr
     decl = delivery.load_delivery(root)  # 判定は保存しない。呼ぶたびに宣言から作り直す
-    watch = GreenWatch(root, a, moved_next=moved_next)
-    watch.test_checks = test_checks_of(root) if ci_tests else None
+    watch = GreenWatch(root, a, moved_next=opts.moved_next)
+    watch.test_checks = test_checks_of(root) if opts.ci_tests else None
     judged = {}
 
     def gate(info):
@@ -320,8 +329,8 @@ def merge_when_green(
         verdict = delivery.judge_target(decl, info.get("baseRefName") or "")
         judged["verdict"] = verdict
         if verdict.stops and not a.gate_approved:
-            sha = _gate_head(info) if gate_head else None
-            gate_stop(n, verdict, info, next_cmd, plan_step, sha, getattr(a, "out", None) if gate_head else None)
+            sha = _gate_head(info) if opts.gate_head else None
+            gate_stop(n, verdict, info, opts, sha, getattr(a, "out", None) if opts.gate_head else None)
 
     watch.on_open = gate
     watch.wait()
@@ -330,8 +339,8 @@ def merge_when_green(
     gate_metrics = {"verdict": verdict.value, "target": verdict.target} if verdict else {}
 
     if not any(i["kind"] == "pr" and i["result"] == "already_merged" for i in items):
-        _merge_pr(root, a, n, watch, items, waits, trail_item)
-    if after_merge and (why := after_merge(items)):
+        _merge_pr(root, a, n, watch, items, waits, opts)
+    if opts.after_merge and (why := opts.after_merge(items)):
         emit(result(TOOL, "stopped", f"#{n} をマージした。{why}", items, {"waits": waits, "queued_runs": queued_runs, **gate_metrics}))
 
     if a.no_cleanup:
@@ -461,9 +470,7 @@ def promote(a, cleanup):
                 after_merge = promote_trail.admin_after_for(root, case, n, a.expect_head, trail_item)
     a.pr, a.no_cleanup = n, True
     approve = f"promote --head {a.head} --base {a.base} --gate-approved user --approved-from "
-    merge_when_green(
-        a,
-        cleanup,
+    opts = MergeOptions(
         next_cmd=lambda path: approve + str(path),
         plan_step="promote-approved",
         gate_head=True,
@@ -472,3 +479,4 @@ def promote(a, cleanup):
         trail_item=trail_item,
         after_merge=after_merge,
     )
+    merge_when_green(a, cleanup, opts)
