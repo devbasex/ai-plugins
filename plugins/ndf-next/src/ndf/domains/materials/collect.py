@@ -212,8 +212,7 @@ def design_files(root: Path, number: int, files: Iterable[str]) -> list[tuple[st
     for rel in sorted(f for f in files if (m := DESIGN_FILE.match(f)) is not None and int(m.group(1)) == number):
         try:
             text = (root / rel).read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            # 読めない文書は材料にしない（旧い design_files と同じ）
+        except (OSError, UnicodeDecodeError):  # noqa: S112 ファイル: 読めない設計文書は材料にしない（旧い design_files と同じ）
             continue
         paths = design_rows(text, number)
         if paths:

@@ -48,12 +48,13 @@ allowed-tools:
 
 ## 手順
 
-スクリプトの置き場所 `$R` の決め方は `development-workflow/references/scripts-lookup.md` にある。
-出力はどれも 1 行の JSON（形は `$R/scripts/lib/README.md`）。`status` が `ok`（0）なら次の手順へ
+`ndf` の確かめと旧いスクリプトの置き場の扱いは `development-workflow/references/scripts-lookup.md` にある。
+出力はどれも 1 行の結果 JSON。`status` が `ok`（0）なら次の手順へ
 進み、`stopped`（1 / 2 / 3）なら `summary` と `items[].reason` を報告して止まる。
 
 ```bash
-FIX=$(bash "$R/scripts/resolve.sh" scripts fix) || exit 3
+FIX=   # 旧いスクリプトの置き場。新しいプラグインだけの起動では空（scripts-lookup.md）
+[ -n "${FIX:-}" ] || { echo "fix-steps.py は M1 #3300 が副命令に置き換えるまで新しいプラグインだけでは打てない" >&2; exit 3; }
 ```
 
 1. **文脈を集める。** 未解決スレッド・3 種のコメント（インライン / レビュー body / PR レベル）・
@@ -65,7 +66,7 @@ FIX=$(bash "$R/scripts/resolve.sh" scripts fix) || exit 3
    ```
 
    `items[].name` が `context` のファイルを読む。末尾の「指摘の基準」の節が振り分けの基準である
-   （正本は `$R/scripts/lib/review_criteria.py`。プロジェクトのレビューの重点は `.ndf/review.json`
+   （正本は旧いプラグインの `scripts/lib/review_criteria.py`。プロジェクトのレビューの重点は `.ndf/review.json`
    の宣言から入り、`/ndf:cross-review` の中では状態ファイルにコピーした重点を使う。宣言のプロファイル
    （`version: 2` の 1 つか、`version: 3` で PR の変更ファイルのパスから選んだ 1 つ）があれば、基準・書かないもの・
    見送りの種類・返信もそこから入る）。`review-focus` の

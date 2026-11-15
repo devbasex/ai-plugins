@@ -123,12 +123,13 @@ python3 "$UPKEEP/upkeep.py" depth compare --since-ref <デプロイした版の�
 **手順 1 で対象が 0 件なら、そこで飛ばす。** 飛ばしたことを報告へ残す。
 
 **候補の収集（手順 1）・順位の算出（手順 2C）・反映（手順 3）・報告の値は `upkeep.py` が持ち、区分と見積の段階の
-決定（手順 2A / 2B）だけを LLM が持つ。** スクリプトの置き場所 `$R` の決め方は `development-workflow/references/scripts-lookup.md`
-にある。出力はどれも 1 行の JSON（形は `$R/scripts/lib/README.md`）で、記録は
+決定（手順 2A / 2B）だけを LLM が持つ。** `ndf` の確かめと旧いスクリプトの置き場の扱いは `development-workflow/references/scripts-lookup.md`
+にある。出力はどれも 1 行の結果 JSON で、記録は
 `$NDF_UPKEEP_STATE_DIR`（既定は一時ディレクトリの `ndf/backlog-refinement/`）の下にリポジトリごとに置く。
 
 ```bash
-UPKEEP=$(bash "$R/scripts/resolve.sh" scripts backlog-refinement) || exit 3
+UPKEEP=   # 旧いスクリプトの置き場。新しいプラグインだけの起動では空（scripts-lookup.md）
+[ -n "${UPKEEP:-}" ] || { echo "upkeep.py は M6 #3301 が副命令に置き換えるまで新しいプラグインだけでは打てない" >&2; exit 3; }
 ```
 
 状態と終了コードの意味は `$SCRIPTS/lib/README.md` の「手順のスクリプトの結果」にある。

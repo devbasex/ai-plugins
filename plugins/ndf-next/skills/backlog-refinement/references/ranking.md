@@ -74,7 +74,8 @@ RR/OE を退避策で下げたかはスクリプトが判定できないため�
 手順 2B で Size を付ける課題ごとに、本文から完了条件と 6 項目を判定して部品を呼び、見積もりの記録へ残す。
 
 ```bash
-SCRIPTS=$(bash "$R/scripts/resolve.sh" scripts) || exit 3
+SCRIPTS=   # 旧いスクリプトの置き場。新しいプラグインだけの起動では空（scripts-lookup.md）
+[ -n "${SCRIPTS:-}" ] || { echo "estimate.py は P3 #3097 が副命令に置き換えるまで新しいプラグインだけでは打てない" >&2; exit 3; }
 python3 "$SCRIPTS/estimate.py" predict --issue 1601 --done 実装 --items spread=重,rework=軽 --save
 ```
 

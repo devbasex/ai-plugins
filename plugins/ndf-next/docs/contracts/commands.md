@@ -187,6 +187,16 @@
 
 結果の `metrics`: 決まった項目を持たない。`items` の要素: `path`（string）
 
+## `ndf materials`
+
+内部（予告なく変えてよい）。[引数のスキーマ](../../contracts/schemas/io/materials.args.schema.json)・[結果のスキーマ](../../contracts/schemas/io/materials.result.schema.json)
+
+| 呼び方 | 引数 |
+| --- | --- |
+| `ndf materials` | `--issue`（array of integer・必須）: 課題の番号（1 つ以上）<br>`--root`（string・任意・既定 `"."`）: リポジトリの作業場所<br>`--out`（string・任意）: 判定の根拠のファイルの下書きを書く先 |
+
+結果の `metrics`: `gaps`（integer）・`issues`（integer）・`out`（string）。`items` の要素: `files`（array of object）・`files_found`（integer）・`kind`（string か null）・`number`（integer）・`public_interface`（object）
+
 ## `ndf notify`
 
 内部（予告なく変えてよい）。[引数のスキーマ](../../contracts/schemas/io/notify.args.schema.json)・[結果のスキーマ](../../contracts/schemas/io/notify.result.schema.json)
@@ -227,6 +237,17 @@
 | `ndf progress show` | `table_id`（string・必須・位置） |
 
 結果の `metrics`: `answer`（string）・`cancelled_rows`（integer）・`current_id`（string）・`disabled`（array of string）・`history`（array of object）・`mode`（string）・`move`（string）・`rev`（integer）・`rows`（integer）・`seq`（integer）・`seqs`（array of integer）・`stage`（string）・`state`（string か null）・`step`（string）・`table_id`（string）。`items` の要素: `at`（string か null）・`changed`（boolean）・`error`（string）・`from`（string）・`gates`（array of string）・`key`（string）・`kind`（string）・`label`（string）・`number`（integer）・`path`（string）・`phase`（string）・`reason`（string か null）・`restored`（string）・`retired`（string）・`source`（string）・`stage`（string）・`state`（string か null）
+
+## `ndf project`
+
+内部（予告なく変えてよい）。[引数のスキーマ](../../contracts/schemas/io/project.args.schema.json)・[結果のスキーマ](../../contracts/schemas/io/project.result.schema.json)
+
+| 呼び方 | 引数 |
+| --- | --- |
+| `ndf project check` | `--force`（boolean・任意）: 新しくても古いと判定する（手動の再解析）<br>`--root`（string・任意・既定 `"."`）: リポジトリの作業場所 |
+| `ndf project schema` | `--out`（string・任意）: 書く先。省けば標準出力 |
+
+結果の `metrics`: `inputs`（integer）。`items` の要素: `kind`（string）・`reason`（string）
 
 ## `ndf records`
 
@@ -278,15 +299,16 @@
 | `ndf relay install` | `--replace-old`（boolean・任意）: 旧い NDF の複製を置き換える（旧いラッパーが動いていれば断る） |
 | `ndf relay ls` | 引数を受けない |
 | `ndf relay mark` | `session_id`（string・必須・位置） |
+| `ndf relay notice` | 引数を受けない |
 | `ndf relay pending` | 引数を受けない |
 | `ndf relay restart` | `name`（string・必須・位置） |
 | `ndf relay run` | `--name`（string・任意）<br>`rest`（array of string・任意・位置）<br>`--prompt`（string・任意） |
 | `ndf relay spawn` | `--name`（string・任意）<br>`rest`（array of string・任意・位置）<br>`--cwd`（string・任意）<br>`--role`（string・任意）<br>`--plan`（string・任意） |
 | `ndf relay status` | 引数を受けない |
-| `ndf relay stop` | `name`（string・必須・位置） |
+| `ndf relay stop` | `name`（string・任意・位置）: 止めるラッパーの名前<br>`--all`（boolean・任意）: 動いている名前つきのラッパーをすべて止める |
 | `ndf relay uninstall` | 引数を受けない |
 
-結果の `metrics`: 決まった項目を持たない。`items` の要素: `account`（string か null）・`args`（array か null）・`cwd`（string か null）・`kind`（string）・`name`（string）・`path`（string）・`pending`（array か null）・`plan`（string か null）・`prompt`（string）・`reason`（string か null）・`role`（string か null）・`run`（string）・`running`（boolean）・`starts`（object）・`state`（string か null）・`status`（string か null）・`updated_at`（string か null）・`version`（string）・`workflow`（string）
+結果の `metrics`: `inside`（boolean）・`stopped`（integer）。`items` の要素: `account`（string か null）・`args`（array か null）・`cwd`（string か null）・`kind`（string）・`name`（string）・`ok`（boolean）・`path`（string）・`pending`（array か null）・`plan`（string か null）・`position`（string）・`prompt`（string）・`reason`（string か null）・`role`（string か null）・`run`（string）・`running`（boolean）・`starts`（object）・`state`（string か null）・`status`（string か null）・`summary`（string）・`text`（string）・`updated_at`（string か null）・`version`（string）・`workflow`（string）
 
 ## `ndf release-steps`
 
@@ -324,6 +346,19 @@
 | `ndf route test` | `--result`（string・任意）<br>`--failed-from`（string・任意）<br>`command`（string・任意・位置） |
 
 結果の `metrics`: `exit_code`（integer）・`failed_runs`（integer）・`failed_tests`（array of string）・`runs`（integer）・`same_cause`（integer）・`streak`（integer）・`templates`（integer）。`items` の要素: `command`（string）・`exit_code`（integer）・`kind`（string）・`name`（string）・`params`（array of string）・`passed`（boolean）・`path`（string）・`purpose`（string）・`suite`（string）
+
+## `ndf statusline`
+
+内部（予告なく変えてよい）。[引数のスキーマ](../../contracts/schemas/io/statusline.args.schema.json)・[結果のスキーマ](../../contracts/schemas/io/statusline.result.schema.json)
+
+| 呼び方 | 引数 |
+| --- | --- |
+| `ndf statusline ensure` | 引数を受けない |
+| `ndf statusline restore` | 引数を受けない |
+| `ndf statusline set` | 引数を受けない |
+| `ndf statusline status` | 引数を受けない |
+
+結果の `metrics`: 決まった項目を持たない。`items` の要素: `action`（string）・`backup`（boolean）・`current`（object）・`message`（string）
 
 ## `ndf test-slot`
 

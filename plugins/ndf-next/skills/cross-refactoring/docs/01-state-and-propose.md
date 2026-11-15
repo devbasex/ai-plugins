@@ -8,7 +8,7 @@
 
 ## 駆動の準備
 
-スクリプトの位置は SKILL.md の「前提」のエントリポイントのブロック（解決のエントリポイント `resolve.sh` が返す絶対パス）で求め、
+スクリプトの位置は SKILL.md の「前提」のブロック（`ndf` の確かめと旧いスクリプトの置き場。新しいプラグインだけの起動では空）で決め、
 対象のリポジトリの中から打つ。Skill のディレクトリへは移らない。副コマンドを呼ぶ `rf` / `rf_eval` の定義は SKILL.md の
 「実行」の先頭にある。**出力を `eval` する呼び出し**（`init` / `start-phase` / `merge-plan` /
 `merge-implement` / `verify` / `final-gate`）は `rf_eval` を使う。`eval "$(rf ...)"` と

@@ -148,8 +148,7 @@ def _managed_copy(path: Optional[Path]) -> bool:
         return False
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        # 読めないコピーは利用者のものとみなし、書き換えない
+    except OSError:  # noqa: NDF401 ファイル: 読めないコピーは利用者のものとみなし、書き換えない
         return False
     if MANAGED_MARK in text:
         return True

@@ -14,9 +14,8 @@ python3 "$SCRIPTS/supervise.py" queue <プラン>.json
 python3 "$SCRIPTS/supervise.py" wait <プラン>-state/queue-done.json
 ```
 
-`$SCRIPTS` の決め方は [scripts-lookup.md](scripts-lookup.md) にある。表のパスは `plugins/ndf/` からの
-相対で、`scripts/` で始まるものは `$SCRIPTS/` の下、`skills/` で始まるものは `resolve.sh skill` で
-決めた Skill のディレクトリの下にある。引数は各スクリプトの `--help` が正である。
+`$SCRIPTS` の決め方は [scripts-lookup.md](scripts-lookup.md) にある。表のパスは旧いプラグインの根からの
+相対で、新しいプラグインだけの起動では `$SCRIPTS` が空のため打てない。引数は各副命令の `--help` が正である。
 
 ## プランを作って流す
 

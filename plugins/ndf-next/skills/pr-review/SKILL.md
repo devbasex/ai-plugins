@@ -153,12 +153,13 @@ PR 差分、または `--branch` 指定時は現在のブランチの差分を�
 
 ## 手順
 
-集める・判定する・投稿するはスクリプトが行い、LLM はレビューだけを行う。`$R` の決め方は
+集める・判定する・投稿するはスクリプトが行い、LLM はレビューだけを行う。`ndf` の確かめと旧いスクリプトの置き場の扱いは
 `development-workflow/references/scripts-lookup.md`。`status` が `stopped` なら `summary` と `items` を
 報告して止まる。
 
 ```bash
-PRR=$(bash "$R/scripts/resolve.sh" scripts pr-review) || exit 3
+PRR=   # 旧いスクリプトの置き場。新しいプラグインだけの起動では空（scripts-lookup.md）
+[ -n "${PRR:-}" ] || { echo "pr-review-steps.py は M5 #3299 が副命令に置き換えるまで新しいプラグインだけでは打てない" >&2; exit 3; }
 ```
 
 Claude 自身がレビューする（第二引数なし）:

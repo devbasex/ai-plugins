@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/io/project.args.schema.json",
+  "title": "ndf project の引数",
+  "description": "ndf project が受ける引数。キーは引数の名前（オプションは -- の名前、位置引数は名前）。規約の生成が作り、手で直さない",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "check",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--force": {
+          "type": "boolean",
+          "description": "新しくても古いと判定する（手動の再解析）"
+        },
+        "--root": {
+          "type": "string",
+          "default": ".",
+          "description": "リポジトリの作業場所"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "schema",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--out": {
+          "type": "string",
+          "description": "書く先。省けば標準出力"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    }
+  ]
+}

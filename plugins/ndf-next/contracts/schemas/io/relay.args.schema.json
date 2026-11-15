@@ -114,6 +114,19 @@
       "additionalProperties": false,
       "properties": {
         "subcommand": {
+          "const": "notice",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
           "const": "pending",
           "description": "下位の命令（入れ子は空白でつなぐ）"
         }
@@ -221,12 +234,16 @@
         },
         "name": {
           "type": "string",
+          "description": "止めるラッパーの名前",
           "x-ndf-positional": true
+        },
+        "--all": {
+          "type": "boolean",
+          "description": "動いている名前つきのラッパーをすべて止める"
         }
       },
       "required": [
-        "subcommand",
-        "name"
+        "subcommand"
       ]
     },
     {

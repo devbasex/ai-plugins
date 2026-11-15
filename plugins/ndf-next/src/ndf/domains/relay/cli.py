@@ -194,7 +194,7 @@ def _stop_all(ctx: hub.Context) -> int:
     items: list[dict[str, Any]] = []
     refused: list[str] = []
     for name in names:
-        got = hub.submit(ctx, {"kind": "stop", "name": name})  # noqa: NDF201 外部コマンド: ラッパーごとに依頼する（本数は上限の表 relay.max-named まで）
+        got = hub.submit(ctx, {"kind": "stop", "name": name})
         items.append({"name": name, "ok": got.ok, "summary": got.summary})
         if not got.ok:
             refused.append(name)

@@ -28,16 +28,11 @@
 ## Step 0: 準備 + 既存 state 引継ぎ
 
 ```bash
-# スクリプトの置き場所を解決のエントリポイント（scripts/resolve.sh）に尋ねる。エントリポイントを探すこのコマンドと
-# 候補の順序は development-workflow/references/scripts-lookup.md にある。
-for R in '${CLAUDE_PLUGIN_ROOT}' "$(git rev-parse --show-toplevel 2>/dev/null)/plugins/ndf" \
-  ~/.claude/plugins/cache/*/ndf/* .kiro/skills/*/../.. ~/.kiro/skills/*/../.. \
-  ~/.codex/{.tmp/,}marketplaces/*/plugins/ndf ~/.gemini/config/plugins/ndf plugins/ndf; do
-  [ -f "$R/scripts/resolve.sh" ] && break; R=
-done
-[ -n "$R" ] || { echo "NDF の scripts/resolve.sh が見つからない" >&2; exit 3; }
-SCRIPTS=$(bash "$R/scripts/resolve.sh" scripts cross-review) || exit 3
-LIB=$(bash "$R/scripts/resolve.sh" scripts)/lib || exit 3   # 共通ライブラリ（bg-wait.sh）
+command -v ndf >/dev/null 2>&1 || { echo "ndf が PATH に無い" >&2; exit 3; }   # scripts-lookup.md
+SCRIPTS=   # 旧いスクリプトの置き場。新しいプラグインだけの起動では空（scripts-lookup.md）
+[ -n "${SCRIPTS:-}" ] || { echo "state.py は M5 #3299 が副命令に置き換えるまで新しいプラグインだけでは打てない" >&2; exit 3; }
+LIB=   # 旧いスクリプトの置き場。新しいプラグインだけの起動では空（scripts-lookup.md）
+[ -n "${LIB:-}" ] || { echo "bg-wait.sh は M5 #3299 が副命令に置き換えるまで新しいプラグインだけでは打てない" >&2; exit 3; }
 
 # state 初期化 / 再開（プリチェック・worktree 作成・既存コメントスナップショットを内部実行）
 # ⚠ `eval "$(スクリプト)"` は、スクリプトが異常終了しても出力が空なら終了コード 0 になる。

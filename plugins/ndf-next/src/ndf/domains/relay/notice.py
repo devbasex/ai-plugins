@@ -5,7 +5,7 @@
 - 区間のやり取りの置き場（`NDF_RELAY_DIR`）が無いか、ディレクトリでなければ `no-dir`
 - ラッパーの排他（`relay.lock`）が持たれていなければ `not-running`
 - 親をたどって最初に当たる claude の親の pid が、ラッパーの状態（`wrapper.json`）の `pid` と違えば `not-child`
-  （fork したセッション・別の入口。conductor が Bash から起こした `claude -p` は子の claude の孫に当たり、先にそちらに当たる）
+  （fork したセッション・別のエントリポイント。conductor が Bash から起こした `claude -p` は子の claude の孫に当たり、先にそちらに当たる）
 - 同じなら `relay`
 
 秒数はラッパーの静かな時間（上限の表 `relay.quiet`）そのもので、切り替えの時間は足さない。
@@ -24,8 +24,6 @@ from ndf.domains.relay import registry, signals
 
 # 親のたどりの上限の世代
 ANCESTOR_LIMIT = 64
-CLAUDE = "claude"
-OUTSIDE = "/exit してから claude を起動し、下の中身を最初の入力として貼り付ける（/ndf11:install-wrapper でラッパーを入れると自動になる）"
 # 位置の種類
 RELAY, NO_DIR, NOT_RUNNING, NOT_CHILD = "relay", "no-dir", "not-running", "not-child"
 
@@ -60,7 +58,7 @@ def first_claude(start_pid: int, info: Callable[[int], Optional[tuple[int, str]]
         if got is None:
             return None
         ppid, name = got
-        if name == CLAUDE:
+        if name == "claude":
             return pid, ppid
         pid = ppid
     return None
@@ -102,7 +100,7 @@ def lines(pos: Position, quiet: float) -> Notice:
             "元の会話へ戻って同じ ndf-next を出すか、元の会話を /exit してから claude を起動し、下の中身を最初の入力として貼り付ける",
         )
     if pos.kind != RELAY:
-        return Notice(False, OUTSIDE)
+        return Notice(False, "/exit してから claude を起動し、下の中身を最初の入力として貼り付ける（ラッパーを入れると自動になる）")
     if math.isinf(quiet) and quiet > 0:
         return Notice(True, "静かな時間が有限でないため、ラッパーは自動で切り替えない。/exit してから claude を起動し、下の中身を最初の入力として貼り付ける")
     # ラッパーは負・nan の静かな時間を待たずに通すので、0 として数える
