@@ -46,7 +46,7 @@ plugins/ndf-next/skills: 公開する Skill 0 個 / Markdown 0 本 / スクリ�
 | 2 | `domains/release/__init__.py`・`.github/workflows/ndf-next-release.yml` | リリースの実行の場が ai-plugins の workflow だけ | 壊れる | #3615 |
 | 3 | `adapters/ci.py:58`・`core/route/__init__.py:35-39`・`parts/steps.json:73` | 落ちたテストを pytest の形だけで読む | 壊れる | #3616 |
 | 4 | `issues/issue-3572-design-decisions.md` 決定 5・14 | 取り込み方の表から develop→main の行を外す | 壊れる（設計） | #3572（やり直し中） |
-| 5 | 同 決定 9 | 検証の場が 2 つ目のマーケットプレイスだけ | 壊れる（設計） | #3572 |
+| 5 | 同 決定 9 | 検証の場が 検証用マーケットプレイスだけ | 壊れる（設計） | #3572 |
 | 6 | 同 決定 7 | バージョンを上げる PR を迂回でマージ、`plugin.json` を書き換える | 壊れる（設計） | #3572・#3615 |
 | 7 | `scripts/check-skill-repo-assumptions.py:172-178` | 走査が `manifests/*-skills.txt` 前提で ndf-next を見ない | 検査の穴 | この Issue |
 | 8 | `domains/release/changes_decide.py:22` | 配らないファイルの既定が Python のテストだけ | 既定 | #3615 |
