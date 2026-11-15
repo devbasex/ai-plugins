@@ -6,11 +6,12 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
 
-from ._slides import DECK_FRAME, needs_node, node
+from ._slides import DECK_FRAME, NODE, SCRIPT_TIME, needs_node, node
 
 pytestmark = needs_node
 
@@ -101,3 +102,63 @@ out([m.readScript({json.dumps(str(f))}), err({json.dumps(missing)}), err({json.d
         [f"台本が無い: {missing}", 1],
         [f"台本にページの区切り（## <番号>. <見出し>）が無い: {bad}", 2],
     ]
+
+
+# ---- script-time.js の CLI（I-008・I-012・I-014） ----
+
+# 字数は 表紙 5・本編 12。見出しの `|` は表で `\|` に置き換わる
+SAMPLE = "## 1. 表紙（20秒）\n> あいう えお\n## 2. 本編|縦\n> **強調**と`コード`\n>\n> 二段落目です\n"
+USAGE = "usage: node lib/script-time.js <台本> [--wpm 350] [--limit <分>] [--json]"
+
+
+def cli(cwd: Path, *args: str) -> tuple[int, str, str]:
+    r = subprocess.run([NODE, str(SCRIPT_TIME), *args], capture_output=True, text=True, cwd=cwd, timeout=60, check=False)
+    return r.returncode, r.stdout, r.stderr
+
+
+@pytest.fixture
+def work(tmp_path: Path) -> Path:
+    (tmp_path / "s.md").write_text(SAMPLE, encoding="utf-8")
+    return tmp_path
+
+
+def sample_json(wpm: float, s1: float, s2: float, total: float) -> dict:
+    return {
+        "wpm": wpm,
+        "pages": [
+            {"no": 1, "title": "表紙", "chars": 5, "seconds": s1, "planned": 20},
+            {"no": 2, "title": "本編|縦", "chars": 12, "seconds": s2, "planned": None},
+        ],
+        "total": {"pages": 2, "chars": 17, "seconds": total, "planned": 20},
+    }
+
+
+def test_default_wpm_is_350(work: Path):
+    code, out, err = cli(work, "s.md", "--json")
+    assert (code, err) == (0, "")
+    assert json.loads(out) == sample_json(350, 0.9, 2.1, 3)
+
+
+def test_default_wpm_appears_in_the_table(work: Path):
+    code, out, _ = cli(work, "s.md")
+    assert code == 0
+    assert out.splitlines()[-1] == "| 合計 | 2 ページ（350 字/分） | 17 | 3.0（0分03秒） | 20 |"
+
+
+@pytest.mark.parametrize(
+    ("args", "wpm", "s1", "s2", "total"),
+    [
+        (["--wpm", "100"], 100, 3, 7.2, 10.2),
+        (["--wpm", "350.5"], 350.5, 0.9, 2.1, 3),
+        (["--wpm", "100", "--wpm", "200"], 200, 1.5, 3.6, 5.1),  # 後に書いた値が勝つ
+    ],
+)
+def test_wpm_overrides_the_default(work: Path, args: list[str], wpm: float, s1: float, s2: float, total: float):
+    code, out, _ = cli(work, "s.md", "--json", *args)
+    assert code == 0
+    assert json.loads(out) == sample_json(wpm, s1, s2, total)
+
+
+@pytest.mark.parametrize("args", [[], ["--json"], ["--wpm", "100"]])
+def test_usage_without_a_script(work: Path, args: list[str]):
+    assert cli(work, *args) == (1, "", USAGE + "\n")
