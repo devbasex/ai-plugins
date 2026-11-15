@@ -240,17 +240,22 @@ def survey_steps(n: int, next_id: str, require_detail: bool = False) -> list:
         "扱えなくなることを `無し` へ書き換えて指摘を消さない。`無し` と書いてよいのは、同じ種類が改名後の設定か別の選択肢で"
         "同じ運用を続けられるときだけ。"
     )
-    return [
-        {
-            "id": "survey-check",
+
+    def run_check(id_: str, **extra) -> dict:
+        """検査のステップ。終了コード 2 は直しへ回さず止め、通れば next_id へ進む（`extra` は cmd と on_exit の間へ入る）。"""
+        return {
+            "id": id_,
             "type": "run",
             "stage": "ドキュメントレビュー",
             "timeout": 120,
             "cmd": check,
-            "on_fail": "fix-survey",
+            **extra,
             "on_exit": {"2": "stop"},
             "next": next_id,
-        },
+        }
+
+    return [
+        run_check("survey-check", on_fail="fix-survey"),
         {
             "id": "fix-survey",
             "type": "work",
@@ -263,15 +268,7 @@ def survey_steps(n: int, next_id: str, require_detail: bool = False) -> list:
             "直すか、外部の調査の表へ出典つきの候補の行を足してコミットする（push しない）。比べずには直せない指摘"
             "（候補を調べ直さないと決まらないもの）は直さずに「判断が要る」と報告する。" + detail_fix + repo_fix,
         },
-        {
-            "id": "survey-recheck",
-            "type": "run",
-            "stage": "ドキュメントレビュー",
-            "timeout": 120,
-            "cmd": check,
-            "on_exit": {"2": "stop"},
-            "next": next_id,
-        },
+        run_check("survey-recheck"),
     ]
 
 
