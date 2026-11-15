@@ -186,20 +186,34 @@ def env_reads(tree: ast.Module) -> list[tuple[int, str]]:
 
 
 def io_findings(model: SpecModel, scope: Scope, rel: Rel) -> list[Finding]:
+    """副命令の引数の出所と結果のスキーマ、コードが読む環境変数、起動スクリプトの表と `bin/` の照合の指摘（この順）。"""
+    return _command_findings(model, rel) + _env_findings(model, scope) + _launcher_findings(model, rel)
+
+
+def _command_findings(model: SpecModel, rel: Rel) -> list[Finding]:
     io_rel = rel(f"{CONTRACTS}/{IO_SCHEMA_DIR}")
     found = []
     for command in model.commands:
         found += [Finding(IO, io_rel, 1, f"副命令 {command.name}: {e}") for e in _source_errors(command) + _result_errors(command)]
+    return found
+
+
+def _env_findings(model: SpecModel, scope: Scope) -> list[Finding]:
     known = model.env_ids
+    found = []
     for src in scope.code():
         found += [
             Finding(IO, src.rel, line, f"環境変数 {name} が環境変数の表（env）に無い")
             for line, name in env_reads(src.tree)
             if name not in known
         ]
+    return found
+
+
+def _launcher_findings(model: SpecModel, rel: Rel) -> list[Finding]:
     rows = {r["id"] for r in model.launchers}
     launchers_rel = _table_rel(rel, "launchers")
-    found += [Finding(IO, launchers_rel, 1, f"bin/{n} が起動スクリプトの表（launchers）に無い") for n in model.bin_files if n not in rows]
+    found = [Finding(IO, launchers_rel, 1, f"bin/{n} が起動スクリプトの表（launchers）に無い") for n in model.bin_files if n not in rows]
     found += [
         Finding(IO, launchers_rel, 1, f"起動スクリプトの表の行 {n} のファイルが bin/ に無い") for n in sorted(rows - set(model.bin_files))
     ]
