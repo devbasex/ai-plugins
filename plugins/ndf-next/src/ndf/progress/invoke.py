@@ -429,14 +429,15 @@ def ci_only(place: Path) -> bool:
     return scoped.ci_only(test if isinstance(test, Mapping) else {})
 
 
-def template_values(t: route.Template, run: StageRun, work_dir: Path, cwd: Path) -> dict[str, route.Value]:
+def template_values(t: route.Template, run: StageRun, work_dir: Path, cwd: Path, *, local_tests: bool) -> dict[str, route.Value]:
     """雛形の差し込みの値。工程の入力 → 出所の表（`FILL_SOURCES`）→ 打った場所（`route.derived`）の順に決める。
 
-    既定も無く決まらない差し込みは、名前と出所を挙げて `TemplateValuesMissing`。テストを CI に寄せる宣言（`ci_only`）が
-    あれば手元のテストのステップを外したプランを組むので、そこだけが使う差し込み（`test_command` など）は求めない。
+    既定も無く決まらない差し込みは、名前と出所を挙げて `TemplateValuesMissing`。手元のテストのステップを外したプランを
+    組むとき（`local_tests` が偽。テストを CI に寄せる宣言 `ci_only` がある）は、そこだけが使う差し込み
+    （`test_command` など）は求めない。
     """
     place = work_place(run, cwd)
-    names = route.needed(t, local_tests=not ci_only(place))
+    names = route.needed(t, local_tests=local_tests)
     values = {k: _param_value(v) for k, v in run.inputs.items() if k in t.params}
     wanted = {n: FILL_SOURCES[n] for n in names if n not in values and n in FILL_SOURCES}
     issued, untrusted = _fill_from_issue(run, work_dir, place, wanted)
@@ -496,7 +497,7 @@ def plan_path(run: StageRun, work_dir: Path, cwd: Path) -> Path:
     if t is None:
         raise model.Refused(f"プランの雛形 {run.name} が無い")
     local_tests = not ci_only(work_place(run, cwd))
-    plan = route.render(t, template_values(t, run, work_dir, cwd), local_tests=local_tests)
+    plan = route.render(t, template_values(t, run, work_dir, cwd, local_tests=local_tests), local_tests=local_tests)
     out = work_dir / f"{run.name}.json"
     out.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return out
