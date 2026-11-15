@@ -9,8 +9,6 @@ allowed-tools:
 
 # Statusline 切り替えコマンド
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `resolve.sh`（X0）・`statusline-switch.sh`（S1b）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
-
 NDF 標準 statusline (project_dir + メインとサブエージェントのコンテキスト使用量) と
 既存のカスタム statusline を切り替える。
 
@@ -39,32 +37,25 @@ NDF 標準 statusline (project_dir + メインとサブエージェントのコ�
 引数に応じて以下のコマンドを実行する:
 
 ```bash
-# スクリプトの置き場所を解決のエントリポイント（scripts/resolve.sh）に尋ねる。エントリポイントを探すこのコマンドと
-# 候補の順序は development-workflow/references/scripts-lookup.md にある。
-for R in '${CLAUDE_PLUGIN_ROOT}' "$(git rev-parse --show-toplevel 2>/dev/null)/plugins/ndf" \
-  ~/.claude/plugins/cache/*/ndf/* .kiro/skills/*/../.. ~/.kiro/skills/*/../.. \
-  ~/.codex/{.tmp/,}marketplaces/*/plugins/ndf ~/.gemini/config/plugins/ndf plugins/ndf; do
-  [ -f "$R/scripts/resolve.sh" ] && break; R=
-done
-[ -n "$R" ] || { echo "NDF の scripts/resolve.sh が見つからない" >&2; exit 3; }
-SWITCH="$(bash "$R/scripts/resolve.sh" scripts)/statusline-switch.sh" || exit 3
+# ndf の有無の確かめ（development-workflow/references/scripts-lookup.md）
+command -v ndf >/dev/null 2>&1 || { echo "ndf が PATH に無い" >&2; exit 3; }
 
 # 状態確認 (引数なし or status)
-bash "$SWITCH" status
+ndf statusline status
 
 # NDF 標準 statusline に切り替え (既存設定は自動バックアップ)
-bash "$SWITCH" set
+ndf statusline set
 
-# 元の設定に復元 (バックアップが無ければ statusLine 設定を削除)
-bash "$SWITCH" restore
+# 元の設定に復元 (バックアップが無く NDF 標準を使っていれば statusLine 設定を削除)
+ndf statusline restore
 ```
 
-実行後、スクリプトの出力をそのままユーザーに報告する。
+実行後、結果 JSON の `summary` をそのままユーザーに報告する。
 statusline の変更は次回セッション開始時 (または statusline 再描画時) に反映される。
 
 ## 自動デフォルト設定 (SessionStart hook)
 
-プラグインインストール後の初回セッション開始時に `statusline-switch.sh ensure` が実行され、
+プラグインインストール後の初回セッション開始時に `ndf statusline ensure` が実行され、
 **statusLine が未設定の場合のみ** NDF 標準 statusline が設定される。
 既に statusline が設定されている場合はそちらが優先され、何も変更しない。
 NDF 標準 statusline の利用中は、プラグイン更新時にスクリプト

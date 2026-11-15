@@ -118,6 +118,8 @@
     "usage-ledger.git": {"summary": "使用量の台帳がリポジトリの URL を読む git の上限", "seconds": 10},
     "merged.main-lock": {"summary": "メインディレクトリの排他を待つ上限。後片付け 1 件と pull は数十秒で終わる", "seconds": 600},
     "project.git": {"summary": "プロジェクトの指紋を取る git の上限", "seconds": 60},
+    "project.measure": {"summary": "プロジェクトの宣言の測定の締め切り（ndf project measure の --budget の既定）", "seconds": 120},
+    "statusline.lock": {"summary": "statusline の設定の排他（.ndf-statusline.lock）を待つ上限。旧い statusline-switch.sh の flock と同じ錠で待ち合う", "seconds": 10},
     "relay.bedrock": {"summary": "従量の接続（Bedrock）を確かめるコマンドの上限", "seconds": 60},
     "relay.handover-prepare": {"summary": "引き継ぎの用意の上限", "seconds": 600},
     "relay.hub-poll": {"summary": "中継の置き場の問い合わせの間隔", "interval": 0.5},

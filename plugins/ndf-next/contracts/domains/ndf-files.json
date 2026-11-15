@@ -1,6 +1,7 @@
 {
   "summary": "NDF の工程が書くファイル（宣言・計測値・実行の記録・文書・受け渡し）の置き場・持ち主・消す時点。工程はこの表に無いパスへ書かない。同じ事実は 1 つの宣言だけが持つ（テストのコマンドは project.json の test だけが持ち、supervise.json は持たない）。実行で変わる計測値は追跡する宣言へ書き戻さず、状態の置き場へ書く。外の呼び手（サービスのランナー）が読むファイルは列 reader と fields に持ち、入れ替えの後も同じ置き場・同じ形で書く。読み手は知らない項目を受け流す",
   "owner": "D2（contracts/domains）",
+  "shared_names": true,
   "columns": {
     "place": {"type": "string", "summary": "置き場", "ref": "domains/places"},
     "path": {"type": "string", "summary": "置き場からの相対パス。<名前> は実行ごとに決まる部分（<n> は Issue の番号、<repo> はリポジトリの鍵、<id> は実行の識別子）"},

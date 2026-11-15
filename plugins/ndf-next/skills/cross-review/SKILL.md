@@ -13,7 +13,7 @@ allowed-tools:
 
 # クロスレビュー収束ループ
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `drive.py`（M5）・`launch-reviewer.sh`（M5）・`measure.py`（M5）・`resolve.sh`（X0）・`rotate-pr.sh`（M5）・`state.py`（M5）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `drive.py`（M5）・`launch-reviewer.sh`（M5）・`measure.py`（M5）・`rotate-pr.sh`（M5）・`state.py`（M5）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 PR を**既定の参加者プール（claude / codex / kiro とホスト）から選んだ 2 者**にレビューさせ、**新しい指摘が出なくなるまで**
 `/ndf:pr-review` と `/ndf:fix` を自動で回す。
@@ -140,15 +140,15 @@ PR を**既定の参加者プール（claude / codex / kiro とホスト）か�
 ## 実行
 
 **対象のリポジトリの中（メインディレクトリか worktree）で**、次のブロックを打ち、最後の行の結果 JSON の `status` と終了コードを見る。
-駆動の位置は解決のエントリポイント（`resolve.sh`）が導入先から求める（[scripts-lookup.md](../development-workflow/references/scripts-lookup.md)）。
+`ndf` の確かめと旧いスクリプトの置き場の扱いは [scripts-lookup.md](../development-workflow/references/scripts-lookup.md) にある。
 駆動はリポジトリを作業ディレクトリから求めるため、**Skill のディレクトリへ `cd` しない**（`cd` したときは、`cd` する前の場所がworktreeならそこで続ける）。
 シェルの変数は呼び出しをまたいで残らないため、各ブロックを 1 回の呼び出しとして打つ。**値のある引数だけを
 渡す**（再開で渡した引数の扱いは [docs/04-contracts.md](docs/04-contracts.md) の「再開で渡した引数の扱い」）。
 
 ```bash
-<エントリポイントを探すコマンド>   # scripts-lookup.md の「エントリポイントを探すコマンド」の for 文。$R を決める
-[ -n "$R" ] || exit 3
-CR=$(bash "$R/scripts/resolve.sh" scripts cross-review) || exit 3
+command -v ndf >/dev/null 2>&1 || { echo "ndf が PATH に無い" >&2; exit 3; }   # scripts-lookup.md
+CR=   # 旧いスクリプトの置き場。新しいプラグインだけの起動では空（scripts-lookup.md）
+[ -n "${CR:-}" ] || { echo "drive.py は M5 #3299 が副命令に置き換えるまで新しいプラグインだけでは打てない" >&2; exit 3; }
 python3 "$CR/drive.py" <PR> [--rotate-mode light|squash] [--reopen] [--max-rounds N] [--rotate-after K] [--host H] [--only R] \
   [--exclude N] [--include N] [--require-all] [--focus TEXT] [--extra-instructions-file PATH] [--verify-command CMD] [--verify-exit-code N]
 ```
@@ -159,19 +159,20 @@ python3 "$CR/drive.py" <PR> [--rotate-mode light|squash] [--reopen] [--max-round
 
 ```bash
 # 起動（1 回の呼び出し）
-<エントリポイントを探すコマンド>   # scripts-lookup.md の「エントリポイントを探すコマンド」の for 文。$R を決める
-[ -n "$R" ] || exit 3
-LIB=$(bash "$R/scripts/resolve.sh" scripts)/lib || exit 3
-CR=$(bash "$R/scripts/resolve.sh" scripts cross-review) || exit 3
+command -v ndf >/dev/null 2>&1 || { echo "ndf が PATH に無い" >&2; exit 3; }   # scripts-lookup.md
+LIB=   # 旧いスクリプトの置き場。新しいプラグインだけの起動では空（scripts-lookup.md）
+[ -n "${LIB:-}" ] || { echo "bg-wait.sh は M5 #3299 が副命令に置き換えるまで新しいプラグインだけでは打てない" >&2; exit 3; }
+CR=   # 旧いスクリプトの置き場。新しいプラグインだけの起動では空（scripts-lookup.md）
+[ -n "${CR:-}" ] || { echo "drive.py は M5 #3299 が副命令に置き換えるまで新しいプラグインだけでは打てない" >&2; exit 3; }
 RC="${TMPDIR:-/tmp}/cross-review-drive-pr<PR>.rc"
 bash "$LIB/bg-wait.sh" run "$RC" -- python3 "$CR/drive.py" <PR> [上と同じ引数]
 ```
 
 ```bash
 # 待ち（124 が返るあいだ、別の呼び出しとして打ち直す）
-<エントリポイントを探すコマンド>   # scripts-lookup.md の「エントリポイントを探すコマンド」の for 文。$R を決める
-[ -n "$R" ] || exit 3
-LIB=$(bash "$R/scripts/resolve.sh" scripts)/lib || exit 3
+command -v ndf >/dev/null 2>&1 || { echo "ndf が PATH に無い" >&2; exit 3; }   # scripts-lookup.md
+LIB=   # 旧いスクリプトの置き場。新しいプラグインだけの起動では空（scripts-lookup.md）
+[ -n "${LIB:-}" ] || { echo "bg-wait.sh は M5 #3299 が副命令に置き換えるまで新しいプラグインだけでは打てない" >&2; exit 3; }
 RC="${TMPDIR:-/tmp}/cross-review-drive-pr<PR>.rc"
 bash "$LIB/bg-wait.sh" wait "$RC"   # 1 回 540 秒以内。124 = まだ終わっていない
 ```

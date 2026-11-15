@@ -1,6 +1,6 @@
 # 01: 状態管理 + レビュー実行 (Step 0〜4)
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `drive.py`（M5）・`fetch-pr-comments.sh`（M1）・`launch-cli.sh`（M4）・`launch-reviewer.sh`（M5）・`resolve.sh`（X0）・`state.py`（M5）・`wait-review.sh`（M5）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `drive.py`（M5）・`fetch-pr-comments.sh`（M1）・`launch-cli.sh`（M4）・`launch-reviewer.sh`（M5）・`state.py`（M5）・`wait-review.sh`（M5）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 `SKILL.md` 本体から呼び出される **状態ファイル初期化 / ラウンド開始 /
 並列レビュー / 判定 / 振動検知** までの詳細手順。
@@ -28,16 +28,11 @@
 ## Step 0: 準備 + 既存 state 引継ぎ
 
 ```bash
-# スクリプトの置き場所を解決のエントリポイント（scripts/resolve.sh）に尋ねる。エントリポイントを探すこのコマンドと
-# 候補の順序は development-workflow/references/scripts-lookup.md にある。
-for R in '${CLAUDE_PLUGIN_ROOT}' "$(git rev-parse --show-toplevel 2>/dev/null)/plugins/ndf" \
-  ~/.claude/plugins/cache/*/ndf/* .kiro/skills/*/../.. ~/.kiro/skills/*/../.. \
-  ~/.codex/{.tmp/,}marketplaces/*/plugins/ndf ~/.gemini/config/plugins/ndf plugins/ndf; do
-  [ -f "$R/scripts/resolve.sh" ] && break; R=
-done
-[ -n "$R" ] || { echo "NDF の scripts/resolve.sh が見つからない" >&2; exit 3; }
-SCRIPTS=$(bash "$R/scripts/resolve.sh" scripts cross-review) || exit 3
-LIB=$(bash "$R/scripts/resolve.sh" scripts)/lib || exit 3   # 共通ライブラリ（bg-wait.sh）
+command -v ndf >/dev/null 2>&1 || { echo "ndf が PATH に無い" >&2; exit 3; }   # scripts-lookup.md
+SCRIPTS=   # 旧いスクリプトの置き場。新しいプラグインだけの起動では空（scripts-lookup.md）
+[ -n "${SCRIPTS:-}" ] || { echo "state.py は M5 #3299 が副命令に置き換えるまで新しいプラグインだけでは打てない" >&2; exit 3; }
+LIB=   # 旧いスクリプトの置き場。新しいプラグインだけの起動では空（scripts-lookup.md）
+[ -n "${LIB:-}" ] || { echo "bg-wait.sh は M5 #3299 が副命令に置き換えるまで新しいプラグインだけでは打てない" >&2; exit 3; }
 
 # state 初期化 / 再開（プリチェック・worktree 作成・既存コメントスナップショットを内部実行）
 # ⚠ `eval "$(スクリプト)"` は、スクリプトが異常終了しても出力が空なら終了コード 0 になる。

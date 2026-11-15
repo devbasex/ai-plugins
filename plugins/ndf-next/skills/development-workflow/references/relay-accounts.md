@@ -1,57 +1,51 @@
 # 利用上限でアカウントを替えて続ける
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `relay.py`（M3b）・`supervise.py`（C2）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
-
 [relay.md](relay.md)（ラッパーでカットポイントを自動にする）から分けた、利用上限でラッパーが claude のアカウントを替えて続ける規約である。
 
-**claude のアカウントを 2 つ以上登録しておくと、利用上限で止まらずに別のアカウントで続く。** 端末で打てば
-`claude auth login` が URL を示し、認可コードの貼り付けを待つ（1 回で終わる）。端末でなければ 2 回に分かれる（下の
-「AI が代わりに打つとき」）。**Linux（コンテナを含む）だけで使える。** macOS の
+**claude のアカウントを 2 つ以上登録しておくと、利用上限で止まらずに別のアカウントで続く。** 登録は 2 回に分かれる
+（1 回目が認可の URL を出し、2 回目で認可コードを渡す。下の「AI が代わりに打つとき」）。**Linux（コンテナを含む）だけで使える。** macOS の
 claude はログインの資格情報を Keychain に置き、設定ディレクトリの `.credentials.json` を書かないため、macOS の
 `account add` は登録の前に止まる。1 つのメールアドレスで複数の組織（個人と Team など）に属していれば、組織ごとに別の
 アカウントとして登録できる（ログインのときに組織を選ぶ。同じメールアドレスと組織の 2 つ目は拒む）。
 
 ```bash
-python3 ~/.claude/ndf/relay.py account add work1   # 専用の設定ディレクトリで claude auth login が動く
-python3 ~/.claude/ndf/relay.py account add work2
-python3 ~/.claude/ndf/relay.py account list        # 推論を呼ばずに残量を出す（--json もある）
-python3 ~/.claude/ndf/relay.py account capacity work2 - 900   # 週の枠の大きさだけを 900 USD と宣言する（- - で外す）
-python3 ~/.claude/ndf/relay.py account remove work2
+ndf relay account add work1   # 専用の設定ディレクトリで claude auth login が動き、認可の URL を出す
+ndf relay account list        # 推論を呼ばずに、登録と使用率のキャッシュを出す
+ndf relay account capacity work2 210 900   # 5 時間と週の枠の大きさを USD で宣言する（枠を - にするとその宣言を外す）
+ndf relay account remove work2
 ```
 
-**`account use <名前>` で、動いているラッパーでも次の区間の起動（`ndf-next` の再起動・起動の直後）から使うアカウントを指定できる**（`python3 ~/.claude/ndf/relay.py account use work1`）。
+**`account use <名前>` で、動いているラッパーでも次の区間の起動（`ndf-next` の再起動・起動の直後）から使うアカウントを指定できる**（`ndf relay account use work1`）。
 指定は置き場の `pinned.json` に書き、区間の起動のたびに読む。指定が使えれば選ぶ順の組に依らずそれで起動し（`account` の行の`reason` は `pinned`）、使えない（上限・認証の失敗・再登録が要る）間は今の選び方で替えて続け、使えるようになった後の区間の起動で
-戻る。`--clear` で外すと今の選び方へ戻る。登録に無い名前と `再登録が要る` 名前は終了コード 1（`reason` は `not_registered`・`needs_relogin`）で断る。同じ置き場を使うラッパーすべてに効く。`account list` は名前に `（指定）`（`--json` は `pinned`）、`relay.py ls` は表の下の 1 行と `metrics.pinned_account` で示す。動いているラッパーは [relay.md](relay.md) の「ラッパーの入れ替え」で新しい版へ替わった後の区間から読む。
+戻る。`ndf relay account clear` で外すと今の選び方へ戻る。同じ置き場を使うラッパーすべてに効く。`account list` は指定したアカウントの項目の `pinned` を真にする。動いているラッパーは [relay.md](relay.md) の「ラッパーの入れ替え」で新しい版へ替わった後の区間から読む。
 
-**`account` の副命令はすべて `--yes`（確認を飛ばす）と `--json`（結果を JSON 1 つで標準出力へ返す）を受ける。**
-対話で聞く値（名前・プロファイル・地域・モデル・確認）はすべて引数でも渡せ、揃っていれば何も聞かない。標準入力が
-端末でなければ入力を待たず、足りない引数の名前（`--json` なら `missing` と `candidates`）を示して終了コード 2 で終わる。
+**`account` の副命令はどれも結果 JSON を 1 行で返し、入力を待たない。** 値（名前・プロファイル・地域・モデル・確認）は
+引数で渡す。足りない値があれば、その名前と候補を `summary` に書いて終了コード 3（止まった理由 `input_missing`）で終わる。
+使い方の誤りは終了コード 2（`invalid`）、登録が無い・確かめに落ちた・断ったときは終了コード 1（`refused`）、排他を
+待ちきれないときは止まった理由 `store_busy` で終わる。引数と結果の形は [副命令の引数と結果](../../../docs/contracts/commands.md) にある。
 
 ## AI が代わりに打つとき
 
-conductor・worker は Bash から打つ（標準入力は端末でない）。人が要るのは、ブラウザでの認可と、画面に出た認可コードを
-AI へ返すことだけである。
+conductor・worker も人も同じ 2 回で打つ。人が要るのは、ブラウザでの認可と、画面に出た認可コードを AI へ返すことだけである。
 
 ```bash
-python3 ~/.claude/ndf/relay.py account add work2 --json
-# → {"ok": true, "stage": "awaiting_code", "url": "https://…", "expires_at": "…"}。URL を利用者へ渡す
-printf '%s\n' '<認可コード>' | python3 ~/.claude/ndf/relay.py account add work2 --code - --json
-# → {"ok": true, "stage": "registered", "email": "…"}
+ndf relay account add work2
+# → {"status": "stopped", "cause": {"kind": "input_missing", …}, "items": [{"url": "https://…", "expires_at": "…"}]}（終了コード 3）。URL を利用者へ渡す
+printf '%s\n' '<認可コード>' | ndf relay account add work2 --code -
+# → {"status": "ok", "items": [{"name": "work2", "email": "…", "org_name": "…"}]}
 ```
 
 1 回目は `claude auth login` を待たせたまま（待機中のログイン）認可の URL を返す。登録の途中の状態は置き場の
-`.pending-<名前>/` に残り、10 分を過ぎると次の `account` の呼び出しで捨てる（2 回目は `expired` で 1）。認可コードは
-`--code -`（標準入力の 1 行）で渡す。引数に載せると `ps` と打った側の記録に残る。
+`.pending-<名前>/` に残り、10 分を過ぎると次の `account add` で捨てる（2 回目は終了コード 3 で、1 回目からやり直す）。
+認可コードは `--code -`（標準入力の 1 行）で渡す。引数に載せると `ps` と打った側の記録に残る。
 
-```text
-名前   識別           5 時間  7 日  モデル別の週  支出上限  枠の大きさ     残り  5時間枠  組                    状態
-team   a@example.com  50%     3%    Fable 58%     no        210 / 1,100    105   有       five_hour_first（次）  使える
-gmail  b@example.com  -       2%    -             no        210 / 1,100*   -     無       weekly_only            使える
-```
+`account list` の項目は登録 1 件ずつで、アカウントは `email`・`org_name`・`pinned`・`percent`（使用率のキャッシュ。
+読めていなければ null）・`capacity_declared`・`state` を持つ。
 
 **アカウントは選ぶ順の組の順に選ぶ。** 5 時間の枠は使わなければ消えるため、5 時間の枠のあるアカウントを先に
 使い、週だけの枠のアカウントへは後で回る。「組」の列が組の名前、「5時間枠」の列が使用率の応答に 5 時間の枠があるか
-（有・無）、`（次）` が次に選ばれるアカウントである。上限にある・起動できないアカウントの組は `-` になる。
+（有・無）、`（次）` が次に選ばれるアカウントである。上限にある・起動できないアカウントの組は `-` になる。組を出すのは
+中継の切り替えの記録（`log.jsonl` の `account` の行）である。
 
 | 順 | 組 | 入るアカウント | 組の中の並べ方 |
 | --- | --- | --- | --- |
@@ -67,34 +61,20 @@ gmail  b@example.com  -       2%    -             no        210 / 1,100*   -    
 
 **今のアカウントが最良の候補と同じ組にあれば替えない（切り替えの余裕）。** 替えるのは組が変わったときだけである
 （5 時間の枠がリセットされたアカウントが組 1 へ戻った・今のアカウントの週の使用率が T を超えた・今のアカウントが上限に当たった）。
-選び直すのは区切り（ラッパーの区間の起動）と `supervise.py` の起動のたびで、戻るためだけに使用率を取りに行ったり区切りを早めたりしない。
+選び直すのは区切り（ラッパーの区間の起動）と `ndf plan` の起動のたびで、戻るためだけに使用率を取りに行ったり区切りを早めたりしない。
 復帰先や戻り待ちの印は持たず、その時点の観測だけで決める。
 
-「枠の大きさ」と「残り」の列は表示だけで、選び方には使わない。枠の大きさは `account capacity` の宣言（`*` 付き）→
-`.credentials.json` の `rateLimitTier` から引く対応表の順に決まる。
+`account capacity` の枠の大きさの宣言は表示と記録だけに使い、選び方には使わない。
 
-| `rateLimitTier` | 5 時間の枠（USD） | 週の枠（USD） |
-| --- | ---: | ---: |
-| `default_claude_max_20x` | 210 | 1,100 |
-| `default_claude_max_5x` | 52.5 | 640（仮の値） |
-
-支出上限は
-`extra_usage.spend_limit_reached` が真のときだけ達したとする。`spend.percent` ≥ 100 か `spend.severity` = `critical`
-（追加の利用の予算の使い切りと見られる）は判定に使わず、生の旗が真でなければ支出上限の列に `no（追加の利用は上限）` と
-補足する（`--json` は `spend_full`）。生の旗が偽でも spend が 100%・critical を返すことがあり、解除の時刻を持たないため、
-判定に使うと上限から外れなくなる（#2036）。
-
-識別の列は、同じメールアドレスの登録が 2 件以上あるときだけ `a@example.com（Team A）` のように組織名を添える。
-従量の接続の宣言があれば、最後に `metered` の行（識別は `Bedrock（<プロファイル>・<地域>・<モデル>）` か
-`環境変数（<変数の名前>）`、状態は `保存した宣言`・`環境変数の宣言`・`壊れている（宣言なしとして扱う）` のどれか）が出る。
-
-状態は `使える`・`上限（<リセット時刻>）`・`支出上限`・`残量不明`・`認証の失敗`・`再登録が要る` の 6 つ。`再登録が要る` は
-同じ名前で `account add` し直す。`認証の失敗` は子の応答が認証の失敗で終わったアカウントで、後の残量の取得が通るか 1 時間で
-`使える` へ戻る。
+`account list` は、アカウントの後に、従量の接続の宣言があれば `metered` の項目（`source` は `saved` か `env`。保存した
+宣言は `provider` と `details`、環境変数の宣言は変数の名前だけを `keys` に持つ）を、登録した API キーがあれば
+キーごとの項目（`account`・`monthly_usd`。値は持たない）を並べる。アカウントの `state` は `使える`・`上限`・
+`残量不明`・`再登録が要る`・`broken`（`account.json` を読めない。`warnings` に 1 行）のどれかである。`再登録が要る` は
+同じ名前で `account add` し直す。
 
 認証ファイルのリフレッシュトークンが空のアカウント（claude がトークンの更新を断られると空にする）は、アクセストークンが
 期限内でも `再登録が要る` になり、切り替え先に選ばれない。ラッパーは起動のたびに、`再登録が要る` アカウントを 1 つにつき
-1 行（`ndf-relay: アカウント <名前> は再登録が要る。python3 ~/.claude/ndf/relay.py account add <名前> で登録し直す`）で
+1 行（`ndf-relay: アカウント <名前> は再登録が要る。ndf relay account add <名前> で登録し直す`）で
 知らせる。`account list` は認証ファイルを確かめないので、ラッパーの起動か切り替えの前は `使える` と出ることがある。
 同じアカウントを既定のログイン（`~/.claude`）と登録済みアカウントの両方で別々にログインしない（1 アカウント = 1 ログイン）。
 別々のログインは別々のリフレッシュトークンを持ち、片方の更新が断られると、そちらだけが使えなくなる。
@@ -112,11 +92,11 @@ symlink にする。会話の記録（`projects`）・設定（`settings.json`�
 | --- | --- |
 | `CLAUDE_CONFIG_DIR` | アカウントの設定ディレクトリ（`<置き場>/<名前>`） |
 | `NDF_CLAUDE_ACCOUNT` | アカウントの名前 |
-| `NDF_SHARED_CONFIG_DIR` | 元の `CLAUDE_CONFIG_DIR`（無かったら空文字）。子の中の `supervise.py` が共有の設定ディレクトリを求める |
+| `NDF_SHARED_CONFIG_DIR` | 元の `CLAUDE_CONFIG_DIR`（無かったら空文字）。子の中の `ndf plan` が共有の設定ディレクトリを求める |
 | `CLAUDE_CODE_PLUGIN_CACHE_DIR` | `<共有>/plugins`（元にあればその値）。子が導入したプラグインの記録を共有側のパスにする |
 | `CLAUDE_CODE_OAUTH_TOKEN`・`CLAUDE_CODE_OAUTH_SCOPES` | 渡さない（元の環境にあっても外す） |
 
-起動の前に、ラッパーと `supervise.py` はアカウントの設定ディレクトリを用意する。共有側に増えた項目の symlink を足し、
+起動の前に、ラッパーと `ndf plan` はアカウントの設定ディレクトリを用意する。共有側に増えた項目の symlink を足し、
 共有の `~/.claude.json` の `projects`（プロジェクトの信頼・MCP サーバーの許可）と `mcpServers` をアカウント側の `.claude.json` へ
 コピーする（`oauthAccount` はアカウントごとのまま）。ラッパーは、セッションの切れ目と終了時に、アカウント側で変わった分を共有の
 `~/.claude.json` へ書き戻す。claude.ai のコネクタは、claude が認証ファイルのスコープを自分で読んで取りに行く。従量の接続の子は
@@ -145,32 +125,32 @@ symlink にする。会話の記録（`projects`）・設定（`settings.json`�
 共有側に無くアカウント側にだけある項目は、アカウントを替えた先から見えない。`account_dir` の行の `local_only` に名前が出るので、
 共有したいものは共有の `~/.claude/` へ移す（次の起動で symlink になる）。登録を外しても（`account remove`）共有側は消えない。
 
-| いつ | ラッパー | `supervise.py`（プランの claude -p） |
+| いつ | ラッパー | `ndf plan`（プランの claude -p） |
 | --- | --- | --- |
 | 起動 | `account use` の指定が使えればそれを使う。無ければ区間ごとに選ぶ順の組で選び直し、今のアカウントが最良の候補と同じ組にあれば替えない | 起動したときのアカウント（`NDF_CLAUDE_ACCOUNT`）から始め、起動のたびに同じ規則で選び直す |
 | 利用上限（5 時間・7 日・支出上限） | 子の応答が上限で終わると（`StopFailure` hook の `limit.json`）、次の区間を別のアカウントで `claude --resume <会話> "<最初の入力>"` として起動する。最初の入力は `ndf-next` があればそれ、無ければ未達の `/goal <条件>`、それも無ければ切り替えの理由に合う定型の文（例: `利用上限でアカウントを替えた。中断したところから続ける`）。**バックグラウンドの作業が残っている間は子を終えない** | 待たずに別のアカウントで同じ呼び出しをやり直す |
-| 認証が通らなかった（401） | 子の応答が認証の失敗で終わると、登録済みアカウントならそのアカウントを 1 時間候補から外し、上限のときと同じ順（使える登録済みアカウント → 従量の接続の宣言）で次の区間を起動する（最初の入力は `認証が通らなかったためアカウントを替えた。中断したところから続ける`）。既定のログインでも同じく替え、登録が 1 つ以下でも替えた先を以後の区間で使い続ける。従量の接続の 401 では替えない。替え先が無ければ、ログインの形に合う直し方を 1 行出して子を残す（既定のログイン: claude の中で `/login`。登録済みアカウント: `relay.py account add <名前>`。従量の接続: `relay.py account check metered` で宣言を確かめる）。1 つの区間につき 1 度だけ | 結果が認証の失敗なら、そのアカウントを外して同じ呼び出しをやり直す |
+| 認証が通らなかった（401） | 子の応答が認証の失敗で終わると、登録済みアカウントならそのアカウントを 1 時間候補から外し、上限のときと同じ順（使える登録済みアカウント → 従量の接続の宣言）で次の区間を起動する（最初の入力は `認証が通らなかったためアカウントを替えた。中断したところから続ける`）。既定のログインでも同じく替え、登録が 1 つ以下でも替えた先を以後の区間で使い続ける。従量の接続の 401 では替えない。替え先が無ければ、ログインの形に合う直し方を 1 行出して子を残す（既定のログイン: claude の中で `/login`。登録済みアカウント: `ndf relay account add <名前>`。従量の接続: `ndf relay account check metered` で宣言を確かめる）。1 つの区間につき 1 度だけ | 結果が認証の失敗なら、そのアカウントを外して同じ呼び出しをやり直す |
 | 組が変わった（週の使用率が T を超えた・5 時間の枠がリセットされた） | **次のカットポイントで**選び直して替える（`account` の行の `reason` は `rule`）。区間の間は使用率を取りに行かない | 次の起動で替える |
 | すべて上限 | 宣言があれば従量の接続へ移る。無ければ 1 行を出して子を残す | 宣言があれば従量の接続へ移る。無ければ今と同じ上限待ち |
 | 従量の接続で動いている間 | 次のカットポイントで、候補のアカウント（組を問わない）があれば戻す | 起動のたびに戻れるかを確かめる |
 
 **従量の接続（Bedrock）は `account add-bedrock` で登録する。** AWS のプロファイルは先に `aws configure sso` などで
-作っておく。候補（`aws configure list-profiles`）が 1 つなら確認だけ、複数なら番号で選ぶ。地域はプロファイルの `region`、
-モデルは Bedrock の推論プロファイルのうち Claude のものから選ぶ。保存の前に `aws sts get-caller-identity` と
+作っておく。`--profile` を省くと候補（`aws configure list-profiles`）を、`--model` を省くと Bedrock の推論プロファイルの
+うち Claude のものを出して止まる。地域は省けばプロファイルの `region` を使う。保存の前に `aws sts get-caller-identity` と
 `aws bedrock-runtime converse`（最大 1 トークン。1 回分の費用が掛かる）で呼べるかを確かめ、呼べなければ理由（`認証切れ`・
 `権限が無い`・`地域で使えない`・`モデルが有効でない`）と AWS のエラーの種類の名前を出して保存しない。macOS でも使える。
 
 ```bash
-python3 ~/.claude/ndf/relay.py account add-bedrock        # 端末で選ぶ
-python3 ~/.claude/ndf/relay.py account add-bedrock --profile bedrock-dev --model <モデルの ID> --yes --json
-python3 ~/.claude/ndf/relay.py account check metered      # 今の宣言で呼べるかを確かめる
-python3 ~/.claude/ndf/relay.py account remove metered     # 保存した宣言を外す
+ndf relay account add-bedrock        # プロファイルの候補を出して止まる（終了コード 3）
+ndf relay account add-bedrock --profile bedrock-dev --model <モデルの ID> --yes
+ndf relay account check metered      # 今の宣言で呼べるかを確かめる
+ndf relay account remove metered     # 保存した宣言を外す
 ```
 
 宣言はアカウントの置き場の `metered.json`（0600）に保存し、次の起動から効く。シェルの設定ファイルは書き換えない。
 保存するのは変数の名前と値（`CLAUDE_CODE_USE_BEDROCK`・`AWS_PROFILE`・`AWS_REGION`・`ANTHROPIC_MODEL`）だけで、AWS の鍵は
 `~/.aws/` に残る。保存した宣言で起動する子からは、環境の AWS の鍵の変数を外す。宣言は 1 つだけで、置き換えは確認
-（`--yes`）が要る。保存先が壊れていれば、ラッパーは区間 1 の起動で、`supervise.py` は最初の呼び出しの前に 1 行出し、
+（`--yes`）が要る。保存先が壊れていれば、ラッパーは区間 1 の起動で、`ndf plan` は最初の呼び出しの前に 1 行出し、
 宣言なしとして扱う。
 
 **環境変数で上書きする場合は `NDF_SUPERVISE_CLAUDE_FALLBACK` を定義する**（`KEY=VALUE` を空白区切り。値はリポジトリに
@@ -181,7 +161,7 @@ export NDF_SUPERVISE_CLAUDE_FALLBACK='CLAUDE_CODE_USE_BEDROCK=1 AWS_PROFILE=<名
 ```
 
 従量の接続で起動する子にはアカウントの設定ディレクトリを渡さず、アカウントで起動する子には宣言の変数を渡さない（混ぜない）。記録と画面に
-出るのは変数の名前だけである。**登録が 1 つ以下なら今と同じ**（ラッパーは上限で何もしない。`supervise.py` は宣言を
+出るのは変数の名前だけである。**登録が 1 つ以下なら今と同じ**（ラッパーは上限で何もしない。`ndf plan` は宣言を
 呼び出しごとに 1 度だけ試してから上限待ち）。切り替えに LLM は使わない。
 
 | 設定 | 既定 | 意味 |
@@ -194,32 +174,32 @@ export NDF_SUPERVISE_CLAUDE_FALLBACK='CLAUDE_CODE_USE_BEDROCK=1 AWS_PROFILE=<名
 
 ## worker の claude -p を API キーで動かす
 
-**サブスクリプション（Max・Ultra・Team）にリンクした Console 組織の API キーを登録すると、`supervise.py` が起動する
+**サブスクリプション（Max・Ultra・Team）にリンクした Console 組織の API キーを登録すると、`ndf plan` が起動する
 `claude -p`（work・worker・判定・遅れの判定・Pull Request）を月の API クレジットで動かせる。** API クレジットは
 利用上限（5 時間・週）と別枠なので、使った分だけ利用上限の消費を逃がせる。ラッパーが起こす対話のセッションには使わない
 （対話の Claude Code は API クレジットで払えない）。cross-review の担当の CLI にも使わない。Console 組織の作成・
 リンク・キーの発行は利用者が Console で行う。
 
 ```bash
-printf '%s\n' "$KEY" | python3 ~/.claude/ndf/relay.py account add-api-key key-main --account main --monthly 200   # 確かめてから保存する
-python3 ~/.claude/ndf/relay.py account add-api-key key-gmail --account gmail --key-file ~/gmail.key
-python3 ~/.claude/ndf/relay.py account api-key-monthly key-gmail 100   # 登録済みのキーへ月の額を宣言する（0 で外す）
-python3 ~/.claude/ndf/relay.py account api-key-use near-limit --weekly-at 85   # 使い方（off・always・near-limit）と閾値 T
-python3 ~/.claude/ndf/relay.py account list                 # キーごとに月の額・直近 7 日の使用額・週の利用枠
-python3 ~/.claude/ndf/relay.py account check key-main       # 確かめ直す（状態は記録しない）
-python3 ~/.claude/ndf/relay.py account remove key-gmail
+printf '%s\n' "$KEY" | ndf relay account add-api-key key-main --account main --monthly 200   # 確かめてから保存する
+ndf relay account add-api-key key-gmail --account gmail --key-file ~/gmail.key
+ndf relay account api-key-monthly key-gmail 100   # 登録済みのキーへ月の額を宣言する（0 で外す）
+ndf relay account api-key-use near-limit --weekly-at 85   # 使い方（off・always・near-limit）と閾値 T
+ndf relay account list                 # キーごとに月の額・直近 7 日の使用額・週の利用枠
+ndf relay account check key-main       # 確かめ直す（状態は記録しない）
+ndf relay account remove key-gmail
 ```
 
-- **キーの値は標準入力の 1 行目か `--key-file` で渡す。** 端末から打つと表示しない入力で聞く。引数では受けない（`ps` と
+- **キーの値は標準入力の 1 行目か `--key-file` で渡す。** 引数では受けない（`ps` と
   シェルの履歴に残るため）。値はアカウントの置き場の `api-keys.json`（0600）にだけ置き、画面・進捗ログ・`account list`・
   使用量の帳簿には出ない
 - **登録の前に Messages API へ `max_tokens` 1 の要求を 1 回打って確かめる。** 認証の失敗・残高切れ・通信の失敗なら、理由
-  （`reason` は `auth_failed`・`credit_low`・`network`・`unclassified`）を出して終了コード 1 で終わり、何も保存しない
+  （項目の `reason` は `auth_failed`・`credit_low`・`network`・`unclassified`）を出して終了コード 1 で終わり、何も保存しない
 - **1 つの登録済みアカウントに結び付けられるキーは 1 本である。** 名前を変えれば 2 本以上を登録でき、同じ名前で登録し直すと
-  置き換わる。登録済みアカウントの名前・`metered` と重なる名前は `name_conflict`、登録に無いアカウントは `not_registered`、
-  別のキーが結び付いたアカウントは `account_taken` で断る（どれも終了コード 1）。`account add` も API キーの名前を断る
+  置き換わる。登録済みアカウントの名前・`metered` と重なる名前は終了コード 2、登録に無いアカウントと、別のキーが
+  結び付いたアカウントは終了コード 1 で断る。`account add` も API キーの名前を断る
 - **月の額（`--monthly`・`api-key-monthly`）は、月に付与されるクレジットの額（ドル）である。** 宣言の無いキーは
-  `near-limit` で選ばれない（一覧の「枠の大きさ」の列が `月 未宣言`）。登録し直さずに足せる。正の数でなければ終了コード 2
+  `near-limit` で選ばれない（一覧の項目の `state` が `月の額が未宣言`）。登録し直さずに足せる。正の数でなければ終了コード 2
 - 組織に買ったクレジットか自動チャージがあると、月の API クレジットを使い切った後もそちらから払われる。NDF は検出しない
   ので、費用の上限は Console の workspace の spend limit で決める（登録のときにも 1 行出る）
 
