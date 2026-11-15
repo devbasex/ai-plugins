@@ -311,24 +311,30 @@ def _median(values: list[float]) -> Optional[float]:
 
 
 def _mark_times(marks: Iterable[Mapping[str, Any]], event: str) -> list[float]:
-    return sorted(t for m in marks if m.get("event") == event and (t := parse_ts(m.get("at"))))
+    return sorted(t for m in marks if m.get("event") == event and (t := parse_ts(m.get("at"))) is not None)
 
 
-def _restore_sample(calls: list[dict[str, Any]], marks: list[dict[str, Any]], by_next: bool) -> Optional[tuple[int, int]]:
-    """引継ぎ文書で始まり復元の印があるセッションの、最初の復元までの (直前のコンテキスト量, 呼び出し数)。"""
+def mark_bounds(marks: list[dict[str, Any]], by_next: bool) -> tuple[Optional[float], Optional[float]]:
+    """(復元の区間の終わり, 引継ぎの区間の始まり)。復元は引継ぎ文書で始まったセッションの最初の「復元完了」、
+    引継ぎは最後の「引継ぎ開始」。印が無ければそれぞれ None。集計（`context_report`）と較正が同じ区間を使う。"""
     restored = _mark_times(marks, MARK_RESTORED)
-    if not (by_next and restored):
+    handoffs = _mark_times(marks, MARK_HANDOFF)
+    return (restored[0] if by_next and restored else None), (handoffs[-1] if handoffs else None)
+
+
+def _restore_sample(calls: list[dict[str, Any]], restore_end: Optional[float]) -> Optional[tuple[int, int]]:
+    """引継ぎ文書で始まり復元の印があるセッションの、最初の復元までの (直前のコンテキスト量, 呼び出し数)。"""
+    if restore_end is None:
         return None
-    before = [c for c in calls if c["ts"] is not None and c["ts"] <= restored[0]]
+    before = [c for c in calls if c["ts"] is not None and c["ts"] <= restore_end]
     return (before[-1]["context"], len(before)) if before else None
 
 
-def _handoff_sample(calls: list[dict[str, Any]], marks: list[dict[str, Any]]) -> Optional[tuple[int, int]]:
+def _handoff_sample(calls: list[dict[str, Any]], handoff_from: Optional[float]) -> Optional[tuple[int, int]]:
     """最後の引継ぎの印から後の (呼び出し数, 出力 token の合計)。印が無ければ None。"""
-    handoffs = _mark_times(marks, MARK_HANDOFF)
-    if not handoffs:
+    if handoff_from is None:
         return None
-    after = [c for c in calls if c["ts"] is not None and c["ts"] >= handoffs[-1]]
+    after = [c for c in calls if c["ts"] is not None and c["ts"] >= handoff_from]
     return len(after), sum(c["out"] for c in after)
 
 
@@ -351,11 +357,12 @@ def _sampled(sessions: Mapping[str, Any], cache: Mapping[str, Any], by_session: 
     for sid, s in sessions.items():
         calls, _, by_next = cache[sid]
         marks = by_session[sid] if sid in by_session else []
-        restore = _restore_sample(calls, marks, by_next)
+        restore_end, handoff_from = mark_bounds(marks, by_next)
+        restore = _restore_sample(calls, restore_end)
         if restore is not None:
             acc["rq"].append(restore[0])
             acc["rn"].append(restore[1])
-        handoff = _handoff_sample(calls, marks)
+        handoff = _handoff_sample(calls, handoff_from)
         if handoff is not None:
             acc["hh"].append(handoff[0])
             acc["ho"].append(handoff[1])

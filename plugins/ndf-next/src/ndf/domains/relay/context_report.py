@@ -132,14 +132,6 @@ def clip_windows(windows: Windows, span: Optional[tuple[float, float]]) -> Windo
     return [(max(a, lo), min(b, hi + 1e-6)) for a, b in windows if max(a, lo) < min(b, hi + 1e-6)]
 
 
-def _mark_bounds(marks: list[dict[str, Any]], by_next: bool) -> tuple[Optional[float], Optional[float]]:
-    """(復元の区間の終わり, 引継ぎの区間の始まり)。復元は引継ぎ文書で始まったセッションの最初の「復元完了」。"""
-    restored = [t for m in marks if m.get("event") == cr.MARK_RESTORED and (t := cr.parse_ts(m.get("at"))) is not None]
-    handoffs = [t for m in marks if m.get("event") == cr.MARK_HANDOFF and (t := cr.parse_ts(m.get("at"))) is not None]
-    restore_end = min(restored, default=None) if by_next else None
-    return restore_end, max(handoffs, default=None)
-
-
 class _Scope(NamedTuple):
     """1 つの作業の集計で共有する入力。"""
 
@@ -178,7 +170,7 @@ def session_parts(sid: str, transcript: Optional[str], marks: list[dict[str, Any
     """1 つのセッションの呼び出しを区分へ時刻で排他に割り当てる。`windows` の区間の呼び出しだけを数える。"""
     calls, compacts, by_next = cr.read_calls(transcript, scope.seen) if transcript and sid not in scope.excluded else ([], None, False)
     calls = [c for c in calls if _within(c["ts"], windows)]
-    restore_end, handoff_from = _mark_bounds(marks, by_next)
+    restore_end, handoff_from = cr.mark_bounds(marks, by_next)
     parts = {b: _empty_totals() for b in buckets()}
     times: dict[str, list[Optional[float]]] = defaultdict(list)
     for c in calls:
