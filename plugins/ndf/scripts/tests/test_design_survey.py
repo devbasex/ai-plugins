@@ -205,11 +205,12 @@ def test_existing_issue_documents_pass():
     """このリポジトリの既存の設計文書と受け入れ条件のファイルで、外部の調査の規則が落ちない（受け入れ条件 10）。
 
     unnamed_redline は規則より前に書いた文書（判断を承認ゲートへ残す書き方だった）を指摘するため、ここでは数えない。
+    代表のリポジトリの 2 規則（repo_*。#3618）も、設定を置く前に書いた文書を指摘するため数えない。
     """
     files = [f for f in git(REPO, "ls-files", "issues/").splitlines() if f.endswith(".md")]
     assert files
     _, out = run(REPO, "--file", *files)
-    survey = [it for it in out["items"] if it["rule"] != "unnamed_redline"]
+    survey = [it for it in out["items"] if it["rule"] != "unnamed_redline" and not it["rule"].startswith("repo_")]
     assert survey == [], survey[:5]
 
 
