@@ -95,7 +95,7 @@ plugins/ndf-next/
 | `plugins/ndf-next/src/ndf/domains/project/__init__.py` | 新設 | パッケージの説明（旧い `project-decl.py` の移し先であること）だけを持つ | 無し |
 | `plugins/ndf-next/src/ndf/domains/project/cli.py` | 新設 | `ndf project` の 5 つの下位の命令の引数を読み、判定・測定・書き出しを呼んで結果 JSON を出す | `project.check`・`project.measure_*`・`project.write`・`ndf.contracts` |
 | `plugins/ndf-next/src/ndf/domains/project/check.py` | 新設 | 宣言の新しさの判定と、判定の入力の指紋を持つ（旧い `check` と `project_lib/fingerprint.py`） | `ndf.domains.records.files`・`ndf.domains.records.jsonfile`・`ndf.adapters.git` |
-| `plugins/ndf-next/src/ndf/domains/project/measure_repo.py` | 新設 | リポジトリの言語・テスト・サービス・配布・指示書・素材を測る（旧い `project_lib/measure_repo.py`・`measure_materials.py`） | `ndf.adapters.git` |
+| `plugins/ndf-next/src/ndf/domains/project/measure_repo.py` | 新設 | リポジトリの言語・テスト・サービス・リリース・指示書・素材を測る（旧い `project_lib/measure_repo.py`・`measure_materials.py`） | `ndf.adapters.git` |
 | `plugins/ndf-next/src/ndf/domains/project/measure_ci.py` | 新設 | CI の定義とその実行の時間、課題の置き場を測る（旧い `project_lib/measure_ci.py`・`ci_tests.py`） | `ndf.adapters.github` |
 | `plugins/ndf-next/src/ndf/domains/project/measure_flow.py` | 新設 | ブランチの使い方を測る（旧い `project_lib/measure_branch_flow.py`） | `ndf.adapters.git`・`ndf.domains.worktree.declaration` |
 | `plugins/ndf-next/src/ndf/domains/project/write.py` | 新設 | 測定の結果と答えを宣言のキーへ取り込み、書き出しとずれの比較を行う（旧い `project_lib/merge.py`・`compose.py`・`secret.py`） | `ndf.domains.records.files`・`ndf.domains.records.jsonfile`・`ndf.domains.worktree.declaration` |
@@ -305,7 +305,7 @@ plugins/ndf-next/
 | `notice.position` | ラッパーの排他（`relay.lock`）が持たれていない | `not-running` |
 | `notice.position` | 親をたどって最初に当たる claude の親の pid が、ラッパーの状態の `pid` と違う | `not-child` |
 | `notice.position` | 同じ | `relay`（`metrics.inside: true`） |
-| `notice.lines` | `relay` で静かな時間が有限 | 「<秒> 秒の静止の後に自動で切り替わる」の文 |
+| `notice.lines` | `relay` で静かな時間が有限 | 「<秒> 秒のアイドルの後に自動で切り替わる」の文 |
 | `notice.lines` | `relay` で静かな時間が有限でない | 自動で切り替えない旨と手で切り替える手順の文 |
 | `notice.lines` | `not-running`・`not-child`・`no-dir` | 理由ごとの外の文（旧い `notice_lines` と同じ文面） |
 | `relay.cli._stop_all` | 動いている新しいラッパーが 0 本 | `ok`・`metrics.stopped: 0` |
@@ -316,7 +316,7 @@ plugins/ndf-next/
 | `context_policy.resolve` | 設定があり読める。それ以外 | 設定の値（出所 `config`）。無いキーは既定値 |
 | `context_policy.resolve` | 設定が壊れている | 現行の方式の既定値と `config_error` |
 
-- 繰り返しの終わる条件: `notice.position` の親のたどりは pid が 1 以下になるか 64 段で終わる（旧い `is_direct_child` と同じ）。`measure_*` は項目の並びの終わりか締め切りで終わる。`relay.cli._stop_all` は `registry.running` の一覧の終わりで終わる
+- 繰り返しの終わる条件: `notice.position` の親のたどりは pid が 1 以下になるか 64 世代で終わる（旧い `is_direct_child` と同じ）。`measure_*` は項目の並びの終わりか締め切りで終わる。`relay.cli._stop_all` は `registry.running` の一覧の終わりで終わる
 - 計算量の注意: `context_report.report` は判定の記録と台帳の行の数に比例し、作業ごとに全行を走査する（旧いと同じ）。`--all` は作業の数だけ走査を繰り返すため、作業の数と行の数の積になる。旧い実装と同じ形のまま移し、速さの改善はこの課題で行わない
 
 ## 内部のデータと定数
@@ -404,7 +404,7 @@ filelock と `flock` コマンドが同じファイルで互いに待つこと�
 | `collect.gather` | `ndf.adapters.github.GitHub.issue_body` | `grep -n "def issue_body" src/ndf/adapters/github.py` | 使う |
 | `collect.draft` | `ndf loop sprint` が読む判定の根拠の形（`ndf.domains.loop`） | `grep -rn "condition" src/ndf/domains/loop --include=*.py` | 使う（形を写さず、同じキーを組む） |
 | `collect.write_draft` | `signals.replace_json` | 上と同じ | 使う |
-| `relay.cli._stop_all` | `registry.running`・`hub.stop` | `grep -n "def running\|def stop" src/ndf/domains/relay/registry.py src/ndf/domains/relay/hub.py` | 使う（新しいラッパーを名前ごとに止める。停止の合図のファイルを新しく作らない） |
+| `relay.cli._stop_all` | `registry.running`・`hub.stop` | `grep -n "def running\|def stop" src/ndf/domains/relay/registry.py src/ndf/domains/relay/hub.py` | 使う（新しいラッパーを名前ごとに止める。停止シグナルファイルを新しく作らない） |
 | `notice.position` | `registry.read_state`・`registry.lock_busy`・`signals.relay_dir`・psutil | `grep -n "def read_state\|def lock_busy" src/ndf/domains/relay/registry.py`・`grep -n psutil pyproject.toml` | 使う（ラッパーの状態の `pid` と親のたどりで判定し、ラッパーに子の pid のファイルを足さない） |
 | `notice.lines` | 無し | `grep -rn "カットポイント" src/ndf --include=*.py` | 新しく書く（旧い `notice_lines` の文面を移す） |
 | `registry.legacy_state_root` | `registry.legacy_root` | `grep -n "def legacy_root" -A8 src/ndf/domains/relay/registry.py` | 使う（中の規則を切り出して共有する） |

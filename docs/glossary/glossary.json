@@ -7300,6 +7300,30 @@
       "pending_source": "issues/issue-3569-requirements.md"
     },
     {
+      "term": "移す",
+      "context": "ndf-workflow",
+      "meaning": "旧いプラグインの関数の振る舞い（入力・判定・書くファイルの置き場と形）を変えずに、新しいプラグインのモジュールへ書き直すこと。旧いプラグインのファイルは変えない",
+      "pending_source": "issues/issue-3569-design-detail.md"
+    },
+    {
+      "term": "公開の関数",
+      "context": "ndf-workflow",
+      "meaning": "モジュールの外から呼ばれる関数。詳細設計の「関数の仕様」に書くのは公開の関数だけである",
+      "pending_source": "issues/issue-3569-design-detail.md"
+    },
+    {
+      "term": "非公開の関数",
+      "context": "ndf-workflow",
+      "meaning": "公開の関数だけが呼ぶ関数。名前が `_` で始まる",
+      "pending_source": "issues/issue-3569-design-detail.md"
+    },
+    {
+      "term": "旧い置き場",
+      "context": "ndf-workflow",
+      "meaning": "旧いプラグインが状態を書く置き場。入れ替えの前は、旧いプラグインと新しいプラグインの両方が同じ旧い置き場を読み書きする",
+      "pending_source": "issues/issue-3569-design-detail.md"
+    },
+    {
       "term": "新しいプラグイン",
       "context": "ndf-workflow",
       "meaning": "入れ替えまでの間、`plugins/ndf-next/` に作る作り直しの側のプラグイン。開発の間の名前は `ndf-next`",
