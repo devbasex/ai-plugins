@@ -26,6 +26,7 @@ from gate1_ids import gate1_id
 import parallel_lane as pl
 import parallel_ledger as plg
 from parallel_question import FULL_SHA, KIND_ASK, KIND_GATE1, KIND_REUSED, AskTarget, Prior, prior_of, ask_source, target_line
+from parallel_question import first_question, option_labels
 
 KIND_LATE = "late"  # 上限の秒が尽きて台帳へ書かなかった送り分けの結果
 
@@ -141,7 +142,9 @@ def route_ask(main: Path, name: str, lane: str, got: dict, rows: list[dict]) -> 
     if gate is not None:  # 分岐 1
         return _route_gate1(main, name, lane, gate, rows, ledger_id, deadline_at)
     target = ask_target(tool_input, cwd).target
-    prior = prior_of(rows, lane, source, target) if kind == "helper" and target else None  # 同じ問いは一時レーンだけ（I5）
+    prior = None
+    if kind == "helper" and target:  # 同じ問いは一時レーンだけ（I5）
+        prior = prior_of(rows, lane, source, target, first_question(tool_input), option_labels(tool_input))
     if prior is not None and (reused := _route_reused(main, name, lane, prior, source, target, ledger_id, deadline_at)):  # 分岐 2
         return reused
     if expired(deadline_at):  # 分岐 3

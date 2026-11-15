@@ -81,8 +81,10 @@ hook が `allow` と `updatedInput` の `answers` で問いに自動で答える
 
 根拠: Value 1 / Value 3 / C4（MVV 版 7）
 
+**実装で変えた点（2026-11-16、PR #3652 の cross-review の指摘。利用者の決定「中身も比べる」、依頼 `lfix-rel-qb3fbee086352`）:** 鍵が（名前・区分・対象）だけだと、同じ区分 `ndf-ask:redline:4` で同じ先端のブランチなら、強制 push の許可をブランチの削除の問いへ当て得る。根拠にした STD2 は同じキーを別の中身で使うことを禁じる。レッドラインの区分（`ndf-ask:redline:*`）だけ、問いの文面（空白を除いたもの）と選択肢の label の並びも一致したときに前の依頼を引き当てる（`lib/parallel_question.py` の `prior_of`・`same_body`）。文面が違えば新しい依頼として人へ問い直す。ほかの区分は今どおり（名前・区分・対象）で引き当てる。
+
 ### 決定 9: 起き直した一時レーンが前の答えを自分でも読めるよう、`asked` に対象を持つ `ask` の答えの中身を載せる
 
-`parallel.py helper` の `asked` は、今は `ask` の答えに `answered: true` だけを付ける（対象が無く、前の答えを今の問いへ当てられなかったため）。問いの対象を持つ `ask` には、`gate2` と同じく答えの `result`・`choice` を載せる。対象を持たない `ask` は今どおり `answered: true` だけにする。判定の正本は `request-ask` の同じ問いの判定である。`asked` は、一時レーンが問いの前に読める同じ判定の結果である。
+`parallel.py helper` の `asked` は、今は `ask` の答えに `answered: true` だけを付ける（対象が無く、前の答えを今の問いへ当てられなかったため）。問いの対象を持つ `ask` には、`gate2` と同じく答えの `result`・`choice` を載せる。対象を持たない `ask` は今どおり `answered: true` だけにする。レッドラインの区分の `ask` も `answered: true` だけにする（決定 8 の「実装で変えた点」。問いの中身を比べられるのは今の問いを持つ `request-ask` だけのため、引き継ぎはそちらだけが行う）。判定の正本は `request-ask` の同じ問いの判定である。`asked` は、一時レーンが問いの前に読める同じ判定の結果である。
 
 根拠: Value 3（MVV 版 7）

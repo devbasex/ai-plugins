@@ -41,7 +41,8 @@ def asked_of(rows: list[dict], lane: str, settled: set = frozenset()) -> list[di
 
     答えの中身（`answer`）を載せるのは、id で問いの決まる `gate2` と、問いの対象（`target`）を持つ `ask` である（#3603 の決定 9）。
     対象を持たない `ask` は、前の答えを今の問いへ当てられないため、答えがあっても `answered: true` だけを付ける（戻せない操作の答えを、
-    対象の分からない問いへ当てない）。判定の正本は `request-ask` の同じ問いの判定（`prior_of`）である。"""
+    対象の分からない問いへ当てない）。レッドラインの区分の `ask` も `answered: true` だけにする（問いの中身を比べられるのは今の問いを
+    持つ `request-ask` だけのため）。判定の正本は `request-ask` の同じ問いの判定（`prior_of`）である。"""
     answers = answers_by_id(rows)
     out = []
     for r in rows:
@@ -50,7 +51,7 @@ def asked_of(rows: list[dict], lane: str, settled: set = frozenset()) -> list[di
             continue
         item = {"id": r.get("id"), "kind": r.get("kind"), "source": msg.get("source"), "target": msg.get("target"), "at": r.get("at")}
         if (a := answers.get(r.get("id"))) is not None:
-            if r.get("kind") == "gate2" or msg.get("target"):
+            if r.get("kind") == "gate2" or (msg.get("target") and not str(msg.get("source") or "").startswith(REDLINE_PREFIX)):
                 item["answer"] = a
             else:
                 item["answered"] = True
@@ -99,6 +100,11 @@ def ask_source(tool_input: dict):
     return ((tool_input or {}).get("metadata") or {}).get("source")
 
 
+def option_labels(tool_input: dict) -> list:
+    """最初の問いの選択肢の label の並び。台帳の `ask` の行の `options` と同じ形。"""
+    return [o.get("label") for o in first_item(tool_input).get("options") or [] if isinstance(o, dict)]
+
+
 def first_question(tool_input: dict) -> str:
     """最初の問いの文（`questions[0].question`）。無ければ空。"""
     return str(first_item(tool_input).get("question") or "")
@@ -114,16 +120,34 @@ def target_line(tool_input: dict) -> str:
     return got
 
 
-def prior_of(rows: list[dict], lane: str, source: str, target: str) -> Prior | None:
+REDLINE_PREFIX = "ndf-ask:redline:"  # 戻せない操作の区分。同じ問いの判定に問いの中身も使う（PR #3652 の指摘、#3603 の決定 8）
+
+
+def squeeze(text) -> str:
+    """問いの文面から空白（改行・字下げを含む）を除いたもの。言い回しの空白の違いだけは同じ問いとみなす。"""
+    return "".join(str(text or "").split())
+
+
+def same_body(msg: dict, source: str, question: str, options: list) -> bool:
+    """レッドラインの区分なら、前の依頼 `msg` の問いの文面（空白を除く）と選択肢の並びが今の問いと一致するか。ほかの区分は常に真。"""
+    if not str(source or "").startswith(REDLINE_PREFIX):
+        return True
+    return squeeze(msg.get("question")) == squeeze(question) and list(msg.get("options") or []) == list(options or [])
+
+
+def prior_of(rows: list[dict], lane: str, source: str, target: str, question: str = "", options: list | None = None) -> Prior | None:
     """同じ一時レーンの名前・区分・問いの対象の `ask` の依頼のうち最も新しいものと、その答え（#3603 の決定 8）。
-    `rows` は最初の `opened` の行より後の台帳の行。`target` が空なら比べない（None。I6）。"""
+    `rows` は最初の `opened` の行より後の台帳の行。`target` が空なら比べない（None。I6）。レッドラインの区分（`ndf-ask:redline:*`）は、
+    同じ区分・同じ対象で中身の違う問い（強制 push の許可とブランチの削除）へ答えを当てないため、問いの文面（`question`。空白を除く）と
+    選択肢の label の並び（`options`）も一致した依頼だけを引き当てる。"""
     if not target:
         return None
     hit = None
     for r in rows:
         msg = r.get("msg") or {}
         if r.get("kind") == "ask" and msg.get("lane") == lane and msg.get("source") == source and msg.get("target") == target:
-            hit = r
+            if same_body(msg, source, question, options or []):
+                hit = r
     if hit is None:
         return None
     return Prior(str(hit.get("id") or ""), answers_by_id(rows).get(hit.get("id")))

@@ -130,7 +130,8 @@ def test_a_helper_reuses_the_answer_of_the_same_question(monkeypatch, tmp_path, 
 
 
 def test_a_helper_asks_again_for_a_moved_tip_another_helper_or_no_target(monkeypatch, tmp_path, capsys):
-    """受け入れ条件 14・16・18: 先端が動いた・別の名前の一時レーン・対象の無い問いは、前の答えを使わずに新しい依頼にする。"""
+    """受け入れ条件 13・14・16・18: 先端が動いた・別の名前の一時レーン・対象の無い問い・同じレッドラインの区分と先端で中身の違う問いは、
+    前の答えを使わずに新しい依頼にする。"""
     import parallel_ledger as plg
 
     main = _main(tmp_path)
@@ -140,12 +141,14 @@ def test_a_helper_asks_again_for_a_moved_tip_another_helper_or_no_target(monkeyp
     _, out = _ask(mod, capsys, monkeypatch, "p1-rel1", "L1", Q, repo)
     pl.send_answer(main, "p1", out["metrics"]["id"], "answered", choice=["消す"])
     assert _ask(mod, capsys, monkeypatch, "p1-rel2", "L2", Q, repo)[1]["metrics"]["kind"] == "ask"
+    other = "強制 push してよいか。\n" + Q.splitlines()[-1]  # 同じ対象の行・同じ区分 redline:4 で中身の違う問い（PR #3652 の指摘）
+    assert _ask(mod, capsys, monkeypatch, "p1-rel1", "L5", other, repo)[1]["metrics"]["kind"] == "ask"
     got = _ask(mod, capsys, monkeypatch, "p1-rel1", "L3", "対象の行の無い問い", repo)[1]["metrics"]
     assert got["kind"] == "ask" and got["target"] is None
     _git(repo, "checkout", "-q", "sprint/lr-t2")
     _git(repo, "commit", "-q", "--allow-empty", "-m", "b")
     assert _ask(mod, capsys, monkeypatch, "p1-rel1", "L4", Q, repo)[1]["metrics"]["kind"] == "ask"
-    assert len(_rows(plg, main, "ask")) == 4 and _rows(plg, main, "reused") == []
+    assert len(_rows(plg, main, "ask")) == 5 and _rows(plg, main, "reused") == []
 
 
 def test_a_sprint_lane_does_not_reuse_answers(monkeypatch, tmp_path, capsys):

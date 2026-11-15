@@ -26,7 +26,7 @@ from typing import Optional
 
 import parallel_external as pe
 from gate1_ids import gate1_id
-from parallel_question import first_item, ask_source
+from parallel_question import first_item, ask_source, option_labels
 import parallel_ledger as plg
 import parallel_plan as pp
 from parallel_request_form import REQUEST_ID_RE, request_errors  # noqa: F401  依頼の形（契約の検査と外のレーンが読む）
@@ -415,7 +415,7 @@ def request_ask(main: Path, name: str, lane: str, tool_input: dict, cwd: str, le
         "lane": lane,
         "source": ask_source(tool_input),
         "question": first.get("question"),
-        "options": [o.get("label") for o in first.get("options") or [] if isinstance(o, dict)],
+        "options": option_labels(tool_input),
         "questions": qs,
         "cwd": cwd,
         "ledger_id": ledger_id,

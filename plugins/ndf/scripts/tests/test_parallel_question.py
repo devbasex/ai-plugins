@@ -18,12 +18,20 @@ def ti(question: str) -> dict:
     return {"questions": [{"question": question, "options": [{"label": "消す"}]}], "metadata": {"source": "ndf-ask:redline:4"}}
 
 
-def ask(rid: str, lane: str = "p6-rel17", source: str = "ndf-ask:redline:4", target=TARGET, ledger_id: str = "") -> dict:
-    return {
-        "kind": "ask",
-        "id": rid,
-        "msg": {"kind": "ask", "id": rid, "lane": lane, "source": source, "target": target, "ledger_id": ledger_id},
-    }
+QUESTION = "ブランチを消してよいか。\n対象: sprint/lr-t2"
+OPTIONS = ["消す", "残す"]
+
+
+def ask(
+    rid: str, lane: str = "p6-rel17", source: str = "ndf-ask:redline:4", target=TARGET, ledger_id: str = "", question=QUESTION, options=None
+) -> dict:
+    msg = {"kind": "ask", "id": rid, "lane": lane, "source": source, "target": target, "ledger_id": ledger_id}
+    msg.update(question=question, options=list(OPTIONS if options is None else options))
+    return {"kind": "ask", "id": rid, "msg": msg}
+
+
+def prior(rows, lane="p6-rel17", source="ndf-ask:redline:4", target=TARGET, question=QUESTION, options=None):
+    return pq.prior_of(rows, lane, source, target, question, OPTIONS if options is None else options)
 
 
 def answer(rid: str, choice=("消す",), result: str = "answered") -> dict:
@@ -51,13 +59,13 @@ def test_target_line_reads_only_the_first_question():
 def test_prior_of_returns_the_newest_same_question_and_its_answer():
     """受け入れ条件 13: 同じ名前・区分・対象の依頼のうち最も新しいものと答え。"""
     rows = [ask("p6-rel17-qa"), answer("p6-rel17-qa", ["残す"]), ask("p6-rel17-qb"), answer("p6-rel17-qb")]
-    got = pq.prior_of(rows, "p6-rel17", "ndf-ask:redline:4", TARGET)
+    got = prior(rows)
     assert got == pq.Prior("p6-rel17-qb", {"result": "answered", "choice": ["消す"]})
 
 
 def test_prior_of_without_answer_returns_the_waiting_id():
     """受け入れ条件 15: 答え待ちなら id だけを返す（答えは None）。"""
-    assert pq.prior_of([ask("p6-rel17-qa")], "p6-rel17", "ndf-ask:redline:4", TARGET) == pq.Prior("p6-rel17-qa", None)
+    assert prior([ask("p6-rel17-qa")]) == pq.Prior("p6-rel17-qa", None)
 
 
 @pytest.mark.parametrize(
@@ -71,13 +79,39 @@ def test_prior_of_without_answer_returns_the_waiting_id():
 )
 def test_prior_of_does_not_match_other_questions(lane, source, target):
     rows = [ask("p6-rel17-qa"), answer("p6-rel17-qa")]
-    assert pq.prior_of(rows, lane, source, target) is None
+    assert prior(rows, lane, source, target) is None
 
 
 def test_prior_of_never_matches_empty_targets_with_each_other():
     """I6: 対象が空の前の依頼どうしを同じ問いにしない。"""
     rows = [ask("p6-rel17-qa", target=None), answer("p6-rel17-qa")]
-    assert pq.prior_of(rows, "p6-rel17", "ndf-ask:redline:4", "") is None
+    assert prior(rows, target="") is None
+
+
+@pytest.mark.parametrize(
+    "question, options",
+    [
+        ("強制 push してよいか。\n対象: sprint/lr-t2", OPTIONS),  # 同じ区分・同じ先端で問いの中身が違う（PR #3652 の指摘）
+        (QUESTION, ["残す", "消す"]),  # 選択肢の並びが違う
+    ],
+)
+def test_prior_of_redline_needs_the_same_question_and_options(question, options):
+    """受け入れ条件 13（PR #3652 で足した）: レッドラインの区分は問いの文面と選択肢の並びも一致したときだけ引き当てる。"""
+    rows = [ask("p6-rel17-qa"), answer("p6-rel17-qa")]
+    assert prior(rows, question=question, options=options) is None
+
+
+def test_prior_of_redline_ignores_whitespace_in_the_question():
+    """空白（改行・字下げ）の違いは同じ問いとみなす。"""
+    rows = [ask("p6-rel17-qa"), answer("p6-rel17-qa")]
+    got = prior(rows, question="  ブランチを消してよいか。\n\n  対象:  sprint/lr-t2 ")
+    assert got == pq.Prior("p6-rel17-qa", {"result": "answered", "choice": ["消す"]})
+
+
+def test_prior_of_other_sources_compare_only_the_target():
+    """レッドラインでない区分は今どおり名前・区分・対象だけで引き当てる。"""
+    rows = [ask("p6-rel17-qa", source="ndf-ask:cost"), answer("p6-rel17-qa")]
+    assert prior(rows, source="ndf-ask:cost", question="別の文面", options=["はい"]).id == "p6-rel17-qa"
 
 
 def test_outcome_of_restores_each_kind():
@@ -93,7 +127,10 @@ def test_outcome_of_restores_each_kind():
 
 def test_asked_of_carries_the_answer_only_for_targeted_asks():
     """決定 9: 対象を持つ ask の答えには中身を、対象の無い ask には answered だけを載せる。"""
-    rows = [ask("p6-rel17-qa"), answer("p6-rel17-qa"), ask("p6-rel17-qb", target=None), answer("p6-rel17-qb")]
+    rows = [ask("p6-rel17-qa", source="ndf-ask:cost"), answer("p6-rel17-qa"), ask("p6-rel17-qb", target=None), answer("p6-rel17-qb")]
+    rows += [ask("p6-rel17-qc"), answer("p6-rel17-qc")]
     got = {i["id"]: i for i in pq.asked_of(rows, "p6-rel17")}
     assert got["p6-rel17-qa"]["answer"] == {"result": "answered", "choice": ["消す"]}
     assert got["p6-rel17-qb"].get("answered") is True and "answer" not in got["p6-rel17-qb"]
+    # レッドラインの答えは中身を載せない（引き継ぎは問いの中身を比べる request-ask の判定だけが行う）
+    assert got["p6-rel17-qc"].get("answered") is True and "answer" not in got["p6-rel17-qc"]
