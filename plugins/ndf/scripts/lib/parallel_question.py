@@ -88,11 +88,20 @@ class Prior:
     answer: dict | None
 
 
+def first_item(tool_input: dict) -> dict:
+    """最初の問い（`questions[0]`）。無いか辞書でなければ空。"""
+    qs = (tool_input or {}).get("questions") or []
+    return qs[0] if qs and isinstance(qs[0], dict) else {}
+
+
+def ask_source(tool_input: dict):
+    """問いの区分（`metadata.source`）の値をそのまま返す。無ければ None。"""
+    return ((tool_input or {}).get("metadata") or {}).get("source")
+
+
 def first_question(tool_input: dict) -> str:
     """最初の問いの文（`questions[0].question`）。無ければ空。"""
-    qs = (tool_input or {}).get("questions") or []
-    first = qs[0] if qs and isinstance(qs[0], dict) else {}
-    return str(first.get("question") or "")
+    return str(first_item(tool_input).get("question") or "")
 
 
 def target_line(tool_input: dict) -> str:

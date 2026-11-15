@@ -26,6 +26,7 @@ from typing import Optional
 
 import parallel_external as pe
 from gate1_ids import gate1_id
+from parallel_question import first_item, ask_source
 import parallel_ledger as plg
 import parallel_plan as pp
 from parallel_request_form import REQUEST_ID_RE, request_errors  # noqa: F401  依頼の形（契約の検査と外のレーンが読む）
@@ -406,13 +407,13 @@ def request_ask(main: Path, name: str, lane: str, tool_input: dict, cwd: str, le
     """承認ゲートの外の区分つきの問い（`kind: ask`）をオーガナイザーへ送る。id は `<送り手>-q<判定の記録の id>`。
     `target` は問いの対象（`ask_target`。#3608）で、行の `target` に残す（空なら null）。"""
     qs = (tool_input or {}).get("questions") or []
-    first = qs[0] if qs and isinstance(qs[0], dict) else {}
+    first = first_item(tool_input)
     rid = f"{lane}-q{ledger_id}"
     msg = {
         "kind": "ask",
         "id": rid,
         "lane": lane,
-        "source": ((tool_input or {}).get("metadata") or {}).get("source"),
+        "source": ask_source(tool_input),
         "question": first.get("question"),
         "options": [o.get("label") for o in first.get("options") or [] if isinstance(o, dict)],
         "questions": qs,

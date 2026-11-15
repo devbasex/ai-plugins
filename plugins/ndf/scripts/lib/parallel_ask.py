@@ -25,7 +25,7 @@ import parallel_external as pe
 from gate1_ids import gate1_id
 import parallel_lane as pl
 import parallel_ledger as plg
-from parallel_question import FULL_SHA, KIND_ASK, KIND_GATE1, KIND_REUSED, AskTarget, Prior, prior_of, target_line
+from parallel_question import FULL_SHA, KIND_ASK, KIND_GATE1, KIND_REUSED, AskTarget, Prior, prior_of, ask_source, target_line
 
 KIND_LATE = "late"  # 上限の秒が尽きて台帳へ書かなかった送り分けの結果
 
@@ -135,7 +135,7 @@ def route_ask(main: Path, name: str, lane: str, got: dict, rows: list[dict]) -> 
 
     tool_input, cwd = got.get("tool_input") or {}, got.get("cwd") or ""
     ledger_id, deadline_at = str(got.get("ledger_id") or ""), got.get("deadline_at")
-    source = str((tool_input.get("metadata") or {}).get("source") or "")
+    source = str(ask_source(tool_input) or "")
     kind = sender_kind(main, name, lane)
     gate = _design_gate_or_none(main, name, lane, tool_input, rows) if kind == "sprint" and source == pdg.GATE1_SOURCE else None
     if gate is not None:  # 分岐 1
