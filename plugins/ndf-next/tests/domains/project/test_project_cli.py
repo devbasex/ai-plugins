@@ -113,3 +113,78 @@ def test_unknown_subcommand_is_a_usage_error():
     with pytest.raises(SystemExit) as exc:
         cli.main(["measure-all"])
     assert exc.value.code == 2
+
+
+def _measure_file(tmp_path: Path, items: dict) -> Path:
+    path = tmp_path / "measure.json"
+    path.write_text(json.dumps({"analyzer": check.ANALYZER, "items": items, "inputs": {}, "notes": ["注記"]}), encoding="utf-8")
+    return path
+
+
+def _answers(tmp_path: Path, answers: dict) -> Path:
+    path = tmp_path / "answers.json"
+    path.write_text(json.dumps(answers), encoding="utf-8")
+    return path
+
+
+def test_measure_writes_outside_the_repo_only(repo, tmp_path, capsys, last_result):
+    assert cli.main(["measure", "--root", str(repo), "--out", str(repo / "m.json")]) == 1
+    out = tmp_path / "out" / "m.json"
+    assert cli.main(["measure", "--root", str(repo), "--out", str(out), "--budget", "30"]) == 0
+    got = last_result(capsys.readouterr().out)
+    data = json.loads(out.read_text(encoding="utf-8"))
+    assert data["items"]["ci"]["status"] == "unknown"  # origin が GitHub でない
+    assert data["items"]["languages"]["status"] == "measured"
+    assert got["metrics"]["out"] == str(out)
+
+
+def test_write_creates_then_keeps_hand_values(repo, tmp_path, capsys, last_result):
+    measured = _measure_file(tmp_path, {"checks": {"status": "measured", "value": {"tools": []}}, "test": {"status": "question", "candidates": {}, "evidence": []}})
+    answers = _answers(tmp_path, {"test": {"value": {"suites": []}}, "nope": {"value": 1}})
+    assert cli.main(["write", "--root", str(repo), "--measure", str(measured), "--answers", str(answers), "--dry-run"]) == 0
+    assert not (repo / ".ndf" / "project.json").exists()
+    assert cli.main(["write", "--root", str(repo), "--measure", str(measured), "--answers", str(answers)]) == 0
+    got = last_result(capsys.readouterr().out)
+    kinds = {r["key"]: r["kind"] for r in got["items"] if "key" in r}
+    assert kinds["checks"] == "written" and kinds["test"] == "written" and kinds["nope"] == "ignored"
+    decl = json.loads((repo / ".ndf" / "project.json").read_text(encoding="utf-8"))
+    assert decl["checks"] == {"tools": []} and decl["analysis"]["analyzer"] == check.ANALYZER
+    decl["checks"] = {"tools": [{"name": "ruff", "config": "ruff.toml"}]}  # 人が書き換えた値
+    (repo / ".ndf" / "project.json").write_text(json.dumps(decl), encoding="utf-8")
+    assert cli.main(["write", "--root", str(repo), "--measure", str(measured), "--answers", str(answers)]) == 0
+    rows = {r["key"]: r for r in last_result(capsys.readouterr().out)["items"] if "key" in r}
+    assert rows["checks"]["kind"] == "mismatch"
+    assert json.loads((repo / ".ndf" / "project.json").read_text(encoding="utf-8"))["checks"] == decl["checks"]
+
+
+def test_write_refuses_bad_flow_answer_and_broken_declaration(repo, tmp_path, capsys, last_result):
+    measured = _measure_file(tmp_path, {})
+    bad = _answers(tmp_path, {"branch_flow": {"value": {"promotion": "whole", "start": "production"}}})
+    assert cli.main(["write", "--root", str(repo), "--measure", str(measured), "--answers", str(bad)]) == 1
+    assert last_result(capsys.readouterr().out)["cause"]["kind"] == "check_failed"
+    (repo / ".ndf").mkdir()
+    (repo / ".ndf" / "project.json").write_text("{", encoding="utf-8")
+    assert cli.main(["write", "--root", str(repo), "--measure", str(measured)]) == 2
+
+
+def test_write_adds_missing_branches_to_worktree(repo, tmp_path, capsys, last_result):
+    (repo / ".ndf").mkdir()
+    (repo / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "base_branch": "develop"}), encoding="utf-8")
+    measured = _measure_file(tmp_path, {"branches": {"status": "question", "candidates": {}, "evidence": []}})
+    answers = _answers(tmp_path, {"branches": {"value": {"base": "main", "production": "main"}}})
+    assert cli.main(["write", "--root", str(repo), "--measure", str(measured), "--answers", str(answers)]) == 0
+    rows = {r["key"]: r["kind"] for r in last_result(capsys.readouterr().out)["items"] if "key" in r}
+    assert rows["worktree.json#base_branch"] == "mismatch"
+    assert rows["worktree.json#production_branch"] == "written"
+    wt = json.loads((repo / ".ndf" / "worktree.json").read_text(encoding="utf-8"))
+    assert wt == {"version": 1, "base_branch": "develop", "production_branch": "main"}
+
+
+def test_drift_compares_with_the_default_row(repo, tmp_path, capsys, last_result):
+    flow = {"fields": {"promotion": {"value": "selected", "confidence": "高", "evidence": []}}}
+    measured = _measure_file(tmp_path, {"branch_flow": flow})
+    assert cli.main(["drift", "--root", str(repo), "--measure", str(measured)]) == 0
+    got = last_result(capsys.readouterr().out)
+    assert got["metrics"] == {"drifted": 1, "declared": False}
+    assert got["items"][0]["name"] == "branch_flow.promotion"
+    assert cli.main(["drift", "--root", str(repo), "--measure", str(tmp_path / "none.json")]) == 1

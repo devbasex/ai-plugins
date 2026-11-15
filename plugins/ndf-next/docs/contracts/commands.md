@@ -250,7 +250,7 @@
 | `ndf project schema` | `--out`（string・任意）: 書く先。省けば標準出力 |
 | `ndf project write` | `--measure`（string・必須）: ndf project measure の測定の結果<br>`--answers`（string・任意）: 問いの項目への答え（キー → {value} か {unknown}）<br>`--dry-run`（boolean・任意）: 書かずに差分だけを出す<br>`--root`（string・任意・既定 `"."`）: リポジトリの作業場所 |
 
-結果の `metrics`: `inputs`（integer）。`items` の要素: `kind`（string）・`reason`（string）
+結果の `metrics`: `declared`（boolean）・`drifted`（integer）・`dry_run`（boolean）・`elapsed_seconds`（number）・`files`（array of string）・`inputs`（integer）・`measured`（integer）・`out`（string）・`question`（integer）・`unknown`（integer）・`unknown_items`（array of string）・`written`（integer）。`items` の要素: `analyzed`（—）・`confidence`（string か null）・`declared`（—）・`evidence`（array）・`kept_previous`（boolean）・`key`（string）・`kind`（string）・`measured`（—）・`name`（string）・`origin`（string）・`pattern`（string）・`proposal`（string）・`reason`（string）・`result`（string）・`source`（string）・`text`（string）
 
 ## `ndf records`
 
