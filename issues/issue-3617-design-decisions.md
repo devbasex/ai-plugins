@@ -135,7 +135,7 @@ ndf-next には配分の表を作る部品がまだ無い（cross-refactoring �
 
 要求の未決 1 の移す先は、根の `scripts/` の下にする。対応表は表の読み手と試走の判定（Python）を持つため、知識を置く `docs/` と計画を置く `issues/` には合わない。`scripts/` は NDF 自身の開発の検査とその材料の置き場である。
 
-対応表の読み手は `jsonschema` を使い、根の環境はこれを持たない（`uv.lock` に無い）。テストは ndf-next の依存の環境（`plugins/ndf-next/uv.lock`）で流し、`ndf-next.yml` のテストのジョブに移した先を足す。根の依存へ `jsonschema` を足すことは採らない。同じ版の固定が 2 か所になる。
+対応表の読み手は `jsonschema` を使い、根の環境はこれを持たない（`uv.lock` に無い）。テストは ndf-next の依存の環境（`plugins/ndf-next/uv.lock`）で流し、`ndf-next.yml` のテストのジョブに移した先を足す。`ndf-next.yml`・`ndf-next-checks.yml` の起動のパスと変更の判定のパスにも移した先を足し、そこだけを変えた PR でもテストを流す。根の `pytest .` の収集の除外（`conftest.py`）と、自分の workflow で確かめるディレクトリ（`scripts/ci-heavy-skip.py` の `SELF_TESTED`）にも移した先を足す。根の環境で収集すると import が失敗するためである。根の依存へ `jsonschema` を足すことは採らない。同じ版の固定が 2 か所になる。
 
 対応表を読むのは、対応表の読み手・試走の判定・対応表と Skill の一覧の一致を見るテストの 3 つだけである。`ndf check` の規則は対応表を読まない（設計文書の「機能の対応表の読み手」に検索の結果がある）。移した 3 つはプラグインの根を引数で受け、既定はリポジトリの根の `plugins/ndf-next/` とする。名前を入れ替えた一時コピーの中では流さない。
 

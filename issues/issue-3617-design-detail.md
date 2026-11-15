@@ -9,8 +9,10 @@
 パッケージ・モジュール構成（触るファイルだけ。`*` は新設、`→` は移す先）:
 
 ```text
+conftest.py                          （根の収集の除外に ndf-next-parity を足す）
 scripts/
 ├── check-skill-repo-assumptions.py
+├── ci-heavy-skip.py                 （SELF_TESTED に ndf-next-parity を足す）
 ├── check-ndf-choices.py *
 ├── ndf-choices.json *
 ├── repo-assumptions-allow/          （ndf-next の項目を足す）
@@ -63,6 +65,8 @@ plugins/ndf-next/
 | `scripts/tests/test_check_skill_repo_assumptions.py` | 変更 | 走査を広げた後の件数・語・既定の除外を確かめる | `scripts/check-skill-repo-assumptions.py` |
 | `scripts/tests/test_check_ndf_choices.py` | 新設 | 選べる値の検査の判定と終了コードを確かめる | `scripts/check-ndf-choices.py` |
 | `scripts/ndf-next-parity/` | 新設 | 機能の対応表・読み手・試走の判定・そのテストを、リリース対象の外に持つ | ndf-next の依存の環境（`jsonschema`）と `ndf.domains.manifests` |
+| `conftest.py` | 変更 | 根の `pytest .` の収集の除外（`collect_ignore_glob`）に `scripts/ndf-next-parity` を足す。根の環境は `jsonschema` と `ndf` のパッケージを持たず、収集の時点で import が失敗するため | 無し |
+| `scripts/ci-heavy-skip.py` | 変更 | 自分の workflow で確かめるディレクトリ（`SELF_TESTED`）に `scripts/ndf-next-parity/` を足し、そこだけを変えた PR で根の全体テストを省く | 無し |
 | `plugins/ndf-next/src/ndf/parity/table.py` | 削除 | `scripts/ndf-next-parity/parity/table.py` へ移す | — |
 | `plugins/ndf-next/src/ndf/parity/trial/probe.py` | 削除 | `scripts/ndf-next-parity/parity/trial/probe.py` へ移す | — |
 | `plugins/ndf-next/tests/parity/test_table.py` | 削除 | `scripts/ndf-next-parity/tests/` へ移す | — |
@@ -102,8 +106,8 @@ plugins/ndf-next/
 | `plugins/ndf-next/contracts/schemas/declarations/estimate.schema.json` | 変更 | `allocation_minutes` を足す | 無し |
 | `plugins/ndf-next/contracts/domains/ndf-files.json` | 変更 | `worktree` に `remote`、`estimate` に `allocation_minutes` の鍵を足す | 無し |
 | `plugins/ndf-next/skills/cross-refactoring/data/allocation-defaults.json` | 変更 | `initial` と上書きの置き場を書いた `summary` を足す | 無し |
-| `.github/workflows/ndf-next-checks.yml` | 変更 | 2 つの検査を打つステップと、それらのファイルの paths を足す | 根の `scripts/` |
-| `.github/workflows/ndf-next.yml` | 変更 | 移した対応表のテストを ndf-next の依存の環境で流す | `scripts/ndf-next-parity/` |
+| `.github/workflows/ndf-next-checks.yml` | 変更 | 2 つの検査を打つステップと、それらのファイルの paths を足す。`on.pull_request.paths`・`on.push.paths` と変更の判定のパス（`NEXT_PATHS`）に `scripts/ndf-next-parity` を足す | 根の `scripts/` |
+| `.github/workflows/ndf-next.yml` | 変更 | 移した対応表のテストを ndf-next の依存の環境で流す。`on.pull_request.paths`・`on.push.paths` と変更の判定のパス（`NEXT_PATHS`）に `scripts/ndf-next-parity` を足し、そこだけを変えた PR でもテストを流す | `scripts/ndf-next-parity/` |
 | `.github/workflows/ndf-next-release.yml` | 変更 | 宣言に無いブランチを GitHub の既定ブランチで補う | `gh api` |
 | `.ndf/project.json` | 変更 | ai-plugins の振る舞いの文書のパスを `docs.behavior` に書く | 無し |
 
