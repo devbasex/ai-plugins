@@ -215,7 +215,9 @@ class _QueueHub(FakeHub):
     # キューへ入れた後に PR を読んだ回数
     reads: int = 0
 
-    def merge(self, number: int, expect_head: str | None = None, method: str | None = None) -> MergeOutcome:
+    def merge(
+        self, number: int, expect_head: str | None = None, method: str | None = None, require_method: bool = False
+    ) -> MergeOutcome:
         self.merged.append(number)
         self.queued.add(number)
         return MergeOutcome(False, MERGE_QUEUE_PENDING, "キューへ入れた", self.pulls[number].head_sha)
