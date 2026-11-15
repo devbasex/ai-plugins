@@ -93,6 +93,12 @@
       "run": ["{{worker}}", "fix-push"],
       "next": "push"
     },
+    "release-guard": {
+      "id": "release-guard",
+      "run": ["ndf", "release-steps", "guard", "--root", "{{repo}}", "--branch", "{{branch}}"],
+      "exit_cause": {"1": "refused", "3": "production_pr"},
+      "on_cause": {"production_pr": "end"}
+    },
     "merge-gate": {
       "id": "merge-gate",
       "run": ["{{gate}}"],

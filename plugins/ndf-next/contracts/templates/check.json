@@ -22,6 +22,7 @@
       {"use": "conflict-check"},
       {"use": "ci"},
       {"id": "behavior-recheck", "run": ["{{behavior}}"]},
+      {"use": "release-guard"},
       {"use": "merge-gate"},
       {"use": "merge", "next": "end"},
       {"id": "fix", "run": ["{{worker}}", "fix"], "next": "test-all"},

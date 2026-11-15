@@ -1,16 +1,17 @@
 {
   "template": "release",
   "purpose": "release",
-  "summary": "デプロイ: 承認ゲートで承認した本番の PR（入力の pr）を、承認した先端との照合付きでマージし（ndf release-steps merge）、含めた PR へリリース記録を書き、次の版のリリースブランチを本番ブランチから用意する。承認の後にコードを変えるステップ（worker・直しのステップ）を持たず、必須のチェックが落ちたら直さずに止まって次の手を返す",
-  "params": ["repo", "pr", "base", "ci_budget"],
+  "summary": "デプロイ: 承認ゲートで承認した本番の PR（入力の pr。main 宛てのスプリントの PR）を、承認した先端との照合付きでマージし（ndf release-steps merge）、CD の版上げの PR のマージ・タグ・GitHub Release を確かめ（confirm）、含めた PR へリリース記録を書き（record）、作業場所を片付ける（cleanup）。承認の後にコードを変えるステップ（worker・直しのステップ）・次の版のブランチの用意・同期の PR を持たず、必須のチェックが落ちたら直さずに止まって次の手を返す",
+  "params": ["repo", "pr", "ci_budget"],
   "plan": {
     "name": "release",
     "repo": "{{repo}}",
     "release": true,
     "steps": [
-      {"id": "merge", "run": ["ndf", "release-steps", "merge", "--root", "{{repo}}", "--pr", "{{pr}}", "--base", "{{base}}", "--budget", "{{ci_budget}}"]},
+      {"id": "merge", "run": ["ndf", "release-steps", "merge", "--root", "{{repo}}", "--pr", "{{pr}}", "--budget", "{{ci_budget}}"]},
+      {"id": "confirm", "run": ["ndf", "release-steps", "confirm", "--root", "{{repo}}", "--pr", "{{pr}}", "--budget", "{{ci_budget}}"]},
       {"id": "record", "run": ["ndf", "release-steps", "record", "--root", "{{repo}}", "--pr", "{{pr}}"]},
-      {"id": "prepare-next", "run": ["ndf", "release-steps", "prepare-next", "--root", "{{repo}}", "--pr", "{{pr}}"], "next": "end"}
+      {"id": "cleanup", "run": ["ndf", "release-steps", "cleanup", "--root", "{{repo}}", "--pr", "{{pr}}"], "next": "end"}
     ]
   }
 }
