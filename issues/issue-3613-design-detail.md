@@ -6,7 +6,7 @@
 
 - 禁止語の規則（`plugins/ndf-next/src/ndf/checks/words.py`）が単独で照合する廃止した語を読むための、関数の形と失敗の扱い
 - 識別子の改名で、どのファイル・モジュール・関数がどの名前になるか
-- 状態のデータベースの列を改名したときに、古い形の保存先と表をどう扱うか
+- 状態のデータベースの列を改名したときに、旧い形の保存先と表をどう扱うか
 
 ## ファイル配置
 
@@ -103,7 +103,7 @@ plugins/ndf-next/
 | `plugins/ndf-next/contracts/schemas/declarations/` | 削除 | `ndf-settings/` へ移す | — |
 | `plugins/ndf-next/contracts/schemas/ndf-settings/` | 新設 | 設定のスキーマ 19 ファイル。受けるキーは変えない（I6） | 無し |
 | `plugins/ndf-next/docs/contracts/declarations.md` | 削除 | `ndf check --write-spec` が `ndf-settings.md` を作り、旧い文書は残さない | — |
-| `plugins/ndf-next/docs/contracts/ndf-settings.md` | 新設 | 設定のスキーマから作る規約の文書 | `plugins/ndf-next/contracts/schemas/ndf-settings/` |
+| `plugins/ndf-next/docs/contracts/ndf-settings.md` | 新設 | 設定のスキーマから作る契約の文書 | `plugins/ndf-next/contracts/schemas/ndf-settings/` |
 | `plugins/ndf-next/tests/checks/test_words.py` | 変更 | 単独で照合する廃止した語の単体テストを足す | `plugins/ndf-next/src/ndf/checks/words.py` |
 | `plugins/ndf-next/tests/checks/test_marks.py` | 削除 | `test_suppressions.py` へ移す | — |
 | `plugins/ndf-next/tests/checks/test_suppressions.py` | 新設 | 抑制コメントのテスト（`test_marks.py` の中身を改名して移す） | `plugins/ndf-next/src/ndf/checks/suppressions.py` |
@@ -223,7 +223,7 @@ plugins/ndf-next/
 | `words.examples` の足す行 | 設定値 | `plugins/ndf-next/src/ndf/checks/rules.json` | 単独で照合する廃止した語を例として挙げるファイル（`skills/requirements-design/references/glossary-format.md` の「字で持」など）と、同等性の表（`src/ndf/parity/features.json`）。行ごとにファイル・語・理由を書く。件数は実装の時点の禁止語の規則の出力で決める |
 | 兆候の表のキー `suppress` | 設定値のキー | `plugins/ndf-next/src/ndf/checks/rules.json` | 値（`boundary`・`none` など）は変えない |
 
-承認ゲートの回答の値（`request_changes`）の置き場は `contracts/facts/answers.json` だけで、`progress/run.py` の定数はそこから引く今の形（`_answer("...")`）を保つ。
+承認ゲートの回答の値（`request_changes`）の置き場は `contracts/facts/answers.json` だけである。`progress/run.py` の定数は、そこから引く今の形（`_answer("...")`）を保つ。
 
 ## 並行と排他
 

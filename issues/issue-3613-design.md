@@ -2,7 +2,7 @@
 
 ## 目的
 
-- **今どうなっているか**: ndf-next（`plugins/ndf-next/`）の Skill・契約の文書・出力・コードに、直訳調の内部の呼び名（版・置き場・宣言・副命令・進行表など 29 語）が 1,061 ファイル中 828 ファイルに出る。印・枠・区間などは 1 語が 2〜3 の意味を持つ
+- **今どうなっているか**: 直訳調の内部の呼び名（版・置き場・宣言・副命令・進行表など 29 語）が、ndf-next（`plugins/ndf-next/`）の 1,061 ファイル中 828 ファイルに出る。出る先は Skill・契約の文書・出力・コードである。印・枠・区間などは 1 語が 2〜3 の意味を持つ
 - **誰に効くか**: 11.0 から ndf-next を使う利用者と、ndf-next を直す開発者
 - **変えると何が成り立つか**: 利用者が読む文書と出力が、説明なしで分かる業界の語で書かれ、1 語が 1 つの意味を指す。旧い語を書いた行は検査が落とすため、旧い語が戻らない
 
@@ -33,7 +33,7 @@
 | 用語集（`project-glossary`） | 語の項目・廃止した語・単独で照合する廃止した語 |
 | NDF の工程（`ndf-workflow` ほか、語の項目が属する既存のコンテキスト） | 置き換えた後の語（バージョン・設定・サブコマンドなど） |
 
-用語集が上流、ndf-next の禁止語の規則が下流で、関係は公開された言語である。用語集の JSON の形（`terms[].deprecated`・`terms[].deprecated_standalone`）を共通の形式として、今の NDF の用語の検査（`plugins/ndf/scripts/glossary.py`）と ndf-next の禁止語の規則（`plugins/ndf-next/src/ndf/checks/words.py`）が別々に読む。
+用語集が上流、ndf-next の禁止語の規則が下流で、関係は公開された言語である。共通の形式は用語集の JSON の形（`terms[].deprecated`・`terms[].deprecated_standalone`）である。この形を、今の NDF の用語の検査（`plugins/ndf/scripts/glossary.py`）と ndf-next の禁止語の規則（`plugins/ndf-next/src/ndf/checks/words.py`）が別々に読む。
 
 用語集を読むほかのコンテキストとの関係は次のとおりである。
 
@@ -261,7 +261,7 @@ classDiagram
 
 ## データ構造
 
-**ndf-next の状態のデータベースの列 `table_id` を `machine_id` へ改名する**（`plugins/ndf-next/src/ndf/progress/store.py` の 81・89 行目の 2 つの表）。データベースはチェックアウトの保存先にあり、その先頭の `format.json` が形の番号（`ndf.core.durable.STORE_FORMAT`、今は 1）を持つ。番号を 2 に上げると、番号の古い保存先は既存の経路（`durable._retire_store`）で `<名前>.v1-<日付>` へ退避され、新しい形で作り直される。ndf-next は未公開で、移行のコードを持たない（S2）。
+**ndf-next の状態のデータベースの列 `table_id` を `machine_id` へ改名する。** 対象は `plugins/ndf-next/src/ndf/progress/store.py` の 81・89 行目の 2 つの表である。データベースはチェックアウトの保存先にあり、その先頭の `format.json` が形の番号（`ndf.core.durable.STORE_FORMAT`、今は 1）を持つ。番号を 2 に上げると、番号の古い保存先は既存の経路（`durable._retire_store`）で `<名前>.v1-<日付>` へ退避され、新しい形で作り直される。ndf-next は未公開で、移行のコードを持たない（S2）。
 
 PostgreSQL の接続先（URL）を使うときは、チェックアウトの保存先の退避が効かない。表の版（`ndf.progress.store.SCHEMA_VERSION`）も 1 から 2 に上げ、版 1 の表を見つけたら、表を作り直す手順を添えて止める（列を変える移行のコードは持たない）。
 
@@ -300,12 +300,14 @@ graph TD
   D -->|0 件| E[受け入れ条件 1〜10 を確かめる]
 ```
 
-1. 禁止語の規則が `deprecated_standalone` を読むようにする。用語集はすでに単独で照合する廃止した語を 2 語持つ（「段」はステップ・ステージの項目、「字で持」は文字列の項目。`docs/glossary/glossary.json` の 1818・1828・7260 行目）。規則が読み始めると、ndf-next の「段」の 75 行（34 ファイル）と「字で持」の 1 行が当たる（`git grep -P '(?<![\x{4E00}-\x{9FFF}々])段(?![\x{4E00}-\x{9FFF}々])' -- plugins/ndf-next | wc -l` → 75）。同じ Pull Request で、「段」の行を用語集がすでに決めた置き換え先（ステップかステージ）へ置き換える。単独で照合する廃止した語を例として挙げる行（「字で持」の 1 行である `skills/requirements-design/references/glossary-format.md` の 83 行目など）は、`words.examples` にファイル・語・理由を書いて外す。件数は実装の時点の禁止語の規則の出力で確かめる
+1. 禁止語の規則が `deprecated_standalone` を読むようにする。用語集はすでに単独で照合する廃止した語を 2 語持つ（「段」はステップ・ステージの項目、「字で持」は文字列の項目。`docs/glossary/glossary.json` の 1818・1828・7260 行目）。規則が読み始めると、ndf-next の「段」の 75 行（34 ファイル）と「字で持」の 1 行が当たる（`git grep -P '(?<![\x{4E00}-\x{9FFF}々])段(?![\x{4E00}-\x{9FFF}々])' -- plugins/ndf-next | wc -l` → 75）。同じ Pull Request で、「段」の行を用語集がすでに決めた置き換え先（ステップかステージ）へ置き換える。単独で照合する廃止した語を例として挙げる行は、`words.examples` にファイル・語・理由を書いて外す。この行には、「字で持」の 1 行である `skills/requirements-design/references/glossary-format.md` の 83 行目などが当たる。件数は実装の時点の禁止語の規則の出力で確かめる
 2. 語のまとまり（例: W1〜W5）ごとに 1 つの Pull Request で、次の順にコミットする
    1. 用語集へ置き換え先の項目と廃止した語を足し、`glossary.py render` する（E1）
    2. まとまりに含まれる語の識別子を決定 6 の基準で改名する（E4）。W11 のまとまりでは、チェックアウトの保存先の形の番号を 2 に上げる
    3. 生成元の語を置き換え、契約の文書を作り直す（E2・E3）
-3. まとまりの Pull Request ごとに `ndf check --base origin/develop` と `glossary.py check --diff origin/develop --rules all` が 0 件で通る（E5）
+3. まとまりの Pull Request ごとに、次の 2 つが 0 件で通る（E5）
+   - `ndf check --base origin/develop`
+   - `glossary.py check --diff origin/develop --rules all`
 
 要求のドメインイベントの順序（E4 は E1 の後）を保つ。識別子の改名は、その語の対応表を用語集へ書くコミットの後に置き、同じ Pull Request に入れる（決定 5）。登録と置き換えは同じ Pull Request に入るため、Pull Request の単位で CI は落ちない。
 
@@ -394,7 +396,7 @@ prh と textlint（LIB1・LIB2）は採らない。用語集と別の辞書を�
 | MVV の設定の中の最上位のキー | `contracts/schemas/declarations/mvv.schema.json` の 30・62 行目 | 改訂の件数などを持つ `.ndf/mvv.json` の中の欄（決定 4 の案で変えない） |
 | Claude Code の起動の引数 `--settings` | `src/ndf/adapters/claude.py` の 99 行目 | Claude Code の設定 |
 
-`settings` へ改名すると、1 つの識別子が 3 つの意味を指し、I1 と 1 語 1 意味に反する。`ndf_settings` は ndf-next と用語集に出現が無い（`git grep -w ndf_settings -- plugins/ndf-next docs/glossary | wc -l` → 0）。`config`（189 行）・`configuration`（50 行）はすでに別の意味で使われているため採らない。日本語の語は、用語集の既存の項目「設定」（`.ndf/<名前>.json`）と同じ意味なので「設定」のままにする。
+`settings` へ改名すると、1 つの識別子が 3 つの意味を指し、I1 と 1 語 1 意味に反する。`ndf_settings` は ndf-next と用語集に出現が無い。確かめたコマンドと結果は `git grep -w ndf_settings -- plugins/ndf-next docs/glossary | wc -l` → 0 である。`config`（189 行）・`configuration`（50 行）はすでに別の意味で使われているため採らない。日本語の語は、用語集の既存の項目「設定」（`.ndf/<名前>.json`）と同じ意味なので「設定」のままにする。
 
 根拠: Value 14 / Value 11（MVV 版 7）
 
