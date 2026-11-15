@@ -263,3 +263,31 @@ def test_merge_item_carries_ci_walls_and_delivery_fields():
         [{"kind": "written", "key": "delivery", "origin": "判断した"}],
         True,
     )
+
+
+def test_row_line_formats_each_kind():
+    """現状固定（I-015）: 出力の行の種類ごとの 1 行と、P 番号の当て方。"""
+    from ndf.domains.project import write
+
+    lines = [
+        write.row_line({"kind": "written", "key": "languages", "origin": "測った"}),
+        write.row_line({"kind": "kept", "key": "test"}),
+        write.row_line({"kind": "secret", "key": "ci"}),
+        write.row_line({"kind": "unknown", "key": "ci#a.yml", "reason": "壁時計が無い", "kept_previous": True}),
+        write.row_line({"kind": "unknown", "key": "issues"}),
+        write.row_line({"kind": "mismatch", "key": "checks", "declared": {"a": "値"}, "analyzed": [1]}),
+        write.row_line({"kind": "note", "key": "notes"}),
+        write.row_line({"kind": "written", "key": "worktree.json#base_branch", "origin": "測った"}),
+        write.row_line({"kind": "written", "key": write.BRANCH_FLOW, "origin": "判断した"}),
+    ]
+    assert lines == [
+        "  P1 languages: 測った",
+        "  P2 test: 手の値を保った",
+        "  P4 ci: 秘密の形の値を捨てて不明にした",
+        "  P4 ci#a.yml: 不明（壁時計が無い）（前の値を残した）",
+        "  P8 issues: 不明（None）",
+        '  P9 checks: 食い違い 宣言 {"a": "値"} / 解析 [1]',
+        "   notes: note",
+        "  P6 worktree.json#base_branch: 測った",
+        f"  P6 {write.BRANCH_FLOW}: 判断した",
+    ]
