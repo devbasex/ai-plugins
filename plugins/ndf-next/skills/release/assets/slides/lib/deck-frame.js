@@ -92,55 +92,75 @@ const DEFAULT_THEME = Object.freeze({
 const THEME_KEYS = ["font", "colors", "sizes", "copyright", "logo"];
 const HEX = /^[0-9A-Fa-f]{6}$/;
 
+// colors と sizes の項目の値の検証と正規化
+const GROUP_RULES = {
+  colors: {
+    valid: (v) => typeof v === "string" && HEX.test(v),
+    message: (k, v) => `theme.json の colors.${k} は 6 桁の 16 進（# なし）: ${v}`,
+    normalize: (v) => v.toUpperCase(),
+  },
+  sizes: {
+    valid: (v) => typeof v === "number" && v > 0,
+    message: (k, v) => `theme.json の sizes.${k} は正の数（pt）: ${v}`,
+    normalize: (v) => v,
+  },
+};
+
+function freshTheme() {
+  return { ...DEFAULT_THEME, colors: { ...DEFAULT_THEME.colors }, sizes: { ...DEFAULT_THEME.sizes } };
+}
+
+function validateFont(value) {
+  if (typeof value !== "string" || !value) throw new DeckError("theme.json の font は空でない文字列", EXIT_INPUT);
+  return value;
+}
+
+function validateCopyright(value) {
+  if (typeof value !== "string") throw new DeckError("theme.json の copyright は文字列", EXIT_INPUT);
+  return value;
+}
+
+function resolveLogo(value, baseDir) {
+  if (value === null) return null;
+  if (typeof value !== "string" || !value) throw new DeckError("theme.json の logo は PNG の相対パスか null", EXIT_INPUT);
+  const p = path.resolve(baseDir || process.cwd(), value);
+  if (!fs.existsSync(p)) throw new DeckError(`theme.json の logo のファイルが無い: ${p}`, EXIT_INPUT);
+  return p;
+}
+
+// グループ（colors・sizes）を項目ごとに既定値へ重ねる
+function mergeGroup(group, g, base) {
+  if (typeof g !== "object" || g == null || Array.isArray(g)) throw new DeckError(`theme.json の ${group} はオブジェクト`, EXIT_INPUT);
+  const bad = Object.keys(g).filter((k) => !(k in DEFAULT_THEME[group]));
+  if (bad.length) throw new DeckError(`theme.json の ${group} に知らない項目がある: ${bad.join(", ")}`, EXIT_INPUT);
+  const rule = GROUP_RULES[group];
+  for (const [k, v] of Object.entries(g)) {
+    if (!rule.valid(v)) throw new DeckError(rule.message(k, v), EXIT_INPUT);
+    base[k] = rule.normalize(v);
+  }
+  return base;
+}
+
+// 項目ごとの重ね方（THEME_KEYS の順に呼ぶ）
+const THEME_MERGERS = {
+  font: (v) => validateFont(v),
+  colors: (v, t) => mergeGroup("colors", v, t.colors),
+  sizes: (v, t) => mergeGroup("sizes", v, t.sizes),
+  copyright: (v) => validateCopyright(v),
+  logo: (v, t, baseDir) => resolveLogo(v, baseDir),
+};
+
 // theme.json の値を既定値へ重ねる。colors と sizes は項目ごと、ほかは値ごと置き換える。
 function mergeTheme(override, baseDir) {
-  const t = {
-    font: DEFAULT_THEME.font,
-    colors: { ...DEFAULT_THEME.colors },
-    sizes: { ...DEFAULT_THEME.sizes },
-    copyright: DEFAULT_THEME.copyright,
-    logo: DEFAULT_THEME.logo,
-  };
+  const t = freshTheme();
   if (override == null) return t;
   if (typeof override !== "object" || Array.isArray(override)) {
     throw new DeckError("theme.json はオブジェクトでなければならない", EXIT_INPUT);
   }
   const unknown = Object.keys(override).filter((k) => !THEME_KEYS.includes(k));
   if (unknown.length) throw new DeckError(`theme.json に知らない項目がある: ${unknown.join(", ")}`, EXIT_INPUT);
-  if ("font" in override) {
-    if (typeof override.font !== "string" || !override.font) throw new DeckError("theme.json の font は空でない文字列", EXIT_INPUT);
-    t.font = override.font;
-  }
-  for (const group of ["colors", "sizes"]) {
-    if (!(group in override)) continue;
-    const g = override[group];
-    if (typeof g !== "object" || g == null || Array.isArray(g)) throw new DeckError(`theme.json の ${group} はオブジェクト`, EXIT_INPUT);
-    const bad = Object.keys(g).filter((k) => !(k in DEFAULT_THEME[group]));
-    if (bad.length) throw new DeckError(`theme.json の ${group} に知らない項目がある: ${bad.join(", ")}`, EXIT_INPUT);
-    for (const [k, v] of Object.entries(g)) {
-      if (group === "colors" && !(typeof v === "string" && HEX.test(v))) {
-        throw new DeckError(`theme.json の colors.${k} は 6 桁の 16 進（# なし）: ${v}`, EXIT_INPUT);
-      }
-      if (group === "sizes" && !(typeof v === "number" && v > 0)) {
-        throw new DeckError(`theme.json の sizes.${k} は正の数（pt）: ${v}`, EXIT_INPUT);
-      }
-      t[group][k] = group === "colors" ? v.toUpperCase() : v;
-    }
-  }
-  if ("copyright" in override) {
-    if (typeof override.copyright !== "string") throw new DeckError("theme.json の copyright は文字列", EXIT_INPUT);
-    t.copyright = override.copyright;
-  }
-  if ("logo" in override) {
-    if (override.logo === null) {
-      t.logo = null;
-    } else if (typeof override.logo === "string" && override.logo) {
-      const p = path.resolve(baseDir || process.cwd(), override.logo);
-      if (!fs.existsSync(p)) throw new DeckError(`theme.json の logo のファイルが無い: ${p}`, EXIT_INPUT);
-      t.logo = p;
-    } else {
-      throw new DeckError("theme.json の logo は PNG の相対パスか null", EXIT_INPUT);
-    }
+  for (const key of THEME_KEYS) {
+    if (key in override) t[key] = THEME_MERGERS[key](override[key], t, baseDir);
   }
   return t;
 }
