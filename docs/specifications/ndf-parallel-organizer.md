@@ -171,12 +171,12 @@ lroot2 の変更もまとめて出た。そのため lroot2 が出していた�
 | `plugins/ndf/scripts/lib/gate1_requests.py` | 設計の承認の依頼の部品: 設計 PR の先頭の読み取り（`design_head`）・取り込みのコミットだけかの判定（`merge_only`）・前のループの待ちの読み出しと依頼の形（`prior_rows`・`prior_requests`）・前のループへの答えの当て方（`answer_prior`。`loop answer` を打ち、記録を直接書かない） |
 | `plugins/ndf/scripts/lib/parallel_hold.py` | 答え待ちの停止: 数え方と範囲の導出（`decide_hold`）・閾値の読み出し・止める指示のファイルと履歴と再開の印の読み書き・突き合わせ（`AnswerHold`）。DBOS を import しない |
 | `plugins/ndf/scripts/lib/parallel_hold_cli.py` | `parallel.py park` の本体 |
-| `plugins/ndf/scripts/lib/parallel_launch.py` | 起動の耐久ステップ `parallel.launch`（一時レーンの起動と止まったレーンの再起動を 1 回打ち、立ち上がりを確かめ、立ち上がらなければ 1 回だけ打ち直す。失敗は結果で返す）と、起動の目的ごとに 1 回だけ流して起動の記録（`launches`）へ残し、2 回とも立ち上がらなければ区分 `spawn` の問いを立てる割り振り（`LaunchRouting`）。`_Run` が継ぐ |
+| `plugins/ndf/scripts/lib/parallel_launch.py` | 起動の耐久ステップ `parallel.launch`（一時レーンの起動と止まったレーンの再起動を 1 回打ち、立ち上がりを確かめ、立ち上がらなければ 1 回だけ打ち直す。別の一時レーンが動いているための断りは打ち直さずに空き待ち `waiting` で返す。失敗は結果で返す）と、起動の目的ごとに 1 回だけ流して起動の記録（`launches`）へ残し、2 回とも立ち上がらなければ区分 `spawn` の問いを立て、空き待ちはループの 1 回ごとに読み直す割り振り（`LaunchRouting`。`launch_waiting`）。`_Run` が継ぐ |
 | `plugins/ndf/scripts/lib/parallel_status.py` | `parallel.py status` の本体: 計画の宣言・レーンの状態の一覧・ループの記録・計画の台帳を読み合わせ、レーンごとに 1 行を返す。読めない欄は `null` にする |
 | `plugins/ndf/scripts/lib/parallel_helper.py` | 一時レーンの組み立て: 起動の入力（`helper_spawn`。`relay.py` へ渡す引数の列と打つ場所）・承認資料の場所（`present_approval`）・流すもの（`helper_task`） |
 | `plugins/ndf/scripts/lib/delivery.py` | 宣言とリリースの経路からリリースの組み方と理由を返す（`release_way`） |
 | `plugins/ndf/scripts/lib/parallel_release.py` | まとめたリリース: 範囲の Pull Request をレーンへ対応づける（`present`・`map_lanes`）、先頭が進んだかを比べる 1 つの関数（`moved`）、加わった範囲が文書だけかの判定（`carry_check`）、範囲で答えられる依頼（`answerable`）、提示のプランと本番のプランの組み立て（`build_plans`・`present_gate_steps`・引き継ぐ提示 2 の `carried_gate_steps`）、リリースの依頼のプラン（`plan_release_request`） |
-| `plugins/ndf/scripts/lib/parallel_lane.py` | レーンの側: 自分が属する計画の判定（`lane_of`）・送り手の資格（`sender_of`）・本番チャネルにあるかの判定（`merged_on_production`）・依頼を送る（`send_release_request`・`request_gate1`・`request_ask`・`request_gate2`）・答えを読む（`read_answer`・`answers_of`）・プランの本数（`lane_plans`・`queue_max`） |
+| `plugins/ndf/scripts/lib/parallel_lane.py` | レーンの側: 自分が属する計画の判定（`lane_of`）・送り手の資格（`sender_of`）・本番チャネルにあるかの判定（`merged_on_production`）・依頼を送る（`send_release_request`・`request_gate1`・`request_ask`。リリース承認ゲートの依頼は `lib/parallel_gate2.py` の `request_gate2`・`request_confirmed`）・答えを読む（`read_answer`・`answers_of`）・プランの本数（`lane_plans`・`queue_max`） |
 | `plugins/ndf/scripts/lib/parallel_files.py` | DBOS を読まずにファイルだけで、レーンか一時レーンかを決める（`lane_name_in_plans`。問いの hook の 10 秒の上限の中で使う） |
 | `plugins/ndf/scripts/lib/durable.py` | 外のプロセスから記録を開く関数（`open_client`・`send_to`・`event_from`・`status_from`・`wait_from`）と、耐久ワークフローの中の `recv`・`set_event`・`patched`。DBOS を import するのはこのファイルだけである |
 | `plugins/ndf/scripts/relay_lib/hub.py`・`hub_client.py` | 役割のファイルの読み書き（`relay.py role`・`spawn --role helper --plan`）と数え方（I13）。`ls --json` の `metrics.hub`・`metrics.tmux` |
@@ -294,7 +294,7 @@ stateDiagram-v2
 | `gate1` で `loop` を持つ（前のループの待ち。`lane` を持たない） | 耐久ワークフローの開始（`parallel.prior-waits`）とレーンのループの 1 回の境（`send_prior`）。同じ行は同じ `id` で 1 つにまとまる | `<ループ>-w<課題>-l<行のループの 1 回>`。別のリポジトリのループは `-r<リポジトリのパスの SHA-1 の 8 桁>` を足し（同じ値を `scope` に持ち、同じ行の置き換えも `scope` が同じものに限る）、問い直すときは末尾に `-<新しい先頭の SHA の 12 桁>` を足す | 送った時点の設計 PR の先頭の SHA |
 | `unmatched`（当たらなかった答え。選択肢は `確かめた`） | レーン（`send_unmatched`）と耐久ワークフロー（`ask_unmatched`） | `<答えた依頼の id>-unmatched`。読めなかったループの知らせは `<計画名>-prior-<ループ>-unmatched` | — |
 | `ask`（承認ゲートの外の問い。1 スプリントのレーンの設計承認ゲートも含む） | 問いの hook（`parallel.py request-ask`） | `<送り手>-q<判定の記録の id>` | 作業の場所の `HEAD` |
-| `gate2`（リリース承認ゲート） | 一時レーン（`parallel.py request-gate2`） | `<計画名>-p<連番>-<提示>` | 承認資料の承認したコミット |
+| `gate2`（リリース承認ゲート） | 一時レーン（`parallel.py request-gate2`） | 提示は `<計画名>-p<連番>-<提示>`、確定の後に本番のプランが承認ゲートで止まったときは `<計画名>-p<連番>-<提示>-c<確定の起動の連番>`（`after: confirmed`。選択肢「打ち直す」「差し戻す」） | 承認資料の承認したコミット |
 | `stall`・`helper`・`spawn`・`observe`・`build` | 耐久ワークフロー自身 | `<レーン>-s<時刻>`・`<一時レーン>-h<起動の連番>`・`<計画名>-spawn-<レーン>-<回数>`・`<計画名>-observe-<観測の時刻>`・`<計画名>-build-<連番>`（`observe` と `build` はレーンに紐づかず、`lane` と `attach` を持たない） | — |
 | 組み直しの依頼（`request` の形に `again: true` と元の依頼の `origin` を足す） | 耐久ワークフロー自身（`build` の問いへの「直してから組み直す」） | `<元の依頼の id>-again<連番>` | — |
 

@@ -359,7 +359,7 @@ stateDiagram-v2
 | I6 | 空き待ちの間のループの 1 回が、眠らずに次の手順へ進む | ループの 1 回の中で前の一時レーンを待つ |
 | I7 | 引き継ぎ・送り済み・5 のどれでも、既存の行のバイト列が変わらない | 既存の行を書き換えて答えを足す |
 | リレーハブ | 動いている一時レーンがあると、一時レーンの起動が `helper-busy` と動いている名前で断られ、ほかの役割は `limit` のまま | 一時レーンの断りを `limit` のまま返す |
-| 受け入れ条件 12 | 既存の `tests/test_parallel_*.py`・`tests/test_ask_guard.py`・`tests/test_relay_hub.py` が通る | 提示の依頼・`settle`・区分 `helper` の問いの条件を変える |
+| 受け入れ条件 12 | 既存の `plugins/ndf/scripts/tests/test_parallel_*.py`・`plugins/ndf/scripts/tests/test_ask_guard.py`・`plugins/ndf/scripts/tests/test_relay_hub.py` が通る | 提示の依頼・`settle`・区分 `helper` の問いの条件を変える |
 | 受け入れ条件 13・14 | 決定の記録の決定 11（ndf-next）と決定 2 の対応表（#3572）の行で確かめる。テストは書かない | — |
 | 受け入れ条件 15 | 実装の PR の差分に `plugins/ndf-next/` が無いことを、PR の変更ファイルの一覧で確かめる | — |
 

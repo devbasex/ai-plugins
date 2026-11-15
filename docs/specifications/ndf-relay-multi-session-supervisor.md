@@ -217,7 +217,7 @@ stateDiagram-v2
 
 | 副命令 | 引数 | 終了コード | 出力 |
 | --- | --- | --- | --- |
-| `run`（2 本目） | `[claude の引数 ...]`。名前は `NDF_RELAY_NAME` | リレーハブが起動したら `attach-session` へ exec し、その終了コード。断られたら結果の `metrics.exit_code`（`bad-name`・`name-taken`・`limit`・`no-tmux` は 3、`tmux-failed` は 1）。tmux が無い・リレーハブが答えないときは前景の起動になり、1 本のラッパーと同じ | 断り: `ndf-relay: 起動しない（<summary>）`。tmux が無い: `ndf-relay: tmux が PATH に無いため統括しない。…`。答えない: `ndf-relay: リレーハブが <秒> 秒答えないため、…` |
+| `run`（2 本目） | `[claude の引数 ...]`。名前は `NDF_RELAY_NAME` | リレーハブが起動したら `attach-session` へ exec し、その終了コード。断られたら結果の `metrics.exit_code`（`bad-name`・`name-taken`・`limit`・`helper-busy`・`no-tmux` は 3、`tmux-failed` は 1）。tmux が無い・リレーハブが答えないときは前景の起動になり、1 本のラッパーと同じ | 断り: `ndf-relay: 起動しない（<summary>）`。tmux が無い: `ndf-relay: tmux が PATH に無いため統括しない。…`。答えない: `ndf-relay: リレーハブが <秒> 秒答えないため、…` |
 | `spawn` | `--name <名前> [--role helper --plan <計画名>] [--json] -- <最初の入力>` | 0: 起動した / 2: `--name` が無い・`--role` が `helper` でない・`--role` に `--plan` が無い（使い方を出す）/ 3: 名前の形が違う（リレーハブに頼まずに断る）・名前が重なる・上限（`--role helper` は上限を見ず、動いている `helper` があれば断る）・リレーハブの側で tmux が無い / 1: リレーハブが居ない・答えない（`no-hub`）・tmux のセッションを作れない | 結果（`tool: relay-spawn`）。成功の `summary` は `<名前> を起動した（relay.py attach <名前> で結び付ける）` |
 | `ls` | `[--json]` | 0 / 2: 状態ディレクトリを読めない | `--json` は 1 行の JSON（`tool: relay-ls`・`status: ok`・`summary`・`items`・`metrics`）。無ければ見出しつきの表（列: 名前・状態・承認待ち・区間・費用・時刻・アカウント・結び付き・リレーハブ。空は `-`、真偽は `yes` / `no`） |
 | `role` | `organizer\|helper --plan <計画名> [--plan-dir <計画の置き場>]` / `--clear [--plan-dir <計画の置き場>]` | 0: 作業ディレクトリ（`NDF_RELAY_DIR`）へ役割のファイル `role.json`（`role`・`plan`・`at`、`--plan-dir` があれば `plan_dir`）を書いた・消した。`--plan-dir` があるとき、`organizer` は同じ `plan_dir` を持つ他のラッパーのオーガナイザーの印を消し、`--clear` はラッパーの外でも全ラッパーを走査して同じ `plan_dir` の印を消す（`plan_dir` を持たない印は消さない。消した数は `items[0].cleared`） / 2: 役割か `--plan` が無い / 1: ラッパーの外（`NDF_RELAY_DIR` が無い）で、`--clear --plan-dir` でもない | 1 行の JSON（`tool: relay-role`） |
@@ -233,7 +233,7 @@ stateDiagram-v2
 | `status` | `ok` / `stopped` |
 | `summary` | 1 行の説明。断りでは理由（上限なら上限の数と動いている名前の並び。名前の無いものは `-`） |
 | `items` | 1 件。`name`（文字列か null）と `result`。人の起動で上限を超えて起動したときだけ `notice`（上限の数と動いている名前の並びを含む 1 行。端末の 2 本目が結び付く前に出す） |
-| `items[0].result` | `started`（起動・起動し直し）・`stopped`（名前つきの `stop` の成功）・`bad-name`・`name-taken`・`limit`・`not-found`・`no-tmux`・`tmux-failed`・`no-hub`・`hub_self`・`bad-request`（知らない種類の依頼。終了コード 2） |
+| `items[0].result` | `started`（起動・起動し直し）・`stopped`（名前つきの `stop` の成功）・`bad-name`・`name-taken`・`limit`・`helper-busy`（一時レーン（役割 `helper`）が既に動いているための断り。`items[0].busy` に動いている名前）・`not-found`・`no-tmux`・`tmux-failed`・`no-hub`・`hub_self`・`bad-request`（知らない種類の依頼。終了コード 2） |
 | `metrics.exit_code` | 頼む側が終える終了コード |
 
 `ls` の `items` の 1 件（`hub_client.py` の `_ls_item`）。並びは登録簿の名前と名前つきで動いている名前の和を名前順に、

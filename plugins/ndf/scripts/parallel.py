@@ -329,7 +329,7 @@ def cmd_request(a) -> None:
         _ = a.verify_plan and sent(send_verify, main, a.name, a.lane, Path(a.state), a.verify_plan, version)
         reply("ok", "自分の Pull Request はすでに本番チャネルにある。依頼を送らずに続きへ進む", result="released", version=version)
     rid = sent(pl.send_release_request, main, a.name, a.lane, a.prs, a.issues, Path(a.state), a.verify_plan)
-    again = _resend(rid)  # 中身の違う同じ id の依頼は 5 で終え、依頼の記録を書かない
+    again = _resend(rid)  # 中身の違う同じ id の依頼は 1 で終え、依頼の記録を書かない
     pl.write_request(Path(a.state), {"id": rid, "plan": a.name, "lane": a.lane, "prs": a.prs})
     nxt = f"python3 {SELF} await {a.name} --from {Path(a.state) / 'work' / 'request.txt'}"
     summary = (
