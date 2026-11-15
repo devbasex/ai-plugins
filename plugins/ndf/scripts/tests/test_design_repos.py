@@ -355,3 +355,82 @@ def test_check_repos_items_are_fixed(text, expected):
     """現状固定: 指摘の name（行）・rule・text と、行の順（同じ行は見つけた順）。"""
     got = dr.check_repos("d.md", text, S, set())
     assert [(it["name"], it["rule"], it["text"]) for it in got] == expected
+
+
+# --- 現状固定: design-survey.py の judge_docs の指摘の並びと metrics（I-014。judge_docs の分割の前に置く） ---
+
+
+def _survey_module():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("design_survey_judge_docs", SCRIPT)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+DECISION_SELF = "## 決定の記録\n\n### 決定 1: 何かのため、何かを決める\n\n理由。\n\n- 作り方: 自前で作る\n\n根拠: Value 7（MVV 版 5）\n"
+BASE_METRICS = {
+    "docs": 4,
+    "decisions": 1,
+    "with_method": 1,
+    "self_built": 1,
+    "skipped": 0,
+    "unnamed_redline": 1,
+    "detail_docs": 0,
+    "detail_section": 0,
+    "detail_failure": 0,
+    "detail_reuse": 0,
+    "detail_file": 0,
+}
+SURVEY_ITEMS = [("no_candidates", "issues/issue-16-design.md:38 決定 1"), ("unnamed_redline", "issues/issue-16-design.md:42")]
+DETAIL_ITEMS = [("detail_missing", "#16"), ("detail_missing", "#17"), ("detail_missing", "#18")]
+REPO_ITEMS = [
+    ("repo_scope_missing", "issues/issue-16-design.md:7"),
+    ("repo_loss_unrouted", "issues/issue-16-design.md:15"),
+    ("repo_scope_missing", "issues/issue-18-design.md:7"),
+]
+
+
+def _judge_docs_inputs(mod):
+    head16 = doc(rows=LOSS, own="") + "\n" + DECISION_SELF + "\n範囲は利用者が選ぶ。\n"
+    return [
+        mod.Doc("issues/issue-16-design.md", head16),
+        mod.Doc("issues/issue-16-design-decisions.md", "# 決定\n\n## 目的\n\n無し\n"),
+        mod.Doc("issues/issue-17-design.md", doc(behavior=False, own="", touched="plugins/mcp/x.json")),
+        mod.Doc("issues/issue-18-design.md", doc(behavior=False)),
+    ]
+
+
+@pytest.mark.parametrize(
+    "settings, require, expected_items, extra_metrics",
+    [
+        (
+            S,
+            True,
+            SURVEY_ITEMS + DETAIL_ITEMS + REPO_ITEMS,
+            {"detail_missing": 3, "repo_scope_missing": 2, "repo_loss_unrouted": 1},
+        ),
+        (S, False, SURVEY_ITEMS + REPO_ITEMS, {"detail_missing": 0, "repo_scope_missing": 2, "repo_loss_unrouted": 1}),
+        (None, True, SURVEY_ITEMS + DETAIL_ITEMS, {"detail_missing": 3}),
+    ],
+    ids=["settings-require-detail", "settings-only", "no-settings"],
+)
+def test_judge_docs_items_and_metrics_are_fixed(settings, require, expected_items, extra_metrics):
+    """現状固定: 調査 → レッドライン → 詳細設計 → 代表のリポジトリの順に指摘を並べ、metrics のキーの順も固定する。"""
+    mod = _survey_module()
+    items, metrics = mod.judge_docs(_judge_docs_inputs(mod), require, settings)
+    assert [(it["rule"], it["name"]) for it in items] == expected_items
+    want = {**BASE_METRICS, **extra_metrics}
+    assert metrics == want and list(metrics) == list(want)
+
+
+@pytest.mark.parametrize("settings", [S, None], ids=["settings", "no-settings"])
+def test_judge_docs_without_documents_is_fixed(settings):
+    """現状固定: 文書が 0 件でも metrics のキーはそろい、設定があるときだけ代表のリポジトリの 2 規則のキーが付く。"""
+    mod = _survey_module()
+    items, metrics = mod.judge_docs([], False, settings)
+    want = {**BASE_METRICS, "docs": 0, "decisions": 0, "with_method": 0, "self_built": 0, "unnamed_redline": 0, "detail_missing": 0}
+    if settings is not None:
+        want.update({"repo_scope_missing": 0, "repo_loss_unrouted": 0})
+    assert items == [] and metrics == want and list(metrics) == list(want)
