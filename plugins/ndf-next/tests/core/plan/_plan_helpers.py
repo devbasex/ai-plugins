@@ -8,6 +8,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import git_sandbox
+
 from ndf import identity
 from ndf.contracts import exit_codes
 from ndf.core import durable
@@ -17,14 +19,10 @@ SECRET = "plan-s3cr3t-value-42"
 OK = exit_codes.code_of("ok")
 
 
-def git(cwd: Path, *args: str) -> None:
-    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.com", *args], cwd=cwd, check=True, capture_output=True)
-
-
 def make_repo(path: Path) -> Path:
     path.mkdir()
-    git(path, "init", "-q")
-    git(path, "commit", "-q", "--allow-empty", "-m", "init")
+    git_sandbox.sh(path, "init", "-q", identity=True)
+    git_sandbox.sh(path, "commit", "-q", "--allow-empty", "-m", "init", identity=True)
     return path
 
 
