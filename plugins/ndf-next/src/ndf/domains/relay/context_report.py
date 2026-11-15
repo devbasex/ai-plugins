@@ -215,6 +215,13 @@ def _session_spans(sessions: Mapping[str, Any], scope: _Scope) -> dict[str, tupl
     return spans
 
 
+def _add_parts(totals: dict[str, dict[str, Any]], parts: Mapping[str, Mapping[str, Any]]) -> None:
+    """1 つのセッションの区分ごとの値を、区分ごとの合計へ足す（丸めない）。"""
+    for b in buckets():
+        for k, v in parts[b].items():
+            totals[b][k] += v
+
+
 def _sum_sessions(sessions: Mapping[str, Any], by_session: Mapping[Any, Any], scope: _Scope, restarted: set[Any]) -> dict[str, Any]:
     """セッションごとの区分を合算し、自動圧縮の数と印の無い区間の数を数える。"""
     totals = {b: _empty_totals() for b in buckets()}
@@ -224,9 +231,7 @@ def _sum_sessions(sessions: Mapping[str, Any], by_session: Mapping[Any, Any], sc
     for sid, s in sessions.items():
         got = session_parts(sid, s["transcript"], by_session[sid] if sid in by_session else [], scope)
         restores += [got["restore"]] if got["restore"] else []
-        for b in buckets():
-            for k, v in got["parts"][b].items():
-                totals[b][k] += v
+        _add_parts(totals, got["parts"])
         compacts = None if compacts is None or got["compacts"] is None else compacts + got["compacts"]
         unknown["restore"] += 0 if got["restore_known"] else 1
         unknown["handoff"] += 1 if sid in restarted and not got["handoff_known"] else 0
