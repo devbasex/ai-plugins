@@ -223,7 +223,7 @@ def _verify_ref_of(root: Path) -> str | None:
 def cmd_guard(args: argparse.Namespace) -> dict:
     verify_ref_name = _verify_ref_of(Path(args.root))
     if verify_ref_name is not None and verify_ref_name in args.branch:
-        detail = f"{verify_ref_name} は検証の ref で、main へ戻さない（マージしない）"
+        detail = f"{verify_ref_name}: 検証の ref は main へ戻さない（マージしない）"
         return result.stopped(TOOL, "refused", detail)
     try:
         production = _production_of(args)

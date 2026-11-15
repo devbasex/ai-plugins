@@ -60,7 +60,8 @@ def _origin(tmp_path: Path, test_only: bool = False, extra: tuple[str, ...] = ()
     changed.write_text("x = 1\n", encoding="utf-8")
     for rel in extra:
         (seed / rel).parent.mkdir(parents=True, exist_ok=True)
-        (seed / rel).write_text("{}\n", encoding="utf-8")
+        # 宣言のファイルは読み手（declaration.load）が読める版 1 の形で置く
+        (seed / rel).write_text('{"version": 1}\n', encoding="utf-8")
     git_sandbox.sh(seed, "add", "-A")
     git_sandbox.sh(seed, "commit", "-q", "-m", "change")
     git_sandbox.sh(seed, "switch", "-q", SPRINT)

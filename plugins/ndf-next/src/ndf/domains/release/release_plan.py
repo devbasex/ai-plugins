@@ -3,7 +3,7 @@
 | 判定 | 何を見るか |
 | --- | --- |
 | `forbidden` | `release: true` のプランが、承認の後にコードを変える worker のステップや、直しのステップ（`FIX_STEPS`）・次の版の用意と同期の副命令（`AFTER_COMMANDS`）を持たず、最初のステップが本番の PR のマージ（`merge_run`）であるか（不変条件 I1・I2・I10） |
-| `guard_before_merge` | `merge` の部品（`merge_part_ids`）を持つプランで、最初の部品の直前が `release-guard` で、原因 `production_pr` の行き先が `end` か（I6・I13） |
+| `guard_before_merge` | `merge` の部品（`merge_part_ids` の id で、本番のプランのマージ `merge_run` でないもの）を持つプランで、最初の部品の直前が `release-guard` で、原因 `production_pr` の行き先が `end` か（I6・I13） |
 | `is_production_pr` | PR を `merge` の部品でマージしてはいけない（base が本番ブランチ）か（I6） |
 
 プランは `ndf.core.route.expanded` の形（`use` を開き、差し込みは埋めていない）で受ける。
@@ -91,7 +91,9 @@ def guard_before_merge(plan: Mapping[str, Any]) -> list[str]:
     """`merge` の部品を持つプランで、最初の部品の直前が `release-guard` で、本番の PR を `end` へ渡すかを確かめ、破れを返す。"""
     steps = _steps(plan)
     parts = merge_part_ids()
-    at = next((i for i, s in enumerate(steps) if s.get("id") in parts), None)
+    # 本番のプランのマージ（`merge_run` で始まるステップ）は `merge` の部品でなく、デプロイの工程そのもの
+    head = merge_run()
+    at = next((i for i, s in enumerate(steps) if s.get("id") in parts and tuple(_run(s)[: len(head)]) != head), None)
     if at is None:
         return []
     part = steps[at].get("id")

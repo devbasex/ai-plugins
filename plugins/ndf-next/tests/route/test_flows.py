@@ -119,11 +119,12 @@ def test_merged_impl_plan_is_not_rerun():
 
 
 def test_behavior_is_rechecked_right_before_merge_gate():
-    """#3003: 振る舞いの確認の後に head が進んでも（CI の修正の push）、マージの承認ゲートの直前に確かめ直す。"""
+    """#3003: 振る舞いの確認の後に head が進んでも（CI の修正の push）、マージの承認ゲートの手前で確かめ直す。
+    #3572 の I13: 承認ゲートの直前は release-guard で、振る舞いの確かめ直しはその前に置く。"""
     script = {"ci": [stopped("test_failed")]}
     visited, _ = walk(plan_of("check"), script, answers=["approved"])
     gate_at = visited.index("merge-gate")
-    assert visited[gate_at - 2 : gate_at] == ["ci", "behavior-recheck"]
+    assert visited[gate_at - 3 : gate_at] == ["ci", "behavior-recheck", "release-guard"]
     assert visited.index("ci-fix") < gate_at
 
 
