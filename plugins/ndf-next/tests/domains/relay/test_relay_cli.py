@@ -171,3 +171,77 @@ def test_install_keeps_an_old_copy_and_replace_old_refuses_while_an_old_wrapper_
         os.close(fd)
     assert cli.main(["install", "--replace-old"]) == 0
     assert last_result(capsys.readouterr().out) == _expect(copy, entry, ("ours", "ours"))
+
+
+@pytest.mark.parametrize(
+    ("value", "allow_zero", "expected"),
+    [
+        (None, False, None),
+        ("5", False, 5.0),
+        ("0.5", False, 0.5),
+        (" 7 ", False, 7.0),
+        ("0", True, None),
+        ("0.0", True, None),
+        ("3", True, 3.0),
+    ],
+)
+def test_amount_reads_a_positive_number(value, allow_zero, expected):
+    """現状固定（I-031）: 月の額は正の有限の数。`allow_zero` なら 0 は宣言を外す None。"""
+    from ndf.domains.relay import account_metered
+
+    assert account_metered.amount(value, allow_zero=allow_zero) == expected
+
+
+@pytest.mark.parametrize(
+    ("value", "allow_zero"), [("0", False), ("-1", False), ("-1", True), ("abc", True), ("inf", False), ("nan", False), ("", False)]
+)
+def test_amount_refuses_without_echoing_the_value(value, allow_zero):
+    """現状固定（I-031）: 読めない・正でない・無限の額は `invalid` で、入力値をメッセージへ出さない。"""
+    from ndf.domains.relay import account_metered
+
+    with pytest.raises(account_metered.MeteredError) as exc:
+        account_metered.amount(value, allow_zero=allow_zero)
+    assert exc.value.kind == "invalid" and str(exc.value) == "月の額は正の数（ドル）で渡す（入力値は表示しない）"
+
+
+@pytest.mark.parametrize(("value", "expected"), [(None, None), ("1", 1.0), ("100", 100.0), ("85.5", 85.5)])
+def test_weekly_at_reads_a_percentage(value, expected):
+    """現状固定（I-031）: 閾値は 1 以上 100 以下の百分率。"""
+    from ndf.domains.relay import account_metered
+
+    assert account_metered.weekly_at(value) == expected
+
+
+@pytest.mark.parametrize("value", ["0", "0.99", "100.1", "x", "nan", ""])
+def test_weekly_at_refuses_outside_the_range(value):
+    """現状固定（I-031）: 範囲の外・読めない閾値は `invalid`。"""
+    from ndf.domains.relay import account_metered
+
+    with pytest.raises(account_metered.MeteredError) as exc:
+        account_metered.weekly_at(value)
+    assert exc.value.kind == "invalid" and str(exc.value) == "--weekly-at は 1 以上 100 以下の百分率"
+
+
+def test_cli_api_key_monthly_sets_clears_and_refuses(tmp_path, monkeypatch, capsys):
+    """現状固定（I-031）: `api-key-monthly` の額の読み方と終了コード。"""
+    from ndf.domains.relay import account_registry
+
+    monkeypatch.setenv("NDF_ACCOUNTS_DIR", str(tmp_path))
+    account_registry.make_store(tmp_path)
+    account_registry.write(
+        account_registry.book_path(tmp_path), {"version": 1, "use": "off", "keys": {"k1": {"key": "sk", "account": "a"}}}
+    )
+
+    def monthly() -> object:
+        return account_registry.read_book(tmp_path)["keys"]["k1"].get("monthly_usd", "なし")
+
+    assert cli.main(["account", "api-key-monthly", "k1", "12.5"]) == 0
+    assert monthly() == 12.5
+    for bad in ("abc", "-1", "inf"):
+        assert cli.main(["account", "api-key-monthly", "k1", bad]) == 2
+    assert monthly() == 12.5
+    assert cli.main(["account", "api-key-monthly", "k1", "0"]) == 0
+    assert monthly() == "なし"
+    assert cli.main(["account", "api-key-monthly", "k2", "5"]) == 1
+    out = capsys.readouterr().out
+    assert "abc" not in out
