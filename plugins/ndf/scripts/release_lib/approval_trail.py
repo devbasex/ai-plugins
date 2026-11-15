@@ -97,6 +97,11 @@ def parse_by(body: str) -> str | None:
     return None
 
 
+def _author(c: dict) -> str:
+    """コメントの作成者の login。無ければ空。"""
+    return str((c.get("user") or {}).get("login") or "")
+
+
 def trails_of(comments: list[dict]) -> list[Trail]:
     """issue のコメントの並び → 証跡（作成の時刻の昇順）。証跡でないコメントは含まない。"""
     out = []
@@ -105,9 +110,8 @@ def trails_of(comments: list[dict]) -> list[Trail]:
             continue
         created = str(c.get("created_at") or "")
         updated = str(c.get("updated_at") or created)
-        login = str((c.get("user") or {}).get("login") or "")
         body = c.get("body") or ""
-        out.append(Trail(sha, login, created, updated != created, c.get("id"), parse_by(body), str(c.get("html_url") or "")))
+        out.append(Trail(sha, _author(c), created, updated != created, c.get("id"), parse_by(body), str(c.get("html_url") or "")))
     return sorted(out, key=lambda t: t.created_at)
 
 
@@ -273,7 +277,7 @@ def post_status(repo: str, sha: str, j: Judgment) -> None:
 
 
 def write_trail(repo: str, pr: int, sha: str, by: str) -> tuple[bool, str]:
-    """先端が `sha` のときだけ証跡のコメントを置く。同じ人の同じ SHA の編集されていない証跡があれば置かない。
+    """先端が `sha` のときだけ証跡のコメントを置く。同じ人・同じ担い手の同じ SHA の編集されていない証跡があれば置かない。
     (置いたか, コメントの URL)。先端が違えば TrailError("head_moved")。"""
     sha = ac.parse_sha(sha)
     head, _base, _state = read_head(repo, pr)
@@ -282,7 +286,7 @@ def write_trail(repo: str, pr: int, sha: str, by: str) -> tuple[bool, str]:
     me = gh_rest.viewer_login()
     comments = read_comments(repo, pr)
     for t in trails_of(comments):
-        if t.login == me and t.sha == sha and not t.edited:
+        if t.login == me and t.sha == sha and t.by == by and not t.edited:
             url = next((c.get("html_url") or "" for c in comments if c.get("id") == t.comment_id), "")
             return False, url
     a = gh_rest.comment(repo, pr, render_trail(sha, by))
@@ -292,11 +296,19 @@ def write_trail(repo: str, pr: int, sha: str, by: str) -> tuple[bool, str]:
 
 
 def write_admin_record(repo: str, pr: int, sha: str, trail_url: str) -> tuple[bool, str]:
-    """迂回の記録を置く。同じ先端の記録が既にあれば置かない（#3506 の I7）。(置いたか, コメントの URL)。"""
+    """迂回の記録を置く。同じ先端の記録が既にあれば置かない（#3506 の I7）。(置いたか, コメントの URL)。
+
+    既にある記録に数えるのは、書き込みの権限（admin・write）を持つ人が書き、作成の後に編集されていないものだけ
+    （コメントできる誰かが印と SHA の入ったコメントを先に置いても、本物の記録を止められない）。"""
     sha = ac.parse_sha(sha)
+    found = []
     for c in read_comments(repo, pr):
         body = str(c.get("body") or "") if isinstance(c, dict) else ""
         if ADMIN_MARK in body and sha in [x.lower() for x in _line_shas(body, ADMIN_SHA_LINE)]:
+            found.append(c)
+    perms = read_permissions(repo, [_author(c) for c in found]) if found else {}
+    for c in found:
+        if perms.get(_author(c)) in REVIEWER_PERMISSIONS and str(c.get("updated_at") or "") == str(c.get("created_at") or ""):
             return False, str(c.get("html_url") or "")
     a = gh_rest.comment(repo, pr, render_admin_record(sha, trail_url))
     if not a.ok:

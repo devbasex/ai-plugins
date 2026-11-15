@@ -13,12 +13,13 @@
 
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import NamedTuple
 
 import re
 
 from ndf import identity
-from ndf.adapters.github import GitHub, GitHubError, Pull
+from ndf.adapters.github import Authored, GitHub, GitHubError, Pull
 from ndf.adapters.publish import Publisher
 from ndf.domains.release import approval_decide
 
@@ -26,9 +27,19 @@ from ndf.domains.release import approval_decide
 ADMIN_MARK = f"<!-- {identity.FIXED_WORDS['workflow_namespace']}:admin-merge -->"
 ADMIN_SHA_LINE = "マージした先端:"
 ADMIN_TRAIL_LINE = "照らした承認の証跡:"
-# 証跡の担い手の行と、迂回の前提に数えない担い手（MVV 判定。#3506 の I9）
+# 証跡の担い手の行。迂回の前提に数えるのは利用者の証跡だけ（#3506 の I9）
 BY_LINE = "担い手:"
-MVV_BY = "mvv"
+
+
+class By(StrEnum):
+    """証跡の担い手（旧いプラグインの `approve --by` と同じ値）。"""
+
+    USER = "user"  # 利用者
+    MVV = "mvv"  # MVV 判定
+
+
+USER_BY, MVV_BY = By.USER.value, By.MVV.value
+BY_CHOICES = tuple(b.value for b in By)
 _PROJECT_FILE = f"{identity.FIXED_WORDS['declaration_dir']}/project.json"
 _SHA = re.compile(r"\b([0-9a-f]{40})\b")
 
@@ -58,11 +69,19 @@ def _by_of(body: str) -> str | None:
     return None
 
 
+def _counts(hub: GitHub, c: Authored, human_only: bool) -> bool:
+    """証跡の判定に数えるコメントか。信用する書き手が書き、作成の後に編集されていない（書き込みの権限を持つ人は他人の
+    コメントを編集できる）。`human_only` なら担い手が利用者（`USER_BY`）と明示された証跡だけ（#3506 の I9）。"""
+    if c.edited or (human_only and _by_of(c.body) != USER_BY):
+        return False
+    return hub.trusts(c)
+
+
 def read(hub: GitHub, number: int, human_only: bool = False) -> Read:
-    """PR と、信用する書き手の証跡からの判定。`human_only` なら担い手が MVV 判定の証跡を数えない（迂回の前提。#3506 の I9）。"""
+    """PR と、信用する書き手の証跡からの判定。`human_only` なら利用者の証跡だけを数える（迂回の前提。#3506 の I9）。"""
     pull = hub.pull(number)
     found = hub.comments(number)
-    comments = [(c.author, c.body, hub.trusts(c) and not (human_only and _by_of(c.body) == MVV_BY)) for c in found]
+    comments = [(c.author, c.body, _counts(hub, c, human_only)) for c in found]
     return Read(pull, approval_decide.judge(approval_decide.trails(comments), pull.head_sha))
 
 
@@ -129,12 +148,15 @@ def render_admin_record(sha: str, trail_url: str) -> str:
 def write_admin_record(hub: GitHub, number: int, sha: str) -> tuple[bool, str]:
     """迂回の記録を置く。同じ先端の記録が既にあれば置かない（#3506 の I7）。(置いたか, コメントの URL)。
 
+    既にある記録に数えるのは、信用する書き手（`GitHub.trusts`）が書き、編集されていないものだけ（コメントできる誰かが
+    印と SHA の入ったコメントを先に置いても、本物の記録を止められない）。
+
     照らした証跡は、利用者の証跡（`read` の `human_only`）の判定に使ったコメントの URL。読めない・書けなければ `TrailError`。
     """
     try:
         found = hub.comments(number)
         for c in found:
-            if ADMIN_MARK in c.body and f"`{sha}`" in c.body:
+            if ADMIN_MARK in c.body and f"`{sha}`" in c.body and not c.edited and hub.trusts(c):
                 return False, c.url
         judged = user_judgment_at(hub, number, sha)
         used = judged.trail.order if judged is not None and judged.trail is not None else None

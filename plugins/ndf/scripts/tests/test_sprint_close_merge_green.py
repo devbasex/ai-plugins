@@ -117,6 +117,11 @@ elif a[:3] == ["api", "-X", "POST"] and a[4].endswith("/comments"):  # 承認の
     out = 'HTTP/2.0 201 Created\n\n{{"html_url": "https://github.com/o/r/pull/9#c1"}}'
 elif a[:1] == ["api"] and "rules/branches/" in a[-1]:
     out = json.dumps(st.get("rules", []))
+elif a[:1] == ["api"] and "/branches/" in a[-1] and "branch_protection" in st:  # 従来の保護（迂回の必須のチェック）
+    out = json.dumps({{"protection": st["branch_protection"]}})
+elif a[:1] == ["api"] and __import__("re").search(r"/branches/[^/]+$", a[-1]):
+    code = 1
+    sys.stderr.write("gh: Not Found (HTTP 404)\n")
 elif a[:1] == ["api"] and a[-1].endswith("/status"):  # 先端の commit status（ndf/release-approval の待ち）
     out = json.dumps({{"statuses": st.get("statuses", [])}})
 elif a[:1] == ["api"] and "/protection/" in a[-1]:
@@ -1417,6 +1422,18 @@ def test_promote_admin_case_does_not_merge_when_the_checks_fail(repo, gh, tmp_pa
     assert merges(gh) == []
 
 
+def test_promote_admin_case_waits_for_every_required_check_of_the_base(repo, gh, tmp_path):
+    """#3506: 迂回は必須のチェックも飛ばすため、宛先の規則が要求するチェックが先端に現れなければ、ほかが通っても
+    迂回でマージせずに待ち、上限で止まる。"""
+    rules = REVIEW_RULES + [{"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": "must"}]}}]
+    passed = dict(to("main", X), headRefName="develop", statusCheckRollup=[run_("other")])
+    code, out, err = _promote_admin(
+        repo, gh, tmp_path, "--gate-approved", "user", "--timeout", "0", rules=rules, pr_seq={"9": [passed] * 3}
+    )
+    assert code == 1 and out["status"] == "stopped", (out, err)
+    assert "must（現れない）" in out["summary"] and merges(gh) == []
+
+
 def test_promote_admin_case_resume_writes_the_missing_record(repo, gh, tmp_path):
     """#3506 の I7: マージ済みの本番の PR を打ち直すと、利用者の証跡が先端と一致し記録が無ければ記録だけを書く。"""
     merged = dict(to("main", X), headRefName="develop", state="MERGED")
@@ -1432,7 +1449,14 @@ def test_promote_admin_case_keeps_an_existing_record(repo, gh, tmp_path):
     from release_lib import approval_trail
 
     merged = dict(to("main", X), headRefName="develop", state="MERGED")
-    old = {"id": 6, "body": approval_trail.render_admin_record(X, "u"), "html_url": "https://github.com/o/r/pull/9#c6"}
+    old = {
+        "id": 6,
+        "body": approval_trail.render_admin_record(X, "u"),
+        "user": {"login": "me"},
+        "created_at": "t",
+        "updated_at": "t",
+        "html_url": "https://github.com/o/r/pull/9#c6",
+    }
     comments = [_user_trail(), old]
     code, out, err = _promote_admin(repo, gh, tmp_path, pr_seq={"9": [merged] * 3}, issue_comments=comments, perms={"me": "admin"})
     assert code == 0, (out, err)

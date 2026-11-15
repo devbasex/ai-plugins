@@ -21,6 +21,7 @@ import project_decl
 import release_case
 import test_strategy
 from merged_lib import promote_trail
+from merged_lib.required_checks import admin_required_checks
 from merged_lib.checks import TOOL, GreenWatch, pr_state
 from step_result import EXIT_UNREADABLE, StepError, approval_present, emit, git_root, result
 
@@ -328,6 +329,8 @@ def merge_when_green(a, cleanup, opts: MergeOptions = MergeOptions()):
         # CI を待つ前・draft を外す前に、最初の読みの宛先で判定する（gh の呼び出しを足さない）
         verdict = delivery.judge_target(decl, info.get("baseRefName") or "")
         judged["verdict"] = verdict
+        if not getattr(a, "no_admin", False) and verdict.value != delivery.NOT_PRODUCTION:
+            watch.required_checks = admin_required_checks(root, n, info.get("baseRefName") or "")
         if verdict.stops and not a.gate_approved:
             sha = _gate_head(info) if opts.gate_head else None
             gate_stop(n, verdict, info, opts, sha, getattr(a, "out", None) if opts.gate_head else None)

@@ -184,11 +184,15 @@ class Authored(NamedTuple):
     body: str
     # コメントの URL（REST の `html_url`。迂回の記録が照らした証跡を指す。#3506）。無ければ空
     url: str = ""
+    # 作成の後に編集されたか（REST の `updated_at` が `created_at` と違う）。編集された証跡は承認に数えない（#3506）
+    edited: bool = False
 
     @classmethod
     def from_rest(cls, raw: dict) -> Authored:
         url = text_of(raw["html_url"]) if isinstance(raw.get("html_url"), str) else ""
-        return cls(_login(raw["user"]), text_of(raw["author_association"]).upper(), text_of(raw["body"]), url)
+        created, updated = raw.get("created_at"), raw.get("updated_at")
+        edited = isinstance(created, str) and isinstance(updated, str) and updated != created
+        return cls(_login(raw["user"]), text_of(raw["author_association"]).upper(), text_of(raw["body"]), url, edited)
 
 
 class Pull(NamedTuple):

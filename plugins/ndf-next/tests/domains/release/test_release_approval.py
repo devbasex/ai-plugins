@@ -19,7 +19,7 @@ from ._fakes import HEAD, OTHER, FakeHub, not_found, pull
 
 
 def _trail(answer: str, sha: str, author: str = "octocat") -> Authored:
-    return Authored(author, "OWNER", approval_decide.render_trail(answer, sha, author))
+    return Authored(author, "OWNER", approval_decide.render_trail(answer, sha, trail.USER_BY))
 
 
 def test_judge_uses_latest_trusted_answer_on_head() -> None:
@@ -276,6 +276,39 @@ def test_admin_declaration_does_not_count_the_mvv_trail() -> None:
     assert not done.merged and done.kind == "refused" and hub.admin_merged == [] and hub.merged == []
 
 
+@pytest.mark.parametrize(
+    "comment",
+    [
+        Authored("octocat", "OWNER", approval_decide.render_trail("approved", HEAD, "x")),  # 担い手が user でない
+        Authored("octocat", "OWNER", approval_decide.render_trail("approved", HEAD, trail.USER_BY).replace("担い手: user\n", "")),
+        Authored("octocat", "OWNER", approval_decide.render_trail("approved", HEAD, trail.USER_BY), edited=True),  # 編集された
+    ],
+)
+def test_admin_declaration_counts_only_unedited_user_trails(comment: Authored) -> None:
+    """I9: 担い手が user と明示されていない・編集された証跡では、迂回の前提に数えず refused で止まる。"""
+    hub = AdminHub(pulls={7: pull()}, comments_of={7: [comment]})
+    done = _admin_lander(hub).land(7)
+    assert not done.merged and done.kind == "refused" and hub.admin_merged == [] and hub.merged == []
+
+
+def test_admin_record_ignores_records_by_untrusted_or_edited_comments() -> None:
+    """I7: 信用しない書き手か編集された、印と先端の SHA を持つコメントがあっても、本物の記録を書く。"""
+    fake = trail.render_admin_record(HEAD, "")
+    hub = AdminHub(
+        pulls={7: pull()},
+        comments_of={7: [_trail("approved", HEAD), Authored("mallory", "NONE", fake), Authored("octocat", "OWNER", fake, edited=True)]},
+    )
+    wrote, url = trail.write_admin_record(hub, 7, HEAD)
+    assert wrote and url == "https://example.invalid/7" and len(_records(hub)) == 3
+    assert trail.write_admin_record(hub, 7, HEAD)[0] is False
+
+
+def test_authored_from_rest_marks_edited_comments() -> None:
+    raw = {"user": {"login": "u"}, "author_association": "owner", "body": "b", "created_at": "t1", "updated_at": "t1"}
+    assert not Authored.from_rest(raw).edited
+    assert Authored.from_rest({**raw, "updated_at": "t2"}).edited
+
+
 @pytest.mark.parametrize("admin, approvals", [(False, 1), (True, 0)])
 def test_without_the_bypass_the_merge_stays_as_it_was(admin: bool, approvals: int) -> None:
     """受け入れ条件 8（迂回しない）・I2b: 宣言が無い・承認数 0 なら今のマージで、記録を置かず admin は偽。"""
@@ -336,3 +369,24 @@ def test_production_admin_reads_only_json_true(tmp_path: Path, body: Any, admin:
         path.parent.mkdir(parents=True)
         path.write_text(body if isinstance(body, str) else json.dumps(body), encoding="utf-8")
     assert declaration.production_admin(tmp_path) is admin
+
+
+def test_production_admin_reads_the_main_directory_before_the_worktree(tmp_path: Path) -> None:
+    """I1: PR の作業場所の宣言だけに迂回を足しても選べない。メインディレクトリの宣言が先に効く。"""
+    import subprocess
+
+    main, wt = tmp_path / "main", tmp_path / "wt"
+
+    def git(*args: str, cwd: Path = main) -> None:
+        subprocess.run(["git", "-c", "user.email=t@e", "-c", "user.name=t", *args], cwd=cwd, check=True, capture_output=True)
+
+    main.mkdir()
+    git("init", "-q")
+    git("commit", "-q", "--allow-empty", "-m", "init")
+    git("worktree", "add", "-q", "--detach", str(wt))
+    for root, admin in ((main, False), (wt, True)):
+        (root / declaration.PROJECT_FILE).parent.mkdir(parents=True)
+        (root / declaration.PROJECT_FILE).write_text(json.dumps({"production_merge": {"admin": admin}}), encoding="utf-8")
+    assert declaration.production_admin(wt) is False
+    (main / declaration.PROJECT_FILE).unlink()
+    assert declaration.production_admin(wt) is True

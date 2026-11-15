@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ndf import identity
+from ndf.adapters import git as git_mod
 from ndf.contracts import facts
 from ndf.domains.release import changes_decide
 
@@ -144,13 +145,27 @@ def run_step(root: Path, step: Step, version: str) -> None:
         raise StepFailed(f"手順 {step.name} が終了コード {done.returncode} で失敗: {done.stderr.strip()[-500:]}")
 
 
+def _admin_declaration(root: Path) -> Path:
+    """迂回の宣言を読むファイル。メインディレクトリ → 無ければ呼ばれた木（契約の `production_merge` の置き場は `main`）。
+
+    PR の作業場所の宣言だけを変えても迂回を選べないよう、メインディレクトリの宣言を先に読む（旧いプラグインの
+    `project_decl.production_admin` と同じ順。#3506 の I1）。git の外ならメインディレクトリを持たないので呼ばれた木。
+    """
+    try:
+        main = git_mod.Git(root).common_dir().parent
+    except git_mod.GitError:  # git の外はメインディレクトリが無いので呼ばれた木の宣言を読む
+        return root / PROJECT_FILE
+    return main / PROJECT_FILE if (main / PROJECT_FILE).is_file() else root / PROJECT_FILE
+
+
 def production_admin(root: Path) -> bool:
     """迂回の宣言（`.ndf/project.json` の `production_merge.admin`）が JSON の true か（#3506 の I1）。
 
-    ファイルが無い・読めない・壊れている・値の型が違う・`unknown` は偽（迂回しない）。
+    宣言はメインディレクトリから読む（`_admin_declaration`）。ファイルが無い・読めない・壊れている・値の型が違う・
+    `unknown` は偽（迂回しない）。
     """
     try:
-        raw = json.loads((root / PROJECT_FILE).read_text(encoding="utf-8"))
+        raw = json.loads(_admin_declaration(root).read_text(encoding="utf-8"))
     except (OSError, ValueError):  # noqa: NDF401 ファイル: 読めない宣言は宣言なしとして迂回しない（#3506 の I1）
         return False
     got = raw.get("production_merge") if isinstance(raw, dict) else None
