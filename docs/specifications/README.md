@@ -178,5 +178,6 @@
 | [ndf-next-closed-children-subcommands.md](ndf-next-closed-children-subcommands.md) | ndf-next の閉じた子の 10 本の機能の副命令（$SCRIPTS を決めず ndf を名前で呼ぶ手順 0・既にある副命令への置き換え・ndf project/statusline/materials と ndf relay の notice・stop --all・account・context・旧い実装と並ぶ間の排他・作らない機能と開いている子へ回した機能の対応表の行。#3569） |
 | [ndf-parallel-helper-confirmed-gate-and-launch-wait.md](ndf-parallel-helper-confirmed-gate-and-launch-wait.md) | 並列の計画の一時レーンが、確定の後に本番のプランが承認ゲートで終わったときに「打ち直す」「差し戻す」の依頼を送ること、台帳に書かなかった依頼を送ったと返さないこと（送り済み・終了コード 1）、別の一時レーンが動いているための起動の断り（helper-busy）を空き待ちにして前の一時レーンが止まってから打ち直すことの常に成り立つ条件・契約・決定の理由・テスト観点。手順は development-workflow の references/parallel.md が正 |
 | [ndf-next-ci-failed-tests-junit.md](ndf-next-ci-failed-tests-junit.md) | ndf-next が CI で落ちたテストを JUnit の成果物を先に、suite の runner のログのパーサーを後に読むこと、手元の確かめが止まるときの文、収集の確かめの成功の終了コード（collect_exit_codes） |
+| [ndf-design-representative-repos.md](ndf-design-representative-repos.md) | 設計の汎用性の守り。代表のリポジトリの設定（.ndf/design.json）・設計の検査の 2 規則（repo_scope_missing・repo_loss_unrouted）・cross-review の汎用性の観点・要求の方針の分け方・ai-plugins の MVV の P2。手順は design の design-template.md が正 |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。
