@@ -8,6 +8,7 @@ conductor が自分で打つ NDF のスクリプトはこの一覧に限る。**
 例: マージ済みの PR #1211 の不具合を即時修正すると決めたときは、`gh` を手で打たずに次の 3 行で流す。
 差し込みは雛形（`contracts/templates/fix.json` の `params`）が受ける名前だけで、課題の番号は PR の題と本文へ書く。
 作業場所（`worktree`）を省けばリポジトリの根の `.worktrees/<branch>` を使い、並びの差し込み（`required`・`tests`）は `--add` で 1 つずつ足す。
+リポジトリの宣言にテストを CI に寄せる値（`test.ci.only`）があれば、プランは手元のテストのステップを持たず、`test_command` は要らない。
 
 ```bash
 ndf route render immediate_fix --set branch=fix/1211 --set title="Fix: ...（#1211）" --set body_file=<本文>.md \

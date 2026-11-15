@@ -44,6 +44,18 @@ def test_run_is_one_entrypoint_for_immediate_fix(tmp_path, monkeypatch):
     assert ids == ["test", "push", "pr", "conflict-check", "ci", "merge"]
 
 
+def test_render_drops_local_tests_when_repo_declares_ci_only(tmp_path):
+    """CI テストの宣言（`test.ci.only`）のあるリポジトリでは、即時修正のプランも手元のテストを持たず、test_command を求めない。"""
+    (tmp_path / ".ndf").mkdir()
+    (tmp_path / ".ndf" / "project.json").write_text(json.dumps({"test": {"ci": {"only": True}}}), encoding="utf-8")
+    out = tmp_path / "fix.json"
+    args = _fix_args(out, tmp_path)
+    at = args.index("test_command=pytest -q")
+    del args[at - 1 : at + 1]
+    assert route.main(["render", *args]) == 0
+    assert "test" not in [s["id"] for s in json.loads(out.read_text())["steps"]]
+
+
 def test_render_refuses_missing_value_as_invalid(tmp_path, capsys, last_result):
     code = route.main(["render", "immediate_fix", "--out", str(tmp_path / "p.json"), "--set", f"repo={tmp_path}"])
     found = last_result(capsys.readouterr().out)
