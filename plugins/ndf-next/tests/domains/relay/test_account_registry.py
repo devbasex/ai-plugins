@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import stat
+import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -183,7 +186,10 @@ def test_list_rows_states_saved_metered_and_key_rows(tmp_path):
         "keys": {"k2": {"key": "sk-2", "account": "x"}, "k1": {"key": "sk-1", "monthly_usd": 0}, "k3": "not a dict"},
     }
     reg.write(reg.book_path(tmp_path), book)
-    usage = [account_decide.Usage(name="c-limited", percent=100.0, limited=True), account_decide.Usage(name="a-relogin", percent=5.0, limited=False)]
+    usage = [
+        account_decide.Usage(name="c-limited", percent=100.0, limited=True),
+        account_decide.Usage(name="a-relogin", percent=5.0, limited=False),
+    ]
     rows, warnings = reg.list_rows(tmp_path, {}, None, usage)
     assert warnings == []
     assert rows == [
@@ -305,3 +311,50 @@ def test_add_reads_email_and_org_from_status(tmp_path, status_claude):
     other_org = _add_with_status(store, "work4", '{"loggedIn": true, "email": "c@example.com", "orgId": "o3", "orgName": ""}')
     assert (other_org.email, other_org.org_name) == ("c@example.com", None)
     assert reg.names(store) == ["work1", "work3", "work4"]
+
+
+def _pending(store: Path, name: str, row) -> Path:
+    d = account_login.pending_dir(store, name)
+    (d / account_login.PENDING_CONFIG).mkdir(parents=True)
+    (d / account_login.PENDING_FILE).write_text(row if isinstance(row, str) else json.dumps(row))
+    return d
+
+
+def _session_proc(script: str):
+    proc = subprocess.Popen(["sh", "-c", script], start_new_session=True)
+    for _ in range(50):
+        if account_login._start_time(proc.pid) is not None:
+            break
+        time.sleep(0.02)
+    return proc
+
+
+def test_discard_pending_removes_state_without_a_live_login(tmp_path):
+    """現状固定（I-028）: 途中の状態が無い・読めない・プロセスが別物なら、止めずに置き場だけを消す。"""
+    account_login.discard_pending(tmp_path, "none")
+    broken = _pending(tmp_path, "broken", "{broken")
+    account_login.discard_pending(tmp_path, "broken")
+    assert not broken.exists()
+    proc = _session_proc("sleep 30")
+    try:
+        stale = _pending(tmp_path, "stale", {"pid": proc.pid, "pid_start": 1.0})
+        account_login.discard_pending(tmp_path, "stale")
+        assert not stale.exists() and proc.poll() is None
+    finally:
+        proc.kill()
+        proc.wait()
+
+
+@pytest.mark.parametrize("script", ["sleep 30", "trap '' TERM; sleep 30"])
+def test_discard_pending_stops_the_waiting_login_group(tmp_path, script):
+    """現状固定（I-028）: 生きている待機中のログインはセッションのグループへ SIGTERM、効かなければ SIGKILL で止める。"""
+    proc = _session_proc(script)
+    try:
+        d = _pending(tmp_path, "work1", {"pid": proc.pid, "pid_start": account_login._start_time(proc.pid)})
+        account_login.discard_pending(tmp_path, "work1")
+        assert not d.exists()
+        assert proc.wait(timeout=5) in (-signal.SIGTERM, -signal.SIGKILL)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
