@@ -366,6 +366,7 @@ def cmd_await(a) -> None:
 def cmd_request_ask(a) -> None:
     """問いを設計承認の依頼・同じ問い・`ask` の依頼の最初に当たったものへ送る（`lib/parallel_ask.py`。#3603）。"""
     import parallel_ask as pask
+    import parallel_question as pq
 
     main = main_of()
     try:
@@ -384,17 +385,17 @@ def cmd_request_ask(a) -> None:
         out = pask.route_ask(main, a.name, a.lane, {**got, "cwd": got.get("cwd") or os.getcwd()}, rows)
     except OSError as exc:  # LockTimeout も OSError（TimeoutError）
         reply("stopped", f"計画の台帳を読めない・書けない: {exc}", code=2)
-    if out.kind == "late":
+    if out.kind == pask.KIND_LATE:
         reply("stopped", "hook の上限の秒が尽きた（台帳へ書かない。問いは通す）", code=2)
-    if out.kind == "gate1":
+    if out.kind == pq.KIND_GATE1:
         verb = "は送ってある" if out.metrics.get("already") else f"をオーガナイザーへ送った{QUEUED if q else ''}"
-        reply("ok", f"設計承認の依頼 {out.id} {verb}", kind="gate1", id=out.id, **out.metrics, **q)
-    if out.kind == "reused":
+        reply("ok", f"設計承認の依頼 {out.id} {verb}", kind=pq.KIND_GATE1, id=out.id, **out.metrics, **q)
+    if out.kind == pq.KIND_REUSED:
         how = "前の答えを使う" if "answer" in out.metrics else "答え待ちの依頼を引き継ぐ"
-        reply("ok", f"同じ問いの依頼 {out.id} がある（{how}）", kind="reused", id=out.id, **out.metrics, **q)
+        reply("ok", f"同じ問いの依頼 {out.id} がある（{how}）", kind=pq.KIND_REUSED, id=out.id, **out.metrics, **q)
     again = _request_resent_fields(out.sent)
     msg = f"問いの依頼 {out.id} を{_sent_verb(again, 'オーガナイザーへ送った')}{QUEUED if q else ''}"
-    reply("ok", msg, kind="ask", id=out.id, **out.metrics, **again, **q)
+    reply("ok", msg, kind=pq.KIND_ASK, id=out.id, **out.metrics, **again, **q)
 
 
 def cmd_design_answer(a) -> None:

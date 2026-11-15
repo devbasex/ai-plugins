@@ -11,6 +11,8 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
+KIND_GATE1, KIND_REUSED, KIND_ASK = "gate1", "reused", "ask"  # 送り分けの結果の種類（台帳の行の kind と同じ。`parallel_ask.route_ask`）
+
 
 def cause_of(msg: dict) -> str:
     """同じ原因の問いの鍵（異常系 5）: 区分と選択肢と、空白をまとめてレーン名・パス・番号を伏せた問いの文面。
@@ -123,14 +125,14 @@ def outcome_of(rows: list[dict], ledger_id: str) -> dict | None:
         return None
     hit = None
     for r in rows:
-        if r.get("kind") in ("gate1", "ask", "reused") and (r.get("msg") or {}).get("ledger_id") == ledger_id:
+        if r.get("kind") in (KIND_GATE1, KIND_ASK, KIND_REUSED) and (r.get("msg") or {}).get("ledger_id") == ledger_id:
             hit = r
     if hit is None:
         return None
     msg = hit.get("msg") or {}
     out = {"kind": hit["kind"], "id": str(msg.get("id") or hit.get("id") or ""), "target": msg.get("target")}
-    if hit["kind"] == "gate1":
+    if hit["kind"] == KIND_GATE1:
         out["sprint_state"] = msg.get("sprint_state")
-    if hit["kind"] == "reused" and msg.get("answered") and (a := answers_by_id(rows).get(out["id"])) is not None:
+    if hit["kind"] == KIND_REUSED and msg.get("answered") and (a := answers_by_id(rows).get(out["id"])) is not None:
         out["answer"] = a
     return out

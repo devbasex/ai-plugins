@@ -159,9 +159,11 @@ def reused_text(rid: str, answer: dict) -> str:
 
 def held_text(out: dict, plan: str) -> str:
     """`request-ask` の metrics（か台帳から戻した結果）の種類ごとの拒否の理由。"""
-    if out.get("kind") == "gate1":
+    import parallel_question as pq
+
+    if out.get("kind") == pq.KIND_GATE1:
         return design_hold_text(str(out["id"]), plan, str(out.get("sprint_state") or ""))
-    if out.get("kind") == "reused" and out.get("answer"):
+    if out.get("kind") == pq.KIND_REUSED and out.get("answer"):
         return reused_text(str(out["id"]), out["answer"])
     return hold_text(str(out["id"]), plan)
 
