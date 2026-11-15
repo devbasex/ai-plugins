@@ -139,7 +139,7 @@ def _stored_form(msg: Optional[dict]) -> Optional[dict]:
 def resent(main: Path, name: str, key: str, msg: Optional[dict]) -> Sent:
     """`append_ledger_row` が同じキーで False を返した後に、同じキーの行と送ろうとした中身が同じか・答え済みかを判定する。
     最初の `opened` の行より前の行は数えない（`append_ledger_row` と同じ）。読めなければ `OSError`。"""
-    rows = rows_since_opened(read_ledger_rows(main, name).rows)
+    rows = current_rows(main, name)
     row = next((r for r in rows if r.get("key") == key), None)
     if row is None:  # 同じキーの行を読めない（起きない見込み。送ったと扱わない）
         return Sent(str((msg or {}).get("id") or ""), written=False, same=False)
@@ -234,6 +234,11 @@ def rows_since_opened(rows: list[dict]) -> list[dict]:
     """最初の `opened` の行（`first_opened`）より後の行。それより前の行は古い途中の記録が処理したもので、数えない。"""
     since = first_opened(rows)
     return [r for r in rows if r["_pos"] >= since]
+
+
+def current_rows(main: Path, name: str) -> list[dict]:
+    """計画 `name` の台帳の最初の `opened` より後の行（`rows_since_opened`）。読めなければ `OSError`。"""
+    return rows_since_opened(read_ledger_rows(main, name).rows)
 
 
 def restore(main: Path, name: str, opening: bool = False) -> dict:

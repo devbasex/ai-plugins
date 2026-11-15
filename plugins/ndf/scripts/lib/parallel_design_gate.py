@@ -284,7 +284,7 @@ def answer_design(
     import parallel_ledger as plg
 
     try:
-        rows = plg.rows_since_opened(plg.read_ledger_rows(main, name).rows)
+        rows = plg.current_rows(main, name)
     except OSError as exc:
         return "stopped", f"計画の台帳を読めない: {exc}", 2, {}
     row = _gate1_row(rows, rid)

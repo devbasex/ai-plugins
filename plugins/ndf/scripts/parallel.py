@@ -380,7 +380,7 @@ def cmd_request_ask(a) -> None:
     main = who.home  # 計画の置き場（別のリポジトリのレーンでは自分のリポジトリと違う。#2733）
     q = accepting(main, a.name)
     try:
-        rows = plg.rows_since_opened(plg.read_ledger_rows(main, a.name).rows)
+        rows = plg.current_rows(main, a.name)
         out = pask.route_ask(main, a.name, a.lane, {**got, "cwd": got.get("cwd") or os.getcwd()}, rows)
     except OSError as exc:  # LockTimeout も OSError（TimeoutError）
         reply("stopped", f"計画の台帳を読めない・書けない: {exc}", code=2)
