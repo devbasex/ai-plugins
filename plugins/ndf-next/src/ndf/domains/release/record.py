@@ -10,6 +10,8 @@
 - リリース後テストの記録は、同じ版のリリース記録を持つ PR へだけ書く。本番ブランチ宛てのリリースの PR は
   リリース記録を持たないので、そこへは書かれない（#3128）
 - 読む側（`read`）は write 以上の権限を持つ書き手の記録だけを読む
+- 書く前に、書く token の書き手を読む側が信用するかを確かめ、信用されなければ 1 件も書かずに `RecordError` で止まる。
+  信用されない書き手（Actions の `github.token` の github-actions[bot] など）の記録は読まれず、打ち直しで重なるため
 """
 
 from __future__ import annotations
@@ -77,9 +79,19 @@ def _trusted_bodies(hub: GitHub, number: int) -> list[str]:
     return [c.body for c in hub.comments(number) if hub.trusts(c)]
 
 
+def _require_trusted_writer(hub: GitHub) -> None:
+    """書く token の書き手が読む側（`GitHub.trusts`）に信用されなければ `RecordError`。"""
+    if not hub.token_trusted():
+        raise RecordError(
+            "記録を書く token の書き手が write 以上の権限を持つ利用者でなく、書いた記録は読まれない。"
+            "利用者の token（workflow では secrets.NDF_RELEASE_TOKEN）で書く"
+        )
+
+
 def write(hub: GitHub, number: int, production: str) -> tuple[record_decide.Record, list[Written]]:
-    """リリースの PR `number` に含めた PR の各々へ、まだ無ければリリース記録を書く。"""
+    """リリースの PR `number` に含めた PR の各々へ、まだ無ければリリース記録を書く。書く token が信用されなければ `RecordError`。"""
     _pull, made = released(hub, number, production)
+    _require_trusted_writer(hub)
     publisher = Publisher(hub)
     body = record_decide.render_record(made)
     out = []
@@ -106,7 +118,8 @@ def _versions(found: Sequence[record_decide.Record]) -> str:
 def write_verification(hub: GitHub, number: int, payload: Mapping[str, Any]) -> str:
     """リリース後テストの記録を、同じ版のリリース記録を持つ PR `number` へ書く。書いたコメントの URL を返す。
 
-    形がスキーマ `release-verification` に合わない・PR が同じ版の信用するリリース記録を持たなければ `RecordError`。
+    形がスキーマ `release-verification` に合わない・PR が同じ版の信用するリリース記録を持たない・書く token が
+    信用されなければ `RecordError`。
     """
     errors = contracts.schema_errors(dict(payload), VERIFICATION_SCHEMA)
     if errors:
@@ -117,4 +130,5 @@ def write_verification(hub: GitHub, number: int, payload: Mapping[str, Any]) -> 
             f"#{number} は版 {payload['version']} のリリース記録を持たない（持つ版: {_versions(found)}）。"
             "リリース後テストの記録はリリース記録と同じ PR へ書く"
         )
+    _require_trusted_writer(hub)
     return Publisher(hub).comment(number, record_decide.render_verification(payload)).url

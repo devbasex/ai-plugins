@@ -44,6 +44,10 @@ class FakeHub:
     def trusts(self, authored: Authored) -> bool:
         return authored.author in self.trusted
 
+    def token_trusted(self) -> bool:
+        # 書いたコメントの書き手は octocat（`rest` の POST）
+        return "octocat" in self.trusted
+
     def visibilities(self, repos: Any) -> dict[str, str]:
         return {r: "PRIVATE" for r in repos}
 

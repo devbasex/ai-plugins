@@ -22,9 +22,12 @@ REPO = "devbasex/ai-plugins"
 HEAD = "2bb66a6c14a618cbac108b61737ad49cfb1ac48b"
 OTHER = "0" * 40
 ALL_METHODS = {"allow_squash_merge": True, "allow_merge_commit": True, "allow_rebase_merge": True}
+NO_QUEUE = {"data": {"repository": {"pullRequest": {"id": "PR_7", "isMergeQueueEnabled": False, "isInMergeQueue": False}}}}
 MERGE_SETTINGS = {
     ("GET", f"/repos/{REPO}/rules/branches/develop"): [httpx.Response(200, json=[])],
     ("GET", f"/repos/{REPO}"): [httpx.Response(200, json=ALL_METHODS)],
+    # 405 の後に読む基底のマージキューの有無（既定はキューなし）
+    ("POST", "/graphql"): [httpx.Response(200, json=NO_QUEUE)],
 }
 
 
@@ -120,6 +123,23 @@ def test_merge_refusal_is_classified_from_merge_state(status: int, after: dict, 
     })  # fmt: skip
     out = _hub(server).merge(7)
     assert (out.merged, out.kind) == (False, kind)
+
+
+@pytest.mark.parametrize(("in_queue", "enqueued"), [(False, 1), (True, 0)])
+def test_merge_enqueues_when_base_requires_merge_queue(in_queue: bool, enqueued: int) -> None:
+    # キュー必須の基底は直接のマージを 405 で断る。先端のままキューへ入れ、実際のマージまでは ci_pending で待つ
+    state = {"data": {"repository": {"pullRequest": {"id": "PR_7", "isMergeQueueEnabled": True, "isInMergeQueue": in_queue}}}}
+    server = Server({
+        ("GET", f"/repos/{REPO}/pulls/7"): [httpx.Response(200, json=_pull())],
+        ("PUT", f"/repos/{REPO}/pulls/7/merge"): [httpx.Response(405, json={"message": "merge queue"})],
+        ("POST", "/graphql"): [httpx.Response(200, json=state), httpx.Response(200, json={"data": {"enqueuePullRequest": {}}})],
+    })  # fmt: skip
+    out = _hub(server).merge(7)
+    assert (out.merged, out.kind) == (False, "ci_pending")
+    mutations = [json.loads(r.content) for r in server.sent("POST") if b"enqueuePullRequest" in r.content]
+    assert len(mutations) == enqueued
+    if enqueued:
+        assert mutations[0]["variables"] == {"id": "PR_7", "head": HEAD}
 
 
 def test_merge_raises_on_server_error() -> None:
@@ -377,6 +397,19 @@ def test_unreadable_permission_is_untrusted(status: int) -> None:
     # 3364-1: 権限を読めない書き手は信用しない（読めないことを write と見なさない）
     server = Server({("GET", f"/repos/{REPO}/collaborators/someone/permission"): [httpx.Response(status, json={"message": "no"})]})
     assert _hub(server).trusts(github.Authored("someone", "MEMBER", "x")) is False
+
+
+@pytest.mark.parametrize(
+    ("user", "permission", "trusted"),
+    [(httpx.Response(200, json={"login": "someone"}), "write", True), (httpx.Response(200, json={"login": "someone"}), "read", False),
+     (httpx.Response(403, json={"message": "Resource not accessible by integration"}), None, False)],
+)  # fmt: skip
+def test_token_trusted_follows_the_writer_permission(user: httpx.Response, permission: str | None, trusted: bool) -> None:
+    # #3487: 利用者を持たない token（Actions の github.token）の書き手は、読み手に信用されない
+    routes = {("GET", "/user"): [user]}
+    if permission is not None:
+        routes[("GET", f"/repos/{REPO}/collaborators/someone/permission")] = [httpx.Response(200, json={"permission": permission})]
+    assert _hub(Server(routes)).token_trusted() is trusted
 
 
 def test_deleted_author_is_untrusted() -> None:

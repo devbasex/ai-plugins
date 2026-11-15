@@ -49,6 +49,18 @@ REST, GRAPHQL = "rest", "graphql"
 MERGE_REFUSED_STATUS = (405, 409, 422)
 # マージの拒否を、拒否の後に読み直した `mergeStateStatus` で種類へ分ける（SF4）。標準エラーの文は読まない
 _REFUSAL_KINDS = {"dirty": "base_conflict", "blocked": "not_ci", "behind": "not_ci", "draft": "not_ci"}
+# マージキューが必須の基底で直接のマージを断る状態（GitHub は 405 で返す）。このときはキューへ入れ、待ちとして返す
+MERGE_QUEUE_REFUSED_STATUS = 405
+# マージキューへ入れた後の止まった理由の種類（実際のマージまでは CI の待ちとして扱う）
+MERGE_QUEUE_PENDING = "ci_pending"
+_MERGE_QUEUE_STATE = (
+    "query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) {"
+    " pullRequest(number: $number) { id isMergeQueueEnabled isInMergeQueue } } }"
+)
+_ENQUEUE = (
+    "mutation($id: ID!, $head: GitObjectID!) {"
+    " enqueuePullRequest(input: {pullRequestId: $id, expectedHeadOid: $head}) { clientMutationId } }"
+)
 # マージの方式 → 「基底に含まれたか」の確かめ方（3378-2）。ancestry は head が基底の祖先か、merged は PR がマージ済み
 # （`merged_at` がある）か。squash と rebase は新しいコミットを作り、head は基底の祖先にならない。
 # 並びは、宣言が無いときに許された方式から選ぶ順
@@ -222,7 +234,10 @@ class Pull(NamedTuple):
 
 
 class MergeOutcome(NamedTuple):
-    """マージの結果。断られたら `kind` に止まった理由の種類（`refused`・`base_conflict`・`not_ci`・`unknown`）。"""
+    """マージの結果。断られたら `kind` に止まった理由の種類（`refused`・`base_conflict`・`not_ci`・`unknown`）。
+
+    マージキューへ入れて実際のマージを待つときは `ci_pending`（`MERGE_QUEUE_PENDING`）。
+    """
 
     merged: bool
     kind: Optional[str]
@@ -504,6 +519,21 @@ class GitHub:
             return False
         return self.permission(authored.author) in WRITE_PERMISSIONS
 
+    def token_trusted(self) -> bool:
+        """このクライアントの token で書いた本文を、読み手が `trusts` で信用するか（#3487）。
+
+        利用者の token なら書き手の login の権限が write 以上のときだけ真。利用者を持たない token（Actions の
+        `github.token` など、`GET /user` が 403・404）の書き手は author_association が持ち主・所属にならず、信用されない。
+        """
+        try:
+            raw = self.rest("GET", "/user")
+        except GitHubError as exc:
+            if exc.quota is None and exc.status in (403, 404):
+                return False
+            raise
+        login = text_of(raw["login"]) if isinstance(raw, dict) and "login" in raw else ""
+        return bool(login) and self.permission(login) in WRITE_PERMISSIONS
+
     def permission(self, login: str) -> str:
         """`login` の対象リポジトリでの権限（`admin`・`write`・`read`・`none`）。書き手ごとに 1 回だけ読む。
 
@@ -630,9 +660,24 @@ class GitHub:
         except GitHubError as exc:
             if exc.status not in MERGE_REFUSED_STATUS:
                 raise
+            queued = self._enqueue(number, pull.head_sha) if exc.status == MERGE_QUEUE_REFUSED_STATUS else None
+            if queued is not None:
+                return queued
             after = self.pull(number)
             return MergeOutcome(False, refusal_kind(after, pull.head_sha), str(exc), after.head_sha)
         return MergeOutcome(True, None, f"#{number} を {chosen} でマージした", pull.head_sha)
+
+    def _enqueue(self, number: int, head_sha: str) -> Optional[MergeOutcome]:
+        """基底がマージキューを持てば PR を先端 `head_sha` のままキューへ入れ、待ち（`ci_pending`）を返す。持たなければ None。
+
+        直接のマージを 405 で断られたときだけ読む（キューの無い基底の要求の回数を増やさない）。既にキューにあれば入れ直さない。
+        """
+        node = self.repository(_MERGE_QUEUE_STATE, {"number": int(number)})["pullRequest"]
+        if not isinstance(node, dict) or not node["isMergeQueueEnabled"]:
+            return None
+        if not node["isInMergeQueue"]:
+            self.graphql(_ENQUEUE, {"id": node["id"], "head": head_sha})
+        return MergeOutcome(False, MERGE_QUEUE_PENDING, f"#{number} をマージキューへ入れた（マージキューの待ち）", head_sha)
 
 
 def _issue_filter(labels: Sequence[str], state: str) -> dict[str, Any]:

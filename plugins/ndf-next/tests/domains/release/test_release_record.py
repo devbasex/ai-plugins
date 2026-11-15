@@ -96,6 +96,15 @@ def test_issue_3128_verification_goes_to_the_record_pull_and_both_are_read() -> 
     assert len(record.read(hub, 11).verifications) == 1
 
 
+def test_untrusted_token_writes_no_record() -> None:
+    # Actions の github.token（github-actions[bot]）で書いた記録は読まれず、打ち直しで重なるので書かずに止まる
+    hub = _hub()
+    hub.trusted = set()
+    with pytest.raises(record.RecordError):
+        record.write(hub, RELEASE, "main")
+    assert hub.comments_of == {}
+
+
 def test_read_skips_untrusted_writers() -> None:
     hub = _hub()
     fake = record_decide.render_record(record_decide.Record(VERSION, RELEASE, (11,)))
