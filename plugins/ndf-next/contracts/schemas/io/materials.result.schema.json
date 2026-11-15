@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "materials.result.schema.json",
+  "title": "ndf materials の結果 JSON",
+  "description": "ndf materials が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果の契約（result.schema.json）が持ち、ここは metrics と items の形だけを足す",
+  "allOf": [
+    {
+      "$ref": "../result.schema.json"
+    }
+  ],
+  "properties": {
+    "tool": {
+      "const": "materials"
+    },
+    "metrics": {
+      "type": "object",
+      "description": "ndf materials の計測値",
+      "additionalProperties": false,
+      "properties": {
+        "issues": {"type": "integer", "description": "材料を集めた課題の数"},
+        "gaps": {"type": "integer", "description": "本文を読めなかった課題の数"},
+        "out": {"type": "string", "description": "下書きを書いたパス（--out のときだけ）"}
+      }
+    },
+    "items": {
+      "type": "array",
+      "description": "課題ごとの材料",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["number", "kind", "public_interface", "files", "files_found"],
+        "properties": {
+          "number": {"type": "integer", "description": "課題の番号"},
+          "kind": {"type": ["string", "null"], "description": "本文の「種類」の節の最初の行。節が無ければ null"},
+          "public_interface": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["value", "cell"],
+            "properties": {
+              "value": {"type": "string", "enum": ["変わる", "変わらない", "記載なし"], "description": "本文の「影響」の表の公開インタフェースの行の読み"},
+              "cell": {"type": "string", "description": "その行の 2 列目の原文"}
+            }
+          },
+          "files": {
+            "type": "array",
+            "description": "触るファイルの候補",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["path", "exists", "source", "section", "tests"],
+              "properties": {
+                "path": {"type": "string", "description": "候補のパス"},
+                "exists": {"type": "boolean", "description": "追跡されたファイルにあるか"},
+                "source": {"type": "string", "enum": ["本文", "設計"], "description": "候補を取った所"},
+                "section": {"type": "string", "description": "本文なら節の見出し、設計なら設計文書のパス"},
+                "tests": {"type": "array", "items": {"type": "string"}, "description": "候補ごとのテストのファイル"}
+              }
+            }
+          },
+          "files_found": {"type": "integer", "description": "候補の数"}
+        }
+      }
+    }
+  }
+}
