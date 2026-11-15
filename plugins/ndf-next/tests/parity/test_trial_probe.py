@@ -69,3 +69,47 @@ def test_write_changes_only_the_trial_of_each_row(tmp_path):
     probe.write_trials(path, {"a:1": {"result": "passed"}, "a:2": {"result": "not_run", "reason": "r"}})
     doc = json.loads(path.read_text(encoding="utf-8"))
     assert [r["trial"]["result"] for r in doc["rows"]] == ["passed", "not_run"]
+
+
+def _twin_features():
+    return {
+        "places": {"M4": [], "M5": [], "S1a": ["skills/"], "S1b": ["hooks/"]},
+        "rows": [
+            {"id": "entrypoint:skills/rf/scripts/drive.py", "kind": "entrypoint", "now": "skills/rf/scripts/drive.py", "to": "M4"},
+            {"id": "entrypoint:skills/cr/scripts/drive.py", "kind": "entrypoint", "now": "skills/cr/scripts/drive.py", "to": "M5"},
+            {"id": "skill:rf", "kind": "skill", "now": "skills/rf", "to": "S1a"},
+            {"id": "skill:cr", "kind": "skill", "now": "skills/cr", "to": "S1a"},
+        ],
+    }
+
+
+def test_scripts_with_the_same_name_are_told_apart_by_the_skill_that_calls_them(tmp_path):
+    (tmp_path / "hooks").mkdir()
+    (tmp_path / "skills/rf").mkdir(parents=True)
+    (tmp_path / "skills/rf/SKILL.md").write_text('python3 "$RF/drive.py" 1\n', encoding="utf-8")
+    (tmp_path / "skills/cr").mkdir()
+    (tmp_path / "skills/cr/SKILL.md").write_text("bin/ndf review drive\n", encoding="utf-8")
+    got = probe.judge(_twin_features(), root=tmp_path, repo=tmp_path)
+    assert "skills/rf/scripts/drive.py（M4）" in got["skill:rf"]["reason"]
+    assert got["entrypoint:skills/rf/scripts/drive.py"]["result"] == "failed"
+    assert got["entrypoint:skills/cr/scripts/drive.py"]["result"] == "not_run"
+
+
+def test_a_written_path_points_at_that_script_from_any_skill(tmp_path):
+    (tmp_path / "hooks").mkdir()
+    (tmp_path / "skills/rf").mkdir(parents=True)
+    (tmp_path / "skills/rf/SKILL.md").write_text("python3 skills/cr/scripts/drive.py 1\n", encoding="utf-8")
+    got = probe.judge(_twin_features(), root=tmp_path, repo=tmp_path)
+    assert got["entrypoint:skills/cr/scripts/drive.py"]["result"] == "failed"
+    assert got["entrypoint:skills/rf/scripts/drive.py"]["result"] == "not_run"
+
+
+def test_rows_passed_in_a_later_record_pass_and_name_that_record(tmp_path, plugin):
+    (tmp_path / "trial").mkdir()
+    (tmp_path / "trial/2026-11-15.json").write_text(json.dumps({"passed": []}), encoding="utf-8")
+    (tmp_path / "trial/2026-11-20.json").write_text(json.dumps({"passed": ["skill:tidy"]}), encoding="utf-8")
+    (tmp_path / "trial/2026-11-25.json").write_text(json.dumps({"passed": []}), encoding="utf-8")
+    passed, latest = probe.records(tmp_path)
+    got = probe.judge(_features(), passed, latest, root=plugin, repo=plugin)
+    assert got["skill:tidy"] == {"result": "passed", "record": "trial/2026-11-20.json"}
+    assert got["skill:merged"]["record"] == "trial/2026-11-25.json"

@@ -86,8 +86,10 @@ cd plugins/ndf-next && PYTHONPATH=src uv run --frozen --project . python -m ndf.
 
 | 結果 | 決まり方 |
 | --- | --- |
-| `passed` | 記録の `passed` に載る（試走で通した）か、作らない行（`not_built`）で ndf-next の本文に呼び手が無い |
+| `passed` | どれかの記録の `passed` に載る（試走で通した）か、作らない行（`not_built`）で ndf-next の本文に呼び手が無い |
 | `failed` | 行き先の置き場が無い・ndf-next の Skill とエージェントと hook の本文がまだ旧いスクリプトを呼ぶ・workflow が旧いスクリプトを呼ぶ。`reason` に行き先の子を書く |
 | `not_run` | 本文の確かめは通ったが、試走がその行まで届いていない |
 
-行き先の子が直したら、試走を流し直して記録を足し、このコマンドを打ち直す。
+行き先の子が直したら、試走を流し直して記録を足し、このコマンドを打ち直す。コマンドは `trial/` の記録をすべて読む。行の `record` は、その行を最後に `passed` に載せた記録で、どの記録にも載らない行は最新の記録になる。
+
+同じ名前の旧いスクリプト（cross-review と cross-refactoring の `drive.py`）は `now` のパスで区別する。本文が名前だけで書いていれば、本文の置かれた Skill の下のスクリプトを呼ぶとみなす。
