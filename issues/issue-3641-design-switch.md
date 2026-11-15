@@ -1,6 +1,6 @@
 # #3641 の切り替えの手順: ai-plugins を develop と main の運用から GitHub flow へ移す
 
-設計文書は [issue-3641-design.md](issue-3641-design.md) 、決定の記録は [issue-3641-design-decisions.md](issue-3641-design-decisions.md) にある。
+設計文書は [issue-3641-design.md](issue-3641-design.md) にある。決定の記録は [issue-3641-design-decisions.md](issue-3641-design-decisions.md) にある。
 この文書は、ai-plugins を一度だけ切り替える手順（受け入れ条件 17・18）を、順序と戻す方法つきで書く。利用者が新しい版へ移るときの移行の手順とは別である。
 
 ## 実例

@@ -9,10 +9,12 @@
 ## 適用範囲
 
 - **働く範囲**: 今の NDF を使うすべてのリポジトリ。GitHub flow の行は、設定ファイルで選んだリポジトリだけで働く。ai-plugins はこの課題の切り替えの手順で選ぶ
-- **プロジェクトごとに違うもの**: 設定ファイルで受ける。ブランチ戦略は `.ndf/worktree.json` の `branch_flow.promotion`、マージの方式は `.ndf/project.json` の `production_merge.method` で選ぶ
+- **プロジェクトごとに違うもの**: 設定ファイルで受ける
+  - ブランチ戦略: `.ndf/worktree.json` の `branch_flow.promotion`
+  - マージの方式: `.ndf/project.json` の `production_merge.method`
 - **当たるモード**: `standard`（ブランチ戦略・本番のプラン・CD の振る舞いを変え、公開の設定に値を足す）
 
-代表のリポジトリでの振る舞い（受け入れ条件 16）:
+### 代表のリポジトリでの振る舞い（受け入れ条件 16）
 
 | リポジトリ | 設定の値 | 振る舞い |
 | --- | --- | --- |
@@ -22,7 +24,13 @@
 
 **開発版を外す層は、取り込み方の行に置く。** 開発版チャネルはベースブランチに載るチャネルで、行 `trunk` ではベースブランチが本番ブランチと同じである（I1）。本番ブランチのほかに変更の載るブランチが無いため、行 `trunk` は開発版のステージと開発版のデプロイのステップを持たない（I8・I12、決定 3）。ai-plugins の `.ndf/supervise.json` から `release.dev_workflow` を外すのは、行 `trunk` が読まない値を残さないためで、開発版を外す理由ではない。
 
-**開発版のデプロイの機能は残す。** `whole`・`selected` の行で使う開発版チャネル・`-dev.N` の版数・`release-steps release --channel dev`・`verify-install --ref <ベースブランチ>` のコードは変えない。ai-plugins で使わなくなるのは、ai-plugins が行 `whole` から行 `trunk` へ設定の値を変えるためである。行 `trunk` を選んだほかのリポジトリでも開発版のデプロイ（Web の staging への反映を含む）は使えない。要求（前提 10・受け入れ条件 16）との関係は「人へ残す判断」に載せる。
+**開発版のデプロイの機能は残す。** 次のコードは変えない。行 `whole`・`selected` が使う。
+
+- 開発版チャネルと `-dev.N` の版数
+- `release-steps release --channel dev`
+- `verify-install --ref <ベースブランチ>`
+
+ai-plugins で使わなくなるのは、ai-plugins が行 `whole` から行 `trunk` へ設定の値を変えるためである。行 `trunk` を選んだほかのリポジトリでも開発版のデプロイ（Web の staging への反映を含む）は使えない。要求（前提 10・受け入れ条件 16）との関係は「人へ残す判断」に載せる。
 
 ## あるべき姿の根拠
 
@@ -35,8 +43,13 @@
 | 起票の時点の事故の表（要求の「目的」） | 実測 | 事故 4 種のうち 3 種は develop と main の間の運び（検査の範囲・コミット・バージョン）から起きた |
 
 要求と受け入れ条件は #3641 の本文にある（コピーは [issue-3641-requirements.md](issue-3641-requirements.md) ）。この文書は「どう作るか」だけを扱う。
-決定の記録は [issue-3641-design-decisions.md](issue-3641-design-decisions.md) 、切り替えの手順（受け入れ条件 17・18）は [issue-3641-design-switch.md](issue-3641-design-switch.md) にある。
-手本は #3572 の設計（ [issue-3572-design.md](issue-3572-design.md) ）の `trunk` の行で、そのうち今すぐ移るのに要るものだけを今の NDF に入れる。
+
+| 分けた文書 | 置き場 |
+| --- | --- |
+| 決定の記録 | [issue-3641-design-decisions.md](issue-3641-design-decisions.md) |
+| 切り替えの手順（受け入れ条件 17・18） | [issue-3641-design-switch.md](issue-3641-design-switch.md) |
+
+手本は #3572 の設計（ [issue-3572-design.md](issue-3572-design.md) ）の `trunk` の行である。そのうち今すぐ移るのに要るものだけを今の NDF に入れる。
 
 ## ドメインモデル
 
@@ -66,7 +79,13 @@ CD はリリースのコンテキストの版上げ・CHANGELOG・`publish` の�
 | main へのマージ | main へのマージ（`release_lib/merge_method.py`） | main 宛ての PR | 人のマージの記録 | 承認した head・マージの方式・承認ゲートを通ったか・マージコミット |
 | main のバージョン | CD（`release_lib/trunk_cd.py`） | 版上げの PR | タグ・GitHub Release | バージョン・上げ幅・範囲 |
 
-**main へのマージの書き手は `merge_method.py` 1 つにする。** main 宛ての PR をマージする・キューへ入れる・人のマージの記録を書く API の呼び出しは、このモジュールだけが打つ。`trunk-steps.py land`（承認した head と承認ゲートを通ったことを渡す）と `merge-when-green` の `merge.py`（承認ゲートを通ったかを `--gate-approved` から渡す）は、このモジュールを呼ぶだけで、マージの API を直接打たない。I4・I5・I6・I11 はこのモジュールの中で守る。
+**main へのマージの書き手は `merge_method.py` 1 つにする。** main 宛ての PR をマージする・キューへ入れる・人のマージの記録を書く API の呼び出しは、このモジュールだけが打つ。I4・I5・I6・I11 はこのモジュールの中で守る。次の 2 つは、このモジュールを呼ぶだけで、マージの API を直接打たない。
+
+| 呼び手 | 渡すもの |
+| --- | --- |
+| `trunk-steps.py land` | 承認した head と、承認ゲートを通ったこと |
+| `merge-when-green` の `merge.py` | 承認ゲートを通ったか（`--gate-approved` から） |
+
 **main のバージョンを変えてよいかの判定は `trunk_cd.py` に置く。** PR の検査（`pr-check`）と I5 の判定（版上げの PR を通すか）は、この判定の関数を呼ぶ。
 承認の記録そのもの（`lib/approved_commit.py` の `record_approval`）は、今のリリース承認ゲートが書く。`land` は読むだけである。
 
@@ -194,6 +213,8 @@ GitHub flow・同期の PR・切り替えの手順・merge queue・マージの�
 | CD の workflow `.github/workflows/release-cd.yml`（変更） | main への push で `trunk-steps.py cd` を打つ。行が `trunk` でなければ今の `publish` だけが働く |
 | 必須のチェックの workflow 8 本（変更） | `merge_group` の起動を足す（決定 9） |
 
+### 構成要素の図
+
 ```mermaid
 flowchart TB
     decl["設定ファイル<br/>worktree.json・project.json"]
@@ -271,12 +292,12 @@ flowchart TB
 | `merged-steps.py merge-when-green` | 行 `trunk` で本番ブランチ宛てのとき、マージを `merge_method` へ渡す。承認ゲートの承認（`--gate-approved`）が無い PR が配るプラグインを変えていれば止める（I5） | あり。`whole`・`selected` では今のまま |
 | `release-cd.yml` | `publish` の代わりに `trunk-steps.py cd` を打つ。秘密 `NDF_RELEASE_TOKEN` を環境に渡す。`pull-requests: write` の権限を足す | あり。`trunk` でなければ `cd` は今の `publish` だけを行う |
 
-上げ幅は、範囲にマージされた PR のラベル（`release:major`・`release:minor`・`release:patch`）の最大で、ラベルの無い PR は PATCH とする（#3572 の決定 7 と同じ）。
+上げ幅は、範囲にマージされた PR のラベル（`release:major`・`release:minor`・`release:patch`）の最大である。ラベルの無い PR は PATCH とする（#3572 の決定 7 と同じ）。
 ラベルは切り替えの手順でリポジトリに作る。
 
 ## 処理の流れ
 
-スプリントから main へのマージまで（`merge-queue`）:
+### スプリントから main へのマージまで（`merge-queue`）
 
 ```mermaid
 sequenceDiagram
@@ -306,9 +327,9 @@ sequenceDiagram
     L->>H: confirm でタグを待つ
 ```
 
-`strict` では投入の代わりに、PR の head が main の先端を祖先に持つかを確かめ（`compare` の `behind_by` が 0）、承認した head を `sha` に渡して迂回せずにマージする。含まなければ `behind` で止まり、スプリントの経路が main を取り込んだ新しい head で承認を取り直す。
+`strict` では投入の代わりに、PR の head が main の先端を祖先に持つか（`compare` の `behind_by` が 0）を確かめる。持てば、承認した head を `sha` に渡して迂回せずにマージする。含まなければ `behind` で止まり、スプリントの経路が main を取り込んだ新しい head で承認を取り直す。
 
-`land` の状態の遷移:
+### `land` の状態の遷移
 
 ```mermaid
 stateDiagram-v2
@@ -327,7 +348,7 @@ stateDiagram-v2
     止まる --> [*]
 ```
 
-CD（`trunk-steps.py cd`）の 1 回の実行:
+### CD（`trunk-steps.py cd`）の 1 回の実行
 
 1. 先端のコミットのバージョンにタグが無ければ、今の `publish` でタグと GitHub Release を作る（版上げの PR のマージの push はここで終わる）
 2. 開いた版上げの PR があれば、新しく作らずに終わる（I9）。そのマージの push の実行が、残りの範囲を次のバージョンへ回す。終わる前に、`strict` で版上げの PR の head が main の先端を含まなければ（`compare` の `behind_by` が 1 以上）、この実行が取り込む。
@@ -336,7 +357,7 @@ CD（`trunk-steps.py cd`）の 1 回の実行:
    - この手順は範囲の判定（手順 3）より前に置き、文書だけの PR の push で main が進んだときも取り込む
    - `merge-queue` では取り込まない。キューが main の先端と合わせて確かめる
 3. 範囲（最後の版上げのコミット..先端）でリリース対象のプラグインに変化が無ければ終わる（設計 PR・確定仕様化の PR・設定の PR の push）。起点はバージョンを書いたコミットで、そのマージコミットではない
-4. 上げ幅を決め、main の先端から `release/v<バージョン>` を作り、今の版上げ（`release-steps.py bump` の書き換え）と CHANGELOG の節を書いたコミットを足し、`NDF_RELEASE_TOKEN` で push して PR を作る
+4. 上げ幅を決め、main の先端から `release/v<バージョン>` を作る。今の版上げ（`release-steps.py bump` の書き換え）と CHANGELOG の節を書いたコミットを足し、`NDF_RELEASE_TOKEN` で push して PR を作る
 5. `gh pr merge --merge --match-head-commit <SHA>` で自動マージを依頼する（STD8）。`merge-queue` ではチェックの後にキューへ入る。`strict` ではチェックの後にマージされ、それまでに main が先へ進めば、その push の実行が手順 2 で取り込む
 
 版上げの PR へ書くのは CD の実行だけで、どの実行も `NDF_RELEASE_TOKEN` で書く。`GITHUB_TOKEN` で取り込むと、取り込んだ head の必須のチェックが自動で走らない（STD5）。
@@ -388,7 +409,11 @@ CD（`trunk-steps.py cd`）の 1 回の実行:
 | --- | --- | --- | --- |
 | #3641 | 実装する | — | `plugins/ndf/scripts/lib/branch_flow.py`、`scripts/script-structure-allow/plugins__ndf__scripts__lib__branch_flow.py--lines.json`、`plugins/ndf/skills/worktree/schemas/worktree.schema.json`、`plugins/ndf/scripts/project_lib/model.py`、`plugins/ndf/skills/development-workflow/schemas/project.schema.json`、`plugins/ndf/scripts/lib/project_decl.py`、`plugins/ndf/scripts/lib/diff_kinds.py`、`scripts/ci-heavy-skip.py`、`plugins/ndf/scripts/supervise_lib/sprint.py`、`plugins/ndf/scripts/supervise_lib/sprint_waves.py`、`plugins/ndf/scripts/supervise_lib/release_templates.py`、`plugins/ndf/scripts/supervise_lib/release_flow.py`、`plugins/ndf/scripts/supervise_lib/sprint_routes.py`、`plugins/ndf/scripts/trunk-steps.py`（新設）、`plugins/ndf/scripts/release_lib/merge_method.py`（新設）、`plugins/ndf/scripts/release_lib/trunk_cd.py`（新設）、`plugins/ndf/scripts/merged_lib/merge.py`、`scripts/script-structure-allow/plugins__ndf__scripts__merged_lib__merge.py--lines.json`（新設）、`plugins/ndf/contracts/entrypoints/plugins__ndf__scripts__trunk-steps.py.json`（新設）、`plugins/ndf/contracts/index.md`、`scripts/check-pr-base.sh`、`.github/workflows/release-cd.yml`、`.github/workflows/runtime-plugin-validate.yml`、`.github/workflows/glossary.yml`、`.github/workflows/pr-base-guard.yml`、`.github/workflows/lint.yml`、`.github/workflows/pr-body-decisions.yml`、`.github/workflows/pytest.yml`、`.github/workflows/script-structure.yml`、`.github/workflows/runtime-plugin-smoke.yml`、`plugins/ndf/scripts/tests/test_branch_flow.py`、`plugins/ndf/scripts/tests/test_sprint_branch_flow.py`、`plugins/ndf/scripts/tests/test_trunk_cd.py`（新設）、`plugins/ndf/scripts/tests/test_merge_method.py`（新設）、`scripts/tests/test_pr_base_guard.py` |
 
-ai-plugins の設定の値（`.ndf/`）・`AGENTS.md`・`CONTRIBUTING.md`・`docs/versioning-and-distribution.md`・開発版の workflow の削除は、実装の PR に入れず、切り替えの手順の設定の PR で行う（決定 10）。
+次の変更は実装の PR に入れず、切り替えの手順の設定の PR で行う（決定 10）。
+
+- ai-plugins の設定の値（`.ndf/`）
+- `AGENTS.md`・`CONTRIBUTING.md`・`docs/versioning-and-distribution.md`
+- 開発版の workflow の削除
 
 ## 影響
 
@@ -411,7 +436,7 @@ $ gh pr list --state open --search lfix --json number,headRefName
 []
 ```
 
-並列のレーンがまとめたリリースへ依頼を送るかは `supervise_lib/sprint.py` の `release_lane` が決め、`parallel_*.py` は変えない。hook（`lib/workflow-merge.sh` の `_wf_check_production_merge`）は本番ブランチ宛ての直接の `gh pr merge` を `merge-when-green` へ案内する今の振る舞いのままで、`trunk` でも同じに働く。
+並列のレーンがまとめたリリースへ依頼を送るかは `supervise_lib/sprint.py` の `release_lane` が決め、`parallel_*.py` は変えない。hook（`lib/workflow-merge.sh` の `_wf_check_production_merge`）は今の振る舞いのままで、`trunk` でも同じに働く。本番ブランチ宛ての直接の `gh pr merge` を `merge-when-green` へ案内する。
 
 ## 人へ残す判断
 

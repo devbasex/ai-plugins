@@ -1,7 +1,7 @@
 # #3641 の詳細設計: 今の NDF に GitHub flow の行を入れ、ai-plugins を移す
 
 設計文書 [issue-3641-design.md](issue-3641-design.md) の「構成要素」と「構造」を、ファイルと関数の粒度へ下ろした文書である。
-決定の番号（決定 1〜13）は [issue-3641-design-decisions.md](issue-3641-design-decisions.md) 、不変条件の番号（I1〜I12）は設計文書の「ドメインモデル」の表を指す。
+決定の番号（決定 1〜13）は [issue-3641-design-decisions.md](issue-3641-design-decisions.md) を指す。不変条件の番号（I1〜I12）は設計文書の「ドメインモデル」の表を指す。
 
 この文書で使う語:
 
@@ -15,7 +15,9 @@
 
 ## ファイル配置
 
-パッケージ・モジュール構成（触るファイルだけ。`*` は新設）:
+### パッケージ・モジュール構成
+
+触るファイルだけを載せる。`*` は新設である。
 
 ```text
 plugins/ndf/
@@ -59,7 +61,18 @@ scripts/
 └── （必須のチェックを出す 8 本）
 ```
 
-**依存は一方向で、循環が無い。** 下の層から順に、取り込み方の表（`lib/branch_flow.py`）・差分の分類（`lib/diff_kinds.py`）・設定の読み（`lib/project_decl.py`）、その上に CD の版上げ（`release_lib/trunk_cd.py`）、その上に main へのマージ（`release_lib/merge_method.py`。版上げの PR の見分けに `trunk_cd` を呼ぶ）、最上段にエントリポイント（`trunk-steps.py`）とマージの部品（`merged_lib/merge.py`）が並ぶ。`trunk_cd` は `merge_method` を読まない。プランの組み立て（`supervise_lib/`）はサブコマンドをコマンドの文字列として組むだけで、`release_lib/` の 2 つの新設モジュールを import しない。`supervise_lib/sprint_routes.py` は今の依存（`release_templates` → `release_flow`）の向きのまま `release_flow` を呼ぶ。
+### 依存の向き
+
+**依存は一方向で、循環が無い。** 下の層から順に次のとおり並ぶ。
+
+1. 最下段: 取り込み方の表（`lib/branch_flow.py`）・差分の分類（`lib/diff_kinds.py`）・設定の読み（`lib/project_decl.py`）
+2. CD の版上げ（`release_lib/trunk_cd.py`）
+3. main へのマージ（`release_lib/merge_method.py`。版上げの PR の見分けに `trunk_cd` を呼ぶ）
+4. 最上段: エントリポイント（`trunk-steps.py`）とマージの部品（`merged_lib/merge.py`）
+
+`trunk_cd` は `merge_method` を読まない。プランの組み立て（`supervise_lib/`）はサブコマンドをコマンドの文字列として組むだけで、`release_lib/` の 2 つの新設モジュールを import しない。`supervise_lib/sprint_routes.py` は今の依存（`release_templates` → `release_flow`）の向きのまま `release_flow` を呼ぶ。
+
+### ファイルごとの役割
 
 | パス | 種類 | 役割 1 文 | 依存する先 |
 | --- | --- | --- | --- |
@@ -124,7 +137,7 @@ scripts/
 | `plugins/ndf/scripts/supervise_lib/sprint.py` | モジュール | `release_lane`（変更。条件 1 行）・`pace_refusal`（変更。呼び出し 1 行） |
 | `plugins/ndf/scripts/supervise_lib/sprint_waves.py` | モジュール | `plan_sprint_check`（変更。2 行） |
 
-`release_lane`・`pace_refusal`・`plan_sprint_check`・`merge_when_green`・`approve_step`・`has_release_template` は、引数か分岐を 1 つ足すだけで、下の「関数の仕様」に変える点だけを書く。
+`release_lane`・`pace_refusal`・`plan_sprint_check`・`merge_when_green`・`approve_step`・`has_release_template` は、引数か分岐を 1 つ足すだけである。下の「関数の仕様」に変える点だけを書く。
 
 ## 関数の仕様
 
