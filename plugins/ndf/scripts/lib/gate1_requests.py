@@ -15,10 +15,10 @@ import design_pr_merge
 import jsonio
 import project_mvv as pm
 import step_read
+from gate1_ids import HEAD_LEN, gate1_id  # noqa: F401  依頼の id の規則（gate1_id は呼び手が g1.gate1_id で読む）
 from sprint_loop_names import LOOP_DIR
 
 SPRINT_STATE = Path(__file__).resolve().parents[1] / "sprint-state.py"
-HEAD_LEN = 12  # 依頼の id に入れる SHA の桁
 
 
 def pr_numbers(value) -> list[int]:

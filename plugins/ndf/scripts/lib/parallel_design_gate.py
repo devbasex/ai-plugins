@@ -176,7 +176,7 @@ def design_gate(
         return None  # 開いていない・先頭を読めない設計 PR へ承認を当てない（決定 3）
     state = sprint_state_of(sprint)
     row = g1.last_verdict(state, "design", pr) if state else {}
-    base = f"{lane}-g{pr}-{stamp[: g1.HEAD_LEN]}"
+    base = g1.gate1_id(lane, pr, stamp)
     rid, returned, why = next_gate1_id(rows, base)
     reasons = [x for x in ("／".join(row.get("reasons") or []) or row.get("verdict") or "判定を読めない", why) if x]
     return DesignGate(

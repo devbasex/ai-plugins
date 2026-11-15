@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Optional
 
 import parallel_external as pe
+from gate1_ids import gate1_id
 import parallel_ledger as plg
 import parallel_plan as pp
 from parallel_request_form import REQUEST_ID_RE, request_errors  # noqa: F401  依頼の形（契約の検査と外のレーンが読む）
@@ -429,7 +430,7 @@ def request_gate1(
 ) -> str:
     """設計の承認の依頼（`kind: gate1`）。id は `<レーン>-g<設計 PR>-<先頭の SHA の 12 桁>`（同じ先頭の打ち直しは同じ id）。
     承認した設計をマージできずに利用者へ戻すとき（#2507）は、同じ先端でも別の依頼にするため `suffix` を足す。"""
-    rid = f"{lane}-g{pr}-{stamp[:12]}{suffix}"
+    rid = gate1_id(lane, pr, stamp, suffix)
     msg = {"kind": "gate1", "id": rid, "lane": lane, "issue": issue, "pr": pr, "report": report, "sprint_state": state, "stamp": stamp}
     send_inbox(main, name, {**msg, **extra, "at": pe.utc_stamp()}, rid)
     return rid

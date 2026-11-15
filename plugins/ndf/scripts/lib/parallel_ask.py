@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Optional
 
 import parallel_external as pe
+from gate1_ids import gate1_id
 import parallel_lane as pl
 import parallel_ledger as plg
 from parallel_question import AskTarget, Prior, prior_of, target_line
@@ -100,7 +101,7 @@ def _design_gate_or_none(main: Path, name: str, lane: str, tool_input: dict, row
 
 def _route_gate1(main: Path, name: str, lane: str, gate, rows: list[dict], ledger_id: str, deadline_at) -> Routed:
     """分岐 1: 設計承認の依頼を送る。同じ先頭の打ち直しは送らずに already を返す（I2）。"""
-    rid = f"{lane}-g{gate.pr}-{gate.stamp[:12]}{gate.suffix}"
+    rid = gate1_id(lane, gate.pr, gate.stamp, gate.suffix)
     state = {"sprint_state": gate.state}
     if any(r.get("kind") == "gate1" and r.get("id") == rid for r in rows):  # 同じ先頭の打ち直し（I2）
         return Routed("gate1", rid, {**state, "already": True})
