@@ -1,6 +1,6 @@
 # 並列の計画のマシン全体の本数と課題の見込みの重なり
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `parallel.py`（P3）・`relay.py`（M3b。`cap --plans`）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `parallel.py`（P3）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 [parallel.md](parallel.md) の続き。マシン全体のプランの本数（起動の待ち。理由 `machine-plans`）と、`parallel.py check` が出す
 課題の見込みの重なり（`I21`・`bundle-overlap`）の決まりを置く。
@@ -21,8 +21,8 @@
   「起動」の欄（`起動待ち（マシン 5 + このレーン 2 > 上限 6）`）で読む
 - 答えを当てるための再起動・止まったレーンの起こし直し・一時レーンの起動は待たせない
 
-上限の値はマシンの設定（`<状態の根>/relay/hub/limits.json` の `max_plans`）→ `NDF_PARALLEL_MAX_PLANS` → 既定 6 の順で決まり、
-どのリポジトリから読んでも同じ値になる。人の指示を受けて `python3 "$NDF_SCRIPTS/relay.py" cap --plans <n>` で書く（レーン数の上限の値は残る）。`ndf lanes limits <計画> --max-plans <n>` は
+上限の値は `NDF_RELAY_MAX_NAMED` → 上限の宣言 `relay.max-named`（`contracts/limits.json`。既定 6）の順で決まり、
+どのリポジトリから読んでも同じ値になる。人の指示を受けて変えるときは、`ndf lanes start` を打つ環境で `NDF_RELAY_MAX_NAMED` を渡す（切り離した `ndf lanes run` が引き継ぐ。値を書き込む副命令は持たない）。`ndf lanes limits <計画> --max-plans <n>` は
 1 つの計画のレーンごとのプランの本数の上限で、このマシン全体の値を変えない。
 
 ## 課題の見込みの重なり（`I21`）

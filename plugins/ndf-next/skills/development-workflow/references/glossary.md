@@ -96,7 +96,7 @@ flowchart TB
 | 語 | 意味 | 英語や識別子 | 正本 |
 | --- | --- | --- | --- |
 | モード | 変更の目的物で決める工程の振り分け。上から `operation` / `documentation` / `standard` / `legacy-refactor` / `light` | モード判定の結果の `mode:` | [../SKILL.md](../SKILL.md) の「判定の手順」、[workflow-modes.md](workflow-modes.md) |
-| pace | モードとは別の軸で、工程をどう通すかを決める。ウォーターフォールで人の承認を取る `normal`（既定）、`normal` の承認だけを MVV 判定にする `auto`、実践投入の中で検証しながら MVV で自動に進める `fast` の 3 つ | `pace:`、`supervise.py new sprint --pace fast|auto --state <状態>`（使ってよい条件を確かめる）、`.ndf/pace.json` | [pace.md](pace.md) |
+| pace | モードとは別の軸で、工程をどう通すかを決める。ウォーターフォールで人の承認を取る `normal`（既定）、`normal` の承認だけを MVV 判定にする `auto`、実践投入の中で検証しながら MVV で自動に進める `fast` の 3 つ | `pace:`、`ndf progress new --pace`（値を保存する。使ってよい条件の確かめは P2 #3295 が足す）、`.ndf/pace.json` | [pace.md](pace.md) |
 | MVV | スプリントの Mission / Vision / Value。マイルストーンの説明からコピーし、利用者が 1 回承認する。`fast` と `auto` で設計承認ゲート・リリース承認ゲートの事前の許可になる | `mvv.md`、`mvv.sha256`、承認ゲートの記録 `MVV` | [pace.md](pace.md) の「スプリントを始める」 |
 | スプリント MVV | スプリント単位の MVV。プロジェクト MVV の範囲での具体化 | `sprint-state.py init --milestone` / `--mvv` でコピーする | [project-mvv.md](project-mvv.md) |
 | MVV 判定 | 承認ゲートのエビデンスが MVV に従うかの判定。「従う」でレッドラインが無いときだけ承認ゲートを省き、記録を残す | `mvv-gate.py check`、`verdict`（follow / not_follow / unknown）、終了コード 0 / 10 | [pace.md](pace.md) の「MVV 判定」 |

@@ -30,7 +30,7 @@ ndf plan wait <プラン>.json
 | `ndf route render immediate_fix` | 即時修正（テスト → PR → `merge-when-green`）のプランを作る。条件は [pace.md](pace.md) |
 | `ndf route render check` | 検査のプランを作る |
 | `ndf route render release` | デプロイ（開発版・本番）のプランを作る |
-| `ndf route render close` | 確定仕様化と PR・CI・マージのプランを作る。振り返り・棚卸し・課題を閉じる `close` のステップを持たないため、スプリントの終わりは `supervise.py new close` で組む |
+| `ndf route render close` | 確定仕様化と PR・CI・マージのプランを作る。振り返り・棚卸し・課題を閉じる `close` のステップを持たないため、スプリントの終わりのまとめは P1b #3092 が `ndf` の副命令に足す。新しいプラグインだけではまだ打てない |
 | `ndf plan queue` | プランを同時に `--max` 本まで順に流す |
 | `ndf plan wait` | queue の終わりか attention の行まで待つ。待ち方は [waiting.md](waiting.md) |
 | `ndf plan next` | プランを 1 本だけフォアグラウンドで流す |

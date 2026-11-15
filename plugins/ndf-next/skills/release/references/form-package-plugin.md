@@ -1,6 +1,6 @@
 # リリースの形: パッケージ・プラグイン
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `release-steps.py`（M2）・`release-verification-steps.py`（M2）・`supervise.py`（C2。`new release --channel`）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `release-steps.py`（M2）・`release-verification-steps.py`（M2）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 利用者が取得の操作をして受け取るもの。**取得先の作りで 2 つに分かれる。**
 
@@ -29,7 +29,7 @@
 版はパッケージごとに独立するため、スプリントで複数の版を上げるときは、起点も大小の判断も
 パッケージごとに分ける。
 
-**本番のリリースプラン（`supervise.py new release --channel prod`）は、宣言の `release.plugin` の後に、
+**本番のリリースプラン（`ndf route render release` で作る）は、宣言の `release.plugin` の後に、
 差分のある他のプラグインの版を、承認資料の「版を上げる他のプラグイン」の表の上げ幅で上げる（`bump-others`
 のステップ。`release-steps.py changed-plugins --decided`）。** 対象は前の本番のタグ（`<release.plugin>--v<版>`。
 `--prev-tag` で指定できる）からの差分にあるプラグインのうち、差分の中でまだ版を上げていないものである。表を
