@@ -261,6 +261,16 @@ def ruleset_merge_methods(rules: Iterable[dict]) -> Optional[list[str]]:
     return None if found is None else [m for m in MERGE_METHODS if m in found]
 
 
+def settings_merge_methods(raw: Any, named: Optional[Sequence[str]]) -> list[str]:
+    """リポジトリの設定（`GET /repos/{repo}` の生の応答）と ruleset が許す方式 `named` の両方が許すマージの方式。
+
+    設定の項目が無い方式は候補に残し、項目があれば値が True の方式だけを許す。`named` が None なら設定だけで決める。
+    """
+    settings = raw if isinstance(raw, dict) else {}
+    allowed = [m for m, spec in _MERGE_METHOD_SPECS.items() if spec.setting not in settings or settings[spec.setting] is True]
+    return allowed if named is None else [m for m in allowed if m in named]
+
+
 def landed(pull: Pull, method: str, base_ref: str, repo: git.Git) -> bool:
     """PR の head が基底 `base_ref`（`origin/develop` など）に含まれたかを、マージの方式ごとに確かめる（3378-2）。
 
@@ -582,10 +592,7 @@ class GitHub:
         named = ruleset_merge_methods(rules if isinstance(rules, list) else [])
         if named == []:
             return []
-        raw = self.rest("GET", f"/repos/{self.repo}")
-        settings = raw if isinstance(raw, dict) else {}
-        allowed = [m for m, spec in _MERGE_METHOD_SPECS.items() if spec.setting not in settings or settings[spec.setting] is True]
-        return allowed if named is None else [m for m in allowed if m in named]
+        return settings_merge_methods(self.rest("GET", f"/repos/{self.repo}"), named)
 
     def check_runs(self, sha: str) -> list[dict]:
         """コミットのチェックの生の一覧を `total_count` に届くまで読む（`github.check-runs` ページまで）。"""
