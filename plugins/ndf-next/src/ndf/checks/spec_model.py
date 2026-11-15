@@ -15,7 +15,6 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -26,7 +25,7 @@ from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 
 from ndf import cli, contracts, identity
-from ndf.checks.model import CheckError
+from ndf.checks.model import CheckError, read_json
 from ndf.checks.spec_args import ArgTree, extract, from_manual
 from ndf.contracts import exit_codes, facts
 
@@ -50,6 +49,8 @@ INTERNAL = "internal"
 # エントリポイントの表の種類と順番
 SPEC_KIND = "spec"
 CALLER_FIRST = "caller-first"
+# 正本が読めないときの指摘の前置き
+UNREADABLE = "規約の正本を読めない"
 
 
 def decl_place(places: dict[str, dict[str, Any]]) -> str:
@@ -218,15 +219,8 @@ def public_ids(entrypoints: list[dict[str, Any]], files: list[dict[str, Any]]) -
     return out
 
 
-def _read_json(path: Path) -> Any:
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        raise CheckError(f"規約の正本を読めない: {path}: {exc}") from exc
-
-
 def _checked_schema(path: Path) -> dict[str, Any]:
-    schema = _read_json(path)
+    schema = read_json(path, UNREADABLE)
     try:
         Draft202012Validator.check_schema(schema)
     except SchemaError as exc:
@@ -266,7 +260,7 @@ def declarations(plugin_root: Path, public: frozenset[tuple[str, str]] | set[tup
 
 def _sections(path: Path) -> tuple[tuple[dict[str, Any], ...], tuple[dict[str, Any], ...]]:
     """節の表（事実の表の形の行と、注釈 `x-ndf-read-by`）を読む。"""
-    raw = _read_json(path)
+    raw = read_json(path, UNREADABLE)
     missing = [k for k in ("summary", "owner", "columns", "rows") if k not in raw]
     if missing:
         raise CheckError(f"節の表 {path} に鍵が無い: {', '.join(missing)}")
@@ -310,7 +304,7 @@ def skills(
 ) -> list[SkillSpec]:
     """実体のある配る Skill と、公開する面に載る Skill に、Skill の入出力の表の行を付ける。"""
     # 配る Skill の表と実体の置き場（持ち主は S1b の ndf.domains.manifests。検査は持ち主のパッケージを読まず、同じファイルを読む）
-    listed = [s["name"] for s in _read_json(plugin_root / "manifests" / "skills.json")["skills"]]
+    listed = [s["name"] for s in read_json(plugin_root / "manifests" / "skills.json", UNREADABLE)["skills"]]
     present = {p.parent.name for p in (plugin_root / "skills").glob("*/SKILL.md")}
     rows = {r["id"]: r for r in facts.rows("skill-io")}
     public_eps = {r["target"]: r for r in entrypoints if r["kind"] == "skill"}
