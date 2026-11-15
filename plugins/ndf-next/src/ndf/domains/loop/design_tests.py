@@ -47,6 +47,42 @@ def _grep(g: git.Git) -> Grep:
     return run
 
 
+# パスを持たない名前を探す範囲（リポジトリ全体から設計などの文書を除く）
+WHOLE = (".", ":(exclude)*.md")
+
+
+def _query(shape: dt.Span) -> tuple[list[str], tuple[str, ...]]:
+    """関数の名前の判定で git grep へ渡す名前と範囲。"""
+    if shape.path is not None:
+        return list(shape.names), (shape.path,)
+    return list(shape.names[:1]), WHOLE
+
+
+def _batched(grep: Grep, shapes: Sequence[dt.Span], files: set[str]) -> Grep:
+    """`shapes` の名前を範囲ごとに 1 回の git grep で探しておき、判定の問い合わせに答える `Grep`。
+
+    名前ごとに git grep を打つと、パスの無い名前が N 個ある設計でリポジトリ全体の検索と Git の起動が N 回になる
+    （PR 3537 の指摘）。先に探していない名前（改名を当てた名前など）の問い合わせだけ `grep` を打つ。範囲の検索が
+    失敗すれば、その範囲の問い合わせは None（確かめられない）。
+    """
+    wanted: dict[tuple[str, ...], set[str]] = {}
+    for shape in shapes:
+        if shape.kind == dt.Kind.FILE or (shape.path is not None and shape.path not in files):
+            continue
+        names, pathspec = _query(shape)
+        wanted.setdefault(pathspec, set()).update(names)
+    held = {spec: grep(sorted(names), spec) for spec, names in wanted.items()}
+
+    def run(names: Sequence[str], pathspec: Sequence[str]) -> Optional[set[str]]:
+        spec = tuple(pathspec)
+        if spec in held and set(names) <= wanted[spec]:
+            got = held[spec]
+            return None if got is None else got & set(names)
+        return grep(names, pathspec)
+
+    return run
+
+
 def judge(shape: dt.Span, files: set[str], dirs: set[str], grep: Grep) -> dt.Verdict:
     """名前 1 つの判定（present / missing / unverified）。"""
     if shape.kind == dt.Kind.FILE:
@@ -57,8 +93,8 @@ def judge(shape: dt.Span, files: set[str], dirs: set[str], grep: Grep) -> dt.Ver
         return dt.Verdict.PRESENT if here else dt.Verdict.MISSING
     if shape.path is not None and shape.path not in files:
         return dt.Verdict.MISSING
-    names = list(shape.names) if shape.path is not None else list(shape.names[:1])
-    found = grep(names, [shape.path] if shape.path is not None else [".", ":(exclude)*.md"])
+    names, pathspec = _query(shape)
+    found = grep(names, pathspec)
     if found is None:
         return dt.Verdict.UNVERIFIED
     return dt.Verdict.PRESENT if set(names) <= found else dt.Verdict.MISSING
@@ -108,7 +144,8 @@ def run(a: argparse.Namespace) -> dict[str, Any]:
     dirs = {str(p) for f in files for p in PurePosixPath(f).parents if str(p) != "."}
     pairs = dt.renames(text for _, text in designs)
     found, skipped = _collect(designs)
-    rows = [judge_found(it, pairs, files, dirs, _grep(g)) for it in found]
+    grep = _batched(_grep(g), [it.shape for it in found], files)
+    rows = [judge_found(it, pairs, files, dirs, grep) for it in found]
     return _report(rows, [doc for doc, _ in designs], skipped)
 
 

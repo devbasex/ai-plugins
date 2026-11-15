@@ -247,6 +247,7 @@ STAGE_INPUTS = {
     "impl": ("issues", "worktree", "mode"),
     "design-merge": ("issues", "worktree"),
     "quality-gates": ("issues", "worktree"),
+    "cross-review": ("issues", "worktree"),
 }
 
 
@@ -408,6 +409,16 @@ def test_review_without_a_declaration_runs_cross_review_with_the_pr_made_before_
     rest = review["run"][4:]
     assert rest[1:4] == ["cross-review", "run", "--state-dir"] and rest[rest.index("--purpose") + 1] == "design"
     assert rest[rest.index("--base") + 1] == "develop" and "--pr" not in rest and rest[-2] == "--findings"
+
+
+def test_review_without_a_declaration_resolves_the_base_for_the_cross_review_template(tmp_path, monkeypatch):
+    # PR 3537 の指摘: cross-review の雛形は params に base を持たないので、宛先はリポジトリのブランチの運用から決める
+    held = PROJECT["workflow"]
+    monkeypatch.setitem(PROJECT, "workflow", {"launch": {"rebuild": held["launch"]["rebuild"]}})
+    plan, _, _, _ = _filled_plan(tmp_path, monkeypatch, "cross-review")
+    review = next(s for s in plan["steps"] if s["id"] == "review")
+    rest = review["run"][4:]
+    assert rest[rest.index("--base") + 1] == "develop" and rest[rest.index("--purpose") + 1] == "code"
 
 
 @pytest.mark.parametrize(("name", "purpose"), [("design", "design"), ("check", "code"), ("cross-review", "code")])

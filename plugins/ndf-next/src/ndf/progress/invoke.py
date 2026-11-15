@@ -489,10 +489,17 @@ def review_launch(template_name: str, branch: str, base: str) -> list[str]:
 
 
 def _fill_review(t: route.Template, values: Mapping[str, route.Value], wanted: Mapping[str, str]) -> dict[str, route.Value]:
-    """宣言に無い `{{review}}` の値（ブランチと宛先が決まらなければ含めない）。"""
+    """宣言に無い `{{review}}` の値（ブランチと宛先が決まらなければ含めない）。
+
+    雛形が `base` を持たない（`cross-review` など）ときは、宛先を `route.default_base`（ブランチの運用の宣言、無ければ
+    origin の既定ブランチ）から決める。`route.derived` は雛形の params にある値しか補わないため（PR 3537 の指摘）。
+    """
     if "review" not in wanted or "review" in values:
         return {}
     branch, base = values.get("branch"), values.get("base")
+    repo = values.get("repo")
+    if base is None and isinstance(repo, str) and repo:
+        base = route.default_base(Path(repo))
     if not isinstance(branch, str) or not isinstance(base, str) or not branch or not base:
         return {}
     return {"review": review_launch(t.name, branch, base)}

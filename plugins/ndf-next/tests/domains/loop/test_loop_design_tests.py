@@ -174,3 +174,30 @@ def test_current_grep_failure_is_incomplete_with_gaps(design_tests, rel_design: 
     assert {i["name"]: i["result"] for i in got["items"]} == {"test_kept_rule": "unverified", "test_kept.py": "present"}
     assert got["metrics"] == {"designs": 1, "names": 2, "skipped": 0, "missing": 0, "unverified": 1, "renamed": 0}
     assert got["gaps"] == [{"kind": "test_function", "name": "test_kept_rule", "reason": "rel.md の 3 行を確かめられなかった"}]
+
+
+def test_bare_names_are_searched_with_one_git_grep(design_tests, repo: Path, monkeypatch: pytest.MonkeyPatch):
+    # PR 3537 の指摘: パスの無い名前が N 個あっても、リポジトリ全体の検索は 1 回にまとめる（無い名前は missing のまま）
+    from ndf.domains.loop import design_tests as mod
+
+    calls: list[tuple[tuple[str, ...], tuple[str, ...]]] = []
+    real = mod._grep
+
+    def counted(g):
+        inner = real(g)
+
+        def run(names, pathspec):
+            calls.append((tuple(names), tuple(pathspec)))
+            return inner(names, pathspec)
+
+        return run
+
+    monkeypatch.setattr(mod, "_grep", counted)
+    (repo / "bare.md").write_text("## テスト設計\n\n`test_kept_rule` と `test_stage` と `test_nowhere`\n", encoding="utf-8")
+    got = design_tests("--design", "bare.md")
+    assert {i["name"]: i["result"] for i in got["items"]} == {
+        "test_kept_rule": "present",
+        "test_stage": "present",
+        "test_nowhere": "missing",
+    }
+    assert [spec for _, spec in calls] == [mod.WHOLE]
