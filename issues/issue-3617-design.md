@@ -318,7 +318,7 @@ $ grep -n 'parity' plugins/ndf-next/src/ndf/checks/children.json
 | `.ndf/estimate.json`（`estimate.schema.json`） | `allocation_minutes`（`test`・`structure`・`verify`・`fix` の 0 より大きい数。省いた種類は初期値）を足す。`ndf-files.json` の `estimate` の `keys` に足す |
 | 初期値のファイル（`skills/cross-refactoring/data/allocation-defaults.json`） | `"initial": true` と、上書きの置き場（`.ndf/estimate.json` の `allocation_minutes`）を説明する `summary` を足す |
 | テンプレートの差し込み（`params.json`） | `remote` を足す。`parts/steps.json` の `push`・`base-sync` と `check.json` の `assess` が使う |
-| 副命令 `progress` | 範囲の差分が文書だけなら終了コード 1、そうでなければ 0、git が読めなければ 2 を返す下位の命令を足す（名前は詳細設計が決める） |
+| 副命令 `progress` | 下位の命令 `docs-only`（`--base <ベースブランチ>`・`--remote <リモート名>`）を足す。範囲の差分が文書だけなら止まった理由 `not_applicable`、そうでなければ `ok`、git が読めなければ止まった理由 `precondition` を結果 JSON で返す（形は詳細設計の「処理の手順」） |
 | `ndf launch-args` の結果 | 一覧が読めなかったとき、`items` に知らせ（種類 `notice`・理由）を 1 件載せる。`status` は `ok` のまま |
 | `ndf --help` | `check`・`manifests` を出さない。`ndf check`・`ndf manifests` は今と同じく動く |
 | 選べる値の基準（`scripts/ndf-choices.json`） | `{"version": 1, "sets": [{"id", "source", "values"}], "removed": [{"set", "value", "issue", "reason"}]}`。`source` は `{"rows": <事実の表のパス>, "key": "id"}`・`{"enum": <スキーマのパス>, "pointer": <JSON Pointer>}`・`{"files": <glob>, "prefix": <外す接頭辞>}` のどれか |
@@ -357,8 +357,8 @@ $ grep -n 'parity' plugins/ndf-next/src/ndf/checks/children.json
 | 8・I7 | 宣言に `upstream` を書いたリポジトリで、push・照合・`assess` の差分の基準・PR の取得・既定ブランチが `upstream` を使う（リリースの部品は除く。「人へ残す判断」） | 部品のどれかが宣言を読まないと落ちる |
 | 8・I7a | 点検 10 の場所に `remote-origin` の当たりが無く、`default` の 1 か所は走査の外になる。`default` を 2 か所に書いた入力で終了コード 2 | 部品のどれかが `origin` を書くか、`default` の除外を全キーへ広げると落ちる |
 | 9 | 宣言が無いと `origin` を使う | 既定を空にすると落ちる |
-| 10・I8・I8a | `docs.files` を書いたリポジトリで、すべて当たる差分は 1、1 つ外れると 0。工程の条件も同じ入力で同じ結果 | `assess` が宣言を読まないと落ちる |
-| 11・I8 | 宣言が無いと `.md` だけの差分で 1（Skill の `.md` でも 1） | 振る舞いの文書の既定を残すと落ちる |
+| 10・I8・I8a | `docs.files` を書いたリポジトリで、すべて当たる差分は `not_applicable`、1 つ外れると `ok`。工程の条件も同じ入力で同じ結果 | `assess` が宣言を読まないと落ちる |
+| 11・I8 | 宣言が無いと `.md` だけの差分で `not_applicable`（Skill の `.md` でも `not_applicable`） | 振る舞いの文書の既定を残すと落ちる |
 | 12・I9 | 宣言の値が初期値より先に効き、省いた種類は初期値。初期値のファイルが `initial` を持つ | 宣言を読まないと落ちる |
 | 13・I10 | 一覧の `ndf@<別の名前>`（有効）が外れ、旧い NDF が無ければ何も外さない | 登録名のハードコードに戻すと落ちる |
 | I10a | 一覧が読めない入力で、外さずに起動の引数を返し、知らせを 1 件載せる | 読めないときに止めると落ちる |
