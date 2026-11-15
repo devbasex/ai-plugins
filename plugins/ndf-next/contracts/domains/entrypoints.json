@@ -2,8 +2,8 @@
   "summary": "外の呼び手（サービス Factory のランナー）が NDF を起動し、NDF とやり取りするエントリポイント（Factory の契約）。エントリポイントごとに、呼び手が渡す引数と環境変数・やり取りの置き場と形・新しい側でエントリポイントを持つ子・呼び手と合わせる順番を持つ。引数は正規表現（全体が一致）で、Skill の名前の前置き（プラグイン名と :）は identity が決め、表は持たない。block の中身は「前置きの語（lead。任意）・Skill の起動・空白・引数」の並びである。見本は entrypoint-cases にある",
   "owner": "D2（contracts/domains）",
   "columns": {
-    "kind": {"type": "string", "summary": "エントリポイントの種類。skill は Skill の起動、block は応答の末尾の ndf-next ブロック（中身は Skill の起動）、report は応答の末尾の区間の報告、hook は hook の登録の行、command は副命令の起動、file は置き場のファイルでのやり取り"},
-    "target": {"type": "string", "summary": "エントリポイントの名前。skill と block は Skill の名前（前置きを除く）、report は結果の行の項目名、hook は hook の事象、command は副命令の名前、file は置き場（domains/places の id）"},
+    "kind": {"type": "string", "summary": "エントリポイントの種類。skill は Skill の起動、block は応答の末尾の ndf-next ブロック（中身は Skill の起動）、report は応答の末尾の区間の報告、hook は hook の登録の行、command は副命令の起動、file は置き場のファイルでのやり取り、spec は規約（契約のページ・宣言のスキーマ・入出力のスキーマ）の置き場"},
+    "target": {"type": "string", "summary": "エントリポイントの名前。skill と block は Skill の名前（前置きを除く）、report は結果の行の項目名、hook は hook の事象、command は副命令の名前、file は置き場（domains/places の id）、spec はプラグインの根からの規約のディレクトリ（入れ替えの後も同じ相対パス）"},
     "lead": {"type": "string", "summary": "block の中身で Skill の起動の前に置いてよい語（今の NDF の再開のコマンドの /goal と空白。sprint_loop_record.resume_command）。無ければ置かない", "optional": true},
     "args": {"type": "array", "summary": "呼び手が渡してよい引数の形（正規表現。どれか 1 つに全体が一致する）。report は結果の行の値", "optional": true},
     "env": {"type": "array", "summary": "呼び手が入れてよい環境変数（domains/env の id）。エントリポイントはこの表に無い名前に頼らない"},
@@ -24,6 +24,9 @@
     {"id": "file-loop-record", "kind": "file", "target": "ndf-loop", "env": ["NDF_FACTORY_RUN"], "files": ["loop-record"], "owner_child": "M1", "order": "kept", "source": "開発ループの loop.json（#3390）"},
     {"id": "file-ledgers", "kind": "file", "target": "mvv-state", "env": ["NDF_MVV_STATE_DIR"], "files": ["ask-ledger", "gate-rejections"], "owner_child": "P2", "order": "kept", "source": "ask.jsonl と gate-rejections.jsonl（#3390・volareinc/nd-factory#183）"},
     {"id": "file-issue-request", "kind": "file", "target": "issue-request", "env": ["NDF_ISSUE_REQUEST_FILE"], "files": ["issue-request"], "owner_child": "M7", "order": "kept", "source": "plugins/ndf/scripts/lib/runner_issue_request.py（#2216）"},
-    {"id": "gate-record", "kind": "command", "target": "gate", "args": ["設計承認ゲート", "リリース承認ゲート"], "env": ["NDF_FACTORY_RUN", "NDF_VERSION", "NDF_STATE_HOME", "NDF_LOOP_EXCLUDE", "NDF_ISSUE_REQUEST_FILE", "NDF_MVV_STATE_DIR", "NDF_PROGRESS_DB", "NDF_ORGANIZER_DIR", "NDF_ORGANIZER_LANE", "GH_TOKEN"], "owner_child": "P2", "order": "caller-first", "source": "sprint-state.py gate と gate-rejections.py record に渡す承認ゲートの名前（volareinc/nd-factory#183）"}
+    {"id": "gate-record", "kind": "command", "target": "gate", "args": ["設計承認ゲート", "リリース承認ゲート"], "env": ["NDF_FACTORY_RUN", "NDF_VERSION", "NDF_STATE_HOME", "NDF_LOOP_EXCLUDE", "NDF_ISSUE_REQUEST_FILE", "NDF_MVV_STATE_DIR", "NDF_PROGRESS_DB", "NDF_ORGANIZER_DIR", "NDF_ORGANIZER_LANE", "GH_TOKEN"], "owner_child": "P2", "order": "caller-first", "source": "sprint-state.py gate と gate-rejections.py record に渡す承認ゲートの名前（volareinc/nd-factory#183）"},
+    {"id": "spec-pages", "kind": "spec", "target": "docs/contracts", "env": [], "owner_child": "S2", "order": "kept", "source": "契約のページ（ndf check --write-spec が生成する。#3518）"},
+    {"id": "spec-declarations", "kind": "spec", "target": "contracts/schemas/declarations", "env": [], "files": ["project", "supervise", "release", "worktree", "glossary", "instructions", "mvv", "mvv-body", "pace", "review", "backlog", "runtime-policy", "ask", "context", "estimate", "issue-items", "projects", "code-metrics"], "owner_child": "S2", "order": "kept", "source": "宣言のスキーマと mvv.md の節の表（#3518）"},
+    {"id": "spec-io", "kind": "spec", "target": "contracts/schemas/io", "env": [], "owner_child": "S2", "order": "kept", "source": "副命令ごとの引数のスキーマ（生成物）と結果のスキーマ（#3518・#3519）"}
   ]
 }

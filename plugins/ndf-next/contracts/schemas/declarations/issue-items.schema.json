@@ -1,0 +1,135 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "declarations/issue-items.schema.json",
+  "title": "Issue の記載項目の宣言（.ndf/issue-items.json）",
+  "description": "Issue の種類ごとの記載項目（必須・該当時・不要）と水準。あれば NDF の既定の代わりに使う",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "編集のときの補完に使うスキーマの位置。読み手は参照しない"
+    },
+    "version": {
+      "type": "integer",
+      "enum": [
+        1
+      ],
+      "description": "宣言の形の版。読み手は知らない版を読まない"
+    },
+    "kinds": {
+      "type": "array",
+      "description": "Issue の種類の並び",
+      "items": {
+        "type": "string"
+      }
+    },
+    "last": {
+      "type": "string",
+      "description": "書き手が書く節の最後に置く項目の id",
+      "default": "request"
+    },
+    "record_headings": {
+      "type": "array",
+      "description": "工程が足す節の見出しの語",
+      "items": {
+        "type": "string"
+      }
+    },
+    "kind_labels": {
+      "type": "object",
+      "description": "種類 → GitHub のラベルの名前",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "items": {
+      "type": "array",
+      "description": "記載項目の並び",
+      "items": {
+        "type": "object",
+        "description": "項目 1 つ",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "項目の id"
+          },
+          "name": {
+            "type": "string",
+            "description": "見出し"
+          },
+          "need": {
+            "type": "object",
+            "description": "種類 → 必須・該当時・不要",
+            "additionalProperties": {
+              "type": "string",
+              "enum": [
+                "必須",
+                "該当時",
+                "不要"
+              ]
+            }
+          },
+          "level": {
+            "type": "string",
+            "description": "水準"
+          },
+          "when": {
+            "type": "object",
+            "description": "該当する条件",
+            "properties": {
+              "text": {
+                "type": "string",
+                "description": "条件の文"
+              },
+              "key": {
+                "type": "string",
+                "description": "機械で判定する鍵",
+                "enum": [
+                  "ai",
+                  "origin"
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "name",
+          "need"
+        ]
+      }
+    }
+  },
+  "x-ndf-place": "worktree",
+  "x-ndf-read-by": [
+    {
+      "by": "工程: 起票",
+      "when": "Issue の本文の項目を決めるとき"
+    }
+  ],
+  "examples": [
+    {
+      "version": 1,
+      "kinds": [
+        "不具合",
+        "機能"
+      ],
+      "items": [
+        {
+          "id": "purpose",
+          "name": "目的",
+          "need": {
+            "不具合": "必須",
+            "機能": "必須"
+          }
+        }
+      ]
+    }
+  ]
+}

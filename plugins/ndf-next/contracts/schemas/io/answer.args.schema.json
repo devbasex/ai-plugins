@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/io/answer.args.schema.json",
+  "title": "ndf answer の引数",
+  "description": "ndf answer が受ける引数。キーは引数の名前（オプションは -- の名前、位置引数は名前）。規約の生成が作り、手で直さない",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "table_id": {
+          "type": "string",
+          "description": "答える進行表の ID",
+          "x-ndf-positional": true
+        },
+        "--gate": {
+          "type": "string",
+          "description": "問いの id（承認ゲートの結果の metrics.gate.id）"
+        },
+        "--result": {
+          "type": "string",
+          "description": "答えの語（承認ゲートの結果の routes のキー）"
+        },
+        "--reason": {
+          "type": "string"
+        },
+        "--by": {
+          "type": "string",
+          "description": "答えた者（human・conductor・organizer か service:<主体>）"
+        },
+        "--key": {
+          "type": "string",
+          "description": "冪等の鍵（同じ鍵の答え直しは書かない）"
+        },
+        "--notes": {
+          "type": "string",
+          "description": "差し戻し（revise）の指摘ファイル"
+        },
+        "--head": {
+          "type": "string",
+          "description": "見た PR の head の SHA"
+        },
+        "--material-sha256": {
+          "type": "string",
+          "description": "見た承認資料の sha256"
+        },
+        "--drop": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "設計承認ゲートで外す課題の番号"
+        }
+      },
+      "required": [
+        "table_id",
+        "--gate",
+        "--result",
+        "--reason",
+        "--by",
+        "--key"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "io/loop.result.schema.json",
+  "title": "ndf loop の結果 JSON",
+  "description": "ndf loop が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果の契約（result.schema.json）が持ち、ここは metrics と items の形だけを足す。載せた項目のほかの項目は受け流す",
+  "allOf": [
+    {
+      "$ref": "../result.schema.json"
+    }
+  ],
+  "properties": {
+    "tool": {
+      "const": "loop"
+    },
+    "metrics": {
+      "type": "object",
+      "description": "ndf loop の計測値",
+      "properties": {
+        "answer": {
+          "description": "コードが出す項目 answer（値の無い経路では null）"
+        },
+        "head": {
+          "description": "コードが出す項目 head（値の無い経路では null）"
+        },
+        "lap": {
+          "description": "コードが出す項目 lap（値の無い経路では null）"
+        },
+        "outcome": {
+          "description": "コードが出す項目 outcome（値の無い経路では null）"
+        },
+        "remaining": {
+          "description": "コードが出す項目 remaining（値の無い経路では null）",
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "streak": {
+          "description": "コードが出す項目 streak（値の無い経路では null）"
+        }
+      }
+    },
+    "items": {
+      "type": "array",
+      "description": "ndf loop の項目の並び",
+      "items": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  }
+}

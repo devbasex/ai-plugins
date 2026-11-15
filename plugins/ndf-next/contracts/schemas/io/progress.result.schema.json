@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "io/progress.result.schema.json",
+  "title": "ndf progress の結果 JSON",
+  "description": "ndf progress が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果の契約（result.schema.json）が持ち、ここは metrics と items の形だけを足す。載せた項目のほかの項目は受け流す",
+  "allOf": [
+    {
+      "$ref": "../result.schema.json"
+    }
+  ],
+  "properties": {
+    "tool": {
+      "const": "progress"
+    },
+    "metrics": {
+      "type": "object",
+      "description": "ndf progress の計測値",
+      "properties": {
+        "gate": {
+          "description": "コードが出す項目 gate（値の無い経路では null）"
+        },
+        "head": {
+          "description": "コードが出す項目 head（値の無い経路では null）"
+        },
+        "table_id": {
+          "description": "コードが出す項目 table_id（値の無い経路では null）"
+        }
+      }
+    },
+    "items": {
+      "type": "array",
+      "description": "ndf progress の項目の並び",
+      "items": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  }
+}

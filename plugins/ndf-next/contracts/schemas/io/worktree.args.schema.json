@@ -1,0 +1,343 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/io/worktree.args.schema.json",
+  "title": "ndf worktree の引数",
+  "description": "ndf worktree が受ける引数。キーは引数の名前（オプションは -- の名前、位置引数は名前）。規約の生成が作り、手で直さない",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "check",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "cleanup",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        },
+        "--dry-run": {
+          "type": "boolean",
+          "description": "判断だけを出し、何も消さない"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "create",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        },
+        "branch": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "--from": {
+          "type": "string",
+          "description": "ベースブランチ（既定はスプリントの起点）"
+        }
+      },
+      "required": [
+        "subcommand",
+        "branch"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "deps",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        },
+        "worktree": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "--if-unprepared": {
+          "type": "boolean",
+          "description": "今の HEAD と宣言で用意した印があれば何もしない"
+        }
+      },
+      "required": [
+        "subcommand",
+        "worktree"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "guard",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        },
+        "paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-ndf-positional": true
+        },
+        "--base": {
+          "type": "string",
+          "description": "相対パスの起点（既定は --cwd）"
+        },
+        "--unread": {
+          "type": "boolean",
+          "description": "書き込み先を読み切れなかった（構文を解けないコマンド）"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "init",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        },
+        "--force": {
+          "type": "boolean",
+          "description": "既にある宣言を書き直す"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "list",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "localenv",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "setup",
+            "verify",
+            "healthcheck",
+            "aim",
+            "mode"
+          ],
+          "x-ndf-positional": true
+        },
+        "worktree": {
+          "type": "string",
+          "x-ndf-positional": true
+        }
+      },
+      "required": [
+        "subcommand",
+        "action"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "merged",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        },
+        "prs": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "x-ndf-positional": true
+        },
+        "--flow-record": {
+          "type": "string",
+          "description": "スプリントの開始時の記録（branch_flow の写しと production_branch）"
+        }
+      },
+      "required": [
+        "subcommand",
+        "prs"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "session",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "testenv",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "env",
+            "tag",
+            "bake",
+            "up",
+            "stop",
+            "down",
+            "test",
+            "compose-env",
+            "reap",
+            "reclaim",
+            "expose",
+            "unexpose"
+          ],
+          "x-ndf-positional": true
+        },
+        "worktree": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "--profile": {
+          "type": "string"
+        },
+        "--tag": {
+          "type": "string"
+        },
+        "--kind": {
+          "type": "string"
+        },
+        "--out": {
+          "type": "string"
+        },
+        "--idle": {
+          "type": "string"
+        },
+        "--volumes": {
+          "type": "boolean"
+        },
+        "--wait-service": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "subcommand",
+        "action"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "trash",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        },
+        "--ref": {
+          "type": "string",
+          "description": "本番に出たコミット（タグ・本番チャネル）"
+        },
+        "--yes": {
+          "type": "boolean",
+          "description": "--only の退避先を消す。人が候補を見て承認したときだけ付ける"
+        },
+        "--only": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "subcommand",
+        "--ref"
+      ]
+    }
+  ]
+}

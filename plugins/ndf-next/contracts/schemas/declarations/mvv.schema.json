@@ -1,0 +1,304 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "declarations/mvv.schema.json",
+  "title": "プロジェクト MVV の宣言（.ndf/mvv.json）",
+  "description": "プロジェクト MVV の本文の置き場・改訂の設定・承認された版の並び。人の承認（M7）で書く",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "versions"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "編集のときの補完に使うスキーマの位置。読み手は参照しない"
+    },
+    "version": {
+      "type": "integer",
+      "enum": [
+        1
+      ],
+      "description": "宣言の形の版。読み手は知らない版を読まない"
+    },
+    "body": {
+      "default": "mvv.md",
+      "minLength": 1,
+      "type": "string",
+      "description": "body（このリポジトリの宣言にある最上位のキー）"
+    },
+    "settings": {
+      "$ref": "#/$defs/MvvSettings",
+      "description": "settings（このリポジトリの宣言にある最上位のキー）"
+    },
+    "versions": {
+      "items": {
+        "$ref": "#/$defs/MvvVersion"
+      },
+      "minItems": 1,
+      "type": "array",
+      "description": "versions（このリポジトリの宣言にある最上位のキー）"
+    }
+  },
+  "x-ndf-place": "worktree",
+  "x-ndf-read-by": [
+    {
+      "by": "ndf records mvv",
+      "when": "MVV の照合と改訂の提案のとき"
+    },
+    {
+      "by": "ndf records preflight",
+      "when": "工程の前の確かめで本文の置き場を読むとき"
+    },
+    {
+      "by": "ndf answer",
+      "when": "承認ゲートで MVV の版を照らすとき"
+    }
+  ],
+  "examples": [
+    {
+      "version": 1,
+      "body": "mvv.md",
+      "settings": {
+        "revise_after": {
+          "overrides": 3
+        }
+      },
+      "versions": [
+        {
+          "version": 1,
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "approved_at": "2026-01-01T00:00:00+00:00",
+          "approved_by": "example",
+          "reason": "初版",
+          "vet": {
+            "verdict": "follow",
+            "at": "2026-01-01T00:00:00+00:00"
+          },
+          "changes": [],
+          "body": "# 例のプロジェクト MVV\n"
+        }
+      ]
+    }
+  ],
+  "$defs": {
+    "MvvChange": {
+      "additionalProperties": false,
+      "properties": {
+        "item": {
+          "title": "Item",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "added",
+            "changed",
+            "removed"
+          ],
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "item",
+        "kind"
+      ],
+      "title": "MvvChange",
+      "type": "object"
+    },
+    "MvvSettings": {
+      "additionalProperties": false,
+      "properties": {
+        "trend_commits": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Trend Commits"
+        },
+        "trend_issues": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Trend Issues"
+        },
+        "unknown_streak": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unknown Streak"
+        },
+        "revise_after": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RevisePolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "MvvSettings",
+      "type": "object"
+    },
+    "MvvVersion": {
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "sha256": {
+          "minLength": 1,
+          "title": "Sha256",
+          "type": "string"
+        },
+        "approved_at": {
+          "minLength": 1,
+          "title": "Approved At",
+          "type": "string"
+        },
+        "approved_by": {
+          "minLength": 1,
+          "title": "Approved By",
+          "type": "string"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        },
+        "vet": {
+          "$ref": "#/$defs/MvvVet"
+        },
+        "changes": {
+          "items": {
+            "$ref": "#/$defs/MvvChange"
+          },
+          "title": "Changes",
+          "type": "array"
+        },
+        "body": {
+          "minLength": 1,
+          "title": "Body",
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "sha256",
+        "approved_at",
+        "approved_by",
+        "vet",
+        "changes",
+        "body"
+      ],
+      "title": "MvvVersion",
+      "type": "object"
+    },
+    "MvvVet": {
+      "additionalProperties": false,
+      "properties": {
+        "verdict": {
+          "enum": [
+            "follow",
+            "unknown"
+          ],
+          "title": "Verdict",
+          "type": "string"
+        },
+        "at": {
+          "title": "At",
+          "type": "string"
+        },
+        "accepted_unknown": {
+          "default": false,
+          "title": "Accepted Unknown",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "verdict",
+        "at"
+      ],
+      "title": "MvvVet",
+      "type": "object"
+    },
+    "RevisePolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "overrides": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Overrides"
+        },
+        "unknowns": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unknowns"
+        },
+        "escapes": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Escapes"
+        }
+      },
+      "title": "RevisePolicy",
+      "type": "object"
+    }
+  }
+}

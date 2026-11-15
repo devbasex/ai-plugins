@@ -1,0 +1,296 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/io/records.args.schema.json",
+  "title": "ndf records の引数",
+  "description": "ndf records が受ける引数。キーは引数の名前（オプションは -- の名前、位置引数は名前）。規約の生成が作り、手で直さない",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "cleanup-stage",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        },
+        "prs": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "x-ndf-positional": true
+        }
+      },
+      "required": [
+        "subcommand",
+        "prs"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "close-check",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        },
+        "issue": {
+          "type": "integer",
+          "x-ndf-positional": true
+        },
+        "--verification": {
+          "type": "string",
+          "description": "リリース後テストの記録（release-verification のスキーマの JSON）"
+        },
+        "--require": {
+          "type": "boolean",
+          "description": "記録が無ければ閉じない"
+        }
+      },
+      "required": [
+        "subcommand",
+        "issue"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "glossary meanings",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "glossary render",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        },
+        "--check": {
+          "type": "boolean",
+          "description": "書かずに、今と違うファイルを出す"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "gws-check",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "handoff check",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        },
+        "path": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "--trim": {
+          "type": "boolean",
+          "description": "雛形に無い節を退避先へ移してから確かめる"
+        },
+        "--history": {
+          "type": "string",
+          "description": "退避先（--trim のとき要る）"
+        }
+      },
+      "required": [
+        "subcommand",
+        "path"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "mvv answer",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        },
+        "--version": {
+          "type": "integer",
+          "description": "答えたときの MVV の版（無ければ worktree の宣言の現行の版）"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "mvv signals",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        },
+        "--base": {
+          "type": "string",
+          "description": "ベースブランチ"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--base"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "preflight",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "spec finalize",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        },
+        "--spec": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "溶かした先の確定仕様（複数可）"
+        },
+        "--remove": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "消す設計（複数可）"
+        },
+        "--source-of": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "<語>=<ファイル> で語の正本を明示する"
+        },
+        "--message": {
+          "type": "string",
+          "description": "コミットの件名。無ければコミットせずパスだけを出す",
+          "x-ndf-aliases": [
+            "-m"
+          ]
+        }
+      },
+      "required": [
+        "subcommand",
+        "--spec"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "usage report",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        },
+        "--since": {
+          "type": "string"
+        },
+        "--until": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--since",
+        "--until"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "usage stop",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    }
+  ]
+}

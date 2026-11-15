@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "io/worktree.result.schema.json",
+  "title": "ndf worktree の結果 JSON",
+  "description": "ndf worktree が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果の契約（result.schema.json）が持ち、ここは metrics と items の形だけを足す。載せた項目のほかの項目は受け流す",
+  "allOf": [
+    {
+      "$ref": "../result.schema.json"
+    }
+  ],
+  "properties": {
+    "tool": {
+      "const": "worktree"
+    },
+    "metrics": {
+      "type": "object",
+      "description": "ndf worktree の計測値",
+      "properties": {
+        "created": {
+          "description": "コードが出す項目 created（値の無い経路では null）"
+        },
+        "existing": {
+          "description": "コードが出す項目 existing（値の無い経路では null）"
+        },
+        "exit": {
+          "description": "コードが出す項目 exit（値の無い経路では null）"
+        },
+        "tag": {
+          "description": "コードが出す項目 tag（値の無い経路では null）"
+        },
+        "url": {
+          "description": "コードが出す項目 url（値の無い経路では null）"
+        }
+      }
+    },
+    "items": {
+      "type": "array",
+      "description": "ndf worktree の項目の並び",
+      "items": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  }
+}

@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "declarations/runtime-policy.schema.json",
+  "title": "使ってよいランタイムの宣言（.ndf/runtimes.json）",
+  "description": "起動してよいランタイムと cross-review の固定の組。認可に関わるため、メインディレクトリから読む",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "allowed"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "編集のときの補完に使うスキーマの位置。読み手は参照しない"
+    },
+    "version": {
+      "type": "integer",
+      "enum": [
+        1
+      ],
+      "description": "宣言の形の版。読み手は知らない版を読まない"
+    },
+    "allowed": {
+      "type": "array",
+      "description": "起動してよいランタイム（1 つ以上、重複なし）",
+      "items": {
+        "type": "string",
+        "enum": [
+          "claude",
+          "codex",
+          "agy",
+          "kiro"
+        ]
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "review_seats": {
+      "type": "array",
+      "description": "cross-review の固定の組（2 つの異なる席の名前。どちらのランタイムも allowed にある）",
+      "items": {
+        "type": "string",
+        "pattern": "^(claude|codex|agy|kiro)(-[2-9])?$"
+      },
+      "minItems": 2,
+      "maxItems": 2,
+      "uniqueItems": true
+    }
+  },
+  "x-ndf-place": "main",
+  "x-ndf-read-by": [
+    {
+      "by": "工程: ランタイムの起動",
+      "when": "ランタイムを起動する前に宣言の外の名前を止めるとき"
+    }
+  ],
+  "examples": [
+    {
+      "version": 1,
+      "allowed": [
+        "claude"
+      ],
+      "review_seats": [
+        "claude",
+        "claude-2"
+      ]
+    }
+  ]
+}

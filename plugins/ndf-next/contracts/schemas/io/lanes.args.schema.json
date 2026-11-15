@@ -1,0 +1,598 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/io/lanes.args.schema.json",
+  "title": "ndf lanes の引数",
+  "description": "ndf lanes が受ける引数。キーは引数の名前（オプションは -- の名前、位置引数は名前）。規約の生成が作り、手で直さない",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "answered",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "sprint_id": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "--answer": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subcommand",
+        "sprint_id",
+        "--answer"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "init",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "plan_file": {
+          "type": "string",
+          "x-ndf-positional": true
+        }
+      },
+      "required": [
+        "subcommand",
+        "plan_file"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "lane add",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "plan": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "lane_file": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "--request": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subcommand",
+        "plan",
+        "lane_file"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "limits",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "plan": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "--max-lanes": {
+          "type": "integer"
+        },
+        "--max-plans": {
+          "type": "integer"
+        },
+        "--reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subcommand",
+        "plan",
+        "--reason"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "move",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "plan": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "from_lane": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "row": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "to_lane": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "--reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subcommand",
+        "plan",
+        "from_lane",
+        "row",
+        "to_lane",
+        "--reason"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "release",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "plan": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "requests": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-ndf-positional": true
+        },
+        "--result": {
+          "type": "string",
+          "enum": [
+            "released",
+            "rejected"
+          ]
+        },
+        "--reason": {
+          "type": "string"
+        },
+        "--version": {
+          "type": "string"
+        },
+        "--release": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subcommand",
+        "plan",
+        "requests",
+        "--result",
+        "--reason"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "request close",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "plan": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "request": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "--reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subcommand",
+        "plan",
+        "request",
+        "--reason"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "row add",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "plan": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "lane": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "--issues": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          }
+        },
+        "--index": {
+          "type": "integer",
+          "description": "並びの位置（0 が先頭）"
+        },
+        "--args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "--reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subcommand",
+        "plan",
+        "lane",
+        "--issues",
+        "--reason"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "row cancel",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "plan": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "lane": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "row": {
+          "type": "string",
+          "description": "行の鍵（r1 など）",
+          "x-ndf-positional": true
+        },
+        "--reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subcommand",
+        "plan",
+        "lane",
+        "row",
+        "--reason"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "row carry",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "plan": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "lane": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "row": {
+          "type": "string",
+          "description": "行の鍵（r1 など）",
+          "x-ndf-positional": true
+        },
+        "--issues": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          }
+        },
+        "--reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subcommand",
+        "plan",
+        "lane",
+        "row",
+        "--issues",
+        "--reason"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "row end",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "sprint_id": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "--outcome": {
+          "type": "string",
+          "enum": [
+            "completed",
+            "cancelled"
+          ]
+        }
+      },
+      "required": [
+        "subcommand",
+        "sprint_id",
+        "--outcome"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "row move",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "plan": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "lane": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "row": {
+          "type": "string",
+          "description": "行の鍵（r1 など）",
+          "x-ndf-positional": true
+        },
+        "--index": {
+          "type": "integer",
+          "description": "並びの位置（0 が先頭）"
+        },
+        "--reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subcommand",
+        "plan",
+        "lane",
+        "row",
+        "--index",
+        "--reason"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "row resumed",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "sprint_id": {
+          "type": "string",
+          "x-ndf-positional": true
+        }
+      },
+      "required": [
+        "subcommand",
+        "sprint_id"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "row start",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "plan": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "lane": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "row": {
+          "type": "string",
+          "description": "行の鍵（r1 など）",
+          "x-ndf-positional": true
+        },
+        "--sprint": {
+          "type": "string",
+          "description": "スプリントの進行表の ID"
+        }
+      },
+      "required": [
+        "subcommand",
+        "plan",
+        "lane",
+        "row",
+        "--sprint"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "run",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "plan": {
+          "type": "string",
+          "x-ndf-positional": true
+        }
+      },
+      "required": [
+        "subcommand",
+        "plan"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "set",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "plan": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "lane": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "--plans": {
+          "type": "integer"
+        },
+        "--touches": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "--after": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "--request": {
+          "type": "string"
+        },
+        "--reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subcommand",
+        "plan",
+        "lane",
+        "--reason"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "start",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "plan_file": {
+          "type": "string",
+          "x-ndf-positional": true
+        }
+      },
+      "required": [
+        "subcommand",
+        "plan_file"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "status",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "plan": {
+          "type": "string",
+          "x-ndf-positional": true
+        }
+      },
+      "required": [
+        "subcommand",
+        "plan"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "stop",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "plan": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "--now": {
+          "type": "boolean",
+          "description": "区切りを待たずに中止する（未着手の行を中止にし、実行中のスプリントを中止させる）"
+        },
+        "--reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subcommand",
+        "plan",
+        "--reason"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "wait",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "plan": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "--after": {
+          "type": "integer",
+          "default": 0,
+          "description": "計画の進行表の事象の番号（前の wait の next が渡す）"
+        },
+        "--known-stalls": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "知らせ済みの止まり（<レーン>/<行>）"
+        }
+      },
+      "required": [
+        "subcommand",
+        "plan"
+      ]
+    }
+  ]
+}
