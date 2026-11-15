@@ -184,7 +184,12 @@ def _declared(v: Any) -> dict[str, float]:
     """`capacity` のうち正の数の枠だけ。"""
     if not isinstance(v, dict):
         return {}
-    return {k: float(v[k]) for k in WINDOWS if isinstance(v.get(k), (int, float)) and not isinstance(v.get(k), bool) and v[k] > 0}
+    return {k: got for k in WINDOWS if (got := positive(v.get(k))) is not None}
+
+
+def capacity_view(declared: Mapping[str, float]) -> dict[str, Optional[float]]:
+    """枠の宣言を結果の形（`WINDOWS` の枠ごとに値か None）にする。"""
+    return {k: declared.get(k) for k in WINDOWS}
 
 
 def load(store: Path, name: str) -> Optional[Account]:
@@ -239,14 +244,14 @@ def set_capacity(store: Path, name: str, five: Optional[float], seven: Optional[
         if a is None:
             raise NotRegistered(f"登録されていない: {name}")
         cur = _declared(a.get("capacity"))
-        for k, v in (("five_hour", five), ("seven_day", seven)):
+        for k, v in zip(WINDOWS, (five, seven), strict=True):
             if v is None:
                 cur.pop(k, None)
             else:
                 cur[k] = float(v)
         a["capacity"] = cur or None  # noqa: NDF501 ファイル: 宣言が無くなれば旧いと同じく null を書く
         write(path, a)
-    return {"name": name, "kind": "oauth", "capacity_declared": {k: cur.get(k) for k in WINDOWS}}
+    return {"name": name, "kind": "oauth", "capacity_declared": capacity_view(cur)}
 
 
 def detach(store: Path, name: str) -> None:
@@ -392,7 +397,7 @@ def _oauth_rows(store: Path, pinned: Optional[str], usages: list[Any]) -> tuple[
                 "org_name": acc.org_name or None,  # noqa: NDF501 ファイル: 組織の無い登録は null で並べる
                 "pinned": n == pinned,
                 "percent": u.percent if u else None,
-                "capacity_declared": {k: acc.declared.get(k) for k in WINDOWS},
+                "capacity_declared": capacity_view(acc.declared),
                 "state": _state(acc, u),
             }
         )
