@@ -82,6 +82,16 @@ def smell_findings(scope: Scope, rules: dict[str, Any]) -> list[Finding]:
     return found
 
 
+def _order(f: Finding) -> tuple[str, int, str, str]:
+    """指摘の並びの鍵（パス・行・規則・中身）。"""
+    return (f.path, f.line, f.rule, f.detail)
+
+
+def _diff_only(only: list[str] | None) -> bool:
+    """`only` が差分の規則（`invariants.DIFF_RULES`）だけか。"""
+    return bool(only) and set(only) <= invariants.DIFF_RULES
+
+
 def check(scope: Scope, rules: dict[str, Any], write_spec: bool = False, written: list[str] | None = None) -> list[Finding]:
     """見る範囲にすべての規則を当て、指摘をパスと行の順で返す。`write_spec` なら規約の生成物を書き、パスを `written` へ足す。"""
     found = unparsable(scope)
@@ -90,7 +100,7 @@ def check(scope: Scope, rules: dict[str, Any], write_spec: bool = False, written
     found += facts.check(scope, rules) + words.check(scope, rules) + invariants.check(scope, rules)
     found += child_deps.apply(scope, rules)
     found += spec_docs.check(scope, rules, write_spec, written)
-    return sorted(found, key=lambda f: (f.path, f.line, f.rule, f.detail))
+    return sorted(found, key=_order)
 
 
 def select(
@@ -101,8 +111,8 @@ def select(
     `only` が差分の規則（`invariants.DIFF_RULES`）だけなら、ファイルを集めず構文木も作らずに差分と PR 本文だけを見る
     （新しいプラグインを変えていない PR で、本文を直すたびに全体の検査を打たない）。このときは `write_spec` を見ない。
     """
-    if only and set(only) <= invariants.DIFF_RULES:
-        found = sorted(invariants.old_plugin_diff(scope, rules["invariants"]), key=lambda f: (f.path, f.line, f.rule, f.detail))
+    if _diff_only(only):
+        found = sorted(invariants.old_plugin_diff(scope, rules["invariants"]), key=_order)
     else:
         scope.sources = collect(scope.plugin_root, scope.repo_root)
         found = check(scope, rules, write_spec, written)
@@ -158,7 +168,7 @@ def main(argv: list[str]) -> int:
         print(f"{f.rule}: {f.path}:{f.line}: {f.detail}", file=sys.stderr)
     by_rule = dict(sorted(Counter(f.rule for f in found).items()))
     metrics: dict[str, Any] = {"files": len(scope.sources), "findings": by_rule}
-    if written is not None and not (args.only and set(args.only) <= invariants.DIFF_RULES):
+    if written is not None and not _diff_only(args.only):
         metrics["written"] = len(written)
     if not found:
         return emit(f"{len(scope.sources)} ファイルに違反なし", [], metrics)
