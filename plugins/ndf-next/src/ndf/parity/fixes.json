@@ -19,9 +19,9 @@
     {"id": "fix:1811", "issue": 1811, "fix": "重なりの判定にディレクトリの宣言を使わず、等しいファイルの宣言と共有の一覧だけで組を決める（承認の前に develop へ入った実装済みの行。R5）", "prs": [], "commits": ["73c7c5558", "0be4e9482"], "tests": [], "to": "C2"},
     {"id": "fix:2453", "issue": 2453, "fix": "分割した設計文書を番号でつなぎ、リンクで委ねたセルを止める（承認の前に develop へ入った実装済みの行。R5）", "prs": [], "commits": [], "tests": [], "to": "C2"},
     {"id": "fix:2614", "issue": 2614, "fix": "スプリント MVV の照合で、入力が同じで最新の判定が「従う」なら再利用する（承認の前に develop へ入った実装済みの行。R5）", "prs": [2830], "commits": ["08f51d00a", "2ed8952a1"], "tests": [], "to": "M7"},
-    {"id": "fix:3618-survey", "issue": 3618, "fix": "設計の検査に代表のリポジトリの設定（.ndf/design.json）と 2 規則（repo_scope_missing・repo_loss_unrouted）・設定のスキーマ・終了コード 2 で止める直しのステップを足す", "prs": [], "commits": ["d94484580"], "tests": ["scripts/tests/test_design_repos.py", "scripts/tests/test_supervise.py"], "to": "M7"},
-    {"id": "fix:3618-focus", "issue": 3618, "fix": "cross-review の design の観点に汎用性（代表のリポジトリの種類を代わりの形なしに扱えなくするか）の 1 行を足す", "prs": [], "commits": ["3ec4f162c"], "tests": [], "to": "M5"},
-    {"id": "fix:3618-items", "issue": 3618, "fix": "起票の項目に方針の分け方（policy_split。運用の決まりと作るものの振る舞いを分ける）を該当時で足す", "prs": [], "commits": ["3ec4f162c"], "tests": ["scripts/tests/test_issue_items.py"], "to": "M6"}
+    {"id": "fix:3618-survey", "issue": 3618, "fix": "設計の検査に代表のリポジトリの設定（.ndf/design.json）と 2 規則（repo_scope_missing・repo_loss_unrouted）・設定のスキーマ・終了コード 2 で止める直しのステップを足す", "prs": [3645], "commits": ["d94484580"], "tests": ["scripts/tests/test_design_repos.py", "scripts/tests/test_supervise.py"], "to": "M7"},
+    {"id": "fix:3618-focus", "issue": 3618, "fix": "cross-review の design の観点に汎用性（代表のリポジトリの種類を代わりの形なしに扱えなくするか）の 1 行を足す", "prs": [3645], "commits": ["3ec4f162c"], "tests": [], "to": "M5"},
+    {"id": "fix:3618-items", "issue": 3618, "fix": "起票の項目に方針の分け方（policy_split。運用の決まりと作るものの振る舞いを分ける）を該当時で足す", "prs": [3645], "commits": ["3ec4f162c"], "tests": ["scripts/tests/test_issue_items.py"], "to": "M6"}
   ],
   "regressions": [
     {"id": "regression:2629", "issue": 2629, "test": "scripts/tests/test_parallel_run.py:1077", "behavior": "続きの一時レーンを起動した直後に、一覧に残る前の起動の止まった行では問わない", "to": "P3"}
