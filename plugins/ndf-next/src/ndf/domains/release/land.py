@@ -188,7 +188,7 @@ class Lander:
             return refused
         merge = self.hub.merge_as_admin if bypass else self.hub.merge
         outcome: MergeOutcome = merge(pull.number, expect_head=pull.head_sha, method=MERGE_METHOD)
-        return Landed(outcome.merged, outcome.kind, outcome.detail, admin=bypass and outcome.merged)
+        return Landed(outcome.merged, outcome.kind, outcome.detail)  # 迂回の印は _record が立てる
 
     def _record(self, pull: Pull, done: Landed) -> Landed:
         """迂回でマージした結果に、迂回の記録の URL か、書けなかった理由を足す（#3506 の I7・決定 7）。"""
