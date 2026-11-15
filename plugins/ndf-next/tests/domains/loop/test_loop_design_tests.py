@@ -100,3 +100,77 @@ def test_a_missing_test_stops_with_every_name_in_full(design_tests, repo: Path):
 def test_no_design_document_is_not_applicable(design_tests):
     got = design_tests("--issue", "9")
     assert got["status"] == "stopped" and got["cause"]["kind"] == "not_applicable"
+
+
+# --- 現状固定（I-001: design_tests.run の分割の前に、結果の形をそのまま記録する） ---
+
+
+@pytest.fixture
+def two_designs(repo: Path) -> Path:
+    """同じ issue の設計文書 2 件。同じ名前が両方に出て、形だけの名前（`<`）を 1 件含む。"""
+    (repo / "issues" / "issue-5-design.md").write_text(
+        "## テスト設計\n\n`tests/test_kept.py::test_kept_rule` と `test_<名前>.py`\n", encoding="utf-8"
+    )
+    (repo / "issues" / "issue-5-design-b.md").write_text(
+        "## テスト設計\n\n`tests/test_kept.py::test_kept_rule` と `tests`\n", encoding="utf-8"
+    )
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-qm", "c2"], check=True)
+    return repo
+
+
+def test_current_ok_over_two_designs_counts_skipped_and_dedups(design_tests, two_designs: Path):
+    got = design_tests("--issue", "5")
+    assert got["status"] == "ok"
+    assert got["summary"] == (
+        "設計文書 2 件（issues/issue-5-design-b.md, issues/issue-5-design.md）。設計に名前の出るテスト 1 件がすべて HEAD にある"
+    )
+    assert got["items"] == [
+        {
+            "kind": "test_function",
+            "name": "tests/test_kept.py::test_kept_rule",
+            "doc": "issues/issue-5-design-b.md",
+            "line": 3,
+            "section": "テスト設計",
+            "result": "present",
+        }
+    ]
+    assert got["metrics"] == {"designs": 2, "names": 1, "skipped": 1, "missing": 0, "unverified": 0, "renamed": 0}
+
+
+@pytest.fixture
+def rel_design(repo: Path) -> str:
+    (repo / "rel.md").write_text("## テスト設計\n\n`test_kept_rule` と `test_kept.py`\n", encoding="utf-8")
+    return "rel.md"
+
+
+def test_current_ok_with_a_relative_design_path(design_tests, rel_design: str):
+    got = design_tests("--design", rel_design)
+    assert got["status"] == "ok"
+    assert got["summary"] == "設計文書 1 件（rel.md）。設計に名前の出るテスト 2 件がすべて HEAD にある"
+    assert [(i["kind"], i["name"], i["result"]) for i in got["items"]] == [
+        ("test_function", "test_kept_rule", "present"),
+        ("test_file", "test_kept.py", "present"),
+    ]
+    assert got["metrics"] == {"designs": 1, "names": 2, "skipped": 0, "missing": 0, "unverified": 0, "renamed": 0}
+
+
+def test_current_unreadable_design_is_invalid(design_tests, repo: Path):
+    got = design_tests("--design", "nope.md")
+    assert got["status"] == "stopped" and got["cause"]["kind"] == "invalid"
+    assert got["cause"]["detail"].startswith("設計文書か git を読めない: ")
+    assert str(repo / "nope.md") in got["cause"]["detail"]
+    assert got["items"] == [] and got["metrics"] == {}
+
+
+def test_current_grep_failure_is_incomplete_with_gaps(design_tests, rel_design: str, monkeypatch: pytest.MonkeyPatch):
+    from ndf.domains.loop import design_tests as mod
+
+    monkeypatch.setattr(mod, "_grep", lambda g: lambda names, pathspec: None)
+    got = design_tests("--design", rel_design)
+    detail = "設計文書 1 件（rel.md）。設計に名前の出るテストのうち 1 件を確かめられなかった: test_kept_rule（rel.md の 3 行・unverified）"
+    assert got["status"] == "stopped" and got["cause"] == {"kind": "incomplete", "detail": detail}
+    assert got["summary"] == detail
+    assert {i["name"]: i["result"] for i in got["items"]} == {"test_kept_rule": "unverified", "test_kept.py": "present"}
+    assert got["metrics"] == {"designs": 1, "names": 2, "skipped": 0, "missing": 0, "unverified": 1, "renamed": 0}
+    assert got["gaps"] == [{"kind": "test_function", "name": "test_kept_rule", "reason": "rel.md の 3 行を確かめられなかった"}]
