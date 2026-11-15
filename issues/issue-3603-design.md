@@ -137,7 +137,7 @@
 | 承認ゲートの記録の書き込み（`sprint-state.py gate`、変える） | `--by mvv` の記録にも `--pr` と `--outcome` を残す（今は `--by user` のときだけ残す）。I9 が設計 PR ごとに MVV 判定の承認の記録を引くためである |
 | 設計 PR のマージのプランの承認の確かめ（`supervise_lib/design_merge.py` の `cmd_design_approved`、変える） | 承認ラベルも利用者の承認の記録も無いとき、設計 PR がマージ済みで、その PR の設計承認ゲートの MVV 判定の承認の記録があれば通す（I9） |
 | 設計承認の依頼の部品（`lib/gate1_requests.py`、変える） | 設計のプランの報告の PR の番号の読み取り（`report_pr`）と MVV 判定の記録の読み取り（`last_verdict`）を `sprint_loop_gate.py` から移し、両方の送り手が同じ関数を使う |
-| 手順書（`asking.md`・`parallel.md`、変える） | 1 スプリントのレーンの設計承認の問いの書き方（承認の行を置く。設計 PR を参照するだけの問いには置かない）、`design-answer` の打ち方、対象の行の書き方、前の答えを使う条件 |
+| 手順書（`approval-request.md`・`asking.md`・`parallel.md`、変える） | 1 スプリントのレーンの設計承認の問いの書き方（`approval-request.md` の「止まる手段」に承認の行を置く書き方を足す。設計 PR を参照するだけの問いには置かない）、`design-answer` の打ち方、対象の行の書き方、前の答えを使う条件 |
 
 ```mermaid
 graph TD
@@ -372,7 +372,7 @@ graph TD
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #3603 | 実装する | — | `plugins/ndf/scripts/parallel.py`、`plugins/ndf/scripts/lib/parallel_args.py`、`plugins/ndf/scripts/lib/parallel_design_gate.py`（新設）、`plugins/ndf/scripts/lib/parallel_question.py`、`plugins/ndf/scripts/lib/parallel_lane.py`、`plugins/ndf/scripts/lib/parallel_ledger.py`、`plugins/ndf/scripts/lib/gate1_requests.py`、`plugins/ndf/scripts/lib/sprint_loop_gate.py`、`plugins/ndf/scripts/hook_lib/ask_guard.py`、`plugins/ndf/scripts/supervise_lib/design_merge.py`、`plugins/ndf/scripts/sprint-state.py`、`plugins/ndf/scripts/lib/README.md`、`plugins/ndf/contracts/forms/parallel-ledger.json`、`plugins/ndf/skills/development-workflow/references/asking.md`、`plugins/ndf/skills/development-workflow/references/parallel.md`、`docs/glossary/glossary.json`、`docs/glossary.md`、`plugins/ndf/scripts/tests/test_parallel_design_gate.py`（新設）、`plugins/ndf/scripts/tests/test_parallel_question.py`（新設）、`plugins/ndf/scripts/tests/test_parallel_lane.py`、`plugins/ndf/scripts/tests/test_ask_guard.py`、`plugins/ndf/scripts/tests/test_parallel_answer.py`、`plugins/ndf/scripts/tests/test_parallel_ledger.py`、`plugins/ndf/scripts/tests/test_gate1_requests.py`、`plugins/ndf/scripts/tests/test_supervise_sprint_chain.py`、`plugins/ndf/scripts/tests/test_sprint_state.py` |
+| #3603 | 実装する | — | `plugins/ndf/scripts/parallel.py`、`plugins/ndf/scripts/lib/parallel_args.py`、`plugins/ndf/scripts/lib/parallel_design_gate.py`（新設）、`plugins/ndf/scripts/lib/parallel_question.py`、`plugins/ndf/scripts/lib/parallel_lane.py`、`plugins/ndf/scripts/lib/parallel_ledger.py`、`plugins/ndf/scripts/lib/gate1_requests.py`、`plugins/ndf/scripts/lib/sprint_loop_gate.py`、`plugins/ndf/scripts/hook_lib/ask_guard.py`、`plugins/ndf/scripts/supervise_lib/design_merge.py`、`plugins/ndf/scripts/sprint-state.py`、`plugins/ndf/scripts/lib/README.md`、`plugins/ndf/contracts/forms/parallel-ledger.json`、`plugins/ndf/skills/development-workflow/references/approval-request.md`、`plugins/ndf/skills/development-workflow/references/asking.md`、`plugins/ndf/skills/development-workflow/references/parallel.md`、`docs/glossary/glossary.json`、`docs/glossary.md`、`plugins/ndf/scripts/tests/test_parallel_design_gate.py`（新設）、`plugins/ndf/scripts/tests/test_parallel_question.py`（新設）、`plugins/ndf/scripts/tests/test_parallel_lane.py`、`plugins/ndf/scripts/tests/test_ask_guard.py`、`plugins/ndf/scripts/tests/test_parallel_answer.py`、`plugins/ndf/scripts/tests/test_parallel_ledger.py`、`plugins/ndf/scripts/tests/test_gate1_requests.py`、`plugins/ndf/scripts/tests/test_supervise_sprint_chain.py`、`plugins/ndf/scripts/tests/test_sprint_state.py` |
 | #3608 | 取り込む | #3603 | — |
 
 ## 人へ残す判断
@@ -383,6 +383,6 @@ graph TD
 
 | 項目 | 内容 |
 | --- | --- |
-| 1 スプリントのレーンの conductor が設計承認の問いに承認の行を置くか | 承認の行は新しい形で、手順書（`asking.md`・`parallel.md`）に書き足す。置かなかった問いは今どおり `ask` になる（I1）。リリース後テストで、台帳に `gate1` の行が増えることで分かる |
+| 1 スプリントのレーンの conductor が設計承認の問いに承認の行を置くか | 承認の行は新しい形で、手順書（`approval-request.md` の「止まる手段」・`asking.md`・`parallel.md`）に書き足す。置かなかった問いは今どおり `ask` になる（I1）。リリース後テストで、台帳に `gate1` の行が増えることで分かる |
 | `request-ask` の設計承認の依頼の分岐が hook の上限の 8 秒に収まるか | `gh pr view` 1 回の秒は実測していない。台帳へ書く前に過ぎたときは問いを通し、書いた後に過ぎたときは保留の側へ倒す（I10）。リリース後テストで、hook の判定の記録と台帳の行の時刻で分かる |
 | 計画の外の設計 PR のマージのプランへの影響（I9） | 計画の外で設計承認ゲートの `by: mvv` の記録を書く経路として、`pace: fast` と `auto` の設計（`supervise_lib/sprint_waves.py`）を読んだ。この経路は承認ラベルを付けてからマージするため、今も承認ラベルで通り、I9 の条件に来ない。ほかに `by: mvv` の設計承認ゲートの記録を書く経路があるかは、全件を洗い出していない |

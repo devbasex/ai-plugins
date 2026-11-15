@@ -35,6 +35,7 @@ plugins/ndf/
 │       ├── test_sprint_state.py
 │       └── test_supervise_sprint_chain.py
 └── skills/development-workflow/references/
+    ├── approval-request.md
     ├── asking.md
     └── parallel.md
 docs/
@@ -69,6 +70,7 @@ docs/
 | `plugins/ndf/scripts/sprint-state.py` | 変更 | `--by mvv` の記録にも `--pr` と `--outcome` を残す | 無し |
 | `plugins/ndf/scripts/lib/README.md` | 変更 | 新設の 1 本と、`gate1_requests.py` の行の役割を直す | 無し |
 | `plugins/ndf/contracts/forms/parallel-ledger.json` | 変更 | `reused` の行・`gate1` の行の `ledger_id`・`ask` の行の `target` の形 | 無し |
+| `plugins/ndf/skills/development-workflow/references/approval-request.md` | 変更 | 「止まる手段」で、1 スプリントのレーンの設計承認の問い（`ndf-gate:1`）に承認の行を置く書き方。設計 PR を参照するだけの問いには置かない | 無し |
 | `plugins/ndf/skills/development-workflow/references/asking.md` | 変更 | 対象の行と承認の行の書き方と、前の答えが返ったときの扱い | 無し |
 | `plugins/ndf/skills/development-workflow/references/parallel.md` | 変更 | 1 スプリントのレーンの設計承認の問いの書き方と `design-answer` の打ち方 | 無し |
 | `docs/glossary/glossary.json` | 変更 | 設計文書の「用語」の表の 5 語の追加と意味の変更 | 無し |
