@@ -273,7 +273,7 @@ ndf-next で本番の PR を扱うプランを、雛形と工程の定義から�
 | 承認資料 `domains/release/assemble.py`（変更） | ブランチを作らず、本番の PR（スプリントの PR）の範囲（main の先端..PR の先端）から承認資料を組み、PR の本文の承認資料の節へ書く。予定の版は上げ幅の宣言から出す |
 | CD の確かめ `domains/release/confirm.py`（新設） | 本番の PR のマージコミットを含む main の先端に、版上げの PR のマージ・タグ `ndf--v<版>`・そのタグの GitHub Release がそろうのを引数 `ci_budget` の秒まで待つ。そろえば版・タグ・版上げの PR を結果に出し、本番の PR の人のマージの記録・迂回の記録と同じ PR へ「作った版」のコメントを 1 回だけ書く。そろわなければ止まる（下の「main へのマージの後（CD）」） |
 | 版上げ `domains/release/bump.py`・`bump_decide.py`（新設） | `bump_decide` は純粋な処理で、前の版上げのコミットの起点から main の先端までにマージされた PR のラベルから上げ幅を決め、版上げの PR の差分が版数の文字列と CHANGELOG の版の節に限られるかを判定する。`bump` は版上げの PR を作り、必須のチェックの後に照合付きでマージする（I7・I8・I11） |
-| PR の検査 `domains/release/pr_check.py`（新設） | 宣言が GitHub flow の行のとき、main 宛ての PR が版数を変えていないか、上げ幅のラベルが 2 つ以上無いか、head が検証の ref でないかを見る（I7・I9） |
+| PR の検査 `domains/release/pr_check.py`（新設） | 宣言が GitHub flow の行のとき、main 宛ての PR が版数を変えていないか、上げ幅のラベルが 2 つ以上無いか、head が検証の ref でないかを見る（I7・I9）。PR 側の宣言のレビューの単位が、GitHub flow の行で書ける 4 種類の行をそろえ `release` の行を持たないかも `declaration.review_problems` で見る（#3119 の I2） |
 | 検証の ref `domains/release/verify_ref.py`・`verify_decide.py`（新設） | `verify_decide` は純粋な処理で、含める PR の並びと検証の版と `marketplace.json` の書き換えを決める。`verify_ref` は main の先端へ PR の先端を順に取り込み、前の検証の ref を親に足したコミットを fast-forward で push する（I9・I12） |
 | 宣言の読み分け `domains/release/declaration.py`（変更） | `.ndf/project.json` の `delivery` の検証の行（ref の名前・マーケットプレイスの名前）と、`.ndf/worktree.json` の取り込み方の行を読む |
 | 取り込み方の表 `contracts/domains/branch-flows.json`（変更） | 行 `github-flow` を足して既定にする。`promote-whole`・`promote-selected` は 11.0.0 の入れ替え（#3304）で外し、それまでは残す（決定 5） |
@@ -423,8 +423,15 @@ sequenceDiagram
 
 **CD が止まったとき（要求の E10 の失敗）。** 版上げの PR の必須のチェックが落ちた・迂回のマージが断られた・版上げのブランチへの
 マージが衝突したときは、`bump` はタグを作らずに止まり、workflow の結果と版上げの PR のコメントに理由を書く。本番（main のコード）は
-出ており、版数とタグだけが出ていない状態である。本番のプランの `confirm` は `ci_budget` の秒まで待って `stopped` になり、理由と
-「本番はマージ済み」を結果に出す。次の手は、workflow を手動の起動（`step=bump`）で打ち直してから `confirm` を打ち直す `rerun` の 1 つである。
+出ており、版数とタグだけが出ていない状態である。`publish` がタグか GitHub Release を作れずに止まったときは、版上げの PR はマージ済みで、
+タグか Release だけが無い状態になる。どちらの場合も、本番のプランの `confirm` は `ci_budget` の秒まで待って `stopped` になり、理由と
+「本番はマージ済み」を結果に出す。次の手は `rerun` の 1 つで、workflow をどの手動の起動で打ち直すかは足りないものが決める。
+
+| 足りないもの | 打ち直す手動の起動 | 理由 |
+| --- | --- | --- |
+| 版上げの PR のマージ（`bump`） | `step=bump` の後に `confirm` | 版上げの PR の作成・更新・マージは `bump` だけが行う |
+| タグか GitHub Release（`publish`。版上げの PR はマージ済み） | `step=publish`（入力 `revision` に、`confirm` の結果に出る版上げの PR のマージコミット）の後に `confirm` | タグがあり配るものの変化が無いと、`step=bump` は `not_applicable` で止まり `publish` を呼ばない。`publish` は足りないタグと Release だけを作る |
+
 `record` と `cleanup` は `confirm` が通ってから流れる。
 
 ### 人が GitHub でマージした（経路 (b)）
@@ -479,7 +486,7 @@ stateDiagram-v2
 | `confirm`（新設） | `outputs.version`・`outputs.tag`・`outputs.bump_pr`・`items`・`routes` | 作った版・タグ・版上げの PR の番号。そろわなければ `stopped` で、`items` に `{"kind": "cd", "name": <bump か publish>, "detail": <理由>}`、次の手は `rerun`（CD を打ち直した後に `confirm` を打ち直す）の 1 つ。本番はマージ済みであることを理由に出す |
 | `guard`（新設） | 終了コード | 本番の PR なら 3（原因 `production_pr`、理由に「デプロイの工程で流す」）、head が検証の ref なら 1（原因 `refused`）、ほかは 0 |
 | `bump`（新設） | `outputs.version`・`outputs.level`・`outputs.pr`・`outputs.state` | 上げた版、上げ幅（`major`・`minor`・`patch`）、版上げの PR の番号、`merged`・`reused`・`published`・`not_applicable` のどれか |
-| `pr-check`（新設） | 終了コード・`items` | 0 か 1。`items` に `{"kind": "version" \| "level" \| "verify-ref", "name": <パスかラベル>, "detail": <理由>}` |
+| `pr-check`（新設） | 終了コード・`items` | 0 か 1。`items` に `{"kind": "version" \| "level" \| "verify-ref" \| "reviews", "name": <パスかラベル>, "detail": <理由>}` |
 | `verify-ref`（新設） | `outputs.ref`・`outputs.head`・`outputs.version`・`outputs.included`・`items` | 組んだ ref と先端、検証の版、含めた PR の番号と先端、衝突したときは `{"kind": "conflict", "name": "#<番号>"}` |
 | `assemble`・`materials` | 外すもの・変えるもの | `--channel dev` と `--source` を外す。`assemble` はブランチを作らず、`--pr` の本文の承認資料の節を書く |
 
@@ -534,7 +541,7 @@ stateDiagram-v2
 | 受け入れ条件 5・I2 | 生成した `release` のプランの最初のステップが `ndf release-steps merge` で、マージの呼び出しの `expect_head` が承認した先端である（GitHub のアダプタを差し替えて記録した呼び出しで見る） | 最初のステップの前に別のステップを足すと落ちる。`expect_head` を渡さないと落ちる |
 | 受け入れ条件 6・I3 | 承認の後に先端が A から B へ動いた本番の PR で `land` が `refused` を返し、理由に A と B の先頭 12 文字が出る | 先端の読み直しを外すと落ちる |
 | 受け入れ条件 7・I5 | 答え待ちの承認ゲートで本番の PR が A でマージ済みなら、承認ゲートが `answer --route github-merge` を呼び、続く `land` が人のマージの記録を書く。生成した `release` のプランで `merge` の次が `confirm`、その後が `record`・`cleanup` である | マージ済みを読まないと承認ゲートが待ち続けて落ちる。記録にマージした人を書かないと落ちる。`confirm` を `record` の後へ移すと落ちる |
-| 受け入れ条件 7（CD の確かめ） | 版上げの PR のマージ・タグ・GitHub Release がそろった main で `confirm` が版・タグ・版上げの PR を返し、作った版のコメントを 1 回だけ書く。そろわないまま `ci_budget` を過ぎると `stopped` を返し、理由に「本番はマージ済み」と CD の止まった理由が出て、次の手が `rerun` の 1 つである | 待ちの切れで `ok` を返すと落ちる。タグだけがあり GitHub Release が無いときに `ok` を返すと落ちる。打ち直しでコメントを 2 回書くと落ちる |
+| 受け入れ条件 7（CD の確かめ） | 版上げの PR のマージ・タグ・GitHub Release がそろった main で `confirm` が版・タグ・版上げの PR を返し、作った版のコメントを 1 回だけ書く。そろわないまま `ci_budget` を過ぎると `stopped` を返し、理由に「本番はマージ済み」と CD の止まった理由と足りないもの（`bump` か、`publish` と版上げの PR のマージコミット）が出て、次の手が `rerun` の 1 つである | 待ちの切れで `ok` を返すと落ちる。タグだけがあり GitHub Release が無いときに `ok` を返すと落ちる。打ち直しでコメントを 2 回書くと落ちる |
 | 受け入れ条件 10（競合） | 版上げの PR が開いたまま、PATCH の PR に続いて MINOR の PR が main へマージされると、`bump` が古い版上げの PR を閉じて新しい版の版上げの PR を作る。同じ上げ幅の PR が続けば、開いた版上げの PR へ main をマージするコミットと版の節の組み直しのコミットを足し、強制 push を呼ばない。main の先端を含まない版上げの PR をマージしない | 古い版のままマージすると落ちる。強制 push を呼ぶと落ちる。後の PR が版の節に載らないと落ちる |
 | 受け入れ条件 8・I5 | `refused` の後に B がマージ済みになった PR で `merge` を打ち直すと、記録の `approved_head` が B、`gate_head` が A で残る | `gate_head` を B に置き換えると落ちる |
 | 受け入れ条件 9 | 差し戻しの後に同じ PR の先端が C になったとき、`assemble` が承認資料を C で書き直し、A への承認の判定が `stale` になり、ブランチを作らない | 資料の対象を A のまま残すと落ちる。ブランチを作ると落ちる |

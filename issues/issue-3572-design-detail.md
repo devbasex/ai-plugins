@@ -97,7 +97,7 @@ GitHub と git のアダプタを読まず、`version_decide` と `changelog_dec
 | `plugins/ndf-next/src/ndf/domains/release/pr_check.py` | 新設 | main 宛ての PR が版数を変えていないか・上げ幅のラベルが 1 つ以下か・head が検証の ref でないかを見る | `bump_decide`・`declaration` |
 | `plugins/ndf-next/src/ndf/domains/release/verify_decide.py` | 新設 | 検証の ref に含める PR・検証の版・`marketplace.json` の書き換えを決める | `version_decide` |
 | `plugins/ndf-next/src/ndf/domains/release/verify_ref.py` | 新設 | 一時の worktree で main の先端へ PR の先端を取り込み、fast-forward で検証の ref を進める | `verify_decide`・`plugins`・`declaration` |
-| `plugins/ndf-next/src/ndf/domains/release/declaration.py` | 変更 | 取り込み方の行と、`delivery` の検証の行を読む | `ndf.contracts.facts` |
+| `plugins/ndf-next/src/ndf/domains/release/declaration.py` | 変更 | 取り込み方の行と、`delivery` の検証の行を読み、取り込み方の行 `github-flow` で書けないレビューの単位の行を見る | `ndf.contracts.facts` |
 | `plugins/ndf-next/src/ndf/domains/release/record.py` | 変更 | リリース記録の版を、ブランチの名前ではなく作った版の記録から読む | `trail` |
 | `plugins/ndf-next/src/ndf/domains/release/tagging.py` | 変更 | GitHub Release の本文の末尾に、次の版の節に載る PR を足す | `bump_decide`・`changelog_decide` |
 | `plugins/ndf-next/src/ndf/domains/release/cli.py` | 変更 | 副命令 `bump`・`confirm`・`pr-check`・`verify-ref` を足し、`defer`・`prepare-next` と開発版の引数を外す | 上の各モジュール |
@@ -107,7 +107,7 @@ GitHub と git のアダプタを読まず、`version_decide` と `changelog_dec
 | `plugins/ndf-next/tests/domains/release/test_release_assemble.py` | 変更 | 承認資料だけを書く形を縛る | `assemble`・`_fakes` |
 | `plugins/ndf-next/tests/domains/release/test_release_bump.py` | 新設 | 上げ幅・起点・競合・差分の範囲・冪等を縛る | `bump`・`bump_decide`・`_fakes` |
 | `plugins/ndf-next/tests/domains/release/test_release_confirm.py` | 新設 | CD の確かめの待ち・止まり方・記録の 1 回を縛る | `confirm`・`_fakes` |
-| `plugins/ndf-next/tests/domains/release/test_release_pr_check.py` | 新設 | 版数・ラベル・検証の ref の検査を縛る | `pr_check` |
+| `plugins/ndf-next/tests/domains/release/test_release_pr_check.py` | 新設 | 版数・ラベル・検証の ref・レビューの単位の検査を縛る | `pr_check`・`declaration` |
 | `plugins/ndf-next/tests/domains/release/test_release_verify_ref.py` | 新設 | 含める PR・衝突・fast-forward・名前の書き換えを縛る | `verify_ref`・`verify_decide` |
 | `plugins/ndf-next/tests/domains/release/test_release_record.py` | 変更 | 作った版の記録から版を読むことを縛る | `record` |
 | `plugins/ndf-next/tests/domains/release/test_release_prepare.py` | 削除 | `prepare.py` と一緒に外す | — |
@@ -136,7 +136,7 @@ GitHub と git のアダプタを読まず、`version_decide` と `changelog_dec
 | `plugins/ndf-next/src/ndf/domains/release/pr_check.py` | `PrFacts`・モジュール | `problems`・`check`（新設） |
 | `plugins/ndf-next/src/ndf/domains/release/verify_decide.py` | `OpenPull`（新設の型）・モジュール | `included`・`version_of`・`marketplace_of`（新設） |
 | `plugins/ndf-next/src/ndf/domains/release/verify_ref.py` | `VerifyConflict`・`Verified`・モジュール | `build`・`_open_pulls`・`_merge_pulls`・`_commit_on_top`（新設） |
-| `plugins/ndf-next/src/ndf/domains/release/declaration.py` | `VerifyDecl`・モジュール | `flow_of`・`require_github_flow`・`verify_of`（新設）。`production_branch`（変えない） |
+| `plugins/ndf-next/src/ndf/domains/release/declaration.py` | `VerifyDecl`・モジュール | `flow_of`・`require_github_flow`・`verify_of`・`review_problems`（新設）。`production_branch`（変えない） |
 | `plugins/ndf-next/src/ndf/domains/release/record.py` | モジュール | `released`（変更） |
 | `plugins/ndf-next/src/ndf/domains/release/tagging.py` | モジュール | `publish`（変更）・`_late`（新設） |
 | `plugins/ndf-next/src/ndf/domains/release/cli.py` | モジュール | `cmd_bump`・`cmd_confirm`・`cmd_pr_check`・`cmd_verify_ref`（新設）・`cmd_merge`・`_merge_result`・`_moves`・`_answer_merged`・`cmd_guard`・`cmd_assemble`・`cmd_materials`・`cmd_cleanup`（変更）・`_target`（変更）。削除: `cmd_defer`・`cmd_prepare_next`・`_target_args` の `--channel`・`--level`・`--source`。`ARGS` と `_ERRORS` に行を足し、外した副命令の行を消す |
@@ -186,7 +186,7 @@ GitHub と git のアダプタを読まず、`version_decide` と `changelog_dec
 | `_tagged` | `confirm.py` | 新設 | `_tagged(hub: GitHub, tag: str) -> bool` | タグが origin にあるかを読む | 無し | タグの参照があれば真、404 なら偽 | GitHub の REST（参照の照会） |
 | `_has_release` | `confirm.py` | 新設 | `_has_release(hub: GitHub, tag: str) -> bool` | タグの GitHub Release があるかを読む | 無し | `/releases/tags/<タグ>` があれば真、404 なら偽 | GitHub の REST（Release の照会） |
 | `problems` | `pr_check.py` | 新設 | `problems(facts: PrFacts) -> list[dict[str, str]]` | main 宛ての PR の事実から、版数・上げ幅のラベル・検証の ref の破れを返す（I7・I9） | 無し | 項目 `{"kind", "name", "detail"}` を 1 件ずつ返す。版上げの PR は版数の破れを返さない | 無し |
-| `check` | `pr_check.py` | 新設 | `check(root: Path, hub: GitHub, repo_git: Git, number: int) -> list[dict[str, str]] \| None` | 宣言の行が `github-flow` のときだけ PR の事実を集めて `problems` を返す | 無し | 行が `github-flow` でなければ None（何も見ない）。そうでなければ `problems` の結果 | git（fetch・diff）・GitHub の REST（PR・ラベル） |
+| `check` | `pr_check.py` | 新設 | `check(root: Path, hub: GitHub, repo_git: Git, number: int) -> list[dict[str, str]] \| None` | 宣言の行が `github-flow` のときだけ PR の事実を集めて `problems` と `review_problems` を返す | `root` は PR 側の木 | 行が `github-flow` でなければ None（何も見ない）。そうでなければ `problems` の結果に `declaration.review_problems(root)` の結果を続けたもの | git（fetch・diff）・GitHub の REST（PR・ラベル） |
 | `included` | `verify_decide.py` | 新設 | `included(pulls: Sequence[OpenPull], verify_ref: str, repo: str) -> list[OpenPull]` | 検証の ref に含める PR を決める | 無し | 下書きでなく、head が検証の ref でも `release/v` でもなく、head のリポジトリが `repo` の PR を番号の順に返す | 無し |
 | `version_of` | `verify_decide.py` | 新設 | `version_of(main_version: str, at: datetime) -> str` | 検証の版を決める | `at` は UTC | `<main の版>-next.<YYYYMMDDHHMMSS>` | 無し |
 | `marketplace_of` | `verify_decide.py` | 新設 | `marketplace_of(raw: Mapping[str, Any], name: str) -> dict[str, Any]` | `marketplace.json` の名前を 2 つ目のマーケットプレイスの名前へ書き換える | `raw` は `marketplace.json` の中身 | `name` だけが変わり、ほかの鍵は元のまま | 無し |
@@ -196,6 +196,7 @@ GitHub と git のアダプタを読まず、`version_decide` と `changelog_dec
 | `_commit_on_top` | `verify_ref.py` | 新設 | `_commit_on_top(work: Git, previous: str \| None) -> str` | 今の木を持ち、前の検証の ref の先端と HEAD を親にするコミットを作る | `previous` は origin の検証の ref の先端（初回は None） | 返す SHA は `previous` を祖先に持つ（初回は HEAD だけが親） | git（commit-tree） |
 | `flow_of` | `declaration.py` | 新設 | `flow_of(root: Path) -> str` | 宣言 `.ndf/worktree.json` の `branch_flow.promotion` から、取り込み方の表の行の id を返す | 無し | 宣言に `branch_flow` が無ければ既定の行の id。表に無い値なら `DeclarationError` | ファイルの読み込み |
 | `require_github_flow` | `declaration.py` | 新設 | `require_github_flow(root: Path) -> None` | 取り込み方の行が `github-flow` でなければ止める（決定 5） | 無し | 行が `github-flow` なら何もしない。ほかは理由「取り込み方 <行> は ndf-next のリリースで扱わない」の `DeclarationError` | ファイルの読み込み |
+| `review_problems` | `declaration.py` | 新設 | `review_problems(root: Path) -> list[dict[str, str]]` | 取り込み方の行が `github-flow` の宣言で、`branch_flow.reviews` の破れを返す（#3119 の I2） | 無し | 行が `github-flow` でなければ空。そうでなければ、4 種類（`impl`・`sprint`・`design`・`spec`）のうち無い行・`release` の行・`impl` と `sprint` のどちらの行も実装の差分を cross-review しないこと（`checks` に `cross-review` を持ち `diff` が `none` でない行が無い）を、項目 `{"kind": "reviews", "name", "detail"}` で 1 件ずつ返す。行の値の形は宣言のスキーマが見る | ファイルの読み込み |
 | `verify_of` | `declaration.py` | 新設 | `verify_of(root: Path) -> VerifyDecl` | `.ndf/project.json` の `delivery` の検証の行から ref の名前とマーケットプレイスの名前を読む | 無し | `channel` が `verify` の行が 1 つで、`verify.ref` と `verify.marketplace` が空でない文字列 | ファイルの読み込み |
 | `released` | `record.py` | 変更 | `released(hub: GitHub, number: int, production: str) -> tuple[Pull, record_decide.Record]` | マージした本番の PR と、作った版の記録の版のリリース記録を返す | 無し | 版は `trail.read_version_record` の値で、head の名前を読まない | GitHub の REST（PR・コメント・比べ） |
 | `publish` | `tagging.py` | 変更 | `publish(root: Path, hub: GitHub, revision: str) -> list[Made]` | 足りないタグと GitHub Release を作り、本文の末尾に次の版の節に載る PR を足す | `revision` は版上げの PR のマージコミット | 441dc236e のまま作り、`_late` が空でなければ本文に節「次の版の節に載る PR」がある | GitHub の REST・git |
@@ -244,11 +245,13 @@ GitHub と git のアダプタを読まず、`version_decide` と `changelog_dec
 | `Bumper._merge` | `land_bump` が止まった | `land_bump` の行のどれか | `Landed.kind` | 呼び出し元へ返す | `land_bump` の行と同じ | `land_bump` の行と同じ |
 | `write_bump` | 版のファイルが読めない・CHANGELOG が壊れている | 宣言の誤り | `plugins_mod.PluginsError`・`changelog_decide` の例外 | 呼び出し元へ返す | `stopped`・`precondition` | 書きかけのファイルは取り出しを捨てて消える（push していない） |
 | `planned_for` | ラベルか main の版を読めない | GitHub の誤り・版の形の誤り | `GitHubError`・`VersionError` | 既定値で続ける（None） | 結果の `outputs.version` が無い | 無し。版は `confirm` が確定する |
-| `confirm` | 待ちの内に版上げの PR のマージ・タグ・GitHub Release のどれかがそろわない | CD が止まった・遅れた | `clock` と `budget` | 止める | `stopped`・`deploy_failed`・理由に「本番はマージ済み」と、足りないもの（版上げの PR のマージなら `bump`、タグか GitHub Release なら `publish`）。次の手は `rerun` の 1 つ | 何も書いていない。workflow を `step=bump` で打ち直してから `confirm` を打ち直す |
+| `confirm` | 待ちの内に版上げの PR がマージされない | `bump` が止まった・遅れた | `clock` と `budget` | 止める | `stopped`・`deploy_failed`・理由に「本番はマージ済み」と、足りないもの `bump`。次の手は `rerun` の 1 つ | 何も書いていない。workflow を `step=bump` で打ち直してから `confirm` を打ち直す |
+| `confirm` | 版上げの PR はマージ済みで、待ちの内にタグか GitHub Release がそろわない | `publish` が止まった・遅れた | `clock` と `budget` | 止める | `stopped`・`deploy_failed`・理由に「本番はマージ済み」と、足りないもの `publish`・版上げの PR のマージコミット。次の手は `rerun` の 1 つ | 何も書いていない。workflow を `step=publish`（入力 `revision` に版上げの PR のマージコミット）で打ち直してから `confirm` を打ち直す。`step=bump` は、タグがあり配るものの変化が無いと `not_applicable` で止まり `publish` を呼ばないため使わない |
 | `confirm` | 本番の PR がマージされていない | `merge` の前に打った | `hub.pull(number).merged` | 止める | `stopped`・`precondition` | 何もしていない |
 | `confirm` | 作った版の記録を書けない | GitHub の誤り | `trail.TrailError` | 止める | `stopped`・`unknown`・「版とタグはそろっている」 | 打ち直すと記録だけを書く |
 | `_bump_containing` | 閉じた PR の一覧を読めない・1 ページに収まらない | GitHub の誤り・版上げの PR が `PER_PAGE` 件を超えて更新された | `GitHubError`・件数 | 呼び出し元へ返す（件数は `BumpError`） | `stopped`・`unknown` か `precondition` | 何もしていない。打ち直せる |
 | `_tagged` | 参照を読めない | 404 以外の GitHub の誤り | `GitHubError` | 呼び出し元へ返す | `stopped`・`infra_wait` か `unknown` | 何もしていない |
+| `_has_release` | Release を読めない | 404 以外の GitHub の誤り | `GitHubError` | 呼び出し元へ返す | `stopped`・`infra_wait` か `unknown` | 何もしていない |
 | `check` | PR の先端を取り込めない・PR を読めない | GitHub の誤り・閉じた PR | `GitError`・`GitHubError` | 呼び出し元へ返す | `stopped`・`precondition` か `unknown`（PR のチェックが落ちる） | 何もしていない。PR を更新すると打ち直される |
 | `build` | PR の取り込みが衝突した | 2 本の PR が同じ箇所を変えた | `_merge_pulls` の `VerifyConflict` | 止める | `stopped`・`base_conflict`・衝突した PR の番号 | ref を動かしていない。一時の worktree は消す。どちらかの PR が直ると次の出来事で組み直される |
 | `build` | push を断られた | 同時に別の組み直しが進めた・前の先端が祖先でない | `GitError` | 止める | `stopped`・`precondition` | ref は動いていない。次の出来事か手動の起動で組み直す |
@@ -258,6 +261,7 @@ GitHub と git のアダプタを読まず、`version_decide` と `changelog_dec
 | `_commit_on_top` | コミットを作れない | 一時の worktree の破損 | `GitError` | 止める | `stopped`・`precondition` | 一時の worktree を消す |
 | `flow_of` | 宣言が壊れている・表に無い値 | 宣言の誤り | JSON の読み込み・`facts.rows` が空 | 止める（`DeclarationError`） | `stopped`・`precondition`・宣言の値 | 宣言を直して打ち直す |
 | `require_github_flow` | 行が `github-flow` でない | 入れ替えの前 | `flow_of` の値 | 止める（`DeclarationError`） | `stopped`・`precondition` | 何もしていない |
+| `review_problems` | 宣言が壊れている・表に無い値 | 宣言の誤り | `flow_of` の `DeclarationError` | 呼び出し元へ返す | `stopped`・`precondition`・宣言の値（PR のチェックが落ちる） | PR の宣言を直すと次の出来事で打ち直される |
 | `verify_of` | 行が無い・2 つ以上・値が空 | 宣言の誤り | 行と鍵の確かめ | 止める（`DeclarationError`） | `stopped`・`precondition` | 宣言を直して打ち直す |
 | `released` | 作った版の記録が無い | `confirm` の前に `record` を打った | `read_version_record` が None | 止める（`NotReleased`） | `stopped`・`not_applicable`・「`confirm` を先に打つ」 | 何も書いていない |
 | `publish` | タグか GitHub Release を作れない | GitHub の誤り | `GitHubError` | 呼び出し元へ返す（441dc236e のまま） | `stopped`・`infra_wait` か `unknown` | 作れた分は残る。打ち直すと足りない分だけを作る |
@@ -366,7 +370,7 @@ workflow `ndf-next-release.yml` のジョブは次のとおりにする。どの
 | `pr-check` | `pull_request`（main 宛ての `opened`・`synchronize`・`reopened`・`labeled`・`unlabeled`） | `pr-check --pr` | `github.token`（`contents: read`・`pull-requests: read`） | PR 側の木（秘密を持たない） |
 | `verify-ref` | `pull_request_target`（main 宛ての `opened`・`synchronize`・`reopened`・`closed`・`ready_for_review`）・`workflow_dispatch`（`step=verify-ref`） | `verify-ref` | `NDF_RELEASE_TOKEN`（push の 1 回だけ渡す） | main の先端（`persist-credentials: false`） |
 | `bump` | `push`（main）・`workflow_dispatch`（`step=bump`） | `bump --budget` | `NDF_RELEASE_TOKEN` | main の先端 |
-| `publish` | `bump` の後（`state` が `published`）・`workflow_dispatch`（`step=publish`） | `publish --revision` | `github.token` | main の先端 |
+| `publish` | `bump` の後（`state` が `published`）・`workflow_dispatch`（`step=publish`、入力 `revision`） | `publish --revision` | `github.token` | main の先端 |
 | `merge`・`approval` | 441dc236e のまま | `merge`・`record` | 441dc236e のまま | 既定ブランチ |
 | `assemble` | `workflow_dispatch`（`step=assemble`、入力 `pr`） | `assemble --pr` | `NDF_RELEASE_TOKEN` | 既定ブランチ |
 
@@ -442,6 +446,7 @@ workflow `ndf-next-release.yml` のジョブは次のとおりにする。どの
 | `_commit_on_top` | 無し | `grep -rn "commit-tree" plugins/ndf-next/src/ndf` の結果が 0 件 | 無い。`git commit-tree` を `Git.run` で打つ |
 | `flow_of` | `domains/worktree/merged_decide` の `facts.rows("branch-flows", ...)` | `merged_decide.py` を読んだ | 読み口（`facts.rows`）を使う。worktree の領域は import しない |
 | `require_github_flow` | `flow_of` | — | 使う |
+| `review_problems` | `flow_of`・`domains/worktree/declaration.py` の `Declaration.branch_flow`・今の NDF の `branch_flow.parse_reviews` | `declaration.py`（worktree）と `plugins/ndf/scripts/lib/branch_flow.py` を読んだ | `flow_of` を使う。worktree の読み口は、リリースの領域が worktree の領域を import しないため使わない。`parse_reviews` は今の NDF の部品で、`promotion` に `direct` を持たないため使えない |
 | `verify_of` | `declaration.production_admin` の `_admin_declaration` | `declaration.py` を読んだ | 使う（宣言はメインディレクトリから読み、PR の作業場所が足した宣言で ref を選べないようにする） |
 | `_late` | `bump_decide.origin_of`・`included_decide.numbers` | 上の行 | 使う |
 | `cmd_bump` | `cli.ARGS`・`HANDLERS` | `cli.py` を読んだ | 使う（表へ行を足すと名前が作られる） |
@@ -485,12 +490,13 @@ workflow `ndf-next-release.yml` のジョブは次のとおりにする。どの
 | `Bumper._merge` | 祖先なら `land_bump` を呼ぶ | 祖先でなければ呼ばずに `reused` | `land_bump` の止まった結果を返す |
 | `write_bump` | 版のファイルと CHANGELOG の節を書き、パスを返す | CHANGELOG が無ければ版だけ | 版のファイルが読めなければ誤りが届く |
 | `planned_for` | ラベル `release:minor` と main の版から MINOR の版 | マージ済みは第 1 親の版から求める | ラベルを読めなければ None |
-| `confirm` | 版上げの PR のマージ・タグ・GitHub Release がそろうと版を返し、記録を 1 件書く。タグだけで Release が無ければ待ち続ける | 打ち直しで記録を 2 件にしない | 締め切りで `deploy_failed`・`missing` と「本番はマージ済み」。`ok` を返さない |
+| `confirm` | 版上げの PR のマージ・タグ・GitHub Release がそろうと版を返し、記録を 1 件書く。タグだけで Release が無ければ待ち続ける | 打ち直しで記録を 2 件にしない | 締め切りで `deploy_failed`・`missing` と「本番はマージ済み」。`ok` を返さない。版上げの PR が未マージなら足りないものが `bump`、マージ済みでタグか Release が無ければ `publish` と版上げの PR のマージコミット |
 | `_bump_containing` | 含む版上げの PR のうち最も小さい版を返す | 含むものが無ければ None | 件数が `PER_PAGE` 以上で `BumpError` |
 | `_tagged` | 参照があれば真 | 404 で偽 | ほかの誤りが届く |
 | `_has_release` | Release があれば真 | 404 で偽 | ほかの誤りが届く |
+| `review_problems` | 4 種類の行を持ち `release` の行が無い宣言で空 | 行が `promote-whole` なら `release` の行があっても空 | `release` の行で `reviews`・`release`、`impl` の行が無いと `reviews`・`impl`、`impl`・`sprint` のどちらも cross-review を持たないと `reviews`・`cross-review` |
 | `problems` | 版を変えない PR で空 | 版上げの PR で空 | 版を変えた PR で `version`、ラベル 2 つで `level`、head が検証の ref で `verify-ref` |
-| `check` | 行が `github-flow` で `problems` の結果 | 行が `promote-whole` で None | PR を読めなければ誤りが届く |
+| `check` | 行が `github-flow` で `problems` と `review_problems` の結果 | 行が `promote-whole` で None | PR を読めなければ誤りが届く |
 | `included` | P1・P2 を番号の順に返す | 下書き・検証の ref・`release/v`・フォークを外す | — |
 | `version_of` | `11.0.0` と時刻から `11.0.0-next.20261115120000` | — | 版でない値で `VersionError` |
 | `marketplace_of` | `name` だけが変わる | — | `name` の無い中身でも足す |
