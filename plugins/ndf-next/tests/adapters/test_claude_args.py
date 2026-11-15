@@ -13,12 +13,19 @@ from ndf.adapters import claude
 MINIMAL_HEAD = ["-p", "--output-format", "json", "--no-session-persistence", "--setting-sources", "", "--strict-mcp-config"]
 
 
-def test_full_args_disable_installed_ndf_and_load_this_plugin(tmp_path):
+LISTED = [
+    {"id": "ndf@other-market", "enabled": True},
+    {"id": "ndf@disabled-market", "enabled": False},
+    {"id": "mcp-serena@other-market", "enabled": True},
+]
+
+
+def test_full_args_disable_installed_ndf_and_load_this_plugin(tmp_path, monkeypatch):
+    monkeypatch.setattr(claude, "list_plugins", lambda: LISTED)
     argv = claude.claude_args(claude.ClaudeCall(system="sys", permission=claude.Permission.FULL), root=tmp_path)
 
     settings = json.loads(argv[argv.index("--settings") + 1])
-    assert settings == {"enabledPlugins": claude.DISABLED_PLUGINS}
-    assert all(enabled is False for enabled in claude.DISABLED_PLUGINS.values())
+    assert settings == {"enabledPlugins": {"ndf@other-market": False}}
     assert argv[argv.index("--plugin-dir") + 1] == str(tmp_path)
     assert argv[0] == claude.CLAUDE and "--append-system-prompt" in argv
 
@@ -76,3 +83,52 @@ def test_each_permission_has_its_own_tools_and_never_skips_permissions(tmp_path)
 def test_call_refuses_tools_or_resume_outside_their_permission(kwargs):
     with pytest.raises(ValueError):
         claude.ClaudeCall(system="sys", **kwargs)
+
+
+def test_disabled_plugins_follow_the_installed_list_not_a_fixed_name():
+    """旧い NDF がどの登録名でも外れ、無効の登録・別の名前・自分の名前は外さない（#3617 の受け入れ条件 13・I10）。"""
+    assert claude.disabled_plugins(LISTED, None) == {"ndf@other-market": False}
+    assert claude.disabled_plugins(LISTED, identity.FINAL_NAME) == {}
+    assert claude.disabled_plugins([{"id": "mcp-serena@x", "enabled": True}], None) == {}
+    assert claude.disabled_plugins([], None) == {}
+
+
+def test_plugin_args_without_old_ndf_adds_no_settings(tmp_path):
+    assert claude.plugin_args(tmp_path, lambda: []) == claude.PluginArgs(["--plugin-dir", str(tmp_path)], None)
+
+
+def test_plugin_args_keeps_going_with_a_notice_when_the_list_is_unreadable(tmp_path):
+    """一覧が読めなければ外さずに起動の引数を返し、知らせを入れる（I10a）。"""
+    got = claude.plugin_args(tmp_path, lambda: None)
+    assert got.args == ["--plugin-dir", str(tmp_path)]
+    assert got.notice == claude.LIST_UNREADABLE
+
+
+class _Done:
+    def __init__(self, code: int, out: str) -> None:
+        self.returncode, self.stdout = code, out
+
+
+@pytest.mark.parametrize(
+    ("run", "expected"),
+    [
+        (lambda *a, **k: _Done(0, json.dumps(LISTED)), LISTED),
+        (lambda *a, **k: _Done(0, "[]"), []),
+        (lambda *a, **k: _Done(1, ""), None),
+        (lambda *a, **k: _Done(0, "not json"), None),
+        (lambda *a, **k: _Done(0, json.dumps([{"name": "x"}])), None),
+    ],
+)
+def test_list_plugins_reads_the_cli_json(run, expected):
+    assert claude.list_plugins(run) == expected
+
+
+def test_list_plugins_gives_up_on_launch_failure_and_timeout():
+    def missing(*a, **k):
+        raise FileNotFoundError("claude")
+
+    def slow(*a, **k):
+        raise claude.subprocess.TimeoutExpired("claude", 1)
+
+    assert claude.list_plugins(missing) is None
+    assert claude.list_plugins(slow) is None

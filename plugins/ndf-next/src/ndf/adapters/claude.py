@@ -5,8 +5,8 @@
 フラグ（`--dangerously-skip-permissions`・`bypassPermissions`）を使わない。
 
 Skill を回す `full` の起動は、入っている旧い NDF を `--settings` の `enabledPlugins` で外し、`--plugin-dir` で
-このプラグインを読む（`plugin_args`）。外す設定は `DISABLED_PLUGINS` の 1 か所だけが持ち、起動のスクリプトは
-副命令 `launch-args` で同じ値を読む。利用者の設定ファイルは書き換えない。
+このプラグインを読む（`plugin_args`）。外す登録は登録名を決め打たず、`claude plugin list --json` の導入済みの一覧から
+決める（#3617）。起動のスクリプトは副命令 `launch-args` で同じ値を読む。利用者の設定ファイルは書き換えない。
 
 起動の前に、学習に使わない設定の控え（`training.refusal`）を読み、重い起動の枠（`launch_slot.held`）を取る（#3391・#3368。前置きは `launch_slot.gate` が持つ）。
 """
@@ -18,7 +18,7 @@ import subprocess
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, NamedTuple, Optional, Sequence
+from typing import Any, Callable, Mapping, NamedTuple, Optional, Sequence
 
 from ndf import identity
 from ndf.adapters import launch_slot
@@ -27,9 +27,10 @@ from ndf.adapters.run_log import child_process_env
 from ndf.contracts import facts
 
 CLAUDE = facts.value("runtimes", "claude", "executable")
-# Skill を回す起動（full）で外す、入っている旧い NDF（マーケットプレイスの登録の名前）。
-# 起動のスクリプトは `ndf launch-args` の items で同じ値を読む。値を写さない
-DISABLED_PLUGINS: dict[str, bool] = {"ndf@ai-plugins": False}
+# 導入済みのプラグインの一覧を読む時間の上限（秒）
+PLUGIN_LIST_TIMEOUT = 30
+# 一覧を読めなかったときの知らせ（導入先のパスを含む CLI の出力は載せない）
+LIST_UNREADABLE = "導入済みのプラグインの一覧を読めず、旧い NDF を外さずに起動する"
 # full の起動で許す Tool
 FULL_TOOLS = "Read,Edit,Write,Bash,Grep,Glob,Skill,Agent,Monitor,SendMessage,ToolSearch,WebFetch,WebSearch"
 # 起動の頭（問いを 1 回渡し、答えを JSON で受ける）
@@ -85,18 +86,58 @@ class ClaudeCall:
             raise ValueError(f"resume は権限 {Permission.FULL} の起動だけが受ける（権限 {self.permission}）")
 
 
-def plugin_args(root: Path) -> list[str]:
+class PluginArgs(NamedTuple):
+    """`claude` に足す引数と、一覧を読めなかったときの知らせ（読めれば `None`）。"""
+
+    args: list[str]
+    notice: Optional[str]
+
+
+def list_plugins(run: Callable[..., subprocess.CompletedProcess] = subprocess.run) -> Optional[list[dict[str, Any]]]:
+    """`claude plugin list --json` の要素の並び。起動できない・失敗・時間切れ・形の違いは `None`。"""
+    try:
+        done = run([CLAUDE, "plugin", "list", "--json"], capture_output=True, text=True, timeout=PLUGIN_LIST_TIMEOUT, check=False)
+    except (OSError, subprocess.SubprocessError):  # noqa: NDF401 外部コマンド: 読めなければ外さずに起動する（#3617 の決定 8）
+        return None
+    if done.returncode != 0:
+        return None
+    try:
+        listed = json.loads(done.stdout)
+    except ValueError:  # noqa: NDF401 外部コマンド: JSON でなければ読めなかったとして扱う
+        return None
+    if not isinstance(listed, list) or not all(isinstance(e, dict) and isinstance(e.get("id"), str) for e in listed):
+        return None
+    return listed
+
+
+def disabled_plugins(listed: Sequence[Mapping[str, Any]], own: Optional[str]) -> dict[str, bool]:
+    """外す登録（`{<id>: False}`）。有効で、`@` の前が旧い NDF の名前で、自分の名前と違う登録だけ（I10）。"""
+    out: dict[str, bool] = {}
+    for entry in listed:
+        plugin_id = entry.get("id")
+        if not isinstance(plugin_id, str) or entry.get("enabled") is not True:
+            continue
+        name = plugin_id.split("@", 1)[0]
+        if name == identity.FINAL_NAME and name != own:
+            out[plugin_id] = False
+    return out
+
+
+def plugin_args(root: Path, listed: Optional[Callable[[], Optional[list[dict[str, Any]]]]] = None) -> PluginArgs:
     """入っている旧い NDF を外し、`root` のプラグインを読む `claude` の引数。
 
-    外す設定（`DISABLED_PLUGINS`）のうち、`root` の `plugin.json` の名前と同じ名前の行は外さない（入れ替えの後、
-    マーケットプレイスの登録の名前が自分と同じになっても、自分を外さない）。外す行が残らなければ `--settings` を付けない。
+    外す登録は導入済みの一覧（`listed`。省けば `list_plugins`）から決め、`root` の `plugin.json` の名前と同じ名前の
+    登録は外さない（入れ替えの後に自分を外さない）。一覧を読めなければ外さずに起動し、`notice` に理由を入れる（I10a）。
+    外す登録が無ければ `--settings` を付けない。
     """
-    own = identity.name_of(root)  # 読めなければ None（外す設定をすべて残す）
-    disabled = {key: value for key, value in DISABLED_PLUGINS.items() if key.split("@", 1)[0] != own}
+    found = (listed if listed is not None else list_plugins)()
     load = ["--plugin-dir", str(root)]
+    if found is None:
+        return PluginArgs(load, LIST_UNREADABLE)
+    disabled = disabled_plugins(found, identity.name_of(root))
     if not disabled:
-        return load
-    return ["--settings", json.dumps({"enabledPlugins": disabled}, separators=(",", ":")), *load]
+        return PluginArgs(load, None)
+    return PluginArgs(["--settings", json.dumps({"enabledPlugins": disabled}, separators=(",", ":")), *load], None)
 
 
 def minimal_args(system: str) -> list[str]:
@@ -118,7 +159,7 @@ def permission_args(permission: Permission, tools: Optional[str] = None) -> list
 
 def _full_args(call: ClaudeCall, root: Path) -> list[str]:
     args = [*PRINT_JSON, *permission_args(Permission.FULL)]
-    args += plugin_args(root) + ["--append-system-prompt", call.system]
+    args += plugin_args(root).args + ["--append-system-prompt", call.system]
     return args + (["--resume", call.resume] if call.resume else [])
 
 
