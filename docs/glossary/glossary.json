@@ -7830,20 +7830,20 @@
       "context": "ndf-workflow",
       "meaning": "CI のジョブが上げた artifact のうち、JUnit の XML を持つもの。設定ファイルの `test.ci.junit_artifacts` が名前の glob で指し、CI で落ちたテストをログより先に読む元になる",
       "code": "junit_artifacts",
-      "pending_source": "issues/issue-3616-requirements.md"
+      "source": "docs/specifications/ndf-next-ci-failed-tests-junit.md"
     },
     {
       "term": "ログのパーサー",
       "context": "ndf-workflow",
       "meaning": "1 つのテストランナー（suite の `runner`）の CI のログの形から、落ちたテストを `<テストのファイル>::<テストの名前>` の並びで読む部品。外部ライブラリを呼ぶ唯一のモジュールの意味の「アダプター」とは別",
-      "pending_source": "issues/issue-3616-requirements.md"
+      "source": "docs/specifications/ndf-next-ci-failed-tests-junit.md"
     },
     {
       "term": "収集の確かめ",
       "context": "ndf-cross-refactoring",
       "meaning": "cross-refactoring が、足したテストを全体の実行が収集するかを suite の `collect_command` で確かめる工程。成功と読む終了コードは suite の設定から読み、設定が無ければ 0 だけ",
       "code": "collect_command",
-      "pending_source": "issues/issue-3616-requirements.md"
+      "source": "docs/specifications/ndf-next-ci-failed-tests-junit.md"
     },
     {
       "term": "設定のキーの改名表",

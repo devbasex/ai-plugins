@@ -714,8 +714,8 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 設定で選べる値 | — | `.ndf/` の設定ファイルに書ける値の選択肢（取り込み方の表の行・delivery の種類・リリースの形）。コントラクトから数え、Issue の番号のある例外なしに減ると検査が落ちる | — | — | — |
 | リモート名 | — | ndf が取得・照合・差分の基準・送信に使う git のリモートの名前。`.ndf/worktree.json` の `remote` に書き、省けば `origin` | — | — | — |
 | 選べる値の基準 | — | 設定で選べる値の集合ごとに、出所と値の一覧を持つファイル（`scripts/ndf-choices.json`）。値を減らすときは Issue の番号と理由を持つ例外を足す | — | — | — |
-| JUnit の成果物 | `junit_artifacts` | CI のジョブが上げた artifact のうち、JUnit の XML を持つもの。設定ファイルの `test.ci.junit_artifacts` が名前の glob で指し、CI で落ちたテストをログより先に読む元になる | — | — | — |
-| ログのパーサー | — | 1 つのテストランナー（suite の `runner`）の CI のログの形から、落ちたテストを `<テストのファイル>::<テストの名前>` の並びで読む部品。外部ライブラリを呼ぶ唯一のモジュールの意味の「アダプター」とは別 | — | — | — |
+| JUnit の成果物 | `junit_artifacts` | CI のジョブが上げた artifact のうち、JUnit の XML を持つもの。設定ファイルの `test.ci.junit_artifacts` が名前の glob で指し、CI で落ちたテストをログより先に読む元になる | — | — | `docs/specifications/ndf-next-ci-failed-tests-junit.md` |
+| ログのパーサー | — | 1 つのテストランナー（suite の `runner`）の CI のログの形から、落ちたテストを `<テストのファイル>::<テストの名前>` の並びで読む部品。外部ライブラリを呼ぶ唯一のモジュールの意味の「アダプター」とは別 | — | — | `docs/specifications/ndf-next-ci-failed-tests-junit.md` |
 | 設定のキーの改名表 | `ndf_settings_renames` | 利用者の設定（.ndf/）の旧いキーの位置・新しいキーの位置・値の対応を行ごとに持つ契約の表（contracts/domains/ndf-settings-renames.json）。移行のコマンド・設定を読む側の止める検査・規約の規則が同じ表を読む | — | — | — |
 | 移行のコマンド | `settings_migrate` | 設定のキーの改名表に従い、利用者の .ndf/ を新しいキーへ書き換えるサブコマンド。差分と差分のハッシュを示す実行と、利用者が承認した差分のハッシュを渡して書く実行に分かれる | — | — | — |
 | 設計承認の依頼 | — | 並列の計画のレーン（開発ループのレーンと 1 スプリントのレーン）が設計承認ゲートでオーガナイザーへ送る、設計 PR の承認の依頼。計画の台帳の `kind: gate1` の行で、`answer --approved` が設計 PR をマージし、MVV 判定と古い依頼の整理が掛かる | — | — | — |
@@ -910,7 +910,7 @@ Pull Request のレビューを CLI へ委譲し、新しい指摘が出なく�
 | 作業場所 | — | ndf-next の cross-refactoring が Pull Request ごとに作る置き場 <置き場>/rf<PR>。書き込み用の work・担当ごとの読み取り用 read/<ランタイム>・logs・状態ファイルを持つ | — | — | — |
 | 状態ファイル | — | ndf-next の cross-refactoring の実行の進みを持つ rf<PR>/state.json。完了の記録が無ければ、同じコマンドを打ち直すと記録のある手順を流し直さずに続ける | — | — | — |
 | 退避の途中の印 | — | 作業場所の退避を始める前に退避した先へ置き、移し終えたら消すファイル。残っていれば、次の打ち直しは照合をせずに退避を続ける | — | — | — |
-| 収集の確かめ | `collect_command` | cross-refactoring が、足したテストを全体の実行が収集するかを suite の `collect_command` で確かめる工程。成功と読む終了コードは suite の設定から読み、設定が無ければ 0 だけ | — | — | — |
+| 収集の確かめ | `collect_command` | cross-refactoring が、足したテストを全体の実行が収集するかを suite の `collect_command` で確かめる工程。成功と読む終了コードは suite の設定から読み、設定が無ければ 0 だけ | — | — | `docs/specifications/ndf-next-ci-failed-tests-junit.md` |
 
 ## NDF のラッパー（`ndf-relay`）
 
