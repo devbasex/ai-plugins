@@ -153,8 +153,8 @@ PR はリリースブランチを名前（head の ref）で参照する。ス�
 | 要素 | 責務 |
 | --- | --- |
 | 雛形 `contracts/templates/release.json`（変更） | 本番のプランを、マージ → 終わりの記録 → 次の版のリリースブランチの用意の 3 ステップにする。worker のステップを持たない（I1・I2） |
-| 雛形 `contracts/templates/merge.json`（変更） | 最初のステップに `release-guard`（`ndf release-steps guard --branch {{branch}}`）を置き、終了コード 3 を止まる原因 `production_pr` にする（I8） |
-| 雛形の引数 `contracts/templates/params.json`（変更） | 本番のプランが使う引数 `pr`・`production` を足す |
+| 雛形 `contracts/templates/merge.json`（変更） | 最初のステップに `release-guard`（`ndf release-steps guard --root {{repo}} --branch {{branch}}`）を置き、終了コード 3 を止まった理由の表の既存の種類 `refused`（不変条件で操作を断った）にする（I8） |
+| 雛形の引数 `contracts/templates/params.json`（変更） | 本番のプランが使う引数 `pr` を足す。本番ブランチは引数にせず、副命令が宣言（`.ndf/worktree.json` の `production_branch`）から読む |
 | 雛形の検査 `domains/release/release_plan.py`（新設） | 純粋な処理。本番のプランの JSON を受け、I1・I2 を破るステップの一覧を返す。PR の base と本番ブランチの名前を受け、`merge` のプランで流してよいかを返す（I8） |
 | マージ `domains/release/land.py`（変更） | 照合付きのマージ（今のまま）。必須のチェックが落ちたら落ちたチェックの名前と次の手を返す（I4）。マージ済みの PR から再開したら、人のマージの記録を書く（I5）。結果に版と承認の経路を載せる |
 | 証跡 `domains/release/trail.py`（変更） | 人のマージの記録をコメントで書き、読む。マージした人・マージした先端・マージコミット・承認ゲートの最新の承認の先端を持つ |
@@ -187,8 +187,7 @@ graph TD
     R -->|副命令を並べる| C
     MJ -->|guard を最初に置く| C
     Q -->|検査する| R
-    G -->|人のマージを読む| M
-    G -->|answer を呼ぶ| C
+    G -->|answer を呼び、人のマージの判定を読む| C
     C --> L
     C --> A
     C --> N
@@ -345,8 +344,8 @@ worker の起動の並び）・`push` を使うステップ（`use` が `push`�
 
 雛形の検査は `release: true` の雛形だけを見るため、本番の PR を `ndf route merge` で `merge` のプランへ流す経路は塞がない。
 これを実行時に塞ぐため、`merge.json` の最初のステップを `release-guard`（`ndf release-steps guard --branch {{branch}}`）にする。
-`guard` は PR の base を GitHub から読み、宣言の本番ブランチと同じなら終了コード 3 で止まる（I8）。止まる原因 `production_pr` は
-`on_cause` に行き先を持たないため、プランはそこで止まり、`ci-fix`・`push` へ進まない。判定は `release_plan` の純粋な関数が持ち、
+`guard` は PR の base を GitHub から読み、宣言の本番ブランチと同じなら終了コード 3 で止まる（I8）。止まる原因は止まった理由の表の既存の種類
+`refused` で、`on_cause` に行き先を持たないため、プランはそこで止まり、`ci-fix`・`push` へ進まない。判定は `release_plan` の純粋な関数が持ち、
 `guard` は PR を読んで渡すだけにする。雛形の検査は、`merge.json` の最初のステップが `release-guard` であることも確かめる。
 プランを読む核（`core/plan/model.py`）や `ndf route` で同じ判定を強制する形は、核と経路の選択がリリースの語を持つことになり、
 受け入れ条件 12 の範囲（`domains/release/` と `contracts/templates/`）の外を変えるため採らない。
@@ -487,7 +486,7 @@ PR から再開し（`land._resume_merged`）、戻すマージと人のマー�
 | 受け入れ条件 1 | `issue-3119-design.md` の決定 21、`issue-3119-design-detail.md` の宣言の値（「内部のデータと定数」）と、この文書の決定 9 に同じ `branch_flow` の値があることを設計レビューで見る | — （設計の成果物の条件で、テストでは縛らない） |
 | 受け入れ条件 2 | この文書の「本番の PR を流すプランと、承認の後に通るステップ」の表を設計レビューで見る | — （同上） |
 | 受け入れ条件 3・I1 | `contracts/templates/` の雛形から生成した `release` のプランを `release_plan.forbidden` が空と返す。`merge.json` に `release: true` を付けた形は `ci-fix`・`push`・`fix-push` を返す | `release.json` に `{{worker}}` のステップか `push` を戻すと雛形のテストが落ちる |
-| 受け入れ条件 3・I8 | base が本番ブランチの PR で `guard` が終了コード 3 を返し、ベースブランチ宛ての PR で 0 を返す。`merge.json` から生成したプランの最初のステップが `release-guard` で、原因 `production_pr` に行き先が無い | `merge.json` の最初のステップを外すか、`production_pr` に `ci-fix` への行き先を足すと落ちる |
+| 受け入れ条件 3・I8 | base が本番ブランチの PR で `guard` が終了コード 3 を返し、ベースブランチ宛ての PR で 0 を返す。`merge.json` から生成したプランの最初のステップが `release-guard` で、終了コード 3 の原因 `refused` に行き先が無い | `merge.json` の最初のステップを外すか、`refused` に `ci-fix` への行き先を足すと落ちる |
 | I2・受け入れ条件 5 | 生成した `release` のプランの最初のステップが `ndf release-steps merge` で、`--pr` と本番ブランチを渡す。マージの呼び出しの `expect_head` が承認した先端である（GitHub のアダプタを差し替えて記録した呼び出しで見る） | 最初のステップの前に別のステップを足すと落ちる。`expect_head` を渡さないと落ちる |
 | 受け入れ条件 4・I4 | 必須のチェックが落ちた本番の PR で `land` が `stopped` を返し、`items` に落ちたチェックの名前、`routes` に `rerun`・`reject`・`defer` を持ち、push もマージも呼ばない。`defer` が本番の PR を閉じ、リリースブランチを消さない | 落ちたチェックを結果から外すと落ちる。`routes` から `defer` を外すと落ちる。止まった後に push かマージを呼ぶと落ちる |
 | 受け入れ条件 6・I3 | 承認の後に先端が A から B へ動いた本番の PR で `land` が `refused` を返し、理由に A と B の先頭 12 文字が出る（今のテスト `test_judge_reports_stale_and_missing` と `_refusal` のテストを残す） | 先端の読み直しを外すと落ちる |
@@ -503,7 +502,7 @@ PR から再開し（`land._resume_merged`）、戻すマージと人のマー�
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #3572 | 実装する | — | `plugins/ndf-next/contracts/templates/release.json`、`plugins/ndf-next/contracts/templates/merge.json`、`plugins/ndf-next/contracts/templates/params.json`、`plugins/ndf-next/src/ndf/domains/release/release_plan.py`、`plugins/ndf-next/src/ndf/domains/release/merge_decide.py`、`plugins/ndf-next/src/ndf/domains/release/prepare.py`、`plugins/ndf-next/src/ndf/domains/release/land.py`、`plugins/ndf-next/src/ndf/domains/release/trail.py`、`plugins/ndf-next/src/ndf/domains/release/assemble.py`、`plugins/ndf-next/src/ndf/domains/release/cli.py`、`plugins/ndf-next/src/ndf/progress/gate/release.py`、`plugins/ndf-next/contracts/schemas/io/release-steps.result.schema.json`、`plugins/ndf-next/contracts/schemas/io/release-steps.args.schema.json`、`plugins/ndf-next/tests/domains/release/test_release_plan.py`、`plugins/ndf-next/tests/domains/release/test_release_approval.py`、`plugins/ndf-next/tests/domains/release/test_release_assemble.py`、`plugins/ndf-next/tests/domains/release/test_release_prepare.py` |
+| #3572 | 実装する | — | `plugins/ndf-next/contracts/templates/release.json`、`plugins/ndf-next/contracts/templates/merge.json`、`plugins/ndf-next/contracts/templates/params.json`、`plugins/ndf-next/src/ndf/domains/release/release_plan.py`、`plugins/ndf-next/src/ndf/domains/release/merge_decide.py`、`plugins/ndf-next/src/ndf/domains/release/prepare.py`、`plugins/ndf-next/src/ndf/domains/release/land.py`、`plugins/ndf-next/src/ndf/domains/release/trail.py`、`plugins/ndf-next/src/ndf/domains/release/assemble.py`、`plugins/ndf-next/src/ndf/domains/release/cli.py`、`plugins/ndf-next/src/ndf/progress/gate/release.py`、`plugins/ndf-next/contracts/schemas/io/release-steps.result.schema.json`、`plugins/ndf-next/contracts/schemas/io/release-steps.args.schema.json`、`plugins/ndf-next/tests/domains/release/test_release_plan.py`、`plugins/ndf-next/tests/domains/release/test_release_approval.py`、`plugins/ndf-next/tests/domains/release/test_release_assemble.py`、`plugins/ndf-next/tests/domains/release/test_release_prepare.py`、`plugins/ndf-next/tests/progress/gate/test_gate_release.py`、`plugins/ndf-next/src/ndf/domains/release/declaration.py` |
 
 結果 JSON と引数のスキーマ（`contracts/schemas/io/`）は副命令の契約の正本で、副命令を変えると同じ変更で合わせる。
 
