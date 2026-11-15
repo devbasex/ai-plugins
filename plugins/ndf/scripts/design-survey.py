@@ -262,9 +262,14 @@ def _result_files(head: Doc | None) -> tuple[set[str] | None, str]:
     return None, f"頭の設計文書 {head.path} の設計の結果の表を読めない"
 
 
+def _is_head(d: Doc) -> bool:
+    """種類が `design` の頭の設計文書か。"""
+    return doc_kinds.doc_kind(d.path, placed=False) == "design"
+
+
 def _head_of(detail: Doc, group: list[Doc]) -> Doc | None:
     """詳細設計の文書と同じ番号を持つ、種類が `design` の設計文書。"""
-    return next((d for d in group if d.nums == detail.nums and doc_kinds.doc_kind(d.path, placed=False) == "design"), None)
+    return next((d for d in group if d.nums == detail.nums and _is_head(d)), None)
 
 
 def detail_items(group: list[Doc], require: bool) -> list[dict]:
@@ -289,7 +294,7 @@ def detail_items(group: list[Doc], require: bool) -> list[dict]:
 def repo_items(group: list[Doc], settings: design_repos.RepoSettings) -> list[dict]:
     """まとまりの頭の設計文書ごとに、当てる範囲を決めて代表のリポジトリの 2 規則を当てる。"""
     try:
-        heads = [d for d in group if doc_kinds.doc_kind(d.path, placed=False) == "design"]
+        heads = [d for d in group if _is_head(d)]
     except doc_kinds.DocKindsError as exc:
         raise StepError(str(exc), EXIT_UNREADABLE) from None
     items: list[dict] = []
