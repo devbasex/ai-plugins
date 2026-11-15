@@ -199,16 +199,11 @@ def production_branch(root: Path) -> str:
     return got
 
 
-# 取り込み方の表と、ndf-next のリリースが扱う行（#3572 の決定 5）
-FLOWS = "branch-flows"
-GITHUB_FLOW = "github-flow"
+# ndf-next のリリースが扱う取り込み方の表の行（スプリントの PR を本番ブランチへ直接マージする行。#3572 の決定 5）
+GITHUB_FLOW = facts.ids("branch-flows", promotion="direct")[0]
 FLOW_CHOICES = ("start", "doc_prs", "integrate")
 # 実装の差分を cross-review するレビューの単位の種類（#3119 の I2）
 CODE_REVIEW_KINDS = ("impl", "sprint")
-CROSS_REVIEW = "cross-review"
-NO_DIFF = "none"
-# 検証の行の channel と鍵（#3572 の決定 9）
-VERIFY_CHANNEL = "verify"
 
 
 class VerifyDecl(NamedTuple):
@@ -235,12 +230,10 @@ def _branch_flow(root: Path) -> dict:
 
 def _flow_row(flow: dict) -> dict:
     """宣言の `branch_flow` が選ぶ取り込み方の表の行。表に無いか、行が許さない値を選べば `DeclarationError`（#3119 の I1）。"""
-    if "promotion" in flow:
-        rows = facts.rows(FLOWS, promotion=flow["promotion"])
-    else:
-        rows = facts.rows(FLOWS, default=True)
+    table = "branch-flows"
+    rows = facts.rows(table, promotion=flow["promotion"]) if "promotion" in flow else facts.rows(table, default=True)
     if not rows:
-        raise DeclarationError(f"branch_flow.promotion {flow.get('promotion')!r} が取り込み方の表 {FLOWS} に無い")
+        raise DeclarationError(f"branch_flow.promotion {flow.get('promotion')!r} が取り込み方の表 {table} に無い")
     row = rows[0]
     bad = [f"{c}={flow[c]!r}" for c in FLOW_CHOICES if c in flow and flow[c] not in row[c]]
     if bad:
@@ -265,7 +258,7 @@ def _reviews_cross(unit: object) -> bool:
     if not isinstance(unit, dict):
         return False
     checks = unit.get("checks")
-    return isinstance(checks, list) and CROSS_REVIEW in checks and unit.get("diff") != NO_DIFF
+    return isinstance(checks, list) and "cross-review" in checks and unit.get("diff") != "none"
 
 
 def review_problems(root: Path) -> list[dict[str, str]]:
@@ -286,8 +279,8 @@ def review_problems(root: Path) -> list[dict[str, str]]:
     ]
     code = [k for k in CODE_REVIEW_KINDS if k in reviews]
     if len(code) == len(CODE_REVIEW_KINDS) and not any(_reviews_cross(reviews[k]) for k in code):
-        detail = f"{'・'.join(CODE_REVIEW_KINDS)} のどちらも実装の差分を {CROSS_REVIEW} しない"
-        out.append({"kind": "reviews", "name": CROSS_REVIEW, "detail": detail})
+        detail = f"{'・'.join(CODE_REVIEW_KINDS)} のどちらも実装の差分を cross-review しない"
+        out.append({"kind": "reviews", "name": "cross-review", "detail": detail})
     return out
 
 
@@ -303,9 +296,10 @@ def verify_of(root: Path) -> VerifyDecl:
     except (OSError, ValueError) as exc:
         raise DeclarationError(f"{path} を読めない: {exc}") from None
     rows = raw.get("delivery") if isinstance(raw, dict) else None
-    found = [r for r in rows if isinstance(r, dict) and r.get("channel") == VERIFY_CHANNEL] if isinstance(rows, list) else []
+    channel = "verify"
+    found = [r for r in rows if isinstance(r, dict) and r.get("channel") == channel] if isinstance(rows, list) else []
     if len(found) != 1:
-        raise DeclarationError(f"{path} の delivery に channel {VERIFY_CHANNEL} の行が 1 つでない（{len(found)} 行）")
+        raise DeclarationError(f"{path} の delivery に channel {channel} の行が 1 つでない（{len(found)} 行）")
     verify = found[0].get("verify")
     values = [verify.get(k) if isinstance(verify, dict) else None for k in ("ref", "marketplace")]
     if not all(isinstance(v, str) and v.strip() == v and v for v in values):

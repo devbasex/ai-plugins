@@ -32,8 +32,6 @@ ORIGIN_LINE = "起点:"
 _SHA = re.compile(r"[0-9a-f]{40}")
 # `action` の動き
 PUBLISH, NOTHING, CREATE, UPDATE, REPLACE = "publish", "nothing", "create", "update", "replace"
-# `bump` の結果の state（結果のスキーマの列挙と同じ値）
-BUMP_STATES = ("merged", "reused", "published", "not_applicable")
 
 
 class LevelError(ValueError):
@@ -47,6 +45,11 @@ class OpenBump(NamedTuple):
     version: str
     head_ref: str
     head_sha: str
+
+
+def bump_states() -> tuple[str, ...]:
+    """`bump` の結果の state（版上げの PR をマージした・main を含まず次の push へ回した・タグを作る側へ渡した・何もしない）。"""
+    return ("merged", "reused", "published", "not_applicable")
 
 
 def level_of(labels: Sequence[str]) -> str:

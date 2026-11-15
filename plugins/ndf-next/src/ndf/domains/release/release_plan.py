@@ -3,7 +3,7 @@
 | 判定 | 何を見るか |
 | --- | --- |
 | `forbidden` | `release: true` のプランが、承認の後にコードを変える worker のステップや、直しのステップ（`FIX_STEPS`）・次の版の用意と同期の副命令（`AFTER_COMMANDS`）を持たず、最初のステップが本番の PR のマージ（`merge_run`）であるか（不変条件 I1・I2・I10） |
-| `guard_before_merge` | `merge` の部品（`MERGE_PART_IDS`）を持つプランで、最初の部品の直前が `release-guard` で、原因 `production_pr` の行き先が `end` か（I6・I13） |
+| `guard_before_merge` | `merge` の部品（`merge_part_ids`）を持つプランで、最初の部品の直前が `release-guard` で、原因 `production_pr` の行き先が `end` か（I6・I13） |
 | `is_production_pr` | PR を `merge` の部品でマージしてはいけない（base が本番ブランチ）か（I6） |
 
 プランは `ndf.core.route.expanded` の形（`use` を開き、差し込みは埋めていない）で受ける。
@@ -24,8 +24,6 @@ WORKER = "{{worker}}"
 FIX_STEPS = frozenset({"push", "fix-push", "ci-fix", "fix-base", "base-sync"})
 # `merge` の部品の直前に置くステップの id
 GUARD_ID = "release-guard"
-# 直前に `release-guard` を求める `merge` の部品の id（並びの先にある方を見る）
-MERGE_PART_IDS = ("merge-gate", "merge")
 # 本番のプランに置かない副命令（次の版のブランチの用意と同期。I10）
 AFTER_COMMANDS = frozenset({"prepare-next", "defer"})
 # `release-guard` が本番の PR を渡した後の行き先
@@ -42,6 +40,11 @@ def guard_cause() -> str:
 
 # 本番の PR を渡す終了コード（止まった理由の表の production_pr の終了コード）
 GUARD_EXIT = causes.exit_code(guard_cause())
+
+
+def merge_part_ids() -> tuple[str, ...]:
+    """直前に `release-guard` を求める `merge` の部品の id（雛形の部品 `parts/steps.json` の id。並びの先にある方を見る）。"""
+    return ("merge-gate", "merge")
 
 
 def merge_run() -> tuple[str, ...]:
@@ -87,7 +90,8 @@ def _mapping(step: Mapping[str, Any], key: str) -> Mapping[str, Any]:
 def guard_before_merge(plan: Mapping[str, Any]) -> list[str]:
     """`merge` の部品を持つプランで、最初の部品の直前が `release-guard` で、本番の PR を `end` へ渡すかを確かめ、破れを返す。"""
     steps = _steps(plan)
-    at = next((i for i, s in enumerate(steps) if s.get("id") in MERGE_PART_IDS), None)
+    parts = merge_part_ids()
+    at = next((i for i, s in enumerate(steps) if s.get("id") in parts), None)
     if at is None:
         return []
     part = steps[at].get("id")

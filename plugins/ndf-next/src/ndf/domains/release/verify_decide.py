@@ -15,8 +15,6 @@ from typing import Any, NamedTuple
 
 from ndf.domains.release import version_decide
 
-# 検証の版の接尾辞の名前
-NEXT_LABEL = "next"
 _STAMP = "%Y%m%d%H%M%S"
 
 
@@ -43,7 +41,7 @@ def included(pulls: Sequence[OpenPull], verify_ref: str, repo: str) -> list[Open
 def version_of(main_version: str, at: datetime) -> str:
     """検証の版（`main_version` は接尾辞の無い版。版でなければ `VersionError`）。"""
     version_decide.parse(main_version)
-    return f"{version_decide.base_of(main_version)}-{NEXT_LABEL}.{at.strftime(_STAMP)}"
+    return f"{version_decide.base_of(main_version)}-next.{at.strftime(_STAMP)}"
 
 
 def marketplace_of(raw: Mapping[str, Any], name: str) -> dict[str, Any]:

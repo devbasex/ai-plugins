@@ -306,9 +306,7 @@ def render_version_record(version: str, tag: str, bump_pr: int) -> str:
     """作った版の記録の本文（証跡の印を持たない）。接尾辞のある版なら `ValueError`。"""
     if version_decide.base_of(version) != version:
         raise ValueError(f"作った版は接尾辞の無い版（渡された値: {version!r}）")
-    return (
-        f"{VERSION_MARK}\n## CD が版を作った\n\n{VERSION_LINE} `{version}`\n{TAG_LINE} `{tag}`\n{BUMP_PR_LINE} #{int(bump_pr)}\n"
-    )
+    return f"{VERSION_MARK}\n## CD が版を作った\n\n{VERSION_LINE} `{version}`\n{TAG_LINE} `{tag}`\n{BUMP_PR_LINE} #{int(bump_pr)}\n"
 
 
 def write_version_record(hub: GitHub, number: int, version: str, tag: str, bump_pr: int) -> tuple[bool, str]:

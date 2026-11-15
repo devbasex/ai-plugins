@@ -98,12 +98,7 @@ def planned_for(root: Path, hub: GitHub, number: int, production: str) -> str | 
             ref = f"{git_mod.ORIGIN}/{production}"
         current = gather.version_at(repo_git, found[0], ref)
         return bump_decide.planned(current, level) if current is not None else None
-    except (
-        git_mod.GitError,
-        plugins_mod.PluginsError,
-        version_decide.VersionError,
-        bump_decide.LevelError,
-    ):  # noqa: NDF401 外部コマンド: 予定の版は表示だけで、確定の版は confirm が読む
+    except (git_mod.GitError, plugins_mod.PluginsError, version_decide.VersionError):  # noqa: NDF401 外部コマンド: 予定の版は表示だけで、確定の版は confirm が読む
         return None
 
 
@@ -132,7 +127,7 @@ class Bumper:
     def _last_bump(self, tip: str) -> str | None:
         """main の祖先にある最新の版上げのコミット（起点の行を持つ。無ければ None）。"""
         found = self._git.run("log", "-1", "--format=%H", f"--grep=^{bump_decide.ORIGIN_LINE}", git_mod.END_OF_OPTIONS, tip).strip()
-        return found or None
+        return found if found else None
 
     def _origin(self, tip: str) -> str:
         """範囲の起点（main の祖先にある最新の版上げのコミットの起点。無ければ main の版のタグ、どちらも無ければ根のコミット）。"""
@@ -234,7 +229,12 @@ class Bumper:
         made = self.hub.rest(
             "POST",
             f"/repos/{self.hub.repo}/pulls",
-            {"title": f"Release: {planned[0].plugin} v{version}", "head": branch, "base": self.production, "body": self._body(version, span, pulls)},
+            {
+                "title": f"Release: {planned[0].plugin} v{version}",
+                "head": branch,
+                "base": self.production,
+                "body": self._body(version, span, pulls),
+            },
         )
         return int(made["number"])
 
@@ -302,7 +302,7 @@ class Bumper:
         planned = gather.clear_shipped(bumps, gather.shipped(repo_git, found, self._tip_ref), level, version_decide.PRODUCTION)
         opened = self._open_bump()
         version = planned[0].next if planned else None
-        act = bump_decide.action(tip_tagged, bool(planned), opened, version or "")
+        act = bump_decide.action(tip_tagged, bool(planned), opened, version if version is not None else "")
         if act == bump_decide.PUBLISH:
             shown = next((v for v in tip_versions.values() if v is not None), None)
             return Bumped("published", shown)

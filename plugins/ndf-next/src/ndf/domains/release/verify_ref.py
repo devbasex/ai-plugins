@@ -48,9 +48,7 @@ def _open_pulls(hub: GitHub, production: str) -> list[verify_decide.OpenPull]:
     out: list[verify_decide.OpenPull] = []
     page = 1
     while True:
-        rows = hub.rest(
-            "GET", f"/repos/{hub.repo}/pulls", params={"state": "open", "base": production, "per_page": PER_PAGE, "page": page}
-        )
+        rows = hub.rest("GET", f"/repos/{hub.repo}/pulls", params={"state": "open", "base": production, "per_page": PER_PAGE, "page": page})
         found = [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
         for r in found:
             head = r["head"]

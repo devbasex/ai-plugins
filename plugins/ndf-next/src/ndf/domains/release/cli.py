@@ -251,7 +251,7 @@ def _bump_stopped(hub: GitHub, made: bump.Bumped) -> dict:
     items = [{"kind": "check", "name": c.name, "outcome": c.conclusion} for c in (landed.failed if landed else ())]
     items += _values(state=made.state, level=made.level, pr_url=f"https://github.com/{hub.repo}/pull/{made.pr}" if made.pr else None)
     outputs = {k: v for k, v in (("version", made.version), ("pr", made.pr)) if v is not None}
-    return result.stopped(TOOL, kind, detail, items=items, outputs=outputs or None)
+    return result.stopped(TOOL, kind, detail, items=items, outputs=outputs if outputs else None)
 
 
 def cmd_bump(args: argparse.Namespace) -> dict:
@@ -259,12 +259,12 @@ def cmd_bump(args: argparse.Namespace) -> dict:
     lander = land.Lander(hub, production, args.budget, admin=decl_mod.production_admin(root))
     today = datetime.now(timezone.utc).date().isoformat()
     made = bump.Bumper(root, hub, lander, production, today).bump()
-    if made.state not in bump_decide.BUMP_STATES:
+    if made.state not in bump_decide.bump_states():
         return _bump_stopped(hub, made)
     outputs = {k: v for k, v in (("version", made.version), ("pr", made.pr)) if v is not None}
     items = _values(state=made.state, level=made.level, production_sha=made.landed.production_sha if made.landed else None)
     detail = f"版上げ: {made.state}（版 {made.version or '無し'}・版上げの PR {f'#{made.pr}' if made.pr else '無し'}）"
-    return result.result(TOOL, result.OK, detail, items, outputs=outputs or None)
+    return result.result(TOOL, result.OK, detail, items, outputs=outputs if outputs else None)
 
 
 def cmd_confirm(args: argparse.Namespace) -> dict:
@@ -272,7 +272,9 @@ def cmd_confirm(args: argparse.Namespace) -> dict:
     found = plugins_mod.load(root)
     if not found:
         return result.stopped(TOOL, "precondition", "マーケットプレイスにプラグインが無い")
-    got = confirm.confirm(hub, git_mod.Git(root), args.pr, production, found[0].name, args.budget, time.monotonic, time.sleep)
+    got = confirm.confirm(
+        hub, git_mod.Git(root), args.pr, production, found[0].name, confirm.Watch(args.budget, time.monotonic, time.sleep)
+    )
     outputs = {"version": got.version} if got.version is not None else None
     values = _values(tag=got.tag, bump_pr=got.bump_pr, bump_revision=got.bump_revision)
     if got.kind is None:

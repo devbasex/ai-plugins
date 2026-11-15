@@ -321,7 +321,7 @@ class Lander:
         deadline = self.clock() + self.budget
         pull = self.hub.pull(number)
         if pull.merged:
-            return Landed(True, None, f"#{number} は既にマージされている", production_sha=pull.merge_sha or None)
+            return Landed(True, None, f"#{number} は既にマージされている", production_sha=pull.merge_sha if pull.merge_sha else None)
         outside = allowed(pull)
         if outside:
             return Landed(False, "refused", f"#{number} の差分が版のファイルと CHANGELOG の外に及ぶ: {', '.join(outside)}")
@@ -341,4 +341,4 @@ class Lander:
         if not outcome.merged:
             return Landed(False, outcome.kind, outcome.detail)
         merged_sha = self.hub.pull(number).merge_sha
-        return Landed(True, None, f"#{number} を迂回でマージした", production_sha=merged_sha or None, admin=True)
+        return Landed(True, None, f"#{number} を迂回でマージした", production_sha=merged_sha if merged_sha else None, admin=True)

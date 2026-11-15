@@ -34,6 +34,14 @@ class ConfirmError(Exception):
     """確かめの前提が無い（本番の PR がマージされていない・閉じた版上げの PR を読み切れない）。"""
 
 
+class Watch(NamedTuple):
+    """待ちの予算（秒）と、時刻と眠りの関数（テストが差し替える）。"""
+
+    budget: float
+    clock: Callable[[], float]
+    sleep: Callable[[float], None]
+
+
 class Confirmed(NamedTuple):
     """確かめの結果。そろわなければ `kind` が `deploy_failed`、`missing` が `bump` か `publish`。"""
 
@@ -115,21 +123,19 @@ def confirm(
     number: int,
     production: str,
     plugin: str,
-    budget: float,
-    clock: Callable[[], float],
-    sleep: Callable[[float], None],
+    watch: Watch,
 ) -> Confirmed:
-    """本番の PR `number` のマージを含む版上げの PR のマージ・タグ・GitHub Release を `budget` 秒まで待ち、作った版を記録する。"""
+    """本番の PR `number` のマージを含む版上げの PR のマージ・タグ・GitHub Release を `watch.budget` 秒まで待ち、作った版を記録する。"""
     pull = hub.pull(number)
     if not pull.merged or not pull.merge_sha:
         raise ConfirmError(f"#{number} はまだマージされていない（release-steps merge の後に打つ）")
-    deadline = clock() + budget
+    deadline = watch.clock() + watch.budget
     while True:
         got = _read(hub, repo_git, pull.merge_sha, production, plugin)
         if got.kind is None and got.version is not None and got.tag is not None and got.bump_pr is not None:
             trail.write_version_record(hub, number, got.version, got.tag, got.bump_pr)
             return got._replace(detail=f"#{number} の版 v{got.version}（タグ {got.tag}・版上げの PR #{got.bump_pr}）を確かめた")
-        left = deadline - clock()
+        left = deadline - watch.clock()
         if left <= 0:
             return got._replace(detail=f"本番はマージ済み。CD の {got.missing} がそろわない: {got.detail}")
-        sleep(min(CONFIRM_POLL_SECONDS, left))
+        watch.sleep(min(CONFIRM_POLL_SECONDS, left))
