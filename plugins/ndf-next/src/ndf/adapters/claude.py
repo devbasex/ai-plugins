@@ -87,7 +87,7 @@ class ClaudeCall:
 
 
 class PluginArgs(NamedTuple):
-    """`claude` に足す引数と、一覧を読めなかったときの知らせ（読めれば `None`）。"""
+    """`claude` の引数と、導入済みの一覧を読めなかったときの知らせ（読めれば `None`）。"""
 
     args: list[str]
     notice: Optional[str]
@@ -169,26 +169,34 @@ def permission_args(permission: Permission, tools: Optional[str] = None) -> list
     return ["--tools", ""]
 
 
-def _full_args(call: ClaudeCall, root: Path, cwd: Optional[Path]) -> list[str]:
+def _full_args(call: ClaudeCall, root: Path, cwd: Optional[Path]) -> PluginArgs:
+    plugins = plugin_args(root, cwd=cwd)
     args = [*PRINT_JSON, *permission_args(Permission.FULL)]
-    args += plugin_args(root, cwd=cwd).args + ["--append-system-prompt", call.system]
-    return args + (["--resume", call.resume] if call.resume else [])
+    args += plugins.args + ["--append-system-prompt", call.system]
+    return PluginArgs(args + (["--resume", call.resume] if call.resume else []), plugins.notice)
 
 
-def claude_args(call: ClaudeCall, root: Optional[Path] = None, base: Sequence[str] = (CLAUDE,), cwd: Optional[Path] = None) -> list[str]:
-    """起動の引数。`root` は full で読むプラグインの根（省けば自分の根）。`base` は起動のコマンド。
+def claude_launch(call: ClaudeCall, root: Optional[Path] = None, base: Sequence[str] = (CLAUDE,), cwd: Optional[Path] = None) -> PluginArgs:
+    """起動の引数と、full の起動で導入済みの一覧を読めなかった知らせ（I10a。読めたか full でなければ `None`）。
 
-    `cwd` は起動する場所で、full の起動の導入済みの一覧をそこで読む（省けばこのプロセスの場所）。
+    `root` は full で読むプラグインの根（省けば自分の根）。`base` は起動のコマンド。`cwd` は起動する場所で、
+    full の起動の導入済みの一覧をそこで読む（省けばこのプロセスの場所）。知らせは呼び手が結果の warnings へ載せる。
     """
+    notice: Optional[str] = None
     if call.permission is Permission.FULL:
-        args = _full_args(call, root if root is not None else identity.load().root, cwd)
+        args, notice = _full_args(call, root if root is not None else identity.load().root, cwd)
     else:
         args = minimal_args(call.system) + permission_args(call.permission, call.tools)
     if call.json_schema is not None:
         args += ["--json-schema", json.dumps(call.json_schema, ensure_ascii=False)]
     if call.model:
         args += ["--model", call.model]
-    return [*base, *args]
+    return PluginArgs([*base, *args], notice)
+
+
+def claude_args(call: ClaudeCall, root: Optional[Path] = None, base: Sequence[str] = (CLAUDE,), cwd: Optional[Path] = None) -> list[str]:
+    """起動の引数だけ（`claude_launch` の `args`）。知らせを結果に残す full の起動は `claude_launch` を使う。"""
+    return claude_launch(call, root, base, cwd).args
 
 
 class ClaudeReply(NamedTuple):

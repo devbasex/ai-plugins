@@ -162,3 +162,12 @@ def test_list_plugins_runs_in_the_given_cwd(tmp_path):
 
     assert claude.list_plugins(run, cwd=tmp_path) == []
     assert got == [tmp_path]
+
+
+def test_full_launch_carries_the_notice_when_the_list_is_unreadable(tmp_path, monkeypatch):
+    """full の起動は一覧を読めなかった知らせを引数と一緒に返す（I10a）。full でない起動は一覧を読まず知らせも無い。"""
+    monkeypatch.setattr(claude, "list_plugins", lambda **k: None)
+    full = claude.claude_launch(claude.ClaudeCall(system="sys", permission=claude.Permission.FULL), root=tmp_path)
+    assert full.notice == claude.LIST_UNREADABLE
+    assert full.args == claude.claude_args(claude.ClaudeCall(system="sys", permission=claude.Permission.FULL), root=tmp_path)
+    assert claude.claude_launch(claude.ClaudeCall(system="sys")).notice is None

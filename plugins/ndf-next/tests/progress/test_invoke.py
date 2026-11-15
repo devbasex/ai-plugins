@@ -810,6 +810,19 @@ def test_skill_is_called_with_full_permission_the_result_schema_and_the_implemen
     assert not (tmp_path / "w").exists()
 
 
+def test_skill_carries_the_notice_of_an_unreadable_plugin_list_into_its_warnings(tmp_path, calls, monkeypatch):
+    """導入済みの一覧を読めずに旧い NDF を外さずに起動したことを、工程の結果の warnings に残す（I10a）。"""
+    from ndf.adapters import claude
+
+    unreadable = claude.PluginArgs(["--plugin-dir", "p"], claude.LIST_UNREADABLE)
+    monkeypatch.setattr(claude, "plugin_args", lambda root, cwd=None: unreadable)
+    box, _, fake = calls
+    box["reply"] = _reply(answer=result.result("skill", "ok", "済んだ", outputs={"pr": 3}))
+    assert invoke.invoke(_skill_run(), tmp_path, tmp_path, call_claude=fake).warnings == (claude.LIST_UNREADABLE,)
+    box["reply"] = _reply(ok=False, error="落ちた")
+    assert invoke.invoke(_skill_run(), tmp_path, tmp_path, call_claude=fake).warnings == (claude.LIST_UNREADABLE,)
+
+
 @pytest.mark.parametrize(
     ("failure", "kind"),
     [(None, "transient"), ("usage_limit", "usage_limit"), ("timeout", "interrupted"), ("no_slot", "precondition")],

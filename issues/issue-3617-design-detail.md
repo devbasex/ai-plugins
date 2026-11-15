@@ -173,6 +173,8 @@ plugins/ndf-next/
 | `claude.list_plugins` | `plugins/ndf-next/src/ndf/adapters/claude.py` | 新設 | `(run: Callable[..., subprocess.CompletedProcess] = subprocess.run) -> Optional[list[dict[str, Any]]]` | `claude plugin list --json` を打ち、要素の並びを返す。読めなければ `None` | 無し | 戻り値は `None` か、各要素が `id`（文字列）と `enabled`（真偽）を持つ並び | 外部コマンド（`claude plugin list --json`） |
 | `claude.disabled_plugins` | `plugins/ndf-next/src/ndf/adapters/claude.py` | 新設 | `(listed: Sequence[Mapping[str, Any]], own: Optional[str]) -> dict[str, bool]` | 一覧のうち外す登録を `{<id>: False}` で返す（I10） | `listed` は `list_plugins` の戻り値（`None` でない） | 鍵は、`enabled` が真で、`id` の `@` の前が `identity.FINAL_NAME` で、`own` と違う登録だけ | 無し |
 | `claude.plugin_args` | `plugins/ndf-next/src/ndf/adapters/claude.py` | 変更 | `(root: Path, listed: Callable[[], Optional[list[dict[str, Any]]]] = list_plugins) -> PluginArgs` | 外す登録を一覧から決め、`root` を読む `claude` の引数と、一覧を読めなかった知らせを返す | `root` はプラグインの根 | 一覧を読めれば `notice` は `None`。読めなければ外す登録を空にし、`notice` に理由を入れる（I10a）。外す登録が空なら `--settings` を付けない | 外部コマンド（`listed` を通して） |
+| `claude.claude_launch` | `plugins/ndf-next/src/ndf/adapters/claude.py` | 新設 | `(call: ClaudeCall, root: Optional[Path] = None, base: Sequence[str] = (CLAUDE,), cwd: Optional[Path] = None) -> PluginArgs` | 起動の引数と、full の起動で一覧を読めなかった知らせを返す。`claude_args` はその `args` だけを返す | 今の `claude_args` と同じ | full でなければ `notice` は `None`。full なら `plugin_args` の `notice` をそのまま返す（I10a） | 外部コマンド（full のとき `plugin_args` を通して） |
+| `worker.delegate`・`invoke._call_skill` | `plugins/ndf-next/src/ndf/core/worker.py`・`plugins/ndf-next/src/ndf/progress/invoke.py` | 変更 | 今と同じ | `claude_launch` の知らせを、worker は `Delivery.notice` から `worker run` の結果の `warnings` へ、Skill の工程は `StageResult.warnings` へ載せる | 今と同じ | 知らせがあっても `status` は変えない（I10a） | 今と同じ |
 | `cli.main` | `plugins/ndf-next/src/ndf/adapters/cli.py` | 変更 | `(argv: list[str]) -> int` | `ndf launch-args` の結果に引数を載せ、知らせがあれば種類 `notice` の行を 1 件足す | 無し | `status` は知らせの有無によらず `ok` | 標準出力・外部コマンド（`plugin_args` を通して） |
 | `cli._usage` | `plugins/ndf-next/src/ndf/cli.py` | 変更 | `(name: str) -> str` | 使い方の表示に、`COMMANDS` から `DEVELOPER_COMMANDS` を除いた副命令だけを並べる | 無し | 戻り値に `check`・`manifests` が無い（I11）。`COMMANDS` は変えないため、名前で呼べば動く（I11a） | 無し |
 | `route.default_base` | `plugins/ndf-next/src/ndf/core/route/__init__.py` | 変更 | `(repo: Path) -> Optional[str]` | 宣言の `base_branch`、無ければリモート名のリモートの既定ブランチを返す | 今と同じ | 既定ブランチは `refs/remotes/<リモート名>/HEAD` から読み、接頭辞 `<リモート名>/` を外す | 外部コマンド（`git symbolic-ref`）・ファイル（読む） |
@@ -361,6 +363,7 @@ plugins/ndf-next/
 | `claude.list_plugins` | JSON の並びを返す | 空の並び | 終了コードが 0 でない・JSON でない・時間切れで `None` |
 | `claude.disabled_plugins` | `ndf@<別の名前>`（有効）を外す（受け入れ条件 13） | 自分の名前と同じ・無効の登録は外さない | — |
 | `claude.plugin_args` | 外す登録があれば `--settings` を付ける | 外す登録が空なら付けない | 一覧が `None` なら外さず `notice` を入れる（I10a） |
+| `claude.claude_launch` | full で一覧を読めれば `notice` は `None` | full でない起動は一覧を読まず `notice` は `None` | full で一覧が `None` なら `notice` を返し、worker と Skill の工程の結果の `warnings` に 1 件載る（I10a） |
 | `cli.main` | 知らせが無ければ `items` は引数の 1 行 | — | 知らせがあれば `notice` の行が 1 件増え、`status` は `ok` |
 | `cli._usage` | `check`・`manifests` が無い（I11） | — | `ndf check` は今と同じ結果（I11a） |
 | `route.derived` | `remote` を宣言から補う | テンプレートが `remote` を使わなければ足さない | 宣言の誤りで `RouteError` |
