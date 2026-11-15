@@ -173,7 +173,7 @@ def unnamed_redlines(path: str, text: str) -> list[dict]:
 
 
 class Doc:
-    """1 つの文書から、外部の調査の節（省いたか・候補の番号）と決定の 2 行と、名指しの無い委ねる行を読んだもの。"""
+    """1 つの文書から、外部の調査の節（省いたか・候補の番号）と決定の 2 行と、名指しの無い委ねる行と、人へ残す判断の表の番号を読んだもの。"""
 
     def __init__(self, path: str, text: str):
         self.path = path
@@ -186,6 +186,7 @@ class Doc:
         self.skipped, self.candidates = _read_survey(text, sections, prose)
         self.decisions = _read_decisions(sections, prose)
         self.unnamed = unnamed_redlines(path, text)
+        self.left_ids = {i for _, _, num, _ in _left_table_rows(text, sections) for i in REDLINE_ID.findall(num)}
 
 
 def survey_groups(docs: list[Doc]) -> list[list[Doc]]:
@@ -302,8 +303,7 @@ def repo_items(group: list[Doc], settings: design_repos.RepoSettings) -> list[di
         touched, _ = _result_files(d)
         if not design_repos.applies(settings, touched):
             continue
-        left_ids = {i for _, _, num, _ in _left_table_rows(d.text, md.md_sections(d.text)) for i in REDLINE_ID.findall(num)}
-        items += design_repos.check_repos(d.path, d.text, settings, left_ids)
+        items += design_repos.check_repos(d.path, d.text, settings, d.left_ids)
     return items
 
 
