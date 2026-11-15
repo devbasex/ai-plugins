@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import shlex
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from pathlib import PurePosixPath
 
 # 並列の指定の語（この表を持つのはこのモジュールだけ）
@@ -100,6 +100,16 @@ def _looks_like_path(word: str) -> bool:
     return "/" in word or "." in word or "::" in word
 
 
+def _drop_parallel_values(args: Sequence[str]) -> Iterator[str]:
+    """並列の指定（`-n` など値を取る形）とその直後の語を除いた語を、元の順で返す。"""
+    words = iter(args)
+    for arg in words:
+        if arg in PARALLEL_FLAGS:
+            next(words, None)
+            continue
+        yield arg
+
+
 def _targets(args: Sequence[str]) -> list[str]:
     """対象の語（選択肢でも、選択肢の値でも、並列の指定の値でもない語）。
 
@@ -107,15 +117,8 @@ def _targets(args: Sequence[str]) -> list[str]:
     （`pytest --tb short` の `short` を対象と取り違えて全体の実行を軽いと判定しない。迷う語は重い側へ倒す）。
     """
     out: list[str] = []
-    skip = False
     after_option = False
-    for arg in args:
-        if skip:
-            skip = False
-            continue
-        if arg in PARALLEL_FLAGS:
-            skip = True
-            continue
+    for arg in _drop_parallel_values(args):
         if arg.startswith("-") or "=" in arg:
             after_option = arg.startswith("-") and "=" not in arg
             continue
