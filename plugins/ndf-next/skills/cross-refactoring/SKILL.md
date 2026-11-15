@@ -13,7 +13,7 @@ allowed-tools:
 
 # 多ランタイム・リファクタリング（実装の予算で選び、選んだ項目をやり通す 1 回のリファクタリング計画の実行）
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `drive.py`（M4）・`launch-cli.sh`（M4）・`prepare-worktrees.sh`（M4）・`refactor.py`（M4）・`resolve.sh`（X0）・`worktree-setup.sh`（M8）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `drive.py`（M4）・`launch-cli.sh`（M4）・`prepare-worktrees.sh`（M4）・`refactor.py`（M4）・`worktree-setup.sh`（M8）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 **参加者の全員が 1 度だけ多面的に提案し、選ばれた 1 者が実装の予算に収まる分を
 リファクタリング計画・テスト追加・実装・検証する。** 実装の予算（`--budget-minutes`、既定 60 分）は何件を選ぶかを
@@ -167,15 +167,13 @@ agy と kiro は取れないため、モデルを比べたいなら `--model agy
   場所では assess も drive も「対象のリポジトリを決められない」と出して止まる
 - プロダクションコードの差分がある。起動の前に `assess` を打ち、飛ばしてよいかを見る（読み方は下の終了コードの表）
 
-シェルの変数は呼び出しをまたいで残らないため、この節と「実行」の各ブロックを 1 回の呼び出しとし、先頭で毎回 `$R` を
-決め直す。`<エントリポイントを探すコマンド>` の行は [scripts-lookup.md](../development-workflow/references/scripts-lookup.md) の
-「エントリポイントを探すコマンド」の for 文である（Codex / Kiro / agy では `${CLAUDE_PLUGIN_ROOT}` が置き換わらないため、この for 文で探す）。
-スクリプトの位置は解決のエントリポイント（`resolve.sh`）が導入先から求める。
+シェルの変数は呼び出しをまたいで残らないため、この節と「実行」の各ブロックを 1 回の呼び出しとし、先頭で毎回 `ndf` を
+確かめ直す。確かめの 1 行と旧いスクリプトの置き場の扱いは [scripts-lookup.md](../development-workflow/references/scripts-lookup.md) にある。
 
 ```bash
-<エントリポイントを探すコマンド>   # scripts-lookup.md の「エントリポイントを探すコマンド」の for 文。$R を決める
-[ -n "$R" ] || exit 2   # エントリポイントを探せない = 判定できない（3 の「飛ばしてよい」と取り違えない）
-RF=$(bash "$R/scripts/resolve.sh" scripts cross-refactoring) || exit 2
+command -v ndf >/dev/null 2>&1 || { echo "ndf が PATH に無い" >&2; exit 2; }   # scripts-lookup.md
+RF=   # 旧いスクリプトの置き場。新しいプラグインだけの起動では空（scripts-lookup.md）
+[ -n "${RF:-}" ] || { echo "refactor.py・drive.py は M4 #3298 が副命令に置き換えるまで新しいプラグインだけでは打てない" >&2; exit 2; }
 BASE="<開発の起点>"   # worktree-setup.sh check の「開発の起点:」の行の名前
 python3 "$RF/refactor.py" assess --base "origin/$BASE"; echo "exit=$?"
 ```
@@ -240,9 +238,9 @@ flowchart TD
 待ちはコマンドの中で行う。Claude Code では `run_in_background` で起動し、完了通知を 1 回受ける。
 
 ```bash
-<エントリポイントを探すコマンド>   # scripts-lookup.md の「エントリポイントを探すコマンド」の for 文。$R を決める
-[ -n "$R" ] || exit 3
-RF=$(bash "$R/scripts/resolve.sh" scripts cross-refactoring) || exit 3
+command -v ndf >/dev/null 2>&1 || { echo "ndf が PATH に無い" >&2; exit 3; }   # scripts-lookup.md
+RF=   # 旧いスクリプトの置き場。新しいプラグインだけの起動では空（scripts-lookup.md）
+[ -n "${RF:-}" ] || { echo "refactor.py・drive.py は M4 #3298 が副命令に置き換えるまで新しいプラグインだけでは打てない" >&2; exit 3; }
 python3 "$RF/drive.py" <PR> --scope <範囲...> [「引数」の表のうち値のあるもの]
 ```
 
@@ -251,19 +249,20 @@ Codex / Kiro / agy では共通ライブラリの `bg-wait.sh` でバックグ�
 
 ```bash
 # 起動（1 回の呼び出し）
-<エントリポイントを探すコマンド>   # scripts-lookup.md の「エントリポイントを探すコマンド」の for 文。$R を決める
-[ -n "$R" ] || exit 3
-RF=$(bash "$R/scripts/resolve.sh" scripts cross-refactoring) || exit 3
-LIB=$(bash "$R/scripts/resolve.sh" scripts)/lib || exit 3
+command -v ndf >/dev/null 2>&1 || { echo "ndf が PATH に無い" >&2; exit 3; }   # scripts-lookup.md
+RF=   # 旧いスクリプトの置き場。新しいプラグインだけの起動では空（scripts-lookup.md）
+[ -n "${RF:-}" ] || { echo "refactor.py・drive.py は M4 #3298 が副命令に置き換えるまで新しいプラグインだけでは打てない" >&2; exit 3; }
+LIB=   # 旧いスクリプトの置き場。新しいプラグインだけの起動では空（scripts-lookup.md）
+[ -n "${LIB:-}" ] || { echo "bg-wait.sh は M4 #3298 が副命令に置き換えるまで新しいプラグインだけでは打てない" >&2; exit 3; }
 RC="${TMPDIR:-/tmp}/cross-refactoring-drive-pr<PR>.rc"
 bash "$LIB/bg-wait.sh" run "$RC" -- python3 "$RF/drive.py" <PR> --scope <範囲...> [上と同じ引数]
 ```
 
 ```bash
 # 待ち（124 が返るあいだ、別の呼び出しとして打ち直す）
-<エントリポイントを探すコマンド>   # scripts-lookup.md の「エントリポイントを探すコマンド」の for 文。$R を決める
-[ -n "$R" ] || exit 3
-LIB=$(bash "$R/scripts/resolve.sh" scripts)/lib || exit 3
+command -v ndf >/dev/null 2>&1 || { echo "ndf が PATH に無い" >&2; exit 3; }   # scripts-lookup.md
+LIB=   # 旧いスクリプトの置き場。新しいプラグインだけの起動では空（scripts-lookup.md）
+[ -n "${LIB:-}" ] || { echo "bg-wait.sh は M4 #3298 が副命令に置き換えるまで新しいプラグインだけでは打てない" >&2; exit 3; }
 RC="${TMPDIR:-/tmp}/cross-refactoring-drive-pr<PR>.rc"
 bash "$LIB/bg-wait.sh" wait "$RC"   # 1 回 540 秒以内。124 = まだ終わっていない
 ```
@@ -303,9 +302,9 @@ origin の head ブランチの `This reverts commit <SHA>` を読み、実装�
 「前提」と同じく対象のリポジトリの中で打つ（既定の置き場は対象のリポジトリの origin から決まる）。
 
 ```bash
-<エントリポイントを探すコマンド>   # scripts-lookup.md の「エントリポイントを探すコマンド」の for 文。$R を決める
-[ -n "$R" ] || exit 3
-RF=$(bash "$R/scripts/resolve.sh" scripts cross-refactoring) || exit 3
+command -v ndf >/dev/null 2>&1 || { echo "ndf が PATH に無い" >&2; exit 3; }   # scripts-lookup.md
+RF=   # 旧いスクリプトの置き場。新しいプラグインだけの起動では空（scripts-lookup.md）
+[ -n "${RF:-}" ] || { echo "refactor.py・drive.py は M4 #3298 が副命令に置き換えるまで新しいプラグインだけでは打てない" >&2; exit 3; }
 python3 "$RF/refactor.py" plan-comment <PR> --scan-reverts
 ```
 

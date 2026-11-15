@@ -1,6 +1,6 @@
 # 設計との突き合わせ
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `design-match.py`（M1）・`pr-steps.py`（M1）・`spec-copy.py`（M7）・`supervise.py`（C2）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `design-match.py`（M1）・`pr-steps.py`（M1）・`spec-copy.py`（M7）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 `standard` の完了判定で、実装を設計文書・既存の確定仕様・要求と照らし、食い違いをマージの前に見えるようにする。
 確認は (a)(b)(c) の 3 つで、結果は実装 PR の本文の `## 設計と違う点` の節に残す。
@@ -28,7 +28,7 @@ python3 "$SCRIPTS/design-match.py" tests --issue 216
 | `light` / `operation` / `documentation` / `legacy-refactor` | 行わない。手順も所要も変えない |
 
 `standard` でも設計文書が無ければ（`tests` が終了コード 3）、3 つの確認を「該当なし（設計文書が無い）」と書いて満たし、
-`specs` は打たない。3 層（supervise.py）の実装プランは、範囲テストと PR の間で同じ 3 つを流す。
+`specs` は打たない。3 層（`ndf plan`）の実装プランは、範囲テストと PR の間で同じ 3 つを流す。
 
 ## 確認 (a): 設計に名前の出るテストが実在する
 

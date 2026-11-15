@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "statusline.result.schema.json",
+  "title": "ndf statusline の結果 JSON",
+  "description": "ndf statusline が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果の契約（result.schema.json）が持ち、ここは metrics と items の形だけを足す",
+  "allOf": [
+    {
+      "$ref": "../result.schema.json"
+    }
+  ],
+  "properties": {
+    "tool": {
+      "const": "statusline"
+    },
+    "metrics": {
+      "type": "object",
+      "description": "ndf statusline は計測値を持たない",
+      "additionalProperties": false
+    },
+    "items": {
+      "type": "array",
+      "description": "行った操作 1 件",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["action", "message", "backup"],
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": ["set", "updated", "kept", "skipped", "status", "restored", "removed"],
+            "description": "行った操作。set = NDF の表示に設定した / updated = 本体か参照を今の版に揃えた / kept = 何も変えない / skipped = 確かめなかった（ensure だけ） / status = 読んだだけ / restored = 控えから戻した / removed = statusLine を消した"
+          },
+          "message": {
+            "type": "string",
+            "description": "人が読む 1 文"
+          },
+          "backup": {
+            "type": "boolean",
+            "description": "操作の後に控え（.ndf-statusline-backup.json）があるか。restore と set では操作の前の値の有無"
+          },
+          "current": {
+            "type": "object",
+            "description": "操作の後の settings.json の statusLine（無ければ置かない）"
+          }
+        }
+      }
+    }
+  }
+}

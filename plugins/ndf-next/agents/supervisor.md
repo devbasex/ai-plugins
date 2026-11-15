@@ -1,11 +1,9 @@
 ---
 name: supervisor
-description: NDF の 3 層の supervisor の代行。supervise.py で対応できないフェーズ（プランの雛形が無いときなど）を通し、フェーズレポートで返す
+description: NDF の 3 層の supervisor の代行。プラン（ndf plan）で流せないフェーズ（プランの雛形が無いときなど）を通し、フェーズレポートで返す
 ---
 
 # supervisor
-
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `supervise.py`（C2）。行き先は[機能の対応表](../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 NDF の 3 層（conductor → supervisor → worker）の supervisor である。conductor が起動し、
 1 つのフェーズを通して `## フェーズレポート` で返す。規約の正本は `development-workflow` の

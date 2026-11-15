@@ -110,6 +110,10 @@
         "--fresh": {
           "type": "boolean"
         },
+        "--max": {
+          "type": "integer",
+          "description": "同時に流すプランの本数の上限（無ければ触るファイルの重ならない組の本数まで）"
+        },
         "--queue-dir": {
           "type": "string"
         }

@@ -9,7 +9,7 @@ allowed-tools:
 
 # 工程の進行を記録する
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `pr-steps.py`（M1）・`progress-record.sh`（M7）・`projects-sync.sh`（M7）・`release-steps.py`（M2）・`sprint-close.py`（M1）・`supervise.py`（C2）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `pr-steps.py`（M1）・`progress-record.sh`（M7）・`projects-sync.sh`（M7）・`release-steps.py`（M2）・`sprint-close.py`（M1）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 いまどの工程まで終わったかを、セッションの外へ残す。**判定したモードも、通った工程も、
 記録しなければ会話の中にしか残らない。** セッションが変わると引き継がれない。
@@ -47,7 +47,7 @@ allowed-tools:
 「確かめ終わった」と読まれるため、記録より先に付けない。プランの中では、そのステップが ok で終わった後にプランが打つ。
 
 **通過記録へ積むのは記録のスクリプト（`progress-record.sh`）自身である。** hook には依らないため、ランタイム（Claude Code・Codex・Kiro CLI・agy）・Skill の起動の有無・
-`supervise.py` の子プロセスのどれから呼んでも積まれる。`projects-sync.sh` は中で
+`ndf plan` の子プロセスのどれから呼んでも積まれる。`projects-sync.sh` は中で
 `progress-record.sh` を呼び、1 回の記録で積むのは渡した工程ごとに 1 件である。
 
 ```bash
@@ -175,7 +175,7 @@ worker の起動指示へはこれをコピーし、本文を読ませない。
 
 | 呼ぶ側 | 呼ぶ時点 | 呼ぶ条件 | `--final-stage` |
 | --- | --- | --- | --- |
-| まとめのプラン（`supervise.py new close`）の `close` のステップ | 振り返りの後、棚卸しの前 | プランで仕上げる実行（どのモードも `retro` を通す） | `振り返り` |
+| スプリントの終わりのまとめのプランの `close` のステップ（まとめのプランは P1b #3092 が `ndf` の副命令に足す。新しいプラグインだけではまだ打てない。`ndf route render close` の雛形は `close` のステップを持たない） | 振り返りの後、棚卸しの前 | プランで仕上げる実行（どのモードも `retro` を通す） | `振り返り` |
 | `retrospective` | 記録を投稿し、課題の本文に辿る経路の行を足した後 | 振り返りを通る変更 | `振り返り` |
 | `release-verification` | 検証結果を記録した後 | 後に振り返りが続かない変更（振り返りを通らない `operation`） | `リリース後テスト` |
 | `release` | デプロイを終えた後 | 後にリリース後テストも振り返りも続かない変更（`light`、どちらも通らない `operation`） | `デプロイ` |

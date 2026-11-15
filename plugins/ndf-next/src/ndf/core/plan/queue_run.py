@@ -7,6 +7,8 @@
   （`accepts_gate`）なら流す（#2876）。`{queue_prs}` は前の段で完了したプランの PR の番号で埋める
 - キューの記録 `queue.json` に、プランごとの結果を書く。`--resume` は完了したプランを流さずに続ける
 - `--fresh` は子の `ndf plan next` へ渡し、各プランを前の回に戻らず先頭から流す（#1592）。打ち直し（next）には渡さない
+- `--max <n>` は同時に流すプランの本数の上限。触るファイルの重ならない組の中で、終わったプランの空いた枠へ次のプランを
+  起動し、`n` 本を保って流す（組を `n` 本ずつに区切って待たない）。打ち直しにも渡す
 """
 
 from __future__ import annotations
@@ -15,6 +17,7 @@ import json
 import os
 import subprocess
 import sys
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
@@ -118,10 +121,14 @@ def _needs_blocked(entry: Entry, order: list[str], done: dict[str, queue_decide.
 
 @dataclass(frozen=True)
 class QueueOptions:
-    """キューの選択肢。`resume` は完了したプランを流さずに続け、`fresh` は子の `ndf plan next` へ `--fresh` を渡す（#1592）。"""
+    """キューの選択肢。`resume` は完了したプランを流さずに続け、`fresh` は子の `ndf plan next` へ `--fresh` を渡す（#1592）。
+
+    `max_parallel` は同時に流すプランの本数の上限（None は組の本数まで）。空いた枠へ次のプランを起動して本数を保つ。
+    """
 
     resume: bool = False
     fresh: bool = False
+    max_parallel: Optional[int] = None
 
 
 class _QueueExecution:
@@ -165,19 +172,48 @@ class _QueueExecution:
         return [outs[name] for name in names]
 
     def _launch(self, wave: list[Entry]) -> list[queue_decide.Outcome]:
-        """組のプランを並べて流し、すべて起動してから結果を組の並びで回収する。"""
-        started: list[tuple[Entry, Optional[subprocess.Popen], Optional[queue_decide.Outcome]]] = []
-        for entry in wave:  # noqa: NDF201 上限: 組のプランの本数（キューの引数に渡したプランの数まで）
+        """組のプランを `--max` の本数まで並べて流し、結果を組の並びで返す。流さないプランは起動せずに結果にする。"""
+        early: dict[str, queue_decide.Outcome] = {}
+        ready: list[tuple[Entry, dict[str, str]]] = []
+        for entry in wave:
             sets, refused = _sets(entry, self.prior)
             refused = refused if refused is not None else _needs_blocked(entry, self.order, self.done)
             if refused is not None:
-                started.append((entry, None, refused))
-                continue
-            proc = subprocess.Popen(
-                _child_args(entry, sets, self.options.fresh), cwd=self.cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
-            )
-            started.append((entry, proc, None))
-        return [early if proc is None else _read_child(entry, proc) for entry, proc, early in started]
+                early[entry.plan.name] = refused
+            else:
+                ready.append((entry, sets))
+        size = self.options.max_parallel
+        ran = self._all_at_once(ready) if size is None or size >= len(ready) else self._rolling(ready, size)
+        outs = early | ran
+        return [outs[e.plan.name] for e in wave]
+
+    def _start(self, entry: Entry, sets: dict[str, str]) -> subprocess.Popen:
+        return subprocess.Popen(
+            _child_args(entry, sets, self.options.fresh), cwd=self.cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+        )
+
+    def _all_at_once(self, ready: list[tuple[Entry, dict[str, str]]]) -> dict[str, queue_decide.Outcome]:
+        """すべて起動してから、組の並びで回収する。"""
+        started = [(entry, self._start(entry, sets)) for entry, sets in ready]
+        return {entry.plan.name: _read_child(entry, proc) for entry, proc in started}
+
+    def _rolling(self, ready: list[tuple[Entry, dict[str, str]]], size: int) -> dict[str, queue_decide.Outcome]:
+        """`size` 本を保って流す。終わったプランを回収するたびに、空いた枠へ次のプランを起動する。
+
+        子の出力は回収の糸（thread）ごとに読み切るため、出力の多い子がパイプで詰まって終わらない形にならない。
+        """
+        pending = list(ready)
+        outs: dict[str, queue_decide.Outcome] = {}
+        running: dict[Future[queue_decide.Outcome], Entry] = {}
+        with ThreadPoolExecutor(max_workers=size) as pool:
+            while pending or running:
+                while pending and len(running) < size:
+                    entry, sets = pending.pop(0)
+                    running[pool.submit(_read_child, entry, self._start(entry, sets))] = entry
+                finished, _ = wait(running, return_when=FIRST_COMPLETED)
+                for future in finished:
+                    outs[running.pop(future).plan.name] = future.result()
+        return outs
 
 
 def run(stages: list[list[Entry]], qdir: Path, cwd: Path, options: QueueOptions) -> list[queue_decide.Outcome]:
@@ -194,7 +230,9 @@ def _finished(recorded: dict[str, dict[str, Any]], entry: Entry) -> bool:
     return row is not None and row["status"] == OK and entry.start is None
 
 
-def queue_result(tool: str, outcomes: list[queue_decide.Outcome], stages: list[list[Entry]], qdir: Path) -> dict[str, Any]:
+def queue_result(
+    tool: str, outcomes: list[queue_decide.Outcome], stages: list[list[Entry]], qdir: Path, max_parallel: Optional[int] = None
+) -> dict[str, Any]:
     """キューの結果。next は `--resume` の打ち直し。
 
     承認ゲートで待つプランの routes は各行（items）に残し、結果の routes は先頭の 1 本の分にする（結果の routes の鍵は
@@ -205,7 +243,7 @@ def queue_result(tool: str, outcomes: list[queue_decide.Outcome], stages: list[l
     items = [_item(o) for o in outcomes]
     metrics = {"plans": len(outcomes), "ok": sum(o.status == OK for o in outcomes)}
     stopped_at = {o.name: o.step for o in outcomes if o.status == STOPPED and o.step is not None}
-    resume = result.command(*again_args(stages, qdir, stopped_at), "--resume")
+    resume = result.command(*again_args(stages, qdir, stopped_at, max_parallel), "--resume")
     if status == STOPPED and first is not None:
         return _stopped_result(tool, first, items, metrics, resume)
     if status == GATE:
@@ -239,10 +277,12 @@ def _item(o: queue_decide.Outcome) -> dict[str, Any]:
     return item
 
 
-def again_args(stages: list[list[Entry]], qdir: Path, starts: Optional[dict[str, str]] = None) -> list[str]:
+def again_args(
+    stages: list[list[Entry]], qdir: Path, starts: Optional[dict[str, str]] = None, max_parallel: Optional[int] = None
+) -> list[str]:
     """このキューを打ち直す引数（エントリポイントの名前の後ろ。絶対のパスで、作業場所の外から打っても同じキューを指す）。
 
-    `starts` は開始点の上書き。
+    `starts` は開始点の上書き。`max_parallel` があれば `--max` で渡す。
     """
     starts = starts if starts is not None else {}
     args = [runner.TOOL, "queue", *(str(e.path) for e in stages[0])]
@@ -252,6 +292,8 @@ def again_args(stages: list[list[Entry]], qdir: Path, starts: Optional[dict[str,
         start = starts[e.plan.name] if e.plan.name in starts else e.start
         if start is not None:
             args += ["--from", f"{e.plan.name}={start}"]
+    if max_parallel is not None:
+        args += ["--max", str(max_parallel)]
     return [*args, "--queue-dir", str(qdir)]
 
 

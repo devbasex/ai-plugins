@@ -1,6 +1,6 @@
 # 見積の段階を付ける
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `estimate.py`（P3）・`resolve.sh`（X0）・`upkeep.py`（M6）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `estimate.py`（P3）・`upkeep.py`（M6）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 手順 2B で、課題ごとに 4 つの列（UBV・TC・RR/OE・Size）の段階と根拠の 1 行を付ける。順位・切り出しの境界・
 前倒しと後ろ倒しの判定は、手順 2C の `upkeep.py rank` が段階から決める。**LLM は段階を付けるだけで、式を当てはめない。**
@@ -74,7 +74,8 @@ RR/OE を退避策で下げたかはスクリプトが判定できないため�
 手順 2B で Size を付ける課題ごとに、本文から完了条件と 6 項目を判定して部品を呼び、見積もりの記録へ残す。
 
 ```bash
-SCRIPTS=$(bash "$R/scripts/resolve.sh" scripts) || exit 3
+SCRIPTS=   # 旧いスクリプトの置き場。新しいプラグインだけの起動では空（scripts-lookup.md）
+[ -n "${SCRIPTS:-}" ] || { echo "estimate.py は P3 #3097 が副命令に置き換えるまで新しいプラグインだけでは打てない" >&2; exit 3; }
 python3 "$SCRIPTS/estimate.py" predict --issue 1601 --done 実装 --items spread=重,rework=軽 --save
 ```
 

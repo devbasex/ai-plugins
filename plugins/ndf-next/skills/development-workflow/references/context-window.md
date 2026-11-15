@@ -1,6 +1,6 @@
 # context window を単位として扱う
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `context-policy.py`（M3b）・`hook.py`（M3a）・`parallel.py`（P3）・`relay.py`（M3b）・`sprint-state.py`（P1b）・`stage-check.sh`（P1a）・`supervise.py`（C2）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `hook.py`（M3a）・`parallel.py`（P3）・`sprint-state.py`（P1b）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 **工程はスプリント単位で 1 回ずつ通し、中の設計と実装は課題ごとに並列に回す**が、その単位に
 **context window は入っていない**。そのため 1 つの会話でスプリント全体を通せてしまう。長い context window では
@@ -164,7 +164,7 @@ Codex / Kiro / agy には hook を置かない。4 つのカットポイント�
 
 **選び方と優先順位は CLI 引数 > 環境変数 > 設定 > 既定である。** チームで選ぶなら `.ndf/context.json`、
 個人で試すなら環境変数 `NDF_CONTEXT_POLICY=trial`（または `current`）にする。いま効いている方針と値と、
-値ごとの出所は `python3 <プラグイン>/scripts/context-policy.py resolve` で見る。設定が壊れていれば
+値ごとの出所は `ndf relay context resolve` で見る。設定が壊れていれば
 現行方式で判定し、セッションの初めと最初の起動で 1 度だけ知らせる。
 
 ```json
@@ -226,11 +226,11 @@ Bash で打つので Codex でも同じに記録できる。`--work` に課題�
 同じセッションの前の行の作業の識別子で補う。
 
 ```bash
-python3 <プラグイン>/scripts/context-policy.py record --event 引継ぎ開始 --work "#829 #830"
-python3 <プラグイン>/scripts/context-policy.py record --event 復元完了 --work "#829 #830"   # Codex だけ
+ndf relay context record --event 引継ぎ開始 --work "#829 #830"
+ndf relay context record --event 復元完了 --work "#829 #830"   # Codex だけ
 ```
 
-作業ごとの集計は `context-policy.py report --work "#829 #830" --format table` で見る。区分は conductor・
+作業ごとの集計は `ndf relay context report --work "#829 #830"` で見る（結果 JSON の `items` を区分ごとに読む）。区分は conductor・
 NDF が起動した分・引継ぎの区間・復元の区間で、同じ呼び出しを 2 つの区分へ数えない。印が無い区間と取れない
 品質の値は 0 でなく「不明」と出す。方針の記録が無い過去の行は現行方式として読み、その数を出す。セッションごとの
 復元の量（「復元完了」の直前の文脈の量）も出す。`--from` と `--until`（ISO 8601 の時刻）を渡すと、その間の呼び出し
@@ -263,12 +263,12 @@ NDF が起動した分・引継ぎの区間・復元の区間で、同じ呼び�
   ラッパーが承認ゲートの前で会話を切る。カットポイント 1 はこの形で満たす
 - **ラッパーがあってもなくても出す。** ラッパー（[relay.md](relay.md)）の下では、ラッパーがブロックを拾って
   次のセッションを自動で起動する。ラッパーが無ければ、人がブロックの中身を新しい会話へ貼り付ける
-- **Claude Code では、ブロックの直前のアナウンスを `relay.py notice` の 2 行目で書く**。2 行目を
-  言い換えずにそのままコピーする。文面と秒数（アイドルの秒数）は `relay.py` だけが持つ。呼び方は
+- **Claude Code では、ブロックの直前のアナウンスを `ndf relay notice` の結果の `summary` で書く**。`summary` を
+  言い換えずにそのままコピーする。文面と秒数（アイドルの秒数）は `ndf relay notice` だけが持つ。呼び方は
   `development-workflow` の `SKILL.md` の、カットポイントのアナウンスの段落にある。hook に止められたときは、
-  拒否文が同じ 1 文を含むので、実行し直さずにコピーしてよい。`relay.py` を解決できないか実行が失敗
+  拒否文が同じ 1 文を含むので、実行し直さずにコピーしてよい。`ndf relay notice` を打てないか実行が失敗
   したときは、ラッパーの外として扱い、人がブロックの中身を新しい会話へ貼り付けると書く。Codex / Kiro /
-  agy では、今までどおり中身を新しい会話へ貼り付けると書く。**ラッパーの下（1 行目が `relay`）では、
+  agy では、今までどおり中身を新しい会話へ貼り付けると書く。**ラッパーの下（`metrics.inside` が真）では、
   手で入力させる文（「次の 1 行を使って」「貼り付けて」）を書かない。** 例外は 2 行目そのものが
   貼り付けの手順を示すとき（`NDF_RELAY_QUIET=inf`）である。ラッパーの外の 2 行目は外である理由
   （ラッパーが無い・終わっている・fork したセッションなど直接の子でない）で変わる（[relay.md](relay.md) の
@@ -276,7 +276,7 @@ NDF が起動した分・引継ぎの区間・復元の区間で、同じ呼び�
 - **バックグラウンドの作業が残っているとラッパーは切り替わらない。** ラッパーの Stop hook はシグナルファイルを書かず、Stop を 1 度だけ
   止めて動いている作業の id とコマンドの先頭を知らせる。監視のように止めてよい作業は `TaskStop <task id>`
   で止め、止まったかは完了通知（`failed` / `killed`）で確かめてからブロックを出し直す。supervisor や
-  `supervise.py queue` は止めずに終わりを待ってから出し直す（[waiting.md](waiting.md) の「バックグラウンドの作業を止める」）
+  `ndf plan queue` は止めずに終わりを待ってから出し直す（[waiting.md](waiting.md) の「バックグラウンドの作業を止める」）
 - **カットポイントの再起動は承認ゲートに数えない。** 引継ぎ文書を更新したら、承認・確認（`AskUserQuestion`
   を含む）を挟まずにアナウンスとブロックを出して応答を終える。状態は課題の本文と Pull Request に残り、
   取り消せるためである。ラッパーの外でも挟まない（確認の答えと貼り付けで入力が 2 度になる）。
@@ -290,10 +290,10 @@ NDF が起動した分・引継ぎの区間・復元の区間で、同じ呼び�
 | --- | --- | --- |
 | 0 | 引継ぎ文書（入力が名指ししたもの。無ければ入力の語に一致する 1 本。見つけ方と一致しないときの扱いは [handoff.md](handoff.md) の「読む」） | 次にやることの 1 つ目。状態は 1〜5 で確かめ、食い違えば 1〜5 を正とする |
 | 1 | 課題の本文の `## 進行`（`gh issue view <番号> --json body`） | モード・worktree・計画ファイル・通った工程 |
-| 2 | `bash <この Skill のディレクトリ>/scripts/stage-check.sh report <番号>`（プラグインの `scripts/` に無く、`development-workflow` の `scripts/` にある） | 通過記録。本文と食い違えば通過記録を正とする |
+| 2 | `ndf progress show <進行表の ID>`（ID は `ndf progress new` の結果にある） | 通過記録。本文と食い違えば通過記録を正とする |
 | 3 | 1 の worktree（`.worktrees/<ブランチ名>`）のブランチ名で `gh pr list --head <ブランチ名> --state all`。実装の Pull Request は `gh issue view <番号> --json closedByPullRequestsReferences` でも引く | 設計・実装の Pull Request と状態 |
 | 4 | 引継ぎ文書の「今の会話の進み」が指す目録（`<out>/sprint.json`。無ければ改名の前の `<out>/mission.json`）の `ステージ` と、ステージごとのキューの done（`wait <done>` の結果）。プランの途中で止まっていれば、その `<プラン>-state/progress.jsonl` の最後のステップ | 終わったステージ・`gate` で止まったステージ・途中のプランとステップ |
-| 5 | 1〜4 から、チェックの付いていない最初の必須の工程 | 次に打つコマンド。プランのあるフェーズは次のステージの `command`（途中のプランは `supervise.py run <プラン> --from <ステップの id>`）、テンプレートの無い工程は起動する supervisor |
+| 5 | 1〜4 から、チェックの付いていない最初の必須の工程 | 次に打つコマンド。プランのあるフェーズは次のステージの `command`（途中のプランは `ndf plan next <プラン> --from <ステップの id>`）、テンプレートの無い工程は起動する supervisor |
 
 **Pull Request は番号の全文検索で引かない。** 同じ番号に触れただけの別の Pull Request も返す
 ためである。設計の Pull Request は GitHub の closing keywords（PR 本文に `Closes #123` のように書くと、マージ時にその課題を自動で閉じる機能）を持たないため、課題との結び付きでは引けず、

@@ -1,6 +1,6 @@
 # プロジェクト MVV（`.ndf/mvv.md`・`.ndf/mvv.json`）
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `check-trigger.py`（M1）・`mvv-gate.py`（P2）・`project-mvv.py`（M7）・`sprint-state.py`（P1b）・`supervise.py`（C2）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `check-trigger.py`（M1）・`mvv-gate.py`（P2）・`project-mvv.py`（M7）・`sprint-state.py`（P1b）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 プロジェクト全体の Mission / Vision / Value と固有の「必ず人の承認が要る操作」（`P<番号>`）を宣言し、NDF が判断する地点
 （承認ゲートの MVV 判定・レビューの指摘と修正の可否・リファクタリングの提案の採否・judge のステップ・範囲外の起票）が
@@ -114,7 +114,7 @@ README・指示書（`AGENTS.md` / `CLAUDE.md` など）・依頼文（`--reques
 | 地点 | MVV の節の渡り方 | 渡した事実と根拠の記録 |
 | --- | --- | --- |
 | 承認ゲートの MVV 判定（`auto` / `fast`） | `mvv-gate.py` の材料の先頭 | `mvv-gate.jsonl` の `project_mvv`・`basis`・`pace`・`sprint_mvv`。「従う」でレッドラインが無ければ状態の承認ゲートの記録（`by: mvv`） |
-| 承認ゲートの助言の MVV 判定（`normal` と `supervise.py new sprint --state`） | `mvv-gate.py check --advise` の材料の先頭 | `mvv-gate.jsonl` の `pace: normal` の行。判定の記録を設計承認ゲートでは設計 PR のコメント、リリース承認ゲートでは承認資料の末尾へ置く。承認ゲートの記録は書かない（承認は利用者） |
+| 承認ゲートの助言の MVV 判定（`normal` と `ndf progress new`） | `mvv-gate.py check --advise` の材料の先頭 | `mvv-gate.jsonl` の `pace: normal` の行。判定の記録を設計承認ゲートでは設計 PR のコメント、リリース承認ゲートでは承認資料の末尾へ置く。承認ゲートの記録は書かない（承認は利用者） |
 | supervise の `work` のステップ（要求・設計・実装・修正の worker） | worker のシステムプロンプトの末尾（プロジェクト MVV が承認済みのときだけ。プランの `スプリント状態` があればスプリント MVV も） | 記録しない（worker の判断は下の 3 行の記録に残る） |
 | `requirements-design` | 下の「工程での読み方」 | 反する疑いは作業の報告の理由（根拠の項目つき） |
 | `design` | 下の「工程での読み方」 | 設計文書の決定ごとの「根拠:」の行。反する疑いは作業の報告の理由 |

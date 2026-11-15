@@ -9,7 +9,7 @@ allowed-tools:
 
 # マージ後クリーンアップコマンド
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `merged-steps.py`（M8）・`projects-sync.sh`（M7）・`release-steps.py`（M2）・`stage-check.sh`（P1a）・`supervise.py`（C2）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `merged-steps.py`（M8）・`projects-sync.sh`（M7）・`release-steps.py`（M2）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 PR マージ後の後始末をまとめて実行する。対象 PR のブランチ削除に加えて、残っているマージ済みブランチの整理とベースブランチの取り込みもこの Skill で扱う。
 
@@ -171,10 +171,10 @@ python3 "$SCRIPTS/merged-steps.py" merge-when-green <PR番号> --root <メイン
   再実行した同じチェックが再びスタックしたら `stopped`（1）で止まる（`items` の `result` は `stuck`）
 - ジョブが `queued` のままランナーを待つ間は、待ちの 1 周ごとに stderr へ
   `merge-when-green: CI のランナー待ち（待ち行列 N 件、待ち M 件）` を出す。最後に見たキューの件数は
-  `metrics.queued_runs` に残る。supervise.py の run のステップで動かすと、この行が `progress.jsonl` の
+  `metrics.queued_runs` に残る。`ndf plan` の run のステップで動かすと、この行が `progress.jsonl` の
   `alive` の行の `last_output` に載る
 
-**待ちが遅れたときの一次の調査は `probe` で行う。** supervise.py の `merge` と `release` のステップが、経過が
+**待ちが遅れたときの一次の調査は `probe` で行う。** `ndf plan` の `merge` と `release` のステップが、経過が
 想定を超えたときに打つ（ステップの `probe`）。
 
 ```bash
@@ -268,7 +268,7 @@ git push origin --delete <branch>        # 先端が headRefOid と一致した�
 引き継がれない。スクリプトの出力をそのまま完了報告へ貼る。
 
 ```bash
-bash "$SCRIPTS/../skills/development-workflow/scripts/stage-check.sh" report <issue番号>
+ndf progress show <進行表の ID>   # ID は ndf progress new の結果にある
 ```
 
 - 記録が無ければ 1 行だけ返る。**すべての工程を欠落として並べない**
@@ -295,7 +295,7 @@ bash "$SCRIPTS/../skills/development-workflow/scripts/stage-check.sh" report <is
 あわせて次も載せる。
 
 - 実行サマリー（PR タイトル、マージコミット、現在のブランチ）
-- **通過工程の報告**（前節の `stage-check.sh report` の出力をそのまま貼る）
+- **通過工程の報告**（前節の `ndf progress show` の結果の工程の並びをそのまま貼る）
 - ベースブランチの状態
 - 復元していない stash が残っている場合はその旨と `git stash list` の該当エントリ
 - PR URL

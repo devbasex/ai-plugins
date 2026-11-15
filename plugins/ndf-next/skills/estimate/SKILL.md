@@ -10,7 +10,7 @@ allowed-tools:
 
 # AI エージェントが実施する前提で工数を見積もる
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `estimate.py`（P3）・`resolve.sh`（X0）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `estimate.py`（P3）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 課題番号か作業の説明を受け取り、近い条件の実績から A（AI の実行量）・H（人の作業時間）・L（完了までの時間）・
 C（利用費用）の見込みを、値ごとに根拠を付けて返す。**人の工数の基準で見積もらない。人日や AI の倍率から換算しない。**
@@ -20,13 +20,14 @@ C（利用費用）の見込みを、値ごとに根拠を付けて返す。**�
 ## 例: 課題 #1856 を実装の完了まで見積もる
 
 ```bash
-SCRIPTS=$(bash "$R/scripts/resolve.sh" scripts) || exit 3
+SCRIPTS=   # 旧いスクリプトの置き場。新しいプラグインだけの起動では空（scripts-lookup.md）
+[ -n "${SCRIPTS:-}" ] || { echo "estimate.py は P3 #3097 が副命令に置き換えるまで新しいプラグインだけでは打てない" >&2; exit 3; }
 python3 "$SCRIPTS/estimate.py" predict --issue 1856 --done 実装 \
   --items requirements=軽,information=軽,spread=重,verification=軽,environment=軽 --save
 ```
 
 返った JSON の `items[0].values` の A・H・L・C を、印（`実績` / `未校正` / `材料なし`）と根拠（比べた課題と実測）と
-ともに表にして示す。`$R` の決め方は `development-workflow/references/scripts-lookup.md` にある。
+ともに表にして示す。`ndf` の確かめと `$SCRIPTS` の扱いは `development-workflow/references/scripts-lookup.md` にある。
 
 ## 手順
 
