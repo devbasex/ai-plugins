@@ -289,7 +289,7 @@ class Bumper:
         gather.fetch(repo_git, self.production)
         gather.fetch(repo_git, pull.head_ref)
         if not repo_git.is_ancestor(self._tip_ref, f"{git_mod.ORIGIN}/{pull.head_ref}"):
-            return Bumped("reused", version, level, number)
+            return Bumped(bump_decide.REUSED, version, level, number)
         allowed = allowed_paths(self.root, decl_mod.load(self.root))
 
         def outside(p: Pull) -> list[str]:
@@ -297,7 +297,7 @@ class Bumper:
             return bump_decide.only_bump(repo_git.changed_files(base, f"{git_mod.ORIGIN}/{p.head_ref}"), allowed)
 
         landed = self.lander.land_bump(number, outside)
-        state = "merged" if landed.merged else "stopped"
+        state = bump_decide.MERGED if landed.merged else bump_decide.STOPPED
         return Bumped(state, version, level, number, landed)
 
     def _tip(self, span: gather.Range, found: Sequence[plugins_mod.Plugin]) -> _Tip:
@@ -331,9 +331,9 @@ class Bumper:
         act = bump_decide.action(tip.tagged, bool(planned), opened, version if version is not None else "")
         if act == bump_decide.PUBLISH:
             shown = next((v for v in tip.versions.values() if v is not None), None)
-            return Bumped("published", shown)
+            return Bumped(bump_decide.PUBLISHED, shown)
         if act == bump_decide.NOTHING or version is None:
-            return Bumped("not_applicable")
+            return Bumped(bump_decide.NOT_APPLICABLE)
         pulls = gather.pull_facts(self.hub, plan.numbers)
         if act == bump_decide.UPDATE and opened is not None:
             self._update(opened, span, pulls, planned)
