@@ -37,7 +37,7 @@ def _engine(url: str) -> Iterator[sa.Engine]:
         engine.dispose()
 
 
-def _ledger(url: str) -> set[str]:
+def _runs(url: str) -> set[str]:
     with _engine(url) as engine, engine.connect() as conn:
         return {row[0] for row in conn.execute(sa.text(f"SELECT run_name FROM {durable.RUNS_TABLE}"))}
 
@@ -56,11 +56,11 @@ def _sweep(url: str, root: Path, days: float) -> durable.SweepResult:
     return durable.sweep_url(root, url, _later(days))
 
 
-def test_launch_writes_the_key_to_the_ledger_and_sweep_deletes_it_after_keep_days(pg_url, root):  # noqa: F811
+def test_launch_writes_the_key_to_the_runs_and_sweep_deletes_it_after_keep_days(pg_url, root):  # noqa: F811
     with durable.session(root, "url-done", pg_url):
         durable.start(url_done_flow, "wf-url-done", "x")
     name = durable.run_name("url-done")
-    assert name in _ledger(pg_url)
+    assert name in _runs(pg_url)
     assert _ids(pg_url, "url-done") == {"wf-url-done"}
 
     assert _sweep(pg_url, root, durable.KEEP_DAYS - 1).deleted == []
@@ -69,7 +69,7 @@ def test_launch_writes_the_key_to_the_ledger_and_sweep_deletes_it_after_keep_day
     result = _sweep(pg_url, root, durable.KEEP_DAYS + 1)
     assert "wf-url-done" in result.deleted
     assert _ids(pg_url, "url-done") == set()
-    assert name not in _ledger(pg_url)
+    assert name not in _runs(pg_url)
 
 
 def test_key_with_a_pending_child_is_kept_whole(pg_url, root):  # noqa: F811
@@ -80,11 +80,11 @@ def test_key_with_a_pending_child_is_kept_whole(pg_url, root):  # noqa: F811
     result = _sweep(pg_url, root, durable.KEEP_DAYS + 1)
     assert not {"wf-url-child", "wf-url-child-child"} & set(result.deleted)
     assert _ids(pg_url, "url-child") == {"wf-url-child", "wf-url-child-child"}
-    assert durable.run_name("url-child") in _ledger(pg_url)
+    assert durable.run_name("url-child") in _runs(pg_url)
     assert "wf-url-child-child" in {r.workflow_id for r in durable.pending(pg_url)}
 
 
-def test_sweep_leaves_runs_of_applications_not_in_the_ledger(pg_url, root):  # noqa: F811
+def test_sweep_leaves_runs_of_applications_not_in_the_runs(pg_url, root):  # noqa: F811
     """I12: 台帳に無い `run-` で始まる `application_name` の実行は、終わって日数が過ぎても消さない。"""
     with durable.session(root, "url-other", pg_url):
         durable.start(url_done_flow, "wf-url-other", "x")
@@ -105,7 +105,7 @@ def test_sweep_leaves_a_key_whose_lock_is_held(pg_url, root):  # noqa: F811
         result = _sweep(pg_url, root, durable.KEEP_DAYS + 1)
         assert result.busy >= 1
         assert _ids(pg_url, "url-held") == {"wf-url-held"}
-        assert durable.run_name("url-held") in _ledger(pg_url)
+        assert durable.run_name("url-held") in _runs(pg_url)
 
     _sweep(pg_url, root, durable.KEEP_DAYS + 1)
     assert _ids(pg_url, "url-held") == set()

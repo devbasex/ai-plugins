@@ -27,7 +27,7 @@ from ndf.adapters import git as git_mod
 from ndf.adapters.github import PER_PAGE, GitHub, text_of
 from ndf.adapters.publish import Publisher
 from ndf.domains.release import changelog_decide, changes_decide, gather, materials_decide, version_decide
-from ndf.domains.release import declaration as decl_mod
+from ndf.domains.release import ndf_settings as decl_mod
 from ndf.domains.release import plugins as plugins_mod
 
 
@@ -103,7 +103,7 @@ def open_releases(hub: GitHub, target: Target) -> list[int]:
     return sorted(n for n, ref in heads if ref.startswith(version_decide.BRANCH_PREFIX) or ref == target.base)
 
 
-def _write(root: Path, decl: decl_mod.Declaration, facts: materials_decide.Facts) -> None:
+def _write(root: Path, decl: decl_mod.NdfSettings, facts: materials_decide.Facts) -> None:
     """版・CHANGELOG を書き換え、宣言の手順を流す。"""
     found = plugins_mod.by_name(plugins_mod.load(root))
     entries = [changelog_decide.Entry(p.number, p.title) for p in facts.pulls]

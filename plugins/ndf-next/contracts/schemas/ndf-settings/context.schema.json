@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ndf-settings/context.schema.json",
+  "title": "再起動の方針の宣言（.ndf/context.json）",
+  "description": "文脈の量による再起動の方針（現行方式か試行方式）と、試行方式の値",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "編集のときの補完に使うスキーマの位置。読み手は参照しない"
+    },
+    "version": {
+      "type": "integer",
+      "enum": [
+        1
+      ],
+      "description": "宣言の形の版。読み手は知らない版を読まない"
+    },
+    "policy": {
+      "type": "string",
+      "description": "current（現行方式）か trial（試行方式）",
+      "enum": [
+        "current",
+        "trial"
+      ],
+      "default": "current"
+    },
+    "trial": {
+      "type": "object",
+      "description": "試行方式の値",
+      "properties": {
+        "decide_from": {
+          "type": "integer",
+          "description": "判断を始める文脈の量（token）",
+          "minimum": 1,
+          "default": 200000
+        },
+        "limit": {
+          "type": "integer",
+          "description": "運用の上限（token）",
+          "minimum": 1,
+          "default": 400000
+        }
+      },
+      "additionalProperties": false
+    },
+    "margin": {
+      "type": "integer",
+      "description": "容量の余白（token）。試行方式だけに効く",
+      "minimum": 0,
+      "default": 50000
+    }
+  },
+  "x-ndf-location": "worktree",
+  "x-ndf-read-by": [
+    {
+      "by": "ndf hooks",
+      "when": "文脈の量の hook で再起動を判断するとき"
+    }
+  ],
+  "examples": [
+    {
+      "version": 1,
+      "policy": "trial",
+      "trial": {
+        "decide_from": 200000,
+        "limit": 400000
+      },
+      "margin": 50000
+    }
+  ]
+}

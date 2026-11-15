@@ -36,11 +36,11 @@ def test_second_table_for_the_same_sprint_is_refused_with_the_current_id(repo, c
     _, first = _new(capsys, last_result)
     code, out = _new(capsys, last_result)
     assert out["status"] == "stopped" and out["cause"]["kind"] == "refused"
-    assert out["metrics"]["current_id"] == first["metrics"]["table_id"]
+    assert out["metrics"]["current_id"] == first["metrics"]["machine_id"]
     assert code != 0
 
 
-def test_disabled_rows_come_from_the_argument_and_the_project_declaration(repo, capsys, last_result):
+def test_disabled_rows_come_from_the_argument_and_the_project_ndf_settings(repo, capsys, last_result):
     (repo / ".ndf").mkdir()
     (repo / ".ndf" / "project.json").write_text(
         json.dumps({"workflow": {"stages": {"リファクタリング": {"enabled": False, "reason": "止めている"}}}})
@@ -64,7 +64,7 @@ def test_requirements_output_marks_the_first_row_finished(repo, capsys, tmp_path
 
 def test_conductor_operations_leave_reason_and_time(repo, capsys, tmp_path, last_result):
     _, made = _new(capsys, last_result)
-    tid = made["metrics"]["table_id"]
+    tid = made["metrics"]["machine_id"]
     assert _run(capsys, last_result, "disable", tid, "実装", "--reason", "外す")[0] == 0
     assert _run(capsys, last_result, "enable", tid, "実装", "--reason", "戻す")[0] == 0
     out_file = tmp_path / "plan.json"
@@ -90,7 +90,7 @@ def _start(tid: str, row: str) -> None:
 
 def test_running_row_cannot_be_disabled_and_bad_output_cannot_finish(repo, capsys, tmp_path, last_result):
     _, made = _new(capsys, last_result)
-    tid = made["metrics"]["table_id"]
+    tid = made["metrics"]["machine_id"]
     _start(tid, "実装")
     _, out = _run(capsys, last_result, "disable", tid, "実装", "--reason", "止めたい")
     assert out["cause"]["kind"] == "refused" and "実行中" in out["cause"]["detail"]
@@ -102,14 +102,14 @@ def test_running_row_cannot_be_disabled_and_bad_output_cannot_finish(repo, capsy
 
 def test_retry_only_on_a_failed_row(repo, capsys, last_result):
     _, made = _new(capsys, last_result)
-    tid = made["metrics"]["table_id"]
+    tid = made["metrics"]["machine_id"]
     _, out = _run(capsys, last_result, "retry", tid, "設計", "--reason", "やり直す")
     assert out["cause"]["kind"] == "refused"
 
 
 def test_cancel_closes_the_remaining_rows_and_the_table(repo, capsys, last_result):
     _, made = _new(capsys, last_result, "--disable", "振り返り=不要")
-    tid = made["metrics"]["table_id"]
+    tid = made["metrics"]["machine_id"]
     _, out = _run(capsys, last_result, "cancel", tid, "--reason", "計画から外した")
     assert out["metrics"]["cancelled_rows"] == 17
     _, shown = _run(capsys, last_result, "show", tid)
@@ -255,7 +255,7 @@ def test_new_stops_as_invalid_when_the_project_file_is_not_json(repo, capsys, la
         {"enabled": False, "reason": ""},
     ],
 )
-def test_new_stops_as_invalid_when_a_stage_declaration_has_the_wrong_shape(repo, capsys, decl, last_result):
+def test_new_stops_as_invalid_when_a_stage_ndf_settings_has_the_wrong_shape(repo, capsys, decl, last_result):
     _declare(repo, json.dumps({"workflow": {"stages": {"リファクタリング": decl}}}))
     code, out = _new(capsys, last_result)
     assert out["status"] == "stopped" and out["cause"]["kind"] == "invalid" and code == 2
@@ -276,16 +276,16 @@ def test_requirements_is_refused_in_a_mode_without_the_requirements_stage(repo, 
 def _stored(tid: str) -> tuple[dict, dict]:
     root = command.store_root_of(Path.cwd())
     with store.open_store(store.default_url(root), root) as st, store.transaction(st) as conn:
-        table = store.read_table(conn, tid)
+        table = store.read_machine(conn, tid)
         _, doc = store.read_definition(conn, tid)
     return table, doc
 
 
-def test_new_reports_the_table_id_rows_and_disabled_in_summary_and_metrics(repo, capsys, last_result):
+def test_new_reports_the_machine_id_rows_and_disabled_in_summary_and_metrics(repo, capsys, last_result):
     code, out = _new(capsys, last_result, "--disable", "振り返り=不要")
-    tid = model.table_id("sprint", str(repo), "s1")
+    tid = model.machine_id("sprint", str(repo), "s1")
     assert code == 0 and out["tool"] == "progress"
-    assert out["metrics"] == {"table_id": tid, "rows": 18, "disabled": ["振り返り"]}
+    assert out["metrics"] == {"machine_id": tid, "rows": 18, "disabled": ["振り返り"]}
     assert out["summary"] == f"進行表 {tid} を作った（18 行、無効 1 行）"
     assert set(out["items"][0]) == {"stage", "phase", "state", "label", "at", "reason", "gates"}
 
@@ -293,14 +293,14 @@ def test_new_reports_the_table_id_rows_and_disabled_in_summary_and_metrics(repo,
 def test_new_names_the_table_by_the_origin_url_when_there_is_one(repo, capsys, last_result):
     subprocess.run(["git", "remote", "add", "origin", "https://example.invalid/o/r.git"], cwd=repo, check=True)
     _, out = _new(capsys, last_result)
-    assert out["metrics"]["table_id"] == model.table_id("sprint", "https://example.invalid/o/r.git", "s1")
+    assert out["metrics"]["machine_id"] == model.machine_id("sprint", "https://example.invalid/o/r.git", "s1")
 
 
-def test_new_drops_the_credentials_of_the_origin_url_from_the_table_id(repo, capsys, last_result):
+def test_new_drops_the_credentials_of_the_origin_url_from_the_machine_id(repo, capsys, last_result):
     subprocess.run(["git", "remote", "add", "origin", "https://x-access-token:secret@example.invalid/o/r.git"], cwd=repo, check=True)
     _, out = _new(capsys, last_result)
-    assert out["metrics"]["table_id"] == model.table_id("sprint", "https://example.invalid/o/r.git", "s1")
-    table, _ = _stored(out["metrics"]["table_id"])
+    assert out["metrics"]["machine_id"] == model.machine_id("sprint", "https://example.invalid/o/r.git", "s1")
+    table, _ = _stored(out["metrics"]["machine_id"])
     assert "secret" not in json.dumps(table, ensure_ascii=False, default=str)
 
 
@@ -339,7 +339,7 @@ def test_new_stores_the_context_the_enablement_and_the_parent(repo, capsys, last
         *("new", "s1", "--mode", "standard", "--issues", "1", "2", "--pace", "fast"),
         *("--disable", "振り返り=不要", "--parent", "lane:abc:l1"),
     )
-    table, doc = _stored(out["metrics"]["table_id"])
+    table, doc = _stored(out["metrics"]["machine_id"])
     assert table["parent_id"] == "lane:abc:l1" and table["level"] == "sprint" and table["name"] == "s1"
     assert doc["context"] == {"issues": [1, 2], "mode": "standard", "pace": "fast"}
     assert doc["mode"] == "standard" and [s["name"] for s in doc["stages"]] == [r["stage"] for r in out["items"]]
@@ -354,7 +354,7 @@ def test_new_writes_created_then_disabled_then_finished_events(repo, capsys, tmp
     req = tmp_path / "req.json"
     req.write_text(json.dumps({"steps": [], "summary": "要求を書いた"}))
     _, made = _new(capsys, last_result, "--disable", "振り返り=不要", "--requirements", str(req))
-    _, shown = _run(capsys, last_result, "show", made["metrics"]["table_id"])
+    _, shown = _run(capsys, last_result, "show", made["metrics"]["machine_id"])
     history = shown["metrics"]["history"]
     rows = [r["stage"] for r in made["items"]]
     assert [(h["kind"], h["row_key"]) for h in history[:18]] == [("created", r) for r in rows]
@@ -423,7 +423,7 @@ def test_gate_stage_cannot_be_disabled_by_the_argument(repo, capsys, stage, last
     assert code != 0
 
 
-def test_gate_stage_cannot_be_disabled_by_the_project_declaration(repo, capsys, last_result):
+def test_gate_stage_cannot_be_disabled_by_the_project_ndf_settings(repo, capsys, last_result):
     (repo / ".ndf").mkdir()
     (repo / ".ndf" / "project.json").write_text(
         json.dumps({"workflow": {"stages": {"デプロイ": {"enabled": False, "reason": "止めている"}}}})
@@ -435,7 +435,7 @@ def test_gate_stage_cannot_be_disabled_by_the_project_declaration(repo, capsys, 
 
 def test_gate_stage_cannot_be_disabled_by_the_conductor(repo, capsys, last_result):
     _, made = _new(capsys, last_result)
-    tid = made["metrics"]["table_id"]
+    tid = made["metrics"]["machine_id"]
     _, out = _run(capsys, last_result, "disable", tid, "設計", "--reason", "外したい")
     assert out["cause"]["kind"] == "refused" and "承認ゲート" in out["cause"]["detail"]
     # ほかの工程は今のまま外せる
@@ -447,7 +447,7 @@ def test_gate_stage_cannot_be_disabled_by_the_conductor(repo, capsys, last_resul
 
 def test_append_rebuilds_after_a_conflict_and_raises_when_the_attempts_run_out(repo, capsys, conflicts, last_result):
     _, made = _new(capsys, last_result)
-    tid = made["metrics"]["table_id"]
+    tid = made["metrics"]["machine_id"]
     calls = conflicts(1)
     code, out = _run(capsys, last_result, "disable", tid, "実装", "--reason", "外す")
     assert code == 0 and calls["n"] == 2 and len(out["metrics"]["seqs"]) == 1

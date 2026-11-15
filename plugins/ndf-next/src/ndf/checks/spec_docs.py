@@ -29,7 +29,7 @@ from ndf import identity
 from ndf.checks import spec_model, spec_render
 from ndf.checks.model import CheckError, Finding, Scope
 from ndf.checks.spec_args import Arg, ArgTree
-from ndf.checks.spec_model import CONTRACTS, DECL_SCHEMA_DIR, IO_SCHEMA_DIR, CommandSpec, DeclarationSpec, SpecModel, opt
+from ndf.checks.spec_model import CONTRACTS, DECL_SCHEMA_DIR, IO_SCHEMA_DIR, CommandSpec, NdfSettingsSpec, SpecModel, opt
 from ndf.contracts import facts
 
 DOCS, DECL, IO, SKILL, PUBLIC = "spec-docs", "spec-decl", "spec-io", "spec-skill", "spec-public"
@@ -47,8 +47,8 @@ Rel = Callable[[str], str]
 
 
 def _table_rel(rel: Rel, name: str) -> str:
-    """事実の表 `name` のリポジトリの根からの相対パス（置き場の facts/ か domains/ は `facts.place` が決める）。"""
-    return rel(f"{CONTRACTS}/{facts.place(name)}")
+    """事実の表 `name` のリポジトリの根からの相対パス（置き場の facts/ か domains/ は `facts.location` が決める）。"""
+    return rel(f"{CONTRACTS}/{facts.location(name)}")
 
 
 def check(scope: Scope, rules: dict[str, Any], write_spec: bool = False, written: list[str] | None = None) -> list[Finding]:
@@ -77,7 +77,7 @@ def check(scope: Scope, rules: dict[str, Any], write_spec: bool = False, written
 # --- spec-decl ---
 
 
-def _key_errors(decl: DeclarationSpec) -> list[str]:
+def _key_errors(decl: NdfSettingsSpec) -> list[str]:
     """キーごとの型と説明、スキーマの注釈の欠け。"""
     assert decl.schema is not None
     errs = []
@@ -86,9 +86,9 @@ def _key_errors(decl: DeclarationSpec) -> list[str]:
             errs.append(f"キー {key} に説明（description）が無い")
         elif not any(w in prop for w in TYPE_WORDS):
             errs.append(f"キー {key} に型が無い")
-    places = sorted(spec_model.DECL_PLACES)
-    if opt(decl.schema, "x-ndf-place", None) not in places:
-        errs.append(f"注釈 x-ndf-place は {' か '.join(places)}")
+    locations = sorted(spec_model.DECL_LOCATIONS)
+    if opt(decl.schema, "x-ndf-location", None) not in locations:
+        errs.append(f"注釈 x-ndf-location は {' か '.join(locations)}")
     if not decl.read_by:
         errs.append("注釈 x-ndf-read-by（読む工程）が無い")
     if not opt(decl.schema, "examples"):
@@ -96,7 +96,7 @@ def _key_errors(decl: DeclarationSpec) -> list[str]:
     return errs
 
 
-def _keys_errors(decl: DeclarationSpec) -> list[str]:
+def _keys_errors(decl: NdfSettingsSpec) -> list[str]:
     """置き場の表の keys とスキーマの最上位の非推奨でないキーの食い違い、keys に無い main_keys。"""
     errs = [f"main_keys の {k} が keys に無い" for k in decl.main_keys if k not in decl.keys]
     if decl.schema is None:
@@ -110,7 +110,7 @@ def _keys_errors(decl: DeclarationSpec) -> list[str]:
     return errs
 
 
-def _real_errors(decl: DeclarationSpec, path: Path) -> list[str]:
+def _real_errors(decl: NdfSettingsSpec, path: Path) -> list[str]:
     """`.ndf/` の実物をスキーマで確かめる。無いファイルは確かめない。"""
     if decl.schema is None or not path.is_file():
         return []
@@ -124,9 +124,9 @@ def _real_errors(decl: DeclarationSpec, path: Path) -> list[str]:
 
 def decl_findings(model: SpecModel, repo_root: Path, rel: Rel) -> list[Finding]:
     files_rel = _table_rel(rel, "ndf-files")
-    decl_dir = repo_root / model.places[spec_model.decl_place(model.places)]["path"]
+    decl_dir = repo_root / model.locations[spec_model.decl_location(model.locations)]["path"]
     found = []
-    for decl in model.declarations:
+    for decl in model.ndf_settings:
         schema_rel = rel(f"{CONTRACTS}/{DECL_SCHEMA_DIR}/{spec_model.decl_schema_rel(decl.id, spec_model.SCHEMA_SUFFIX)}")
         if decl.schema is None and decl.sections is None:
             found.append(Finding(DECL, files_rel, 1, f"宣言 {decl.id} にスキーマか節の表が無い"))
@@ -353,7 +353,7 @@ def _row_errors(model: SpecModel) -> list[str]:
     errs += [f"公開する Skill {s.name} の行が args か env を持つ（正本はエントリポイントの表）" for s in model.skills if s.row_has_args_env]
     errs += [f"Skill の入出力の表の行 {i} の Skill に実体が無い" for i in model.skill_io_ids if i not in names]
     for s in model.skills:
-        errs += [f"Skill {s.name} の読む宣言 {d} が置き場の表に無い" for d in s.declarations if d not in decls]
+        errs += [f"Skill {s.name} の読む宣言 {d} が置き場の表に無い" for d in s.ndf_settings if d not in decls]
         errs += [f"Skill {s.name} の読む環境変数 {e} が環境変数の表に無い" for e in s.env if e not in env]
     return errs
 
@@ -377,7 +377,7 @@ def _hits(model: SpecModel, row: dict[str, Any]) -> bool:
     """公開する面の行が規約の項目に当たるか。"""
     kind, target = row["kind"], row["target"]
     if kind == "file":
-        return target in model.places and set(opt(row, "files")) <= model.file_ids
+        return target in model.locations and set(opt(row, "files")) <= model.file_ids
     face = spec_model.face_of(kind)
     # 面ごとの項目の名前（report は規約の項目を持たず、行があれば当たる）
     names = {
@@ -404,10 +404,10 @@ def public_findings(model: SpecModel, plugin_root: Path, rel: Rel) -> list[Findi
             continue
         if not _hits(model, row):
             found.append(Finding(PUBLIC, ep_rel, 1, f"公開する面の行 {row['id']} が規約のどの項目にも当たらない"))
-    return found + _spec_place_findings(model, plugin_root, ep_rel)
+    return found + _spec_location_findings(model, plugin_root, ep_rel)
 
 
-def _spec_place_findings(model: SpecModel, plugin_root: Path, ep_rel: str) -> list[Finding]:
+def _spec_location_findings(model: SpecModel, plugin_root: Path, ep_rel: str) -> list[Finding]:
     """種類 spec の行が規約の置き場ごとにちょうど 1 行あり、どの行も実在の規約の置き場を指すか。"""
     found = []
     spec = [r for r in model.entrypoints if spec_model.is_spec(r)]

@@ -157,7 +157,7 @@ def lanes_of(view: PlanView, rows: Mapping[str, list[LaneRow]]) -> PlanLanes:
         (launch.wrapper_name(str(view.repo), view.name, name), spec.plans, any(r.state == RUNNING for r in rows[name]))
         for name, spec in view.lanes.items()
     )
-    return PlanLanes(view.table_id, lanes)
+    return PlanLanes(view.machine_id, lanes)
 
 
 def discover(listed: Mapping[str, Mapping[str, Any]]) -> list[tuple[Path, str]]:
@@ -178,7 +178,7 @@ def read_lanes(cwd: Path, plan: str, skip: Sequence[str] = ()) -> Optional[PlanL
             # 進行表の DB が無いチェックアウトの計画は読めない（DB を作らない）
             return PlanLanes(key, readable=False)
         with store.open_store(url, root) as st:
-            pid = model.table_id("plan", command.repo_id(cwd, st.root), plan)
+            pid = model.machine_id("plan", command.repo_id(cwd, st.root), plan)
             if pid in skip:
                 return None
             with store.transaction(st) as conn:

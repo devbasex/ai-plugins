@@ -36,7 +36,7 @@ def test_repo_flag_naming_another_repository_is_judged_by_that_repository(tmp_pa
     assert got is not None and "other/repo" in got.reason and "clone" in got.reason
 
 
-def test_cd_into_the_target_clone_uses_its_declaration(tmp_path):
+def test_cd_into_the_target_clone_uses_its_ndf_settings(tmp_path):
     # セッションのリポジトリ（自動）ではなく、cd した宛先（手動）の宣言で判定する（#2838）
     session = make_repo(tmp_path / "session", slug="owner/session", delivery=AUTO)
     target = make_repo(tmp_path / "target", slug="volare/target", delivery=MANUAL, worktree=True)
@@ -44,7 +44,7 @@ def test_cd_into_the_target_clone_uses_its_declaration(tmp_path):
     assert _check(session, "gh pr merge 65 --merge") is not None
 
 
-def test_matching_repo_flag_reads_the_declaration(tmp_path):
+def test_matching_repo_flag_reads_the_ndf_settings(tmp_path):
     repo = make_repo(tmp_path / "r", slug="owner/repo", delivery=AUTO)
     assert _check(repo, "gh -R OWNER/repo pr merge 3") is not None
     repo2 = make_repo(tmp_path / "m", slug="owner/m", delivery=MANUAL)

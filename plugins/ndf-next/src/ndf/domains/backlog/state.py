@@ -4,7 +4,7 @@
 `.ndf/backlog/state` の順に決め、その下の `<repo>/` に書く。どの worktree から打っても同じ位置になり、マシンを
 再起動しても消えない。一時ディレクトリへは倒さない（#1640・#1595 の関連 1）。
 
-ファイルの名前は工程が書くファイルの表（`ndf-files` の `place` が `backlog-state` の行）から引く。
+ファイルの名前は工程が書くファイルの表（`ndf-files` の `location` が `backlog-state` の行）から引く。
 """
 
 from __future__ import annotations
@@ -48,13 +48,13 @@ def repo_key(repo: str) -> str:
 
 def state_dir(cwd: Path, repo: str, arg: Optional[str] = None) -> Path:
     """状態のディレクトリ（作って返す）。作れなければ `StateError`。"""
-    env = facts.value("places", "backlog-state", "env")
+    env = facts.value("locations", "backlog-state", "env")
     if arg:
         base = Path(arg)
     elif os.environ.get(env):
         base = Path(os.environ[env])
     else:
-        base = main_dir(cwd) / facts.value("places", "backlog-state", "path")
+        base = main_dir(cwd) / facts.value("locations", "backlog-state", "path")
     path = base / repo_key(repo)
     try:
         path.mkdir(parents=True, exist_ok=True)

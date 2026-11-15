@@ -30,11 +30,11 @@ from ndf.progress.plan import external
 
 
 def present(
-    st: store.Store, table_id: str, cwd: Path, out: dict[str, Any], observe: Observe, env: Optional[Mapping[str, str]] = None
+    st: store.Store, machine_id: str, cwd: Path, out: dict[str, Any], observe: Observe, env: Optional[Mapping[str, str]] = None
 ) -> dict[str, Any]:
     """`ndf progress` の結果（next・wait・work）が承認ゲート（`ndf.listen`）の待ちなら、問い・承認資料・答えごとの行き先の結果に
     差し替える。リリース承認ゲートならレーンのリリースの依頼も出す（`request_release`）。"""
-    v = run.read(st, table_id)
+    v = run.read(st, machine_id)
     m = run.decide(v)
     if out["status"] != result.GATE or m.action != run.Action.GATE or m.step is None or not invoke.is_listen(m.step):
         return out
@@ -109,18 +109,18 @@ def _cmd_work(argv: list[str], exec_: Callable[[str, list[str]], Any] = os.execv
 def _cmd_give(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any]:
     seen = Target(a.head, a.material_sha256)
     given = Answer(a.gate, a.result, a.reason, a.by, a.key, Path(a.notes) if a.notes else None, seen, tuple(a.drop))
-    return answer(st, a.table_id, given, github_observe(cwd, st.root))
+    return answer(st, a.machine_id, given, github_observe(cwd, st.root))
 
 
 def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog=f"{result.ENTRY} {TOOL}", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("table_id", help="答える進行表の ID")
+    ap.add_argument("machine_id", help="答える進行表の ID")
     ap.add_argument("--gate", required=True, help="問いの id（承認ゲートの結果の metrics.gate.id）")
     ap.add_argument("--result", required=True, help="答えの語（承認ゲートの結果の routes のキー）")
     ap.add_argument("--reason", required=True)
     ap.add_argument("--by", required=True, help="答えた者（human・conductor・organizer か service:<主体>）")
     ap.add_argument("--key", required=True, help="冪等の鍵（同じ鍵の答え直しは書かない）")
-    ap.add_argument("--notes", help="差し戻し（revise）の指摘ファイル")
+    ap.add_argument("--notes", help="差し戻し（request_changes）の指摘ファイル")
     ap.add_argument("--head", help="見た PR の head の SHA")
     ap.add_argument("--material-sha256", help="見た承認資料の sha256")
     ap.add_argument("--drop", type=int, nargs="*", default=[], help="設計承認ゲートで外す課題の番号")
@@ -128,28 +128,28 @@ def parser() -> argparse.ArgumentParser:
 
 
 def _cmd_head(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, Any]:
-    head = approved_head(run.read(st, a.table_id), a.gate, st.root)
+    head = approved_head(run.read(st, a.machine_id), a.gate, st.root)
     if head is None:
-        raise model.Refused(f"進行表 {a.table_id} に、{model.gate_label(a.gate)}で head を見て承認した答えが無い")
+        raise model.Refused(f"進行表 {a.machine_id} に、{model.gate_label(a.gate)}で head を見て承認した答えが無い")
     summary = f"{model.gate_label(a.gate)}で承認した head は {head}"
-    return result.result(TOOL, result.OK, summary, metrics={"table_id": a.table_id, "gate": a.gate, "head": head})
+    return result.result(TOOL, result.OK, summary, metrics={"machine_id": a.machine_id, "gate": a.gate, "head": head})
 
 
 def head_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog=f"{result.ENTRY} {TOOL} head")
-    ap.add_argument("table_id")
+    ap.add_argument("machine_id")
     ap.add_argument("--gate", choices=sorted(model.table()["gates"]), default=RELEASE_GATE)
     return ap
 
 
 def _cmd_list(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, Any]:
-    got = answers(run.read(st, a.table_id))
-    return result.result(TOOL, result.OK, f"進行表 {a.table_id} の答え {len(got)} 件", items=got, metrics={"table_id": a.table_id})
+    got = answers(run.read(st, a.machine_id))
+    return result.result(TOOL, result.OK, f"進行表 {a.machine_id} の答え {len(got)} 件", items=got, metrics={"machine_id": a.machine_id})
 
 
 def list_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog=f"{result.ENTRY} {TOOL} list")
-    ap.add_argument("table_id")
+    ap.add_argument("machine_id")
     return ap
 
 
@@ -163,16 +163,16 @@ def _progress(a: argparse.Namespace, cwd: Path, st: store.Store, observe: Option
     """`ndf progress` の工程を流す副命令。レーンの行を終える `Env` で流し、答えを読む前に対象を見直し、承認ゲートの
     待ちは問いと答えごとの行き先の結果にする。"""
     seen = observe if observe is not None else github_observe(cwd, st.root)
-    took = _took(st, a.table_id, seen)
-    why = recheck(st, a.table_id, seen, git_docs_only(cwd))
+    took = _took(st, a.machine_id, seen)
+    why = recheck(st, a.machine_id, seen, git_docs_only(cwd))
     out = run.COMMANDS[a.action](run.with_env(a, lane_env(run.Env(facts=command.facts_of))), cwd, st)
-    return command.with_warnings(present(st, a.table_id, cwd, out, seen), before=[w for w in (took, why) if w])
+    return command.with_warnings(present(st, a.machine_id, cwd, out, seen), before=[w for w in (took, why) if w])
 
 
-def _took(st: store.Store, table_id: str, observe: Observe) -> Optional[str]:
+def _took(st: store.Store, machine_id: str, observe: Observe) -> Optional[str]:
     """リリースの依頼への答えを承認ゲートの答えとして書く。書けなければ理由を警告に返す（待ちは残る）。"""
     try:
-        got = take_reply(st, table_id, os.environ, observe)
+        got = take_reply(st, machine_id, os.environ, observe)
     except (model.Refused, external.ExchangeError) as exc:
         return f"リリースの依頼への答えを承認ゲートの答えにできなかった: {exc}"
     return got["summary"] if got is not None else None

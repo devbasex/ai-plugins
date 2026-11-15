@@ -14,8 +14,8 @@ def _est(n: int, ubv: int, size: int = 1, waiting: bool = False) -> Estimate:
     return Estimate(n, ubv, 1, 1, size, digest=f"d{n}", waiting_decision=waiting)
 
 
-def _board(ests: list[Estimate], place: dict[int, str | None], capacity: int | None = 3, **kw) -> rank_decide.Board:
-    issues = {e.number: {"milestone": place[e.number], "labels": [], "created_at": "2026-10-01"} for e in ests}
+def _board(ests: list[Estimate], location: dict[int, str | None], capacity: int | None = 3, **kw) -> rank_decide.Board:
+    issues = {e.number: {"milestone": location[e.number], "labels": [], "created_at": "2026-10-01"} for e in ests}
     return rank_decide.Board(issues, {e.number: e for e in ests}, Config(capacity=capacity), [NEAR, NEXT], **kw)
 
 
@@ -144,7 +144,7 @@ def _q(ratio: float = 0.5, minimum: int = 1) -> dict:
     return {"label": QL, "ratio": ratio, "min": minimum}
 
 
-def test_quality_slot_is_none_without_declaration():
+def test_quality_slot_is_none_without_ndf_settings():
     rows = [_row(1)]
     assert rank_decide.quality_slot(rows, _qboard(rows, 10), None, set()) is None
 
@@ -333,8 +333,8 @@ def test_retable_drops_closed_issues_and_recomputes_the_boundary():
 
 def test_cycle_across_milestones_is_refused():
     # 別々のマイルストーンにある #1 → #2 → #1 の輪も、未所属の課題の輪も止める
-    for place in ({1: NEAR, 2: NEXT}, {1: None, 2: None}):
-        board = _board([_est(1, 2), _est(2, 1)], place, edges=frozenset({(1, 2), (2, 1)}))
+    for location in ({1: NEAR, 2: NEXT}, {1: None, 2: None}):
+        board = _board([_est(1, 2), _est(2, 1)], location, edges=frozenset({(1, 2), (2, 1)}))
         with pytest.raises(rank_decide.CycleError):
             rank_decide.compute(board)
 
@@ -348,7 +348,7 @@ def test_quality_slot_leaves_room_for_the_large_slot():
     assert got["issues"] == [] and got["size_sum"] == 0
 
 
-def test_tables_place_approved_moves_at_their_destination():
+def test_tables_location_approved_moves_at_their_destination():
     board = _board([_est(1, 2), _est(2, 1), _est(9, 20)], {1: NEAR, 2: NEAR, 9: NEXT}, capacity=2, approved=frozenset({9}))
     got = rank_decide.compute(board)
     assert got["forward"][0]["decision"] == model.APPROVED
@@ -356,7 +356,7 @@ def test_tables_place_approved_moves_at_their_destination():
     assert 9 in [r["number"] for r in near["rows"]] and 9 not in [r["number"] for r in nxt["rows"]]
 
 
-def test_config_reads_the_declaration_and_the_argument_overrides_capacity():
+def test_config_reads_the_ndf_settings_and_the_argument_overrides_capacity():
     cfg = model.config_from({"capacity": 40, "label_floor": {"bug": 8}, "quality": {"ratio": 0.3}}, None)
     assert cfg.capacity == 40 and cfg.label_floor == {"bug": 8} and cfg.quality == {"label": "quality", "ratio": 0.3, "min": 1}
     assert model.config_from({"capacity": 40}, 10).capacity == 10

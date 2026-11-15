@@ -70,9 +70,9 @@ def _lane_kind(decl: dict[str, Any]) -> str:
     return lane_inputs(decl)[0]["kind"]
 
 
-def lane_payload(decl: dict[str, Any], table_id: str) -> dict[str, Any]:
+def lane_payload(decl: dict[str, Any], machine_id: str) -> dict[str, Any]:
     """計画の進行表のレーンの行（`lane_added` の値）。"""
-    body = {"table_id": table_id, "kind": _lane_kind(decl), "plans": decl["plans"], "touches": decl["touches"]}
+    body = {"machine_id": machine_id, "kind": _lane_kind(decl), "plans": decl["plans"], "touches": decl["touches"]}
     body["after"] = list(decl["after"]) if "after" in decl else []
     if "repo" in decl:
         body["repo"] = decl["repo"]
@@ -100,7 +100,7 @@ def plan_payload(doc: dict[str, Any]) -> dict[str, Any]:
 
 
 def plan_id(repo: str, name: str) -> str:
-    return model.table_id("plan", repo, name)
+    return model.machine_id("plan", repo, name)
 
 
 def _append(conn: sa.Connection, pid: str, drafts: list[model.EventDraft]) -> list[int]:
@@ -133,11 +133,11 @@ def create_plan(conn: sa.Connection, repo: str, doc: dict[str, Any], start: bool
     names = [d["name"] for d in doc["lanes"]]
     dup = sorted({n for n in names if names.count(n) > 1})
     _refuse_if([f"レーン名が重なる: {', '.join(dup)}"] if dup else [])
-    lane_ids = {d["name"]: model.table_id("lane", repo, lane.lane_table_name(name, d["name"])) for d in doc["lanes"]}
+    lane_ids = {d["name"]: model.machine_id("lane", repo, lane.lane_table_name(name, d["name"])) for d in doc["lanes"]}
     drafts = [model.EventDraft("created", "organizer", lane.PLAN_ROW, payload=plan_payload(doc))]
     drafts += [model.EventDraft("lane_added", "organizer", d["name"], payload=lane_payload(d, lane_ids[d["name"]])) for d in doc["lanes"]]
     drafts += [model.EventDraft("plan_started", "organizer")] if start else []
-    store.create_table(conn, ("plan", repo, name), None, None, drafts)
+    store.create_machine(conn, ("plan", repo, name), None, None, drafts)
     for d in doc["lanes"]:
         lane.create_lane(conn, (repo, name, d["name"]), pid, lane_inputs(d))
     _refuse_if(_new_errors(conn, pid, set()))
@@ -168,12 +168,12 @@ def add_lane(conn: sa.Connection, pid: str, decl: dict[str, Any], request: Optio
     """動いている計画へレーンを足す（オーガナイザー）。応えた依頼があれば同じトランザクションで閉じる。"""
     lane.lock_plan(conn, pid)
     view, _ = lane.read_plan(conn, pid)
-    meta = store.read_table(conn, pid)
+    meta = store.read_machine(conn, pid)
     if decl["name"] in view.lanes:
         raise model.Refused(f"計画 {view.name} にレーン {decl['name']} は既にある")
     _check_request(view, request)
     before = _errors_now(conn, pid)
-    tid = model.table_id("lane", meta["repo"], lane.lane_table_name(view.name, decl["name"]))
+    tid = model.machine_id("lane", meta["repo"], lane.lane_table_name(view.name, decl["name"]))
     drafts = [model.EventDraft("lane_added", "organizer", decl["name"], payload=lane_payload(decl, tid))]
     _append(conn, pid, drafts + _close_request(request, f"レーン {decl['name']} を足した"))
     lane.create_lane(conn, (meta["repo"], view.name, decl["name"]), pid, lane_inputs(decl))

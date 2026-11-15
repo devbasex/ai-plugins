@@ -2,7 +2,7 @@
 
 - `locate`: メインディレクトリと、今の位置が worktree の中か。サブモジュールの中は通常のリポジトリとして扱う
 - `dev_worktrees`: `git worktree list` の一覧（`adapters.git.Git.worktrees`）を置き場 `.worktrees/` の下だけに絞る
-  （置き場の名前は事実の表 `places` の `worktrees` から引く）
+  （置き場の名前は事実の表 `locations` の `worktrees` から引く）
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from typing import Any, Iterable, Mapping, Optional
 from ndf import identity
 from ndf.adapters.git import ORIGIN, Git, GitError, WorktreeEntry
 from ndf.contracts import facts
-from ndf.domains.worktree import declaration
+from ndf.domains.worktree import ndf_settings
 
 # マージ済みと認められなかったブランチを残すときに添える文（`-D` は NDF が打たず、人が確かめて打つ。C4）
 MANUAL_FORCE = "消すなら人が確かめて -D で消す"
@@ -23,7 +23,7 @@ MANUAL_FORCE = "消すなら人が確かめて -D で消す"
 
 def worktrees_dir(main_dir: Path) -> Path:
     """開発 worktree を置くディレクトリ（メインディレクトリの下）。"""
-    return main_dir / facts.value("places", "worktrees", "path")
+    return main_dir / facts.value("locations", "worktrees", "path")
 
 
 def worktree_path(main_dir: Path, branch: str) -> Path:
@@ -59,7 +59,7 @@ Worktree = WorktreeEntry
 def dev_worktrees(main_dir: Path, items: Iterable[Worktree]) -> list[Worktree]:
     """置き場 `.worktrees/` の下（その下の `.ndf/` の作業用を除く）の worktree。"""
     root = os.path.realpath(worktrees_dir(main_dir))
-    scratch = os.path.join(root, identity.FIXED_WORDS["declaration_dir"])
+    scratch = os.path.join(root, identity.FIXED_WORDS["ndf_settings_dir"])
     picked = []
     for item in items:
         path = os.path.realpath(item.path)
@@ -75,12 +75,12 @@ def default_branch(git: Git) -> Optional[str]:
     return name[len(ORIGIN) + 1 :] if name.startswith(ORIGIN + "/") else None
 
 
-def base_branch(git: Git, decl: Optional[declaration.Declaration]) -> Optional[str]:
+def base_branch(git: Git, decl: Optional[ndf_settings.NdfSettings]) -> Optional[str]:
     """ベースブランチ: 宣言の `base_branch`、無ければ origin の既定ブランチ。"""
     return decl.base_branch if decl is not None and decl.base_branch else default_branch(git)
 
 
-def declared_flow(decl: Optional[declaration.Declaration]) -> Optional[dict[str, Any]]:
+def declared_flow(decl: Optional[ndf_settings.NdfSettings]) -> Optional[dict[str, Any]]:
     """今の宣言の取り込み方と本番チャネル（開始時の記録の無いスプリントが使う）。"""
     if decl is None:
         return None

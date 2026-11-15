@@ -254,7 +254,7 @@ def test_current_listen_steps_offer_the_answer_enum_of_their_output_contract(mod
     listen = _listen_steps(mode)
     assert listen
     for st in listen:
-        assert run.choices(run.Move(run.Action.GATE, None, st, run.StepProgress())) == ["approved", "rejected", "revise"]
+        assert run.choices(run.Move(run.Action.GATE, None, st, run.StepProgress())) == ["approved", "rejected", "request_changes"]
 
 
 def test_current_standard_has_listen_steps_for_both_gates():
@@ -283,9 +283,9 @@ def test_current_listen_step_whose_contract_has_no_answer_enum_offers_nothing(re
 def test_current_non_listen_step_offers_the_known_routes_of_the_waiting_report():
     # 現状固定: プランの承認ゲートは待っている結果の routes の鍵のうち、答えの語彙にあるものを鍵の順に返す
     st = next(s for s in definition.load_definition("standard").steps() if s.call in invoke.CALLS and not invoke.is_listen(s))
-    routes = {"revise": {}, "bogus": {}, "approved": {}}
+    routes = {"request_changes": {}, "bogus": {}, "approved": {}}
     prog = run.StepProgress(waiting={"report": {"routes": routes}})
-    assert run.choices(run.Move(run.Action.GATE, None, st, prog)) == ["revise", "approved"]
+    assert run.choices(run.Move(run.Action.GATE, None, st, prog)) == ["request_changes", "approved"]
     prog = run.StepProgress(waiting={"report": {"routes": ["approved"]}})
     assert run.choices(run.Move(run.Action.GATE, None, st, prog)) == []
     prog = run.StepProgress(waiting={"report": {}})

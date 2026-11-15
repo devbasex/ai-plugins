@@ -84,12 +84,12 @@ worktree 運用の仕組みは、リポジトリ側に `.ndf/worktree.json` が�
 設定の状態を終了コードで返し（0 あり / 2 なし / 3 読めない / 1 判定できない）、ファイルを作らない。
 
 ローカル環境での動作検証やテスト実行の分離を使うときは `localenv` / `testenv` を足す。
-書き方は [references/declaration.md](references/declaration.md) にある。
+書き方は [references/ndf-settings.md](references/ndf-settings.md) にある。
 
 **機械ごとに違う値は共有設定へ書かない。** ポートの帯・持ち込み物・追従の有無は、
 コミットしない `.ndf/worktree.local.json` へ書く（`init` が `.ndf/.gitignore` で追跡から
 外す）。上書きできる項目と重ね合わせの規則は
-[references/declaration.md](references/declaration.md) の「機械ごとに違う値は個人設定へ
+[references/ndf-settings.md](references/ndf-settings.md) の「機械ごとに違う値は個人設定へ
 書く」にある。
 
 ## 1. 現在地を確かめる
@@ -180,7 +180,7 @@ bash "$SCRIPTS/worktree-setup.sh" create feat/issue-<番号>-<名前> --from spr
 
 **既定ブランチと開発の起点は別物である。** 既定ブランチに正式版を置き、開発の本流を
 別のブランチ（ベースブランチ）に置くリポジトリでは、既定ブランチから分岐すると開発中の
-変更が正式版から枝分かれする。起点は設定（[references/declaration.md](references/declaration.md)
+変更が正式版から枝分かれする。起点は設定（[references/ndf-settings.md](references/ndf-settings.md)
 の `base_branch`）から取り、設定が無ければ `origin` の HEAD が指すブランチへ落ちる。
 
 設定した名前が origin にもローカルにも無いときは、`wt_base_branch` が名前を挙げて失敗する。
@@ -258,7 +258,7 @@ Pull Request がマージされた後の削除は `/ndf:merged` が行う。
 入れ替わらないためである。
 
 稼働中の worktree の内容をメインディレクトリでも見たいときは、設定に `follow_branch: true` を
-書く（[references/declaration.md](references/declaration.md)）。このときメインディレクトリの
+書く（[references/ndf-settings.md](references/ndf-settings.md)）。このときメインディレクトリの
 ブランチは、稼働中の開発用 worktree へセッション開始時に追従する。同じブランチを 2 つの
 作業ディレクトリへ checkout できないため、追従は detached HEAD で行う。detached HEAD では
 コミットしてもブランチが動かないため、メインディレクトリで加えた変更が worktree のブランチへ
@@ -291,7 +291,7 @@ Claude Code 本体が Bash を走らせる直前に「git がメインディレ�
 worktree は追跡されているファイルしか持たないため、`vendor/`・`node_modules/`・`.env` が無く、pre-commit や
 テストが落ちる。設定（`.ndf/worktree.json`）の `deps` に用意の仕方を書くと、NDF が worktree を作るとき
 （`worktree-setup.sh create`・3 層の run と queue・cross-review・cross-refactoring・落ちたテストの見分け）に
-メインディレクトリから依存物を用意する。書き方は [references/declaration.md](references/declaration.md) の `deps` にある。
+メインディレクトリから依存物を用意する。書き方は [references/ndf-settings.md](references/ndf-settings.md) の `deps` にある。
 
 ```json
 { "version": 1, "deps": { "copy_from_main": ["vendor"], "copy_as_real": [".env"] } }
@@ -338,7 +338,7 @@ bash "$NDF" verify "$WT"; echo $?  # 0 一致 / 1 不一致 / 2 未起動
 しては現れない。別のコードを検証したことに気づけないまま進む。
 
 リポジトリごとの差は `.ndf/worktree.json` が持つ。書き方は
-[references/declaration.md](references/declaration.md) にある。**この設定が無い
+[references/ndf-settings.md](references/ndf-settings.md) にある。**この設定が無い
 リポジトリでは、これらのコマンドは何も出力せず終了コード 0 で終わる。**
 
 ## テスト実行の分離

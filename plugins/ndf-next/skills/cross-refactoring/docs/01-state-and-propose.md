@@ -339,7 +339,7 @@ claude の別のアカウントで集め直したときは、その名前を `pr
 ```
 
 値は `"ruff-complexipy"`（`python` だけ）・`"lizard"`・`null`（その言語を測らず、重複も探さない）。形が違えば
-（JSON でない・知らない鍵・知らない言語かツール）宣言の全体を使わずに既定で測り、`declaration_invalid` と
+（JSON でない・知らない鍵・知らない言語かツール）宣言の全体を使わずに既定で測り、`ndf_settings_invalid` と
 理由を指標のファイルと計画に残す。重複の最小の行数と版は宣言で変えない。
 
 **参加者は `evidence` に根拠の値を書ける。** 鍵は `cc` / `cognitive` / `lines` / `functions` /

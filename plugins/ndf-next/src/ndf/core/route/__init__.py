@@ -81,7 +81,7 @@ REPEAT_LIMIT = "supervise.step-rerun"
 # 作業場所を省いたときの置き場（リポジトリの根の下）
 WORKTREES = ".worktrees"
 # base を省いたときに読むブランチの運用の宣言（リポジトリの根の下）と、その鍵
-BRANCH_DECLARATION = identity.FIXED_WORDS["declaration_dir"] + "/worktree.json"
+BRANCH_NDF_SETTINGS = identity.FIXED_WORDS["ndf_settings_dir"] + "/worktree.json"
 BASE_KEY = "base_branch"
 _PARAM = re.compile(r"\{\{([a-z_][a-z0-9_]*)\}\}")
 
@@ -399,7 +399,7 @@ def repo_root(cwd: Path) -> str:
 def default_base(repo: Path) -> Optional[str]:
     """宛先のブランチの既定: ブランチの運用の宣言の `base_branch`、無ければ `origin` の既定ブランチ（決まらなければ None）。"""
     try:
-        declared = json.loads((repo / BRANCH_DECLARATION).read_text(encoding="utf-8")).get(BASE_KEY)
+        declared = json.loads((repo / BRANCH_NDF_SETTINGS).read_text(encoding="utf-8")).get(BASE_KEY)
     except (OSError, ValueError, AttributeError):
         declared = None
     if isinstance(declared, str) and declared:
@@ -448,9 +448,9 @@ def derived(t: Template, given: Mapping[str, Value], cwd: Path) -> dict[str, Val
 def _check_worktree(t: Template, given: Mapping[str, Value], values: Mapping[str, Value]) -> None:
     """省いて決めた作業場所が使えなければ `RouteError`（ランナーがリポジトリの根へ倒れて別のチェックアウトを変えないため）。"""
     if "worktree" in t.params and "worktree" not in given and "worktree" in values:
-        place = str(values["worktree"])
-        if not steps.usable_worktree(place):
-            raise RouteError(f"省いた作業場所 {place} が使える worktree でない。作るか --set worktree=<path> で渡す")
+        location = str(values["worktree"])
+        if not steps.usable_worktree(location):
+            raise RouteError(f"省いた作業場所 {location} が使える worktree でない。作るか --set worktree=<path> で渡す")
 
 
 def _split(flag: str, pair: str) -> tuple[str, str]:
@@ -479,8 +479,8 @@ def _declared_ci_only(values: Mapping[str, Value]) -> bool:
     工程から組むプラン（`ndf.progress.invoke.plan_path`）と同じく、宣言があれば手元のテストのステップを外す（PR 3590 の指摘）。
     """
     repo = values.get("repo")
-    place = Path(repo) if isinstance(repo, str) and repo else Path.cwd()
-    return scoped.ci_only(declared.test_section(place))
+    location = Path(repo) if isinstance(repo, str) and repo else Path.cwd()
+    return scoped.ci_only(declared.test_section(location))
 
 
 def _write_plan(a: argparse.Namespace) -> tuple[Template, Path]:

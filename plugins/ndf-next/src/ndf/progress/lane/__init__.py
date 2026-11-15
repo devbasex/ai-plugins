@@ -100,7 +100,7 @@ def lane_table_name(plan: str, lane: str) -> str:
 
 
 def read_plan(conn: sa.Connection, plan_id: str) -> tuple[PlanView, list[model.Event]]:
-    meta = store.read_table(conn, plan_id)
+    meta = store.read_machine(conn, plan_id)
     if meta is None or meta["level"] != "plan":
         raise model.Refused(f"計画の進行表 {plan_id} は無い")
     events = store.read_events(conn, plan_id)
@@ -109,7 +109,7 @@ def read_plan(conn: sa.Connection, plan_id: str) -> tuple[PlanView, list[model.E
 
 def read_lanes(conn: sa.Connection, view: PlanView) -> dict[str, list[model.Event]]:
     """計画のレーンごとの、レーンの進行表の事象。"""
-    return {name: store.read_events(conn, spec.table_id) for name, spec in view.lanes.items()}
+    return {name: store.read_events(conn, spec.machine_id) for name, spec in view.lanes.items()}
 
 
 def folded(events: Mapping[str, list[model.Event]]) -> dict[str, list[LaneRow]]:
@@ -167,7 +167,7 @@ def checked_write(conn: sa.Connection, plan_id: str, lane: str, drafts: list[mod
         errs += [e for e in plan_errors(view, folded(events)) if e not in before]
         if errs:
             raise model.Refused("; ".join(errs))
-    return store.append_events(conn, view.lanes[lane].table_id, drafts, last)
+    return store.append_events(conn, view.lanes[lane].machine_id, drafts, last)
 
 
 def create_lane(conn: sa.Connection, key: tuple[str, str, str], plan_id: str, inputs: list[dict[str, Any]]) -> str:
@@ -180,7 +180,7 @@ def create_lane(conn: sa.Connection, key: tuple[str, str, str], plan_id: str, in
         model.EventDraft("row_added", "organizer", f"{ROW_PREFIX}{i}", payload={"input": inp, "index": None})
         for i, inp in enumerate(inputs, start=1)
     ]
-    return store.create_table(conn, ("lane", repo, lane_table_name(plan, lane)), plan_id, None, drafts)
+    return store.create_machine(conn, ("lane", repo, lane_table_name(plan, lane)), plan_id, None, drafts)
 
 
 def _require_lane(view: PlanView, lane: str) -> None:
@@ -213,7 +213,7 @@ class RowChange:
 def add_row(conn: sa.Connection, plan_id: str, lane: str, inp: dict[str, Any], change: RowChange) -> str:
     """順番表へ行を足す（未着手）。足した行の鍵を返す。"""
     view, _ = _lane_rows(conn, plan_id, lane)
-    key = _new_key(store.read_events(conn, view.lanes[lane].table_id))
+    key = _new_key(store.read_events(conn, view.lanes[lane].machine_id))
     payload = {"input": inp, "index": change.index}
     checked_write(conn, plan_id, lane, [model.EventDraft("row_added", change.actor, key, reason=change.reason, payload=payload)])
     return key
@@ -272,15 +272,15 @@ def start_row(conn: sa.Connection, plan_id: str, lane: str, key: str, sprint_id:
 
 def sprint_row(conn: sa.Connection, sprint_id: str) -> Optional[tuple[str, str, LaneRow]]:
     """スプリントの進行表を指すレーンの行（計画の ID, レーン, 行）。レーンの外のスプリントなら None。"""
-    sprint = store.read_table(conn, sprint_id)
-    parent = store.read_table(conn, sprint["parent_id"]) if sprint and sprint["parent_id"] else None
+    sprint = store.read_machine(conn, sprint_id)
+    parent = store.read_machine(conn, sprint["parent_id"]) if sprint and sprint["parent_id"] else None
     if parent is None or parent["level"] != "lane" or parent["parent_id"] is None:
         return None
     view, _ = read_plan(conn, parent["parent_id"])
-    lane = next((n for n, s in view.lanes.items() if s.table_id == parent["id"]), None)
+    lane = next((n for n, s in view.lanes.items() if s.machine_id == parent["id"]), None)
     rows = fold_lane(store.read_events(conn, parent["id"])) if lane else []
     row = next((r for r in rows if r.sprint_id == sprint_id), None)
-    return (view.table_id, lane, row) if lane and row else None
+    return (view.machine_id, lane, row) if lane and row else None
 
 
 def end_row(conn: sa.Connection, sprint_id: str, outcome: str, actor: str) -> Optional[dict[str, Any]]:
@@ -326,12 +326,12 @@ def cancel_pending(conn: sa.Connection, view: PlanView, reason: str) -> list[str
 
     計画ごと止めるので、別のレーンの after が指す行（I18）の決まりは当てない。
     """
-    lock_plan(conn, view.table_id)
+    lock_plan(conn, view.machine_id)
     running = []
     for name, evs in read_lanes(conn, view).items():
         rows = fold_lane(evs)
         drafts = [model.EventDraft("row_cancelled", "organizer", r.key, reason=reason) for r in rows if r.state == PENDING]
         running += [r.sprint_id for r in rows if r.active]
         if drafts:
-            store.append_events(conn, view.lanes[name].table_id, drafts, evs[-1].seq)
+            store.append_events(conn, view.lanes[name].machine_id, drafts, evs[-1].seq)
     return running

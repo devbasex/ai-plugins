@@ -13,7 +13,7 @@ import time
 from datetime import date
 from pathlib import Path
 
-from ndf.domains.relay import accounts, marks, registry, signals, stop_signal, wrapper
+from ndf.domains.relay import accounts, markers, registry, signals, stop_signal, wrapper
 from ndf.domains.relay.account_decide import Usage
 
 VERSION = "11.0.0-dev.4"
@@ -50,18 +50,18 @@ class FakeChild:
 
 
 class Spawner:
-    """`marks` は起動の順番 → その子のセッションが Stop の hook で書く次の区間のブロック。"""
+    """`markers` は起動の順番 → その子のセッションが Stop の hook で書く次の区間のブロック。"""
 
-    def __init__(self, children, marks=None):
+    def __init__(self, children, markers=None):
         self.children = list(children)
-        self.marks = dict(marks or {})
+        self.markers = dict(markers or {})
         self.calls: list[tuple[list[str], dict]] = []
         self.made: list[FakeChild] = []
 
     def __call__(self, argv, env, cwd):
         self.calls.append((argv, dict(env)))
         child = self.children.pop(0)
-        block = self.marks.get(len(self.made))
+        block = self.markers.get(len(self.made))
         if block is not None:
             signals.write_next(Path(env["NDF_RELAY_DIR"]), argv[2], block, True, 0.1)
         self.made.append(child)
@@ -98,9 +98,9 @@ def _settings(tmp_path: Path, **changes) -> wrapper.Settings:
     return wrapper.Settings(**values)
 
 
-def _run(tmp_path, children, prepare=None, marks=None, wall=None, **changes):
+def _run(tmp_path, children, prepare=None, markers=None, wall=None, **changes):
     s = _settings(tmp_path, **changes)
-    spawn = Spawner(children, marks)
+    spawn = Spawner(children, markers)
     w = wrapper.Wrapper(s, spawn=spawn, clock=_clock(), wall=wall)
     if prepare:
         prepare(w.dir, s.state_dir)
@@ -121,7 +121,7 @@ def test_next_block_starts_a_new_session_with_the_block_and_a_relay_mark(tmp_pat
         accounts.write_usages(state, [Usage("team", 95.0, False), Usage("main", 10.0, False)])
         accounts.use(state, "team")
 
-    ended, spawn, w = _run(tmp_path, [FakeChild([b"working\r\n"], None), FakeChild([], 0)], prepare, marks={0: "/goal 次の区間"})
+    ended, spawn, w = _run(tmp_path, [FakeChild([b"working\r\n"], None), FakeChild([], 0)], prepare, markers={0: "/goal 次の区間"})
     assert ended.cause == "" and "書かずに終わった" in ended.reason
     (first, first_env), (second, second_env) = spawn.calls
     assert first[:2] == [wrapper.CLAUDE, "--session-id"] and first[3:] == ["--model", "x", "最初の 1 行"]
@@ -129,7 +129,7 @@ def test_next_block_starts_a_new_session_with_the_block_and_a_relay_mark(tmp_pat
     # カットポイントで使用率が閾値を超えていれば、空いたアカウントで次の区間を始める（#3336）
     assert (first_env["NDF_CLAUDE_ACCOUNT"], second_env["NDF_CLAUDE_ACCOUNT"]) == ("team", "main")
     assert first_env["NDF_RELAY_DIR"] == str(w.dir) and first_env["CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION"] == "false"
-    assert marks.take(tmp_path / "state", second[2]) is True
+    assert markers.take(tmp_path / "state", second[2]) is True
     assert signals.read_next(w.dir) is None
     assert spawn.made[0].alive is False
     kinds = [row["kind"] for row in _log(w)]
@@ -198,14 +198,14 @@ class StopOnSpawn(Spawner):
 
     def __call__(self, argv, env, cwd):
         child = super().__call__(argv, env, cwd)
-        stop_signal.place_stop(Path(env["NDF_RELAY_DIR"]))
+        stop_signal.location_stop(Path(env["NDF_RELAY_DIR"]))
         return child
 
 
 def test_stop_signal_lets_the_session_finish_and_starts_no_next_section(tmp_path):
     stale = registry.wrapper_dir(tmp_path / "state", "t1")
     stale.mkdir(parents=True)
-    stop_signal.place_stop(stale)  # 前の実行の残りは始めたばかりの実行を止めない
+    stop_signal.location_stop(stale)  # 前の実行の残りは始めたばかりの実行を止めない
     s = _settings(tmp_path)
     # 出力の後に黙る見回り（b""）を置き、子が生きたまま静かな時間に入って次の区間を保留する形にする
     child = FakeChild([b"a\r\n", b"", b"", b"", b"", b"", b""], 0)
@@ -320,7 +320,7 @@ def test_next_mark_switches_once_its_quiet_time_has_passed_even_while_output_con
     # /goal の未達の応答が続いて画面が静かにならなくても、印を最初に書いてから静かな時間が過ぎれば切り替える（#2438）
     chatty = FakeChild([b"goal not met\r\n"] * 50, None)
     later = wrapper.WallClock(now=lambda: time.time() + 60.0)
-    ended, spawn, _ = _run(tmp_path, [chatty, FakeChild([], 0)], marks={0: "/goal 次"}, wall=later, quiet=30.0)
+    ended, spawn, _ = _run(tmp_path, [chatty, FakeChild([], 0)], markers={0: "/goal 次"}, wall=later, quiet=30.0)
     assert len(spawn.calls) == 2 and spawn.calls[1][0][-1] == "/goal 次"
     assert chatty.outputs and ended.cause == ""
 

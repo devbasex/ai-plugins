@@ -1,7 +1,7 @@
 """最後の応答から、次の区間を指すコードブロックを読む。
 
 Markdown の解析は `ndf.adapters.markdown` だけが行う。ここはコードブロックの行の印から、囲みの 1 行目の
-情報の文字列（言語の名前の位置）が `fence` のブロックを拾う。`fence` の名前は guard の表の `relay-mark` の行の
+情報の文字列（言語の名前の位置）が `fence` のブロックを拾う。`fence` の名前は guard の表の `relay-marker` の行の
 `params.fence` にある（コードは名前を文字で持たない）。
 """
 

@@ -74,7 +74,7 @@ cd "$WORKTREE"
    `.cross_review/` を持たないリポジトリでも、state.json と result.json が残る。
 
    ツールのパス（既定は `.serena/project.yml` と `.serena/serena_config.yml`。足し引きは
-   `worktree` の `references/declaration.md`）には、作成と同期の後に `git update-index --skip-worktree`
+   `worktree` の `references/ndf-settings.md`）には、作成と同期の後に `git update-index --skip-worktree`
    を掛ける。担当の CLI が起動した Serena が書き換えても、fix 担当の `git add -A` で index へ入らず、
    ラウンドの開始の検査でも止まらない。同期の前は印を外して HEAD の内容へ戻す。
 

@@ -41,7 +41,7 @@ def test_scoped_runs_reads_omitted_or_non_list_paths_as_the_whole_and_an_empty_l
     assert _runs([{"name": "all", "scope_command": "a {paths}"}], ["z/y.py"]) == ([("all", "a z/y.py", ("z/y.py",))], [])
 
 
-def test_verify_suites_reads_the_same_declaration_the_same_way(tmp_path: Path):
+def test_verify_suites_reads_the_same_ndf_settings_the_same_way(tmp_path: Path):
     suites = [
         *UNUSABLE,
         {"name": "empty", "kind": "lint", "scope_command": "e {paths}", "paths": []},

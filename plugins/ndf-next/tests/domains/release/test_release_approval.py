@@ -13,7 +13,7 @@ from typing import Any
 
 from ndf.adapters import ci
 from ndf.adapters.github import MERGE_QUEUE_PENDING, Authored, GitHubError, MergeOutcome, Pull
-from ndf.domains.release import approval_decide, declaration, land, trail
+from ndf.domains.release import approval_decide, ndf_settings, land, trail
 
 from ._fakes import HEAD, OTHER, FakeHub, not_found, pull
 
@@ -324,7 +324,7 @@ def _records(hub: FakeHub, number: int = 7) -> list[str]:
     return [c.body for c in hub.comments_of.get(number, []) if trail.ADMIN_MARK in c.body]
 
 
-def test_admin_declaration_merges_the_production_pr_with_the_bypass_and_records_it() -> None:
+def test_admin_ndf_settings_merges_the_production_pr_with_the_bypass_and_records_it() -> None:
     """受け入れ条件 8・I7・I8: 宣言があり承認数 1 なら、迂回でマージし、記録を置き、admin が真。戻す PR は迂回しない。"""
     hub = AdminHub(pulls={7: pull(), 8: pull(number=8, base="develop")}, comments_of={7: [_trail("approved", HEAD)]})
     done = _admin_lander(hub).land(7)
@@ -334,7 +334,7 @@ def test_admin_declaration_merges_the_production_pr_with_the_bypass_and_records_
     assert HEAD in record and approval_decide.TRAIL_MARK not in record
 
 
-def test_admin_declaration_stops_like_the_plain_merge_without_merging() -> None:
+def test_admin_ndf_settings_stops_like_the_plain_merge_without_merging() -> None:
     """受け入れ条件 8（条件 2〜4）: 証跡が無い・チェックが落ちた・待つ間に差し戻されたら止まり、迂回しない。"""
     hub = AdminHub(pulls={7: pull()})
     done = _admin_lander(hub).land(7)
@@ -352,7 +352,7 @@ def test_admin_declaration_stops_like_the_plain_merge_without_merging() -> None:
     assert not done.merged and done.kind == "refused" and hub.admin_merged == [] and _records(hub) == []
 
 
-def test_admin_declaration_does_not_count_the_mvv_trail() -> None:
+def test_admin_ndf_settings_does_not_count_the_mvv_trail() -> None:
     """I9: 利用者の証跡が無く MVV 判定の証跡だけなら refused で止まり、迂回しない。"""
     hub = AdminHub(pulls={7: pull()}, comments_of={7: [_mvv_trail()]})
     done = _admin_lander(hub).land(7)
@@ -366,7 +366,7 @@ def test_admin_declaration_does_not_count_the_mvv_trail() -> None:
         Authored("octocat", "OWNER", approval_decide.render_trail("rejected", HEAD, trail.USER_BY).replace("担い手: user\n", "")),
     ],
 )
-def test_admin_declaration_counts_rejections_by_any_trusted_author(rejection: Authored) -> None:
+def test_admin_ndf_settings_counts_rejections_by_any_trusted_author(rejection: Authored) -> None:
     """I9: 利用者の承認の後の差し戻しは、担い手が user でなくても数えて refused で止まり、迂回しない。"""
     hub = AdminHub(pulls={7: pull()}, comments_of={7: [_trail("approved", HEAD), rejection]})
     done = _admin_lander(hub).land(7)
@@ -381,7 +381,7 @@ def test_admin_declaration_counts_rejections_by_any_trusted_author(rejection: Au
         Authored("octocat", "OWNER", approval_decide.render_trail("approved", HEAD, trail.USER_BY), edited=True),  # 編集された
     ],
 )
-def test_admin_declaration_counts_only_unedited_user_trails(comment: Authored) -> None:
+def test_admin_ndf_settings_counts_only_unedited_user_trails(comment: Authored) -> None:
     """I9: 担い手が user と明示されていない・編集された証跡では、迂回の前提に数えず refused で止まる。"""
     hub = AdminHub(pulls={7: pull()}, comments_of={7: [comment]})
     done = _admin_lander(hub).land(7)
@@ -461,11 +461,11 @@ def test_admin_record_failure_is_reported_apart_from_the_merge() -> None:
     ],
 )
 def test_production_admin_reads_only_json_true(tmp_path: Path, body: Any, admin: bool) -> None:
-    path = tmp_path / declaration.PROJECT_FILE
+    path = tmp_path / ndf_settings.PROJECT_FILE
     if body is not None:
         path.parent.mkdir(parents=True)
         path.write_text(body if isinstance(body, str) else json.dumps(body), encoding="utf-8")
-    assert declaration.production_admin(tmp_path) is admin
+    assert ndf_settings.production_admin(tmp_path) is admin
 
 
 def test_production_admin_reads_the_main_directory_before_the_worktree(tmp_path: Path) -> None:
@@ -482,11 +482,11 @@ def test_production_admin_reads_the_main_directory_before_the_worktree(tmp_path:
     git("commit", "-q", "--allow-empty", "-m", "init")
     git("worktree", "add", "-q", "--detach", str(wt))
     for root, admin in ((main, False), (wt, True)):
-        (root / declaration.PROJECT_FILE).parent.mkdir(parents=True)
-        (root / declaration.PROJECT_FILE).write_text(json.dumps({"production_merge": {"admin": admin}}), encoding="utf-8")
-    assert declaration.production_admin(wt) is False
-    (main / declaration.PROJECT_FILE).unlink()
-    assert declaration.production_admin(wt) is False  # メインディレクトリに無ければ作業場所の宣言で補わない（#2363）
+        (root / ndf_settings.PROJECT_FILE).parent.mkdir(parents=True)
+        (root / ndf_settings.PROJECT_FILE).write_text(json.dumps({"production_merge": {"admin": admin}}), encoding="utf-8")
+    assert ndf_settings.production_admin(wt) is False
+    (main / ndf_settings.PROJECT_FILE).unlink()
+    assert ndf_settings.production_admin(wt) is False  # メインディレクトリに無ければ作業場所の宣言で補わない（#2363）
 
 
 def test_issue_3487_production_merge_stops_before_merging_with_untrusted_token() -> None:

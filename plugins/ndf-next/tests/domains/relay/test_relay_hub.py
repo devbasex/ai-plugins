@@ -108,7 +108,7 @@ def test_spawn_that_never_comes_up_is_not_reported_as_started(ctx):
     assert registry.read_registry(hub.hub_dir(ctx.state_dir)) == {}
 
 
-def test_missing_wrapper_place_says_how_to_recover(ctx):
+def test_missing_wrapper_location_says_how_to_recover(ctx):
     # プラグインの更新で版の置き場が消えたら、理由と打ち直しを返す（#2583）
     (ctx.plugin_root / "bin" / "ndf").unlink()
     got = hub.submit(ctx, {"kind": "spawn", "name": "t1"})

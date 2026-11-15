@@ -54,7 +54,7 @@ def run(tool: str, install: bool) -> Outcome:
         return _present(tool, npm)
     _install(npm)
     if not shutil.which("gws"):
-        bin_dir = _npm_place(npm, "`npm prefix -g` の bin", sub="/bin")
+        bin_dir = _npm_location(npm, "`npm prefix -g` の bin", sub="/bin")
         raise GwsStop(
             "unknown",
             "gws を入れたが PATH に見つからない",
@@ -97,7 +97,7 @@ def _unauthenticated_summary(keys: Mapping[str, Any]) -> str:
 
 def _present(tool: str, npm: str) -> Outcome:
     """導入の承認資料を書き、missing の承認ゲートの結果を組む。"""
-    where = _npm_place(npm, "`npm prefix -g` が示す場所（値を読めなかった）", note="（`npm prefix -g` の値）")
+    where = _npm_location(npm, "`npm prefix -g` が示す場所（値を読めなかった）", note="（`npm prefix -g` の値）")
     text = material.render(package=PACKAGE, package_url=PACKAGE_URL, command=("npm", *INSTALL_ARGS), where=where)
     try:
         path = material.write(text, identity.load().state_dir)
@@ -122,7 +122,7 @@ def _install(npm: str) -> None:
         )
 
 
-def _npm_place(npm: str, fallback: str, *, sub: str = "", note: str = "") -> str:
+def _npm_location(npm: str, fallback: str, *, sub: str = "", note: str = "") -> str:
     """npm の全体インストールの置き場を示す文（`` `<置き場><sub>`<note> ``）。置き場を読めなければ `fallback`。"""
     prefix = _npm_prefix(npm)
     return f"`{prefix}{sub}`{note}" if prefix else fallback

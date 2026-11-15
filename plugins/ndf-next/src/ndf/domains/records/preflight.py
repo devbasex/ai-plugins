@@ -42,19 +42,19 @@ def run_entry(args: list[str], cwd: Path) -> Mapping[str, Any]:
     return got
 
 
-def declaration_checked(root: Path) -> pd.Checked:
+def ndf_settings_checked(root: Path) -> pd.Checked:
     """`.ndf/project.json` を確かめる。無ければ通す（既定で動く）。読めない・object でなければ止まる。"""
     path = files.path(root, "project")
     if not path.is_file():
-        return pd.Checked(pd.DECLARATION, result.result(TOOL, result.OK, "プロジェクトの宣言が無い（既定で動く）"))
+        return pd.Checked(pd.NDF_SETTINGS, result.result(TOOL, result.OK, "プロジェクトの宣言が無い（既定で動く）"))
     try:
         raw = jsonfile.read_object(path)
     except jsonfile.JsonFileError as exc:
-        return pd.Checked(pd.DECLARATION, result.stopped(TOOL, "precondition", str(exc)))
+        return pd.Checked(pd.NDF_SETTINGS, result.stopped(TOOL, "precondition", str(exc)))
     known = set(facts.value("ndf-files", "project", "keys")) | {"version", "$schema"}
     # 知らないキーは NDF が読まないだけなので止めない（利用者の宣言の追記を拒まない）
     warnings = [f"{path} の知らないキー（NDF は読まない）: {k}" for k in sorted(set(raw) - known)]
-    return pd.Checked(pd.DECLARATION, result.result(TOOL, result.OK, "プロジェクトの宣言を読めた", warnings=warnings))
+    return pd.Checked(pd.NDF_SETTINGS, result.result(TOOL, result.OK, "プロジェクトの宣言を読めた", warnings=warnings))
 
 
 def _sha256(path: Path) -> Optional[str]:
@@ -90,7 +90,7 @@ def check(root: Path, runner: Runner = run_entry) -> dict[str, Any]:
     """3 つの確かめを順に打ち、まとめた結果 JSON を返す。"""
     absent = causes.cause("precondition", "worktree の設定の宣言が無い")
     wt = pd.worktree_checked(runner(["worktree", "check"], root), result.command("worktree", "init"), absent)
-    s = pd.combine([wt, declaration_checked(root), mvv_checked(root)])
+    s = pd.combine([wt, ndf_settings_checked(root), mvv_checked(root)])
     if s.passed:
         return result.result(TOOL, result.OK, s.summary, s.items)
     extra: dict[str, Any] = {"next": s.next} if s.next else {}

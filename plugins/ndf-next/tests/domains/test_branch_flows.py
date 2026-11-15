@@ -14,7 +14,7 @@ from ndf.contracts import facts
 
 FLOWS = "branch-flows"
 CHOICES = ("start", "doc_prs", "integrate")
-KEYS = {"promotion", *CHOICES, "reviews"}
+KEYS = {"release_strategy", *CHOICES, "reviews"}
 
 
 class FlowError(ValueError):
@@ -35,9 +35,9 @@ def flow_of(decl: dict[str, Any] | None) -> dict[str, Any]:
 
 def _row_for(decl: dict[str, Any], default: dict[str, Any]) -> dict[str, Any]:
     """宣言の取り込み方（無ければ既定の行の取り込み方）の表の行。表に無ければ止める。"""
-    rows = facts.rows(FLOWS, promotion=decl.get("promotion", default["promotion"]))
+    rows = facts.rows(FLOWS, release_strategy=decl.get("release_strategy", default["release_strategy"]))
     if not rows:
-        raise FlowError(f"取り込み方が表に無い: {decl.get('promotion')!r}")
+        raise FlowError(f"取り込み方が表に無い: {decl.get('release_strategy')!r}")
     return rows[0]
 
 
@@ -46,35 +46,35 @@ def _picked(decl: dict[str, Any], row: dict[str, Any]) -> dict[str, Any]:
     picked = {c: decl.get(c, row[c][0]) for c in CHOICES}
     bad = [c for c in CHOICES if picked[c] not in row[c]]
     if bad:
-        raise FlowError(f"{row['promotion']} が許さない値: {bad}")
+        raise FlowError(f"{row['release_strategy']} が許さない値: {bad}")
     kinds = set(decl.get("reviews", {})) - set(row["review_kinds"])
     if kinds:
-        raise FlowError(f"{row['promotion']} で書けないレビューの単位: {sorted(kinds)}")
+        raise FlowError(f"{row['release_strategy']} で書けないレビューの単位: {sorted(kinds)}")
     return picked
 
 
 def test_one_default_row_and_values_come_from_the_table():
     assert len(facts.rows(FLOWS, default=True)) == 1
-    assert flow_of(None) == {"row": "promote-whole", "start": "base", "doc_prs": "base", "integrate": "check"}
+    assert flow_of(None) == {"row": "merge-base-branch", "start": "base", "doc_prs": "base", "integrate": "check"}
 
 
 def test_selected_flow_of_another_repository():
-    decl = {"promotion": "selected", "start": "production", "doc_prs": "sprint", "reviews": {"release": {"checks": ["cross-review"]}}}
-    assert flow_of(decl) == {"row": "promote-selected", "start": "production", "doc_prs": "sprint", "integrate": "check"}
-    assert facts.value(FLOWS, "promote-selected", "keeps_sprint") is True
-    assert facts.value(FLOWS, "promote-selected", "release_from") == "production"
+    decl = {"release_strategy": "selected", "start": "production", "doc_prs": "sprint", "reviews": {"release": {"checks": ["cross-review"]}}}
+    assert flow_of(decl) == {"row": "release-branch", "start": "production", "doc_prs": "sprint", "integrate": "check"}
+    assert facts.value(FLOWS, "release-branch", "keeps_sprint") is True
+    assert facts.value(FLOWS, "release-branch", "release_from") == "production"
 
 
 @pytest.mark.parametrize(
     "decl",
     [
-        {"promotion": "selected", "start": "base"},
-        {"promotion": "whole", "reviews": {"release": {}}},
-        {"promotion": "merge"},
-        {"promotion": "whole", "squash": True},
+        {"release_strategy": "selected", "start": "base"},
+        {"release_strategy": "whole", "reviews": {"release": {}}},
+        {"release_strategy": "merge"},
+        {"release_strategy": "whole", "squash": True},
     ],
 )
-def test_declarations_outside_the_table_stop(decl):
+def test_ndf_settings_outside_the_table_stop(decl):
     with pytest.raises(FlowError):
         flow_of(decl)
 

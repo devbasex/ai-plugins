@@ -119,7 +119,7 @@ def test_row_schema_without_columns():
     }
 
 
-def test_row_schema_from_column_declarations():
+def test_row_schema_from_column_ndf_settings():
     columns = {
         "rank": {"type": "integer", "summary": "r"},
         "tags": {"type": "array", "summary": "t", "optional": True},
@@ -195,7 +195,7 @@ def test_consts_picks_top_level_constants_by_assignment_form():
         (16, "AUG", 1),
     ]
     assert {c.rel for c in found} == {"src/ndf/a.py"}
-    assert found[0].place == "src/ndf/a.py:2 NAME"
+    assert found[0].location == "src/ndf/a.py:2 NAME"
 
 
 # 現状固定テスト（I-004）: 組の種類ごとの出力の並び・位置・文言。種類の順（same-str → same-set → same-num → subset → member）も固定する。

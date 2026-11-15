@@ -148,7 +148,7 @@ class Lander:
     production: str
     budget: float
     wait: Callable[[Callable[[], ci.Reading], float], ci.WatchResult] | None = None
-    # 迂回の宣言（`declaration.production_admin`）。偽なら今のマージのまま
+    # 迂回の宣言（`ndf_settings.production_admin`）。偽なら今のマージのまま
     admin: bool = False
     clock: Callable[[], float] = time.monotonic
     sleep: Callable[[float], None] = time.sleep

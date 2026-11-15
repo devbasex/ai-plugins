@@ -39,8 +39,8 @@ def test_count_signals_dedupes_pairs_and_reads_only_the_current_version_and_repo
     rows = [row, dict(row), {**row, "pr": 2}, {**row, "version": 1, "pr": 3}, {**row, "repo": "/other", "pr": 4},
             {**row, "kind": md.OVERRIDE_UNKNOWN_PASS, "pr": 5}]  # fmt: skip
     got = md.count_signals(rows, _decl(2, {"overrides": 2}), "/m")
-    assert (got.version, got.overrides, got.unknown_pass, got.unknown, got.revise) == (2, 2, 1, 0, True)
-    assert md.count_signals(rows, _decl(2), "/m").revise is False
+    assert (got.version, got.overrides, got.unknown_pass, got.unknown, got.revision_due) == (2, 2, 1, 0, True)
+    assert md.count_signals(rows, _decl(2), "/m").revision_due is False
 
 
 def test_status_compares_the_body_with_the_approved_record() -> None:
@@ -52,8 +52,8 @@ def test_status_compares_the_body_with_the_approved_record() -> None:
 
 
 def test_reusable_takes_only_the_latest_follow_for_the_same_key() -> None:
-    key = md.vet_key({"sprint": "a", "project": "b"})
-    assert key == md.vet_key({"project": "b", "sprint": "a"}) and key != md.vet_key({"sprint": "a", "project": "c"})
+    key = md.mvv_validation_key({"sprint": "a", "project": "b"})
+    assert key == md.mvv_validation_key({"project": "b", "sprint": "a"}) and key != md.mvv_validation_key({"sprint": "a", "project": "c"})
     first = md.judged_row(key, md.FOLLOW, "t1", "/m", {"usd": 0.1})
     assert md.reusable([first], key) == first
     assert md.reusable([first, md.judged_row(key, md.UNKNOWN, "t2", "/m", {})], key) is None
@@ -106,7 +106,7 @@ def test_signals_count_with_the_base_branch_version_from_a_worktree(repo: Path) 
     assert mvv.signals(repo, "main").overrides == 0
 
 
-def test_record_answer_without_a_version_takes_the_worktree_declaration(repo: Path) -> None:
+def test_record_answer_without_a_version_takes_the_worktree_ndf_settings(repo: Path) -> None:
     wt = repo / ".worktrees" / "w"
     rows = mvv.record_answer(wt, {"verdict": md.NOT_FOLLOW, "approved": True, "pr": 1}, None)
     assert [r["version"] for r in rows] == [2]
@@ -116,22 +116,22 @@ def test_record_answer_without_a_version_takes_the_worktree_declaration(repo: Pa
         mvv.record_answer(wt, {"verdict": md.NOT_FOLLOW, "approved": True, "pr": 2}, None)
 
 
-def test_vet_sprint_reuses_the_latest_follow_and_survives_broken_rows(repo: Path) -> None:
+def test_mvv_validate_sprint_reuses_the_latest_follow_and_survives_broken_rows(repo: Path) -> None:
     calls: list[int] = []
 
     def judge(inputs: Any) -> tuple[str, dict]:
         calls.append(1)
         return md.FOLLOW, {"usd": 0.2, "seconds": 3}
 
-    path = mvv.record_path("mvv-vet")
+    path = mvv.record_path("mvv-validation")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("{壊れた\n", encoding="utf-8")
     inputs = {"sprint": "本文", "project": "MVV", "principles": "原則", "prompt": "指示"}
-    first = mvv.vet_sprint(repo, inputs, judge)
-    second = mvv.vet_sprint(repo / ".worktrees" / "w", inputs, judge)
+    first = mvv.mvv_validate_sprint(repo, inputs, judge)
+    second = mvv.mvv_validate_sprint(repo / ".worktrees" / "w", inputs, judge)
     assert len(calls) == 1 and second["reused_from"] == first["at"]
-    mvv.vet_sprint(repo, {**inputs, "sprint": "変えた"}, judge)
-    mvv.vet_sprint(repo, inputs, judge, reuse=False)
+    mvv.mvv_validate_sprint(repo, {**inputs, "sprint": "変えた"}, judge)
+    mvv.mvv_validate_sprint(repo, inputs, judge, reuse=False)
     assert len(calls) == 3
     rows, broken = jsonl.read_rows(path)
     assert len(rows) == 4 and broken == 1
@@ -141,7 +141,7 @@ def test_vet_sprint_reuses_the_latest_follow_and_survives_broken_rows(repo: Path
 def test_record_path_prefers_the_env_dir_and_does_not_load_the_identity(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("NDF_MVV_STATE_DIR", str(tmp_path / "m"))
     monkeypatch.setattr(identity, "load", _unloadable)
-    assert mvv.record_path("mvv-vet") == tmp_path / "m" / "mvv-vet.jsonl"
+    assert mvv.record_path("mvv-validation") == tmp_path / "m" / "mvv-validation.jsonl"
     assert mvv.record_path("mvv-signals") == tmp_path / "m" / "mvv-signals.jsonl"
 
 
@@ -152,7 +152,7 @@ def test_record_path_falls_back_to_the_state_dir_when_the_env_is_unset_or_empty(
     else:
         monkeypatch.setenv("NDF_MVV_STATE_DIR", env)
     state = identity.load().state_dir
-    assert mvv.record_path("mvv-vet") == state / "mvv-vet.jsonl"
+    assert mvv.record_path("mvv-validation") == state / "mvv-validation.jsonl"
     assert mvv.record_path("mvv-signals") == state / "mvv-signals.jsonl"
 
 
@@ -164,4 +164,4 @@ def test_record_path_raises_identity_error_without_the_env_and_the_state_dir(mon
     monkeypatch.delenv("NDF_MVV_STATE_DIR", raising=False)
     monkeypatch.setattr(identity, "load", _unloadable)
     with pytest.raises(identity.IdentityError):
-        mvv.record_path("mvv-vet")
+        mvv.record_path("mvv-validation")

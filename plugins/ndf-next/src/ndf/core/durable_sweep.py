@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from ndf.core import durable_locks as locks
-from ndf.core.durable_ledger import _forget_run, _ledger
+from ndf.core.durable_runs import _forget_run, _runs
 from ndf.core.durable_locks import maint_lock, sa
 
 # 殻（durable）から分けた後も、片付けのログは殻の logger に出す
@@ -109,11 +109,11 @@ def _move_out(body: Path, dest_dir: Path, target_name: str, now: datetime) -> Pa
         if src.exists():
             os.utime(src, stamp)
             src.rename(target.with_name(target.name + suffix))
-    _drop_marks(body)
+    _drop_markers(body)
     return target
 
 
-def _drop_marks(body: Path) -> None:
+def _drop_markers(body: Path) -> None:
     """鍵のファイルの目印 `.checked` と、最後に `.lock` を消す。"""
     body.with_suffix(CHECKED_SUFFIX).unlink(missing_ok=True)
     body.with_suffix(LOCK_SUFFIX).unlink(missing_ok=True)
@@ -123,7 +123,7 @@ def retire_name(root: Path, name: str, records: Records, now: datetime) -> Path 
     """鍵の名前 `name` のファイルの耐久ワークフローがすべて終わっていれば retired/ へ移し、移した先を返す。待ちがあれば何もしない。"""
     body = _dbos_dir(root) / f"{name}{DB_SUFFIX}"
     if not body.exists():
-        _drop_marks(body)
+        _drop_markers(body)
         return None
     if any(r.status not in FINISHED for r in records.read(locks.sqlite_url(body), None)):
         return None
@@ -241,7 +241,7 @@ def sweep_url(root: Path, database_url: str, records: Records, now: datetime | N
 
     def body(now: datetime, out: SweepResult) -> None:
         try:
-            rows = _ledger(database_url)
+            rows = _runs(database_url)
         except sa.exc.SQLAlchemyError as exc:
             out.warnings.append(f"台帳を読めない: {exc}")
             rows = []

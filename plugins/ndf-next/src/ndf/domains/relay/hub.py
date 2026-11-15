@@ -67,7 +67,7 @@ class Context:
 
 
 def hub_dir(state_dir: Path) -> Path:
-    return state_dir / facts.value("places", "relay-hub", "path")
+    return state_dir / facts.value("locations", "relay-hub", "path")
 
 
 def submit(ctx: Context, request: Mapping[str, Any]) -> Outcome:

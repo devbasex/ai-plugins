@@ -29,10 +29,10 @@
     {"id": "organizer-stray", "entrypoint": "file-organizer", "call": "inbox/x.json", "env": ["NDF_ORGANIZER_DIR"], "valid": false, "meaning": "置き場の表に無いファイルはやり取りしない"},
     {"id": "plan-progress", "entrypoint": "file-plan-progress", "call": "s1/8-release-request-state/progress.jsonl", "env": ["NDF_FACTORY_RUN"], "valid": true, "meaning": "プランの進捗の step と attention を読む"},
     {"id": "loop-record", "entrypoint": "file-loop-record", "call": "l20261102/loop.json", "env": ["NDF_FACTORY_RUN"], "valid": true, "meaning": "開発ループの記録を読む"},
-    {"id": "ask-ledger", "entrypoint": "file-ledgers", "call": "ask.jsonl", "env": ["NDF_MVV_STATE_DIR"], "valid": true, "meaning": "判断の記録を読む"},
+    {"id": "ask-journal", "entrypoint": "file-journals", "call": "ask.jsonl", "env": ["NDF_MVV_STATE_DIR"], "valid": true, "meaning": "判断の記録を読む"},
     {"id": "issue-request", "entrypoint": "file-issue-request", "call": ".", "env": ["NDF_ISSUE_REQUEST_FILE"], "valid": true, "meaning": "別のリポジトリ宛ての起票の依頼を読む"},
-    {"id": "spec-page", "entrypoint": "spec-pages", "call": "docs/contracts/declarations.md", "env": [], "valid": true, "meaning": "連携システムが宣言のページを読む"},
-    {"id": "spec-declaration", "entrypoint": "spec-declarations", "call": "contracts/schemas/declarations/project.schema.json", "env": [], "valid": true, "meaning": "連携システムが設定ページの入力欄を宣言のスキーマから作る"},
+    {"id": "spec-page", "entrypoint": "spec-pages", "call": "docs/contracts/ndf-settings.md", "env": [], "valid": true, "meaning": "連携システムが宣言のページを読む"},
+    {"id": "spec-ndf_settings", "entrypoint": "spec-ndf_settings", "call": "contracts/schemas/ndf-settings/project.schema.json", "env": [], "valid": true, "meaning": "連携システムが設定ページの入力欄を宣言のスキーマから作る"},
     {"id": "spec-io-args", "entrypoint": "spec-io", "call": "contracts/schemas/io/check.args.schema.json", "env": [], "valid": true, "meaning": "連携システムが副命令の呼び出しを引数のスキーマで確かめる"},
     {"id": "spec-outside", "entrypoint": "spec-io", "call": "src/ndf/cli.py", "env": [], "valid": false, "meaning": "規約の置き場の外のファイルは規約ではない"}
   ]

@@ -85,7 +85,7 @@ class _Run:
     g: git.Git
     ref: store.StateRef
     data: dict[str, Any]
-    ledger: FindingLedger
+    journal: FindingJournal
     warnings: list[str]
     process: list[dict[str, str]]
     history: list[frozenset[str]]
@@ -112,12 +112,12 @@ def _text(value: object) -> Optional[str]:
 # --- 台帳 -------------------------------------------------------------------------------
 
 
-def _ledger_row(fid: str, round_no: int, text: str, by: Any, key: Optional[str] = None, section: Optional[str] = None) -> dict[str, Any]:
+def _journal_row(fid: str, round_no: int, text: str, by: Any, key: Optional[str] = None, section: Optional[str] = None) -> dict[str, Any]:
     """台帳の 1 行（未解決で始まる）。"""
     return {"id": fid, "key": key, "text": text, "section": section, "round": round_no, "outcome": fin.UNRESOLVED, "reason": None, "by": by}
 
 
-class FindingLedger:
+class FindingJournal:
     """指摘の台帳（id から行の辞書。状態ファイルの findings に並べる形のまま持つ）と、その規則。
 
     指摘は鍵で重ねず、見送り済みの指摘は出し直されても扱わず、直した指摘が戻れば未解決へ戻す。
@@ -146,7 +146,7 @@ class FindingLedger:
             known = by_key.get(key)
             if known is None:
                 fid = self._next_id(round_no)
-                self.rows[fid] = _ledger_row(fid, round_no, text, item.get("by"), key, _text(item.get("section")))
+                self.rows[fid] = _journal_row(fid, round_no, text, item.get("by"), key, _text(item.get("section")))
             elif known.get("outcome") == fin.FIXED:
                 known |= {"outcome": fin.UNRESOLVED, "reason": None, "round": round_no}
         return frozenset(keys)
@@ -171,7 +171,7 @@ class FindingLedger:
             if fid in self.rows:
                 self.rows[fid] |= {"outcome": item["outcome"], "reason": reason}
             elif fid in texts:
-                self.rows[fid] = _ledger_row(fid, round_no, texts[fid], "rebuild") | {"outcome": item["outcome"], "reason": reason}
+                self.rows[fid] = _journal_row(fid, round_no, texts[fid], "rebuild") | {"outcome": item["outcome"], "reason": reason}
         return reported
 
     def reopen(self, fids: Sequence[str]) -> None:
@@ -226,7 +226,7 @@ def _resend(run: _Run, synced: worktree.SyncResult) -> None:
     sent = _push(run, round_no, remote, fix, check_commit=False)
     if sent:
         # 前の起動が送れずに未解決へ戻した指摘は、PR へ届いたので直したへ戻す（修正担当へ渡し直さない）
-        run.ledger.restore_fixed(store.list_of(fix, "fixed"))
+        run.journal.restore_fixed(store.list_of(fix, "fixed"))
     _save(run)
     if not sent:
         raise DriveStopped("work_stopped", f"前の起動の round {round_no} の修正を送れない: {run.warnings[-1]}")
@@ -240,7 +240,7 @@ def _start(cfg: RunConfig) -> _Run:
         raise DriveStopped("precondition", worktree.conflict_detail(synced))
     ref = store.state_pr(cfg.state_dir, cfg.pr)
     data = store.read_state(ref)
-    run = _Run(cfg, g, ref, data, FindingLedger(store.list_of(data, store.FINDINGS)), [], [], [])
+    run = _Run(cfg, g, ref, data, FindingJournal(store.list_of(data, store.FINDINGS)), [], [], [])
     _ingest_pending(run)
     _resend(run, synced)
     return run
@@ -262,7 +262,7 @@ def _note(run: _Run, round_no: int, who: str, result: str, warning: Optional[str
 
 
 def _review_prompt(run: _Run, round_no: int, scope: scope_decide.Scope, diff: Path) -> str:
-    decided = run.ledger.skipped_texts()
+    decided = run.journal.skipped_texts()
     handed = [f"- {h.id}: {h.text}" for h in run.cfg.handed]
     lines = [
         f"PR #{run.ref.current_pr} のレビューの round {round_no} である。読むだけで、ファイルを変えない。",
@@ -336,18 +336,18 @@ def _fixer_launch(run: _Run, round_no: int, prompt: str) -> agents.Launch:
     )
 
 
-def _fix_record(ledger: FindingLedger, ref: store.StateRef, path: Path, handed: Sequence[fin.Handed], round_no: int) -> dict[str, Any]:
+def _fix_record(journal: FindingJournal, ref: store.StateRef, path: Path, handed: Sequence[fin.Handed], round_no: int) -> dict[str, Any]:
     """修正の結果ファイルを読んで台帳へ取り込み、ラウンドの修正の記録（commit・reported・fixed）を返す。
     番号が合わなければ `store.FixResultMismatch`。"""
     found = store.read_fix_result(path, ref)
-    reported = ledger.apply_fix(store.list_of(found, store.FINDINGS), handed, round_no)
+    reported = journal.apply_fix(store.list_of(found, store.FINDINGS), handed, round_no)
     fixed = [str(f.get("id")) for f in reported if f["outcome"] == fin.FIXED]
     return {"commit": found.get("commit"), "reported": len(reported), "fixed": fixed}
 
 
 def _take_fix(run: _Run, path: Path, round_no: int) -> dict[str, Any]:
     """修正の結果を台帳へ取り込む。結果ファイルは呼び手が状態ファイルへ書いてから `_consume` で移す。"""
-    return _fix_record(run.ledger, run.ref, path, run.cfg.handed, round_no)
+    return _fix_record(run.journal, run.ref, path, run.cfg.handed, round_no)
 
 
 def _consume(path: Path, round_no: int, label: str = "round") -> None:
@@ -367,9 +367,9 @@ def merge_fix(state_dir: Path, pr: int, path: Path, handed: Sequence[fin.Handed]
     if not rounds:
         rounds.append({"round": 1})
     round_no = rounds[-1].get("round") or len(rounds)
-    ledger = FindingLedger(store.list_of(data, store.FINDINGS))
-    rounds[-1]["fix"] = _fix_record(ledger, ref, path, handed, round_no)
-    data[store.FINDINGS] = list(ledger.rows.values())
+    journal = FindingJournal(store.list_of(data, store.FINDINGS))
+    rounds[-1]["fix"] = _fix_record(journal, ref, path, handed, round_no)
+    data[store.FINDINGS] = list(journal.rows.values())
     store.write_object(ref.path, data)
     _consume(path, round_no)
     return round_no
@@ -411,7 +411,7 @@ def _push(run: _Run, round_no: int, reviewed_head: str, fix: dict[str, Any], che
     if sent.ok:
         fix["pushed"] = sent.head
         return True
-    run.ledger.reopen(store.list_of(fix, "fixed"))
+    run.journal.reopen(store.list_of(fix, "fixed"))
     tail = f"（衝突: {', '.join(sent.conflicts)}）" if sent.conflicts else ""
     _note(run, round_no, "push", f"送れない（{sent.reason}）", f"round {round_no} の修正を送れなかった: {sent.reason}{tail}")
     return False
@@ -421,12 +421,12 @@ def _push(run: _Run, round_no: int, reviewed_head: str, fix: dict[str, Any], che
 
 
 def _save(run: _Run) -> None:
-    run.data[store.FINDINGS] = list(run.ledger.rows.values())
+    run.data[store.FINDINGS] = list(run.journal.rows.values())
     store.write_object(run.ref.path, run.data)
 
 
 def _summary(run: _Run, final: str, rounds: int) -> Outcome:
-    findings = run.ledger.findings()
+    findings = run.journal.findings()
     path = run.cfg.state_dir / SUMMARY_NAME
     review = fin.Review(final, rounds, findings)
     store.write_object(path, fin.summary_of(review, run.ref.origin_pr))
@@ -471,12 +471,12 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
     raised, answered = _review(run, round_no, _review_prompt(run, round_no, prep.scope, prep.diff), launch)
     if answered == 0:
         return fin.ERROR
-    run.history.append(run.ledger.enter(round_no, raised))
+    run.history.append(run.journal.enter(round_no, raised))
     if prep.scope.kind == scope_decide.FULL:
         run.data[store.REVIEWED] = sorted(prep.reviewed | set(prep.sections))
     record: dict[str, Any] = {"round": round_no, "head": prep.head, "scope": prep.scope.kind}
     rounds.append(record)
-    open_, handed = run.ledger.pending(run.cfg.handed)
+    open_, handed = run.journal.pending(run.cfg.handed)
     record["verdict"] = _verdict(run, open_, handed)
     if record["verdict"] != CHANGES_REQUIRED:
         return record["verdict"]

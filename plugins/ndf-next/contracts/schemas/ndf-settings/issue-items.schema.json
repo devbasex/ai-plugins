@@ -1,0 +1,184 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ndf-settings/issue-items.schema.json",
+  "title": "Issue の記載項目の宣言（.ndf/issue-items.json）",
+  "description": "Issue の種類ごとの記載項目（必須・該当時・不要）と水準。あれば NDF の既定の代わりに使う",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "kinds",
+    "items"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "編集のときの補完に使うスキーマの位置。読み手は参照しない"
+    },
+    "version": {
+      "type": "integer",
+      "enum": [
+        1
+      ],
+      "description": "宣言の形の版。読み手は知らない版を読まない"
+    },
+    "kinds": {
+      "type": "array",
+      "description": "Issue の種類の並び",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 1
+    },
+    "last": {
+      "type": "string",
+      "description": "書き手が書く節の最後に置く項目の id",
+      "default": "request"
+    },
+    "record_headings": {
+      "type": "array",
+      "description": "工程が足す節の見出しの語",
+      "items": {
+        "type": "string"
+      }
+    },
+    "kind_labels": {
+      "type": "object",
+      "description": "種類 → GitHub のラベルの名前",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "items": {
+      "type": "array",
+      "description": "記載項目の並び",
+      "items": {
+        "type": "object",
+        "description": "項目 1 つ",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "項目の id",
+            "minLength": 1
+          },
+          "name": {
+            "type": "string",
+            "description": "見出し",
+            "minLength": 1
+          },
+          "need": {
+            "type": "object",
+            "description": "種類 → 必須・該当時・不要。kinds の種類をすべて書く",
+            "additionalProperties": {
+              "type": "string",
+              "enum": [
+                "必須",
+                "該当時",
+                "不要"
+              ]
+            }
+          },
+          "level": {
+            "type": "string",
+            "description": "水準（空でない文）",
+            "pattern": "\\S"
+          },
+          "when": {
+            "type": "object",
+            "description": "該当する条件。need に該当時があれば text は必須",
+            "properties": {
+              "text": {
+                "type": "string",
+                "description": "条件の文"
+              },
+              "key": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "機械で判定する鍵。null は機械で判定しない",
+                "enum": [
+                  "ai",
+                  "origin",
+                  null
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "name",
+          "need",
+          "level"
+        ],
+        "if": {
+          "description": "need のどれかの値が該当時",
+          "required": [
+            "need"
+          ],
+          "properties": {
+            "need": {
+              "not": {
+                "additionalProperties": {
+                  "not": {
+                    "const": "該当時"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "then": {
+          "description": "該当時の項目は when.text（空でない文）を持つ",
+          "required": [
+            "when"
+          ],
+          "properties": {
+            "when": {
+              "required": [
+                "text"
+              ],
+              "properties": {
+                "text": {
+                  "pattern": "\\S"
+                }
+              }
+            }
+          }
+        }
+      },
+      "minItems": 1
+    }
+  },
+  "x-ndf-location": "worktree",
+  "x-ndf-read-by": [
+    {
+      "by": "工程: 起票",
+      "when": "Issue の本文の項目を決めるとき"
+    }
+  ],
+  "examples": [
+    {
+      "version": 1,
+      "kinds": [
+        "不具合",
+        "機能"
+      ],
+      "items": [
+        {
+          "id": "purpose",
+          "name": "目的",
+          "need": {
+            "不具合": "必須",
+            "機能": "必須"
+          },
+          "level": "何を良くするかを 1〜2 文で書く"
+        }
+      ]
+    }
+  ]
+}

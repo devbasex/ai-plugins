@@ -12,7 +12,7 @@
 | `issue-excluded` | `lap`・`issue`・`reason` | 周の途中で課題を外した（#2788）。外すとモードを決め直す |
 | `issues-created` | `lap`・`issues` | 周の中で起票した課題（#2132） |
 | `gate-shown` | `lap`・`pr`・`head` | 設計承認ゲートを出した時点の PR の先端 |
-| `gate-answered` | `lap`・`pr`・`answer`・`head`・`note` | ゲートの答え。`revise` は差し戻しとして残る（#2400） |
+| `gate-answered` | `lap`・`pr`・`answer`・`head`・`note` | ゲートの答え。`request_changes` は差し戻しとして残る（#2400） |
 | `version-shipped` | `lap`・`version` | その周で版をリリースした |
 | `lap-closed` | `lap`・`outcome`・`reason` | 周を締めた |
 | `stop-requested` | `by`・`reason` | 止める要求。鍵は返さない（#2820） |
@@ -140,7 +140,7 @@ class LoopState:
         return self.holder is not None and self.holder != session and self.lease_until > now
 
     def rejections(self) -> list[dict[str, Any]]:
-        """設計承認ゲートの差し戻し（答え `revise` と `rejected`）の一覧。振り返りが数える（#2400）。"""
+        """設計承認ゲートの差し戻し（答え `request_changes` と `rejected`）の一覧。振り返りが数える（#2400）。"""
         return [
             {"lap": lap.number, "pr": a.pr, "answer": a.answer, "note": a.note, "at": a.at}
             for lap in self.laps

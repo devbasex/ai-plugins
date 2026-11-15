@@ -14,7 +14,7 @@ def _skills(tmp_path, name="fix", text="# fix の手順"):
     return tmp_path / "skills"
 
 
-def test_rules_carry_the_draft_place_of_the_state_dir(tmp_path):
+def test_rules_carry_the_draft_location_of_the_state_dir(tmp_path):
     text = worker.system_prompt("impl", tmp_path / "state", tmp_path / "skills")
     assert str(tmp_path / "state" / "work" / "pr_body.md") in text
     assert worker.pr_body_draft(tmp_path / "state") == tmp_path / "state" / "work" / "pr_body.md"

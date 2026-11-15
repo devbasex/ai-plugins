@@ -6,7 +6,7 @@ from ndf import contracts
 from ndf.contracts import limits
 
 
-def test_policy_and_values_from_plugin_declaration():
+def test_policy_and_values_from_plugin_ndf_settings():
     p = limits.policy("cause.infra-wait")
     assert (p.attempts, p.interval, p.factor, p.max_interval) == (3, 600, 2, 3600)
     assert limits.value("output.tail-lines", "count") == 200
@@ -60,7 +60,7 @@ def test_duplicate_policy_names_stop(contracts_copy):
         limits.table()
 
 
-def test_missing_declaration_stops(contracts_copy):
+def test_missing_ndf_settings_stops(contracts_copy):
     (contracts_copy.root / "limits.json").unlink()
     with pytest.raises(limits.LimitsError):
         limits.table()

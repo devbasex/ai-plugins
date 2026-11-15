@@ -47,7 +47,7 @@ TOOL = cli.tool_of(__name__)
 # 持ち主の鍵の期限の契約の名前
 LEASE_POLICY = "loop.lease"
 # 設計承認ゲートで受ける答え（事実の表 answers の行）
-GATE_ANSWERS = (APPROVED, run.REVISE, REJECTED)
+GATE_ANSWERS = (APPROVED, run.REQUEST_CHANGES, REJECTED)
 
 
 def _command(step: Optional[ctl.Step], session: Optional[str], cwd: Path) -> Optional[dict[str, Any]]:

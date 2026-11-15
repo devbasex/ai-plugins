@@ -84,7 +84,7 @@ def _refusal(v: run.View, a: Answer, observe: Observe) -> Question:
     """答えを受けられるかを確かめ、待っている問いを返す。断るなら `model.Refused`（行は待ちのまま残る）。"""
     q = waiting(v)
     if q is None:
-        raise model.Refused(f"進行表 {v.table_id} は答えを待っていない（実行の前か、済んだ答え）")
+        raise model.Refused(f"進行表 {v.machine_id} は答えを待っていない（実行の前か、済んだ答え）")
     if q.id != a.gate_id:
         raise model.Refused(f"問い {a.gate_id} は今の問い {q.id}（工程 {q.stage}）と違う")
     if a.value not in q.choices:
@@ -122,30 +122,30 @@ def _dropped(v: run.View, q: Question, drop: Sequence[int]) -> list[model.EventD
     return [model.EventDraft(stages.OUTPUTS_EVENT, run.CONDUCTOR, q.stage, payload=payload, rev=v.rev)]
 
 
-def _carry(conn: Any, table_id: str, issues: Sequence[int], reason: str) -> Optional[str]:
+def _carry(conn: Any, machine_id: str, issues: Sequence[int], reason: str) -> Optional[str]:
     """外した課題を、スプリントを持つレーンの順番表の次の行へ入れる。レーンの外のスプリントなら断る。"""
     if not issues:
         return None
-    found = lane.sprint_row(conn, table_id)
+    found = lane.sprint_row(conn, machine_id)
     if found is None:
-        raise model.Refused(f"進行表 {table_id} を持つレーンの行が無く、外した課題を入れる先が無い")
+        raise model.Refused(f"進行表 {machine_id} を持つレーンの行が無く、外した課題を入れる先が無い")
     plan_id, name, row = found
     return lane.carry_issues(conn, plan_id, name, row.key, list(issues), reason)
 
 
-def answer(st: store.Store, table_id: str, a: Answer, observe: Observe = no_observe) -> dict[str, Any]:
+def answer(st: store.Store, machine_id: str, a: Answer, observe: Observe = no_observe) -> dict[str, Any]:
     """答えを事象 `answered` に残す（外した課題の行と、今のスプリントの課題から外す事象も同じトランザクション）。
     同じ冪等の鍵は書かずに同じ結果を返す。"""
     if not ACTORS.match(a.by):
         raise model.Refused(f"答えた者 {a.by} の形が違う（human・conductor・organizer か service:<主体>）")
     text = run.notes_text(a.value, a.notes)
     with store.transaction(st) as conn:
-        v = run.view(conn, table_id)
+        v = run.view(conn, machine_id)
         held = _answered_with_key(v, a.key)
         if held is not None:
-            return _same(held, a, table_id)
+            return _same(held, a, machine_id)
         q = _refusal(v, a, observe)
-        carried = _carry(conn, table_id, a.drop, a.reason)
+        carried = _carry(conn, machine_id, a.drop, a.reason)
         rejected = _reject_release(conn, q, a)
         extra = {
             "gate_id": q.id,
@@ -159,10 +159,10 @@ def answer(st: store.Store, table_id: str, a: Answer, observe: Observe = no_obse
         }
         draft = run.answer_draft(v, q.stage, a.value, a.reason, text, extra)
         drafts = [draft, *_outputs(v, q, a), *_dropped(v, q, a.drop)]
-        seqs = store.append_events(conn, table_id, drafts, v.events[-1].seq if v.events else 0)
+        seqs = store.append_events(conn, machine_id, drafts, v.events[-1].seq if v.events else 0)
     summary = f"工程 {q.stage} へ答え {a.value} を書いた（{a.by}）。続きは ndf progress next で流す"
-    metrics = {"table_id": table_id, "seqs": seqs, "gate_id": q.id, "carried_row": carried}
-    out = result.result(TOOL, result.OK, summary, metrics=metrics, next=result.command("progress", "next", table_id))
+    metrics = {"machine_id": machine_id, "seqs": seqs, "gate_id": q.id, "carried_row": carried}
+    out = result.result(TOOL, result.OK, summary, metrics=metrics, next=result.command("progress", "next", machine_id))
     return command.with_warnings(out, after=record_answer(v, q, a, rejections_path))
 
 
@@ -188,18 +188,18 @@ def _outputs(v: run.View, q: Question, a: Answer) -> list[model.EventDraft]:
     return [model.EventDraft(stages.OUTPUTS_EVENT, run.ACTOR, q.stage, payload={"outputs": kept}, rev=v.rev)]
 
 
-def _same(held: model.Event, a: Answer, table_id: str) -> dict[str, Any]:
+def _same(held: model.Event, a: Answer, machine_id: str) -> dict[str, Any]:
     p = run.payload_of(held)
     if p.get("answer") != a.value or p.get("gate_id") != a.gate_id:
         raise model.Refused(f"冪等の鍵 {a.key} は別の答え（{p.get('answer')}・問い {p.get('gate_id')}）に使った")
     summary = f"冪等の鍵 {a.key} の答えは書いてある（事象 {held.seq}）"
-    metrics = {"table_id": table_id, "seqs": [held.seq], "gate_id": a.gate_id, "replayed": True}
-    return result.result(TOOL, result.OK, summary, metrics=metrics, next=result.command("progress", "next", table_id))
+    metrics = {"machine_id": machine_id, "seqs": [held.seq], "gate_id": a.gate_id, "replayed": True}
+    return result.result(TOOL, result.OK, summary, metrics=metrics, next=result.command("progress", "next", machine_id))
 
 
 def lane_env(env: run.Env) -> run.Env:
     """スプリントの完了と同じトランザクションで、スプリントを持つレーンの行を終える `Env`（決定 17。レーンの外なら何もしない）。"""
-    return replace(env, ended=lambda conn, table_id: lane.end_row(conn, table_id, lane.COMPLETED, run.ACTOR))
+    return replace(env, ended=lambda conn, machine_id: lane.end_row(conn, machine_id, lane.COMPLETED, run.ACTOR))
 
 
 # 承認の後に加わった範囲（見た head → 今の head）が文書だけか。分からなければ False（出し直す側に倒す）
@@ -236,19 +236,19 @@ def _docs_only_after(q: Question, seen: Target, now: Target, docs_only: DocsOnly
 
 def _accept(root: Path, q: Question, now: Target) -> None:
     """出し直さずに進めた今の head を残す（マージの側が照らす head。`approved_head`）。"""
-    path = accepted_path(root, q.table_id, q.id)
+    path = accepted_path(root, q.machine_id, q.id)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"head": now.head}) + "\n", encoding="utf-8")
 
 
-def recheck(st: store.Store, table_id: str, observe: Observe, docs_only: DocsOnly = never_docs_only) -> Optional[str]:
+def recheck(st: store.Store, machine_id: str, observe: Observe, docs_only: DocsOnly = never_docs_only) -> Optional[str]:
     """答えを読む前に、答えた者が見た対象と今の対象を比べる。違えば待ちへ戻し（問いは新しい id）、理由を返す（3364-2）。
 
     `ndf answer` が書いた答え（問いの id と見た対象を持つ）だけを比べる。どの副命令でも、答えが読まれる前に打つ。待ちへ戻すのは承認ゲートのステップの
     待ちの記録で、答えはその後の答えだけが読まれる（`run.StepProgress`）。答えが課題を外していれば、同じトランザクションで
     文脈の `issues` を答えの前へ戻し、外した課題を入れたレーンの行を取り消す（答え直しで同じ課題を外せる）。
     """
-    v = run.read(st, table_id)
+    v = run.read(st, machine_id)
     m = run.decide(v)
     if m.action != run.Action.CONSUME or m.event is None or m.stage is None or m.step is None or m.progress is None:
         return None
@@ -279,9 +279,9 @@ def recheck(st: store.Store, table_id: str, observe: Observe, docs_only: DocsOnl
 
     def after(conn: Any) -> None:
         if undo:
-            _uncarry(conn, table_id, p.get("carried_row"), why)
+            _uncarry(conn, machine_id, p.get("carried_row"), why)
 
-    run.append(st, table_id, build, after)
+    run.append(st, machine_id, build, after)
     return why
 
 
@@ -297,11 +297,11 @@ def _undropped(v: run.View, stage: str, answered: model.Event) -> list[model.Eve
     return [model.EventDraft(stages.OUTPUTS_EVENT, run.CONDUCTOR, stage, payload=payload, rev=v.rev)]
 
 
-def _uncarry(conn: Any, table_id: str, carried: Optional[str], reason: str) -> None:
+def _uncarry(conn: Any, machine_id: str, carried: Optional[str], reason: str) -> None:
     """待ちへ戻した答えが外した課題を入れたレーンの行を取り消す（`_carry` の逆）。"""
     if not carried:
         return
-    found = lane.sprint_row(conn, table_id)
+    found = lane.sprint_row(conn, machine_id)
     if found is None:
         return
     plan_id, name, _row = found

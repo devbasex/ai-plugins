@@ -3,7 +3,7 @@
 外のオーガナイザー（サービス Factory のランナーなど）の下で動くレーンは、計画の進行表の代わりに、環境変数
 `NDF_ORGANIZER_DIR` の置き場のファイルでオーガナイザーとやり取りする。置き場・パス・項目は表が持ち、ここは写さない:
 
-- 置き場は `places` の `organizer`（環境変数の名前）、やり取りするファイルはエントリポイントの表 `entrypoints` の
+- 置き場は `locations` の `organizer`（環境変数の名前）、やり取りするファイルはエントリポイントの表 `entrypoints` の
   `file-organizer` の `files`、各ファイルのパスと項目は `ndf-files` の行が持つ
 - レーンが書くのはリリースの依頼（`organizer-request`）だけで、外のオーガナイザーの答え（`organizer-answer`）を読む。
   ほかのファイル（ranges・batch・presented・progress・results）はリリースの工程（M2）が読み書きする
@@ -36,8 +36,8 @@ class ExchangeError(contracts.ContractError):
 
 
 def organizer_dir(env: Mapping[str, str]) -> Optional[Path]:
-    """外のオーガナイザーの置き場。環境変数（`places` の `organizer` の `env`）が無ければ None（計画の進行表で動く）。"""
-    found = env.get(facts.value("places", "organizer", "env"))
+    """外のオーガナイザーの置き場。環境変数（`locations` の `organizer` の `env`）が無ければ None（計画の進行表で動く）。"""
+    found = env.get(facts.value("locations", "organizer", "env"))
     return Path(found) if found else None
 
 

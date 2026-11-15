@@ -25,7 +25,7 @@ OVERRIDE_PASS = "override_pass"
 OVERRIDE_UNKNOWN_PASS = "unknown_pass"
 OVERRIDES = (OVERRIDE_REJECT, OVERRIDE_PASS)
 # 照合の記録の種類（スプリント MVV の照合）
-VET_SPRINT = "sprint-mvv"
+MVV_VALIDATION_SPRINT = "sprint-mvv"
 # 改訂の設定（mvv.json の settings.revise_after）の鍵と、無いときの閾値
 REVISE_AFTER = "revise_after"
 OVERRIDE_LIMIT_KEY, UNKNOWN_LIMIT_KEY = "overrides", "unknowns"
@@ -57,7 +57,7 @@ class Signals:
     overrides: int
     unknown_pass: int
     unknown: int
-    revise: bool
+    revision_due: bool
 
 
 def _pair(row: Mapping[str, Any]) -> tuple[Any, Any, Any]:
@@ -125,8 +125,8 @@ def count_signals(rows: Iterable[Mapping[str, Any]], decl: Mapping[str, Any], re
     limits = _settings(decl)
     overrides = len(pairs[OVERRIDE_REJECT]) + len(pairs[OVERRIDE_PASS])
     unknown = len(pairs[UNKNOWN])
-    revise = overrides >= limits[OVERRIDE_LIMIT_KEY] or unknown >= limits[UNKNOWN_LIMIT_KEY]
-    return Signals(version, overrides, len(pairs[OVERRIDE_UNKNOWN_PASS]), unknown, revise)
+    revision_due = overrides >= limits[OVERRIDE_LIMIT_KEY] or unknown >= limits[UNKNOWN_LIMIT_KEY]
+    return Signals(version, overrides, len(pairs[OVERRIDE_UNKNOWN_PASS]), unknown, revision_due)
 
 
 def signals_ref(base_branch: str, remote: str) -> str:
@@ -134,7 +134,7 @@ def signals_ref(base_branch: str, remote: str) -> str:
     return f"{remote}/{base_branch}"
 
 
-def vet_key(inputs: Mapping[str, str]) -> str:
+def mvv_validation_key(inputs: Mapping[str, str]) -> str:
     """照合の入力の全体を見分ける値（sha256）。どれか 1 字でも変われば別の値になる。"""
     blob = json.dumps(dict(sorted(inputs.items())), ensure_ascii=False, sort_keys=True)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
@@ -145,21 +145,21 @@ def reusable(rows: Iterable[Mapping[str, Any]], key: str) -> Optional[Mapping[st
 
     `repo` は見ない（メインディレクトリと worktree のどちらから打っても同じ）。壊れた行（辞書でない）は呼び手が除く。
     """
-    last_vet: Optional[Mapping[str, Any]] = None
+    last_mvv_validation: Optional[Mapping[str, Any]] = None
     for r in rows:
-        if r.get("kind") == VET_SPRINT and r.get("key") == key:
-            last_vet = r
-    if last_vet is None or last_vet.get("verdict") != FOLLOW:
+        if r.get("kind") == MVV_VALIDATION_SPRINT and r.get("key") == key:
+            last_mvv_validation = r
+    if last_mvv_validation is None or last_mvv_validation.get("verdict") != FOLLOW:
         return None
-    return last_vet
+    return last_mvv_validation
 
 
 def reuse_row(origin: Mapping[str, Any], at: str, repo: str) -> dict[str, Any]:
     """再利用したときに足す行。元の判定の時刻を持ち、費用と秒の実測値を持たない。"""
     first = origin["reused_from"] if "reused_from" in origin else origin.get("at")
-    return {"at": at, "kind": VET_SPRINT, "key": origin["key"], "verdict": FOLLOW, "repo": repo, "reused_from": first}
+    return {"at": at, "kind": MVV_VALIDATION_SPRINT, "key": origin["key"], "verdict": FOLLOW, "repo": repo, "reused_from": first}
 
 
 def judged_row(key: str, verdict: str, at: str, repo: str, cost: Mapping[str, Any]) -> dict[str, Any]:
     """LLM が判定したときに足す行（照合の入力を見分ける値を持ち、次の照合が再利用できる）。"""
-    return {"at": at, "kind": VET_SPRINT, "key": key, "verdict": verdict, "repo": repo, **cost}
+    return {"at": at, "kind": MVV_VALIDATION_SPRINT, "key": key, "verdict": verdict, "repo": repo, **cost}

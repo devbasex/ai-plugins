@@ -27,7 +27,7 @@ from typing import Any, Iterable, Mapping, Optional, Protocol
 
 from ndf.adapters.git import ORIGIN, Git
 from ndf.adapters.github import Pull
-from ndf.domains.worktree import declaration, mainlock, merged_decide, outcomes, repo, testenv, testenv_sweep, trash
+from ndf.domains.worktree import ndf_settings, mainlock, merged_decide, outcomes, repo, testenv, testenv_sweep, trash
 
 # 未コミットの変更を理由に並べるパスの上限
 LISTED = 5
@@ -163,16 +163,16 @@ def sync_main(main: Git, base: Optional[str], rec: Record) -> None:
 
 
 def read_flow_record(path: Optional[Path]) -> Optional[dict[str, Any]]:
-    """開始時の記録（`branch_flow` の写しに `production_branch` を足した JSON のオブジェクト）。読めなければ `DeclarationError`。"""
+    """開始時の記録（`branch_flow` の写しに `production_branch` を足した JSON のオブジェクト）。読めなければ `NdfSettingsError`。"""
     if path is None:
         return None
-    return declaration.read_object(path)
+    return ndf_settings.read_object(path)
 
 
 def after_merge(main_dir: Path, numbers: list[int], hub: PullsReader, flow_record: Optional[Mapping[str, Any]] = None) -> Record:
     """マージの後の後片付けを行い、記録を返す。"""
     main = Git(main_dir)
-    decl = declaration.load(main_dir)
+    decl = ndf_settings.load(main_dir)
     flow = flow_record if flow_record is not None else repo.declared_flow(decl)
     pulls = hub.pulls(numbers)
     rec = Record()

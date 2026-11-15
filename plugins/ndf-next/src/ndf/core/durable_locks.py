@@ -51,7 +51,7 @@ def _lazy(name: str) -> ModuleType:
 if TYPE_CHECKING:
     import sqlalchemy as sa
 else:
-    # 殻のモジュール（durable・durable_ledger）もこれを使う
+    # 殻のモジュール（durable・durable_runs）もこれを使う
     sa = _lazy("sqlalchemy")
 
 # 置き場のロックと、共有の目印の検査・走査のロック。どちらも state/ の親に置き、退避で動かない（I11）

@@ -62,7 +62,7 @@ def test_root_run_prunes_dirs_older_than_keep_days():
     assert (repo / "2026-10-15").is_dir() and (repo / "notes").is_dir()
 
 
-def test_unwritable_place_and_unknown_sink_are_refused(tmp_path, monkeypatch, capsys):
+def test_unwritable_location_and_unknown_sink_are_refused(tmp_path, monkeypatch, capsys):
     blocker = tmp_path / "file"
     blocker.write_text("")
     monkeypatch.setenv("XDG_STATE_HOME", str(blocker))

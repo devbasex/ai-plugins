@@ -11,7 +11,7 @@ hook の子として動いたなど）`PluginIdentity.foreign_root` に残し、
 
 状態の置き場の用意（`prepare_state_dir`）:
 
-- 旧い NDF の状態の置き場の全一覧は `OLD_STATE_PLACES` の表で、行ごとに退避するか・その理由を持つ。退避するのは
+- 旧い NDF の状態の置き場の全一覧は `OLD_STATE_LOCATIONS` の表で、行ごとに退避するか・その理由を持つ。退避するのは
   新しい NDF が同じパスへ書く置き場だけで、どれも同じ規則で退避する。規則は「形の版のファイル `format.json` が
   無く、ほかのファイルがある置き場は、名前に `.v10-<日付>` を足して名前を変える」で、消さない（決定 79・判断 (b)）。
   チェックアウトの置き場（`<git の共通ディレクトリ>/<名前>/state`）は `core/durable.py` の `prepare_store` が
@@ -55,7 +55,7 @@ WORKER_KIND_ENV = "NDF_WORKER_KIND"
 # プラグイン名から求めない固定の語の表（#3347 の決定 101）。I1 はこの表の定義の行だけを通し、コードはここから引く
 FIXED_WORDS = {
     # 利用先のリポジトリの宣言の置き場（`.ndf/project.json` など）
-    "declaration_dir": ".ndf",
+    "ndf_settings_dir": ".ndf",
     # エントリポイントのファイル名（`bin/ndf`）と、結果 JSON の next・routes のコマンドの先頭
     "entrypoint": "ndf",
     # 工程の定義の文書の名前空間（`metadata.ndf`・`document.namespace`）
@@ -210,7 +210,7 @@ class OldPlace:
 
 # 旧い NDF の状態の置き場の全一覧（#3341 の 3341-3）。正本はこの表だけで、文書へ写さない。
 # 規則は「新しい NDF が同じパスへ書く旧い置き場だけを退避する」。退避は `prepare_state_dir` が上から順に行う
-OLD_STATE_PLACES: tuple[OldPlace, ...] = (
+OLD_STATE_LOCATIONS: tuple[OldPlace, ...] = (
     OldPlace(
         key="state-home",
         where="<NDF_STATE_HOME か XDG_STATE_HOME か ~/.local/state>/<名前>",
@@ -263,23 +263,23 @@ OLD_STATE_PLACES: tuple[OldPlace, ...] = (
 )
 
 
-def old_state_places(ident: PluginIdentity) -> list[Path]:
-    """`OLD_STATE_PLACES` のうち、このモジュールで退避する置き場のパス（表の順）。"""
-    return _places(ident, Handling.RETIRE_HERE)
+def old_state_locations(ident: PluginIdentity) -> list[Path]:
+    """`OLD_STATE_LOCATIONS` のうち、このモジュールで退避する置き場のパス（表の順）。"""
+    return _locations(ident, Handling.RETIRE_HERE)
 
 
-def kept_places(ident: PluginIdentity) -> list[Path]:
-    """`OLD_STATE_PLACES` のうち、退避しない置き場のパス（表の順）。"""
-    return _places(ident, Handling.KEEP)
+def kept_locations(ident: PluginIdentity) -> list[Path]:
+    """`OLD_STATE_LOCATIONS` のうち、退避しない置き場のパス（表の順）。"""
+    return _locations(ident, Handling.KEEP)
 
 
-def _places(ident: PluginIdentity, handling: Handling) -> list[Path]:
-    return [place.path(ident) for place in OLD_STATE_PLACES if place.handling is handling and place.path is not None]
+def _locations(ident: PluginIdentity, handling: Handling) -> list[Path]:
+    return [location.path(ident) for location in OLD_STATE_LOCATIONS if location.handling is handling and location.path is not None]
 
 
-def _retire_candidates(place: Path, now: datetime) -> Iterator[Path]:
+def _retire_candidates(location: Path, now: datetime) -> Iterator[Path]:
     """退避先の候補を順に出す。日付の名前、時刻を足した名前、その後に番号を足した名前。"""
-    base = place.with_name(place.name + RETIRED_SUFFIX + now.strftime("%Y%m%d"))
+    base = location.with_name(location.name + RETIRED_SUFFIX + now.strftime("%Y%m%d"))
     yield base
     stamped = base.with_name(base.name + now.strftime("T%H%M%S"))
     yield stamped
@@ -287,9 +287,9 @@ def _retire_candidates(place: Path, now: datetime) -> Iterator[Path]:
         yield stamped.with_name(f"{stamped.name}-{n}")
 
 
-def _retire_target(place: Path, now: datetime) -> Path:
+def _retire_target(location: Path, now: datetime) -> Path:
     """退避先のパス。候補のうち最初にまだ無い名前。消さない。"""
-    return next(candidate for candidate in _retire_candidates(place, now) if not candidate.exists())
+    return next(candidate for candidate in _retire_candidates(location, now) if not candidate.exists())
 
 
 def lock_path(ident: PluginIdentity) -> Path:
@@ -308,18 +308,18 @@ def prepare_state_dir(ident: PluginIdentity, now: Optional[datetime] = None) -> 
         return _prepare_locked(ident, now or datetime.now())
 
 
-def _is_old(place: Path) -> bool:
-    return place.is_dir() and not (place / FORMAT_FILE).exists() and any(place.iterdir())
+def _is_old(location: Path) -> bool:
+    return location.is_dir() and not (location / FORMAT_FILE).exists() and any(location.iterdir())
 
 
-def _outermost(places: list[Path]) -> list[Path]:
+def _outermost(locations: list[Path]) -> list[Path]:
     """ほかの置き場の中にある置き場と、前に同じパスがある置き場を除く（外側を動かせば中も動く）。順は保つ。"""
-    resolved = [p.resolve() for p in places]
-    return [p for i, (p, r) in enumerate(zip(places, resolved)) if r not in resolved[:i] and not any(o in r.parents for o in resolved)]
+    resolved = [p.resolve() for p in locations]
+    return [p for i, (p, r) in enumerate(zip(locations, resolved)) if r not in resolved[:i] and not any(o in r.parents for o in resolved)]
 
 
 def _prepare_locked(ident: PluginIdentity, now: datetime) -> StateReady:
-    old = _outermost([p for p in old_state_places(ident) if _is_old(p)])
+    old = _outermost([p for p in old_state_locations(ident) if _is_old(p)])
     _refuse_unsafe_retire(ident, old)
     retired = _retire_all(old, now)
     try:
@@ -357,7 +357,7 @@ def _holding_state_dir(ident: PluginIdentity, old: list[Path]) -> list[tuple[Pat
 def _holding_kept(ident: PluginIdentity, old: list[Path]) -> list[tuple[Path, Path]]:
     """退避する置き場と、その中にある（あれば）退避しない置き場の組。"""
     # 置き場そのものがリンクでも、置かれている場所で比べる（リンクの先へたどらない）
-    kept = [(k, k.parent.resolve() / k.name) for k in kept_places(ident) if os.path.lexists(k)]
+    kept = [(k, k.parent.resolve() / k.name) for k in kept_locations(ident) if os.path.lexists(k)]
     return [(outer, k) for outer in old for k, resolved in kept if outer.resolve() in resolved.parents]
 
 
@@ -368,10 +368,10 @@ def _retire_all(old: list[Path], now: datetime) -> tuple[Retired, ...]:
     """
     retired: list[Retired] = []
     try:
-        for place in old:
-            target = _retire_target(place, now)
-            place.rename(target)
-            retired.append(Retired(place, target))
+        for location in old:
+            target = _retire_target(location, now)
+            location.rename(target)
+            retired.append(Retired(location, target))
     except OSError as exc:
         _log_retired(retired)
         raise IdentityError(

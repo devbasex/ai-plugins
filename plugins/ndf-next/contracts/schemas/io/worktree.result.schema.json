@@ -217,7 +217,7 @@
             "type": "boolean",
             "description": "宣言を書いたか（init）"
           },
-          "declaration": {
+          "ndf_settings": {
             "type": "string",
             "description": "宣言の状態（check）"
           },

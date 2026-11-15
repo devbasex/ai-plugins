@@ -168,7 +168,7 @@ def _report(since: str) -> int:
     except ValueError as exc:
         return _stopped("invalid", str(exc))
     try:
-        directory, retired = slots.slots_place()
+        directory, retired = slots.slots_location()
     except identity.IdentityError as exc:
         # 退避の途中か後で失敗しても、それまでに退避した元と先を items に載せる
         return _stopped("config_broken", str(exc), items=exc.items())

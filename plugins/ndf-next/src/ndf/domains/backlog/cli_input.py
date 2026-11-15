@@ -37,9 +37,9 @@ def read_json(path: str) -> Any:
         raise Stop("invalid", f"{path} を JSON として読めない: {exc}") from exc
 
 
-def declaration() -> dict[str, Any]:
+def ndf_settings() -> dict[str, Any]:
     """宣言（.ndf/backlog.json）。"""
-    return depth.declaration(depth.declaration_path(Path.cwd()))
+    return depth.ndf_settings(depth.ndf_settings_path(Path.cwd()))
 
 
 def given_rows(path: Optional[str]) -> dict[int, Any]:
@@ -73,7 +73,7 @@ def _given_number(key: str, given: dict[int, Any]) -> bool:
 
 def config(a: argparse.Namespace) -> model.Config:
     try:
-        decl = declaration()
+        decl = ndf_settings()
         return model.config_from(decl, a.capacity)
     except (depth.DepthError, model.ConfigError) as exc:
         raise Stop("invalid", str(exc)) from exc

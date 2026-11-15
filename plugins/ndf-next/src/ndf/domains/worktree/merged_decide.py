@@ -19,12 +19,12 @@ SPRINT_PREFIX = "sprint/"
 FLOWS = "branch-flows"
 
 
-def _flow_row(promotion: Optional[str]) -> Optional[dict[str, Any]]:
-    """取り込み方の行。`promotion` が無ければ既定の行、表に無ければ `None`。"""
-    if promotion is None:
+def _flow_row(release_strategy: Optional[str]) -> Optional[dict[str, Any]]:
+    """取り込み方の行。`release_strategy` が無ければ既定の行、表に無ければ `None`。"""
+    if release_strategy is None:
         rows = facts.rows(FLOWS, default=True)
     else:
-        rows = facts.rows(FLOWS, promotion=promotion)
+        rows = facts.rows(FLOWS, release_strategy=release_strategy)
     return rows[0] if rows else None
 
 
@@ -39,7 +39,7 @@ def long_lived_keep(branch: Optional[str], base: Optional[str], production: Opti
 def sprint_keep(branch: Optional[str], flow: Optional[Mapping[str, Any]], contained: Optional[bool], remote: str) -> Optional[str]:
     """スプリントブランチを残す理由。消してよければ `None`。
 
-    `flow` は開始時の記録か今の宣言の `branch_flow`（`promotion` と `production_branch` を読む）。`contained` は
+    `flow` は開始時の記録か今の宣言の `branch_flow`（`release_strategy` と `production_branch` を読む）。`contained` は
     ブランチが `<remote>/<本番チャネル>` に含まれるか（確かめられなければ `None`）。`remote` はリモートの名前（呼ぶ側が
     git の接続から渡す。判断のモジュールは接続を読まない）。
     """
@@ -47,10 +47,10 @@ def sprint_keep(branch: Optional[str], flow: Optional[Mapping[str, Any]], contai
         return None
     if flow is None:
         flow = {}
-    promotion = flow.get("promotion")
-    row = _flow_row(promotion if isinstance(promotion, str) else None)
+    release_strategy = flow.get("release_strategy")
+    row = _flow_row(release_strategy if isinstance(release_strategy, str) else None)
     if row is None:
-        return f"取り込み方 {promotion!r} が表 {FLOWS} に無いため残す"
+        return f"取り込み方 {release_strategy!r} が表 {FLOWS} に無いため残す"
     if not row["keeps_sprint"] or not flow.get("production_branch"):
         return None
     production = f"{remote}/{flow['production_branch']}"
@@ -58,7 +58,7 @@ def sprint_keep(branch: Optional[str], flow: Optional[Mapping[str, Any]], contai
         return f"{production} に含まれるかを確かめられないため残す"
     if contained:
         return None
-    return f"取り込み方 {row['promotion']} では {production} に含まれるまでスプリントブランチを残す"
+    return f"取り込み方 {row['release_strategy']} では {production} に含まれるまでスプリントブランチを残す"
 
 
 def pull_skip(current: Optional[str], base: Optional[str]) -> Optional[str]:

@@ -15,7 +15,7 @@ EP = "entrypoints"
 CASES = "entrypoint-cases"
 FILES = "ndf-files"
 ENV = "env"
-PLACES = "places"
+LOCATIONS = "locations"
 ARG_KINDS = {"skill", "block", "report", "command"}
 
 
@@ -56,7 +56,7 @@ def test_every_entrypoint_has_an_accepted_case_and_new_loop_resume_are_shown():
     assert {"new", "loop", "resume"} <= set(facts.ids(CASES, valid=True))
 
 
-def test_entrypoints_refer_to_declared_env_files_and_places():
+def test_entrypoints_refer_to_declared_env_files_and_locations():
     env = set(facts.ids(ENV))
     files = set(facts.ids(FILES))
     for r in facts.rows(EP):
@@ -66,7 +66,7 @@ def test_entrypoints_refer_to_declared_env_files_and_places():
         assert re.fullmatch(r"[A-Z][0-9]+[a-z]?\+?", r["owner_child"]), r["id"]
         assert ("args" in r) is (r["kind"] in ARG_KINDS), r["id"]
     for r in facts.rows(EP, kind="file"):
-        assert {facts.value(FILES, f, "place") for f in r["files"]} == {r["target"]}, r["id"]
+        assert {facts.value(FILES, f, "location") for f in r["files"]} == {r["target"]}, r["id"]
 
 
 def test_files_the_service_reads_have_an_entrypoint():
@@ -82,11 +82,11 @@ def test_env_the_service_sets_is_in_the_workflow_entrypoint():
     assert facts.value(ENV, "NDF_PROGRESS_DB", "secret") is True
 
 
-def test_places_given_by_env_name_a_declared_variable():
-    for r in facts.rows(PLACES, root="env"):
+def test_locations_given_by_env_name_a_declared_variable():
+    for r in facts.rows(LOCATIONS, root="env"):
         assert r["path"] == ".", r["id"]
 
 
 def test_loop_record_is_kept_in_the_main_directory():
     """開発ループの記録は、どの worktree から再開・監視しても同じメインディレクトリの位置にある。"""
-    assert facts.value(PLACES, facts.value(EP, "file-loop-record", "target"), "root") == "main"
+    assert facts.value(LOCATIONS, facts.value(EP, "file-loop-record", "target"), "root") == "main"

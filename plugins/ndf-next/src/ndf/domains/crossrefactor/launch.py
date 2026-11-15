@@ -51,8 +51,8 @@ class Dirs:
     logs: Path
 
 
-def place_of(req: Request, dirs: Dirs) -> launch_decide.ResultPlace:
-    return launch_decide.result_place(req.phase, req.runtime, req.stem, (dirs.read_root, dirs.work, dirs.logs))
+def location_of(req: Request, dirs: Dirs) -> launch_decide.ResultPlace:
+    return launch_decide.result_location(req.phase, req.runtime, req.stem, (dirs.read_root, dirs.work, dirs.logs))
 
 
 def phase_limit(phase: str) -> float:
@@ -73,9 +73,9 @@ def _read_only(req: Request, workdir: Path, paths_stem: Path) -> agents.Launch:
     return participants.review_launch(req.runtime, workdir, req.prompt, paths_stem, _limit(req))
 
 
-def _coding(req: Request, workdir: Path, paths_stem: Path, place: launch_decide.ResultPlace) -> agents.Launch:
+def _coding(req: Request, workdir: Path, paths_stem: Path, location: launch_decide.ResultPlace) -> agents.Launch:
     call = claude.ClaudeCall(system=f"{launch_decide.SKILL} の {req.phase} の担当", permission=claude.Permission.TOOLS, tools=CODE_TOOLS)
-    submit, progress = Path(place.submit), Path(place.progress)
+    submit, progress = Path(location.submit), Path(location.progress)
     prompt = (
         f"{req.prompt}\n\n作業の途中は、ファイルを編集するたび・テストを打つたびに、何をしたかを 1 行で "
         f"{progress.relative_to(workdir)} へ追記する（追記が止まると無進捗として止められる）。\n"
@@ -121,7 +121,7 @@ def _collect_file(submit: Path, collect: Path) -> Optional[dict[str, Any]]:
 
 def run(req: Request, dirs: Dirs, launcher: Launcher = agents.run_agent) -> tuple[Optional[dict[str, Any]], agents.AgentStatus]:
     """担当を起動して結果を回収する。返すのは (結果。出さなければ None, 監視の結果)。"""
-    where = place_of(req, dirs)
+    where = location_of(req, dirs)
     stem = dirs.logs / f"{req.runtime}-{req.phase}-{req.stem}"
     read_only = req.phase in launch_decide.read_only_phases()
     if read_only:

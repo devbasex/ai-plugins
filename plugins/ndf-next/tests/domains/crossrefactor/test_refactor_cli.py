@@ -76,7 +76,7 @@ def test_collected_stops_when_an_added_test_is_not_collected(gitwork, capsys):
     assert got["items"][0]["uncollected"] == ["tests/foo_helpers.py"]
 
 
-def test_collected_without_a_declaration_is_undecided(gitwork, capsys):
+def test_collected_without_a_ndf_settings_is_undecided(gitwork, capsys):
     gitwork.make(FILES)
     code, got = run(capsys, "collected", "--paths", "tests/foo_helpers.py", "--work", str(gitwork.work))
     assert code == 0 and got["items"][0]["undecided"] == ["tests/foo_helpers.py"]

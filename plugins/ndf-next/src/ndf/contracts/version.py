@@ -15,7 +15,7 @@ from typing import Any
 from ndf import contracts
 from ndf.contracts import causes, facts
 
-DECLARATION = "version.json"
+NDF_SETTINGS = "version.json"
 SCHEMA = contracts.schema_path("version")
 # 指紋に入れる契約のスキーマ（保存されるデータの形）
 SCHEMAS = ("result", "route-chosen")
@@ -28,15 +28,15 @@ class VersionError(contracts.ContractError):
 
 
 @contracts.cached_reader
-def declaration() -> dict[str, Any]:
-    raw = contracts.load_as(DECLARATION, VersionError)
-    contracts.require_schema(raw, SCHEMA, VersionError, f"契約の版 {DECLARATION}")
+def ndf_settings() -> dict[str, Any]:
+    raw = contracts.load_as(NDF_SETTINGS, VersionError)
+    contracts.require_schema(raw, SCHEMA, VersionError, f"契約の版 {NDF_SETTINGS}")
     return raw
 
 
 def current() -> int:
     """今の契約の版（履歴の末尾の版）。"""
-    return int(declaration()["history"][-1]["version"])
+    return int(ndf_settings()["history"][-1]["version"])
 
 
 def fingerprint() -> str:
@@ -52,7 +52,7 @@ def fingerprint() -> str:
 
 def errors() -> list[str]:
     """版の履歴の誤り（版が 1 から 1 つずつ上がらない・指紋の重なり・末尾の指紋が今の契約と合わない）。"""
-    history = declaration()["history"]
+    history = ndf_settings()["history"]
     errs: list[str] = []
     versions = [h["version"] for h in history]
     if versions != list(range(1, len(history) + 1)):
@@ -64,6 +64,6 @@ def errors() -> list[str]:
     if history[-1]["sha256"] != now:
         errs.append(
             f"契約（{', '.join(SCHEMAS)} のスキーマ・止まった理由の種類・{', '.join(VOCABULARIES)} の語彙）が版 {versions[-1]} の指紋と違う。"
-            f'版を上げて {{"version": {len(history) + 1}, "sha256": "{now}"}} を {DECLARATION} の history の末尾へ足す'
+            f'版を上げて {{"version": {len(history) + 1}, "sha256": "{now}"}} を {NDF_SETTINGS} の history の末尾へ足す'
         )
     return errs

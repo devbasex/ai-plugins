@@ -203,7 +203,7 @@ def test_status_shows_liveness_and_warns_only_about_stalls(opened):
         view, _ = lane.read_plan(conn, pid)
         sids = {}
         for name in ("a", "b"):
-            sids[name] = store.create_table(conn, ("sprint", REPO, f"{name}-r1"), view.lanes[name].table_id, None, [])
+            sids[name] = store.create_machine(conn, ("sprint", REPO, f"{name}-r1"), view.lanes[name].machine_id, None, [])
             lane.start_row(conn, pid, name, "r1", sids[name])
     # a は承認ゲートの答えを待ち（正常）、b は conductor が落ちた
     probes = _Probes({}, {sids["a"]: _gate(), sids["b"]: _idle()})

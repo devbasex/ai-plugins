@@ -52,7 +52,7 @@ def new_table(capsys):
         code = command.main(["new", "s1", "--mode", "standard", "--issues", str(ISSUE), *extra])
         out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
         assert code == 0, out
-        return out["metrics"]["table_id"]
+        return out["metrics"]["machine_id"]
 
     return make
 
@@ -87,7 +87,7 @@ def lane_sprint(st, new_table):
         with store.transaction(st) as conn:
             pid = plan.create_plan(conn, REPO, _doc(_decl("a", [[3092], [2]])), True)
             view, _ = lane.read_plan(conn, pid)
-        tid = new_table("--parent", view.lanes["a"].table_id, *extra)
+        tid = new_table("--parent", view.lanes["a"].machine_id, *extra)
         with store.transaction(st) as conn:
             lane.start_row(conn, pid, "a", "r1", tid)
         return pid, tid

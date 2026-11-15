@@ -33,7 +33,7 @@
           "type": "integer",
           "description": "切り離して起こした耐久ワークフローの pid（start）"
         },
-        "lane_table_id": {
+        "lane_machine_id": {
           "type": "string",
           "description": "足したレーンの進行表の ID（lane add）"
         },

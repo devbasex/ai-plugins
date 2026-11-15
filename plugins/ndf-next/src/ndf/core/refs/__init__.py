@@ -321,7 +321,7 @@ def _source(ref: Ref, ctx: Context) -> str:
     return str(_target(ref, ctx))
 
 
-def _place(out: Resolved, skipped: list[str], ref: Ref, got: Got, ctx: Context) -> None:
+def _location(out: Resolved, skipped: list[str], ref: Ref, got: Got, ctx: Context) -> None:
     """解いた結果 1 つを、値・解けない参照・飛ばす参照のどれかへ振り分ける。"""
     if isinstance(got, Unresolved):
         out.unresolved[ref.name] = got
@@ -339,7 +339,7 @@ def resolve(refs: Sequence[Ref], ctx: Context, src: Sources) -> Resolved:
     out = Resolved()
     skipped: list[str] = []
     for ref in refs:
-        _place(out, skipped, ref, _one(ref, ctx, src), ctx)
+        _location(out, skipped, ref, _one(ref, ctx, src), ctx)
     return replace(out, skipped=tuple(skipped))
 
 

@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Optional
 
 from ndf.adapters.git import ORIGIN, Git
-from ndf.domains.worktree import declaration, repo
+from ndf.domains.worktree import ndf_settings, repo
 
 # 取得するリモート
 REMOTE = ORIGIN
@@ -42,13 +42,13 @@ class Created:
     warnings: list[str] = field(default_factory=list)
 
 
-def start_branch(git: Git, decl: Optional[declaration.Declaration]) -> str:
+def start_branch(git: Git, decl: Optional[ndf_settings.NdfSettings]) -> str:
     """スプリントのベースブランチ。決められなければ `CreateError`（precondition）。"""
     name: Optional[str] = None
     if decl is not None:
         try:
             channel = decl.start_channel
-        except declaration.DeclarationError as exc:
+        except ndf_settings.NdfSettingsError as exc:
             raise CreateError("precondition", str(exc)) from exc
         name = decl.production_branch if channel == "production" else decl.base_branch
     if name is None:
@@ -64,7 +64,7 @@ def _check_name(git: Git, branch: str) -> None:
         raise CreateError("invalid", f"ブランチ名として使えない: {branch}")
 
 
-def _check_place(git: Git, main_dir: Path, target: Path) -> None:
+def _check_location(git: Git, main_dir: Path, target: Path) -> None:
     rel = repo.worktrees_dir(main_dir).relative_to(main_dir).as_posix()
     ignored = git.attempt("check-ignore", "-q", f"{rel}/")
     if ignored.returncode != 0:
@@ -91,12 +91,12 @@ def create(main_dir: Path, branch: str, start: Optional[str] = None, git: Option
     g = git if git is not None else Git(main_dir)
     _check_name(g, branch)
     target = repo.worktree_path(main_dir, branch)
-    _check_place(g, main_dir, target)
+    _check_location(g, main_dir, target)
     warnings = _fetch(g)
     if start is None:
         try:
-            decl = declaration.load(main_dir)
-        except declaration.DeclarationError as exc:
+            decl = ndf_settings.load(main_dir)
+        except ndf_settings.NdfSettingsError as exc:
             raise CreateError("precondition", str(exc)) from exc
         base = start_branch(g, decl)
     else:

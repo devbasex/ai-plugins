@@ -140,36 +140,36 @@ def test_prepare_creates_state_dir_with_format_file(ident):
 
 def test_prepare_retires_old_state_and_keeps_its_contents(ident):
     ident.state_dir.mkdir(parents=True)
-    (ident.state_dir / "ledger.jsonl").write_text("old\n")
+    (ident.state_dir / "journal.jsonl").write_text("old\n")
 
     ready = identity.prepare_state_dir(ident, now=NOW)
 
     retired = ident.state_dir.with_name("p.v10-20261113")
-    assert (retired / "ledger.jsonl").read_text() == "old\n"
+    assert (retired / "journal.jsonl").read_text() == "old\n"
     assert sorted(p.name for p in ident.state_dir.iterdir()) == ["format.json"]
     # 3394-8: 退避した元と先を返す
     assert ready.retired == (identity.Retired(ident.state_dir, retired),)
     assert ready.items() == [{"retired_from": str(ident.state_dir), "retired_to": str(retired)}]
 
 
-def test_prepare_retires_every_old_place_by_the_same_rule(ident, tmp_path):
+def test_prepare_retires_every_old_location_by_the_same_rule(ident, tmp_path):
     # 3341-3: 旧い NDF の既定の状態の置き場（<設定の置き場>/<名前>/state）も同じ規則で退避し、作り直さない
     ident.state_dir.mkdir(parents=True)
     (ident.state_dir / "a").write_text("1")
     config_state = tmp_path / "config" / "p" / "state"
     config_state.mkdir(parents=True)
-    (config_state / "ledger.jsonl").write_text("2")
+    (config_state / "journal.jsonl").write_text("2")
 
     ready = identity.prepare_state_dir(ident, now=NOW)
 
     moved = config_state.with_name("state.v10-20261113")
-    assert (moved / "ledger.jsonl").read_text() == "2"
+    assert (moved / "journal.jsonl").read_text() == "2"
     assert not config_state.exists()
     assert [r.source for r in ready.retired] == [ident.state_dir, config_state]
     assert ready.retired[1].target == moved
 
 
-def test_prepare_carries_the_places_retired_before_a_rename_fails(ident, tmp_path, monkeypatch):
+def test_prepare_carries_the_locations_retired_before_a_rename_fails(ident, tmp_path, monkeypatch):
     # 後の置き場の名前を変えられなくても、先に退避した元と先を例外が持ち、ログにも残す
     ident.state_dir.mkdir(parents=True)
     (ident.state_dir / "a").write_text("1")
@@ -194,7 +194,7 @@ def test_prepare_carries_the_places_retired_before_a_rename_fails(ident, tmp_pat
     assert (moved / "a").read_text() == "1"
 
 
-def test_prepare_moves_a_place_inside_another_only_with_the_outer_one(tmp_path, monkeypatch):
+def test_prepare_moves_a_location_inside_another_only_with_the_outer_one(tmp_path, monkeypatch):
     # XDG_STATE_HOME と CLAUDE_CONFIG_DIR が同じだと config-state が state-home の中にある。外側だけの名前を変える
     monkeypatch.setattr(identity, "ROOT", make_plugin(tmp_path, "x", "p"))
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "same"))
@@ -202,24 +202,24 @@ def test_prepare_moves_a_place_inside_another_only_with_the_outer_one(tmp_path, 
     ident = identity.load()
     inner = ident.state_dir / "state"
     inner.mkdir(parents=True)
-    (inner / "ledger.jsonl").write_text("old")
+    (inner / "journal.jsonl").write_text("old")
 
     ready = identity.prepare_state_dir(ident, now=NOW)
 
     moved = ident.state_dir.with_name("p.v10-20261113")
     assert ready.retired == (identity.Retired(ident.state_dir, moved),)
-    assert (moved / "state" / "ledger.jsonl").read_text() == "old"
+    assert (moved / "state" / "journal.jsonl").read_text() == "old"
     assert sorted(p.name for p in ident.state_dir.iterdir()) == ["format.json"]
 
 
-def test_prepare_refuses_to_move_an_outer_place_holding_places_marked_not_to_retire(tmp_path, monkeypatch):
+def test_prepare_refuses_to_move_an_outer_location_holding_locations_marked_not_to_retire(tmp_path, monkeypatch):
     # XDG_STATE_HOME と CLAUDE_CONFIG_DIR が同じだと state-home が accounts・locks を含む。外側ごと動かさず止める
     monkeypatch.setattr(identity, "ROOT", make_plugin(tmp_path, "x", "p"))
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "same"))
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "same"))
     ident = identity.load()
     (ident.state_dir / "state").mkdir(parents=True)
-    (ident.state_dir / "state" / "ledger.jsonl").write_text("old")
+    (ident.state_dir / "state" / "journal.jsonl").write_text("old")
     (ident.state_dir / "locks").mkdir()
     (ident.state_dir / "locks" / "x.lock").write_text("held")
 
@@ -227,7 +227,7 @@ def test_prepare_refuses_to_move_an_outer_place_holding_places_marked_not_to_ret
         identity.prepare_state_dir(ident, now=NOW)
 
     assert (ident.state_dir / "locks" / "x.lock").read_text() == "held"
-    assert (ident.state_dir / "state" / "ledger.jsonl").read_text() == "old"
+    assert (ident.state_dir / "state" / "journal.jsonl").read_text() == "old"
     assert not (ident.state_dir / identity.FORMAT_FILE).exists()
     assert _retired_names(ident) == []
 
@@ -240,46 +240,46 @@ def test_prepare_refuses_to_move_a_config_state_holding_the_new_state_dir(tmp_pa
     ident = identity.load()
     ident.state_dir.mkdir(parents=True)
     (ident.state_dir / identity.FORMAT_FILE).write_text('{"format": 1}\n')
-    (ident.state_dir / "ledger.jsonl").write_text("new")
+    (ident.state_dir / "journal.jsonl").write_text("new")
 
     with pytest.raises(identity.IdentityError, match=re.escape(str(ident.state_dir))):
         identity.prepare_state_dir(ident, now=NOW)
 
-    assert (ident.state_dir / "ledger.jsonl").read_text() == "new"
+    assert (ident.state_dir / "journal.jsonl").read_text() == "new"
     assert sorted(p.name for p in (tmp_path / "config" / "p").iterdir()) == ["state"]
 
 
-def test_old_state_places_are_the_state_home_and_the_config_state_in_order(ident, tmp_path):
+def test_old_state_locations_are_the_state_home_and_the_config_state_in_order(ident, tmp_path):
     # 現状固定: このモジュールで退避するのは state-home と config-state の 2 つで、表の順に並ぶ
-    assert identity.old_state_places(ident) == [ident.state_dir, tmp_path / "config" / "p" / "state"]
+    assert identity.old_state_locations(ident) == [ident.state_dir, tmp_path / "config" / "p" / "state"]
 
 
-def test_every_old_place_has_a_decision_and_a_reason():
+def test_every_old_location_has_a_decision_and_a_reason():
     # 3341-3: 旧い NDF の状態の置き場の全行が、退避するか・その理由を持つ
-    keys = [place.key for place in identity.OLD_STATE_PLACES]
+    keys = [location.key for location in identity.OLD_STATE_LOCATIONS]
     assert len(keys) == len(set(keys))
     assert {"state-home", "config-state", "checkout-state", "config-accounts", "config-relay", "config-locks", "cache"} == set(keys)
-    for place in identity.OLD_STATE_PLACES:
-        assert isinstance(place.handling, identity.Handling), place.key
-        assert place.reason.strip(), place.key
+    for location in identity.OLD_STATE_LOCATIONS:
+        assert isinstance(location.handling, identity.Handling), location.key
+        assert location.reason.strip(), location.key
         # ほかのモジュールが退避する行だけがパスを持たない（退避しない行のパスは中に入っていないかの確かめだけに使う）
-        assert (place.handling is identity.Handling.RETIRE_ELSEWHERE) == (place.path is None), place.key
+        assert (location.handling is identity.Handling.RETIRE_ELSEWHERE) == (location.path is None), location.key
 
 
-def test_prepare_leaves_places_marked_not_to_retire(ident, tmp_path, monkeypatch):
+def test_prepare_leaves_locations_marked_not_to_retire(ident, tmp_path, monkeypatch):
     # 3341-3: 退避しない行（accounts・relay.py・locks・~/.cache/<名前>）は中身ごとそのまま残す
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     config = tmp_path / "config" / "p"
     kept = [config / "accounts", config / "locks", tmp_path / "home" / ".cache" / "p"]
-    for place in kept:
-        place.mkdir(parents=True)
-        (place / "x").write_text("keep")
+    for location in kept:
+        location.mkdir(parents=True)
+        (location / "x").write_text("keep")
     (config / "relay.py").write_text("relay")
 
     ready = identity.prepare_state_dir(ident, now=NOW)
 
     assert ready.retired == ()
-    assert all((place / "x").read_text() == "keep" for place in kept)
+    assert all((location / "x").read_text() == "keep" for location in kept)
     assert (config / "relay.py").read_text() == "relay"
     assert sorted(p.name for p in config.iterdir()) == ["accounts", "locks", "relay.py"]
 
@@ -289,16 +289,16 @@ def test_prepare_does_not_retire_when_the_environment_names_another_root(ident, 
     monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(make_plugin(tmp_path, "old", "p")))
     foreign = identity.load()
     foreign.state_dir.mkdir(parents=True)
-    (foreign.state_dir / "ledger.jsonl").write_text("old")
+    (foreign.state_dir / "journal.jsonl").write_text("old")
 
     with pytest.raises(identity.IdentityError, match="CLAUDE_PLUGIN_ROOT"):
         identity.prepare_state_dir(foreign, now=NOW)
 
-    assert (foreign.state_dir / "ledger.jsonl").read_text() == "old"
+    assert (foreign.state_dir / "journal.jsonl").read_text() == "old"
     assert not (foreign.state_dir / "format.json").exists()
 
 
-def test_prepare_with_another_root_in_the_environment_uses_a_ready_place(ident, tmp_path, monkeypatch):
+def test_prepare_with_another_root_in_the_environment_uses_a_ready_location(ident, tmp_path, monkeypatch):
     identity.prepare_state_dir(ident, now=NOW)
     monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(make_plugin(tmp_path, "old", "p")))
 

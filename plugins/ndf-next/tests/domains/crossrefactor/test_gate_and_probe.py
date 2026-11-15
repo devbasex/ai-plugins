@@ -72,5 +72,5 @@ def test_probe_budget_keeps_the_floor_when_the_baseline_used_almost_everything()
     assert probe_decide.probe_budget(540, 533.9, 120) == 120
 
 
-def test_probe_floor_comes_from_the_limits_declaration():
+def test_probe_floor_comes_from_the_limits_ndf_settings():
     assert probe_decide.probe_floor() == 120

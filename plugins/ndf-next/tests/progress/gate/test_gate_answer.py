@@ -34,10 +34,10 @@ def test_the_gate_result_carries_the_kind_the_pr_url_and_a_route_per_answer(st, 
     assert result.errors(out, 10) == [] and result.code_for(out) == 10
     meta = out["metrics"]["gate"]
     assert meta["kind"] == "design" and meta["pr"] == 7 and meta["pr_url"] == "https://github.com/o/r/pull/7"
-    assert set(out["routes"]) == {"approved", "rejected", "revise"}
+    assert set(out["routes"]) == {"approved", "rejected", "request_changes"}
     argv = out["routes"]["approved"]["argv"]
     assert argv[:3] == ["ndf", "answer", tid] and argv[argv.index("--gate") + 1] == q.id and "abc" in argv
-    assert "drop" in out["routes"]["approved"]["ask"] and "notes" in out["routes"]["revise"]["ask"]
+    assert "drop" in out["routes"]["approved"]["ask"] and "notes" in out["routes"]["request_changes"]["ask"]
 
 
 def test_the_answer_keeps_who_answered_the_key_and_what_was_seen_and_is_idempotent(st, new_table, flow):
@@ -99,7 +99,7 @@ def test_a_revised_stage_asks_a_new_question_and_the_rejections_are_counted(st, 
     old = _waiting(st, tid)
     notes = tmp_path / "notes.md"
     notes.write_text("節 2 の根拠が足りない")
-    _give(st, tid, old, "revise", notes=notes)
+    _give(st, tid, old, "request_changes", notes=notes)
     assert flow.turn(tid)["status"] == "gate"
     new = _waiting(st, tid)
     assert new.id != old.id
@@ -200,9 +200,9 @@ def test_the_conductor_reads_the_choice_the_notes_who_and_when(st, new_table, fl
     flow.turn(tid)
     notes = tmp_path / "notes.md"
     notes.write_text("節 2 の根拠が足りない")
-    _give(st, tid, _waiting(st, tid), "revise", notes=notes)
+    _give(st, tid, _waiting(st, tid), "request_changes", notes=notes)
     (got,) = gate.answers(run.read(st, tid))
-    assert got["answer"] == "revise" and got["notes"] == "節 2 の根拠が足りない" and got["reason"] == "人が答えた"
+    assert got["answer"] == "request_changes" and got["notes"] == "節 2 の根拠が足りない" and got["reason"] == "人が答えた"
     assert got["by"] == BY and got["at"] and got["gate"] == "design" and got["stage"] == "設計"
 
 
@@ -216,13 +216,13 @@ def _event(seq, event_kind, **payload):
 
 def test_current_rejections_count_the_unapproved_listen_answers_per_gate_in_first_seen_order():
     events = [
-        _event(1, run.ANSWERED, answer=run.REVISE, kind=invoke.LISTEN, gate="release"),
+        _event(1, run.ANSWERED, answer=run.REQUEST_CHANGES, kind=invoke.LISTEN, gate="release"),
         _event(2, run.ANSWERED, answer=run.REJECTED, kind=invoke.LISTEN),
-        _event(3, run.ANSWERED, answer=run.REVISE, kind=invoke.LISTEN, gate="release"),
+        _event(3, run.ANSWERED, answer=run.REQUEST_CHANGES, kind=invoke.LISTEN, gate="release"),
         _event(4, run.ANSWERED, answer=run.APPROVED, kind=invoke.LISTEN, gate="design"),
         _event(5, run.ANSWERED, answer=run.REJECTED, kind=invoke.LISTEN, gate=None),
         _event(6, run.ANSWERED, answer=run.REJECTED, kind=invoke.LISTEN, gate="design"),
-        _event(7, run.ANSWERED, answer=run.REVISE, kind="plan", gate="release"),  # プランの中の承認ゲートの答えは数えない
+        _event(7, run.ANSWERED, answer=run.REQUEST_CHANGES, kind="plan", gate="release"),  # プランの中の承認ゲートの答えは数えない
         _event(8, run.STARTED, answer=run.REJECTED, kind=invoke.LISTEN, gate="design"),  # 答えの事象でなければ数えない
     ]
     counted = gate.rejections(events)
@@ -246,7 +246,7 @@ def test_current_main_routes_ask_list_and_head_to_their_own_parsers(repo, st, ne
     tid = new_table()
     assert gate.main(["list", tid]) == 0
     listed = _last_json(capsys)
-    assert listed["items"] == [] and listed["metrics"] == {"table_id": tid}
+    assert listed["items"] == [] and listed["metrics"] == {"machine_id": tid}
     assert gate.main(["head", tid]) != 0
     assert _last_json(capsys)["status"] == "stopped"
     assert gate.main(["head"]) == 2

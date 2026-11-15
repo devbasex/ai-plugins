@@ -130,7 +130,7 @@
       "params": {}
     },
     {
-      "name": "relay-mark",
+      "name": "relay-marker",
       "summary": "中継の下で最後の応答が次の区間のブロックを持てば、背景の作業が残る間は差し戻し、無ければ中継の印を書く（#1877・#2438）",
       "module": "ndf.domains.hooks.guards.relay_mark",
       "events": ["Stop"],

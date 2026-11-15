@@ -17,7 +17,7 @@ from typing import NamedTuple
 from ndf.adapters import git as git_mod
 from ndf.adapters.github import GitHub, GitHubError
 from ndf.domains.release import changelog_decide, version_decide
-from ndf.domains.release import declaration as decl_mod
+from ndf.domains.release import ndf_settings as decl_mod
 from ndf.domains.release import plugins as plugins_mod
 
 # GET で対象が無いときの状態

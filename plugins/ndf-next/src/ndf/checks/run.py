@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from ndf import cli, identity
-from ndf.checks import child_deps, facts, invariants, lint, marks, smells, spec_docs, structure, words
+from ndf.checks import child_deps, facts, invariants, lint, suppressions, smells, spec_docs, structure, words
 from ndf.checks.model import SCRIPT_PREFIXES, CheckError, Finding, Scope, Source, load_rules, read_json
 from ndf.contracts import result
 
@@ -73,12 +73,12 @@ def smell_findings(scope: Scope, rules: dict[str, Any]) -> list[Finding]:
     for src in sources:
         own, caught = smells.scan(src.tree, rules["smells"])
         hits = sorted({*own, *by_ruff[src.path.resolve()]})
-        applied = marks.apply(hits, marks.read_marks(src.text, codes), caught, rules)
+        applied = suppressions.apply(hits, suppressions.read_suppressions(src.text, codes), caught, rules)
         found += [
             Finding(code, src.rel, line, rules["smells"][code]["summary"] + (f"。印を受けない: {why}" if why else ""))
             for line, code, why in applied.counted
         ]
-        found += [Finding("mark-unused", src.rel, m.line, f"{code} の兆候が無い行の印") for m, code in applied.unused]
+        found += [Finding("suppression-unused", src.rel, m.line, f"{code} の兆候が無い行の印") for m, code in applied.unused]
     return found
 
 

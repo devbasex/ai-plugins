@@ -99,7 +99,7 @@ def test_issue_2714_answer_reads_the_head_once(loop: Callable[..., dict], tmp_pa
     loop("start", "demo", "--session", "s1")
     loop("select", "demo", "--session", "s1", "--candidates", _candidates(tmp_path, [{"issue": 1}]))
     loop("gate", "demo", "--pr", "9")
-    ok = loop("answer", "demo", "--pr", "9", "--answer", "revise", "--note", "直す")
+    ok = loop("answer", "demo", "--pr", "9", "--answer", "request_changes", "--note", "直す")
     assert ok["metrics"]["head"] == "a" * 40 and len(calls) == 2
     moved = loop("answer", "demo", "--pr", "9", "--answer", "approved")
     assert moved["cause"]["kind"] == "precondition" and len(calls) == 3

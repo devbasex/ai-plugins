@@ -26,7 +26,7 @@ class AccountError(ValueError):
 
 
 def accounts_dir(state_dir: Path) -> Path:
-    return state_dir / facts.value("places", "relay-accounts", "path")
+    return state_dir / facts.value("locations", "relay-accounts", "path")
 
 
 def pin_path(state_dir: Path) -> Path:

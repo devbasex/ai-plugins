@@ -346,7 +346,7 @@ def _rounds_without_heads(state: dict) -> list[dict]:
     return out
 
 
-def test_run_records_the_ledger_process_and_summary(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+def test_run_records_the_journal_process_and_summary(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
     fake = Recording(tmp_path / "st", {"codex": [["節 B の根拠が無い"], []], "kiro": [["節 B の根拠が無い", "語の定義"], []]})
     code, got = _run(capsys, monkeypatch, fake, wt)
     assert got["summary"] == "2 ラウンドで converged。指摘 2 件（直した 2・見送った 0・未解決 0）"

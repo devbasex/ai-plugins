@@ -88,8 +88,8 @@ def _write_result(path: Optional[str], found: Mapping[str, Any]) -> None:
 def _declared_suites(cwd: Path) -> Any:
     """打った場所から根へ探した宣言の `test.suites`（宣言か鍵が無ければ空か None。形の確かめは `scoped.scoped_runs` が持つ）。読めなければ `LocalTestError`。"""
     try:
-        read = declared.read_declaration(cwd)
-    except declared.DeclarationError as exc:
+        read = declared.read_ndf_settings(cwd)
+    except declared.NdfSettingsError as exc:
         raise LocalTestError(f"宣言 {exc.path} を読めない: {exc.cause}") from None
     if read is None:
         return []

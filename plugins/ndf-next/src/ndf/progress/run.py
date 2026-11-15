@@ -65,7 +65,7 @@ FAILED = _event("failed")
 FINISHED = _event("finished")
 # 答えの語（承認・差し戻し・承認しない）
 APPROVED = invoke.APPROVED
-REVISE = _answer("revise")
+REQUEST_CHANGES = _answer("request_changes")
 REJECTED = _answer("rejected")
 # 番号のぶつかり（同時の追記）で読み直して書き直す回数
 APPEND_ATTEMPTS = command.APPEND_ATTEMPTS
@@ -85,7 +85,7 @@ LAUNCH_FILE = "launched.json"
 class View:
     """1 つのトランザクションで読んだ進行表（最新の改訂・定義・事象）。"""
 
-    table_id: str
+    machine_id: str
     rev: int
     snap: stages.Snapshot
     doc: dict[str, Any]
@@ -116,33 +116,33 @@ def payload_of(ev: model.Event) -> dict[str, Any]:
     return ev.draft.payload if ev.draft.payload is not None else {}
 
 
-def view(conn: Any, table_id: str) -> View:
-    rev, raw, snap, events = command.read_current(conn, table_id)
-    return View(table_id, rev, snap, raw, events)
+def view(conn: Any, machine_id: str) -> View:
+    rev, raw, snap, events = command.read_current(conn, machine_id)
+    return View(machine_id, rev, snap, raw, events)
 
 
-def read(st: store.Store, table_id: str) -> View:
+def read(st: store.Store, machine_id: str) -> View:
     with store.transaction(st) as conn:
-        return view(conn, table_id)
+        return view(conn, machine_id)
 
 
 def append(
-    st: store.Store, table_id: str, build: Callable[[View], list[model.EventDraft]], after: Callable[[Any], Any] = lambda _conn: None
+    st: store.Store, machine_id: str, build: Callable[[View], list[model.EventDraft]], after: Callable[[Any], Any] = lambda _conn: None
 ) -> list[int]:
     """`build` が今の進行表から作った下書きを追記する（ぶつかれば作り直す。空なら書かない）。`after` は同じトランザクションで打つ。"""
 
     def write(conn: Any) -> list[int]:
-        v = view(conn, table_id)
+        v = view(conn, machine_id)
         drafts = build(v)
-        seqs = store.append_events(conn, table_id, drafts, v.events[-1].seq if v.events else 0) if drafts else []
+        seqs = store.append_events(conn, machine_id, drafts, v.events[-1].seq if v.events else 0) if drafts else []
         after(conn)
         return seqs
 
     return command.retrying_transaction(st, write)
 
 
-def _write(st: store.Store, table_id: str, *drafts: model.EventDraft) -> list[int]:
-    return append(st, table_id, lambda _v: list(drafts))
+def _write(st: store.Store, machine_id: str, *drafts: model.EventDraft) -> list[int]:
+    return append(st, machine_id, lambda _v: list(drafts))
 
 
 # --- 工程の中のステップの進み ---------------------------------------------------------------
@@ -178,7 +178,7 @@ class StepProgress:
         return str(payload_of(self.answer)["answer"]) if self.answer is not None else None
 
     def see(self, ev: model.Event) -> None:
-        """事象 1 つを読んで進みを書き換える。差し戻し（承認ゲートの revise）なら世代を上げてステップを初めから流し直す。"""
+        """事象 1 つを読んで進みを書き換える。差し戻し（承認ゲートの request_changes）なら世代を上げてステップを初めから流し直す。"""
         handle = _SEES.get(ev.draft.kind)
         if handle is not None:
             handle(self, ev, payload_of(ev))
@@ -206,7 +206,7 @@ class StepProgress:
 
     def _answered(self, ev: model.Event, p: dict[str, Any]) -> None:
         """答え。承認ゲートの差し戻しなら世代を上げて初めから流し直し、ほかは数え始めの後の答えだけを残す。"""
-        if p["answer"] == REVISE and p["kind"] == invoke.LISTEN:
+        if p["answer"] == REQUEST_CHANGES and p["kind"] == invoke.LISTEN:
             self.generation += 1
             self.done, self.waiting, self.answer, self.anchor = {}, None, None, ev.seq
             self.notes = p["notes"]
@@ -320,26 +320,26 @@ def choices(m: Move) -> list[str]:
     return [a for a in listed if a in known]
 
 
-def _gate_routes(table_id: str, m: Move) -> dict[str, Any]:
+def _gate_routes(machine_id: str, m: Move) -> dict[str, Any]:
     assert m.stage is not None
     out = {}
     for a in choices(m):
-        ask = ("notes", "reason") if a == REVISE else ("reason",)
-        out[a] = _cmd("answer", table_id, m.stage.name, "--answer", a, ask=ask)
+        ask = ("notes", "reason") if a == REQUEST_CHANGES else ("reason",)
+        out[a] = _cmd("answer", machine_id, m.stage.name, "--answer", a, ask=ask)
     return out
 
 
-def failed_routes(table_id: str, stage: str) -> dict[str, Any]:
+def failed_routes(machine_id: str, stage: str) -> dict[str, Any]:
     """失敗した行で conductor が選ぶ手（答えの語彙の retry・finish・cancel）。"""
     return {
-        "retry": _cmd("retry", table_id, stage, ask=("reason",)),
-        "finish": _cmd("finish", table_id, stage, ask=("output", "reason")),
-        "cancel": _cmd("cancel", table_id, ask=("reason",)),
+        "retry": _cmd("retry", machine_id, stage, ask=("reason",)),
+        "finish": _cmd("finish", machine_id, stage, ask=("output", "reason")),
+        "cancel": _cmd("cancel", machine_id, ask=("reason",)),
     }
 
 
 def _metrics(v: View, m: Move) -> dict[str, Any]:
-    out: dict[str, Any] = {"table_id": v.table_id, "rev": v.rev, "state": v.whole, "move": m.action}
+    out: dict[str, Any] = {"machine_id": v.machine_id, "rev": v.rev, "state": v.whole, "move": m.action}
     if m.stage is not None:
         out["stage"] = m.stage.name
     if m.step is not None:
@@ -355,22 +355,22 @@ def _failed_report(v: View, m: Move) -> dict[str, Any]:
     kind = kind if kind is not None and kind in causes.table() else "unknown"
     detail = cause["detail"] if isinstance(cause.get("detail"), str) and cause["detail"] else f"工程 {m.stage.name} が失敗した"
     summary = f"工程 {m.stage.name} が失敗した: {detail}"
-    return result.stopped(TOOL, kind, detail, summary=summary, metrics=_metrics(v, m), routes=failed_routes(v.table_id, m.stage.name))
+    return result.stopped(TOOL, kind, detail, summary=summary, metrics=_metrics(v, m), routes=failed_routes(v.machine_id, m.stage.name))
 
 
 def report(v: View, m: Move) -> dict[str, Any]:
     """副作用の無い 1 手の結果（`wait`・`show` と、`next` が流せない手）。"""
     if m.action == Action.DONE:
-        return result.result(TOOL, result.OK, f"進行表 {v.table_id} は{model.label(v.whole)}", metrics=_metrics(v, m))
+        return result.result(TOOL, result.OK, f"進行表 {v.machine_id} は{model.label(v.whole)}", metrics=_metrics(v, m))
     if m.action == Action.FAILED:
         return _failed_report(v, m)
     assert m.stage is not None
     if m.action == Action.GATE:
         assert m.step is not None
         summary = f"工程 {m.stage.name} のステップ {m.step.id} が答えを待っている"
-        return result.result(TOOL, result.GATE, summary, metrics=_metrics(v, m), routes=_gate_routes(v.table_id, m))
+        return result.result(TOOL, result.GATE, summary, metrics=_metrics(v, m), routes=_gate_routes(v.machine_id, m))
     summary = f"次に流すのは工程 {m.stage.name}（{m.action}）"
-    return result.result(TOOL, result.OK, summary, metrics=_metrics(v, m), next=_cmd("next", v.table_id))
+    return result.result(TOOL, result.OK, summary, metrics=_metrics(v, m), next=_cmd("next", v.machine_id))
 
 
 # --- 進捗記録（受け入れ条件 6・3377-9）: 課題の工程表とスプリント PR の「通した工程」を終了の印から書き直す ---
@@ -476,14 +476,14 @@ Launch = Callable[[store.Store, str, Path], Optional[int]]
 Invoker = Callable[[invoke.StageRun, Path, Path, Optional[str]], invoke.StageResult]
 
 
-def launch_worker(st: store.Store, table_id: str, cwd: Path) -> Optional[int]:
+def launch_worker(st: store.Store, machine_id: str, cwd: Path) -> Optional[int]:
     """工程を流す作業（`ndf progress work`）を、自分の終わりに巻き込まれない別のプロセスの組で起こし、組の番号（pid）を返す。
 
     作業の標準出力と標準エラーは作業の置き場の `work.log` へ追記する。"""
-    log = work_root(st.root, table_id) / "work.log"
+    log = work_root(st.root, machine_id) / "work.log"
     log.parent.mkdir(parents=True, exist_ok=True)
     with log.open("a", encoding="utf-8") as out:
-        argv = invoke.ndf_command(TOOL, "work", table_id)
+        argv = invoke.ndf_command(TOOL, "work", machine_id)
         env = invoke.ndf_env(os.environ)
         proc = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=out, stderr=out, start_new_session=True)
     return proc.pid
@@ -502,20 +502,20 @@ class Env:
     invoker: Invoker = _invoke
     records: Callable[[Path], Records] = github_records
     sleep: Callable[[float], None] = time.sleep
-    ended: Callable[[Any, str], Any] = lambda _conn, _table_id: None  # スプリントの完了と同じトランザクションで打つ
+    ended: Callable[[Any, str], Any] = lambda _conn, _machine_id: None  # スプリントの完了と同じトランザクションで打つ
 
 
-def work_root(root: Path, table_id: str) -> Path:
+def work_root(root: Path, machine_id: str) -> Path:
     """進行表ごとの作業の置き場（プランの実行の置き場と作業の記録）。名前は進行表の識別子の sha256 の頭。"""
-    return root / WORK_DIR / hashlib.sha256(table_id.encode()).hexdigest()[: model.REPO_KEY_LENGTH]
+    return root / WORK_DIR / hashlib.sha256(machine_id.encode()).hexdigest()[: model.REPO_KEY_LENGTH]
 
 
-def resync(st: store.Store, table_id: str, cwd: Path, env: Env) -> dict[str, Any]:
-    v = read(st, table_id)
+def resync(st: store.Store, machine_id: str, cwd: Path, env: Env) -> dict[str, Any]:
+    v = read(st, machine_id)
     items, errors = sync_records(v, cwd, env.records)
     if errors:
-        return result.stopped(TOOL, "transient", "; ".join(errors), items=items, next=_cmd("resync", table_id))
-    return result.result(TOOL, result.OK, f"進行表 {table_id} の進捗記録を揃えた（{len(items)} 件）", items=items)
+        return result.stopped(TOOL, "transient", "; ".join(errors), items=items, next=_cmd("resync", machine_id))
+    return result.result(TOOL, result.OK, f"進行表 {machine_id} の進捗記録を揃えた（{len(items)} 件）", items=items)
 
 
 # --- 手を進める（next と work） ---------------------------------------------------------------
@@ -526,18 +526,18 @@ class Drive:
     """1 回の駆動。`inline` が真なら工程をこのプロセスで流し（`work`）、偽なら作業を起こして返す（`next`）。"""
 
     st: store.Store
-    table_id: str
+    machine_id: str
     cwd: Path
     env: Env
     inline: bool
     warnings: list[str] = field(default_factory=list)
 
     def write(self, *drafts: model.EventDraft) -> None:
-        _write(self.st, self.table_id, *drafts)
+        _write(self.st, self.machine_id, *drafts)
 
     def synced(self) -> None:
         """行を終えた後に進捗記録を書き直す。記録の失敗は工程を止めず警告に載せる。"""
-        _, errors = sync_records(read(self.st, self.table_id), self.cwd, self.env.records)
+        _, errors = sync_records(read(self.st, self.machine_id), self.cwd, self.env.records)
         self.warnings.extend(errors)
 
 
@@ -591,21 +591,21 @@ def _start(d: Drive, v: View, s: stages.StageDef) -> Optional[dict[str, Any]]:
     return None if d.inline else _launched(d, v, m)
 
 
-def launch_path(root: Path, table_id: str) -> Path:
+def launch_path(root: Path, machine_id: str) -> Path:
     """起動の印。`next` が作業を起こした後、作業が排他を取るまでの間だけ置く（中身は作業の組の番号）。"""
-    return work_root(root, table_id) / LAUNCH_FILE
+    return work_root(root, machine_id) / LAUNCH_FILE
 
 
 def _launched(d: Drive, v: View, m: Move) -> dict[str, Any]:
     """作業を起こし、排他を持ったまま起動の印を書く。作業が排他を取るまでの間も `is_live` が生きているとみなす。"""
     assert m.stage is not None
-    pid = d.env.launch(d.st, d.table_id, d.cwd)
+    pid = d.env.launch(d.st, d.machine_id, d.cwd)
     if pid is not None:
-        mark = launch_path(d.st.root, d.table_id)
+        mark = launch_path(d.st.root, d.machine_id)
         mark.parent.mkdir(parents=True, exist_ok=True)
         mark.write_text(json.dumps({"pid": pid}), encoding="utf-8")
     summary = f"工程 {m.stage.name} から流す作業を起こした。承認ゲート・失敗・完了までは wait で待つ"
-    return result.result(TOOL, result.OK, summary, metrics=_metrics(v, m), next=_cmd("wait", d.table_id))
+    return result.result(TOOL, result.OK, summary, metrics=_metrics(v, m), next=_cmd("wait", d.machine_id))
 
 
 def gate_report(step: stages.StepDef, answer: model.Event) -> dict[str, Any]:
@@ -630,10 +630,10 @@ def _consume(d: Drive, v: View, m: Move) -> None:
 
 def _complete(d: Drive, v: View) -> dict[str, Any]:
     done = model.EventDraft("completed", ACTOR, None, rev=v.rev)
-    append(d.st, d.table_id, lambda _v: [done], after=lambda conn: d.env.ended(conn, d.table_id))
+    append(d.st, d.machine_id, lambda _v: [done], after=lambda conn: d.env.ended(conn, d.machine_id))
     d.synced()
-    done = read(d.st, d.table_id)
-    return result.result(TOOL, result.OK, f"進行表 {d.table_id} を完了にした", metrics=_metrics(done, Move(Action.DONE)))
+    done = read(d.st, d.machine_id)
+    return result.result(TOOL, result.OK, f"進行表 {d.machine_id} を完了にした", metrics=_metrics(done, Move(Action.DONE)))
 
 
 def _resume(d: Drive, v: View, m: Move) -> Optional[dict[str, Any]]:
@@ -645,7 +645,7 @@ def _resume(d: Drive, v: View, m: Move) -> Optional[dict[str, Any]]:
         _finish_stage(d, v, m.stage)
     else:
         d.write(_run_step(d, v, m.stage, m.step))
-    if decide(read(d.st, d.table_id)).stage != m.stage:
+    if decide(read(d.st, d.machine_id)).stage != m.stage:
         d.synced()
     return None
 
@@ -667,40 +667,40 @@ def _step(d: Drive, v: View, m: Move) -> Optional[dict[str, Any]]:
 
 
 def _drive(d: Drive) -> dict[str, Any]:
-    first = read(d.st, d.table_id)
+    first = read(d.st, d.machine_id)
     # 1 手ごとに行かステップが 1 つ進む（行ごとに始めと終わり、ステップごとに流すと答えの読み取り）。手の数はこの数を超えない
     for _ in range(3 * (len(first.snap.stages) + len(first.snap.steps()))):
-        v = read(d.st, d.table_id)
+        v = read(d.st, d.machine_id)
         out = _step(d, v, decide(v))
         if out is not None:
             return command.with_warnings(out, before=d.warnings)
     raise AssertionError("手の数が行とステップの数を超えた")
 
 
-def advance(st: store.Store, table_id: str, cwd: Path, env: Env) -> dict[str, Any]:
+def advance(st: store.Store, machine_id: str, cwd: Path, env: Env) -> dict[str, Any]:
     """`next`: 排他を取り、終わるか待つか作業を起こすまで手を進める。作業が動いていれば `wait` を返す。"""
-    if is_live(st, table_id):
-        summary = f"進行表 {table_id} を流す作業が動いている。終わりは wait で待つ"
-        return result.result(TOOL, result.OK, summary, metrics={"table_id": table_id}, next=_cmd("wait", table_id))
-    with store.run_lock(st, table_id):
-        return _drive(Drive(st, table_id, cwd, env, inline=False))
+    if is_live(st, machine_id):
+        summary = f"進行表 {machine_id} を流す作業が動いている。終わりは wait で待つ"
+        return result.result(TOOL, result.OK, summary, metrics={"machine_id": machine_id}, next=_cmd("wait", machine_id))
+    with store.run_lock(st, machine_id):
+        return _drive(Drive(st, machine_id, cwd, env, inline=False))
 
 
-def _launching(st: store.Store, table_id: str) -> bool:
+def _launching(st: store.Store, machine_id: str) -> bool:
     """起こした作業がまだ排他を取っていないか（起動の印があり、印の組が生きている）。"""
     try:
-        raw = json.loads(launch_path(st.root, table_id).read_text(encoding="utf-8"))
+        raw = json.loads(launch_path(st.root, machine_id).read_text(encoding="utf-8"))
     except (OSError, ValueError):  # noqa: NDF401 ファイル: 印が無い・書きかけなら起こした作業は無い
         return False
     pid = raw.get("pid") if isinstance(raw, dict) else None
     return isinstance(pid, int) and pid > 0 and process_group.group_alive(pid)
 
 
-def is_live(st: store.Store, table_id: str) -> bool:
+def is_live(st: store.Store, machine_id: str) -> bool:
     """同じ進行表を流す作業（か `next`）が動いているか。排他を取れないか、起こした作業がまだ排他を取っていなければ動いている。"""
     try:
-        with store.run_lock(st, table_id):
-            held = _launching(st, table_id)
+        with store.run_lock(st, machine_id):
+            held = _launching(st, machine_id)
     except model.Refused:
         held = True
     return held
@@ -710,7 +710,7 @@ def hand(st: store.Store, v: View) -> Optional[dict[str, Any]]:
     """次に打つ 1 手（`show` が返す。プロセスが落ちた後も同じ）。作業が動いていれば `wait`、終わっていれば無し、ほかは `next`。"""
     if model.is_terminal(v.whole):
         return None
-    return _cmd("wait" if is_live(st, v.table_id) else "next", v.table_id)
+    return _cmd("wait" if is_live(st, v.machine_id) else "next", v.machine_id)
 
 
 # --- wait ----------------------------------------------------------------------------------
@@ -718,7 +718,7 @@ def hand(st: store.Store, v: View) -> Optional[dict[str, Any]]:
 
 def wait(
     st: store.Store,
-    table_id: str,
+    machine_id: str,
     timeout: float,
     sleep: Callable[[float], None] = time.sleep,
     *,
@@ -730,12 +730,12 @@ def wait(
     """
     interval = limits.value(WAIT_POLL, "interval")
     deadline = clock() + timeout
-    while is_live(st, table_id):
+    while is_live(st, machine_id):
         if clock() >= deadline:
-            detail = f"進行表 {table_id} を流す作業がまだ動いている（{timeout:g} 秒待った）"
-            return result.stopped(TOOL, "wait_timeout", detail, next=_cmd("wait", table_id))
+            detail = f"進行表 {machine_id} を流す作業がまだ動いている（{timeout:g} 秒待った）"
+            return result.stopped(TOOL, "wait_timeout", detail, next=_cmd("wait", machine_id))
         sleep(interval)
-    v = read(st, table_id)
+    v = read(st, machine_id)
     return report(v, decide(v))
 
 
@@ -744,10 +744,10 @@ def wait(
 
 def notes_text(value: str, path: Optional[Path]) -> Optional[str]:
     """差し戻しの指摘の本文。差し戻しには空でない指摘ファイルが要る（3365-4）。"""
-    if value != REVISE:
+    if value != REQUEST_CHANGES:
         return None
     if path is None:
-        raise model.Refused("差し戻し（revise）には指摘ファイル（--notes）が要る")
+        raise model.Refused("差し戻し（request_changes）には指摘ファイル（--notes）が要る")
     try:
         text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
@@ -776,12 +776,12 @@ def answer_draft(v: View, stage: str, value: str, reason: str, text: Optional[st
     return model.EventDraft(ANSWERED, writer, stage, reason=reason, payload=payload, rev=v.rev)
 
 
-def answer(st: store.Store, table_id: str, stage: str, value: str, reason: str, notes: Optional[Path]) -> dict[str, Any]:
+def answer(st: store.Store, machine_id: str, stage: str, value: str, reason: str, notes: Optional[Path]) -> dict[str, Any]:
     """待っているステップへの答えを事象 `answered` で残す（`answer_draft`）。"""
     text, extra = notes_text(value, notes), ({"notes_path": str(notes)} if notes is not None else {})
-    seqs = append(st, table_id, lambda v: [answer_draft(v, stage, value, reason, text, extra)])
+    seqs = append(st, machine_id, lambda v: [answer_draft(v, stage, value, reason, text, extra)])
     summary = f"工程 {stage} へ答え {value} を書いた。続きは next で流す"
-    return result.result(TOOL, result.OK, summary, metrics={"table_id": table_id, "seqs": seqs}, next=_cmd("next", table_id))
+    return result.result(TOOL, result.OK, summary, metrics={"machine_id": machine_id, "seqs": seqs}, next=_cmd("next", machine_id))
 
 
 # --- work（next が起こす作業） ----------------------------------------------------------------
@@ -846,7 +846,7 @@ def _step_draft(v: View, s: stages.StageDef, step: stages.StepDef, prog: StepPro
     return model.EventDraft(STEP_EVENT, ACTOR, s.name, payload=payload, rev=v.rev)
 
 
-def step_place(step: str, prog: StepProgress) -> str:
+def step_location(step: str, prog: StepProgress) -> str:
     """ステップのプランの実行の置き場の名前。差し戻し（世代）で新しい置き場にする（打ち直しは同じ置き場の新しい回）。"""
     return f"{step}-g{prog.generation}"
 
@@ -861,7 +861,7 @@ def _run_step(d: Drive, v: View, s: stages.StageDef, step: stages.StepDef) -> mo
     run = replace(invoke.stage_run(s, step, inputs), notes=prog.notes, retries=prog.retries)
     waited = prog.waiting is not None and prog.waiting["step"] == step.id
     ans = prog.answer_value() if waited else None
-    work_dir = work_root(d.st.root, v.table_id) / s.id / step_place(step.id, prog)
+    work_dir = work_root(d.st.root, v.machine_id) / s.id / step_location(step.id, prog)
     res = _retrying(lambda again: d.env.invoker(replace(run, again=again), d.cwd, work_dir, ans), d.env.sleep)
     return _step_draft(v, s, step, prog, res)
 
@@ -893,12 +893,12 @@ def _finish_stage(d: Drive, v: View, s: stages.StageDef) -> None:
     d.warnings.extend(warnings)
 
 
-def _work_lock(stack: ExitStack, st: store.Store, table_id: str, sleep: Callable[[float], None]) -> bool:
+def _work_lock(stack: ExitStack, st: store.Store, machine_id: str, sleep: Callable[[float], None]) -> bool:
     """作業の排他を取る。起こした `next` が放すまで待ち、待ちの上限までに取れなければ偽（ほかの作業が流している）。"""
     interval = limits.value(LOCK_POLL, "interval")
     for _ in range(max(1, int(limits.value(WAIT_POLL, "interval") / interval))):
         try:
-            stack.enter_context(store.run_lock(st, table_id))
+            stack.enter_context(store.run_lock(st, machine_id))
         except model.Refused:
             sleep(interval)
         else:
@@ -906,14 +906,14 @@ def _work_lock(stack: ExitStack, st: store.Store, table_id: str, sleep: Callable
     return False
 
 
-def work(st: store.Store, table_id: str, cwd: Path, env: Env) -> dict[str, Any]:
+def work(st: store.Store, machine_id: str, cwd: Path, env: Env) -> dict[str, Any]:
     """工程を順に流す。答えを待つステップ・失敗・進行表の終わりで抜ける。"""
     with ExitStack() as stack:
-        locked = _work_lock(stack, st, table_id, env.sleep)
-        launch_path(st.root, table_id).unlink(missing_ok=True)  # 排他を取った（か、ほかの作業が持つ）ので起動の印は要らない
+        locked = _work_lock(stack, st, machine_id, env.sleep)
+        launch_path(st.root, machine_id).unlink(missing_ok=True)  # 排他を取った（か、ほかの作業が持つ）ので起動の印は要らない
         if not locked:
-            return result.result(TOOL, result.OK, f"進行表 {table_id} はほかの作業が流している", metrics={"table_id": table_id})
-        return _drive(Drive(st, table_id, cwd, env, inline=True))
+            return result.result(TOOL, result.OK, f"進行表 {machine_id} はほかの作業が流している", metrics={"machine_id": machine_id})
+        return _drive(Drive(st, machine_id, cwd, env, inline=True))
     raise AssertionError("到達しない")
 
 
@@ -921,29 +921,29 @@ def work(st: store.Store, table_id: str, cwd: Path, env: Env) -> dict[str, Any]:
 
 
 def _cmd_next(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any]:
-    return advance(st, a.table_id, cwd, a.env)
+    return advance(st, a.machine_id, cwd, a.env)
 
 
 def _cmd_wait(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, Any]:
-    return wait(st, a.table_id, a.timeout)
+    return wait(st, a.machine_id, a.timeout)
 
 
 def _cmd_answer(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, Any]:
-    return answer(st, a.table_id, a.stage, a.answer, a.reason, Path(a.notes) if a.notes else None)
+    return answer(st, a.machine_id, a.stage, a.answer, a.reason, Path(a.notes) if a.notes else None)
 
 
 def _cmd_resync(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any]:
-    return resync(st, a.table_id, cwd, a.env)
+    return resync(st, a.machine_id, cwd, a.env)
 
 
 def _cmd_work(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any]:
-    return work(st, a.table_id, cwd, a.env)
+    return work(st, a.machine_id, cwd, a.env)
 
 
 def _cmd_show(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any]:
     """進行表の表示に、次に打つ 1 手（`next`）を足す。プロセスが落ちた後もこの 1 手で続けられる（3366-1）。"""
     out = command.COMMANDS["show"](a, cwd, st)
-    held = hand(st, read(st, a.table_id))
+    held = hand(st, read(st, a.machine_id))
     if held is not None:
         out["next"] = held
     return out
@@ -965,16 +965,16 @@ def parser() -> argparse.ArgumentParser:
         ("work", "工程を流す作業（next が起こす）"),
         ("show", "進行表を表示する"),
     ):
-        sub.add_parser(name, help=text).add_argument("table_id")
+        sub.add_parser(name, help=text).add_argument("machine_id")
     w = sub.add_parser("wait", help="工程を流す作業の終わりを待つ")
-    w.add_argument("table_id")
+    w.add_argument("machine_id")
     w.add_argument("--timeout", type=float, default=WAIT_DEFAULT_SECONDS)
     ans = sub.add_parser("answer", help="答えを待つ工程へ答えを書く")
-    ans.add_argument("table_id")
+    ans.add_argument("machine_id")
     ans.add_argument("stage", help="工程の名前（工程表の行名）")
     ans.add_argument("--answer", required=True, choices=facts.ids(result.ANSWERS))
     ans.add_argument("--reason", required=True)
-    ans.add_argument("--notes", help="差し戻し（revise）の指摘ファイル")
+    ans.add_argument("--notes", help="差し戻し（request_changes）の指摘ファイル")
     return ap
 
 

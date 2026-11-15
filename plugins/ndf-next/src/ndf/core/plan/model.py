@@ -22,7 +22,7 @@ from ndf.contracts.routing import END, PLAN_TARGETS, STOP
 
 # ステップを打つ作業ディレクトリの語。worktree は作業場所（使えなければリポジトリの根）、repo はリポジトリの根
 IN_WORKTREE, IN_REPO = "worktree", "repo"
-PLACES = (IN_WORKTREE, IN_REPO)
+LOCATIONS = (IN_WORKTREE, IN_REPO)
 # 上限を書かないプランの、ステップの数の上限（ステップの数の倍）
 LIMIT_PER_STEP = 3
 # 承認の答えの行き先に書ける語（ステップの id のほか）
@@ -46,7 +46,7 @@ class Step:
     exit_cause: Mapping[int, str] = field(default_factory=dict)
     on_answer: Mapping[str, str] = field(default_factory=dict)
     timeout: Optional[float] = None
-    place: str = IN_WORKTREE
+    location: str = IN_WORKTREE
     probe: Optional[tuple[str, ...]] = None
 
 
@@ -132,7 +132,7 @@ def _step(raw: Mapping[str, Any]) -> Step:
         exit_cause=_exit_cause(sid, dict(_opt(raw, "exit_cause", {}))),
         on_answer=dict(_opt(raw, "on_answer", {})),
         timeout=raw.get("timeout"),
-        place=_opt(raw, "in", IN_WORKTREE),
+        location=_opt(raw, "in", IN_WORKTREE),
         probe=probe,
     )
 
@@ -173,8 +173,8 @@ def errors(plan: Plan) -> list[str]:
         errs += _target_errors(step, set(ids))
         errs += _kind_errors(step, table)
         errs += _answer_errors(step, answers)
-        if step.place not in PLACES:
-            errs.append(f"ステップ {step.id} の in は {' か '.join(PLACES)}: {step.place}")
+        if step.location not in LOCATIONS:
+            errs.append(f"ステップ {step.id} の in は {' か '.join(LOCATIONS)}: {step.location}")
     if plan.limit < 1:
         errs.append(f"limit は 1 以上: {plan.limit}")
     return errs

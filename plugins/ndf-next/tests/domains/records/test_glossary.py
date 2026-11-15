@@ -73,7 +73,7 @@ def test_layout_reads_document_dir_and_max_lines(tmp_path: Path) -> None:
     assert glossary.layout(root) == gd.Layout("glossary.json", "docs/words.md", "docs/terms", 10)
 
 
-def test_layout_without_declaration_raises(tmp_path: Path) -> None:
+def test_layout_without_ndf_settings_raises(tmp_path: Path) -> None:
     with pytest.raises(glossary.GlossaryError):
         glossary.layout(tmp_path)
 
@@ -85,7 +85,7 @@ def _decl_only(tmp_path: Path, data: bytes) -> Path:
     return tmp_path
 
 
-def test_layout_reports_unreadable_json_and_a_declaration_without_source_or_document(tmp_path: Path) -> None:
+def test_layout_reports_unreadable_json_and_a_ndf_settings_without_source_or_document(tmp_path: Path) -> None:
     root = _decl_only(tmp_path, b"{")
     with pytest.raises(glossary.GlossaryError, match=r"glossary\.json を読めない: "):
         glossary.layout(root)

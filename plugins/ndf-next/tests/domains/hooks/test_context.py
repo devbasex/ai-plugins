@@ -41,7 +41,7 @@ def test_bash_pre_tool_use_parses_payload_shell_and_transcript_once(tmp_path, ca
 
 
 def test_stop_classifies_the_last_reply_once(tmp_path, calls, monkeypatch):
-    # stop-wait・unattended・relay-mark が同じ応答を読む
+    # stop-wait・unattended・relay-marker が同じ応答を読む
     _transcript(tmp_path)
     monkeypatch.setenv("NDF_FACTORY_RUN", "1")
     payload = stop(tmp_path, "x")

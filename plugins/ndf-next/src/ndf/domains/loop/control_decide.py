@@ -224,7 +224,7 @@ def answer(state: rec.LoopState, c: Ctx, pr: int, given: str, head: Optional[str
 
     先端は呼び手が 1 回だけ読んだ値（`head`）を使い、ゲートを出した時点と違えば答えを書かずに断る（#2714）。
     書いた答えの先端を `metrics.head` で返し、マージはその値を `--match-head-commit` に渡す。
-    `revise`・`rejected` は差し戻しとして記録に残る（#2400）。
+    `request_changes`・`rejected` は差し戻しとして記録に残る（#2400）。
     """
     refusal, lap = _open_lap(state, c, lease=False)
     if refusal is not None:

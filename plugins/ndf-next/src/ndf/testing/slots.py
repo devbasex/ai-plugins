@@ -107,22 +107,22 @@ class Interrupted(KeyboardInterrupt):
 
 
 # プロセスの中の待ちの帳簿（monotonic の始まりと終わり）。待ちをテストの時間に数えないために引く（I4）
-_ledger: list[tuple[float, float]] = []
-_ledger_lock = threading.Lock()
+_spans: list[tuple[float, float]] = []
+_spans_lock = threading.Lock()
 
 
 def _note_wait(start: float, end: float) -> None:
-    with _ledger_lock:
-        _ledger.append((start, end))
+    with _spans_lock:
+        _spans.append((start, end))
 
 
 def waited_since(started: float) -> float:
     """`started`（`time.monotonic()` の値）より後にこのプロセスが枠とメモリを待った秒。"""
-    with _ledger_lock:
-        return sum(max(0.0, end - max(start, started)) for start, end in _ledger if end > started)
+    with _spans_lock:
+        return sum(max(0.0, end - max(start, started)) for start, end in _spans if end > started)
 
 
-def slots_place(environ: Mapping[str, str] | None = None) -> tuple[Path, list[dict[str, str]]]:
+def slots_location(environ: Mapping[str, str] | None = None) -> tuple[Path, list[dict[str, str]]]:
     """枠の置き場と、そのために状態の置き場を用意したときに退避した旧い置き場（結果 JSON の `items` の形）。
 
     `NDF_TEST_SLOTS_DIR` があればそこで、状態の置き場に触れない（退避は空）。無ければ状態の置き場の下。
@@ -343,7 +343,7 @@ def _prepare_directory(options: GateOptions, env: Mapping[str, str]) -> tuple[Pa
     retired: list[dict[str, str]] = []
     try:
         if options.directory is None:
-            directory, retired = slots_place(env)
+            directory, retired = slots_location(env)
         else:
             directory = options.directory
         directory.mkdir(parents=True, exist_ok=True)

@@ -80,7 +80,7 @@ def _pid(conn: sa.Connection, repo: str, name: str) -> str:
 def _cmd_create(a: argparse.Namespace, conn: sa.Connection, repo: str) -> dict[str, Any]:
     doc = read_doc(Path(a.plan_file), PLAN_SCHEMA, "計画の宣言")
     start = a.action == "start"
-    existing = store.read_table(conn, plan_id(repo, doc["name"]))
+    existing = store.read_machine(conn, plan_id(repo, doc["name"]))
     if existing is None:
         pid = create_plan(conn, repo, doc, start)
     elif start:
@@ -110,7 +110,7 @@ def _cmd_status(a: argparse.Namespace, where: run.Where) -> dict[str, Any]:
 def _cmd_lane_add(a: argparse.Namespace, conn: sa.Connection, repo: str) -> dict[str, Any]:
     decl = read_doc(Path(a.lane_file), LANE_SCHEMA, "レーンの宣言")
     tid = add_lane(conn, _pid(conn, repo, a.plan), decl, a.request)
-    return _ok(f"計画 {a.plan} にレーン {decl['name']} を足した", lane_table_id=tid)
+    return _ok(f"計画 {a.plan} にレーン {decl['name']} を足した", lane_machine_id=tid)
 
 
 def _cmd_set(a: argparse.Namespace, conn: sa.Connection, repo: str) -> dict[str, Any]:

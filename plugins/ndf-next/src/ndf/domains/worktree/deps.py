@@ -26,10 +26,10 @@ from pathlib import Path
 from typing import Any, Optional
 
 from ndf.adapters.git import Git
-from ndf.domains.worktree import container, declaration, repo
+from ndf.domains.worktree import container, ndf_settings, repo
 
 # 宣言の節と、その中の手順の名前（行う順）
-SECTION = declaration.DEPS
+SECTION = ndf_settings.DEPS
 # 複製の手順（ハードリンクで複製する `LINK_STEP` と、実体を複製する手順）と、コマンドを打つ手順
 LINK_STEP = "copy_from_main"
 COPY_STEPS = (LINK_STEP, "copy_as_real")
@@ -66,7 +66,7 @@ def safe_relative(rel: str) -> bool:
     return bool(rel) and not rel.startswith(("/", "~")) and ".." not in parts and rel not in (".",)
 
 
-def read_steps(decl: Optional[declaration.Declaration]) -> dict[str, list[str]]:
+def read_steps(decl: Optional[ndf_settings.NdfSettings]) -> dict[str, list[str]]:
     """`deps` 節の手順。宣言・節が無ければ空。形が違えば `DepsError`。"""
     if decl is None or SECTION not in decl.raw:
         return {}
@@ -85,7 +85,7 @@ def read_steps(decl: Optional[declaration.Declaration]) -> dict[str, list[str]]:
 def mark_key(worktree: Git, main_dir: Path) -> str:
     """印の中身: 今の HEAD と宣言の中身の要約。どちらかが変われば印は効かない。"""
     head = worktree.run("rev-parse", "HEAD").strip()
-    shared = declaration.shared_file(main_dir)
+    shared = ndf_settings.shared_file(main_dir)
     digest = hashlib.sha256(shared.read_bytes()).hexdigest()[:16] if shared.is_file() else "none"
     return f"head={head} decl={digest}"
 
@@ -267,7 +267,7 @@ def prepare(worktree: Path, if_unprepared: bool = False, shell: Optional[contain
     previous = marker.read_text(encoding="utf-8").strip() if marker.is_file() else None
     if if_unprepared and previous == key:
         return Prepared(skipped=True)
-    steps = read_steps(declaration.load(main_dir))
+    steps = read_steps(ndf_settings.load(main_dir))
     out = Prepared(steps=sum(len(v) for v in steps.values()))
     if out.steps == 0:
         return out

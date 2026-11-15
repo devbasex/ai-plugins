@@ -19,7 +19,7 @@
 | `depth.py` | 深さ（見直し・大整理）の秒の上限と打ち切りの記録 |
 | `issues_gh.py` | GitHub のアダプター越しの Issue・マイルストーン・親の読み書き |
 | `reparent.py` | 付け直しと戻し |
-| `actions.py` | 判定の反映と起票（記録 ledger.json） |
+| `actions.py` | 判定の反映と起票（記録 journal.json） |
 | `tables.py` | 順位の表をマイルストーンの説明へ書く |
 | `settle.py` | 証拠を GitHub で確かめて閉じる |
 | `collect.py` | 候補の経路の収集 |

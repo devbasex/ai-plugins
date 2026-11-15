@@ -11,7 +11,7 @@ from typing import NamedTuple, Optional
 
 from ndf import contracts
 
-DECLARATION = "limits.json"
+NDF_SETTINGS = "limits.json"
 SCHEMA = contracts.schema_path("limits")
 
 
@@ -52,14 +52,14 @@ VALUE_KEYS = tuple(f for f in Policy._fields if f not in ("name", "summary"))
 
 def validate(raw: object) -> dict[str, Policy]:
     """宣言の中身を確かめて方針の表にする。形の誤りは `LimitsError`。"""
-    contracts.require_schema(raw, SCHEMA, LimitsError, f"上限の宣言 {DECLARATION}")
+    contracts.require_schema(raw, SCHEMA, LimitsError, f"上限の宣言 {NDF_SETTINGS}")
     return {name: Policy(name=name, **row) for name, row in raw["policies"].items()}  # type: ignore[index]
 
 
 @contracts.cached_reader
 def table() -> dict[str, Policy]:
     """宣言を 1 プロセスに 1 回読む。"""
-    return validate(contracts.load_as(DECLARATION, LimitsError))
+    return validate(contracts.load_as(NDF_SETTINGS, LimitsError))
 
 
 def policy(name: str) -> Policy:

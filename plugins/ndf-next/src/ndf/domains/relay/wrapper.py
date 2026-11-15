@@ -6,7 +6,7 @@
 
 - 区間は `claude --session-id <新しい ID> <ブロック>` で始め、上限で替えるときと起こし直すときは
   `claude --resume <ID> <1 行>` で同じ会話を続ける
-- 子へ入力を送る前（起動の引数で渡す 1 行を含む）に中継の印を立てる（`marks`。hook の数え手が数え直さない）
+- 子へ入力を送る前（起動の引数で渡す 1 行を含む）に中継の印を立てる（`markers`。hook の数え手が数え直さない）
 - 切り替えない理由は、前の見回りと変わったときだけ `log.jsonl` へ 1 行書く（同じ理由を見回りごとに書かない）
 - 状態（`running`・`waiting`・`stalled`・`stopped`）と理由を `wrapper.json` に書き、一覧と耐久ワークフローが読む
   （認証の失敗で `/goal` が外れたレーンを running のまま扱わない。#3243）
@@ -33,7 +33,7 @@ from ndf.domains.relay import (
     account_decide,
     accounts,
     hub_decide,
-    marks,
+    markers,
     observe,
     registry,
     session_env,
@@ -311,7 +311,7 @@ class Wrapper:
         head = ["--resume", req.session_id] if req.resume else ["--session-id", req.session_id]
         argv = [CLAUDE, *head, *self.s.args, *([req.prompt] if req.prompt else [])]
         if req.prompt:
-            marks.mark(self.s.state_dir, req.session_id)
+            markers.mark(self.s.state_dir, req.session_id)
         child = self.spawn(argv, env, self.s.cwd)
         self.section = Section(req.number, req.session_id, req.account, child, last_output=self.clock())
         self._write_state("running", f"区間 {req.number} を始めた")
@@ -329,7 +329,7 @@ class Wrapper:
 
     def _send(self, text: str) -> None:
         sec = self._current()
-        marks.mark(self.s.state_dir, sec.session_id)
+        markers.mark(self.s.state_dir, sec.session_id)
         sec.child.write(text.encode("utf-8") + b"\r")
         sec.screen.clear()
 

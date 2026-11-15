@@ -121,8 +121,8 @@ def fill(args: Sequence[str], values: Mapping[str, str]) -> list[str]:
     return out
 
 
-def workdir_for(place: str, worktree: Optional[str], repo: Optional[str], worktree_usable: bool) -> Optional[str]:
+def workdir_for(location: str, worktree: Optional[str], repo: Optional[str], worktree_usable: bool) -> Optional[str]:
     """ステップを打つ作業ディレクトリ。作業場所が使えなければリポジトリの根。どちらも無ければ None（呼び手の cwd）。"""
-    if place == IN_REPO or worktree is None or not worktree_usable:
+    if location == IN_REPO or worktree is None or not worktree_usable:
         return repo if repo is not None else (worktree if worktree_usable else None)
     return worktree

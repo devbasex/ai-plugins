@@ -63,11 +63,11 @@ from ndf.adapters import run_log
 from ndf.contracts import limits
 from ndf.core import durable_locks as locks
 from ndf.core import durable_sweep as sweeping
-from ndf.core.durable_ledger import (
+from ndf.core.durable_runs import (
     RUNS_TABLE as RUNS_TABLE,
-    LedgerRow as LedgerRow,
+    RunRow as RunRow,
     _forget_run as _forget_run,
-    _ledger as _ledger,
+    _runs as _runs,
     _register_run as _register_run,
 )
 from ndf.core.durable_locks import (
@@ -123,7 +123,7 @@ FORMAT = 1
 # 関数を変えたら、FORMAT を上げるか、呼び出しの順が変わらないと判断してこの値だけを書き直す
 FORMAT_SOURCE_HASH = "15db4cc3f838e5731ec1ac208ee114cb0666311953793bb6f45a88f92ca71034"
 # チェックアウトの置き場の `format.json` の番号（決定 85）
-STORE_FORMAT = 1
+STORE_FORMAT = 2
 # 鍵の名前の接頭辞。名前の形を決めるだけで、URL の片付けの絞り込みには使わない（絞るのは台帳）
 RUN_PREFIX = "run-"
 # DBOS を閉じる前に、走っている耐久ワークフローが記録を終えたかを見る間隔（秒）
@@ -727,7 +727,7 @@ def pending(root_or_url: Path | str) -> list[RunRecord]:
     """待ちを抱えた（`PENDING`・`ENQUEUED`・`DELAYED`）実行を集める。置き場なら鍵ごとのファイル、URL なら台帳の鍵から。"""
     if isinstance(root_or_url, Path):
         return _pending_in(root_or_url)
-    names = [row.run_name for row in _ledger(root_or_url)]
+    names = [row.run_name for row in _runs(root_or_url)]
     return _records(root_or_url, names, list(WAITING)) if names else []
 
 

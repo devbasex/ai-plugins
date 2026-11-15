@@ -1,6 +1,6 @@
 """MVV の記録を読み書きする口（N8b・#2603・#2614・#2777・#2970・#2853）。
 
-記録は状態の置き場の mvv-state（表 places）の下の JSONL で、追記だけで持つ。記録の `repo` はメインディレクトリの
+記録は状態の置き場の mvv-state（表 locations）の下の JSONL で、追記だけで持つ。記録の `repo` はメインディレクトリの
 パスにする（worktree から書いても同じ鍵）。改訂の兆候は、ベースブランチの宣言を読んで数える。
 """
 
@@ -32,14 +32,14 @@ class MvvError(ValueError):
 
 
 def _state_dir() -> Path:
-    var = facts.value("places", "mvv-state", "env")
+    var = facts.value("locations", "mvv-state", "env")
     # 環境変数があれば identity を読まない。状態の置き場を解けなければ IdentityError のまま
     state = None if os.environ.get(var) else identity.load().state_dir
-    return ud.state_place_dir(os.environ, var, state, facts.value("places", "mvv-state", "path"))
+    return ud.state_location_dir(os.environ, var, state, facts.value("locations", "mvv-state", "path"))
 
 
 def record_path(file_id: str) -> Path:
-    """記録のファイル（表 ndf-files の mvv-vet・mvv-signals）。"""
+    """記録のファイル（表 ndf-files の mvv-validation・mvv-signals）。"""
     return _state_dir() / facts.value("ndf-files", file_id, "path")
 
 
@@ -113,14 +113,14 @@ def record_answer(root: Path, answer: Mapping[str, Any], version: Optional[int])
     return rows
 
 
-def vet_sprint(root: Path, inputs: Mapping[str, str], judge: Judge, reuse: bool = True) -> dict[str, Any]:
+def mvv_validate_sprint(root: Path, inputs: Mapping[str, str], judge: Judge, reuse: bool = True) -> dict[str, Any]:
     """スプリント MVV を照合し、記録に足した行を返す。
 
     `reuse` なら、同じ照合の入力の最新の判定が「従う」の記録を再利用して LLM を呼ばない。記録が無い・壊れた行を
     含んでも止まらず LLM で判定する。`project-mvv vet` に当たる呼び手は `reuse=False` で毎回 LLM を呼ぶ。
     """
-    key = md.vet_key(inputs)
-    path = record_path("mvv-vet")
+    key = md.mvv_validation_key(inputs)
+    path = record_path("mvv-validation")
     repo = repo_key(root)
     rows, _ = jsonl.read_rows(path)
     origin = md.reusable(rows, key) if reuse else None

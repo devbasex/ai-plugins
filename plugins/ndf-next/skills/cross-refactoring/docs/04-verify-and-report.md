@@ -125,7 +125,7 @@ done
 **打ち消しが衝突したら、打ち消しの前の HEAD へ戻して止まる**（`UndoConflict`。I9）。衝突した項目を外して続けない。
 `verify` は `VERIFY=halt` を返し、駆動が `gate`・終了コード 10 で人へ渡す。
 
-打ち消したコミット（revert）はオーケストレーターが残すコミットとして台帳（`ledger.orchestrator_commits`）へ記録する。
+打ち消したコミット（revert）はオーケストレーターが残すコミットとして台帳（`journal.orchestrator_commits`）へ記録する。
 打ち消した項目のコミットは revert と一緒に履歴に残り、公開してよいコミットとして扱う（`reverted_by_commit`）。
 記録は `drops[]`（`mode: revert`・`reason`・`round`・`dropped`・`reverted`・`before`・`recheck`）に残る。
 
@@ -143,19 +143,19 @@ done
 最終ゲートが push 済みの地点を判定するために残す。最終ゲートへ入る前（`phase` が `final` / `done` でない）に公開のエントリポイントが
 呼ばれたら、呼び出し元の誤りとして終了コード 4 で止まる。
 
-**push の直前に、送るコミット（origin の head から HEAD まで）がすべて残すコミットかを照らす**（`ledger.unpublishable`）。
+**push の直前に、送るコミット（origin の head から HEAD まで）がすべて残すコミットかを照らす**（`journal.unpublishable`）。
 見放した担当の残留コミットのように記録に無いコミットがあれば、push せずに終了コード 4 で止まり、そのコミットの SHA・
 `Item-Id`・件名を 1 行ずつ出す。残すかは状態ファイルに記録した SHA の一致だけで決め、担当が書けるトレーラーでは決めない。
-同期とリファクタリング計画の記録のコミットは、作った直後に台帳（`ledger.orchestrator_commits`）へ記録する。
+同期とリファクタリング計画の記録のコミットは、作った直後に台帳（`journal.orchestrator_commits`）へ記録する。
 
 **公開の結果は状態ファイルの `publication` に残す。** push が通れば `pushed` と SHA、同期・ツールのパスの照合・残すコミットの
 照合・`git push` のどれかで止まれば `refused` と理由（認証情報を伏せ、末尾の 5 行・500 字に縮めたもの。伏せ字は共通ライブラリの
 `scripts/lib/secret_redact.py`）を残してから終了コード 4 で止まる。`publication` は次の push の照合の起点
-（`ledger.published_sha`）とは別に持つ。
+（`journal.published_sha`）とは別に持つ。
 
 **最終ゲートを経ずに終わった実行は、残った改善項目を「採用」と表さない。** `refactor.py report` は「採用: 未確定」と書き、
 drive は `stopped`（`metrics.exit` に最終ゲートの終了コード・`metrics.adopted` は 0・`metrics.unconfirmed` に残った項目の数）で終える。
-項目の表示の状態と件数は `ledger.display_status`・`ledger.tally` の 1 か所で決め、リファクタリング計画のコメント・結果 JSON・
+項目の表示の状態と件数は `journal.display_status`・`journal.tally` の 1 か所で決め、リファクタリング計画のコメント・結果 JSON・
 報告が同じものを使う。
 
 | 項目の `status` | 最終ゲートが `passed` | 表示の状態 |

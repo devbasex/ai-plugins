@@ -14,8 +14,8 @@ from typing import Any, Optional
 from ndf.contracts.result import STOPPED
 
 # 確かめの名前（結果の items の name）
-WORKTREE, DECLARATION, MVV = "worktree-setup", "project-declaration", "project-mvv"
-ORDER = (WORKTREE, DECLARATION, MVV)
+WORKTREE, NDF_SETTINGS, MVV = "worktree-setup", "project-ndf_settings", "project-mvv"
+ORDER = (WORKTREE, NDF_SETTINGS, MVV)
 
 
 @dataclass(frozen=True)

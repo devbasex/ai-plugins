@@ -47,7 +47,7 @@ def workdir_of(phase: str, runtime: str, read_root: PurePath, work: PurePath) ->
     return read_root / runtime if phase in read_only_phases() else work
 
 
-def result_place(phase: str, runtime: str, stem: str, dirs: tuple[PurePath, PurePath, PurePath]) -> ResultPlace:
+def result_location(phase: str, runtime: str, stem: str, dirs: tuple[PurePath, PurePath, PurePath]) -> ResultPlace:
     """結果ファイルの置き場。`dirs` は (読み取り用ディレクトリの根, 書き込み用の作業ディレクトリ, 回収先の一時ディレクトリ)。
 
     提出先は担当が動くディレクトリの中にあり、担当は作業ディレクトリの外を触らずに書ける。

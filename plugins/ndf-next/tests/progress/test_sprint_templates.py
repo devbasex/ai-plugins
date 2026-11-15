@@ -57,7 +57,7 @@ def sprint(repo, monkeypatch):
     patched = {n: replace(p, default=DEFAULTS[n]) if n in DEFAULTS else p for n, p in held.items()}
     monkeypatch.setattr(route, "params", lambda: patched)
     monkeypatch.setattr(route, "default_merge_method", lambda repo, base: "squash")
-    monkeypatch.setattr(invoke, "issue_text", lambda place, n: (f"#{n} の題", f"#{n} の本文"))
+    monkeypatch.setattr(invoke, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
     values = {"worktree": str(repo), "branch": BRANCH, "design_pr": 7, "pr": 8, "version": "11.0.0"}
     values["delivery"] = {"target": "t", "kind": "auto", "trigger": "cd", "channel": "production", "versioned": True}
     plans: list[dict] = []
@@ -87,7 +87,7 @@ def _new(capsys, mode: str) -> str:
     code = command.main(["new", "s1", "--mode", mode, "--issues", str(ISSUE)])
     out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert code == 0, out
-    return out["metrics"]["table_id"]
+    return out["metrics"]["machine_id"]
 
 
 def _turn(st, tid: str, repo: Path, env: run.Env) -> dict:

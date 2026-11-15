@@ -37,7 +37,7 @@ def _view(st, pid):
 def _run_sprint(st, pid, lane_name, key, name, outcome="completed"):
     with store.transaction(st) as conn:
         view, _ = lane.read_plan(conn, pid)
-        sid = store.create_table(conn, ("sprint", REPO, name), view.lanes[lane_name].table_id, None, [])
+        sid = store.create_machine(conn, ("sprint", REPO, name), view.lanes[lane_name].machine_id, None, [])
         lane.start_row(conn, pid, lane_name, key, sid)
         if outcome is not None:
             lane.end_row(conn, sid, outcome, "workflow")

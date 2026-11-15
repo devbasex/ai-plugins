@@ -57,7 +57,7 @@ def test_an_unreadable_plan_counts_each_running_wrapper_once_and_is_named():
 # --- count の現状固定（リファクタリングの前に今の出力を記録する） ----------------------------------------
 
 
-def test_count_takes_the_first_declaration_of_a_wrapper_named_in_two_plans_as_it_is_now():
+def test_count_takes_the_first_ndf_settings_of_a_wrapper_named_in_two_plans_as_it_is_now():
     first = machine.PlanLanes("plan:1", (("dup", 3, True), ("p1", 1, False)))
     second = machine.PlanLanes("plan:2", (("dup", 5, True), ("p2", 2, True)))
     listed = {"p1": _row(), "dup": _row()}
@@ -95,7 +95,7 @@ def other_repo(tmp_path):
         repo = command.repo_id(path, st.root)
         pid = plan.create_plan(conn, repo, {**doc(decl("a", [[1]], plans=4), decl("b", [[2]], touches=("src/b",))), "name": "q1"}, True)
         view, _ = lane.read_plan(conn, pid)
-        sid = store.create_table(conn, ("sprint", repo, "a-r1"), view.lanes["a"].table_id, None, [])
+        sid = store.create_machine(conn, ("sprint", repo, "a-r1"), view.lanes["a"].machine_id, None, [])
         lane.start_row(conn, pid, "a", "r1", sid)
     yield path, repo
     durable.release_store(root)

@@ -62,7 +62,7 @@ class Starts:
 
 
 def wrappers_dir(state_dir: Path) -> Path:
-    return state_dir / facts.value("places", "relay-wrappers", "path")
+    return state_dir / facts.value("locations", "relay-wrappers", "path")
 
 
 def wrapper_dir(state_dir: Path, name: str) -> Path:

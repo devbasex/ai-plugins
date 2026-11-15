@@ -46,7 +46,7 @@ def test_ndf_progress_work_runs_the_stage_work_and_not_ndf_answer_work(repo, st,
     seen: list[tuple[str, str]] = []
 
     def fake(a, cwd, st_):
-        seen.append((a.action, a.table_id))
+        seen.append((a.action, a.machine_id))
         return result.result("progress", result.OK, "流した")
 
     monkeypatch.setattr(entry, "_progress", fake)

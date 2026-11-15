@@ -9,7 +9,7 @@
 | ほか | `changes`（題・本文・状態・ラベル）のうち今と違うものだけを書く |
 
 書く前に今の課題を読み、plan を作った後に課題が書き換わっていれば（更新の時刻と要約値の両方が違い、前の打ち直しで
-自分が書いた状態でもなければ）書かずに飛ばす（skipped_changed）。済んだ反映と起票は記録（ledger.json）に残り、
+自分が書いた状態でもなければ）書かずに飛ばす（skipped_changed）。済んだ反映と起票は記録（journal.json）に残り、
 同じ plan の打ち直しで 2 度書かない。
 
 起票は種類（needs・seeds・policy）・題・出典・MVV の当たる所を要る。MVV の判定が `follow` でない起票には
@@ -136,7 +136,7 @@ def changes_of(act: dict[str, Any]) -> dict[str, Any]:
     return act["changes"] if "changes" in act else {}
 
 
-def ledger_key(repo: str, act: dict[str, Any]) -> str:
+def journal_key(repo: str, act: dict[str, Any]) -> str:
     """記録の鍵。plan の更新の時刻と要約値も含め、後の回の同じ変更を「済み」にしない。"""
     return (
         f"{repo}#{act['number']}:"

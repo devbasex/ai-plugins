@@ -28,7 +28,7 @@ from ndf.parity import table
 
 ROOT = Path(__file__).resolve().parents[4]
 REPO = ROOT.parents[1]
-# 旧いスクリプトを呼ぶ本文を探す置き場は、本文を移した子（Skill・エージェント・hook・配る表）の places から引く
+# 旧いスクリプトを呼ぶ本文を探す置き場は、本文を移した子（Skill・エージェント・hook・配る表）の locations から引く
 TEXT_CHILDREN = ("S1a", "S1b")
 # 試走の記録の置き場（対応表のディレクトリからの相対。中の `<日付>.json` を名前の順に読む）
 RECORDS = "trial"
@@ -38,11 +38,11 @@ STALLED = (
 )
 
 
-def texts(places: Mapping[str, Any], root: Path = ROOT) -> dict[str, str]:
+def texts(locations: Mapping[str, Any], root: Path = ROOT) -> dict[str, str]:
     """本文の置き場の文字のファイル（プラグインの根からの相対 → 中身）。Python のコードは本文に数えない。"""
     found = {}
-    for place in sorted({p for child in TEXT_CHILDREN for p in places[child]}):
-        for path in sorted((root / place).rglob("*")):
+    for location in sorted({p for child in TEXT_CHILDREN for p in locations[child]}):
+        for path in sorted((root / location).rglob("*")):
             if path.is_file() and not path.suffix.startswith(".py"):
                 found[str(path.relative_to(root))] = path.read_text(encoding="utf-8")
     return found
@@ -115,9 +115,9 @@ def _not_run(reason: str = STALLED) -> dict[str, str]:
     return {"result": "not_run", "reason": reason}
 
 
-def _missing_places(row: Mapping[str, Any], places: Mapping[str, Any], root: Path) -> list[str]:
+def _missing_locations(row: Mapping[str, Any], locations: Mapping[str, Any], root: Path) -> list[str]:
     to = row.get("to")
-    return [p for p in places[to] if not (root / p).exists()] if to else []
+    return [p for p in locations[to] if not (root / p).exists()] if to else []
 
 
 def _skill_calls(under: str, calls: Mapping[str, set[str]], scripts: Mapping[str, Mapping[str, Any]]) -> list[str]:
@@ -163,12 +163,12 @@ def _by_workflow(row: Mapping[str, Any], repo: Path, scripts: Mapping[str, Mappi
 
 
 def judge_row(row: Mapping[str, Any], ctx: Mapping[str, Any]) -> dict[str, str]:
-    """1 行の試走の結果（`record` は除く）。`ctx` は places・calls・scripts・root・repo・passed を持つ。
+    """1 行の試走の結果（`record` は除く）。`ctx` は locations・calls・scripts・root・repo・passed を持つ。
 
     静的な確かめを記録より先に行う。記録の `passed` は `failed` でない行にだけ効く（旧いプラグインに頼って通った行・
     通した後で本文が旧い呼び出しに戻った行を `passed` に残さない）。
     """
-    missing = _missing_places(row, ctx["places"], ctx["root"])
+    missing = _missing_locations(row, ctx["locations"], ctx["root"])
     if missing:
         return _failed(f"行き先 {row['to']} の置き場が無い: {'・'.join(missing)}")
     kind = row["kind"]
@@ -199,8 +199,8 @@ def judge(
     passed = passed if isinstance(passed, Mapping) else dict.fromkeys(passed, record)
     scripts = old_scripts(features["rows"])
     ctx = {
-        "places": features["places"],
-        "calls": _calls(texts(features["places"], root), scripts),
+        "locations": features["locations"],
+        "calls": _calls(texts(features["locations"], root), scripts),
         "scripts": scripts,
         "root": root,
         "repo": repo,

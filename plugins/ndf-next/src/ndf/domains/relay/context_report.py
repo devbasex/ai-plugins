@@ -51,20 +51,20 @@ def busy_seconds(times: Iterable[Optional[float]]) -> float:
     return sum(min(b - a, IDLE_CAP) for a, b in zip(ts, ts[1:]))
 
 
-def load_ledger(environ: Mapping[str, str]) -> list[dict[str, Any]]:
+def load_usage_log(environ: Mapping[str, str]) -> list[dict[str, Any]]:
     """新しいプラグインの使用量の台帳の行。読めなければ空の一覧（NDF が起動した分は会話の記録の分だけにする）。"""
     try:
-        return jsonl.read_rows(usage.ledger_path(environ))[0]
+        return jsonl.read_rows(usage.usage_log_path(environ))[0]
     except (LookupError, OSError, UnicodeDecodeError):
         return []  # 台帳が読めなければ NDF が起動した分は会話の記録の分だけにする
 
 
-def _ledger_sid(row: Mapping[str, Any]) -> Optional[str]:
+def _usage_sid(row: Mapping[str, Any]) -> Optional[str]:
     sid = row.get("session_id") if row.get("session_id") else row.get("agent_id")
     return sid if isinstance(sid, str) else None
 
 
-def ledger_call(row: Mapping[str, Any]) -> Optional[dict[str, Any]]:
+def usage_call(row: Mapping[str, Any]) -> Optional[dict[str, Any]]:
     """台帳の 1 行を 1 つの呼び出しの形にする。usage が取れなければ None。"""
     u = row.get("usage")
     if not isinstance(u, dict):
@@ -137,7 +137,7 @@ def clip_windows(windows: Windows, span: Optional[tuple[float, float]]) -> Windo
 class _Scope(NamedTuple):
     """1 つの作業の集計で共有する入力。"""
 
-    ledger: list[dict[str, Any]]
+    usage_log: list[dict[str, Any]]
     excluded: set[str]
     seen: set[Any]
     windows: Mapping[str, Windows]  # セッション → 作業の区間
@@ -164,7 +164,7 @@ def _add_subagents(ndf: dict[str, Any], transcript: str, scope: _Scope, windows:
         ndf["seconds"] += busy_seconds(c["ts"] for c in calls)
 
 
-def _ledger_owned(row: Mapping[str, Any], sid: str, transcript: Optional[str]) -> bool:
+def _usage_owned(row: Mapping[str, Any], sid: str, transcript: Optional[str]) -> bool:
     """台帳の行がこのセッションのものか。親のセッション（`parent_session_id`）か、サブエージェントの会話の記録
     （`transcript`）がこのセッションの `subagents/` の下にあるかで結び付ける。
 
@@ -176,25 +176,25 @@ def _ledger_owned(row: Mapping[str, Any], sid: str, transcript: Optional[str]) -
     return bool(transcript) and isinstance(path, str) and Path(path).parent == _subagents_dir(str(transcript))
 
 
-def _add_ledger(ndf: dict[str, Any], sid: str, transcript: Optional[str], scope: _Scope, windows: Windows) -> None:
-    """このセッションのものと結び付いた台帳の行（`_ledger_owned`）を、NDF が起動した分へ 1 回だけ足す。"""
-    for row in scope.ledger:
+def _add_usage_log(ndf: dict[str, Any], sid: str, transcript: Optional[str], scope: _Scope, windows: Windows) -> None:
+    """このセッションのものと結び付いた台帳の行（`_usage_owned`）を、NDF が起動した分へ 1 回だけ足す。"""
+    for row in scope.usage_log:
         at = cr.parse_ts(row.get("at"))
-        mine = _ledger_owned(row, sid, transcript)
-        key = ("ledger", _ledger_sid(row), row.get("at"), row.get("step"))
-        c = ledger_call(row) if mine and key not in scope.seen and _within(at, windows) else None
+        mine = _usage_owned(row, sid, transcript)
+        key = ("usage", _usage_sid(row), row.get("at"), row.get("step"))
+        c = usage_call(row) if mine and key not in scope.seen and _within(at, windows) else None
         if c is not None:
             scope.seen.add(key)
             _add_call(ndf, c)
             ndf["seconds"] += c["seconds"] if c["seconds"] else 0.0
 
 
-def session_parts(sid: str, transcript: Optional[str], marks: list[dict[str, Any]], scope: _Scope) -> dict[str, Any]:
+def session_parts(sid: str, transcript: Optional[str], markers: list[dict[str, Any]], scope: _Scope) -> dict[str, Any]:
     """1 つのセッションの呼び出しを区分へ時刻で排他に割り当てる。そのセッションの作業の区間の呼び出しだけを数える。"""
     windows = scope.windows_of(sid)
     calls, compacts, by_next = cr.read_calls(transcript, scope.seen) if transcript and sid not in scope.excluded else ([], None, False)
     calls = [c for c in calls if _within(c["ts"], windows)]
-    restore_end, handoff_from = cr.mark_bounds(marks, by_next)
+    restore_end, handoff_from = cr.mark_bounds(markers, by_next)
     parts = {b: _empty_totals() for b in buckets()}
     times: dict[str, list[Optional[float]]] = defaultdict(list)
     for c in calls:
@@ -203,7 +203,7 @@ def session_parts(sid: str, transcript: Optional[str], marks: list[dict[str, Any
         times[b].append(c["ts"])
     if transcript:
         _add_subagents(parts[identity.FINAL_NAME], transcript, scope, windows)
-    _add_ledger(parts[identity.FINAL_NAME], sid, transcript, scope, windows)
+    _add_usage_log(parts[identity.FINAL_NAME], sid, transcript, scope, windows)
     for b, ts in times.items():
         parts[b]["seconds"] += busy_seconds(ts)
     restored = [c for c in calls if restore_end is not None and c["ts"] is not None and c["ts"] <= restore_end]
@@ -287,18 +287,18 @@ def work_scope(
     return mine, [r for r in mine if _in_span(cr.parse_ts(r.get("at")), span)], windows
 
 
-def report(work: str, rows: list[dict[str, Any]], ledger: list[dict[str, Any]], span: Optional[tuple[float, float]]) -> dict[str, Any]:
+def report(work: str, rows: list[dict[str, Any]], usage_log: list[dict[str, Any]], span: Optional[tuple[float, float]]) -> dict[str, Any]:
     """作業の識別子 1 つの集計。`span`（UNIX 時刻の (始め, 終わり)、両端を含む）を渡すと、その中の呼び出しと
     判定の記録の行だけを数える。"""
-    excluded = {sid for r in ledger if (sid := _ledger_sid(r))}
+    excluded = {sid for r in usage_log if (sid := _usage_sid(r))}
     every, mine, windows = work_scope(work, rows, span)
     sessions = cr.sessions_of(every)
     # 会話の記録のパスは、セッションの最初の行（別の作業の行のことがある）だけが持つ
     known = cr.sessions_of(rows)
     for sid, s in sessions.items():
         s["transcript"] = s["transcript"] or known[sid]["transcript"]
-    scope = _Scope(ledger, excluded, set(), windows)
-    by_session = cr.attach_marks([r for r in every if r.get("event") in cr.MARKS], _session_spans(sessions, scope))
+    scope = _Scope(usage_log, excluded, set(), windows)
+    by_session = cr.attach_markers([r for r in every if r.get("event") in cr.MARKS], _session_spans(sessions, scope))
     restarted = {r.get("session_id") for r in mine if r.get("verdict") == cp.RESTART}
     summed = _sum_sessions(sessions, by_session, scope, restarted)
     restarts = _restarts_by_reason(mine)

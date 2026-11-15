@@ -56,7 +56,7 @@ BUSY_TIMEOUT_SECONDS = 30
 BUSY_MARKERS = ("locked", "busy")
 BROKEN_MARKERS = ("malformed", "not a database")
 # 表の版（ndf_progress_meta の schema_version）
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 SCHEMA_VERSION_KEY = "schema_version"
 # PostgreSQL の進行表の操作の排他（pg_try_advisory_lock の 2 引数の形）の第 1 引数。値は "NDFP" の 4 バイト。
 # DBOS の記録の鍵のロック（durable.RUN_LOCK_SPACE）と値の空間を分ける
@@ -65,8 +65,8 @@ PG_LOCK_SPACE = 0x4E444650
 PG_SCHEMA_KEY = 0
 
 META = sa.MetaData()
-TABLES = sa.Table(
-    "ndf_progress_tables",
+MACHINES = sa.Table(
+    "ndf_progress_machines",
     META,
     sa.Column("id", sa.Text, primary_key=True),
     sa.Column("level", sa.Text, nullable=False),
@@ -78,7 +78,7 @@ TABLES = sa.Table(
 DEFINITIONS = sa.Table(
     "ndf_progress_definitions",
     META,
-    sa.Column("table_id", sa.Text, primary_key=True),
+    sa.Column("machine_id", sa.Text, primary_key=True),
     sa.Column("rev", sa.Integer, primary_key=True),
     sa.Column("definition", sa.JSON, nullable=False),
     sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
@@ -86,7 +86,7 @@ DEFINITIONS = sa.Table(
 EVENTS = sa.Table(
     "ndf_progress_events",
     META,
-    sa.Column("table_id", sa.Text, primary_key=True),
+    sa.Column("machine_id", sa.Text, primary_key=True),
     sa.Column("seq", sa.Integer, primary_key=True),
     sa.Column("rev", sa.Integer, nullable=True),
     sa.Column("row_key", sa.Text, nullable=True),
@@ -284,6 +284,10 @@ def ensure_schema(store: Store, now: datetime) -> None:
             raise durable.StoreFormatNewer(f"進行表の表の版 {found} が自分の {SCHEMA_VERSION} より新しい: {shown}")
         if found == SCHEMA_VERSION:
             return
+        if found is not None and store.path is None:
+            # 版 1 の表は列の名前が古い（table_id）。列を変える移行は持たず、表を作り直す手順を示して止まる
+            shown = store.engine.url.render_as_string(hide_password=True)
+            raise durable.StoreBroken(f"ステートマシンの表の版 {found} は列の名前が古い。表 ndf_progress_* を消して作り直す: {shown}")
         if found is not None and store.path is not None:
             _backup_or_warn(store, now, force=True)
         _write_schema(store.engine, found)
@@ -383,23 +387,23 @@ def _event(row: Any) -> model.Event:
     return model.Event(row.seq, _utc(row.at), draft)
 
 
-def read_events(conn: sa.Connection, table_id: str, after: int = 0) -> list[model.Event]:
+def read_events(conn: sa.Connection, machine_id: str, after: int = 0) -> list[model.Event]:
     """1 つの進行表の事象を番号の順に読む（`seq > after`）。"""
-    q = sa.select(EVENTS).where(EVENTS.c.table_id == table_id, EVENTS.c.seq > after).order_by(EVENTS.c.seq)
+    q = sa.select(EVENTS).where(EVENTS.c.machine_id == machine_id, EVENTS.c.seq > after).order_by(EVENTS.c.seq)
     return [_event(r) for r in conn.execute(q)]
 
 
-def read_table(conn: sa.Connection, table_id: str) -> Optional[dict[str, Any]]:
-    row = conn.execute(sa.select(TABLES).where(TABLES.c.id == table_id)).first()
+def read_machine(conn: sa.Connection, machine_id: str) -> Optional[dict[str, Any]]:
+    row = conn.execute(sa.select(MACHINES).where(MACHINES.c.id == machine_id)).first()
     return dict(row._mapping) if row is not None else None
 
 
-def read_definition(conn: sa.Connection, table_id: str) -> tuple[int, dict[str, Any]]:
+def read_definition(conn: sa.Connection, machine_id: str) -> tuple[int, dict[str, Any]]:
     """最新の定義の改訂（改訂の番号, スナップショット）。"""
-    q = sa.select(DEFINITIONS.c.rev, DEFINITIONS.c.definition).where(DEFINITIONS.c.table_id == table_id)
+    q = sa.select(DEFINITIONS.c.rev, DEFINITIONS.c.definition).where(DEFINITIONS.c.machine_id == machine_id)
     row = conn.execute(q.order_by(DEFINITIONS.c.rev.desc()).limit(1)).first()
     if row is None:
-        raise model.Refused(f"進行表 {table_id} に定義の改訂が無い")
+        raise model.Refused(f"進行表 {machine_id} に定義の改訂が無い")
     return row.rev, row.definition
 
 
@@ -409,53 +413,53 @@ def _deduped(conn: sa.Connection, key: Optional[str]) -> Optional[int]:
     return conn.execute(sa.select(EVENTS.c.seq).where(EVENTS.c.dedupe_key == key)).scalar()
 
 
-def _insert(conn: sa.Connection, table_id: str, seq: int, draft: model.EventDraft, at: datetime) -> None:
-    values = {"table_id": table_id, "seq": seq, "at": at, **asdict(draft)}
+def _insert(conn: sa.Connection, machine_id: str, seq: int, draft: model.EventDraft, at: datetime) -> None:
+    values = {"machine_id": machine_id, "seq": seq, "at": at, **asdict(draft)}
     try:
         conn.execute(sa.insert(EVENTS).values(**values))
     except sa.exc.IntegrityError as exc:
-        raise Conflict(f"進行表 {table_id} の事象の番号 {seq} がぶつかった") from exc
+        raise Conflict(f"進行表 {machine_id} の事象の番号 {seq} がぶつかった") from exc
 
 
 def append_events(
-    conn: sa.Connection, table_id: str, drafts: list[model.EventDraft], expect_seq: int, now: Optional[datetime] = None
+    conn: sa.Connection, machine_id: str, drafts: list[model.EventDraft], expect_seq: int, now: Optional[datetime] = None
 ) -> list[int]:
     """事象を追記する唯一の関数。書く前に書き手の表と遷移を確かめる（I2・I6）。
 
     `expect_seq` は呼び手が読んだ最後の番号で、違えば `Conflict`。重複の鍵が既にある下書きは書かずに今の番号を返す。
     """
-    meta = read_table(conn, table_id)
+    meta = read_machine(conn, machine_id)
     if meta is None:
-        raise model.Refused(f"進行表 {table_id} は無い")
-    level, events = meta["level"], read_events(conn, table_id)
+        raise model.Refused(f"進行表 {machine_id} は無い")
+    level, events = meta["level"], read_events(conn, machine_id)
     last = events[-1].seq if events else 0
     if last != expect_seq:
-        raise Conflict(f"進行表 {table_id} の最後の番号は {last}（読んだ番号 {expect_seq}）")
-    return _write_drafts(conn, table_id, level, events, drafts, now or datetime.now(UTC))
+        raise Conflict(f"進行表 {machine_id} の最後の番号は {last}（読んだ番号 {expect_seq}）")
+    return _write_drafts(conn, machine_id, level, events, drafts, now or datetime.now(UTC))
 
 
 def _write_drafts(
-    conn: sa.Connection, table_id: str, level: str, events: list[model.Event], drafts: list[model.EventDraft], at: datetime
+    conn: sa.Connection, machine_id: str, level: str, events: list[model.Event], drafts: list[model.EventDraft], at: datetime
 ) -> list[int]:
     """下書きを順に書き、番号を返す。重複の鍵が既にある下書きは書かずに今の番号を返す。`events` へ書いた事象を足す。"""
     written = []
     for draft in drafts:
         known = _deduped(conn, draft.dedupe_key)
-        written.append(known if known is not None else _write_draft(conn, table_id, level, events, draft, at))
+        written.append(known if known is not None else _write_draft(conn, machine_id, level, events, draft, at))
     return written
 
 
-def _write_draft(conn: sa.Connection, table_id: str, level: str, events: list[model.Event], draft: model.EventDraft, at: datetime) -> int:
+def _write_draft(conn: sa.Connection, machine_id: str, level: str, events: list[model.Event], draft: model.EventDraft, at: datetime) -> int:
     """1 件を確かめて次の番号で書き、`events` へ足して番号を返す。"""
     model.check_event(level, model.rows_for(level, events, draft), model.table_state(level, events), draft)
     written_draft = model.recorded(level, draft)
     seq = (events[-1].seq if events else 0) + 1
-    _insert(conn, table_id, seq, written_draft, at)
+    _insert(conn, machine_id, seq, written_draft, at)
     events.append(model.Event(seq, at, written_draft))
     return seq
 
 
-def create_table(
+def create_machine(
     conn: sa.Connection,
     key: tuple[str, str, str],
     parent_id: Optional[str],
@@ -467,16 +471,16 @@ def create_table(
     同じ識別子の進行表が既にあれば（中止したものを含む）`Refused` に今の識別子を入れて投げる（I1）。
     """
     level, repo, name = key
-    tid = model.table_id(level, repo, name)
-    if read_table(conn, tid) is not None:
+    tid = model.machine_id(level, repo, name)
+    if read_machine(conn, tid) is not None:
         raise model.Refused(f"同じ進行表が既にある: {tid}", current_id=tid)
     now = datetime.now(UTC)
     try:
-        conn.execute(sa.insert(TABLES).values(id=tid, level=level, repo=repo, name=name, parent_id=parent_id, created_at=now))
+        conn.execute(sa.insert(MACHINES).values(id=tid, level=level, repo=repo, name=name, parent_id=parent_id, created_at=now))
     except sa.exc.IntegrityError as exc:
         raise model.Refused(f"同じ進行表が既にある: {tid}", current_id=tid) from exc
     if definition is not None:
-        conn.execute(sa.insert(DEFINITIONS).values(table_id=tid, rev=1, definition=definition, created_at=now))
+        conn.execute(sa.insert(DEFINITIONS).values(machine_id=tid, rev=1, definition=definition, created_at=now))
     append_events(conn, tid, drafts, 0, now)
     return tid
 
@@ -490,45 +494,45 @@ def table_names(store: Store) -> list[str]:
 # --- 状態を変える操作の排他 -------------------------------------------------------------------
 
 
-def _pg_key(table_id: str) -> int:
-    return int.from_bytes(hashlib.sha256(table_id.encode()).digest()[:4], "big", signed=True)
+def _pg_key(machine_id: str) -> int:
+    return int.from_bytes(hashlib.sha256(machine_id.encode()).digest()[:4], "big", signed=True)
 
 
 @contextmanager
-def run_lock(store: Store, table_id: str) -> Iterator[None]:
+def run_lock(store: Store, machine_id: str) -> Iterator[None]:
     """同じ進行表の状態を変える操作（やり直し・中止・工程を流す）を 1 つに限る。取れなければ待たずに `Refused`。
 
     SQLite: `<実ファイル>.<進行表の鍵>.lock` の flock。PostgreSQL: 専用の接続の `pg_try_advisory_lock`（I14）。
     """
-    lock = _pg_run_lock(store, table_id) if store.path is None else _file_run_lock(store.path, table_id)
+    lock = _pg_run_lock(store, machine_id) if store.path is None else _file_run_lock(store.path, machine_id)
     with lock:
         yield
 
 
-def _run_lock_path(path: Path, table_id: str) -> Path:
+def _run_lock_path(path: Path, machine_id: str) -> Path:
     """`<実ファイル>.<進行表の鍵>.lock`。"""
-    return Path(f"{path}.{hashlib.sha256(table_id.encode()).hexdigest()[:16]}{durable.LOCK_SUFFIX}")
+    return Path(f"{path}.{hashlib.sha256(machine_id.encode()).hexdigest()[:16]}{durable.LOCK_SUFFIX}")
 
 
 @contextmanager
-def _file_run_lock(path: Path, table_id: str) -> Iterator[None]:
-    handle = durable.open_lock_file(_run_lock_path(path, table_id))
+def _file_run_lock(path: Path, machine_id: str) -> Iterator[None]:
+    handle = durable.open_lock_file(_run_lock_path(path, machine_id))
     try:
         try:
             fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
-            raise model.Refused(f"進行表 {table_id} を変える操作が動いている") from exc
+            raise model.Refused(f"進行表 {machine_id} を変える操作が動いている") from exc
         yield
     finally:
         handle.close()
 
 
 @contextmanager
-def _pg_run_lock(store: Store, table_id: str) -> Iterator[None]:
-    params = {"space": PG_LOCK_SPACE, "key": _pg_key(table_id)}
+def _pg_run_lock(store: Store, machine_id: str) -> Iterator[None]:
+    params = {"space": PG_LOCK_SPACE, "key": _pg_key(machine_id)}
     with store.engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
         if not conn.execute(sa.text("SELECT pg_try_advisory_lock(:space, :key)"), params).scalar():
-            raise model.Refused(f"進行表 {table_id} を変える操作が動いている")
+            raise model.Refused(f"進行表 {machine_id} を変える操作が動いている")
         try:
             yield
         finally:

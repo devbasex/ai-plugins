@@ -42,7 +42,7 @@ class TrashError(Exception):
     """退避できないファイルがあった（残りを移さず、worktree を外さない）。"""
 
 
-def ledger_of(dest: Path) -> Path:
+def record_of(dest: Path) -> Path:
     """退避先の隣の台帳 `<退避先>.json`。"""
     return dest.with_name(f"{dest.name}.json")
 
@@ -98,7 +98,7 @@ def evacuate(main: Git, worktree: Path, branch: str, head: str, merge: str = "")
         "discarded": list(discarded),
         **({"merge_commit": merge} if merge else {}),
     }
-    ledger_of(dest).write_text(json.dumps(record, ensure_ascii=False), encoding="utf-8")
+    record_of(dest).write_text(json.dumps(record, ensure_ascii=False), encoding="utf-8")
     for i, rel in enumerate(moved):
         try:
             (dest / rel).parent.mkdir(parents=True, exist_ok=True)
@@ -127,7 +127,7 @@ def restore(worktree: Path, got: Evacuated) -> Optional[str]:
         except (OSError, shutil.Error) as exc:  # 戻せなかったものは退避先に残す
             return f"{rel} を退避先 {got.dest} から戻せない: {exc}"
     shutil.rmtree(got.dest)
-    ledger_of(got.dest).unlink(missing_ok=True)
+    record_of(got.dest).unlink(missing_ok=True)
     return None
 
 
@@ -143,7 +143,7 @@ class Candidate:
 
 def _read_meta(path: Path) -> Optional[dict]:
     try:
-        data = json.loads(ledger_of(path).read_text(encoding="utf-8"))
+        data = json.loads(record_of(path).read_text(encoding="utf-8"))
     except (OSError, ValueError):  # noqa: NDF401 ファイル: 台帳の無い・壊れた退避先は候補にしない（残す）
         return None
     return data if isinstance(data, dict) else None
@@ -157,7 +157,7 @@ def candidates(main: Git, ref: str) -> list[Candidate]:
         meta = _read_meta(path)
         branch = str(meta["branch"]) if meta is not None and "branch" in meta else ""
         if meta is None or not isinstance(meta.get("head"), str):
-            out.append(Candidate(path.name, "", False, f"台帳（{ledger_of(path).name}）が読めないため残す"))
+            out.append(Candidate(path.name, "", False, f"台帳（{record_of(path).name}）が読めないため残す"))
             continue
         try:
             released = _released(main, meta, ref)
@@ -196,6 +196,6 @@ def sweep(main: Git, ref: str, approved: Iterable[str]) -> list[str]:
     for c in candidates(main, ref):
         if c.released and c.name in allowed:
             shutil.rmtree(root / c.name)
-            ledger_of(root / c.name).unlink(missing_ok=True)
+            record_of(root / c.name).unlink(missing_ok=True)
             done.append(c.name)
     return done

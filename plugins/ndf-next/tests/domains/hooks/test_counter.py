@@ -59,12 +59,12 @@ def test_relay_input_does_not_reset_the_counts(tmp_path):
 
 
 def test_relay_mark_file_written_by_the_relay_does_not_reset_the_counts(tmp_path):
-    from ndf.domains.relay import marks
+    from ndf.domains.relay import markers
 
     for _ in range(2):
         call_entry("claude", "Stop", stop(tmp_path, WAIT))
     session = sample("claude", "Stop", tmp_path)["session_id"]
-    path = marks.mark(state_dir(), session)
+    path = markers.mark(state_dir(), session)
     _prompt(tmp_path)  # 中継が送った入力: 中継の印を消すだけ
     assert not path.exists()
     assert call_entry("claude", "Stop", stop(tmp_path, WAIT)) is None

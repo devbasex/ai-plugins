@@ -43,7 +43,7 @@ def _main(capsys, fn, *argv: str) -> tuple[int, dict]:
 def _new(capsys, mode: str = "standard", *extra: str) -> str:
     code, out = _main(capsys, command.main, "new", "s1", "--mode", mode, "--issues", str(ISSUE), *extra)
     assert code == 0, out
-    return out["metrics"]["table_id"]
+    return out["metrics"]["machine_id"]
 
 
 class Fake:
@@ -116,8 +116,8 @@ def test_next_starts_the_first_pending_row_and_returns_wait(repo, st, env, capsy
 def test_work_flows_rows_until_the_design_gate_and_returns_routes(repo, st, env, capsys):
     tid = _new(capsys)
     out = lanes.turn(st, tid, repo, env.env)
-    assert out["status"] == "gate" and set(out["routes"]) == {"approved", "rejected", "revise"}
-    assert out["routes"]["revise"]["ask"] == ["notes", "reason"]
+    assert out["status"] == "gate" and set(out["routes"]) == {"approved", "rejected", "request_changes"}
+    assert out["routes"]["request_changes"]["ask"] == ["notes", "reason"]
     assert result.code_for(out) == 10
     labels = _labels(st, tid)
     assert labels["要求と受け入れ条件"] == labels["作業場所の用意"] == "finished" and labels["設計"] == "running"
@@ -173,14 +173,14 @@ def test_revise_needs_a_notes_file_and_reruns_the_stage_with_the_notes(repo, st,
     tid = _new(capsys)
     lanes.turn(st, tid, repo, env.env)
     with pytest.raises(model.Refused):
-        _approve(st, tid, "設計", "revise")
+        _approve(st, tid, "設計", "request_changes")
     empty = tmp_path / "empty.md"
     empty.write_text("  \n")
     with pytest.raises(model.Refused):
-        _approve(st, tid, "設計", "revise", empty)
+        _approve(st, tid, "設計", "request_changes", empty)
     notes = tmp_path / "notes.md"
     notes.write_text("節 2 の根拠が足りない")
-    _approve(st, tid, "設計", "revise", notes)
+    _approve(st, tid, "設計", "request_changes", notes)
     answered = [e for e in run.read(st, tid).events if e.draft.kind == "answered"][-1]
     assert answered.draft.payload["notes"] == "節 2 の根拠が足りない"
     before = len(env.fake.calls)
@@ -358,7 +358,7 @@ def test_conditions_that_cannot_be_decided_stop_before_the_row(repo, st, env, ca
     assert _labels(st, tid)["リファクタリング"] == "pending"
 
 
-def test_facts_of_reads_the_declarations_and_the_context(repo):
+def test_facts_of_reads_the_ndf_settings_and_the_context(repo):
     words = ("ci_declared", "design_pr", "prod_branch", "release_record")
     assert command.facts_of(words, {}, repo) == dict.fromkeys(words, False)
     (repo / ".ndf").mkdir()
@@ -367,7 +367,7 @@ def test_facts_of_reads_the_declarations_and_the_context(repo):
     assert command.facts_of(words, {"design_pr": 3, "version": "11.0.0"}, repo) == dict.fromkeys(words, True)
 
 
-def test_facts_of_reads_a_declaration_that_is_not_an_object_as_empty_and_refuses_broken_json(repo):
+def test_facts_of_reads_a_ndf_settings_that_is_not_an_object_as_empty_and_refuses_broken_json(repo):
     # 現状固定（I-018）: 宣言の読み方は command._declared と同じ（オブジェクトでなければ空、読めなければ ContractError）
     (repo / ".ndf").mkdir()
     (repo / ".ndf" / "project.json").write_text("[1]")
@@ -408,7 +408,7 @@ def test_diff_words_split_the_sprint_diff_into_code_and_docs(repo, changed, kind
     assert tuple(command.facts_of(words, ctx, repo)[w] for w in words) == kinds
 
 
-def test_diff_words_follow_the_docs_declaration(repo):
+def test_diff_words_follow_the_docs_ndf_settings(repo):
     _sprint_branch(repo, "a.txt", "rules/b.txt")
     words = ("code_in_diff", "docs_only_diff", "behavior_docs_in_diff")
     ctx = {"worktree": str(repo), "branch": "sprint/s1"}
@@ -585,7 +585,7 @@ def test_append_writes_the_drafts_built_from_the_current_view(repo, st, capsys):
 
     seqs = run.append(st, tid, build)
     assert seqs == [before.events[-1].seq + 1]
-    assert len(seen) == 1 and seen[0].table_id == tid and seen[0].rev == before.rev
+    assert len(seen) == 1 and seen[0].machine_id == tid and seen[0].rev == before.rev
     assert [e.seq for e in seen[0].events] == [e.seq for e in before.events]
     after = run.read(st, tid)
     assert after.events[-1].seq == seqs[0] and after.events[-1].draft.kind == "started"

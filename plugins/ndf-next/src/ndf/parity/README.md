@@ -2,7 +2,7 @@
 
 作り直しの入れ替え（S2）の前に、今のプラグインの機能が新しい側のどの子に移るかを 1 か所で持つ。11.0.0 の受け入れ条件の 1（全行が行き先の子か作らない理由を持つ）と 5（作り直しの間に起票された不具合の受け付け）の材料である。
 
-例: 今の `scripts/merged-steps.py`（マージの後の後片付け）は、対応表の次の行で M8 へ移る。移行後の置き場は `places` の `M8` の値である。#3317（メインディレクトリの取り込みが止まる）はこの行を指して受け付け、M8 で直す。
+例: 今の `scripts/merged-steps.py`（マージの後の後片付け）は、対応表の次の行で M8 へ移る。移行後の置き場は `locations` の `M8` の値である。#3317（メインディレクトリの取り込みが止まる）はこの行を指して受け付け、M8 で直す。
 
 ```json
 {"id": "entrypoint:scripts/merged-steps.py", "kind": "entrypoint", "feature": "merged の後片付けの決まった手順。", "now": "scripts/merged-steps.py", "to": "M8", "trial": null, "conductor": true}
@@ -23,7 +23,7 @@
 | 鍵 | 中身 |
 | --- | --- |
 | `feature` | 今の機能 |
-| `to` | 行き先の子の記号（`M8` など）。`places` に無い記号は誤り |
+| `to` | 行き先の子の記号（`M8` など）。`locations` に無い記号は誤り |
 | `not_built` | 作らない理由。`to` とどちらか 1 つだけを持つ |
 | `trial` | 試走（T2）の結果。T2 が書くまでは `null`。`{"result": "passed"}`、または `failed` か `not_run` に `reason` を添える |
 | `id` | `<種類>:<今の置き場>`。行の同一性で、書き換えない |
@@ -34,7 +34,7 @@
 | `user_command` | 利用者が手で打つコマンド |
 | `source` | ほかの Issue から寄せた行の出所 |
 
-`places` は子ごとの移行後の置き場である（`issues/issue-1142-design-next-design-detail.md` の「ファイル配置」と #3395 の構成要素）。エントリポイントの移行後の置き場は、行の `to` の `places` から引く（`table.entrypoints`）。利用者のコマンドの移行後の副命令の名前は、表に写さず、行き先の子の置き場にモジュールがある副命令を `cli.COMMANDS` から引く（`table.user_commands`）。副命令を足す子は、この表を書き換えずに済む。
+`locations` は子ごとの移行後の置き場である（`issues/issue-1142-design-next-design-detail.md` の「ファイル配置」と #3395 の構成要素）。エントリポイントの移行後の置き場は、行の `to` の `locations` から引く（`table.entrypoints`）。利用者のコマンドの移行後の副命令の名前は、表に写さず、行き先の子の置き場にモジュールがある副命令を `cli.COMMANDS` から引く（`table.user_commands`）。副命令を足す子は、この表を書き換えずに済む。
 
 退行させないもの（設計承認ゲートとリリース承認ゲート・hook の守り・秘密の検査・Codex 向けのリリース・Factory の契約）は `kind` が `non-regression` の 5 行である。
 

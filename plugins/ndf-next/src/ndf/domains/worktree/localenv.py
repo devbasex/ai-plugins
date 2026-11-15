@@ -16,9 +16,9 @@ from pathlib import Path
 from typing import Any, Optional
 
 from ndf.adapters.git import Git
-from ndf.domains.worktree import container, declaration, deps, localenv_decide, repo
+from ndf.domains.worktree import container, ndf_settings, deps, localenv_decide, repo
 
-SECTION = declaration.LOCALENV
+SECTION = ndf_settings.LOCALENV
 KIND = "compose"
 
 
@@ -47,14 +47,14 @@ def target(path: Path) -> Optional[Target]:
     """対象（`path` が worktree の下のディレクトリでも、worktree の根）。適用外なら `None`。"""
     loc = repo.locate(Git(path))
     main_dir = loc.main_dir
-    decl = declaration.load(main_dir)
+    decl = ndf_settings.load(main_dir)
     section = decl.section(SECTION) if decl is not None else None
     if section is None or section.get("kind") != KIND:
         return None
     return Target(loc.top, main_dir, section)
 
 
-def compose_files(decl: declaration.Declaration) -> tuple[str, ...]:
+def compose_files(decl: ndf_settings.NdfSettings) -> tuple[str, ...]:
     """`localenv.compose_files` の起動の定義（空でない文字列だけ）。節・配列が無ければ空。"""
     local = decl.section(SECTION)
     files = local.get("compose_files") if local is not None else None

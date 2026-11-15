@@ -1,6 +1,6 @@
 """使用量の帳簿を書く口（SubagentStop の hook・`claude -p` の呼び手）と、帳簿を集計する口（N8b）。
 
-帳簿は 1 本の JSONL（表 ndf-files の usage-ledger-file）で、書き手（hook かスクリプトか）によらず同じ置き場に書く。
+帳簿は 1 本の JSONL（表 ndf-files の usage-log-file）で、書き手（hook かスクリプトか）によらず同じ置き場に書く。
 同じ `agent_id` の差を書くときは、帳簿の錠の中で既存の行を読んでから書く（別々のサブエージェントの hook が
 同時に走るため）。書き込みの失敗は hook を落とさず、標準エラーへ 1 行出して続ける（I5）。
 """
@@ -29,20 +29,20 @@ CLAUDE_CLI = "claude-p"
 _SEARCH = "query($q: String!) { search(query: $q, type: ISSUE) { issueCount } }"
 
 
-def ledger_path(env: Optional[Mapping[str, str]] = None) -> Path:
+def usage_log_path(env: Optional[Mapping[str, str]] = None) -> Path:
     """帳簿のファイル。置き場を決められなければ `LookupError`。"""
-    place = facts.value("ndf-files", "usage-ledger-file", "place")
+    location = facts.value("ndf-files", "usage-log-file", "location")
     try:
         state_dir: Optional[Path] = identity.load().state_dir
     except identity.IdentityError:
         state_dir = None
-    where = ud.state_place_dir(
+    where = ud.state_location_dir(
         os.environ if env is None else env,
-        facts.value("places", place, "env"),
+        facts.value("locations", location, "env"),
         state_dir,
-        facts.value("places", place, "path"),
+        facts.value("locations", location, "path"),
     )
-    return where / facts.value("ndf-files", "usage-ledger-file", "path")
+    return where / facts.value("ndf-files", "usage-log-file", "path")
 
 
 def _records(path: Path) -> list[dict[str, Any]]:
@@ -71,7 +71,7 @@ def record_subagent(payload: Mapping[str, Any], env: Optional[Mapping[str, str]]
         print("使用量の帳簿: agent_id か agent_transcript_path が無いので書かない", file=sys.stderr)
         return None
     try:
-        path = ledger_path(env)
+        path = usage_log_path(env)
         with jsonl.lock(path):
             total = transcript_usage(Path(transcript))
             prior, _ = jsonl.read_rows(path)
@@ -89,7 +89,7 @@ def record_cli(usage: Mapping[str, Any], meta: Mapping[str, Any], env: Optional[
     u = ud.usage_of(usage)
     row = {"at": jsonl.now(), "caller": CLAUDE_CLI, **meta, "usage": u.as_dict() if u is not None else ud.UNKNOWN}
     try:
-        jsonl.append_locked(ledger_path(env), row)
+        jsonl.append_locked(usage_log_path(env), row)
     except (LookupError, OSError) as exc:
         print(f"使用量の帳簿へ書けない: {exc}", file=sys.stderr)
         return None

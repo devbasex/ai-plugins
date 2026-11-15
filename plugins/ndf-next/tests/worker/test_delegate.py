@@ -142,9 +142,9 @@ def test_a_worker_that_asks_for_a_decision_returns_a_gate(tmp_path):
 def test_a_worker_that_finished_returns_ok_and_an_unreadable_report_is_bad_report(tmp_path):
     assert _outcome(tmp_path, {"status": "ok", "summary": "済んだ"})["status"] == "ok"
     for i, bad in enumerate(("{}", "壊れた", None)):
-        place = tmp_path / f"b{i}"
-        place.mkdir()
-        got = _outcome(place, bad)
+        location = tmp_path / f"b{i}"
+        location.mkdir()
+        got = _outcome(location, bad)
         assert got["status"] == "stopped" and got["cause"]["kind"] == "bad_report"
 
 
@@ -189,11 +189,11 @@ def test_ci_fix_that_asks_stops_or_changed_no_definition_is_not_resumed(tmp_path
     # 判断が要る・できなかった結果と、語を空で書いた記録（変えた定義が無い直し）は起こし直さない
     no_terms = {"status": "ok", "metrics": {worker.SEARCH_RECORD: {"terms": [], "files": []}}}
     for i, body in enumerate(({"status": "gate", "summary": "判断が要る"}, {"status": "stopped", "summary": "直せない"}, no_terms)):
-        place = tmp_path / f"w{i}"
-        place.mkdir()
-        h = _ci_fix(place)
+        location = tmp_path / f"w{i}"
+        location.mkdir()
+        h = _ci_fix(location)
         fake, calls = _replies(h, body)
-        assert worker.delegate(h, "規則", root=place, call=fake).cause is None and len(calls) == 1
+        assert worker.delegate(h, "規則", root=location, call=fake).cause is None and len(calls) == 1
 
 
 def test_other_kinds_do_not_need_the_search_record(tmp_path):

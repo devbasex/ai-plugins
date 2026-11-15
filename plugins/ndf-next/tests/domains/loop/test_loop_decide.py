@@ -177,10 +177,10 @@ def test_issue_2714_moved_head_refuses_the_answer() -> None:
 
 def test_issue_2400_revise_answer_is_kept_as_a_rejection() -> None:
     state = _gated()
-    state = _apply(state, ctl.answer(state, _ctx(), 77, "revise", "a" * 40, "受け入れ条件が足りない"))
+    state = _apply(state, ctl.answer(state, _ctx(), 77, "request_changes", "a" * 40, "受け入れ条件が足りない"))
     state = _apply(state, ctl.answer(state, _ctx(), 77, "approved", "a" * 40, ""))
     got = state.rejections()
-    assert [(r["pr"], r["answer"], r["note"]) for r in got] == [(77, "revise", "受け入れ条件が足りない")]
+    assert [(r["pr"], r["answer"], r["note"]) for r in got] == [(77, "request_changes", "受け入れ条件が足りない")]
 
 
 @pytest.mark.parametrize(
@@ -253,8 +253,8 @@ def test_lap_events_change_only_the_named_lap(ev: dict[str, Any], want: dict[str
 
 def test_answer_event_is_appended_with_typed_fields() -> None:
     before = _two_laps()
-    after = rec.apply(before, rec.event(rec.GATE_ANSWERED, "6", lap="2", pr="77", answer="revise", head=None, note="n"))
-    assert after.laps[1].answers == (rec.Answer(77, "revise", None, "n", 6.0),)
+    after = rec.apply(before, rec.event(rec.GATE_ANSWERED, "6", lap="2", pr="77", answer="request_changes", head=None, note="n"))
+    assert after.laps[1].answers == (rec.Answer(77, "request_changes", None, "n", 6.0),)
     assert after.laps[0].answers == ()
 
 

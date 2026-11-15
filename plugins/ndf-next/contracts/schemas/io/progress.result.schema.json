@@ -17,7 +17,7 @@
       "description": "ndf progress の計測値",
       "additionalProperties": false,
       "properties": {
-        "table_id": {
+        "machine_id": {
           "type": "string",
           "description": "進行表の ID"
         },

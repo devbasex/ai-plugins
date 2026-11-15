@@ -183,7 +183,7 @@ def test_render_stops_when_omitted_worktree_is_not_usable(tmp_path, monkeypatch,
     assert not out.exists()
 
 
-def test_omitted_base_reads_declaration_then_origin_default_branch(tmp_path):
+def test_omitted_base_reads_ndf_settings_then_origin_default_branch(tmp_path):
     """base を省けば、ブランチの運用の宣言の base_branch、無ければ origin の既定ブランチにする（develop に固定しない）。"""
     repo = tmp_path / "repo"
     repo.mkdir()

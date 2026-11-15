@@ -1,6 +1,6 @@
 """判定の反映（plan の `actions`）・起票（plan の `create`）・マイルストーンの移動（plan の `reschedule`）。決まりは `actions_decide` が持つ。
 
-済んだ反映と起票は記録（ledger.json）へ 1 件ずつ書き、打ち直しで 2 度書かない。1 件の失敗で残りを止めない。
+済んだ反映と起票は記録（journal.json）へ 1 件ずつ書き、打ち直しで 2 度書かない。1 件の失敗で残りを止めない。
 """
 
 from __future__ import annotations
@@ -14,14 +14,14 @@ from ndf.domains.backlog import issues_gh, model, state
 from ndf.domains.backlog import actions_decide as ad
 
 
-class Ledger:
+class Journal:
     """記録（鍵 → 済んだ結果）。書くたびにファイルへ置き換えて残す。"""
 
     def __init__(self, sd: Path) -> None:
         self.sd = sd
-        got = state.read(sd, "backlog-ledger", {})
+        got = state.read(sd, "backlog-journal", {})
         if not isinstance(got, dict):
-            raise state.StateError(f"記録の形が違う（オブジェクトでない）: {sd}/ledger", "invalid")
+            raise state.StateError(f"記録の形が違う（オブジェクトでない）: {sd}/journal", "invalid")
         self.rows: dict[str, Any] = got
 
     def get(self, key: str) -> Optional[dict[str, Any]]:
@@ -30,7 +30,7 @@ class Ledger:
 
     def put(self, key: str, row: dict[str, Any]) -> None:
         self.rows[key] = row
-        state.write(self.sd, "backlog-ledger", self.rows)
+        state.write(self.sd, "backlog-journal", self.rows)
 
 
 def each_number(
@@ -99,10 +99,10 @@ def _write(gh: GitHub, n: int, d: ad.Diff, done: ad.Diff) -> None:
         done.remove.append(lb)
 
 
-def _one(gh: GitHub, act: dict[str, Any], key: str, ledger: Ledger) -> tuple[str, str]:
+def _one(gh: GitHub, act: dict[str, Any], key: str, journal: Journal) -> tuple[str, str]:
     """1 件を反映し (区分, 理由) を返す。"""
     n = act["number"]
-    rec = ledger.get(key)
+    rec = journal.get(key)
     early = ad.gate(act, rec)
     if early is not None:
         return early
@@ -111,7 +111,7 @@ def _one(gh: GitHub, act: dict[str, Any], key: str, ledger: Ledger) -> tuple[str
         return ad.SKIPPED, f"plan の後に書き換わった（updated_at {act['updated_at']} → {cur['updated_at']}）"
     d = ad.diff(cur, ad.changes_of(act))
     if d.empty():
-        ledger.put(key, {"result": ad.UNCHANGED})
+        journal.put(key, {"result": ad.UNCHANGED})
         return ad.UNCHANGED, "変える内容が無い"
     done = ad.Diff()
     try:
@@ -119,14 +119,14 @@ def _one(gh: GitHub, act: dict[str, Any], key: str, ledger: Ledger) -> tuple[str
     except GitHubError:
         if not done.empty():
             # 書けた分までの要約値を残し、打ち直しで自分の書き込みを並行の更新と取り違えない
-            ledger.put(key, {"result": ad.PARTIAL, "digest": model.snapshot_digest(ad.after_write(cur, done))})
+            journal.put(key, {"result": ad.PARTIAL, "digest": model.snapshot_digest(ad.after_write(cur, done))})
         raise
-    ledger.put(key, {"result": ad.APPLIED, "fields": sorted(d.patch), "add_labels": d.add, "remove_labels": d.remove,
+    journal.put(key, {"result": ad.APPLIED, "fields": sorted(d.patch), "add_labels": d.add, "remove_labels": d.remove,
                      "digest": model.snapshot_digest(ad.after_write(cur, d))})  # fmt: skip
     return ad.APPLIED, ", ".join([*sorted(d.patch), *(f"+{x}" for x in d.add), *(f"-{x}" for x in d.remove)])
 
 
-def apply_actions(gh: GitHub, ledger: Ledger, plan: dict[str, Any]) -> dict[str, Any]:
+def apply_actions(gh: GitHub, journal: Journal, plan: dict[str, Any]) -> dict[str, Any]:
     """plan の `actions` を反映する。区分ごとの番号と、課題ごとの行を返す。
 
     `gone` は plan が閉じる課題のうち閉じた状態にあるもの（この回に閉じた・前の打ち直しで閉じた・もう閉じていた）。
@@ -139,7 +139,7 @@ def apply_actions(gh: GitHub, ledger: Ledger, plan: dict[str, Any]) -> dict[str,
     failed: list[dict[str, Any]] = []
     for act in plan["actions"] if "actions" in plan else []:
         try:
-            bucket, reason = _one(gh, act, ad.ledger_key(gh.repo, act), ledger)
+            bucket, reason = _one(gh, act, ad.journal_key(gh.repo, act), journal)
         except GitHubError as exc:
             bucket, reason = ad.FAILED, str(exc)
         buckets[bucket].append(act["number"])
@@ -153,7 +153,7 @@ def apply_actions(gh: GitHub, ledger: Ledger, plan: dict[str, Any]) -> dict[str,
     return {"buckets": buckets, "items": items, "closed": closed, "gone": gone, "failed": failed}
 
 
-def create(gh: GitHub, ledger: Ledger, plan: dict[str, Any]) -> dict[str, Any]:
+def create(gh: GitHub, journal: Journal, plan: dict[str, Any]) -> dict[str, Any]:
     """plan の `create` を起票する。{created, rejected, failed}。"""
     out: dict[str, list[dict[str, Any]]] = {"created": [], "rejected": [], "failed": []}
     for c in plan["create"] if "create" in plan else []:
@@ -162,7 +162,7 @@ def create(gh: GitHub, ledger: Ledger, plan: dict[str, Any]) -> dict[str, Any]:
             out["rejected"].append({"title": c.get("title"), "reason": why})
             continue
         key = ad.create_key(c)
-        done = ledger.get(key)
+        done = journal.get(key)
         if done is not None:
             out["created"].append({**done, "already": True})
             continue
@@ -173,6 +173,6 @@ def create(gh: GitHub, ledger: Ledger, plan: dict[str, Any]) -> dict[str, Any]:
             out["failed"].append({"title": c["title"], "reason": str(exc)})
             continue
         row = {"number": n, "title": c["title"], "kind": c["kind"], "labels": labels}
-        ledger.put(key, row)
+        journal.put(key, row)
         out["created"].append(row)
     return out

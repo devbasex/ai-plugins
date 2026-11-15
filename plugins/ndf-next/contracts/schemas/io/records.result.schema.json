@@ -29,7 +29,7 @@
           "type": "integer",
           "description": "引継ぎ文書のバイト数（handoff）"
         },
-        "revise": {
+        "revision_due": {
           "type": "boolean",
           "description": "MVV の改訂を提案する兆候があるか（mvv signals）"
         }

@@ -1,7 +1,7 @@
 """ブランチ運用の測定（`ndf project measure` の `branch_flow`）と、宣言とのずれ（`ndf project drift`。#3569。旧い
 `project_lib/measure_branch_flow.py` と `lib/branch_flow.py` の取り込み方の検査の移し先）。
 
-測るのは宣言の 4 項目（`start`・`integrate`・`doc_prs`・`promotion`）で、項目ごとに推した値・確からしさ・根拠（打った
+測るのは宣言の 4 項目（`start`・`integrate`・`doc_prs`・`release_strategy`）で、項目ごとに推した値・確からしさ・根拠（打った
 コマンドと結果の要約）を出す。根拠が足りない項目は値を出さず `unknown` と理由を出す。
 
 - 標本は直近のマージ済みの Pull Request（最大 100 件）と、origin のスプリントブランチである
@@ -30,9 +30,9 @@ PR_LIMIT = 100
 REVIEW_SAMPLES = 10
 ITEM = "branch_flow"
 REVIEWS_KEY = "reviews"
-WORKTREE_SCHEMA = contracts.schema_path("declarations/worktree")
+WORKTREE_SCHEMA = contracts.schema_path("ndf-settings/worktree")
 DOC_PREFIXES = (("design/", "design"), ("spec/", "spec"))
-FLOW_KEYS = ("start", "integrate", "doc_prs", "promotion")
+FLOW_KEYS = ("start", "integrate", "doc_prs", "release_strategy")
 REVIEW_KINDS = ("impl", "sprint", "release", "design", "spec")
 # 書いていない種類の値。キーは課題のまとまりの記録が有るか（旧い lib/branch_flow.py の REVIEW_DEFAULTS と同じ）
 REVIEW_DEFAULTS: dict[str, dict[bool, dict[str, Any]]] = {
@@ -67,13 +67,13 @@ class Branch:
 
 
 def _rows() -> dict[str, dict[str, Any]]:
-    return {r["promotion"]: r for r in facts.rows("branch-flows")}
+    return {r["release_strategy"]: r for r in facts.rows("branch-flows")}
 
 
 def default_flow() -> dict[str, Any]:
     """`branch_flow` の無い宣言が使う値（表の既定の行の各列の先頭）。"""
     row = next(r for r in facts.rows("branch-flows") if r["default"])
-    return {"start": row["start"][0], "integrate": row["integrate"][0], "doc_prs": row["doc_prs"][0], "promotion": row["promotion"]}
+    return {"start": row["start"][0], "integrate": row["integrate"][0], "doc_prs": row["doc_prs"][0], "release_strategy": row["release_strategy"]}
 
 
 def review_allowed(kind: str) -> tuple[list[str], list[str]]:
@@ -88,14 +88,14 @@ def answer_problem(value: Any) -> Optional[str]:
     if errs:
         return "; ".join(errs[:3])
     flow = {**default_flow(), **obj(value)}
-    row = _rows()[flow["promotion"]]
+    row = _rows()[flow["release_strategy"]]
     bad = [
-        f"{k} = {flow[k]}（promotion = {flow['promotion']} が許すのは {'・'.join(row[k])}）"
+        f"{k} = {flow[k]}（release_strategy = {flow['release_strategy']} が許すのは {'・'.join(row[k])}）"
         for k in ("start", "doc_prs", "integrate")
         if flow[k] not in row[k]
     ]
     bad += [
-        f"reviews.{k} は promotion = {flow['promotion']} では書けない"
+        f"reviews.{k} は release_strategy = {flow['release_strategy']} では書けない"
         for k in obj(obj(value).get(REVIEWS_KEY))
         if k not in row["review_kinds"]
     ]
@@ -134,16 +134,16 @@ def infer_field(counts: Counter[str], command: str, what: str) -> dict[str, Any]
     return {"value": value, "confidence": level, "evidence": ev}
 
 
-def _start_from_table(starts: dict[str, Any], promotion: dict[str, Any]) -> dict[str, Any]:
+def _start_from_table(starts: dict[str, Any], release_strategy: dict[str, Any]) -> dict[str, Any]:
     """動いているスプリントブランチが少なければ、取り込み方の表が許す起点を、取り込み方の確からしさのまま出す。"""
-    row = _rows().get(str(promotion.get("value")))
+    row = _rows().get(str(release_strategy.get("value")))
     if "unknown" not in starts or row is None or len(row["start"]) != 1:
         return starts
     only = row["start"][0]
-    text = f"promotion = {row['promotion']} が許す start は {only} だけ"
+    text = f"release_strategy = {row['release_strategy']} が許す start は {only} だけ"
     return {
         "value": only,
-        "confidence": promotion["confidence"],
+        "confidence": release_strategy["confidence"],
         "evidence": [*starts["evidence"], {"command": TABLE_COMMAND, "text": text}],
     }
 
@@ -160,7 +160,7 @@ def infer(prs: list[dict[str, str]], base: str, production: str, release_kinds: 
     out = {
         "integrate": infer_field(integrate, PR_COMMAND, f"head が {Branch.SPRINT}* で宛先が {base} の Pull Request"),
         "doc_prs": infer_field(docs, PR_COMMAND, "設計 PR・確定仕様化の PR の宛先"),
-        "promotion": infer_field(
+        "release_strategy": infer_field(
             Counter(release_kinds), PR_COMMAND + " と git rev-list --first-parent", f"{production} 宛ての Pull Request の head"
         ),
     }
@@ -169,12 +169,12 @@ def infer(prs: list[dict[str, str]], base: str, production: str, release_kinds: 
         "git merge-base <スプリントブランチ> origin/<ベースブランチ>・origin/<本番チャネル> と git rev-list --first-parent",
         "本番に入っていないスプリントブランチの起点",
     )
-    return {"start": _start_from_table(starts, out["promotion"]), **out}
+    return {"start": _start_from_table(starts, out["release_strategy"]), **out}
 
 
 def as_item(fields: dict[str, Any], extra_evidence: list[dict[str, Any]]) -> dict[str, Any]:
     """測定の結果の 1 項目。4 項目すべてが `高` で組み合わせが取り込み方の表に合えば測った値、ほかは問い（候補は推した値）。"""
-    fields = {k: {**v, "evidence": [*seq(v.get("evidence")), *(extra_evidence if k == "promotion" else [])]} for k, v in fields.items()}
+    fields = {k: {**v, "evidence": [*seq(v.get("evidence")), *(extra_evidence if k == "release_strategy" else [])]} for k, v in fields.items()}
     proposal = {k: v["value"] for k, v in fields.items() if "value" in v}
     unsure = any(v.get("confidence") != "高" for v in fields.values())
     problem = None if unsure else answer_problem(proposal)
@@ -277,7 +277,7 @@ def pr_kind(head: str, base_ref: str, base: str, production: str) -> Optional[st
     return next((k for pre, k in DOC_PREFIXES if head.startswith(pre)), None)
 
 
-def marks_of(gh: Gh, number: int) -> frozenset[str]:
+def markers_of(gh: Gh, number: int) -> frozenset[str]:
     """PR のレビューとコメントから、掛けたレビューの印の組。読めなければ `GhUnavailable`（呼ぶ側が標本から外す）。"""
     texts = {
         "reviews": [str(obj(r).get("body")) for r in seq(gh.get(f"repos/{gh.repo}/pulls/{number}/reviews?per_page=100"))],
@@ -288,18 +288,18 @@ def marks_of(gh: Gh, number: int) -> frozenset[str]:
     )
 
 
-def _review_diff(kind: str, checks: list[str], release_marks: dict[str, int]) -> str:
+def _review_diff(kind: str, checks: list[str], release_markers: dict[str, int]) -> str:
     """推したレビューの対象の差分。レビューを掛けなければ none、リリースは cross-review の印の多い側。"""
     if not checks:
         return "none"
     if kind == "release":
-        resolution = release_marks["resolution"] if "resolution" in release_marks else 0
-        pr = release_marks["pr"] if "pr" in release_marks else 0
+        resolution = release_markers["resolution"] if "resolution" in release_markers else 0
+        pr = release_markers["pr"] if "pr" in release_markers else 0
         return "resolution" if resolution >= max(pr, 1) else "pr"
     return next(d for d in review_allowed(kind)[1] if d != "none")
 
 
-def _infer_kind(kind: str, got: list[frozenset[str]], release_marks: dict[str, int], unreadable: int) -> dict[str, Any]:
+def _infer_kind(kind: str, got: list[frozenset[str]], release_markers: dict[str, int], unreadable: int) -> dict[str, Any]:
     """1 つの種類の印の組から推す。`unreadable` は読めなかった PR の件数。並びはステップを置く順（スキーマの列挙の順）。"""
     order = review_allowed("sprint")[0]
     allowed = frozenset(review_allowed(kind)[0])
@@ -309,14 +309,14 @@ def _infer_kind(kind: str, got: list[frozenset[str]], release_marks: dict[str, i
         est["evidence"].append({"command": REVIEWS_COMMAND, "text": f"読めない PR {unreadable} 件"})
     if "value" in est:
         checks = [] if est["value"] == "(無し)" else est["value"].split("+")
-        est["value"] = {"checks": checks, "diff": _review_diff(kind, checks, release_marks)}
+        est["value"] = {"checks": checks, "diff": _review_diff(kind, checks, release_markers)}
     return est
 
 
-def infer_reviews(samples: dict[str, list[frozenset[str]]], release_marks: dict[str, int], unreadable: dict[str, int]) -> dict[str, Any]:
+def infer_reviews(samples: dict[str, list[frozenset[str]]], release_markers: dict[str, int], unreadable: dict[str, int]) -> dict[str, Any]:
     """種類ごとの印の組から、掛けるレビュー・対象の差分・確からしさを推す。標本が足りない種類は `unknown` と理由。"""
     return {
-        k: _infer_kind(k, samples[k] if k in samples else [], release_marks, unreadable[k] if k in unreadable else 0) for k in REVIEW_KINDS
+        k: _infer_kind(k, samples[k] if k in samples else [], release_markers, unreadable[k] if k in unreadable else 0) for k in REVIEW_KINDS
     }
 
 
@@ -337,9 +337,9 @@ def _pick_samples(
 
 
 def _sample(gh: Gh, kind: str, p: dict[str, Any], reviews: dict[str, dict[str, Any]]) -> tuple[frozenset[str], frozenset[str]]:
-    marks = marks_of(gh, p["number"])
+    markers = markers_of(gh, p["number"])
     rv = reviews.get(p["head"]["ref"][len(Branch.RELEASE) :].split("-")[0]) if kind == "release" else None
-    return marks, (marks_of(gh, rv["number"]) if rv is not None else frozenset())
+    return markers, (markers_of(gh, rv["number"]) if rv is not None else frozenset())
 
 
 def collect_reviews(gh: Gh, pulls: list[dict[str, Any]], base: str, production: str) -> dict[str, Any]:
@@ -348,18 +348,18 @@ def collect_reviews(gh: Gh, pulls: list[dict[str, Any]], base: str, production: 
     chosen, reviews = _pick_samples(pulls, base, production)
     samples: dict[str, list[frozenset[str]]] = {k: [] for k in REVIEW_KINDS}
     unreadable: Counter[str] = Counter()
-    release_marks: Counter[str] = Counter()
+    release_markers: Counter[str] = Counter()
     for kind, prs in chosen.items():
         for p in prs:
             try:
-                marks, extra = _sample(gh, kind, p, reviews)
+                markers, extra = _sample(gh, kind, p, reviews)
             except GhUnavailable:  # 読めない PR は標本から外し、根拠に件数を出す
                 unreadable[kind] += 1
                 continue
-            release_marks["pr"] += int("cross-review" in marks and kind == "release")
-            release_marks["resolution"] += int("cross-review" in extra)
-            samples[kind].append(marks | extra)
-    return infer_reviews(samples, dict(release_marks), dict(unreadable))
+            release_markers["pr"] += int("cross-review" in markers and kind == "release")
+            release_markers["resolution"] += int("cross-review" in extra)
+            samples[kind].append(markers | extra)
+    return infer_reviews(samples, dict(release_markers), dict(unreadable))
 
 
 def declared_flow(worktree: Optional[dict[str, Any]]) -> tuple[dict[str, Any], dict[str, Any], bool]:
@@ -395,7 +395,7 @@ def drift(worktree: Optional[dict[str, Any]], item: Optional[dict[str, Any]]) ->
         f = obj(fields.get(key))
         if "value" not in f or f["value"] == want[key]:
             continue
-        proposal = f"{ITEM}.{key} を {f['value']} にする（同じ promotion の行が許す組み合わせに揃えてから write で書く）"
+        proposal = f"{ITEM}.{key} を {f['value']} にする（同じ release_strategy の行が許す組み合わせに揃えてから write で書く）"
         rows.append(_drift_row(f"{ITEM}.{key}", want[key], f, proposal))
     return rows + _review_drift(reviews, obj(obj(item).get(REVIEWS_KEY)))
 

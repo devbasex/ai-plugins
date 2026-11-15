@@ -46,14 +46,14 @@ def project_with(suite_jobs: list | None = None, exempt: list | None = None) -> 
 
 
 @pytest.mark.parametrize("job", JOBS_OK)
-def test_ci_job_ids_accepted_in_both_places(job: str):
+def test_ci_job_ids_accepted_in_both_locations(job: str):
     v = validator(PROJECT)
     assert valid(v, project_with(suite_jobs=[job]))
     assert valid(v, project_with(exempt=[{"job": job, "reason": "手元で走らせない"}]))
 
 
 @pytest.mark.parametrize("job", JOBS_NG)
-def test_ci_job_ids_rejected_in_both_places(job: str):
+def test_ci_job_ids_rejected_in_both_locations(job: str):
     v = validator(PROJECT)
     assert not valid(v, project_with(suite_jobs=[job]))
     assert not valid(v, project_with(exempt=[{"job": job, "reason": "手元で走らせない"}]))

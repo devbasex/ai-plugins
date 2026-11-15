@@ -94,9 +94,9 @@ def _context_report(args: argparse.Namespace) -> int:
     except OSError as exc:
         return result.emit(result.stopped(TOOL, "unknown", f"判定の記録を読めない: {exc}"))
     rows = [r for r in rows if since is None or context_records.at_least(r, since)]
-    ledger = context_report.load_ledger(os.environ)
+    usage_log = context_report.load_usage_log(os.environ)
     targets = [context_records.recorded_work(args.work, None)] if args.work else context_report.works(rows)
-    reports = [context_report.report(w, rows, ledger, span) for w in targets]
+    reports = [context_report.report(w, rows, usage_log, span) for w in targets]
     metrics = {"works": len(reports), "skipped": skipped, "no_policy_rows": sum(r["no_policy_rows"] for r in reports)}
     return result.emit(result.result(TOOL, result.OK, f"{len(reports)} 件の作業を集計した", items=reports, metrics=metrics))
 

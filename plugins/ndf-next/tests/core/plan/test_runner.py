@@ -288,7 +288,7 @@ def test_prepare_uses_the_state_dir_of_the_plan(in_repo):
     assert inv.again == (str(in_repo / rel),)
 
 
-def test_prepare_keeps_an_absolute_plan_path_and_a_plan_without_a_place(in_repo, tmp_path):
+def test_prepare_keeps_an_absolute_plan_path_and_a_plan_without_a_location(in_repo, tmp_path):
     path = tmp_path / "loose.json"
     path.write_text(json.dumps({"name": "loose", "steps": [H.py_step("s", "pass")]}), encoding="utf-8")
     inv = runner.prepare(_root(in_repo), path, None, None, in_repo)

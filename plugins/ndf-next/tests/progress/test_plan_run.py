@@ -460,7 +460,7 @@ def _snapshot(st, pid):
 
 def _start(conn, pid, lane_name, key):
     view, _ = lane.read_plan(conn, pid)
-    sid = store.create_table(conn, ("sprint", REPO, f"{lane_name}-{key}"), view.lanes[lane_name].table_id, None, [])
+    sid = store.create_machine(conn, ("sprint", REPO, f"{lane_name}-{key}"), view.lanes[lane_name].machine_id, None, [])
     lane.start_row(conn, pid, lane_name, key, sid)
     return sid
 
@@ -482,7 +482,7 @@ def test_first_input_starts_the_row_with_the_lane_table_as_parent(opened):
     with store.transaction(opened) as conn:
         text = run.first_input(conn, pid, Launch("a", "r1"))
         view, _ = lane.read_plan(conn, pid)
-    assert "progress" in text and "--parent" in text and view.lanes["a"].table_id in text and '"start"' in text
+    assert "progress" in text and "--parent" in text and view.lanes["a"].machine_id in text and '"start"' in text
 
 
 def test_snapshot_lists_a_running_row_whose_answer_has_no_next_and_drops_it_after_the_mark(opened):
@@ -584,7 +584,7 @@ def test_snapshot_reads_the_last_move_of_a_stalled_lane_from_the_lane_and_sprint
     with store.transaction(opened) as conn:
         sid = _start(conn, pid, "a", "r1")
         view, _ = lane.read_plan(conn, pid)
-        last = store.read_events(conn, view.lanes["a"].table_id)[-1].at
+        last = store.read_events(conn, view.lanes["a"].machine_id)[-1].at
         snap = run.read_snapshot(conn, pid, _probes({}, {sid: {"status": "ok"}}))
     (stall,) = snap["stalls"]
     assert stall[:2] == ["a", "stall:a/r1:ended"] and stall[3] == last.isoformat() and stall[4] == "r1"

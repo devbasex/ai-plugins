@@ -38,7 +38,7 @@ def test_all_three_pass_into_one_ok_result(tmp_path: Path) -> None:
     assert result.errors(got) == []
 
 
-def test_missing_worktree_declaration_returns_init_as_next_and_still_runs_the_rest(tmp_path: Path) -> None:
+def test_missing_worktree_ndf_settings_returns_init_as_next_and_still_runs_the_rest(tmp_path: Path) -> None:
     _mvv(tmp_path, "承認した本文", "書き換えた本文")
     got = preflight.check(tmp_path, _runner({**OK, "metrics": {"present": False}}))
     assert got["status"] == "stopped" and got["next"]["argv"][1:] == ["worktree", "init"]
@@ -46,13 +46,13 @@ def test_missing_worktree_declaration_returns_init_as_next_and_still_runs_the_re
     assert result.errors(got) == []
 
 
-def test_declaration_with_unknown_keys_warns_and_unreadable_stops(tmp_path: Path) -> None:
+def test_ndf_settings_with_unknown_keys_warns_and_unreadable_stops(tmp_path: Path) -> None:
     (tmp_path / ".ndf").mkdir()
     (tmp_path / ".ndf" / "project.json").write_text(json.dumps({"test": {}, "extra": 1}), encoding="utf-8")
-    checked = preflight.declaration_checked(tmp_path)
+    checked = preflight.ndf_settings_checked(tmp_path)
     assert checked.passed and any("extra" in w for w in checked.result["warnings"])
     (tmp_path / ".ndf" / "project.json").write_text("{", encoding="utf-8")
-    assert not preflight.declaration_checked(tmp_path).passed
+    assert not preflight.ndf_settings_checked(tmp_path).passed
 
 
 def test_mvv_states(tmp_path: Path) -> None:
@@ -95,7 +95,7 @@ def _approved(body: Any = "mvv.md", sha: Any = _SHA_X) -> bytes:
         (_approved(), {"mvv.md": None}, "unreadable"),
     ],
 )
-def test_mvv_state_reads_the_declaration_and_the_body(tmp_path: Path, decl: bytes | None, files: dict, state: str) -> None:
+def test_mvv_state_reads_the_ndf_settings_and_the_body(tmp_path: Path, decl: bytes | None, files: dict, state: str) -> None:
     (tmp_path / ".ndf").mkdir()
     if decl is not None:
         (tmp_path / ".ndf" / "mvv.json").write_bytes(decl)
@@ -108,7 +108,7 @@ def test_mvv_state_reads_the_declaration_and_the_body(tmp_path: Path, decl: byte
 
 
 # NOTE: 現状固定。UTF-8 でない宣言は unreadable にならず、UnicodeDecodeError がそのまま出る
-def test_mvv_state_raises_on_a_declaration_that_is_not_utf8(tmp_path: Path) -> None:
+def test_mvv_state_raises_on_a_ndf_settings_that_is_not_utf8(tmp_path: Path) -> None:
     (tmp_path / ".ndf").mkdir()
     (tmp_path / ".ndf" / "mvv.json").write_bytes(b"\xff")
     with pytest.raises(UnicodeDecodeError):

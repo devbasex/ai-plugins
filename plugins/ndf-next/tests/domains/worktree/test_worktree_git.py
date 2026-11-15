@@ -53,7 +53,7 @@ def test_create_reuses_existing_branch(main_repo: Path, run_git: Callable) -> No
     assert (got.new_branch, got.start_ref) == (False, "feat/old")
 
 
-def test_create_without_declaration_uses_origin_default(make_repo: Callable) -> None:
+def test_create_without_ndf_settings_uses_origin_default(make_repo: Callable) -> None:
     main = make_repo(None)
     assert create.create(main, "feat/c").base == "develop"
 
@@ -168,7 +168,7 @@ def test_cleanup_restores_evacuated_files_when_git_refuses(main_repo: Path, run_
 
 def test_cleanup_keeps_selected_sprint_until_production(main_repo: Path, run_git: Callable) -> None:
     """選んで集める取り込み方のスプリントは、merged と同じく本番チャネルに含まれるまで cleanup でも消さない。"""
-    decl = {"version": 1, "base_branch": "develop", "production_branch": "main", "branch_flow": {"promotion": "selected"}}
+    decl = {"version": 1, "base_branch": "develop", "production_branch": "main", "branch_flow": {"release_strategy": "selected"}}
     (main_repo / ".ndf" / "worktree.json").write_text(json.dumps(decl), encoding="utf-8")
     run_git(main_repo, "add", "-A")
     run_git(main_repo, "commit", "-q", "-m", "declare")
@@ -197,12 +197,12 @@ def test_cleanup_records_merge_commit_for_evacuated_files(main_repo: Path, run_g
     pull = _pull("feat/sq", "closed", True)._replace(merge_sha=merge)
     [got] = cleanup.cleanup(main_repo, main_repo, FakeHub({"feat/sq": [pull]}))
     dest = Path(got.note.split(" ", 1)[1].split("。", 1)[0])
-    assert json.loads(trash.ledger_of(dest).read_text(encoding="utf-8"))["merge_commit"] == merge
+    assert json.loads(trash.record_of(dest).read_text(encoding="utf-8"))["merge_commit"] == merge
 
 
 # 現状固定（I-022）: 状態ファイル（排他・台帳・退避先）の置き場は、どこから呼んでも共通の git ディレクトリの実体の下。
 def test_state_files_live_under_common_git_dir_from_main_and_worktree(main_repo: Path, tmp_path: Path) -> None:
-    from ndf.domains.worktree import ledger, mainlock, trash
+    from ndf.domains.worktree import allocations, mainlock, trash
 
     wt = create.create(main_repo, "feat/state").path
     link = tmp_path / "link"
@@ -211,16 +211,16 @@ def test_state_files_live_under_common_git_dir_from_main_and_worktree(main_repo:
     for where in (main_repo, wt, link):
         g = Git(where)
         assert mainlock.lock_file(g) == common / "ndf-main.lock"
-        assert ledger.ledger_path(g) == common / identity.load().name / "worktree-registry.json"
+        assert allocations.allocations_path(g) == common / identity.load().name / "worktree-registry.json"
         assert trash.trash_root(g) == common / identity.load().name / "worktree-trash"
 
 
 def test_state_files_propagate_git_failure(tmp_path: Path) -> None:
     from ndf.adapters.git import GitError
-    from ndf.domains.worktree import ledger, mainlock, trash
+    from ndf.domains.worktree import allocations, mainlock, trash
 
     outside = tmp_path / "not-a-repo"
     outside.mkdir()
-    for find in (mainlock.lock_file, ledger.ledger_path, trash.trash_root):
+    for find in (mainlock.lock_file, allocations.allocations_path, trash.trash_root):
         with pytest.raises(GitError):
             find(Git(outside))

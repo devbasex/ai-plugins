@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ndf-settings/instructions.schema.json",
+  "title": "指示書の宣言（.ndf/instructions.json）",
+  "description": "指示書（AGENTS.md・CLAUDE.md など）のファイル・読み込みの許可・リリース済み版の取り出し方・予算。無ければ既定の判定だけが動く",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "編集のときの補完に使うスキーマの位置。読み手は参照しない"
+    },
+    "version": {
+      "type": "integer",
+      "enum": [
+        1
+      ],
+      "description": "宣言の形の版。読み手は知らない版を読まない"
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "走査する指示書の名前。/ を含まない値はファイル名の一致、含む値は根からの相対パスの一致。書くと既定の 3 つ（AGENTS.md / CLAUDE.md / KIRO.md）を置き換える"
+    },
+    "imports": {
+      "type": "object",
+      "description": "許可する@インポート。キーは根からの相対パス、値は {参照先: 理由}。書けば許可の外を指摘する。{} は「許可が 1 つも無い」で、未指定とは別の値",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "string",
+          "description": "毎回読ませる理由"
+        }
+      }
+    },
+    "released": {
+      "type": "object",
+      "description": "リリース済み版の取り出し方。pattern は名前付きの捕捉 (?P<version>…) を 1 つ持つ",
+      "required": [
+        "source",
+        "pattern"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "type": "string",
+          "enum": [
+            "changelog",
+            "tags"
+          ]
+        },
+        "path": {
+          "type": "string",
+          "description": "changelog のときの文書。根の中に収まること"
+        },
+        "pattern": {
+          "type": "string"
+        }
+      }
+    },
+    "decisions": {
+      "type": "string",
+      "description": "退避先の文書。指摘の文面に出す"
+    },
+    "pending_marker": {
+      "type": "string",
+      "minLength": 1,
+      "description": "版が決まる前の段落の目印（例: の次の版で）。空文字列は宣言の不正"
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "ルート指示書 1 本あたりの読み込みの上限"
+        }
+      },
+      "description": "budget（このリポジトリの宣言にある最上位のキー）"
+    }
+  },
+  "x-ndf-location": "worktree",
+  "x-ndf-read-by": [
+    {
+      "by": "工程: 指示書の確かめ",
+      "when": "リリースの前に指示書の読み込みと予算を確かめるとき"
+    }
+  ],
+  "examples": [
+    {
+      "version": 1,
+      "files": [
+        "AGENTS.md",
+        "CLAUDE.md"
+      ],
+      "budget": {
+        "bytes": 24000
+      }
+    }
+  ]
+}

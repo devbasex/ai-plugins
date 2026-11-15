@@ -75,5 +75,5 @@ def distribution_changed(found: Iterable[Change]) -> bool:
 def instruction_changes(paths: Iterable[str]) -> list[str]:
     """指示書と宣言の置き場（`.ndf/`）の下の変化（#3110）。"""
     names = set(facts.ids(INSTRUCTION_FILES))
-    decl = identity.FIXED_WORDS["declaration_dir"] + "/"
+    decl = identity.FIXED_WORDS["ndf_settings_dir"] + "/"
     return sorted({p for p in paths if p in names or p.startswith(decl)})

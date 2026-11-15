@@ -5,7 +5,7 @@
 
 | ファイル | 書き手 | 中身 |
 | --- | --- | --- |
-| `next.json` | Stop の hook（`relay-mark`） | 次の区間のブロック。中継が読んで次の区間を始める |
+| `next.json` | Stop の hook（`relay-marker`） | 次の区間のブロック。中継が読んで次の区間を始める |
 | `question.json` | PreToolUse の hook（`ask-forward`） | AskUserQuestion の問い。中継が人かオーガナイザーへ回す |
 
 オーガナイザーのレーン（`NDF_ORGANIZER_DIR` と `NDF_ORGANIZER_LANE`）では、問いを `questions/<レーン>.json` へも書く

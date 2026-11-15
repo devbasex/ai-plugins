@@ -37,7 +37,7 @@ TOOL = __package__.rpartition(".")[2]
 ACTOR = "conductor"
 # 番号のぶつかり（同時の追記）で読み直して書き直す回数
 APPEND_ATTEMPTS = 3
-PROJECT_FILE = identity.FIXED_WORDS["declaration_dir"] + "/project.json"
+PROJECT_FILE = identity.FIXED_WORDS["ndf_settings_dir"] + "/project.json"
 # 副命令 disable・enable が書く事象の種類
 TOGGLE_KINDS = {"disable": "disabled", "enable": "enabled"}
 # 進行表の作成の時点で済んでいる工程（要求と受け入れ条件）の終了の理由
@@ -78,19 +78,19 @@ def read_json(path: Path, failure: str = "を JSON として読めない") -> An
         raise contracts.ContractError(f"{path} {failure}: {exc}") from exc
 
 
-def declaration_path(cwd: Path, name: str) -> Path:
+def ndf_settings_path(cwd: Path, name: str) -> Path:
     """リポジトリの根の宣言のファイルのパス。"""
     return Path(Git(cwd).run("rev-parse", "--show-toplevel").strip()) / name
 
 
-def _read_declaration(path: Path) -> dict[str, Any]:
+def _read_ndf_settings(path: Path) -> dict[str, Any]:
     raw = read_json(path, "を読めない") if path.exists() else {}
     return raw if isinstance(raw, dict) else {}
 
 
-def declaration(cwd: Path, name: str) -> dict[str, Any]:
+def ndf_settings(cwd: Path, name: str) -> dict[str, Any]:
     """リポジトリの根の宣言のファイル。無いか、オブジェクトでなければ空。JSON として読めなければ `ContractError`。"""
-    return _read_declaration(declaration_path(cwd, name))
+    return _read_ndf_settings(ndf_settings_path(cwd, name))
 
 
 # --- 工程の定義の条件（`when`）の語のうち、進行表の外（git の差分と宣言のファイル・スプリントの文脈）から求める語 ---
@@ -105,7 +105,7 @@ class FactUnknown(Exception):
         self.word = word
 
 
-WORKTREE_FILE = identity.FIXED_WORDS["declaration_dir"] + "/worktree.json"
+WORKTREE_FILE = identity.FIXED_WORDS["ndf_settings_dir"] + "/worktree.json"
 DOC_FILES = ("**/*.md",)  # `.ndf/project.json` の `docs.files` を省いたときの文書のファイル
 BEHAVIOR_DOCS = ("**/skills/**/*.md", "**/agents/*.md")  # 同じく `docs.behavior`（振る舞いを決める文書）
 # 差分の語（`diff_kinds` の鍵）
@@ -131,7 +131,7 @@ def _pathspecs(project: Mapping[str, Any], key: str, default: tuple[str, ...]) -
 
 def _sprint_range(context: Mapping[str, Any], cwd: Path) -> tuple[Git, str]:
     """スプリントブランチとベースブランチ（`.ndf/worktree.json` の `base_branch`。手元に無ければ `origin/`）の分岐点からの範囲。"""
-    base = definition.dig(declaration(cwd, WORKTREE_FILE), "base_branch")
+    base = definition.dig(ndf_settings(cwd, WORKTREE_FILE), "base_branch")
     if not isinstance(base, str) or not base or base.startswith("-"):
         raise FactUnknown(f"差分を求められない: {WORKTREE_FILE} の base_branch が無いか、- で始まる")
     git = Git(Path(context.get("worktree") or cwd))
@@ -150,7 +150,7 @@ def _diff_names(git: Git, rng: str, specs: list[str]) -> set[str]:
 
 def range_diff_kinds(git: Git, rng: str, cwd: Path) -> dict[str, bool]:
     """範囲 `rng` の差分を、`.ndf/project.json` の `docs.files`・`docs.behavior`（省けば既定）で分ける。git が読めなければ `GitError`。"""
-    project = declaration(cwd, PROJECT_FILE)
+    project = ndf_settings(cwd, PROJECT_FILE)
     files = _diff_names(git, rng, [])
     docs = _diff_names(git, rng, _pathspecs(project, "files", DOC_FILES))
     return diff_kinds(files, docs, _diff_names(git, rng, _pathspecs(project, "behavior", BEHAVIOR_DOCS)))
@@ -170,8 +170,8 @@ def facts_of(words: tuple[str, ...], context: Mapping[str, Any], cwd: Path) -> d
     kinds = functools.cache(lambda: sprint_diff_kinds(context, cwd))
     known: dict[str, Callable[[], bool]] = {
         **{w: (lambda w=w: kinds()[w]) for w in DIFF_WORDS},
-        "ci_declared": lambda: definition.dig(declaration(cwd, PROJECT_FILE), "test", "ci", "only") is True,
-        "prod_branch": lambda: bool(definition.dig(declaration(cwd, WORKTREE_FILE), "production_branch")),
+        "ci_declared": lambda: definition.dig(ndf_settings(cwd, PROJECT_FILE), "test", "ci", "only") is True,
+        "prod_branch": lambda: bool(definition.dig(ndf_settings(cwd, WORKTREE_FILE), "production_branch")),
         "release_record": lambda: "version" in context,
         "design_pr": lambda: "design_pr" in context,
     }
@@ -189,19 +189,19 @@ def facts_of(words: tuple[str, ...], context: Mapping[str, Any], cwd: Path) -> d
 
 def _declared(cwd: Path) -> dict[str, Any]:
     """`.ndf/project.json` の `workflow.stages`（工程の名前 → 有効と理由）。ファイルか項目が無ければ空。"""
-    path = declaration_path(cwd, PROJECT_FILE)
-    raw = _read_declaration(path)
+    path = ndf_settings_path(cwd, PROJECT_FILE)
+    raw = _read_ndf_settings(path)
     workflow = raw.get("workflow")
     declared = workflow.get("stages") if isinstance(workflow, dict) else None
     if not isinstance(declared, dict):
         return {}
-    errs = [f"workflow.stages.{name}: {e}" for name, value in declared.items() for e in _declaration_errors(value)]
+    errs = [f"workflow.stages.{name}: {e}" for name, value in declared.items() for e in _ndf_settings_errors(value)]
     if errs:
         raise contracts.ContractError(f"{path} の宣言が形に合わない: {'; '.join(errs)}")
     return declared
 
 
-def _declaration_errors(value: Any) -> list[str]:
+def _ndf_settings_errors(value: Any) -> list[str]:
     """工程の宣言 1 つの形 `{"enabled": 真偽, "reason": 理由（無効のとき必須）}` を破る理由。"""
     if not isinstance(value, dict):
         return ['{"enabled": 真偽, "reason": 理由} の形でない']
@@ -216,12 +216,12 @@ def _declaration_errors(value: Any) -> list[str]:
 # --- 進行表の読み書き ---------------------------------------------------------------------
 
 
-def read_current(conn: Any, table_id: str) -> tuple[int, dict[str, Any], stages.Snapshot, list[model.Event]]:
+def read_current(conn: Any, machine_id: str) -> tuple[int, dict[str, Any], stages.Snapshot, list[model.Event]]:
     """進行表の最新の改訂・定義の文書・定義・事象。進行表が無ければ `model.Refused`。"""
-    if store.read_table(conn, table_id) is None:
-        raise model.Refused(f"進行表 {table_id} は無い")
-    rev, raw = store.read_definition(conn, table_id)
-    return rev, raw, stages.snapshot_from(raw), store.read_events(conn, table_id)
+    if store.read_machine(conn, machine_id) is None:
+        raise model.Refused(f"進行表 {machine_id} は無い")
+    rev, raw = store.read_definition(conn, machine_id)
+    return rev, raw, stages.snapshot_from(raw), store.read_events(conn, machine_id)
 
 
 def retrying_transaction(st: store.Store, write: Callable[[Any], list[int]]) -> list[int]:
@@ -237,14 +237,14 @@ def retrying_transaction(st: store.Store, write: Callable[[Any], list[int]]) -> 
 
 
 def _append(
-    st: store.Store, table_id: str, build: Callable[[int, stages.Snapshot, list[model.Event]], list[model.EventDraft]]
+    st: store.Store, machine_id: str, build: Callable[[int, stages.Snapshot, list[model.Event]], list[model.EventDraft]]
 ) -> list[int]:
     """今の改訂と事象を読み、`build` が作った下書きを追記する。番号がぶつかれば読み直して作り直す。"""
 
     def write(conn: Any) -> list[int]:
-        rev, _, snap, events = read_current(conn, table_id)
+        rev, _, snap, events = read_current(conn, machine_id)
         drafts = build(rev, snap, events)
-        return store.append_events(conn, table_id, drafts, events[-1].seq if events else 0)
+        return store.append_events(conn, machine_id, drafts, events[-1].seq if events else 0)
 
     return retrying_transaction(st, write)
 
@@ -317,21 +317,21 @@ def _cmd_new(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any
     snap = definition.load_definition(a.mode)
     doc, drafts = _prepare_new(a, cwd, snap)
     with store.transaction(st) as conn:
-        tid = store.create_table(conn, ("sprint", repo_id(cwd, st.root), a.name), a.parent, doc, drafts)
+        tid = store.create_machine(conn, ("sprint", repo_id(cwd, st.root), a.name), a.parent, doc, drafts)
         rev, _, _, events = read_current(conn, tid)
     rows = _rows(snap, events, rev)
     off = [r["stage"] for r in rows if r["state"] == "disabled"]
     summary = f"進行表 {tid} を作った（{len(rows)} 行、無効 {len(off)} 行）"
-    return result.result(TOOL, result.OK, summary, items=rows, metrics={"table_id": tid, "rows": len(rows), "disabled": off})
+    return result.result(TOOL, result.OK, summary, items=rows, metrics={"machine_id": tid, "rows": len(rows), "disabled": off})
 
 
 def _cmd_show(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, Any]:
     with store.transaction(st) as conn:
-        rev, _, snap, events = read_current(conn, a.table_id)
+        rev, _, snap, events = read_current(conn, a.machine_id)
     rows = _rows(snap, events, rev)
     whole = model.table_state("sprint", events)
-    metrics = {"table_id": a.table_id, "mode": snap.mode, "rev": rev, "state": whole, "history": [e.as_dict() for e in events]}
-    return result.result(TOOL, result.OK, f"進行表 {a.table_id} は{model.label(whole)}（{len(rows)} 行）", items=rows, metrics=metrics)
+    metrics = {"machine_id": a.machine_id, "mode": snap.mode, "rev": rev, "state": whole, "history": [e.as_dict() for e in events]}
+    return result.result(TOOL, result.OK, f"進行表 {a.machine_id} は{model.label(whole)}（{len(rows)} 行）", items=rows, metrics=metrics)
 
 
 def _changed(a: argparse.Namespace, st: store.Store, kind: str, payload: dict[str, Any] | None) -> dict[str, Any]:
@@ -341,9 +341,9 @@ def _changed(a: argparse.Namespace, st: store.Store, kind: str, payload: dict[st
             raise model.Refused(stages.gate_refusal(stage))
         return [model.EventDraft(kind, ACTOR, a.stage, reason=a.reason, payload=payload, rev=rev)]
 
-    seqs = _append(st, a.table_id, build)
+    seqs = _append(st, a.machine_id, build)
     return result.result(
-        TOOL, result.OK, f"進行表 {a.table_id} の {a.stage} に {kind} を書いた", metrics={"table_id": a.table_id, "seqs": seqs}
+        TOOL, result.OK, f"進行表 {a.machine_id} の {a.stage} に {kind} を書いた", metrics={"machine_id": a.machine_id, "seqs": seqs}
     )
 
 
@@ -352,14 +352,14 @@ def _cmd_toggle(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str,
 
 
 def _cmd_retry(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, Any]:
-    with store.run_lock(st, a.table_id):
+    with store.run_lock(st, a.machine_id):
         return _changed(a, st, "retry", None)
 
 
 def _cmd_finish(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, Any]:
     output = read_json(Path(a.output))
     with store.transaction(st) as conn:
-        _, _, snap, _ = read_current(conn, a.table_id)
+        _, _, snap, _ = read_current(conn, a.machine_id)
     stage = snap.stage(a.stage)
     errs = definition.validate_stage_output(stage, output)
     if errs:
@@ -372,10 +372,10 @@ def _cmd_finish(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str,
         done = model.EventDraft("manual_finished", ACTOR, a.stage, reason=a.reason, payload={"output": a.output}, rev=rev)
         return [done, *([draft] if draft is not None else [])]
 
-    seqs = _append(st, a.table_id, build)
+    seqs = _append(st, a.machine_id, build)
     st.warnings.extend(dropped)
     return result.result(
-        TOOL, result.OK, f"進行表 {a.table_id} の {a.stage} に manual_finished を書いた", metrics={"table_id": a.table_id, "seqs": seqs}
+        TOOL, result.OK, f"進行表 {a.machine_id} の {a.stage} に manual_finished を書いた", metrics={"machine_id": a.machine_id, "seqs": seqs}
     )
 
 
@@ -386,11 +386,11 @@ def _cmd_cancel(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str,
         drafts = [model.EventDraft("cancelled", ACTOR, name, reason=a.reason, rev=rev) for name in live]
         return [*drafts, model.EventDraft("cancelled", ACTOR, None, reason=a.reason, rev=rev)]
 
-    with store.run_lock(st, a.table_id):
-        seqs = _append(st, a.table_id, build)
+    with store.run_lock(st, a.machine_id):
+        seqs = _append(st, a.machine_id, build)
     rows = len(seqs) - 1
     return result.result(
-        TOOL, result.OK, f"進行表 {a.table_id} を中止した（中止にした行 {rows}）", metrics={"table_id": a.table_id, "cancelled_rows": rows}
+        TOOL, result.OK, f"進行表 {a.machine_id} を中止した（中止にした行 {rows}）", metrics={"machine_id": a.machine_id, "cancelled_rows": rows}
     )
 
 
@@ -445,16 +445,16 @@ def parser() -> argparse.ArgumentParser:
     new.add_argument("--disable", type=_disable_item, action="append", default=[], help="<工程>=<理由>")
     new.add_argument("--requirements", help="要求と受け入れ条件の出力（工程の出力の規約に合う JSON）")
     new.add_argument("--parent", help="親の進行表（レーンの進行表）の ID")
-    sub.add_parser("show", help="進行表を表示する").add_argument("table_id")
+    sub.add_parser("show", help="進行表を表示する").add_argument("machine_id")
     for name in ("disable", "enable", "retry", "finish"):
         p = sub.add_parser(name, help=f"工程に {name} を書く")
-        p.add_argument("table_id")
+        p.add_argument("machine_id")
         p.add_argument("stage", help="工程の名前（工程表の行名）")
         p.add_argument("--reason", required=True)
         if name == "finish":
             p.add_argument("--output", required=True, help="工程の出力の規約に合う JSON のファイル")
     cancel = sub.add_parser("cancel", help="進行表を中止する")
-    cancel.add_argument("table_id")
+    cancel.add_argument("machine_id")
     cancel.add_argument("--reason", required=True)
     sub.add_parser("restore", help="控えから進行表の DB を戻す").add_argument("--from", dest="source", required=True)
     return ap

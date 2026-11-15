@@ -12,7 +12,7 @@ import pytest
 
 from ndf import identity
 from ndf.adapters.git import Completed, Git
-from ndf.domains.worktree import cli_env, container, create, deps, ledger, localenv, localenv_decide, testenv, testenv_decide, testenv_sweep
+from ndf.domains.worktree import cli_env, container, create, deps, allocations, localenv, localenv_decide, testenv, testenv_decide, testenv_sweep
 
 
 def _declare(main: Path, run_git: Callable, extra: dict) -> None:
@@ -257,7 +257,7 @@ def test_testenv_reach_refuses_container_without_worktree(main_repo: Path, run_g
 # 現状固定（I-008）: `testenv.test_values` の各分岐。期待値は今の実装の出力。
 def _values_target(main_repo: Path, kinds: dict) -> testenv.Target:
     path = Path(os.path.realpath(main_repo))
-    return testenv.Target(path, path, {"test_kinds": kinds}, (), FakeShell().shell(), ledger.Ledger(path / "unused.json"))
+    return testenv.Target(path, path, {"test_kinds": kinds}, (), FakeShell().shell(), allocations.Allocations(path / "unused.json"))
 
 
 ROW = {"environment": "env-a", "ports": {"http": 20001, "api": 20002}}
@@ -284,7 +284,7 @@ def test_test_values_without_evidence(main_repo: Path, kinds: dict, want: dict) 
     assert not (t.path / testenv.EVIDENCE).exists()
 
 
-def test_test_values_evidence_default_place_and_exclude(main_repo: Path) -> None:
+def test_test_values_evidence_default_location_and_exclude(main_repo: Path) -> None:
     t = _values_target(main_repo, {"e2e": {"out_env": "OUT", "skip_reset": {"S": "1"}}})
     got = testenv.test_values(t, "e2e", ROW, None)
     out = Path(got.pop("OUT"))
@@ -393,9 +393,9 @@ def test_run_localenv_does_not_catch_errors_of_mode_verify_healthcheck(monkeypat
             _le_run(monkeypatch, action, **{action: _le_raise})
 
 
-# 現状固定（I-012）: `ledger.Ledger` の読み書き。期待値は今の実装の出力。
-def test_ledger_rows_tolerates_missing_and_broken_shapes(tmp_path: Path) -> None:
-    book = ledger.Ledger(tmp_path / "ndf" / "reg.json")
+# 現状固定（I-012）: `allocations.Allocations` の読み書き。期待値は今の実装の出力。
+def test_allocations_rows_tolerates_missing_and_broken_shapes(tmp_path: Path) -> None:
+    book = allocations.Allocations(tmp_path / "ndf" / "reg.json")
     assert book.rows() == [] and book.current("/w") is None
     book.path.parent.mkdir()
     for text, want in [("[]", []), ('{"assignments": {}}', []), ('{"assignments": [1, {"a": 1}, "x"]}', [{"a": 1}])]:
@@ -403,8 +403,8 @@ def test_ledger_rows_tolerates_missing_and_broken_shapes(tmp_path: Path) -> None
         assert book.rows() == want
 
 
-def test_ledger_acquire_current_update_and_release(tmp_path: Path) -> None:
-    book = ledger.Ledger(tmp_path / "ndf" / "reg.json")
+def test_allocations_acquire_current_update_and_release(tmp_path: Path) -> None:
+    book = allocations.Allocations(tmp_path / "ndf" / "reg.json")
     row = book.acquire("/w/a", "feat/a", "env-a")
     assert row is not None
     keys = {"id", "worktree", "branch", "environment", "slot", "ports", "assigned_at", "last_used_at", "released_at", "expose"}
@@ -435,28 +435,28 @@ def test_ledger_acquire_current_update_and_release(tmp_path: Path) -> None:
     assert not list(book.path.parent.glob(f".{book.path.name}.*"))  # 一時ファイルは残らない
 
 
-def test_ledger_acquire_skips_released_slot_with_open_expose(tmp_path: Path) -> None:
-    book = ledger.Ledger(tmp_path / "reg.json")
+def test_allocations_acquire_skips_released_slot_with_open_expose(tmp_path: Path) -> None:
+    book = allocations.Allocations(tmp_path / "reg.json")
     rows = [{"worktree": "/w/a", "slot": 0, "released_at": "t1", "expose": {"url": "u", "closed_at": None}}]
     book.path.write_text(json.dumps({"assignments": rows}), encoding="utf-8")
     assert book.acquire("/w/new", "b", "e")["slot"] == 1  # type: ignore[index]  # 公開が閉じるまでスロットを渡さない
 
 
-def test_ledger_acquire_returns_none_when_slots_are_full(tmp_path: Path) -> None:
-    book = ledger.Ledger(tmp_path / "reg.json")
+def test_allocations_acquire_returns_none_when_slots_are_full(tmp_path: Path) -> None:
+    book = allocations.Allocations(tmp_path / "reg.json")
     rows = [{"worktree": f"/w/{i}", "slot": i, "released_at": None} for i in range(testenv_decide.SLOTS)]
     book.path.write_text(json.dumps({"assignments": rows}), encoding="utf-8")
     assert book.acquire("/w/new", "b", "e") is None
     assert len(book.rows()) == testenv_decide.SLOTS
 
 
-def test_ledger_latest_and_path_of_git(main_repo: Path) -> None:
+def test_allocations_latest_and_path_of_git(main_repo: Path) -> None:
     rows = [{"worktree": "/w", "n": 1}, {"worktree": "/x", "n": 2}, {"worktree": "/w", "n": 3}]
-    assert ledger.latest(rows, "/w", lambda r: True) == {"worktree": "/w", "n": 3}
-    assert ledger.latest(rows, "/w", lambda r: r["n"] == 1) == {"worktree": "/w", "n": 1}
-    assert ledger.latest(rows, "/z", lambda r: True) is None
+    assert allocations.latest(rows, "/w", lambda r: True) == {"worktree": "/w", "n": 3}
+    assert allocations.latest(rows, "/w", lambda r: r["n"] == 1) == {"worktree": "/w", "n": 1}
+    assert allocations.latest(rows, "/z", lambda r: True) is None
     want = Path(os.path.realpath(main_repo)) / ".git" / identity.load().name / "worktree-registry.json"
-    assert ledger.ledger_path(Git(main_repo)) == want and ledger.Ledger.of(Git(main_repo)).path == want
+    assert allocations.allocations_path(Git(main_repo)) == want and allocations.Allocations.of(Git(main_repo)).path == want
 
 
 # 現状固定（I-020）: `testenv_sweep.expose`・`unexpose` の分岐。期待値は今の実装の出力。
@@ -467,7 +467,7 @@ def _sweep_target(tmp_path: Path, fake: FakeShell, conf: object, make_dir: bool 
     wt = tmp_path / "wt"
     if make_dir:
         wt.mkdir()
-    return testenv.Target(wt, tmp_path, {"expose": conf}, (), fake.shell(), ledger.Ledger(tmp_path / "reg.json"))
+    return testenv.Target(wt, tmp_path, {"expose": conf}, (), fake.shell(), allocations.Allocations(tmp_path / "reg.json"))
 
 
 def _assigned(t: testenv.Target, tag: Optional[str] = "t1") -> None:
@@ -625,7 +625,7 @@ def test_unexpose_without_close_command_keeps_record(tmp_path: Path) -> None:
 
 # 現状固定（I-012）: `testenv_sweep.reap` が止める行と残す行。期待値は今の実装の出力。
 def test_reap_stops_only_unreleased_rows_idle_long_enough(tmp_path: Path) -> None:
-    old, new = "2000-01-01T00:00:00Z", ledger.now()
+    old, new = "2000-01-01T00:00:00Z", allocations.now()
     rows = [
         {"worktree": "/w/a", "environment": "env-a", "slot": 0, "last_used_at": old, "released_at": None},
         {"worktree": "/w/b", "environment": "env-b", "slot": 1, "last_used_at": old, "released_at": old},  # 解放済み
@@ -633,7 +633,7 @@ def test_reap_stops_only_unreleased_rows_idle_long_enough(tmp_path: Path) -> Non
         {"worktree": "/w/d", "environment": "env-d", "slot": 3, "last_used_at": "broken", "released_at": None},  # 読めない
         {"worktree": "/w/e", "environment": "env-e", "slot": 4, "released_at": None},  # 時刻が無い
     ]
-    book = ledger.Ledger(tmp_path / "reg.json")
+    book = allocations.Allocations(tmp_path / "reg.json")
     book.path.write_text(json.dumps({"assignments": rows}), encoding="utf-8")
     fake = FakeShell({"compose -p": Completed(0, "", "")})
     t = testenv.Target(tmp_path, tmp_path, {}, (), fake.shell(), book)
@@ -655,7 +655,7 @@ def test_reap_stops_only_unreleased_rows_idle_long_enough(tmp_path: Path) -> Non
 def test_open_row_reads_expose_shapes(expose: object, want: bool) -> None:
     released = {"worktree": "/w", "released_at": "2026-01-01T00:00:00Z", "expose": expose}
     rows = [{"worktree": "/w", "released_at": None, "expose": None}, released, {"worktree": "/x", "expose": {"closed_at": None}}]
-    assert ledger.exposing(released) is want
+    assert allocations.exposing(released) is want
     assert testenv_sweep._open_row(rows, "/w") == (released if want else None)
 
 
@@ -702,7 +702,7 @@ def test_testenv_up_failure_does_not_record_tag(main_repo: Path, run_git: Callab
         testenv_sweep.expose(t)
 
 
-def test_testenv_unexpose_without_close_command_keeps_ledger(main_repo: Path, run_git: Callable) -> None:
+def test_testenv_unexpose_without_close_command_keeps_allocations(main_repo: Path, run_git: Callable) -> None:
     t = _testenv(main_repo, run_git, "feat/q")
     testenv.assign(t)
     t.book.update(t.key, lambda r: r.update(golden_tag="t1"))

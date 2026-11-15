@@ -54,10 +54,10 @@ def test_writer_through_the_entry_leaves_a_prepared_state_dir(state_home, last_r
     assert accounts.pinned(state_home) == "work"
 
 
-def test_entry_writes_the_retired_places_to_stderr(state_home, monkeypatch, capsys):
+def test_entry_writes_the_retired_locations_to_stderr(state_home, monkeypatch, capsys):
     # 旧い置き場を退避したら、元と先を標準エラーへ 1 行ずつ書き、副命令はそのまま呼ぶ
     state_home.mkdir(parents=True)
-    (state_home / "ledger.jsonl").write_text("old")
+    (state_home / "journal.jsonl").write_text("old")
     calls = []
     _fake_subcommand(monkeypatch, lambda argv: calls.append(argv) or 0)
 
@@ -65,7 +65,7 @@ def test_entry_writes_the_retired_places_to_stderr(state_home, monkeypatch, caps
 
     assert calls == [[]]
     [moved] = [p for p in state_home.parent.iterdir() if p.name.startswith(state_home.name + identity.RETIRED_SUFFIX)]
-    assert (moved / "ledger.jsonl").read_text() == "old"
+    assert (moved / "journal.jsonl").read_text() == "old"
     line = identity.RETIRED_LINE.format(retired_from=state_home, retired_to=moved)
     assert line in capsys.readouterr().err.splitlines()
 
@@ -73,7 +73,7 @@ def test_entry_writes_the_retired_places_to_stderr(state_home, monkeypatch, caps
 def test_entry_stops_without_calling_the_subcommand_when_preparing_fails(state_home, monkeypatch, capsys, last_result):
     # 用意できなければ（ほかのプラグインの根から呼ばれ、旧い置き場を退避してよいと確かめられない）副命令を呼ばずに止まる
     state_home.mkdir(parents=True)
-    (state_home / "ledger.jsonl").write_text("old")
+    (state_home / "journal.jsonl").write_text("old")
     monkeypatch.setenv("NDF_CALLER_PLUGIN_ROOT", str(state_home.parent / "other-plugin"))
     calls = []
     _fake_subcommand(monkeypatch, lambda argv: calls.append(argv) or 0)
@@ -83,10 +83,10 @@ def test_entry_stops_without_calling_the_subcommand_when_preparing_fails(state_h
     assert calls == []
     report = last_result(capsys.readouterr().out)
     assert (report["tool"], report["status"], report["cause"]["kind"]) == (cli.TOOL, "stopped", "config_broken")
-    assert (state_home / "ledger.jsonl").read_text() == "old"
+    assert (state_home / "journal.jsonl").read_text() == "old"
 
 
-def test_entry_keeps_the_places_retired_before_preparing_failed(monkeypatch, capsys, last_result):
+def test_entry_keeps_the_locations_retired_before_preparing_failed(monkeypatch, capsys, last_result):
     # 退避の途中か後で失敗しても、それまでに退避した元と先を標準エラーと items に残す
     retired = (identity.Retired(Path("/s/p"), Path("/s/p.v10-20261114")),)
 

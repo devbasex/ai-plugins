@@ -103,9 +103,9 @@ def test_parallel_runs_wait_for_each_other(project):
     root, bin_dir, log = project
     procs = [_ndf(["run", "--", "fakerun ."], root, bin_dir, log) for _ in range(3)]
     assert [p.wait() for p in procs] == [0, 0, 0]
-    marks = sorted((float(t), kind) for kind, t in (line.split() for line in log.read_text().splitlines()))
+    markers = sorted((float(t), kind) for kind, t in (line.split() for line in log.read_text().splitlines()))
     running = peak = 0
-    for _, kind in marks:
+    for _, kind in markers:
         running += 1 if kind == "start" else -1
         peak = max(peak, running)
     assert peak == 1
@@ -146,12 +146,12 @@ def test_report_reads_the_records(tmp_path, slots_dir):
     assert (metrics["gave_up"], metrics["waited_runs"]) == (1, 1)
 
 
-def test_report_lists_the_old_state_places_it_retired(monkeypatch, tmp_path, capsys):
+def test_report_lists_the_old_state_locations_it_retired(monkeypatch, tmp_path, capsys):
     # 枠の置き場のために状態の置き場を用意して旧い置き場を退避したら、元と先を items に載せる（エントリポイントを通らずに呼んだとき）
     state_home = tmp_path / "xdg-state"
     old = state_home / identity.load().name
     old.mkdir(parents=True)
-    (old / "ledger.jsonl").write_text("old")
+    (old / "journal.jsonl").write_text("old")
     for name, value in {slots.SLOTS_DIR_ENV: "", "XDG_STATE_HOME": str(state_home), "CLAUDE_CONFIG_DIR": str(tmp_path / "config")}.items():
         monkeypatch.setenv(name, value)
 
@@ -159,16 +159,16 @@ def test_report_lists_the_old_state_places_it_retired(monkeypatch, tmp_path, cap
 
     items = _result(capsys.readouterr().out, 0)["items"]
     assert [item["retired_from"] for item in items] == [str(old)]
-    assert (Path(items[0]["retired_to"]) / "ledger.jsonl").read_text() == "old"
+    assert (Path(items[0]["retired_to"]) / "journal.jsonl").read_text() == "old"
 
 
-def test_run_writes_the_old_state_places_it_retired(project, tmp_path):
+def test_run_writes_the_old_state_locations_it_retired(project, tmp_path):
     # エントリポイント（`ndf test-slot run`）を通すと、エントリポイントが副命令の前に退避し、元と先を標準エラーへ書く。標準出力は子のもののまま（I7）
     root, bin_dir, log = project
     state_home = tmp_path / "xdg-state"
     old = state_home / identity.load().name
     old.mkdir(parents=True)
-    (old / "ledger.jsonl").write_text("old")
+    (old / "journal.jsonl").write_text("old")
     extra = {slots.SLOTS_DIR_ENV: "", "XDG_STATE_HOME": str(state_home), "CLAUDE_CONFIG_DIR": str(tmp_path / "config")}
 
     proc = _ndf(["run", "--", "fakerun ."], root, bin_dir, log, **extra)
@@ -177,23 +177,23 @@ def test_run_writes_the_old_state_places_it_retired(project, tmp_path):
     assert (proc.returncode, out) == (0, "out\n"), err
     (moved,) = [p for p in state_home.iterdir() if identity.RETIRED_SUFFIX in p.name]
     assert command.RETIRED_LINE.format(retired_from=old, retired_to=moved) in err.splitlines()
-    assert (moved / "ledger.jsonl").read_text() == "old"
+    assert (moved / "journal.jsonl").read_text() == "old"
 
 
-def test_report_lists_the_places_retired_before_preparing_failed(monkeypatch, capsys):
+def test_report_lists_the_locations_retired_before_preparing_failed(monkeypatch, capsys):
     # 退避の途中で失敗して止まるときも、先に退避した元と先を items に載せる
     retired = (identity.Retired(Path("/s/p"), Path("/s/p.v10-20261114")),)
 
     def fail(environ=None):
         raise identity.IdentityError("read-only", retired)
 
-    monkeypatch.setattr(slots, "slots_place", fail)
+    monkeypatch.setattr(slots, "slots_location", fail)
     code = command._report("1d")
     got = _result(capsys.readouterr().out, code)
     assert got["items"] == [{"retired_from": "/s/p", "retired_to": "/s/p.v10-20261114"}]
 
 
-def test_stopped_run_lists_the_old_state_places_it_retired(capsys):
+def test_stopped_run_lists_the_old_state_locations_it_retired(capsys):
     retired = [{"retired_from": "/s/p", "retired_to": "/s/p.v10-20261114"}]
     code = command._stopped_from(slots.Stopped(records.GAVE_UP, 1.0, None, retired))
     got = _result(capsys.readouterr().out, code)
@@ -352,7 +352,7 @@ def test_wrong_run_arguments_are_stopped_before_running(project, args, summary):
     assert not log.exists()
 
 
-def test_interrupted_run_writes_the_old_state_places_it_retired(monkeypatch, tmp_path, capsys):
+def test_interrupted_run_writes_the_old_state_locations_it_retired(monkeypatch, tmp_path, capsys):
     # 中断で終わる run でも、退避した旧い置き場の元と先を標準エラーへ残す
     retired = [{"retired_from": "/s/p", "retired_to": "/s/p.v10-20261114"}]
 

@@ -11,7 +11,7 @@ import pytest
 
 # コミットの書き手（テストの機械の git の設定に依らない）
 IDENT = ["-c", "user.name=ndf-test", "-c", "user.email=ndf-test@example.invalid", "-c", "init.defaultBranch=develop"]
-DECLARATION = {"version": 1, "base_branch": "develop", "production_branch": "main"}
+NDF_SETTINGS = {"version": 1, "base_branch": "develop", "production_branch": "main"}
 
 
 def git(cwd: Path, *args: str) -> str:
@@ -43,7 +43,7 @@ def _make(tmp_path: Path, decl: dict | None) -> Path:
 @pytest.fixture
 def main_repo(tmp_path: Path) -> Path:
     """宣言（base_branch は develop）を持つメインディレクトリ。origin に develop と main がある。"""
-    return _make(tmp_path, DECLARATION)
+    return _make(tmp_path, NDF_SETTINGS)
 
 
 @pytest.fixture

@@ -31,7 +31,7 @@ def test_test_added_to_a_helper_module_is_not_collected(gitwork):
     assert got.undecided == ()
 
 
-def test_suite_without_a_collect_declaration_is_undecided(gitwork):
+def test_suite_without_a_collect_ndf_settings_is_undecided(gitwork):
     gitwork.make(FILES)
     got = collect.collected(gitwork.work, ["tests/doc_staleness_helpers.py"], [suite()], 120)
     assert got.undecided == ("tests/doc_staleness_helpers.py",)

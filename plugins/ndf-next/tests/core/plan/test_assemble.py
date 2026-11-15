@@ -65,7 +65,7 @@ def test_fill_replaces_known_names_only():
 
 
 @pytest.mark.parametrize(
-    ("place", "worktree", "repo", "usable", "expected"),
+    ("location", "worktree", "repo", "usable", "expected"),
     [
         ("worktree", "/wt", "/repo", True, "/wt"),
         ("worktree", "/wt", "/repo", False, "/repo"),
@@ -74,9 +74,9 @@ def test_fill_replaces_known_names_only():
         ("worktree", "/wt", None, False, None),
     ],
 )
-def test_workdir_falls_back_to_the_repo_root(place, worktree, repo, usable, expected):
+def test_workdir_falls_back_to_the_repo_root(location, worktree, repo, usable, expected):
     """マージで作業場所が消えた後のステップはリポジトリの根で打つ（#2969・#3022・#3186）。"""
-    assert workdir_for(place, worktree, repo, usable) == expected
+    assert workdir_for(location, worktree, repo, usable) == expected
 
 
 def test_choose_run_fresh_skips_the_running_round_and_taken_numbers():

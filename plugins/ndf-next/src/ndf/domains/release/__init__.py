@@ -7,7 +7,7 @@
 
 | 段階 | モジュール |
 | --- | --- |
-| 材料を集める | `plugins`（マーケットプレイスと版）・`declaration`（宣言と宣言の手順）・`gather` |
+| 材料を集める | `plugins`（マーケットプレイスと版）・`ndf_settings`（宣言と宣言の手順）・`gather` |
 | 組み立て | `assemble`（版上げ・CHANGELOG・宣言の手順・PR） |
 | 提示と承認 | `materials_decide`（承認資料）・`approval_decide`（証跡の判定）・`trail`（証跡の読み書き） |
 | マージ | `land`（証跡の後のマージとベースブランチへ戻す PR）・`cleanup`（worktree の後片付け） |

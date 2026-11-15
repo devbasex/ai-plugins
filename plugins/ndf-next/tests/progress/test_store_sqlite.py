@@ -32,7 +32,7 @@ def checks(monkeypatch):
 
 def _write_one(st: store.Store, name: str = "s1") -> str:
     with store.transaction(st) as conn:
-        return store.create_table(
+        return store.create_machine(
             conn, ("sprint", "r", name), None, {"stages": []}, [model.EventDraft("created", "conductor", "実装", rev=1)]
         )
 
@@ -40,7 +40,7 @@ def _write_one(st: store.Store, name: str = "s1") -> str:
 def _names(path: Path) -> list[str]:
     conn = sqlite3.connect(path)
     try:
-        return [r[0] for r in conn.execute("SELECT name FROM ndf_progress_tables ORDER BY name")]
+        return [r[0] for r in conn.execute("SELECT name FROM ndf_progress_machines ORDER BY name")]
     finally:
         conn.close()
 
@@ -124,7 +124,7 @@ def _write_and_crash(url: str, root: str) -> None:
     path = store.sqlite_path(url)
     conn = sqlite3.connect(path)
     conn.execute("PRAGMA wal_autocheckpoint=0")
-    conn.execute("INSERT INTO ndf_progress_tables VALUES ('sprint:r:late', 'sprint', 'r', 'late', NULL, '2026-11-14')")
+    conn.execute("INSERT INTO ndf_progress_machines VALUES ('sprint:r:late', 'sprint', 'r', 'late', NULL, '2026-11-14')")
     conn.commit()
     os._exit(0)
 

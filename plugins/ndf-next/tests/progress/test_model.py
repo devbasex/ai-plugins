@@ -22,10 +22,10 @@ def _d(kind: str, actor: str, row: str | None = "実装", reason: str | None = N
     return model.EventDraft(kind, actor, row, state=state, reason=reason, rev=1)
 
 
-def test_table_id_is_stable_and_separates_repositories():
-    assert model.table_id("sprint", "git@x:a/b.git", "s1") == model.table_id("sprint", "git@x:a/b.git", "s1")
-    assert model.table_id("sprint", "git@x:a/b.git", "s1") != model.table_id("sprint", "git@x:a/c.git", "s1")
-    assert model.table_id("sprint", "r", "s1").startswith("sprint:") and model.table_id("sprint", "r", "s1").endswith(":s1")
+def test_machine_id_is_stable_and_separates_repositories():
+    assert model.machine_id("sprint", "git@x:a/b.git", "s1") == model.machine_id("sprint", "git@x:a/b.git", "s1")
+    assert model.machine_id("sprint", "git@x:a/b.git", "s1") != model.machine_id("sprint", "git@x:a/c.git", "s1")
+    assert model.machine_id("sprint", "r", "s1").startswith("sprint:") and model.machine_id("sprint", "r", "s1").endswith(":s1")
 
 
 def test_fold_keeps_the_latest_state_per_row_and_skips_stateless_events():
@@ -132,7 +132,7 @@ def test_enablement_priority_is_sprint_then_project_then_definition():
     assert stages.resolve_enabled(snap, None, {}, {})["リファクタリング"].enabled
 
 
-def test_refactoring_suspension_is_a_declaration():
+def test_refactoring_suspension_is_a_ndf_settings():
     # 受け入れ条件 3: リファクタリングの停止は .ndf/project.json の宣言で表す
     snap = definition.load_definition("standard")
     declared = {"リファクタリング": {"enabled": False, "reason": "#1142 の作り直しの間は止める"}}

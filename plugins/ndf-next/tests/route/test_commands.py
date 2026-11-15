@@ -458,7 +458,7 @@ def _both(sub):
     return declared.load_suites(sub), raw
 
 
-def test_current_declared_suites_without_a_declaration(tmp_path):
+def test_current_declared_suites_without_a_ndf_settings(tmp_path):
     assert _both(_declared_at(tmp_path, None)) == ([], [])
 
 
@@ -483,7 +483,7 @@ def test_current_declared_suites_over_each_shape(tmp_path):
     }
 
 
-def test_current_declared_suites_take_the_nearest_declaration(tmp_path):
+def test_current_declared_suites_take_the_nearest_ndf_settings(tmp_path):
     outer = json.dumps({"test": {"suites": [{"name": "outer"}]}})
     sub = _declared_at(tmp_path, outer)
     (sub.parent / ".ndf").mkdir()

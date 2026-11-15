@@ -89,9 +89,9 @@ def _matches(c: Changed, patterns: Sequence[str]) -> bool:
 
 
 def mvv_decls() -> tuple[str, ...]:
-    """利用者の MVV の宣言のパス（根からの相対。表 ndf-files と places から引く）。"""
-    decls = [r for r in facts.rows("ndf-files", kind="declaration") if Path(r["path"]).stem == MVV_STEM]
-    return tuple(f"{facts.value('places', r['place'], 'path')}/{r['path']}" for r in decls)
+    """利用者の MVV の宣言のパス（根からの相対。表 ndf-files と locations から引く）。"""
+    decls = [r for r in facts.rows("ndf-files", kind="ndf_settings") if Path(r["path"]).stem == MVV_STEM]
+    return tuple(f"{facts.value('locations', r['location'], 'path')}/{r['path']}" for r in decls)
 
 
 def _hits(changed: Iterable[Changed], patterns: Sequence[str]) -> list[str]:

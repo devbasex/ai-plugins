@@ -55,7 +55,7 @@ def test_guard_inside_worktree_is_silent(main_repo: Path, capsys: pytest.Capture
     assert out["items"] == []
 
 
-def test_broken_declaration_is_precondition(main_repo: Path, capsys: pytest.CaptureFixture[str], last_result: Callable) -> None:
+def test_broken_ndf_settings_is_precondition(main_repo: Path, capsys: pytest.CaptureFixture[str], last_result: Callable) -> None:
     (main_repo / ".ndf" / "worktree.json").write_text("{", encoding="utf-8")
     _, out = _run(capsys, last_result, "--cwd", str(main_repo), "session")
     assert out["cause"]["kind"] == "precondition"

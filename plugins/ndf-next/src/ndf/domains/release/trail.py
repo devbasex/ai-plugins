@@ -40,7 +40,7 @@ class By(StrEnum):
 
 USER_BY, MVV_BY = By.USER.value, By.MVV.value
 BY_CHOICES = tuple(b.value for b in By)
-_PROJECT_FILE = f"{identity.FIXED_WORDS['declaration_dir']}/project.json"
+_PROJECT_FILE = f"{identity.FIXED_WORDS['ndf_settings_dir']}/project.json"
 _SHA = re.compile(r"\b([0-9a-f]{40})\b")
 
 # 判定 → commit status の状態（承認だけが success。待ちは pending で必須のチェックがマージを塞ぐ）

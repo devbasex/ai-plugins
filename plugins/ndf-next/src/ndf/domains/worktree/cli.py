@@ -29,7 +29,7 @@ from ndf.domains.worktree import (
     cleanup_decide,
     cli_env,
     create,
-    declaration,
+    ndf_settings,
     deps,
     follow,
     guard_decide,
@@ -52,7 +52,7 @@ COMMANDS = {
     "guard": "書き込み先がメインディレクトリかを判断し、案内の文を出す",
     "merged": "マージ済みの PR のブランチの worktree とブランチを外し、メインディレクトリを取り込む",
     "trash": "本番に出たブランチの退避先を挙げる。承認した名前だけを消す",
-    "init": f"宣言（{identity.FIXED_WORDS['declaration_dir']}/worktree.json）を作る",
+    "init": f"宣言（{identity.FIXED_WORDS['ndf_settings_dir']}/worktree.json）を作る",
     "check": "宣言の状態とベースブランチ・本番チャネルを出す",
 }
 
@@ -122,7 +122,7 @@ def _cleanup(args: argparse.Namespace, where: repo.Location) -> dict[str, Any]:
 
 
 def _session(args: argparse.Namespace, where: repo.Location) -> dict[str, Any]:
-    decl = declaration.load(where.main_dir)
+    decl = ndf_settings.load(where.main_dir)
     dirty = repo.dirty_paths(Git(where.main_dir))
     text = session_decide.deviation(dirty, where.in_worktree, decl is not None, decl is not None and decl.follow_branch)
     moved = None if where.in_worktree else follow.follow(where.main_dir, decl)
@@ -132,13 +132,13 @@ def _session(args: argparse.Namespace, where: repo.Location) -> dict[str, Any]:
 
 
 def _guard(args: argparse.Namespace, where: repo.Location) -> dict[str, Any]:
-    decl = declaration.load(where.main_dir)
+    decl = ndf_settings.load(where.main_dir)
     if decl is None:
         return result.result(TOOL, result.OK, "宣言が無いリポジトリでは案内しない")
     wdir = repo.worktrees_dir(where.main_dir).relative_to(where.main_dir).as_posix()
-    place = guard_decide.Place(str(where.main_dir), where.in_worktree, decl.allow_paths, wdir)
+    location = guard_decide.Location(str(where.main_dir), where.in_worktree, decl.allow_paths, wdir)
     base = os.path.realpath(args.base if args.base is not None else args.cwd)
-    paths = guard_decide.flagged(args.paths, base, place)
+    paths = guard_decide.flagged(args.paths, base, location)
     got = guard_decide.notice(paths, wdir, unread=args.unread and not where.in_worktree)
     if got is None:
         return result.result(TOOL, result.OK, "案内は要らない")
@@ -183,7 +183,7 @@ def _init(args: argparse.Namespace, where: repo.Location) -> dict[str, Any]:
 
 def _check(args: argparse.Namespace, where: repo.Location) -> dict[str, Any]:
     got = setup.state(where.main_dir)
-    items: list[dict[str, Any]] = [{"declaration": got.state, "detail": got.detail}]
+    items: list[dict[str, Any]] = [{"ndf_settings": got.state, "detail": got.detail}]
     if got.decl is not None:
         items.append({"base_branch": got.decl.base_branch, "production_branch": got.decl.production_branch,
                       "local_ignored": list(got.decl.local_ignored)})  # fmt: skip
@@ -220,7 +220,7 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
         return result.stopped(TOOL, "precondition", f"git のリポジトリの中で打つ: {exc}")
     try:
         return HANDLERS[args.command](args, where)
-    except declaration.DeclarationError as exc:
+    except ndf_settings.NdfSettingsError as exc:
         return result.stopped(TOOL, "precondition", str(exc))
     except GitError as exc:
         return result.stopped(TOOL, "unknown", str(exc))

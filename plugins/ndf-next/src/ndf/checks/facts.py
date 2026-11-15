@@ -35,7 +35,7 @@ class Const:
     value: object
 
     @property
-    def place(self) -> str:
+    def location(self) -> str:
         return f"{self.rel}:{self.line} {self.name}"
 
 
@@ -81,7 +81,7 @@ def _spread(group: list[Const]) -> bool:
 
 def _report(kind: str, group: list[Const], what: str) -> Finding:
     first, *rest = sorted(group, key=lambda c: (c.rel, c.line))
-    others = "・".join(c.place for c in rest)
+    others = "・".join(c.location for c in rest)
     return Finding("const-fact", first.rel, first.line, f"{kind}: {what}（{first.name} と {others}）")
 
 
@@ -216,10 +216,10 @@ def _hit_kind(c: Const, idset: set[str], min_str: int) -> str | None:
     return None
 
 
-def table_hits(all_consts: list[Const], table_ids: dict[str, list[str]], min_str: int) -> list[Finding]:
+def table_hits(all_consts: list[Const], machine_ids: dict[str, list[str]], min_str: int) -> list[Finding]:
     """表の `id` を 2 つ以上含む集まり（`table-set`）と、表の `id` に等しい文字列（`table-str`）。"""
     found = []
-    for name, ids in table_ids.items():
+    for name, ids in machine_ids.items():
         idset = set(ids)
         for c in all_consts:
             kind = _hit_kind(c, idset, min_str)
@@ -231,5 +231,5 @@ def table_hits(all_consts: list[Const], table_ids: dict[str, list[str]], min_str
 def check(scope: Scope, rules: dict[str, Any]) -> list[Finding]:
     conf = rules["facts"]
     all_consts = [c for src in scope.code() for c in consts(src.tree, src.rel)]
-    table_ids, found = tables(scope, conf["contracts_dir"])
-    return found + groups(all_consts, conf["min_str"]) + table_hits(all_consts, table_ids, conf["min_str"])
+    machine_ids, found = tables(scope, conf["contracts_dir"])
+    return found + groups(all_consts, conf["min_str"]) + table_hits(all_consts, machine_ids, conf["min_str"])

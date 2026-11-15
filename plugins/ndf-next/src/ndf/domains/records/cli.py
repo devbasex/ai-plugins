@@ -123,7 +123,7 @@ def _usage_stop(args: argparse.Namespace, root: Path) -> dict[str, Any]:
 
 def _usage_report(args: argparse.Namespace, root: Path) -> dict[str, Any]:
     try:
-        path = usage.ledger_path()
+        path = usage.usage_log_path()
     except LookupError as exc:
         return result.stopped(TOOL, "precondition", str(exc))
     hub = _hub(root)
@@ -136,9 +136,9 @@ def _mvv_signals(args: argparse.Namespace, root: Path) -> dict[str, Any]:
         s = mvv.signals(root, args.base)
     except (mvv.MvvError, OSError) as exc:
         return result.stopped(TOOL, "precondition", str(exc))
-    item = {k: v for k, v in dataclasses.asdict(s).items() if k != "revise"}
-    summary = "MVV の改訂を提案する兆候がある" if s.revise else "MVV の改訂の兆候は閾値に届かない"
-    return result.result(TOOL, result.OK, summary, [item], {"revise": s.revise})
+    item = {k: v for k, v in dataclasses.asdict(s).items() if k != "revision_due"}
+    summary = "MVV の改訂を提案する兆候がある" if s.revision_due else "MVV の改訂の兆候は閾値に届かない"
+    return result.result(TOOL, result.OK, summary, [item], {"revision_due": s.revision_due})
 
 
 def _mvv_answer(args: argparse.Namespace, root: Path) -> dict[str, Any]:

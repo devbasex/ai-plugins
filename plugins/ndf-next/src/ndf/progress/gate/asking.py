@@ -32,7 +32,7 @@ RELEASE_GATE = _gate("release")
 # 問いの id の長さ（sha256 の頭）
 ID_LENGTH = 16
 # 承認しなかった答え（差し戻しの記録に数える）
-REJECTING = (run.REVISE, run.REJECTED)
+REJECTING = (run.REQUEST_CHANGES, run.REJECTED)
 # 承認資料の置き場（進行表ごとの作業の置き場の下。名前は問いの id）
 MATERIAL_DIR = "gate-materials"
 
@@ -72,7 +72,7 @@ class Question:
     """待っている承認ゲートの問い。`gate` は区分（design・release）で、プランの中の承認ゲートは None。"""
 
     id: str
-    table_id: str
+    machine_id: str
     stage: str
     step: str
     gate: Optional[str]
@@ -86,9 +86,9 @@ class Question:
         return model.gate_label(self.gate) if self.gate else "プランの中の承認ゲート"
 
 
-def question_id(table_id: str, rev: int, stage: str, step: str, anchor: int) -> str:
+def question_id(machine_id: str, rev: int, stage: str, step: str, anchor: int) -> str:
     """問いの記録の id。待ちに入った事象の番号（`anchor`）を含むため、差し戻しで流し直した問いは別の id になる。"""
-    text = f"{table_id}\0{rev}\0{stage}\0{step}\0{anchor}"
+    text = f"{machine_id}\0{rev}\0{stage}\0{step}\0{anchor}"
     return hashlib.sha256(text.encode()).hexdigest()[:ID_LENGTH]
 
 
@@ -121,8 +121,8 @@ def question(v: run.View, m: run.Move, *, repo: Optional[str] = None, target: Ta
     ctx = _waiting_context(v, m.progress)
     key = "design_pr" if m.step.gate == DESIGN_GATE else "pr"
     number = ctx[key] if isinstance(ctx.get(key), int) else None
-    qid = question_id(v.table_id, v.rev, m.stage.name, m.step.id, m.progress.anchor)
-    return Question(qid, v.table_id, m.stage.name, m.step.id, m.step.gate, tuple(run.choices(m)), number, pr_url(repo, number), target)
+    qid = question_id(v.machine_id, v.rev, m.stage.name, m.step.id, m.progress.anchor)
+    return Question(qid, v.machine_id, m.stage.name, m.step.id, m.step.gate, tuple(run.choices(m)), number, pr_url(repo, number), target)
 
 
 def waiting(v: run.View, **kw: Any) -> Optional[Question]:
@@ -137,7 +137,7 @@ def waiting(v: run.View, **kw: Any) -> Optional[Question]:
 def _asks(q: Question, answer: str) -> tuple[str, ...]:
     """答えを打つ側が埋める鍵。差し戻しは指摘ファイル、設計承認ゲートの承認は外す課題（無ければ省く）も持つ。"""
     asks = ["reason", "by", "key"]
-    if answer == run.REVISE:
+    if answer == run.REQUEST_CHANGES:
         asks.insert(0, "notes")
     if answer == run.APPROVED and q.gate == DESIGN_GATE:
         asks.append("drop")
@@ -151,7 +151,7 @@ def routes(q: Question) -> dict[str, Any]:
         seen += ["--head", q.target.head]
     if q.target.material:
         seen += ["--material-sha256", q.target.material]
-    return {a: result.command(TOOL, q.table_id, "--gate", q.id, "--result", a, *seen, ask=_asks(q, a)) for a in q.choices}
+    return {a: result.command(TOOL, q.machine_id, "--gate", q.id, "--result", a, *seen, ask=_asks(q, a)) for a in q.choices}
 
 
 def describe(q: Question) -> dict[str, Any]:
@@ -160,7 +160,7 @@ def describe(q: Question) -> dict[str, Any]:
         "id": q.id,
         "kind": q.gate,
         "label": q.label,
-        "table_id": q.table_id,
+        "machine_id": q.machine_id,
         "stage": q.stage,
         "step": q.step,
         "pr": q.pr,
@@ -190,7 +190,7 @@ def material_sha256(path: Path) -> str:
 
 def material_path(root: Path, q: Question) -> Path:
     """問いの承認資料の置き場（`run.work_root` の下）。問いごとに 1 つで、書いた後は書き換えない。"""
-    return run.work_root(root, q.table_id) / MATERIAL_DIR / f"{q.id}.md"
+    return run.work_root(root, q.machine_id) / MATERIAL_DIR / f"{q.id}.md"
 
 
 def unconfirmed(v: run.View, stage: str) -> list[str]:
@@ -244,8 +244,8 @@ def write_material(root: Path, v: run.View, q: Question) -> Path:
 ACCEPTED_SUFFIX = ".accepted.json"
 
 
-def accepted_path(root: Path, table_id: str, gate_id: str) -> Path:
-    return run.work_root(root, table_id) / MATERIAL_DIR / f"{gate_id}{ACCEPTED_SUFFIX}"
+def accepted_path(root: Path, machine_id: str, gate_id: str) -> Path:
+    return run.work_root(root, machine_id) / MATERIAL_DIR / f"{gate_id}{ACCEPTED_SUFFIX}"
 
 
 # 依頼の中身の kind（計画の進行表の依頼。依頼の ID の頭にも使う）
@@ -263,7 +263,7 @@ def plan_request(view: lane.PlanView, ident: str) -> Optional[lane.Request]:
 
 def release_request_of(conn: Any, q: Question) -> Optional[tuple[str, str, Optional[lane.Request]]]:
     """スプリントを持つレーンの行の（計画の ID, レーン）と、問いのリリースの依頼（無ければ None）。レーンの外なら None。"""
-    found = lane.sprint_row(conn, q.table_id)
+    found = lane.sprint_row(conn, q.machine_id)
     if found is None:
         return None
     plan_id, name, _row = found

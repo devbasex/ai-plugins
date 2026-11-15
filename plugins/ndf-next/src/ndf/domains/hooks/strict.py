@@ -33,7 +33,7 @@ from ndf.domains.hooks import strict_shell, tables
 from ndf.domains.hooks.verdict import Verdict, deny
 
 # 宛先のリポジトリの宣言（delivery を読む）
-_PROJECT_FILE = identity.FIXED_WORDS["declaration_dir"] + "/project.json"
+_PROJECT_FILE = identity.FIXED_WORDS["ndf_settings_dir"] + "/project.json"
 
 # guard の表（hooks/guards.json）でのこの guard の名前
 GUARD_NAME = "merge-production"

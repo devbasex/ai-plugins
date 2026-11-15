@@ -1,6 +1,6 @@
 """worktree ごとのテスト環境（宣言の `testenv` 節。起動の定義は `localenv.compose_files`）。
 
-- `assign`: 環境名・スロット・ポートを決めて台帳（`ledger`）へ記録する。スロットが尽きたら回収（`reclaim`）を 1 回挟む
+- `assign`: 環境名・スロット・ポートを決めて台帳（`allocations`）へ記録する。スロットが尽きたら回収（`reclaim`）を 1 回挟む
 - `reclaim`: worktree の消えた割り当てのテスト環境を破棄して解放する（判定は `ndf.testing.testenv`）
 - `tag`: 基準のタグ（宣言の `golden_tag_paths` の内容の要約）。同じ内容なら同じ値で、焼き直しが要るかを内容で決める
 - `bake`: 基準のボリューム（宣言の `golden_volumes`）をタグ付きで作る。足りないものだけを作る
@@ -25,10 +25,10 @@ from typing import Any, Optional
 from filelock import FileLock, Timeout
 
 from ndf.adapters.git import Git
-from ndf.domains.worktree import container, declaration, deps, ledger, localenv, outcomes, repo, testenv_decide
+from ndf.domains.worktree import container, ndf_settings, deps, allocations, localenv, outcomes, repo, testenv_decide
 from ndf.testing import testenv as placement
 
-SECTION = declaration.TESTENV
+SECTION = ndf_settings.TESTENV
 # 証跡の置き場（worktree の下。共通の git ディレクトリの info/exclude で追跡から外す）
 EVIDENCE = ".ndf-evidence"
 # 同じテスト環境の実行の目印を待つ秒
@@ -48,7 +48,7 @@ class Target:
     section: dict[str, Any]
     compose_files: tuple[str, ...]
     shell: container.Shell
-    book: ledger.Ledger
+    book: allocations.Allocations
 
     @property
     def key(self) -> str:
@@ -70,12 +70,12 @@ def target(path: Path, shell: Optional[container.Shell] = None) -> Optional[Targ
     """対象（`path` が worktree の下のディレクトリでも、worktree の根）。宣言・節が無ければ `None`。"""
     loc = repo.locate(Git(path))
     main_dir = loc.main_dir
-    decl = declaration.load(main_dir)
+    decl = ndf_settings.load(main_dir)
     section = decl.section(SECTION) if decl is not None else None
     if decl is None or section is None:
         return None
     return Target(loc.top, main_dir, section, localenv.compose_files(decl),
-                  shell if shell is not None else container.Shell.from_env(), ledger.Ledger.of(Git(main_dir)))  # fmt: skip
+                  shell if shell is not None else container.Shell.from_env(), allocations.Allocations.of(Git(main_dir)))  # fmt: skip
 
 
 # --- 割り当て ------------------------------------------------------------------
@@ -117,11 +117,11 @@ def inuse_lock(t: Target, environment: str) -> Path:
 
 
 def _release(row: dict[str, Any]) -> None:
-    row["released_at"] = ledger.now()
+    row["released_at"] = allocations.now()
 
 
 def _touch(row: dict[str, Any]) -> None:
-    row["last_used_at"] = ledger.now()
+    row["last_used_at"] = allocations.now()
 
 
 # --- compose -------------------------------------------------------------------
@@ -336,7 +336,7 @@ def _kind_values(spec: dict[str, Any], ports: dict[str, Any]) -> dict[str, str]:
 
 def _prepare_evidence(t: Target, environment: str, out: Optional[Path]) -> str:
     """証跡の置き場を決めて作り、info/exclude へ登録して実体のパスを返す。worktree の外を指せば `TestenvError`。"""
-    where = out if out is not None else t.path / EVIDENCE / f"{environment}-{time.strftime(ledger.COMPACT_STAMP, time.gmtime())}"
+    where = out if out is not None else t.path / EVIDENCE / f"{environment}-{time.strftime(allocations.COMPACT_STAMP, time.gmtime())}"
     real = os.path.realpath(where if where.is_absolute() else t.path / where)
     if not t.contains(real):
         raise TestenvError(f"証跡の置き場が worktree の外を指す: {real}")
@@ -421,7 +421,7 @@ def _reclaim_one(t: Target, row: dict[str, Any], rows: list[dict[str, Any]]) -> 
     item: dict[str, Any] = {"kind": "testenv", "name": env, "worktree": str(wt)}
     if not placement.location_seen(wt, t.main_dir):
         return {**item, "result": outcomes.KEPT, "reason": "worktree の置き場をここから確かめられない"}
-    if ledger.exposing(row):
+    if allocations.exposing(row):
         return {**item, "result": outcomes.KEPT, "reason": "公開が開いている（unexpose で閉じてから回収する）"}
     if not t.shell.has_docker():
         return {**item, "result": outcomes.KEPT, "reason": "コンテナの実行系が見つからず、破棄できたか確かめられない"}
@@ -444,7 +444,7 @@ def reclaim(t: Target, limit: Optional[int] = None) -> list[dict[str, Any]]:
     rows = t.book.rows()
     items: list[dict[str, Any]] = []
     for row in rows:
-        if not ledger.active(row) or Path(str(row.get("worktree"))).exists():
+        if not allocations.active(row) or Path(str(row.get("worktree"))).exists():
             continue
         items.append(_reclaim_one(t, row, rows))
         if limit is not None and sum(1 for i in items if i["result"] != outcomes.KEPT) >= limit:

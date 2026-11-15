@@ -13,7 +13,7 @@ import pytest
 from ndf import cli as top
 from ndf import identity
 from ndf.contracts import causes
-from ndf.domains.relay import accounts, cli, cli_account, marks, pending, registry
+from ndf.domains.relay import accounts, cli, cli_account, markers, pending, registry
 
 
 def test_relay_is_a_subcommand_of_ndf():
@@ -61,7 +61,7 @@ def test_decide_reads_the_section_state(monkeypatch, capsys, last_result):
 
 def test_mark_sets_the_relay_mark(capsys):
     assert cli.main(["mark", "s-9"]) == 0
-    assert marks.take(identity.load().state_dir, "s-9") is True
+    assert markers.take(identity.load().state_dir, "s-9") is True
     assert cli.main(["mark", "../bad"]) != 0
 
 
@@ -103,7 +103,7 @@ def test_pending_reports_why_the_list_could_not_be_read(tmp_path, runner):
 
 # 現状固定（I-018）: install・uninstall・status の結果 JSON（要約・項目・警告）と、--replace-old の断り
 @pytest.fixture
-def places(tmp_path, monkeypatch):
+def locations(tmp_path, monkeypatch):
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
     monkeypatch.setenv("XDG_BIN_HOME", str(tmp_path / "bin"))
     monkeypatch.setenv("NDF_STATE_HOME", str(tmp_path / "old"))
@@ -123,8 +123,8 @@ def _expect(copy, entry, states, warnings=None) -> dict:
     return out
 
 
-def test_install_status_uninstall_report_both_places(places, monkeypatch, capsys, last_result):
-    copy, entry = places
+def test_install_status_uninstall_report_both_locations(locations, monkeypatch, capsys, last_result):
+    copy, entry = locations
     base = os.environ.get("PATH", "")
     monkeypatch.setenv("PATH", base)
     assert cli.main(["status"]) == 0
@@ -140,8 +140,8 @@ def test_install_status_uninstall_report_both_places(places, monkeypatch, capsys
     assert not copy.exists() and not entry.exists()
 
 
-def test_install_keeps_an_old_copy_and_replace_old_refuses_while_an_old_wrapper_runs(places, tmp_path, monkeypatch, capsys, last_result):
-    copy, entry = places
+def test_install_keeps_an_old_copy_and_replace_old_refuses_while_an_old_wrapper_runs(locations, tmp_path, monkeypatch, capsys, last_result):
+    copy, entry = locations
     monkeypatch.setenv("PATH", str(entry.parent))
     copy.parent.mkdir(parents=True)
     copy.write_text("old\n", encoding="utf-8")

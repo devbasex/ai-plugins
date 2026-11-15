@@ -137,7 +137,7 @@ def test_add_bedrock_asks_then_saves_after_the_check(tmp_path, fake_aws, monkeyp
     assert denied.value.items[0]["reason"] == "model_unavailable"
 
 
-def test_check_metered_reads_the_env_declaration_first(tmp_path):
+def test_check_metered_reads_the_env_ndf_settings_first(tmp_path):
     with pytest.raises(m.MeteredError, match="Bedrock"):
         m.check(tmp_path, {"NDF_SUPERVISE_CLAUDE_FALLBACK": "ANTHROPIC_BASE_URL=https://x"}, "metered")
     with pytest.raises(m.MeteredError, match="宣言が無い"):

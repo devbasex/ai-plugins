@@ -11,7 +11,7 @@ import pytest
 from ndf.adapters import git as git_mod
 from ndf.domains.release import assemble, changes_decide, checks_decide, gather, materials_decide, version_decide
 from ndf.domains.release import cli as release_cli
-from ndf.domains.release import declaration as decl_mod
+from ndf.domains.release import ndf_settings as decl_mod
 from ndf.domains.release import plugins as plugins_mod
 
 from ._fakes import FakeHub, clone, init_repo, write_json

@@ -29,12 +29,12 @@ def sample_paths() -> list[Path]:
     return sorted(SAMPLES.glob("*/*/*.json"))
 
 
-def _fill(value: Any, places: dict[str, str]) -> Any:
+def _fill(value: Any, locations: dict[str, str]) -> Any:
     if isinstance(value, dict):
-        return {k: _fill(v, places) for k, v in value.items()}
+        return {k: _fill(v, locations) for k, v in value.items()}
     if isinstance(value, list):
-        return [_fill(v, places) for v in value]
-    return places.get(value, value) if isinstance(value, str) else value
+        return [_fill(v, locations) for v in value]
+    return locations.get(value, value) if isinstance(value, str) else value
 
 
 def read_sample(path: Path, cwd: Path, **override: Any) -> dict[str, Any]:

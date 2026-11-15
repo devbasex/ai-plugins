@@ -42,7 +42,7 @@ from ndf.domains.backlog import (
 )
 from ndf.domains.backlog import tables as tables_mod
 from ndf.domains.backlog import selection_decide as sel
-from ndf.domains.backlog.cli_input import Stop, declaration, rank_board, read_json
+from ndf.domains.backlog.cli_input import Stop, ndf_settings, rank_board, read_json
 
 TOOL = top.tool_of(__name__)
 DEFAULT_LIMIT = 10
@@ -204,12 +204,12 @@ def cmd_apply(a: argparse.Namespace) -> dict[str, Any]:
     sd = _sd(a, repo)
     reparent.entries_of(plan)
     metrics, holds, board = _checked_rank(sd, plan)
-    ledger = actions.Ledger(sd)
+    journal = actions.Journal(sd)
     if metrics:
         state.write(sd, "backlog-rejected", plan_decide.rejected_after(state.read(sd, "backlog-rejected", []), plan, metrics))
     gh = hub(repo)
-    acted = actions.apply_actions(gh, ledger, plan)
-    made = actions.create(gh, ledger, plan)
+    acted = actions.apply_actions(gh, journal, plan)
+    made = actions.create(gh, journal, plan)
     moves = actions.reschedule(gh, plan, holds, rank_decide.origin(board) if board else {})
     run_id = a.run_id if a.run_id else uuid.uuid4().hex
     parents = reparent.apply(gh, sd, plan, run_id)
@@ -284,7 +284,7 @@ def cmd_revert(a: argparse.Namespace) -> dict[str, Any]:
 
 
 def cmd_depth_limits(a: argparse.Namespace) -> dict[str, Any]:
-    seconds = depth.depth_seconds(declaration(), a.depth)
+    seconds = depth.depth_seconds(ndf_settings(), a.depth)
     return result.result(TOOL, result.OK, f"{a.depth} の 1 回の秒の上限は {seconds} 秒", metrics={"depth": a.depth, "seconds": seconds})
 
 
@@ -298,7 +298,7 @@ def cmd_due(a: argparse.Namespace) -> dict[str, Any]:
     """見直し・大整理を起動するか。起動しなければ not_applicable で止まる（読み手は status で分ける）。"""
     repo = _repo(a)
     sd = _sd(a, repo)
-    decl = declaration()
+    decl = ndf_settings()
     depth.depth_seconds(decl, a.depth)  # 宣言の形を確かめる
     try:
         cfg = due_decide.settings(a.depth, depth.depth_entry(decl, a.depth))

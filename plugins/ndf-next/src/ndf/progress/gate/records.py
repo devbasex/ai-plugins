@@ -22,9 +22,9 @@ from ndf.progress.gate.asking import REJECTING, Answer, Question, Target, accept
 
 
 def rejections_path() -> Path:
-    """`gate-rejections.jsonl` の置き場（表 places の mvv-state。環境変数があればその位置、無ければ状態の置き場）。"""
-    var = facts.value("places", "mvv-state", "env")
-    base = Path(os.environ[var]) if os.environ.get(var) else identity.load().state_dir / facts.value("places", "mvv-state", "path")
+    """`gate-rejections.jsonl` の置き場（表 locations の mvv-state。環境変数があればその位置、無ければ状態の置き場）。"""
+    var = facts.value("locations", "mvv-state", "env")
+    base = Path(os.environ[var]) if os.environ.get(var) else identity.load().state_dir / facts.value("locations", "mvv-state", "path")
     return base / facts.value("ndf-files", "gate-rejections", "path")
 
 
@@ -39,7 +39,7 @@ def rejection_row(v: run.View, q: Question, a: Answer) -> dict[str, Any]:
         "gate": q.gate if q.gate else "plan",
         "gate_id": q.id,
         "what": a.reason,
-        "sprint": v.table_id,
+        "sprint": v.machine_id,
         "issues": issues,
         "prs": prs,
         "by": a.by,
@@ -105,7 +105,7 @@ def approved_head(v: run.View, kind: str, root: Optional[Path] = None) -> Option
     last = got[-1] if got else None
     if last is None or last["answer"] != run.APPROVED:
         return None
-    accepted = accepted_path(root, v.table_id, str(last["gate_id"])) if root is not None and last["gate_id"] else None
+    accepted = accepted_path(root, v.machine_id, str(last["gate_id"])) if root is not None and last["gate_id"] else None
     if accepted is not None and accepted.exists():
         return str(json.loads(accepted.read_text(encoding="utf-8"))["head"])
     return str(last["head"]) if last["head"] else None

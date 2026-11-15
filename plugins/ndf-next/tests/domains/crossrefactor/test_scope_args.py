@@ -51,7 +51,7 @@ def test_state_command_reports_an_empty_run(gitwork, capsys, last_result, monkey
         (["a/", "b"], ["pkg/a.py", "a", "b"]),
     ],
 )
-def test_compose_declared_test_places_current_behavior(declared, expected) -> None:
+def test_compose_declared_test_locations_current_behavior(declared, expected) -> None:
     assert range_decide.compose(["pkg/a.py"], declared, {"pkg/a.py": "pkg/tests"}, []) == expected
 
 

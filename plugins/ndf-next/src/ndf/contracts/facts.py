@@ -23,7 +23,7 @@ TABLE_DIRS = (FACTS_DIR, DOMAINS_DIR)
 SCHEMA_FILE = "fact.schema.json"
 SCHEMA = f"{FACTS_DIR}/{SCHEMA_FILE}"
 NAME = re.compile(r"^[a-z][a-z0-9-]*$")
-# 列の ref の 2 つの形（`limits.json#<接頭辞>` と `<置き場>/<表>`）のうち前者の頭。limits.json は limits.DECLARATION と同じ
+# 列の ref の 2 つの形（`limits.json#<接頭辞>` と `<置き場>/<表>`）のうち前者の頭。limits.json は limits.NDF_SETTINGS と同じ
 LIMITS_REF = "limits.json#"
 
 
@@ -86,7 +86,7 @@ def names() -> tuple[str, ...]:
     return tuple(sorted(_found()))
 
 
-def place(name: str) -> str:
+def location(name: str) -> str:
     """表 `name` の置き場（`contracts/` からの相対の `<置き場>/<name>.json`）。
 
     2 つの置き場が同じ名前を持てば `FactsError`。どちらにも無ければ `facts/` の候補を返す（読む側が無いことを報告する）。
@@ -107,7 +107,7 @@ def table(name: str) -> Table:
 
 @contracts.cached_reader
 def _read(name: str) -> Table:
-    where = place(name)
+    where = location(name)
     return _validate(contracts.load_as(where, FactsError), name, where)
 
 
@@ -159,8 +159,8 @@ def _limits_ref_errors(name: str, col: str, prefix: str, values: list[tuple[str,
 
 def _table_ref_errors(name: str, col: str, ref: str, values: list[tuple[str, Any]]) -> list[str]:
     other = ref.split("/", 1)[1]
-    if place(other) != f"{ref}.json":
-        return [f"{name} の列 {col} の ref {ref} の表は {place(other)} にある"]
+    if location(other) != f"{ref}.json":
+        return [f"{name} の列 {col} の ref {ref} の表は {location(other)} にある"]
     known = set(ids(other))
     return [f"{name}:{rid} の {col} {v!r} が表 {other} に無い" for rid, v in values if v not in known]
 

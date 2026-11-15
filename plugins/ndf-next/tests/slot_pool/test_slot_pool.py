@@ -86,7 +86,7 @@ def test_an_owner_whose_lock_is_free_is_not_counted(tmp_path):
     again.release()
 
 
-def test_weights_come_from_the_limits_declaration():
+def test_weights_come_from_the_limits_ndf_settings():
     assert slot_pool.weight_mib("llm-cli") < slot_pool.weight_mib("test")
 
 

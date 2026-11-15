@@ -61,7 +61,7 @@
           ],
           "default": "base"
         },
-        "promotion": {
+        "release_strategy": {
           "type": "string",
           "enum": [
             "whole",

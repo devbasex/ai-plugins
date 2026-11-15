@@ -20,7 +20,7 @@ from typing import Any, Iterator, Optional
 
 from filelock import FileLock, Timeout
 
-from ndf.domains.worktree import ledger, outcomes, testenv
+from ndf.domains.worktree import allocations, outcomes, testenv
 from ndf.domains.worktree.testenv import Target, TestenvError
 
 # 公開の既定の期限
@@ -34,7 +34,7 @@ def _age(stamp: Any) -> Optional[float]:
     if not isinstance(stamp, str):
         return None
     try:
-        return time.time() - calendar.timegm(time.strptime(stamp, ledger.STAMP))
+        return time.time() - calendar.timegm(time.strptime(stamp, allocations.STAMP))
     except ValueError:  # noqa: NDF401 ファイル: 台帳の時刻が読めない行は止めない側へ倒す
         return None
 
@@ -46,7 +46,7 @@ def reap(t: Target, idle: float) -> list[dict[str, Any]]:
     items = []
     for row in t.book.rows():
         age = _age(row.get("last_used_at"))
-        if not ledger.active(row) or age is None or age < idle:
+        if not allocations.active(row) or age is None or age < idle:
             continue
         items.append(_stop_idle(t, row))
     return items
@@ -69,7 +69,7 @@ def _stop_idle(t: Target, row: dict[str, Any]) -> dict[str, Any]:
 
 def _open_row(rows: list[dict[str, Any]], worktree: str) -> Optional[dict[str, Any]]:
     """worktree の、開いている公開を持つ最後の割り当て（解放の後も閉じるまで残る）。"""
-    return ledger.latest(rows, worktree, ledger.exposing)
+    return allocations.latest(rows, worktree, allocations.exposing)
 
 
 def _config(t: Target) -> dict[str, Any]:
@@ -86,12 +86,12 @@ def _config(t: Target) -> dict[str, Any]:
 def _claim(t: Target, url: str, ttl: str) -> bool:
     """公開の記録を置く。ほかの worktree が公開中なら置かずに偽（同時に開けるのは 1 本）。"""
     with t.book.editing() as rows:
-        if any(ledger.exposing(r) and r.get("worktree") != t.key for r in rows):
+        if any(allocations.exposing(r) and r.get("worktree") != t.key for r in rows):
             return False
-        row = ledger.latest(rows, t.key, ledger.active)
+        row = allocations.latest(rows, t.key, allocations.active)
         if row is None:
             return False
-        row["expose"] = {"url": url, "ttl": ttl, "opened_at": ledger.now(), "closed_at": None}
+        row["expose"] = {"url": url, "ttl": ttl, "opened_at": allocations.now(), "closed_at": None}
         return True
 
 
@@ -106,7 +106,7 @@ def _expose_values(url: str, host: str, row: dict[str, Any]) -> dict[str, str]:
 
 
 def _close(row: dict[str, Any]) -> None:
-    row["expose"]["closed_at"] = ledger.now()
+    row["expose"]["closed_at"] = allocations.now()
 
 
 @contextmanager
@@ -172,7 +172,7 @@ def _unexpose(t: Target) -> Optional[str]:
     where = t.path if t.path.is_dir() else t.main_dir
     if t.shell.sh(str(command), where, values).returncode != 0:
         raise TestenvError(f"公開を閉じる手段が失敗した。台帳は閉じていない: {row['environment']} {url}")
-    if not t.book.update(t.key, _close, pick=ledger.exposing):
+    if not t.book.update(t.key, _close, pick=allocations.exposing):
         raise TestenvError(f"台帳を閉じられない。unexpose を打ち直す: {url}")
     return url
 

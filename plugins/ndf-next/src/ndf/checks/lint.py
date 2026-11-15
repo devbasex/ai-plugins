@@ -2,7 +2,7 @@
 
 `rules.json` の `smells` のうち `by` が `ruff` の規則を、見るファイルすべてへ 1 回の起動で当てる。
 しきい値は `rules.json` の `ruff.config` にあり、`--config` で 1 つずつ渡す。ruff の `# noqa` は読ませない
-（`--ignore-noqa`）。境界の印は NDF の形で、`marks` が規則ごとに効くかを決めるためである。
+（`--ignore-noqa`）。境界の印は NDF の形で、`suppressions` が規則ごとに効くかを決めるためである。
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-from ndf.checks.marks import EXCEPT_RULES
+from ndf.checks.suppressions import EXCEPT_RULES
 from ndf.checks.model import CheckError, Source
 
 # ruff の終了コード: 0 は指摘なし、1 は指摘あり。ほかは起動や設定の誤り

@@ -199,9 +199,9 @@ def test_session_start_without_the_environment_prepares_it_detached(scripts, tmp
     used = env.venv_dir(ident) / env.LAST_USED
     assert used.exists()
     os.utime(used, (1, 1))
-    marks = {p: p.stat().st_mtime for p in ident.roots_dir.glob("*.json")}
+    markers = {p: p.stat().st_mtime for p in ident.roots_dir.glob("*.json")}
     after = _register(python, scripts, "claude", "PreToolUse", bash(tmp_path, "ls"), uv_env)
     assert after.returncode == 0
     assert records()[-1]["path"] == "entry" and records()[-1]["event"] == "PreToolUse"
     # 予算の経路（PreToolUse）は目印と最後に使った時刻を書かない
-    assert used.stat().st_mtime == 1 and {p: p.stat().st_mtime for p in ident.roots_dir.glob("*.json")} == marks
+    assert used.stat().st_mtime == 1 and {p: p.stat().st_mtime for p in ident.roots_dir.glob("*.json")} == markers

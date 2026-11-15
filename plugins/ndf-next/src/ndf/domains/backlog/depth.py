@@ -28,17 +28,17 @@ class DepthError(Exception):
     """宣言の形が違う・宣言を読めない。"""
 
 
-def declaration_path(cwd: Path) -> Path:
+def ndf_settings_path(cwd: Path) -> Path:
     """今の worktree の `.ndf/backlog.json`。"""
     try:
         top = Git(cwd).run("rev-parse", "--show-toplevel").strip()
     except (GitError, OSError) as exc:
         raise DepthError(f"リポジトリの根を解けない: {exc}") from exc
-    place = facts.value(state.FILES, "backlog", "place")
-    return Path(top) / facts.value("places", place, "path") / facts.value(state.FILES, "backlog", "path")
+    location = facts.value(state.FILES, "backlog", "location")
+    return Path(top) / facts.value("locations", location, "path") / facts.value(state.FILES, "backlog", "path")
 
 
-def declaration(path: Path) -> dict[str, Any]:
+def ndf_settings(path: Path) -> dict[str, Any]:
     """宣言を読む。無ければ空。JSON のオブジェクトでなければ `DepthError`。"""
     if not path.exists():
         return {}

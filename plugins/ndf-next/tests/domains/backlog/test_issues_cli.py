@@ -63,7 +63,7 @@ def test_added_issues_are_kept_beyond_the_limit(repo_dir, fake, run_issues):
     assert got["metrics"]["notes"]
 
 
-def test_depth_limits_read_the_declaration(repo_dir, run_issues):
+def test_depth_limits_read_the_ndf_settings(repo_dir, run_issues):
     # #2423: 宣言の depths.review.seconds 900 で 900、無ければ既定、形が違えば止まる
     assert run_issues("depth-limits", "review")["metrics"]["seconds"] == 1800
     decl = repo_dir / ".ndf" / "backlog.json"
@@ -209,7 +209,7 @@ def test_rescoring_without_a_dependency_drops_the_stored_edge(repo_dir, fake, ru
     assert [r["number"] for r in again["items"][0]["rows"]] == [1, 2]
 
 
-def test_rank_reads_capacity_and_label_floor_from_the_declaration(repo_dir, fake, run_issues, tmp_path):
+def test_rank_reads_capacity_and_label_floor_from_the_ndf_settings(repo_dir, fake, run_issues, tmp_path):
     (repo_dir / ".ndf").mkdir(exist_ok=True)
     (repo_dir / ".ndf" / "backlog.json").write_text(json.dumps({"capacity": 1, "label_floor": {"bug": 13}}))
     fake.issue(1, milestone="01")

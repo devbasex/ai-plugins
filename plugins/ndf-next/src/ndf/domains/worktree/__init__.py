@@ -11,7 +11,7 @@
 
 部品:
 
-- `declaration`: 宣言 `.ndf/worktree.json` と個人設定 `.ndf/worktree.local.json` の読み取り
+- `ndf_settings`: 宣言 `.ndf/worktree.json` と個人設定 `.ndf/worktree.local.json` の読み取り
 - `repo`: メインディレクトリ・worktree の中か・worktree の一覧（git は `adapters.git` を通す）
 - `create`: ブランチの worktree を `.worktrees/<ブランチ>` に作る（作業場所の用意）
 - `cleanup`: マージ済みのブランチの worktree を消す（PR は `adapters.github` から読む）
@@ -19,7 +19,7 @@
 - `trash`: 外す前の退避と、本番に出た退避先の回収（承認した名前だけを消す）
 - `mainlock`: メインディレクトリの排他（index か HEAD を動かす git の操作を 1 本ずつにする）
 - `follow`: セッションを始めたときのブランチの追従（宣言の `follow_branch: true` のとき）
-- `deps`・`localenv`・`testenv`（`ledger`・`testenv_sweep`）: 宣言の各節に従う worktree の環境
+- `deps`・`localenv`・`testenv`（`allocations`・`testenv_sweep`）: 宣言の各節に従う worktree の環境
 - `container`: 宣言のコマンドとコンテナの実行系の起動（差し替えられる）
 - `atomic`: 半端なファイルを残さない書き込み（一時ファイルから付け替える）
 - `outcomes`: 後片付けと回収の結果の語（`items` の `result`）

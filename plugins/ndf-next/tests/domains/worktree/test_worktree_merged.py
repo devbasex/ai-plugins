@@ -10,7 +10,7 @@ import pytest
 
 from ndf.adapters.git import Completed, Git
 from ndf.adapters.github import Pull
-from ndf.domains.worktree import create, declaration, follow, merged, setup, trash
+from ndf.domains.worktree import create, ndf_settings, follow, merged, setup, trash
 
 
 def _pull(number: int, branch: str, merged_: bool) -> Pull:
@@ -77,10 +77,10 @@ def test_after_merge_keeps_tracked_changes_and_main_dir_off_base(main_repo: Path
     assert results == {"worktree": "kept", "main_dir": "kept"} and wt.exists()
 
 
-def test_sprint_branch_uses_start_record_over_declaration(main_repo: Path, run_git: Callable) -> None:
+def test_sprint_branch_uses_start_record_over_ndf_settings(main_repo: Path, run_git: Callable) -> None:
     """宣言（whole）を変えても、開始時の記録（selected）で始めたスプリントブランチは本番に入るまで残す（#3310）。"""
     wt = _land(main_repo, run_git, "sprint/s1")
-    record = {"promotion": "selected", "production_branch": "main"}
+    record = {"release_strategy": "selected", "production_branch": "main"}
     rec = merged.after_merge(main_repo, [2], FakeHub({2: _pull(2, "sprint/s1", True)}), flow_record=record)
     assert [i["result"] for i in rec.items if i["kind"] == "branch"] == ["kept"] and wt.exists()
     rec = merged.after_merge(main_repo, [2], FakeHub({2: _pull(2, "sprint/s1", True)}))
@@ -89,8 +89,8 @@ def test_sprint_branch_uses_start_record_over_declaration(main_repo: Path, run_g
 
 def test_read_flow_record(tmp_path: Path) -> None:
     path = tmp_path / "flow.json"
-    path.write_text(json.dumps({"promotion": "selected"}), encoding="utf-8")
-    assert merged.read_flow_record(path) == {"promotion": "selected"}
+    path.write_text(json.dumps({"release_strategy": "selected"}), encoding="utf-8")
+    assert merged.read_flow_record(path) == {"release_strategy": "selected"}
     assert merged.read_flow_record(None) is None
 
 
@@ -100,20 +100,20 @@ def test_follow_detaches_main_dir_to_single_worktree(make_repo: Callable, run_gi
     (wt / "f.txt").write_text("f", encoding="utf-8")
     run_git(wt, "add", "-A")
     run_git(wt, "commit", "-q", "-m", "f")
-    text = follow.follow(main, declaration.load(main))
+    text = follow.follow(main, ndf_settings.load(main))
     assert text is not None and "feat/f" in text
     assert Git(main).rev_parse("HEAD") == Git(wt).rev_parse("HEAD")
-    assert follow.follow(main, declaration.load(main)) is None  # 合っていれば動かさない
+    assert follow.follow(main, ndf_settings.load(main)) is None  # 合っていれば動かさない
 
 
 def test_follow_does_nothing_without_flag_or_with_changes(make_repo: Callable) -> None:
     plain = make_repo({"version": 1, "base_branch": "develop"})
     create.create(plain, "feat/g")
     before = Git(plain).rev_parse("HEAD")
-    assert follow.follow(plain, declaration.load(plain)) is None
+    assert follow.follow(plain, ndf_settings.load(plain)) is None
     (plain / ".gitignore").write_text("changed\n", encoding="utf-8")
     (plain / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "follow_branch": True}), encoding="utf-8")
-    assert follow.follow(plain, declaration.load(plain)) is None  # 未コミットの変更があれば動かさない
+    assert follow.follow(plain, ndf_settings.load(plain)) is None  # 未コミットの変更があれば動かさない
     assert Git(plain).rev_parse("HEAD") == before
 
 

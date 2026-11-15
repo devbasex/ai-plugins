@@ -75,7 +75,7 @@ def test_old_analyzer_and_hand_written_are_stale(repo, capsys, last_result):
     assert len(last_result(capsys.readouterr().out)["items"]) == 1
 
 
-def test_broken_declarations_are_2(repo, capsys, last_result):
+def test_broken_ndf_settings_are_2(repo, capsys, last_result):
     (repo / ".ndf").mkdir()
     (repo / ".ndf" / "project.json").write_text("{", encoding="utf-8")
     assert cli.main(["check", "--root", str(repo)]) == 2
@@ -105,7 +105,7 @@ def test_check_reads_the_main_directory_from_a_linked_worktree(repo, tmp_path):
 def test_schema_prints_or_writes(tmp_path, capsys, last_result):
     assert cli.main(["schema"]) == 0
     out = capsys.readouterr().out.splitlines()
-    assert json.loads("\n".join(out[:-1]))["$id"] == "declarations/project.schema.json"
+    assert json.loads("\n".join(out[:-1]))["$id"] == "ndf-settings/project.schema.json"
     target = tmp_path / "s" / "project.schema.json"
     assert cli.main(["schema", "--out", str(target)]) == 0
     assert json.loads(target.read_text(encoding="utf-8"))["type"] == "object"
@@ -183,9 +183,9 @@ def test_write_creates_then_keeps_hand_values(repo, tmp_path, capsys, last_resul
     assert json.loads((repo / ".ndf" / "project.json").read_text(encoding="utf-8"))["checks"] == decl["checks"]
 
 
-def test_write_refuses_bad_flow_answer_and_broken_declaration(repo, tmp_path, capsys, last_result):
+def test_write_refuses_bad_flow_answer_and_broken_ndf_settings(repo, tmp_path, capsys, last_result):
     measured = _measure_file(tmp_path, {})
-    bad = _answers(tmp_path, {"branch_flow": {"value": {"promotion": "whole", "start": "production"}}})
+    bad = _answers(tmp_path, {"branch_flow": {"value": {"release_strategy": "whole", "start": "production"}}})
     assert cli.main(["write", "--root", str(repo), "--measure", str(measured), "--answers", str(bad)]) == 1
     assert last_result(capsys.readouterr().out)["cause"]["kind"] == "check_failed"
     (repo / ".ndf").mkdir()
@@ -207,12 +207,12 @@ def test_write_adds_missing_branches_to_worktree(repo, tmp_path, capsys, last_re
 
 
 def test_drift_compares_with_the_default_row(repo, tmp_path, capsys, last_result):
-    flow = {"fields": {"promotion": {"value": "selected", "confidence": "高", "evidence": []}}}
+    flow = {"fields": {"release_strategy": {"value": "selected", "confidence": "高", "evidence": []}}}
     measured = _measure_file(tmp_path, {"branch_flow": flow})
     assert cli.main(["drift", "--root", str(repo), "--measure", str(measured)]) == 0
     got = last_result(capsys.readouterr().out)
     assert got["metrics"] == {"drifted": 1, "declared": False}
-    assert got["items"][0]["name"] == "branch_flow.promotion"
+    assert got["items"][0]["name"] == "branch_flow.release_strategy"
     assert cli.main(["drift", "--root", str(repo), "--measure", str(tmp_path / "none.json")]) == 1
 
 

@@ -80,7 +80,7 @@ def test_issue_2601_user_facing_change_is_decided_by_files() -> None:
     assert changes_decide.distribution_changed(shipped) is True
 
 
-def test_issue_3110_instruction_changes_include_declarations() -> None:
+def test_issue_3110_instruction_changes_include_ndf_settings() -> None:
     """#3110: 指示書の変化に `.ndf/` の設定の変化が載る。"""
     got = changes_decide.instruction_changes(["CLAUDE.md", ".ndf/release.json", "src/a.py", "docs/CLAUDE.md"])
     assert got == [".ndf/release.json", "CLAUDE.md"]

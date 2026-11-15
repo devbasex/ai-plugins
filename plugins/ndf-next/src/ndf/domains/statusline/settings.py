@@ -122,7 +122,7 @@ def _ndf_line() -> dict[str, Any]:
     return {"type": "command", "command": NDF_COMMAND, "refreshInterval": REFRESH_INTERVAL}
 
 
-def _place_body(p: Paths) -> bool:
+def _location_body(p: Paths) -> bool:
     """表示の本体を今の版で置く。中身が同じなら置かない。置いたら真。"""
     text = BODY_SOURCE.read_text(encoding="utf-8")
     if p.body.is_file() and p.body.read_text(encoding="utf-8") == text:
@@ -170,7 +170,7 @@ def _keep_refresh(p: Paths, data: dict[str, Any], line: dict[str, Any]) -> None:
 
 def ensure(p: Paths, home: Optional[Path] = None) -> Switched:
     """SessionStart 向け。`statusLine` が無ければ NDF の表示を設定する。NDF の表示なら本体だけを今の版に置き直す。"""
-    placed = _place_body(p)
+    placed = _location_body(p)
     data = _read_settings(p)
     line = _status_line(data)
     if line is None:
@@ -208,7 +208,7 @@ def status(p: Paths) -> Switched:
 def set_ndf(p: Paths) -> Switched:
     """今の値を控えて NDF の表示へ切り替える。既に NDF の表示なら再描画の間隔だけを補う。"""
     data = _read_settings(p)
-    _place_body(p)
+    _location_body(p)
     line = _status_line(data)
     if is_ndf(line) and line is not None:
         _keep_refresh(p, data, line)

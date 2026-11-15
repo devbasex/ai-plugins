@@ -32,7 +32,7 @@ def _venv(ident: env.Ident, name: str, used_at: float) -> Path:
     return path
 
 
-def test_places_follow_the_lock_hash(tmp_path):
+def test_locations_follow_the_lock_hash(tmp_path):
     a = _ident(tmp_path, "a", "one")
     b = _ident(tmp_path, "b", "two")
     assert env.venv_dir(a) != env.venv_dir(b) and env.venv_dir(a).parent == tmp_path / "cache" / "demo" / "venv"
@@ -42,11 +42,11 @@ def test_places_follow_the_lock_hash(tmp_path):
 def test_mark_root_writes_once_per_content(tmp_path):
     ident = _ident(tmp_path)
     assert env.mark_root(ident) is True and env.mark_root(ident) is False
-    marks = list(ident.roots_dir.glob("*.json"))
-    assert len(marks) == 1 and json.loads(marks[0].read_text(encoding="utf-8"))["lock_hash"] == env.lock_hash(ident.plugin_root)
+    markers = list(ident.roots_dir.glob("*.json"))
+    assert len(markers) == 1 and json.loads(markers[0].read_text(encoding="utf-8"))["lock_hash"] == env.lock_hash(ident.plugin_root)
 
 
-def test_prune_keeps_marked_recent_and_locked_places(tmp_path):
+def test_prune_keeps_marked_recent_and_locked_locations(tmp_path):
     now = 100 * DAY
     keep = tables.policy_value("hook.venv-keep", "seconds")
     ident = _ident(tmp_path)
@@ -65,7 +65,7 @@ def test_prune_keeps_marked_recent_and_locked_places(tmp_path):
     assert marked.exists() and recent.exists() and locked.exists() and not old.exists()
 
 
-def test_prune_drops_marks_of_removed_installations(tmp_path):
+def test_prune_drops_markers_of_removed_installations(tmp_path):
     gone = _ident(tmp_path, "gone", "old-lock")
     env.mark_root(gone)
     stale = _venv(gone, env.lock_hash(gone.plugin_root), 0)
@@ -75,7 +75,7 @@ def test_prune_drops_marks_of_removed_installations(tmp_path):
     assert list(live.roots_dir.glob("*.json")) == []
 
 
-def test_prepare_does_not_rebuild_a_place_in_use(tmp_path):
+def test_prepare_does_not_rebuild_a_location_in_use(tmp_path):
     ident = _ident(tmp_path)
     python = env.venv_python(ident)
     python.parent.mkdir(parents=True)
@@ -83,7 +83,7 @@ def test_prepare_does_not_rebuild_a_place_in_use(tmp_path):
     assert env.prepare(ident, uv="/nonexistent/uv") == env.venv_dir(ident)
 
 
-def test_failed_prepare_leaves_the_reason_and_no_place(tmp_path):
+def test_failed_prepare_leaves_the_reason_and_no_location(tmp_path):
     ident = _ident(tmp_path)
     assert env.prepare(ident, uv="/nonexistent/uv") is None
     assert "uv" in env.failed_path(ident).read_text(encoding="utf-8")
@@ -106,7 +106,7 @@ def test_prepare_skips_while_another_prepare_holds_the_lock(tmp_path):
     assert env.preparing(ident) is False
 
 
-def test_touch_used_only_marks_an_existing_place(tmp_path):
+def test_touch_used_only_marks_an_existing_location(tmp_path):
     ident = _ident(tmp_path)
     env.touch_used(ident)
     assert not env.venv_dir(ident).exists()

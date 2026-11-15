@@ -188,7 +188,7 @@ class RowState:
     payload: Optional[dict[str, Any]] = None
 
 
-def table_id(level: str, repo: str, name: str) -> str:
+def machine_id(level: str, repo: str, name: str) -> str:
     """進行表の識別子 `<階層>:<リポジトリの短い鍵>:<名前>`。同じ 3 つの値から常に同じ文字列（決定 15）。"""
     key = hashlib.sha256(repo.encode()).hexdigest()[:REPO_KEY_LENGTH]
     return f"{level}:{key}:{name}"

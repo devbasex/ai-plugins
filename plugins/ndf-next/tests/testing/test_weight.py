@@ -36,7 +36,7 @@ def test_word_list_is_read_as_one_command():
     assert not weight.is_heavy(["pytest", "a.py"], SUITES)
 
 
-def test_no_declaration_means_not_heavy():
+def test_no_ndf_settings_means_not_heavy():
     assert not weight.is_heavy("pytest . -n 8", [])
 
 

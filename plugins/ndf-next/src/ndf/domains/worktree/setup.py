@@ -15,14 +15,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from ndf.domains.worktree import atomic, declaration
+from ndf.domains.worktree import atomic, ndf_settings
 
 # 宣言の状態
 PRESENT = "present"
 ABSENT = "absent"
 UNREADABLE = "not_readable"
 # 個人設定を追跡から外す登録の名前（宣言と同じディレクトリに置き、根の .gitignore に触れない）
-IGNORE_FILE = declaration.GITIGNORE
+IGNORE_FILE = ndf_settings.GITIGNORE
 
 
 class SetupError(Exception):
@@ -33,13 +33,13 @@ class SetupError(Exception):
 class State:
     state: str
     detail: str = ""
-    decl: Optional[declaration.Declaration] = None
+    decl: Optional[ndf_settings.NdfSettings] = None
 
 
 def state(main_dir: Path) -> State:
     try:
-        decl = declaration.load(main_dir)
-    except declaration.DeclarationError as exc:
+        decl = ndf_settings.load(main_dir)
+    except ndf_settings.NdfSettingsError as exc:
         return State(UNREADABLE, str(exc))
     return State(ABSENT) if decl is None else State(PRESENT, decl=decl)
 
@@ -53,7 +53,7 @@ class Initialized:
 
 def init(main_dir: Path, force: bool = False) -> Initialized:
     """宣言を作る。既にあれば書かずに `written=False`。"""
-    shared = declaration.shared_file(main_dir)
+    shared = ndf_settings.shared_file(main_dir)
     if not force:
         got = state(main_dir)
         if got.state == PRESENT:
@@ -64,13 +64,13 @@ def init(main_dir: Path, force: bool = False) -> Initialized:
         if p.is_symlink():
             raise SetupError(f"{p} が symlink（たどらずに終わる）")
     shared.parent.mkdir(parents=True, exist_ok=True)
-    atomic.write_text(shared, json.dumps({"version": declaration.VERSION}, indent=2) + "\n")
-    declaration.load(main_dir)
+    atomic.write_text(shared, json.dumps({"version": ndf_settings.VERSION}, indent=2) + "\n")
+    ndf_settings.load(main_dir)
     ignore = shared.parent / IGNORE_FILE
     if ignore.exists() or ignore.is_symlink():
         return Initialized(shared, True)
     try:
-        atomic.write_text(ignore, f"# 個人設定。各自の機械の値を書き、コミットしない\n{declaration.local_file(main_dir).name}\n")
+        atomic.write_text(ignore, f"# 個人設定。各自の機械の値を書き、コミットしない\n{ndf_settings.local_file(main_dir).name}\n")
     except OSError as exc:  # 宣言は作れている。気づけるよう警告だけを返す
         return Initialized(shared, True, (f"{ignore} を書けない（個人設定を使うなら手で登録する）: {exc}",))
     return Initialized(shared, True)

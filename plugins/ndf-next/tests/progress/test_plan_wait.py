@@ -72,7 +72,7 @@ def test_read_seen_finds_the_request_and_the_answer_without_next(opened):
         pid = plan.create_plan(conn, REPO, _doc(), True)
         view, events = lane.read_plan(conn, pid)
         after = events[-1].seq
-        sid = store.create_table(conn, ("sprint", REPO, "a-r1"), view.lanes["a"].table_id, None, [])
+        sid = store.create_machine(conn, ("sprint", REPO, "a-r1"), view.lanes["a"].machine_id, None, [])
         lane.start_row(conn, pid, "a", "r1", sid)
         lane.record_answer(conn, sid, {"choice": "approved"})
         key = plan.open_request(conn, pid, {"lane": "a", "kind": "lane_add"}, "レーンを足したい", "organizer")
@@ -118,7 +118,7 @@ def test_read_seen_does_not_count_an_answer_within_the_grace_as_a_stall(opened):
     with store.transaction(opened) as conn:
         pid, after = _plan_and_after(conn)
         view, _ = lane.read_plan(conn, pid)
-        sid = store.create_table(conn, ("sprint", REPO, "a-r1"), view.lanes["a"].table_id, None, [])
+        sid = store.create_machine(conn, ("sprint", REPO, "a-r1"), view.lanes["a"].machine_id, None, [])
         lane.start_row(conn, pid, "a", "r1", sid)
         lane.record_answer(conn, sid, {"choice": "approved"})
         seen = wait.read_seen(conn, pid, after, datetime.now(UTC))

@@ -37,7 +37,7 @@ from ndf.domains.relay import (
     hub,
     install,
     lane_question,
-    marks,
+    markers,
     notice,
     pending,
     registry,
@@ -117,7 +117,7 @@ def _pending() -> int:
 
 
 def _mark(session_id: str) -> int:
-    path = marks.mark(identity.load().state_dir, session_id)
+    path = markers.mark(identity.load().state_dir, session_id)
     return result.emit(result.result(TOOL, result.OK, f"セッション {session_id} に中継の印を立てた", items=[{"path": str(path)}]))
 
 
@@ -198,7 +198,7 @@ def _stop_all(ctx: hub.Context) -> int:
 
 def _stop_one(ctx: hub.Context, name: str) -> hub.Outcome:
     try:
-        stop_signal.place_stop(registry.wrapper_dir(ctx.state_dir, name))
+        stop_signal.location_stop(registry.wrapper_dir(ctx.state_dir, name))
     except (OSError, registry.RegistryError) as exc:
         return hub.Outcome(False, f"停止シグナルファイルを置けない: {exc}", "refused")
     if ctx.tmux.has(name):
@@ -312,5 +312,5 @@ def main(argv: list[str]) -> int:
         return causes.exit_code("invalid") if exc.code else 0
     try:
         return HANDLERS[args.action](args)
-    except (accounts.AccountError, account_registry.AccountError, marks.MarkError, registry.RegistryError, limits.EnvError) as exc:
+    except (accounts.AccountError, account_registry.AccountError, markers.MarkerError, registry.RegistryError, limits.EnvError) as exc:
         return result.emit(result.stopped(TOOL, "invalid", str(exc)))

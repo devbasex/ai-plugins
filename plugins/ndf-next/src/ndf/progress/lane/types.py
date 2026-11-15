@@ -23,7 +23,7 @@ class LaneSpec:
     """計画の進行表のレーンの行。`after` の要素は `<レーン>`（レーンの全行）か `<レーン>/<行の鍵>`。"""
 
     name: str
-    table_id: str
+    machine_id: str
     kind: str
     plans: int
     touches: tuple[str, ...]
@@ -48,7 +48,7 @@ class Request:
 class PlanView:
     """計画の進行表の畳み込み。"""
 
-    table_id: str
+    machine_id: str
     name: str
     state: str
     rules: tuple[str, ...]

@@ -71,7 +71,7 @@ def usable_worktree(path: Optional[str]) -> bool:
 
 def workdir(plan: Plan, step: Step) -> Optional[str]:
     """ステップを打つ作業ディレクトリ（`assemble_decide.workdir_for` の判断に作業場所の今の状態を渡す）。"""
-    return assemble_decide.workdir_for(step.place, plan.worktree, plan.repo, usable_worktree(plan.worktree))
+    return assemble_decide.workdir_for(step.location, plan.worktree, plan.repo, usable_worktree(plan.worktree))
 
 
 def _pid_path(state_dir: Path, step_id: str) -> Path:

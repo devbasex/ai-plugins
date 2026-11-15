@@ -89,8 +89,8 @@ def test_broken_json_stops(contracts_copy, text):
         facts.table("sample")
 
 
-def test_limits_ref_names_the_limits_declaration():
-    assert facts.LIMITS_REF == f"{limits.DECLARATION}#"
+def test_limits_ref_names_the_limits_ndf_settings():
+    assert facts.LIMITS_REF == f"{limits.NDF_SETTINGS}#"
 
 
 def test_ref_errors_point_at_missing_targets(contracts_copy, sample_table):
@@ -133,17 +133,17 @@ def test_parse_where_needs_equals():
 def test_domain_tables_are_read_by_name(contracts_copy, fact_table):
     contracts_copy("domains/sample.json", lambda _: fact_table({}, [{"id": "x"}]))
     assert "sample" in facts.names() and "runtimes" in facts.names()
-    assert facts.place("sample") == "domains/sample.json"
+    assert facts.location("sample") == "domains/sample.json"
     assert facts.ids("sample") == ("x",)
 
 
-def test_same_name_in_both_places_is_refused(contracts_copy, fact_table):
+def test_same_name_in_both_locations_is_refused(contracts_copy, fact_table):
     contracts_copy("domains/exit-codes.json", lambda _: fact_table({}, [{"id": "x"}]))
     with pytest.raises(facts.FactsError, match="2 つの置き場"):
         facts.table("exit-codes")
 
 
-def test_table_ref_must_name_the_tables_place(contracts_copy, fact_table):
+def test_table_ref_must_name_the_tables_location(contracts_copy, fact_table):
     columns = {
         "seat": {"type": "string", "summary": "s", "ref": "facts/runtimes"},
         "next": {"type": "string", "summary": "n", "ref": "domains/runtimes"},
@@ -160,7 +160,7 @@ def test_table_ref_must_name_the_tables_place(contracts_copy, fact_table):
 ROW_COLUMNS = {"rank": {"type": "integer", "summary": "r"}, "tags": {"type": "array", "summary": "t", "optional": True}}
 
 
-def test_row_schema_from_column_declarations_in_contracts():
+def test_row_schema_from_column_ndf_settings_in_contracts():
     assert facts.row_schema(ROW_COLUMNS) == {
         "type": "object",
         "additionalProperties": False,

@@ -18,7 +18,7 @@ from ndf.adapters import git as git_mod
 from ndf.adapters.github import GitHub, text_of
 from ndf.domains.release import changes_decide, checks_decide, included_decide, materials_decide, version_decide
 from ndf.domains.release import plugins as plugins_mod
-from ndf.domains.release.declaration import Declaration
+from ndf.domains.release.ndf_settings import NdfSettings
 
 # 含む PR から読む項目（題と、最後のコミットのチェックの結論）
 PULL_SELECTION = (
@@ -105,7 +105,7 @@ def shipped(repo_git: git_mod.Git, found: Sequence[plugins_mod.Plugin], producti
     return out
 
 
-def changes(paths: Sequence[str], found: Sequence[plugins_mod.Plugin], decl: Declaration) -> list[changes_decide.Change]:
+def changes(paths: Sequence[str], found: Sequence[plugins_mod.Plugin], decl: NdfSettings) -> list[changes_decide.Change]:
     """範囲の変わったファイル（`paths`）のプラグインごとの変化。"""
     return changes_decide.changes(paths, {p.name: p.dir for p in found}, decl.undistributed)
 
@@ -114,7 +114,7 @@ def plan_bumps(
     root: Path,
     found: Sequence[plugins_mod.Plugin],
     change_list: Sequence[changes_decide.Change],
-    decl: Declaration,
+    decl: NdfSettings,
     level: str,
     channel: str,
 ) -> list[version_decide.Planned]:

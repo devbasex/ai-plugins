@@ -8,7 +8,7 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "table_id": {
+        "machine_id": {
           "type": "string",
           "description": "答える進行表の ID",
           "x-ndf-positional": true
@@ -34,7 +34,7 @@
         },
         "--notes": {
           "type": "string",
-          "description": "差し戻し（revise）の指摘ファイル"
+          "description": "差し戻し（request_changes）の指摘ファイル"
         },
         "--head": {
           "type": "string",
@@ -53,7 +53,7 @@
         }
       },
       "required": [
-        "table_id",
+        "machine_id",
         "--gate",
         "--result",
         "--reason",

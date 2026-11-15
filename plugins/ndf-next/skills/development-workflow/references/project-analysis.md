@@ -134,20 +134,20 @@ clone した全員と CI で同じ値のまま効き、変える Pull Request �
 
 ## ブランチ運用
 
-`measure` は `branch_flow`（P6 のブランチ運用）も測る。宣言の 4 項目（`start`・`integrate`・`doc_prs`・`promotion`）ごとに、
+`measure` は `branch_flow`（P6 のブランチ運用）も測る。宣言の 4 項目（`start`・`integrate`・`doc_prs`・`release_strategy`）ごとに、
 推した値・確からしさ（`高` / `中`）・根拠（打ったコマンドと結果の要約）を `fields` に出す。標本は直近のマージ済みの
 Pull Request（最大 100 件）と origin のスプリントブランチで、合う割合が 0.9 以上なら `高`、0.6 以上なら `中` である。
 標本が 3 件未満か 0.6 未満の項目は値を出さず、`unknown` と理由を出す。4 項目がすべて `高` なら測った値、ほかは問いになる。
 
 | 項目 | 何から推すか |
 | --- | --- |
-| `start` | 本番チャネルに入っていないスプリントブランチの分岐点。本番チャネルにだけあるコミットなら `production`、ベースブランチにだけあるコミットなら `base`。丸ごとのリリースで後から本番に入った分岐点は、本番チャネルの first-parent の列に無ければ `base`。少なければ `promotion` の行が許す値 |
+| `start` | 本番チャネルに入っていないスプリントブランチの分岐点。本番チャネルにだけあるコミットなら `production`、ベースブランチにだけあるコミットなら `base`。丸ごとのリリースで後から本番に入った分岐点は、本番チャネルの first-parent の列に無ければ `base`。少なければ `release_strategy` の行が許す値 |
 | `integrate` | head がスプリントブランチで宛先がベースブランチの Pull Request |
 | `doc_prs` | 設計 PR（`design/*`）と確定仕様化の PR（`spec/*`）の宛先 |
-| `promotion` | 本番チャネル宛ての Pull Request の head。ベースブランチそのもの・リリースブランチの first-parent の列がマージ前の本番チャネルへ届かないなら `whole`、届けば `selected` |
+| `release_strategy` | 本番チャネル宛ての Pull Request の head。ベースブランチそのもの・リリースブランチの first-parent の列がマージ前の本番チャネルへ届かないなら `whole`、届けば `selected` |
 
-答えは `branch_flow` に `{"value": {"start": ..., "integrate": ..., "doc_prs": ..., "promotion": ...}}` で書く。取り込み方の表
-（[worktree の declaration.md](../../worktree/references/declaration.md) の「ブランチ運用を宣言するリポジトリ」）に合わない答えは、
+答えは `branch_flow` に `{"value": {"start": ..., "integrate": ..., "doc_prs": ..., "release_strategy": ...}}` で書く。取り込み方の表
+（[worktree の ndf_settings.md](../../worktree/references/ndf-settings.md) の「ブランチ運用を宣言するリポジトリ」）に合わない答えは、
 `write` が書かずに 1 で終わる。`write` が書くのは `worktree.json` に `branch_flow` が無いときと、前の `write` の値のままのときだけである。
 
 **ずれの検出は `drift` が行う。** `check` は `gh` を呼ばないため、`.ndf/worktree.json` が読めない誤り（2）だけを見る。振り返りと棚卸しは

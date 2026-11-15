@@ -2,7 +2,7 @@
 
 規則の定義（何を兆候と数えるか）は `rules.json` の `smells` と、同じディレクトリの `README.md` の表にある。どの規則も 1 つの関数が
 `(行, 規則)` を返し、`scan` がそれらをまとめる。ruff で数える規則（`by` が `ruff`）は `lint` が数える（決定 36）。
-境界の印による許しは `marks` が当てる。
+境界の印による許しは `suppressions` が当てる。
 """
 
 from __future__ import annotations

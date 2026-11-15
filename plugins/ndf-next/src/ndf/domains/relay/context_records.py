@@ -31,7 +31,7 @@ MARK_HANDOFF, MARK_RESTORED = "引継ぎ開始", "復元完了"
 MARKS = (MARK_HANDOFF, MARK_RESTORED)
 EVENT_DECISION = "判定"
 UNKNOWN = "不明"
-HANDOFF_PATH = re.compile(re.escape(facts.value("places", "ndf-handoff", "path") + "/"))
+HANDOFF_PATH = re.compile(re.escape(facts.value("locations", "ndf-handoff", "path") + "/"))
 CACHE_1H = 3600  # 呼び出しの間隔がこれを超えたら、1 時間のキャッシュが切れたとみなす
 ISSUE = re.compile(r"(?:^|[^0-9A-Za-z_/])#?([0-9]+)\b")
 NOISE = re.compile(r"[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}|[0-9]+(?:\.[0-9]+)+")
@@ -57,7 +57,7 @@ def toplevel(cwd: Optional[Path]) -> Optional[Path]:
 
 
 def repo_key(root: Optional[Path]) -> str:
-    """`<owner>__<repo>`（origin の URL から。旧い `usage_ledger.repo_key` と同じ）。git の外は `_local`。"""
+    """`<owner>__<repo>`（origin の URL から。旧い `usage_log.repo_key` と同じ）。git の外は `_local`。"""
     if root is None:
         return LOCAL
     try:
@@ -204,10 +204,10 @@ def sessions_of(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     return out
 
 
-def attach_marks(marks: list[dict[str, Any]], spans: Mapping[str, tuple[float, float]]) -> dict[Optional[str], list[dict[str, Any]]]:
+def attach_markers(markers: list[dict[str, Any]], spans: Mapping[str, tuple[float, float]]) -> dict[Optional[str], list[dict[str, Any]]]:
     """session_id の無い印を、`at` を時間の範囲に含むセッションへ割り当てる。どれにも入らなければ None へ。"""
     out: dict[Optional[str], list[dict[str, Any]]] = defaultdict(list)
-    for m in marks:
+    for m in markers:
         sid = m.get("session_id")
         at = parse_ts(m.get("at"))
         if not sid and at is not None:
@@ -316,15 +316,15 @@ def _median(values: list[float]) -> Optional[float]:
     return float(statistics.median(values)) if values else None
 
 
-def _mark_times(marks: Iterable[Mapping[str, Any]], event: str) -> list[float]:
-    return sorted(t for m in marks if m.get("event") == event and (t := parse_ts(m.get("at"))) is not None)
+def _mark_times(markers: Iterable[Mapping[str, Any]], event: str) -> list[float]:
+    return sorted(t for m in markers if m.get("event") == event and (t := parse_ts(m.get("at"))) is not None)
 
 
-def mark_bounds(marks: list[dict[str, Any]], by_next: bool) -> tuple[Optional[float], Optional[float]]:
+def mark_bounds(markers: list[dict[str, Any]], by_next: bool) -> tuple[Optional[float], Optional[float]]:
     """(復元の区間の終わり, 引継ぎの区間の始まり)。復元は引継ぎ文書で始まったセッションの最初の「復元完了」、
     引継ぎは最後の「引継ぎ開始」。印が無ければそれぞれ None。集計（`context_report`）と較正が同じ区間を使う。"""
-    restored = _mark_times(marks, MARK_RESTORED)
-    handoffs = _mark_times(marks, MARK_HANDOFF)
+    restored = _mark_times(markers, MARK_RESTORED)
+    handoffs = _mark_times(markers, MARK_HANDOFF)
     return (restored[0] if by_next and restored else None), (handoffs[-1] if handoffs else None)
 
 
@@ -369,8 +369,8 @@ def _sampled(sessions: Mapping[str, Any], cache: Mapping[str, Any], by_session: 
     }
     for sid, s in sessions.items():
         calls, _, by_next = cache[sid]
-        marks = by_session[sid] if sid in by_session else []
-        restore_end, handoff_from = mark_bounds(marks, by_next)
+        markers = by_session[sid] if sid in by_session else []
+        restore_end, handoff_from = mark_bounds(markers, by_next)
         restore = _restore_sample(calls, restore_end)
         if restore is not None:
             acc["restore_context"].append(restore[0])
@@ -397,7 +397,7 @@ def estimate(rows: list[dict[str, Any]], since: Optional[float]) -> dict[str, An
     sessions = sessions_of(rows)
     cache = {sid: read_calls(s["transcript"], set()) for sid, s in sessions.items()}
     spans = {sid: (min(ts), max(ts)) for sid, got in cache.items() if (ts := [c["ts"] for c in got[0] if c["ts"]])}
-    acc = _sampled(sessions, cache, attach_marks([r for r in rows if r.get("event") in MARKS], spans))
+    acc = _sampled(sessions, cache, attach_markers([r for r in rows if r.get("event") in MARKS], spans))
 
     def med(values: list[float]) -> Optional[float]:
         return _median(values) if len(values) >= cp.MIN_SAMPLES else None

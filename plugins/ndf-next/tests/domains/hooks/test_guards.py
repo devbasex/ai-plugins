@@ -1,4 +1,4 @@
-"""guard の本体の判定（sleep・script-chain・context-limit・ask-forward・relay-mark・unattended・stop-wait）。"""
+"""guard の本体の判定（sleep・script-chain・context-limit・ask-forward・relay-marker・unattended・stop-wait）。"""
 
 from __future__ import annotations
 

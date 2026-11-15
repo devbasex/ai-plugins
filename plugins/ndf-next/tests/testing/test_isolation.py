@@ -32,7 +32,7 @@ INNER = textwrap.dedent(
         return forbid_real_state
 
     def test_writes_to_the_real_state():
-        target = Path.home() / ".local" / "state" / "ndf" / "ledger.jsonl"
+        target = Path.home() / ".local" / "state" / "ndf" / "journal.jsonl"
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text("{壊れた行")
 
@@ -44,7 +44,7 @@ INNER = textwrap.dedent(
 
     def test_symlink_into_the_real_state_fails(tmp_path):
         (tmp_path / "link").symlink_to(Path.home() / ".local" / "state")
-        (tmp_path / "link" / "ledger.jsonl").write_text("x")
+        (tmp_path / "link" / "journal.jsonl").write_text("x")
 
     def test_dir_fd_removal_in_the_real_state_fails():
         real = Path.home() / ".claude"
@@ -109,7 +109,7 @@ def test_real_state_writes_fail_and_redirected_ones_pass(tmp_path, src_env, base
     flagged = {line.split("::")[1].split()[0] for line in proc.stdout.splitlines() if line.startswith(("FAILED", "ERROR"))}
     assert flagged == FLAGGED, proc.stdout
     assert not (home / ".local" / "state" / "ndf").exists()
-    assert not (home / ".local" / "state" / "ledger.jsonl").exists()
+    assert not (home / ".local" / "state" / "journal.jsonl").exists()
     assert not (home / ".claude" / "x").exists()
     assert (home / ".claude" / "kept").read_text() == "kept"
 
@@ -275,10 +275,10 @@ def test_hook_resolves_links_before_parent_steps(tmp_path):
     guard = _guard_over(real)
     guard.allowed = (os.path.realpath(allowed),)
     with pytest.raises(isolation.RealStateWriteError):
-        guard._hook("open", (str(allowed / "link") + "/../ledger.jsonl", "w", 0))
+        guard._hook("open", (str(allowed / "link") + "/../journal.jsonl", "w", 0))
     with pytest.raises(isolation.RealStateWriteError):
-        guard._hook("os.remove", (str(allowed / "link") + "/../ledger.jsonl", None))
-    assert guard.violations == [os.path.realpath(real) + "/ledger.jsonl"] * 2
+        guard._hook("os.remove", (str(allowed / "link") + "/../journal.jsonl", None))
+    assert guard.violations == [os.path.realpath(real) + "/journal.jsonl"] * 2
 
 
 def test_hook_ignores_non_path_targets():
@@ -307,22 +307,22 @@ def test_check_rejects_bytes_paths_under_a_root(tmp_path):
     real.mkdir()
     guard = _guard_over(real)
     with pytest.raises(isolation.RealStateWriteError):
-        guard._check(os.fsencode(real / "ledger"), None, N)
-    assert guard.violations == [os.path.realpath(real / "ledger")]
+        guard._check(os.fsencode(real / "journal"), None, N)
+    assert guard.violations == [os.path.realpath(real / "journal")]
 
 
 def test_hook_resolves_file_descriptors_to_their_paths(tmp_path):
     real = tmp_path / "real"
     real.mkdir()
-    (real / "ledger").write_text("kept")
+    (real / "journal").write_text("kept")
     guard = _guard_over(real)
-    fd = os.open(real / "ledger", os.O_RDONLY)
+    fd = os.open(real / "journal", os.O_RDONLY)
     try:
         with pytest.raises(isolation.RealStateWriteError):
             guard._hook("os.truncate", (fd, 0))
     finally:
         os.close(fd)
-    assert guard.violations == [os.path.realpath(real / "ledger")]
+    assert guard.violations == [os.path.realpath(real / "journal")]
 
 
 @pytest.mark.skipif(getattr(isolation.fcntl, "F_GETPATH", None) is not None, reason="F_GETPATH の代替が読めてしまう")
@@ -406,7 +406,7 @@ ORIGINAL_STATE_INNER = textwrap.dedent(
         return forbid_real_state
 
     def test_write_to_the_original_state_home():
-        Path(os.environ["ORIGINAL_STATE"], "ledger.jsonl").write_text("x")
+        Path(os.environ["ORIGINAL_STATE"], "journal.jsonl").write_text("x")
     """
 )
 
@@ -420,7 +420,7 @@ def test_original_state_variable_stays_protected_after_an_earlier_fixture_rewrit
     proc = _run_inner_pytest(inner, env, basetemp)
     assert proc.returncode != 0, proc.stdout
     assert "本物の状態の置き場へ書こうとした" in proc.stdout
-    assert not (original / "ledger.jsonl").exists()
+    assert not (original / "journal.jsonl").exists()
 
 
 EARLIER_HOME_CONFTEST = textwrap.dedent(
@@ -445,7 +445,7 @@ ORIGINAL_HOME_INNER = textwrap.dedent(
         return forbid_real_state
 
     def test_write_under_the_original_home():
-        Path(os.environ["ORIGINAL_HOME"], ".claude", "ledger.jsonl").write_text("x")
+        Path(os.environ["ORIGINAL_HOME"], ".claude", "journal.jsonl").write_text("x")
     """
 )
 
@@ -459,4 +459,4 @@ def test_original_home_stays_protected_after_an_earlier_fixture_rewrites_it(tmp_
     proc = _run_inner_pytest(inner, env, basetemp)
     assert proc.returncode != 0, proc.stdout
     assert "本物の状態の置き場へ書こうとした" in proc.stdout
-    assert not (home / ".claude" / "ledger.jsonl").exists()
+    assert not (home / ".claude" / "journal.jsonl").exists()

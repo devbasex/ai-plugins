@@ -1,6 +1,6 @@
 """殻: cross-refactoring の作業場所の準備と片付け（#3106・#750）。
 
-作業場所の根は `ndf.core.converge.place` の置き場の `rf<PR>`。中に次を置く。
+作業場所の根は `ndf.core.converge.location` の置き場の `rf<PR>`。中に次を置く。
 
 | パス | 中身 |
 | --- | --- |
@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ndf.adapters import git
-from ndf.core.converge import place, worktree
+from ndf.core.converge import location, worktree
 from ndf.domains.crossrefactor import launch_decide
 
 
@@ -44,7 +44,7 @@ class Workspace:
 
 def root_of(repo: git.Git, pr: int) -> Path:
     """PR の作業場所の根（<置き場>/rf<PR>）。"""
-    return place.work_root(repo, f"rf{pr}")
+    return location.work_root(repo, f"rf{pr}")
 
 
 def layout(root: Path, runtimes: Sequence[str]) -> Workspace:

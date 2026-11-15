@@ -45,7 +45,7 @@ from ndf.domains.release import (
     verify,
     version_decide,
 )
-from ndf.domains.release import declaration as decl_mod
+from ndf.domains.release import ndf_settings as decl_mod
 from ndf.domains.release import plugins as plugins_mod
 
 # 結果 JSON の tool の名前は副命令の名前（正本は `cli.COMMANDS`）
@@ -313,7 +313,7 @@ _ERRORS: tuple[tuple[type[Exception], str], ...] = (
     (record.NotReleased, "not_applicable"),
     (record.RecordError, "precondition"),
     (record_decide.UnreadableRecord, "invalid"),
-    (decl_mod.DeclarationError, "precondition"),
+    (decl_mod.NdfSettingsError, "precondition"),
     (decl_mod.StepFailed, "check_failed"),
     (plugins_mod.PluginsError, "precondition"),
     (version_decide.VersionError, "precondition"),

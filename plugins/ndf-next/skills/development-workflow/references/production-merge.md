@@ -56,14 +56,14 @@ CD のある場合のマージの後は、CD の workflow がタグと GitHub Re
 
 ## 選んで集める取り込み方のリリース
 
-宣言 `.ndf/worktree.json` の `branch_flow.promotion` が `selected` のスプリントは、ベースブランチを本番チャネルへ入れない。
+宣言 `.ndf/worktree.json` の `branch_flow.release_strategy` が `selected` のスプリントは、ベースブランチを本番チャネルへ入れない。
 スプリントの開始時に目録へ書いたスナップショットで、リリースのプランが次の順に組む。
 
 1. 開発版のデプロイ（ベースブランチ）の後、承認資料の前に `release-steps.py release-branch` がリリースブランチ `release/v<版>` を
    `origin/<本番チャネル>` から切り、そのスプリントのブランチだけを `--no-ff` でマージして push する。衝突すれば止まり、承認資料を出さない
 2. 承認資料（`approval-facts --head release/v<版>`）の範囲は前の本番のタグからリリースブランチの先頭までで、承認したコミットはその先頭である。
    ベースブランチへ入れた検査の Pull Request は範囲に入らない
-3. 本番のプランはリリースブランチから worktree を作り、版を上げ、`release --promotion selected` が `release/v<版>` → 本番チャネルの
+3. 本番のプランはリリースブランチから worktree を作り、版を上げ、`release --release_strategy selected` が `release/v<版>` → 本番チャネルの
    Pull Request を出す。CD の無い場合は、先端が承認したコミットに版上げのコミットだけを積んだものであるときだけマージし、承認の後に別のブランチを
    マージした先端は承認の外として承認ゲート（10）で止める。CD のある場合は版上げまで積んだ本番の PR の先端を承認に出し、先端と
    PR の上の承認（証跡かレビュー）が完全に一致するときだけマージする。承認の後のコミットの追加や組み直しで先端が動けば止まる。

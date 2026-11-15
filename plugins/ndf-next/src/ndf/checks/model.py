@@ -136,7 +136,7 @@ def load_rules(path: Path = RULES_PATH) -> dict[str, Any]:
     ]
     if missing:
         raise CheckError(f"規則のデータに鍵が無い: {path}: {missing}")
-    bad = [code for code, rule in data["smells"].items() if rule["mark"] not in ("none", "boundary", "boundary-or-limit")]
+    bad = [code for code, rule in data["smells"].items() if rule["suppress"] not in ("none", "boundary", "boundary-or-limit")]
     if bad:
         raise CheckError(f"規則のデータの mark が知らない値: {bad}")
     return data

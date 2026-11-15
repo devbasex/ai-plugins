@@ -77,7 +77,7 @@ def test_snapshot_reads_config_dirs_from_env(tmp_path: Path, monkeypatch: pytest
     installed = {"plugins": {"kit@m": [{"scope": "user", "version": "1.0.0"}]}}
     (claude / "plugins" / "installed_plugins.json").write_text(json.dumps(installed), encoding="utf-8")
     known = {"m": {"source": {"source": "github", "repo": "o/r"}}}
-    (claude / "plugins" / "known_marketplaces.json").write_text(json.dumps(known), encoding="utf-8")
+    (claude / "plugins" / "known_marketlocations.json").write_text(json.dumps(known), encoding="utf-8")
     toml = '[marketplaces.m]\nsource_type="git"\nsource="https://example.invalid/r.git"\n[plugins."kit@m"]\nenabled=true\n'
     (codex / "config.toml").write_text(toml, encoding="utf-8")
     got = verify.snapshot()
@@ -128,7 +128,7 @@ def test_snapshot_records_unreadable_files_in_read_order(tmp_path: Path, monkeyp
     claude, codex = _config_dirs(tmp_path, monkeypatch)
     installed, known, config = (
         claude / "plugins" / "installed_plugins.json",
-        claude / "plugins" / "known_marketplaces.json",
+        claude / "plugins" / "known_marketlocations.json",
         codex / "config.toml",
     )
     installed.write_text("{bad", encoding="utf-8")
@@ -138,7 +138,7 @@ def test_snapshot_records_unreadable_files_in_read_order(tmp_path: Path, monkeyp
     assert got.items == {"codex:plugin:kit@m": "enabled=- versions=0.9.0,1.0.0"}
     assert len(got.unreadable) == 3
     assert got.unreadable[0].startswith(f"{installed}: Expecting property name")
-    assert got.unreadable[1] == f"{known}: known_marketplaces.json が表でない"
+    assert got.unreadable[1] == f"{known}: known_marketlocations.json が表でない"
     assert got.unreadable[2].startswith(f"{config}: ")
     installed.write_text(json.dumps({"plugins": []}), encoding="utf-8")
     known.write_text("{}", encoding="utf-8")

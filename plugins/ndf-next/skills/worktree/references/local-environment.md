@@ -11,7 +11,7 @@ worktree は**追跡されているファイルしか持たない**。依存物�
 
 この文書が前提にするのは git・コンテナ実行系と Compose 相当の定義・POSIX シェルまでで、
 ホストの種類・言語・フレームワークには依存しない。リポジトリごとの差は
-[`declaration.md`](declaration.md) の設定ファイルが持つ。
+[`ndf_settings.md`](ndf_settings.md) の設定ファイルが持つ。
 
 ## この文書が受け取る値
 

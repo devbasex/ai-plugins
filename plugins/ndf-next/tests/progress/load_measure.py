@@ -50,27 +50,27 @@ def _setup(url: str, root: Path, n: int) -> list[str]:
     with store.open_store(url, root) as st, store.transaction(st) as conn:
         for i in range(n):
             drafts = [model.EventDraft("created", "conductor", "実装", rev=1)]
-            ids.append(store.create_table(conn, ("sprint", "load", f"s{i}"), None, {"stages": []}, drafts))
+            ids.append(store.create_machine(conn, ("sprint", "load", f"s{i}"), None, {"stages": []}, drafts))
     return ids
 
 
-def _one_write(url: str, root: Path, table_id: str, toggle: bool) -> float:
+def _one_write(url: str, root: Path, machine_id: str, toggle: bool) -> float:
     kind = "disabled" if toggle else "enabled"
     with store.open_store(url, root) as st:
         started = time.perf_counter()
         with store.transaction(st) as conn:
-            last = store.read_events(conn, table_id)[-1].seq
-            store.append_events(conn, table_id, [model.EventDraft(kind, "conductor", "実装", reason="負荷", rev=1)], last)
+            last = store.read_events(conn, machine_id)[-1].seq
+            store.append_events(conn, machine_id, [model.EventDraft(kind, "conductor", "実装", reason="負荷", rev=1)], last)
         return time.perf_counter() - started
 
 
-def _worker(url: str, root: str, table_id: str, deadline: float, interval: float, out: str) -> None:
+def _worker(url: str, root: str, machine_id: str, deadline: float, interval: float, out: str) -> None:
     durable.check_file = _counting_check(Path(out).with_suffix(".checks"))
     waits, busy, other = [], 0, []
     toggle = True
     while time.time() < deadline:
         try:
-            waits.append(_one_write(url, Path(root), table_id, toggle))
+            waits.append(_one_write(url, Path(root), machine_id, toggle))
             toggle = not toggle
         except store.StoreBusy:
             busy += 1
@@ -80,7 +80,7 @@ def _worker(url: str, root: str, table_id: str, deadline: float, interval: float
     Path(out).write_text(json.dumps({"waits": waits, "busy": busy, "other": other[:5], "other_count": len(other)}))
 
 
-def _expire_marks(root: Path, deadline: float, every: float) -> None:
+def _expire_markers(root: Path, deadline: float, every: float) -> None:
     while time.time() < deadline:
         time.sleep(every)
         (root / store.CHECKED_MARK).unlink(missing_ok=True)
@@ -128,7 +128,7 @@ def main() -> None:
         mp.Process(target=_worker, args=(url, str(root), tid, deadline, a.interval, str(work / f"w{i}.json"))) for i, tid in enumerate(ids)
     ]
     if a.check_every:
-        procs.append(mp.Process(target=_expire_marks, args=(root, deadline, a.check_every)))
+        procs.append(mp.Process(target=_expire_markers, args=(root, deadline, a.check_every)))
     for p in procs:
         p.start()
     for p in procs:

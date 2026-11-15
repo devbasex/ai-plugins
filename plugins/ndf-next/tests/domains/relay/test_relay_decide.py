@@ -116,7 +116,7 @@ def test_restart_judges_limits_before_stopping_and_excludes_the_target():
     assert hub_decide.spawn(hub_decide.Lanes(3, 3, False, 0, 5)).kind == "refuse"
 
 
-def test_started_needs_the_wrapper_place_a_live_process_and_registration():
+def test_started_needs_the_wrapper_location_a_live_process_and_registration():
     ok = hub_decide.started(hub_decide.Started(True, True, True), "t1")
     assert ok.kind == "go"
     missing = hub_decide.started(hub_decide.Started(False, False, False), "t1")

@@ -95,6 +95,6 @@ def lane(url: str, root: str, cwd: str, name: str, rounds: int, barrier, out) ->
         sprint = f"{name}-{i}"
         assert command.main(["new", sprint, "--mode", "light", "--issues", "1"]) == 0
         with store.open_store(url, Path(root)) as st:
-            busy += _sprint(st, model.table_id("sprint", repo, sprint), here, env)
+            busy += _sprint(st, model.machine_id("sprint", repo, sprint), here, env)
             done += 1
     out.put((name, busy, done))

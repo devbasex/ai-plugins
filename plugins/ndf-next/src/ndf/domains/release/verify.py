@@ -23,7 +23,7 @@ from ndf.domains.release import gather, sync_decide, user_config_decide
 CLAUDE_DIR_ENV, CODEX_DIR_ENV = "CLAUDE_CONFIG_DIR", "CODEX_HOME"
 # 控えに読むファイル（設定ディレクトリから）
 CLAUDE_INSTALLED = Path("plugins") / "installed_plugins.json"
-CLAUDE_KNOWN = Path("plugins") / "known_marketplaces.json"
+CLAUDE_KNOWN = Path("plugins") / "known_marketlocations.json"
 CODEX_CONFIG = Path("config.toml")
 CODEX_CACHE = Path("plugins") / "cache"
 

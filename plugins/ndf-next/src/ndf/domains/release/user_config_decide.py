@@ -77,9 +77,9 @@ def claude_plugins(installed: Any) -> dict[str, str]:
 
 
 def claude_marketplaces(known: Any) -> dict[str, str]:
-    """Claude Code の取得元（`known_marketplaces.json`）の控え。取得元の値だけを写す。"""
+    """Claude Code の取得元（`known_marketlocations.json`）の控え。取得元の値だけを写す。"""
     if not isinstance(known, dict):
-        raise ShapeError("known_marketplaces.json が表でない")
+        raise ShapeError("known_marketlocations.json が表でない")
     out = {}
     for name, entry in known.items():
         source = entry["source"] if isinstance(entry, dict) and "source" in entry else None

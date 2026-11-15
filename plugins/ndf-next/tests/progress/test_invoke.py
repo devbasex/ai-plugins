@@ -203,19 +203,19 @@ def test_a_stage_calling_a_plan_run_in_the_worktree_takes_the_worktree_as_an_inp
     assert lacking == []
 
 
-def test_plan_gets_the_worktree_as_the_plans_place_and_not_as_a_set_value(tmp_path, monkeypatch):
+def test_plan_gets_the_worktree_as_the_plans_location_and_not_as_a_set_value(tmp_path, monkeypatch):
     # PR 3464 の指摘: --set worktree=... はプランの実行が決まった名前の上書きとして断る
     _plan_template(monkeypatch, params=("worktree",))
-    work, place = tmp_path / "w", str(tmp_path / "wt")
+    work, location = tmp_path / "w", str(tmp_path / "wt")
     work.mkdir()
-    argv = invoke.plan_argv(_plan_run({"issues": [1], "worktree": place}), work, None, tmp_path)
+    argv = invoke.plan_argv(_plan_run({"issues": [1], "worktree": location}), work, None, tmp_path)
     sets = [argv[i + 1] for i, a in enumerate(argv) if a == "--set"]
     assert sets == ["issues=[1]"]
     plan = Path(argv[argv.index("next") + 1])
-    assert plan.parent == work and json.loads(plan.read_text())["worktree"] == place
+    assert plan.parent == work and json.loads(plan.read_text())["worktree"] == location
     # プランの実行は同じ引数を断らずに受け、作業場所はプランの作業場所に入る
     inv = plan_runner.prepare(tmp_path / "root", plan, None, str(work), tmp_path, plan_runner.RunOptions(plan_cli._pairs(sets, "--set")))
-    assert inv.plan.worktree == place and inv.values["worktree"] == place
+    assert inv.plan.worktree == location and inv.values["worktree"] == location
 
 
 def test_a_template_that_cannot_be_filled_stops_as_invalid(tmp_path, monkeypatch):
@@ -290,7 +290,7 @@ def _filled_plan(tmp_path, monkeypatch, name):
     held = route.params()
     patched = {n: replace(p, default=defaults[n]) if n in defaults else p for n, p in held.items()}
     monkeypatch.setattr(route, "params", lambda: patched)
-    monkeypatch.setattr(invoke, "issue_text", lambda place, n: (f"#{n} の題", f"#{n} の本文"))
+    monkeypatch.setattr(invoke, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
     monkeypatch.setattr(route, "default_merge_method", lambda repo, base: "squash")
     work = tmp_path / "w"
     work.mkdir()
@@ -301,7 +301,7 @@ def _filled_plan(tmp_path, monkeypatch, name):
 
 
 @pytest.mark.parametrize("name", ["design", "impl", "design-merge"])
-def test_template_values_fill_the_worker_from_the_default_and_the_branch_from_the_place(tmp_path, monkeypatch, name):
+def test_template_values_fill_the_worker_from_the_default_and_the_branch_from_the_location(tmp_path, monkeypatch, name):
     plan, text, repo, _ = _filled_plan(tmp_path, monkeypatch, name)
     assert plan["worktree"] == str(repo) and "sprint/s1" in plan["name"]
     assert "ndf-worker" in text and "{{" not in text
@@ -329,18 +329,18 @@ def test_template_values_fill_the_title_and_the_body_file_from_the_issue(tmp_pat
     assert body.read_text() == "#3092 の本文" and str(body) in text
 
 
-def test_template_values_fill_the_test_command_from_the_test_suites_of_the_declaration(tmp_path, monkeypatch):
+def test_template_values_fill_the_test_command_from_the_test_suites_of_the_ndf_settings(tmp_path, monkeypatch):
     _, text, _, _ = _filled_plan(tmp_path, monkeypatch, "impl")
     assert "pytest -q" in text and "ruff check" not in text
 
 
 @pytest.mark.parametrize("name", ["design", "impl"])
-def test_template_values_fill_the_required_checks_from_the_declaration(tmp_path, monkeypatch, name):
+def test_template_values_fill_the_required_checks_from_the_ndf_settings(tmp_path, monkeypatch, name):
     _, text, _, _ = _filled_plan(tmp_path, monkeypatch, name)
     assert "--required=pytest" in text and "--required=lint" in text
 
 
-def test_template_values_fill_the_review_and_rebuild_launch_from_the_declaration(tmp_path, monkeypatch):
+def test_template_values_fill_the_review_and_rebuild_launch_from_the_ndf_settings(tmp_path, monkeypatch):
     _, text, _, _ = _filled_plan(tmp_path, monkeypatch, "design")
     assert "ndf-review" in text and "ndf-rebuild" in text
 
@@ -367,14 +367,14 @@ def test_test_command_joins_every_test_suite_in_declared_order():
     assert invoke._project_value("test_command", {"test": {"suites": suites[1:3]}}) is None
 
 
-def test_ci_only_declaration_builds_the_impl_plan_without_local_tests(tmp_path, monkeypatch):
+def test_ci_only_ndf_settings_builds_the_impl_plan_without_local_tests(tmp_path, monkeypatch):
     # #3473: テストを CI に寄せる宣言（test.ci.only）があれば、実装のプランは手元でテストを打たない。テストの suite が
     # 宣言に無くても test_command を求めず、worker の後は push へ、CI の修正の後も push へ進む
     project = {**PROJECT, "test": {"ci": {"only": True}, "suites": [{"name": "lint", "kind": "lint", "command": "ruff check"}]}}
     repo = _sprint_repo(tmp_path, project)
     held = route.params()
     monkeypatch.setattr(route, "params", lambda: {n: replace(p, default=["ndf-worker"]) if n == "worker" else p for n, p in held.items()})
-    monkeypatch.setattr(invoke, "issue_text", lambda place, n: (f"#{n} の題", f"#{n} の本文"))
+    monkeypatch.setattr(invoke, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
     work = tmp_path / "w"
     work.mkdir()
     argv = invoke.plan_argv(_stage_run_of("impl", repo, [3473]), work, None, repo)
@@ -396,7 +396,7 @@ def test_the_impl_plan_checks_the_acceptance_records_of_the_issue_after_the_work
     assert check["run"] == ["ndf", "loop", "acceptance", "check", "--issue", "3092"]
 
 
-def test_review_without_a_declaration_runs_cross_review_with_the_pr_made_before_the_step(tmp_path, monkeypatch):
+def test_review_without_a_ndf_settings_runs_cross_review_with_the_pr_made_before_the_step(tmp_path, monkeypatch):
     # #3489: 宣言に review が無ければ、設計のプランの review は pr のステップの後に、ブランチの PR の番号で cross-review run を打つ
     held = PROJECT["workflow"]
     monkeypatch.setitem(PROJECT, "workflow", {"launch": {"rebuild": held["launch"]["rebuild"]}})
@@ -411,7 +411,7 @@ def test_review_without_a_declaration_runs_cross_review_with_the_pr_made_before_
     assert rest[rest.index("--base") + 1] == "develop" and "--pr" not in rest and rest[-2] == "--findings"
 
 
-def test_review_without_a_declaration_resolves_the_base_for_the_cross_review_template(tmp_path, monkeypatch):
+def test_review_without_a_ndf_settings_resolves_the_base_for_the_cross_review_template(tmp_path, monkeypatch):
     # PR 3537 の指摘: cross-review の雛形は params に base を持たないので、宛先はリポジトリのブランチの運用から決める
     held = PROJECT["workflow"]
     monkeypatch.setitem(PROJECT, "workflow", {"launch": {"rebuild": held["launch"]["rebuild"]}})
@@ -446,7 +446,7 @@ def test_review_launch_stops_when_the_branch_has_no_pr(tmp_path):
     assert subprocess.run(argv, capture_output=True, text=True, env=env).returncode == 1
 
 
-def test_workflow_declaration_with_launch_and_stages_passes_the_schema(tmp_path):
+def test_workflow_ndf_settings_with_launch_and_stages_passes_the_schema(tmp_path):
     # #3473 の受け入れ条件 3: workflow.launch の review・rebuild・refactor（語の並び）と stages を持つ宣言はスキーマの検査を通る
     launch = {"review": ["ndf", "review"], "rebuild": ["ndf", "rebuild"], "refactor": ["ndf", "refactor"]}
     stages_decl = {"design": {"enabled": True}, "release": {"enabled": False, "reason": "手で出す"}}
@@ -467,7 +467,7 @@ def test_workflow_declaration_with_launch_and_stages_passes_the_schema(tmp_path)
         {"other": {}},
     ],
 )
-def test_workflow_declaration_out_of_shape_stops_as_invalid(tmp_path, workflow):
+def test_workflow_ndf_settings_out_of_shape_stops_as_invalid(tmp_path, workflow):
     # #3473: workflow の形が違う宣言は、値を黙って捨てずにプランを組む前に invalid で止まる
     repo = _sprint_repo(tmp_path, {**PROJECT, "workflow": workflow})
     with pytest.raises(route.RouteError, match="workflow"):
@@ -480,7 +480,7 @@ def test_an_issue_by_an_untrusted_author_is_not_written_and_stops_as_invalid_by_
     # PR 3469 の指摘（#3364）: write 以上の権限が無い書き手の課題の本文を、指示として読まれる作業の入力へ写さない。
     # 題と本文は欠けとして、信用しない出所を挙げて止まり、本文のファイルは書かない
     repo = _sprint_repo(tmp_path, PROJECT)
-    monkeypatch.setattr(invoke, "issue_text", lambda place, n: None)
+    monkeypatch.setattr(invoke, "issue_text", lambda location, n: None)
     monkeypatch.setattr(route, "default_merge_method", lambda repo, base: "squash")
     work = tmp_path / "w"
     work.mkdir()
@@ -497,7 +497,7 @@ def test_the_issue_is_read_once_and_later_calls_use_the_copy_in_the_work_dir(tmp
     repo = _sprint_repo(tmp_path, PROJECT)
     reads = []
 
-    def read(place, n):
+    def read(location, n):
         reads.append(n)
         return (f"#{n} の題（{len(reads)} 回目）", f"#{n} の本文（{len(reads)} 回目）")
 
@@ -526,7 +526,7 @@ def test_a_failure_to_read_the_issue_stops_with_its_reason_not_as_missing_values
     # 打ち直せる失敗（不達・5xx・上限）は transient、ほか（認証が無い・リモートが無い）は precondition で止める
     repo = _sprint_repo(tmp_path, PROJECT)
 
-    def fail(place, n):
+    def fail(location, n):
         raise error
 
     monkeypatch.setattr(invoke, "issue_text", fail)
@@ -659,13 +659,13 @@ def test_an_answer_with_no_route_ends_the_plan_without_running_it(tmp_path, monk
 
 def test_skills_and_scripts_run_in_the_worktree_of_the_inputs(tmp_path):
     # PR 3464 の指摘: 打った場所でなく、用意した作業場所のファイルを読み書きする
-    place = tmp_path / "wt"
-    place.mkdir()
+    location = tmp_path / "wt"
+    location.mkdir()
     seen = []
-    run = invoke.StageRun(invoke.SCRIPT, "true", {"worktree": str(place)}, (), "sprint_diff", "s", {"argv": ["true"]})
+    run = invoke.StageRun(invoke.SCRIPT, "true", {"worktree": str(location)}, (), "sprint_diff", "s", {"argv": ["true"]})
     ok = subprocess.CompletedProcess([], 0, json.dumps(result.result("script", "ok", "済んだ")), "")
     invoke.invoke(run, tmp_path, tmp_path / "w", runner=lambda argv, cwd, env: seen.append(cwd) or ok)
-    assert seen == [place]
+    assert seen == [location]
     gone = replace(run, inputs={"worktree": str(tmp_path / "none")})
     got = invoke.invoke(gone, tmp_path, tmp_path / "w", runner=lambda *a: pytest.fail("打たない"))
     assert got.cause["kind"] == "precondition"

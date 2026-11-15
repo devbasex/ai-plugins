@@ -11,7 +11,7 @@
     "D1+": {"issue": 3284, "packages": [], "needs": ["D1"], "order": 3, "lane": "lr-data", "closed": true},
     "D2": {"issue": 3287, "packages": [], "needs": ["D1"], "order": 3, "lane": "lr-data", "closed": true},
     "D2+": {"issue": 3287, "packages": [], "needs": ["D2", "D1+"], "order": 4, "lane": "lr-data", "closed": true},
-    "C1": {"issue": 3285, "packages": ["ndf.core.durable", "ndf.core.durable_ledger", "ndf.core.durable_locks", "ndf.core.durable_sweep", "ndf.core.loop"], "needs": ["X0", "D1", "AD3"], "order": 2, "lane": "lr-flow", "closed": true},
+    "C1": {"issue": 3285, "packages": ["ndf.core.durable", "ndf.core.durable_runs", "ndf.core.durable_locks", "ndf.core.durable_sweep", "ndf.core.loop"], "needs": ["X0", "D1", "AD3"], "order": 2, "lane": "lr-flow", "closed": true},
     "C1+": {"issue": 3285, "packages": [], "needs": ["C1"], "order": 3, "lane": "lr-flow", "closed": true},
     "T1": {"issue": 3286, "packages": ["ndf.process_group", "ndf.slot_pool", "ndf.testing"], "needs": ["X0"], "order": 2, "lane": "lr-fix-b", "closed": true},
     "T1+": {"issue": 3286, "packages": [], "needs": ["T1", "D1"], "order": 3, "lane": "lr-fix-b", "closed": true},

@@ -28,7 +28,7 @@ def _launch(copy: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run([sys.executable, "-I", str(copy), *args], capture_output=True, text=True, timeout=30, check=False)
 
 
-def test_one_install_places_a_copy_that_calls_the_plugin(tmp_path):
+def test_one_install_locations_a_copy_that_calls_the_plugin(tmp_path):
     env = _env(tmp_path)
     root = _plugin(tmp_path / "cache", "11.0.0")
     got = install.install(env, root, CODE, replace_foreign=False)

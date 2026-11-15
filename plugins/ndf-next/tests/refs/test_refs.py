@@ -44,7 +44,7 @@ def test_declared_reads_the_refs_of_the_plan() -> None:
         {"refs": {"x": {"kind": "queue_prs", "when_empty": "zero"}}},
     ],
 )
-def test_declared_refuses_a_broken_declaration(raw: dict) -> None:
+def test_declared_refuses_a_broken_ndf_settings(raw: dict) -> None:
     with pytest.raises(refs.RefError):
         refs.declared(raw)
 
@@ -59,7 +59,7 @@ def test_declared_refuses_a_broken_declaration(raw: dict) -> None:
         ({"kind": "queue_prs", "when_empty": "zero"}, "参照 x の when_empty は skip だけ: 'zero'"),
     ],
 )
-def test_declared_names_what_is_wrong_in_the_declaration(raw: object, message: str) -> None:
+def test_declared_names_what_is_wrong_in_the_ndf_settings(raw: object, message: str) -> None:
     """現状固定: 宣言の誤りのメッセージ（検査の順は kind → of/key → of の有無 → when_empty）。"""
     with pytest.raises(refs.RefError) as caught:
         refs.declared({"refs": {"x": raw}})
@@ -71,7 +71,7 @@ def test_declared_keeps_of_and_key_and_an_explicit_null_when_empty() -> None:
     assert refs.declared(raw) == [refs.Ref("r", "plan_result", "p.state", "out", False)]
 
 
-def test_resolve_plan_returns_a_broken_declaration_as_invalid(tmp_path: Path) -> None:
+def test_resolve_plan_returns_a_broken_ndf_settings_as_invalid(tmp_path: Path) -> None:
     out = refs.resolve_plan({"refs": {"x": {"kind": "nope"}}}, _ctx(tmp_path), FakeSources())
     assert out.decision == STOPPED
     assert out.unresolved["refs"].cause == "invalid"

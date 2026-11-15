@@ -21,7 +21,7 @@ from typing import Iterable, Optional, Protocol
 
 from ndf.adapters.git import ORIGIN, Git, GitError
 from ndf.adapters.github import Pull
-from ndf.domains.worktree import cleanup_decide, declaration, merged_decide, repo, testenv_sweep, trash
+from ndf.domains.worktree import cleanup_decide, ndf_settings, merged_decide, repo, testenv_sweep, trash
 from ndf.domains.worktree.cleanup_decide import KEEP_SPRINT, REMOVE, Facts, PullState
 
 
@@ -127,7 +127,7 @@ def _sprint_keep(g: Git, item: repo.Worktree, flow: Optional[dict]) -> Optional[
 def cleanup(main_dir: Path, cwd: Path, hub: PullReader, dry_run: bool = False, git: Optional[Git] = None) -> list[Outcome]:
     """片付けを行い、worktree ごとの結果を返す。"""
     g = git if git is not None else Git(main_dir)
-    flow = repo.declared_flow(declaration.load(main_dir))
+    flow = repo.declared_flow(ndf_settings.load(main_dir))
     out: list[Outcome] = []
     for item, facts in survey(main_dir, cwd, hub, g):
         verdict = cleanup_decide.decide(facts)

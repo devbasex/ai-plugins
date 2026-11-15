@@ -162,7 +162,7 @@ def test_cli_finalize_with_message_commits_only_the_paths(git_repo: Path, capsys
     assert git_sandbox.sh(git_repo, "status", "--porcelain", strip=True) == "A  other.md"
 
 
-def test_finalize_skips_the_glossary_without_its_declaration(tmp_path: Path) -> None:
+def test_finalize_skips_the_glossary_without_its_ndf_settings(tmp_path: Path) -> None:
     root = _repo(tmp_path)
     (root / ".ndf" / "glossary.json").unlink()
     before = (root / "glossary.json").read_text(encoding="utf-8")

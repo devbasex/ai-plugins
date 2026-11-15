@@ -270,10 +270,10 @@ def test_preexec_is_none_when_running_without_a_slot():
 
 
 @pytest.mark.parametrize("in_child", [False, True])
-def test_interrupt_after_retiring_carries_the_retired_places(tmp_path, monkeypatch, in_child):
+def test_interrupt_after_retiring_carries_the_retired_locations(tmp_path, monkeypatch, in_child):
     # 旧い状態の置き場を退避した後の中断（待ちの間・子の実行中）は、退避の元と先を持つ Interrupted で抜ける
     retired = [{"retired_from": "/s/p", "retired_to": "/s/p.v10-20261114"}]
-    monkeypatch.setattr(slots, "slots_place", lambda env: (tmp_path / "slots", retired))
+    monkeypatch.setattr(slots, "slots_location", lambda env: (tmp_path / "slots", retired))
     options = slots.GateOptions(
         kind="whole", limits=_limits(1), environ={}, poll=POLL, read_memory=lambda: PLENTY, interrupted=lambda: not in_child
     )
@@ -285,14 +285,14 @@ def test_interrupt_after_retiring_carries_the_retired_places(tmp_path, monkeypat
     assert caught.value.retired == retired
 
 
-def test_gate_keeps_the_places_retired_before_preparing_failed(tmp_path, monkeypatch):
+def test_gate_keeps_the_locations_retired_before_preparing_failed(tmp_path, monkeypatch):
     # 退避の途中で失敗して枠を取らずに走らせるときも、先に退避した元と先を Held に残す
     retired = (identity.Retired(Path("/s/p"), Path("/s/p.v10-20261114")),)
 
     def fail(env):
         raise identity.IdentityError("read-only", retired)
 
-    monkeypatch.setattr(slots, "slots_place", fail)
+    monkeypatch.setattr(slots, "slots_location", fail)
     options = slots.GateOptions(kind="whole", limits=_limits(1), environ={}, poll=POLL, read_memory=lambda: PLENTY)
 
     with slots.gate("pytest .", tmp_path, options=options) as held:

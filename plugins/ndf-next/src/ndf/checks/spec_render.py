@@ -14,7 +14,7 @@ from ndf.checks.spec_args import Arg, ArgTree
 from ndf.checks.spec_model import (
     CALLER_FIRST,
     CONTRACTS,
-    DECL_PLACES,
+    DECL_LOCATIONS,
     DECL_SCHEMA_DIR,
     INTERNAL,
     IO_SCHEMA_DIR,
@@ -23,7 +23,7 @@ from ndf.checks.spec_model import (
     SCHEMA_SUFFIX,
     SECTIONS_SUFFIX,
     CommandSpec,
-    DeclarationSpec,
+    NdfSettingsSpec,
     SkillSpec,
     SpecModel,
     decl_schema_rel,
@@ -35,7 +35,7 @@ from ndf.checks.spec_model import (
 
 # エントリポイントの短い名前と宣言の置き場（`identity` の固定の語）
 ENTRY = identity.FIXED_WORDS["entrypoint"]
-DECL_DIR = identity.FIXED_WORDS["declaration_dir"]
+DECL_DIR = identity.FIXED_WORDS["ndf_settings_dir"]
 JSON_SCHEMA = "https://json-schema.org/draft/2020-12/schema"
 # 範囲の語（置き場の表の列 tracked から導く）
 SCOPE_WORDS = {True: "チーム", False: "個人"}
@@ -44,13 +44,13 @@ SURFACE_WORDS = {PUBLIC: "公開", INTERNAL: "内部（予告なく変えてよ�
 GENERATED = "<!-- ndf check --write-spec が生成する。手で直さない（正本は各節の出典） -->\n"
 NONE = "—"
 MAIN_MARK = "（メインディレクトリから読む）"
-# 宣言のスキーマの注釈 x-ndf-place の値（spec_model.DECL_PLACES の並び）→ 置き場の語
-PLACE_LABELS = dict(zip(DECL_PLACES, ("メインディレクトリ（既定ブランチの worktree）", "worktree"), strict=True))
+# 宣言のスキーマの注釈 x-ndf-location の値（spec_model.DECL_LOCATIONS の並び）→ 置き場の語
+LOCATION_LABELS = dict(zip(DECL_LOCATIONS, ("メインディレクトリ（既定ブランチの worktree）", "worktree"), strict=True))
 DEPRECATED_MARK = "（非推奨。読み手は読まない）"
 # ページの名前 → 見出し
 PAGES = {
     "index.md": "宣言と入出力の規約",
-    "declarations.md": f"宣言（{DECL_DIR}/）",
+    "ndf-settings.md": f"宣言（{DECL_DIR}/）",
     "commands.md": "副命令の引数と結果",
     "exit-codes.md": "終了コードと止まった理由",
     "env.md": "環境変数",
@@ -87,7 +87,7 @@ def render(model: SpecModel) -> dict[str, str]:
     """契約のページ 8 つと副命令ごとの引数のスキーマを、プラグインの根からの相対パス → 中身で返す。"""
     pages = {
         "index.md": page_index(model),
-        "declarations.md": page_declarations(model),
+        "ndf-settings.md": page_ndf_settings(model),
         "commands.md": page_commands(model),
         "exit-codes.md": page_exit_codes(model),
         "env.md": page_env(model),
@@ -209,7 +209,7 @@ def _count(items: list[str]) -> str:
 def page_index(model: SpecModel) -> str:
     """面の一覧と、公開と内部の約束。"""
     counts = {
-        "declarations.md": _count([d.surface for d in model.declarations]),
+        "ndf-settings.md": _count([d.surface for d in model.ndf_settings]),
         "commands.md": _count([c.surface for c in model.commands]),
         "exit-codes.md": f"終了コード {len(model.exit_codes)}・止まった理由 {len(model.causes)}",
         "env.md": _count([surface_of(model.public, "env", r["id"]) for r in model.env]),
@@ -222,7 +222,7 @@ def page_index(model: SpecModel) -> str:
     caller = [[code(r["id"]), r["kind"], code(r["target"]), r["source"]] for r in model.entrypoints if r["order"] == CALLER_FIRST]
     intro = (
         "NDF を外から呼ぶ面（宣言・副命令・環境変数・受け渡しのファイル・hook・Skill・起動スクリプト）の規約である。"
-        "機械が読む形は JSON Schema（`contracts/schemas/declarations/`・`contracts/schemas/io/`）で、このページの表はそれと正本の表から生成する。\n\n"
+        "機械が読む形は JSON Schema（`contracts/schemas/ndf-settings/`・`contracts/schemas/io/`）で、このページの表はそれと正本の表から生成する。\n\n"
         "**公開**の項目は外の呼び手（連携システム）が頼ってよく、名前と意味を版で約束する。"
         "**内部**の項目は NDF の中の Skill・エージェント・AI が使い、予告なく変えてよい。"
         "公開か内部かは、公開する面の表（`contracts/domains/entrypoints.json` と、`contracts/domains/ndf-files.json` の列 `reader`）に当たるかで決まる"
@@ -239,10 +239,10 @@ def page_index(model: SpecModel) -> str:
     return _page("index.md", intro, body)
 
 
-def _place_word(decl: DeclarationSpec) -> str:
-    """置き場（スキーマの注釈 `x-ndf-place`）。`main_keys` のキーは worktree の宣言でもメインディレクトリから読む。"""
-    place = opt(decl.schema, "x-ndf-place", None) if decl.schema is not None else None
-    label = PLACE_LABELS[place] if place in PLACE_LABELS else NONE
+def _location_word(decl: NdfSettingsSpec) -> str:
+    """置き場（スキーマの注釈 `x-ndf-location`）。`main_keys` のキーは worktree の宣言でもメインディレクトリから読む。"""
+    location = opt(decl.schema, "x-ndf-location", None) if decl.schema is not None else None
+    label = LOCATION_LABELS[location] if location in LOCATION_LABELS else NONE
     return f"{label}（印のキーはメインディレクトリ）" if decl.main_keys else label
 
 
@@ -250,7 +250,7 @@ def _read_by(rows: tuple[dict[str, Any], ...]) -> str:
     return "・".join(f"{code(r['by'])}（{r['when']}）" for r in rows) if rows else NONE
 
 
-def _key_rows(decl: DeclarationSpec) -> list[list[str]]:
+def _key_rows(decl: NdfSettingsSpec) -> list[list[str]]:
     assert decl.schema is not None
     props = opt(decl.schema, "properties", {})
     required = set(opt(decl.schema, "required"))
@@ -271,8 +271,8 @@ def _key_rows(decl: DeclarationSpec) -> list[list[str]]:
     return rows
 
 
-def _declaration(decl: DeclarationSpec) -> list[str]:
-    meta = f"{_place_word(decl)}・{SCOPE_WORDS[decl.tracked]}・{SURFACE_WORDS[decl.surface]}・{_schema_link(decl)}。読む工程: {_read_by(decl.read_by)}\n"
+def _ndf_settings(decl: NdfSettingsSpec) -> list[str]:
+    meta = f"{_location_word(decl)}・{SCOPE_WORDS[decl.tracked]}・{SURFACE_WORDS[decl.surface]}・{_schema_link(decl)}。読む工程: {_read_by(decl.read_by)}\n"
     head = [f"## `{DECL_DIR}/{decl.path}`（{decl.id}）\n", meta]
     if decl.sections is not None:
         rows = [
@@ -287,21 +287,21 @@ def _declaration(decl: DeclarationSpec) -> list[str]:
     return [*head, opt(decl.schema, "description", "") + "\n", keys, examples]
 
 
-def _schema_link(decl: DeclarationSpec) -> str:
+def _schema_link(decl: NdfSettingsSpec) -> str:
     name = decl_schema_rel(decl.id, SECTIONS_SUFFIX if decl.sections is not None else SCHEMA_SUFFIX)
     return f"[{name}](../../{CONTRACTS}/{DECL_SCHEMA_DIR}/{name})"
 
 
-def page_declarations(model: SpecModel) -> str:
+def page_ndf_settings(model: SpecModel) -> str:
     """宣言のファイルごとの置き場・範囲・読む工程と、キーごとの型・既定値・取りうる値・必須か・説明・例。"""
     intro = (
         f"リポジトリの `{DECL_DIR}/` に置く宣言（人が決める設定のファイル）である。正本は置き場の表（`contracts/domains/ndf-files.json` の種類 "
-        "`declaration` の行）と宣言のスキーマで、読み手は表の `keys` に無いキーを読まない。範囲のチームは git が追跡するファイル、個人は追跡しないファイルである"
+        "`ndf_settings` の行）と宣言のスキーマで、読み手は表の `keys` に無いキーを読まない。範囲のチームは git が追跡するファイル、個人は追跡しないファイルである"
     )
     body: list[str] = []
-    for decl in model.declarations:
-        body += _declaration(decl)
-    return _page("declarations.md", intro, body)
+    for decl in model.ndf_settings:
+        body += _ndf_settings(decl)
+    return _page("ndf-settings.md", intro, body)
 
 
 def _arg_text(arg: Arg) -> str:
@@ -400,12 +400,12 @@ def page_env(model: SpecModel) -> str:
     return _page("env.md", intro, [md_table(["名前", "設定する者", "型", "秘密か", "意味", "公開か"], rows)])
 
 
-def _place(model: SpecModel, place: str) -> str:
-    row = model.places.get(place)
+def _location(model: SpecModel, location: str) -> str:
+    row = model.locations.get(location)
     if row is None:
-        return code(place)
+        return code(location)
     where = f"{row['root']}:{row['path']}" + (f"（{row['env']} で差し替え）" if "env" in row else "")
-    return f"{code(place)} {where}"
+    return f"{code(location)} {where}"
 
 
 def page_files(model: SpecModel) -> str:
@@ -413,7 +413,7 @@ def page_files(model: SpecModel) -> str:
     rows = [
         [
             code(r["id"]),
-            _place(model, r["place"]),
+            _location(model, r["location"]),
             code(r["path"]),
             r["kind"],
             "追跡" if r["tracked"] else NONE,
@@ -429,7 +429,7 @@ def page_files(model: SpecModel) -> str:
         if surface_of(model.public, "file", r["id"]) == PUBLIC
     ]
     intro = (
-        "NDF の工程が書くファイル（宣言・計測値・実行の記録・文書・受け渡し）である。正本は `contracts/domains/ndf-files.json` と置き場の表 `contracts/domains/places.json`。"
+        "NDF の工程が書くファイル（宣言・計測値・実行の記録・文書・受け渡し）である。正本は `contracts/domains/ndf-files.json` と置き場の表 `contracts/domains/locations.json`。"
         "形（項目）を約束するのは公開する行だけで、内部の行は置き場と種類だけを載せる"
     )
     body = [
@@ -477,7 +477,7 @@ def _skill_row(skill: SkillSpec) -> list[str]:
         SURFACE_WORDS[skill.surface],
         _skill_args_text(skill),
         skill.goal_end if skill.goal_end else NONE,
-        "・".join(code(d) for d in skill.declarations),
+        "・".join(code(d) for d in skill.ndf_settings),
         "・".join(code(e) for e in skill.env),
         skill.result if skill.result else NONE,
         skill.meaning,

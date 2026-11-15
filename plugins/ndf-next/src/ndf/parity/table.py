@@ -52,18 +52,18 @@ def _duplicates(ids: list[str]) -> list[str]:
     return sorted(i for i, n in Counter(ids).items() if n > 1)
 
 
-def _unknown_children(name: str, items: list[dict[str, Any]], places: Mapping[str, Any]) -> list[str]:
+def _unknown_children(name: str, items: list[dict[str, Any]], locations: Mapping[str, Any]) -> list[str]:
     return [
-        f"{name}: 行き先 {item['to']} が places に無い（{item.get('id') or item.get('issue')}）"
+        f"{name}: 行き先 {item['to']} が locations に無い（{item.get('id') or item.get('issue')}）"
         for item in items
-        if "to" in item and item["to"] not in places
+        if "to" in item and item["to"] not in locations
     ]
 
 
 def shape_errors(features: Any, fixes: Any) -> list[str]:
     """2 つの表の誤りを並べる。空なら合う。
 
-    スキーマ（鍵・値の形・`to` か作らない理由のどちらか 1 つ）に加え、id の重なり・`places` に無い行き先・
+    スキーマ（鍵・値の形・`to` か作らない理由のどちらか 1 つ）に加え、id の重なり・`locations` に無い行き先・
     受け付けた不具合が指す対応表の行が無いことを数える。
     """
     errs = _schema_errors("features", features) + _schema_errors("fixes", fixes)
@@ -71,15 +71,15 @@ def shape_errors(features: Any, fixes: Any) -> list[str]:
 
 
 def _reference_errors(features: Mapping[str, Any], fixes: Mapping[str, Any]) -> list[str]:
-    """スキーマで表せない参照の誤り（id の重なり・`places` に無い行き先・対応表に無い行を指す受け付け）。"""
-    places = features["places"]
+    """スキーマで表せない参照の誤り（id の重なり・`locations` に無い行き先・対応表に無い行を指す受け付け）。"""
+    locations = features["locations"]
     rows = features["rows"]
     ids = [r["id"] for r in rows]
     errs = [f"features: id が重なる: {i}" for i in _duplicates(ids)]
     errs += [f"fixes: id が重なる: {i}" for i in _duplicates([f["id"] for part in ID_PARTS for f in fixes[part]])]
-    errs += _unknown_children("features", rows, places)
+    errs += _unknown_children("features", rows, locations)
     for part in DESTINATION_PARTS:
-        errs += _unknown_children(part, fixes[part], places)
+        errs += _unknown_children(part, fixes[part], locations)
     return errs + _missing_rows(fixes["intake"], set(ids))
 
 
@@ -88,7 +88,7 @@ def _missing_rows(intake: list[dict[str, Any]], known: set[str]) -> list[str]:
 
 
 class Entrypoint(NamedTuple):
-    """エントリポイントの今の置き場と、移行後の置き場（行き先の子の places）。作らない行は `after` が空。"""
+    """エントリポイントの今の置き場と、移行後の置き場（行き先の子の locations）。作らない行は `after` が空。"""
 
     now: str
     to: str | None
@@ -99,25 +99,25 @@ class Entrypoint(NamedTuple):
 def entrypoints(features: Mapping[str, Any], *, conductor_only: bool = False) -> list[Entrypoint]:
     """エントリポイントの一覧。`conductor_only` なら conductor が直に打つものだけ。"""
     rows = [r for r in features["rows"] if r["kind"] == "entrypoint" and (r.get("conductor") or not conductor_only)]
-    return [_entrypoint(r, features["places"]) for r in rows]
+    return [_entrypoint(r, features["locations"]) for r in rows]
 
 
-def _entrypoint(row: Mapping[str, Any], places: Mapping[str, Any]) -> Entrypoint:
-    return Entrypoint(row["now"], row.get("to"), _destination(places, row), bool(row.get("conductor")))
+def _entrypoint(row: Mapping[str, Any], locations: Mapping[str, Any]) -> Entrypoint:
+    return Entrypoint(row["now"], row.get("to"), _destination(locations, row), bool(row.get("conductor")))
 
 
-def _destination(places: Mapping[str, Any], row: Mapping[str, Any]) -> tuple[str, ...]:
+def _destination(locations: Mapping[str, Any], row: Mapping[str, Any]) -> tuple[str, ...]:
     """行の行き先の子の置き場。行き先（`to`）の無い行は空。"""
     to = row.get("to")
-    return tuple(places[to]) if to else ()
+    return tuple(locations[to]) if to else ()
 
 
-def _under(module: str, place: str) -> bool:
+def _under(module: str, location: str) -> bool:
     """モジュール（`a.b.c`）が置き場（`src/a/b/` のディレクトリか `src/a/b/c.py` のファイル）にあるか。"""
     path = "src/" + module.replace(".", "/")
-    if place.endswith("/"):
-        return (path + "/").startswith(place)
-    return path == place.removesuffix(".py")
+    if location.endswith("/"):
+        return (path + "/").startswith(location)
+    return path == location.removesuffix(".py")
 
 
 def user_commands(features: Mapping[str, Any], commands: Mapping[str, str]) -> dict[str, list[str]]:
@@ -126,7 +126,7 @@ def user_commands(features: Mapping[str, Any], commands: Mapping[str, str]) -> d
     `commands` は副命令の表（`cli.COMMANDS`）。副命令の名前は表に写さず、行き先の子の置き場にモジュールがある
     副命令をこの表から引く。
     """
-    by_child = features["places"]
+    by_child = features["locations"]
     found: dict[str, list[str]] = {}
     for r in features["rows"]:
         if not r.get("user_command"):
@@ -135,6 +135,6 @@ def user_commands(features: Mapping[str, Any], commands: Mapping[str, str]) -> d
     return found
 
 
-def _commands_under(commands: Mapping[str, str], places: Sequence[str]) -> list[str]:
+def _commands_under(commands: Mapping[str, str], locations: Sequence[str]) -> list[str]:
     """副命令の表から、モジュールがいずれかの置き場の下にある副命令の名前を並べる。"""
-    return sorted(cmd for cmd, module in commands.items() if any(_under(module, p) for p in places))
+    return sorted(cmd for cmd, module in commands.items() if any(_under(module, p) for p in locations))

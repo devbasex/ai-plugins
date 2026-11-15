@@ -22,7 +22,7 @@ def has_stop(directory: Path) -> bool:
     return (directory / STOP_FILE).is_file()
 
 
-def place_stop(directory: Path) -> None:
+def location_stop(directory: Path) -> None:
     """停止シグナルファイルを置く。ラッパーの置き場が無ければ `OSError`（作らない）。"""
     (directory / STOP_FILE).touch(mode=0o600)
 

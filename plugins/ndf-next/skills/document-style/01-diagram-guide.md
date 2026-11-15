@@ -93,7 +93,7 @@ classDiagram
 
 ```mermaid
 erDiagram
-    USER ||--o{ ORDER : places
+    USER ||--o{ ORDER : locations
     ORDER ||--|{ LINE_ITEM : contains
     PRODUCT ||--o{ LINE_ITEM : "ordered in"
 ```

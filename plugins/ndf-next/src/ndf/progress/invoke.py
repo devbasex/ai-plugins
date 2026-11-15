@@ -46,7 +46,7 @@ from ndf.core.plan import cli as plan_cli
 from ndf.core.plan import files as plan_files
 from ndf.core.plan import runner as plan_runner
 from ndf.progress import definition, model, stages
-from ndf.progress.command import PROJECT_FILE, declaration
+from ndf.progress.command import PROJECT_FILE, ndf_settings
 from ndf.testing import scoped, weight
 
 # 作業種別と、工程の定義の call → 作業種別（plan は副命令 `ndf plan` の名前）
@@ -139,7 +139,7 @@ class StageRun:
     range: str
     step: str
     args: dict[str, Any] = field(default_factory=dict)
-    # 差し戻しの指摘の本文（承認ゲートの revise の答え）。作業へは環境変数 NDF_STAGE_NOTES か問いの末尾で渡す
+    # 差し戻しの指摘の本文（承認ゲートの request_changes の答え）。作業へは環境変数 NDF_STAGE_NOTES か問いの末尾で渡す
     notes: Optional[str] = None
     # 行の打ち直し（conductor の retry）の回数と、方針による自動の打ち直しか。プランはどちらでも新しい回を始める（`plan_attempt`）
     retries: int = 0
@@ -343,12 +343,12 @@ ISSUE_BODY_FILE = "issue-{number}-body.md"
 ISSUE_TITLE_FILE = "issue-{number}-title.json"
 
 
-def issue_text(place: Path, number: int) -> Optional[tuple[str, str]]:
+def issue_text(location: Path, number: int) -> Optional[tuple[str, str]]:
     """課題の題と本文（作業場所のリモートの GitHub から読む）。テストが差し替える。
 
     書き手を信用しない（`GitHub.trusts` が偽。#3364）なら None。本文は作業の入力として指示に読まれるためである。
     """
-    hub = github.GitHub(git.Git(place).remote_repo(), github.client())
+    hub = github.GitHub(git.Git(location).remote_repo(), github.client())
     title, authored = hub.issue_text(number)
     return (title, authored.body) if hub.trusts(authored) else None
 
@@ -374,13 +374,13 @@ def _project_value(name: str, project: Mapping[str, Any]) -> Optional[route.Valu
     return _strings(definition.dig(project, *PROJECT_KEYS[name]))
 
 
-def _project(place: Path) -> dict[str, Any]:
+def _project(location: Path) -> dict[str, Any]:
     """作業場所のリポジトリの `.ndf/project.json`。git の根が決まらなければ空。
 
     読めないか、`workflow` が形（`WORKFLOW_SCHEMA`）に合わなければ `route.RouteError`。
     """
     try:
-        project = declaration(place, PROJECT_FILE)
+        project = ndf_settings(location, PROJECT_FILE)
         if "workflow" in project:
             contracts.require_schema(project["workflow"], WORKFLOW_SCHEMA, contracts.ContractError, f"{PROJECT_FILE} の workflow")
     except GitError:
@@ -390,7 +390,7 @@ def _project(place: Path) -> dict[str, Any]:
     return project
 
 
-def _issue_values(run: StageRun, work_dir: Path, place: Path) -> Optional[dict[str, route.Value]]:
+def _issue_values(run: StageRun, work_dir: Path, location: Path) -> Optional[dict[str, route.Value]]:
     """課題が 1 つなら、その題（title）・本文を書いたファイル（body_file）・番号（issue）。課題が 1 つでなければ空。
 
     題と本文は置き場へ初回に 1 度だけ写し（`ISSUE_BODY_FILE`・`ISSUE_TITLE_FILE`）、以後の呼び出し（承認の答え・続き・
@@ -409,7 +409,7 @@ def _issue_values(run: StageRun, work_dir: Path, place: Path) -> Optional[dict[s
     held = plan_files.read_json(copy)
     if held is not None and isinstance(held.get("title"), str) and out.is_file():
         return {"title": held["title"], "body_file": str(out), "issue": str(number)}
-    found = issue_text(place, number)
+    found = issue_text(location, number)
     if found is None:
         return None
     title, body = found
@@ -446,11 +446,11 @@ def template_values(
     （`test_command` など）は求めない。`project` は呼び手が 1 度だけ読んだ宣言（`_project`）で、CI に寄せるかの判定と
     宣言の出所の差し込みが同じものを使う（読み直すと git・ファイル・形の検査が 2 回ずつ走る。PR 3525 の指摘）。
     """
-    place = work_place(run, cwd)
+    location = work_location(run, cwd)
     names = route.needed(t, local_tests=local_tests)
     values = {k: _param_value(v) for k, v in run.inputs.items() if k in t.params}
     wanted = {n: FILL_SOURCES[n] for n in names if n not in values and n in FILL_SOURCES}
-    issued, untrusted = _fill_from_issue(run, work_dir, place, wanted)
+    issued, untrusted = _fill_from_issue(run, work_dir, location, wanted)
     values = {**values, **issued, **_fill_from_project(project, wanted), **_fill_branch(run, wanted), **_fill_gate(wanted)}
     values = route.derived(t, values, cwd)
     values = {**values, **_fill_review(t, values, wanted)}
@@ -461,12 +461,12 @@ def template_values(
 
 
 def _fill_from_issue(
-    run: StageRun, work_dir: Path, place: Path, wanted: Mapping[str, str]
+    run: StageRun, work_dir: Path, location: Path, wanted: Mapping[str, str]
 ) -> tuple[dict[str, route.Value], dict[str, str]]:
     """課題の出所の差し込みの値と、出所の上書き（書き手を信用しない課題なら値を返さず、出所を FROM_UNTRUSTED_ISSUE にする）。"""
     if FROM_ISSUE not in wanted.values():
         return {}, {}
-    issued = _issue_values(run, work_dir, place)
+    issued = _issue_values(run, work_dir, location)
     if issued is None:
         return {}, {n: FROM_UNTRUSTED_ISSUE for n, s in wanted.items() if s == FROM_ISSUE}
     return {k: v for k, v in issued.items() if k in wanted}, {}
@@ -531,7 +531,7 @@ def plan_path(run: StageRun, work_dir: Path, cwd: Path) -> Path:
     t = template(run.name)
     if t is None:
         raise model.Refused(f"プランの雛形 {run.name} が無い")
-    project = _project(work_place(run, cwd))
+    project = _project(work_location(run, cwd))
     local_tests = not ci_only(project)
     values = template_values(t, run, work_dir, cwd, project=project, local_tests=local_tests)
     plan = route.render(t, values, local_tests=local_tests)
@@ -730,15 +730,15 @@ def invoke(
         return _call_plan(run, cwd, work_dir, answer, runner)
     if run.kind not in (SCRIPT, SKILL):
         raise model.Refused(f"作業種別 {run.kind} は呼ばない（答えを待つステップ）")
-    place = work_place(run, cwd)
-    if not place.is_dir():
-        return StageResult(result.stopped(run.kind, "precondition", f"作業場所 {place} が無い"), {})
+    location = work_location(run, cwd)
+    if not location.is_dir():
+        return StageResult(result.stopped(run.kind, "precondition", f"作業場所 {location} が無い"), {})
     if run.kind == SCRIPT:
-        return _call_script(run, place, runner)
-    return _call_skill(run, place, call_claude)
+        return _call_script(run, location, runner)
+    return _call_skill(run, location, call_claude)
 
 
-def work_place(run: StageRun, cwd: Path) -> Path:
+def work_location(run: StageRun, cwd: Path) -> Path:
     """skill・script を打つ作業ディレクトリ。入力の作業場所（`worktree`）があればそこ、無ければ打った場所。"""
     held = run.inputs["worktree"] if "worktree" in run.inputs else None
     return Path(held) if isinstance(held, str) and held else cwd

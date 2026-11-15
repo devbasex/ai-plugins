@@ -67,12 +67,12 @@ def test_span_cuts_calls_and_rows(tmp_path):
     assert got["auto_compacts"] == 0
 
 
-def test_ledger_rows_go_to_the_ndf_bucket_and_missing_ledger_is_empty(tmp_path):
+def test_usage_log_rows_go_to_the_ndf_bucket_and_missing_usage_log_is_empty(tmp_path):
     t = _transcript(tmp_path / "t.jsonl", [_call(0, "2026-11-15T01:00:00Z"), _call(1, "2026-11-15T01:30:00Z")])
     rows = [{"at": "2026-11-15T00:59:00Z", "session_id": "s", "transcript": t, "work": "#1"}]
     sub = str(tmp_path / "t" / "subagents" / "agent-a1.jsonl")
     other = str(tmp_path / "u" / "subagents" / "agent-b1.jsonl")
-    ledger = [
+    usage_log = [
         {
             "at": "2026-11-15T01:10:00Z",
             "caller": "subagent",
@@ -90,11 +90,11 @@ def test_ledger_rows_go_to_the_ndf_bucket_and_missing_ledger_is_empty(tmp_path):
         },
         {"at": "2026-11-15T01:20:00Z", "caller": "claude-p", "run": "x", "usage": {"input_tokens": 9, "output_tokens": 1}},
     ]
-    got = context_report.report("#1", rows, ledger, None)
+    got = context_report.report("#1", rows, usage_log, None)
     assert got["parts"]["ndf"]["calls"] == 1 and got["parts"]["ndf"]["inp"] == 5
     assert got["parts"]["conductor"]["calls"] == 2
     assert context_report.report("#1", rows, [{"usage": "unknown"}], None)["parts"]["ndf"]["calls"] == 0
-    assert context_report.load_ledger({"NDF_USAGE_DIR": str(tmp_path / "none")}) == []
+    assert context_report.load_usage_log({"NDF_USAGE_DIR": str(tmp_path / "none")}) == []
 
 
 def test_cost_uses_weights_and_read_rate():

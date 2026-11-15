@@ -92,7 +92,7 @@ def test_render_check_passes_and_reports_a_stale_file(tmp_path, capsys, last_res
 
 
 @pytest.mark.parametrize(("runtime", "event", "command"), _commands(), ids=lambda v: v if len(v) < 40 else "cmd")
-def test_the_three_paths_start_the_script_with_runtime_and_event_in_the_same_place(
+def test_the_three_paths_start_the_script_with_runtime_and_event_in_the_same_location(
     runtime, event, command, probe_root, tmp_path, monkeypatch
 ):
     # S1-H5・決定 89: 環境の python がある経路は entry.py、無い経路は boot.py（entry.py のパスを外す）、python3 も無ければ何もしない

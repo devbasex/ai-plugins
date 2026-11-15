@@ -175,7 +175,7 @@ def last_moved(conn: Any, view: lane.PlanView, rows: dict[str, list[lane.LaneRow
         row = liveness.running_row(rows[name])
         if row is None or row.sprint_id is None:
             continue
-        lane_at = [e.at for e in store.read_events(conn, view.lanes[name].table_id) if e.draft.row_key == row.key]
+        lane_at = [e.at for e in store.read_events(conn, view.lanes[name].machine_id) if e.draft.row_key == row.key]
         times = lane_at + [e.at for e in store.read_events(conn, row.sprint_id)]
         if times:
             out[name] = max(times).isoformat()
@@ -244,9 +244,9 @@ def first_input(conn: Any, plan_id: str, act: Launch) -> str:
         return launch.prompt(view.name, act.lane, launch.resume_commands(act.resume))
     if act.goal is not None:
         return launch.goal_prompt(view.name, act.lane, act.goal)
-    rows = lane.fold_lane(store.read_events(conn, view.lanes[act.lane].table_id))
+    rows = lane.fold_lane(store.read_events(conn, view.lanes[act.lane].machine_id))
     row = next(r for r in rows if r.key == act.row)
-    return launch.prompt(view.name, act.lane, launch.start_commands(view.name, act.lane, view.lanes[act.lane].table_id, row))
+    return launch.prompt(view.name, act.lane, launch.start_commands(view.name, act.lane, view.lanes[act.lane].machine_id, row))
 
 
 @durable.step
@@ -394,8 +394,8 @@ def advance(where: Where, plan: str, pol: Policy) -> dict[str, Any]:
 
 
 def record_dir(cwd: Path, plan: str) -> Path:
-    """計画の記録の置き場（`places` の `ndf-parallel` の下の、`ndf-files` の `parallel` の `<id>` を計画の名前にしたもの）。"""
-    base = command.declaration_path(cwd, facts.value("places", "ndf-parallel", "path"))
+    """計画の記録の置き場（`locations` の `ndf-parallel` の下の、`ndf-files` の `parallel` の `<id>` を計画の名前にしたもの）。"""
+    base = command.ndf_settings_path(cwd, facts.value("locations", "ndf-parallel", "path"))
     return base / facts.value("ndf-files", "parallel", "path").replace("<id>", plan)
 
 

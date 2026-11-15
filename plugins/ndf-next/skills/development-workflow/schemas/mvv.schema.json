@@ -117,7 +117,7 @@
           "title": "Reason"
         },
         "vet": {
-          "$ref": "#/$defs/MvvVet"
+          "$ref": "#/$defs/MvvValidation"
         },
         "changes": {
           "items": {
@@ -144,7 +144,7 @@
       "title": "MvvVersion",
       "type": "object"
     },
-    "MvvVet": {
+    "MvvValidation": {
       "additionalProperties": false,
       "properties": {
         "verdict": {
@@ -169,7 +169,7 @@
         "verdict",
         "at"
       ],
-      "title": "MvvVet",
+      "title": "MvvValidation",
       "type": "object"
     },
     "RevisePolicy": {
