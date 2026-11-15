@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/lib/parallel_ledger.py", "name": "", "kind": "lines", "reason": "PR #3614 の cross-refactoring（I-008）で、最初の opened の行より後の行の絞り込みを rows_since_opened、台帳に書く形への正規化を _stored_form として抽出して 510 行（抽出の前は上限ちょうどの 500 行）。500 行以下にしたら消す。分けるなら、問いと依頼の読み出し（pending_questions・settled_gates とその下請け）を別のモジュールへ移す", "lines": 510}
