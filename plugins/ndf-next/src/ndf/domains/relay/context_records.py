@@ -274,11 +274,19 @@ class _Calls:
 
     def take(self, e: Mapping[str, Any]) -> None:
         if _is_auto_compact(e):
-            at = parse_ts(e.get("timestamp"))
-            self.compacts.append(at if at is not None else (self.calls[-1]["ts"] if self.calls else None))
+            self._take_compact(e)
             return
         if self.first_user is None:
             self.first_user = _user_text(e)
+        self._take_usage(e)
+
+    def _take_compact(self, e: Mapping[str, Any]) -> None:
+        """自動圧縮の時刻を記録する（行に無ければ直前の呼び出しの時刻）。"""
+        at = parse_ts(e.get("timestamp"))
+        self.compacts.append(at if at is not None else (self.calls[-1]["ts"] if self.calls else None))
+
+    def _take_usage(self, e: Mapping[str, Any]) -> None:
+        """assistant の usage を 1 つの呼び出しとして取り込む。前のファイルで数えた id は数えない。"""
         msg = e.get("message")
         usage = msg.get("usage") if isinstance(msg, dict) else None
         if e.get("type") != "assistant" or not isinstance(usage, dict) or not isinstance(msg, dict):
@@ -287,7 +295,10 @@ class _Calls:
         if mid in self.seen and mid not in self.here:
             return
         self.seen.add(mid)
-        call = usage_call(usage, parse_ts(e.get("timestamp")), msg.get("model"))
+        self._put(mid, usage_call(usage, parse_ts(e.get("timestamp")), msg.get("model")))
+
+    def _put(self, mid: Any, call: dict[str, Any]) -> None:
+        """同じ `mid` の呼び出しがあれば最後の usage で置き換え（時刻は最初の行のものを保つ）、無ければ足す。"""
         if mid in self.here:
             prev = self.calls[self.here[mid]]["ts"]
             call["ts"] = prev if prev is not None else call["ts"]
