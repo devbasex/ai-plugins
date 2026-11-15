@@ -349,6 +349,11 @@ def _generated(plugin_root: Path, patterns: list[str]) -> set[str]:
     return {p.relative_to(plugin_root).as_posix() for pat in patterns for p in plugin_root.glob(pat) if p.is_file()}
 
 
+def _stale(rendered: dict[str, str], plugin_root: Path, patterns: list[str]) -> list[str]:
+    """描画に無いのに生成物の置き場に残るファイル（プラグインの根からの相対パスの昇順）。"""
+    return sorted(_generated(plugin_root, patterns) - set(rendered))
+
+
 def _first_diff(want: str, have: str) -> int:
     for i, (a, b) in enumerate(zip(want.splitlines(), have.splitlines()), 1):
         if a != b:
@@ -373,8 +378,7 @@ def docs_findings(rendered: dict[str, str], plugin_root: Path, patterns: list[st
         if have != rendered[path]:
             found.append(Finding(DOCS, rel(path), _first_diff(rendered[path], have), "生成し直した中身と違う" + hint))
     found += [
-        Finding(DOCS, rel(p), 1, "生成されないファイルが生成物の置き場に残る" + hint)
-        for p in sorted(_generated(plugin_root, patterns) - set(rendered))
+        Finding(DOCS, rel(p), 1, "生成されないファイルが生成物の置き場に残る" + hint) for p in _stale(rendered, plugin_root, patterns)
     ]
     return found
 
@@ -390,7 +394,7 @@ def write(rendered: dict[str, str], plugin_root: Path, patterns: list[str]) -> l
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(rendered[path], encoding="utf-8")
             done.append(path)
-        for path in sorted(_generated(plugin_root, patterns) - set(rendered)):
+        for path in _stale(rendered, plugin_root, patterns):
             (plugin_root / path).unlink()
             done.append(path)
     except OSError as exc:
