@@ -389,6 +389,34 @@ def judge_pr(repo, pr, head, prod):
     return approval_trail.judge_trails_on(repo, pr, head)
 
 
+def _pr_to_judge(a, root, repo: str, prod: str, head: str, base: str, state: str) -> int:
+    """証跡を判定する PR の番号。本番チャネル宛てでない・レビューで承認する場合・閉じて同じ先端の開いた PR が無いときは、
+    何も付けずに ok で終える。閉じた PR は同じ先端の開いた PR を判定し直す（I10）。"""
+    if base != prod:
+        emit(result(TOOL, "ok", f"PR #{a.pr} の宛先 {base} が本番チャネルでない（何も付けない）", [], {"pr": a.pr, "base": base}))
+    if (case := release_case_or_stop(root)).case == release_case.CD_REVIEW and not trail_required(root, repo, prod):
+        msg = f"リリースの場合が {case.case}（レビューで承認する）で、証跡のチェックを付けない"
+        emit(result(TOOL, "ok", msg, [], {"pr": a.pr, "case": case.case}))
+    if state == "open":
+        return a.pr
+    same = approval_trail.open_prs_at(repo, head, prod)
+    if not same:
+        emit(result(TOOL, "ok", f"PR #{a.pr} は閉じていて、同じ先端の開いた PR が無い（何も付けない）", [], {"pr": a.pr}))
+    return same[0]
+
+
+def _judge_and_post(repo: str, pr: int, head: str, prod: str):
+    """証跡を判定して先端へ commit status を付ける。承認なら並んだ実行が同じ先端の PR を開いていないかを読み直す（I10）。"""
+    j = judge_pr(repo, pr, head, prod)
+    approval_trail.post_status(repo, head, j)
+    if j.state == "success":
+        again = judge_pr(repo, pr, head, prod)
+        if again.state != "success":
+            approval_trail.post_status(repo, head, again)
+            j = again
+    return j
+
+
 def approval_check(a):
     """PR の承認の証跡を判定し、先端へ commit status を付ける（証跡のチェックの workflow が打つ。#2773 の F4）。
     レビューが必須の場合（cd-review）は証跡を書かないため何も付けない（I8。付けると証跡が無い failure でマージが止まる）。
@@ -399,24 +427,8 @@ def approval_check(a):
     repo, head = repo_or_stop(root), None
     try:
         head, base, state = approval_trail.read_head(repo, a.pr)
-        if base != prod:
-            emit(result(TOOL, "ok", f"PR #{a.pr} の宛先 {base} が本番チャネルでない（何も付けない）", [], {"pr": a.pr, "base": base}))
-        if (case := release_case_or_stop(root)).case == release_case.CD_REVIEW and not trail_required(root, repo, prod):
-            msg = f"リリースの場合が {case.case}（レビューで承認する）で、証跡のチェックを付けない"
-            emit(result(TOOL, "ok", msg, [], {"pr": a.pr, "case": case.case}))
-        pr = a.pr
-        if state != "open":  # 閉じた PR の先端を持つ開いた PR を判定し直す（I10）
-            same = approval_trail.open_prs_at(repo, head, prod)
-            if not same:
-                emit(result(TOOL, "ok", f"PR #{a.pr} は閉じていて、同じ先端の開いた PR が無い（何も付けない）", [], {"pr": a.pr}))
-            pr = same[0]
-        j = judge_pr(repo, pr, head, prod)
-        approval_trail.post_status(repo, head, j)
-        if j.state == "success":  # 並んだ実行が同じ先端の PR を開いていないかを読み直す（I10）
-            again = judge_pr(repo, pr, head, prod)
-            if again.state != "success":
-                approval_trail.post_status(repo, head, again)
-                j = again
+        pr = _pr_to_judge(a, root, repo, prod, head, base, state)
+        j = _judge_and_post(repo, pr, head, prod)
     except approval_trail.TrailError as e:
         if head:
             try:
