@@ -41,7 +41,14 @@
 | NDF の工程（`ndf-workflow`） | JUnit の成果物・ログのパーサー・落ちたテスト・落ちたテストのチェック・suite |
 | cross-refactoring（`ndf-cross-refactoring`） | 収集の確かめ・許す終了コード |
 
-2 つは共有カーネルの関係にある。suite の設定（`test.suites[]`）を両方が読み、同じ変更で形を変える。共有するのは suite の設定の形だけで、ほかの語は分けて持つ。
+コンテキストマップ:
+
+| 上流 | 下流 | 関係 | 何を渡すか |
+| --- | --- | --- | --- |
+| NDF の工程 | cross-refactoring | 共有カーネル | suite の設定（`test.suites[]`）の形。両方が読み、同じ変更で形を変える |
+| NDF の工程（供給者） | cross-refactoring（顧客） | 顧客と供給者 | 最後の確かめ（`final_gate`）が落ちたテストの組み立てを呼び、出力の型（落ちたテスト・読み取りの記録）を受け取る。型の形は NDF の工程が決め、cross-refactoring は形の変更を同じ変更のテストで受ける |
+
+suite の設定の形と組み立ての出力の型のほかの語は、2 つのコンテキストで分けて持つ。
 
 ### 集約
 
@@ -57,13 +64,16 @@
 
 | # | 集約 | 条件 | 破れたときの扱い |
 | --- | --- | --- | --- |
-| I1 | CI の結果 | 落ちたテストの要素のファイルは、作業ディレクトリの根からの相対パスで、作業ディレクトリが追跡するファイルである | ファイルを決められない testcase は一覧へ入れず、読み取りの記録に testcase の名前と足りない属性を残す |
+| I1 | CI の結果 | JUnit の成果物から読んだ要素のファイルは、作業ディレクトリが追跡するファイル（`git ls-files` が返す、根からの相対パス）のどれかである | ファイルを決められない testcase は一覧へ入れず、読み取りの記録に testcase の名前と足りない属性を残す |
+| I8 | CI の結果 | ログから読んだ要素は、ログのパーサーが返した形のまま一覧へ入れ、追跡するファイルと照らさない（今の pytest の読み方と同じ一覧を返すため。受け入れ条件 7） | 照らす経路を作らない |
 | I2 | CI の結果 | 落ちたテストの一覧は重ならず、昇順に並ぶ | 組み立てで集合にしてから並べる。破る経路を作らない |
 | I3 | CI の結果 | `<skipped>` だけを持つ testcase と通った testcase は、落ちたテストに入らない | 一覧へ入れない |
 | I4 | CI の結果 | ログのパーサーは、チェックに当たる suite の `runner` に登録されたものだけを当てる。当たる suite が無いか、`runner` にパーサーが無ければログを読まない | 一覧を空のままにし、読み取りの記録に理由を残す |
-| I5 | CI の結果 | 成果物の取得の本数は、ログの取得と同じ上限（`limits.json` の `github.failed-logs` の件数）を超えない | 上限を超えた成果物は取得せず、読み取りの記録に上限で止めたことを残す |
-| I6 | 手元の確かめの結果 | 落ちたテストのチェックがあるのに一覧が空なら、範囲のテストを打たずに `precondition` で止まり、止まった理由に足すべき設定のキーか読めなかった理由が出る | テストのコマンドを 1 本も打たない |
-| I7 | 設定ファイルの suite | 収集の確かめは、suite の `collect_exit_codes` の終了コードだけを成功と読む。キーが無ければ 0 だけを成功と読む | ほかの終了コードは `CollectError` で止める |
+| I5 | CI の結果 | 成果物の取得の本数は、ログの取得と同じ上限（`limits.json` の `github.failed-logs` の件数）を超えない | 上限を超えた成果物は取得せず、その実行のチェックをログへ移し、読み取りの記録に上限で止めたことを残す |
+| I6 | 手元の確かめの結果 | 落ちたテストのチェックがあるのに一覧が空なら、範囲のテストを打たずに `precondition` で止まる | テストのコマンドを 1 本も打たない |
+| I9 | 手元の確かめの結果 | I6 で止まったときの止まった理由に、足すべき設定のキーか読めなかった理由が出る | 読み取りの記録から文を組む（決定 6） |
+| I7 | 設定ファイルの suite | 収集の確かめは、suite の `collect_exit_codes` に入る終了コードだけを成功と読む | ほかの終了コードは `CollectError` で止める |
+| I10 | 設定ファイルの suite | `collect_exit_codes` の無い suite の収集の確かめは、0 だけを成功と読む | 0 以外は `CollectError` で止める |
 
 ### ドメインイベント
 
@@ -105,7 +115,7 @@ E3 と E4 の受け手の「落ちたテストの組み立て」は `ndf ci watc
 | STD4 | PHPUnit の JUnit のログ | testsuite と testcase に `file` 属性を書く。値はテストのファイルのパス（CI では作業ディレクトリの絶対パス） | 絶対パスを作業ディレクトリの根からの相対パスへ直す（受け入れ条件 3） | https://raw.githubusercontent.com/sebastianbergmann/phpunit/main/src/Logging/JUnit/JunitXmlLogger.php （2026-11-15。437〜445 行の `setAttribute('file', …)`） |
 | STD5 | pytest の `--junitxml` | `junit_family` の既定は `xunit2`。`xunit1` は testcase に `file` と `line` を書き、`xunit2` は書かない。`classname` はドットで区切ったモジュール名 | `xunit2` ではファイルを決められず、ログのパーサーへ移る | https://docs.pytest.org/en/stable/reference/reference.html （2026-11-15）と実測（pytest 9.0.3 で `-o junit_family=xunit1` と `xunit2` を書かせた。下の実測の出力） |
 | STD6 | playwright の JUnit レポーター | testsuite の `name` はテストのファイル（設定の置き場からの相対）。`addFileAttribute` で testcase に `fileRoot` からの相対の `file` が付く | testsuite の `name` を候補に入れ、作業ディレクトリのファイルの末尾と照らす | https://raw.githubusercontent.com/microsoft/playwright/main/docs/src/test-reporters-js.md （2026-11-15。444〜486 行） |
-| STD7 | GitHub REST の Actions の API | ジョブの取得（`GET /actions/jobs/{id}` が `run_id` を返す）、ワークフローの実行の取得（`path` が `.github/workflows/build.yml@main` の形）、実行の成果物の一覧（`expired` を持つ）、成果物の取得（302 で転送、期限切れは 410） | チェックからワークフローのファイルを引き、`ci_jobs` と照らす。期限切れはログへ移る | https://docs.github.com/en/rest/actions/workflow-jobs ・ https://docs.github.com/en/rest/actions/workflow-runs ・ https://docs.github.com/en/rest/actions/artifacts （2026-11-15） |
+| STD7 | GitHub REST の Actions の API | ジョブの取得（`GET /actions/jobs/{id}` が `run_id` を返す。応答はワークフローの YAML のジョブの識別子を持たず、`name` は表示名）、ワークフローの実行の取得（`path` が `.github/workflows/build.yml@main` の形）、実行の成果物の一覧（`expired` を持つ）、成果物の取得（302 で転送、期限切れは 410） | チェックからワークフローのファイルを引き、`ci_jobs` と照らす。期限切れはログへ移る | https://docs.github.com/en/rest/actions/workflow-jobs ・ https://docs.github.com/en/rest/actions/workflow-runs ・ https://docs.github.com/en/rest/actions/artifacts （2026-11-15） |
 
 pytest の実測（2026-11-15。`/work/ai-plugins/.venv/bin/python -m pytest -o junit_family=<形> --junitxml=<形>.xml tests`）:
 
@@ -166,7 +176,7 @@ pytest の実測（2026-11-15。`/work/ai-plugins/.venv/bin/python -m pytest -o 
 | cross-refactoring の最後の確かめ（変更。`src/ndf/domains/crossrefactor/final_gate.py`） | 作業場所の設定ファイルを読み、落ちたテストの組み立てを CI を待つエントリポイントと同じ引数で呼ぶ |
 | 収集の確かめ（変更。`src/ndf/domains/crossrefactor/collect.py`） | 終了コード 5 を成功に含む定数を外し、suite の `collect_exit_codes`（無ければ `[0]`）で判定する |
 | 設定ファイルのスキーマ（変更。`contracts/schemas/declarations/project.schema.json`） | suite に `collect_command` と `collect_exit_codes` を足し、`test.ci.junit_artifacts` の説明を「書いたときだけ成果物を読む」に直す |
-| CI の結果 JSON のスキーマ（変更。`contracts/schemas/io/ci.result.schema.json`） | `metrics` に `junit_artifacts` と `failed_test_reads` を足す |
+| CI の結果 JSON のスキーマ（変更。`contracts/schemas/io/ci.result.schema.json`） | `metrics` に `junit_artifacts` と `failed_test_reads` を足し、`test_failed` の結果では `failed_test_reads` を必須にする |
 | 契約のページ（生成物。`docs/contracts/commands.md`・`docs/contracts/declarations.md`） | スキーマから `ndf check` が作り直す |
 | 子の表（変更。`src/ndf/checks/children.json` と #1142 の本文） | この課題の子の行を足す（受け入れ条件 17） |
 
@@ -223,6 +233,7 @@ classDiagram
     }
     class FailedTestRead {
         +check
+        +run_id
         +runner
         +source
         +found
@@ -241,7 +252,7 @@ classDiagram
 | --- | --- | --- |
 | `FailedTestSource`（新設） | `adapters/ci.py` | 組み立ての入力。JUnit の成果物の glob（無ければ None）・テストの suite の並び（`runner` と `ci_jobs`）・作業ディレクトリが追跡するファイルの集合 |
 | `FailedTests`（新設） | `adapters/ci.py` | 組み立ての出力。落ちたテストの一覧（I1・I2）と、チェックごとの読み取りの記録 |
-| `FailedTestRead`（新設） | `adapters/ci.py` | チェック 1 件の読み取りの記録。読み元（`junit`・`log`・`none`）・読めた件数・読めなかった理由 |
+| `FailedTestRead`（新設） | `adapters/ci.py` | チェック 1 件の読み取りの記録。ワークフローの実行の識別子・読み元（`junit`・`log`・`none`）・読めた件数・読めなかった理由 |
 | `JunitFailures`（新設） | `testing/junit.py` | XML 1 本の読み取りの結果。落ちたテストの一覧と、ファイルを決められなかった testcase の理由の並び |
 
 `failed_test_nodes_of(github, checks)` は `failed_tests_of(github, checks, source) -> FailedTests` に置き換え、`failed_test_nodes(log_text)` と正規表現 `_PYTEST_FAILED` は `adapters/ci.py` から消す（ログのパーサーの一覧へ移る）。
@@ -263,9 +274,9 @@ CI の結果 JSON（`ndf ci watch` が `test_failed` で止まったとき）の
 | キー | 型 | 空を許すか | 意味 |
 | --- | --- | --- | --- |
 | `metrics.junit_artifacts` | 文字列 | 許す（キーを置かない） | 読んだ設定の glob。設定に無ければキーを置かない（手元の確かめが止まった理由の文を選ぶ） |
-| `metrics.failed_test_reads` | 読み取りの記録の並び | 許さない（`test_failed` のとき必ず置く。チェックが上限で切られたら、切られたチェックも `source: none` で並ぶ） | チェックごとの `check`（名前）・`runner`（当たる suite の `runner`。当たらなければ `null`）・`source`（`junit`・`log`・`none`）・`found`（読めた件数）・`reason`（読めたときは空） |
+| `metrics.failed_test_reads` | 読み取りの記録の並び | 許さない（`test_failed` のとき必ず置く。チェックが上限で切られたら、切られたチェックも `source: none` で並ぶ） | チェックごとの `check`（名前）・`run_id`（ジョブが属するワークフローの実行の識別子。ジョブを読めなければ `null`）・`runner`（当たる suite の `runner`。当たらなければ `null`）・`source`（`junit`・`log`・`none`）・`found`（読めた件数。読み元 `junit` なら実行の成果物から読めた件数）・`reason`（読めたときは空） |
 
-`metrics.failed_tests`・`metrics.test_files`・`metrics.log_error` の形と意味は変えない（前提 2）。`log_error` はジョブを特定できない（E2 の失敗）ときだけ置く。
+`metrics.failed_tests`・`metrics.test_files`・`metrics.log_error` の形と意味は変えない（前提 2）。`log_error` はジョブを特定できない（E2 の失敗）チェックがあるときだけ置き、その理由を入れる（2 件以上なら `; ` でつなぐ）。そのチェックの読み取りの記録は `source: none`・`found: 0`・`reason` に同じ理由を持つ。ほかのチェックで読めた落ちたテストは一覧に残す。
 
 機能とデータの対応:
 
@@ -287,7 +298,7 @@ CI の結果 JSON（`ndf ci watch` が `test_failed` で止まったとき）の
 | --- | --- |
 | 入力 | 引数は変えない。作業場所から根へ探した設定ファイルの `test.ci.junit_artifacts` と `test.suites` を読む（設定ファイルが無い・読めないときは、glob も suite も無いとして読む） |
 | 出力 | `test_failed` のとき、`metrics` に上の 2 つのキーが増える。ほかの結果は変えない |
-| 失敗の形 | ジョブかワークフローの実行を読めない（`GitHubError`）とき、落ちたテストは空・`log_error` に理由（今と同じ）。成果物の一覧・成果物の取得・XML の読み取りの失敗はそのチェックをログへ移し、ログの取得の失敗はそのチェックの `reason` に残す。どれも止まった理由の種類（`test_failed`）を変えない |
+| 失敗の形 | ジョブかワークフローの実行を読めない（`GitHubError`）とき、そのチェックだけを読み元 `none` にし、`reason` と `log_error` に理由を残す。ほかのチェックは読み続け、読めた落ちたテストを一覧に残す。成果物の一覧・成果物の取得・XML の読み取りの失敗はそのチェックをログへ移し、ログの取得の失敗はそのチェックの `reason` に残す。どれも止まった理由の種類（`test_failed`）を変えない |
 | 互換性 | 互換の経路は持たない（前提 1） |
 
 ### `ndf route test --failed-from`
@@ -296,7 +307,7 @@ CI の結果 JSON（`ndf ci watch` が `test_failed` で止まったとき）の
 | --- | --- |
 | 入力 | 変えない（CI の結果 JSON のファイル） |
 | 出力 | 落ちたテストが空のときの `precondition` の止まった理由の文だけが変わる |
-| 失敗の形 | 設定に glob が無い（`metrics.junit_artifacts` が無い）: `落ちたテストを読めない。JUnit の成果物を上げ、設定ファイルの test.ci.junit_artifacts に名前の glob を書く（ログを読めなかった suite の runner: vitest（チェック factory-check））`。glob がある: `JUnit の成果物（junit-*）とログのどちらからも落ちたテストを読めない: <チェックごとの reason>`。`failed_test_reads` が空（読み取りの記録の無い旧い結果か手で作った結果）なら今の文のまま |
+| 失敗の形 | 設定に glob が無い（`metrics.junit_artifacts` が無い）: `落ちたテストを読めない。JUnit の成果物を上げ、設定ファイルの test.ci.junit_artifacts に名前の glob を書く（ログを読めなかった suite の runner: vitest（チェック factory-check））`。glob がある: `JUnit の成果物（junit-*）とログのどちらからも落ちたテストを読めない: <チェックごとの reason>`。落ちたテストのチェックがある結果（`cause` が `test_failed`）に `metrics.failed_test_reads` が無ければ、`ndf ci watch` の結果ではないとして `LocalTestError`（入力の誤り）で止まる。CI の結果 JSON のスキーマも、`test_failed` の結果に `failed_test_reads` を必須にする |
 | 互換性 | 互換の経路は持たない（前提 1） |
 
 ### 設定ファイルのスキーマ
@@ -323,17 +334,18 @@ sequenceDiagram
     loop 落ちたテストのチェック（github.failed-logs の件数まで）
         組->>GH: ジョブ（run_id）・ワークフローの実行（path）
         alt 読めない
-            GH-->>組: GitHubError（一覧は空・log_error）
+            GH-->>組: GitHubError（このチェックだけ読み元 none と理由・log_error に足す）
         end
         opt 設定に junit_artifacts があり、この実行の成果物をまだ読んでいない
             組->>GH: 実行の成果物の一覧
             組->>GH: glob に当たり期限の切れていない成果物の ZIP（取得の本数は上限まで）
             組->>J: ZIP の中の .xml と追跡するファイルの集合
             J-->>組: 落ちたテストとファイルを決められない testcase の理由
+            組->>組: 実行の読み元を決めて、同じ実行のチェックで使い回す
         end
-        alt 成果物から 1 件以上読め、ファイルを決められない testcase が無い
+        alt 実行の成果物から 1 件以上読め、決められない testcase が無く、上限で打ち切っていない
             組->>組: 読み元 junit
-        else 読めない・0 件・決められない testcase がある
+        else 読めない・0 件・決められない testcase がある・上限で打ち切った
             組->>組: ci_jobs でチェックに当たる suite の runner を決める
             alt runner にパーサーがある
                 組->>GH: ジョブのログ
@@ -347,9 +359,16 @@ sequenceDiagram
     組->>組: 一覧を重ねずに昇順へ並べる
 ```
 
-チェックと suite の照合: ワークフローの実行の `path` から `@` 以降を外したファイルを、テストの suite（`kind` が `test`）の `ci_jobs` の `#` より前と比べる。`#` の後ろ（ジョブの識別子）があれば、チェックの名前（`bare_name` で分割ジョブの括弧とワークフローの名前を外した名前）と一致するか、`<識別子> (` で始まるときだけ当たる。当たる suite の `runner` が 1 種類なら、その `runner` のパーサーを当てる。当たる suite が無いか `runner` が 2 種類以上なら、ログを読まない。
+チェックと suite の照合: ワークフローの実行の `path` から `@` 以降を外したファイルを、テストの suite（`kind` が `test`）の `ci_jobs` の `#` より前と比べる。`#` の後ろ（ジョブの識別子）は照合に使わない。ジョブの API の応答はジョブの識別子を持たず（STD7。応答の項目は `name`・`workflow_name`・`run_id` などで、`name` は表示名）、表示名と比べると、ジョブに `name:` を付けたワークフローで当たらなくなるためである。当たる suite の `runner` が 1 種類なら、その `runner` のパーサーを当てる。当たる suite が無いか `runner` が 2 種類以上なら、ログを読まない。
 
-JUnit の読み取りのファイルの決め方（落ちた testcase ごと）: 候補を testcase の `file`、最も近い testsuite の `file`、testcase の `classname`、最も近い testsuite の `name` の順に試す。候補はバックスラッシュを `/` に、先頭の `./` を外して比べる。候補が追跡するファイルと一致すればそれを使う。候補が追跡するファイルを末尾に持つ（`<何か>/<ファイル>`。絶対パスの場合）なら、当たるうち最も長いファイルを使う。追跡するファイルが候補を末尾に持つ（`<何か>/<候補>`）ものが 1 つだけならそれを使う。どの候補でも決まらなければ、testcase の `classname` と `name`、試した属性を理由に残す。一覧の要素は `<ファイル>::<testcase の name>`。決められない testcase が 1 件でもある実行は、成果物から読めた分を使わずにログへ移る（一部のファイルだけを打って、ほかの落ちを見落とさないため）。ログでも読めなければ、成果物の理由とログの理由の両方を `reason` に残す。
+JUnit の読み取りのファイルの決め方（落ちた testcase ごと）: 候補を testcase の `file`、最も近い testsuite の `file`、testcase の `classname`、最も近い testsuite の `name` の順に試す。候補はバックスラッシュを `/` に、先頭の `./` を外して比べる。候補が追跡するファイルと一致すればそれを使う。候補が追跡するファイルを末尾に持つ（`<何か>/<ファイル>`。絶対パスの場合）なら、当たるうち最も長いファイルを使う。追跡するファイルが候補を末尾に持つ（`<何か>/<候補>`）ものが 1 つだけならそれを使う。どの候補でも決まらなければ、testcase の `classname` と `name`、試した属性を理由に残す。一覧の要素は `<ファイル>::<testcase の name>`。
+
+成果物の読み元は、チェックごとではなくワークフローの実行ごとに決める。成果物は実行に付き、どの XML がどのジョブ（チェック）から上がったかは成果物の一覧から分からないためである。
+
+- 実行の成果物から 1 件以上読め、決められない testcase が無く、ZIP の取得を上限で打ち切っていないとき、その実行を「成果物から読めた」とする。その実行の落ちたテストのチェックは、すべて読み元 `junit` になる
+- 決められない testcase が 1 件でもある実行と、glob に当たる ZIP を上限で打ち切った実行は、成果物から読めた分を使わず、その実行の落ちたテストのチェックをすべてログへ移す（一部のファイルだけを打って、ほかの落ちを見落とさないため）。打ち切ったときは、上限で止めたことを `reason` に残す
+- ログでも読めなければ、成果物の理由とログの理由の両方を `reason` に残す
+- 読み取りの記録はチェックごとに 1 行で、`run_id` で同じ実行の行が分かる。読み元 `junit` の行の `found` は実行の成果物から読めた件数で、同じ実行の行は同じ値を持つ（行の間で足し合わせない）
 
 手元の確かめ（`ndf route test --failed-from`）:
 
@@ -358,7 +377,7 @@ graph TD
     A[CI の結果 JSON を読む] --> B{落ちたテストのファイルがある}
     B -->|ある| C[suite の scope_command で範囲を打つ]
     B -->|無い| D{failed_test_reads がある}
-    D -->|無い| E[precondition: 今の文]
+    D -->|無い| E[LocalTestError: ci watch の結果でない]
     D -->|ある| F{metrics.junit_artifacts がある}
     F -->|無い| G[precondition: test.ci.junit_artifacts と読めなかった runner]
     F -->|ある| H[precondition: glob とチェックごとの理由]
@@ -370,7 +389,7 @@ graph TD
 
 | 大項目 | 要求の条件 | 実現方式 | 確かめ方 |
 | --- | --- | --- | --- |
-| 性能・拡張性 | 成果物の取得は、今のログの取得と同じ上限（`limits.json` の `github.failed-logs` の件数）に収める | 読むチェックの数と、ZIP を取得する本数の両方を `github.failed-logs` の件数で切る。実行ごとに成果物の一覧を 1 回だけ読み、同じ実行の分割ジョブで使い回す。1 本の成果物が 50 MiB を超えれば取得せず、そのチェックをログへ移す | 上限 + 1 本の成果物を持つ偽の GitHub で、取得の本数が上限で止まり、読み取りの記録に上限が残るテスト |
+| 性能・拡張性 | 成果物の取得は、今のログの取得と同じ上限（`limits.json` の `github.failed-logs` の件数）に収める | 読むチェックの数と、ZIP を取得する本数の両方を `github.failed-logs` の件数で切る。実行ごとに成果物の一覧を 1 回だけ読み、同じ実行の分割ジョブで使い回す。ZIP の取得を上限で打ち切った実行は成果物から読めたと扱わず、その実行のチェックをログへ移す。1 本の成果物が 50 MiB を超えれば取得せず、その実行のチェックをログへ移す | 上限 + 1 本の成果物を持つ偽の GitHub で、取得の本数が上限で止まり、その実行のチェックが読み元 `log` になり、読み取りの記録に上限が残るテスト |
 | 運用・保守性 | 止まった理由の文から、利用者が設定ファイルのどのキーを足せばよいかが分かる（受け入れ条件 10・11） | 止まった理由の文に、キーの名前（`test.ci.junit_artifacts`）か、書いた glob と読めなかった理由を入れる | 受け入れ条件 10・11 のテスト |
 
 ## 決定の記録
@@ -410,7 +429,7 @@ junitparser（LIB2）は要素を型で読めるが、難しいファイルの�
 
 ### 決定 4: 落ちたテストのチェックと suite を対応させるため、suite の `ci_jobs` とワークフローの実行のファイルを照らす
 
-`ci_jobs` は「この suite が同じ検査を手元で走らせる CI のジョブ」として設定ファイルにすでにあり、利用者が書く。チェックの名前は GitHub の表示名で、ワークフローの YAML のジョブの識別子とも suite の名前とも一致するとは限らない。ジョブの API が返す `run_id` から実行の `path` を引けば、設定のファイルと 1 対 1 で照らせる（STD7）。1 回の読み取りでジョブと実行の 2 回の API の呼び出しが増えるが、成果物を読むにも実行の識別子が要るため、同じ呼び出しを使い回せる。
+`ci_jobs` は「この suite が同じ検査を手元で走らせる CI のジョブ」として設定ファイルにすでにあり、利用者が書く。チェックの名前は GitHub の表示名で、ワークフローの YAML のジョブの識別子とも suite の名前とも一致するとは限らない。ジョブの API が返す `run_id` から実行の `path` を引けば、設定のファイルと 1 対 1 で照らせる（STD7）。照らすのは `ci_jobs` のワークフローのファイル（`#` より前）だけで、`#` の後ろのジョブの識別子は使わない。ジョブの API の応答にジョブの識別子が無く（応答の項目は `id`・`run_id`・`name`・`workflow_name` など。`name` は表示名）、表示名と比べる形では `name:` を付けたジョブで照合が外れ、今の pytest の読み方が退行する（受け入れ条件 7）。1 つのワークフローのファイルに `runner` の違う suite が当たるときはログを読まずに理由を残し、利用者がワークフローのファイルを分けて解く。1 回の読み取りでジョブと実行の 2 回の API の呼び出しが増えるが、成果物を読むにも実行の識別子が要るため、同じ呼び出しを使い回せる。
 
 チェックの名前で照らす形は採らない。分割（`pytest (0/2)`）や行列（`test (3.11)`）で名前が変わり、新しいキーを利用者に書かせることになる。
 
@@ -451,25 +470,27 @@ vitest・jest・PHPUnit・playwright・Flutter・Swift の落ちたテストは�
 
 | 受け入れ条件・不変条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
 | --- | --- | --- |
-| 1・I3 | 5 つのランナーの見本の XML（落ち・通り・飛ばしを含む）から、落ちたテストだけが `<ファイル>::<名前>` で返る。ランナーごとに 1 件 | `<skipped>` を落ちに数える・`<error>` を落ちに数えない・通った testcase を入れると落ちる |
+| 1・I3 | 5 つのランナーの見本の XML（落ち・通り・飛ばしを含む）から、落ちたテストだけが `<ファイル>::<名前>` で返る。ランナーごとに 1 件。見本はファイルを決められる形で書かせる: vitest は既定、jest（jest-junit）と playwright は `addFileAttribute` を有効にした形、PHPUnit は既定、pytest は `junit_family=xunit1`。jest の既定と pytest の `xunit2` は受け入れ条件 4 の見本に使う | `<skipped>` を落ちに数える・`<error>` を落ちに数えない・通った testcase を入れると落ちる |
 | 2 | 見本の XML の置き場に、実際に動かして書かせたか公式の文書の形かを書いたファイルがある | 見本の出所の記述が無い（レビューで見る。`.md` の文言のテストは書かない） |
 | 3・I1 | `file` が絶対パス（PHPUnit の形）の testcase が、追跡するファイルの相対パスで返る | 絶対パスのまま返す・末尾の照合で短い方のファイルを選ぶと落ちる |
 | 4・I1 | `file` も `classname` も testsuite の `name` もファイルに当たらない testcase（jest の既定・pytest の `xunit2`）は一覧へ入らず、理由に testcase の名前と試した属性が出る | 当たらない testcase を `classname` のまま一覧へ入れる・理由を空にすると落ちる |
 | 5・I2 | 2 本の XML（分割ジョブ）に同じ落ちと別の落ちがあるとき、一覧が重ならず昇順になる | 並びを入力の順のまま返す・重ねると落ちる |
 | 6 | 設定に glob があり、当たる成果物が無い（一覧が空・期限切れ・410）とき、ログのパーサーで読み、読み元が `log` になる | 成果物が無いときにログを読まない・`none` で止めると落ちる |
-| 7 | 今のテスト `tests/adapters/test_ci.py::test_failed_test_nodes_and_files_from_log` の入力のログを pytest のパーサーで読むと、今と同じ一覧が返る（テストは置き場を移しても入力と期待を変えない） | 正規表現を変えて `ERROR <パス>` を拾わないと落ちる |
+| 7・I8 | 今のテスト `tests/adapters/test_ci.py::test_failed_test_nodes_and_files_from_log` の入力のログを pytest のパーサーで読むと、今と同じ一覧が返る（テストは置き場を移しても入力と期待を変えない） | 正規表現を変えて `ERROR <パス>` を拾わないと落ちる |
 | 8・I4 | `runner` が `vitest` の suite に当たるチェックのログに pytest の行が含まれても、一覧は空で、理由に `runner` が出る。当たる suite が無いときも読まない | パーサーが無いときに pytest のパーサーを当てると落ちる |
 | 9 | パーサーの一覧へ試験用のパーサーを足すと、その `runner` の suite に当たるチェックのログが読まれる。組み立ての処理は書き換えない | 組み立てが `runner == "pytest"` で分岐すると落ちる |
-| 10・I6 | 一覧が空で `metrics.junit_artifacts` が無い CI の結果を渡すと、範囲のテストを打たずに `precondition` で止まり、理由に `test.ci.junit_artifacts` と記録の `runner` が出る | テストのコマンドを打つ・理由にキーを出さないと落ちる |
-| 11・I6 | 一覧が空で glob がある CI の結果を渡すと、理由に glob とチェックごとの読めなかった理由が出る | glob か理由のどちらかを出さないと落ちる |
+| 10・I6・I9 | 一覧が空で `metrics.junit_artifacts` が無い CI の結果を渡すと、範囲のテストを打たずに `precondition` で止まり、理由に `test.ci.junit_artifacts` と記録の `runner` が出る | テストのコマンドを打つ・理由にキーを出さないと落ちる |
+| 11・I9 | 一覧が空で glob がある CI の結果を渡すと、理由に glob とチェックごとの読めなかった理由が出る | glob か理由のどちらかを出さないと落ちる |
+| 読み取りの記録の無い結果 | `test_failed` で `metrics.failed_test_reads` の無い CI の結果を渡すと、テストを打たずに `LocalTestError`（入力の誤り）で止まる。同じ結果は CI の結果 JSON のスキーマの検査でも落ちる | 記録が無いときに `precondition` の文で止める・スキーマで必須にしないと落ちる |
 | 12・I7 | `collect_exit_codes: [0, 5]` の suite の収集のコマンドが 5 で終わると成功、`[0]` で 1 なら `CollectError` | 宣言を読まずに固定の集合で判定すると落ちる |
-| 13・I7 | `collect_exit_codes` の無い suite で 5 が返ると `CollectError` | 既定に 5 を含めると落ちる |
+| 13・I10 | `collect_exit_codes` の無い suite で 5 が返ると `CollectError` | 既定に 5 を含めると落ちる |
 | 14 | スキーマの検査で、`collect_exit_codes` の `["5"]`・`5`・`[1.5]`・`[true]`・`[]`・`collect_command` の無い suite の指定が落ち、`[0, 5]` が通る | `items` の型・`minItems`・`dependentRequired` を外すと落ちる |
 | 15 | `grep -rnE "frozenset\(\{0, 5\}\)|COLLECT_OK" plugins/ndf-next/src` が 0 件（PR に結果を添える） | 定数を残すと当たる |
 | 16 | 設計の「適用範囲」の表（この文書） | 設計レビューで見る |
 | 17 | `ndf check` の規則 `child-deps` が、`AD4` の行を足した子の表で通る | 行の `needs` の順番が規則に合わないと落ちる |
 | I5 | 上限 + 1 本の成果物を持つ実行で、取得する ZIP の本数が `github.failed-logs` の件数で止まる | 上限を数えずに全部を取得すると落ちる |
-| E2 の失敗 | ジョブの読み取りが `GitHubError` のとき、一覧は空・`log_error` が置かれ、止まった理由の種類は `test_failed` のまま | 例外を外へ投げる・種類を変えると落ちる |
+| E2 の失敗 | 2 つのチェックのうち 1 つのジョブの読み取りが `GitHubError` のとき、そのチェックは読み元 `none` で理由を持ち、`log_error` が置かれ、もう 1 つのチェックから読めた落ちたテストは一覧に残る。止まった理由の種類は `test_failed` のまま | 例外を外へ投げる・種類を変える・ほかのチェックの分を捨てると落ちる |
+| 実行ごとの読み元 | 1 つの実行に落ちたテストのチェックが 2 つあり、一方の XML に決められない testcase があるとき、両方のチェックが読み元 `log` になる。決められない testcase が無ければ両方が `junit` で同じ `run_id` と `found` を持つ | チェックごとに読み元を決めて片方だけ `junit` にすると落ちる |
 | cross-refactoring の最後の確かめ | 最後の確かめが組み立てに作業場所の設定（glob と suite）を渡す | 設定を渡さずに呼ぶと、JUnit の成果物から読む試験の偽の GitHub で一覧が空になる |
 
 ## 設計の結果
