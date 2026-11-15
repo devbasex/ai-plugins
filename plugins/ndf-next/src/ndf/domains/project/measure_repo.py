@@ -16,7 +16,7 @@ import time
 import tomllib
 from collections import Counter
 from pathlib import Path, PurePosixPath
-from typing import Any, Callable, Iterator, Optional
+from typing import Any, Callable, Iterator, NamedTuple, Optional
 
 from ndf.adapters import git
 from ndf.contracts import facts
@@ -92,10 +92,6 @@ DEFAULT_BRANCH_CANDIDATES = check.KNOWN_BRANCHES[:2]
 # 素材の宣言の案（#2315）
 MAX_LIBRARIES = 15
 ANALYTICS = ("analytics", "gtag", "sentry", "datadog", "mixpanel", "amplitude", "posthog", "segment", "newrelic", "bugsnag", "rollbar")
-# 依存の言語と、その依存の置き場の組
-ECOSYSTEM = (("php", "packagist"), ("javascript", "npm"), ("python", "pypi"))
-# 依存を集める言語（`dependencies` の返す言語の組と、測れなかったときの既定）
-DEP_LANGUAGES = tuple(lang for lang, _ in ECOSYSTEM)
 # 依存の表へ処理系の版を書く行の名前（依存ではない）
 PHP_ROW, NODE_ROW, PYTHON_ROW = "php", "node", "python"
 RUNTIME_ROWS = (PHP_ROW, PYTHON_ROW, NODE_ROW)
@@ -273,10 +269,29 @@ def _py_dependencies(tree: Tree) -> dict[str, str]:
     return out
 
 
+class DepSource(NamedTuple):
+    """依存を集める言語 1 つ。言語・その依存の置き場・依存の定義を読む関数。"""
+
+    language: str
+    ecosystem: str
+    read: Callable[[Tree], dict[str, str]]
+
+
+# 依存を集める言語の唯一の定義（並びは `dependencies` の返す言語の順）
+DEP_SOURCES = (
+    DepSource("php", "packagist", _php_dependencies),
+    DepSource("javascript", "npm", _js_dependencies),
+    DepSource("python", "pypi", _py_dependencies),
+)
+# 依存の言語 → その依存の置き場
+ECOSYSTEM = {s.language: s.ecosystem for s in DEP_SOURCES}
+# 依存を集める言語（`dependencies` の返す言語の組と、測れなかったときの既定）
+DEP_LANGUAGES = tuple(s.language for s in DEP_SOURCES)
+
+
 def dependencies(tree: Tree) -> dict[str, dict[str, str]]:
     """言語 → {依存の名前: 版の指定}。根と 1 段下の依存の定義から集める。"""
-    readers = (_php_dependencies, _js_dependencies, _py_dependencies)  # DEP_LANGUAGES の順
-    return {lang: read(tree) for lang, read in zip(DEP_LANGUAGES, readers, strict=True)}
+    return {s.language: s.read(tree) for s in DEP_SOURCES}
 
 
 def _spec(deps: dict[str, dict[str, str]], lang: str, name: str) -> str:
@@ -534,7 +549,7 @@ def _library_seeds(deps: dict[str, dict[str, str]]) -> tuple[list[dict[str, Any]
     libraries: list[dict[str, Any]] = []
     analytics: list[dict[str, Any]] = []
     for lang, names in deps.items():
-        eco = next((e for k, e in ECOSYSTEM if k == lang), lang)
+        eco = ECOSYSTEM.get(lang, lang)
         for name in sorted(n for n in names if n not in RUNTIME_ROWS):
             if any(w in name.lower() for w in ANALYTICS):
                 analytics.append({"text": f"{eco}: {name}"})
