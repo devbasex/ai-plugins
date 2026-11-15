@@ -11,15 +11,18 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping, Sequence
+from http import HTTPStatus
 from pathlib import Path
 from typing import Any, NamedTuple
 
 from ndf.adapters import git as git_mod
-from ndf.adapters.github import GitHub, text_of
+from ndf.adapters.github import GitHub, GitHubError, text_of
 from ndf.domains.release import changes_decide, checks_decide, included_decide, materials_decide, version_decide
 from ndf.domains.release import plugins as plugins_mod
 from ndf.domains.release.declaration import Declaration
 
+# GET で対象が無いときの状態
+NOT_FOUND = HTTPStatus.NOT_FOUND
 # 含む PR から読む項目（題と、最後のコミットのチェックの結論）
 PULL_SELECTION = (
     "number title commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { nodes {"
@@ -39,6 +42,17 @@ def fetch(repo_git: git_mod.Git, name: str) -> None:
     done = repo_git.fetch_branch(git_mod.ORIGIN, name)
     if done.returncode != 0:
         raise git_mod.GitError(f"origin の {name} を取り込めない: {done.stderr.strip()}")
+
+
+def resource_exists(hub: GitHub, path: str) -> bool:
+    """GitHub の `path` を GET して、通れば真、404 なら偽（ほかの誤りは呼び出し元へ）。"""
+    try:
+        hub.rest("GET", path)
+    except GitHubError as exc:
+        if exc.status != NOT_FOUND:
+            raise
+        return False
+    return True
 
 
 def pull_ref(number: int) -> str:

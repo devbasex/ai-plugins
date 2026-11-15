@@ -13,17 +13,14 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from http import HTTPStatus
 from typing import NamedTuple
 
 from ndf.adapters import git as git_mod
-from ndf.adapters.github import PER_PAGE, GitHub, GitHubError, text_of
+from ndf.adapters.github import PER_PAGE, GitHub, text_of
 from ndf.domains.release import gather, land, trail, version_decide
 
 # 読み直しの間隔（秒。マージキューの読み直しと同じ値）
 CONFIRM_POLL_SECONDS = land.QUEUE_POLL_SECONDS
-# GET で対象が無いときの状態
-NOT_FOUND = HTTPStatus.NOT_FOUND
 # 足りないもの（版上げの PR のマージ・タグか GitHub Release）
 MISSING_BUMP, MISSING_PUBLISH = "bump", "publish"
 # 止まった理由の種類
@@ -81,25 +78,14 @@ def _bump_containing(hub: GitHub, repo_git: git_mod.Git, merge_sha: str, product
     return number, version, sha
 
 
-def _exists(hub: GitHub, path: str) -> bool:
-    """GET が通れば真、404 なら偽（ほかの誤りは呼び出し元へ）。"""
-    try:
-        hub.rest("GET", path)
-    except GitHubError as exc:
-        if exc.status != NOT_FOUND:
-            raise
-        return False
-    return True
-
-
 def _tagged(hub: GitHub, tag: str) -> bool:
     """タグが origin にあるか。"""
-    return _exists(hub, f"/repos/{hub.repo}/git/ref/tags/{tag}")
+    return gather.resource_exists(hub, f"/repos/{hub.repo}/git/ref/tags/{tag}")
 
 
 def _has_release(hub: GitHub, tag: str) -> bool:
     """タグの GitHub Release があるか。"""
-    return _exists(hub, f"/repos/{hub.repo}/releases/tags/{tag}")
+    return gather.resource_exists(hub, f"/repos/{hub.repo}/releases/tags/{tag}")
 
 
 def _read(hub: GitHub, repo_git: git_mod.Git, merge_sha: str, production: str, plugin: str) -> Confirmed:

@@ -13,18 +13,15 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterator
-from http import HTTPStatus
 from pathlib import Path
 from typing import NamedTuple
 
 from ndf.adapters import git as git_mod
-from ndf.adapters.github import GitHub, GitHubError
-from ndf.domains.release import bump_decide, changelog_decide, included_decide, version_decide
+from ndf.adapters.github import GitHub
+from ndf.domains.release import bump_decide, changelog_decide, gather, included_decide, version_decide
 from ndf.domains.release import declaration as decl_mod
 from ndf.domains.release import plugins as plugins_mod
 
-# GET で対象が無いときの状態
-NOT_FOUND = HTTPStatus.NOT_FOUND
 # 結果の語と種類の語（`Made.result`・`Made.kind`）
 CREATED, EXISTS = "created", "exists"
 TAG, RELEASE = "tag", "release"
@@ -44,26 +41,15 @@ class Made(NamedTuple):
         return {"kind": self.kind, "name": self.name, "result": self.result}
 
 
-def _missing(hub: GitHub, path: str) -> bool:
-    """GET が 404 なら真。"""
-    try:
-        hub.rest("GET", path)
-    except GitHubError as exc:
-        if exc.status != NOT_FOUND:
-            raise
-        return True
-    return False
-
-
 def _tag(hub: GitHub, tag: str, revision: str) -> Made:
-    if not _missing(hub, f"/repos/{hub.repo}/git/ref/tags/{tag}"):
+    if gather.resource_exists(hub, f"/repos/{hub.repo}/git/ref/tags/{tag}"):
         return Made(TAG, tag, EXISTS)
     hub.rest("POST", f"/repos/{hub.repo}/git/refs", {"ref": f"refs/tags/{tag}", "sha": revision})
     return Made(TAG, tag, CREATED)
 
 
 def _release(hub: GitHub, tag: str, title: str, notes: str) -> Made:
-    if not _missing(hub, f"/repos/{hub.repo}/releases/tags/{tag}"):
+    if gather.resource_exists(hub, f"/repos/{hub.repo}/releases/tags/{tag}"):
         return Made(RELEASE, tag, EXISTS)
     hub.rest("POST", f"/repos/{hub.repo}/releases", {"tag_name": tag, "name": title, "body": notes, "make_latest": "true"})
     return Made(RELEASE, tag, CREATED)
