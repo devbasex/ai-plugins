@@ -67,7 +67,7 @@ def _report(tool: str) -> Outcome:
     """認証の状態を読み、records の gws の部品の判定で authenticated か unauthenticated の結果を組む。"""
     status = _read_status()
     # 結果へ写すのは 3 つのキーだけ（ほかのキーは写さない）
-    keys = {key: status[key] for key in records_gws.STATUS_KEYS}
+    keys = records_gws.public_keys(status)
     if records_gws.authenticated(status):
         return result.result(tool, result.OK, "gws は認証済み", metrics={"state": rd.AUTHENTICATED, **keys}), exit_codes.first_code(
             result.OK

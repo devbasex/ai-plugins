@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any, Optional
 
 from ndf.contracts import limits
@@ -43,6 +43,11 @@ def auth_status(limit: str = "gws.auth-status") -> dict[str, Any]:
     if not isinstance(raw, dict) or any(k not in raw for k in STATUS_KEYS):
         raise GwsError(f"gws auth status の出力に {' / '.join(STATUS_KEYS)} のどれかが無い", done.stderr)
     return raw
+
+
+def public_keys(status: Mapping[str, Any], keys: Sequence[str] = STATUS_KEYS) -> dict[str, Any]:
+    """認証の状態から公開するキーだけを取り出す（ほかのキーは結果へ写さない）。"""
+    return {key: status[key] for key in keys}
 
 
 def decide(status: Mapping[str, Any], token_in_env: bool) -> bool:
