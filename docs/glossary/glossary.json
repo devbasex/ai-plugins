@@ -3605,6 +3605,12 @@
       "source": "docs/specifications/ndf-google-workspace-gws.md"
     },
     {
+      "term": "導入の同意の印",
+      "context": "ndf-google-workspace",
+      "meaning": "gws の確認の引数 --install。利用者が gws の導入に同意したことを示し、付いたときだけ npm で全体インストールする",
+      "pending_source": "issues/issue-3547-design.md"
+    },
+    {
       "term": "他のプラグイン",
       "context": "ndf-release",
       "meaning": "リリースの設定の release.plugin 以外で、前のタグからの差分にファイルがあるプラグイン。release-steps.py changed-plugins が列挙する",
