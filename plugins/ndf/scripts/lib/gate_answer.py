@@ -58,6 +58,20 @@ def replaces(old: dict, name: str, pr: int | None) -> bool:
     return canonical(old.get("name")) == canonical(name) and old.get("pr") == pr
 
 
+def user_keys(outcome: str | None, pr: int | None) -> dict:
+    """`sprint-state.py gate --by user` の記録に足す鍵。利用者の承認は by と答えた PR を書き、承認ゲートの名と PR の組で
+    置き換える（`replaces`）。"""
+    return {**({"outcome": "approved", "by": "user"} if outcome else {}), **({"pr": pr} if pr else {})}
+
+
+def mvv_keys(judged: dict, pr: int | None, outcome: str | None) -> dict:
+    """`sprint-state.py gate --by mvv` の記録に足す鍵（MVV 判定の鍵 `judged`）。`pr` があれば答えた PR と承認を残す
+    （設計 PR のマージのプランが PR ごとに引く。#3603 の I9）。`pr` が無ければ判定の鍵だけ。"""
+    if not pr:
+        return judged
+    return {**judged, "pr": pr, **({"outcome": "approved"} if outcome == "approved" else {})}
+
+
 def gates_of(state: str | Path) -> list[dict]:
     """状態ファイルの承認ゲートの記録。読めなければ空。"""
     data = jsonio.read(state, missing={}, broken={})

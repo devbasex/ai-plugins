@@ -277,8 +277,7 @@ def gate_locked(a) -> dict:
         override = pms.record_override(m, a.sprint, a.name, a.outcome, at, root, a.mvv_log, pr=a.pr)
         if a.outcome == "rejected":
             return reject_gate(a, m, repo, override, at)
-        # 利用者の承認は by と答えた PR を書き、承認ゲートの名と PR の組で置き換える（#1426 の決定 1。lib/gate_answer.py）
-        entry.update({**({"outcome": "approved", "by": "user"} if a.outcome else {}), **({"pr": a.pr} if a.pr else {})})
+        entry.update(gate_answer.user_keys(a.outcome, a.pr))
     if a.name == MVV_GATE:
         sha = mvv_sha(m)
         if sha is None:
@@ -288,9 +287,7 @@ def gate_locked(a) -> dict:
         judged, stop = mvv_judgement(a, m)
         if stop:
             return stop
-        entry.update(judged)
-        if a.pr:  # 答えた PR と承認を残す（設計 PR のマージのプランが PR ごとに引く。#3603 の I9）。--pr が無ければ今の形
-            entry.update({"pr": a.pr, **({"outcome": "approved"} if a.outcome == "approved" else {})})
+        entry.update(gate_answer.mvv_keys(judged, a.pr, a.outcome))
     m["gates"] = gates = [g for g in m.get("gates", []) if not gate_answer.replaces(g, a.name, entry.get("pr"))] + [entry]
     jsonio.write_atomic(a.sprint, m, indent=1)
     who = "MVV 判定" if a.by == "mvv" else "承認"
