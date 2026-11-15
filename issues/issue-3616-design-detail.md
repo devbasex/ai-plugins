@@ -1,4 +1,4 @@
-# #3616 の詳細設計: 落ちたテストを JUnit の成果物とランナーごとのログのパーサーで読み、収集の確かめの終了コードを suite の設定から読む
+# #3616 の詳細設計: どのランナーでも CI で落ちたテストを読み、収集の確かめの成功を suite ごとに宣言する
 
 設計文書 [issue-3616-design.md](issue-3616-design.md) の「構成要素」と「構造」を、ファイルと関数の粒度へ下ろした文書である。パスはすべて `plugins/ndf-next/` からの相対で書く（表の「パス」の列だけはリポジトリの根からのパス）。
 
@@ -45,7 +45,13 @@ plugins/ndf-next/
         └── project/test_project_cli.py
 ```
 
-依存の向きは一方向である。`ndf.testing.junit` と `ndf.testing.ci_logs` は標準ライブラリだけを読み、`ndf.adapters` も `ndf.domains` も読まない。`ndf.adapters.ci` は `ndf.adapters.github`・`ndf.adapters.git`・`ndf.testing.junit`・`ndf.testing.ci_logs`・`ndf.testing.declared` を読む。`ndf.ci_cli` と `ndf.domains.crossrefactor.final_gate` は `ndf.adapters.ci` を読み、逆向きの import は無い。`ndf.core.route.local_tests` は結果 JSON のファイルだけを読み、`ndf.adapters.ci` を読まない（設計の決定 6）。見本の XML と出所を書いたファイルは `tests/testing/` の下へ置き、置き場の名前は実装で決める（設計文書の「設計の結果」）。
+依存の向きは一方向である。モジュールごとの依存する先は下の表の「依存する先」の列にある。
+
+- `ndf.testing.junit` と `ndf.testing.ci_logs` は標準ライブラリだけを読み、`ndf.adapters` も `ndf.domains` も読まない
+- `ndf.ci_cli` と `ndf.domains.crossrefactor.final_gate` は `ndf.adapters.ci` を読み、逆向きの import は無い
+- `ndf.core.route.local_tests` は結果 JSON のファイルだけを読み、`ndf.adapters.ci` を読まない（設計の決定 6）
+
+見本の XML と出所を書いたファイルは `tests/testing/` の下へ置き、置き場の名前は実装で決める（設計文書の「設計の結果」）。
 
 | パス | 種類 | 役割 1 文 | 依存する先 |
 | --- | --- | --- | --- |

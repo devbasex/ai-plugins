@@ -1,15 +1,22 @@
-# ndf-next の CI の修正: 落ちたテストを JUnit の成果物とランナーごとのログのパーサーで読み、収集の確かめの終了コードを suite の設定から読む（#3616）
+# ndf-next: どのランナーでも CI で落ちたテストを読み、収集の確かめの成功を suite ごとに宣言する（#3616）
 
 ## 目的
 
-- **今どうなっているか**: ndf-next は CI で落ちたテストを pytest のログの行（`FAILED <パス>.py::<名前>`）からしか読まない。vitest・jest・PHPUnit・playwright のリポジトリでは落ちたテストの一覧が空になり、CI の修正の後に手元で確かめるステップが毎回 `precondition` で止まる。cross-refactoring の収集の確かめは、pytest の「収集が 0 件」を表す終了コード 5 をどのランナーでも成功と読む
+- **今どうなっているか**: ndf-next は CI で落ちたテストを pytest のログの行（`FAILED <パス>.py::<名前>`）からしか読まない。vitest・jest・PHPUnit・playwright のリポジトリでは落ちたテストの一覧が空になる。そのため、CI の修正の後に手元で確かめるステップが毎回 `precondition` で止まる。cross-refactoring の収集の確かめは、pytest の「収集が 0 件」を表す終了コード 5 をどのランナーでも成功と読む
 - **誰に効くか**: pytest 以外のテストランナーを使うリポジトリで ndf-next の CI の修正のループを回す利用者
 - **変えると何が成り立つか**: 設定ファイルで JUnit の成果物を指せば、どのランナーでも落ちたテストのファイルが分かり、CI の修正のループが人へ戻らずに回る。読めないときは、足すべき設定のキーが止まった理由に出る。収集の確かめは suite ごとに宣言した終了コードだけを成功と読む
 
 ## 適用範囲
 
-- **働く範囲**: ndf-next（`plugins/ndf-next/`）。利用先のリポジトリでも、`ndf ci watch` と `ndf route test --failed-from` と cross-refactoring の収集の確かめ・最後の確かめで働く。今の NDF（`plugins/ndf/`）は変えない
-- **プロジェクトごとに違うもの**: 設定ファイル（`.ndf/project.json`）で受ける。JUnit の成果物の名前は `test.ci.junit_artifacts`、チェックと suite の対応は `test.suites[].ci_jobs`、ログのパーサーの選択は `test.suites[].runner`、収集の確かめで成功と読む終了コードは `test.suites[].collect_exit_codes`。引数は増やさない
+- **働く範囲**: ndf-next（`plugins/ndf-next/`）。利用先のリポジトリでも、次の 3 つで働く。今の NDF（`plugins/ndf/`）は変えない
+    - `ndf ci watch`
+    - `ndf route test --failed-from`
+    - cross-refactoring の収集の確かめと最後の確かめ
+- **プロジェクトごとに違うもの**: 設定ファイル（`.ndf/project.json`）の次のキーで受ける。引数は増やさない
+    - JUnit の成果物の名前: `test.ci.junit_artifacts`
+    - チェックと suite の対応: `test.suites[].ci_jobs`
+    - ログのパーサーの選択: `test.suites[].runner`
+    - 収集の確かめで成功と読む終了コード: `test.suites[].collect_exit_codes`
 - **当たるモード**: `standard`
 
 代表のリポジトリで、直した後に CI の修正のループで何が起きるか（受け入れ条件 16）:
@@ -180,7 +187,11 @@ pytest の実測（2026-11-15。`/work/ai-plugins/.venv/bin/python -m pytest -o 
 | 契約のページ（生成物。`docs/contracts/commands.md`・`docs/contracts/declarations.md`） | スキーマから `ndf check` が作り直す |
 | 子の表（変更。`src/ndf/checks/children.json` と #1142 の本文） | この課題の子の行を足す（受け入れ条件 17） |
 
-構成要素図（参照を読む関係だけを描く。生成物と子の表は図に含めない）。落ちたテストを読む側:
+### 構成要素図
+
+参照を読む関係だけを描く。生成物と子の表は図に含めない。
+
+落ちたテストを読む側:
 
 ```mermaid
 graph TD
@@ -214,7 +225,14 @@ graph TD
     K[収集の確かめ] --> S[設定ファイルのスキーマ]
 ```
 
-新設の 2 本は `ndf.testing` の下に置く。子の表の持ち主の規則（`child-deps`）で `ndf.testing` の持ち主は T1（#3286）に決まり、`adapters`・`ci_cli`（AD1）と `crossrefactor`（M4）の先に要るものに T1 が入っているため、新しい子の行に `packages` を持たせずに import の向きの規則が通る。新設の 2 本は `ndf.adapters` を読まない（T1 の閉包に AD1 が無い）。
+### 新設のモジュールの置き場
+
+新設の 2 本は `ndf.testing` の下に置く。
+
+- 子の表の持ち主の規則（`child-deps`）で、`ndf.testing` の持ち主は T1（#3286）に決まる
+- `adapters`・`ci_cli`（AD1）と `crossrefactor`（M4）の先に要るものに、T1 がすでに入っている
+- そのため、新しい子の行に `packages` を持たせずに import の向きの規則が通る
+- 新設の 2 本は `ndf.adapters` を読まない（T1 の閉包に AD1 が無い）
 
 ## 構造
 
@@ -255,7 +273,7 @@ classDiagram
 | `FailedTestRead`（新設） | `adapters/ci.py` | チェック 1 件の読み取りの記録。ワークフローの実行の識別子・読み元（`junit`・`log`・`none`）・読めた件数・読めなかった理由 |
 | `JunitFailures`（新設） | `testing/junit.py` | XML 1 本の読み取りの結果。落ちたテストの一覧と、ファイルを決められなかった testcase の理由の並び |
 
-`failed_test_nodes_of(github, checks)` は `failed_tests_of(github, checks, source) -> FailedTests` に置き換え、`failed_test_nodes(log_text)` と正規表現 `_PYTEST_FAILED` は `adapters/ci.py` から消す（ログのパーサーの一覧へ移る）。
+`failed_test_nodes_of(github, checks)` は `failed_tests_of(github, checks, source) -> FailedTests` に置き換える。`failed_test_nodes(log_text)` と正規表現 `_PYTEST_FAILED` は `adapters/ci.py` から消す（ログのパーサーの一覧へ移る）。
 
 ## データ構造
 
@@ -323,7 +341,9 @@ CI の結果 JSON（`ndf ci watch` が `test_failed` で止まったとき）の
 
 ## 処理の流れ
 
-落ちたテストの組み立て（`ndf ci watch` と cross-refactoring の最後の確かめで同じ）:
+### 落ちたテストの組み立て
+
+`ndf ci watch` と cross-refactoring の最後の確かめで同じ流れを通る。
 
 ```mermaid
 sequenceDiagram
@@ -359,18 +379,48 @@ sequenceDiagram
     組->>組: 一覧を重ねずに昇順へ並べる
 ```
 
-チェックと suite の照合: ワークフローの実行の `path` から `@` 以降を外したファイルを、テストの suite（`kind` が `test`）の `ci_jobs` の `#` より前と比べる。`#` の後ろ（ジョブの識別子）は照合に使わない。ジョブの API の応答はジョブの識別子を持たず（STD7。応答の項目は `name`・`workflow_name`・`run_id` などで、`name` は表示名）、表示名と比べると、ジョブに `name:` を付けたワークフローで当たらなくなるためである。当たる suite の `runner` が 1 種類なら、その `runner` のパーサーを当てる。当たる suite が無いか `runner` が 2 種類以上なら、ログを読まない。
+### チェックと suite の照合
 
-JUnit の読み取りのファイルの決め方（落ちた testcase ごと）: 候補を testcase の `file`、最も近い testsuite の `file`、testcase の `classname`、最も近い testsuite の `name` の順に試す。候補はバックスラッシュを `/` に、先頭の `./` を外して比べる。候補が追跡するファイルと一致すればそれを使う。候補が追跡するファイルを末尾に持つ（`<何か>/<ファイル>`。絶対パスの場合）なら、当たるうち最も長いファイルを使う。追跡するファイルが候補を末尾に持つ（`<何か>/<候補>`）ものが 1 つだけならそれを使う。どの候補でも決まらなければ、testcase の `classname` と `name`、試した属性を理由に残す。一覧の要素は `<ファイル>::<testcase の name>`。
+ワークフローの実行の `path` から `@` 以降を外したファイルを、テストの suite（`kind` が `test`）の `ci_jobs` の `#` より前と比べる。
+
+| 当たる suite | 扱い |
+| --- | --- |
+| `runner` が 1 種類 | その `runner` のパーサーを当てる |
+| 無い・`runner` が 2 種類以上 | ログを読まない |
+
+`#` の後ろ（ジョブの識別子）は照合に使わない。ジョブの API の応答はジョブの識別子を持たない（STD7。応答の項目は `name`・`workflow_name`・`run_id` などで、`name` は表示名）。表示名と比べると、ジョブに `name:` を付けたワークフローで当たらなくなるためである。
+
+### JUnit の読み取りのファイルの決め方
+
+落ちた testcase ごとに、次の順で候補を試す。
+
+1. testcase の `file`
+2. 最も近い testsuite の `file`
+3. testcase の `classname`
+4. 最も近い testsuite の `name`
+
+候補はバックスラッシュを `/` に、先頭の `./` を外して比べる。
+
+| 候補と追跡するファイルの関係 | 使うファイル |
+| --- | --- |
+| 候補が追跡するファイルと一致する | そのファイル |
+| 候補が追跡するファイルを末尾に持つ（`<何か>/<ファイル>`。絶対パスの場合） | 当たるうち最も長いファイル |
+| 追跡するファイルが候補を末尾に持つ（`<何か>/<候補>`）ものが 1 つだけ | そのファイル |
+
+どの候補でも決まらなければ、testcase の `classname` と `name`、試した属性を理由に残す。一覧の要素は `<ファイル>::<testcase の name>` である。
+
+### 成果物の読み元を実行ごとに決める
 
 成果物の読み元は、チェックごとではなくワークフローの実行ごとに決める。成果物は実行に付き、どの XML がどのジョブ（チェック）から上がったかは成果物の一覧から分からないためである。
 
 - 実行の成果物から 1 件以上読め、決められない testcase が無く、ZIP の取得を上限で打ち切っていないとき、その実行を「成果物から読めた」とする。その実行の落ちたテストのチェックは、すべて読み元 `junit` になる
-- 決められない testcase が 1 件でもある実行と、glob に当たる ZIP を上限で打ち切った実行は、成果物から読めた分を使わず、その実行の落ちたテストのチェックをすべてログへ移す（一部のファイルだけを打って、ほかの落ちを見落とさないため）。打ち切ったときは、上限で止めたことを `reason` に残す
+- 決められない testcase が 1 件でもある実行と、glob に当たる ZIP を上限で打ち切った実行は、成果物から読めた分を使わない。その実行の落ちたテストのチェックをすべてログへ移す（一部のファイルだけを打って、ほかの落ちを見落とさないため）。打ち切ったときは、上限で止めたことを `reason` に残す
 - ログでも読めなければ、成果物の理由とログの理由の両方を `reason` に残す
 - 読み取りの記録はチェックごとに 1 行で、`run_id` で同じ実行の行が分かる。読み元 `junit` の行の `found` は実行の成果物から読めた件数で、同じ実行の行は同じ値を持つ（行の間で足し合わせない）
 
-手元の確かめ（`ndf route test --failed-from`）:
+### 手元の確かめ
+
+`ndf route test --failed-from` は次の順に分かれる。
 
 ```mermaid
 graph TD
@@ -383,7 +433,14 @@ graph TD
     F -->|ある| H[precondition: glob とチェックごとの理由]
 ```
 
-収集の確かめ: 収集のコマンドの終了コードが、その suite の `collect_exit_codes`（無ければ `[0]`）に入れば成功として出力を読み、入らなければ `CollectError` で止まる。
+### 収集の確かめ
+
+収集のコマンドの終了コードを、その suite の `collect_exit_codes`（無ければ `[0]`）と比べる。
+
+| 終了コード | 扱い |
+| --- | --- |
+| `collect_exit_codes` に入る | 成功として出力を読む |
+| 入らない | `CollectError` で止まる |
 
 ## 非機能の実現方式
 
@@ -396,7 +453,9 @@ graph TD
 
 ### 決定 1: ランナーをまたいで同じ形で読むため、落ちたテストは JUnit の成果物を先に、ログを後に読む
 
-JUnit XML はどのランナーも書ける共通の形で（STD1〜STD6）、ログの形はランナーとレポーターの設定ごとに違う。成果物を先に読めば、ログのパーサーを持たないランナーでも、設定 1 行で落ちたテストが分かる。成果物は設定に glob を書いたときだけ読む。名前の推測（今の所要時間の測定が使う名前の正規表現）を当てると、利用者の CI が上げた別の成果物を JUnit と読む恐れがあり、要求も「設定ファイルに `test.ci.junit_artifacts` があれば」とする（前提 3）。
+JUnit XML はどのランナーも書ける共通の形で（STD1〜STD6）、ログの形はランナーとレポーターの設定ごとに違う。成果物を先に読めば、ログのパーサーを持たないランナーでも、設定 1 行で落ちたテストが分かる。
+
+成果物は設定に glob を書いたときだけ読む。名前の推測（今の所要時間の測定が使う名前の正規表現）を当てると、利用者の CI が上げた別の成果物を JUnit と読む恐れがある。要求も「設定ファイルに `test.ci.junit_artifacts` があれば」とする（前提 3）。
 
 成果物だけを読み、ログを読まない形は採らない。ai-plugins のように JUnit にファイルの属性が無い CI でも、今の pytest の読み方で一覧が出ている（受け入れ条件 7）。
 
@@ -407,7 +466,15 @@ JUnit XML はどのランナーも書ける共通の形で（STD1〜STD6）、�
 
 ### 決定 2: ランナーごとにファイルの書き場所が違うため、属性の候補を順に試し、作業ディレクトリが追跡するファイルと照らして決める
 
-ファイルの書き場所は testcase の `file`（PHPUnit・pytest の `xunit1`・`addFileAttribute` を有効にした vitest・jest・playwright）、testcase の `classname`（vitest の既定）、testsuite の `name`（playwright）と分かれ、PHPUnit は CI の作業ディレクトリの絶対パスを書く（STD2〜STD6）。CI の作業ディレクトリの根は手元から分からないため、パスの末尾を追跡するファイルと照らす（PRD1 と同じ解き方）。末尾の照合で 2 つ以上が当たる短い候補は決めずに理由を残す。誤ったファイルを打つより、止まって設定を知らせる方が直しの費用が小さい。
+ファイルの書き場所はランナーごとに次のように分かれる（STD2〜STD6）。
+
+| 書き場所 | 書くランナー |
+| --- | --- |
+| testcase の `file` | PHPUnit・pytest の `xunit1`・`addFileAttribute` を有効にした vitest・jest・playwright |
+| testcase の `classname` | vitest の既定 |
+| testsuite の `name` | playwright |
+
+PHPUnit は CI の作業ディレクトリの絶対パスを書く。CI の作業ディレクトリの根は手元から分からないため、パスの末尾を追跡するファイルと照らす（PRD1 と同じ解き方）。末尾の照合で 2 つ以上が当たる短い候補は決めずに理由を残す。誤ったファイルを打つより、止まって設定を知らせる方が直しの費用が小さい。
 
 ランナーごとに属性を決め打ちする形は採らない。ランナーの事実を NDF が持つことになり、レポーターの設定（`classnameTemplate` など）を変えた利用者で外れる。
 
@@ -429,7 +496,11 @@ junitparser（LIB2）は要素を型で読めるが、難しいファイルの�
 
 ### 決定 4: 落ちたテストのチェックと suite を対応させるため、suite の `ci_jobs` とワークフローの実行のファイルを照らす
 
-`ci_jobs` は「この suite が同じ検査を手元で走らせる CI のジョブ」として設定ファイルにすでにあり、利用者が書く。チェックの名前は GitHub の表示名で、ワークフローの YAML のジョブの識別子とも suite の名前とも一致するとは限らない。ジョブの API が返す `run_id` から実行の `path` を引けば、設定のファイルと 1 対 1 で照らせる（STD7）。照らすのは `ci_jobs` のワークフローのファイル（`#` より前）だけで、`#` の後ろのジョブの識別子は使わない。ジョブの API の応答にジョブの識別子が無く（応答の項目は `id`・`run_id`・`name`・`workflow_name` など。`name` は表示名）、表示名と比べる形では `name:` を付けたジョブで照合が外れ、今の pytest の読み方が退行する（受け入れ条件 7）。1 つのワークフローのファイルに `runner` の違う suite が当たるときはログを読まずに理由を残し、利用者がワークフローのファイルを分けて解く。1 回の読み取りでジョブと実行の 2 回の API の呼び出しが増えるが、成果物を読むにも実行の識別子が要るため、同じ呼び出しを使い回せる。
+`ci_jobs` は「この suite が同じ検査を手元で走らせる CI のジョブ」として設定ファイルにすでにあり、利用者が書く。チェックの名前は GitHub の表示名で、ワークフローの YAML のジョブの識別子とも suite の名前とも一致するとは限らない。ジョブの API が返す `run_id` から実行の `path` を引けば、設定のファイルと 1 対 1 で照らせる（STD7）。
+
+- **照らすのは `ci_jobs` のワークフローのファイル（`#` より前）だけである。** `#` の後ろのジョブの識別子は使わない。ジョブの API の応答にジョブの識別子が無い（応答の項目は `id`・`run_id`・`name`・`workflow_name` など。`name` は表示名）。表示名と比べる形では `name:` を付けたジョブで照合が外れ、今の pytest の読み方が退行する（受け入れ条件 7）
+- **1 つのワークフローのファイルに `runner` の違う suite が当たるときは、ログを読まずに理由を残す。** 利用者がワークフローのファイルを分けて解く
+- **API の呼び出しは、1 回の読み取りでジョブと実行の 2 回増える。** 成果物を読むにも実行の識別子が要るため、同じ呼び出しを使い回せる
 
 チェックの名前で照らす形は採らない。分割（`pytest (0/2)`）や行列（`test (3.11)`）で名前が変わり、新しいキーを利用者に書かせることになる。
 
@@ -462,7 +533,9 @@ vitest・jest・PHPUnit・playwright・Flutter・Swift の落ちたテストは�
 
 ### 決定 8: 子の表の規則を新しい持ち主なしで通すため、新設のモジュールを `ndf.testing` の下に置き、子の行は `packages` を持たない
 
-新設のモジュールの持ち主は、子の表の `packages` の最も長い一致で決まる。`ndf.testing` の下なら持ち主は T1（#3286）で、組み立てを読む `adapters`・`ci_cli`（AD1）と `crossrefactor`（M4）は T1 を先に要るものにすでに持つ。子の行は記号 `AD4`・`packages: []`・`needs: ["AD1", "C3", "T1"]`・順番 6・レーン `lci-junit` とする。`ndf.adapters` の下へ新しいモジュールを置く形は採らない。AD1 の閉包に新しい子を足すため、閉じた子の行（AD1）か開いた追補（AD1+）の順番と先に要るものを書き換えることになる。
+新設のモジュールの持ち主は、子の表の `packages` の最も長い一致で決まる。`ndf.testing` の下なら持ち主は T1（#3286）である。組み立てを読む `adapters`・`ci_cli`（AD1）と `crossrefactor`（M4）は、T1 を先に要るものにすでに持つ。子の行は記号 `AD4`・`packages: []`・`needs: ["AD1", "C3", "T1"]`・順番 6・レーン `lci-junit` とする。
+
+`ndf.adapters` の下へ新しいモジュールを置く形は採らない。AD1 の閉包に新しい子を足すため、閉じた子の行（AD1）か開いた追補（AD1+）の順番と先に要るものを書き換えることになる。
 
 根拠: Value 9 / Value 11（MVV 版 7）
 
