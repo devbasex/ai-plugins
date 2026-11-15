@@ -151,7 +151,9 @@ class JsonStore:
         prefixed = [f"{ROOT_UNIT_DIR}/{p}" for p in paths]
         found = changes_decide.split(prefixed, self.name, ROOT_UNIT_DIR, decl.undistributed)
         cut = len(ROOT_UNIT_DIR) + 1  # 接頭辞を外し、パスをリポジトリの根からに戻す
-        return [found._replace(distributed=tuple(p[cut:] for p in found.distributed), undistributed=tuple(p[cut:] for p in found.undistributed))]
+        return [
+            found._replace(distributed=tuple(p[cut:] for p in found.distributed), undistributed=tuple(p[cut:] for p in found.undistributed))
+        ]
 
 
 def _text(raw: dict, key: str) -> str:
