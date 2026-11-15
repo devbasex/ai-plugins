@@ -112,7 +112,7 @@ def write_verification(hub: GitHub, number: int, payload: Mapping[str, Any]) -> 
     if errors:
         raise RecordError(f"リリース後テストの記録の形が違う: {'; '.join(errors)}")
     found = record_decide.records(_trusted_bodies(hub, number))
-    if not any(r.version == payload["version"] for r in found):
+    if not record_decide.has_record_of(found, payload["version"]):
         raise RecordError(
             f"#{number} は版 {payload['version']} のリリース記録を持たない（持つ版: {_versions(found)}）。"
             "リリース後テストの記録はリリース記録と同じ PR へ書く"

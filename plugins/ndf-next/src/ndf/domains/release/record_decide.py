@@ -101,9 +101,14 @@ def records(bodies: Iterable[str]) -> list[Record]:
     return [r for r in (parse_record(b) for b in bodies) if r is not None]
 
 
+def has_record_of(found: Iterable[Record], version: str) -> bool:
+    """リリース記録の並びに、版 `version` の記録があるか。"""
+    return any(r.version == version for r in found)
+
+
 def has_version(bodies: Iterable[str], version: str) -> bool:
     """本文の並びに、版 `version` のリリース記録があるか（打ち直しで同じ版の記録を重ねない）。"""
-    return any(r.version == version for r in records(bodies))
+    return has_record_of(records(bodies), version)
 
 
 def verifications(bodies: Iterable[str]) -> list[dict[str, Any]]:
