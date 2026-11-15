@@ -24,6 +24,30 @@
         "stopped": {
           "type": "integer",
           "description": "停止の依頼が通ったラッパーの数（stop --all）"
+        },
+        "policy": {
+          "type": "string",
+          "description": "適用する再起動の方針（context resolve）"
+        },
+        "limit": {
+          "type": "integer",
+          "description": "適用する運用上限（context resolve）"
+        },
+        "samples": {
+          "type": "integer",
+          "description": "較正に使った標本の数の合計（context calibrate）"
+        },
+        "works": {
+          "type": "integer",
+          "description": "集計した作業の数（context report）"
+        },
+        "skipped": {
+          "type": "integer",
+          "description": "読めずに飛ばした判定の記録の行の数（context report）"
+        },
+        "no_policy_rows": {
+          "type": "integer",
+          "description": "方針の列が無く現行方式として読んだ行の数（context report）"
         }
       }
     },
@@ -61,7 +85,7 @@
               "string",
               "null"
             ],
-            "description": "次の手の理由（decide）か、ラッパーの状態の理由（hub ls）"
+            "description": "次の手の理由（decide）か、ラッパーの状態の理由（hub ls）、再起動の理由（context record）"
           },
           "prompt": {
             "type": "string",
@@ -164,6 +188,227 @@
           "summary": {
             "type": "string",
             "description": "リレーハブの答えの要約（stop --all）"
+          },
+          "policy": {
+            "type": [
+              "string"
+            ],
+            "description": "再起動の方針（context resolve・record）"
+          },
+          "decide_from": {
+            "type": "integer",
+            "description": "判断開始の値（context resolve・record）"
+          },
+          "limit": {
+            "type": "integer",
+            "description": "運用上限（context resolve・record）"
+          },
+          "margin": {
+            "type": "integer",
+            "description": "容量の余白（context resolve・record）"
+          },
+          "sources": {
+            "type": "object",
+            "description": "値ごとの出所（context resolve・record）"
+          },
+          "config_error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "壊れていて読まなかった設定の理由（context resolve・record）"
+          },
+          "schema": {
+            "type": "integer",
+            "description": "判定の記録の行の版（context record）"
+          },
+          "at": {
+            "type": "string",
+            "description": "判定の記録の行か見込みを書いた時刻（context record・calibrate）"
+          },
+          "runtime": {
+            "type": "string",
+            "description": "記録したランタイム（context record）"
+          },
+          "source": {
+            "type": "string",
+            "description": "行の書き手（context record）"
+          },
+          "session_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "記録したセッション（context record）"
+          },
+          "transcript": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "会話の記録のパス（context record）"
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "モデル（context record）"
+          },
+          "work": {
+            "type": "string",
+            "description": "作業の識別子（context record・report）"
+          },
+          "event": {
+            "type": "string",
+            "description": "判定か印（context record）"
+          },
+          "stage": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "工程（context record）"
+          },
+          "context": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "コンテキストの量（context record）"
+          },
+          "window": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "窓の大きさ（context record）"
+          },
+          "effective_limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "効く上限（context record）"
+          },
+          "band": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "帯（context record。判定をしないので null）"
+          },
+          "verdict": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "判定（context record）"
+          },
+          "basis": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "継続の根拠（context record）"
+          },
+          "estimate": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "費用の見込み（context record）"
+          },
+          "missing": {
+            "type": "array",
+            "description": "取れなかった値（context record）"
+          },
+          "relay": {
+            "type": "boolean",
+            "description": "中継の下の記録か（context record）"
+          },
+          "passed_once": {
+            "type": "boolean",
+            "description": "一度通したか（context record）"
+          },
+          "restore_context": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "復元の量の中央値（context calibrate）"
+          },
+          "restore_calls": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "復元の呼び出し数の中央値（context calibrate）"
+          },
+          "handoff_calls": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "引継ぎの呼び出し数の中央値（context calibrate）"
+          },
+          "handoff_output": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "引継ぎの出力 token の中央値（context calibrate）"
+          },
+          "stage_calls": {
+            "type": "object",
+            "description": "工程ごとの呼び出し数の中央値（context calibrate）"
+          },
+          "stage_expiries": {
+            "type": "object",
+            "description": "工程ごとのキャッシュ切れの数の中央値（context calibrate）"
+          },
+          "samples": {
+            "type": "object",
+            "description": "値ごとの標本の数（context calibrate）"
+          },
+          "sessions": {
+            "type": "integer",
+            "description": "セッションの数（context report）"
+          },
+          "parts": {
+            "type": "object",
+            "description": "区分ごとの token・秒・費用（context report）"
+          },
+          "unknown_parts": {
+            "type": "object",
+            "description": "印の無い区間の数（context report）"
+          },
+          "restores": {
+            "type": "array",
+            "description": "セッションごとの復元の量（context report）"
+          },
+          "restarts": {
+            "type": "object",
+            "description": "理由ごとの再起動の数（context report）"
+          },
+          "restart_count": {
+            "type": "integer",
+            "description": "再起動の数（context report）"
+          },
+          "auto_compacts": {
+            "type": [
+              "integer",
+              "string"
+            ],
+            "description": "自動圧縮の数か「不明」（context report）"
+          },
+          "quality": {
+            "type": "object",
+            "description": "品質（context report）"
+          },
+          "no_policy_rows": {
+            "type": "integer",
+            "description": "方針の列が無い行の数（context report）"
           }
         }
       }

@@ -1,6 +1,6 @@
 # context window を単位として扱う
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `context-policy.py`（M3b）・`hook.py`（M3a）・`parallel.py`（P3）・`sprint-state.py`（P1b）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `hook.py`（M3a）・`parallel.py`（P3）・`sprint-state.py`（P1b）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 **工程はスプリント単位で 1 回ずつ通し、中の設計と実装は課題ごとに並列に回す**が、その単位に
 **context window は入っていない**。そのため 1 つの会話でスプリント全体を通せてしまう。長い context window では
@@ -164,7 +164,7 @@ Codex / Kiro / agy には hook を置かない。4 つのカットポイント�
 
 **選び方と優先順位は CLI 引数 > 環境変数 > 設定 > 既定である。** チームで選ぶなら `.ndf/context.json`、
 個人で試すなら環境変数 `NDF_CONTEXT_POLICY=trial`（または `current`）にする。いま効いている方針と値と、
-値ごとの出所は `python3 <プラグイン>/scripts/context-policy.py resolve` で見る。設定が壊れていれば
+値ごとの出所は `ndf relay context resolve` で見る。設定が壊れていれば
 現行方式で判定し、セッションの初めと最初の起動で 1 度だけ知らせる。
 
 ```json
@@ -226,11 +226,11 @@ Bash で打つので Codex でも同じに記録できる。`--work` に課題�
 同じセッションの前の行の作業の識別子で補う。
 
 ```bash
-python3 <プラグイン>/scripts/context-policy.py record --event 引継ぎ開始 --work "#829 #830"
-python3 <プラグイン>/scripts/context-policy.py record --event 復元完了 --work "#829 #830"   # Codex だけ
+ndf relay context record --event 引継ぎ開始 --work "#829 #830"
+ndf relay context record --event 復元完了 --work "#829 #830"   # Codex だけ
 ```
 
-作業ごとの集計は `context-policy.py report --work "#829 #830" --format table` で見る。区分は conductor・
+作業ごとの集計は `ndf relay context report --work "#829 #830"` で見る（結果 JSON の `items` を区分ごとに読む）。区分は conductor・
 NDF が起動した分・引継ぎの区間・復元の区間で、同じ呼び出しを 2 つの区分へ数えない。印が無い区間と取れない
 品質の値は 0 でなく「不明」と出す。方針の記録が無い過去の行は現行方式として読み、その数を出す。セッションごとの
 復元の量（「復元完了」の直前の文脈の量）も出す。`--from` と `--until`（ISO 8601 の時刻）を渡すと、その間の呼び出し

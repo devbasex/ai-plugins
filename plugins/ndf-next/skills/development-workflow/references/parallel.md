@@ -1,6 +1,6 @@
 # 並列開発のオーガナイザー（`--parallel <計画名>`）
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `context-policy.py`（M3b）・`handoff.py`（M7）・`mvv-gate.py`（P2）・`parallel.py`（P3）・`sprint-state.py`（P1b）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `handoff.py`（M7）・`mvv-gate.py`（P2）・`parallel.py`（P3）・`sprint-state.py`（P1b）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 並列の計画（[issue-plan-strategy の parallel-plan.md](../../issue-plan-strategy/references/parallel-plan.md) で作る）を、
 1 行で始める。
@@ -167,7 +167,7 @@
   Q は較正した復元の文脈か、無ければこの会話の最初の応答の入力 token
 - **費用**（入力の単価を 1 とする）: 報告の回数 n = ⌈W ÷ 上限の秒数⌉、報告を続ける費用 = n·r·C、
   切り替える費用 = h·r·C + 5·H + 2·Q + q·r·Q + n·r·Q。r はモデルのキャッシュの読み込みの倍率、h・H・q は
-  `context-policy.py calibrate` の見込み（標本 3 件以上）で、無ければ h = 3・H = 2,000・q = 5 を使い `defaults` に出す
+  `ndf relay context calibrate` の見込み（標本 3 件以上）で、無ければ h = 3・H = 2,000・q = 5 を使い `defaults` に出す
 
 Opus 5.5 で C が 47 万 token なら、W が 4 時間を超えると切り替える。C が 19 万 token なら 9.5 時間を超えると切り替える。
 ラッパーの外では次のセッションが自動で起動しないため、判定は `切り替える` にならず、30 分ごとの報告を続ける。
