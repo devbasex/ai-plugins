@@ -69,7 +69,7 @@ docs/
 | `plugins/ndf/scripts/sprint-state.py` | 変更 | `--by mvv` の記録にも `--pr` と `--outcome` を残す | 無し |
 | `plugins/ndf/scripts/lib/README.md` | 変更 | 新設の 1 本と、`gate1_requests.py` の行の役割を直す | 無し |
 | `plugins/ndf/contracts/forms/parallel-ledger.json` | 変更 | `reused` の行・`gate1` の行の `ledger_id`・`ask` の行の `target` の形 | 無し |
-| `plugins/ndf/skills/development-workflow/references/asking.md` | 変更 | 対象の行の書き方と、前の答えが返ったときの扱い | 無し |
+| `plugins/ndf/skills/development-workflow/references/asking.md` | 変更 | 対象の行と承認の行の書き方と、前の答えが返ったときの扱い | 無し |
 | `plugins/ndf/skills/development-workflow/references/parallel.md` | 変更 | 1 スプリントのレーンの設計承認の問いの書き方と `design-answer` の打ち方 | 無し |
 | `docs/glossary/glossary.json` | 変更 | 設計文書の「用語」の表の 5 語の追加と意味の変更 | 無し |
 | `docs/glossary.md` | 変更 | `glossary.py render` で作り直す | `docs/glossary/glossary.json` |
@@ -91,7 +91,7 @@ docs/
 | --- | --- | --- |
 | `plugins/ndf/scripts/parallel.py` | モジュール | `cmd_request_ask`（変更）・`cmd_design_answer`（新設）・`_expired`（新設） |
 | `plugins/ndf/scripts/lib/parallel_args.py` | モジュール | `add_release_parsers`（変更。`design-answer` の副命令を足すだけで、責務とシグネチャは変えない） |
-| `plugins/ndf/scripts/lib/parallel_design_gate.py` | `DesignGate`（データクラス）とモジュール | `named_prs`・`gated_design_prs`・`next_gate1_id`・`design_gate`・`answer_design`（すべて新設） |
+| `plugins/ndf/scripts/lib/parallel_design_gate.py` | `DesignGate`（データクラス）とモジュール | `approval_prs`・`gated_design_prs`・`next_gate1_id`・`design_gate`・`answer_design`（すべて新設） |
 | `plugins/ndf/scripts/lib/parallel_question.py` | `AskTarget`・`Prior`（データクラス）とモジュール | `target_line`・`prior_of`・`outcome_of`（新設）・`asked_of`（変更） |
 | `plugins/ndf/scripts/lib/parallel_lane.py` | モジュール | `sender_kind`・`ask_target`・`record_reused`（新設）・`request_ask`（変更） |
 | `plugins/ndf/scripts/lib/parallel_ledger.py` | モジュール | 定数 `RECORD` に `reused` を足す（関数は変えない） |
@@ -108,10 +108,10 @@ docs/
 | `cmd_request_ask` | `plugins/ndf/scripts/parallel.py` | 変更 | `cmd_request_ask(a: argparse.Namespace) -> None` | 送り手を確かめ、設計承認の依頼・同じ問い・`ask` の依頼の順に最初に当たった分岐へ送り、統一 JSON レポートで返す | 標準入力が `tool_input`・`cwd`・`ledger_id`・`deadline_at`（任意）を持つ JSON | 台帳に足した行は高々 1 行で、`metrics.kind`・`metrics.id` が足した行か引き当てた行を指す。`deadline_at` を過ぎていれば台帳は変わらない | 台帳のファイルの読み書き・`gh pr view`・`git rev-parse` |
 | `_expired` | `plugins/ndf/scripts/parallel.py` | 新設 | `_expired(deadline_at: float \| None, now: Callable[[], float] = time.time) -> bool` | 台帳へ書く直前に、hook の上限の秒が尽きたかを返す | 無し | `deadline_at` が無いか数でなければ偽。`now()` が `deadline_at` 以上なら真 | 無し |
 | `cmd_design_answer` | `plugins/ndf/scripts/parallel.py` | 新設 | `cmd_design_answer(a: argparse.Namespace) -> None` | `answer_design` の結果を統一 JSON レポートで返す | `a.name`・`a.id`・`a.state` がある | 終了コードが「入出力の契約」の `design-answer` の表のとおり | スプリント状態・指摘ファイルの書き込み（`answer_design` を通す） |
-| `named_prs` | `plugins/ndf/scripts/lib/parallel_design_gate.py` | 新設 | `named_prs(tool_input: dict) -> list[int]` | 最初の問いの文と選択肢の `label`・`description` から、PR の URL（`/pull/<番号>`）と `#<番号>` の番号を重複なく出現順に返す | 無し | 返す番号はすべて正の整数 | 無し |
+| `approval_prs` | `plugins/ndf/scripts/lib/parallel_design_gate.py` | 新設 | `approval_prs(tool_input: dict) -> list[int]` | 最初の問いの文の承認の行（`承認: #<番号>`）の番号を、行ごとに出現順で返す（同じ番号の行が 2 行あっても 2 つ返す。問いの文のほかの場所と選択肢の PR の URL・`#<番号>` は読まない） | 無し | 返す番号はすべて正の整数。承認の行が無ければ空 | 無し |
 | `gated_design_prs` | `plugins/ndf/scripts/lib/parallel_design_gate.py` | 新設 | `gated_design_prs(sprint: Path) -> dict[int, dict]` | スプリントの `sprint.json` の設計のステージのプランのうち、報告の結果が承認ゲート（`関門`）のものの設計 PR の番号から `{"report": <報告のパス>, "issue": <課題>}` を引く表を返す | `sprint` がスプリントのディレクトリ | 報告を読めないプラン・PR の番号の無いプランは表に入らない | ファイルを読む（`sprint.json`・各プランの `report.md`） |
 | `next_gate1_id` | `plugins/ndf/scripts/lib/parallel_design_gate.py` | 新設 | `next_gate1_id(rows: list[dict], base: str) -> tuple[str, bool, str]` | 同じ先頭の `gate1` の行の並びから、今の問いに当てる id・印 `returned` の要否・マージの結果の理由を返す | `rows` は最初の `opened` より後の台帳の行。`base` は `<レーン>-g<PR>-<先頭の 12 桁>` | `base` か `base-r<n>` の最後の行に `by: mvv` の承認の答えがあれば `(base-r<n+1>, True, <答えの merge.reason>)`。ほかは最後の行の id（無ければ `base`）と `False` と空 | 無し |
-| `design_gate` | `plugins/ndf/scripts/lib/parallel_design_gate.py` | 新設 | `design_gate(main: Path, name: str, lane: str, tool_input: dict, rows: list[dict], view: Callable[[Path, int], dict \| None] = run_state.view_pr) -> DesignGate \| None` | I1 を満たす問いなら設計承認の依頼の中身を返し、満たさなければ `None` を返す | 送り手が計画 `name` の 1 スプリントのレーン `lane` で、区分が `ndf-gate:1` | 返す `DesignGate` の `pr` は名指しの番号と承認ゲートで終わった設計 PR の積がちょうど 1 本のときの番号で、`state` が `OPEN`、`stamp` が 40 桁 | ファイルを読む（計画の宣言・スプリント・MVV 判定の記録）・`gh pr view` を 1 回 |
+| `design_gate` | `plugins/ndf/scripts/lib/parallel_design_gate.py` | 新設 | `design_gate(main: Path, name: str, lane: str, tool_input: dict, rows: list[dict], view: Callable[[Path, int], dict \| None] = run_state.view_pr) -> DesignGate \| None` | I1 を満たす問いなら設計承認の依頼の中身を返し、満たさなければ `None` を返す | 送り手が計画 `name` の 1 スプリントのレーン `lane` で、区分が `ndf-gate:1` | 返す `DesignGate` の `pr` は、`approval_prs` がちょうど 1 つの番号を返し、その番号が承認ゲートで終わった設計 PR のときの番号で、`state` が `OPEN`、`stamp` が 40 桁 | ファイルを読む（計画の宣言・スプリント・MVV 判定の記録）・`gh pr view` を 1 回 |
 | `answer_design` | `plugins/ndf/scripts/lib/parallel_design_gate.py` | 新設 | `answer_design(main: Path, name: str, rid: str, state: Path, run: Callable[..., tuple[int, str, str]] = design_pr_merge.run_cmd) -> tuple[str, str, int, dict]` | 設計承認の依頼の答えを読み、答えの種類ごとの記録を書き、(状態, 要約, 終了コード, metrics) を返す | `rid` は台帳の `gate1` の行の id | 承認ゲートの記録は同じ `pr`・`by`・`outcome` で高々 1 件。`metrics` が `result`・`by`・`merge`・`pr`・`next` を持つ | 台帳を読む・スプリント状態の書き込み（`sprint-state.py gate` を子プロセスで）・指摘ファイルの書き込み |
 | `target_line` | `plugins/ndf/scripts/lib/parallel_question.py` | 新設 | `target_line(tool_input: dict) -> str` | 最初の問いの文の最後の対象の行の値を、前後の空白を除いて返す | 無し | 対象の行が無ければ空文字 | 無し |
 | `prior_of` | `plugins/ndf/scripts/lib/parallel_question.py` | 新設 | `prior_of(rows: list[dict], lane: str, source: str, target: str) -> Prior \| None` | 同じ一時レーンの名前・区分・問いの対象の `ask` の行のうち最も新しいものと、その答えを返す | `rows` は最初の `opened` より後の台帳の行 | `target` が空なら `None`。返す `Prior.answer` は `{"result", "choice"}` か `None` | 無し |
@@ -145,7 +145,7 @@ docs/
 | `gated_design_prs` | プランの報告を読めない | 報告が無い | `report_pr` が `None` | 既定値で続ける（そのプランを外す） | 無し | 後始末なし |
 | `design_gate` | レーンのスプリントが見つからない | スプリントのディレクトリが無い・入力の課題と合わない | `find_sprint` が `None` | 既定値で続ける（`None`） | 無し（`ask` で送る） | 後始末なし |
 | `design_gate` | PR の状態と先頭を読めない | `gh` の失敗・認証切れ | `view` が `None`・`headRefOid` が 40 桁でない | 既定値で続ける（`None`） | 無し（`ask` で送る。決定 3） | 後始末なし |
-| `design_gate` | 名指した PR が開いていない | マージ済み・閉じた | `state` が `OPEN` でない | 既定値で続ける（`None`） | 無し（`ask` で送る） | 後始末なし |
+| `design_gate` | 承認の行の PR が開いていない | マージ済み・閉じた | `state` が `OPEN` でない | 既定値で続ける（`None`） | 無し（`ask` で送る） | 後始末なし |
 | `design_gate` | MVV 判定の記録を読めない | ログが壊れている | `last_verdict` が空 | 既定値で続ける（`verdict` を `unknown`、`boundary` を空にする） | 無し | 後始末なし |
 | `answer_design` | 依頼が `gate1` でない | 別の種類の id | 台帳の行の `kind` | 止める | `stopped`・1 | 書かない。正しい id で打ち直せる |
 | `answer_design` | 答えがまだ無い | オーガナイザーが答えていない | 台帳に `answer` の行が無い | 止める | `stopped`・3 | 書かない。答えの後に打ち直せる |
@@ -185,7 +185,7 @@ docs/
 | `cmd_design_approved` | どちらも無く、PR が `MERGED` でないか `mvv_approval` が無い | 今どおり 10 |
 
 - 繰り返しの終わる条件: `forward_to_organizer` の候補の繰り返しは今と同じ（候補が尽きるか全体の上限の秒）。`held_after_timeout` は台帳を 1 回だけ読み、繰り返さない
-- 計算量の注意: `cmd_request_ask` は台帳を 1 回だけ読む。読んだ行は `next_gate1_id`・`prior_of`・既存の行の確かめに使い回す。台帳の行数に比例する。`gh pr view` は名指しが 1 本に決まった後の 1 回だけ
+- 計算量の注意: `cmd_request_ask` は台帳を 1 回だけ読む。読んだ行は `next_gate1_id`・`prior_of`・既存の行の確かめに使い回す。台帳の行数に比例する。`gh pr view` は承認の行の設計 PR が 1 本に決まった後の 1 回だけ
 
 ## 内部のデータと定数
 
@@ -231,7 +231,7 @@ docs/
 | --- | --- | --- | --- |
 | `_expired` | `parallel_lane.read_answer` の期限の扱い | `grep -n "deadline" plugins/ndf/scripts/lib/parallel_lane.py` | 使えない理由: `time.monotonic` の期限で、プロセスをまたいで渡せない。壁時計の時刻を比べる 1 行を持つ |
 | `cmd_design_answer` | `parallel.py` の `cmd_await` | `plugins/ndf/scripts/parallel.py` の `cmd_await` を読んだ | 使えない理由: リリースの依頼の記録のファイルと答えの値を前提にする（決定 4） |
-| `named_prs` | `sprint_loop_gate.pr_numbers` | `grep -n "def pr_numbers" plugins/ndf/scripts/lib/*.py` | 使う（`gate1_requests.py` へ移した `pr_numbers` で URL と `#<番号>` を読み、問いの文と選択肢を連ねて渡す） |
+| `approval_prs` | `sprint_loop_gate.pr_numbers` | `grep -n "def pr_numbers" plugins/ndf/scripts/lib/*.py` | 使う（`gate1_requests.py` へ移した `pr_numbers` へ、承認の行ごとにその値だけを渡す。問いの文のほかの行と選択肢は渡さない） |
 | `gated_design_prs` | `parallel_hold_sprint.next_plans`・`supervise_lib.paths.report_result`・`report_pr` | `grep -n "def next_plans\|def report_result\|def report_pr" -r plugins/ndf/scripts` | 使う（`report_result`・`state_dir_of`・`report_pr`）。`next_plans` は未着手のプランを返す関数で、承認ゲートで終わったプランを返さないため使わない |
 | `next_gate1_id` | `gate1_requests.prior_id`・`sprint_loop_gate` の問い直しの接尾辞 | `grep -n "suffix" plugins/ndf/scripts/lib/sprint_loop_gate.py plugins/ndf/scripts/lib/gate1_requests.py` | 使えない理由: 接尾辞はループの記録の行の数から作り、台帳の行から作る部品が無い。id の形は `request_gate1` に任せる |
 | `design_gate` | `parallel_hold_sprint.find_sprint`・`parallel_hold.lane_input`・`parallel_answer.lane_repo`・`run_state.view_pr`・`last_verdict` | `grep -n "def find_sprint\|def lane_input\|def lane_repo\|def view_pr\|def last_verdict" -r plugins/ndf/scripts/lib` | 使う（すべて読むだけの部品） |
@@ -252,13 +252,13 @@ docs/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `cmd_request_ask` | 1 スプリントのレーンの設計 PR を名指す問いで `gate1` の行が 1 行、一時レーンの同じ問いで `reused` の行が 1 行、ほかで `ask` の行が 1 行 | 同じ先頭の打ち直しで行が増えない。`deadline_at` ちょうどで書かない | 標準入力が壊れて 2・送り手でなく 4・台帳を読めず 2・時刻を過ぎて 2 で台帳が変わらない・書けず 2・同じ id で中身が違い 1 |
+| `cmd_request_ask` | 1 スプリントのレーンの承認の行つきの問いで `gate1` の行が 1 行、一時レーンの同じ問いで `reused` の行が 1 行、ほかで `ask` の行が 1 行 | 同じ先頭の打ち直しで行が増えない。`deadline_at` ちょうどで書かない | 標準入力が壊れて 2・送り手でなく 4・台帳を読めず 2・時刻を過ぎて 2 で台帳が変わらない・書けず 2・同じ id で中身が違い 1 |
 | `_expired` | 未来の時刻で偽 | 等しい時刻で真。`None`・文字列で偽 | 無し（副作用なし） |
 | `cmd_design_answer` | 承認で 0 と記録 1 件 | 2 回打って記録 1 件 | `answer_design` の終了コードがそのまま返る |
-| `named_prs` | URL と `#<番号>` の両方を拾う | 選択肢の `description` だけに書かれた番号・同じ番号の重複 | 無し（副作用なし） |
+| `approval_prs` | 承認の行の番号を拾う | 問いの文と選択肢に PR の URL・`#<番号>` だけがあって空・承認の行が 2 行で 2 つ返す・前後の空白 | 無し（副作用なし） |
 | `gated_design_prs` | `関門` の設計のプラン 2 本で 2 件 | `完了` のプランは入らない | `sprint.json` が無くて空・報告に PR の行が無いプランを外す |
 | `next_gate1_id` | 行が無くて `base` | `-r1` の後に `by: mvv` の承認があり `-r2` | 無し（副作用なし） |
-| `design_gate` | 名指しが 1 本で開いていて中身を返す | 名指しが 2 本で `None`・承認ゲートで終わった PR が 2 本で名指しが 1 本なら中身 | スプリントが無い・`view` が `None`・`MERGED`・MVV 判定の記録が壊れて `verdict: unknown` |
+| `design_gate` | 承認の行が 1 行で開いていて中身を返す | 承認の行が無く問いの文で PR を書いただけで `None`・承認の行が 2 行で `None`・承認ゲートで終わった PR が 2 本で承認の行が 1 行なら中身 | スプリントが無い・`view` が `None`・`MERGED`・MVV 判定の記録が壊れて `verdict: unknown` |
 | `answer_design` | 承認・直し・差し戻しのそれぞれ | `by: mvv` の承認で `--verdict` などを渡す | `gate1` でなく 1・答えが無く 3・答えが `answered` で 1・状態を読めず 2・子が失敗して 2・指摘ファイルを書けず 2 |
 | `target_line` | 対象の行の値 | 対象の行が 2 行で最後・前後の空白 | 無し（副作用なし） |
 | `prior_of` | 同じ名前・区分・対象の答え済みの依頼 | 同じ鍵が 2 件で新しい方。対象が空で `None` | 無し（副作用なし） |

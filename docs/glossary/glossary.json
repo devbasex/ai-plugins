@@ -7762,8 +7762,8 @@
     {
       "term": "同じ問い",
       "context": "ndf-workflow",
-      "meaning": "並列の計画で、同じ一時レーンの名前が送った依頼のうち、問いの区分と操作の対象（ブランチ名と先端のコミット、または課題・PR の番号）が同じもの。言い回しの違いは数えない",
-      "pending_source": "issues/issue-3597-requirements.md"
+      "meaning": "並列の計画で、一時レーンの区分つきの問いのうち、同じ一時レーンの名前・同じ区分・同じ問いの対象（ブランチなら先端のコミットの 40 桁まで）を持つもの。言い回しの違いは数えない。1 スプリントのレーンと開発ループのレーンの問いは比べず、問いの対象が空の問いはどの問いとも同じ問いにならない",
+      "pending_source": "issues/issue-3603-design.md"
     },
     {
       "term": "起き直し",
@@ -7784,10 +7784,16 @@
       "pending_source": "issues/issue-3603-design.md"
     },
     {
+      "term": "承認の行",
+      "context": "ndf-workflow",
+      "meaning": "1 スプリントのレーンが設計 PR のマージの承認を求める区分 `ndf-gate:1` の問いの、最初の問いの文に置く `承認: #<設計 PR の番号>` の 1 行。`request-ask` が設計承認の依頼に組む問いを見分ける唯一の印で、問いの文のほかの場所で PR を指しても設計承認の依頼にならない",
+      "pending_source": "issues/issue-3603-design.md"
+    },
+    {
       "term": "答えの引き継ぎ",
       "context": "ndf-workflow",
-      "meaning": "起き直した一時レーンの同じ問いへ、前の起動で送った依頼の答えを当てること。新しい依頼を作らず、計画の台帳に `reused` の行で残る",
-      "pending_source": "issues/issue-3597-design.md"
+      "meaning": "起き直した一時レーンの同じ問いへ、前の起動で送った依頼の答えを当てるか、答え待ちの依頼の id を返すこと。どちらの場合も新しい依頼の行を書かず、計画の台帳に `reused` の行で残る",
+      "pending_source": "issues/issue-3603-design.md"
     },
     {
       "term": "一時レーンの空き待ち",
@@ -7852,8 +7858,8 @@
     {
       "term": "区分つきの問い",
       "context": "ndf-workflow",
-      "meaning": "`metadata.source` に区分（`ndf-gate:<番号>`・`ndf-ask:<名前>`）を持つ `AskUserQuestion`。並列の計画のレーンと一時レーンが出すと、問いの hook が `parallel.py request-ask` でオーガナイザーへ送り、計画の台帳の `kind: ask` の行になる",
-      "pending_source": "issues/issue-3603-requirements.md"
+      "meaning": "`metadata.source` に区分（`ndf-gate:<番号>`・`ndf-ask:<名前>`）を持つ `AskUserQuestion`。並列の計画のレーンと一時レーンが出すと、問いの hook が `parallel.py request-ask` でオーガナイザーへ送り、計画の台帳の `kind: ask` の行になる。1 スプリントのレーンの区分 `ndf-gate:1` の問いが、承認の行で承認ゲートで終わった設計 PR を 1 本だけ指し、その PR が開いていて先頭のコミットを読めたときは `kind: gate1` の行（設計承認の依頼）になる",
+      "pending_source": "issues/issue-3603-design.md"
     }
   ]
 }
