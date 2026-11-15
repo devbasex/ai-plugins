@@ -73,10 +73,18 @@ def to_item(c: dict) -> CheckItem:
     return CheckItem(("run", workflow, name), label, state, run, job, c.get("startedAt"), c.get("completedAt"))
 
 
+def _rollup_skipped(c: dict) -> bool:
+    return (c.get("status") or "").upper() == "COMPLETED" and (c.get("conclusion") or "").upper() == "SKIPPED"
+
+
 def fold_rollup(rollup):
     """rollup を同じチェックごとの最新の項目へ束ねる（純粋）。(最新の並び, 置き換わった失敗の並び) を返す。
-    新しさは lib/gh_checks.py の `newness`（test-run.py の畳み方と同じ規則）。"""
-    items = [to_item(c) for c in rollup or [] if isinstance(c, dict)]
+    新しさは lib/gh_checks.py の `newness`（test-run.py の畳み方と同じ規則）。SKIPPED の項目は、同じチェックに
+    SKIPPED でない項目があれば数えない（本文の編集の実行がテストを飛ばして、push の実行の失敗を隠さない。#3445）。"""
+    rows = [c for c in rollup or [] if isinstance(c, dict)]
+    items = [to_item(c) for c in rows]
+    ran = {i.key for c, i in zip(rows, items) if not _rollup_skipped(c)}
+    items = [i for c, i in zip(rows, items) if not (_rollup_skipped(c) and i.key in ran)]
     latest, older = gh_checks.fold_latest(items, lambda i: i.key, lambda i: (i.completed, i.started, i.job))
     return latest, [i for i in older if i.state in ("failed", "cancelled")]
 

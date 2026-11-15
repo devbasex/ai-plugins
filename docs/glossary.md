@@ -1015,19 +1015,22 @@ release が走らせるリリースの種別・リリースコマンド・公開
 | 承認資料のコメント | — | 承認を求める時点の承認資料を、リリースの PR へ置いたコメント。証跡とは別の印を持ち、判定に数えない | — | — | `docs/specifications/ndf-release-approval-on-pr.md` |
 | 開発版の workflow | — | 手元で作った開発版の PR を、CI の必須チェックが通るのを待って develop へマージする GitHub Actions の workflow | — | — | `docs/specifications/ndf-release-approval-on-pr.md` |
 | 承認の証跡 | — | リリースの PR に置いた、承認したコミットの 40 桁の SHA を書いたコメント（証跡の印と `承認したコミット:` の行を持つ）。承認ラベルや承認ゲートの記録は含まない | — | — | `docs/specifications/ndf-release-approval-on-pr.md` |
-| 戻すマージ | — | 正式版のリリースの後、リリースブランチを `release/v<版>-sync` 経由でベースブランチへ取り込むマージ。版数を持つ箇所が衝突したら本番の版を取る | — | — | — |
-| 本番の PR | — | リリースのブランチから本番チャネルへ出す Pull Request。CD のある場合は、この PR のマージで本番へ届く | — | — | `docs/specifications/ndf-release-production-admin-merge.md` |
+| 戻すマージ | — | 今の NDF（11.0.0 の入れ替えの前）だけの語。正式版のリリースの後、リリースブランチを `release/v<版>-sync` 経由でベースブランチへ取り込むマージ。版数を持つ箇所が衝突したら本番の版を取る。ndf-next（GitHub flow）は同期の PR を作らず、この操作を持たない | — | — | — |
+| 本番の PR | — | 本番チャネル（main）へ入れる Pull Request。CD のある場合は、この PR のマージで本番へ届く。ndf-next（GitHub flow）では main 宛てのスプリントの PR が兼ね、CD が作る版上げの PR は含まない。今の NDF では、リリースのブランチから本番チャネルへ出す PR を指す | — | — | `docs/specifications/ndf-release-production-admin-merge.md` |
 | 管理者の迂回 | — | ruleset が迂回を許した役割の人が、必須の承認レビューと必須のチェックを満たさずにマージすること。`gh pr merge --admin` で打つ | — | — | `docs/specifications/ndf-release-production-admin-merge.md` |
 | 迂回の宣言 | — | 本番の PR を管理者の迂回でマージすることを選ぶ、`.ndf/project.json` の `production_merge.admin` の値。`true` のときだけ宣言があるとみなし、無いときは迂回しない | — | — | `docs/specifications/ndf-release-production-admin-merge.md` |
 | 迂回の記録 | — | 本番の PR を管理者の迂回でマージしたことを示す、本番の PR へ置くコメント。マージした先端と照らした承認の証跡を指す。証跡とは別の印を持ち、承認の判定に数えない | — | — | `docs/specifications/ndf-release-production-admin-merge.md` |
 | 承認した先端 | — | リリース承認ゲートの承認の答えか、利用者の GitHub でのマージが対象にした本番の PR の先端のコミット。本番ブランチへ入れてよいのはこの先端だけである | — | — | — |
 | 先端の照合 | — | マージの API に承認した先端を渡し、PR の先端が違えば GitHub に断らせることと、マージの前に承認の証跡を読み直すこと | — | — | — |
 | 承認の経路 | — | 本番の PR の承認がどこで与えられたか。リリース承認ゲート（`gate`）か、利用者の GitHub でのマージ（`github-merge`）のどちらか | — | — | — |
-| 差し戻し | — | リリース承認ゲートで承認しない答え、または必須のチェックの落ちた本番の PR を出さずに止めること。直しを同じリリースブランチへ入れ、新しい先端で承認を取り直す | — | — | — |
-| 次の版への回し | — | 必須のチェックの落ちた本番の PR を閉じてこの時点では出さず、リリースブランチを残して後のスプリントと一緒に出すこと | — | — | — |
+| 差し戻し | — | リリース承認ゲートで承認しない答え、または必須のチェックの落ちた本番の PR を出さずに止めること。直しを同じ本番の PR（スプリントの PR）へ入れ、新しい先端で承認を取り直す | — | — | — |
 | 直しのステップ | — | CI が落ちたときにコードを直して push するプランのステップ（雛形の `ci-fix`・`fix-push`・`fix-base` と、それに続く `push`） | — | — | — |
 | fix の worker | — | 要求での直しのステップの呼び方。CI が落ちたときにコードを直して push するステップ（雛形の `ci-fix` とそれに続く `push`） | — | — | — |
-| リリースブランチ | — | 本番の PR の head になる、版ごとに 1 本のリリースブランチ（`release/v<版>`）。前の版が出た直後に本番ブランチから用意する | — | — | — |
+| リリースブランチ | — | 版上げの PR の head になるブランチ（`release/v<版>`）。main へのマージの後に CD が main の先端から作り、版上げの PR のマージで消える | — | — | — |
+| 版上げのコミット | — | main へのマージの後に CD が作り、版上げの PR を通して main へ入るコミット。`plugin.json` の `version` と CHANGELOG の版の節だけを変える。PR は版数を触らない | — | — | — |
+| 上げ幅の宣言 | — | main 宛ての PR が版数の上げ幅（MAJOR・MINOR・PATCH）を示す印。CD がマージの時点に読んで版を上げる | — | — | — |
+| 検証の ref | — | main へマージする前の PR を集めて組んだ、使い捨ての git の ref。2 つ目のマーケットプレイスが指し、main へ戻さない | — | — | — |
+| 2 つ目のマーケットプレイス | — | 正式版のマーケットプレイスと違う名前で検証の ref を指すマーケットプレイス。名前が違うので正式版と両方を登録できる | — | — | — |
 
 ## NDF の指示書チェック（`ndf-instructions`）
 
