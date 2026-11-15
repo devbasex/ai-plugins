@@ -1726,6 +1726,8 @@ def assert_design_plan(design: dict) -> None:
     assert "design-survey.py check --issue" in ds["survey-check"]["cmd"] and ds["survey-check"]["on_fail"] == "fix-survey"
     assert ds["fix-survey"]["next"] == "survey-recheck" and ds["survey-recheck"]["cmd"] == ds["survey-check"]["cmd"]
     assert "on_fail" not in ds["survey-recheck"] and ds["survey-check"]["next"] == ds["survey-recheck"]["next"] == "glossary-check"
+    # 設定が壊れた検査（終了コード 2）は直しの worker へ回さず止める（#3618 の C7）
+    assert ds["survey-check"]["on_exit"] == ds["survey-recheck"]["on_exit"] == {"2": "stop"}
     assert "--ff-only" in ds["sync-review"]["cmd"]  # レビューが push した直しに追いついてから語を見る
     assert "check --diff origin/develop" in ds["glossary-check"]["cmd"]
     assert ds["glossary-check"]["on_fail"] == "fix-glossary" and ds["fix-glossary"]["next"] == "glossary-recheck"

@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "representative_repos": {
+    "kinds": ["Web サービス", "モバイルアプリ", "業務文書だけ"],
+    "paths": ["plugins/ndf/**", "plugins/ndf-next/**", ".claude-plugin/marketplace.json"],
+    "redline": "P2"
+  }
+}
