@@ -315,6 +315,50 @@ def test_job_log_returns_text() -> None:
 
 
 @pytest.mark.parametrize(
+    ("read", "path"),
+    [
+        (lambda h: h.job(5), f"/repos/{REPO}/actions/jobs/5"),
+        (lambda h: h.workflow_run(9), f"/repos/{REPO}/actions/runs/9"),
+    ],
+)
+def test_job_and_workflow_run_return_the_body_and_raise_on_404(read: Callable[[github.GitHub], dict], path: str) -> None:
+    assert read(_hub(Server({("GET", path): [httpx.Response(200, json={"id": 1, "run_id": 9})]}))) == {"id": 1, "run_id": 9}
+    with pytest.raises(github.GitHubError):
+        read(_hub(Server({("GET", path): [httpx.Response(404, json={"message": "Not Found"})]})))
+
+
+def test_run_artifacts_reads_pages_until_total_and_stops_over_the_limit() -> None:
+    path = f"/repos/{REPO}/actions/runs/9/artifacts"
+    pages = [httpx.Response(200, json={"total_count": 150, "artifacts": [{"id": i} for i in range(n)]}) for n in (100, 50)]
+    server = Server({("GET", path): pages})
+    assert len(_hub(server).run_artifacts(9)) == 150
+    assert [r.url.params["page"] for r in server.seen] == ["1", "2"]
+    assert _hub(Server({("GET", path): [httpx.Response(200, json={"total_count": 0, "artifacts": []})]})).run_artifacts(9) == []
+    full = httpx.Response(200, json={"total_count": 100000, "artifacts": [{"id": 1}] * 100})
+    with pytest.raises(github.GitHubError, match="github.list-pages"):
+        _hub(Server({("GET", path): [full]})).run_artifacts(9)
+
+
+def test_artifact_zip_follows_the_redirect_and_keeps_bytes() -> None:
+    blob = b"PK\x03\x04\xff\x00binary"
+    redirect = httpx.Response(302, headers={"location": "https://blob.example.test/zip/1"})
+    server = Server(
+        {
+            ("GET", f"/repos/{REPO}/actions/artifacts/3/zip"): [redirect],
+            ("GET", "/zip/1"): [httpx.Response(200, content=blob, headers={"content-type": "application/zip"})],
+        }
+    )
+    assert _hub(server).artifact_zip(3) == blob
+
+
+def test_artifact_zip_raises_gone_for_an_expired_artifact() -> None:
+    server = Server({("GET", f"/repos/{REPO}/actions/artifacts/3/zip"): [httpx.Response(410, json={"message": "Gone"})]})
+    with pytest.raises(github.GitHubError) as caught:
+        _hub(server).artifact_zip(3)
+    assert caught.value.status == 410
+
+
+@pytest.mark.parametrize(
     ("body", "risks"),
     [
         ("残リスク: 照合が止まっている。マージの前に決める", ["残リスク: 照合が止まっている。マージの前に決める"]),
