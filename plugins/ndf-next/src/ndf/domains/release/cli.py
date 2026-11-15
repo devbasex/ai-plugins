@@ -109,16 +109,21 @@ def cmd_present(args: argparse.Namespace) -> dict:
     return result.result(TOOL, result.GATE, f"#{args.pr}（{head[:12]}）の承認資料を提示した。答えを待つ", _values(head=head), routes=routes)
 
 
+def _answer_merged(args: argparse.Namespace) -> dict:
+    """経路 `github-merge` の答え。マージの事実から証跡を書き、出した版を outputs に出す。"""
+    try:
+        judgment, facts = trail.answer_merged(_hub(args), args.pr, _production_of(args))
+    except trail.NotMerged as exc:
+        return result.stopped(TOOL, "not_applicable", str(exc))
+    version = land.release_version(facts.head_ref)
+    items = _values(state=judgment.state, by=facts.by, head=facts.head)
+    detail = f"#{args.pr} の人のマージを承認の証跡にした: {judgment.detail}"
+    return result.result(TOOL, result.OK, detail, items, outputs={"version": version} if version else None)
+
+
 def cmd_answer(args: argparse.Namespace) -> dict:
     if args.route == merge_decide.MERGE_ROUTE:
-        try:
-            judgment, facts = trail.answer_merged(_hub(args), args.pr, _production_of(args))
-        except trail.NotMerged as exc:
-            return result.stopped(TOOL, "not_applicable", str(exc))
-        version = land.release_version(facts.head_ref)
-        items = _values(state=judgment.state, by=facts.by, head=facts.head)
-        detail = f"#{args.pr} の人のマージを承認の証跡にした: {judgment.detail}"
-        return result.result(TOOL, result.OK, detail, items, outputs={"version": version} if version else None)
+        return _answer_merged(args)
     missing = [k for k in ("answer", "presented", "by") if getattr(args, k) is None]
     if missing:
         return result.stopped(TOOL, "invalid", f"--route gate には --{'・--'.join(missing)} が要る")
