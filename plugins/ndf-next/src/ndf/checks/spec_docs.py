@@ -118,7 +118,7 @@ def decl_findings(model: SpecModel, repo_root: Path, rel: Any) -> list[Finding]:
     decl_dir = repo_root / model.places[spec_model.decl_place(model.places)]["path"]
     found = []
     for decl in model.declarations:
-        schema_rel = rel(f"{CONTRACTS}/{DECL_SCHEMA_DIR}/{decl.id}.schema.json")
+        schema_rel = rel(f"{CONTRACTS}/{DECL_SCHEMA_DIR}/{spec_model.decl_schema_rel(decl.id, spec_model.SCHEMA_SUFFIX)}")
         if decl.schema is None and decl.sections is None:
             found.append(Finding(DECL, files_rel, 1, f"宣言 {decl.id} にスキーマか節の表が無い"))
         found += [Finding(DECL, files_rel, 1, f"宣言 {decl.id}: {e}") for e in _keys_errors(decl)]

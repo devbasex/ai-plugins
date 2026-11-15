@@ -53,6 +53,16 @@ CALLER_FIRST = "caller-first"
 UNREADABLE = "規約の正本を読めない"
 
 
+def io_schema_rel(name: str, kind: str) -> str:
+    """副命令 `name` の引数（`kind` が `args`）か結果（`result`）のスキーマの、`IO_SCHEMA_DIR` からの相対パス。"""
+    return f"{name}.{kind}{SCHEMA_SUFFIX}"
+
+
+def decl_schema_rel(ident: str, suffix: str) -> str:
+    """宣言 `ident` のスキーマ（`SCHEMA_SUFFIX`）か節の表（`SECTIONS_SUFFIX`）の、`DECL_SCHEMA_DIR` からの相対パス。"""
+    return f"{ident}{suffix}"
+
+
 def decl_place(places: dict[str, dict[str, Any]]) -> str:
     """宣言の置き場（リポジトリの根の `.ndf`）の、置き場の表の id。"""
     found = [i for i, r in places.items() if r["root"] == "repo" and r["path"] == identity.FIXED_WORDS["declaration_dir"]]
@@ -284,7 +294,7 @@ def commands(public: frozenset[tuple[str, str]] | set[tuple[str, str]]) -> list[
         module = cli.COMMANDS[name]
         tree = extract(module)
         args = tree if tree is not None else (from_manual(manual[name]) if name in manual else None)
-        result_path = io_dir / f"{name}.result{SCHEMA_SUFFIX}"
+        result_path = io_dir / io_schema_rel(name, "result")
         out.append(
             CommandSpec(
                 name=name,
@@ -371,7 +381,7 @@ def _without_result_ref(schema: dict[str, Any]) -> dict[str, Any]:
 @contracts.cached_reader
 def result_validator(name: str) -> Draft202012Validator | None:
     """副命令 `name` の結果のスキーマ（結果の契約への `$ref` を外したもの）の検証器。スキーマが無ければ `None`。"""
-    path = contracts.contracts_dir() / IO_SCHEMA_DIR / f"{name}.result{SCHEMA_SUFFIX}"
+    path = contracts.contracts_dir() / IO_SCHEMA_DIR / io_schema_rel(name, "result")
     if not path.is_file():
         return None
     return Draft202012Validator(_without_result_ref(_checked_schema(path)))

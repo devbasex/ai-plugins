@@ -19,11 +19,15 @@ from ndf.checks.spec_model import (
     IO_SCHEMA_DIR,
     PAGES_DIR,
     PUBLIC,
+    SCHEMA_SUFFIX,
+    SECTIONS_SUFFIX,
     SPEC_KIND,
     CommandSpec,
     DeclarationSpec,
     SkillSpec,
     SpecModel,
+    decl_schema_rel,
+    io_schema_rel,
     opt,
     surface_of,
 )
@@ -98,11 +102,11 @@ def render(model: SpecModel) -> dict[str, str]:
 
 
 def args_rel(name: str) -> str:
-    return f"{CONTRACTS}/{IO_SCHEMA_DIR}/{name}.args.schema.json"
+    return f"{CONTRACTS}/{IO_SCHEMA_DIR}/{io_schema_rel(name, 'args')}"
 
 
 def result_rel(name: str) -> str:
-    return f"{CONTRACTS}/{IO_SCHEMA_DIR}/{name}.result.schema.json"
+    return f"{CONTRACTS}/{IO_SCHEMA_DIR}/{io_schema_rel(name, 'result')}"
 
 
 # --- 引数のスキーマ ---
@@ -152,7 +156,7 @@ def args_schema(command: CommandSpec) -> dict[str, Any]:
         branches.append(branch)
     return {
         "$schema": JSON_SCHEMA,
-        "$id": f"{IO_SCHEMA_DIR}/{command.name}.args.schema.json",
+        "$id": f"{IO_SCHEMA_DIR}/{io_schema_rel(command.name, 'args')}",
         "title": f"ndf {command.name} の引数",
         "description": f"ndf {command.name} が受ける引数。キーは引数の名前（オプションは -- の名前、位置引数は名前）。規約の生成が作り、手で直さない",
         "oneOf": branches,
@@ -284,8 +288,8 @@ def _declaration(decl: DeclarationSpec) -> list[str]:
 
 
 def _schema_link(decl: DeclarationSpec) -> str:
-    suffix = ".sections.json" if decl.sections is not None else ".schema.json"
-    return f"[{decl.id}{suffix}](../../{CONTRACTS}/{DECL_SCHEMA_DIR}/{decl.id}{suffix})"
+    name = decl_schema_rel(decl.id, SECTIONS_SUFFIX if decl.sections is not None else SCHEMA_SUFFIX)
+    return f"[{name}](../../{CONTRACTS}/{DECL_SCHEMA_DIR}/{name})"
 
 
 def page_declarations(model: SpecModel) -> str:
