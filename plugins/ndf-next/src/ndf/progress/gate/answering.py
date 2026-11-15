@@ -60,15 +60,15 @@ def github_observe(cwd: Path, root: Path, hub: Optional[Callable[[], GitHub]] = 
         return made[0]
 
     def observe(q: Question) -> Target:
-        head, merged = None, None
+        head, merged, base = None, None, None
         if q.pr is not None:
             try:
                 pull = _hub().pull(q.pr)
             except (GitHubError, GitError) as exc:
                 raise model.Refused(f"PR #{q.pr} の head を読めないので、答えと対象を照らせない: {exc}") from None
-            head, merged = pull.head_sha, pull.merged
+            head, merged, base = pull.head_sha, pull.merged, pull.base_ref
         path = material_path(root, q)
-        return Target(head, material_sha256(path) if path.exists() else None, merged=merged)
+        return Target(head, material_sha256(path) if path.exists() else None, merged=merged, base=base)
 
     return observe
 

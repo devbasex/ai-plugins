@@ -17,7 +17,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Optional
 
-from ndf.progress import invoke, lane, model, plan, run, store
+from ndf.adapters.git import GitError
+from ndf.contracts import ContractError
+from ndf.progress import command, invoke, lane, model, plan, run, store
 from ndf.progress.gate.answering import Answer, Observe, answer, no_observe
 from ndf.progress.gate.asking import (
     RELEASE_GATE,
@@ -41,6 +43,8 @@ MERGE_ACTOR = "service:github-merge"
 MERGE_KEY = "github-merge"
 # マージされていないときの副命令の止まった理由（待ちを残す）
 NOT_MERGED_KIND = "not_applicable"
+# 宣言の本番ブランチの鍵（`ndf.domains.release.declaration.PRODUCTION_KEY` と同じ 1 鍵。領域を import しない）
+PRODUCTION_KEY = "production_branch"
 
 
 def _reply_values(report: Mapping[str, Any]) -> dict[str, Any]:
@@ -157,6 +161,21 @@ def _merged_reply(q: Question, runner: invoke.Runner, cwd: Path) -> Optional[dic
     raise model.Refused(f"人のマージを承認の証跡にできない: {got.get('summary')}")
 
 
+def _off_production(now: Target, cwd: Path) -> bool:
+    """読み直した PR の宛先が、宣言（`.ndf/worktree.json` の `production_branch`）の本番ブランチと違うか。
+
+    リリース承認ゲートの問いの PR は多くがスプリントの PR で、develop へマージ済みでも本番の PR ではない。その待ちの
+    読み直しの度に副命令を起動しないために使う（#3587）。宛先か本番ブランチが分からなければ偽（副命令が確かめて止まる）。
+    """
+    if now.base is None:
+        return False
+    try:
+        production = command.declaration(cwd, command.WORKTREE_FILE).get(PRODUCTION_KEY)
+    except (GitError, ContractError):  # noqa: NDF401 宣言を読めなければ省かず、副命令が理由を添えて止まる
+        return False
+    return isinstance(production, str) and bool(production) and now.base != production
+
+
 def _merge_answer(
     st: store.Store, table_id: str, q: Question, observe: Observe, runner: invoke.Runner, cwd: Path
 ) -> Optional[dict[str, Any]]:
@@ -184,8 +203,8 @@ def take_reply(
 
     見た対象は依頼を出したときの対象で、その後に PR の head が変わっていれば答えは断られる（今の対象との照合は `answer`）。
     答えが無く、問いが PR を持ち、本番の PR がマージ済みなら、人のマージを承認の答えとして書く（E6）。GitHub を読まない
-    呼び出し（`observe` が `no_observe` で `runner` も無い）は人のマージを読まない。読み直し（`observe`）が未マージと
-    返せば副命令を起動しない（待ちの読み直しの度に CLI を起動しない）。
+    呼び出し（`observe` が `no_observe` で `runner` も無い）は人のマージを読まない。読み直し（`observe`）が未マージか、
+    本番ブランチ宛てでない（`_off_production`）と返せば副命令を起動しない（待ちの読み直しの度に CLI を起動しない）。
     """
     q = waiting(run.read(st, table_id))
     if q is None or q.gate != RELEASE_GATE:
@@ -194,9 +213,10 @@ def take_reply(
     if reply is None or reply.get("result") not in ORGANIZER_ANSWERS:
         if q.pr is None or (runner is None and observe is no_observe):
             return None
-        if observe(q).merged is False:  # 読み直しで未マージと分かれば、人のマージを読む副命令を起動しない
-            return None
+        now = observe(q)
         place = cwd if cwd is not None else Path.cwd()
+        if now.merged is False or _off_production(now, place):  # 未マージか本番宛てでなければ、副命令を起動しない
+            return None
         return _merge_answer(st, table_id, q, observe, runner if runner is not None else invoke.run_command, place)
     return _organizer_answer(st, table_id, q, reply, observe)
 

@@ -343,6 +343,20 @@ def test_an_unmerged_pr_read_by_the_recheck_does_not_start_the_merge_check(st, l
     assert calls == [] and gate.waiting(run.read(st, tid)) is not None
 
 
+@pytest.mark.parametrize(("base", "started"), [("develop", 0), ("main", 1)])
+def test_a_merged_pr_not_aimed_at_production_does_not_start_the_merge_check(st, lane_sprint, flow, tmp_path, base, started):
+    """develop へマージ済みのスプリントの PR（宣言の本番ブランチ宛てでない）は、副命令を起動しない。本番宛てなら起動する。"""
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / ".ndf").mkdir()
+    (tmp_path / ".ndf" / "worktree.json").write_text(json.dumps({"production_branch": "main"}))
+    _pid, tid = lane_sprint()
+    _at_release(st, tid, flow)
+    calls: list = []
+    merged = lambda _q: gate.Target(head=MERGED_HEAD, merged=True, base=base)  # noqa: E731
+    gate.take_reply(st, tid, {}, merged, runner=_runner(MERGED_REPORT, calls), cwd=tmp_path)
+    assert len(calls) == started
+
+
 def test_a_broken_reply_of_the_merge_check_is_refused_and_the_gate_keeps_waiting(st, lane_sprint, flow, tmp_path):
     _pid, tid = lane_sprint()
     _at_release(st, tid, flow)
