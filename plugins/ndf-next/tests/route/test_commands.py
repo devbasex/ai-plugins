@@ -91,13 +91,12 @@ def _ci_result(path, nodes):
 
 
 def _slot(monkeypatch, tmp_path, body, *, append=False):
-    """`ndf route test` が打つ枠（test-slot）を偽のコマンドへ差し替え、受けた引数を書くファイルを返す。
-
-    `append` なら打つたびに受けたコマンドを 1 行ずつ足す（suite ごとに打つ回数を数える）。
-    """
+    """`ndf route test` が打つ枠（test-slot）を偽のコマンドへ差し替え、受けた引数を書くファイルを返す。"""
     seen = tmp_path / "seen.txt"
-    redirect = ">>" if append else ">"
-    bindir = fake_bin(tmp_path, "slot", f'printf "%s\\n" "$@" {redirect} {shlex.quote(str(seen))}\n{body}')
+    script = (
+        f'printf "%s\\n" "$@" >> {shlex.quote(str(seen))}\n{body}' if append else f'printf "%s\\n" "$@" > {shlex.quote(str(seen))}\n{body}'
+    )
+    bindir = fake_bin(tmp_path, "slot", script)
     monkeypatch.setattr(local_tests, "TEST_SLOT", (str(bindir / "slot"),))
     return seen
 
@@ -164,6 +163,11 @@ def _declare(monkeypatch, tmp_path, suites=SUITES):
     monkeypatch.chdir(tmp_path)
 
 
+def _slots(monkeypatch, tmp_path, body):
+    """`_slot` と同じだが、打つたびに受けたコマンドを 1 行ずつ足す（suite ごとに打つ回数を数える）。"""
+    return _slot(monkeypatch, tmp_path, body, append=True)
+
+
 def _failed_from(ci, out):
     return route.main(["test", "--failed-from", str(ci), "--result", str(out)])
 
@@ -177,7 +181,7 @@ def test_ci_local_runs_failed_test_files_through_their_suite_and_records_the_com
     ci, out = tmp_path / "ci.json", tmp_path / "state" / "ci-local.json"
     nodes = ["tests/a.py::t1", "tests/a.py::t2", "tests/b.py::t3"]
     _ci_result(ci, nodes)
-    seen = _slot(monkeypatch, tmp_path, "exit 0", append=True)
+    seen = _slots(monkeypatch, tmp_path, "exit 0")
     assert _failed_from(ci, out) == 0
     assert seen.read_text().splitlines() == ["pytest -q tests/a.py tests/b.py"]
     found = last_result(capsys.readouterr().out)
@@ -192,7 +196,7 @@ def test_ci_local_runs_each_suite_holding_failed_tests_and_reports_failure(tmp_p
     ci, out = tmp_path / "ci.json", tmp_path / "ci-local.json"
     nodes = ["tests/a.py::t1", "web/b.test.ts"]
     _ci_result(ci, nodes)
-    seen = _slot(monkeypatch, tmp_path, 'case "$1" in vitest*) exit 1 ;; esac', append=True)
+    seen = _slots(monkeypatch, tmp_path, 'case "$1" in vitest*) exit 1 ;; esac')
     assert _failed_from(ci, out) == causes.exit_code("test_failed")
     assert seen.read_text().splitlines() == ["pytest -q tests/a.py", "vitest run web/b.test.ts"]
     found = last_result(capsys.readouterr().out)
@@ -204,7 +208,7 @@ def test_ci_local_runs_each_suite_holding_failed_tests_and_reports_failure(tmp_p
 def test_ci_local_stops_without_running_whole_tests_when_failed_tests_are_unknown(tmp_path, monkeypatch, capsys, last_result):
     """#3188: 落ちたテストを読めない（空）か、範囲を打てる suite に当たらないファイルがあれば、全体テストを打たずに止まる。"""
     _declare(monkeypatch, tmp_path)
-    seen = _slot(monkeypatch, tmp_path, "exit 0", append=True)
+    seen = _slots(monkeypatch, tmp_path, "exit 0")
     for nodes in ([], ["tests/a.py::t1", "docs/x.py::t"]):
         ci = tmp_path / "ci.json"
         _ci_result(ci, nodes)
@@ -220,7 +224,7 @@ def test_ci_local_stops_without_running_whole_tests_when_failed_tests_are_unknow
 def test_ci_local_stops_as_invalid_when_ci_result_is_unreadable(tmp_path, monkeypatch, capsys, last_result):
     """CI の結果を読めないときは、テストを打たずに invalid の結果 JSON で止まる（テストの落ちの終了コードと衝突しない）。"""
     _declare(monkeypatch, tmp_path)
-    seen = _slot(monkeypatch, tmp_path, "exit 0", append=True)
+    seen = _slots(monkeypatch, tmp_path, "exit 0")
     _failed_from(tmp_path / "no.json", tmp_path / "ci-local.json")
     assert last_result(capsys.readouterr().out)["cause"]["kind"] == "invalid"
     assert not seen.exists()
@@ -228,7 +232,7 @@ def test_ci_local_stops_as_invalid_when_ci_result_is_unreadable(tmp_path, monkey
 
 def test_route_test_takes_either_a_command_or_failed_tests(tmp_path, monkeypatch, capsys, last_result):
     """コマンドと --failed-from は 1 つだけを渡す（両方・どちらも無しは打たずに invalid）。"""
-    seen = _slot(monkeypatch, tmp_path, "exit 0", append=True)
+    seen = _slots(monkeypatch, tmp_path, "exit 0")
     for argv in (["test"], ["test", "--failed-from", str(tmp_path / "ci.json"), "--", "pytest -q"]):
         route.main(argv)
         assert last_result(capsys.readouterr().out)["cause"]["kind"] == "invalid"
@@ -241,7 +245,7 @@ def test_ci_local_quotes_failed_test_files_for_the_shell(tmp_path, monkeypatch):
     ci = tmp_path / "ci.json"
     files = ["tests/a b.py", "tests/$(touch hit); x.py"]
     _ci_result(ci, [f"{f}::t[1]" for f in files])
-    seen = _slot(monkeypatch, tmp_path, "exit 0", append=True)
+    seen = _slots(monkeypatch, tmp_path, "exit 0")
     assert _failed_from(ci, tmp_path / "ci-local.json") == 0
     assert shlex.split(seen.read_text().splitlines()[-1]) == ["pytest", "-q", *files]
     assert not (tmp_path / "hit").exists()
@@ -252,13 +256,13 @@ def test_ci_local_passes_signal_and_slot_results_through_without_running_the_res
     _declare(monkeypatch, tmp_path)
     ci, out = tmp_path / "ci.json", tmp_path / "ci-local.json"
     _ci_result(ci, ["tests/a.py::t1", "web/b.test.ts"])
-    seen = _slot(monkeypatch, tmp_path, "exit 130", append=True)
+    seen = _slots(monkeypatch, tmp_path, "exit 130")
     assert _failed_from(ci, out) == 130
     assert seen.read_text().splitlines() == ["pytest -q tests/a.py"]
     assert capsys.readouterr().out == "" and not out.exists()
     seen.unlink()
     own = {"tool": "test-slot", "status": "stopped", "summary": "待ちの上限", "cause": {"kind": "wait_timeout", "detail": "x"}}
-    seen = _slot(monkeypatch, tmp_path, f"echo {shlex.quote(json.dumps(own))}; exit 3", append=True)
+    seen = _slots(monkeypatch, tmp_path, f"echo {shlex.quote(json.dumps(own))}; exit 3")
     assert _failed_from(ci, out) == 3
     assert seen.read_text().splitlines() == ["pytest -q tests/a.py"]
     assert json.loads(capsys.readouterr().out.splitlines()[-1]) == own and not out.exists()
@@ -292,14 +296,14 @@ def test_ci_local_counts_runs_and_names_the_first_failed_command(tmp_path, monke
     ci, out = tmp_path / "ci.json", tmp_path / "ci-local.json"
     nodes = ["tests/a.py::t1", "web/b.test.ts"]
     _ci_result(ci, nodes)
-    _slot(monkeypatch, tmp_path, "exit 1", append=True)
+    _slots(monkeypatch, tmp_path, "exit 1")
     _failed_from(ci, out)
     found = last_result(capsys.readouterr().out)
     assert found["metrics"] == {"failed_tests": nodes, "runs": 2, "failed_runs": 2}
     assert found["cause"]["detail"].endswith(": pytest -q tests/a.py")
     assert "2 本のうち 2 本" in found["cause"]["detail"]
     assert [i["kind"] for i in found["items"]] == ["test_run", "test_run"]
-    _slot(monkeypatch, tmp_path, "exit 0", append=True)
+    _slots(monkeypatch, tmp_path, "exit 0")
     _failed_from(ci, out)
     found = last_result(capsys.readouterr().out)
     assert found["metrics"] == {"failed_tests": nodes, "runs": 2, "failed_runs": 0}
