@@ -79,8 +79,13 @@ def payload_of(body: str, mark: str) -> dict[str, Any] | None:
     return got if isinstance(got, dict) else None
 
 
+def _is_int(value: Any) -> bool:
+    """bool でない int か。"""
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
 def _numbers(value: Any) -> tuple[int, ...] | None:
-    if not isinstance(value, list) or not all(isinstance(n, int) and not isinstance(n, bool) and n > 0 for n in value):
+    if not isinstance(value, list) or not all(_is_int(n) and n > 0 for n in value):
         return None
     return tuple(value)
 
@@ -91,7 +96,7 @@ def parse_record(body: str) -> Record | None:
     if got is None:
         return None
     version, release, included = got.get("version"), got.get("release"), _numbers(got.get("included"))
-    if not isinstance(version, str) or not version or not isinstance(release, int) or isinstance(release, bool) or included is None:
+    if not isinstance(version, str) or not version or not _is_int(release) or included is None:
         return None
     return Record(version, release, included)
 
