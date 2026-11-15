@@ -6857,7 +6857,7 @@
     {
       "term": "リリースブランチ",
       "context": "ndf-workflow",
-      "meaning": "本番チャネルへ入れる変更を集め、版を上げるブランチ（`release/v<版>`）",
+      "meaning": "本番チャネルへ入れる変更を集め、版を上げる、版ごとに 1 本のブランチ（`release/v<版>`）。前の版が出た直後に本番ブランチから用意し、本番の PR の head になる",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
@@ -7552,18 +7552,6 @@
       "pending_source": "issues/issue-3388-design.md"
     },
     {
-      "term": "リリースブランチのロック",
-      "context": "ndf-release",
-      "meaning": "リリース承認ゲートの承認の後、GitHub の側でそのリリースブランチ 1 本への push と更新を断らせる状態。マージか差し戻しの後に外す",
-      "pending_source": "issues/issue-3572-requirements.md"
-    },
-    {
-      "term": "リリースブランチの組み直し",
-      "context": "ndf-release",
-      "meaning": "差し戻しの後に、ベースブランチの先端から新しいリリースブランチと本番の PR を作り、承認を取り直すこと",
-      "pending_source": "issues/issue-3572-requirements.md"
-    },
-    {
       "term": "承認した先端",
       "context": "ndf-release",
       "meaning": "リリース承認ゲートの承認の答えか、利用者の GitHub でのマージが対象にした本番の PR の先端のコミット。本番ブランチへ入れてよいのはこの先端だけである",
@@ -7594,10 +7582,16 @@
       "pending_source": "issues/issue-3572-design.md"
     },
     {
-      "term": "リリースブランチ",
+      "term": "直しのステップ",
       "context": "ndf-release",
-      "meaning": "版ごとに 1 本の `release/v<版>` のブランチ。前の版が出た直後に本番ブランチから用意し、本番の PR の head になる",
+      "meaning": "CI が落ちたときにコードを直して push するプランのステップ（雛形の `ci-fix`・`fix-push`・`fix-base` と、それに続く `push`）",
       "pending_source": "issues/issue-3572-design.md"
+    },
+    {
+      "term": "fix の worker",
+      "context": "ndf-release",
+      "meaning": "要求での直しのステップの呼び方。CI が落ちたときにコードを直して push するステップ（雛形の `ci-fix` とそれに続く `push`）",
+      "pending_source": "issues/issue-3572-requirements.md"
     }
   ]
 }

@@ -590,7 +590,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | ブランチ運用の宣言 | — | スプリントの起点・ベースブランチへ入れる時点・文書の Pull Request の宛先・本番への取り込み方を書いた `.ndf/worktree.json` の `branch_flow`。無ければ、ベースブランチから切りベースブランチを丸ごと本番チャネルへ出す既定の振る舞いになる | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | スプリントの起点 | — | スプリントブランチと worktree を切る元のブランチ。ベースブランチか本番チャネルをチャネルの名前で指す。ブランチ運用の宣言が決め、無ければベースブランチ | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 結合ブランチ | — | ベースブランチを、スプリントブランチを入れてスプリントどうしの組み合わせを試す役割で呼ぶときの名前。開発版のチャネルを兼ねることがある | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| リリースブランチ | — | 本番チャネルへ入れる変更を集め、版を上げるブランチ（`release/v<版>`） | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| リリースブランチ | — | 本番チャネルへ入れる変更を集め、版を上げる、版ごとに 1 本のブランチ（`release/v<版>`）。前の版が出た直後に本番ブランチから用意し、本番の PR の head になる | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 本番への取り込み方 | — | 本番チャネルへ何をどう入れるか。ベースブランチを丸ごと出すか、本番チャネルから切ったリリースブランチへ選んだリリースの単位を集めるか。ブランチ運用の宣言が決める。リリースの組み方（まとめたリリースを組むか）とは別の軸 | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 本番チャネルの宣言 | — | 本番チャネルのブランチの origin 上の先頭にあるブランチ運用の宣言（`origin/<本番チャネル>:.ndf/worktree.json`）。本番チャネル宛の検査とスプリントに属さないリリースのプランが読む | — | — | `docs/specifications/ndf-branch-flow-declaration.md` |
 | 開始時の記録 | — | スプリントの目録（`sprint.json`）の `ブランチ運用` に、スプリントを始めたときに書いたブランチ運用の宣言の値。スプリントの後の工程はこれを読み、宣言を読み直さない | — | — | `docs/specifications/ndf-branch-flow-declaration.md` |
@@ -1012,14 +1012,13 @@ release が走らせるリリースの種別・リリースコマンド・公開
 | 管理者の迂回 | — | ruleset が迂回を許した役割の人が、必須の承認レビューと必須のチェックを満たさずにマージすること。`gh pr merge --admin` で打つ | — | — | `docs/specifications/ndf-release-production-admin-merge.md` |
 | 迂回の宣言 | — | 本番の PR を管理者の迂回でマージすることを選ぶ、`.ndf/project.json` の `production_merge.admin` の値。`true` のときだけ宣言があるとみなし、無いときは迂回しない | — | — | `docs/specifications/ndf-release-production-admin-merge.md` |
 | 迂回の記録 | — | 本番の PR を管理者の迂回でマージしたことを示す、本番の PR へ置くコメント。マージした先端と照らした承認の証跡を指す。証跡とは別の印を持ち、承認の判定に数えない | — | — | `docs/specifications/ndf-release-production-admin-merge.md` |
-| リリースブランチのロック | — | リリース承認ゲートの承認の後、GitHub の側でそのリリースブランチ 1 本への push と更新を断らせる状態。マージか差し戻しの後に外す | — | — | — |
-| リリースブランチの組み直し | — | 差し戻しの後に、ベースブランチの先端から新しいリリースブランチと本番の PR を作り、承認を取り直すこと | — | — | — |
 | 承認した先端 | — | リリース承認ゲートの承認の答えか、利用者の GitHub でのマージが対象にした本番の PR の先端のコミット。本番ブランチへ入れてよいのはこの先端だけである | — | — | — |
 | 先端の照合 | — | マージの API に承認した先端を渡し、PR の先端が違えば GitHub に断らせることと、マージの前に承認の証跡を読み直すこと | — | — | — |
 | 承認の経路 | — | 本番の PR の承認がどこで与えられたか。リリース承認ゲート（`gate`）か、利用者の GitHub でのマージ（`github-merge`）のどちらか | — | — | — |
 | 差し戻し | — | リリース承認ゲートで承認しない答え、または必須のチェックの落ちた本番の PR を出さずに止めること。直しを同じリリースブランチへ入れ、新しい先端で承認を取り直す | — | — | — |
 | 次の版への回し | — | 必須のチェックの落ちた本番の PR を閉じてこの時点では出さず、リリースブランチを残して後のスプリントと一緒に出すこと | — | — | — |
-| リリースブランチ | — | 版ごとに 1 本の `release/v<版>` のブランチ。前の版が出た直後に本番ブランチから用意し、本番の PR の head になる | — | — | — |
+| 直しのステップ | — | CI が落ちたときにコードを直して push するプランのステップ（雛形の `ci-fix`・`fix-push`・`fix-base` と、それに続く `push`） | — | — | — |
+| fix の worker | — | 要求での直しのステップの呼び方。CI が落ちたときにコードを直して push するステップ（雛形の `ci-fix` とそれに続く `push`） | — | — | — |
 
 ## NDF の指示書チェック（`ndf-instructions`）
 
