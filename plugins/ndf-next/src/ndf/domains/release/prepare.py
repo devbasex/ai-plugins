@@ -13,8 +13,8 @@ from typing import NamedTuple
 from ndf.adapters.github import GitHub, GitHubError
 from ndf.domains.release import release_plan, version_decide
 
-# 同じ名前の参照が既にあるときの GitHub の状態
-EXISTS = HTTPStatus.UNPROCESSABLE_ENTITY
+# GitHub が作成を断る状態（同じ名前の参照が既にある。`land.UNPROCESSABLE` と同じ応答の意味）
+UNPROCESSABLE = HTTPStatus.UNPROCESSABLE_ENTITY
 # 用意するブランチの版の上げ幅（上げ幅が大きければ組み立てが改名する）
 NEXT_LEVEL = "patch"
 
@@ -49,7 +49,7 @@ def prepare_next(hub: GitHub, number: int, production: str) -> Prepared:
     try:
         hub.rest("POST", f"/repos/{hub.repo}/git/refs", {"ref": f"refs/heads/{branch}", "sha": pull.merge_sha})
     except GitHubError as exc:
-        if exc.status != EXISTS:
+        if exc.status != UNPROCESSABLE:
             raise
         return Prepared(branch, version, False)
     return Prepared(branch, version, True)
