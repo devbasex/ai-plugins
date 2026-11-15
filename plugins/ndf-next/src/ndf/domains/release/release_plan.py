@@ -15,14 +15,15 @@ from collections.abc import Mapping
 from typing import Any
 
 from ndf import identity
+from ndf.contracts import causes
 
 # worker の起動の差し込み（雛形の `{{worker}}`）
 WORKER = "{{worker}}"
 # 承認の後に置かない直しのステップ（コードを変えるか、リリースブランチへ push する）
 FIX_STEPS = frozenset({"push", "fix-push", "ci-fix", "fix-base", "base-sync"})
-# `merge` のプランの最初のステップの id と、本番の PR で止まる終了コード（止まる原因は表 causes の refused）
+# `merge` のプランの最初のステップの id と、本番の PR で止まる終了コード（止まった理由の表の refused の終了コード）
 GUARD_ID = "release-guard"
-GUARD_EXIT = 3
+GUARD_EXIT = causes.exit_code("refused")
 
 
 def guard_cause() -> str:

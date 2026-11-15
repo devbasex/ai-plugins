@@ -294,7 +294,7 @@
 
 | 呼び方 | 引数 |
 | --- | --- |
-| `ndf release-steps answer` | `--root`（string・任意・既定 `"."`）: リポジトリの根<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば origin<br>`--pr`（integer・必須）<br>`--route`（string・任意・既定 `"gate"`・値 `gate`・`github-merge`）: 承認の経路（承認ゲート gate / 人の GitHub でのマージ github-merge。github-merge は答えた者と対象をマージから読む）<br>`--answer`（string・任意・値 `approved`・`rejected`）: 答え（gate で要る）<br>`--presented`（string・任意）: 提示した先端の SHA（present の outputs.head。gate で要る）<br>`--by`（string・任意・値 `user`・`mvv`）: 答えた担い手（利用者 user / MVV 判定 mvv。迂回は user だけを数える。gate で要る）<br>`--production`（string・任意）: 本番ブランチ（省けば宣言 worktree.json の production_branch） |
+| `ndf release-steps answer` | `--root`（string・任意・既定 `"."`）: リポジトリの根<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば origin<br>`--pr`（integer・必須）<br>`--route`（string・任意・既定 `"gate"`・値 `gate`・`github-merge`）: 承認の経路（承認ゲート gate / 人の GitHub でのマージ github-merge。github-merge は答えた者と対象をマージから読む）<br>`--answer`（string・任意・値 `approved`・`rejected`）: 答え（gate で要る）<br>`--presented`（string・任意）: 提示した先端の SHA（present の値の項目 head。gate で要る）<br>`--by`（string・任意・値 `user`・`mvv`）: 答えた担い手（利用者 user / MVV 判定 mvv。迂回は user だけを数える。gate で要る）<br>`--production`（string・任意）: 本番ブランチ（省けば宣言 worktree.json の production_branch） |
 | `ndf release-steps approval-check` | `--root`（string・任意・既定 `"."`）: リポジトリの根<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば origin<br>`--pr`（integer・必須）<br>`--production`（string・任意）: 本番ブランチ（省けば宣言 worktree.json の production_branch） |
 | `ndf release-steps assemble` | `--root`（string・任意・既定 `"."`）: リポジトリの根<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば origin<br>`--base`（string・必須）: ベースブランチ（宣言 worktree.json の base_branch）<br>`--production`（string・任意）: 本番ブランチ（省けば宣言 worktree.json の production_branch）<br>`--channel`（string・必須・値 `production`・`dev`）<br>`--level`（string・任意・既定 `"patch"`・値 `major`・`minor`・`patch`）<br>`--plugin`（string・任意）: ブランチの名前に版を使うプラグイン（省けば登録の順の先頭）<br>`--source`（string・任意・既定 `"base"`・値 `base`・`release`）: 範囲の先端（ベースブランチ base / 常設のリリースブランチ release） |
 | `ndf release-steps cleanup` | `--root`（string・任意・既定 `"."`）: リポジトリの根<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば origin<br>`--branch`（array of string・必須） |
@@ -312,7 +312,7 @@
 | `ndf release-steps sync-base` | `--root`（string・任意・既定 `"."`）: リポジトリの根<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば origin<br>`--main-dir`（string・必須）<br>`--base`（string・必須） |
 | `ndf release-steps verification-record` | `--root`（string・任意・既定 `"."`）: リポジトリの根<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば origin<br>`--pr`（integer・必須）<br>`--record`（string・必須）: リリース後テストの記録の JSON（スキーマ release-verification） |
 
-結果の `metrics`: 決まった項目を持たない。`items` の要素: `change`（string）・`checks`（integer）・`checks_passed`（integer）・`checks_skipped`（integer）・`failed`（array of string）・`kind`（string）・`name`（string）・`number`（integer）・`outcome`（string）・`path`（string）・`reason`（string）・`result`（string）
+結果の `metrics`: 決まった項目を持たない。`items` の要素: `change`（string）・`checks`（integer）・`checks_passed`（integer）・`checks_skipped`（integer）・`failed`（array of string）・`kind`（string）・`name`（string）・`number`（integer）・`outcome`（string）・`path`（string）・`reason`（string）・`result`（string）・`value`（—）
 
 ## `ndf route`
 

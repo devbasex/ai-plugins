@@ -67,7 +67,7 @@ def test_the_rendered_release_plan_merges_the_approved_pr_first() -> None:
 
 
 def test_the_merge_plan_starts_with_the_guard_that_has_no_way_onward() -> None:
-    """I8: merge の雛形の最初は release-guard で、終了コード 3 の原因 refused に行き先が無い。"""
+    """I8: merge の雛形の最初は release-guard で、refused の終了コードの原因 refused に行き先が無い。"""
     plan = _expanded("merge")
     assert release_plan.guard_first(plan) == []
     assert plan["steps"][0]["exit_cause"] == {str(release_plan.GUARD_EXIT): release_plan.guard_cause()}
@@ -78,7 +78,7 @@ def test_the_guard_check_names_each_broken_part() -> None:
     plan = _expanded("merge")
     assert release_plan.guard_first({**plan, "steps": plan["steps"][1:]}) == [f"最初のステップが {release_plan.GUARD_ID} でない"]
     other = copy.deepcopy(plan)
-    other["steps"][0]["exit_cause"] = {"3": "precondition"}
+    other["steps"][0]["exit_cause"] = {str(release_plan.GUARD_EXIT): "precondition"}
     assert len(release_plan.guard_first(other)) == 1
     routed = copy.deepcopy(plan)
     routed["steps"][0]["on_cause"] = {"refused": "ci-fix"}
@@ -105,8 +105,8 @@ def _guard(monkeypatch, capsys, hub: FakeHub, *extra: str) -> tuple[int, dict]:
     return code, json.loads(capsys.readouterr().out.strip().splitlines()[-1])
 
 
-def test_guard_stops_a_production_pr_with_exit_code_3(monkeypatch, capsys) -> None:
-    """I8: 本番の PR は refused・終了コード 3 で止まる（merge のプランはそこで止まり、直しのステップへ進まない）。"""
+def test_guard_stops_a_production_pr_as_refused(monkeypatch, capsys) -> None:
+    """I8: 本番の PR は refused（終了コードは止まった理由の表の値）で止まる（merge のプランはそこで止まり、直しのステップへ進まない）。"""
     code, out = _guard(monkeypatch, capsys, _HeadHub(pulls={7: pull()}), "--production", "main")
     assert code == release_plan.GUARD_EXIT and out["cause"]["kind"] == "refused" and "#7" in out["summary"]
 

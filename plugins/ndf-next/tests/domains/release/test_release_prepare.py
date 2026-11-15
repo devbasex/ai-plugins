@@ -64,7 +64,9 @@ def test_cli_prepare_next_reports_the_branch(monkeypatch, capsys) -> None:
     monkeypatch.setattr(release_cli, "_hub", lambda args: hub)
     assert release_cli.main(["prepare-next", "--pr", "7", "--production", "main"]) == 0
     out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
-    assert out["outputs"] == {"branch": "release/v10.27.69", "version": "10.27.69", "created": True}
+    values = {i["name"]: i["value"] for i in out["items"] if i["kind"] == release_cli.VALUE_KIND}
+    assert values == {"branch": "release/v10.27.69", "version": "10.27.69", "created": True}
+    assert "outputs" not in out  # 次の版はスプリントの文脈の版（出した版）を書き換えない
     monkeypatch.setattr(release_cli, "_hub", lambda args: FakeHub(pulls={7: pull()}))
     assert release_cli.main(["prepare-next", "--pr", "7", "--production", "main"]) != 0
     out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])

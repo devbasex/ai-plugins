@@ -7,7 +7,7 @@
 | `present` | 会話のセッション | `trail.present`（承認資料の提示。承認ゲート） |
 | `answer` | 会話のセッション・承認ゲートの待ち | `trail.answer`（答えを証跡に書き、届いたかを確かめる）。`--route github-merge` は `trail.answer_merged`（人のマージを承認の証跡にする） |
 | `approval-check` | workflow | `trail.check`（証跡の判定を commit status へ） |
-| `merge` | 本番のプラン・workflow | `land`（証跡の後のマージと、ベースブランチへ戻す PR。止まったら次の手を `outputs.moves` に出す） |
+| `merge` | 本番のプラン・workflow | `land`（証跡の後のマージと、ベースブランチへ戻す PR。止まったら次の手を値の項目 `moves` に出す） |
 | `guard` | `merge` のプラン | `release_plan.is_production_pr`（本番の PR を直しのステップのあるプランで流さない） |
 | `defer` | オーガナイザー・一時レーン | 本番の PR を閉じ、リリースブランチを残す（次の版への回し） |
 | `prepare-next` | 本番のプラン | `prepare.prepare_next`（次の版のリリースブランチを本番ブランチから用意する） |
@@ -56,6 +56,14 @@ from ndf.domains.release import plugins as plugins_mod
 
 # 結果 JSON の tool の名前は副命令の名前（正本は `cli.COMMANDS`）
 TOOL = cli.tool_of(__name__)
+# 結果の `outputs` はスプリントの文脈の閉じた語彙（版・PR・ブランチなど）だけを持つ。ほかの値（承認・次の手・SHA など）は
+# 種類 `VALUE_KIND` の項目（`name` と `value`）で返す（#3572）
+VALUE_KIND = "value"
+
+
+def _values(**found: Any) -> list[dict[str, Any]]:
+    """値の項目の並び（None の値は載せない）。"""
+    return [{"kind": VALUE_KIND, "name": k, "value": v} for k, v in found.items() if v is not None]
 
 
 def _hub(args: argparse.Namespace) -> GitHub:
@@ -79,14 +87,10 @@ def _target(args: argparse.Namespace) -> assemble.Target:
 
 def cmd_assemble(args: argparse.Namespace) -> dict:
     built = assemble.assemble(Path(args.root), _hub(args), _target(args))
-    outputs: dict[str, Any] = {"pr": built.pr, "url": built.url, "branch": built.branch, "version": built.version}
-    outputs["reassembled"] = built.reassembled
-    if built.renamed_from is not None:
-        outputs["renamed_from"] = built.renamed_from
+    outputs = {"pr": built.pr, "branch": built.branch, "version": built.version}
+    items = materials_decide.items(built.facts) + _values(url=built.url, reassembled=built.reassembled, renamed_from=built.renamed_from)
     verb = "の承認資料を新しい先端で書き直した" if built.reassembled else "を作った"
-    return result.result(
-        TOOL, result.OK, f"{built.branch} の PR #{built.pr} {verb}: {built.url}", materials_decide.items(built.facts), outputs=outputs
-    )
+    return result.result(TOOL, result.OK, f"{built.branch} の PR #{built.pr} {verb}: {built.url}", items, outputs=outputs)
 
 
 def cmd_materials(args: argparse.Namespace) -> dict:
@@ -107,9 +111,7 @@ def cmd_present(args: argparse.Namespace) -> dict:
         answer: result.command(TOOL, "answer", "--pr", str(args.pr), "--answer", answer, "--presented", head, ask=("--by",))
         for answer in approval_decide.ANSWERS
     }
-    return result.result(
-        TOOL, result.GATE, f"#{args.pr}（{head[:12]}）の承認資料を提示した。答えを待つ", routes=routes, outputs={"head": head}
-    )
+    return result.result(TOOL, result.GATE, f"#{args.pr}（{head[:12]}）の承認資料を提示した。答えを待つ", _values(head=head), routes=routes)
 
 
 def cmd_answer(args: argparse.Namespace) -> dict:
@@ -118,13 +120,15 @@ def cmd_answer(args: argparse.Namespace) -> dict:
             judgment, facts = trail.answer_merged(_hub(args), args.pr, _production_of(args))
         except trail.NotMerged as exc:
             return result.stopped(TOOL, "not_applicable", str(exc))
-        outputs = {"state": judgment.state, "by": facts.by, "head": facts.head, "version": _version_of(facts.head_ref)}
-        return result.result(TOOL, result.OK, f"#{args.pr} の人のマージを承認の証跡にした: {judgment.detail}", outputs=outputs)
+        version = _version_of(facts.head_ref)
+        items = _values(state=judgment.state, by=facts.by, head=facts.head)
+        detail = f"#{args.pr} の人のマージを承認の証跡にした: {judgment.detail}"
+        return result.result(TOOL, result.OK, detail, items, outputs={"version": version} if version else None)
     missing = [k for k in ("answer", "presented", "by") if getattr(args, k) is None]
     if missing:
         return result.stopped(TOOL, "invalid", f"--route gate には --{'・--'.join(missing)} が要る")
     judgment = trail.answer(_hub(args), args.pr, args.answer, args.by, args.presented)
-    return result.result(TOOL, result.OK, f"#{args.pr} の答えが証跡に届いた: {judgment.detail}", outputs={"state": judgment.state})
+    return result.result(TOOL, result.OK, f"#{args.pr} の答えが証跡に届いた: {judgment.detail}", _values(state=judgment.state))
 
 
 def cmd_approval_check(args: argparse.Namespace) -> dict:
@@ -135,7 +139,7 @@ def cmd_approval_check(args: argparse.Namespace) -> dict:
         return result.stopped(TOOL, "not_applicable", f"#{args.pr} は本番ブランチ {production} 宛てでない（{pull.base_ref}）")
     got = trail.check(hub, args.pr)
     return result.result(
-        TOOL, result.OK, f"#{args.pr} の承認の判定: {got.judgment.detail}", outputs={"state": got.judgment.state, "head": got.pull.head_sha}
+        TOOL, result.OK, f"#{args.pr} の承認の判定: {got.judgment.detail}", _values(state=got.judgment.state, head=got.pull.head_sha)
     )
 
 
@@ -156,29 +160,25 @@ def _moves(args: argparse.Namespace, kind: str) -> dict[str, Any]:
 def cmd_merge(args: argparse.Namespace) -> dict:
     admin = decl_mod.production_admin(Path(args.root))
     done = land.Lander(_hub(args), args.base, _production_of(args), args.budget, admin=admin).land(args.pr)
-    outputs: dict[str, Any] = {"sync_pr": done.sync_pr} if done.sync_pr is not None else {}
-    if done.production_sha is not None:
-        outputs["production_sha"] = done.production_sha
-    outputs["admin"] = done.admin
-    if done.admin_record is not None:
-        outputs["admin_record"] = done.admin_record
-    if done.version is not None:
-        outputs["version"] = done.version
-    if done.approval is not None:
-        outputs["approval"] = done.approval.as_json()
-    if done.merge_record is not None:
-        outputs["merge_record"] = done.merge_record
+    outputs = {"version": done.version} if done.version is not None else None
+    approval = done.approval.as_json() if done.approval is not None else None
+    items = [{"kind": "check", "name": c.name, "outcome": c.conclusion} for c in done.failed]
+    items += _values(
+        sync_pr=done.sync_pr,
+        production_sha=done.production_sha,
+        admin=done.admin,
+        admin_record=done.admin_record,
+        approval=approval,
+        merge_record=done.merge_record,
+    )
     detail = done.detail
     if done.record_error is not None:  # 本番は出ている。記録だけを打ち直しで書く（#3506 の決定 7）
         detail = f"{detail}。記録を書けなかった（本番は出ている）: {done.record_error}"
     if done.merged and done.kind is None and done.record_error is None:
-        return result.result(TOOL, result.OK, detail, outputs=outputs)
+        return result.result(TOOL, result.OK, detail, items, outputs=outputs)
     kind = done.kind if done.kind else "unknown"
-    items = [{"kind": "check", "name": c.name, "outcome": c.conclusion} for c in done.failed]
-    if done.merged:
-        return result.stopped(TOOL, kind, detail, items=items, outputs=outputs)
-    # 次の手は打つ側が選ぶ（既定の手を next にすると、打つ側が問わずに本番の PR を閉じる）
-    outputs.update(_moves(args, kind))
+    if not done.merged:  # 次の手は打つ側が選ぶ（既定の手を next にすると、打つ側が問わずに本番の PR を閉じる）
+        items += _values(**_moves(args, kind))
     return result.stopped(TOOL, kind, detail, items=items, outputs=outputs)
 
 
@@ -207,22 +207,23 @@ def cmd_defer(args: argparse.Namespace) -> dict:
         return result.stopped(TOOL, "precondition", f"#{args.pr} は開いた本番の PR でない（{pull.state}・{pull.base_ref}）")
     hub.rest("PATCH", f"/repos/{hub.repo}/pulls/{args.pr}", {"state": "closed"})
     detail = f"#{args.pr} を閉じ、{pull.head_ref} を残した（直しと後のスプリントを入れてから組み直す）"
-    return result.result(TOOL, result.OK, detail, outputs={"closed": args.pr, "branch": pull.head_ref})
+    return result.result(TOOL, result.OK, detail, _values(closed=args.pr, branch=pull.head_ref))
 
 
 def cmd_prepare_next(args: argparse.Namespace) -> dict:
     made = prepare.prepare_next(_hub(args), args.pr, _production_of(args))
     verb = "を用意した" if made.created else "は既にある"
-    outputs = {"branch": made.branch, "version": made.version, "created": made.created}
-    return result.result(TOOL, result.OK, f"次の版のリリースブランチ {made.branch} {verb}", outputs=outputs)
+    # 版とブランチは出した版のものではないため outputs（スプリントの文脈）へ書かない
+    items = _values(branch=made.branch, version=made.version, created=made.created)
+    return result.result(TOOL, result.OK, f"次の版のリリースブランチ {made.branch} {verb}", items)
 
 
 def cmd_record(args: argparse.Namespace) -> dict:
     made, written = record.write(_hub(args), args.pr, _production_of(args))
     count = sum(1 for w in written if w.result == record.WRITTEN)
-    outputs = {"version": made.version, "included": list(made.included)}
+    outputs = {"version": made.version}
     detail = f"v{made.version} のリリース記録を {count} 件書いた（含めた PR {len(written)} 本。既にあった {len(written) - count} 本）"
-    return result.result(TOOL, result.OK, detail, [w.item() for w in written], outputs=outputs)
+    return result.result(TOOL, result.OK, detail, [w.item() for w in written] + _values(included=list(made.included)), outputs=outputs)
 
 
 def cmd_verification_record(args: argparse.Namespace) -> dict:
@@ -230,15 +231,15 @@ def cmd_verification_record(args: argparse.Namespace) -> dict:
     if not isinstance(payload, dict):
         raise record.RecordError(f"{args.record} はオブジェクトの JSON でない")
     url = record.write_verification(_hub(args), args.pr, payload)
-    return result.result(TOOL, result.OK, f"#{args.pr} へリリース後テストの記録を書いた: {url}", outputs={"url": url})
+    return result.result(TOOL, result.OK, f"#{args.pr} へリリース後テストの記録を書いた: {url}", _values(url=url))
 
 
 def cmd_records(args: argparse.Namespace) -> dict:
     got = record.read(_hub(args), args.pr)
-    outputs = {"release": got.release.as_json() if got.release else None, "verifications": list(got.verifications)}
+    items = _values(release=got.release.as_json() if got.release else None, verifications=list(got.verifications))
     version = got.release.version if got.release else "無し"
     detail = f"#{args.pr} のリリース記録（版 {version}）とリリース後テストの記録 {len(got.verifications)} 件を読んだ"
-    return result.result(TOOL, result.OK, detail, outputs=outputs)
+    return result.result(TOOL, result.OK, detail, items)
 
 
 def cmd_publish(args: argparse.Namespace) -> dict:
@@ -252,7 +253,7 @@ def cmd_sync_base(args: argparse.Namespace) -> dict:
     if plan.action == sync_decide.STOP:
         detail = f"メインディレクトリの変更が取り込む差分と重なり、origin と中身が違う: {', '.join(plan.paths)}"
         return result.stopped(TOOL, "precondition", detail, items=[{"kind": "path", "path": p} for p in plan.paths])
-    return result.result(TOOL, result.OK, f"{args.base} を origin へそろえた（{plan.action}）", outputs={"action": plan.action})
+    return result.result(TOOL, result.OK, f"{args.base} を origin へそろえた（{plan.action}）", _values(action=plan.action))
 
 
 def cmd_config_snapshot(args: argparse.Namespace) -> dict:
@@ -329,7 +330,7 @@ def _answer_args(p: argparse.ArgumentParser) -> None:
         help="承認の経路（承認ゲート gate / 人の GitHub でのマージ github-merge。github-merge は答えた者と対象をマージから読む）",
     )
     p.add_argument("--answer", choices=approval_decide.ANSWERS, help="答え（gate で要る）")
-    p.add_argument("--presented", help="提示した先端の SHA（present の outputs.head。gate で要る）")
+    p.add_argument("--presented", help="提示した先端の SHA（present の値の項目 head。gate で要る）")
     p.add_argument(
         "--by", choices=trail.BY_CHOICES, help="答えた担い手（利用者 user / MVV 判定 mvv。迂回は user だけを数える。gate で要る）"
     )
@@ -438,16 +439,10 @@ def _stopped_of(exc: Exception) -> dict:
     return result.stopped(TOOL, kind, str(exc))
 
 
-# 止まった結果の終了コードを止まった理由の表から変える副命令（雛形の `exit_cause` の鍵と同じ値。#3572 の I8）
-STOP_CODES = {"guard": release_plan.GUARD_EXIT}
-
-
 def main(argv: list[str]) -> int:
     args = _parser().parse_args(argv)
     try:
         out = HANDLERS[args.command](args)
     except (github_mod.GitHubError, *(t for t, _k in _ERRORS)) as exc:
         out = _stopped_of(exc)
-    refused = out["status"] == result.STOPPED and out["cause"]["kind"] == release_plan.guard_cause()
-    code = STOP_CODES[args.command] if args.command in STOP_CODES and refused else None
-    return result.emit(out, code)
+    return result.emit(out)

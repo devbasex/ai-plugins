@@ -298,9 +298,13 @@ MERGED_REPORT = {
     "tool": "release-steps",
     "status": "ok",
     "summary": "人のマージを承認の証跡にした",
-    "items": [],
+    "items": [
+        {"kind": "value", "name": "state", "value": "approved"},
+        {"kind": "value", "name": "by", "value": "takemi"},
+        {"kind": "value", "name": "head", "value": MERGED_HEAD},
+    ],
     "metrics": {},
-    "outputs": {"state": "approved", "by": "takemi", "head": MERGED_HEAD, "version": "11.0.0"},
+    "outputs": {"version": "11.0.0"},
 }
 
 
@@ -324,7 +328,7 @@ def test_an_unmerged_production_pr_keeps_the_release_gate_waiting(st, lane_sprin
     _pid, tid = lane_sprint()
     _at_release(st, tid, flow)
     report = {k: v for k, v in MERGED_REPORT.items() if k != "outputs"}
-    report = {**report, "status": "stopped", "cause": {"kind": "not_applicable", "detail": "まだ"}}
+    report = {**report, "items": [], "status": "stopped", "cause": {"kind": "not_applicable", "detail": "まだ"}}
     assert gate.take_reply(st, tid, {}, runner=_runner(report, []), cwd=tmp_path) is None
     assert gate.waiting(run.read(st, tid)) is not None
 
@@ -333,7 +337,7 @@ def test_a_broken_reply_of_the_merge_check_is_refused_and_the_gate_keeps_waiting
     _pid, tid = lane_sprint()
     _at_release(st, tid, flow)
     refused = {k: v for k, v in MERGED_REPORT.items() if k != "outputs"}
-    refused = {**refused, "status": "stopped", "cause": {"kind": "refused", "detail": "届かない"}}
+    refused = {**refused, "items": [], "status": "stopped", "cause": {"kind": "refused", "detail": "届かない"}}
 
     def unreadable(argv, cwd, env):
         return subprocess.CompletedProcess(argv, 2, "not json\n", "boom\n")

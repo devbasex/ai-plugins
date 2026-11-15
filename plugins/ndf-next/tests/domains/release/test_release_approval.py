@@ -655,17 +655,26 @@ def test_failed_required_check_stops_with_the_check_and_without_pushing_or_mergi
     assert hub.pulls[7].head_sha == HEAD
 
 
+def _values(out: dict) -> dict:
+    return {i["name"]: i["value"] for i in out["items"] if i["kind"] == release_cli.VALUE_KIND}
+
+
+def _last(capsys) -> dict:
+    return json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+
+
 def test_cli_merge_reports_the_failed_check_and_three_next_moves(monkeypatch, capsys) -> None:
-    """受け入れ条件 4: 止まった結果は items に落ちたチェック、outputs.moves に 3 つの手、既定の手は次の版への回し。"""
+    """受け入れ条件 4: 止まった結果は items に落ちたチェック、値の項目 moves に 3 つの手、既定の手は次の版への回し。"""
     hub = FakeHub(pulls={7: pull()}, comments_of={7: [_trail("approved", HEAD)]})
     lander = _lander(hub, True, [])
     monkeypatch.setattr(release_cli, "_hub", lambda args: hub)
     monkeypatch.setattr(land, "Lander", lambda h, b, p, budget, admin=False: lander)
     code = release_cli.main(["merge", "--pr", "7", "--base", "develop", "--production", "main", "--budget", "1"])
-    out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
-    assert code != 0 and out["items"] == [{"kind": "check", "name": "pytest", "outcome": "failure"}]
-    assert set(out["outputs"]["moves"]) == set(merge_decide.NEXT_MOVES) and out["outputs"]["suggested"] == "defer"
-    assert out["outputs"]["moves"]["defer"]["argv"][1:3] == ["release-steps", "defer"] and "next" not in out
+    out = _last(capsys)
+    assert code != 0 and out["items"][0] == {"kind": "check", "name": "pytest", "outcome": "failure"}
+    values = _values(out)
+    assert set(values["moves"]) == set(merge_decide.NEXT_MOVES) and values["suggested"] == "defer"
+    assert values["moves"]["defer"]["argv"][1:3] == ["release-steps", "defer"] and "next" not in out
 
 
 def test_moved_head_after_the_approval_is_not_merged_and_names_both_heads() -> None:
@@ -773,12 +782,11 @@ def test_defer_closes_the_production_pr_and_keeps_the_branch(monkeypatch, capsys
     hub = FakeHub(pulls={7: pull(), 8: pull(number=8, base="develop")})
     monkeypatch.setattr(release_cli, "_hub", lambda args: hub)
     assert release_cli.main(["defer", "--pr", "7", "--production", "main"]) == 0
-    out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
-    assert out["outputs"] == {"closed": 7, "branch": "release/v1.2.4"}
+    assert _values(_last(capsys)) == {"closed": 7, "branch": "release/v1.2.4"}
     assert [(m, p, b) for m, p, b in hub.requests if m != "GET"] == [("PATCH", "/repos/o/r/pulls/7", {"state": "closed"})]
     assert not any(m == "DELETE" for m, _p, _b in hub.requests)
     assert release_cli.main(["defer", "--pr", "8", "--production", "main"]) != 0
-    assert json.loads(capsys.readouterr().out.strip().splitlines()[-1])["cause"]["kind"] == "precondition"
+    assert _last(capsys)["cause"]["kind"] == "precondition"
 
 
 def test_cli_answer_routes(monkeypatch, capsys) -> None:
@@ -787,10 +795,23 @@ def test_cli_answer_routes(monkeypatch, capsys) -> None:
     hub.responses[("GET", "/repos/o/r/pulls/7")] = _merged_raw(HEAD, merged=False)
     monkeypatch.setattr(release_cli, "_hub", lambda args: hub)
     release_cli.main(["answer", "--pr", "7", "--answer", "approved"])
-    assert json.loads(capsys.readouterr().out.strip().splitlines()[-1])["cause"]["kind"] == "invalid"
+    assert _last(capsys)["cause"]["kind"] == "invalid"
     release_cli.main(["answer", "--pr", "7", "--route", "github-merge", "--production", "main"])
-    assert json.loads(capsys.readouterr().out.strip().splitlines()[-1])["cause"]["kind"] == "not_applicable"
+    assert _last(capsys)["cause"]["kind"] == "not_applicable"
     hub.responses[("GET", "/repos/o/r/pulls/7")] = _merged_raw(HEAD)
     assert release_cli.main(["answer", "--pr", "7", "--route", "github-merge", "--production", "main"]) == 0
-    out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])["outputs"]
-    assert out == {"state": "approved", "by": "takemi", "head": HEAD, "version": "1.2.4"}
+    out = _last(capsys)
+    assert _values(out) == {"state": "approved", "by": "takemi", "head": HEAD} and out["outputs"] == {"version": "1.2.4"}
+
+
+def test_cli_merge_of_an_approved_pr_writes_only_the_version_into_the_outputs(monkeypatch, capsys) -> None:
+    """結果の outputs はスプリントの文脈の語彙（版）だけで、承認と SHA は値の項目に載る（結果の契約に合う）。"""
+    hub = FakeHub(pulls={7: pull(), 8: pull(number=8, base="develop")}, comments_of={7: [_gate_trail(HEAD)]})
+    hub.responses[("POST", "/repos/o/r/pulls")] = {"number": 8}
+    hub.responses[("GET", "/repos/o/r/pulls/7")] = _merged_raw(HEAD, by="octocat")
+    lander = _lander(hub, False, [])
+    monkeypatch.setattr(release_cli, "_hub", lambda args: hub)
+    monkeypatch.setattr(land, "Lander", lambda h, b, p, budget, admin=False: lander)
+    assert release_cli.main(["merge", "--pr", "7", "--base", "develop", "--production", "main", "--budget", "1"]) == 0
+    out = _last(capsys)
+    assert out["outputs"] == {"version": "1.2.4"} and _values(out)["approval"]["route"] == "gate"

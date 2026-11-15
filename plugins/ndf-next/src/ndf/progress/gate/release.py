@@ -43,6 +43,14 @@ MERGE_KEY = "github-merge"
 NOT_MERGED_KIND = "not_applicable"
 
 
+def _reply_values(report: Mapping[str, Any]) -> dict[str, Any]:
+    """副命令の結果の値の項目（種類 value。`ndf.domains.release.cli.VALUE_KIND`。領域を import しない）と outputs の版。"""
+    items = report["items"] if isinstance(report.get("items"), list) else []
+    found = {str(i["name"]): i["value"] for i in items if isinstance(i, dict) and i.get("kind") == "value" and "name" in i}
+    outputs = report["outputs"] if isinstance(report.get("outputs"), dict) else {}
+    return {**found, **({"version": outputs["version"]} if "version" in outputs else {})}
+
+
 def _request_fields(v: run.View, q: Question, lane_name: Optional[str]) -> dict[str, Any]:
     issues = sprint_issues(v)
     return {
@@ -127,7 +135,8 @@ def _released(reply: Mapping[str, Any], value: str) -> dict[str, Any]:
 
 
 def _merged_reply(q: Question, runner: invoke.Runner, cwd: Path) -> Optional[dict[str, Any]]:
-    """副命令 `answer --route github-merge` を打ち、本番の PR がマージ済みなら結果の `outputs` を返す（まだなら None）。
+    """副命令 `answer --route github-merge` を打ち、本番の PR がマージ済みなら結果の値（`state`・`by`・`head`・`version`）を返す
+    （まだなら None）。
 
     ほかの止まり方・結果 JSON を読めない・起動できないときは `model.Refused`（待ちは残る）。
     """
@@ -140,8 +149,8 @@ def _merged_reply(q: Question, runner: invoke.Runner, cwd: Path) -> Optional[dic
     if got is None:
         first = done.stderr.strip().splitlines()[:1]
         raise model.Refused(f"人のマージを読む副命令の結果 JSON を読めない（終了コード {done.returncode}）: {''.join(first)}")
-    if got["status"] == "ok" and isinstance(got.get("outputs"), dict):
-        return dict(got["outputs"])
+    if got["status"] == "ok":
+        return _reply_values(got)
     cause = got["cause"] if isinstance(got.get("cause"), dict) else {}
     if cause.get("kind") == NOT_MERGED_KIND:
         return None
