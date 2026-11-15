@@ -180,9 +180,12 @@ def admin_back(back=None):
 
     def run(items: list[dict], metrics: dict, done: str) -> tuple[str, int, str]:
         status, code, done = back(items, metrics, done) if back else ("ok", None, done)
-        if admin_unwritten(items):
-            return "stopped", (code or 1) if status != "ok" else 1, f"{done}。{UNWRITTEN_NOTE}"
-        return status, code, done
+        if not admin_unwritten(items):
+            return status, code, done
+        note = f"{done}。{UNWRITTEN_NOTE}"
+        if status != "ok":  # 戻すマージが止まっていればその終了コード（無ければ 1）
+            return "stopped", code or 1, note
+        return "stopped", 1, note
 
     return run
 
