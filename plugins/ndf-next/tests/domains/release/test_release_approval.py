@@ -907,6 +907,14 @@ def test_characterize_cli_merge_record_error_stops_as_unknown_without_moves(monk
     }
 
 
+def test_merge_result_takes_the_landed_directly_and_matches_the_cli(monkeypatch, capsys, tmp_path) -> None:
+    """結果の組み立て（`_merge_result`）へ Landed を直接渡した結果は、main 経由の出力と同じ。"""
+    done = land.Landed(True, None, "マージした", version="1.2.4", record_error="書けない")
+    _code, out, _seen_args = _cli_merge(monkeypatch, capsys, done, tmp_path, "--production", "main")
+    args = release_cli._parser().parse_args(["merge", "--pr", "7", "--base", "develop", "--budget", "30", "--production", "main"])
+    assert release_cli._merge_result(args, done) == out
+
+
 def test_characterize_cli_merge_merged_with_a_kind_stops_with_that_kind_without_moves(monkeypatch, capsys, tmp_path) -> None:
     done = land.Landed(True, "ci_pending", "戻す PR を待つ")
     code, out, seen = _cli_merge(monkeypatch, capsys, done, tmp_path, "--production", "main")

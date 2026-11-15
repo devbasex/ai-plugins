@@ -160,6 +160,11 @@ def _moves(args: argparse.Namespace, kind: str) -> dict[str, Any]:
 def cmd_merge(args: argparse.Namespace) -> dict:
     admin = decl_mod.production_admin(Path(args.root))
     done = land.Lander(_hub(args), args.base, _production_of(args), args.budget, admin=admin).land(args.pr)
+    return _merge_result(args, done)
+
+
+def _merge_result(args: argparse.Namespace, done: land.Landed) -> dict:
+    """マージの結果 `done` を結果 JSON（items・outputs・止まった理由・記録の失敗の説明・止まったときの次の手）にする。"""
     outputs = {"version": done.version} if done.version is not None else None
     approval = done.approval.as_json() if done.approval is not None else None
     items = [{"kind": "check", "name": c.name, "outcome": c.conclusion} for c in done.failed]
