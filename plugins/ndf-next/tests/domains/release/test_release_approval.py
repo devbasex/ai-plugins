@@ -277,6 +277,20 @@ def test_admin_declaration_does_not_count_the_mvv_trail() -> None:
 
 
 @pytest.mark.parametrize(
+    "rejection",
+    [
+        Authored("octocat", "OWNER", approval_decide.render_trail("rejected", HEAD, trail.MVV_BY)),  # MVV 判定の差し戻し
+        Authored("octocat", "OWNER", approval_decide.render_trail("rejected", HEAD, trail.USER_BY).replace("担い手: user\n", "")),
+    ],
+)
+def test_admin_declaration_counts_rejections_by_any_trusted_author(rejection: Authored) -> None:
+    """I9: 利用者の承認の後の差し戻しは、担い手が user でなくても数えて refused で止まり、迂回しない。"""
+    hub = AdminHub(pulls={7: pull()}, comments_of={7: [_trail("approved", HEAD), rejection]})
+    done = _admin_lander(hub).land(7)
+    assert not done.merged and done.kind == "refused" and hub.admin_merged == [] and hub.merged == []
+
+
+@pytest.mark.parametrize(
     "comment",
     [
         Authored("octocat", "OWNER", approval_decide.render_trail("approved", HEAD, "x")),  # 担い手が user でない
@@ -372,7 +386,7 @@ def test_production_admin_reads_only_json_true(tmp_path: Path, body: Any, admin:
 
 
 def test_production_admin_reads_the_main_directory_before_the_worktree(tmp_path: Path) -> None:
-    """I1: PR の作業場所の宣言だけに迂回を足しても選べない。メインディレクトリの宣言が先に効く。"""
+    """I1: PR の作業場所の宣言だけに迂回を足しても選べない。メインディレクトリの宣言だけが効く。"""
     import subprocess
 
     main, wt = tmp_path / "main", tmp_path / "wt"
@@ -389,4 +403,4 @@ def test_production_admin_reads_the_main_directory_before_the_worktree(tmp_path:
         (root / declaration.PROJECT_FILE).write_text(json.dumps({"production_merge": {"admin": admin}}), encoding="utf-8")
     assert declaration.production_admin(wt) is False
     (main / declaration.PROJECT_FILE).unlink()
-    assert declaration.production_admin(wt) is True
+    assert declaration.production_admin(wt) is False  # メインディレクトリに無ければ作業場所の宣言で補わない（#2363）

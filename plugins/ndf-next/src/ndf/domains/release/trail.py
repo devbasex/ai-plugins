@@ -71,10 +71,17 @@ def _by_of(body: str) -> str | None:
 
 def _counts(hub: GitHub, c: Authored, human_only: bool) -> bool:
     """証跡の判定に数えるコメントか。信用する書き手が書き、作成の後に編集されていない（書き込みの権限を持つ人は他人の
-    コメントを編集できる）。`human_only` なら担い手が利用者（`USER_BY`）と明示された証跡だけ（#3506 の I9）。"""
-    if c.edited or (human_only and _by_of(c.body) != USER_BY):
+    コメントを編集できる）。`human_only` なら承認は担い手が利用者（`USER_BY`）と明示された証跡だけを数え、差し戻しは
+    担い手を問わず数える（利用者の承認の後の差し戻しを捨てて迂回しない。#3506 の I9）。"""
+    if c.edited or (human_only and _by_of(c.body) != USER_BY and not _rejects(c)):
         return False
     return hub.trusts(c)
+
+
+def _rejects(c: Authored) -> bool:
+    """コメントが差し戻し（`approval_decide.REJECTED`）の証跡か。"""
+    got = approval_decide.parse(0, c.author, c.body)
+    return got is not None and got.answer == approval_decide.REJECTED
 
 
 def read(hub: GitHub, number: int, human_only: bool = False) -> Read:

@@ -146,16 +146,17 @@ def run_step(root: Path, step: Step, version: str) -> None:
 
 
 def _admin_declaration(root: Path) -> Path:
-    """迂回の宣言を読むファイル。メインディレクトリ → 無ければ呼ばれた木（契約の `production_merge` の置き場は `main`）。
+    """迂回の宣言を読むファイル（契約の `production_merge` の置き場は `main`）。
 
-    PR の作業場所の宣言だけを変えても迂回を選べないよう、メインディレクトリの宣言を先に読む（旧いプラグインの
-    `project_decl.production_admin` と同じ順。#3506 の I1）。git の外ならメインディレクトリを持たないので呼ばれた木。
+    メインディレクトリが解ければそこのファイルだけを読み、無くても呼ばれた木の値で補わない。PR の作業場所が
+    足した宣言だけで迂回を選べないようにする（旧いプラグインの `decl.overlay_keys` と同じ扱い。#2363・#3506 の I1）。
+    git の外ならメインディレクトリを持たないので呼ばれた木。
     """
     try:
         main = git_mod.Git(root).common_dir().parent
     except git_mod.GitError:  # git の外はメインディレクトリが無いので呼ばれた木の宣言を読む
         return root / PROJECT_FILE
-    return main / PROJECT_FILE if (main / PROJECT_FILE).is_file() else root / PROJECT_FILE
+    return main / PROJECT_FILE
 
 
 def production_admin(root: Path) -> bool:
