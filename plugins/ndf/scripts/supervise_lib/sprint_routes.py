@@ -246,10 +246,10 @@ def normal_prod_waves(a, repo: str, release: dict, prod_plan: dict, first: str, 
     return [release, {"name": RELEASE_GATE, "gate": normal_gate_2_stage(a, repo, prod, advise)}, {"name": "本番", "plans": prod_plan}]
 
 
-def normal_cd_gate_2(a, case: str) -> str:
+def normal_cd_gate_2(a, case: release_case.Case) -> str:
     """CD のある場合（#2773 の決定 6）の本番のステージの文。リリース承認ゲートは本番のプランの中にあり、承認資料を本番の PR へ
     置いた（approval-post）ところで止まる。承認の手順はここの 1 か所に置く。"""
-    if case == release_case.CD_REVIEW:
+    if case.case == release_case.CD_REVIEW:
         return (
             "リリース承認ゲートは本番のプランの中にある: approval-post が承認資料を本番の Pull Request へ置いて止まる。本番の Pull Request の"
             f"レビューの承認を得たら `{user_gate_cmd(a, RELEASE_GATE, False)}` を打ち、承認されたら"

@@ -172,6 +172,12 @@ class NdfPolicies(schema.Shape):
     reject_md_wording_tests: bool
 
 
+class ProductionMerge(schema.Shape):
+    """本番の PR のマージの方式（#3506）。`admin` が true なら、本番チャネルが承認レビューを必須にするとき管理者の迂回でマージする。利用者が手で書き、解析は書かない。"""
+
+    admin: StrictBool
+
+
 class Import(schema.Shape):
     from_: str = Field(alias="from")
     to: str
@@ -308,6 +314,7 @@ class ProjectDecl(schema.Shape):
     instructions: Optional[Union[Instructions, Unknown]] = None
     materials: Optional[Union[Materials, Unknown]] = None
     docs: Optional[Union[Docs, Unknown]] = None
+    production_merge: Optional[Union[ProductionMerge, Unknown]] = None
     analysis: Optional[Analysis] = None
 
     model_config = {**schema.Shape.model_config, "populate_by_name": True}

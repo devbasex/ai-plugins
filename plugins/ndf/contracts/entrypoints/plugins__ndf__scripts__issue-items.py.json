@@ -33,7 +33,8 @@
       "file": "project.json",
       "keys": [
         "issues",
-        "ndf_policies"
+        "ndf_policies",
+        "production_merge"
       ]
     }
   ],

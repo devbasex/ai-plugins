@@ -27,8 +27,8 @@ def _runner(got: dict[str, Any]) -> preflight.Runner:
 def _mvv(root: Path, approved_body: str, body: str) -> None:
     (root / ".ndf").mkdir(exist_ok=True)
     sha = hashlib.sha256(approved_body.encode("utf-8")).hexdigest()
-    (root / ".ndf" / "mvv.json").write_text(json.dumps({"body": "mvv.md", "versions": [{"version": 1, "sha256": sha}]}), encoding="utf-8")
-    (root / ".ndf" / "mvv.md").write_text(body, encoding="utf-8")
+    (root / ".ndf" / "mvv.json").write_text(json.dumps({"body": "body.md", "versions": [{"version": 1, "sha256": sha}]}), encoding="utf-8")
+    (root / ".ndf" / "body.md").write_text(body, encoding="utf-8")
 
 
 def test_all_three_pass_into_one_ok_result(tmp_path: Path) -> None:
@@ -59,7 +59,7 @@ def test_mvv_states(tmp_path: Path) -> None:
     assert preflight.mvv_state(tmp_path) == "absent"
     _mvv(tmp_path, "a", "a")
     assert preflight.mvv_state(tmp_path) == "approved"
-    (tmp_path / ".ndf" / "mvv.md").unlink()
+    (tmp_path / ".ndf" / "body.md").unlink()
     assert preflight.mvv_state(tmp_path) == "unreadable"
 
 

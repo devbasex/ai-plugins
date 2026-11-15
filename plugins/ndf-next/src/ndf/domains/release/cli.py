@@ -8,6 +8,9 @@
 | `answer` | 会話のセッション | `trail.answer`（答えを証跡に書き、届いたかを確かめる） |
 | `approval-check` | workflow | `trail.check`（証跡の判定を commit status へ） |
 | `merge` | workflow | `land`（証跡の後のマージと、ベースブランチへ戻す PR） |
+| `record` | workflow | `record.write`（含めた PR の各々へリリース記録を書く。本番ブランチへのマージの後） |
+| `verification-record` | 会話のセッション | `record.write_verification`（リリース後テストの記録を、リリース記録と同じ PR へ書く） |
+| `records` | 会話のセッション | `record.read`（PR のリリース記録とリリース後テストの記録を読む） |
 | `publish` | workflow | `tagging`（タグと GitHub Release） |
 | `sync-base` | 会話のセッション | `verify.sync_base`（メインディレクトリのベースブランチをそろえる） |
 | `config-snapshot`・`config-check` | 会話のセッション | `verify.snapshot`（利用者の設定の控えと比べ） |
@@ -33,6 +36,8 @@ from ndf.domains.release import (
     cleanup,
     land,
     materials_decide,
+    record,
+    record_decide,
     sync_decide,
     tagging,
     trail,
@@ -104,13 +109,44 @@ def cmd_approval_check(args: argparse.Namespace) -> dict:
 
 
 def cmd_merge(args: argparse.Namespace) -> dict:
-    done = land.Lander(_hub(args), args.base, args.production, args.budget).land(args.pr)
+    admin = decl_mod.production_admin(Path(args.root))
+    done = land.Lander(_hub(args), args.base, args.production, args.budget, admin=admin).land(args.pr)
     outputs: dict[str, Any] = {"sync_pr": done.sync_pr} if done.sync_pr is not None else {}
     if done.production_sha is not None:
         outputs["production_sha"] = done.production_sha
-    if done.merged and done.kind is None:
-        return result.result(TOOL, result.OK, done.detail, outputs=outputs)
-    return result.stopped(TOOL, done.kind if done.kind else "unknown", done.detail, outputs=outputs)
+    outputs["admin"] = done.admin
+    if done.admin_record is not None:
+        outputs["admin_record"] = done.admin_record
+    detail = done.detail
+    if done.record_error is not None:  # 本番は出ている。記録だけを打ち直しで書く（#3506 の決定 7）
+        detail = f"{detail}。迂回の記録を書けなかった（本番は出ている）: {done.record_error}"
+    if done.merged and done.kind is None and done.record_error is None:
+        return result.result(TOOL, result.OK, detail, outputs=outputs)
+    return result.stopped(TOOL, done.kind if done.kind else "unknown", detail, outputs=outputs)
+
+
+def cmd_record(args: argparse.Namespace) -> dict:
+    made, written = record.write(_hub(args), args.pr, args.production)
+    count = sum(1 for w in written if w.result == record.WRITTEN)
+    outputs = {"version": made.version, "included": list(made.included)}
+    detail = f"v{made.version} のリリース記録を {count} 件書いた（含めた PR {len(written)} 本。既にあった {len(written) - count} 本）"
+    return result.result(TOOL, result.OK, detail, [w.item() for w in written], outputs=outputs)
+
+
+def cmd_verification_record(args: argparse.Namespace) -> dict:
+    payload = json.loads(Path(args.record).read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise record.RecordError(f"{args.record} はオブジェクトの JSON でない")
+    url = record.write_verification(_hub(args), args.pr, payload)
+    return result.result(TOOL, result.OK, f"#{args.pr} へリリース後テストの記録を書いた: {url}", outputs={"url": url})
+
+
+def cmd_records(args: argparse.Namespace) -> dict:
+    got = record.read(_hub(args), args.pr)
+    outputs = {"release": got.release.as_json() if got.release else None, "verifications": list(got.verifications)}
+    version = got.release.version if got.release else "無し"
+    detail = f"#{args.pr} のリリース記録（版 {version}）とリリース後テストの記録 {len(got.verifications)} 件を読んだ"
+    return result.result(TOOL, result.OK, detail, outputs=outputs)
 
 
 def cmd_publish(args: argparse.Namespace) -> dict:
@@ -190,7 +226,9 @@ def _material(p: argparse.ArgumentParser) -> None:
 def _answer_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--answer", choices=approval_decide.ANSWERS, required=True)
     p.add_argument("--presented", required=True, help="提示した先端の SHA（present の outputs.head）")
-    p.add_argument("--by", required=True, help="答えた人")
+    p.add_argument(
+        "--by", required=True, choices=trail.BY_CHOICES, help="答えた担い手（利用者 user / MVV 判定 mvv。迂回は user だけを数える）"
+    )
 
 
 def _materials_out(p: argparse.ArgumentParser) -> None:
@@ -207,6 +245,10 @@ def _budget(p: argparse.ArgumentParser) -> None:
 
 def _revision(p: argparse.ArgumentParser) -> None:
     p.add_argument("--revision", required=True)
+
+
+def _verification(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--record", required=True, help="リリース後テストの記録の JSON（スキーマ release-verification）")
 
 
 def _main_dir(p: argparse.ArgumentParser) -> None:
@@ -237,6 +279,9 @@ ARGS: dict[Callable[[argparse.Namespace], dict], tuple[Callable[[argparse.Argume
     cmd_answer: (_pr, _answer_args),
     cmd_approval_check: (_pr, _production),
     cmd_merge: (_pr, _branches, _budget),
+    cmd_record: (_pr, _production),
+    cmd_verification_record: (_pr, _verification),
+    cmd_records: (_pr,),
     cmd_publish: (_revision,),
     cmd_sync_base: (_main_dir, _base),
     cmd_config_snapshot: (_snapshot_out,),
@@ -265,6 +310,9 @@ _ERRORS: tuple[tuple[type[Exception], str], ...] = (
     (assemble.AssembleError, "precondition"),
     (assemble.ReleaseOpen, "refused"),
     (trail.TrailError, "refused"),
+    (record.NotReleased, "not_applicable"),
+    (record.RecordError, "precondition"),
+    (record_decide.UnreadableRecord, "invalid"),
     (decl_mod.DeclarationError, "precondition"),
     (decl_mod.StepFailed, "check_failed"),
     (plugins_mod.PluginsError, "precondition"),
