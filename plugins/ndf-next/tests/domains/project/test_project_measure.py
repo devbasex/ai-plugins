@@ -160,3 +160,64 @@ def test_pr_kind():
     assert measure_flow.pr_kind("release/v1.0.0", "main", "develop", "main") == "release"
     assert measure_flow.pr_kind("review/release/v1.0.0-base", "main", "develop", "main") is None
     assert measure_flow.pr_kind("spec/x", "develop", "develop", "main") == "spec"
+
+
+def _small_repo(tmp_path, files: dict[str, str]) -> Path:
+    path = tmp_path / "small"
+    path.mkdir()
+    _git(path, "init", "-q", "-b", "main")
+    _git(path, "config", "user.email", "t@example.com")
+    _git(path, "config", "user.name", "t")
+    for name, text in files.items():
+        (path / name).parent.mkdir(parents=True, exist_ok=True)
+        (path / name).write_text(text, encoding="utf-8")
+    _git(path, "add", ".")
+    _git(path, "commit", "-qm", "init")
+    return path
+
+
+def test_measure_materials_libraries_analytics_and_readme_evidence(tmp_path):
+    """現状固定（I-006）: 依存の言語ごとの並び・処理系の行の除外・解析の SDK・最初の README の冒頭 8 行。"""
+    long_line = "x" * 250
+    readme = "\n".join(["# 題", "", long_line] + [f"行{i}" for i in range(10)]) + "\n"
+    path = _small_repo(tmp_path, {"README.ja.md": readme, "README.md": "# 英語\n", "docs/README.md": "# 下\n"})
+    deps = {
+        "php": {"php": "^8.3", "laravel/framework": "^10", "sentry/sdk": "^3"},
+        "javascript": {"node": ">=20", "@datadog/browser": "1", "react": "18"},
+        "python": {"python": ">=3.11", "requests": "2"},
+        "go": {"x/y": "1"},
+    }
+    got = measure_repo.measure_materials(_tree(path), deps)
+    assert got == {
+        "status": "question",
+        "candidates": {
+            "product": None,
+            "needs": {"usage": [], "market": []},
+            "seeds": {
+                "libraries": [
+                    {"name": "laravel/framework", "ecosystem": "packagist", "alternatives": []},
+                    {"name": "sentry/sdk", "ecosystem": "packagist", "alternatives": []},
+                    {"name": "@datadog/browser", "ecosystem": "npm", "alternatives": []},
+                    {"name": "react", "ecosystem": "npm", "alternatives": []},
+                    {"name": "requests", "ecosystem": "pypi", "alternatives": []},
+                    {"name": "x/y", "ecosystem": "go", "alternatives": []},
+                ],
+                "environment": [],
+            },
+            "deferred_milestones": [],
+        },
+        "evidence": [{"file": "README.ja.md", "text": t} for t in ["# 題", "x" * 200] + [f"行{i}" for i in range(6)]]
+        + [{"text": "packagist: sentry/sdk"}, {"text": "npm: @datadog/browser"}],
+    }
+
+
+def test_measure_materials_caps_libraries_and_evidence(tmp_path):
+    """現状固定（I-006）: ライブラリは MAX_LIBRARIES 件まで・解析の SDK は上限の後も数え、根拠は MAX_EVIDENCE 件まで。"""
+    path = _small_repo(tmp_path, {"a.txt": "a\n"})
+    deps = {"javascript": {f"lib{i:02d}": "1" for i in range(measure_repo.MAX_LIBRARIES)} | {f"zz-sentry-{i:02d}": "1" for i in range(25)}}
+    got = measure_repo.measure_materials(_tree(path), deps)
+    libraries = got["candidates"]["seeds"]["libraries"]
+    assert [x["name"] for x in libraries] == [f"lib{i:02d}" for i in range(measure_repo.MAX_LIBRARIES)]
+    assert got["evidence"] == [{"text": f"npm: zz-sentry-{i:02d}"} for i in range(measure_repo.MAX_EVIDENCE)]
+    empty = measure_repo.measure_materials(_tree(path), {})
+    assert empty["evidence"] == [] and empty["candidates"]["seeds"]["libraries"] == []
