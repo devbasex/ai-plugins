@@ -218,3 +218,19 @@ def test_cli_assemble_outputs_the_pr_and_the_version_and_refuses_the_channel(mon
     assert out["outputs"] == {"pr": PR, "version": "1.2.4"}
     with pytest.raises(SystemExit):
         release_cli.main(["assemble", "--root", str(work), "--pr", str(PR), "--channel", "dev"])
+
+
+def test_splice_replaces_only_the_section_and_drops_a_broken_mark() -> None:
+    start, end = materials_decide.MATERIALS_START, materials_decide.MATERIALS_END
+    body = f"前\n\n{start}\n古い\n{end}\n後\n"
+    assert materials_decide.splice(body, "新しい\n") == f"前\n\n{start}\n新しい\n{end}\n後\n"
+    assert materials_decide.splice("本文", "資料") == f"本文\n\n{start}\n資料\n{end}\n"
+    assert materials_decide.splice("", "資料") == f"{start}\n資料\n{end}\n"
+    broken = materials_decide.splice(f"本文\n{start}\n半端", "資料")
+    assert broken.count(start) == 1 and broken.endswith(f"{start}\n資料\n{end}\n") and "半端" in broken
+
+
+def test_the_version_record_refuses_a_suffixed_version() -> None:
+    assert trail.VERSION_MARK in trail.render_version_record("1.3.0", "kit--v1.3.0", 20)
+    with pytest.raises(ValueError):
+        trail.render_version_record("1.3.0-next.1", "kit--v1.3.0", 20)
