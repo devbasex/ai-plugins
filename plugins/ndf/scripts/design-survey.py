@@ -302,6 +302,11 @@ def repo_items(group: list[Doc], settings: design_repos.RepoSettings) -> list[di
     return items
 
 
+def _count_rules(items: list[dict], rules: tuple[str, ...]) -> dict[str, int]:
+    """規則の並びごとに、指摘の件数を数える。"""
+    return {r: sum(1 for it in items if it["rule"] == r) for r in rules}
+
+
 def judge_docs(docs: list[Doc], require_detail: bool, settings: design_repos.RepoSettings | None = None) -> tuple[list[dict], dict]:
     """文書の並びに調査・レッドライン・詳細設計・代表のリポジトリの判定を当て、指摘（判定の順）と metrics を返す。"""
     groups = survey_groups(docs)
@@ -318,13 +323,11 @@ def judge_docs(docs: list[Doc], require_detail: bool, settings: design_repos.Rep
     detail = [it for g in groups for it in detail_items(g, require_detail)]
     items += detail
     metrics["detail_docs"] = sum(1 for d in docs if is_detail(d.path))
-    for rule in (*RULES, "detail_missing"):
-        metrics[rule] = sum(1 for it in detail if it["rule"] == rule)
+    metrics.update(_count_rules(detail, (*RULES, "detail_missing")))
     if settings is not None:  # 設定の無いリポジトリの結果は今と同じ（#3618 の I3）
         repos = [it for g in groups for it in repo_items(g, settings)]
         items += repos
-        for rule in design_repos.RULES:
-            metrics[rule] = sum(1 for it in repos if it["rule"] == rule)
+        metrics.update(_count_rules(repos, design_repos.RULES))
     return items, metrics
 
 
