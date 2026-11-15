@@ -162,3 +162,33 @@ def test_wpm_overrides_the_default(work: Path, args: list[str], wpm: float, s1: 
 @pytest.mark.parametrize("args", [[], ["--json"], ["--wpm", "100"]])
 def test_usage_without_a_script(work: Path, args: list[str]):
     assert cli(work, *args) == (1, "", USAGE + "\n")
+
+
+@pytest.mark.parametrize(
+    ("args", "message"),
+    [
+        (["s.md", "--wpm", "0"], "--wpm は正の数"),
+        (["s.md", "--wpm", "abc"], "--wpm は正の数"),
+        (["s.md", "--wpm"], "--wpm は正の数"),
+        (["s.md", "--limit", "-1"], "--limit は正の数"),
+        (["s.md", "--foo"], "知らない引数: --foo"),
+        (["s.md", "--wpm=100"], "知らない引数: --wpm=100"),
+        (["s.md", "other.md"], "台本は 1 つだけ渡す: other.md"),
+        (["s.md", "-x"], "台本は 1 つだけ渡す: -x"),
+    ],
+)
+def test_bad_arguments_exit_1(work: Path, args: list[str], message: str):
+    assert cli(work, *args) == (1, "", message + "\n")
+
+
+@pytest.mark.parametrize("args", [["--json", "s.md"], ["s.md", "--json", "--json"], ["--wpm", "350", "s.md", "--json"]])
+def test_flags_may_come_before_or_after_the_script(work: Path, args: list[str]):
+    code, out, _ = cli(work, *args)
+    assert code == 0
+    assert json.loads(out) == sample_json(350, 0.9, 2.1, 3)
+
+
+def test_limit_is_reported_in_json(work: Path):
+    code, out, _ = cli(work, "s.md", "--limit", "1", "--json")
+    assert code == 0
+    assert json.loads(out) == {**sample_json(350, 0.9, 2.1, 3), "limit": {"minutes": 1, "over": False}}
