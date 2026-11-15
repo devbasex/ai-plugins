@@ -1,10 +1,10 @@
 # 3 層で工程を通す（conductor / supervisor / worker）
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `projects-sync.sh`（M7）・`stage-skills.py`（C5）・`supervise.py`（C2）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `projects-sync.sh`（M7）・`stage-skills.py`（C5）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 **工程を 3 層へ出し、2 つの承認ゲート以外を人間の入力なしで通す。** 人間と対話しているセッション
-（conductor）がフェーズごとにプラン（`supervise.py`）をキューで流し、プランが 1 つの作業を worker
-（毎回新しい `claude -p`）へ出す。**supervisor の役割は `supervise.py` が主に担い、`supervise.py` で対応できないとき
+（conductor）がフェーズごとにプラン（`ndf plan`）をキューで流し、プランが 1 つの作業を worker
+（毎回新しい `claude -p`）へ出す。**supervisor の役割は `ndf plan` が主に担い、`ndf plan` で対応できないとき
 （プランの雛形が無いときなど）だけ、supervisor のサブエージェント（`ndf:supervisor`）が代行する。** そのときは
 conductor が代行のサブエージェントを起動し、代行が 1 つの作業をサブエージェント（worker）へ出す（下の「プランで流すか
 supervisor で回すか」）。
@@ -22,7 +22,7 @@ conductor へ伝えれば次のフェーズから反映する。
 | 層 | 何者か | 人間へ問えるか | 起動する相手 | 持たないもの |
 | --- | --- | --- | --- | --- |
 | conductor | 人間と対話しているセッション。`/ndf:development-workflow` を受ける | **問える**（`AskUserQuestion`） | プラン（キュー）。テンプレートの無いフェーズだけ supervisor | 工程 Skill の実行。**`development-workflow` と `issue-plan-strategy` 以外を起動しない** |
-| supervisor | 1 つのフェーズ（連続する工程のグループ）を通す役割。`supervise.py` が主に担い、プランの雛形が無いなど対応できないフェーズだけサブエージェント（`ndf:supervisor`）が代行する | 問えない | worker | 人間への問い、設計 Pull Request のマージ、承認のない本番の操作 |
+| supervisor | 1 つのフェーズ（連続する工程のグループ）を通す役割。`ndf plan` が主に担い、プランの雛形が無いなど対応できないフェーズだけサブエージェント（`ndf:supervisor`）が代行する | 問えない | worker | 人間への問い、設計 Pull Request のマージ、承認のない本番の操作 |
 | worker | 1 つの作業（調査・修正・検証・集計）を行うサブエージェント | 問えない | 起動しない。**別のサブエージェントを起動しない** | 人間への問い、進捗記録、収束の判定、設計の決定 |
 
 **worker は葉である。** 深さ 3（worker がさらに起動する形）は実測していない。
@@ -41,7 +41,7 @@ context window を埋めるときは、**読解だけを worker へ出す**（co
 ## フェーズ
 
 **フェーズは supervisor 1 つ（またはプラン 1 本）が通す工程のグループで、6 つある。** `context-window.md` のカットポイント 4 点で
-切った下の表の 5 つと、`supervise.py new release` のプランが通す**デプロイ**（プランの `"フェーズ"` の値は `開発版のデプロイ` / `リリース`）
+切った下の表の 5 つと、`ndf route render release` のプランが通す**デプロイ**（プランの `"フェーズ"` の値は `開発版のデプロイ` / `リリース`）
 である。[承認ゲート](../SKILL.md)の 2 つはそれぞれ設計と取り込みの終わりに当たる。
 
 | フェーズ | 通す工程（工程表の行） | 単位 | 始まりの条件 | 終わりの条件 | 返す承認ゲート |
@@ -65,9 +65,9 @@ context window を埋めるときは、**読解だけを worker へ出す**（co
 **Draft を開く位置は既存の規約のとおりである**（[stage-notes.md](stage-notes.md) のリファクタリングの節）。
 フェーズの表は、その 1 度の呼び出しを実装のフェーズの終わりに置いただけで、工程表の順序を変えない。
 
-**スプリントの中の並列は、設計と実装のフェーズで開く。** `supervise.py new sprint` が `.ndf/` の設定から
-設計のプランを設計 Pull Request ごとに、実装のプランを課題ごとに書き出し、`supervise.py queue --max 3` が
-同時に 3 本まで流す。検査・取り込み・仕上げはスプリントで 1 つずつ流す。スプリントブランチ（`sprint/<名前>`）は、
+**スプリントの中の並列は、設計と実装のフェーズで開く。** `ndf progress new` が `.ndf/` の設定から
+設計のプランを設計 Pull Request ごとに、実装のプランを課題ごとに書き出し、`ndf plan queue --max 3` が
+同時に 3 本まで流す（`--max` を省くと、触るファイルの重ならないプランをすべて一度に起動する）。検査・取り込み・仕上げはスプリントで 1 つずつ流す。スプリントブランチ（`sprint/<名前>`）は、
 設計承認ゲートの承認とマージの後に、スプリントブランチのステージのプランがベースブランチ（`.ndf/worktree.json` の
 `base_branch`）から 1 度だけ切る。supervisor で回すフェーズも同じ単位と本数で起動する。
 
@@ -79,7 +79,7 @@ context window を埋めるときは、**読解だけを worker へ出す**（co
 進捗ログの `attention`）をテンプレートとして持つ。打つコマンドの並びは [waiting.md](waiting.md) の
 「スプリントを流すコマンド」にある。
 
-| フェーズ | プラン（`supervise.py new` の種別） | ステージ（目録 `<out>/sprint.json`） | supervisor で回すとき |
+| フェーズ | プラン（`ndf plan` new` の種別） | ステージ（目録 `<out>/sprint.json`） | supervisor で回すとき |
 | --- | --- | --- | --- |
 | 設計 | `new sprint --design <課題>...` の設計のプラン（設計 Pull Request ごと）。終わりの judge が設計承認ゲートを返す | 設計 → 設計承認ゲート | `--design` を渡さないときの要求と受け入れ条件（`requirements-design`）の工程。設計のプランはこの工程を持つ（課題の本文と仕様のコピーが一致すれば飛ばす） |
 | 実装 | `new sprint` の実装のプラン（課題ごと。スプリントブランチ宛て）。スプリントブランチはその前のステージのプランが切る。単発は `new impl` | スプリントブランチ → 実装 | — |
@@ -93,9 +93,9 @@ context window を埋めるときは、**読解だけを worker へ出す**（co
 | 条件 | 見分け方 | conductor の動き |
 | --- | --- | --- |
 | プランのテンプレートが無い | 表の「supervisor で回すとき」の列の工程、表に無いモードの組み方（`operation` の実行、`documentation` の素材の収集など）、リリースの形（`.ndf/supervise.json` の `release.form`）のテンプレートが無い | その工程だけを supervisor で回し、残りはプランで流す |
-| テンプレートに要る設定が無い | `supervise.py new` が設定の不足（`.ndf/worktree.json` の `base_branch`、テストの宣言（`.ndf/project.json` の `test`、無ければ `.ndf/supervise.json` の `test.command`）。`new release` では `release` も）で止まる。`new sprint` は `release` が無くても止まらず、手で行うリリースのステージを最後に置く | 設定を足せるなら足して打ち直す。足せなければそのフェーズを supervisor で回す |
+| テンプレートに要る設定が無い | `ndf plan` new` が設定の不足（`.ndf/worktree.json` の `base_branch`、テストの宣言（`.ndf/project.json` の `test`、無ければ `.ndf/supervise.json` の `test.command`）。`new release` では `release` も）で止まる。`new sprint` は `release` が無くても止まらず、手で行うリリースのステージを最後に置く | 設定を足せるなら足して打ち直す。足せなければそのフェーズを supervisor で回す |
 
-**`supervise.py --help` の説明を読んでプランを外さない。** `new sprint` は設計承認ゲートの前の設計から
+**`ndf plan --help` の説明を読んでプランを外さない。** `new sprint` は設計承認ゲートの前の設計から
 書き出す（`--design` を渡したとき）。
 
 ### モードごとの組み方
@@ -183,7 +183,7 @@ supervisor が守る規則:
 13. **設計の工程（設計文書を書く・直す作業）は、`design` の [design-template.md の「承認する人が読む欄」](../../design/references/design-template.md#承認する人が読む欄) に従わせる。** 設計承認ゲートを返す前に、埋められる欄は埋める
 14. **フェーズの終わりの条件を満たしたら、Skill の本文が続きの作業を指示していても始めず、フェーズレポートを返す。** 続きの指示は、フェーズレポートの `理由` に「<Skill>: <続きの作業>（始めていない）」と書く。工程表とフェーズの表に無い作業は、Skill の本文が指示しても工程として扱わない
 
-**`supervise.py run` / `queue` で回すフェーズの待ち方と `progress.jsonl` の読み方は、[waiting.md](waiting.md) の「supervise.py の進捗ログ」に従う。**
+**`ndf plan next` / `queue` で回すフェーズの待ち方と `progress.jsonl` の読み方は、[waiting.md](waiting.md) の「`ndf plan` の進捗ログ」に従う。**
 
 ### supervisor → worker
 
@@ -256,7 +256,7 @@ python3 "$SCRIPTS/lib/step_result.py" emit --tool worker --status <ok|gate|stopp
 | `判断が要る` | `gate` | `--next` に判断が要る理由 |
 | `できなかった` | `stopped` | `--gap` に 1 件ずつ理由 |
 
-形が違えば CLI が終了コード 2 で拒み、ファイルは書かれない。worker は直して打ち直す。**supervisor（`supervise.py` の
+形が違えば CLI が終了コード 2 で拒み、ファイルは書かれない。worker は直して打ち直す。**supervisor（`ndf plan` の
 work のステップを含む）は、このファイルが `ok` のときだけ作業を成功と読む。** ファイルが無い・読めない・形が違うときは
 失敗として扱い、`## 作業の報告` の文から成否を決めない。報告の節は人と conductor が経緯を読むために残す。
 
@@ -300,7 +300,7 @@ supervisor を起動できる。
 conductor が読む量は変わらない。
 
 **プランで流したフェーズの結果は、キューの done の `status` で読む**（[waiting.md](waiting.md) の
-「supervise.py の進捗ログ」）。`gate` なら承認資料を添えて承認を取り（`AskUserQuestion` に `ndf-gate:1` か `ndf-gate:2` を付ける）、承認の後に目録（`<out>/sprint.json`）の
+「`ndf plan` の進捗ログ」）。`gate` なら承認資料を添えて承認を取り（`AskUserQuestion` に `ndf-gate:1` か `ndf-gate:2` を付ける）、承認の後に目録（`<out>/sprint.json`）の
 次のステージの `command` を打つ。下の表は supervisor のフェーズレポートにだけ当たる。
 
 **conductor が見るのは、見出しの有無と `結果` の 2 つである。**

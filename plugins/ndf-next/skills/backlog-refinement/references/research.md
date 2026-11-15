@@ -1,6 +1,6 @@
 # ニーズとシーズの調査
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `project-decl.py`（D2+）・`supervise.py`（C2）・`upkeep.py`（M6）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `upkeep.py`（M6）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 **具体例**: 開発ツールのプラグインは、`materials.needs.usage` に Skill の利用統計を集計するコマンド（`aggregate_only: true`）を、
 `seeds.libraries` に pytest（競合の候補 ward）を宣言する。調査は「`needs.usage:<名>`」「`seeds.library:pytest`」
@@ -13,7 +13,7 @@
 ## 材料の宣言
 
 `.ndf/project.json` の `materials`。形は `development-workflow/schemas/project.schema.json` が正本である。案は
-`project-decl.py measure` が問い（`question`）で出し（README の冒頭・直接の依存・解析の SDK の依存を根拠にする）、
+`ndf project measure` が問い（`question`）で出し（README の冒頭・直接の依存・解析の SDK の依存を根拠にする）、
 人が確かめて書く（`development-workflow` の `references/project-analysis.md`）。
 
 | キー | 中身 | 調査の項目 |
@@ -48,7 +48,7 @@
 
 ## 待ち時間の調査
 
-開発ループの `loop sprint` は、`supervise.py wait` と並べて背景で打つ 1 行を `metrics.research` に返す。
+開発ループの `loop sprint` は、`ndf plan wait` と並べて背景で打つ 1 行を `metrics.research` に返す。
 
 ```bash
 # Bash の run_in_background: true で、wait と並べて起動する

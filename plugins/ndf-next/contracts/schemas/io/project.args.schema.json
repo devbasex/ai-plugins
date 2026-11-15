@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/io/project.args.schema.json",
+  "title": "ndf project の引数",
+  "description": "ndf project が受ける引数。キーは引数の名前（オプションは -- の名前、位置引数は名前）。規約の生成が作り、手で直さない",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "check",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--force": {
+          "type": "boolean",
+          "description": "新しくても古いと判定する（手動の再解析）"
+        },
+        "--root": {
+          "type": "string",
+          "default": ".",
+          "description": "リポジトリの作業場所"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "drift",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--measure": {
+          "type": "string",
+          "description": "ndf project measure の測定の結果"
+        },
+        "--root": {
+          "type": "string",
+          "default": ".",
+          "description": "リポジトリの作業場所"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--measure"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "measure",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--out": {
+          "type": "string",
+          "description": "測定の結果の置き場（リポジトリの外の一時ディレクトリ）"
+        },
+        "--budget": {
+          "type": "number",
+          "default": 120.0,
+          "description": "締め切りの秒（既定 120）"
+        },
+        "--root": {
+          "type": "string",
+          "default": ".",
+          "description": "リポジトリの作業場所"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--out"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "schema",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--out": {
+          "type": "string",
+          "description": "書く先。省けば標準出力"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "write",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--measure": {
+          "type": "string",
+          "description": "ndf project measure の測定の結果"
+        },
+        "--answers": {
+          "type": "string",
+          "description": "問いの項目への答え（キー → {value} か {unknown}）"
+        },
+        "--dry-run": {
+          "type": "boolean",
+          "description": "書かずに差分だけを出す"
+        },
+        "--root": {
+          "type": "string",
+          "default": ".",
+          "description": "リポジトリの作業場所"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--measure"
+      ]
+    }
+  ]
+}

@@ -13,6 +13,9 @@
 
 `next.json` は Stop のたびに書き直されても、最初に書いた時刻 `first_written_at` を保つ。`/goal` の目標が未達で
 Stop が続いても、中継は最初の印から数えた静かな時間で切り替える（#2438）。
+
+中継と `ndf relay stop` の間の停止シグナルファイルは `stop_signal` が持つ（hook は読まない。事実の表を引くため、
+hook の経路へ入れない）。
 """
 
 from __future__ import annotations
@@ -95,12 +98,19 @@ def held(path: Path, wait: float) -> Iterator[bool]:
 
 
 def replace_text(path: Path, text: str, mode: Optional[int] = None) -> None:
-    """親の置き場を作り、同じ置き場の一時の名前（`.<名前>.<pid>.tmp`）へ書いてから名前を変える。"""
+    """親の置き場を作り、同じ置き場の一時の名前（`.<名前>.<pid>.tmp`）へ書いてから名前を変える。
+
+    `mode` を渡すと、一時のファイルを 0600 で作って書く前にその権限にする（秘密を持つ中身が一時でも広い権限で置かれない）。
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    tmp.write_text(text, encoding="utf-8")
-    if mode is not None:
-        tmp.chmod(mode)
+    if mode is None:
+        tmp.write_text(text, encoding="utf-8")
+    else:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            os.fchmod(f.fileno(), mode)
+            f.write(text)
     os.replace(tmp, path)
 
 

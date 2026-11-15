@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import NamedTuple, Optional
 
 from ndf import contracts
@@ -16,6 +17,10 @@ SCHEMA = contracts.schema_path("limits")
 
 class LimitsError(contracts.ContractError):
     """宣言が無い・形が違う・引いた方針や値が無い。"""
+
+
+class EnvError(ValueError):
+    """上限を替える環境変数の値の形が違う。"""
 
 
 class Policy(NamedTuple):
@@ -87,3 +92,20 @@ def scaled(name: str, measured: Optional[float]) -> float:
     if measured is None:
         return floor
     return max(floor, value(name, "factor") * float(measured))
+
+
+def from_env(environ: Mapping[str, str], name: str, policy_name: str, key: str) -> float:
+    """環境変数 `name` があればその値、無ければ宣言の値。数でない・0 以下なら `EnvError`。
+
+    リレーハブとマシン全体の本数の判定が同じ環境変数を同じ規則で読む（片方だけが替わった上限で数えない）。
+    """
+    raw = environ.get(name)
+    if not raw:
+        return value(policy_name, key)
+    try:
+        got = float(raw)
+    except ValueError as exc:
+        raise EnvError(f"{name} の値が数でない: {raw}") from exc
+    if got <= 0:
+        raise EnvError(f"{name} の値は 0 より大きくする: {raw}")
+    return got

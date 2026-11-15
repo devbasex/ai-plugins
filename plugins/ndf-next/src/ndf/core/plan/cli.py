@@ -109,8 +109,10 @@ def _cmd_queue(a: argparse.Namespace) -> int:
         return result.emit(result.stopped(TOOL, "invalid", str(exc)))
     except subprocess.CalledProcessError as exc:
         return result.emit(result.stopped(TOOL, "precondition", f"チェックアウトの根を引けない: {exc}"))
-    outcomes = queue_run.run(stages, qdir, stable, queue_run.QueueOptions(a.resume, a.fresh))
-    return result.emit(queue_run.queue_result(TOOL, outcomes, stages, qdir))
+    if a.max is not None and a.max < 1:
+        return result.emit(result.stopped(TOOL, "invalid", f"--max は 1 以上（入力 {a.max}）"))
+    outcomes = queue_run.run(stages, qdir, stable, queue_run.QueueOptions(a.resume, a.fresh, a.max))
+    return result.emit(queue_run.queue_result(TOOL, outcomes, stages, qdir, a.max))
 
 
 def _watched(path: Path, state_dir: Optional[str] = None) -> wait_decide.Watched:
@@ -205,6 +207,7 @@ def _parser() -> argparse.ArgumentParser:
     qu.add_argument("--from", dest="starts", action="append")
     qu.add_argument("--resume", action="store_true")
     qu.add_argument("--fresh", action="store_true")
+    qu.add_argument("--max", type=int, help="同時に流すプランの本数の上限（無ければ触るファイルの重ならない組の本数まで）")
     qu.add_argument("--queue-dir")
     qu.set_defaults(fn=_cmd_queue)
     wt = sub.add_parser("wait", help="流れている回を見回る")

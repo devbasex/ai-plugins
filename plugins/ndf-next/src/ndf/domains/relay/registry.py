@@ -145,13 +145,18 @@ def _version(directory: Path) -> Optional[str]:
     return version if isinstance(version, str) else None
 
 
-def legacy_root(environ: Mapping[str, str]) -> Path:
+def legacy_state_root(environ: Mapping[str, str]) -> Path:
+    """旧い NDF の状態の根（`NDF_STATE_HOME` → `XDG_STATE_HOME/ndf` → `~/.local/state/ndf`）。"""
     explicit = environ.get("NDF_STATE_HOME")
     if explicit:
-        return Path(explicit) / "relay"
+        return Path(explicit)
     xdg = environ.get("XDG_STATE_HOME")
     legacy = identity.FINAL_NAME  # 旧い NDF のプラグイン名は入れ替えの後の名前と同じ（#1142 の決定 73）
-    return (Path(xdg) / legacy if xdg else Path.home() / ".local" / "state" / legacy) / "relay"
+    return Path(xdg) / legacy if xdg else Path.home() / ".local" / "state" / legacy
+
+
+def legacy_root(environ: Mapping[str, str]) -> Path:
+    return legacy_state_root(environ) / "relay"
 
 
 def legacy_running(environ: Mapping[str, str]) -> list[hub_decide.Running]:

@@ -1,6 +1,6 @@
 # 初期化・再開・提案
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `launch-cli.sh`（M4）・`prepare-worktrees.sh`（M4）・`refactor.py`（M4）・`resolve.sh`（X0）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `launch-cli.sh`（M4）・`prepare-worktrees.sh`（M4）・`refactor.py`（M4）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 [← SKILL.md](../SKILL.md)
 
@@ -8,7 +8,7 @@
 
 ## 駆動の準備
 
-スクリプトの位置は SKILL.md の「前提」のエントリポイントのブロック（解決のエントリポイント `resolve.sh` が返す絶対パス）で求め、
+スクリプトの位置は SKILL.md の「前提」のブロック（`ndf` の確かめと旧いスクリプトの置き場。新しいプラグインだけの起動では空）で決め、
 対象のリポジトリの中から打つ。Skill のディレクトリへは移らない。副コマンドを呼ぶ `rf` / `rf_eval` の定義は SKILL.md の
 「実行」の先頭にある。**出力を `eval` する呼び出し**（`init` / `start-phase` / `merge-plan` /
 `merge-implement` / `verify` / `final-gate`）は `rf_eval` を使う。`eval "$(rf ...)"` と
