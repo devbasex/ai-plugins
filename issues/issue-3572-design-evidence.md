@@ -181,7 +181,9 @@ the queue」）。外れる理由は、チェックの失敗・チェックの�
           "properties": {
             "method": {"enum": ["merge-queue", "strict"]},
             "admin": {"type": "boolean"}
-          }
+          },
+          "if": {"required": ["method"]},
+          "then": {"properties": {"admin": {"const": false}}}
         },
         "verify": {
           "type": "object",
@@ -235,6 +237,10 @@ the queue」）。外れる理由は、チェックの失敗・チェックの�
             "else": {"properties": {"start": {"const": "base"}, "doc_prs": {"const": "base"}, "integrate": {"const": "check"},
                                     "reviews": {"not": {"required": ["release"]}}}}
           }
+        },
+        {
+          "if": {"not": {"properties": {"release_strategy": {"const": "trunk"}}, "required": ["release_strategy"]}},
+          "then": {"properties": {"release": {"not": {"required": ["version_store"]}}}}
         }
       ]
     }
@@ -260,7 +266,7 @@ the queue」）。外れる理由は、チェックの失敗・チェックの�
       "design": {"checks": ["cross-review"], "diff": "pr"},
       "spec": {"checks": [], "diff": "none"}
     },
-    "production_merge": {"method": "merge-queue", "admin": true},
+    "production_merge": {"method": "merge-queue"},
     "verify": {"kind": "marketplace", "ref": "verify/next", "marketplace": "ai-plugins-next"},
     "release": {"version_store": {"kind": "plugin"}}
   }
@@ -282,16 +288,16 @@ the queue」）。外れる理由は、チェックの失敗・チェックの�
       "ref": "verify/staging",
       "command": ["gh", "workflow", "run", "deploy-staging.yml", "-f", "ref={ref}"],
       "timeout_seconds": 900
-    },
-    "release": {"version_store": {"kind": "json", "path": "package.json", "key": "version", "name": "web"}}
+    }
   }
 }
 ```
 
-検査のスクリプトは `/tmp/bs3572/check.py`（jsonschema 4.26.0 の `Draft202012Validator`。ndf-next の依存と同じバージョン）で、上の 3 つのファイルを読む。
+検査のスクリプトは `check.py`（jsonschema 4.26.0 の `Draft202012Validator`。ndf-next の依存と同じバージョン）で、上の 3 つのファイルを読む。
+`web-trunk` の例は、Web サービスの例を `trunk` の行（`strict`・置き場 `json` の `package.json`）へ書き換えたもので、スクリプトの中で組む。
 
 ```text
-$ cd /tmp/bs3572 && /work/ai-plugins/.worktrees/design/issue-3572/plugins/ndf-next/.venv/bin/python -I check.py
+$ cd <作業ディレクトリ>/bs && /work/ai-plugins/.worktrees/design/issue-3572/plugins/ndf-next/.venv/bin/python -I check.py
 ai-plugins: 通る
 web-develop: 通る
 壊した例 trunk でマージの方式が無い: 落ちる
@@ -303,8 +309,12 @@ web-develop: 通る
 壊した例 表に無いマージの方式: 落ちる
 壊した例 deploy でコマンドが無い: 落ちる
 壊した例 表に無い検証環境の種類: 落ちる
+web-trunk: 通る
 壊した例 json の置き場で path が無い: 落ちる
+壊した例 マージの方式と admin が真: 落ちる
+壊した例 merge_base_branch でバージョンの置き場: 落ちる
 壊した例 release_branch で doc_prs が無い: 落ちる
+方式の無い行で admin が真: 通る
 release_branch の例: 通る
 節の無いファイル: 通る
 ```
