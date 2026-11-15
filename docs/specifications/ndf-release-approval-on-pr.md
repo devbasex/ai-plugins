@@ -249,7 +249,7 @@ ai-plugins を `cd-no-review` へ移す ruleset の変更は、人が次の順�
 
 移行の途中（手順 2〜3）は、本番チャネルの ruleset が証跡のチェックを必須にしていれば、`cd-review` の判定でも `approval-check` が判定して付ける。移行の途中は本番のリリースを出さない。出す必要が生じた場合は `cd-review` の経路になり、リリースの PR の作成者以外のコードオーナーがレビューを承認するまで止まる。
 
-2026-11-13 の時点で `protect main`（id 22332172）は承認数 1 で、必須チェックに `ndf/release-approval` を持たない（`gh api repos/devbasex/ai-plugins/rulesets/22332172` の出力）。そのため ai-plugins の場合の判定は `cd-review` を返す。
+2026-11-13 の時点で `protect main`（id 22332172）は承認数 1 で、必須チェックに `ndf/release-approval` を持たない（`gh api repos/devbasex/ai-plugins/rulesets/22332172` の出力）。ai-plugins は `.ndf/project.json` に迂回の宣言（`production_merge.admin: true`）を持つため、承認数 1 のままでは場合の判定は `cd-admin` を返す。
 
 ### 確かめていないこと
 
