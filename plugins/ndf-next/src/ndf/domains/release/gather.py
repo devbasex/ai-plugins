@@ -97,21 +97,21 @@ def included(repo_git: git_mod.Git, span: Range, production: str) -> list[int]:
     return included_decide.numbers(subjects.splitlines(), (production,))
 
 
-def _production_version(repo_git: git_mod.Git, plugin: plugins_mod.Plugin, production_ref: str) -> list[str]:
-    """本番ブランチの先端のプラグインの定義（先頭）の版。本番ブランチにまだ定義が無ければ空。"""
+def _versions_at(repo_git: git_mod.Git, plugin: plugins_mod.Plugin, ref: str) -> list[str]:
+    """コミット `ref` のプラグインの定義（先頭）の版。定義が無ければ空。"""
     path = f"{plugin.dir}/{plugins_mod.MANIFESTS[0].as_posix()}"
-    if not repo_git.run("ls-tree", "--name-only", git_mod.END_OF_OPTIONS, production_ref, path).strip():
+    if not repo_git.run("ls-tree", "--name-only", git_mod.END_OF_OPTIONS, ref, path).strip():
         return []
     try:
-        value = json.loads(repo_git.run("show", git_mod.END_OF_OPTIONS, f"{production_ref}:{path}")).get("version")
+        value = json.loads(repo_git.run("show", git_mod.END_OF_OPTIONS, f"{ref}:{path}")).get("version")
     except (json.JSONDecodeError, AttributeError) as exc:
-        raise plugins_mod.PluginsError(f"{production_ref} の {path} を読めない: {exc}") from None
+        raise plugins_mod.PluginsError(f"{ref} の {path} を読めない: {exc}") from None
     return [value] if isinstance(value, str) else []
 
 
 def version_at(repo_git: git_mod.Git, plugin: plugins_mod.Plugin, ref: str) -> str | None:
     """コミット `ref` のプラグインの定義（先頭）の版（定義が無ければ None）。"""
-    found = _production_version(repo_git, plugin, ref)
+    found = _versions_at(repo_git, plugin, ref)
     return found[0] if found else None
 
 
@@ -125,7 +125,7 @@ def shipped(repo_git: git_mod.Git, found: Sequence[plugins_mod.Plugin], producti
     out = {}
     for p in found:
         tagged = [v for v in (version_decide.version_of_tag(p.name, t) for t in tags) if v is not None]
-        top = version_decide.highest([*_production_version(repo_git, p, production_ref), *tagged])
+        top = version_decide.highest([*_versions_at(repo_git, p, production_ref), *tagged])
         if top is not None:
             out[p.name] = top
     return out
