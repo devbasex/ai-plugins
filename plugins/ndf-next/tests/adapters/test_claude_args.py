@@ -97,6 +97,17 @@ def test_plugin_args_without_old_ndf_adds_no_settings(tmp_path):
     assert claude.plugin_args(tmp_path, lambda: []) == claude.PluginArgs(["--plugin-dir", str(tmp_path)], None)
 
 
+def test_plugin_args_skips_the_list_when_own_name_is_the_final_name(tmp_path):
+    """自分の名前が入れ替え後の名前なら外す登録は必ず無いので、一覧を読まない（`claude plugin list` を打たない）。"""
+    (tmp_path / ".claude-plugin").mkdir()
+    (tmp_path / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": identity.FINAL_NAME}), encoding="utf-8")
+
+    def never() -> None:
+        raise AssertionError("一覧を読んだ")
+
+    assert claude.plugin_args(tmp_path, never) == claude.PluginArgs(["--plugin-dir", str(tmp_path)], None)
+
+
 def test_plugin_args_keeps_going_with_a_notice_when_the_list_is_unreadable(tmp_path):
     """一覧が読めなければ外さずに起動の引数を返し、知らせを入れる（I10a）。"""
     got = claude.plugin_args(tmp_path, lambda: None)

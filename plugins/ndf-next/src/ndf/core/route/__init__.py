@@ -396,8 +396,11 @@ def repo_root(cwd: Path) -> str:
     return git.Git(cwd).run("rev-parse", "--show-toplevel").strip()
 
 
-def default_base(repo: Path) -> Optional[str]:
-    """宛先のブランチの既定: ブランチの運用の宣言の `base_branch`、無ければリモート名のリモートの既定ブランチ（決まらなければ None）。"""
+def default_base(repo: Path, remote: Optional[str] = None) -> Optional[str]:
+    """宛先のブランチの既定: ブランチの運用の宣言の `base_branch`、無ければリモートの既定ブランチ（決まらなければ None）。
+
+    `remote` は既定ブランチを読むリモート名（`--set remote=` で渡した値）。省けばこの作業場所のリモート名。
+    """
     try:
         declared = json.loads((repo / BRANCH_DECLARATION).read_text(encoding="utf-8")).get(BASE_KEY)
     except (OSError, ValueError, AttributeError):
@@ -405,19 +408,28 @@ def default_base(repo: Path) -> Optional[str]:
     if isinstance(declared, str) and declared:
         return declared
     try:
-        return git.Git(repo).remote_default_branch()
+        return git.Git(repo).remote_default_branch(remote)
     except git.GitError:  # noqa: NDF401 外部コマンド: 宣言の remote が誤り
         return None
 
 
-def default_merge_method(repo: Path, base: str) -> Optional[str]:
-    """マージの方式の既定: 基底のブランチ `base` で許された方式の先頭（`github.pick_merge_method`）。読めなければ None。"""
+def default_merge_method(repo: Path, base: str, remote: Optional[str] = None) -> Optional[str]:
+    """マージの方式の既定: 基底のブランチ `base` で許された方式の先頭（`github.pick_merge_method`）。読めなければ None。
+
+    `remote` はリポジトリを読むリモート名（`--set remote=` で渡した値）。省けばこの作業場所のリモート名。
+    """
     try:
-        hub = github.GitHub(git.Git(repo).remote_repo(), github.client())
+        hub = github.GitHub(git.Git(repo).remote_repo(remote), github.client())
         allowed = hub.allowed_merge_methods(base)
     except (git.GitError, github.GitHubError):  # noqa: NDF401 外部コマンド: リモートか GitHub の設定を読めない
         return None
     return github.pick_merge_method(None, allowed)
+
+
+def _given_remote(out: Mapping[str, Value]) -> Optional[str]:
+    """決めた（渡したか求めた）リモート名。base と merge_method もこのリモートから決める（push の宛先とそろえる）。"""
+    remote = out.get("remote")
+    return remote if isinstance(remote, str) and remote else None
 
 
 def _omitted(t: Template, out: Mapping[str, Value], name: str) -> bool:
@@ -439,11 +451,11 @@ def derived(t: Template, given: Mapping[str, Value], cwd: Path) -> dict[str, Val
     if _omitted(t, out, "worktree") and isinstance(out.get("branch"), str):
         out["worktree"] = str(Path(str(out["repo"])) / WORKTREES / out["branch"])
     if _omitted(t, out, "base") and "repo" in out:
-        base = default_base(Path(str(out["repo"])))
+        base = default_base(Path(str(out["repo"])), _given_remote(out))
         if base is not None:
             out["base"] = base
     if _omitted(t, out, "merge_method") and "repo" in out and isinstance(out.get("base"), str):
-        method = default_merge_method(Path(str(out["repo"])), str(out["base"]))
+        method = default_merge_method(Path(str(out["repo"])), str(out["base"]), _given_remote(out))
         if method is not None:
             out["merge_method"] = method
     return out

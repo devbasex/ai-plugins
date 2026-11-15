@@ -92,9 +92,12 @@ def inputs(repo: git.Git, tracked: Optional[dict[str, str]] = None) -> dict[str,
     return {p: got[p] for p in sorted(got) if is_input(p)}
 
 
-def branch_state(repo: git.Git, declared: tuple[str, ...] = ()) -> dict[str, Any]:
-    """リモート名のリモートの HEAD の指す先と、既知のブランチ名と宣言した名前のうちそのリモートにあるもの。"""
-    remote = repo.remote()
+def branch_state(repo: git.Git, declared: tuple[str, ...] = (), remote: Optional[str] = None) -> dict[str, Any]:
+    """リモート名のリモートの HEAD の指す先と、既知のブランチ名と宣言した名前のうちそのリモートにあるもの。
+
+    `remote` を省けば `repo.remote()`（求め済みなら渡して `git worktree list` を打ち直さない）。
+    """
+    remote = remote if remote is not None else repo.remote()
     head = repo.remote_default_branch(remote)
     refs_done = repo.attempt("for-each-ref", "--format=%(refname:short)", f"refs/remotes/{remote}")
     refs = refs_done.stdout.split() if refs_done.returncode == 0 else []

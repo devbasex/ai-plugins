@@ -22,24 +22,26 @@ from ndf.domains.worktree import declaration, mainlock, repo, session_decide
 LOCK_WAIT = 60
 
 
-def resolve(main: Git, name: str) -> Optional[str]:
-    """ブランチ名が指すコミット（ローカル → 取得済みのリモート名の参照の順）。無ければ `None`。
+def resolve(main: Git, name: str, remote: str) -> Optional[str]:
+    """ブランチ名が指すコミット（ローカル → 取得済みの `remote` の参照の順）。無ければ `None`。
 
     名前をそのまま `git rev-parse` へ渡さない（`refs/remotes/<リモート名>/<名前>` は名前の解決の順に含まれない）。
+    リモート名は呼び手が 1 回求めて渡す（`Git.remote()` は呼ぶたびに `git worktree list` を打つ）。
     """
-    for ref in (f"refs/heads/{name}", f"refs/remotes/{main.remote()}/{name}"):
+    for ref in (f"refs/heads/{name}", f"refs/remotes/{remote}/{name}"):
         if main.has_ref(ref):
             return main.rev_parse(ref)
     return None
 
 
 def _resolve_base(main: Git, name: str) -> Optional[str]:
-    found = resolve(main, name)
+    remote = main.remote()
+    found = resolve(main, name, remote)
     if found is not None:
         return found
-    if main.fetch_branch(main.remote(), name).returncode != 0:
+    if main.fetch_branch(remote, name).returncode != 0:
         return None
-    return resolve(main, name)
+    return resolve(main, name, remote)
 
 
 def _wanted(main: Git, main_dir: Path, decl: declaration.Declaration) -> tuple[Optional[str], str]:
@@ -48,7 +50,7 @@ def _wanted(main: Git, main_dir: Path, decl: declaration.Declaration) -> tuple[O
     branches = [w.branch for w in repo.dev_worktrees(main_dir, main.worktrees())]
     verdict, branch = session_decide.follow_target(dirty, branches)
     if verdict == session_decide.FOLLOW_DETACH and branch is not None:
-        return resolve(main, branch), f"worktree のブランチ {branch}"
+        return resolve(main, branch, main.remote()), f"worktree のブランチ {branch}"
     if verdict != session_decide.FOLLOW_BASE:
         return None, ""
     base = repo.base_branch(main, decl)

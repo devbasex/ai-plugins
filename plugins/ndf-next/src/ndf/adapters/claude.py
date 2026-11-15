@@ -136,13 +136,17 @@ def plugin_args(
 
     外す登録は導入済みの一覧（`listed`。省けば起動先の `cwd` での `list_plugins`）から決め、`root` のプラグインの名前（`identity.name_of`）と同じ名前の
     登録は外さない（入れ替えの後に自分を外さない）。一覧を読めなければ外さずに起動し、`notice` に理由を入れる（I10a）。
-    外す登録が無ければ `--settings` を付けない。
+    外す登録が無ければ `--settings` を付けない。自分の名前が旧い NDF の名前（`identity.FINAL_NAME`）と同じなら
+    外す登録は必ず無いため、一覧を読まない（`claude plugin list --json` の起動を省く）。
     """
-    found = listed() if listed is not None else list_plugins(cwd=cwd)
     load = ["--plugin-dir", str(root)]
+    own = identity.name_of(root)
+    if own == identity.FINAL_NAME:
+        return PluginArgs(load, None)
+    found = listed() if listed is not None else list_plugins(cwd=cwd)
     if found is None:
         return PluginArgs(load, LIST_UNREADABLE)
-    disabled = disabled_plugins(found, identity.name_of(root))
+    disabled = disabled_plugins(found, own)
     if not disabled:
         return PluginArgs(load, None)
     return PluginArgs(["--settings", json.dumps({"enabledPlugins": disabled}, separators=(",", ":")), *load], None)

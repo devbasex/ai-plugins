@@ -398,10 +398,14 @@ def _git_dir(repo_root: Path) -> Optional[Path]:
 
 
 def _remote_slug(repo_root: Path) -> Optional[str]:
-    """リモート名（`.ndf/worktree.json` の `remote`、無ければ既定）の URL の `owner/repo`。読めなければ None。"""
+    """リモート名（メインディレクトリの `.ndf/worktree.json` の `remote`、無ければ既定）の URL の `owner/repo`。読めなければ None。
+
+    linked worktree からもメインディレクトリ（共通の git ディレクトリの親）の宣言を読む（`Git.remote()` と同じ宣言）。
+    """
     git_dir = _git_dir(repo_root)
+    main_dir = git_dir.parent if git_dir else repo_root
     try:
-        header = f'[remote "{git_mod.remote_of(repo_root)}"]'
+        header = f'[remote "{git_mod.remote_of(main_dir)}"]'
         text = (git_dir / "config").read_text(encoding="utf-8") if git_dir else ""
     except (OSError, git_mod.RemoteError):  # noqa: NDF401 ファイル: 設定か宣言を読めなければリモートは不明
         return None

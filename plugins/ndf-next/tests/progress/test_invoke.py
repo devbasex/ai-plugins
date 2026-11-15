@@ -269,7 +269,7 @@ def test_template_values_missing_from_every_source_stop_as_invalid_by_name(tmp_p
     # 出所（課題・宣言・既定）のどれからも決まらなければ、足りない名前と出所を挙げて止まる
     repo = _sprint_repo(tmp_path)
     monkeypatch.setattr(invoke, "issue_text", lambda *a: pytest.fail("課題が 2 つなら課題から写さない"))
-    monkeypatch.setattr(route, "default_merge_method", lambda repo, base: "squash")
+    monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None: "squash")
     got = invoke.invoke(_stage_run_of(name, repo, [1, 2]), repo, tmp_path / "w", runner=lambda *a: pytest.fail("打たない"))
     assert got.status == "stopped" and got.cause["kind"] == "invalid"
     named = {i["key"]: i["source"] for i in got.report["items"]}
@@ -291,7 +291,7 @@ def _filled_plan(tmp_path, monkeypatch, name):
     patched = {n: replace(p, default=defaults[n]) if n in defaults else p for n, p in held.items()}
     monkeypatch.setattr(route, "params", lambda: patched)
     monkeypatch.setattr(invoke, "issue_text", lambda place, n: (f"#{n} の題", f"#{n} の本文"))
-    monkeypatch.setattr(route, "default_merge_method", lambda repo, base: "squash")
+    monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None: "squash")
     work = tmp_path / "w"
     work.mkdir()
     run = _stage_run_of(name, repo, [3092])
@@ -481,7 +481,7 @@ def test_an_issue_by_an_untrusted_author_is_not_written_and_stops_as_invalid_by_
     # 題と本文は欠けとして、信用しない出所を挙げて止まり、本文のファイルは書かない
     repo = _sprint_repo(tmp_path, PROJECT)
     monkeypatch.setattr(invoke, "issue_text", lambda place, n: None)
-    monkeypatch.setattr(route, "default_merge_method", lambda repo, base: "squash")
+    monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None: "squash")
     work = tmp_path / "w"
     work.mkdir()
     got = invoke.invoke(_stage_run_of("impl", repo, [3092]), repo, work, runner=lambda *a: pytest.fail("打たない"))
@@ -530,7 +530,7 @@ def test_a_failure_to_read_the_issue_stops_with_its_reason_not_as_missing_values
         raise error
 
     monkeypatch.setattr(invoke, "issue_text", fail)
-    monkeypatch.setattr(route, "default_merge_method", lambda repo, base: "squash")
+    monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None: "squash")
     work = tmp_path / "w"
     work.mkdir()
     got = invoke.invoke(_stage_run_of("impl", repo, [3092]), repo, work, runner=lambda *a: pytest.fail("打たない"))

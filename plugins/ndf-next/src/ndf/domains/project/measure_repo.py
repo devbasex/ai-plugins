@@ -107,7 +107,7 @@ class Tree:
     def __init__(self, root: Path, deadline: float) -> None:
         self.root = root
         self.deadline = deadline
-        self.remote = git.remote_of(root)
+        self.remote = git.Git(root).remote()
         self.files = check.tree(git.Git(root))
         self.skipped: list[str] = sorted(p for p in self.files if is_secret_path(p))
 
@@ -440,7 +440,7 @@ def default_branch(tree: Tree) -> Optional[str]:
 
 
 def measure_branches(tree: Tree) -> dict[str, Any]:
-    state = check.branch_state(git.Git(tree.root))
+    state = check.branch_state(git.Git(tree.root), remote=tree.remote)
     local = tree.refs("refs/heads")
     evidence: list[dict[str, Any]] = []
     names: list[str] = []

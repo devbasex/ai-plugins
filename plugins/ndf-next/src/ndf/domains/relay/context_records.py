@@ -61,7 +61,7 @@ def repo_key(root: Optional[Path]) -> str:
     if root is None:
         return LOCAL
     try:
-        done = git.run_git(["config", "--get", f"remote.{git.remote_of(root)}.url"], root)
+        done = git.run_git(["config", "--get", f"remote.{git.Git(root).remote()}.url"], root)
     except git.GitError:  # noqa: NDF401 外部コマンド: リモートか宣言を読めなければ旧いと同じ unknown
         return "unknown"
     m = _SLUG.search(done.stdout.strip())
