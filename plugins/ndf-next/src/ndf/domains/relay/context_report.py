@@ -140,6 +140,11 @@ class _Scope(NamedTuple):
     ledger: list[dict[str, Any]]
     excluded: set[str]
     seen: set[Any]
+    windows: Mapping[str, Windows]  # セッション → 作業の区間
+
+    def windows_of(self, sid: str) -> Windows:
+        """セッションの作業の区間。区間を持たないセッションはすべての時刻。"""
+        return self.windows[sid] if sid in self.windows else ALL_TIME
 
 
 def _add_subagents(ndf: dict[str, Any], transcript: str, scope: _Scope, windows: Windows) -> None:
@@ -168,8 +173,9 @@ def _add_ledger(ndf: dict[str, Any], sid: str, span: tuple[Optional[float], Opti
             ndf["seconds"] += c["seconds"] if c["seconds"] else 0.0
 
 
-def session_parts(sid: str, transcript: Optional[str], marks: list[dict[str, Any]], scope: _Scope, windows: Windows) -> dict[str, Any]:
-    """1 つのセッションの呼び出しを区分へ時刻で排他に割り当てる。`windows` の区間の呼び出しだけを数える。"""
+def session_parts(sid: str, transcript: Optional[str], marks: list[dict[str, Any]], scope: _Scope) -> dict[str, Any]:
+    """1 つのセッションの呼び出しを区分へ時刻で排他に割り当てる。そのセッションの作業の区間の呼び出しだけを数える。"""
+    windows = scope.windows_of(sid)
     calls, compacts, by_next = cr.read_calls(transcript, scope.seen) if transcript and sid not in scope.excluded else ([], None, False)
     calls = [c for c in calls if _within(c["ts"], windows)]
     restore_end, handoff_from = cr.mark_bounds(marks, by_next)
@@ -196,12 +202,12 @@ def session_parts(sid: str, transcript: Optional[str], marks: list[dict[str, Any
     }
 
 
-def _session_spans(sessions: Mapping[str, Any], excluded: set[str], windows: Mapping[str, Windows]) -> dict[str, tuple[float, float]]:
+def _session_spans(sessions: Mapping[str, Any], scope: _Scope) -> dict[str, tuple[float, float]]:
     """セッションごとの (最初, 最後) の時刻。作業の区間の呼び出しと判定の記録の行から取る（印の割り当てに使う）。"""
     spans = {}
     for sid, s in sessions.items():
-        calls = cr.read_calls(s["transcript"], set())[0] if s["transcript"] and sid not in excluded else []
-        w = windows[sid] if sid in windows else ALL_TIME
+        calls = cr.read_calls(s["transcript"], set())[0] if s["transcript"] and sid not in scope.excluded else []
+        w = scope.windows_of(sid)
         ts = [c["ts"] for c in calls if c["ts"] and _within(c["ts"], w)]
         ts += [t for r in s["rows"] if (t := cr.parse_ts(r.get("at")))]
         if ts:
@@ -209,18 +215,14 @@ def _session_spans(sessions: Mapping[str, Any], excluded: set[str], windows: Map
     return spans
 
 
-def _sum_sessions(
-    sessions: Mapping[str, Any], by_session: Mapping[Any, Any], scope: _Scope, windows: Mapping[str, Windows], restarted: set[Any]
-) -> dict[str, Any]:
+def _sum_sessions(sessions: Mapping[str, Any], by_session: Mapping[Any, Any], scope: _Scope, restarted: set[Any]) -> dict[str, Any]:
     """セッションごとの区分を合算し、自動圧縮の数と印の無い区間の数を数える。"""
     totals = {b: _empty_totals() for b in buckets()}
     compacts: Optional[int] = 0
     unknown = {"restore": 0, "handoff": 0}
     restores: list[dict[str, Any]] = []
     for sid, s in sessions.items():
-        got = session_parts(
-            sid, s["transcript"], by_session[sid] if sid in by_session else [], scope, windows[sid] if sid in windows else ALL_TIME
-        )
+        got = session_parts(sid, s["transcript"], by_session[sid] if sid in by_session else [], scope)
         restores += [got["restore"]] if got["restore"] else []
         for b in buckets():
             for k, v in got["parts"][b].items():
@@ -276,9 +278,10 @@ def report(work: str, rows: list[dict[str, Any]], ledger: list[dict[str, Any]], 
     known = cr.sessions_of(rows)
     for sid, s in sessions.items():
         s["transcript"] = s["transcript"] or known[sid]["transcript"]
-    by_session = cr.attach_marks([r for r in every if r.get("event") in cr.MARKS], _session_spans(sessions, excluded, windows))
+    scope = _Scope(ledger, excluded, set(), windows)
+    by_session = cr.attach_marks([r for r in every if r.get("event") in cr.MARKS], _session_spans(sessions, scope))
     restarted = {r.get("session_id") for r in mine if r.get("verdict") == cp.RESTART}
-    summed = _sum_sessions(sessions, by_session, _Scope(ledger, excluded, set()), windows, restarted)
+    summed = _sum_sessions(sessions, by_session, scope, restarted)
     restarts = _restarts_by_reason(mine)
     compacts = summed["compacts"]
     return {
