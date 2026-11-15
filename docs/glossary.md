@@ -664,6 +664,8 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 遅れ（依存の版の） | — | 宣言の版が上げる先より古く、固定する理由も無い状態。週 1 回の検査が知らせる | — | — | — |
 | 依存の更新の仕組み | — | 依存の版の遅れを知らせ、版を上げる手段。このリポジトリでは Renovate を GitHub Actions で動かす形（#3370 の決定 1） | — | — | — |
 | 依存の一覧の Issue | — | 依存の更新の仕組みが遅れを知らせる 1 件の Issue。Renovate の Dependency Dashboard で、チェックを入れると更新の PR が作られる | — | — | — |
+| 環境ブランチ | — | 検証や本番の環境へ載せるブランチ（`qa/*`・`staging/*`・`release/*` など）。`/ndf:cherry-pick-pr` の引数で指し、短命ブランチの Pull Request の宛先になる | — | — | — |
+| 短命ブランチ | — | 環境ブランチの先端から切り、選んだコミットだけを cherry-pick して環境ブランチ宛の Pull Request を出すためのブランチ（`<元のブランチ>-for-<環境ブランチのスラッシュ以降>`）。マージした後に消す | — | — | — |
 
 ## NDF の Slack 通知（`ndf-notification`）
 
@@ -840,6 +842,11 @@ Pull Request のレビューを CLI へ委譲し、新しい指摘が出なく�
 | 差し戻し | — | 改善項目の中の手順の違反（記名の欠け・期待値の欠け・文言を固定するテスト・計画に無いコミット）を、項目を取り消さずに担当へ直させること | — | — | `docs/specifications/cross-refactoring-implementation-budget.md` |
 | 落ちたテストの材料 | — | 落ちたテストの ID・ログの置き場・走らせ直すコマンドの組。JUnit を読めないときもログから組み、修正と成立の判定へ渡す | — | — | `docs/specifications/cross-refactoring-implementation-budget.md` |
 | 判定の担い手 | — | 成立の判定と判定し直しを行うランタイム。参加者のうち実装担当でない者を、ホスト → 参加者の順で選ぶ | — | — | `docs/specifications/cross-refactoring-implementation-budget.md` |
+| 古い起点 | — | 中断した cross-refactoring を続けるとき、Pull Request の今の head が、作業場所の work の HEAD と同じでもその祖先でもないこと。続けずに退避して今の head から始め直す | — | — | — |
+| 退避した作業場所 | — | 古い起点のために、消さずに rf<PR>.retired-<時刻> へ移した cross-refactoring の作業場所（work・read/<ランタイム>・logs）と状態ファイル。同じ Pull Request の作業場所の片付けが、作業の残りで外すかを決める | — | — | — |
+| 作業場所 | — | ndf-next の cross-refactoring が Pull Request ごとに作る置き場 <置き場>/rf<PR>。書き込み用の work・担当ごとの読み取り用 read/<ランタイム>・logs・状態ファイルを持つ | — | — | — |
+| 状態ファイル | — | ndf-next の cross-refactoring の実行の進みを持つ rf<PR>/state.json。完了の記録が無ければ、同じコマンドを打ち直すと記録のある手順を流し直さずに続ける | — | — | — |
+| 退避の途中の印 | — | 作業場所の退避を始める前に退避した先へ置き、移し終えたら消すファイル。残っていれば、次の打ち直しは照合をせずに退避を続ける | — | — | — |
 
 ## NDF のラッパー（`ndf-relay`）
 
