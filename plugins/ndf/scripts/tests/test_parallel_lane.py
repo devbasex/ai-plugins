@@ -271,6 +271,26 @@ def test_check_md_names_every_pr_without_a_check_state(tmp_path):
     assert parallel_present.check_md(tmp_path, mapped, []) == ["- 検査の状態が無い Pull Request: #5 #7"]
 
 
+def test_check_md_splits_requests_of_one_lane_by_their_own_check_state(tmp_path):
+    """同じレーンに 2 スプリント分の依頼があれば、依頼ごとにその依頼より前の検査の結果を、その依頼の PR に付ける（#3585）。"""
+    import parallel_present
+
+    sprint = tmp_path / "work" / "sprint-la"
+    _review_out(sprint / "3-check-state", 1)
+    _review_out(sprint / "7-check-state", 2)
+    reqs = [
+        {"id": "r1", "lane": "la", "prs": [5], "sprint_state": str(sprint / "5-release-request-state")},
+        {"id": "r2", "lane": "la", "prs": [6], "sprint_state": str(sprint / "9-release-request-state")},
+    ]
+    mapped = {"lanes": {"la": {"prs": [5, 6], "requested": True, "requests": ["r1", "r2"]}}, "orphans": []}
+    got = parallel_present.check_md(tmp_path, mapped, reqs)
+    heads = [x for x in got if x.startswith("- レーン")]
+    assert heads == [
+        f"- レーン la（#5。検査の状態 `{sprint / '3-check-state'}`）",
+        f"- レーン la（#6。検査の状態 `{sprint / '7-check-state'}`）",
+    ]
+
+
 def test_production_plan_has_no_fix_step_after_the_approval(tmp_path):
     """本番のプランは承認の後にコードを直すステップ（fix）を持たず、judge はやり直すか止めるかだけを選ぶ（#3572 の今の NDF の側）。"""
     import parallel_release

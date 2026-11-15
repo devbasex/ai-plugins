@@ -486,6 +486,18 @@ def test_dev_version_of_the_parallel_plan_skips_a_released_version(tmp_path, wor
     assert parallel_repo.dev_version(world.repo) == "10.27.7"
 
 
+def test_dev_version_without_fetch_does_not_touch_origin(tmp_path, world, monkeypatch):
+    """起動の前の検査は origin を取り直さず、手元の追跡ブランチとタグで版を決める。"""
+    import parallel_repo
+
+    (world.repo / ".ndf" / "supervise.json").write_text(json.dumps({"release": {"plugin": "ndf"}}))
+    world.publish("10.27.6", "develop", "main", tag=True)
+    real = rv._git_run
+    seen = []
+    monkeypatch.setattr(rv, "_git_run", lambda repo, *a: seen.append(a[0]) or real(repo, *a))
+    assert parallel_repo.dev_version(world.repo, fetch=False) == "10.27.7" and "fetch" not in seen
+
+
 # ---- observe の現状固定（I-002） ----
 
 

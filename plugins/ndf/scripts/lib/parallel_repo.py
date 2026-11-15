@@ -40,17 +40,18 @@ def git_head(main: Path) -> str:
     return (got.stdout or "").strip()
 
 
-def dev_version(main: Path) -> str:
+def dev_version(main: Path, fetch: bool = True) -> str:
     """まとめたリリースで出す版。ベースブランチの配るプラグインの `plugin.json` の版から接尾辞を外した版で、それが既に出した
     最新の正式版のタグ以下なら、そのタグの次の PATCH（#3551。同期の PR が出した版へ揃えた後に、出した版で組まない）。
-    決まらなければ空。"""
+    決まらなければ空。`fetch` を偽にすると origin を取り直さず手元の追跡ブランチとタグで決める（起動の前の検査が使う。
+    取り直しに落ちて版があるのに組めないと警告しないため）。"""
     import release_version as rv
 
     ref, plugin = base_tracking_ref(main), release_plugin(main)
     rel = rv.plugin_json_rel(main, ref, plugin) if ref and plugin else None
     if not rel:
         return ""
-    return rv.collected_release(rv.observe(main, plugin, ref.removeprefix("origin/"), None, rel=rel)) or ""
+    return rv.collected_release(rv.observe(main, plugin, ref.removeprefix("origin/"), None, fetch=fetch, rel=rel)) or ""
 
 
 def loop_records(main: Path, name: str) -> list[tuple]:
