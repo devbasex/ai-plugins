@@ -146,34 +146,37 @@ class LaunchRouting:
         """空き待ち（`waiting`）の起動の記録を、ループの 1 回の観測（一覧の成功した行 `rows`）ごとに読み直す（#3597 の決定 10）。
         待つ相手が一覧で動いて観えなければ打ち直し、動いていて上限を過ぎていれば `failed` にして区分 `spawn` の問いを立てる。
         眠らない（I6）。古い記録の打ち直しでは何もしない。"""
-        import clock
-
         if not self.launching:
             return
         for purpose, rec in list(self.launches.items()):
-            if rec.get("result") != "waiting":
-                continue
-            busy, spec, extra = str(rec.get("busy") or ""), rec.get("launch") or {}, dict(rec.get("extra") or {})
-            since = clock.parse(rec.get("since"), naive="utc") if rec.get("since") else None
-            waited = max(0.0, self.seen_at - since.timestamp()) if since else 0.0
-            if (rows.get(busy) or {}).get("state") in UP:
-                if waited >= float(rec.get("limit") or 0):
-                    rec.update(result="failed", reason=f"一時レーンは同時に 1 本まで: {busy} が動いたまま {waited:g} 秒待った")
-                    text = f"レーン {rec['lane']} を起動できない（一時レーンは同時に 1 本まで。{busy} が {waited:g} 秒のあいだ動いている）"
-                    self._ask_launch(purpose, rec["lane"], text, spec, extra)
-                continue
-            got = step_launch(self.main, list(spec.get("argv") or []), rec["lane"], spec.get("cwd"), bool(spec.get("fresh")))
-            self.helper_seen.pop(rec["lane"], None)
-            if got.get("result") == "waiting":
-                rec["busy"] = got.get("busy")  # 別の一時レーンが先に立ち上がった: 最初に断られた時刻のまま待ちを続ける
-            elif got.get("result") == "up":
-                self.launches[purpose] = {"lane": rec["lane"], **{k: got.get(k) for k in ("result", "attempts", "at", "reason")},
-                                          "waited": {"busy": busy, "seconds": waited}}  # fmt: skip
-            else:
-                rec.update(**{k: got.get(k) for k in ("result", "attempts", "at", "reason")})
-                self._ask_launch(
-                    purpose, rec["lane"], f"レーン {rec['lane']} を 2 回起動しても立ち上がらない（{rec.get('reason')}）", spec, extra
-                )
+            if rec.get("result") == "waiting":
+                self._launch_waiting_one(purpose, rec, rows)
+
+    def _launch_waiting_one(self, purpose: str, rec: dict, rows: dict) -> None:
+        """空き待ちの起動の記録 `rec` を 1 件読み直す。待つ相手が動いて観えれば時間切れだけを扱い、観えなければ打ち直す。"""
+        import clock
+
+        busy, spec, extra = str(rec.get("busy") or ""), rec.get("launch") or {}, dict(rec.get("extra") or {})
+        since = clock.parse(rec.get("since"), naive="utc") if rec.get("since") else None
+        waited = max(0.0, self.seen_at - since.timestamp()) if since else 0.0
+        if (rows.get(busy) or {}).get("state") in UP:
+            if waited >= float(rec.get("limit") or 0):
+                rec.update(result="failed", reason=f"一時レーンは同時に 1 本まで: {busy} が動いたまま {waited:g} 秒待った")
+                text = f"レーン {rec['lane']} を起動できない（一時レーンは同時に 1 本まで。{busy} が {waited:g} 秒のあいだ動いている）"
+                self._ask_launch(purpose, rec["lane"], text, spec, extra)
+            return
+        got = step_launch(self.main, list(spec.get("argv") or []), rec["lane"], spec.get("cwd"), bool(spec.get("fresh")))
+        self.helper_seen.pop(rec["lane"], None)
+        if got.get("result") == "waiting":
+            rec["busy"] = got.get("busy")  # 別の一時レーンが先に立ち上がった: 最初に断られた時刻のまま待ちを続ける
+        elif got.get("result") == "up":
+            self.launches[purpose] = {"lane": rec["lane"], **{k: got.get(k) for k in ("result", "attempts", "at", "reason")},
+                                      "waited": {"busy": busy, "seconds": waited}}  # fmt: skip
+        else:
+            rec.update(**{k: got.get(k) for k in ("result", "attempts", "at", "reason")})
+            self._ask_launch(
+                purpose, rec["lane"], f"レーン {rec['lane']} を 2 回起動しても立ち上がらない（{rec.get('reason')}）", spec, extra
+            )
 
     def launch_helper(self) -> None:
         """流れているリリースの最後の起動（`launch`）の一時レーンを起動する。立ち上がらなければ問いに `n` を添える（「止める」で締める）。"""
