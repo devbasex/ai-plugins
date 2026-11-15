@@ -9,7 +9,7 @@ allowed-tools:
 
 # worktree で開発する
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `projects-sync.sh`（M7）・`worktree-localenv.sh`（M8）・`worktree-setup.sh`（M8）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `projects-sync.sh`（M7）・`worktree-localenv.sh`（M8）・`worktree-setup.sh`（M8）・`worktree-testenv.sh`（M8）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 開発の変更は、git の worktree の中で行い、リポジトリを clone したディレクトリには加えない。
 並行して複数の作業を進めても、互いの変更が同じ作業ディレクトリで混ざらない状態を保つ。
@@ -347,12 +347,12 @@ bash "$NDF" verify "$WT"; echo $?  # 0 一致 / 1 不一致 / 2 未起動
 立てて分ける。手順は [references/test-execution.md](references/test-execution.md) にある。
 
 ```bash
-TE=ndf
-"$TE" worktree testenv env "$WT"                        # 環境名・スロット・ポートを採番し worktree レジストリへ記録
-"$TE" worktree testenv bake --tag "$("$TE" worktree testenv tag "$WT")"  # 基準を作る（内容が同じなら焼き直さない）
-"$TE" worktree testenv up "$WT" --profile core          # 起動する
-"$TE" worktree testenv test "$WT" --kind stateful       # 実行したコマンドの終了コードがそのまま返る
-"$TE" worktree testenv down "$WT"                       # 破棄し、割り当てを解放する。ボリュームも消す（消すのは既定で、戻せない）
+TE="$SCRIPTS/worktree-testenv.sh"
+bash "$TE" env "$WT"                        # 環境名・スロット・ポートを採番し worktree レジストリへ記録
+bash "$TE" bake --tag "$(bash "$TE" tag "$WT")"  # 基準を作る（内容が同じなら焼き直さない）
+bash "$TE" up "$WT" --profile core          # 起動する
+bash "$TE" test "$WT" --kind stateful       # 実行したコマンドの終了コードがそのまま返る
+bash "$TE" down "$WT"                       # 破棄し、割り当てを解放する。ボリュームも消す（消すのは既定で、戻せない）
 ```
 
 **テストのステップは、止まっているテスト環境を自動で起こす。** `/ndf:merged` の後片付けは worktree を外す前に破棄する。

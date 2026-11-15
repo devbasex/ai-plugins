@@ -58,7 +58,7 @@ description: "Turn a vague request into verifiable acceptance criteria before im
    - 1 件以上（既に文書かコードのあるプロジェクト）: 候補から領域の語を選び、語・意味・コンテキストの案を添えて
      利用者へ一覧で示す
    - 0 件（スクラッチのプロジェクト）: 依頼文から語とコンテキストを大まかに起こし、同じ形で示す
-4. 利用者が採った語だけを用語集のファイルへ書き、`ndf records glossary render` で文書を作り直す。
+4. 利用者が採った語だけを用語集のファイルへ書き、`python3 "$SCRIPTS/glossary.py" render` で文書を作り直す。
    採る語が 0 件でもよい（ほぼ空の用語集のまま設計へ進める）
 
 ### 1. 依頼を要約せずに写す

@@ -12,7 +12,7 @@ hooks:
 
 # 開発ワークフローの振り分け
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `behavior-check.py`（M1）・`context-policy.py`（M3b）・`hook.py`（M3a）・`mvv-gate.py`（P2）・`parallel.py`（P3）・`project-decl.py`（D2+）・`project-mvv.py`（M7）・`relay.py`（M3b）・`release-steps.py`（M2）・`supervise.py`（C2）・`test-run.py`（C2）・`workflow-guard.sh`（M3a）・`worktree-setup.sh`（M8）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `behavior-check.py`（M1）・`ci-watch.py`（AD1+）・`context-policy.py`（M3b）・`hook.py`（M3a）・`mvv-gate.py`（P2）・`parallel.py`（P3）・`project-decl.py`（D2+）・`project-mvv.py`（M7）・`relay.py`（M3b）・`release-steps.py`（M2）・`supervise.py`（C2）・`test-run.py`（C2）・`workflow-guard.sh`（M3a）・`worktree-setup.sh`（M8）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 変更内容をモードへ分類し、必要な工程だけを起動する。**全変更にフル工程を課さない。**
 判定の結果として返すもの（モード・必須工程・次のコマンド）の形は「3. 判定結果を出力する」にある。
@@ -218,7 +218,7 @@ CI でテストが走るリポジトリでは、手元でテストを走らせ�
 
 1. **宣言する。** 手順 0 の解析（`project-decl.py write`）は、テストの suite（`kind` が `test`）の `ci_jobs` のワークフローのファイルがリポジトリにあれば、`.ndf/project.json` に `test.ci.only: true` を書く。条件を満たさなくなれば解析が書いた値を消す。人が書いた値（`false` を含む）は書き換えない
 2. **手元でテストを走らせない。** 宣言があれば、実装と検査のプランは範囲テスト・全体テスト（`test-limited`・`test-all`）を持たない。`test-run.py scope` は静的解析だけを走らせる。worker と supervisor がテストの suite のコマンドを打つと hook が止める（`hook_lib/ci_test_guard.py`）。静的解析は手元で走らせる
-3. **CI の結果を待たずに監視して直す。** プランは `pr` の後・`doc-lint` の後・マージが落ちた後に `ndf ci watch` で CI のテストのチェックを 1 回だけ読む。落ちていれば `ci-fix` が直して push し、改修の回数が上限（`contracts/limits.json` の `supervise.ci-fix`）に当たれば止めて人へ戻す。マージはテストのチェックがすべて現れて通ったときだけ行う
+3. **CI の結果を待たずに監視して直す。** プランは `pr` の後・`doc-lint` の後・マージが落ちた後に `ci-watch.py peek` で CI のテストのチェックを 1 回だけ読む。落ちていれば `ci-fix` が直して push し、改修の回数が上限（`contracts/limits.json` の `supervise.ci-fix`）に当たれば止めて人へ戻す。マージはテストのチェックがすべて現れて通ったときだけ行う
 4. **PR を早く出す。** 宣言のあるリポジトリの実装のプランは、実装の直後に Draft の PR を出す（`pr-draft`）。以後の push のたびに CI が走る
 
 CI の結果の監視が読んだ結論と改修の回数は、プランの状態ディレクトリの `work/ci-watch.jsonl` に追記で残る。

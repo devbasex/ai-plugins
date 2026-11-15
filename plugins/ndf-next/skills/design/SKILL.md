@@ -106,7 +106,7 @@ issue のことではない。
 [references/domain-model.md](references/domain-model.md) にある。
 
 **書いた後に語を用語集と突き合わせる。** `python3 "$SCRIPTS/glossary.py" check --file <設計文書>` を打ち、
-新しい語・意味の変わった語・廃止する語を、同じ変更の中で用語集へ反映して `ndf records glossary render` で文書を
+新しい語・意味の変わった語・廃止する語を、同じ変更の中で用語集へ反映して `glossary.py render` で文書を
 作り直す。構成要素の名前などを語として新しく使うときは、ドメインモデルの節の「用語」の表に書く。
 
 **タスクを機械的に導けるだけの情報を書く。** 導けない設計は、次の工程が成立しない。

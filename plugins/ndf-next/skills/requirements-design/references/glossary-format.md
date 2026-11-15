@@ -9,7 +9,7 @@ NDF の `scripts/glossary.py` はこの形でだけ読み、語はすべて用�
 | --- | --- | --- |
 | 用語集の設定（`.ndf/glossary.json`） | `glossary.py init` が初めの 1 回。後はプロジェクトの変更 | 用語集の置き場・形式・検査の対象 |
 | 用語集（設定の `source`） | プロジェクトの変更（Pull Request） | 語・意味・コンテキスト・廃止した語・識別子・正本。**正** |
-| 人が読む文書（設定の `document`） | `ndf records glossary render` だけ | 用語集から作るコピー。手で直さない |
+| 人が読む文書（設定の `document`） | `glossary.py render` だけ | 用語集から作るコピー。手で直さない |
 
 ## 例
 

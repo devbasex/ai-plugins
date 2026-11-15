@@ -1,6 +1,6 @@
 # worktree でのテスト実行
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `test-run.py`（C2）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `test-run.py`（C2）・`worktree-testenv.sh`（M8）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 必要な分離の範囲は、テストが自プロセスの外へ何を書き、誰がそれを叩くかで決まる。
 外部依存が無ければ worktree のファイルだけ、データ保存先へ書くならその実体ごと、画面を
@@ -52,7 +52,7 @@ flowchart TD
 ## 採番
 
 ```bash
-ndf worktree testenv env "$WT"
+bash "$SCRIPTS/worktree-testenv.sh" env "$WT"
 ```
 
 環境名・スロット・ポートを出力し、worktree レジストリへ記録する。**同じ worktree には常に同じ値が返る。**
@@ -78,7 +78,7 @@ worktree レジストリは共通の git ディレクトリ配下（`.git/ndf/wo
 記述の中に固定していると、名前を変える方式は成立しない。実測では、副系統を指す記述を含む
 スクリプトが 109 本と 15 本存在した。実体を分ければ名前を変えずに済む。
 
-1. **採番する** — `ndf worktree testenv env "$WT"`
+1. **採番する** — `worktree-testenv.sh env "$WT"`
 
 2. **依存物を持ち込む** — 手順は [`local-environment.md`](local-environment.md) と共通。
    ハードリンク複製を使い、書き換えられるディレクトリだけ実体を複製する。**symlink は
@@ -93,11 +93,11 @@ worktree レジストリは共通の git ディレクトリ配下（`.git/ndf/wo
    決まる。同じ内容なら焼き直しは発生しない
 
    ```bash
-   TAG=$(ndf worktree testenv tag "$WT" | jq -r .metrics.tag)   # 結果 JSON の metrics.tag がタグ
-   ndf worktree testenv bake --tag "$TAG"   # 2 なら同じタグの基準が既にある
+   TAG=$(bash "$SCRIPTS/worktree-testenv.sh" tag "$WT")
+   bash "$SCRIPTS/worktree-testenv.sh" bake --tag "$TAG"   # 2 なら同じタグの基準が既にある
    ```
 
-5. **復元して起動する** — `ndf worktree testenv up "$WT" --profile core`。ホストポートは
+5. **復元して起動する** — `worktree-testenv.sh up "$WT" --profile core`。ホストポートは
    公開しない。**定義に無いコンテナを削除する指定を付けない**（稼働中のプロジェクトに定義外の
    コンテナが属していることがある）
 
@@ -125,7 +125,7 @@ worktree レジストリは共通の git ディレクトリ配下（`.git/ndf/wo
    最初のテストが全体を作り直す構成がある（実測では 1,790 本の定義を流し直した）
 
    ```bash
-   ndf worktree testenv test "$WT" --kind stateful
+   bash "$SCRIPTS/worktree-testenv.sh" test "$WT" --kind stateful
    ```
 
 `test` は**実行したコマンドの終了コードをそのまま返す**。テストの成否を包み隠さないためである。
@@ -152,7 +152,7 @@ worktree レジストリは共通の git ディレクトリ配下（`.git/ndf/wo
    `port_role` で指定する（既定は `http`）
 
    ```bash
-   ndf worktree testenv test "$WT" --kind browser
+   bash "$SCRIPTS/worktree-testenv.sh" test "$WT" --kind browser
    ```
 
 証跡の置き場所は、その worktree 限りの除外設定（`.git/info/exclude`）へ自動で登録される。
@@ -167,8 +167,8 @@ worktree レジストリは共通の git ディレクトリ配下（`.git/ndf/wo
 **公開するのは、マスク済みデータで焼いた基準を載せたテスト環境だけとする。**
 
 ```bash
-ndf worktree testenv expose "$WT"     # 0 完了 / 1 条件を満たさず拒否
-ndf worktree testenv unexpose "$WT"
+bash "$SCRIPTS/worktree-testenv.sh" expose "$WT"     # 0 完了 / 1 条件を満たさず拒否
+bash "$SCRIPTS/worktree-testenv.sh" unexpose "$WT"
 ```
 
 拒否する条件は次の 3 つで、1 つでも該当すれば公開しない（終了コード 1）。どれに当たったかは
@@ -225,15 +225,15 @@ worktree を見ているかを確かめ（到達の確認）、見ていなけ�
 | 書く場所 | 何を書くか | 確かめる経路 |
 | --- | --- | --- |
 | `.ndf/project.json` の `test.suites[].container` | `service`（とテスト環境が無いときの `compose_files`） | `test-run.py`（3 層）・cross-refactoring の範囲テストと全体テスト |
-| `.ndf/worktree.json` の `testenv.test_kinds.<種類>.service` | サービス名 | `ndf worktree testenv test` |
+| `.ndf/worktree.json` の `testenv.test_kinds.<種類>.service` | サービス名 | `worktree-testenv.sh test` |
 
-確かめ方: worktree に探りの印（`.ndf-evidence/reach-<乱数>`）を置き、`ndf worktree testenv compose-env` が出す
+確かめ方: worktree に探りの印（`.ndf-evidence/reach-<乱数>`）を置き、`worktree-testenv.sh compose-env` が出す
 テスト環境の値（`NDF_*`・`COMPOSE_PROJECT_NAME`・`COMPOSE_FILE`）を付けて `docker compose exec -T <サービス> cat <印>`
 を打つ。中身が一致すれば、同じ値を付けてテストのコマンドを走らせる。印は共通の git ディレクトリの
 `info/exclude` へ `.ndf-evidence/` を登録してから置き、確かめた後に消す。
 
 ```bash
-ndf worktree testenv compose-env "$WT"   # 割り当て済みのテスト環境へ向ける値（割り当てを新しく取らない）
+bash "$SCRIPTS/worktree-testenv.sh" compose-env "$WT"   # 割り当て済みのテスト環境へ向ける値（割り当てを新しく取らない）
 python3 "$SCRIPTS/lib/container_reach.py" probe "$WT" --service app; echo $?  # 0 届いた / 1 届かない / 2 実行系が無い
 ```
 
@@ -244,15 +244,15 @@ python3 "$SCRIPTS/lib/container_reach.py" probe "$WT" --service app; echo $?  # 
 | `test-run.py` | テスト環境を用意する。それでも届かなければ走らせずに 2（判断できない）で終わり、`summary` に理由を出す |
 | cross-refactoring | テスト環境を用意する。それでも届かなければ走らせずに止まる。着手前のテストでも既存失敗として記録しない |
 | 落ちたテストの見分け（着手前の HEAD の一時の worktree） | 見分けられないとして扱う（既存失敗とみなさない） |
-| `ndf worktree testenv test` | 起こさない。走らせずに 1（実行系が無ければ 2）で終わり、起こし方（`ndf worktree testenv up <worktree>`）を出す |
+| `worktree-testenv.sh test` | 起こさない。走らせずに 1（実行系が無ければ 2）で終わり、起こし方（`worktree-testenv.sh up <worktree>`）を出す |
 
 **テスト環境の用意の決まり。** `test-run.py` と cross-refactoring は、テストを走らせる前に宣言のすべてのサービスを
 確かめる。コンテナが動いていない・別のディレクトリを見ている・答えないサービスが 1 つでもあれば、次を 1 度だけ行い、
 全部を確かめ直す。既に届く worktree では起動のコマンドを打たない。
 
-1. `ndf worktree testenv env` で割り当てを取る
+1. `worktree-testenv.sh env` で割り当てを取る
 2. 同じプロジェクト名で残っているボリュームを読む（`testenv[].reused_volumes` へ載せる。テストは止めない）
-3. `ndf worktree testenv up <worktree> --wait-service <サービス>` を上限 300 秒で打つ。`up -d` の後に、宣言のサービスと
+3. `worktree-testenv.sh up <worktree> --wait-service <サービス>` を上限 300 秒で打つ。`up -d` の後に、宣言のサービスと
    その依存だけが準備できるのを待つ。依存の準備を待てるのは、依存が healthcheck を持つときである
 
 コンテナの実行系が無い・テスト環境の値を読めない・探りの印を置けないときは、起こしても直らないため起こさない。
@@ -265,7 +265,7 @@ python3 "$SCRIPTS/lib/container_reach.py" probe "$WT" --service app; echo $?  # 
 | --- | --- |
 | `testenv` の宣言が無い | `.ndf/worktree.json` への宣言を求める |
 | `localenv.compose_files` が無い | `.ndf/worktree.json` への宣言を求める |
-| 空きスロットが無い・起動の失敗 | サービス名と、`ndf worktree testenv` の標準エラーの末尾 |
+| 空きスロットが無い・起動の失敗 | サービス名と、`worktree-testenv.sh` の標準エラーの末尾 |
 | 上限の超過 | サービス名と上限の秒 |
 | 起こしても届かない | 2 度目の到達の確認の理由 |
 
@@ -337,7 +337,7 @@ docker volume ls -q --filter label=com.docker.compose.project=<環境名> | xarg
 `down` と同じく宣言で決め、`--volumes` は宣言より優先する。手で確かめるときはリポジトリの中から打つ。
 
 ```bash
-ndf worktree testenv reclaim <メインディレクトリ>  # 結果を 1 行の JSON で出す
+bash "$SCRIPTS/worktree-testenv.sh" reclaim <メインディレクトリ>  # 結果を 1 行の JSON で出す
 ```
 
 環境ごとの結果は `items[].result` に載る。終了コードを 1 にするのは `failed` と、何も回収しなかったとき（`not_run`）だけである。

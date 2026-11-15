@@ -1,6 +1,6 @@
 # 設定ファイルの書き方
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `pr-steps.py`（M1）・`project-decl.py`（D2+）・`release-steps.py`（M2）・`supervise.py`（C2）・`worktree-localenv.sh`（M8）・`worktree-setup.sh`（M8）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `pr-steps.py`（M1）・`project-decl.py`（D2+）・`release-steps.py`（M2）・`supervise.py`（C2）・`worktree-localenv.sh`（M8）・`worktree-setup.sh`（M8）・`worktree-testenv.sh`（M8）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 worktree 運用の仕組みは、リポジトリごとの差を `.ndf/worktree.json` から読む。
 **このファイルが無いリポジトリでは、すべての仕組みが何もせずに終わる。**
@@ -356,7 +356,7 @@ worktree ごとにテスト環境を立てるなら、`testenv` を足す。
 | --- | --- |
 | `port_band` | 他の用途と重ならない帯。スロット 1 つあたり 20 番を使う |
 | `port_roles` | 役割ごとの番号。ポートは `帯の下限 + スロット*20 + 役割番号` |
-| `discard_volumes` | `false` のとき、`ndf worktree testenv down` がテスト環境のボリュームを残す。**無しと `true` では消し、消えたデータは戻せない。** 作り直せないデータを持つプロジェクトは `false` を書く。真偽値以外の値は残す側に倒す。メインディレクトリの宣言を読む |
+| `discard_volumes` | `false` のとき、`worktree-testenv.sh down` がテスト環境のボリュームを残す。**無しと `true` では消し、消えたデータは戻せない。** 作り直せないデータを持つプロジェクトは `false` を書く。真偽値以外の値は残す側に倒す。メインディレクトリの宣言を読む |
 | `golden_tag_paths` | データ構造を定める資産。**内容が同じなら基準を焼き直さない** |
 | `test_kinds` | 種類ごとの選別と実行。**書かなければテスト実行の仕組みは何もせずに終わる** |
 | `skip_reset` | 初期化を抑止する環境変数。渡さないと最初のテストが全体を作り直す構成がある |
