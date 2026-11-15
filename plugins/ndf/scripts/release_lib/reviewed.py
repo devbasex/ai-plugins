@@ -95,7 +95,7 @@ class ProdOps:
 def release_prod(ctx: ReleaseCtx, case, ops: ProdOps):
     """CD のある場合の本番: 開発版の PR → 本番の PR → CI の待ち → 承認の照合 → マージ（`cd-admin` だけ迂回）→ 公開の後（#2773・#3506）。
     承認が先端と一致しなければ本番の PR を開いたまま承認ゲート（10）で止める。"""
-    root, a, plugin, plugins, branch, base, prod = ctx.root, ctx.a, ctx.plugin, ctx.plugins, ctx.branch, ctx.base, ctx.prod
+    root, a, plugin, plugins, prod = ctx.root, ctx.a, ctx.plugin, ctx.plugins, ctx.prod
     ver = a.version
     metrics = {
         "channel": "prod",
@@ -109,7 +109,7 @@ def release_prod(ctx: ReleaseCtx, case, ops: ProdOps):
         "plugins": ",".join(plugins),
     }
     items: list[dict] = []
-    main_pr = _open_prod_pr(root, a, plugin, plugins, branch, base, prod, items, metrics, ops, case)
+    main_pr = _open_prod_pr(ctx, items, metrics, ops, case)
     repo = repo_or_stop(root)
 
     def waiting(head, judged):
@@ -173,8 +173,9 @@ def admin_back(back=None):
     return run
 
 
-def _open_prod_pr(root, a, plugin, plugins, branch, base, prod, items, metrics, ops: ProdOps, case=None) -> int:
+def _open_prod_pr(ctx: ReleaseCtx, items, metrics, ops: ProdOps, case=None) -> int:
     """本番の PR を引くか作り、その番号を返す。マージ済みなら公開の後へ進む（再開）。無ければ開発版の PR をマージしてから作る。"""
+    root, a, plugin, plugins, branch, base, prod = ctx.root, ctx.a, ctx.plugin, ctx.plugins, ctx.branch, ctx.base, ctx.prod
     ver = a.version
     git(root, "fetch", "-q", "origin", "--tags")
     done = ops.find_pr(root, branch, prod, states=("MERGED", "OPEN"))
