@@ -3,7 +3,7 @@
 設計文書 [issue-3572-design.md](issue-3572-design.md) の「構成要素」のうち、決定 24 の 12・13 の行（設定の読み分けを節から読む形へ直すことと、
 取り込み方の表から行が許す値の列を外すこと）を、ファイルと関数の粒度へ下ろした文書である。語（ブランチ戦略の節・取り込み方の表・マージの方式・
 検証環境・バージョンの置き場・本番ブランチ・ベースブランチ）は設計文書の「用語」と「ブランチ戦略の節」の意味で使う。不変条件（I1〜I18）と
-決定（決定 1〜30）の番号は設計文書と [決定の記録](issue-3572-design-decisions.md) の番号である。
+決定（決定 1〜31）の番号は設計文書と [決定の記録](issue-3572-design-decisions.md) の番号である。
 
 **起点のコード。** 実装の PR https://github.com/devbasex/ai-plugins/pull/3587 の先端 84e6c33b4（`origin/sprint/lrel-lock`。2026-11-16 の
 PR https://github.com/devbasex/ai-plugins/pull/3636 のマージ）である。決定 24 の 1〜10 の行（行ごとの振る舞い・マージの方式・merge queue・
