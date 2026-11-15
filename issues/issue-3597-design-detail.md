@@ -133,15 +133,15 @@ scripts/script-structure-allow/plugins__ndf__scripts__lib__parallel_run.py--line
 | `_rev` | `plugins/ndf/scripts/lib/parallel_lane.py` | 変更 | `_rev(cwd: str, ref: str = "HEAD") -> str` | 作業ディレクトリで `ref` のコミットの 40 桁を求める（`_head_sha` を `ref` を取る形へ広げる） | 無し | `git -C <cwd> rev-parse --verify --quiet <ref>^{commit}` が 0 で 40 桁を返せばそれを、ほかは空文字を返す | 外部コマンド（git） |
 | `request_gate2` | `plugins/ndf/scripts/lib/parallel_gate2.py` | 変更 | `request_gate2(main: Path, name: str, n: int, k: int, report: str) -> plg.Sent` | 提示のリリース承認ゲートの依頼を送る（`parallel_lane.py` から移し、送った結果を返す） | 今と同じ | id と中身は今と同じ（`<計画名>-p<連番>-<提示>`） | ファイル（`presented.json` を読む・台帳）・耐久の記録（知らせ） |
 | `request_confirmed` | `plugins/ndf/scripts/lib/parallel_gate2.py` | 新設 | `request_confirmed(main: Path, name: str, n: int, k: int, done: str) -> plg.Sent` | 確定の後の承認ゲートの依頼を組んで送る | 一時レーンが確定の流すものの本番のプランを終えた | 最後の起動が同じ連番・提示の `confirmed`（`carried` を持たない）なら、id `<計画名>-p<連番>-<提示>-c<起動の seq>`、`after: confirmed`・`reason`・`pr`・`options: ["打ち直す", "差し戻す"]`・`question`・`report`・`stamp`（承認したコミット）の依頼を送った結果を返す。違えば `NotConfirmed` | ファイル（done・本番のプランの状態・`presented.json` を読む・台帳）・耐久の記録（イベントを読む・知らせ） |
-| `gate_detail` | `plugins/ndf/scripts/lib/parallel_gate2.py` | 新設 | `gate_detail(done: str) -> tuple[str, Optional[int], str]` | 本番のプランの done から、承認ゲートの理由・本番の PR の番号・承認資料のパスを読む | 無し | done の結果が `関門` の項目の `report` の置き場の `progress.jsonl` で最後の終了コード 10 のステップの出力を読み、`metrics.reason`（無ければ `summary`）と `metrics.main_pr` を返す。項目のほかが読めなければ理由は「承認ゲートの理由を読めない（<パス>）」、番号は `None` | ファイル（done・`progress.jsonl`・ステップの出力を読む） |
+| `gate_detail` | `plugins/ndf/scripts/lib/parallel_gate2.py` | 新設 | `gate_detail(done: str) -> Optional[tuple[str, Optional[int], str]]` | 本番のプランの done から、承認ゲートの理由・本番の PR の番号・承認資料のパスを読む | 無し | 結果が `関門` の項目が無ければ `None`（`request_confirmed` が `NotConfirmed` にする）。あれば、その項目の `report` の置き場の `progress.jsonl` で最後の終了コード 10 のステップの出力を読み、`metrics.reason`（無ければ `summary`）と `metrics.main_pr` を返す。項目のほかが読めなければ理由は「承認ゲートの理由を読めない（<パス>）」、番号は `None` | ファイル（done・`progress.jsonl`・ステップの出力を読む） |
 | `step_close_release_pr` | `plugins/ndf/scripts/lib/parallel_gate2.py` | 新設 | `step_close_release_pr(main: str, pr: int, comment: str) -> dict`（耐久ステップ `parallel.close-release-pr`） | 差し戻した本番の PR を閉じ、理由と依頼の id をコメントに残す | `pr` は正の整数 | `gh pr close <pr> --comment <comment>` を 1 回打ち、`{"closed": 終了コードが 0, "reason": 失敗の標準エラーの 1 行目か None}` を返す。例外にしない | 外部コマンド（gh）・ネットワーク（GitHub） |
 | `ConfirmedGate.apply_confirmed` | `plugins/ndf/scripts/lib/parallel_gate2.py` | 新設 | `apply_confirmed(self, q: dict, choice: list[str]) -> bool` | 確定の後の依頼への答え「打ち直す」「差し戻す」を当てる | `q` は答えた問い。`self` は `_Run` | `q` が確定の後の `gate2` でなければ `False`（ほかの当て方へ進む）。そうなら `True` を返し、「打ち直す」は新しい目的の確定の起動を流し、「差し戻す」は本番の PR を閉じる耐久ステップを打ってから `settle(rel, {"result": "rejected", "reason": ...})` を呼ぶ | 耐久の記録（イベント `pause`）・起動（`launch_helper`）・外部コマンド（`step_close_release_pr`） |
 | `last_launch` | `plugins/ndf/scripts/lib/parallel_helper.py` | 新設 | `last_launch(main: Path, name: str) -> dict` | 最後の起動の指示（イベント `pause` か、それに添えた `release`）を読む | 計画の耐久の記録がある | `action` が `release` か `confirmed` のイベント、それ以外のイベントに添えた `release`、無ければ空の dict を返す | 耐久の記録（イベントを読む） |
 | `helper_task` | `plugins/ndf/scripts/lib/parallel_helper.py` | 変更 | `helper_task(main: Path, name: str, n: int, k: int) -> dict` | 一時レーンの流すものに、確定の後の依頼の 1 行と自分の依頼と答えを足す | 今と同じ | `phase: confirmed` の `gate2` は `request-gate2 <計画名> <連番> <提示> --confirmed --done <release-done.json>`。両方の `phase` に `asked`（`asked_of` の結果） | 耐久の記録（イベントを読む）・ファイル（台帳を読む） |
-| `_resend` | `plugins/ndf/scripts/parallel.py` | 新設 | `_resend(s: plg.Sent) -> dict` | 送った結果から、出力に足す値を作り、中身の違う同じキーの依頼を終了コード 5 で断る | 依頼のコマンドの中で呼ぶ | `same` が `False` なら `reply("stopped", ..., code=5, existing=..., reason=...)` で終える。書いたなら空の dict、同じなら `{"already": True, "answered": s.answered}` | 標準出力（統一 JSON レポート） |
-| `cmd_request` | `plugins/ndf/scripts/parallel.py` | 変更 | `cmd_request(a) -> None` | リリースの依頼を送り、送った結果で出力を決める | 今と同じ | 書いたときは今と同じ。同じなら終了コード 10 のまま要約を「送り済み」にし `already`・`answered` を足す。中身が違えば 5 で、依頼の記録のファイルを書かない | ファイル（台帳・依頼の記録）・耐久の記録（知らせ）・標準出力 |
-| `cmd_request_ask` | `plugins/ndf/scripts/parallel.py` | 変更 | `cmd_request_ask(a) -> None` | 問いの依頼を送り、引き継いだときは引き継いだ答えか id を返す | 今と同じ | 引き継いだら 0 で `reused`・`id`（と答え済みなら `answer`）。送ったら今と同じ（同じなら `already`）。中身が違えば 5 | ファイル（台帳）・耐久の記録（知らせ）・外部コマンド（git）・標準出力 |
-| `cmd_request_gate2` | `plugins/ndf/scripts/parallel.py` | 変更 | `cmd_request_gate2(a) -> None` | 提示か確定の後のリリース承認ゲートの依頼を送る | `--report` か `--confirmed --done` のどちらかがある | 送ったら 0（同じなら `already`）。中身が違えば 5。確定の起動が合わなければ 4。引数の組が合わなければ 1 | ファイル（台帳ほか `request_confirmed` が読むもの）・耐久の記録・標準出力 |
+| `_resend` | `plugins/ndf/scripts/parallel.py` | 新設 | `_resend(s: plg.Sent) -> dict` | 送った結果から、出力に足す値を作り、中身の違う同じキーの依頼を終了コード 1 で断る | 依頼のコマンドの中で呼ぶ | `same` が `False` なら `reply("stopped", ..., code=1, existing=..., reason=...)` で終える。書いたなら空の dict、同じなら `{"already": True, "answered": s.answered}` | 標準出力（統一 JSON レポート） |
+| `cmd_request` | `plugins/ndf/scripts/parallel.py` | 変更 | `cmd_request(a) -> None` | リリースの依頼を送り、送った結果で出力を決める | 今と同じ | 書いたときは今と同じ。同じなら終了コード 10 のまま要約を「送り済み」にし `already`・`answered` を足す。中身が違えば 1 で、依頼の記録のファイルを書かない | ファイル（台帳・依頼の記録）・耐久の記録（知らせ）・標準出力 |
+| `cmd_request_ask` | `plugins/ndf/scripts/parallel.py` | 変更 | `cmd_request_ask(a) -> None` | 問いの依頼を送り、引き継いだときは引き継いだ答えか id を返す | 今と同じ | 引き継いだら 0 で `reused`・`id`（と答え済みなら `answer`）。送ったら今と同じ（同じなら `already`）。中身が違えば 1 | ファイル（台帳）・耐久の記録（知らせ）・外部コマンド（git）・標準出力 |
+| `cmd_request_gate2` | `plugins/ndf/scripts/parallel.py` | 変更 | `cmd_request_gate2(a) -> None` | 提示か確定の後のリリース承認ゲートの依頼を送る | `--report` か `--confirmed --done` のどちらかがある | 送ったら 0（同じなら `already`）。中身が違えば 1。確定の起動が合わなければ 4。引数の組が合わなければ 1 | ファイル（台帳ほか `request_confirmed` が読むもの）・耐久の記録・標準出力 |
 | `cmd_helper` | `plugins/ndf/scripts/parallel.py` | 変更 | `cmd_helper(a) -> None` | 一時レーンの流すものを返す。台帳を読めなければ止める | 今と同じ | 今の出力に `asked` が載る。台帳を読めなければ終了コード 2 | 耐久の記録（イベントを読む）・ファイル（台帳を読む）・標準出力 |
 | `cmd_answer` | `plugins/ndf/scripts/parallel.py` | 変更 | `cmd_answer(a) -> None` | 答えの行が既にあれば要約を「送り済み」にする | 今と同じ | 終了コードは今と同じ。`already: true` を足す | ファイル（台帳）・耐久の記録（知らせ）・標準出力 |
 | `cmd_confirm` | `plugins/ndf/scripts/parallel.py` | 変更 | `cmd_confirm(a) -> None` | 同上（確定の行） | 今と同じ | 同上 | ファイル（台帳）・耐久の記録（知らせ）・標準出力 |
@@ -166,9 +166,9 @@ scripts/script-structure-allow/plugins__ndf__scripts__lib__parallel_run.py--line
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `resent` | 台帳を読めない | ファイルの権限・ディスクの誤り | `read_ledger_rows` の `OSError` | 呼び出し元へ返す | 依頼のコマンドが「計画の台帳へ書けない」と終了コード 2（`sent` が受ける） | 台帳は変えていない。再実行してよい |
-| `resent` | 同じキーの行が見つからない | 最初の `opened` より前の行だけが同じキーを持つ（`append_ledger_row` は受けるので起きない） | 行を探した結果が無い | 既定値で続ける（`same=False`・`existing=""`） | 終了コード 5（理由「同じキーの行を読めない」） | 書いていない。原因を直して再実行する |
+| `resent` | 同じキーの行が見つからない | 最初の `opened` より前の行だけが同じキーを持つ（`append_ledger_row` は受けるので起きない） | 行を探した結果が無い | 既定値で続ける（`same=False`・`existing=""`） | 終了コード 1（理由「同じキーの行を読めない」） | 書いていない。原因を直して再実行する |
 | `deliver_message` | 台帳を書けない | ロックの上限・ディスク | `append_ledger_row` の `OSError`・`LockTimeout` | 呼び出し元へ返す（今と同じ） | 終了コード 2 | 知らせを送らない。再実行してよい |
-| `deliver_message` | 中身の違う同じキーの行 | 別の依頼が同じ id を使った | `resent` の `same` が `False` | 呼び出し元へ返す（`Sent` で） | 依頼のコマンドが終了コード 5 | 台帳を変えず、知らせない。送り手が次の手を変える |
+| `deliver_message` | 中身の違う同じキーの行 | 別の依頼が同じ id を使った | `resent` の `same` が `False` | 呼び出し元へ返す（`Sent` で） | 依頼のコマンドが終了コード 1 | 台帳を変えず、知らせない。送り手が次の手を変える |
 | `deliver_message` | 耐久ワークフローへ知らせられない | 記録を開けない | `durable.DurableError` | 既定値で続ける（今と同じ。標準エラーへ 1 行） | 送ったと返る。耐久ワークフローは次の観測で台帳から読む | 再実行は不要 |
 | `send_inbox` | 外のオーガナイザーのレーン | 計画が外の計画 | 計画名の判定 | 呼び出し元へ返す（`ValueError`。今と同じ） | 今と同じ | 今と同じ |
 | `send_release_request` | 依頼の id のファイルを書けない・台帳を書けない | ディスク | `OSError` | 呼び出し元へ返す（今と同じ） | 終了コード 2 | 再実行してよい（id はファイルから読み直す） |
@@ -193,15 +193,15 @@ scripts/script-structure-allow/plugins__ndf__scripts__lib__parallel_run.py--line
 | `last_launch` | 耐久の記録を読めない | 記録のロック・壊れ | `durable.DurableError` | 呼び出し元へ返す | 呼び出し元の行のとおり | 無し |
 | `helper_task` | 台帳を読めない | ディスク | `OSError` | 呼び出し元へ返す | `cmd_helper` が終了コード 2 | 再実行してよい |
 | `helper_task` | 耐久の記録を読めない | 記録のロック・壊れ | `durable.DurableError` | 呼び出し元へ返す（今と同じ） | 今と同じ | 今と同じ |
-| `_resend` | 中身の違う同じキーの依頼 | 別の依頼が同じ id を使った | `s.same` が `False` | 止める | 終了コード 5、`status: stopped`、`metrics.existing`・`metrics.reason` | 送り手が次の手を変える |
-| `cmd_request` | 中身の違う同じキーの依頼 | 同上 | `_resend` | 止める | 終了コード 5。依頼の記録のファイル（`request.txt`）を書かない | 同上 |
+| `_resend` | 中身の違う同じキーの依頼 | 別の依頼が同じ id を使った | `s.same` が `False` | 止める | 終了コード 1、`status: stopped`、`metrics.existing`・`metrics.reason` | 送り手が次の手を変える |
+| `cmd_request` | 中身の違う同じキーの依頼 | 同上 | `_resend` | 止める | 終了コード 1。依頼の記録のファイル（`request.txt`）を書かない | 同上 |
 | `cmd_request` | 台帳を書けない | ディスク・ロック | `sent` の `OSError` | 止める（今と同じ） | 終了コード 2 | 再実行してよい |
-| `cmd_request_ask` | 中身の違う同じキーの依頼 | 同じ判定の記録の id で中身の違う問い | `_resend` | 止める | 終了コード 5。hook は問いを通す | 人へ問いが届く |
+| `cmd_request_ask` | 中身の違う同じキーの依頼 | 同じ判定の記録の id で中身の違う問い | `_resend` | 止める | 終了コード 1。hook は問いを通す | 人へ問いが届く |
 | `cmd_request_ask` | 台帳を読めない・書けない | ディスク・ロック | `sent` の `OSError` | 止める（今と同じ） | 終了コード 2。hook は問いを通す | 再実行してよい |
 | `cmd_request_gate2` | 引数の組が合わない | `--report` と `--confirmed` が両方か両方とも無い・`--confirmed` に `--done` が無い | 引数を比べる | 止める | 終了コード 1 | 引数を直して再実行する |
 | `cmd_request_gate2` | 確定の起動が合わない・承認ゲートで止まっていない | `NotConfirmed` | 例外を受ける | 止める | 終了コード 4 | 台帳を変えない |
 | `cmd_request_gate2` | 耐久の記録・done・台帳を読めない・書けない | `OSError`・`ValueError`・`durable.DurableError` | 例外を受ける | 止める | 終了コード 2 | 再実行してよい |
-| `cmd_request_gate2` | 中身の違う同じキーの依頼 | 同じ確定の起動で本番のプランの done が変わった | `_resend` | 止める | 終了コード 5 | 一時レーンは止まり、途中停止の問いになる |
+| `cmd_request_gate2` | 中身の違う同じキーの依頼 | 同じ確定の起動で本番のプランの done が変わった | `_resend` | 止める | 終了コード 1 | 一時レーンは止まり、途中停止の問いになる |
 | `cmd_helper` | 台帳を読めない | ディスク | `OSError` | 止める | 終了コード 2「計画の台帳を読めない」。一時レーンは問いを送らずに止まる | 耐久ワークフローの途中停止の問いになる |
 | `cmd_answer` | 台帳を書けない | ディスク・ロック | `sent` の `OSError` | 止める（今と同じ） | 終了コード 2 | 再実行してよい |
 | `cmd_confirm` | 台帳を書けない | 同上 | 同上 | 止める（今と同じ） | 終了コード 2 | 再実行してよい |
@@ -228,7 +228,7 @@ scripts/script-structure-allow/plugins__ndf__scripts__lib__parallel_run.py--line
 | `resent` | 同じキーの行があり、中身が違う | `same=False`・`existing=<その行の id>` |
 | `_resend` | 書いた | 空の dict（出力は今と同じ） |
 | `_resend` | 書かず、中身が同じ | `already: true`・`answered`、要約は「送り済み」 |
-| `_resend` | 書かず、中身が違う | 終了コード 5 |
+| `_resend` | 書かず、中身が違う | 終了コード 1 |
 | `request_ask` | `metadata.target` が無い | 新しい依頼（`target` の欄なし） |
 | `request_ask` | `#<数字>` | 対象はその文字列。同じ問いを引く |
 | `request_ask` | ブランチ名で、先端を求められる | 対象は `<ブランチ名>@<40 桁>`。同じ問いを引く |
@@ -275,7 +275,7 @@ scripts/script-structure-allow/plugins__ndf__scripts__lib__parallel_run.py--line
 
 **`HELPER_BUSY` の値を `parallel_launch` に写さない。** 起動の部品は、断りの項目に `busy` の欄があるかどうかで空き待ちを決め、結果の値の文字列を比べない。リレーハブだけが値を持つ。
 
-**比べる中身から外す欄は `at` だけである。** `stamp`（問いを出した作業ディレクトリの先頭）・`reason`・`pr` は同じ依頼の再送で変わらないため比べる。変われば別の依頼であり、終了コード 5 になる。
+**比べる中身から外す欄は `at` だけである。** `stamp`（問いを出した作業ディレクトリの先頭）・`reason`・`pr` は同じ依頼の再送で変わらないため比べる。変われば別の依頼であり、終了コード 1 になる。
 
 ## 並行と排他
 
@@ -336,9 +336,9 @@ scripts/script-structure-allow/plugins__ndf__scripts__lib__parallel_run.py--line
 | `ConfirmedGate.apply_confirmed` | 「打ち直す」で新しい `seq` の確定の起動が流れる。「差し戻す」で範囲のレーンへ `rejected` と理由が返り、PR を閉じる耐久ステップが 1 回呼ばれる | 確定の後でない `gate2` は `False`。PR の番号が無いと閉じずに締める | PR を閉じられなくても締める。ほかの選択肢では何もせず、次の観測で途中停止の問いが立つ |
 | `last_launch` | `confirmed` のイベントを返す | ほかのイベントに添えた `release` を返す。無ければ空 | 耐久の記録を読めなければ例外 |
 | `helper_task` | `phase: confirmed` の `gate2` が `--confirmed --done` の 1 行になる。`asked` が載る | 提示では `gate2` が今と同じ | 台帳を読めなければ `cmd_helper` が 2 |
-| `_resend` | 書いたら空、同じなら `already` | 答え済みの同じ再送も `already`（5 にしない） | 中身が違えば 5 と `existing`・`reason` |
-| `cmd_request` | 書いたら今と同じ 10 | 答えのある依頼の打ち直しは 10・`already`・`answered`、続く `await` が答えを読む | 中身が違えば 5 で `request.txt` を書かない。台帳を書けなければ 2 |
-| `cmd_request_ask` | 引き継ぎで 0・`reused` | 答え待ちの同じ問いは `reused: pending` と答え待ちの id | 中身が違えば 5。台帳を書けなければ 2 |
+| `_resend` | 書いたら空、同じなら `already` | 答え済みの同じ再送も `already`（1 にしない） | 中身が違えば 1 と `existing`・`reason` |
+| `cmd_request` | 書いたら今と同じ 10 | 答えのある依頼の打ち直しは 10・`already`・`answered`、続く `await` が答えを読む | 中身が違えば 1 で `request.txt` を書かない。台帳を書けなければ 2 |
+| `cmd_request_ask` | 引き継ぎで 0・`reused` | 答え待ちの同じ問いは `reused: pending` と答え待ちの id | 中身が違えば 1。台帳を書けなければ 2 |
 | `cmd_request_gate2` | 提示も確定の後も 0 | 同じ依頼の再送は送り済み | 引数の組が合わないと 1、起動が合わないと 4、読めないと 2、中身が違うと 5 |
 | `cmd_helper` | `asked` が載る | 依頼の無い一時レーンは空の一覧 | 台帳を読めなければ 2 |
 | `cmd_answer` | 今と同じ出力 | 2 回目の答えに `already: true` | 台帳を書けなければ 2 |

@@ -71,7 +71,9 @@ def add_release_parsers(sub) -> None:
     rg.add_argument("name")
     rg.add_argument("n", type=int)
     rg.add_argument("k", type=int)
-    rg.add_argument("--report", required=True)
+    rg.add_argument("--report", help="提示の承認資料（提示の依頼）")
+    rg.add_argument("--confirmed", action="store_true", help="確定の後に本番のプランが承認ゲートで終わったときの依頼（#3597）")
+    rg.add_argument("--done", help="--confirmed の本番のプランの done")
 
 
 def add_answer_parsers(sub) -> None:

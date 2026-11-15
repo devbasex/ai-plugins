@@ -13,7 +13,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import test_parallel_hold_flow as tph  # noqa: E402
-import test_parallel_run as tpr  # noqa: E402
+import parallel_run_world as prw  # noqa: E402
 
 import durable  # noqa: E402
 import gh_call  # noqa: E402
@@ -23,7 +23,7 @@ import parallel_defer as pdf  # noqa: E402
 import parallel_lane as pl  # noqa: E402
 import parallel_route as prt  # noqa: E402
 
-env = tpr.env
+env = prw.env
 HOURS = {"timezone": "Asia/Tokyo", "days": ["mon", "tue", "wed", "thu", "fri"], "start": "09:00", "end": "18:00"}
 NIGHT = dt.datetime(2026, 11, 10, 13, 0, tzinfo=dt.timezone.utc)  # 火 22:00 JST
 MORNING = dt.datetime(2026, 11, 11, 0, 5, tzinfo=dt.timezone.utc)  # 水 09:05 JST

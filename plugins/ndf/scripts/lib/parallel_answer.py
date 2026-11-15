@@ -1,8 +1,8 @@
 """並列の計画の問いへ答えた後に、だれを起こすか（#2436 の 6c・6f）と、答えの後に残る依頼の一覧（#2507 の答えの後の整理）。
 `parallel.py answer` だけが使う。
 
-`parallel_run`（耐久ワークフローの本体）を読むため、レーンの側の `parallel_lane` から分けて置く（レーンの側の入口が
-`parallel_run` の環境変数を読まないように）。
+レーンの側の `parallel_lane` から分けて置く。ラッパーの一覧（`parallel_repo.relay`）と `relay.py` の場所（`parallel_files.RELAY`）は
+定義元から読み、耐久ワークフローの本体（`parallel_run`）は読まない。
 """
 
 from __future__ import annotations
@@ -105,9 +105,9 @@ def after_items(items: list[dict], answered: dict, earlier: list[dict] | None = 
 def owner_lanes(main: Path, name: str, rid: str, q: dict) -> list[str]:
     """答えを待って止まった持ち主のレーン。起こす要否はレーンの側の待ちの記録で決める（`parallel_lane.lane_waits`）。同じ原因としてまとめた
     問い（`merged`）は、代表だけでなく全持ち主をそれぞれの依頼の id で調べる（異常系 5）。"""
-    import parallel_run as pr_run
+    from parallel_repo import relay
 
-    ls = lambda: pr_run.relay(main, "ls", "--json")  # noqa: E731
+    ls = lambda: relay(main, "ls", "--json")  # noqa: E731
     owners = [(q["lane"], rid), *((m.get("lane"), m.get("id")) for m in q.get("merged") or [] if m.get("lane"))]
     return list(dict.fromkeys(lane for lane, each in owners if pl.lane_waits(main, name, lane, str(each or rid), ls)))
 
@@ -139,9 +139,9 @@ def owner_next(
 
 
 def _restart_lines(lanes: list[str]) -> str | None:
-    import parallel_run as pr_run
+    from parallel_files import RELAY
 
-    return "; ".join(f"python3 {pr_run.RELAY} restart {lane}" for lane in lanes) or None
+    return "; ".join(f"python3 {RELAY} restart {lane}" for lane in lanes) or None
 
 
 def _questions_event(main: Path, name: str) -> dict:
@@ -214,14 +214,15 @@ def answer_with_merge(main: Path, name: str, q: dict, result: str, items: list[d
     前に送ったが受け手がまだ外していない答えの依頼を除いたもの（`after_items`）に、`wait` と同じ業務時間外の振り分け
     （`parallel_defer.route`）を通したもの。業務時間外は溜めた `gate1`・`ask` を `after` へ出さず、`deferred` に件数を載せる（#2913）。"""
     import parallel_defer as pdf
+    import parallel_ledger as plg
 
     earlier = sent_answers(main, name, items)
     merge = merge_design(main, q, name) if result == "approved" else None
-    pl.send_answer(main, name, q["id"], result, merge=merge, **kw)
+    got = pl.send_answer(main, name, q["id"], result, merge=merge, **kw)
     remember_answers(main, name, [*earlier, q])
     tail, extra = merge_note(merge)
     after, kept = pdf.route(main, name, after_items(items, q, earlier), pdf.hours_of(main))
-    return tail, {**extra, **kept, "after": after}
+    return tail, {**extra, **kept, "after": after, **plg.already_fields(got)}
 
 
 def merge_note(merge: dict | None) -> tuple[str, dict]:
