@@ -373,6 +373,19 @@ def declared_flow(worktree: Optional[dict[str, Any]]) -> tuple[dict[str, Any], d
     return flow, obj(obj(raw).get(REVIEWS_KEY)), raw is not None
 
 
+def _drift_row(name: str, declared: Any, estimate: dict[str, Any], proposal: str) -> dict[str, Any]:
+    """ずれの結果行 1 つ。`estimate` は測った項目（`value`・`confidence`・`evidence`）。"""
+    return {
+        "kind": "drift",
+        "name": name,
+        "declared": declared,
+        "measured": estimate["value"],
+        "confidence": estimate.get("confidence"),
+        "evidence": seq(estimate.get("evidence")),
+        "proposal": proposal,
+    }
+
+
 def drift(worktree: Optional[dict[str, Any]], item: Optional[dict[str, Any]]) -> list[dict[str, Any]]:
     """宣言（無ければ既定値の行）と測った値のずれ。測れなかった項目は比べない。ずれが無ければ空。"""
     want, reviews, _ = declared_flow(worktree)
@@ -383,17 +396,7 @@ def drift(worktree: Optional[dict[str, Any]], item: Optional[dict[str, Any]]) ->
         if "value" not in f or f["value"] == want[key]:
             continue
         proposal = f"{ITEM}.{key} を {f['value']} にする（同じ promotion の行が許す組み合わせに揃えてから write で書く）"
-        rows.append(
-            {
-                "kind": "drift",
-                "name": f"{ITEM}.{key}",
-                "declared": want[key],
-                "measured": f["value"],
-                "confidence": f.get("confidence"),
-                "evidence": seq(f.get("evidence")),
-                "proposal": proposal,
-            }
-        )
+        rows.append(_drift_row(f"{ITEM}.{key}", want[key], f, proposal))
     return rows + _review_drift(reviews, obj(obj(item).get(REVIEWS_KEY)))
 
 
@@ -409,15 +412,5 @@ def _review_drift(declared: dict[str, Any], est: dict[str, Any]) -> list[dict[st
         key = f"{ITEM}.{REVIEWS_KEY}.{kind}"
         proposal = f"{key} を {e['value']} にする（成り立たない組み合わせは check が直すキーと理由を出す）"
         declared_value = wants[0] if row else {"既定値": wants}
-        rows.append(
-            {
-                "kind": "drift",
-                "name": key,
-                "declared": declared_value,
-                "measured": e["value"],
-                "confidence": e.get("confidence"),
-                "evidence": seq(e.get("evidence")),
-                "proposal": proposal,
-            }
-        )
+        rows.append(_drift_row(key, declared_value, e, proposal))
     return rows
