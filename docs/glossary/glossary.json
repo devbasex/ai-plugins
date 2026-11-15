@@ -3608,7 +3608,7 @@
       "term": "導入の同意の印",
       "context": "ndf-google-workspace",
       "meaning": "gws の確認の引数 --install。利用者が gws の導入に同意したことを示し、付いたときだけ npm で全体インストールする",
-      "pending_source": "issues/issue-3547-design.md"
+      "source": "docs/specifications/ndf-next-gws-subcommands.md"
     },
     {
       "term": "他のプラグイン",
