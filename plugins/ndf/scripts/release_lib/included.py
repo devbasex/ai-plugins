@@ -126,6 +126,11 @@ def ci_fact(checks: list[dict]) -> str:
     return "、".join([f"CI {passed}/{len(checks)}", *(f"{why}: {', '.join(names)}" for why, names in by.items())])
 
 
+def pr_refs(numbers, sep: str = " ") -> str:
+    """PR の番号の並びを `#<番号>` で sep につなぐ（承認資料・注記での PR の書き方）。"""
+    return sep.join(f"#{n}" for n in numbers)
+
+
 def included_row(n: int, title: str, facts: list[str], via: int | None, no_change: bool) -> str:
     """「含む PR」の 1 行。行の頭は `#<番号>`、括弧の中は facts（状態・merge commit・CI）の後に印を足す。"""
     marks = [*facts, *([VIA.format(via)] if via else []), *([NO_CHANGE] if no_change else [])]
@@ -244,7 +249,7 @@ def outside_items(outside) -> list[dict]:
 
 def outside_note(outside) -> str:
     """drop_outside が外した番号の要約の注記（無ければ空）。"""
-    return f"（範囲の終点に入っていない {' '.join(f'#{n}' for n in outside)} は載せない）" if outside else ""
+    return f"（範囲の終点に入っていない {pr_refs(outside)} は載せない）" if outside else ""
 
 
 def as_included(prs) -> list[IncludedPr]:
@@ -260,7 +265,7 @@ def unmerged(d) -> bool:
 def require_merged(found, prs):
     """マージ済みが 0 件なら、書き込む前に前提エラーで止める（既存の節や欄を空で上書きしない）。"""
     if not found:
-        raise StepError(f"渡した PR {' '.join(f'#{n}' for n in prs)} にマージ済みが無い", EXIT_PRECONDITION)
+        raise StepError(f"渡した PR {pr_refs(prs)} にマージ済みが無い", EXIT_PRECONDITION)
     return found
 
 

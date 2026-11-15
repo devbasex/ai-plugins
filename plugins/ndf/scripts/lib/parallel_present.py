@@ -31,7 +31,7 @@ def check_state_of(requests: Iterable[dict], ids: Iterable[str]) -> Optional[Pat
 def check_md(root: Path, mapped: dict, requests: Iterable[dict]) -> list[str]:
     """承認資料の `## 検査の結果` の本文。レーンごとに、その依頼のスプリントの検査のプランの結果（レビュー・リファクタリング・
     全体テスト）を書き、検査の状態の無い Pull Request は番号を挙げて無いと書く（#3585。#2655 の今の NDF の側）。"""
-    from release_lib import materials
+    from release_lib import included, materials
 
     requests = list(requests)
     lines: list[str] = []
@@ -42,10 +42,10 @@ def check_md(root: Path, mapped: dict, requests: Iterable[dict]) -> list[str]:
         if not any(got):
             missing += row["prs"]
             continue
-        lines += [f"- レーン {name}（{' '.join(f'#{n}' for n in row['prs'])}。検査の状態 `{d}`）"]
+        lines += [f"- レーン {name}（{included.pr_refs(row['prs'])}。検査の状態 `{d}`）"]
         lines += [f"  {x}" for x in materials.check_lines(materials.Materials(*got))]
     if missing:
-        lines.append(f"- 検査の状態が無い Pull Request: {' '.join(f'#{n}' for n in sorted(set(missing)))}")
+        lines.append(f"- 検査の状態が無い Pull Request: {included.pr_refs(sorted(set(missing)))}")
     return lines or ["- 無し（含む Pull Request が無い）"]
 
 

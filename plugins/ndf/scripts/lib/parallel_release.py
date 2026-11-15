@@ -112,17 +112,19 @@ def answerable(pending: Iterable[dict], prs: Iterable[int], done: Iterable[int] 
 
 def breakdown_md(mapped: dict, added: Optional[dict] = None) -> str:
     """承認資料へ足すレーンの内訳の節。出し直しなら加わった範囲を載せる。"""
+    from release_lib.included import pr_refs
+
     lines = ["", "## レーンの内訳", "", "| レーン | 依頼 | Pull Request |", "| --- | --- | --- |"]
     for name, row in sorted(mapped["lanes"].items()):
-        lines.append(f"| {name} | {'あり' if row['requested'] else 'なし'} | {', '.join(f'#{n}' for n in row['prs'])} |")
+        lines.append(f"| {name} | {'あり' if row['requested'] else 'なし'} | {pr_refs(row['prs'], ', ')} |")
     if mapped["orphans"]:
-        lines.append(f"| （レーンの無い Pull Request） | - | {', '.join(f'#{n}' for n in mapped['orphans'])} |")
+        lines.append(f"| （レーンの無い Pull Request） | - | {pr_refs(mapped['orphans'], ', ')} |")
     if added:
         lines += ["", "### 出し直しで加わった範囲", "", "| レーン | Pull Request |", "| --- | --- |"]
         for name, row in sorted(added["lanes"].items()):
-            lines.append(f"| {name} | {', '.join(f'#{n}' for n in row['prs'])} |")
+            lines.append(f"| {name} | {pr_refs(row['prs'], ', ')} |")
         if added["orphans"]:
-            lines.append(f"| （レーンの無い Pull Request） | {', '.join(f'#{n}' for n in added['orphans'])} |")
+            lines.append(f"| （レーンの無い Pull Request） | {pr_refs(added['orphans'], ', ')} |")
     return "\n".join(lines) + "\n"
 
 
