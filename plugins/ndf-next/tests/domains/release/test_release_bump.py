@@ -99,8 +99,8 @@ def _bumper(work: Path, hub: BumpHub, failed: bool = False) -> bump.Bumper:
     return bump.Bumper(work, hub, dataclasses.replace(lander, admin=True), "main", "2026-11-15")
 
 
-def _open(hub: BumpHub, number: int, ref: str) -> None:
-    hub.responses[("GET", "/repos/o/r/pulls")] = [{"number": number, "head": {"ref": ref, "sha": "a" * 40}}]
+def _open(hub: BumpHub, number: int, ref: str, repo: str = "o/r") -> None:
+    hub.responses[("GET", "/repos/o/r/pulls")] = [{"number": number, "head": {"ref": ref, "sha": "a" * 40, "repo": {"full_name": repo}}}]
     hub.pulls[number] = fake_pull(number=number, ref=ref)
 
 
@@ -135,9 +135,22 @@ def test_bumping_twice_on_the_same_tip_keeps_one_bump_pr_and_adds_no_commit(tmp_
     assert git_sandbox.sh(work, "rev-parse", "origin/release/v1.3.0").strip() == before
 
 
+def _push_old_bump(work: Path, extra: bool = False) -> None:
+    """main の先端から版だけを 1.2.4 へ上げた release/v1.2.4 を origin へ置く（`extra` なら利用者の直しも積む）。"""
+    git_sandbox.sh(work, "switch", "-q", "-c", "release/v1.2.4", "origin/main")
+    write_json(work / "tools" / "kit" / ".claude-plugin" / "plugin.json", {"name": "kit", "version": "1.2.4"})
+    if extra:
+        (work / "tools" / "kit" / "fix.py").write_text("z = 1\n", encoding="utf-8")
+    git_sandbox.sh(work, "add", "-A")
+    git_sandbox.sh(work, "commit", "-q", "-m", "Release: kit v1.2.4")
+    git_sandbox.sh(work, "push", "-q", "origin", "HEAD:refs/heads/release/v1.2.4")
+    git_sandbox.sh(work, "switch", "-q", "--detach", "origin/main")
+
+
 def test_a_larger_level_replaces_the_open_bump_pr(tmp_path: Path) -> None:
     """受け入れ条件 10（競合）: PATCH の版上げの PR が開いたまま MINOR が入れば、古い PR を閉じてブランチを消し、新しい版で作る。"""
     work = _origin(tmp_path)
+    _push_old_bump(work)
     hub = _hub()
     _open(hub, 19, "release/v1.2.4")
     made = _bumper(work, hub).bump()
@@ -148,6 +161,18 @@ def test_a_larger_level_replaces_the_open_bump_pr(tmp_path: Path) -> None:
     assert "版 1.2.4 を 1.3.0 へ置き換えた" in comment["body"]
 
 
+@pytest.mark.parametrize("fork", [False, True])
+def test_replacing_a_bump_pr_with_user_changes_or_from_a_fork_stops_without_closing(tmp_path: Path, fork: bool) -> None:
+    """置き換えで閉じて消すのは、同じリポジトリの head で差分が版上げだけの版上げの PR だけ。利用者の直しやフォークなら止まる。"""
+    work = _origin(tmp_path)
+    _push_old_bump(work, extra=not fork)
+    hub = _hub()
+    _open(hub, 19, "release/v1.2.4", repo="someone/r" if fork else "o/r")
+    with pytest.raises(bump.BumpError, match="#19"):
+        _bumper(work, hub).bump()
+    assert [(m, p) for m, p, _b in hub.requests if m in ("PATCH", "DELETE")] == [] and hub.created == []
+
+
 def test_only_test_changes_do_not_bump(tmp_path: Path) -> None:
     """I11: 範囲にリリース対象の変化が無ければ not_applicable で、版上げの PR を作らない。"""
     work = _origin(tmp_path, test_only=True)
@@ -156,16 +181,16 @@ def test_only_test_changes_do_not_bump(tmp_path: Path) -> None:
     assert hub.created == [] and hub.admin_merged == []
 
 
-def test_an_untagged_tip_version_goes_to_publish(tmp_path: Path) -> None:
-    """版上げの PR のマージの push（先端の版にタグが無い）は版を上げずに published を返す。"""
+def test_an_untagged_tip_without_a_bump_merge_does_not_go_to_publish(tmp_path: Path) -> None:
+    """版上げの履歴が無く、今の版にタグが無い main（新しく導入したリポジトリ）は published に倒れず、版上げの PR を作る。"""
     work = _origin(tmp_path, tagged=False)
     hub = _hub()
     made = _bumper(work, hub).bump()
-    assert (made.state, made.version) == ("published", "1.2.3") and hub.created == []
+    assert made.state != "published" and len(hub.created) == 1
 
 
 def test_an_untagged_plugin_that_the_last_bump_did_not_change_does_not_go_to_publish(tmp_path: Path) -> None:
-    """タグを待つのは直前の版上げで定義を変えたプラグイン（無ければ先頭）だけ。タグの無いほかのプラグインで PUBLISH に倒れない。"""
+    """タグを待つのは直前の版上げで定義を変えたプラグインだけ。タグの無いほかのプラグインで PUBLISH に倒れない。"""
     work = _origin(tmp_path, other=True)
     made = _bumper(work, _hub()).bump()
     assert (made.state, made.version) == ("merged", "1.3.0")
@@ -243,6 +268,12 @@ def test_version_only_checks_take_only_the_version_strings() -> None:
     assert not bump_decide.version_lines_only(["version = 1.2.3"], ["version = 1.3.0", "hook = x"], pairs)
     assert bump_decide.json_version_only({"v": "1.2.3", "d": "K (v1.2.3)"}, {"v": "1.3.0", "d": "K (v1.3.0)"}, pairs)
     assert not bump_decide.json_version_only({"v": "1.2.3"}, {"v": "1.3.0", "hooks": "x"}, pairs)
+    same = [{"d": "Kit (v1.2.3)"}, {"d": "Other (v1.2.3)"}]
+    assert bump_decide.json_version_only(same, [{"d": "Kit (v1.3.0)"}, {"d": "Other (v1.2.3)"}], pairs)
+    assert not bump_decide.json_version_only(same, [{"d": "Kit (v1.3.0)"}, {"d": "Other"}], pairs)
+    generated = frozenset({"docs/metrics/x/"})
+    assert bump_decide.covered("docs/metrics/x/a.md", generated) and not bump_decide.covered("docs/metrics/xy.md", generated)
+    assert bump_decide.only_bump(["docs/metrics/x/a.json", "a.py"], generated) == ["a.py"]
     swap = [("1.2.3", "1.3.0"), ("1.3.0", "1.4.0")]
     assert bump_decide.version_lines_only(["a 1.2.3 b 1.3.0"], ["a 1.3.0 b 1.4.0"], swap)
 

@@ -102,12 +102,14 @@ def test_confirm_before_the_merge_is_refused() -> None:
         _confirm(hub)
 
 
-def test_confirm_picks_the_smallest_bump_containing_the_merge() -> None:
+def test_confirm_picks_the_earliest_bump_in_the_production_history_not_the_smallest_version() -> None:
+    """kit 1.3.0 の版上げの後に別のプラグインの 0.2.0 を出しても、対象のマージを最初に含んだ 1.3.0 の版上げを選ぶ。"""
     hub = _hub()
     rows = hub.responses[("GET", "/repos/o/r/pulls")]
-    rows.append({"number": 21, "head": {"ref": "release/v1.4.0"}, "merged_at": "t", "merge_commit_sha": "9" * 40})
+    rows.insert(0, {"number": 21, "head": {"ref": "release/v0.2.0"}, "merged_at": "t", "merge_commit_sha": "9" * 40})
     watch, _ = _watch()
-    got = confirm.confirm(hub, FakeGit({(MERGE, BUMP_MERGE), (MERGE, "9" * 40)}), PR, "main", _kit, watch)
+    ancestors = {(MERGE, BUMP_MERGE), (MERGE, "9" * 40), (BUMP_MERGE, "9" * 40)}
+    got = confirm.confirm(hub, FakeGit(ancestors), PR, "main", _kit, watch)
     assert (got.version, got.bump_pr) == ("1.3.0", 20)
 
 

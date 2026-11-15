@@ -10,7 +10,7 @@ CHANGELOG の版の節（決定 11）はこの範囲にマージされた PR か
 | `NOTHING` | 何も書かずに `not_applicable` を返す（I11） |
 | `CREATE` | main の先端から `release/v<版>` を作り、版のファイルと CHANGELOG の版の節だけを変えたコミットを足して PR を作る |
 | `UPDATE` | 開いた版上げの PR へ main を取り込むコミットと、版の節を組み直したコミットを足す（強制 push を使わない） |
-| `REPLACE` | 古い版の版上げの PR を理由つきで閉じてブランチを消し、`CREATE` へ進む |
+| `REPLACE` | 古い版の版上げの PR（同じリポジトリの head で、差分が版上げだけのもの。違えば止まる）を理由つきで閉じてブランチを消し、`CREATE` へ進む |
 
 作るか進めた後は、main の先端が head の祖先のときだけ `land.Lander.land_bump` でマージする（祖先でなければ `reused`。次の
 main への push の `bump` が進める）。同じ main の先端で 2 回打っても版上げの PR は 1 本で、差分が同じならコミットを足さない（I8）。
@@ -207,7 +207,9 @@ class Bumper:
             return None
         r = bumps[0]
         ref = text_of(r["head"]["ref"])
-        return bump_decide.OpenBump(int(r["number"]), version_decide.version_of_branch(ref), ref, text_of(r["head"]["sha"]))
+        repo = r["head"].get("repo")
+        same = isinstance(repo, dict) and text_of(repo.get("full_name")) == self.hub.repo
+        return bump_decide.OpenBump(int(r["number"]), version_decide.version_of_branch(ref), ref, text_of(r["head"]["sha"]), same)
 
     def _commit(self, message: str) -> bool:
         """変更をコミットする（変更が無ければ足さない）。足したか。"""
@@ -293,7 +295,20 @@ class Bumper:
             self._push(opened.head_ref)
 
     def _replace(self, opened: bump_decide.OpenBump, version: str) -> None:
-        """古い版の版上げの PR を理由つきで閉じ、そのブランチを消す。"""
+        """古い版の版上げの PR を理由つきで閉じ、そのブランチを消す。
+
+        消す前に、head が同じリポジトリのブランチで、main との差分が版上げだけかを確かめる。どちらかが違えば（フォークの PR・
+        利用者が積んだ直し）閉じも消しもせず `BumpError` で止まる（戻せない削除を名前だけで選ばない）。"""
+        if not opened.same_repo:
+            raise BumpError(f"開いた版上げの PR #{opened.number} の head が別のリポジトリにある（閉じずに止まる。人が見てから打ち直す）")
+        repo_git = self._git
+        gather.fetch(repo_git, opened.head_ref)
+        remote = f"{git_mod.ORIGIN}/{opened.head_ref}"
+        outside = self._outside(repo_git.merge_base(self._tip_ref, remote), remote, decl_mod.load(self.root))
+        if outside:
+            raise BumpError(
+                f"置き換える版上げの PR #{opened.number} が版上げの外の変更を持つ（閉じずに止まる。人が見てから打ち直す）: {', '.join(outside)}"
+            )
         hub = self.hub
         detail = f"版 {opened.version} を {version} へ置き換えた（後に main へ入った PR が上げ幅を大きくした）"
         hub.rest("POST", f"/repos/{hub.repo}/issues/{opened.number}/comments", {"body": detail})
@@ -331,7 +346,7 @@ class Bumper:
         paths = repo_git.changed_files(base, head)
         allowed = allowed_paths(self.root, decl)
         outside = bump_decide.only_bump(paths, allowed)
-        generated = {w for step in decl.for_stage(version_decide.PRODUCTION) for w in step.writes}
+        generated = frozenset(w for step in decl.for_stage(version_decide.PRODUCTION) for w in step.writes)
         pairs = [
             (old, new)
             for p in plugins_mod.load(self.root)
@@ -340,7 +355,11 @@ class Bumper:
             and old != new
         ]
         for path in paths:
-            if path in allowed and path not in generated and not self._version_only(base, head, path, decl.changelog, pairs):
+            if (
+                bump_decide.covered(path, allowed)
+                and not bump_decide.covered(path, generated)
+                and not self._version_only(base, head, path, decl.changelog, pairs)
+            ):
                 outside.append(f"{path}（版の外の変更）")
         return outside
 
@@ -363,11 +382,12 @@ class Bumper:
         """main の先端のプラグインごとの版と、タグを待つプラグインのタグが origin にあるか。
 
         タグを待つのは、直前の版上げの PR のマージで定義が変わったプラグイン（`tagging.bumped`。publish がタグを作る対象と
-        同じ）。版上げの PR のマージが無ければ先頭のプラグイン。ほかのプラグインのタグの有無は数えない。"""
+        同じ）。版上げの PR のマージが無ければタグを待つプラグインは無く、`tagged` は真（PUBLISH はタグの無い版上げのマージが
+        あるときだけ。版上げの履歴が無く今の版にタグが無いリポジトリで、版上げの PR を作らずに published を返し続けない）。"""
         tags = self._tags()
         versions = {p.name: gather.version_at(self._git, p, span.until) for p in found}
         merged = self._bump_merge(span.until)
-        waiting = [p.name for p in tagging.bumped(self.root, merged)] if merged is not None else [p.name for p in found[:1]]
+        waiting = [p.name for p in tagging.bumped(self.root, merged)] if merged is not None else []
         targets = [(n, v) for n in waiting if (v := versions.get(n)) is not None and not version_decide.is_dev(v)]
         tagged = all(version_decide.tag_of(n, v) in tags for n, v in targets)
         shown = targets[0][1] if targets else None

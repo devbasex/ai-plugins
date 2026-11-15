@@ -47,6 +47,8 @@ class OpenBump(NamedTuple):
     version: str
     head_ref: str
     head_sha: str
+    # head がこのリポジトリのブランチか（フォークの PR なら偽。置き換えで閉じて消すのは真のときだけ）
+    same_repo: bool = True
 
 
 def bump_states() -> tuple[str, ...]:
@@ -90,9 +92,15 @@ def message_of(plugin: str, version: str, origin: str) -> str:
     return f"Release: {plugin} v{version}\n\n{ORIGIN_LINE} {origin}\n"
 
 
+def covered(path: str, allowed: frozenset[str]) -> bool:
+    """`path` が `allowed` のどれかに当たるか（同じパスか、`allowed` の値をディレクトリの前置きとしてその配下にあるか。
+    手順の `writes` は書くパスの前置きの申告で、`docs/x/` のようなディレクトリの指定がその配下の生成ファイルに当たる）。"""
+    return any(path == a or path.startswith(a.rstrip("/") + "/") for a in allowed)
+
+
 def only_bump(paths: Sequence[str], allowed: frozenset[str]) -> list[str]:
     """版上げの PR の差分のうち、版のファイルと CHANGELOG（`allowed`）の外のパスを入力の順に返す（空なら版上げだけ。I7）。"""
-    return [p for p in paths if p not in allowed]
+    return [p for p in paths if not covered(p, allowed)]
 
 
 def diff_lines(diff: str) -> tuple[list[str], list[str]]:
@@ -127,18 +135,15 @@ def version_lines_only(removed: Sequence[str], added: Sequence[str], pairs: Sequ
 
 
 def json_version_only(before: object, after: object, pairs: Sequence[tuple[str, str]]) -> bool:
-    """JSON の値 `before` の文字列の版（`pairs`）を後の版へ置き換えると `after` になるか（書式の違いは問わない。I7）。"""
-
-    def swapped(value: object) -> object:
-        if isinstance(value, str):
-            return _swap(value, pairs)
-        if isinstance(value, list):
-            return [swapped(v) for v in value]
-        if isinstance(value, dict):
-            return {k: swapped(v) for k, v in value.items()}
-        return value
-
-    return swapped(before) == after
+    """JSON の値 `before` と `after` の形が同じで、違う文字列はどれも `before` の版（`pairs`）を後の版へ置き換えたものか
+    （変わっていない文字列はそのまま許す。同じ版のほかのプラグインの説明を置き換えずに残しても通す。書式の違いは問わない。I7）。"""
+    if isinstance(before, str) and isinstance(after, str):
+        return before == after or _swap(before, pairs) == after
+    if isinstance(before, list) and isinstance(after, list):
+        return len(before) == len(after) and all(json_version_only(b, a, pairs) for b, a in zip(before, after))
+    if isinstance(before, dict) and isinstance(after, dict):
+        return before.keys() == after.keys() and all(json_version_only(before[k], after[k], pairs) for k in before)
+    return type(before) is type(after) and before == after
 
 
 def action(tip_tagged: bool, changed: bool, opened: OpenBump | None, version: str) -> str:

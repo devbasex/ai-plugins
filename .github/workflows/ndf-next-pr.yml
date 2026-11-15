@@ -9,14 +9,17 @@ name: ndf-next pull request
 #   既定ブランチの先端のものだけを使い、PR の先端はデータとして取り込んでマージするだけで、PR の木のスクリプト・依存の導入・hook を
 #   実行しない。秘密 NDF_RELEASE_TOKEN は push の認証だけに使う
 #
+# 検査対象を変える出来事を購読する: 宛先（base）だけを変えた編集（edited のうち changes.base があるもの）で pr-check を打ち直し、
+# 宛先の変更と下書きへの戻し（converted_to_draft）で検証の ref を組み直す（題や本文だけの編集では走らない）。
+#
 # 宛先のブランチで絞らない（必須のチェックの照合 check-required-checks.py がどの宛先の PR でもこのジョブを知るため）。
 # 入れ替え（S2 #3304）までは、出来事での起動をリポジトリの変数 NDF_RELEASE_RUNNER が ndf-next のときだけにする。
 on:
   workflow_dispatch:
   pull_request:
-    types: [opened, synchronize, reopened, labeled, unlabeled]
+    types: [opened, synchronize, reopened, labeled, unlabeled, edited]
   pull_request_target:
-    types: [opened, synchronize, reopened, closed, ready_for_review]
+    types: [opened, synchronize, reopened, closed, ready_for_review, converted_to_draft, edited]
 
 permissions:
   contents: read
@@ -27,7 +30,9 @@ env:
 jobs:
   pr-check:
     # PR 側の定義と木で動く。秘密を持たない（github.token の読み取りだけ）
-    if: github.event_name == 'pull_request' && vars.NDF_RELEASE_RUNNER == 'ndf-next'
+    if: >-
+      github.event_name == 'pull_request' && vars.NDF_RELEASE_RUNNER == 'ndf-next' &&
+      (github.event.action != 'edited' || github.event.changes.base != null)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -51,7 +56,8 @@ jobs:
   verify-ref:
     # main の先端の定義と ndf だけを使う。PR の先端はデータとして取り込んでマージするだけで実行しない
     if: >-
-      (github.event_name == 'pull_request_target' && vars.NDF_RELEASE_RUNNER == 'ndf-next') ||
+      (github.event_name == 'pull_request_target' && vars.NDF_RELEASE_RUNNER == 'ndf-next' &&
+        (github.event.action != 'edited' || github.event.changes.base != null)) ||
       github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 30

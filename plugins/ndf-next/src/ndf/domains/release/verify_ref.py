@@ -6,7 +6,9 @@
 4. `marketplace.json` の名前を 2 つ目のマーケットプレイスの名前へ、プラグインの版を検証の版へ書き換えたコミットを足す
 5. 前の検証の ref の先端と 4 のコミットを親にし、4 の木を持つコミットを作って fast-forward で push する（強制 push を使わない。I12）
 
-取り込んだ PR の木のスクリプト・依存の導入・hook を実行しない（git のマージとファイルの書き換えだけ）。検証の ref は main へ戻さない（I9）。
+取り込んだ PR の木のスクリプト・依存の導入・hook を実行しない（git のマージとファイルの書き換えだけ）。一時の worktree を作る・
+使う git は起動ごとに `core.hooksPath` を無効にする（`NO_HOOKS`。`core.hooksPath` が追跡されたディレクトリを指す環境で、PR が
+変えた hook が `--no-verify` の効かない場面でも走らず、渡した認証情報を読めない）。検証の ref は main へ戻さない（I9）。
 """
 
 from __future__ import annotations
@@ -24,6 +26,16 @@ from ndf.adapters.github import PER_PAGE, GitHub, text_of
 from ndf.domains.release import gather, verify_decide
 from ndf.domains.release import declaration as decl_mod
 from ndf.domains.release import plugins as plugins_mod
+
+
+# 起動ごとに hook を無効にする git の設定（存在しないディレクトリを hook の置き場にする）
+NO_HOOKS = ("-c", "core.hooksPath=/dev/null")
+
+
+def _without_hooks(repo_git: git_mod.Git) -> git_mod.Git:
+    """`repo_git` と同じ場所で、起動ごとに `NO_HOOKS` を付けて git を動かす `Git`。"""
+    runner = repo_git.runner
+    return git_mod.Git(repo_git.cwd, lambda args, cwd: runner([*NO_HOOKS, *args], cwd))
 
 
 class VerifyConflict(Exception):
@@ -130,9 +142,9 @@ def build(root: Path, hub: GitHub, decl: decl_mod.VerifyDecl, now: datetime) -> 
     pulls = verify_decide.included(_open_pulls(hub, production), decl.ref, hub.repo)
     place = Path(tempfile.mkdtemp(prefix="ndf-verify-"))
     path = place / "work"
-    repo_git.run("worktree", "add", "--quiet", "--detach", str(path), f"{git_mod.ORIGIN}/{production}")
+    _without_hooks(repo_git).run("worktree", "add", "--quiet", "--detach", str(path), f"{git_mod.ORIGIN}/{production}")
     try:
-        work = git_mod.Git(path)
+        work = _without_hooks(git_mod.Git(path, repo_git.runner))
         _merge_pulls(work, pulls)
         _contained(path)
         version = _rewrite(path, decl.marketplace, now)

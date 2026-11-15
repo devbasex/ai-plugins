@@ -56,7 +56,9 @@ class Confirmed(NamedTuple):
 
 
 def _bump_containing(hub: GitHub, repo_git: git_mod.Git, merge_sha: str, production: str) -> tuple[int, str, str] | None:
-    """マージ済みの版上げの PR のうち、マージコミットが `merge_sha` を含む最も小さい版のもの（PR の番号, 版, マージコミット）。
+    """マージ済みの版上げの PR のうち、マージコミットが `merge_sha` を含み、本番の履歴で最も早いもの（PR の番号, 版, マージコミット）。
+
+    版の大小では選ばない（プラグインごとに版の系列が違い、後に出した別のプラグインの小さい版を選ばない）。
 
     閉じた PR を更新の新しい順に 1 ページ読む。1 ページが埋まり、含むものが見つからなければ確かめられないとして `ConfirmError`。
     """
@@ -72,14 +74,16 @@ def _bump_containing(hub: GitHub, repo_git: git_mod.Git, merge_sha: str, product
         if not ref.startswith(version_decide.BRANCH_PREFIX) or not r.get("merged_at") or not sha:
             continue
         if repo_git.is_ancestor(merge_sha, sha):
-            version = version_decide.version_of_branch(ref)
-            hits.append((version_decide.parse(version), int(r["number"]), version, sha))
+            hits.append((int(r["number"]), version_decide.version_of_branch(ref), sha))
     if not hits:
         if len(found) >= PER_PAGE:
             raise ConfirmError(f"{production} 宛ての閉じた PR が {PER_PAGE} 件以上あり、版上げの PR を確かめられない")
         return None
-    _v, number, version, sha = min(hits)
-    return number, version, sha
+    earliest = hits[0]
+    for hit in hits[1:]:
+        if repo_git.is_ancestor(hit[2], earliest[2]):
+            earliest = hit
+    return earliest
 
 
 def _tagged(hub: GitHub, tag: str) -> bool:

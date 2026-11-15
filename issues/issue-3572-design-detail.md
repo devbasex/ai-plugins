@@ -184,7 +184,7 @@ GitHub と git のアダプタを読まず、`version_decide` と `changelog_dec
 | `write_bump` | `bump.py` | 新設 | `write_bump(root: Path, decl: Declaration, planned: Sequence[version_decide.Planned], pulls: Sequence[materials_decide.PullFact], today: str) -> frozenset[str]` | 版のファイルと CHANGELOG の版の節を書き、宣言の手順を流す（`assemble._write` を移す） | `root` は版上げのブランチを取り出した場所 | 書いたパスを返す。返したパスは `only_bump` の `allowed` に入る | ファイルの書き込み・宣言の手順の外部コマンド |
 | `planned_for` | `bump.py` | 新設 | `planned_for(root: Path, hub: GitHub, number: int, production: str) -> str \| None` | 本番の PR の予定の版を、PR のラベルと main の版から求める | 無し | マージ済みなら第 1 親の版、そうでなければ origin の main の版を `planned` で上げた版。版を読めなければ None | git（show）・GitHub の REST（ラベル） |
 | `confirm` | `confirm.py` | 新設 | `confirm(hub: GitHub, repo_git: Git, number: int, production: str, budget: float, clock: Callable[[], float], sleep: Callable[[float], None]) -> Confirmed` | 本番の PR のマージコミットを含む版上げの PR のマージ・タグ・そのタグの GitHub Release を待ち、作った版を本番の PR へ記録する | 本番の PR がマージ済み | 3 つがそろえば版・タグ・版上げの PR を持ち、作った版の記録が 1 件ある。待ちが切れれば止まった結果で、記録を書いていない | GitHub の REST（PR の一覧・参照の照会・Release の照会・コメント）・git（fetch・is-ancestor） |
-| `_bump_containing` | `confirm.py` | 新設 | `_bump_containing(hub: GitHub, repo_git: Git, merge_sha: str, production: str) -> tuple[int, str, str] \| None` | マージ済みの版上げの PR のうち、マージコミットが `merge_sha` を含む最も小さい版のものを探す | main を fetch 済み | (PR の番号, 版, マージコミット)。無ければ None | GitHub の REST（閉じた PR の一覧）・git（is-ancestor） |
+| `_bump_containing` | `confirm.py` | 新設 | `_bump_containing(hub: GitHub, repo_git: Git, merge_sha: str, production: str) -> tuple[int, str, str] \| None` | マージ済みの版上げの PR のうち、マージコミットが `merge_sha` を含み、本番の履歴で最も早いもの（版の大小では選ばない）を探す | main を fetch 済み | (PR の番号, 版, マージコミット)。無ければ None | GitHub の REST（閉じた PR の一覧）・git（is-ancestor） |
 | `_tagged` | `confirm.py` | 新設 | `_tagged(hub: GitHub, tag: str) -> bool` | タグが origin にあるかを読む | 無し | タグの参照があれば真、404 なら偽 | GitHub の REST（参照の照会） |
 | `_has_release` | `confirm.py` | 新設 | `_has_release(hub: GitHub, tag: str) -> bool` | タグの GitHub Release があるかを読む | 無し | `/releases/tags/<タグ>` があれば真、404 なら偽 | GitHub の REST（Release の照会） |
 | `problems` | `pr_check.py` | 新設 | `problems(facts: PrFacts) -> list[dict[str, str]]` | main 宛ての PR の事実から、版数・上げ幅のラベル・検証の ref の破れを返す（I7・I9） | 無し | 項目 `{"kind", "name", "detail"}` を 1 件ずつ返す。版上げの PR は版数の破れを返さない | 無し |
@@ -493,7 +493,7 @@ workflow `ndf-next-release.yml` のジョブは次のとおりにする。どの
 | `write_bump` | 版のファイルと CHANGELOG の節を書き、パスを返す | CHANGELOG が無ければ版だけ | 版のファイルが読めなければ誤りが届く |
 | `planned_for` | ラベル `release:minor` と main の版から MINOR の版 | マージ済みは第 1 親の版から求める | ラベルを読めなければ None |
 | `confirm` | 版上げの PR のマージ・タグ・GitHub Release がそろうと版を返し、記録を 1 件書く。タグだけで Release が無ければ待ち続ける | 打ち直しで記録を 2 件にしない | 締め切りで `deploy_failed`・`missing` と「本番はマージ済み」。`ok` を返さない。版上げの PR が未マージなら足りないものが `bump`、マージ済みでタグか Release が無ければ `publish` と版上げの PR のマージコミット |
-| `_bump_containing` | 含む版上げの PR のうち最も小さい版を返す | 含むものが無ければ None | 件数が `PER_PAGE` 以上で `BumpError` |
+| `_bump_containing` | 含む版上げの PR のうち本番の履歴で最も早いものを返す（後に出した別のプラグインの小さい版を選ばない） | 含むものが無ければ None | 件数が `PER_PAGE` 以上で `BumpError` |
 | `_tagged` | 参照があれば真 | 404 で偽 | ほかの誤りが届く |
 | `_has_release` | Release があれば真 | 404 で偽 | ほかの誤りが届く |
 | `review_problems` | 4 種類の行を持ち `release` の行が無い宣言で空。`reviews` を書かない宣言と、`impl` だけを書いた宣言でも空 | 行が `promote-whole` なら `release` の行があっても空。表の行 `github-flow` の `review_kinds` を差し替えたテストの表では、その一覧に無い種類で破れが出る | `release` の行で `reviews`・`release`、書いた `impl`・`sprint` のどちらも cross-review を持たないと `reviews`・`cross-review` |

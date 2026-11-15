@@ -177,3 +177,24 @@ def test_rewrite_targets_outside_the_temporary_worktree_are_refused(tmp_path: Pa
     write_json(decl_mod.path_of(work), {"version": decl_mod.READABLE_VERSION, "version_files": ["../victim.json"]})
     with pytest.raises(verify_ref.VerifyEscape, match="victim.json"):
         verify_ref._contained(work)
+
+
+def test_hooks_that_the_merged_prs_track_do_not_run(tmp_path: Path) -> None:
+    """`core.hooksPath` が追跡されたディレクトリを指しても、取り込んだ PR が足した hook（post-merge・post-commit）を走らせない。"""
+    marker = tmp_path / "ran"
+    work = _origin(tmp_path, {1: ("a.txt", "a\n")})
+    seed = tmp_path / "seed"
+    git_sandbox.sh(seed, "switch", "-q", "-c", "feat/2", "main")
+    (seed / ".hooks").mkdir()
+    for name in ("post-merge", "post-commit", "post-checkout"):
+        hook = seed / ".hooks" / name
+        hook.write_text(f"#!/bin/sh\ntouch '{marker}'\n", encoding="utf-8")
+        hook.chmod(0o755)
+    git_sandbox.sh(seed, "add", "-A")
+    git_sandbox.sh(seed, "commit", "-q", "-m", "pr 2")
+    git_sandbox.sh(seed, "switch", "-q", "main")
+    git_sandbox.sh(tmp_path / "origin.git", "fetch", "-q", str(seed), "+refs/heads/feat/2:refs/pull/2/head")
+    git_sandbox.sh(work, "config", "core.hooksPath", ".hooks")
+    built = verify_ref.build(work, _hub(_row(1), _row(2)), DECL, NOW)
+    assert [n for n, _h in built.included] == [1, 2] and _show(work, ".hooks/post-merge")
+    assert not marker.exists()
