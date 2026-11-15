@@ -213,18 +213,38 @@ def set_ndf(p: Paths) -> Switched:
     if is_ndf(line) and line is not None:
         _keep_refresh(p, data, line)
         return Switched("kept", "既に NDF の表示が設定されている", line, _read_backup(p))
-    wrote_backup = False
+    # 上書きする前の控え（settings.json を書けなければこの中身へ戻す。無かったなら消す）
+    before = _backup_text(p) if line is not None else None
     if line is not None:
         _write(p.backup, line)
-        wrote_backup = True
     try:
         _write(p.settings, _with_ndf(data))
     except StatuslineError:
-        if wrote_backup:
-            # settings.json を書けなければ控えを消し、元の状態に戻す
-            p.backup.unlink(missing_ok=True)
+        if line is not None:
+            _undo_backup(p, before)
         raise
     return Switched("set", "NDF の表示に切り替えた", _ndf_line(), line)
+
+
+def _backup_text(p: Paths) -> Optional[str]:
+    """今の控えのバイト列のまま（壊れた JSON でも戻せるよう、読み解かない）。無ければ None。"""
+    if not p.backup.exists():
+        return None
+    try:
+        return p.backup.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise StatuslineError("invalid", f"{p.backup} を読めない: {exc}") from exc
+
+
+def _undo_backup(p: Paths, before: Optional[str]) -> None:
+    """控えを操作の前の状態へ戻す。前に控えがあればその中身を書き戻し、無ければ消す。"""
+    if before is None:
+        p.backup.unlink(missing_ok=True)
+        return
+    try:
+        signals.replace_text(p.backup, before, mode=stat.S_IMODE(p.backup.stat().st_mode))
+    except OSError as exc:
+        raise StatuslineError("unknown", f"{p.backup} を戻せない: {exc}") from exc
 
 
 def restore(p: Paths) -> Switched:

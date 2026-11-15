@@ -104,6 +104,30 @@ def test_switching_keeps_a_private_settings_file_private(tmp_path, home):
     assert stat.S_IMODE((path.parent / settings.BACKUP_NAME).stat().st_mode) == 0o600
 
 
+@pytest.mark.parametrize("earlier", ['{"type": "command", "command": "bash ~/first.sh"}\n', None])
+def test_failed_set_puts_the_earlier_backup_back(tmp_path, home, monkeypatch, earlier):
+    """settings.json を書けなければ、控えを操作の前の状態（前の控えの中身・無ければ無し）へ戻す。"""
+    base = tmp_path / "cfg"
+    p = settings.Paths(base / "settings.json", base / settings.BACKUP_NAME, base / settings.LOCK_NAME, home / ".claude" / "body.sh")
+    _write(p.settings, {"statusLine": {"type": "command", "command": "bash ~/second.sh"}})
+    if earlier is not None:
+        p.backup.write_text(earlier, encoding="utf-8")
+    real = settings._write
+
+    def fail_on_settings(path, data):
+        if path == p.settings:
+            raise settings.StatuslineError("unknown", "書けない")
+        real(path, data)
+
+    monkeypatch.setattr(settings, "_write", fail_on_settings)
+    with pytest.raises(settings.StatuslineError):
+        settings.set_ndf(p)
+    if earlier is None:
+        assert not p.backup.exists()
+    else:
+        assert p.backup.read_text(encoding="utf-8") == earlier
+
+
 def test_restore_without_backup_removes_only_the_ndf_line(tmp_path, home, capsys, last_result):
     user = {"type": "command", "command": "bash ~/mine.sh"}
     _write(_settings(tmp_path), {"statusLine": user})

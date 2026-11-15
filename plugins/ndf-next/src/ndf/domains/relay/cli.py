@@ -68,23 +68,6 @@ COMMANDS = {
 }
 
 
-class EnvError(ValueError):
-    """上限を替える環境変数の値の形が違う。"""
-
-
-def _env_number(environ: Mapping[str, str], name: str, policy: str, key: str) -> float:
-    raw = environ.get(name)
-    if not raw:
-        return limits.value(policy, key)
-    try:
-        got = float(raw)
-    except ValueError as exc:
-        raise EnvError(f"{name} の値が数でない: {raw}") from exc
-    if got <= 0:
-        raise EnvError(f"{name} の値は 0 より大きくする: {raw}")
-    return got
-
-
 def plugin_version(root: Path) -> str:
     data = json.loads((root / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
     return str(data["version"])
@@ -157,14 +140,14 @@ def hub_context(environ: Mapping[str, str]) -> hub.Context:
         version=plugin_version(ident.root),
         environ=environ,
         tmux=Tmux(environ, limits.seconds("relay.tmux")),
-        max_named=int(_env_number(environ, "NDF_RELAY_MAX_NAMED", "relay.max-named", "count")),
-        max_starts=int(_env_number(environ, "NDF_RELAY_MAX_STARTS", "relay.max-starts", "attempts")),
+        max_named=int(limits.from_env(environ, "NDF_RELAY_MAX_NAMED", "relay.max-named", "count")),
+        max_starts=int(limits.from_env(environ, "NDF_RELAY_MAX_STARTS", "relay.max-starts", "attempts")),
         started=hub.Wait(limits.seconds("relay.started"), limits.value("relay.started", "interval")),
         stop_wait=hub.Wait(
-            _env_number(environ, "NDF_RELAY_STOP_WAIT", "relay.stop-wait", "seconds"), limits.value("relay.stop-wait", "interval")
+            limits.from_env(environ, "NDF_RELAY_STOP_WAIT", "relay.stop-wait", "seconds"), limits.value("relay.stop-wait", "interval")
         ),
         hub_wait=hub.Wait(
-            _env_number(environ, "NDF_RELAY_HUB_WAIT", "relay.hub-wait", "seconds"), limits.value("relay.hub-poll", "interval")
+            limits.from_env(environ, "NDF_RELAY_HUB_WAIT", "relay.hub-wait", "seconds"), limits.value("relay.hub-poll", "interval")
         ),
         pending=lambda: _pending_read(ident.root)._asdict(),
     )
@@ -245,7 +228,7 @@ def wrapper_settings(name: str, rest: list[str]) -> wrapper.Settings:
         tick=limits.value("relay.tick", "interval"),
         quiet=limits.seconds("relay.quiet"),
         stall=limits.seconds("relay.stall"),
-        max_starts=int(_env_number(environ, "NDF_RELAY_MAX_STARTS", "relay.max-starts", "attempts")),
+        max_starts=int(limits.from_env(environ, "NDF_RELAY_MAX_STARTS", "relay.max-starts", "attempts")),
         context_limit=int(limits.value("relay.context", "count")),
         usage_threshold=limits.value("relay.usage-guard", "count"),
         transcript_bytes=int(limits.value("relay.transcript-tail", "count")),
@@ -329,5 +312,5 @@ def main(argv: list[str]) -> int:
         return causes.exit_code("invalid") if exc.code else 0
     try:
         return HANDLERS[args.action](args)
-    except (accounts.AccountError, account_registry.AccountError, marks.MarkError, registry.RegistryError, EnvError) as exc:
+    except (accounts.AccountError, account_registry.AccountError, marks.MarkError, registry.RegistryError, limits.EnvError) as exc:
         return result.emit(result.stopped(TOOL, "invalid", str(exc)))

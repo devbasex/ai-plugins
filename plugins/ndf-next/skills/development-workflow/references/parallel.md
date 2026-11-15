@@ -1,6 +1,6 @@
 # 並列開発のオーガナイザー（`--parallel <計画名>`）
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `handoff.py`（M7）・`mvv-gate.py`（P2）・`parallel.py`（P3）・`sprint-state.py`（P1b）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `handoff.py`（M7）・`mvv-gate.py`（P2）・`parallel.py`（P3）・`sprint-state.py`（P1b）・`supervise.py`（C2。`queue` の答え待ちの停止の `metrics.answer_hold`・`metrics.park`・`metrics.cleared` と `--resume <D>` を `ndf plan queue` がまだ持たない）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 並列の計画（[issue-plan-strategy の parallel-plan.md](../../issue-plan-strategy/references/parallel-plan.md) で作る）を、
 1 行で始める。
@@ -318,8 +318,9 @@ CI の失敗・衝突・版数の衝突は、リリースプランの直しの�
 | 手で届ける | 手で行うリリースのステージ | 手で行うリリースの手順に従う。オーガナイザーはこの経路のリリースを組めない（上の「まとめたリリース」） |
 
 リリースの依頼の課題の一覧はプランの `課題` だけが持ち、コマンドの `--issues {plan_issues}` は流す時点の `課題` で埋まる。設計承認ゲートで
-外した課題は、依頼にも本番チャネルへ入れるリリースプランにもまとめにも載らない。レーンで `ndf plan queue` の `--max` を省くと、並列の計画のそのレーンの
-プランの本数で流す。
+外した課題は、依頼にも本番チャネルへ入れるリリースプランにもまとめにも載らない。レーンで `ndf plan queue` を打つときは
+`--max <レーンのプランの本数>`（並列の計画のそのレーンの宣言の `plans`）を必ず渡す。省くと触るファイルの重ならないプランをすべて一度に起動し、
+マシン全体の本数の判定（宣言の `plans` で数える）を超えて流れる。
 
 リリースの依頼を送ったレーンの続きは次のとおりである。
 
@@ -339,7 +340,7 @@ CI の失敗・衝突・版数の衝突は、リリースプランの直しの�
 | レーン | 止まり方 |
 | --- | --- |
 | 開発ループ | `loop select` か `loop lap` が `answer_hold` で止まる（[loop.md](loop.md) の「止まる条件」） |
-| 1 スプリント | 新しい承認を生むプランを始めるとき、`ndf plan queue` がそのプランを `流さなかった` として `status: gate` と `metrics.answer_hold` を返す（ほかのプランが止まっていれば `status: stopped`）。`metrics.park` の `parallel.py park p1 --lane <レーン> --done <D>` を打つ（`next` にも載る。承認ゲートと同居したら `next` は report.md の提示の後にこの 1 行を続ける）。止まる手順なら `metrics.next` の自分のラッパーを止める 1 行を最後に打って終える。`metrics.cleared` が `true` なら停止は解けているので、`metrics.next` の `ndf plan queue --resume <D>` で続ける |
+| 1 スプリント | 新しい承認を生むプランを始めるとき、`supervise.py queue` がそのプランを `流さなかった` として `status: gate` と `metrics.answer_hold` を返す（ほかのプランが止まっていれば `status: stopped`）。`metrics.park` の `parallel.py park p1 --lane <レーン> --done <D>` を打つ（`next` にも載る。承認ゲートと同居したら `next` は report.md の提示の後にこの 1 行を続ける）。止まる手順なら `metrics.next` の自分のラッパーを止める 1 行を最後に打って終える。`metrics.cleared` が `true` なら停止は解けているので、`metrics.next` の `supervise.py queue --resume <D>` で続ける |
 
 ## 別のリポジトリのレーン
 
@@ -401,8 +402,10 @@ CI の失敗・衝突・版数の衝突は、リリースプランの直しの�
    `ndf lanes limits <計画> --max-lanes <n> --reason <理由>` の 1 行が出る
 3. 人の指示を受けて `ndf lanes limits <計画> --max-lanes <n> --reason <理由>` を打つ（計画の DB の上限の行を変え、計画の検査は次の判定から
    その値を読む）。リレーハブの名前つきのラッパーの数の上限は別の値で、`ndf relay` を打つ環境の `NDF_RELAY_MAX_NAMED`（無ければ
-   `contracts/limits.json` の `relay.max-named`）を毎回読む。`<n>` がその上限を超えるなら、`ndf relay spawn` を打つ環境で
-   `NDF_RELAY_MAX_NAMED=<n>` を渡す（リレーハブを起動し直さない）
+   `contracts/limits.json` の `relay.max-named`）を毎回読む。マシン全体の本数の判定（`ndf lanes run` の中）も同じ環境変数を読む。
+   `<n>` がその上限を超えるなら、`ndf lanes stop <計画> --reason <理由>` で区切りまで止め、`NDF_RELAY_MAX_NAMED=<n> ndf lanes start <計画のファイル>`
+   で起こし直す（レーンの `ndf relay spawn` を打つのは `ndf lanes start` が切り離して起こした `ndf lanes run` で、その環境を引き継ぐ。
+   動いている `ndf lanes run` の環境は後から変えられない。打ち直した `start` は止めた所から続く）
 4. もう一度 2 を打つ。通ると `plan.json`・`plan.md`・引継ぎ文書を書き、耐久ワークフローへ知らせる。耐久ワークフローが計画を読み直し、
    足したレーンを起動の候補に入れる。計画がまだ動いていなければ、次の `start` で起動する
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
+import threading
 from pathlib import Path
 
 import git_sandbox
@@ -174,10 +175,36 @@ def test_run_puts_overlapping_plans_of_a_stage_into_separate_waves(tmp_path, chi
 def test_run_launches_at_most_max_parallel_plans_at_once(tmp_path, children):
     fake = children({n: _ok() for n in "abcd"})
     plans = [_entry(tmp_path, n, touches=[f"{n}.py"]) for n in "abcd"]
-    queue_run.run([plans], tmp_path / "q", tmp_path, queue_run.QueueOptions(max_parallel=3))
-    starts = [("start", n) for n in "abc"]
-    reads = [("read", n) for n in "abc"]
-    assert fake.log == [*starts, *reads, ("start", "d"), ("read", "d")]
+    outs = queue_run.run([plans], tmp_path / "q", tmp_path, queue_run.QueueOptions(max_parallel=3))
+    assert [o.name for o in outs] == list("abcd")
+    assert fake.log[:3] == [("start", n) for n in "abc"]
+    running, peak = 0, 0
+    for event, _name in fake.log:
+        running += 1 if event == "start" else -1
+        peak = max(peak, running)
+    assert peak == 3
+    assert fake.log.index(("start", "d")) > min(fake.log.index(("read", n)) for n in "abc")
+
+
+def test_run_starts_the_next_plan_when_one_finishes_without_waiting_for_the_rest(tmp_path, children):
+    """空いた枠へ次のプランを起動する（長引く 1 本が終わるのを待たない）。"""
+    release = threading.Event()
+    fake = children({n: _ok() for n in "abc"})
+    real = _FakeProc.communicate
+
+    def slow_a(self):
+        if self.name == "a":
+            assert release.wait(5)
+        if self.name == "c":
+            release.set()
+        return real(self)
+
+    plans = [_entry(tmp_path, n, touches=[f"{n}.py"]) for n in "abc"]
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(_FakeProc, "communicate", slow_a)
+        outs = queue_run.run([plans], tmp_path / "q", tmp_path, queue_run.QueueOptions(max_parallel=2))
+    assert [o.status for o in outs] == ["ok", "ok", "ok"]
+    assert ("start", "c") in fake.log
 
 
 def test_resume_line_keeps_the_max_parallel(tmp_path):

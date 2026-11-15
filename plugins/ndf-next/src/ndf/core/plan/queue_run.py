@@ -7,7 +7,8 @@
   （`accepts_gate`）なら流す（#2876）。`{queue_prs}` は前の段で完了したプランの PR の番号で埋める
 - キューの記録 `queue.json` に、プランごとの結果を書く。`--resume` は完了したプランを流さずに続ける
 - `--fresh` は子の `ndf plan next` へ渡し、各プランを前の回に戻らず先頭から流す（#1592）。打ち直し（next）には渡さない
-- `--max <n>` は同時に流すプランの本数の上限。触るファイルの重ならない組を `n` 本ずつに分けて順に流す。打ち直しにも渡す
+- `--max <n>` は同時に流すプランの本数の上限。触るファイルの重ならない組の中で、終わったプランの空いた枠へ次のプランを
+  起動し、`n` 本を保って流す（組を `n` 本ずつに区切って待たない）。打ち直しにも渡す
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ import json
 import os
 import subprocess
 import sys
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
@@ -121,7 +123,7 @@ def _needs_blocked(entry: Entry, order: list[str], done: dict[str, queue_decide.
 class QueueOptions:
     """キューの選択肢。`resume` は完了したプランを流さずに続け、`fresh` は子の `ndf plan next` へ `--fresh` を渡す（#1592）。
 
-    `max_parallel` は同時に流すプランの本数の上限（None は組の本数まで）。
+    `max_parallel` は同時に流すプランの本数の上限（None は組の本数まで）。空いた枠へ次のプランを起動して本数を保つ。
     """
 
     resume: bool = False
@@ -155,8 +157,7 @@ class _QueueExecution:
         current: list[queue_decide.Outcome] = []
         queued = [queue_decide.Queued(e.plan.name, e.plan.touches, e.plan.needs) for e in stage]
         for names in queue_decide.waves(queued, {o.name for o in self.prior}):
-            for chunk in _chunks(names, self.options.max_parallel):
-                current += self._run_group(stage, chunk)
+            current += self._run_group(stage, names)
         self.prior += current
 
     def _run_group(self, stage: list[Entry], names: list[str]) -> list[queue_decide.Outcome]:
@@ -171,19 +172,48 @@ class _QueueExecution:
         return [outs[name] for name in names]
 
     def _launch(self, wave: list[Entry]) -> list[queue_decide.Outcome]:
-        """組のプランを並べて流し、すべて起動してから結果を組の並びで回収する。"""
-        started: list[tuple[Entry, Optional[subprocess.Popen], Optional[queue_decide.Outcome]]] = []
-        for entry in wave:  # noqa: NDF201 上限: 組のプランの本数（キューの引数に渡したプランの数まで）
+        """組のプランを `--max` の本数まで並べて流し、結果を組の並びで返す。流さないプランは起動せずに結果にする。"""
+        early: dict[str, queue_decide.Outcome] = {}
+        ready: list[tuple[Entry, dict[str, str]]] = []
+        for entry in wave:
             sets, refused = _sets(entry, self.prior)
             refused = refused if refused is not None else _needs_blocked(entry, self.order, self.done)
             if refused is not None:
-                started.append((entry, None, refused))
-                continue
-            proc = subprocess.Popen(
-                _child_args(entry, sets, self.options.fresh), cwd=self.cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
-            )
-            started.append((entry, proc, None))
-        return [early if proc is None else _read_child(entry, proc) for entry, proc, early in started]
+                early[entry.plan.name] = refused
+            else:
+                ready.append((entry, sets))
+        size = self.options.max_parallel
+        ran = self._all_at_once(ready) if size is None or size >= len(ready) else self._rolling(ready, size)
+        outs = early | ran
+        return [outs[e.plan.name] for e in wave]
+
+    def _start(self, entry: Entry, sets: dict[str, str]) -> subprocess.Popen:
+        return subprocess.Popen(
+            _child_args(entry, sets, self.options.fresh), cwd=self.cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+        )
+
+    def _all_at_once(self, ready: list[tuple[Entry, dict[str, str]]]) -> dict[str, queue_decide.Outcome]:
+        """すべて起動してから、組の並びで回収する。"""
+        started = [(entry, self._start(entry, sets)) for entry, sets in ready]
+        return {entry.plan.name: _read_child(entry, proc) for entry, proc in started}
+
+    def _rolling(self, ready: list[tuple[Entry, dict[str, str]]], size: int) -> dict[str, queue_decide.Outcome]:
+        """`size` 本を保って流す。終わったプランを回収するたびに、空いた枠へ次のプランを起動する。
+
+        子の出力は回収の糸（thread）ごとに読み切るため、出力の多い子がパイプで詰まって終わらない形にならない。
+        """
+        pending = list(ready)
+        outs: dict[str, queue_decide.Outcome] = {}
+        running: dict[Future[queue_decide.Outcome], Entry] = {}
+        with ThreadPoolExecutor(max_workers=size) as pool:
+            while pending or running:
+                while pending and len(running) < size:
+                    entry, sets = pending.pop(0)
+                    running[pool.submit(_read_child, entry, self._start(entry, sets))] = entry
+                finished, _ = wait(running, return_when=FIRST_COMPLETED)
+                for future in finished:
+                    outs[running.pop(future).plan.name] = future.result()
+        return outs
 
 
 def run(stages: list[list[Entry]], qdir: Path, cwd: Path, options: QueueOptions) -> list[queue_decide.Outcome]:
@@ -245,13 +275,6 @@ def _item(o: queue_decide.Outcome) -> dict[str, Any]:
     if o.routes:
         item["routes"] = dict(o.routes)
     return item
-
-
-def _chunks(names: list[str], size: Optional[int]) -> list[list[str]]:
-    """組を `size` 本ずつに分ける（None なら分けない）。"""
-    if size is None:
-        return [names]
-    return [names[i : i + size] for i in range(0, len(names), size)]
 
 
 def again_args(
