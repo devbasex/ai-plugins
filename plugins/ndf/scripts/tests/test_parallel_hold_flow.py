@@ -17,8 +17,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import test_parallel_run as tpr  # noqa: E402
-from test_parallel_run import SCRIPTS, calls, event, questions, spawned, start, stop, until  # noqa: E402
+import parallel_run_world as prw  # noqa: E402
+from parallel_run_world import SCRIPTS, calls, event, questions, spawned, start, stop, until  # noqa: E402
 
 import durable  # noqa: E402
 import handoff  # noqa: E402
@@ -29,7 +29,7 @@ import parallel_lane as pl  # noqa: E402
 import parallel_plan as pp  # noqa: E402
 import parallel_run as prun  # noqa: E402
 
-env = tpr.env
+env = prw.env
 SEEN = {"limits": {"plan": 2, "lane": 1}, "marks": {}}
 LANES = [
     {"name": "la", "input": {"kind": "sprint"}},
@@ -415,7 +415,7 @@ CRASH = textwrap.dedent(
     prun.git_head = lambda _m: "sha1"
     if mode == "old":
         ph.limit_values = lambda _m: None  # 閾値を載せない版の観測で記録する
-    orig_patched = durable.patched  # test_parallel_run.env と同じ記録の道（LEGACY_MARKS）
+    orig_patched = durable.patched  # parallel_run_world.env と同じ記録の道（LEGACY_MARKS）
     durable.patched = lambda n: False if n in ("parallel-lane-end", "parallel-approved-sha") else orig_patched(n)
     prun.open_parallel_record(main, "p1")
     wid = pl.workflow_id("p1")
