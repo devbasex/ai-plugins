@@ -51,7 +51,7 @@ def test_ensure_sets_when_absent_and_keeps_user_setting(tmp_path, home, capsys, 
 
 def test_ensure_migrates_a_managed_copy(tmp_path, home, capsys, last_result):
     copy = home / ".claude" / "statusline-command.sh"
-    copy.parent.mkdir(parents=True)
+    copy.parent.mkdir(parents=True, exist_ok=True)
     copy.write_text("# ndf-statusline: managed\n", encoding="utf-8")
     old = {"type": "command", "command": "bash ~/.claude/statusline-command.sh"}
     _write(_settings(tmp_path), {"statusLine": old})
@@ -62,7 +62,7 @@ def test_ensure_migrates_a_managed_copy(tmp_path, home, capsys, last_result):
 
 
 def test_ensure_skips_a_broken_settings_file(tmp_path, home, capsys, last_result):
-    _settings(tmp_path).parent.mkdir(parents=True)
+    _settings(tmp_path).parent.mkdir(parents=True, exist_ok=True)
     _settings(tmp_path).write_text("{", encoding="utf-8")
     assert cli.main(["ensure"]) == 0
     out = last_result(capsys.readouterr().out)
@@ -100,7 +100,7 @@ def test_symlinked_settings_are_written_through(tmp_path, home):
     real = tmp_path / "dotfiles" / "settings.json"
     _write(real, {})
     link = _settings(tmp_path)
-    link.parent.mkdir(parents=True)
+    link.parent.mkdir(parents=True, exist_ok=True)
     link.symlink_to(real)
     assert cli.main(["set"]) == 0
     assert link.is_symlink()
@@ -108,7 +108,7 @@ def test_symlinked_settings_are_written_through(tmp_path, home):
 
 
 def test_broken_settings_stop_set_and_status(tmp_path, home, capsys, last_result):
-    _settings(tmp_path).parent.mkdir(parents=True)
+    _settings(tmp_path).parent.mkdir(parents=True, exist_ok=True)
     _settings(tmp_path).write_text("[]", encoding="utf-8")
     assert cli.main(["status"]) == 2
     assert last_result(capsys.readouterr().out)["cause"]["kind"] == "invalid"
@@ -125,7 +125,7 @@ def test_unknown_subcommand_is_a_usage_error():
 def test_waits_for_the_old_flock_holder(tmp_path, home, monkeypatch, capsys, last_result):
     # 旧い statusline-switch.sh と同じ錠（flock コマンド）を子が持つ間は、新しい書き手が待ちきれずに止まる
     lock = _settings(tmp_path).parent / settings.LOCK_NAME
-    lock.parent.mkdir(parents=True)
+    lock.parent.mkdir(parents=True, exist_ok=True)
     holder = subprocess.Popen(["flock", "-x", str(lock), "sleep", "3"])
     try:
         for _ in range(200):
