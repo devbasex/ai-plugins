@@ -10,7 +10,8 @@ worker（`claude -p` の full の起動）へ渡す規則文を組み、作業�
   ほかは信用されない入力として囲って渡す。信用の区分の無い本文は信用されない側に倒す（#3364 の 3364-1）
 - 結果ファイルを書かずに応答を終えた worker は、同じ会話を `RESUMES` 回まで起こし直す（`delegate`。#1734）
 - CI の修正（`ci-fix`）には、変えた定義を期待値に直書きしたテストを探して一緒に直す手順（`KIND_RULES`）を足し、
-  探した語と見つけたテストのファイル（`search_record`）が結果ファイルに無ければ起こし直す。記録は結果 JSON に載せる（#3188）
+  済んだ（status が ok の）結果ファイルに探した語と見つけたテストのファイル（`search_record`）が無ければ起こし直す。
+  判断が要る・できなかった結果と、変えた定義が無く語を空で書いた記録は起こし直さない。記録は結果 JSON に載せる（#3188）
 - 起動の間は子へ作業種別を環境変数 `identity.WORKER_KIND_ENV` で渡す。hook の guard `full-test` はこれで worker の中の
   全体テストを止める（#3112）
 - push の前に、コミットの件名と本文の closing keywords を照らし、当たれば push させない（`closing_commits`。#3129）
@@ -129,7 +130,8 @@ KIND_RULES: dict[str, tuple[str, ...]] = {
         "- 落ちたテストが期待値に持つ定義（工程の並び・定数・語の一覧など）のうち、この変更で変えたものを、作業の前のコミットとの差分から特定する",
         "- 変えた定義の値（足した・外した・並べ替えた語や要素）を `git grep -n` でテストの置き場から探し、期待値に直書きしているテストを"
         "落ちたテストと一緒に直す。CI で落ちていないテストでも、同じ値を直書きしていれば直す",
-        f"- 結果ファイルの metrics.{SEARCH_RECORD} に、探した語（terms。文字列の並び）と見つけたテストのファイル（files。無ければ空の並び）を書く",
+        f"- 結果ファイルの metrics.{SEARCH_RECORD} に、探した語（terms。文字列の並び。変えた定義が無ければ空の並び）と"
+        "見つけたテストのファイル（files。無ければ空の並び）を書く",
     ),
 }
 # 結果ファイルに探した記録（`SEARCH_RECORD`）を要る作業種別
@@ -292,21 +294,28 @@ def _strings(value: Any) -> bool:
 def search_record(path: Path) -> Optional[dict[str, list[str]]]:
     """結果ファイルの、期待値の直書きを探した記録（探した語 `terms` と見つけたテストのファイル `files`）。
 
-    語が 1 つも無い・形が違う・結果ファイルを読めなければ None（探していないとみなす）。"""
+    形が違う・結果ファイルを読めなければ None（探していないとみなす）。変えた定義が無い修正は語を空の並びで書く。"""
     try:
         got = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):  # noqa: NDF401 ファイル: 読めない結果ファイルは記録が無いとして起こし直す
         return None
     metrics = got.get("metrics") if isinstance(got, dict) else None
     record = metrics.get(SEARCH_RECORD) if isinstance(metrics, dict) else None
-    if not isinstance(record, dict) or not record.get("terms") or not all(_strings(record.get(k)) for k in ("terms", "files")):
+    if not isinstance(record, dict) or not all(_strings(record.get(k)) for k in ("terms", "files")):
         return None
     return {"terms": record["terms"], "files": record["files"]}
 
 
 def _missing_record(handoff: Handoff) -> bool:
-    """手順に探した記録を持つ作業種別で、結果ファイルにその記録が無ければ真。"""
-    return handoff.kind in RECORD_KINDS and search_record(handoff.result_file) is None
+    """手順に探した記録を持つ作業種別の済んだ（status が ok の）結果ファイルに、その記録が無ければ真。
+
+    判断が要る（gate）・できなかった（stopped）結果は起こし直さずに `outcome_of` へ渡す。起こし直すと worker の書いた
+    status と summary が `work_stopped` で捨てられ、起動とトークンが `RESUMES` 回分増えるためである。
+    """
+    if handoff.kind not in RECORD_KINDS:
+        return False
+    report = plan_files.read_json(handoff.result_file)
+    return isinstance(report, dict) and report.get("status") == OK and search_record(handoff.result_file) is None
 
 
 def _reply_failed(reply: claude.ClaudeReply, out: Delivery) -> bool:
@@ -547,13 +556,11 @@ def _load_sources(path: Optional[str]) -> list[Source]:
         raise WorkerError("invalid", f"書き手の付いた本文 {path} が JSON でない: {exc}") from None
 
 
-_GAP_KEYS = ("kind", "name", "reason")
-
-
 def _gap_of(raw: object) -> dict[str, str]:
     """gaps の要素 1 つ。形の違う要素（kind・name・reason が空でない文字列でない）も捨てず、中身を理由に写した欠けにする。"""
-    if isinstance(raw, dict) and all(isinstance(raw.get(k), str) and raw[k] for k in _GAP_KEYS):
-        return {k: raw[k] for k in _GAP_KEYS}
+    keys = ("kind", "name", "reason")
+    if isinstance(raw, dict) and all(isinstance(raw.get(k), str) and raw[k] for k in keys):
+        return {k: raw[k] for k in keys}
     shown = json.dumps(raw, ensure_ascii=False, default=str)
     return {"kind": "work", "name": "gap", "reason": f"形の違う gap（kind・name・reason を空でない文字列で書く）: {shown}"}
 

@@ -180,10 +180,20 @@ def test_ci_fix_without_the_search_record_is_resumed_until_it_is_written(tmp_pat
 
 def test_ci_fix_that_never_records_the_search_stops(tmp_path):
     h = _ci_fix(tmp_path)
-    no_terms = {"metrics": {worker.SEARCH_RECORD: {"terms": [], "files": []}}}
-    fake, _ = _replies(h, *[no_terms] * (worker.RESUMES + 1))
+    fake, _ = _replies(h, *[{"status": "ok"}] * (worker.RESUMES + 1))
     done = worker.delegate(h, "規則", root=tmp_path, call=fake)
     assert done.cause == "work_stopped" and worker.SEARCH_RECORD in done.detail
+
+
+def test_ci_fix_that_asks_stops_or_changed_no_definition_is_not_resumed(tmp_path):
+    # 判断が要る・できなかった結果と、語を空で書いた記録（変えた定義が無い直し）は起こし直さない
+    no_terms = {"status": "ok", "metrics": {worker.SEARCH_RECORD: {"terms": [], "files": []}}}
+    for i, body in enumerate(({"status": "gate", "summary": "判断が要る"}, {"status": "stopped", "summary": "直せない"}, no_terms)):
+        place = tmp_path / f"w{i}"
+        place.mkdir()
+        h = _ci_fix(place)
+        fake, calls = _replies(h, body)
+        assert worker.delegate(h, "規則", root=place, call=fake).cause is None and len(calls) == 1
 
 
 def test_other_kinds_do_not_need_the_search_record(tmp_path):
