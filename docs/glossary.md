@@ -653,7 +653,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 取り込み方 | `promotion` | スプリントの変更を本番チャネルへ入れる方法。ブランチ運用の宣言の `branch_flow.promotion`。`whole` はベースブランチを丸ごと、`selected` は選んだスプリントブランチだけをリリースブランチへ集めて入れる | — | — | — |
 | プラグインの入れ替え | — | 作り直した `plugins/ndf-next/` を 1 本の PR で `plugins/ndf/` へ `git mv` し、名前と版を替えること。取得元とプラグイン名は変えない。「入れ替え」と略す。ラッパーの入れ替えとは別 | — | — | — |
 | 旧いプラグイン | — | #1142 の作り直しの前から配っている NDF のプラグイン（`plugins/ndf/`）。作り直した `plugins/ndf-next/` と区別して呼ぶ | — | — | `docs/specifications/ndf-next-closed-children-subcommands.md` |
-| 機能の対応表 | — | 旧いプラグインの機能 1 つを 1 行に持ち、行き先の子・作らない理由・試走の結果を持つ表。置き場は NDF 自身の開発の `scripts/ndf-next-parity/parity/features.json` で、ndf-next のリリース対象に置かない | — | — | — |
+| 機能の対応表 | — | 旧いプラグインの機能 1 つを 1 行に持ち、行き先の子・作らない理由・試走の結果を持つ表。置き場は NDF 自身の開発の `scripts/ndf-next-parity/parity/features.json` で、ndf-next のリリース対象に置かない | — | — | `docs/specifications/ndf-next-repo-neutral-defaults.md` |
 | 子の表 | — | #1142 の作り直しの子の Issue を、記号ごとに番号・依存・順番・閉じたかで持つ表（`plugins/ndf-next/src/ndf/checks/children.json`） | — | — | `docs/specifications/ndf-next-closed-children-subcommands.md` |
 | 入れ替えの前の試走 | — | プラグインの入れ替え（S2 #3304）の前に、`plugins/ndf-next/` だけを読む起動でスプリントを流し、機能の対応表の行ごとに機能が届くかを確かめること（T2 #3411） | — | — | `docs/specifications/ndf-next-closed-children-subcommands.md` |
 | 移す | — | 旧いプラグインの関数の振る舞い（入力・判定・書くファイルの置き場と形）を変えずに、新しいプラグインのモジュールへ書き直すこと。旧いプラグインのファイルは変えない | — | — | `docs/specifications/ndf-next-closed-children-subcommands.md` |
@@ -710,10 +710,10 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 承認の行 | — | 1 スプリントのレーンが設計 PR のマージの承認を求める区分 `ndf-gate:1` の問いの、最初の問いの文に置く `承認: #<設計 PR の番号>` の 1 行。`request-ask` が設計承認の依頼に組む問いを見分ける唯一の印で、問いの文のほかの場所で PR を指しても設計承認の依頼にならない | — | — | — |
 | 答えの引き継ぎ | — | 起き直した一時レーンの同じ問いへ、前の起動で送った依頼の答えを当てるか、答え待ちの依頼の id を返すこと。どちらの場合も新しい依頼の行を書かず、計画の台帳に `reused` の行で残る | — | — | — |
 | 一時レーンの空き待ち | — | 一時レーンの起動が、別の一時レーンが動いているために断られた後、耐久ワークフローが前の一時レーンが止まるまで区分 `spawn` の問いを立てずに待つこと。上限は既定 3,600 秒 | — | — | `docs/specifications/ndf-parallel-helper-confirmed-gate-and-launch-wait.md` |
-| ハードコード | — | ai-plugins 固有の名前（リポジトリ名・組織名・ブランチ名・タグの形・マーケットプレイスの登録名など）を、設定から読まずに ndf-next のコード・コントラクト・Skill の本文へ直接書くこと。検査が例外リストの外の件数を数えて落とす | — | — | — |
-| 設定で選べる値 | — | `.ndf/` の設定ファイルに書ける値の選択肢（取り込み方の表の行・delivery の種類・リリースの形）。コントラクトから数え、Issue の番号のある例外なしに減ると検査が落ちる | — | — | — |
-| リモート名 | — | ndf が取得・照合・差分の基準・送信に使う git のリモートの名前。`.ndf/worktree.json` の `remote` に書き、省けば `origin` | — | — | — |
-| 選べる値の基準 | — | 設定で選べる値の集合ごとに、出所と値の一覧を持つファイル（`scripts/ndf-choices.json`）。値を減らすときは Issue の番号と理由を持つ例外を足す | — | — | — |
+| ハードコード | — | ai-plugins 固有の名前（リポジトリ名・組織名・ブランチ名・タグの形・マーケットプレイスの登録名など）を、設定から読まずに ndf-next のコード・コントラクト・Skill の本文へ直接書くこと。検査が例外リストの外の件数を数えて落とす | — | — | `docs/specifications/ndf-next-repo-neutral-defaults.md` |
+| 設定で選べる値 | — | `.ndf/` の設定ファイルに書ける値の選択肢（取り込み方の表の行・delivery の種類・リリースの形）。コントラクトから数え、Issue の番号のある例外なしに減ると検査が落ちる | — | — | `docs/specifications/ndf-next-repo-neutral-defaults.md` |
+| リモート名 | — | ndf が取得・照合・差分の基準・送信に使う git のリモートの名前。`.ndf/worktree.json` の `remote` に書き、省けば `origin` | — | — | `docs/specifications/ndf-next-repo-neutral-defaults.md` |
+| 選べる値の基準 | — | 設定で選べる値の集合ごとに、出所と値の一覧を持つファイル（`scripts/ndf-choices.json`）。値を減らすときは Issue の番号と理由を持つ例外を足す | — | — | `docs/specifications/ndf-next-repo-neutral-defaults.md` |
 | JUnit の成果物 | `junit_artifacts` | CI のジョブが上げた artifact のうち、JUnit の XML を持つもの。設定ファイルの `test.ci.junit_artifacts` が名前の glob で指し、CI で落ちたテストをログより先に読む元になる | — | — | `docs/specifications/ndf-next-ci-failed-tests-junit.md` |
 | ログのパーサー | — | 1 つのテストランナー（suite の `runner`）の CI のログの形から、落ちたテストを `<テストのファイル>::<テストの名前>` の並びで読む部品。外部ライブラリを呼ぶ唯一のモジュールの意味の「アダプター」とは別 | — | — | `docs/specifications/ndf-next-ci-failed-tests-junit.md` |
 | 設定のキーの改名表 | `ndf_settings_renames` | 利用者の設定（.ndf/）の旧いキーの位置・新しいキーの位置・値の対応を行ごとに持つ契約の表（contracts/domains/ndf-settings-renames.json）。移行のコマンド・設定を読む側の止める検査・規約の規則が同じ表を読む | — | — | — |
