@@ -7351,8 +7351,8 @@
     {
       "term": "機能の対応表",
       "context": "ndf-workflow",
-      "meaning": "旧いプラグインの機能 1 つを 1 行に持ち、行き先の子・作らない理由・試走の結果を持つ表（`plugins/ndf-next/src/ndf/parity/features.json`）",
-      "source": "docs/specifications/ndf-next-closed-children-subcommands.md"
+      "meaning": "旧いプラグインの機能 1 つを 1 行に持ち、行き先の子・作らない理由・試走の結果を持つ表。置き場は NDF 自身の開発の `scripts/ndf-next-parity/features.json` で、ndf-next のリリース対象に置かない",
+      "pending_source": "issues/issue-3617-design.md"
     },
     {
       "term": "子の表",
@@ -7751,13 +7751,13 @@
       "term": "確定の後の承認ゲート",
       "context": "ndf-workflow",
       "meaning": "並列の計画で、リリース承認ゲートの承認（確定）を受けた後に、本番のプランが承認ゲート（終了コード 10）で終わること",
-      "pending_source": "issues/issue-3597-requirements.md"
+      "source": "docs/specifications/ndf-parallel-helper-confirmed-gate-and-launch-wait.md"
     },
     {
       "term": "依頼",
       "context": "ndf-workflow",
       "meaning": "並列の計画のレーンか一時レーンがオーガナイザーへ送る問い・承認の求め。台帳に 1 行で残り、id を持つ",
-      "pending_source": "issues/issue-3597-requirements.md"
+      "source": "docs/specifications/ndf-parallel-helper-confirmed-gate-and-launch-wait.md"
     },
     {
       "term": "同じ問い",
@@ -7769,7 +7769,7 @@
       "term": "起き直し",
       "context": "ndf-workflow",
       "meaning": "止まった一時レーンを、耐久ワークフローが同じ名前で起動し直すこと",
-      "pending_source": "issues/issue-3597-requirements.md"
+      "source": "docs/specifications/ndf-parallel-helper-confirmed-gate-and-launch-wait.md"
     },
     {
       "term": "問いの対象",
@@ -7799,7 +7799,65 @@
       "term": "一時レーンの空き待ち",
       "context": "ndf-workflow",
       "meaning": "一時レーンの起動が、別の一時レーンが動いているために断られた後、耐久ワークフローが前の一時レーンが止まるまで区分 `spawn` の問いを立てずに待つこと。上限は既定 3,600 秒",
-      "pending_source": "issues/issue-3597-design.md"
+      "source": "docs/specifications/ndf-parallel-helper-confirmed-gate-and-launch-wait.md"
+    },
+    {
+      "term": "ハードコード",
+      "context": "ndf-workflow",
+      "meaning": "ai-plugins 固有の名前（リポジトリ名・組織名・ブランチ名・タグの形・マーケットプレイスの登録名など）を、設定から読まずに ndf-next のコード・コントラクト・Skill の本文へ直接書くこと。検査が例外リストの外の件数を数えて落とす",
+      "pending_source": "issues/issue-3617-requirements.md"
+    },
+    {
+      "term": "設定で選べる値",
+      "context": "ndf-workflow",
+      "meaning": "`.ndf/` の設定ファイルに書ける値の選択肢（取り込み方の表の行・delivery の種類・リリースの形）。コントラクトから数え、Issue の番号のある例外なしに減ると検査が落ちる",
+      "pending_source": "issues/issue-3617-requirements.md"
+    },
+    {
+      "term": "リモート名",
+      "context": "ndf-workflow",
+      "meaning": "ndf が取得・照合・差分の基準・送信に使う git のリモートの名前。`.ndf/worktree.json` の `remote` に書き、省けば `origin`",
+      "pending_source": "issues/issue-3617-design.md"
+    },
+    {
+      "term": "選べる値の基準",
+      "context": "ndf-workflow",
+      "meaning": "設定で選べる値の集合ごとに、出所と値の一覧を持つファイル（`scripts/ndf-choices.json`）。値を減らすときは Issue の番号と理由を持つ例外を足す",
+      "pending_source": "issues/issue-3617-design.md"
+    },
+    {
+      "term": "JUnit の成果物",
+      "context": "ndf-workflow",
+      "meaning": "CI のジョブが上げた artifact のうち、JUnit の XML を持つもの。設定ファイルの `test.ci.junit_artifacts` が名前の glob で指し、CI で落ちたテストをログより先に読む元になる",
+      "code": "junit_artifacts",
+      "pending_source": "issues/issue-3616-requirements.md"
+    },
+    {
+      "term": "ログのパーサー",
+      "context": "ndf-workflow",
+      "meaning": "1 つのテストランナー（suite の `runner`）の CI のログの形から、落ちたテストを `<テストのファイル>::<テストの名前>` の並びで読む部品。外部ライブラリを呼ぶ唯一のモジュールの意味の「アダプター」とは別",
+      "pending_source": "issues/issue-3616-requirements.md"
+    },
+    {
+      "term": "収集の確かめ",
+      "context": "ndf-cross-refactoring",
+      "meaning": "cross-refactoring が、足したテストを全体の実行が収集するかを suite の `collect_command` で確かめる工程。成功と読む終了コードは suite の設定から読み、設定が無ければ 0 だけ",
+      "code": "collect_command",
+      "pending_source": "issues/issue-3616-requirements.md"
+    },
+    {
+      "term": "設定のキーの改名表",
+      "code": "ndf_settings_renames",
+      "context": "ndf-workflow",
+      "meaning": "利用者の設定（.ndf/）の旧いキーの位置・新しいキーの位置・値の対応を行ごとに持つ契約の表（contracts/domains/ndf-settings-renames.json）。移行のコマンド・設定を読む側の止める検査・規約の規則が同じ表を読む",
+      "pending_source": "issues/issue-3613-design.md"
+    },
+    {
+      "term": "移行のコマンド",
+      "code": "settings_migrate",
+      "context": "ndf-workflow",
+      "meaning": "設定のキーの改名表に従い、利用者の .ndf/ を新しいキーへ書き換えるサブコマンド。差分と差分のハッシュを示す実行と、利用者が承認した差分のハッシュを渡して書く実行に分かれる",
+      "pending_source": "issues/issue-3613-design.md"
     },
     {
       "term": "ブランチ戦略",
@@ -7860,6 +7918,60 @@
       "context": "ndf-workflow",
       "meaning": "`metadata.source` に区分（`ndf-gate:<番号>`・`ndf-ask:<名前>`）を持つ `AskUserQuestion`。並列の計画のレーンと一時レーンが出すと、問いの hook が `parallel.py request-ask` でオーガナイザーへ送り、計画の台帳の `kind: ask` の行になる。1 スプリントのレーンの区分 `ndf-gate:1` の問いが、承認の行で承認ゲートで終わった設計 PR を 1 本だけ指し、その PR が開いていて先頭のコミットを読めたときは `kind: gate1` の行（設計承認の依頼）になる",
       "pending_source": "issues/issue-3603-design.md"
+    },
+    {
+      "term": "汎用性の後退",
+      "context": "ndf-workflow",
+      "meaning": "NDF の変更の後に、代表のリポジトリの種類のどれかを NDF で扱えなくなること。その種類に要る選択肢（運用・リリースの形・テストのツール・CI など）を、代わりの形なしに無くすことで起きる。値の改名・作り直し・既定の変更・代わりの形のある値の削除は当たらない",
+      "pending_source": "issues/issue-3618-design.md"
+    },
+    {
+      "term": "サポートする選択肢",
+      "context": "ndf-workflow",
+      "meaning": "設定で選べる値（supported options）。リリース方式の値・delivery の種類・リリースの形など。汎用性の後退は、ある種類に要るサポートする選択肢を代わりの形なしに無くすことで起きる",
+      "pending_source": "issues/issue-3618-design.md"
+    },
+    {
+      "term": "代表のリポジトリの種類",
+      "context": "ndf-workflow",
+      "meaning": "NDF が扱えることを保つリポジトリの種類。代表のリポジトリの設定の kinds に名前で書く（ai-plugins では Web サービス・モバイルアプリ・業務文書だけ）",
+      "pending_source": "issues/issue-3618-design.md"
+    },
+    {
+      "term": "代表のリポジトリ",
+      "context": "ndf-workflow",
+      "meaning": "代表のリポジトリの種類ごとに、設計の振る舞いを確かめるために選ぶ、このリポジトリの作るものを使う側のリポジトリ（実物か、設定を仮に置いたもの）",
+      "pending_source": "issues/issue-3618-design.md"
+    },
+    {
+      "term": "代表のリポジトリの設定",
+      "context": "ndf-workflow",
+      "meaning": ".ndf/design.json の representative_repos。代表のリポジトリの種類の一覧・表を求めるパス・扱えなくなる種類があるときに名指すレッドラインの番号を持つ。置いたリポジトリで、触るファイルがそのパスに当たる設計だけに設計の検査が振る舞いの表を求める",
+      "pending_source": "issues/issue-3618-design.md"
+    },
+    {
+      "term": "このリポジトリだけの事情",
+      "context": "ndf-workflow",
+      "meaning": "設計を書くリポジトリの運用で決めた値。作るものの既定や振る舞いへ入れず、そのリポジトリの .ndf/ の設定に置く。ai-plugins では「ai-plugins だけの事情」と書く",
+      "pending_source": "issues/issue-3618-design.md"
+    },
+    {
+      "term": "ai-plugins だけの事情",
+      "context": "ndf-workflow",
+      "meaning": "ai-plugins の運用で決めた値（ブランチの運用・リリースの形・マーケットプレイスの名前など）。NDF の既定や振る舞いへ入れず、ai-plugins の .ndf/ の設定に置く",
+      "pending_source": "issues/issue-3618-requirements.md"
+    },
+    {
+      "term": "製品の約束",
+      "context": "ndf-workflow",
+      "meaning": "NDF が利用者の多様なリポジトリへ約束する価値。ai-plugins の MVV の Value 1〜14 と Vision が持つ",
+      "pending_source": "issues/issue-3618-requirements.md"
+    },
+    {
+      "term": "設計の検査",
+      "context": "ndf-workflow",
+      "meaning": "設計文書を書いた後に工程が走らせる、言語モデルを呼ばない決まった検査（design-survey.py check。設計のプランのステップ survey-check）",
+      "pending_source": "issues/issue-3618-requirements.md"
     }
   ]
 }
