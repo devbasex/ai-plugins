@@ -2,17 +2,17 @@
 
 ## 目的
 
-- **今どうなっているか**: ndf-next（`plugins/ndf-next/`）の既定値・Skill の本文・同梱物に、ai-plugins だけの値（リモート名 `origin` のハードコード、`.md` だけの差分を文書と決める判定、ai-plugins の実測の配分、登録名 `ndf@ai-plugins`、`devbasex` の例、機能の対応表など）が汎用の振る舞いとして入っている。ハードコードを見つける今の検査は ndf-next の Skill を 1 本も走査していない
+- **今どうなっているか**: ndf-next（`plugins/ndf-next/`）の既定値・Skill の本文・同梱物に、ai-plugins だけの値が汎用の振る舞いとして入っている。リモート名 `origin` のハードコード、`.md` だけの差分を文書と決める判定、ai-plugins の実測の配分、登録名 `ndf@ai-plugins`、`devbasex` の例、機能の対応表などである。ハードコードを見つける今の検査は ndf-next の Skill を 1 本も走査していない
 - **誰に効くか**: ai-plugins 以外のリポジトリで ndf-next を使う利用者と、ndf-next を開発する人
 - **変えると何が成り立つか**: ai-plugins の値は ai-plugins の `.ndf/` にだけ置かれ、ほかのリポジトリは設定を書くか既定のまま使える。ハードコードが例外リストの外で増えるか、設定で選べる値が黙って減ると CI が落ちる
 
 ## 適用範囲
 
 - **働く範囲**: ndf-next を使う利用先のリポジトリすべて。検査 2 つ（ハードコードの検査・選べる値の検査）はこのリポジトリの CI だけで働く
-- **プロジェクトごとに違うもの**: 設定で受ける。リモート名は `.ndf/worktree.json` の `remote`、文書だけとみなすパスは `.ndf/project.json` の `docs`、配分の値は `.ndf/estimate.json` の `allocation_minutes`。外す旧い NDF の登録は、起動のときに導入済みの登録から読む
+- **プロジェクトごとに違うもの**: 設定で受ける。リモート名は `.ndf/worktree.json` の `remote` で受ける。文書だけとみなすパスは `.ndf/project.json` の `docs`、配分の値は `.ndf/estimate.json` の `allocation_minutes` で受ける。外す旧い NDF の登録は、起動のときに導入済みの登録から読む
 - **当たるモード**: `standard`
 
-点検の一覧の直しの後に、代表のリポジトリで何が起きるか（受け入れ条件 24）。Web サービスは TypeScript・vitest か jest・develop→main・OpenAPI、モバイルアプリは Flutter か Swift、業務文書だけは Markdown と表計算だけのリポジトリを指す。
+点検の一覧の直しの後に、代表のリポジトリで何が起きるか（受け入れ条件 24）。Web サービスは TypeScript・vitest か jest・develop→main・OpenAPI のリポジトリを指す。モバイルアプリは Flutter か Swift、業務文書だけは Markdown と表計算だけのリポジトリを指す。
 
 | 点検 | Web サービス | モバイルアプリ | 業務文書だけ | ai-plugins だけの事情 |
 | --- | --- | --- | --- | --- |
@@ -37,23 +37,8 @@
 | STD3（Claude Code の `claude plugin list --json`） | 外部の一次情報 | 導入済みのプラグインの登録（`name@marketplace`）と有効かを、文書化された形で読める |
 | PRD1（GitHub Actions の `paths-ignore`） | 外部の一次情報 | 「変えたファイルがすべて当たれば飛ばす」を、利用者が書く glob で受ける |
 | LIB1（detect-secrets の baseline） | 外部の一次情報 | 既知の検出を記録し、新しい検出だけで落とす形が広く使われている |
-| `check-skill-repo-assumptions.py --report` の実測（2026-11-15） | 実測 | ndf-next の行が「公開する Skill 0 個 / ヒット 0 件」。`skills/` には Skill のディレクトリが 49 個ある（数え方は下の「Skill の数え方」） |
+| `check-skill-repo-assumptions.py --report` の実測（2026-11-15） | 実測 | ndf-next の行が「公開する Skill 0 個 / ヒット 0 件」。`skills/` には Skill のディレクトリが 49 個ある（数え方は末尾の「Skill の数え方」） |
 | 依頼の原文「ai-plugins(ndf) を開発することと、ndf を使って様々な開発を汎用的に進行することの区別がついていない設計が入り込んでしまう」 | 利用者の指示の原文 | ai-plugins の値を ndf-next の既定に置かない |
-
-### Skill の数え方
-
-受け入れ条件 1 の「Skill のディレクトリの数」は、`plugins/ndf-next/skills/` の直下のディレクトリの数とする。直下のディレクトリはすべて `SKILL.md` を持ち、Skill の一覧（`manifests/skills.json` の `skills`）の件数とも等しい。検査の走査の件数はこの数と比べる。
-
-```console
-$ git ls-tree -d --name-only 43fbe05fb plugins/ndf-next/skills/ | wc -l
-49
-$ git ls-tree -r --name-only 43fbe05fb plugins/ndf-next/skills/ | grep -c '^plugins/ndf-next/skills/[^/]*/SKILL.md$'
-49
-$ python3 -c "import json; print(len(json.load(open('plugins/ndf-next/manifests/skills.json'))['skills']))"
-49
-```
-
-要求の本文は同じ commit（43fbe05fb）で「51 個」と書いているが、上の 3 つの数え方はどれも 49 になる。受け入れ条件 1 は数を固定せず「ディレクトリの数と一致する」と書くため、検査とテストは実行の時点のディレクトリの数と比べる。要求の本文の数は、設計承認ゲートで直すかを人が決める（「人へ残す判断」）。
 
 要求と受け入れ条件は #3617 の本文にある（コピーは [issue-3617-requirements.md](issue-3617-requirements.md) ）。この文書は「どう作るか」だけを扱う。
 決定の記録は [issue-3617-design-decisions.md](issue-3617-design-decisions.md) に分けた。
@@ -67,7 +52,7 @@ $ python3 -c "import json; print(len(json.load(open('plugins/ndf-next/manifests/
 | NDF 自身の開発の検査（このリポジトリの CI だけで働く） | ハードコード・例外リスト・選べる値の基準・機能の対応表 |
 | NDF の開発ワークフロー（`ndf-workflow`。利用者のリポジトリで働く ndf-next の部品） | 設定で選べる値・リモート名・文書だけとみなすパス・配分の初期値・副命令 |
 
-コンテキストの関係: NDF 自身の開発の検査は、ndf-next のリリース対象（Skill・`src/`・`contracts/`）を読むだけで、書き換えず、ndf-next の部品から呼ばれない。ndf-next の部品は、検査・例外リスト・選べる値の基準・機能の対応表を読まない。読む向きは検査から ndf-next への 1 方向だけである。機能の対応表を `scripts/` へ移す（決定 10）のは、対応表を NDF 自身の開発の側へ戻し、この 1 方向を保つためである。
+コンテキストの関係: NDF 自身の開発の検査は、ndf-next のリリース対象（Skill・`src/`・`contracts/`）を読むだけで、書き換えない。ndf-next の部品からも呼ばれない。ndf-next の部品は、検査・例外リスト・選べる値の基準・機能の対応表を読まない。読む向きは検査から ndf-next への 1 方向だけである。機能の対応表を `scripts/` へ移す（決定 10）のは、対応表を NDF 自身の開発の側へ戻し、この 1 方向を保つためである。
 
 用語集の上では、2 つのコンテキストの語をどちらも `ndf-workflow` の区分に載せる。用語集に NDF 自身の開発だけの区分が無いためで、区分を足すかは用語集の側の課題とする。
 
@@ -294,7 +279,7 @@ sequenceDiagram
 
 ### 機能の対応表の読み手
 
-対応表を読むのは、対応表の読み手（`table.py`）・試走の判定（`trial/probe.py`）・対応表と Skill の一覧の一致を見るテスト（`test_skill_table.py`）の 3 つだけである。`ndf check` の規則（I2・移しの印・子の表の `child-deps`）は対応表を読まない。
+対応表を読むのは 3 つだけである。対応表の読み手（`table.py`）・試走の判定（`trial/probe.py`）・対応表と Skill の一覧の一致を見るテスト（`test_skill_table.py`）である。`ndf check` の規則（I2・移しの印・子の表の `child-deps`）は対応表を読まない。
 
 ```console
 $ grep -rn 'parity\|features.json' plugins/ndf-next/src/ndf --include=*.py | grep -v '^plugins/ndf-next/src/ndf/parity/'
@@ -397,3 +382,18 @@ $ grep -n 'parity' plugins/ndf-next/src/ndf/checks/children.json
 | `--settings` の `enabledPlugins` で別の登録名の旧い NDF が外れるか | 公式の文書に鍵の形の記述が見つからなかった。リリース後テストで、旧い NDF を別の登録名で入れた環境の起動の引数と、読み込まれたプラグインを見る（要求の検証手段） |
 | 配分の値を決める部品の呼び手 | ndf-next の cross-refactoring の配分の表は、cross-refactoring を移す子（M4、#3298）がまだ作っていない。この課題は部品と宣言を置き、M4 が配分の表をこの部品から作る。宣言の値で配分されることの端から端の確認は M4 の後になる |
 | 他レーンとの同じファイルの変更 | #3613 は ndf-next 全体の語を、#3615 はリリースの部品を変える。この課題は #3615 が受け持つ `gather.py`・`assemble.py` を触らない。#3615 がこの 2 ファイルを直すとき、`git.ORIGIN` をリモート名を決める部品の呼び出しへ替え、`git.ORIGIN` を消す。この引き継ぎは #3615 の本文に書く。#3613 と同じファイルを触る実装は、設計の結果の触るファイルで 1 本ずつ流れ、後に流れる側が取り込みの衝突を解く |
+
+## Skill の数え方
+
+受け入れ条件 1 の「Skill のディレクトリの数」は、`plugins/ndf-next/skills/` の直下のディレクトリの数とする。直下のディレクトリはすべて `SKILL.md` を持ち、Skill の一覧（`manifests/skills.json` の `skills`）の件数とも等しい。検査の走査の件数はこの数と比べる。
+
+```console
+$ git ls-tree -d --name-only 43fbe05fb plugins/ndf-next/skills/ | wc -l
+49
+$ git ls-tree -r --name-only 43fbe05fb plugins/ndf-next/skills/ | grep -c '^plugins/ndf-next/skills/[^/]*/SKILL.md$'
+49
+$ python3 -c "import json; print(len(json.load(open('plugins/ndf-next/manifests/skills.json'))['skills']))"
+49
+```
+
+要求の本文は同じ commit（43fbe05fb）で「51 個」と書いているが、上の 3 つの数え方はどれも 49 になる。受け入れ条件 1 は数を固定せず「ディレクトリの数と一致する」と書くため、検査とテストは実行の時点のディレクトリの数と比べる。要求の本文の数は、設計承認ゲートで直すかを人が決める（「人へ残す判断」）。

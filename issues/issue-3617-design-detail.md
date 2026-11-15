@@ -1,6 +1,6 @@
 # #3617 の詳細設計: ndf-next の ai-plugins の値を設定で受け、ハードコードと選べる値の減少を CI で止める
 
-設計文書 [issue-3617-design.md](issue-3617-design.md) の「構成要素」と「ドメインモデル」を、ファイルと関数の粒度へ下ろした文書である。決定の番号（決定 1 など）は [issue-3617-design-decisions.md](issue-3617-design-decisions.md) を、不変条件の番号（I1 など）は設計文書の「不変条件」を指す。
+設計文書 [issue-3617-design.md](issue-3617-design.md) の「構成要素」と「ドメインモデル」を、ファイルと関数の粒度へ下ろした文書である。決定の番号（決定 1 など）は [issue-3617-design-decisions.md](issue-3617-design-decisions.md) を指す。不変条件の番号（I1 など）は設計文書の「不変条件」を指す。
 
 関数は `<モジュール>.<関数>` の形で書く（例: `git.remote_of` は `plugins/ndf-next/src/ndf/adapters/git.py` の `remote_of`）。モジュールの名前が 2 つの置き場で重なるときは、置き場の列で区別する。
 
@@ -52,7 +52,7 @@ plugins/ndf-next/
         └── worktree/{cleanup.py, create.py, declaration.py, follow.py, merged.py, repo.py}
 ```
 
-依存の向き: リモート名の事実は `adapters/git.py` の `remote_of` だけが読み、`core/`・`progress/`・`domains/` はそこから引く（下の層のアダプタを上の層が読む 1 方向）。`adapters/git.py` は標準ライブラリと `ndf.identity` だけを読み、`ndf.contracts`（`jsonschema` を読み込む）を読まない。hook（`domains/hooks/strict.py`）が `adapters/git.py` を読んでも起動の時間を延ばさないためである。根の `scripts/` の 2 つの検査は ndf-next のファイルを読むだけで、ndf-next のモジュールを import しない。移した機能の対応表（`scripts/ndf-next-parity/`）は ndf-next のモジュール（`ndf.domains.manifests`）を import するが、ndf-next の側からは読まれない。循環は無い。
+依存の向き: リモート名の事実は `adapters/git.py` の `remote_of` だけが読む。`core/`・`progress/`・`domains/` はそこから引く（下の層のアダプタを上の層が読む 1 方向）。`adapters/git.py` は標準ライブラリと `ndf.identity` だけを読み、`ndf.contracts`（`jsonschema` を読み込む）を読まない。hook（`domains/hooks/strict.py`）が `adapters/git.py` を読んでも起動の時間を延ばさないためである。根の `scripts/` の 2 つの検査は ndf-next のファイルを読むだけで、ndf-next のモジュールを import しない。移した機能の対応表（`scripts/ndf-next-parity/`）は ndf-next のモジュール（`ndf.domains.manifests`）を import する。ndf-next の側からは読まれない。循環は無い。
 
 | パス | 種類 | 役割 1 文 | 依存する先 |
 | --- | --- | --- | --- |
@@ -107,7 +107,12 @@ plugins/ndf-next/
 | `.github/workflows/ndf-next-release.yml` | 変更 | 宣言に無いブランチを GitHub の既定ブランチで補う | `gh api` |
 | `.ndf/project.json` | 変更 | ai-plugins の振る舞いの文書のパスを `docs.behavior` に書く | 無し |
 
-表に挙げないファイル（Skill とエージェントの本文の 104 ファイル・`docs/glossary/glossary.json`・`docs/glossary.md`・ndf-next のテストのファイル）は、設計文書の「設計の結果」の触るファイルのとおりに直す。Skill とエージェントの本文の直しは関数を持たないため、下の節には現れない。直す中身は、冒頭の機能の対応表の注記を消す（決定 10）・「（ai-plugins）」の表記を外す・`devbasex` の例を `<owner>`・`<owner>/<repo>` にする・`--admin` を迂回の宣言と ruleset の両方がそろうときの扱いとして書く、の 4 つである。
+表に挙げないファイルは、設計文書の「設計の結果」の触るファイルのとおりに直す。Skill とエージェントの本文の 104 ファイル・`docs/glossary/glossary.json`・`docs/glossary.md`・ndf-next のテストのファイルである。Skill とエージェントの本文の直しは関数を持たないため、下の節には現れない。直す中身は次の 4 つである。
+
+- 冒頭の機能の対応表の注記を消す（決定 10）
+- 「（ai-plugins）」の表記を外す
+- `devbasex` の例を `<owner>`・`<owner>/<repo>` にする
+- `--admin` を、迂回の宣言と ruleset の両方がそろうときの扱いとして書く
 
 ## クラスと関数の構造
 
@@ -219,7 +224,7 @@ plugins/ndf-next/
 | `probe.texts` | 置き場を読めない | 根の誤り | `OSError` | 呼び出し元へ返す（今と同じ） | テストか試走が落ちる | 再実行できる |
 | `probe.main` | 根が無い | `--plugin-root` の誤り | `is_dir` | 止める | `プラグインの根が無い: <パス>`、終了コード 2 | 再実行できる |
 
-`allocation_decide.decide` は副作用を持たないため上の表に無い。形の誤り（初期値のファイルに `initial` が無い・`values` の分が 0 以下・宣言に初期値に無い種類がある）は `AllocationError` を上げ、呼び手（M4 の配分の表の部品）が止まった結果にする。
+`allocation_decide.decide` は副作用を持たないため上の表に無い。形の誤り（初期値のファイルに `initial` が無い・`values` の分が 0 以下・宣言に初期値に無い種類がある）は `AllocationError` を上げる。呼び手（M4 の配分の表の部品）が止まった結果にする。
 
 ## 処理の手順
 
@@ -253,7 +258,7 @@ plugins/ndf-next/
 - 繰り返しの終わる条件: 2 つの検査はファイルの一覧と集合の要素を 1 回ずつ回るだけで、打ち直しを持たない。`claude.list_plugins` は打ち直さない（1 回で読めなければ知らせにする）
 - 計算量の注意: ハードコードの検査は、ndf-next の `src/` の Python と `contracts/` の JSON を足しても、語の和で行を先に絞る今の形のまま 1 ファイル 1 回読む。走査を広げる前と後の所要を `time` で測って PR に載せる（設計文書の「非機能の実現方式」）。`Git.remote()` は呼ぶたびに `git worktree list` を 1 回打つ。1 つの関数で 2 回以上使うときは、戻り値を変数に持って打ち直さない
 
-テンプレート `check` の `assess` の終了コード: 設計文書の入出力の契約は、文書だけを 1、それ以外を 0、git の失敗を 2 と書く。ndf の副命令は結果 JSON を出し、プランのランナーは結果 JSON があれば `cause.kind` で行き先を決める（`core/plan/steps.py`）。このため `ndf progress docs-only` は結果 JSON の `not_applicable`・`ok`・`precondition` で 3 つを表し、`assess` の `exit_cause` を外す。行き先（文書だけなら `review`、git の失敗なら人へ戻す）は今と同じである。
+テンプレート `check` の `assess` の終了コード: 設計文書の入出力の契約は、文書だけを 1、それ以外を 0、git の失敗を 2 と書く。ndf の副命令は結果 JSON を出し、プランのランナーは結果 JSON があれば `cause.kind` で行き先を決める（`core/plan/steps.py`）。このため `ndf progress docs-only` は結果 JSON の `not_applicable`・`ok`・`precondition` で 3 つを表す。`assess` の `exit_cause` は外す。行き先（文書だけなら `review`、git の失敗なら人へ戻す）は今と同じである。
 
 ## 内部のデータと定数
 

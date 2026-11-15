@@ -6,7 +6,7 @@
 
 ### 決定 1: 例外リストの件数と受け持ちの Issue の番号を持てるよう、ハードコードの検査は今の検査を広げる
 
-今の検査（`scripts/check-skill-repo-assumptions.py`）は、（ファイル・語）ごとの件数・理由・種類（`not-a-violation` と、Issue の番号を必須にする `pending`）を 1 項目 1 ファイルで持ち、件数より増えれば 1、減れば 2 で落とす。要求の S3（件数と理由）と S12（他レーンの受け持ちを例外で扱う）をそのまま満たすため、走査の対象を広げるだけにする。ndf-next の検査のエントリポイント（`ndf check`）へ新しい規則として足すことは採らない。`ndf check` は兆候の基準のファイルを持たない方針で、例外の件数の仕組みを別に作り直すことになるためである。
+ハードコードの検査は、今の検査（`scripts/check-skill-repo-assumptions.py`）の走査の対象を広げるだけにする。今の検査が要求の S3（件数と理由）と S12（他レーンの受け持ちを例外で扱う）をそのまま満たすためである。今の検査は、（ファイル・語）ごとの件数・理由・種類を 1 項目 1 ファイルで持つ。種類は `not-a-violation` と、Issue の番号を必須にする `pending` である。件数より増えれば 1、減れば 2 で落とす。ndf-next の検査のエントリポイント（`ndf check`）へ新しい規則として足すことは採らない。`ndf check` は兆候の基準のファイルを持たない方針で、例外の件数の仕組みを別に作り直すことになるためである。
 
 既存の検出のツールは採らない。detect-secrets（LIB1）は既知の検出を記録する形は同じだが、検出が秘密の値に限られる。betterer（LIB2）は JavaScript の実行環境を足し、latest が先行版である。semgrep（LIB3）は語の一致だけの検査に対して依存が大きく、例外の件数と Issue の番号は自前で足すことになる。
 
@@ -17,13 +17,23 @@
 
 ### 決定 2: 今の NDF の件数を変えないため、追加の語は ndf-next の形のプラグインにだけ当てる
 
-追加の語は `repo-name`（`ai-plugins`）・`org-name`（`devbasex`）・`marketplace-entry`（`ndf@`）・`remote-origin`（コードとコントラクトの中のリモート名の文字列。`"origin"`・`origin/`・`remotes/origin`・`remote.origin`・`remote "origin"`）・`parity-table`（機能の対応表への参照）の 5 つである。要求の前提 6 の名前のうち、`ndf--v`・`marketplace.json`・`plugin.json`・`develop` は今の語（`tag-form`・`marketplace-json`・`plugin-manifest`・`develop-branch` ほか）が受ける。
+追加の語は次の 5 つである。
+
+| 語 | 当てる名前 |
+| --- | --- |
+| `repo-name` | `ai-plugins` |
+| `org-name` | `devbasex` |
+| `marketplace-entry` | `ndf@` |
+| `remote-origin` | コードとコントラクトの中のリモート名の文字列（`"origin"`・`origin/`・`remotes/origin`・`remote.origin`・`remote "origin"`） |
+| `parity-table` | 機能の対応表への参照 |
+
+要求の前提 6 の名前のうち、`ndf--v`・`marketplace.json`・`plugin.json`・`develop` は今の語が受ける。受ける語は `tag-form`・`marketplace-json`・`plugin-manifest`・`develop-branch` ほかである。
 
 ndf-next の形のプラグインは、Skill の一覧を `manifests/skills.json` に持つプラグインと決める。今の NDF は `manifests/*-skills.txt` を持つため、走査の対象と語は今と同じになり、要求の前提 2 が成り立つ。入れ替え（S2）で今の NDF が ndf-next の形になれば、追加の語も当たる。
 
-走査は、Skill の本文とエージェントに今の文書の語、`src/` の Python・`contracts/` の JSON・`hooks/*.py` に今のスクリプトの語を当て、どちらにも追加の語を足す。`remote-origin` はコードとコントラクトにだけ当てる（Skill の本文の手順の `origin` は範囲の外。決定 13）。
+走査は、Skill の本文とエージェントに今の文書の語を当てる。`src/` の Python・`contracts/` の JSON・`hooks/*.py` には今のスクリプトの語を当てる。どちらにも追加の語を足す。`remote-origin` はコードとコントラクトにだけ当てる（Skill の本文の手順の `origin` は範囲の外。決定 13）。
 
-`remote-origin` は、`contracts/` の JSON Schema の `default` の値を走査しない。既定の値を持つのはスキーマの `default` であり（決定 5）、既定を書く正しい置き場を違反として数えると、例外リストに常に 1 件残るためである。外すのは `default` という鍵の値だけで、ほかの鍵（`description`・`enum`・`examples` など）と Python のコードは走査する。代わりに、`remote-origin` に当たる `default` の値が `worktree.schema.json` の `remote` の 1 か所だけであることを検査が数え、2 か所以上か 0 か所なら終了コード 2 で落とす（設計文書の I7a）。
+`remote-origin` は、`contracts/` の JSON Schema の `default` の値を走査しない。既定の値を持つのはスキーマの `default` であり（決定 5）、既定を書く正しい置き場を違反として数えると、例外リストに常に 1 件残るためである。外すのは `default` という鍵の値だけで、ほかの鍵（`description`・`enum`・`examples` など）と Python のコードは走査する。代わりに検査は、`remote-origin` に当たる `default` の値を数える。`worktree.schema.json` の `remote` の 1 か所だけでなければ（2 か所以上か 0 か所）、終了コード 2 で落とす（設計文書の I7a）。
 
 根拠: Value 4（MVV 版 7）
 
@@ -44,9 +54,9 @@ ndf-next の今の当たりは、次の規則で 1 件ずつ分ける。
 
 ### 決定 4: 選べる値の減少を 1 か所で止めるため、基準のファイル `scripts/ndf-choices.json` と根の検査を置く
 
-要求の未決 5 の置き場は、NDF 自身の開発の検査とその例外を置く根の `scripts/` にする（ハードコードの検査と例外リストと同じ置き場）。基準は集合ごとに出所（事実の表の行・スキーマの列挙・ファイル名の glob の 3 種）と値の一覧を持ち、値を減らすときは `removed` に Issue の番号と理由を持つ項目を足す。
+要求の未決 5 の置き場は、NDF 自身の開発の検査とその例外を置く根の `scripts/` にする（ハードコードの検査と例外リストと同じ置き場）。基準は集合ごとに出所（事実の表の行・スキーマの列挙・ファイル名の glob の 3 種）と値の一覧を持つ。値を減らすときは `removed` に Issue の番号と理由を持つ項目を足す。
 
-**基準に無い値がコントラクトに増えても落とす**（I6）。増えた値を黙って通すと、基準がその値を知らないまま、後で消えても検査が気づかない。I6 は要求の S4（減ったら落とす）より範囲が広く、値を足す PR に基準のファイルの更新を求めるため、入れるかを設計承認ゲートで人が決める（設計文書の「人へ残す判断」）。外す場合は I6 と、そのテストの行を消す。リリースの形の値はまだ機械が読む表を持たないため、形ごとの文書（`skills/release/references/form-*.md`）のファイル名から読む。#3615 が形の表を置いたら、その PR が出所を表へ替える。
+**基準に無い値がコントラクトに増えても落とす**（I6）。増えた値を黙って通すと、基準がその値を知らないまま、後で消えても検査が気づかない。I6 は要求の S4（減ったら落とす）より範囲が広く、値を足す PR に基準のファイルの更新を求める。そのため、入れるかを設計承認ゲートで人が決める（設計文書の「人へ残す判断」）。外す場合は I6 と、そのテストの行を消す。リリースの形の値はまだ機械が読む表を持たないため、形ごとの文書（`skills/release/references/form-*.md`）のファイル名から読む。#3615 が形の表を置いたら、その PR が出所を表へ替える。
 
 検査は stdlib の JSON の読み取りだけで書き、ndf-next の依存の環境を要らないようにする。CI では今のジョブ `ndf-next-checks` に 1 ステップを足す。新しいジョブを作ると、必須のチェックの宣言（`scripts/required-checks-allow.json`）か ruleset の変更が要る。
 
@@ -61,7 +71,7 @@ ndf-next の今の当たりは、次の規則で 1 件ずつ分ける。
 
 リモート名は、ベースブランチ・本番ブランチと同じく git の運用の宣言なので `.ndf/worktree.json` に置く。git 自身が既定を `origin` とし、設定で変えられる（STD2）。既定の値はスキーマの `default` に 1 回だけ書き、リモート名を決める部品（`adapters/git.py`）がそれを読む。コードに定数を持つとスキーマと 2 か所になり、ハードコードの検査（`remote-origin`）の例外を 1 件残すことになる。スキーマの `default` はハードコードの検査の走査の外とし、1 か所だけであることを検査が数える（決定 2）。
 
-リモート名を決める部品は最も下の層の 1 つ（アダプタ）に置き、テンプレート（`{{remote}}`）・ルート・収束・工程・各領域がそこから引く。今の `git.ORIGIN` を使う部品のうち、この課題が直すもの（`domains/release/verify.py` ほか、設計の結果の触るファイルにあるもの）は、リモート名を引数か部品から受ける。
+リモート名を決める部品は最も下の層の 1 つ（アダプタ）に置き、テンプレート（`{{remote}}`）・ルート・収束・工程・各領域がそこから引く。今の `git.ORIGIN` を使う部品のうち、この課題が直すものは、リモート名を引数か部品から受ける。直すのは `domains/release/verify.py` ほか、設計の結果の触るファイルにあるものである。
 
 要求の前提 5 に従い、#3615 が受け持つ `domains/release/gather.py`・`assemble.py` は直さない。この 2 ファイルが読む `git.ORIGIN` は名前を残し、値を文字列 `origin` ではなくスキーマの `default` から読む形にする。`adapters/git.py` にリモート名の文字列は残らず（受け入れ条件 8）、2 ファイルは変えずに今と同じ値を受ける。#3615 がこの 2 ファイルを直すときに、`git.ORIGIN` をリモート名を決める部品の呼び出しへ替えて `git.ORIGIN` を消す。それまで、宣言に別の名前を書いたリポジトリでもリリースの部品は既定のリモート名を使う。これを受け入れ条件 8 の範囲としてよいかは、設計文書の「人へ残す判断」で人が確かめる。
 
@@ -74,9 +84,9 @@ ndf-next の今の当たりは、次の規則で 1 件ずつ分ける。
 
 ### 決定 6: 文書だけの判定を 1 つにするため、テンプレート `check` の `assess` を宣言 `docs` で分ける判定へ寄せ、振る舞いの文書の既定を空にする
 
-文書だけとみなすパスの受け口は、既に `.ndf/project.json` の `docs`（`files`・`behavior`）がある。工程の条件（`code_in_diff` など）はこれを読むが、テンプレート `check` の `assess` は `.md` をシェルに直に書いていた。`assess` は副命令 `progress` の下の命令を呼び、工程と同じ判定を使う。照合は git の pathspec の glob で行い、GitHub Actions の `paths-ignore`（PRD1）と同じく「変えたファイルがすべて当たれば飛ばす」とする。
+文書だけとみなすパスの受け口は、既に `.ndf/project.json` の `docs`（`files`・`behavior`）がある。工程の条件（`code_in_diff` など）はこれを読むが、テンプレート `check` の `assess` は `.md` をシェルに直に書いていた。`assess` は副命令 `progress` の下の命令を呼び、工程と同じ判定を使う。照合は git の pathspec の glob で行う。GitHub Actions の `paths-ignore`（PRD1）と同じく「変えたファイルがすべて当たれば飛ばす」とする。
 
-振る舞いの文書の既定（`**/skills/**/*.md`・`**/agents/*.md`）は空にする。Skill の本文が振る舞いであるのは ai-plugins の事情で（要求の前提 3）、ai-plugins は `.ndf/project.json` の `docs.behavior` にその 2 つを書く。今の NDF も同じ宣言を読むが、書く値は今の NDF の既定と同じなので、今の NDF の振る舞いは変わらない。
+振る舞いの文書の既定（`**/skills/**/*.md`・`**/agents/*.md`）は空にする。Skill の本文が振る舞いであるのは ai-plugins の事情である（要求の前提 3）。ai-plugins は `.ndf/project.json` の `docs.behavior` にその 2 つを書く。今の NDF も同じ宣言を読むが、書く値は今の NDF の既定と同じなので、今の NDF の振る舞いは変わらない。
 
 今の NDF の既定と読み方は、次のとおりである（2026-11-15 に確かめた）。
 
@@ -89,7 +99,7 @@ $ python3 -c "import json; print('behavior' in json.load(open('.ndf/project.json
 False
 ```
 
-今の NDF は `docs.behavior` があればその値を、無ければ `DEFAULT_BEHAVIOR` を使う。ai-plugins の宣言には今 `docs.behavior` が無いので、今の NDF は既定の 2 つのパターンで判定している。同じ 2 つのパターンを宣言に書けば、今の NDF が判定に使うパターンは変わらない。振る舞いを決める文書は文書のファイルの部分集合であるという今の NDF の決まり（`diff_kinds.py` の I3）も、ai-plugins の `docs.files` が `**/*.md` を持つため満たす。
+今の NDF は `docs.behavior` があればその値を、無ければ `DEFAULT_BEHAVIOR` を使う。ai-plugins の宣言には今 `docs.behavior` が無いので、今の NDF は既定の 2 つのパターンで判定している。同じ 2 つのパターンを宣言に書けば、今の NDF が判定に使うパターンは変わらない。今の NDF には、振る舞いを決める文書は文書のファイルの部分集合であるという決まり（`diff_kinds.py` の I3）がある。ai-plugins の `docs.files` が `**/*.md` を持つため、この決まりも満たす。
 
 - 作り方: 自前で作る・標準に倣う
 - 比べた候補: PRD1 / LIB4
@@ -106,7 +116,7 @@ ndf-next には配分の表を作る部品がまだ無い（cross-refactoring �
 
 ### 決定 8: 旧い NDF をどの登録名でも外せるよう、`claude plugin list --json` の一覧から外す登録を決め、読めなければ外さずに起動する
 
-外す登録は、一覧の要素のうち `enabled` が真で、`id` の `@` の前が旧い NDF の名前（`identity` が持つ入れ替えの後の名前）であり、プラグインの根の名前と違うものとする。根の名前と同じものを外さない規則は今のコードと同じである。一覧は文書化された CLI の出力（STD3）を読み、文書に無い導入先のファイル（`installed_plugins.json`）は読まない。
+外す登録は、一覧の要素のうち次の 3 つを満たすものとする。`enabled` が真である。`id` の `@` の前が旧い NDF の名前（`identity` が持つ入れ替えの後の名前）である。プラグインの根の名前と違う。根の名前と同じものを外さない規則は今のコードと同じである。一覧は文書化された CLI の出力（STD3）を読み、文書に無い導入先のファイル（`installed_plugins.json`）は読まない。
 
 要求の未決 4（一覧が読めないとき）は、外す登録を空にして起動し、結果の `items` に知らせを 1 件載せる。止めると、`claude` の CLI の版の違いだけで Skill を回す起動が全部止まる。外さずに起動したときに起きるのは、旧い NDF が並んで読まれることで、今のハードコードの登録名が合わない環境と同じである。
 
@@ -127,7 +137,7 @@ ndf-next には配分の表を作る部品がまだ無い（cross-refactoring �
 
 対応表の読み手は `jsonschema` を使い、根の環境はこれを持たない（`uv.lock` に無い）。テストは ndf-next の依存の環境（`plugins/ndf-next/uv.lock`）で流し、`ndf-next.yml` のテストのジョブに移した先を足す。根の依存へ `jsonschema` を足すことは採らない。同じ版の固定が 2 か所になる。
 
-対応表を読むのは、対応表の読み手・試走の判定・対応表と Skill の一覧の一致を見るテストの 3 つだけで、`ndf check` の規則は対応表を読まない（設計文書の「機能の対応表の読み手」に検索の結果がある）。移した 3 つはプラグインの根を引数で受け、既定はリポジトリの根の `plugins/ndf-next/` とする。名前を入れ替えた一時コピーの中では流さない。
+対応表を読むのは、対応表の読み手・試走の判定・対応表と Skill の一覧の一致を見るテストの 3 つだけである。`ndf check` の規則は対応表を読まない（設計文書の「機能の対応表の読み手」に検索の結果がある）。移した 3 つはプラグインの根を引数で受け、既定はリポジトリの根の `plugins/ndf-next/` とする。名前を入れ替えた一時コピーの中では流さない。
 
 対応表と Skill の一覧の一致を見るテスト（`tests/domains/manifests/test_skill_table.py`）も、対応表の側へ移す。子の表（`children.json`）の `X3` の `packages` から `ndf.parity` を外し、対応表の `places` の `X3` を移した先にする。試走の判定は、プラグインの根を引数で受ける（既定は今の ndf-next の置き場）。
 
@@ -168,6 +178,6 @@ Skill とエージェントの冒頭の注記（104 ファイル）は消す。�
 
 ### 決定 13: 範囲を点検の一覧の場所に保つため、Skill の本文の手順のリモート名は直さずに範囲外として起票する
 
-Skill の本文の git の手順は、`origin` を約 190 行書く（2026-11-15、`grep -rnE '"origin|origin/|\borigin\b' plugins/ndf-next/skills`）。点検の一覧 10 はコードとコントラクトの 5 か所で、受け入れ条件 8 は ndf の取得・照合・差分の基準を対象にする。本文の手順は #3613 が全体の語を置き換えている最中で、同じ 190 行を並べて直すと衝突が増える。範囲外の課題として起票し、ハードコードの検査の `remote-origin` は Skill の本文に当てない。
+Skill の本文の git の手順は、`origin` を約 190 行書く。数えたのは 2026-11-15 の `grep -rnE '"origin|origin/|\borigin\b' plugins/ndf-next/skills` である。点検の一覧 10 はコードとコントラクトの 5 か所で、受け入れ条件 8 は ndf の取得・照合・差分の基準を対象にする。本文の手順は #3613 が全体の語を置き換えている最中で、同じ 190 行を並べて直すと衝突が増える。範囲外の課題として起票し、ハードコードの検査の `remote-origin` は Skill の本文に当てない。
 
 根拠: Value 5 / Value 7（MVV 版 7）
