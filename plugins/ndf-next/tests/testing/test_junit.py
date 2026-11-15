@@ -70,7 +70,9 @@ def test_resolve_file_normalizes_and_skips_ambiguous_candidates() -> None:
 
 def test_split_xmls_are_merged_without_duplicates_in_order() -> None:
     # 受け入れ条件 5（読み取りの側）: 2 本の XML の一覧は、組み立てで重ねずに昇順へ並ぶ
-    first = b'<testsuite><testcase file="b.py" name="t2"><failure/></testcase><testcase file="a.py" name="t1"><error/></testcase></testsuite>'
+    first = (
+        b'<testsuite><testcase file="b.py" name="t2"><failure/></testcase><testcase file="a.py" name="t1"><error/></testcase></testsuite>'
+    )
     second = b'<testsuites><testsuite><testsuite file="b.py"><testcase name="t2"><failure/></testcase></testsuite></testsuite></testsuites>'
     tracked = frozenset({"a.py", "b.py"})
     merged = sorted({n for xml in (first, second) for n in junit.junit_failures(xml, tracked).nodes})
