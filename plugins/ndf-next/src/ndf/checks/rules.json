@@ -68,10 +68,40 @@
   },
   "words": {
     "glossary_config": "glossary.json",
-    "skip_files": ["uv.lock"]
+    "skip_files": ["uv.lock"],
+    "examples": {
+      "skills/document-style/SKILL.md": {
+        "words": ["入口"],
+        "reason": "避ける語の表と、避ける語を探す grep の例が、言い換える前の語として挙げる"
+      },
+      "skills/pr-review/SKILL.md": {
+        "words": ["実装レビュー"],
+        "reason": "旧 projects-sync.sh（M7）が受ける工程名。入れ替えまでは呼び先の工程表の名前を渡す"
+      },
+      "skills/refactoring/SKILL.md": {
+        "words": ["構造改善"],
+        "reason": "旧 projects-sync.sh（M7）が受ける工程名。入れ替えまでは呼び先の工程表の名前を渡す"
+      },
+      "skills/development-workflow/references/projects-tracking.md": {
+        "words": ["実装レビュー"],
+        "reason": "旧 projects-sync.sh（M7）が受ける工程名。入れ替えまでは呼び先の工程表の名前を渡す"
+      },
+      "skills/development-workflow/references/workflow-modes.md": {
+        "words": ["構造改善"],
+        "reason": "旧 projects-sync.sh（M7）が受ける工程名。入れ替えまでは呼び先の工程表の名前を渡す"
+      },
+      "src/ndf/checks/rules.json": {
+        "words": ["入口", "実装レビュー", "構造改善"],
+        "reason": "この除外のデータそのものが、外す語を持つ"
+      }
+    }
   },
   "child_deps": {
     "max_per_slot": 2
+  },
+  "spec": {
+    "rules": ["spec-docs", "spec-decl", "spec-io", "spec-skill", "spec-public"],
+    "generated": ["docs/contracts/*.md", "contracts/schemas/io/*.args.schema.json"]
   },
   "invariants": {
     "old_plugin": "plugins/ndf",

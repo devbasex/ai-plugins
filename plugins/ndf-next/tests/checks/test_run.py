@@ -115,7 +115,7 @@ def test_emit_ok_prints_one_line_without_cause(capsys):
 
 
 def test_emit_violation_has_check_failed_cause(capsys):
-    items = [{"rule": "NDF502", "path": "a.py", "line": 2}]
+    items = [{"rule": "NDF502", "path": "a.py", "line": 2, "detail": "x"}]
     assert run.emit("違反 1 件", items, {"files": 1, "findings": {"NDF502": 1}}, "check_failed") == exit_codes.code_of("failed")
     assert json.loads(capsys.readouterr().out) == {
         "tool": run.TOOL,

@@ -1,0 +1,231 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/io/progress.args.schema.json",
+  "title": "ndf progress の引数",
+  "description": "ndf progress が受ける引数。キーは引数の名前（オプションは -- の名前、位置引数は名前）。規約の生成が作り、手で直さない",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "cancel",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "table_id": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "--reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subcommand",
+        "table_id",
+        "--reason"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "disable",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "table_id": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "stage": {
+          "type": "string",
+          "description": "工程の名前（工程表の行名）",
+          "x-ndf-positional": true
+        },
+        "--reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subcommand",
+        "table_id",
+        "stage",
+        "--reason"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "enable",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "table_id": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "stage": {
+          "type": "string",
+          "description": "工程の名前（工程表の行名）",
+          "x-ndf-positional": true
+        },
+        "--reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subcommand",
+        "table_id",
+        "stage",
+        "--reason"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "finish",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "table_id": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "stage": {
+          "type": "string",
+          "description": "工程の名前（工程表の行名）",
+          "x-ndf-positional": true
+        },
+        "--reason": {
+          "type": "string"
+        },
+        "--output": {
+          "type": "string",
+          "description": "工程の出力の規約に合う JSON のファイル"
+        }
+      },
+      "required": [
+        "subcommand",
+        "table_id",
+        "stage",
+        "--reason",
+        "--output"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "new",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "name": {
+          "type": "string",
+          "description": "スプリント名",
+          "x-ndf-positional": true
+        },
+        "--mode": {
+          "type": "string"
+        },
+        "--issues": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          }
+        },
+        "--pace": {
+          "type": "string",
+          "default": "normal"
+        },
+        "--disable": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "<工程>=<理由>"
+        },
+        "--requirements": {
+          "type": "string",
+          "description": "要求と受け入れ条件の出力（工程の出力の規約に合う JSON）"
+        },
+        "--parent": {
+          "type": "string",
+          "description": "親の進行表（レーンの進行表）の ID"
+        }
+      },
+      "required": [
+        "subcommand",
+        "name",
+        "--mode",
+        "--issues"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "restore",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--from": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--from"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "retry",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "table_id": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "stage": {
+          "type": "string",
+          "description": "工程の名前（工程表の行名）",
+          "x-ndf-positional": true
+        },
+        "--reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subcommand",
+        "table_id",
+        "stage",
+        "--reason"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "show",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "table_id": {
+          "type": "string",
+          "x-ndf-positional": true
+        }
+      },
+      "required": [
+        "subcommand",
+        "table_id"
+      ]
+    }
+  ]
+}

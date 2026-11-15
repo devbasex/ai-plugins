@@ -3605,6 +3605,12 @@
       "source": "docs/specifications/ndf-google-workspace-gws.md"
     },
     {
+      "term": "導入の同意の印",
+      "context": "ndf-google-workspace",
+      "meaning": "gws の確認の引数 --install。利用者が gws の導入に同意したことを示し、付いたときだけ npm で全体インストールする",
+      "source": "docs/specifications/ndf-next-gws-subcommands.md"
+    },
+    {
       "term": "他のプラグイン",
       "context": "ndf-release",
       "meaning": "リリースの設定の release.plugin 以外で、前のタグからの差分にファイルがあるプラグイン。release-steps.py changed-plugins が列挙する",
@@ -7276,6 +7282,54 @@
       "pending_source": "issues/issue-1142-design-next.md"
     },
     {
+      "term": "旧いプラグイン",
+      "context": "ndf-workflow",
+      "meaning": "#1142 の作り直しの前から配っている NDF のプラグイン（`plugins/ndf/`）。作り直した `plugins/ndf-next/` と区別して呼ぶ",
+      "pending_source": "issues/issue-3569-requirements.md"
+    },
+    {
+      "term": "機能の対応表",
+      "context": "ndf-workflow",
+      "meaning": "旧いプラグインの機能 1 つを 1 行に持ち、行き先の子・作らない理由・試走の結果を持つ表（`plugins/ndf-next/src/ndf/parity/features.json`）",
+      "pending_source": "issues/issue-3569-requirements.md"
+    },
+    {
+      "term": "子の表",
+      "context": "ndf-workflow",
+      "meaning": "#1142 の作り直しの子の Issue を、記号ごとに番号・依存・順番・閉じたかで持つ表（`plugins/ndf-next/src/ndf/checks/children.json`）",
+      "pending_source": "issues/issue-3569-requirements.md"
+    },
+    {
+      "term": "入れ替えの前の試走",
+      "context": "ndf-workflow",
+      "meaning": "プラグインの入れ替え（S2 #3304）の前に、`plugins/ndf-next/` だけを読む起動でスプリントを流し、機能の対応表の行ごとに機能が届くかを確かめること（T2 #3411）",
+      "pending_source": "issues/issue-3569-requirements.md"
+    },
+    {
+      "term": "移す",
+      "context": "ndf-workflow",
+      "meaning": "旧いプラグインの関数の振る舞い（入力・判定・書くファイルの置き場と形）を変えずに、新しいプラグインのモジュールへ書き直すこと。旧いプラグインのファイルは変えない",
+      "pending_source": "issues/issue-3569-design-detail.md"
+    },
+    {
+      "term": "公開の関数",
+      "context": "ndf-workflow",
+      "meaning": "モジュールの外から呼ばれる関数。詳細設計の「関数の仕様」に書くのは公開の関数だけである",
+      "pending_source": "issues/issue-3569-design-detail.md"
+    },
+    {
+      "term": "非公開の関数",
+      "context": "ndf-workflow",
+      "meaning": "公開の関数だけが呼ぶ関数。名前が `_` で始まる",
+      "pending_source": "issues/issue-3569-design-detail.md"
+    },
+    {
+      "term": "旧い置き場",
+      "context": "ndf-workflow",
+      "meaning": "旧いプラグインが状態を書く置き場。入れ替えの前は、旧いプラグインと新しいプラグインの両方が同じ旧い置き場を読み書きする",
+      "pending_source": "issues/issue-3569-design-detail.md"
+    },
+    {
       "term": "新しいプラグイン",
       "context": "ndf-workflow",
       "meaning": "入れ替えまでの間、`plugins/ndf-next/` に作る作り直しの側のプラグイン。開発の間の名前は `ndf-next`",
@@ -7387,61 +7441,67 @@
       "term": "宣言",
       "context": "ndf-workflow",
       "meaning": "リポジトリの `.ndf/` に置く、人が決める設定のファイル。置き場の表で種類が宣言の行",
-      "pending_source": "issues/issue-3518-requirements.md"
+      "source": "docs/specifications/ndf-next-declarations-and-io-contracts.md"
     },
     {
       "term": "公開する面",
       "context": "ndf-workflow",
       "meaning": "外の呼び手が頼ってよい面（副命令・環境変数・受け渡しのファイル・hook・宣言とそのスキーマの置き場）。名前と意味を版で約束し、公開する面の表に載る",
-      "pending_source": "issues/issue-3518-requirements.md"
+      "source": "docs/specifications/ndf-next-declarations-and-io-contracts.md"
     },
     {
       "term": "内部の面",
       "context": "ndf-workflow",
       "meaning": "NDF の中だけで使い、形を約束しない面。公開する面の表に載らない",
-      "pending_source": "issues/issue-3518-requirements.md"
+      "source": "docs/specifications/ndf-next-declarations-and-io-contracts.md"
     },
     {
       "term": "連携システム",
       "context": "ndf-factory",
       "meaning": "NDF を外から呼び、`.ndf/` の設定ページを作るシステム（サービス Factory のランナーと、その上の設定画面）",
-      "pending_source": "issues/issue-3518-requirements.md"
+      "source": "docs/specifications/ndf-next-declarations-and-io-contracts.md"
     },
     {
       "term": "副命令",
       "context": "ndf-workflow",
       "meaning": "`bin/ndf <名前>` の `<名前>`。ndf-next の副命令の表（`cli.py` の `COMMANDS`）に載るもの",
-      "pending_source": "issues/issue-3518-requirements.md"
+      "source": "docs/specifications/ndf-next-declarations-and-io-contracts.md"
     },
     {
       "term": "配る Skill の表",
       "context": "ndf-workflow",
       "meaning": "ndf-next が配る Skill と配るランタイムの一覧（`plugins/ndf-next/manifests/skills.json`）",
-      "pending_source": "issues/issue-3518-requirements.md"
+      "source": "docs/specifications/ndf-next-declarations-and-io-contracts.md"
     },
     {
       "term": "起動スクリプト",
       "context": "ndf-workflow",
       "meaning": "利用者と AI が打つ `plugins/ndf-next/bin/` のスクリプト（`ndf`・`ndf-claude`）",
-      "pending_source": "issues/issue-3518-requirements.md"
+      "source": "docs/specifications/ndf-next-declarations-and-io-contracts.md"
     },
     {
       "term": "契約のページ",
       "context": "ndf-workflow",
       "meaning": "ndf-next の宣言と入出力の規約を、面ごとのページ（宣言・副命令・終了コード・環境変数・受け渡しのファイル・hook・Skill）で表した文書（`plugins/ndf-next/docs/contracts/`）。正本の表とスキーマから生成し、手で書かない",
-      "pending_source": "issues/issue-3518-design.md"
+      "source": "docs/specifications/ndf-next-declarations-and-io-contracts.md"
     },
     {
       "term": "Skill の入出力の表",
       "context": "ndf-workflow",
       "meaning": "配る Skill ごとの `/goal` の終わりの条件・読む宣言・結果の形と、公開する面に無い Skill の引数の形と環境変数を持つ事実の表（`plugins/ndf-next/contracts/domains/skill-io.json`）",
-      "pending_source": "issues/issue-3518-design.md"
+      "source": "docs/specifications/ndf-next-declarations-and-io-contracts.md"
     },
     {
       "term": "起動スクリプトの表",
       "context": "ndf-workflow",
       "meaning": "`plugins/ndf-next/bin/` のファイルごとに、起動スクリプトか内部の部品かを持つ事実の表（`plugins/ndf-next/contracts/domains/launchers.json`）",
-      "pending_source": "issues/issue-3518-design.md"
+      "source": "docs/specifications/ndf-next-declarations-and-io-contracts.md"
+    },
+    {
+      "term": "手書きの引数の表",
+      "context": "ndf-workflow",
+      "meaning": "argparse を使わない副命令の呼び方（下位の命令の道ごとに 1 行）と引数を持つ事実の表（`plugins/ndf-next/contracts/domains/manual-args.json`）。規約の生成がこの表から引数のスキーマを作る",
+      "source": "docs/specifications/ndf-next-declarations-and-io-contracts.md"
     },
     {
       "term": "上げる先（依存の版の）",
@@ -7544,6 +7604,54 @@
       "context": "ndf-workflow",
       "meaning": "11.0.0 を出した後に着手する子の Issue。記号は Z<数> で、ラベル rebuild-1142 を付けない（#3388）",
       "pending_source": "issues/issue-3388-design.md"
+    },
+    {
+      "term": "承認した先端",
+      "context": "ndf-release",
+      "meaning": "リリース承認ゲートの承認の答えか、利用者の GitHub でのマージが対象にした本番の PR の先端のコミット。本番ブランチへ入れてよいのはこの先端だけである",
+      "pending_source": "issues/issue-3572-design.md"
+    },
+    {
+      "term": "先端の照合",
+      "context": "ndf-release",
+      "meaning": "マージの API に承認した先端を渡し、PR の先端が違えば GitHub に断らせることと、マージの前に承認の証跡を読み直すこと",
+      "pending_source": "issues/issue-3572-design.md"
+    },
+    {
+      "term": "承認の経路",
+      "context": "ndf-release",
+      "meaning": "本番の PR の承認がどこで与えられたか。リリース承認ゲート（`gate`）か、利用者の GitHub でのマージ（`github-merge`）のどちらか",
+      "pending_source": "issues/issue-3572-design.md"
+    },
+    {
+      "term": "差し戻し",
+      "context": "ndf-release",
+      "meaning": "リリース承認ゲートで承認しない答え、または必須のチェックの落ちた本番の PR を出さずに止めること。直しを同じリリースブランチへ入れ、新しい先端で承認を取り直す",
+      "pending_source": "issues/issue-3572-design.md"
+    },
+    {
+      "term": "次の版への回し",
+      "context": "ndf-release",
+      "meaning": "必須のチェックの落ちた本番の PR を閉じてこの時点では出さず、リリースブランチを残して後のスプリントと一緒に出すこと",
+      "pending_source": "issues/issue-3572-design.md"
+    },
+    {
+      "term": "直しのステップ",
+      "context": "ndf-release",
+      "meaning": "CI が落ちたときにコードを直して push するプランのステップ（雛形の `ci-fix`・`fix-push`・`fix-base` と、それに続く `push`）",
+      "pending_source": "issues/issue-3572-design.md"
+    },
+    {
+      "term": "fix の worker",
+      "context": "ndf-release",
+      "meaning": "要求での直しのステップの呼び方。CI が落ちたときにコードを直して push するステップ（雛形の `ci-fix` とそれに続く `push`）",
+      "pending_source": "issues/issue-3572-requirements.md"
+    },
+    {
+      "term": "リリースブランチ",
+      "context": "ndf-release",
+      "meaning": "本番の PR の head になる、版ごとに 1 本のリリースブランチ（`release/v<版>`）。前の版が出た直後に本番ブランチから用意する",
+      "pending_source": "issues/issue-3572-design.md"
     }
   ]
 }

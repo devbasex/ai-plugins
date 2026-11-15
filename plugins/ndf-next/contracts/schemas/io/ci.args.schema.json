@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/io/ci.args.schema.json",
+  "title": "ndf ci の引数",
+  "description": "ndf ci が受ける引数。キーは引数の名前（オプションは -- の名前、位置引数は名前）。規約の生成が作り、手で直さない",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "merge",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--branch": {
+          "type": "string",
+          "description": "PR の head のブランチ"
+        },
+        "--repo": {
+          "type": "string",
+          "description": "<所有者>/<リポジトリ>。省けば作業場所の origin"
+        },
+        "--method": {
+          "type": "string",
+          "description": "マージの方式（squash・merge・rebase）。省けば基底のブランチで許された方式の先頭"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--branch"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "watch",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--pr": {
+          "type": "integer"
+        },
+        "--repo": {
+          "type": "string",
+          "description": "<所有者>/<リポジトリ>。省けば作業場所の origin"
+        },
+        "--required": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "待つ必須のチェック（PR の先端の宣言から渡す）"
+        },
+        "--test": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "テストのチェックの名前（分割ジョブも数える）"
+        },
+        "--budget": {
+          "type": "number",
+          "description": "待ちの合計の秒（ランナーの割り当ての待ちは数えない）"
+        },
+        "--after-merge": {
+          "type": "boolean",
+          "description": "マージの段階が落ちた後の判定"
+        },
+        "--merge-failed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "マージの段階が落ちたと読んだチェックの名前"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--pr",
+        "--required",
+        "--budget"
+      ]
+    }
+  ]
+}

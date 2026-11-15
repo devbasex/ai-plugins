@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "test-slot.result.schema.json",
+  "title": "ndf test-slot の結果 JSON",
+  "description": "ndf test-slot が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果の契約（result.schema.json）が持ち、ここは metrics と items の形だけを足す。metrics と items の要素は閉じていて、載せた項目のほかの項目を持つと通らない",
+  "allOf": [
+    {
+      "$ref": "../result.schema.json"
+    }
+  ],
+  "properties": {
+    "tool": {
+      "const": "test-slot"
+    },
+    "metrics": {
+      "type": "object",
+      "description": "ndf test-slot の計測値",
+      "additionalProperties": false,
+      "properties": {
+        "waited_seconds": {
+          "type": "number",
+          "description": "枠を待った秒（run が止まったとき）か、待った秒の合計（report）"
+        },
+        "available_mib": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "使えるメモリ（MiB。run が止まったとき。測れなければ null）"
+        },
+        "runs": {
+          "type": "integer",
+          "description": "記録の実行の数（report）"
+        },
+        "waited_runs": {
+          "type": "integer",
+          "description": "待った実行の数（report）"
+        },
+        "memory_stopped": {
+          "type": "integer",
+          "description": "メモリで止めた実行の数（report）"
+        },
+        "gave_up": {
+          "type": "integer",
+          "description": "待ちを諦めた実行の数（report）"
+        },
+        "oom_kill_increase": {
+          "type": "integer",
+          "description": "OOM Killer の回数の増分（report）"
+        }
+      }
+    },
+    "items": {
+      "type": "array",
+      "description": "ndf test-slot の項目の並び",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "retired_from": {
+            "type": "string",
+            "description": "退避した旧い状態の置き場（状態の置き場の用意で退避したときだけ）"
+          },
+          "retired_to": {
+            "type": "string",
+            "description": "退避した先"
+          },
+          "detail": {
+            "type": "string",
+            "description": "設定の誤りの箇所（run が invalid で止まったとき）"
+          }
+        }
+      }
+    }
+  }
+}

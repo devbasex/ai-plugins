@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "release-steps.result.schema.json",
+  "title": "ndf release-steps の結果 JSON",
+  "description": "ndf release-steps が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果の契約（result.schema.json）が持ち、ここは metrics と items の形だけを足す。metrics と items の要素は閉じていて、載せた項目のほかの項目を持つと通らない",
+  "allOf": [
+    {
+      "$ref": "../result.schema.json"
+    }
+  ],
+  "properties": {
+    "tool": {
+      "const": "release-steps"
+    },
+    "metrics": {
+      "type": "object",
+      "description": "ndf release-steps の計測値",
+      "additionalProperties": false,
+      "properties": {}
+    },
+    "items": {
+      "type": "array",
+      "description": "ndf release-steps の項目の並び",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string",
+            "description": "項目の種類（pull・tag・release・path・config・worktree）"
+          },
+          "number": {
+            "type": "integer",
+            "description": "PR の番号（pull）"
+          },
+          "checks_passed": {
+            "type": "integer",
+            "description": "通ったチェックの数（承認資料の pull）"
+          },
+          "checks": {
+            "type": "integer",
+            "description": "実行されたチェックの数（承認資料の pull）"
+          },
+          "checks_skipped": {
+            "type": "integer",
+            "description": "飛ばしたチェックの数（承認資料の pull）"
+          },
+          "failed": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "落ちたチェックの名前（承認資料の pull）"
+          },
+          "result": {
+            "type": "string",
+            "description": "書いた・作った・外した結果（リリース記録の pull・tag・release・worktree）"
+          },
+          "name": {
+            "type": "string",
+            "description": "タグか GitHub Release の名前（tag・release）"
+          },
+          "path": {
+            "type": "string",
+            "description": "重なったパス（path）か worktree（worktree）"
+          },
+          "change": {
+            "type": "string",
+            "description": "利用者の設定の違い（config）"
+          },
+          "reason": {
+            "type": "string",
+            "description": "worktree を残した理由（worktree）"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      }
+    }
+  }
+}

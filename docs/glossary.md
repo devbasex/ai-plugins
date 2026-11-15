@@ -642,6 +642,14 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 文字列 | — | 文字の並びとして持つ値 | 字で持（単独） | — | `docs/specifications/ndf-glossary-deprecated-meaning.md` |
 | 取り込み方 | `promotion` | スプリントの変更を本番チャネルへ入れる方法。ブランチ運用の宣言の `branch_flow.promotion`。`whole` はベースブランチを丸ごと、`selected` は選んだスプリントブランチだけをリリースブランチへ集めて入れる | — | — | — |
 | プラグインの入れ替え | — | 作り直した `plugins/ndf-next/` を 1 本の PR で `plugins/ndf/` へ `git mv` し、名前と版を替えること。取得元とプラグイン名は変えない。「入れ替え」と略す。ラッパーの入れ替えとは別 | — | — | — |
+| 旧いプラグイン | — | #1142 の作り直しの前から配っている NDF のプラグイン（`plugins/ndf/`）。作り直した `plugins/ndf-next/` と区別して呼ぶ | — | — | — |
+| 機能の対応表 | — | 旧いプラグインの機能 1 つを 1 行に持ち、行き先の子・作らない理由・試走の結果を持つ表（`plugins/ndf-next/src/ndf/parity/features.json`） | — | — | — |
+| 子の表 | — | #1142 の作り直しの子の Issue を、記号ごとに番号・依存・順番・閉じたかで持つ表（`plugins/ndf-next/src/ndf/checks/children.json`） | — | — | — |
+| 入れ替えの前の試走 | — | プラグインの入れ替え（S2 #3304）の前に、`plugins/ndf-next/` だけを読む起動でスプリントを流し、機能の対応表の行ごとに機能が届くかを確かめること（T2 #3411） | — | — | — |
+| 移す | — | 旧いプラグインの関数の振る舞い（入力・判定・書くファイルの置き場と形）を変えずに、新しいプラグインのモジュールへ書き直すこと。旧いプラグインのファイルは変えない | — | — | — |
+| 公開の関数 | — | モジュールの外から呼ばれる関数。詳細設計の「関数の仕様」に書くのは公開の関数だけである | — | — | — |
+| 非公開の関数 | — | 公開の関数だけが呼ぶ関数。名前が `_` で始まる | — | — | — |
+| 旧い置き場 | — | 旧いプラグインが状態を書く置き場。入れ替えの前は、旧いプラグインと新しいプラグインの両方が同じ旧い置き場を読み書きする | — | — | — |
 | 新しいプラグイン | — | 入れ替えまでの間、`plugins/ndf-next/` に作る作り直しの側のプラグイン。開発の間の名前は `ndf-next` | — | — | — |
 | 文書の行き先 | — | プラグインの入れ替えで中身や参照が古くなる文書ごとに決めた、扱い（そのまま移す・書き直す・固定の URL へ向ける・archive へ移す）と持ち主の子と時期 | — | — | — |
 | 入れ替えの起点のコミット | — | 入れ替えの PR が分かれた develop のコミット。今のプラグインがそのまま残り、入れ替えで切れるリンクの書き換え先の固定の URL に使う | — | — | — |
@@ -660,15 +668,16 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | マシンに依らない条件 | — | 同じ入力なら、合否がコードの振る舞いと、条件の文に書いた測る場所だけで決まる受け入れ条件。正しさ・回数と計算量・同じマシンの上で測った基準との相対の 3 つの形。正しさと回数と計算量は、どのマシンで実行しても同じ合否になる。相対は、変更の影響がマシンごとに違うため比もマシンで変わり、スペックが固定された測る場所を同じ文に書いたときだけこの条件に当たる（非機能の条件の書き方） | — | — | — |
 | 時間で区切った負荷試験 | — | 「N 分流す」のように、流す時間と同時に動かす本数を決めて所要や失敗を測る試験。結果がマシンのスペックで変わるため、受け入れ条件に置かない | — | — | — |
 | 測る場所 | — | 秒数の上限と、同じマシンの上で測る相対の比を測るマシン。CI のランナーのように、スペックが設定で固定され、ほかの処理と CPU を取り合わない場所に限る。共有の開発機は当たらない | — | — | — |
-| 宣言 | — | リポジトリの `.ndf/` に置く、人が決める設定のファイル。置き場の表で種類が宣言の行 | — | — | — |
-| 公開する面 | — | 外の呼び手が頼ってよい面（副命令・環境変数・受け渡しのファイル・hook・宣言とそのスキーマの置き場）。名前と意味を版で約束し、公開する面の表に載る | — | — | — |
-| 内部の面 | — | NDF の中だけで使い、形を約束しない面。公開する面の表に載らない | — | — | — |
-| 副命令 | — | `bin/ndf <名前>` の `<名前>`。ndf-next の副命令の表（`cli.py` の `COMMANDS`）に載るもの | — | — | — |
-| 配る Skill の表 | — | ndf-next が配る Skill と配るランタイムの一覧（`plugins/ndf-next/manifests/skills.json`） | — | — | — |
-| 起動スクリプト | — | 利用者と AI が打つ `plugins/ndf-next/bin/` のスクリプト（`ndf`・`ndf-claude`） | — | — | — |
-| 契約のページ | — | ndf-next の宣言と入出力の規約を、面ごとのページ（宣言・副命令・終了コード・環境変数・受け渡しのファイル・hook・Skill）で表した文書（`plugins/ndf-next/docs/contracts/`）。正本の表とスキーマから生成し、手で書かない | — | — | — |
-| Skill の入出力の表 | — | 配る Skill ごとの `/goal` の終わりの条件・読む宣言・結果の形と、公開する面に無い Skill の引数の形と環境変数を持つ事実の表（`plugins/ndf-next/contracts/domains/skill-io.json`） | — | — | — |
-| 起動スクリプトの表 | — | `plugins/ndf-next/bin/` のファイルごとに、起動スクリプトか内部の部品かを持つ事実の表（`plugins/ndf-next/contracts/domains/launchers.json`） | — | — | — |
+| 宣言 | — | リポジトリの `.ndf/` に置く、人が決める設定のファイル。置き場の表で種類が宣言の行 | — | — | `docs/specifications/ndf-next-declarations-and-io-contracts.md` |
+| 公開する面 | — | 外の呼び手が頼ってよい面（副命令・環境変数・受け渡しのファイル・hook・宣言とそのスキーマの置き場）。名前と意味を版で約束し、公開する面の表に載る | — | — | `docs/specifications/ndf-next-declarations-and-io-contracts.md` |
+| 内部の面 | — | NDF の中だけで使い、形を約束しない面。公開する面の表に載らない | — | — | `docs/specifications/ndf-next-declarations-and-io-contracts.md` |
+| 副命令 | — | `bin/ndf <名前>` の `<名前>`。ndf-next の副命令の表（`cli.py` の `COMMANDS`）に載るもの | — | — | `docs/specifications/ndf-next-declarations-and-io-contracts.md` |
+| 配る Skill の表 | — | ndf-next が配る Skill と配るランタイムの一覧（`plugins/ndf-next/manifests/skills.json`） | — | — | `docs/specifications/ndf-next-declarations-and-io-contracts.md` |
+| 起動スクリプト | — | 利用者と AI が打つ `plugins/ndf-next/bin/` のスクリプト（`ndf`・`ndf-claude`） | — | — | `docs/specifications/ndf-next-declarations-and-io-contracts.md` |
+| 契約のページ | — | ndf-next の宣言と入出力の規約を、面ごとのページ（宣言・副命令・終了コード・環境変数・受け渡しのファイル・hook・Skill）で表した文書（`plugins/ndf-next/docs/contracts/`）。正本の表とスキーマから生成し、手で書かない | — | — | `docs/specifications/ndf-next-declarations-and-io-contracts.md` |
+| Skill の入出力の表 | — | 配る Skill ごとの `/goal` の終わりの条件・読む宣言・結果の形と、公開する面に無い Skill の引数の形と環境変数を持つ事実の表（`plugins/ndf-next/contracts/domains/skill-io.json`） | — | — | `docs/specifications/ndf-next-declarations-and-io-contracts.md` |
+| 起動スクリプトの表 | — | `plugins/ndf-next/bin/` のファイルごとに、起動スクリプトか内部の部品かを持つ事実の表（`plugins/ndf-next/contracts/domains/launchers.json`） | — | — | `docs/specifications/ndf-next-declarations-and-io-contracts.md` |
+| 手書きの引数の表 | — | argparse を使わない副命令の呼び方（下位の命令の道ごとに 1 行）と引数を持つ事実の表（`plugins/ndf-next/contracts/domains/manual-args.json`）。規約の生成がこの表から引数のスキーマを作る | — | — | `docs/specifications/ndf-next-declarations-and-io-contracts.md` |
 | 上げる先（依存の版の） | — | #3347 の決定 106 の規則で選んだ依存の版のうち、最初のアップロードから 7 日たったもの | — | — | — |
 | 遅れ（依存の版の） | — | 宣言の版が上げる先より古く、固定する理由も無い状態。週 1 回の検査が知らせる | — | — | — |
 | 依存の更新の仕組み | — | 依存の版の遅れを知らせ、版を上げる手段。このリポジトリでは Renovate を GitHub Actions で動かす形（#3370 の決定 1） | — | — | — |
@@ -1011,6 +1020,14 @@ release が走らせるリリースの種別・リリースコマンド・公開
 | 管理者の迂回 | — | ruleset が迂回を許した役割の人が、必須の承認レビューと必須のチェックを満たさずにマージすること。`gh pr merge --admin` で打つ | — | — | `docs/specifications/ndf-release-production-admin-merge.md` |
 | 迂回の宣言 | — | 本番の PR を管理者の迂回でマージすることを選ぶ、`.ndf/project.json` の `production_merge.admin` の値。`true` のときだけ宣言があるとみなし、無いときは迂回しない | — | — | `docs/specifications/ndf-release-production-admin-merge.md` |
 | 迂回の記録 | — | 本番の PR を管理者の迂回でマージしたことを示す、本番の PR へ置くコメント。マージした先端と照らした承認の証跡を指す。証跡とは別の印を持ち、承認の判定に数えない | — | — | `docs/specifications/ndf-release-production-admin-merge.md` |
+| 承認した先端 | — | リリース承認ゲートの承認の答えか、利用者の GitHub でのマージが対象にした本番の PR の先端のコミット。本番ブランチへ入れてよいのはこの先端だけである | — | — | — |
+| 先端の照合 | — | マージの API に承認した先端を渡し、PR の先端が違えば GitHub に断らせることと、マージの前に承認の証跡を読み直すこと | — | — | — |
+| 承認の経路 | — | 本番の PR の承認がどこで与えられたか。リリース承認ゲート（`gate`）か、利用者の GitHub でのマージ（`github-merge`）のどちらか | — | — | — |
+| 差し戻し | — | リリース承認ゲートで承認しない答え、または必須のチェックの落ちた本番の PR を出さずに止めること。直しを同じリリースブランチへ入れ、新しい先端で承認を取り直す | — | — | — |
+| 次の版への回し | — | 必須のチェックの落ちた本番の PR を閉じてこの時点では出さず、リリースブランチを残して後のスプリントと一緒に出すこと | — | — | — |
+| 直しのステップ | — | CI が落ちたときにコードを直して push するプランのステップ（雛形の `ci-fix`・`fix-push`・`fix-base` と、それに続く `push`） | — | — | — |
+| fix の worker | — | 要求での直しのステップの呼び方。CI が落ちたときにコードを直して push するステップ（雛形の `ci-fix` とそれに続く `push`） | — | — | — |
+| リリースブランチ | — | 本番の PR の head になる、版ごとに 1 本のリリースブランチ（`release/v<版>`）。前の版が出た直後に本番ブランチから用意する | — | — | — |
 
 ## NDF の指示書チェック（`ndf-instructions`）
 
@@ -1195,6 +1212,7 @@ google-workspace の Skill が Google Workspace（Drive・Docs など）を操�
 | --- | --- | --- | --- | --- | --- |
 | gws | — | Google Workspace CLI（npm の @googleworkspace/cli）。Google の公式サポート外の CLI で、NDF の Google Workspace の操作はすべてこれで行う | — | — | `docs/specifications/ndf-google-workspace-gws.md` |
 | gws の状態 | — | google-workspace の確認のスクリプト（gws-check.py）が返す 4 つの値（authenticated / missing / unauthenticated / uninstallable）。状態ごとに次の手が 1 つに決まる | — | — | `docs/specifications/ndf-google-workspace-gws.md` |
+| 導入の同意の印 | — | gws の確認の引数 --install。利用者が gws の導入に同意したことを示し、付いたときだけ npm で全体インストールする | — | — | `docs/specifications/ndf-next-gws-subcommands.md` |
 
 ## NDF の工数の見積もり（`ndf-estimate`）
 
@@ -1265,4 +1283,4 @@ Neural Development Factory（別のリポジトリのサービス）が NDF を�
 | 区間の報告 | — | 人のいない実行の conductor が区間を終える最後の応答の末尾に置く報告。見出し「## 区間の報告」の直後の項目が結果の行で、値ごとに要る項目を添える。形は contracts/forms/unattended-report.json | — | — | — |
 | 人のいない実行の印 | — | 人のいない実行の conductor のセッションに UserPromptSubmit hook が付ける状態のファイル。Stop hook が差し戻しの対象と回数をここで決める | — | — | — |
 | 結果の行の差し戻し | — | 人のいない実行の印のあるセッションで、最後の応答が区間の報告の形に合わないとき、Stop hook が Stop を止めて報告を書かせること。形に合わない Stop が続く間は 2 回までで、形に合った Stop で数え直す | — | — | — |
-| 連携システム | — | NDF を外から呼び、`.ndf/` の設定ページを作るシステム（サービス Factory のランナーと、その上の設定画面） | — | — | — |
+| 連携システム | — | NDF を外から呼び、`.ndf/` の設定ページを作るシステム（サービス Factory のランナーと、その上の設定画面） | — | — | `docs/specifications/ndf-next-declarations-and-io-contracts.md` |

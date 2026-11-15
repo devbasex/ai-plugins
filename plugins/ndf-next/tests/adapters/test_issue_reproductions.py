@@ -7,10 +7,10 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
+import git_sandbox
 import httpx
 import pytest
 
@@ -24,15 +24,16 @@ from ._github_helpers import hub, offline_client, pull_json
 REPO = "devbasex/ai-plugins"
 
 
-def _git(cwd: Path, *args: str) -> str:
-    return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
-
-
 def test_issue_2041_merge_with_the_short_sha_git_prints_for_the_same_head_merges(tmp_path: Path) -> None:
     # #2041: `--expect-head "$(git rev-parse --short HEAD)"` が同じ先端なのに head_moved で止まった
-    _git(tmp_path, "init", "-q")
-    _git(tmp_path, "-c", "user.email=t@example.invalid", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "x")
-    full, short = _git(tmp_path, "rev-parse", "HEAD"), _git(tmp_path, "rev-parse", "--short", "HEAD")
+    git_sandbox.sh(tmp_path, "init", "-q", strip=True)
+    git_sandbox.sh(
+        tmp_path, "-c", "user.email=t@example.invalid", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "x", strip=True
+    )
+    full, short = (
+        git_sandbox.sh(tmp_path, "rev-parse", "HEAD", strip=True),
+        git_sandbox.sh(tmp_path, "rev-parse", "--short", "HEAD", strip=True),
+    )
     sent: list[dict] = []
 
     def handler(request: httpx.Request) -> httpx.Response:

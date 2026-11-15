@@ -113,6 +113,23 @@ def commit_at(files: dict[str, str], message: str, out: Optional[dict[str, Any]]
     return act
 
 
+# 同じ area の提案を採るシナリオの、足すテストと直した後のソース
+TESTS = {"tests/test_geo.py": "from src.geo import area\n\n\ndef test_area():\n    assert area(2, 3) == 6\n"}
+NEW = {"src/geo.py": "def area(w, h):\n    product = w * h\n    return product\n\n\ndef untouched():\n    return 0\n"}
+
+
+def base_acts() -> dict[str, Optional[Act]]:
+    """提案から final-fix までの基本の工程（毎回新しく作る）。"""
+    return {
+        "propose": propose_area,
+        "plan": no_plan,
+        "add-tests": commit_at(TESTS, "テストを足す", {"tests": ["tests/test_geo.py"]}),
+        "implement": commit_at(NEW, "式に名前を付ける"),
+        "fix": no_plan,
+        "final-fix": no_plan,
+    }
+
+
 class FakeHub:
     """`pull` だけを持つ GitHub の代わり。`states` を順に返す（尽きたら最後のもの）。"""
 

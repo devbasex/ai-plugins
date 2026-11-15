@@ -14,6 +14,7 @@
 | `fixes.json` | 設計の承認（PR #3280、2026-11-13 19:40Z）以後に旧いプラグインへ入った直し・旧い側にしか無い回帰のテスト・受け付けた不具合 |
 | `schema.json` | 2 つのファイルの形（JSON Schema） |
 | `table.py` | 読み手。形の確かめ（`shape_errors`）・エントリポイントの一覧（`entrypoints`）・利用者のコマンドの行き先（`user_commands`） |
+| `trial/` | 試走（T2 #3411）の記録（`<日付>.json`）と、行ごとの `trial` を書く確かめ（`probe.py`） |
 
 ## 対応表の行
 
@@ -74,3 +75,21 @@
 ```bash
 git log origin/develop --since=2026-11-13T19:40:00Z --no-merges --format='%h %s' -- plugins/ndf
 ```
+
+## 試走の記録
+
+試走は、ndf-next だけを読む起動（`bin/ndf-claude`）でスプリントと計画を流し、行ごとの `trial` を書く。`trial` は次のコマンドが記録（`trial/<日付>.json` の `passed`）と本文から書く。手で書き換えない。
+
+```bash
+cd plugins/ndf-next && PYTHONPATH=src uv run --frozen --project . python -m ndf.parity.trial.probe --write
+```
+
+| 結果 | 決まり方 |
+| --- | --- |
+| `passed` | どれかの記録の `passed` に載る（試走で通した）か、作らない行（`not_built`）で ndf-next の本文に呼び手が無い |
+| `failed` | 行き先の置き場が無い・ndf-next の Skill とエージェントと hook の本文がまだ旧いスクリプトを呼ぶ・workflow が旧いスクリプトを呼ぶ。`reason` に行き先の子を書く |
+| `not_run` | 本文の確かめは通ったが、試走がその行まで届いていない |
+
+行き先の子が直したら、試走を流し直して記録を足し、このコマンドを打ち直す。コマンドは `trial/` の記録をすべて読む。行の `record` は、その行を最後に `passed` に載せた記録で、どの記録にも載らない行は最新の記録になる。
+
+同じ名前の旧いスクリプト（cross-review と cross-refactoring の `drive.py`）は `now` のパスで区別する。本文が名前だけで書いていれば、本文の置かれた Skill の下のスクリプトを呼ぶとみなす。

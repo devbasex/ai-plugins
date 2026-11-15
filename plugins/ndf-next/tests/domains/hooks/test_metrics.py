@@ -75,10 +75,11 @@ def test_session_start_prunes_the_state_files(tmp_path, monkeypatch):
     assert len(pruned) == 1 and pruned[0][1] == 14
 
 
-def test_metrics_write_failure_does_not_change_the_verdict(tmp_path, monkeypatch):
-    blocker = tmp_path / "blocker"
-    blocker.write_text("ファイルの下には書けない", encoding="utf-8")
-    monkeypatch.setattr(metrics, "_day_file", lambda state, now: blocker / "x.jsonl")
+def test_metrics_write_failure_does_not_change_the_verdict(tmp_path):
+    # 今日の計測のファイルの名前をディレクトリで塞ぐ（日付の変わり目に備えて翌日の分も）。ファイルとして開けず書けない
+    now = datetime.now(timezone.utc)
+    for day in (now, now + timedelta(days=1)):
+        (metrics.metrics_dir(state_dir()) / f"{day.strftime('%Y-%m-%d')}.jsonl").mkdir(parents=True)
     assert deny_reason(call_entry("claude", "PreToolUse", bash(tmp_path, "sleep 999"))) is not None
     assert metrics.write_line(state_dir(), {"x": 1}) is False
 

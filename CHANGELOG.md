@@ -9,6 +9,26 @@
 **開発版（接尾辞の付いた版）は載せない。** `9.8.0` は `9.8.0-dev.1` までしか出ておらず、
 その内容は `10.0.0` で届いている。
 
+## [ndf 10.27.69] - 2026-11-15
+
+- ndf-next プラグインで、後半の Skill 37 件とエージェント定義 6 件を使える（#3548）（#3549）
+- ndf-next の Skill とエージェント定義は、スクリプトを `bin/ndf` のサブコマンドで呼ぶ（#3548）（#3549）
+- ndf-next の Codex 向けの定義が、追加した Skill とエージェント定義を含む（#3548）（#3549）
+- サブコマンドがまだ無い `plan note`・`progress update`・`progress next` と google-workspace のスクリプトは、今の名前のまま呼ぶ（#3548）（#3549）
+- ndf-next の宣言 18 種に JSON Schema があり、宣言の形を検証できる（#3550）（#3554）
+- `ndf check` が規約の検査を行い、契約のページと引数のスキーマを生成する（#3550）（#3554）
+- `ndf check` の `--event` の既定値は環境から取らない。契約の生成物は CI と手元で同じになる（#3550）（#3554）
+- 環境変数の表には、NDF が読む変数だけを載せる（#3550）（#3554）
+- 並列の計画に、終わったレーンと同じ課題を持つレーンを足しても、`parallel.py status` などの計画を読む操作が止まらなくなった（#3553）（#3556）
+- 移さない理由（ndf-next）: ndf-next は課題の重なり（I19）を `progress/lane/rules.py` の `_issue_errors` 1 か所で、終わったレーンを除いて（`_live_lanes`）確かめる。書く側と読む側で検証の入力が分かれていないため、同じ食い違いは起きない。（#3556）
+- Refs #3553（#3556）
+- 🤖 Generated with [Claude Code](https://claude.com/claude-code)（#3556）
+- https://claude.ai/code/session_01KYHP82cZZpk9gt8nZsZXKg（#3556）
+- ndf-next の試走（T2 #3411）の 1 回目: スプリントは手順 0 で旧いプラグインへ落ちる。対応表 204 行の trial を書く（#3571）
+- Fix(release): 同期の PR と本番の PR の本文に ndf-next の移しの印を持たせる（#3573）（#3575）
+- ndf-next プラグインで `ndf gws check` と `ndf gws thumbnails` を使えます（#3577）（#3580）
+- google-workspace の Skill は、`ndf gws check` と `ndf gws thumbnails` を呼ぶ手順で案内します（#3577）（#3580）
+
 ## [ndf 10.27.67] - 2026-11-15
 
 - プロジェクトの宣言に迂回を書くと、リリースの場合が `cd-admin` になります。本番の PR は管理者の迂回でマージされます（#3521）（#3530）

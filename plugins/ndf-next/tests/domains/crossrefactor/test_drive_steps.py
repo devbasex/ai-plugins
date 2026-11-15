@@ -21,18 +21,16 @@ from ._drive_world import (
     FakeHub,
     Watched,
     World,
+    base_acts,
     commit_at,
     commit_in,
     fake_ci,
     make_world,
     no_plan,
     ports,
-    propose_area,
     sh,
 )
 
-TESTS = {"tests/test_geo.py": "from src.geo import area\n\n\ndef test_area():\n    assert area(2, 3) == 6\n"}
-NEW = {"src/geo.py": "def area(w, h):\n    product = w * h\n    return product\n\n\ndef untouched():\n    return 0\n"}
 LONG = {"src/geo.py": "def area(w, h):\n    a = w\n    b = h\n    c = a * b\n    return c\n\n\ndef untouched():\n    return 0\n"}
 # 行数の上限の検査（7 行を超えれば落ちる）
 LINES = "import sys\nsys.exit(any(len(open(p).read().splitlines()) > 7 for p in sys.argv[1:]))\n"
@@ -69,16 +67,8 @@ def _declare(world: World, name: str, script: str) -> None:
 
 
 def _acts(**over):
-    acts = {
-        "propose": propose_area,
-        "plan": no_plan,
-        "add-tests": commit_at(TESTS, "テストを足す", {"tests": ["tests/test_geo.py"]}),
-        "implement": commit_at(NEW, "式に名前を付ける"),
-        "fix": no_plan,
-        "final-fix": no_plan,
-        "judge": no_plan,
-        "flaky-fix": no_plan,
-    }
+    acts = base_acts()
+    acts.update({"judge": no_plan, "flaky-fix": no_plan})
     acts.update(over)
     return acts
 

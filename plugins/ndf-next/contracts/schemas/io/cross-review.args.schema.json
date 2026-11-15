@@ -1,0 +1,341 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/io/cross-review.args.schema.json",
+  "title": "ndf cross-review の引数",
+  "description": "ndf cross-review が受ける引数。キーは引数の名前（オプションは -- の名前、位置引数は名前）。規約の生成が作り、手で直さない",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "check-worktree",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "worktree": {
+          "type": "string",
+          "x-ndf-positional": true
+        }
+      },
+      "required": [
+        "subcommand",
+        "worktree"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "finish",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--summary": {
+          "type": "string"
+        },
+        "--findings": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--summary"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "fix-gate",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--state-dir": {
+          "type": "string"
+        },
+        "--pr": {
+          "type": "integer"
+        },
+        "--findings": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--state-dir",
+        "--pr"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "head",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--pr": {
+          "type": "integer"
+        },
+        "--repo": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--pr"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "lock",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "worktree": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "--pr": {
+          "type": "integer"
+        },
+        "--tool": {
+          "type": "string",
+          "default": "cross-review"
+        }
+      },
+      "required": [
+        "subcommand",
+        "worktree",
+        "--pr"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "merge-fix",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--state-dir": {
+          "type": "string"
+        },
+        "--pr": {
+          "type": "integer"
+        },
+        "--file": {
+          "type": "string"
+        },
+        "--findings": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--state-dir",
+        "--pr",
+        "--file"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "push-fix",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "worktree": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "--branch": {
+          "type": "string"
+        },
+        "--commit": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subcommand",
+        "worktree",
+        "--branch"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "release",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "worktree": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "--repo-dir": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subcommand",
+        "worktree",
+        "--repo-dir"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "review-scope",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "worktree": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "--purpose": {
+          "type": "string"
+        },
+        "--base": {
+          "type": "string"
+        },
+        "--state-dir": {
+          "type": "string"
+        },
+        "--pr": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "subcommand",
+        "worktree",
+        "--purpose",
+        "--base",
+        "--state-dir",
+        "--pr"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "run",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--pr": {
+          "type": "integer"
+        },
+        "--state-dir": {
+          "type": "string"
+        },
+        "--base": {
+          "type": "string"
+        },
+        "--worktree": {
+          "type": "string"
+        },
+        "--branch": {
+          "type": "string"
+        },
+        "--purpose": {
+          "type": "string",
+          "default": "cross-review"
+        },
+        "--reviewer": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "--max-rounds": {
+          "type": "integer",
+          "default": 3
+        },
+        "--findings": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--pr",
+        "--state-dir",
+        "--base"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "state-file",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--state-dir": {
+          "type": "string"
+        },
+        "--pr": {
+          "type": "integer"
+        },
+        "--current": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--state-dir",
+        "--pr"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "sync",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "worktree": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "--branch": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subcommand",
+        "worktree",
+        "--branch"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "target-repo",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--repo": {
+          "type": "string"
+        },
+        "--state-dir": {
+          "type": "string"
+        },
+        "--pr": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    }
+  ]
+}

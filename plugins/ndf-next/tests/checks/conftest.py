@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import json
 import shutil
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+import git_sandbox
 import pytest
 
 from ndf.checks import child_deps, run
@@ -17,11 +17,6 @@ PLUGIN_ROOT = Path(__file__).resolve().parents[2]
 # 開発の間のディレクトリ名とプラグイン名（#3347 の決定 100）
 DIR = "ndf-next"
 NAME = "ndf11"
-
-
-def git(repo: Path, *args: str) -> str:
-    done = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, check=True)
-    return done.stdout.strip()
 
 
 @dataclass
@@ -41,9 +36,9 @@ class Plugin:
         return scope
 
     def commit(self, message: str = "c") -> str:
-        git(self.repo, "add", "-A")
-        git(self.repo, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-qm", message)
-        return git(self.repo, "rev-parse", "HEAD")
+        git_sandbox.sh(self.repo, "add", "-A", strip=True)
+        git_sandbox.sh(self.repo, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-qm", message, strip=True)
+        return git_sandbox.sh(self.repo, "rev-parse", "HEAD", strip=True)
 
 
 @pytest.fixture
@@ -59,7 +54,7 @@ def plugin(tmp_path: Path) -> Plugin:
     child = {"packages": ["ndf"], "needs": [], "order": 1, "lane": "l", "closed": False}
     (root / child_deps.CHILDREN_REL).parent.mkdir(parents=True)
     (root / child_deps.CHILDREN_REL).write_text(json.dumps({"children": {"X": child}, "tables": {}}))
-    git(repo, "init", "-q")
+    git_sandbox.sh(repo, "init", "-q", strip=True)
     return Plugin(repo, root)
 
 

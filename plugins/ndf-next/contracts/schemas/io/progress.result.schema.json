@@ -1,0 +1,185 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "progress.result.schema.json",
+  "title": "ndf progress の結果 JSON",
+  "description": "ndf progress が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果の契約（result.schema.json）が持ち、ここは metrics と items の形だけを足す。metrics と items の要素は閉じていて、載せた項目のほかの項目を持つと通らない",
+  "allOf": [
+    {
+      "$ref": "../result.schema.json"
+    }
+  ],
+  "properties": {
+    "tool": {
+      "const": "progress"
+    },
+    "metrics": {
+      "type": "object",
+      "description": "ndf progress の計測値",
+      "additionalProperties": false,
+      "properties": {
+        "table_id": {
+          "type": "string",
+          "description": "進行表の ID"
+        },
+        "rev": {
+          "type": "integer",
+          "description": "スプリントの定義の改訂（next・wait・work・show）"
+        },
+        "state": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "進行表の状態（next・wait・work・show）"
+        },
+        "move": {
+          "type": "string",
+          "description": "次の 1 手の種類（next・wait・work）"
+        },
+        "stage": {
+          "type": "string",
+          "description": "手の工程（next・wait・work。工程の手のときだけ）"
+        },
+        "step": {
+          "type": "string",
+          "description": "手のステップ（next・wait・work。ステップの手のときだけ）"
+        },
+        "seqs": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "書いた事象の番号（answer・enable・disable・retry・finish）"
+        },
+        "answer": {
+          "type": "string",
+          "description": "承認ゲートのステップの答え"
+        },
+        "seq": {
+          "type": "integer",
+          "description": "答えの事象の番号"
+        },
+        "rows": {
+          "type": "integer",
+          "description": "行の数（new）"
+        },
+        "disabled": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "無効の工程（new）"
+        },
+        "mode": {
+          "type": "string",
+          "description": "モード（show）"
+        },
+        "history": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          },
+          "description": "事象の並び（show）"
+        },
+        "cancelled_rows": {
+          "type": "integer",
+          "description": "中止にした行の数（cancel）"
+        },
+        "current_id": {
+          "type": "string",
+          "description": "既にある進行表の ID（refused で止まったときだけ）"
+        }
+      }
+    },
+    "items": {
+      "type": "array",
+      "description": "ndf progress の項目の並び",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "stage": {
+            "type": "string",
+            "description": "工程（new・show）"
+          },
+          "phase": {
+            "type": "string",
+            "description": "工程のフェーズ（new・show）"
+          },
+          "state": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "行の状態（new・show）"
+          },
+          "label": {
+            "type": "string",
+            "description": "行の状態の表示名（new・show）"
+          },
+          "at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "状態を最後に変えた時刻（new・show）"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "状態を最後に変えた理由（new・show）"
+          },
+          "gates": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "工程の承認ゲート（new・show）"
+          },
+          "kind": {
+            "type": "string",
+            "description": "進捗記録の種類（resync）"
+          },
+          "number": {
+            "type": "integer",
+            "description": "進捗記録の課題か PR の番号（resync）"
+          },
+          "changed": {
+            "type": "boolean",
+            "description": "進捗記録を書き換えたか（resync）"
+          },
+          "restored": {
+            "type": "string",
+            "description": "戻した DB のパス（restore）"
+          },
+          "from": {
+            "type": "string",
+            "description": "戻した控え（restore）"
+          },
+          "retired": {
+            "type": "string",
+            "description": "退避した元の DB（restore）"
+          },
+          "path": {
+            "type": "string",
+            "description": "置き場のパス（置き場を使えずに止まったとき）"
+          },
+          "error": {
+            "type": "string",
+            "description": "定義の誤り（invalid で止まったとき）"
+          },
+          "key": {
+            "type": "string",
+            "description": "文脈に足りない入力の鍵（工程を始められずに止まったとき）"
+          },
+          "source": {
+            "type": "string",
+            "description": "足りない値の出所（同上）"
+          }
+        }
+      }
+    }
+  }
+}

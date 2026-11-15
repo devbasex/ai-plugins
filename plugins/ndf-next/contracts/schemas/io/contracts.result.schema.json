@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contracts.result.schema.json",
+  "title": "ndf contracts の結果 JSON",
+  "description": "ndf contracts が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果の契約（result.schema.json）が持ち、ここは metrics と items の形だけを足す。metrics と items の要素は閉じていて、載せた項目のほかの項目を持つと通らない",
+  "allOf": [
+    {
+      "$ref": "../result.schema.json"
+    }
+  ],
+  "properties": {
+    "tool": {
+      "const": "contracts"
+    },
+    "metrics": {
+      "type": "object",
+      "description": "ndf contracts の計測値",
+      "additionalProperties": false,
+      "properties": {
+        "fact_tables": {
+          "type": "integer",
+          "description": "確かめた事実の表の数（ok のときだけ）"
+        }
+      }
+    },
+    "items": {
+      "type": "array",
+      "description": "ndf contracts の項目の並び",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "violation",
+            "description": "契約の表の誤り"
+          },
+          "reason": {
+            "type": "string",
+            "description": "誤りの中身"
+          }
+        },
+        "required": [
+          "kind",
+          "reason"
+        ]
+      }
+    }
+  }
+}

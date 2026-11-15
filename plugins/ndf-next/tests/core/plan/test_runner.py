@@ -9,6 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import git_sandbox
 import pytest
 
 from ndf.contracts import causes, chosen, result, routing
@@ -43,7 +44,7 @@ def test_a_fixed_head_runs_a_new_round(repo, tmp_path):
     """差し戻しの後に head を直して同じ引数で打ち直すと、前回の報告を返さずに流す（#3176）。"""
     plan = H.write_plan(repo, "p", [H.count_step("s", tmp_path / "n")])
     H.ndf(repo, "next", plan)
-    H.git(repo, "commit", "-q", "--allow-empty", "-m", "fix")
+    git_sandbox.sh(repo, "commit", "-q", "--allow-empty", "-m", "fix", identity=True)
     code, out = H.ndf(repo, "next", plan)
     assert code == H.OK
     assert out["metrics"]["round"] == 1

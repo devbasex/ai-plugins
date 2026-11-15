@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "worker.result.schema.json",
+  "title": "ndf worker の結果 JSON",
+  "description": "ndf worker が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果の契約（result.schema.json）が持ち、ここは metrics と items の形だけを足す。metrics と items の要素は閉じていて、載せた項目のほかの項目を持つと通らない",
+  "allOf": [
+    {
+      "$ref": "../result.schema.json"
+    }
+  ],
+  "properties": {
+    "tool": {
+      "const": "worker"
+    },
+    "metrics": {
+      "type": "object",
+      "description": "ndf worker の計測値",
+      "additionalProperties": false,
+      "properties": {
+        "attempts": {
+          "type": "integer",
+          "description": "worker を起動した回数（run）"
+        },
+        "expectation_search": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "description": "期待値の直書きを探した記録（探した語 terms と見つけたテストのファイル files。ci-fix などの run。結果ファイルに無ければ null）"
+        },
+        "edits": {
+          "type": "integer",
+          "description": "プランの書き換えの数（plan-edits）"
+        },
+        "attention": {
+          "type": "integer",
+          "description": "注意の要る報告の数（attention）"
+        }
+      }
+    },
+    "items": {
+      "type": "array",
+      "description": "ndf worker の項目の並び",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "session",
+              "closing_commit",
+              "plan_edit",
+              "attention"
+            ],
+            "description": "項目の種類"
+          },
+          "session": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "worker のセッションの id（session）"
+          },
+          "result_file": {
+            "type": "string",
+            "description": "結果ファイルのパス（session）"
+          },
+          "sha": {
+            "type": "string",
+            "description": "コミットの SHA（closing_commit）"
+          },
+          "subject": {
+            "type": "string",
+            "description": "コミットの件名（closing_commit）"
+          },
+          "words": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "closing keywords（closing_commit）"
+          },
+          "plan": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "書き換えたプラン（plan_edit）"
+          },
+          "at": {
+            "description": "書き換えた時刻（plan_edit）か報告の時刻（attention。進捗ログの値のまま）"
+          },
+          "backup": {
+            "type": "string",
+            "description": "書き換えの前の控え（plan-edit の plan_edit）"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "書き換えの理由（plan-edits の plan_edit）"
+          },
+          "diff": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "書き換えの差分（plan-edits の plan_edit）"
+          },
+          "state": {
+            "type": "string",
+            "description": "報告の state（attention）"
+          },
+          "text": {
+            "description": "報告の本文（attention。進捗ログの値のまま）"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      }
+    }
+  }
+}

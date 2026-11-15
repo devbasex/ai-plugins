@@ -31,6 +31,7 @@ from release_lib import approval, approval_trail
 from release_lib.approval import HeadMoved
 from release_lib.context import ReleaseCtx
 from release_lib.names import release_tag
+from release_lib.port_mark import NO_PORT_LINE, ensure_no_port_line
 from step_result import EXIT_GATE, EXIT_INFRA_WAIT, EXIT_PRECONDITION, EXIT_UNREADABLE, StepError, emit, gh_json, git, git_root, result
 
 TOOL = approval.TOOL
@@ -41,10 +42,6 @@ UNWRITTEN_NOTE = "迂回の記録を書けなかった（本番は出ている�
 
 
 release_case_or_stop = release_case.case_or_stop  # release-steps.py と merged_lib が同じ止め方を使う
-
-# 旧いプラグインを変える PR に ndf-next の検査（規則 port。#3343）が求める行。印は plugins/ndf-next/src/ndf/checks/rules.json の
-# no_port_mark。リリースの PR は版数と CHANGELOG を上げて取り込み済みの PR を運ぶだけで、移す変更は元の PR が持つ
-NO_PORT_LINE = "移さない理由（ndf-next）: リリースの PR は版数と CHANGELOG を上げて取り込み済みの PR を運ぶだけで、移す変更は元の PR が持つ"
 
 
 def refresh_release_pr_body(root, pr, body: Callable[[], str]):
@@ -204,14 +201,14 @@ def _open_prod_pr(ctx: ReleaseCtx, items, metrics, ops: ProdOps, case=None) -> i
             items.append(row)
         ops.published(root, a, plugin, prod, done["number"], merge, items, metrics, back=admin_back())
     if done:
-        return done["number"]
+        return ensure_no_port_line(root, done)["number"]  # 前の版が作った本番の PR は port 検査の印を持たない
     if git(root, "rev-parse", "-q", "--verify", f"refs/tags/{release_tag(plugin, ver)}", check=False).returncode == 0:
         raise StepError(f"タグ {release_tag(plugin, ver)} は既にある")
     release_pr, merged_pr, _ = ops.merge_release_pr(root, a, plugin, plugins, branch, base)
     metrics.update({"release_pr": release_pr, "sync_pr": merged_pr if merged_pr != release_pr else None})
     repo_lib.restore_branch(root, branch, run_git=git)  # 開発版の PR のマージで消えた版上げのブランチを戻す
     title = f"Release: {plugin} v{ver} を {prod} へ"
-    body = f"{plugin} v{ver} を {prod} へ出す（開発版の PR #{release_pr}）。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+    body = f"{plugin} v{ver} を {prod} へ出す（開発版の PR #{release_pr}）。\n\n{NO_PORT_LINE}\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
     return ops.create_pr(root, prod, branch, title, body)
 
 
