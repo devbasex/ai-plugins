@@ -70,8 +70,8 @@ C7 に当たる書き換え（`.ndf/` と `AGENTS.md` の運用の節）は、PR
 
 | # | 集約 | 条件 | 破れたときの扱い |
 | --- | --- | --- | --- |
-| I1 | 宣言 | `branch_flow` のブランチの流れは `start: production`・`integrate: release`・`doc_prs: sprint`・`promotion: direct`（決定 21）、`base_branch` と `production_branch` はどちらも `main` | ndf-next の宣言のスキーマの検査（`ndf check spec-decl`）か取り込み方の読み取り（#3572 の詳細設計の `declaration.flow_of`）が断り、宣言を読む工程が止まる。実装 PR の確認の手順で落とす |
-| I2 | 宣言 | `reviews` は GitHub flow の行（`direct`）で書ける 4 種類（`impl`・`sprint`・`design`・`spec`）すべての行を持ち、`release` の行を持たない（決定 21）。各行は許す値の表の値で、実装の差分をどの PR でも cross-review しない組（NDF の I4）と既定値の行との重なり（NDF の I12）を生じない | ndf-next の main 宛ての PR の検査（`release-steps pr-check`。#3572 の詳細設計の `declaration.review_problems`）が PR のチェックを落とす。行の値の形の誤りは宣言のスキーマの検査が落とす |
+| I1 | 宣言 | `branch_flow` のブランチの流れは `start: production`・`integrate: release`・`doc_prs: sprint`・`promotion: direct`（決定 21）、`base_branch` と `production_branch` はどちらも `main` | 鍵ごとの値の誤りは ndf-next の宣言のスキーマの検査（`ndf check spec-decl`）が断る。`promotion: direct` に `start: base` を組むなど、取り込み方の表の行が許さない組み合わせは、取り込み方の読み取り（#3572 の詳細設計の `declaration.flow_of`）が行の列と照らして断り、宣言を読む工程が止まる。`base_branch` と `production_branch` が `main` であることは ai-plugins の値で、実装 PR の確認の手順で見る |
+| I2 | 宣言 | `reviews` は GitHub flow の行（`direct`）で書ける 4 種類（`impl`・`sprint`・`design`・`spec`）すべての行を持ち、`release` の行を持たない（決定 21）。各行は許す値の表の値で、実装の差分をどの PR でも cross-review しない組（NDF の I4）と既定値の行との重なり（NDF の I12）を生じない | 2 つに分けて見る。書けない種類の行（`release`）と、書いた `impl`・`sprint` の行のどちらも cross-review しない組は、ndf-next の main 宛ての PR の検査（`release-steps pr-check`。#3572 の詳細設計の `declaration.review_problems`）が PR のチェックを落とす。この検査はどのプロジェクトにも掛かり、書いていない種類を既定値に任せる。4 種類すべての行を持つことは ai-plugins の値で、実装 PR の確認の手順で見る（下の「テスト設計」）。行の値の形の誤りは宣言のスキーマの検査が落とす |
 | I3 | 文書 | 正本の文書のレビューの単位の表は、宣言の `reviews` の 4 行と同じ値を持つ | コードレビューで見る（`.md` の文言を照合するテストは書かない） |
 | I4 | 文書 | `AGENTS.md` は判断の基準だけを持ち、手順と実測を正本の文書へリンクで渡す。指示書のチェックが 0 を返す | `instructions-check.py` が 1 を返す |
 | I5 | 文書 | `develop` を宛先にする記述が、新しい運用で `develop` へ入れる PR（開発版の版上げ・戻すマージ・スプリントの検査の PR）だけに残る | コードレビューで見る |
@@ -392,7 +392,8 @@ conductor が決めた。設計承認ゲートの承認資料に載せる。
 `selected` への途中の切り替えは行わない（切り替えを 2 回にすると、`selected` の間に始めたスプリントの宛先を付け直す手間が残る）。
 「処理の流れ」の切り替えの順序・決定 10・I7・I8 は `selected` への切り替えを前提にしており、GitHub flow への 1 回の切り替えとして詳細設計の工程で書き直す。
 今の NDF の宣言の読み取り（`plugins/ndf/scripts/lib/branch_flow.py` の `parse_flow`）は `promotion` に `whole`・`selected` だけを持ち、`direct` の宣言を断る。
-そのため I1・I2 の検査は ndf-next の部品（#3572 の詳細設計の `declaration.flow_of`・`declaration.review_problems` と宣言のスキーマ）が持つ。
+そのため I1・I2 のうちどのプロジェクトにも掛かる検査は ndf-next の部品（#3572 の詳細設計の `declaration.flow_of`・`declaration.review_problems` と宣言のスキーマ）が持つ。
+ai-plugins の値（`base_branch` と `production_branch` が `main`・`reviews` が 4 種類の行を持つ）は、ndf-next の部品へ持ち込まず、実装 PR の確認の手順で見る（NDF の側は ai-plugins の値を前提にしない）。
 レビューの単位（決定 1）は、リリースブランチの PR の行（`release`）を持たない。GitHub flow ではスプリントの PR が本番の PR を兼ね、集めたときに
 生じる衝突の解消の差分が無いためである。承認した先端でのマージ・版上げ・検証の ref・同期の PR を作らないことは #3572 の設計
 （[issue-3572-design.md](issue-3572-design.md) の決定 1〜15）が持つ。詳細設計（[issue-3119-design-detail.md](issue-3119-design-detail.md)）の
@@ -407,13 +408,13 @@ conductor が決めた。設計承認ゲートの承認資料に載せる。
 
 | 受け入れ条件・不変条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
 | --- | --- | --- |
-| 受け入れ条件 1・I1 | worktree でコミットした `.ndf/worktree.json` が ndf-next の宣言のスキーマの検査に通り、`declaration.flow_of` が `github-flow` を返し、`base_branch`・`production_branch` が `main` である | `promotion` を表に無い値にすると `flow_of` が `DeclarationError` を返す（#3572 の詳細設計の単体テストの観点） |
+| 受け入れ条件 1・I1 | worktree でコミットした `.ndf/worktree.json` が ndf-next の宣言のスキーマの検査に通り、`declaration.flow_of` が `github-flow` を返し、`base_branch`・`production_branch` が `main` である | `promotion` を表に無い値にするか、`promotion: direct` に `start: base` を組むと `flow_of` が `DeclarationError` を返す（#3572 の詳細設計の単体テストの観点） |
 | 受け入れ条件 2 | #3121 の受け入れ条件 14 のテスト（`test_sprint_branch_flow.py`）が、この宣言の値で起点 `origin/main`・設計 PR の宛先 `sprint/<名前>` を返す | 宣言の `start` を読まないと落ちる |
 | 受け入れ条件 3 | #3121 の受け入れ条件 15 のテスト（`scripts/tests/test_pr_base_guard.py`）で、head が `develop` の `main` 宛を `check-pr-base.sh` が 1 で断る | worktree の宣言を読むと落ちる |
 | 受け入れ条件 4 | #3121 の受け入れ条件 16 のテストで、選んでいないスプリントのコミットを含む head を `check-pr-base.sh` が 1 で断る。承認資料の範囲は、このスプリントでは確かめず、段 5 の最初のリリースで見る（「未確認のまま残ること」） | 決定 14 の 3 つ目の条件を外すと落ちる |
 | 受け入れ条件 5 | 正本の文書に戻すマージの手順があることをコードレビューで見る。版上げのコミットが入らないことは #3121 の受け入れ条件 17 のテスト | スプリントブランチへ `develop` を取り込むと落ちる |
 | 受け入れ条件 6 | #3121 の受け入れ条件 18 のテストで、宛先の宣言が `selected` のとき `ci-heavy-skip.py` が規則 3 で省かない | 規則 3 で宣言を見ないと落ちる |
-| 受け入れ条件 7・I2 | コミットした宣言の `reviews` が 4 種類の行（`impl`・`sprint`・`design`・`spec`）を持って `release` の行を持たず、`declaration.review_problems` が空を返す（テストは #3572 の `test_release_pr_check.py`） | `release` の行を足すと `reviews`・`release` の破れ、`impl` の行を消すと `reviews`・`impl` の破れが出る |
+| 受け入れ条件 7・I2 | コミットした宣言で `declaration.review_problems` が空を返す（テストは #3572 の `test_release_pr_check.py`）。4 種類の行を持つことは、実装 PR の確認の手順で `jq -e '.branch_flow.reviews \| keys == ["design","impl","spec","sprint"]' .ndf/worktree.json` が 0 を返すことで見る | `release` の行を足すと `reviews`・`release` の破れが出る。`impl` の行を消すと `jq` が 1 を返す |
 | 受け入れ条件 8・I3 | 正本の文書の表の 4 行と宣言の `reviews` が同じ値であることをコードレビューで見る。決定 1 に理由と採らなかった値がある | 表と宣言の片方だけを変えると、レビューで食い違いとして指摘される |
 | 受け入れ条件 9 | 段 5 の最初のスプリントのリリース後テストで、`project-decl.py measure --out <ファイル>` → `project-decl.py drift --measure <ファイル>` のずれが 0 件（標本 3 件未満の種類は `unknown`） | 宣言と違うレビューを掛けた PR が 3 件以上あれば、その種類のずれが出る |
 | 受け入れ条件 10・I4 | `python3 plugins/ndf/scripts/instructions-check.py --root .` が 0 | `AGENTS.md` に手順を書き足して上限を超えると 1 |
