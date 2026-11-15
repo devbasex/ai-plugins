@@ -29,6 +29,7 @@ from ndf import identity
 from ndf.adapters.github import Authored, GitHub, GitHubError, Pull
 from ndf.adapters.publish import Publisher
 from ndf.domains.release import approval_decide, merge_decide, release_plan, version_decide
+from ndf.domains.release.declaration import PROJECT_FILE
 
 # 迂回の記録の印と行の見出し（旧いプラグインと同じ文字列。作り直しは旧いプラグインを読み込まないため別に持つ）
 ADMIN_MARK = f"<!-- {identity.FIXED_WORDS['workflow_namespace']}:admin-merge -->"
@@ -60,7 +61,6 @@ class By(StrEnum):
 
 USER_BY, MVV_BY = By.USER.value, By.MVV.value
 BY_CHOICES = tuple(b.value for b in By)
-_PROJECT_FILE = f"{identity.FIXED_WORDS['declaration_dir']}/project.json"
 _SHA = re.compile(r"\b([0-9a-f]{40})\b")
 # 読めなかった値（マージした人・照らした証跡）の表記
 UNREADABLE = "（読めない）"
@@ -275,7 +275,7 @@ def render_admin_record(sha: str, trail_url: str) -> str:
     _require_sha(sha, "マージした先端")
     return (
         f"{ADMIN_MARK}\n## 管理者の迂回でマージした\n\n{ADMIN_SHA_LINE} `{sha}`\n"
-        f"{ADMIN_TRAIL_LINE} {trail_url if trail_url else UNREADABLE}\n宣言: `{_PROJECT_FILE}` の `production_merge.admin`\n"
+        f"{ADMIN_TRAIL_LINE} {trail_url if trail_url else UNREADABLE}\n宣言: `{PROJECT_FILE.as_posix()}` の `production_merge.admin`\n"
     )
 
 
