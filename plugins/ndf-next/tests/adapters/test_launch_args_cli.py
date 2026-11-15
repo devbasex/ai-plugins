@@ -9,7 +9,7 @@ from ndf.adapters import claude, cli
 
 
 def test_launch_args_subcommand_prints_the_same_values(capsys, last_result, monkeypatch):
-    monkeypatch.setattr(claude, "list_plugins", lambda: [{"id": "ndf@m", "enabled": True}])
+    monkeypatch.setattr(claude, "list_plugins", lambda **_: [{"id": "ndf@m", "enabled": True}])
     assert cli.main([]) == 0
 
     out = last_result(capsys.readouterr().out)
@@ -19,7 +19,7 @@ def test_launch_args_subcommand_prints_the_same_values(capsys, last_result, monk
 
 def test_launch_args_adds_a_notice_when_the_list_is_unreadable(capsys, last_result, monkeypatch):
     """一覧を読めなくても ok のまま、知らせの行を 1 件足す（I10a）。"""
-    monkeypatch.setattr(claude, "list_plugins", lambda: None)
+    monkeypatch.setattr(claude, "list_plugins", lambda **_: None)
     assert cli.main([]) == 0
 
     out = last_result(capsys.readouterr().out)

@@ -352,9 +352,9 @@ def _worker_env(kind: str) -> Iterator[None]:
             os.environ[identity.WORKER_KIND_ENV] = before
 
 
-def _args_for(system: str, root: Optional[Path], resume: Optional[str]) -> list[str]:
-    """worker の起動の引数（`resume` があればその会話を起こし直す）。"""
-    return claude.claude_args(claude.ClaudeCall(system, claude.Permission.FULL, resume=resume), root)
+def _args_for(system: str, root: Optional[Path], resume: Optional[str], cwd: Path) -> list[str]:
+    """worker の起動の引数（`resume` があればその会話を起こし直す）。導入済みの一覧は worker の `cwd` で読む。"""
+    return claude.claude_args(claude.ClaudeCall(system, claude.Permission.FULL, resume=resume), root, cwd=cwd)
 
 
 def _stopped_detail(handoff: Handoff) -> str:
@@ -378,7 +378,7 @@ def delegate(
     """
     out = Delivery(session=session or str(uuid.uuid4()))
     handoff.result_file.unlink(missing_ok=True)
-    argv = _args_for(system, root, None) + ["--session-id", out.session]
+    argv = _args_for(system, root, None, handoff.cwd) + ["--session-id", out.session]
     prompt = f"{handoff.prompt}\n\n" + RESULT_FILE_LINE.format(result_file=handoff.result_file)
     for attempt in range(RESUMES + 1):
         with _worker_env(handoff.kind):
@@ -388,7 +388,7 @@ def delegate(
         written = _written(handoff.result_file)
         if (written and not _missing_record(handoff)) or _reply_failed(reply, out):
             return out
-        argv = _args_for(system, root, out.session)
+        argv = _args_for(system, root, out.session, handoff.cwd)
         prompt = RECORD_PROMPT if written else RESUME_PROMPT
     out.cause = "work_stopped"
     out.detail = _stopped_detail(handoff)

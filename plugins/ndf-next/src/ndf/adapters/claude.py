@@ -93,10 +93,16 @@ class PluginArgs(NamedTuple):
     notice: Optional[str]
 
 
-def list_plugins(run: Callable[..., subprocess.CompletedProcess] = subprocess.run) -> Optional[list[dict[str, Any]]]:
-    """`claude plugin list --json` の要素の並び。起動できない・失敗・時間切れ・形の違いは `None`。"""
+def list_plugins(
+    run: Callable[..., subprocess.CompletedProcess] = subprocess.run, cwd: Optional[Path] = None
+) -> Optional[list[dict[str, Any]]]:
+    """`cwd`（省けばこのプロセスの場所）での `claude plugin list --json` の要素の並び。起動できない・失敗・時間切れ・形の違いは `None`。
+
+    一覧はプロジェクトの設定で変わるため、これから起動する `claude` と同じ `cwd` で読む。
+    """
     try:
-        done = run([CLAUDE, "plugin", "list", "--json"], capture_output=True, text=True, timeout=PLUGIN_LIST_TIMEOUT, check=False)
+        argv = [CLAUDE, "plugin", "list", "--json"]
+        done = run(argv, capture_output=True, text=True, timeout=PLUGIN_LIST_TIMEOUT, check=False, cwd=cwd)
     except (OSError, subprocess.SubprocessError):  # noqa: NDF401 外部コマンド: 読めなければ外さずに起動する（#3617 の決定 8）
         return None
     if done.returncode != 0:
@@ -123,14 +129,16 @@ def disabled_plugins(listed: Sequence[Mapping[str, Any]], own: Optional[str]) ->
     return out
 
 
-def plugin_args(root: Path, listed: Optional[Callable[[], Optional[list[dict[str, Any]]]]] = None) -> PluginArgs:
+def plugin_args(
+    root: Path, listed: Optional[Callable[[], Optional[list[dict[str, Any]]]]] = None, cwd: Optional[Path] = None
+) -> PluginArgs:
     """入っている旧い NDF を外し、`root` のプラグインを読む `claude` の引数。
 
-    外す登録は導入済みの一覧（`listed`。省けば `list_plugins`）から決め、`root` のプラグインの名前（`identity.name_of`）と同じ名前の
+    外す登録は導入済みの一覧（`listed`。省けば起動先の `cwd` での `list_plugins`）から決め、`root` のプラグインの名前（`identity.name_of`）と同じ名前の
     登録は外さない（入れ替えの後に自分を外さない）。一覧を読めなければ外さずに起動し、`notice` に理由を入れる（I10a）。
     外す登録が無ければ `--settings` を付けない。
     """
-    found = (listed if listed is not None else list_plugins)()
+    found = listed() if listed is not None else list_plugins(cwd=cwd)
     load = ["--plugin-dir", str(root)]
     if found is None:
         return PluginArgs(load, LIST_UNREADABLE)
@@ -157,16 +165,19 @@ def permission_args(permission: Permission, tools: Optional[str] = None) -> list
     return ["--tools", ""]
 
 
-def _full_args(call: ClaudeCall, root: Path) -> list[str]:
+def _full_args(call: ClaudeCall, root: Path, cwd: Optional[Path]) -> list[str]:
     args = [*PRINT_JSON, *permission_args(Permission.FULL)]
-    args += plugin_args(root).args + ["--append-system-prompt", call.system]
+    args += plugin_args(root, cwd=cwd).args + ["--append-system-prompt", call.system]
     return args + (["--resume", call.resume] if call.resume else [])
 
 
-def claude_args(call: ClaudeCall, root: Optional[Path] = None, base: Sequence[str] = (CLAUDE,)) -> list[str]:
-    """起動の引数。`root` は full で読むプラグインの根（省けば自分の根）。`base` は起動のコマンド。"""
+def claude_args(call: ClaudeCall, root: Optional[Path] = None, base: Sequence[str] = (CLAUDE,), cwd: Optional[Path] = None) -> list[str]:
+    """起動の引数。`root` は full で読むプラグインの根（省けば自分の根）。`base` は起動のコマンド。
+
+    `cwd` は起動する場所で、full の起動の導入済みの一覧をそこで読む（省けばこのプロセスの場所）。
+    """
     if call.permission is Permission.FULL:
-        args = _full_args(call, root if root is not None else identity.load().root)
+        args = _full_args(call, root if root is not None else identity.load().root, cwd)
     else:
         args = minimal_args(call.system) + permission_args(call.permission, call.tools)
     if call.json_schema is not None:

@@ -21,7 +21,7 @@ LISTED = [
 
 
 def test_full_args_disable_installed_ndf_and_load_this_plugin(tmp_path, monkeypatch):
-    monkeypatch.setattr(claude, "list_plugins", lambda: LISTED)
+    monkeypatch.setattr(claude, "list_plugins", lambda **_: LISTED)
     argv = claude.claude_args(claude.ClaudeCall(system="sys", permission=claude.Permission.FULL), root=tmp_path)
 
     settings = json.loads(argv[argv.index("--settings") + 1])
@@ -132,3 +132,22 @@ def test_list_plugins_gives_up_on_launch_failure_and_timeout():
 
     assert claude.list_plugins(missing) is None
     assert claude.list_plugins(slow) is None
+
+
+def test_full_args_read_the_installed_list_where_the_worker_starts(tmp_path, monkeypatch):
+    """導入済みの一覧は、これから起動する claude と同じ cwd で読む（プロジェクトの設定で一覧が変わる）。"""
+    seen = []
+    monkeypatch.setattr(claude, "list_plugins", lambda **k: seen.append(k.get("cwd")) or LISTED)
+    claude.claude_args(claude.ClaudeCall(system="sys", permission=claude.Permission.FULL), root=tmp_path, cwd=tmp_path / "w")
+    assert seen == [tmp_path / "w"]
+
+
+def test_list_plugins_runs_in_the_given_cwd(tmp_path):
+    got = []
+
+    def run(*a, **k):
+        got.append(k.get("cwd"))
+        return _Done(0, "[]")
+
+    assert claude.list_plugins(run, cwd=tmp_path) == []
+    assert got == [tmp_path]

@@ -703,7 +703,7 @@ def _skill_cause(failure: Optional[claude.Failure]) -> str:
 def _call_skill(run: StageRun, cwd: Path, call_claude: SkillCaller) -> StageResult:
     schema = contracts.load_json(contracts.schema_path("result"))
     call = claude.ClaudeCall(system=SKILL_SYSTEM, permission=claude.Permission.FULL, json_schema=schema)
-    reply = call_claude(claude.claude_args(call), skill_prompt(run), limits.seconds(SKILL_LIMIT), cwd)
+    reply = call_claude(claude.claude_args(call, cwd=cwd), skill_prompt(run), limits.seconds(SKILL_LIMIT), cwd)
     if not reply.ok:
         kind = _skill_cause(reply.failure)
         return StageResult(result.stopped(SKILL, kind, f"Skill {run.name} を回せない: {reply.error}"), {})
