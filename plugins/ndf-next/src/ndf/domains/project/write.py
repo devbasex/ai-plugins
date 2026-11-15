@@ -194,12 +194,20 @@ def merge_item(
     return value, rows + got, True
 
 
+def written_digests(doc: Optional[dict[str, Any]]) -> dict[str, Any]:
+    """前の `write` が書いた値の指紋（宣言の `analysis.written`）。無ければ空。"""
+    return obj(obj(obj(doc).get("analysis")).get("written"))
+
+
 def merge_project(
-    existing: Optional[dict[str, Any]], measure: dict[str, Any], answers: dict[str, Any], analysis: dict[str, Any]
+    existing: Optional[dict[str, Any]],
+    measure: dict[str, Any],
+    answers: dict[str, Any],
+    analysis: dict[str, Any],
+    written_before: dict[str, Any],
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    """新しい `project.json` と出力の行。`analysis` は `written` を除いた節（ここで指紋を作る）。"""
+    """新しい `project.json` と出力の行。`analysis` は `written` を除いた節（ここで指紋を作る）。`written_before` は前の指紋。"""
     doc = dict(existing) if existing else {"version": 1}
-    written_before = obj(obj(obj(existing).get("analysis")).get("written"))
     written, rows = {}, []
     items = obj(measure.get("items"))
     for key in ITEM_KEYS:
@@ -435,7 +443,7 @@ def plan(inp: Inputs) -> Plan:
         raise WriteError(f"ブランチ運用の答えが取り込み方の表に合わないため書かない: {bad}")
     questions = {k for k, m in obj(inp.measure.get("items")).items() if obj(m).get("status") == "question"}
     rows = [{"kind": "ignored", "key": k} for k in inp.answers if k not in questions]
-    written_before = obj(obj(obj(inp.existing).get("analysis")).get("written"))
+    written_before = written_digests(inp.existing)
     out, wt_rows, wt_written, declared, names = _worktree_part(inp, written_before)
     analysis = {
         "analyzer": check.ANALYZER,
@@ -443,7 +451,7 @@ def plan(inp: Inputs) -> Plan:
         "inputs": obj(inp.measure.get("inputs")),
         "branches": check.branch_state(git.Git(inp.root), declared),
     }
-    doc, item_rows = merge_project(inp.existing, inp.measure, delivery_channels(inp.answers, names), analysis)
+    doc, item_rows = merge_project(inp.existing, inp.measure, delivery_channels(inp.answers, names), analysis, written_before)
     doc["analysis"]["written"].update(wt_written)
     doc, ci_row = _declare_ci_tests(doc, inp.existing, written_before, inp.root)
     errs = contracts.schema_errors(doc, check.SCHEMA)
