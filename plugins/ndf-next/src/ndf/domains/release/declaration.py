@@ -153,8 +153,8 @@ def run_step(root: Path, step: Step, version: str) -> None:
         raise StepFailed(f"手順 {step.name} が終了コード {done.returncode} で失敗: {done.stderr.strip()[-500:]}")
 
 
-def _admin_declaration(root: Path) -> Path:
-    """迂回の宣言を読むファイル（契約の `production_merge` の置き場は `main`）。
+def _trusted_project_path(root: Path) -> Path:
+    """信頼する `.ndf/project.json` のパス（迂回の宣言と検証の行を読む。契約の `production_merge` の置き場は `main`）。
 
     メインディレクトリが解ければそこのファイルだけを読み、無くても呼ばれた木の値で補わない。PR の作業場所が
     足した宣言だけで迂回を選べないようにする（旧いプラグインの `decl.overlay_keys` と同じ扱い。#2363・#3506 の I1）。
@@ -170,11 +170,11 @@ def _admin_declaration(root: Path) -> Path:
 def production_admin(root: Path) -> bool:
     """迂回の宣言（`.ndf/project.json` の `production_merge.admin`）が JSON の true か（#3506 の I1）。
 
-    宣言はメインディレクトリから読む（`_admin_declaration`）。ファイルが無い・読めない・壊れている・値の型が違う・
+    宣言はメインディレクトリから読む（`_trusted_project_path`）。ファイルが無い・読めない・壊れている・値の型が違う・
     `unknown` は偽（迂回しない）。
     """
     try:
-        raw = json.loads(_admin_declaration(root).read_text(encoding="utf-8"))
+        raw = json.loads(_trusted_project_path(root).read_text(encoding="utf-8"))
     except (OSError, ValueError):  # noqa: NDF401 ファイル: 読めない宣言は宣言なしとして迂回しない（#3506 の I1）
         return False
     got = raw.get("production_merge") if isinstance(raw, dict) else None
@@ -287,10 +287,10 @@ def review_problems(root: Path) -> list[dict[str, str]]:
 def verify_of(root: Path) -> VerifyDecl:
     """`.ndf/project.json` の `delivery` の検証の行（`channel: verify`）の ref とマーケットプレイスの名前。
 
-    宣言はメインディレクトリから読む（`_admin_declaration` と同じ。PR の作業場所が足した宣言で ref を選べない）。
+    宣言はメインディレクトリから読む（`_trusted_project_path` と同じ。PR の作業場所が足した宣言で ref を選べない）。
     行が無い・2 つ以上・値が空なら `DeclarationError`（既定値を持たない）。
     """
-    path = _admin_declaration(root)
+    path = _trusted_project_path(root)
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
