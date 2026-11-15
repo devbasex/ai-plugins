@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from dataclasses import replace
 
 import pytest
@@ -276,3 +277,84 @@ def test_current_a_rejection_closes_the_open_plan_request_once(st, lane_sprint, 
     assert key == req.key and req.closed is not None
     with store.transaction(st) as conn:
         assert answering._reject_release(conn, q, _rejection(q)) is None  # 閉じた依頼は閉じ直さない
+
+
+# --- #3572: 人の GitHub でのマージを承認ゲートの答えにする ------------------------------------------------
+
+MERGED_HEAD = "a" * 40
+
+
+def _runner(report: dict, calls: list):
+    """副命令 `release-steps answer --route github-merge` の代わり（打った argv を `calls` へ足し、`report` を出す）。"""
+
+    def run_it(argv, cwd, env):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, json.dumps(report) + "\n", "")
+
+    return run_it
+
+
+MERGED_REPORT = {
+    "tool": "release-steps",
+    "status": "ok",
+    "summary": "人のマージを承認の証跡にした",
+    "items": [
+        {"kind": "value", "name": "state", "value": "approved"},
+        {"kind": "value", "name": "by", "value": "takemi"},
+        {"kind": "value", "name": "head", "value": MERGED_HEAD},
+    ],
+    "metrics": {},
+    "outputs": {"version": "11.0.0"},
+}
+
+
+def test_a_human_merge_while_the_release_gate_waits_becomes_the_approval(st, lane_sprint, flow, tmp_path):
+    """受け入れ条件 7・E6: 答え待ちのまま人が本番の PR をマージしたら、問い直さずに承認の答えを書く（答えた者は
+    service:github-merge、理由にマージした人と先端）。答えた後は待ちが無く、副命令を打ち直さない。"""
+    _pid, tid = lane_sprint()
+    q = _at_release(st, tid, flow)
+    calls: list = []
+    out = gate.take_reply(st, tid, {}, runner=_runner(MERGED_REPORT, calls), cwd=tmp_path)
+    assert out is not None and out["status"] == "ok"
+    assert calls[0][-4:] == ["--pr", str(q.pr), "--route", "github-merge"] and "answer" in calls[0]
+    (ev,) = [e for e in run.read(st, tid).events if e.draft.kind == "answered" and e.draft.payload["gate_id"] == q.id]
+    assert ev.draft.payload["by"] == release.MERGE_ACTOR and ev.draft.payload["answer"] == "approved"
+    assert "takemi" in ev.draft.reason and MERGED_HEAD[:12] in ev.draft.reason
+    assert run.read(st, tid).context()["version"] == "11.0.0"
+    assert gate.take_reply(st, tid, {}, runner=_runner(MERGED_REPORT, calls), cwd=tmp_path) is None and len(calls) == 1
+
+
+def test_an_unmerged_production_pr_keeps_the_release_gate_waiting(st, lane_sprint, flow, tmp_path):
+    _pid, tid = lane_sprint()
+    _at_release(st, tid, flow)
+    report = {k: v for k, v in MERGED_REPORT.items() if k != "outputs"}
+    report = {**report, "items": [], "status": "stopped", "cause": {"kind": "not_applicable", "detail": "まだ"}}
+    assert gate.take_reply(st, tid, {}, runner=_runner(report, []), cwd=tmp_path) is None
+    assert gate.waiting(run.read(st, tid)) is not None
+
+
+def test_a_broken_reply_of_the_merge_check_is_refused_and_the_gate_keeps_waiting(st, lane_sprint, flow, tmp_path):
+    _pid, tid = lane_sprint()
+    _at_release(st, tid, flow)
+    refused = {k: v for k, v in MERGED_REPORT.items() if k != "outputs"}
+    refused = {**refused, "items": [], "status": "stopped", "cause": {"kind": "refused", "detail": "届かない"}}
+
+    def unreadable(argv, cwd, env):
+        return subprocess.CompletedProcess(argv, 2, "not json\n", "boom\n")
+
+    for runner in (_runner(refused, []), unreadable):
+        with pytest.raises(model.Refused):
+            gate.take_reply(st, tid, {}, runner=runner, cwd=tmp_path)
+    assert gate.waiting(run.read(st, tid)) is not None
+
+
+def test_the_organizers_answer_comes_before_the_merge_check(st, lane_sprint, flow, tmp_path):
+    """オーガナイザーの答えがあれば副命令を打たない。GitHub を読まない呼び出し（runner も observe も無い）も打たない。"""
+    pid, tid = lane_sprint()
+    q = _at_release(st, tid, flow)
+    sent = gate.request_release(st, run.read(st, tid), q, {})
+    calls: list = []
+    with store.transaction(st) as conn:
+        plan.record_release(conn, pid, [sent["request"]], plan.ReleaseAnswer(plan.RELEASED, "出した", "11.0.0", "https://x/pull/9"))
+    assert gate.take_reply(st, tid, {}, runner=_runner(MERGED_REPORT, calls), cwd=tmp_path) is not None
+    assert calls == []

@@ -12,6 +12,10 @@
 5. 本番ブランチへ入れたら、本番ブランチからベースブランチ宛ての PR を作り（開いたものがあれば使い直す）、必須のチェックの
    後にマージする（版上げのコミットをベースブランチへ戻す）。マージ済みの PR で打ち直しても、ここから再開する
 
+承認の後はコードを直さない（#3572 の I4）。必須のチェックが落ちたら、落ちたチェック（`Landed.failed`）を結果に載せて
+止まり、push もマージもしない。本番ブランチへ入れたら（マージ済みからの再開を含む）、版と承認（`merge_decide.Approval`。
+承認ゲートの承認か、人の GitHub でのマージか）を結果に載せ、人のマージなら人のマージの記録を 1 回だけ書く（決定 8）。
+
 迂回の宣言（`admin`。`.ndf/project.json` の `production_merge.admin`）があり、本番ブランチの規則の承認数が 1 以上と読めるときだけ、
 本番ブランチ宛ての PR を管理者の迂回でマージし（`GitHub.merge_as_admin`）、迂回の記録を置く（#3506 の I2b・I7）。そのときの
 証跡の照合は、担い手が MVV 判定の証跡を数えない（I9）。承認数が 0 か読めなければ迂回しない。
@@ -28,7 +32,7 @@ from typing import NamedTuple
 from ndf.adapters import ci
 from ndf.adapters.github import MERGE_COMMIT, MERGE_QUEUE_PENDING, GitHub, GitHubError, MergeOutcome, Pull, text_of
 from ndf.contracts import facts
-from ndf.domains.release import approval_decide, trail, version_decide
+from ndf.domains.release import approval_decide, merge_decide, trail, version_decide
 
 # 規則の種類（必須のチェック）
 REQUIRED_RULE = "required_status_checks"
@@ -72,6 +76,11 @@ class Landed(NamedTuple):
     admin: bool = False
     admin_record: str | None = None
     record_error: str | None = None
+    # 出した版・承認（経路・承認した人・先端）・止まったときの落ちたチェック・人のマージの記録の URL（#3572）
+    version: str | None = None
+    approval: merge_decide.Approval | None = None
+    failed: tuple[ci.Check, ...] = ()
+    merge_record: str | None = None
 
 
 def _status_run(status: dict, app: int | None = None) -> dict:
@@ -222,8 +231,9 @@ class Lander:
             bots[login] = self.hub.bot_app(login)
         return bots[login]
 
-    def _watch(self, pull: Pull, deadline: float) -> str | None:
-        """必須のチェック（check run と commit status）を時刻 `deadline` まで待ち、止まった理由の種類（通れば None）。"""
+    def _watch(self, pull: Pull, deadline: float) -> tuple[str | None, tuple[ci.Check, ...]]:
+        """必須のチェック（check run と commit status）を時刻 `deadline` まで待ち、止まった理由の種類（通れば None）と
+        最後の読みの落ちたチェックを返す。"""
         required = self.required(pull.base_ref)
         bots: dict[str, int | None] = {}
 
@@ -232,7 +242,10 @@ class Lander:
 
         left = max(0.0, deadline - self.clock())
         watched = self.wait(reader, left) if self.wait is not None else ci.Watch(reader, left).run()
-        return watched.cause([])
+        kind = watched.cause([])
+        if kind is None:
+            return None, ()
+        return kind, (*watched.reading.failed_tests, *watched.reading.failed_other)
 
     def _refusal(self, pull: Pull, human_only: bool = False) -> Landed | None:
         """本番ブランチ宛ての PR の証跡を読み直し、`pull` の先端が承認されていなければ止まった結果（承認されていれば None）。
@@ -255,9 +268,12 @@ class Lander:
         refused = self._refusal(pull, bypass)
         if refused is not None:
             return refused
-        kind = self._watch(pull, deadline)
+        kind, failed = self._watch(pull, deadline)
         if kind is not None:
-            return Landed(False, kind, f"#{pull.number} の必須のチェックが通らない（{kind}。打ち直さずに人へ戻す）")
+            names = "、".join(c.name for c in failed)
+            listed = f"。落ちたチェック: {names}" if names else ""
+            detail = f"#{pull.number} の必須のチェックが通らない（{kind}。コードを直さずに止まる{listed}）"
+            return Landed(False, kind, detail, failed=failed)
         return self._refusal(pull, bypass)
 
     def _merge(self, pull: Pull, deadline: float, bypass: bool = False) -> Landed:
@@ -370,11 +386,35 @@ class Lander:
         detail = f"#{pull.number} をマージした。戻す PR: {synced.detail}"
         return synced._replace(sync_pr=number, detail=detail, production_sha=landed)
 
+    def _approval(self, number: int) -> merge_decide.Approval | None:
+        """マージ済みの PR を読み直し、承認を決める（マージされていなければ None）。"""
+        return merge_decide.decide(trail.merge_facts(self.hub, number), trail.approvals(self.hub, number))
+
+    def _record_merge(self, number: int, done: Landed, approval: merge_decide.Approval) -> Landed:
+        """承認を結果に足し、経路が人のマージなら人のマージの記録を書く（書けなければ理由を `record_error` へ）。"""
+        done = done._replace(approval=approval)
+        if approval.route != merge_decide.MERGE_ROUTE:
+            return done
+        try:
+            _wrote, url = trail.write_merge_record(self.hub, number, approval)
+        except trail.TrailError as exc:
+            return done._replace(record_error=str(exc))
+        return done._replace(merge_record=url)
+
+    def _released(self, pull: Pull, done: Landed) -> Landed:
+        """本番ブランチへ入れた結果に、版と承認（人のマージなら記録も）を足す。"""
+        ref = pull.head_ref
+        version = version_decide.version_of_branch(ref) if ref.startswith(version_decide.BRANCH_PREFIX) else None
+        done = done._replace(version=version)
+        approval = self._approval(pull.number)
+        return self._record_merge(pull.number, done, approval) if approval is not None else done
+
     def _resume_merged(self, number: int, pull: Pull, deadline: float) -> Landed:
-        """マージ済みの PR からの再開。本番ブランチ宛てならベースブランチへ戻し、迂回の記録が無ければ補う。"""
+        """マージ済みの PR からの再開。本番ブランチ宛てならベースブランチへ戻し、承認を決めて（人のマージなら記録を書き）、
+        迂回の記録が無ければ補う。"""
         if pull.base_ref != self.production:
             return Landed(True, None, f"#{number} は既にマージされている")
-        synced = self._sync(pull, deadline)
+        synced = self._released(pull, self._sync(pull, deadline))
         # 再開: 利用者の証跡がマージした先端への承認なら、迂回でマージしたとして記録を補う（I7）
         if self._bypass(pull) and (judged := trail.user_judgment_at(self.hub, number, pull.head_sha)) is not None and judged.approved:
             return self._record(pull, synced)
@@ -402,5 +442,5 @@ class Lander:
         done = self._merge(pull, deadline, bypass)
         if not done.merged or pull.base_ref != self.production:
             return done
-        synced = self._sync(pull, deadline)
+        synced = self._released(pull, self._sync(pull, deadline))
         return self._record(pull, synced) if bypass else synced

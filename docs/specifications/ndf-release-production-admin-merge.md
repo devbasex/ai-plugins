@@ -190,7 +190,7 @@ sequenceDiagram
 | `release --channel prod`・`promote` の本番の PR の行 | `admin`（真偽。I8） |
 | 迂回の記録の行 | `{"kind": "comment", "name": "<URL>", "result": "written" \| "kept" \| "unwritten"}` |
 | `release-steps.py release-case` の `metrics`（`cd-admin`） | `approval_place`: リリースの PR の証跡のコメント・`merger`: 利用者のアカウント（管理者の迂回） |
-| 作り直しの `release-steps merge` の `outputs` | `admin`（真偽）と、記録を書いたときは `admin_record`（URL） |
+| 作り直しの `release-steps merge` の値の項目（`{"kind": "value", "name": <名前>, "value": <値>}`） | `admin`（真偽）と、記録を書いたときは `admin_record`（URL）。`outputs` は出した版の `version` だけを持つ |
 
 終了コード（0・1・10・75・3）の意味は変わらない。
 
@@ -204,7 +204,7 @@ sequenceDiagram
 | GitHub が迂回のマージを断った | PR を読み直す（`merge._moved_after_refusal`）。先端が動いていれば `head_moved`、衝突なら 4、ほかは 1 | 本番の経路は `head_moved` を 10 にする |
 | 迂回の記録を書けない（旧いプラグイン） | 本番は出ているため公開の後の手順は止めず、`reviewed.admin_back` が本番の完了と分けて報告する | `stopped`・1。要約に「迂回の記録を書けなかった（本番は出ている）」。戻すマージも止まっていればその終了コード |
 | 迂回の記録を書けない（`promote`） | `after_merge` が文を返す | `stopped`・1「#<番号> をマージした。迂回の記録を書けなかった（本番は出ている）」 |
-| 迂回の記録を書けない（作り直し） | `Landed.record_error` に理由を入れる | `stopped`。要約に「迂回の記録を書けなかった（本番は出ている）: <理由>」を足す。`production_sha` は出力に残り、workflow の publish へ渡る |
+| 迂回の記録を書けない（作り直し） | `Landed.record_error` に理由を入れる | `stopped`。要約に「記録を書けなかった（本番は出ている）: <理由>」を足す。`production_sha` は出力に残り、workflow の publish へ渡る |
 
 記録はマージした事実を書くため、マージの前には書けない。そのため、記録を書けないことを理由にマージを止めない。
 

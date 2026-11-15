@@ -171,3 +171,21 @@ def production_admin(root: Path) -> bool:
         return False
     got = raw.get("production_merge") if isinstance(raw, dict) else None
     return isinstance(got, dict) and got.get("admin") is True
+
+
+# ブランチの運用の宣言と、本番ブランチの名前の鍵（#3572。`ndf.core.route.default_base` と同じ宣言の 1 鍵を読む）
+BRANCH_FILE = Path(identity.FIXED_WORDS["declaration_dir"]) / "worktree.json"
+PRODUCTION_KEY = "production_branch"
+
+
+def production_branch(root: Path) -> str:
+    """宣言（`.ndf/worktree.json`）の本番ブランチの名前。無い・読めない・空・前後に空白があれば `DeclarationError`。"""
+    path = root / BRANCH_FILE
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise DeclarationError(f"{path} を読めない（{PRODUCTION_KEY} を宣言するか --production を渡す）: {exc}") from None
+    got = raw[PRODUCTION_KEY] if isinstance(raw, dict) and PRODUCTION_KEY in raw else None
+    if not isinstance(got, str) or not got or got != got.strip():
+        raise DeclarationError(f"{path} の {PRODUCTION_KEY} が名前でない（宣言するか --production を渡す）: {got!r}")
+    return got
