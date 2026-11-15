@@ -133,6 +133,7 @@
 | `reused` の行（`lib/parallel_ledger.py` と `contracts/forms/parallel-ledger.json`、変える） | 台帳の行の種類に `reused` を足す。耐久ワークフローの状態へ反映しない行に入れる |
 | 問いの hook（`hook_lib/ask_guard.py`、変える） | `request-ask` の結果の分岐ごとに拒否の理由を組む（設計承認の依頼の保留・前の答えの返却・引き継いだ id の保留・今の `ask` の保留）。上限の秒を過ぎたときは、判定の記録の id を持つ台帳の行を 1 回だけ探し、あればその行から同じ拒否の理由を組む |
 | `parallel.py design-answer`（新設。`lib/parallel_args.py` に引数） | 設計承認の依頼の答えを読み、スプリント状態へ承認ゲートの記録を書き、続きの 1 行と結果を返す |
+| 承認ゲートの記録の書き込み（`sprint-state.py gate`、変える） | `--by mvv` の記録にも `--pr` と `--outcome` を残す（今は `--by user` のときだけ残す）。I9 が設計 PR ごとに MVV 判定の承認の記録を引くためである |
 | 設計 PR のマージのプランの承認の確かめ（`supervise_lib/design_merge.py` の `cmd_design_approved`、変える） | 承認ラベルも利用者の承認の記録も無いとき、設計 PR がマージ済みで、その PR の設計承認ゲートの MVV 判定の承認の記録があれば通す（I9） |
 | 設計承認の依頼の部品（`lib/gate1_requests.py`、変える） | 設計のプランの報告の PR の番号の読み取り（`report_pr`）と MVV 判定の記録の読み取り（`last_verdict`）を `sprint_loop_gate.py` から移し、両方の送り手が同じ関数を使う |
 | 手順書（`asking.md`・`parallel.md`、変える） | 1 スプリントのレーンの設計承認の問いの書き方（設計 PR の URL を問いの文に入れる）、`design-answer` の打ち方、対象の行の書き方、前の答えを使う条件 |
@@ -196,7 +197,7 @@ classDiagram
 | `ask` | `target` に値が入る | `<ブランチ名>@<40 桁>` か `#<番号>`。対象の行が無い・先端を求められないときは `null` |
 | `reused`（新設） | 答えの引き継ぎの記録。耐久ワークフローの状態へ反映しない | `id`（前の依頼の id）・`lane`・`source`・`target`・`ledger_id`（今の判定の記録の id）・`answered`（答えを使ったか、答え待ちの引き継ぎか）・`at` |
 
-スプリント状態の承認ゲートの記録は形を変えない。`design-answer` は `sprint-state.py gate` が書く今の形（`設計承認ゲート`・`--pr`・`--by`・`--outcome`）で書く。
+スプリント状態の承認ゲートの記録は、`by: mvv` の記録が `pr` と `outcome` を持てるようになる（`--pr`・`--outcome` を渡したときだけ。渡さない今の呼び出しの記録は今と同じ形）。`design-answer` は `sprint-state.py gate` で `設計承認ゲート`・`--pr`・`--by`・`--outcome` を渡して書く。
 
 ## 入出力の契約
 
@@ -326,7 +327,7 @@ graph TD
 | --- | --- | --- |
 | 1・I1 | 1 スプリントのレーンの `ndf-gate:1` の問いが、承認ゲートで終わった設計のプランの設計 PR P を名指すと、`request-ask` が `gate1` の行（`issue`・`pr`・`stamp`）を 1 行書き、`ask` の行を書かない | 問いの区分だけで `gate1` にする・`ask` も書く・`stamp` を作業ディレクトリの先頭にする |
 | 2・4 | 1 スプリントのレーンが送った `gate1` へ `answer --approved` を打つと、マージを試みて `metrics.merge` を返す。マージできなくても答えは送られる | `merge_design` が送り手の種類で分岐する |
-| 3・I9 | `design-answer` が承認の答えでスプリント状態へ承認ゲートの記録を書く。マージ済みの設計 PR P と、P の `by: mvv` の承認の記録で `design-approved` が 0 を返す。開いている P と `by: mvv` の記録だけ、またはマージ済みの P で記録が無いときは今どおり 10 を返す | 記録を書かない・マージ済みでも承認の記録を求めて 10 を返す・開いている PR を `by: mvv` の記録だけで通す・記録の無いマージ済みの PR を通す |
+| 3・I9 | `design-answer` が承認の答えでスプリント状態へ承認ゲートの記録を書き、`by: mvv` の記録も `pr` と `outcome` を持つ。マージ済みの設計 PR P と、P の `by: mvv` の承認の記録で `design-approved` が 0 を返す。開いている P と `by: mvv` の記録だけ、またはマージ済みの P で記録が無いときは今どおり 10 を返す | 記録を書かない・マージ済みでも承認の記録を求めて 10 を返す・開いている PR を `by: mvv` の記録だけで通す・記録の無いマージ済みの PR を通す |
 | 5 | `revise` で指摘ファイルを書いて 10、`rejected` で差し戻しの記録を書いて 10 を返し、どちらも設計 PR をマージしない | `revise` で承認の記録を書く |
 | 6 | 1 スプリントのレーンの `gate1` の行（判定が決まらない・境界が空・`sprint_state` がある）で `mvv.eligible` が真、境界がある行で偽と「レッドラインに当たる」 | `sprint_state` を載せない・`verdict` を載せない |
 | 7・8・I2 | 同じレーン・同じ P の先頭の違う 2 行で古い方に `resend`、新しい方へ答えた後に `settled`。同じ先頭の打ち直しは同じ id で行が増えない | id に判定の記録の id を入れる |
@@ -348,7 +349,7 @@ graph TD
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #3603 | 実装する | — | `plugins/ndf/scripts/parallel.py`、`plugins/ndf/scripts/lib/parallel_args.py`、`plugins/ndf/scripts/lib/parallel_design_gate.py`（新設）、`plugins/ndf/scripts/lib/parallel_question.py`、`plugins/ndf/scripts/lib/parallel_lane.py`、`plugins/ndf/scripts/lib/parallel_ledger.py`、`plugins/ndf/scripts/lib/gate1_requests.py`、`plugins/ndf/scripts/lib/sprint_loop_gate.py`、`plugins/ndf/scripts/hook_lib/ask_guard.py`、`plugins/ndf/scripts/supervise_lib/design_merge.py`、`plugins/ndf/scripts/lib/README.md`、`plugins/ndf/contracts/forms/parallel-ledger.json`、`plugins/ndf/skills/development-workflow/references/asking.md`、`plugins/ndf/skills/development-workflow/references/parallel.md`、`docs/glossary/glossary.json`、`docs/glossary.md`、`plugins/ndf/scripts/tests/test_parallel_design_gate.py`（新設）、`plugins/ndf/scripts/tests/test_parallel_question.py`（新設）、`plugins/ndf/scripts/tests/test_parallel_lane.py`、`plugins/ndf/scripts/tests/test_ask_guard.py`、`plugins/ndf/scripts/tests/test_parallel_answer.py`、`plugins/ndf/scripts/tests/test_parallel_ledger.py`、`plugins/ndf/scripts/tests/test_gate1_requests.py`、`plugins/ndf/scripts/tests/test_supervise_sprint_chain.py` |
+| #3603 | 実装する | — | `plugins/ndf/scripts/parallel.py`、`plugins/ndf/scripts/lib/parallel_args.py`、`plugins/ndf/scripts/lib/parallel_design_gate.py`（新設）、`plugins/ndf/scripts/lib/parallel_question.py`、`plugins/ndf/scripts/lib/parallel_lane.py`、`plugins/ndf/scripts/lib/parallel_ledger.py`、`plugins/ndf/scripts/lib/gate1_requests.py`、`plugins/ndf/scripts/lib/sprint_loop_gate.py`、`plugins/ndf/scripts/hook_lib/ask_guard.py`、`plugins/ndf/scripts/supervise_lib/design_merge.py`、`plugins/ndf/scripts/sprint-state.py`、`plugins/ndf/scripts/lib/README.md`、`plugins/ndf/contracts/forms/parallel-ledger.json`、`plugins/ndf/skills/development-workflow/references/asking.md`、`plugins/ndf/skills/development-workflow/references/parallel.md`、`docs/glossary/glossary.json`、`docs/glossary.md`、`plugins/ndf/scripts/tests/test_parallel_design_gate.py`（新設）、`plugins/ndf/scripts/tests/test_parallel_question.py`（新設）、`plugins/ndf/scripts/tests/test_parallel_lane.py`、`plugins/ndf/scripts/tests/test_ask_guard.py`、`plugins/ndf/scripts/tests/test_parallel_answer.py`、`plugins/ndf/scripts/tests/test_parallel_ledger.py`、`plugins/ndf/scripts/tests/test_gate1_requests.py`、`plugins/ndf/scripts/tests/test_supervise_sprint_chain.py`、`plugins/ndf/scripts/tests/test_sprint_state.py` |
 | #3608 | 取り込む | #3603 | — |
 
 ## 人へ残す判断
