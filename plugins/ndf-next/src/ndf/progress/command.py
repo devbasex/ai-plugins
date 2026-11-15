@@ -28,7 +28,7 @@ from urllib.parse import urlsplit, urlunsplit
 import sqlalchemy as sa
 
 from ndf import contracts, identity
-from ndf.adapters.git import Git, GitError
+from ndf.adapters.git import WORKTREE_DECLARATION, Git, GitError
 from ndf.contracts import causes, facts, result
 from ndf.core import durable
 from ndf.progress import definition, model, stages, store
@@ -107,7 +107,7 @@ class FactUnknown(Exception):
         self.word = word
 
 
-WORKTREE_FILE = identity.FIXED_WORDS["declaration_dir"] + "/worktree.json"
+WORKTREE_FILE = WORKTREE_DECLARATION
 DOC_FILES = ("**/*.md",)  # `.ndf/project.json` の `docs.files` を省いたときの文書のファイル
 BEHAVIOR_DOCS: tuple[str, ...] = ()  # 同じく `docs.behavior`（振る舞いを決める文書。省けば無し）
 # 差分の語（`diff_kinds` の鍵）
