@@ -259,13 +259,10 @@ def amount(v: Optional[str], allow_zero: bool = False) -> Optional[float]:
     """月の額の引数（正の数。`allow_zero` なら 0 は宣言を外す None）。読めなければ `MeteredError`（値は表示しない）。"""
     if v is None:
         return None
-    try:
-        x = float(v)
-    except ValueError:
-        x = -1.0
+    x = reg.parse_number(v)
     if allow_zero and x == 0:
         return None
-    if not (x > 0 and x != float("inf")):
+    if x is None or not (x > 0 and x != float("inf")):
         raise MeteredError("invalid", "月の額は正の数（ドル）で渡す（入力値は表示しない）")
     return x
 
@@ -331,11 +328,8 @@ def set_monthly(store: Path, name: str, usd: Optional[float]) -> dict[str, Any]:
 def weekly_at(v: Optional[str]) -> Optional[float]:
     if v is None:
         return None
-    try:
-        x = float(v)
-    except ValueError:
-        x = 0.0
-    if not 1 <= x <= 100:
+    x = reg.parse_number(v)
+    if x is None or not 1 <= x <= 100:
         raise MeteredError("invalid", "--weekly-at は 1 以上 100 以下の百分率")
     return x
 

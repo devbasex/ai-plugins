@@ -355,6 +355,14 @@ def key_names(store: Path) -> list[str]:
         return []
 
 
+def parse_number(v: str) -> Optional[float]:
+    """引数の文字列を数にする。読めなければ None（範囲の判定と誤りの文言は呼び手が持つ）。"""
+    try:
+        return float(v)
+    except ValueError:  # noqa: NDF401 利用者の入力: 数でない引数は、呼び手が範囲の外として誤りの文言で止める
+        return None
+
+
 def positive(v: Any) -> Optional[float]:
     return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0 else None
 

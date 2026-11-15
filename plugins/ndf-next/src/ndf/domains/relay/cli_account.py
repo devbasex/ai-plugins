@@ -43,11 +43,8 @@ def _capacity_arg(v: str) -> Optional[float]:
     """枠の引数（正の数か `-`）。`-` は None。"""
     if v == "-":
         return None
-    try:
-        x = float(v)
-    except ValueError:
-        x = 0.0
-    if not 0 < x < float("inf"):
+    x = account_registry.parse_number(v)
+    if x is None or not 0 < x < float("inf"):
         raise account_registry.AccountError(f"枠は正の数（USD）か - で渡す: {v}")
     return x
 
