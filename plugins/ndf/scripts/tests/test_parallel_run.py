@@ -625,6 +625,128 @@ def test_gate_detail_falls_back_to_the_path_when_outputs_are_missing(tmp_path):
     assert "承認ゲートの理由を読めない" in reason and pr is None and report.endswith("report.md")
 
 
+# ---- 現状固定（gate_detail の経路。I-001 の抽出の前に今の振る舞いを固定する） ----
+
+
+def _gate_state(tmp_path, rows, outs, items=None):
+    """progress.jsonl の行 rows（dict か生の文字列）と出力 outs（ファイル名 → 中身）を置いた done。items が無ければ関門の項目 1 つ。"""
+    st = tmp_path / "gate-state"
+    st.mkdir(exist_ok=True)
+    for name, body in outs.items():
+        (st / name).write_text(body if isinstance(body, str) else json.dumps(body, ensure_ascii=False) + "\n")
+    (st / "progress.jsonl").write_text("".join((r if isinstance(r, str) else json.dumps(r)) + "\n" for r in rows))
+    done = tmp_path / "gate-done.json"
+    got = items if items is not None else [{"result": "関門", "report": str(st / "report.md")}]
+    done.write_text(json.dumps({"items": got}, ensure_ascii=False))
+    return done, st
+
+
+def _step(out, exit=10, kind="step"):
+    return {"kind": kind, "exit": exit, "out": out}
+
+
+def test_gate_detail_current_reads_reason_and_pr_from_an_earlier_step_and_stops(tmp_path):
+    """末尾の行から読み、理由と番号がそろった行で止まる。それより前の行の値は使わない。"""
+    done, st = _gate_state(
+        tmp_path,
+        [_step("a.out"), _step("b.out"), _step("c.out")],
+        {
+            "a.out": {"summary": "最初", "metrics": {"reason": "古い理由", "main_pr": 1}},
+            "b.out": {"summary": "中", "metrics": {"reason": "理由 b", "main_pr": 2}},
+            "c.out": {"summary": "最後", "metrics": {}},
+        },
+    )
+    assert pgate.gate_detail(str(done)) == ("理由 b", 2, str(st / "report.md"))
+
+
+def test_gate_detail_current_takes_reason_and_pr_from_different_steps(tmp_path):
+    """理由と番号は、それぞれ末尾に近い行の値を別々の行から取る。"""
+    done, _ = _gate_state(
+        tmp_path,
+        [_step("a.out"), _step("b.out")],
+        {"a.out": {"metrics": {"reason": "理由 a", "main_pr": 7}}, "b.out": {"metrics": {"reason": "理由 b"}}},
+    )
+    assert pgate.gate_detail(str(done))[:2] == ("理由 b", 7)
+
+
+def test_gate_detail_current_falls_back_to_the_last_summary_without_a_reason(tmp_path):
+    done, _ = _gate_state(
+        tmp_path,
+        [_step("a.out"), _step("b.out"), _step("c.out")],
+        {"a.out": {"summary": "最初", "metrics": {"main_pr": 5}}, "b.out": {"summary": "後", "metrics": {}}, "c.out": {"metrics": {}}},
+    )
+    assert pgate.gate_detail(str(done))[:2] == ("後", 5)
+
+
+def test_gate_detail_current_ignores_other_rows_and_a_str_pr(tmp_path):
+    """終了コード 10 でない行・step でない行・JSON でない行・dict でない行は読まない。main_pr が文字列なら番号に取らない。
+    NOTE: 現状固定。bool は int の派生のため main_pr が true でも番号として取る。"""
+    done, _ = _gate_state(
+        tmp_path,
+        [_step("a.out"), "not json", "[1, 2]", _step("x.out", exit=0), _step("y.out", kind="event"), _step("b.out")],
+        {
+            "a.out": {"metrics": {"reason": "理由 a", "main_pr": 9}},
+            "b.out": {"summary": "b", "metrics": {"main_pr": "3593"}},
+            "x.out": {"metrics": {"reason": "読まない", "main_pr": 1}},
+            "y.out": {"metrics": {"reason": "読まない", "main_pr": 1}},
+        },
+    )
+    assert pgate.gate_detail(str(done))[:2] == ("理由 a", 9)
+    done, _ = _gate_state(tmp_path, [_step("t.out")], {"t.out": {"metrics": {"reason": "r", "main_pr": True}}})
+    assert pgate.gate_detail(str(done))[:2] == ("r", True)
+
+
+def test_gate_detail_current_reads_the_last_json_line_and_skips_unreadable_outputs(tmp_path):
+    """出力は最後の JSON の行を読む。出力のファイルが無い・JSON が無い・out の無い行は空として次の行へ進む。"""
+    lines = ["log", json.dumps({"metrics": {"reason": "前"}}), json.dumps({"metrics": {"reason": "後", "main_pr": 4}})]
+    done, _ = _gate_state(
+        tmp_path,
+        [_step("a.out"), _step("missing.out"), _step("text.out"), {"kind": "step", "exit": 10}],
+        {"a.out": "\n".join(lines) + "\n", "text.out": "JSON の無い出力\n"},
+    )
+    assert pgate.gate_detail(str(done))[:2] == ("後", 4)
+
+
+def test_gate_detail_current_without_any_value_returns_the_progress_path(tmp_path):
+    done, st = _gate_state(tmp_path, [_step("a.out")], {"a.out": {"metrics": {}}})
+    assert pgate.gate_detail(str(done)) == (f"承認ゲートの理由を読めない（{st / 'progress.jsonl'}）", None, str(st / "report.md"))
+
+
+def test_gate_detail_current_picks_the_first_gate_item_and_skips_non_dicts(tmp_path):
+    first, second = tmp_path / "s1", tmp_path / "s2"
+    items = ["x", None, {"result": "完了", "report": "/no"}, {"result": "関門", "report": str(first / "r.md")},
+             {"result": "関門", "report": str(second / "r.md")}]  # fmt: skip
+    done, _ = _gate_state(tmp_path, [], {}, items=items)
+    reason, pr, report = pgate.gate_detail(str(done))
+    assert (pr, report) == (None, str(first / "r.md")) and str(first / "progress.jsonl") in reason
+
+
+def test_gate_detail_current_without_a_report_reads_the_working_directory(tmp_path, monkeypatch):
+    """report が無い関門の項目は report を空にし、作業ディレクトリ（`.`）の progress.jsonl を読む。"""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "o.out").write_text(json.dumps({"metrics": {"reason": "ここ", "main_pr": 8}}) + "\n")
+    (tmp_path / "progress.jsonl").write_text(json.dumps(_step("o.out")) + "\n")
+    done = tmp_path / "d.json"
+    done.write_text(json.dumps({"items": [{"result": "関門", "report": None}]}))
+    assert pgate.gate_detail(str(done)) == ("ここ", 8, "")
+
+
+@pytest.mark.parametrize("body", ['{"items": null}', "{}", '{"items": []}'])
+def test_gate_detail_current_returns_none_without_items(tmp_path, body):
+    done = tmp_path / "d.json"
+    done.write_text(body)
+    assert pgate.gate_detail(str(done)) is None
+
+
+def test_gate_detail_current_raises_on_an_unreadable_done(tmp_path):
+    with pytest.raises(OSError):
+        pgate.gate_detail(str(tmp_path / "none.json"))
+    bad = tmp_path / "bad.json"
+    bad.write_text("{")
+    with pytest.raises(ValueError):
+        pgate.gate_detail(str(bad))
+
+
 def test_retry_after_a_confirmed_gate_relaunches_the_confirm_with_a_new_seq(env, tmp_path):
     """決定 2 の「打ち直す」: 同じ承認のまま、答えた問いの id を添えた新しい目的で確定の起動を流し直す。"""
     main, _, _, seq = _confirmed(env, tmp_path)
