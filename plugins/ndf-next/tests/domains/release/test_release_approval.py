@@ -397,9 +397,7 @@ def test_merged_admin_release_resume_writes_the_missing_record_once() -> None:
 
 def test_admin_record_failure_is_reported_apart_from_the_merge() -> None:
     """決定 7: 記録を書けなければ、マージは済んだまま record_error に理由を残す。"""
-    hub = AdminHub(
-        pulls={7: pull()}, comments_of={7: [trail_comment("approved", HEAD)]}, fail_record=True
-    )
+    hub = AdminHub(pulls={7: pull()}, comments_of={7: [trail_comment("approved", HEAD)]}, fail_record=True)
     done = _admin_lander(hub).land(7)
     assert done.merged and done.admin and done.admin_record is None and done.record_error and hub.admin_merged == [7]
 

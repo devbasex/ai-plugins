@@ -92,7 +92,7 @@ def test_merge_plan_fixes_non_test_check_failures_and_pushes():
     落ちたテストが無いので、手元のテスト（ci-local）を打たずに push する。
     """
     visited, state = walk(plan_of("merge"), {"ci": [stopped("check_failed")]})
-    assert visited == ["release-guard", "conflict-check", "ci", "check-repeat", "check-fix", "push", "conflict-check", "ci", "merge"]
+    assert visited == ["conflict-check", "ci", "check-repeat", "check-fix", "push", "conflict-check", "ci", "release-guard", "merge"]
     assert state.status == OK
 
 
@@ -166,7 +166,7 @@ def test_merge_gate_and_merge_steps_are_fixed_in_check_and_design_merge():
 
 def test_merge_gate_rejected_ends_without_merge():
     """現状固定: マージの承認ゲートで rejected と答えると、merge を打たずに ok で終わる。"""
-    expected_tail = {"check": ["ci", "behavior-recheck", "merge-gate"], "design_merge": ["conflict-check", "merge-gate"]}
+    expected_tail = {"check": ["ci", "behavior-recheck", "release-guard", "merge-gate"], "design_merge": ["conflict-check", "merge-gate"]}
     for purpose, tail in expected_tail.items():
         visited, state = walk(plan_of(purpose), {"merge-gate": [gate()]}, answers=["rejected"])
         assert visited[-len(tail) :] == tail, purpose
@@ -241,3 +241,23 @@ def test_design_review_gets_rebuild_findings():
     assert visited.index("rebuild") < visited.index("review")
     assert visited[visited.index("review") + 1] == "push-reviewed"
     assert state.status == OK
+
+
+@pytest.mark.parametrize("purpose", ["merge", "check", "close"])
+def test_a_production_pr_is_handed_to_the_deploy_stage_before_the_merge(purpose):
+    """#3572 の I6: release-guard が本番の PR（原因 production_pr）を返せば、マージを打たずに ok で終わる。承認の前の CI の直しは手前で流れる。"""
+    visited, state = walk(plan_of(purpose), {"release-guard": [stopped("production_pr")], "merge-gate": [gate()]}, answers=["approved"])
+    assert visited[-1] == "release-guard" and "merge" not in visited and "merge-gate" not in visited
+    assert state.status == OK
+
+
+def test_a_github_flow_declaration_targets_main(tmp_path):
+    """#3572 の受け入れ条件 15: 宣言が行 github-flow（base_branch も production_branch も main）なら、PR の宛先は main。"""
+    import json
+
+    from ndf.core import route as route_mod
+
+    decl = {"version": 1, "base_branch": "main", "production_branch": "main", "branch_flow": {"promotion": "direct", "start": "production"}}
+    (tmp_path / ".ndf").mkdir()
+    (tmp_path / ".ndf" / "worktree.json").write_text(json.dumps(decl), encoding="utf-8")
+    assert route_mod.default_base(tmp_path) == "main"

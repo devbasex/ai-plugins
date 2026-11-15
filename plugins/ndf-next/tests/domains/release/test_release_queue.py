@@ -4,11 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from ndf.adapters import ci
 from ndf.adapters.github import MERGE_QUEUE_PENDING, GitHubError, MergeOutcome, Pull
 from ndf.domains.release import land
 
-from ._fakes import HEAD, FakeHub, ci_reading, pull, release_lander, trail_comment
+from ._fakes import HEAD, FakeHub, pull, release_lander, trail_comment
 
 
 class _QueueHub(FakeHub):

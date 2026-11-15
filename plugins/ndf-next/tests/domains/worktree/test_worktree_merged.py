@@ -87,6 +87,31 @@ def test_sprint_branch_uses_start_record_over_declaration(main_repo: Path, run_g
     assert [i["result"] for i in rec.items if i["kind"] == "branch"] == ["deleted"] and not wt.exists()
 
 
+GITHUB_FLOW_DECL = {
+    "version": 1,
+    "base_branch": "main",
+    "production_branch": "main",
+    "branch_flow": {"promotion": "direct", "start": "production", "doc_prs": "sprint", "integrate": "release"},
+}
+
+
+def test_github_flow_declaration_passes_the_schema_and_starts_the_sprint_from_main() -> None:
+    """#3572 の受け入れ条件 15: 行 github-flow の宣言はスキーマを通り、スプリントの起点は本番ブランチ（main）。"""
+    from ndf import contracts
+
+    assert contracts.schema_errors(GITHUB_FLOW_DECL, contracts.schema_path("declarations/worktree")) == []
+    decl = declaration.Declaration(GITHUB_FLOW_DECL)
+    assert decl.start_channel == "production" and create.start_branch(None, decl) == "main"  # type: ignore[arg-type]
+
+
+def test_github_flow_does_not_keep_the_merged_sprint_branch() -> None:
+    """#3572 の I10: 行 github-flow の keeps_sprint は偽で、マージした時点でスプリントブランチを残さない。"""
+    from ndf.domains.worktree import merged_decide
+
+    flow = {**GITHUB_FLOW_DECL["branch_flow"], "production_branch": "main"}
+    assert merged_decide.sprint_keep("sprint/s1", flow, contained=False, remote="origin") is None
+
+
 def test_read_flow_record(tmp_path: Path) -> None:
     path = tmp_path / "flow.json"
     path.write_text(json.dumps({"promotion": "selected"}), encoding="utf-8")

@@ -314,7 +314,7 @@
 | `ndf release-steps verification-record` | `--root`（string・任意・既定 `"."`）: リポジトリの根<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば origin<br>`--pr`（integer・必須）<br>`--record`（string・必須）: リリース後テストの記録の JSON（スキーマ release-verification） |
 | `ndf release-steps verify-ref` | `--root`（string・任意・既定 `"."`）: リポジトリの根<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば origin |
 
-結果の `metrics`: 決まった項目を持たない。`items` の要素: `change`（string）・`checks`（integer）・`checks_passed`（integer）・`checks_skipped`（integer）・`failed`（array of string）・`kind`（string）・`name`（string）・`number`（integer）・`outcome`（string）・`path`（string）・`reason`（string）・`result`（string）・`value`（—）
+結果の `metrics`: 決まった項目を持たない。`items` の要素: `change`（string）・`checks`（integer）・`checks_passed`（integer）・`checks_skipped`（integer）・`detail`（string）・`failed`（array of string）・`kind`（string）・`name`（string）・`number`（integer）・`outcome`（string）・`path`（string）・`reason`（string）・`result`（string）・`value`（—）
 
 ## `ndf route`
 

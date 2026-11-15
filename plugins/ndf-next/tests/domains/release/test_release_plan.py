@@ -134,7 +134,14 @@ def test_guard_hands_a_production_pr_to_the_deploy_stage(monkeypatch, capsys) ->
 def test_guard_refuses_the_verify_ref(monkeypatch, capsys, tmp_path) -> None:
     """受け入れ条件 14・I9: head が検証の ref なら refused（終了コード 1）で止まる。"""
     (tmp_path / ".ndf").mkdir()
-    row = {"target": "検証版", "kind": "auto", "trigger": "wf", "channel": "verify", "versioned": False, "verify": {"ref": "verify/next", "marketplace": "x-next"}}
+    row = {
+        "target": "検証版",
+        "kind": "auto",
+        "trigger": "wf",
+        "channel": "verify",
+        "versioned": False,
+        "verify": {"ref": "verify/next", "marketplace": "x-next"},
+    }
     (tmp_path / ".ndf" / "project.json").write_text(json.dumps({"delivery": [row]}), encoding="utf-8")
     hub = _HeadHub(pulls={9: pull(number=9, ref="verify/next")})
     monkeypatch.setattr(release_cli, "_hub", lambda args: hub)
