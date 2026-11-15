@@ -157,7 +157,7 @@ def sent(fn, *args, **kw):
         reply("stopped", f"計画の台帳へ書けない: {exc}", code=2)
 
 
-def _resend(s: plg.Sent) -> dict:
+def _request_resent_fields(s: plg.Sent) -> dict:
     """依頼を送った結果から出力へ足す値。書いたなら空、同じキーで中身が同じ再送なら `already`・`answered`（#3597 の決定 5）。
     同じキーで中身の違う依頼は送ったと返さず、既にある id と理由を添えて 1（失敗）で終える。終了コード 5 は全体で「CD の結果が失敗」の
     見出しを持つため使わない（`exit_codes.EXIT_LABELS`）。"""
@@ -174,7 +174,7 @@ def _sent_verb(already, fresh: str = "送った") -> str:
     return "送り済み" if already else fresh
 
 
-def _already(s) -> dict:
+def _resent_fields(s) -> dict:
     """答え・確定・締め・止める指示の行が既にあったか（終了コードは変えない）。"""
     return {"already": True} if isinstance(s, plg.Sent) and not s.written else {}
 
@@ -264,7 +264,9 @@ def cmd_compose(a) -> None:
 def cmd_confirm(a) -> None:
     main = main_of()
     q = accepting(main, a.name)
-    got = _already(sent(pl.resume_plan, main, a.name, {"n": a.n, "phase": "confirm", "take": a.take}, f"confirm:{a.n}:{a.take or '-'}"))
+    got = _resent_fields(
+        sent(pl.resume_plan, main, a.name, {"n": a.n, "phase": "confirm", "take": a.take}, f"confirm:{a.n}:{a.take or '-'}")
+    )
     reply("ok", f"リリース {a.n} の承認を{_sent_verb(got)}{QUEUED if q else ''}", n=a.n, take=a.take, **got, **q)
 
 
@@ -289,7 +291,7 @@ def cmd_settle(a) -> None:
     q = accepting(main, a.name)
     res, version = ("rejected", None) if a.rejected else _release_result(a.done)
     msg = {"n": a.n, "phase": "settle", "result": res, "version": version, "reason": a.reason}
-    got = _already(sent(pl.resume_plan, main, a.name, msg, f"settle:{a.n}"))
+    got = _resent_fields(sent(pl.resume_plan, main, a.name, msg, f"settle:{a.n}"))
     reply("ok", f"リリース {a.n} の結果 {res} を{_sent_verb(got)}{QUEUED if q else ''}", result=res, version=version, **got, **q)
 
 
@@ -303,7 +305,7 @@ def cmd_stop(a) -> None:
     st, got = plg.plan_state(main, a.name, pl.run_status(main, a.name)), {}
     if st == "running":
         msg, key = ({"kind": "stop", "force": True}, "stop:force") if a.force else ({"kind": "stop"}, "stop")
-        got = _already(sent(pl.deliver_message, main, a.name, msg, "inbox", key))
+        got = _resent_fields(sent(pl.deliver_message, main, a.name, msg, "inbox", key))
     elif st == "lost":  # 失われた計画は閉じる（作り直さない。I11）
         sent(plg.append_ledger_row, main, a.name, "closed", "closed", by="organizer")
     left = [ln.name for ln in plan.lanes if pr_run.relay(main, "stop", ln.name, "--json")[0] not in (0, 3)]
@@ -327,7 +329,7 @@ def cmd_request(a) -> None:
         _ = a.verify_plan and sent(send_verify, main, a.name, a.lane, Path(a.state), a.verify_plan, version)
         reply("ok", "自分の Pull Request はすでに本番チャネルにある。依頼を送らずに続きへ進む", result="released", version=version)
     rid = sent(pl.send_release_request, main, a.name, a.lane, a.prs, a.issues, Path(a.state), a.verify_plan)
-    again = _resend(rid)  # 中身の違う同じ id の依頼は 1 で終え、依頼の記録を書かない
+    again = _request_resent_fields(rid)  # 中身の違う同じ id の依頼は 1 で終え、依頼の記録を書かない
     pl.write_request(Path(a.state), {"id": rid, "plan": a.name, "lane": a.lane, "prs": a.prs})
     nxt = f"python3 {SELF} await {a.name} --from {Path(a.state) / 'work' / 'request.txt'}"
     summary = f"リリースの依頼 {rid} を{_sent_verb(again)}（リリース待ち）。答えは parallel.py await で読む{QUEUED if q else ''}"
@@ -376,7 +378,7 @@ def cmd_request_ask(a) -> None:
     rid = sent(
         pl.request_ask, main, a.name, a.lane, got.get("tool_input") or {}, got.get("cwd") or os.getcwd(), str(got.get("ledger_id") or "")
     )
-    again = _resend(rid)
+    again = _request_resent_fields(rid)
     reply("ok", f"問いの依頼 {rid} を{_sent_verb(again, 'オーガナイザーへ送った')}{QUEUED if q else ''}", id=str(rid), **again, **q)
 
 
@@ -401,7 +403,7 @@ def cmd_request_gate2(a) -> None:
         reply("stopped", f"done を読めない: {exc}", code=2)
     except durable.DurableError as exc:
         reply("stopped", f"耐久の記録を読めない: {exc}", code=2)
-    again = _resend(rid)
+    again = _request_resent_fields(rid)
     what = _sent_verb(again, "オーガナイザーへ送った")
     reply("ok", f"リリース承認ゲートの依頼 {rid} を{what}。答えを待つ間は止まる{QUEUED if q else ''}", id=str(rid), **again, **q)
 
