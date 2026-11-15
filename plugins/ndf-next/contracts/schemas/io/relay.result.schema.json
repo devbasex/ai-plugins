@@ -48,6 +48,14 @@
         "no_policy_rows": {
           "type": "integer",
           "description": "方針の列が無く現行方式として読んだ行の数（context report）"
+        },
+        "accounts": {
+          "type": "integer",
+          "description": "登録したアカウントの数（account list）"
+        },
+        "keys": {
+          "type": "integer",
+          "description": "登録した API キーの数（account list）"
         }
       }
     },
@@ -67,25 +75,25 @@
               "string",
               "null"
             ],
-            "description": "複製・エントリポイントの状態（install）か、ラッパーの状態（hub ls）"
+            "description": "複製・エントリポイントの状態（install）か、ラッパーの状態（hub ls）、登録の状態（account list・check）"
           },
           "account": {
             "type": [
               "string",
               "null"
             ],
-            "description": "選ばれるアカウント（account）か、次に使うアカウント（decide）"
+            "description": "選ばれるアカウント（account）か、次に使うアカウント（decide）、API キーを結び付けたアカウント（account add-api-key・list）"
           },
           "kind": {
             "type": "string",
-            "description": "次の手の種類（decide）か、待ちを抱えた実行の種類（pending）"
+            "description": "次の手の種類（decide）か、待ちを抱えた実行の種類（pending）、登録の種類 oauth・metered・api_key（account の登録の副命令）"
           },
           "reason": {
             "type": [
               "string",
               "null"
             ],
-            "description": "次の手の理由（decide）か、ラッパーの状態の理由（hub ls）、再起動の理由（context record）"
+            "description": "次の手の理由（decide）か、ラッパーの状態の理由（hub ls）、再起動の理由（context record）、確かめの失敗の区分（account add-bedrock・add-api-key・check）"
           },
           "prompt": {
             "type": "string",
@@ -232,7 +240,7 @@
           },
           "source": {
             "type": "string",
-            "description": "行の書き手（context record）"
+            "description": "行の書き手（context record）、従量の接続の宣言の出所 env・saved（account list）"
           },
           "session_id": {
             "type": [
@@ -409,6 +417,74 @@
           "no_policy_rows": {
             "type": "integer",
             "description": "方針の列が無い行の数（context report）"
+          },
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "アカウントのメールアドレス（account add・list）"
+          },
+          "org_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "アカウントの組織名（account add・list）"
+          },
+          "pinned": {
+            "type": "boolean",
+            "description": "次の区間から使うと指定したアカウントか（account list）"
+          },
+          "percent": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "使用率のキャッシュの使用率（account list。読めていなければ null）"
+          },
+          "capacity_declared": {
+            "type": "object",
+            "description": "宣言した 5 時間と週の枠の大きさ（account list・capacity）"
+          },
+          "provider": {
+            "type": "string",
+            "description": "従量の接続の提供元（account add-bedrock・list・check）"
+          },
+          "details": {
+            "type": "object",
+            "description": "従量の接続のプロファイル・地域・モデル（account add-bedrock・list・check）"
+          },
+          "keys": {
+            "type": "array",
+            "description": "環境変数の宣言の変数の名前（account list。値は出さない）"
+          },
+          "monthly_usd": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "API キーの月の額（account add-api-key・api-key-monthly・list）"
+          },
+          "replaced": {
+            "type": "boolean",
+            "description": "前の登録を置き換えたか（account add-bedrock・add-api-key）"
+          },
+          "use": {
+            "type": "string",
+            "description": "API キーへ切り替える使い方（account api-key-use）"
+          },
+          "weekly_at": {
+            "type": "number",
+            "description": "API キーへ切り替える週の使用率の閾値（account api-key-use）"
+          },
+          "url": {
+            "type": "string",
+            "description": "認可の URL（account add）"
+          },
+          "expires_at": {
+            "type": "string",
+            "description": "登録の途中の状態の期限（account add）"
           }
         }
       }

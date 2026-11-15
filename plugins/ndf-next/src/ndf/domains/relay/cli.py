@@ -2,6 +2,8 @@
 
     ndf relay install [--replace-old] | uninstall | status   # 複製 ~/.claude/ndf/relay.py と PATH のエントリポイント ndf-relay
     ndf relay account use <名前> | show | clear               # 子の claude を起動するアカウントの指定（#2464）
+    ndf relay account add | add-bedrock | add-api-key | api-key-monthly | api-key-use | list | capacity | remove | check
+                                                              # アカウントと従量の接続の登録（旧い置き場と同じ。#3569）
     ndf relay run --name <名前> [--prompt <1 行>] [-- <claude の引数>]   # ラッパーを今の端末で動かす
     ndf relay spawn [--name <名前>] [--cwd <dir>] [--role <役割>] [--plan <計画>] [-- <claude の引数>]
     ndf relay restart <名前> | stop <名前> | stop --all | ls   # リレーハブへの依頼と一覧
@@ -11,12 +13,14 @@
     ndf relay mark <session_id>                               # 子へ入力を送る前に中継の印を立てる（決定 92）
     ndf relay decide < 区間の状態の JSON                       # 区間を切り替えるかの判断（#2962）
 
-副命令の説明は `COMMANDS`・`ACCOUNT_COMMANDS` の表から作り、`--help` の一覧と実装が食い違わない（#2898）。
+副命令の説明は `COMMANDS`・`ACCOUNT_COMMANDS`・`ACCOUNT_REGISTRY` の表から作り、`--help` の一覧と実装が食い違わない（#2898）。
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import json
 import os
 import sys
@@ -24,12 +28,12 @@ import termios
 import time
 import tty
 from pathlib import Path
-from typing import Any, Callable, Mapping, Optional
+from typing import Any, Callable, Mapping, NamedTuple, Optional
 
 from ndf import cli, identity
 from ndf.contracts import causes, limits, result
 from ndf.domains.relay import account_decide, accounts, hub, install, lane_question, marks, notice, pending, registry, switch_decide, wrapper
-from ndf.domains.relay import context_policy, context_records, context_report
+from ndf.domains.relay import account_login, account_metered, account_registry, context_policy, context_records, context_report
 from ndf.domains.relay.tmux import Tmux
 
 # 結果 JSON の tool の名前は副命令の名前（正本は `cli.COMMANDS`）
@@ -38,7 +42,7 @@ COMMANDS = {
     "install": "中継の複製と PATH のエントリポイントを置く",
     "uninstall": "置いた複製と PATH のエントリポイントを消す",
     "status": "複製と PATH のエントリポイントの有無",
-    "account": "子の claude を起動するアカウントの指定",
+    "account": "子の claude を起動するアカウントの指定と、アカウント・従量の接続の登録",
     "run": "ラッパーを今の端末で動かす",
     "spawn": "名前つきのラッパーを tmux で起動する",
     "restart": "名前つきのラッパーを起こし直す（止める前に上限を判定する）",
@@ -118,6 +122,8 @@ def _install_run(args: argparse.Namespace) -> int:
 
 
 def _account(args: argparse.Namespace) -> int:
+    if args.account_action in ACCOUNT_REGISTRY_HANDLERS:
+        return _account_registry(args)
     state_dir = identity.load().state_dir
     if args.account_action == "use":
         accounts.use(state_dir, args.name)
@@ -127,6 +133,148 @@ def _account(args: argparse.Namespace) -> int:
         return result.emit(result.result(TOOL, result.OK, "指定を消した" if done else "指定は無かった"))
     name = accounts.chosen(os.environ, state_dir)
     return result.emit(result.result(TOOL, result.OK, f"選ばれるアカウント: {name or '（claude の既定）'}", items=[{"account": name}]))
+
+
+def _capacity_arg(v: str) -> Optional[float]:
+    """枠の引数（正の数か `-`）。`-` は None。"""
+    if v == "-":
+        return None
+    try:
+        x = float(v)
+    except ValueError:
+        x = 0.0
+    if not 0 < x < float("inf"):
+        raise account_registry.AccountError(f"枠は正の数（USD）か - で渡す: {v}")
+    return x
+
+
+def _acc_add(store: Path, a: argparse.Namespace) -> int:
+    code = (sys.stdin.readline() if a.code == "-" else a.code) if a.code is not None else None
+    got = account_login.add(store, a.name, code, os.environ)
+    if got.needs_code:
+        detail = f"認可の URL: {got.url} をブラウザで開き、出た認可コードを {got.expires_at} までに渡す: printf '%s\\n' '<コード>' | ndf relay account add {a.name} --code -"
+        return result.emit(result.stopped(TOOL, "input_missing", detail, items=[{"name": a.name, "kind": "oauth", "url": got.url, "expires_at": got.expires_at}]))
+    who = f"{got.email}・{got.org_name}" if got.org_name else got.email
+    return result.emit(result.result(TOOL, result.OK, f"登録した: {a.name}（{who}）", items=[{"name": a.name, "kind": "oauth", "email": got.email, "org_name": got.org_name}]))
+
+
+def _acc_bedrock(store: Path, a: argparse.Namespace) -> int:
+    asked = account_metered.Target(a.profile or "", a.region or "", a.model or "")  # noqa: NDF501 利用者の入力: 省いた欄は空で渡し、候補を添えて止める
+    row = account_metered.add_bedrock(store, os.environ, asked, a.yes)
+    return result.emit(result.result(TOOL, result.OK, f"登録した: 従量の接続（Bedrock・{'・'.join(row['details'].values())}）", items=[row]))
+
+
+def _acc_api_key(store: Path, a: argparse.Namespace) -> int:
+    usd = account_metered.amount(a.monthly)
+    key = account_metered.read_key(a.key_file, "" if a.key_file else sys.stdin.readline())
+    row = account_metered.add_api_key(store, os.environ, account_metered.KeyRequest(a.name, a.account, key, usd))
+    note = "組織に買ったクレジットか自動チャージがあると、月の API クレジットを使い切った後もそちらから払われる（Console の spend limit で抑える）"
+    return result.emit(result.result(TOOL, result.OK, f"登録した: {a.name}（アカウント {a.account}）", items=[row], warnings=[note]))
+
+
+def _acc_monthly(store: Path, a: argparse.Namespace) -> int:
+    row = account_metered.set_monthly(store, a.name, account_metered.amount(a.usd, allow_zero=True))
+    usd = row["monthly_usd"]
+    return result.emit(result.result(TOOL, result.OK, f"月の額を外した: {a.name}" if usd is None else f"月の額: {a.name} {usd:g} ドル", items=[row]))
+
+
+def _acc_use(store: Path, a: argparse.Namespace) -> int:
+    row = account_metered.set_use(store, a.mode, account_metered.weekly_at(a.weekly_at))
+    return result.emit(result.result(TOOL, result.OK, f"API キーの使い方: {row['use']}（閾値 {row['weekly_at']:g}%）", items=[row]))
+
+
+def _acc_list(store: Path, a: argparse.Namespace) -> int:
+    state_dir = identity.load().state_dir
+    rows, warnings = account_registry.list_rows(store, os.environ, accounts.pinned(state_dir), accounts.usages(state_dir))
+    metrics = {"accounts": sum(r["kind"] == "oauth" for r in rows), "keys": sum(r["kind"] == "api_key" for r in rows)}
+    summary = f"登録: アカウント {metrics['accounts']} 件・API キー {metrics['keys']} 件" if rows else "登録済みのアカウントは無い"
+    return result.emit(result.result(TOOL, result.OK, summary, items=rows, metrics=metrics, warnings=warnings))
+
+
+def _acc_capacity(store: Path, a: argparse.Namespace) -> int:
+    row = account_registry.set_capacity(store, a.name, _capacity_arg(a.five), _capacity_arg(a.seven))
+    return result.emit(result.result(TOOL, result.OK, f"枠の大きさを宣言した: {a.name}", items=[row]))
+
+
+def _acc_remove(store: Path, a: argparse.Namespace) -> int:
+    if a.target != account_registry.METERED and a.target in account_registry.names(store):
+        account_registry.detach(store, a.target)  # logout が設定ディレクトリの中を消す前に、共有の項目への symlink を外す
+        out = account_login.logout(store, a.target, os.environ)
+        account_registry.unregister(store, a.target)
+        warnings = None if out else ["claude auth logout が通らなかった（登録は外した）"]
+        return result.emit(result.result(TOOL, result.OK, f"外した: {a.target}", items=[{"name": a.target, "kind": "oauth"}], warnings=warnings))
+    row = account_metered.remove(store, a.target)
+    return result.emit(result.result(TOOL, result.OK, f"外した: {a.target}", items=[row]))
+
+
+def _acc_check(store: Path, a: argparse.Namespace) -> int:
+    row = account_metered.check(store, os.environ, a.target)
+    return result.emit(result.result(TOOL, result.OK, f"呼べる: {a.target}", items=[row]))
+
+
+class AccountSub(NamedTuple):
+    """アカウントの登録の副命令の 1 つ（名前・説明・ハンドラ）。"""
+
+    name: str
+    text: str
+    handler: Callable[[Path, argparse.Namespace], int]
+
+
+# アカウントと従量の接続の登録の副命令（旧い置き場と同じ。#3569）
+ACCOUNT_REGISTRY = (
+    AccountSub("add", "OAuth のアカウントを登録する（--code なしで認可の URL を出し、--code で認可コードを渡す）", _acc_add),
+    AccountSub("add-bedrock", "Bedrock の従量の接続を確かめて保存する", _acc_bedrock),
+    AccountSub("add-api-key", "API キーを確かめて保存する（値は標準入力か --key-file）", _acc_api_key),
+    AccountSub("api-key-monthly", "API キーの月の額を宣言する（0 で外す）", _acc_monthly),
+    AccountSub("api-key-use", "API キーへ切り替える使い方と閾値を読む・書く", _acc_use),
+    AccountSub("list", "登録したアカウント・従量の接続・API キーの一覧", _acc_list),
+    AccountSub("capacity", "アカウントの 5 時間と週の枠の大きさを宣言する（- で外す）", _acc_capacity),
+    AccountSub("remove", "アカウント・従量の接続（metered）・API キーの登録を外す", _acc_remove),
+    AccountSub("check", "従量の接続（metered）か API キーが呼べるかを確かめる（状態は記録しない）", _acc_check),
+)
+ACCOUNT_REGISTRY_HANDLERS = {sub.name: sub.handler for sub in ACCOUNT_REGISTRY}
+
+
+def _account_registry(args: argparse.Namespace) -> int:
+    """登録の副命令を動かす。使い方の誤りは invalid、待ちきれない排他と書けない置き場は failed で止まる。"""
+    try:
+        return ACCOUNT_REGISTRY_HANDLERS[args.account_action](account_registry.store_dir(os.environ, identity.load().name), args)
+    except account_metered.MeteredError as exc:
+        return result.emit(result.stopped(TOOL, exc.kind, str(exc), items=exc.items))
+    except account_login.LoginError as exc:
+        return result.emit(result.stopped(TOOL, exc.kind, str(exc)))
+    except account_registry.NotRegistered as exc:
+        return result.emit(result.stopped(TOOL, "refused", str(exc)))
+    except account_registry.AccountLockTimeout as exc:
+        return result.emit(result.stopped(TOOL, "store_busy", str(exc)))
+    except OSError as exc:
+        return result.emit(result.stopped(TOOL, "unknown", f"アカウントの置き場へ書けない: {exc}"))
+
+
+def _account_parser(sub: Any) -> None:
+    texts = {**ACCOUNT_COMMANDS, **{s.name: s.text for s in ACCOUNT_REGISTRY}}
+    acc = sub.add_parser("account", help=COMMANDS["account"], description="副命令: " + " / ".join(f"{k}（{v}）" for k, v in texts.items()))
+    acc_sub = acc.add_subparsers(dest="account_action", required=True)
+    p = {name: acc_sub.add_parser(name, help=text, description=text) for name, text in texts.items()}
+    p["use"].add_argument("name")
+    p["add"].add_argument("name", help="アカウントの名前（英小文字・数字・- と _ の 32 字まで）")
+    p["add"].add_argument("--code", help="認可コード。- なら標準入力の 1 行（引数と記録に残さない）")
+    for opt, text in (("--profile", "AWS のプロファイル"), ("--region", "地域（省けばプロファイルの region）"), ("--model", "モデルの ID")):
+        p["add-bedrock"].add_argument(opt, help=text)
+    p["add-bedrock"].add_argument("--yes", action="store_true", help="確かめが通れば保存する（前の宣言を置き換える）")
+    p["add-api-key"].add_argument("name", help="API キーの名前")
+    p["add-api-key"].add_argument("--account", required=True, help="結び付ける登録済みアカウント")
+    p["add-api-key"].add_argument("--key-file", help="キーの値を 1 行目に持つファイル（省けば標準入力の 1 行）")
+    p["add-api-key"].add_argument("--monthly", help="月の額（ドル）")
+    p["api-key-monthly"].add_argument("name", help="API キーの名前")
+    p["api-key-monthly"].add_argument("usd", help="月の額（ドル。0 で外す）")
+    p["api-key-use"].add_argument("mode", nargs="?", choices=account_registry.USES, help="使い方（省けば今の値を出す）")
+    p["api-key-use"].add_argument("--weekly-at", help="閾値（百分率。1〜100）")
+    p["capacity"].add_argument("name", help="アカウントの名前")
+    p["capacity"].add_argument("five", help="5 時間の枠（USD か -）")
+    p["capacity"].add_argument("seven", help="週の枠（USD か -）")
+    p["remove"].add_argument("target", help="アカウントの名前・metered・API キーの名前")
+    p["check"].add_argument("target", help="metered か API キーの名前")
 
 
 def _pending_read(root: Path) -> pending.Pending:
@@ -363,14 +511,7 @@ def _parser() -> argparse.ArgumentParser:
     p = {name: sub.add_parser(name, help=text, description=text) for name, text in COMMANDS.items() if name not in ("account", "context")}
     _context_parser(sub)
     p["install"].add_argument("--replace-old", action="store_true", help="旧い NDF の複製を置き換える（旧いラッパーが動いていれば断る）")
-    acc = sub.add_parser(
-        "account", help=COMMANDS["account"], description="副命令: " + " / ".join(f"{k}（{v}）" for k, v in ACCOUNT_COMMANDS.items())
-    )
-    acc_sub = acc.add_subparsers(dest="account_action", required=True)
-    for name, text in ACCOUNT_COMMANDS.items():
-        a = acc_sub.add_parser(name, help=text)
-        if name == "use":
-            a.add_argument("name")
+    _account_parser(sub)
     for name in ("run", "spawn"):
         p[name].add_argument("--name")
         p[name].add_argument("rest", nargs=argparse.REMAINDER)
@@ -413,11 +554,15 @@ HANDLERS: dict[str, Callable[[argparse.Namespace], int]] = {
 
 
 def main(argv: list[str]) -> int:
+    secret_args = argv[:2] == ["account", "add-api-key"]
     try:
-        args = _parse(argv)
+        with contextlib.redirect_stderr(io.StringIO()) if secret_args else contextlib.nullcontext():
+            args = _parse(argv)
     except SystemExit as exc:
+        if exc.code and secret_args:  # 余った引数はキーの値でありうるので、引数を写さない
+            print("引数を読めない（引数は表示しない）。キーの値は標準入力か --key-file で渡す", file=sys.stderr)
         return causes.exit_code("invalid") if exc.code else 0
     try:
         return HANDLERS[args.action](args)
-    except (accounts.AccountError, marks.MarkError, registry.RegistryError, EnvError) as exc:
+    except (accounts.AccountError, account_registry.AccountError, marks.MarkError, registry.RegistryError, EnvError) as exc:
         return result.emit(result.stopped(TOOL, "invalid", str(exc)))

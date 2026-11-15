@@ -22,6 +22,9 @@ NDF が読む環境変数と、NDF が子のプロセスへ渡す環境変数で
 | `HOME` | user | path | — | 利用者のホームディレクトリ。worktree の書き込み先の判定が ~ で始まるパスを解くときと、学習の結果のキャッシュの置き場を求めるときに読む。無ければ ~ を空として解く | 内部（予告なく変えてよい） |
 | `KIRO_AGENT` | runtime | string | — | Kiro のエージェントの名前（ホストの推定） | 内部（予告なく変えてよい） |
 | `KIRO_PLUGIN_ROOT` | runtime | path | — | Kiro のプラグインの根（ホストの推定） | 内部（予告なく変えてよい） |
+| `NDF_ACCOUNTS_DIR` | user | path | — | アカウントの登録の置き場（ndf relay account の登録の副命令）。無ければ <共有の設定ディレクトリ>/ndf/accounts（旧いプラグインと同じ置き場） | 内部（予告なく変えてよい） |
+| `NDF_API_KEY_CHECK_MODEL` | user | string | — | API キーの確かめに使うモデル。無ければ claude-haiku-4-5 | 内部（予告なく変えてよい） |
+| `NDF_API_KEY_CHECK_URL` | user | string | — | API キーの確かめの要求の宛先。無ければ https://api.anthropic.com/v1/messages | 内部（予告なく変えてよい） |
 | `NDF_CALLER_PLUGIN_ROOT` | ndf | path | — | bin/ndf が子へ自分の根を渡す前に写した、呼び出し元の CLAUDE_PLUGIN_ROOT（空なら無かった）。ほかのプラグインの根なら旧い状態の置き場を退避しない。中継が起動するセッションへ渡さない | 内部（予告なく変えてよい） |
 | `NDF_CLAUDE_ACCOUNT` | user | string | — | 子の claude を起動する登録済みのアカウントの名前 | 内部（予告なく変えてよい） |
 | `NDF_CLAUDE_API_KEY_GENERATION` | ndf | integer | — | 子へ渡した API キーの世代。入れ子の監督が読む | 内部（予告なく変えてよい） |
@@ -49,7 +52,9 @@ NDF が読む環境変数と、NDF が子のプロセスへ渡す環境変数で
 | `NDF_RELAY_STOP_WAIT` | user | seconds | — | 名前つきの stop がラッパーの終わりを待つ上限。無ければ上限の宣言の値 | 内部（予告なく変えてよい） |
 | `NDF_RELAY_TMUX` | user | path | — | リレーハブが呼ぶ tmux の実行ファイル。無ければ PATH の tmux | 内部（予告なく変えてよい） |
 | `NDF_RUNTIME_SESSION` | user | string | — | ランタイムのセッションを <pid>:<開始時刻> で指定する（テストと CI）。無ければ祖先のプロセスから探す | 内部（予告なく変えてよい） |
+| `NDF_SHARED_CONFIG_DIR` | ndf | path | — | アカウントの子の中で、元の CLAUDE_CONFIG_DIR を持つ（空なら ~/.claude）。アカウントの登録の置き場を決める | 内部（予告なく変えてよい） |
 | `NDF_STATE_HOME` | user | path | — | 状態の置き場の根。置き場は <値>/<プラグイン名>（XDG_STATE_HOME と同じ読み方。入れ替えの前に旧い NDF と同じ値を渡されても、旧い置き場を退避しない）。無ければ XDG_STATE_HOME の下 | 公開 |
+| `NDF_SUPERVISE_CLAUDE_FALLBACK` | user | string | — | 従量の接続の宣言（KEY=VALUE を空白区切り）。定義されていれば保存した宣言（metered.json）より先に読む | 内部（予告なく変えてよい） |
 | `NDF_UPKEEP_STATE_DIR` | user | path | — | 棚卸しの状態（候補・順位・却下・見積・付け直しの前の状態・深さの記録）の置き場。無ければメインディレクトリの .ndf/backlog/state | 内部（予告なく変えてよい） |
 | `NDF_USAGE_DIR` | user | path | — | 使用量の帳簿（usage.jsonl）の置き場。hook から書いてもスクリプトから書いても同じ置き場になる。無ければ状態の置き場の usage | 内部（予告なく変えてよい） |
 | `NDF_VERSION` | service | string | — | サービスの実行ジョブが入れた NDF の版（開発版は <version>@<コミットの SHA>） | 公開 |

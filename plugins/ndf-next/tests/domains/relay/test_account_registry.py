@@ -1,0 +1,166 @@
+"""アカウントの登録の置き場と OAuth の登録（`ndf relay account add`・`list`・`capacity`・`remove`。#3569）。"""
+
+from __future__ import annotations
+
+import json
+import os
+import stat
+from pathlib import Path
+
+import pytest
+
+from ndf.domains.relay import account_decide, account_login, cli
+from ndf.domains.relay import account_registry as reg
+
+FAKE_CLAUDE = """#!/bin/sh
+# claude auth の代わり。login は URL を出して認可コードの 1 行を待ち、資格情報を書く。status は本人を出す
+if [ "$2" = "login" ]; then
+  echo "Open https://claude.ai/oauth/authorize?x=1"
+  read code
+  [ "$code" = "good" ] || exit 1
+  echo '{"claudeAiOauth": {"accessToken": "t"}}' > "$CLAUDE_CONFIG_DIR/.credentials.json"
+  exit 0
+fi
+if [ "$2" = "status" ]; then
+  if [ -f "$CLAUDE_CONFIG_DIR/.credentials.json" ]; then
+    echo '{"loggedIn": true, "email": "a@example.com", "orgId": "o1", "orgName": "Org"}'
+  else
+    echo '{"loggedIn": false}'
+  fi
+  exit 0
+fi
+exit 1
+"""
+
+
+def _account(store: Path, name: str, **extra) -> Path:
+    d = store / name
+    d.mkdir(parents=True)
+    (d / reg.ACCOUNT_FILE).write_text(json.dumps({"name": name, "email": f"{name}@example.com", "needs_relogin": False, **extra}))
+    return d
+
+
+def _last(capsys) -> dict:
+    return json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+
+
+def test_store_dir_follows_the_old_rules(tmp_path):
+    assert reg.store_dir({"NDF_ACCOUNTS_DIR": str(tmp_path)}, "ndf") == tmp_path
+    assert reg.store_dir({"CLAUDE_CONFIG_DIR": str(tmp_path)}, "ndf") == tmp_path / "ndf" / "accounts"
+    shared = {"NDF_SHARED_CONFIG_DIR": str(tmp_path / "s"), "CLAUDE_CONFIG_DIR": str(tmp_path / "acc")}
+    assert reg.store_dir(shared, "ndf") == tmp_path / "s" / "ndf" / "accounts"
+    assert reg.store_dir({"NDF_SHARED_CONFIG_DIR": "", "CLAUDE_CONFIG_DIR": "x"}, "ndf") == Path.home() / ".claude" / "ndf" / "accounts"
+
+
+def test_register_new_then_relogin_keeps_other_items(tmp_path):
+    store = tmp_path / "store"
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    (staging / reg.CRED_FILE).write_text("{}")
+    reg.register(store, "work1", staging, reg.Identity("a@example.com", "o1", "Org"), 0.0)
+    final = store / "work1"
+    assert json.loads((final / reg.ACCOUNT_FILE).read_text())["org_id"] == "o1"
+    assert stat.S_IMODE(final.stat().st_mode) == 0o700 and stat.S_IMODE((final / reg.CRED_FILE).stat().st_mode) == 0o600
+    (final / "backups").mkdir()
+    (final / reg.USAGE_FILE).write_text("{}")
+    again = tmp_path / "again"
+    again.mkdir()
+    (again / reg.CRED_FILE).write_text('{"new": 1}')
+    reg.register(store, "work1", again, reg.Identity("a@example.com", "", ""), 1.0)
+    assert (final / "backups").is_dir() and not (final / reg.USAGE_FILE).exists() and not again.exists()
+    assert json.loads((final / reg.CRED_FILE).read_text()) == {"new": 1}
+
+
+def test_set_capacity_declares_and_clears(tmp_path):
+    _account(tmp_path, "work1")
+    assert reg.set_capacity(tmp_path, "work1", None, 900)["capacity_declared"] == {"five_hour": None, "seven_day": 900.0}
+    reg.set_capacity(tmp_path, "work1", None, None)
+    assert json.loads((tmp_path / "work1" / reg.ACCOUNT_FILE).read_text())["capacity"] is None
+    with pytest.raises(reg.NotRegistered):
+        reg.set_capacity(tmp_path, "nobody", 1, 1)
+
+
+def test_locked_gives_up_when_another_writer_holds_it(tmp_path, hold_lock):
+    fd = hold_lock(tmp_path / reg.LOCKS_DIR / "work1.lock")
+    try:
+        with pytest.raises(reg.AccountLockTimeout), reg.locked(tmp_path, "work1", wait=0.05):
+            pass
+    finally:
+        os.close(fd)
+
+
+def test_list_rows_hide_secrets_and_mark_broken(tmp_path):
+    _account(tmp_path, "work1", capacity={"seven_day": 900})
+    (tmp_path / "work2").mkdir()
+    (tmp_path / "work2" / reg.ACCOUNT_FILE).write_text("{broken")
+    book = {"version": 1, "use": "off", "keys": {"key1": {"key": "sk-secret", "account": "work1", "added_at": "x", "generation": "g", "monthly_usd": 100}}}
+    reg.write(reg.book_path(tmp_path), book)
+    usage = [account_decide.Usage(name="work1", percent=40.0, limited=False)]
+    rows, warnings = reg.list_rows(tmp_path, {"NDF_SUPERVISE_CLAUDE_FALLBACK": "AWS_REGION=us-east-1 AWS_PROFILE=p"}, "work1", usage)
+    by = {r["name"]: r for r in rows}
+    assert by["work1"]["pinned"] and by["work1"]["percent"] == 40.0 and by["work1"]["state"] == "使える"
+    assert by["work2"]["state"] == "broken" and len(warnings) == 1
+    assert by["metered"]["keys"] == ["AWS_PROFILE", "AWS_REGION"] and "us-east-1" not in json.dumps(rows)
+    assert by["key1"]["monthly_usd"] == 100.0 and "sk-secret" not in json.dumps(rows)
+
+
+def test_cli_capacity_and_remove(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("NDF_ACCOUNTS_DIR", str(tmp_path))
+    monkeypatch.setenv("PATH", str(tmp_path / "bin"))  # claude が無い: logout は通らないが登録は外す
+    d = _account(tmp_path, "work1")
+    shared = tmp_path / "shared.json"
+    shared.write_text("{}")
+    (d / "settings.json").symlink_to(shared)
+    assert cli.main(["account", "capacity", "work1", "x", "1"]) == 2
+    assert cli.main(["account", "capacity", "nobody", "1", "1"]) == 1
+    capsys.readouterr()
+    assert cli.main(["account", "remove", "work1"]) == 0
+    got = _last(capsys)
+    assert got["warnings"] and not d.exists() and shared.exists()
+    assert cli.main(["account", "remove", "metered"]) == 1
+
+
+@pytest.fixture
+def fake_claude(tmp_path, monkeypatch):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    exe = bin_dir / "claude"
+    exe.write_text(FAKE_CLAUDE)
+    exe.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}:/usr/bin:/bin")
+    return exe
+
+
+def test_add_in_two_steps_registers_the_account(tmp_path, fake_claude):
+    store = tmp_path / "store"
+    env = dict(os.environ)
+    first = account_login.add(store, "work1", None, env)
+    assert first.needs_code and first.url.startswith("https://claude.ai/oauth")
+    assert (store / ".pending-work1" / account_login.PENDING_FIFO).exists()
+    done = account_login.add(store, "work1", "good\n", env)
+    assert not done.needs_code and (done.email, done.org_name) == ("a@example.com", "Org")
+    assert reg.names(store) == ["work1"] and not (store / ".pending-work1").exists()
+    with pytest.raises(account_login.LoginError):
+        account_login.add(store, "work1", None, env)  # 登録済み
+    account_login.add(store, "work2", None, env)
+    with pytest.raises(account_login.LoginError, match="同じメールアドレス"):
+        account_login.add(store, "work2", "good", env)
+
+
+def test_add_with_a_wrong_code_does_not_register(tmp_path, fake_claude):
+    store = tmp_path / "store"
+    account_login.add(store, "work1", None, dict(os.environ))
+    with pytest.raises(account_login.LoginError):
+        account_login.add(store, "work1", "bad", dict(os.environ))
+    assert reg.names(store) == [] and not (store / ".pending-work1").exists()
+
+
+def test_cli_add_asks_for_the_code_and_refuses_bad_names(tmp_path, fake_claude, monkeypatch, capsys):
+    monkeypatch.setenv("NDF_ACCOUNTS_DIR", str(tmp_path / "store"))
+    assert cli.main(["account", "add", "BAD"]) == 2
+    assert cli.main(["account", "add", "metered"]) == 2
+    capsys.readouterr()
+    assert cli.main(["account", "add", "work1"]) == 3
+    got = _last(capsys)
+    assert got["cause"]["kind"] == "input_missing" and got["items"][0]["url"].startswith("https://")
+    account_login.discard_pending(tmp_path / "store", "work1")

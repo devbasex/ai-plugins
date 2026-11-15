@@ -295,7 +295,16 @@
 
 | 呼び方 | 引数 |
 | --- | --- |
+| `ndf relay account add` | `name`（string・必須・位置）: アカウントの名前（英小文字・数字・- と _ の 32 字まで）<br>`--code`（string・任意）: 認可コード。- なら標準入力の 1 行（引数と記録に残さない） |
+| `ndf relay account add-api-key` | `name`（string・必須・位置）: API キーの名前<br>`--account`（string・必須）: 結び付ける登録済みアカウント<br>`--key-file`（string・任意）: キーの値を 1 行目に持つファイル（省けば標準入力の 1 行）<br>`--monthly`（string・任意）: 月の額（ドル） |
+| `ndf relay account add-bedrock` | `--profile`（string・任意）: AWS のプロファイル<br>`--region`（string・任意）: 地域（省けばプロファイルの region）<br>`--model`（string・任意）: モデルの ID<br>`--yes`（boolean・任意）: 確かめが通れば保存する（前の宣言を置き換える） |
+| `ndf relay account api-key-monthly` | `name`（string・必須・位置）: API キーの名前<br>`usd`（string・必須・位置）: 月の額（ドル。0 で外す） |
+| `ndf relay account api-key-use` | `mode`（string・任意・位置・値 `off`・`always`・`near-limit`）: 使い方（省けば今の値を出す）<br>`--weekly-at`（string・任意）: 閾値（百分率。1〜100） |
+| `ndf relay account capacity` | `name`（string・必須・位置）: アカウントの名前<br>`five`（string・必須・位置）: 5 時間の枠（USD か -）<br>`seven`（string・必須・位置）: 週の枠（USD か -） |
+| `ndf relay account check` | `target`（string・必須・位置）: metered か API キーの名前 |
 | `ndf relay account clear` | 引数を受けない |
+| `ndf relay account list` | 引数を受けない |
+| `ndf relay account remove` | `target`（string・必須・位置）: アカウントの名前・metered・API キーの名前 |
 | `ndf relay account show` | 引数を受けない |
 | `ndf relay account use` | `name`（string・必須・位置） |
 | `ndf relay context calibrate` | `--days`（integer・任意・既定 `30`）: 較正に使う直近の日数 |
@@ -315,7 +324,7 @@
 | `ndf relay stop` | `name`（string・任意・位置）: 止めるラッパーの名前<br>`--all`（boolean・任意）: 動いている名前つきのラッパーをすべて止める |
 | `ndf relay uninstall` | 引数を受けない |
 
-結果の `metrics`: `inside`（boolean）・`limit`（integer）・`no_policy_rows`（integer）・`policy`（string）・`samples`（integer）・`skipped`（integer）・`stopped`（integer）・`works`（integer）。`items` の要素: `account`（string か null）・`args`（array か null）・`at`（string）・`auto_compacts`（integer か string）・`band`（string か null）・`basis`（string か null）・`config_error`（string か null）・`context`（integer か null）・`cwd`（string か null）・`decide_from`（integer）・`effective_limit`（integer か null）・`estimate`（object か null）・`event`（string）・`handoff_calls`（number か null）・`handoff_output`（number か null）・`kind`（string）・`limit`（integer）・`margin`（integer）・`missing`（array）・`model`（string か null）・`name`（string）・`no_policy_rows`（integer）・`ok`（boolean）・`parts`（object）・`passed_once`（boolean）・`path`（string）・`pending`（array か null）・`plan`（string か null）・`policy`（string）・`position`（string）・`prompt`（string）・`quality`（object）・`reason`（string か null）・`relay`（boolean）・`restart_count`（integer）・`restarts`（object）・`restore_calls`（number か null）・`restore_context`（number か null）・`restores`（array）・`role`（string か null）・`run`（string）・`running`（boolean）・`runtime`（string）・`samples`（object）・`schema`（integer）・`session_id`（string か null）・`sessions`（integer）・`source`（string）・`sources`（object）・`stage`（string か null）・`stage_calls`（object）・`stage_expiries`（object）・`starts`（object）・`state`（string か null）・`status`（string か null）・`summary`（string）・`text`（string）・`transcript`（string か null）・`unknown_parts`（object）・`updated_at`（string か null）・`verdict`（string か null）・`version`（string）・`window`（integer か null）・`work`（string）・`workflow`（string）
+結果の `metrics`: `accounts`（integer）・`inside`（boolean）・`keys`（integer）・`limit`（integer）・`no_policy_rows`（integer）・`policy`（string）・`samples`（integer）・`skipped`（integer）・`stopped`（integer）・`works`（integer）。`items` の要素: `account`（string か null）・`args`（array か null）・`at`（string）・`auto_compacts`（integer か string）・`band`（string か null）・`basis`（string か null）・`capacity_declared`（object）・`config_error`（string か null）・`context`（integer か null）・`cwd`（string か null）・`decide_from`（integer）・`details`（object）・`effective_limit`（integer か null）・`email`（string か null）・`estimate`（object か null）・`event`（string）・`expires_at`（string）・`handoff_calls`（number か null）・`handoff_output`（number か null）・`keys`（array）・`kind`（string）・`limit`（integer）・`margin`（integer）・`missing`（array）・`model`（string か null）・`monthly_usd`（number か null）・`name`（string）・`no_policy_rows`（integer）・`ok`（boolean）・`org_name`（string か null）・`parts`（object）・`passed_once`（boolean）・`path`（string）・`pending`（array か null）・`percent`（number か null）・`pinned`（boolean）・`plan`（string か null）・`policy`（string）・`position`（string）・`prompt`（string）・`provider`（string）・`quality`（object）・`reason`（string か null）・`relay`（boolean）・`replaced`（boolean）・`restart_count`（integer）・`restarts`（object）・`restore_calls`（number か null）・`restore_context`（number か null）・`restores`（array）・`role`（string か null）・`run`（string）・`running`（boolean）・`runtime`（string）・`samples`（object）・`schema`（integer）・`session_id`（string か null）・`sessions`（integer）・`source`（string）・`sources`（object）・`stage`（string か null）・`stage_calls`（object）・`stage_expiries`（object）・`starts`（object）・`state`（string か null）・`status`（string か null）・`summary`（string）・`text`（string）・`transcript`（string か null）・`unknown_parts`（object）・`updated_at`（string か null）・`url`（string）・`use`（string）・`verdict`（string か null）・`version`（string）・`weekly_at`（number）・`window`（integer か null）・`work`（string）・`workflow`（string）
 
 ## `ndf release-steps`
 
