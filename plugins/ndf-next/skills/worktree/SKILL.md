@@ -323,12 +323,12 @@ worktree は追跡されているファイルしか持たないため、`vendor/
 無い。手順は [references/local-environment.md](references/local-environment.md) にある。
 
 ```bash
-NDF="${CLAUDE_PLUGIN_ROOT}/bin/ndf" worktree localenv
+NDF="${CLAUDE_PLUGIN_ROOT}/bin/ndf"
 WT="$main_dir/.worktrees/<ブランチ名>"
-bash "$NDF" setup "$WT"       # 設定と依存物を持ち込む
-bash "$NDF" mode "$WT"        # 相乗り(0) か 分離(1) かを提示
-bash "$NDF" aim "$WT"         # ローカル環境が指すコードを向ける
-bash "$NDF" verify "$WT"; echo $?  # 0 一致 / 1 不一致 / 2 未起動
+"$NDF" worktree localenv setup "$WT"       # 設定と依存物を持ち込む
+"$NDF" worktree localenv mode "$WT"        # 相乗り(0) か 分離(1) かを提示
+"$NDF" worktree localenv aim "$WT"         # ローカル環境が指すコードを向ける
+"$NDF" worktree localenv verify "$WT"; echo $?  # 0 一致 / 1 不一致 / 2 未起動
 ```
 
 **対象の worktree を引数で渡す。** 省略すると現在地が対象になるため、メインディレクトリから
@@ -347,12 +347,12 @@ bash "$NDF" verify "$WT"; echo $?  # 0 一致 / 1 不一致 / 2 未起動
 立てて分ける。手順は [references/test-execution.md](references/test-execution.md) にある。
 
 ```bash
-TE="${CLAUDE_PLUGIN_ROOT}/bin/ndf" worktree testenv
-bash "$TE" env "$WT"                        # 環境名・スロット・ポートを採番し worktree レジストリへ記録
-bash "$TE" bake --tag "$(bash "$TE" tag "$WT")"  # 基準を作る（内容が同じなら焼き直さない）
-bash "$TE" up "$WT" --profile core          # 起動する
-bash "$TE" test "$WT" --kind stateful       # 実行したコマンドの終了コードがそのまま返る
-bash "$TE" down "$WT"                       # 破棄し、割り当てを解放する。ボリュームも消す（消すのは既定で、戻せない）
+TE="${CLAUDE_PLUGIN_ROOT}/bin/ndf"
+"$TE" worktree testenv env "$WT"                        # 環境名・スロット・ポートを採番し worktree レジストリへ記録
+"$TE" worktree testenv bake --tag "$("$TE" worktree testenv tag "$WT")"  # 基準を作る（内容が同じなら焼き直さない）
+"$TE" worktree testenv up "$WT" --profile core          # 起動する
+"$TE" worktree testenv test "$WT" --kind stateful       # 実行したコマンドの終了コードがそのまま返る
+"$TE" worktree testenv down "$WT"                       # 破棄し、割り当てを解放する。ボリュームも消す（消すのは既定で、戻せない）
 ```
 
 **テストのステップは、止まっているテスト環境を自動で起こす。** `/ndf:merged` の後片付けは worktree を外す前に破棄する。
