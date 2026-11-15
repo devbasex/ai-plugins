@@ -89,3 +89,64 @@ def test_a_cell_delegating_files_to_a_split_document_stops():
     gaps = design_gaps([1], {1: DesignResult(1, files, delegated=delegated)})
     assert len(gaps) == 1 and "issue-1-design-lane-loop.md" in gaps[0]
     assert files_cell("`a.py`、`b.py`") == (("a.py", "b.py"), ())
+
+
+# --- 現状固定（I-003: acceptance_decide.read_checks と check_kinds の重複を寄せる前に、両方の読み方を記録する） ---
+
+CHECKS_TABLE = """## 受け入れ条件の確認
+
+説明
+
+| 手段 | 区分 | 条件 |
+| --- | --- | --- |
+| `test_a` | マージ前 | 1 |
+| — | リリース後 | 2. 補足 |
+|  | マージ前 | 3 |
+| — | マージ前 | 4 |
+| x | 未定 | 5 |
+| y | マージ前 | 番号なし |
+| 短い |
+| `pytest t.py` | マージ前 | 1 |
+
+```md
+| z | マージ前 | 6 |
+```
+
+### 小見出しは節の中
+| w | リリース後 | 7 |
+
+## 次の節
+| v | マージ前 | 8 |
+"""
+
+
+def test_current_read_checks_and_check_kinds_over_the_same_table():
+    from ndf.domains.loop.acceptance_decide import Check, read_checks
+    from ndf.core.plan.inputs_decide import check_kinds
+
+    # 列の順は見出しで決まる。同じ番号は後の行が勝つ。手段の無いマージ前の行は read_checks だけが読まない
+    assert read_checks(CHECKS_TABLE) == {
+        1: Check("マージ前", "`pytest t.py`"),
+        2: Check("リリース後", ""),
+        7: Check("リリース後", ""),
+    }
+    assert check_kinds(CHECKS_TABLE) == {1: "マージ前", 2: "リリース後", 3: "マージ前", 4: "マージ前", 7: "リリース後"}
+
+
+def test_current_read_checks_and_check_kinds_without_a_usable_table():
+    from ndf.domains.loop.acceptance_decide import Check, read_checks
+    from ndf.core.plan.inputs_decide import check_kinds
+
+    # 手段の列が無い表: read_checks は空、check_kinds は読む（CRLF も読む）
+    no_means = "## 受け入れ条件の確認\r\n\r\n| 条件 | 区分 |\r\n| --- | --- |\r\n| 1 | マージ前 |\r\n"
+    assert (read_checks(no_means), check_kinds(no_means)) == ({}, {1: "マージ前"})
+    # 見出しの行だけ・節が無い・見出しが違う
+    for body in (
+        "## 受け入れ条件の確認\n| 条件 | 区分 | 手段 |\n",
+        "",
+        "## 受け入れ条件の確認(旧)\n\n| 条件 | 区分 | 手段 |\n|---|---|---|\n| 1 | リリース後 | x |\n",
+    ):
+        assert (read_checks(body), check_kinds(body)) == ({}, {})
+    # 見出しの行末の空白は許す
+    trailing = "## 受け入れ条件の確認 \n\n| 条件 | 区分 | 手段 |\n|---|---|---|\n| 1 | リリース後 | x |\n"
+    assert (read_checks(trailing), check_kinds(trailing)) == ({1: Check("リリース後", "")}, {1: "リリース後"})
