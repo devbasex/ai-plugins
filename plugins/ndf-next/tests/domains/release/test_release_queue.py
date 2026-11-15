@@ -4,11 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from ndf.adapters import ci
 from ndf.adapters.github import MERGE_QUEUE_PENDING, GitHubError, MergeOutcome, Pull
 from ndf.domains.release import land
 
-from ._fakes import HEAD, FakeHub, ci_reading, pull, release_lander, trail_comment
+from ._fakes import HEAD, FakeHub, pull, release_lander, trail_comment
 
 
 class _QueueHub(FakeHub):
@@ -45,7 +44,7 @@ def _queue_lander(hub: _QueueHub, now: list[float], budget: float, on_poll: Call
         if on_poll is not None:
             on_poll()
 
-    return land.Lander(hub, base.base, base.production, budget, wait=base.wait, clock=lambda: now[0], sleep=sleep)
+    return land.Lander(hub, base.production, budget, wait=base.wait, clock=lambda: now[0], sleep=sleep)
 
 
 def test_merge_queue_waits_until_merged_then_syncs() -> None:
@@ -67,23 +66,6 @@ def test_merge_queue_stops_with_rerun_hint_when_budget_runs_out() -> None:
     assert now[0] == 45.0
     # ループの 1 回ごとに PR を 1 回だけ読み、承認の判定にもその PR を使う（0 秒・30 秒・45 秒の 3 回）
     assert hub.reads == 3
-
-
-def test_one_budget_is_shared_by_the_release_pr_and_the_sync_pr() -> None:
-    """待ちの予算は land のエントリポイントで 1 つに決め、戻す PR のチェックの待ちには本番の PR の待ちの残りだけを渡す。"""
-    hub = _QueueHub(pulls={7: pull(), 8: pull(number=8, base="develop")}, comments_of={7: [trail_comment("approved", HEAD)]})
-    hub.responses[("POST", "/repos/o/r/pulls")] = {"number": 8}
-    now = [0.0]
-    lander = _queue_lander(hub, now, 600.0)
-    budgets: list[float] = []
-
-    def wait(reader: Callable[[], ci.Reading], budget: float) -> ci.WatchResult:
-        budgets.append(budget)
-        return ci.WatchResult(ci_reading(False), 1, 0.0, 0.0)
-
-    done = land.Lander(hub, lander.base, lander.production, 600.0, wait=wait, clock=lander.clock, sleep=lander.sleep).land(7)
-    assert done.merged and done.sync_pr == 8
-    assert budgets == [600.0, 600.0 - 2 * land.QUEUE_POLL_SECONDS]
 
 
 def test_merge_queue_stops_at_once_when_the_queue_drops_the_pull() -> None:

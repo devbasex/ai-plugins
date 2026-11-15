@@ -110,48 +110,52 @@
           "type": "string",
           "description": "<所有者>/<リポジトリ>。省けば origin"
         },
-        "--base": {
-          "type": "string",
-          "description": "ベースブランチ（宣言 worktree.json の base_branch）"
+        "--pr": {
+          "type": "integer"
         },
         "--production": {
           "type": "string",
           "description": "本番ブランチ（省けば宣言 worktree.json の production_branch）"
         },
-        "--channel": {
-          "type": "string",
-          "enum": [
-            "production",
-            "dev"
-          ]
-        },
-        "--level": {
-          "type": "string",
-          "enum": [
-            "major",
-            "minor",
-            "patch"
-          ],
-          "default": "patch"
-        },
         "--plugin": {
           "type": "string",
-          "description": "ブランチの名前に版を使うプラグイン（省けば登録の順の先頭）"
-        },
-        "--source": {
-          "type": "string",
-          "enum": [
-            "base",
-            "release"
-          ],
-          "default": "base",
-          "description": "範囲の先端（ベースブランチ base / 常設のリリースブランチ release）"
+          "description": "予定の版を出すプラグイン（省けば登録の順の先頭）"
         }
       },
       "required": [
         "subcommand",
-        "--base",
-        "--channel"
+        "--pr"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "bump",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--root": {
+          "type": "string",
+          "default": ".",
+          "description": "リポジトリの根"
+        },
+        "--repo": {
+          "type": "string",
+          "description": "<所有者>/<リポジトリ>。省けば origin"
+        },
+        "--production": {
+          "type": "string",
+          "description": "本番ブランチ（省けば宣言 worktree.json の production_branch）"
+        },
+        "--budget": {
+          "type": "number",
+          "description": "必須のチェックを待つ秒"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--budget"
       ]
     },
     {
@@ -175,12 +179,16 @@
           "type": "array",
           "items": {
             "type": "string"
-          }
+          },
+          "description": "worktree を外すブランチ（省けば --pr の head のブランチ）"
+        },
+        "--pr": {
+          "type": "integer",
+          "description": "head のブランチの worktree を外す PR"
         }
       },
       "required": [
-        "subcommand",
-        "--branch"
+        "subcommand"
       ]
     },
     {
@@ -240,7 +248,7 @@
       "additionalProperties": false,
       "properties": {
         "subcommand": {
-          "const": "defer",
+          "const": "confirm",
           "description": "下位の命令（入れ子は空白でつなぐ）"
         },
         "--root": {
@@ -258,11 +266,16 @@
         "--production": {
           "type": "string",
           "description": "本番ブランチ（省けば宣言 worktree.json の production_branch）"
+        },
+        "--budget": {
+          "type": "number",
+          "description": "必須のチェックを待つ秒"
         }
       },
       "required": [
         "subcommand",
-        "--pr"
+        "--pr",
+        "--budget"
       ]
     },
     {
@@ -315,42 +328,16 @@
           "type": "string",
           "description": "<所有者>/<リポジトリ>。省けば origin"
         },
-        "--base": {
-          "type": "string",
-          "description": "ベースブランチ（宣言 worktree.json の base_branch）"
+        "--pr": {
+          "type": "integer"
         },
         "--production": {
           "type": "string",
           "description": "本番ブランチ（省けば宣言 worktree.json の production_branch）"
         },
-        "--channel": {
-          "type": "string",
-          "enum": [
-            "production",
-            "dev"
-          ]
-        },
-        "--level": {
-          "type": "string",
-          "enum": [
-            "major",
-            "minor",
-            "patch"
-          ],
-          "default": "patch"
-        },
         "--plugin": {
           "type": "string",
-          "description": "ブランチの名前に版を使うプラグイン（省けば登録の順の先頭）"
-        },
-        "--source": {
-          "type": "string",
-          "enum": [
-            "base",
-            "release"
-          ],
-          "default": "base",
-          "description": "範囲の先端（ベースブランチ base / 常設のリリースブランチ release）"
+          "description": "予定の版を出すプラグイン（省けば登録の順の先頭）"
         },
         "--out": {
           "type": "string",
@@ -359,8 +346,7 @@
       },
       "required": [
         "subcommand",
-        "--base",
-        "--channel"
+        "--pr"
       ]
     },
     {
@@ -383,10 +369,6 @@
         "--pr": {
           "type": "integer"
         },
-        "--base": {
-          "type": "string",
-          "description": "ベースブランチ（宣言 worktree.json の base_branch）"
-        },
         "--production": {
           "type": "string",
           "description": "本番ブランチ（省けば宣言 worktree.json の production_branch）"
@@ -399,7 +381,6 @@
       "required": [
         "subcommand",
         "--pr",
-        "--base",
         "--budget"
       ]
     },
@@ -408,7 +389,7 @@
       "additionalProperties": false,
       "properties": {
         "subcommand": {
-          "const": "prepare-next",
+          "const": "pr-check",
           "description": "下位の命令（入れ子は空白でつなぐ）"
         },
         "--root": {
@@ -422,10 +403,6 @@
         },
         "--pr": {
           "type": "integer"
-        },
-        "--production": {
-          "type": "string",
-          "description": "本番ブランチ（省けば宣言 worktree.json の production_branch）"
         }
       },
       "required": [
@@ -604,6 +581,28 @@
         "subcommand",
         "--pr",
         "--record"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "verify-ref",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--root": {
+          "type": "string",
+          "default": ".",
+          "description": "リポジトリの根"
+        },
+        "--repo": {
+          "type": "string",
+          "description": "<所有者>/<リポジトリ>。省けば origin"
+        }
+      },
+      "required": [
+        "subcommand"
       ]
     }
   ]

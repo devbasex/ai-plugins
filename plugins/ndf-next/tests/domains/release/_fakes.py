@@ -141,7 +141,7 @@ def _fixed_wait(failed: bool, calls: list[int]) -> Callable[[Callable[[], ci.Rea
 
 
 def release_lander(hub: FakeHub, failed: bool, calls: list[int]) -> land.Lander:
-    """本番ブランチ main（必須のチェック pytest）とベースブランチ develop の Lander。待ちは 1 回で `failed` の読みを返す。"""
+    """本番ブランチ main（必須のチェック pytest）の Lander。待ちは 1 回で `failed` の読みを返す。"""
     hub.responses[("GET", "/repos/o/r/rules/branches/main")] = [
         {
             "type": "required_status_checks",
@@ -149,7 +149,7 @@ def release_lander(hub: FakeHub, failed: bool, calls: list[int]) -> land.Lander:
         }
     ]
     hub.responses[("GET", "/repos/o/r/rules/branches/develop")] = []
-    return land.Lander(hub, "develop", "main", 60.0, wait=_fixed_wait(failed, calls))
+    return land.Lander(hub, "main", 60.0, wait=_fixed_wait(failed, calls))
 
 
 def configure(path: Path) -> Path:

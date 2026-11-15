@@ -15,6 +15,7 @@
       {"use": "pr"},
       {"use": "conflict-check"},
       {"use": "ci"},
+      {"use": "release-guard"},
       {"use": "merge", "next": "end"},
       {"use": "repeat-check"},
       {"use": "ci-fix"},

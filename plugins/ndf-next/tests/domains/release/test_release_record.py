@@ -6,7 +6,7 @@ import pytest
 
 from ndf.adapters.github import Authored
 from ndf.domains.release import cli as release_cli
-from ndf.domains.release import record, record_decide
+from ndf.domains.release import record, record_decide, trail
 
 from ._fakes import FakeHub, pull
 
@@ -32,9 +32,15 @@ COMMITS = [
 MERGE = "e" * 40
 
 
+def _version_record(version: str = VERSION, author: str = "octocat") -> Authored:
+    """confirm が本番の PR へ書く作った版の記録。"""
+    return Authored(author, "OWNER", trail.render_version_record(version, f"ndf--v{version}", 60))
+
+
 def _hub() -> FakeHub:
-    released = pull(RELEASE, head="r" * 40, base="main", ref=f"release/v{VERSION}", merged=True)._replace(merge_sha=MERGE)
-    return FakeHub(pulls={RELEASE: released}, commits_of={"r" * 40: list(COMMITS)})
+    """本番の PR（head は sprint/。版はブランチの名前に無い）と、confirm が書いた作った版の記録。"""
+    released = pull(RELEASE, head="r" * 40, base="main", ref="sprint/lrel", merged=True)._replace(merge_sha=MERGE)
+    return FakeHub(pulls={RELEASE: released}, commits_of={"r" * 40: list(COMMITS)}, comments_of={RELEASE: [_version_record()]})
 
 
 def _written(hub: FakeHub, number: int) -> list[record_decide.Record]:
@@ -48,8 +54,8 @@ def test_issue_2783_records_go_to_each_included_pull() -> None:
     assert [(w.number, w.result) for w in written] == [(11, record.WRITTEN), (12, record.WRITTEN)]
     for n in (11, 12):
         assert _written(hub, n) == [made]
-    # 本番から戻す PR・枝の中のコミット・リリースの PR には書かない
-    assert set(hub.comments_of) == {11, 12}
+    # 本番から戻す PR・枝の中のコミット・本番の PR には書かない（本番の PR のコメントは作った版の記録だけ）
+    assert set(hub.comments_of) == {11, 12, RELEASE} and len(hub.comments_of[RELEASE]) == 1
 
 
 def test_rerun_on_same_version_does_not_stack_records() -> None:
@@ -62,13 +68,25 @@ def test_rerun_on_same_version_does_not_stack_records() -> None:
 
 def test_dev_or_unmerged_release_writes_nothing() -> None:
     hub = _hub()
-    hub.pulls[RELEASE] = pull(RELEASE, base="develop", ref=f"release/v{VERSION}-dev.1", merged=True)
+    hub.pulls[RELEASE] = pull(RELEASE, base="develop", ref="sprint/lrel", merged=True)
     with pytest.raises(record.NotReleased):
         record.write(hub, RELEASE, "main")
-    hub.pulls[RELEASE] = pull(RELEASE, base="main", ref=f"release/v{VERSION}", merged=False)
+    hub.pulls[RELEASE] = pull(RELEASE, base="main", ref="sprint/lrel", merged=False)
     with pytest.raises(record.NotReleased):
         record.write(hub, RELEASE, "main")
-    assert hub.comments_of == {}
+    assert set(hub.comments_of) == {RELEASE}
+
+
+def test_the_version_comes_from_the_version_record_and_is_required() -> None:
+    """版は作った版の記録の最新（信用する書き手）から読み、記録が無ければ confirm を先に打つよう止まる。"""
+    hub = _hub()
+    hub.comments_of[RELEASE] = [_version_record("1.2.3"), _version_record("9.9.9", author="mallory"), _version_record()]
+    made, _ = record.write(hub, RELEASE, "main")
+    assert made.version == VERSION
+    hub = _hub()
+    hub.comments_of[RELEASE] = []
+    with pytest.raises(record.NotReleased, match="confirm"):
+        record.write(hub, RELEASE, "main")
 
 
 def test_range_is_read_from_the_merge_parent_beyond_250_commits() -> None:
@@ -99,7 +117,7 @@ def test_issue_3128_verification_goes_to_the_record_pull_and_both_are_read() -> 
     got = record.read(hub, 11)
     assert got.release == made
     assert got.verifications == (_verification(),)
-    # リリースの PR（main 宛て）はリリース記録を持たないので書かない
+    # 本番の PR（main 宛て）はリリース記録を持たないので書かない
     with pytest.raises(record.RecordError):
         record.write_verification(hub, RELEASE, _verification())
     # 別の版の記録も書かない・形の違う記録も書かない
@@ -114,9 +132,10 @@ def test_untrusted_token_writes_no_record() -> None:
     # Actions の github.token（github-actions[bot]）で書いた記録は読まれず、打ち直しで重なるので書かずに止まる
     hub = _hub()
     hub.trusted = set()
-    with pytest.raises(record.RecordError):
+    # 信用しない書き手の作った版の記録も読まない（版が決まらず止まる）
+    with pytest.raises((record.RecordError, record.NotReleased)):
         record.write(hub, RELEASE, "main")
-    assert hub.comments_of == {}
+    assert set(hub.comments_of) == {RELEASE}
 
 
 def test_read_skips_untrusted_writers() -> None:

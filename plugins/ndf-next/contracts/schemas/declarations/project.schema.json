@@ -533,7 +533,8 @@
             {
               "enum": [
                 "production",
-                "base"
+                "base",
+                "verify"
               ],
               "type": "string"
             },
@@ -594,6 +595,18 @@
           ],
           "default": null,
           "title": "Publishes Release"
+        },
+        "verify": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DeliveryVerify"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "検証の行（channel が verify）の検証の ref と 2 つ目のマーケットプレイスの名前（#3572 の決定 9）"
         }
       },
       "required": [
@@ -648,6 +661,28 @@
         }
       },
       "title": "DeliveryResult",
+      "type": "object"
+    },
+    "DeliveryVerify": {
+      "additionalProperties": false,
+      "description": "検証の ref の名前と、検証の ref が持つ 2 つ目のマーケットプレイスの名前。読み手は ndf.domains.release.declaration.verify_of",
+      "properties": {
+        "ref": {
+          "minLength": 1,
+          "title": "Ref",
+          "type": "string"
+        },
+        "marketplace": {
+          "minLength": 1,
+          "title": "Marketplace",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ref",
+        "marketplace"
+      ],
+      "title": "DeliveryVerify",
       "type": "object"
     },
     "Docs": {

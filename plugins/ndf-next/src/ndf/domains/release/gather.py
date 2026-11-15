@@ -41,6 +41,26 @@ def fetch(repo_git: git_mod.Git, name: str) -> None:
         raise git_mod.GitError(f"origin の {name} を取り込めない: {done.stderr.strip()}")
 
 
+def pull_ref(number: int) -> str:
+    """PR の先端を取り込む手元の参照（`refs/remotes/origin/pull/<番号>`）。"""
+    return f"refs/remotes/{git_mod.ORIGIN}/pull/{int(number)}"
+
+
+def fetch_pull(repo_git: git_mod.Git, number: int) -> str:
+    """origin の PR の先端（`refs/pull/<番号>/head`）を `pull_ref` へ取り込み、その参照を返す。取り込めなければ `GitError`。"""
+    ref = pull_ref(number)
+    done = repo_git.fetch(git_mod.ORIGIN, f"+refs/pull/{int(number)}/head:{ref}")
+    if done.returncode != 0:
+        raise git_mod.GitError(f"origin の PR #{number} の先端を取り込めない: {done.stderr.strip()}")
+    return ref
+
+
+def labels_of(hub: GitHub, number: int) -> list[str]:
+    """PR のラベルの名前（上げ幅の宣言を読む）。"""
+    rows = hub.rest("GET", f"/repos/{hub.repo}/issues/{int(number)}/labels")
+    return [text_of(r["name"]) for r in rows if isinstance(r, dict) and "name" in r] if isinstance(rows, list) else []
+
+
 def _context(node: dict) -> tuple[str, str]:
     """チェックの 1 件を (名前, 結論) にする。check run が終わっていなければ結論は空。
 
@@ -87,6 +107,12 @@ def _production_version(repo_git: git_mod.Git, plugin: plugins_mod.Plugin, produ
     except (json.JSONDecodeError, AttributeError) as exc:
         raise plugins_mod.PluginsError(f"{production_ref} の {path} を読めない: {exc}") from None
     return [value] if isinstance(value, str) else []
+
+
+def version_at(repo_git: git_mod.Git, plugin: plugins_mod.Plugin, ref: str) -> str | None:
+    """コミット `ref` のプラグインの定義（先頭）の版（定義が無ければ None）。"""
+    found = _production_version(repo_git, plugin, ref)
+    return found[0] if found else None
 
 
 def shipped(repo_git: git_mod.Git, found: Sequence[plugins_mod.Plugin], production_ref: str) -> dict[str, str]:

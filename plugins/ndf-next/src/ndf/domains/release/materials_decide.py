@@ -6,6 +6,7 @@
   レーンの記録を読まない（並列リリースでも同じ値になる。#2655）。実行されなかったチェックは内訳に出す（#3169）
 - 「利用者向けの変化」はリリース対象のファイルの変化だけで決める。PR 本文の文は読まない（#2601）
 - 「指示書と設定の変化」は指示書と `.ndf/` の下の変化を並べる（C7 の変更を人が見られる。#3110）
+- 資料は本番の PR（スプリントの PR）の本文の印 `MATERIALS_START`〜`MATERIALS_END` の間に置き、印の外の本文を変えない（`splice`。#3572 の決定 6）
 """
 
 from __future__ import annotations
@@ -13,7 +14,12 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import NamedTuple
 
+from ndf import identity
 from ndf.domains.release import approval_decide, changes_decide, checks_decide, version_decide
+
+# PR の本文の承認資料の節の印（名前空間は固定語から組む）
+MATERIALS_START = f"<!-- {identity.FIXED_WORDS['workflow_namespace']}:release-materials:start -->"
+MATERIALS_END = f"<!-- {identity.FIXED_WORDS['workflow_namespace']}:release-materials:end -->"
 
 
 class PullFact(NamedTuple):
@@ -112,3 +118,19 @@ def items(facts: Facts) -> list[dict]:
         }
         for p in _ordered(facts.pulls)
     ]
+
+
+def _without_marks(body: str) -> str:
+    """片方だけ残った印の行を外した本文（壊れた印を残さない）。"""
+    kept = [line for line in body.splitlines() if line.strip() not in (MATERIALS_START, MATERIALS_END)]
+    return "\n".join(kept)
+
+
+def splice(body: str, materials: str) -> str:
+    """PR の本文の承認資料の節を `materials` に差し替える（節が無ければ末尾に足す）。印の外の本文は元のまま。"""
+    section = f"{MATERIALS_START}\n{materials.rstrip()}\n{MATERIALS_END}"
+    start, end = body.find(MATERIALS_START), body.find(MATERIALS_END)
+    if start != -1 and end > start:
+        return body[:start] + section + body[end + len(MATERIALS_END) :]
+    rest = _without_marks(body).rstrip()
+    return f"{rest}\n\n{section}\n" if rest else f"{section}\n"

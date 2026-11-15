@@ -12,6 +12,13 @@
 | `changelog` | CHANGELOG のファイル（リポジトリの根から） | `CHANGELOG.md` |
 
 トークン消費の記録のような、リポジトリ固有のリリースの作業は宣言の手順に書く（NDF は中身を知らない）。
+
+ほかの宣言から読むもの（#3572）:
+
+| 関数 | 宣言 | 読むもの |
+| --- | --- | --- |
+| `flow_of`・`require_github_flow`・`review_problems` | `.ndf/worktree.json` の `branch_flow` | 取り込み方の表（`branch-flows`）の行。ndf-next のリリースは行 `github-flow` だけを扱う |
+| `verify_of` | `.ndf/project.json` の `delivery` の検証の行（`channel: verify`） | 検証の ref の名前と 2 つ目のマーケットプレイスの名前 |
 """
 
 from __future__ import annotations
@@ -21,6 +28,7 @@ import subprocess
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import NamedTuple
 
 from ndf import identity
 from ndf.adapters import git as git_mod
@@ -189,3 +197,111 @@ def production_branch(root: Path) -> str:
     if not isinstance(got, str) or not got or got != got.strip():
         raise DeclarationError(f"{path} の {PRODUCTION_KEY} が名前でない（宣言するか --production を渡す）: {got!r}")
     return got
+
+
+# ndf-next のリリースが扱う取り込み方の表の行（スプリントの PR を本番ブランチへ直接マージする行。#3572 の決定 5）
+GITHUB_FLOW = facts.ids("branch-flows", promotion="direct")[0]
+FLOW_CHOICES = ("start", "doc_prs", "integrate")
+# 実装の差分を cross-review するレビューの単位の種類（#3119 の I2）
+CODE_REVIEW_KINDS = ("impl", "sprint")
+
+
+class VerifyDecl(NamedTuple):
+    """検証の ref の名前と、それを指す 2 つ目のマーケットプレイスの名前。"""
+
+    ref: str
+    marketplace: str
+
+
+def _branch_flow(root: Path) -> dict:
+    """宣言 `.ndf/worktree.json` の `branch_flow`（無ければ空）。読めなければ `DeclarationError`。"""
+    path = root / BRANCH_FILE
+    if not path.is_file():
+        return {}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise DeclarationError(f"{path} を読めない: {exc}") from None
+    got = raw.get("branch_flow") if isinstance(raw, dict) else None
+    if got is not None and not isinstance(got, dict):
+        raise DeclarationError(f"{path} の branch_flow がオブジェクトでない")
+    return got if got is not None else {}
+
+
+def _flow_row(flow: dict) -> dict:
+    """宣言の `branch_flow` が選ぶ取り込み方の表の行。表に無いか、行が許さない値を選べば `DeclarationError`（#3119 の I1）。"""
+    table = "branch-flows"
+    rows = facts.rows(table, promotion=flow["promotion"]) if "promotion" in flow else facts.rows(table, default=True)
+    if not rows:
+        raise DeclarationError(f"branch_flow.promotion {flow.get('promotion')!r} が取り込み方の表 {table} に無い")
+    row = rows[0]
+    bad = [f"{c}={flow[c]!r}" for c in FLOW_CHOICES if c in flow and flow[c] not in row[c]]
+    if bad:
+        raise DeclarationError(f"取り込み方 {row['id']} が許さない branch_flow の値: {', '.join(bad)}")
+    return row
+
+
+def flow_of(root: Path) -> str:
+    """宣言の取り込み方の表の行の id（`branch_flow` が無ければ既定の行）。"""
+    return str(_flow_row(_branch_flow(root))["id"])
+
+
+def require_github_flow(root: Path) -> None:
+    """取り込み方の行が `github-flow` でなければ `DeclarationError` で止める（既定の行へ倒さない。決定 5）。"""
+    found = flow_of(root)
+    if found != GITHUB_FLOW:
+        raise DeclarationError(f"取り込み方 {found} は ndf-next のリリースで扱わない（{GITHUB_FLOW} の宣言だけを扱う）")
+
+
+def _reviews_cross(unit: object) -> bool:
+    """レビューの単位の行が実装の差分を cross-review するか。"""
+    if not isinstance(unit, dict):
+        return False
+    checks = unit.get("checks")
+    return isinstance(checks, list) and "cross-review" in checks and unit.get("diff") != "none"
+
+
+def review_problems(root: Path) -> list[dict[str, str]]:
+    """取り込み方の行が `github-flow` の宣言で、`branch_flow.reviews` の破れを 1 件ずつ返す（#3119 の I2）。
+
+    書ける種類は表の行の `review_kinds` から読む。書いていない種類は既定値に任せて数えない。
+    """
+    flow = _branch_flow(root)
+    row = _flow_row(flow)
+    if row["id"] != GITHUB_FLOW:
+        return []
+    reviews = flow.get("reviews")
+    reviews = reviews if isinstance(reviews, dict) else {}
+    out = [
+        {"kind": "reviews", "name": kind, "detail": f"取り込み方 {GITHUB_FLOW} では {kind} のレビューの単位を書けない"}
+        for kind in reviews
+        if kind not in row["review_kinds"]
+    ]
+    code = [k for k in CODE_REVIEW_KINDS if k in reviews]
+    if len(code) == len(CODE_REVIEW_KINDS) and not any(_reviews_cross(reviews[k]) for k in code):
+        detail = f"{'・'.join(CODE_REVIEW_KINDS)} のどちらも実装の差分を cross-review しない"
+        out.append({"kind": "reviews", "name": "cross-review", "detail": detail})
+    return out
+
+
+def verify_of(root: Path) -> VerifyDecl:
+    """`.ndf/project.json` の `delivery` の検証の行（`channel: verify`）の ref とマーケットプレイスの名前。
+
+    宣言はメインディレクトリから読む（`_admin_declaration` と同じ。PR の作業場所が足した宣言で ref を選べない）。
+    行が無い・2 つ以上・値が空なら `DeclarationError`（既定値を持たない）。
+    """
+    path = _admin_declaration(root)
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise DeclarationError(f"{path} を読めない: {exc}") from None
+    rows = raw.get("delivery") if isinstance(raw, dict) else None
+    channel = "verify"
+    found = [r for r in rows if isinstance(r, dict) and r.get("channel") == channel] if isinstance(rows, list) else []
+    if len(found) != 1:
+        raise DeclarationError(f"{path} の delivery に channel {channel} の行が 1 つでない（{len(found)} 行）")
+    verify = found[0].get("verify")
+    values = [verify.get(k) if isinstance(verify, dict) else None for k in ("ref", "marketplace")]
+    if not all(isinstance(v, str) and v.strip() == v and v for v in values):
+        raise DeclarationError(f"{path} の検証の行の verify.ref と verify.marketplace が空でない名前でない: {verify!r}")
+    return VerifyDecl(str(values[0]), str(values[1]))

@@ -43,6 +43,7 @@
 | `not_applicable` | 正常な否定の結果（立たない・変更なし・飛ばしてよい）。行き先はプランの on_cause が書く | validation | 3（precondition） | conductor | — | — |
 | `not_ci` | マージが CI 以外の理由（保護の規則・権限）で断られた | authorization | 1（failed） | human | — | — |
 | `precondition` | 前提が無い（宣言・認証・対象のファイル） | configuration | 3（precondition） | human | — | — |
+| `production_pr` | 本番の PR を承認の前の工程として終え、デプロイの工程へ渡した | validation | 3（precondition） | conductor | — | — |
 | `push_rejected` | push 前の検査（pre-push の hook）が push を断った | validation | 1（failed） | step | — | — |
 | `refused` | 不変条件で操作を断った | validation | 1（failed） | human | — | — |
 | `restore_unsupported` | PostgreSQL の URL で進行表の DB の戻しを求めた。控えと戻しは DB の運用で行う | configuration | 3（precondition） | human | — | — |
