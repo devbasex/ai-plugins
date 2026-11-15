@@ -132,3 +132,48 @@ def test_cli_record_fails_when_it_cannot_write(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("NDF_CONTEXT_DIR", str(blocked))
     assert cli.main(["context", "record", "--event", "引継ぎ開始", "--work", "#1"]) == 1
     assert _last(capsys)["status"] == "stopped"
+
+
+def test_estimate_samples_restore_handoff_and_stage_segments(tmp_path):
+    """現状固定（I-005）: 復元・引継ぎ・工程の区間の標本の集め方と、見込みの値の形。"""
+    calls = ["2026-11-15T01:00:00Z", "2026-11-15T01:10:00Z", "2026-11-15T01:20:00Z", "2026-11-15T03:00:00Z"]
+    rows = []
+    for n in range(3):
+        sid = f"s{n}"
+        t = _transcript(tmp_path / f"t{n}.jsonl", [(ts, 100 + n) for ts in calls])
+        rows += [
+            {"at": "2026-11-15T00:59:00Z", "session_id": sid, "transcript": t, "stage": "design", "verdict": context_policy.CONTINUE},
+            {"at": "2026-11-15T01:05:00Z", "session_id": sid, "event": context_records.MARK_RESTORED},
+            {"at": "2026-11-15T01:12:00Z", "session_id": sid, "event": context_records.MARK_HANDOFF},
+            {"at": "2026-11-15T01:15:00Z", "session_id": sid, "stage": "impl", "verdict": context_policy.CONTINUE},
+            {"at": "2026-11-15T05:00:00Z", "session_id": sid, "stage": "review", "verdict": context_policy.CONTINUE},
+        ]
+    plain = tmp_path / "plain.jsonl"
+    plain.write_text(json.dumps({"type": "user", "message": {"content": "始める"}}) + "\n", encoding="utf-8")
+    rows += [
+        {"at": "2026-11-15T00:59:00Z", "session_id": "s9", "transcript": str(plain)},
+        {"at": "2026-11-15T01:05:00Z", "session_id": "s9", "event": context_records.MARK_RESTORED},
+    ]
+    rows.sort(key=lambda r: r["at"])
+    got = context_records.estimate(rows, None)
+    got.pop("at")
+    assert got == {
+        "restore_context": 101.0,
+        "restore_calls": 1.0,
+        "handoff_calls": 2.0,
+        "handoff_output": 20.0,
+        "stage_calls": {"design": 2.0, "*": 2.0, "impl": 2.0},
+        "stage_expiries": {"design": 0.0, "*": 0.5, "impl": 1.0},
+        "samples": {"restore": 3, "handoff": 3, "stage:design": 3, "stage:*": 6, "stage:impl": 3},
+    }
+    late = context_records.estimate(rows, context_records.parse_ts("2026-11-15T06:00:00Z"))
+    late.pop("at")
+    assert late == {
+        "restore_context": None,
+        "restore_calls": None,
+        "handoff_calls": None,
+        "handoff_output": None,
+        "stage_calls": {},
+        "stage_expiries": {},
+        "samples": {"restore": 0, "handoff": 0},
+    }
