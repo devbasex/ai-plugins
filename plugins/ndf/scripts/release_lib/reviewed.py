@@ -34,6 +34,8 @@ from release_lib.names import release_tag
 from step_result import EXIT_GATE, EXIT_INFRA_WAIT, EXIT_PRECONDITION, EXIT_UNREADABLE, StepError, emit, gh_json, git, git_root, result
 
 TOOL = approval.TOOL
+# 迂回の記録の行（items の `record`。#3506 の I7）
+ADMIN_RECORD = "admin_merge"
 
 
 release_case_or_stop = release_case.case_or_stop  # release-steps.py と merged_lib が同じ止め方を使う
@@ -136,13 +138,18 @@ def release_prod(ctx: ReleaseCtx, case, ops: ProdOps):
     ops.published(root, a, plugin, prod, main_pr, merge, items, metrics, back=admin_back())
 
 
+def _unwritten(pr: int, e: Exception) -> dict:
+    """迂回の記録を書けなかった行。"""
+    return {"kind": "comment", "name": f"#{pr}", "result": "unwritten", "record": ADMIN_RECORD, "reason": str(e)[:200]}
+
+
 def admin_record_item(repo: str, pr: int, sha: str, trail_url: str) -> dict:
     """迂回の記録を書き、結果の行を返す（#3506 の I7）。書けなければ `unwritten` の行を返し、例外を上げない（決定 7）。"""
     try:
         wrote, url = approval_trail.write_admin_record(repo, pr, sha, trail_url)
     except (approval_trail.TrailError, ValueError) as e:
-        return {"kind": "comment", "name": f"#{pr}", "result": "unwritten", "record": "admin_merge", "reason": str(e)[:200]}
-    return {"kind": "comment", "name": url or f"#{pr}", "result": "written" if wrote else "kept", "record": "admin_merge"}
+        return _unwritten(pr, e)
+    return {"kind": "comment", "name": url or f"#{pr}", "result": "written" if wrote else "kept", "record": ADMIN_RECORD}
 
 
 def admin_record_on_resume(root, repo: str, case, pr: int) -> dict | None:
@@ -154,7 +161,7 @@ def admin_record_on_resume(root, repo: str, case, pr: int) -> dict | None:
         head = str((gh_json(root, ["pr", "view", str(pr), "--json", "headRefOid"], "gh pr view") or {}).get("headRefOid") or "")
         judged = approval_trail.judge_trails_on(repo, pr, head, "user") if head else None
     except (StepError, approval_trail.TrailError) as e:
-        return {"kind": "comment", "name": f"#{pr}", "result": "unwritten", "record": "admin_merge", "reason": str(e)[:200]}
+        return _unwritten(pr, e)
     if judged is None or judged.state != "success":
         return None  # 利用者の承認と先端が一致しない: NDF の迂回でマージしたと言えないため記録しない
     return admin_record_item(repo, pr, head, judged.url or "")
@@ -166,7 +173,7 @@ def admin_back(back=None):
 
     def run(items: list[dict], metrics: dict, done: str) -> tuple[str, int, str]:
         status, code, done = back(items, metrics, done) if back else ("ok", None, done)
-        if any(i.get("record") == "admin_merge" and i.get("result") == "unwritten" for i in items if isinstance(i, dict)):
+        if any(i.get("record") == ADMIN_RECORD and i.get("result") == "unwritten" for i in items if isinstance(i, dict)):
             return "stopped", (code or 1) if status != "ok" else 1, f"{done}。迂回の記録を書けなかった（本番は出ている）"
         return status, code, done
 
