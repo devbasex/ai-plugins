@@ -34,6 +34,11 @@ class VersionConflict(StepError):
         self.paths = paths
 
 
+def _version_pairs(x: str, y: str) -> list[tuple[str, str]]:
+    """2 行の同じ位置の版数の組のうち、違うものだけ。"""
+    return [(v, w) for v, w in zip(VERSION_RE.findall(x), VERSION_RE.findall(y)) if v != w]
+
+
 def _same_but_versions(a: list[str], b: list[str], allowed: set[str]) -> bool:
     """行ごとに版数の外が同じで、違う版数はどれもこちらの側が allowed（release/v<版> が書いた版数）のもの。"""
     if len(a) != len(b):
@@ -41,7 +46,7 @@ def _same_but_versions(a: list[str], b: list[str], allowed: set[str]) -> bool:
     for x, y in zip(a, b):
         if VERSION_RE.sub("<v>", x) != VERSION_RE.sub("<v>", y):
             return False
-        if any(v != w and v not in allowed for v, w in zip(VERSION_RE.findall(x), VERSION_RE.findall(y))):
+        if any(v not in allowed for v, _ in _version_pairs(x, y)):
             return False
     return True
 
@@ -51,7 +56,7 @@ def _newer(x: str, y: str) -> str:
     ほかは x（本番の版を書いた側）。同期の PR が起点のブランチの開発版の版数（10.27.69-dev.1）を本番の版（10.27.68）へ戻さない。"""
     import versions
 
-    pairs = [(v, w) for v, w in zip(VERSION_RE.findall(x), VERSION_RE.findall(y)) if v != w]
+    pairs = _version_pairs(x, y)
     later = [versions.compare_versions(w, v) for v, w in pairs]
     return y if later and all(c >= 0 for c in later) and any(c > 0 for c in later) else x
 
