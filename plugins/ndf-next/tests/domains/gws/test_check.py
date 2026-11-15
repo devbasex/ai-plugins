@@ -8,12 +8,14 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from ndf import cli
 from ndf.contracts import limits
 from ndf.domains.gws import report_decide as rd
+from ndf.domains.gws import thumbnails
 from ndf.domains.records import cli as records_cli
 from ndf.domains.records import gws as records_gws
 
@@ -201,10 +203,14 @@ def test_tail() -> None:
     assert rd.tail(None) == "" and rd.tail("") == ""
 
 
+def _io_schema(name: str) -> dict[str, Any]:
+    path = Path(__file__).resolve().parents[3] / "contracts" / "schemas" / "io" / f"gws.{name}.schema.json"
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 def test_states_match_the_result_schema_enum() -> None:
     # 4 つの状態の値は結果のスキーマ gws.result の metrics.state の列挙と同じ（並びも含む）
-    schema_path = Path(__file__).resolve().parents[3] / "contracts" / "schemas" / "io" / "gws.result.schema.json"
-    enum = json.loads(schema_path.read_text(encoding="utf-8"))["properties"]["metrics"]["properties"]["state"]["enum"]
+    enum = _io_schema("result")["properties"]["metrics"]["properties"]["state"]["enum"]
     assert [rd.AUTHENTICATED, rd.MISSING, rd.UNAUTHENTICATED, rd.UNINSTALLABLE] == enum
     assert (rd.AUTHENTICATED, rd.MISSING, rd.UNAUTHENTICATED, rd.UNINSTALLABLE) == (
         "authenticated",
@@ -212,3 +218,11 @@ def test_states_match_the_result_schema_enum() -> None:
         "unauthenticated",
         "uninstallable",
     )
+
+
+def test_sizes_match_the_schema_enums() -> None:
+    # サムネイルの大きさは結果のスキーマ gws.result の metrics.size と、引数のスキーマ gws.args の --size の列挙と同じ
+    result_enum = _io_schema("result")["properties"]["metrics"]["properties"]["size"]["enum"]
+    args = next(v for v in _io_schema("args")["oneOf"] if v["properties"]["subcommand"]["const"] == "thumbnails")
+    assert list(thumbnails.SIZES) == result_enum == args["properties"]["--size"]["enum"]
+    assert thumbnails.DEFAULT_SIZE == args["properties"]["--size"]["default"]
