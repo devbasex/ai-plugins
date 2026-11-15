@@ -174,5 +174,6 @@
 | [ndf-glossary-deprecated-meaning.md](ndf-glossary-deprecated-meaning.md) | 用語チェックの構造の検査が用語集自身の意味の説明の廃止した語を deprecated_meaning で落とす理由と規則、1 文字の語と語の一部に現れる語を前後の漢字で区切って照合する deprecated_standalone の欄。規則の契約は ndf-ubiquitous-language.md が正 |
 | [ndf-release-production-admin-merge.md](ndf-release-production-admin-merge.md) | 本番の PR を迂回の宣言（`production_merge.admin`）に従って管理者の迂回でマージすること: リリースの場合の属性、迂回の記録、記録を書けないときの報告と再開、作り直しの `mergePullRequest` による迂回、未確認・残リスク。リリースの場合と承認の証跡の全体は `ndf-release-approval-on-pr.md` が正 |
 | [ndf-next-declarations-and-io-contracts.md](ndf-next-declarations-and-io-contracts.md) | ndf-next の宣言と入出力の規約（.ndf/ の宣言の JSON Schema・副命令の引数と結果のスキーマ・生成する契約のページ docs/contracts/・ndf check の規則 spec-docs/spec-decl/spec-io/spec-skill/spec-public と --write-spec・全副命令の出力の検査・公開と内部の区別。#3518・#3519） |
+| [ndf-next-gws-subcommands.md](ndf-next-gws-subcommands.md) | ndf-next の `ndf gws`（gws の確認とサムネイルの保存の副命令・状態ごとの結果と終了コード・止まった理由の種類・記録の gws の部品と共有する認証済みの判定・承認資料の置き場・決定の理由。#3547）。手順は ndf-next の `google-workspace` の SKILL.md が正 |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。
