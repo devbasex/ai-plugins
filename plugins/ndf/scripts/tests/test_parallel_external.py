@@ -343,3 +343,24 @@ def test_session_ndf_version_keeps_pinned_dev_commit(monkeypatch):
     assert pe.session_ndf_version() == f"{version}@0123abcd"
     monkeypatch.setenv("NDF_VERSION", "0.0.1@0123abcd")
     assert pe.session_ndf_version() == version
+
+
+def test_compose_external_answers_stopped_when_origin_cannot_be_fetched(tmp_path, org, monkeypatch):
+    """取り直しに落ちたまとめたリリースは、traceback で落とさず stopped の答えで返す（#3551）。"""
+    import parallel_external_cli as px
+    import parallel_repo
+
+    def unfetchable(*_a):
+        raise parallel_repo.OriginUnfetchable("origin を取り直せない: fatal: unable to access origin")
+
+    monkeypatch.setattr(pe, "read_batch", lambda d: {})
+    monkeypatch.setattr(pe, "compose", unfetchable)
+    got = []
+
+    def reply(status, summary, code=0, **_kw):
+        got.append((status, summary, code))
+        raise SystemExit(code)
+
+    with pytest.raises(SystemExit):
+        px.compose_external(tmp_path, reply)
+    assert got == [("stopped", "まとめたリリースを組めない: origin を取り直せない: fatal: unable to access origin", 1)]

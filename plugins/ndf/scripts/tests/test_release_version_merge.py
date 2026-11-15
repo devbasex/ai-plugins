@@ -65,6 +65,20 @@ def test_hunks_that_differ_only_in_versions_take_the_release_side():
     assert version_merge.resolve_text(text, {"10.28.0"}) == 'x\n  "version": "10.28.0",\ny\n'
 
 
+def test_hunks_keep_a_newer_dev_version_of_the_base_branch():
+    """同期の PR が develop の次の開発版の版数を本番の版へ戻さない（#3551。リリース 16 の 10.27.69-dev.1 → 10.27.68）。"""
+    text = 'x\n<<<<<<< ours\n  "version": "10.27.68",\n=======\n  "version": "10.27.69-dev.1",\n>>>>>>> theirs\ny\n'
+    assert version_merge.resolve_text(text, {"10.27.68"}) == 'x\n  "version": "10.27.69-dev.1",\ny\n'
+
+
+def test_sync_keeps_the_newer_dev_version_of_the_base_branch(repo):
+    tip = branch_release(repo, {})
+    dev = commit(repo, {MANIFEST: manifest("10.28.1-dev.1")}, "dev 10.28.1-dev.1")
+    sha, resolved = version_merge.sync_commit(repo, tip, dev, "sync", sections=True)
+    assert resolved == [MANIFEST]
+    assert json.loads(git(repo, "show", f"{sha}:{MANIFEST}"))["version"] == "10.28.1-dev.1"
+
+
 def test_hunks_that_differ_beyond_versions_are_not_resolved():
     text = "<<<<<<< ours\nv 10.28.0 a\n=======\nv 10.28.0-dev.4 b\n>>>>>>> theirs\n"
     assert version_merge.resolve_text(text, {"10.28.0"}) is None

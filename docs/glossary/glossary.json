@@ -7272,7 +7272,7 @@
     {
       "term": "戻すマージ",
       "context": "ndf-release",
-      "meaning": "正式版のリリースの後、リリースブランチを `release/v<版>-sync` 経由でベースブランチへ取り込むマージ。版数を持つ箇所が衝突したら本番の版を取る",
+      "meaning": "今の NDF（11.0.0 の入れ替えの前）だけの語。正式版のリリースの後、リリースブランチを `release/v<版>-sync` 経由でベースブランチへ取り込むマージ。版数を持つ箇所が衝突したら本番の版を取る。ndf-next（GitHub flow）は同期の PR を作らず、この操作を持たない",
       "pending_source": "issues/issue-3119-design.md"
     },
     {
@@ -7530,7 +7530,7 @@
     {
       "term": "本番の PR",
       "context": "ndf-release",
-      "meaning": "リリースのブランチから本番チャネルへ出す Pull Request。CD のある場合は、この PR のマージで本番へ届く",
+      "meaning": "本番チャネル（main）へ入れる Pull Request。CD のある場合は、この PR のマージで本番へ届く。ndf-next（GitHub flow）では main 宛てのスプリントの PR が兼ね、CD が作る版上げの PR は含まない。今の NDF では、リリースのブランチから本番チャネルへ出す PR を指す",
       "source": "docs/specifications/ndf-release-production-admin-merge.md"
     },
     {
@@ -7626,13 +7626,7 @@
     {
       "term": "差し戻し",
       "context": "ndf-release",
-      "meaning": "リリース承認ゲートで承認しない答え、または必須のチェックの落ちた本番の PR を出さずに止めること。直しを同じリリースブランチへ入れ、新しい先端で承認を取り直す",
-      "pending_source": "issues/issue-3572-design.md"
-    },
-    {
-      "term": "次の版への回し",
-      "context": "ndf-release",
-      "meaning": "必須のチェックの落ちた本番の PR を閉じてこの時点では出さず、リリースブランチを残して後のスプリントと一緒に出すこと",
+      "meaning": "リリース承認ゲートで承認しない答え、または必須のチェックの落ちた本番の PR を出さずに止めること。直しを同じ本番の PR（スプリントの PR）へ入れ、新しい先端で承認を取り直す",
       "pending_source": "issues/issue-3572-design.md"
     },
     {
@@ -7650,8 +7644,74 @@
     {
       "term": "リリースブランチ",
       "context": "ndf-release",
-      "meaning": "本番の PR の head になる、版ごとに 1 本のリリースブランチ（`release/v<版>`）。前の版が出た直後に本番ブランチから用意する",
+      "meaning": "版上げの PR の head になるブランチ（`release/v<版>`）。main へのマージの後に CD が main の先端から作り、版上げの PR のマージで消える",
       "pending_source": "issues/issue-3572-design.md"
+    },
+    {
+      "term": "版上げのコミット",
+      "context": "ndf-release",
+      "meaning": "main へのマージの後に CD が作り、版上げの PR を通して main へ入るコミット。`plugin.json` の `version` と CHANGELOG の版の節だけを変える。PR は版数を触らない",
+      "pending_source": "issues/issue-3572-design.md"
+    },
+    {
+      "term": "上げ幅の宣言",
+      "context": "ndf-release",
+      "meaning": "main 宛ての PR が版数の上げ幅（MAJOR・MINOR・PATCH）を示す印。CD がマージの時点に読んで版を上げる",
+      "pending_source": "issues/issue-3572-design.md"
+    },
+    {
+      "term": "検証の ref",
+      "context": "ndf-release",
+      "meaning": "main へマージする前の PR を集めて組んだ、使い捨ての git の ref。2 つ目のマーケットプレイスが指し、main へ戻さない",
+      "pending_source": "issues/issue-3572-design.md"
+    },
+    {
+      "term": "2 つ目のマーケットプレイス",
+      "context": "ndf-release",
+      "meaning": "正式版のマーケットプレイスと違う名前で検証の ref を指すマーケットプレイス。名前が違うので正式版と両方を登録できる",
+      "pending_source": "issues/issue-3572-design.md"
+    },
+    {
+      "term": "確定の後の承認ゲート",
+      "context": "ndf-workflow",
+      "meaning": "並列の計画で、リリース承認ゲートの承認（確定）を受けた後に、本番のプランが承認ゲート（終了コード 10）で終わること",
+      "pending_source": "issues/issue-3597-requirements.md"
+    },
+    {
+      "term": "依頼",
+      "context": "ndf-workflow",
+      "meaning": "並列の計画のレーンか一時レーンがオーガナイザーへ送る問い・承認の求め。台帳に 1 行で残り、id を持つ",
+      "pending_source": "issues/issue-3597-requirements.md"
+    },
+    {
+      "term": "同じ問い",
+      "context": "ndf-workflow",
+      "meaning": "並列の計画で、同じ一時レーンの名前が送った依頼のうち、問いの区分と操作の対象（ブランチ名と先端のコミット、または課題・PR の番号）が同じもの。言い回しの違いは数えない",
+      "pending_source": "issues/issue-3597-requirements.md"
+    },
+    {
+      "term": "起き直し",
+      "context": "ndf-workflow",
+      "meaning": "止まった一時レーンを、耐久ワークフローが同じ名前で起動し直すこと",
+      "pending_source": "issues/issue-3597-requirements.md"
+    },
+    {
+      "term": "問いの対象",
+      "context": "ndf-workflow",
+      "meaning": "並列の計画で、区分つきの問いが操作する対象を表す 1 つの文字列。`<ブランチ名>@<先端のコミットの 40 桁>` か `#<課題か PR の番号>`。一時レーンは問いの `metadata.target` にブランチ名か `#<番号>` だけを載せ、`request-ask` が先端のコミットを足して組み、計画の台帳の依頼の行の `target` に残す",
+      "pending_source": "issues/issue-3597-design.md"
+    },
+    {
+      "term": "答えの引き継ぎ",
+      "context": "ndf-workflow",
+      "meaning": "起き直した一時レーンの同じ問いへ、前の起動で送った依頼の答えを当てること。新しい依頼を作らず、計画の台帳に `reused` の行で残る",
+      "pending_source": "issues/issue-3597-design.md"
+    },
+    {
+      "term": "一時レーンの空き待ち",
+      "context": "ndf-workflow",
+      "meaning": "一時レーンの起動が、別の一時レーンが動いているために断られた後、耐久ワークフローが前の一時レーンが止まるまで区分 `spawn` の問いを立てずに待つこと。上限は既定 3,600 秒",
+      "pending_source": "issues/issue-3597-design.md"
     }
   ]
 }

@@ -634,6 +634,7 @@ def test_run_switches_to_next_section(term, tmp_path):
     assert s2["command"] == "/goal 次のステップ"
     assert s2["from_session"] == f"s{first['pid']}"
     assert s2["section"] == 2 and s2["pid"] == second["pid"]
+    assert "resumed" not in s2  # ndf-next の区間は新しい会話（#3555）
     assert e1["ended_by"] == "mark" and e1["section"] == 1
     t.type("quit 0\r")
     assert t.finish() == 0
@@ -3281,6 +3282,7 @@ def test_limit_switches_account_and_resumes_goal(term, accounts):
     assert "利用上限（five_hour）に達したため、アカウントを a から b（b@example.com）へ替えて続ける" in t.text
     rows = t.rows()
     assert [r["account"] for r in events(rows, "start")] == ["a", "b"]
+    assert [r.get("resumed") for r in events(rows, "start")] == [None, True]  # 前の会話を続けた区間の印（#3555）
     acc = events(rows, "account")
     assert [(r["reason"], r["from"], r["to"], r["section"]) for r in acc] == [("five_hour", "a", "b", 2)]
     assert accounts.account("a")["limit"]["type"] == "five_hour"

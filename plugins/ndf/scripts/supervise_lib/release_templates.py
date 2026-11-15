@@ -37,13 +37,13 @@ RULE_RELEASE_DEV = (
     "の揺れなら同じステップをもう一度（retry）。認証や権限の不足・タグの重複は stop。"
 )
 RULE_RELEASE_PROD = (
-    "利用者はリリース承認ゲートを承認した。run のステップが落ちたら、直せるもの（版数の書き漏れ・文書の形）は fix。"
-    "外部の待ち（CI・ネットワーク）の揺れなら同じステップをもう一度。タグの重複・権限の不足は stop。"
+    "利用者はリリース承認ゲートを承認した。run のステップが落ちたら、外部の待ち（CI・ネットワーク）の揺れなら同じステップを"
+    "もう一度。タグの重複・権限の不足と、コードや設定に原因があるもの（版数の書き漏れ・文書の形）は stop。"
 )
 RULE_RELEASE_PROD_MVV = (
     "リリース承認ゲートは利用者か MVV 判定が承認した（先頭の mvv のステップが 0 を返したときだけ先へ進む）。"
-    "run のステップが落ちたら、直せるもの（版数の書き漏れ・文書の形）は fix。"
-    "外部の待ち（CI・ネットワーク）の揺れなら同じステップをもう一度。タグの重複・権限の不足は stop。"
+    "run のステップが落ちたら、外部の待ち（CI・ネットワーク）の揺れなら同じステップをもう一度。"
+    "タグの重複・権限の不足と、コードや設定に原因があるもの（版数の書き漏れ・文書の形）は stop。"
 )
 
 
@@ -404,7 +404,7 @@ def plan_release_package_plugin(a) -> dict:
     steps += [release_branch_step(a, repo, base, units, reviews[0]["id"] if reviews else after_branch), *reviews] if dev and units else []
     ctx = _KindArgs(a, repo, approval, prs, rts, v, base, units, cd)
     steps += kind.approval_steps(ctx)
-    steps += judge_fix_steps(run_ids, after_notes)
+    steps += judge_fix_steps(run_ids, after_notes, fix=dev)  # 本番は承認の外のコミットを積まない（#3572）
     if not dev:
         steps.append(judge_record_step())
     kind.add_gate(steps, ctx)  # CD のある場合の承認ゲートは approval-post の後に置く（release_cd.cd_prod_steps）

@@ -20,8 +20,8 @@ import threading
 import time
 from typing import NamedTuple
 
-from . import claude as cl
 from . import tmux
+from .hub_input import restart_input
 from .common import (
     LOCK_FILE,
     LOG_FILE,
@@ -30,7 +30,6 @@ from .common import (
     _lock,
     _unlock,
     env_num,
-    fallback_cwd,
     launcher_path,
     load_json,
     lock_busy,
@@ -64,6 +63,7 @@ BAD_NAME = "bad-name"
 NAME_TAKEN = "name-taken"
 LIMIT = "limit"
 NOT_FOUND = "not-found"
+NO_SESSION = "no-session"  # 再開する会話を決められない（#3555）
 NO_TMUX = "no-tmux"
 TMUX_FAILED = "tmux-failed"
 
@@ -279,19 +279,6 @@ def live(ws: list[Wrapper], registry: dict[str, dict], sessions: dict[str, dict]
     return Live(len(names) - helpers - humans - organizer, names, taken | set(sessions), helpers, humans)
 
 
-def restart_input(name: str, row: dict, w: Wrapper | None) -> tuple[str, list[str]]:
-    """やり直しの (cwd, 引数)。区間 1 なら登録簿の引数、2 以降は最後の start の行の入力（決定 10）。
-    cwd は最後の start の行のもの（区間の切り替えで worktree へ移っている）。"""
-    args = [a for a in row.get("args") or [] if isinstance(a, str)]
-    start = w.start if w else None
-    cwd = (start or {}).get("cwd") or row.get("cwd") or os.path.expanduser("~")
-    if not os.path.isdir(cwd):
-        cwd = fallback_cwd(cwd)
-    if start and isinstance(start.get("section"), int) and start["section"] >= 2 and start.get("command"):
-        args = [*cl.carried_args(args), start["command"]]
-    return cwd, args
-
-
 def spawn_input(req: dict) -> tuple[str, list[str]]:
     """新しく起こす (cwd, 引数)。cwd は無い・ディレクトリでなければホームへ寄せる。"""
     cwd = req.get("cwd") if isinstance(req.get("cwd"), str) and os.path.isdir(req["cwd"]) else os.path.expanduser("~")
@@ -422,7 +409,11 @@ class Hub:
             row = registry.get(name) if isinstance(name, str) else None
             if row is None:
                 return Refusal(NOT_FOUND, f"その名前は無い: {name}", 3)
-            cwd, args = restart_input(name, row, by_name(ws).get(name))
+            got = restart_input(name, row, by_name(ws).get(name))
+            if got is None:
+                why = f"{name} の再開する会話を決められない。relay.py spawn --name {name} -- <引継ぎ文書の次に実行するコマンド> で新しい会話として起こす"
+                return Refusal(NO_SESSION, why, 3)
+            cwd, args = got
             return name, cwd, args, (row.get("role") if row.get("role") == "helper" else None)
         if kind == "spawn":
             cwd, args = spawn_input(req)

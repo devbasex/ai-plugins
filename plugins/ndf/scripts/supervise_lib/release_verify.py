@@ -62,17 +62,27 @@ def release_verify_step(sprint: str, refs: str, record_pr: str) -> dict:
     }
 
 
-def judge_fix_steps(run_ids: list[str], after_notes: str) -> list[dict]:
-    """落ちたステップの判断（judge）と修正（fix）のステップ。"""
+JUDGE_FIX_QUESTION = (
+    "落ちたステップを直す（fix）か、同じステップをもう一度（retry）か、止める（stop）か。retry なら decision に落ちたステップの id を返す"
+)
+JUDGE_NO_FIX_QUESTION = (
+    "落ちたステップを同じ形でもう一度（retry）か、止める（stop）か。retry なら decision に落ちたステップの id を返す。"
+    "リリースのプランではコードを直さない。原因がコードや設定にあるなら stop を選ぶ（直しはベースブランチ宛ての Pull Request で入れる）"
+)
+
+
+def _judge_step(run_ids: list[str], question: str, choices: list[str]) -> dict:
+    return {"id": "judge", "type": "judge", "inputs": run_ids, "question": question, "choices": choices}
+
+
+def judge_fix_steps(run_ids: list[str], after_notes: str, fix: bool = True) -> list[dict]:
+    """落ちたステップの判断（judge）と修正（fix）のステップ。`fix` が偽（本番のプラン）なら修正のステップを置かず、judge は
+    やり直すか止めるかだけを選ぶ（#3572 の今の NDF の側。リリース承認ゲートの承認の外のコミットをリリースブランチへ積まない。
+    直しはベースブランチ宛ての Pull Request で入れ、承認を取り直す）。"""
+    if not fix:
+        return [_judge_step(run_ids, JUDGE_NO_FIX_QUESTION, [*run_ids, "stop"])]
     return [
-        {
-            "id": "judge",
-            "type": "judge",
-            "inputs": run_ids,
-            "question": "落ちたステップを直す（fix）か、同じステップをもう一度（retry）か、止める（stop）か。retry なら decision に"
-            "落ちたステップの id を返す",
-            "choices": ["fix", *run_ids, "stop"],
-        },
+        _judge_step(run_ids, JUDGE_FIX_QUESTION, ["fix", *run_ids, "stop"]),
         {
             "id": "fix",
             "type": "work",

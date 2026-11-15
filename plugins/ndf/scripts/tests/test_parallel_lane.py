@@ -228,3 +228,76 @@ def test_merged_on_production_checks_the_production_branch(tmp_path, monkeypatch
     assert seen[-1][-1] == "origin/live"
     monkeypatch.setattr(repo, "production_branch", lambda _root, decl=None: (None, "無い"))
     assert pl.merged_on_production(tmp_path, [7], run=run) is False
+
+
+def _review_out(d: Path, rounds: int) -> None:
+    d.mkdir(parents=True, exist_ok=True)
+    got = {"tool": "cross-review-drive", "status": "ok", "items": [], "metrics": {"rounds": rounds}}
+    (d / "05-review.out").write_text("ログ\n" + json.dumps(got) + "\n")
+
+
+def test_present_writes_check_results_of_each_lane(tmp_path, monkeypatch):
+    """まとめたリリースの承認資料の `## 検査の結果` に、レーンの依頼のスプリントの検査のプランの結果を載せ、
+    検査の状態の無い Pull Request は番号で挙げる（#3585）。"""
+    import supervise_lib  # noqa: F401
+    import approved_commit
+    import parallel_release
+    from release_lib import included
+
+    sprint = tmp_path / "work" / "sprint-la"
+    _review_out(sprint / "3-check-state", 1)
+    _review_out(sprint / "7-check-state", 2)  # 連番の大きい検査のプランを読む
+    req = {"id": "la-r1", "lane": "la", "prs": [5], "sprint_state": str(sprint / "9-release-request-state")}
+    approval = tmp_path / "a.md"
+    approval.write_text(
+        "# 承認\n\n## 検査の結果\n\n- 無し（レビュー・リファクタリング・全体テストの結果が検査の状態に無い）\n\n## 同意を求めること\n\n- x\n"
+    )
+    monkeypatch.setattr(approved_commit, "material_sha", lambda p: "abc")
+    monkeypatch.setattr(included, "read_included", lambda p: [5, 6])
+    plan = pp.ParallelPlan.model_validate(PLAN, context={"max_plans": 10, "max_named": 10})
+    parallel_release.present(tmp_path, plan, approval, [req], tmp_path / "releases" / "1" / "1", closes_of=lambda r, prs: {})
+    text = approval.read_text()
+    section = text.split("## 検査の結果", 1)[1].split("## 同意を求めること", 1)[0]
+    assert "無し（" not in section
+    assert "レーン la（#5。" in section and "cross-review 2 ラウンド" in section
+    assert "検査の状態が無い Pull Request: #6" in section
+    assert text.endswith("## 同意を求めること\n\n- x\n")
+
+
+def test_check_md_names_every_pr_without_a_check_state(tmp_path):
+    import parallel_present
+
+    mapped = {"lanes": {"la": {"prs": [5], "requested": False, "requests": []}}, "orphans": [7]}
+    assert parallel_present.check_md(tmp_path, mapped, []) == ["- 検査の状態が無い Pull Request: #5 #7"]
+
+
+def test_check_md_splits_requests_of_one_lane_by_their_own_check_state(tmp_path):
+    """同じレーンに 2 スプリント分の依頼があれば、依頼ごとにその依頼より前の検査の結果を、その依頼の PR に付ける（#3585）。"""
+    import parallel_present
+
+    sprint = tmp_path / "work" / "sprint-la"
+    _review_out(sprint / "3-check-state", 1)
+    _review_out(sprint / "7-check-state", 2)
+    reqs = [
+        {"id": "r1", "lane": "la", "prs": [5], "sprint_state": str(sprint / "5-release-request-state")},
+        {"id": "r2", "lane": "la", "prs": [6], "sprint_state": str(sprint / "9-release-request-state")},
+    ]
+    mapped = {"lanes": {"la": {"prs": [5, 6], "requested": True, "requests": ["r1", "r2"]}}, "orphans": []}
+    got = parallel_present.check_md(tmp_path, mapped, reqs)
+    heads = [x for x in got if x.startswith("- レーン")]
+    assert heads == [
+        f"- レーン la（#5。検査の状態 `{sprint / '3-check-state'}`）",
+        f"- レーン la（#6。検査の状態 `{sprint / '7-check-state'}`）",
+    ]
+
+
+def test_production_plan_has_no_fix_step_after_the_approval(tmp_path):
+    """本番のプランは承認の後にコードを直すステップ（fix）を持たず、judge はやり直すか止めるかだけを選ぶ（#3572 の今の NDF の側）。"""
+    import parallel_release
+
+    d = tmp_path / "releases" / "1" / "1"
+    _, release = parallel_release.plan_parallel_release(SCRIPTS.parents[2], "p1", d, "1.2.3")
+    steps = {s["id"]: s for s in release["steps"]}
+    assert not [s for s in release["steps"] if s.get("type") == "work" and s.get("kind") == "修正"]
+    assert "fix" not in steps and "fix" not in steps["judge"]["choices"] and "stop" in steps["judge"]["choices"]
+    assert all(s.get("on_fail") != "fix" and s.get("next") != "fix" for s in release["steps"])
