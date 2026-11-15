@@ -70,10 +70,7 @@ def dev_worktrees(main_dir: Path, items: Iterable[Worktree]) -> list[Worktree]:
 
 def default_branch(git: Git) -> Optional[str]:
     """リモート名のリモートの既定ブランチ（取得済みの `refs/remotes/<リモート名>/HEAD`）。無ければ `None`。"""
-    remote = git.remote()
-    done = git.attempt("symbolic-ref", "--quiet", "--short", f"refs/remotes/{remote}/HEAD")
-    name = done.stdout.strip() if done.returncode == 0 else ""
-    return name[len(remote) + 1 :] if name.startswith(remote + "/") else None
+    return git.remote_default_branch()
 
 
 def base_branch(git: Git, decl: Optional[declaration.Declaration]) -> Optional[str]:

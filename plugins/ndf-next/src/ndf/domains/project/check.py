@@ -95,13 +95,12 @@ def inputs(repo: git.Git, tracked: Optional[dict[str, str]] = None) -> dict[str,
 def branch_state(repo: git.Git, declared: tuple[str, ...] = ()) -> dict[str, Any]:
     """リモート名のリモートの HEAD の指す先と、既知のブランチ名と宣言した名前のうちそのリモートにあるもの。"""
     remote = repo.remote()
-    head_done = repo.attempt("symbolic-ref", "--short", f"refs/remotes/{remote}/HEAD")
-    head = head_done.stdout.strip() if head_done.returncode == 0 else ""
+    head = repo.remote_default_branch(remote)
     refs_done = repo.attempt("for-each-ref", "--format=%(refname:short)", f"refs/remotes/{remote}")
     refs = refs_done.stdout.split() if refs_done.returncode == 0 else []
     names = set(KNOWN_BRANCHES) | {d for d in declared if d}
     present = sorted(n for n in names if f"{remote}/{n}" in refs)
-    return {"head": head.split("/", 1)[-1] if head else None, "present": present}
+    return {"head": head, "present": present}
 
 
 def declared_branches(worktree: Optional[dict[str, Any]]) -> tuple[str, ...]:

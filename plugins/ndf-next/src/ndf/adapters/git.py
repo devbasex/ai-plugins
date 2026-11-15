@@ -310,6 +310,19 @@ class Git:
             raise GitError(f"リモート {remote} は GitHub のリポジトリでない: {url}")
         return repo
 
+    def remote_default_branch(self, remote: Optional[str] = None) -> Optional[str]:
+        """リモートの既定ブランチ（取得済みの `refs/remotes/<remote>/HEAD` の指す先から `<remote>/` を外した名前）。
+
+        `remote` を省けばこの作業場所のリモート名。HEAD が無い・`<remote>/` で始まらなければ `None`。
+        """
+        remote = remote if remote is not None else self.remote()
+        done = self.attempt("symbolic-ref", "--quiet", "--short", f"refs/remotes/{remote}/HEAD")
+        name = done.stdout.strip() if done.returncode == 0 else ""
+        prefix = remote + "/"
+        if not name.startswith(prefix):
+            return None
+        return name[len(prefix) :] or None
+
     def status_paths(self) -> list[str]:
         """未コミットの変更のパス（追跡していないファイルは中まで含める）。改名と複製は変更前のパスも含める。"""
         return parse_status_z(self.run("status", "--porcelain", "-z", "--untracked-files=all"))

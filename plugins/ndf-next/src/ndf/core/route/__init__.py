@@ -405,12 +405,9 @@ def default_base(repo: Path) -> Optional[str]:
     if isinstance(declared, str) and declared:
         return declared
     try:
-        remote = git.remote_of(repo)
-        ref = git.Git(repo).run("symbolic-ref", "--short", f"refs/remotes/{remote}/HEAD").strip()
-    except git.GitError:  # noqa: NDF401 外部コマンド: リモートの既定ブランチを持たないか宣言の remote が誤り
+        return git.Git(repo).remote_default_branch(git.remote_of(repo))
+    except git.GitError:  # noqa: NDF401 外部コマンド: 宣言の remote が誤り
         return None
-    branch = ref.removeprefix(f"{remote}/")
-    return branch if branch else None
 
 
 def default_merge_method(repo: Path, base: str) -> Optional[str]:
