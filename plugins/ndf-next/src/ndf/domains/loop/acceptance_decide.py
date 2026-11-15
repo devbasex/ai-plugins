@@ -13,7 +13,6 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Iterable, Mapping
 from typing import NamedTuple, Optional
 
@@ -105,11 +104,11 @@ def checks_table(checks: Mapping[int, Check]) -> str:
 def recorded_body(body: str, pre_merge: Mapping[int, str], post_release: Iterable[int]) -> str:
     """記録を書いた本文。節が無ければ末尾へ足し、あれば節の中の表だけを置き換える。節の外は変えない。"""
     table = checks_table(merged(body, pre_merge, post_release))
-    lines = body.replace("\r\n", "\n").split("\n")
-    heads = [i for i, line in enumerate(lines) if line.rstrip() == inputs.CHECKS_HEADING]
-    if not heads:
+    lines = inputs.body_lines(body)
+    at = inputs.heading_at(lines, inputs.CHECKS_HEADING)
+    if at is None:
         return body.rstrip("\n") + f"\n\n{inputs.CHECKS_HEADING}\n\n{table}\n"
-    start = heads[0] + 1
-    end = next((i for i in range(start, len(lines)) if re.match(r"^#{1,2} ", lines[i])), len(lines))
+    start = at + 1
+    end = next((i for i in range(start, len(lines)) if inputs.SECTION_END.match(lines[i])), len(lines))
     tail = lines[end:]
     return "\n".join([*lines[:start], "", table, *([""] if tail else []), *tail])

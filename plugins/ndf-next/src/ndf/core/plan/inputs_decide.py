@@ -21,6 +21,8 @@ CHECKS_HEAD = ("条件", "区分")
 KINDS = ("マージ前", "リリース後")
 _BOX = re.compile(r"- \[[ xX]\](?=[ \t\r]|$)\s*(.*)")
 _FENCE = re.compile(r"^(```|~~~)")
+# 節の終わり（`#` か `##` の見出し）
+SECTION_END = re.compile(r"^#{1,2} ")
 _CODE = re.compile(r"`([^`]+)`")
 _LINK = re.compile(r"\[[^\]]*\]\(([^)\s]+\.md)(?:#[^)]*)?\)")
 
@@ -44,18 +46,28 @@ def files_cell(cell: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
     return files, links
 
 
+def body_lines(body: str) -> list[str]:
+    """本文を行へ分ける（CRLF は LF とみなす）。"""
+    return body.replace("\r\n", "\n").split("\n")
+
+
+def heading_at(lines: Sequence[str], heading: str) -> Optional[int]:
+    """行全体（行末の空白を除く）が `heading` と一致する最初の行の添字。無ければ None。"""
+    return next((i for i, line in enumerate(lines) if line.rstrip() == heading), None)
+
+
 def section_lines(body: str, heading: str) -> Optional[list[str]]:
     """見出しの節の行（コードブロックの外）。節が無ければ None。見出しは行全体が一致するものだけ。"""
-    lines = body.replace("\r\n", "\n").split("\n")
-    heads = [i for i, line in enumerate(lines) if line.rstrip() == heading]
-    if not heads:
+    lines = body_lines(body)
+    at = heading_at(lines, heading)
+    if at is None:
         return None
     out, fenced = [], False
-    for line in lines[heads[0] + 1 :]:
+    for line in lines[at + 1 :]:
         if _FENCE.match(line):
             fenced = not fenced
             continue
-        if not fenced and re.match(r"^#{1,2} ", line):
+        if not fenced and SECTION_END.match(line):
             break
         if not fenced:
             out.append(line)
