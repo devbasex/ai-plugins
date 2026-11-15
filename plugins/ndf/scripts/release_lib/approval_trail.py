@@ -115,25 +115,33 @@ def _cut(text: str) -> str:
     return text if len(text) <= DESCRIPTION_LIMIT else text[: DESCRIPTION_LIMIT - 1] + "…"
 
 
+def _narrow(trails: list[Trail], roles: dict[str, str | None], by: str | None) -> tuple[list[Trail], str]:
+    """証跡を担い手・未編集・承認権限の順に絞る。(残った証跡, 失敗の理由)。残れば理由は空。"""
+    if by is not None:
+        trails = [t for t in trails if t.by == by]
+        if not trails:
+            return [], f"担い手が {by} の証跡が無い"
+    fresh = [t for t in trails if not t.edited]
+    if not fresh:
+        return [], "編集された証跡だけがある"
+    valid = [t for t in fresh if roles.get(t.login) in APPROVER_ROLES]
+    if valid:
+        return valid, ""
+    unread = sorted({t.login for t in fresh if roles.get(t.login) is None})
+    if unread:
+        return [], _cut(f"権限を読めない {', '.join(unread)}")
+    others = sorted({t.login for t in fresh})
+    return [], _cut(f"承認権限の無い {', '.join(others)} の証跡だけがある")
+
+
 def judge(trails: list[Trail], roles: dict[str, str | None], head: str, by: str | None = None) -> Judgment:
     """承認権限（admin・maintain）を持つ人の最新の、編集されていない証跡と先端を照らす（I1〜I4）。
     `by` を渡せば担い手がその値の証跡だけを数える（`cd-admin` は利用者の証跡だけ。#3506 の I9）。"""
     if not trails:
         return Judgment("failure", "証跡が無い")
-    if by is not None:
-        trails = [t for t in trails if t.by == by]
-        if not trails:
-            return Judgment("failure", f"担い手が {by} の証跡が無い")
-    fresh = [t for t in trails if not t.edited]
-    if not fresh:
-        return Judgment("failure", "編集された証跡だけがある")
-    valid = [t for t in fresh if roles.get(t.login) in APPROVER_ROLES]
+    valid, why = _narrow(trails, roles, by)
     if not valid:
-        unread = sorted({t.login for t in fresh if roles.get(t.login) is None})
-        if unread:
-            return Judgment("failure", _cut(f"権限を読めない {', '.join(unread)}"))
-        others = sorted({t.login for t in fresh})
-        return Judgment("failure", _cut(f"承認権限の無い {', '.join(others)} の証跡だけがある"))
+        return Judgment("failure", why)
     last = max(valid, key=lambda t: t.created_at)
     if last.sha != head.lower():
         return Judgment("failure", f"証跡 {last.sha[:7]} ≠ 先端 {head[:7]}", last.login, last.created_at)
