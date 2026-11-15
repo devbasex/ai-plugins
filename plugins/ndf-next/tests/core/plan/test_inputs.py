@@ -150,3 +150,39 @@ def test_current_read_checks_and_check_kinds_without_a_usable_table():
     # 見出しの行末の空白は許す
     trailing = "## 受け入れ条件の確認 \n\n| 条件 | 区分 | 手段 |\n|---|---|---|\n| 1 | リリース後 | x |\n"
     assert (read_checks(trailing), check_kinds(trailing)) == ({1: Check("リリース後", "")}, {1: "リリース後"})
+
+
+# --- 現状固定（I-016: section_lines と design_tests_decide の囲みの読み方の重複を寄せる前に、両方の読み方を記録する） ---
+
+
+def test_current_section_lines_fences_headings_and_boundaries():
+    from ndf.core.plan.inputs_decide import section_lines
+
+    body = (
+        "前\n## 対象\r\na\n   ```\n## 囲みの中ではない\nb\n   ```\n```\n## 囲みの中\n~~~\nc\n~~~\n```\n"
+        "### 小見出し\n# 上の見出し\nd\n## 対象\ne\n"
+    )
+    # 字下げした囲みは囲みとして扱わない。最初の見出しの節だけを読み、`#` / `##` の見出しで終わる
+    assert section_lines(body, "## 対象") == ["a", "   ```"]
+    assert section_lines("## 対象\n", "## 対象") == [""]
+    assert section_lines("x", "## 対象") is None
+    assert section_lines("## 対象x\n", "## 対象") is None
+    assert section_lines("  ## 対象\n", "## 対象") is None
+    # `###` 以下と、空白の無い `##` では終わらない
+    assert section_lines("## 対象\n#### 深い\nz\n##不正\ny\n## 次", "## 対象") == ["#### 深い", "z", "##不正", "y"]
+
+
+def test_current_design_target_lines_fences_and_sections():
+    from ndf.domains.loop.design_tests_decide import target_lines
+
+    text = (
+        "## テスト設計\n\n`a`\n  ```\n`b`\n  ```\n```\n## 構成要素\n```\n> 引用\n- **採らなかった案**: `x`\n"
+        "### 小\n`y`\n## 別\n`z`\n## 決定の記録\r\n`w`\n"
+    )
+    # 字下げした囲みも囲みとして扱う。行番号は 1 始まり。`###` は採らなかった案を解くが節は変えない
+    assert target_lines(text) == [
+        ("テスト設計", 2, ""),
+        ("テスト設計", 3, "`a`"),
+        ("テスト設計", 13, "`y`"),
+        ("決定の記録", 17, "`w`"),
+    ]
