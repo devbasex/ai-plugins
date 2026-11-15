@@ -106,6 +106,40 @@ def append_ledger_row(
     return True
 
 
+class Sent(str):
+    """送った結果（#3597 の決定 5）。値は依頼の id で、今までの戻り値（id の文字列）のまま読める。`written` は台帳へ書いたか、`same` は
+    書いたか同じキーの行と中身（`at` を除いた `msg`）が同じか、`answered` は同じ id の答えか処理済みか、`existing` は同じキーの行の id。"""
+
+    written: bool
+    same: bool
+    answered: bool
+    existing: str
+
+    def __new__(cls, rid: str, written: bool = True, same: bool = True, answered: bool = False, existing: str = "") -> "Sent":
+        got = super().__new__(cls, rid)
+        got.written, got.same, got.answered, got.existing = written, same, answered, existing
+        return got
+
+
+def _bare(msg) -> Optional[dict]:
+    """比べる中身: 送るたびに変わる `at` を除いた `msg`。"""
+    return {k: v for k, v in msg.items() if k != "at"} if isinstance(msg, dict) else msg
+
+
+def resent(main: Path, name: str, key: str, msg: Optional[dict]) -> Sent:
+    """`append_ledger_row` が同じキーで False を返した後に、同じキーの行と送ろうとした中身が同じか・答え済みかを判定する。
+    最初の `opened` の行より前の行は数えない（`append_ledger_row` と同じ）。読めなければ `OSError`。"""
+    since = first_opened(rows := read_ledger_rows(main, name).rows)
+    rows = [r for r in rows if r["_pos"] >= since]
+    row = next((r for r in rows if r.get("key") == key), None)
+    if row is None:  # 同じキーの行を読めない（起きない見込み。送ったと扱わない）
+        return Sent(str((msg or {}).get("id") or ""), written=False, same=False)
+    rid = str(row.get("id") or "")
+    same = _bare(row.get("msg")) == _bare(json.loads(json.dumps(_redact(msg), ensure_ascii=False)) if msg is not None else None)
+    answered = bool(rid) and (any(r["kind"] == "answer" and r.get("id") == rid for r in rows) or rid in settled_gates(rows))
+    return Sent(rid, written=False, same=same, answered=answered, existing=rid)
+
+
 def known(row) -> bool:
     return isinstance(row, dict) and row.get("v") == VERSION and row.get("kind") in KINDS and isinstance(row.get("key"), str)
 
@@ -263,14 +297,25 @@ def settled_gates(rows: list[dict], earlier: list[dict] = ()) -> set[str]:
     """処理済みのリリース承認ゲートの ID（#3080 の I8）。`rows` は位置（`_pos`）を持つ台帳の行で、リリース承認ゲート（`gate2`）の
     行は、同じ連番の確定か締めの `resume` の行がそれより後にあれば処理済みとする。出し直しの提示の 2 回目は確定の後に届くため、
     連番の一致だけでは除かない（I9）。`earlier` は `rows` より前に届いた問い（チェックポイントの問い）で、`rows` に同じ連番の
-    確定か締めがあれば処理済みとする。"""
+    確定か締めがあれば処理済みとする。確定の後の依頼（`msg.after` が `confirmed`。#3597 の決定 4）は確定の行では処理済みにせず、
+    同じ id の答えの行か、それより後の同じ連番の締めの行があるときだけ処理済みとする。"""
     done: dict[str, int] = {}  # 連番 → 確定か締めの最後の位置
+    ends: dict[str, int] = {}  # 連番 → 締めの最後の位置（確定の後の依頼が読む）
     for r in rows:
         msg = r.get("msg") or {}
         if r["kind"] == "resume" and msg.get("phase") in SETTLING:
-            done[str(msg.get("n"))] = max(done.get(str(msg.get("n")), -1), r["_pos"])
-    out = {r["id"] for r in rows if r["kind"] == "gate2" and done.get(str((r.get("msg") or {}).get("n")), -1) > r["_pos"]}
-    return out | {str(q.get("id")) for q in earlier if q.get("kind") == "gate2" and str(q.get("n")) in done}
+            for got in (done, ends) if msg.get("phase") == "settle" else (done,):
+                got[str(msg.get("n"))] = max(got.get(str(msg.get("n")), -1), r["_pos"])
+    answers = {r["id"] for r in rows if r["kind"] == "answer"}
+
+    def settled(q: dict, pos: int) -> bool:
+        n = str(q.get("n"))
+        if q.get("after") == "confirmed":
+            return str(q.get("id")) in answers or ends.get(n, -1) > pos
+        return done.get(n, -1) > pos
+
+    out = {r["id"] for r in rows if r["kind"] == "gate2" and settled({**(r.get("msg") or {}), "id": r["id"]}, r["_pos"])}
+    return out | {str(q.get("id")) for q in earlier if q.get("kind") == "gate2" and settled(q, -1)}
 
 
 def pending_questions(main: Path, name: str) -> list[dict]:

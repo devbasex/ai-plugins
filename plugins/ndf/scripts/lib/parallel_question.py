@@ -21,3 +21,19 @@ def cause_of(msg: dict) -> str:
     text = re.sub(r"(/[^\s（）()]+)+", "<path>", text)
     text = re.sub(r"\d+", "<n>", text)
     return f"{msg.get('source')}|{json.dumps(msg.get('options') or [], ensure_ascii=False)}|{' '.join(text.split())}"
+
+
+def asked_of(rows: list[dict], lane: str) -> list[dict]:
+    """一時レーン `lane` が送った依頼（`gate2`・`ask`）と、その答えの一覧（台帳の順。#3597 の決定 8）。`rows` は台帳の行で、
+    最初の `opened` の行より後のものを渡す。起き直した一時レーンは、答えのある問いを出し直さずにこの答えで進む。"""
+    answers = {r.get("id"): r.get("msg") or {} for r in rows if r.get("kind") == "answer"}
+    out = []
+    for r in rows:
+        msg = r.get("msg") or {}
+        if r.get("kind") not in ("gate2", "ask") or msg.get("lane") != lane:
+            continue
+        item = {"id": r.get("id"), "kind": r.get("kind"), "source": msg.get("source"), "target": msg.get("target"), "at": r.get("at")}
+        if (a := answers.get(r.get("id"))) is not None:
+            item["answer"] = {"result": a.get("result"), "choice": list(a.get("choice") or [])}
+        out.append(item)
+    return out

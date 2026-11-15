@@ -217,11 +217,11 @@ def answer_with_merge(main: Path, name: str, q: dict, result: str, items: list[d
 
     earlier = sent_answers(main, name, items)
     merge = merge_design(main, q, name) if result == "approved" else None
-    pl.send_answer(main, name, q["id"], result, merge=merge, **kw)
+    got = pl.send_answer(main, name, q["id"], result, merge=merge, **kw)
     remember_answers(main, name, [*earlier, q])
     tail, extra = merge_note(merge)
     after, kept = pdf.route(main, name, after_items(items, q, earlier), pdf.hours_of(main))
-    return tail, {**extra, **kept, "after": after}
+    return tail, {**extra, **kept, "after": after, **({"already": True} if not getattr(got, "written", True) else {})}
 
 
 def merge_note(merge: dict | None) -> tuple[str, dict]:

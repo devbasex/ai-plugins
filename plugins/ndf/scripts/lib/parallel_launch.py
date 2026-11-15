@@ -4,6 +4,8 @@
   再試行する。打つ前の一覧で動いていれば打たない。失敗は例外にせず結果（`up` / `failed`）で返す（設計の決定 2）
 - `LaunchRouting`（`parallel_run._Run` が継ぐ）: 起動の目的ごとに耐久ステップを 1 回だけ呼び、結果を起動の記録（`launches`）へ残し、
   2 回とも立ち上がらなければ区分 `spawn` の問いを立てる。問いの答えの「起こし直す」は、答えた問いのキーを添えた新しい目的で流す（I2）
+- 一時レーンの空き待ち（#3597 の決定 10）: 別の一時レーンが動いているための断り（断りの項目に `busy` がある）は 2 回目を打たず、
+  起動の記録を `waiting` にする。ループの 1 回の観測ごとに読み直し、待つ相手が止まって観えたら打ち直し、上限を過ぎたら問う
 
 耐久ワークフローの中の分岐は耐久ステップの結果だけで決める（`parallel_run.py` の決まり）。
 """
@@ -26,6 +28,7 @@ from parallel_repo import relay, relay_proc
 UP = ("running", "awaiting_approval")
 LAUNCH_SECONDS = float(limits.seconds("parallel-launch.up"))  # 立ち上がりを待つ上限の既定（設計の決定 3）
 INTERVAL = float(limits.value("parallel-launch.up", "interval"))  # 一覧を読む間隔
+HELPER_WAIT = float(limits.seconds("parallel-launch.helper-wait"))  # 一時レーンの空き待ちの上限の既定（#3597 の決定 10）
 RESTART = ("起こし直す", "続きから起こし直す")
 
 
@@ -35,6 +38,14 @@ def launch_seconds() -> float:
         return max(0.0, float(os.environ.get("NDF_PARALLEL_LAUNCH_SECONDS") or LAUNCH_SECONDS))
     except ValueError:
         return LAUNCH_SECONDS
+
+
+def helper_wait_seconds() -> float:
+    """一時レーンの空き待ちの上限の秒（`NDF_PARALLEL_HELPER_WAIT_SECONDS` で変えられる。既定 3,600 秒）。"""
+    try:
+        return max(0.0, float(os.environ.get("NDF_PARALLEL_HELPER_WAIT_SECONDS") or HELPER_WAIT))
+    except ValueError:
+        return HELPER_WAIT
 
 
 def _launch_stamp(t: float) -> str:
@@ -64,32 +75,39 @@ def came_up(row: dict, since: float, fresh: bool) -> bool:
     return row.get("state") in UP or (row.get("state") == "stopped" and _moved_since(row, since))
 
 
-def _hit_once(main: Path, where: Path, argv: list[str], lane: str, fresh: bool) -> tuple[bool, float, str]:
-    """1 回打って立ち上がりを確かめる。(立ち上がったか, 打った時刻, 立ち上がらなかった理由)。"""
+def _hit_once(main: Path, where: Path, argv: list[str], lane: str, fresh: bool) -> tuple[bool, float, str, str]:
+    """1 回打って立ち上がりを確かめる。(立ち上がったか, 打った時刻, 立ち上がらなかった理由, 断りの元の一時レーンの名前)。
+    断りの項目に `busy`（別の一時レーンが動いている）があれば、立ち上がりを待たずにその名前を返す（#3597 の決定 9）。"""
     import waits
 
     t0 = time.time()
     code, res = relay(where, *argv)
-    why = ((res.get("items") or [{}])[0] or {}).get("result")
+    item = (res.get("items") or [{}])[0] or {}
+    why = item.get("result")
     if code != 0 and why != "name-taken":  # 名前の重なりは動いている同じ名前があるため、確かめに進む
-        return False, t0, f"断られた（{why or res.get('summary') or f'exit {code}'}）"
+        return False, t0, f"断られた（{why or res.get('summary') or f'exit {code}'}）", str(item.get("busy") or "")
     limit = launch_seconds()
     policy = limits.policy("parallel-launch.up")._replace(seconds=limit, interval=min(INTERVAL, max(limit / 10, 0.05)))
     got = waits.wait_until(lambda: _ls_row(main, lane), lambda row: row is not None and came_up(row, t0, fresh), policy=policy)
-    return got.done, t0, "" if got.done else f"{limit:g} 秒のうちに一覧で動いて観えない"
+    return got.done, t0, "" if got.done else f"{limit:g} 秒のうちに一覧で動いて観えない", ""
 
 
 @durable.step(name="parallel.launch")
 def step_launch(main: str, argv: list[str], lane: str, cwd: Optional[str] = None, fresh: bool = False) -> dict:
     """`relay.py <argv>` を打って立ち上がりを確かめる。最大 2 回打つ。`cwd` は打つ場所（別のリポジトリの一時レーン）。
-    返す値: `result`（up / failed）・`attempts`（打った回数。打つ前に動いていれば 0）・`at`（最後に打った時刻）・`reason`。"""
+    返す値: `result`（up / failed / waiting）・`attempts`（打った回数。打つ前に動いていれば 0）・`at`（最後に打った時刻）・`reason`。
+    別の一時レーンが動いているための断りは 2 回目を打たず、`waiting` に `busy`（動いている名前）と `limit`（空き待ちの上限の秒）を
+    添えて返す（#3597 の決定 10）。上限は結果に記録し、打ち直しで環境変数を読み直さない。"""
     if not fresh and (row := _ls_row(Path(main), lane)) and row.get("state") in UP:
         return {"result": "up", "attempts": 0, "at": _launch_stamp(time.time()), "reason": "打つ前から動いていた"}
     t0, reason = time.time(), ""
     for attempt in (1, 2):
-        up, t0, reason = _hit_once(Path(main), Path(cwd) if cwd else Path(main), list(argv), lane, fresh)
+        up, t0, reason, busy = _hit_once(Path(main), Path(cwd) if cwd else Path(main), list(argv), lane, fresh)
         if up:
             return {"result": "up", "attempts": attempt, "at": _launch_stamp(t0), "reason": None}
+        if busy:
+            return {"result": "waiting", "attempts": attempt, "at": _launch_stamp(t0), "reason": reason, "busy": busy,
+                    "limit": helper_wait_seconds()}  # fmt: skip
     return {"result": "failed", "attempts": 2, "at": _launch_stamp(t0), "reason": reason}
 
 
@@ -101,7 +119,8 @@ class LaunchRouting:
 
     def launch_once(self, purpose: str, lane: str, argv: list[str], cwd: Optional[str] = None, fresh: bool = False, **extra) -> dict:
         """起動の目的 `purpose` を 1 回だけ流す。記録のある目的は打ち直さない（`failed` でも。I3）。2 回とも立ち上がらなければ
-        区分 `spawn` の問いを立てる。`extra` は問いへ添える値（リリースの連番 `n` など）。古い記録の打ち直しでは何もしない。"""
+        区分 `spawn` の問いを立てる。`extra` は問いへ添える値（リリースの連番 `n` など）。古い記録の打ち直しでは何もしない。
+        別の一時レーンが動いているための断り（`waiting`）は問いにせず、起動の記録に残して `launch_waiting` が読み直す（#3597）。"""
         if not self.launching:
             return {}
         if purpose in self.launches:
@@ -110,13 +129,51 @@ class LaunchRouting:
         rec = {"lane": lane, **{k: got.get(k) for k in ("result", "attempts", "at", "reason")}}
         self.launches[purpose] = rec
         self.helper_seen.pop(lane, None)  # 止まりの観測は今の起動から数え直す（I4）
-        if rec["result"] != "up":
-            text = f"レーン {lane} を 2 回起動しても立ち上がらない（{rec.get('reason')}）"
-            spec = {"argv": list(argv), "cwd": cwd, "fresh": fresh}
-            self.ask(
-                "spawn", f"{self.name}-launch-{purpose}", lane, text, list(RESTART[:1]) + ["止める"], purpose=purpose, launch=spec, **extra
-            )
+        spec = {"argv": list(argv), "cwd": cwd, "fresh": fresh}
+        if rec["result"] == "waiting":
+            rec.update(since=got.get("at"), busy=got.get("busy"), limit=got.get("limit"), launch=spec, extra=dict(extra))
+        elif rec["result"] != "up":
+            self._ask_launch(purpose, lane, f"レーン {lane} を 2 回起動しても立ち上がらない（{rec.get('reason')}）", spec, extra)
         return rec
+
+    def _ask_launch(self, purpose: str, lane: str, text: str, spec: dict, extra: dict) -> None:
+        """起動できないレーンの区分 `spawn` の問い（選択肢「起こし直す」「止める」）を立てる。同じ id は 1 回だけ立つ。"""
+        self.ask(
+            "spawn", f"{self.name}-launch-{purpose}", lane, text, list(RESTART[:1]) + ["止める"], purpose=purpose, launch=spec, **extra
+        )
+
+    def launch_waiting(self, rows: dict) -> None:
+        """空き待ち（`waiting`）の起動の記録を、ループの 1 回の観測（一覧の成功した行 `rows`）ごとに読み直す（#3597 の決定 10）。
+        待つ相手が一覧で動いて観えなければ打ち直し、動いていて上限を過ぎていれば `failed` にして区分 `spawn` の問いを立てる。
+        眠らない（I6）。古い記録の打ち直しでは何もしない。"""
+        import clock
+
+        if not self.launching:
+            return
+        for purpose, rec in list(self.launches.items()):
+            if rec.get("result") != "waiting":
+                continue
+            busy, spec, extra = str(rec.get("busy") or ""), rec.get("launch") or {}, dict(rec.get("extra") or {})
+            since = clock.parse(rec.get("since"), naive="utc") if rec.get("since") else None
+            waited = max(0.0, self.seen_at - since.timestamp()) if since else 0.0
+            if (rows.get(busy) or {}).get("state") in UP:
+                if waited >= float(rec.get("limit") or 0):
+                    rec.update(result="failed", reason=f"一時レーンは同時に 1 本まで: {busy} が動いたまま {waited:g} 秒待った")
+                    text = f"レーン {rec['lane']} を起動できない（一時レーンは同時に 1 本まで。{busy} が {waited:g} 秒のあいだ動いている）"
+                    self._ask_launch(purpose, rec["lane"], text, spec, extra)
+                continue
+            got = step_launch(self.main, list(spec.get("argv") or []), rec["lane"], spec.get("cwd"), bool(spec.get("fresh")))
+            self.helper_seen.pop(rec["lane"], None)
+            if got.get("result") == "waiting":
+                rec["busy"] = got.get("busy")  # 別の一時レーンが先に立ち上がった: 最初に断られた時刻のまま待ちを続ける
+            elif got.get("result") == "up":
+                self.launches[purpose] = {"lane": rec["lane"], **{k: got.get(k) for k in ("result", "attempts", "at", "reason")},
+                                          "waited": {"busy": busy, "seconds": waited}}  # fmt: skip
+            else:
+                rec.update(**{k: got.get(k) for k in ("result", "attempts", "at", "reason")})
+                self._ask_launch(
+                    purpose, rec["lane"], f"レーン {rec['lane']} を 2 回起動しても立ち上がらない（{rec.get('reason')}）", spec, extra
+                )
 
     def launch_helper(self) -> None:
         """流れているリリースの最後の起動（`launch`）の一時レーンを起動する。立ち上がらなければ問いに `n` を添える（「止める」で締める）。"""
