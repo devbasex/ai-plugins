@@ -94,6 +94,9 @@ MAX_LIBRARIES = 15
 ANALYTICS = ("analytics", "gtag", "sentry", "datadog", "mixpanel", "amplitude", "posthog", "segment", "newrelic", "bugsnag", "rollbar")
 # 依存の言語と、その依存の置き場の組
 ECOSYSTEM = (("php", "packagist"), ("javascript", "npm"), ("python", "pypi"))
+# 依存の表へ処理系の版を書く行の名前（依存ではない）
+PHP_ROW, NODE_ROW, PYTHON_ROW = "php", "node", "python"
+RUNTIME_ROWS = (PHP_ROW, PYTHON_ROW, NODE_ROW)
 
 
 class TimeUp(Exception):
@@ -212,7 +215,7 @@ def _js_dependencies(tree: Tree) -> dict[str, str]:
         out.update(_sections(c, ("dependencies", "devDependencies")))
         node = obj(c.get("engines")).get("node")
         if node:
-            out["node"] = str(node)
+            out[NODE_ROW] = str(node)
     return out
 
 
@@ -257,7 +260,7 @@ def _py_dependencies(tree: Tree) -> dict[str, str]:
         out.update(_pyproject_tool_deps(c))
         python = obj(c.get("project")).get("requires-python")
         if python:
-            out["python"] = str(python)
+            out[PYTHON_ROW] = str(python)
     for name, line in _requirements_deps(tree).items():
         out.setdefault(name, line)
     return out
@@ -273,10 +276,10 @@ def _spec(deps: dict[str, dict[str, str]], lang: str, name: str) -> str:
 
 
 def _versions(tree: Tree, deps: dict[str, dict[str, str]]) -> dict[str, Optional[str]]:
-    node = _major(_spec(deps, "javascript", "node"))
+    node = _major(_spec(deps, "javascript", NODE_ROW))
     version_of = {
-        "php": _major(_spec(deps, "php", "php")),
-        "python": _major(_spec(deps, "python", "python")),
+        "php": _major(_spec(deps, "php", PHP_ROW)),
+        "python": _major(_spec(deps, "python", PYTHON_ROW)),
         "javascript": node,
         "typescript": node,
     }
@@ -507,17 +510,23 @@ def measure_instructions(tree: Tree) -> dict[str, Any]:
     return measured({"files": files, "imports": imports, "notes": notes})
 
 
-def measure_materials(tree: Tree, deps: dict[str, dict[str, str]]) -> dict[str, Any]:
-    """素材の宣言の候補。README の冒頭・直接の依存・解析の SDK を根拠にする。決めるのは人である。"""
+def _library_seeds(deps: dict[str, dict[str, str]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """(素材の候補の依存（上限 `MAX_LIBRARIES`）, 解析の SDK の根拠)。処理系の版の行は依存でないので外す。"""
     libraries: list[dict[str, Any]] = []
     analytics: list[dict[str, Any]] = []
     for lang, names in deps.items():
         eco = next((e for k, e in ECOSYSTEM if k == lang), lang)
-        for name in sorted(n for n in names if n not in ("php", "python", "node")):  # 処理系の版の行は依存でない
+        for name in sorted(n for n in names if n not in RUNTIME_ROWS):
             if any(w in name.lower() for w in ANALYTICS):
                 analytics.append({"text": f"{eco}: {name}"})
             if len(libraries) < MAX_LIBRARIES:
                 libraries.append({"name": name, "ecosystem": eco, "alternatives": []})
+    return libraries, analytics
+
+
+def measure_materials(tree: Tree, deps: dict[str, dict[str, str]]) -> dict[str, Any]:
+    """素材の宣言の候補。README の冒頭・直接の依存・解析の SDK を根拠にする。決めるのは人である。"""
+    libraries, analytics = _library_seeds(deps)
     evidence = [
         {"file": f, "text": ln[:200]}
         for f in tree.shallow("README*.md")[:1]
