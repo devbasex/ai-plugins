@@ -16,7 +16,7 @@ import time
 import tomllib
 from collections import Counter
 from pathlib import Path, PurePosixPath
-from typing import Any, Callable, Iterator, Optional
+from typing import Any, Callable, Iterator, NamedTuple, Optional
 
 from ndf.adapters import git
 from ndf.contracts import facts
@@ -86,16 +86,12 @@ DEPLOY_WORDS = re.compile(r"deploy|release|publish|デプロイ|リリース|本
 IMPORT_TOKEN = re.compile(r"(?:^|\s)@([\w./-]+\.md)\b")
 DEP_NAME = re.compile(r"[\s<>=!~\[;]")
 REQ_NAME = re.compile(r"[\s<>=!~\[;#]")
-# 本番チャネルの候補（origin の HEAD が無いときに既定ブランチとして当てる名前）
+# 本番チャネルの候補（リモートの HEAD が無いときに既定ブランチとして当てる名前）
 DEFAULT_BRANCH_CANDIDATES = check.KNOWN_BRANCHES[:2]
 
 # 素材の設定の案（#2315）
 MAX_LIBRARIES = 15
 ANALYTICS = ("analytics", "gtag", "sentry", "datadog", "mixpanel", "amplitude", "posthog", "segment", "newrelic", "bugsnag", "rollbar")
-# 依存の言語と、その依存の保存先の組
-ECOSYSTEM = (("php", "packagist"), ("javascript", "npm"), ("python", "pypi"))
-# 依存を集める言語（`dependencies` の返す言語の組と、測れなかったときの既定）
-DEP_LANGUAGES = tuple(lang for lang, _ in ECOSYSTEM)
 # 依存の表へ処理系のバージョンを書く行の名前（依存ではない）
 PHP_ROW, NODE_ROW, PYTHON_ROW = "php", "node", "python"
 RUNTIME_ROWS = (PHP_ROW, PYTHON_ROW, NODE_ROW)
@@ -111,6 +107,7 @@ class Tree:
     def __init__(self, root: Path, deadline: float) -> None:
         self.root = root
         self.deadline = deadline
+        self.remote = git.Git(root).remote()
         self.files = check.tree(git.Git(root))
         self.skipped: list[str] = sorted(p for p in self.files if is_secret_path(p))
 
@@ -272,10 +269,29 @@ def _py_dependencies(tree: Tree) -> dict[str, str]:
     return out
 
 
+class DepSource(NamedTuple):
+    """依存を集める言語 1 つ。言語・その依存の保存先・依存の定義を読む関数。"""
+
+    language: str
+    ecosystem: str
+    read: Callable[[Tree], dict[str, str]]
+
+
+# 依存を集める言語の唯一の定義（並びは `dependencies` の返す言語の順）
+DEP_SOURCES = (
+    DepSource("php", "packagist", _php_dependencies),
+    DepSource("javascript", "npm", _js_dependencies),
+    DepSource("python", "pypi", _py_dependencies),
+)
+# 依存の言語 → その依存の保存先
+ECOSYSTEM = {s.language: s.ecosystem for s in DEP_SOURCES}
+# 依存を集める言語（`dependencies` の返す言語の組と、測れなかったときの既定）
+DEP_LANGUAGES = tuple(s.language for s in DEP_SOURCES)
+
+
 def dependencies(tree: Tree) -> dict[str, dict[str, str]]:
     """言語 → {依存の名前: バージョンの指定}。根と 1 段下の依存の定義から集める。"""
-    readers = (_php_dependencies, _js_dependencies, _py_dependencies)  # DEP_LANGUAGES の順
-    return {lang: read(tree) for lang, read in zip(DEP_LANGUAGES, readers, strict=True)}
+    return {s.language: s.read(tree) for s in DEP_SOURCES}
 
 
 def _spec(deps: dict[str, dict[str, str]], lang: str, name: str) -> str:
@@ -415,8 +431,8 @@ def measure_test(tree: Tree, deps: dict[str, dict[str, str]], services: list[str
 
 
 def default_branch(tree: Tree) -> Optional[str]:
-    """既定ブランチ。origin の HEAD の指す先 → ローカルの main・master の順。どれも無ければ `None`。"""
-    head = tree.git("symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+    """既定ブランチ。リモート名のリモートの HEAD の指す先 → ローカルの main・master の順。どれも無ければ `None`。"""
+    head = tree.git("symbolic-ref", "--short", f"refs/remotes/{tree.remote}/HEAD")
     if head and head.strip():
         return head.strip().split("/", 1)[-1]
     local = tree.refs("refs/heads")
@@ -424,20 +440,20 @@ def default_branch(tree: Tree) -> Optional[str]:
 
 
 def measure_branches(tree: Tree) -> dict[str, Any]:
-    state = check.branch_state(git.Git(tree.root))
+    state = check.branch_state(git.Git(tree.root), remote=tree.remote)
     local = tree.refs("refs/heads")
     evidence: list[dict[str, Any]] = []
     names: list[str] = []
     for b in check.KNOWN_BRANCHES:
-        ref = f"origin/{b}" if b in state["present"] else (b if b in local else None)
+        ref = f"{tree.remote}/{b}" if b in state["present"] else (b if b in local else None)
         if ref:
             names.append(b)
             last = tree.git("log", "-1", "--format=%cI", ref)
             evidence.append({"text": f"{ref} の最後のコミット: {last.strip() if last else None}"})
     if state["head"]:
-        evidence.insert(0, {"text": f"origin の HEAD: {state['head']}"})
+        evidence.insert(0, {"text": f"{tree.remote} の HEAD: {state['head']}"})
     if not names and not state["head"]:
-        return unknown(f"origin の HEAD も {'・'.join(check.KNOWN_BRANCHES)} も無い")
+        return unknown(f"{tree.remote} の HEAD も {'・'.join(check.KNOWN_BRANCHES)} も無い")
     base = [state["head"]] if state["head"] else []
     base += [b for b in names if b not in base]
     production = [b for b in DEFAULT_BRANCH_CANDIDATES if b in names] or base[:1]
@@ -533,7 +549,7 @@ def _library_seeds(deps: dict[str, dict[str, str]]) -> tuple[list[dict[str, Any]
     libraries: list[dict[str, Any]] = []
     analytics: list[dict[str, Any]] = []
     for lang, names in deps.items():
-        eco = next((e for k, e in ECOSYSTEM if k == lang), lang)
+        eco = ECOSYSTEM[lang] if lang in ECOSYSTEM else lang
         for name in sorted(n for n in names if n not in RUNTIME_ROWS):
             if any(w in name.lower() for w in ANALYTICS):
                 analytics.append({"text": f"{eco}: {name}"})

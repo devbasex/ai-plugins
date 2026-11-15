@@ -35,7 +35,7 @@ graph TD
         B[例外リスト]
         C[語の表]
     end
-    D[走査の対象<br/>Markdown・scripts・hooks]
+    D[走査の対象<br/>Markdown・scripts・hooks・src・contracts]
     A --> C
     A --> B
     A --> D
@@ -81,6 +81,7 @@ Value 6 の棚卸しで、ai-plugins の形を前提にした箇所が 27 件見
 | 5 | 終了コード 2 の判定は 1 より先に行う。`--report` は出力を足すだけで、終了コードを変えない |
 | 6 | manifest に載る Skill のうち、走査できる Markdown を 1 本も持たないものがあれば、例外リストより先に終了コード 2 で落ちる |
 | 7 | リリース対象のファイルに、ファイル全体の除外は無い。除外は常に語とファイルの組で宣言する |
+| 8 | ndf-next の形の family で、リモート名の語（`remote-origin`）に当たる JSON Schema の `default` の値が `contracts/schemas/declarations/worktree.schema.json` の `/properties/remote/default` の 1 か所だけでなければ（2 か所以上か 0 か所）、例外リストより先に終了コード 2 で落ちる |
 
 ### 走査の範囲
 
@@ -96,10 +97,24 @@ Value 6 の棚卸しで、ai-plugins の形を前提にした箇所が 27 件見
 
 パスのどこかに `tests` か `experimental` のディレクトリを含むファイルは対象にしない。manifest に載らない Skill も対象にしない。
 
-`--report` の 1 行目は family ごとの規模である（2026-11-12 の実測）。
+**ndf-next の形の family**（Skill の一覧を `manifests/skills.json` の `skills[].name` に持つ family）は、上の対象に次を足して走査する。
+`manifests/*-skills.txt` を持つ今の NDF と playwright-kit の走査の対象と語は変わらない。
+
+| 対象 | 掛ける語の表 |
+| --- | --- |
+| family の `src/**/*.py` | スクリプト用と ndf-next のコード用 |
+| family の `contracts/**/*.json` | スクリプト用と ndf-next のコード用（`remote-origin` は JSON Schema の `"default"` の値を走査しない） |
+| family の `hooks/*.py` | スクリプト用と ndf-next のコード用 |
+| manifest に載る Skill の `*.md` と `agents/*.md` | Markdown 用と ndf-next の文書用 |
+
+リモート名の既定はスキーマの `default` の 1 か所だけが持つ。既定を書く正しい置き場を違反として数えると例外リストに常に 1 件残るため、
+`default` という鍵の値だけを走査から外し、代わりにその件数を数える（常に成り立つ条件 8）。ほかの鍵（`description`・`enum`・`examples` など）は走査する。
+
+`--report` の 1 行目は family ごとの規模である（2026-11-16 の実測）。
 
 ```text
-plugins/ndf/skills: 公開する Skill 49 個 / Markdown 218 本 / スクリプト 572 本（family 420・Skill 152） / hook 2 本 / エージェント 11 本 / ヒット 236 件
+plugins/ndf/skills: 公開する Skill 49 個 / Markdown 221 本 / スクリプト 597 本（family 445・Skill 152） / hook 2 本 / エージェント 11 本 / ヒット 238 件
+plugins/ndf-next/skills: 公開する Skill 49 個 / Markdown 221 本 / スクリプト 0 本（family 0・Skill 0） / src 349 本 / contracts 166 本 / hook 4 本 / エージェント 11 本 / ヒット 159 件
 plugins/playwright-kit/skills: 公開する Skill 4 個 / Markdown 24 本 / スクリプト 8 本（family 0・Skill 8） / hook 0 本 / エージェント 0 本 / ヒット 14 件
 ```
 
@@ -126,6 +141,17 @@ Markdown 用の表は、特定のブランチ名で書いた手順も拾う（`d
 `base-branch-name` の `--base[ =](?:main|master)\b`・`main-branch` の `` `(?:main|master)` ``）。手順はベースブランチ・本番チャネル・
 スプリントの起点の語で書き、名前は `.ndf/worktree.json` の宣言から読む。
 語の表は網羅ではない。新しい形が見つかったら表へ足し、同じ変更で既知の当たりを宣言する。
+
+ndf-next の形の family にだけ掛ける語は次の 5 つである（今の NDF の件数を変えないため、ほかの family には掛けない）。
+`remote-origin` はコードとコントラクトにだけ掛け、Skill の本文とエージェントには掛けない。
+
+| ID | 正規表現 | 掛ける対象 |
+| --- | --- | --- |
+| `repo-name` | `\bai-plugins\b` | 文書・コード |
+| `org-name` | `\bdevbasex\b` | 文書・コード |
+| `marketplace-entry` | `ndf@` | 文書・コード |
+| `parity-table` | `parity/features\.json\|機能の対応表\|ndf-next-parity`（コードでは `\|ndf\.parity` も） | 文書・コード |
+| `remote-origin` | `remote "origin"\|"origin"\|\borigin/\|remotes/origin\b\|remote\.origin\b` | コード |
 
 ### 宣言を読む 4 か所
 
@@ -209,6 +235,8 @@ python3 scripts/check-skill-repo-assumptions.py [--skills-dir D]... [--allow DIR
 | manifest に載る Skill に走査できる Markdown が無い | 2 | Skill のパスと、manifest から外す案内 |
 | 例外リストが読めない・形が違う・置き場がファイル | 2 | 項目のファイル名と、満たすべき形 |
 | 項目の対象が走査の範囲に無い・どの family にも属さない | 2 | パスと、消す項目のファイル名 |
+| ndf-next の形の family の `manifests/skills.json` が読めない | 2 | ファイルのパスと理由 |
+| ndf-next の形の family でリモート名の既定が 1 か所でない | 2 | 見つかった（ファイル・行）と、置くべき位置 |
 | 宣言より当たりが少ない | 2 | 宣言の数・実際の数・直す値（0 なら項目を消す） |
 | 宣言の外の当たり・数を超えた当たり | 1 | 当たりの一覧と、宣言か引数で受ける案内 |
 
@@ -259,6 +287,8 @@ python3 scripts/check-skill-repo-assumptions.py [--skills-dir D]... [--allow DIR
 - リリースのスクリプト 3 本（`release-steps.py`・`lib/step_result.py`・`release-verification-steps.py`）にファイル全体の除外が無いこと
 - family を 1 つだけ指定した走査で、実物のリポジトリの他の family の項目で落ちないこと。実物のリポジトリで終了コード 0 で終わることは、全体テストの suite `skill-repo-assumptions-check`（`python3 scripts/check-skill-repo-assumptions.py`）が確かめる
 - `--report` が規模の行を出し、当たりがあれば終了コード 1 のままであること
+- ndf-next の形の family で、`src/`・`contracts/`・`hooks/*.py` と追加の 5 語が当たり、`manifests/*-skills.txt` の family では当たらないこと
+- `remote-origin` が JSON Schema の `default` の値に当たらず、その件数が 1 か所でなければ終了コード 2 になること
 - `production_branch: prod` の宣言で、並列の計画の 2 つの照会が `--base prod` を渡すこと。宣言が無く既定ブランチが `main` なら `--base main` を渡すこと。本番が決まらないとき照会を打たないこと
 - 宣言も既定ブランチも無いリポジトリで、`pr-steps.py` の `plan`・`create` が止まり、Pull Request を作るコマンドを呼ばないこと
 - `supervise.py example` の出力に `pytest` が無く、`pr` のステップが `base` を持たず、`supervise.py expected` が読めること

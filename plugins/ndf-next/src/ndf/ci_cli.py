@@ -8,12 +8,23 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 from typing import Any, Optional
 
 from ndf import cli
 from ndf.adapters import git
 from ndf.adapters import github as github_mod
-from ndf.adapters.ci import Classifier, Reading, Watch, WatchResult, failed_test_nodes_of, files_of, is_test_check, watch_head
+from ndf.adapters.ci import (
+    Classifier,
+    FailedTestSource,
+    Reading,
+    Watch,
+    WatchResult,
+    failed_tests_of,
+    files_of,
+    is_test_check,
+    watch_head,
+)
 from ndf.adapters.github import GitHub
 from ndf.contracts import result
 
@@ -67,13 +78,24 @@ def _items(reading: Reading, tests: list[str]) -> list[dict]:
     return rows
 
 
-def _failed_nodes(hub: GitHub, reading: Reading) -> dict:
-    """落ちたテストの node id とファイル。ログを読めなくても（権限・Actions 以外のチェック）分類は保ち、理由を `log_error` に残す。"""
-    try:
-        nodes = failed_test_nodes_of(hub, reading.failed_tests)
-    except github_mod.GitHubError as exc:
-        return {"failed_tests": [], "test_files": [], "log_error": str(exc)}
-    return {"failed_tests": nodes, "test_files": files_of(nodes)}
+def _failed_metrics(hub: GitHub, reading: Reading, cwd: Path) -> dict:
+    """落ちたテストの node id・ファイルと、チェックごとの読み取りの記録（結果 JSON の `metrics` のキー）。
+
+    作業場所の設定ファイルの `test.ci.junit_artifacts` と suite を読み、JUnit の成果物を先に、ログを後に読む。
+    ジョブを特定できないチェックがあっても分類は保ち、理由を `log_error` に残す。
+    """
+    source = FailedTestSource.from_work(cwd)
+    found = failed_tests_of(hub, reading.failed_tests, source)
+    out: dict[str, Any] = {
+        "failed_tests": found.nodes,
+        "test_files": files_of(found.nodes),
+        "failed_test_reads": [r.as_metric() for r in found.reads],
+    }
+    if source.junit_artifacts is not None:
+        out["junit_artifacts"] = source.junit_artifacts
+    if found.job_errors:
+        out["log_error"] = "; ".join(found.job_errors)
+    return out
 
 
 def _unread() -> Reading:
@@ -98,7 +120,7 @@ def _report(args: argparse.Namespace, pull: github_mod.Pull, hub: GitHub, watche
     """待ちの結果と停止理由の種類（通っていれば None）から結果 JSON を組む。"""
     metrics: dict[str, Any] = {"rounds": watched.rounds, "elapsed": round(watched.elapsed, 1), "queued_for": round(watched.queued_for, 1)}
     if kind == "test_failed":
-        metrics.update(_failed_nodes(hub, watched.reading))
+        metrics.update(_failed_metrics(hub, watched.reading, Path.cwd()))
     items = _items(watched.reading, args.test)
     if kind is None:
         return result.result(TOOL, result.OK, f"#{args.pr} の必須のチェックが通った", items=items, metrics=metrics)

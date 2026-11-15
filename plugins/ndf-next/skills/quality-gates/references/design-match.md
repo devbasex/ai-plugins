@@ -1,13 +1,11 @@
 # 設計との突き合わせ
 
-> 次のスクリプトのサブコマンドは新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `design-match.py`（M1）・`pr-steps.py`（M1）・`spec-copy.py`（M7）。移行先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
-
 `standard` の完了判定で、実装を設計文書・既存の確定仕様・要求と照らし、食い違いをマージの前に見えるようにする。
 確認は (a)(b)(c) の 3 つで、結果は実装 PR の本文の `## 設計と違う点` の節に残す。
 
 ## 実例
 
-devbasex/devbase の #216 の設計文書は、`## 構成要素` に回帰テスト `tests/ci/test_ci_workflow.py` を、
+あるリポジトリ（`<owner>/<repo>`）の #216 の設計文書は、`## 構成要素` に回帰テスト `tests/ci/test_ci_workflow.py` を、
 `## テスト設計` にテスト関数 `test_pull_request_is_not_filtered_by_branch` などを書いていた。実装の HEAD で
 確認 (a) を打つと、次のように「無い」が出て終了コード 1 で終わる。
 
@@ -16,7 +14,7 @@ python3 "$SCRIPTS/design-match.py" tests --issue 216
 # items: tests/ci/test_ci_workflow.py missing（構成要素）・test_pull_request_is_not_filtered_by_branch missing（テスト設計）…
 ```
 
-同じスプリントで shellcheck のバージョンを固定した変更（devbasex/devbase の `4d82277`）に確認 (b) を打つと、既存の確定仕様 `docs/specifications/base-image-shellcheck.md` が
+同じスプリントで shellcheck のバージョンを固定した変更（同じリポジトリの `4d82277`）に確認 (b) を打つと、既存の確定仕様 `docs/specifications/base-image-shellcheck.md` が
 一致した語 4 つ（変えたパス 3 つと `SHELLCHECK_VERSION`）で最上位に並び、「バージョンは固定せず」と書いた行が出る。
 担い手はテストを作るか節に「作らなかった」と理由を並べ、確定仕様の記述を同じ PR で直す。
 

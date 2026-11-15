@@ -59,6 +59,28 @@
       "additionalProperties": false,
       "properties": {
         "subcommand": {
+          "const": "docs-only",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--base": {
+          "type": "string",
+          "description": "ベースブランチ"
+        },
+        "--remote": {
+          "type": "string",
+          "description": "リモート名（省けば worktree の設定の remote か既定）"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--base"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
           "const": "enable",
           "description": "下位の命令（入れ子は空白でつなぐ）"
         },

@@ -9,8 +9,6 @@ allowed-tools:
 
 # 工程の進行を記録する
 
-> 次のスクリプトのサブコマンドは新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `pr-steps.py`（M1）・`progress-record.sh`（M7）・`projects-sync.sh`（M7）・`release-steps.py`（M2）・`sprint-close.py`（M1）。移行先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
-
 いまどの工程まで終わったかを、セッションの外へ残す。**判定したモードも、通った工程も、
 記録しなければ会話の中にしか残らない。** セッションが変わると引き継がれない。
 

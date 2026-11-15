@@ -1,7 +1,5 @@
 # 01: 状態管理 + レビュー実行 (Step 0〜4)
 
-> 次のスクリプトのサブコマンドは新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `drive.py`（M5）・`fetch-pr-comments.sh`（M1）・`launch-cli.sh`（M4）・`launch-reviewer.sh`（M5）・`state.py`（M5）・`wait-review.sh`（M5）。移行先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
-
 `SKILL.md` 本体から呼び出される **状態ファイル初期化 / ラウンド開始 /
 並列レビュー / 判定 / 振動検知** までの詳細手順。
 

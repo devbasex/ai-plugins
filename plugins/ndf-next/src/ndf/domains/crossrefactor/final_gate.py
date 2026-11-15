@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Optional
 
 from ndf.adapters import ci, git, github
@@ -50,11 +51,12 @@ FixLauncher = Callable[[Sequence[str], int], bool]
 
 
 def send(g: git.Git, branch: str) -> str:
-    """origin の先頭へ合わせて送り、送った head を返す。"""
-    synced = worktree.sync_worktree(g, branch)
+    """リモート名のリモートの先頭へ合わせて送り、送った head を返す。"""
+    remote = g.remote()  # 同期と送信で 1 回だけ求める
+    synced = worktree.sync_worktree(g, branch, remote)
     if synced.conflicts:
         raise GateStopped("base_conflict", worktree.conflict_detail(synced))
-    done = g.attempt("push", "-q", "origin", f"HEAD:refs/heads/{branch}")
+    done = g.attempt("push", "-q", "--", remote, f"HEAD:refs/heads/{branch}")
     if done.returncode != 0:
         raise GateStopped("push_rejected", f"PR のブランチ {branch} へ送れない: {done.stderr.strip()}")
     return g.rev_parse("HEAD")
@@ -101,12 +103,9 @@ def _check_fix(g: git.Git, before: str, failed: Sequence[str], cfg: GateConfig) 
     raise GateStopped("refused", str(verdict.cause()["detail"]), record)
 
 
-def _failed_tests(hub: github.GitHub, watched: ci.WatchResult) -> Optional[list[str]]:
-    """落ちたテストの node id。ログを読めなければ None（落ちたチェックの名前で直しを頼む）。"""
-    try:
-        return ci.failed_test_nodes_of(hub, watched.reading.failed_tests)
-    except github.GitHubError:  # noqa: NDF401 ネットワーク: ログを読めなくても落ちたチェックの名前で直しを頼む
-        return None
+def _failed_tests(hub: github.GitHub, watched: ci.WatchResult, source: ci.FailedTestSource) -> list[str]:
+    """落ちたテストの node id を `ndf ci watch` と同じ組み立てで得る。読めなければ空（落ちたチェックの名前で直しを頼む）。"""
+    return ci.failed_tests_of(hub, watched.reading.failed_tests, source).nodes
 
 
 @dataclass(frozen=True)
@@ -114,7 +113,7 @@ class CiPort:
     """CI との接続: 必須のチェックの待ちと、落ちたテストの node id の取得（テストで差し替える）。"""
 
     wait: Callable[[github.GitHub, str, GateConfig], ci.WatchResult] = wait_ci
-    failed_tests: Callable[[github.GitHub, ci.WatchResult], Optional[list[str]]] = _failed_tests
+    failed_tests: Callable[[github.GitHub, ci.WatchResult, ci.FailedTestSource], list[str]] = _failed_tests
 
 
 def _fix_or_undo(g: git.Git, before: str, fix: Callable[[], bool], record: dict[str, Any]) -> None:
@@ -151,7 +150,7 @@ def run_gate(
 ) -> dict[str, Any]:
     """最終ゲートを回し、通れば記録（`status` が `passed`・`rounds`）を返す。止まれば `GateStopped`。"""
     port = ci_port if ci_port is not None else CiPort()
-    for round_no in range(cfg.max_fix + 1):
+    for round_no in range(cfg.max_fix + 1):  # noqa: NDF201 上限: 最終ゲートの周は cfg.max_fix + 1 回まで
         sha = send(g, cfg.branch)
         ensure_mergeable(hub, cfg.pr, sleep)
         watched = port.wait(hub, sha, cfg)
@@ -160,7 +159,8 @@ def run_gate(
             return _record("passed", round_no, sha)
         if kind != "test_failed" or round_no == cfg.max_fix:
             raise GateStopped(kind, f"最終ゲートの CI が通らない（{watched.reading.verdict}）", _record(kind, round_no, sha))
-        nodes = port.failed_tests(hub, watched)
+        source = ci.FailedTestSource.from_work(g.cwd if g.cwd is not None else Path.cwd())
+        nodes = port.failed_tests(hub, watched, source)
         failed = nodes if nodes else _names(watched.reading.failed_tests)
         before = g.rev_parse("HEAD")
         _fix_or_undo(g, before, lambda: fix(failed, round_no + 1), _record("work_stopped", round_no, sha))

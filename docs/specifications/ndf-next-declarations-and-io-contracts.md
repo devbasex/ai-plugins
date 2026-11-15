@@ -21,7 +21,7 @@ Skill の本文から `ndf` を打つ AI が読み手である。
 | 何を | 正本 |
 | --- | --- |
 | 宣言・副命令・環境変数・受け渡しのファイル・hook・Skill・起動スクリプトの規約（読む形） | [`plugins/ndf-next/docs/contracts/`](../../plugins/ndf-next/docs/contracts/index.md)（生成物） |
-| 宣言のキーの型・説明・既定値・取りうる値・例 | [`plugins/ndf-next/contracts/schemas/declarations/`](../../plugins/ndf-next/contracts/schemas/declarations/) |
+| 宣言のキーの型・説明・既定値・取りうる値・例 | [`plugins/ndf-next/contracts/schemas/ndf-settings/`](../../plugins/ndf-next/contracts/schemas/ndf-settings/) |
 | 副命令の引数（生成物）と結果の `metrics`・`items`（手書き） | [`plugins/ndf-next/contracts/schemas/io/`](../../plugins/ndf-next/contracts/schemas/io/) |
 | 規則と不変条件の対応 | [`plugins/ndf-next/src/ndf/checks/spec_docs.py`](../../plugins/ndf-next/src/ndf/checks/spec_docs.py) の docstring |
 | 読む正本の一覧 | [`plugins/ndf-next/src/ndf/checks/spec_model.py`](../../plugins/ndf-next/src/ndf/checks/spec_model.py) の docstring |

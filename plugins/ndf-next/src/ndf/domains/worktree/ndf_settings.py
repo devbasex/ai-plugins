@@ -4,7 +4,8 @@
 （`ndf-files` の `worktree`・`worktree-local` と `locations` の `ndf`）から引き、写さない。
 
 - 共有設定が無ければ `None`（worktree の運用を使わないリポジトリ）。読めない・バージョンが違えば `NdfSettingsError`
-- 個人設定は `LOCAL_KEYS` の項目だけを重ねる（運用を決める項目は共有設定だけが持つ）。壊れていても共有の
+- 個人設定は `LOCAL_KEYS` の項目だけを重ねる（運用を決める項目は共有設定だけが持つ。リモート名 `remote` もここに入れず、
+  `adapters/git.py` の `remote_of` が共有設定から読む）。壊れていても共有の
   運用を止めず、反映しなかった項目と理由を `local_ignored` に載せる
 """
 

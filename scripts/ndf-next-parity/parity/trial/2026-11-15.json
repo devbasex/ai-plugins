@@ -1,0 +1,36 @@
+{
+  "summary": "T2 #3411 の 1 回目の試走（2026-11-15）。ndf-next だけを読む起動でスプリントを流したが、手順 0 で $SCRIPTS が旧いプラグインの scripts/ へ解決し、ndf-next だけでは先へ進めなかった。行ごとの結果は対応表の trial の列にあり、python -m parity.trial.probe --write がこの記録の passed と本文の確かめから書く",
+  "base": "develop 10ca124c7（ndf-next 11.0.0-dev.8）",
+  "runs": [
+    {
+      "what": "起動",
+      "command": "plugins/ndf-next/bin/ndf-claude -p --output-format stream-json --verbose --max-turns 1 hi",
+      "result": "passed",
+      "observed": "init の plugins は ndf11（plugins/ndf-next）と組み込みだけで、ndf@ai-plugins は無い。ndf11: の Skill は 45 本。SessionStart の hook 2 本は exit 0"
+    },
+    {
+      "what": "スプリント",
+      "issue": 3411,
+      "command": "plugins/ndf-next/bin/ndf-claude -p --output-format stream-json --verbose --max-turns 40 --permission-mode bypassPermissions \"/ndf11:development-workflow #3411 の手順 0 から 3（判定結果の出力）までだけを行い、次のコマンドは打たずに判定結果を返して終える\"",
+      "result": "failed",
+      "stopped_at": "手順 0（$SCRIPTS を決める）",
+      "observed": "plugins/ndf-next/scripts/resolve.sh が無く、探索の次の候補で SCRIPTS=plugins/ndf/scripts に決まった。worktree-setup.sh check・project-decl.py check・project-mvv.py check は旧いプラグインのスクリプトが走った（exit 0）。判定結果（mode: light）は出たが、次のコマンドは旧い supervise.py で、ndf-next だけでは打てない。6 ターン・$0.67",
+      "fix": [3569]
+    },
+    {
+      "what": "計画",
+      "result": "not_run",
+      "reason": "スプリントが手順 0 で旧いプラグインへ解決するため、並列の計画（parallel.py。移行先 P3 #3097 は開いている）は流していない"
+    },
+    {
+      "what": "閉じる証拠（#2602・#2690・#2719 の再現しない記録）",
+      "result": "not_run",
+      "reason": "直す子（M1+ #3489 ほか）の PR がまだ develop に無い。マージの後の試走で取る"
+    }
+  ],
+  "fixes": {
+    "closed_children": {"issue": 3569, "children": ["X0", "C2", "D2+", "M3b", "P1a", "S1b"]},
+    "open_children": "ほかの failed の行は、行の to の子（開いている）が直す。移行先の子の Issue 番号は src/ndf/checks/children.json にある"
+  },
+  "passed": []
+}

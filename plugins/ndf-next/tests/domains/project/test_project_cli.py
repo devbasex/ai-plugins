@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from ndf import contracts
 from ndf.domains.project import check, cli, measure_ci, measure_repo, write
 from ndf.domains.project.items import unknown
 
@@ -157,7 +158,7 @@ def test_branch_defaults_running_out_of_time_leave_the_item_unknown(monkeypatch)
     monkeypatch.setattr(measure_ci, "measure", lambda *a: None)
     monkeypatch.setattr(measure_ci, "measure_issues", lambda *a: unknown("x"))
     step = cli._Steps(time.monotonic() + 60)
-    cli._ci_items(object(), step, {"gh_repo": None, "head": None, "repo_issues": None, "worktree": None})
+    cli._ci_items(object(), step, cli.MeasurementContext(gh_repo=None, head=None, repo_issues=None, worktree=None))
     assert step.items[write.BRANCH_FLOW] == unknown("時間切れ")
 
 
@@ -314,3 +315,121 @@ def test_row_line_formats_each_kind():
         "  P6 worktree.json#base_branch: 測った",
         f"  P6 {write.BRANCH_FLOW}: 判断した",
     ]
+
+
+# --- 現状固定: cli._ci_items（I-022。CI の部分・ブランチ運用・課題の SSOT の項目の入れ方と注記） ---
+
+_REPO_ISSUES = {"markdown_files": 2, "templates": [], "hosts": []}
+
+
+def _ci_ctx(**over) -> cli.MeasurementContext:
+    ctx = {
+        "gh_repo": "o/r",
+        "head": "abc",
+        "repo_issues": _REPO_ISSUES,
+        "worktree": {"base_branch": "develop", "production_branch": "main"},
+    }
+    return cli.MeasurementContext(**{**ctx, **over})
+
+
+def _patch_ci(monkeypatch, ci, flow, calls: list) -> None:
+    def fake_ci(tree, gh_repo, head, deadline, environ):
+        calls.append(("ci", tree, gh_repo, head))
+        if isinstance(ci, Exception):
+            raise ci
+        return ci
+
+    def fake_flow(tree, gh_repo, base, production):
+        calls.append(("flow", tree, gh_repo, base, production))
+        return flow
+
+    monkeypatch.setattr(measure_ci, "measure", fake_ci)
+    monkeypatch.setattr(cli.measure_flow, "measure", fake_flow)
+
+
+def test_ci_items_current_behavior_with_ci_part(monkeypatch):
+    calls: list = []
+    ci_part = {
+        "ci": {"status": "measured", "value": "c"},
+        "test_duration": {"status": "measured", "value": 5},
+        "notes": ["ci の注記"],
+        "merges": {"develop": 3, "main": 7},
+        "github_issues": 4,
+        "hosts": ["redmine.example.com"],
+    }
+    _patch_ci(monkeypatch, ci_part, {"status": "measured", "value": "f"}, calls)
+    step = cli._Steps(time.monotonic() + 60)
+    step.items["instructions"] = {"status": "measured", "value": {"notes": ["指示の注記"]}}
+    step.items[write.BRANCHES] = {"status": "question", "evidence": []}
+    tree = object()
+    notes = cli._ci_items(tree, step, _ci_ctx())
+    assert notes == ["指示の注記", "ci の注記"]
+    assert calls == [("ci", tree, "o/r", "abc"), ("flow", tree, "o/r", "develop", "main")]
+    assert step.items["ci"] == ci_part["ci"]
+    assert step.items["test_duration"] == ci_part["test_duration"]
+    assert step.items[write.BRANCHES]["evidence"] == [{"text": "直近 100 件のマージ先: main 7・develop 3"}]
+    assert step.items[write.BRANCH_FLOW] == {"status": "measured", "value": "f"}
+    assert step.items["issues"] == measure_ci.measure_issues(_REPO_ISSUES, ci_part)
+
+
+def test_ci_items_current_behavior_without_ci_part(monkeypatch):
+    calls: list = []
+    _patch_ci(monkeypatch, None, None, calls)
+    step = cli._Steps(time.monotonic() + 60)
+    step.items[write.BRANCHES] = {"status": "measured", "value": "x"}
+    notes = cli._ci_items(object(), step, _ci_ctx())
+    assert notes == []
+    assert "ci" not in step.items
+    assert step.items["test_duration"] == unknown("時間切れ")
+    assert write.BRANCH_FLOW not in step.items  # 測った値が None なら入れない
+    assert step.items[write.BRANCHES] == {"status": "measured", "value": "x"}
+    assert step.items["issues"] == measure_ci.measure_issues(_REPO_ISSUES, {})
+
+
+def test_ci_items_current_behavior_failed_ci_copies_to_test_duration(monkeypatch):
+    _patch_ci(monkeypatch, RuntimeError("boom"), None, [])
+    step = cli._Steps(time.monotonic() + 60)
+    cli._ci_items(object(), step, _ci_ctx())
+    assert step.items["ci"] == unknown("測れない: RuntimeError: boom")
+    assert step.items["test_duration"] == step.items["ci"]
+
+
+def test_ci_items_current_behavior_keeps_existing_test_duration_and_issues(monkeypatch):
+    _patch_ci(monkeypatch, None, None, [])
+    step = cli._Steps(time.monotonic() + 60)
+    step.items["test_duration"] = {"status": "measured", "value": 1}
+    step.items["issues"] = {"status": "measured", "value": "keep"}
+    cli._ci_items(object(), step, _ci_ctx())
+    assert step.items["test_duration"] == {"status": "measured", "value": 1}
+    assert step.items["issues"] == {"status": "measured", "value": "keep"}
+
+
+def test_ci_items_current_behavior_past_deadline_marks_unknown(monkeypatch):
+    calls: list = []
+    _patch_ci(monkeypatch, {"never": True}, {"never": True}, calls)
+    step = cli._Steps(time.monotonic() - 1)
+    notes = cli._ci_items(object(), step, _ci_ctx())
+    assert notes == []
+    assert calls == []
+    assert step.items["ci"] == unknown("時間切れ")
+    assert step.items["test_duration"] == unknown("時間切れ")
+    assert step.items[write.BRANCH_FLOW] == unknown("時間切れ")
+    assert step.items["issues"] == measure_ci.measure_issues(_REPO_ISSUES, {})
+
+
+SUITE_SCHEMA = contracts.schema_path("ndf_settings/project") + "#/$defs/Suite"
+BASE_SUITE = {"name": "pytest", "runner": "pytest", "command": "pytest"}
+
+
+@pytest.mark.parametrize("codes", [["5"], 5, [1.5], [True], []])
+def test_collect_exit_codes_must_be_a_list_of_integers(codes):
+    # 受け入れ条件 14: 整数の並び以外は設定ファイルのスキーマの検査で落ちる
+    assert contracts.schema_errors({**BASE_SUITE, "collect_command": "pytest --collect-only -q", "collect_exit_codes": codes}, SUITE_SCHEMA)
+
+
+def test_collect_exit_codes_need_a_collect_command():
+    assert contracts.schema_errors({**BASE_SUITE, "collect_exit_codes": [0, 5]}, SUITE_SCHEMA)
+    assert (
+        contracts.schema_errors({**BASE_SUITE, "collect_command": "pytest --collect-only -q", "collect_exit_codes": [0, 5]}, SUITE_SCHEMA)
+        == []
+    )

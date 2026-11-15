@@ -218,3 +218,32 @@ def test_ci_fix_run_carries_the_search_record_into_its_result(tmp_path, monkeypa
     assert worker.main(args + ["--cwd", ".", "--state-dir", "state"]) == 0
     assert json.loads(capsys.readouterr().out)["metrics"][worker.SEARCH_RECORD] == SEARCHED
     assert "\n".join(worker.KIND_RULES["ci-fix"]) in seen["system"]
+
+
+def _unreadable_list(monkeypatch):
+    """導入済みの一覧を読めなかったときの `plugin_args`（外さずに起動し、知らせを返す）。"""
+    monkeypatch.setattr(
+        claude, "plugin_args", lambda root, cwd=None: claude.PluginArgs(["--plugin-dir", str(root)], claude.LIST_UNREADABLE)
+    )
+
+
+def test_delegate_keeps_the_notice_of_an_unreadable_plugin_list(tmp_path, monkeypatch):
+    _unreadable_list(monkeypatch)
+    h = _handoff(tmp_path)
+    done = worker.delegate(h, "規則", root=tmp_path, call=FakeClaude(h.result_file, write_on=1))
+    assert done.cause is None and done.notice == claude.LIST_UNREADABLE
+
+
+def test_run_puts_the_notice_into_the_warnings_of_its_result(tmp_path, monkeypatch, capsys):
+    (tmp_path / "prompt.md").write_text("直す", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    def fake_delegate(handoff, system, root=None):
+        handoff.result_file.write_text('{"status": "ok", "summary": "済んだ"}', encoding="utf-8")
+        return worker.Delivery(attempts=1, session="s", notice=claude.LIST_UNREADABLE)
+
+    monkeypatch.setattr(worker, "delegate", fake_delegate)
+    args = ["run", "--kind", "impl", "--prompt-file", "prompt.md", "--result-file", "out.json"]
+    assert worker.main(args + ["--cwd", ".", "--state-dir", "state"]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["status"] == "ok" and out["warnings"] == [claude.LIST_UNREADABLE]

@@ -29,8 +29,10 @@ from pathlib import Path
 from typing import List, NamedTuple, Optional, Tuple, Union
 
 from ndf import identity
+from ndf.adapters import git as git_mod
 from ndf.domains.hooks import strict_shell, tables
 from ndf.domains.hooks.verdict import Verdict, deny
+from ndf.testing import weight
 
 # 宛先のリポジトリの設定（delivery を読む）
 _PROJECT_FILE = identity.FIXED_WORDS["ndf_settings_dir"] + "/project.json"
@@ -51,6 +53,11 @@ _GH_REPO = "GH_REPO"
 _UNKNOWN_DIR_COMMANDS = frozenset({"pushd", "popd"})
 # ファイルのスクリプトを今のシェルで読む語
 _SOURCES = frozenset({"source", "."})
+# 前に付いても後ろのコマンドを打つ語
+# 重い処理の判定のラッパー（`weight.WRAPPERS`）に、権限と端末を変えて後ろを打つ語を足す
+_WRAPPERS = weight.WRAPPERS | {"sudo", "doas", "setsid"}
+# 包む語の後ろで読み直す、打つコマンドの語
+_WRAPPED_TARGETS = _SHELLS | {"gh", "eval"}
 
 _MERGE_HELP = "NDF のマージの手順（宛先を確かめ、本番なら承認を求めてからマージする）で打つ"
 
@@ -59,6 +66,13 @@ class MergeCall(NamedTuple):
     """`gh pr merge` の呼び出し。`repo` は Pull Request の URL・`-R`・`--repo`・`GH_REPO` の `owner/repo`（無ければ None）。"""
 
     repo: Optional[str]
+
+
+class ShellContext(NamedTuple):
+    """文を打つシェルの環境。作業ディレクトリ `here`（決められなければ None）と宛先 `gh_repo`（`GH_REPO` の値、無ければ None）。"""
+
+    here: Optional[Path]
+    gh_repo: Optional[str]
 
 
 def judge(payload: dict, off: frozenset) -> Tuple[Optional[Verdict], Optional[float]]:
@@ -75,18 +89,18 @@ def check(raw_payload: object, root: str, gh_repo: Optional[str] = None) -> Opti
     text = _command_text(raw_payload)
     if text is None or not _mentions_merge(text):
         return None
-    return _script_denial(text, Path(root), 0, gh_repo)
+    return _script_denial(text, ShellContext(Path(root), gh_repo), 0)
 
 
-def _script_denial(text: str, here: Optional[Path], depth: int, gh_repo: Optional[str] = None) -> Optional[Verdict]:
-    """スクリプト 1 つの判定。読めない・深すぎるときは止める。`here` が None なら作業ディレクトリを決められない。"""
+def _script_denial(text: str, ctx: ShellContext, depth: int) -> Optional[Verdict]:
+    """スクリプト 1 つの判定。読めない・深すぎるときは止める。`ctx.here` が None なら作業ディレクトリを決められない。"""
     if depth > _MAX_DEPTH:
         return deny(f"入れ子のスクリプトが深く、本番チャネルへのマージかを確かめられない。{_MERGE_HELP}")
     try:
         parts = list(strict_shell.parts(text))
     except ValueError:
         return deny(f"シェルの字句を読めず、本番チャネルへのマージかを確かめられない。{_MERGE_HELP}")
-    return _first_denial(parts, here, depth, gh_repo)
+    return _first_denial(parts, ctx, depth)
 
 
 def _mentions_merge(text: str) -> bool:
@@ -94,47 +108,53 @@ def _mentions_merge(text: str) -> bool:
     return "gh" in text and "merge" in text
 
 
-def _first_denial(
-    parts: List[Union[List[str], str]], here: Optional[Path], depth: int = 0, gh_repo: Optional[str] = None
-) -> Optional[Verdict]:
+def _first_denial(parts: List[Union[List[str], str]], ctx: ShellContext, depth: int = 0) -> Optional[Verdict]:
     """`cd` で作業ディレクトリを、`export GH_REPO=...` で宛先を移しながら、最初に止める `gh pr merge` の判定。無ければ None。
 
     サブシェルの `(` で今の値を退避して `)` で戻す。パイプラインと `&` のコマンドの移動は後の文へ持ち越さない。
     """
-    saved: List[Tuple[Optional[Path], Optional[str]]] = []
+    saved: List[ShellContext] = []
     for i, raw in enumerate(parts):
         if isinstance(raw, str):
-            if raw == "(":
-                saved.append((here, gh_repo))
-            elif raw == ")":
-                here, gh_repo = saved.pop() if saved else (None, gh_repo)
+            ctx = _subshell_step(raw, saved, ctx)
             continue
         words = _command_words(raw)
-        moved = _moved(here, gh_repo, raw, words)
+        moved = _moved(ctx, raw, words)
         if moved is not None:
             if not _in_own_shell(parts, i):
-                here, gh_repo = moved
+                ctx = moved
             continue
-        env_repo = _assigned_gh_repo(raw[: len(raw) - len(words)], gh_repo)
-        verdict = (
-            _unreadable_script_denial(words) or _inner_denial(here, raw, words, depth, env_repo) or _call_verdict(here, words, env_repo)
-        )
+        # 文の前の一時的な代入（`GH_REPO=x gh ...`）はその文だけの環境にし、後の文へ持ち越さない
+        call_ctx = ctx._replace(gh_repo=_assigned_gh_repo(raw[: len(raw) - len(words)], ctx.gh_repo))
+        verdict = _statement_denial(call_ctx, raw, words, depth)
         if verdict is not None:
             return verdict
     return None
 
 
-def _moved(
-    here: Optional[Path], gh_repo: Optional[str], raw: List[str], words: List[str]
-) -> Optional[Tuple[Optional[Path], Optional[str]]]:
+def _subshell_step(raw: str, saved: List[ShellContext], ctx: ShellContext) -> ShellContext:
+    """区切りの字句 1 つの処理。`(` で今の値を `saved` へ退避し、`)` で戻す（退避が無ければ作業ディレクトリを決められない）。"""
+    if raw == "(":
+        saved.append(ctx)
+    elif raw == ")":
+        return saved.pop() if saved else ctx._replace(here=None)
+    return ctx
+
+
+def _statement_denial(ctx: ShellContext, raw: List[str], words: List[str], depth: int) -> Optional[Verdict]:
+    """文 1 つの判定（読めないスクリプト → 中のスクリプト → `gh pr merge` の呼び出しの順）。止めなければ None。"""
+    return _unreadable_script_denial(words) or _inner_denial(ctx, raw, words, depth) or _call_verdict(ctx, words)
+
+
+def _moved(ctx: ShellContext, raw: List[str], words: List[str]) -> Optional[ShellContext]:
     """作業ディレクトリか宛先を移す文（`cd`・`pushd`・`popd`・代入だけ・`export`・`unset GH_REPO`）なら移った後の値。ほかは None。"""
     head = words[:1]
     if head == ["cd"] or head and head[0] in _UNKNOWN_DIR_COMMANDS:
-        return _cd(here, words), gh_repo
+        return ctx._replace(here=_cd(ctx.here, words))
     if not words or head == ["export"]:
-        return here, _assigned_gh_repo(raw, gh_repo)
+        return ctx._replace(gh_repo=_assigned_gh_repo(raw, ctx.gh_repo))
     if head == ["unset"] and _GH_REPO in words[1:]:
-        return here, None
+        return ctx._replace(gh_repo=None)
     return None
 
 
@@ -198,11 +218,11 @@ def _without_redirections(words: List[str]) -> List[str]:
     return kept
 
 
-def _inner_denial(here: Optional[Path], raw: List[str], words: List[str], depth: int, gh_repo: Optional[str]) -> Optional[Verdict]:
+def _inner_denial(ctx: ShellContext, raw: List[str], words: List[str], depth: int) -> Optional[Verdict]:
     """`bash -c`・`eval`・コマンド置換の中のスクリプトの判定。中に `gh` と `merge` が無ければ None。"""
     for inner in _inner_scripts(raw, words):
         if _mentions_merge(inner):
-            verdict = _script_denial(inner, here, depth + 1, gh_repo)
+            verdict = _script_denial(inner, ctx, depth + 1)
             if verdict is not None:
                 return verdict
     return None
@@ -248,9 +268,9 @@ def _shell_script(words: List[str]) -> Optional[str]:
     return None
 
 
-def _call_verdict(here: Optional[Path], words: List[str], gh_repo: Optional[str]) -> Optional[Verdict]:
-    call = _merge_call(words, gh_repo)
-    return None if call is None else _judge(here, call)
+def _call_verdict(ctx: ShellContext, words: List[str]) -> Optional[Verdict]:
+    call = _merge_call(words, ctx.gh_repo)
+    return None if call is None else _judge(ctx.here, call)
 
 
 def _command_text(raw: object) -> Optional[str]:
@@ -288,27 +308,13 @@ def _command_words(words: List[str]) -> List[str]:
 
 def _is_wrapper(word: str) -> bool:
     """前に付いても後ろのコマンドを打つ語か（後ろの語のうち gh・シェル・eval から読み直す）。"""
-    return os.path.basename(word) in {
-        "command",
-        "env",
-        "exec",
-        "nohup",
-        "time",
-        "sudo",
-        "doas",
-        "xargs",
-        "timeout",
-        "nice",
-        "ionice",
-        "stdbuf",
-        "setsid",
-    }
+    return os.path.basename(word) in _WRAPPERS
 
 
 def _after_wrapper(words: List[str], start: int) -> int:
     """包む語の後ろで、打つコマンド（`gh`・シェル・`eval`）の位置。無ければ包む語の直後の語の位置。"""
     for j in range(start, len(words)):
-        if os.path.basename(words[j]) in _SHELLS | {"gh", "eval"}:
+        if os.path.basename(words[j]) in _WRAPPED_TARGETS:
             return j
     return start
 
@@ -346,7 +352,7 @@ def _judge(here: Optional[Path], call: MergeCall) -> Optional[Verdict]:
     if repo_root is None:
         return deny(f"マージの宛先のリポジトリを {here} から決められない。宛先の clone へ cd してから打つか、{_MERGE_HELP}")
     if call.repo:
-        origin = _origin_slug(repo_root)
+        origin = _remote_slug(repo_root)
         if origin is None or origin.lower() != call.repo.lower():
             return deny(
                 f"宛先 {call.repo}（-R・--repo・GH_REPO か Pull Request の URL）は作業ディレクトリ {repo_root} のリポジトリ（{origin or '不明'}）と違い、"
@@ -393,19 +399,24 @@ def _git_dir(repo_root: Path) -> Optional[Path]:
     return (gitdir / common).resolve()
 
 
-def _origin_slug(repo_root: Path) -> Optional[str]:
-    """`origin` の URL の `owner/repo`。読めなければ None。"""
+def _remote_slug(repo_root: Path) -> Optional[str]:
+    """リモート名（メインディレクトリの `.ndf/worktree.json` の `remote`、無ければ既定）の URL の `owner/repo`。読めなければ None。
+
+    linked worktree からもメインディレクトリ（共通の git ディレクトリの親）の設定を読む（`Git.remote()` と同じ設定）。
+    """
     git_dir = _git_dir(repo_root)
+    main_dir = git_dir.parent if git_dir else repo_root
     try:
+        header = f'[remote "{git_mod.remote_of(main_dir)}"]'
         text = (git_dir / "config").read_text(encoding="utf-8") if git_dir else ""
-    except OSError:  # noqa: NDF401 ファイル: 設定を読めなければ origin は不明
+    except (OSError, git_mod.RemoteError):  # noqa: NDF401 ファイル: 設定か設定を読めなければリモートは不明
         return None
     section = ""
     for raw in text.splitlines():
         line = raw.strip()
         if line.startswith("["):
             section = line
-        elif section == '[remote "origin"]' and line.replace(" ", "").startswith("url="):
+        elif section == header and line.replace(" ", "").startswith("url="):
             return slug_of_url(line.split("=", 1)[1].strip())
     return None
 

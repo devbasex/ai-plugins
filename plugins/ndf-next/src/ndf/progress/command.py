@@ -7,6 +7,7 @@ ndf progress disable|enable|retry <ステートマシンの ID> <工程> --reaso
 ndf progress finish <ステートマシンの ID> <工程> --output <出力のファイル> --reason <理由>
 ndf progress cancel <ステートマシンの ID> --reason <理由>
 ndf progress restore --from <バックアップ>
+ndf progress docs-only --base <ベースブランチ> [--remote <リモート名>]
 
 結果は結果 JSON の 1 行で返す。このサブコマンドを打つのはレーンの conductor で、書く事象の書き手は conductor になる。
 工程を流す `next` と、承認ゲートの回答を書く `answer` は P1b（#3092）が足す。
@@ -27,7 +28,7 @@ from urllib.parse import urlsplit, urlunsplit
 import sqlalchemy as sa
 
 from ndf import contracts, identity
-from ndf.adapters.git import Git, GitError
+from ndf.adapters.git import WORKTREE_NDF_SETTINGS, Git, GitError
 from ndf.contracts import causes, facts, result
 from ndf.core import durable
 from ndf.progress import definition, model, stages, store
@@ -62,11 +63,11 @@ def _without_userinfo(url: str) -> str:
 
 
 def repo_id(cwd: Path, root: Path) -> str:
-    """リポジトリの識別。origin の URL（userinfo を外す）、無ければメインディレクトリの絶対パス（保存先の 2 つ上の親）。"""
+    """リポジトリの識別。リモート名のリモートの URL（userinfo を外す）、無ければメインディレクトリの絶対パス（保存先の 2 つ上の親）。"""
     try:
-        return _without_userinfo(Git(cwd).run("remote", "get-url", "origin").strip())
+        return _without_userinfo(Git(cwd).remote_url())
     except GitError:
-        # origin の無いリポジトリはメインディレクトリで識別する
+        # リモートの無いリポジトリはメインディレクトリで識別する
         return str(root.parents[2])
 
 
@@ -105,9 +106,9 @@ class FactUnknown(Exception):
         self.word = word
 
 
-WORKTREE_FILE = identity.FIXED_WORDS["ndf_settings_dir"] + "/worktree.json"
+WORKTREE_FILE = WORKTREE_NDF_SETTINGS
 DOC_FILES = ("**/*.md",)  # `.ndf/project.json` の `docs.files` を省いたときの文書のファイル
-BEHAVIOR_DOCS = ("**/skills/**/*.md", "**/agents/*.md")  # 同じく `docs.behavior`（振る舞いを決める文書）
+BEHAVIOR_DOCS: tuple[str, ...] = ()  # 同じく `docs.behavior`（振る舞いを決める文書。省けば無し）
 # 差分の語（`diff_kinds` のキー）
 DIFF_WORDS = ("code_in_diff", "docs_only_diff", "behavior_docs_in_diff")
 
@@ -125,12 +126,18 @@ def diff_kinds(files: set[str], docs: set[str], behavior: set[str]) -> dict[str,
 def _pathspecs(project: Mapping[str, Any], key: str, default: tuple[str, ...]) -> list[str]:
     """設定のパターン（根からのパス全体に当てる glob。`!` は前が当てたものを外す）を git の pathspec にする。"""
     value = definition.dig(project, "docs", key)
-    patterns = value if isinstance(value, list) and value and all(isinstance(p, str) for p in value) else default
+    patterns = value if isinstance(value, list) and all(isinstance(p, str) for p in value) else default
     return [f":(exclude,glob){p[1:]}" if p.startswith("!") else f":(glob){p}" for p in patterns]
 
 
+def behavior_declared(cwd: Path) -> bool:
+    """`.ndf/project.json` が `docs.behavior`（振る舞いを決める文書のパターンの並び）を定義しているか。"""
+    value = definition.dig(ndf_settings(cwd, PROJECT_FILE), "docs", "behavior")
+    return isinstance(value, list) and all(isinstance(p, str) for p in value)
+
+
 def _sprint_range(context: Mapping[str, Any], cwd: Path) -> tuple[Git, str]:
-    """スプリントブランチとベースブランチ（`.ndf/worktree.json` の `base_branch`。手元に無ければ `origin/`）の分岐点からの範囲。"""
+    """スプリントブランチとベースブランチ（`.ndf/worktree.json` の `base_branch`。手元に無ければ `<リモート名>/`）の分岐点からの範囲。"""
     base = definition.dig(ndf_settings(cwd, WORKTREE_FILE), "base_branch")
     if not isinstance(base, str) or not base or base.startswith("-"):
         raise FactUnknown(f"差分を求められない: {WORKTREE_FILE} の base_branch が無いか、- で始まる")
@@ -140,20 +147,30 @@ def _sprint_range(context: Mapping[str, Any], cwd: Path) -> tuple[Git, str]:
         git.rev_parse(base)
         ref = base
     except GitError:
-        ref = f"origin/{base}"
+        ref = f"{git.remote()}/{base}"
     return git, f"{git.merge_base(ref, head)}...{head}"
 
 
-def _diff_names(git: Git, rng: str, specs: list[str]) -> set[str]:
+def _diff_names(git: Git, rng: str, specs: list[str] | None) -> set[str]:
+    """範囲の差分のパス。`specs` が `None` なら全体、空の並びなら空（`git diff` を打たない。打つと全体が返る）。"""
+    if specs is None:
+        specs = []
+    elif not specs:
+        return set()
     return {p for p in git.run("diff", "--name-only", "-z", rng, "--", *specs).split("\0") if p}
 
 
 def range_diff_kinds(git: Git, rng: str, cwd: Path) -> dict[str, bool]:
     """範囲 `rng` の差分を、`.ndf/project.json` の `docs.files`・`docs.behavior`（省けば既定）で分ける。git が読めなければ `GitError`。"""
     project = ndf_settings(cwd, PROJECT_FILE)
-    files = _diff_names(git, rng, [])
+    files = _diff_names(git, rng, None)
     docs = _diff_names(git, rng, _pathspecs(project, "files", DOC_FILES))
     return diff_kinds(files, docs, _diff_names(git, rng, _pathspecs(project, "behavior", BEHAVIOR_DOCS)))
+
+
+def docs_only(git: Git, rng: str, cwd: Path) -> bool:
+    """範囲の差分が文書だけか（工程の条件 `docs_only_diff` と同じ判定。#3617 の I8a）。"""
+    return range_diff_kinds(git, rng, cwd)["docs_only_diff"]
 
 
 def sprint_diff_kinds(context: Mapping[str, Any], cwd: Path) -> dict[str, bool]:
@@ -402,6 +419,25 @@ def _cmd_restore(a: argparse.Namespace, cwd: Path) -> dict[str, Any]:
     return result.result(TOOL, result.OK, f"ステートマシンの DB をバックアップ {a.source} から戻した", items=items)
 
 
+def _cmd_docs_only(a: argparse.Namespace, cwd: Path) -> dict[str, Any]:
+    """`base` のリモートの参照から HEAD までの差分が文書だけなら `not_applicable`、そうでなければ `ok`。git が読めなければ `precondition`。"""
+    if not a.base or a.base.startswith("-"):
+        return result.stopped(TOOL, "invalid", f"--base が空か - で始まる: {a.base!r}")
+    try:
+        git = Git(cwd)
+        remote = a.remote if a.remote else git.remote()
+        if remote.startswith("-"):
+            return result.stopped(TOOL, "invalid", f"--remote が - で始まる: {remote!r}")
+        rng = f"{remote}/{a.base}...HEAD"
+        kinds = range_diff_kinds(git, rng, cwd)
+    except GitError as exc:
+        return result.stopped(TOOL, "precondition", f"差分を読めない: {exc}")
+    metrics = {k: int(v) for k, v in kinds.items()}
+    if kinds["docs_only_diff"]:
+        return result.stopped(TOOL, "not_applicable", f"{rng} の差分は文書だけ", metrics=metrics)
+    return result.result(TOOL, result.OK, f"{rng} の差分は文書だけでない", metrics=metrics)
+
+
 Command = Callable[[argparse.Namespace, Path, store.Store], dict[str, Any]]
 
 
@@ -457,6 +493,9 @@ def parser() -> argparse.ArgumentParser:
     cancel.add_argument("machine_id")
     cancel.add_argument("--reason", required=True)
     sub.add_parser("restore", help="バックアップからステートマシンの DB を戻す").add_argument("--from", dest="source", required=True)
+    docs = sub.add_parser("docs-only", help="ベースブランチからの差分が文書だけかを返す")
+    docs.add_argument("--base", required=True, help="ベースブランチ")
+    docs.add_argument("--remote", help="リモート名（省けば worktree の設定の remote か既定）")
     return ap
 
 
@@ -480,6 +519,8 @@ def with_store(cwd: Path, handler: Command, a: argparse.Namespace) -> dict[str, 
 def _dispatch(a: argparse.Namespace, cwd: Path) -> dict[str, Any]:
     if a.action == "restore":
         return _cmd_restore(a, cwd)
+    if a.action == "docs-only":
+        return _cmd_docs_only(a, cwd)
     return with_store(cwd, COMMANDS[a.action], a)
 
 

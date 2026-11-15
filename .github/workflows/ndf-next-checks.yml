@@ -11,6 +11,9 @@ on:
       - ".github/workflows/ndf-next.yml"
       - ".github/workflows/ndf-next-checks.yml"
       - "plugins/ndf-next/**"
+      - "scripts/ndf-next-parity/**"
+      - "scripts/check-ndf-choices.py"
+      - "scripts/ndf-choices.json"
       - "plugins/ndf/**"
   push:
     branches:
@@ -20,13 +23,16 @@ on:
       - ".github/workflows/ndf-next.yml"
       - ".github/workflows/ndf-next-checks.yml"
       - "plugins/ndf-next/**"
+      - "scripts/ndf-next-parity/**"
+      - "scripts/check-ndf-choices.py"
+      - "scripts/ndf-choices.json"
 
 permissions:
   contents: read
 
 env:
   # 新しいプラグインを変えたかを見るパス（リポジトリの根から）。ndf-next.yml にも同じ値がある
-  NEXT_PATHS: plugins/ndf-next .github/workflows/ndf-next.yml .github/workflows/ndf-next-checks.yml
+  NEXT_PATHS: plugins/ndf-next scripts/ndf-next-parity .github/workflows/ndf-next.yml .github/workflows/ndf-next-checks.yml
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
@@ -57,6 +63,11 @@ jobs:
           diff = [k for k in ("name", "version") if a.get(k) != b.get(k)];
           sys.exit(f"plugin.json の食い違い: {diff}" if diff else 0)'
       - run: bash -n bin/ndf && bash -n bin/ndf-claude
+      # 設定で選べる値（取り込み方の表の行・delivery の種類・リリースの形）が基準から黙って減っていないか（#3617）。
+      # ハードコードの検査（check-skill-repo-assumptions.py）は runtime-plugin-validate.yml が PR ごとに打つ
+      - name: 設定で選べる値が減っていないか
+        working-directory: .
+        run: python3 scripts/check-ndf-choices.py
       # 新しいプラグインだけを見る検査（src/ndf/checks/README.md）。Pull Request では起点からの差分（I2）も見る。
       # PR 本文（即時修正の印）は GitHub が渡す GITHUB_EVENT_PATH から読む。
       # main へのリリースの PR は develop で I2 を通った差分を束ねるだけなので、I2 を当てない。

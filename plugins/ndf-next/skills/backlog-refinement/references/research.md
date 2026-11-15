@@ -1,7 +1,5 @@
 # ニーズとシーズの調査
 
-> 次のスクリプトのサブコマンドは新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `upkeep.py`（M6）。移行先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
-
 **具体例**: 開発ツールのプラグインは、`materials.needs.usage` に Skill の利用統計を集計するコマンド（`aggregate_only: true`）を、
 `seeds.libraries` に pytest（競合の候補 ward）を定義する。調査は「`needs.usage:<名>`」「`seeds.library:pytest`」
 「`seeds.alternatives:pytest`」の項目に分かれ、conductor がプランの完了を待つ間に 1 項目ずつ調べて

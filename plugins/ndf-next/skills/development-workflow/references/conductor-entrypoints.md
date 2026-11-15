@@ -1,7 +1,5 @@
 # conductor が直に使うエントリポイント
 
-> 次のスクリプトのサブコマンドは新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `check-trigger.py`（M1）・`external-ai.py`（AD3+）・`gate-rejections.py`（P2）・`glossary.py`（M7）・`handoff.py`（M7）・`merged-steps.py`（M8）・`mvv-gate.py`（P2）・`parallel-measure.py`（P3）・`project-mvv.py`（M7）・`release-steps.py`（M2）・`release-verification-steps.py`（M2）・`skill-stats.py`（M7）・`sprint-close.py`（M1）・`sprint-state.py`（P1b）。移行先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
-
 conductor が自分で打つ NDF のスクリプトはこの一覧に限る。**一覧にあるものは起動指示や引継ぎ文書に
 コピーしない。** ここに無い操作を手で組み立てそうになったら、先に一覧の中の近いプランを探す。
 

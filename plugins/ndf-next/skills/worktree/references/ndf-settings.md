@@ -1,7 +1,5 @@
 # 設定ファイルの書き方
 
-> 次のスクリプトのサブコマンドは新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `pr-steps.py`（M1）・`release-steps.py`（M2）・`worktree-deps.sh`（M8）・`worktree-localenv.sh`（M8）・`worktree-setup.sh`（M8）・`worktree-testenv.sh`（M8）。移行先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
-
 worktree 運用の仕組みは、リポジトリごとの差を `.ndf/worktree.json` から読む。
 **このファイルが無いリポジトリでは、すべての仕組みが何もせずに終わる。**
 
@@ -96,9 +94,23 @@ worktree の起点がこのブランチになる（`follow_branch: true` のと�
 }
 ```
 
-書かなければ `origin` の HEAD が指すブランチ（既定ブランチ）が起点になる。**書いた名前が
-origin にもローカルにも無いときは、既定ブランチへは落ちず、解決が失敗する。** 落とすと、
+書かなければリモート（下の `remote`）の HEAD が指すブランチ（既定ブランチ）が起点になる。**書いた名前が
+そのリモートにもローカルにも無いときは、既定ブランチへは落ちず、解決が失敗する。** 落とすと、
 開発の変更が正式版から分岐したまま進む。
+
+## 取得と送信に使うリモートの名前
+
+NDF が取得・検証・差分の基準・送信に使う git のリモートの名前は `remote` に書く。書かなければ git の既定と同じ
+`origin` を使う。フォークを `origin`、統合先を `upstream` に置く運用では、統合先を書く。
+
+```json
+{
+  "version": 1,
+  "remote": "upstream"
+}
+```
+
+`-` で始まる名前は受けない。個人設定（`worktree.local.json`）の `remote` は反映しない（下の「機械ごとに違う値は個人設定へ書く」）。
 
 ## ブランチ運用を定義するリポジトリ
 
@@ -399,7 +411,7 @@ worktree レジストリの定義は [`../schemas/registry.schema.json`](../sche
 | `testenv` | オブジェクト | `expose` を除いて、共有の `testenv` へ深く併合する |
 | `follow_branch` | 真偽値 | 共有の値を置き換える |
 
-**この 3 つ以外は反映しない。** `base_branch` / `production_branch` / `guard` と未知の
+**この 3 つ以外は反映しない。** `remote` / `base_branch` / `production_branch` / `guard` と未知の
 項目は、書いても共有設定の値が使われる。個人設定は追跡されずレビューを通らないため、
 リポジトリの運用を個人が変えると、手元の動作とCIの判定が食い違う。
 `testenv.expose` も反映しない。追跡されないファイルから外部への公開を有効にできる状態を

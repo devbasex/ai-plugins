@@ -214,10 +214,13 @@ def git_docs_only(cwd: Path) -> DocsOnly:
     """承認の後に加わった範囲が文書だけか（差分の分け方は `command.range_diff_kinds`。#3020）。
 
     見た head が今の head の祖先でない（履歴の書き換え）か、git が読めなければ文書だけと見なさない。振る舞いを決める
-    文書（Skill の本文・エージェント定義）が加わったときも文書だけではない。
+    文書（`.ndf/project.json` の `docs.behavior`）が加わったときも文書だけではない。`docs.behavior` を定義していない
+    リポジトリでは、どの文書が振る舞いを決めるか分からないため、文書だけと見なさない（承認を出し直す側に倒す）。
     """
 
     def docs_only(seen: str, now: str) -> bool:
+        if not command.behavior_declared(cwd):
+            return False
         git = Git(cwd)
         try:
             return git.is_ancestor(seen, now) and command.range_diff_kinds(git, f"{seen}..{now}", cwd)["docs_only_diff"]

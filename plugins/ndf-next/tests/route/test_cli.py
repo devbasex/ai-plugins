@@ -195,6 +195,10 @@ def test_omitted_base_reads_ndf_settings_then_origin_default_branch(tmp_path):
     git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
     git(repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
     assert route.derived(t, given, repo)["base"] == "main"
+    # --set remote= で渡したリモートの既定ブランチから決める（push の宛先とそろえる）
+    git(repo, "update-ref", "refs/remotes/upstream/develop", "HEAD")
+    git(repo, "symbolic-ref", "refs/remotes/upstream/HEAD", "refs/remotes/upstream/develop")
+    assert route.derived(t, {**given, "remote": "upstream"}, repo)["base"] == "develop"
     (repo / ".ndf").mkdir()
     (repo / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "base_branch": "develop"}), encoding="utf-8")
     assert route.derived(t, given, repo)["base"] == "develop"

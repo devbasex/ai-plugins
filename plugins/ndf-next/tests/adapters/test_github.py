@@ -17,7 +17,7 @@ from githubkit.response import Response
 
 from ndf.adapters import git, github
 
-from ._github_helpers import graphql_pull_node, hub, pull_json
+from ._github_helpers import RouteServer, graphql_pull_node, hub, pull_json
 
 REPO = "devbasex/ai-plugins"
 HEAD = "2bb66a6c14a618cbac108b61737ad49cfb1ac48b"
@@ -40,21 +40,12 @@ def _pull(head: str = HEAD, body: str = "", merged: bool = False, mergeable_stat
     return pull_json(head, body, merged, mergeable_state)
 
 
-class Server:
-    """要求を記録し、(メソッド, パス) ごとに応答を順に返す。"""
+class Server(RouteServer):
+    """`RouteServer` に、マージの方式の読み取りの既定の応答を足したもの。"""
 
     def __init__(self, routes: dict[tuple[str, str], list[httpx.Response]]) -> None:
         # マージの方式の読み取り（ruleset に指定が無く、リポジトリの設定が 3 方式とも許す）は省いてよい
-        self.routes = {**MERGE_SETTINGS, **routes}
-        self.seen: list[httpx.Request] = []
-
-    def __call__(self, request: httpx.Request) -> httpx.Response:
-        self.seen.append(request)
-        queue = self.routes[(request.method, request.url.path)]
-        return queue.pop(0) if len(queue) > 1 else queue[0]
-
-    def sent(self, method: str) -> list[httpx.Request]:
-        return [r for r in self.seen if r.method == method]
+        super().__init__({**MERGE_SETTINGS, **routes})
 
 
 def test_pull_reads_rest_fields() -> None:
@@ -305,13 +296,6 @@ def test_nodes_refuses_unknown_node() -> None:
     hub, _ = _hub_graphql(lambda q: {})
     with pytest.raises(ValueError):
         hub.nodes([1], "repository", "id")
-
-
-def test_job_log_returns_text() -> None:
-    server = Server(
-        {("GET", f"/repos/{REPO}/actions/jobs/5/logs"): [httpx.Response(200, text="line\n", headers={"content-type": "text/plain"})]}
-    )
-    assert _hub(server).job_log(5) == "line\n"
 
 
 @pytest.mark.parametrize(

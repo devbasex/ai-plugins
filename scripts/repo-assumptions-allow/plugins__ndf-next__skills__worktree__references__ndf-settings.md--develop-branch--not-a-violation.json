@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf-next/skills/worktree/references/ndf-settings.md",
+  "name": "develop-branch",
+  "kind": "not-a-violation",
+  "reason": "宣言の例の base_branch の値。書かなければ既定ブランチを使うと本文が書いている",
+  "count": 3
+}

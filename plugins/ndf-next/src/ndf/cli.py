@@ -59,6 +59,8 @@ COMMANDS: dict[str, str] = {
     "worker": "ndf.core.worker",
     "worktree": "ndf.domains.worktree.cli",
 }
+# NDF 自身の開発のサブコマンド（使い方の表示に出さない。名前で呼べば動く。#3617 の決定 11）
+DEVELOPER_COMMANDS = frozenset({"check", "manifests"})
 # モジュールのパス → サブコマンドの名前（`tool_of` の引き。2 つの名前が同じモジュールを指すときは表の先の名前）
 _TOOL_OF: dict[str, str] = {path: name for name, path in reversed(COMMANDS.items())}
 
@@ -76,7 +78,7 @@ def tool_of(module: str) -> str:
 
 def _usage(name: str) -> str:
     lines = [f"使い方: {name} <サブコマンド> [引数...]", "サブコマンド:"]
-    lines += [f"  {cmd}" for cmd in sorted(COMMANDS)]
+    lines += [f"  {cmd}" for cmd in sorted(COMMANDS) if cmd not in DEVELOPER_COMMANDS]
     return "\n".join(lines)
 
 

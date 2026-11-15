@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import json
+import subprocess
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 
 from ndf.adapters import ci
 from ndf.contracts import causes, limits
+from ndf.testing import ci_logs
+
+from failed_hub import FakeHub, art as _art, xml as _xml, zip_of as _zip
 
 from ._ci_helpers import LOG, run
 
@@ -162,31 +168,192 @@ def test_split_failed_and_read_accept_generators() -> None:
     assert [c.name for c in reading.failed_other] == ["lint"]
 
 
-# --- 落ちたテストの拾い出し（#3188） ---
+# --- 落ちたテストの拾い出し（#3188・#3616） ---
 
 
 def test_failed_test_nodes_and_files_from_log() -> None:
-    nodes = ci.failed_test_nodes(LOG)
+    # 受け入れ条件 7: pytest のログの読み方は、ログのパーサーの一覧へ移しても入力と期待を変えない
+    nodes = ci_logs.pytest_failures(LOG)
     assert nodes == ["tests/test_other.py", "tests/test_stage_check.py::test_names", "tests/test_stage_check.py::test_order[standard]"]
     assert ci.files_of(nodes) == ["tests/test_other.py", "tests/test_stage_check.py"]
 
 
-class _Logs:
-    def __init__(self) -> None:
-        self.jobs: list[int] = []
-
-    def job_log(self, job: int) -> str:
-        self.jobs.append(job)
-        return f"FAILED tests/test_{job}.py::t - x\n"
+PYTEST_SUITE = {"name": "pytest", "runner": "pytest", "command": "pytest", "ci_jobs": [".github/workflows/pytest.yml#pytest"]}
+VITEST_SUITE = {"name": "web", "runner": "vitest", "command": "npx vitest run", "ci_jobs": [".github/workflows/web.yml"]}
+TRACKED = frozenset({"tests/test_a.py", "tests/test_b.py", "web/src/sum.test.ts"})
 
 
-def test_failed_test_nodes_of_reads_at_most_the_declared_number_of_jobs() -> None:
+def _check(job: int, name: str = "") -> ci.Check:
+    return ci.Check(name if name else f"pytest ({job}/9)", "done", "failure", job)
+
+
+def _source(glob: str | None = None, suites: tuple = (PYTEST_SUITE,)) -> ci.FailedTestSource:
+    return ci.FailedTestSource(glob, suites, TRACKED)
+
+
+def test_junit_artifacts_are_read_once_per_run_and_shared_by_its_checks() -> None:
+    # 受け入れ条件 1・5: 分割ジョブの XML 2 本から重ねずに昇順。同じ実行のチェックは同じ run_id・found を持つ
+    hub = FakeHub(
+        {1: 9, 2: 9},
+        {9: ".github/workflows/pytest.yml"},
+        artifacts={9: [_art(31, "junit-0"), _art(32, "junit-1"), _art(33, "coverage")]},
+        zips={31: _zip(_xml(("tests/test_b.py", "t"), ("tests/test_a.py", "t"))), 32: _zip(_xml(("tests/test_a.py", "t")))},
+    )
+    got = ci.failed_tests_of(hub, [_check(1), _check(2)], _source("junit-*"))  # type: ignore[arg-type]
+    assert got.nodes == ["tests/test_a.py::t", "tests/test_b.py::t"]
+    assert [(r.source, r.run_id, r.found, r.runner, r.reason) for r in got.reads] == [("junit", 9, 2, "pytest", "")] * 2
+    assert (hub.count("workflow_run"), hub.count("run_artifacts"), hub.count("artifact_zip"), hub.count("job_log")) == (1, 1, 2, 0)
+    assert got.job_errors == []
+
+
+@pytest.mark.parametrize(
+    "arts",
+    [[], [_art(31, expired=True)], [_art(31, "coverage")], [_art(99)]],
+    ids=["none", "expired", "other-name", "gone-410"],
+)
+def test_missing_artifacts_fall_back_to_the_runner_log_parser(arts: list[dict]) -> None:
+    # 受け入れ条件 6: glob に当たる成果物が無い・期限切れ・410 なら、ログのパーサーで読む
+    hub = FakeHub({1: 9}, {9: ".github/workflows/pytest.yml"}, artifacts={9: arts}, logs={1: LOG})
+    got = ci.failed_tests_of(hub, [_check(1)], _source("junit-*"))  # type: ignore[arg-type]
+    (read,) = got.reads
+    assert (read.source, read.found) == ("log", 3)
+    assert read.reason
+    assert got.nodes == ci_logs.pytest_failures(LOG)
+
+
+def test_unresolved_testcase_moves_every_check_of_the_run_to_the_log() -> None:
+    xml = b'<testsuite><testcase classname="Suite" name="x"><failure/></testcase></testsuite>'
+    hub = FakeHub(
+        {1: 9, 2: 9},
+        {9: ".github/workflows/pytest.yml"},
+        artifacts={9: [_art(31)]},
+        zips={31: _zip(_xml(("tests/test_a.py", "t")), xml)},
+        logs={1: "FAILED tests/test_a.py::t - x\n", 2: "FAILED tests/test_b.py::u - x\n"},
+    )
+    got = ci.failed_tests_of(hub, [_check(1), _check(2)], _source("junit-*"))  # type: ignore[arg-type]
+    assert [r.source for r in got.reads] == ["log", "log"]
+    assert all("Suite x" in r.reason for r in got.reads)
+    assert got.nodes == ["tests/test_a.py::t", "tests/test_b.py::u"]
+
+
+def test_more_artifacts_than_the_room_are_not_fetched() -> None:
+    # 不変条件 I5: 当たる成果物が取得のスロットを超える実行は ZIP を 1 本も取得せず、ログへ移す
     cap = int(limits.value("github.failed-logs", "count"))
-    checks = [ci.Check(f"pytest ({i}/9)", "done", "failure", i) for i in range(cap + 3)]
-    logs = _Logs()
-    nodes = ci.failed_test_nodes_of(logs, checks)  # type: ignore[arg-type]
-    assert logs.jobs == list(range(cap))
-    assert nodes == sorted(f"tests/test_{i}.py::t" for i in range(cap))
+    arts = [_art(100 + i, f"junit-{i}") for i in range(cap + 1)]
+    hub = FakeHub({1: 9}, {9: ".github/workflows/pytest.yml"}, artifacts={9: arts}, logs={1: LOG})
+    got = ci.failed_tests_of(hub, [_check(1)], _source("junit-*"))  # type: ignore[arg-type]
+    assert hub.count("artifact_zip") == 0
+    assert got.reads[0].source == "log"
+    assert "github.failed-logs" in got.reads[0].reason
+
+
+def test_too_large_artifact_is_not_fetched() -> None:
+    hub = FakeHub({1: 9}, {9: ".github/workflows/pytest.yml"}, artifacts={9: [_art(31, size_in_bytes=10**12)]}, logs={1: LOG})
+    got = ci.failed_tests_of(hub, [_check(1)], _source("junit-*"))  # type: ignore[arg-type]
+    assert hub.count("artifact_zip") == 0 and got.reads[0].source == "log"
+
+
+def test_a_runner_without_a_parser_does_not_read_the_log() -> None:
+    # 受け入れ条件 8: vitest の suite に当たるチェックのログに pytest の行があっても読まない
+    hub = FakeHub({1: 9}, {9: ".github/workflows/web.yml"}, logs={1: LOG})
+    got = ci.failed_tests_of(hub, [_check(1, "web")], _source(None, (PYTEST_SUITE, VITEST_SUITE)))  # type: ignore[arg-type]
+    (read,) = got.reads
+    assert (read.source, read.runner, got.nodes) == ("none", "vitest", [])
+    assert "vitest" in read.reason
+    assert hub.count("job_log") == 0
+
+
+def test_a_check_without_a_matching_suite_does_not_read_the_log() -> None:
+    hub = FakeHub({1: 9}, {9: ".github/workflows/other.yml"}, logs={1: LOG})
+    got = ci.failed_tests_of(hub, [_check(1)], _source())  # type: ignore[arg-type]
+    assert (got.reads[0].source, got.reads[0].runner, got.nodes) == ("none", None, [])
+    assert "ci_jobs" in got.reads[0].reason
+
+
+def test_a_parser_added_to_the_table_is_used_without_changing_the_assembly(monkeypatch: pytest.MonkeyPatch) -> None:
+    # 受け入れ条件 9
+    monkeypatch.setitem(ci_logs.PARSERS, "vitest", lambda text: ["web/src/sum.test.ts::" + text.strip()])
+    hub = FakeHub({1: 9}, {9: ".github/workflows/web.yml"}, logs={1: "breaks\n"})
+    got = ci.failed_tests_of(hub, [_check(1, "web")], _source(None, (VITEST_SUITE,)))  # type: ignore[arg-type]
+    assert got.nodes == ["web/src/sum.test.ts::breaks"]
+    assert got.reads[0].source == "log"
+
+
+def test_unreadable_job_is_recorded_and_other_checks_are_still_read() -> None:
+    hub = FakeHub({2: 9}, {9: ".github/workflows/pytest.yml"}, logs={2: LOG}, broken_jobs=frozenset({1}))
+    got = ci.failed_tests_of(hub, [_check(1), _check(2)], _source())  # type: ignore[arg-type]
+    assert [(r.source, r.run_id) for r in got.reads] == [("none", None), ("log", 9)]
+    assert "404" in got.reads[0].reason and len(got.job_errors) == 1
+    assert got.nodes == ci_logs.pytest_failures(LOG)
+
+
+def test_a_job_answer_without_run_id_is_unreadable_and_other_checks_are_still_read() -> None:
+    # 応答の形が違うジョブ（run_id が無い）も、外へ投げずに読み元 none にする
+    hub = FakeHub({2: 9}, {9: ".github/workflows/pytest.yml"}, logs={2: LOG})
+    real_job = hub.job
+    hub.job = lambda job_id: {"id": job_id} if job_id == 1 else real_job(job_id)  # type: ignore[method-assign]
+    got = ci.failed_tests_of(hub, [_check(1), _check(2)], _source())  # type: ignore[arg-type]
+    assert [(r.source, r.run_id) for r in got.reads] == [("none", None), ("log", 9)]
+    assert "run_id" in got.reads[0].reason and len(got.job_errors) == 1
+    assert got.nodes == ci_logs.pytest_failures(LOG)
+
+
+def test_unreadable_log_keeps_the_artifact_and_log_reasons() -> None:
+    hub = FakeHub({1: 9}, {9: ".github/workflows/pytest.yml"}, artifacts={9: []})
+    got = ci.failed_tests_of(hub, [_check(1)], _source("junit-*"))  # type: ignore[arg-type]
+    assert got.reads[0].source == "none"
+    assert "junit-*" in got.reads[0].reason and "403" in got.reads[0].reason
+    assert got.job_errors == []
+
+
+def test_checks_over_the_limit_are_not_read() -> None:
+    cap = int(limits.value("github.failed-logs", "count"))
+    hub = FakeHub(
+        {i: 9 for i in range(cap + 3)},
+        {9: ".github/workflows/pytest.yml"},
+        logs={i: f"FAILED tests/test_{i}.py::t - x\n" for i in range(cap + 3)},
+    )
+    got = ci.failed_tests_of(hub, [_check(i) for i in range(cap + 3)], _source())  # type: ignore[arg-type]
+    assert [j for k, j in hub.calls if k == "job_log"] == list(range(cap))
+    assert got.nodes == sorted(f"tests/test_{i}.py::t" for i in range(cap))
+    assert [r.source for r in got.reads[cap:]] == ["none"] * 3
+    assert hub.count("workflow_run") == 1
+
+
+@pytest.mark.parametrize(
+    ("workflow", "suites", "runner"),
+    [
+        (".github/workflows/pytest.yml", (PYTEST_SUITE,), "pytest"),
+        (".github/workflows/web.yml", (PYTEST_SUITE, VITEST_SUITE), "vitest"),
+        (".github/workflows/none.yml", (PYTEST_SUITE,), None),
+        (".github/workflows/pytest.yml", (PYTEST_SUITE, {**VITEST_SUITE, "ci_jobs": [".github/workflows/pytest.yml#web"]}), None),
+    ],
+)
+def test_runner_of_matches_the_workflow_file_only(workflow: str, suites: tuple, runner: str | None) -> None:
+    got, reason = ci.runner_of(workflow, suites)
+    assert got == runner
+    assert bool(reason) == (runner is None)
+
+
+def test_from_work_reads_the_ndf_settings_and_every_tracked_file(tmp_path: Path) -> None:
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "top.py").write_text("", encoding="utf-8")
+    (tmp_path / "pkg" / "inner.py").write_text("", encoding="utf-8")
+    lint = {"name": "lint", "runner": "ruff", "command": "ruff", "kind": "lint"}
+    decl = {"test": {"ci": {"junit_artifacts": "junit-*"}, "suites": [PYTEST_SUITE, lint]}}
+    (tmp_path / ".ndf").mkdir()
+    (tmp_path / ".ndf" / "project.json").write_text(json.dumps(decl), encoding="utf-8")
+    subprocess.run(["git", "-C", str(tmp_path), "add", "top.py", "pkg/inner.py"], check=True)
+    got = ci.FailedTestSource.from_work(tmp_path / "pkg")
+    assert got.junit_artifacts == "junit-*"
+    assert [s["name"] for s in got.suites] == ["pytest"]
+    assert got.tracked == frozenset({"top.py", "pkg/inner.py"})
+
+
+def test_from_work_without_git_or_ndf_settings_reads_nothing(tmp_path: Path) -> None:
+    got = ci.FailedTestSource.from_work(tmp_path)
+    assert got == ci.FailedTestSource(None, (), frozenset())
 
 
 # --- 待ち ---

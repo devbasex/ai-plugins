@@ -5,8 +5,6 @@ description: "Create or update an implementation plan under issues/ before codin
 
 # 実装計画ガイド
 
-> 次のスクリプトのサブコマンドは新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `ask.py`（P2）・`projects-sync.sh`（M7）。移行先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
-
 ## 基本方針
 
 実装の開始時およびPR作成時に、`issues/` 配下に実装計画のファイルが存在するか確認し、なければ作成する。プランを残すことで後任エンジニアや将来の自分が変更意図を追跡できる。

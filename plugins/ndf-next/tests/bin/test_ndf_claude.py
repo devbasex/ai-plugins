@@ -97,18 +97,22 @@ def test_the_script_disables_the_installed_ndf_and_loads_this_plugin_without_wri
 
     assert done.returncode == 0, done.stderr
     got = json.loads((tmp_path / "argv.json").read_text(encoding="utf-8"))
-    assert got == [*claude.plugin_args(ROOT), "-p", "x"]
+    # 偽の claude は一覧を出さないので、外さずに起動する（#3617 の I10a）
+    assert got == [*claude.plugin_args(ROOT, lambda: None).args, "-p", "x"]
     assert got[got.index("--plugin-dir") + 1] == str(ROOT)
     assert settings.read_text(encoding="utf-8") == before
 
 
+OLD = [{"id": f"{identity.FINAL_NAME}@some-market", "enabled": True}]
+
+
 def test_launch_args_disable_every_old_plugin_but_never_this_one():
     # 入れ替え（S2）で名前が外す相手と同じになっても、自分を外さない
-    argv = claude.plugin_args(ROOT)
+    argv = claude.plugin_args(ROOT, lambda: OLD).args
     disabled = json.loads(argv[argv.index("--settings") + 1])["enabledPlugins"] if "--settings" in argv else {}
     own = identity.load().name
     assert all(key.split("@", 1)[0] != own for key in disabled)
-    assert set(disabled) == {k for k in claude.DISABLED_PLUGINS if k.split("@", 1)[0] != own}
+    assert set(disabled) == {e["id"] for e in OLD if e["id"].split("@", 1)[0] != own}
     assert argv[-2:] == ["--plugin-dir", str(ROOT)]
 
 
@@ -143,8 +147,10 @@ def test_live_session_loads_only_this_plugin_and_its_hooks(tmp_path, monkeypatch
     names = {p["name"] for p in init["plugins"]}
     own = identity.load().name
     assert own in names and any(p.get("path") == str(ROOT) for p in init["plugins"])
-    assert not names & {k.split("@", 1)[0] for k in claude.DISABLED_PLUGINS if k.split("@", 1)[0] != own}
-    others = {k.split("@", 1)[0] for k in claude.DISABLED_PLUGINS} - {own}
+    listed = claude.list_plugins() or []
+    disabled = claude.disabled_plugins(listed, own)
+    assert not names & {k.split("@", 1)[0] for k in disabled}
+    others = {k.split("@", 1)[0] for k in disabled} - {own}
     assert not [s for s in init.get("skills", []) if ":" in str(s) and str(s).split(":", 1)[0] in others]
     records = [json.loads(x) for p in (identity.load().state_dir / "hooks").glob("*.jsonl") for x in p.read_text().splitlines() if x]
     assert {r["event"] for r in records} >= {"SessionStart"}
@@ -153,15 +159,15 @@ def test_live_session_loads_only_this_plugin_and_its_hooks(tmp_path, monkeypatch
 
 def test_launch_args_keep_a_plugin_whose_name_is_on_the_disabled_list(tmp_path):
     # 名前を読むだけで、そのプラグインの bin/ndf は起動しない（旧い状態の保存先に触れない）
-    for key in claude.DISABLED_PLUGINS:
-        root = tmp_path / key.split("@", 1)[0]
+    for entry in OLD:
+        name = entry["id"].split("@", 1)[0]
+        root = tmp_path / name
         (root / ".claude-plugin").mkdir(parents=True)
-        (root / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": key.split("@", 1)[0]}), encoding="utf-8")
-        argv = claude.plugin_args(root)
-        rest = {k: v for k, v in claude.DISABLED_PLUGINS.items() if k != key}
-        assert argv == (["--settings", json.dumps({"enabledPlugins": rest}, separators=(",", ":"))] if rest else []) + [
-            "--plugin-dir",
-            str(root),
-        ]
+        (root / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": name}), encoding="utf-8")
+        assert claude.plugin_args(root, lambda: OLD).args == ["--plugin-dir", str(root)]
     unnamed = tmp_path / "unnamed"
-    assert claude.plugin_args(unnamed)[:2] == ["--settings", json.dumps({"enabledPlugins": claude.DISABLED_PLUGINS}, separators=(",", ":"))]
+    expected = {e["id"]: False for e in OLD}
+    assert claude.plugin_args(unnamed, lambda: OLD).args[:2] == [
+        "--settings",
+        json.dumps({"enabledPlugins": expected}, separators=(",", ":")),
+    ]

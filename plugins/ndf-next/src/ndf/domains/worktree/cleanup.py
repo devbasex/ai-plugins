@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Optional, Protocol
 
-from ndf.adapters.git import ORIGIN, Git, GitError
+from ndf.adapters.git import Git, GitError
 from ndf.adapters.github import Pull
 from ndf.domains.worktree import cleanup_decide, ndf_settings, merged_decide, repo, testenv_sweep, trash
 from ndf.domains.worktree.cleanup_decide import KEEP_SPRINT, REMOVE, Facts, PullState
@@ -116,22 +116,23 @@ def _remove(g: Git, item: repo.Worktree, merge: str = "") -> Outcome:
     return Outcome(item.path, item.branch, REMOVE, removed=True, branch_deleted=True, note=evacuated)
 
 
-def _sprint_keep(g: Git, item: repo.Worktree, flow: Optional[dict]) -> Optional[str]:
+def _sprint_keep(g: Git, item: repo.Worktree, flow: Optional[dict], remote: str) -> Optional[str]:
     """`merged` が残したスプリントブランチを、本番チャネルに含まれる前に消さない（残す理由。消してよければ `None`）。"""
     branch = str(item.branch)
     if not branch.startswith(merged_decide.SPRINT_PREFIX):  # スプリントでなければ本番チャネルを読まない
         return None
-    return merged_decide.sprint_keep(branch, flow, repo.contained_in_production(g, branch, flow), ORIGIN)
+    return merged_decide.sprint_keep(branch, flow, repo.contained_in_production(g, branch, flow, remote), remote)
 
 
 def cleanup(main_dir: Path, cwd: Path, hub: PullReader, dry_run: bool = False, git: Optional[Git] = None) -> list[Outcome]:
     """片付けを行い、worktree ごとの結果を返す。"""
     g = git if git is not None else Git(main_dir)
     flow = repo.declared_flow(ndf_settings.load(main_dir))
+    remote = g.remote()  # エントリポイントで 1 回だけ求める（worktree ごとに `git worktree list` を打たない）
     out: list[Outcome] = []
     for item, facts in survey(main_dir, cwd, hub, g):
         verdict = cleanup_decide.decide(facts)
-        keep = _sprint_keep(g, item, flow) if verdict == REMOVE else None
+        keep = _sprint_keep(g, item, flow, remote) if verdict == REMOVE else None
         if keep is not None:
             out.append(Outcome(item.path, item.branch, KEEP_SPRINT, note=keep))
         elif verdict == REMOVE and not dry_run:

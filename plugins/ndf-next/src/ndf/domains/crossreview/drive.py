@@ -221,7 +221,7 @@ def _resend(run: _Run, synced: worktree.SyncResult) -> None:
     if synced.replayed == 0 or not isinstance(fix, dict) or "pushed" in fix:
         return
     round_no = len(store.list_of(run.data, store.ROUNDS))
-    remote = run.g.rev_parse(f"refs/remotes/{git.ORIGIN}/{run.cfg.branch}")
+    remote = run.g.rev_parse(f"refs/remotes/{run.g.remote()}/{run.cfg.branch}")
     # 載せ直しでコミットの SHA が変わるので、報告されたコミットとの検証はしない
     sent = _push(run, round_no, remote, fix, check_commit=False)
     if sent:

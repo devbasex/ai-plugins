@@ -2,7 +2,7 @@
 
 **生成物を git のリポジトリへ置く形である。** HTML / PDF / Markdown が対象になる。
 
-**このリポジトリに前例が 1 つある。** `docs/presentations/2026-08-06-ai-plugins-intro` は、当時の Marp で
+**NDF のリポジトリに前例が 1 つある。** `docs/presentations/` の 2026-08-06 の紹介の資料は、当時の Marp で
 `.md` から書き出した `.pdf` と `.html` を記録としてコミットしている。**ただし標準の形には含めず、作り直す手順も残していない**
 （README が「発表日時点の記録で、以後の構成変更には追随しない」と明記している。スライドの作り方は `release` の
 `form-slide.md` が持つ）。

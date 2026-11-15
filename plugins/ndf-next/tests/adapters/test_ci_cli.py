@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
+from pathlib import Path
 
 import httpx
 import pytest
@@ -32,23 +34,44 @@ PULL = {
 }
 
 
-def _serve(monkeypatch: pytest.MonkeyPatch, runs: list[dict], log: str = "", log_status: int = 200, calls: list[str] | None = None) -> None:
-    # パスの末尾 → 応答を作る関数
+def _serve(
+    monkeypatch: pytest.MonkeyPatch,
+    runs: list[dict],
+    log: str = "",
+    log_status: int = 200,
+    calls: list[str] | None = None,
+    job_status: int = 200,
+) -> None:
+    # パスの末尾 → 応答を作る関数（ジョブはどれもワークフローの実行 9、実行は pytest.yml）
     responses = {
         "/pulls/7": lambda: httpx.Response(200, json=PULL),
         "/check-runs": lambda: httpx.Response(200, json={"total_count": len(runs), "check_runs": runs}),
         "/logs": lambda: httpx.Response(log_status, text=log, headers={"content-type": "text/plain"}),
+        "/actions/runs/9/artifacts": lambda: httpx.Response(200, json={"total_count": 0, "artifacts": []}),
+        "/actions/runs/9": lambda: httpx.Response(200, json={"id": 9, "path": ".github/workflows/pytest.yml@refs/pull/7/merge"}),
     }
 
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
         if calls is not None:
             calls.append(path)
+        if "/actions/jobs/" in path and not path.endswith("/logs"):
+            return httpx.Response(job_status, json={"run_id": 9} if job_status == 200 else {"message": "no"})
         respond = next((r for tail, r in responses.items() if path.endswith(tail)), None)
         return respond() if respond else httpx.Response(404, json={"message": "not found"})
 
     api = offline_client(handler)
     monkeypatch.setattr(github, "client", lambda **_: api)
+
+
+@pytest.fixture(autouse=True)
+def _work(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """設定ファイル（pytest の suite が pytest.yml に当たる）を置いた作業場所へ移る。リポジトリの設定を読まない。"""
+    suite = {"name": "pytest", "runner": "pytest", "command": "pytest", "ci_jobs": [".github/workflows/pytest.yml#pytest"]}
+    (tmp_path / ".ndf").mkdir()
+    (tmp_path / ".ndf" / "project.json").write_text(json.dumps({"test": {"suites": [suite]}}), encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    return tmp_path
 
 
 ARGS = ["watch", "--pr", "7", "--repo", REPO, "--required", "pytest", "--required", "doc-lint", "--test", "pytest", "--budget", "60"]
@@ -70,15 +93,50 @@ def test_cli_watch_test_failure_lists_test_files(
 def test_cli_watch_keeps_test_failure_when_logs_cannot_be_read(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], last_result: Callable[[str], dict]
 ) -> None:
-    # ログを読めない（権限・Actions 以外のチェック）ときも、test_failed の分類と落ちたチェックの一覧は残す
+    # ログを読めない（権限・Actions 以外のチェック）ときも、test_failed の分類と落ちたチェックの一覧は残し、理由を記録に置く
     runs = [run("pytest (0/2)", conclusion="failure", rid=41), run("pytest", rid=42), run("doc-lint", rid=43)]
     _serve(monkeypatch, runs, log="forbidden", log_status=403)
     assert ci_cli.main(ARGS) == causes.exit_code("test_failed")
     out = last_result(capsys.readouterr().out)
     assert out["cause"]["kind"] == "test_failed"
     assert (out["metrics"]["failed_tests"], out["metrics"]["test_files"]) == ([], [])
-    assert "403" in out["metrics"]["log_error"]
+    (read,) = out["metrics"]["failed_test_reads"]
+    assert (read["check"], read["run_id"], read["runner"], read["source"]) == ("pytest (0/2)", 9, "pytest", "none")
+    assert "403" in read["reason"]
+    assert "log_error" not in out["metrics"] and "junit_artifacts" not in out["metrics"]
     assert out["items"][0]["name"] == "pytest (0/2)"
+
+
+def test_cli_watch_puts_log_error_only_when_the_job_cannot_be_read(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], last_result: Callable[[str], dict]
+) -> None:
+    runs = [run("pytest (0/2)", conclusion="failure", rid=41), run("pytest", rid=42), run("doc-lint", rid=43)]
+    _serve(monkeypatch, runs, log=LOG, job_status=404)
+    assert ci_cli.main(ARGS) == causes.exit_code("test_failed")
+    out = last_result(capsys.readouterr().out)
+    assert "404" in out["metrics"]["log_error"]
+    assert out["metrics"]["failed_test_reads"][0]["source"] == "none"
+    assert out["metrics"]["failed_test_reads"][0]["run_id"] is None
+
+
+def test_cli_watch_carries_the_declared_junit_glob(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    last_result: Callable[[str], dict],
+    _work: Path,
+) -> None:
+    # 設定に glob があれば結果に写す。成果物が無ければログ（pytest のパーサー）で読む
+    suite = {"name": "pytest", "runner": "pytest", "command": "pytest", "ci_jobs": [".github/workflows/pytest.yml"]}
+    decl = {"test": {"ci": {"junit_artifacts": "junit-*"}, "suites": [suite]}}
+    (_work / ".ndf" / "project.json").write_text(json.dumps(decl), encoding="utf-8")
+    runs = [run("pytest (0/2)", conclusion="failure", rid=41), run("pytest", rid=42), run("doc-lint", rid=43)]
+    _serve(monkeypatch, runs, log=LOG)
+    assert ci_cli.main(ARGS) == causes.exit_code("test_failed")
+    out = last_result(capsys.readouterr().out)
+    assert out["metrics"]["junit_artifacts"] == "junit-*"
+    (read,) = out["metrics"]["failed_test_reads"]
+    assert read["source"] == "log" and read["found"] == 3
+    assert "junit-*" in read["reason"]
 
 
 def test_cli_watch_passes(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], last_result: Callable[[str], dict]) -> None:

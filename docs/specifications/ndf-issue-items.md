@@ -54,7 +54,7 @@ Issue も起票の後の検査が拾う。
 
 | 要素 | 責務 |
 | --- | --- |
-| [`data/issue-items.json`](../../plugins/ndf/scripts/data/issue-items.json) | 記載項目の定義の既定（30 項目。種類ごとの区分・水準・該当する条件、最後に置く項目 `last`） |
+| [`data/issue-items.json`](../../plugins/ndf/scripts/data/issue-items.json) | 記載項目の定義の既定（31 項目。種類ごとの区分・水準・該当する条件、最後に置く項目 `last`） |
 | [`data/issue-stores.json`](../../plugins/ndf/scripts/data/issue-stores.json) | 置き場ごとの表し方（GitHub・markdown・Redmine）と、工程が足す節の見出しの一覧（`record_headings`） |
 | [`lib/issue_items.py`](../../plugins/ndf/scripts/lib/issue_items.py) | 定義と表し方を読み（`load_definition`・`definition_for`）、常に成り立つ条件 I1〜I3 を確かめる。本文とラベルと文脈から欠けを返す純粋な判定（`judge_body`） |
 | [`issue-items.py`](../../plugins/ndf/scripts/issue-items.py) | `audit`（起票の後の検査）と `templates`（一致の検査） |
@@ -213,7 +213,7 @@ graph TD
 
 判定と 2 つの副命令は `plugins/ndf/scripts/tests/test_issue_items.py`、起票の guard は `plugins/ndf/scripts/tests/test_issue_guard.py` にある。
 
-- 既定の定義の 30 項目すべてが 4 種類の区分と水準を持ち、該当時の項目は条件を持つこと。区分を空にする・水準を消すと読み込みが終了コード 2 で止まること（I1・I2）
+- 既定の定義の 31 項目すべてが 4 種類の区分と水準を持ち、該当時の項目は条件を持つこと。区分を空にする・水準を消すと読み込みが終了コード 2 で止まること（I1・I2）
 - 表し方のファイルに識別子の無い独自の項目を足した定義が「ほかの項目」の表し方で読み込め、置き場の既定を消すと終了コード 2 で止まること（I3）
 - 「依頼（原文）」の後ろに工程が足す節でない節がある本文は `order` の欠けになり、`## 進行` だけが後ろにある本文は欠けにならないこと（I5）
 - `templates` が今のフォーム 3 つ・骨格・仕様のテンプレートを通し、必須欄を 1 つ消す・`required` を外す・項目に無い見出しを足すと終了コード 1 で項目とテンプレートの名前が出ること（I4）

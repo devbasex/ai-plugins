@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "summary": "ndf-next の設定で選べる値の基準（#3617 の決定 4）。scripts/check-ndf-choices.py が今のコントラクトと照らす。値を減らすときは removed に {set, value, issue, reason} を足し、値を足すときは sets の values に足す",
+  "sets": [
+    {
+      "id": "branch-flows",
+      "source": {"rows": "plugins/ndf-next/contracts/domains/branch-flows.json", "key": "id"},
+      "values": ["merge-base-branch", "release-branch"]
+    },
+    {
+      "id": "delivery-kind",
+      "source": {"enum": "plugins/ndf-next/contracts/schemas/ndf-settings/project.schema.json", "pointer": "/$defs/Delivery/properties/kind/enum"},
+      "values": ["auto", "manual"]
+    },
+    {
+      "id": "release-form",
+      "source": {"files": "plugins/ndf-next/skills/release/references/form-*.md", "prefix": "form-"},
+      "values": ["desktop", "document", "mobile", "package-plugin", "page", "procedure", "service", "slide", "spreadsheet"]
+    }
+  ],
+  "removed": [
+    {"set": "branch-flows", "value": "promote-selected", "issue": 3613, "reason": "release-branch へ改名した（設定の値の改名表 contracts/domains/ndf-settings-renames.json と ndf settings migrate が旧い値を書き換える）"},
+    {"set": "branch-flows", "value": "promote-whole", "issue": 3613, "reason": "merge-base-branch へ改名した（設定の値の改名表 contracts/domains/ndf-settings-renames.json と ndf settings migrate が旧い値を書き換える）"}
+  ]
+}

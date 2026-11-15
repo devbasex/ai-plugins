@@ -1,7 +1,5 @@
 # 見積もりの規約
 
-> 次のスクリプトのサブコマンドは新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `estimate.py`（P3）。移行先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
-
 AI エージェントが実施する前提で、作業の大きさを見積もるときの規約の SSOT。Skill `estimate`・`backlog-refinement`
 の Size は、この規約と部品（`scripts/estimate.py`）を使い、定義を写さない。
 
@@ -124,7 +122,7 @@ Size は A の見込みを表す。比 r = A ÷ Size 1 の基準とし、尺度 
 ## 根拠にした研究
 
 研究からは定性の知見だけを採り、数値は式・既定値・この規約に写さない。出典と確かめた数値・採らなかった知見は
-ai-plugins の確定仕様 `docs/specifications/ndf-estimate.md` にある。
+NDF のリポジトリの確定仕様 `docs/specifications/ndf-estimate.md` にある。
 
 | 研究 | 採った知見 |
 | --- | --- |

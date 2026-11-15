@@ -2,6 +2,7 @@
 
 判定は設定（`.ndf/project.json` の `test.suites`）の `runner` と `command` だけを照らし、実行器の一覧を持たない。
 持つのは並列の指定の語の表と、コマンドの位置を探すときに読み飛ばすラッパーの表だけである。
+hook の `strict` がラッパーの表を読むため、標準ライブラリだけを読む（`contracts/hooks/imports.json` の `stdlib_only`）。
 """
 
 from __future__ import annotations

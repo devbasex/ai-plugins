@@ -92,15 +92,18 @@ def inputs(repo: git.Git, tracked: Optional[dict[str, str]] = None) -> dict[str,
     return {p: got[p] for p in sorted(got) if is_input(p)}
 
 
-def branch_state(repo: git.Git, declared: tuple[str, ...] = ()) -> dict[str, Any]:
-    """origin の HEAD の指す先と、main・master・develop と定義した名前のうち origin にあるもの。"""
-    head_done = repo.attempt("symbolic-ref", "--short", "refs/remotes/origin/HEAD")
-    head = head_done.stdout.strip() if head_done.returncode == 0 else ""
-    refs_done = repo.attempt("for-each-ref", "--format=%(refname:short)", "refs/remotes/origin")
+def branch_state(repo: git.Git, declared: tuple[str, ...] = (), remote: Optional[str] = None) -> dict[str, Any]:
+    """リモート名のリモートの HEAD の指す先と、既知のブランチ名と定義した名前のうちそのリモートにあるもの。
+
+    `remote` を省けば `repo.remote()`（求め済みなら渡して `git worktree list` を打ち直さない）。
+    """
+    remote = remote if remote is not None else repo.remote()
+    head = repo.remote_default_branch(remote)
+    refs_done = repo.attempt("for-each-ref", "--format=%(refname:short)", f"refs/remotes/{remote}")
     refs = refs_done.stdout.split() if refs_done.returncode == 0 else []
     names = set(KNOWN_BRANCHES) | {d for d in declared if d}
-    present = sorted(n for n in names if f"origin/{n}" in refs)
-    return {"head": head.split("/", 1)[-1] if head else None, "present": present}
+    present = sorted(n for n in names if f"{remote}/{n}" in refs)
+    return {"head": head, "present": present}
 
 
 def declared_branches(worktree: Optional[dict[str, Any]]) -> tuple[str, ...]:

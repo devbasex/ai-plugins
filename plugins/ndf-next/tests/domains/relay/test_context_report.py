@@ -225,3 +225,65 @@ def test_sum_sessions_adds_parts_rounds_and_counts_unknowns(tmp_path):
     missing = context_report.report("#1", rows, [], None)
     assert missing["sessions"] == 3 and missing["auto_compacts"] == context_records.UNKNOWN
     assert context_report.report("#9", rows, [], None)["auto_compacts"] == context_records.UNKNOWN
+
+
+# --- 現状固定: context_records._Calls.take（I-017。read_calls から通す。圧縮の時刻・重複の id・最初の発言） ---
+
+
+def _take_assistant(mid, ts: str, inp: int = 100, out: int = 10, uuid=None) -> dict:
+    e = {"type": "assistant", "timestamp": ts, "message": {"model": "m", "usage": {"input_tokens": inp, "output_tokens": out}}}
+    if mid:
+        e["message"]["id"] = mid
+    if uuid:
+        e["uuid"] = uuid
+    return e
+
+
+def _take_call(ts: float, inp: int, out: int = 10) -> dict:
+    return {"ts": ts, "model": "m", "inp": inp, "out": out, "read": 0, "w5": 0, "w1h": 0, "context": inp}
+
+
+_AUTO = {"type": "system", "subtype": "compact_boundary", "compactMetadata": {"trigger": "auto"}}
+_T0 = 1767225600.0  # 2026-01-01T00:00:00Z
+
+
+def _take_entries() -> list:
+    return [
+        _AUTO,  # 呼び出しの前の圧縮は時刻 None
+        {"type": "user", "isMeta": True, "message": {"content": "meta"}},
+        {"type": "user", "message": {"content": [{"type": "text", "text": "read .ndf/handoff/x.md"}]}},
+        _take_assistant("m1", "2026-01-01T00:00:00Z", 100),
+        _take_assistant("m1", "2026-01-01T00:00:05Z", 200, 20),  # 同じ id は最後の usage・最初の時刻
+        _take_assistant(None, "2026-01-01T00:01:00Z", 50, uuid="u1"),  # id が無ければ uuid
+        {"type": "assistant", "timestamp": "2026-01-01T00:02:00Z", "message": {"id": "m3"}},  # usage が無い
+        _AUTO,  # 時刻が無ければ直前の呼び出しの時刻
+        {**_AUTO, "timestamp": "2026-01-01T00:03:00Z"},
+        {**_AUTO, "compactMetadata": {"trigger": "manual"}},  # 手動の圧縮は数えない
+        _take_assistant("m4", "2026-01-01T00:04:00Z", 1),
+        {"type": "assistant", "timestamp": "2026-01-01T00:05:00Z", "message": "str"},
+    ]
+
+
+def test_take_current_behavior_collects_calls_compacts_and_handoff(tmp_path):
+    t = _transcript(tmp_path / "t.jsonl", _take_entries())
+    calls, compacts, handoff = context_records.read_calls(t)
+    assert calls == [_take_call(_T0, 200, 20), _take_call(_T0 + 60, 50), _take_call(_T0 + 240, 1)]
+    assert compacts == [None, _T0 + 60, _T0 + 180]
+    assert handoff is True
+
+
+def test_take_current_behavior_skips_ids_seen_in_earlier_files(tmp_path):
+    t = _transcript(tmp_path / "t.jsonl", _take_entries())
+    seen = {"m1"}
+    calls, _, _ = context_records.read_calls(t, seen)
+    assert calls == [_take_call(_T0 + 60, 50), _take_call(_T0 + 240, 1)]
+    assert seen == {"m1", "m4", "u1"}
+    calls, _, _ = context_records.read_calls(t, {"m4"})
+    assert calls == [_take_call(_T0, 200, 20), _take_call(_T0 + 60, 50)]
+
+
+def test_take_current_behavior_plain_first_user_and_unreadable(tmp_path):
+    t = _transcript(tmp_path / "t.jsonl", [{"type": "user", "message": {"content": "plain"}}, _take_assistant("x", "2026-01-01T00:00:00Z")])
+    assert context_records.read_calls(t) == ([_take_call(_T0, 100)], [], False)
+    assert context_records.read_calls(None) == ([], None, False)
+    assert context_records.read_calls(str(tmp_path / "missing.jsonl")) == ([], None, False)

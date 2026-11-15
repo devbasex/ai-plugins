@@ -13,8 +13,8 @@ PR 1 件ごとに、メインディレクトリの排他（`mainlock`）を取�
    （`--force` は戻せない削除で人の承認が要るため、この経路では使わない。C4）
 4. ローカルブランチを `git branch -d` で消す（`-D` は使わない。git がマージ済みと認めなければ残して理由を返す）
 
-片付けの前に、メインディレクトリがベースブランチにいれば、`git fetch` で `refs/remotes/origin/<ベースブランチ>` を
-更新してから `git merge --ff-only origin/<ベースブランチ>` でマージする（`git branch -d` は HEAD に含まれたブランチだけを消す）。
+片付けの前に、メインディレクトリがベースブランチにいれば、`git fetch` で `refs/remotes/<リモート名>/<ベースブランチ>` を
+更新してから `git merge --ff-only <リモート名>/<ベースブランチ>` でマージする（`git branch -d` は HEAD に含まれたブランチだけを消す）。
 最後に `git worktree prune` を打ち、worktree の消えた割り当てのテスト環境を回収する（`testenv.reclaim`）。
 `git pull` は使わない（`FETCH_HEAD` をほかのセッションの fetch と取り合い、マージが止まる。#3317）。
 """
@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional, Protocol
 
-from ndf.adapters.git import ORIGIN, Git
+from ndf.adapters.git import Git
 from ndf.adapters.github import Pull
 from ndf.domains.settings import renames
 from ndf.domains.worktree import ndf_settings, mainlock, merged_decide, outcomes, repo, testenv, testenv_sweep, trash
@@ -128,29 +128,33 @@ def _clean_branch(main: Git, main_dir: Path, branch: str, rec: Record, merge: st
         _delete_branch(main, branch, rec)
 
 
-def _one(main: Git, main_dir: Path, pull: Pull, flow: Optional[Mapping[str, Any]], base: Optional[str], rec: Record) -> None:
-    branch = pull.head_ref
+def _keep_reason(main: Git, branch: str, flow: Optional[Mapping[str, Any]], base: Optional[str], remote: str) -> Optional[str]:
+    """ブランチを残す理由（消してよければ `None`）。"""
     production = flow.get("production_branch") if flow is not None else None
     keep = merged_decide.long_lived_keep(branch, base, production if isinstance(production, str) else None)
     if keep is None:
-        keep = merged_decide.sprint_keep(branch, flow, repo.contained_in_production(main, branch, flow), ORIGIN)
+        keep = merged_decide.sprint_keep(branch, flow, repo.contained_in_production(main, branch, flow, remote), remote)
+    return keep
+
+
+def _one(main: Git, main_dir: Path, pull: Pull, keep: Optional[str], rec: Record) -> None:
     if keep is not None:
-        rec.add("branch", branch, outcomes.KEPT, keep)
+        rec.add("branch", pull.head_ref, outcomes.KEPT, keep)
         return
-    _clean_branch(main, main_dir, branch, rec, pull.merge_sha)
+    _clean_branch(main, main_dir, pull.head_ref, rec, pull.merge_sha)
 
 
-def sync_main(main: Git, base: Optional[str], rec: Record) -> None:
+def sync_main(main: Git, base: Optional[str], remote: str, rec: Record) -> None:
     """メインディレクトリがベースブランチにいれば fast-forward でマージする。失敗は `rec.stopped` に書く。"""
     skip = merged_decide.pull_skip(repo.current_branch(main), base)
     if skip is not None:
         rec.add("main_dir", str(main.cwd), outcomes.KEPT, skip)
         return
-    fetched = main.fetch_branch(ORIGIN, base)
+    fetched = main.fetch_branch(remote, base)
     if fetched.returncode != 0:
         rec.add("main_dir", str(main.cwd), outcomes.KEPT, f"git fetch が失敗した（マージしない）: {fetched.stderr.strip()}")
         return
-    done = main.merge_ff(f"{ORIGIN}/{base}")
+    done = main.merge_ff(f"{remote}/{base}")
     if done.returncode == 0:
         rec.add("main_dir", str(main.cwd), outcomes.PULLED)
         return
@@ -159,7 +163,7 @@ def sync_main(main: Git, base: Optional[str], rec: Record) -> None:
         # 利用者の手元の変更には触れない（stash も checkout もしない）。マージだけを見送る
         rec.add("main_dir", str(main.cwd), outcomes.KEPT, f"未コミットの変更（{len(dirty)} 件）がマージを塞いだためマージしない")
         return
-    rec.stopped = f"メインディレクトリの git merge --ff-only {ORIGIN}/{base} が失敗: {done.stderr.strip()}"
+    rec.stopped = f"メインディレクトリの git merge --ff-only {remote}/{base} が失敗: {done.stderr.strip()}"
     rec.add("main_dir", str(main.cwd), outcomes.STOPPED, rec.stopped)
 
 
@@ -185,16 +189,17 @@ def after_merge(main_dir: Path, numbers: list[int], hub: PullsReader, flow_recor
     pulls = hub.pulls(numbers)
     rec = Record()
     base = repo.base_branch(main, decl)
+    remote = main.remote()  # エントリポイントで 1 回だけ求める（PR ごとに `git worktree list` を打たない）
     # 先にマージする: `git branch -d` はメインディレクトリの HEAD に含まれたブランチだけを消す
     with mainlock.held(main):
-        sync_main(main, base, rec)
+        sync_main(main, base, remote, rec)
     for n in numbers:
         pull = pulls.get(n)
         if pull is None or not pull.merged:
             rec.add("pr", str(n), outcomes.KEPT, "PR が見つからない" if pull is None else "PR がマージされていない")
             continue
         with mainlock.held(main):
-            _one(main, main_dir, pull, flow, base, rec)
+            _one(main, main_dir, pull, _keep_reason(main, pull.head_ref, flow, base, remote), rec)
     main.run("worktree", "prune")
     # worktree の消えた割り当てのテスト環境を回収する（排他の外で行う。並列のレーンの後片付けを待たせない）
     t = testenv.target(main_dir)

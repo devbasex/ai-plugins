@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+import subprocess
+
 import pytest
 
 from ndf.core import route
@@ -63,6 +66,33 @@ def test_base_has_no_fixed_default():
         route.render(t, given)
 
 
+def _repo(tmp_path, ndf_settings=None):
+    subprocess.run(["git", "init", "-q", "-b", "main", str(tmp_path)], check=True)
+    if ndf_settings is not None:
+        (tmp_path / ".ndf").mkdir()
+        (tmp_path / ".ndf" / "worktree.json").write_text(json.dumps(ndf_settings), encoding="utf-8")
+    return tmp_path
+
+
+def test_omitted_remote_reads_the_ndf_settings_then_the_default(tmp_path):
+    """remote を省けば設定の remote、無ければスキーマの既定（#3617 の受け入れ条件 8・9）。"""
+    t = route.choose("immediate_fix")
+    plain = _repo(tmp_path / "plain")
+    given = {"repo": str(plain), "worktree": str(plain), "branch": "fix/x", "base": "main"}
+    assert route.derived(t, given, plain)["remote"] == "origin"
+    fork = _repo(tmp_path / "fork", {"version": 1, "remote": "upstream"})
+    plan = route.render(t, {**values("immediate_fix"), **route.derived(t, {**given, "repo": str(fork)}, fork)})
+    push = next(s for s in plan["steps"] if s["id"] == "push")
+    assert push["run"][:4] == ["git", "push", "--", "upstream"]
+
+
+def test_broken_remote_ndf_settings_is_refused(tmp_path):
+    t = route.choose("immediate_fix")
+    repo = _repo(tmp_path, {"version": 1, "remote": "-x"})
+    with pytest.raises(route.RouteError, match="remote"):
+        route.derived(t, {"repo": str(repo), "worktree": str(repo), "branch": "fix/x", "base": "main"}, repo)
+
+
 def test_list_values_expand_per_element_and_vanish_when_empty():
     plan = plan_of("immediate_fix", required=["test", "lint"], tests=[])
     ci = next(s for s in plan["steps"] if s["id"] == "ci")
@@ -121,3 +151,18 @@ def test_unknown_shared_step_is_refused():
 def test_worker_steps_expand_to_fixed_shape(template, step, expected):
     found = [s for s in route.expanded(route.templates()[template])["steps"] if s["id"] == step]
     assert found == [expected]
+
+
+def test_omitted_remote_in_a_linked_worktree_reads_the_main_ndf_settings(tmp_path):
+    """linked worktree から打っても、メインディレクトリの設定の remote を使う（作業場所の古い設定を読まない）。"""
+    t = route.choose("immediate_fix")
+    main = _repo(tmp_path / "main", {"version": 1, "remote": "origin"})
+    commit = ["git", "-C", str(main), "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m", "a"]
+    subprocess.run(commit, check=True)
+    linked = tmp_path / "linked"
+    subprocess.run(["git", "-C", str(main), "worktree", "add", "-q", "--detach", str(linked)], check=True)
+    (linked / ".ndf").mkdir(exist_ok=True)
+    (linked / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "remote": "origin"}), encoding="utf-8")
+    (main / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "remote": "upstream"}), encoding="utf-8")
+    given = {"worktree": str(linked), "branch": "fix/x", "base": "main"}
+    assert route.derived(t, given, linked)["remote"] == "upstream"

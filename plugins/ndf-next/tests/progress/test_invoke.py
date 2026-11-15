@@ -269,7 +269,7 @@ def test_template_values_missing_from_every_source_stop_as_invalid_by_name(tmp_p
     # 出所（課題・設定・既定）のどれからも決まらなければ、足りない名前と出所を挙げて止まる
     repo = _sprint_repo(tmp_path)
     monkeypatch.setattr(invoke, "issue_text", lambda *a: pytest.fail("課題が 2 つなら課題から写さない"))
-    monkeypatch.setattr(route, "default_merge_method", lambda repo, base: "squash")
+    monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None: "squash")
     got = invoke.invoke(_stage_run_of(name, repo, [1, 2]), repo, tmp_path / "w", runner=lambda *a: pytest.fail("打たない"))
     assert got.status == "stopped" and got.cause["kind"] == "invalid"
     named = {i["key"]: i["source"] for i in got.report["items"]}
@@ -291,7 +291,7 @@ def _filled_plan(tmp_path, monkeypatch, name):
     patched = {n: replace(p, default=defaults[n]) if n in defaults else p for n, p in held.items()}
     monkeypatch.setattr(route, "params", lambda: patched)
     monkeypatch.setattr(invoke, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
-    monkeypatch.setattr(route, "default_merge_method", lambda repo, base: "squash")
+    monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None: "squash")
     work = tmp_path / "w"
     work.mkdir()
     run = _stage_run_of(name, repo, [3092])
@@ -481,7 +481,7 @@ def test_an_issue_by_an_untrusted_author_is_not_written_and_stops_as_invalid_by_
     # 題と本文は欠けとして、信用しない出所を挙げて止まり、本文のファイルは書かない
     repo = _sprint_repo(tmp_path, PROJECT)
     monkeypatch.setattr(invoke, "issue_text", lambda location, n: None)
-    monkeypatch.setattr(route, "default_merge_method", lambda repo, base: "squash")
+    monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None: "squash")
     work = tmp_path / "w"
     work.mkdir()
     got = invoke.invoke(_stage_run_of("impl", repo, [3092]), repo, work, runner=lambda *a: pytest.fail("打たない"))
@@ -530,7 +530,7 @@ def test_a_failure_to_read_the_issue_stops_with_its_reason_not_as_missing_values
         raise error
 
     monkeypatch.setattr(invoke, "issue_text", fail)
-    monkeypatch.setattr(route, "default_merge_method", lambda repo, base: "squash")
+    monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None: "squash")
     work = tmp_path / "w"
     work.mkdir()
     got = invoke.invoke(_stage_run_of("impl", repo, [3092]), repo, work, runner=lambda *a: pytest.fail("打たない"))
@@ -793,11 +793,13 @@ def test_skill_calls_claude_call_claude_by_default():
     assert inspect.signature(invoke.invoke).parameters["call_claude"].default is claude.call_claude
 
 
-def test_skill_is_called_with_full_permission_the_result_schema_and_the_implement_limit(tmp_path, calls):
+def test_skill_is_called_with_full_permission_the_result_schema_and_the_implement_limit(tmp_path, calls, monkeypatch):
     from ndf import contracts
     from ndf.adapters import claude
     from ndf.contracts import limits
 
+    # 導入済みの一覧を読めた（外す登録が無い）起動に固定する。読めないときの知らせは次のテストが見る
+    monkeypatch.setattr(claude, "list_plugins", lambda **k: [])
     box, seen, fake = calls
     run = _skill_run()
     box["reply"] = _reply(answer=result.result("skill", "ok", "済んだ", outputs={"pr": 3}))
@@ -808,6 +810,19 @@ def test_skill_is_called_with_full_permission_the_result_schema_and_the_implemen
     assert got.status == "ok" and got.outputs == {"pr": 3} and got.warnings == ()
     # Skill の作業はプランの保存先を作らない
     assert not (tmp_path / "w").exists()
+
+
+def test_skill_carries_the_notice_of_an_unreadable_plugin_list_into_its_warnings(tmp_path, calls, monkeypatch):
+    """導入済みの一覧を読めずに旧い NDF を外さずに起動したことを、工程の結果の warnings に残す（I10a）。"""
+    from ndf.adapters import claude
+
+    unreadable = claude.PluginArgs(["--plugin-dir", "p"], claude.LIST_UNREADABLE)
+    monkeypatch.setattr(claude, "plugin_args", lambda root, cwd=None: unreadable)
+    box, _, fake = calls
+    box["reply"] = _reply(answer=result.result("skill", "ok", "済んだ", outputs={"pr": 3}))
+    assert invoke.invoke(_skill_run(), tmp_path, tmp_path, call_claude=fake).warnings == (claude.LIST_UNREADABLE,)
+    box["reply"] = _reply(ok=False, error="落ちた")
+    assert invoke.invoke(_skill_run(), tmp_path, tmp_path, call_claude=fake).warnings == (claude.LIST_UNREADABLE,)
 
 
 @pytest.mark.parametrize(

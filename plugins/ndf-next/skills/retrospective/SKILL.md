@@ -12,8 +12,6 @@ allowed-tools:
 
 # 振り返り
 
-> 次のスクリプトのサブコマンドは新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `ask.py`（P2）・`gate-rejections.py`（P2）・`glossary.py`（M7）・`issue-file.py`（M6）・`project-mvv.py`（M7）・`projects-sync.sh`（M7）・`skill-stats.py`（M7）・`upkeep.py`（M6）。移行先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
-
 **進め方のうち次に変えることを決めて残し、起票の取りこぼしを拾う。**
 
 対象はこの変更の進め方と、途中で起票した課題の一覧である。成果物の良し悪しは

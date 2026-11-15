@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -637,7 +638,9 @@ def test_characterize_scan_family_returns_scanned_hits_report_and_unscanned(tmp_
     mod = load_checker()
     skills = build_family(tmp_path)
     family = skills.parent
-    scanned, hits, report_line, unscanned = mod.scan_family(skills)
+    got = mod.scan_family(skills)
+    scanned, hits, (report_line,), unscanned, problems = got.scanned, got.hits, got.report_lines, got.unscanned, got.default_problems
+    assert problems == []
 
     assert sorted(Path(p).relative_to(family.resolve()).as_posix() for p in scanned) == [
         "agents/ag.md",
@@ -676,9 +679,190 @@ def test_characterize_scan_family_of_an_empty_family(tmp_path: Path) -> None:
     mod = load_checker()
     skills = tmp_path / "plugins" / "fx" / "skills"
     skills.mkdir(parents=True)
-    scanned, hits, report_line, unscanned = mod.scan_family(skills)
+    got = mod.scan_family(skills)
+    scanned, hits, (report_line,), unscanned, problems = got.scanned, got.hits, got.report_lines, got.unscanned, got.default_problems
+    assert problems == []
     assert (scanned, hits, unscanned) == (set(), [], [])
     assert report_line == (
         f"{skills}: 公開する Skill 0 個 / Markdown 0 本 / スクリプト 0 本（family 0・Skill 0） / "
         "hook 0 本 / エージェント 0 本 / ヒット 0 件"
     )
+
+
+# --- ndf-next の形の family（#3617）---
+
+REMOTE_SCHEMA = '{\n  "properties": {\n    "remote": {\n      "type": "string",\n      "default": "origin"\n    }\n  }\n}\n'
+
+
+def build_next_tree(tmp_path: Path, *, src: str = "X = 1\n", contract: str = '{"a": 1}\n', schema: str = REMOTE_SCHEMA) -> Path:
+    """Skill の一覧を `manifests/skills.json` に持つ最小の木を作り、`skills/` を返す。"""
+    family = tmp_path / "plugins" / "nx"
+    (family / "manifests").mkdir(parents=True)
+    (family / "manifests" / "skills.json").write_text(json.dumps({"skills": [{"name": LISTED_SKILL}]}), encoding="utf-8")
+    skills = family / "skills"
+    (skills / LISTED_SKILL).mkdir(parents=True)
+    (skills / LISTED_SKILL / "SKILL.md").write_text(CLEAN_BODY, encoding="utf-8")
+    (family / "src" / "pkg").mkdir(parents=True)
+    (family / "src" / "pkg" / "a.py").write_text(src, encoding="utf-8")
+    decl = family / "contracts" / "schemas" / "ndf-settings"
+    decl.mkdir(parents=True)
+    (decl / "worktree.schema.json").write_text(schema, encoding="utf-8")
+    (family / "contracts" / "c.json").write_text(contract, encoding="utf-8")
+    return skills
+
+
+def test_report_scans_ndf_next_skills_src_and_contracts() -> None:
+    """ndf-next の Skill・src・contracts の走査の件数が 0 でなく、Skill の数はディレクトリの数と等しい（受け入れ条件 1）。"""
+    result = subprocess.run([sys.executable, str(CHECKER), "--report"], capture_output=True, text=True, cwd=REPO_ROOT)
+    assert result.returncode == 0, output_of(result)
+    summary = re.search(
+        r"^plugins/ndf-next/skills: 公開する Skill (\d+) 個 / Markdown (\d+) 本 / .* / src (\d+) 本 / contracts (\d+) 本 / ",
+        output_of(result),
+        re.MULTILINE,
+    )
+    assert summary is not None, output_of(result)
+    skills, markdown, src, contracts = (int(v) for v in summary.groups())
+    dirs = [d for d in (REPO_ROOT / "plugins/ndf-next/skills").iterdir() if d.is_dir()]
+    assert skills == len(dirs) > 0 and markdown >= skills and src > 0 and contracts > 0
+
+
+def test_a_new_name_in_ndf_next_src_fails_with_file_and_line(tmp_path: Path) -> None:
+    """例外の外の語（`devbasex`）を src に 1 行足すと 1 で落ち、ファイルと行と足す項目の名前を出す（受け入れ条件 2・I1）。"""
+    skills = build_next_tree(tmp_path, src="X = 1\nORG = 'devbasex'\n")
+    result = run_check(skills, [], tmp_path)
+    assert result.returncode == 1, output_of(result)
+    out = output_of(result)
+    assert "src/pkg/a.py:2: 'devbasex'" in out
+    assert "src__pkg__a.py--org-name--pending.json" in out
+
+
+def test_one_more_hit_than_declared_fails_and_an_exact_count_passes(tmp_path: Path) -> None:
+    """宣言の件数どおりなら通り、1 件増えると落ちる（受け入れ条件 3・I1）。"""
+    skills = build_next_tree(tmp_path, src="A = 'ai-plugins'\n")
+    path = key_for(skills.parent, "src/pkg/a.py")
+    assert run_check(skills, [allow_row(path, "repo-name", issue=3617)], tmp_path).returncode == 0
+    (skills.parent / "src/pkg/a.py").write_text("A = 'ai-plugins'\nB = 'ai-plugins'\n", encoding="utf-8")
+    assert run_check(skills, [allow_row(path, "repo-name", issue=3617)], tmp_path).returncode == 1
+
+
+@pytest.mark.parametrize("row", [{"reason": ""}, {"kind": "pending", "issue": None}])
+def test_a_row_without_reason_or_issue_fails(tmp_path: Path, row: dict) -> None:
+    """理由の無い項目・Issue の番号の無い pending の項目で 2 で落ちる（受け入れ条件 3・I2）。"""
+    skills = build_next_tree(tmp_path, src="A = 'ai-plugins'\n")
+    base = allow_row(key_for(skills.parent, "src/pkg/a.py"), "repo-name")
+    broken = {k: v for k, v in {**base, **row}.items() if v is not None}
+    assert run_check(skills, [broken], tmp_path).returncode == 2
+
+
+def test_next_words_are_not_applied_to_other_families(tmp_path: Path) -> None:
+    """追加の語は ndf-next の形の family にだけ掛ける。今の形の family の件数は変わらない（受け入れ条件 4・I3）。"""
+    skills = build_tree(tmp_path, listed=CLEAN_BODY + "\ndevbasex/ai-plugins の例と ndf@x\n", unlisted=CLEAN_BODY)
+    assert run_check(skills, [], tmp_path).returncode == 0
+
+
+def test_contract_default_is_not_a_hit_but_other_keys_are(tmp_path: Path) -> None:
+    """`"default": "origin"` の値は走査しないが、ほかの鍵の値の "origin" は当たる（I7a）。"""
+    mod = load_checker()
+    skills = build_next_tree(tmp_path, contract='{"description": "x", "enum": ["origin"]}\n')
+    root = skills.parent
+    hits = mod.scan_contracts(root, ["contracts/c.json", "contracts/schemas/ndf-settings/worktree.schema.json"], mod.NEXT_CODE_MATCHERS)
+    assert [(h.rel, h.word_id) for h in hits] == [("contracts/c.json", "remote-origin")]
+    assert mod.remote_defaults(root, ["contracts/schemas/ndf-settings/worktree.schema.json"]) == [
+        ("contracts/schemas/ndf-settings/worktree.schema.json", 5)
+    ]
+
+
+@pytest.mark.parametrize(
+    ("contract", "schema"),
+    [
+        ('{"default": "origin"}\n', REMOTE_SCHEMA),  # 2 か所
+        ('{"a": 1}\n', '{"properties": {}}\n'),  # 0 か所
+        ('{"default": "origin"}\n', '{"properties": {}}\n'),  # 別の置き場の 1 か所
+    ],
+)
+def test_remote_default_must_be_in_exactly_one_place(tmp_path: Path, contract: str, schema: str) -> None:
+    """リモート名の既定がスキーマの 1 か所でなければ 2 で落ちる（I7a）。"""
+    result = run_check(build_next_tree(tmp_path, contract=contract, schema=schema), [], tmp_path)
+    assert result.returncode == 2, output_of(result)
+    assert "リモート名の既定が" in output_of(result)
+
+
+def test_a_remote_default_in_a_skill_schema_fails(tmp_path: Path) -> None:
+    """Skill が同梱するスキーマにリモート名の既定を写すと 2 で落ちる（I7a）。"""
+    skills = build_next_tree(tmp_path)
+    (skills / LISTED_SKILL / "schemas").mkdir()
+    (skills / LISTED_SKILL / "schemas" / "w.schema.json").write_text(REMOTE_SCHEMA, encoding="utf-8")
+    result = run_check(skills, [], tmp_path)
+    assert result.returncode == 2, output_of(result)
+    assert "リモート名の既定が 2 か所にある" in output_of(result)
+
+
+def test_broken_skills_json_and_missing_src_fail(tmp_path: Path) -> None:
+    """Skill の一覧が読めない・src が無いときは、0 件と読まずに 2 で落ちる。"""
+    skills = build_next_tree(tmp_path / "a")
+    (skills.parent / "manifests" / "skills.json").write_text("{", encoding="utf-8")
+    assert run_check(skills, [], tmp_path / "a").returncode == 2
+    skills = build_next_tree(tmp_path / "b")
+    shutil.rmtree(skills.parent / "src")
+    result = run_check(skills, [], tmp_path / "b")
+    assert result.returncode == 2 and "走査の対象が無い" in output_of(result)
+
+
+def test_ndf_next_skill_docs_get_the_name_words(tmp_path: Path) -> None:
+    """ndf-next の Skill の本文には名前の語と機能の対応表の語を掛ける（受け入れ条件 16〜18）。"""
+    skills = build_next_tree(tmp_path)
+    (skills / LISTED_SKILL / "SKILL.md").write_text(CLEAN_BODY + "\n（ai-plugins）と[機能の対応表](x)\n", encoding="utf-8")
+    out = output_of(run_check(skills, [], tmp_path))
+    assert "'ai-plugins'" in out and "'機能の対応表'" in out
+
+
+# --- 現状固定テスト（I-020: _split_defaults。scan_contracts と remote_defaults から通す） --------------------------
+
+
+def _write_defaults_tree(tmp_path: Path) -> Path:
+    files = {
+        "a.json": '{\n"default": "origin", "enum": ["origin"]\n"x": 1\n"default"  :  "use origin/main", "y": "remotes/origin"\n}\n',
+        "b.json": '{"default": "origin"}\n',
+        "c.json": '{"k": 1}\n',
+    }
+    for name, text in files.items():
+        (tmp_path / name).write_text(text, encoding="utf-8")
+    return tmp_path
+
+
+def test_split_defaults_current_behavior_separates_default_values(tmp_path: Path) -> None:
+    """同じ行でも `"default"` の値の中の当たりは既定の側へ、外の当たりはヒットへ分かれる。"""
+    mod = load_checker()
+    root = _write_defaults_tree(tmp_path)
+    rels = ["a.json", "b.json", "c.json"]
+    hits = mod.scan_contracts(root, rels, mod.NEXT_CODE_MATCHERS)
+    assert [(h.rel, h.lineno, h.word_id, h.word) for h in hits] == [
+        ("a.json", 4, "origin-main", "origin/main"),
+        ("a.json", 2, "remote-origin", '"origin"'),
+        ("a.json", 4, "remote-origin", "remotes/origin"),
+    ]
+    assert mod.remote_defaults(root, rels) == [("a.json", 2), ("a.json", 4), ("b.json", 1)]
+
+
+def test_split_defaults_current_behavior_skipped_without_remote_word(tmp_path: Path) -> None:
+    """語 `remote-origin` を渡さなければ既定の分け方を通らない。"""
+    mod = load_checker()
+    root = _write_defaults_tree(tmp_path)
+    others = [(w, r) for w, r in mod.NEXT_CODE_MATCHERS if w != mod.REMOTE_WORD]
+    hits = mod.scan_contracts(root, ["a.json"], others)
+    assert [(h.rel, h.lineno, h.word_id, h.word) for h in hits] == [("a.json", 4, "origin-main", "origin/main")]
+
+
+def test_split_defaults_current_behavior_unreadable_file_raises(tmp_path: Path) -> None:
+    mod = load_checker()
+    with pytest.raises(mod.ScanError, match="を読めない"):
+        mod.remote_defaults(tmp_path, ["missing.json"])
+
+
+def test_split_defaults_current_behavior_two_defaults_on_one_line(tmp_path: Path) -> None:
+    """同じ行の 2 つの `"default"` の値の当たりは 1 件にまとめず 2 件、外の当たりは行の順にヒットへ残る。"""
+    mod = load_checker()
+    (tmp_path / "d.json").write_text('{"default": "origin", "a": "origin", "default": "origin"}\n', encoding="utf-8")
+    hits = mod.scan_contracts(tmp_path, ["d.json"], mod.NEXT_CODE_MATCHERS)
+    assert [(h.rel, h.lineno, h.word_id, h.word) for h in hits] == [("d.json", 1, "remote-origin", '"origin"')]
+    assert mod.remote_defaults(tmp_path, ["d.json"]) == [("d.json", 1), ("d.json", 1)]

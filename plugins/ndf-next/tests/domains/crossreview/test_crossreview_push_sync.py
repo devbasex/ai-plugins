@@ -13,6 +13,8 @@ from ndf.domains.crossreview import push
 from ._repos import BRANCH, Repos, commit, run_cli, sh
 
 SHA = "a" * 40
+# 設定（`.ndf/worktree.json`）を持たないメインディレクトリ
+_NO_NDF_SETTINGS = "/nonexistent/ndf-main"
 
 
 def _origin_head(repos: Repos) -> str:
@@ -62,7 +64,10 @@ def test_issue_2440_conflicting_push_is_undone_and_reported_as_diverged(
 
 
 class _Script:
-    """git の起動を順の回答で返す差し替え。"""
+    """git の起動を順の回答で返す差し替え。
+
+    リモート名を読む `git worktree list` は順に数えず、設定の無いメインディレクトリで回答する（既定のリモート名になる）。
+    """
 
     def __init__(self, answers: list[tuple[str, git.Completed]]):
         self.answers = answers
@@ -70,6 +75,8 @@ class _Script:
 
     def __call__(self, args: list[str], cwd):
         self.calls.append(args)
+        if args[:2] == ["worktree", "list"]:
+            return _ok(f"worktree {_NO_NDF_SETTINGS}\0HEAD {SHA}\0branch refs/heads/main\0\0")
         want, done = self.answers.pop(0)
         assert args[0] == want, (args, want)
         return done
@@ -96,6 +103,7 @@ def test_issue_2440_push_rejected_again_after_taking_in_stops_with_rejected_twic
     got = push.push_fix(git.Git(Path("."), script), BRANCH, None)
     assert (got.ok, got.rebased, got.reason) == (False, True, push.REJECTED_TWICE)
     assert script.answers == []
+    assert sum(c[:2] == ["worktree", "list"] for c in script.calls) == 1  # リモート名はエントリポイントで 1 回だけ求める
     assert not any("--force" in c or "-f" in c for c in script.calls)
 
 

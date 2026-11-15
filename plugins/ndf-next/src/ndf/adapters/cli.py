@@ -31,7 +31,6 @@ from ndf.adapters.agents import (
 )
 from ndf.adapters.claude import (
     CLAUDE,
-    DISABLED_PLUGINS,
     FULL_TOOLS,
     ClaudeCall,
     ClaudeReply,
@@ -72,7 +71,6 @@ TOOL = cli.tool_of(__name__)
 __all__ = [
     "BACKUP_SUFFIX",
     "CLAUDE",
-    "DISABLED_PLUGINS",
     "EARLY_WARN",
     "ENV_RUN_ID",
     "ENV_RUN_LOG",
@@ -126,5 +124,8 @@ def main(argv: list[str]) -> int:
     """`ndf launch-args`: full の起動で `claude` に足す引数（旧い NDF を外し、このプラグインを読む）を items で出す。"""
     if argv:
         return result.emit(result.stopped(TOOL, "invalid", f"引数を受けない: {' '.join(argv)}"))
-    args = plugin_args(identity.load().root)
-    return result.emit(result.result(TOOL, result.OK, "full の起動の claude に足す引数", items=[{"args": args}]))
+    got = plugin_args(identity.load().root)
+    items: list[dict] = [{"args": got.args}]
+    if got.notice is not None:
+        items.append({"kind": "notice", "reason": got.notice})
+    return result.emit(result.result(TOOL, result.OK, "full の起動の claude に足す引数", items=items))
