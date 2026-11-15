@@ -261,16 +261,28 @@ def call_errors(words: list[str], commands: dict[str, CommandSpec]) -> list[str]
         if _is_placeholder(word):
             continue
         if word.startswith("-"):
-            if word.split("=", 1)[0] not in allowed:
-                errs.append(f"引数 {word.split('=', 1)[0]} が無い")
+            errs += _flag_error(word, allowed)
             continue
-        if tree.subcommands:
-            if word not in tree.subcommands:
-                errs.append(f"下位の命令 {word} が無い")
-                break
-            tree = tree.subcommands[word]
-            allowed |= _names(tree)
+        sub = _descend(tree, word)
+        if sub is None:
+            errs.append(f"下位の命令 {word} が無い")
+            break
+        tree = sub
+        allowed |= _names(tree)
     return errs
+
+
+def _flag_error(word: str, allowed: set[str]) -> list[str]:
+    """オプションの語（`--名前` か `--名前=値`）の名前が、ここまでの命令の引数に無ければその指摘。"""
+    flag = word.split("=", 1)[0]
+    return [] if flag in allowed else [f"引数 {flag} が無い"]
+
+
+def _descend(tree: ArgTree, word: str) -> ArgTree | None:
+    """位置の語 `word` で下位の命令を辿る。下位の命令が無い木はそのまま（語は位置引数）、下位の命令に無い語は `None`。"""
+    if not tree.subcommands:
+        return tree
+    return tree.subcommands[word] if word in tree.subcommands else None
 
 
 def _row_errors(model: SpecModel) -> list[str]:
