@@ -649,7 +649,9 @@ def test_reject_after_a_confirmed_gate_settles_rejected_and_closes_the_pr(env, t
     pl.send_answer(main, "p1", rid, "answered", choice=["差し戻す"])
     ans, _ = pl.read_answer(main, "p1", req, timeout=30)
     assert ans["result"] == "rejected" and rid in ans["reason"]
-    assert [a[:3] for a in closed] == [["pr", "close", "3593"]] and rid in closed[0][-1]
+    # 提示や範囲の読み取り（GraphQL）も同じ gh を通るため、PR を閉じる呼び出しだけを数える
+    closes = [a for a in closed if a[:2] == ["pr", "close"]]
+    assert [a[:3] for a in closes] == [["pr", "close", "3593"]] and rid in closes[0][-1]
 
 
 def test_close_release_pr_failure_is_returned_not_raised(monkeypatch):
