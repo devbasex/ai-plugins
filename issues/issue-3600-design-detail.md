@@ -90,7 +90,7 @@ plugins/ndf-next/
         └── test_run.py
 ```
 
-**依存の向き。** 土台の読み取りは層 `ndf.progress` に置く。並列の計画（`ndf.progress.plan`）が土台を読み、層の規則（`checks/rules.json` の `structure.layers`）は `ndf.progress` から `ndf.domains` を読むことを許さないためである。`ndf.progress.epic` は `ndf.contracts`・`ndf.adapters`・`ndf.core.route` だけを読み、`ndf.progress.plan`・`ndf.progress.lane` を読まない。`ndf.progress.plan` と `ndf.progress.lane` が `ndf.progress.epic` を読む。`ndf.progress.lane` は `ndf.progress.plan` を読まない（今と同じ）。輪は無い。判断のモジュール（`foundation_decide`・`run_decide`）は `ndf.adapters` と入出力を読まない（`structure.decide_forbidden_imports`）。
+**依存の向き。** 土台の読み取りは層 `ndf.progress` に置く。並列の計画（`ndf.progress.plan`）が土台を読むためである。層の規則（`checks/rules.json` の `structure.layers`）は、`ndf.progress` から `ndf.domains` を読むことを許さない。`ndf.progress.epic` は `ndf.contracts`・`ndf.adapters`・`ndf.core.route` だけを読む。`ndf.progress.plan`・`ndf.progress.lane` は読まない。`ndf.progress.plan` と `ndf.progress.lane` が `ndf.progress.epic` を読む。`ndf.progress.lane` は `ndf.progress.plan` を読まない（今と同じ）。輪は無い。判断のモジュール（`foundation_decide`・`run_decide`）は `ndf.adapters` と入出力を読まない（`structure.decide_forbidden_imports`）。
 
 | パス | 種類 | 役割 1 文 | 依存する先 |
 | --- | --- | --- | --- |
@@ -318,7 +318,7 @@ plugins/ndf-next/
 `--scale-reason` を省いたときの理由は `理由の記載無し` とする。`--scale` 無しで `--scale-reason` だけを渡すと誤りにする。
 
 - 繰り返しの終わる条件: 耐久ワークフローのループは今と同じく計画の終わりで止まる。エピックの手は終わりの条件を変えず、完了の判定（`rules.plan_complete`）に残りが無いことを足すだけである。`verify.done_verdicts` と `verify.verify_rows` は渡した行の数だけ回る
-- 計算量の注意: `judge=False` の手は毎周 `git rev-parse` を 1 回打つ。識別子が変わったときだけ 2 つの版を読む。`verify.done_verdicts` は課題の状態を `GitHub.nodes` で 1 回にまとめて読み（`github.graphql-batch` の件数ごと）、ループの中で GitHub を読まない（兆候の規則 `NDF201`）。`exists:` の照合は glob に当たるファイルを 1 回ずつだけ読む
+- 計算量の注意: `judge=False` の手は毎周 `git rev-parse` を 1 回打つ。識別子が変わったときだけ 2 つの版を読む。`verify.done_verdicts` は課題の状態を `GitHub.nodes` で 1 回にまとめて読む（`github.graphql-batch` の件数ごと）。ループの中で GitHub を読まない（兆候の規則 `NDF201`）。`exists:` の照合は glob に当たるファイルを 1 回ずつだけ読む
 
 ## 内部のデータと定数
 
@@ -369,7 +369,7 @@ GitHub の読み取り（`states`）と DB の書き込みを同じトランザ�
 | `plan_cli._row_start`・`_row_resumed`・`progress_run._cmd_next`・`_cmd_wait` | `notices`（節・触る場所・前と後の版・事象の番号） | 結果 JSON | 土台の本文 |
 | `progress_run.issue_section` | `規模:` の行 | 課題の本文の `## 進行` | 無し |
 
-**確かめ方のコマンドの出力は秘密を含みうる。** `verify.done_verdicts` と `verify.verify_one` は、`detail` に載せる文を最後の 1 行の 200 字で切り、既存の伏せ字の処理 `ndf.adapters.run_log.redact`（秘密の環境変数の値とトークンの形を伏せる）を通してから返す。
+**確かめ方のコマンドの出力は秘密を含みうる。** `verify.done_verdicts` と `verify.verify_one` は、`detail` に載せる文を最後の 1 行の 200 字で切る。切った文は、既存の伏せ字の処理 `ndf.adapters.run_log.redact`（秘密の環境変数の値とトークンの形を伏せる）を通してから返す。
 
 ## 既存の部品の再利用
 
