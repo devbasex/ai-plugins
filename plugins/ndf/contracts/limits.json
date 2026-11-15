@@ -87,6 +87,7 @@
     "repo.production-fetch": {"summary": "本番チャネルを origin から取り込み直す上限。応答の無い origin でリリースのプランの組み立てを止め続けないため", "seconds": 60},
     "release-steps.head-moved": {"summary": "先端が動いたときに比べ直して入れ直す回数（最初の 1 回を含む）", "attempts": 4},
     "release-steps.trail-status": {"summary": "承認の証跡を置いた後に、証跡のチェック（ndf/release-approval）が success になるまで待つ上限と間隔", "seconds": 600, "interval": 10},
+    "release-steps.port-rerun": {"summary": "使い回す PR の本文へ ndf-next の port 検査の印を足した後、編集の前に落ちていたチェックが打ち直しで落ちた状態から外れるまで待つ上限と間隔", "seconds": 120, "interval": 5},
     "release-steps.ci-wait": {"summary": "CD のある場合の本番の PR で、証跡のチェックを除くチェックを読み直す間隔。上限は --ci-wait で渡す", "seconds": 3600, "interval": 15},
     "release-steps.dev-workflow": {"summary": "開発版の workflow の実行の終わりを待つ上限と間隔（CI の待ち 3600 秒に起動の遅れを足す）", "seconds": 3900, "interval": 15},
     "release-verification-steps.env-i": {"summary": "リリース後テストの素の環境のコマンドの上限", "seconds": 600},
