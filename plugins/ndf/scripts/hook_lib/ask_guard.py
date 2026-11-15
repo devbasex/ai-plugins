@@ -10,8 +10,9 @@
 判定のたびに `lib/ask_ledger.py` へ 1 行を追記する。追記の失敗は飲む。どの失敗も None（通す）を返す（I8）。
 
 並列の計画（#2436 の 6d）: 判定が通す問いを、動いている計画のレーンか一時レーン（作業ディレクトリの役割のファイルが
-`helper`）が出したときは、`parallel.py request-ask` でオーガナイザーへ送り、`deny` で止めて保留の手順を返す。
-レーンでない・送れない・上限を越えたときは今どおり通す。
+`helper`）が出したときは、`parallel.py request-ask` でオーガナイザーへ送り、`deny` で止めて結果の種類ごとの理由を返す（#3603）:
+設計承認の依頼（`gate1`）は `design-answer` の保留の手順、同じ問いの前の答え（`reused`）はその答え、ほかは今の保留の手順。
+レーンでない・送れないときは今どおり通す。上限の秒を過ぎたときは、台帳に判定の記録の id の行があれば保留の側へ倒し、無ければ通す。
 """
 
 from __future__ import annotations
@@ -123,8 +124,61 @@ def hold_text(rid: str, plan: str) -> str:
     )
 
 
+def design_hold_text(rid: str, plan: str, state: str) -> str:
+    """設計承認の依頼の保留の手順（正本: asking.md の「並列の計画のレーン」。#3603 の決定 4）。"""
+    import parallel_files
+
+    stop = parallel_files.stop_self() or f'python3 {parallel_files.RELAY} stop "$NDF_RELAY_NAME"'
+    answer = f'python3 "{PARALLEL_PY}" design-answer {plan} {rid} --state {state or "<スプリント状態>"}'
+    return "\n".join(
+        [
+            f"ndf: 並列の計画 {plan} のレーンの設計承認を、設計承認の依頼としてオーガナイザーへ送った（依頼 {rid}）。この作業を保留する。",
+            f"引継ぎ文書の「次にやること」に {answer} と依頼 {rid} を書き、ndf-next を出さずに、"
+            f"最後に {stop} を打って自分のラッパーを止めてセッションを終える（オーガナイザーが答えた後に起こす）。",
+            "起き直したらその 1 行を打ち、出力の metrics.next を続ける（承認ならマージ済みの設計 PR のまま続きのステージへ進む）。",
+            f"正本: {ASKING_MD}",
+        ]
+    )
+
+
+def reused_text(rid: str, answer: dict) -> str:
+    """同じ問いの前の依頼の答えを返す文（#3603 の決定 8）。"""
+    got = "、".join(answer.get("choice") or []) or str(answer.get("result") or "")
+    return "\n".join(
+        [
+            f"ndf: この問いは同じ一時レーンの同じ問い（区分と問いの対象が同じ）で、依頼 {rid} に答えがある。問い直さない。",
+            f"答え: {got}",
+            "この答えで操作を進める。",
+            f"正本: {ASKING_MD}",
+        ]
+    )
+
+
+def held_text(out: dict, plan: str) -> str:
+    """`request-ask` の metrics（か台帳から戻した結果）の種類ごとの拒否の理由。"""
+    if out.get("kind") == "gate1":
+        return design_hold_text(str(out["id"]), plan, str(out.get("sprint_state") or ""))
+    if out.get("kind") == "reused" and out.get("answer"):
+        return reused_text(str(out["id"]), out["answer"])
+    return hold_text(str(out["id"]), plan)
+
+
+def held_after_timeout(home: Path, plan: str, ledger_id: str) -> dict | None:
+    """上限の秒を過ぎた後に台帳を 1 回読み、判定の記録の id の行があればその種類の deny を返す（I10）。無い・読めなければ None。"""
+    import parallel_ledger as plg
+    import parallel_question as pq
+    from hook_lib.token_guard import deny
+
+    try:
+        got = pq.outcome_of(plg.rows_since_opened(plg.read_ledger_rows(home, plan).rows), ledger_id)
+    except OSError:
+        return None
+    return deny(held_text(got, plan)) if got and got.get("id") else None
+
+
 def forward_to_organizer(ev, row_id: str) -> dict | None:
-    """レーンか一時レーンの通す問いをオーガナイザーへ送り、送れたら deny を返す。当たらない・送れなければ None（通す）。"""
+    """レーンか一時レーンの通す問いをオーガナイザーへ送り、送れたら結果の種類ごとの deny を返す。当たらない・送れなければ None（通す）。
+    子プロセスが上限の秒を過ぎたら、台帳に判定の記録の id の行があれば保留の側へ倒す（台帳と hook の出力を食い違わせない。I10）。"""
     name = os.environ.get("NDF_RELAY_NAME")
     if not name:
         return None
@@ -134,23 +188,26 @@ def forward_to_organizer(ev, row_id: str) -> dict | None:
     import time
 
     main = decl.main_dir(ev.cwd) or Path(ev.cwd)
-    payload = {"tool_input": ev.tool_input, "cwd": ev.cwd, "ledger_id": row_id}
     deadline = time.monotonic() + FORWARD_TIMEOUT
+    payload = {"tool_input": ev.tool_input, "cwd": ev.cwd, "ledger_id": row_id, "deadline_at": time.time() + FORWARD_TIMEOUT}
     # 同じレーン名を持つ終わった計画を飛ばす: 送り手でない計画（終了コード 4）なら次の候補へ（全体で FORWARD_TIMEOUT 秒まで）
     # 別のリポジトリのレーンの計画も、計画の所在の一覧から探す（#2733）
-    for _home, plan in parallel_files.lane_homes_in(main, name, os.environ.get("NDF_RELAY_DIR")):
+    for home, plan in parallel_files.lane_homes_in(main, name, os.environ.get("NDF_RELAY_DIR")):
         left = deadline - time.monotonic()
         if left <= 0:
             return None
-        code, got = run_request_ask(main, plan, name, payload, timeout=left)
+        try:
+            code, got = run_request_ask(main, plan, name, payload, timeout=left)
+        except subprocess.TimeoutExpired:
+            return held_after_timeout(Path(home), plan, row_id)
         if code == 4:
             continue
-        rid = (got.get("metrics") or {}).get("id")
-        if code != 0 or not rid:
+        out = got.get("metrics") or {}
+        if code != 0 or not out.get("id"):
             return None
         from hook_lib.token_guard import deny
 
-        return deny(hold_text(rid, plan))
+        return deny(held_text({"kind": out.get("kind") or "ask", **out}, plan))
     return None
 
 

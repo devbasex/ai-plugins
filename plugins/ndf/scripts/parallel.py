@@ -18,7 +18,8 @@
 | `request <計画名> --lane <名> --state <パス> [--prs ...] [--issues ...] [--verify-plan <パス>]` | リリースの依頼を送る（10）か、すでに `main` にあれば送らない（0。版の要るまとめのプランがあれば待ちを知らせる） |
 | `end <計画名> --lane <名> [--request <依頼の記録>]` / `verified <計画名> <依頼> [--done <D>]` | 終わりの記録を書く（依頼の答えが差し戻しか失敗なら書かずに 10）・版の要るまとめの流すものを返すか結果を送る（`lib/parallel_end.py`。#3058） |
 | `await <計画名> --from <パス> [--timeout 秒]` | 依頼の答えを読む（released 0・rejected 10・failed 1・まだ無い 3） |
-| `request-ask <計画名> --lane <名>` | 標準入力の問い（`tool_input`・`cwd`・`ledger_id`）をオーガナイザーへ送る（送り手でなければ 4） |
+| `request-ask <計画名> --lane <名>` | 標準入力の問い（`tool_input`・`cwd`・`ledger_id`・`deadline_at`）を、設計承認の依頼（1 スプリントのレーンの承認の行つきの `ndf-gate:1`）・同じ問いの前の依頼（一時レーン）・`ask` の依頼の最初に当たったものとして送る（`metrics.kind`。送り手でなければ 4、上限の秒を過ぎたら書かずに 2） |
+| `design-answer <計画名> <依頼> --state <スプリント状態>` | 1 スプリントのレーンが設計承認の依頼の答えを読み、承認ゲートの記録を書いて続きを返す（承認 0・直しと差し戻し 10・まだ無い 3。`lib/parallel_design_gate.py`。#3603） |
 | `request-gate2 <計画名> <連番> <提示> --report <承認資料>` | 一時レーンがリリース承認ゲート の依頼を送る |
 | `answer <計画名> <依頼> (--approved [--by mvv] \\| --revise --note <パス> \\| --rejected \\| --choice <答え>...)` | 問いの答えを送る（止まった持ち主の再起動は耐久ワークフローが打つ。`metrics.next` は一覧の失敗の問いで選んだ 1 行だけ。今の問いの一覧に無い依頼なら `metrics.warning`）。設計の承認では設計 PR をマージしてから送り、結果を `metrics.merge` に、答えの後に残る依頼を `metrics.after` に載せる |
 | `helper <計画名> <連番> <提示>` | 一時レーンが流すもの（`phase`・`pipeline`・`settle`・`gate2`）を返す |
@@ -362,24 +363,86 @@ def cmd_await(a) -> None:
 # ---- 問いと一時レーン（#2436 の 6c・6d・6f） ----
 
 
+def _expired(deadline_at, now=None) -> bool:
+    """台帳へ書く直前に、hook の上限の秒が尽きたか（`deadline_at` は UNIX 時刻の秒。無いか数でなければ偽。#3603 の I10）。"""
+    import time
+
+    if isinstance(deadline_at, bool) or not isinstance(deadline_at, (int, float)):
+        return False
+    return (now or time.time)() >= deadline_at
+
+
 def cmd_request_ask(a) -> None:
+    """問いを 3 つの分岐（設計承認の依頼・同じ問い・`ask` の依頼）の最初に当たったものへ送る（#3603 の「送り分けの順序」）。
+    読む処理を済ませてから、最後に台帳へ高々 1 行だけ書く。`deadline_at` を過ぎていれば書かずに 2（hook は問いを通す）。"""
+    import parallel_design_gate as pdg
+    import parallel_question as pq
+
     main = main_of()
     try:
         got = json.loads(sys.stdin.read() or "{}")
     except ValueError as exc:
         reply("stopped", f"標準入力の問いを読めない: {exc}", code=2)
-    who = pl.sender_of(main, a.lane, os.environ.get("NDF_RELAY_DIR"))
+    relay_dir = os.environ.get("NDF_RELAY_DIR")
+    who = pl.sender_of(main, a.lane, relay_dir)
     if who is None:
         reply("stopped", f"{a.lane} は動いている計画のレーンでも一時レーンでもない（問いは通す）", code=4)
     if who[0] != a.name:
         reply("stopped", f"{a.lane} は計画 {who[0]} の送り手で、{a.name} の送り手でない", code=4)
     main = who.home  # 計画の置き場（別のリポジトリのレーンでは自分のリポジトリと違う。#2733）
     q = accepting(main, a.name)
-    rid = sent(
-        pl.request_ask, main, a.name, a.lane, got.get("tool_input") or {}, got.get("cwd") or os.getcwd(), str(got.get("ledger_id") or "")
-    )
+    tool_input, cwd = got.get("tool_input") or {}, got.get("cwd") or os.getcwd()
+    ledger_id, deadline_at = str(got.get("ledger_id") or ""), got.get("deadline_at")
+    source = str((tool_input.get("metadata") or {}).get("source") or "")
+    try:
+        rows = plg.rows_since_opened(plg.read_ledger_rows(main, a.name).rows)
+    except OSError as exc:
+        reply("stopped", f"計画の台帳を読めない: {exc}", code=2)
+    kind = pl.sender_kind(main, a.name, a.lane)
+    late = lambda: reply("stopped", "hook の上限の秒が尽きた（台帳へ書かない。問いは通す）", code=2)  # noqa: E731
+    gate = None
+    if kind == "sprint" and source == pdg.GATE1_SOURCE:
+        try:
+            gate = pdg.design_gate(main, a.name, a.lane, tool_input, rows)
+        except Exception:  # noqa: BLE001 — 組めなければ今どおり ask で送る（決定 3）
+            gate = None
+    if gate is not None:  # 分岐 1: 1 スプリントのレーンの設計承認の依頼（I1）
+        rid = f"{a.lane}-g{gate.pr}-{gate.stamp[:12]}{gate.suffix}"
+        state = {"sprint_state": gate.state}
+        if any(r.get("kind") == "gate1" and r.get("id") == rid for r in rows):  # 同じ先頭の打ち直し（I2）
+            reply("ok", f"設計承認の依頼 {rid} は送ってある", kind="gate1", id=rid, already=True, **state, **q)
+        if _expired(deadline_at):
+            late()
+        sent(
+            pl.request_gate1, main, a.name, a.lane, gate.issue, gate.pr, gate.report, gate.state, gate.stamp, suffix=gate.suffix,
+            verdict=gate.verdict, reasons=gate.reasons, boundary=gate.boundary, ledger_id=ledger_id,
+            **({"returned": True} if gate.returned else {}),
+        )  # fmt: skip
+        reply("ok", f"設計承認の依頼 {rid} をオーガナイザーへ送った{QUEUED if q else ''}", kind="gate1", id=rid, **state, **q)
+    target = pl.ask_target(tool_input, cwd).target
+    prior = pq.prior_of(rows, a.lane, source, target) if kind == "helper" and target else None  # 同じ問いは一時レーンだけ（I5）
+    if prior is not None:  # 分岐 2: 一時レーンの同じ問い（I5〜I8）
+        if _expired(deadline_at):
+            late()
+        if pl.record_reused(main, a.name, a.lane, prior, source, target, ledger_id):
+            how = "前の答えを使う" if prior.answer is not None else "答え待ちの依頼を引き継ぐ"
+            extra = {"answer": prior.answer} if prior.answer is not None else {}
+            reply("ok", f"同じ問いの依頼 {prior.id} がある（{how}）", kind="reused", id=prior.id, target=target, **extra, **q)
+    if _expired(deadline_at):  # 分岐 3: ask の依頼
+        late()
+    rid = sent(pl.request_ask, main, a.name, a.lane, tool_input, cwd, ledger_id, target=target or None)
     again = _request_resent_fields(rid)
-    reply("ok", f"問いの依頼 {rid} を{_sent_verb(again, 'オーガナイザーへ送った')}{QUEUED if q else ''}", id=str(rid), **again, **q)
+    msg = f"問いの依頼 {rid} を{_sent_verb(again, 'オーガナイザーへ送った')}{QUEUED if q else ''}"
+    reply("ok", msg, kind="ask", id=str(rid), target=target or None, **again, **q)
+
+
+def cmd_design_answer(a) -> None:
+    """設計承認の依頼の答えを読み、スプリント状態へ承認ゲートの記録を書いて続きを返す（#3603 の決定 4）。"""
+    import parallel_design_gate as pdg
+
+    status, summary, code, metrics = pdg.answer_design(main_of(), a.name, a.id, Path(a.state))
+    nxt = metrics.get("next") if status == "gate" else None
+    reply(status, summary, code=code or None, next_step=nxt, **metrics)
 
 
 def _send_gate2(main: Path, a) -> plg.Sent:
