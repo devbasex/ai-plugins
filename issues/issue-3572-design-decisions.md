@@ -1,6 +1,6 @@
 # #3572 の決定の記録: リポジトリごとのブランチ戦略で承認した head だけを本番へ入れ、同時の承認は merge queue で確かめる
 
-設計文書 [issue-3572-design.md](issue-3572-design.md) の決定の記録である。不変条件（I1〜I18）・外部の調査（STD1〜STD11・PRD1〜PRD3・LIB1〜LIB4）・
+設計文書 [issue-3572-design.md](issue-3572-design.md) の決定の記録（決定 1〜26）である。不変条件（I1〜I18）・外部の調査（STD1〜STD11・PRD1〜PRD3・LIB1〜LIB4）・
 用語は、設計文書の同じ名前の章の意味で使う。確かめ 1〜7 は [issue-3572-design-evidence.md](issue-3572-design-evidence.md) にある。
 
 置き換えた決定は消さずに残し、見出しの直後に状態の行（`状態: superseded（決定 N）` か `状態: 一部 superseded（…は決定 N）`）を置く。
@@ -28,7 +28,7 @@
 （`push`・`fix-push`・`ci-fix`・`fix-base`・`base-sync`）・次のバージョンの用意のステップ・最初が `ndf release-steps merge` でないことを返す。
 `release: true` でないテンプレートについては、`merge` の部品（`check.json` では `merge-gate`）の直前に `release-guard` が無いことを返す。
 
-`github-flow` の行ではスプリントの PR が本番の PR を兼ね、今の行ではリリースブランチの PR が本番の PR である。どちらも宛先が本番ブランチの PR で、
+`trunk` の行ではスプリントの PR が本番の PR を兼ね、今の行ではリリースブランチの PR が本番の PR である。どちらも宛先が本番ブランチの PR で、
 `release-guard` は宛先で本番の PR を見分ける。承認の前の CI の直しはこれらのテンプレートで行ってよく（承認の対象はその後の head である）、
 マージだけをデプロイの工程へ渡せば足りる。本番の PR なら終了コード 3 を原因 `production_pr` にして `end` へ進め、結果に「デプロイの工程で流す」を出す。
 
@@ -74,13 +74,13 @@
 
 根拠: Value 1 / Value 3（MVV 版 7）
 
-### 決定 5: GitHub flow を選べるようにするため、取り込み方の表に行 `github-flow` を足す
+### 決定 5: GitHub flow を選べるようにするため、取り込み方の表に行 `trunk` を足す
 
-状態: 一部 superseded（行を既定にすること・ndf-next のリリースで `github-flow` だけを扱うこと・11.0.0 の入れ替えで `promote-whole`・`promote-selected` を表から外すことは決定 16）
+状態: 一部 superseded（行を既定にすること・ndf-next のリリースで `trunk` だけを扱うこと・11.0.0 の入れ替えで `merge_base_branch`・`release_branch` を表から外すことは決定 16）
 
 | 列 | 値 | 意味 |
 | --- | --- | --- |
-| `promotion` | `direct` | スプリントの PR を本番ブランチへ直接マージする |
+| `release_strategy` | `trunk` | スプリントの PR を本番ブランチへ直接マージする |
 | `start` | `["production"]` | スプリントブランチは本番ブランチから切る |
 | `doc_prs` | `["sprint"]` | 設計 PR と確定仕様化の PR はスプリントブランチへ（文書だけで本番へマージしてリリースを起こさない） |
 | `integrate` | `["release"]` | スプリントブランチは、スプリントの PR のマージ（リリース）で本番ブランチへ入る |
@@ -91,33 +91,33 @@
 
 この行を選ぶ設定ファイル（`.ndf/worktree.json`）は、`base_branch` と `production_branch` を同じ本番ブランチにする。
 
-（superseded の部分）行 `github-flow` を既定にし、`promote-whole`・`promote-selected` は ndf-next のリリースで扱わず、11.0.0 の入れ替えで表から外す。
-それまで ndf-next のリリースのサブコマンドは、設定ファイルの行が `github-flow` でなければ原因 `precondition` で止まる。
+（superseded の部分）行 `trunk` を既定にし、`merge_base_branch`・`release_branch` は ndf-next のリリースで扱わず、11.0.0 の入れ替えで表から外す。
+それまで ndf-next のリリースのサブコマンドは、設定ファイルの行が `trunk` でなければ原因 `precondition` で止まる。
 
 | 比べた候補 | 採否と理由 |
 | --- | --- |
-| 設定ファイルを変えず、`promote-whole` のまま `base_branch` を main にする | 採らない。`promote-whole` は文書の PR を `base`（= main）へ入れ、文書だけのマージでリリースが起きる。行の意味と運用が食い違う |
+| 設定ファイルを変えず、`merge_base_branch` のまま `base_branch` を main にする | 採らない。`merge_base_branch` は文書の PR を `base`（= main）へ入れ、文書だけのマージでリリースが起きる。行の意味と運用が食い違う |
 | 常設のリリースブランチの行（`standing`） | 採らない。GitHub flow を選ぶリポジトリは、スプリントの宛先を本番ブランチにする |
-| 行 `github-flow` を足す | 採る |
+| 行 `trunk` を足す | 採る |
 
 - 作り方: 標準に倣う
 - 比べた候補: STD3
 
 根拠: Value 4 / Value 11 / P1（MVV 版 7）
 
-### 決定 6: `github-flow` の行で main へのマージをそのままリリースにするため、スプリントの PR を本番の PR にし、承認資料をその PR の本文に書く
+### 決定 6: `trunk` の行で main へのマージをそのままリリースにするため、スプリントの PR を本番の PR にし、承認資料をその PR の本文に書く
 
 リリースのためのブランチを組まず、スプリントの PR（main 宛て）がリリース承認ゲートの対象になる。マージ＝リリース承認＝マージ承認である。
 `assemble` はブランチとバージョン上げのコミットを作らず、範囲（main の先端..PR の head）から承認資料を組んで PR の本文の承認資料の節へ書く。
 本文の書き換えは head を動かさないため、承認の対象を変えない。予定のバージョンは上げ幅のラベル（決定 7）から出し、確定のバージョンは CD が決める。
-この振る舞いは `github-flow` の行だけのもので、今の行の `assemble`（リリースブランチの組み立て・開発版チャネルの組み立て `--channel dev`）は今のまま残す（決定 16）。
+この振る舞いは `trunk` の行だけのもので、今の行の `assemble`（リリースブランチの組み立て・開発版チャネルの組み立て `--channel dev`）は今のまま残す（決定 16）。
 
 - 作り方: 標準に倣う
 - 比べた候補: STD3 / PRD1
 
 根拠: Value 1 / Value 5（MVV 版 7）
 
-### 決定 7: `github-flow` の行でバージョンをマージの時点に CD が上げるため、上げ幅をラベルで受け、バージョン上げの PR を head の一致の確認付きで main へ入れてからタグを作る
+### 決定 7: `trunk` の行でバージョンをマージの時点に CD が上げるため、上げ幅をラベルで受け、バージョン上げの PR を head の一致の確認付きで main へ入れてからタグを作る
 
 状態: 一部 superseded（手順 3 の書き換え先を `plugin.json` に決め打つ部分は決定 22、手順 4 のマージとキューの関係は決定 20）
 
@@ -130,7 +130,7 @@ push には迂回が効かず、承認 1 と必須のチェックが掛かる。
 4. `bump_decide` が差分を置き場・CHANGELOG・手順の書き先に限られると判定し、必須のチェックの後にマージする（キューとの関係は決定 20）
 5. バージョン上げの PR のマージの push で、`bump` は先端のバージョンにタグが無いと読んで上げず、`publish` がタグと GitHub Release を作る
 
-同じバージョンの PR が開いていれば使い直し（I8）、`concurrency` で workflow を 1 本ずつ流す。PR の検査（`pr-check`）は行が `github-flow` のときだけ働き、
+同じバージョンの PR が開いていれば使い直し（I8）、`concurrency` で workflow を 1 本ずつ流す。PR の検査（`pr-check`）は行が `trunk` のときだけ働き、
 今の行ではリリースブランチの PR がバージョンを上げるため 0 を返して何も見ない。
 
 | 比べた候補 | 採否と理由 |
@@ -162,7 +162,7 @@ push には迂回が効かず、承認 1 と必須のチェックが掛かる。
 状態: 一部 superseded（検証環境を検証用マーケットプレイスの 1 種類に決め打つ部分は決定 21。下の表は種類 `marketplace` の値として残る）
 
 #188（2026-08-31）で main と develop に分けたのは、マージした時点で常用する利用者へ届くのを避け、届ける前に試す場所を持つためである。
-`github-flow` の行ではマージがリリースになるため、試す場所をマージの前へ移す。Claude Code にはリリースチャネルの概念が無く、名前の違う 2 つの
+`trunk` の行ではマージがリリースになるため、試す場所をマージの前へ移す。Claude Code にはリリースチャネルの概念が無く、名前の違う 2 つの
 マーケットプレイスが違う ref を指す形を勧めている（STD4）。確かめ 1〜3 で、同じリポジトリを違う名前と ref で登録すると両方が残り、
 作り直しが更新で入り、正式版の登録が変わらないことを見た。
 
@@ -181,9 +181,9 @@ push には迂回が効かず、承認 1 と必須のチェックが掛かる。
 
 根拠: Value 5 / Value 13 / P1（MVV 版 7）
 
-### 決定 10: `github-flow` の行では同期の PR を作らない
+### 決定 10: `trunk` の行では同期の PR を作らない
 
-develop が無く、main へ入ったバージョン上げのコミットを戻す先が無いため、`github-flow` の行では `land._sync`（本番ブランチからベースブランチ宛ての PR）を
+develop が無く、main へ入ったバージョン上げのコミットを戻す先が無いため、`trunk` の行では `land._sync`（本番ブランチからベースブランチ宛ての PR）を
 呼ばず、結果に `sync_pr` を出さない。今の行（ベースブランチが本番ブランチと違う）では今のまま作る（要求の前提 9。決定 16）。
 
 - 作り方: 標準に倣う
@@ -241,7 +241,7 @@ GitHub Release の本文は今の `tagging` のとおりその節から作り、
 
 #3576 は常設のリリースブランチの取り込み方の行（`standing`）と、リリースブランチから develop への同期の PR を足す課題である。
 取り込み方の表の 2 行を残すこと（決定 16）は #3576 の扱いを変えない。今の 2 行はどちらも常設のリリースブランチを持たず、
-develop を持つリポジトリの同期の PR は今の行の `land._sync` が既に作る。`github-flow` の行と検証環境は #3572 の受け入れ条件 12・15・20 が持つため、
+develop を持つリポジトリの同期の PR は今の行の `land._sync` が既に作る。`trunk` の行と検証環境は #3572 の受け入れ条件 12・15・20 が持つため、
 #3576 を書き換えて残すと同じ条件を 2 つの課題に持つ。実装のステップで、理由を本文に書いて閉じる。
 
 - 作り方: 標準に倣う
@@ -249,12 +249,12 @@ develop を持つリポジトリの同期の PR は今の行の `land._sync` が
 
 根拠: Value 6 / Value 11（MVV 版 7）
 
-### 決定 14: #3119 の設計の決定 21 を、ai-plugins の設定ファイルを行 `github-flow` にする決定へ置き換える
+### 決定 14: #3119 の設計の決定 21 を、ai-plugins の設定ファイルを行 `trunk` にする決定へ置き換える
 
 状態: superseded（決定 25）
 
-#3119 の設計の決定 21（常設のリリースブランチ `standing`）を、行 `github-flow` を ai-plugins の設定ファイルにする決定へ書き換える。
-設定ファイルの書き換えは 11.0.0 の入れ替えと同じ時点で行い、取り込み方の表から `promote-whole`・`promote-selected` を外すのも同じ時点とする。
+#3119 の設計の決定 21（常設のリリースブランチ `standing`）を、行 `trunk` を ai-plugins の設定ファイルにする決定へ書き換える。
+設定ファイルの書き換えは 11.0.0 の入れ替えと同じ時点で行い、取り込み方の表から `merge_base_branch`・`release_branch` を外すのも同じ時点とする。
 
 根拠: Value 4 / P1（MVV 版 7）
 
@@ -267,16 +267,16 @@ develop を持つリポジトリの同期の PR は今の行の `land._sync` が
 
 根拠: Value 2 / Value 5（MVV 版 7）
 
-### 決定 16: ブランチ戦略をリポジトリごとに選べるようにするため、取り込み方の表の 3 行を残して既定を `promote-whole` のままにし、リリースのサブコマンドは行ごとに振る舞いを選ぶ
+### 決定 16: ブランチ戦略をリポジトリごとに選べるようにするため、取り込み方の表の 3 行を残して既定を `merge_base_branch` のままにし、リリースのサブコマンドは行ごとに振る舞いを選ぶ
 
 ブランチ戦略はリポジトリの決まりで、NDF の制約にしない（#3119・#3121 の「リポジトリの決まりは設定の値で受ける」）。develop と main を分ける Web・アプリの
-リポジトリは `promote-whole`・`promote-selected` を選び、GitHub flow を採るリポジトリは `github-flow` を選ぶ。ai-plugins が `github-flow` を選ぶのは
-ai-plugins の設定ファイルの値である。既定の行（`branch_flow` の無い設定ファイルが使う行）は `promote-whole` のままにする。既定を変えると、
+リポジトリは `merge_base_branch`・`release_branch` を選び、GitHub flow を採るリポジトリは `trunk` を選ぶ。ai-plugins が `trunk` を選ぶのは
+ai-plugins の設定ファイルの値である。既定の行（`branch_flow` の無い設定ファイルが使う行）は `merge_base_branch` のままにする。既定を変えると、
 設定ファイルの無いリポジトリのスプリントの起点と宛先が黙って変わるためである。
 
-リリースのサブコマンドは、行の列で振る舞いを選ぶ。`require_github_flow`（行が `github-flow` でなければ止まる）は外す。
+リリースのサブコマンドは、行の列で振る舞いを選ぶ。`require_github_flow`（行が `trunk` でなければ止まる）は外す。
 
-| 振る舞い | `github-flow` | `promote-whole`・`promote-selected` |
+| 振る舞い | `trunk` | `merge_base_branch`・`release_branch` |
 | --- | --- | --- |
 | 本番の PR | スプリントの PR | リリースブランチの PR（今のまま） |
 | `assemble` | 本文の承認資料の節だけ（決定 6） | リリースブランチの組み立て（今のまま） |
@@ -291,8 +291,8 @@ ai-plugins の設定ファイルの値である。既定の行（`branch_flow` �
 
 | 比べた候補 | 採否と理由 |
 | --- | --- |
-| 11.0.0 の入れ替えで 2 行を外し、ndf-next のリリースは `github-flow` だけを扱う（決定 5 の superseded の部分） | 採らない。develop を持つリポジトリが ndf-next のリリースを使えなくなり、受けられる運用を減らす |
-| `github-flow` を既定の行にする | 採らない。設定ファイルの無いリポジトリの振る舞いが黙って変わる |
+| 11.0.0 の入れ替えで 2 行を外し、ndf-next のリリースは `trunk` だけを扱う（決定 5 の superseded の部分） | 採らない。develop を持つリポジトリが ndf-next のリリースを使えなくなり、受けられる運用を減らす |
+| `trunk` を既定の行にする | 採らない。設定ファイルの無いリポジトリの振る舞いが黙って変わる |
 | 3 行を残し、行ごとに振る舞いを選ぶ | 採る |
 
 - 作り方: 標準に倣う
@@ -313,7 +313,7 @@ A+B の組み合わせが CI を通らずに本番へ出る（確かめ 6）。�
 
 置き場を `production_merge` にするのは、本番のマージの振る舞い（迂回の `admin`。#3506）を既に持つ設定で、同じ読み手（`land`）が読むためである。
 `.ndf/worktree.json` の `branch_flow` はスプリントの経路も読む設定で、マージの方式を置くとスプリントの経路が使わない値を持つ。
-`github-flow` の行では方式の記述を必須にし、無い・表に無い値・ruleset と食い違う、のどれでも `land` が原因 `precondition` で止まる（I15）。
+`trunk` の行では方式の記述を必須にし、無い・表に無い値・ruleset と食い違う、のどれでも `land` が原因 `precondition` で止まる（I15）。
 既定の方式へ倒さないのは、倒した先が ruleset の実際と食い違えば、組み合わせの確かめが黙って抜けるためである。
 ruleset の読み取りは `GET /repos/{o}/{r}/rules/branches/{branch}`（本番ブランチに効く規則の一覧）と GraphQL の `mergeQueue(branch)` で行い、書き換えない。
 
@@ -439,14 +439,14 @@ branch protection checks」）、キューを通すには結局迂回が要る�
 | `json` | `path`・`key`・`name`。1 つの JSON のファイルの 1 つの鍵（`package.json`・`composer.json`・`app.json` など） | 作る（受け入れ条件 21） |
 | ほか（`pubspec.yaml`・Gradle・タグだけ など） | — | #3615 が足す |
 
-`bump`・`pr-check`・`confirm`・`planned_for` は口だけを呼び、`plugins.py` を直接呼ばない（I18）。置き場が無ければ `github-flow` の `bump` は止まる。
+`bump`・`pr-check`・`confirm`・`planned_for` は口だけを呼び、`plugins.py` を直接呼ばない（I18）。置き場が無ければ `trunk` の `bump` は止まる。
 設定ファイルの手順（`steps` の `production`）は口の `write` の後に今のまま流れ、`package-lock.json` のような付随のファイルを書き換える。
 
 **#3615 との境。**
 
 | 決めること | 持ち主 |
 | --- | --- |
-| いつ・誰がバージョンを上げるか（`github-flow` の CD・バージョン上げの PR・キューとの関係） | #3572（決定 7・20） |
+| いつ・誰がバージョンを上げるか（`trunk` の CD・バージョン上げの PR・キューとの関係） | #3572（決定 7・20） |
 | バージョンの置き場のアダプタの口と、設定のキー `version_store` | #3572（この決定） |
 | アダプタ `plugin`・`json` | #3572 |
 | ほかのリリースの形のアダプタ（今の NDF のリリースの形 11 種との対応） | #3615 |
@@ -474,7 +474,7 @@ branch protection checks」）、キューを通すには結局迂回が要る�
 PR の本文や宛先を読むチェック（`pr-body-decisions-check`・`guard` など）は、キューの一時のコミットでは PR の時点の結論を引き継いで通す。
 キューに入れられるのは PR の時点で必須のチェックを満たした PR だけだからである（STD7）。
 
-ruleset の書き換えは、ai-plugins の設定ファイルを `github-flow`・`merge-queue` へ書き換える入れ替えの PR と同じ時点にする。キューを先に足すと、
+ruleset の書き換えは、ai-plugins の設定ファイルを `trunk`・`merge-queue` へ書き換える入れ替えの PR と同じ時点にする。キューを先に足すと、
 今の NDF のリリース（develop から main への PR を `production_merge.admin` で迂回してマージする）がキューの規則に当たり、11.0.0 まで今の運用を
 変えない前提（要求の前提 10）と食い違う。実行は承認ゲートを通らない外部の系の設定の変更で、実行の前に止めて人へ戻す（設計文書の「人へ残す判断」の C2 の行）。
 
@@ -499,14 +499,14 @@ ruleset の書き換えは、ai-plugins の設定ファイルを `github-flow`�
 
 #3587（宛先 develop、head d7d5fe0b1、66 ファイル・73 コミット。`git diff --stat origin/develop...origin/sprint/lrel-lock` と
 `git log --oneline origin/develop..origin/sprint/lrel-lock | wc -l`、2026-11-15）は、決定 1〜4・6〜8・10〜12 の実装と、取り込み方の表の 3 行
-（`github-flow`・`promote-whole`・`promote-selected`）を既に持ち、cross-review と cross-refactoring を通った。閉じて出し直すと、残す部分の
+（`trunk`・`merge_base_branch`・`release_branch`）を既に持ち、cross-review と cross-refactoring を通った。閉じて出し直すと、残す部分の
 レビューとリファクタリングをやり直す。ndf-next は 11.0.0 の入れ替えまで develop で開発するため、宛先 develop も変えない。
 次の変更を同じ PR へ足し、変わった差分を再びレビューへ通す。
 
 | # | 変更 | 決定 |
 | --- | --- | --- |
-| 1 | `branch-flows.json` の既定の行を `promote-whole` へ戻す。`declaration.require_github_flow` を外し、`assemble`・`bump`・`cli` の呼び出しを行ごとの振る舞いの選択に置き換える | 16 |
-| 2 | 今の行の経路（`assemble` のリリースブランチの組み立てと `--channel`・`--source`、`land._sync`、結果の `sync_pr`）を develop の形へ戻し、`github-flow` の行でだけ外す | 6・10・16 |
+| 1 | `branch-flows.json` の既定の行を `merge_base_branch` へ戻す。`declaration.require_github_flow` を外し、`assemble`・`bump`・`cli` の呼び出しを行ごとの振る舞いの選択に置き換える | 16 |
+| 2 | 今の行の経路（`assemble` のリリースブランチの組み立てと `--channel`・`--source`、`land._sync`、結果の `sync_pr`）を develop の形へ戻し、`trunk` の行でだけ外す | 6・10・16 |
 | 3 | `production_merge.method` のスキーマ・`merge_method.py`・アダプタの `branch_rules`・`land` の照らし合わせ（原因 `precondition`） | 17 |
 | 4 | アダプタの `enqueue`・`queue_entry`、`land` のキューへの投入と待ち、原因 `queue_removed`、次の手の表 | 3・18 |
 | 5 | `land` の先端の取り込みの確かめ、原因 `behind` | 19 |
@@ -515,6 +515,7 @@ ruleset の書き換えは、ai-plugins の設定ファイルを `github-flow`�
 | 8 | `delivery` の検証の行の `verify.kind`、`verify_ref` の `deploy` の配り方 | 21 |
 | 9 | 必須のチェックを出す workflow へ `merge_group` を足し、PR の本文を読むチェックの引き継ぎ | 23 |
 | 10 | テストを足す（設計文書の「テスト設計」の受け入れ条件 18・20〜26 の行）。今の行のテスト（リリースブランチの組み立て・同期の PR）を develop から戻す | 16〜23 |
+| 11 | #3613 の改名が develop へ入った後に develop を取り込み、#3587 が足した行・値・スキーマの名前を `release_strategy`・`trunk` へそろえる | 26 |
 
 | 比べた候補 | 採否と理由 |
 | --- | --- |
@@ -526,10 +527,10 @@ ruleset の書き換えは、ai-plugins の設定ファイルを `github-flow`�
 
 根拠: Value 2 / Value 5（MVV 版 7）
 
-### 決定 25: #3119 の設計の決定 21 を、ai-plugins の設定ファイルが `github-flow` の行を選び、表は 3 行を残す決定へ見直す
+### 決定 25: #3119 の設計の決定 21 を、ai-plugins の設定ファイルが `trunk` の行を選び、表は 3 行を残す決定へ見直す
 
-#3119 の決定 21 は、ai-plugins の設定ファイルを行 `github-flow`（`direct`）にすることを決めている。見直すのは 3 点で、
-(1) 取り込み方の表は `promote-whole`・`promote-selected` を残し、`github-flow` は選ぶ行の 1 つであること（決定 16）、
+#3119 の決定 21 は、ai-plugins の設定ファイルを行 `trunk` にすることを決めている。見直すのは 3 点で、
+(1) 取り込み方の表は `merge_base_branch`・`release_branch` を残し、`trunk` は選ぶ行の 1 つであること（決定 16）、
 (2) マージの前の検証は ai-plugins が選ぶ検証環境の種類 `marketplace` であること（決定 21）、
 (3) ai-plugins のマージの方式は `merge-queue` で、ruleset の変更は入れ替えの PR と同じ時点に人の承認の後に行うこと（決定 23）である。
 設定ファイルの書き換えを 11.0.0 の入れ替えと同じ時点にすることは変えない。差分は同じ設計 PR の `issues/issue-3119-design.md` の決定 21 にある。
@@ -538,3 +539,28 @@ ruleset の書き換えは、ai-plugins の設定ファイルを `github-flow`�
 - 比べた候補: STD3 / STD7
 
 根拠: Value 4 / P1（MVV 版 7）
+
+### 決定 26: ブランチ戦略のキーと値は #3613 の改名の後の名前で書き、改名と移行は #3613 が持つ
+
+ブランチ戦略のキーは `.ndf/worktree.json` の `branch_flow.release_strategy`、値と取り込み方の表の行の名前は `merge_base_branch`（ベースブランチを丸ごと本番ブランチへマージする）・
+`release_branch`（承認したスプリントだけを本番ブランチから作ったリリースブランチで出す）・`trunk`（スプリントの PR を直接本番ブランチへ入れる）である
+（利用者の決定、2026-11-16。#3613）。この設計の文書は、どの節もこの名前で書く。
+
+| 何を決めるか | 持つ課題 |
+| --- | --- |
+| develop にある 2 行のキー・値・行の名前の改名、スキーマの改名、利用者の設定を新しいキーへ書き換える移行のコマンド、移行の後に残る旧いキーで止める読み取り | #3613 |
+| 行 `trunk` を新しい名前で足すこと、`trunk` の行のリリースの振る舞い（決定 5〜7・9・10・16〜23） | #3572 |
+
+#3587 は行 `trunk` を改名の前の名前で持つ。#3613 の改名が develop へ入った後に develop を #3587 へ取り込み、#3587 が足した行・値・スキーマの名前を
+新しい名前へそろえる（決定 24 の 11 行目）。#3613 の改名より先に #3587 をマージしない。先にマージすると、develop に旧い名前の行と新しい名前の行が混ざる。
+
+| 比べた候補 | 採否と理由 |
+| --- | --- |
+| #3572 の実装で改名も行う | 採らない。改名と移行のコマンドは利用者の設定の書き換え（C7）を伴い、#3613 が 1 か所で持つ（Value 11） |
+| 改名の前の名前で書き、改名の後に文書を直す | 採らない。承認の資料と実装の名前が食い違い、読み手が 2 つの名前を対応づける手間が残る |
+| #3613 の改名の後の名前で書き、#3587 は改名の後に取り込む | 採る |
+
+- 作り方: 標準に倣う
+- 比べた候補: STD3
+
+根拠: Value 11 / Value 14 / C7（MVV 版 7）

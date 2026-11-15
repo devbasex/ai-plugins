@@ -7530,7 +7530,7 @@
     {
       "term": "本番の PR",
       "context": "ndf-release",
-      "meaning": "本番チャネル（main）へ入れる Pull Request。CD のある場合は、この PR のマージで本番へ届く。ndf-next の取り込み方の行 `github-flow` では main 宛てのスプリントの PR が兼ね、CD が作る版上げの PR は含まない。行 `promote-whole`・`promote-selected` と今の NDF では、リリースのブランチから本番チャネルへ出す PR を指す",
+      "meaning": "本番チャネル（main）へ入れる Pull Request。CD のある場合は、この PR のマージで本番へ届く。ndf-next の取り込み方の行 `trunk` では main 宛てのスプリントの PR が兼ね、CD が作る版上げの PR は含まない。行 `merge_base_branch`・`release_branch` と今の NDF では、リリースのブランチから本番チャネルへ出す PR を指す",
       "source": "docs/specifications/ndf-release-production-admin-merge.md"
     },
     {
@@ -7650,13 +7650,13 @@
     {
       "term": "リリースブランチ",
       "context": "ndf-release",
-      "meaning": "ndf-next の取り込み方の行 `github-flow` では、版上げの PR の head になるブランチ（`release/v<バージョン>`）。main へのマージの後に CD が main の先端から作り、版上げの PR のマージで消える。行 `promote-whole`・`promote-selected` では `ndf-workflow` の同じ語の意味（本番チャネルへ入れる変更を集めるブランチ）",
+      "meaning": "ndf-next の取り込み方の行 `trunk` では、版上げの PR の head になるブランチ（`release/v<バージョン>`）。main へのマージの後に CD が main の先端から作り、版上げの PR のマージで消える。行 `merge_base_branch`・`release_branch` では `ndf-workflow` の同じ語の意味（本番チャネルへ入れる変更を集めるブランチ）",
       "pending_source": "issues/issue-3572-design.md"
     },
     {
       "term": "版上げのコミット",
       "context": "ndf-release",
-      "meaning": "取り込み方の行 `github-flow` で、main へのマージの後に CD が作り、版上げの PR を通して main へ入るコミット。バージョンの置き場のファイル・CHANGELOG のバージョンの節・`.ndf/release.json` の手順の書き先だけを変える。PR はバージョンを触らない",
+      "meaning": "取り込み方の行 `trunk` で、main へのマージの後に CD が作り、版上げの PR を通して main へ入るコミット。バージョンの置き場のファイル・CHANGELOG のバージョンの節・`.ndf/release.json` の手順の書き先だけを変える。PR はバージョンを触らない",
       "pending_source": "issues/issue-3572-design.md"
     },
     {
@@ -7737,7 +7737,7 @@
     {
       "term": "取り込み方の表",
       "context": "ndf-release",
-      "meaning": "ndf-next がブランチ戦略として選べる行の一覧（`plugins/ndf-next/contracts/domains/branch-flows.json`）。`promote-whole`・`promote-selected` と、スプリントブランチを main から切って main へマージする `github-flow` の行を持つ",
+      "meaning": "ndf-next がブランチ戦略として選べる行の一覧（`plugins/ndf-next/contracts/domains/branch-flows.json`）。`merge_base_branch`・`release_branch` と、スプリントブランチを main から切って main へマージする `trunk` の行を持つ（行の名前は `.ndf/worktree.json` の `branch_flow.release_strategy` の値と同じ）",
       "pending_source": "issues/issue-3572-requirements.md"
     },
     {

@@ -4,7 +4,7 @@
 
 - **今どうなっているか**: ai-plugins のスプリントは開発版のブランチ（`develop`）から切り、リリースは `develop` を丸ごと正式版のブランチ（`main`）へ入れる。並列の計画では、承認していないスプリントもリリースに載る（2026-11-12 のリリース 9 に計画の外のスプリントが入った）
 - **誰に効くか**: ai-plugins で開発を進める conductor・レーンと、リリースを担うオーガナイザー・一時レーン
-- **変えると何が成り立つか**: スプリントを `main` から切り、スプリントの PR を `main` へマージしてリリースする（GitHub flow）。`develop` と常設のリリースブランチを持たず、マージの前の検証は検証用マーケットプレイスで行う（決定 21。取り込み方の表は develop を持つリポジトリ向けの 2 行も残し、ai-plugins が `github-flow` を選ぶ）。PR の種類ごとに掛けるレビューが 1 つの宣言で決まり、同じ差分を 2 度レビューすることも、どこでもレビューされない実装の差分も生じない
+- **変えると何が成り立つか**: スプリントを `main` から切り、スプリントの PR を `main` へマージしてリリースする（GitHub flow）。`develop` と常設のリリースブランチを持たず、マージの前の検証は検証用マーケットプレイスで行う（決定 21。取り込み方の表は develop を持つリポジトリ向けの 2 行も残し、ai-plugins が `trunk` を選ぶ）。PR の種類ごとに掛けるレビューが 1 つの宣言で決まり、同じ差分を 2 度レビューすることも、どこでもレビューされない実装の差分も生じない
 - **要求との差**: 要求の目的は「どこでもレビューされない差分」を生じさせないことで、実装の差分に限っていない。この設計では、確定仕様化の PR の差分（文書）を cross-review する PR が無い（決定 1）。この差を残すかは設計承認ゲートで確かめる（「人へ残す判断」）
 
 ## 適用範囲
@@ -70,12 +70,12 @@ C7 に当たる書き換え（`.ndf/` と `AGENTS.md` の運用の節）は、PR
 
 | # | 集約 | 条件 | 破れたときの扱い |
 | --- | --- | --- | --- |
-| I1 | 宣言 | `branch_flow` のブランチの流れは `start: production`・`integrate: release`・`doc_prs: sprint`・`promotion: direct`（決定 21）、`base_branch` と `production_branch` はどちらも `main` | 鍵ごとの値の誤りは ndf-next の宣言のスキーマの検査（`ndf check spec-decl`）が断る。`promotion: direct` に `start: base` を組むなど、取り込み方の表の行が許さない組み合わせは、取り込み方の読み取り（#3572 の詳細設計の `declaration.flow_of`）が行の列と照らして断り、宣言を読む工程が止まる。`base_branch` と `production_branch` が `main` であることは ai-plugins の値で、実装 PR の確認の手順で見る |
-| I2 | 宣言 | `reviews` は GitHub flow の行（`direct`）で書ける 4 種類（`impl`・`sprint`・`design`・`spec`）すべての行を持ち、`release` の行を持たない（決定 21）。各行は許す値の表の値で、実装の差分をどの PR でも cross-review しない組（NDF の I4）と既定値の行との重なり（NDF の I12）を生じない | 2 つに分けて見る。書けない種類の行（`release`）と、書いた `impl`・`sprint` の行のどちらも cross-review しない組は、ndf-next の main 宛ての PR の検査（`release-steps pr-check`。#3572 の詳細設計の `declaration.review_problems`）が PR のチェックを落とす。この検査はどのプロジェクトにも掛かり、書いていない種類を既定値に任せる。4 種類すべての行を持つことは ai-plugins の値で、実装 PR の確認の手順で見る（下の「テスト設計」）。行の値の形の誤りは宣言のスキーマの検査が落とす |
+| I1 | 宣言 | `branch_flow` のブランチの流れは `start: production`・`integrate: release`・`doc_prs: sprint`・`release_strategy: trunk`（決定 21）、`base_branch` と `production_branch` はどちらも `main` | 鍵ごとの値の誤りは ndf-next の宣言のスキーマの検査（`ndf check spec-decl`）が断る。`release_strategy: trunk` に `start: base` を組むなど、取り込み方の表の行が許さない組み合わせは、取り込み方の読み取り（#3572 の詳細設計の `declaration.flow_of`）が行の列と照らして断り、宣言を読む工程が止まる。`base_branch` と `production_branch` が `main` であることは ai-plugins の値で、実装 PR の確認の手順で見る |
+| I2 | 宣言 | `reviews` は GitHub flow の行（`trunk`）で書ける 4 種類（`impl`・`sprint`・`design`・`spec`）すべての行を持ち、`release` の行を持たない（決定 21）。各行は許す値の表の値で、実装の差分をどの PR でも cross-review しない組（NDF の I4）と既定値の行との重なり（NDF の I12）を生じない | 2 つに分けて見る。書けない種類の行（`release`）と、書いた `impl`・`sprint` の行のどちらも cross-review しない組は、ndf-next の main 宛ての PR の検査（`release-steps pr-check`。#3572 の詳細設計の `declaration.review_problems`）が PR のチェックを落とす。この検査はどのプロジェクトにも掛かり、書いていない種類を既定値に任せる。4 種類すべての行を持つことは ai-plugins の値で、実装 PR の確認の手順で見る（下の「テスト設計」）。行の値の形の誤りは宣言のスキーマの検査が落とす |
 | I3 | 文書 | 正本の文書のレビューの単位の表は、宣言の `reviews` の 4 行と同じ値を持つ | コードレビューで見る（`.md` の文言を照合するテストは書かない） |
 | I4 | 文書 | `AGENTS.md` は判断の基準だけを持ち、手順と実測を正本の文書へリンクで渡す。指示書のチェックが 0 を返す | `instructions-check.py` が 1 を返す |
 | I5 | 文書 | `develop` を宛先にする記述が、新しい運用で `develop` へ入れる PR（開発版の版上げ・戻すマージ・スプリントの検査の PR）だけに残る | コードレビューで見る |
-| I6 | 宣言 | `main` の宣言は、`main` 宛の PR のマージでだけ変わる（`direct` への切り替えは 1 回だけで、ndf-next への入れ替えの `main` 宛の PR で行う。`whole` へ戻すのは決定 20 の順序。決定 21） | `main` 宛の検査は `main` の宣言で判定するため、ほかの経路では入らない（#3121 の決定 12） |
+| I6 | 宣言 | `main` の宣言は、`main` 宛の PR のマージでだけ変わる（`trunk` への切り替えは 1 回だけで、ndf-next への入れ替えの `main` 宛の PR で行う。`whole` へ戻すのは決定 20 の順序。決定 21） | `main` 宛の検査は `main` の宣言で判定するため、ほかの経路では入らない（#3121 の決定 12） |
 | I7 | 宣言 | 段 3 のマージから段 4 のマージまでの間に、新しいスプリントを始めない | 始めたスプリントは `main` から切られ、`main` の検査（まだ `whole`）でリリースの PR が断られる。始めたスプリントを止め、段 4 の後に切り直す |
 | I8 | 宣言 | 段 3 のスプリントの PR を `develop` へ入れるのは、#3308（リリースを組む取り込み方を本番チャネルの宣言で決める）の版が本番へ出た後である | 先に入れると、段 4 のまとめたリリースがメインディレクトリの `selected` の宣言で組まれ、`main` の検査（まだ `whole` の規則）に断られる（決定 10） |
 
@@ -87,7 +87,7 @@ C7 に当たる書き換え（`.ndf/` と `AGENTS.md` の運用の節）は、PR
 | E2 | `AGENTS.md` と正本の文書を新しい運用へ書き換えた | この課題の実装 PR | conductor・レーン・外部の貢献者 |
 | E3 | このスプリントを `develop` へ入れた | スプリントの検査の PR | 開発版のデプロイ、メインディレクトリの追従 |
 | E4 | このスプリントを `whole` のまま `main` へ出した（段 4） | リリース承認ゲートの承認 | CD（正式版のデプロイ） |
-| E4a | `main` の宣言が `direct` に切り替わった（宣言の書き換えを載せた `main` 宛の PR のマージ。I6・決定 21） | 宣言の書き換えを載せた `main` 宛の PR のマージ | `main` 宛の検査（以後 `direct` で判定） |
+| E4a | `main` の宣言が `trunk` に切り替わった（宣言の書き換えを載せた `main` 宛の PR のマージ。I6・決定 21） | 宣言の書き換えを載せた `main` 宛の PR のマージ | `main` 宛の検査（以後 `trunk` で判定） |
 | E5 | リリースブランチを `release/v<版>-sync` 経由で `develop` へ戻した | 段 4 の後の戻すマージ（決定 17） | メインディレクトリの追従、開発版のデプロイ |
 | E6 | 新しいスプリントを `main` から切った | 段 4 の後に始めるスプリント | スプリントの目録のスナップショット |
 | E7 | スプリントの PR を `main` へマージしてリリースした（決定 21） | E4a の後のリリース | `main` 宛の検査・CD（版上げとタグ） |
@@ -284,7 +284,7 @@ sprint の行を消す : 既定値の sprint が、書いた impl と同じ実�
 
 NDF は書いていない種類を、課題のまとまりの記録の有無で 2 列の既定値から解く。実装 PR とスプリントの PR を既定値に任せると、まとまりの記録が無いスプリントでは
 実装 PR で cross-review せず、スプリントの PR で 3 つすべてを掛ける。どの PR で何を見るかがスプリントの外の事情で変わり、正本の文書の表と食い違う。
-書ける種類すべてを書けば、掛け方は宣言だけで決まる（受け入れ条件 7）。GitHub flow の行（`direct`）では `release` の行を書けない（決定 21）ため、
+書ける種類すべてを書けば、掛け方は宣言だけで決まる（受け入れ条件 7）。GitHub flow の行（`trunk`）では `release` の行を書けない（決定 21）ため、
 書くのは `impl`・`sprint`・`design`・`spec` の 4 種類で、決定 1 の値から `release` の行を除いたものになる。
 
 まとまりの記録が無いスプリントでは、実装 PR は課題 1 つずつになり、cross-review の回数は課題の数と同じになる。この費用は段 5 の最初のスプリントで実測する（「未確認のまま残ること」）。
@@ -370,18 +370,18 @@ conductor が決めた。設計承認ゲートの承認資料に載せる。
 
 根拠: Value 7 / Value 13（MVV 版 7）
 
-### 決定 21: ai-plugins のブランチ戦略を設定ファイルで選ぶため、ai-plugins の設定ファイルを取り込み方の行 `github-flow`（`direct`）にし、実装を ndf-next（11.0.0）で行う
+### 決定 21: ai-plugins のブランチ戦略を設定ファイルで選ぶため、ai-plugins の設定ファイルを取り込み方の行 `trunk` にし、実装を ndf-next（11.0.0）で行う
 
 ブランチ戦略はリポジトリごとに設定ファイルで選ぶ（#3121 の「リポジトリの決まりは設定の値で受け、NDF の制約にしない」）。ai-plugins は GitHub flow を選び、
 スプリントブランチを `main` から切って PR で `main` へマージし、`develop` と常設のリリースブランチを持たない（#3572 の課題の本文の「方針の転換」と
 「設計のやり直し」、2026-11-15・2026-11-16）。マージがそのままリリースで、バージョンとタグは CD がマージの時点に作る。決定 1〜10 が前提にした
-`promotion: selected` はスプリントを `develop` へ入れ、リリースの時点で選んで集めるため、ai-plugins の選ぶ運用と違う。
-ai-plugins の設定ファイルは、#3572 が ndf-next の取り込み方の表へ足す次の行の値にし、`base_branch` を `main` にする（行の意味と理由は
+行 `release_branch` はスプリントを `develop` へ入れ、リリースの時点で選んで集めるため、ai-plugins の選ぶ運用と違う。
+キーと値の名前は #3613 の改名の後の名前で書く（#3572 の決定 26）。ai-plugins の設定ファイルは、#3572 が ndf-next の取り込み方の表へ足す次の行の値にし、`base_branch` を `main` にする（行の意味と理由は
 [issue-3572-design-decisions.md](issue-3572-design-decisions.md) の決定 5・16）。
 
 | 列 | 値 |
 | --- | --- |
-| `promotion` | `direct` |
+| `release_strategy` | `trunk` |
 | `start` | `["production"]` |
 | `doc_prs` | `["sprint"]` |
 | `integrate` | `["release"]` |
@@ -389,19 +389,19 @@ ai-plugins の設定ファイルは、#3572 が ndf-next の取り込み方の�
 | `release_from` | `production` |
 | `release_units` | `false` |
 
-**取り込み方の表は `promote-whole`・`promote-selected` の 2 行を残す。** `github-flow` は選べる行の 1 つで、ai-plugins がそれを選ぶのは ai-plugins の
-設定ファイルの値である。develop と main を分けるリポジトリは今の 2 行を選び続け、既定の行も `promote-whole` のままである（#3572 の決定 16）。
+**取り込み方の表は `merge_base_branch`・`release_branch` の 2 行を残す。** `trunk` は選べる行の 1 つで、ai-plugins がそれを選ぶのは ai-plugins の
+設定ファイルの値である。develop と main を分けるリポジトリは今の 2 行を選び続け、既定の行も `merge_base_branch` のままである（#3572 の決定 16）。
 ai-plugins のほかの選択も設定ファイルの値で受ける。マージの前の検証は検証環境の種類 `marketplace`（検証用マーケットプレイス、#3572 の決定 21）、
 同時に承認された PR の組み合わせの確かめはマージの方式 `merge-queue`（#3572 の決定 17）で、main の ruleset へ merge queue を足すのは入れ替えの
 PR と同じ時点に人の承認の後に行う（#3572 の決定 23）。
 
 この取り込み方は今の NDF（`plugins/ndf/`）の取り込み方の表に無いため、設定ファイルの書き換え（受け入れ条件 1）は ndf-next への入れ替え（11.0.0）と同じ時点で行う。
-`selected` への途中の切り替えは行わない（切り替えを 2 回にすると、`selected` の間に始めたスプリントの宛先を付け直す手間が残る）。
-「処理の流れ」の切り替えの順序・決定 10・I7・I8 は `selected` への切り替えを前提にしており、GitHub flow への 1 回の切り替えとして詳細設計の工程で書き直す。
-今の NDF の読み取り（`plugins/ndf/scripts/lib/branch_flow.py` の `parse_flow`）は `promotion` に `whole`・`selected` だけを持ち、`direct` の設定を断る。
+`release_branch` への途中の切り替えは行わない（切り替えを 2 回にすると、`release_branch` の間に始めたスプリントの宛先を付け直す手間が残る）。
+「処理の流れ」の切り替えの順序・決定 10・I7・I8 は `release_branch` への切り替えを前提にしており、GitHub flow への 1 回の切り替えとして詳細設計の工程で書き直す。
+今の NDF の読み取り（`plugins/ndf/scripts/lib/branch_flow.py` の `parse_flow`）は GitHub flow の行を持たず、`release_strategy: trunk` の設定を読めない。
 そのため I1・I2 のうちどのプロジェクトにも掛かる検査は ndf-next の部品（#3572 の `declaration.flow_of`・`declaration.review_problems` と設定ファイルのスキーマ）が持つ。
 ai-plugins の値（`base_branch` と `production_branch` が `main`・`reviews` が 4 種類の行を持つ）は、ndf-next の部品へ持ち込まず、実装 PR の確認の手順で見る（NDF の側は ai-plugins の値を前提にしない）。
-レビューの単位（決定 1）は、リリースブランチの PR の行（`release`）を持たない。`github-flow` の行ではスプリントの PR が本番の PR を兼ね、集めたときに
+レビューの単位（決定 1）は、リリースブランチの PR の行（`release`）を持たない。`trunk` の行ではスプリントの PR が本番の PR を兼ね、集めたときに
 生じる衝突の解消の差分が無いためである。承認した head でのマージ・バージョン上げ・検証環境・同期の PR の扱いは #3572 の設計
 （[issue-3572-design.md](issue-3572-design.md) の決定 1〜25）が持つ。詳細設計（[issue-3119-design-detail.md](issue-3119-design-detail.md)）の
 設定ファイルの値（「`.ndf/worktree.json` の書き換え」「内部のデータと定数」）はこの決定の値にしてある。運用の文書（`AGENTS.md`・
@@ -415,7 +415,7 @@ ai-plugins の値（`base_branch` と `production_branch` が `main`・`reviews`
 
 | 受け入れ条件・不変条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
 | --- | --- | --- |
-| 受け入れ条件 1・I1 | worktree でコミットした `.ndf/worktree.json` が ndf-next の宣言のスキーマの検査に通り、`declaration.flow_of` が `github-flow` を返し、`base_branch`・`production_branch` が `main` である | `promotion` を表に無い値にするか、`promotion: direct` に `start: base` を組むと `flow_of` が `DeclarationError` を返す（#3572 の詳細設計の単体テストの観点） |
+| 受け入れ条件 1・I1 | worktree でコミットした `.ndf/worktree.json` が ndf-next の宣言のスキーマの検査に通り、`declaration.flow_of` が `trunk` を返し、`base_branch`・`production_branch` が `main` である | `release_strategy` を表に無い値にするか、`release_strategy: trunk` に `start: base` を組むと `flow_of` が `DeclarationError` を返す（#3572 の詳細設計の単体テストの観点） |
 | 受け入れ条件 2 | #3121 の受け入れ条件 14 のテスト（`test_sprint_branch_flow.py`）が、この宣言の値で起点 `origin/main`・設計 PR の宛先 `sprint/<名前>` を返す | 宣言の `start` を読まないと落ちる |
 | 受け入れ条件 3 | #3121 の受け入れ条件 15 のテスト（`scripts/tests/test_pr_base_guard.py`）で、head が `develop` の `main` 宛を `check-pr-base.sh` が 1 で断る | worktree の宣言を読むと落ちる |
 | 受け入れ条件 4 | #3121 の受け入れ条件 16 のテストで、選んでいないスプリントのコミットを含む head を `check-pr-base.sh` が 1 で断る。承認資料の範囲は、このスプリントでは確かめず、段 5 の最初のリリースで見る（「未確認のまま残ること」） | 決定 14 の 3 つ目の条件を外すと落ちる |
