@@ -954,7 +954,7 @@ def included_pr_facts(prs, data, checks, repo):
         n, d = p.number, data.get(p.number) or {}
         oid = (d.get("mergeCommit") or {}).get("oid") or ""
         pr_checks = checks[n]
-        passed = sum(1 for c in pr_checks if c.get("bucket") == "pass")
+        passed = included.ci_passed(pr_checks)
         url = d.get("url") or f"https://github.com/{repo}/pull/{n}"
         items.append(
             {

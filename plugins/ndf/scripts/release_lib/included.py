@@ -100,9 +100,14 @@ def included_prs(found, extra) -> list[int]:
 CI_NOT_PASSED = {"skipping": "飛ばした", "fail": "必須でない失敗", "cancel": "必須でない取り消し", "pending": "必須でない未完了"}
 
 
+def ci_passed(checks: list[dict]) -> int:
+    """通ったチェック（bucket が pass）の数。"""
+    return sum(1 for c in checks if c.get("bucket") == "pass")
+
+
 def ci_fact(checks: list[dict]) -> str:
     """「含む PR」の CI の欄。`CI <通った>/<全部>` に、通らなかったチェックの名前を理由ごとに足す（#3585）。"""
-    passed = sum(1 for c in checks if c.get("bucket") == "pass")
+    passed = ci_passed(checks)
     by: dict[str, list[str]] = {}
     for c in checks:
         if c.get("bucket") != "pass":
