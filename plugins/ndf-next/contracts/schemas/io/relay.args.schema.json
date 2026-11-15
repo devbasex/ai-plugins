@@ -1,0 +1,242 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/io/relay.args.schema.json",
+  "title": "ndf relay の引数",
+  "description": "ndf relay が受ける引数。キーは引数の名前（オプションは -- の名前、位置引数は名前）。規約の生成が作り、手で直さない",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "account clear",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "account show",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "account use",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "name": {
+          "type": "string",
+          "x-ndf-positional": true
+        }
+      },
+      "required": [
+        "subcommand",
+        "name"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "decide",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "install",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--replace-old": {
+          "type": "boolean",
+          "description": "旧い NDF の複製を置き換える（旧いラッパーが動いていれば断る）"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "ls",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "mark",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "session_id": {
+          "type": "string",
+          "x-ndf-positional": true
+        }
+      },
+      "required": [
+        "subcommand",
+        "session_id"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "pending",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "restart",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "name": {
+          "type": "string",
+          "x-ndf-positional": true
+        }
+      },
+      "required": [
+        "subcommand",
+        "name"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "run",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--name": {
+          "type": "string"
+        },
+        "rest": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "--prompt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subcommand",
+        "rest"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "spawn",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--name": {
+          "type": "string"
+        },
+        "rest": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "--cwd": {
+          "type": "string"
+        },
+        "--role": {
+          "type": "string"
+        },
+        "--plan": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subcommand",
+        "rest"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "status",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "stop",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "name": {
+          "type": "string",
+          "x-ndf-positional": true
+        }
+      },
+      "required": [
+        "subcommand",
+        "name"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "uninstall",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    }
+  ]
+}

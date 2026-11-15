@@ -47,6 +47,7 @@
       "uniqueItems": true
     }
   },
+  "x-ndf-place": "main",
   "x-ndf-read-by": [
     {
       "by": "工程: ランタイムの起動",

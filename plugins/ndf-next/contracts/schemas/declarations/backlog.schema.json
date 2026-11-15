@@ -62,7 +62,7 @@
           },
           "every": {
             "type": "integer",
-            "description": "頻度（周回の数）",
+            "description": "頻度（ループの 1 回の数）",
             "minimum": 1
           },
           "threshold": {
@@ -78,6 +78,7 @@
       }
     }
   },
+  "x-ndf-place": "worktree",
   "x-ndf-read-by": [
     {
       "by": "ndf issues",

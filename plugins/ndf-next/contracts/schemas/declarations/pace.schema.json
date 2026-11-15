@@ -145,7 +145,7 @@
           "properties": {
             "laps": {
               "type": "integer",
-              "description": "周回の上限"
+              "description": "ループの回数の上限"
             },
             "hours": {
               "type": "integer",
@@ -224,6 +224,7 @@
       "additionalProperties": false
     }
   },
+  "x-ndf-place": "worktree",
   "x-ndf-read-by": [
     {
       "by": "ndf answer",

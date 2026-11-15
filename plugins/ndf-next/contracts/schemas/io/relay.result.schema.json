@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "io/relay.result.schema.json",
+  "title": "ndf relay の結果 JSON",
+  "description": "ndf relay が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果の契約（result.schema.json）が持ち、ここは metrics と items の形だけを足す。載せた項目のほかの項目は受け流す",
+  "allOf": [
+    {
+      "$ref": "../result.schema.json"
+    }
+  ],
+  "properties": {
+    "tool": {
+      "const": "relay"
+    },
+    "metrics": {
+      "type": "object",
+      "description": "ndf relay の計測値",
+      "properties": {}
+    },
+    "items": {
+      "type": "array",
+      "description": "ndf relay の項目の並び",
+      "items": {
+        "type": "object",
+        "properties": {
+          "account": {
+            "description": "結果の account"
+          },
+          "path": {
+            "description": "結果の path",
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

@@ -55,6 +55,7 @@
       "default": 50000
     }
   },
+  "x-ndf-place": "worktree",
   "x-ndf-read-by": [
     {
       "by": "ndf hooks",

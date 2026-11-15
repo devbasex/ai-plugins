@@ -79,6 +79,7 @@
       }
     }
   },
+  "x-ndf-place": "worktree",
   "x-ndf-read-by": [
     {
       "by": "ndf release-steps",

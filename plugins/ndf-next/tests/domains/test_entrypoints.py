@@ -36,6 +36,9 @@ def accepts(entrypoint: str, call: str, env: list[str]) -> bool:
         return any(re.fullmatch(arg, call) for arg in ep["args"])
     if ep["kind"] == "hook":
         return call == ep["target"]
+    if ep["kind"] == "spec":
+        # 規約の置き場: 値はプラグインの根からのパスで、置き場（target）の下のファイル
+        return call.startswith(ep["target"] + "/")
     paths = [facts.value(FILES, f, "path") for f in ep["files"]]
     return any(re.fullmatch(_path_pattern(p), call) for p in paths)
 

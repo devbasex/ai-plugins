@@ -106,6 +106,7 @@
       }
     }
   },
+  "x-ndf-place": "worktree",
   "x-ndf-read-by": [
     {
       "by": "工程: 起票",

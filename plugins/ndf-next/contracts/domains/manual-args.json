@@ -1,33 +1,37 @@
 {
-  "summary": "argparse を使わない副命令の下位の命令と引数（規約の生成が引数のスキーマを作る入力）。argparse から引数を取り出せる副命令はこの表に行を持たない（持てば ndf check の spec-io が落とす）",
+  "summary": "argparse を使わない副命令の呼び方（下位の命令の道ごとに 1 行）と引数。規約の生成が引数のスキーマを作る入力で、argparse から引数を取り出せる副命令はこの表に行を持たない（持てば ndf check の spec-io が落とす）",
   "owner": "副命令を持つ子（初版は #3518。ndf.checks.spec_args）",
   "columns": {
-    "subcommands": {
-      "type": "array",
-      "summary": "下位の命令の名前の並び。無ければ下位の命令を持たない",
+    "command": {
+      "type": "string",
+      "summary": "副命令の名前（cli.COMMANDS のキー）"
+    },
+    "path": {
+      "type": "string",
+      "summary": "下位の命令の道（入れ子は空白でつなぐ）。無ければ副命令そのものの呼び方",
       "optional": true
     },
     "args": {
       "type": "array",
-      "summary": "引数の並び。1 つは <下位の命令>:<名前>:<型>:<required か optional>:<説明>（下位の命令に属さない引数は <下位の命令> を空にする。型は JSON Schema の type）",
+      "summary": "引数の並び。1 つは <名前>:<型>:<required か optional>:<説明>（型は JSON Schema の type）。無ければ引数を受けない",
       "optional": true
     },
     "meaning": {
       "type": "string",
-      "summary": "副命令が引数をどう受けるか"
+      "summary": "この呼び方が何をするか"
     }
   },
   "rows": [
     {
       "id": "launch-args",
-      "meaning": "引数を受けない。引数があれば invalid で止まる"
+      "command": "launch-args",
+      "meaning": "full の起動で claude に足す引数を items で出す。引数を受けず、引数があれば invalid で止まる"
     },
     {
-      "id": "notify",
-      "subcommands": [
-        "send"
-      ],
-      "meaning": "下位の命令 send だけを受ける（引数は持たない）。ほかの並びは invalid で止まる"
+      "id": "notify send",
+      "command": "notify",
+      "path": "send",
+      "meaning": "状態の置き場の送信待ちを Slack へ送る。ほかの並びは invalid で止まる"
     }
   ]
 }

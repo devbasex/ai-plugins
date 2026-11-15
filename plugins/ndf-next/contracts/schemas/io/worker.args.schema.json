@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/io/worker.args.schema.json",
+  "title": "ndf worker の引数",
+  "description": "ndf worker が受ける引数。キーは引数の名前（オプションは -- の名前、位置引数は名前）。規約の生成が作り、手で直さない",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "attention",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "progress": {
+          "type": "string",
+          "x-ndf-positional": true
+        }
+      },
+      "required": [
+        "subcommand",
+        "progress"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "closing-check",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--base": {
+          "type": "string"
+        },
+        "--cwd": {
+          "type": "string",
+          "default": "."
+        }
+      },
+      "required": [
+        "subcommand",
+        "--base"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "plan-edit",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "plan": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "--new": {
+          "type": "string"
+        },
+        "--reason": {
+          "type": "string"
+        },
+        "--state-dir": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subcommand",
+        "plan",
+        "--new",
+        "--reason"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "plan-edits",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "plans": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-ndf-positional": true
+        },
+        "--state-dir": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subcommand",
+        "plans"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "run",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--kind": {
+          "type": "string"
+        },
+        "--prompt-file": {
+          "type": "string"
+        },
+        "--result-file": {
+          "type": "string"
+        },
+        "--cwd": {
+          "type": "string"
+        },
+        "--state-dir": {
+          "type": "string"
+        },
+        "--sources": {
+          "type": "string"
+        },
+        "--timeout": {
+          "type": "number",
+          "default": 3600.0
+        }
+      },
+      "required": [
+        "subcommand",
+        "--kind",
+        "--prompt-file",
+        "--result-file",
+        "--cwd",
+        "--state-dir"
+      ]
+    }
+  ]
+}

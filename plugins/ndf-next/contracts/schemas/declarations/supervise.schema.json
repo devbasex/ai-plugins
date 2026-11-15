@@ -94,7 +94,7 @@
     },
     "test": {
       "type": "object",
-      "description": "ndf-next は読まない（今の版が読む値。テストのコマンドは project.json の test が持つ）",
+      "description": "読み手は読まない（今の版の読み手が読む値。テストのコマンドは project.json の test が持つ）",
       "properties": {
         "command": {
           "type": "string",
@@ -113,6 +113,7 @@
       "deprecated": true
     }
   },
+  "x-ndf-place": "worktree",
   "x-ndf-read-by": [
     {
       "by": "工程: プランの実行",

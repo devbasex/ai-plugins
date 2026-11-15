@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "declarations/glossary.schema.json",
-  "title": "用語集の宣言（.ndf/glossary.json）",
+  "title": "用語集の設定（.ndf/glossary.json）",
   "description": "用語集の正本と生成する文書の置き場、検査の範囲",
   "type": "object",
   "additionalProperties": false,
@@ -102,6 +102,7 @@
       "additionalProperties": false
     }
   },
+  "x-ndf-place": "worktree",
   "x-ndf-read-by": [
     {
       "by": "ndf records glossary",

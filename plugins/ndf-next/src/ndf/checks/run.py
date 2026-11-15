@@ -1,10 +1,11 @@
 """検査 1 本のエントリポイント（副命令 `check`）。見るファイルを集め、構文木を 1 回ずつ作り、すべての規則を当てる。
 
-    ndf check [--base <起点>] [--event <GitHub の事象の JSON>] [--only <規則>]...
+    ndf check [--base <起点>] [--event <GitHub の事象の JSON>] [--only <規則>]... [--write-spec]
 
 `--base` があれば差分の検査（I2）も行う。`--only` があれば、その規則の指摘だけを違反にする（新しいプラグインを
 変えていない PR で規則 port だけを当てる。新しいプラグインの側に残る違反で無関係な PR を落とさない）。規則が差分の
-規則（port・I2）だけなら、プラグインのファイルを読まずに差分と PR 本文だけを見る。PR 本文は `--event`（既定は環境変数 `GITHUB_EVENT_PATH`）から読む。
+規則（port・I2）だけなら、プラグインのファイルを読まずに差分と PR 本文だけを見る。`--write-spec` があれば、規約の
+生成物（契約のページと引数のスキーマ。`spec_docs`）を書いてから検査する。PR 本文は `--event`（既定は環境変数 `GITHUB_EVENT_PATH`）から読む。
 結果 JSON（結果の契約 `ndf.contracts.result`）を標準出力の最後の 1 行に出す。違反は止まった理由 check_failed、構文の誤りは\ninvalid、読めない（規則のデータ・git・事象の JSON）は config_broken で、終了コードは種類の終了コード（1・2・2）である。
 """
 
@@ -19,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from ndf import cli, identity
-from ndf.checks import child_deps, facts, invariants, lint, marks, smells, structure, words
+from ndf.checks import child_deps, facts, invariants, lint, marks, smells, spec_docs, structure, words
 from ndf.checks.model import SCRIPT_PREFIXES, CheckError, Finding, Scope, Source, load_rules, read_json
 from ndf.contracts import result
 
@@ -81,27 +82,28 @@ def smell_findings(scope: Scope, rules: dict[str, Any]) -> list[Finding]:
     return found
 
 
-def check(scope: Scope, rules: dict[str, Any]) -> list[Finding]:
-    """見る範囲にすべての規則を当て、指摘をパスと行の順で返す。"""
+def check(scope: Scope, rules: dict[str, Any], write_spec: bool = False, written: list[str] | None = None) -> list[Finding]:
+    """見る範囲にすべての規則を当て、指摘をパスと行の順で返す。`write_spec` なら規約の生成物を書き、パスを `written` へ足す。"""
     found = unparsable(scope)
     found += smell_findings(scope, rules)
     found += structure.check(scope, rules) + structure.cycles(scope)
     found += facts.check(scope, rules) + words.check(scope, rules) + invariants.check(scope, rules)
     found += child_deps.apply(scope, rules)
+    found += spec_docs.check(scope, rules, write_spec, written)
     return sorted(found, key=lambda f: (f.path, f.line, f.rule, f.detail))
 
 
-def select(scope: Scope, rules: dict[str, Any], only: list[str] | None) -> list[Finding]:
+def select(scope: Scope, rules: dict[str, Any], only: list[str] | None, write_spec: bool = False, written: list[str] | None = None) -> list[Finding]:
     """`only` の規則の指摘だけを返す（無ければすべての規則）。
 
     `only` が差分の規則（`invariants.DIFF_RULES`）だけなら、ファイルを集めず構文木も作らずに差分と PR 本文だけを見る
-    （新しいプラグインを変えていない PR で、本文を直すたびに全体の検査を打たない）。
+    （新しいプラグインを変えていない PR で、本文を直すたびに全体の検査を打たない）。このときは `write_spec` を見ない。
     """
     if only and set(only) <= invariants.DIFF_RULES:
         found = sorted(invariants.old_plugin_diff(scope, rules["invariants"]), key=lambda f: (f.path, f.line, f.rule, f.detail))
     else:
         scope.sources = collect(scope.plugin_root, scope.repo_root)
-        found = check(scope, rules)
+        found = check(scope, rules, write_spec, written)
     return [f for f in found if not only or f.rule in only]
 
 
@@ -137,19 +139,23 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--base", help="差分の起点（I2）。無ければ差分を見ない")
     parser.add_argument("--event", default=os.environ.get("GITHUB_EVENT_PATH", ""), help="PR 本文を読む GitHub の事象の JSON")
     parser.add_argument("--only", action="append", metavar="RULE", help="この規則の指摘だけを違反にする（繰り返せる）")
+    parser.add_argument("--write-spec", action="store_true", help="規約の生成物（契約のページと引数のスキーマ）を書いてから検査する")
     args = parser.parse_args(argv)
+    written: list[str] | None = [] if args.write_spec else None
     try:
         ident = identity.load()
         rules = load_rules()
         repo_root = _repo_root(ident.root)
         scope = Scope(repo_root, ident.root.resolve(), ident.name, args.base, _pr_body(args.event))
-        found = select(scope, rules, args.only)
+        found = select(scope, rules, args.only, args.write_spec, written)
     except (CheckError, identity.IdentityError) as exc:
         return emit(str(exc), [], {}, "config_broken")
     for f in found:
         print(f"{f.rule}: {f.path}:{f.line}: {f.detail}", file=sys.stderr)
     by_rule = dict(sorted(Counter(f.rule for f in found).items()))
-    metrics = {"files": len(scope.sources), "findings": by_rule}
+    metrics: dict[str, Any] = {"files": len(scope.sources), "findings": by_rule}
+    if written is not None and not (args.only and set(args.only) <= invariants.DIFF_RULES):
+        metrics["written"] = len(written)
     if not found:
         return emit(f"{len(scope.sources)} ファイルに違反なし", [], metrics)
     kind = "invalid" if "syntax" in by_rule else "check_failed"

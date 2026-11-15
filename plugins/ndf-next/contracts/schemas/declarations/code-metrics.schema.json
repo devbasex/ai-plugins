@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "declarations/code-metrics.schema.json",
   "title": "コードの測り方の宣言（.ndf/code-metrics.json）",
-  "description": "構造改善が言語ごとに使う測りの Tool。null はその言語を測らない",
+  "description": "リファクタリングが言語ごとに使う測りの Tool。null はその言語を測らない",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -32,10 +32,11 @@
       }
     }
   },
+  "x-ndf-place": "worktree",
   "x-ndf-read-by": [
     {
       "by": "ndf refactor",
-      "when": "構造改善でコードを測るとき"
+      "when": "リファクタリングでコードを測るとき"
     }
   ],
   "examples": [

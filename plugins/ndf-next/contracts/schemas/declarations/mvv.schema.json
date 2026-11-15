@@ -40,6 +40,7 @@
       "description": "versions（このリポジトリの宣言にある最上位のキー）"
     }
   },
+  "x-ndf-place": "worktree",
   "x-ndf-read-by": [
     {
       "by": "ndf records mvv",
