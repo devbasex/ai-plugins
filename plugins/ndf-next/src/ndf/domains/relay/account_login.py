@@ -88,7 +88,7 @@ def _auth(claude: str, config_dir: Path, environ: Mapping[str, str], *args: str)
         return None
 
 
-def _identity(claude: str, config_dir: Path, environ: Mapping[str, str]) -> Optional[tuple[str, str, str]]:
+def _identity(claude: str, config_dir: Path, environ: Mapping[str, str]) -> Optional[reg.Identity]:
     """`claude auth status --json` のメールアドレス・組織の ID・組織名。ログインしていなければ None。"""
     p = _auth(claude, config_dir, environ, "status", "--json")
     if p is None:
@@ -100,7 +100,7 @@ def _identity(claude: str, config_dir: Path, environ: Mapping[str, str]) -> Opti
     if not isinstance(d, dict) or not d.get("loggedIn") or not isinstance(d.get("email"), str):
         return None
     org_id, org_name = d.get("orgId"), d.get("orgName")
-    return d["email"], org_id if isinstance(org_id, str) else "", org_name if isinstance(org_name, str) else ""
+    return reg.Identity(d["email"], org_id if isinstance(org_id, str) else "", org_name if isinstance(org_name, str) else "")
 
 
 def owner_of(store: Path, email: str, org_id: str, other_than: str) -> Optional[str]:
@@ -251,12 +251,11 @@ def _register(store: Path, claude: str, name: str, config_dir: Path, environ: Ma
     ident = _identity(claude, config_dir, environ)
     if ident is None or not (config_dir / reg.CRED_FILE).is_file():
         raise LoginError("refused", "ログインが通らなかった。登録しない")
-    email, org_id, org_name = ident
-    owner = owner_of(store, email, org_id, other_than=name)
+    owner = owner_of(store, ident.email, ident.org_id, other_than=name)
     if owner:
         raise LoginError("refused", f"同じメールアドレスと組織で登録済み: {owner}")
-    reg.register(store, name, config_dir, reg.Identity(email, org_id, org_name), now)
-    return Added(name, needs_code=False, email=email, org_name=org_name or None)  # noqa: NDF501 外部コマンド: 組織名の無い本人は null
+    reg.register(store, name, config_dir, ident, now)
+    return Added(name, needs_code=False, email=ident.email, org_name=ident.org_name or None)  # noqa: NDF501 外部コマンド: 組織名の無い本人は null
 
 
 def _finish(store: Path, name: str, code: str, environ: Mapping[str, str], now: float) -> Added:
