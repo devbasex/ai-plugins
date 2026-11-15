@@ -7351,8 +7351,8 @@
     {
       "term": "機能の対応表",
       "context": "ndf-workflow",
-      "meaning": "旧いプラグインの機能 1 つを 1 行に持ち、行き先の子・作らない理由・試走の結果を持つ表（`plugins/ndf-next/src/ndf/parity/features.json`）",
-      "source": "docs/specifications/ndf-next-closed-children-subcommands.md"
+      "meaning": "旧いプラグインの機能 1 つを 1 行に持ち、行き先の子・作らない理由・試走の結果を持つ表。置き場は NDF 自身の開発の `scripts/ndf-next-parity/features.json` で、ndf-next のリリース対象に置かない",
+      "pending_source": "issues/issue-3617-design.md"
     },
     {
       "term": "子の表",
@@ -7788,6 +7788,30 @@
       "context": "ndf-workflow",
       "meaning": "一時レーンの起動が、別の一時レーンが動いているために断られた後、耐久ワークフローが前の一時レーンが止まるまで区分 `spawn` の問いを立てずに待つこと。上限は既定 3,600 秒",
       "pending_source": "issues/issue-3597-design.md"
+    },
+    {
+      "term": "ハードコード",
+      "context": "ndf-workflow",
+      "meaning": "ai-plugins 固有の名前（リポジトリ名・組織名・ブランチ名・タグの形・マーケットプレイスの登録名など）を、設定から読まずに ndf-next のコード・コントラクト・Skill の本文へ直接書くこと。検査が例外リストの外の件数を数えて落とす",
+      "pending_source": "issues/issue-3617-requirements.md"
+    },
+    {
+      "term": "設定で選べる値",
+      "context": "ndf-workflow",
+      "meaning": "`.ndf/` の設定ファイルに書ける値の選択肢（取り込み方の表の行・delivery の種類・リリースの形）。コントラクトから数え、Issue の番号のある例外なしに減ると検査が落ちる",
+      "pending_source": "issues/issue-3617-requirements.md"
+    },
+    {
+      "term": "リモート名",
+      "context": "ndf-workflow",
+      "meaning": "ndf が取得・照合・差分の基準・送信に使う git のリモートの名前。`.ndf/worktree.json` の `remote` に書き、省けば `origin`",
+      "pending_source": "issues/issue-3617-design.md"
+    },
+    {
+      "term": "選べる値の基準",
+      "context": "ndf-workflow",
+      "meaning": "設定で選べる値の集合ごとに、出所と値の一覧を持つファイル（`scripts/ndf-choices.json`）。値を減らすときは Issue の番号と理由を持つ例外を足す",
+      "pending_source": "issues/issue-3617-design.md"
     },
     {
       "term": "JUnit の成果物",
