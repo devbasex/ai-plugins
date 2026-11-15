@@ -1,4 +1,4 @@
-# #3600 の詳細設計: エピックのアーキテクチャ設計書・起動前チェック・DoD の項目・変更通知
+# #3600 の詳細設計: エピックのアーキテクチャ設計書・起動前チェック・完了条件の項目・変更通知
 
 設計文書 [issue-3600-design.md](issue-3600-design.md) の「構成要素」と「構造」を、ファイルと関数の粒度へ下ろした文書である。書き方は NDF の `design` Skill の `references/detailed-design.md` にある。
 
@@ -11,7 +11,7 @@
 | アーキテクチャ設計書 | エピックのアーキテクチャ設計書（設計文書の「用語」）。アーキテクチャ設計書 1 本を指す |
 | 計画 | 並列の計画。実装計画とは呼び分ける |
 | ベースブランチのリビジョン | `origin/<ベースブランチ>` にあるアーキテクチャ設計書。ベースブランチは `.ndf/worktree.json` の `base_branch`、無ければ origin の既定ブランチ |
-| DoD 待ちのリクエスト | 計画のワークフロー状態のリクエストのうち、中身の `kind` が `epic_done_wait` のもの（設計文書の「計画の終了判定」） |
+| 完了条件待ちのリクエスト | 計画のワークフロー状態のリクエストのうち、中身の `kind` が `epic_done_wait` のもの（設計文書の「計画の終了判定」） |
 | 指摘 | 結果 JSON の `items` の 1 行（`rule`・`name`・`detail`） |
 
 関数は「モジュールの短い名前.関数名」で書く。短い名前とパスの対応は次のとおりである（パスは `plugins/ndf-next/src/ndf/` から）。
@@ -95,7 +95,7 @@ plugins/ndf-next/
 | パス | 種類 | 役割 1 文 | 依存する先 |
 | --- | --- | --- | --- |
 | `plugins/ndf-next/contracts/epic/foundation.schema.json` | 新設 | アーキテクチャ設計書のマーカー・セクションの名前と必須か・表の列・検証と確認方法の種類を持つ唯一の正本 | 無し |
-| `plugins/ndf-next/contracts/limits.json` | 変更 | DoD の判定の間隔（`lanes.epic-recheck`）と、検証と確認方法のコマンドの上限（`epic.command`）の 2 行を足す | 無し |
+| `plugins/ndf-next/contracts/limits.json` | 変更 | 完了条件の判定の間隔（`lanes.epic-recheck`）と、検証と確認方法のコマンドの上限（`epic.command`）の 2 行を足す | 無し |
 | `plugins/ndf-next/contracts/workflow/context.schema.json` | 変更 | 任意のキー `scale`（`value`・`reason`）を足す | 無し |
 | `plugins/ndf-next/contracts/workflow/parallel-plan.schema.json` | 変更 | 任意のフィールド `epic`（`name`・`foundation`・`done`）を足す | 無し |
 | `plugins/ndf-next/contracts/workflow/progress.json` | 変更 | 計画のイベント `done_checked`・`foundation_noticed` とレーンのイベント `notice_read` を足す | 無し |
@@ -109,16 +109,16 @@ plugins/ndf-next/
 | `plugins/ndf-next/src/ndf/progress/epic/__init__.py` | 新設 | パッケージの説明と `TOOL` の名前 | `ndf.cli`（`tool_of`） |
 | `plugins/ndf-next/src/ndf/progress/epic/foundation_decide.py` | 新設 | アーキテクチャ設計書の値の型と、解析済みの見出しと表からアーキテクチャ設計書の値を作る・形を判定する純粋な処理 | 無し（標準ライブラリだけ） |
 | `plugins/ndf-next/src/ndf/progress/epic/foundation.py` | 新設 | アーキテクチャ設計書をファイル・ベースブランチのリビジョン・blob から読み、コントラクトを読む入出力 | `ndf.adapters.markdown`、`ndf.adapters.git`、`ndf.core.route`、`ndf.contracts` |
-| `plugins/ndf-next/src/ndf/progress/epic/verify.py` | 新設 | コントラクトの行の検証と、DoD の確認方法の実行 | `foundation_decide`、`ndf.adapters.github`、`ndf.contracts`、jsonschema |
+| `plugins/ndf-next/src/ndf/progress/epic/verify.py` | 新設 | コントラクトの行の検証と、完了条件の確認方法の実行 | `foundation_decide`、`ndf.adapters.github`、`ndf.contracts`、jsonschema |
 | `plugins/ndf-next/src/ndf/progress/epic/cli.py` | 新設 | サブコマンド `ndf epic init`・`check` の引数・結果 JSON・終了コード | `foundation`、`verify`、`ndf.contracts.result` |
-| `plugins/ndf-next/src/ndf/progress/plan/__init__.py` | 変更 | 計画の作成と起動にアーキテクチャ設計書のチェックと起動時点のリビジョンを足し、完了と状態に DoD の項目を足す | `ndf.progress.epic.foundation`、`ndf.progress.lane` |
+| `plugins/ndf-next/src/ndf/progress/plan/__init__.py` | 変更 | 計画の作成と起動にアーキテクチャ設計書のチェックと起動時点のリビジョンを足し、完了と状態に完了条件の項目を足す | `ndf.progress.epic.foundation`、`ndf.progress.lane` |
 | `plugins/ndf-next/src/ndf/progress/plan/cli.py` | 変更 | `init`・`start` の前にアーキテクチャ設計書のチェックを実行し、`row start`・`resumed` の出力に変更通知を足す | `plan`、`ndf.progress.lane` |
-| `plugins/ndf-next/src/ndf/progress/plan/epic.py` | 新設 | Durable Workflow のエピックのアクション（アーキテクチャ設計書の比較・変更通知・DoD の判定・DoD 待ちのリクエストの開閉） | `ndf.progress.epic`、`ndf.progress.lane`、`ndf.core.durable` |
+| `plugins/ndf-next/src/ndf/progress/plan/epic.py` | 新設 | Durable Workflow のエピックのアクション（アーキテクチャ設計書の比較・変更通知・完了条件の判定・完了条件待ちのリクエストの開閉） | `ndf.progress.epic`、`ndf.progress.lane`、`ndf.core.durable` |
 | `plugins/ndf-next/src/ndf/progress/plan/run.py` | 変更 | エピックのアクションを実行し、スナップショットにエピックの有無と行の終わりを載せる | `plan_epic`、`run_decide` |
 | `plugins/ndf-next/src/ndf/progress/plan/run_decide.py` | 変更 | エピックのアクションを実行する時点を決める | 無し（判断のモジュール） |
 | `plugins/ndf-next/src/ndf/progress/lane/__init__.py` | 変更 | レーン宛ての未読の変更通知を読み、既読フラグを書く | `fold`、`rules` |
 | `plugins/ndf-next/src/ndf/progress/lane/fold.py` | 変更 | 計画のイベント 3 つ（`plan_started` のリビジョン・`done_checked`・`foundation_noticed`）とレーンの `notice_read` を畳み込む | `types` |
-| `plugins/ndf-next/src/ndf/progress/lane/rules.py` | 変更 | 完了の判定に DoD の項目を足し、変更通知の宛先を選ぶ | `types` |
+| `plugins/ndf-next/src/ndf/progress/lane/rules.py` | 変更 | 完了の判定に完了条件の項目を足し、変更通知の宛先を選ぶ | `types` |
 | `plugins/ndf-next/src/ndf/progress/lane/types.py` | 変更 | 計画のスナップショットに`epic` フィールド・判定・変更通知を足す | 無し |
 | `plugins/ndf-next/src/ndf/progress/command.py` | 変更 | `ndf progress new` に `--scale`・`--scale-reason` を足し、最初のスプリントの組み合わせを断る | `ndf.contracts` |
 | `plugins/ndf-next/src/ndf/progress/run.py` | 変更 | Issue の `## 進行` に `規模:` の行を出し、`next`・`wait` の結果に変更通知を載せる | `ndf.progress.lane` |
@@ -129,7 +129,7 @@ plugins/ndf-next/
 | `plugins/ndf-next/tests/progress/test_epic_foundation.py` | 新設 | アーキテクチャ設計書の解析と形の判定のテスト | `foundation_decide`、`foundation` |
 | `plugins/ndf-next/tests/progress/test_epic_verify.py` | 新設 | 検証と確認方法のテスト | `verify` |
 | `plugins/ndf-next/tests/progress/test_epic_cli.py` | 新設 | `ndf epic init`・`check` の結果 JSON と終了コードのテスト | `epic_cli` |
-| `plugins/ndf-next/tests/progress/test_plan_epic.py` | 新設 | 起動前チェック・DoD の項目・変更通知のテスト（受け入れ条件 2・4〜6・8） | `plan`、`plan_epic`、`lane` |
+| `plugins/ndf-next/tests/progress/test_plan_epic.py` | 新設 | 起動前チェック・完了条件の項目・変更通知のテスト（受け入れ条件 2・4〜6・8） | `plan`、`plan_epic`、`lane` |
 | `plugins/ndf-next/tests/progress/test_command.py` | 変更 | `--scale` の記録と断りのテスト | `command` |
 | `plugins/ndf-next/tests/progress/test_run.py` | 変更 | `規模:` の行と `next`・`wait` の変更通知のテスト | `progress_run` |
 
@@ -162,14 +162,14 @@ plugins/ndf-next/
 | 関数 | 配置先 | 種類 | シグネチャ | 責務 1 文 | 事前条件 | 事後条件 | 副作用 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `markdown.tables` | `adapters/markdown.py` | 新設 | `tables(text: str) -> list[Table]` | 最上位の GFM の表を、見出しの行・本文の行・各行の行番号つきで返す | 無し | 引用とリストの中の表は返さない。セルは前後の空白を除いた文字列 | 無し |
-| `foundation_decide.parse` | `progress/epic/foundation_decide.py` | 新設 | `parse(path: str, lines: list[str], headings: Sequence[Heading], tables: Sequence[Table], kinds: Sequence[str], spec: Mapping[str, Any]) -> Foundation` | 解析済みの見出し・表・行の種類から、セクション・コントラクトの行・DoD の行を持つアーキテクチャ設計書の値を作る | `kinds` の長さが `lines` と同じ | セクションは `##` の見出しごとに 1 つ。セクションの本文の行は HTML のコメントと空行を除いた行。コントラクトの行と DoD の行はコントラクトが表を持つと定めるセクションからだけ作る | 無し |
+| `foundation_decide.parse` | `progress/epic/foundation_decide.py` | 新設 | `parse(path: str, lines: list[str], headings: Sequence[Heading], tables: Sequence[Table], kinds: Sequence[str], spec: Mapping[str, Any]) -> Foundation` | 解析済みの見出し・表・行の種類から、セクション・コントラクトの行・完了条件の行を持つアーキテクチャ設計書の値を作る | `kinds` の長さが `lines` と同じ | セクションは `##` の見出しごとに 1 つ。セクションの本文の行は HTML のコメントと空行を除いた行。コントラクトの行と完了条件の行はコントラクトが表を持つと定めるセクションからだけ作る | 無し |
 | `foundation_decide.shape_errors` | `progress/epic/foundation_decide.py` | 新設 | `shape_errors(f: Foundation, spec: Mapping[str, Any]) -> list[Finding]` | 必須セクションの有無と空、表の列と各行の形を判定する | `f` は `parse` の結果 | 指摘は `empty-section`（無いセクションも含む）か `shape`。並びはコントラクトのセクションの順、セクションの中は行の順 | 無し |
-| `foundation_decide.unknown_done` | `progress/epic/foundation_decide.py` | 新設 | `unknown_done(f: Foundation, ids: Sequence[str]) -> list[Finding]` | 計画の DoD の番号のうち、アーキテクチャ設計書の DoD の表に無いものを指摘にする | 無し | 指摘は `unknown-done`。番号の並びは `ids` の順 | 無し |
+| `foundation_decide.unknown_done` | `progress/epic/foundation_decide.py` | 新設 | `unknown_done(f: Foundation, ids: Sequence[str]) -> list[Finding]` | 計画の完了条件の番号のうち、アーキテクチャ設計書の完了条件の表に無いものを指摘にする | 無し | 指摘は `unknown-done`。番号の並びは `ids` の順 | 無し |
 | `foundation_decide.changed_sections` | `progress/epic/foundation_decide.py` | 新設 | `changed_sections(old: Foundation, new: Foundation) -> list[str]` | 2 つのリビジョンで内容の違うセクションの名前を返す | 無し | 片方にだけあるセクションも違うセクションに含む。並びは `new` のセクションの順、`old` にだけあるセクションは後ろ | 無し |
 | `foundation_decide.places_of` | `progress/epic/foundation_decide.py` | 新設 | `places_of(old: Foundation, new: Foundation, names: Sequence[str]) -> list[str]` | 違うセクションの触るファイルを集める | `names` は `changed_sections` の結果 | 表のセクションは 2 つのリビジョンで違う行の正本と検証のパス。表の無いセクションは `触るファイル:` の行。どちらも無いセクションは `**`。重複を除き、並びは出た順 | 無し |
 | `foundation_decide.template` | `progress/epic/foundation_decide.py` | 新設 | `template(name: str, spec: Mapping[str, Any]) -> str` | マーカー・見出し・セクションごとのガイドのコメント・表の見出しの行を持つテンプレートの文を作る | 無し | 返した文を `parse` して `shape_errors` に掛けると、必須セクションがすべて `empty-section` になる | 無し |
 | `foundation_decide.parse_verify` | `progress/epic/foundation_decide.py` | 新設 | `parse_verify(cell: str) -> Verify \| None` | コントラクトの行の検証のフィールドを `exists`・`schema`・`generated`・`—` のどれかに読む | 無し | 4 つのどれでもなければ None。`—` は種類 `none` | 無し |
-| `foundation_decide.parse_check` | `progress/epic/foundation_decide.py` | 新設 | `parse_check(cell: str) -> Check \| None` | DoD の確認方法のフィールドを `issues`（番号の並び）か `command`（コマンドの文）に読む | 無し | どちらでもない・番号が 1 つも無い・コマンドが空なら None | 無し |
+| `foundation_decide.parse_check` | `progress/epic/foundation_decide.py` | 新設 | `parse_check(cell: str) -> Check \| None` | 完了条件の確認方法のフィールドを `issues`（番号の並び）か `command`（コマンドの文）に読む | 無し | どちらでもない・番号が 1 つも無い・コマンドが空なら None | 無し |
 | `foundation.spec` | `progress/epic/foundation.py` | 新設 | `spec() -> dict[str, Any]` | アーキテクチャ設計書のスキーマを読んで返す | 無し | 返す値はコントラクトの形のチェックを通っている | コントラクトのファイルを読む |
 | `foundation.read_text` | `progress/epic/foundation.py` | 新設 | `read_text(text: str, path: str) -> Foundation` | 文から見出し・表・行の種類を作り、`foundation_decide.parse` へ渡す | 無し | `parse` の事後条件と同じ | 無し |
 | `foundation.read_file` | `progress/epic/foundation.py` | 新設 | `read_file(root: Path, path: str) -> Foundation` | worktree のアーキテクチャ設計書を読む（`ndf epic check` が使う） | `path` は `root` からの相対 | 読めなければ `FoundationError` | ファイルを読む |
@@ -180,7 +180,7 @@ plugins/ndf-next/
 | `foundation.marked_files` | `progress/epic/foundation.py` | 新設 | `marked_files(root: Path) -> list[str]` | 追跡している Markdown のうち、先頭の行がマーカーのものを返す | 無し | パスは `root` からの相対で、辞書順 | git を読む（`ls-files`）・ファイルを読む |
 | `verify.verify_rows` | `progress/epic/verify.py` | 新設 | `verify_rows(root: Path, f: Foundation, timeout: float) -> list[Finding]` | 検証方法を持つコントラクトの行をすべて検証し、食い違いを指摘にする | `f` に `shape` の指摘が無い | 指摘は `contract-mismatch`。種類 `none` の行は検証しない | ファイルを読む・外部コマンド（`generated:`） |
 | `verify.verify_one` | `progress/epic/verify.py` | 新設 | `verify_one(root: Path, row: ContractRow, timeout: float) -> str \| None` | コントラクトの行 1 つを検証し、食い違いの文を返す | `row.verify` が None でない | 食い違いが無ければ None | ファイルを読む・外部コマンド（`generated:`） |
-| `verify.done_verdicts` | `progress/epic/verify.py` | 新設 | `done_verdicts(root: Path, rows: Sequence[DoneRow], states: Callable[[Sequence[int]], dict[int, str]], timeout: float) -> list[DoneVerdict]` | DoD の行ごとに確認方法を実行し、満たしたかを返す | `rows` は計画の `done` の番号に絞ってある | 1 行に 1 つの判定。Issue の状態はまとめて 1 回だけ読む | 外部コマンド（`command:`）・ネットワーク（`states` が GitHub を読む） |
+| `verify.done_verdicts` | `progress/epic/verify.py` | 新設 | `done_verdicts(root: Path, rows: Sequence[DoneRow], states: Callable[[Sequence[int]], dict[int, str]], timeout: float) -> list[DoneVerdict]` | 完了条件の行ごとに確認方法を実行し、満たしたかを返す | `rows` は計画の `done` の番号に絞ってある | 1 行に 1 つの判定。Issue の状態はまとめて 1 回だけ読む | 外部コマンド（`command:`）・ネットワーク（`states` が GitHub を読む） |
 | `verify.run_command` | `progress/epic/verify.py` | 新設 | `run_command(root: Path, text: str, timeout: float) -> tuple[int, str]` | シェルを通さずにコマンドを `root` で実行し、終了コードと標準出力を返す | `text` は `shlex.split` で割れる | 上限に当たれば終了コード `-1` と上限の文 | 外部コマンド |
 | `epic_cli.main` | `progress/epic/cli.py` | 新設 | `main(argv: list[str]) -> int` | 引数を読み、サブコマンドを流し、結果 JSON を最後の 1 行に出して終了コードを返す | 無し | 終了コードは結果のコントラクトの `cause.kind` から引く（0・1・2） | 標準出力 |
 | `epic_cli._cmd_init` | `progress/epic/cli.py` | 新設 | `_cmd_init(a: Namespace, root: Path) -> dict[str, Any]` | テンプレートを書く | 無し | ファイルがあれば書かずに `refused`。書いたらパスを `items` に返す | ファイルを書く（親のディレクトリを作る） |
@@ -189,13 +189,13 @@ plugins/ndf-next/
 | `plan.plan_payload` | `progress/plan/__init__.py` | 変更 | `plan_payload(doc: dict[str, Any]) -> dict[str, Any]` | 計画の行に `epic` フィールドを足す | 無し | `epic` が無い設定ファイルの値は今と同じ | 無し |
 | `plan.create_plan` | `progress/plan/__init__.py` | 変更 | `create_plan(conn, repo: str, doc: dict[str, Any], start: bool, foundation_rev: str \| None = None) -> str` | 起動するときの `plan_started` に起動時点のリビジョンを書く | `epic` があれば `epic_gate` が指摘 0 件で通っている | `foundation_rev` が None なら今と同じイベント | ワークフロー状態の DB にイベントを書く |
 | `plan.start_plan` | `progress/plan/__init__.py` | 変更 | `start_plan(conn, pid: str, foundation_rev: str \| None = None) -> None` | 止めた計画の起動にもリビジョンを書く | 同上 | 比較元は最初の `plan_started` のリビジョンのまま（`fold` が最初の値だけを持つ） | ワークフロー状態の DB にイベントを書く |
-| `plan.complete_plan` | `progress/plan/__init__.py` | 変更 | `complete_plan(conn, pid: str) -> bool` | DoD 待ちのリクエストが開いていれば、同じトランザクションで閉じてから計画を完了にする | 無し | 完了にしたら真。`rules.plan_complete` が偽なら何も書かない | ワークフロー状態の DB にイベントを書く |
-| `plan.epic_items` | `progress/plan/__init__.py` | 新設 | `epic_items(view: PlanView) -> tuple[list[dict[str, Any]], dict[str, int]]` | DoD の項目ごとの行と、満たした件数 / 全件数を作る | 無し | `epic` が無ければ `([], {})`。判定の記録の無い番号は `met: null` | 無し |
-| `plan.status_of` | `progress/plan/__init__.py` | 変更 | 変えない | `items` に DoD の行、`metrics.epic_done` に件数を足す | 無し | `epic` の無い計画の結果は今と同じ | 無し |
+| `plan.complete_plan` | `progress/plan/__init__.py` | 変更 | `complete_plan(conn, pid: str) -> bool` | 完了条件待ちのリクエストが開いていれば、同じトランザクションで閉じてから計画を完了にする | 無し | 完了にしたら真。`rules.plan_complete` が偽なら何も書かない | ワークフロー状態の DB にイベントを書く |
+| `plan.epic_items` | `progress/plan/__init__.py` | 新設 | `epic_items(view: PlanView) -> tuple[list[dict[str, Any]], dict[str, int]]` | 完了条件の項目ごとの行と、満たした件数 / 全件数を作る | 無し | `epic` が無ければ `([], {})`。判定の記録の無い番号は `met: null` | 無し |
+| `plan.status_of` | `progress/plan/__init__.py` | 変更 | 変えない | `items` に完了条件の行、`metrics.epic_done` に件数を足す | 無し | `epic` の無い計画の結果は今と同じ | 無し |
 | `plan_cli._dispatch` | `progress/plan/cli.py` | 変更 | 変えない | `init`・`start` で、トランザクションを開く前に `epic_gate` を実行し、指摘があれば止める | 無し | 指摘があればワークフロー状態を 1 つも書かず、`check_failed` の結果を返す | git を読む・ネットワーク |
 | `plan_cli._row_start` | `progress/plan/cli.py` | 変更 | 変えない | 行を始めた同じトランザクションで、レーンの未読の変更通知を結果の `notices` に載せる | 無し | 載せたら既読フラグが書かれている | ワークフロー状態の DB にイベントを書く |
 | `plan_cli._row_resumed` | `progress/plan/cli.py` | 変更 | 変えない | 同上（スプリントの ID からレーンを引く） | 無し | 同上 | ワークフロー状態の DB にイベントを書く |
-| `plan_epic.tick` | `progress/plan/epic.py` | 新設 | `tick(spec: dict[str, Any], judge: bool) -> dict[str, Any]` | Durable Step。ベースブランチのリビジョンを読み、変更通知と、`judge` なら DoD の判定を書く | 計画が `epic` を持つ | 戻り値は `{"noticed": 件数, "judged": 真偽, "remaining": [番号], "error": 文 \| None}` | git・ネットワーク・外部コマンド・ワークフロー状態の DB |
+| `plan_epic.tick` | `progress/plan/epic.py` | 新設 | `tick(spec: dict[str, Any], judge: bool) -> dict[str, Any]` | Durable Step。ベースブランチのリビジョンを読み、変更通知と、`judge` なら完了条件の判定を書く | 計画が `epic` を持つ | 戻り値は `{"noticed": 件数, "judged": 真偽, "remaining": [番号], "error": 文 \| None}` | git・ネットワーク・外部コマンド・ワークフロー状態の DB |
 | `plan_epic.gather` | `progress/plan/epic.py` | 新設 | `gather(root: Path, view: PlanView, judge: bool, timeout: float) -> TickInput` | DB の外で、ベースブランチのリビジョン・比較元のリビジョン・判定を読む | 無し | 読めなかったものは `TickInput.error` に理由を持ち、その部分は空 | git・ネットワーク・外部コマンド |
 | `plan_epic.write_tick` | `progress/plan/epic.py` | 新設 | `write_tick(conn, plan_id: str, got: TickInput) -> dict[str, Any]` | 読み直した計画に、変わった判定・変更通知・リクエストの開閉を書く | 無し | 計画が実行中でなければ何も書かない。同じ入力で 2 回呼んでも 2 回目は何も書かない | ワークフロー状態の DB にイベントを書く |
 | `plan_run._perform` | `progress/plan/run.py` | 変更 | 変えない | アクション `EpicTick` を `plan_epic.tick` へ渡す | 無し | 結果は `Done(act, 戻り値)` | Durable Stepを実行する |
@@ -208,8 +208,8 @@ plugins/ndf-next/
 | `fold.last_notice_read` | `progress/lane/fold.py` | 新設 | `last_notice_read(events: Iterable[Event]) -> int` | レーンのワークフロー状態の最後の `notice_read` の番号を返す | 無し | 無ければ 0 | 無し |
 | `fold._fold_plan_event` | `progress/lane/fold.py` | 変更 | 変えない | `created` の `epic`、最初の `plan_started` の `foundation_rev`、`done_checked`（番号ごとに最後）、`foundation_noticed`（並び）をスナップショットに畳む | 無し | フィールドの無いイベントの扱いは今と同じ | 無し |
 | `rules.rows_done` | `progress/lane/rules.py` | 新設 | `rows_done(view: PlanView, lanes: Lanes) -> bool` | 全レーンの行が完了か中止かを返す | 無し | 今の `plan_complete` の前半と同じ判定 | 無し |
-| `rules.done_remaining` | `progress/lane/rules.py` | 新設 | `done_remaining(view: PlanView) -> list[str]` | 計画の DoD の番号のうち、最後の判定が満たしていないもの（未判定を含む）を返す | 無し | `epic` が無ければ空。並びは `epic.done` の順 | 無し |
-| `rules.plan_complete` | `progress/lane/rules.py` | 変更 | 変えない | 全行の終わりと、DoD 待ちのリクエストを除いた答えていないリクエストが無いことに、DoD の残りが無いことを足す | 無し | `epic` が無ければ今と同じ（I6） | 無し |
+| `rules.done_remaining` | `progress/lane/rules.py` | 新設 | `done_remaining(view: PlanView) -> list[str]` | 計画の完了条件の番号のうち、最後の判定が満たしていないもの（未判定を含む）を返す | 無し | `epic` が無ければ空。並びは `epic.done` の順 | 無し |
+| `rules.plan_complete` | `progress/lane/rules.py` | 変更 | 変えない | 全行の終わりと、完了条件待ちのリクエストを除いた答えていないリクエストが無いことに、完了条件の残りが無いことを足す | 無し | `epic` が無ければ今と同じ（I6） | 無し |
 | `rules.notice_targets` | `progress/lane/rules.py` | 新設 | `notice_targets(view: PlanView, lanes: Lanes, places: Sequence[str]) -> list[str]` | 終わっていないレーンのうち、触るファイルが `places` のどれかと重なるものを返す | 無し | 重なりは既存の `touch_hit`。`**` はすべてのレーンに当たる。並びは計画のレーンの順 | 無し |
 | `command._prepare_new` | `progress/command.py` | 変更 | 変えない | `--scale` があればコンテキストに `scale` を足し、`epic-first` の組み合わせを確かめる | 無し | `--scale` が無ければコンテキストは今と同じ。`epic-first` でモードが `standard` でないか進め方が `normal` でなければ `model.Refused` | 無し |
 | `progress_run.issue_section` | `progress/run.py` | 変更 | 変えない | コンテキストに `scale` があれば `モード:` の次の行に `規模:` の行を出す | 無し | `scale` が無ければ今と同じ文 | 無し |
@@ -247,7 +247,7 @@ plugins/ndf-next/
 | `plan_cli._row_start` | 行を始められない | 既存のルール | 既存の `start_row` | 止める | 今と同じ `refused`。変更通知の既読フラグも書かない（同じトランザクション） | トランザクションごと戻る |
 | `plan_cli._row_resumed` | 書く前にレーンのワークフロー状態が動いた | 同時の書き込み | `checked_write` の番号の食い違い | 呼び出し元へ返す | 既存の再実行（`retrying_transaction`） | トランザクションごと戻る |
 | `plan_epic.tick` | 読み取りの一部が失敗した | `gather` の `error` | `TickInput.error` | 既定値で続ける（読めた分だけ書く） | 戻り値の `error`。`run.log` に 1 行 | 次の間隔で再実行する |
-| `plan_epic.gather` | ベースブランチのリビジョンにアーキテクチャ設計書が無くなった | アーキテクチャ設計書を消す・移す変更がマージされた | `read_at` が None | 既定値で続ける（変更通知と判定を書かない） | 戻り値の `error`（「ベースブランチのリビジョンにアーキテクチャ設計書が無い」）。`status` の DoD の項目は前の判定のまま | アーキテクチャ設計書が戻れば次の間隔で続く |
+| `plan_epic.gather` | ベースブランチのリビジョンにアーキテクチャ設計書が無くなった | アーキテクチャ設計書を消す・移す変更がマージされた | `read_at` が None | 既定値で続ける（変更通知と判定を書かない） | 戻り値の `error`（「ベースブランチのリビジョンにアーキテクチャ設計書が無い」）。`status` の完了条件の項目は前の判定のまま | アーキテクチャ設計書が戻れば次の間隔で続く |
 | `plan_epic.write_tick` | 計画が実行中でない | 止めた・中止した・完了した | 読み直した計画の状態 | 何も書かずに返す | 無し | 無し |
 | `plan_epic.write_tick` | 書く前に計画が動いた | 同時の書き込み | `store.append_events` の番号の食い違い | 呼び出し元へ返す | Durable Stepの失敗として記録される | トランザクションごと戻る。冪等なので次のアクションで再実行できる |
 | `plan_run._perform` | エピックのアクションが例外で落ちた | `tick` の中の予期しない例外 | Durable Step | 呼び出し元へ返す | 既存の Durable Workflow の失敗の扱い（`ndf lanes run` の結果） | 再開すると同じアクションから再実行する |
@@ -260,9 +260,9 @@ plugins/ndf-next/
 
 ## 処理の手順
 
-**計画を完了にしてよいか（`rules.plan_complete`）。** DoD 待ちのリクエストを答えていないリクエストに数えない（設計文書の I5）。
+**計画を完了にしてよいか（`rules.plan_complete`）。**完了条件待ちのリクエストを答えていないリクエストに数えない（設計文書の I5）。
 
-| 計画の `epic` | 全行が終わった | DoD 待ちのリクエストのほかに開いたリクエスト | DoD の残り | 結果 |
+| 計画の `epic` | 全行が終わった | 完了条件待ちのリクエストのほかに開いたリクエスト | 完了条件の残り | 結果 |
 | --- | --- | --- | --- | --- |
 | 無し | いいえ | どれでも | — | 偽 |
 | 無し | はい | ある | — | 偽 |
@@ -290,8 +290,8 @@ plugins/ndf-next/
 | ベースブランチのリビジョンの識別子が比較元と違い、宛先が 1 本以上ある | `foundation_noticed`（`from_rev`・`to_rev`・`sections`・`places`・`lanes`） |
 | ベースブランチのリビジョンの識別子が比較元と違い、宛先が 0 本 | `foundation_noticed`（`lanes` は空。比較元を進めるために書く） |
 | `judge` で、番号の判定（`met`・`detail`）が最後の `done_checked` と違う | 番号ごとに `done_checked` |
-| 全行が終わり、ほかのリクエストが無く、残りがあり、残りの並びのキーのリクエストがまだ開いたことが無い | 開いている DoD 待ちのリクエストを閉じ、`request_opened`（`kind: epic_done_wait`・`remaining`・理由に番号の並び） |
-| 全行が終わっていない（オーガナイザーがレーンか行を足した）で、DoD 待ちのリクエストが開いている | `request_closed`（理由「レーンか行が足された」） |
+| 全行が終わり、ほかのリクエストが無く、残りがあり、残りの並びのキーのリクエストがまだ開いたことが無い | 開いている完了条件待ちのリクエストを閉じ、`request_opened`（`kind: epic_done_wait`・`remaining`・理由に番号の並び） |
+| 全行が終わっていない（オーガナイザーがレーンか行を足した）で、完了条件待ちのリクエストが開いている | `request_closed`（理由「レーンか行が足された」） |
 | 残りが無い | 何も書かない（ループの次の 1 回で `Complete` がリクエストを閉じて完了にする） |
 
 リクエストのキーは `epic-done:<残りの番号をカンマでつないだ文>` である。「開いたことが無い」は、計画のスナップショットのリクエスト（閉じたものを含む）にそのキーが無いことで判定する。オーガナイザーが閉じたキーでは開き直さない。
@@ -329,10 +329,10 @@ plugins/ndf-next/
 | 検証の種類 | 定数 | 同じコントラクトの `verify_kinds` | `exists`・`schema`・`generated`・`none` |
 | 確認方法の種類 | 定数 | 同じコントラクトの `check_kinds` | `issues`・`command` |
 | 触るファイルの行の頭 | 定数 | 同じコントラクトの `places_prefix` | `触るファイル:` |
-| DoD の判定の間隔 | 設定値 | `contracts/limits.json` の `lanes.epic-recheck` | `seconds: 600` |
+| 完了条件の判定の間隔 | 設定値 | `contracts/limits.json` の `lanes.epic-recheck` | `seconds: 600` |
 | 検証と確認方法のコマンドの上限 | 設定値 | `contracts/limits.json` の `epic.command` | `per_call: 300` |
-| DoD 待ちのリクエストの種類 | 定数 | `progress/lane/types.py` の `DONE_WAIT` | `epic_done_wait` |
-| DoD 待ちのリクエストのキーの頭 | 定数 | `progress/lane/types.py`（`DONE_WAIT` の隣） | `epic-done:` |
+| 完了条件待ちのリクエストの種類 | 定数 | `progress/lane/types.py` の `DONE_WAIT` | `epic_done_wait` |
+| 完了条件待ちのリクエストのキーの頭 | 定数 | `progress/lane/types.py`（`DONE_WAIT` の隣） | `epic-done:` |
 | `Foundation`・`Section`・`ContractRow`・`DoneRow`・`Finding` | 型（不変の値） | `progress/epic/foundation_decide.py` | — |
 | `DoneVerdict` | 型 | `progress/epic/verify.py` | — |
 | `EpicDecl`・`Notice` | 型 | `progress/lane/types.py` | — |
@@ -362,8 +362,8 @@ GitHub の読み取り（`states`）と DB の書き込みを同じトランザ�
 | --- | --- | --- | --- |
 | `epic_cli.main` | 結果 JSON（`items` に指摘、`metrics.files`・`metrics.findings`）。指摘は 1 件 1 行で標準エラーにも出す | 標準出力の最後の 1 行・標準エラー | コマンドの標準出力の全文（`generated:` の食い違いは最初に違う行の番号だけを出す） |
 | `plan_cli._dispatch` | 起動前チェックの指摘 | 結果 JSON の `items` | アーキテクチャ設計書の本文 |
-| `plan.status_of` | DoD の項目ごとの行と `metrics.epic_done` | 結果 JSON | 確認方法のコマンドの出力 |
-| `plan_epic.write_tick` | `done_checked`・`foundation_noticed`・DoD 待ちのリクエスト | 計画のワークフロー状態のイベント | 確認方法のコマンドの出力の全文（`detail` は終了コードと最後の 1 行の 200 字まで） |
+| `plan.status_of` | 完了条件の項目ごとの行と `metrics.epic_done` | 結果 JSON | 確認方法のコマンドの出力 |
+| `plan_epic.write_tick` | `done_checked`・`foundation_noticed`・完了条件待ちのリクエスト | 計画のワークフロー状態のイベント | 確認方法のコマンドの出力の全文（`detail` は終了コードと最後の 1 行の 200 字まで） |
 | `plan_epic.tick` | 読めなかった理由（`error`） | Durable Workflow の `run.log` に 1 行（既存の `RUN_LOG`） | 環境変数の値・トークン |
 | `lane.take_notices` | 既読フラグ | レーンのワークフロー状態のイベント `notice_read` | 無し |
 | `plan_cli._row_start`・`_row_resumed`・`progress_run._cmd_next`・`_cmd_wait` | `notices`（セクション・触るファイル・前後のリビジョン・イベントの番号） | 結果 JSON | アーキテクチャ設計書の本文 |
@@ -417,7 +417,7 @@ GitHub の読み取り（`states`）と DB の書き込みを同じトランザ�
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `markdown.tables` | 見出しと 2 行の表を、行番号つきで返す | 見出しだけの表は本文 0 行。引用の中の表は返さない | 区切りの行の無い `\|` の並びは表にしない |
-| `foundation_decide.parse` | 12 セクションのアーキテクチャ設計書からセクション・コントラクトの行・DoD の行を作る | コメントだけのセクションは本文 0 行。コードブロックの中の `##` はセクションにしない | コントラクトに無い名前の `##` のセクションは値に残り、`shape_errors` が指摘しない（追加のセクションを許す） |
+| `foundation_decide.parse` | 12 セクションのアーキテクチャ設計書からセクション・コントラクトの行・完了条件の行を作る | コメントだけのセクションは本文 0 行。コードブロックの中の `##` はセクションにしない | コントラクトに無い名前の `##` のセクションは値に残り、`shape_errors` が指摘しない（追加のセクションを許す） |
 | `foundation_decide.shape_errors` | すべて埋めたアーキテクチャ設計書で 0 件 | 必須セクションが無い・空のとき `empty-section`。該当時のセクションが空でも指摘しない | 列の名前が違う・`#` が `D<数>` でない・確認方法が読めない行で `shape`（行の番号と列の名前を持つ） |
 | `foundation_decide.unknown_done` | すべてある番号で 0 件 | 空の並びで 0 件 | 無い番号ごとに `unknown-done` |
 | `foundation_decide.changed_sections` | 同じリビジョンで空 | 片方にだけあるセクションを含む | 空白だけの違いも違いとする（本文の行を比べる） |
@@ -444,7 +444,7 @@ GitHub の読み取り（`states`）と DB の書き込みを同じトランザ�
 | `plan.plan_payload` | `epic` をコピーする | `epic` が無い | — |
 | `plan.create_plan` | `plan_started` に `foundation_rev` | `foundation_rev` が None | 既存のルールの `Refused` |
 | `plan.start_plan` | 止めた計画の起動でリビジョンを書き、比較元は最初のリビジョンのまま | — | 既存のルールの `Refused` |
-| `plan.complete_plan` | DoD 待ちのリクエストを閉じてから完了を書く | リクエストが無い | 残りがあれば何も書かない |
+| `plan.complete_plan` | 完了条件待ちのリクエストを閉じてから完了を書く | リクエストが無い | 残りがあれば何も書かない |
 | `plan.epic_items` | 番号ごとの行と `{met, total}` | 判定の記録の無い番号で `met: null`（受け入れ条件 5） | — |
 | `plan.status_of` | `epic` の行が `items` に載る | `epic` の無い計画で今と同じ | — |
 | `plan_cli._dispatch` | 指摘 0 件で今と同じ | — | 指摘でワークフロー状態を 1 つも書かず `check_failed` |
@@ -464,7 +464,7 @@ GitHub の読み取り（`states`）と DB の書き込みを同じトランザ�
 | `fold._fold_plan_event` | 新しいイベントを畳む | 前のリビジョンの記録（フィールドが無い）を読める | — |
 | `rules.rows_done` | 全行が完了か中止で真 | 行が 0 | — |
 | `rules.done_remaining` | 満たしていない番号 | 未判定の番号を含む | `epic` が無ければ空 |
-| `rules.plan_complete` | 判定表の 7 行 | DoD 待ちのリクエストだけが開いている | — |
+| `rules.plan_complete` | 判定表の 7 行 | 完了条件待ちのリクエストだけが開いている | — |
 | `rules.notice_targets` | 重なるレーンだけ | `**` で終わっていないレーンすべて | 終わったレーンは選ばない |
 | `command._prepare_new` | `scale` をコンテキストに書く（受け入れ条件 7） | `--scale` 無しで今と同じ | 判定表の断る 2 行。`--scale-reason` だけで誤り |
 | `progress_run.issue_section` | `規模:` の行が `モード:` の次 | `scale` が無ければ今と同じ | — |
