@@ -295,15 +295,18 @@ def skill_findings(model: SpecModel, scope: Scope, rel: Any) -> list[Finding]:
 def _hits(model: SpecModel, row: dict[str, Any]) -> bool:
     """公開する面の行が規約の項目に当たるか。"""
     kind, target = row["kind"], row["target"]
-    if kind in ("skill", "block"):
-        return target in {s.name for s in model.skills}
-    if kind == "command":
-        return target in {c.name for c in model.commands}
-    if kind == "hook":
-        return target in {h.event for h in model.hooks}
     if kind == "file":
         return target in model.places and set(opt(row, "files")) <= {r["id"] for r in model.files}
-    return kind == "report"
+    face = spec_model.face_of(kind)
+    # 面ごとの項目の名前（report は規約の項目を持たず、行があれば当たる）
+    names = {
+        "skill": {s.name for s in model.skills},
+        "command": {c.name for c in model.commands},
+        "hook": {h.event for h in model.hooks},
+    }
+    if face in names:
+        return target in names[face]
+    return face == "report"
 
 
 def public_findings(model: SpecModel, plugin_root: Path, rel: Any) -> list[Finding]:

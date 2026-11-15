@@ -71,6 +71,15 @@ def decl_place(places: dict[str, dict[str, Any]]) -> str:
     return found[0]
 
 
+def face_of(kind: str) -> str | None:
+    """エントリポイントの表の種類 → 規約の面。種類 spec と file は面の項目を指さず `None`。
+
+    対応表を最上位の定数に置くと、面の語が別の語彙（作業種別など）の定数と同じ文字列として const-fact に数えられる。
+    """
+    faces = {"skill": "skill", "block": "skill", "command": "command", "hook": "hook", "report": "report"}
+    return faces[kind] if kind in faces else None
+
+
 def opt(row: dict[str, Any], key: str, empty: Any = ()) -> Any:
     """表の任意の列（`optional`）の値。行が列を持たなければ `empty`（列の宣言が欠けてよいとする値）。"""
     return row[key] if key in row else empty
@@ -221,10 +230,9 @@ def public_ids(entrypoints: list[dict[str, Any]], files: list[dict[str, Any]]) -
             out |= {(DECL_KIND, f) for f in opt(row, "files")}
             continue
         out |= {("file", f) for f in opt(row, "files")}
-        if kind in ("skill", "block"):
-            out.add(("skill", row["target"]))
-        elif kind in ("command", "hook", "report"):
-            out.add((kind, row["target"]))
+        face = face_of(kind)
+        if face is not None:
+            out.add((face, row["target"]))
     out |= {("file", r["id"]) for r in files if "reader" in r}
     return out
 
