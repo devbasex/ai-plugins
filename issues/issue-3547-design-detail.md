@@ -20,9 +20,9 @@ plugins/ndf-next/
 │       │   ├── cli.py *            受付（argparse と結果 JSON の出力）
 │       │   ├── check.py *          gws の確認の流れ
 │       │   ├── thumbnails.py *     サムネイルの流れ
-│       │   ├── auth_decide.py *    認証の判定・キーの取り出し・末尾の切り出し（純粋）
+│       │   ├── report_decide.py *  キーの取り出し・末尾の切り出し（純粋）
 │       │   └── material.py *       導入の承認資料
-│       └── records/gws.py          足すだけの変更 3 つ
+│       └── records/gws.py          足すだけの変更 3 つ（判定 authenticated は変えずに使う）
 ├── contracts/
 │   ├── schemas/io/gws.result.schema.json *   手書き
 │   ├── schemas/io/gws.args.schema.json *     生成物
@@ -36,16 +36,16 @@ plugins/ndf-next/
 docs/glossary/glossary.json, docs/glossary.md  （リポジトリの根から）
 ```
 
-依存の向きは一方向である。受付が 2 つの流れを読み、流れが認証の判定・導入の承認資料・records の gws の部品・パッケージの `__init__.py` を読む。認証の判定は標準ライブラリの型のほかを読まない。records の gws の部品は gws のパッケージを読まない。受付だけが結果の部品で結果 JSON を出し、流れは結果の辞書と終了コードを返すか、止まる理由の例外を投げる。流れが副命令の表（`ndf.cli`）を読まないため、`ndf.cli` → 受付 → 流れ の間に輪はできない。
+依存の向きは一方向である。受付が 2 つの流れを読み、流れが結果の値の切り出し・導入の承認資料・records の gws の部品（読み取りと判定）・パッケージの `__init__.py` を読む。結果の値の切り出しは標準ライブラリの型のほかを読まない。records の gws の部品は gws のパッケージを読まない。受付だけが結果の部品で結果 JSON を出し、流れは結果の辞書と終了コードを返すか、止まる理由の例外を投げる。流れが副命令の表（`ndf.cli`）を読まないため、`ndf.cli` → 受付 → 流れ の間に輪はできない。
 
 | パス | 種類 | 役割 1 文 | 依存する先 |
 | --- | --- | --- | --- |
 | `plugins/ndf-next/src/ndf/cli.py` | 変更 | 副命令の表に `"gws": "ndf.domains.gws.cli"` を足す | 無し（読むのは呼ぶときだけ） |
 | `plugins/ndf-next/src/ndf/domains/gws/__init__.py` | 新設 | 2 つの流れが共有する止まる理由の例外（`GwsStop`）と未認証の終了コードを持つ | `ndf.contracts.exit_codes`・`ndf.contracts.result` |
 | `plugins/ndf-next/src/ndf/domains/gws/cli.py` | 新設 | 下位の命令 `check`・`thumbnails` の引数を読み、流れを呼び、結果 JSON を 1 行出して終了コードを返す | `ndf.cli`・`ndf.contracts.result`・`check.py`・`thumbnails.py`・`__init__.py` |
-| `plugins/ndf-next/src/ndf/domains/gws/check.py` | 新設 | gws と npm を探し、認証の状態の読み取り・承認資料の書き出し・npm の全体インストールを行って gws の確認の結果を組む | `auth_decide.py`・`material.py`・`__init__.py`・`ndf.domains.records.gws`・`ndf.contracts.limits`・`ndf.contracts.result` |
-| `plugins/ndf-next/src/ndf/domains/gws/thumbnails.py` | 新設 | gws と curl を探し、ページの ID の取得・サムネイルの URL の取得・画像の保存を行ってサムネイルの保存の結果を組む | `auth_decide.py`・`__init__.py`・`ndf.domains.records.gws`・`ndf.contracts.limits`・`ndf.contracts.result` |
-| `plugins/ndf-next/src/ndf/domains/gws/auth_decide.py` | 新設 | 認証済みかの判定・`metrics` へ写すキーの取り出し・出力の末尾の切り出しを持つ純粋な判断 | 無し |
+| `plugins/ndf-next/src/ndf/domains/gws/check.py` | 新設 | gws と npm を探し、認証の状態の読み取り・承認資料の書き出し・npm の全体インストールを行って gws の確認の結果を組む | `report_decide.py`・`material.py`・`__init__.py`・`ndf.domains.records.gws`・`ndf.contracts.limits`・`ndf.contracts.result` |
+| `plugins/ndf-next/src/ndf/domains/gws/thumbnails.py` | 新設 | gws と curl を探し、ページの ID の取得・サムネイルの URL の取得・画像の保存を行ってサムネイルの保存の結果を組む | `report_decide.py`・`__init__.py`・`ndf.domains.records.gws`・`ndf.contracts.limits`・`ndf.contracts.result` |
+| `plugins/ndf-next/src/ndf/domains/gws/report_decide.py` | 新設 | 認証済みかの判定・`metrics` へ写すキーの取り出し・出力の末尾の切り出しを持つ純粋な判断 | 無し |
 | `plugins/ndf-next/src/ndf/domains/gws/material.py` | 新設 | 導入の承認資料の Markdown を組み、状態の置き場の下の置き場 `gws` へ書く | `ndf.identity`・`ndf.domains.records.files`・`ndf.domains.worktree.atomic` |
 | `plugins/ndf-next/src/ndf/domains/records/gws.py` | 変更 | 認証の状態の読み取りに、上限の名前の引数・誤りの標準エラー・3 つのキーの公開の名前を足す | `ndf.contracts.limits`（変えない） |
 | `plugins/ndf-next/contracts/schemas/io/gws.result.schema.json` | 新設 | 結果の契約を引き、`tool` を `gws` に固定し、`metrics` と `items` の要素を閉じる | `contracts/schemas/result.schema.json` |
@@ -74,9 +74,9 @@ docs/glossary/glossary.json, docs/glossary.md  （リポジトリの根から）
 | `src/ndf/domains/gws/cli.py` | モジュール `ndf.domains.gws.cli` | `gws.cli.main`・`gws.cli._check`・`gws.cli._thumbnails`・`gws.cli._emit_stop`（いずれも新設） |
 | `src/ndf/domains/gws/check.py` | モジュール `ndf.domains.gws.check` | `check.run`・`check._report`・`check._present`・`check._install`・`check._npm_prefix`（いずれも新設） |
 | `src/ndf/domains/gws/thumbnails.py` | モジュール `ndf.domains.gws.thumbnails` | `thumbnails.run`・`thumbnails._gws`・`thumbnails._unauthenticated`・`thumbnails._page_ids`・`thumbnails._thumbnail`（いずれも新設）。内部の例外 `_NeedsLogin`（新設） |
-| `src/ndf/domains/gws/auth_decide.py` | モジュール `ndf.domains.gws.auth_decide` | `auth_decide.authenticated`・`auth_decide.pick`・`auth_decide.tail`（いずれも新設） |
+| `src/ndf/domains/gws/report_decide.py` | モジュール `ndf.domains.gws.report_decide` | `report_decide.pick`・`report_decide.tail`（いずれも新設） |
 | `src/ndf/domains/gws/material.py` | モジュール `ndf.domains.gws.material` | `material.render`・`material.write`（いずれも新設） |
-| `src/ndf/domains/records/gws.py` | クラス `GwsError`・モジュール `ndf.domains.records.gws` | `GwsError.__init__`（変更）・`records.gws.auth_status`（変更）・`STATUS_KEYS`（変更。`_STATUS_KEYS` を公開の名前にする）。`decide`・`authenticated` は変えない |
+| `src/ndf/domains/records/gws.py` | クラス `GwsError`・モジュール `ndf.domains.records.gws` | `GwsError.__init__`（変更）・`records.gws.auth_status`（変更）・`STATUS_KEYS`（変更。`_STATUS_KEYS` を公開の名前にする）。`decide`・`authenticated` は変えず、gws の確認とサムネイルの保存が呼ぶ（設計文書の決定 4） |
 | `src/ndf/domains/records/cli.py` | モジュール `ndf.domains.records.cli` | 変えない（`_gws_check` は `records.gws.auth_status()` を引数なしで呼び続ける） |
 
 ## 関数の仕様
@@ -85,13 +85,12 @@ docs/glossary/glossary.json, docs/glossary.md  （リポジトリの根から）
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `GwsStop.__init__` | `src/ndf/domains/gws/__init__.py` | 新設 | `(kind: str, detail: str, *, summary: str \| None = None, items: list[dict[str, str]] \| None = None, metrics: dict[str, Any] \| None = None) -> None` | 流れが止まる理由（止まった理由の種類・説明・利用者への案内・項目・計測値）を受付へ運ぶ | `kind` は止まった理由の種類の表（`contracts/causes.json`）にある | 渡した値を同名の属性に持つ | 無し |
 | `unauthenticated_code` | `src/ndf/domains/gws/__init__.py` | 新設 | `() -> int` | 未認証の承認ゲートの終了コード（承認ゲートの最初の値に 1 を足した値。11）を返す | 無し | 返す値は承認ゲートの範囲（10〜19）の中にある | 契約のファイル（終了コードの表）を読む |
-| `auth_decide.authenticated` | `src/ndf/domains/gws/auth_decide.py` | 新設 | `(status: Mapping[str, Any]) -> bool` | `credential_source` が `none` でなければ認証済みとする | `status` は認証の状態の読み取りが返した辞書 | `credential_source` が `none` のときだけ偽 | 無し |
-| `auth_decide.pick` | `src/ndf/domains/gws/auth_decide.py` | 新設 | `(status: Mapping[str, Any], keys: Sequence[str]) -> dict[str, Any]` | 認証の状態から、`metrics` へ写すキーだけを取り出す | `keys` のキーはすべて `status` にある（読み取りが確かめた） | 戻り値のキーは `keys` と一致し、ほかのキーを持たない | 無し |
-| `auth_decide.tail` | `src/ndf/domains/gws/auth_decide.py` | 新設 | `(text: str \| None) -> str` | 出力の末尾 `TAIL_LINES` 行を切り出す | 無し | 戻り値の行数は `TAIL_LINES` 以下で、前後の空白を除く。`None` と空は空文字 | 無し |
+| `report_decide.pick` | `src/ndf/domains/gws/report_decide.py` | 新設 | `(status: Mapping[str, Any], keys: Sequence[str]) -> dict[str, Any]` | 認証の状態から、`metrics` へ写すキーだけを取り出す | `keys` のキーはすべて `status` にある（読み取りが確かめた） | 戻り値のキーは `keys` と一致し、ほかのキーを持たない | 無し |
+| `report_decide.tail` | `src/ndf/domains/gws/report_decide.py` | 新設 | `(text: str \| None) -> str` | 出力の末尾 `TAIL_LINES` 行を切り出す | 無し | 戻り値の行数は `TAIL_LINES` 以下で、前後の空白を除く。`None` と空は空文字 | 無し |
 | `records.gws.auth_status` | `src/ndf/domains/records/gws.py` | 変更 | `(limit: str = "gws.auth-status") -> dict[str, Any]` | `gws auth status` を 1 回打ち、上限の名前 `limit` の秒数で打ち切り、3 つのキーがそろった JSON を返す | `limit` は上限の宣言（`contracts/limits.json`）にある名前 | 戻り値は `STATUS_KEYS` をすべて持つ辞書。引数なしの呼び出しの振る舞いは今と同じ | gws の起動（引数は `auth status` だけ） |
 | `GwsError.__init__` | `src/ndf/domains/records/gws.py` | 変更 | `(message: str, stderr: str = "") -> None` | 読めない理由に gws の標準エラーを添える | 無し | `str(exc)` は今と同じ文、`exc.stderr` は gws の標準エラー（無ければ空文字） | 無し |
 | `check.run` | `src/ndf/domains/gws/check.py` | 新設 | `(tool: str, install: bool) -> tuple[dict[str, Any], int]` | gws の有無・npm の有無・導入の同意の印から次の処理を選び、gws の確認の結果と終了コードを返す | 状態の置き場は受付の前に用意済み（`ndf.cli`） | 戻り値は `ok`・0 か `gate`・10 か `gate`・11 のどれか。ほかは `GwsStop` を投げる | gws・npm の起動、承認資料の書き出し |
-| `check._report` | `src/ndf/domains/gws/check.py` | 新設 | `(tool: str) -> tuple[dict[str, Any], int]` | 認証の状態を上限 `google-workspace.call` で読み、`authenticated` か `unauthenticated` の結果を組む | gws が PATH にある | `metrics` は `state` と 3 つのキーだけを持つ。未認証なら `routes` は `retry` → `ndf gws check`・`cancel` → `null` | gws の起動 |
+| `check._report` | `src/ndf/domains/gws/check.py` | 新設 | `(tool: str) -> tuple[dict[str, Any], int]` | 認証の状態を上限 `google-workspace.call` で読み、`records.gws.authenticated` で `authenticated` か `unauthenticated` の結果を組む | gws が PATH にある | `metrics` は `state` と 3 つのキーだけを持つ。未認証なら `routes` は `retry` → `ndf gws check`・`cancel` → `null` | gws の起動 |
 | `check._present` | `src/ndf/domains/gws/check.py` | 新設 | `(tool: str, npm: str) -> tuple[dict[str, Any], int]` | 承認資料を書き、`missing` の承認ゲートの結果を組む | gws が無く、npm が PATH にあり、導入の同意の印が無い | 承認資料のファイルがあり、`presentation_path` がそのパスを指す。`routes` は `approved` → `ndf gws check --install`・`rejected` → `null` | npm の起動（`prefix -g`）、承認資料の書き出し |
 | `check._install` | `src/ndf/domains/gws/check.py` | 新設 | `(npm: str) -> None` | `npm install -g @googleworkspace/cli` を上限 `google-workspace.install` で 1 回打つ | 導入の同意の印がある | 戻ったときは npm が 0 で終わっている | npm の起動（利用者の環境への全体インストール） |
 | `check._npm_prefix` | `src/ndf/domains/gws/check.py` | 新設 | `(npm: str) -> str \| None` | `npm prefix -g` を上限 `google-workspace.call` で打ち、全体インストールの置き場を読む | 無し | 0 で終わり出力が空でなければその値、ほかは `None` | npm の起動（読むだけ） |
@@ -99,7 +98,7 @@ docs/glossary/glossary.json, docs/glossary.md  （リポジトリの根から）
 | `material.write` | `src/ndf/domains/gws/material.py` | 新設 | `(text: str) -> Path` | 承認資料を状態の置き場の下の `gws/install.md` へ置き換えで書く | 状態の置き場を解ける | 戻り値のパスに `text` が書き終わっている（半端なファイルを残さない） | ファイルの書き出し（ディレクトリの作成を含む） |
 | `thumbnails.run` | `src/ndf/domains/gws/thumbnails.py` | 新設 | `(tool: str, presentation_id: str, out_dir: str, size: str) -> tuple[dict[str, Any], int]` | 全ページのサムネイルを `p<番号>.png` で保存し、サムネイルの保存の結果と終了コードを返す | `size` は `SIZES` のどれか（受付の argparse が確かめた） | 戻り値は `ok`・0 か `gate`・11。ほかは `GwsStop` を投げる。`ok` のとき `items` はページ順 | gws・curl の起動、出力のディレクトリの作成と画像の書き出し |
 | `thumbnails._gws` | `src/ndf/domains/gws/thumbnails.py` | 新設 | `(gws: str, args: Sequence[str], what: str) -> Any` | gws のスライドの操作を上限 `google-workspace.thumbnails` で打ち、応答の JSON を返す | gws が PATH にある | 戻り値は JSON として読めた値。0 以外で未認証なら `_NeedsLogin` を投げる | gws の起動 |
-| `thumbnails._unauthenticated` | `src/ndf/domains/gws/thumbnails.py` | 新設 | `() -> bool` | gws が失敗した後に、認証の状態を上限 `google-workspace.thumbnails` で 1 回読み、未認証かを決める | gws の操作が 0 以外で終わった後だけ呼ぶ | 読めて `auth_decide.authenticated` が偽のときだけ真。読めないときは偽 | gws の起動（`auth status`） |
+| `thumbnails._unauthenticated` | `src/ndf/domains/gws/thumbnails.py` | 新設 | `() -> bool` | gws が失敗した後に、認証の状態を上限 `google-workspace.thumbnails` で 1 回読み、未認証かを決める | gws の操作が 0 以外で終わった後だけ呼ぶ | 読めて `records.gws.authenticated` が偽のときだけ真。読めないときは偽 | gws の起動（`auth status`） |
 | `thumbnails._page_ids` | `src/ndf/domains/gws/thumbnails.py` | 新設 | `(gws: str, presentation_id: str) -> list[str]` | `gws slides presentations get` でページの ID をページ順に取る | 無し | 戻り値は 1 件以上で、どれも空でない文字列 | gws の起動 |
 | `thumbnails._thumbnail` | `src/ndf/domains/gws/thumbnails.py` | 新設 | `(gws: str, presentation_id: str, object_id: str, size: str, dest: Path, no: int) -> None` | 1 ページのサムネイルの URL を取り、curl で `dest` へ保存する | `dest` の親のディレクトリがある | 戻ったときは `dest` に画像があり、curl が 0 で終わっている | gws・curl の起動、画像の書き出し |
 | `gws.cli.main` | `src/ndf/domains/gws/cli.py` | 新設 | `(argv: list[str]) -> int` | 引数を読み、下位の命令の流れを呼び、結果 JSON を 1 行出して終了コードを返す | 引数を読む前に副作用を起こさない（`spec_args` が `main([])` で引数の定義を取り出す） | 標準出力の最後の行が結果 JSON で、戻り値はその終了コード | 標準出力への書き出し |
@@ -155,9 +154,9 @@ docs/glossary/glossary.json, docs/glossary.md  （リポジトリの根から）
 | `check.run` | gws が無い・npm がある・印が無い | `check._present` の結果（`gate`・10） |
 | `check.run` | gws が無い・npm がある・印がある・入れた後に gws がある | `check._install` の後に `check._report` の結果 |
 | `check.run` | gws が無い・npm がある・印がある・入れた後も gws が無い | `GwsStop`（`unknown`） |
-| `check._report` | 読めた・`credential_source` が `none` でない | `ok`・0・`state: authenticated` |
-| `check._report` | 読めた・`credential_source` が `none`・`client_config_exists` が真 | `gate`・11・`state: unauthenticated`。`summary` はログインの案内 |
-| `check._report` | 読めた・`credential_source` が `none`・`client_config_exists` が偽 | `gate`・11・`state: unauthenticated`。`summary` は `gws auth setup` か OAuth クライアントの用意を先に置く案内 |
+| `check._report` | 読めた・`records.gws.authenticated` が真 | `ok`・0・`state: authenticated` |
+| `check._report` | 読めた・`records.gws.authenticated` が偽（`credential_source` が `none` か `client_secret.json`）・`client_config_exists` が真 | `gate`・11・`state: unauthenticated`。`summary` はログインの案内 |
+| `check._report` | 読めた・`records.gws.authenticated` が偽・`client_config_exists` が偽 | `gate`・11・`state: unauthenticated`。`summary` は `gws auth setup` か OAuth クライアントの用意を先に置く案内 |
 | `check._report` | 読めない | `GwsStop`（`invalid`） |
 | `thumbnails._gws` | 0 で終わった・JSON として読める | 応答を返す |
 | `thumbnails._gws` | 0 で終わった・JSON として読めない | `GwsStop`（`invalid`） |
@@ -178,9 +177,8 @@ docs/glossary/glossary.json, docs/glossary.md  （リポジトリの根から）
 | `Outcome` | 型（`tuple[dict[str, Any], int]`。結果の辞書と終了コード） | `src/ndf/domains/gws/__init__.py` | — |
 | `_NeedsLogin` | 型（内部の例外。属性 `what`・`detail`） | `src/ndf/domains/gws/thumbnails.py` | — |
 | `STATUS_KEYS` | 定数（3 つのキーの唯一の置き場。gws の確認の `metrics` もここから引く） | `src/ndf/domains/records/gws.py` | `("credential_source", "auth_method", "client_config_exists")` |
-| `TAIL_LINES` | 定数 | `src/ndf/domains/gws/auth_decide.py` | `20` |
-| `AUTHENTICATED`・`MISSING`・`UNAUTHENTICATED`・`UNINSTALLABLE` | 定数（gws の状態の値。結果のスキーマの `metrics.state` の列挙と同じ 4 つ） | `src/ndf/domains/gws/auth_decide.py` | `"authenticated"` ほか |
-| `NO_CREDENTIAL` | 定数（未認証を示す `credential_source` の値） | `src/ndf/domains/gws/auth_decide.py` | `"none"` |
+| `TAIL_LINES` | 定数 | `src/ndf/domains/gws/report_decide.py` | `20` |
+| `AUTHENTICATED`・`MISSING`・`UNAUTHENTICATED`・`UNINSTALLABLE` | 定数（gws の状態の値。結果のスキーマの `metrics.state` の列挙と同じ 4 つ） | `src/ndf/domains/gws/report_decide.py` | `"authenticated"` ほか |
 | `PACKAGE`・`PACKAGE_URL` | 定数 | `src/ndf/domains/gws/check.py` | `"@googleworkspace/cli"`・`"https://www.npmjs.com/package/@googleworkspace/cli"` |
 | `INSTALL_ARGS` | 定数（npm の後ろの引数） | `src/ndf/domains/gws/check.py` | `("install", "-g", PACKAGE)` |
 | `CALL_LIMIT`・`INSTALL_LIMIT` | 定数（上限の名前。値は上限の宣言が持つ） | `src/ndf/domains/gws/check.py` | `"google-workspace.call"`（120 秒）・`"google-workspace.install"`（600 秒） |
@@ -212,7 +210,7 @@ docs/glossary/glossary.json, docs/glossary.md  （リポジトリの根から）
 | --- | --- | --- | --- |
 | `gws.cli.main` | 結果 JSON 1 行 | 標準出力の最後の行（結果 JSON） | 資格情報・トークン・`gws auth status` の応答の 3 つのキーのほか |
 | `gws.cli._emit_stop` | 止まった結果 JSON 1 行 | 標準出力（結果 JSON） | 同上 |
-| `check._report` | `metrics` の `state` と 3 つのキー | 結果 JSON | 応答のほかのキー（`auth_decide.pick` が取り除く）。資格情報のファイルは開かない |
+| `check._report` | `metrics` の `state` と 3 つのキー | 結果 JSON | 応答のほかのキー（`report_decide.pick` が取り除く）。資格情報のファイルは開かない |
 | `check._report` | 読めないときの gws の標準エラーの末尾 | 結果 JSON の `items` | 標準出力（応答の本体） |
 | `check._install` | npm の出力の末尾 | 結果 JSON の `items` | — |
 | `material.write` | 承認資料 | 状態の置き場の `gws/install.md`（ファイルの表の行） | 利用者の環境の値のうち、入る先（`npm prefix -g` の値）のほか |
@@ -228,11 +226,10 @@ docs/glossary/glossary.json, docs/glossary.md  （リポジトリの根から）
 | --- | --- | --- | --- |
 | `GwsStop.__init__` | 各領域の止まる理由の例外（`crossrefactor.drive` の例外・`backlog.cli_input` の例外など） | `grep -rn "def __init__(self, kind: str, detail: str" plugins/ndf-next/src` | 使えない。どれも各領域の非公開の型で、gws の領域から読むと領域の間の依存が増える。形（種類と説明を持つ）はそろえる |
 | `unauthenticated_code` | 終了コードの部品 `exit_codes.first_code` | `grep -n "^def " plugins/ndf-next/src/ndf/contracts/exit_codes.py` | 使う（最初の値を引き、1 を足す） |
-| `auth_decide.authenticated` | records の判定 `records.gws.decide`・`records.gws.authenticated` | `src/ndf/domains/records/gws.py` を読んだ | 使えない。`client_secret.json` を未認証とし環境変数のトークンを見る別の規則で、受け入れ条件 1・2 と合わない（設計文書の決定 4） |
-| `auth_decide.pick` | records の gws の部品の 3 つのキー | 同上 | キーの集まりは `STATUS_KEYS` を使う。取り出しは新設する（records の部品は辞書全体を返す） |
-| `auth_decide.tail` | 記録の MVV の承認資料の末尾の切り出し（`mvv_material_decide._tail`）・棚卸しの表の `_tail` | `grep -rn "def .*tail" plugins/ndf-next/src --include=*.py` | 使えない。前者は非公開の関数で、行数は MVV の承認資料の決まり（`OUTPUT_LINES`）が持つ。後者は表の行の省略で別の処理 |
+| `report_decide.pick` | records の gws の部品の 3 つのキー | 同上 | キーの集まりは `STATUS_KEYS` を使う。取り出しは新設する（records の部品は辞書全体を返す） |
+| `report_decide.tail` | 記録の MVV の承認資料の末尾の切り出し（`mvv_material_decide._tail`）・棚卸しの表の `_tail` | `grep -rn "def .*tail" plugins/ndf-next/src --include=*.py` | 使えない。前者は非公開の関数で、行数は MVV の承認資料の決まり（`OUTPUT_LINES`）が持つ。後者は表の行の省略で別の処理 |
 | `check.run` | 今のスクリプトの流れ（`plugins/ndf/skills/google-workspace/scripts/gws-check.py`） | ファイルを読んだ | 新しい NDF からは読まない（今の NDF は変えない。設計文書の決定 11）。判定と順序をそのまま移す |
-| `check._report` | records の gws の部品 `records.gws.auth_status` | 同上 | 使う（上限の名前を渡す） |
+| `check._report` | records の gws の部品 `records.gws.auth_status`・`records.gws.authenticated` | 同上 | 2 つとも使う（読み取りには上限の名前を渡す。判定は新設しない。設計文書の決定 4） |
 | `check._present` | 結果の部品 `result.result`・`result.command` | `grep -n "^def " plugins/ndf-next/src/ndf/contracts/result.py` | 使う |
 | `check._install` | 新しい NDF の外部のコマンドを打つ部品 | `grep -rln "shutil.which" plugins/ndf-next/src`（`worktree/container.py`・`hooks/env.py` の 2 件。どちらも自分の領域の非公開の処理） | 使えない。共有の起動の部品が無いため、`subprocess.run` を直接呼ぶ |
 | `check._npm_prefix` | 同上 | 同上 | 使えない（同上） |
@@ -240,7 +237,7 @@ docs/glossary/glossary.json, docs/glossary.md  （リポジトリの根から）
 | `material.write` | 付け替えで書く部品 `worktree.atomic.write_text`・ファイルの置き場の部品 `records.files.path`・状態の置き場 `identity.load().state_dir` | `grep -rn "os.replace\|def write_text" plugins/ndf-next/src --include=*.py`・`src/ndf/domains/records/files.py` を読んだ | 3 つとも使う。依存は S1d → S1a → M7・M8 で子の表の向きに合う |
 | `thumbnails.run` | 今のスクリプト（`slides-thumbnails.py`） | ファイルを読んだ | 新しい NDF からは読まない。判定と順序をそのまま移す |
 | `thumbnails._gws` | 外部のコマンドを打つ部品 | `check._install` の行と同じ | 使えない（同上） |
-| `thumbnails._unauthenticated` | `records.gws.auth_status`・`auth_decide.authenticated` | 上の行 | 2 つとも使う |
+| `thumbnails._unauthenticated` | `records.gws.auth_status`・`records.gws.authenticated` | 上の行 | 2 つとも使う |
 | `thumbnails._page_ids` | 無し（gws のスライドの応答を読む部品） | `grep -rn "objectId" plugins/ndf-next/src`（0 件） | 新設 |
 | `thumbnails._thumbnail` | 新しい NDF の HTTP の部品（`adapters/http.py`） | `ls plugins/ndf-next/src/ndf/adapters` | 使えない。`contentUrl` の取得は curl の `-fsSL --max-time` と同じ振る舞い（設計文書の入出力の契約）を保つ。部品を替えると上限と失敗の分け方が変わる |
 | `gws.cli.main` | ほかの副命令の受付（`records.cli`・`contracts.cli`）の形 | `src/ndf/domains/records/cli.py` を読んだ | 形をそろえる（`TOOL = cli.tool_of(__name__)`、下位の命令の `set_defaults(handler=...)`） |
@@ -255,13 +252,12 @@ docs/glossary/glossary.json, docs/glossary.md  （リポジトリの根から）
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `unauthenticated_code` | 11 を返す | 承認ゲートの範囲の中にある | 終了コードの表が読めないと `ContractError`（`ndf.cli` の既存のテストが持つ。足さない） |
-| `auth_decide.authenticated` | `token_env_var` で真 | `auth_method` が `none` でも `credential_source` が `none` でなければ真。`client_secret.json` で真 | `credential_source` が `none` で偽 |
-| `auth_decide.pick` | 3 つのキーだけを返す | 余分のキー（トークンの値）を混ぜても返さない | — |
-| `auth_decide.tail` | 21 行の入力で末尾 20 行 | 20 行ちょうど・空・`None` | — |
+| `report_decide.pick` | 3 つのキーだけを返す | 余分のキー（トークンの値）を混ぜても返さない | — |
+| `report_decide.tail` | 21 行の入力で末尾 20 行 | 20 行ちょうど・空・`None` | — |
 | `records.gws.auth_status` | 渡した上限の名前の秒数で打ち切る | 引数なしで今の上限（`gws.auth-status`） | 0 以外・JSON でない・キーの欠けで `GwsError` の `stderr` に標準エラー。起動できない・打ち切りで `stderr` が空 |
 | `GwsError.__init__` | `stderr` を持つ | `stderr` を省くと空文字 | — |
 | `check.run` | gws があり認証済みで `ok`・0 | 印があり gws が既にあるとき npm を起動しない | npm が無く 3。入れた後も gws が無く 1 |
-| `check._report` | 未認証で `gate`・11 と `routes`（`retry`・`cancel`） | `client_config_exists` の真と偽で `summary` が変わる | 読めない 4 通り（0 以外・JSON でない・キーの欠け・打ち切り）で `stopped`・2、標準エラーがあれば `items` に末尾 |
+| `check._report` | 未認証で `gate`・11 と `routes`（`retry`・`cancel`）。トークンの無い状態（`credential_source: none`）と `client_secret.json` だけの状態（#2067）の両方が未認証。環境変数のトークンがあれば認証済み | `client_config_exists` の真と偽で `summary` が変わる | 読めない 4 通り（0 以外・JSON でない・キーの欠け・打ち切り）で `stopped`・2、標準エラーがあれば `items` に末尾 |
 | `check._present` | `gate`・10、承認資料に取得元・打つコマンド・入る先・戻し方、`routes` の `approved` が `ndf gws check --install` | npm の `install` が 1 度も起動されない | 承認資料を書けないと `stopped`・1 |
 | `check._install` | `install -g @googleworkspace/cli` を 1 回起動 | — | 起動できない・0 以外で `stopped`・1（`items` に末尾）、打ち切りで `stopped`・1（`interrupted`） |
 | `check._npm_prefix` | 値が承認資料の入る先に載る | 出力が空 | 0 以外で入る先が「値を読めなかった」になる |
@@ -269,7 +265,7 @@ docs/glossary/glossary.json, docs/glossary.md  （リポジトリの根から）
 | `material.write` | 状態の置き場の `gws/install.md` に書く | 2 回打ってもファイルは 1 つ | 書けないと `OSError` を呼び出し元へ返す（`check._present` の行で確かめる） |
 | `thumbnails.run` | 3 ページで `p1.png`〜`p3.png`、`items` と `metrics`、`auth status` を打たない | 大きさの指定が無いと `LARGE` | gws か curl が無く 3。出力のディレクトリを作れず 1 |
 | `thumbnails._gws` | 応答の JSON を返す | — | 未認証で `gate`・11 と同じ引数の `routes`。未認証でない失敗で 1（`gws-failed` と末尾）。起動できない 1。打ち切り 1（`interrupted`）。JSON でない 2 |
-| `thumbnails._unauthenticated` | `none` で真 | — | 読めない・打ち切りで偽（元の失敗の 1） |
+| `thumbnails._unauthenticated` | `none` と `client_secret.json` で真 | — | 読めない・打ち切りで偽（元の失敗の 1） |
 | `thumbnails._page_ids` | ページ順の ID | 1 ページ | 0 件・`objectId` の欠けで 2 |
 | `thumbnails._thumbnail` | `dest` に保存 | — | `contentUrl` の欠けで 2。curl の 28 で 1（`interrupted`）。そのほかの 0 以外で 1（`download-failed`）。起動できない 1 |
 | `gws.cli.main` | `check`・`thumbnails` の結果 JSON が結果のスキーマに合う | 下位の命令が無いと 2 | 知らない引数・3 つ以外の大きさで 2（`ndf.cli` を通して確かめる） |

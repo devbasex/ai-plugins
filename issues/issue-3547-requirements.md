@@ -19,7 +19,7 @@
 | --- | --- | --- | --- |
 | S1 | 2 本を `bin/ndf` の副命令として作り直す（置き場の群は設計で決める。候補は新しい群 `ndf gws`） | 本文「やること」（conductor）・「進め方の決まり」（オーガナイザー） | 受け入れ条件 1〜11。群の名前は未決 1（設計が決める） |
 | S2 | 結果は新しい契約に合わせる（承認ゲートの結果は `routes` が必須・`next` の argv の先頭は `ndf`） | 本文「背景」「進め方の決まり」 | 受け入れ条件 4・12 |
-| S3 | 確認は今の `gws-check.py` と同じ判定で返す | 本文「受け入れ条件」1 行目 | 受け入れ条件 1〜7（判定の同じさを、状態・終了コード・`metrics` のキーで観測できる形にした） |
+| S3 | 確認は今の `gws-check.py` と同じ判定で返す | 本文「受け入れ条件」1 行目 | 受け入れ条件 1〜7（判定の同じさを、状態・終了コード・`metrics` のキーで観測できる形にした）。既知の不具合 #2067 は引き継がない（前提 7。利用者の差し戻し） |
 | S4 | 縮小画像の取得は今の `slides-thumbnails.py` と同じ出力を返す | 本文「受け入れ条件」2 行目 | 受け入れ条件 8〜11（同じさを、保存するファイル・`items`・`metrics`・終了コードで観測できる形にした）。結果 JSON の外枠は新しい契約に従うため、外枠は同じにしない（前提 2） |
 | S5 | 新しい副命令の引数と結果のスキーマを lspec（#3518・#3519）の仕組みに載せる | 本文「進め方の決まり」 | 受け入れ条件 12・13 |
 | S6 | 今の `plugins/ndf/` は変えない | 本文「対象範囲」「進め方の決まり」 | 受け入れ条件 16・含まない |
@@ -39,6 +39,7 @@
 - 前提 4: 共通部品 `gws_common.py` の 2 つの処理（出力の末尾 20 行を切り出す・stopped の結果を出して終える）は副命令にしない。stopped の結果は新しい NDF の結果の部品（`ndf.contracts.result`）で組み、出力の末尾の切り出しは新しい群の中の 1 か所に置く
 - 前提 5: この課題は入れ替え S2 #3304 より先に閉じる。試走 T2 #3411 が機能の対応表の 2 行を確かめるとき、行は作った副命令を指している
 - 前提 6: gws の呼び出しと導入の上限の秒数は、新しい NDF にすでにある上限の宣言（`plugins/ndf-next/contracts/limits.json` の `google-workspace.call`・`google-workspace.install`・`google-workspace.thumbnails`）を使い、値を変えない
+- 前提 7: 「同じ判定」は既知の不具合 #2067（トークンの無い状態を認証済みと判定する）を引き継がない（利用者の差し戻し 2026-11-15。#3395 の決定 127「同等だが既知の不具合を引き継がない」）。トークンを環境変数 `GOOGLE_WORKSPACE_CLI_TOKEN` で渡しておらず、`credential_source` が `none` か `client_secret.json` の状態は未認証とする。この判定は新しい NDF の記録の部品（`src/ndf/domains/records/gws.py` の `authenticated`。M7 #3302 が #2067 を直して入れた）がすでに持つため、認証済みかの判定はそこ 1 か所とし、2 つの副命令はそれを呼ぶ。#2067 はこの課題で解消する Issue に入れる
 
 ## 対象範囲
 
@@ -53,7 +54,7 @@
 含まない:
 - 今の `plugins/ndf/` の変更（スクリプト・テスト・Skill 本文のどれも変えない）
 - google-workspace の Skill の操作の対応表にある gws のコマンド（エクスポート・アップロード・共有範囲の確認など）を副命令にすること。Skill 本文から gws を直接打つまま残す
-- 判定の変更（状態の数・判定の条件・導入のコマンド・導入の同意の扱いを変えない）
+- 判定の変更（状態の数・導入のコマンド・導入の同意の扱いを変えない。認証済みの判定の条件だけは #2067 を引き継がない形にする。前提 7）
 - 今のスクリプトのパスで呼ぶ互換の経路（前提 3）
 - 時間で区切った負荷試験
 - 入れ替え S2 #3304 と試走 T2 #3411 の作業
@@ -86,8 +87,8 @@
 
 確認の副命令（今の `gws-check.py` と同じ判定。前提 2）:
 
-- [ ] 1. gws が PATH にあり、`gws auth status` の `credential_source` が `none` でないとき、`status` が `ok`、終了コードが 0、`metrics.state` が `authenticated` になり、`metrics` に `credential_source`・`auth_method`・`client_config_exists` の 3 つが入る
-- [ ] 2. gws が PATH にあり、`credential_source` が `none` のとき、`status` が `gate`、終了コードが 11、`metrics.state` が `unauthenticated` になり、`metrics.client_config_exists` に gws が返した値が入る
+- [ ] 1. gws が PATH にあり、トークンを環境変数 `GOOGLE_WORKSPACE_CLI_TOKEN` で渡しているか、`gws auth status` の `credential_source` が `none`・`client_secret.json` のどちらでもないとき、`status` が `ok`、終了コードが 0、`metrics.state` が `authenticated` になり、`metrics` に `credential_source`・`auth_method`・`client_config_exists` の 3 つが入る
+- [ ] 2. gws が PATH にあり、トークンを環境変数で渡しておらず、`credential_source` が `none` か `client_secret.json` のとき、`status` が `gate`、終了コードが 11、`metrics.state` が `unauthenticated` になり、`metrics.client_config_exists` に gws が返した値が入る（前提 7）。次の 2 つの状態をそれぞれテストで確かめる: (a) トークンが無い（`auth_method` が `none`・`credential_source` が `none`）、(b) `client_secret.json` だけがありトークンが無い（`auth_method` が `none`・`credential_source` が `client_secret.json`・`client_config_exists` が真。#2067 の再現の形）
 - [ ] 3. gws が PATH に無く npm があり、導入の同意の印が無いとき、npm を打たずに、`status` が `gate`、終了コードが 10、`metrics.state` が `missing` になり、`presentation_path` に承認資料（取得元・打つコマンド `npm install -g @googleworkspace/cli`・入る先・戻し方）のファイルがある
 - [ ] 4. 受け入れ条件 2・3 の結果は `routes` を持ち、そのキーは答えの語彙（`contracts/facts/answers.json`）の中にあり、各行き先の `argv` の先頭が `ndf` である。受け入れ条件 3 の結果には、導入の同意の印を付けて確認の副命令を打ち直す行き先がある
 - [ ] 5. gws も npm も PATH に無いとき、`status` が `stopped`、終了コードが 3、`metrics.state` が `uninstallable` になる
@@ -98,7 +99,7 @@
 
 - [ ] 8. ページが N 枚のプレゼンテーションで打つと、出力のディレクトリに `p1.png`〜`pN.png` をページ順に保存し、`status` が `ok`、終了コードが 0、`items` がページごとに `name`（`p<番号>`）・`objectId`・保存先を持ち、`metrics` が `pages`（N）・`size`・`out_dir` を持つ。成功したときは `gws auth status` を打たない
 - [ ] 9. 大きさは `SMALL`・`MEDIUM`・`LARGE` の 3 つだけを受け、指定が無ければ `LARGE` になる。引数が足りない・3 つ以外の大きさを渡したときは `status` が `stopped`、終了コードが 2 になる
-- [ ] 10. gws が 0 以外で終わり、`gws auth status` の `credential_source` が `none` のとき、`status` が `gate`、終了コードが 11、`metrics.state` が `unauthenticated` になり、`routes` を持つ（キーは答えの語彙の中、`argv` の先頭は `ndf`）
+- [ ] 10. gws が 0 以外で終わり、`gws auth status` の結果が受け入れ条件 2 と同じ判定で未認証のとき、`status` が `gate`、終了コードが 11、`metrics.state` が `unauthenticated` になり、`routes` を持つ（キーは答えの語彙の中、`argv` の先頭は `ndf`）
 - [ ] 11. gws が 0 以外で終わり、未認証でないとき、`status` が `stopped`、終了コードが 1 になり、`items` に gws の出力の末尾（20 行まで）が載る。gws か curl が PATH に無いときは終了コードが 3 になる
 
 契約と Skill 本文:
@@ -108,6 +109,7 @@
 - [ ] 14. 新しい NDF の google-workspace の Skill 本文（`plugins/ndf-next/skills/google-workspace/SKILL.md`）に `gws-check.py`・`slides-thumbnails.py`・`$SKILL_DIR/scripts/` の文字列が 0 件で、移したときの注記（「副命令は #3547 で作る」）が無く、流れの手順 1・2 と操作の対応表の縮小画像の行が副命令を打つ
 - [ ] 15. 機能の対応表の 2 行（`entrypoint:skills/google-workspace/scripts/gws-check.py`・`entrypoint:skills/google-workspace/scripts/slides-thumbnails.py`）が、作った副命令を試走 T2 #3411 が確かめられる形で指している（書き方は設計が決める。未決 3）
 - [ ] 16. 今の `plugins/ndf/` に差分が無い（`git diff --stat origin/develop -- plugins/ndf/` が空）
+- [ ] 17. 認証済みかの判定は新しい NDF の中で 1 つの関数（記録の部品の `authenticated`）にあり、確認の副命令・縮小画像の副命令・`ndf records gws-check` が同じ関数を呼ぶ（前提 7）
 
 ## 非機能の条件
 
@@ -123,7 +125,7 @@
 | --- | --- |
 | 公開インタフェース | 新しい NDF に副命令が 2 つ増える。新しい NDF はまだリリースしていないため、今の利用者への影響は無い。今の `ndf` のスクリプトは変わらない |
 | データ | 無い |
-| 既存の振る舞い | 新しい NDF の google-workspace の Skill 本文の手順 1・2 と縮小画像の行のコマンドが変わる。判定と終了コードは変わらない |
+| 既存の振る舞い | 新しい NDF の google-workspace の Skill 本文の手順 1・2 と縮小画像の行のコマンドが変わる。判定と終了コードは変わらない。ただし `client_secret.json` だけがありトークンが無い状態は未認証になる（#2067。前提 7） |
 
 ## 検証手段
 
@@ -146,9 +148,9 @@
 
 | 区分 | 内容 |
 | --- | --- |
-| 常に行う | 偽のコマンドでのテスト、`ndf check`、判定と終了コードを今のスクリプトと揃えること |
+| 常に行う | 偽のコマンドでのテスト、`ndf check`、判定と終了コードを今のスクリプトと揃えること（#2067 の直しを除く。前提 7） |
 | 確認してから行う | 新しい NDF の副命令の追加（設計承認ゲートで見る） |
-| 行わない | 今の `plugins/ndf/` の変更、判定の変更、操作の対応表の gws のコマンドの副命令化、実の Google のアカウントへの書き込み |
+| 行わない | 今の `plugins/ndf/` の変更、判定の変更（#2067 の直しを除く）、操作の対応表の gws のコマンドの副命令化、実の Google のアカウントへの書き込み |
 
 ## 未決
 

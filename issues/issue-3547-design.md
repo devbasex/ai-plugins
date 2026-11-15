@@ -18,6 +18,7 @@
 | --- | --- | --- |
 | 確定仕様 [docs/specifications/ndf-google-workspace-gws.md](../docs/specifications/ndf-google-workspace-gws.md) の「決定の理由」（gws 0.22.5 の実測） | 実測 | 認証済みかを `credential_source` で決める理由（環境変数のトークンを渡しても `auth_method` は `none` のまま）。状態ごとの `status` と終了コード（0・10・11・3）と、失敗の形（1・2） |
 | 新しい NDF の結果の契約（`plugins/ndf-next/contracts/schemas/result.schema.json`）と終了コードの表（`plugins/ndf-next/docs/contracts/exit-codes.md`） | 既存の形に揃える | 承認ゲートの結果は `routes` が必須で、キーは答えの語彙、行き先の `argv` の先頭は `ndf`。`stopped` は `cause.kind` を持ち、終了コードは種類から決まる |
+| Issue #2067 と設計の差し戻し（利用者の答え、2026-11-15） | 不具合の再現・利用者の指示 | `client_secret.json` だけがありトークンが無い状態を今の `gws-check.py` が認証済みと判定する不具合（gws 0.22.5 で再現）。作り直しはこれを引き継がず、認証済みの判定を 1 か所にまとめる（決定 4） |
 | 「2 本を `bin/ndf` の副命令として作り直す」「結果は新しい契約の JSON」「今の `plugins/ndf/` は変えない」（#3547 の本文の「やること」と「進め方の決まり」） | 起票者の文 | 利用者の指示の原文ではない。レーン lrebuild の conductor と並列の計画 p6 のオーガナイザーが書いた |
 
 要求と受け入れ条件は #3547 の本文にある（コピーは [issues/issue-3547-requirements.md](issue-3547-requirements.md) ）。この文書は「どう作るか」だけを扱う。詳細設計（ファイルごとの関数と異常系）は [issues/issue-3547-design-detail.md](issue-3547-design-detail.md) にある。
@@ -78,7 +79,7 @@
 | I7 | サムネイルの保存の結果 | 保存したファイルの名前はページ順に `p1.png` から番号が振られ、`items` の並びもページ順である | 1 ページでも保存できなければ `ok` を返さない |
 | I8 | サムネイルの保存の結果 | 全ページを保存できたときは `gws auth status` を打たない | 成功の経路に認証の状態の読み取りの呼び出しを持たない |
 | I9 | 認証の状態の読み取り | `gws auth status` を読む処理は新しい NDF の中で 1 か所（records の gws の部品）にある | 確かめる側の重複を `ndf check` の事実の重複の規則（`const-fact`）が落とす |
-| I10 | gws の確認の結果・サムネイルの保存の結果 | 認証済みかの判定（`credential_source` が `none` でない）は 2 つの副命令で 1 つの関数を使う | 判定の関数を 1 つにする（決定 4） |
+| I10 | gws の確認の結果・サムネイルの保存の結果 | 認証済みかの判定（トークンを環境変数で渡しているか、`credential_source` が `none`・`client_secret.json` のどちらでもない）は、2 つの副命令と `ndf records gws-check` で 1 つの関数（records の gws の部品の `authenticated`）を使う | gws の群に判定を置かず、records の gws の部品の判定を呼ぶ（決定 4） |
 | I11 | 認証の状態の読み取り | 資格情報のファイルとトークンを開かない。読むのは `gws auth status` の応答だけである | 資格情報のファイルを開く経路を持たない。応答の 3 つのキーのほかは読み捨てる |
 | I12 | サムネイルの保存の結果 | gws が失敗したとき、未認証かを確かめる認証の状態の読み取りは 1 回だけ打ち、打ち直さない | 読めなかったときは未認証でないとして、元の gws の失敗（`unknown`・1）で返す |
 
@@ -90,7 +91,7 @@
 | --- | --- | --- | --- |
 | E1 | gws を PATH の上で探した | gws の確認 | gws の確認（E2・E4・E5 の分かれ目） |
 | E2 | gws の認証の状態を 1 回読んだ | records の gws の部品 | gws の確認 |
-| E3 | 認証済みか未認証かを決めた | 認証の判定（`auth_decide`） | gws の確認 |
+| E3 | 認証済みか未認証かを決めた | records の gws の部品の判定（`authenticated`） | gws の確認 |
 | E4 | 導入の同意を求める承認資料を書いた | gws の確認 | Skill の手順 2（利用者へ示す） |
 | E5 | npm で gws を全体インストールした | gws の確認 | gws の確認（同じ起動の中で E2 へ戻る） |
 | E6 | 確認の結果を返した | gws の確認 | Skill の流れの手順 1 |
@@ -98,7 +99,7 @@
 | E8 | ページの ID をページ順に取った | サムネイルの保存 | サムネイルの保存（E9） |
 | E9 | 各ページのサムネイルを保存した | サムネイルの保存 | サムネイルの保存（E10） |
 | E10 | サムネイルの結果を返した | サムネイルの保存 | Skill の操作の対応表を打った手順 |
-| E11 | gws の失敗が未認証によるものかを決めた | 認証の判定（records の gws の部品で読んだ値を渡す） | サムネイルの保存 |
+| E11 | gws の失敗が未認証によるものかを決めた | records の gws の部品（読み取りと判定の `authenticated`） | サムネイルの保存 |
 
 ### 用語
 
@@ -136,9 +137,9 @@
 | `ndf gws` の受付（`src/ndf/domains/gws/cli.py`） | 下位の命令 `check`・`thumbnails` の引数を argparse で読み、流れへ渡し、結果 JSON を出して終了コードを返す。結果の `tool` は `gws`（`cli.tool_of` で引く） |
 | gws の確認の流れ（`src/ndf/domains/gws/check.py`） | gws と npm を PATH の上で探し、認証の状態の読み取り・承認資料の書き出し・npm の全体インストールを順に行い、gws の確認の結果を組む（F1〜F3） |
 | サムネイルの流れ（`src/ndf/domains/gws/thumbnails.py`） | gws と curl を PATH の上で探し、ページの ID の取得・各ページのサムネイルの URL の取得・画像の保存を行い、サムネイルの保存の結果を組む（F4・F5） |
-| 認証の判定（`src/ndf/domains/gws/auth_decide.py`） | 純粋な判断。読み取った認証の状態から未認証かを決め、`metrics` へ写す 3 つのキーを取り出す（I4・I10）。出力の末尾（20 行まで）を切り出す（前提 4 の 1 か所） |
+| 結果の値の切り出し（`src/ndf/domains/gws/report_decide.py`） | 純粋な判断。読み取った認証の状態から `metrics` へ写す 3 つのキーを取り出す（I4）。出力の末尾（20 行まで）を切り出す（前提 4 の 1 か所）。認証済みかの判定は持たない（I10・決定 4） |
 | 導入の承認資料（`src/ndf/domains/gws/material.py`） | 承認資料の Markdown（対象を開くためのもの・承認の判断に使うもの・同意を求めること・戻し方）を組み、状態の置き場の下へ書く（決定 7） |
-| records の gws の部品（`src/ndf/domains/records/gws.py`） | 認証の状態の読み取りの 1 か所（I9）。読めないときの誤りに標準エラーを持たせ、3 つのキーの定数を公開の名前にし、上限の名前を呼ぶ側が渡せるようにする（既定は今の `gws.auth-status`）。`ndf records gws-check` の振る舞いは変えない（決定 3） |
+| records の gws の部品（`src/ndf/domains/records/gws.py`） | 認証の状態の読み取りと、認証済みかの判定（`authenticated`。#2067 を直した判定）の 1 か所（I9・I10）。読めないときの誤りに標準エラーを持たせ、3 つのキーの定数を公開の名前にし、上限の名前を呼ぶ側が渡せるようにする（既定は今の `gws.auth-status`）。`ndf records gws-check` の振る舞いは変えない（決定 3） |
 | 結果のスキーマ（`contracts/schemas/io/gws.result.schema.json`） | 手書き。`metrics` と `items` の要素を閉じる（決定 2） |
 | 引数のスキーマ（`contracts/schemas/io/gws.args.schema.json`）と副命令の一覧（`docs/contracts/commands.md`） | 生成物。`ndf check --write-spec` が副命令の引数の定義から書く（決定 2） |
 | 置き場の表（`contracts/domains/places.json`）とファイルの表（`contracts/domains/ndf-files.json`） | 承認資料の置き場 `gws`（状態の置き場の下）とファイル `gws-install-material` の行を 1 行ずつ足す（決定 7）。生成物の契約のページ（`docs/contracts/files.md`）も作り直す |
@@ -174,7 +175,7 @@ graph TD
     table --> entry["ndf gws の受付 cli.py"]
     entry --> check["gws の確認の流れ"]
     entry --> thumbs["サムネイルの流れ"]
-    check --> decide["認証の判定 auth_decide"]
+    check --> decide["結果の値の切り出し report_decide"]
     thumbs --> decide
     check --> reader["records の gws の部品"]
     thumbs --> reader
@@ -200,8 +201,8 @@ graph TD
 
 | 場合 | `status` | 終了コード | `cause.kind` | `metrics` | ほかの項目 |
 | --- | --- | --- | --- | --- | --- |
-| gws があり、`credential_source` が `none` でない | `ok` | 0 | — | `state: authenticated` と 3 つのキー | — |
-| gws があり、`credential_source` が `none` | `gate` | 11 | — | `state: unauthenticated` と 3 つのキー | `routes`: `retry` → `ndf gws check`、`cancel` → `null` |
+| gws があり、認証済み（環境変数のトークンがあるか、`credential_source` が `none`・`client_secret.json` のどちらでもない。決定 4） | `ok` | 0 | — | `state: authenticated` と 3 つのキー | — |
+| gws があり、未認証（環境変数のトークンが無く、`credential_source` が `none` か `client_secret.json`） | `gate` | 11 | — | `state: unauthenticated` と 3 つのキー | `routes`: `retry` → `ndf gws check`、`cancel` → `null` |
 | gws が無く npm があり、導入の同意の印が無い | `gate` | 10 | — | `state: missing` | `presentation_path`（承認資料）。`routes`: `approved` → `ndf gws check --install`、`rejected` → `null` |
 | gws も npm も無い | `stopped` | 3 | `precondition` | `state: uninstallable` | — |
 | 導入の同意の印があり、npm が起動できない・0 以外で終わる | `stopped` | 1 | `unknown` | — | `items` に npm の出力の末尾。`summary` は `sudo` で打ち直さないと示す |
@@ -288,13 +289,13 @@ flowchart TD
     auth -->|そうでない| fail["stopped・終了コード 1"]
 ```
 
-応答を読めないとき（終了コード 2）と、画像を取れないとき（終了コード 1）の分かれ目は図から外した。対応は「入出力の契約」の表にある。未認証かは、records の gws の部品で認証の状態を読み、認証の判定へ渡して決める。読めなければ未認証でないとする。
+応答を読めないとき（終了コード 2）と、画像を取れないとき（終了コード 1）の分かれ目は図から外した。対応は「入出力の契約」の表にある。未認証かは、records の gws の部品で認証の状態を読み、同じ部品の判定（`authenticated`）で決める。読めなければ未認証でないとする。
 
 ## 非機能の実現方式
 
 | 条件 | 実現方式 |
 | --- | --- |
-| 失敗の切り分け（出力の末尾 20 行まで） | 認証の判定のモジュールが末尾の切り出しを 1 か所で持ち、gws・npm・curl の失敗の `items` の `detail` に載せる。認証の状態を読めないときの標準エラーは、records の gws の部品の誤りが持つ値から切り出す |
+| 失敗の切り分け（出力の末尾 20 行まで） | 結果の値の切り出しのモジュールが末尾の切り出しを 1 か所で持ち、gws・npm・curl の失敗の `items` の `detail` に載せる。認証の状態を読めないときの標準エラーは、records の gws の部品の誤りが持つ値から切り出す |
 | 資格情報を開かない・写さない | 読むのは `gws auth status` の応答だけで、`metrics` へ写すのは 3 つのキーだけ（I4・I11）。結果のスキーマが `metrics` を閉じる |
 | 利用者の環境の書き換え（C6） | npm の全体インストールは導入の同意の印があるときだけ。`sudo` を打たず、PATH と設定のファイルを書き換えない |
 | 上限の秒数 | 既存の上限の宣言（`contracts/limits.json`）のうち要求の前提 6 の 3 つ（`google-workspace.call`・`google-workspace.install`・`google-workspace.thumbnails`）から引き、値を変えない |
@@ -305,7 +306,7 @@ flowchart TD
 
 副命令の表は最上位の名前 1 つにモジュール 1 つを対応させ、下位の命令は argparse で分ける（`ndf ci merge`・`ndf worktree list` と同じ形）。2 つの機能はどちらも gws を呼ぶ機能で、Skill の外から見た場所が 1 つにまとまる。名前は gws のコマンドの語（gws の CLI 名）と確定仕様の語（確認・サムネイル）に合わせる。
 
-採らなかった案: 最上位に 2 つの名前（`gws-check`・`slides-thumbnails`）を置く案。副命令の表と結果のスキーマが 2 つずつになり、同じ部品（認証の判定・末尾の切り出し）を持つ機能が 2 か所に分かれる。`ndf records gws-check` の下へ足す案。records は記録の領域で、gws の導入とスライドの操作は記録ではない。
+採らなかった案: 最上位に 2 つの名前（`gws-check`・`slides-thumbnails`）を置く案。副命令の表と結果のスキーマが 2 つずつになり、同じ部品（キーの取り出し・末尾の切り出し）を持つ機能が 2 か所に分かれる。`ndf records gws-check` の下へ足す案。records は記録の領域で、gws の導入とスライドの操作は記録ではない。
 
 根拠: Value 9 / Value 11（MVV 版 7）
 
@@ -338,15 +339,18 @@ flowchart TD
 
 根拠: Value 11 / Value 9（MVV 版 7）
 
-### 決定 4: 判定を変えないため、認証済みの判定は今の `gws-check.py` と同じ関数を新しく置き、2 つの副命令で使う
+### 決定 4: 既知の不具合 #2067 を引き継がず判定を 1 か所に保つため、認証済みの判定は records の gws の部品の `authenticated` を使う
 
-認証の判定（`auth_decide`）は「`credential_source` が `none` でなければ認証済み」の 1 つで、gws の確認とサムネイルの保存の両方が使う（I10）。records の gws の部品の判定（`decide`）は別の規則で、受け入れ条件 1・2 と合わない。`credential_source` が `client_secret.json` のときも未認証とし、環境変数のトークンがあれば認証済みとする。判定の変更はこの課題の範囲の外であるため、records の判定は使わない。
+認証済みかの判定は、records の gws の部品の `authenticated`（純粋な判断 `decide` を包む）を、gws の確認・サムネイルの保存・`ndf records gws-check` の 3 つが呼ぶ 1 つの関数とする（I10）。規則は「トークンを環境変数 `GOOGLE_WORKSPACE_CLI_TOKEN` で渡していれば認証済み。渡していなければ、`credential_source` が `none` か `client_secret.json` のとき未認証」である。gws の群には判定を置かない。
 
-2 つの規則のどちらを正とし、いつ 1 つにまとめるかは、この課題では決めない。決めるには `client_secret.json` だけを置いた状態の実測が要り、まとめると `ndf records gws-check` の判定が変わる（M7 の範囲）。この課題では 2 つの判定を残し、後続の Issue を起票する。その Issue は、入れ替え（#3304）の後のリリース後テストで、実の gws に `client_secret.json` だけを置いた状態の `gws auth status` を打って正の規則を決め、判定を 1 つの関数にまとめる。2 つが残る間は、その状態で `ndf records gws-check` と `ndf gws check` が別の答えを返す（未確認のまま残ること）。
+今の `gws-check.py` の判定（`credential_source` が `none` でなければ認証済み）は既知の不具合 #2067 を持つ。`client_secret.json` だけがありトークンが無い状態で `gws auth status` は `credential_source: client_secret.json`・`auth_method: none` を返し（gws 0.22.5 で 2026-10-18・2026-10-31 に再現）、今の判定はこれを認証済みとして後の操作を失敗させる。作り直しの「同じ判定」は意図した振る舞いと同じであって、既知の不具合を引き継がない（#3395 の決定 127）。records の部品は M7 #3302 で #2067 を直した判定を持つため、これを使えば直しと 1 か所化が同時に済み、records の側の振る舞いも変わらない。#2067 はこの課題で解消する Issue に入れる。
 
-`_decide.py` で終わる名前にし、副作用のある部品を読まない（`decide-pure` の規則）。出力の末尾の切り出しも純粋な処理で、同じモジュールに置く。
+`metrics` へ写すキーの取り出しと出力の末尾の切り出しは、判定と別の純粋な処理として `report_decide.py` に置く。`_decide.py` で終わる名前にし、副作用のある部品を読まない（`decide-pure` の規則）。
 
-採らなかった案: records の判定を使う案。`credential_source` が `client_secret.json` の応答で gws の確認の状態が変わり、受け入れ条件 1 を満たさない。
+採らなかった案:
+
+- 今の `gws-check.py` と同じ判定を gws の群に新しく置く案。#2067 を引き継ぎ、判定が records と 2 か所に分かれて同じ状態に別の答えを返す（設計の差し戻しの指摘 1・2）
+- 判定を gws の群へ移し、records から呼ぶ案。M7 は S1d を要らず、子の表の依存（IG1）に反する
 
 根拠: Value 11 / Value 13（MVV 版 7）
 
@@ -440,8 +444,8 @@ gws の確認はリポジトリの外でも打たれるため、置き場はリ�
 
 | 受け入れ条件・不変条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
 | --- | --- | --- |
-| 受け入れ条件 1・I3 | `credential_source` が `token_env_var` で `auth_method` が `none` の応答で、`ok`・0・`authenticated` と 3 つのキーが返る | 判定を `auth_method` に変える・3 つのキーのどれかを `metrics` から落とす |
-| 受け入れ条件 2・I10 | `credential_source` が `none` の応答で、`gate`・11・`unauthenticated` と gws が返した `client_config_exists`（真と偽の両方）が返る | 判定を records の `decide` に変える・`client_config_exists` を固定の値にする |
+| 受け入れ条件 1・I3 | `credential_source` が `token_env_var` で `auth_method` が `none` の応答で、`ok`・0・`authenticated` と 3 つのキーが返る。環境変数 `GOOGLE_WORKSPACE_CLI_TOKEN` を渡せば `credential_source` が `none` の応答でも `ok`・0 | 判定を `auth_method` に変える・環境変数を見ない・3 つのキーのどれかを `metrics` から落とす |
+| 受け入れ条件 2・I10 | 環境変数のトークンが無いとき、(a) `auth_method: none`・`credential_source: none` の応答と、(b) `auth_method: none`・`credential_source: client_secret.json`・`client_config_exists: true` の応答（#2067 の再現の形）のどちらでも、`gate`・11・`unauthenticated` と gws が返した `client_config_exists`（(a) は真と偽の両方）が返る | 判定を `credential_source` が `none` かだけに戻す（#2067 を引き継ぐ）・gws の群に別の判定を置く・`client_config_exists` を固定の値にする |
 | 受け入れ条件 3・I1 | gws が無く npm があり、導入の同意の印が無いとき、npm の `install` が 1 度も起動されず、`gate`・10・`missing` と、承認資料のファイル（取得元・打つコマンド・入る先・戻し方を含む）が返る | 印が無くても npm を打つ・承認資料を書かない |
 | 受け入れ条件 4・I6 | 2・3・10 の結果の `routes` のキーが答えの語彙の中にあり、各行き先の `argv` の先頭が `ndf`。3 の結果は `approved` が `ndf gws check --install` を指す | 行き先の先頭をエントリポイントのパスにする・語彙に無いキーを使う |
 | 受け入れ条件 5・I5 | gws も npm も無いとき、`stopped`・3・`uninstallable` | 0 で終える・`missing` を返す |
@@ -449,13 +453,14 @@ gws の確認はリポジトリの外でも打たれるため、置き場はリ�
 | 受け入れ条件 7・I2・I4・I11 | `gws auth status` が起動できない・0 以外・JSON でない・キーが欠けるときに `stopped`・2 になり、`unauthenticated` に倒れない。どの場合も gws に渡った引数は `auth status` だけ。応答に余分のキー（トークンの値）を混ぜても結果に現れない | 読めない応答を未認証として扱う・`auth login` を打つ・応答をそのまま `metrics` に写す |
 | 受け入れ条件 8・I7・I8 | 3 ページの応答で `p1.png`〜`p3.png` がページ順に保存され、`items` の `name`・`objectId`・保存先、`metrics` の `pages`・`size`・`out_dir` が返る。gws に `auth status` が渡らない | ページの順を変える・番号を 0 から振る・成功時に認証の状態を読む |
 | 受け入れ条件 9 | 大きさの指定が無いと `LARGE` で要求する。引数が足りない・3 つ以外の大きさで `stopped`・2 | 既定を変える・知らない大きさを受ける |
-| 受け入れ条件 10・I6・I12 | gws が 0 以外で終わり、認証の状態が `none` のとき、`gate`・11・`unauthenticated` と、同じ引数の `ndf gws thumbnails` を指す `routes` が返る。gws の失敗の後に gws へ `auth status` が渡るのは 1 回だけ。認証の状態の応答が読めないときも打ち直さず、`stopped`・1 が返る | gws のエラーの文言で判定する・`routes` を持たない・読めないときに `auth status` を打ち直す |
+| 受け入れ条件 10・I6・I12 | gws が 0 以外で終わり、認証の状態が受け入れ条件 2 の (a)・(b) のどちらかのとき、`gate`・11・`unauthenticated` と、同じ引数の `ndf gws thumbnails` を指す `routes` が返る。gws の失敗の後に gws へ `auth status` が渡るのは 1 回だけ。認証の状態の応答が読めないときも打ち直さず、`stopped`・1 が返る | gws のエラーの文言で判定する・`routes` を持たない・読めないときに `auth status` を打ち直す |
 | 受け入れ条件 11 | gws が 0 以外で終わり未認証でないとき（認証の状態を読めないときを含む）、`stopped`・1 と、`items` に gws の出力の末尾（20 行まで）が返る。gws か curl が無いときは 3 | 読めない認証の状態を未認証とする・末尾を切らずに全部を載せる・前提の欠けを 1 で返す |
 | I9 | records の gws の部品を読めないときの誤りが標準エラーを持ち、gws の確認の `items` に載る。gws の確認は `google-workspace.call`、サムネイルの保存は `google-workspace.thumbnails` の上限で読む。読み取りが上限を超えたとき、gws の確認は `stopped`・2、サムネイルの保存は `stopped`・1 になる | 標準エラーを誤りから落とす・上限の名前を渡さない・打ち切りを `interrupted` にする |
 | 受け入れ条件 12・13 | `ndf check --base origin/develop` が 0 で終わる（spec-io・spec-skill・spec-docs・const-fact・child-deps・decide-pure を含む）。副命令の一覧に `ndf gws check`・`ndf gws thumbnails` の行がある | 結果のスキーマを置かない・生成物を書き直さない・子の表に `packages` を書かない |
 | 受け入れ条件 14 | `ndf check` の spec-skill が Skill 本文の `ndf gws ...` の呼び出しを副命令の引数の木に当てる。`git grep` で 3 つの文字列と注記が 0 件 | Skill 本文に知らない引数を書く・今のスクリプトのパスを残す |
 | 受け入れ条件 15 | 機能の対応表の 2 行から `parity.table` の利用者のコマンドの引き方で `gws` が引ける（`to` が `S1d`、置き場の下に副命令のモジュールがある） | 副命令のモジュールを置き場の外に置く・`to` を消す |
 | 受け入れ条件 16 | `git diff --stat origin/develop -- plugins/ndf/` が空 | 今のスクリプトかテストを変える |
+| 受け入れ条件 17・I10 | gws の確認とサムネイルの保存が、受け入れ条件 2 の (b) の応答で records の `ndf records gws-check` と同じ答え（未認証）を返す。gws の群のモジュールに `credential_source` の値で分ける処理が無い（`ndf check` の事実の重複の規則が `none`・`client_secret.json` の集まりの重複を落とす） | gws の群に判定を書き写す |
 
 結果 JSON の形（結果の契約と `gws.result.schema.json`）は、テストの間に出たすべての結果 JSON を `tests/conftest.py` が確かめる。偽の gws・npm・curl の組み方と呼ばれた引数の記録の仕方は実装（`tdd-cycle`）で決める。
 
@@ -463,7 +468,8 @@ gws の確認はリポジトリの外でも打たれるため、置き場はリ�
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #3547 | 実装する | — | `plugins/ndf-next/src/ndf/cli.py`、`plugins/ndf-next/src/ndf/domains/gws/__init__.py`、`plugins/ndf-next/src/ndf/domains/gws/cli.py`、`plugins/ndf-next/src/ndf/domains/gws/check.py`、`plugins/ndf-next/src/ndf/domains/gws/thumbnails.py`、`plugins/ndf-next/src/ndf/domains/gws/auth_decide.py`、`plugins/ndf-next/src/ndf/domains/gws/material.py`、`plugins/ndf-next/src/ndf/domains/records/gws.py`、`plugins/ndf-next/contracts/schemas/io/gws.result.schema.json`、`plugins/ndf-next/contracts/schemas/io/gws.args.schema.json`（生成物）、`plugins/ndf-next/docs/contracts/commands.md`（生成物）、`plugins/ndf-next/docs/contracts/files.md`（生成物）、`plugins/ndf-next/contracts/domains/places.json`、`plugins/ndf-next/contracts/domains/ndf-files.json`、`plugins/ndf-next/src/ndf/checks/children.json`、`plugins/ndf-next/src/ndf/parity/features.json`、`plugins/ndf-next/skills/google-workspace/SKILL.md`、`plugins/ndf-next/tests/domains/gws/__init__.py`、`plugins/ndf-next/tests/domains/gws/test_check.py`、`plugins/ndf-next/tests/domains/gws/test_thumbnails.py`、`docs/glossary/glossary.json`、`docs/glossary.md` |
+| #2067 | この子で解消する（M7 #3302 で records の判定を直して手で閉じた。`ndf gws` もその判定を使い、PR の closing keywords と本文の「この子で解消する Issue」に入れる） | #3547 | — |
+| #3547 | 実装する | — | `plugins/ndf-next/src/ndf/cli.py`、`plugins/ndf-next/src/ndf/domains/gws/__init__.py`、`plugins/ndf-next/src/ndf/domains/gws/cli.py`、`plugins/ndf-next/src/ndf/domains/gws/check.py`、`plugins/ndf-next/src/ndf/domains/gws/thumbnails.py`、`plugins/ndf-next/src/ndf/domains/gws/report_decide.py`、`plugins/ndf-next/src/ndf/domains/gws/material.py`、`plugins/ndf-next/src/ndf/domains/records/gws.py`、`plugins/ndf-next/contracts/schemas/io/gws.result.schema.json`、`plugins/ndf-next/contracts/schemas/io/gws.args.schema.json`（生成物）、`plugins/ndf-next/docs/contracts/commands.md`（生成物）、`plugins/ndf-next/docs/contracts/files.md`（生成物）、`plugins/ndf-next/contracts/domains/places.json`、`plugins/ndf-next/contracts/domains/ndf-files.json`、`plugins/ndf-next/src/ndf/checks/children.json`、`plugins/ndf-next/src/ndf/parity/features.json`、`plugins/ndf-next/skills/google-workspace/SKILL.md`、`plugins/ndf-next/tests/domains/gws/__init__.py`、`plugins/ndf-next/tests/domains/gws/test_check.py`、`plugins/ndf-next/tests/domains/gws/test_thumbnails.py`、`docs/glossary/glossary.json`、`docs/glossary.md` |
 
 ## 人へ残す判断
 
@@ -473,5 +479,4 @@ gws の確認はリポジトリの外でも打たれるため、置き場はリ�
 
 | 項目 | 内容 |
 | --- | --- |
-| records の判定との違い | records の gws の部品の判定は `credential_source` が `client_secret.json` のときも未認証とする。gws がその値を返す状態があるか（OAuth クライアントだけを置きトークンが無い状態）を、gws 0.22.5 の実測では確かめていない。返すなら、gws の確認は認証済みと答え、後の操作のコマンドが gws の誤りで止まる。扱いは決定 4 にある |
 | 実の gws と Google のアカウントでの動き | 偽のコマンドのテストでは、実の gws の応答の形（特に `getThumbnail` の `contentUrl`）と実のプレゼンテーションの全ページの保存を確かめられない。入れ替えの後のリリース後テストで確かめる |
