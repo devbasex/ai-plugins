@@ -6,7 +6,8 @@ pytest の `python_files` に当たらない補助のモジュールへ足した
 suite の宣言（`.ndf/project.json` の `test.suites[]`）の `collect_command` が、全体の実行が収集するテストを 1 行ずつ出す
 （pytest なら `pytest --collect-only -q`）。pytest は引数に渡したファイルを `python_files` に依らず収集するため、テンプレートに
 `{paths}` を書くのは、渡したファイルを名前の規則で落とすランナーに限る。宣言の無い suite のファイルは判定できない
-（`undecided`）。終了コードは 0 と 5（pytest の「収集が 0 件」）を受け、ほかは `CollectError` で止める。
+（`undecided`）。成功と読む終了コードは suite の `collect_exit_codes`（無ければ 0 だけ）で、ほかは `CollectError` で止める。
+pytest の「収集が 0 件」（終了コード 5）を成功と読むかは、ランナーの事実なので suite の宣言に書く。
 """
 
 from __future__ import annotations
@@ -24,8 +25,9 @@ from ndf.testing import slots
 COLLECT_KEY = "collect_command"
 # 収集の確かめの上限（秒）の宣言
 COLLECT_POLICY = "cross-refactoring.collect-check"
-# 収集の終了コードのうち、判定に使ってよいもの（0: 収集した、5: pytest の「収集が 0 件」）
-COLLECT_OK = frozenset({0, 5})
+# 収集の確かめで成功と読む終了コードの宣言（suite の鍵）と、宣言の無い suite の既定
+EXIT_CODES_KEY = "collect_exit_codes"
+DEFAULT_EXIT_CODES = frozenset({0})
 
 
 class CollectError(Exception):
@@ -56,14 +58,23 @@ def _group(paths: Sequence[str], suites: Sequence[Mapping[str, Any]]) -> tuple[d
     return by_suite, decl
 
 
-def _collect(work: Path, name: str, command: str, timeout: float) -> frozenset[str]:
+def exit_codes_of(suite: Mapping[str, Any]) -> frozenset[int]:
+    """suite の `collect_exit_codes` を成功と読む終了コードの集合にする。無いか並びでなければ `{0}`。真偽値は数えない。"""
+    declared = suite.get(EXIT_CODES_KEY)
+    if not isinstance(declared, list):
+        return DEFAULT_EXIT_CODES
+    codes = frozenset(c for c in declared if isinstance(c, int) and not isinstance(c, bool))
+    return codes if codes else DEFAULT_EXIT_CODES
+
+
+def _collect(work: Path, name: str, command: str, timeout: float, ok: frozenset[int]) -> frozenset[str]:
     try:
         proc = slots.run_command(command, work, timeout)
     except subprocess.TimeoutExpired as exc:
         raise CollectError(name, command, f"{timeout:g} 秒の上限を超えた") from exc
     except OSError as exc:
         raise CollectError(name, command, f"起動できない: {exc}") from exc
-    if proc.returncode not in COLLECT_OK:
+    if proc.returncode not in ok:
         raise CollectError(name, command, f"終了コード {proc.returncode}: {proc.stderr.strip()[-400:]}")
     return tests_decide.collected_files(proc.stdout)
 
@@ -75,6 +86,6 @@ def collected(work: Path, paths: Sequence[str], suites: Sequence[Mapping[str, An
     for name, files in by_suite.items():
         template = str(decl[name][COLLECT_KEY])
         command = scoped.fill_paths(template, files) if scoped.PATHS_SLOT in template else template
-        found = _collect(work, name, command, timeout)
+        found = _collect(work, name, command, timeout, exit_codes_of(decl[name]))
         got.update({f: found for f in files})
     return tests_decide.collect_verdict(paths, got)

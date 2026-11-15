@@ -720,6 +720,36 @@ class GitHub:
         body = self.rest("GET", f"/repos/{self.repo}/actions/jobs/{int(job_id)}/logs")
         return body if isinstance(body, str) else ""
 
+    def job(self, job_id: int) -> dict:
+        """Actions のジョブ（`GET /actions/jobs/<id>`。`run_id` を持つ）の本文。"""
+        return self.rest("GET", f"/repos/{self.repo}/actions/jobs/{int(job_id)}")
+
+    def workflow_run(self, run_id: int) -> dict:
+        """ワークフローの実行（`GET /actions/runs/<id>`。`path` が `.github/workflows/<ファイル>@<ref>` の形）の本文。"""
+        return self.rest("GET", f"/repos/{self.repo}/actions/runs/{int(run_id)}")
+
+    def run_artifacts(self, run_id: int) -> list[dict]:
+        """ワークフローの実行の成果物の一覧を `total_count` に届くまで読む（`github.list-pages` ページまで）。"""
+        pages = _page_cap("github.list-pages")
+        path = f"/repos/{self.repo}/actions/runs/{int(run_id)}/artifacts"
+        rows: list[dict] = []
+        for page in range(1, pages + 1):
+            body = self.rest("GET", path, params={"per_page": PER_PAGE, "page": page})
+            rows.extend(body["artifacts"])
+            if len(rows) >= int(body["total_count"]) or not body["artifacts"]:
+                return rows
+        raise _too_many_pages(f"実行 {run_id} の成果物が", pages, "github.list-pages")
+
+    def artifact_zip(self, artifact_id: int) -> bytes:
+        """成果物の ZIP の中身（302 の転送先の本文をバイト列のまま）。期限切れは状態 410 の `GitHubError`。
+
+        `rest` は JSON でない本文を文字列にして ZIP を壊すため、応答の `content` を直に返す。
+        """
+        path = f"/repos/{self.repo}/actions/artifacts/{int(artifact_id)}/zip"
+        with _translating(f"GET {path}"):
+            resp = self.api.request("GET", path)
+        return bytes(resp.content)
+
     def merge(
         self, number: int, expect_head: Optional[str] = None, method: Optional[str] = None, require_method: bool = False
     ) -> MergeOutcome:

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="Unit" tests="3" assertions="2" errors="1" failures="0" skipped="1" time="0.012">
+    <testsuite name="Tests\Unit\UserTest" file="/home/runner/work/app/app/tests/Unit/UserTest.php" tests="3" assertions="2" errors="1" failures="0" skipped="1" time="0.012">
+      <testcase name="test_creates_user" file="/home/runner/work/app/app/tests/Unit/UserTest.php" line="12" class="Tests\Unit\UserTest" classname="Tests.Unit.UserTest" assertions="1" time="0.004"/>
+      <testcase name="test_rejects_duplicate" file="/home/runner/work/app/app/tests/Unit/UserTest.php" line="20" class="Tests\Unit\UserTest" classname="Tests.Unit.UserTest" assertions="1" time="0.006">
+        <error type="RuntimeException">Tests\Unit\UserTest::test_rejects_duplicate
+RuntimeException: duplicate</error>
+      </testcase>
+      <testcase name="test_sends_mail" file="/home/runner/work/app/app/tests/Unit/UserTest.php" line="28" class="Tests\Unit\UserTest" classname="Tests.Unit.UserTest" assertions="0" time="0.002">
+        <skipped/>
+      </testcase>
+    </testsuite>
+  </testsuite>
+</testsuites>
