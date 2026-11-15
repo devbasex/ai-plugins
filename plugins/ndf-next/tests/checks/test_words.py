@@ -31,3 +31,13 @@ def test_words_inside_same_script_words_are_not_hits(plugin, rules):
 def test_no_glossary_config_means_no_words(plugin, rules):
     plugin.write("src/ndf/a.py", "# 旧名\n")
     assert words.check(plugin.scope(), rules) == []
+
+
+def test_example_words_are_skipped_only_in_the_listed_file(plugin, rules):
+    glossary(plugin)
+    examples = {"skills/a/SKILL.md": {"words": ["旧い語"], "reason": "言い換える前の語の例"}}
+    rules = {**rules, "words": {**rules["words"], "examples": examples}}
+    plugin.write("skills/a/SKILL.md", "旧い語を例に挙げる\n旧名もある\n")
+    plugin.write("skills/b/SKILL.md", "旧い語を書く\n")
+    found = words.check(plugin.scope(), rules)
+    assert [(f.path.split("/")[-2], f.line) for f in found] == [("a", 2), ("b", 1)]

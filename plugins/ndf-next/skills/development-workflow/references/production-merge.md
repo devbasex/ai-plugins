@@ -1,0 +1,77 @@
+# 自動反映の本番チャネルへのマージ（リリース承認ゲート）
+
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `merged-steps.py`（M8）・`release-steps.py`（M2）・`workflow-guard.sh`（M3a）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+
+`SKILL.md` の「本番系へ届く操作」のうち、Pull Request のマージがリリース承認ゲートに当たる場面の細部。条件そのもの
+（宛先が自動反映の本番チャネルのときだけ当たる）は `SKILL.md` にある。
+
+## 例: project-trygroup-prd の 2 本のマージ
+
+宣言が `.ndf/worktree.json` の `base_branch: develop`・`production_branch: main` と、`.ndf/project.json` の
+`delivery` に `develop` へのマージで stg・`main` へのマージで prd へ自動で反映する 2 行を持つとき:
+
+1. 実装の Pull Request（`develop` 宛て）は、`develop` が本番チャネルでないため止まらずにマージする
+2. リリースの Pull Request（`develop` → `main`）は、`main` が本番チャネルで `delivery` に `kind: auto`・`branch: main` の行が
+   あるため、`merged-steps.py` が終了コード 10 で止まり、承認資料を書く
+3. 利用者が承認したら、同じコマンドに `--gate-approved user` を付けて打ち直し、マージする
+
+**設計 Pull Request の宛先が自動反映の本番チャネルなら、そのマージは本番への反映も起こす。** 設計承認ゲートの承認資料に
+「このマージで本番へ出る」ことを書き、1 回の承認（`AskUserQuestion` の `metadata.source` は `ndf-gate:1`）で両方を通す。承認を得たら conductor が
+`ndf ci merge <番号> --gate-approved user` でマージする。1 回のマージに 2 回の承認を求めない。
+
+## リリースの場合ごとの承認の場所とマージの主体
+
+**本番チャネルへのマージのリリース承認を取る場所とマージする主体は、リリースの場合で決まる**（判定は `release-steps.py release-case`。
+4 つの場合の意味は `release` の Skill の「リリースの場合」）。
+
+| 場合 | リリース承認を取る場所 | マージする主体 | NDF が打つもの |
+| --- | --- | --- | --- |
+| CD があり、レビューなしでマージできる（`cd-no-review`） | マージの前。リリースの PR へ承認資料と承認の証跡をコメントで置く | 利用者のアカウントで NDF が `--admin` なしにマージする。main の必須チェック `ndf/release-approval` が証跡を確かめる | `release --channel prod`（承認の前は 10）→ `approval-post` → 承認 → `approve --pr` → `release --channel prod`。リリースの Pull Request の経路は `promote --gate-approved` がマージの前に証跡を書く |
+| CD があり、レビューが必須（`cd-review`） | リリースの PR のレビューの承認 | 利用者のアカウントで NDF が `--admin` なしにマージする | 証跡を書かない。承認のレビューのコミットが先端と一致したときだけマージする |
+| CD があり、レビューが必須で、迂回の宣言がある（`cd-admin`） | マージの前。リリースの PR へ承認資料と利用者の承認の証跡（`--by user`）をコメントで置く | 利用者のアカウントで NDF が管理者の迂回（`--admin`）でマージする | `cd-no-review` と同じ並び。MVV 判定のプランでも承認ゲートで止まる。マージの後に迂回の記録を置く |
+| CD が無い（`no-cd`） | 手元の承認資料 | NDF（下の「宛先ごとの判定」のとおり） | 今の `release` の工程 |
+
+CD のある場合のマージの後は、CD の workflow がタグと GitHub Release を作り、NDF は `cd-result` で結果を読んでリリース記録へ残す。
+会話の中でタグを打たない。マージの前のテストは CI の必須チェックが受け持ち、リリースの手順は全体テストを流し直さない。
+
+## 宛先ごとの判定
+
+| 宛先 | 判定 | NDF が行うマージ |
+| --- | --- | --- |
+| 本番チャネルでない | 当たらない | そのまま進む |
+| 自動反映の本番チャネル | 当たる | 承認を得るまで進めない |
+| 本番チャネルで、`delivery` が無い・不明、または宣言が読めない | 決められないため当たるとして扱う | 承認を得るまで進めない。`delivery` を宣言すれば次から判定できる |
+| 本番チャネルで、`delivery` に `kind: auto` のその行が無い（手で反映・リリースしない） | 当たらない | そのまま進む。本番への反映は `release` の工程で承認を取る |
+
+**判定と止める場所は `merged-steps.py` が持つ**（本体は `lib/delivery.py` の `judge_target`。`gh` を呼ばず、宣言と宛先だけで決める）。
+`merge-when-green` は最初の読みで宛先を判定し、当たれば CI を待たずに終了コード 10（`metrics.gate: production-merge`）で止まり、
+承認資料を書く。承認（`ndf-gate:2`）を得たら同じコマンドに `--gate-approved user`（`fast` / `auto` の MVV 判定が通したときは `mvv`）を付けて打ち直す。
+プランでは `merge-gate` のステップがプランを終え、承認の後に `run <プラン> --from merge-approved` で続ける。
+エージェントが直接打つ `gh pr merge` は hook（`workflow-guard.sh`）が同じ判定で拒み、`merge-when-green` へ案内する。
+人の手によるマージ（端末・GitHub の画面）は止めない。
+
+**ベースブランチと本番チャネルが同じリポジトリでは、リリース承認ゲートはスプリントで 1 回になる。** 実装 Pull Request は
+スプリントブランチへ入り、ベースブランチへ入るのは検査の Pull Request の 1 本だけである。スプリントを通さない
+`new impl` / `new fix` は Pull Request ごとに止まる（1 本のマージが 1 回の本番への反映である）。
+
+## 選んで集める取り込み方のリリース
+
+宣言 `.ndf/worktree.json` の `branch_flow.promotion` が `selected` のスプリントは、ベースブランチを本番チャネルへ入れない。
+スプリントの開始時に目録へ書いたスナップショットで、リリースのプランが次の順に組む。
+
+1. 開発版のデプロイ（ベースブランチ）の後、承認資料の前に `release-steps.py release-branch` がリリースブランチ `release/v<版>` を
+   `origin/<本番チャネル>` から切り、そのスプリントのブランチだけを `--no-ff` でマージして push する。衝突すれば止まり、承認資料を出さない
+2. 承認資料（`approval-facts --head release/v<版>`）の範囲は前の本番のタグからリリースブランチの先頭までで、承認したコミットはその先頭である。
+   ベースブランチへ入れた検査の Pull Request は範囲に入らない
+3. 本番のプランはリリースブランチから worktree を作り、版を上げ、`release --promotion selected` が `release/v<版>` → 本番チャネルの
+   Pull Request を出す。CD の無い場合は、先端が承認したコミットに版上げのコミットだけを積んだものであるときだけマージし、承認の後に別のブランチを
+   マージした先端は承認の外として承認ゲート（10）で止める。CD のある場合は版上げまで積んだ本番の PR の先端を承認に出し、先端と
+   PR の上の承認（証跡かレビュー）が完全に一致するときだけマージする。承認の後のコミットの追加や組み直しで先端が動けば止まる。
+   組み直すには承認資料を作り直して承認を取り直す
+4. 本番チャネルへ入れてタグと GitHub Release を作った後、`release/v<版>-sync` に `origin/<ベースブランチ>` を取り込み（版数の衝突は
+   本番の版を、CHANGELOG.md の同じ版の節の衝突はリリースブランチの節を取る）、`release/v<版>-sync` → ベースブランチの Pull Request で
+   戻す。戻すマージで止まっても本番は出ており、結果は `stopped` で戻すマージの項目だけを失敗として出す。打ち直すと本番のマージと
+   公開は済みとして飛ばし、戻すマージからやり直す
+
+`pace: fast` はスプリントブランチを作らないため、この取り込み方と組めない（`new sprint` が計画を書かずに止まる）。まとめたリリースも
+この取り込み方では組めない（`parallel.md` の「リリースの組み方」）。

@@ -1,0 +1,500 @@
+# 01: 状態管理 + レビュー実行 (Step 0〜4)
+
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `fetch-pr-comments.sh`（M1）・`launch-cli.sh`（M4）・`launch-reviewer.sh`（M5）・`resolve.sh`（X0）・`state.py`（M5）・`wait-review.sh`（M5）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+
+`SKILL.md` 本体から呼び出される **状態ファイル初期化 / ラウンド開始 /
+並列レビュー / 判定 / 振動検知** までの詳細手順。
+
+主要処理は `scripts/` 配下のコマンドに切り出し済み:
+
+| script | 役割 |
+|---|---|
+| `scripts/state.py init` | Step 0 — state 初期化 / 再開 + プリチェック |
+| `scripts/state.py start-round` | Step 1 — round 開始判定 |
+| `scripts/launch-reviewer.sh` | Step 2 — レビュワー起動のエントリポイント（4 ランタイム共通） |
+| `scripts/monitor.py` | Step 2 — レビュワーのプロセス多軸監視（`--agents` で担当を渡す） |
+| `scripts/wait-review.sh` | Step 2 — `monitor.py` の薄ラッパ（互換用） |
+| 共通ライブラリの `scripts/lib/bg-wait.sh` | Step 2 / 2.5 — Bash の 1 回（600 秒）に収まらない監視と反証をバックグラウンドで起動し、540 秒以内の wait を 124 のあいだ**別の Bash の呼び出しで**呼び直す |
+| `scripts/state.py read-result` | Step 2.4 — result.json マージ |
+| `scripts/state.py unresolved-threads` | PR 上の未解決の指摘を数える（順序を持たない補助） |
+| `scripts/state.py judge` | Step 3 — intent + 引き継いだ指摘の判定 |
+| `scripts/state.py check-oscillation` | Step 4 — 振動検知 |
+
+このドキュメントは Step 0〜4 の**手順**を残す。状態ファイルの形式と AI への入出力の契約は
+[04-contracts.md](04-contracts.md) にある。スクリプト側の挙動はソースを直接参照のこと。
+
+**目次:** [Step 0: 準備 + 既存 state 引継ぎ](#step-0-準備--既存-state-引継ぎ) / [Step 1: Round 開始判定](#step-1-round-開始判定) / [Step 2: レビュー担当 2 者の並列レビュー](#step-2-レビュー担当-2-者の並列レビュー) / [Step 3: 判定（新規の指摘 + 引き継いだ指摘 + 結果なし）](#step-3-判定新規の指摘--引き継いだ指摘--結果なし) / [Step 4: 振動検知](#step-4-振動検知)
+
+## Step 0: 準備 + 既存 state 引継ぎ
+
+```bash
+# スクリプトの置き場所を解決のエントリポイント（scripts/resolve.sh）に尋ねる。エントリポイントを探すこのコマンドと
+# 候補の順序は development-workflow/references/scripts-lookup.md にある。
+for R in '${CLAUDE_PLUGIN_ROOT}' "$(git rev-parse --show-toplevel 2>/dev/null)/plugins/ndf" \
+  ~/.claude/plugins/cache/*/ndf/* .kiro/skills/*/../.. ~/.kiro/skills/*/../.. \
+  ~/.codex/{.tmp/,}marketplaces/*/plugins/ndf ~/.gemini/config/plugins/ndf plugins/ndf; do
+  [ -f "$R/scripts/resolve.sh" ] && break; R=
+done
+[ -n "$R" ] || { echo "NDF の scripts/resolve.sh が見つからない" >&2; exit 3; }
+SCRIPTS=$(bash "$R/scripts/resolve.sh" scripts cross-review) || exit 3
+LIB=$(bash "$R/scripts/resolve.sh" scripts)/lib || exit 3   # 共通ライブラリ（bg-wait.sh）
+
+# state 初期化 / 再開（プリチェック・worktree 作成・既存コメントスナップショットを内部実行）
+# ⚠ `eval "$(スクリプト)"` は、スクリプトが異常終了しても出力が空なら終了コード 0 になる。
+# コマンド置換の終了コードは eval 自身の終了コードにならないため、止まるべき場面で
+# 止まらない。**必ず変数で受け、終了コードを見てから eval する。**
+# **値のある引数だけを渡す**（渡すと再開で上書きする。04-contracts.md）。
+INIT_VARS=$("$SCRIPTS/state.py" init "$STATE_PR" \
+          ${MAX_ROUNDS:+--max-rounds "$MAX_ROUNDS"} ${ROTATE_AFTER:+--rotate-after "$ROTATE_AFTER"} ${ONLY:+--only "$ONLY"} \
+          ${EXCLUDE:+--exclude "$EXCLUDE"} ${INCLUDE:+--include "$INCLUDE"} ${REQUIRE_ALL:+--require-all} ${FOCUS:+--focus "$FOCUS"} \
+          ${EXTRA_INSTRUCTIONS_FILE:+--extra-instructions-file "$EXTRA_INSTRUCTIONS_FILE"}) || exit $?
+eval "$INIT_VARS"
+
+# eval で取り込まれる変数: PR, WORKTREE, REPO, HEAD_BRANCH, BASE_BRANCH,
+#                        IS_OWN_PR, EVENT_DOWNGRADE, CARRIED_OVER_THREADS, RESUMED
+cd "$WORKTREE"
+```
+
+`state.py init` が内部で行う処理:
+
+1. 既存 state.json があれば再開。`final` が確定していれば、先にラウンドを足す（下の「ラウンドを足す」）。
+   **再開のときは PR 上の未解決の指摘を数え、`carried_over` に記録する**（Step 3 の判定へ入る。取得できなければ
+   記録は変えない）。state.json が JSON として読めなければ、上書きせずに
+   `❌ レビューの状態ファイルを読めません: <パス>（<理由>）` を出して exit 1
+2. 自分の PR 判定（`gh api user` と `gh pr view --json author` を比較）
+3. worktree 作成（`<worktree-base>/<owner>--<repo>/pr<PR>`。`<worktree-base>` は `NDF_WORKTREE_BASE` env > コンテナの宣言があれば `<メインディレクトリ>/.worktrees/.ndf` > `<システム tmpdir>/ndf-worktrees` の優先順で解決。既存パスが現リポジトリの登録済み worktree でなければ `.stale-<ts>` に退避して作り直す。実 path は state.json の `worktree_path` を参照）
+
+   **既存の worktree を流用するときは、必ず PR の head へ同期する。** `git fetch origin <head>`
+   の後に worktree の中で `git reset --hard origin/<head>` を実行し、
+   `git clean -fd -e .cross_review` で前回の実行が残した追跡対象外のファイルを消す。
+   フォーク PR で origin に head branch が無いときは `gh pr checkout <PR> --detach` へ
+   落とす。同期できないときは止める。
+
+   同期しないと、**レビュー担当は前回の実行が残した古い差分を読む**。指摘は現在の Pull Request
+   に無い行へ出るか、直したはずの箇所へ再び出る。どちらも投稿されるため、読む側からは
+   見分けが付かない。実測では 8 コミット古い worktree がそのまま流用された。
+
+   追跡対象外のファイルを消すのは、fix 担当が `git add -A` を使ったときに Pull Request へ
+   混ざるためである。`-x` は付けず、tmp ディレクトリは `-e` で除外する。`.gitignore` に
+   `.cross_review/` を持たないリポジトリでも、state.json と result.json が残る。
+
+   ツールのパス（既定は `.serena/project.yml` と `.serena/serena_config.yml`。足し引きは
+   `worktree` の `references/declaration.md`）には、作成と同期の後に `git update-index --skip-worktree`
+   を掛ける。担当の CLI が起動した Serena が書き換えても、fix 担当の `git add -A` で index へ入らず、
+   ラウンドの開始の検査でも止まらない。同期の前は印を外して HEAD の内容へ戻す。
+
+   **再開の経路でも同じ同期を行う。** 中断から再開するまでの間に head が進んでいることがある。
+   **ラウンドの開始時（Step 1）にも同期する。** そちらは失われるものがあるときに止める。
+4. 既存コメントスナップショット (`fix/scripts/fetch-pr-comments.sh` で 3 ソース一括取得) → `$TMP_DIR/cross-review-pr<PR>-existing-comments.txt`
+5. state.json 書き出し
+
+**重要**: 以降の全ステップで `cd $WORKTREE` を強制。
+サブエージェント（fix）を起動するときも、prompt 内で worktree path を明示する。
+
+再開で渡した引数の扱いは [04-contracts.md](04-contracts.md) の同じ名前の節にある。
+
+### ラウンドを足す
+
+`final` が確定した（`approved` / `error` / `oscillation` / `max_rounds`）state.json に `init` を打つと、
+`final` を外し、`reopens` に 1 件積んでから今の再開の手順へ進む。足した記録の書き込みは再開の反映と同じ 1 回で、
+引数の反映が止まれば state.json は足す前のまま残る。標準エラーには次の 2 行が出る。
+
+```text
+↻ final=approved のレビューにラウンドを足す（round 4 から）
+↻ 前回中断 state から再開（round=3）
+```
+
+| 項目 | 扱い |
+| --- | --- |
+| `rounds` | 1 つも消さず変えない。次のラウンドは `len(rounds) + 1` |
+| `reopens[]` | `at`・`from_final`・`base_round`（足した時点の `len(rounds)`）・`ended_at`・`sweep` を持つ。古い順に積む |
+| `ended_at`・`sweep` | 足した記録へ移し、state.json からは消す（足した後の実行を前の実行の最終スイープで読まない） |
+| 上限・巻き直し・振動検知 | `base_round` より後のラウンドだけで数える。`--max-rounds` を渡せばその数で数え直す |
+| 足す前のラウンドの後始末のチェック | 最後の足した記録の `sweep` が `verified: true` かつ `remaining_open: 0` のときだけ当てない。それ以外は今と同じく当てる |
+
+`ndf cross-review run` から打つときは、終わりの時点の PR の head と今の head が違うか、結果を変える引数（`--worktree` を除く
+`state.py init` の引数）が完了の時点と違うか、`--reopen` があれば新しい実行の回を始め、その `init` がラウンドを足す。
+head と引数が同じなら前回の結果を返す。比べられない項目（head か引数を持たない古い記録・今の head を取れない）は
+飛ばし、`ℹ head を比べられないため前回の結果を返す（足すなら --reopen）`・`ℹ 完了の記録が引数を持たないため、引数を比べない（足すなら --reopen）` を出す。
+
+## Step 1: Round 開始判定
+
+```bash
+ROUND_VARS=$("$SCRIPTS/state.py" start-round "$STATE_PR") || {
+  RC=$?
+  [ "$RC" -eq 1 ] && break   # max_rounds 到達 → ループを抜けて最終スイープへ
+  exit "$RC"                 # 5=後始末が未了 / 8=worktree を同期できない。その場で止める
+}
+eval "$ROUND_VARS"
+# eval で取り込まれる変数: ROUND, ROUND_IN_PR, PR, MAX_ROUNDS, ROTATE_AFTER
+```
+
+`state.py start-round` は `max_rounds` 超過（最後にラウンドを足した時点より後のラウンドで数える）なら `final=max_rounds` を書いて exit 1。
+それ以外は新しい round エントリを state.rounds に push して KEY=VALUE を吐く。
+
+前のラウンドの後始末（返信と Resolve）が終わっていなければ **exit 5** で止まる。
+条件は Step 3 の「Step 1 の開始時に行う後始末のチェック」にある。
+round エントリを保存する前に**コメントのスナップショットを取り直す**（#542。失敗しても止めない。条件と形は [04-contracts.md](04-contracts.md) の「ラウンドの開始時に担当へ渡すもの」）。
+
+### ラウンドの開始時の同期
+
+**round エントリを開く前に、worktree を PR の head へ揃える。** 修正を worktree の外で
+行って push すると、次のラウンドは 1 つ前の内容をレビューする。実測（PR #212）では、
+ラウンド 4 で対応済みの指摘 2 件がラウンド 5 で再び投稿された。エントリを開く前に行うのは、
+途中で止まったときにラウンドが半端に開かれず、原因を取り除いた後に同じ番号から再開できる
+ようにするためである。
+
+| 状態 | 扱い |
+| --- | --- |
+| head より古い | `git fetch` と `git reset --hard <headRefOid>` で揃える |
+| head と一致していて変更が無い | 何もしない。`git clean` も発行しない |
+| 追跡対象のファイルに変更がある | **exit 8** で止める |
+| 基準に含まれないローカルのコミットがある | **exit 8** で止める |
+| 基準を取り込めない / head を解決できない | **exit 8** で止める |
+| `worktree_path` が無い、または登録済みの worktree でない | 同期せず、警告して続ける |
+
+追跡対象の変更と未 push のコミットで止めるのは、それが**修正の工程が push を終えていない
+証拠**だからである。捨てると修正そのものが失われ、しかも失われたことが誰にも見えない。
+`init` の側で同じものを捨てているのは、そこで見つかる残骸が前回の実行のものだからで、
+意味が違う。
+
+**同期の失敗で exit 1 を返さない。** 1 はループを抜ける値であり、返すと同期できない原因が
+残ったまま最終スイープへ進む。
+
+比較の基準は `gh pr view --json headRefOid` が返すコミットで、`origin/<head>` ではない。
+フォークの PR では head branch が base のリポジトリに無く、`origin/<head>` を基準に据えると
+一致判定も未 push のコミットの検出もフォークのときだけ行えない。取り込みの宛先だけを
+`refs/pull/<PR>/head` へ変える。
+
+同期先のブランチ名は毎ラウンド取り直し、`state.json` の `head_branch` へ書き戻す。
+`squash` の巻き直しは `<branch>-r<HHMMSS>` を作るため、巻き直しの側でも `set-current-pr` が
+`--head-branch` で受け取った値を書き戻す。ラウンドの開始時にも取り直すのは、worktree の
+外で行われた変更に追従するためである。
+
+## Step 2: レビュー担当 2 者の並列レビュー
+
+**要点**: メインは launcher を **並列バックグラウンド** で起動するだけ。
+各担当は **投稿しない。** 指摘ファイル（`<席>-review-pr<PR>-round<R>-payload.json`）と
+結果ファイル（`<席>-review-pr<PR>-result.json`）を一時の名前で書き、指摘ファイル → 結果の順に
+改名する。投稿は取り込み（`read-result`）が行う（#730）。**本文はメイン context に載せない**。
+
+### 2.1 launcher 起動 + monitor
+
+```bash
+# 担当は `start-round` が $REVIEWERS / $REVIEWERS_CSV で返す。**名前で分岐せず、シェル変数で絞り直さない**（絞ると状態ファイルとずれたときに誰にも当たらない。05-pool-and-convergence.md）。
+for r in $REVIEWERS; do
+  "$SCRIPTS/launch-reviewer.sh" "$r" "$STATE_PR" "$ROUND"
+done
+
+# monitor.py が多軸で完了判定。exit code で失敗種別を分岐。上限は `--phase review`（1200 秒）。
+# ⚠ 位置引数の `both` は codex / agy の 2 者だけを指す。担当の一覧は `--agents` で渡す。
+"$LIB/bg-wait.sh" run "$TMP_DIR/review.rc" -- "$SCRIPTS/monitor.py" "$STATE_PR" --phase review --agents "$REVIEWERS_CSV"
+# 待ちは 1 回 540 秒以内。**124 が返るあいだ、この 2 行を別の Bash の呼び出しとして呼び直す。**
+# 繰り返しを 1 回の呼び出しへ書くと、2 回目の待ちで合計が 600 秒を超えてホストに打ち切られる。
+"$LIB/bg-wait.sh" wait "$TMP_DIR/review.rc"; RC=$?
+if [ "$RC" -ne 0 ] && [ "$RC" -ne 124 ]; then
+  case $RC in
+    2) echo "❌ timeout"      ;;  # hard timeout 超過
+    3) echo "❌ no result"    ;;  # プロセス終了したが result.json 未生成
+    4) echo "💥 early error"  ;;  # err.log に致命的パターン
+    5) echo "🛑 stalled"      ;;  # 進捗ログ更新なし
+    6) echo "❓ pidfile bad"  ;;  # 起動失敗 / 不正
+  esac
+  # ラウンドを失敗マークしてリトライ or 中断（state.py side で判断）
+fi
+```
+
+#### `monitor.py` の多軸監視
+
+| 軸 | 内容 |
+|---|---|
+| pidfile + `kill -0` | プロセス生存確認。alive 確認後に `/proc/<pid>/cmdline` で agent 名一致も検証 (PID 再利用対策)。**プロセスが既に死んでいる場合は result.json の有無のみで OK 判定**する (死亡直後 cmdline 不一致で誤検知しないため) |
+| codex sentinel | err.log に `^tokens used$` 出現で正常完了マーク |
+| early-error | 致命の文言を検出して止める。**利用上限**（`Monthly request limit reached` / `"api_error_status":429` / 「quota exceeded」「rate limit exceeded」/ `^HTTP/1.1 429`）は理由 `usage_limit`、それ以外の致命（`^HTTP/1.1 401\|403` / `^Authentication failed` / 「API key not found/missing/invalid」「sandbox error」など）は理由 `early_error`。どちらも状態は `EARLY_ERROR`（終了コード 4）。err.log は全担当、stdout.log は claude だけ JSON 向けの照合で見る。diff / doc 引用文中の同語句は anchor + benign フィルタで除外する。`^Error:` / `^Traceback ` などは警告に留めて止めない |
+| stall timeout | err.log + stdout.log + progress.log の合計サイズが一定時間変化しなければ STALLED で中断。既定は **agent 別** (codex=**180s** / agy=**480s** / kiro=**480s** / claude=**900s**、上限の表)。agy は err.log がほぼ無音のため大きめに取る。上書き方法: CLI `--stall-timeout` (明示優先) > env `MONITOR_STALL_<AGENT>` (per-agent) > env `MONITOR_STALL` (両 agent 共通) > agent 別ビルトイン |
+| hard timeout | 既定は `--phase` の工程の値で、上限の表（`scripts/lib/limits.py`）が持つ（review / critique は **1200 秒**）。上書きは `--timeout` > env `MONITOR_TIMEOUT_<AGENT>` > env `MONITOR_TIMEOUT`。agy の CLI の上限（`--print-timeout`）は同じ解決の値 + 120 秒で、監視より先に打ち切らない。解決した stall が hard timeout 以上なら担当ごとに警告する |
+| progress.log heartbeat | launcher が任意で `<agent>-review-pr<PR>-progress.log` への短いフェーズマーカー出力を要求し、monitor が最終行を stderr の heartbeat に表示する。内部推論ではなく `scan` / `analyze` / `post` / `done` などの監視用ステータスだけを出す |
+| result.json 存在 | プロセス終了後、result.json が無ければ NO_RESULT (exit 3)。err.log に CLI 自身の上限の文言（agy の `print timeout after … with turn in progress`）があれば理由は `cli_timeout`、無ければ `missing` |
+| **result.json + age fallback** | sentinel を持たない agent (agy) 向け。プロセスが alive のまま result.json の mtime が **30 秒以上前**なら完了とみなし kill → OK。結果を書いた後にプロセスが終わらないケースに対応 (codex は sentinel チェックが先に発火するため影響なし) |
+| **失敗時 kill** | TIMEOUT / STALLED / EARLY_ERROR / PIDFILE_BAD で返るときは対象に SIGTERM → 3 秒後 SIGKILL。`launch-cli.sh` は CLI を独立したプロセスグループで起動する（`set -m`）ため、対象がグループの先頭なら**グループごと**止める。止めた後に子プロセスが `gh api` 投稿や result.json 書き込みを行うのを防ぐ（#584） |
+
+完了判定の罠を 4 つ挙げる。
+
+| 罠 | 守ること |
+|---|---|
+| `nohup ... &` でラッパーシェルは即終了し、ハーネスから「タスク完了」通知が飛んでくる | 惑わされず、`monitor.py` で実プロセスの完了を pidfile / sentinel で確認する |
+| agy は長い `-p` プロンプトを引数に持ち、`pgrep -fa <prompt>` はキーワード選定で誤検知する | `pgrep` で完了判定しない。**pidfile 必須** |
+| codex がクラッシュすると sentinel `tokens used` が永遠に出ない | sentinel 単独で完了判定しない。`monitor.py` は pidfile / result.json / err.log を併用する |
+| Docker では `nohup ... & disown` のプロセスが終了後にゾンビ化する（PID 1 が init でない場合） | `monitor.py` は `/proc/<pid>/status` でゾンビを検出して dead 扱いする。**Docker 実行時は `--init` を付ける**（tini がゾンビを回収する） |
+
+AI への入出力の契約（2.2）と、AI が書き出すファイルの契約（2.3）は
+[04-contracts.md](04-contracts.md) にある。
+
+### 2.4 result.json を state にマージ
+
+```bash
+for r in $REVIEWERS; do
+  "$SCRIPTS/state.py" read-result "$STATE_PR" "$r"
+done
+```
+
+`state.rounds[-1].<席の名前>` に `intent / posted_as / comments / review_url / by_severity` を分離保存する（スロット名の形は `04-contracts.md`）。
+
+#### 取り込みがレビューを投稿する
+
+**書き込みと記録を 1 つの部分命令に閉じる**。`read-result` は「指摘ファイルを読む → 投稿を
+積む → 流す → 送信の応答を記録へ書き戻す → 指摘を取り込む」の順に進む。記録の参照は送信の
+応答から、件数（`comments`）は送れたインラインの数から取る。**担当の申告を GitHub の実数と
+突き合わせる処理は無い**（投稿する側と記録する側が同じになったため）。標準出力に足すのは
+件数・参照・状態の行（`POSTED review_url=` / `INLINE= BODY= QUEUED=` / `FINDINGS=`）だけである。
+
+| 止まった場所 | 投稿キューの項目 | 立て直し |
+| --- | --- | --- |
+| 送る前（上限か一時的な失敗で送れていない） | 残る | 取り込みは結果を記録して終了コード 0（`QUEUED=1`）で終わり、担当を結果なしに数えない。判定の終了コード 8 の枝が流し直す |
+| 送った後・記録の前 | 残らない | 取り込みをもう一度呼ぶ。照合（ラウンドとスロットまでの前方一致）が重複投稿を見つけ、増えない |
+
+本文の先頭行は `## 🤖 cross-review | round <R> | <席> | <本来の判定>` である。自分の
+Pull Request では送る形だけを `COMMENT` へ落とし、記録の `intent` は本来の判定のまま残す。
+
+**誰がレビューし、いつ止めるかは [05-pool-and-convergence.md](05-pool-and-convergence.md)
+にある。** 参加者プール・担当の輪番・認証確認と、終了基準の 3 つの層をそこで定める。
+
+## Step 3: 判定（新規の指摘 + 引き継いだ指摘 + 結果なし）
+
+```bash
+JUDGE_VARS=$("$SCRIPTS/state.py" judge "$STATE_PR"); JUDGE_RC=$?
+eval "$JUDGE_VARS"
+# コマンド置換の終了コードは変数で受けてから読む。
+# `eval "$(...)"` の形は置換の終了コードを飲むため、7 で分岐できない。
+```
+
+### 判定の出口
+
+出口は 6 つある。**結果を取り込めていないラウンドは、収束も修正も決められない。**
+そのため結果なしのチェックを、通ったかどうかの判定より先に置く。
+
+| ラウンドの状態 | 出口 | 終了コード | `verdict` |
+| --- | --- | --- | --- |
+| 結果なしがあり、どの席にも起動し直すか振り替える担当がいる | 起動し直す・振り替える | 7 | `no_result` |
+| 結果なしがあり、振り替え先の無い席がある | 中断（`final = error`） | 1 | `no_result` |
+| 通ったが、投稿キューに投稿が残っている | 流し直す | 8 | `queued` |
+| 通った、かつ引き継いだ指摘なし | 収束（`final = approved`） | 0 | `approved` |
+| 範囲の照合で外れた通した担当を数えなければ収束したが、外れた担当がいる | 修正を挟まずに次のラウンドへ（`SCOPE_RETRY=1`） | 2 | `scope_unmatched` |
+| それ以外 | 修正へ | 2 | `changes_requested` |
+
+終了コード 8 を 2 と分けるのは、**修正するものが無い状態で修正の工程を起動すると再起動ループに
+なる**ためである。呼び出し側は 8 を受けたら `flush` を試し、流し切れたら判定をもう一度
+実行する（`SKILL.md` のループ）。
+
+`scope_unmatched` は修正するものが無いため、`ndf cross-review run` は修正の工程を通さずに次のラウンドを開く。
+`start-round` の後始末のチェックは `changes_requested` だけに修正の記録を求めるため、記録なしで開ける。
+照合の規則は [05-pool-and-convergence.md](05-pool-and-convergence.md) の「範囲の照合」にある。
+
+`ndf cross-review run` は 8 を受けると段階 `posts` へ移り、**担当を起動し直さず、新しいラウンドも開かずに**
+投稿キューを流し直す。
+
+| `state.py flush` の結果 | 扱い |
+| --- | --- |
+| 残りが 0 | 判定をもう一度打ち、修正（2）か収束（0）へ進む |
+| 一時的な失敗で残る（`PENDING_TRANSIENT=1`） | 30 秒おきに、合計 300 秒まで流し直す（上限の宣言 `plugins/ndf/contracts/limits.json` の方針 `post-queue.transient-reflush`）。その後に判定を打ち直す |
+| 上限か読めない項目で残る | 待たずに判定を打ち直す |
+
+打ち直した判定がなお 8 なら「投稿待ち」で止まる。止まりの結果は `status` が `stopped`、`summary` が
+`投稿待ち:` で始まり残りの件数と最後の失敗を含み、`metrics.exit` が 8 で、`final` は書かない
+（結果なしの中断の `final = error` と読み分ける）。同じコマンドを打ち直すと段階 `posts` から続け、
+送れたら同じラウンドの判定へ進む。
+
+### 結果を残さなかったレビュアーの扱い
+
+**起動したのに使える結果が残らなかったレビュアーは、収束の側へ数えない。** レビューが
+行われていないのに、行われて承認されたのと同じ出口へ進むためである。打ち切りは負荷が
+高いときや対象が大きいときに起きやすく、レビューが最も要る場面で承認が水増しされる。
+
+`--only` で外したレビュアーと、結果を残さなかったレビュアーは別の値で持つ。
+
+| 値 | 意味 | 収束の判定 |
+| --- | --- | --- |
+| `SKIP` | `--only` の指定で起動しなかった | 判定へ届かない（短絡する） |
+| `NO_RESULT` | 起動したが、使える結果が残らなかった | 通らない |
+
+`NO_RESULT` は `read-result` が書き込む。理由は `no_result_reason` に、監視が残した詳細（err.log の
+抜粋、最大 200 文字）は `monitor_detail` に残る（監視結果ファイルがあったときだけ）。理由の語彙を
+持つのは共通ライブラリの `monitor_outcome.py`、リトライ可否と振り替えの規則を持つのは
+`assignment.py`（`after_no_result`）だけで、`read-result` は理由をコピーし、判定は規則の答えに従う。
+
+| 理由 | 何が起きたか | 同じ席で起動し直し | `read-result` の終了コード |
+| --- | --- | --- | --- |
+| `missing` | 結果ファイルが無い・空で、監視の理由の文言も無い | 可 | 1 |
+| `unparsable` | 結果ファイルがあるが JSON オブジェクトとして読めない | 可 | 3 |
+| `no_verdict` | `event` も `intent` も無い | 可 | 1 |
+| `not_posted` | 投稿が Pull Request に届いていない | 可 | 1 |
+| `timeout` | 監視の上限で打ち切った | 可 | 1 |
+| `stalled` | 無進捗の許容を超えて打ち切った | 可 | 1 |
+| `early_error` | 利用上限以外の致命の文言で止めた | 可 | 1 |
+| `usage_limit` | 担当の CLI の利用上限（月間・週間の枠）に達した | **否** | 1 |
+| `cli_timeout` | CLI 自身の上限（agy の `--print-timeout`）で結果を書かずに終わった | 可 | 1 |
+| `pidfile_bad` | pid ファイルが無い・別のプロセスを指す | 可 | 1 |
+
+**記録が無いラウンドも結果なしとして読む。** スケルトンが取り込みを呼び忘れても、判定は収束しない。
+
+結果なしの担当があると、判定は理由を `NO_RESULT_REASONS='<担当>=<理由> ...'` の 1 行で出す。
+続けて結果なしの席ごとに規則（`assignment.after_no_result`）へ答えを求め、答えを状態ファイルの
+`no_results`（結果なしの記録）へ追記する。判定は答えを実行するだけで、自分では決めない。
+
+| 順 | 条件 | 答え |
+| ---: | --- | --- |
+| 1 | 理由が `usage_limit` 以外で、その席（とアカウント）をこのラウンドでまだ起動し直していない | 同じ席で 1 度だけ起動し直す |
+| 2 | `--only`（1 者指定） | 中断 |
+| 3 | claude の `usage_limit` で、登録済みの別のアカウントが使える | 同じ席のまま、そのアカウントへ振り替える |
+| 4 | 利用可能な参加者から外した担当・結果なしの担当・同じラウンドのもう一方の席を引いて、1 者以上残る | 残りから「ホスト → 先頭」で 1 者へ振り替える |
+| 5 | どれにも当たらない | 中断 |
+
+利用上限は同じ担当を何度起動しても解けず、待ちと相手の枠を消費するだけである。そのため
+順 1 に当たらず、別のアカウントか別のランタイムへ振り替える。
+
+| 答え | 出力と記録 |
+| --- | --- |
+| 起動し直す | `RELAUNCH_AGENTS='<席> ...'`・`RELAUNCH_AGENTS_CSV`・`RELAUNCH_TARGET` の 3 行。対象を `rounds[-1].relaunched` へ |
+| 振り替える | `REASSIGNED='<元の席>=<振り替え先>:<理由> ...'` の 1 行。アカウントへの振り替えは振り替え先を `claude@<アカウント>` と書く。駆動は、元の席が claude なら元の席を、別のランタイムからなら振り替え先の席（`claude`）を起動する。`rounds[-1].reviewers` / `seats` を振り替え先へ書き換え、`rounds[-1].reassigned` に写す。元の席の欄（`rounds[-1].<元の席>`）は残す |
+| 中断 | `final=error`・終了コード 1。標準エラーに、このラウンドで試した担当・理由・答えと `monitor_detail` |
+
+どれかの席が中断なら終了コード 1、そうでなければ 7 で、駆動は `RELAUNCH_AGENTS` の席と
+`REASSIGNED` の振り替え先を起動して判定し直す。7 の回数は数えない。席ごとの起動し直しは 1 度、
+振り替えは候補が減るたびに 1 度で、候補が尽きれば中断になる（記録が止める）。
+
+```text
+NO_RESULT_REASONS='kiro=usage_limit'
+REASSIGNED='kiro=claude:usage_limit'
+```
+
+`RELAUNCH_TARGET` は `codex` / `agy` / `both` のいずれかで、`monitor.py` へそのまま渡せる値である。
+起動し直しと振り替えはラウンドの中で完結するため、**ラウンドの数え方と上限の意味は変わらない。**
+
+**外した担当は同じ実行の残りで席に選ばない。** 別のランタイムへ振り替えた元の担当と中断した担当は、
+記録から導く外した担当（`assignment.excluded_runtimes`）になり、次のラウンドの席は利用可能な参加者から
+それを引いて表（`review_seats`）で決める（`-2` の席も含めて出ない）。固定の組（`.ndf/runtimes.json` の
+`review_seats`）は、どちらかのランタイムが振り替えか中断の元になった時点で使わない。席を選べなくなれば
+`start-round` が `final=error`・終了コード 1 で止める。完了報告の「参加した者」には振り替えの行と外した担当が載る。
+
+### 判定へ入れる対象
+
+判定は 2 つの対象を別々に見る。**投稿数と未解決の指摘の数は一致しない。** 投稿数はそのラウンドで
+外部の AI が新しく投稿した件数で、未解決の指摘は前のラウンドの分も含む Pull Request 上の総数である。
+
+| 対象 | 判定への入れ方 | 数え方 |
+|---|---|---|
+| そのラウンドで新しく投稿された指摘 | 外部の AI が返した `intent` と重要度で見る | `result.json` の `comments_count` |
+| 引き継いだ指摘（再開の時点で残っていた未解決の指摘） | 修正の工程（Step 5）を 1 度通すまで収束させない | GraphQL の `reviewThreads` を数え直す |
+
+```mermaid
+graph TD
+    A[ラウンドの判定] --> G{結果を残さなかった<br/>レビュアーがいるか}
+    G -->|"いる (規則が起動し直し・振り替え)"| R[その席を起動し直すか<br/>振り替え先を起動する]
+    G -->|"いる (振り替え先が無い)"| X[中断<br/>final=error]
+    R --> A
+    G -->|いない| B{新しく投稿された<br/>指摘は通ったか}
+    B -->|通らない| E[修正の工程<br/>Step 5]
+    B -->|通った| C{引き継いだ指摘が<br/>残っているか}
+    C -->|残っている| E
+    C -->|無い| D[収束<br/>final=approved]
+    E --> F[次のラウンド]
+```
+
+すべてのラウンドで未解決の指摘が 0 件になるまで収束させる形は採らない。承認された
+ラウンドに軽微な指摘が乗るのは通常の経路であり、そこを収束の条件にするとラウンドが
+増え続ける。収束を止めるのは修正の工程を 1 度通すまでで、**増えるラウンドは最大 1 回**に
+収まる。1 度通した後に残る指摘は最終スイープ（Step 7.5）が受け持つ。
+
+**判定ロジック**（新しく投稿された指摘の側）:
+
+- `APPROVE` は pass
+- `COMMENT` は `by_severity.critical == 0 && major == 0` のみ pass（軽微な指摘のみなら通す）
+- `NO_RESULT` は pass にしない（結果なしのチェックが先に効くため、ここへは届かない）
+- `--only` 指定時は反対側を SKIP 扱いとし、pass 判定を短絡する
+- ループ収束判定は **必ず `intent`** を見る（`posted_as` ではない）
+
+自分の PR で `REQUEST_CHANGES → COMMENT` にダウングレード投稿していても、
+intent が `REQUEST_CHANGES` なら継続する。
+
+### 引き継いだ指摘の記録と解除
+
+| 段階 | 起きること |
+|---|---|
+| `init` の再開 | 未解決の指摘を数え、`carried_over` に件数と thread ID を記録。出力に `CARRIED_OVER_THREADS=N` |
+| `judge` | `carried_over.fixed_in_round` が `null` のあいだは、両者が承認しても exit 2 |
+| `merge-fix` | 修正の工程を通したラウンド番号を `carried_over.fixed_in_round` に入れる |
+| 以降の `judge` | 引継ぎは判定から外れ、収束の振る舞いは現行に戻る |
+
+新規に開始したレビューでは記録しない。引継ぎは**再開の時点**で決まる。
+未解決の指摘を取得できなかったときは記録を書き換えない（0 件として扱わない）。
+
+修正の工程を通した後にもう一度再開したときは、**そのとき残っている指摘が前回の記録に
+無い識別子を含むかどうか**で分ける。含まなければ deferred / rejected と最終スイープ待ちの
+残りなので、`fixed_in_round` をそのまま残して収束を抑止しない。含むなら再開の後に増えた
+指摘があるため、それを含めて数え直し、もう 1 度修正の工程へ通す。前者を未処理として
+数え直すと、収束が再開のたびに 1 ラウンドずつ先送りされる。
+
+### 未解決の指摘を単独で数える
+
+```bash
+UNRESOLVED_VARS=$("$SCRIPTS/state.py" unresolved-threads "$STATE_PR") || exit $?
+eval "$UNRESOLVED_VARS"
+# UNRESOLVED_COUNT / UNRESOLVED_THREAD_IDS を取り込む。
+# exit 1 = 取得できなかった（0 件と区別する）
+```
+
+### GitHub が使えないあいだの投稿（投稿キュー）
+
+上限で送れなかった投稿を残して後から流す仕組みと、#261 の決まりとの関係は
+[07-posts-and-records.md](07-posts-and-records.md) の「GitHub が使えないあいだの投稿（投稿キュー）」にある。
+
+### Step 1 の開始時に行う後始末のチェック
+
+`start-round` は、前のラウンドの後始末が終わっているかを次の 2 点で確かめ、
+どちらかに当たれば **exit 5** で止まる。オーケストレーターが手で修正して次のラウンドへ進めると、
+Step 5 が担う返信と Resolve が飛ばされるため。
+
+| 状態 | 扱い |
+|---|---|
+| 前のラウンドが修正必須の判定で、`fix` の記録が無い | exit 5 |
+| 前のラウンドで Resolve したと申告された thread が GitHub 側で未解決のまま | exit 5 |
+| 前のラウンドが結果なし（`verdict = no_result`）| 修正の記録を求めない |
+| 未解決の指摘を取得できない | チェックを飛ばし、確認できなかったことを stderr へ残して続行 |
+
+判定の結果（`rounds[].verdict`）を持たない古い state.json では、保存された `intent` と
+重要度から判定し直して同じチェックへ通す。
+
+ホストが `/ndf:fix` を通さずに自分で直して送り、返信と Resolve を済ませたときは、戻り値ファイルを手で書かずに
+`state.py record-fix <PR> [--commit <SHA>] [--resolved-thread <ID>]...` で修正の記録を作る。形と終了コードは
+[04-contracts.md](04-contracts.md) の「`record-fix`」にある。
+
+## Step 4: 振動検知
+
+```bash
+if "$SCRIPTS/state.py" check-oscillation "$STATE_PR"; then
+  : # ここには来ない（成功は exit 2 = continue）
+elif [ $? -eq 4 ]; then
+  exit 4  # final=oscillation で中断
+fi
+```
+
+各ラウンドの `$TMP_DIR/<agent>-review-pr<PR>-round<R>-payload.json` から指摘を集め、
+前のラウンドと**同じ箇所を指す指摘の割合**を計算する。**0.5 以上で中断**する。
+
+同じ箇所かどうかは 3 つの一致でこの順に試し、いずれか 1 つで結びつけば同じ箇所として数える。
+位置だけで測ると、趣旨が同じでも行が 1 行ずれれば別の指摘として数えてしまう。
+
+| 一致 | 条件 | 出力での呼び名 |
+| --- | --- | --- |
+| 位置 | ファイルが同じで、行が同じ | `位置=` |
+| 近傍 | ファイルが同じで、行の差が 3 行（`OSCILLATION_NEAR_LINES`）以内 | `近傍=` |
+| 本文 | ファイルが同じで、正規化した本文（先頭 80 文字）が同じ | `本文=` |
+
+出力は内訳を持つ（`振動検知: overlap=4/6 (67%) 位置=2 近傍=1 本文=1`）。**近傍の幅の根拠と
+なる実測はまだ無いため、内訳を残して判断の材料を貯める。**
+
+PR ローテーション直後 (`round_in_pr < 2`) と現ラウンドの payload が無いときはスキップする。
+比べるのは最後にラウンドを足した時点より後のラウンドだけである。
+
+`final` が確定しているとき（`judge` が収束を書いた後など）は判定せず、`⏭ final=<値> は確定済み: 振動検知スキップ` を
+出して exit 2 で抜ける。`final` を書き換えないため、収束と中断が同じ出力に並ばない。
