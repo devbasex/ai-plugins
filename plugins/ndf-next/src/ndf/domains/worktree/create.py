@@ -20,8 +20,6 @@ from typing import Optional
 from ndf.adapters.git import Git
 from ndf.domains.worktree import declaration, repo
 
-# 取得するリモート
-
 
 class CreateError(Exception):
     """作れない。`kind` は止まった理由の表の種類（`invalid`・`precondition`・`refused`）。"""
