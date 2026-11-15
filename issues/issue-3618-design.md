@@ -9,7 +9,7 @@
 
 ## 適用範囲
 
-- **働く範囲**: 設計の工程を通るすべてのリポジトリ。代表のリポジトリでの振る舞いの表を求める検査は、代表のリポジトリの設定（`.ndf/design.json`）を置いたリポジトリでだけ働く。そのリポジトリの中でも、設計の結果の「触るファイル」が設定の `paths` に当たる設計だけに働く。cross-review の汎用性の観点と、要求と起票のテンプレートの方針の分け方は、設定に依らずすべてのリポジトリで働く。表を求める範囲を設定と `paths` で絞ること（要求の層 C と「影響」より範囲を狭める）と、設計文書のテンプレートを変えること（全プロジェクトの設計に効く。要求の「境界」の「確認してから行う」）は、レッドラインに当たらないため決定の記録で決める（決定 13・14）
+- **働く範囲**: 設計の工程を通るすべてのリポジトリ。代表のリポジトリでの振る舞いの表を求める検査は、代表のリポジトリの設定（`.ndf/design.json`）を置いたリポジトリでだけ働く。そのリポジトリの中でも、設計の結果の「触るファイル」が設定の `paths` に当たる設計だけに働く。触るファイルを読めない設計（`legacy-refactor` の書式の設計と、設計の結果の表を読めない設計）には、`paths` に依らず働く。cross-review の汎用性の観点と、要求と起票のテンプレートの方針の分け方は、設定に依らずすべてのリポジトリで働く。表を求める範囲を設定と `paths` で絞ること（要求の層 C と「影響」より範囲を狭める）と、設計文書のテンプレートを変えること（全プロジェクトの設計に効く。要求の「境界」の「確認してから行う」）は、レッドラインに当たらないため決定の記録で決める（決定 13・14）
 - **プロジェクトごとに違うもの**: 代表のリポジトリの種類・表を求めるパス・扱えなくなる種類があるときに名指すレッドラインの番号は、設定 `.ndf/design.json` で受ける。名指す番号の中身（何を承認に回すか）は、そのリポジトリのプロジェクト MVV の「このプロジェクトが足す操作」の表に置く。ai-plugins では MVV の文言（Value 4・P2）を ai-plugins の `.ndf/mvv.md` に入れる
 - **当たるモード**: `standard`・`legacy-refactor`（頭の設計文書 `issues/issue-<番号>-design.md` を書くモード）。汎用性の観点は設計 Pull Request の cross-review を通るすべてのモード、方針の分け方は要求を書くすべてのモード
 
@@ -108,7 +108,7 @@ ai-plugins の運用で決める値で、NDF の既定や振る舞いへ入れ�
 
 | # | 集約 | 条件 | 破れたときの扱い |
 | --- | --- | --- | --- |
-| I1 | 設計文書 | 代表のリポジトリの設定があり、頭の設計文書の「設計の結果」の触るファイルのどれかが設定の `paths` に当たるか、触るファイルを読めなければ（`paths` が無ければ常に当たる。詳細設計の `applies`）、頭の設計文書の「適用範囲」に、代表のリポジトリでの振る舞いの表があり、設定の `kinds` の種類ごとに行がある | 設計の検査が終了コード 1 で、規則 `repo_scope_missing` の指摘を出す |
+| I1 | 設計文書 | 代表のリポジトリの設定があり、頭の設計文書の「設計の結果」の触るファイルのどれかが設定の `paths` に当たるか、触るファイルを読めなければ（`paths` が無ければ常に当たる。詳細設計の `applies`）、頭の設計文書の「適用範囲」に、代表のリポジトリでの振る舞いの表があり、設定の `kinds` の種類ごとに行があり、どの行も「直した後に起きること」と「この種類で扱えなくなること」が空でない | 設計の検査が終了コード 1 で、規則 `repo_scope_missing` の指摘を出す |
 | I2 | 設計文書 | I1 と同じ前提（代表のリポジトリの設定があり、触るファイルのどれかが `paths` に当たるか、触るファイルを読めない）で、振る舞いの表のどれかの行の「この種類で扱えなくなること」が `無し` で始まらなければ、「人へ残す判断」の表に、設定が名指す番号を持つ行がある | 設計の検査が終了コード 1 で、規則 `repo_loss_unrouted` の指摘を出す |
 | I3 | 代表のリポジトリの設定 | 設定が無いか、設計の触るファイルが `paths` に当たらなければ、設計の検査の結果（終了コード・指摘）は今と同じである | 既存の設計の検査のテストが落ちる |
 | I4 | 代表のリポジトリの設定 | 設定がスキーマに合わなければ（種類が空の配列を含む）、設計の検査は推して進めずに止まる。種類を求めないリポジトリは設定を置かない | 設計の検査が終了コード 2 で止まる |
@@ -122,10 +122,10 @@ ai-plugins の運用で決める値で、NDF の既定や振る舞いへ入れ�
 | --- | --- | --- | --- | --- |
 | E1 | 利用者が運用の方針を指示した | 利用者 | 要求の書き手・起票者 | — |
 | E2 | 方針を「このリポジトリの運用の決まり」と「作るものの振る舞い」に分けて記録した（D） | 要求の書き手・起票者 | 設計の工程 | — |
-| E3 | 設計の「適用範囲」に代表のリポジトリでの振る舞いを、種類ごとの「この種類で扱えなくなること」とともに書いた（C） | 設計の worker | 設計の検査 | — |
-| E4 | 設計の検査が表と人へ残す判断の行を確かめた（C） | 設計の検査（`design-survey.py check`） | 直しの worker（終了コード 1）・設計 PR のステップ（0） | 設定が壊れていれば終了コード 2 で止まる（I4） |
-| E5 | cross-review が汎用性の観点で問うた（E） | cross-review のレビュー担当 | 直しのラウンド | — |
-| E6 | MVV 判定が、代表のリポジトリの種類を扱えなくする設計をレッドライン（P2）に当たるとした（B） | MVV 判定（`mvv-gate.py`） | 承認資料 | 判定が走らない場合（#3596 の事実 6）、`無し` 以外の行は E4 で人へ残す判断に載って届く。`無し` と書いた設計は E5 だけが捕まえる。この扱いは決定 15 で決めた |
+| E3 | 設計の「適用範囲」に代表のリポジトリでの振る舞いを、種類ごとの「この種類で扱えなくなること」とともに書いた（C） | 設計の worker | cross-review（設計 PR） | — |
+| E4 | 設計の検査が、cross-review の後に表と人へ残す判断の行を確かめた（C） | 設計の検査（`design-survey.py check`。ステップ `survey-check`） | 直しの worker（終了コード 1。直した後は再検査 `survey-recheck` だけを通り、cross-review へ戻らない。決定 17）・用語の検査と承認ゲート（0） | 設定が壊れていれば終了コード 2 で止まり、直しの worker へ回さない（I4） |
+| E5 | cross-review が汎用性の観点で問うた（E）。設計の検査より前に走る | cross-review のレビュー担当 | 直しのラウンド（収束した設計は E4 へ） | 設計の検査の後に直しの worker が足した表は問わない（決定 17） |
+| E6 | MVV 判定が、代表のリポジトリの種類を扱えなくする設計をレッドライン（P2）に当たるとした（B） | MVV 判定（`mvv-gate.py`） | 承認資料 | 判定が走らない場合（#3596 の事実 6）、`無し` 以外の行は E4 で人へ残す判断に載って届く。`無し` と書いた設計は E5 だけが捕まえる（直しの worker が設計の検査の後に書いた表は E5 も通らない。決定 17）。この扱いは決定 15 で決めた |
 | E7 | 利用者が人へ残す判断の行を見て、承認か変更要求を返した | 利用者 | 設計の工程（変更要求なら E3 へ） | — |
 | E8 | CI が、代表のリポジトリの種類に要る選択肢を代わりの形なしに無くす変更を落とした（F） | #3617 の検査 | 実装の Pull Request | — |
 | E9 | 代表のリポジトリで試走した（G） | #3411 の試走 | 行き先の子 | — |
@@ -137,12 +137,12 @@ ai-plugins の運用で決める値で、NDF の既定や振る舞いへ入れ�
 | 汎用性の後退 | NDF の変更の後に、代表のリポジトリの種類のどれかを NDF で扱えなくなること。その種類に要る選択肢（運用・リリースの形・テストのツール・CI など）を、代わりの形なしに無くすことで起きる。値の改名・作り直し・既定の変更・代わりの形のある値の削除は当たらない | 追加 |
 | サポートする選択肢 | 設定で選べる値（supported options）。リリース方式の値・`delivery` の種類・リリースの形など。汎用性の後退は、ある種類に要るサポートする選択肢を代わりの形なしに無くすことで起きる | 追加 |
 | 代表のリポジトリの種類 | NDF が扱えることを保つリポジトリの種類。代表のリポジトリの設定の `kinds` に名前で書く（ai-plugins では Web サービス・モバイルアプリ・業務文書だけ） | 追加 |
-| 代表のリポジトリ | 代表のリポジトリの種類ごとに、設計の振る舞いを確かめるために選ぶ、このリポジトリの作るものを使う側のリポジトリ（実物か、設定を仮に置いたもの） | 意味の変更 |
-| 代表のリポジトリの設定 | `.ndf/design.json` の `representative_repos`。代表のリポジトリの種類の一覧・表を求めるパス・扱えなくなる種類があるときに名指すレッドラインの番号を持つ。置いたリポジトリで、触るファイルがそのパスに当たる設計だけに設計の検査が振る舞いの表を求める | 意味の変更 |
-| このリポジトリだけの事情 | 設計を書くリポジトリの運用で決めた値。作るものの既定や振る舞いへ入れず、そのリポジトリの `.ndf/` の設定に置く。ai-plugins では「ai-plugins だけの事情」と書く | そのまま |
-| 設計の検査 | 設計文書を書いた後に工程が走らせる、言語モデルを呼ばない決まった検査（`design-survey.py check`。設計のプランのステップ `survey-check`） | 意味の変更 |
-| 製品の約束 | NDF が利用者の多様なリポジトリへ約束する価値。ai-plugins の MVV の Value 1〜14 と Vision が持つ | そのまま |
-| ai-plugins だけの事情 | ai-plugins の運用で決めた値（ブランチの運用・リリースの形・マーケットプレイスの名前など）。NDF の既定や振る舞いへ入れず、ai-plugins の `.ndf/` の設定に置く | そのまま |
+| 代表のリポジトリ | 代表のリポジトリの種類ごとに、設計の振る舞いを確かめるために選ぶ、このリポジトリの作るものを使う側のリポジトリ（実物か、設定を仮に置いたもの） | 追加 |
+| 代表のリポジトリの設定 | `.ndf/design.json` の `representative_repos`。代表のリポジトリの種類の一覧・表を求めるパス・扱えなくなる種類があるときに名指すレッドラインの番号を持つ。置いたリポジトリで、触るファイルがそのパスに当たる設計だけに設計の検査が振る舞いの表を求める | 追加 |
+| このリポジトリだけの事情 | 設計を書くリポジトリの運用で決めた値。作るものの既定や振る舞いへ入れず、そのリポジトリの `.ndf/` の設定に置く。ai-plugins では「ai-plugins だけの事情」と書く | 追加 |
+| 設計の検査 | 設計文書を書いた後に工程が走らせる、言語モデルを呼ばない決まった検査（`design-survey.py check`。設計のプランのステップ `survey-check`） | 追加 |
+| 製品の約束 | NDF が利用者の多様なリポジトリへ約束する価値。ai-plugins の MVV の Value 1〜14 と Vision が持つ | 追加 |
+| ai-plugins だけの事情 | ai-plugins の運用で決めた値（ブランチの運用・リリースの形・マーケットプレイスの名前など）。NDF の既定や振る舞いへ入れず、ai-plugins の `.ndf/` の設定に置く | 追加 |
 
 要求の工程で用語集に足した、設定が受け付ける値の種類を指す語は廃止する（直訳の和語で、守る単位を値に置く語のため。決定 10）。指していたものは「サポートする選択肢」、守る対象は「汎用性の後退」が持つ。
 
@@ -226,7 +226,7 @@ ai-plugins の運用で決める値で、NDF の既定や振る舞いへ入れ�
 | 代表のリポジトリの規則（新設 `plugins/ndf/scripts/lib/design_repos.py`） | 設定を読んで形を確かめ、頭の設計文書の「適用範囲」と「人へ残す判断」の表を読み、規則 `repo_scope_missing`・`repo_loss_unrouted` の指摘を返す。ファイルを書かない |
 | 設計の検査（`plugins/ndf/scripts/design-survey.py`） | 新しい規則を 1 つの課題の設計文書の一式ごとに呼び、指摘と件数を結果 JSON に足す。設定が壊れていれば終了コード 2 |
 | 設定のスキーマ（新設 `plugins/ndf/skills/design/schemas/design.schema.json`） | `.ndf/design.json` の形（`representative_repos.kinds`・`representative_repos.redline`） |
-| 直しのステップの指示（`plugins/ndf/scripts/supervise_lib/procedures.py` の `survey_steps`） | 新しい規則の指摘の直し方を、直しの worker への指示に足す |
+| 直しのステップの指示（`plugins/ndf/scripts/supervise_lib/procedures.py` の `survey_steps`） | 新しい規則の指摘の直し方を、直しの worker への指示に足す。設計の検査の終了コード 2 は直しの worker へ回さず、プランを止める |
 | 設計文書のテンプレート（`plugins/ndf/skills/design/references/design-template.md` と ndf-next のコピー） | 「適用範囲」に振る舞いの表と事情の欄の形を置く |
 | 要求のテンプレート（`plugins/ndf/skills/requirements-design/references/spec-template.md` と ndf-next のコピー）と起票の項目（`plugins/ndf/scripts/data/issue-items.json`） | 方針の分け方の節（該当時） |
 | cross-review の観点（`plugins/ndf/skills/cross-review/scripts/review_lib/review_focus.py` の `DESIGN_REVIEW_TEMPLATE`）と分類の説明（`docs/08-review-categories.md` と ndf-next のコピー） | 汎用性の 1 行 |
@@ -302,30 +302,30 @@ graph TB
 ```mermaid
 sequenceDiagram
   participant W as 設計の worker
+  participant X as cross-review
   participant S as 設計の検査
   participant R as 代表のリポジトリの規則
   participant F as 直しの worker
-  participant X as cross-review
   participant M as MVV 判定
   participant H as 利用者
-  W->>S: 頭の設計文書を書いてコミットした
+  W->>X: 設計 PR（汎用性の観点つき）
+  X->>S: 収束した設計
   S->>R: 設定と設計文書の一式
   R-->>S: 指摘（無ければ空）
   alt 指摘あり（終了コード 1）
     S->>F: 指摘
     F->>S: 表か人へ残す判断の行を直して再検査
   end
-  S->>X: 設計 PR（汎用性の観点つき）
-  X->>M: 収束した設計
+  S->>M: 検査を通った設計
   M->>H: 判定と当たるレッドライン（P2 を含む）
   H-->>W: 承認か変更要求
 ```
 
 設定が無いリポジトリと、触るファイルが `paths` に当たらない設計では、規則は空の指摘を返し、流れは今と同じになる。
 
-**決まった検査が捕まえる範囲には限りがある。** 設計の検査は、表があることと、`無し` 以外の行が人へ残す判断に結ばれていることだけを確かめる。代わりの形があるかは言語モデルでなければ判定できず、設計者か直しの worker が種類を扱えなくなる変更を `無し` と書いた表は、設計の検査を通る。この場合に捕まえるのは、汎用性の観点で問う cross-review（E）と、P2 を材料に読む MVV 判定（B）である。設計の検査の役目は、扱えなくなることを書いた行を人へ残す判断へ必ず届けることと、表を書く欄を設計者の前に必ず置くことである。
+**決まった検査が捕まえる範囲には限りがある。** 設計の検査は、表があることと、`無し` 以外の行が人へ残す判断に結ばれていることだけを確かめる。代わりの形があるかは言語モデルでなければ判定できず、設計者か直しの worker が種類を扱えなくなる変更を `無し` と書いた表は、設計の検査を通る。設計者が書いた表なら、捕まえるのは汎用性の観点で問う cross-review（E）と、P2 を材料に読む MVV 判定（B）である。設計の検査は cross-review の後に走るため、直しの worker が設計の検査の指摘を受けて足した表は cross-review を通らず、捕まえるのは MVV 判定と承認ゲートで表を読む人だけになる（決定 17）。設計の検査の役目は、扱えなくなることを書いた行を人へ残す判断へ必ず届けることと、表を書く欄を設計者の前に必ず置くことである。
 
-設定が壊れていれば、設計の検査は終了コード 2 で止まり、プランは今の「読めない」の扱いで止まる。
+設定が壊れていれば、設計の検査は終了コード 2 で終わる。設計のプランは検査の 2 ステップ（`survey-check`・`survey-recheck`）の終了コード 2 を止まる行き先へ送り、直しの worker へ回さない。直しの worker が利用者の設定（`.ndf/design.json`）を書き換えないためである（C7）。
 
 ## 非機能の実現方式
 
@@ -344,7 +344,7 @@ sequenceDiagram
 | 受け入れ条件 9（B）: 改名だけの設計 | 言語モデルの判定は単体テストで縛れない。「受け入れ条件 7 の確かめ」の B2 で、改名だけの設計に P2 が出ないことを確かめる | — |
 | 受け入れ条件 9（B）: 扱えなくする設計で「人へ残す」を返すこと | 言語モデルの判定は単体テストで縛れない（上の 2 行が縛るのは既存の分岐と判定の材料だけ）。「受け入れ条件 7 の確かめ」の B で確かめ、受け入れ条件 13 の記録に残す。受け入れ条件 9 は「（テスト）」で確かめると書くため、この確かめ方は決定 16 で決めた | — |
 | 受け入れ条件 9（B）: 人へ残す判断の行・I2 | 扱えなくなることの行を持つ合成の設計文書で、人へ残す判断に P2 の行が無ければ設計の検査が `repo_loss_unrouted` を出し、P2 の行があれば出さない。すべての行が `無し` の設計文書（改名だけの設計）は出さない | 番号の照らし合わせを外す・`無し` の判定を逆にすると落ちる |
-| 受け入れ条件 10（C）・I1 | 設定に 3 種があるリポジトリで、触るファイルが `paths` に当たる設計文書のうち、表が無い・種類の行が欠けるものは終了コード 1、表に 3 種の行があるものは 0。触るファイルが `paths` に当たらない設計文書は表が無くても 0 | 種類ごとの数え方を「どれか 1 行」に緩める・`paths` の照らし合わせを外すと落ちる |
+| 受け入れ条件 10（C）・I1 | 設定に 3 種があるリポジトリで、触るファイルが `paths` に当たる設計文書のうち、表が無い・種類の行が欠ける・「直した後に起きること」の列が無いか空欄の行があるものは終了コード 1、表に 3 種の行があり 2 つの列が埋まっているものは 0。触るファイルが `paths` に当たらない設計文書は表が無くても 0 | 種類ごとの数え方を「どれか 1 行」に緩める・`paths` の照らし合わせを外す・「直した後に起きること」の確かめを外すと落ちる |
 | 受け入れ条件 10（C）・I7 | 同じリポジトリで、触るファイルが `paths` に当たり、表は埋まっているが「このリポジトリだけの事情」の欄が無い設計文書は終了コード 1、欄があれば 0 | 事情の欄の確かめを外すと落ちる |
 | 受け入れ条件 11（D） | テンプレートの節は文言の照合で縛らない（`AGENTS.md` の DON'T）。起票の項目は `issue-items.json` の読み手のテスト（`plugins/ndf/scripts/tests/test_issue_items.py`）で、項目 `policy_split` が該当時の項目として読めることを縛る | 項目の `need` の形を壊すと読み手のテストが落ちる |
 | 受け入れ条件 12（E） | 観点の文は文言の照合で縛らない。受け入れ条件 13 の E の記録で確かめる | — |
@@ -462,7 +462,7 @@ claude -p "$(cat "$T/focus.md")"$'\n\n次の設計文書をこの観点でレビ
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #3618 | 実装する | — | `plugins/ndf/scripts/design-survey.py`、`plugins/ndf/scripts/lib/design_repos.py`、`plugins/ndf/scripts/lib/README.md`、`plugins/ndf/skills/design/schemas/design.schema.json`、`plugins/ndf/scripts/supervise_lib/procedures.py`、`plugins/ndf/skills/design/references/design-template.md`、`plugins/ndf/skills/requirements-design/references/spec-template.md`、`plugins/ndf/scripts/data/issue-items.json`、`plugins/ndf/skills/cross-review/scripts/review_lib/review_focus.py`、`plugins/ndf/skills/cross-review/docs/08-review-categories.md`、`plugins/ndf/scripts/tests/test_design_repos.py`、`plugins/ndf/scripts/tests/test_issue_items.py`、`plugins/ndf/scripts/tests/test_mvv_gate.py`、`plugins/ndf-next/skills/design/references/design-template.md`、`plugins/ndf-next/skills/requirements-design/references/spec-template.md`、`plugins/ndf-next/skills/cross-review/docs/08-review-categories.md`、`plugins/ndf-next/src/ndf/parity/fixes.json`、`plugins/ndf-next/src/ndf/checks/children.json`、`.ndf/design.json`、`.ndf/mvv.md`、`.ndf/mvv.json`、`docs/glossary/glossary.json`、`docs/glossary.md` |
+| #3618 | 実装する | — | `plugins/ndf/scripts/design-survey.py`、`plugins/ndf/scripts/lib/design_repos.py`、`plugins/ndf/scripts/lib/README.md`、`plugins/ndf/skills/design/schemas/design.schema.json`、`plugins/ndf/scripts/supervise_lib/procedures.py`、`plugins/ndf/skills/design/references/design-template.md`、`plugins/ndf/skills/requirements-design/references/spec-template.md`、`plugins/ndf/scripts/data/issue-items.json`、`plugins/ndf/skills/cross-review/scripts/review_lib/review_focus.py`、`plugins/ndf/skills/cross-review/docs/08-review-categories.md`、`plugins/ndf/scripts/tests/test_design_repos.py`、`plugins/ndf/scripts/tests/test_issue_items.py`、`plugins/ndf/scripts/tests/test_supervise.py`、`plugins/ndf/scripts/tests/fixtures/supervise-contract/plans/sprint/1-design-16.json`、`plugins/ndf/scripts/tests/test_mvv_gate.py`、`plugins/ndf-next/skills/design/references/design-template.md`、`plugins/ndf-next/skills/requirements-design/references/spec-template.md`、`plugins/ndf-next/skills/cross-review/docs/08-review-categories.md`、`plugins/ndf-next/src/ndf/parity/fixes.json`、`plugins/ndf-next/src/ndf/checks/children.json`、`.ndf/design.json`、`.ndf/mvv.md`、`.ndf/mvv.json`、`docs/glossary/glossary.json`、`docs/glossary.md` |
 
 ## 人へ残す判断
 
@@ -470,7 +470,7 @@ claude -p "$(cat "$T/focus.md")"$'\n\n次の設計文書をこの観点でレビ
 | --- | --- | --- |
 | MVV の改訂の文 M1（Value 4 に、代表のリポジトリの種類をどれも扱えることを保ち、値の改名・作り直し・既定の変更は自由に行い、ある種類を扱えなくする設計だけを人の承認に回すことと、普及のフェーズまで後方互換を求めないことを足す）を入れてよいか | C7 | 利用者の設定（`.ndf/mvv.md`）の書き換えであり、MVV の改訂は利用者の承認で成立する |
 | MVV の改訂の文 M2（必ず人の承認が要る操作に P2「代表のリポジトリの種類のどれかを、NDF で扱えなくする（その種類に要る選択肢を代わりの形なしに無くす）」を足す。既定の変更と代わりの形のある値の削除・改名は当たらない）を入れてよいか | C7 | 同上。P2 は以後のすべての設計承認で、ある種類を扱えなくする設計をレッドラインに当たるものとする |
-| ai-plugins に代表のリポジトリの設定（`.ndf/design.json`。3 種と番号 P2）を新しく置いてよいか | C7 | 利用者の設定を新しく書く（解析で作るものではない）。置いた後、触るファイルが `plugins/ndf/`・`plugins/ndf-next/`・`.claude-plugin/marketplace.json` に当たる ai-plugins の頭の設計文書は振る舞いの表を求められる。`plugins/mcp/`・`plugins/playwright-kit/` だけを触る設計は求められない |
+| ai-plugins に代表のリポジトリの設定（`.ndf/design.json`。3 種と番号 P2）を新しく置いてよいか | C7 | 利用者の設定を新しく書く（解析で作るものではない）。置いた後、触るファイルが `plugins/ndf/`・`plugins/ndf-next/`・`.claude-plugin/marketplace.json` に当たる ai-plugins の頭の設計文書は振る舞いの表を求められる。`plugins/mcp/`・`plugins/playwright-kit/` だけを触る設計は求められない。ただし、触るファイルを読めない設計（`legacy-refactor` の書式の設計と、設計の結果の表を読めない設計）は、触るファイルに依らず求められる |
 
 ## 未確認のまま残ること
 
