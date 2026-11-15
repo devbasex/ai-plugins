@@ -837,6 +837,24 @@ def test_process_spawn_helper_role_and_plan(launched):
     assert row["role"] == "helper" and row["plan"] == "p1"
 
 
+def test_helper_is_refused_as_helper_busy_with_the_running_name(launched):
+    """#3597 の決定 9: 一時レーンが動いていれば、次の一時レーンは `helper-busy` と動いている名前で断る。ほかの役割は `limit` のまま。"""
+    now = hb.Live(5, ["a", "p6-rel17"], {"a", "p6-rel17"}, helpers=1, helper_names=("p6-rel17",))
+    r = hb.Hub.judge("p6-rel10v", now, role="helper")
+    assert (r.reason, r.busy, r.code) == (hb.HELPER_BUSY, "p6-rel17", 3) and "p6-rel17" in r.message
+    res = hb.Hub.refuse("spawn", "p6-rel10v", r)
+    assert res["items"] == [{"name": "p6-rel10v", "result": "helper-busy", "busy": "p6-rel17"}]
+    over = hb.Hub.judge("b", hb.Live(99, ["a"], {"a"}), role=None)
+    assert over.reason == hb.LIMIT and over.busy == ""
+    assert "busy" not in hb.Hub.refuse("spawn", "b", over)["items"][0]
+
+
+def test_live_lists_the_running_helper_names():
+    reg = {"h1": {"session": "h1", "role": "helper"}, "x": {"session": "x"}}
+    got = hb.live([], reg, {"h1": {}, "x": {}})
+    assert got.helpers == 1 and got.helper_names == ("h1",)
+
+
 def test_process_spawn_other_role_is_ignored(launched):
     hb.Hub(None).process({"kind": "spawn", "name": "o", "cwd": "/", "args": [], "by": "spawn", "role": "organizer", "plan": "p1"})
     assert launched[0]["env"] == {"NDF_RELAY_NAME": "o", "NDF_RELAY_SPAWNED": "1"}

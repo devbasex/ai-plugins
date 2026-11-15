@@ -15,13 +15,13 @@ import parallel_hold as ph  # noqa: E402
 import parallel_plan as pp  # noqa: E402
 import sprint_loop_argv as sl_argv  # noqa: E402
 import test_parallel_hold_flow as tph  # noqa: E402
-import test_parallel_run as tpr  # noqa: E402
+import parallel_run_world as prw  # noqa: E402
 import test_sprint_loop as tsl  # noqa: E402
 from test_parallel_hold_lanes import HOLD, plan_dir  # noqa: E402
 from test_sprint_loop import rec, sl, sl_record, sl_select, start  # noqa: E402
 
 env, mvv = tsl.env, tsl.mvv
-run_env = tpr.env
+run_env = prw.env
 APPROVED = {"answer": "approved", "merged_at": "t", "lap": 0}
 # Clock は 2026-10-25T00:01Z から 1 分ずつ進む（日曜）
 OUTSIDE = {"timezone": "UTC", "days": ["mon"], "start": "09:00", "end": "10:00"}

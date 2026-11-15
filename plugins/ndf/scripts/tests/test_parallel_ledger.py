@@ -40,6 +40,59 @@ def test_same_key_is_written_once(tmp_path):
     assert len(plg.read_ledger_rows(tmp_path, "p1").rows) == 1
 
 
+def _resent(main, msg, topic="inbox"):
+    kind, key = plg.message_key(msg, topic)
+    assert plg.append_ledger_row(main, "p1", kind, key, msg) is False
+    return plg.resent(main, "p1", key, msg)
+
+
+def test_resent_tells_a_same_resend_from_a_different_request(tmp_path):
+    """#3597 の決定 5: 同じキーの行と `at` だけが違う再送は同じ、中身が違えば別の依頼として既にある id を返す。行は増えない。"""
+    _add(tmp_path, _req(1))
+    same = _resent(tmp_path, {**_req(1), "at": "later"})
+    assert (same, same.written, same.same, same.answered, same.existing) == (_req(1)["id"], False, True, False, _req(1)["id"])
+    other = _resent(tmp_path, {**_req(1), "prs": [99]})
+    assert (other.same, other.existing) == (False, _req(1)["id"])
+    assert len(plg.read_ledger_rows(tmp_path, "p1").rows) == 1
+
+
+def test_resent_reads_answered_and_settled_requests(tmp_path):
+    _add(tmp_path, _req(1))
+    _add(tmp_path, {"kind": "answer", "id": _req(1)["id"], "result": "released", "at": "t"}, by="organizer")
+    assert _resent(tmp_path, _req(1)).answered is True
+    gate = {"kind": "gate2", "id": "p1-p1-1", "lane": "p1-rel1", "n": 1, "k": 1, "report": "r", "stamp": "s", "at": "t"}
+    _add(tmp_path, gate)
+    assert _resent(tmp_path, gate).answered is False
+    _add(tmp_path, {"n": 1, "phase": "confirm", "take": None}, topic="resume")
+    assert _resent(tmp_path, gate).answered is True  # 処理済みのリリース承認ゲートも答え済み
+
+
+def _rows(main):
+    return plg.read_ledger_rows(main, "p1").rows
+
+
+def test_a_confirmed_gate_is_settled_only_by_its_answer_or_a_later_settle(tmp_path):
+    """#3597 の決定 4: 確定の後の依頼は、確定の行では処理済みにならず、同じ id の答えかそれより後の締めで処理済みになる。"""
+    present = {"kind": "gate2", "id": "p1-p1-1", "lane": "p1-rel1", "n": 1, "k": 1, "at": "t"}
+    after = {**present, "id": "p1-p1-1-c7", "after": "confirmed", "reason": "r", "pr": 5}
+    _add(tmp_path, present)
+    _add(tmp_path, {"n": 1, "phase": "confirm", "take": None}, topic="resume")
+    _add(tmp_path, after)
+    assert plg.settled_gates(_rows(tmp_path)) == {"p1-p1-1"}
+    assert plg.settled_gates([], [after, present]) == set()
+    assert plg.settled_gates(_rows(tmp_path), [after]) == {"p1-p1-1"}  # チェックポイントの問いでも確定の行では外さない
+    _add(tmp_path, {"kind": "answer", "id": after["id"], "result": "answered", "choice": ["打ち直す"], "at": "t"}, by="organizer")
+    assert plg.settled_gates(_rows(tmp_path)) == {"p1-p1-1", "p1-p1-1-c7"}
+    assert plg.settled_gates(_rows(tmp_path), [after]) >= {"p1-p1-1-c7"}
+
+
+def test_a_confirmed_gate_before_a_settle_is_settled(tmp_path):
+    after = {"kind": "gate2", "id": "p1-p1-1-c7", "lane": "p1-rel1", "n": 1, "k": 1, "after": "confirmed", "at": "t"}
+    _add(tmp_path, after)
+    _add(tmp_path, {"n": 1, "phase": "settle", "result": "rejected", "version": None, "reason": "x"}, topic="resume")
+    assert plg.settled_gates(_rows(tmp_path)) == {"p1-p1-1-c7"}
+
+
 def test_a_cut_line_becomes_one_broken_row_and_does_not_mix_with_the_next(tmp_path):
     """条件 8・I3・I4: 途中で切れた行の後に足した行は混ざらず読め、切れた行は壊れた行として 1 つ数える。"""
     _add(tmp_path, _req(1))

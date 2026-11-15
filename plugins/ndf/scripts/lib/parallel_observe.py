@@ -49,6 +49,9 @@ def _ask_helper(run, rows: dict) -> None:
         return
     if name in _asking_lanes(run):
         return
+    if any(r.get("lane") == name and r.get("result") == "waiting" for r in run.launches.values()):
+        run.helper_seen.pop(name, None)  # 答えの後の再起動などが空き待ちの間は止まって観えて当然。空きができて打ち直すまで数えない（#3597）
+        return
     if run.launching:
         rec = run.launches.get(run.launch.get("purpose") or "") or {}
         since = clock.parse(rec.get("at"), naive="utc") if rec.get("result") == "up" and rec.get("at") else None
