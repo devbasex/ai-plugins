@@ -46,10 +46,8 @@ docs/
 依存の向きは一方向である。エントリポイント（`parallel.py`・`hook_lib/ask_guard.py`）が `lib/` の部品を呼び、`lib/` の部品はエントリポイントを読まない。
 新設の `parallel_design_gate.py` が読む部品と、それを読む側は次のとおりである。`parallel_question.py` は純粋な関数だけを持ち、ほかの `lib/` を読まない。
 
-| 向き | 部品 |
-| --- | --- |
-| `parallel_design_gate.py` が読む | `parallel_lane.py`・`parallel_ledger.py`・`gate1_requests.py`・`parallel_hold_sprint.py`・`run_state.py` |
-| `parallel_design_gate.py` を読む | `parallel.py` だけ（上の部品のどれからも読まれない） |
+- `parallel_design_gate.py` が読む部品: `parallel_lane.py`・`parallel_ledger.py`・`gate1_requests.py`・`parallel_hold_sprint.py`・`run_state.py`
+- `parallel_design_gate.py` を読む側: `parallel.py` だけ（上の部品のどれからも読まれない）
 
 `report_pr`・`last_verdict`・`pr_numbers` は `sprint_loop_gate.py` から `gate1_requests.py` へ移す。
 移した後は `sprint_loop_gate.py` が `gate1_requests.py` を読む（今も `carried_over` などを読む向きと同じ）。
