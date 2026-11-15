@@ -122,10 +122,10 @@ GitHub との間は**腐敗防止層**である。ruleset と merge queue の語
 | I11 | バージョン上げの PR | 範囲にリリース対象の変化が無ければバージョンを上げない | `bump` が `not_applicable` を返す |
 | I12 | 検証用ブランチ | 検証用ブランチは fast-forward でだけ進み、強制 push を使わない | `verify-ref` は止まる |
 | I13 | 本番のプラン | `merge` の部品（`check.json` では `merge-gate`）の直前に `release-guard` がある | テンプレートの検査が返す |
-| I14 | 本番の PR の承認とマージの記録 | `trunk` の行で、本番の PR から本番ブランチへ入るコミットは、その時点の本番ブランチの先端と承認した head を合わせたもので必須のチェックを通ったものである（`merge-queue` はキューの一時のコミット、`strict` は最新の取り込み済みの head）。バージョン上げの PR は I17 の守り（本番ブランチの先端からの fast-forward だけで入る）で、必須のチェックを通った head そのものが入る | マージの方式が無い・表に無い値・ruleset と食い違うときは、マージもキューへの投入もせずに止まる（I15）。`strict` で head が本番ブランチの先端を含まなければ止まる |
+| I14 | 本番の PR の承認とマージの記録 | `trunk` の行で、本番の PR から本番ブランチへ入るコミットは、その時点の本番ブランチの先端と承認した head を合わせたもので必須のチェックを通ったものである（`merge-queue` はキューの一時のコミット、`strict` は最新の取り込み済みの head）。バージョン上げの PR も迂回せずに同じマージの方式を通るため、同じ条件で入る（I17） | マージの方式が無い・表に無い値・ruleset と食い違うときは、マージもキューへの投入もせずに止まる（I15）。`strict` で head が本番ブランチの先端を含まなければ止まる |
 | I15 | 本番の PR の承認とマージの記録 | 設定ファイルのマージの方式と、本番ブランチの ruleset の実際の設定（merge queue の有無・`strict` の値）が一致する。`trunk` の行では方式の記述が必須で、既定の方式へ倒さない。本番ブランチの規則がレビューの承認（`required_approving_review_count` が 1 以上）を求めるときは、PR がその承認を持つ（決定 17） | `land` が原因 `precondition`・理由に設定の値と ruleset の値を出して止まる |
 | I16 | 本番の PR の承認とマージの記録 | キューから外れた PR は、同じ head のままキューへ入れ直さない。入れ直すのは新しい head が承認された後だけ。`land` はキューへ入れた時点で、入れた head を本番の PR の投入の記録のコメントに残す。打ち直し（`ci_pending` の後の `rerun` など）で始まった `land` も、この記録で初めての投入と見分ける | `land` は外れた PR の次の手に `rerun` を出さず、`reject` だけを出す。始めに投入の記録を読み、承認した head の記録があり、PR がマージされておらずキューにも無ければ、入れ直さずに `queue_removed` で止まる |
-| I17 | 本番の PR の承認とマージの記録 | マージの方式があるとき（`merge-queue`・`strict`）、本番の PR を管理者の迂回でマージしない。迂回するのはバージョン上げの PR だけ。迂回を使えるのは、マージの方式の無い今の行の本番の PR（今の規則）とバージョン上げの PR である | `land` はマージの方式のある本番の PR で、`production_merge.admin` が真でも迂回のマージを呼ばない。`land_bump` は差分がバージョンの置き場・CHANGELOG・手順の書き先に限られ、本番ブランチの先端が head の祖先のときだけ迂回する。迂回は本番ブランチの ref を head へ fast-forward で進める更新（`force` なし）で打ち、確かめた後に本番ブランチが動けば GitHub が fast-forward でない更新として断る。断られたら `refused` で止まり、次の push の `bump` が進める |
+| I17 | 本番の PR の承認とマージの記録 | マージの方式があるとき（`merge-queue`・`strict`）、本番の PR もバージョン上げの PR も管理者の迂回でマージしない。迂回を使えるのは、マージの方式の無い今の行の PR（今の規則）だけで、迂回は PR のマージで打つ。工程は本番ブランチの ref を PR を通さずに更新しない（ruleset の迂回の形 `pull_request` は PR を通さない更新を許さない。STD12） | `land` と `land_bump` は、マージの方式があるとき `production_merge.admin` が真でも迂回のマージを呼ばない。`land_bump` は差分がバージョンの置き場・CHANGELOG・手順の書き先に限られるときだけ入れる。`merge-queue` ではバージョン上げの PR の head を `expectedHeadOid` に渡してキューへ入れ、キューの一時のコミットで組み合わせが確かめられる。`strict` では head が本番ブランチの先端を含むときだけ head の一致の確認付きでマージし、確かめの後に本番ブランチが動けば GitHub の最新の取り込みの規則が断る。外れた・断られたら止まり、次の push の `bump` が進める |
 | I18 | バージョン上げの PR | バージョン上げの経路は、設定ファイルのバージョンの置き場が選んだアダプタだけを通る。プラグインの登録のパスを、置き場が `plugin` でないときに読まない | 置き場が無ければ `bump` は原因 `precondition`・理由に取れる値を出して止まる |
 
 ### ドメインイベント
@@ -188,7 +188,8 @@ GitHub との間は**腐敗防止層**である。ruleset と merge queue の語
 | STD8 | GitHub Docs「Events that trigger workflows」の `merge_group` | 活動の種類は `checks_requested`。`GITHUB_SHA` は一時のコミット、`GITHUB_REF` はそのブランチ | 同上（決定 23） | https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#merge_group （2026-11-15） |
 | STD9 | 同じ頁の提供条件 | 「Pull request merge queues are available in any public repository owned by an organization, or in private repositories owned by organizations using GitHub Enterprise Cloud」 | 使えないリポジトリの代わりに `strict` を持つ（決定 17・19） | STD7 と同じ（2026-11-15） |
 | STD10 | GitHub GraphQL の `enqueuePullRequest` | 引数 `pullRequestId`（必須）・`expectedHeadOid`・`jump`。エントリの状態は `QUEUED`・`AWAITING_CHECKS`・`MERGEABLE`・`UNMERGEABLE`・`LOCKED` | キューへの投入に承認した head を渡す（I3・決定 18） | 型の照会（確かめ 4・5、2026-11-15） |
-| STD11 | GitHub Docs「Merging a pull request with a merge queue」 | 管理者は保護の迂回で直接マージできる（許されていれば）。`gh pr merge` はキューのある本番ブランチでは PR をキューへ入れる | 本番の PR は迂回せずキューへ入れ、迂回はバージョン上げの PR だけ（決定 20） | https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/incorporating-changes-from-a-pull-request/merging-a-pull-request-with-a-merge-queue （2026-11-15） |
+| STD11 | GitHub Docs「Merging a pull request with a merge queue」 | 管理者は保護の迂回で直接マージできる（許されていれば）。`gh pr merge` はキューのある本番ブランチでは PR をキューへ入れる | 本番の PR もバージョン上げの PR も迂回せずキューへ入れる（決定 20） | https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/incorporating-changes-from-a-pull-request/merging-a-pull-request-with-a-merge-queue （2026-11-15） |
+| STD12 | GitHub Docs「Creating rulesets for a repository」の「Granting bypass permissions for your branch or tag ruleset」 | 迂回の形「For pull requests only」は、直接の push を許さずに迂回を与える。迂回する者は変更に PR を開く必要があり、その PR の保護を迂回してマージできる | 工程は本番ブランチの ref を直接更新せず、バージョン上げの PR もマージの方式があればキューか最新の取り込みの規則を通す（決定 20・I17） | https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/creating-rulesets-for-a-repository （2026-11-15） |
 
 ### 主要な製品
 
@@ -237,7 +238,7 @@ GitHub との間は**腐敗防止層**である。ruleset と merge queue の語
 | テンプレート `contracts/templates/release.json`（変更） | 本番のプランを `merge` → `confirm` → `record` → `cleanup` の 4 ステップにする。worker・push・次のバージョンの用意を持たない（I1・I2） |
 | テンプレート `merge.json`・`check.json`・`close.json` と部品 `parts/steps.json`（変更） | 部品 `release-guard` を `merge` の部品の直前に置く。本番の PR（宛先が本番ブランチの PR）なら終了コード 3（原因 `production_pr`）で `end` へ進める（I6・I13） |
 | テンプレートの検査 `domains/release/release_plan.py`（新設） | 純粋な処理。プランの JSON を受け、I1・I2・I13 を破るステップを返す |
-| マージ `domains/release/land.py`（変更） | 行とマージの方式で振る舞いを選ぶ。`merge-queue` はキューへの投入と待ち、`strict` は先端の取り込みの確かめとマージ、方式なしは今のマージ。止まったら落ちたチェックと次の手を返す（I3・I4・I16）。マージ済みの PR から再開したら人のマージの記録を書く（I5）。同期の PR は今の行でだけ作る（I10）。`merge-queue` の本番の PR で迂回を呼ばない（I17） |
+| マージ `domains/release/land.py`（変更） | 行とマージの方式で振る舞いを選ぶ。`merge-queue` はキューへの投入と待ち、`strict` は先端の取り込みの確かめとマージ、方式なしは今のマージ。止まったら落ちたチェックと次の手を返す（I3・I4・I16）。マージ済みの PR から再開したら人のマージの記録を書く（I5）。同期の PR は今の行でだけ作る（I10）。マージの方式があるとき、本番の PR でもバージョン上げの PR でも迂回を呼ばない（I17） |
 | マージの方式の読み分け `domains/release/merge_method.py`（新設） | 純粋な処理。設定ファイルの `production_merge.method` と、アダプタが読んだ ruleset の事実（merge queue の有無・`strict`）を受け、方式か食い違いの理由を返す（I15） |
 | GitHub のアダプタ `adapters/github.py`（変更） | `enqueue(number, expect_head)`（GraphQL `enqueuePullRequest`）・`queue_entry(number)`（`mergeQueueEntry` と `isInMergeQueue`）・`branch_rules(branch)`（`GET /repos/{o}/{r}/rules/branches/{branch}` と GraphQL `mergeQueue(branch)`）を足す。どれも読むか投入するだけで、ruleset を書かない |
 | 承認の記録 `domains/release/trail.py`（変更） | 人のマージの記録をコメントで書き、読む |
@@ -390,7 +391,7 @@ sequenceDiagram
     H->>W: main への push（本番の PR のマージ）
     W->>B: bump
     B->>H: バージョンの置き場を書いたコミットとバージョン上げの PR
-    B->>H: 必須のチェックの後、迂回して head の一致の確認付きでマージ
+    B->>H: 必須のチェックの後、キューへ入れる（strict は head の一致の確認付きでマージ）
     H->>W: main への push（バージョン上げの PR のマージ）
     W->>B: bump（タグの無いバージョン上げのコミットがある）
     W->>T: publish（そのコミットへ）
@@ -410,7 +411,7 @@ workflow は main への push の run を `concurrency`（グループ 1 つ・`
 | タグがあり、範囲にリリース対象の変化がある | 開いたバージョン上げの PR があれば下の表のとおり進め、無ければ作る |
 | タグがあり、範囲に変化が無い | 何もしない（`not_applicable`） |
 
-### バージョン上げの PR の競合・迂回・止まったとき（CD、`trunk`）
+### バージョン上げの PR の競合・キュー・止まったとき（CD、`trunk`）
 
 | バージョン上げの PR が開いている間に別の PR が main へ入った | `bump` の動き |
 | --- | --- |
@@ -418,16 +419,17 @@ workflow は main への push の run を `concurrency`（グループ 1 つ・`
 | 決め直したバージョンが違う | 開いた PR を理由つきで閉じてブランチを消し、新しいバージョンの PR を作る |
 | マージの直前 | main の先端がバージョン上げの PR の head に含まれていなければマージしない。次の push の `bump` が進める |
 
-**バージョン上げの PR とキュー。** バージョン上げの PR はキューを通さず、管理者の迂回でマージする（決定 20）。迂回するのは、差分がバージョンの
-置き場・CHANGELOG・手順の書き先に限られ、main の先端が head の祖先であるときだけである。迂回は main の ref を head へ fast-forward で進める
-更新（`force` なし）で打つ。確かめた後にキューが別の PR を main へ入れると、GitHub は fast-forward でない更新として断るため、main は
-バージョン上げの PR の CI が確かめた head そのものにしかならない。断られたら `bump` はタグを作らずに止まり、次の main への push の `bump` が
-開いたバージョン上げの PR を上の表のとおり進める。
+**バージョン上げの PR とキュー。** バージョン上げの PR も迂回せず、本番の PR と同じマージの方式で入る（決定 20）。`merge-queue` では、
+差分がバージョンの置き場・CHANGELOG・手順の書き先に限られるときだけ、head を `expectedHeadOid` に渡してキューへ入れる。キューは
+「main の先端 + 前に入った PR + バージョン上げの PR」の一時のコミットで必須のチェックを走らせるため、確かめた後にほかの PR が main へ入っても、
+確かめていない組み合わせは main へ入らない。`strict` では head が main の先端を含むときだけ head の一致の確認付きでマージし、確かめの後に
+main が動けば GitHub の最新の取り込みの規則が断る。キューから外れた・断られたときは `bump` はタグを作らずに止まり、次の main への push の
+`bump` が開いたバージョン上げの PR を上の表のとおり進める。
 
 **リリースとバージョンの間の時間。** main へのマージで本番の中身は新しいコードになり、バージョンはバージョン上げの PR のマージで変わる。
 この間に新しく入れた利用者は、前のバージョンの番号で新しいコードを受け取る（「人へ残す判断」の P1 の行）。
 
-**CD が止まったとき。** バージョン上げの PR のチェックが落ちた・迂回が断られた・取り込みが衝突したときは、`bump` はタグを作らずに止まり、
+**CD が止まったとき。** バージョン上げの PR のチェックが落ちた・キューから外れた・最新の取り込みの規則で断られた・取り込みが衝突したときは、`bump` はタグを作らずに止まり、
 workflow の結果とバージョン上げの PR のコメントに理由を書く。`confirm` は `ci_budget` まで待って `stopped` になり、「本番はマージ済み」と
 理由を出す。次の手は `rerun` の 1 つである。足りないものが `bump` なら手動の起動 `step=bump` を打ち直す。
 タグか GitHub Release なら `step=publish`（入力 `revision` に `outputs.bump_revision`）を打ち直す。どちらも、その後に `confirm` を打ち直す。
@@ -506,7 +508,7 @@ head が動いた（`refused`）・キューから外れた（`queue_removed`）
 | 大項目 | 実現方式 |
 | --- | --- |
 | 運用・保守性 | 止まった・マージした・キューへ入れた・キューから外れた・人のマージを検知した・バージョンを上げたことは、結果 JSON の `outputs`・`items`・`routes` と、本番の PR とバージョン上げの PR のコメントに、承認した head・マージした head・承認した人・作ったバージョンと一緒に残る |
-| セキュリティ | token は今の `secrets.NDF_RELEASE_TOKEN`（キューへの投入・バージョン上げの PR・検証用ブランチの push）と `github.token`（タグと GitHub Release）だけで、新しい秘密を足さない。工程は ruleset を読むだけで書き換えない。迂回のマージはバージョン上げの PR だけに、迂回の設定（`production_merge.admin`）と差分の判定と祖先の確かめの 3 つがそろうときだけ打つ（I17） |
+| セキュリティ | token は今の `secrets.NDF_RELEASE_TOKEN`（キューへの投入・バージョン上げの PR・検証用ブランチの push）と `github.token`（タグと GitHub Release）だけで、新しい秘密を足さない。工程は ruleset を読むだけで書き換えない。マージの方式があるとき、工程は迂回のマージを打たない。迂回のマージは方式の無い今の行で迂回の設定（`production_merge.admin`）があるときだけ、PR のマージで打つ（I17） |
 | セキュリティ（PR の中身と秘密） | 秘密を持つジョブで PR 側のコードを実行しない。`verify-ref` は `pull_request_target` で動き、workflow と `ndf` は本番ブランチから取り出したものだけを使う。PR の head は `git fetch` でデータとして取り込んでマージするだけで、取り込んだ木のスクリプト・依存の導入・hook を実行しない。フォークの PR は含めない。種類 `deploy` のコマンドは本番ブランチの設定ファイルにあるものだけを流し、PR の側で書き換えたコマンドは流さない。`pr-check` は秘密を使わない `pull_request` で動く。`bump`・`publish` は main への `push` で動き、main のコードだけを実行する。検証用ブランチの push は、`NDF_RELEASE_TOKEN` の push のため、リポジトリの `push` の workflow を起動しうる。そのとき起動する workflow の定義は push したコミットの木（PR が書き換えた `.github/workflows` を含む）から読まれる。この経路の扱いは次の 2 つである。(1) 前提: 含める PR はフォークでない PR だけで、その作者はリポジトリへの書き込みの権限を持ち、自分でブランチを push して同じ workflow を起動できる。そのため、この経路は書き込みの権限を持つ人ができることを広げない (2) 絞り込み: 本番ブランチの木の `push` の workflow は `branches`（ai-plugins では `push` を引き金に持つ 8 本とも `main` か `main`・`develop` だけ。2026-11-15 の `.github/workflows/*.yml`）で起動のブランチを絞り、検証用ブランチでは起動しない。絞りの無い `push` の workflow を足す PR は、レビューで `branches-ignore` に検証用ブランチを足す |
 | 移植性 | ブランチ戦略・マージの方式・検証環境・バージョンの置き場は設定ファイルの値だけで切り替わる。`ndf`・`verify/next`・`ai-plugins-next`・`plugin.json` はコードに決め打たない（`plugin.json` のパスは `plugin` のアダプタの中だけに置く） |
 
@@ -528,7 +530,7 @@ head が動いた（`refused`）・キューから外れた（`queue_removed`）
 | 14 | #3119 の決定 21 を置き換える | superseded（決定 25） |
 | 15 | #3587 を閉じずに直す | superseded（決定 24） |
 | 16 | 取り込み方の表の 3 行を残し、既定は `merge_base_branch`、リリースのサブコマンドは行ごとに振る舞いを選ぶ | 新設 |
-| 17〜20 | マージの方式を設定ファイルで選んで ruleset（レビューの承認の数を含む）と照らす・`merge-queue` の投入と待ちと経路の見分け・`strict` の止め方・マージの方式のある本番の PR は迂回せず、バージョン上げの PR だけがキューを迂回する | 新設 |
+| 17〜20 | マージの方式を設定ファイルで選んで ruleset（レビューの承認の数を含む）と照らす・`merge-queue` の投入と待ちと経路の見分け・`strict` の止め方・マージの方式があるとき本番の PR もバージョン上げの PR も迂回しない | 新設 |
 | 21・22 | 検証環境の種類を選ぶ・バージョンの置き場をアダプタで受け、#3615 との境を決める | 新設 |
 | 23 | ruleset へ merge queue を足すのは 11.0.0 の入れ替えと同時、`merge_group` は実装で足す | 新設 |
 | 24・25 | #3587 に足す変更の一覧・#3119 の決定 21 の見直し | 新設 |
@@ -560,7 +562,7 @@ head が動いた（`refused`）・キューから外れた（`queue_removed`）
 | 受け入れ条件 23 | `strict` で head が先端を含まない PR に `land` が `behind` で止まり、次の手が `reject` だけで、マージを呼ばない | 先端の確かめを外すとマージが呼ばれて落ちる |
 | 受け入れ条件 24・I15 | 方式が無い・表に無い値・`merge-queue` なのにキューが無い・`strict` なのに偽、の 4 つで `land` が `precondition` で止まり、マージも `enqueue` も呼ばない | 既定の方式へ倒すと落ちる |
 | 受け入れ条件 25・I16 | キューから外れた PR で `land` が `queue_removed` で止まり、次の手が `reject` だけで、`enqueue` を 2 回呼ばない | 同じ head で入れ直すと落ちる |
-| 受け入れ条件 26・I17 | `merge-queue` と `strict` で、本番の PR は `production_merge.admin` が真でも迂回のマージを呼ばない。バージョン上げの PR は差分の判定と祖先の確かめが通るときだけ迂回する | 本番の PR で迂回を呼ぶと落ちる。置き場の外のファイルを含むバージョン上げの PR を迂回すると落ちる |
+| 受け入れ条件 26・I17 | `merge-queue` と `strict` で、本番の PR もバージョン上げの PR も `production_merge.admin` が真でも迂回のマージを呼ばない。バージョン上げの PR は差分の判定が通るときだけ、`merge-queue` ではキューへ入れ、`strict` では先端を含むときだけマージする | 迂回を呼ぶと落ちる。置き場の外のファイルを含むバージョン上げの PR をキューへ入れるかマージすると落ちる |
 | I6・I13 | `merge`・`check`・`close` のテンプレートで、`merge` の直前が `release-guard` で、本番の PR では終了コード 3 で `end` へ進み、マージが呼ばれない | `release-guard` を外すと落ちる |
 | 受け入れ条件 16 | `AGENTS.md` と `docs/versioning-and-distribution.md` を実装 PR のレビューで読み、4 つの問いに答えられるかを見る。`instructions-check.py --root .` が 0 | — （文書の条件） |
 | 受け入れ条件 17 | 実装 PR の `git diff --name-only` に `plugins/ndf/` が無い | — （差分の条件） |
@@ -587,7 +589,6 @@ head が動いた（`refused`）・キューから外れた（`queue_removed`）
 | ai-plugins のブランチ戦略を `trunk` にし、バージョンを CD がマージの後に上げ、`CHANGELOG.md` を CD が書く規則にしてよいか（決定 5・7・11・16） | P1 | 既定ブランチへ何がどの経路で入るかとバージョンの規則を変え、11.0.0 の入れ替えで利用者全員に効く。main へのマージからバージョン上げの PR のマージまでの間に入れた利用者が前のバージョンの番号で新しいコードを持つことも含む |
 | 検証用マーケットプレイス（`ai-plugins-next`、検証用ブランチ `verify/next`）をリリース対象の取得元として足してよいか（決定 9・21） | P1 | リリース対象の取得元を 1 つ足す。登録した利用者は消す操作が要る |
 | `AGENTS.md` の「版とリリースの方針」と、`.ndf/project.json`・`.ndf/release.json`・`.ndf/worktree.json` の ai-plugins の値を書き換えてよいか（決定 12・23） | C7 | 利用者の設定と指示書の運用の節の書き換えである。この課題の実装 PR が書き換えるのは `AGENTS.md` の 1 段落（11.0.0 で移ることと正本の節へのリンク。決定 12）だけで、設定ファイルの 3 つは書き換えない（実装はスキーマと読み分けだけ）。設定ファイルの値と `AGENTS.md` のチャネルの表は 11.0.0 の入れ替え（#3304）の PR が書き換える。どちらも PR の中でコミットし、リリース承認ゲートで人が見る |
-| バージョン上げの PR を、merge queue を迂回してマージしてよいか（決定 7・20） | C2 | キューを求める main の規則を、人の承認なしの機械のマージで越える。迂回の設定（#3506）の範囲をバージョン上げの PR へ広げる。`NDF_RELEASE_TOKEN` の持ち主が迂回の役割を持つかは未確認で、通らなければ `bump` が止まって人へ戻る |
 | `verify-ref` が `pull_request_target` の出来事で `NDF_RELEASE_TOKEN` を使い、未承認の PR の head を検証用ブランチへ取り込んで push し、種類 `deploy` では設定ファイルのコマンドを流してよいか（決定 9・21） | C1 | 秘密を持つジョブが、承認の前の PR の中身を扱う。PR 側のコードを実行しない分け方は「非機能の実現方式」の行。検証用ブランチの push は、push したコミットの木の `push` の workflow を起動しうる。含める PR はフォークでない PR だけで、作者は書き込みの権限を持ち同じ workflow を自分の push で起動できるため、できることは広がらない、という前提で受けてよいか。起動の絞り込みは本番ブランチの木の `push` の workflow の `branches` で行う（同じ行）。staging へ配ったコードが何を実行するかは、コマンドの先の配り方が持つ |
 | 実物の確かめの 1 回で、利用者の登録の `lastUpdated` が書き換わったことをどう扱うか（受け入れ条件 2d） | C6 | 受け入れ条件 2d は利用者の登録を変えない場所で確かめることを求める。1 回（取得に失敗した試み）で利用者の登録の `lastUpdated` が 2026-11-15T11:53:54Z に書き換わった。取得元と ref は前後で同じだった（[issue-3572-design-evidence.md](issue-3572-design-evidence.md) ） |
 
@@ -598,10 +599,10 @@ head が動いた（`refused`）・キューから外れた（`queue_removed`）
 | キューへの投入で head が違うときの応答・キューで落ちた PR の扱い | `expectedHeadOid` が違うときの応答の形、キューの一時のコミットで ai-plugins の必須のチェックが起動すること、落ちた PR がキューから外れてマージされないことは、ai-plugins の main にキューが無いため実物で確かめていない。11.0.0 の入れ替えで ruleset へキューを足した直後に、次の手順で確かめる: (1) 違う `expectedHeadOid` で投入して断られることと応答の形 (2) テスト用の PR を投入し、`gh run list --event merge_group` でチェックが一時のコミットで走ること (3) 必須のチェックを落とす PR を投入し、`isInMergeQueue` が偽・`merged` が偽になること。応答の形が設計と違えば、`land` の判定をその応答に合わせる |
 | キューの一時のコミットの形（マージコミットか） | 公開リポジトリの記録（squash）では一時のコミットがマージコミットになった。ai-plugins は `merge` だけを許すため、親が 2 つになる見込みで、上の (2) で確かめる |
 | キューへ入れた PR へ push したとき | キューに入った後に PR の head が動いたとき、GitHub が PR を外すかは、取得した頁に記述が無い。`land` はマージした head で経路を見分け、承認した head と違えば人の操作のマージとして記録する（「人が GitHub でマージした」の見分け）。キューに入った後の push で、GitHub が PR の head と違うコミットをマージするか（マージした head の読み方が変わるか）を上の (2) で確かめ、違えば `merge_decide` の読み方をその応答に合わせる |
-| バージョン上げの PR の迂回が、merge queue のある main で通ること | 迂回の役割を持つ token で、キューの規則のある main の ref を fast-forward で進める更新（`PATCH /git/refs/heads/main`、`force` なし）が通るか、更新の後に GitHub がバージョン上げの PR をマージ済みとして閉じるかは確かめていない。マージ済みにならなければ、`land_bump` が PR を閉じてブランチを消す形へ直す。`NDF_RELEASE_TOKEN` の持ち主が迂回の役割を持つかも確かめていない（秘密の中身を読まず、main へマージする操作になるため）。入れ替えの後の最初のバージョン上げで分かり、断られたら `bump` が止まって人へ戻る |
+| バージョン上げの PR が承認なしでキューの必須のチェックを通ること | バージョン上げの PR は承認ゲートの承認を持たない。キューの一時のコミットで、承認を確かめるチェック（`ndf/release-approval` など）がバージョン上げの PR を通すかは、ai-plugins の main にキューが無いため確かめていない。方式の無い今の行で承認の数 0 のときの普通のマージ（d7d5fe0b1）と同じ前提である。入れ替えの後の最初のバージョン上げで分かり、外れれば `bump` が `queue_removed` で止まって人へ戻る |
 | 古い保護（branch protection）だけを使うリポジトリでの `strict` の読み取り | ruleset は `rules/branches` で読めるが、古い保護の `strict` は管理の権限が要る API にある。読めなければ `land` は「ruleset を読めない」で止まる。この止まり方が利用者に通じるかは、最初に `strict` を選んだ外のリポジトリで分かる |
 | PR の本文や宛先を読むチェックの `merge_group` での結論 | `pr-body-decisions-check` などはキューの一時のコミットで PR の本文を持たない。PR の時点の結論を引き継いで通す形を実装で決め、上の (2) で確かめる |
-| バージョン上げの PR の CI の時間・リリースとバージョンの間の時間 | main へのマージからタグまでに CI 1 回分かかる。実測は 11.0.0 の後の最初のリリースで分かる |
+| バージョン上げの PR の CI の時間・リリースとバージョンの間の時間 | main へのマージからタグまでに、`merge-queue` ではバージョン上げの PR の CI とキューの CI の 2 回分かかる。実測は 11.0.0 の後の最初のリリースで分かる |
 | 2 つの NDF を同時に有効にしたとき | `ndf@ai-plugins` と `ndf@ai-plugins-next` を同時に有効にしたときの Skill・hook の重なりは確かめていない。手順は片方を `claude plugin disable` で止める形にする |
 | Codex での検証用マーケットプレイス | 確かめは Claude Code だけで行った。Codex の登録の形は実装のステップで確かめる |
 | 人のマージの検知の遅れ | 承認ゲートの待ちの読み直しの間隔だけ、人のマージから記録までが遅れる。実測は最初に人が GitHub でマージしたリリースで分かる |
@@ -615,7 +616,7 @@ head が動いた（`refused`）・キューから外れた（`queue_removed`）
 | p6-redesign:1-3 | 同時に承認された PR の組み合わせを merge queue で確かめてから入れる。承認は各 PR の head に付いたまま | 直した | 決定 17・18、「処理の流れ」の `merge-queue` の図と同時の承認の段落、I14、受け入れ条件 22 のテスト設計 |
 | p6-redesign:1-4 | merge queue を使うかを設定ファイルで選び、`strict` を別の値として持ち、どちらでもない設定を許さない | 直した | 決定 17・19、I15、「設定ファイルの形」のマージの方式の行、受け入れ条件 23・24 のテスト設計 |
 | p6-redesign:1-5 | `enqueuePullRequest` とキューの一時のコミットの CI を実物で確かめる。キューで落ちた PR の扱い | 直した | [issue-3572-design-evidence.md](issue-3572-design-evidence.md) の確かめ 4〜7、決定 18（外れた PR は `reject` だけ）、I16。ruleset の書き換えが要る確かめは「未確認のまま残ること」に手順と一緒に置いた |
-| p6-redesign:1-6 | バージョン上げの PR と merge queue の関係 | 直した | 決定 20（キューを迂回し、本番の PR は迂回しない）、I17、受け入れ条件 26 のテスト設計 |
+| p6-redesign:1-6 | バージョン上げの PR と merge queue の関係 | 直した | 決定 20（マージの方式があるとき、バージョン上げの PR もキューか最新の取り込みの規則を通し、迂回しない）、I17、受け入れ条件 26 のテスト設計 |
 | p6-redesign:1-7 | ruleset へ merge queue を足す操作を「人へ残す判断」に載せ、実行は実装のとき | 直した | 「人へ残す判断」の C2 の 1 行目、決定 23（足す時点と設定の案） |
 | p6-redesign:1-8 | 置き換える決定を superseded として残し、新しい決定を書く | 直した | 決定の記録の決定 5・7・9・14・15 の冒頭の状態の行と置き換え先、決定 16〜25 |
 | p6-redesign:1-9 | 承認資料と依頼の問いを業界の語で書く | 直した | この文書の全体と決定の記録を業界の語（head・バージョン・サブコマンド・設定ファイル・テンプレート・マーカー）で書き直した。NDF の内部の呼び名は初出で括弧に添えた |

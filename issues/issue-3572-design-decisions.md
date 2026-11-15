@@ -395,33 +395,39 @@ ruleset の `dismiss_stale_reviews_on_push` が偽でも（確かめ 6）、NDF 
 
 根拠: Value 3 / Value 4（MVV 版 7）
 
-### 決定 20: バージョン上げの PR は merge queue を通さず迂回してマージし、本番の PR はマージの方式があるとき迂回しない
+### 決定 20: バージョン上げの PR も、マージの方式があるときは迂回せずに本番の PR と同じ方式で入れる
 
-バージョン上げの PR は人の承認を持たない。決定 17 で本番ブランチの承認の数を 0 にすればキューへ入れられるが、キューを通すとキューの CI がもう 1 回走り、リリースとバージョンの間の時間（設計文書の
-「main へのマージの後（CD）」）が延びる。一方、迂回しても組み合わせの確かめは抜けない。`land_bump` は main の先端がバージョン上げの PR の head の
-祖先であるときだけ、main の ref を head へ fast-forward で進める更新（`force` なし）で入れる。確かめた後にキューが別の PR を main へ入れても、
-GitHub が fast-forward でない更新を断るため、main はバージョン上げの PR の必須のチェックが確かめた head そのものにしかならない。
+バージョン上げの PR は人の承認を持たない。決定 17 で本番ブランチの PR の規則の承認の数を 0 にするため、マージの方式があるリポジトリでは
+バージョン上げの PR も迂回せずにキューへ入れられ、`strict` でもマージできる。main の ruleset の迂回の形は `pull_request`（確かめ 6）で、
+迂回は PR のマージにだけ効き、PR を通さない ref の更新（`PATCH /git/refs/heads/main`）には効かない（STD12）。PR のマージで迂回すると、
+必須のチェックと最新の取り込みの規則も越える。確かめの後にキューが別の PR を main へ入れれば、確かめていない組み合わせが main へ入る
+（`expect_head` が固定するのは PR の head だけで、main の先端は固定しない）。迂回せずに方式を通すと、組み合わせの確かめはキュー
+（`merge-queue`）か最新の取り込みの規則（`strict`）が持つ。
 
 | 守り | どこで守るか |
 | --- | --- |
-| 迂回するのはバージョン上げの PR だけ | `land` はマージの方式（`merge-queue`・`strict`）のある本番の PR で、`production_merge.admin` が真でも `merge_as_admin` を呼ばない（I17）。迂回は必須のチェックと最新の取り込みの規則も越え、`strict` でも I14 が破れるためである。マージの方式の無い今の行の本番の PR は今の規則のまま |
-| バージョン上げの PR にコードが混ざらない | `bump_decide` が、差分がバージョンの置き場（決定 22）・CHANGELOG・手順の書き先に限られると判定したときだけ迂回する |
-| 確かめた木がそのまま入る | main の先端が head の祖先であることを確かめてから、main の ref を head へ fast-forward で進める（`force` なし）。確かめの後に main が動けば GitHub が断り、`land_bump` は `refused` で止まって次の push の `bump` に任せる |
-| 迂回の許し | 設定ファイルの `production_merge.admin` が真のときだけ（#3506 の今の規則） |
+| マージの方式があるとき、迂回のマージを打たない | `land` と `land_bump` は、`production_merge.admin` が真でも `merge_as_admin` を呼ばない（I17）。方式の無い今の行は今の規則のまま |
+| バージョン上げの PR にコードが混ざらない | `bump_decide` が、差分がバージョンの置き場（決定 22）・CHANGELOG・手順の書き先に限られると判定したときだけ入れる |
+| 確かめた組み合わせだけが入る | `merge-queue` では head を `expectedHeadOid` に渡してキューへ入れ、キューの一時のコミットで必須のチェックが走る。`strict` では head が main の先端を含むときだけ `expect_head` 付きでマージし、確かめの後に main が動けば GitHub が断る。外れた・断られたら `land_bump` は `queue_removed` か `behind` で止まり、次の push の `bump` に任せる |
+
+キューを通すと、main へのマージからタグまでに CI がもう 1 回（キューの一時のコミットの分）走り、リリースとバージョンの間の時間
+（設計文書の「main へのマージの後（CD）」）が延びる。この費用は、確かめていない組み合わせを main へ入れないために払う。
 
 人が GitHub の画面で管理者の迂回を使ってコードの PR をマージすることは、利用者の操作（経路 (b)）で、工程は止めない。人のマージの記録に
 マージの方式とマージコミットが残る（決定 8）。
 
 | 比べた候補 | 採否と理由 |
 | --- | --- |
-| バージョン上げの PR もキューへ入れる | 採らない。キューの CI が 1 回増え、リリースとバージョンの間の時間が延びる。祖先の確かめで、迂回しても確かめた木と同じものが入る |
+| main の ref を head へ fast-forward で進める（`PATCH /git/refs/heads/main`） | 採らない。迂回の形 `pull_request` は PR を通さない更新を許さず（STD12）、迂回の役割を持つ token でも断られる |
+| ruleset の迂回の形を `always` にして ref を進める | 採らない。ruleset の書き換えで、承認ゲートを通らない機械の push を許す（決定 7 の採らなかった案と同じ） |
+| 祖先を確かめてから PR のマージで迂回する | 採らない。確かめとマージの間に main が動くと、確かめていない組み合わせが入る。迂回は最新の取り込みの規則も越えるため GitHub も断らない |
 | バージョン上げの PR をやめ、タグだけを作る（バージョンのファイルを持たない） | 採らない。決定 7 の採らなかった案と同じ理由 |
-| 3 つの守りを付けて迂回する | 採る |
+| バージョン上げの PR も迂回せず、本番の PR と同じ方式で入れる | 採る。キューの CI が 1 回増える代わりに、組み合わせの確かめと PR を通した迂回の形の両方が保たれる |
 
-- 作り方: 自前で作る・標準に倣う
-- 比べた候補: STD6 / STD7 / STD11
+- 作り方: 標準に倣う
+- 比べた候補: STD6 / STD7 / STD11 / STD12
 
-根拠: Value 3 / Value 5 / C2（MVV 版 7）
+根拠: Value 3 / Value 7（MVV 版 7）
 
 ### 決定 21: 検証環境をリポジトリごとに選べるようにするため、`delivery` の検証の行の `verify.kind` で種類（`marketplace`・`deploy`）を選ぶ
 
@@ -549,7 +555,7 @@ ruleset の書き換えは、ai-plugins の設定ファイルを `trunk`・`merg
 | 3 | `production_merge.method` のスキーマ・`merge_method.py`・アダプタの `branch_rules`・`land` の照らし合わせ（原因 `precondition`） | 17 |
 | 4 | アダプタの `enqueue`・`queue_entry`、`land` のキューへの投入と待ち、原因 `queue_removed`、次の手の表 | 3・18 |
 | 5 | `land` の先端の取り込みの確かめ、原因 `behind` | 19 |
-| 6 | `land` で `merge-queue` の本番の PR に迂回を呼ばない。`land_bump` の迂回の条件にバージョンの置き場の判定を使う | 20 |
+| 6 | `land` で `merge-queue` の本番の PR に迂回を呼ばない。`land_bump` はマージの方式があるとき迂回せずにキューか `strict` のマージで入れ、入れる条件にバージョンの置き場の判定を使う | 20 |
 | 7 | `version_store.py`（インタフェースと `plugin`・`json`）、`release.json` のスキーマの `version_store`。`bump.py`・`pr_check.py`・`cli._plugin_of`・`planned_for` をインタフェースへ移す | 22 |
 | 8 | `delivery` の検証の行の `verify.kind`、`verify_ref` の `deploy` の配り方 | 21 |
 | 9 | 必須のチェックを出す workflow へ `merge_group` を足し、PR の本文を読むチェックの引き継ぎ | 23 |
