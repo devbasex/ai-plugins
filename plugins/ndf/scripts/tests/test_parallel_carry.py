@@ -245,7 +245,7 @@ def test_build_failure_after_carry_answers_failed_and_asks(env, tmp_path, carry,
         raise RuntimeError("組み立ての失敗")
 
     monkeypatch.setattr(prl, "build_plans", lambda m, n, s, k, v, builder_=None, **kw: boom() if k == 2 else prw._build(
-        m, n, s, k, v, lambda *_a, **_k: ({"steps": []}, {"steps": []}), **kw))  # fmt: skip
+        prw.ORIG_BUILD, m, n, s, k, v, lambda *_a, **_k: ({"steps": []}, {"steps": []}), **kw))  # fmt: skip
     rid = to_confirm(env, tmp_path)
     ans = read(main, rid)
     assert ans["result"] == "failed" and "組み立ての失敗" in ans["reason"] and build_question(main)["kind"] == "build"

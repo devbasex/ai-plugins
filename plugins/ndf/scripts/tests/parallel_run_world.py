@@ -116,7 +116,7 @@ def env(tmp_path, monkeypatch):
     def builder(_main, _name, d, _v, **_kw):
         return {"steps": []}, {"steps": []}
 
-    monkeypatch.setattr(prl, "build_plans", lambda m, n, s, k, v, builder_=None, **kw: _build(m, n, s, k, v, builder, **kw))
+    monkeypatch.setattr(prl, "build_plans", lambda m, n, s, k, v, builder_=None, **kw: _build(ORIG_BUILD, m, n, s, k, v, builder, **kw))
     yield {"main": main, "log": log, "states": states, "heads": heads}
     _stop_running(main)
     durable.close()
@@ -143,11 +143,12 @@ def _stop_running(main):
         pass
 
 
-def _build(m, n, s, k, v, builder, **kw):
-    return prl.__dict__["_orig_build"](m, n, s, k, v, builder, **kw)
+ORIG_BUILD = prl.build_plans  # 差し替える前の build_plans（テストが prl.build_plans を差し替えた後も元の組み立てを呼ぶ）
 
 
-prl._orig_build = prl.build_plans
+def _build(orig, m, n, s, k, v, builder, **kw):
+    """`orig`（差し替える前の build_plans。ふつうは `ORIG_BUILD`）を `builder` で呼ぶ。"""
+    return orig(m, n, s, k, v, builder, **kw)
 
 
 def calls(log: Path, sub: str) -> list[list[str]]:
