@@ -17,10 +17,14 @@ CHECK_STATE = re.compile(r"(\d+)-check-state")
 def check_state_of(requests: Iterable[dict], ids: Iterable[str]) -> Optional[Path]:
     """依頼 `ids` のスプリントの検査のプランの状態ディレクトリ（#3585）。依頼の `sprint_state`（リリースの依頼のプランの状態）と
     同じディレクトリの `<連番>-check-state` のうち連番の最も大きいもの。無ければ None。"""
-    for req in (r for r in requests if r.get("id") in set(ids) and r.get("sprint_state")):
-        found = [d for d in Path(str(req["sprint_state"])).parent.glob("*-check-state") if CHECK_STATE.fullmatch(d.name)]
-        if found := [d for d in found if d.is_dir()]:
-            return max(found, key=lambda d: int(CHECK_STATE.fullmatch(d.name).group(1)))
+    wanted = set(ids)
+    for req in requests:
+        if req.get("id") not in wanted or not req.get("sprint_state"):
+            continue
+        parent = Path(str(req["sprint_state"])).parent
+        by = [(int(m.group(1)), d) for d in parent.glob("*-check-state") if (m := CHECK_STATE.fullmatch(d.name)) and d.is_dir()]
+        if by:
+            return max(by, key=lambda x: x[0])[1]  # 連番の最も大きいもの
     return None
 
 
