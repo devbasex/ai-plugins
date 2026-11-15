@@ -2,19 +2,18 @@
 
 from __future__ import annotations
 
-import io
 import json
 import subprocess
-import zipfile
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
 from ndf.adapters import ci
-from ndf.adapters.github import GitHubError
 from ndf.contracts import causes, limits
 from ndf.testing import ci_logs
+
+from failed_hub import FakeHub, art as _art, xml as _xml, zip_of as _zip
 
 from ._ci_helpers import LOG, run
 
@@ -184,78 +183,12 @@ VITEST_SUITE = {"name": "web", "runner": "vitest", "command": "npx vitest run", 
 TRACKED = frozenset({"tests/test_a.py", "tests/test_b.py", "web/src/sum.test.ts"})
 
 
-def _zip(*xmls: bytes) -> bytes:
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w") as z:
-        for i, xml in enumerate(xmls):
-            z.writestr(f"junit-{i}.xml", xml)
-    return buf.getvalue()
-
-
-def _xml(*cases: tuple[str, str]) -> bytes:
-    rows = "".join(f'<testcase file="{f}" name="{n}"><failure/></testcase>' for f, n in cases)
-    return f"<testsuites><testsuite>{rows}</testsuite></testsuites>".encode()
-
-
-class FakeHub:
-    """ジョブ → 実行、実行 → ワークフローのファイル・成果物、成果物 → ZIP、ジョブ → ログを答える偽の GitHub。"""
-
-    def __init__(
-        self,
-        jobs: dict[int, int],
-        paths: dict[int, str],
-        artifacts: dict[int, list[dict]] | None = None,
-        zips: dict[int, bytes] | None = None,
-        logs: dict[int, str] | None = None,
-        broken_jobs: frozenset[int] = frozenset(),
-    ) -> None:
-        self.jobs, self.paths = jobs, paths
-        self.artifacts = artifacts if artifacts is not None else {}
-        self.zips = zips if zips is not None else {}
-        self.logs = logs if logs is not None else {}
-        self.broken_jobs = broken_jobs
-        self.calls: list[tuple[str, int]] = []
-
-    def job(self, job_id: int) -> dict:
-        self.calls.append(("job", job_id))
-        if job_id in self.broken_jobs:
-            raise GitHubError(f"GitHub が断った（404）: GET jobs/{job_id}", 404)
-        return {"id": job_id, "run_id": self.jobs[job_id]}
-
-    def workflow_run(self, run_id: int) -> dict:
-        self.calls.append(("workflow_run", run_id))
-        return {"id": run_id, "path": f"{self.paths[run_id]}@refs/pull/7/merge"}
-
-    def run_artifacts(self, run_id: int) -> list[dict]:
-        self.calls.append(("run_artifacts", run_id))
-        return self.artifacts.get(run_id, [])
-
-    def artifact_zip(self, artifact_id: int) -> bytes:
-        self.calls.append(("artifact_zip", artifact_id))
-        if artifact_id not in self.zips:
-            raise GitHubError("GitHub が断った（410）: GET zip", 410)
-        return self.zips[artifact_id]
-
-    def job_log(self, job_id: int) -> str:
-        self.calls.append(("job_log", job_id))
-        if job_id not in self.logs:
-            raise GitHubError("GitHub が断った（403）: GET logs", 403)
-        return self.logs[job_id]
-
-    def count(self, kind: str) -> int:
-        return sum(1 for k, _ in self.calls if k == kind)
-
-
 def _check(job: int, name: str = "") -> ci.Check:
     return ci.Check(name if name else f"pytest ({job}/9)", "done", "failure", job)
 
 
 def _source(glob: str | None = None, suites: tuple = (PYTEST_SUITE,)) -> ci.FailedTestSource:
     return ci.FailedTestSource(glob, suites, TRACKED)
-
-
-def _art(aid: int, name: str = "junit-0", **extra) -> dict:
-    return {"id": aid, "name": name, "expired": False, "size_in_bytes": 100, **extra}
 
 
 def test_junit_artifacts_are_read_once_per_run_and_shared_by_its_checks() -> None:

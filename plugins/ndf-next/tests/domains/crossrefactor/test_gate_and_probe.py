@@ -7,18 +7,17 @@
 
 from __future__ import annotations
 
-import io
 import json
-import zipfile
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from ndf.adapters import ci
-from ndf.adapters.github import GitHubError
 from ndf.contracts import causes
 from ndf.domains.crossrefactor import final_gate, final_gate_decide, probe_decide
+
+from failed_hub import FakeHub, art, xml, zip_of
 
 
 def test_fix_that_changes_a_file_outside_the_plan_is_not_taken():
@@ -103,24 +102,18 @@ class _Git:
         return ""
 
 
-class _ArtifactHub:
+def _artifact_hub(**kw: Any) -> FakeHub:
     """ジョブ 1 は実行 9（pytest.yml）で、成果物 junit-0 に落ちたテストが 1 件ある偽の GitHub。"""
+    return _NoLog(
+        {1: 9},
+        {9: ".github/workflows/pytest.yml"},
+        artifacts={9: [art(31)]},
+        zips={31: zip_of(xml(("tests/test_a.py", "t")))},
+        **kw,
+    )
 
-    def job(self, job_id: int) -> dict:
-        return {"run_id": 9}
 
-    def workflow_run(self, run_id: int) -> dict:
-        return {"path": ".github/workflows/pytest.yml@main"}
-
-    def run_artifacts(self, run_id: int) -> list[dict]:
-        return [{"id": 31, "name": "junit-0", "expired": False, "size_in_bytes": 10}]
-
-    def artifact_zip(self, artifact_id: int) -> bytes:
-        buf = io.BytesIO()
-        with zipfile.ZipFile(buf, "w") as z:
-            z.writestr("r.xml", '<testsuite><testcase file="tests/test_a.py" name="t"><failure/></testcase></testsuite>')
-        return buf.getvalue()
-
+class _NoLog(FakeHub):
     def job_log(self, job_id: int) -> str:
         raise AssertionError("成果物から読めたのにログを読んだ")
 
@@ -144,16 +137,12 @@ def test_final_gate_passes_the_work_declaration_to_the_failed_test_assembly(tmp_
     fixed: list[Any] = []
     port = final_gate.CiPort(lambda hub, sha, cfg: results.pop(0), failed_tests)
     cfg = final_gate.GateConfig(7, "b", ("pytest",), ("pytest",), ("tests",), 1)
-    got = final_gate.run_gate(_Git(tmp_path), _ArtifactHub(), cfg, lambda failed, n: fixed.append(failed) or True, lambda s: None, port)  # type: ignore[arg-type]
+    got = final_gate.run_gate(_Git(tmp_path), _artifact_hub(), cfg, lambda failed, n: fixed.append(failed) or True, lambda s: None, port)  # type: ignore[arg-type]
     assert got["status"] == "passed"
     assert seen[0].junit_artifacts == "junit-*" and [s["name"] for s in seen[0].suites] == ["pytest"]
     assert fixed == [["tests/test_a.py::t"]]
 
 
 def test_final_gate_default_reader_returns_empty_when_nothing_is_read():
-    class _NoJob(_ArtifactHub):
-        def job(self, job_id: int) -> dict:
-            raise GitHubError("GitHub が断った（404）", 404)
-
     watched = ci.WatchResult(FAILED, 1, 0.0, 0.0)
-    assert final_gate._failed_tests(_NoJob(), watched, ci.FailedTestSource()) == []  # type: ignore[arg-type]
+    assert final_gate._failed_tests(_artifact_hub(broken_jobs=frozenset({1})), watched, ci.FailedTestSource()) == []  # type: ignore[arg-type]
