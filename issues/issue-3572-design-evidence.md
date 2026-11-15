@@ -1,13 +1,13 @@
-# #3572 の実物の確かめ: 検証用マーケットプレイス・merge queue・ブランチ戦略の節
+# #3572 の実物の確かめ: 検証マーケットプレイス・merge queue・ブランチ戦略のセクション
 
-設計文書 [issue-3572-design.md](issue-3572-design.md) の実物の確かめ（要求の受け入れ条件 2d・2g・2o・2r）を置く。打ったコマンドと出力をそのまま載せる。
+設計文書 [issue-3572-design.md](issue-3572-design.md) の実物の確かめ（要求の受け入れ条件 2d・2g・2o・2r）を置く。実行したコマンドと出力をそのまま載せる。
 用語は設計文書の「用語」の表の意味で使う。
 
-## 検証用マーケットプレイス（受け入れ条件 2d）
+## 検証マーケットプレイス（受け入れ条件 2d）
 
-使い捨てのディレクトリに、正式版の `main` と検証用ブランチ `verify/next` を持つ git のリポジトリを作り、HTTPS で配った
+使い捨てのディレクトリに、正式版の `main` と検証ブランチ `verify/next` を持つ git のリポジトリを作り、HTTPS で配った
 （`git http-backend`。`claude plugin marketplace add` は `file://` と `git://` を「Invalid marketplace source format」で受け付けない）。
-`HOME`・`CLAUDE_CONFIG_DIR`・`CLAUDE_CODE_PLUGIN_CACHE_DIR` を使い捨てのディレクトリへ向け、Claude Code 2.1.325 で打った（2026-11-15）。
+`HOME`・`CLAUDE_CONFIG_DIR`・`CLAUDE_CODE_PLUGIN_CACHE_DIR` を使い捨てのディレクトリへ向け、Claude Code 2.1.325 で実行した（2026-11-15）。
 `main` の `marketplace.json` の名前は `exp-plugins`、`verify/next` は `exp-plugins-next` である。
 
 ### 確かめ 1: 同じリポジトリを違う名前と違う ref で登録すると、両方が残る
@@ -28,7 +28,7 @@ $ claude plugin marketplace list
 同じプラグイン `demo` を両方から入れると、`demo@exp-plugins` と `demo@exp-plugins-next` が両方とも有効になる。
 `claude plugin disable demo@exp-plugins` で片方だけを止められた。
 
-### 確かめ 2: 検証用ブランチを作り直した後に、更新で新しい中身が入る
+### 確かめ 2: 検証ブランチを作り直した後に、更新で新しい中身が入る
 
 ```text
 （作り直しの前の exp-plugins-next の marketplace.json の説明）v1.1.0-pr1
@@ -63,9 +63,9 @@ $ claude plugin marketplace add https://127.0.0.1:18443/repo.git#verify/same
 ai-plugins の main には merge queue が無く、足すには ruleset の書き換えが要る。設計の工程では ruleset を書き換えず、外部へ公開する
 リポジトリも作らない（要求の「含まない」）。そのため、確かめは (1) GitHub の API の型と ai-plugins の設定を読む、(2) merge queue を使って
 いる公開リポジトリの記録を読む、の 2 つで行った。キューへ入れて落とす操作は実装のときに行う（設計文書の「未確認のまま残ること」と
-「人へ残す判断」の C2 の行）。どれも 2026-11-15 に打った。
+「人へ残す判断」の C2 の行）。どれも 2026-11-15 に実行した。
 
-### 確かめ 4: キューへ入れる操作は、承認した head を引数に取れる
+### 確かめ 4: キューへ入れる操作は、承認済みのコミットを引数に取れる
 
 ```text
 $ gh api graphql -f query='{ __type(name:"EnqueuePullRequestInput"){ inputFields{ name description } } }'
@@ -75,7 +75,7 @@ jump              Add the pull request to the front of the queue.
 expectedHeadOid   The expected head OID of the pull request.
 ```
 
-`enqueuePullRequest` は `expectedHeadOid` を持つ。マージの API の `sha`（STD1）と同じ役割で、承認した head を渡せる。head が違うときの
+`enqueuePullRequest` は `expectedHeadOid` を持つ。マージの API の `sha`（STD1）と同じ役割で、承認済みのコミットを渡せる。head が違うときの
 応答の形は、キューの無いブランチでは確かめられない（キューの有無の判定が先に断る見込みで、確かめにならない）。
 
 ### 確かめ 5: キューのエントリの状態と、PR の型が持つ項目
@@ -106,10 +106,10 @@ $ grep -l merge_group .github/workflows/*.yml | wc -l
 ```
 
 ai-plugins は Organization が持つ public のリポジトリで、merge queue を使える条件（STD9）に当たる。必須のチェックを出す workflow は、
-キューの一時のコミットで起動する `merge_group` を 1 つも持たない。キューを足す前に、17 個のチェックを出す workflow へ `merge_group` を
+キューの一時マージコミットで起動する `merge_group` を 1 つも持たない。キューを足す前に、17 個のチェックを出す workflow へ `merge_group` を
 足す必要がある（STD7・STD8）。
 
-### 確かめ 7: キューの一時のコミットで必須のチェックが走り、確かめたコミットがそのまま本番ブランチへ入る（公開リポジトリの記録）
+### 確かめ 7: キューの一時マージコミットで必須のチェックが走り、確かめたコミットがそのまま本番ブランチへ入る（公開リポジトリの記録）
 
 `microsoft/vscode` は main に merge queue を持つ。2026-11-15 にキューを通ってマージされた PR #348333 の記録を読んだ。
 
@@ -133,24 +133,24 @@ $ gh api repos/microsoft/vscode/pulls/348333 --jq '{merged_by:.merged_by.login, 
 
 | 項目 | 記録 | 設計への反映 |
 | --- | --- | --- |
-| 一時のコミット | ブランチ `gh-readonly-queue/main/pr-<番号>-<main の SHA>` に作られ、`merge_group` の workflow がその SHA で走った | 必須のチェックを出す workflow に `merge_group` を足す（決定 23） |
-| マージしたコミット | PR のマージコミット（`merge_commit_sha`）は、キューで確かめた一時のコミットと同じ SHA。親はキューへ入れた時点の main | 組み合わせを確かめたコミットがそのまま main へ入る（I14） |
-| マージした人 | `merged_by` と `merged` の出来事の主はキューへ入れた人。外したのは `github-merge-queue[bot]` | 人がキューへ入れたときの承認した人は `merged_by` で読める（経路 (b)。決定 4） |
-| PR の head | PR の head（29e2cc9）は一時のコミット（0fbab14）と別の SHA | 承認した head は PR の head で照らし、マージした結果は `merge_commit_sha` で読む（I3・I14） |
+| 一時マージコミット | ブランチ `gh-readonly-queue/main/pr-<番号>-<main の SHA>` に作られ、`merge_group` の workflow がその SHA で走った | 必須のチェックを出す workflow に `merge_group` を足す（決定 23） |
+| マージしたコミット | PR のマージコミット（`merge_commit_sha`）は、キューで確かめた一時マージコミットと同じ SHA。親はキューへ入れた時点の main | 組み合わせを確かめたコミットがそのまま main へ入る（I14） |
+| マージした人 | `merged_by` と `merged` のイベントの主はキューへ入れた人。外したのは `github-merge-queue[bot]` | 人がキューへ入れたときの承認した人は `merged_by` で読める（経路 (b)。決定 4） |
+| PR の head | PR の head（29e2cc9）は一時マージコミット（0fbab14）と別の SHA | 承認済みのコミットは PR の head で検証し、マージした結果は `merge_commit_sha` で読む（I3・I14） |
 
-vscode のマージは squash で、一時のコミットの親は 1 つである。ai-plugins の ruleset は `merge` だけを許す。そのため、キューの一時のコミットは
+vscode のマージは squash で、一時マージコミットの親は 1 つである。ai-plugins の ruleset は `merge` だけを許す。そのため、キューの一時マージコミットは
 main と PR の head を親に持つマージコミットになる見込みで、これは実装のときの確かめで見る。
 
 ### GitHub Docs の記述（STD7〜STD9）
 
-キューの一時のコミットで必須のチェックが落ちるか、本番ブランチと衝突すると、PR はキューから外れる。
+キューの一時マージコミットで必須のチェックが落ちるか、本番ブランチと衝突すると、PR はキューから外れる。
 タイムラインには理由が出る。原文は「if there are failed required status checks or conflicts with the base branch, the pull request will be removed from
 the queue」である。外れる理由は、チェックの失敗・チェックの待ちの時間切れ・API か画面からの取り外し・自動で解けない保護の違反の 4 つである。
 キューへ入れられるのは、PR が保護の条件（承認・必須のチェック）をすべて満たした後で、書き込みの権限を持つ利用者である。
 
-## ブランチ戦略の節のスキーマ（受け入れ条件 2m・2r。確かめ 8、2026-11-16）
+## ブランチ戦略のセクションのスキーマ（受け入れ条件 2m・2r。確かめ 8、2026-11-16）
 
-設計文書の「ブランチ戦略の節」の 2 つの設定の例が、節のスキーマの案に通ることと、組み合わせを壊した設定が落ちることを確かめた。
+設計文書の「ブランチ戦略のセクション」の 2 つの設定の例が、セクションのスキーマの案に通ることと、組み合わせを壊した設定が落ちることを確かめた。
 
 ### スキーマの案
 
@@ -257,7 +257,7 @@ the queue」である。外れる理由は、チェックの失敗・チェッ�
 
 ### 設定の例
 
-設計文書の「ブランチ戦略の節」と同じ全文である。
+設計文書の「ブランチ戦略のセクション」と同じ全文である。
 
 ```json
 {
@@ -305,7 +305,7 @@ the queue」である。外れる理由は、チェックの失敗・チェッ�
 ### 検査の結果
 
 検査のスクリプトは `check.py`（jsonschema 4.26.0 の `Draft202012Validator`。ndf-next の依存と同じバージョン）で、上の 3 つのファイルを読む。
-`web-trunk` の例は、Web サービスの例を `trunk` の行（`strict`・置き場 `json` の `package.json`）へ書き換えたもので、スクリプトの中で組む。
+`web-trunk` の例は、Web サービスの例を `trunk` 戦略（`strict`・バージョンの保存先 `json` の `package.json`）へ書き換えたもので、スクリプトの中で作る。
 
 ```text
 $ cd <作業ディレクトリ>/bs && /work/ai-plugins/.worktrees/design/issue-3572/plugins/ndf-next/.venv/bin/python -I check.py
@@ -332,7 +332,7 @@ release_branch の例: 通る
 
 ### ai-plugins の今の設定ファイルの値
 
-ai-plugins の今の設定ファイルに、節へ移す前の値（検証環境の行・バージョンの置き場・マージの方式）があるかを数えた結果（a677e2d51 の時点）:
+ai-plugins の今の設定ファイルに、セクションへ移す前の値（検証環境の行・バージョンの保存先・マージの方式）があるかを数えた結果（a677e2d51 の時点）:
 
 ```text
 $ grep -c '"verify"\|version_store\|"method"' .ndf/project.json .ndf/release.json .ndf/worktree.json
@@ -345,8 +345,10 @@ $ grep -c '"verify"\|version_store\|"method"' .ndf/project.json .ndf/release.jso
 
 ## #3613 の設計との一致（受け入れ条件 2o。確かめ 9、2026-11-16）
 
-#3613 の設計（`issues/issue-3613-design.md` の「ブランチ戦略の節へ移す行」）の移す行の新しい位置が、この設計の「ブランチ戦略の節」の「節のキー」の表に
-すべてあり、置き場のファイルと節の名前が両方の文書にあり、移行の側の差分の記号（`<F>`・`<S>`）が残っていないことを、次のスクリプトで確かめた。
+#3613 の設計（`issues/issue-3613-design.md` の「ブランチ戦略のセクションへ移す行」）の移す行の新しい位置が、この設計の「ブランチ戦略のセクション」の「セクションのキー」の表に
+すべてあり、保存先のファイルとセクションの名前が両方の文書にあり、移行の側の差分の記号（`<F>`・`<S>`）が残っていないことを、次のスクリプトで確かめた。
+
+このスクリプトは語の直し（2026-11-16）の前の見出し（「節のキー」）で書いた記録で、直した後の文書には見出しの名前を合わせて当てる。
 
 ```python
 import re, sys
