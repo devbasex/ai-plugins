@@ -51,6 +51,8 @@ SPEC_KIND = "spec"
 CALLER_FIRST = "caller-first"
 # 宣言のスキーマの注釈 x-ndf-place が取る値（宣言を読む置き場）
 DECL_PLACES = ("main", "worktree")
+# 公開する項目の集合（面・id の組）
+PublicIds = frozenset[tuple[str, str]]
 # 正本が読めないときの指摘の前置き
 UNREADABLE = "規約の正本を読めない"
 
@@ -162,7 +164,7 @@ class SpecModel:
     causes: tuple[dict[str, Any], ...]
     manual_ids: tuple[str, ...]
     skill_io_ids: tuple[str, ...]
-    public: frozenset[tuple[str, str]] = field(default_factory=frozenset)
+    public: PublicIds = field(default_factory=frozenset)
 
     @property
     def orders(self) -> dict[str, str]:
@@ -185,7 +187,7 @@ class SpecModel:
         return frozenset(s.name for s in self.skills)
 
 
-def surface_of(public: frozenset[tuple[str, str]] | set[tuple[str, str]], face: str, ident: str) -> str:
+def surface_of(public: PublicIds, face: str, ident: str) -> str:
     return PUBLIC if (face, ident) in public else INTERNAL
 
 
@@ -216,7 +218,7 @@ def load(plugin_root: Path) -> SpecModel:
 def _load(plugin_root: Path) -> SpecModel:
     entrypoints = facts.rows("entrypoints")
     files = facts.rows("ndf-files")
-    public = frozenset(public_ids(list(entrypoints), list(files)))
+    public = public_ids(list(entrypoints), list(files))
     launcher_rows, bin_files = launchers(plugin_root)
     return SpecModel(
         declarations=tuple(declarations(plugin_root, public)),
@@ -237,7 +239,7 @@ def _load(plugin_root: Path) -> SpecModel:
     )
 
 
-def public_ids(entrypoints: list[dict[str, Any]], files: list[dict[str, Any]]) -> set[tuple[str, str]]:
+def public_ids(entrypoints: list[dict[str, Any]], files: list[dict[str, Any]]) -> PublicIds:
     """公開する面の表から、公開する項目の組（面・id）を集める。"""
     out: set[tuple[str, str]] = set()
     for row in entrypoints:
@@ -251,7 +253,7 @@ def public_ids(entrypoints: list[dict[str, Any]], files: list[dict[str, Any]]) -
         if face is not None:
             out.add((face, row["target"]))
     out |= {("file", r["id"]) for r in files if "reader" in r}
-    return out
+    return frozenset(out)
 
 
 def _checked_schema(path: Path) -> dict[str, Any]:
@@ -263,7 +265,7 @@ def _checked_schema(path: Path) -> dict[str, Any]:
     return schema
 
 
-def declarations(plugin_root: Path, public: frozenset[tuple[str, str]] | set[tuple[str, str]]) -> list[DeclarationSpec]:
+def declarations(plugin_root: Path, public: PublicIds) -> list[DeclarationSpec]:
     """宣言の行ごとに、スキーマ（JSON の宣言）か節の表（Markdown の宣言）を読む。どちらも無ければ両方 `None`。"""
     base = plugin_root / CONTRACTS / DECL_SCHEMA_DIR
     out = []
@@ -308,7 +310,7 @@ def _sections(path: Path) -> tuple[tuple[dict[str, Any], ...], tuple[dict[str, A
     return rows, tuple(opt(raw, "x-ndf-read-by"))
 
 
-def commands(public: frozenset[tuple[str, str]] | set[tuple[str, str]]) -> list[CommandSpec]:
+def commands(public: PublicIds) -> list[CommandSpec]:
     """副命令の表の副命令ごとに、引数の木と結果のスキーマを付ける。"""
     manual: dict[str, list[dict[str, Any]]] = {}
     for r in facts.rows("manual-args"):
@@ -334,9 +336,7 @@ def commands(public: frozenset[tuple[str, str]] | set[tuple[str, str]]) -> list[
     return out
 
 
-def skills(
-    plugin_root: Path, public: frozenset[tuple[str, str]] | set[tuple[str, str]], entrypoints: list[dict[str, Any]]
-) -> list[SkillSpec]:
+def skills(plugin_root: Path, public: PublicIds, entrypoints: list[dict[str, Any]]) -> list[SkillSpec]:
     """実体のある配る Skill と、公開する面に載る Skill に、Skill の入出力の表の行を付ける。"""
     # 配る Skill の表と実体の置き場（持ち主は S1b の ndf.domains.manifests。検査は持ち主のパッケージを読まず、同じファイルを読む）
     listed = [s["name"] for s in read_json(plugin_root / "manifests" / "skills.json", UNREADABLE)["skills"]]
@@ -366,7 +366,7 @@ def skills(
     return out
 
 
-def hooks(public: frozenset[tuple[str, str]] | set[tuple[str, str]]) -> list[HookSpec]:
+def hooks(public: PublicIds) -> list[HookSpec]:
     """hook の表のランタイムと事象ごとに、読む入力の鍵・無くてよい鍵・判定ごとの出力の形を並べる。"""
     table = contracts.load_json(HOOKS_TABLE)
     out = []
