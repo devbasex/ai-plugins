@@ -128,6 +128,11 @@ def _standing(repo_git: git_mod.Git, shipped: str | None) -> str | None:
     return later[0][1] if later else None
 
 
+def _prepared(root: Path, repo_git: git_mod.Git, target: Target) -> str | None:
+    """前の版の直後に用意した常設のリリースブランチ（出し済みの版より大きい最小の版。無ければ None）。"""
+    return _standing(repo_git, _shipped_of(root, repo_git, target))
+
+
 def _span(root: Path, repo_git: git_mod.Git, target: Target) -> gather.Range:
     """範囲（本番ブランチの先端..範囲の先端）。`release` なら範囲の先端は常設のリリースブランチ。"""
     for name in (target.base, target.production):
@@ -135,7 +140,7 @@ def _span(root: Path, repo_git: git_mod.Git, target: Target) -> gather.Range:
     since = f"{git_mod.ORIGIN}/{target.production}"
     if target.source != RELEASE_SOURCE:
         return gather.Range(since, f"{git_mod.ORIGIN}/{target.base}")
-    branch = _standing(repo_git, _shipped_of(root, repo_git, target))
+    branch = _prepared(root, repo_git, target)
     if branch is None:
         raise AssembleError("origin に常設のリリースブランチが無い（前の版の後の release-steps prepare-next を先に打つ）")
     gather.fetch(repo_git, branch)
@@ -253,7 +258,7 @@ def _existing(root: Path, repo_git: git_mod.Git, hub: GitHub, target: Target, br
 
     別のブランチの開いた本番の PR があれば `ReleaseOpen`。用意した名前の PR があり計画した版と違えば `AssembleError`。
     """
-    prepared = _standing(repo_git, _shipped_of(root, repo_git, target))
+    prepared = _prepared(root, repo_git, target)
     found = branch if _on_origin(repo_git, branch) else prepared
     heads = open_release_heads(hub, target)
     others = sorted(n for n, ref in heads.items() if ref != found)
