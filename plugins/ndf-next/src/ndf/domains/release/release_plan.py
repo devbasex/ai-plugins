@@ -72,10 +72,10 @@ def guard_first(plan: Mapping[str, Any]) -> list[str]:
     if not steps or steps[0].get("id") != GUARD_ID:
         return [f"最初のステップが {GUARD_ID} でない"]
     first = steps[0]
-    causes = first["exit_cause"] if isinstance(first.get("exit_cause"), Mapping) else {}
+    exit_causes = first["exit_cause"] if isinstance(first.get("exit_cause"), Mapping) else {}
     out = []
     cause = guard_cause()
-    if causes.get(str(GUARD_EXIT)) != cause:
+    if exit_causes.get(str(GUARD_EXIT)) != cause:
         out.append(f"{GUARD_ID} の終了コード {GUARD_EXIT} の原因が {cause} でない")
     on_cause = first["on_cause"] if isinstance(first.get("on_cause"), Mapping) else {}
     if cause in on_cause:
