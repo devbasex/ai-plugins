@@ -984,7 +984,7 @@ release が走らせるリリースの種別・リリースコマンド・公開
 | 補足の表 | — | リリース後テストの記録のうち、課題の表でない表（例: 主なテストの実行の表）。課題を閉じる判定にも承認資料にも使わない | — | — | `docs/specifications/ndf-sprint-close-acceptance-criteria.md` |
 | 版数を上げないリリース | — | 版数を変えず、既定ブランチへのマージかコミットの反映で本番へ届けるリリース | 版数を上げない配布 | — | `docs/specifications/ndf-production-release-record.md` |
 | 範囲の PR | — | 直前の正式版のタグから範囲の終点までに、ベースブランチへ merge commit か squash merge で入った PR と、スプリント経由の PR の和。`--prs` で渡した番号は、マージコミットが範囲の終点の祖先であるものだけを含む。版上げの PR と、PR でない番号（squash の件名の `(#N)` が課題を指すもの）は含まない | — | — | `docs/specifications/ndf-release-approval-included-prs.md` |
-| 版上げの PR | — | head のブランチが `release/` で始まる PR。版数と CHANGELOG だけを変え、中身の変更を持たない | — | — | `docs/specifications/ndf-release-approval-included-prs.md` |
+| 版上げの PR | — | 今の NDF では、head のブランチが `release/` で始まる PR。版数と CHANGELOG だけを変え、中身の変更を持たない。ndf-next の取り込み方の行 `trunk` では、main へのマージの後に CD の `bump` が main の先端から作る main 宛ての PR で、head のブランチの名前（`release/v<バージョン>`）と、差分がバージョンの置き場・CHANGELOG のバージョンの節・`.ndf/release.json` の手順の書き先に限られることの両方で見分ける。名前が `release/` で始まるだけの PR は含まない | — | — | `docs/specifications/ndf-release-approval-included-prs.md` |
 | 合格の行 | — | リリース後テストの表で、`結果` の列が `合格` で始まる行 | — | — | `docs/specifications/ndf-sprint-close-acceptance-criteria.md` |
 | 手で足した節 | — | 承認資料の `## ` の節のうち、デプロイのステップ（approval-facts・notes --approval・changed-plugins --approval）が書く見出しに当たらないもの。作り直しの後も見出しと中身が残る | — | — | `plugins/ndf/skills/release/references/release-steps.md` |
 | 置き換える箇条 | — | 後の PR の本文の `## 置き換える箇条` の節に書く行。同じ版に含む前の PR の「利用者向けの変化」の箇条を指し、その箇条を CHANGELOG と承認資料の「配る中身」から除く | — | — | `plugins/ndf/skills/release/references/release-steps.md` |
@@ -1023,21 +1023,29 @@ release が走らせるリリースの種別・リリースコマンド・公開
 | 開発版の workflow | — | 手元で作った開発版の PR を、CI の必須チェックが通るのを待って develop へマージする GitHub Actions の workflow | — | — | `docs/specifications/ndf-release-approval-on-pr.md` |
 | 承認の証跡 | — | リリースの PR に置いた、承認したコミットの 40 桁の SHA を書いたコメント（証跡の印と `承認したコミット:` の行を持つ）。承認ラベルや承認ゲートの記録は含まない | — | — | `docs/specifications/ndf-release-approval-on-pr.md` |
 | 戻すマージ | — | 今の NDF（11.0.0 の入れ替えの前）だけの語。正式版のリリースの後、リリースブランチを `release/v<版>-sync` 経由でベースブランチへ取り込むマージ。版数を持つ箇所が衝突したら本番の版を取る。ndf-next（GitHub flow）は同期の PR を作らず、この操作を持たない | — | — | — |
-| 本番の PR | — | 本番チャネル（main）へ入れる Pull Request。CD のある場合は、この PR のマージで本番へ届く。ndf-next（GitHub flow）では main 宛てのスプリントの PR が兼ね、CD が作る版上げの PR は含まない。今の NDF では、リリースのブランチから本番チャネルへ出す PR を指す | — | — | `docs/specifications/ndf-release-production-admin-merge.md` |
+| 本番の PR | — | 本番チャネル（main）へ入れる Pull Request。CD のある場合は、この PR のマージで本番へ届く。ndf-next の取り込み方の行 `trunk` では main 宛てのスプリントの PR が兼ね、CD が作る版上げの PR は含まない。行 `merge_base_branch`・`release_branch` と今の NDF では、リリースのブランチから本番チャネルへ出す PR を指す | — | — | `docs/specifications/ndf-release-production-admin-merge.md` |
 | 管理者の迂回 | — | ruleset が迂回を許した役割の人が、必須の承認レビューと必須のチェックを満たさずにマージすること。`gh pr merge --admin` で打つ | — | — | `docs/specifications/ndf-release-production-admin-merge.md` |
 | 迂回の宣言 | — | 本番の PR を管理者の迂回でマージすることを選ぶ、`.ndf/project.json` の `production_merge.admin` の値。`true` のときだけ宣言があるとみなし、無いときは迂回しない | — | — | `docs/specifications/ndf-release-production-admin-merge.md` |
 | 迂回の記録 | — | 本番の PR を管理者の迂回でマージしたことを示す、本番の PR へ置くコメント。マージした先端と照らした承認の証跡を指す。証跡とは別の印を持ち、承認の判定に数えない | — | — | `docs/specifications/ndf-release-production-admin-merge.md` |
-| 承認した先端 | — | リリース承認ゲートの承認の答えか、利用者の GitHub でのマージが対象にした本番の PR の先端のコミット。本番ブランチへ入れてよいのはこの先端だけである | — | — | — |
-| 先端の照合 | — | マージの API に承認した先端を渡し、PR の先端が違えば GitHub に断らせることと、マージの前に承認の証跡を読み直すこと | — | — | — |
+| 承認した head | — | 承認ゲートの承認か、利用者の GitHub でのマージ（キューへ入れる操作を含む）が対象にした本番の PR の head コミット。本番ブランチへ入れてよいのはこの head だけである | 承認した先端 | — | — |
+| head の一致の確認 | — | マージかキューへの投入の API に承認した head を渡し、PR の head が違えば GitHub に断らせることと、マージの前に承認の記録を読み直すこと | 先端の照合 | — | — |
 | 承認の経路 | — | 本番の PR の承認がどこで与えられたか。リリース承認ゲート（`gate`）か、利用者の GitHub でのマージ（`github-merge`）のどちらか | — | — | — |
 | 差し戻し | — | リリース承認ゲートで承認しない答え、または必須のチェックの落ちた本番の PR を出さずに止めること。直しを同じ本番の PR（スプリントの PR）へ入れ、新しい先端で承認を取り直す | — | — | — |
 | 直しのステップ | — | CI が落ちたときにコードを直して push するプランのステップ（雛形の `ci-fix`・`fix-push`・`fix-base` と、それに続く `push`） | — | — | — |
 | fix の worker | — | 要求での直しのステップの呼び方。CI が落ちたときにコードを直して push するステップ（雛形の `ci-fix` とそれに続く `push`） | — | — | — |
-| リリースブランチ | — | 版上げの PR の head になるブランチ（`release/v<版>`）。main へのマージの後に CD が main の先端から作り、版上げの PR のマージで消える | — | — | — |
-| 版上げのコミット | — | main へのマージの後に CD が作り、版上げの PR を通して main へ入るコミット。`plugin.json` の `version` と CHANGELOG の版の節だけを変える。PR は版数を触らない | — | — | — |
-| 上げ幅の宣言 | — | main 宛ての PR が版数の上げ幅（MAJOR・MINOR・PATCH）を示す印。CD がマージの時点に読んで版を上げる | — | — | — |
-| 検証の ref | — | main へマージする前の PR を集めて組んだ、使い捨ての git の ref。2 つ目のマーケットプレイスが指し、main へ戻さない | — | — | — |
-| 2 つ目のマーケットプレイス | — | 正式版のマーケットプレイスと違う名前で検証の ref を指すマーケットプレイス。名前が違うので正式版と両方を登録できる | — | — | — |
+| リリースブランチ | — | ndf-next の取り込み方の行 `trunk` では、版上げの PR の head になるブランチ（`release/v<バージョン>`）。main へのマージの後に CD が main の先端から作り、版上げの PR のマージで消える。行 `merge_base_branch`・`release_branch` では `ndf-workflow` の同じ語の意味（本番チャネルへ入れる変更を集めるブランチ） | — | — | — |
+| 版上げのコミット | — | 取り込み方の行 `trunk` で、main へのマージの後に CD が作り、版上げの PR を通して main へ入るコミット。バージョンの置き場のファイル・CHANGELOG のバージョンの節・`.ndf/release.json` の手順の書き先だけを変える。PR はバージョンを触らない | — | — | — |
+| 上げ幅のラベル | — | main 宛ての PR が上げ幅（MAJOR・MINOR・PATCH）を示すラベル（`release:major` など）。CD がマージの時点に読んでバージョンを上げる | 上げ幅の宣言 | — | — |
+| 検証用ブランチ | — | main 宛ての開いた PR を集めて組む使い捨てのブランチ（ai-plugins では `verify/next`）。検証用マーケットプレイスが指し、main へ戻さない | 検証の ref | — | — |
+| 検証用マーケットプレイス | — | 正式版のマーケットプレイスと違う名前で検証用ブランチを指すマーケットプレイス。名前が違うので正式版と両方を登録できる。検証環境の種類の 1 つ | 2 つ目のマーケットプレイス | — | — |
+| ブランチ戦略 | — | リポジトリがどのブランチから作業を切り、どこへマージし、どこから本番へ出すかの決まり。リポジトリごとに `.ndf/worktree.json` の `branch_flow`（ブランチ運用の宣言）で、取り込み方の表の行を選ぶ | — | — | — |
+| 取り込み方の表 | — | ndf-next がブランチ戦略として選べる行の一覧（`plugins/ndf-next/contracts/domains/branch-flows.json`）。`merge_base_branch`・`release_branch` と、スプリントブランチを main から切って main へマージする `trunk` の行を持つ（行の名前は `.ndf/worktree.json` の `branch_flow.release_strategy` の値と同じ） | — | — | — |
+| merge queue | — | GitHub のマージキュー。キューへ入れた PR を、main の先端と前に並ぶ PR を合わせた一時のコミット（`gh-readonly-queue/main/...`）で必須のチェックに通し、通ったものだけを順にマージする | — | — | — |
+| マージの方式 | — | 承認した複数の PR の組み合わせを確かめてから本番ブランチへマージする方式。`merge-queue`（merge queue を使う）か `strict`（最新の main の取り込みを必須にし、head が動けば承認を取り直す）。リポジトリごとに設定ファイルで選ぶ | — | — | — |
+| 検証環境 | — | マージの前に変更を試す場所。リポジトリごとに設定ファイルで種類を選ぶ。プラグインなら検証用マーケットプレイス、Web なら staging 環境 | — | — | — |
+| バージョン上げ | — | main へのマージの後に CD がバージョンを上げること。書き換えるファイルと流すコマンドは `.ndf/release.json` の手順で決める | — | — | — |
+| キューへの投入 | — | 承認した head を `expectedHeadOid` に渡して、本番の PR を merge queue へ入れること（GraphQL の `enqueuePullRequest`）。PR の head が違えば GitHub が断る | — | — | — |
+| バージョンの置き場 | — | リリースの単位のバージョンを持つファイルと、その読み書きのアダプタ（`plugin`・`json` など）。`.ndf/release.json` の `version_store` で選ぶ | — | — | — |
 
 ## NDF の指示書チェック（`ndf-instructions`）
 

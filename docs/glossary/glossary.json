@@ -3987,7 +3987,7 @@
     {
       "term": "版上げの PR",
       "context": "ndf-release",
-      "meaning": "head のブランチが `release/` で始まる PR。版数と CHANGELOG だけを変え、中身の変更を持たない",
+      "meaning": "今の NDF では、head のブランチが `release/` で始まる PR。版数と CHANGELOG だけを変え、中身の変更を持たない。ndf-next の取り込み方の行 `trunk` では、main へのマージの後に CD の `bump` が main の先端から作る main 宛ての PR で、head のブランチの名前（`release/v<バージョン>`）と、差分がバージョンの置き場・CHANGELOG のバージョンの節・`.ndf/release.json` の手順の書き先に限られることの両方で見分ける。名前が `release/` で始まるだけの PR は含まない",
       "source": "docs/specifications/ndf-release-approval-included-prs.md"
     },
     {
@@ -7530,7 +7530,7 @@
     {
       "term": "本番の PR",
       "context": "ndf-release",
-      "meaning": "本番チャネル（main）へ入れる Pull Request。CD のある場合は、この PR のマージで本番へ届く。ndf-next（GitHub flow）では main 宛てのスプリントの PR が兼ね、CD が作る版上げの PR は含まない。今の NDF では、リリースのブランチから本番チャネルへ出す PR を指す",
+      "meaning": "本番チャネル（main）へ入れる Pull Request。CD のある場合は、この PR のマージで本番へ届く。ndf-next の取り込み方の行 `trunk` では main 宛てのスプリントの PR が兼ね、CD が作る版上げの PR は含まない。行 `merge_base_branch`・`release_branch` と今の NDF では、リリースのブランチから本番チャネルへ出す PR を指す",
       "source": "docs/specifications/ndf-release-production-admin-merge.md"
     },
     {
@@ -7606,16 +7606,22 @@
       "pending_source": "issues/issue-3388-design.md"
     },
     {
-      "term": "承認した先端",
+      "term": "承認した head",
       "context": "ndf-release",
-      "meaning": "リリース承認ゲートの承認の答えか、利用者の GitHub でのマージが対象にした本番の PR の先端のコミット。本番ブランチへ入れてよいのはこの先端だけである",
-      "pending_source": "issues/issue-3572-design.md"
+      "meaning": "承認ゲートの承認か、利用者の GitHub でのマージ（キューへ入れる操作を含む）が対象にした本番の PR の head コミット。本番ブランチへ入れてよいのはこの head だけである",
+      "pending_source": "issues/issue-3572-requirements.md",
+      "deprecated": [
+        "承認した先端"
+      ]
     },
     {
-      "term": "先端の照合",
+      "term": "head の一致の確認",
       "context": "ndf-release",
-      "meaning": "マージの API に承認した先端を渡し、PR の先端が違えば GitHub に断らせることと、マージの前に承認の証跡を読み直すこと",
-      "pending_source": "issues/issue-3572-design.md"
+      "meaning": "マージかキューへの投入の API に承認した head を渡し、PR の head が違えば GitHub に断らせることと、マージの前に承認の記録を読み直すこと",
+      "pending_source": "issues/issue-3572-requirements.md",
+      "deprecated": [
+        "先端の照合"
+      ]
     },
     {
       "term": "承認の経路",
@@ -7644,32 +7650,41 @@
     {
       "term": "リリースブランチ",
       "context": "ndf-release",
-      "meaning": "版上げの PR の head になるブランチ（`release/v<版>`）。main へのマージの後に CD が main の先端から作り、版上げの PR のマージで消える",
+      "meaning": "ndf-next の取り込み方の行 `trunk` では、版上げの PR の head になるブランチ（`release/v<バージョン>`）。main へのマージの後に CD が main の先端から作り、版上げの PR のマージで消える。行 `merge_base_branch`・`release_branch` では `ndf-workflow` の同じ語の意味（本番チャネルへ入れる変更を集めるブランチ）",
       "pending_source": "issues/issue-3572-design.md"
     },
     {
       "term": "版上げのコミット",
       "context": "ndf-release",
-      "meaning": "main へのマージの後に CD が作り、版上げの PR を通して main へ入るコミット。`plugin.json` の `version` と CHANGELOG の版の節だけを変える。PR は版数を触らない",
+      "meaning": "取り込み方の行 `trunk` で、main へのマージの後に CD が作り、版上げの PR を通して main へ入るコミット。バージョンの置き場のファイル・CHANGELOG のバージョンの節・`.ndf/release.json` の手順の書き先だけを変える。PR はバージョンを触らない",
       "pending_source": "issues/issue-3572-design.md"
     },
     {
-      "term": "上げ幅の宣言",
+      "term": "上げ幅のラベル",
       "context": "ndf-release",
-      "meaning": "main 宛ての PR が版数の上げ幅（MAJOR・MINOR・PATCH）を示す印。CD がマージの時点に読んで版を上げる",
-      "pending_source": "issues/issue-3572-design.md"
+      "meaning": "main 宛ての PR が上げ幅（MAJOR・MINOR・PATCH）を示すラベル（`release:major` など）。CD がマージの時点に読んでバージョンを上げる",
+      "pending_source": "issues/issue-3572-requirements.md",
+      "deprecated": [
+        "上げ幅の宣言"
+      ]
     },
     {
-      "term": "検証の ref",
+      "term": "検証用ブランチ",
       "context": "ndf-release",
-      "meaning": "main へマージする前の PR を集めて組んだ、使い捨ての git の ref。2 つ目のマーケットプレイスが指し、main へ戻さない",
-      "pending_source": "issues/issue-3572-design.md"
+      "meaning": "main 宛ての開いた PR を集めて組む使い捨てのブランチ（ai-plugins では `verify/next`）。検証用マーケットプレイスが指し、main へ戻さない",
+      "pending_source": "issues/issue-3572-requirements.md",
+      "deprecated": [
+        "検証の ref"
+      ]
     },
     {
-      "term": "2 つ目のマーケットプレイス",
+      "term": "検証用マーケットプレイス",
       "context": "ndf-release",
-      "meaning": "正式版のマーケットプレイスと違う名前で検証の ref を指すマーケットプレイス。名前が違うので正式版と両方を登録できる",
-      "pending_source": "issues/issue-3572-design.md"
+      "meaning": "正式版のマーケットプレイスと違う名前で検証用ブランチを指すマーケットプレイス。名前が違うので正式版と両方を登録できる。検証環境の種類の 1 つ",
+      "pending_source": "issues/issue-3572-requirements.md",
+      "deprecated": [
+        "2 つ目のマーケットプレイス"
+      ]
     },
     {
       "term": "確定の後の承認ゲート",
@@ -7712,6 +7727,54 @@
       "context": "ndf-workflow",
       "meaning": "一時レーンの起動が、別の一時レーンが動いているために断られた後、耐久ワークフローが前の一時レーンが止まるまで区分 `spawn` の問いを立てずに待つこと。上限は既定 3,600 秒",
       "pending_source": "issues/issue-3597-design.md"
+    },
+    {
+      "term": "ブランチ戦略",
+      "context": "ndf-release",
+      "meaning": "リポジトリがどのブランチから作業を切り、どこへマージし、どこから本番へ出すかの決まり。リポジトリごとに `.ndf/worktree.json` の `branch_flow`（ブランチ運用の宣言）で、取り込み方の表の行を選ぶ",
+      "pending_source": "issues/issue-3572-requirements.md"
+    },
+    {
+      "term": "取り込み方の表",
+      "context": "ndf-release",
+      "meaning": "ndf-next がブランチ戦略として選べる行の一覧（`plugins/ndf-next/contracts/domains/branch-flows.json`）。`merge_base_branch`・`release_branch` と、スプリントブランチを main から切って main へマージする `trunk` の行を持つ（行の名前は `.ndf/worktree.json` の `branch_flow.release_strategy` の値と同じ）",
+      "pending_source": "issues/issue-3572-requirements.md"
+    },
+    {
+      "term": "merge queue",
+      "context": "ndf-release",
+      "meaning": "GitHub のマージキュー。キューへ入れた PR を、main の先端と前に並ぶ PR を合わせた一時のコミット（`gh-readonly-queue/main/...`）で必須のチェックに通し、通ったものだけを順にマージする",
+      "pending_source": "issues/issue-3572-requirements.md"
+    },
+    {
+      "term": "マージの方式",
+      "context": "ndf-release",
+      "meaning": "承認した複数の PR の組み合わせを確かめてから本番ブランチへマージする方式。`merge-queue`（merge queue を使う）か `strict`（最新の main の取り込みを必須にし、head が動けば承認を取り直す）。リポジトリごとに設定ファイルで選ぶ",
+      "pending_source": "issues/issue-3572-requirements.md"
+    },
+    {
+      "term": "検証環境",
+      "context": "ndf-release",
+      "meaning": "マージの前に変更を試す場所。リポジトリごとに設定ファイルで種類を選ぶ。プラグインなら検証用マーケットプレイス、Web なら staging 環境",
+      "pending_source": "issues/issue-3572-requirements.md"
+    },
+    {
+      "term": "バージョン上げ",
+      "context": "ndf-release",
+      "meaning": "main へのマージの後に CD がバージョンを上げること。書き換えるファイルと流すコマンドは `.ndf/release.json` の手順で決める",
+      "pending_source": "issues/issue-3572-requirements.md"
+    },
+    {
+      "term": "キューへの投入",
+      "context": "ndf-release",
+      "meaning": "承認した head を `expectedHeadOid` に渡して、本番の PR を merge queue へ入れること（GraphQL の `enqueuePullRequest`）。PR の head が違えば GitHub が断る",
+      "pending_source": "issues/issue-3572-design.md"
+    },
+    {
+      "term": "バージョンの置き場",
+      "context": "ndf-release",
+      "meaning": "リリースの単位のバージョンを持つファイルと、その読み書きのアダプタ（`plugin`・`json` など）。`.ndf/release.json` の `version_store` で選ぶ",
+      "pending_source": "issues/issue-3572-design.md"
     }
   ]
 }

@@ -44,7 +44,7 @@ docs/
 ### `.ndf/worktree.json` の書き換え
 
 `production_branch`・`guard` は変えず、`base_branch` を `main` にし、`branch_flow` を GitHub flow の行の値にする。書き換えた後の全体は「内部のデータと定数」にある。
-取り込み方は GitHub flow（`promotion: direct`。設計文書の決定 21）で、この値は今の NDF（`plugins/ndf/`）の取り込み方の表に無い。
+取り込み方は GitHub flow（`release_strategy: trunk`。設計文書の決定 21）で、この値は今の NDF（`plugins/ndf/`）の取り込み方の表に無い。
 書き換えは ndf-next への入れ替え（11.0.0）と同じ時点で行う。行は #3572 が ndf-next の取り込み方の表へ足す。
 メインディレクトリの未コミットの同じファイル（`whole` の値）は、この worktree の書き換えに使わない（決定 6。扱いは「並行と排他」）。
 
@@ -130,7 +130,7 @@ docs/
     "start": "production",
     "integrate": "release",
     "doc_prs": "sprint",
-    "promotion": "direct",
+    "release_strategy": "trunk",
     "reviews": {
       "impl": {"checks": ["cross-review"], "diff": "pr"},
       "sprint": {"checks": ["cross-refactoring", "behavior"], "diff": "unchecked"},
@@ -149,15 +149,15 @@ docs/
 | 名前 | 種類 | 置き場 | 既定値 |
 | --- | --- | --- | --- |
 | `branch_flow.start` | 設定値 | `.ndf/worktree.json` | `production`（スプリントを `main` から切る） |
-| `branch_flow.integrate` | 設定値 | `.ndf/worktree.json` | `release`（スプリントの PR の `main` へのマージがリリースになる。マージの前は検証の ref で試す） |
+| `branch_flow.integrate` | 設定値 | `.ndf/worktree.json` | `release`（スプリントの PR の `main` へのマージがリリースになる。マージの前は検証用ブランチで試す） |
 | `branch_flow.doc_prs` | 設定値 | `.ndf/worktree.json` | `sprint`（設計 PR と確定仕様化の PR の宛先はスプリントブランチ） |
-| `branch_flow.promotion` | 設定値 | `.ndf/worktree.json` | `direct`（スプリントの PR を `main` へ直接マージする。develop と常設のリリースブランチを持たない） |
+| `branch_flow.release_strategy` | 設定値 | `.ndf/worktree.json` | `trunk`（スプリントの PR を `main` へ直接マージする。develop と常設のリリースブランチを持たない） |
 | `branch_flow.reviews` | 設定値 | `.ndf/worktree.json` | 4 種類の行（`impl`・`sprint`・`design`・`spec`。決定 1・決定 2） |
 | `base_branch` | 設定値 | `.ndf/worktree.json` | `main`（本番ブランチと同じ。develop を持たない） |
 | `production_branch` | 設定値 | `.ndf/worktree.json` | `main`（変えない） |
 
 キーの名前と許す値の正本は NDF の `lib/branch_flow.py`（取り込み方の表と `REVIEW_ALLOWED`）で、ai-plugins の側で値の一覧を持たない。
-`direct` の行（行の名前 `github-flow`。`start`・`doc_prs`・`integrate` が許す値と、`keeps_sprint: false`・`release_from: production`・`release_units: false` の列）は、
+`trunk` の行（`start`・`doc_prs`・`integrate` が許す値と、`keeps_sprint: false`・`release_from: production`・`release_units: false` の列）は、
 ndf-next の取り込み方の表（`contracts/domains/branch-flows.json`）へ #3572 が足す。行の値は #3572 の設計の決定 5 にある。
 
 ## 並行と排他
