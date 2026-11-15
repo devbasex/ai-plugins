@@ -28,7 +28,9 @@ from ndf.domains.project.measure_repo import has_secret, obj, redact, seq
 
 # 解析が測る宣言の項目（スキーマの並びの順）。外すのは人が書く項目・解析の記録・形の版
 ITEM_KEYS = tuple(
-    k for k in contracts.load_json(check.SCHEMA)["properties"] if k not in ("$schema", "version", "docs", "production_merge", "analysis", "workflow")
+    k
+    for k in contracts.load_json(check.SCHEMA)["properties"]
+    if k not in ("$schema", "version", "docs", "production_merge", "analysis", "workflow")
 )
 BRANCHES = "branches"
 BRANCH_FLOW = measure_flow.ITEM
@@ -161,7 +163,9 @@ def _replace_ours(key: str, cur: Any, new: Any, origin: str) -> tuple[Any, list[
     return new, rows + [_put_row(key, new, origin)]
 
 
-def merge_item(key: str, current: tuple[bool, Any], new: Any, origin: str, written: dict[str, Any]) -> tuple[Any, list[dict[str, Any]], bool]:
+def merge_item(
+    key: str, current: tuple[bool, Any], new: Any, origin: str, written: dict[str, Any]
+) -> tuple[Any, list[dict[str, Any]], bool]:
     """1 項目を決める。`current` は (前の値が有るか, 前の値)。返すのは (書く値, 出力の行, 解析の値か)。"""
     has_cur, cur = current
     if has_cur and has_secret(cur):
@@ -180,7 +184,9 @@ def merge_item(key: str, current: tuple[bool, Any], new: Any, origin: str, writt
     return value, rows + got, True
 
 
-def merge_project(existing: Optional[dict[str, Any]], measure: dict[str, Any], answers: dict[str, Any], analysis: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+def merge_project(
+    existing: Optional[dict[str, Any]], measure: dict[str, Any], answers: dict[str, Any], analysis: dict[str, Any]
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """新しい `project.json` と出力の行。`analysis` は `written` を除いた節（ここで指紋を作る）。"""
     doc = dict(existing) if existing else {"version": 1}
     written_before = obj(obj(obj(existing).get("analysis")).get("written"))
@@ -213,7 +219,9 @@ def delivery_channels(answers: dict[str, Any], names: dict[str, Any]) -> dict[st
     return {**answers, "delivery": {**ans, "value": out}}
 
 
-def _worktree_key(doc: dict[str, Any], wkey: str, new: Any, origin: str, written_before: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, str]]:
+def _worktree_key(
+    doc: dict[str, Any], wkey: str, new: Any, origin: str, written_before: dict[str, Any]
+) -> tuple[list[dict[str, Any]], dict[str, str]]:
     """`.ndf/worktree.json` の起点・本番の 1 キー。`doc` を書き換え、出力の行と書いたキーの指紋を返す。"""
     tag = f"{WORKTREE_TAG}#{wkey}"
     ours = wkey in doc and written_before.get(tag) == value_digest(doc[wkey])
@@ -230,7 +238,9 @@ def _worktree_key(doc: dict[str, Any], wkey: str, new: Any, origin: str, written
     return [{"kind": "kept", "key": tag}], {}
 
 
-def merge_worktree(existing: dict[str, Any], branches: dict[str, Any], origin: str, written_before: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, str]]:
+def merge_worktree(
+    existing: dict[str, Any], branches: dict[str, Any], origin: str, written_before: dict[str, Any]
+) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, str]]:
     """`.ndf/worktree.json` に欠けた 2 キーを足す。返すのは (新しい中身, 出力の行, 書いたキーの指紋)。"""
     doc = dict(existing)
     rows: list[dict[str, Any]] = []
@@ -242,7 +252,9 @@ def merge_worktree(existing: dict[str, Any], branches: dict[str, Any], origin: s
     return doc, rows, written
 
 
-def merge_flow(doc: dict[str, Any], value: Any, origin: str, written_before: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, str]]:
+def merge_flow(
+    doc: dict[str, Any], value: Any, origin: str, written_before: dict[str, Any]
+) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, str]]:
     """`.ndf/worktree.json` の `branch_flow` を書く。不明・前の `write` の値でない手の値は変えない。"""
     tag = f"{WORKTREE_TAG}#{BRANCH_FLOW}"
     if is_unknown(value) or not isinstance(value, dict):
@@ -285,7 +297,9 @@ def _put_ci(doc: dict[str, Any], value: Optional[bool]) -> dict[str, Any]:
     return {**doc, "test": {**test, **({"ci": ci} if ci else {})}}
 
 
-def declare_ci(doc: dict[str, Any], previous: Optional[dict[str, Any]], written_before: dict[str, Any], exists: Callable[[str], bool]) -> tuple[dict[str, Any], str, Optional[str]]:
+def declare_ci(
+    doc: dict[str, Any], previous: Optional[dict[str, Any]], written_before: dict[str, Any], exists: Callable[[str], bool]
+) -> tuple[dict[str, Any], str, Optional[str]]:
     """書き出す宣言の `test.ci.only` を決め、(宣言, 出力の 1 行, 指紋か None) を返す。"""
     test = doc.get("test")
     if not isinstance(test, dict) or is_unknown(test):
@@ -300,7 +314,9 @@ def declare_ci(doc: dict[str, Any], previous: Optional[dict[str, Any]], written_
     return _put_ci(doc, None), f"{verb}（テストの suite の CI のジョブが無い）", None
 
 
-def _declare_ci_tests(doc: dict[str, Any], existing: Optional[dict[str, Any]], written_before: dict[str, Any], root: Path) -> tuple[dict[str, Any], dict[str, Any]]:
+def _declare_ci_tests(
+    doc: dict[str, Any], existing: Optional[dict[str, Any]], written_before: dict[str, Any], root: Path
+) -> tuple[dict[str, Any], dict[str, Any]]:
     """CI テストの宣言を決める。`test` を解析が持つなら、その指紋を書き足した値で取り直す。"""
     doc, line, digest = declare_ci(doc, existing, written_before, lambda p: (root / p).is_file())
     written = doc["analysis"]["written"]
@@ -327,7 +343,17 @@ def ignored_notes(root: Path, rels: list[str]) -> list[dict[str, Any]]:
         num, _, pattern = rest.partition(":")
         if sep and not pattern.startswith("!"):
             text = f"{path} は {src}:{num} の `{pattern}` が除外している（コミットできない。.gitignore は変えない）"
-            out.append({"kind": "note", "key": "gitignore", "name": path, "result": "ignored", "source": f"{src}:{num}", "pattern": pattern, "text": text})
+            out.append(
+                {
+                    "kind": "note",
+                    "key": "gitignore",
+                    "name": path,
+                    "result": "ignored",
+                    "source": f"{src}:{num}",
+                    "pattern": pattern,
+                    "text": text,
+                }
+            )
     return out
 
 
@@ -362,13 +388,19 @@ class Inputs(NamedTuple):
     answers: dict[str, Any]
 
 
-def _worktree_part(inp: Inputs, written_before: dict[str, Any]) -> tuple[list[File], list[dict[str, Any]], dict[str, str], tuple[str, ...], dict[str, Any]]:
+def _worktree_part(
+    inp: Inputs, written_before: dict[str, Any]
+) -> tuple[list[File], list[dict[str, Any]], dict[str, str], tuple[str, ...], dict[str, Any]]:
     """`.ndf/worktree.json` の起点・本番・ブランチ運用。返すのは (書くファイル, 行, 指紋, 宣言したブランチ, 起点と本番の名前)。"""
     items = obj(inp.measure.get("items"))
     value, origin = resolve_item(BRANCHES, items.get(BRANCHES), inp.answers, item_problem_branches)
     branches = {} if is_unknown(value) else dict(obj(value))
     if inp.worktree is None:
-        note = {"kind": "note", "key": WORKTREE_TAG, "text": f"{files.relpath('worktree')} が無い（ndf worktree の用意を先に通す）。起点と本番を書かない"}
+        note = {
+            "kind": "note",
+            "key": WORKTREE_TAG,
+            "text": f"{files.relpath('worktree')} が無い（ndf worktree の用意を先に通す）。起点と本番を書かない",
+        }
         return [], [note], {}, (), branches
     new_wt, rows, written = merge_worktree(inp.worktree, branches, origin, written_before)
     flow, flow_origin = resolve_item(BRANCH_FLOW, items.get(BRANCH_FLOW), inp.answers, flow_problem)
@@ -409,9 +441,13 @@ def plan(inp: Inputs) -> Plan:
         raise WriteError(f"書き出す宣言が形に合わない（解析器の誤り）: {'; '.join(errs[:3])}")
     if not _same_but_time(inp.existing, doc):
         path = files.path(inp.main, "project")
-        out.insert(0, File(path, files.relpath("project"), path.read_text(encoding="utf-8") if inp.existing is not None else None, dumps(doc)))
+        out.insert(
+            0, File(path, files.relpath("project"), path.read_text(encoding="utf-8") if inp.existing is not None else None, dumps(doc))
+        )
     notes = [{"kind": "note", "key": "notes", "text": n} for n in seq(inp.measure.get("notes"))]
-    return Plan(out, item_rows + [ci_row] + rows + wt_rows + notes + ignored_notes(inp.main, [files.relpath("project"), files.relpath("worktree")]))
+    return Plan(
+        out, item_rows + [ci_row] + rows + wt_rows + notes + ignored_notes(inp.main, [files.relpath("project"), files.relpath("worktree")])
+    )
 
 
 def row_line(row: dict[str, Any]) -> str:

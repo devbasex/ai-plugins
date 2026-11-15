@@ -98,7 +98,10 @@ def test_compose_services_reads_names_and_images():
 
 def test_ci_reading_parts(repo):
     assert measure_ci.workflow_jobs(_tree(repo)) == {".github/workflows/ci.yml": 2}
-    rules = [{"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": "b"}, {"context": "a"}]}}, {"type": "x"}]
+    rules = [
+        {"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": "b"}, {"context": "a"}]}},
+        {"type": "x"},
+    ]
     assert measure_ci.required_contexts(rules) == ["a", "b"]
     assert measure_ci.junit_seconds(b'<testsuites><testsuite time="1.5"/><testsuite time="2"/></testsuites>') == 3.5
     assert measure_ci.junit_seconds(b"<not-xml") is None

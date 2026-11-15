@@ -48,7 +48,9 @@ class Gh:
         if left <= 0:
             raise GhUnavailable(TIME_UP)
         try:
-            done = subprocess.run(["gh", "api", "--method", "GET", path], cwd=str(self.root), capture_output=True, timeout=min(CALL_LIMIT, left))
+            done = subprocess.run(
+                ["gh", "api", "--method", "GET", path], cwd=str(self.root), capture_output=True, timeout=min(CALL_LIMIT, left)
+            )
         except FileNotFoundError:
             raise GhUnavailable("gh が無い") from None
         except subprocess.TimeoutExpired:
@@ -158,7 +160,11 @@ def _junit_of_run(gh: Gh, run: dict[str, Any]) -> Optional[dict[str, Any]]:
         seconds += [s for s in map(junit_seconds, _xmls(gh.raw(f"repos/{gh.repo}/actions/artifacts/{a['id']}/zip"))) if s is not None]
     if not seconds:
         return None
-    return {"seconds": round(sum(seconds), 1), "source": "ci-junit", "detail": f"run {run['id']}（{run.get('path')}）の JUnit {len(seconds)} 本の合計"}
+    return {
+        "seconds": round(sum(seconds), 1),
+        "source": "ci-junit",
+        "detail": f"run {run['id']}（{run.get('path')}）の JUnit {len(seconds)} 本の合計",
+    }
 
 
 def _steps_of(jobs: list[dict[str, Any]], run: dict[str, Any]) -> Optional[dict[str, Any]]:
@@ -173,7 +179,11 @@ def _steps_of(jobs: list[dict[str, Any]], run: dict[str, Any]) -> Optional[dict[
     total = sum(secs)
     if not secs or total <= 0:
         return None
-    return {"seconds": round(total, 1), "source": "ci-steps", "detail": f"run {run['id']}（{run.get('path')}）のテストの step {len(secs)} 個の合計"}
+    return {
+        "seconds": round(total, 1),
+        "source": "ci-steps",
+        "detail": f"run {run['id']}（{run.get('path')}）のテストの step {len(secs)} 個の合計",
+    }
 
 
 def _record_value(line: str) -> Optional[float]:
@@ -200,7 +210,11 @@ def ndf_record(repo: Optional[str], environ: Mapping[str, str]) -> Optional[dict
     values = [v for v in map(_record_value, lines) if v is not None][-RECENT:]
     if not values:
         return None
-    return {"seconds": round(statistics.median(values), 1), "source": "ndf-record", "detail": f"NDF の実行の記録の直近 {len(values)} 件の中央値"}
+    return {
+        "seconds": round(statistics.median(values), 1),
+        "source": "ndf-record",
+        "detail": f"NDF の実行の記録の直近 {len(values)} 件の中央値",
+    }
 
 
 def _required_checks(gh: Gh, branch: Optional[str]) -> list[str]:
@@ -243,7 +257,9 @@ def _representative(gh: Gh, candidates: list[dict[str, Any]]) -> tuple[Optional[
     seen = 0
     for run in candidates[:CANDIDATE_RUNS]:
         seen += 1
-        jobs = [j for j in seq(obj(gh.get(f"repos/{gh.repo}/actions/runs/{run['id']}/jobs?per_page=100")).get("jobs")) if isinstance(j, dict)]
+        jobs = [
+            j for j in seq(obj(gh.get(f"repos/{gh.repo}/actions/runs/{run['id']}/jobs?per_page=100")).get("jobs")) if isinstance(j, dict)
+        ]
         if not _has_skipped_job(jobs):
             return run, jobs, seen
     return None, [], seen
@@ -300,7 +316,9 @@ class _Runs:
 
 def _measure_runs(gh: Gh, jobs_static: dict[str, int], head: Optional[str]) -> tuple[dict[str, Any], list[dict[str, Any]], list[str]]:
     """ワークフローごとの行・所要の候補・注記。代表の run はジョブを飛ばしていない最新の候補。"""
-    runs = [r for r in seq(obj(gh.get(f"repos/{gh.repo}/actions/runs?status=success&per_page=50")).get("workflow_runs")) if isinstance(r, dict)]
+    runs = [
+        r for r in seq(obj(gh.get(f"repos/{gh.repo}/actions/runs?status=success&per_page=50")).get("workflow_runs")) if isinstance(r, dict)
+    ]
     required = _required_checks(gh, head)
     candidates: dict[str, list[dict[str, Any]]] = {}
     for run in runs:

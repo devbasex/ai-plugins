@@ -171,7 +171,9 @@ def locked(store: Path, name: str, wait: Optional[float] = None) -> Iterator[Non
     try:
         lock.acquire(timeout=timeout)
     except Timeout:
-        raise AccountLockTimeout(f"{d / name}.lock の排他を {timeout:g} 秒で取れない（旧い relay.py か別のセッションが書いている）") from None
+        raise AccountLockTimeout(
+            f"{d / name}.lock の排他を {timeout:g} 秒で取れない（旧い relay.py か別のセッションが書いている）"
+        ) from None
     try:
         yield
     finally:
@@ -404,7 +406,15 @@ def list_rows(store: Path, environ: Mapping[str, str], pinned: Optional[str], us
         row = book["keys"][k]
         if isinstance(row, dict):
             usd = positive(row.get("monthly_usd"))
-            rows.append({"name": k, "kind": "api_key", "account": row.get("account"), "monthly_usd": usd, "state": "使える" if usd else "月の額が未宣言"})
+            rows.append(
+                {
+                    "name": k,
+                    "kind": "api_key",
+                    "account": row.get("account"),
+                    "monthly_usd": usd,
+                    "state": "使える" if usd else "月の額が未宣言",
+                }
+            )
     return rows, warnings
 
 
@@ -414,7 +424,16 @@ def _metered_rows(store: Path, environ: Mapping[str, str]) -> list[dict[str, Any
         return [{"name": METERED, "kind": "metered", "source": "env", "keys": keys, "state": "環境変数の宣言"}] if keys else []
     decl, why = load_metered(store)
     if decl is not None:
-        return [{"name": METERED, "kind": "metered", "source": "saved", "provider": decl.provider, "details": decl.details, "state": "保存した宣言"}]
+        return [
+            {
+                "name": METERED,
+                "kind": "metered",
+                "source": "saved",
+                "provider": decl.provider,
+                "details": decl.details,
+                "state": "保存した宣言",
+            }
+        ]
     if why is not None:
         return [{"name": METERED, "kind": "metered", "source": "saved", "state": "壊れている（宣言なしとして扱う）"}]
     return []

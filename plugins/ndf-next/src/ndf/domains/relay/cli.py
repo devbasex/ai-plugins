@@ -32,7 +32,19 @@ from typing import Any, Callable, Mapping, NamedTuple, Optional
 
 from ndf import cli, identity
 from ndf.contracts import causes, limits, result
-from ndf.domains.relay import account_decide, accounts, hub, install, lane_question, marks, notice, pending, registry, switch_decide, wrapper
+from ndf.domains.relay import (
+    account_decide,
+    accounts,
+    hub,
+    install,
+    lane_question,
+    marks,
+    notice,
+    pending,
+    registry,
+    switch_decide,
+    wrapper,
+)
 from ndf.domains.relay import account_login, account_metered, account_registry, context_policy, context_records, context_report
 from ndf.domains.relay.tmux import Tmux
 
@@ -153,15 +165,28 @@ def _acc_add(store: Path, a: argparse.Namespace) -> int:
     got = account_login.add(store, a.name, code, os.environ)
     if got.needs_code:
         detail = f"認可の URL: {got.url} をブラウザで開き、出た認可コードを {got.expires_at} までに渡す: printf '%s\\n' '<コード>' | ndf relay account add {a.name} --code -"
-        return result.emit(result.stopped(TOOL, "input_missing", detail, items=[{"name": a.name, "kind": "oauth", "url": got.url, "expires_at": got.expires_at}]))
+        return result.emit(
+            result.stopped(
+                TOOL, "input_missing", detail, items=[{"name": a.name, "kind": "oauth", "url": got.url, "expires_at": got.expires_at}]
+            )
+        )
     who = f"{got.email}・{got.org_name}" if got.org_name else got.email
-    return result.emit(result.result(TOOL, result.OK, f"登録した: {a.name}（{who}）", items=[{"name": a.name, "kind": "oauth", "email": got.email, "org_name": got.org_name}]))
+    return result.emit(
+        result.result(
+            TOOL,
+            result.OK,
+            f"登録した: {a.name}（{who}）",
+            items=[{"name": a.name, "kind": "oauth", "email": got.email, "org_name": got.org_name}],
+        )
+    )
 
 
 def _acc_bedrock(store: Path, a: argparse.Namespace) -> int:
     asked = account_metered.Target(a.profile or "", a.region or "", a.model or "")  # noqa: NDF501 利用者の入力: 省いた欄は空で渡し、候補を添えて止める
     row = account_metered.add_bedrock(store, os.environ, asked, a.yes)
-    return result.emit(result.result(TOOL, result.OK, f"登録した: 従量の接続（Bedrock・{'・'.join(row['details'].values())}）", items=[row]))
+    return result.emit(
+        result.result(TOOL, result.OK, f"登録した: 従量の接続（Bedrock・{'・'.join(row['details'].values())}）", items=[row])
+    )
 
 
 def _acc_api_key(store: Path, a: argparse.Namespace) -> int:
@@ -175,7 +200,9 @@ def _acc_api_key(store: Path, a: argparse.Namespace) -> int:
 def _acc_monthly(store: Path, a: argparse.Namespace) -> int:
     row = account_metered.set_monthly(store, a.name, account_metered.amount(a.usd, allow_zero=True))
     usd = row["monthly_usd"]
-    return result.emit(result.result(TOOL, result.OK, f"月の額を外した: {a.name}" if usd is None else f"月の額: {a.name} {usd:g} ドル", items=[row]))
+    return result.emit(
+        result.result(TOOL, result.OK, f"月の額を外した: {a.name}" if usd is None else f"月の額: {a.name} {usd:g} ドル", items=[row])
+    )
 
 
 def _acc_use(store: Path, a: argparse.Namespace) -> int:
@@ -202,7 +229,9 @@ def _acc_remove(store: Path, a: argparse.Namespace) -> int:
         out = account_login.logout(store, a.target, os.environ)
         account_registry.unregister(store, a.target)
         warnings = None if out else ["claude auth logout が通らなかった（登録は外した）"]
-        return result.emit(result.result(TOOL, result.OK, f"外した: {a.target}", items=[{"name": a.target, "kind": "oauth"}], warnings=warnings))
+        return result.emit(
+            result.result(TOOL, result.OK, f"外した: {a.target}", items=[{"name": a.target, "kind": "oauth"}], warnings=warnings)
+        )
     row = account_metered.remove(store, a.target)
     return result.emit(result.result(TOOL, result.OK, f"外した: {a.target}", items=[row]))
 
@@ -358,14 +387,18 @@ def _stop_all(ctx: hub.Context) -> int:
             refused.append(name)
     metrics = {"stopped": len(names) - len(refused)}
     if refused:
-        return result.emit(result.stopped(TOOL, "refused", f"止められないラッパーがある: {'・'.join(refused)}", items=items, metrics=metrics))
+        return result.emit(
+            result.stopped(TOOL, "refused", f"止められないラッパーがある: {'・'.join(refused)}", items=items, metrics=metrics)
+        )
     return result.emit(result.result(TOOL, result.OK, f"ラッパーを {len(names)} 本止めた", items=items, metrics=metrics))
 
 
 def _notice() -> int:
     pos = notice.position(os.environ, os.getppid())
     got = notice.lines(pos, limits.seconds("relay.quiet"))
-    return result.emit(result.result(TOOL, result.OK, got.text, items=[{"text": got.text, "position": pos.kind}], metrics={"inside": got.inside}))
+    return result.emit(
+        result.result(TOOL, result.OK, got.text, items=[{"text": got.text, "position": pos.kind}], metrics={"inside": got.inside})
+    )
 
 
 def _context_resolve(args: argparse.Namespace) -> int:
@@ -374,7 +407,11 @@ def _context_resolve(args: argparse.Namespace) -> int:
     warnings = [got.config_error] if got.config_error else None
     if got.config_error:
         summary += f"。設定が壊れているため読まなかった: {got.config_error}"
-    return result.emit(result.result(TOOL, result.OK, summary, items=[got.as_dict()], metrics={"policy": got.policy, "limit": got.limit}, warnings=warnings))
+    return result.emit(
+        result.result(
+            TOOL, result.OK, summary, items=[got.as_dict()], metrics={"policy": got.policy, "limit": got.limit}, warnings=warnings
+        )
+    )
 
 
 def _context_record(args: argparse.Namespace) -> int:
@@ -397,7 +434,9 @@ def _context_calibrate(args: argparse.Namespace) -> int:
     except OSError as exc:
         return result.emit(result.stopped(TOOL, "unknown", f"見込みのファイルへ書けない: {exc}"))
     samples = body["samples"]
-    return result.emit(result.result(TOOL, result.OK, f"見込みを較正した（標本 {samples}）", items=[body], metrics={"samples": sum(samples.values())}))
+    return result.emit(
+        result.result(TOOL, result.OK, f"見込みを較正した（標本 {samples}）", items=[body], metrics={"samples": sum(samples.values())})
+    )
 
 
 def _span(args: argparse.Namespace) -> Optional[tuple[float, float]]:
@@ -447,7 +486,9 @@ CONTEXT_HANDLERS: dict[str, Callable[[argparse.Namespace], int]] = {
 
 
 def _context_parser(sub: Any) -> None:
-    ctx = sub.add_parser("context", help=COMMANDS["context"], description="副命令: " + " / ".join(f"{k}（{v}）" for k, v in CONTEXT_COMMANDS.items()))
+    ctx = sub.add_parser(
+        "context", help=COMMANDS["context"], description="副命令: " + " / ".join(f"{k}（{v}）" for k, v in CONTEXT_COMMANDS.items())
+    )
     ctx_sub = ctx.add_subparsers(dest="context_action", required=True)
     p = {name: ctx_sub.add_parser(name, help=text, description=text) for name, text in CONTEXT_COMMANDS.items()}
     p["resolve"].add_argument("--root", help="設定を読むリポジトリ（省けば今の作業場所の git の根）")

@@ -66,4 +66,6 @@ def main(argv: list[str]) -> int:
         metrics["out"] = args.out
     empty = [i["number"] for i in found.items if not i["files_found"]]
     note = f"。触るファイルの候補が 0 件: {' '.join(f'#{n}' for n in empty)}" if empty else ""
-    return result.emit(result.result(TOOL, result.OK, f"{len(found.items)} 件の課題の判定の材料を集めた{note}", items=found.items, metrics=metrics))
+    return result.emit(
+        result.result(TOOL, result.OK, f"{len(found.items)} 件の課題の判定の材料を集めた{note}", items=found.items, metrics=metrics)
+    )

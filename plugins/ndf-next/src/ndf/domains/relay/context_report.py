@@ -215,14 +215,18 @@ def _session_spans(sessions: Mapping[str, Any], excluded: set[str], windows: Map
     return spans
 
 
-def _sum_sessions(sessions: Mapping[str, Any], by_session: Mapping[Any, Any], scope: _Scope, windows: Mapping[str, Windows], restarted: set[Any]) -> dict[str, Any]:
+def _sum_sessions(
+    sessions: Mapping[str, Any], by_session: Mapping[Any, Any], scope: _Scope, windows: Mapping[str, Windows], restarted: set[Any]
+) -> dict[str, Any]:
     """セッションごとの区分を合算し、自動圧縮の数と印の無い区間の数を数える。"""
     totals = {b: _empty_totals() for b in buckets()}
     compacts: Optional[int] = 0
     unknown = {"restore": 0, "handoff": 0}
     restores: list[dict[str, Any]] = []
     for sid, s in sessions.items():
-        got = session_parts(sid, s["transcript"], by_session[sid] if sid in by_session else [], scope, windows[sid] if sid in windows else ALL_TIME)
+        got = session_parts(
+            sid, s["transcript"], by_session[sid] if sid in by_session else [], scope, windows[sid] if sid in windows else ALL_TIME
+        )
         restores += [got["restore"]] if got["restore"] else []
         for b in buckets():
             for k, v in got["parts"][b].items():
@@ -254,7 +258,9 @@ def _rework(rows: list[dict[str, Any]]) -> int | str:
     return sum(1 for n in keep.values() if n >= 2) if keep else cr.UNKNOWN
 
 
-def work_scope(work: str, rows: list[dict[str, Any]], span: Optional[tuple[float, float]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Windows]]:
+def work_scope(
+    work: str, rows: list[dict[str, Any]], span: Optional[tuple[float, float]]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Windows]]:
     """作業の対象の行（期間で絞る前）・そのうち span に入る行・セッションごとの区間。"""
     filled = cr.fill_work(rows)
     windows = work_windows(filled, work)

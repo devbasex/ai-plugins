@@ -93,7 +93,11 @@ def test_list_rows_hide_secrets_and_mark_broken(tmp_path):
     _account(tmp_path, "work1", capacity={"seven_day": 900})
     (tmp_path / "work2").mkdir()
     (tmp_path / "work2" / reg.ACCOUNT_FILE).write_text("{broken")
-    book = {"version": 1, "use": "off", "keys": {"key1": {"key": "sk-secret", "account": "work1", "added_at": "x", "generation": "g", "monthly_usd": 100}}}
+    book = {
+        "version": 1,
+        "use": "off",
+        "keys": {"key1": {"key": "sk-secret", "account": "work1", "added_at": "x", "generation": "g", "monthly_usd": 100}},
+    }
     reg.write(reg.book_path(tmp_path), book)
     usage = [account_decide.Usage(name="work1", percent=40.0, limited=False)]
     rows, warnings = reg.list_rows(tmp_path, {"NDF_SUPERVISE_CLAUDE_FALLBACK": "AWS_REGION=us-east-1 AWS_PROFILE=p"}, "work1", usage)

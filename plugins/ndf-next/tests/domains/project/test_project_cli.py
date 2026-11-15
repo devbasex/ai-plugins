@@ -139,7 +139,10 @@ def test_measure_writes_outside_the_repo_only(repo, tmp_path, capsys, last_resul
 
 
 def test_write_creates_then_keeps_hand_values(repo, tmp_path, capsys, last_result):
-    measured = _measure_file(tmp_path, {"checks": {"status": "measured", "value": {"tools": []}}, "test": {"status": "question", "candidates": {}, "evidence": []}})
+    measured = _measure_file(
+        tmp_path,
+        {"checks": {"status": "measured", "value": {"tools": []}}, "test": {"status": "question", "candidates": {}, "evidence": []}},
+    )
     answers = _answers(tmp_path, {"test": {"value": {"suites": []}}, "nope": {"value": 1}})
     assert cli.main(["write", "--root", str(repo), "--measure", str(measured), "--answers", str(answers), "--dry-run"]) == 0
     assert not (repo / ".ndf" / "project.json").exists()

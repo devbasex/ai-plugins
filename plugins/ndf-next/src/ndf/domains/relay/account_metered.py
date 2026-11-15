@@ -77,7 +77,9 @@ def from_env(env: Mapping[str, str]) -> Optional[Target]:
     return Target(env.get("AWS_PROFILE", "default"), region, model)  # noqa: NDF502 利用者の入力: プロファイルの無い宣言は aws の既定のプロファイル
 
 
-def _aws(environ: Mapping[str, str], args: list[str], profile: Optional[str] = None, region: Optional[str] = None) -> Optional[subprocess.CompletedProcess]:
+def _aws(
+    environ: Mapping[str, str], args: list[str], profile: Optional[str] = None, region: Optional[str] = None
+) -> Optional[subprocess.CompletedProcess]:
     aws = shutil.which("aws")
     if aws is None:
         return None
@@ -87,7 +89,9 @@ def _aws(environ: Mapping[str, str], args: list[str], profile: Optional[str] = N
         if region:
             env["AWS_REGION"] = region
     try:
-        return subprocess.run([aws, *args], env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=limits.seconds("relay.bedrock"))
+        return subprocess.run(
+            [aws, *args], env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=limits.seconds("relay.bedrock")
+        )
     except subprocess.TimeoutExpired:
         return subprocess.CompletedProcess(args, 124, "", "Timeout")
     except OSError:  # noqa: NDF401 外部コマンド: aws を起動できなければ None（呼び手が区分できない失敗として止める）
@@ -106,7 +110,18 @@ def region_of(environ: Mapping[str, str], profile: str) -> str:
 
 def models(environ: Mapping[str, str], profile: str, reg_name: str) -> list[str]:
     """推論プロファイル（SYSTEM_DEFINED）のうち ID に `anthropic.claude` を含むもの。読めなければ空。"""
-    args = ["bedrock", "list-inference-profiles", "--type-equals", "SYSTEM_DEFINED", "--output", "json", "--profile", profile, "--region", reg_name]
+    args = [
+        "bedrock",
+        "list-inference-profiles",
+        "--type-equals",
+        "SYSTEM_DEFINED",
+        "--output",
+        "json",
+        "--profile",
+        profile,
+        "--region",
+        reg_name,
+    ]
     p = _aws(environ, args, profile, reg_name)
     if p is None or p.returncode != 0:
         return []
@@ -177,7 +192,9 @@ def add_bedrock(store: Path, environ: Mapping[str, str], asked: Target, yes: boo
     if not profile:
         cands = profiles(environ)
         if not cands:
-            raise MeteredError("precondition", "AWS のプロファイルが無い（aws configure list-profiles が 0 件）。先に aws configure sso などで作る")
+            raise MeteredError(
+                "precondition", "AWS のプロファイルが無い（aws configure list-profiles が 0 件）。先に aws configure sso などで作る"
+            )
         raise MeteredError("input_missing", f"--profile を渡す。候補: {', '.join(cands)}")
     region = region or region_of(environ, profile)
     if not region:
@@ -197,7 +214,11 @@ def add_bedrock(store: Path, environ: Mapping[str, str], asked: Target, yes: boo
 def check_api_key(key: str, environ: Mapping[str, str], transport: Optional[httpx.BaseTransport] = None) -> tuple[str, int, Optional[str]]:
     """API キーで 1 回要求を打ち、(結果, HTTP の状態, エラーの型) を返す。結果は ok・auth_failed・credit_low・network・unclassified。"""
     url = environ.get("NDF_API_KEY_CHECK_URL") or CHECK_URL
-    body = {"model": environ.get("NDF_API_KEY_CHECK_MODEL") or CHECK_MODEL, "max_tokens": 1, "messages": [{"role": "user", "content": "ping"}]}
+    body = {
+        "model": environ.get("NDF_API_KEY_CHECK_MODEL") or CHECK_MODEL,
+        "max_tokens": 1,
+        "messages": [{"role": "user", "content": "ping"}],
+    }
     headers = {"x-api-key": key, "anthropic-version": "2023-06-01"}
     try:
         with httpx.Client(transport=transport, timeout=limits.seconds("claude-api-keys.check"), follow_redirects=False) as client:
@@ -220,7 +241,11 @@ def check_api_key(key: str, environ: Mapping[str, str], transport: Optional[http
     return "unclassified", resp.status_code, etype
 
 
-CHECK_TEXT = {"auth_failed": "認証が通らない（キーが違うか失効している）", "credit_low": "残高切れ（credit balance is too low）", "network": "通信に失敗した"}
+CHECK_TEXT = {
+    "auth_failed": "認証が通らない（キーが違うか失効している）",
+    "credit_low": "残高切れ（credit balance is too low）",
+    "network": "通信に失敗した",
+}
 
 
 def _verify_key(key: str, environ: Mapping[str, str], name: str, transport: Optional[httpx.BaseTransport]) -> None:
@@ -245,7 +270,9 @@ def amount(v: Optional[str], allow_zero: bool = False) -> Optional[float]:
     return x
 
 
-def add_api_key(store: Path, environ: Mapping[str, str], req: KeyRequest, transport: Optional[httpx.BaseTransport] = None) -> dict[str, Any]:
+def add_api_key(
+    store: Path, environ: Mapping[str, str], req: KeyRequest, transport: Optional[httpx.BaseTransport] = None
+) -> dict[str, Any]:
     """API キーを確かめ、通ったときだけ保存する（同じ名前なら置き換える）。結果にキーの値を含めない。"""
     name, account, key, monthly = req
     accounts = reg.names(store)
@@ -368,4 +395,3 @@ def remove(store: Path, target: str) -> dict[str, Any]:
     if not reg.remove_key(store, target):
         raise MeteredError("refused", f"登録されていない: {target}")
     return {"name": target, "kind": "api_key"}
-

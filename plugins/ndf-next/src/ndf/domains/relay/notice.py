@@ -73,9 +73,7 @@ def _wrapper_pid(directory: Path) -> Optional[int]:
     return pid if isinstance(pid, int) else None
 
 
-def position(
-    environ: Mapping[str, str], start_pid: int, info: Callable[[int], Optional[tuple[int, str]]] = _parent_and_name
-) -> Position:
+def position(environ: Mapping[str, str], start_pid: int, info: Callable[[int], Optional[tuple[int, str]]] = _parent_and_name) -> Position:
     """呼び手の claude とラッパーの位置。"""
     directory = signals.relay_dir(environ)
     if directory is None:
@@ -102,7 +100,10 @@ def lines(pos: Position, quiet: float) -> Notice:
     if pos.kind != RELAY:
         return Notice(False, "/exit してから claude を起動し、下の中身を最初の入力として貼り付ける（ラッパーを入れると自動になる）")
     if math.isinf(quiet) and quiet > 0:
-        return Notice(True, "静かな時間が有限でないため、ラッパーは自動で切り替えない。/exit してから claude を起動し、下の中身を最初の入力として貼り付ける")
+        return Notice(
+            True,
+            "静かな時間が有限でないため、ラッパーは自動で切り替えない。/exit してから claude を起動し、下の中身を最初の入力として貼り付ける",
+        )
     # ラッパーは負・nan の静かな時間を待たずに通すので、0 として数える
     n = round(quiet) if quiet == quiet and quiet > 0 else 0
     when = f"約 {n} 秒後に" if n > 0 else "まもなく"

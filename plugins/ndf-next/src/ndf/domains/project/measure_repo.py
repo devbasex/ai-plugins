@@ -212,7 +212,9 @@ class Tree:
 
     def shallow(self, *patterns: str) -> list[str]:
         """根と 1 段下で名前が当たる追跡ファイル。"""
-        return sorted(p for p in self.files if p.count("/") <= 1 and any(fnmatch.fnmatchcase(p.rsplit("/", 1)[-1], pat) for pat in patterns))
+        return sorted(
+            p for p in self.files if p.count("/") <= 1 and any(fnmatch.fnmatchcase(p.rsplit("/", 1)[-1], pat) for pat in patterns)
+        )
 
     def json(self, path: str) -> dict[str, Any]:
         try:
@@ -232,7 +234,9 @@ class Tree:
         hits: list[dict[str, Any]] = []
         for path in paths:
             hits += [
-                {"path": path, "line": n, "text": redact(line.strip())[:200]} for n, line in enumerate(self.text(path).splitlines(), 1) if rx.search(line)
+                {"path": path, "line": n, "text": redact(line.strip())[:200]}
+                for n, line in enumerate(self.text(path).splitlines(), 1)
+                if rx.search(line)
             ]
             if len(hits) >= MAX_EVIDENCE:
                 return hits[:MAX_EVIDENCE]
@@ -499,7 +503,11 @@ def measure_delivery(tree: Tree) -> dict[str, Any]:
     workflows = sorted(p for p in tree.files if p.startswith(".github/workflows/") and check.is_input(p))
     evidence = tree.grep(workflows, DEPLOY_WORDS) + tree.grep(docs_of(tree), DEPLOY_WORDS)
     tags = tree.words("tag", "--sort=-creatordate")
-    candidates = {"deploy_files": tree.shallow(*DEPLOY_FILES), "versioned": _versioned(tree), "tags": {"count": len(tags), "latest": tags[:3]}}
+    candidates = {
+        "deploy_files": tree.shallow(*DEPLOY_FILES),
+        "versioned": _versioned(tree),
+        "tags": {"count": len(tags), "latest": tags[:3]},
+    }
     return question(candidates, evidence)
 
 
@@ -558,9 +566,7 @@ def _old_guide_notes(tree: Tree, files: list[str], imports: list[dict[str, str]]
 def measure_instructions(tree: Tree) -> dict[str, Any]:
     files = [p for p in INSTRUCTION_FILES if p in tree.files]
     imports = [
-        {"from": f, "to": _normalize(str(PurePosixPath(f).parent / m.group(1)))}
-        for f in files
-        for m in IMPORT_TOKEN.finditer(tree.text(f))
+        {"from": f, "to": _normalize(str(PurePosixPath(f).parent / m.group(1)))} for f in files for m in IMPORT_TOKEN.finditer(tree.text(f))
     ]
     notes = _old_guide_notes(tree, files, imports)
     if not files:
@@ -579,7 +585,11 @@ def measure_materials(tree: Tree, deps: dict[str, dict[str, str]]) -> dict[str, 
                 analytics.append({"text": f"{eco}: {name}"})
             if len(libraries) < MAX_LIBRARIES:
                 libraries.append({"name": name, "ecosystem": eco, "alternatives": []})
-    evidence = [{"file": f, "text": ln[:200]} for f in tree.shallow("README*.md")[:1] for ln in [x for x in tree.text(f).splitlines() if x.strip()][:8]]
+    evidence = [
+        {"file": f, "text": ln[:200]}
+        for f in tree.shallow("README*.md")[:1]
+        for ln in [x for x in tree.text(f).splitlines() if x.strip()][:8]
+    ]
     candidates = {
         "product": None,
         "needs": {"usage": [], "market": []},
