@@ -192,3 +192,80 @@ def test_limit_is_reported_in_json(work: Path):
     code, out, _ = cli(work, "s.md", "--limit", "1", "--json")
     assert code == 0
     assert json.loads(out) == {**sample_json(350, 0.9, 2.1, 3), "limit": {"minutes": 1, "over": False}}
+
+
+# ---- main（I-014）: 出力の形・上限の判定・失敗の終了コード ----
+
+TABLE_HEAD = ["| # | 見出し | 字数 | 尺（秒） | 配分（秒） |", "| ---: | --- | ---: | ---: | ---: |"]
+
+
+def test_table_output(work: Path):
+    assert cli(work, "s.md") == (
+        0,
+        "\n".join(
+            [
+                *TABLE_HEAD,
+                "| 1 | 表紙 | 5 | 0.9 | 20 |",
+                "| 2 | 本編\\|縦 | 12 | 2.1 | — |",
+                "| 合計 | 2 ページ（350 字/分） | 17 | 3.0（0分03秒） | 20 |",
+            ]
+        )
+        + "\n",
+        "",
+    )
+
+
+def test_table_without_planned_seconds(tmp_path: Path):
+    (tmp_path / "noplan.md").write_text("## 1. A\n> あ\n## 2. B\n", encoding="utf-8")
+    assert cli(tmp_path, "noplan.md") == (
+        0,
+        "\n".join(
+            [*TABLE_HEAD, "| 1 | A | 1 | 0.2 | — |", "| 2 | B | 0 | 0.0 | — |", "| 合計 | 2 ページ（350 字/分） | 1 | 0.2（0分00秒） | — |"]
+        )
+        + "\n",
+        "",
+    )
+
+
+def test_over_limit_prints_the_table_and_exits_1(work: Path):
+    code, out, err = cli(work, "s.md", "--limit", "0.01")
+    assert code == 1
+    assert out.splitlines()[-1] == "| 合計 | 2 ページ（350 字/分） | 17 | 3.0（0分03秒） | 20 |"
+    assert err == "尺が上限を超えた: 0分03秒 > 0.01 分\n"
+
+
+def test_over_limit_in_json_also_exits_1(work: Path):
+    code, out, err = cli(work, "s.md", "--limit", "0.01", "--json")
+    assert code == 1
+    assert json.loads(out)["limit"] == {"minutes": 0.01, "over": True}
+    assert err == "尺が上限を超えた: 0分03秒 > 0.01 分\n"
+
+
+def test_limit_equal_to_the_total_is_not_over(tmp_path: Path):
+    (tmp_path / "one.md").write_text("## 1. A\n> " + "あ" * 350 + "\n", encoding="utf-8")
+    code, out, err = cli(tmp_path, "one.md", "--limit", "1", "--json")
+    assert (code, err) == (0, "")
+    assert json.loads(out) == {
+        "wpm": 350,
+        "pages": [{"no": 1, "title": "A", "chars": 350, "seconds": 60, "planned": None}],
+        "total": {"pages": 1, "chars": 350, "seconds": 60, "planned": None},
+        "limit": {"minutes": 1, "over": False},
+    }
+    code, out, err = cli(tmp_path, "one.md", "--wpm", "349", "--limit", "1")
+    assert code == 1
+    assert out.splitlines()[-1] == "| 合計 | 1 ページ（349 字/分） | 350 | 60.2（1分00秒） | — |"
+    assert err == "尺が上限を超えた: 1分00秒 > 1 分\n"
+
+
+def test_missing_script_exits_1(tmp_path: Path):
+    assert cli(tmp_path, "none.md") == (1, "", "台本が無い: none.md\n")
+
+
+def test_malformed_script_exits_2(tmp_path: Path):
+    (tmp_path / "dup.md").write_text("## 1. A\n## 1. B\n", encoding="utf-8")
+    assert cli(tmp_path, "dup.md") == (2, "", "台本のページの番号が重なる: 1（dup.md）\n")
+
+
+def test_module_exports_without_running_main():
+    code = f"const t = require({json.dumps(str(SCRIPT_TIME))});\nout(Object.keys(t).sort());"
+    assert node(code) == ["count", "measure", "table"]
