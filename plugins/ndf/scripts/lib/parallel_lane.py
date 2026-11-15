@@ -401,8 +401,9 @@ def _head_sha(cwd: str) -> str:
     return got.stdout.strip() if got.returncode == 0 else ""
 
 
-def request_ask(main: Path, name: str, lane: str, tool_input: dict, cwd: str, ledger_id: str) -> plg.Sent:
-    """承認ゲートの外の区分つきの問い（`kind: ask`）をオーガナイザーへ送る。id は `<送り手>-q<判定の記録の id>`。"""
+def request_ask(main: Path, name: str, lane: str, tool_input: dict, cwd: str, ledger_id: str, target: Optional[str] = None) -> plg.Sent:
+    """承認ゲートの外の区分つきの問い（`kind: ask`）をオーガナイザーへ送る。id は `<送り手>-q<判定の記録の id>`。
+    `target` は問いの対象（`ask_target`。#3608）で、行の `target` に残す（空なら null）。"""
     qs = (tool_input or {}).get("questions") or []
     first = qs[0] if qs and isinstance(qs[0], dict) else {}
     rid = f"{lane}-q{ledger_id}"
@@ -417,6 +418,7 @@ def request_ask(main: Path, name: str, lane: str, tool_input: dict, cwd: str, le
         "cwd": cwd,
         "ledger_id": ledger_id,
         "stamp": _head_sha(cwd),
+        "target": target or None,
         "at": pe.utc_stamp(),
     }
     return send_inbox(main, name, msg, rid)

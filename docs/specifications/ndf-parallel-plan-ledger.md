@@ -237,6 +237,7 @@ sequenceDiagram
 | `opened` / `closed` | `opened` / `closed` | 反映しない。`opened` は `run` が耐久ワークフローを始める直前、`closed` は計画の終わりと失われた計画の `stop` が書く |
 | `rebuilt` | `rebuilt:<回>` | 反映しない。回数を `seq` の基準に使う。`msg.retired` に退避先を持つ |
 | `role` | `role:<時刻>:<pid>` | 反映しない。持ち主の記録。`id` はラッパーの名前、`msg.plan_dir` は計画の置き場の絶対パス |
+| `reused` | `reused:<判定の記録の id>` | 反映しない。一時レーンの同じ問いへ前の `ask` の答えを当てたか、答え待ちの依頼の id を返した記録。`id` は前の依頼の id |
 
 耐久ワークフローが自分で作る組み直しの依頼と問いは行にせず、チェックポイントが持つ。
 

@@ -157,8 +157,8 @@ IETF の Idempotency-Key の標準案（処理済みの再送には最初の結�
 | 欄 | 中身 |
 | --- | --- |
 | `asked[]` | 自分の名前の一時レーンが送った `gate2`・`ask` の依頼を台帳の順に並べる。各要素は `id`・`kind`・`source`・`target`・`at` |
-| `asked[].answer` | `gate2` に答えの行があれば `result`・`choice` |
-| `asked[].answered` | `ask` に答えがあれば `true`。代表の問いへまとめられた依頼は、依頼ごとの答えがあれば `true` |
+| `asked[].answer` | `gate2` と、問いの対象（`target`）を持つ `ask` に答えの行があれば `result`・`choice` |
+| `asked[].answered` | 問いの対象を持たない `ask` に答えがあれば `true`。代表の問いへまとめられた依頼は、依頼ごとの答えがあれば `true` |
 | `asked[].settled` | 確定か締めで処理済みの `gate2` に `true` |
 
 起き直した一時レーンは、答えのある `gate2` を出し直さない。`ask` は操作の対象を比べられないため、答えの中身を載せず、
