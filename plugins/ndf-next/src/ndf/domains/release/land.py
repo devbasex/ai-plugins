@@ -237,10 +237,11 @@ class Lander:
         moved = f"#{pull.number} の先端がキューの待ちの間に {got.pull.head_sha[:12]} へ動いた"
         return _judged_refusal(pull, got, moved, f"#{pull.number} の承認がキューの待ちの間に失効した: {got.judgment.detail}")
 
-    def _await_queue(self, pull: Pull, deadline: float) -> Landed:
+    def _await_queue(self, pull: Pull, deadline: float, judge: bool = True) -> Landed:
         """マージキューへ入れた PR `pull` がマージされるまで、時刻 `deadline`（`clock` の値）まで読み直す。
 
-        読み直すたびに、キューに残っているかと（本番ブランチ宛てなら）承認を確かめる。キューが外したら `not_ci` で
+        読み直すたびに、キューに残っているかと（本番ブランチ宛てで `judge` なら）承認を確かめる。版上げの PR は承認の
+        証跡を持たないため、`land_bump` は `judge` を偽にして呼ぶ。キューが外したら `not_ci` で
         すぐに止まり、承認が失効したらキューから外して `refused` で止まる（前の承認のままキューがマージしない）。
         予算の内にマージされなければ `ci_pending` で止まり、キューがマージした後の打ち直しを促す（`land` はマージ済みの
         本番ブランチ宛ての PR から、承認の記録へ再開する）。
@@ -251,7 +252,7 @@ class Lander:
             now = self.hub.pull(number)
             if now.merged:
                 return queued_merged
-            refused = self._queued_refusal(pull, now)
+            refused = self._queued_refusal(pull, now) if judge else None
             if refused is not None:
                 self.hub.dequeue(number)
                 return refused._replace(detail=f"{refused.detail}。マージキューから外した")
@@ -346,6 +347,12 @@ class Lander:
             return Landed(False, kind, f"#{number} の必須のチェックが通らない（{kind}{_failed_listing(failed)}）", failed=failed)
         if plain:
             outcome = self.hub.merge(number, expect_head=pull.head_sha, method=MERGE_METHOD, require_method=True)
+            if outcome.kind == MERGE_QUEUE_PENDING:
+                # main がマージキューを使うとき、普通のマージはキューへ入れる。マージされるまで残りの締め切りまで待つ
+                queued = self._await_queue(pull, deadline, judge=False)
+                if not queued.merged:
+                    return queued
+                outcome = outcome._replace(merged=True, kind=None, detail=queued.detail)
         else:
             outcome = self.hub.merge_as_admin(number, expect_head=pull.head_sha, method=MERGE_METHOD)
         if not outcome.merged:

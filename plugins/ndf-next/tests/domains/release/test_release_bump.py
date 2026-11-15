@@ -207,6 +207,22 @@ def test_a_bump_pr_that_changes_more_than_the_version_in_an_allowed_file_is_refu
     assert "plugin.json（版の外の変更）" in got.landed.detail and hub.admin_merged == []
 
 
+def test_updating_an_open_bump_pr_with_changes_outside_the_version_stops_before_taking_its_tree(tmp_path: Path) -> None:
+    """既存の版上げの PR を進める前に、信頼する main の先端の宣言で head の差分を検査し、版上げの外があればその木を取り出さずに止まる。"""
+    work = _origin(tmp_path)
+    tip = git_sandbox.sh(work, "rev-parse", "origin/main").strip()
+    git_sandbox.sh(work, "switch", "-q", "-c", "release/v1.3.0", tip)
+    write_json(work / ".ndf" / "release.json", {"steps": []})
+    git_sandbox.sh(work, "add", "-A")
+    git_sandbox.sh(work, "commit", "-q", "-m", "Release: kit v1.3.0")
+    git_sandbox.sh(work, "push", "-q", "origin", "HEAD:refs/heads/release/v1.3.0")
+    hub = _hub()
+    _open(hub, BUMP_PR, "release/v1.3.0")
+    with pytest.raises(bump.BumpError, match=r"\.ndf/release\.json"):
+        _bumper(work, hub).bump()
+    assert git_sandbox.sh(work, "rev-parse", "HEAD").strip() == tip and hub.admin_merged == []
+
+
 def test_a_bump_pr_whose_head_moved_after_the_fetch_is_refused(tmp_path: Path) -> None:
     """差分の検査はマージへ渡す先端そのもので行う。取り込んだ先端と PR の先端が違えばマージしない。"""
     work = _origin(tmp_path)

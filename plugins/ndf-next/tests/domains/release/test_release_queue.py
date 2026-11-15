@@ -7,7 +7,7 @@ from collections.abc import Callable
 from ndf.adapters.github import MERGE_QUEUE_PENDING, GitHubError, MergeOutcome, Pull
 from ndf.domains.release import land
 
-from ._fakes import HEAD, FakeHub, pull, release_lander, trail_comment
+from ._fakes import HEAD, FakeHub, not_found, pull, release_lander, trail_comment
 
 
 class _QueueHub(FakeHub):
@@ -85,3 +85,13 @@ def test_merge_queue_dequeues_when_approval_is_revoked_while_waiting() -> None:
     now = [0.0]
     done = _queue_lander(hub, now, 3600.0, on_poll=lambda: hub.comments_of[7].append(trail_comment("rejected", HEAD))).land(7)
     assert not done.merged and done.kind == "refused" and hub.dequeued == [7] and 7 not in hub.queued
+
+
+def test_bump_pr_waits_in_the_merge_queue_without_reading_the_approval_trail() -> None:
+    """承認数 0 の main がマージキューを使うとき、版上げの PR は承認の証跡を読まずにキューのマージを待ち、マージ済みとして返す。"""
+    hub = _QueueHub(pulls={20: pull(number=20, ref="release/v1.3.0")})
+    hub.responses[("GET", "/repos/o/r/branches/main/protection/required_pull_request_reviews")] = not_found()
+    now = [0.0]
+    done = _queue_lander(hub, now, 600.0).land_bump(20, lambda p: [])
+    assert done.merged and not done.admin and done.production_sha == "c" * 40
+    assert hub.dequeued == [] and now[0] == 2 * land.QUEUE_POLL_SECONDS

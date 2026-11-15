@@ -100,7 +100,7 @@ def _contained(work_root: Path) -> None:
     targets = [work_root / plugins_mod.MARKETPLACE, *(work_root / rel for rel in decl.version_files)]
     for p in plugins_mod.load(work_root):
         targets += [work_root / p.dir / m for m in plugins_mod.MANIFESTS]
-    outside = [str(t) for t in targets if not t.resolve().is_relative_to(top)]
+    outside = [str(r) for t in targets if not (r := t.resolve()).is_relative_to(top)]
     if outside:
         raise VerifyEscape(f"検証の ref の書き換え先が一時の worktree の外を指す（書き換えない）: {', '.join(outside)}")
 

@@ -267,10 +267,18 @@ class Bumper:
         pulls: Sequence[materials_decide.PullFact],
         planned: Sequence[version_decide.Planned],
     ) -> None:
-        """開いた版上げの PR へ main を取り込むコミットと、版の節を組み直したコミットを足す（版が同じとき）。"""
+        """開いた版上げの PR へ main を取り込むコミットと、版の節を組み直したコミットを足す（版が同じとき）。
+
+        宣言と書き換え先は、取り出した main の先端（信頼する本番側）から読む。PR の head が版上げの外の変更を持てば、
+        その木を取り出して手順を流す前に `BumpError` で止まる（未承認のブランチの宣言の手順を token 付きで流さない）。"""
         repo_git = self._git
+        decl = decl_mod.load(self.root)
         gather.fetch(repo_git, opened.head_ref)
-        repo_git.run("switch", "--quiet", "-C", opened.head_ref, f"{git_mod.ORIGIN}/{opened.head_ref}")
+        remote = f"{git_mod.ORIGIN}/{opened.head_ref}"
+        outside = self._outside(repo_git.merge_base(self._tip_ref, remote), remote, decl)
+        if outside:
+            raise BumpError(f"開いた版上げの PR #{opened.number} が版上げの外の変更を持つ（人が見てから打ち直す）: {', '.join(outside)}")
+        repo_git.run("switch", "--quiet", "-C", opened.head_ref, remote)
         before = repo_git.rev_parse("HEAD")
         conflicted: list[str] = []
 
@@ -279,7 +287,7 @@ class Bumper:
 
         if not gather.merge_or_abort(repo_git, ("--quiet", "--no-edit", git_mod.END_OF_OPTIONS, span.until), read_conflicted):
             raise BumpConflict(f"{span.until[:12]} を {opened.head_ref} へ取り込めない（衝突: {', '.join(conflicted) or '読めない'}）")
-        write_bump(self.root, decl_mod.load(self.root), planned, pulls, self.today)
+        write_bump(self.root, decl, planned, pulls, self.today)
         committed = self._commit(bump_decide.message_of(planned[0].plugin, opened.version, span.until))
         if committed or repo_git.rev_parse("HEAD") != before:
             self._push(opened.head_ref)
