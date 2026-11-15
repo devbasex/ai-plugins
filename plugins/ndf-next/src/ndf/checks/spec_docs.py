@@ -29,6 +29,7 @@ from ndf.checks import spec_model, spec_render
 from ndf.checks.model import CheckError, Finding, Scope
 from ndf.checks.spec_args import ArgTree
 from ndf.checks.spec_model import CONTRACTS, DECL_SCHEMA_DIR, IO_SCHEMA_DIR, CommandSpec, DeclarationSpec, SpecModel, opt
+from ndf.contracts import facts
 
 DOCS, DECL, IO, SKILL, PUBLIC = "spec-docs", "spec-decl", "spec-io", "spec-skill", "spec-public"
 # キーの型の語（どれか 1 つを持てば型がある）
@@ -40,6 +41,11 @@ CALL_DIRS = ("skills/", "agents/")
 CALL_STOPS = frozenset({"|", "||", "&&", ";", ">", ">>", "2>&1", "&", ")", "<"})
 # 呼び出しの先頭の語（エントリポイントの短い名前か、末尾がそのファイルのパス）
 ENTRY = identity.FIXED_WORDS["entrypoint"]
+
+
+def _table_rel(rel: Any, name: str) -> str:
+    """事実の表 `name` のリポジトリの根からの相対パス（置き場の facts/ か domains/ は `facts.place` が決める）。"""
+    return rel(f"{CONTRACTS}/{facts.place(name)}")
 
 
 def check(scope: Scope, rules: dict[str, Any], write_spec: bool = False, written: list[str] | None = None) -> list[Finding]:
@@ -114,7 +120,7 @@ def _real_errors(decl: DeclarationSpec, path: Path) -> list[str]:
 
 
 def decl_findings(model: SpecModel, repo_root: Path, rel: Any) -> list[Finding]:
-    files_rel = rel(f"{CONTRACTS}/domains/ndf-files.json")
+    files_rel = _table_rel(rel, "ndf-files")
     decl_dir = repo_root / model.places[spec_model.decl_place(model.places)]["path"]
     found = []
     for decl in model.declarations:
@@ -189,7 +195,7 @@ def io_findings(model: SpecModel, scope: Scope, rel: Any) -> list[Finding]:
             if name not in known
         ]
     rows = {r["id"] for r in model.launchers}
-    launchers_rel = rel(f"{CONTRACTS}/domains/launchers.json")
+    launchers_rel = _table_rel(rel, "launchers")
     found += [Finding(IO, launchers_rel, 1, f"bin/{n} が起動スクリプトの表（launchers）に無い") for n in model.bin_files if n not in rows]
     found += [
         Finding(IO, launchers_rel, 1, f"起動スクリプトの表の行 {n} のファイルが bin/ に無い") for n in sorted(rows - set(model.bin_files))
@@ -278,7 +284,7 @@ def _row_errors(model: SpecModel) -> list[str]:
 
 
 def skill_findings(model: SpecModel, scope: Scope, rel: Any) -> list[Finding]:
-    table_rel = rel(f"{CONTRACTS}/domains/skill-io.json")
+    table_rel = _table_rel(rel, "skill-io")
     found = [Finding(SKILL, table_rel, 1, e) for e in _row_errors(model)]
     commands = {c.name: c for c in model.commands}
     for src in scope.sources:
@@ -310,7 +316,7 @@ def _hits(model: SpecModel, row: dict[str, Any]) -> bool:
 
 
 def public_findings(model: SpecModel, plugin_root: Path, rel: Any) -> list[Finding]:
-    ep_rel = rel(f"{CONTRACTS}/domains/entrypoints.json")
+    ep_rel = _table_rel(rel, "entrypoints")
     found = []
     env = model.env_ids
     for row in model.entrypoints:
