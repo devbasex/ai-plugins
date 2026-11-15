@@ -291,7 +291,9 @@ def restart_input(name: str, row: dict, w: Wrapper | None) -> tuple[str, list[st
     cwd は最後の start の行のもの（区間の切り替えで worktree へ移っている）。
 
     最後の区間が前の会話を続けた区間（上限での切り替え）なら、その会話を `--resume` で再開する。再開の文は会話の外では
-    意味を持たず、新しい会話へ打つと別の役目の作業を拾う（#3555）。会話を決められなければ None（起こさない）。"""
+    意味を持たず、新しい会話へ打つと別の役目の作業を拾う（#3555）。`--resume` は同じ会話の ID のまま続けるため、
+    `from_session` がその区間の会話である。会話を決められなければ None（起こさない）。
+    印の無い古い行のうち、未達の `/goal` を入れ直して再開した区間は見分けられず、今までどおり新しい会話へ打つ。"""
     args = [a for a in row.get("args") or [] if isinstance(a, str)]
     start = w.start if w else None
     cwd = (start or {}).get("cwd") or row.get("cwd") or os.path.expanduser("~")
@@ -304,7 +306,7 @@ def restart_input(name: str, row: dict, w: Wrapper | None) -> tuple[str, list[st
         sid = start.get("from_session")
         return (cwd, [*args, "--resume", sid, start["command"]]) if isinstance(sid, str) and sid else None
     if args and args[-1] in sw.RESUME_TEXTS and "--resume" not in args:
-        return None  # 前の起こし直しが登録簿へ残した、会話の無い再開の文
+        return None  # 前の起こし直しが登録簿へ残した、会話の無い再開の文（利用者が同じ文を渡した場合も止まる側に倒す）
     return cwd, args
 
 
