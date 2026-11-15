@@ -27,7 +27,8 @@ from typing import Any, Optional
 from ndf import cli, contracts
 from ndf.adapters import git
 from ndf.contracts import result
-from ndf.domains.project import check, measure_ci, measure_flow, measure_repo, write
+from ndf.domains.project import check, measure_ci, measure_flow, measure_repo, secret, write
+from ndf.domains.project.items import obj, seq, unknown
 from ndf.domains.records import files, jsonfile
 from ndf.domains.relay import signals
 
@@ -55,7 +56,7 @@ def _gh_repo(repo: git.Git) -> Optional[str]:
 
 def _flow_branches(tree: measure_repo.Tree, worktree: Optional[dict[str, Any]]) -> tuple[Optional[str], Optional[str]]:
     """ブランチ運用を測るベースブランチと本番チャネル（宣言の値、無ければ既定ブランチ）。"""
-    wt = measure_repo.obj(worktree)
+    wt = obj(worktree)
     default = None
     if not isinstance(wt.get("base_branch"), str) or not isinstance(wt.get("production_branch"), str):
         default = measure_repo.default_branch(tree)
@@ -73,14 +74,14 @@ class _Steps:
 
     def __call__(self, key: str, fn: Any) -> Any:
         if time.monotonic() >= self.deadline:
-            self.items[key] = measure_repo.unknown("時間切れ")
+            self.items[key] = unknown("時間切れ")
             return None
         try:
             return fn()
         except measure_repo.TimeUp:  # 途中で締め切りを越えた項目は、読めた分だけで測ったことにしない
-            self.items[key] = measure_repo.unknown("時間切れ")
+            self.items[key] = unknown("時間切れ")
         except Exception as exc:  # noqa: BLE001 ファイル: 1 項目の失敗で測定を止めず、その項目を不明にする
-            self.items[key] = measure_repo.unknown(f"測れない: {type(exc).__name__}: {str(exc)[:200]}")
+            self.items[key] = unknown(f"測れない: {type(exc).__name__}: {str(exc)[:200]}")
         return None
 
 
@@ -88,15 +89,15 @@ def _ci_items(tree: measure_repo.Tree, step: _Steps, ctx: dict[str, Any]) -> lis
     """`gh` と CI から測る項目を入れ、指示ファイルと CI の注記を返す。"""
     items = step.items
     ci_part = step("ci", lambda: measure_ci.measure(tree, ctx["gh_repo"], ctx["head"], step.deadline, os.environ))
-    notes = list(measure_repo.seq(measure_repo.obj(measure_repo.obj(items.get("instructions")).get("value")).get("notes")))
+    notes = list(seq(obj(obj(items.get("instructions")).get("value")).get("notes")))
     if ci_part:
         items["ci"], items["test_duration"] = ci_part["ci"], ci_part["test_duration"]
         notes += ci_part["notes"]
-        if ci_part["merges"] and measure_repo.obj(items.get(write.BRANCHES)).get("status") == "question":
+        if ci_part["merges"] and obj(items.get(write.BRANCHES)).get("status") == "question":
             counts = "・".join(f"{k} {v}" for k, v in sorted(ci_part["merges"].items(), key=lambda kv: -kv[1]))
             items[write.BRANCHES]["evidence"].append({"text": f"直近 100 件のマージ先: {counts}"})
     elif "test_duration" not in items:
-        items["test_duration"] = items["ci"] if "ci" in items else measure_repo.unknown("時間切れ")
+        items["test_duration"] = items["ci"] if "ci" in items else unknown("時間切れ")
     flow = step(write.BRANCH_FLOW, lambda: measure_flow.measure(tree, ctx["gh_repo"], *ctx["flow_branches"]))
     if flow is not None:
         items[write.BRANCH_FLOW] = flow
@@ -207,7 +208,7 @@ def _print_write(planned: write.Plan, rows: list[dict[str, Any]], dry_run: bool)
 
 
 def _report_write(planned: write.Plan, dry_run: bool) -> dict[str, Any]:
-    rows = measure_repo.mask(planned.rows)  # 表に無い形の秘密も、出力の直前でもう一度伏せる
+    rows = secret.mask(planned.rows)  # 表に無い形の秘密も、出力の直前でもう一度伏せる
     _print_write(planned, rows, dry_run)
     unknown = sorted(
         {
@@ -226,14 +227,14 @@ def _drift(args: argparse.Namespace) -> int:
     try:
         _, main = check.repo_dirs(Path(args.root).resolve())
         worktree = check.load(main)[1]
-        rows = measure_flow.drift(worktree, measure_repo.obj(_read_input(args.measure).get("items")).get(write.BRANCH_FLOW))
+        rows = measure_flow.drift(worktree, obj(_read_input(args.measure).get("items")).get(write.BRANCH_FLOW))
     except check.CheckError as exc:
         return result.emit(result.stopped(TOOL, "unknown", f"比べられない: {exc}"))
     except jsonfile.JsonFileError as exc:
         return result.emit(result.stopped(TOOL, "check_failed", f"測定の結果か宣言を読めない: {exc}"))
     except ValueError as exc:
         return result.emit(result.stopped(TOOL, "invalid", f"{files.relpath('worktree')}: {exc}"))
-    rows = measure_repo.mask(rows)
+    rows = secret.mask(rows)
     for r in rows:
         print(f"ずれ: {r['name']} 宣言 {r['declared']} / 測った {r['measured']}（{r['confidence']}）— {r['proposal']}")
     summary = f"ブランチ運用の宣言と使い方のずれ {len(rows)} 件" if rows else "ブランチ運用の宣言は使い方と合う"

@@ -20,7 +20,8 @@ import zipfile
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
-from ndf.domains.project.measure_repo import CALL_LIMIT, Tree, measured, obj, question, seq, unknown, url_hosts
+from ndf.domains.project.items import measured, obj, question, seq, unknown
+from ndf.domains.project.measure_repo import CALL_LIMIT, Tree, url_hosts
 from ndf.domains.relay import registry
 
 TEST_STEP = re.compile(r"(?<![a-z])test|pytest|phpunit|jest|vitest|rspec", re.I)

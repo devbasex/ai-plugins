@@ -20,7 +20,9 @@ from typing import Any, Optional
 from ndf import contracts, identity
 from ndf.contracts import facts
 from ndf.domains.project.measure_ci import Gh, GhUnavailable
-from ndf.domains.project.measure_repo import Tree, mask, measured, obj, question, seq, unknown
+from ndf.domains.project.items import measured, obj, question, seq, unknown
+from ndf.domains.project.measure_repo import Tree
+from ndf.domains.project.secret import mask
 
 MIN_FLOW_SAMPLES = 3
 HIGH, MID = 0.9, 0.6

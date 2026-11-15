@@ -9,7 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from ndf.domains.project import measure_ci, measure_flow, measure_repo
+from ndf.domains.project import items as forms
+from ndf.domains.project import measure_ci, measure_flow, measure_repo, secret
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -50,9 +51,9 @@ def test_tree_skips_secret_files_and_masks_values(repo):
     tree = _tree(repo)
     assert tree.skipped == [".env"]
     assert tree.read(".env") is None
-    assert measure_repo.mask({"a": ["ok", "key=ghp_abcdefghijklmnopqrstuvwxyz"]}) == {"a": ["ok", measure_repo.MASK]}
-    assert measure_repo.has_secret({"x": "AKIAABCDEFGHIJKLMNOP"})
-    assert not measure_repo.has_secret({"x": "PASSWORD=testpassword"})
+    assert secret.mask({"a": ["ok", "key=ghp_abcdefghijklmnopqrstuvwxyz"]}) == {"a": ["ok", secret.MASK]}
+    assert secret.has_secret({"x": "AKIAABCDEFGHIJKLMNOP"})
+    assert not secret.has_secret({"x": "PASSWORD=testpassword"})
 
 
 def test_tree_past_deadline_raises_time_up(repo):
@@ -81,7 +82,7 @@ def test_measure_marks_failed_items_unknown(repo):
 
     def step(key, fn):
         if key == "services":
-            items[key] = measure_repo.unknown("測れない")
+            items[key] = forms.unknown("測れない")
             return None
         return fn()
 
@@ -218,7 +219,7 @@ def test_measure_materials_caps_libraries_and_evidence(tmp_path):
     got = measure_repo.measure_materials(_tree(path), deps)
     libraries = got["candidates"]["seeds"]["libraries"]
     assert [x["name"] for x in libraries] == [f"lib{i:02d}" for i in range(measure_repo.MAX_LIBRARIES)]
-    assert got["evidence"] == [{"text": f"npm: zz-sentry-{i:02d}"} for i in range(measure_repo.MAX_EVIDENCE)]
+    assert got["evidence"] == [{"text": f"npm: zz-sentry-{i:02d}"} for i in range(forms.MAX_EVIDENCE)]
     empty = measure_repo.measure_materials(_tree(path), {})
     assert empty["evidence"] == [] and empty["candidates"]["seeds"]["libraries"] == []
 

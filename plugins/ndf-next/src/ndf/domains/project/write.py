@@ -24,7 +24,8 @@ from ndf import contracts
 from ndf.adapters import git
 from ndf.domains.project import check, measure_flow
 from ndf.domains.records import files
-from ndf.domains.project.measure_repo import has_secret, obj, redact, seq
+from ndf.domains.project.items import obj, seq
+from ndf.domains.project.secret import has_secret, redact
 
 # 解析が測る宣言の項目（スキーマの並びの順）。外すのは人が書く項目・解析の記録・形の版
 ITEM_KEYS = tuple(
