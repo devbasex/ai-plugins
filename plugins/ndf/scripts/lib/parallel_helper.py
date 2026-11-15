@@ -83,6 +83,26 @@ def present_approval(d: Path) -> str:
     return shlex.quote(str(path if path.is_absolute() else Path(step.get("cwd") or ".") / path))
 
 
+def last_launch(main: Path, name: str) -> dict:
+    """最後の起動の指示: イベント `pause` が release / confirmed ならそれ、ほかのイベントならそれに添えた `release`、無ければ空。"""
+    ev = durable.event_from(pl.KIND, pl.record_identity(main, name), pl.workflow_id(name), "pause", 0, start=pl.record_start(main)) or {}
+    return ev if ev.get("action") in ("release", "confirmed") else ev.get("release") or {}
+
+
+def is_confirmed_launch(launch: dict, n: int, k: int) -> bool:
+    """最後の起動 `launch` が連番 `n`・提示 `k` の確定（`action: confirmed`）で、`carried` を持たないか。`carried` は出し直しを省いた確定で、
+    提示と同じ流し方にする（提示のプランが確かめ直して承認を書く。#3020 の決定 3）ため、確定の後としては扱わない。"""
+    return launch.get("action") == "confirmed" and launch.get("n") == n and launch.get("k") == k and not launch.get("carried")
+
+
+def merged_answers(main: Path, name: str, asked: list[dict]) -> list[dict]:
+    """台帳に答えの無い `ask` に、依頼の id ごとの答え（`answer-<依頼>`）があれば `answered: true` を付ける。同じ原因として代表の問いへ
+    まとめた依頼（異常系 5）は、台帳の `answer` の行が代表の id にしか無く、答えは耐久ワークフローが依頼ごとに立てるため。"""
+    ids = [a["id"] for a in asked if a.get("kind") == "ask" and not a.get("answered") and a.get("id")]
+    got = pl.answers_of(main, name, ids) if ids else {}
+    return [{**a, "answered": True} if (got.get(a.get("id")) or {}).get("answer") is not None else a for a in asked]
+
+
 def helper_task(main: Path, name: str, n: int, k: int) -> dict:
     """一時レーン（`--parallel-helper <計画名> <連番> <提示>`）が流すもの。最後の起動の指示（イベント `pause` か、
     リリースの途中の知らせに添えた `release`）が同じ連番と提示の `confirmed`（`carried` を持たない）なら確定の後の 3 手、
@@ -91,19 +111,43 @@ def helper_task(main: Path, name: str, n: int, k: int) -> dict:
     - 提示（`phase: present`）: `pipeline` は提示のプラン → 本番のプランの queue と待ち。終われば提示のプランがリリース承認ゲート で
       止まったかを見て、止まっていれば `gate2`（リリース承認ゲート の依頼を送る）、流れ切れば `settle` を打つ
     - 確定の後（`phase: confirmed`）: `pipeline` は答えの記録 → 提示のプランを `approve` から → 本番のプランの queue と待ち。
-      終われば `settle` を打つ。`approve` が承認ゲート（10）で終われば queue を打たずに問いとして送る"""
-    ev = durable.event_from(pl.KIND, pl.record_identity(main, name), pl.workflow_id(name), "pause", 0, start=pl.record_start(main)) or {}
-    launch = ev if ev.get("action") in ("release", "confirmed") else ev.get("release") or {}
+      終われば `settle` を打つ。`approve` が承認ゲート（10）で終われば queue を打たずに問いとして送る。本番のプランが承認ゲートで
+      終われば `gate2`（確定の後の依頼。#3597 の決定 2）を打つ。前の起動の `release-done.json` があれば（打ち直す）、本番のプランは
+      `queue --resume --from <プラン>=<関門を返したステップ>` で関門から流し直す
+
+    確定の後で、前の本番のプランが承認ゲートで止まったのに開始のステップを決められなければ、流すものを組まずに `error` を返す。
+
+    `asked` は自分の名前の一時レーンが送った依頼と答え（決定 8）。台帳を読めなければ `OSError`。"""
+    import parallel_ledger as plg
+    from parallel_question import asked_of
+
+    launch = last_launch(main, name)
     d = pr.release_dir(main, name, n, k)
     py = f"python3 {HERE / 'parallel.py'}"
-    out = {"n": n, "k": k, "dir": str(d), "gate2": f"{py} request-gate2 {name} {n} {k} --report {present_approval(d)}"}
+    rows = plg.read_ledger_rows(main, name).rows
+    since = plg.rows_since_opened(rows)
+    asked = merged_answers(main, name, asked_of(since, pr.helper_name(name, n), plg.settled_gates(since)))
+    out = {"n": n, "k": k, "dir": str(d), "gate2": f"{py} request-gate2 {name} {n} {k} --report {present_approval(d)}", "asked": asked}
     # 出し直しを省いた確定（`carried`）は提示と同じ流し方にする。提示のプランが確かめ直して承認を書く（#3020 の決定 3）
-    if launch.get("action") == "confirmed" and launch.get("n") == n and launch.get("k") == k and not launch.get("carried"):
+    if is_confirmed_launch(launch, n, k):
         done = d / "release-done.json"
         gate = pr.record_answer_cmd(d, n, k)
-        steps = [gate, f"{SUPERVISE} run {d / 'present.json'} --from approve", f"{SUPERVISE} queue {d / 'release.json'} --done {done}"]
+        # 打ち直し（決定 2）では前の本番のプランが承認ゲートで終えた done が残る。同じ queue は耐久の記録の関門をそのまま返すため、
+        # done があれば `queue --resume` で関門のプランを新しい実行の回として流し直す。開始は関門を返したステップ（`--from`）にする。
+        # 渡さないと、関門の後に成功したステップ（承認資料の投稿など）だけが続きとして流れ、マージせずに完了と読まれる
+        queue = f"{SUPERVISE} queue {d / 'release.json'} --done {done}"
+        if done.exists():
+            from parallel_gate2 import gate_item, gate_step
+
+            at = gate_step(done)
+            if at is None and gate_item(done) is not None:
+                # 関門で止まったのに開始のステップを決められない（report が空・progress.jsonl を読めない・終了コード 10 の行が無い）。
+                # `--from` 無しの resume は関門の後に成功したステップだけを流してマージせずに完了と読まれるため、流すものを組まない
+                return {**out, "phase": "confirmed", "error": f"本番のプランが承認ゲートで止まった位置を {done} から決められない"}
+            queue = f"{SUPERVISE} queue --resume {done}" + (f" --from {at[0]}={at[1]}" if at else "")
+        steps = [gate, f"{SUPERVISE} run {d / 'present.json'} --from approve", queue]
         return {**out, "phase": "confirmed", "pipeline": " && ".join([*steps, f"{SUPERVISE} wait {done}"]),
-                "settle": f"{py} settle {name} {n} --done {done}"}  # fmt: skip
+                "gate2": f"{py} request-gate2 {name} {n} {k} --confirmed --done {done}", "settle": f"{py} settle {name} {n} --done {done}"}  # fmt: skip
     done = d / "done.json"
     return {**out, "phase": "present", "pipeline": f"{pr.pipeline_cmd(SUPERVISE, d)} && {SUPERVISE} wait {done}",
             "settle": f"{py} settle {name} {n} --done {done}"}  # fmt: skip

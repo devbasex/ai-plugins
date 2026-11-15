@@ -13,6 +13,7 @@ import gate1_requests as g1
 import parallel_plan as pp
 import parallel_release as pr
 import parallel_route as prt
+from parallel_gate2 import is_confirmed_gate
 
 
 @durable.step(name="parallel.prior-waits")
@@ -153,7 +154,7 @@ class AnswerRouting:
         （#2510 の決定 9）。問いを送った一時レーンは、この場で再起動する（打つ前の一覧で動いていれば打たない）。
         耐久ワークフローが立てた問いは、持ち主を再起動の対象へ入れない（答えは apply_own が当て、起こし直しは relaunch が打つ。
         入れると relaunch が失敗して新しい問いを立てた後も、答え待ちのまま launch_wakes が別の目的で再起動を打つ）。"""
-        if q.get("kind") in OWN_KINDS:
+        if q.get("kind") in OWN_KINDS or is_confirmed_gate(q):  # 確定の後の依頼は apply_confirmed だけが当てる（#3597）
             return
         senders = {q.get("lane"), *(m.get("lane") for m in q.get("merged", []))}
         for h in sorted(x for x in senders if x and x not in self.lanes and x.startswith(f"{self.name}-rel")):

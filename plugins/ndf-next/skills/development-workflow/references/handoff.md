@@ -1,6 +1,6 @@
 # 引継ぎ文書
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `handoff.py`（M7）・`sprint-state.py`（P1b）・`supervise.py`（C2）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `handoff.py`（M7）・`sprint-state.py`（P1b）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 会話を切って新しいセッションで続けるための引継ぎ文書の、置き場・名・節の形・作る／読む／更新する／消す規則の正本。
 `restart`・[context-window.md](context-window.md)・[relay.md](relay.md)・用語集はここを指す。
@@ -49,7 +49,7 @@
 | 課題の順 | ○ | 着手の順と状態。状態は課題の URL を添えて 1 語で | conductor |
 | 現在地 | ○ | 本番の版・動いているプランの状態ディレクトリのパス・利用者の側で残っていること | conductor が書き直す |
 | 次にやること | ○ | 番号付き。1 つ目が次のセッションの最初の作業 | conductor が書き直す |
-| 今の会話の進み | — | プランごとの行の表 | `sprint-state.py render`・`supervise.py note` |
+| 今の会話の進み | — | プランごとの行の表 | `sprint-state.py render`・引継ぎ文書の表への追記（M7 #3302 が `ndf` の副命令に足す。新しいプラグインだけではまだ打てない） |
 | 運用の知見 | — | その対象で繰り返し効いた手順と落とし穴。対象をまたいで効くものは Skill か課題へ移す | conductor |
 | 次に実行するコマンド | ○ | `ndf-next` のブロック 1 つ（形は [context-window.md](context-window.md) の「新しい会話で戻す」） | `handoff.py next`・`sprint-state.py next --replace` |
 

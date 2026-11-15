@@ -61,6 +61,7 @@ NDF の工程が書くファイル（宣言・計測値・実行の記録・文�
 | `relay-next` | `relay-wrappers` state:relay/wrappers | `<名前>/next.json` | exchange | — | Stop の hook（M3a） | run | 内部（予告なく変えてよい） |
 | `relay-pinned-account` | `relay-accounts` state:relay/accounts | `pinned.json` | declaration | — | 人（ndf relay account use） | replaced | 内部（予告なく変えてよい） |
 | `relay-question` | `relay-wrappers` state:relay/wrappers | `<名前>/question.json` | exchange | — | PreToolUse の hook（M3a） | run | 内部（予告なく変えてよい） |
+| `relay-stop` | `relay-wrappers` state:relay/wrappers | `<名前>/stop` | exchange | — | ndf relay stop（M3b）と人（touch） | run | 内部（予告なく変えてよい） |
 | `relay-usage` | `relay-accounts` state:relay/accounts | `usage.json` | measured | — | 使用率のセンサー（M3a） | replaced | 内部（予告なく変えてよい） |
 | `relay-wrapper` | `relay-wrappers` state:relay/wrappers | `<名前>/wrapper.json` | exchange | — | 中継のラッパー（M3b） | replaced | 内部（予告なく変えてよい） |
 | `relay-wrapper-lock` | `relay-wrappers` state:relay/wrappers | `<名前>/relay.lock` | exchange | — | 中継のラッパー（M3b） | replaced | 内部（予告なく変えてよい） |

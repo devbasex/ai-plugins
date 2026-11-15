@@ -13,7 +13,8 @@
   起動の排他を `parallel-machine.admit-lock` の秒の間に取れなければ、その読み直しでは起こさずに待たせる
 - ラッパーの一覧を読めなければ、ほかの計画を数えられないので、自分の計画の実行中の行だけで決める
 - 合計が 0 なら上限を見ずに起こす（待ち続けて計画が終わらない状態を作らない。#2999 の受け入れ条件 7）
-- 上限は計画の上限の既定と同じ宣言（`CAP_POLICY`）から読み、どのリポジトリでも同じ値になる。保存せず、判定のたびに数え直す
+- 上限は計画の上限の既定と同じ宣言（`CAP_POLICY`）から読み、どのリポジトリでも同じ値になる。リレーハブと同じく環境変数
+  `NDF_RELAY_MAX_NAMED` があればそれで替える。保存せず、判定のたびに数え直す
 
 `count`・`admit`・`waiting` は純粋な関数で、DB もプロセスも読まない。
 """
@@ -22,6 +23,7 @@ from __future__ import annotations
 
 import contextlib
 import fcntl
+import os
 import subprocess
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
@@ -138,8 +140,12 @@ def waiting(reason: str, got: Optional[Count], plans: int, cap: int) -> dict[str
     return {"ok": False, "waiting": body, "detail": detail}
 
 
-def cap() -> int:
-    return int(limits.value(*CAP_POLICY))
+def cap(environ: Optional[Mapping[str, str]] = None) -> int:
+    """マシン全体の本数の上限。リレーハブと同じく `NDF_RELAY_MAX_NAMED` があればそれ、無ければ宣言の値。
+
+    環境変数は `ndf lanes start` を打つ環境で渡すと、切り離した `ndf lanes run` が引き継ぐ（名前の正本は表 env）。
+    """
+    return int(limits.from_env(os.environ if environ is None else environ, "NDF_RELAY_MAX_NAMED", *CAP_POLICY))
 
 
 # --- 読み取り（進行表・登録簿）と排他 --------------------------------------------------------------

@@ -8,9 +8,9 @@ allowed-tools:
 
 # 再起動して続きから始める
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `handoff.py`（M7）・`relay.py`（M3b）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `handoff.py`（M7）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
-**ラッパー（`relay.py`）の下では、この応答の最後に出す `ndf-next` のブロック 1 つで、claude の
+**ラッパー（`ndf relay`）の下では、この応答の最後に出す `ndf-next` のブロック 1 つで、claude の
 
 **ラッパー（`ndf relay`）の下では、この応答の最後に出す `ndf-next` のブロック 1 つで、claude の
 終了・プラグインの更新・起動し直し・再開コマンドの入力までが人の入力なしで進む。** 経路は
@@ -18,7 +18,7 @@ allowed-tools:
 
 例: ラッパーの下で `/ndf:restart` を打つ（`/goal /ndf:development-workflow #928` の会話）。
 
-1. `relay.py notice` の 1 行目でラッパーの下と判定し、引継ぎ文書 `.ndf/handoff/issue-928.md` を作るか更新してから、2 行目（「約 5 秒後に自動で新しい会話へ切り替わる。…」）を示して、最後に次のブロックを出して応答を終える
+1. `ndf relay notice` の 1 行目でラッパーの下と判定し、引継ぎ文書 `.ndf/handoff/issue-928.md` を作るか更新してから、2 行目（「約 5 秒後に自動で新しい会話へ切り替わる。…」）を示して、最後に次のブロックを出して応答を終える
 
    ````text
    ```ndf-next
@@ -41,14 +41,12 @@ allowed-tools:
 （Claude Code 2.1.281 の haiku で、判定を飛ばしてブロックだけを出した例がある）。
 
 ```bash
-PLUGIN_ROOT='${CLAUDE_PLUGIN_ROOT}'
-case "$PLUGIN_ROOT" in '$'*) PLUGIN_ROOT= ;; esac
-[ -n "$PLUGIN_ROOT" ] && python3 "$PLUGIN_ROOT/scripts/relay.py" notice || echo outside
+ndf relay notice || echo outside
 ```
 
-1 行目が判定（`relay` / `outside`）、2 行目がアナウンスの 1 文である。`NDF_RELAY_DIR` があるだけでは
-決めない。ラッパーが動いていて、この claude がその直接の子のときだけ 1 行目が `relay` になる。
-1 行しか出なかったとき（`relay.py` を呼べなかった）はラッパーの外として扱う。
+結果の `metrics.inside` が判定（真ならラッパーの下）、`summary` がアナウンスの 1 文である。`NDF_RELAY_DIR` があるだけでは
+決めない。ラッパーが動いていて、この claude がその直接の子のときだけ `metrics.inside` が真になる。
+結果 JSON が出なかったとき（`ndf relay notice` を打てなかった）はラッパーの外として扱う。
 
 ### 2. 引継ぎ文書を作る・更新する
 
