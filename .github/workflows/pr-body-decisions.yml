@@ -9,6 +9,9 @@ name: PR body decisions
 # ruleset の必須のチェックにする（#653、2026-10-06 に利用者が決めた）。ジョブ名 pr-body-decisions-check で
 # 必須の一覧と照合する。ruleset へ足すまでは scripts/required-checks-allow.json の追加待ちに置く。
 on:
+  # merge queue の一時のコミット（gh-readonly-queue/...）でも必須のチェックを出す（#3572 の決定 23。キューが無い間は起動しない）
+  merge_group:
+    types: [checks_requested]
   pull_request:
     types: [opened, synchronize, edited, reopened]
 
@@ -22,7 +25,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      # merge queue の一時のコミットは PR の本文を持たない。PR の時点の結論を引き継いで通す（#3572 の決定 23）
+      - name: Inherit the pull request result in the merge queue
+        if: github.event_name == 'merge_group'
+        run: echo "キューの一時のコミットは PR の時点の結論を引き継ぐ"
       - name: Compare the decisions section with the design documents
+        if: github.event_name != 'merge_group'
         # 番号とリポジトリ名は環境変数で渡す。ブランチ名と本文はシェルの本文へ埋めない。
         # 設計文書は head のコミットから、本文は Pull Request から API で読む。
         env:

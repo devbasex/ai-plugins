@@ -1,9 +1,10 @@
 name: ndf-next release
 
-# 作り直しの NDF（plugins/ndf-next/。#1142 の M2 #3296）のリリース。11.0.0 からは GitHub flow を土台にする（#3572）。
-# スプリントの PR（main 宛て）が本番の PR を兼ね、main へのマージがそのままリリースになる。版数とタグは main へのマージの後に
-# この workflow（CD）が版上げの PR で作り、PR は版数を触らない。処理はすべて ndf-next のエントリポイント
-# （plugins/ndf-next/bin/ndf release-steps）が持ち、plugins/ndf/scripts/ を呼ばない。
+# 作り直しの NDF（plugins/ndf-next/。#1142 の M2 #3296）のリリース。振る舞いはブランチ戦略（宣言 .ndf/worktree.json の
+# branch_flow）の行で選ぶ（#3572 の決定 16）。github-flow の行ではスプリントの PR（main 宛て）が本番の PR を兼ね、main への
+# マージがそのままリリースになり、版数とタグは main へのマージの後にこの workflow（CD）が版上げの PR で作る。ほかの行では
+# リリースブランチの PR が版を上げ、bump は何もせず（not_applicable）、publish がそのマージコミットにタグを作る。
+# 処理はすべて ndf-next のエントリポイント（plugins/ndf-next/bin/ndf release-steps）が持ち、plugins/ndf/scripts/ を呼ばない。
 #
 # 入れ替え（S2 #3304）までは、今の NDF の release-approval.yml・release-cd.yml・release-dev.yml が同じ出来事で動く。
 # 同じ commit status とタグを取り合わないよう、出来事での起動はリポジトリの変数 NDF_RELEASE_RUNNER が ndf-next のときだけに
@@ -11,14 +12,16 @@ name: ndf-next release
 #
 # 起動の出来事と仕事:
 # - PR の出来事の pr-check と verify-ref は ndf-next-pr.yml が持つ（宛先で絞らない workflow に分ける）
-# - push（main）と workflow_dispatch（step=bump）: bump（版上げの PR を作り・進め・置き換え、照合付きでマージする）
-# - bump の後（state が published）と workflow_dispatch（step=publish、入力 revision）: publish（タグと GitHub Release）
+# - push（main）と workflow_dispatch（step=bump）: bump（github-flow の行で版上げの PR を作り・進め・置き換え、照合付きで
+#   入れる。マージの方式 production_merge.method があれば迂回せずに方式で入れる。決定 20）
+# - bump の後（state が published か not_applicable）と workflow_dispatch（step=publish、入力 revision）: publish（足りない
+#   タグと GitHub Release。版の変わっていないコミットでは何も作らない）
 # - workflow_dispatch（step=assemble、入力 pr）: 本番の PR の本文の承認資料の節を書く
 # - workflow_dispatch（step=merge、入力 pr）と issue_comment（証跡の印を含むコメント）: 承認の証跡と必須のチェックの後に、
-#   承認した先端との照合付きでマージする。リリース記録は本番のプランが CD の確かめ（confirm）の後に書く
+#   承認した head との照合付きでマージかキューへの投入をする。リリース記録は本番のプランが CD の確かめ（confirm）の後に書く
 #
 # 本番ブランチの名前は宣言 .ndf/worktree.json の production_branch から読む（ここに写さない。push の絞り込みの main を除く）。
-# 版上げの PR と検証の ref で CI を起動するため、PR の作成・マージと push は利用者の token（secrets.NDF_RELEASE_TOKEN）で
+# 版上げの PR と検証用ブランチで CI を起動するため、PR の作成・マージと push は利用者の token（secrets.NDF_RELEASE_TOKEN）で
 # 行う（GITHUB_TOKEN の操作では CI が起動しない）。新しい秘密を足さない。
 on:
   workflow_dispatch:
@@ -118,11 +121,13 @@ jobs:
           exit "${code:-0}"
 
   publish:
-    # bump が版上げの PR のマージの push（先端の版にタグが無い）を published と読んだときか、手動の起動（step=publish）で打つ
+    # bump が版上げの PR のマージの push（先端の版にタグが無い）を published と読んだとき・bump が何もしなかったとき
+    # （not_applicable。今の行ではリリースブランチの PR のマージコミットにタグを作る）か、手動の起動（step=publish）で打つ
     needs: [bump]
     if: >-
       always() &&
       ((needs.bump.outputs.state == 'published') ||
+       (github.event_name == 'push' && needs.bump.outputs.state == 'not_applicable') ||
        (github.event_name == 'workflow_dispatch' && inputs.step == 'publish'))
     runs-on: ubuntu-latest
     timeout-minutes: 15

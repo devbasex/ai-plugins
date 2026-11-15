@@ -7,6 +7,9 @@ name: Glossary
 # 文書の一致だけを見る（--rules structure）。light の Pull Request が issues/ の文書を足しても、語の規則で落とさない。
 # 見る文書は宣言の check.paths（設計の文書）に限る。
 on:
+  # merge queue の一時のコミット（gh-readonly-queue/...）でも必須のチェックを出す（#3572 の決定 23。キューが無い間は起動しない）
+  merge_group:
+    types: [checks_requested]
   pull_request:
 
 permissions:
@@ -21,10 +24,11 @@ jobs:
           fetch-depth: 0
       - name: Check the glossary and the added lines
         # ブランチ名はシェルの本文へ埋めず、環境変数で渡す
+        # merge queue の一時のコミットでは PR が無いため、キューの基底のコミットと比べる（head のブランチ名は空で structure）
         env:
           HEAD_REF: ${{ github.head_ref }}
-          BASE_REF: ${{ github.base_ref }}
+          DIFF_BASE: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_sha || format('origin/{0}', github.base_ref) }}
         run: |
           rules=structure
           case "$HEAD_REF" in design/*) rules=all ;; esac
-          python3 plugins/ndf/scripts/glossary.py check --diff "origin/$BASE_REF" --rules "$rules"
+          python3 plugins/ndf/scripts/glossary.py check --diff "$DIFF_BASE" --rules "$rules"

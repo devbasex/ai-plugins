@@ -76,6 +76,25 @@ _ENQUEUE = (
     " enqueuePullRequest(input: {pullRequestId: $id, expectedHeadOid: $head}) { clientMutationId } }"
 )
 _DEQUEUE = "mutation($id: ID!) { dequeuePullRequest(input: {id: $id}) { clientMutationId } }"
+# 承認した head を渡し、`jump` ならキューの先頭へ入れる投入（#3572 の決定 18・20）
+_ENQUEUE_JUMP = (
+    "mutation($id: ID!, $head: GitObjectID!, $jump: Boolean!) {"
+    " enqueuePullRequest(input: {pullRequestId: $id, expectedHeadOid: $head, jump: $jump}) { clientMutationId } }"
+)
+# 本番ブランチの merge queue の設定（無ければ null）
+_MERGE_QUEUE_CONFIG = (
+    "query($owner: String!, $name: String!, $branch: String!) { repository(owner: $owner, name: $name) {"
+    " mergeQueue(branch: $branch) { configuration { mergeMethod } } } }"
+)
+# PR のマージ・head・キューの所属とキューのエントリの状態（1 回の照会）
+_QUEUE_ENTRY = (
+    "query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) {"
+    " pullRequest(number: $number) { id merged headRefOid isInMergeQueue mergeQueueEntry { state } } } }"
+)
+_REVIEW_DECISION = (
+    "query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) {"
+    " pullRequest(number: $number) { reviewDecision } } }"
+)
 # マージの方式 → 「基底に含まれたか」の確かめ方（3378-2）。ancestry は head が基底の祖先か、merged は PR がマージ済み
 # （`merged_at` がある）か。squash と rebase は新しいコミットを作り、head は基底の祖先にならない。
 # 並びは、宣言が無いときに許された方式から選ぶ順
@@ -268,6 +287,21 @@ class MergeOutcome(NamedTuple):
     kind: Optional[str]
     detail: str
     head_sha: str
+
+
+class QueueConfig(NamedTuple):
+    """本番ブランチの merge queue の設定（`merge_method` はキューのマージの方式の小文字。読めなければ None）。"""
+
+    merge_method: Optional[str]
+
+
+class QueueEntry(NamedTuple):
+    """PR のマージ・head・キューの所属・キューのエントリの状態（キューに無ければ `state` は None）。"""
+
+    merged: bool
+    head: str
+    in_queue: bool
+    state: Optional[str]
 
 
 def premerge_risks(body: str) -> list[str]:
@@ -807,6 +841,56 @@ class GitHub:
         node = self.repository(_IN_MERGE_QUEUE, {"number": int(number)})["pullRequest"]
         if isinstance(node, dict) and node["isInMergeQueue"]:
             self.graphql(_DEQUEUE, {"id": node["id"]})
+
+    def merge_queue(self, branch: str) -> Optional[QueueConfig]:
+        """ブランチ `branch` の merge queue の設定（GraphQL `repository.mergeQueue(branch)`）。無ければ None。"""
+        queue = self.repository(_MERGE_QUEUE_CONFIG, {"branch": branch}).get("mergeQueue")
+        return QueueConfig(_queue_merge_method(queue)) if isinstance(queue, dict) else None
+
+    def enqueue(self, number: int, expect_head: str, jump: bool = False) -> MergeOutcome:
+        """承認した head を `expectedHeadOid` に渡して PR をキューへ入れ、待ち（`ci_pending`）を返す（#3572 の決定 18）。
+
+        PR の head が `expect_head` でなければ要求を送らずに `refused`。既に入っていれば入れ直さない。GitHub が断れば
+        PR を読み直した head とともに `refused`。`jump` が真ならキューの先頭へ入れる（バージョン上げの PR。決定 20）。
+        """
+        pull = self.pull(number)
+        early = _preflight(pull, number, expect_head)
+        if early is not None:
+            return early
+        node = self.repository(_QUEUE_ENTRY, {"number": int(number)})["pullRequest"]
+        if not isinstance(node, dict):
+            raise GitHubError(f"#{number} を GraphQL で読めない")
+        if not node["isInMergeQueue"]:
+            try:
+                self.graphql(_ENQUEUE_JUMP, {"id": node["id"], "head": pull.head_sha, "jump": jump})
+            except GitHubError as exc:
+                if not _refused_by_graphql(exc):
+                    raise
+                return MergeOutcome(False, "refused", f"#{number} をキューへ入れられない: {exc}", self.pull(number).head_sha)
+        return MergeOutcome(False, MERGE_QUEUE_PENDING, f"#{number} を head {pull.head_sha[:12]} でキューへ入れた", pull.head_sha)
+
+    def queue_entry(self, number: int) -> QueueEntry:
+        """PR の `merged`・`headRefOid`・`isInMergeQueue`・`mergeQueueEntry.state` を 1 回の照会で読む。"""
+        node = self.repository(_QUEUE_ENTRY, {"number": int(number)})["pullRequest"]
+        if not isinstance(node, dict):
+            raise GitHubError(f"#{number} を GraphQL で読めない")
+        entry = node.get("mergeQueueEntry")
+        state = text_of(entry.get("state")) if isinstance(entry, dict) and entry.get("state") else None
+        return QueueEntry(node["merged"] is True, text_of(node["headRefOid"]), node["isInMergeQueue"] is True, state)
+
+    def review_decision(self, number: int) -> Optional[str]:
+        """PR の `reviewDecision`（`APPROVED`・`CHANGES_REQUESTED`・`REVIEW_REQUIRED`）。レビューを求めない規則なら None。"""
+        node = self.repository(_REVIEW_DECISION, {"number": int(number)})["pullRequest"]
+        got = node.get("reviewDecision") if isinstance(node, dict) else None
+        return got if isinstance(got, str) and got else None
+
+    def behind_by(self, base: str, head: str) -> int:
+        """`GET /compare/{base}...{head}` の `behind_by`（0 なら `head` は `base` の先端を祖先に持つ）。"""
+        path = f"/repos/{self.repo}/compare/{quote(base, safe='')}...{quote(head, safe='')}"
+        got = self.rest("GET", path, params={"per_page": 1}).get("behind_by")
+        if not isinstance(got, int) or isinstance(got, bool) or got < 0:
+            raise GitHubError(f"{base}...{head} の behind_by を読めない: {got!r}")
+        return got
 
 
 def _queue_merge_method(queue: Any) -> Optional[str]:

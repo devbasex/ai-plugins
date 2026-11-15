@@ -6,17 +6,35 @@ import argparse
 import json
 from pathlib import Path
 
+import git_sandbox
 import pytest
 
 from ndf import cli
 from ndf.adapters import git as git_mod
 from ndf.adapters.github import GitHubError
-from ndf.domains.release import cleanup, tagging
+from ndf.domains.release import bump_decide, cleanup, tagging, version_store
 from ndf.domains.release import cli as release_cli
 from ndf.domains.release import declaration as decl_mod
 from ndf.domains.release import plugins as plugins_mod
 
-from ._fakes import FakeHub, not_found, pull, write_json
+from ._fakes import FakeHub, init_repo, not_found, pull, write_json
+
+KIT = version_store.Unit("kit", "tools/kit")
+
+
+class _Store:
+    """kit が 1.2.3 の置き場（タグを作る単位は `tagging.bumped` の差し替えで決める）。"""
+
+    kind = "plugin"
+
+    def units(self) -> list[version_store.Unit]:
+        return [KIT, version_store.Unit("mcp-x", "plugins/mcp/x")]
+
+    def read(self, repo_git: object, ref: str, unit: version_store.Unit) -> str | None:
+        return "1.2.3" if unit == KIT else None
+
+
+STORE = _Store()
 
 
 def _repo(root: Path) -> Path:
@@ -87,11 +105,11 @@ def test_declared_step_failure_is_reported(tmp_path: Path) -> None:
 def test_publish_creates_missing_tag_and_release_for_bumped_plugins(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root = _repo(tmp_path)
     (root / "CHANGELOG.md").write_text("# 変更履歴\n\n## [kit 1.2.3] - 2026-01-01\n\n- 直した（#5）\n", encoding="utf-8")
-    monkeypatch.setattr(git_mod.Git, "changed_files", lambda self, a, b: ["tools/kit/.claude-plugin/plugin.json"])
+    monkeypatch.setattr(tagging, "bumped", lambda store, root, revision: [KIT])
     hub = FakeHub()
     hub.responses[("GET", "/repos/o/r/git/ref/tags/kit--v1.2.3")] = not_found()
     hub.responses[("GET", "/repos/o/r/releases/tags/kit--v1.2.3")] = not_found()
-    made = tagging.publish(root, hub, "d" * 40)
+    made = tagging.publish(root, hub, "d" * 40, STORE)
     assert [m.item() for m in made] == [
         {"kind": "tag", "name": "kit--v1.2.3", "result": "created"},
         {"kind": "release", "name": "kit--v1.2.3", "result": "created"},
@@ -104,7 +122,7 @@ def test_publish_creates_missing_tag_and_release_for_bumped_plugins(tmp_path: Pa
 
 
 def _publish_hub(root: Path, monkeypatch: pytest.MonkeyPatch, tag: object, release: object) -> FakeHub:
-    monkeypatch.setattr(git_mod.Git, "changed_files", lambda self, a, b: ["tools/kit/.claude-plugin/plugin.json"])
+    monkeypatch.setattr(tagging, "bumped", lambda store, root, revision: [KIT])
     hub = FakeHub()
     for path, got in (("/repos/o/r/git/ref/tags/kit--v1.2.3", tag), ("/repos/o/r/releases/tags/kit--v1.2.3", release)):
         if got is not None:
@@ -120,13 +138,13 @@ def test_characterize_publish_keeps_what_exists(tmp_path: Path, monkeypatch: pyt
     """GET が通れば（応答が空でも）あるとして作らない。タグだけあれば GitHub Release だけを作る。"""
     root = _repo(tmp_path)
     hub = _publish_hub(root, monkeypatch, None, None)
-    assert [m.item() for m in tagging.publish(root, hub, "d" * 40)] == [
+    assert [m.item() for m in tagging.publish(root, hub, "d" * 40, STORE)] == [
         {"kind": "tag", "name": "kit--v1.2.3", "result": "exists"},
         {"kind": "release", "name": "kit--v1.2.3", "result": "exists"},
     ]
     assert _posts(hub) == []
     hub = _publish_hub(root, monkeypatch, {"ref": "refs/tags/kit--v1.2.3"}, not_found())
-    assert [m.result for m in tagging.publish(root, hub, "d" * 40)] == ["exists", "created"]
+    assert [m.result for m in tagging.publish(root, hub, "d" * 40, STORE)] == ["exists", "created"]
     assert _posts(hub) == ["/repos/o/r/releases"]
     release = next(p for m, path, p in hub.requests if m == "POST")
     assert release == {"tag_name": "kit--v1.2.3", "name": "kit v1.2.3", "body": "kit v1.2.3", "make_latest": "true"}
@@ -135,7 +153,7 @@ def test_characterize_publish_keeps_what_exists(tmp_path: Path, monkeypatch: pyt
 def test_characterize_publish_creates_the_tag_at_the_revision(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root = _repo(tmp_path)
     hub = _publish_hub(root, monkeypatch, not_found(), {})
-    assert [m.result for m in tagging.publish(root, hub, "d" * 40)] == ["created", "exists"]
+    assert [m.result for m in tagging.publish(root, hub, "d" * 40, STORE)] == ["created", "exists"]
     assert [(path, p) for m, path, p in hub.requests if m == "POST"] == [
         ("/repos/o/r/git/refs", {"ref": "refs/tags/kit--v1.2.3", "sha": "d" * 40})
     ]
@@ -151,9 +169,41 @@ def test_characterize_publish_raises_errors_other_than_404(
     error = GitHubError("断られた", status)
     hub = _publish_hub(root, monkeypatch, error if which == "tag" else None, error if which == "release" else None)
     with pytest.raises(GitHubError) as caught:
-        tagging.publish(root, hub, "d" * 40)
+        tagging.publish(root, hub, "d" * 40, STORE)
     assert caught.value is error
     assert _posts(hub) == []
+
+
+def _commit(root: Path, message: str, name: str) -> str:
+    (root / name).write_text(name, encoding="utf-8")
+    git_sandbox.sh(root, "add", "-A")
+    git_sandbox.sh(root, "commit", "-q", "-m", message)
+    return git_sandbox.sh(root, "rev-parse", "HEAD").strip()
+
+
+def test_overtaken_is_true_only_when_a_queued_pr_entered_before_the_bump_merge(tmp_path: Path) -> None:
+    """決定 20: バージョン上げのマージコミットの第 1 親が第 2 親の祖先でなければ追い越された。今の行のリリースブランチは見ない。"""
+    root = init_repo(tmp_path / "repo")
+    base = _commit(root, "init", "a")
+    git_sandbox.sh(root, "switch", "-q", "-c", "release/v1.3.0")
+    _commit(root, bump_decide.message_of("kit", "1.3.0", base), "b")
+    git_sandbox.sh(root, "switch", "-q", "develop")
+    git_sandbox.sh(root, "merge", "-q", "--no-ff", "release/v1.3.0", "-m", "in order")
+    in_order = git_sandbox.sh(root, "rev-parse", "HEAD").strip()
+    assert not tagging.overtaken(git_mod.Git(root), in_order) and not tagging.overtaken(git_mod.Git(root), base)
+    _commit(root, "queued pr", "c")
+    git_sandbox.sh(root, "switch", "-q", "-c", "release/v1.3.1", in_order)
+    _commit(root, bump_decide.message_of("kit", "1.3.1", in_order), "d")
+    git_sandbox.sh(root, "switch", "-q", "develop")
+    git_sandbox.sh(root, "merge", "-q", "--no-ff", "release/v1.3.1", "-m", "overtaken")
+    overtaken = git_sandbox.sh(root, "rev-parse", "HEAD").strip()
+    assert tagging.overtaken(git_mod.Git(root), overtaken)
+    assert tagging.bumped(STORE, root, overtaken) == []  # type: ignore[arg-type]
+    git_sandbox.sh(root, "switch", "-q", "-c", "release/v2.0.0", in_order)
+    _commit(root, "Release: kit v2.0.0", "e")
+    git_sandbox.sh(root, "switch", "-q", "develop")
+    git_sandbox.sh(root, "merge", "-q", "--no-ff", "release/v2.0.0", "-m", "release branch")
+    assert not tagging.overtaken(git_mod.Git(root), git_sandbox.sh(root, "rev-parse", "HEAD").strip())
 
 
 def _entry(path: str, branch: str | None) -> git_mod.WorktreeEntry:
@@ -209,7 +259,15 @@ def test_release_steps_parser_current_behavior() -> None:
 
     production = opt("--production")
     pr = req("--pr", int)
-    target = [pr, production, opt("--plugin")]
+    # 本番の PR は github-flow の行だけで要り、ほかの行はチャネル・上げ幅・ベースブランチを渡す（#3572 の決定 16）
+    target = [
+        (*opt("--pr")[:4], int, "_StoreAction"),
+        production,
+        opt("--plugin"),
+        opt("--channel", choices=("production", "dev")),
+        opt("--level", "patch", ("major", "minor", "patch")),
+        opt("--base"),
+    ]
     budget = req("--budget", float)
     answer = [
         opt("--route", "gate", ("gate", "github-merge")),

@@ -1,20 +1,22 @@
-"""検証の ref の組み立て（本物の git と、偽の GitHub。#3572 の決定 9・I9・I12）。"""
+"""検証用ブランチの組み立てと検証環境への配り方（本物の git と、偽の GitHub。#3572 の決定 9・21・I9・I12）。"""
 
 from __future__ import annotations
 
 import json
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 import git_sandbox
 import pytest
 
+from ndf.domains.release import cli as release_cli
 from ndf.domains.release import declaration as decl_mod
 from ndf.domains.release import verify_decide, verify_ref
 
 from ._fakes import FakeHub, clone, init_repo, write_json
 
-DECL = decl_mod.VerifyDecl("verify/next", "kit-next")
+DECL = decl_mod.VerifyDecl("marketplace", "verify/next", marketplace="kit-next")
 NOW = datetime(2026, 11, 15, 12, 0, 0, tzinfo=timezone.utc)
 
 
@@ -57,7 +59,7 @@ def _show(work: Path, path: str) -> str:
 
 
 def test_build_merges_the_open_prs_renames_the_marketplace_and_sets_the_verify_version(tmp_path: Path) -> None:
-    """受け入れ条件 12: main の先端に P1・P2 を入れ、2 つ目のマーケットプレイスの名前と検証の版を持つ。"""
+    """受け入れ条件 12: main の先端に P1・P2 を入れ、検証用マーケットプレイスの名前と検証の版を持つ。"""
     work = _origin(tmp_path, {1: ("a.txt", "a\n"), 2: ("b.txt", "b\n")})
     built = verify_ref.build(work, _hub(_row(2), _row(1)), DECL, NOW)
     assert built.ref == "verify/next" and built.version == "1.2.3-next.20261115120000"
@@ -70,7 +72,7 @@ def test_build_merges_the_open_prs_renames_the_marketplace_and_sets_the_verify_v
 
 
 def test_rebuilding_is_a_child_of_the_previous_verify_ref(tmp_path: Path) -> None:
-    """I12: 組み直しは前の検証の ref の先端を親に持ち、fast-forward でだけ進む。"""
+    """I12: 組み直しは前の検証用ブランチの先端を親に持ち、fast-forward でだけ進む。"""
     work = _origin(tmp_path, {1: ("a.txt", "a\n"), 2: ("b.txt", "b\n")})
     first = verify_ref.build(work, _hub(_row(1)), DECL, NOW)
     second = verify_ref.build(work, _hub(_row(1), _row(2)), DECL, NOW.replace(minute=5))
@@ -198,3 +200,41 @@ def test_hooks_that_the_merged_prs_track_do_not_run(tmp_path: Path) -> None:
     built = verify_ref.build(work, _hub(_row(1), _row(2)), DECL, NOW)
     assert [n for n, _h in built.included] == [1, 2] and _show(work, ".hooks/post-merge")
     assert not marker.exists()
+
+
+# --- 種類 deploy（決定 21・受け入れ条件 20） ---------------------------------------------------------------
+
+_WRITE = "import pathlib, sys; pathlib.Path(sys.argv[1]).write_text(' '.join(sys.argv[2:]), encoding='utf-8')"
+
+
+def test_command_of_replaces_only_the_ref_and_the_head() -> None:
+    got = verify_decide.command_of(["deploy", "--ref={ref}", "{head}", "{other}", "x"], "verify/next", "a" * 40)
+    assert got == ["deploy", "--ref=verify/next", "a" * 40, "{other}", "x"]
+
+
+def test_deploy_pushes_the_verify_branch_without_rewriting_and_runs_the_command(tmp_path: Path) -> None:
+    """受け入れ条件 20: 種類 deploy は marketplace.json を書き換えず、検証用ブランチを push した後に置き換えたコマンドを流す。"""
+    work = _origin(tmp_path, {1: ("a.txt", "a\n")})
+    out = tmp_path / "deployed.txt"
+    decl = decl_mod.VerifyDecl("deploy", "verify/next", command=(sys.executable, "-c", _WRITE, str(out), "{ref}", "{head}"))
+    built = verify_ref.build(work, _hub(_row(1)), decl, NOW)
+    assert built.kind == "deploy" and built.version is None and [n for n, _h in built.included] == [1]
+    assert out.read_text(encoding="utf-8") == f"verify/next {built.head}"
+    assert json.loads(_show(work, ".claude-plugin/marketplace.json"))["name"] == "kit"
+    assert json.loads(_show(work, "tools/kit/.claude-plugin/plugin.json"))["version"] == "1.2.3"
+
+
+def test_a_failed_deploy_keeps_the_pushed_verify_branch(tmp_path: Path) -> None:
+    work = _origin(tmp_path, {1: ("a.txt", "a\n")})
+    decl = decl_mod.VerifyDecl("deploy", "verify/next", command=(sys.executable, "-c", "import sys; sys.exit(3)"))
+    with pytest.raises(verify_ref.VerifyDeployFailed) as got:
+        verify_ref.build(work, _hub(_row(1)), decl, NOW)
+    assert got.value.code == 3 and _show(work, "a.txt") == "a\n"
+
+
+def test_cli_verify_ref_without_a_verify_row_does_nothing(monkeypatch, capsys, tmp_path: Path) -> None:
+    """検証の行が無いリポジトリは検証環境を使わず、workflow を落とさない（状態は not_applicable）。"""
+    monkeypatch.setattr(release_cli, "_hub", lambda args: FakeHub())
+    assert release_cli.main(["verify-ref", "--root", str(tmp_path)]) == 0
+    out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert out["items"] == [{"kind": "value", "name": "state", "value": "not_applicable"}]

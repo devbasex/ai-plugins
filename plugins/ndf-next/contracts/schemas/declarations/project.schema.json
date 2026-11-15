@@ -606,7 +606,7 @@
             }
           ],
           "default": null,
-          "description": "検証の行（channel が verify）の検証の ref と 2 つ目のマーケットプレイスの名前（#3572 の決定 9）"
+          "description": "検証の行（channel が verify）の検証環境の種類と値（#3572 の決定 9・21）"
         }
       },
       "required": [
@@ -665,8 +665,16 @@
     },
     "DeliveryVerify": {
       "additionalProperties": false,
-      "description": "検証の ref の名前と、検証の ref が持つ 2 つ目のマーケットプレイスの名前。読み手は ndf.domains.release.declaration.verify_of",
+      "description": "検証環境の種類と値（#3572 の決定 21）。kind が marketplace なら検証用ブランチ ref を検証用マーケットプレイス marketplace が指し、deploy なら検証用ブランチを push した後に command（{ref}・{head} を置き換える）を timeout_seconds 秒まで流す。読み手は ndf.domains.release.declaration.verify_of",
       "properties": {
+        "kind": {
+          "enum": [
+            "marketplace",
+            "deploy"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
         "ref": {
           "minLength": 1,
           "title": "Ref",
@@ -676,14 +684,58 @@
           "minLength": 1,
           "title": "Marketplace",
           "type": "string"
+        },
+        "command": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Command",
+          "type": "array"
+        },
+        "timeout_seconds": {
+          "exclusiveMinimum": 0,
+          "title": "Timeout Seconds",
+          "type": "integer"
         }
       },
       "required": [
-        "ref",
-        "marketplace"
+        "kind",
+        "ref"
       ],
       "title": "DeliveryVerify",
-      "type": "object"
+      "type": "object",
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "marketplace"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "marketplace"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "deploy"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "command"
+            ]
+          }
+        }
+      ]
     },
     "Docs": {
       "additionalProperties": false,
@@ -1123,11 +1175,19 @@
     },
     "ProductionMerge": {
       "additionalProperties": false,
-      "description": "本番の PR のマージの方式（#3506）。`admin` が true なら、本番チャネルが承認レビューを必須にするとき管理者の迂回でマージする。利用者が手で書き、解析は書かない。",
+      "description": "本番の PR のマージの方式（#3506・#3572 の決定 17）。`admin` が true なら、マージの方式が無く本番チャネルが承認レビューを必須にするとき管理者の迂回でマージする。`method` は同時に承認された PR の組み合わせを確かめてから入れる方式（`merge-queue` は merge queue、`strict` は最新の取り込みを必須にする規則）で、本番チャネルの ruleset と照らし、食い違えば止まる。ブランチ戦略が github-flow なら `method` が要る。利用者が手で書き、解析は書かない。",
       "properties": {
         "admin": {
           "title": "Admin",
           "type": "boolean"
+        },
+        "method": {
+          "enum": [
+            "merge-queue",
+            "strict"
+          ],
+          "title": "Method",
+          "type": "string"
         }
       },
       "required": [

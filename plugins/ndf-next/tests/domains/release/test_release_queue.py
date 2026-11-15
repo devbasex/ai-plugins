@@ -69,12 +69,12 @@ def test_merge_queue_stops_with_rerun_hint_when_budget_runs_out() -> None:
 
 
 def test_merge_queue_stops_at_once_when_the_queue_drops_the_pull() -> None:
-    """キューが PR を外したら（merge_group の CI の失敗など）、予算を使い切らずに not_ci で止まる。"""
+    """キューが PR を外したら（merge_group の CI の失敗など）、予算を使い切らずに queue_removed で止まる（#3572 の決定 18）。"""
     hub = _QueueHub(pulls={7: pull()}, comments_of={7: [trail_comment("approved", HEAD)]})
     hub.merge_after, hub.leave_after = 10**6, 1
     now = [0.0]
     done = _queue_lander(hub, now, 3600.0).land(7)
-    assert not done.merged and done.kind == "not_ci" and "merge_group" in done.detail
+    assert not done.merged and done.kind == "queue_removed" and "同じ head では入れ直さない" in done.detail
     assert now[0] == land.QUEUE_POLL_SECONDS
 
 

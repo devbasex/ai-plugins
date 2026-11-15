@@ -101,6 +101,56 @@
       "type": "string",
       "default": "CHANGELOG.md",
       "description": "CHANGELOG のファイル（リポジトリの根から）"
+    },
+    "version_store": {
+      "description": "バージョンの置き場（#3572 の決定 22）。kind が plugin ならマーケットプレイスの登録とプラグインの定義（と version_files）、json なら path の JSON のファイルの key の値を name の単位のバージョンにする。ブランチ戦略が github-flow なら要る。書かなければ、ほかの行では plugin を使う。読み手は ndf.domains.release.version_store.of",
+      "type": "object",
+      "properties": {
+        "kind": {
+          "enum": [
+            "plugin",
+            "json"
+          ],
+          "type": "string"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "バージョンを持つ JSON のファイル（リポジトリの根から。json）"
+        },
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "バージョンの鍵（json）"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "タグと CHANGELOG の見出しに使う単位の名前（json）"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "json"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "path",
+              "key",
+              "name"
+            ]
+          }
+        }
+      ]
     }
   },
   "x-ndf-place": "worktree",

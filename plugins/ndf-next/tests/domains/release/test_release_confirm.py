@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -12,8 +13,7 @@ import pytest
 
 from ndf.adapters.github import GitHubError
 from ndf.domains.release import cli as release_cli
-from ndf.domains.release import confirm, records_trail
-from ndf.domains.release import plugins as plugins_mod
+from ndf.domains.release import confirm, records_trail, version_store
 
 from ._fakes import FakeHub, init_repo, not_found, pull, write_json
 
@@ -125,6 +125,11 @@ def test_cli_confirm_stops_with_one_rerun_move(monkeypatch, capsys, tmp_path) ->
     (tmp_path / ".claude-plugin" / "marketplace.json").write_text(
         json.dumps({"plugins": [{"name": "kit", "source": "./kit"}]}), encoding="utf-8"
     )
+    # 行 github-flow と置き場 plugin の宣言（既定の行は merge_base_branch。#3572 の決定 16・22）
+    write_json(
+        tmp_path / ".ndf" / "worktree.json", {"base_branch": "main", "production_branch": "main", "branch_flow": {"promotion": "direct"}}
+    )
+    write_json(tmp_path / ".ndf" / "release.json", {"version": 1, "version_store": {"kind": "plugin"}})
     hub = _hub(bumped=False)
     monkeypatch.setattr(release_cli, "_hub", lambda args: hub)
     monkeypatch.setattr(release_cli.git_mod, "Git", lambda root: FakeGit(set()))
@@ -148,5 +153,47 @@ def test_the_confirmed_plugin_is_the_one_the_bump_merge_changed(tmp_path: Path) 
     write_json(root / "other" / ".claude-plugin" / "plugin.json", {"name": "other", "version": "0.2.0"})
     git_sandbox.sh(root, "commit", "-q", "-am", "Release: other v0.2.0")
     sha = git_sandbox.sh(root, "rev-parse", "HEAD").strip()
-    plugin_of = release_cli._plugin_of(root, plugins_mod.load(root))
-    assert plugin_of(sha, "0.2.0") == "other"
+    unit_of = release_cli._unit_of(root, version_store.PluginStore(root))
+    assert unit_of(sha, "0.2.0") == "other"
+
+
+# --- 今の行（リリースブランチでバージョンを上げた）: マージコミットのバージョンのタグと GitHub Release を待つ（決定 16） ---
+
+PARENT = "d" * 40
+
+
+class _ReleaseGit(FakeGit):
+    def rev_parse(self, ref: str) -> str:
+        return PARENT if ref == f"{MERGE}^1" else ref
+
+
+@dataclass(frozen=True)
+class _Store:
+    """マージコミットで kit を 1.2.3 から 1.2.4 へ上げた置き場。"""
+
+    kind: str = "plugin"
+
+    def units(self) -> list[version_store.Unit]:
+        return [version_store.Unit("kit", "kit")]
+
+    def read(self, repo_git: Any, ref: str, unit: version_store.Unit) -> str | None:
+        return "1.2.4" if ref == MERGE else "1.2.3"
+
+
+def test_current_row_waits_for_the_tag_of_the_merge_commit_and_records_it_once(tmp_path: Path) -> None:
+    hub = FakeHub(pulls={PR: pull(number=PR, ref="release/v1.2.4", merged=True)._replace(merge_sha=MERGE)})
+    tag = "kit--v1.2.4"
+    hub.responses[("GET", f"/repos/o/r/git/ref/tags/{tag}")] = {}
+    hub.responses[("GET", f"/repos/o/r/releases/tags/{tag}")] = {}
+    watch, _slept = _watch()
+    got = confirm.confirm_release_branch(hub, _ReleaseGit(set()), PR, "main", _Store(), watch)  # type: ignore[arg-type]
+    assert (got.kind, got.version, got.tag, got.bump_pr) == (None, "1.2.4", tag, PR)
+    assert len(_records(hub)) == 1
+
+
+def test_current_row_without_the_tag_stops_naming_publish() -> None:
+    hub = FakeHub(pulls={PR: pull(number=PR, ref="release/v1.2.4", merged=True)._replace(merge_sha=MERGE)})
+    hub.responses[("GET", "/repos/o/r/git/ref/tags/kit--v1.2.4")] = not_found()
+    watch, _slept = _watch(0.0)
+    got = confirm.confirm_release_branch(hub, _ReleaseGit(set()), PR, "main", _Store(), watch)  # type: ignore[arg-type]
+    assert got.kind == confirm.DEPLOY_FAILED and got.missing == confirm.MISSING_PUBLISH and _records(hub) == []

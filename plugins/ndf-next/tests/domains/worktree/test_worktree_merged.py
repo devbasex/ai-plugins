@@ -112,6 +112,15 @@ def test_github_flow_does_not_keep_the_merged_sprint_branch() -> None:
     assert merged_decide.sprint_keep("sprint/s1", flow, contained=False, remote="origin") is None
 
 
+def test_a_declaration_without_a_branch_flow_starts_from_the_base_branch_on_the_default_row() -> None:
+    """#3572 の決定 16: 既定の行は promote-whole で、branch_flow の無い宣言のスプリントの起点はベースブランチのまま。"""
+    from ndf.contracts import facts
+
+    assert facts.ids("branch-flows", default=True) == ("promote-whole",)
+    decl = declaration.Declaration({"version": 1, "base_branch": "develop", "production_branch": "main"})
+    assert decl.start_channel == "base" and create.start_branch(None, decl) == "develop"  # type: ignore[arg-type]
+
+
 def test_read_flow_record(tmp_path: Path) -> None:
     path = tmp_path / "flow.json"
     path.write_text(json.dumps({"promotion": "selected"}), encoding="utf-8")

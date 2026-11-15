@@ -111,7 +111,8 @@
           "description": "<所有者>/<リポジトリ>。省けば origin"
         },
         "--pr": {
-          "type": "integer"
+          "type": "integer",
+          "description": "本番の PR（取り込み方 github-flow で要る）"
         },
         "--production": {
           "type": "string",
@@ -119,12 +120,33 @@
         },
         "--plugin": {
           "type": "string",
-          "description": "予定の版を出すプラグイン（省けば登録の順の先頭）"
+          "description": "予定の版を出す単位（省けば置き場の順の先頭）"
+        },
+        "--channel": {
+          "type": "string",
+          "enum": [
+            "production",
+            "dev"
+          ],
+          "description": "リリースのチャネル（github-flow でない行で要る）"
+        },
+        "--level": {
+          "type": "string",
+          "enum": [
+            "major",
+            "minor",
+            "patch"
+          ],
+          "default": "patch",
+          "description": "上げ幅（github-flow でない行）"
+        },
+        "--base": {
+          "type": "string",
+          "description": "ベースブランチ（github-flow でない行で要る。宣言 worktree.json の base_branch）"
         }
       },
       "required": [
-        "subcommand",
-        "--pr"
+        "subcommand"
       ]
     },
     {
@@ -329,7 +351,8 @@
           "description": "<所有者>/<リポジトリ>。省けば origin"
         },
         "--pr": {
-          "type": "integer"
+          "type": "integer",
+          "description": "本番の PR（取り込み方 github-flow で要る）"
         },
         "--production": {
           "type": "string",
@@ -337,7 +360,29 @@
         },
         "--plugin": {
           "type": "string",
-          "description": "予定の版を出すプラグイン（省けば登録の順の先頭）"
+          "description": "予定の版を出す単位（省けば置き場の順の先頭）"
+        },
+        "--channel": {
+          "type": "string",
+          "enum": [
+            "production",
+            "dev"
+          ],
+          "description": "リリースのチャネル（github-flow でない行で要る）"
+        },
+        "--level": {
+          "type": "string",
+          "enum": [
+            "major",
+            "minor",
+            "patch"
+          ],
+          "default": "patch",
+          "description": "上げ幅（github-flow でない行）"
+        },
+        "--base": {
+          "type": "string",
+          "description": "ベースブランチ（github-flow でない行で要る。宣言 worktree.json の base_branch）"
         },
         "--out": {
           "type": "string",
@@ -345,8 +390,7 @@
         }
       },
       "required": [
-        "subcommand",
-        "--pr"
+        "subcommand"
       ]
     },
     {

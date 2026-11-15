@@ -26,6 +26,7 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | `bad_report` | 呼んだ作業が結果 JSON を返さなかった・形が違った | validation | 2（unreadable） | conductor | — | — |
 | `base_conflict` | ベースブランチと衝突 | runtime | 4（base_conflict） | step | — | — |
+| `behind` | 本番の PR の head が本番ブランチの先端を含まない（strict）。本番ブランチを取り込んだ head で承認を取り直す | validation | 3（precondition） | conductor | — | — |
 | `check_failed` | テスト以外のチェック（静的解析・文書の検査・PR の本文の検査）が落ちた | validation | 1（failed） | step | — | — |
 | `ci_pending` | CI のチェックが終わっていない | timeout | 1（failed） | retry | cause.ci-pending | step |
 | `config_broken` | プラグインの定義（plugin.json）か契約のファイルが読めず、起動できない | configuration | 2（unreadable） | human | — | — |
@@ -45,6 +46,7 @@
 | `precondition` | 前提が無い（宣言・認証・対象のファイル） | configuration | 3（precondition） | human | — | — |
 | `production_pr` | 本番の PR を承認の前の工程として終え、デプロイの工程へ渡した | validation | 3（precondition） | conductor | — | — |
 | `push_rejected` | push 前の検査（pre-push の hook）が push を断った | validation | 1（failed） | step | — | — |
+| `queue_removed` | 本番の PR がマージされずに merge queue から外れた。同じ head では入れ直さず、直しを入れた head で承認を取り直す | validation | 3（precondition） | conductor | — | — |
 | `refused` | 不変条件で操作を断った | validation | 1（failed） | human | — | — |
 | `restore_unsupported` | PostgreSQL の URL で進行表の DB の戻しを求めた。控えと戻しは DB の運用で行う | configuration | 3（precondition） | human | — | — |
 | `store_broken` | 記録の DB（進行表の DB か DBOS の鍵のファイル）が quick_check を通らない・台帳に書けない。壊れた鍵のファイルは broken/ へ移した。進行表の DB は ndf progress restore で控えから戻す | runtime | 2（unreadable） | human | — | — |
