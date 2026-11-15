@@ -7,7 +7,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from jsonschema import Draft202012Validator
 
+from ndf import identity
 from ndf.domains.release import cli as release_cli
 from ndf.domains.release import declaration as decl_mod
 from ndf.domains.release import pr_check
@@ -122,6 +124,25 @@ def test_verify_of_reads_one_verify_row(tmp_path: Path) -> None:
         write_json(tmp_path / ".ndf" / "project.json", {"delivery": rows})
         with pytest.raises(decl_mod.DeclarationError):
             decl_mod.verify_of(tmp_path)
+
+
+@pytest.mark.parametrize(
+    "schema", ["contracts/schemas/declarations/project.schema.json", "skills/development-workflow/schemas/project.schema.json"]
+)
+def test_the_project_schema_accepts_the_verify_row_and_rejects_unknown_keys(schema: str) -> None:
+    """決定 9: 宣言のスキーマが verify_of の読む行（channel verify・鍵 verify）を通し、verify の知らない鍵を断る。"""
+    doc = json.loads((identity.ROOT / schema).read_text(encoding="utf-8"))
+    Draft202012Validator.check_schema(doc)
+    v = Draft202012Validator(doc)
+    row = {"target": "検証版", "kind": "auto", "trigger": "wf", "channel": "verify", "versioned": False}
+    ok = {**row, "verify": {"ref": "verify/next", "marketplace": "x-next"}}
+    assert not list(v.iter_errors({"version": 1, "delivery": [ok, {**row, "channel": "production"}]}))
+    for bad in (
+        {**row, "verify": {"ref": "verify/next", "marketplace": "x-next", "branch": "x"}},
+        {**row, "verify": {"ref": "verify/next"}},
+        {**ok, "unknown": 1},
+    ):
+        assert list(v.iter_errors({"version": 1, "delivery": [bad]}))
 
 
 def test_cli_pr_check_exits_1_with_the_items_and_0_outside_the_flow(monkeypatch, capsys, tmp_path: Path) -> None:

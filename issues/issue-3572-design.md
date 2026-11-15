@@ -502,6 +502,9 @@ stateDiagram-v2
  "verify": {"ref": "verify/next", "marketplace": "ai-plugins-next"}}
 ```
 
+**このリポジトリの `.ndf/project.json` への行は 11.0.0 の入れ替え（#3304）で足す。** 今の NDF（`plugins/ndf/scripts/lib/delivery.py`）が
+`channel: verify` の行で `delivery` 全体を読めなくなるためで、#3572 では ndf-next の宣言のスキーマだけを広げる。
+
 人のマージの記録は、本番の PR のコメントに置く（印 `<!-- ndf:merge-approval -->`）。行は `承認の経路:`・`承認した人:`・`マージした先端:`・
 `マージコミット:`・`承認ゲートの承認の先端:` の 5 つで、1 回だけ書き、打ち直しでは書き直さない。
 

@@ -114,7 +114,8 @@ GitHub と git のアダプタを読まず、`version_decide` と `changelog_dec
 | `plugins/ndf-next/tests/domains/worktree/test_worktree_merged.py` | 変更 | 行 `github-flow` でスプリントブランチを残さないことを縛る | `domains/worktree` |
 | `plugins/ndf-next/tests/route/test_flows.py` | 変更 | 行 `github-flow` の宣言で起点と宛先が main になることを縛る | `ndf.core.route` |
 | `.github/workflows/ndf-next-release.yml` | 変更 | main への push で `bump`・`publish`、PR の出来事で `pr-check`・`verify-ref` を打つ | `plugins/ndf-next/bin/ndf` |
-| `.ndf/project.json` | 変更 | `delivery` に検証の行を足す（決定 9） | 無し |
+| `.ndf/project.json` | 変更しない | 検証の行は 11.0.0 の入れ替え（#3304）で足す。今の NDF の `lib/delivery.py` が `channel: verify` の行で `delivery` 全体を読めなくなり、受け入れ条件 17 で `plugins/ndf/` を変えられないため（conductor の決定 2690a429ba33） | 無し |
+| `plugins/ndf-next/contracts/schemas/declarations/project.schema.json`・`plugins/ndf-next/skills/development-workflow/schemas/project.schema.json` | 変更 | `Delivery` の `channel` に `verify` を許し、任意の鍵 `verify`（`ref`・`marketplace`。追加の鍵を断る）を足す（決定 9） | 無し |
 | `AGENTS.md` | 変更 | 「版とリリースの方針」に、11.0.0 の入れ替えで GitHub flow へ移る 1 段落と正本へのリンクを足す（決定 12） | 無し |
 | `docs/versioning-and-distribution.md` | 変更 | 節「11.0.0 からの運用（GitHub flow）」を足す（決定 12） | 無し |
 
