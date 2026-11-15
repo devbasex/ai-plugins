@@ -18,7 +18,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import time
 from pathlib import Path
@@ -141,7 +140,7 @@ def _measure(args: argparse.Namespace) -> int:
     except (check.CheckError, jsonfile.JsonFileError) as exc:
         return result.emit(result.stopped(TOOL, "unknown", f"測れない: {exc}"))
     try:
-        signals.replace_text(out, json.dumps(data, ensure_ascii=False, indent=2) + "\n")
+        signals.replace_text(out, write.dumps(data))
     except OSError as exc:
         return result.emit(result.stopped(TOOL, "check_failed", f"--out を書けない: {exc}"))
     counts = {s: sum(1 for m in data["items"].values() if m["status"] == s) for s in ("measured", "question", "unknown")}
@@ -243,7 +242,7 @@ def _drift(args: argparse.Namespace) -> int:
 
 
 def _schema(args: argparse.Namespace) -> int:
-    text = json.dumps(contracts.load_json(check.SCHEMA), ensure_ascii=False, indent=2) + "\n"
+    text = write.dumps(contracts.load_json(check.SCHEMA))
     if not args.out:
         print(text, end="")
         return result.emit(result.result(TOOL, result.OK, "宣言の JSON Schema を出した"))
