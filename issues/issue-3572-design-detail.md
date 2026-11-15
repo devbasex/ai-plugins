@@ -1,17 +1,17 @@
 # #3572 の詳細設計: ブランチ戦略の設定を `.ndf/branch-strategy.json` の節 `branch_strategy` の 1 か所から読む
 
-設計文書 [issue-3572-design.md](issue-3572-design.md) の「構成要素」のうち、決定 24 の 12・13 の行（設定の読み分けを節から読む形へ直すことと、
-取り込み方の表から行が許す値の列を外すこと）を、ファイルと関数の粒度へ下ろした文書である。語（ブランチ戦略の節・取り込み方の表・マージの方式・
+設計文書 [issue-3572-design.md](issue-3572-design.md) の「構成要素」のうち、決定 24 の 12・13 の行を、ファイルと関数の粒度へ下ろした文書である。
+2 つの行は、設定の読み分けを節から読む形へ直すことと、取り込み方の表から行が許す値の列を外すことである。語（ブランチ戦略の節・取り込み方の表・マージの方式・
 検証環境・バージョンの置き場・本番ブランチ・ベースブランチ）は設計文書の「用語」と「ブランチ戦略の節」の意味で使う。不変条件（I1〜I18）と
 決定（決定 1〜31）の番号は設計文書と [決定の記録](issue-3572-design-decisions.md) の番号である。
 
 **起点のコード。** 実装の PR https://github.com/devbasex/ai-plugins/pull/3587 の先端 84e6c33b4（`origin/sprint/lrel-lock`。2026-11-16 の
-PR https://github.com/devbasex/ai-plugins/pull/3636 のマージ）である。決定 24 の 1〜10 の行（行ごとの振る舞い・マージの方式・merge queue・
-バージョンの置き場・検証環境の種類・`merge_group`）は 84e6c33b4 にあり、この文書では関数を書かない。「変更」「削除」は 84e6c33b4 の時点の
+PR https://github.com/devbasex/ai-plugins/pull/3636 のマージ）である。決定 24 の 1〜10 の行は 84e6c33b4 にあり、この文書では関数を書かない。
+1〜10 の行は、行ごとの振る舞い・マージの方式・merge queue・バージョンの置き場・検証環境の種類・`merge_group` である。「変更」「削除」は 84e6c33b4 の時点の
 コードに対する差分である。
 
 **名前。** ブランチ戦略のキーと値は #3613 の改名の後の名前（`release_strategy`・`merge_base_branch`・`release_branch`・`trunk`）で書く。
-84e6c33b4 のコードは改名の前の名前（`promotion`・`direct`・`whole`・`selected`、行の id `github-flow`・`promote-whole`・`promote-selected`）を持つ。
+84e6c33b4 のコードは改名の前の名前を持つ。キーと値は `promotion`・`direct`・`whole`・`selected`、行の id は `github-flow`・`promote-whole`・`promote-selected` である。
 #3613 の改名が develop へ入った後に develop を取り込み、名前をそろえてからこの文書の変更を入れる（決定 24 の 11 の行・決定 26）。
 定数 `TRUNK` は、そろえた後の行 `trunk` の id を指す（84e6c33b4 の `GITHUB_FLOW`）。
 
@@ -19,7 +19,7 @@ PR https://github.com/devbasex/ai-plugins/pull/3636 のマージ）である。�
 #3587 の head ブランチを宛先にする（決定 29）。
 
 **読む場所。** 節はメインディレクトリ（既定ブランチの worktree）のファイルから読む（決定 27）。84e6c33b4 で呼ばれた worktree から読んでいた
-`base_branch`（`core/route` の `default_base`・`progress/command.py` の差分の範囲・リリースの `base_branch`）も、メインディレクトリから読む。
+`base_branch` も、メインディレクトリから読む。読んでいた箇所は `core/route` の `default_base`・`progress/command.py` の差分の範囲・リリースの `base_branch` である。
 この読み方の差は設計文書の「人へ残す判断」の行にある。
 
 **84e6c33b4 のまま使うもの。** 次は設定を読む関数を介して節の値を受けるだけで、シグネチャ・責務・失敗の扱いを変えない。
@@ -63,11 +63,20 @@ plugins/ndf-next/
     └── （フィクスチャを直すテスト。下の表）
 ```
 
-**依存の向き。** 一方向で、循環は無い。新設の `core/branch_strategy.py` は `ndf.contracts`（スキーマと事実の表の読み）と `ndf.adapters.git`
-（メインディレクトリと既定ブランチの読み）だけに依存する。節を読む 5 つの領域（リリース `domains/release`・スプリントの経路 `domains/worktree`・
-宛先の既定 `core/route`・リポジトリの解析 `domains/project`・工程の記録 `progress`）は `core/branch_strategy` を呼び、互いを呼ばない。
-`core` から `domains` への import は 84e6c33b4 で 0 件（`git grep -l 'from ndf.domains' origin/sprint/lrel-lock -- plugins/ndf-next/src/ndf/core`）で、
-この変更でも 0 件のままにする。
+**依存の向き。** 一方向で、循環は無い。新設の `core/branch_strategy.py` が依存するのは 2 つだけである。
+
+| 依存する先 | 何を読むか |
+| --- | --- |
+| `ndf.contracts` | スキーマと事実の表 |
+| `ndf.adapters.git` | メインディレクトリと既定ブランチ |
+
+節を読む 5 つの領域は `core/branch_strategy` を呼び、互いを呼ばない。5 つは、リリース `domains/release`・スプリントの経路 `domains/worktree`・
+宛先の既定 `core/route`・リポジトリの解析 `domains/project`・工程の記録 `progress` である。
+`core` から `domains` への import は 84e6c33b4 で 0 件で、この変更でも 0 件のままにする。数えたコマンドは次のとおりである。
+
+```bash
+git grep -l 'from ndf.domains' origin/sprint/lrel-lock -- plugins/ndf-next/src/ndf/core
+```
 
 | パス | 種類 | 役割 1 文 | 依存する先 |
 | --- | --- | --- | --- |
@@ -111,11 +120,21 @@ plugins/ndf-next/
 | `plugins/ndf-next/tests/core/test_branch_strategy.py` | 新設 | 節の読み取り・既定・スキーマの組み合わせの検査（確かめ 8 の例）を縛る | `ndf.core.branch_strategy` |
 | `plugins/ndf-next/tests/domains/release/test_release_branch_strategy.py` | 新設 | リリースの読み分けが節だけを読み、ほかの 3 つの設定ファイルを開かないことを縛る | `declaration`・`version_store` |
 
-**フィクスチャを直すテスト。** 次の 27 本は、84e6c33b4 で旧い置き場（`.ndf/worktree.json` の `base_branch`・`production_branch`・`branch_flow`、
-`.ndf/project.json` の `production_merge`・検証環境の行、`.ndf/release.json` の `version_store`）へ値を書いてテストを組む。どれもフィクスチャを
-節のファイルへ移すだけで、縛る振る舞いを変えない。一覧は
-`git grep -l -E 'branch_flow|"production_branch"|production_branch=|"base_branch"|production_merge|version_store|"channel": "verify"|promotion' origin/sprint/lrel-lock -- plugins/ndf-next/tests`
-の結果である。
+### フィクスチャを直すテスト
+
+次の 27 本は、84e6c33b4 で旧い置き場へ値を書いてテストを組む。どれもフィクスチャを節のファイルへ移すだけで、縛る振る舞いを変えない。
+
+| 旧い置き場 | 値 |
+| --- | --- |
+| `.ndf/worktree.json` | `base_branch`・`production_branch`・`branch_flow` |
+| `.ndf/project.json` | `production_merge`・検証環境の行 |
+| `.ndf/release.json` | `version_store` |
+
+一覧は次のコマンドの結果である。
+
+```bash
+git grep -l -E 'branch_flow|"production_branch"|production_branch=|"base_branch"|production_merge|version_store|"channel": "verify"|promotion' origin/sprint/lrel-lock -- plugins/ndf-next/tests
+```
 
 | テストの置き場（`plugins/ndf-next/tests/` から） |
 | --- |
@@ -145,8 +164,8 @@ plugins/ndf-next/
 | `plugins/ndf-next/src/ndf/domains/project/measure_flow.py` | モジュール | `default_flow`・`review_allowed`・`answer_problem`・`_start_from_table`・`declared_flow`・`drift`（変更）・`_rows`（削除）。定数 `WORKTREE_SCHEMA` を外す |
 | `plugins/ndf-next/src/ndf/domains/project/write.py` | `Inputs`・モジュール | `_worktree_part` を `_strategy_part` へ（変更）・`merge_worktree`・`merge_flow`（変更）。定数 `WORKTREE_TAG` を `STRATEGY_TAG` へ。欄 `Inputs.worktree` を `Inputs.strategy` へ |
 
-`verify_of`・`optional_verify_ref`・`records_trail` の本文の関数・`land.py` と `merge_method.py` の文言は、設定ファイルの名前を書いた文字列だけが変わり、
-責務と失敗の扱いを変えないため「関数の仕様」には書かない。
+次の 4 つは「関数の仕様」には書かない。設定ファイルの名前を書いた文字列だけが変わり、責務と失敗の扱いを変えないためである。
+`verify_of`・`optional_verify_ref`・`records_trail` の本文の関数・`land.py` と `merge_method.py` の文言である。
 
 ## 関数の仕様
 
@@ -279,8 +298,8 @@ plugins/ndf-next/
 | `Declaration.strategy` | 欄 | `domains/worktree/declaration.py` | `branch_strategy.load` の値 |
 | `Inputs.strategy` | 欄 | `domains/project/write.py` | `check.load` の 2 つ目の値 |
 
-**指紋のキーの頭を変える影響。** 解析の記録（`.ndf/project.json` の `analysis.written`）が持つ `worktree.json#<キー>` の指紋は、新しいキーの頭
-`branch-strategy.json#<キー>` と一致しない。移行（#3613）の後の最初の解析では、節の値を手で書いた値として扱い、書き換えない（判断の行を出す）。
+**指紋のキーの頭を変える影響。** 解析の記録（`.ndf/project.json` の `analysis.written`）は `worktree.json#<キー>` の指紋を持つ。
+この指紋は、新しいキーの頭 `branch-strategy.json#<キー>` と一致しない。移行（#3613）の後の最初の解析では、節の値を手で書いた値として扱い、書き換えない（判断の行を出す）。
 値を壊す向きには倒れない。指紋のキーを移すかは移行の改名表の行が決める（#3613。決定 29）。
 
 ## 並行と排他

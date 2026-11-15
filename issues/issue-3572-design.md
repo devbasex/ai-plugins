@@ -4,14 +4,19 @@
 
 - **今どうなっているか**: ndf-next の本番のプラン（テンプレート `release.json`）は、承認ゲートの後に worker 1 つへリリースを任せる。worker は CI が落ちるとコードを直して本番の PR へ push できる（今の NDF でリリース 8・14 に同じ形が 2 回起きた）。ほぼ同時に承認された 2 つの PR は、main の必須のチェックが最新の取り込みを求めない（`strict` が偽）ため、組み合わせを CI に通さずに本番へ入る
 - **誰に効くか**: ndf-next を使うすべてのリポジトリ（Web サービス・アプリ・プラグイン）の、本番のリリースを承認する利用者と、リリースを流すオーガナイザー・一時レーン
-- **変えると何が成り立つか**: 承認の後にコードを直すステップが無くなり、承認した head だけが本番へ入る。利用者の GitHub でのマージも承認として扱われる。ブランチ戦略・マージの方式・検証環境・バージョンの置き場はリポジトリごとに 1 つの設定ファイル `.ndf/branch-strategy.json` の節 `branch_strategy` で選び、develop と main を分けるリポジトリは今の行のまま動く。GitHub flow を選んだリポジトリでは、同時に承認された PR の組み合わせを merge queue（使えなければ最新の取り込みの必須）で確かめてから main へ入れる
+- **変えると何が成り立つか**: 承認の後にコードを直すステップが無くなり、承認した head だけが本番へ入る。利用者の GitHub でのマージも承認として扱われる。ブランチ戦略・マージの方式・検証環境・バージョンの置き場はリポジトリごとに 1 つの設定ファイル `.ndf/branch-strategy.json` の節 `branch_strategy` で選ぶ。develop と main を分けるリポジトリは今の行のまま動く。GitHub flow を選んだリポジトリでは、同時に承認された PR の組み合わせを merge queue（使えなければ最新の取り込みの必須）で確かめてから main へ入れる
 
 ## 適用範囲
 
-- **働く範囲**: ndf-next（`plugins/ndf-next/`）を使う利用者のリポジトリ。リリースのサブコマンド（NDF の内部の呼び名は「副命令」）`ndf release-steps` と本番のプランのテンプレート、ndf-next のリリースの workflow（`.github/workflows/ndf-next-release.yml`）が働く。今の NDF（`plugins/ndf/`）と今の CD（`.github/workflows/release-cd.yml`）は 11.0.0 の入れ替えまで変えない
-- **リポジトリごとに違うもの（設定ファイルで受ける）**: ブランチ戦略・マージの方式・検証環境・バージョンの置き場を、`.ndf/branch-strategy.json` の節 `branch_strategy` の 1 か所で受ける（形と設定の例は「ブランチ戦略の節」）。必須のチェックの待ちの秒は引数 `ci_budget` で受ける
-- **ai-plugins だけの事情（設定ファイルの値へ移すもの）**: `trunk` の行・`merge-queue`・検証用マーケットプレイス `ai-plugins-next` と検証用ブランチ `verify/next`・バージョンの置き場 `plugin`・タグ `ndf--v<バージョン>`。どれも ai-plugins の設定ファイルの値で、ndf-next のコードに決め打たない
-- **キーと値の名前**: ブランチ戦略のキーと値は #3613 の改名の後の名前（`branch_strategy.release_strategy` と `merge_base_branch`・`release_branch`・`trunk`）で書く。値と取り込み方の表の行の名前は同じである。改名と、旧い 3 つのファイルの値を節へ移す移行のコマンドは #3613 が持つ（決定 26・29）。要求（ [issue-3572-requirements.md](issue-3572-requirements.md) ）と利用者の指示の原文は改名の前の名前で書かれており、下の読み替えの表で読む
+- **働く範囲**: ndf-next（`plugins/ndf-next/`）を使う利用者のリポジトリ。リリースのサブコマンド `ndf release-steps`（NDF の内部の呼び名は「副命令」）と本番のプランのテンプレートが働く。ndf-next のリリースの workflow（`.github/workflows/ndf-next-release.yml`）も働く。今の NDF（`plugins/ndf/`）と今の CD（`.github/workflows/release-cd.yml`）は 11.0.0 の入れ替えまで変えない
+- **リポジトリごとに違うもの（設定ファイルで受ける）**: ブランチ戦略・マージの方式・検証環境・バージョンの置き場を、`.ndf/branch-strategy.json` の節 `branch_strategy` の 1 か所で受ける。形と設定の例は「ブランチ戦略の節」にある。必須のチェックの待ちの秒は引数 `ci_budget` で受ける
+- **ai-plugins だけの事情（設定ファイルの値へ移すもの）**: 次の 5 つで、どれも ai-plugins の設定ファイルの値である。ndf-next のコードに決め打たない
+    - `trunk` の行
+    - `merge-queue`
+    - 検証用マーケットプレイス `ai-plugins-next` と検証用ブランチ `verify/next`
+    - バージョンの置き場 `plugin`
+    - タグ `ndf--v<バージョン>`
+- **キーと値の名前**: ブランチ戦略のキーと値は #3613 の改名の後の名前で書く。キーは `branch_strategy.release_strategy`、値は `merge_base_branch`・`release_branch`・`trunk` である。値と取り込み方の表の行の名前は同じである。改名と、旧い 3 つのファイルの値を節へ移す移行のコマンドは #3613 が持つ（決定 26・29）。要求（ [issue-3572-requirements.md](issue-3572-requirements.md) ）と利用者の指示の原文は改名の前の名前で書かれており、下の読み替えの表で読む
 - **当たるモード**: リリース承認ゲートを通る本番のリリース（デプロイの工程）と、その前後のスプリントの PR・検証環境の更新・CD のバージョン上げ
 
 | 要求と利用者の指示の原文の名前（改名の前） | この設計の名前（#3613 の改名の後） |
@@ -33,8 +38,8 @@
 | develop を持つ Web・アプリ | `merge_base_branch` か `release_branch`・`base_branch: develop`・マージの方式は任意 | 今の行のまま動く。スプリントは develop（`release_branch` は main）から切り、リリースブランチの PR が本番の PR になる。組み合わせは develop（かリリースブランチ）で既に CI を通っており、本番の PR は 1 度に 1 つのため、マージの方式を書かなくても止まらない。書けば ruleset と照らして使う。同期の PR は今のまま作る |
 | `.ndf/branch-strategy.json` の無いリポジトリ | どれも無い | ブランチ戦略は既定の行 `merge_base_branch`（本番ブランチはリポジトリの既定ブランチ）で、今と同じに動く。マージの方式は無く、今のマージ（head の一致の確認付き）を打つ。検証環境は使わない。CD のバージョン上げは `trunk` の行でだけ動くため流れない |
 
-**ai-plugins の入れ替えまでの期間。** #3587 が develop へ入ってから 11.0.0 の入れ替え（#3304）の PR がマージされるまで、ai-plugins の開発は今の NDF で行い、
-ndf-next の工程（スプリントの起点・宛先・解析・リリース）を ai-plugins で流さない。ndf-next は新しいキーだけを読み、入れ替えまで `.ndf/` を書かない（#3613 の前提 7・I11）ため、
+**ai-plugins の入れ替えまでの期間。** この期間は、#3587 が develop へ入ってから 11.0.0 の入れ替え（#3304）の PR がマージされるまでである。
+この間、ai-plugins の開発は今の NDF で行い、ndf-next の工程（スプリントの起点・宛先・解析・リリース）を ai-plugins で流さない。ndf-next は新しいキーだけを読み、入れ替えまで `.ndf/` を書かない（#3613 の前提 7・I11）ため、
 この期間の ai-plugins には ndf-next が読む値が無い。それでも ndf-next を流したときの読み取りの結果は次のとおりで、どれも ai-plugins の今の運用（develop へのスプリント）と合わない。
 
 | ndf-next の処理 | 読み取りの結果 |
@@ -44,7 +49,7 @@ ndf-next の工程（スプリントの起点・宛先・解析・リリース�
 
 入れ替えの PR が、移行のコマンドで `.ndf/branch-strategy.json` を作ってから ndf-next の工程を ai-plugins で使い始める。
 
-リリースの承認資料・タグ・CHANGELOG を、プラグインの登録（`.claude-plugin/marketplace.json`）を持たないリポジトリで組めるようにするのは #3615 の範囲である（決定 22 の境の表）。develop を持つ Web のリポジトリの今の行の経路はこの課題で後退させないが、#3615 が直るまでは承認資料の組み立てで止まる（今と同じ）。
+リリースの承認資料・タグ・CHANGELOG を、プラグインの登録（`.claude-plugin/marketplace.json`）を持たないリポジトリで組めるようにするのは #3615 の範囲である。境は決定 22 の表にある。develop を持つ Web のリポジトリの今の行の経路はこの課題で後退させないが、#3615 が直るまでは承認資料の組み立てで止まる（今と同じ）。
 
 ## あるべき姿の根拠
 
@@ -86,8 +91,8 @@ ndf-next の工程（スプリントの起点・宛先・解析・リリース�
 リリースが供給者、承認ゲートとプランのテンプレートとスプリントの経路が顧客である（**顧客 / 供給者**）。承認ゲートはリリースの公開する判定
 （PR がマージ済みか、誰がどの head をマージしたか）を読み、本番の PR へ書くことはサブコマンド `release-steps answer` を呼んで行う。
 テンプレートはサブコマンドを並べるだけで判定を持たない。取り込み方の表は**公表された言語**で、リリースとスプリントの経路が同じ行を読む。
-ブランチ戦略の節も**公表された言語**で、形の正本は節のスキーマである。節を読むリリース（`declaration.py`）・スプリントの経路（`domains/worktree`）・
-宛先の既定（`core/route`）・リポジトリの解析（`domains/project`）・工程の記録（`progress`）の 5 つは、スキーマに**順応者**として従い、節の形を自分で足したり読み替えたりしない。
+ブランチ戦略の節も**公表された言語**で、形の正本は節のスキーマである。節を読むのは、リリース（`declaration.py`）・スプリントの経路（`domains/worktree`）・
+宛先の既定（`core/route`）・リポジトリの解析（`domains/project`）・工程の記録（`progress`）の 5 つである。5 つはスキーマに**順応者**として従い、節の形を自分で足したり読み替えたりしない。
 5 つのどれも、ほかの 4 つを呼ばずに、共通の読み取り（`core/branch_strategy.py`）を通して同じファイルを読む。節を書くプログラムは「集約」の表の行のとおり期間ごとに 1 つだけである。
 GitHub との間は**腐敗防止層**である。ruleset と merge queue の語はアダプタ（`adapters/github.py`）とリリースの読み分け（`merge_method`）の中に閉じ、
 ほかのコンテキストへ出さない。スプリントの経路はスプリントの PR（`trunk` では本番の PR を兼ねる）を作って上げ幅のラベルを書き、head へコミットを足す。
@@ -282,10 +287,13 @@ GitHub との間は**腐敗防止層**である。ruleset と merge queue の語
 
 ## 構造
 
-呼び出しの関係（リリースの領域の中核だけを描く。図に含めない要素は、テンプレートの検査 `release_plan`（テストが呼ぶ）・`assemble`・`confirm`・
-`pr_check`・`record`・`materials_decide`・`tagging`・`causes.json`・設定ファイルのスキーマ・スプリントの経路・必須のチェックを出す workflow で、
-どれも `cli` から呼ばれるか、ファイルとして読まれるだけである。節のスキーマと保存先の表は `declaration.py` が節を読むときに使う。
-節を読むほかの領域（`domains/worktree`・`core/route`・`domains/project`）は同じ節のファイルを読むだけで、リリースの領域を呼ばない）:
+呼び出しの関係を、リリースの領域の中核だけで描く。図に含めない要素の扱いは次のとおりである。
+
+| 図に含めない要素 | 扱い |
+| --- | --- |
+| テンプレートの検査 `release_plan`（テストが呼ぶ）・`assemble`・`confirm`・`pr_check`・`record`・`materials_decide`・`tagging`・`causes.json`・設定ファイルのスキーマ・スプリントの経路・必須のチェックを出す workflow | `cli` から呼ばれるか、ファイルとして読まれるだけ |
+| 節のスキーマと保存先の表 | `declaration.py` が節を読むときに使う |
+| 節を読むほかの領域（`domains/worktree`・`core/route`・`domains/project`） | 同じ節のファイルを読むだけで、リリースの領域を呼ばない |
 
 ```mermaid
 graph TD
@@ -334,11 +342,11 @@ graph TD
 | マージの前にどこで試すか | `verify` | 検証用マーケットプレイス `ai-plugins-next` |
 | バージョンをどう上げるか | `trunk` の行: `release.version_store`（CD がマージの後に上げ幅のラベルから上げる。決定 7）。今の行（`merge_base_branch`・`release_branch`）: 節では決めない（下の段落） | `plugin`（`plugin.json`） |
 
-**今の行のバージョンの上げ方は節の外にある。** 今の行では、リリースブランチの経路がプラグインの登録（`.claude-plugin/marketplace.json`）と `.ndf/release.json`
-（`version_files`・`steps`）からバージョンを上げ、`release.version_store` を読まない（今の行の `bump` は `not_applicable`）。読まれない値を書けないよう、
+**今の行のバージョンの上げ方は節の外にある。** 今の行では、リリースブランチの経路がバージョンを上げる。読むのはプラグインの登録（`.claude-plugin/marketplace.json`）と `.ndf/release.json`
+（`version_files`・`steps`）である。`release.version_store` は読まない。今の行の `bump` は `not_applicable` を返す。読まれない値を書けないよう、
 節のスキーマは `trunk` でない行で `release.version_store` を落とす（「組み合わせの検査」）。`trunk` の行で置き場 `plugin` を選んだときも、
-プラグインの名前を含む行を書き換える追加のファイルは `.ndf/release.json` の `version_files` にあり、節の外である（決定 22 の表）。
-今の行のバージョンの上げ方を節へ移すことと、プラグインの登録の無いリポジトリで今の行のバージョンを上げることは #3615 の範囲で、
+プラグインの名前を含む行を書き換える追加のファイルは節の外にある。置き場は `.ndf/release.json` の `version_files` である（決定 22 の表）。
+次の 2 つは #3615 の範囲である。今の行のバージョンの上げ方を節へ移すことと、プラグインの登録の無いリポジトリで今の行のバージョンを上げることである。
 受け入れ条件 2l（節だけを読めばバージョンの上げ方が分かる）と 2r（develop を持つ Web サービスの例に `package.json` のバージョン）との差と、比べた候補は決定 31 にある。
 
 ### 節のキー
@@ -369,8 +377,8 @@ graph TD
 `json` のアダプタの `name` はリリースの単位の名前で、タグと CHANGELOG の見出しに使う（形は今の `<名前>--v<バージョン>`。形を設定ファイルで変えるのは #3615）。
 バージョン上げのときに一緒に流すコマンド（`package-lock.json` の更新など）は、今のまま `.ndf/release.json` の `steps`（`stage: "production"`）に書く。
 
-**リリースの形の設定の入る場所。** `release` は、リリースの形（何をどこへどの形で出すか）の設定を置くキーである。この課題は `release.version_store` だけを置き、
-リリースの形・タグ・CHANGELOG の見出し・リリースブランチの名前の形と、`version_store` の種類の足しは #3615 が `release` の下に足す（決定 30）。
+**リリースの形の設定の入る場所。** `release` は、リリースの形（何をどこへどの形で出すか）の設定を置くキーである。この課題が置くのは `release.version_store` だけである。
+リリースの形・タグ・CHANGELOG の見出し・リリースブランチの名前の形と、`version_store` の種類の足しは、#3615 が `release` の下に足す（決定 30）。
 
 ### 節へ移さない設定
 
@@ -393,7 +401,7 @@ graph TD
 | マージの方式と `production_merge.admin` の真の組み合わせ（方式があるとき迂回は使われない。I17） | `.ndf/branch-strategy.json` | `production_merge` のスキーマの `if`/`then`（`method` があれば `admin` は偽だけ） | 同上 |
 | マージの方式と ruleset の照らし合わせ（I15） | `.ndf/branch-strategy.json` の `production_merge.method` と、本番ブランチの規則の読み取り | `merge_method`（`land`・`land_bump` が呼ぶ） | 原因 `precondition`・理由に設定の値と ruleset の値 |
 
-スキーマの案に下の 2 つの例と、Web サービスの例を `trunk` の行へ書き換えた例が通り、組み合わせを壊した 13 の例が落ちることは確かめ 8（[issue-3572-design-evidence.md](issue-3572-design-evidence.md) ）にある。
+確かめ 8（[issue-3572-design-evidence.md](issue-3572-design-evidence.md) ）は、スキーマの案に次の例が通り、組み合わせを壊した 13 の例が落ちることを示す。通る例は、下の 2 つの例と、Web サービスの例を `trunk` の行へ書き換えた例である。
 
 ### 設定の例
 
@@ -425,8 +433,7 @@ ai-plugins（11.0.0 の入れ替えの後。`trunk`・merge queue・検証用マ
 ai-plugins は今 `.ndf/project.json` に `production_merge.admin: true` を持つ（今の NDF の迂回のマージ）。11.0.0 の入れ替えの PR は、移行のコマンドが節へ移した
 `admin` を外してから `method` を書く（I17 と上の組み合わせの検査）。
 
-develop を持つ Web サービス（`merge_base_branch`・staging 環境へ配る）。この行のバージョンの上げ方は節の外にある（「6 つの問いとキー」の後の段落）。
-バージョン上げのときに流す手順は `.ndf/release.json` の `steps` に `{"name": "lock", "stage": "production", "command": ["npm", "install", "--package-lock-only"], "writes": ["package-lock.json"]}` と書く:
+develop を持つ Web サービス（`merge_base_branch`・staging 環境へ配る）。この行のバージョンの上げ方は節の外にある（「6 つの問いとキー」の後の段落）:
 
 ```json
 {
@@ -448,9 +455,18 @@ develop を持つ Web サービス（`merge_base_branch`・staging 環境へ配�
 }
 ```
 
+バージョン上げのときに流す手順は、`.ndf/release.json` の `steps` に次のように書く:
+
+```json
+{"name": "lock", "stage": "production", "command": ["npm", "install", "--package-lock-only"], "writes": ["package-lock.json"]}
+```
+
 Web サービスの例はマージの方式を書かない（今のマージ）。書くなら `production_merge.method` に `strict` か `merge-queue` を書き、ruleset と照らして使う。
-同じ Web サービスが `trunk` の行を選ぶと、`package.json` のバージョンは節の `"release": {"version_store": {"kind": "json", "path": "package.json", "key": "version", "name": "web"}}` で選ぶ
-（確かめ 8 の `web-trunk` の例）。
+同じ Web サービスが `trunk` の行を選ぶと、`package.json` のバージョンは節の次の値で選ぶ（確かめ 8 の `web-trunk` の例）:
+
+```json
+"release": {"version_store": {"kind": "json", "path": "package.json", "key": "version", "name": "web"}}
+```
 
 ## 処理の流れ
 
@@ -558,10 +574,10 @@ workflow は main への push の run を `concurrency`（グループ 1 つ・`
 | マージの直前 | main の先端がバージョン上げの PR の head に含まれていなければマージしない。次の push の `bump` が進める |
 
 **バージョン上げの PR とキュー。** バージョン上げの PR も迂回せず、本番の PR と同じマージの方式で入る（決定 20）。`merge-queue` では、
-差分がバージョンの置き場・CHANGELOG・手順の書き先に限られ、設定ファイルの方式が ruleset と一致し、head が main の先端を含むときだけ、
-head を `expectedHeadOid` に渡してキューの先頭へ入れる（`jump`）。キューは一時のコミットで必須のチェックを走らせるため、
-確かめていない組み合わせは main へ入らない。先頭へ入れるのは、前に並んだ PR がバージョン上げのマージコミットの祖先に入ると、
-その PR がタグの範囲（そのコミット..先端）から外れ、バージョン上げも CHANGELOG の行も無いまま前のバージョンとして出るためである。
+次の 3 つがそろうときだけ、head を `expectedHeadOid` に渡してキューの先頭へ入れる（`jump`）。
+差分がバージョンの置き場・CHANGELOG・手順の書き先に限られること、設定ファイルの方式が ruleset と一致すること、head が main の先端を含むことである。キューは一時のコミットで必須のチェックを走らせるため、
+確かめていない組み合わせは main へ入らない。先頭へ入れる理由は、前に並んだ PR の扱いにある。その PR がバージョン上げのマージコミットの祖先に入ると、
+タグの範囲（そのコミット..先端）から外れる。するとバージョン上げも CHANGELOG の行も無いまま、前のバージョンとして出る。
 組み直しが間に合わずに追い越されたときは、上の表の最初の行のとおり `bump` がタグを作らずに上げ直す。`strict` では head が main の先端を含むときだけ head の一致の確認付きでマージし、確かめの後に
 main が動けば GitHub の最新の取り込みの規則が断る。キューから外れた・断られたときは `bump` はタグを作らずに止まり、次の main への push の
 `bump` が開いたバージョン上げの PR を上の表のとおり進める。
@@ -569,8 +585,8 @@ main が動けば GitHub の最新の取り込みの規則が断る。キュー�
 **リリースとバージョンの間の時間。** main へのマージで本番の中身は新しいコードになり、バージョンはバージョン上げの PR のマージで変わる。
 この間に新しく入れた利用者は、前のバージョンの番号で新しいコードを受け取る（「人へ残す判断」の P1 の行）。
 
-**CD が止まったとき。** バージョン上げの PR のチェックが落ちた・キューから外れた・最新の取り込みの規則で断られた・取り込みが衝突したときは、`bump` はタグを作らずに止まり、
-workflow の結果とバージョン上げの PR のコメントに理由を書く。`confirm` は `ci_budget` まで待って `stopped` になり、「本番はマージ済み」と
+**CD が止まったとき。** バージョン上げの PR のチェックが落ちた・キューから外れた・最新の取り込みの規則で断られた・取り込みが衝突したときは、`bump` はタグを作らずに止まる。
+理由は workflow の結果とバージョン上げの PR のコメントに書く。`confirm` は `ci_budget` まで待って `stopped` になり、「本番はマージ済み」と
 理由を出す。次の手は `rerun` の 1 つである。足りないものが `bump` なら手動の起動 `step=bump` を打ち直す。
 タグか GitHub Release なら `step=publish`（入力 `revision` に `outputs.bump_revision`）を打ち直す。どちらも、その後に `confirm` を打ち直す。
 
@@ -616,7 +632,7 @@ head が動いた（`refused`）・キューから外れた（`queue_removed`）
 1. ブランチ戦略の節の `verify` を読む。無ければ `not_applicable` で終わる。種類が表に無ければ止まる
 2. 本番ブランチ宛ての開いた PR のうち、下書きでなく、head が検証用ブランチでもバージョン上げの PR でもフォークでもないものを番号の順に並べる
 3. 本番ブランチの先端から作業用のブランチを作り、PR の head を順にマージする。衝突すればそこで止め、衝突した PR を結果に出し、検証用ブランチを動かさない
-4. 種類が `marketplace` なら、2 つを書き換えたコミットを足す。`.claude-plugin/marketplace.json` の `name` は検証用マーケットプレイスの名前へ、リリース対象のバージョンは `<main のバージョン>-next.<組んだ時刻 UTC の YYYYMMDDHHMMSS>` へ書き換える。`deploy` なら書き換えない
+4. 種類が `marketplace` なら、2 つを書き換えたコミットを足す。`.claude-plugin/marketplace.json` の `name` は検証用マーケットプレイスの名前へ書き換える。リリース対象のバージョンは `<main のバージョン>-next.<組んだ時刻 UTC の YYYYMMDDHHMMSS>` へ書き換える。`deploy` なら書き換えない
 5. 前の検証用ブランチの head を親に足したコミットを fast-forward で push する
 6. 種類が `deploy` なら、`{ref}`・`{head}` を置き換えたコマンドを `timeout_seconds` まで流す。失敗すれば理由を結果に出す（検証用ブランチは 5 のまま残す）
 
@@ -723,8 +739,14 @@ head が動いた（`refused`）・キューから外れた（`queue_removed`）
 
 #3572 の実装は #3587 に足す（決定 24）。#3576 を閉じる理由は決定 13 にある。#3119 は設計の決定 21 を見直す（決定 25）。差分は同じ設計 PR の `issues/issue-3119-design.md` にあり、
 実装の差分を持たないためこの表に行を置かない。必須のチェックを出す workflow の一覧は、実装のときに ruleset の 17 個の名前から引き直す。
-上の表の workflow は 2026-11-15 の名前から引いた候補で、1 つの workflow が複数のチェックを出す。ai-plugins の `.ndf/branch-strategy.json` の作成と、移す前の 3 つのファイル（`.ndf/worktree.json`・`.ndf/project.json`・`.ndf/release.json`）から
-節へ移したキーを外す書き換えは、11.0.0 の入れ替え（#3304）の PR で、#3613 の移行のコマンドが行う。この課題の実装では、節のスキーマと
+上の表の workflow は 2026-11-15 の名前から引いた候補で、1 つの workflow が複数のチェックを出す。
+
+次の 2 つは、11.0.0 の入れ替え（#3304）の PR で #3613 の移行のコマンドが行う。
+
+- ai-plugins の `.ndf/branch-strategy.json` の作成
+- 移す前の 3 つのファイル（`.ndf/worktree.json`・`.ndf/project.json`・`.ndf/release.json`）から、節へ移したキーを外す書き換え
+
+この課題の実装では、節のスキーマと
 読み分けだけを入れる（決定 23・29）。#3587 で消した `prepare.py` は戻さない（次のバージョンのリリースブランチの用意は、今の行でも ndf-next の
 工程が持たない）。
 
