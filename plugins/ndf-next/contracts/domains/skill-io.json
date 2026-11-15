@@ -32,6 +32,21 @@
   },
   "rows": [
     {
+      "id": "backlog-refinement",
+      "args": [
+        "",
+        ".*"
+      ],
+      "declarations": [
+        "backlog",
+        "issue-items",
+        "project"
+      ],
+      "env": [],
+      "result": "none",
+      "meaning": "開いている課題を読み、重複と古いものを整理して優先順位を付ける"
+    },
+    {
       "id": "cherry-pick-pr",
       "args": [
         "[^ ]+"
@@ -52,6 +67,47 @@
       "meaning": "開発コンテナから利用者の Chrome へ CDP で繋ぎ、ログインと目視の確かめをする"
     },
     {
+      "id": "cross-refactoring",
+      "args": [
+        "",
+        ".*"
+      ],
+      "declarations": [
+        "code-metrics",
+        "project",
+        "runtime-policy"
+      ],
+      "env": [],
+      "result": "report",
+      "meaning": "複数の AI ランタイムで同じ範囲をリファクタリングし、テストの通るものを採る"
+    },
+    {
+      "id": "cross-review",
+      "args": [
+        "",
+        ".*"
+      ],
+      "declarations": [
+        "pace",
+        "project",
+        "review",
+        "runtime-policy"
+      ],
+      "env": [],
+      "result": "report",
+      "meaning": "複数の AI ランタイムで Pull Request をレビューし、指摘が無くなるまで修正と再レビューを回す"
+    },
+    {
+      "id": "decision-request",
+      "args": [],
+      "declarations": [
+        "ask"
+      ],
+      "env": [],
+      "result": "none",
+      "meaning": "人へ判断を求める前に、経緯・根拠・選択肢を示す手順"
+    },
+    {
       "id": "deploy",
       "args": [
         "[^ ]+"
@@ -64,12 +120,76 @@
       "meaning": "環境ブランチへのデプロイの Pull Request を作る。引数は環境ブランチの名前"
     },
     {
+      "id": "design",
+      "args": [],
+      "declarations": [
+        "backlog"
+      ],
+      "env": [],
+      "result": "none",
+      "meaning": "領域ごとの設計の観点と手順"
+    },
+    {
+      "id": "development-workflow",
+      "declarations": [
+        "ask",
+        "backlog",
+        "context",
+        "glossary",
+        "handoff",
+        "mvv",
+        "mvv-body",
+        "pace",
+        "parallel",
+        "project",
+        "projects",
+        "release",
+        "supervise",
+        "worktree",
+        "worktree-local"
+      ],
+      "result": "block",
+      "meaning": "課題を指して、要求から本番のリリースまでの開発の工程を回す"
+    },
+    {
       "id": "docker-container-access",
       "args": [],
       "declarations": [],
       "env": [],
       "result": "none",
       "meaning": "コンテナへの接続と localhost の経路の失敗を調べる"
+    },
+    {
+      "id": "document-drafting",
+      "args": [],
+      "declarations": [],
+      "env": [],
+      "result": "none",
+      "meaning": "文書の下書きを書く手順"
+    },
+    {
+      "id": "document-rebuild",
+      "args": [],
+      "declarations": [],
+      "env": [],
+      "result": "none",
+      "meaning": "既存の文書を作り直す手順"
+    },
+    {
+      "id": "document-sources",
+      "args": [],
+      "declarations": [],
+      "env": [],
+      "result": "none",
+      "meaning": "文書の材料の集め方と出典の残し方"
+    },
+    {
+      "id": "document-style",
+      "args": [],
+      "declarations": [],
+      "env": [],
+      "result": "none",
+      "meaning": "文書の書き方の規則"
     },
     {
       "id": "document-systems",
@@ -80,6 +200,70 @@
       "meaning": "文書の置き場（Google Drive・Notion・Confluence・SharePoint・リポジトリ）ごとの読み書きの手順を持つ"
     },
     {
+      "id": "estimate",
+      "args": [
+        "",
+        ".*"
+      ],
+      "declarations": [
+        "estimate"
+      ],
+      "env": [],
+      "result": "none",
+      "meaning": "課題か作業の説明から、作業の量と費用を見積もる"
+    },
+    {
+      "id": "external-ai",
+      "args": [],
+      "declarations": [
+        "runtime-policy"
+      ],
+      "env": [],
+      "result": "none",
+      "meaning": "外部の AI ランタイム（codex・agy・kiro）を呼ぶ手順"
+    },
+    {
+      "id": "fix",
+      "args": [
+        "",
+        ".*"
+      ],
+      "declarations": [
+        "review"
+      ],
+      "env": [],
+      "result": "none",
+      "meaning": "Pull Request のレビューの指摘を振り分けて直し、戻り値ファイルを書く"
+    },
+    {
+      "id": "google-workspace",
+      "args": [],
+      "declarations": [],
+      "env": [],
+      "result": "none",
+      "meaning": "Google Workspace（Drive・Docs・Sheets）を読み書きする手順"
+    },
+    {
+      "id": "implementation-plan",
+      "args": [],
+      "declarations": [],
+      "env": [],
+      "result": "none",
+      "meaning": "設計から実装のプランを作る手順"
+    },
+    {
+      "id": "install-wrapper",
+      "args": [
+        "install",
+        "uninstall",
+        "status"
+      ],
+      "declarations": [],
+      "env": [],
+      "result": "none",
+      "meaning": "Claude Code の中継（ラッパー）を入れる・外す・状態を見る"
+    },
+    {
       "id": "investigation-rules",
       "args": [],
       "declarations": [],
@@ -88,12 +272,47 @@
       "meaning": "調べた手段を示さずに「無い」と書かないための規則"
     },
     {
+      "id": "issue-plan-strategy",
+      "args": [
+        "",
+        ".*"
+      ],
+      "declarations": [
+        "handoff",
+        "parallel"
+      ],
+      "env": [],
+      "result": "none",
+      "meaning": "課題を読み、並べて進める実装のプランを立てる"
+    },
+    {
+      "id": "layout-review",
+      "args": [],
+      "declarations": [],
+      "env": [],
+      "result": "none",
+      "meaning": "画面の配置をレビューする手順"
+    },
+    {
       "id": "logging-guidelines",
       "args": [],
       "declarations": [],
       "env": [],
       "result": "none",
       "meaning": "ログのレベルの選び方と、秘密と個人の情報をログに出さない規則"
+    },
+    {
+      "id": "merged",
+      "args": [
+        "",
+        "[1-9][0-9]*"
+      ],
+      "declarations": [
+        "worktree"
+      ],
+      "env": [],
+      "result": "none",
+      "meaning": "マージ済みの Pull Request の作業場所とブランチを片付ける。引数は Pull Request の番号"
     },
     {
       "id": "ml-model-structure",
@@ -122,6 +341,58 @@
       "meaning": "Notion のページの書き方"
     },
     {
+      "id": "official-skills-autoloader",
+      "args": [],
+      "declarations": [],
+      "env": [],
+      "result": "none",
+      "meaning": "公式の Skill を必要なときに読み込む"
+    },
+    {
+      "id": "out-of-scope",
+      "args": [],
+      "declarations": [
+        "issue-items"
+      ],
+      "env": [],
+      "result": "none",
+      "meaning": "範囲外の指摘を課題として起票する"
+    },
+    {
+      "id": "plan-to-spec",
+      "args": [],
+      "declarations": [
+        "glossary"
+      ],
+      "env": [],
+      "result": "none",
+      "meaning": "出したスプリントのプランを確定した仕様の文書へ移す"
+    },
+    {
+      "id": "pr",
+      "args": [
+        "",
+        ".*"
+      ],
+      "declarations": [
+        "worktree"
+      ],
+      "env": [],
+      "result": "none",
+      "meaning": "今のブランチから Pull Request を作る"
+    },
+    {
+      "id": "pr-review",
+      "args": [
+        "",
+        ".*"
+      ],
+      "declarations": [],
+      "env": [],
+      "result": "report",
+      "meaning": "Pull Request かブランチをレビューし、承認か変更の要求を判定する"
+    },
+    {
       "id": "pr-tests",
       "args": [
         "",
@@ -131,6 +402,151 @@
       "env": [],
       "result": "none",
       "meaning": "Pull Request の本文のテストの計画を流し、結果を Pull Request のコメントに書く。引数は Pull Request の番号（無ければ今のブランチの Pull Request）"
+    },
+    {
+      "id": "problem-solving",
+      "args": [],
+      "declarations": [],
+      "env": [],
+      "result": "none",
+      "meaning": "不具合の根本原因を切り分ける手順"
+    },
+    {
+      "id": "progress-tracking",
+      "args": [
+        "",
+        ".*"
+      ],
+      "declarations": [
+        "projects"
+      ],
+      "env": [],
+      "result": "none",
+      "meaning": "課題の工程の進み具合を GitHub Projects へ記録する"
+    },
+    {
+      "id": "qa-security-scan",
+      "args": [],
+      "declarations": [],
+      "env": [],
+      "result": "none",
+      "meaning": "セキュリティの検査を流して結果をまとめる"
+    },
+    {
+      "id": "quality-gates",
+      "args": [],
+      "declarations": [
+        "project"
+      ],
+      "env": [],
+      "result": "none",
+      "meaning": "テスト・静的解析・型の検査をまとめて流す"
+    },
+    {
+      "id": "refactoring",
+      "args": [],
+      "declarations": [
+        "code-metrics"
+      ],
+      "env": [],
+      "result": "none",
+      "meaning": "言語ごとのリファクタリングの手順"
+    },
+    {
+      "id": "release",
+      "args": [],
+      "declarations": [
+        "instructions",
+        "project",
+        "release",
+        "supervise",
+        "worktree"
+      ],
+      "env": [],
+      "result": "none",
+      "meaning": "版を作り、開発版と本番へリリースする"
+    },
+    {
+      "id": "release-verification",
+      "args": [],
+      "declarations": [],
+      "env": [],
+      "result": "none",
+      "meaning": "リリースした版を実際に使って受け入れ条件を確かめる"
+    },
+    {
+      "id": "requirements-design",
+      "args": [],
+      "declarations": [
+        "glossary",
+        "issue-items"
+      ],
+      "env": [],
+      "result": "none",
+      "meaning": "課題から要求と受け入れ条件をまとめる"
+    },
+    {
+      "id": "restart",
+      "args": [
+        "",
+        ".*"
+      ],
+      "declarations": [
+        "handoff"
+      ],
+      "env": [],
+      "result": "block",
+      "meaning": "再開のコマンドで claude を再起動する（中継の下では応答の末尾の ndf-next ブロックで切り替える）"
+    },
+    {
+      "id": "retrospective",
+      "args": [],
+      "declarations": [
+        "worktree"
+      ],
+      "env": [],
+      "result": "none",
+      "meaning": "スプリントの振り返りを書く"
+    },
+    {
+      "id": "skill-stats",
+      "args": [],
+      "declarations": [],
+      "env": [],
+      "result": "none",
+      "meaning": "Skill の使われ方を集計する"
+    },
+    {
+      "id": "statusline",
+      "args": [
+        "status",
+        "set",
+        "restore"
+      ],
+      "declarations": [],
+      "env": [],
+      "result": "none",
+      "meaning": "Claude Code の statusline を切り替える・戻す・状態を見る"
+    },
+    {
+      "id": "tdd-cycle",
+      "args": [],
+      "declarations": [],
+      "env": [],
+      "result": "none",
+      "meaning": "テストを先に書いて実装する手順"
+    },
+    {
+      "id": "worktree",
+      "args": [],
+      "declarations": [
+        "project",
+        "worktree",
+        "worktree-local"
+      ],
+      "env": [],
+      "result": "none",
+      "meaning": "作業場所（git worktree）を作り、依存を用意する"
     }
   ]
 }

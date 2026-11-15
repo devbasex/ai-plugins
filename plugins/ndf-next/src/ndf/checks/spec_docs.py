@@ -223,12 +223,18 @@ def _launcher_findings(model: SpecModel, rel: Rel) -> list[Finding]:
 # --- spec-skill ---
 
 
-def _words(line: str) -> list[str]:
-    plain = line.replace("`", " ")
+def _segments(line: str) -> list[str]:
+    """呼び出しを探す区間。インラインのコード（`...`）を持つ行はその中身ごと、持たない行は行の全体。"""
+    return line.split("`")[1::2] if "`" in line else [line]
+
+
+def _words(segment: str) -> list[str]:
+    """区間の語の並び。単独の `#` から後ろはシェルの注釈で、呼び出しに数えない。"""
     try:
-        return shlex.split(plain)
+        words = shlex.split(segment)
     except ValueError:
-        return plain.split()
+        words = segment.split()
+    return words[: words.index("#")] if "#" in words else words
 
 
 def _call_at(words: list[str], i: int) -> list[str] | None:
@@ -248,8 +254,8 @@ def written_calls(text: str) -> list[tuple[int, list[str]]]:
     """本文の行から `ndf`（か末尾が `/bin/ndf` の語）で始まる呼び出しを探し、（行, 後ろの語の並び）を返す。"""
     out = []
     for number, line in enumerate(text.splitlines(), 1):
-        words = _words(line)
-        out += [(number, call) for i in range(len(words)) if (call := _call_at(words, i)) is not None]
+        for words in map(_words, _segments(line)):
+            out += [(number, call) for i in range(len(words)) if (call := _call_at(words, i)) is not None]
     return out
 
 

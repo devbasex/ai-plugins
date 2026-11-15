@@ -142,6 +142,9 @@ def test_written_calls_and_call_errors(copy):
     text = "打つ: `ndf check --base x | tail`\n`ndf:design` は Skill\nplugins/p/bin/ndf contracts check --nope\nndf の副命令\n"
     calls = spec_docs.written_calls(text)
     assert calls == [(1, ["check", "--base", "x"]), (3, ["contracts", "check", "--nope"])]
+    # インラインのコードの後ろの地の文と、シェルの注釈の中の語は呼び出しに数えない
+    marker = "ブロック（`# >>> ndf relay >>>` 〜 `# <<< ndf relay <<<`）で足す。ラッパー（`ndf relay`）の下では\n"
+    assert spec_docs.written_calls(marker) == [(1, ["relay"])]
     commands = {c.name: c for c in spec_model.load(copy.root).commands}
     assert spec_docs.call_errors(["check", "--base=x", "<起点>"], commands) == []
     assert spec_docs.call_errors(["contracts", "check", "--nope"], commands) == ["引数 --nope が無い"]
