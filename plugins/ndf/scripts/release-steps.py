@@ -385,7 +385,7 @@ def section_prs(root, a):
     return prs, prev, to, extra_out
 
 
-def _pr_fields(to):
+def _pr_view_fields(to):
     """PR の読み出しの欄。終点 to があれば絞り込みに使うマージコミットも読む。"""
     return "title,body,state" + (",mergeCommit" if to else "")
 
@@ -400,7 +400,7 @@ def pr_titles(root, prs, skipped=None, to=None, extra_out=(), outside=None):
     """PR ごとに (番号, 箇条)（included.titles_of。スプリント経由と利用者向けの変化なしの PR は箇条にしない）。
     終点 to を渡すと、範囲の外の --prs のうち終点に入っていない番号を外して outside へ足す（included.drop_outside）。"""
     prs = included.as_included(prs)
-    data = pr_many(root, [p.number for p in prs], _pr_fields(to))
+    data = pr_many(root, [p.number for p in prs], _pr_view_fields(to))
     prs = _within_end(root, prs, data, to, extra_out, outside)
     return included.titles_of(prs, data, skipped)
 
@@ -1111,7 +1111,7 @@ def pr_notes(root, prs, skipped=None, replacing=None, unreadable=None, data=None
     """PR ごとの配る中身・危険・移行の手順（included.notes_of）。data は pr_many の出力（渡さなければここで読む）。
     終点 to を渡すと、範囲の外の --prs のうち終点に入っていない番号を外して outside へ足す（included.drop_outside）。"""
     prs = included.as_included(prs)
-    data = data if data is not None else pr_many(root, [p.number for p in prs], _pr_fields(to))
+    data = data if data is not None else pr_many(root, [p.number for p in prs], _pr_view_fields(to))
     prs = _within_end(root, prs, data, to, extra_out, outside)
     return included.notes_of(prs, data, skipped, replacing, unreadable)
 
