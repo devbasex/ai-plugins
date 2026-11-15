@@ -279,3 +279,41 @@ def test_flow_drift_rows_for_fields_and_reviews():
         },
     ]
     assert measure_flow.drift(None, None) == []
+
+
+def _dated_commit(repo: Path, day: int, tag: str) -> None:
+    stamp = f"2026-01-{day:02d}T00:00:00Z"
+    env = {"GIT_COMMITTER_DATE": stamp, "GIT_AUTHOR_DATE": stamp, "PATH": "/usr/bin:/bin"}
+    subprocess.run(["git", "-C", str(repo), "commit", "-q", "--allow-empty", "-m", tag], check=True, env=env)
+    _git(repo, "tag", tag)
+
+
+def test_tree_words_and_its_readers(tmp_path):
+    """現状固定（I-027）: `Tree.words` の分け方・失敗で空・締め切りで TimeUp と、それを読む既定ブランチ・ブランチ・タグの測定。"""
+    path = _small_repo(tmp_path, {"a.txt": "a\n"})
+    _git(path, "config", "user.email", "t@example.com")
+    for day, tag in ((2, "v1"), (4, "v3"), (3, "v2"), (5, "v4")):
+        _dated_commit(path, day, tag)
+    _git(path, "branch", "develop")
+    tree = _tree(path)
+    assert tree.words("tag", "--sort=-creatordate") == ["v4", "v3", "v2", "v1"]
+    assert tree.words("rev-parse", "--verify", "nope") == []
+    assert tree.words("for-each-ref", "--format=%(refname:short) x", "refs/heads") == ["develop", "x", "main", "x"]
+    with pytest.raises(measure_repo.TimeUp):
+        _tree(path, -1).words("tag")
+    assert measure_repo.default_branch(tree) == "main"
+    assert measure_repo.measure_delivery(tree)["candidates"]["tags"] == {"count": 4, "latest": ["v4", "v3", "v2"]}
+    branches = measure_repo.measure_branches(tree)
+    assert branches == {
+        "status": "question",
+        "candidates": {"base": ["main", "develop"], "production": ["main"]},
+        "evidence": [
+            {"text": "main の最後のコミット: 2026-01-05T00:00:00Z"},
+            {"text": "develop の最後のコミット: 2026-01-05T00:00:00Z"},
+        ],
+    }
+    _git(path, "branch", "-m", "main", "trunk")
+    _git(path, "branch", "-D", "develop")
+    tree = _tree(path)
+    assert measure_repo.default_branch(tree) is None
+    assert measure_repo.measure_branches(tree)["status"] == "unknown"
