@@ -221,3 +221,61 @@ def test_measure_materials_caps_libraries_and_evidence(tmp_path):
     assert got["evidence"] == [{"text": f"npm: zz-sentry-{i:02d}"} for i in range(measure_repo.MAX_EVIDENCE)]
     empty = measure_repo.measure_materials(_tree(path), {})
     assert empty["evidence"] == [] and empty["candidates"]["seeds"]["libraries"] == []
+
+
+def test_flow_drift_rows_for_fields_and_reviews():
+    """現状固定（I-016）: 4 項目とレビューの単位のずれの行の形。書いたレビューの行は 1 つの値と、書いていない種類は既定値の 2 列と比べる。"""
+    worktree = {"branch_flow": {**measure_flow.default_flow(), "reviews": {"impl": {"checks": [], "diff": "none"}}}}
+    item = {
+        "fields": {
+            "start": {"value": "base"},
+            "integrate": {"value": "x", "confidence": "低", "evidence": [{"path": "a"}]},
+            "doc_prs": {"confidence": "高"},
+            "promotion": {"value": "selected", "evidence": "not a list"},
+        },
+        "reviews": {
+            "impl": {"value": {"checks": ["cross-review"], "diff": "pr"}, "confidence": "中"},
+            "sprint": {"value": {"checks": ["cross-refactoring", "behavior"], "diff": "unchecked"}},
+            "release": {"value": {"checks": ["x"], "diff": "none"}, "evidence": [1]},
+            "spec": {"unknown": "測れない"},
+        },
+    }
+    assert measure_flow.drift(worktree, item) == [
+        {
+            "kind": "drift",
+            "name": "branch_flow.integrate",
+            "declared": "check",
+            "measured": "x",
+            "confidence": "低",
+            "evidence": [{"path": "a"}],
+            "proposal": "branch_flow.integrate を x にする（同じ promotion の行が許す組み合わせに揃えてから write で書く）",
+        },
+        {
+            "kind": "drift",
+            "name": "branch_flow.promotion",
+            "declared": "whole",
+            "measured": "selected",
+            "confidence": None,
+            "evidence": [],
+            "proposal": "branch_flow.promotion を selected にする（同じ promotion の行が許す組み合わせに揃えてから write で書く）",
+        },
+        {
+            "kind": "drift",
+            "name": "branch_flow.reviews.impl",
+            "declared": {"checks": [], "diff": "none"},
+            "measured": {"checks": ["cross-review"], "diff": "pr"},
+            "confidence": "中",
+            "evidence": [],
+            "proposal": "branch_flow.reviews.impl を {'checks': ['cross-review'], 'diff': 'pr'} にする（成り立たない組み合わせは check が直すキーと理由を出す）",
+        },
+        {
+            "kind": "drift",
+            "name": "branch_flow.reviews.release",
+            "declared": {"既定値": [{"checks": [], "diff": "none"}, {"checks": [], "diff": "none"}]},
+            "measured": {"checks": ["x"], "diff": "none"},
+            "confidence": None,
+            "evidence": [1],
+            "proposal": "branch_flow.reviews.release を {'checks': ['x'], 'diff': 'none'} にする（成り立たない組み合わせは check が直すキーと理由を出す）",
+        },
+    ]
+    assert measure_flow.drift(None, None) == []
