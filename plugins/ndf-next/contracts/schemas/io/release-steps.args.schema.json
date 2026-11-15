@@ -1,0 +1,491 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/io/release-steps.args.schema.json",
+  "title": "ndf release-steps の引数",
+  "description": "ndf release-steps が受ける引数。キーは引数の名前（オプションは -- の名前、位置引数は名前）。規約の生成が作り、手で直さない",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "answer",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--root": {
+          "type": "string",
+          "default": ".",
+          "description": "リポジトリの根"
+        },
+        "--repo": {
+          "type": "string",
+          "description": "<所有者>/<リポジトリ>。省けば origin"
+        },
+        "--pr": {
+          "type": "integer"
+        },
+        "--answer": {
+          "type": "string",
+          "enum": [
+            "approved",
+            "rejected"
+          ]
+        },
+        "--presented": {
+          "type": "string",
+          "description": "提示した先端の SHA（present の outputs.head）"
+        },
+        "--by": {
+          "type": "string",
+          "enum": [
+            "user",
+            "mvv"
+          ],
+          "description": "答えた担い手（利用者 user / MVV 判定 mvv。迂回は user だけを数える）"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--pr",
+        "--answer",
+        "--presented",
+        "--by"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "approval-check",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--root": {
+          "type": "string",
+          "default": ".",
+          "description": "リポジトリの根"
+        },
+        "--repo": {
+          "type": "string",
+          "description": "<所有者>/<リポジトリ>。省けば origin"
+        },
+        "--pr": {
+          "type": "integer"
+        },
+        "--production": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--pr",
+        "--production"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "assemble",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--root": {
+          "type": "string",
+          "default": ".",
+          "description": "リポジトリの根"
+        },
+        "--repo": {
+          "type": "string",
+          "description": "<所有者>/<リポジトリ>。省けば origin"
+        },
+        "--base": {
+          "type": "string",
+          "description": "ベースブランチ（宣言 worktree.json の base_branch）"
+        },
+        "--production": {
+          "type": "string",
+          "description": "本番ブランチ（宣言 worktree.json の production_branch）"
+        },
+        "--channel": {
+          "type": "string",
+          "enum": [
+            "production",
+            "dev"
+          ]
+        },
+        "--level": {
+          "type": "string",
+          "enum": [
+            "major",
+            "minor",
+            "patch"
+          ],
+          "default": "patch"
+        },
+        "--plugin": {
+          "type": "string",
+          "description": "ブランチの名前に版を使うプラグイン（省けば登録の順の先頭）"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--base",
+        "--production",
+        "--channel"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "cleanup",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--root": {
+          "type": "string",
+          "default": ".",
+          "description": "リポジトリの根"
+        },
+        "--repo": {
+          "type": "string",
+          "description": "<所有者>/<リポジトリ>。省けば origin"
+        },
+        "--branch": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "subcommand",
+        "--branch"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "config-check",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--root": {
+          "type": "string",
+          "default": ".",
+          "description": "リポジトリの根"
+        },
+        "--repo": {
+          "type": "string",
+          "description": "<所有者>/<リポジトリ>。省けば origin"
+        },
+        "--before": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--before"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "config-snapshot",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--root": {
+          "type": "string",
+          "default": ".",
+          "description": "リポジトリの根"
+        },
+        "--repo": {
+          "type": "string",
+          "description": "<所有者>/<リポジトリ>。省けば origin"
+        },
+        "--out": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--out"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "materials",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--root": {
+          "type": "string",
+          "default": ".",
+          "description": "リポジトリの根"
+        },
+        "--repo": {
+          "type": "string",
+          "description": "<所有者>/<リポジトリ>。省けば origin"
+        },
+        "--base": {
+          "type": "string",
+          "description": "ベースブランチ（宣言 worktree.json の base_branch）"
+        },
+        "--production": {
+          "type": "string",
+          "description": "本番ブランチ（宣言 worktree.json の production_branch）"
+        },
+        "--channel": {
+          "type": "string",
+          "enum": [
+            "production",
+            "dev"
+          ]
+        },
+        "--level": {
+          "type": "string",
+          "enum": [
+            "major",
+            "minor",
+            "patch"
+          ],
+          "default": "patch"
+        },
+        "--plugin": {
+          "type": "string",
+          "description": "ブランチの名前に版を使うプラグイン（省けば登録の順の先頭）"
+        },
+        "--out": {
+          "type": "string",
+          "description": "承認資料を書くファイル（省けば標準出力）"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--base",
+        "--production",
+        "--channel"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "merge",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--root": {
+          "type": "string",
+          "default": ".",
+          "description": "リポジトリの根"
+        },
+        "--repo": {
+          "type": "string",
+          "description": "<所有者>/<リポジトリ>。省けば origin"
+        },
+        "--pr": {
+          "type": "integer"
+        },
+        "--base": {
+          "type": "string",
+          "description": "ベースブランチ（宣言 worktree.json の base_branch）"
+        },
+        "--production": {
+          "type": "string",
+          "description": "本番ブランチ（宣言 worktree.json の production_branch）"
+        },
+        "--budget": {
+          "type": "number",
+          "description": "必須のチェックを待つ秒"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--pr",
+        "--base",
+        "--production",
+        "--budget"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "present",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--root": {
+          "type": "string",
+          "default": ".",
+          "description": "リポジトリの根"
+        },
+        "--repo": {
+          "type": "string",
+          "description": "<所有者>/<リポジトリ>。省けば origin"
+        },
+        "--pr": {
+          "type": "integer"
+        },
+        "--material": {
+          "type": "string",
+          "description": "承認資料のファイル（省けば PR の本文）"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--pr"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "publish",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--root": {
+          "type": "string",
+          "default": ".",
+          "description": "リポジトリの根"
+        },
+        "--repo": {
+          "type": "string",
+          "description": "<所有者>/<リポジトリ>。省けば origin"
+        },
+        "--revision": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--revision"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "record",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--root": {
+          "type": "string",
+          "default": ".",
+          "description": "リポジトリの根"
+        },
+        "--repo": {
+          "type": "string",
+          "description": "<所有者>/<リポジトリ>。省けば origin"
+        },
+        "--pr": {
+          "type": "integer"
+        },
+        "--production": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--pr",
+        "--production"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "records",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--root": {
+          "type": "string",
+          "default": ".",
+          "description": "リポジトリの根"
+        },
+        "--repo": {
+          "type": "string",
+          "description": "<所有者>/<リポジトリ>。省けば origin"
+        },
+        "--pr": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--pr"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "sync-base",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--root": {
+          "type": "string",
+          "default": ".",
+          "description": "リポジトリの根"
+        },
+        "--repo": {
+          "type": "string",
+          "description": "<所有者>/<リポジトリ>。省けば origin"
+        },
+        "--main-dir": {
+          "type": "string"
+        },
+        "--base": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--main-dir",
+        "--base"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "verification-record",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--root": {
+          "type": "string",
+          "default": ".",
+          "description": "リポジトリの根"
+        },
+        "--repo": {
+          "type": "string",
+          "description": "<所有者>/<リポジトリ>。省けば origin"
+        },
+        "--pr": {
+          "type": "integer"
+        },
+        "--record": {
+          "type": "string",
+          "description": "リリース後テストの記録の JSON（スキーマ release-verification）"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--pr",
+        "--record"
+      ]
+    }
+  ]
+}

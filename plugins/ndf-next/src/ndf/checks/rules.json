@@ -99,6 +99,10 @@
   "child_deps": {
     "max_per_slot": 2
   },
+  "spec": {
+    "rules": ["spec-docs", "spec-decl", "spec-io", "spec-skill", "spec-public"],
+    "generated": ["docs/contracts/*.md", "contracts/schemas/io/*.args.schema.json"]
+  },
   "invariants": {
     "old_plugin": "plugins/ndf",
     "immediate_fix_mark": "即時修正（plugins/ndf）:",

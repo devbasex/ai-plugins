@@ -1,0 +1,584 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/io/loop.args.schema.json",
+  "title": "ndf loop の引数",
+  "description": "ndf loop が受ける引数。キーは引数の名前（オプションは -- の名前、位置引数は名前）。規約の生成が作り、手で直さない",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "acceptance check",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        },
+        "--issue": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--issue"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "acceptance record",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        },
+        "--pre-merge": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "'<条件の番号>=<手段（テスト名・実行したコマンド）>'"
+        },
+        "--post-release": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "リリースの後でしか確かめられない条件の番号"
+        },
+        "--issue": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--issue"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "acceptance show",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        },
+        "--issue": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--issue"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "answer",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        },
+        "name": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "--pr": {
+          "type": "integer"
+        },
+        "--answer": {
+          "type": "string",
+          "enum": [
+            "approved",
+            "revise",
+            "rejected"
+          ]
+        },
+        "--note": {
+          "type": "string",
+          "default": "",
+          "description": "差し戻しの理由など"
+        }
+      },
+      "required": [
+        "subcommand",
+        "name",
+        "--pr",
+        "--answer"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "close-plan",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        },
+        "--pace": {
+          "type": "string"
+        },
+        "--route": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "promote",
+              "merged-by-check",
+              "manual",
+              "none"
+            ]
+          }
+        },
+        "--mvv": {
+          "type": "boolean",
+          "description": "MVV の判定がある"
+        },
+        "--record-pr": {
+          "type": "integer",
+          "description": "リリース記録の PR の番号（0 は記録なし）"
+        },
+        "--retrospective-due": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--pace",
+        "--route"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "created",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        },
+        "name": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "issues": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "x-ndf-positional": true
+        }
+      },
+      "required": [
+        "subcommand",
+        "name",
+        "issues"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "design-tests",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        },
+        "--issue": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "HEAD の issues/issue-<N>-design*.md を読む"
+        },
+        "--design": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "作業場所の設計文書のパス"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "exclude",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        },
+        "name": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "--session": {
+          "type": "string",
+          "description": "打ったセッションの識別子"
+        },
+        "--issue": {
+          "type": "integer"
+        },
+        "--reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subcommand",
+        "name",
+        "--session",
+        "--issue",
+        "--reason"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "gate",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        },
+        "name": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "--pr": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "subcommand",
+        "name",
+        "--pr"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "get",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        },
+        "name": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "--field": {
+          "type": "string",
+          "enum": [
+            "status",
+            "stop",
+            "holder",
+            "laps",
+            "current",
+            "rejections",
+            "created"
+          ]
+        }
+      },
+      "required": [
+        "subcommand",
+        "name"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "lap",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        },
+        "name": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "--session": {
+          "type": "string",
+          "description": "打ったセッションの識別子"
+        },
+        "--failed": {
+          "type": "boolean",
+          "description": "手順の失敗の印"
+        },
+        "--failure-key": {
+          "type": "string"
+        },
+        "--version": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "この周で出した版（記録に無いもの）"
+        },
+        "--returned": {
+          "type": "boolean",
+          "description": "リリースを承認されずに人へ戻した"
+        },
+        "--unreadable": {
+          "type": "string",
+          "description": "版の記録を読めなかった理由"
+        }
+      },
+      "required": [
+        "subcommand",
+        "name",
+        "--session"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "released",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        },
+        "name": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "--version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subcommand",
+        "name",
+        "--version"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "review-args",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        },
+        "--purpose": {
+          "type": "string",
+          "enum": [
+            "design",
+            "code"
+          ],
+          "description": "cross-review run の --purpose"
+        },
+        "--pr": {
+          "type": "integer"
+        },
+        "--state-dir": {
+          "type": "string"
+        },
+        "--base": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--purpose",
+        "--pr",
+        "--state-dir",
+        "--base"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "select",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        },
+        "name": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "--session": {
+          "type": "string",
+          "description": "打ったセッションの識別子"
+        },
+        "--candidates": {
+          "type": "string",
+          "description": "候補の行の JSON の配列のファイル"
+        },
+        "--first": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "先頭に選ぶ課題（直して出し直すと答えた課題）"
+        },
+        "--size": {
+          "type": "integer",
+          "default": 1,
+          "description": "周に入れる課題の数"
+        }
+      },
+      "required": [
+        "subcommand",
+        "name",
+        "--session",
+        "--candidates"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "sprint",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        },
+        "name": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "--session": {
+          "type": "string",
+          "description": "打ったセッションの識別子"
+        },
+        "--mode": {
+          "type": "string"
+        },
+        "--basis": {
+          "type": "string",
+          "description": "モードの判定の根拠"
+        }
+      },
+      "required": [
+        "subcommand",
+        "name",
+        "--session",
+        "--mode",
+        "--basis"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "start",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        },
+        "name": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "--session": {
+          "type": "string",
+          "description": "打ったセッションの識別子"
+        }
+      },
+      "required": [
+        "subcommand",
+        "name",
+        "--session"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "stop",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        },
+        "name": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "--by": {
+          "type": "string",
+          "enum": [
+            "human",
+            "organizer"
+          ]
+        },
+        "--reason": {
+          "type": "string",
+          "default": ""
+        },
+        "--now": {
+          "type": "boolean",
+          "description": "周の境を待たずにその場で止める"
+        }
+      },
+      "required": [
+        "subcommand",
+        "name",
+        "--by"
+      ]
+    }
+  ]
+}

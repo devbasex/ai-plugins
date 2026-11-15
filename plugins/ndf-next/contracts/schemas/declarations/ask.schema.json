@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "declarations/ask.schema.json",
+  "title": "人へ問う区分の宣言（.ndf/ask.json）",
+  "description": "人へ問う区分（AskUserQuestion の守り）と費用の閾値",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "編集のときの補完に使うスキーマの位置。読み手は参照しない"
+    },
+    "version": {
+      "type": "integer",
+      "enum": [
+        1
+      ],
+      "description": "宣言の形の版。読み手は知らない版を読まない"
+    },
+    "mode": {
+      "type": "string",
+      "description": "区分の無い問いの扱い。enforce は断る、advise は案内する、off は見ない",
+      "enum": [
+        "enforce",
+        "advise",
+        "off"
+      ],
+      "default": "enforce"
+    },
+    "allow": {
+      "type": "array",
+      "description": "許す区分（既定は cost・irreversible・human-action・legal）",
+      "items": {
+        "type": "string"
+      }
+    },
+    "cost": {
+      "type": "object",
+      "description": "費用の区分",
+      "properties": {
+        "threshold_usd": {
+          "type": "number",
+          "description": "この額（USD）を超える費用だけを問う",
+          "minimum": 0,
+          "default": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "extra": {
+      "type": "array",
+      "description": "足す区分",
+      "items": {
+        "type": "object",
+        "description": "区分 1 つ",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "区分の名前"
+          },
+          "description": {
+            "type": "string",
+            "description": "区分の説明"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "description"
+        ]
+      }
+    }
+  },
+  "x-ndf-place": "worktree",
+  "x-ndf-read-by": [
+    {
+      "by": "ndf hooks",
+      "when": "人への問いの hook（PreToolUse）で区分を照らすとき"
+    }
+  ],
+  "examples": [
+    {
+      "version": 1,
+      "mode": "enforce",
+      "cost": {
+        "threshold_usd": 10
+      }
+    }
+  ]
+}

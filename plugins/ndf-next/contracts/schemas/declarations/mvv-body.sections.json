@@ -1,0 +1,94 @@
+{
+  "summary": "Markdown の宣言 mvv.md（mvv-body）の節の並び。人の承認（M7）で書き、MVV の照合が節の見出しで本文を引く",
+  "owner": "宣言を読む子（初版は #3518。ndf.checks.spec_model）",
+  "columns": {
+    "order": {
+      "type": "integer",
+      "summary": "節の順番（1 から）"
+    },
+    "level": {
+      "type": "integer",
+      "summary": "見出しの深さ（# の数）"
+    },
+    "heading": {
+      "type": "string",
+      "summary": "節の見出しの語"
+    },
+    "required": {
+      "type": "boolean",
+      "summary": "必ず置く節か"
+    },
+    "meaning": {
+      "type": "string",
+      "summary": "節が持つもの"
+    }
+  },
+  "rows": [
+    {
+      "id": "title",
+      "order": 1,
+      "level": 1,
+      "heading": "<プロジェクト名> のプロジェクト MVV",
+      "required": true,
+      "meaning": "表題と、この MVV が何の基準かの 1 段落"
+    },
+    {
+      "id": "mission",
+      "order": 2,
+      "level": 2,
+      "heading": "Mission",
+      "required": true,
+      "meaning": "何のためにやるか"
+    },
+    {
+      "id": "vision",
+      "order": 3,
+      "level": 2,
+      "heading": "Vision",
+      "required": true,
+      "meaning": "目指す姿"
+    },
+    {
+      "id": "value",
+      "order": 4,
+      "level": 2,
+      "heading": "Value",
+      "required": true,
+      "meaning": "判断の基準（番号つきの項目）"
+    },
+    {
+      "id": "principles",
+      "order": 5,
+      "level": 2,
+      "heading": "NDF の共通原則との関係",
+      "required": false,
+      "meaning": "共通原則の範囲で読むこと"
+    },
+    {
+      "id": "approval",
+      "order": 6,
+      "level": 2,
+      "heading": "必ず人の承認が要る操作",
+      "required": false,
+      "meaning": "プロジェクトが足す操作（P の番号）"
+    },
+    {
+      "id": "revision",
+      "order": 7,
+      "level": 2,
+      "heading": "改訂",
+      "required": false,
+      "meaning": "改訂の規則"
+    }
+  ],
+  "x-ndf-read-by": [
+    {
+      "by": "ndf records mvv",
+      "when": "MVV の照合で本文を読むとき"
+    },
+    {
+      "by": "ndf records preflight",
+      "when": "工程の前に本文があるかを確かめるとき"
+    }
+  ]
+}

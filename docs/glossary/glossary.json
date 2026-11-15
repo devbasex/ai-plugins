@@ -7444,6 +7444,12 @@
       "pending_source": "issues/issue-3518-design.md"
     },
     {
+      "term": "手書きの引数の表",
+      "context": "ndf-workflow",
+      "meaning": "argparse を使わない副命令の呼び方（下位の命令の道ごとに 1 行）と引数を持つ事実の表（`plugins/ndf-next/contracts/domains/manual-args.json`）。規約の生成がこの表から引数のスキーマを作る",
+      "pending_source": "issues/issue-3518-design.md"
+    },
+    {
       "term": "上げる先（依存の版の）",
       "context": "ndf-workflow",
       "meaning": "#3347 の決定 106 の規則で選んだ依存の版のうち、最初のアップロードから 7 日たったもの",

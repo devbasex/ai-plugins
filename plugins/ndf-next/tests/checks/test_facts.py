@@ -265,3 +265,27 @@ def test_table_hits_reports_sets_and_strings_per_table():
         "table-set: ONE が表 codes の id を写す",
         "table-str: SHORT が表 codes の id を写す",
     ]
+
+
+def test_shared_names_table_is_not_matched_against_constants(with_schema, rules):
+    plugin = with_schema
+    shared = json.loads(table([{"id": "deploy"}, {"id": "verify"}], {}))
+    shared["shared_names"] = True
+    plugin.write("contracts/domains/skills.json", json.dumps(shared))
+    plugin.write("contracts/facts/stages.json", table([{"id": "release"}, {"id": "rollback"}], {}))
+    plugin.write("src/ndf/a.py", 'STAGES = ("deploy", "verify")\nONE = "verify"\nRUN = ("release", "rollback")\nTWO = "release"\n')
+    found = facts.check(plugin.scope(), rules)
+    assert sorted(f.detail for f in found) == [
+        "table-set: RUN が表 stages の id を写す",
+        "table-str: TWO が表 stages の id を写す",
+    ]
+
+
+def test_shared_names_table_still_has_its_shape_checked(with_schema, rules):
+    plugin = with_schema
+    dup = json.loads(table([{"id": "a"}, {"id": "a"}], {}))
+    dup["shared_names"] = True
+    plugin.write("contracts/domains/skills.json", json.dumps(dup))
+    plugin.write("contracts/domains/bad.json", json.dumps({**dup, "shared_names": "yes"}))
+    found = sorted((f.path.rsplit("/", 1)[-1], f.detail.split(":", 1)[0]) for f in facts.check(plugin.scope(), rules))
+    assert found == [("bad.json", "表の形"), ("skills.json", "`id` の重なり")]

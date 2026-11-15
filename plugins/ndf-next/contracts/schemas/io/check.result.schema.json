@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "check.result.schema.json",
+  "title": "ndf check の結果 JSON",
+  "description": "ndf check が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果の契約（result.schema.json）が持ち、ここは metrics と items の形だけを足す。metrics と items の要素は閉じていて、載せた項目のほかの項目を持つと通らない",
+  "allOf": [
+    {
+      "$ref": "../result.schema.json"
+    }
+  ],
+  "properties": {
+    "tool": {
+      "const": "check"
+    },
+    "metrics": {
+      "type": "object",
+      "description": "ndf check の計測値",
+      "additionalProperties": false,
+      "properties": {
+        "files": {
+          "type": "integer",
+          "description": "見たファイルの数"
+        },
+        "findings": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "description": "規則 → 指摘の件数"
+        },
+        "written": {
+          "type": "integer",
+          "description": "--write-spec で書いた・消した生成物の数（--write-spec のときだけ）"
+        }
+      }
+    },
+    "items": {
+      "type": "array",
+      "description": "ndf check の項目の並び",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "rule": {
+            "type": "string",
+            "description": "規則の名前"
+          },
+          "path": {
+            "type": "string",
+            "description": "リポジトリの根からのパス"
+          },
+          "line": {
+            "type": "integer",
+            "description": "行"
+          },
+          "detail": {
+            "type": "string",
+            "description": "指摘の中身"
+          }
+        },
+        "required": [
+          "rule",
+          "path",
+          "line",
+          "detail"
+        ]
+      }
+    }
+  }
+}

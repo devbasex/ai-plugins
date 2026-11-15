@@ -3,6 +3,11 @@
 テストはプラグインの根の依存の環境（`pyproject.toml` と `uv.lock`）で流す（決定 78）。リポジトリの根から
 `pytest .` で流したときは、根の環境にこのディレクトリの依存が無いため収集しない。
 
+テストの間に副命令が出す結果 JSON は、すべて結果の契約（形と、状態・止まった理由と終了コードの対応）と副命令の結果の
+スキーマ（`contracts/schemas/io/<副命令>.result.schema.json`）で確かめる（fixture `_checked_emit`。#3518 の決定 9）。
+形の誤った結果をわざと作るテストは印 `ndf_bad_result` を付ける。全体の実行の終わりに、ok の出力を 1 度も確かめなかった
+副命令があれば、その名前を出して落とす（`pytest_sessionfinish`）。
+
 使い捨ての PostgreSQL は `initdb` と `pg_ctl` で起こす（fixture `start_postgres`。実体は `support/postgres_server.py`）。GitHub Actions の ubuntu の Runner は
 PostgreSQL を入れてある（サービスは止まっている）。手元に無ければ飛ばし、CI（環境変数 `CI`）では落とす。
 """
@@ -10,6 +15,7 @@ PostgreSQL を入れてある（サービスは止まっている）。手元に
 from __future__ import annotations
 
 import json
+import sys
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from pathlib import Path
@@ -17,7 +23,91 @@ from pathlib import Path
 import postgres_server
 import pytest
 
+from ndf import cli
+from ndf.checks import spec_model
+from ndf.contracts import result as result_contract
+
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
+# 形の誤った結果 JSON をわざと作るテストの印
+BAD_RESULT_MARK = "ndf_bad_result"
+# 並列の実行で worker から controller へ ok を確かめた副命令を渡す鍵
+OK_TOOLS_KEY = "ndf_ok_tools"
+# 全体の実行を狭める引数（どれかがあれば ok の出力の確かめを行わない）
+NARROWING_OPTIONS = ("keyword", "markexpr", "deselect", "lf", "last_failed", "failedfirst")
+_ok_tools: set[str] = set()
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    config.addinivalue_line("markers", f"{BAD_RESULT_MARK}: 形の誤った結果 JSON をわざと作るテスト（結果の契約の確かめで落とさない）")
+
+
+def record_output(obj: dict, code: int | None, allow_bad: bool) -> None:
+    """副命令が出した結果 JSON と終了コードの組を結果の契約で、結果 JSON を副命令の結果のスキーマで確かめる。
+
+    確かめるのは `tool` が副命令の表（とエントリポイント `cli`）にある結果だけで、ほかの名前の結果（結果の契約そのものの
+    テストが作る見本）は見ない。合えば ok の副命令の名前を記録する。
+    """
+    tool = obj.get("tool") if isinstance(obj, dict) else None
+    if tool not in cli.COMMANDS and tool != cli.TOOL:
+        return
+    errs = result_contract.errors(obj, code if code is not None else result_contract.code_for(obj))
+    if errs and not allow_bad:
+        pytest.fail(f"副命令 {tool} の結果 JSON が結果の契約に合わない: {errs[:5]}")
+    validator = spec_model.result_validator(tool) if tool in cli.COMMANDS else None
+    shape = (
+        sorted(f"/{'/'.join(str(p) for p in e.absolute_path)}: {e.message}" for e in validator.iter_errors(obj))
+        if validator is not None
+        else []
+    )
+    if shape and not allow_bad:
+        pytest.fail(f"副命令 {tool} の結果 JSON が結果のスキーマに合わない: {shape[:5]}")
+    if not errs and not shape and obj.get("status") == result_contract.OK:
+        _ok_tools.add(tool)
+
+
+@pytest.fixture(autouse=True)
+def _checked_emit(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest) -> None:
+    """テストの間だけ結果 JSON を出す 1 か所（`ndf.contracts.result.emit`）を、確かめてから元の `emit` を呼ぶ関数にする。"""
+    original = result_contract.emit
+    allow_bad = request.node.get_closest_marker(BAD_RESULT_MARK) is not None
+
+    def checked(obj, code=None, stream=None):
+        record_output(obj, code, allow_bad)
+        return original(obj, code, stream)
+
+    monkeypatch.setattr(result_contract, "emit", checked)
+
+
+def is_full_run(config: pytest.Config) -> bool:
+    """全体の実行（引数のパスがプラグインの根か `testpaths` のディレクトリだけで、絞り込みが無い）か。
+
+    引数を書かずに流すと、pytest は `testpaths`（`pyproject.toml` の `["tests"]`）を引数にする。
+    """
+    whole = {PLUGIN_ROOT} | {(config.rootpath / t).resolve() for t in config.getini("testpaths")}
+    base = config.invocation_params.dir
+    paths = [(base / a.split("::")[0]).resolve() for a in config.args]
+    if any(p not in whole for p in paths):
+        return False
+    return not any(getattr(config.option, name, None) for name in NARROWING_OPTIONS)
+
+
+def pytest_testnodedown(node, error) -> None:
+    """並列の実行で、終わった worker の記録を集める（pytest-xdist の controller で呼ばれる）。"""
+    _ok_tools.update(getattr(node, "workeroutput", {}).get(OK_TOOLS_KEY, []))
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    """worker は記録を controller へ渡す。controller（か並列でない実行）は、全体の実行のときだけ ok の無い副命令で落とす。"""
+    config = session.config
+    if hasattr(config, "workeroutput"):
+        config.workeroutput[OK_TOOLS_KEY] = sorted(_ok_tools)
+        return
+    if not is_full_run(config) or exitstatus != 0:
+        return
+    missing = sorted(set(cli.COMMANDS) - _ok_tools)
+    if missing:
+        print(f"ok の出力が確かめられない副命令: {', '.join(missing)}", file=sys.stderr)
+        session.exitstatus = 1
 
 
 def pytest_ignore_collect(collection_path: Path, config: pytest.Config) -> bool | None:

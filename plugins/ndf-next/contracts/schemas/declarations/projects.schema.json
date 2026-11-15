@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "declarations/projects.schema.json",
+  "title": "GitHub Projects の宣言（.ndf/projects.json）",
+  "description": "課題を載せる GitHub Projects のボードと、項目の名前",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "owner",
+    "number"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "編集のときの補完に使うスキーマの位置。読み手は参照しない"
+    },
+    "version": {
+      "type": "integer",
+      "enum": [
+        1
+      ],
+      "description": "宣言の形の版。読み手は知らない版を読まない"
+    },
+    "owner": {
+      "type": "string",
+      "description": "ボードの持ち主（組織か利用者の名前）",
+      "minLength": 1
+    },
+    "number": {
+      "type": "integer",
+      "description": "ボードの番号",
+      "minimum": 1
+    },
+    "fields": {
+      "type": "object",
+      "description": "鍵（status など）→ ボードの項目の名前",
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "x-ndf-place": "worktree",
+  "x-ndf-read-by": [
+    {
+      "by": "工程: 起票と進行",
+      "when": "課題をボードへ載せ、状態を動かすとき"
+    }
+  ],
+  "examples": [
+    {
+      "version": 1,
+      "owner": "example-org",
+      "number": 1,
+      "fields": {
+        "status": "Status"
+      }
+    }
+  ]
+}
