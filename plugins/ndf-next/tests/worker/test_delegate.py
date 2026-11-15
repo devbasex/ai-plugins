@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 
+from ndf import identity
 from ndf.adapters import claude
 from ndf.contracts import result
 from ndf.core import worker
@@ -48,6 +50,20 @@ def test_never_written_stops_as_work_stopped_after_the_limit(tmp_path):
     done = worker.delegate(h, "規則", root=tmp_path, call=fake)
     assert done.cause == "work_stopped"
     assert len(fake.calls) == worker.RESUMES + 1
+
+
+def test_the_launch_passes_the_work_kind_only_while_it_runs(tmp_path, monkeypatch):
+    monkeypatch.delenv(identity.WORKER_KIND_ENV, raising=False)
+    h = _handoff(tmp_path)
+    seen = []
+
+    def fake(argv, prompt, timeout, cwd):
+        seen.append(os.environ.get(identity.WORKER_KIND_ENV))
+        h.result_file.write_text("{}", encoding="utf-8")
+        return claude.ClaudeReply(True, None, "終えた", 0.5)
+
+    assert worker.delegate(h, "規則", root=tmp_path, call=fake).cause is None
+    assert seen == ["fix"] and identity.WORKER_KIND_ENV not in os.environ
 
 
 def test_written_on_the_last_resume_is_taken(tmp_path):

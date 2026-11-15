@@ -9,6 +9,8 @@ worker（`claude -p` の full の起動）へ渡す規則文を組み、作業�
 - 書き手の付いた本文（Issue・PR・コメント）は、write 以上の権限を持つ書き手と確かめた本文だけをそのまま渡し、
   ほかは信用されない入力として囲って渡す。信用の区分の無い本文は信用されない側に倒す（#3364 の 3364-1）
 - 結果ファイルを書かずに応答を終えた worker は、同じ会話を `RESUMES` 回まで起こし直す（`delegate`。#1734）
+- 起動の間は子へ作業種別を環境変数 `identity.WORKER_KIND_ENV` で渡す。hook の guard `full-test` はこれで worker の中の
+  全体テストを止める（#3112）
 - push の前に、コミットの件名と本文の closing keywords を照らし、当たれば push させない（`closing_commits`。#3129）
 - conductor がプランを書き換えるときは、前の中身を控え、差分と理由をプランの進捗記録へ残す（`edit_plan`。#3111）
 - 進捗ログの注意は `state` の値だけで決め、本文の語（「止まった」など）では決めない（`needs_attention`。#1984）
@@ -32,6 +34,7 @@ ndf worker attention <progress.jsonl>
 from __future__ import annotations
 
 import argparse
+import contextlib
 import difflib
 import hashlib
 import json
@@ -41,7 +44,7 @@ import re
 import shutil
 import tempfile
 import uuid
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -266,6 +269,20 @@ def _reply_failed(reply: claude.ClaudeReply, out: Delivery) -> bool:
     return True
 
 
+@contextlib.contextmanager
+def _worker_env(kind: str) -> Iterator[None]:
+    """起動の間だけ、子へ作業種別（`identity.WORKER_KIND_ENV`）を渡す。hook の guard が worker の中かを見分ける（#3112）。"""
+    before = os.environ.get(identity.WORKER_KIND_ENV)
+    os.environ[identity.WORKER_KIND_ENV] = kind
+    try:
+        yield
+    finally:
+        if before is None:
+            os.environ.pop(identity.WORKER_KIND_ENV, None)
+        else:
+            os.environ[identity.WORKER_KIND_ENV] = before
+
+
 def delegate(
     handoff: Handoff,
     system: str,
@@ -288,7 +305,8 @@ def delegate(
     argv = args_for(None) + ["--session-id", out.session]
     prompt = f"{handoff.prompt}\n\n" + RESULT_FILE_LINE.format(result_file=handoff.result_file)
     for attempt in range(RESUMES + 1):
-        reply = call(argv, prompt, handoff.timeout, handoff.cwd)
+        with _worker_env(handoff.kind):
+            reply = call(argv, prompt, handoff.timeout, handoff.cwd)
         out.attempts, out.cost = attempt + 1, out.cost + reply.cost
         out.replies.append(reply.raw[:200])
         if _written(handoff.result_file) or _reply_failed(reply, out):
