@@ -62,6 +62,7 @@ RESULT_TTL = 600  # 結果のファイルを残す秒数（頼む側が読まず
 BAD_NAME = "bad-name"
 NAME_TAKEN = "name-taken"
 LIMIT = "limit"
+HELPER_BUSY = "helper-busy"  # 一時レーンの同時数の断り（#3597 の決定 9）。耐久ワークフローは待ってから打ち直す
 NOT_FOUND = "not-found"
 NO_SESSION = "no-session"  # 再開する会話を決められない（#3555）
 NO_TMUX = "no-tmux"
@@ -243,6 +244,7 @@ class Live(NamedTuple):
     taken: set[str]  # 名前つきで動いている・起動した直後の名前
     helpers: int = 0  # 役割 `helper` の動いているラッパーの数（#2436 の I13）
     humans: int = 0  # 人の起動（`by: terminal`）で動いていて `count` から外したラッパーの数（#2862）
+    helper_names: tuple = ()  # 動いている役割 `helper` のラッパーの名前（#3597。断りの `busy` に載せる）
 
 
 def _role_of(w: Wrapper, registry: dict[str, dict]) -> str | None:
@@ -276,7 +278,8 @@ def live(ws: list[Wrapper], registry: dict[str, dict], sessions: dict[str, dict]
     humans = sum(1 for h, r in zip(human, roles) if h and r != "helper")
     organizer = 1 if any(r == "organizer" and not h for h, r in zip(human, roles)) else 0
     # tmux のセッションの名前も重ねない（tmux が `duplicate session` で断る）
-    return Live(len(names) - helpers - humans - organizer, names, taken | set(sessions), helpers, humans)
+    helper_names = tuple(n for n, r in zip(names, roles) if r == "helper")
+    return Live(len(names) - helpers - humans - organizer, names, taken | set(sessions), helpers, humans, helper_names)
 
 
 def spawn_input(req: dict) -> tuple[str, list[str]]:
@@ -310,6 +313,7 @@ class Refusal(NamedTuple):
     reason: str
     message: str
     code: int
+    busy: str = ""  # 断りの元の動いている一時レーンの名前（`helper-busy` のときだけ）
 
 
 class Hub:
@@ -444,7 +448,8 @@ class Hub:
         cap = max_named()
         if role == "helper":
             if now.helpers >= 1:
-                return Refusal(LIMIT, "一時レーン（役割 helper）は同時に 1 本まで", 3)
+                busy = next(iter(now.helper_names), "")
+                return Refusal(HELPER_BUSY, f"一時レーン（役割 helper）は同時に 1 本まで（動いている: {busy or '-'}）", 3, busy)
         elif by != TERMINAL and now.count >= cap:
             return Refusal(LIMIT, f"同時に動かすラッパーの上限 {cap} に達した（動いている: {', '.join(now.names)}）", 3)
         if tmux.binary() is None:
@@ -480,11 +485,11 @@ class Hub:
     @staticmethod
     def refuse(kind, name, r: Refusal) -> dict:
         hub_log("refused", name if isinstance(name, str) else None, r.reason)
-        return hub_result(kind, "stopped", r.message, name, r.reason, r.code)
+        return hub_result(kind, "stopped", r.message, name, r.reason, r.code, r.busy)
 
 
-def hub_result(kind, status: str, summary: str, name, result: str, code: int) -> dict:
-    """依頼の結果（step_result の形。`metrics.exit_code` は頼む側が終える終了コード）。"""
+def hub_result(kind, status: str, summary: str, name, result: str, code: int, busy: str | None = None) -> dict:
+    """依頼の結果（step_result の形。`metrics.exit_code` は頼む側が終える終了コード）。`busy` は断りの元の一時レーンの名前。"""
     tool = f"relay-{kind}" if kind in ("spawn", "restart") else "relay-hub"
-    item = {"name": name if isinstance(name, str) else None, "result": result}
+    item = {"name": name if isinstance(name, str) else None, "result": result, **({"busy": busy} if busy else {})}
     return {"tool": tool, "status": status, "summary": summary, "items": [item], "metrics": {"exit_code": code}}

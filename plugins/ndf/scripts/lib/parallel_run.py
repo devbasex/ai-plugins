@@ -766,6 +766,7 @@ def _observe_run(run: _Run, main: str) -> dict:
     apply_observed_states(run, rows)
     run.observe_ends(rows)  # 終わったレーンを止め、終わりの記録の無い停止と版の要るまとめを見張る（#3058）
     run.release_woken(rows)  # 動いて観えたら、または動いて観える前に今の再起動より後で止まったら、設計の答えの再起動を解く
+    run.launch_waiting(rows)  # 一時レーンの空き待ち: 待つ相手が止まって観えたら打ち直し、上限を過ぎたら問う（#3597）
     return seen
 
 

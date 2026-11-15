@@ -237,3 +237,144 @@ def test_status_of_an_unknown_plan_exits_2(env, monkeypatch, capsys):  # noqa: F
     with pytest.raises(SystemExit) as e:
         cli.main(["status", "nope"])
     assert e.value.code == 2
+
+
+# ---- #3597: 一時レーンの空き待ち（受け入れ条件 9〜11・I5・I6） ----
+
+
+def _refuse(*items):
+    """`relay.py` の代わり: 打つたびに `items` の断りの項目を 1 つずつ返す（尽きたら最後のものを返し続ける）。"""
+    seen = []
+
+    def relay(where, *argv):
+        seen.append(list(argv))
+        item = items[min(len(seen), len(items)) - 1]
+        return (0, {"items": [item]}) if item.get("result") == "started" else (3, {"items": [item], "summary": "断った"})
+
+    return relay, seen
+
+
+BUSY = {"name": "p6-rel10v", "result": "helper-busy", "busy": "p6-rel17"}
+LIMIT = {"name": "p6-rel10v", "result": "limit"}
+
+
+def test_helper_busy_waits_without_a_second_hit(monkeypatch):
+    """受け入れ条件 9: 一時レーンの同時数の断りは 2 回目を打たずに空き待ちを返し、上限の秒を結果に残す。"""
+    monkeypatch.setenv("NDF_PARALLEL_HELPER_WAIT_SECONDS", "90")
+    relay, seen = _refuse(BUSY)
+    monkeypatch.setattr(plc, "relay", relay)
+    monkeypatch.setattr(plc, "_ls_row", lambda main, lane: {})
+    got = plc.step_launch.__wrapped__("/m", ["spawn", "--name", "p6-rel10v"], "p6-rel10v")
+    assert (got["result"], got["attempts"], got["busy"], got["limit"]) == ("waiting", 1, "p6-rel17", 90.0) and len(seen) == 1
+
+
+def test_a_limit_then_helper_busy_waits_on_the_second_hit(monkeypatch):
+    relay, seen = _refuse(LIMIT, BUSY)
+    monkeypatch.setattr(plc, "relay", relay)
+    monkeypatch.setattr(plc, "_ls_row", lambda main, lane: {})
+    got = plc.step_launch.__wrapped__("/m", ["spawn"], "p6-rel10v")
+    assert (got["result"], got["attempts"]) == ("waiting", 2) and len(seen) == 2
+
+
+def test_other_refusals_are_hit_twice_and_fail_as_before(monkeypatch):
+    """受け入れ条件 11: 全体の上限の `limit` は今と同じく 1 回だけ打ち直し、2 回とも断られれば failed（待たない）。"""
+    relay, seen = _refuse(LIMIT)
+    monkeypatch.setattr(plc, "relay", relay)
+    monkeypatch.setattr(plc, "_ls_row", lambda main, lane: {})
+    got = plc.step_launch.__wrapped__("/m", ["spawn"], "p6-rel10v")
+    assert (got["result"], got["attempts"]) == ("failed", 2) and "busy" not in got and len(seen) == 2
+
+
+@pytest.mark.parametrize("value, want", [("12", 12.0), ("-3", 0.0), ("x", plc.HELPER_WAIT), ("", plc.HELPER_WAIT)])
+def test_helper_wait_seconds_reads_the_env_or_the_declared_limit(monkeypatch, value, want):
+    monkeypatch.setenv("NDF_PARALLEL_HELPER_WAIT_SECONDS", value)
+    assert plc.helper_wait_seconds() == want
+
+
+class _Routing(plc.LaunchRouting):
+    """`_Run` の代わり: 起動の部品が読む値だけを持つ。"""
+
+    def __init__(self):
+        self.main, self.name, self.launching = "/m", "p6", True
+        self.launches, self.helper_seen, self.seen_at, self.asked = {}, {}, 0.0, []
+
+    def ask(self, kind, rid, lane, text, options, **extra):
+        if all(a[1] != rid for a in self.asked):
+            self.asked.append((kind, rid, lane, text, options, extra))
+
+
+def _stamp(t):
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t))
+
+
+def _waiting_run(monkeypatch, results):
+    """最初の起動を `helper-busy` で断られた `_Routing` と、`step_launch` の呼び出しの記録。"""
+    calls_ = []
+    t0 = time.time()
+
+    def fake(main, argv, lane, cwd=None, fresh=False):
+        calls_.append(list(argv))
+        r = results[min(len(calls_), len(results)) - 1]
+        return {"result": r, "attempts": 1, "at": _stamp(t0), "reason": "断られた（helper-busy）" if r != "up" else None,
+                **({"busy": "p6-rel17", "limit": 600.0} if r == "waiting" else {})}  # fmt: skip
+
+    monkeypatch.setattr(plc, "step_launch", fake)
+    run = _Routing()
+    rec = run.launch_once("verify-x", "p6-rel10v", ["spawn", "--name", "p6-rel10v"], n=17)
+    return run, rec, calls_, t0
+
+
+def test_a_helper_busy_launch_is_recorded_as_waiting_without_a_question(monkeypatch):
+    """I5: 空き待ちの間は区分 spawn の問いを立てない。記録は打ち直しに要る起動の入力を持つ。"""
+    run, rec, calls_, _ = _waiting_run(monkeypatch, ["waiting"])
+    assert rec["result"] == "waiting" and rec["busy"] == "p6-rel17" and rec["launch"]["argv"][0] == "spawn"
+    assert rec["extra"] == {"n": 17} and run.asked == []
+    assert run.launch_once("verify-x", "p6-rel10v", ["spawn"]) is rec and len(calls_) == 1  # 記録のある目的は打ち直さない
+
+
+def test_waiting_launch_is_hit_again_once_the_running_helper_stopped(monkeypatch):
+    """受け入れ条件 9: 待つ相手が動いている間は打たず、止まって観えたループの 1 回で打ち直し、待ったことを記録に残す。"""
+    run, _, calls_, t0 = _waiting_run(monkeypatch, ["waiting", "up"])
+    run.seen_at = t0 + 30
+    run.launch_waiting({"p6-rel17": {"state": "running"}})
+    assert len(calls_) == 1 and run.launches["verify-x"]["result"] == "waiting" and run.asked == []
+    run.seen_at = t0 + 48
+    run.launch_waiting({"p6-rel17": {"state": "stopped"}})
+    rec = run.launches["verify-x"]
+    assert len(calls_) == 2 and rec["result"] == "up" and rec["waited"]["busy"] == "p6-rel17" and run.asked == []
+    assert rec["waited"]["seconds"] == pytest.approx(48, abs=1)
+
+
+def test_waiting_past_the_limit_asks_with_the_running_helper_name(monkeypatch):
+    """受け入れ条件 10: 上限を過ぎても待つ相手が動いていれば区分 spawn の問いを立て、本文に同時数の上限と相手の名前が出る。"""
+    run, _, calls_, t0 = _waiting_run(monkeypatch, ["waiting"])
+    run.seen_at = t0 + 600
+    run.launch_waiting({"p6-rel17": {"state": "running"}})
+    assert len(calls_) == 1 and run.launches["verify-x"]["result"] == "failed"
+    (kind, rid, lane, text, options, extra), = run.asked
+    assert (kind, rid, lane) == ("spawn", "p6-launch-verify-x", "p6-rel10v") and "同時に 1 本まで" in text and "p6-rel17" in text
+    assert options == ["起こし直す", "止める"] and extra["n"] == 17 and extra["launch"]["argv"][0] == "spawn"
+
+
+def test_waiting_continues_when_the_retry_is_refused_by_another_helper(monkeypatch):
+    run, _, calls_, t0 = _waiting_run(monkeypatch, ["waiting", "waiting"])
+    since = run.launches["verify-x"]["since"]
+    run.seen_at = t0 + 5
+    run.launch_waiting({})
+    assert len(calls_) == 2 and run.launches["verify-x"]["result"] == "waiting" and run.launches["verify-x"]["since"] == since
+
+
+def test_waiting_retry_that_fails_otherwise_asks(monkeypatch):
+    run, _, calls_, t0 = _waiting_run(monkeypatch, ["waiting", "failed"])
+    run.seen_at = t0 + 5
+    run.launch_waiting({})
+    assert run.launches["verify-x"]["result"] == "failed" and [a[0] for a in run.asked] == ["spawn"]
+
+
+def test_waiting_does_not_sleep_in_one_loop(monkeypatch):
+    """I6: 空き待ちの読み直しはループの 1 回の中で眠らない。"""
+    run, _, _, t0 = _waiting_run(monkeypatch, ["waiting"])
+    monkeypatch.setattr(time, "sleep", lambda s: pytest.fail("ループの 1 回の中で眠った"))
+    run.seen_at = t0 + 1
+    run.launch_waiting({"p6-rel17": {"state": "running"}})
+    assert run.launches["verify-x"]["result"] == "waiting"
