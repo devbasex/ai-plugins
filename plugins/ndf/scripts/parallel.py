@@ -169,6 +169,11 @@ def _resend(s: plg.Sent) -> dict:
     return {"already": True, "answered": s.answered}
 
 
+def _sent_verb(already, fresh: str = "送った") -> str:
+    """要約の動詞: 同じキーの行が既にあった（`already` が真）なら「送り済み」、書いたなら `fresh`（#3597 の決定 5）。"""
+    return "送り済み" if already else fresh
+
+
 def _already(s) -> dict:
     """答え・確定・締め・止める指示の行が既にあったか（終了コードは変えない）。"""
     return {"already": True} if isinstance(s, plg.Sent) and not s.written else {}
@@ -260,7 +265,7 @@ def cmd_confirm(a) -> None:
     main = main_of()
     q = accepting(main, a.name)
     got = _already(sent(pl.resume_plan, main, a.name, {"n": a.n, "phase": "confirm", "take": a.take}, f"confirm:{a.n}:{a.take or '-'}"))
-    reply("ok", f"リリース {a.n} の承認を{'送り済み' if got else '送った'}{QUEUED if q else ''}", n=a.n, take=a.take, **got, **q)
+    reply("ok", f"リリース {a.n} の承認を{_sent_verb(got)}{QUEUED if q else ''}", n=a.n, take=a.take, **got, **q)
 
 
 def _release_result(path: str) -> tuple[str, str | None]:
@@ -285,14 +290,7 @@ def cmd_settle(a) -> None:
     res, version = ("rejected", None) if a.rejected else _release_result(a.done)
     msg = {"n": a.n, "phase": "settle", "result": res, "version": version, "reason": a.reason}
     got = _already(sent(pl.resume_plan, main, a.name, msg, f"settle:{a.n}"))
-    reply(
-        "ok",
-        f"リリース {a.n} の結果 {res} を{'送り済み' if got else '送った'}{QUEUED if q else ''}",
-        result=res,
-        version=version,
-        **got,
-        **q,
-    )
+    reply("ok", f"リリース {a.n} の結果 {res} を{_sent_verb(got)}{QUEUED if q else ''}", result=res, version=version, **got, **q)
 
 
 def cmd_stop(a) -> None:
@@ -332,9 +330,7 @@ def cmd_request(a) -> None:
     again = _resend(rid)  # 中身の違う同じ id の依頼は 1 で終え、依頼の記録を書かない
     pl.write_request(Path(a.state), {"id": rid, "plan": a.name, "lane": a.lane, "prs": a.prs})
     nxt = f"python3 {SELF} await {a.name} --from {Path(a.state) / 'work' / 'request.txt'}"
-    summary = (
-        f"リリースの依頼 {rid} を{'送り済み' if again else '送った'}（リリース待ち）。答えは parallel.py await で読む{QUEUED if q else ''}"
-    )
+    summary = f"リリースの依頼 {rid} を{_sent_verb(again)}（リリース待ち）。答えは parallel.py await で読む{QUEUED if q else ''}"
     reply("gate", summary, code=10, next_step=nxt, id=str(rid), result="requested", **again, **q)
 
 
@@ -381,7 +377,7 @@ def cmd_request_ask(a) -> None:
         pl.request_ask, main, a.name, a.lane, got.get("tool_input") or {}, got.get("cwd") or os.getcwd(), str(got.get("ledger_id") or "")
     )
     again = _resend(rid)
-    reply("ok", f"問いの依頼 {rid} を{'送り済み' if again else 'オーガナイザーへ送った'}{QUEUED if q else ''}", id=str(rid), **again, **q)
+    reply("ok", f"問いの依頼 {rid} を{_sent_verb(again, 'オーガナイザーへ送った')}{QUEUED if q else ''}", id=str(rid), **again, **q)
 
 
 def cmd_request_gate2(a) -> None:
@@ -406,7 +402,7 @@ def cmd_request_gate2(a) -> None:
     except durable.DurableError as exc:
         reply("stopped", f"耐久の記録を読めない: {exc}", code=2)
     again = _resend(rid)
-    what = "送り済み" if again else "オーガナイザーへ送った"
+    what = _sent_verb(again, "オーガナイザーへ送った")
     reply("ok", f"リリース承認ゲートの依頼 {rid} を{what}。答えを待つ間は止まる{QUEUED if q else ''}", id=str(rid), **again, **q)
 
 
@@ -429,9 +425,7 @@ def cmd_answer(a) -> None:
     extra.update(
         id=a.id, result=result, next=nxt, seq=seq, **({"held_owners": held} if held else {}), **pa.not_listed(a.id, items), **queued
     )
-    reply(
-        "ok", f"依頼 {a.id} へ答え（{result}）を{'送り済み' if extra.get('already') else '送った'}{tail}{QUEUED if queued else ''}", **extra
-    )
+    reply("ok", f"依頼 {a.id} へ答え（{result}）を{_sent_verb(extra.get('already'))}{tail}{QUEUED if queued else ''}", **extra)
 
 
 def cmd_park(a) -> None:
