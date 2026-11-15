@@ -33,6 +33,8 @@ class FakeHub:
     drop_comments: bool = False
     node_data: dict[int, dict] = field(default_factory=dict)
     runs: list[dict] = field(default_factory=list)
+    status_list: list[dict] = field(default_factory=list)
+    bot_apps: dict[str, int] = field(default_factory=dict)
 
     def pull(self, number: int) -> Pull:
         return self.pulls[number]
@@ -67,6 +69,12 @@ class FakeHub:
 
     def check_runs(self, sha: str) -> list[dict]:
         return list(self.runs)
+
+    def statuses(self, sha: str) -> list[dict]:
+        return list(self.status_list)
+
+    def bot_app(self, login: str) -> int | None:
+        return self.bot_apps.get(login)
 
     def merge(self, number: int, expect_head: str | None = None, method: str | None = None) -> MergeOutcome:
         self.merged.append(number)

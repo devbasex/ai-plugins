@@ -2,8 +2,8 @@
 
 管理者の迂回は必須のチェックも飛ばすため、迂回で本番チャネルへ入れる前に、宛先の規則（ruleset）と従来の保護が
 要求するチェックが先端に現れて通ったことを `GreenWatch` で確かめる。規則が発行元のアプリ（ruleset の `integration_id`・
-従来の保護の `app_id`）を指定していれば、そのアプリの check run が先端で通ったことも確かめる（同じ名前の別の発行元の
-成功を数えない）。規則は全ページを読み、読めなければ止める（迂回の前提を読めないまま進めない）。
+従来の保護の `app_id`）を指定していれば、そのアプリの check run か、そのアプリの bot（`<slug>[bot]`）が付けた commit status が
+先端で通ったことも確かめる（同じ名前の別の発行元の成功を数えない）。規則は全ページを読み、読めなければ止める（迂回の前提を読めないまま進めない）。
 """
 
 from __future__ import annotations
@@ -22,6 +22,10 @@ PER_PAGE = 100
 ANY_APP = -1
 # 必須のチェックを満たす check run の結論（rollup の判定と同じく SKIPPED・NEUTRAL は通過）
 PASSED = frozenset({"success", "neutral", "skipped"})
+# 必須のチェックを満たす commit status の状態
+STATUS_PASSED = "success"
+# GitHub App の bot の login の末尾（`<アプリの slug>[bot]`。commit status の書き手からアプリを引く）
+BOT_SUFFIX = "[bot]"
 
 
 class Required(NamedTuple):
@@ -141,15 +145,42 @@ def _latest_passed(runs: list, app: int) -> bool:
     return last.get("status") == "completed" and str(last.get("conclusion") or "").lower() in PASSED
 
 
+def _bot_app(root, login: str, cache: dict[str, int | None]) -> int | None:
+    """GitHub App の bot（`<slug>[bot]`）が属するアプリの ID。bot でない・アプリが無ければ None。読めなければ StepError。"""
+    if login not in cache:
+        slug = login.removesuffix(BOT_SUFFIX)
+        got = _gh_json(root, f"apps/{quote(slug, safe='')}") if slug and slug != login else None
+        cache[login] = _app(got.get("id")) if isinstance(got, dict) else None
+    return cache[login]
+
+
+def _status_passed(root, statuses: list, name: str, app: int, cache: dict[str, int | None]) -> bool:
+    """名前 `name` の commit status のうち、発行元 `app` の bot が付けた最新（ID が最大）が success か。"""
+    mine = [
+        s
+        for s in statuses
+        if isinstance(s, dict)
+        and s.get("context") == name
+        and _bot_app(root, str((s.get("creator") or {}).get("login") or ""), cache) == app
+    ]
+    return bool(mine) and max(mine, key=lambda s: int(s.get("id") or 0)).get("state") == STATUS_PASSED
+
+
 def unmet_sources(root, sha: str, req: Required) -> list[str]:
-    """発行元を指定された必須のチェックのうち、指定のアプリの check run が先端 `sha` で通っていないもの（`名前（アプリ ID）`）。
-    読めなければ StepError（全ページを読めないまま迂回しない）。"""
-    unmet = []
+    """発行元を指定された必須のチェックのうち、指定のアプリの check run も、そのアプリの bot が付けた commit status も
+    先端 `sha` で通っていないもの（`名前（アプリ ID）`）。読めなければ StepError（全ページを読めないまま迂回しない）。
+    commit status は check run で満たせない名前があるときだけ読む。"""
+    unmet: list[tuple[str, int]] = []
     for name in sorted(req.apps):
         pages = _gh_pages(root, f"repos/{{owner}}/{{repo}}/commits/{sha}/check-runs?check_name={quote(name, safe='')}") or []
         runs = [r for page in pages if isinstance(page, dict) for r in page.get("check_runs") or []]
-        unmet += [f"{name}（アプリ {app}）" for app in sorted(req.apps[name]) if not _latest_passed(runs, app)]
-    return unmet
+        unmet += [(name, app) for app in sorted(req.apps[name]) if not _latest_passed(runs, app)]
+    if unmet:
+        pages = _gh_pages(root, f"repos/{{owner}}/{{repo}}/commits/{sha}/statuses") or []
+        statuses = [s for page in pages if isinstance(page, list) for s in page]
+        cache: dict[str, int | None] = {}
+        unmet = [(name, app) for name, app in unmet if not _status_passed(root, statuses, name, app, cache)]
+    return [f"{name}（アプリ {app}）" for name, app in unmet]
 
 
 def check_sources(root, n: int, sha: str | None, req: Required, items: list) -> None:

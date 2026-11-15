@@ -197,9 +197,7 @@ def test_required_check_with_a_named_app_counts_only_that_app() -> None:
     lander = land.Lander(hub, "develop", "main", 1.0)
     assert lander.required("main") == land.Required(["build", "lint", "pytest"], {"pytest": frozenset({15368}), "build": frozenset({7})})
     runs = [_run("pytest", 999, 1), _run("build", 7, 2), _run("lint", 42, 3)]
-    hub.responses[("GET", f"/repos/o/r/commits/{HEAD}/status")] = {
-        "statuses": [{"context": "pytest", "state": "success", "updated_at": "t1", "created_at": "t0", "id": 4}]
-    }
+    hub.status_list = [_status("pytest", "someone", 4)]
     readers: list[Callable[[], ci.Reading]] = []
 
     def wait(reader: Callable[[], ci.Reading], budget: float) -> ci.WatchResult:
@@ -212,6 +210,46 @@ def test_required_check_with_a_named_app_counts_only_that_app() -> None:
     done = land.Lander(hub, "develop", "main", 1.0, wait=wait).land(7)
     assert readers[0]().missing == ["pytest"] and not done.merged and hub.merged == []
     hub.runs = [*runs, _run("pytest", 15368, 5)]
+    assert readers[0]().missing == []
+
+
+def _status(context: str, creator: str, status_id: int, state: str = "success") -> dict:
+    return {"context": context, "state": state, "updated_at": "t1", "created_at": "t0", "id": status_id, "creator": {"login": creator}}
+
+
+def _named_app_lander(hub: FakeHub) -> tuple[land.Lander, list[Callable[[], ci.Reading]]]:
+    hub.responses[("GET", "/repos/o/r/rules/branches/main")] = [
+        {"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": "pytest", "integration_id": 15368}]}}
+    ]
+    hub.pulls = {7: pull()}
+    hub.comments_of = {7: [_trail("approved", HEAD)]}
+    readers: list[Callable[[], ci.Reading]] = []
+
+    def wait(reader: Callable[[], ci.Reading], budget: float) -> ci.WatchResult:
+        readers.append(reader)
+        return ci.WatchResult(reader(), 1, 0.0, 0.0)
+
+    return land.Lander(hub, "develop", "main", 1.0, wait=wait), readers
+
+
+def test_required_check_with_a_named_app_counts_that_apps_commit_status() -> None:
+    """#3506: 発行元を指定された必須のチェックは、そのアプリの bot が付けた commit status でも満たす。別の書き手の status は数えない。"""
+    hub = FakeHub(bot_apps={"github-actions[bot]": 15368, "other-app[bot]": 99})
+    hub.status_list = [_status("pytest", "other-app[bot]", 1)]
+    lander, readers = _named_app_lander(hub)
+    assert not lander.land(7).merged and readers[0]().missing == ["pytest"]
+    hub.status_list = [_status("pytest", "other-app[bot]", 1), _status("pytest", "github-actions[bot]", 2)]
+    assert readers[0]().missing == [] and hub.merged == []
+
+
+@pytest.mark.parametrize("name", ["other / pytest", "pytest (1/2)", "ci / pytest (0/2)"])
+def test_named_app_check_is_matched_by_the_same_name_rule_as_the_wait(name: str) -> None:
+    """#3506: 別の発行元の実行は、前置きや分割ジョブの末尾が付いていても、必須のチェックとして数えない（待ちと同じ照合で絞る）。"""
+    hub = FakeHub(runs=[_run(name, 999, 1)])
+    hub.status_list = [_status(name, "someone", 2)]
+    lander, readers = _named_app_lander(hub)
+    assert not lander.land(7).merged and readers[0]().missing == ["pytest"] and hub.merged == []
+    hub.runs = [_run(name, 999, 1), _run(f"ci / {name.rpartition(' / ')[2]}", 15368, 3)]
     assert readers[0]().missing == []
 
 

@@ -412,6 +412,20 @@ def test_branch_rules_read_every_page_and_stop_over_the_limit() -> None:
         _hub(full).branch_rules("main")
 
 
+def test_bot_app_reads_the_app_of_a_bot_and_none_otherwise() -> None:
+    """#3506: commit status の書き手が GitHub App の bot（`<slug>[bot]`）ならアプリの ID、bot でない・アプリが無ければ None。"""
+    server = Server(
+        {
+            ("GET", "/apps/github-actions"): [httpx.Response(200, json={"id": 15368, "slug": "github-actions"})],
+            ("GET", "/apps/gone"): [httpx.Response(404, json={"message": "Not Found"})],
+        }
+    )
+    hub = _hub(server)
+    assert hub.bot_app("github-actions[bot]") == 15368
+    assert hub.bot_app("gone[bot]") is None and hub.bot_app("octocat") is None and hub.bot_app("[bot]") is None
+    assert [r.url.path for r in server.seen] == ["/apps/github-actions", "/apps/gone"]
+
+
 def _issue_page(numbers: list[int], total: int, more: bool) -> dict:
     conn = {"totalCount": total, "pageInfo": {"hasNextPage": more, "endCursor": "c"}, "nodes": [{"number": n} for n in numbers]}
     return {"data": {"repository": {"issues": conn}}}

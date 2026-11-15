@@ -127,6 +127,15 @@ elif a[:1] == ["api"] and "/check-runs?" in a[-1]:  # 発行元を指定され�
     q = __import__("urllib.parse").parse.parse_qs(a[-1].split("?", 1)[1])
     runs = [r for r in st.get("check_runs", []) if r.get("name") == q.get("check_name", [""])[0]]
     out = json.dumps({{"total_count": len(runs), "check_runs": runs}})
+elif a[:1] == ["api"] and "/statuses?" in a[-1]:  # 先端の commit status の全件（発行元の照合。#3506）
+    out = json.dumps(st.get("status_list", []))
+elif a[:1] == ["api"] and a[-1].startswith("apps/"):  # bot の属するアプリ
+    app = st.get("bot_apps", {{}}).get(a[-1].split("/", 1)[1] + "[bot]")
+    if app is None:
+        code = 1
+        sys.stderr.write("gh: Not Found (HTTP 404)\n")
+    else:
+        out = json.dumps({{"id": app}})
 elif a[:1] == ["api"] and "/branches/" in a[-1] and "branch_protection" in st:  # 従来の保護（迂回の必須のチェック）
     out = json.dumps({{"protection": st["branch_protection"]}})
 elif a[:1] == ["api"] and __import__("re").search(r"/branches/[^/]+$", a[-1]):
@@ -1482,6 +1491,42 @@ def test_promote_admin_case_checks_the_app_named_by_the_rule(repo, gh, tmp_path,
     rules = [*REVIEW_RULES, {"type": "required_status_checks", "parameters": {"required_status_checks": [must]}}]
     passed = dict(to("main", X), headRefName="develop", statusCheckRollup=[run_("must")])
     code, out, err = _promote_admin(repo, gh, tmp_path, rules_pages=[rules], rules=rules, check_runs=runs, pr_seq={"9": [passed] * 3})
+    if merged:
+        assert code == 0 and merges(gh) == [["pr", "merge", "9", "--admin", "--merge", "--match-head-commit", X]], (out, err)
+    else:
+        assert code == 1 and merges(gh) == [], (out, err)
+        assert {"kind": "check", "name": "must（アプリ 15368）", "result": "unmet_source"} in out["items"]
+
+
+def _status(context, creator, status_id, state="success"):
+    return {"id": status_id, "context": context, "state": state, "creator": {"login": creator}}
+
+
+@pytest.mark.parametrize(
+    ("statuses", "merged"),
+    [
+        ([_status("must", "someone", 1)], False),  # 利用者が付けた status は数えない
+        ([_status("must", "other-app[bot]", 1)], False),  # 別のアプリの bot が付けた status は数えない
+        ([_status("must", "github-actions[bot]", 2, "failure"), _status("must", "github-actions[bot]", 1)], False),  # 最新が落ちている
+        ([_status("must", "someone", 1), _status("must", "github-actions[bot]", 2)], True),
+    ],
+)
+def test_promote_admin_case_counts_the_status_of_the_app_named_by_the_rule(repo, gh, tmp_path, statuses, merged):
+    """#3506: 規則が発行元を指定した必須のチェックは、指定のアプリの bot が付けた commit status が先端で success でも満たす
+    （例: ndf/release-approval を GitHub Actions のアプリに限った cd-admin）。"""
+    must = {"context": "must", "integration_id": 15368}
+    rules = [*REVIEW_RULES, {"type": "required_status_checks", "parameters": {"required_status_checks": [must]}}]
+    passed = dict(to("main", X), headRefName="develop", statusCheckRollup=[run_("must")])
+    code, out, err = _promote_admin(
+        repo,
+        gh,
+        tmp_path,
+        rules_pages=[rules],
+        rules=rules,
+        status_list=statuses,
+        bot_apps={"github-actions[bot]": 15368, "other-app[bot]": 99},
+        pr_seq={"9": [passed] * 3},
+    )
     if merged:
         assert code == 0 and merges(gh) == [["pr", "merge", "9", "--admin", "--merge", "--match-head-commit", X]], (out, err)
     else:

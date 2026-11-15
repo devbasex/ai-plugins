@@ -21,6 +21,7 @@ import subprocess
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from http import HTTPStatus
 from typing import Any, NamedTuple, Optional, TypeVar
 from urllib.parse import quote
 
@@ -43,6 +44,8 @@ PULL_FIELDS = (
 PULLS_PER_HEAD = 5
 # 一覧の 1 ページの件数（REST と GraphQL の上限。ページ数の上限は limits.json の github.check-runs・github.list-pages）
 PER_PAGE = 100
+# GitHub App の bot の login の末尾（`<アプリの slug>[bot]`。commit status の書き手からアプリを引く。#3506）
+BOT_SUFFIX = "[bot]"
 # 上限に当たった枠（`GitHubError.quota`）
 REST, GRAPHQL = "rest", "graphql"
 # マージの要求を GitHub が断ったときの HTTP の状態（405: 規則・衝突、409: 先端が変わった、422: 形）
@@ -619,6 +622,24 @@ class GitHub:
             if len(runs) >= int(body["total_count"]) or not body["check_runs"]:
                 return runs
         raise _too_many_pages(f"{sha} のチェックが", pages, "github.check-runs")
+
+    def statuses(self, sha: str) -> list[dict]:
+        """コミットの commit status の全件（`GET /commits/<sha>/statuses`。書き手の `creator` を持つ。#3506）。"""
+        return [s for s in self._pages(f"/repos/{self.repo}/commits/{sha}/statuses") if isinstance(s, dict)]
+
+    def bot_app(self, login: str) -> Optional[int]:
+        """GitHub App の bot（`<slug>[bot]`）が属するアプリの ID。bot でない・アプリが無ければ None（#3506）。"""
+        slug = login.removesuffix(BOT_SUFFIX)
+        if slug == login or not slug:
+            return None
+        try:
+            got = self.rest("GET", f"/apps/{quote(slug, safe='')}")
+        except GitHubError as exc:
+            if exc.status == HTTPStatus.NOT_FOUND:
+                return None
+            raise
+        app_id = got.get("id") if isinstance(got, dict) else None
+        return app_id if isinstance(app_id, int) and not isinstance(app_id, bool) else None
 
     def job_log(self, job_id: int) -> str:
         """Actions のジョブのログの本文。"""

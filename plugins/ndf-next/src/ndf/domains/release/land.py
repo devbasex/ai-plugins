@@ -68,11 +68,11 @@ class Landed(NamedTuple):
     record_error: str | None = None
 
 
-def _status_run(status: dict) -> dict:
-    """commit status 1 件を check run の形にする（`ci.read` に渡す）。"""
+def _status_run(status: dict, app: int | None = None) -> dict:
+    """commit status 1 件を check run の形にする（`ci.read` に渡す）。`app` は書き手の GitHub App（分かれば `app.id` に入れる）。"""
     state = text_of(status["state"]).lower()
     conclusion = "" if state in PENDING_STATES else state
-    return {
+    run = {
         "name": text_of(status["context"]),
         "status": "completed" if conclusion else "in_progress",
         "conclusion": conclusion,
@@ -80,6 +80,9 @@ def _status_run(status: dict) -> dict:
         "started_at": text_of(status["created_at"]),
         "id": int(status["id"]),
     }
+    if app is not None:
+        run["app"] = {"id": app}
+    return run
 
 
 def _review_count(raw: dict) -> int:
@@ -109,11 +112,19 @@ def _protection_checks(branch: dict) -> list[tuple[str, int | None]]:
     return contexts + [(text_of(c["context"]), _app(c.get("app_id"))) for c in _list(checks, "checks") if isinstance(c, dict)]
 
 
-def _from_sources(runs: list[dict], apps: dict[str, frozenset[int]]) -> list[dict]:
-    """発行元を指定された名前は、指定のアプリの check run だけを残す（同じ名前の別の発行元と commit status を数えない。#3506）。
+def _restricted(name: str, apps: dict[str, frozenset[int]]) -> list[frozenset[int]]:
+    """チェックの名前 `name` が `ci.read` の照合で当たる、発行元を指定された必須のチェックのアプリの集合の並び。"""
+    return [want for required, want in apps.items() if ci.fulfils(name, required)]
 
-    同じ名前に別々のアプリが指定されていれば、1 つの check run では満たせないため、その名前は残さない（待ちが止める）。"""
-    return [r for r in runs if r.get("name") not in apps or apps[r["name"]] == {(r.get("app") or {}).get("id")}]
+
+def _from_sources(runs: list[dict], apps: dict[str, frozenset[int]]) -> list[dict]:
+    """発行元を指定された必須のチェックに当たる実行は、指定のアプリのもの（check run と、そのアプリの bot が書いた commit status）
+    だけを残す（同じ名前の別の発行元を数えない。#3506）。
+
+    当たるかは `ci.read` と同じ照合（`ci.fulfils`）で決める。生の名前で絞ると、前置きや分割ジョブの末尾の付いた別の発行元の
+    実行（`other / pytest`）が絞り込みを抜け、`ci.read` が必須のチェックとして数える。同じ名前に別々のアプリが指定されていれば、
+    1 つの実行では満たせないため残さない（待ちが止める）。"""
+    return [r for r in runs if all(want == {(r.get("app") or {}).get("id")} for want in _restricted(text_of(r.get("name")), apps))]
 
 
 @dataclass(frozen=True)
@@ -176,18 +187,34 @@ class Lander:
                 apps.setdefault(name, set()).add(app)
         return Required(sorted({n for n, _ in pairs}), {k: frozenset(v) for k, v in apps.items()})
 
-    def _runs(self, sha: str) -> list[dict]:
-        """コミットの check run と commit status（check run の形にしたもの）の一覧。"""
-        combined = self.hub.rest("GET", f"/repos/{self.hub.repo}/commits/{sha}/status", params={"per_page": 100})
-        statuses = _list(combined, "statuses") if isinstance(combined, dict) else []
-        return self.hub.check_runs(sha) + [_status_run(s) for s in statuses if isinstance(s, dict)]
+    def _runs(self, sha: str, apps: dict[str, frozenset[int]], bots: dict[str, int | None]) -> list[dict]:
+        """コミットの check run と commit status（check run の形にしたもの）の一覧。
+
+        発行元を指定された必須のチェックがあれば、commit status を全件（書き手つき）で読み、それに当たる status には
+        書き手の bot のアプリを付ける（指定のアプリが付けた status を満たしたと数える。#3506）。`bots` は bot ごとのアプリの控え。"""
+        if not apps:
+            combined = self.hub.rest("GET", f"/repos/{self.hub.repo}/commits/{sha}/status", params={"per_page": 100})
+            statuses = _list(combined, "statuses") if isinstance(combined, dict) else []
+            return self.hub.check_runs(sha) + [_status_run(s) for s in statuses if isinstance(s, dict)]
+        return self.hub.check_runs(sha) + [_status_run(s, self._status_app(s, apps, bots)) for s in self.hub.statuses(sha)]
+
+    def _status_app(self, status: dict, apps: dict[str, frozenset[int]], bots: dict[str, int | None]) -> int | None:
+        """発行元を指定された必須のチェックに当たる commit status の書き手のアプリ（当たらない・bot でなければ None）。"""
+        if not _restricted(text_of(status.get("context")), apps):
+            return None
+        creator = status.get("creator")
+        login = text_of(creator.get("login")) if isinstance(creator, dict) else ""
+        if login not in bots:
+            bots[login] = self.hub.bot_app(login)
+        return bots[login]
 
     def _watch(self, pull: Pull) -> str | None:
         """必須のチェック（check run と commit status）を待ち、止まった理由の種類（通れば None）。"""
         required = self.required(pull.base_ref)
+        bots: dict[str, int | None] = {}
 
         def reader() -> ci.Reading:
-            return ci.read(_from_sources(self._runs(pull.head_sha), required.apps), required.names, [])
+            return ci.read(_from_sources(self._runs(pull.head_sha, required.apps, bots), required.apps), required.names, [])
 
         watched = self.wait(reader, self.budget) if self.wait is not None else ci.Watch(reader, self.budget).run()
         return watched.cause([])
