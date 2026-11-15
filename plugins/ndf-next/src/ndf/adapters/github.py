@@ -425,6 +425,15 @@ def _too_many_pages(what: str, pages: int, name: str) -> GitHubError:
     return GitHubError(f"{what} {pages} ページを超える（上限 {name}）")
 
 
+class _Counted(NamedTuple):
+    """件数の鍵を持つ一覧の読み方（`GitHub._counted_pages`）。"""
+
+    rows: str  # 行の配列の鍵
+    total: str  # 総件数の鍵
+    cap: str  # ページ数の上限の名前（limits.json）
+    what: str  # 上限を超えたときの文の主語と助詞
+
+
 @contextmanager
 def _translating(label: str, detail_body: bool = False) -> Iterator[None]:
     """githubkit の上限・拒否・不達を `_translated` で `GitHubError` へ写して投げ直す。"""
@@ -607,15 +616,19 @@ class GitHub:
 
         `pulls/<番号>/commits` と違い 250 件で切れない。`github.list-pages` ページを超えたら途中で切らずに止まる。
         """
-        pages = _page_cap("github.list-pages")
         path = f"/repos/{self.repo}/compare/{quote(base, safe='')}...{quote(head, safe='')}"
+        return self._counted_pages(path, _Counted("commits", "total_commits", "github.list-pages", f"{base}...{head} のコミットが"))
+
+    def _counted_pages(self, path: str, spec: _Counted) -> list[dict]:
+        """件数の鍵を持つ REST の一覧を、行が件数に届くか空のページが来るまで読む。`spec.cap` ページを超えたら途中で切らずに止まる。"""
+        pages = _page_cap(spec.cap)
         rows: list[dict] = []
         for page in range(1, pages + 1):
             body = self.rest("GET", path, params={"per_page": PER_PAGE, "page": page})
-            rows.extend(body["commits"])
-            if len(rows) >= int(body["total_commits"]) or not body["commits"]:
+            rows.extend(body[spec.rows])
+            if len(rows) >= int(body[spec.total]) or not body[spec.rows]:
                 return rows
-        raise _too_many_pages(f"{base}...{head} のコミットが", pages, "github.list-pages")
+        raise _too_many_pages(spec.what, pages, spec.cap)
 
     def _pages(self, path: str) -> list[dict]:
         """配列を返す REST の一覧を、短いページが来るまで読む。`github.list-pages` ページを超えたら途中で切らずに止まる。"""
@@ -688,14 +701,8 @@ class GitHub:
 
     def check_runs(self, sha: str) -> list[dict]:
         """コミットのチェックの生の一覧を `total_count` に届くまで読む（`github.check-runs` ページまで）。"""
-        pages = _page_cap("github.check-runs")
-        runs: list[dict] = []
-        for page in range(1, pages + 1):
-            body = self.rest("GET", f"/repos/{self.repo}/commits/{sha}/check-runs", params={"per_page": PER_PAGE, "page": page})
-            runs.extend(body["check_runs"])
-            if len(runs) >= int(body["total_count"]) or not body["check_runs"]:
-                return runs
-        raise _too_many_pages(f"{sha} のチェックが", pages, "github.check-runs")
+        path = f"/repos/{self.repo}/commits/{sha}/check-runs"
+        return self._counted_pages(path, _Counted("check_runs", "total_count", "github.check-runs", f"{sha} のチェックが"))
 
     def statuses(self, sha: str) -> list[dict]:
         """コミットの commit status の全件（`GET /commits/<sha>/statuses`。書き手の `creator` を持つ。#3506）。"""
@@ -730,15 +737,8 @@ class GitHub:
 
     def run_artifacts(self, run_id: int) -> list[dict]:
         """ワークフローの実行の成果物の一覧を `total_count` に届くまで読む（`github.list-pages` ページまで）。"""
-        pages = _page_cap("github.list-pages")
         path = f"/repos/{self.repo}/actions/runs/{int(run_id)}/artifacts"
-        rows: list[dict] = []
-        for page in range(1, pages + 1):
-            body = self.rest("GET", path, params={"per_page": PER_PAGE, "page": page})
-            rows.extend(body["artifacts"])
-            if len(rows) >= int(body["total_count"]) or not body["artifacts"]:
-                return rows
-        raise _too_many_pages(f"実行 {run_id} の成果物が", pages, "github.list-pages")
+        return self._counted_pages(path, _Counted("artifacts", "total_count", "github.list-pages", f"実行 {run_id} の成果物が"))
 
     def artifact_zip(self, artifact_id: int) -> bytes:
         """成果物の ZIP の中身（302 の転送先の本文をバイト列のまま）。期限切れは状態 410 の `GitHubError`。
