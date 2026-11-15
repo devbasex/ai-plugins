@@ -493,7 +493,9 @@ def outcome_of(kind: str, result_file: Path, items: list[dict[str, Any]], metric
     report = plan_files.read_json(result_file)
     status = report.get("status") if isinstance(report, dict) else None
     if not isinstance(report, dict) or status not in (OK, GATE, STOPPED):
-        return result.stopped(TOOL, BAD_REPORT, f"作業 {kind} の結果ファイルを読めないか status が無い: {result_file}", items=items, metrics=metrics)
+        return result.stopped(
+            TOOL, BAD_REPORT, f"作業 {kind} の結果ファイルを読めないか status が無い: {result_file}", items=items, metrics=metrics
+        )
     said = report.get("summary") if isinstance(report.get("summary"), str) and report["summary"] else "（要約なし）"
     gaps = _gaps_of(report)
     if status == OK and not gaps:

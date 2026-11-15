@@ -14,6 +14,7 @@
     ndf loop close-plan --pace <P> --route <段>... [--mvv] [--record-pr <N>] [--retrospective-due]
     ndf loop review-args --purpose design|code --pr <N> --state-dir <D> --base <B>
     ndf loop acceptance record|show|check --issue <N> ...      # 受け入れ条件の確認の区分（#2144・#1682。`acceptance`）
+    ndf loop design-tests (--issue <N>... | --design <パス>...)   # 設計に名前の出るテストが HEAD にあるか（#2118。`design_tests`）
 
 書き込む副命令は、記録の排他の下で記録を読み、判断（`control_decide`）を受けて事象を追記する。断りと止まりは
 止まった理由の種類と、打てる次の 1 手（`next`）を返す（SF11）。
@@ -35,7 +36,7 @@ from ndf import cli, contracts, identity
 from ndf.adapters import git, github
 from ndf.adapters.git import GitError
 from ndf.contracts import limits, result
-from ndf.domains.loop import acceptance
+from ndf.domains.loop import acceptance, design_tests
 from ndf.domains.loop import control_decide as ctl
 from ndf.domains.loop import lap_decide, select_decide, sprint_decide, store
 from ndf.domains.loop import record_decide as rec
@@ -239,6 +240,7 @@ def _parser() -> argparse.ArgumentParser:
     r.add_argument("--state-dir", required=True)
     r.add_argument("--base", required=True)
     acceptance.add_parsers(sub)
+    design_tests.add_parser(sub)
     return p
 
 

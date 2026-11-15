@@ -396,7 +396,7 @@ def test_review_launch_appends_the_pr_number_read_when_the_step_runs(tmp_path, n
     # #3489: 打つ時点にブランチの PR の番号を読み、--pr に足して打つ（gh を差し替えて確かめる）
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    (bin_dir / "gh").write_text('#!/bin/sh\necho 3489\n')
+    (bin_dir / "gh").write_text("#!/bin/sh\necho 3489\n")
     (bin_dir / "gh").chmod(0o755)
     argv = invoke.review_launch(name, "feat/x", "develop")
     argv = [a if a != "ndf" else "echo" for a in argv]

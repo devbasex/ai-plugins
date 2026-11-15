@@ -74,7 +74,9 @@ def _record(a: argparse.Namespace) -> dict[str, Any]:
     checks = acc.read_checks(new)
     pre_n = sum(c.kind == acc.PRE_MERGE for c in checks.values())
     state = "変更なし" if new == body else "記録した"
-    return result.result(TOOL, result.OK, f"#{a.issue}: {state}（マージ前 {pre_n} 件・リリース後 {len(checks) - pre_n} 件）", _items(checks))
+    return result.result(
+        TOOL, result.OK, f"#{a.issue}: {state}（マージ前 {pre_n} 件・リリース後 {len(checks) - pre_n} 件）", _items(checks)
+    )
 
 
 def _show(a: argparse.Namespace) -> dict[str, Any]:
@@ -86,7 +88,9 @@ def _check(a: argparse.Namespace) -> dict[str, Any]:
     body = read_body(a.cwd, a.issue)
     found = acc.criteria(body)
     if not found:
-        return result.result(TOOL, result.OK, f"#{a.issue} の本文に受け入れ条件（`## 受け入れ条件` のチェックボックス）が無く、照らすものが無い")
+        return result.result(
+            TOOL, result.OK, f"#{a.issue} の本文に受け入れ条件（`## 受け入れ条件` のチェックボックス）が無く、照らすものが無い"
+        )
     left = acc.unrecorded(body)
     checks = acc.read_checks(body)
     if not left:
