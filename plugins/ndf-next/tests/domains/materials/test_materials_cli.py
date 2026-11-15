@@ -8,7 +8,6 @@ from pathlib import Path
 
 import pytest
 
-from ndf.adapters import github
 from ndf.domains.materials import cli, collect
 
 BODY = """## 種類
@@ -87,31 +86,12 @@ def _repo(path: Path) -> Path:
     (path / "src").mkdir()
     (path / "src" / "app.py").write_text("x = 1\n", encoding="utf-8")
     subprocess.run(["git", "-C", str(path), "add", "."], check=True)
-    # 架空の origin（GitHub アダプターの差し替えへ渡すリポジトリの名前を作るだけで、通信はしない）
-    subprocess.run(["git", "-C", str(path), "remote", "add", "origin", "https://github.com/example/repo.git"], check=True)
     return path
-
-
-class _StubGitHub:
-    """GitHub アダプターの公開境界（`GitHub(repo, api).issue_body(number)`）の代わり。通信も資格情報の読み取りもしない。"""
-
-    def __init__(self, repo: str, api: object, body: str = "", error: str = "") -> None:
-        self.repo, self.api, self.body, self.error = repo, api, body, error
-
-    def issue_body(self, number: int) -> github.Authored:
-        if self.error:
-            raise github.GitHubError(self.error)
-        return github.Authored(author="someone", association="MEMBER", body=self.body)
-
-
-def _stub_github(monkeypatch, body: str = "", error: str = "") -> None:
-    monkeypatch.setattr(github, "client", lambda *a, **k: object())
-    monkeypatch.setattr(github, "GitHub", lambda repo, api: _StubGitHub(repo, api, body, error))
 
 
 def test_main_collects_and_writes_the_draft(tmp_path, monkeypatch, capsys, last_result):
     repo = _repo(tmp_path / "repo")
-    _stub_github(monkeypatch, body=BODY)
+    monkeypatch.setattr(cli, "_body_reader", lambda _repo: lambda n: BODY)
     out = tmp_path / "draft.json"
     assert cli.main(["--issue", "7", "--root", str(repo), "--out", str(out)]) == 0
     got = last_result(capsys.readouterr().out)
@@ -121,7 +101,14 @@ def test_main_collects_and_writes_the_draft(tmp_path, monkeypatch, capsys, last_
 
 def test_main_reports_gaps_as_incomplete(tmp_path, monkeypatch, capsys, last_result):
     repo = _repo(tmp_path / "repo")
-    _stub_github(monkeypatch, error="届かない")
+
+    def reader(_repo):
+        def body_of(n: int) -> str:
+            raise ValueError("届かない")
+
+        return body_of
+
+    monkeypatch.setattr(cli, "_body_reader", reader)
     assert cli.main(["--issue", "7", "--root", str(repo)]) == 6
     got = last_result(capsys.readouterr().out)
     assert got["cause"]["kind"] == "incomplete"
