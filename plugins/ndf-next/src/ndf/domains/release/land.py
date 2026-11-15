@@ -276,7 +276,7 @@ class Lander:
         approval = self._approval(pull.number)
         return self._record_merge(pull.number, done, approval) if approval is not None else done
 
-    def _resume_merged(self, number: int, pull: Pull, deadline: float) -> Landed:
+    def _resume_merged(self, number: int, pull: Pull) -> Landed:
         """マージ済みの PR からの再開。本番ブランチ宛てなら承認を決めて（人のマージなら記録を書き）、
         迂回の記録が無ければ補う。同期の PR を作らない（I10）。"""
         if not self._is_production(pull):
@@ -295,7 +295,7 @@ class Lander:
         deadline = self.clock() + self.budget
         pull = self.hub.pull(number)
         if pull.merged:
-            return self._resume_merged(number, pull, deadline)
+            return self._resume_merged(number, pull)
         if self._is_production(pull) and not self.hub.token_trusted():
             return Landed(
                 False,
