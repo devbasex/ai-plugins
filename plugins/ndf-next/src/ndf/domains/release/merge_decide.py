@@ -15,7 +15,7 @@
 | 経路 `github-merge` | `github-merge` | 証跡の「承認した人」 | 経路 `gate` の最新の承認の先端（無ければ None） |
 | 無い（承認の後に先端が動き、人がその先端をマージした） | `github-merge` | マージした人 | 経路 `gate` の最新の承認の先端（無ければ None）。別の先端への承認を引き継がない |
 
-止まったマージの次の手は `NEXT_MOVES` の 3 つで、既定の手（`suggested`）は止まった理由の種類で決まる（決定 3）。
+止まったマージの次の手は `NEXT_MOVES` の 2 つで、既定の手（`suggested`）は止まった理由の種類で決まる（決定 3）。
 """
 
 from __future__ import annotations
@@ -28,9 +28,9 @@ from ndf.domains.release.shapes import text_at
 
 GATE_ROUTE, MERGE_ROUTE = "gate", "github-merge"
 ROUTES = (GATE_ROUTE, MERGE_ROUTE)
-# 止まったマージの次の手（打ち直し・差し戻し・次の版への回し）
-RERUN, REJECT, DEFER = "rerun", "reject", "defer"
-NEXT_MOVES = (RERUN, REJECT, DEFER)
+# 止まったマージの次の手（打ち直し・差し戻し）
+RERUN, REJECT = "rerun", "reject"
+NEXT_MOVES = (RERUN, REJECT)
 
 
 class MergeFacts(NamedTuple):
@@ -102,7 +102,7 @@ def decide(facts: MergeFacts, found: Sequence[Approved]) -> Approval | None:
 
 
 def suggested(kind: str) -> str:
-    """止まった理由の種類から既定の次の手（表の行き先が打ち直しの止まり方は打ち直し、ほかは次の版への回し。決定 3）。"""
+    """止まった理由の種類から既定の次の手（表の行き先が打ち直しの止まり方は打ち直し、ほかは差し戻し。決定 3）。"""
     found = causes.table()
     # 同じ承認・同じ先端のまま打ち直せば通りうる止まり方（ci_pending・infra_wait など）は、表の行き先が retry
-    return RERUN if kind in found and found[kind].route == "retry" else DEFER
+    return RERUN if kind in found and found[kind].route == "retry" else REJECT
