@@ -516,8 +516,10 @@ def test_workflow_gives_write_only_to_the_publish_job_and_no_new_secret():
 def _cd_steps(case, mvv, tmp_path):
     import argparse
 
+    import release_case
     from supervise_lib import release_cd
 
+    case = release_case.Case(case, "", "", "")
     state = tmp_path / "state"
     a = argparse.Namespace(mvv=str(state) if mvv else None, mode="standard", production_branch="main", state=str(state))
     approval = [{"id": "facts", "next": "explain"}, {"id": "others", "next": "end"}]
