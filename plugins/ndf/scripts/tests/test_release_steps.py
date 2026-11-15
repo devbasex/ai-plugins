@@ -1139,12 +1139,13 @@ def test_the_production_merge_carries_who_approved(monkeypatch, tmp_path, by, us
         mod.ac.record_approval(material, sha, by, "2026-11-07T10:00")
     seen = []
     monkeypatch.setattr(mod, "find_pr", lambda *a, **k: None)
-    monkeypatch.setattr(mod, "create_pr", lambda *a: 9)
+    monkeypatch.setattr(mod, "create_pr", lambda *a: seen.append(a[-1]) or 9)
     monkeypatch.setattr(mod, "wait_and_merge", lambda r, n, **kw: seen.append(kw) or "m")
     a = argparse.Namespace(version="1.2.3", ci_wait=60.0, approval=str(material) if use_material else None)
     verdict = mod.ac.Verdict(True, sha, "b" * 40, "match")
     mod._merge_prod_pr(tmp_path, a, "ndf", "release/v1.2.3", "main", 7, sha, None, verdict, [], {})
-    assert seen[0]["gate_approved"] == expected and seen[0]["expect"] == "b" * 40
+    # 本番の PR も旧いプラグインの変更を運ぶので、本文に ndf-next の port 検査の印を持つ
+    assert mod.reviewed.NO_PORT_LINE in seen[0] and seen[1]["gate_approved"] == expected and seen[1]["expect"] == "b" * 40
 
 
 def _record(monkeypatch, root, **args):
@@ -1282,6 +1283,7 @@ def _reviewed_prod(monkeypatch, tmp_path, case, state, found=None, wait_and_merg
         rv, "git", lambda r, *a, check=True: subprocess.CompletedProcess(a, 1 if a[:2] == ("rev-parse", "-q") else 0, "", "")
     )
     monkeypatch.setattr(rv.repo_lib, "restore_branch", lambda *a, **k: None)
+    monkeypatch.setattr(rv, "ensure_no_port_line", lambda root, pr: pr)  # 印の足し方は test_ensure_no_port_line_* が確かめる
     monkeypatch.setattr(rv, "repo_or_stop", lambda r: "o/r")
     monkeypatch.setattr(rv.approval_trail, "read_head", lambda repo, n: (HEAD, "main", "open"))
     monkeypatch.setattr(
@@ -1772,6 +1774,24 @@ def test_release_dev_runs_the_declared_workflow_only_for_an_open_pr(monkeypatch,
     assert runs == [("release-dev.yml", 4)]
     # 使い回す開いた PR だけ、本文を今の版の本文（ndf-next の port 検査の印を持つ）へ書き直す（#3343）
     assert [n for n, _ in refreshed] == ["4"] and rv.NO_PORT_LINE in refreshed[0][1]
+
+
+@pytest.mark.parametrize("has_line", [False, True])
+def test_ensure_no_port_line_appends_the_mark_to_a_reused_pr(monkeypatch, tmp_path, has_line):
+    """前の版が作った -sync の PR を使い回すとき、本文に port 検査の印が無ければ、ほかの行を残して末尾へ足す（#3343）。"""
+    from release_lib import reviewed as rv
+
+    body = "解いたパス: README.md" + (f"\n\n{rv.NO_PORT_LINE}" if has_line else "")
+    monkeypatch.setattr(rv, "gh_json", lambda root, args, what: {"body": body})
+    edited = []
+    monkeypatch.setattr(
+        rv.gh_parts, "gh", lambda args, stdin=None, cwd=None: edited.append((args[2], stdin)) or SimpleNamespace(returncode=0, stderr="")
+    )
+    assert rv.ensure_no_port_line(tmp_path, {"number": 7}) == {"number": 7} and rv.ensure_no_port_line(tmp_path, None) is None
+    if has_line:
+        assert edited == []
+    else:
+        assert [n for n, _ in edited] == ["7"] and edited[0][1].startswith("解いたパス: README.md") and rv.NO_PORT_LINE in edited[0][1]
 
 
 @pytest.mark.parametrize("synced", [None, 6])
