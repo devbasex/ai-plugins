@@ -69,4 +69,3 @@ def test_write_changes_only_the_trial_of_each_row(tmp_path):
     probe.write_trials(path, {"a:1": {"result": "passed"}, "a:2": {"result": "not_run", "reason": "r"}})
     doc = json.loads(path.read_text(encoding="utf-8"))
     assert [r["trial"]["result"] for r in doc["rows"]] == ["passed", "not_run"]
-

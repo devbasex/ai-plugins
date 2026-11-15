@@ -28,7 +28,9 @@ TEXT_CHILDREN = ("S1a", "S1b")
 # 試走の記録（同じディレクトリの JSON）
 RECORD = "trial/2026-11-15.json"
 ROW_PREFIX = '    {"id": '
-STALLED = "試走のスプリントは手順 0 で $SCRIPTS が旧いプラグインの scripts/ へ解決したため、この行の振る舞いまで ndf-next だけで流せていない"
+STALLED = (
+    "試走のスプリントは手順 0 で $SCRIPTS が旧いプラグインの scripts/ へ解決したため、この行の振る舞いまで ndf-next だけで流せていない"
+)
 
 
 def texts(places: Mapping[str, Any], root: Path = ROOT) -> dict[str, str]:
@@ -82,7 +84,9 @@ def _skill_calls(under: str, bodies: Mapping[str, str], scripts: Mapping[str, Ma
     return found
 
 
-def _by_path(row: Mapping[str, Any], bodies: Mapping[str, str], scripts: Mapping[str, Mapping[str, Any]], root: Path) -> dict[str, str] | None:
+def _by_path(
+    row: Mapping[str, Any], bodies: Mapping[str, str], scripts: Mapping[str, Mapping[str, Any]], root: Path
+) -> dict[str, str] | None:
     """Skill・エージェントの行。本文が無いか、旧いスクリプトを呼べば `failed`。"""
     name = row["id"].split(":", 1)[1]
     under = f"skills/{name}/" if row["kind"] == "skill" else f"agents/{name}.md"
@@ -90,7 +94,9 @@ def _by_path(row: Mapping[str, Any], bodies: Mapping[str, str], scripts: Mapping
         return _failed(f"ndf-next に {under} が無い（行き先 {row['to']}）")
     calls = _skill_calls(under, bodies, scripts)
     if calls:
-        return _failed(f"本文が旧いプラグインのスクリプトを呼ぶ: {'・'.join(calls)}。括弧は新しいエントリポイントの副命令へ置き換える行き先の子")
+        return _failed(
+            f"本文が旧いプラグインのスクリプトを呼ぶ: {'・'.join(calls)}。括弧は新しいエントリポイントの副命令へ置き換える行き先の子"
+        )
     return None
 
 
@@ -171,7 +177,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.write:
         write_trials(table.HERE / "features.json", results)
     counts = Counter(t["result"] for t in results.values())
-    print(json.dumps({"tool": "parity-trial", "status": "ok", "summary": f"{len(results)} 行を判定した", "items": [], "metrics": counts}, ensure_ascii=False))
+    print(
+        json.dumps(
+            {"tool": "parity-trial", "status": "ok", "summary": f"{len(results)} 行を判定した", "items": [], "metrics": counts},
+            ensure_ascii=False,
+        )
+    )
     return 0
 
 
