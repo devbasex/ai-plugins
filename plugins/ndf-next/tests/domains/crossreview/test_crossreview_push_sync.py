@@ -13,6 +13,8 @@ from ndf.domains.crossreview import push
 from ._repos import BRANCH, Repos, commit, run_cli, sh
 
 SHA = "a" * 40
+# 宣言（`.ndf/worktree.json`）を持たないメインディレクトリ
+_NO_DECLARATION = "/nonexistent/ndf-main"
 
 
 def _origin_head(repos: Repos) -> str:
@@ -62,7 +64,10 @@ def test_issue_2440_conflicting_push_is_undone_and_reported_as_diverged(
 
 
 class _Script:
-    """git の起動を順の答えで返す差し替え。"""
+    """git の起動を順の答えで返す差し替え。
+
+    リモート名を読む `git worktree list` は順に数えず、宣言の無いメインディレクトリで答える（既定のリモート名になる）。
+    """
 
     def __init__(self, answers: list[tuple[str, git.Completed]]):
         self.answers = answers
@@ -70,6 +75,8 @@ class _Script:
 
     def __call__(self, args: list[str], cwd):
         self.calls.append(args)
+        if args[:2] == ["worktree", "list"]:
+            return _ok(f"worktree {_NO_DECLARATION}\0HEAD {SHA}\0branch refs/heads/main\0\0")
         want, done = self.answers.pop(0)
         assert args[0] == want, (args, want)
         return done

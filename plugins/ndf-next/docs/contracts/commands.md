@@ -237,7 +237,7 @@
 | `ndf progress retry` | `table_id`（string・必須・位置）<br>`stage`（string・必須・位置）: 工程の名前（工程表の行名）<br>`--reason`（string・必須） |
 | `ndf progress show` | `table_id`（string・必須・位置） |
 
-結果の `metrics`: `answer`（string）・`cancelled_rows`（integer）・`current_id`（string）・`disabled`（array of string）・`history`（array of object）・`mode`（string）・`move`（string）・`rev`（integer）・`rows`（integer）・`seq`（integer）・`seqs`（array of integer）・`stage`（string）・`state`（string か null）・`step`（string）・`table_id`（string）。`items` の要素: `at`（string か null）・`changed`（boolean）・`error`（string）・`from`（string）・`gates`（array of string）・`key`（string）・`kind`（string）・`label`（string）・`number`（integer）・`path`（string）・`phase`（string）・`reason`（string か null）・`restored`（string）・`retired`（string）・`source`（string）・`stage`（string）・`state`（string か null）
+結果の `metrics`: `answer`（string）・`behavior_docs_in_diff`（integer）・`cancelled_rows`（integer）・`code_in_diff`（integer）・`current_id`（string）・`disabled`（array of string）・`docs_only_diff`（integer）・`history`（array of object）・`mode`（string）・`move`（string）・`rev`（integer）・`rows`（integer）・`seq`（integer）・`seqs`（array of integer）・`stage`（string）・`state`（string か null）・`step`（string）・`table_id`（string）。`items` の要素: `at`（string か null）・`changed`（boolean）・`error`（string）・`from`（string）・`gates`（array of string）・`key`（string）・`kind`（string）・`label`（string）・`number`（integer）・`path`（string）・`phase`（string）・`reason`（string か null）・`restored`（string）・`retired`（string）・`source`（string）・`stage`（string）・`state`（string か null）
 
 ## `ndf project`
 
