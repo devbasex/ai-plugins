@@ -7652,6 +7652,30 @@
       "context": "ndf-release",
       "meaning": "本番の PR の head になる、版ごとに 1 本のリリースブランチ（`release/v<版>`）。前の版が出た直後に本番ブランチから用意する",
       "pending_source": "issues/issue-3572-design.md"
+    },
+    {
+      "term": "版上げのコミット",
+      "context": "ndf-release",
+      "meaning": "main へのマージの後に CD が作る、`plugin.json` の `version` と版の記録だけを変えるコミット。PR は版数を触らない",
+      "pending_source": "issues/issue-3572-design.md"
+    },
+    {
+      "term": "上げ幅の宣言",
+      "context": "ndf-release",
+      "meaning": "main 宛ての PR が版数の上げ幅（MAJOR・MINOR・PATCH）を示す印。CD がマージの時点に読んで版を上げる",
+      "pending_source": "issues/issue-3572-design.md"
+    },
+    {
+      "term": "検証の ref",
+      "context": "ndf-release",
+      "meaning": "main へマージする前の PR を集めて組んだ、使い捨ての git の ref。2 つ目のマーケットプレイスが指し、main へ戻さない",
+      "pending_source": "issues/issue-3572-design.md"
+    },
+    {
+      "term": "2 つ目のマーケットプレイス",
+      "context": "ndf-release",
+      "meaning": "正式版のマーケットプレイスと違う名前で検証の ref を指すマーケットプレイス。名前が違うので正式版と両方を登録できる",
+      "pending_source": "issues/issue-3572-design.md"
     }
   ]
 }
