@@ -9,7 +9,7 @@ allowed-tools:
 
 # Google Workspace（gws）
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `gws-check.py`（S1a）・`slides-thumbnails.py`（S1a）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `gws-check.py`（副命令は #3547 で作る）・`slides-thumbnails.py`（副命令は #3547 で作る）。スクリプトはこの Skill の `scripts/` へ写していない。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 Google Workspace の操作は、すべて gws（Google Workspace CLI、npm の `@googleworkspace/cli`）で行う。
 gws は Google の公式サポート外の CLI で、版は 0.x である。
