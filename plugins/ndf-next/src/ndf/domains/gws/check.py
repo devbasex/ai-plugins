@@ -21,7 +21,7 @@ import subprocess
 from typing import Optional
 
 from ndf.contracts import exit_codes, limits, result
-from ndf.domains.gws import GwsStop, Outcome, material, unauthenticated_code
+from ndf.domains.gws import GwsStop, Outcome, call, material, unauthenticated_code
 from ndf.domains.gws import report_decide as rd
 from ndf.domains.records import gws as records_gws
 
@@ -104,18 +104,13 @@ def _present(tool: str, npm: str) -> Outcome:
 def _install(npm: str) -> None:
     """`npm install -g @googleworkspace/cli` を 1 回打つ。失敗したら止まる（`sudo` で打ち直さない）。"""
     no_sudo = "出力を利用者に示して止まる。sudo で打ち直さない"
-    try:
-        done = subprocess.run([npm, *INSTALL_ARGS], capture_output=True, text=True, timeout=limits.seconds(INSTALL_LIMIT), check=False)
-    except subprocess.TimeoutExpired as exc:
-        raise GwsStop("interrupted", f"npm install -g が上限の {exc.timeout} 秒を超えた", summary=no_sudo) from exc
-    except OSError as exc:
-        raise GwsStop("unknown", f"npm install を起動できない: {exc}", summary=no_sudo) from exc
+    done = call([npm, *INSTALL_ARGS], INSTALL_LIMIT, "npm install -g", summary=no_sudo)
     if done.returncode != 0:
         raise GwsStop(
             "unknown",
             f"npm install -g が終了コード {done.returncode} で終わった",
             summary=f"npm install -g が終了コード {done.returncode} で終わった。{no_sudo}",
-            items=[{"name": "npm の出力の末尾", "result": "failed", "detail": rd.tail(done.stdout + "\n" + done.stderr)}],
+            items=[{"name": "npm の出力の末尾", "result": "failed", "detail": rd.output_tail(done)}],
         )
 
 

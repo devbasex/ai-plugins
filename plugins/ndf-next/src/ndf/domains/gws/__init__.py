@@ -6,9 +6,11 @@
 
 from __future__ import annotations
 
+import subprocess
+from collections.abc import Sequence
 from typing import Any, Optional
 
-from ndf.contracts import exit_codes
+from ndf.contracts import exit_codes, limits
 
 # 結果の辞書と終了コードの組
 Outcome = tuple[dict[str, Any], int]
@@ -37,3 +39,13 @@ class GwsStop(Exception):
 def unauthenticated_code() -> int:
     """gws が未認証の承認ゲートの終了コード（承認ゲートの最初の値の次。導入の同意の承認ゲートと分ける）。"""
     return exit_codes.first_code(exit_codes.GATE) + 1
+
+
+def call(cmd: Sequence[str], limit_name: str, what: str, *, summary: Optional[str] = None) -> subprocess.CompletedProcess[str]:
+    """外部コマンドを上限 `limit_name` の秒数で 1 回打つ。上限を超えたら interrupted、起動できなければ unknown の `GwsStop`。"""
+    try:
+        return subprocess.run(list(cmd), capture_output=True, text=True, timeout=limits.seconds(limit_name), check=False)
+    except subprocess.TimeoutExpired as exc:
+        raise GwsStop("interrupted", f"{what} が上限の {exc.timeout} 秒を超えた", summary=summary) from exc
+    except OSError as exc:
+        raise GwsStop("unknown", f"{what} を起動できない: {exc}", summary=summary) from exc

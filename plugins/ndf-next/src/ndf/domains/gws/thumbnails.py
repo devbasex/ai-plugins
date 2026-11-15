@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from ndf.contracts import exit_codes, limits, result
-from ndf.domains.gws import GwsStop, Outcome, unauthenticated_code
+from ndf.domains.gws import GwsStop, Outcome, call, unauthenticated_code
 from ndf.domains.gws import report_decide as rd
 from ndf.domains.records import gws as records_gws
 
@@ -78,13 +78,8 @@ def run(tool: str, presentation_id: str, out_dir: str, size: str) -> Outcome:
 
 def _gws(gws: str, args: Sequence[str], what: str) -> Any:
     """gws のスライドの操作を打ち、応答の JSON を返す。未認証の失敗は `_NeedsLogin`、ほかは `GwsStop`。"""
-    try:
-        done = subprocess.run([gws, *args], capture_output=True, text=True, timeout=limits.seconds(LIMIT), check=False)
-    except subprocess.TimeoutExpired as exc:
-        raise GwsStop("interrupted", f"{what}: gws が上限の {exc.timeout} 秒を超えた") from exc
-    except OSError as exc:
-        raise GwsStop("unknown", f"{what}: gws を起動できない: {exc}") from exc
-    out = rd.tail(done.stdout + "\n" + done.stderr)
+    done = call([gws, *args], LIMIT, f"{what}: gws")
+    out = rd.output_tail(done)
     if done.returncode != 0:
         if _unauthenticated():
             raise _NeedsLogin(what, out)

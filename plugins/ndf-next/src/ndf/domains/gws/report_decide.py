@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from collections.abc import Mapping, Sequence
 from typing import Any, Optional
 
@@ -24,3 +25,8 @@ def tail(text: Optional[str]) -> str:
     if not text:
         return ""
     return "\n".join(text.strip().splitlines()[-DETAIL_LINES:])
+
+
+def output_tail(done: subprocess.CompletedProcess[str]) -> str:
+    """終わった外部のコマンドの標準出力と標準エラーをつないだ末尾（`tail`）。"""
+    return tail(done.stdout + "\n" + done.stderr)
