@@ -54,6 +54,8 @@ USER_BY, MVV_BY = By.USER.value, By.MVV.value
 BY_CHOICES = tuple(b.value for b in By)
 _PROJECT_FILE = f"{identity.FIXED_WORDS['declaration_dir']}/project.json"
 _SHA = re.compile(r"\b([0-9a-f]{40})\b")
+# 読めなかった値（マージした人・照らした証跡）の表記
+UNREADABLE = "（読めない）"
 
 # 判定 → commit status の状態（承認だけが success。待ちは pending で必須のチェックがマージを塞ぐ）
 STATUS_STATE = {
@@ -183,7 +185,7 @@ def answer_merged(hub: GitHub, number: int, production: str) -> tuple[approval_d
     now = read(hub, number)
     if now.judgment.approved and now.pull.head_sha == facts.head:
         return now.judgment, facts
-    by = facts.by if facts.by else "（読めない）"
+    by = facts.by if facts.by else UNREADABLE
     body = (
         f"{approval_decide.render_trail(approval_decide.APPROVED, facts.head, USER_BY)}"
         f"{ROUTE_LINE} {merge_decide.MERGE_ROUTE}\n{APPROVER_LINE} {by}\n"
@@ -230,13 +232,18 @@ def _existing_record(comments: list[Authored], hub: GitHub, mark: str, sha: str)
     return None
 
 
+def _require_sha(value: str, what: str) -> None:
+    """`value` が 40 桁の SHA でなければ `ValueError`（`what` は値の呼び名）。"""
+    if not _SHA.fullmatch(value):
+        raise ValueError(f"{what}は 40 桁の SHA（渡された値: {value!r}）")
+
+
 def render_admin_record(sha: str, trail_url: str) -> str:
     """迂回の記録の本文（証跡の印を持たない）。"""
-    if not _SHA.fullmatch(sha):
-        raise ValueError(f"マージした先端は 40 桁の SHA（渡された値: {sha!r}）")
+    _require_sha(sha, "マージした先端")
     return (
         f"{ADMIN_MARK}\n## 管理者の迂回でマージした\n\n{ADMIN_SHA_LINE} `{sha}`\n"
-        f"{ADMIN_TRAIL_LINE} {trail_url if trail_url else '（読めない）'}\n宣言: `{_PROJECT_FILE}` の `production_merge.admin`\n"
+        f"{ADMIN_TRAIL_LINE} {trail_url if trail_url else UNREADABLE}\n宣言: `{_PROJECT_FILE}` の `production_merge.admin`\n"
     )
 
 
@@ -265,8 +272,7 @@ def write_admin_record(hub: GitHub, number: int, sha: str) -> tuple[bool, str]:
 def render_merge_record(approval: merge_decide.Approval) -> str:
     """人のマージの記録の本文（証跡の印を持たない）。SHA の形が違えば `ValueError`。"""
     for sha in (approval.merged_head, approval.merge_sha):
-        if not _SHA.fullmatch(sha):
-            raise ValueError(f"マージした先端とマージコミットは 40 桁の SHA（渡された値: {sha!r}）")
+        _require_sha(sha, "マージした先端とマージコミット")
     gate = f"`{approval.gate_head}`" if approval.gate_head else "（無し）"
     return (
         f"{MERGE_MARK}\n## 人のマージを承認として記録した\n\n{ROUTE_LINE} {approval.route}\n{APPROVER_LINE} {approval.by}\n"
