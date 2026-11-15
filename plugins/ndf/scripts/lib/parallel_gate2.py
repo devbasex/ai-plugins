@@ -56,23 +56,39 @@ def gate_detail(done: str) -> Optional[tuple[str, Optional[int], str]]:
         return None
     report = str(item.get("report") or "")
     state = Path(report).parent
-    reason, pr, summary = "", None, ""
+    reason, pr, summary = _gate_reason(state)
+    return reason or summary or f"承認ゲートの理由を読めない（{state / 'progress.jsonl'}）", pr, report
+
+
+def _gate_steps(state: Path) -> list[dict]:
+    """状態 `state` の `progress.jsonl` のうち、終了コード 10 のステップ（`kind: step`・`exit: 10`）の行。読めなければ空。"""
     try:
         rows = [json.loads(x) for x in (state / "progress.jsonl").read_text(encoding="utf-8").splitlines() if x.strip().startswith("{")]
     except (OSError, ValueError):
         rows = []
-    for row in reversed([r for r in rows if isinstance(r, dict) and r.get("kind") == "step" and r.get("exit") == 10]):
-        try:
-            out = last_json((state / str(row.get("out") or "")).read_text(encoding="utf-8")) or {}
-        except (OSError, ValueError):
-            out = {}
+    return [r for r in rows if isinstance(r, dict) and r.get("kind") == "step" and r.get("exit") == 10]
+
+
+def _step_out(state: Path, row: dict) -> dict:
+    """1 ステップの出力（`out` のファイルの最後の JSON）。読めなければ空。"""
+    try:
+        return last_json((state / str(row.get("out") or "")).read_text(encoding="utf-8")) or {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _gate_reason(state: Path) -> tuple[str, Optional[int], str]:
+    """終了コード 10 のステップの出力を末尾から読み、(`metrics.reason`, `metrics.main_pr`, `summary`) をそれぞれ最初に見つけた値で畳む。"""
+    reason, pr, summary = "", None, ""
+    for row in reversed(_gate_steps(state)):
+        out = _step_out(state, row)
         m = out.get("metrics") or {}
         summary = summary or str(out.get("summary") or "")
         reason = reason or str(m.get("reason") or "")
         pr = pr if pr is not None else (m.get("main_pr") if isinstance(m.get("main_pr"), int) else None)
         if reason and pr is not None:
             break
-    return reason or summary or f"承認ゲートの理由を読めない（{state / 'progress.jsonl'}）", pr, report
+    return reason, pr, summary
 
 
 def request_confirmed(main: Path, name: str, n: int, k: int, done: str) -> plg.Sent:
