@@ -1,6 +1,6 @@
 # 待ち方
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `hook.py`（M3a）・`merged-steps.py`（M8）・`relay.py`（M3b）・`release-steps.py`（M2）・`sprint-state.py`（P1b）・`supervise.py`（C2）・`upkeep.py`（M6）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `hook.py`（M3a）・`merged-steps.py`（M8）・`release-steps.py`（M2）・`sprint-state.py`（P1b）・`upkeep.py`（M6）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 **待つ間に状態を問い合わせる呼び出しを繰り返さない。** 待ち方の規約はこの文書だけが持ち、
 他の文書はコピーせずにここを指す。
@@ -255,7 +255,7 @@ bash -c 'until [ -e "$1.done" ]; do [ "$SECONDS" -lt "$2" ] || exit 124; sleep 5
 一致しない。確かめる側の `grep -v pgrep` は、`pgrep` を含む待ちのコマンド行ごと結果から除く）。
 止まったかは完了通知（`failed` / `killed`）で確かめる。
 
-バックグラウンドの作業が残っていると、ラッパーの Stop hook（`relay.py mark`）は `ndf-next` のシグナルファイルを書かない。そのときは
+バックグラウンドの作業が残っていると、ラッパーの Stop hook（Stop の hook の guard（`hooks/guards/relay_mark.py`））は `ndf-next` のシグナルファイルを書かない。そのときは
 Stop を 1 度だけ止め、動いている作業を並べて知らせる。supervisor や `ndf plan queue` のように
 止めてはいけない作業なら、止めずに終わりを待ってから `ndf-next` を出し直す。
 

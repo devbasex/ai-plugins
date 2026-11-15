@@ -1,6 +1,6 @@
 # 開発ワークフローの用語集
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `check-trigger.py`（M1）・`doc-lint.py`（M7）・`glossary.py`（M7）・`handoff.py`（M7）・`merged-steps.py`（M8）・`mvv-gate.py`（P2）・`pr-review-steps.py`（M5）・`progress-record.sh`（M7）・`projects-sync.sh`（M7）・`relay.py`（M3b）・`release-steps.py`（M2）・`release-verification-steps.py`（M2）・`spec-copy.py`（M7）・`sprint-close.py`（M1）・`sprint-state.py`（P1b）・`stage-check.sh`（P1a）・`state.py`（M5）・`supervise.py`（C2）・`upkeep.py`（M6）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `check-trigger.py`（M1）・`doc-lint.py`（M7）・`glossary.py`（M7）・`handoff.py`（M7）・`merged-steps.py`（M8）・`mvv-gate.py`（P2）・`pr-review-steps.py`（M5）・`progress-record.sh`（M7）・`projects-sync.sh`（M7）・`release-steps.py`（M2）・`release-verification-steps.py`（M2）・`spec-copy.py`（M7）・`sprint-close.py`（M1）・`sprint-state.py`（P1b）・`state.py`（M5）・`upkeep.py`（M6）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 `development-workflow` と、そこから呼ぶ Skill・スクリプトで使う語を集める。**定義は各語の正本が持ち、
 この文書は 1 行の要約と正本への案内だけを持つ。** 食い違ったときは正本を正とする。
@@ -24,7 +24,7 @@
    修正の Pull Request #1101 を足して、開発版を `10.17.22-dev.2` として出し直した
 8. 【リリース承認ゲート】で【MVV 判定】は【レッドライン】（`.github/workflows/` を触った）に当たり、利用者の承認へ戻った。利用者が承認した
 9. conductor は本番のキューと `sprint-state.py update → render → next` を 1 本のバックグラウンドの Bash で流し、【本番】へ【正式版】 `10.17.22` をリリースした
-10. 最後に `relay.py notice` の【アナウンス】と ndf-next を出して応答を終え、ラッパーが次のセッションを起動した
+10. 最後に `ndf relay notice` の【アナウンス】と ndf-next を出して応答を終え、ラッパーが次のセッションを起動した
 
 ## 大きさの関係
 
@@ -84,7 +84,7 @@ flowchart TB
 | conductor | 人間と対話しているセッション。スプリントを持ち、承認ゲートで人間へ問えるのはこの層だけ | `AskUserQuestion` | [agent-layers.md](agent-layers.md) の「3 層の責務」 |
 | supervisor | 1 つのフェーズを通すサブエージェント。人間へ問わない | `ndf:supervisor`（キャッシュの寿命 5 分）/ `ndf:supervisor-waits`（1 時間） | [agent-layers.md](agent-layers.md) の「3 層の責務」 |
 | worker | 1 つの作業（調査・修正・検証・集計）を行うサブエージェント。別のサブエージェントを起動しない | `ndf:worker`、プランの work のステップ | [agent-layers.md](agent-layers.md) の「3 層の責務」 |
-| ラッパー | 利用者の `claude` を包んで常駐し、ndf-next のブロックを拾って `/exit`・プラグインの更新・次のセッションの起動を行う（Claude Code だけ） | `relay.py run`、`/ndf:install-wrapper`、`NDF_RELAY_DIR` | [relay.md](relay.md) |
+| ラッパー | 利用者の `claude` を包んで常駐し、ndf-next のブロックを拾って `/exit`・プラグインの更新・次のセッションの起動を行う（Claude Code だけ） | `ndf relay run`、`/ndf:install-wrapper`、`NDF_RELAY_DIR` | [relay.md](relay.md) |
 | 最小構成の `claude -p` | Tool と指示を絞った 1 回の判断。judge のステップと MVV 判定が使う | — | [work-vessels.md](work-vessels.md) の「比べる実行方式」 |
 | 実行レベル | 仕事を渡す実行方式の LLM の使い方の水準。実行レベル 1 = スクリプト、実行レベル 2 = 分類の判断、実行レベル 3 = インライン実行の LLM | — | [work-vessels.md](work-vessels.md) の「比べる実行方式」 |
 | インライン実行 | 仕事を渡す実行方式の 1 つ。いまの会話の文脈で行う | — | [work-vessels.md](work-vessels.md) |
@@ -134,7 +134,7 @@ flowchart TB
 | インストール確認 | 隔離した HOME で ref からプラグインをインストールし、版と中身が ref と一致するかを確かめる | `release-verification-steps.py verify-install --ref <ブランチ> --expect <版>`、プランの `verify` のステップ、`fast.verify` | `release-verification-steps.py` の docstring |
 | リリース完了の確認 | 公開が済んだことを、リリース先の状態から読み取れる値 | `release` の結果 JSON の `items[]` | [completion-check.md](../../release/references/completion-check.md) の「用語」 |
 | スタックしたチェック | 実行が終わったのに pending のまま残った CI のチェック。1 度だけ再実行し、再び残れば止まる | `merged-steps.py merge-when-green --stale-after <秒>`、`items` の `rerun` / `stuck` | [merged](../../merged/SKILL.md) の `merge-when-green` |
-| コピー | 元のファイルをそのまま別の場所へ置いたもの。ラッパーの `relay.py`（版は横の `relay.version`。新しい版を古い版で置き直さない）・マイルストーンの説明から作る `mvv.md`・承認資料の `issues/approval-*.md` | `~/.claude/ndf/relay.py`、`relay.version` | [relay.md](relay.md) の「始め方」 |
+| コピー | 元のファイルをそのまま別の場所へ置いたもの。ラッパーの起動の部品の複製（指す先は横の `relay.root`）・マイルストーンの説明から作る `mvv.md`・承認資料の `issues/approval-*.md` | `~/.claude/ndf/` の複製、`relay.root` | [relay.md](relay.md) の「始め方」 |
 | 抜粋 | 呼ぶ側が要る部分だけを Skill の本文から取り出したもの | `EXCERPTS.md` | [EXCERPTS.md](../../EXCERPTS.md) |
 | リリースコマンド | リポジトリが `.ndf/release.json`（リリースの設定）に書き、`release` がリリース種別に合わせて走らせる 1 つのコマンド | `steps[]`、`release-steps.py run`、出力の `コマンド: <name> → <終了コード>` | [release-steps.md](../../release/references/release-steps.md) |
 
@@ -180,8 +180,8 @@ flowchart TB
 | 引継ぎの対象 | 引継ぎ文書 1 本が受け持つ仕事のまとまり（スプリント・マイルストーン・課題のどれか）。名の頭になる | `sprint-` / `milestone-` / `issue-` | [handoff.md](handoff.md) の「置き場と名」 |
 | 引継ぎの履歴 | 引継ぎ文書の本体から終わった項目を移す文書。本体と同じ場所に置く | `<名>-history.md`、`handoff.py check --trim` | [handoff.md](handoff.md) の「作る・更新する」 |
 | ndf-next | 次のセッションの最初の入力を置く、情報文字列が `ndf-next` のコードブロック。最後の応答に 1 つだけ置く | フェンスの情報文字列 `ndf-next` | [context-window.md](context-window.md) の「新しい会話で戻す」 |
-| シグナルファイル | ラッパーへ知らせるファイル。Stop hook が最後の応答の ndf-next を移した `next.json` と、止める `stop`。ラッパーはこれを受けてセッションを切り替える | `next.json`、`stop`、`relay.py mark` | [relay.md](relay.md) の「承認ゲートを越えない守り」 |
-| アナウンス | ndf-next のブロックの直前にそのまま置く 1 文。1 行目がラッパーの内か外かを示す | `relay.py notice`（1 行目 `relay` / `outside`、2 行目がアナウンス） | [context-window.md](context-window.md) の「新しい会話で戻す」 |
+| シグナルファイル | ラッパーへ知らせるファイル。Stop hook が最後の応答の ndf-next を移した `next.json` と、止める `stop`。ラッパーはこれを受けてセッションを切り替える | `next.json`、`stop`、Stop の hook の guard（`hooks/guards/relay_mark.py`） | [relay.md](relay.md) の「承認ゲートを越えない守り」 |
+| アナウンス | ndf-next のブロックの直前にそのまま置く 1 文。1 行目がラッパーの内か外かを示す | `ndf relay notice`（1 行目 `relay` / `outside`、2 行目がアナウンス） | [context-window.md](context-window.md) の「新しい会話で戻す」 |
 | アイドル | シグナルファイル・会話の記録・利用者の入力が動かない秒数。この秒数がたつまでラッパーは `/exit` を入力しない | `NDF_RELAY_QUIET`（既定 5） | [relay.md](relay.md) の「上限」 |
 | パススルー | ラッパーを挟まず、本物の claude をそのまま起動すること | `NDF_RELAY=0`、`claude -p` | [relay.md](relay.md) の「ラッパーを挟まない起動」 |
 | 進捗ログ | プランの実行中に 1 行 1 つの JSON で追記する記録。LLM を使わない | `<state-dir>/progress.jsonl` | `ndf plan` の docstring |

@@ -12,7 +12,7 @@ hooks:
 
 # 開発ワークフローの振り分け
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `behavior-check.py`（M1）・`ci-watch.py`（AD1+）・`context-policy.py`（M3b）・`hook.py`（M3a）・`mvv-gate.py`（P2）・`parallel.py`（P3）・`project-decl.py`（D2+）・`project-mvv.py`（M7）・`relay.py`（M3b）・`release-steps.py`（M2）・`supervise.py`（C2）・`test-run.py`（C2）・`workflow-guard.sh`（M3a）・`worktree-setup.sh`（M8）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `behavior-check.py`（M1）・`ci-watch.py`（AD1+）・`context-policy.py`（M3b）・`hook.py`（M3a）・`mvv-gate.py`（P2）・`parallel.py`（P3）・`project-mvv.py`（M7）・`release-steps.py`（M2）・`workflow-guard.sh`（M3a）・`worktree-setup.sh`（M8）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 変更内容をモードへ分類し、必要な工程だけを起動する。**全変更にフル工程を課さない。**
 判定の結果として返すもの（モード・必須工程・次のコマンド）の形は「3. 判定結果を出力する」にある。
@@ -406,12 +406,11 @@ conductor がフェーズごとにプランをキューで流す（[references/w
 **カットポイントの再起動はラッパーが自動で行う（Claude Code だけ）。** 利用者が `claude` と打つと alias がラッパーを挟む。
 ラッパーは conductor が出した `ndf-next` のブロックを拾い、`/exit`・プラグインの更新・次のセッションの起動を行う。
 始め方・止め方・上限は [references/relay.md](references/relay.md)、利用上限でのアカウントの切り替えは [references/relay-accounts.md](references/relay-accounts.md) にある。
-**ブロックの前に次の Bash を 1 回実行し、2 行目（アナウンス）をブロックの直前へそのままコピーする。**
-1 行目が `outside` か失敗ならラッパーの外である（書き方は `context-window.md` の「新しい会話で戻す」）。
+**ブロックの前に次の Bash を 1 回実行し、結果の `summary`（アナウンス）をブロックの直前へそのままコピーする。**
+`metrics.inside` が偽か失敗ならラッパーの外である（書き方は `context-window.md` の「新しい会話で戻す」）。
 
 ```bash
-PLUGIN_ROOT='${CLAUDE_PLUGIN_ROOT}'; case "$PLUGIN_ROOT" in '$'*) PLUGIN_ROOT= ;; esac
-[ -n "$PLUGIN_ROOT" ] && python3 "$PLUGIN_ROOT/scripts/relay.py" notice || echo outside
+ndf relay notice || echo outside
 ```
 
 **人がその場にいて指示を変えたいときは、conductor へ伝える。** 次のフェーズから反映する。

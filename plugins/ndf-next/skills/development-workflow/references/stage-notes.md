@@ -1,6 +1,6 @@
 # 工程ごとの理由と例外
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `behavior-check.py`（M1）・`check-trigger.py`（M1）・`refactor-scope.py`（M4）・`refactor.py`（M4）・`test-run.py`（C2）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `behavior-check.py`（M1）・`check-trigger.py`（M1）・`refactor-scope.py`（M4）・`refactor.py`（M4）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 工程表（`SKILL.md` の「モードごとに起動する Skill」）の各行が、なぜその Skill を指すのか。
 **条件に当たったときだけ読む。** 起動のたびに要るのは判定の基準と工程表そのものである。

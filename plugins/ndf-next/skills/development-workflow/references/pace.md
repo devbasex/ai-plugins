@@ -1,6 +1,6 @@
 # 進め方（`pace`）
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `check-trigger.py`（M1）・`merged-steps.py`（M8）・`mvv-gate.py`（P2）・`parallel.py`（P3）・`project-mvv.py`（M7）・`release-steps.py`（M2）・`sprint-close.py`（M1）・`sprint-state.py`（P1b）・`supervise.py`（C2）・`upkeep.py`（M6）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `check-trigger.py`（M1）・`merged-steps.py`（M8）・`mvv-gate.py`（P2）・`parallel.py`（P3）・`project-mvv.py`（M7）・`release-steps.py`（M2）・`sprint-close.py`（M1）・`sprint-state.py`（P1b）・`upkeep.py`（M6）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 SKILL.md の「進め方（`pace`）」の続きである。3 つの進め方の定義の表は SKILL.md にあり、この文書は
 進め方ごとのフロー・`fast` の工程の区分・`fast` と `auto` の使ってよい条件・設定の形・プランのステージ・

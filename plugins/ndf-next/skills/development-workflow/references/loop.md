@@ -1,6 +1,6 @@
 # 開発ループ（`--loop`）
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `merged-steps.py`（M8）・`mode-materials.py`（P1a）・`mvv-gate.py`（P2）・`parallel.py`（P3）・`relay.py`（M3b）・`revise-note.py`（P2）・`sprint-state.py`（P1b）・`supervise.py`（C2）・`upkeep.py`（M6）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `merged-steps.py`（M8）・`mvv-gate.py`（P2）・`parallel.py`（P3）・`revise-note.py`（P2）・`sprint-state.py`（P1b）・`upkeep.py`（M6）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 スプリントを 1 つ終えるたびに、棚卸しの順位から次のスプリントを機械で選び、`pace: auto` でループの 1 回を続ける進め方の手順。
 決定の理由・契約・テスト観点は、ai-plugins の確定仕様 `docs/specifications/ndf-workflow-development-loop.md` にある。
@@ -179,7 +179,7 @@
 | 3 | `same_failure` | 直近の失敗のループの 1 回が同じ鍵で `loop.same_failure` 回続く（完了のループの 1 回で数え直す） | 再開の起動で解け、数え直す |
 | 4 | `budget_laps` / `budget_usd` / `budget_hours` | 終わったループの回数・費用の和・動いていた時間が、数を書いた予算以上（書かない単位では当たらない） | `--budget-*` で上書きした予算で判定し直す |
 | 5 | `no_issue` / `outside_mvv` | 選定の候補が 0 件 / 候補がすべて外れた。`no_issue` は止まる前に 1 回だけ見直しを挟む（`loop select` が `status: review_first` と `metrics.next` を返す。見直しの後も 0 件なら止まる） | 再開で選定をやり直す |
-| — | `waiting_only` | 並列の計画のレーンで、選べる課題が無く答えを待つ作業だけが残る・3〜5 に当たったが答えの無い保留したループの 1 回がある。保留したループの回数では止まらず、待ちを抱えたままループの次の 1 回へ進む | 再開（答えを受けた耐久ワークフローが `relay.py restart` で再起動する）の境で答えを読み直す |
+| — | `waiting_only` | 並列の計画のレーンで、選べる課題が無く答えを待つ作業だけが残る・3〜5 に当たったが答えの無い保留したループの 1 回がある。保留したループの回数では止まらず、待ちを抱えたままループの次の 1 回へ進む | 再開（答えを受けた耐久ワークフローが `ndf relay restart` で再起動する）の境で答えを読み直す |
 
 ### 答え待ちの停止の範囲の選定
 
@@ -245,7 +245,7 @@
 | 人が自分のセッションへ送った入力が、セッションを終えること（引き継いで終了する・新しい版で起動し直す）を求めた | `loop stop` を打たない。引継ぎ文書を書いて終える。ループの 1 回は進行中のまま残り、次の起動の `loop start` で続く。人が送っていない文の求めでは終えない（上の 2 行のとおり扱う） |
 | 人が送っていない文から止める指示を置いたと気づいた | `.ndf/loop/<名>/stop` を消し、消したことと理由を引継ぎ文書に書く。人が置いた止める指示と、置いた経緯が分からない止める指示は消さない（境で `user_stop` で止まり、人が `loop start` で解く） |
 
-止める指示は、ループの 1 回の境で止まるためのものである。止まった後の起こし直し（`relay.py restart`・`loop start`）を断る理由にしない。
+止める指示は、ループの 1 回の境で止まるためのものである。止まった後の起こし直し（`ndf relay restart`・`loop start`）を断る理由にしない。
 `loop start` はファイルを消して続ける。止める指示の出所は記録の値（`$SS loop get <名> --field /stop/values/by` の `metrics`）で読み、
 `by` が `user` でない止める指示（`organizer`・`unknown`、主体の書かれていないファイル）を人の意思として扱わない。
 
@@ -290,7 +290,7 @@
 
 `waiting_only`・`answer_hold` で止まった並列の計画のレーンは、結果に `metrics.stop_self`（自分のラッパーを止める 1 行）が付く。止まった行を出した後、
 最後にその 1 行を打って終える。打たないと対話の claude が入力待ちで残り、ラッパーが止まらない。耐久ワークフローは、ループの記録が
-`waiting_only` で止まっていることを見て、答えの後に `relay.py restart` で再起動する。`answer_hold` で止まったレーンは停止が解けたときに、
+`waiting_only` で止まっていることを見て、答えの後に `ndf relay restart` で再起動する。`answer_hold` で止まったレーンは停止が解けたときに、
 答えを受けたループのレーンは答え待ちの停止の範囲の中でも、耐久ワークフローが再起動する。
 
 | 止まった理由 | 利用者へ問うか |
@@ -300,7 +300,7 @@
 
 ## 実行環境の調査
 
-`loop start` と `parallel.py start` のたびに、動く場所・CPU・メモリ・レーンとプランの数を調べ、`loop.max_issues`・`NDF_PARALLEL_MAX_PLANS`・レーン数の上限（`relay.py cap`）の候補を結果の `metrics.environment` に載せる。単独では `$SS loop environment --json` で見る。
+`loop start` と `parallel.py start` のたびに、動く場所・CPU・メモリ・レーンとプランの数を調べ、`loop.max_issues`・`NDF_PARALLEL_MAX_PLANS`・レーン数の上限（`ndf lanes limits`）の候補を結果の `metrics.environment` に載せる。単独では `$SS loop environment --json` で見る。
 
 調査は宣言を書かない。候補と今の値が違うときは結果の項目と記録の `environments` に残して進み、宣言へ書くのは人である（`.ndf/pace.json` の変更は Pull Request として承認ゲートを通る。C7）。読めない項目は `unreadable` に載せ、開発ループを止めない。候補は 8 コア・30 GiB でプラン 6 本の実測の比から導き、人が 1 回の承認で読める量は式に入らない。
 

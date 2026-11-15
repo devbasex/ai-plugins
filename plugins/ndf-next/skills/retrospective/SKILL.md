@@ -12,7 +12,7 @@ allowed-tools:
 
 # 振り返り
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `ask.py`（P2）・`gate-rejections.py`（P2）・`glossary.py`（M7）・`issue-file.py`（M6）・`project-decl.py`（D2+）・`project-mvv.py`（M7）・`projects-sync.sh`（M7）・`skill-stats.py`（M7）・`upkeep.py`（M6）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `ask.py`（P2）・`gate-rejections.py`（P2）・`glossary.py`（M7）・`issue-file.py`（M6）・`project-decl.py`（S1e）・`project-mvv.py`（M7）・`projects-sync.sh`（M7）・`skill-stats.py`（M7）・`upkeep.py`（M6）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 **進め方のうち次に変えることを決めて残し、起票の取りこぼしを拾う。**
 

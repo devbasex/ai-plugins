@@ -5,14 +5,14 @@
 新しいプラグインの機能は `bin/ndf` の副命令である。Skill とエージェントの本文は `ndf` を名前で呼び、プラグインの置き場を探さない。
 
 - Claude Code は、有効なプラグインの `bin/` を Bash の `PATH` へ足す
-- Codex と端末は、`PATH` 上に置いた `bin/ndf` へのリンクで呼ぶ（`bin/ndf` の冒頭の注記。リンクは `install-wrapper` の Skill が置く）
+- Codex と端末は、`PATH` 上に置いた `bin/ndf` へのシンボリックリンクで呼ぶ（`bin/ndf` の冒頭の注記）
 
 ## 確かめる 1 行
 
 手順の先頭で次を打つ。`ndf` が見つからなければ、理由を標準エラーへ書いて終了コード 3 で止まる。旧いプラグイン（`plugins/ndf`）へは倒れない。
 
 ```bash
-command -v ndf >/dev/null 2>&1 || { echo "ndf が PATH に無い: 新しいプラグインを有効にするか、install-wrapper の Skill で bin/ndf へのリンクを PATH に置く" >&2; exit 3; }
+command -v ndf >/dev/null 2>&1 || { echo "ndf が PATH に無い: 新しいプラグインを有効にするか、bin/ndf へのシンボリックリンクを PATH に置く" >&2; exit 3; }
 SCRIPTS=
 ```
 

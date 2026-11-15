@@ -1,6 +1,6 @@
 # conductor が直に使うエントリポイント
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `check-trigger.py`（M1）・`external-ai.py`（AD3+）・`gate-rejections.py`（P2）・`glossary.py`（M7）・`handoff.py`（M7）・`merged-steps.py`（M8）・`mvv-gate.py`（P2）・`parallel-measure.py`（P3）・`project-mvv.py`（M7）・`relay.py`（M3b）・`release-steps.py`（M2）・`release-verification-steps.py`（M2）・`resolve.sh`（X0）・`skill-stats.py`（M7）・`sprint-close.py`（M1）・`sprint-state.py`（P1b）・`supervise.py`（C2）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `check-trigger.py`（M1）・`external-ai.py`（AD3+）・`gate-rejections.py`（P2）・`glossary.py`（M7）・`handoff.py`（M7）・`merged-steps.py`（M8）・`mvv-gate.py`（P2）・`parallel-measure.py`（P3）・`project-mvv.py`（M7）・`release-steps.py`（M2）・`release-verification-steps.py`（M2）・`skill-stats.py`（M7）・`sprint-close.py`（M1）・`sprint-state.py`（P1b）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 conductor が自分で打つ NDF のスクリプトはこの一覧に限る。**一覧にあるものは起動指示や引継ぎ文書に
 コピーしない。** ここに無い操作を手で組み立てそうになったら、先に一覧の中の近いプランを探す。
@@ -66,8 +66,8 @@ ndf plan wait <プラン>.json
 
 | エントリポイント | 使うとき |
 | --- | --- |
-| `scripts/relay.py notice` | 切り替えの前に、利用者へ出す案内を得る。仕組みは [relay.md](relay.md) |
-| `scripts/relay.py status` | ラッパーの導入の状態を確かめる |
+| `scripts/ndf relay notice` | 切り替えの前に、利用者へ出す案内を得る。仕組みは [relay.md](relay.md) |
+| `scripts/ndf relay status` | ラッパーの導入の状態を確かめる |
 | `scripts/handoff.py path` | 引継ぎ文書の本体と履歴の、メインディレクトリの絶対パスを得る（`--exists` で本体の有無）。規則は [handoff.md](handoff.md) |
 | `scripts/handoff.py init` | 引継ぎ文書が無ければテンプレートから作る |
 | `scripts/handoff.py find` | 名指しの無い再開で、入力の語に一致する引継ぎ文書を探す |

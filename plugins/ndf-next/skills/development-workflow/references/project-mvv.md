@@ -1,6 +1,6 @@
 # プロジェクト MVV（`.ndf/mvv.md`・`.ndf/mvv.json`）
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `check-trigger.py`（M1）・`mvv-gate.py`（P2）・`project-mvv.py`（M7）・`sprint-state.py`（P1b）・`supervise.py`（C2）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `check-trigger.py`（M1）・`mvv-gate.py`（P2）・`project-mvv.py`（M7）・`sprint-state.py`（P1b）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 プロジェクト全体の Mission / Vision / Value と固有の「必ず人の承認が要る操作」（`P<番号>`）を宣言し、NDF が判断する地点
 （承認ゲートの MVV 判定・レビューの指摘と修正の可否・リファクタリングの提案の採否・judge のステップ・範囲外の起票）が

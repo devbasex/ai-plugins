@@ -1,7 +1,5 @@
 # 設計文書の雛形
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `supervise.py`（C2）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
-
 不要な節は削る。空の見出しを残さない。**触らない領域の節は作らない。**
 
 詳細設計の文書（`standard`・`legacy-refactor`）は、[detail-template.md](detail-template.md) の雛形で別のファイルに書く。

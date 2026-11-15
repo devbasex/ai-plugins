@@ -1,6 +1,6 @@
 # プロジェクトの宣言を解析する
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `glossary.py`（M7）・`project-decl.py`（D2+）・`project-mvv.py`（M7）・`worktree-setup.sh`（M8）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
+> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `glossary.py`（M7）・`project-decl.py`（S1e）・`project-mvv.py`（M7）・`worktree-setup.sh`（M8）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
 
 **NDF は、使い始めたリポジトリを手順 0 で解析し、そのプロジェクトの形を `.ndf/project.json` に書き出す。**
 各 Skill とスクリプトは、ai-plugins の形（pytest を uv で・本番チャネルと別のベースブランチ宛て・版数を持つプラグインのデプロイ）を既定にせず、
