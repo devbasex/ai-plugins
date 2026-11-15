@@ -468,8 +468,10 @@ gws の確認はリポジトリの外でも打たれるため、置き場はリ�
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #2067 | この子で解消する（M7 #3302 で records の判定を直して手で閉じた。`ndf gws` もその判定を使い、PR の closing keywords と本文の「この子で解消する Issue」に入れる） | #3547 | — |
+| #2067 | 取り込む | #3547 | — |
 | #3547 | 実装する | — | `plugins/ndf-next/src/ndf/cli.py`、`plugins/ndf-next/src/ndf/domains/gws/__init__.py`、`plugins/ndf-next/src/ndf/domains/gws/cli.py`、`plugins/ndf-next/src/ndf/domains/gws/check.py`、`plugins/ndf-next/src/ndf/domains/gws/thumbnails.py`、`plugins/ndf-next/src/ndf/domains/gws/report_decide.py`、`plugins/ndf-next/src/ndf/domains/gws/material.py`、`plugins/ndf-next/src/ndf/domains/records/gws.py`、`plugins/ndf-next/contracts/schemas/io/gws.result.schema.json`、`plugins/ndf-next/contracts/schemas/io/gws.args.schema.json`（生成物）、`plugins/ndf-next/docs/contracts/commands.md`（生成物）、`plugins/ndf-next/docs/contracts/files.md`（生成物）、`plugins/ndf-next/contracts/domains/places.json`、`plugins/ndf-next/contracts/domains/ndf-files.json`、`plugins/ndf-next/src/ndf/checks/children.json`、`plugins/ndf-next/src/ndf/parity/features.json`、`plugins/ndf-next/skills/google-workspace/SKILL.md`、`plugins/ndf-next/tests/domains/gws/__init__.py`、`plugins/ndf-next/tests/domains/gws/test_check.py`、`plugins/ndf-next/tests/domains/gws/test_thumbnails.py`、`docs/glossary/glossary.json`、`docs/glossary.md` |
+
+#2067 は M7 #3302 で records の判定を直して手で閉じた。`ndf gws` もその判定を使うため #3547 へ取り込み、PR の closing keywords と本文の「この子で解消する Issue」に入れる。
 
 ## 人へ残す判断
 
