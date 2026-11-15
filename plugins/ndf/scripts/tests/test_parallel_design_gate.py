@@ -238,14 +238,59 @@ def test_answer_design_user_approval_writes_the_gate_record(lane):
     assert cmd[cmd.index("--pr") + 1] == "12" and cmd[cmd.index("--outcome") + 1] == "approved"
 
 
-@pytest.mark.parametrize("res", ["head_moved", "no_stamp", "not_green", "conflict", "failed", "production"])
-def test_answer_design_approval_for_an_unmerged_pr_reasks_without_a_record(lane, res):
-    """マージ済み（merged / already_merged）でない答えは、承認の記録を書かず問い直しへ戻す（未承認の先端を後のマージで通さない）。"""
+@pytest.mark.parametrize("res", ["head_moved", "no_stamp"])
+def test_answer_design_approval_for_a_moved_head_reasks_without_a_record(lane, res):
+    """承認した先端を今の先端に当てられない答えは、承認の記録を書かず問い直しへ戻す（未承認の先端を後のマージで通さない）。"""
     main, sprint = lane
     pl.send_answer(main, "p1", "la-g12-0123456789ab", "approved", by="user", merge={"result": res, "reason": "動いた"})
     run = Run()
     got = pdg.answer_design(main, "p1", "la-g12-0123456789ab", sprint / "state.json", run=run)
     assert (got.status, got.code) == ("gate", 10) and run.calls == [] and "問い直す" in got.metrics["next"]
+
+
+@pytest.mark.parametrize("res", ["not_green", "conflict", "failed"])
+@pytest.mark.parametrize(("again", "want"), [("merged", "ok"), ("not_green", "gate"), ("head_moved", "gate")])
+def test_answer_design_retries_the_merge_with_the_approved_stamp(lane, monkeypatch, res, again, want):
+    """先端を変えずに解ける結果は、依頼の stamp でマージをやり直し、マージ済みになったときだけ記録する（_settle_one と同じ）。"""
+    main, sprint = lane
+    pl.send_answer(main, "p1", "la-g12-0123456789ab", "approved", by="user", merge={"result": res, "reason": "赤"})
+    tried = []
+    monkeypatch.setattr(
+        pdg.design_pr_merge, "merge_approved", lambda root, pr, stamp, run=None: tried.append(stamp) or {"result": again, "reason": "r"}
+    )
+    run = Run()
+    got = pdg.answer_design(main, "p1", "la-g12-0123456789ab", sprint / "state.json", run=run)
+    assert tried == [SHA] and got.status == want and got.metrics["merge"]["result"] == again
+    assert bool(run.calls) == (want == "ok")  # 記録（sprint-state.py gate）はマージ済みのときだけ
+    if again == "head_moved":
+        assert "問い直す" in got.metrics["next"]
+    elif want == "gate":
+        assert "同じ design-answer を打ち直す" in got.metrics["next"]
+
+
+class GhView(Run):
+    def __init__(self, state):
+        super().__init__()
+        self.state = state
+
+    def __call__(self, cmd, cwd=None, stdin=None):
+        self.calls.append(cmd)
+        if cmd[:3] == ["gh", "pr", "view"]:
+            return 0, json.dumps({"state": self.state, "headRefOid": SHA}), ""
+        return 0, "", ""
+
+
+@pytest.mark.parametrize(("state", "want"), [("MERGED", "ok"), ("OPEN", "gate")])
+def test_answer_design_production_waits_for_the_human_merge(lane, state, want):
+    """宛先が本番チャネルの承認は問い直さず、人がマージしたら記録し、まだなら同じ design-answer を打ち直す続きを返す。"""
+    main, sprint = lane
+    pl.send_answer(main, "p1", "la-g12-0123456789ab", "approved", by="user", merge={"result": "production", "reason": "本番"})
+    run = GhView(state)
+    got = pdg.answer_design(main, "p1", "la-g12-0123456789ab", sprint / "state.json", run=run)
+    gates = [c for c in run.calls if "gate" in c]
+    assert got.status == want and bool(gates) == (want == "ok")
+    if want == "gate":
+        assert "マージした後に、同じ design-answer を打ち直す" in got.metrics["next"]
 
 
 def test_answer_design_mvv_approval_writes_one_record(lane):

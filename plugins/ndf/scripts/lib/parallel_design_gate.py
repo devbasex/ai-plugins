@@ -362,21 +362,39 @@ def answer_design(
     return _answer_rejected(run, state, pr, rid, what, repo, msg, work, metrics)
 
 
+def _settle_unmerged(run, repo: Path, pr: int, msg: dict, merge: dict) -> tuple[str, str, dict] | None:
+    """答えに載ったマージの結果がマージ済みでないときの (要約, 続き, やり直したマージの結果)。マージ済みと分かれば None。
+    開発ループの `_settle_one` と同じ扱いにする。先端を変えずに解ける結果（`not_green`・`conflict`・`failed`）は、依頼の
+    stamp で `merge_approved` をやり直す（承認した先端のままのときだけマージされる）。`production` は人がリリース承認ゲートで
+    マージしたか（`gh pr view` が MERGED か）だけを読む。承認した先端を今の先端に当てられないもの（`REASK_MERGE`）は問い直す。"""
+    got = merge
+    if got.get("result") not in (*design_pr_merge.MERGED_RESULTS, *REASK_MERGE, "production"):
+        got = design_pr_merge.merge_approved(repo, pr, msg.get("stamp"), run=run)
+    res, why = got.get("result"), str(got.get("reason") or got.get("result"))
+    if res in design_pr_merge.MERGED_RESULTS:
+        return None
+    if res == "production":
+        if (pr_state_of(repo, pr, run) or {}).get("state") == "MERGED":
+            return None
+        nxt = f"人がリリース承認ゲートで設計 PR #{pr} をマージした後に、同じ design-answer を打ち直す"
+        return f"設計 PR #{pr} は人のマージを待つ（{why}）。記録を書かずに待つ", nxt, got
+    if res in REASK_MERGE:
+        nxt = f"設計 PR #{pr} の今の先端で設計承認を問い直す（同じ承認の問いを出し直すと、新しい先端の依頼が送られる）"
+        return f"設計 PR #{pr} の承認は今の先端に当てられない（{why}）。記録を書かずに問い直す", nxt, got
+    nxt = f"設計 PR #{pr} のマージを止めた原因（{res}: {why}）を解き、同じ design-answer を打ち直す（承認した先端のままならマージをやり直し、先端が動けば問い直しへ回す）"
+    return f"設計 PR #{pr} をマージできなかった（{res}: {why}）。記録を書かずに止まる", nxt, got
+
+
 def _answer_approved(run, state: Path, pr: int, by: str, what: str, repo: Path, msg: dict, sprint: Path | None, metrics: dict) -> Answered:
     """承認の答え: 設計承認ゲートの記録が無ければ書き、設計 PR のマージのステージの `resume` を続きにする。
-    答えにマージの結果が載り、それがマージ済み（`MERGED_RESULTS`）でなければ記録を書かない。続く `design-approved` と
-    `--expect-head` の無いマージのプランが、承認していない先端（CI を直す push・衝突を解く取り込み）を通さないためである。
-    承認した先端を今の先端に当てられないもの（`REASK_MERGE`）は新しい先端で問い直し、ほかはマージを止めた原因を解いてから問い直す。"""
+    答えにマージの結果が載り、それがマージ済み（`MERGED_RESULTS`）でなく、やり直し・人のマージの確認（`_settle_unmerged`）でも
+    マージ済みにならなければ記録を書かない。続く `design-approved` と `--expect-head` の無いマージのプランが、承認していない
+    先端（CI を直す push・衝突を解く取り込み）を通さないためである。"""
     merge = metrics.get("merge") if isinstance(metrics.get("merge"), dict) else {}
-    if merge and merge.get("result") not in design_pr_merge.MERGED_RESULTS:
-        why = str(merge.get("reason") or merge.get("result"))
-        if merge.get("result") in REASK_MERGE:
-            nxt = f"設計 PR #{pr} の今の先端で設計承認を問い直す（同じ承認の問いを出し直すと、新しい先端の依頼が送られる）"
-            head = f"設計 PR #{pr} の承認は今の先端に当てられない（{why}）"
-        else:
-            nxt = f"設計 PR #{pr} のマージを止めた原因（{merge.get('result')}: {why}）を解き、今の先端で設計承認を問い直す"
-            head = f"設計 PR #{pr} をマージできなかった（{merge.get('result')}: {why}）"
-        return Answered("gate", f"{head}。記録を書かずに問い直す", 10, {**metrics, "next": nxt})
+    left = _settle_unmerged(run, repo, pr, msg, merge) if merge else None
+    if left is not None:
+        head, nxt, got = left
+        return Answered("gate", head, 10, {**metrics, "merge": got, "next": nxt})
     if not _has_gate(state, pr, by, "approved") and (
         err := _write_gate(run, GateRecord(state=state, pr=pr, by=by, outcome="approved", what=what, repo=repo, msg=msg))
     ):

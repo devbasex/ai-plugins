@@ -261,7 +261,10 @@ classDiagram
 | --- | --- | --- | --- |
 | `approved` | スプリント状態へ `設計承認ゲート` の記録（`--pr <P> --by <答えの by> --outcome approved`） | `ok`・0 | 続くステージの `supervise.py queue --resume` の 1 行（そのキューをまだ起動していなければステージの `command`） |
 | `approved` で、答えに載ったマージの結果が `head_moved` か `no_stamp`（承認した先端を今の先端に当てられない） | 書かない | `gate`・10 | 今の先端で設計承認を問い直す（開発ループの問い直しと同じ） |
-| `approved` で、答えに載ったマージの結果がほかのマージ済みでないもの（`not_green`・`conflict`・`failed`・`production`） | 書かない（続く `design-approved` と `--expect-head` の無いマージが、CI を直す push や衝突を解く取り込みで生まれた未承認の先端を通さないため） | `gate`・10 | マージを止めた原因を解き、今の先端で設計承認を問い直す |
+| `approved` で、答えに載ったマージの結果が先端を変えずに解けるもの（`not_green`・`conflict`・`failed`） | 依頼の stamp でマージをやり直し（`design_pr_merge.merge_approved`。開発ループの `_settle_one` と同じ）、マージ済みになったときだけ上の `approved` の記録を書く。やり直しの結果が `head_moved` / `no_stamp` なら上の行、`production` なら下の行に従う | マージ済みなら `ok`・0、ほかは `gate`・10 | マージ済みなら上の `approved` と同じ。ほかはマージを止めた原因を解き、同じ `design-answer` を打ち直す（承認した先端のままならマージをやり直し、先端が動けば問い直しへ回る） |
+| `approved` で、答えに載ったマージの結果が `production`（宛先が本番チャネルに当たる・当たるか決められない） | 問い直さない。設計 PR が MERGED（`gh pr view`）なら上の `approved` の記録を書く。まだなら書かない | MERGED なら `ok`・0、ほかは `gate`・10 | MERGED なら上の `approved` と同じ。ほかは人がリリース承認ゲートで設計 PR をマージした後に、同じ `design-answer` を打ち直す |
+
+マージ済みでない承認の記録を書かないのは、続く `design-approved` と `--expect-head` の無いマージが、CI を直す push や衝突を解く取り込みで生まれた未承認の先端を通さないためである。同じ先端で同じ問いを出し直しても同じ依頼 id に答え済みが返るため（I2）、先端を変えずに解ける結果と `production` は、問い直しではなく `design-answer` の打ち直しで進める。
 | `revise` | 指摘をプランの状態ディレクトリの `work/design-revise-<P>.md` へ書く | `gate`・10 | 利用者が設計承認ゲートで直しを選んだときと同じ工程（`approval-request.md` の「利用者が承認ゲートで答えたら」の表） |
 | `rejected` | スプリント状態へ `--outcome rejected` の記録 | `gate`・10 | 課題を進めない（同じ表の差し戻し） |
 | まだ無い | 書かない | `stopped`・3 | 無し（耐久ワークフローが答えの後に起こす） |
