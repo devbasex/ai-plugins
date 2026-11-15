@@ -27,6 +27,7 @@ NDF の工程が書くファイル（宣言・計測値・実行の記録・文�
 | `estimate` | `ndf` repo:.ndf | `estimate.json` | declaration | 追跡 | 人 | kept | 内部（予告なく変えてよい） |
 | `gate-rejections` | `mvv-state` state:.（NDF_MVV_STATE_DIR で差し替え） | `gate-rejections.jsonl` | record | — | 承認ゲート（P2） | kept | 公開 |
 | `glossary` | `ndf` repo:.ndf | `glossary.json` | declaration | 追跡 | 人 | kept | 内部（予告なく変えてよい） |
+| `gws-install-material` | `google-workspace` state:gws | `install.md` | document | — | gws の確認（S1d） | replaced | 内部（予告なく変えてよい） |
 | `handoff` | `ndf-handoff` repo:.ndf/handoff | `<id>.md` | record | — | 中継（M3） | cleanup | 内部（予告なく変えてよい） |
 | `instructions` | `ndf` repo:.ndf | `instructions.json` | declaration | 追跡 | 人と解析（M7） | kept | 内部（予告なく変えてよい） |
 | `issue-items` | `ndf` repo:.ndf | `issue-items.json` | declaration | 追跡 | 人 | kept | 内部（予告なく変えてよい） |

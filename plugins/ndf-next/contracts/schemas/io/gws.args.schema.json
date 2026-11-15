@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/io/gws.args.schema.json",
+  "title": "ndf gws の引数",
+  "description": "ndf gws が受ける引数。キーは引数の名前（オプションは -- の名前、位置引数は名前）。規約の生成が作り、手で直さない",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "check",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--install": {
+          "type": "boolean",
+          "description": "導入の同意の印。gws が無ければ npm で入れる"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "thumbnails",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "presentation_id": {
+          "type": "string",
+          "description": "プレゼンテーションの ID",
+          "x-ndf-positional": true
+        },
+        "out_dir": {
+          "type": "string",
+          "description": "出力のディレクトリ（無ければ作る）",
+          "x-ndf-positional": true
+        },
+        "--size": {
+          "type": "string",
+          "enum": [
+            "SMALL",
+            "MEDIUM",
+            "LARGE"
+          ],
+          "default": "LARGE",
+          "description": "サムネイルの大きさ"
+        }
+      },
+      "required": [
+        "subcommand",
+        "presentation_id",
+        "out_dir"
+      ]
+    }
+  ]
+}

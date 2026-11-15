@@ -16,30 +16,32 @@ from typing import Any, Optional
 from ndf.contracts import limits
 
 # 状態の応答が必ず持つ鍵（gws auth status が成功したときの形）。どれかが無ければ読めない応答として止まる
-_STATUS_KEYS = ("credential_source", "auth_method", "client_config_exists")
+STATUS_KEYS = ("credential_source", "auth_method", "client_config_exists")
 
 
 class GwsError(RuntimeError):
-    """gws を打てない・結果を読めない。"""
+    """gws を打てない・結果を読めない。`stderr` は gws の標準エラー（起動できない・打ち切ったときは空文字）。"""
+
+    def __init__(self, message: str, stderr: str = "") -> None:
+        super().__init__(message)
+        self.stderr = stderr
 
 
-def auth_status() -> dict[str, Any]:
-    """`gws auth status` の JSON。打てない・失敗した・状態の鍵がそろわなければ `GwsError`。"""
+def auth_status(limit: str = "gws.auth-status") -> dict[str, Any]:
+    """`gws auth status` の JSON（上限は宣言 `limit` の秒数）。打てない・失敗した・状態の鍵がそろわなければ `GwsError`。"""
     try:
-        done = subprocess.run(
-            ["gws", "auth", "status"], capture_output=True, text=True, timeout=limits.seconds("gws.auth-status"), check=False
-        )
+        done = subprocess.run(["gws", "auth", "status"], capture_output=True, text=True, timeout=limits.seconds(limit), check=False)
     except (OSError, subprocess.SubprocessError) as exc:
         raise GwsError(f"gws auth status を打てない: {exc}") from exc
     # 失敗した応答の JSON を認証の判定へ渡さない
     if done.returncode != 0:
-        raise GwsError(f"gws auth status が終了コード {done.returncode} で終わった")
+        raise GwsError(f"gws auth status が終了コード {done.returncode} で終わった", done.stderr)
     try:
         raw = json.loads(done.stdout)
     except json.JSONDecodeError as exc:
-        raise GwsError(f"gws auth status を読めない: {exc}") from exc
-    if not isinstance(raw, dict) or any(k not in raw for k in _STATUS_KEYS):
-        raise GwsError(f"gws auth status の出力に {' / '.join(_STATUS_KEYS)} のどれかが無い")
+        raise GwsError(f"gws auth status を読めない: {exc}", done.stderr) from exc
+    if not isinstance(raw, dict) or any(k not in raw for k in STATUS_KEYS):
+        raise GwsError(f"gws auth status の出力に {' / '.join(STATUS_KEYS)} のどれかが無い", done.stderr)
     return raw
 
 
