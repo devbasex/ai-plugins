@@ -208,18 +208,18 @@ def classify_release(tree: Tree, merge_commit: str, head: str, base: str) -> Opt
 
 def sprint_start(tree: Tree, ref: str, base: str, production: str) -> Optional[str]:
     """本番チャネルに含まれていないスプリントブランチの起点のチャネル（`base` / `production`。旧いと同じ 3 段の判定）。"""
-    prod, origin_base = f"{tree.remote}/{production}", f"{tree.remote}/{base}"
-    if _succeeds(tree, "merge-base", "--is-ancestor", ref, prod):
+    remote_prod, remote_base = f"{tree.remote}/{production}", f"{tree.remote}/{base}"
+    if _succeeds(tree, "merge-base", "--is-ancestor", ref, remote_prod):
         return None
-    mb_prod = _out(tree, "merge-base", ref, prod).strip()
-    if mb_prod and not _succeeds(tree, "merge-base", "--is-ancestor", mb_prod, origin_base):
+    mb_prod = _out(tree, "merge-base", ref, remote_prod).strip()
+    if mb_prod and not _succeeds(tree, "merge-base", "--is-ancestor", mb_prod, remote_base):
         return "production"
-    mb = _out(tree, "merge-base", ref, origin_base).strip()
+    mb = _out(tree, "merge-base", ref, remote_base).strip()
     if not mb:
         return None
-    if not _succeeds(tree, "merge-base", "--is-ancestor", mb, prod):
+    if not _succeeds(tree, "merge-base", "--is-ancestor", mb, remote_prod):
         return "base"
-    chain = _out(tree, "rev-list", "--first-parent", f"^{mb}^@", prod).split()
+    chain = _out(tree, "rev-list", "--first-parent", f"^{mb}^@", remote_prod).split()
     return "production" if mb in chain else "base"
 
 
