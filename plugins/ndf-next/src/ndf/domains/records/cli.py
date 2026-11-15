@@ -9,7 +9,7 @@
     ndf records mvv signals --base <ブランチ>       # ベースブランチの MVV のバージョンで改訂の兆候を数える
     ndf records mvv answer [--version <バージョン>]         # 承認ゲートの回答（標準入力の JSON）を覆しの記録へ写す
     ndf records preflight                          # 手順 0 の 3 つの確かめ（worktree の設定・設定・MVV）
-    ndf records cleanup-stage <PR番号>...           # 後片付けを終えた PR が閉じる課題に工程の記録を付ける
+    ndf records cleanup-stage <PR番号>...           # クリーンアップを終えた PR が閉じる課題に工程の記録を付ける
     ndf records close-check <課題> [--verification <JSON>] [--require]   # スプリントで課題を閉じてよいか
     ndf records gws-check                          # gws の認証を確かめる
 
@@ -158,10 +158,10 @@ def _cleanup_stage(args: argparse.Namespace, root: Path) -> dict[str, Any]:
     failed = [i for i in items if i["result"] == cleanup_stage.FAILED]
     recorded = sum(1 for i in items if i["result"] == cleanup_stage.RECORDED)
     if failed:
-        detail = f"後片付けの工程の記録が {len(failed)} 件失敗した（後片付けの本体は戻さない）"
+        detail = f"クリーンアップの工程の記録が {len(failed)} 件失敗した（クリーンアップの本体は戻さない）"
         gaps = [{"kind": "stage_record", "name": cleanup_stage.item_name(i), "reason": i["reason"]} for i in failed]
         return result.stopped(TOOL, "incomplete", detail, items=items, gaps=gaps)
-    return result.result(TOOL, result.OK, f"後片付けの工程を {recorded} 件の課題に記録した", items)
+    return result.result(TOOL, result.OK, f"クリーンアップの工程を {recorded} 件の課題に記録した", items)
 
 
 def _close_check(args: argparse.Namespace, root: Path) -> dict[str, Any]:
@@ -208,7 +208,7 @@ def _add_spec(sub: Any) -> None:
 def _add_handoff(sub: Any) -> None:
     h = sub.add_parser("handoff").add_subparsers(dest="action", required=True).add_parser("check")
     h.add_argument("path", type=Path)
-    h.add_argument("--trim", action="store_true", help="テンプレートに無い節を退避先へ移してから確かめる")
+    h.add_argument("--trim", action="store_true", help="テンプレートに無いセクションを退避先へ移してから確かめる")
     h.add_argument("--history", type=Path, default=None, help="退避先（--trim のとき要る）")
     sub.choices["handoff"].set_defaults(handler=_handoff)
 

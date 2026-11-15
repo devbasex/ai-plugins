@@ -33,7 +33,7 @@
         },
         "--presented": {
           "type": "string",
-          "description": "提示した先端の SHA（present の outputs.head）"
+          "description": "提示した HEAD の SHA（present の outputs.head）"
         },
         "--by": {
           "type": "string",

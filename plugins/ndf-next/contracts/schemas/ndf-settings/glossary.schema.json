@@ -58,7 +58,7 @@
         },
         "term_sections": {
           "type": "array",
-          "description": "用語の節の見出し",
+          "description": "用語のセクションの見出し",
           "items": {
             "type": "string"
           }

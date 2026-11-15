@@ -86,12 +86,16 @@
         "words": ["実装レビュー"],
         "reason": "旧 projects-sync.sh（M7）が受ける工程名。入れ替えまでは呼び先の工程表の名前を渡す"
       },
+      "skills/merged/SKILL.md": {
+        "words": ["後片付け"],
+        "reason": "旧 projects-sync.sh（M7）が受ける工程名。入れ替えまでは呼び先の工程表の名前を渡す"
+      },
       "skills/development-workflow/references/workflow-modes.md": {
         "words": ["構造改善"],
         "reason": "旧 projects-sync.sh（M7）が受ける工程名。入れ替えまでは呼び先の工程表の名前を渡す"
       },
       "src/ndf/checks/rules.json": {
-        "words": ["入口", "雛形", "台帳", "実装レビュー", "構造改善"],
+        "words": ["入口", "雛形", "台帳", "実装レビュー", "構造改善", "後片付け"],
         "reason": "この除外のデータそのものが、外す語を持つ"
       }
     }

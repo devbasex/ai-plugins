@@ -9,7 +9,7 @@ NDF の工程が書くファイル（設定・計測値・実行の記録・文�
 | 行 | 保存先 | パス | 種類 | 追跡 | 書き手 | 消す時点 | 公開か |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `approval` | `issues` repo:issues | `approval-<id>.md` | document | — | 承認ゲート（P2） | cleanup | 内部（予告なく変えてよい） |
-| `archived-docs` | `issues-old` repo:issues/old | `<name>.md` | document | 追跡 | 後片付けの工程 | kept | 内部（予告なく変えてよい） |
+| `archived-docs` | `issues-old` repo:issues/old | `<name>.md` | document | 追跡 | クリーンアップの工程 | kept | 内部（予告なく変えてよい） |
 | `ask` | `ndf` repo:.ndf | `ask.json` | ndf_settings | 追跡 | 人 | kept | 内部（予告なく変えてよい） |
 | `ask-journal` | `mvv-state` state:.（NDF_MVV_STATE_DIR で差し替え） | `ask.jsonl` | record | — | 人への質問の守り（M3a） | kept | 公開 |
 | `backlog` | `ndf` repo:.ndf | `backlog.json` | ndf_settings | 追跡 | 人 | kept | 内部（予告なく変えてよい） |

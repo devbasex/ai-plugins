@@ -1,9 +1,9 @@
 """課題の本文の受け入れ条件と、その確認の区分の記録の読み書き（#2144・#1682。GitHub を呼ばない）。
 
-受け入れ条件の節・確認の表の見出し・区分の語と、節と表の行の読み方は `ndf.core.plan.inputs_decide` が持ち、ここは
+受け入れ条件のセクション・確認の表の見出し・区分の語と、セクションと表の行の読み方は `ndf.core.plan.inputs_decide` が持ち、ここは
 その上に手段の列と記録の書き込みを足す。
 
-確認の区分の記録は `## 受け入れ条件の確認` の節の表（`| 条件 | 区分 | 手段 |`）で、区分は `マージ前`（マージ前に
+確認の区分の記録は `## 受け入れ条件の確認` のセクションの表（`| 条件 | 区分 | 手段 |`）で、区分は `マージ前`（マージ前に
 確かめた。手段にテスト名か実行したコマンドを書く）か `リリース後`（リリースの後でしか確かめられない）である。
 手段の無い `マージ前` の行は確かめていないので読まない。
 
@@ -41,7 +41,7 @@ class Check(NamedTuple):
 
 
 def criteria(body: str) -> list[Criterion]:
-    """受け入れ条件の番号（上から 1 始まり）とチェックボックスの後の文。節が無ければ空。"""
+    """受け入れ条件の番号（上から 1 始まり）とチェックボックスの後の文。セクションが無ければ空。"""
     return [Criterion(i, text) for i, text in enumerate(inputs.criteria(body), start=1)]
 
 
@@ -60,7 +60,7 @@ def _parse_row(kind: str, means: str) -> Optional[Check]:
 
 
 def read_checks(body: str) -> dict[int, Check]:
-    """`## 受け入れ条件の確認` の表を {条件の番号: Check} で返す。節・表・列が無ければ空。"""
+    """`## 受け入れ条件の確認` の表を {条件の番号: Check} で返す。セクション・表・列が無ければ空。"""
     out: dict[int, Check] = {}
     for num, (_, kind, means) in inputs.check_rows(body, _head()):
         check = _parse_row(kind, means)
@@ -94,7 +94,7 @@ def merged(body: str, pre_merge: Mapping[int, str], post_release: Iterable[int])
 
 
 def checks_table(checks: Mapping[int, Check]) -> str:
-    """`## 受け入れ条件の確認` の節の表（番号の順）。手段の `|` と改行は `inputs.cell` で書き、`read_checks` が元へ戻す。"""
+    """`## 受け入れ条件の確認` のセクションの表（番号の順）。手段の `|` と改行は `inputs.cell` で書き、`read_checks` が元へ戻す。"""
     head = "| " + " | ".join(_head()) + " |"
     rule = "| " + " | ".join(":---" for _ in _head()) + " |"
     rows = [f"| {n} | {c.kind} | {inputs.cell(c.means) if c.kind == PRE_MERGE else NO_MEANS} |" for n, c in sorted(checks.items())]
@@ -102,7 +102,7 @@ def checks_table(checks: Mapping[int, Check]) -> str:
 
 
 def _table_span(lines: list[str], start: int, end: int) -> Optional[tuple[int, int]]:
-    """節（`lines[start:end]`）の囲みの外の最初の表の行の範囲（終わりは含まない）。表が無ければ None。"""
+    """セクション（`lines[start:end]`）の囲みの外の最初の表の行の範囲（終わりは含まない）。表が無ければ None。"""
     first = next((start + i for i, line in inputs.outside_fences(lines[start:end]) if line.strip().startswith("|")), None)
     if first is None:
         return None
@@ -111,8 +111,8 @@ def _table_span(lines: list[str], start: int, end: int) -> Optional[tuple[int, i
 
 
 def recorded_body(body: str, pre_merge: Mapping[int, str], post_release: Iterable[int]) -> str:
-    """記録を書いた本文。節が無ければ末尾へ足し、あれば節の中の表だけを置き換える（表が無ければ見出しの直後へ置く）。
-    節の中の説明文・小見出しと、節の外は変えない。"""
+    """記録を書いた本文。セクションが無ければ末尾へ足し、あればセクションの中の表だけを置き換える（表が無ければ見出しの直後へ置く）。
+    セクションの中の説明文・小見出しと、セクションの外は変えない。"""
     table = checks_table(merged(body, pre_merge, post_release))
     lines = inputs.body_lines(body)
     at = inputs.heading_at(lines, inputs.CHECKS_HEADING)

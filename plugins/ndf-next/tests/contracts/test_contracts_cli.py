@@ -260,7 +260,7 @@ def test_emit_passes_every_field(capsys):
     }
 
 
-# 現状固定（I-011）: --out の既存ファイルは断ったとき書き換えず、書けない宛先では標準出力へも出さない。
+# 現状固定（I-011）: --out の既存ファイルは断ったとき書き換えず、書けない書き込み先では標準出力へも出さない。
 def test_emit_mismatched_code_keeps_existing_out(capsys, tmp_path):
     dest = tmp_path / "r.json"
     dest.write_text("old\n", encoding="utf-8")

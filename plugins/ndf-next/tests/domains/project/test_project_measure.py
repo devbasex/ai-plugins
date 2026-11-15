@@ -441,9 +441,9 @@ def test_collect_flow_current_behavior_measured_when_all_high():
     assert f["integrate"] == {
         "value": "check",
         "confidence": "高",
-        "evidence": [{"command": _PR_CMD, "text": "head が sprint/* で宛先が develop の Pull Request 3 件: check 3"}],
+        "evidence": [{"command": _PR_CMD, "text": "head が sprint/* でマージ先が develop の Pull Request 3 件: check 3"}],
     }
-    assert f["doc_prs"]["evidence"] == [{"command": _PR_CMD, "text": "設計 PR・確定仕様化の PR の宛先 3 件: base 3"}]
+    assert f["doc_prs"]["evidence"] == [{"command": _PR_CMD, "text": "設計 PR・確定仕様化の PR のマージ先 3 件: base 3"}]
     assert f["release_strategy"]["evidence"] == [
         {"command": _PR_CMD + " と git rev-list --first-parent", "text": "main 宛ての Pull Request の head 3 件: whole 3"},
         {"command": "gh api repos/o/r/rulesets", "text": "ルールセット: main"},

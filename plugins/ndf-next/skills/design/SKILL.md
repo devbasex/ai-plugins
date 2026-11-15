@@ -64,7 +64,7 @@ issue のことではない。
 | 呼び出される約束（API・イベント・コマンド）を変える | [references/interface-api.md](references/interface-api.md) |
 | 画面を追加・変更する | [references/interface-ui.md](references/interface-ui.md) |
 | 非機能の条件が仕様にある | [references/nonfunctional.md](references/nonfunctional.md) |
-| ドメインモデルの節を書く（`standard` は必ず。ほかは集約・不変条件・ドメインイベントを変えるとき） | [references/domain-model.md](references/domain-model.md) |
+| ドメインモデルのセクションを書く（`standard` は必ず。ほかは集約・不変条件・ドメインイベントを変えるとき） | [references/domain-model.md](references/domain-model.md) |
 | **読み手へ渡す文書を作る**（`documentation`） | 共通の [references/layout-common.md](references/layout-common.md) と、出力の形に当たる参照 1 つ（[slide](references/layout-slide.md) / [document](references/layout-document.md) / [spreadsheet](references/layout-spreadsheet.md) / [page](references/layout-page.md)） |
 
 触らない領域の参照は読まない。
@@ -73,13 +73,13 @@ issue のことではない。
 
 **`light` / `operation` では、この表が起動の条件も決める。** 「すべての変更」以外の領域が
 1 つ以上該当するときにこの Skill を通し、1 つも当たらなければ通さない。「すべての変更」の行と
-「ドメインモデルの節を書く」の行は数に入れない。「すべての変更」の行は入れると常に該当し、条件が
+「ドメインモデルのセクションを書く」の行は数に入れない。「すべての変更」の行は入れると常に該当し、条件が
 条件でなくなる。ドメインモデルの行は、入れるとこの 2 モードの起動が増える。
 
 ### 2. 外部の調査を通す
 
 **設計の判断の前に、触る領域の業界の標準・仕様、主要な製品の解き方、使える既存のライブラリとサービスを
-一次情報で調べ、設計文書の `## 外部の調査` の節に残す。** 手元のコードと要求の文だけで組むと、比べないまま
+一次情報で調べ、設計文書の `## 外部の調査` のセクションに残す。** 手元のコードと要求の文だけで組むと、比べないまま
 「自前で作る」「古い形に寄せる」と決まるためである。手順の SSOT は
 [references/external-survey.md](references/external-survey.md) にある。
 
@@ -87,25 +87,25 @@ issue のことではない。
 - 調べた行には出典（URL・パス・コマンドのどれかと取得日）を付ける。取得できない対象は推定で埋めず、
   「確かめられなかったこと」へ書く
 - 上限（種類ごとの候補 6 件・取得の試み 30 回）に当たったら止め、残りを「確かめられなかったこと」へ書く
-- 省ける条件に当たるときは、節に `省く: <理由>` の 1 行だけを置く。省けるか決められないときは通す
+- 省ける条件に当たるときは、セクションに `省く: <理由>` の 1 行だけを置く。省けるか決められないときは通す
 
 この手順はプロジェクトの MVV に調査の項目があるかに依らず通す。
 
 ### 3. 設計文書を書く
 
-テンプレートは [references/design-template.md](references/design-template.md) にある。節の並びと、
+テンプレートは [references/design-template.md](references/design-template.md) にある。セクションの並びと、
 各節が `implementation-plan` のどのタスクへつながるかもそこにある。
 
-**H1 と承認する人が読む欄（目的・適用範囲・あるべき姿の根拠）を先に書き、続けてドメインモデルの節を書く。**
+**H1 と承認する人が読む欄（目的・適用範囲・あるべき姿の根拠）を先に書き、続けてドメインモデルのセクションを書く。**
 欄の書き方は [design-template.md の「承認する人が読む欄」](references/design-template.md#承認する人が読む欄) にある。
 
-**ドメインモデルの節は機能一覧より先に書く。** 変更が属するコンテキスト・変える集約とそのオーナー・不変条件・
+**ドメインモデルのセクションは機能一覧より先に書く。** 変更が属するコンテキスト・変える集約とそのオーナー・不変条件・
 ドメインイベント・用語を、機能一覧より先に決める。書き方は
 [references/domain-model.md](references/domain-model.md) にある。
 
 **書いた後に語を用語集と突き合わせる。** `python3 "$SCRIPTS/glossary.py" check --file <設計文書>` を打ち、
 新しい語・意味の変わった語・廃止する語を、同じ変更の中で用語集へ反映して `glossary.py render` で文書を
-作り直す。構成要素の名前などを語として新しく使うときは、ドメインモデルの節の「用語」の表に書く。
+作り直す。構成要素の名前などを語として新しく使うときは、ドメインモデルのセクションの「用語」の表に書く。
 
 **タスクを機械的に導けるだけの情報を書く。** 導けない設計は、次の工程が成立しない。
 
@@ -135,7 +135,7 @@ issue のことではない。
 当たる判断だけで、`## 人へ残す判断` の表に判断ごとの番号となぜ当たるかを書く。番号を挙げられない判断は人へ残さない。
 
 **決定ごとに、根拠にした MVV の項目を最後の行に書く**（「根拠: Value 6（MVV バージョン 1）」）。MVV に反する疑いのある決定は
-設計に書かずに人へ戻す（理由と根拠の項目つき）。MVV の節の読み方と根拠の行の形は [project-mvv.md の「工程での読み方」](../development-workflow/references/project-mvv.md) にある。
+設計に書かずに人へ戻す（理由と根拠の項目つき）。MVV のセクションの読み方と根拠の行の形は [project-mvv.md の「工程での読み方」](../development-workflow/references/project-mvv.md) にある。
 
 **承認の工程を足す決定を書かない。** 承認ゲートの数と置く場所は `development-workflow` の「人手の承認を求める承認ゲート」だけが持つ。
 共通原則の「必ず人の承認が要る操作」（C1〜C8）やプロジェクト固有の操作に当たる変更も、設計承認ゲート・リリース承認ゲートで人が見る。
@@ -184,7 +184,7 @@ issue のことではない。
 `python3 "$SCRIPTS/spec-copy.py" check <課題> issues/issue-<番号>-requirements.md` が 0 であること。1 なら
 本文が正なので、`spec-copy.py write` でコピーを作り直す。
 
-設計 PR の cross-review は、1 ラウンド目でドメインモデルの節だけを見て（モデルレビュー）、2 ラウンド目以降で
+設計 PR の cross-review は、1 ラウンド目でドメインモデルのセクションだけを見て（モデルレビュー）、2 ラウンド目以降で
 残りを見る（詳細レビュー）。設計承認ゲートは詳細レビューの後の 1 回だけである。
 
 **同じ表への指摘が 2 ラウンド続いたら、その表を実装へ送るかを supervisor が判断する。** 送るときは、

@@ -1,12 +1,12 @@
 """承認の証跡の後に、リリースの PR をマージする（GitHub Actions の workflow が打つ）。
 
-1. 本番ブランチ宛ての PR は、証跡を読み直して今の先端が承認されていることを確かめる（commit status も付け直す）。
+1. 本番ブランチ宛ての PR は、証跡を読み直して今の HEAD が承認されていることを確かめる（commit status も付け直す）。
    書く token が記録の読み手に信用されなければ、本番ブランチへ入れる前に止まる（マージの後のリリース記録が必ず落ちる。#3487）
-2. 宛先のブランチの規則（ruleset）と従来の保護の必須のチェック（check run と commit status）が PR の先端で通るまで待つ。落ちたら打ち直さずに停止理由で
+2. マージ先のブランチの規則（ruleset）と従来の保護の必須のチェック（check run と commit status）が PR の HEAD で通るまで待つ。落ちたら打ち直さずに停止理由で
    返す（同じ CI の失敗を読み直し続けない。#1983）
-3. 本番ブランチ宛ての PR は、待ちの後にもう一度証跡を読み直し、待つ前と同じ先端への最新の回答が承認のときだけ進む
+3. 本番ブランチ宛ての PR は、待ちの後にもう一度証跡を読み直し、待つ前と同じ HEAD への最新の回答が承認のときだけ進む
    （待つ間に足された変更要求や消された承認を見落とさない）
-4. 先端の SHA を添えて merge commit でマージする（承認の後に先端が動いていれば GitHub が断る）。マージキューへ入れたら、
+4. HEAD の SHA を添えて merge commit でマージする（承認の後に HEAD が動いていれば GitHub が断る）。マージキューへ入れたら、
    予算の範囲で PR がマージされるまで待つ（待たずに返すと、戻す PR・リリース記録・タグが走らない）。待つ間も
    キューに残っているかと承認を読み直し、キューが外したらすぐに止まり、承認が失効したらキューから外して止まる
 5. 本番ブランチへ入れたら、本番ブランチからベースブランチ宛ての PR を作り（開いたものがあれば使い直す）、必須のチェックの
@@ -52,7 +52,7 @@ ANY_APP = -1
 
 
 class Required(NamedTuple):
-    """宛先の必須のチェック。`names` は名前（重複なく整列）、`apps` は発行元のアプリ（ruleset の `integration_id`・
+    """マージ先の必須のチェック。`names` は名前（重複なく整列）、`apps` は発行元のアプリ（ruleset の `integration_id`・
     従来の保護の `app_id`）を指定された名前ごとのアプリの ID（#3506）。"""
 
     names: list[str]
@@ -154,7 +154,7 @@ class Lander:
     sleep: Callable[[float], None] = time.sleep
 
     def approvals(self, branch: str) -> int | None:
-        """宛先のブランチの承認数。ruleset の承認の規則があればその最大、無ければ従来の保護、保護が無ければ 0、読めなければ None。"""
+        """マージ先のブランチの承認数。ruleset の承認の規則があればその最大、無ければ従来の保護、保護が無ければ 0、読めなければ None。"""
         try:
             rules = self.hub.branch_rules(branch)
         except GitHubError:  # noqa: NDF401 ネットワーク: 承認数を読めなければ迂回しない（#3506 の I2b）
@@ -180,7 +180,7 @@ class Lander:
         return n is not None and n >= 1
 
     def required(self, branch: str) -> Required:
-        """宛先のブランチの規則（ruleset。全ページ）と従来の保護の必須のチェック（承認の commit status を除く）。"""
+        """マージ先のブランチの規則（ruleset。全ページ）と従来の保護の必須のチェック（承認の commit status を除く）。"""
         pairs: list[tuple[str, int | None]] = [
             (text_of(check["context"]), _app(check.get("integration_id")))
             for rule in self.hub.branch_rules(branch)
@@ -235,13 +235,13 @@ class Lander:
         return watched.cause([])
 
     def _refusal(self, pull: Pull, human_only: bool = False) -> Landed | None:
-        """本番ブランチ宛ての PR の証跡を読み直し、`pull` の先端が承認されていなければ止まった結果（承認されていれば None）。
+        """本番ブランチ宛ての PR の証跡を読み直し、`pull` の HEAD が承認されていなければ止まった結果（承認されていれば None）。
         `human_only` なら担い手が MVV 判定の証跡を数えない（迂回の前提。#3506 の I9）。"""
         if pull.base_ref != self.production:
             return None
         got = trail.check(self.hub, pull.number, human_only)
         if got.pull.head_sha != pull.head_sha:
-            return Landed(False, "refused", f"#{pull.number} の先端が {pull.head_sha[:12]} から {got.pull.head_sha[:12]} へ動いた")
+            return Landed(False, "refused", f"#{pull.number} の HEAD が {pull.head_sha[:12]} から {got.pull.head_sha[:12]} へ動いた")
         if not got.judgment.approved:
             return Landed(False, "refused", f"#{pull.number} は承認されていない: {got.judgment.detail}")
         return None
@@ -292,7 +292,7 @@ class Lander:
             return None
         got = trail.judged(self.hub, now)
         if got.pull.head_sha != pull.head_sha:
-            return Landed(False, "refused", f"#{pull.number} の先端がキューの待ちの間に {got.pull.head_sha[:12]} へ動いた")
+            return Landed(False, "refused", f"#{pull.number} の HEAD がキューの待ちの間に {got.pull.head_sha[:12]} へ動いた")
         if not got.judgment.approved:
             return Landed(False, "refused", f"#{pull.number} の承認がキューの待ちの間に失効した: {got.judgment.detail}")
         return None
@@ -375,7 +375,7 @@ class Lander:
         if pull.base_ref != self.production:
             return Landed(True, None, f"#{number} は既にマージされている")
         synced = self._sync(pull, deadline)
-        # 再開: 利用者の証跡がマージした先端への承認なら、迂回でマージしたとして記録を補う（I7）
+        # 再開: 利用者の証跡がマージした HEAD への承認なら、迂回でマージしたとして記録を補う（I7）
         if self._bypass(pull) and (judged := trail.user_judgment_at(self.hub, number, pull.head_sha)) is not None and judged.approved:
             return self._record(pull, synced)
         return synced

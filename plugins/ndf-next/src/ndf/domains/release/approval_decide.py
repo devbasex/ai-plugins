@@ -5,13 +5,13 @@
 
 証跡の 1 件は、マーカー `TRAIL_MARK` と、回答の行・承認したコミットの行（40 桁の SHA）を持つコメントである。
 承認資料の提示（マーカー `REQUEST_MARK`）は証跡に数えない。判定は write 以上の権限を持つ書き手の証跡だけを読み、
-PR の今の先端に当てた最も新しい回答で決める。
+PR の今の HEAD に当てた最も新しい回答で決める。
 
 | 信用する証跡 | 判定 |
 | --- | --- |
-| 今の先端への最新の回答が承認 | `approved` |
-| 今の先端への最新の回答が変更要求 | `rejected` |
-| 今の先端への回答が無く、ほかのコミットへの回答がある（回答の後に先端が動いた） | `stale` |
+| 今の HEAD への最新の回答が承認 | `approved` |
+| 今の HEAD への最新の回答が変更要求 | `rejected` |
+| 今の HEAD への回答が無く、ほかのコミットへの回答がある（回答の後に HEAD が動いた） | `stale` |
 | 1 件も無い | `missing` |
 """
 
@@ -27,7 +27,7 @@ _NS = identity.FIXED_WORDS["workflow_namespace"]
 # 証跡のマーカーと、承認資料の提示のマーカー（提示は証跡に数えない）
 TRAIL_MARK = f"<!-- {_NS}:release-approval -->"
 REQUEST_MARK = f"<!-- {_NS}:release-approval-request -->"
-# 承認の判定を PR の先端へ付ける commit status の名前
+# 承認の判定を PR の HEAD へ付ける commit status の名前
 STATUS_CONTEXT = f"{_NS}/release-approval"
 # 回答の語（事実の表 answers の語と同じ綴り）
 APPROVED, REJECTED = "approved", "rejected"
@@ -111,7 +111,7 @@ def trails(comments: Iterable[tuple[str, str, bool]]) -> list[Trail]:
 
 
 def judge(found: Sequence[Trail], head: str) -> Judgment:
-    """今の先端 `head`（40 桁）への最新の回答で判定する。"""
+    """今の HEAD `head`（40 桁）への最新の回答で判定する。"""
     on_head = [t for t in found if t.sha == head]
     if on_head:
         last = max(on_head, key=lambda t: t.order)
@@ -119,5 +119,5 @@ def judge(found: Sequence[Trail], head: str) -> Judgment:
         return Judgment(last.answer, f"{last.author} が {head[:12]} を{verb}", last)
     if found:
         last = max(found, key=lambda t: t.order)
-        return Judgment(STALE, f"回答は {last.sha[:12]} へのもので、今の先端 {head[:12]} への回答が無い（承認し直しが要る）", last)
+        return Judgment(STALE, f"回答は {last.sha[:12]} へのもので、今の HEAD {head[:12]} への回答が無い（承認し直しが要る）", last)
     return Judgment(MISSING, f"{head[:12]} への承認の証跡が無い")

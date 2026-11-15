@@ -162,8 +162,8 @@ flowchart TB
 | 指摘ファイル | レビューする者（`cross-review` の担当・`pr-review` の LLM か外部 AI）が書く、指摘の全件と総評のファイル。投稿は書いた者でなく、読む側のスクリプトが行う | `<席>-review-pr<番号>-round<R>-payload.json`、`pr-review-steps.py` の `findings.json` | [cross-review](../../cross-review/SKILL.md)、[pr-review](../../pr-review/SKILL.md) |
 | doc-lint | 追加した Markdown の行に、検討の痕跡・課題番号の由来・比較の語が無いかを見るチェック | `doc-lint.py`、プランの `doc-lint` のステップ | `doc-lint.py` の docstring |
 | 用語チェック | プロジェクトの用語集の形と、文書の追加した行の廃止した語・未登録の語を見るチェック。LLM を使わない | `glossary.py check`、設計のフェーズの `glossary-check` のステップ | [glossary-format.md](../../requirements-design/references/glossary-format.md) |
-| モデルレビュー | 設計 Pull Request のレビューの 1 ラウンド目。ドメインモデルの節と用語集の差分だけを見る。承認されても抜けない | 状態ファイルの `rounds[].stage: "model"` | [08-review-categories.md](../../cross-review/docs/08-review-categories.md) |
-| 詳細レビュー | 設計 Pull Request のレビューの 2 ラウンド目以降。確定したモデルを前提に残りの節を見る | 状態ファイルの `rounds[].stage: "detail"` | [08-review-categories.md](../../cross-review/docs/08-review-categories.md) |
+| モデルレビュー | 設計 Pull Request のレビューの 1 ラウンド目。ドメインモデルのセクションと用語集の差分だけを見る。承認されても抜けない | 状態ファイルの `rounds[].stage: "model"` | [08-review-categories.md](../../cross-review/docs/08-review-categories.md) |
+| 詳細レビュー | 設計 Pull Request のレビューの 2 ラウンド目以降。確定したモデルを前提に残りのセクションを見る | 状態ファイルの `rounds[].stage: "detail"` | [08-review-categories.md](../../cross-review/docs/08-review-categories.md) |
 
 ## 記録と状態
 
@@ -174,7 +174,7 @@ flowchart TB
 | 通過工程 | ある課題について、進捗記録が実際に書かれた工程の集合 | — | [stage-completeness.md](stage-completeness.md) の「用語」 |
 | 通過記録 | 通過工程を課題ごとに残したファイル | `ndf progress show <ステートマシンの ID>` | [stage-completeness.md](stage-completeness.md) の「用語」 |
 | スプリント状態ファイル | スプリントのプラン・done・承認ゲートの記録・MVV・バージョンを持つファイル。パスは呼ぶ側が決め、目録 `sprint.json` とは別のファイルにする。引継ぎ文書の表と ndf-next をここから作る | 例 `sprint-state.json`、`sprint-state.py init` / `update` / `gate` / `render` / `next` / `status` | `sprint-state.py` の docstring |
-| 引継ぎ文書 | 会話を切って新しいセッションで続けるための文書。メインディレクトリに置き、コミットしない。1 本が 1 つの引継ぎの対象を受け持つ。「今の会話の進み」と「次に実行するコマンド」の節はスクリプトが書く | `.ndf/handoff/<名>.md`、`handoff.py`、引継ぎ文書の表への追記（M7 #3302 が `ndf` のサブコマンドに足す。新しいプラグインだけではまだ打てない） | [handoff.md](handoff.md) |
+| 引継ぎ文書 | 会話を切って新しいセッションで続けるための文書。メインディレクトリに置き、コミットしない。1 本が 1 つの引継ぎの対象を受け持つ。「今の会話の進み」と「次に実行するコマンド」のセクションはスクリプトが書く | `.ndf/handoff/<名>.md`、`handoff.py`、引継ぎ文書の表への追記（M7 #3302 が `ndf` のサブコマンドに足す。新しいプラグインだけではまだ打てない） | [handoff.md](handoff.md) |
 | 引継ぎの対象 | 引継ぎ文書 1 本が受け持つ仕事のまとまり（スプリント・マイルストーン・課題のどれか）。名の頭になる | `sprint-` / `milestone-` / `issue-` | [handoff.md](handoff.md) の「保存先と名」 |
 | 引継ぎの履歴 | 引継ぎ文書の本体から終わった項目を移す文書。本体と同じ場所に置く | `<名>-history.md`、`handoff.py check --trim` | [handoff.md](handoff.md) の「作る・更新する」 |
 | ndf-next | 次のセッションの最初の入力を置く、情報文字列が `ndf-next` のコードブロック。最後の応答に 1 つだけ置く | フェンスの情報文字列 `ndf-next` | [context-window.md](context-window.md) の「新しい会話で戻す」 |
@@ -194,11 +194,11 @@ flowchart TB
 | --- | --- | --- | --- |
 | worktree | 開発の変更を行う git worktree。課題ごとに 1 つ切る | `.worktrees/<ブランチ名>`、`/ndf:worktree` | [worktree](../../worktree/SKILL.md) |
 | メインディレクトリ | リポジトリを clone したディレクトリ。`issues/` `docs/` と各ランタイムの設定は、ここで編集してよい | `git rev-parse --git-common-dir` の親 | [worktree](../../worktree/SKILL.md) の用語の表 |
-| ベースブランチ | Pull Request の宛先で、スプリントどうしを結合して試すブランチ。開発版のチャネルを兼ねることがある。worktree の分岐元はスプリントの起点が決める | `.ndf/worktree.json` の `base_branch` | [../SKILL.md](../SKILL.md) の「本番系へ届く操作」 |
+| ベースブランチ | Pull Request のマージ先で、スプリントどうしを結合して試すブランチ。開発版のチャネルを兼ねることがある。worktree の分岐元はスプリントの起点が決める | `.ndf/worktree.json` の `base_branch` | [../SKILL.md](../SKILL.md) の「本番系へ届く操作」 |
 | 結合ブランチ | ベースブランチを、スプリントどうしの組み合わせを試す役割で呼ぶときの名前 | — | [worktree の ndf-settings.md](../../worktree/references/ndf-settings.md) の「ブランチ運用を定義するリポジトリ」 |
-| ブランチ運用の設定 | スプリントの起点・ベースブランチへ入れる時点・文書の Pull Request の宛先・本番へのリリース方式を書いた設定。無ければベースブランチから切り、ベースブランチを丸ごと出す | `.ndf/worktree.json` の `branch_flow` | [worktree の ndf-settings.md](../../worktree/references/ndf-settings.md) の「ブランチ運用を定義するリポジトリ」 |
+| ブランチ運用の設定 | スプリントの起点・ベースブランチへ入れる時点・文書の Pull Request のマージ先・本番へのリリース方式を書いた設定。無ければベースブランチから切り、ベースブランチを丸ごと出す | `.ndf/worktree.json` の `branch_flow` | [worktree の ndf-settings.md](../../worktree/references/ndf-settings.md) の「ブランチ運用を定義するリポジトリ」 |
 | スプリントの起点 | スプリントブランチと worktree を切る元のブランチ。ベースブランチか本番チャネルをチャネルの名前で指す | `branch_flow.start`（`base` / `production`） | 同上 |
-| 文書の Pull Request の宛先 | 設計 PR と確定仕様化の PR の宛先。ベースブランチかスプリントブランチ | `branch_flow.doc_prs`（`base` / `sprint`） | 同上 |
+| 文書の Pull Request のマージ先 | 設計 PR と確定仕様化の PR のマージ先。ベースブランチかスプリントブランチ | `branch_flow.doc_prs`（`base` / `sprint`） | 同上 |
 | 本番へのリリース方式 | 本番チャネルへ何をどう入れるか。ベースブランチを丸ごと出すか、選んだリリースの単位を集めるか | `branch_flow.release_strategy`（`merge_base_branch` / `release_branch`） | 同上 |
 | リリースブランチ | 本番チャネルへ入れる変更を集め、バージョンを上げるブランチ | `release/v<バージョン>` | [release-steps.md](../../release/references/release-steps.md) |
 | リリースの単位 | 選んで集めるリリース方式で、リリースが選ぶ 1 つのブランチ。本番チャネルに含まれていないコミットを持つスプリントブランチ | `sprint/<名前>` | [worktree の ndf-settings.md](../../worktree/references/ndf-settings.md) の「ブランチ運用を定義するリポジトリ」 |

@@ -60,13 +60,13 @@ def test_handoff_check_reports_missing_paths(repo: Path, capsys, last_result) ->
 def test_handoff_check_reads_relative_paths_from_the_target_repo(
     repo: Path, capsys, last_result, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    (repo / "handoff.md").write_text("## 現在地\n\n- 対象\n\n## 古い節\n\n- 移す\n", encoding="utf-8")
+    (repo / "handoff.md").write_text("## 現在地\n\n- 対象\n\n## 古いセクション\n\n- 移す\n", encoding="utf-8")
     caller = tmp_path / "caller"
     caller.mkdir()
     (caller / "handoff.md").write_text("## 現在地\n\n- 呼び出し元\n", encoding="utf-8")
     monkeypatch.chdir(caller)
     code, got = _run(capsys, last_result, "--cwd", str(repo), "handoff", "check", "handoff.md", "--trim", "--history", "h.md")
-    assert code == 0 and {"moved": "## 古い節"} in got["items"]
+    assert code == 0 and {"moved": "## 古いセクション"} in got["items"]
     assert (repo / "h.md").is_file() and not (caller / "h.md").exists()
     assert (caller / "handoff.md").read_text(encoding="utf-8") == "## 現在地\n\n- 呼び出し元\n"
 

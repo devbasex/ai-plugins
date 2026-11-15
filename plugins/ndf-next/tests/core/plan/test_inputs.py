@@ -40,9 +40,9 @@ def test_criteria_reads_checkboxes_outside_code_blocks():
 
 
 def test_section_lack_names_a_missing_or_empty_section():
-    """受け入れ条件の節を持たない本文を通さない（#2246）。"""
+    """受け入れ条件のセクションを持たない本文を通さない（#2246）。"""
     assert section_lack(BODY) is None
-    assert "節が無い" in section_lack("## 目的\n\nx\n")
+    assert "セクションが無い" in section_lack("## 目的\n\nx\n")
     assert "条件が無い" in section_lack("## 受け入れ条件\n\n説明だけ\n")
 
 
@@ -112,10 +112,10 @@ CHECKS_TABLE = """## 受け入れ条件の確認
 | z | マージ前 | 6 |
 ```
 
-### 小見出しは節の中
+### 小見出しはセクションの中
 | w | リリース後 | 7 |
 
-## 次の節
+## 次のセクション
 | v | マージ前 | 8 |
 """
 
@@ -140,7 +140,7 @@ def test_current_read_checks_and_check_kinds_without_a_usable_table():
     # 手段の列が無い表: read_checks は空、check_kinds は読む（CRLF も読む）
     no_means = "## 受け入れ条件の確認\r\n\r\n| 条件 | 区分 |\r\n| --- | --- |\r\n| 1 | マージ前 |\r\n"
     assert (read_checks(no_means), check_kinds(no_means)) == ({}, {1: "マージ前"})
-    # 見出しの行だけ・節が無い・見出しが違う
+    # 見出しの行だけ・セクションが無い・見出しが違う
     for body in (
         "## 受け入れ条件の確認\n| 条件 | 区分 | 手段 |\n",
         "",
@@ -162,7 +162,7 @@ def test_current_section_lines_fences_headings_and_boundaries():
         "前\n## 対象\r\na\n   ```\n## 囲みの中ではない\nb\n   ```\n```\n## 囲みの中\n~~~\nc\n~~~\n```\n"
         "### 小見出し\n# 上の見出し\nd\n## 対象\ne\n"
     )
-    # 字下げした囲みは囲みとして扱わない。最初の見出しの節だけを読み、`#` / `##` の見出しで終わる
+    # 字下げした囲みは囲みとして扱わない。最初の見出しのセクションだけを読み、`#` / `##` の見出しで終わる
     assert section_lines(body, "## 対象") == ["a", "   ```"]
     assert section_lines("## 対象\n", "## 対象") == [""]
     assert section_lines("x", "## 対象") is None
@@ -179,7 +179,7 @@ def test_current_design_target_lines_fences_and_sections():
         "## テスト設計\n\n`a`\n  ```\n`b`\n  ```\n```\n## 構成要素\n```\n> 引用\n- **採らなかった案**: `x`\n"
         "### 小\n`y`\n## 別\n`z`\n## 決定の記録\r\n`w`\n"
     )
-    # 字下げした囲みも囲みとして扱う。行番号は 1 始まり。`###` は採らなかった案を解くが節は変えない
+    # 字下げした囲みも囲みとして扱う。行番号は 1 始まり。`###` は採らなかった案を解くがセクションは変えない
     assert target_lines(text) == [
         ("テスト設計", 2, ""),
         ("テスト設計", 3, "`a`"),

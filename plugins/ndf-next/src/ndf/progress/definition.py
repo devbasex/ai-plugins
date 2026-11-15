@@ -108,7 +108,7 @@ def ref_target(ref: str) -> Any:
 
 
 def _enum_of_property(node: dict[str, Any], key: str) -> Optional[list[str]]:
-    """スキーマの節 `node` の性質 `key` の `enum`。無ければ None。"""
+    """スキーマのセクション `node` の性質 `key` の `enum`。無ければ None。"""
     props = node["properties"] if isinstance(node.get("properties"), dict) else {}
     prop = props[key] if key in props else None
     return list(prop["enum"]) if isinstance(prop, dict) and "enum" in prop else None

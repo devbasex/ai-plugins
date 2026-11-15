@@ -49,7 +49,7 @@ def test_env_names_and_secrets():
 
 
 def _assemble(parts: dict[str, str]) -> list[str]:
-    """部品（id → 中身）を order の昇順に並べた本文の行。中身の無い節は見出しだけ。"""
+    """部品（id → 中身）を order の昇順に並べた本文の行。中身の無いセクションは見出しだけ。"""
     order = facts.column("pr-body", "order")
     lines: list[str] = []
     for pid in sorted(parts, key=order.__getitem__):
@@ -59,7 +59,7 @@ def _assemble(parts: dict[str, str]) -> list[str]:
 
 
 def _section(lines: list[str], heading: str) -> list[str]:
-    """節の中身: 見出しの次から、次の部品（見出し・行のマーカー・署名）の前まで。"""
+    """セクションの中身: 見出しの次から、次の部品（見出し・行のマーカー・署名）の前まで。"""
     starts = tuple(r["text"] for r in facts.rows("pr-body"))
     i = lines.index(heading) + 1
     j = next((k for k in range(i, len(lines)) if lines[k].startswith(starts)), len(lines))

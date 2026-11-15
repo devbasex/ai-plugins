@@ -35,14 +35,14 @@ allowed-tools:
 ## 実行計画
 
 **複数の課題を渡されたら、最初の supervisor を起動する前に実行計画を書く。** バンドルごとの依存・触るファイルと
-節・起動してよい本数を 1 つの表に置き、工程の終わりごとに読み直して、着手できる行を起動する。
+セクション・起動してよい本数を 1 つの表に置き、工程の終わりごとに読み直して、着手できる行を起動する。
 **課題が 1 件で Pull Request も 1 本のときは書かない。**
 
 置く場所（メインディレクトリの `issues/execution-plan-<キー>.md`、開いている間はコミットしない）・
 行と測った値の形・見直す 5 つの契機と手順・閉じ方は
 [references/execution-plan.md](references/execution-plan.md) が持つ。
 
-**並行の可否そのものはこの Skill が決めない。** 依存と本数の必須ルール・変更重複の目安（別の節 / 足すだけ /
+**並行の可否そのものはこの Skill が決めない。** 依存と本数の必須ルール・変更重複の目安（別のセクション / 足すだけ /
 書き換え）は
 [parallel-work.md](../development-workflow/references/parallel-work.md) にある。
 
@@ -110,7 +110,7 @@ plan の構造は `/ndf:implementation-plan` を参照。本 skill では multi-
 ```markdown
 ## PR 分割計画
 
-| PR # | branch 名 | 概要 | 触るファイルと節 | 設計の依存 | 実装の依存 |
+| PR # | branch 名 | 概要 | 触るファイルとセクション | 設計の依存 | 実装の依存 |
 |---|---|---|---|---|---|
 | 1 | feature/PLAN42-schema | スキーマ追加 | `db/schema.sql`「注文」 | なし | なし |
 | 2 | feature/PLAN42-api    | API 実装    | `api/orders.py` | PR1:収束 | PR1:マージ |
@@ -251,11 +251,11 @@ git worktree add "$main_dir/.worktrees/feature/<PLAN-ID>-ui"     feature/<PLAN-I
 ガイドライン:
 
 - **依存は工程の対で見る。** PR2 の実装が PR1 のマージを待つ場合でも、PR2 の**設計は待たない**
-- **同じファイルを触っても、変更重複が「別の節」か「足すだけ」なら並行してよい。** 同じ節を
+- **同じファイルを触っても、変更重複が「別のセクション」か「足すだけ」なら並行してよい。** 同じセクションを
   書き換える・移す・消す組だけ、後の PR の実装を先の PR のマージまで待つ（区分は
   [parallel-work.md](../development-workflow/references/parallel-work.md) の「変更重複の目安」）
 - **競合は後からマージする側が解き、解いた後の head でレビューを収束させてからマージする**
-- 終わった worktree は `git worktree remove <path>` で片付ける。マージ後の後片付けは
+- 終わった worktree は `git worktree remove <path>` で片付ける。マージ後のクリーンアップは
   `/ndf:merged` が扱う
 - Claude Code から並行開発を指示する場合も、worktree は `worktree-setup.sh create` で作り、そのパスを渡す。
   Agent tool の `isolation: "worktree"` は使わない（隔離の中では NDF のスクリプトが拒まれることがあり、

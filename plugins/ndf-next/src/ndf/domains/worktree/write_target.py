@@ -314,7 +314,7 @@ def _noncontinuing(n: Any) -> bool:
 
 
 def _apply_cd(st: _Location, args: list[str]) -> None:
-    """`cd` の引数から現在地を進める。宛先を字面から決められなければ `cwd` を `None` にする。"""
+    """`cd` の引数から現在地を進める。移動先を字面から決められなければ `cwd` を `None` にする。"""
     st.cds += 1
     dest = next((a for a in args if a == "--" or not a.startswith("-")), "")
     if dest == "--":
@@ -368,7 +368,7 @@ def sed_inplace_files(args: list[str]) -> list[str]:
 
 
 def _target_dir(a: str) -> Optional[str]:
-    """`--target-directory=<d>`・`-t<d>` の `<d>`。当たらなければ `None`（`-t` 単独は空文字で、次の語が宛先）。"""
+    """`--target-directory=<d>`・`-t<d>` の `<d>`。当たらなければ `None`（`-t` 単独は空文字で、次の語が書き込み先）。"""
     if a.startswith("--target-directory="):
         return a.split("=", 1)[1]
     if a == "--target-directory":

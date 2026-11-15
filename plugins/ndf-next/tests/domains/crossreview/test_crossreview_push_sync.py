@@ -52,8 +52,8 @@ def test_issue_2440_conflicting_push_is_undone_and_reported_as_diverged(
 ) -> None:
     """#2440: 同じ行を変えた push の後はマージを取り消し、diverged と衝突したファイル・同期の 1 行を返す。"""
     wt = _review_worktree(repos, tmp_path)
-    fix = commit(wt, "doc.md", "# 設計\n\n## 節 A\n\n直した本文\n", "修正")
-    commit(repos.other, "doc.md", "# 設計\n\n## 節 A\n\n別の本文\n", "別の push")
+    fix = commit(wt, "doc.md", "# 設計\n\n## セクション A\n\n直した本文\n", "修正")
+    commit(repos.other, "doc.md", "# 設計\n\n## セクション A\n\n別の本文\n", "別の push")
     sh(repos.other, "push", "-q", "origin", f"HEAD:refs/heads/{BRANCH}")
     code, got = run_cli(capsys, "push-fix", str(wt), "--branch", BRANCH, "--commit", fix)
     assert code != 0
@@ -146,8 +146,8 @@ def test_sync_without_own_commits_only_moves_to_origin(repos: Repos, tmp_path: P
 def test_sync_conflict_returns_to_the_previous_head(repos: Repos, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """#2440: 載せ直しで衝突したら前の HEAD に戻し（コミットを失わない）、衝突したファイルを返して止まる。"""
     wt = _review_worktree(repos, tmp_path)
-    before = commit(wt, "doc.md", "# 設計\n\n## 節 A\n\n直した\n", "修正")
-    commit(repos.other, "doc.md", "# 設計\n\n## 節 A\n\n別\n", "別の push")
+    before = commit(wt, "doc.md", "# 設計\n\n## セクション A\n\n直した\n", "修正")
+    commit(repos.other, "doc.md", "# 設計\n\n## セクション A\n\n別\n", "別の push")
     sh(repos.other, "push", "-q", "origin", f"HEAD:refs/heads/{BRANCH}")
     code, got = run_cli(capsys, "sync", str(wt), "--branch", BRANCH)
     assert code != 0 and got["items"][0]["conflicts"] == ["doc.md"] and before in got["summary"]

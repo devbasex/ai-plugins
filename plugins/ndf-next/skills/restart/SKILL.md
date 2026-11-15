@@ -48,7 +48,7 @@ ndf relay notice || echo outside
 
 ### 2. 引継ぎ文書を作る・更新する
 
-保存先・名・節の形・規則の SSOT は [handoff.md](../development-workflow/references/handoff.md) にある。
+保存先・名・セクションの形・規則の SSOT は [handoff.md](../development-workflow/references/handoff.md) にある。
 
 1. 引継ぎの対象と名（`sprint-<スプリント名>`・`milestone-<番号>`・`issue-<番号>`）を SSOT の「保存先と名」で決める。
    決まらなければ文書を作らない（下の表の 3 行目か、引数だけで出す）

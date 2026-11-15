@@ -5,7 +5,7 @@
     ndf worktree cleanup [--dry-run]                # マージ済みのブランチの worktree を片付ける
     ndf worktree session                            # メインディレクトリの逸脱を伝え、設定で有効ならブランチを追従する
     ndf worktree guard [--base <dir>] [--unread] <パス>...   # 書き込み先がメインディレクトリかの案内
-    ndf worktree merged <PR番号>... [--flow-record <JSON>]   # マージの後の後片付け（worktree・ブランチ・マージ）
+    ndf worktree merged <PR番号>... [--flow-record <JSON>]   # マージの後のクリーンアップ（worktree・ブランチ・マージ）
     ndf worktree trash --ref <コミット> [--yes --only <退避先>...]   # 本番に出た退避先を挙げる（承認した名前だけ消す）
     ndf worktree init [--force] | check             # 設定を作る・設定の状態を出す
     ndf worktree deps|localenv|testenv ...          # worktree の環境（cli_env）

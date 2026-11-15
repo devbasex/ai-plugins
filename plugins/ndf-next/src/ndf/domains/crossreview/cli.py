@@ -213,7 +213,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
 
 
 def _every_section(purpose: str) -> bool:
-    """節を詳細レビューへ必ず通す PR か（設計のプランのテンプレートの purpose。#3181）。"""
+    """セクションを詳細レビューへ必ず通す PR か（設計のプランのテンプレートの purpose。#3181）。"""
     return purpose == route.templates()["design"].purpose
 
 
@@ -225,7 +225,7 @@ def cmd_scope(args: argparse.Namespace) -> int:
     sections = drive.changed_sections(git.Git(wt), args.base, wt)
     got = scope_decide.state_scope(data, _every_section(args.purpose), len(rounds) + 1, sections)
     item = {"kind": "scope", "scope": got.kind, "base": got.base, "unreviewed": list(got.unreviewed)}
-    return _ok(f"round {len(rounds) + 1} の範囲は {got.kind}（詳細レビューを通らない節 {len(got.unreviewed)} 件）", [item])
+    return _ok(f"round {len(rounds) + 1} の範囲は {got.kind}（詳細レビューを通らないセクション {len(got.unreviewed)} 件）", [item])
 
 
 def _handed(path: Optional[str]) -> tuple[fin.Handed, ...]:

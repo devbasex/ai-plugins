@@ -1,4 +1,4 @@
-"""マージの後の後片付けの判断（純粋な関数）: スプリントブランチを残すかと、メインディレクトリをマージするか。
+"""マージの後のクリーンアップの判断（純粋な関数）: スプリントブランチを残すかと、メインディレクトリをマージするか。
 
 - `sprint_keep`: 選んで集めるリリース方式（事実の表 `branch-flows` の `keeps_sprint` が真の行）では、スプリントブランチを
   本番チャネルに含まれるまで残す。リリース方式は**そのスプリントの開始時の記録**で決め、記録が無いスプリントだけ今の設定で
@@ -29,7 +29,7 @@ def _flow_row(release_strategy: Optional[str]) -> Optional[dict[str, Any]]:
 
 
 def long_lived_keep(branch: Optional[str], base: Optional[str], production: Optional[str]) -> Optional[str]:
-    """PR の head がベースブランチか本番チャネルなら残す理由（リリースの PR の後片付けで本流を消さない）。"""
+    """PR の head がベースブランチか本番チャネルなら残す理由（リリースの PR のクリーンアップで本流を消さない）。"""
     for name, label in ((base, "ベースブランチ"), (production, "本番チャネル")):
         if branch and branch == name:
             return f"PR の head が{label} {branch} のため残す"

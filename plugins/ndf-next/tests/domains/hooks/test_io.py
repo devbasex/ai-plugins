@@ -104,7 +104,7 @@ def test_sender_drops_without_slack_and_keeps_failed_sends(tmp_path, monkeypatch
 
 
 def test_queues_are_kept_per_destination(tmp_path, monkeypatch):
-    # プロジェクト A の宛先で残った通知を、プロジェクト B の接続で起動した送り手が送らない
+    # プロジェクト A の送信先で残った通知を、プロジェクト B の接続で起動した送り手が送らない
     other = {"SLACK_BOT_TOKEN": "t-b", "SLACK_CHANNEL_ID": "C-B"}
     outbox.enqueue(tmp_path, "question", {"text": "A の質問"}, DEST)
     sent = []

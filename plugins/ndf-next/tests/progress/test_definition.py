@@ -292,7 +292,7 @@ def test_current_non_listen_step_offers_the_known_routes_of_the_waiting_report()
     assert run.choices(run.Move(run.Action.GATE, None, st, prog)) == []
 
 
-# --- 現状固定: スキーマの木から性質の enum を探す（I-018。入れ子・配列・候補が複数・enum の無い節・空の enum） -----
+# --- 現状固定: スキーマの木から性質の enum を探す（I-018。入れ子・配列・候補が複数・enum の無いセクション・空の enum） -----
 
 _find_enum = definition.find_enum
 

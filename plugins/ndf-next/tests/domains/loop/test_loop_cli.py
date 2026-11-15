@@ -1,4 +1,4 @@
-"""サブコマンド `ndf loop`: 記録の読み書き・断りの結果 JSON・ゲートの回答の先端。"""
+"""サブコマンド `ndf loop`: 記録の読み書き・断りの結果 JSON・ゲートの回答の HEAD。"""
 
 from __future__ import annotations
 

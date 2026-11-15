@@ -1,14 +1,14 @@
-"""リリースの PR の承認の証跡を読み書きし、判定を PR の先端の commit status へ付ける。
+"""リリースの PR の承認の証跡を読み書きし、判定を PR の HEAD の commit status へ付ける。
 
-- 提示（`present`）: 承認資料を、提示した先端の SHA を添えて PR へコメントする（会話のセッションが打つ）。資料が対象にした
-  コミットが今の先端でなければ提示しない
-- 回答（`answer`）: 人の回答を証跡のコメントに書き、書いた後に PR を読み直して、回答が今の先端への判定として
+- 提示（`present`）: 承認資料を、提示した HEAD の SHA を添えて PR へコメントする（会話のセッションが打つ）。資料が対象にした
+  コミットが今の HEAD でなければ提示しない
+- 回答（`answer`）: 人の回答を証跡のコメントに書き、書いた後に PR を読み直して、回答が今の HEAD への判定として
   届いたことを確かめる。届いていなければ `TrailError`（回答したつもりで止まり続けない）
 - 確かめ（`check`）: 証跡を読んで判定し、判定を commit status `approval_decide.STATUS_CONTEXT` に付ける（workflow が打つ）
 - 迂回の記録（`write_admin_record`）: 本番の PR を管理者の迂回でマージしたことを、照らした証跡を指すコメントで残す（#3506）。
   マーカー `ADMIN_MARK` は証跡のマーカーと別で、証跡の判定に数えない。旧いプラグイン（`release_lib/approval_trail.py`）と同じマーカーと行を持つ
 
-回答は提示した先端へのもので、回答するときに先端が動いていれば書かずに断る（見ていないコミットを承認しない）。
+回答は提示した HEAD へのもので、回答するときに HEAD が動いていれば書かずに断る（見ていないコミットを承認しない）。
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ from ndf.domains.release import approval_decide
 
 # 迂回の記録のマーカーと行の見出し（旧いプラグインと同じ文字列。作り直しは旧いプラグインを読み込まないため別に持つ）
 ADMIN_MARK = f"<!-- {identity.FIXED_WORDS['workflow_namespace']}:admin-merge -->"
-ADMIN_SHA_LINE = "マージした先端:"
+ADMIN_SHA_LINE = "マージした HEAD:"
 ADMIN_TRAIL_LINE = "照らした承認の証跡:"
 # 証跡の担い手の行。迂回の前提に数えるのは利用者の証跡だけ（#3506 の I9）
 BY_LINE = "担い手:"
@@ -53,7 +53,7 @@ STATUS_STATE = {
 
 
 class TrailError(Exception):
-    """証跡を書けない・書いた回答が判定に届かない・先端が提示から動いた。"""
+    """証跡を書けない・書いた回答が判定に届かない・HEAD が提示から動いた。"""
 
 
 class Read(NamedTuple):
@@ -104,16 +104,16 @@ def user_judgment_at(hub: GitHub, number: int, sha: str) -> approval_decide.Judg
 
 
 def present(hub: GitHub, number: int, material: str) -> str:
-    """承認資料を提示する。提示した先端の SHA を返す。
+    """承認資料を提示する。提示した HEAD の SHA を返す。
 
-    資料が対象にしたコミット（行 `approval_decide.HEAD_LINE`）が PR の今の先端でなければ、提示せずに `TrailError`
-    （資料の後に積んだ変更を含まない資料から、新しい先端を承認させない。資料を組み直してから提示する）。
+    資料が対象にしたコミット（行 `approval_decide.HEAD_LINE`）が PR の今の HEAD でなければ、提示せずに `TrailError`
+    （資料の後に積んだ変更を含まない資料から、新しい HEAD を承認させない。資料を組み直してから提示する）。
     """
     pull = hub.pull(number)
     shown = approval_decide.material_head(material)
     if shown != pull.head_sha:
         target = shown[:12] if shown else "（資料に無い）"
-        raise TrailError(f"#{number} の承認資料が対象にしたコミット {target} が今の先端 {pull.head_sha[:12]} でない（資料を組み直す）")
+        raise TrailError(f"#{number} の承認資料が対象にしたコミット {target} が今の HEAD {pull.head_sha[:12]} でない（資料を組み直す）")
     Publisher(hub).comment(number, approval_decide.render_request(material, pull.head_sha))
     return pull.head_sha
 
@@ -122,7 +122,7 @@ def answer(hub: GitHub, number: int, value: str, by: str, presented: str) -> app
     """回答を証跡に書き、届いたことを読み直して確かめる。"""
     pull = hub.pull(number)
     if pull.head_sha != presented:
-        raise TrailError(f"#{number} の先端が提示した {presented[:12]} から {pull.head_sha[:12]} へ動いた（提示し直す）")
+        raise TrailError(f"#{number} の HEAD が提示した {presented[:12]} から {pull.head_sha[:12]} へ動いた（提示し直す）")
     Publisher(hub).comment(number, approval_decide.render_trail(value, pull.head_sha, by))
     after = read(hub, number)
     if after.judgment.state != value or after.pull.head_sha != pull.head_sha:
@@ -141,7 +141,7 @@ def post_status(hub: GitHub, sha: str, judgment: approval_decide.Judgment) -> No
 
 
 def check(hub: GitHub, number: int, human_only: bool = False) -> Read:
-    """証跡を読んで判定し、PR の先端へ commit status を付ける。"""
+    """証跡を読んで判定し、PR の HEAD へ commit status を付ける。"""
     got = read(hub, number, human_only)
     post_status(hub, got.pull.head_sha, got.judgment)
     return got
@@ -150,7 +150,7 @@ def check(hub: GitHub, number: int, human_only: bool = False) -> Read:
 def render_admin_record(sha: str, trail_url: str) -> str:
     """迂回の記録の本文（証跡のマーカーを持たない）。"""
     if not _SHA.fullmatch(sha):
-        raise ValueError(f"マージした先端は 40 桁の SHA（渡された値: {sha!r}）")
+        raise ValueError(f"マージした HEAD は 40 桁の SHA（渡された値: {sha!r}）")
     return (
         f"{ADMIN_MARK}\n## 管理者の迂回でマージした\n\n{ADMIN_SHA_LINE} `{sha}`\n"
         f"{ADMIN_TRAIL_LINE} {trail_url if trail_url else '（読めない）'}\n設定: `{_PROJECT_FILE}` の `production_merge.admin`\n"
@@ -158,7 +158,7 @@ def render_admin_record(sha: str, trail_url: str) -> str:
 
 
 def write_admin_record(hub: GitHub, number: int, sha: str) -> tuple[bool, str]:
-    """迂回の記録を置く。同じ先端の記録が既にあれば置かない（#3506 の I7）。(置いたか, コメントの URL)。
+    """迂回の記録を置く。同じ HEAD の記録が既にあれば置かない（#3506 の I7）。(置いたか, コメントの URL)。
 
     既にある記録に数えるのは、信用する書き手（`GitHub.trusts`）が書き、編集されていないものだけ（コメントできる誰かが
     マーカーと SHA の入ったコメントを先に置いても、本物の記録を止められない）。

@@ -5,7 +5,7 @@
 
 | 規則 | 縛る不変条件 |
 | --- | --- |
-| spec-decl | 設定の行がスキーマか節の表を持つ・スキーマのキーと保存先の表の `keys` が等しい・`main_keys` が `keys` に含まれる・キーが型と説明を持つ・`.ndf/` の実物がスキーマに通る |
+| spec-decl | 設定の行がスキーマかセクションの表を持つ・スキーマのキーと保存先の表の `keys` が等しい・`main_keys` が `keys` に含まれる・キーが型と説明を持つ・`.ndf/` の実物がスキーマに通る |
 | spec-io | サブコマンドが結果のスキーマを持つ・引数の出所が取り出しか手書きの表のどちらか一方・コードが名前で読む環境変数が環境変数の表にある・`bin/` のファイルが起動スクリプトの表にある |
 | spec-skill | 実体のある配る Skill が Skill の入出力の表に行を持つ・Skill の本文とエージェント定義に書かれた `ndf` の呼び出しが規約のサブコマンドと引数に当たる |
 | spec-public | 公開する面の表の行が規約の項目に当たる・規約の保存先の行が実在のディレクトリを指す |
@@ -136,7 +136,7 @@ def decl_findings(model: SpecModel, repo_root: Path, rel: Rel) -> list[Finding]:
     for decl in model.ndf_settings:
         schema_rel = rel(f"{CONTRACTS}/{DECL_SCHEMA_DIR}/{spec_model.decl_schema_rel(decl.id, spec_model.SCHEMA_SUFFIX)}")
         if decl.schema is None and decl.sections is None:
-            found.append(Finding(DECL, files_rel, 1, f"設定 {decl.id} にスキーマか節の表が無い"))
+            found.append(Finding(DECL, files_rel, 1, f"設定 {decl.id} にスキーマかセクションの表が無い"))
         found += [Finding(DECL, files_rel, 1, f"設定 {decl.id}: {e}") for e in _keys_errors(decl)]
         if decl.schema is not None:
             found += [Finding(DECL, schema_rel, 1, f"設定 {decl.id}: {e}") for e in _key_errors(decl)]

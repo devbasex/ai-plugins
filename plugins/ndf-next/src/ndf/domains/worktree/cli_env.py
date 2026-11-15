@@ -4,7 +4,7 @@
     ndf worktree localenv <setup|verify|healthcheck|aim|mode> [worktree]
     ndf worktree testenv <env|tag|bake|up|stop|down|test|compose-env|reap|reclaim|expose|unexpose> [worktree] [オプション]
 
-設定（か、その節）が無いリポジトリでは何もせず、`ok` と「適用外」の要約を返す。
+設定（か、そのセクション）が無いリポジトリでは何もせず、`ok` と「適用外」の要約を返す。
 テスト環境の値（環境名・スロット・ポート・タグ・URL・コンテナへ渡す値）は `items` と `metrics` に置く。`outputs` は
 スプリントの文脈の閉じた語彙（`contracts/schemas/result.schema.json`）だけを持つため、ここでは使わない。
 """
@@ -22,11 +22,11 @@ from ndf.testing.command import parse_period
 
 LOCALENV = ("setup", "verify", "healthcheck", "aim", "mode")
 TESTENV = ("env", "tag", "bake", "up", "stop", "down", "test", "compose-env", "reap", "reclaim", "expose", "unexpose")
-NOT_APPLICABLE = "適用外（設定か、その節が無い）"
+NOT_APPLICABLE = "適用外（設定か、そのセクションが無い）"
 
 
 def add_parsers(sub: Any) -> None:
-    d = sub.add_parser(deps.SECTION, help="設定の deps 節に従って worktree の依存を用意する")
+    d = sub.add_parser(deps.SECTION, help="設定の deps セクションに従って worktree の依存を用意する")
     d.add_argument("worktree", type=Path)
     d.add_argument("--if-unprepared", action="store_true", help="今の HEAD と設定で用意したマーカーがあれば何もしない")
     lo = sub.add_parser(localenv.SECTION, help="worktree でのローカルの動作検証")

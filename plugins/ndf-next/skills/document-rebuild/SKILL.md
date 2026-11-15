@@ -102,7 +102,7 @@ Skill を呼べるランタイムでは `document-style` を Skill として起�
 **別の Skill が固定した章は動かさない**（共通ルール K3）。設計文書の H1 と、H1 の直後の「目的」から
 「あるべき姿の根拠」までの章は、`design` の
 [design-template.md の「承認する人が読む欄」](../design/references/design-template.md#承認する人が読む欄) が決める。
-要求のテンプレート・Pull Request の本文の形・`type-*.md` の必ず書く節・`document-sources` の出典の節も同じ扱いで、
+要求のテンプレート・Pull Request の本文の形・`type-*.md` の必ず書くセクション・`document-sources` の出典のセクションも同じ扱いで、
 目的別の構成は固定されていない章の中だけに当てる。
 
 **構成に当てはまらない章は、並びの外へ置き、末尾へ集める。** 参照の一覧・用語表・付録がこれに当たる。
@@ -123,7 +123,7 @@ Skill を呼べるランタイムでは `document-style` を Skill として起�
 | 2 | 当たる他の Skill の規約を当てる。長い文は形式別ガイドの目安で分け、対比・列挙の形は `document-style` のルール 8 に従う | [related-skills.md](references/related-skills.md) |
 | 3 | `document-style` のセルフチェックを通す（ソースが Markdown のとき。多義語の候補もここで見る） | `document-style` の「書き終えたらセルフチェック」 |
 | 4 | キーワードを確かめる。読み手が社外なら公式ドキュメントの語、社内なら用語集と流通している語と突き合わせる | [keyword-check.md](references/keyword-check.md) |
-| 5 | 文脈を持たない読み手役に読ませる（下の節） | この節 |
+| 5 | 文脈を持たない読み手役に読ませる（下のセクション） | このセクション |
 
 **書き方の規則はこの文書が持たない。** 同じ規則を 2 か所に置くと、片方だけが更新される。
 

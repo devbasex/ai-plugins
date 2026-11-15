@@ -5,7 +5,7 @@
     ndf loop sprint <名前> --session <S> --mode <M> --basis <根拠>   # 周のモードを根拠つきで決める（#2923）
     ndf loop exclude <名前> --session <S> --issue <N> --reason <理由>   # 周の途中で課題を外す（#2788）
     ndf loop created <名前> <課題>...                         # 周の中で起票した課題を記録する（#2132）
-    ndf loop gate <名前> --pr <N>                             # 設計承認ゲートを出した時点の先端を記録する
+    ndf loop gate <名前> --pr <N>                             # 設計承認ゲートを出した時点の HEAD を記録する
     ndf loop answer <名前> --pr <N> --answer <回答> [--note <文>]   # ゲートの回答を記録する（#2400・#2714）
     ndf loop released <名前> --version <バージョン>                   # 周で出したバージョンを記録する
     ndf loop lap <名前> --session <S> [--failed] [--failure-key <キー>] [--version <バージョン>...] [--returned] [--unreadable <文>]
@@ -103,7 +103,7 @@ def _hub(cwd: Path) -> github.GitHub:
 
 
 def head_of(cwd: Path, pr: int) -> str:
-    """PR の今の先端（GitHub から 1 回だけ読む）。テストが差し替える。"""
+    """PR の今の HEAD（GitHub から 1 回だけ読む）。テストが差し替える。"""
     return _hub(cwd).pull(pr).head_sha
 
 
@@ -127,7 +127,7 @@ def _lap(state: rec.LoopState, c: ctl.Ctx, a: argparse.Namespace) -> ctl.Decisio
 
 
 def _answer(state: rec.LoopState, c: ctl.Ctx, a: argparse.Namespace) -> ctl.Decision:
-    # 先端は 1 回だけ読み、比べる値と記録する値に同じものを使う（#2714）
+    # HEAD は 1 回だけ読み、比べる値と記録する値に同じものを使う（#2714）
     return ctl.answer(state, c, a.pr, a.answer, head_of(a.cwd, a.pr), a.note)
 
 
@@ -200,7 +200,7 @@ def _add_writes(sub: Any) -> None:
     x.add_argument("--reason", required=True)
     made = _named(sub, "created", "周の中で起票した課題を記録する", lambda s, c, a: ctl.created(s, c, a.issues))
     made.add_argument("issues", type=int, nargs="+")
-    g = _named(sub, "gate", "設計承認ゲートを出した時点の先端を記録する", lambda s, c, a: ctl.gate(s, c, a.pr, head_of(a.cwd, a.pr)))
+    g = _named(sub, "gate", "設計承認ゲートを出した時点の HEAD を記録する", lambda s, c, a: ctl.gate(s, c, a.pr, head_of(a.cwd, a.pr)))
     g.add_argument("--pr", type=int, required=True)
     w = _named(sub, "answer", "設計承認ゲートの回答を記録する", _answer)
     w.add_argument("--pr", type=int, required=True)

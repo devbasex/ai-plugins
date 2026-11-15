@@ -59,7 +59,7 @@ open -na "Google Chrome" --args --remote-debugging-port=9222 --user-data-dir="$H
 
 ### 経路 B だけ: SSH の転送を足す
 
-エディタ（VS Code の Remote-SSH など）が使う SSH の設定の、そのホストの節に 1 行足す。**SSH の接続を張り直すまで効かない**（ウィンドウを閉じて開き直す）。
+エディタ（VS Code の Remote-SSH など）が使う SSH の設定の、そのホストのセクションに 1 行足す。**SSH の接続を張り直すまで効かない**（ウィンドウを閉じて開き直す）。
 
 ```
 Host <リモートのホスト>

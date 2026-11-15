@@ -62,7 +62,7 @@ def test_pull_reads_rest_fields() -> None:
 
 
 def test_merge_resolves_short_expected_head_and_sends_full_sha() -> None:
-    # #2041: 同じ先端の短い SHA で止まらない。要求には完全な SHA を添える
+    # #2041: 同じ HEAD の短い SHA で止まらない。要求には完全な SHA を添える
     server = Server({
         ("GET", f"/repos/{REPO}/pulls/7"): [httpx.Response(200, json=_pull())],
         ("PUT", f"/repos/{REPO}/pulls/7/merge"): [httpx.Response(200, json={"merged": True})],
@@ -119,7 +119,7 @@ def test_merge_refusal_is_classified_from_merge_state(status: int, after: dict, 
 
 @pytest.mark.parametrize(("in_queue", "enqueued"), [(False, 1), (True, 0)])
 def test_merge_enqueues_when_base_requires_merge_queue(in_queue: bool, enqueued: int) -> None:
-    # キュー必須の基底は直接のマージを 405 で断る。先端のままキューへ入れ、実際のマージまでは ci_pending で待つ
+    # キュー必須の基底は直接のマージを 405 で断る。HEAD のままキューへ入れ、実際のマージまでは ci_pending で待つ
     state = {"data": {"repository": {"pullRequest": {"id": "PR_7", "isMergeQueueEnabled": True, "isInMergeQueue": in_queue}}}}
     server = Server({
         ("GET", f"/repos/{REPO}/pulls/7"): [httpx.Response(200, json=_pull())],
@@ -756,7 +756,7 @@ def test_merge_refuses_a_declared_method_the_branch_does_not_allow() -> None:
 
 
 def _squashed_repo(tmp_path: Path) -> tuple[git.Git, str]:
-    """feat の 2 コミットを develop へ squash でマージしたリポジトリと、feat の先端の SHA。"""
+    """feat の 2 コミットを develop へ squash でマージしたリポジトリと、feat の HEAD の SHA。"""
     git_sandbox.sh(tmp_path, "init", "-q", "-b", "develop", strip=True)
     git_sandbox.sh(tmp_path, "config", "user.email", "t@example.invalid", strip=True)
     git_sandbox.sh(tmp_path, "config", "user.name", "t", strip=True)
@@ -833,7 +833,7 @@ def test_merge_as_admin_sends_merge_pull_request_with_the_head(method: str | Non
 @pytest.mark.parametrize(
     ("pull", "expect", "outcome"),
     [
-        (_pull(), OTHER, github.MergeOutcome(False, "refused", f"#7 の先端が {OTHER} でない（今は {HEAD}）", HEAD)),
+        (_pull(), OTHER, github.MergeOutcome(False, "refused", f"#7 の HEAD が {OTHER} でない（今は {HEAD}）", HEAD)),
         (_pull(merged=True), HEAD, github.MergeOutcome(True, None, "#7 は既にマージ済み", HEAD)),
     ],
 )
@@ -917,7 +917,7 @@ class _GraphQLRecorder:
 
 
 def test_merge_as_admin_keeps_the_release_contract() -> None:
-    """決定 5: 迂回は mergePullRequest を expectedHeadOid 付きで打つ。先端が違えば送らない。断られたら読み直して種類を返す。"""
+    """決定 5: 迂回は mergePullRequest を expectedHeadOid 付きで打つ。HEAD が違えば送らない。断られたら読み直して種類を返す。"""
     server = _GraphQLRecorder()
     got = hub("o/r", server).merge_as_admin(7, HEAD, "merge")
     assert got.merged and server.sent == [{"id": "PR_1", "head": HEAD, "method": "MERGE"}]

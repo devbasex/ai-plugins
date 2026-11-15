@@ -56,15 +56,15 @@
 | 既に起動したプロセス・書き終わりを待つファイル | 終わりを待つ until ループ（例: `until [ -s out.md ]; do sleep 5; done`）を `run_in_background: true` で起動する |
 | Pull Request のチェック | 今の状態は `lib/gh_parts.py pr-status <番号>` を 1 回打って読む。`metrics.action` が次の 1 手（`wait` 待つ・`fix` 直す・`merge` マージへ進める・`escalate` 人へ戻す）で、`next` に打つコマンドが載る。待つときは下の `merge-when-green` を `run_in_background: true` で起動する。PR の表示とチェックの照会を別々に続けて打たない |
 | 新しいコメントを 1 件ずつ | `Monitor` |
-| `ndf plan next` | 同じプランと状態の保存先で `ndf plan wait <プラン> [--state-dir <next に渡した保存先>]` を `run_in_background: true` で 1 回起動する（承認ゲートの結果の `next` がこの形）。止まり・承認ゲート・終わりで終わる（下の節） |
-| `ndf plan queue` | 同じプランの並びで `ndf plan wait <プラン>...` を `run_in_background: true` で 1 回起動する。プランの止まり・承認ゲート・終わりで終わる（下の節） |
+| `ndf plan next` | 同じプランと状態の保存先で `ndf plan wait <プラン> [--state-dir <next に渡した保存先>]` を `run_in_background: true` で 1 回起動する（承認ゲートの結果の `next` がこの形）。止まり・承認ゲート・終わりで終わる（下のセクション） |
+| `ndf plan queue` | 同じプランの並びで `ndf plan wait <プラン>...` を `run_in_background: true` で 1 回起動する。プランの止まり・承認ゲート・終わりで終わる（下のセクション） |
 | Pull Request の CI とマージ | `merged-steps.py merge-when-green <PR 番号>` を `run_in_background: true` で 1 回起動する。CI がまだ現れない間も待ち、緑になればマージする。マージの承認を得た後に限る。起動の前に `gh_parts.py pr-status <PR 番号>` で、直すもの（失敗したチェック・未解決のスレッド）と衝突が無いかを 1 回で確かめる。チェックの照会と `gh pr merge` を手でつながない |
 | 判断の要らない NDF の手順を続けて打つ（`queue` の後の `wait` など） | 1 行ずつ打たず、手順をプランのステップにして `ndf plan next <プラン>` を 1 回打つ。承認ゲートか止まる所まで続けて進め、理由と続きのコマンドを `next` に返す。長く待つ手順を含むなら `run_in_background: true` で起動する |
 | キューの後に続けるプラン（リリースなど） | 手でパイプラインを組まず、`queue <実装のプラン>... --then <後続のプラン>` で渡す。後続は前のプランがすべて `完了` のときだけ流れ、1 本でも `止まった` / `承認ゲート` なら `流さなかった` と理由が結果に残る。リリースプランを `new release --prs-from-queue` で作れば、実装の PR の番号を知らずに渡せる |
 
 ### `ndf plan` の進捗ログ
 
-**フェーズを `ndf plan next` / `queue` で回すとき、conductor は `ndf plan wait` を 1 回のバックグラウンドの待ちで待つ（下の節）。**
+**フェーズを `ndf plan next` / `queue` で回すとき、conductor は `ndf plan wait` を 1 回のバックグラウンドの待ちで待つ（下のセクション）。**
 `progress.jsonl` はプランの状態ディレクトリ（`<プラン>-state/`）に置かれ、1 行が 1 つの JSON である。
 書くのは `ndf plan` と worker で、LLM は使わない。
 
@@ -104,7 +104,7 @@
 ndf plan wait plan-1101.json --state-dir <next に渡した保存先>
 ```
 
-- 終わり方と次にすることは次の節の表のとおりである
+- 終わり方と次にすることは次のセクションの表のとおりである
 
 ### キューの待ち（ndf plan wait）
 
@@ -136,7 +136,7 @@ ndf plan wait plan-1101.json plan-1102.json plan-release-dev.json
 
 ### 1 スプリントの流し方
 
-**1 スプリント（実装 → 開発版 → リリース承認ゲート→ 本番 → 後片付け）で conductor が打つのは、キューと `wait` と、承認ゲートで
+**1 スプリント（実装 → 開発版 → リリース承認ゲート→ 本番 → クリーンアップ）で conductor が打つのは、キューと `wait` と、承認ゲートで
 利用者の回答を書く 1 行だけである。** プランの組み立て・待ちの監視・次のプランの起動・承認の記録のために起きない。
 
 1. 実装のプランを並べ、開発版のリリースプランを `new release --channel dev --prs-from-queue` で作る
@@ -146,12 +146,12 @@ ndf plan wait plan-1101.json plan-1102.json plan-release-dev.json
 2. `queue <実装のプラン>... --then <開発版のプラン>` と `wait <実装のプラン>... <開発版のプラン>` をバックグラウンドで起動する
 3. `wait` が 0 で終わり、キューの結果が `gate`（開発版の facts のステップのリリース承認ゲート）なら、承認資料を添えて本番の承認（`ndf-gate:2`）を取る。
    利用者が回答したら `sprint-state.py gate <状態> "リリース承認ゲート" --what <要約> --by user --outcome approved|rejected` を打つ
-4. 承認の後、本番のプランを `new release --channel prod --dev-state <開発版のプランの状態ディレクトリ> --state <状態>` で作り、
-   `queue <本番のプラン>` と `wait <本番のプラン>` をバックグラウンドで起動する。本番のプランの先頭の `approve` が、
+4. 承認の後、リリースのワークフローを `new release --channel prod --dev-state <開発版のプランの状態ディレクトリ> --state <状態>` で作り、
+   `queue <リリースのワークフロー>` と `wait <リリースのワークフロー>` をバックグラウンドで起動する。リリースのワークフローの先頭の `approve` が、
    開発版の facts の承認したコミットと 3 の記録を照らして承認資料へ承認の記録を書く（記録が無い・facts の後に承認資料が
    書き直されていれば、書かずに承認ゲートで止まり `release` へ進まない）。状態のファイルが無いときは、`approve` の前に
    `release-steps.py approve --approval <承認資料> --approved-sha <SHA> --by user` で承認の記録を書いておく。
-   本番のプランのステップの最後は後片付け（`merged-steps.py cleanup`）で、リリースの PR（`release/v<バージョン>` → main）と
+   リリースのワークフローのステップの最後はクリーンアップ（`merged-steps.py cleanup`）で、リリースの PR（`release/v<バージョン>` → main）と
    スプリントの PR（`--prs`）のブランチ・worktree を片付ける。`git branch -D` が要るブランチがあれば承認ゲートで止まる
 5. どこかのプランが止まったら、原因を直してから `queue --resume <パス>` と `wait <パス>` をバックグラウンドで起動する。
    止まったプランは終えたステップから続き、後続のステージも流れる。プランのファイルを写して作り直さない
@@ -182,7 +182,7 @@ ndf plan wait plan-1101.json plan-1102.json plan-release-dev.json
    承認資料（バージョンは `$O/8-release-state/version.json` の `base`）を添えて本番の承認（`ndf-gate:2`）を取る。利用者が回答したら `sprint-state.py gate $S "リリース承認ゲート" --what <要約> --by user --outcome approved|rejected`
    を打つ。変更を要求されたら 6 を打たない
 6. 本番: `sv queue $O/10-release-prod.json` と `sv wait $O/10-release-prod.json`。先頭の `approve` が
-   5 の記録を見て承認資料へ承認の記録を書き、出す PR は検査の報告から埋まる。最後のステップが後片付けを行う
+   5 の記録を見て承認資料へ承認の記録を書き、出す PR は検査の報告から埋まる。最後のステップがクリーンアップを行う
 
 - どこかで止まったら（CI の古い失敗・衝突・手動確認のマーカーの待ち・承認の証跡の無さ）、原因を片付けてから止まった結果 JSON の
   `next`（元の全プランと `--then` の区切りを保った `sv queue … --resume`）と、同じプランの並びで `sv wait` を打つ。プラン 1 本だけに
@@ -202,7 +202,7 @@ ndf plan wait plan-1101.json plan-1102.json plan-release-dev.json
 結果と読むと、報告の無いフェーズを受け取る。supervisor と worker は待ちで応答を終えない
 （[agent-layers.md](agent-layers.md) の規則）。バックグラウンドの処理を起動した後は、同じ応答の中で
 他の作業を進め、通知を受けてから次の作業へ進む。他の作業が無いまま待つときの手は #656 が扱う。
-親の側の手は、受け取る層ごとに次の節が持つ。
+親の側の手は、受け取る層ごとに次のセクションが持つ。
 
 ### 中間通知を受けたとき
 

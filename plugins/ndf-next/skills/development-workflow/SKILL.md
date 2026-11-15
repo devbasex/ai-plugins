@@ -29,7 +29,7 @@ hooks:
 | 進め方 | モードを判定する単位 | ブランチ |
 | --- | --- | --- |
 | `normal`・`auto` | スプリントのベースブランチ宛て Pull Request | スプリントブランチ（`sprint/<名前>`）をベースブランチから切り、課題ごとの worktree はそこから切る。課題の Pull Request はスプリントブランチへ集め、ベースブランチへの Pull Request はスプリントで 1 本にする |
-| `fast` | 実装の Pull Request 1 本 | スプリントブランチを作らず、実装の Pull Request がベースブランチへ直接入る（「進め方」の節） |
+| `fast` | 実装の Pull Request 1 本 | スプリントブランチを作らず、実装の Pull Request がベースブランチへ直接入る（「進め方」のセクション） |
 
 - **モードの違う課題を 1 つのスプリントへ混ぜない。** 混ざるなら高い方のモードで進めるか、スプリントを分ける
 - **スプリントの大きさは、同時に回せる本数（フェーズは 3 本まで）とリリースの間隔（1 バージョンを 1〜2 日）で切る。**
@@ -157,7 +157,7 @@ pace: fast
 | 完了判定 | `quality-gates` | `quality-gates` | `quality-gates` | `quality-gates` | `quality-gates` |
 | Pull Request | `pr` | `pr` | `pr` | `pr` | `pr` |
 | 確定仕様化 | — | `plan-to-spec`（実行で決まった設定が以後の判断の前提になる場合） | — | `plan-to-spec` | `plan-to-spec`（確定版を残す場合） |
-| 後片付け | `merged` | `merged` | `merged` | `merged` | `merged` |
+| クリーンアップ | `merged` | `merged` | `merged` | `merged` | `merged` |
 | デプロイ | `release` | `release` | `release` | `release` | `release` |
 | 体裁レビュー | — | — | — | — | `layout-review` |
 | リリース後テスト | — | `release-verification`（実行した経路とは別の経路で確かめられる場合） | `release-verification` | `release-verification` | `release-verification`（提出の後に確かめる経路がある場合） |
@@ -234,13 +234,13 @@ CI の結果の監視が読んだ結論と改修の回数は、プランの状�
 | 工程 | 何を作るか |
 | --- | --- |
 | 用語と不変条件 | `requirements-design` の仕様へ書く |
-| 設計文書 | `design` が独立したファイルで作る。触る領域に該当する節をすべて埋める |
-| 設計判断の記録 | 設計文書の「決定の記録」の節へ書く |
+| 設計文書 | `design` が独立したファイルで作る。触る領域に該当するセクションをすべて埋める |
+| 設計判断の記録 | 設計文書の「決定の記録」のセクションへ書く |
 | ドキュメント再構成 | `document-rebuild` が章立てを文書の目的に合った読み手の問う順へ組み直し、`document-style` の規則で整え、前後の値を並べる |
 | ドキュメントレビュー | 設計だけを載せた Pull Request を `cross-review` へ通し、マージしてから実装へ進む |
 | コントラクト・結合テスト | `tdd-cycle` の階層の使い分けに従う |
 
-**判定基準の側は変えない。** モードの定義は確定しており、この節は振り分け先を示す。
+**判定基準の側は変えない。** モードの定義は確定しており、このセクションは振り分け先を示す。
 
 ## 進め方（`pace`）
 
@@ -298,7 +298,7 @@ CI の結果の監視が読んだ結論と改修の回数は、プランの状�
 - **`documentation` でも承認ゲートは 2 つのままである。** 企画承認は構成案と体裁設計を載せた設計 Pull Request のマージ、
   制作物承認は本番の提出先への操作にそのまま当たる。**新しい承認ゲートを作らない**
 
-**2 つは要否の決まり方が違う。** 並べて書くと片方に掛かる規則が両方に掛かって読めるため、節を分ける。
+**2 つは要否の決まり方が違う。** 並べて書くと片方に掛かる規則が両方に掛かって読めるため、セクションを分ける。
 
 ### 設計 Pull Request のマージ
 
@@ -313,7 +313,7 @@ CI の結果の監視が読んだ結論と改修の回数は、プランの状�
 | `light`・`operation` | **設計工程を条件付きで通る場合でも対象外である。** どちらも独立した設計文書を作らず、設計 Pull Request を出さない。承認ゲートが掛かるのは設計だけを載せた Pull Request のマージで、設計を書くこと自体には掛からない |
 
 **止める場所をドキュメントレビューに限るのは、そこが後から直す費用の変わり目だからである。**
-**宛先が自動反映の本番チャネル（下の節）なら、承認資料に本番への反映を載せ、1 回の承認で両方を通す**
+**マージ先が自動反映の本番チャネル（下のセクション）なら、承認資料に本番への反映を載せ、1 回の承認で両方を通す**
 （[production-merge.md](references/production-merge.md)）。
 
 ### 本番系へ届く操作
@@ -331,9 +331,9 @@ CI の結果の監視が読んだ結論と改修の回数は、プランの状�
 `release` の規則には、実装 Pull Request をマージする時点で読む `merged` と `pr` から辿れるようにしてある。
 
 **検証環境や開発版のチャネルへ入れるマージは取り消せるため、承認を求めない。**
-**Pull Request のマージ（実装・設計を問わない）がリリース承認ゲートに当たるのは、宛先が自動反映の本番チャネルのときだけである。**
+**Pull Request のマージ（実装・設計を問わない）がリリース承認ゲートに当たるのは、マージ先が自動反映の本番チャネルのときだけである。**
 自動反映の本番チャネルは、本番チャネルのうち、`.ndf/project.json` の `delivery` に `kind: auto` でそのブランチを
-`branch` に持つ行があるものである。マージで本番系への反映が自動で始まる。それ以外の宛先へのマージは止めない。
+`branch` に持つ行があるものである。マージで本番系への反映が自動で始まる。それ以外のマージ先へのマージは止めない。
 判定の表・止める場所・承認の後の続け方は [references/production-merge.md](references/production-merge.md) にある。
 
 **マージからリリースまでの工程は、リリースの場合（CD の有無・レビュー必須の有無・迂回の設定。`release-steps.py release-case`）で 4 つに分かれる。**
@@ -468,5 +468,5 @@ issue にする**。呼び出し元・3 択の判断・振り返りでの拾い�
 - [references/pace-records.md](references/pace-records.md) — 自動で通した承認ゲートと検査の記録の読み方・閾値の見直し
 - [references/approval-request.md](references/approval-request.md) — 承認を求めるときに提示するもの
 - [references/operation-run.md](references/operation-run.md) — `operation` の実行の範囲・記録・失敗したときの扱い
-- [references/context-window.md](references/context-window.md) — context window のカットポイント、委譲する対象としない対象、残量の見方。引継ぎ文書の保存先・節の形・作る／読む／更新する／消す規則は [references/handoff.md](references/handoff.md)
+- [references/context-window.md](references/context-window.md) — context window のカットポイント、委譲する対象としない対象、残量の見方。引継ぎ文書の保存先・セクションの形・作る／読む／更新する／消す規則は [references/handoff.md](references/handoff.md)
 - [references/agent-layers.md](references/agent-layers.md) — 3 層（conductor / supervisor / worker）の責務、フェーズ、報告の形

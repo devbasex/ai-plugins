@@ -62,7 +62,7 @@ def io_schema_rel(name: str, kind: str) -> str:
 
 
 def decl_schema_rel(ident: str, suffix: str) -> str:
-    """設定 `ident` のスキーマ（`SCHEMA_SUFFIX`）か節の表（`SECTIONS_SUFFIX`）の、`DECL_SCHEMA_DIR` からの相対パス。"""
+    """設定 `ident` のスキーマ（`SCHEMA_SUFFIX`）かセクションの表（`SECTIONS_SUFFIX`）の、`DECL_SCHEMA_DIR` からの相対パス。"""
     return f"{ident}{suffix}"
 
 
@@ -98,7 +98,7 @@ def opt(row: dict[str, Any], key: str, empty: Any = ()) -> Any:
 
 @dataclass(frozen=True)
 class NdfSettingsSpec:
-    """設定のファイル 1 つ。`schema` は JSON の設定のスキーマ、`sections` は Markdown の設定の節の表の行。"""
+    """設定のファイル 1 つ。`schema` は JSON の設定のスキーマ、`sections` は Markdown の設定のセクションの表の行。"""
 
     id: str
     path: str
@@ -273,7 +273,7 @@ def _checked_schema(path: Path) -> dict[str, Any]:
 
 
 def ndf_settings(plugin_root: Path, public: PublicIds) -> list[NdfSettingsSpec]:
-    """設定の行ごとに、スキーマ（JSON の設定）か節の表（Markdown の設定）を読む。どちらも無ければ両方 `None`。"""
+    """設定の行ごとに、スキーマ（JSON の設定）かセクションの表（Markdown の設定）を読む。どちらも無ければ両方 `None`。"""
     base = plugin_root / CONTRACTS / DECL_SCHEMA_DIR
     out = []
     location = decl_location({r["id"]: r for r in facts.rows("locations")})
@@ -303,16 +303,16 @@ def ndf_settings(plugin_root: Path, public: PublicIds) -> list[NdfSettingsSpec]:
 
 
 def _sections(path: Path) -> tuple[tuple[dict[str, Any], ...], tuple[dict[str, Any], ...]]:
-    """節の表（事実の表の形の行と、注釈 `x-ndf-read-by`）を読む。"""
+    """セクションの表（事実の表の形の行と、注釈 `x-ndf-read-by`）を読む。"""
     raw = read_json(path, UNREADABLE)
     missing = [k for k in ("summary", "owner", "columns", "rows") if k not in raw]
     if missing:
-        raise CheckError(f"節の表 {path} にキーが無い: {', '.join(missing)}")
+        raise CheckError(f"セクションの表 {path} にキーが無い: {', '.join(missing)}")
     validator = Draft202012Validator(facts.row_schema(raw["columns"]))
     for row in raw["rows"]:
         bad = sorted(e.message for e in validator.iter_errors(row))
         if bad:
-            raise CheckError(f"節の表 {path} の行 {row.get('id')!r} の形が違う: {'; '.join(bad)}")
+            raise CheckError(f"セクションの表 {path} の行 {row.get('id')!r} の形が違う: {'; '.join(bad)}")
     rows = tuple(sorted(raw["rows"], key=lambda r: r["order"]))
     return rows, tuple(opt(raw, "x-ndf-read-by"))
 

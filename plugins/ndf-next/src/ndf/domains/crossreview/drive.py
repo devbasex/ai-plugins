@@ -2,7 +2,7 @@
 
 1 ラウンドは次の順に進む:
 
-1. 範囲を決める（`scope_decide`。設計の PR は、詳細レビューを通らない節が残る間は全差分。#3181）
+1. 範囲を決める（`scope_decide`。設計の PR は、詳細レビューを通らないセクションが残る間は全差分。#3181）
 2. 相手役（`ndf.core.converge.participants`）を並べて起動し、最後の 1 行の `{"findings": [...]}` を読む
 3. 指摘をキー（`oscillation.finding_key`）で重ねずジャーナルへ入れる。見送り済みの指摘は出し直されても扱わない
 4. 未解決の指摘と、まだ決めていない足すべき内容（`--findings`。#2444）が無ければ収束。前々ラウンドの指摘が
@@ -54,7 +54,7 @@ class DriveStopped(Exception):
 
 @dataclass(frozen=True)
 class RunConfig:
-    """1 回の起動の引数。`purpose` は PR の目的（設計のプランのテンプレートの purpose なら節を必ず詳細レビューへ通す）。"""
+    """1 回の起動の引数。`purpose` は PR の目的（設計のプランのテンプレートの purpose ならセクションを必ず詳細レビューへ通す）。"""
 
     worktree: Path
     branch: str
@@ -95,7 +95,7 @@ class _Run:
 
 
 def changed_sections(g: git.Git, base: str, root: Path) -> list[str]:
-    """`base...HEAD` で変わった Markdown の節（`<パス>#<見出し>`）。"""
+    """`base...HEAD` で変わった Markdown のセクション（`<パス>#<見出し>`）。"""
     out: list[str] = []
     for path in g.changed_files(base, "HEAD"):
         target = root / path
@@ -105,7 +105,7 @@ def changed_sections(g: git.Git, base: str, root: Path) -> list[str]:
 
 
 def _text(value: object) -> Optional[str]:
-    """空でない文字列ならそのまま、ほかは None（理由・節の無い指摘）。"""
+    """空でない文字列ならそのまま、ほかは None（理由・セクションの無い指摘）。"""
     return value if isinstance(value, str) and value.strip() else None
 
 
@@ -269,7 +269,7 @@ def _review_prompt(run: _Run, round_no: int, scope: scope_decide.Scope, diff: Pa
         f"差分は {diff}（範囲: {scope.kind}{'・' + scope.base if scope.base else ''}）にある。worktree は {run.cfg.worktree}。",
     ]
     if scope.unreviewed:
-        lines.append("次の節はまだ詳細レビューを通っていない。1 節ずつ読む: " + "・".join(scope.unreviewed))
+        lines.append("次のセクションはまだ詳細レビューを通っていない。1 セクションずつ読む: " + "・".join(scope.unreviewed))
     if handed:
         lines += ["組み直しが残した足すべき内容（足されたかを確かめる）:", *handed]
     if decided:
@@ -434,7 +434,7 @@ def _summary(run: _Run, final: str, rounds: int) -> Outcome:
 
 
 class _Prepared(NamedTuple):
-    """ラウンドの前半で決めたもの（範囲・変わった節・詳細レビューを通った節・レビューする head・差分のファイル）。"""
+    """ラウンドの前半で決めたもの（範囲・変わったセクション・詳細レビューを通ったセクション・レビューする head・差分のファイル）。"""
 
     scope: scope_decide.Scope
     sections: list[str]

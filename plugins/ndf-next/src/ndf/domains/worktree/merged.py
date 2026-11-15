@@ -1,4 +1,4 @@
-"""マージの後の後片付け: マージ済みの PR のブランチの worktree とローカルブランチを外し、メインディレクトリをマージする。
+"""マージの後のクリーンアップ: マージ済みの PR のブランチの worktree とローカルブランチを外し、メインディレクトリをマージする。
 
 PR 1 件ごとに、メインディレクトリの排他（`mainlock`）を取ってから次を行う（並列のレーンの間で 1 本ずつ）。
 
@@ -42,7 +42,7 @@ class PullsReader(Protocol):
 
 @dataclass
 class Record:
-    """後片付けの記録。`items` は 1 件ごとの `{kind, name, result, reason?}`。"""
+    """クリーンアップの記録。`items` は 1 件ごとの `{kind, name, result, reason?}`。"""
 
     items: list[dict[str, Any]] = field(default_factory=list)
     stopped: Optional[str] = None
@@ -182,7 +182,7 @@ def read_flow_record(path: Optional[Path]) -> Optional[dict[str, Any]]:
 
 
 def after_merge(main_dir: Path, numbers: list[int], hub: PullsReader, flow_record: Optional[Mapping[str, Any]] = None) -> Record:
-    """マージの後の後片付けを行い、記録を返す。"""
+    """マージの後のクリーンアップを行い、記録を返す。"""
     main = Git(main_dir)
     decl = ndf_settings.load(main_dir)
     flow = flow_record if flow_record is not None else repo.declared_flow(decl)
@@ -201,7 +201,7 @@ def after_merge(main_dir: Path, numbers: list[int], hub: PullsReader, flow_recor
         with mainlock.held(main):
             _one(main, main_dir, pull, _keep_reason(main, pull.head_ref, flow, base, remote), rec)
     main.run("worktree", "prune")
-    # worktree の消えた割り当てのテスト環境を回収する（排他の外で行う。並列のレーンの後片付けを待たせない）
+    # worktree の消えた割り当てのテスト環境を回収する（排他の外で行う。並列のレーンのクリーンアップを待たせない）
     t = testenv.target(main_dir)
     if t is not None:
         rec.items.extend({**i, "swept": True} for i in testenv.reclaim(t))

@@ -1,10 +1,10 @@
 {
-  "summary": "Markdown の設定 mvv.md（mvv-body）の節の並び。人の承認（M7）で書き、MVV 判定が節の見出しで本文を引く",
+  "summary": "Markdown の設定 mvv.md（mvv-body）のセクションの並び。人の承認（M7）で書き、MVV 判定がセクションの見出しで本文を引く",
   "owner": "設定を読む子（初版は #3518。ndf.checks.spec_model）",
   "columns": {
     "order": {
       "type": "integer",
-      "summary": "節の順番（1 から）"
+      "summary": "セクションの順番（1 から）"
     },
     "level": {
       "type": "integer",
@@ -12,15 +12,15 @@
     },
     "heading": {
       "type": "string",
-      "summary": "節の見出しの語"
+      "summary": "セクションの見出しの語"
     },
     "required": {
       "type": "boolean",
-      "summary": "必ず置く節か"
+      "summary": "必ず置くセクションか"
     },
     "meaning": {
       "type": "string",
-      "summary": "節が持つもの"
+      "summary": "セクションが持つもの"
     }
   },
   "rows": [

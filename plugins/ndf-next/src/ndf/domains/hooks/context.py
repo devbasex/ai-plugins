@@ -16,9 +16,9 @@ from typing import Any, NamedTuple, Optional
 
 from ndf.domains.hooks import tables
 
-# シェルの構文木で、ループとして数える節
+# シェルの構文木で、ループとして数えるセクション
 _LOOP_NODES = frozenset({"while_statement", "until_statement", "for_statement", "c_style_for_statement"})
-# 語として読む節（引用を外して読む）
+# 語として読むセクション（引用を外して読む）
 _WORD_NODES = frozenset({"word", "string", "raw_string", "number", "concatenation", "simple_expansion", "expansion", "ansi_c_string"})
 
 # 本文で人の回答を待つ言い回し（AskUserQuestion を使わずに待った応答）
@@ -41,7 +41,7 @@ class ShellCommand(NamedTuple):
 
 
 class ShellScript(NamedTuple):
-    """シェルの構文木から読んだもの。`loops` はループの節を含むか。"""
+    """シェルの構文木から読んだもの。`loops` はループのセクションを含むか。"""
 
     commands: tuple[ShellCommand, ...]
     loops: bool

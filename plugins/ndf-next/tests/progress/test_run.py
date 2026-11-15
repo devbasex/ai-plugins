@@ -179,15 +179,15 @@ def test_revise_needs_a_notes_file_and_reruns_the_stage_with_the_notes(repo, st,
     with pytest.raises(model.Refused):
         _approve(st, tid, "設計", "request_changes", empty)
     notes = tmp_path / "notes.md"
-    notes.write_text("節 2 の根拠が足りない")
+    notes.write_text("セクション 2 の根拠が足りない")
     _approve(st, tid, "設計", "request_changes", notes)
     answered = [e for e in run.read(st, tid).events if e.draft.kind == "answered"][-1]
-    assert answered.draft.payload["notes"] == "節 2 の根拠が足りない"
+    assert answered.draft.payload["notes"] == "セクション 2 の根拠が足りない"
     before = len(env.fake.calls)
     out = lanes.turn(st, tid, repo, env.env)
     assert out["status"] == "gate" and out["metrics"]["stage"] == "設計"
     rerun = env.fake.calls[before:]
-    assert [c.step for c in rerun] == ["design", "design-review"] and {c.notes for c in rerun} == {"節 2 の根拠が足りない"}
+    assert [c.step for c in rerun] == ["design", "design-review"] and {c.notes for c in rerun} == {"セクション 2 の根拠が足りない"}
     assert rerun[0].work_dir.name == "design-g1"
 
 

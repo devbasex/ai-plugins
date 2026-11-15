@@ -132,7 +132,7 @@
         },
         "--trim": {
           "type": "boolean",
-          "description": "テンプレートに無い節を退避先へ移してから確かめる"
+          "description": "テンプレートに無いセクションを退避先へ移してから確かめる"
         },
         "--history": {
           "type": "string",

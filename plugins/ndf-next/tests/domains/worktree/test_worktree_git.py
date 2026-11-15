@@ -184,7 +184,7 @@ def test_cleanup_keeps_selected_sprint_until_production(main_repo: Path, run_git
 
 
 def test_cleanup_records_merge_commit_for_evacuated_files(main_repo: Path, run_git: Callable) -> None:
-    """squash のマージでは先端が本番に入らないため、退避のジャーナルへ PR のマージコミットも書く（回収の候補になる）。"""
+    """squash のマージでは HEAD が本番に入らないため、退避のジャーナルへ PR のマージコミットも書く（回収の候補になる）。"""
     from ndf.domains.worktree import trash
 
     wt = create.create(main_repo, "feat/sq").path

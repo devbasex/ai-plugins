@@ -226,7 +226,7 @@ def test_a_template_that_cannot_be_filled_stops_as_invalid(tmp_path, monkeypatch
 
 
 def _sprint_repo(tmp_path: Path, project: dict | None = None) -> Path:
-    """ブランチ sprint/s1 に居る作業場所（リモート無し）。宛先は設定の base_branch、`project` は `.ndf/project.json`。"""
+    """ブランチ sprint/s1 に居る作業場所（リモート無し）。マージ先は設定の base_branch、`project` は `.ndf/project.json`。"""
     repo = tmp_path / "repo"
     subprocess.run(["git", "init", "-q", "-b", "sprint/s1", str(repo)], check=True)
     (repo / ".ndf").mkdir()
@@ -412,7 +412,7 @@ def test_review_without_a_ndf_settings_runs_cross_review_with_the_pr_made_before
 
 
 def test_review_without_a_ndf_settings_resolves_the_base_for_the_cross_review_template(tmp_path, monkeypatch):
-    # PR 3537 の指摘: cross-review のテンプレートは params に base を持たないので、宛先はリポジトリのブランチの運用から決める
+    # PR 3537 の指摘: cross-review のテンプレートは params に base を持たないので、マージ先はリポジトリのブランチの運用から決める
     held = PROJECT["workflow"]
     monkeypatch.setitem(PROJECT, "workflow", {"launch": {"rebuild": held["launch"]["rebuild"]}})
     plan, _, _, _ = _filled_plan(tmp_path, monkeypatch, "cross-review")

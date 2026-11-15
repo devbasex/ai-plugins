@@ -158,8 +158,8 @@ def infer(prs: list[dict[str, str]], base: str, production: str, release_kinds: 
         if p["head"].startswith(("design/", "spec/"))
     )
     out = {
-        "integrate": infer_field(integrate, PR_COMMAND, f"head が {Branch.SPRINT}* で宛先が {base} の Pull Request"),
-        "doc_prs": infer_field(docs, PR_COMMAND, "設計 PR・確定仕様化の PR の宛先"),
+        "integrate": infer_field(integrate, PR_COMMAND, f"head が {Branch.SPRINT}* でマージ先が {base} の Pull Request"),
+        "doc_prs": infer_field(docs, PR_COMMAND, "設計 PR・確定仕様化の PR のマージ先"),
         "release_strategy": infer_field(
             Counter(release_kinds), PR_COMMAND + " と git rev-list --first-parent", f"{production} 宛ての Pull Request の head"
         ),
@@ -280,7 +280,7 @@ def measure(tree: Tree, gh_repo: Optional[str], base: Optional[str], production:
 
 
 def pr_kind(head: str, base_ref: str, base: str, production: str) -> Optional[str]:
-    """PR の head と宛先から PR の種類。当たらなければ None。"""
+    """PR の head とマージ先から PR の種類。当たらなければ None。"""
     if head.startswith(Branch.IMPL):
         return "impl"
     if head.startswith(Branch.SPRINT) and base_ref == base:

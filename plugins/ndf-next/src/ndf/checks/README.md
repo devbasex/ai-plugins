@@ -115,7 +115,7 @@ plugins/ndf-next/bin/ndf check                # 書かずに検査する（CI �
 | 規則 | 違反と数えるもの |
 | --- | --- |
 | `spec-docs` | コミットされた生成物が、生成し直した中身と違う・無い・読めない。生成物の保存先に生成されないファイルが残る |
-| `spec-decl` | 保存先の表（`contracts/domains/ndf-files.json`）の設定の行が、スキーマ（`contracts/schemas/ndf-settings/<id>.schema.json`）か節の表（`<id>.sections.json`）を持たない。スキーマの最上位の非推奨でないキーが表の `keys` と食い違う。`main_keys` が `keys` に無い。キーが型か説明を持たない。注釈 `x-ndf-location`・`x-ndf-read-by`・例が無い。検査を打つリポジトリの `.ndf/` の実物がスキーマに通らない（ファイルと JSON Pointer） |
+| `spec-decl` | 保存先の表（`contracts/domains/ndf-files.json`）の設定の行が、スキーマ（`contracts/schemas/ndf-settings/<id>.schema.json`）かセクションの表（`<id>.sections.json`）を持たない。スキーマの最上位の非推奨でないキーが表の `keys` と食い違う。`main_keys` が `keys` に無い。キーが型か説明を持たない。注釈 `x-ndf-location`・`x-ndf-read-by`・例が無い。検査を打つリポジトリの `.ndf/` の実物がスキーマに通らない（ファイルと JSON Pointer） |
 | `spec-io` | サブコマンドが結果のスキーマ（`contracts/schemas/io/<サブコマンド>.result.schema.json`）を持たない。引数の出所が argparse の取り出しと手書きの引数の表（`contracts/domains/manual-args.json`）の両方か、どちらでもない。`src/` のコードが名前の文字列で読む環境変数が環境変数の表に無い。`bin/` のファイルが起動スクリプトの表（`contracts/domains/launchers.json`）に無い |
 | `spec-skill` | 実体のある配る Skill が Skill の入出力の表（`contracts/domains/skill-io.json`）に行を持たない。公開する Skill の行が `args`・`env` を持つ。`skills/`・`agents/` の `.md` に書かれた `ndf <サブコマンド>` の呼び出しが、サブコマンド・下位の命令・引数の名前で規約に当たらない（値の型は見ない） |
 | `spec-public` | 公開する面の表（`contracts/domains/entrypoints.json`）の行が規約の項目に当たらない（順番が `caller-first` の行と種類 `spec` の行を除く）。規約の保存先 3 つ（`docs/contracts`・`contracts/schemas/ndf-settings`・`contracts/schemas/io`）を指す種類 `spec` の行がちょうど 1 行ずつでないか、ディレクトリが無い |

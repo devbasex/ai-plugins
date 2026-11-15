@@ -142,8 +142,8 @@ Issue の種類ごとの記載項目（必須・該当時・不要）と水準�
 | `items` | array of object | — | — | 必須 | 記載項目の並び |
 | `kind_labels` | object | — | — | 任意 | 種類 → GitHub のラベルの名前 |
 | `kinds` | array of string | — | — | 必須 | Issue の種類の並び |
-| `last` | string | `"request"` | — | 任意 | 書き手が書く節の最後に置く項目の id |
-| `record_headings` | array of string | — | — | 任意 | 工程が足す節の見出しの語 |
+| `last` | string | `"request"` | — | 任意 | 書き手が書くセクションの最後に置く項目の id |
+| `record_headings` | array of string | — | — | 任意 | 工程が足すセクションの見出しの語 |
 | `version` | integer | — | `1` | 必須 | 設定の形のバージョン。読み手は知らないバージョンを読まない |
 
 例: `{"version": 1, "kinds": ["不具合", "機能"], "items": [{"id": "purpose", "name": "目的", "need": {"不具合": "必須", "機能": "必須"}, "level": "何を良くするかを 1〜2 文で書く"}]}`
@@ -168,7 +168,7 @@ worktree・チーム・公開・[mvv.schema.json](../../contracts/schemas/ndf-se
 
 —・チーム・公開・[mvv-body.sections.json](../../contracts/schemas/ndf-settings/mvv-body.sections.json)。読む工程: `ndf records mvv`（MVV 判定で本文を読むとき）・`ndf records preflight`（工程の前に本文があるかを確かめるとき）
 
-Markdown の設定。節の並び:
+Markdown の設定。セクションの並び:
 
 | 順 | 見出し | 必須か | 持つもの |
 | --- | --- | --- | --- |
@@ -210,7 +210,7 @@ worktree（抑制コメントのキーはメインディレクトリ）・チー
 | キー | 型 | 既定値 | 取りうる値 | 必須か | 説明 |
 | --- | --- | --- | --- | --- | --- |
 | `$schema` | string | — | — | 任意 | 編集のときの補完に使うスキーマの位置。読み手は参照しない |
-| `analysis` | Analysis か null | — | — | 任意 | 解析（M7）が書いた入力の sha256・ブランチ・書いた節の記録。人は書かない |
+| `analysis` | Analysis か null | — | — | 任意 | 解析（M7）が書いた入力の sha256・ブランチ・書いたセクションの記録。人は書かない |
 | `checks` | Checks か Unknown か null | — | — | 任意 | 静的解析・整形の Tool の並び |
 | `ci` | Ci か Unknown か null | — | — | 任意 | CI の提供元・ワークフロー・必須のチェック |
 | `delivery` | array of Delivery か Unknown か null | — | — | 任意 | リリースの経路の行。本番・ベースブランチで動く行は channel で指し、ブランチ名を写さない |

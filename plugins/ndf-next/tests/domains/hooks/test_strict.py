@@ -1,4 +1,4 @@
-"""`strict` の guard（本番チャネルへのマージ）を、宛先のリポジトリの設定とエントリポイントの経路で確かめる（M3-H6・#2446・#2838）。"""
+"""`strict` の guard（本番チャネルへのマージ）を、マージ先のリポジトリの設定とエントリポイントの経路で確かめる（M3-H6・#2446・#2838）。"""
 
 from __future__ import annotations
 
@@ -30,14 +30,14 @@ def test_merge_in_manual_delivery_repo_passes(tmp_path):
 
 @pytest.mark.parametrize("flag", ["-R other/repo", "--repo other/repo", "--repo=other/repo", "-Rother/repo"])
 def test_repo_flag_naming_another_repository_is_judged_by_that_repository(tmp_path, flag):
-    # 作業ディレクトリ（手動の設定）の設定で別のリポジトリの宛先を判定しない（#2446）
+    # 作業ディレクトリ（手動の設定）の設定で別のリポジトリのマージ先を判定しない（#2446）
     repo = make_repo(tmp_path / "r", slug="owner/repo", delivery=MANUAL)
     got = _check(repo, f"gh {flag} pr merge 3")
     assert got is not None and "other/repo" in got.reason and "clone" in got.reason
 
 
 def test_cd_into_the_target_clone_uses_its_ndf_settings(tmp_path):
-    # セッションのリポジトリ（自動）ではなく、cd した宛先（手動）の設定で判定する（#2838）
+    # セッションのリポジトリ（自動）ではなく、cd したマージ先（手動）の設定で判定する（#2838）
     session = make_repo(tmp_path / "session", slug="owner/session", delivery=AUTO)
     target = make_repo(tmp_path / "target", slug="volare/target", delivery=MANUAL, worktree=True)
     assert _check(session, f"cd {target} && gh pr merge 65 -R volare/target --merge") is None
@@ -240,7 +240,7 @@ def test_cd_to_an_absolute_path_after_an_unknown_cd_reads_that_path(tmp_path):
     ],
 )
 def test_gh_repo_naming_another_repository_is_judged_by_that_repository(tmp_path, command):
-    # gh は GH_REPO を -R と同じ宛先として読む（https://cli.github.com/manual/gh_help_environment）
+    # gh は GH_REPO を -R と同じ対象のリポジトリとして読む（https://cli.github.com/manual/gh_help_environment）
     repo = make_repo(tmp_path / "r", slug="owner/repo", delivery=MANUAL)
     got = _check(repo, command)
     assert got is not None and "other/production" in got.reason
@@ -254,7 +254,7 @@ def test_gh_repo_matching_the_origin_or_overridden_by_the_flag_passes(tmp_path):
 
 
 def test_gh_repo_in_the_hook_environment_is_the_initial_target(tmp_path, monkeypatch):
-    # セッションの前に export した GH_REPO も、gh は -R と同じ宛先として読む
+    # セッションの前に export した GH_REPO も、gh は -R と同じ対象のリポジトリとして読む
     repo = make_repo(tmp_path / "r", slug="owner/repo", delivery=MANUAL)
     monkeypatch.setenv("GH_REPO", "other/production")
     got = deny_reason(call_entry("claude", "PreToolUse", bash(repo, "gh pr merge 1 --merge")))

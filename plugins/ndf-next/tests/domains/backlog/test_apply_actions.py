@@ -1,4 +1,4 @@
-"""apply の判定の反映・起票・記録（journal）と、マイルストーンの説明の `### 順位` の節・見積もりの Size の重ね。"""
+"""apply の判定の反映・起票・記録（journal）と、マイルストーンの説明の `### 順位` のセクション・見積もりの Size の重ね。"""
 
 from __future__ import annotations
 
@@ -94,12 +94,12 @@ def test_apply_writes_the_rank_section_and_keeps_the_rest(repo_dir, fake, run_is
     for n in range(1, 9):
         fake.issue(n, milestone="01")
     fake.milestones = {"01": 1}
-    fake.descriptions = {1: "目的の文\n\n### 順位\n\n古い表\n\n## 後ろの節\n\n残す"}
+    fake.descriptions = {1: "目的の文\n\n### 順位\n\n古い表\n\n## 後ろのセクション\n\n残す"}
     ranked = _rank(run_issues, tmp_path)
     got = _apply(run_issues, tmp_path, {"rank": ranked["metrics"]["digest"]})
     assert got["status"] == "ok" and got["metrics"]["tables"]["written"] == ["01"]
     desc = fake.descriptions[1]
-    assert desc.startswith("目的の文\n\n### 順位\n\n| 順位 |") and desc.endswith("## 後ろの節\n\n残す") and "古い表" not in desc
+    assert desc.startswith("目的の文\n\n### 順位\n\n| 順位 |") and desc.endswith("## 後ろのセクション\n\n残す") and "古い表" not in desc
 
 
 def test_rank_section_halves_rows_when_the_description_is_too_long(repo_dir, fake, run_issues, tmp_path):

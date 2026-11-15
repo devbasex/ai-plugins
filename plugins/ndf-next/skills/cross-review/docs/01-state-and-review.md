@@ -84,7 +84,7 @@ cd "$WORKTREE"
 **重要**: 以降の全ステップで `cd $WORKTREE` を強制。
 サブエージェント（fix）を起動するときも、prompt 内で worktree path を明示する。
 
-再開で渡した引数の扱いは [04-contracts.md](04-contracts.md) の同じ名前の節にある。
+再開で渡した引数の扱いは [04-contracts.md](04-contracts.md) の同じ名前のセクションにある。
 
 ### ラウンドを足す
 
@@ -156,7 +156,7 @@ round エントリを保存する前に**コメントのスナップショット
 
 比較の基準は `gh pr view --json headRefOid` が返すコミットで、`origin/<head>` ではない。
 フォークの PR では head branch が base のリポジトリに無く、`origin/<head>` を基準に据えると
-一致判定も未 push のコミットの検出もフォークのときだけ行えない。マージの宛先だけを
+一致判定も未 push のコミットの検出もフォークのときだけ行えない。マージ先だけを
 `refs/pull/<PR>/head` へ変える。
 
 同期先のブランチ名は毎ラウンド取り直し、`state.json` の `head_branch` へ書き戻す。
@@ -294,7 +294,7 @@ eval "$JUDGE_VARS"
 
 打ち直した判定がなお 8 なら「投稿待ち」で止まる。止まりの結果は `status` が `stopped`、`summary` が
 `投稿待ち:` で始まり残りの件数と最後の失敗を含み、`metrics.exit` が 8 で、`final` は書かない
-（結果なしの中断の `final = error` と読み分ける）。同じコマンドを打ち直すと段階 `posts` から続け、
+（結果なしの中断の `final = error` と区別する）。同じコマンドを打ち直すと段階 `posts` から続け、
 送れたら同じラウンドの判定へ進む。
 
 ### 結果を残さなかったレビュアーの扱い

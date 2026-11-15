@@ -210,20 +210,20 @@ def created(state: rec.LoopState, c: Ctx, issues: Sequence[int]) -> Decision:
 
 
 def gate(state: rec.LoopState, c: Ctx, pr: int, head: str) -> Decision:
-    """設計承認ゲートを出した時点の PR の先端を記録する。"""
+    """設計承認ゲートを出した時点の PR の HEAD を記録する。"""
     refusal, lap = _open_lap(state, c, lease=False)
     if refusal is not None:
         return refusal
     assert lap is not None
     ev = rec.event(rec.GATE_SHOWN, c.now, lap=lap.number, pr=pr, head=head)
-    return Decision(f"PR #{pr} の設計承認ゲートを先端 {head[:12]} で記録した", (ev,))
+    return Decision(f"PR #{pr} の設計承認ゲートを HEAD {head[:12]} で記録した", (ev,))
 
 
 def answer(state: rec.LoopState, c: Ctx, pr: int, given: str, head: Optional[str], note: str) -> Decision:
     """設計承認ゲートの回答を記録する。
 
-    先端は呼び手が 1 回だけ読んだ値（`head`）を使い、ゲートを出した時点と違えば回答を書かずに断る（#2714）。
-    書いた回答の先端を `metrics.head` で返し、マージはその値を `--match-head-commit` に渡す。
+    HEAD は呼び手が 1 回だけ読んだ値（`head`）を使い、ゲートを出した時点と違えば回答を書かずに断る（#2714）。
+    書いた回答の HEAD を `metrics.head` で返し、マージはその値を `--match-head-commit` に渡す。
     `request_changes`・`rejected` は変更要求として記録に残る（#2400）。
     """
     refusal, lap = _open_lap(state, c, lease=False)
@@ -235,7 +235,7 @@ def answer(state: rec.LoopState, c: Ctx, pr: int, given: str, head: Optional[str
     if shown is None:
         return refuse(PRECONDITION, f"PR #{pr} の設計承認ゲートを記録していない", regate)
     if head != shown:
-        return refuse(PRECONDITION, f"PR #{pr} の先端がゲートを出した {shown[:12]} から {str(head)[:12]} へ動いた。資料を出し直す", regate)
+        return refuse(PRECONDITION, f"PR #{pr} の HEAD がゲートを出した {shown[:12]} から {str(head)[:12]} へ動いた。資料を出し直す", regate)
     ev = rec.event(rec.GATE_ANSWERED, c.now, lap=lap.number, pr=pr, answer=given, head=head, note=note)
     return Decision(f"PR #{pr} の回答 {given} を記録した", (ev,), metrics={"head": head, "answer": given})
 

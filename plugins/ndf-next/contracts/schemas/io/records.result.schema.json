@@ -83,7 +83,7 @@
           },
           "moved": {
             "type": "string",
-            "description": "退避した節の見出し（handoff --trim）"
+            "description": "退避したセクションの見出し（handoff --trim）"
           },
           "at": {
             "type": "string",

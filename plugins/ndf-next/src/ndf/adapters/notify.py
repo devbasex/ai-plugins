@@ -1,7 +1,7 @@
 """通知のアダプター。HTTP は `ndf.adapters.http`（`post_json`・`PostError`）を通す。
 
 - `slack_call` は Slack の Web API を 1 回呼ぶ。設定は `slack_settings` が環境変数と `.env`（python-dotenv）から読む。
-  宛先（`NDF_SLACK_API_BASE`）だけは環境変数からしか読まない（通知の `cwd` の `.env` でトークンの送り先を替えさせない）
+  送信先（`NDF_SLACK_API_BASE`）だけは環境変数からしか読まない（通知の `cwd` の `.env` でトークンの送り先を替えさせない）
 - `drain` は送信待ち（`outbox_dir`）の通知を送る送り手で、排他で 1 つだけ動き、通りうる失敗を打ち直す。
   サブコマンド `notify send` がこれを呼ぶ
 
@@ -40,7 +40,7 @@ _wall = time.time
 
 # ---- Slack ----
 
-# Slack の Web API の宛先の既定（環境変数 `NDF_SLACK_API_BASE` で替える。テストの相手を指すため。`.env` からは読まない）
+# Slack の Web API の送信先の既定（環境変数 `NDF_SLACK_API_BASE` で替える。テストの相手を指すため。`.env` からは読まない）
 SLACK_API_BASE = "https://slack.com"
 # 打ち直して通りうる Slack の `error`
 _SLACK_RETRYABLE = frozenset({"ratelimited"})
@@ -77,10 +77,10 @@ def env_file_values(cwd: Path, fallback: Path | None) -> dict[str, str]:
 
 
 def slack_settings(cwd: Path, fallback: Path | None, environ: dict[str, str]) -> SlackSettings | None:
-    """環境変数と `.env` から Slack の設定を読む。環境変数が `.env` に勝つ。トークンか宛先が無ければ `None`（送らない）。
+    """環境変数と `.env` から Slack の設定を読む。環境変数が `.env` に勝つ。トークンか送信先が無ければ `None`（送らない）。
 
-    API の宛先（`NDF_SLACK_API_BASE`）は `environ` からだけ読む。通知の `cwd` の `.env` は通知を書いたリポジトリの
-    中身で、そこから読むと環境変数のトークンを別の宛先へ送らせられるため。
+    API の送信先（`NDF_SLACK_API_BASE`）は `environ` からだけ読む。通知の `cwd` の `.env` は通知を書いたリポジトリの
+    中身で、そこから読むと環境変数のトークンを別の送信先へ送らせられるため。
     """
     env = {**env_file_values(cwd, fallback), **environ}
     token, channel = env.get("SLACK_BOT_TOKEN"), env.get("SLACK_CHANNEL_ID")

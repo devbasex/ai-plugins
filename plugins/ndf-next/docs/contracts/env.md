@@ -24,7 +24,7 @@ NDF が読む環境変数と、NDF が子のプロセスへ渡す環境変数で
 | `KIRO_PLUGIN_ROOT` | runtime | path | — | Kiro のプラグインの根（ホストの推定） | 内部（予告なく変えてよい） |
 | `NDF_ACCOUNTS_DIR` | user | path | — | アカウントの登録の保存先（ndf relay account の登録のサブコマンド）。無ければ <共有の設定ディレクトリ>/ndf/accounts（旧いプラグインと同じ保存先） | 内部（予告なく変えてよい） |
 | `NDF_API_KEY_CHECK_MODEL` | user | string | — | API キーの確かめに使うモデル。無ければ claude-haiku-4-5 | 内部（予告なく変えてよい） |
-| `NDF_API_KEY_CHECK_URL` | user | string | — | API キーの確かめの要求の宛先。無ければ https://api.anthropic.com/v1/messages | 内部（予告なく変えてよい） |
+| `NDF_API_KEY_CHECK_URL` | user | string | — | API キーの確かめの送信先。無ければ https://api.anthropic.com/v1/messages | 内部（予告なく変えてよい） |
 | `NDF_CALLER_PLUGIN_ROOT` | ndf | path | — | bin/ndf が子へ自分の根を渡す前に写した、呼び出し元の CLAUDE_PLUGIN_ROOT（空なら無かった）。ほかのプラグインの根なら旧い状態の保存先を退避しない。中継が起動するセッションへ渡さない | 内部（予告なく変えてよい） |
 | `NDF_CLAUDE_ACCOUNT` | user | string | — | 子の claude を起動する登録済みのアカウントの名前 | 内部（予告なく変えてよい） |
 | `NDF_CLAUDE_API_KEY_GENERATION` | ndf | integer | — | 子へ渡した API キーの世代。入れ子の監督が読む | 内部（予告なく変えてよい） |
@@ -35,7 +35,7 @@ NDF が読む環境変数と、NDF が子のプロセスへ渡す環境変数で
 | `NDF_CONTEXT_POLICY` | user | string | — | 再起動の方針（current・trial）。.ndf/context.json より先で --policy より後。ほかの値は無視して出所に ignored を書く | 内部（予告なく変えてよい） |
 | `NDF_FACTORY_RUN` | service | flag | — | サービスの実行ジョブの中で動いているマーカー | 公開 |
 | `NDF_HOOK_OFF` | user | string | — | 止める guard の名前をカンマでつなぐ。all で全部を止める。無ければ全部の guard が働く。閾値はこの変数で受けず、上限の設定から読む | 内部（予告なく変えてよい） |
-| `NDF_ISSUE_REQUEST_FILE` | service | path | — | 作業のリポジトリと別の宛先への起票を、承認資料を書かずにリクエストの 1 行（{repo, title, body, labels} の JSON）として足すファイル。サービスが起票するかを決める。無ければ承認資料で止まる | 公開 |
+| `NDF_ISSUE_REQUEST_FILE` | service | path | — | 作業のリポジトリと別の起票先への起票を、承認資料を書かずにリクエストの 1 行（{repo, title, body, labels} の JSON）として足すファイル。サービスが起票するかを決める。無ければ承認資料で止まる | 公開 |
 | `NDF_LOOP_EXCLUDE` | service | string | — | 開発ループの選定から、そのループの 1 回だけ外す課題の番号（, か空白で区切る）。同じリポジトリの別の実行が持つ課題をサービスが渡す。無ければ外さない | 公開 |
 | `NDF_MVV_STATE_DIR` | service | path | — | 判断の記録（ask.jsonl）と承認ゲートの変更要求の記録（gate-rejections.jsonl）の保存先。無ければ状態の保存先 | 公開 |
 | `NDF_ORGANIZER_DIR` | ndf | path | — | 外のオーガナイザーとファイルでやり取りする保存先。あればこのセッションは外のオーガナイザーのレーン | 公開 |
@@ -59,7 +59,7 @@ NDF が読む環境変数と、NDF が子のプロセスへ渡す環境変数で
 | `NDF_USAGE_DIR` | user | path | — | 使用量の使用量ログ（usage.jsonl）の保存先。hook から書いてもスクリプトから書いても同じ保存先になる。無ければ状態の保存先の usage | 内部（予告なく変えてよい） |
 | `NDF_VERSION` | service | string | — | サービスの実行ジョブが入れた NDF のバージョン（開発版は <version>@<コミットの SHA>） | 公開 |
 | `SLACK_BOT_TOKEN` | user | string | 秘密 | Slack の通知のトークン。無ければ通知しない | 内部（予告なく変えてよい） |
-| `SLACK_CHANNEL_ID` | user | string | — | Slack の通知の宛先のチャンネル | 内部（予告なく変えてよい） |
+| `SLACK_CHANNEL_ID` | user | string | — | Slack の通知先のチャンネル | 内部（予告なく変えてよい） |
 | `VSCODE_GIT_ASKPASS_EXTRA_ARGS` | user | string | — | VS Code の git 認証の部品。中継が起動するセッションへ渡さない | 内部（予告なく変えてよい） |
 | `VSCODE_GIT_ASKPASS_MAIN` | user | path | — | VS Code の git 認証の部品。中継が起動するセッションへ渡さない | 内部（予告なく変えてよい） |
 | `VSCODE_GIT_ASKPASS_NODE` | user | path | — | VS Code の git 認証の部品。中継が起動するセッションへ渡さない | 内部（予告なく変えてよい） |

@@ -1,4 +1,4 @@
-"""worktree でのローカルの動作検証（設定の `localenv` 節。実行系は `kind: compose` だけを扱う）。
+"""worktree でのローカルの動作検証（設定の `localenv` セクション。実行系は `kind: compose` だけを扱う）。
 
 - `setup`: 設定の `localenv.copy_from_main`・`copy_as_real` に従って設定と依存物を worktree へ複製する（複製の手順は `deps` と同じ）
 - `verify`: ローカル環境に載っているコードと対象の worktree のブランチを検証する（判断は `localenv_decide.verify`）
@@ -6,7 +6,7 @@
 - `aim`: ローカル環境が指すコードを対象の worktree へ向ける（`layout: indirect` だけ。`direct`・`host` は手順書で行う）
 - `mode`: 対象の変更の一覧から、相乗りか分離かを提示する（判断は `localenv_decide.mode`）
 
-設定・`localenv` 節が無い、または `kind` が `compose` でないリポジトリでは、どれも `None`（適用外）を返す。
+設定・`localenv` セクションが無い、または `kind` が `compose` でないリポジトリでは、どれも `None`（適用外）を返す。
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ class LocalenvError(Exception):
 
 @dataclass(frozen=True)
 class Target:
-    """対象の worktree と、メインディレクトリ・`localenv` 節。"""
+    """対象の worktree と、メインディレクトリ・`localenv` セクション。"""
 
     path: Path
     main_dir: Path
@@ -55,7 +55,7 @@ def target(path: Path) -> Optional[Target]:
 
 
 def compose_files(decl: ndf_settings.NdfSettings) -> tuple[str, ...]:
-    """`localenv.compose_files` の起動の定義（空でない文字列だけ）。節・配列が無ければ空。"""
+    """`localenv.compose_files` の起動の定義（空でない文字列だけ）。セクション・配列が無ければ空。"""
     local = decl.section(SECTION)
     files = local.get("compose_files") if local is not None else None
     return tuple(f for f in files if isinstance(f, str) and f) if isinstance(files, list) else ()

@@ -89,7 +89,7 @@ def load_limits(cwd: Path, *, cpus: int | None = None, total_mib: int | None = N
 
 
 def _section(path: Path) -> dict | None:
-    """設定の節 `SECTION`。節が無ければ None。読めない・形が違えば `SlotConfigError`。"""
+    """設定のセクション `SECTION`。セクションが無ければ None。読めない・形が違えば `SlotConfigError`。"""
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:

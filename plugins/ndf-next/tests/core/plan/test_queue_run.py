@@ -1,4 +1,4 @@
-"""サブコマンド `plan queue` を子プロセスで流す: ステップと `--then`・承認ゲートを届けるステップ・作業場所の後片付け・`--resume`（#2876・#1886）。"""
+"""サブコマンド `plan queue` を子プロセスで流す: ステップと `--then`・承認ゲートを届けるステップ・作業場所のクリーンアップ・`--resume`（#2876・#1886）。"""
 
 from __future__ import annotations
 
@@ -52,7 +52,7 @@ def test_a_stage_without_the_gate_role_waits_for_the_gate(repo, tmp_path):
 
 
 def test_a_queue_started_in_a_removed_worktree_runs_the_next_stage(repo, tmp_path):
-    """#1886 の再現: 作業場所から起動したキューで、前のステップのプランが作業場所を後片付けで消しても、--then のステップが流れる。"""
+    """#1886 の再現: 作業場所から起動したキューで、前のステップのプランが作業場所をクリーンアップで消しても、--then のステップが流れる。"""
     wt = tmp_path / "wt"
     git_sandbox.sh(repo, "worktree", "add", "-q", str(wt), "-b", "feat", identity=True)
     remove = {"id": "cleanup", "run": ["git", "-C", str(repo), "worktree", "remove", "--force", str(wt)], "in": "repo"}

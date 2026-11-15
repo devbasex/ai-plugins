@@ -1,4 +1,4 @@
-"""hook のテストの共通の部品。見本の入力・エントリポイントの呼び出し・宛先のリポジトリの作り方。"""
+"""hook のテストの共通の部品。見本の入力・エントリポイントの呼び出し・マージ先のリポジトリの作り方。"""
 
 from __future__ import annotations
 
@@ -79,7 +79,7 @@ def records() -> list[dict[str, Any]]:
 
 
 def make_repo(root: Path, slug: str = "owner/repo", delivery: Any = None, worktree: bool = False) -> Path:
-    """宛先のリポジトリ（.git の設定に origin と、.ndf/project.json の delivery）を作る。`delivery` が None なら設定を置かない。"""
+    """マージ先のリポジトリ（.git の設定に origin と、.ndf/project.json の delivery）を作る。`delivery` が None なら設定を置かない。"""
     root.mkdir(parents=True, exist_ok=True)
     config = f'[core]\n\tbare = false\n[remote "origin"]\n\turl = git@github.com:{slug}.git\n'
     if worktree:

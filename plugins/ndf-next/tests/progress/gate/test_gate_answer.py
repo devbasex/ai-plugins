@@ -98,7 +98,7 @@ def test_a_revised_stage_asks_a_new_question_and_the_rejections_are_counted(st, 
     flow.turn(tid)
     old = _waiting(st, tid)
     notes = tmp_path / "notes.md"
-    notes.write_text("節 2 の根拠が足りない")
+    notes.write_text("セクション 2 の根拠が足りない")
     _give(st, tid, old, "request_changes", notes=notes)
     assert flow.turn(tid)["status"] == "gate"
     new = _waiting(st, tid)
@@ -199,10 +199,10 @@ def test_the_conductor_reads_the_choice_the_notes_who_and_when(st, new_table, fl
     tid = new_table()
     flow.turn(tid)
     notes = tmp_path / "notes.md"
-    notes.write_text("節 2 の根拠が足りない")
+    notes.write_text("セクション 2 の根拠が足りない")
     _give(st, tid, _waiting(st, tid), "request_changes", notes=notes)
     (got,) = gate.answers(run.read(st, tid))
-    assert got["answer"] == "request_changes" and got["notes"] == "節 2 の根拠が足りない" and got["reason"] == "人が回答した"
+    assert got["answer"] == "request_changes" and got["notes"] == "セクション 2 の根拠が足りない" and got["reason"] == "人が回答した"
     assert got["by"] == BY and got["at"] and got["gate"] == "design" and got["stage"] == "設計"
 
 

@@ -31,10 +31,10 @@ PRIVATE_REF_TEXT = "（非公開のリポジトリへの参照）"
 HOME_TEXT = "（利用者のホーム）"
 EMAIL_TEXT = "（メール）"
 ACCOUNT_TEXT = "（アカウント名）"
-# 公開のリポジトリへ書いてよいメール。公開してよいと確かめた宛先だけを完全な形で並べる（GitHub の SSH の利用者・
-# GitHub と Claude の送信専用の宛先）。ローカル部だけでは許さない（`git@<社内のホスト>` は社内の情報を出す）
+# 公開のリポジトリへ書いてよいメール。公開してよいと確かめたアドレスだけを完全な形で並べる（GitHub の SSH の利用者・
+# GitHub と Claude の送信専用のアドレス）。ローカル部だけでは許さない（`git@<社内のホスト>` は社内の情報を出す）
 PUBLIC_EMAILS = frozenset({"git@github.com", "noreply@github.com", "noreply@anthropic.com"})
-# GitHub が公開用に発行する宛先のドメイン（`<番号>+<login>@users.noreply.github.com`）
+# GitHub が公開用に発行するアドレスのドメイン（`<番号>+<login>@users.noreply.github.com`）
 PUBLIC_EMAIL_DOMAIN = "users.noreply.github.com"
 # 公開の書き先と同じ検査をかける書き先の公開範囲（読めない書き先は公開と同じに扱う）
 SCRUBBED_VISIBILITIES = frozenset({PUBLIC, UNKNOWN})

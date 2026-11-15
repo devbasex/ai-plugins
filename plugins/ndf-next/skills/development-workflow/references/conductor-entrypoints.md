@@ -44,7 +44,7 @@ ndf plan wait <プラン>.json
 | `scripts/sprint-state.py gate` | 承認ゲートの判定（利用者か MVV）を状態ファイルへ書く。利用者の回答は `--what <要約> --by user [--pr <設計 PR>] --outcome approved\|rejected`（承認も変更要求も変更要求の記録へ 1 行書く。変更要求は承認ゲートを通さない。`reject` のステップを持つプランの変更要求は `ndf plan next <プラン> --from reject` が書く） |
 | `scripts/gate-rejections.py record` | 状態ファイルの無い進め方で、承認ゲートの変更要求を変更要求の記録へ 1 行書く。打つ場面は [approval-request.md](approval-request.md) の「回答を記録する」 |
 | `scripts/gate-rejections.py count` | 承認ゲートの変更要求を、スプリント・課題・PR ごとに設計承認ゲート・リリース承認ゲートに分けて数える（読めなければ件数は「不明」、範囲に回答の行が無ければ「未記録」） |
-| `scripts/project-mvv.py` | プロジェクト MVV の判定（`check`）・材料（`collect`）・候補（`propose`）・検証（`vet`）・承認の書き込み（`approve`）・バージョン（`show`）・節（`context`）・改訂の兆候（`signals`）。手順は [project-mvv.md](project-mvv.md) |
+| `scripts/project-mvv.py` | プロジェクト MVV の判定（`check`）・材料（`collect`）・候補（`propose`）・検証（`vet`）・承認の書き込み（`approve`）・バージョン（`show`）・セクション（`context`）・改訂の兆候（`signals`）。手順は [project-mvv.md](project-mvv.md) |
 | `scripts/sprint-state.py status` | 今の状態を出す |
 | `scripts/sprint-state.py next` | 切れ目で引継ぎ文書へ置く ndf-next のブロックを作る |
 | `scripts/sprint-state.py render` | 状態を表に書き出す |
@@ -57,9 +57,9 @@ ndf plan wait <プラン>.json
 | --- | --- |
 | `scripts/check-trigger.py eval` | 検査を回すかを判定する |
 | `scripts/check-trigger.py stats` | 検査のラウンド数と指摘の数を集計する |
-| `scripts/merged-steps.py merge-when-green` | CI が通るまで待ってマージし、後片付けまで行う。宛先が自動反映の本番チャネルなら `--gate-approved user\|mvv` が無い限り CI を待たずにリリース承認ゲート（終了コード 10）で止まる |
-| `scripts/merged-steps.py merge-gate` | 宛先へのマージがリリース承認ゲートに当たるかだけを判定する（0 = 進めてよい / 10 = リリース承認ゲート） |
-| `scripts/merged-steps.py promote` | リリースの Pull Request（ベースブランチ → 本番チャネル）を作り、リリース承認ゲートの後にマージする（後片付けはしない） |
+| `scripts/merged-steps.py merge-when-green` | CI が通るまで待ってマージし、クリーンアップまで行う。マージ先が自動反映の本番チャネルなら `--gate-approved user\|mvv` が無い限り CI を待たずにリリース承認ゲート（終了コード 10）で止まる |
+| `scripts/merged-steps.py merge-gate` | マージ先へのマージがリリース承認ゲートに当たるかだけを判定する（0 = 進めてよい / 10 = リリース承認ゲート） |
+| `scripts/merged-steps.py promote` | リリースの Pull Request（ベースブランチ → 本番チャネル）を作り、リリース承認ゲートの後にマージする（クリーンアップはしない） |
 | `scripts/merged-steps.py cleanup` | マージ済みの PR の worktree とブランチを片付ける |
 | `scripts/release-steps.py approval-facts` | 本番の承認資料のうち機械で作れる部分を書き出す |
 | `scripts/release-verification-steps.py verify-install` | 開発版を導入して確かめる |
@@ -74,8 +74,8 @@ ndf plan wait <プラン>.json
 | `scripts/handoff.py path` | 引継ぎ文書の本体と履歴の、メインディレクトリの絶対パスを得る（`--exists` で本体の有無）。規則は [handoff.md](handoff.md) |
 | `scripts/handoff.py init` | 引継ぎ文書が無ければテンプレートから作る |
 | `scripts/handoff.py find` | 名指しの無い再開で、入力の語に一致する引継ぎ文書を探す |
-| `scripts/handoff.py next` | 引継ぎ文書の「次に実行するコマンド」の節を再開コマンドで置き換える |
-| `scripts/handoff.py check` | 引継ぎ文書の節の形と行数を確かめる（`--trim` で「前の会話の進み」を履歴へ移す） |
+| `scripts/handoff.py next` | 引継ぎ文書の「次に実行するコマンド」のセクションを再開コマンドで置き換える |
+| `scripts/handoff.py check` | 引継ぎ文書のセクションの形と行数を確かめる（`--trim` で「前の会話の進み」を履歴へ移す） |
 | `scripts/handoff.py remove` | 対象が閉じた後に、引継ぎ文書の本体と履歴を消す |
 | `skills/skill-stats/scripts/skill-stats.py --agents` | 3 層（conductor / supervisor / worker）の context window を出す |
 | `skills/external-ai/scripts/external-ai.py run <CLI>` | 外部 AI に 1 回の質問を投げる |

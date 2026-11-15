@@ -140,8 +140,8 @@ Pull Request（最大 100 件）と origin のスプリントブランチで、�
 | 項目 | 何から推すか |
 | --- | --- |
 | `start` | 本番チャネルに入っていないスプリントブランチの分岐点。本番チャネルにだけあるコミットなら `production`、ベースブランチにだけあるコミットなら `base`。丸ごとのリリースで後から本番に入った分岐点は、本番チャネルの first-parent の列に無ければ `base`。少なければ `release_strategy` の行が許す値 |
-| `integrate` | head がスプリントブランチで宛先がベースブランチの Pull Request |
-| `doc_prs` | 設計 PR（`design/*`）と確定仕様化の PR（`spec/*`）の宛先 |
+| `integrate` | head がスプリントブランチでマージ先がベースブランチの Pull Request |
+| `doc_prs` | 設計 PR（`design/*`）と確定仕様化の PR（`spec/*`）のマージ先 |
 | `release_strategy` | 本番チャネル宛ての Pull Request の head。ベースブランチそのもの・リリースブランチの first-parent の列がマージ前の本番チャネルへ届かないなら `merge_base_branch`、届けば `release_branch` |
 
 回答は `branch_flow` に `{"value": {"start": ..., "integrate": ..., "doc_prs": ..., "release_strategy": ...}}` で書く。リリース方式の表

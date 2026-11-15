@@ -166,7 +166,7 @@ def _gated(head: str = "a" * 40) -> rec.LoopState:
 
 
 def test_issue_2714_moved_head_refuses_the_answer() -> None:
-    """回答の先端がゲートを出した先端と違えば、回答を書かずに資料の出し直しへ向ける。"""
+    """回答の HEAD がゲートを出した HEAD と違えば、回答を書かずに資料の出し直しへ向ける。"""
     state = _gated()
     d = ctl.answer(state, _ctx(), 77, "approved", "b" * 40, "")
     assert d.kind == ctl.PRECONDITION and not d.events

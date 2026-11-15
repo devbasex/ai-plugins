@@ -32,7 +32,7 @@ def _fake(returncode: int = 0, stdout: str = "", stderr: str = ""):
     [(FULL, True), ("2bb66a6c1", True), ("2BB66A6C1", True), ("2bb66a6c2", False), ("deadbeef", False)],
 )
 def test_sha_matches_accepts_short_and_full(expected: str, matches: bool) -> None:
-    # #2041: 同じ先端を指す短い SHA は一致として読む
+    # #2041: 同じ HEAD を指す短い SHA は一致として読む
     assert git.sha_matches(expected, FULL) is matches
 
 

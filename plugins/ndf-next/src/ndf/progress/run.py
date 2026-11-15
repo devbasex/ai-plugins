@@ -374,9 +374,9 @@ def report(v: View, m: Move) -> dict[str, Any]:
 
 
 # --- 進捗記録（受け入れ条件 6・3377-9）: 課題の工程表とスプリント PR の「通した工程」を終了のマーカーから書き直す ---
-# 本文の節（見出しから終わりのマーカーまで）だけを書き直すので、何度打っても同じ本文になる。
+# 本文のセクション（見出しから終わりのマーカーまで）だけを書き直すので、何度打っても同じ本文になる。
 
-# 進捗記録の節の見出しと終わりのマーカー、時刻の表示の時間帯（JST）
+# 進捗記録のセクションの見出しと終わりのマーカー、時刻の表示の時間帯（JST）
 ISSUE_SECTION = "## 進行"
 PR_SECTION = "## 通した工程"
 SECTION_END = f"<!-- {identity.FINAL_NAME}:section-end -->"
@@ -416,7 +416,7 @@ def _record_line(name: str, row: Optional[model.RowState]) -> str:
 
 
 def issue_section(v: View) -> str:
-    """課題の工程表（節「進行」の中身）。全工程を並べ、終了のマーカーが付いた行だけにマーカーと時刻を付ける。"""
+    """課題の工程表（セクション「進行」の中身）。全工程を並べ、終了のマーカーが付いた行だけにマーカーと時刻を付ける。"""
     rows = v.rows
     lines = [f"モード: {v.snap.mode}", ""] + [_record_line(s.name, rows.get(s.name)) for s in v.snap.stages]
     return "\n".join(lines)
@@ -430,7 +430,7 @@ def pr_section(v: View) -> str:
 
 
 def replace_section(body: str, heading: str, content: str) -> str:
-    """本文の節（見出しから終わりのマーカーまで）を書き直す。無ければ末尾へ足す。何度打っても同じ本文になる。"""
+    """本文のセクション（見出しから終わりのマーカーまで）を書き直す。無ければ末尾へ足す。何度打っても同じ本文になる。"""
     block = f"{heading}\n\n{content}\n{SECTION_END}\n"
     pattern = re.compile(rf"^{re.escape(heading)}\n.*?^{re.escape(SECTION_END)}\n?", re.MULTILINE | re.DOTALL)
     if pattern.search(body):
@@ -447,7 +447,7 @@ def _targets(v: View) -> list[tuple[str, int, str, str]]:
 
 
 def sync_records(v: View, cwd: Path, make: Callable[[Path], Records]) -> tuple[list[dict[str, Any]], list[str]]:
-    """課題と PR の本文の進捗の節を、ステートマシンの終了のマーカーから書き直す。書けなかった保存先は誤りに載せる。
+    """課題と PR の本文の進捗のセクションを、ステートマシンの終了のマーカーから書き直す。書けなかった保存先は誤りに載せる。
 
     `make` は保存先を作る（`run.Env.records`）。
     """

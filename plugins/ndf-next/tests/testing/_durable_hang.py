@@ -31,7 +31,7 @@ def perform(act: int) -> int:
     with LOG.open("a") as f:
         f.write(f"{act}\n")
     if act == HANG_AT:
-        threading.Event().wait()  # 落とされるまで止まる（後片付けの猶予を与えない落ち方を待つ）
+        threading.Event().wait()  # 落とされるまで止まる（クリーンアップの猶予を与えない落ち方を待つ）
     return act * 10
 
 

@@ -341,7 +341,7 @@ def _le_raise(*args: object) -> None:
 def test_run_localenv_not_applicable(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(localenv, "target", lambda p: None)
     got = cli_env.run_localenv("t", argparse.Namespace(action="setup", worktree=None, cwd=Path("/")))
-    assert got == _le_ok("適用外（設定か、その節が無い）")
+    assert got == _le_ok("適用外（設定か、そのセクションが無い）")
 
 
 def test_run_localenv_setup_and_aim(monkeypatch: pytest.MonkeyPatch) -> None:

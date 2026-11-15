@@ -208,7 +208,7 @@ claude のアカウントを 2 つ以上登録しておくと、利用上限で�
 ## カットポイントの引継ぎ文書と ndf-next はスクリプトで作る
 
 **conductor は引継ぎ文書の「今の会話の進み」の表と `ndf-next` の文面を手で書かない。**
-引継ぎ文書の保存先（メインディレクトリの `.ndf/handoff/<名>.md`）・名・節の形・規則は [handoff.md](handoff.md) にある。
+引継ぎ文書の保存先（メインディレクトリの `.ndf/handoff/<名>.md`）・名・セクションの形・規則は [handoff.md](handoff.md) にある。
 `scripts/sprint-state.py` が、スプリント状態ファイル `sprint-state.json`（プランの出力先に置く）から作る。LLM は呼ばない。同じパスに別の形の JSON（`ndf progress new` の目録など）があると、`init` は上書きせずに終了コード 1 で止まる。
 
 例: セッション 7 の実装 3 本と開発版・本番を流す。
@@ -222,10 +222,10 @@ claude のアカウントを 2 つ以上登録しておくと、利用上限で�
    - `ndf relay context record --event 引継ぎ開始 --work "<課題番号の並び>"`（文書を書き始める前に打つ。引継ぎの期間の起点になる。hook に止められて切るときは hook が打ったので打たない。[context-window.md](context-window.md) の「判定と再起動を記録する」）
    - `handoff.py init <名> --title <表示名>`（無ければテンプレートから作る。あれば変えない）
    - `sprint-state.py update <sprint-state.json> [--done <done>] [--next <plan.json>=<行の「次」>]`（done と報告から状態・PR・秒・費用を埋める。何度走らせても同じ）
-   - `sprint-state.py render <sprint-state.json> <引継ぎ文書> --section 今の会話の進み`（節の本文だけを置き換える。新しいセッションなら `--demote 前の会話の進み --heading "今の会話の進み（<時刻>）"` で今の節を下げて新しい節を足す）
+   - `sprint-state.py render <sprint-state.json> <引継ぎ文書> --section 今の会話の進み`（セクションの本文だけを置き換える。新しいセッションなら `--demote 前の会話の進み --heading "今の会話の進み（<時刻>）"` で今のセクションを下げて新しいセクションを足す）
    - `sprint-state.py get <sprint-state.json> [--field <JSON Pointer>]`（読むだけ。計画ごとの状態と、最初の終わっていない計画の次の欄を `next` に返す。状態ファイルをその場の Python の 1 行で読み直さない）
-   - `sprint-state.py next <sprint-state.json> --doc <引継ぎ文書> --replace`（「次に実行するコマンド」の節を置き換え、同じ `ndf-next` のブロックを最後の応答に出す）
-   - `handoff.py check <名> --trim`（「前の会話の進み」を履歴へ移し、節の形と 300 行の上限を確かめる。1 か 5 のときの扱いは [handoff.md](handoff.md) の「作る・更新する」）
+   - `sprint-state.py next <sprint-state.json> --doc <引継ぎ文書> --replace`（「次に実行するコマンド」のセクションを置き換え、同じ `ndf-next` のブロックを最後の応答に出す）
+   - `handoff.py check <名> --trim`（「前の会話の進み」を履歴へ移し、セクションの形と 300 行の上限を確かめる。1 か 5 のときの扱いは [handoff.md](handoff.md) の「作る・更新する」）
 
 **本番へのリリースの後は、カットポイントの呼び出しを本番のキューと同じバックグラウンドの Bash で続けて流す。** 流す前に conductor が `handoff.py init` を打ち、本番の後の「現在地」と「次にやること」を文書へ書く（パイプラインの中では書き直せない）。`check` が 1 か 5 ならパイプラインはブロックを出さずに止まり、conductor が完了の通知で終了コードを受けて扱ってからブロックを出す。リリース承認ゲートの承認から次のセッションの起動までに、conductor が組み立てる文は無くなる。conductor は完了の通知を受けたら `ndf relay notice` のアナウンスと、出力の `ndf-next` のブロックをそのまま出す。ラッパーがプラグインを本番のバージョンへ更新し、次のセッションを起動する。本番のキューは、目録（`$O/sprint.json`）の `本番` のステージの `command` に `--done` を足したものである（例の `9` はステージの番号）。
 
@@ -246,7 +246,7 @@ python3 $H check $N --trim >/dev/null && sed -n '/^```ndf-next/,/^```$/p' $DOC
 **再開したセッションの「復元完了」は hook が打つ。** 引継ぎ文書で始まったセッションで、エントリポイントの Skill を除く最初の工程を起動したときに 1 回だけ書き、復元の期間の終わりになる（[context-window.md](context-window.md) の「判定と再起動を記録する」）。conductor は打たない。hook が止めた後の「引継ぎ開始」も、ラッパーの下では hook が打つ。上の 3 の `record --event 引継ぎ開始` は、カットポイントで自分で切るときに打つ。`sprint-state.py next` は `ndf-next` を出すたびに判定「再起動」を記録する（理由は `--reason`。既定は直前の拒否の理由、無ければ現行方式はカットポイント・試行方式は手動）。
 
 `sprint-state.py status <sprint-state.json>` は端末向けに 1 行ずつ（スプリント・状態・次）を出す。
-節が見つからないときは文書を変えずに `"status": "stopped"` と理由を返す。
+セクションが見つからないときは文書を変えずに `"status": "stopped"` と理由を返す。
 
 ## 落ちたときの続け方
 

@@ -150,7 +150,7 @@
             "items": {
               "type": "string"
             },
-            "description": "詳細レビューを通らない節（scope）"
+            "description": "詳細レビューを通らないセクション（scope）"
           },
           "id": {
             "type": "string",

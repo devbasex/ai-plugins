@@ -27,7 +27,7 @@
         "target": {"type": "string", "minLength": 1, "description": "届ける先"},
         "kind": {"enum": ["auto", "manual"], "description": "マージで自動で届くか、手で届けるか"},
         "trigger": {"type": "string", "minLength": 1, "description": "届ける契機"},
-        "channel": {"enum": ["production", "base", null], "description": "動くマージの宛先（本番のブランチ・ベースブランチ）"},
+        "channel": {"enum": ["production", "base", null], "description": "動くマージ先（本番のブランチ・ベースブランチ）"},
         "branch": {"anyOf": [{"$ref": "#/properties/branch"}, {"type": "null"}], "description": "channel でないブランチで動く行のブランチ"},
         "versioned": {"type": "boolean"},
         "production": {"type": ["boolean", "null"]},

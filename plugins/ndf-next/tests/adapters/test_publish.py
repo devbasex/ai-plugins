@@ -164,8 +164,8 @@ def test_publisher_scrubs_a_target_of_unknown_visibility_like_a_public_one() -> 
      ("git@gitlab.corp.example.co.jp", False), ("noreply@corp.example.co.jp", False), ("x@evil-users.noreply.github.com.example", False)],
 )  # fmt: skip
 def test_only_confirmed_public_emails_stay_on_a_public_target(email: str, kept: bool) -> None:
-    # ローカル部（git・noreply）だけでは許さず、公開してよいと確かめた宛先だけを残す
-    got = publish.scrub(f"宛先 {email} へ", True)
+    # ローカル部（git・noreply）だけでは許さず、公開してよいと確かめたアドレスだけを残す
+    got = publish.scrub(f"アドレス {email} へ", True)
     assert (email in got.text) is kept
 
 

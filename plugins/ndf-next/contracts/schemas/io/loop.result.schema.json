@@ -30,7 +30,7 @@
         },
         "head": {
           "type": "string",
-          "description": "回答を記録した PR の先端（answer）"
+          "description": "回答を記録した PR の HEAD（answer）"
         },
         "answer": {
           "type": "string",
@@ -201,7 +201,7 @@
               "string",
               "null"
             ],
-            "description": "名前の節（design-tests）"
+            "description": "名前のセクション（design-tests）"
           },
           "renamed_to": {
             "type": "string",

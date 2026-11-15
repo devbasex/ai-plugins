@@ -225,7 +225,7 @@ def _material(p: argparse.ArgumentParser) -> None:
 
 def _answer_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--answer", choices=approval_decide.ANSWERS, required=True)
-    p.add_argument("--presented", required=True, help="提示した先端の SHA（present の outputs.head）")
+    p.add_argument("--presented", required=True, help="提示した HEAD の SHA（present の outputs.head）")
     p.add_argument(
         "--by", required=True, choices=trail.BY_CHOICES, help="回答した担い手（利用者 user / MVV 判定 mvv。迂回は user だけを数える）"
     )

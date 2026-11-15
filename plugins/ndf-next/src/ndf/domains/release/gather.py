@@ -1,9 +1,9 @@
 """承認資料と版上げの材料を、git と GitHub から集める。
 
-- 変わったファイルと含む PR は `<前のリリース>..<ベースブランチ>` の範囲から読む（前のリリースは本番ブランチの先端）
+- 変わったファイルと含む PR は `<前のリリース>..<ベースブランチ>` の範囲から読む（前のリリースは本番ブランチの HEAD）
 - 含む PR の題と CI の結論は、GraphQL のエイリアスで 1 回のクエリにまとめて読む（PR ごとに 1 回ずつ呼ばない）。
   CI の結論は各 PR の最後のコミットの `statusCheckRollup` で、手元の検査の状態やレーンの記録を読まない（#2655）
-- 出し済みのバージョンは、本番ブランチの先端のプラグインの定義のバージョンと、origin のタグのバージョンから読む（ベースブランチの定義のバージョンを
+- 出し済みのバージョンは、本番ブランチの HEAD のプラグインの定義のバージョンと、origin のタグのバージョンから読む（ベースブランチの定義のバージョンを
   そのまま出すバージョンにしない。#2554）
 """
 
@@ -28,7 +28,7 @@ PULL_SELECTION = (
 
 
 class Range(NamedTuple):
-    """リリースの範囲。`since` は前のリリース（本番ブランチの先端）、`until` はベースブランチの先端。"""
+    """リリースの範囲。`since` は前のリリース（本番ブランチの HEAD）、`until` はベースブランチの HEAD。"""
 
     since: str
     until: str
@@ -78,7 +78,7 @@ def included(repo_git: git_mod.Git, span: Range, production: str) -> list[int]:
 
 
 def _production_version(repo_git: git_mod.Git, plugin: plugins_mod.Plugin, production_ref: str) -> list[str]:
-    """本番ブランチの先端のプラグインの定義（先頭）のバージョン。本番ブランチにまだ定義が無ければ空。"""
+    """本番ブランチの HEAD のプラグインの定義（先頭）のバージョン。本番ブランチにまだ定義が無ければ空。"""
     path = f"{plugin.dir}/{plugins_mod.MANIFESTS[0].as_posix()}"
     if not repo_git.run("ls-tree", "--name-only", git_mod.END_OF_OPTIONS, production_ref, path).strip():
         return []

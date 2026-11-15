@@ -216,7 +216,7 @@
         }
       ],
       "default": null,
-      "description": "解析（M7）が書いた入力の sha256・ブランチ・書いた節の記録。人は書かない"
+      "description": "解析（M7）が書いた入力の sha256・ブランチ・書いたセクションの記録。人は書かない"
     },
     "test_duration": {
       "anyOf": [

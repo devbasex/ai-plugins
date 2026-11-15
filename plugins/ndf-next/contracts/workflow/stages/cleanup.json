@@ -21,7 +21,7 @@
   },
   "metadata": {
     "ndf": {
-      "stage": "後片付け",
+      "stage": "クリーンアップ",
       "phase": "release",
       "inputs": [
         "worktree",

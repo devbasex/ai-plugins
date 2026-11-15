@@ -76,7 +76,7 @@ def record_fallback(routes: Sequence[str]) -> str:
 
 
 def closing_pace(pace: str) -> str:
-    """閉じが読む進め方の節。MVV の進め方（fast・auto）はそのまま、ほかは normal。"""
+    """閉じが読む進め方のセクション。MVV の進め方（fast・auto）はそのまま、ほかは normal。"""
     return pace if pace in MVV_PACES else "normal"
 
 

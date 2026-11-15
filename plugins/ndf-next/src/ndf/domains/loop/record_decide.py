@@ -11,7 +11,7 @@
 | `mode-decided` | `lap`・`mode`・`basis` | モードを根拠つきで決めた（#2923） |
 | `issue-excluded` | `lap`・`issue`・`reason` | 周の途中で課題を外した（#2788）。外すとモードを決め直す |
 | `issues-created` | `lap`・`issues` | 周の中で起票した課題（#2132） |
-| `gate-shown` | `lap`・`pr`・`head` | 設計承認ゲートを出した時点の PR の先端 |
+| `gate-shown` | `lap`・`pr`・`head` | 設計承認ゲートを出した時点の PR の HEAD |
 | `gate-answered` | `lap`・`pr`・`answer`・`head`・`note` | ゲートの回答。`request_changes` は変更要求として残る（#2400） |
 | `version-shipped` | `lap`・`version` | その周でバージョンをリリースした |
 | `lap-closed` | `lap`・`outcome`・`reason` | 周を締めた |
@@ -94,7 +94,7 @@ class Lap:
         return tuple(n for n in self.issues if n not in out)
 
     def gate_head(self, pr: int) -> Optional[str]:
-        """PR の設計承認ゲートを出した時点の先端（最後に出したもの）。出していなければ None。"""
+        """PR の設計承認ゲートを出した時点の HEAD（最後に出したもの）。出していなければ None。"""
         heads = [h for p, h in self.gates if p == pr]
         return heads[-1] if heads else None
 

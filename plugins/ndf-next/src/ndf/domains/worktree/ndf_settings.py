@@ -23,7 +23,7 @@ from ndf.domains.settings import renames
 # 読める設定のバージョン
 VERSION = 1
 # 個人設定から重ねる項目と、その値の型
-# 節の名前（依存の用意・ローカルの動作検証・テスト環境）
+# セクションの名前（依存の用意・ローカルの動作検証・テスト環境）
 DEPS = "deps"
 LOCALENV = "localenv"
 TESTENV = "testenv"
@@ -77,13 +77,13 @@ class NdfSettings:
         return value if isinstance(value, str) and value else None
 
     def section(self, name: str) -> Optional[dict[str, Any]]:
-        """節（`deps`・`localenv`・`testenv` など）の値。無い・オブジェクトでなければ `None`。"""
+        """セクション（`deps`・`localenv`・`testenv` など）の値。無い・オブジェクトでなければ `None`。"""
         value = self.raw.get(name)
         return value if isinstance(value, dict) else None
 
     @property
     def branch_flow(self) -> Optional[dict[str, Any]]:
-        """リリース方式の節（`branch_flow`）。無い・オブジェクトでなければ `None`。"""
+        """リリース方式のセクション（`branch_flow`）。無い・オブジェクトでなければ `None`。"""
         return self.section("branch_flow")
 
     @property

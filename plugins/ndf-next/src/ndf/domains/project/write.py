@@ -206,7 +206,7 @@ def merge_project(
     analysis: dict[str, Any],
     written_before: dict[str, Any],
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    """新しい `project.json` と出力の行。`analysis` は `written` を除いた節（ここで指紋を作る）。`written_before` は前の指紋。"""
+    """新しい `project.json` と出力の行。`analysis` は `written` を除いたセクション（ここで指紋を作る）。`written_before` は前の指紋。"""
     doc = dict(existing) if existing else {"version": 1}
     written, rows = {}, []
     items = obj(measure.get("items"))

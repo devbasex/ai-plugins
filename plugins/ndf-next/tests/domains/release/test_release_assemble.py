@@ -154,16 +154,16 @@ def _develop_ahead(tmp_path: Path) -> Path:
 
 
 def test_assemble_plans_from_base_tip_even_when_started_on_production(tmp_path: Path) -> None:
-    """既定ブランチ（main）で起動しても、バージョンは範囲の先端（develop）から読んで計画する（バージョンが逆行しない）。"""
+    """既定ブランチ（main）で起動しても、バージョンは範囲の HEAD（develop）から読んで計画する（バージョンが逆行しない）。"""
     work = _develop_ahead(tmp_path)
     built = assemble.assemble(work, _hub(), assemble.Target("production", "patch", "develop", "main"))
     assert built.version == "1.3.1"
 
 
 def test_collect_refuses_when_head_is_not_base_tip(tmp_path: Path) -> None:
-    """collect はworktreeが範囲の先端でなければ止まる（ほかのブランチのバージョンから計画しない）。"""
+    """collect はworktreeが範囲の HEAD でなければ止まる（ほかのブランチのバージョンから計画しない）。"""
     work = _develop_ahead(tmp_path)
-    with pytest.raises(assemble.AssembleError, match="origin/develop の先端でない"):
+    with pytest.raises(assemble.AssembleError, match="origin/develop の HEAD でない"):
         assemble.collect(work, _hub(), assemble.Target("production", "patch", "develop", "main"))
 
 

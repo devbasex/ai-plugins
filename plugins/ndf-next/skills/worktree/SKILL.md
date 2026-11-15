@@ -22,7 +22,7 @@ allowed-tools:
 | レビュー worktree | `cross-review` と `cross-refactoring` が一時的に使うもの。システムの一時ディレクトリに置く |
 
 この Skill が扱うのは開発 worktree だけである。レビュー worktree は
-それぞれの Skill が作って捨てるため、置く場所も後片付けの主体も異なる。
+それぞれの Skill が作って捨てるため、置く場所もクリーンアップの主体も異なる。
 
 ## メインディレクトリを編集してよい場合
 
@@ -305,8 +305,8 @@ bash "$SCRIPTS/worktree-deps.sh" prepare "$WT" --if-unprepared  # 用意が済�
 
 用意が済むと worktree ごとの git の管理ディレクトリにマーカー（`ndf-deps`）を書く。マーカーは用意した時の HEAD と設定の
 中身を持つ。使い回す worktree は、HEAD も設定も変わっていなければやり直さない（別の commit へ同期した後はやり直す）。
-このやり直しでは、既にある `copy_from_main` / `copy_as_real` の宛先はメインディレクトリと食い違っていてもそのまま使い、
-無い宛先の複製と `run` だけを走らせる（`run` が入れ替えた依存物や、メインディレクトリ側の更新で止めない）。
+このやり直しでは、既にある `copy_from_main` / `copy_as_real` の複製先はメインディレクトリと食い違っていてもそのまま使い、
+無い複製先の複製と `run` だけを走らせる（`run` が入れ替えた依存物や、メインディレクトリ側の更新で止めない）。
 コミットしていない lock ファイルの変更などで用意し直すときは、引数なしの `prepare` を打つ。
 
 **`copy_from_main` に置くのは、worktree の中でその場で書き換えないパスだけにする。** ハードリンクで複製するため、
@@ -353,8 +353,8 @@ bash "$TE" test "$WT" --kind stateful       # 実行したコマンドの終了�
 bash "$TE" down "$WT"                       # 破棄し、割り当てを解放する。ボリュームも消す（消すのは既定で、戻せない）
 ```
 
-**テストのステップは、止まっているテスト環境を自動で起動する。** `/ndf:merged` の後片付けは worktree を外す前に破棄する。
-手で worktree を消すときは先に `down "$WT"` を打つ。worktree が消えた割り当ては、後片付けとスロットの枯渇のときに
+**テストのステップは、止まっているテスト環境を自動で起動する。** `/ndf:merged` のクリーンアップは worktree を外す前に破棄する。
+手で worktree を消すときは先に `down "$WT"` を打つ。worktree が消えた割り当ては、クリーンアップとスロットの枯渇のときに
 NDF が回収する（`reclaim`）。
 ボリュームを残すのは `.ndf/worktree.json` の `testenv.discard_volumes` に `false` を定義したときだけで、設定より優先して
 消すときは `--volumes` を付ける。データを残して止めるのは `stop "$WT"` である。起動方・破棄の担い手・回収の結果の読み方・

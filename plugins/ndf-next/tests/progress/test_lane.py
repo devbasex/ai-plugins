@@ -379,7 +379,7 @@ def test_touch_overlap_errors_as_they_are_now(view, rows, errors):
             {"a": _lane_rows("pending"), "b": _lane_rows("pending"), "c": _lane_rows("pending")},
             [],
         ),
-        # 終わった行も鎖の節になる（a/r1 は完了でも b はその後で、a/r2 とは同時に動き得る）
+        # 終わった行も鎖のセクションになる（a/r1 は完了でも b はその後で、a/r2 とは同時に動き得る）
         (
             _view(_spec("a"), _spec("b", after=("a/r1",))),
             {"a": _lane_rows("completed", "pending"), "b": _lane_rows("pending")},

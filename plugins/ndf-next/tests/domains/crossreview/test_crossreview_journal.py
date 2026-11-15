@@ -22,14 +22,14 @@ def _row(fid: str, text: str, round_no: int, outcome: str = fin.UNRESOLVED, reas
 def test_enter_numbers_new_findings_per_round_and_ignores_duplicates_and_blanks() -> None:
     journal = drive.FindingJournal()
     raised = [
-        {"text": " 一つ目 ", "by": "codex", "section": "a.md#節"},
+        {"text": " 一つ目 ", "by": "codex", "section": "a.md#セクション"},
         {"text": "一つ目", "by": "kiro"},
         {"text": "  ", "by": "kiro"},
         {"text": 3, "by": "kiro"},
         {"text": "二つ目", "by": "kiro", "section": " "},
     ]
     assert journal.enter(1, raised) == frozenset({"一つ目", "二つ目"})
-    assert list(journal.rows.values()) == [_row("r1-1", "一つ目", 1, section="a.md#節"), _row("r1-2", "二つ目", 1, by="kiro")]
+    assert list(journal.rows.values()) == [_row("r1-1", "一つ目", 1, section="a.md#セクション"), _row("r1-2", "二つ目", 1, by="kiro")]
 
 
 def test_enter_skips_deferred_findings_and_reopens_fixed_ones() -> None:

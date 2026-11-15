@@ -49,10 +49,10 @@ def read_ndf_settings(cwd: Path) -> tuple[Path, object] | None:
 
 
 def test_section(cwd: Path) -> dict[str, object]:
-    """設定（`.ndf/project.json`）の `test` の節。設定が無い・読めない・形が違えば空の辞書。"""
+    """設定（`.ndf/project.json`）の `test` のセクション。設定が無い・読めない・形が違えば空の辞書。"""
     try:
         found = read_ndf_settings(cwd)
-    except NdfSettingsError:  # 読めない設定は節が無いとして扱う
+    except NdfSettingsError:  # 読めない設定はセクションが無いとして扱う
         return {}
     data = found[1] if found is not None else None
     test = data.get("test") if isinstance(data, dict) else None

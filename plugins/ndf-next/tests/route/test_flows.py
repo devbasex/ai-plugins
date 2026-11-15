@@ -55,7 +55,7 @@ def test_push_rejected_twice_goes_to_fix_push():
 
 
 def test_design_merge_returns_to_base_sync_on_conflict():
-    """#2273: 設計 PR のマージのプランは、宛先との衝突（DIRTY）で止まらず、マージ → 直し → push → 確かめ直しへ戻る。"""
+    """#2273: 設計 PR のマージのプランは、マージ先との衝突（DIRTY）で止まらず、マージ → 直し → push → 確かめ直しへ戻る。"""
     script = {"conflict-check": [stopped("base_conflict")], "base-sync": [stopped("base_conflict")], "merge-gate": [gate()]}
     visited, state = walk(plan_of("design_merge"), script, answers=["approved"])
     assert visited == ["conflict-check", "base-sync", "fix-base", "push", "conflict-check", "merge-gate", "merge"]
@@ -63,7 +63,7 @@ def test_design_merge_returns_to_base_sync_on_conflict():
 
 
 def test_conflicted_pr_is_synced_instead_of_waiting_for_ci():
-    """#2752・#2680: 衝突して CI の始まらない PR を待たない。CI の待ちの前に衝突を確かめ、宛先のマージへ進む。"""
+    """#2752・#2680: 衝突して CI の始まらない PR を待たない。CI の待ちの前に衝突を確かめ、マージ先のマージへ進む。"""
     for purpose in ("implement", "check", "close"):
         visited, state = walk(plan_of(purpose), {"conflict-check": [stopped("base_conflict")]})
         i = visited.index("conflict-check")
@@ -97,7 +97,7 @@ def test_merge_plan_fixes_non_test_check_failures_and_pushes():
 
 
 def test_plan_to_spec_plan_delivers_the_spec_through_pr_and_merge():
-    """#3474: 確定仕様化のプランは、書いた確定仕様を作業場所から push → PR → CI → マージで宛先へ届ける。"""
+    """#3474: 確定仕様化のプランは、書いた確定仕様を作業場所から push → PR → CI → マージでマージ先へ届ける。"""
     visited, state = walk(plan_of("plan_to_spec"), {})
     assert visited == ["work-start", "work", "changes-check", "push", "pr", "conflict-check", "ci", "merge"]
     assert state.status == OK

@@ -2,7 +2,7 @@
 
 - 書く時点は、リリースの PR を本番ブランチへマージした後（`release-steps merge` の後に workflow が打つ）。publish は
   タグと GitHub Release だけを持ち、含めた PR の範囲を持たない
-- 含めた PR は、リリースの PR のコミットを先端から first-parent で辿った件名から、承認資料と同じ規則
+- 含めた PR は、リリースの PR のコミットを HEAD から first-parent で辿った件名から、承認資料と同じ規則
   （`included_decide`）で決める（承認資料の範囲 `<前のリリース>..<ベースブランチ>` と同じ範囲）
 - 同じバージョンのリリース記録が既にある PR には書かない（打ち直しで重ねない）。既にあるかは信用する書き手
   （write 以上の権限）の記録だけで見る。信用しない書き手のコメントはマーカーがあっても読み飛ばし、壊れていても止まらない。
@@ -59,7 +59,7 @@ def included_of(hub: GitHub, pull: Pull, production: str) -> list[int]:
     """リリースの PR `pull` に含めた PR の番号（小さい順）。マージコミットが読めなければ `RecordError`。
 
     PR のコミットは `pulls/<番号>/commits`（250 件で切れる）ではなく、マージコミットの第 1 親（マージ前の本番
-    ブランチ）からリリースの先端までの compare をページ送りで読み切る。
+    ブランチ）からリリースの HEAD までの compare をページ送りで読み切る。
     """
     if not pull.merge_sha:
         raise RecordError(f"#{pull.number} のマージコミットが読めず、含めた PR を決められない")

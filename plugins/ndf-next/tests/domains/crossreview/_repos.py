@@ -42,7 +42,7 @@ def make_repos(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Repos:
     sh(tmp_path, "init", "-q", "--bare", "--initial-branch=main", str(origin))
     main = tmp_path / "main"
     sh(tmp_path, "clone", "-q", str(origin), str(main))
-    commit(main, "doc.md", "# 設計\n\n## 節 A\n\n本文\n", "初め")
+    commit(main, "doc.md", "# 設計\n\n## セクション A\n\n本文\n", "初め")
     sh(main, "push", "-q", "origin", "HEAD:refs/heads/main", f"HEAD:refs/heads/{BRANCH}")
     sh(main, "fetch", "-q", "origin")
     other = tmp_path / "other"

@@ -155,7 +155,7 @@
           },
           "head": {
             "type": "string",
-            "description": "先端（list）"
+            "description": "HEAD（list）"
           },
           "prunable": {
             "type": "boolean",
@@ -203,7 +203,7 @@
           },
           "sha": {
             "type": "string",
-            "description": "ブランチの先端（merged の branch）"
+            "description": "ブランチの HEAD（merged の branch）"
           },
           "restore": {
             "type": "string",
@@ -211,7 +211,7 @@
           },
           "released": {
             "type": "boolean",
-            "description": "先端が本番に出たか（trash）"
+            "description": "HEAD が本番に出たか（trash）"
           },
           "written": {
             "type": "boolean",

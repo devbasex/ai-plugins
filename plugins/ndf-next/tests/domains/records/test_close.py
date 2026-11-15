@@ -1,4 +1,4 @@
-"""スプリントを閉じる条件（#2293）・後片付けの工程の記録（#1893）・gws の認証（#2067）。"""
+"""スプリントを閉じる条件（#2293）・クリーンアップの工程の記録（#1893）・gws の認証（#2067）。"""
 
 from __future__ import annotations
 
@@ -29,14 +29,14 @@ def test_closable_without_a_record_depends_on_require() -> None:
 
 
 def _body(mark: str) -> str:
-    return f"本文\n\n{ISSUE_SECTION}\n\n- [x] 実装 — 2026-11-14 22:08\n- [{mark}] 後片付け\n- [ ] デプロイ\n{SECTION_END}\n"
+    return f"本文\n\n{ISSUE_SECTION}\n\n- [x] 実装 — 2026-11-14 22:08\n- [{mark}] クリーンアップ\n- [ ] デプロイ\n{SECTION_END}\n"
 
 
 def test_mark_stage_checks_only_the_cleanup_line_once() -> None:
     got = cd.mark_stage(_body(" "), cd.CLEANUP_STAGE, "2026-11-15 01:00")
-    assert got is not None and "- [x] 後片付け — 2026-11-15 01:00" in got and "- [ ] デプロイ" in got
+    assert got is not None and "- [x] クリーンアップ — 2026-11-15 01:00" in got and "- [ ] デプロイ" in got
     assert cd.mark_stage(got, cd.CLEANUP_STAGE, "later") is None
-    assert cd.mark_stage("進行の節が無い", cd.CLEANUP_STAGE, "x") is None
+    assert cd.mark_stage("進行のセクションが無い", cd.CLEANUP_STAGE, "x") is None
 
 
 def test_gws_client_secret_only_is_not_authenticated() -> None:
@@ -73,7 +73,7 @@ def test_record_cleanup_stage_records_skips_and_fails_per_issue() -> None:
     hub = Hub(bodies={1: _body(" "), 2: _body("x"), 3: ""}, closing={10: [1, 2], 11: [2, 3]}, broken={3})
     got = cleanup_stage.record_cleanup_stage(hub, [11, 10])  # type: ignore[arg-type]
     assert [(i["issue"], i["result"]) for i in got] == [(1, "recorded"), (2, "skipped"), (3, "failed")]
-    assert hub.patched == [1] and "- [x] 後片付け" in hub.bodies[1]
+    assert hub.patched == [1] and "- [x] クリーンアップ" in hub.bodies[1]
 
 
 def test_item_name_uses_the_issue_and_falls_back_to_the_pr() -> None:

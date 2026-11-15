@@ -18,7 +18,7 @@ def _commit(sha: str, message: str, *parents: str) -> dict:
     return {"sha": sha, "commit": {"message": message}, "parents": [{"sha": p} for p in parents]}
 
 
-# リリースの PR のコミット（先端から first-parent: 版上げ → #12 → #11 → 本番から戻す PR #9 → PR の外）
+# リリースの PR のコミット（HEAD から first-parent: 版上げ → #12 → #11 → 本番から戻す PR #9 → PR の外）
 COMMITS = [
     _commit("r" * 40, "Release: ndf v1.2.4\n\n本文", "d2" * 20),
     _commit("d2" * 20, "Merge pull request #12 from o/feat/b", "d1" * 20, "x" * 40),
@@ -72,7 +72,7 @@ def test_dev_or_unmerged_release_writes_nothing() -> None:
 
 
 def test_range_is_read_from_the_merge_parent_beyond_250_commits() -> None:
-    # pulls/<番号>/commits の 250 件で切れず、マージ前の本番ブランチから先端までを読み切る
+    # pulls/<番号>/commits の 250 件で切れず、マージ前の本番ブランチから HEAD までを読み切る
     hub = _hub()
     filler = [_commit(f"{i:040d}", "c", f"{i + 1:040d}") for i in range(300)]
     hub.commits_of["r" * 40] = [*COMMITS[:-1], _commit("s" * 40, "Merge pull request #9 from o/main", f"{0:040d}", "m" * 40), *filler]

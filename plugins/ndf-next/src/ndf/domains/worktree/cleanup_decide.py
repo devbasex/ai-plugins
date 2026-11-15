@@ -42,7 +42,7 @@ REASONS = {
 class PullState:
     """判断に要る PR の状態（`adapters.github.Pull` の `state`・`merged`・`merge_sha` と同じ語）。
 
-    `merge_sha` は判断には使わず、消すときに退避のジャーナルへ書く（squash のマージでは先端と別）。
+    `merge_sha` は判断には使わず、消すときに退避のジャーナルへ書く（squash のマージでは HEAD と別）。
     """
 
     state: str

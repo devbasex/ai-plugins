@@ -135,7 +135,7 @@ python3 "$SKILL_DIR/scripts/external-ai.py" run codex --phase review \
 
 **原因**: `--dangerously-bypass-approvals-and-sandbox` を付け忘れ、かつ環境が user namespace 非対応。
 
-**対処**: フラグを追加して再実行する。ホストで有効化する方法は「サンドボックス制約」節を参照。
+**対処**: フラグを追加して再実行する。ホストで有効化する方法は「サンドボックス制約」セクションを参照。
 
 ### Q3. 「ファイルを読めません」と返ってくる
 

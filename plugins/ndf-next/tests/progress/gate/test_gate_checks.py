@@ -71,7 +71,7 @@ def test_the_note_shows_the_boundary_and_why_the_gate_was_not_skipped():
 
 
 def test_current_an_empty_verdict_lists_none_under_the_reasons_and_the_boundary():
-    # I-015 の現状固定: 空の箇条書きは「- （無し）」の 1 行。省かない理由が無ければ節ごと載せない
+    # I-015 の現状固定: 空の箇条書きは「- （無し）」の 1 行。省かない理由が無ければセクションごと載せない
     text = gate.note("design", {"verdict": "follow"}, [])
     assert text == (
         "## MVV 判定（設計 Pull Request のマージ）\n\n- 判定: follow\n\n### 理由\n\n- （無し）\n\n### レッドライン\n\n- （無し）\n"

@@ -2,9 +2,9 @@
 
 手順（`assemble`）:
 
-1. origin の本番ブランチとベースブランチをマージ、範囲（本番ブランチの先端..ベースブランチの先端）を決める
+1. origin の本番ブランチとベースブランチをマージ、範囲（本番ブランチの HEAD..ベースブランチの HEAD）を決める
 2. 変わったファイルからバージョンを上げるプラグインと次のバージョンを決める。上げるものが無ければ何もせずに `not_applicable`
-3. ベースブランチの先端から `release/v<バージョン>` を作り、バージョンを書き換え、本番のバージョンなら CHANGELOG に節を足し、設定の手順
+3. ベースブランチの HEAD から `release/v<バージョン>` を作り、バージョンを書き換え、本番のバージョンなら CHANGELOG にセクションを足し、設定の手順
    （トークン消費の記録など）を流す
 4. 1 つのコミットにして push し、リリースの PR（本番は本番ブランチ宛て、開発版はベースブランチ宛て）を作り、承認資料を
    PR の本文に書く
@@ -60,7 +60,7 @@ class Target:
 
     @property
     def pr_base(self) -> str:
-        """リリースの PR の宛先（本番は本番ブランチ、開発版はベースブランチ）。"""
+        """リリースの PR のマージ先（本番は本番ブランチ、開発版はベースブランチ）。"""
         return self.production if self.is_production else self.base
 
 
@@ -132,7 +132,7 @@ def _open_pr(hub: GitHub, branch: str, base: str, title: str, body: str) -> tupl
 
 
 def _facts(root: Path, hub: GitHub, target: Target, span: gather.Range) -> materials_decide.Facts:
-    """worktree（範囲の先端を取り出したもの）から材料を読む。上げるものが無ければ `NothingToRelease`。"""
+    """worktree（範囲の HEAD を取り出したもの）から材料を読む。上げるものが無ければ `NothingToRelease`。"""
     repo_git = git_mod.Git(root)
     decl = decl_mod.load(root)
     found = plugins_mod.load(root)
@@ -160,18 +160,18 @@ def _facts(root: Path, hub: GitHub, target: Target, span: gather.Range) -> mater
 def collect(root: Path, hub: GitHub, target: Target) -> materials_decide.Facts:
     """承認資料の材料（版上げの計画を含む。ブランチは作らない）。上げるものが無ければ `NothingToRelease`。
 
-    設定・マーケットプレイス・今のバージョンはworktreeから読むため、worktreeの HEAD が範囲の先端（origin のベースブランチ）で
+    設定・マーケットプレイス・今のバージョンはworktreeから読むため、worktreeの HEAD が範囲の HEAD（origin のベースブランチ）で
     なければ `AssembleError` で止まる（ほかのブランチのバージョンから計画するとバージョンが逆行する）。
     """
     repo_git = git_mod.Git(root)
     span = _span(repo_git, target)
     if repo_git.rev_parse("HEAD") != repo_git.rev_parse(span.until):
-        raise AssembleError(f"worktreeの HEAD が {span.until} の先端でない（ベースブランチの先端で打つ）")
+        raise AssembleError(f"worktreeの HEAD が {span.until} の HEAD でない（ベースブランチの HEAD で打つ）")
     return _facts(root, hub, target, span)
 
 
 def assemble(root: Path, hub: GitHub, target: Target) -> Built:
-    """リリースのブランチを組み立てて PR を作る。材料は範囲の先端を取り出してから読む。"""
+    """リリースのブランチを組み立てて PR を作る。材料は範囲の HEAD を取り出してから読む。"""
     repo_git = git_mod.Git(root)
     span = _span(repo_git, target)
     repo_git.run("switch", "--quiet", "--detach", span.until)

@@ -197,7 +197,7 @@ def test_step_outputs_reach_the_plan_result(repo):
 def test_review_gaps_survive_a_later_ok_step(repo):
     """レビューが incomplete と gaps を返しても、後のステップ（CI）が ok ならプランの結果は incomplete のまま gaps を持つ
     （PR #3462 の保留: 設計のプランの review の on_cause incomplete → push-reviewed → CI）。"""
-    gap = {"kind": "unresolved_finding", "name": "r1-1", "reason": "節 A の根拠が無い"}
+    gap = {"kind": "unresolved_finding", "name": "r1-1", "reason": "セクション A の根拠が無い"}
     review = {"tool": "cross-review", "status": "stopped", "summary": "s", "cause": {"kind": "incomplete", "detail": "d"}}
     review |= {"gaps": [gap], "outputs": {"gaps": [gap]}}
     ok_line = json.dumps({"tool": "t", "status": "ok", "summary": "ci"})

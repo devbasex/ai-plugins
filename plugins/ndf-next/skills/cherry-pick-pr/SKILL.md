@@ -183,6 +183,6 @@ git checkout <original-branch>
 ## 関連
 
 - `ndf-policies` — 環境ブランチへの適用原則とブランチ汚染の回避（本 Skill の前提）
-- `/ndf:pr` — 通常のPR作成（宛先はベースブランチ）。環境ブランチ宛は本 Skill に誘導される
+- `/ndf:pr` — 通常のPR作成（マージ先はベースブランチ）。環境ブランチ宛は本 Skill に誘導される
 - `/ndf:merged` — マージ後のブランチ整理と、現ブランチへのベースブランチのマージ
 - `/ndf:deploy` — ブランチ全体を環境へデプロイ（cherry-pickとは別用途）

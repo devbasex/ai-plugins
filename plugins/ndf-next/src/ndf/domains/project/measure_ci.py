@@ -1,4 +1,4 @@
-"""CI と GitHub から測る設定の項目（P3・P4・P6 の PR の宛先・P8 の GitHub の分。#3569。旧い `project_lib/measure_ci.py` と
+"""CI と GitHub から測る設定の項目（P3・P4・P6 の PR のマージ先・P8 の GitHub の分。#3569。旧い `project_lib/measure_ci.py` と
 `lib/ci_workflows.py`・`lib/junit.py` の読み取りの移し先）。
 
 **`gh` へ渡すのは読む要求だけである。** `gh api` は `--method GET` を付けて打ち、artifact はメモリで開く。
@@ -233,7 +233,7 @@ def _test_duration(durations: list[dict[str, Any]], ci_reason: Optional[str]) ->
 
 
 def _measure_merges(gh: Gh) -> tuple[dict[str, int], list[str]]:
-    """閉じた PR の宛先別のマージ数と、本文に出たホスト名。"""
+    """閉じた PR のマージ先別のマージ数と、本文に出たホスト名。"""
     pulls = [p for p in seq(gh.get(f"repos/{gh.repo}/pulls?state=closed&per_page=100")) if isinstance(p, dict)]
     merges: dict[str, int] = {}
     for pr in pulls:
@@ -353,7 +353,7 @@ def measure(tree: Tree, repo: Optional[str], head: Optional[str], deadline: floa
         issues = seq(gh.get(f"repos/{repo}/issues?state=all&per_page=100"))
         out["github_issues"] = sum(1 for i in issues if isinstance(i, dict) and "pull_request" not in i)
     except GhUnavailable as exc:
-        out["notes"].append(f"PR の宛先と GitHub Issues を測れない: {exc}")
+        out["notes"].append(f"PR のマージ先と GitHub Issues を測れない: {exc}")
     return out
 
 

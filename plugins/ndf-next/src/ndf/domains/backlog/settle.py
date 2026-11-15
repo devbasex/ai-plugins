@@ -65,7 +65,7 @@ def check_improved(gh: GitHub, ev: dict[str, Any], base: str) -> Optional[str]:
     if why is not None:
         return why
     if _base_ref(raw) != base:
-        return f"PR #{ev['pr']} の宛先 {_base_ref(raw)} が基底のブランチ {base} でない"
+        return f"PR #{ev['pr']} のマージ先 {_base_ref(raw)} が基底のブランチ {base} でない"
     files = pull_files(gh, ev["pr"])
     if path not in files:
         return f"PR #{ev['pr']} の変更ファイルにテストのファイル {path} が無い"

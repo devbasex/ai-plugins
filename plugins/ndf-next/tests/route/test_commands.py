@@ -23,7 +23,7 @@ _REPO = "devbasex/ai-plugins"
 
 
 def test_conflict_check_reports_dirty_pr_as_base_conflict(tmp_path):
-    """#2752・#2680・#2273: 宛先と衝突した PR（mergeStateStatus が DIRTY）は待たずに base_conflict で返す。"""
+    """#2752・#2680・#2273: マージ先と衝突した PR（mergeStateStatus が DIRTY）は待たずに base_conflict で返す。"""
     step = step_of(plan_of("implement", branch="feat/x"), "conflict-check")
     dirty = fake_bin(tmp_path, "gh", "echo DIRTY")
     assert run_step(step, tmp_path, dirty)["kind"] == "base_conflict"
@@ -50,7 +50,7 @@ def test_done_check_skips_only_when_head_is_merged(tmp_path):
 def test_changes_check_finds_no_changes_since_work_start(tmp_path):
     """#3039・#3474: worker を打つ前の HEAD から変更が無ければ not_applicable（PR を作らない）。変更があれば ok。
 
-    宛先へまだマージされていない（取得し直していない）ブランチの差分は数えない。記録した起点は打ち直しでも上書きしない。起点を読めなければ precondition（変更なしと読まない）。
+    マージ先へまだマージされていない（取得し直していない）ブランチの差分は数えない。記録した起点は打ち直しでも上書きしない。起点を読めなければ precondition（変更なしと読まない）。
     """
     for purpose in ("close", "plan_to_spec"):
         plan = plan_of(purpose, base="develop")
@@ -370,7 +370,7 @@ _RISK = "- [ ] 残リスク: 設計文書に名前の出るテストの検証が
 
 
 def _serve_pull(monkeypatch, head: str, body: str) -> list[dict]:
-    """feat/x の開いた PR 7 番（本文 `body`・先端 `head`）を回答する GitHub。送ったマージの要求の本文を返す並びへ足す。"""
+    """feat/x の開いた PR 7 番（本文 `body`・HEAD `head`）を回答する GitHub。送ったマージの要求の本文を返す並びへ足す。"""
     sent: list[dict] = []
     pull = {
         "number": 7, "state": "open", "merged": False, "body": body, "mergeable_state": "clean",
@@ -455,7 +455,7 @@ def _design_step(tmp_path, step_id):
 
 def test_design_pr_step_keeps_existing_pr_body(tmp_path, monkeypatch):
     """#2853: 設計の出し直しで PR が既にあれば、pr のステップは PR を作り直さず本文を書き換えない
-    （worker が本文の節に足した行が次のループの 1 回で消えない）。設計のプランに本文を組み直すステップは無い。"""
+    （worker が本文のセクションに足した行が次のループの 1 回で消えない）。設計のプランに本文を組み直すステップは無い。"""
     calls = tmp_path / "gh.log"
     gh = fake_bin(tmp_path, "gh", f'echo "$@" >> {shlex.quote(str(calls))}\ncase "$2" in list) echo 7 ;; *) exit 1 ;; esac')
     monkeypatch.setenv("PATH", f"{gh}:{os.environ['PATH']}")

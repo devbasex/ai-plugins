@@ -1,4 +1,4 @@
-"""worktree ごとのテスト環境（設定の `testenv` 節。起動の定義は `localenv.compose_files`）。
+"""worktree ごとのテスト環境（設定の `testenv` セクション。起動の定義は `localenv.compose_files`）。
 
 - `assign`: 環境名・スロット・ポートを決めて割り当て表（`allocations`）へ記録する。スロットが尽きたら回収（`reclaim`）を 1 回挟む
 - `reclaim`: worktree の消えた割り当てのテスト環境を破棄して解放する（判定は `ndf.testing.testenv`）
@@ -9,7 +9,7 @@
   種類に `service` があれば、そのコンテナが worktree を見ているかを先に確かめる（`reach`）
 - `compose_env`: 割り当て済みのテスト環境をコンテナへ渡す値（割り当てを新しく取らない）
 
-設定・`testenv` 節が無いリポジトリでは `target` が `None` を返し、どれも打たない。
+設定・`testenv` セクションが無いリポジトリでは `target` が `None` を返し、どれも打たない。
 """
 
 from __future__ import annotations
@@ -41,7 +41,7 @@ class TestenvError(Exception):
 
 @dataclass(frozen=True)
 class Target:
-    """対象の worktree と、設定の `testenv`・`localenv` 節・割り当て表・起動の手段。"""
+    """対象の worktree と、設定の `testenv`・`localenv` セクション・割り当て表・起動の手段。"""
 
     path: Path
     main_dir: Path
@@ -59,7 +59,7 @@ class Target:
         return real.startswith(self.key + os.sep)
 
     def at(self, *keys: str) -> Any:
-        """節の入れ子の値（無ければ `None`）。"""
+        """セクションの入れ子の値（無ければ `None`）。"""
         value: Any = self.section
         for k in keys:
             value = value.get(k) if isinstance(value, dict) else None
@@ -67,7 +67,7 @@ class Target:
 
 
 def target(path: Path, shell: Optional[container.Shell] = None) -> Optional[Target]:
-    """対象（`path` が worktree の下のディレクトリでも、worktree の根）。設定・節が無ければ `None`。"""
+    """対象（`path` が worktree の下のディレクトリでも、worktree の根）。設定・セクションが無ければ `None`。"""
     loc = repo.locate(Git(path))
     main_dir = loc.main_dir
     decl = ndf_settings.load(main_dir)

@@ -33,12 +33,12 @@
     },
     "last": {
       "type": "string",
-      "description": "書き手が書く節の最後に置く項目の id",
+      "description": "書き手が書くセクションの最後に置く項目の id",
       "default": "request"
     },
     "record_headings": {
       "type": "array",
-      "description": "工程が足す節の見出しの語",
+      "description": "工程が足すセクションの見出しの語",
       "items": {
         "type": "string"
       }

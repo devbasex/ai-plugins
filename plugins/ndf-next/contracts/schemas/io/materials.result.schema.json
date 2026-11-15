@@ -31,7 +31,7 @@
         "required": ["number", "kind", "public_interface", "files", "files_found"],
         "properties": {
           "number": {"type": "integer", "description": "課題の番号"},
-          "kind": {"type": ["string", "null"], "description": "本文の「種類」の節の最初の行。節が無ければ null"},
+          "kind": {"type": ["string", "null"], "description": "本文の「種類」のセクションの最初の行。セクションが無ければ null"},
           "public_interface": {
             "type": "object",
             "additionalProperties": false,
@@ -52,7 +52,7 @@
                 "path": {"type": "string", "description": "候補のパス"},
                 "exists": {"type": "boolean", "description": "追跡されたファイルにあるか"},
                 "source": {"type": "string", "enum": ["本文", "設計"], "description": "候補を取った所"},
-                "section": {"type": "string", "description": "本文なら節の見出し、設計なら設計文書のパス"},
+                "section": {"type": "string", "description": "本文ならセクションの見出し、設計なら設計文書のパス"},
                 "tests": {"type": "array", "items": {"type": "string"}, "description": "候補ごとのテストのファイル"}
               }
             }

@@ -1,8 +1,8 @@
 """worktree を外す前の退避: 追跡していないファイル（無視したものを含む）を退避先へ移し、作り直せる生成物は捨てる。
 
 退避先は `<git の共通ディレクトリ>/ndf/worktree-trash/<ブランチ>-<時刻>/` で、隣のジャーナル `<退避先>.json` に元のブランチと
-先端のコミット（PR のマージコミットが分かればそれも）を書く（退避先の中に置くと、利用者の同じ名前のファイルを上書きする）。作り直せる生成物の決め方と、
-1 件でも移せなければ止める決まりは `docs/specifications/ndf-cleanup-and-bundle-closing.md` の退避の節にある。退避先を消すのは、先端か PR のマージコミットが本番に出たコミットに含まれ、人が名前を見て承認したものだけである
+HEAD のコミット（PR のマージコミットが分かればそれも）を書く（退避先の中に置くと、利用者の同じ名前のファイルを上書きする）。作り直せる生成物の決め方と、
+1 件でも移せなければ止める決まりは `docs/specifications/ndf-cleanup-and-bundle-closing.md` の退避のセクションにある。退避先を消すのは、HEAD か PR のマージコミットが本番に出たコミットに含まれ、人が名前を見て承認したものだけである
 （`sweep`。消すと戻せない利用者のファイル。C3・C4）。
 """
 
@@ -79,7 +79,7 @@ class Evacuated:
 def evacuate(main: Git, worktree: Path, branch: str, head: str, merge: str = "") -> Evacuated:
     """`worktree` の追跡していないファイルを退避先へ移し、作り直せる生成物を消す。移せなければ `TrashError`。
 
-    `merge` は PR のマージで本流へ入ったコミット（squash・rebase のマージでは先端と別。分からなければ空）。
+    `merge` は PR のマージで本流へ入ったコミット（squash・rebase のマージでは HEAD と別。分からなければ空）。
     """
     rels = _others(Git(worktree))
     discarded = tuple(r for r in rels if _regenerable(worktree, r))
@@ -133,7 +133,7 @@ def restore(worktree: Path, got: Evacuated) -> Optional[str]:
 
 @dataclass(frozen=True)
 class Candidate:
-    """退避先 1 つと、消してよいか（先端が本番に出たか）。"""
+    """退避先 1 つと、消してよいか（HEAD が本番に出たか）。"""
 
     name: str
     branch: str
@@ -150,7 +150,7 @@ def _read_meta(path: Path) -> Optional[dict]:
 
 
 def candidates(main: Git, ref: str) -> list[Candidate]:
-    """退避先の一覧。先端が `ref` に含まれるものだけを回収の候補（`released`）にする。"""
+    """退避先の一覧。HEAD が `ref` に含まれるものだけを回収の候補（`released`）にする。"""
     root = trash_root(main)
     out: list[Candidate] = []
     for path in sorted(p for p in root.iterdir() if p.is_dir()) if root.is_dir() else []:
@@ -161,16 +161,16 @@ def candidates(main: Git, ref: str) -> list[Candidate]:
             continue
         try:
             released = _released(main, meta, ref)
-        except GitError as exc:  # 先端のコミットが無い（gc 済み）退避先は判断できないので残す
-            out.append(Candidate(path.name, branch, False, f"先端を確かめられないため残す: {exc}"))
+        except GitError as exc:  # HEAD のコミットが無い（gc 済み）退避先は判断できないので残す
+            out.append(Candidate(path.name, branch, False, f"HEAD を確かめられないため残す: {exc}"))
             continue
-        reason = f"先端かマージコミットが {ref} に含まれる" if released else f"先端もマージコミットも {ref} に含まれないため残す"
+        reason = f"HEAD かマージコミットが {ref} に含まれる" if released else f"HEAD もマージコミットも {ref} に含まれないため残す"
         out.append(Candidate(path.name, branch, released, reason))
     return out
 
 
 def _released(main: Git, meta: dict, ref: str) -> bool:
-    """先端か PR のマージコミット（squash のマージでは先端は本番に入らない）が `ref` に含まれるか。
+    """HEAD か PR のマージコミット（squash のマージでは HEAD は本番に入らない）が `ref` に含まれるか。
 
     どれも確かめられなければ `GitError`。
     """

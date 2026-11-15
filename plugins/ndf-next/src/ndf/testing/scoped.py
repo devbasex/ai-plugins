@@ -42,7 +42,7 @@ class ScopedRun:
 
 
 def ci_only(test: Mapping[str, Any]) -> bool:
-    """設定の `test` の節がテストを CI に寄せる（`ci.only` が真）か。"""
+    """設定の `test` のセクションがテストを CI に寄せる（`ci.only` が真）か。"""
     ci = test.get("ci")
     return isinstance(ci, dict) and ci.get("only") is True
 

@@ -397,7 +397,7 @@ def repo_root(cwd: Path) -> str:
 
 
 def default_base(repo: Path, remote: Optional[str] = None) -> Optional[str]:
-    """宛先のブランチの既定: ブランチの運用の設定の `base_branch`、無ければリモートの既定ブランチ（決まらなければ None）。
+    """マージ先のブランチの既定: ブランチの運用の設定の `base_branch`、無ければリモートの既定ブランチ（決まらなければ None）。
 
     `remote` は既定ブランチを読むリモート名（`--set remote=` で渡した値）。省けばこの作業場所のリモート名。
     """
@@ -427,7 +427,7 @@ def default_merge_method(repo: Path, base: str, remote: Optional[str] = None) ->
 
 
 def _given_remote(out: Mapping[str, Value]) -> Optional[str]:
-    """決めた（渡したか求めた）リモート名。base と merge_method もこのリモートから決める（push の宛先とそろえる）。"""
+    """決めた（渡したか求めた）リモート名。base と merge_method もこのリモートから決める（push 先とそろえる）。"""
     remote = out.get("remote")
     return remote if isinstance(remote, str) and remote else None
 
@@ -436,7 +436,7 @@ def _remote_of_repo(repo: Path) -> str:
     """省いた `remote` の値（I7: 設定の `remote`、無ければスキーマの既定）。誤りは `RouteError`。
 
     git の作業場所では、linked worktree から打ってもメインディレクトリの設定を読む（`Git.remote`。取得・レビューの経路と
-    同じ宛先）。git の作業場所でない場所（`.git` が無い）にはメインディレクトリが無いため、git を起動せず `repo` の設定を読む。
+    同じリモート）。git の作業場所でない場所（`.git` が無い）にはメインディレクトリが無いため、git を起動せず `repo` の設定を読む。
     """
     try:
         if not (repo / ".git").exists():

@@ -18,7 +18,7 @@
       "required": ["stage", "phase"],
       "properties": {
         "stage": {"type": "string", "minLength": 1, "description": "工程表の行名（進捗記録の stage の値）。ステートマシンの行のキー"},
-        "phase": {"enum": ["design", "implement", "release", "close"], "description": "工程が属するフェーズ。design は要求から設計の承認まで、implement は計画から Pull Request まで、release は後片付けとデプロイ、close はまとめ（確定仕様化・リリース後テスト・振り返り・棚卸し）"},
+        "phase": {"enum": ["design", "implement", "release", "close"], "description": "工程が属するフェーズ。design は要求から設計の承認まで、implement は計画から Pull Request まで、release はクリーンアップとデプロイ、close はまとめ（確定仕様化・リリース後テスト・振り返り・棚卸し）"},
         "when": {
           "type": "array",
           "uniqueItems": true,

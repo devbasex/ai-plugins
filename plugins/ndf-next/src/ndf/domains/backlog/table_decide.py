@@ -1,6 +1,6 @@
-"""マイルストーンの説明の `### 順位` の節の描画と置き換え（純粋）。
+"""マイルストーンの説明の `### 順位` のセクションの描画と置き換え（純粋）。
 
-節は見出し `### 順位` から、次の同じか上の階層の見出し（`#`〜`###`）の手前までである。節の外の文字は変えない。
+セクションは見出し `### 順位` から、次の同じか上の階層の見出し（`#`〜`###`）の手前までである。セクションの外の文字は変えない。
 説明が長さの上限で拒まれたら、表の行を半分ずつ減らして書き直す（`next_limit`）。載せなかった行の件数は表の下に書く。
 """
 
@@ -16,7 +16,7 @@ _UPPER_HEADING = re.compile(r"^#{1,3} ", re.MULTILINE)
 
 
 def _section_span(desc: str) -> Optional[tuple[int, int]]:
-    """節の (始まり, 終わり) の位置。無ければ None。"""
+    """セクションの (始まり, 終わり) の位置。無ければ None。"""
     m = re.search(r"^" + re.escape(HEADING) + r"[ \t]*$", desc, re.MULTILINE)
     if m is None:
         return None
@@ -25,7 +25,7 @@ def _section_span(desc: str) -> Optional[tuple[int, int]]:
 
 
 def replace_section(desc: str, table: str) -> str:
-    """`### 順位` の節だけを `table` に置き換える。節が無ければ末尾へ足す。"""
+    """`### 順位` のセクションだけを `table` に置き換える。セクションが無ければ末尾へ足す。"""
     block = f"{HEADING}\n\n{table.rstrip()}\n"
     span = _section_span(desc)
     if span is None:
@@ -36,9 +36,9 @@ def replace_section(desc: str, table: str) -> str:
 
 
 def outside(desc: str) -> str:
-    """節の外の文字（節を除いた説明）。書く前後でこれが同じことを確かめる。
+    """セクションの外の文字（セクションを除いた説明）。書く前後でこれが同じことを確かめる。
 
-    節の手前の末尾の空白は比べない。節を末尾へ足すときに置く区切りの改行で、外の文字ではない。
+    セクションの手前の末尾の空白は比べない。セクションを末尾へ足すときに置く区切りの改行で、外の文字ではない。
     """
     span = _section_span(desc)
     return desc.rstrip() if span is None else desc[: span[0]].rstrip() + desc[span[1] :]

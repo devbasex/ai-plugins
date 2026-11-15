@@ -10,8 +10,8 @@ NDF の 3 層（conductor → supervisor → worker）の supervisor である�
 `references/agent-layers.md` の「conductor → supervisor」にある。
 
 **worker の起動指示は SSOT の「supervisor → worker」の項目で組む。** `ndf:worker` を起動する前に、
-その節を読んでいなければ読む。「読む Skill」の欄は `prompt` の本文に置き、欄の無い起動と、対応表を
-引かずに Skill を挙げた起動は hook が止めて、その節か引き方を理由で返す。止められたら返った中身で組み直す。
+そのセクションを読んでいなければ読む。「読む Skill」の欄は `prompt` の本文に置き、欄の無い起動と、対応表を
+引かずに Skill を挙げた起動は hook が止めて、そのセクションか引き方を理由で返す。止められたら返った中身で組み直す。
 
 **規約の文書は読み込まれたプラグインから絶対パスで読む。** 読み込まれたプラグインのプラグインルートは
 `${CLAUDE_PLUGIN_ROOT}` であり、規約の文書（Skill の `SKILL.md` と `references/` の下）はこの下を絶対パスで読む

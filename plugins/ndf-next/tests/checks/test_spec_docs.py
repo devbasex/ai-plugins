@@ -94,7 +94,7 @@ def test_a_key_without_description_or_main_key_outside_keys_is_caught(copy):
 
 def test_a_ndf_settings_without_schema_is_caught(copy):
     copy.path("contracts/schemas/ndf-settings/review.schema.json").unlink()
-    assert any("設定 review にスキーマか節の表が無い" in d for d in _rows(copy.findings(), spec_docs.DECL))
+    assert any("設定 review にスキーマかセクションの表が無い" in d for d in _rows(copy.findings(), spec_docs.DECL))
 
 
 def test_the_real_ndf_settings_is_checked_with_a_json_pointer(copy):

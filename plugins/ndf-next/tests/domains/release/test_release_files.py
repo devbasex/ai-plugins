@@ -1,4 +1,4 @@
-"""マーケットプレイスとバージョンの書き換え・設定・タグと GitHub Release・worktree の後片付け・サブコマンド。"""
+"""マーケットプレイスとバージョンの書き換え・設定・タグと GitHub Release・worktree のクリーンアップ・サブコマンド。"""
 
 from __future__ import annotations
 

@@ -48,9 +48,9 @@ PER_PAGE = 100
 BOT_SUFFIX = "[bot]"
 # 上限に当たったスロット（`GitHubError.quota`）
 REST, GRAPHQL = "rest", "graphql"
-# マージの要求を GitHub が断ったときの HTTP の状態（405: 規則・衝突、409: 先端が変わった、422: 形）
+# マージの要求を GitHub が断ったときの HTTP の状態（405: 規則・衝突、409: HEAD が変わった、422: 形）
 MERGE_REFUSED_STATUS = (405, 409, 422)
-# PR の node の ID と、迂回のマージ（`gh pr merge --admin` が呼ぶのと同じ mergePullRequest を、先端を添えて打つ。#3506 の決定 5）
+# PR の node の ID と、迂回のマージ（`gh pr merge --admin` が呼ぶのと同じ mergePullRequest を、HEAD を添えて打つ。#3506 の決定 5）
 _PULL_ID = "query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { id } } }"
 _ADMIN_MERGE = (
     "mutation($id: ID!, $head: GitObjectID!, $method: PullRequestMergeMethod!) {"
@@ -347,11 +347,11 @@ def _refused_by_graphql(exc: GitHubError) -> bool:
 
 
 def _preflight(pull: Pull, number: int, expect_head: Optional[str]) -> Optional[MergeOutcome]:
-    """マージの要求を送らずに返す結果（マージ済み・先端の食い違い・決めていない残リスク）。送ってよければ None。"""
+    """マージの要求を送らずに返す結果（マージ済み・HEAD の食い違い・決めていない残リスク）。送ってよければ None。"""
     if pull.merged:
         return MergeOutcome(True, None, f"#{number} は既にマージ済み", pull.head_sha)
     if expect_head and not git.sha_matches(expect_head, pull.head_sha):
-        return MergeOutcome(False, "refused", f"#{number} の先端が {expect_head} でない（今は {pull.head_sha}）", pull.head_sha)
+        return MergeOutcome(False, "refused", f"#{number} の HEAD が {expect_head} でない（今は {pull.head_sha}）", pull.head_sha)
     risks = premerge_risks(pull.body)
     if risks:
         return MergeOutcome(False, "refused", f"#{number} の本文にマージの前に決める残リスクがある: {' / '.join(risks)}", pull.head_sha)
@@ -753,9 +753,9 @@ class GitHub:
     def merge(
         self, number: int, expect_head: Optional[str] = None, method: Optional[str] = None, require_method: bool = False
     ) -> MergeOutcome:
-        """PR をマージする。先端の食い違い・決めていない残リスクは要求を送らずに断り、拒否は種類で返す（SF4）。
+        """PR をマージする。HEAD の食い違い・決めていない残リスクは要求を送らずに断り、拒否は種類で返す（SF4）。
 
-        `expect_head` は完全か短い SHA（#2041）。要求には読んだ先端の完全な SHA を添え、その後に先端が
+        `expect_head` は完全か短い SHA（#2041）。要求には読んだ HEAD の完全な SHA を添え、その後に HEAD が
         動いていれば GitHub が断る。`method` は設定のマージの方式で、省けば基底のブランチで許された方式から選ぶ。
         許されていない方式は要求を送らずに断る（3378-2）。基底がマージキューを持てば、キューは自分の方式でマージする。
         `require_method` が真の呼び手（merge commit を必須とする本番へのマージ）だけ、キューの方式が `method` と
@@ -766,7 +766,7 @@ class GitHub:
 
     def merge_as_admin(self, number: int, expect_head: str, method: Optional[str] = None) -> MergeOutcome:
         """PR を管理者の迂回でマージする（#3506 の決定 5）。`merge` と同じ先の確認を通り、GraphQL の `mergePullRequest` を
-        読んだ先端（`expectedHeadOid`）を添えて打つ。断られたら PR を読み直して種類を返し、届かない・上限は投げ直す。
+        読んだ HEAD（`expectedHeadOid`）を添えて打つ。断られたら PR を読み直して種類を返し、届かない・上限は投げ直す。
         """
         return self._merge_with(number, expect_head, method, _MergeRoute(self._send_admin_merge, _refused_by_graphql, "管理者の迂回で"))
 
@@ -803,7 +803,7 @@ class GitHub:
         return MergeOutcome(True, None, f"#{number} を {chosen} で{route.how}マージした", pull.head_sha)
 
     def _enqueue(self, pull: Pull, method: Optional[str]) -> Optional[MergeOutcome]:
-        """基底がマージキューを持てば PR を先端のままキューへ入れ、待ち（`ci_pending`）を返す。持たなければ None。
+        """基底がマージキューを持てば PR を HEAD のままキューへ入れ、待ち（`ci_pending`）を返す。持たなければ None。
 
         直接のマージを 405 で断られたときだけ読む（キューの無い基底の要求の回数を増やさない）。既にキューにあれば入れ直さない。
         `method`（方式を必須とする呼び手だけが渡す）を指定したときは、キューのマージの方式が同じでなければ

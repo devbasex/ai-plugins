@@ -190,8 +190,8 @@ REST の応答（`GET /repos/{repo}/pulls/{pr}`）の `base.sha` から読み、
 
 範囲を求められなくてもラウンドは止めない。`launch-reviewer.sh` は `review_scope` に `unavailable` が
 無く、`review_scope.head_sha` がそのラウンドの `head_sha` と一致するときだけ、プロンプトの「必須
-コンテキスト」に節「このラウンドのレビュー範囲」（base・head・3 点の `git diff` のコマンド・ファイル数）を
-載せ、結果ファイルに `read_files` を書くよう指示する。それ以外は節も指示も載せない。
+コンテキスト」にセクション「このラウンドのレビュー範囲」（base・head・3 点の `git diff` のコマンド・ファイル数）を
+載せ、結果ファイルに `read_files` を書くよう指示する。それ以外はセクションも指示も載せない。
 
 ### 読んだファイル数
 
@@ -223,7 +223,7 @@ REST の応答（`GET /repos/{repo}/pulls/{pr}`）の `base.sha` から読み、
 | --- | --- |
 | `review_scope.unavailable` の値 | 範囲を求められなかった |
 | `legacy` | `review_scope` を持たない前のバージョンのラウンド |
-| `model_stage` | 設計 PR のモデルレビュー。指示どおりドメインモデルの節だけを読むため、検証すると誤って外す |
+| `model_stage` | 設計 PR のモデルレビュー。指示どおりドメインモデルのセクションだけを読むため、検証すると誤って外す |
 
 判定の出力と状態ファイル:
 

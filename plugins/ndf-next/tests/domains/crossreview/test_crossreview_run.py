@@ -82,7 +82,7 @@ class Fake:
 
 @pytest.fixture
 def wt(repos: Repos, tmp_path: Path) -> Path:
-    commit(repos.other, "doc.md", "# 設計\n\n## 節 A\n\n本文\n\n## 節 B\n\n足した\n", "節 B")
+    commit(repos.other, "doc.md", "# 設計\n\n## セクション A\n\n本文\n\n## セクション B\n\n足した\n", "セクション B")
     sh(repos.other, "push", "-q", "origin", f"HEAD:refs/heads/{BRANCH}")
     sh(repos.main, "fetch", "-q", "origin")
     return repos.add_worktree(tmp_path / "wt")
@@ -103,14 +103,14 @@ def _state(state_dir: Path) -> dict:
 
 def test_loop_fixes_pushes_and_converges(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
     """指摘を重ねずに 1 回直して送り、次のラウンドで指摘が無ければ収束する。rounds・reviewed_sections・summary.json を残す。"""
-    fake = Fake(tmp_path / "st", {"codex": [["節 B の根拠が無い"], []], "kiro": [["節 B の根拠が無い", "語の定義"], []]})
+    fake = Fake(tmp_path / "st", {"codex": [["セクション B の根拠が無い"], []], "kiro": [["セクション B の根拠が無い", "語の定義"], []]})
     code, got = _run(capsys, monkeypatch, fake, wt)
     assert (code, got["status"], got["metrics"]) == (0, "ok", {"rounds": 2, "findings": 2})
     assert got["outputs"] == {"gaps": []}
     state = _state(fake.state_dir)
     assert [r["verdict"] for r in state["rounds"]] == [drive.CHANGES_REQUIRED, fin.CONVERGED]
     assert [r["scope"] for r in state["rounds"]] == ["full", "since"]
-    assert "doc.md#節 B" in state["reviewed_sections"]
+    assert "doc.md#セクション B" in state["reviewed_sections"]
     assert sh(repos.origin, "rev-parse", BRANCH).strip() == sh(wt, "rev-parse", "HEAD").strip()
     assert store.read_object(fake.state_dir / drive.SUMMARY_NAME)["final"] == fin.CONVERGED
     assert sorted(fake.calls) == ["claude", "codex", "codex", "kiro", "kiro"]
@@ -347,7 +347,7 @@ def _rounds_without_heads(state: dict) -> list[dict]:
 
 
 def test_run_records_the_journal_process_and_summary(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
-    fake = Recording(tmp_path / "st", {"codex": [["節 B の根拠が無い"], []], "kiro": [["節 B の根拠が無い", "語の定義"], []]})
+    fake = Recording(tmp_path / "st", {"codex": [["セクション B の根拠が無い"], []], "kiro": [["セクション B の根拠が無い", "語の定義"], []]})
     code, got = _run(capsys, monkeypatch, fake, wt)
     assert got["summary"] == "2 ラウンドで converged。指摘 2 件（直した 2・見送った 0・未解決 0）"
     assert got["items"] == [
@@ -364,11 +364,11 @@ def test_run_records_the_journal_process_and_summary(wt: Path, tmp_path: Path, c
     assert "warnings" not in got
     state = _state(fake.state_dir)
     assert state["findings"] == [
-        _entry("r1-1", "codex", "節 B の根拠が無い", fin.FIXED, 1),
+        _entry("r1-1", "codex", "セクション B の根拠が無い", fin.FIXED, 1),
         _entry("r1-2", "kiro", "語の定義", fin.FIXED, 1),
     ]
     assert state["pr"] == PR
-    assert state["reviewed_sections"] == ["doc.md#節 A", "doc.md#節 B", "doc.md#設計"]
+    assert state["reviewed_sections"] == ["doc.md#セクション A", "doc.md#セクション B", "doc.md#設計"]
     assert _rounds_without_heads(state) == [
         {"fix": {"fixed": ["r1-1", "r1-2"], "reported": 2}, "round": 1, "scope": "full", "verdict": drive.CHANGES_REQUIRED},
         {"round": 2, "scope": "since", "verdict": fin.CONVERGED},
@@ -376,7 +376,7 @@ def test_run_records_the_journal_process_and_summary(wt: Path, tmp_path: Path, c
     assert store.read_object(fake.state_dir / drive.SUMMARY_NAME) == {
         "final": fin.CONVERGED,
         "findings": [
-            {"id": "r1-1", "outcome": fin.FIXED, "reason": None, "text": "節 B の根拠が無い"},
+            {"id": "r1-1", "outcome": fin.FIXED, "reason": None, "text": "セクション B の根拠が無い"},
             {"id": "r1-2", "outcome": fin.FIXED, "reason": None, "text": "語の定義"},
         ],
         "pr": PR,
@@ -386,7 +386,7 @@ def test_run_records_the_journal_process_and_summary(wt: Path, tmp_path: Path, c
     assert (fake.state_dir / "fix-pr41-result-round1.json").is_file()
     assert store.pending_fix_result(fake.state_dir, store.state_pr(fake.state_dir, PR)) is None
     fix_prompt = next(p for a, _, p in fake.prompts if a == "claude")
-    assert "- r1-1: 節 B の根拠が無い\n- r1-2: 語の定義\n" in fix_prompt
+    assert "- r1-1: セクション B の根拠が無い\n- r1-2: 語の定義\n" in fix_prompt
     assert str(store.fix_result_path(fake.state_dir, store.state_pr(fake.state_dir, PR))) in fix_prompt
 
 

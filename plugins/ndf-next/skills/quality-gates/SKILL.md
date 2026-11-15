@@ -106,7 +106,7 @@ flowchart LR
 書かれた値が出典と一致することを確かめる。
 
 **事実確認は書いた本人だけでは完了しない。** 書いた側が確かめると、同じ思い込みで通る。
-**`cross-review` のレビュワーが、出典の節と本文の値を突き合わせる。** 新しい仕組みは作らず、
+**`cross-review` のレビュワーが、出典のセクションと本文の値を突き合わせる。** 新しい仕組みは作らず、
 レビューの観点として渡す。
 
 **一致しなかったときは「素材の収集と出典の確定」へ戻す。** 本文の値を出典に合わせて書き換え
@@ -146,7 +146,7 @@ python3 "$SCRIPTS/acceptance-check.py" record --issue 2144 \
   --post-release 5 --post-release 6
 ```
 
-本文の `## 受け入れ条件の確認` の節に `| 条件 | 区分 | 手段 |` の表として残り、打ち直すと渡した番号の行だけが
+本文の `## 受け入れ条件の確認` のセクションに `| 条件 | 区分 | 手段 |` の表として残り、打ち直すと渡した番号の行だけが
 置き換わる。`マージ前` には手段（テスト名か実行したコマンド）が要る。打っても確かめられない条件（本番の利用者の
 環境・次のスプリントで見ることなど）だけを `リリース後` にする。記録は `acceptance-check.py show --issue <番号>` で読める。
 
@@ -158,7 +158,7 @@ python3 "$SCRIPTS/acceptance-check.py" record --issue 2144 \
 （分け方は `requirements-design` の `references/acceptance-criteria.md`）。
 
 **文書の文言を検証するテストを、受け入れ条件の検証手段にしない。** 文書（`.md`）の変更を
-求める条件は、該当の節を読んで確かめ、その節を証跡に書く。文言を固定しても振る舞いは
+求める条件は、該当のセクションを読んで確かめ、そのセクションを証跡に書く。文言を固定しても振る舞いは
 保証されない（`tdd-cycle` の `references/test-quality.md` の例 8）。
 
 ## カバレッジの扱い
@@ -233,7 +233,7 @@ Skill 側に既定値を持たせると、プロジェクトの方針と食い�
 ## 参照
 
 - [references/definition-of-done.md](references/definition-of-done.md) — モード別の完了の定義
-- [references/design-match.md](references/design-match.md) — `standard` の設計との突き合わせと「設計と違う点」の節
+- [references/design-match.md](references/design-match.md) — `standard` の設計との突き合わせと「設計と違う点」のセクション
 - `/ndf:release-verification` — リリースされた成果物を利用者の環境で確かめる工程
 - `/ndf:out-of-scope` — 範囲外と判断したものの起票と、起票先のリポジトリの判断
 

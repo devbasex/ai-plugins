@@ -11,11 +11,11 @@
 | ユビキタス言語 | — | プロジェクトの関係者とエージェントが、要求・設計・コードで同じ意味に使う語の集まり | — | — | `docs/specifications/ndf-ubiquitous-language.md` |
 | 用語集 | `glossary` | ユビキタス言語を持つ構造化ファイル（正）と、そこから作る人が読む Markdown の文書。どちらもプロジェクトのリポジトリに置く | — | — | `docs/specifications/ndf-ubiquitous-language.md` |
 | コンテキスト | `context` | 語の意味が 1 つに決まる範囲（境界づけられたコンテキスト） | — | — | `docs/specifications/ndf-ubiquitous-language.md` |
-| ドメインモデルの節 | — | 設計文書の先頭に置く節。変更が属するコンテキスト・変える集約とそのオーナー・不変条件・ドメインイベントを書く | — | — | `docs/specifications/ndf-ubiquitous-language.md` |
+| ドメインモデルのセクション | — | 設計文書の先頭に置くセクション。変更が属するコンテキスト・変える集約とそのオーナー・不変条件・ドメインイベントを書く | — | — | `docs/specifications/ndf-ubiquitous-language.md` |
 | 廃止した語 | `deprecated` | 用語集で別の語へ置き換えた語。文書の追加した行と、用語集自身の意味の説明に出たら落とす | — | — | `docs/specifications/ndf-glossary-deprecated-meaning.md` |
 | 単独でマッチする廃止した語 | `deprecated_standalone` | 前後が漢字の出現には当てない廃止した語。1 文字の語と、長い語の一部に現れる語を登録するために使う | — | — | `docs/specifications/ndf-glossary-deprecated-meaning.md` |
-| 不変条件 | — | 集約がいつも満たす条件。設計のドメインモデルの節に書き、実装の前にテストにする | — | — | `docs/specifications/ndf-ubiquitous-language.md` |
-| 未登録の語 | `unregistered` | 用語として書かれているのに用語集に無い語。見出しが「用語」の節の表の 1 列目に書いた語を指す | — | — | `docs/specifications/ndf-ubiquitous-language.md` |
+| 不変条件 | — | 集約がいつも満たす条件。設計のドメインモデルのセクションに書き、実装の前にテストにする | — | — | `docs/specifications/ndf-ubiquitous-language.md` |
+| 未登録の語 | `unregistered` | 用語として書かれているのに用語集に無い語。見出しが「用語」のセクションの表の 1 列目に書いた語を指す | — | — | `docs/specifications/ndf-ubiquitous-language.md` |
 | 用語集のマージ | — | ベースブランチのマージで衝突した用語集を、共通の祖先・自分の側・相手の側の 3 つのバージョンから語の単位で合わせ、文書を作り直してマージを終えること。`glossary.py merge` が行う | — | — | `docs/specifications/ndf-glossary-merge.md` |
 | 語の衝突 | — | 用語集のマージで、両側が同じ語（コンテキストと語の組）を違う中身にしたこと、または片側が消して片側が書き換えたこと。コンテキストの `id` でも同じ。スクリプトは解かずに止まる | — | — | `docs/specifications/ndf-glossary-merge.md` |
 | agy に配る定義 | — | `plugins/ndf/dev.agy/agents/` の下にあり agy が読むエージェント定義。`plugins/ndf/agents/` から生成した写しで、`model` だけが agy の tier 名に変わる。手で直さない | — | — | `docs/specifications/runtime-plugin-distribution.md` |
@@ -29,7 +29,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | --- | --- | --- | --- | --- | --- |
 | 用語集の設定 | `glossary_config` | `.ndf/glossary.json`。用語集の保存先・形式・チェックの対象を持つ | 用語集の宣言 | `declaration` | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 用語チェック | — | `glossary.py check`。用語集の形と意味の説明の廃止した語、文書の追加した行の語を見る | 語のチェック | — | `docs/specifications/ndf-glossary-deprecated-meaning.md` |
-| モデルレビュー | — | 設計 PR のレビューの 1 ラウンド目。ドメインモデルの節だけを見る | モデルの段 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| モデルレビュー | — | 設計 PR のレビューの 1 ラウンド目。ドメインモデルのセクションだけを見る | モデルの段 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 詳細レビュー | — | 設計 PR のレビューの 2 ラウンド目以降。確定したモデルを前提に残りを見る | 詳細の段 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 仕様のコピー | — | 課題の本文にある要求を、設計 PR と一緒にコミットする `issues/` のファイル | 仕様の写し | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | パイプライン | `pipeline` | キューが `--then` でつないだプランの列（実装 → 検査 → コードレビュー → 開発版 → 本番）。列の 1 つ分がステージ | チェイン | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
@@ -53,7 +53,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | リリースプラン | — | リリースの手順をステップの列として持つプラン | 配布の計画、昇格のプラン | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | リリースコマンド | — | リポジトリが `.ndf/release.json` に定義し、`release` がリリースの段階に合わせて走らせる 1 つのコマンド | 配布のコマンド | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | インストール確認 | — | 隔離した HOME で ref からプラグインをインストールし、バージョンと中身が ref と一致するかを確かめる | 導入確認 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| 導入の確認 | — | `.ndf/pace.json` の `<節>.verify` に書かれたコマンドを、ベースブランチの先頭で走らせること。pace: fast / auto で、リリースの Pull Request で届くときはリリース承認ゲートの前に、経路 merge だけのときは検査の後に走り、終了コードを承認資料へ載せ、出力は所有者だけが読めるログへ分ける | — | — | — |
+| 導入の確認 | — | `.ndf/pace.json` の `<セクション>.verify` に書かれたコマンドを、ベースブランチの先頭で走らせること。pace: fast / auto で、リリースの Pull Request で届くときはリリース承認ゲートの前に、経路 merge だけのときは検査の後に走り、終了コードを承認資料へ載せ、出力は所有者だけが読めるログへ分ける | — | — | — |
 | リリース完了の確認 | — | 公開が済んだことを、リリース先の状態から読み取れる値 | 完了の事実 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | スタックしたチェック | — | 実行が終わったのに pending のまま残った CI のチェック | 取り残されたチェック | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | リファクタリング | — | 振る舞いを変えずに構造を直す工程 | 構造改善 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
@@ -73,7 +73,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | worktree | `worktree` | 開発の変更を行う git worktree。課題ごとに 1 つ切る | 作業ツリー | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | メインディレクトリ | — | リポジトリを clone したディレクトリ | 主ディレクトリ | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 設定を探す木 | — | supervise.py new が .ndf/ の設定を探すディレクトリの並び。--worktree のパス → --repo → --worktree のパスの /.worktrees/ より前 → 今のディレクトリの順。既定ブランチは、この並びで最初に存在する git の木から解く | — | — | — |
-| ベースブランチ | — | Pull Request の宛先で、スプリントどうしを結合して試すブランチ。開発版のチャネルを兼ねることがある。設定の `base_branch`。worktree とスプリントブランチの分岐元はスプリントの起点が決める | 起点のブランチ | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| ベースブランチ | — | Pull Request のマージ先で、スプリントどうしを結合して試すブランチ。開発版のチャネルを兼ねることがある。設定の `base_branch`。worktree とスプリントブランチの分岐元はスプリントの起点が決める | 起点のブランチ | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 安定版と実験版 | — | NDF の変更の 2 つの経路（stable / experimental）。実験版の保存先は `experimental/` | 安定と試行 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 系統（決定番号の） | — | 決定番号が一意に決まる設計文書の集まり。#1142 では `decisions`・`dbos`・`smells`・`data`・`scripted-flow`・`fixes`・`next` の 7 つ。重なる番号は `決定 73（fixes）` のように系統を添えて書く | — | — | — |
 | 固定する理由（依存のバージョンの） | — | 依存を上げる先へ上げずに今のバージョンに止める理由と、止めさせている相手（例: githubkit 0.17.1 の `httpx<1.0.0`）。依存の更新の仕組み（Renovate）の依存ごとの規則に、理由の文として書く（#3370 の決定 5） | — | — | — |
@@ -111,7 +111,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 実行計画 | — | スプリントの課題を、バンドル・工程ごとの依存・触る箇所・着手できる時点で並べた表。オーケストレーターが持つ | — | — | `docs/specifications/ndf-execution-plan-and-parallel-capacity.md` |
 | バンドル | `bundle` | 1 本の設計 Pull Request で決める課題の集合 | — | — | `docs/specifications/ndf-execution-plan-and-parallel-capacity.md` |
 | 課題グループ | — | マイルストーンの説明に書く、触る場所の見込みと依存で分けた課題の集合。実行計画のバンドルの初期値 | — | — | `docs/specifications/ndf-execution-plan-and-parallel-capacity.md` |
-| 変更重複 | — | 2 つの Pull Request が同じファイルを触ること。節（見出し）・関数の単位で程度を分ける | — | — | `docs/specifications/ndf-execution-plan-and-parallel-capacity.md` |
+| 変更重複 | — | 2 つの Pull Request が同じファイルを触ること。セクション（見出し）・関数の単位で程度を分ける | — | — | `docs/specifications/ndf-execution-plan-and-parallel-capacity.md` |
 | 並行度 | — | 対象の Pull Request のうち、2 本以上が同時に開いていた時間の割合 | — | — | `docs/specifications/ndf-execution-plan-and-parallel-capacity.md` |
 | 予備メモリ | — | 同じ VM に常駐する他のプロセスの揺れのために空けておくメモリ。既に動いているオーケストレーターの本体と担当は MemAvailable から引かれているため含めない | — | — | `docs/specifications/ndf-execution-plan-and-parallel-capacity.md` |
 | 設定 | — | リポジトリ側に置く .ndf/<名前>.json。無ければその機能は既定の動きだけになるか、何も動かない。「<対象>の設定」の形で呼ぶ（指示書チェックの設定・リリースの設定・ボードの設定・worktree の設定・用語集の設定）。git で追跡するものを共有設定、追跡しないものを個人設定と呼ぶ | 宣言 | — | `docs/specifications/ndf-instruction-files-check.md` |
@@ -123,14 +123,14 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | コンテキスト量 | — | 1 回の API 呼び出しで読んだトークン数（input_tokens + cache_read_input_tokens + cache_creation_input_tokens） | 文脈量 | — | `docs/specifications/ndf-token-waits-and-context-cut.md` |
 | 工程 Skill | — | development-workflow の工程表が起動する Skill | 工程の Skill | — | `docs/specifications/ndf-worker-agent-and-skill-excerpts.md` |
 | 中間通知 | — | 背景の処理を残したまま応答を終えたサブエージェントについて、親へ届く 1 回目の通知 | 途中の通知 | — | `docs/specifications/ndf-token-waits-and-context-cut.md` |
-| 報告コピー | — | worker が起動指示の置く場所のファイルの末尾へ書く作業の報告の節。最後の応答の報告と同じ中身 | 報告のコピー | — | `docs/specifications/ndf-token-waits-and-context-cut.md` |
+| 報告コピー | — | worker が起動指示の置く場所のファイルの末尾へ書く作業の報告のセクション。最後の応答の報告と同じ中身 | 報告のコピー | — | `docs/specifications/ndf-token-waits-and-context-cut.md` |
 | 完了マーカー | — | worker が報告コピーを書き終えた後に作る空のファイル（<置く場所>.done） | 完了の目印 | — | `docs/specifications/ndf-token-waits-and-context-cut.md` |
 | 待ちのテンプレート | — | waiting.md が持つ、背景で起動して条件が成り立つまで待つ until ループのコマンド。成り立てば 0、上限に達すれば 124 で終わり、exit=<終了コード> を出す | — | — | `plugins/ndf/skills/development-workflow/references/waiting.md` |
 | 横断 Skill | — | 工程表に載らず、どの工程からも呼ばれる Skill（progress-tracking / out-of-scope など） | 工程の外の Skill | — | `docs/specifications/ndf-worker-agent-and-skill-excerpts.md` |
 | 抜粋 | — | 呼ぶ側が要る部分だけを Skill の本文から取り出したもの | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 実行方式 | — | 仕事を渡す先の実行の形。インライン実行 / サブエージェント / CLI 実行 / 最小構成の claude -p / スクリプト | — | — | `docs/specifications/ndf-worker-agent-and-skill-excerpts.md` |
 | 固定費 | — | 作業を始める前に context window が既に埋まっている分（指示・規約・Tool の定義）。実行を 1 つ起動するたびに掛かる | — | — | `plugins/ndf/skills/development-workflow/references/context-window.md` |
-| スケルトン | — | SKILL.md の実行の節に置く bash。利用者はこれをコピーして起動する | 骨組み | — | `docs/specifications/ndf-workflow-blockers.md` |
+| スケルトン | — | SKILL.md の実行のセクションに置く bash。利用者はこれをコピーして起動する | 骨組み | — | `docs/specifications/ndf-workflow-blockers.md` |
 | 通過記録 | — | 通過工程を課題ごとに残したファイル | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 本番チャネル | — | リリースしたバージョンが常用する利用者へ届くブランチ | 本番のチャネル | — | `docs/specifications/ndf-workflow-unit-and-gates.md` |
 | 本番系 | — | 利用者が現に使っているリリースのチャネル・環境・外部サービス。チャネルは本番系の一種 | 本番の系 | — | `docs/specifications/ndf-workflow-unit-and-gates.md` |
@@ -167,7 +167,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 判断の地点 | — | NDF が LLM の判断を挟む場所（承認ゲートの判定・レビューの指摘と修正の可否・リファクタリングの提案の採否・judge のステップ・範囲外の起票の 3 択） | — | — | — |
 | MVV 候補 | — | 材料から書いたプロジェクト MVV の案。2 案以上と分かれる点を利用者へ示す | — | — | — |
 | 傾向モード | — | 履歴が育っていないプロジェクトで、README・指示書・リクエスト文の傾向から MVV 候補を出す抽出の形 | — | — | — |
-| MVV の節 | — | 判断の地点へ渡す塊。NDF の共通原則の本文全体を先頭に置き、承認済みのプロジェクト MVV の本文か「MVV なし」とその理由、行動の 2 択と根拠の指示を続ける | — | — | — |
+| MVV のセクション | — | 判断の地点へ渡す塊。NDF の共通原則の本文全体を先頭に置き、承認済みのプロジェクト MVV の本文か「MVV なし」とその理由、行動の 2 択と根拠の指示を続ける | — | — | — |
 | 根拠の項目 | — | 判断の記録と設計の決定の記録に残す MVV の項目の番号（Mission / Vision / Value 3 / C4 / P1 / R2）。スプリント MVV の項目は頭に「スプリント」を付ける（スプリント Value 4。R の番号はそのまま）。MVV が無ければ「MVV なし」、返されなければ「根拠なし」 | — | — | `plugins/ndf/skills/development-workflow/references/project-mvv.md` |
 | 覆し | — | 承認ゲートで人の回答が直前の MVV 判定と食い違ったこと。「反する疑い」「判定できない」を人が通すと override_pass、「従う」を人が変更を要求すると override_reject。MVV の改訂の兆候に数える | — | — | — |
 | NDF の共通原則 | — | NDF を使うすべてのプロジェクトに効く原則。NDF が持ち、利用側は上書きできない。上位の原則・優先順位・AI の行動の 2 択・判断の記録・人と AI の対話・必ず承認が要る操作 C1〜C8 を含む | — | — | — |
@@ -239,7 +239,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | スプリント MVV | — | スプリント単位の MVV。プロジェクト MVV の範囲での具体化 | ミッション MVV | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 自動反映の本番チャネル | `auto_production_branch` | 本番チャネルのうち、マージ（push）で本番系への反映が自動で始まるもの。設定の delivery に kind: auto で本番チャネルを branch に持つ行があるときに当たる。そこへのマージはリリース承認ゲートに当たる | — | — | — |
 | 手動反映の本番系 | `manual_production` | リリースの設定の行のうち、production: true と定義され、kind: manual（担い手が手で起動する）のもの。そこへ届ける操作の前にリリース承認ゲートを掛ける。自動反映の本番チャネルと対になる | — | — | — |
-| 載ったバージョン | — | PR が載った正式版。CHANGELOG のバージョンの節 → マージの時刻の後の最初の正式版のタグ → 行の時刻の後の最初の正式版のタグ、の順で決める。計測でバージョンを寄せる規則 | — | — | — |
+| 載ったバージョン | — | PR が載った正式版。CHANGELOG のバージョンのセクション → マージの時刻の後の最初の正式版のタグ → 行の時刻の後の最初の正式版のタグ、の順で決める。計測でバージョンを寄せる規則 | — | — | — |
 | 動いたバージョン | — | 呼び出しや会話を動かした NDF のバージョン（使用量の使用量ログの ndf_version・会話の Skill の保存先のバージョン） | — | — | — |
 | 耐久ワークフロー | `durable_workflow` | DBOS の @DBOS.workflow の関数の 1 回の実行。ID を持ち、落ちた後の起動が記録から続ける。プラン 1 本・キュー 1 本・drive 1 回・投稿の項目 1 件がそれぞれ 1 つ | — | — | — |
 | 耐久ステップ | `durable_step` | 耐久ワークフローの中で出力を SQLite へ記録する単位（DBOS の @DBOS.step）。記録のある耐久ステップは続けるときに流し直さない。プランのステップとは別の語 | — | — | — |
@@ -263,21 +263,21 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 手動確認の行 | — | 要求の検証手段の表で、項目が「手動確認」で始まり、2 列目が「無し」の形（「無し」「なし」「不要」「ない」「-」「—」「―」の単独か、直後に括弧・句読点・空白が続く形）でない行。項目が「手動確認（マージ前）」ならマージ前、それ以外はリリース後テストに確かめる | — | — | — |
 | 記録の PR | — | リリース記録（## リリース記録）を置いた Pull Request。まとめの close が --record-pr に受け、リリース後テストが記録を書く先。まとめを流し始める時点に解決する（#2230） | — | — | `docs/specifications/ndf-sprint-close-record-pr-at-run-time.md` |
 | 記録の保存先が分からない | — | まとめの close が読むリリース記録の Pull Request が分からない状態。sprint-close.py --record-pr unknown で渡し、課題を開いたまま残す。まとめのプランは組まず（#2230）、手で打つエントリポイントと前のバージョンで組んだプランだけが渡す | — | — | `docs/specifications/ndf-sprint-misjudgments-unknown-record-and-manual-none.md` |
-| 設計の結果 | — | 設計文書の「設計の結果」の節の表。課題ごとに扱い（実装する / マージする / 閉じる）・統合先・触るファイルを書き、実装のステージの前に機械が読む | — | — | — |
-| 決定の見出し | — | 設計文書の囲みの外にある、決定 1 件を表す見出しの行。`## 決定の記録` で始まる H2 の節の `### ` の行か、H1 に「決定の記録」を含み `## 決定の記録` の節を持たない文書の `## 決定 <数字>…` / `### 決定 <数字>…` の行。pr-body-decisions.sh が設計 PR の本文の「決めたこと」へ写す | — | — | `docs/specifications/ndf-workflow-unit-and-gates.md` |
-| 決定を分けたファイル | — | 設計文書から決定の記録の節だけを別に置いたファイル。名前は `issue-<番号>-design-decisions.md` | — | — | `docs/specifications/ndf-workflow-unit-and-gates.md` |
-| 決定を読めない文書 | — | 設計 PR で変更した .md のうち、`## 決定の記録` で始まる H2 を持つか決定を分けたファイルであるのに、決定の見出しが 0 件のもの。文書自身の名前が `-design-decisions.md` で終わらないときに限り、決定を分けたファイルの名前だけを示す節は除く。pr-body-decisions.sh の check / sync が 1 で止まる | — | — | `docs/specifications/ndf-workflow-unit-and-gates.md` |
+| 設計の結果 | — | 設計文書の「設計の結果」のセクションの表。課題ごとに扱い（実装する / マージする / 閉じる）・統合先・触るファイルを書き、実装のステージの前に機械が読む | — | — | — |
+| 決定の見出し | — | 設計文書の囲みの外にある、決定 1 件を表す見出しの行。`## 決定の記録` で始まる H2 のセクションの `### ` の行か、H1 に「決定の記録」を含み `## 決定の記録` のセクションを持たない文書の `## 決定 <数字>…` / `### 決定 <数字>…` の行。pr-body-decisions.sh が設計 PR の本文の「決めたこと」へ写す | — | — | `docs/specifications/ndf-workflow-unit-and-gates.md` |
+| 決定を分けたファイル | — | 設計文書から決定の記録のセクションだけを別に置いたファイル。名前は `issue-<番号>-design-decisions.md` | — | — | `docs/specifications/ndf-workflow-unit-and-gates.md` |
+| 決定を読めない文書 | — | 設計 PR で変更した .md のうち、`## 決定の記録` で始まる H2 を持つか決定を分けたファイルであるのに、決定の見出しが 0 件のもの。文書自身の名前が `-design-decisions.md` で終わらないときに限り、決定を分けたファイルの名前だけを示すセクションは除く。pr-body-decisions.sh の check / sync が 1 で止まる | — | — | `docs/specifications/ndf-workflow-unit-and-gates.md` |
 | hook の上限 | — | ランタイムの hook の定義（hooks/*.json・dev.agy/hooks.json）の timeout。過ぎるとランタイムが hook を打ち切る | — | — | `docs/specifications/cross-review-reopen-and-hook-deadline.md` |
 | 実装の上限 | `impl_timeout` | プランの impl のステップ（worker の実装）の経過時間の上限（秒）。.ndf/supervise.json の impl_timeout か supervise.py new の --impl-timeout に書いたときだけ効き、書かなければ無い | — | — | `docs/specifications/ndf-supervise-step-budgets.md` |
 | hook の締め切り | — | NDF の hook が自分で決める 1 回の実行の時間の上限（3.5 秒）。hook の上限より短く、過ぎたら残りの判定を飛ばして通し、標準エラーへ 1 行残す | — | — | `docs/specifications/cross-review-reopen-and-hook-deadline.md` |
-| 適用範囲 | — | 設計した変更が働く範囲。このリポジトリだけで働くのか利用先のリポジトリでも働くのか、プロジェクトごとに違うものを設定か引数のどちらで受けるのか。設計文書の節と承認資料の行に書く | — | — | `docs/specifications/ndf-design-phase.md` |
-| あるべき姿の根拠 | — | 変更後の形が適切だと言える根拠。外部の一次情報・実測・利用者の指示の原文のどれか。設計文書の節と承認資料の行に書き、無ければ「無し（理由）」。MVV の根拠の項目とは別のもの | — | — | `docs/specifications/ndf-design-phase.md` |
+| 適用範囲 | — | 設計した変更が働く範囲。このリポジトリだけで働くのか利用先のリポジトリでも働くのか、プロジェクトごとに違うものを設定か引数のどちらで受けるのか。設計文書のセクションと承認資料の行に書く | — | — | `docs/specifications/ndf-design-phase.md` |
+| あるべき姿の根拠 | — | 変更後の形が適切だと言える根拠。外部の一次情報・実測・利用者の指示の原文のどれか。設計文書のセクションと承認資料の行に書き、無ければ「無し（理由）」。MVV の根拠の項目とは別のもの | — | — | `docs/specifications/ndf-design-phase.md` |
 | ジョブの識別子 | — | CI のジョブを指す `<ワークフローのファイルのパス>#<job id>`。`#<job id>` を省くとそのファイルのジョブすべてを指す。設定の suites[].ci_jobs と test.ci_exempt が使う | — | — | `docs/specifications/cross-refactoring-lint-suite-and-ci-coverage.md` |
 | 除外したジョブ | `ci_exempt` | 手元の検証で走らせないと定義したジョブ。設定の test.ci_exempt に理由と組で書く | — | — | `docs/specifications/cross-refactoring-lint-suite-and-ci-coverage.md` |
 | 必須のチェック | — | ブランチの ruleset の required_status_checks に context の名前で載ったチェック。落ちるか結果が無いとマージを塞ぐ | — | — | `docs/specifications/ci-required-checks-reconcile.md` |
 | チェックの名前 | — | ジョブの結果が Pull Request に載るときの名前。ジョブの name:（無ければ job id）に matrix の値が付いたもの。必須のチェックはこの名前で検証する | — | — | `docs/specifications/ci-required-checks-reconcile.md` |
 | 必須にしないジョブ | — | 必須のチェックとの突き合わせで差に数えないと、理由と組で定義したジョブ | — | — | `docs/specifications/ci-required-checks-reconcile.md` |
-| 突き合わせのチェック | — | ワークフローのジョブから決まるチェックの名前と、宛先のブランチの必須のチェックと、必須のチェックの設定を突き合わせ、差があれば落ちるチェック | — | — | `docs/specifications/ci-required-checks-reconcile.md` |
+| 突き合わせのチェック | — | ワークフローのジョブから決まるチェックの名前と、マージ先のブランチの必須のチェックと、必須のチェックの設定を突き合わせ、差があれば落ちるチェック | — | — | `docs/specifications/ci-required-checks-reconcile.md` |
 | 追加待ちのチェック | — | 必須にすると決めたが、ruleset へ足す承認（リリース承認ゲート）を待っているチェック。突き合わせのチェックは差に数えない | — | — | `docs/specifications/ci-required-checks-reconcile.md` |
 | 依存の欠け | — | 手順のスクリプトが deps.require で外部パッケージを用意できずに止まったこと。終了コード 69 で終わり、status は stopped。「飛ばしてよい」とも「前提が無い（3）」とも読まない | — | — | `docs/specifications/ndf-deps-missing-exit-code.md` |
 | 置き換わった失敗 | — | PR の先頭のコミットで、同じチェック（`workflowName` と `name` の組）により新しい項目があるときの古い項目の失敗。CI のチェックの結論に数えない | — | — | `docs/specifications/ndf-ci-wait-superseded-failures-and-infra-wait.md` |
@@ -298,8 +298,8 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 設計に名前の出るテスト | — | 設計文書の「決定の記録」「テスト設計」「構成要素」に、バッククォートで囲んで書かれたテストファイルのパス・<パス>::<名前>・「テスト設計」の test で始まる識別子 | — | — | `docs/specifications/quality-gates-design-match.md` |
 | 既存の確定仕様 | — | 比べるベースブランチとの merge-base の時点で確定仕様の保存先にあった文書。同じ差分で足した確定仕様は含まない | — | — | `docs/specifications/quality-gates-design-match.md` |
 | 設計の決定 | — | 設計文書の「決定の記録」の 1 件（### 決定 N）。judge のステップが返す「決定」とは別の語 | — | — | `docs/specifications/quality-gates-design-match.md` |
-| 設計と違う点 | — | 実装 PR の本文の節。設計の決定・設計に名前の出るテスト・既存の確定仕様・受け入れ条件と実装の違いを、箇所・違い・理由の行で並べる | — | — | `docs/specifications/quality-gates-design-match.md` |
-| 受け入れ条件の番号 | — | 課題の本文の `## 受け入れ条件` の節で、コードブロックの外にある行頭のチェックボックスの行を上から数えた順（1 から）。リリース後テストの表の `受け入れ条件` の列は、セルの頭に `<番号>.` で書く | — | — | `docs/specifications/ndf-sprint-close-acceptance-criteria.md` |
+| 設計と違う点 | — | 実装 PR の本文のセクション。設計の決定・設計に名前の出るテスト・既存の確定仕様・受け入れ条件と実装の違いを、箇所・違い・理由の行で並べる | — | — | `docs/specifications/quality-gates-design-match.md` |
+| 受け入れ条件の番号 | — | 課題の本文の `## 受け入れ条件` のセクションで、コードブロックの外にある行頭のチェックボックスの行を上から数えた順（1 から）。リリース後テストの表の `受け入れ条件` の列は、セルの頭に `<番号>.` で書く | — | — | `docs/specifications/ndf-sprint-close-acceptance-criteria.md` |
 | 受け入れ条件のマーカー | — | 受け入れ条件の番号に合格の行がそろった課題を閉じるとき、sprint-close.py がその行のチェックボックスへ付ける `[x]` | — | — | `docs/specifications/ndf-sprint-close-acceptance-criteria.md` |
 | 起票者の推定 | — | 課題の題・本文に、利用者の指示の原文に無く起票者（課題を書いた AI）が文書・コード・経緯から推して足した条件。設計承認ゲートで確かめるまで利用者の決定として扱わない。扱い（受け入れ条件・前提・含まない・採らない）を書いた推定は設計者が決めた判断として読み、MVV 判定が承認ゲートを省いたときはその判定が確かめた記録になる | — | — | `docs/specifications/ndf-design-ai-decisions-and-mvv-gate.md` |
 | 承認ゲートの変更要求 | — | 承認ゲートで利用者が承認せず、対象を直すよう戻したこと。MVV 判定の有無を問わず 1 回を 1 件と数える。MVV 判定との食い違いである覆しとは別の数 | — | — | `docs/specifications/ndf-gate-rejections-and-filer-assumptions.md` |
@@ -317,7 +317,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | ループを通らない最長の経路 | — | プランの並びで後ろのステップへ行く遷移だけをたどった、最も長い経路。数はステップの数で、流し始めるステップを含む | — | — | `docs/specifications/ndf-supervise-plan-limits-and-slow-watch.md` |
 | worker のセッションの記録 | — | 会話を残す claude -p（Skill を回す work のステップ）が CLAUDE_CONFIG_DIR の projects の下へ書き足していく 1 本の JSONL。遅れの見張りが大きさの伸びを進みに数える | — | — | `docs/specifications/ndf-supervise-plan-limits-and-slow-watch.md` |
 | 戻りの輪 | — | 修正の work を含まず、kind が「戻り」のステップを含む遷移の輪。戻りの上限の回数だけ回るものとして上限に数える | — | — | `docs/specifications/ndf-supervise-plan-limits-and-slow-watch.md` |
-| ベースブランチのマージ | — | ベースブランチの先端を作業ブランチへマージのコミットでマージ、衝突を解いてから合成の上で検査を続けるプランのステップ。用語集だけの衝突は用語集のマージで解き、ほかは修正の worker へ回す | — | — | `docs/specifications/ndf-supervise-base-sync.md` |
+| ベースブランチのマージ | — | ベースブランチの HEAD を作業ブランチへマージのコミットでマージ、衝突を解いてから合成の上で検査を続けるプランのステップ。用語集だけの衝突は用語集のマージで解き、ほかは修正の worker へ回す | — | — | `docs/specifications/ndf-supervise-base-sync.md` |
 | 補正 | — | conductor がテンプレートの書いたプランへ手で足した指示や値。プランを書き直す側は消さない | — | — | `docs/specifications/ndf-supervise-impl-prompt-format-and-transient-failures.md` |
 | 整形 | — | 規則を変えずにコードの形だけを揃えるコマンド。何を打つかはプロジェクトの設定が持つ | — | — | `docs/specifications/ndf-supervise-impl-prompt-format-and-transient-failures.md` |
 | 一時的な失敗 | — | GitHub や git の呼び出しが 0 以外で終わり、打ち直せば通りうる失敗（5xx・接続の切断）。打ち直しても残れば、読めなかったとして止まる（#1941） | — | — | `docs/specifications/ndf-supervise-impl-prompt-format-and-transient-failures.md` |
@@ -325,7 +325,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 依存グループ | — | lib/deps.py の GROUPS と pyproject.toml の extra に並ぶ、外部パッケージの用途ごとのまとまり（procs・locks など）。deps.require へ名前で渡す | — | — | `docs/specifications/ndf-deps-require-groups-check.md` |
 | 未設定のグループ | — | モジュールから import をたどって届く外部パッケージの依存グループのうち、そのモジュールの中で覆う deps.require が無いもの。そのモジュールを読む側が引き受ける | — | — | `docs/specifications/ndf-deps-require-groups-check.md` |
 | 任意の依存 | — | 無ければ代わりの手段へ落ちる import。except ImportError / ModuleNotFoundError で受けるか、同じ関数の中で find_spec / deps.importable で確かめ、確かめが成り立ったときだけ通る枝で読む | — | — | `docs/specifications/ndf-deps-require-groups-check.md` |
-| 作業の報告 | `work_report` | worker が応答の最後に書く「## 作業の報告」の節。人と conductor が読む。成否は作業の結果ファイルで決め、この節の文からは決めない（#2337） | — | — | `docs/specifications/ndf-supervise-work-step-web-tools-and-report-stop.md` |
+| 作業の報告 | `work_report` | worker が応答の最後に書く「## 作業の報告」のセクション。人と conductor が読む。成否は作業の結果ファイルで決め、このセクションの文からは決めない（#2337） | — | — | `docs/specifications/ndf-supervise-work-step-web-tools-and-report-stop.md` |
 | 再起動 | `resume_prompt` | supervise の full のステップで、作業の結果ファイルが無いまま応答が終わったとき、同じ会話（--resume）へ続けるよう送ること。3 回まで（#2337） | — | — | `docs/specifications/ndf-supervise-work-step-web-tools-and-report-stop.md` |
 | 所要の記録 | — | `.ndf/project.json` の `test_duration.measured` にある全体テストの所要（秒。w）。出所は ndf-record → ci-junit → ci-steps の順に採る。設定の解析が書き、プランの作成と test-run.py が読む | — | — | `docs/specifications/ndf-supervise-test-limits-from-whole-runs.md` |
 | 全体テストの実測 | — | 同じリポジトリで先に走った全体テストの壁時計の秒。所要の記録とは別に残し、後のプランと test-run.py が予算なしのテストの上限を決めるときに読む（#1631） | — | — | `docs/specifications/ndf-supervise-test-limits-from-whole-runs.md` |
@@ -347,7 +347,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 過程の項目 | `process` | 結果 JSON の process。スクリプトが実行したこと（コマンド・操作）と、その結果の要旨を順に並べる | — | — | `docs/specifications/ndf-step-result-gaps-and-reading.md` |
 | 判断の項目 | `decisions` | 結果 JSON の decisions。スクリプトが決めたことと、その根拠を並べる | — | — | `docs/specifications/ndf-step-result-gaps-and-reading.md` |
 | 最終工程の記録 | — | 最終工程を終えたことを示す、GitHub に残った記録。デプロイはリリース記録の `段階:`、リリース後テストはその課題の行、振り返りは課題の本文の `振り返り: <コメントの URL>` の行のうち、指すコメントの識別子が記録の PR の最後のリリース記録のコメントの識別子以上のもの（その実行の振り返り）。sprint-close.py が閉じる前に確かめる | — | — | `plugins/ndf/skills/progress-tracking/SKILL.md` |
-| 閉じる予定の参照 | — | Pull Request の本文に `最終工程の後に閉じる: #<番号>` と書く形。GitHub は閉じず、sprint-close.py がスプリント課題として集める。宛先が既定ブランチの Pull Request では、NDF の手順が closing keywords をこの形へ置き換える | — | — | `plugins/ndf/skills/progress-tracking/SKILL.md` |
+| 閉じる予定の参照 | — | Pull Request の本文に `最終工程の後に閉じる: #<番号>` と書く形。GitHub は閉じず、sprint-close.py がスプリント課題として集める。マージ先が既定ブランチの Pull Request では、NDF の手順が closing keywords をこの形へ置き換える | — | — | `plugins/ndf/skills/progress-tracking/SKILL.md` |
 | バージョンの差し込み | — | 前のバージョンの NDF が組んだリリースプランが、具体的なバージョンの代わりに持つ `{release_version}`（出すバージョン）と `{release_base}`（その接尾辞を外したバージョン）。プランの型の移行関数がバージョンの参照へ読み替える（#2344） | — | — | — |
 | バージョンの記録 | — | 解決のスナップショットのうち、バージョンの参照の行。決めた・確かめたバージョンと、決めた根拠と、決め直しの履歴を持ち、流し直しはこれを読む。前のバージョンの NDF が書いた `version.json` は移行関数でこの行へ読み替える（#2344） | — | — | — |
 | バージョンの決め直し | — | 開発版の流し直しで、バージョンの記録のバージョンが自分のデプロイのマージより前に別のスプリントに出ていたとき、次に空いているバージョンを決め、解決のスナップショットのバージョンの行をそのバージョンへ上書きし、前のバージョンと理由をバックアップの履歴に残すこと。プランのファイルは書き換えない。明示のバージョンと、自分のデプロイのマージの後には行わない（#2344） | — | — | — |
@@ -380,7 +380,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | Skill の対応表 | — | 工程（ステップの stage）から、そのステップの worker へ届ける Skill の一覧を引く表。NDF の scripts/lib/stage-skills.json の 1 か所に置き、プランの worker の起動と ndf:worker の起動指示の両方が読む（#2376） | — | — | `docs/specifications/ndf-worker-stage-skills.md` |
 | Skill の渡し方 | — | Skill を worker へ届ける形。プランの worker には本文を system プロンプトへ入れ（本文）、ndf:worker には SKILL.md の絶対パスを起動指示の「読む Skill」に書く（パス。#2376） | — | — | `docs/specifications/ndf-worker-stage-skills.md` |
 | 読む Skill | — | supervisor が ndf:worker の起動指示に書く項目。その作業で読む規則の Skill の名前と SKILL.md の絶対パスを並べ、worker はここに挙がった SKILL.md だけを読む（#2376） | — | — | `docs/specifications/ndf-worker-stage-skills.md` |
-| 読む Skill の guard | — | supervisor が ndf:worker を起動する Agent の呼び出しを PreToolUse の hook で見て、「読む Skill」の欄が無い起動と、Skill の対応表を引かずに Skill を挙げた起動を止める判定。止めた理由に SSOT の「supervisor → worker」の節を添える（#2399） | — | — | `docs/specifications/ndf-supervisor-worker-skills-guard.md` |
+| 読む Skill の guard | — | supervisor が ndf:worker を起動する Agent の呼び出しを PreToolUse の hook で見て、「読む Skill」の欄が無い起動と、Skill の対応表を引かずに Skill を挙げた起動を止める判定。止めた理由に SSOT の「supervisor → worker」のセクションを添える（#2399） | — | — | `docs/specifications/ndf-supervisor-worker-skills-guard.md` |
 | 規則の Skill | — | 手順を持たず、書き方・記録の仕方のような規則だけを持つ Skill（document-style・logging-guidelines など）。Skill の対応表に置けるのはこれだけで、工程 Skill は置かない（#2376） | — | — | `docs/specifications/ndf-worker-stage-skills.md` |
 | 差分の棚卸し | — | 開発ループでは数回のループの 1 回に 1 回（既定 3 回。`.ndf/backlog.json` の `depths.diff.every`）、ループの外では毎スプリントのまとめで行う棚卸しの深さ。振り返りの範囲の変更で食い違った本文の訂正・直ったのに開いたままの課題を閉じる・閉じた親の子の見直し・その範囲で起票した課題（振り返りの範囲の始まりの時刻より後に作られた課題）への見積の段階の付与だけを行う（#2315・#2914） | — | — | `docs/specifications/ndf-backlog-refinement-depths.md` |
 | 仕上げのプラン | — | `supervise.py new close` が組むプラン（記録の `フェーズ` の値は「まとめ」）。確定仕様化・リリース後テスト・振り返り・課題を閉じる・棚卸しのステップを持つ（#2914） | — | — | `docs/specifications/ndf-sprint-close-plan-cost.md` |
@@ -439,7 +439,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 作業の識別子 | — | 複数のセッションを 1 つの作業として結ぶキー。起動の引数かスプリントに含まれる課題番号の組（#829 #830） | — | — | `docs/specifications/ndf-context-restart-policy.md` |
 | 費用の見込み | — | 判断の帯で、続けた場合と再起動した場合の次の工程までの費用を、記録から較正した中央値で比べた値 | — | — | `docs/specifications/ndf-context-restart-policy.md` |
 | 引継ぎの期間 | — | conductor が引継ぎ文書を書き始める前に記録した「引継ぎ開始」の時点から、そのセッションの最後の行まで | — | — | `docs/specifications/ndf-context-restart-policy.md` |
-| プランの参照 | — | プランが値の代わりに持つ、値の取り先の名前（次に空いている開発版・課題のリリース記録を置いた PR・前のプランが出した PR・承認したコミットと照らすブランチの先端）。流す直前に実行の核が値へ解決する（#2344） | — | — | — |
+| プランの参照 | — | プランが値の代わりに持つ、値の取り先の名前（次に空いている開発版・課題のリリース記録を置いた PR・前のプランが出した PR・承認したコミットと照らすブランチの HEAD）。流す直前に実行の核が値へ解決する（#2344） | — | — | — |
 | 解決の記録 | — | 1 回の実行がプランの参照ごとに解決した値と出所。実行の記録の行として残り、プランのファイルへは書き戻さない（#2344） | — | — | — |
 | 承認時の値 | — | 承認ゲートで人か MVV 判定が承認資料で見た値（承認したコミット・バージョン）。流す直前に解決した値と照らし、食い違えば流さずに人へ戻す（#2344） | — | — | — |
 | 解決のスナップショット | — | 流し直しでも同じ値を使う参照（バージョン）の解決した値と決め直しの履歴を、プランの状態ディレクトリに残すファイル（`refs.json`）（#2344） | — | — | — |
@@ -452,8 +452,8 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 作り方 | — | 設計文書の決定の記録の中の 1 行。その決定が機能をどう得るか（自前で作る / ライブラリやサービスを使う / 標準に倣う、またはその組み合わせ）を書く（#2519） | — | — | `plugins/ndf/skills/design/references/decisions.md` |
 | 比べた候補 | — | 設計文書の決定の記録の中の 1 行。外部の調査の表で比べた行の番号（STD<数> / PRD<数> / LIB<数>）を並べる（#2519） | — | — | `plugins/ndf/skills/design/references/decisions.md` |
 | プランの進行の記録 | — | supervise のプランのステップごとの終了コード・秒・ドルを 1 行ずつ残す記録（`<状態のディレクトリ>/progress.jsonl`）。開発ループのまとめのプランでは `.ndf/loop/<名>/lap-<番号>/close*/` の下にある（#2315） | — | — | — |
-| 承認した head | — | 設計の承認を問うた時点の設計 Pull Request の先頭のコミット。承認した設計のマージはこの先端のときだけ行う | — | — | — |
-| マージの結果 | — | 承認した設計 Pull Request を宛先へマージする 1 回の試みの結果。マージした・マージ済み・先端が動いた・マーカーが無い・検査が緑でない・衝突・宛先が本番・失敗のどれか | — | — | — |
+| 承認済みのコミット | — | 設計の承認を問うた時点の設計 Pull Request の先頭のコミット。承認した設計のマージはこの HEAD のときだけ行う | 承認した head、承認した先端 | — | — |
+| マージの結果 | — | 承認した設計 Pull Request をマージ先へマージする 1 回の試みの結果。マージした・マージ済み・HEAD が動いた・マーカーが無い・検査が緑でない・衝突・マージ先が本番・失敗のどれか | — | — | — |
 | 回答の後の整理 | — | オーガナイザーが回答を送った後、待つ間に届いたリクエストを取り直し、除くものを除いて残りをまとめて問う手順 | — | — | — |
 | 本体 | — | エントリポイントの仕事の中身を持つ関数。実行の核が呼び、結果 JSON か終了コードを返す（#2337） | — | — | — |
 | 核の対象外 | — | 実行の核を通さないエントリポイントのマーカー。hook の定義から起動されるか、ランタイムが直接起動して標準出力をそのまま使うもの。コントラクトの一覧の core に理由と根拠を書く（#2337） | — | — | — |
@@ -464,7 +464,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 触るファイル | — | 設計の結果の列。扱いが `実装する` の課題が変えるファイルの一覧。実装のプランの触る範囲になる | — | — | `docs/specifications/ndf-design-results-docs-and-cell-format.md` |
 | 食い違い | — | 同じ課題について、2 本の設計文書が違う設計の結果（扱い・統合先・触るファイルのどれか）を書いていること。設計の結果のステージは食い違いを見つけると止まり、人へ戻す | — | — | `docs/specifications/ndf-design-results-docs-and-cell-format.md` |
 | 出し直しの指摘 | — | 設計承認ゲートで人が「直して出し直す」と回答したときに `--note` に渡したファイルの全文。レビューの担当が書く指摘ファイルとは別のもの | — | — | `docs/specifications/ndf-loop-human-answer-delivery.md` |
-| 出し直しの指摘の履歴 | — | 課題の本文に置く、出し直しの指摘を回ごとに追記する節。人の判断待ちの節を書き直しても消えない | — | — | `docs/specifications/ndf-loop-human-answer-delivery.md` |
+| 出し直しの指摘の履歴 | — | 課題の本文に置く、出し直しの指摘を回ごとに追記するセクション。人の判断待ちのセクションを書き直しても消えない | — | — | `docs/specifications/ndf-loop-human-answer-delivery.md` |
 | 指摘への対応の表 | — | 出し直しの設計 PR の本文に置く表。出し直しの指摘の項目ごとに、直した / 直せない、直した箇所か直せない理由を 1 行で持つ | — | — | `docs/specifications/ndf-loop-human-answer-delivery.md` |
 | 設計のプラン | — | 開発ループの 1 回が課題ごとに組む、設計のフェーズのプラン（`sprint/<番号>-design-<課題>.json`）。要求・設計・レビュー・設計承認ゲートのステップを持つ | — | — | `docs/specifications/ndf-loop-human-answer-delivery.md` |
 | 回答の種類 | — | 人が承認ゲートや質問に返す回答の区分。承認・直して出し直す・やらない・予算・止めるの 5 つ | — | — | `docs/specifications/ndf-loop-human-answer-delivery.md` |
@@ -485,7 +485,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | リリース待ち | — | リリースのリクエストを送り、回答を待たずに締めたループの 1 回の結果。まとめはまだ流していない | 配布待ち | — | `plugins/ndf/skills/development-workflow/references/loop.md` |
 | リリースのリクエスト | — | レーンがリリース承認ゲートの手前で、リリースをオーガナイザーへ頼むために送る 1 件のメッセージ（parallel.py request）。テンプレートで出すリポジトリのレーンだけが送る | 配布の依頼 | — | `plugins/ndf/skills/development-workflow/references/parallel.md` |
 | 課題の差し込み | — | リリースのリクエストのプランのコマンドが、課題の番号の代わりに持つ `{plan_issues}`。ステップを流す時点に、プランの `課題` の空白区切りで埋まる | — | — | `plugins/ndf/skills/development-workflow/references/parallel.md` |
-| まとめたリリース | — | オーガナイザーが複数のレーンの Pull Request を 1 つのバージョンとして出すリリース。提示のプランと本番のプランからなる | まとめた配布 | — | — |
+| まとめたリリース | — | オーガナイザーが複数のレーンの Pull Request を 1 つのバージョンとして出すリリース。提示のプランとリリースのワークフローからなる | まとめた配布 | — | — |
 | 利用先のリポジトリ | — | NDF を導入して使っているリポジトリ | 配布先のリポジトリ | — | `docs/specifications/ndf-deploy-and-release-terms.md` |
 | 旧い値の読み替え | — | バージョンを上げる前に書かれた記録の値を、読む時点で新しい値へ変換すること | — | — | `docs/specifications/ndf-deploy-and-release-terms.md` |
 | 禁止語 | — | 用語集の設定が、検査する範囲で新しく書くことを禁じた語 | — | — | `docs/specifications/ndf-deploy-and-release-terms.md` |
@@ -595,14 +595,14 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 最終の検査 | — | スプリントのまとめの先頭で流す検査（`<スプリント名>-final`）。変更が無ければ終了コード 3 で終わり、後続の開発版・本番・リリースのリクエストのプランは実行条件で飛ぶ | — | — | `docs/specifications/ndf-parallel-empty-requests-and-settled-gates.md` |
 | 中身の無いリクエスト | — | リリースのリクエストのうち、載せた Pull Request がすべてマージされずに閉じたもの。耐久ワークフローはリリースを組まずに、バージョンなしのリリース済みと理由（閉じた Pull Request の番号）で回答して外す | — | — | `docs/specifications/ndf-parallel-empty-requests-and-settled-gates.md` |
 | 処理済みのリリース承認ゲート | — | 計画のジャーナルで、同じ連番の確定か締めの行がそれより後にあるリリース承認ゲートの行。回答待ちのリクエストに数えない | — | — | `docs/specifications/ndf-parallel-empty-requests-and-settled-gates.md` |
-| ブランチ運用の設定 | — | スプリントの起点・ベースブランチへ入れる時点・文書の Pull Request の宛先・本番へのリリース方式を書いた `.ndf/worktree.json` の `branch_flow`。無ければ、ベースブランチから切りベースブランチを丸ごと本番チャネルへ出す既定の振る舞いになる | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| ブランチ運用の設定 | — | スプリントの起点・ベースブランチへ入れる時点・文書の Pull Request のマージ先・本番へのリリース方式を書いた `.ndf/worktree.json` の `branch_flow`。無ければ、ベースブランチから切りベースブランチを丸ごと本番チャネルへ出す既定の振る舞いになる | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | スプリントの起点 | — | スプリントブランチと worktree を切る元のブランチ。ベースブランチか本番チャネルをチャネルの名前で指す。ブランチ運用の設定が決め、無ければベースブランチ | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 結合ブランチ | — | ベースブランチを、スプリントブランチを入れてスプリントどうしの組み合わせを試す役割で呼ぶときの名前。開発版のチャネルを兼ねることがある | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | リリースブランチ | — | 本番チャネルへ入れる変更を集め、バージョンを上げるブランチ（`release/v<バージョン>`） | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 本番へのリリース方式 | — | 本番チャネルへ何をどう入れるか。ベースブランチを丸ごと出すか、本番チャネルから切ったリリースブランチへ選んだリリースの単位を集めるか。ブランチ運用の設定が決める。リリースの組み方（まとめたリリースを組むか）とは別の軸 | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 本番チャネルの設定 | — | 本番チャネルのブランチの origin 上の先頭にあるブランチ運用の設定（`origin/<本番チャネル>:.ndf/worktree.json`）。本番チャネル宛の検査とスプリントに属さないリリースのプランが読む | — | — | `docs/specifications/ndf-branch-flow-declaration.md` |
 | 開始時の記録 | — | スプリントの目録（`sprint.json`）の `ブランチ運用` に、スプリントを始めたときに書いたブランチ運用の設定の値。スプリントの後の工程はこれを読み、設定を読み直さない | — | — | `docs/specifications/ndf-branch-flow-declaration.md` |
-| 文書の Pull Request の宛先 | — | 設計 PR と確定仕様化の PR の宛先。ベースブランチかスプリントブランチで、ブランチ運用の設定が決める | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| 文書の Pull Request のマージ先 | — | 設計 PR と確定仕様化の PR のマージ先。ベースブランチかスプリントブランチで、ブランチ運用の設定が決める | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | リリースの単位 | — | 選んで集めるリリース方式で、リリースが選ぶ 1 つのブランチ。本番チャネルに含まれていないコミットを持つスプリントブランチ | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 詳細設計 | — | 設計の後に置く工程と、その成果物。ファイル配置・クラスと関数の構造・関数ごとの責務と異常系の処理を、実装の前に決める | — | — | `plugins/ndf/skills/design/references/detailed-design.md` |
 | 異常系の処理 | — | 関数ごとに起こりうる失敗と、その検出の場所・扱い・利用者に見える出力・後始末。詳細設計が決める | — | — | `plugins/ndf/skills/design/references/detailed-design.md` |
@@ -666,7 +666,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 初期構成 | — | 新しいディレクトリに最初に置く `plugin.json`・依存の lock・エントリポイント・CI のジョブ・テストの保存先（#1142 の子 X0）。スケルトン（SKILL.md の bash）とは別 | — | — | — |
 | チェックアウトの保存先 | — | <git の共通ディレクトリ>/<プラグイン名>/state/。どの worktree からも同じ所に解決し、ステートマシンの DB と実行のキーごとの耐久の記録とバックアップを置く（#1142 の作り直し） | — | — | — |
 | 形の番号 | — | チェックアウトの保存先の format.json と耐久の記録のアプリのバージョンが持つ整数。読み書きの形が変わるときだけ上げ、NDF のバージョンとは別に動く | — | — | — |
-| レビューの項目 | — | 設計レビューの Issue の本文（進行の節より前）にある、取り消し線の無いチェックボックスの行 1 つ（#1142 の作り直し） | — | — | — |
+| レビューの項目 | — | 設計レビューの Issue の本文（進行のセクションより前）にある、取り消し線の無いチェックボックスの行 1 つ（#1142 の作り直し） | — | — | — |
 | ルートの表 | — | レビューの項目ごとに、ルートの子・順番・新設か追補か・要求の行を持つ 1 つの表（#1142 の作り直し） | — | — | — |
 | 追補の単位 | — | 閉じた子へ足す作業を、元の子の名前に + を付けて別の子にしたもの（例: X1+） | — | — | — |
 | 要求の行 | — | issues/issue-1142-requirements.md の行番号か受け入れ条件の番号。レビューの項目の根拠になる | — | — | — |
@@ -689,20 +689,20 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 遅れ（依存のバージョンの） | — | 設定のバージョンが上げる先より古く、固定する理由も無い状態。週 1 回の検査が知らせる | — | — | — |
 | 依存の更新の仕組み | — | 依存のバージョンの遅れを知らせ、バージョンを上げる手段。このリポジトリでは Renovate を GitHub Actions で動かす形（#3370 の決定 1） | — | — | — |
 | 依存の一覧の Issue | — | 依存の更新の仕組みが遅れを知らせる 1 件の Issue。Renovate の Dependency Dashboard で、チェックを入れると更新の PR が作られる | — | — | — |
-| 環境ブランチ | — | 検証や本番の環境へ載せるブランチ（`qa/*`・`staging/*`・`release/*` など）。`/ndf:cherry-pick-pr` の引数で指し、短命ブランチの Pull Request の宛先になる | — | — | — |
-| 短命ブランチ | — | 環境ブランチの先端から切り、選んだコミットだけを cherry-pick して環境ブランチ宛の Pull Request を出すためのブランチ（`<元のブランチ>-for-<環境ブランチのスラッシュ以降>`）。マージした後に消す | — | — | — |
+| 環境ブランチ | — | 検証や本番の環境へ載せるブランチ（`qa/*`・`staging/*`・`release/*` など）。`/ndf:cherry-pick-pr` の引数で指し、短命ブランチの Pull Request のマージ先になる | — | — | — |
+| 短命ブランチ | — | 環境ブランチの HEAD から切り、選んだコミットだけを cherry-pick して環境ブランチ宛の Pull Request を出すためのブランチ（`<元のブランチ>-for-<環境ブランチのスラッシュ以降>`）。マージした後に消す | — | — | — |
 | 振り分け表 | — | #1142 の設計レビューの全項目と要求の行について、ルートの子とバージョン（11.0.0 か 11.x）を持つ文書 issues/issue-1142-design-review-routing.md。ルートの表と要求の受け入れ条件のオーナーの表から成る | — | — | — |
 | 11.x の行 | — | 振り分け表でバージョンの列が 11.x の行。11.0.0 を出した後に解く（#1142 の作り直し） | — | — | — |
 | 閉じた子 | — | ルートの子のうち、設計を書く時点で GitHub の Issue の状態が CLOSED のもの。子の表のコピーの closed では判定しない（#3388） | — | — | — |
 | 多観点レビュー | — | 観点ごとに独立したレビュー役を並列に立て、設計の抜けを探すレビュー。ラウンドを重ねて磨く cross-review とは別の場（#3388） | — | — | — |
-| 起票の前に人へ見せる場 | — | 多観点レビューの範囲の外の指摘を分類し、分類ごとのあるべき姿と受け入れ条件の案を、設計承認ゲートの承認資料の節「多観点レビューの分類」に載せる場。人が回答した承認ゲートの後にだけ起票する（#3388） | — | — | — |
+| 起票の前に人へ見せる場 | — | 多観点レビューの範囲の外の指摘を分類し、分類ごとのあるべき姿と受け入れ条件の案を、設計承認ゲートの承認資料のセクション「多観点レビューの分類」に載せる場。人が回答した承認ゲートの後にだけ起票する（#3388） | — | — | — |
 | 11.x の対応表 | — | 振り分け表の 11.x の行ごとに、11.x でのルート（11.x の子の記号・開いている Issue・作らない理由のどれか 1 つ）を持つ表 issues/issue-3388-design-routing.md。11.x の行のルートの SSOT（#3388） | — | — | — |
 | 11.x の子 | — | 11.0.0 を出した後に着手する子の Issue。記号は Z<数> で、ラベル rebuild-1142 を付けない（#3388） | — | — | — |
-| 確定の後の承認ゲート | — | 並列の計画で、リリース承認ゲートの承認（確定）を受けた後に、本番のプランが承認ゲート（終了コード 10）で終わること | — | — | `docs/specifications/ndf-parallel-helper-confirmed-gate-and-launch-wait.md` |
+| 確定の後の承認ゲート | — | 並列の計画で、リリース承認ゲートの承認（確定）を受けた後に、リリースのワークフローが承認ゲート（終了コード 10）で終わること | — | — | `docs/specifications/ndf-parallel-helper-confirmed-gate-and-launch-wait.md` |
 | リクエスト | `request` | 並列の計画のレーンか一時レーンがオーガナイザーへ送る質問・承認の求め。ジャーナルに 1 行で残り、id を持つ | 依頼 | — | `docs/specifications/ndf-parallel-helper-confirmed-gate-and-launch-wait.md` |
-| 同じ質問 | — | 並列の計画で、一時レーンの区分つきの質問のうち、同じ一時レーンの名前・同じ区分・同じ質問の対象（ブランチなら先端のコミットの 40 桁まで）を持つもの。言い回しの違いは数えない。1 スプリントのレーンと開発ループのレーンの質問は比べず、質問の対象が空の質問はどの質問とも同じ質問にならない | — | — | — |
+| 同じ質問 | — | 並列の計画で、一時レーンの区分つきの質問のうち、同じ一時レーンの名前・同じ区分・同じ質問の対象（ブランチなら HEAD のコミットの 40 桁まで）を持つもの。言い回しの違いは数えない。1 スプリントのレーンと開発ループのレーンの質問は比べず、質問の対象が空の質問はどの質問とも同じ質問にならない | — | — | — |
 | 起き直し | — | 止まった一時レーンを、耐久ワークフローが同じ名前で起動し直すこと | — | — | `docs/specifications/ndf-parallel-helper-confirmed-gate-and-launch-wait.md` |
-| 質問の対象 | — | 並列の計画で、区分つきの質問が操作する対象を表す 1 つの文字列。`<ブランチ名>@<先端のコミットの 40 桁>` か `#<課題か PR の番号>`。`request-ask` が質問の文の対象の行から読み、ブランチの先端のコミットは質問を受けた時点に求めて足し、計画のジャーナルのリクエストの行の `target` に残す | — | — | — |
+| 質問の対象 | — | 並列の計画で、区分つきの質問が操作する対象を表す 1 つの文字列。`<ブランチ名>@<HEAD のコミットの 40 桁>` か `#<課題か PR の番号>`。`request-ask` が質問の文の対象の行から読み、ブランチの HEAD のコミットは質問を受けた時点に求めて足し、計画のジャーナルのリクエストの行の `target` に残す | — | — | — |
 | 対象の行 | — | 区分つきの質問の最初の質問の文に置く `対象: <ブランチ名>` か `対象: #<番号>` の 1 行。`request-ask` が質問の対象を読む唯一の場所で、複数あれば最後の行を使う | — | — | — |
 | 承認の行 | — | 1 スプリントのレーンが設計 PR のマージの承認を求める区分 `ndf-gate:1` の質問の、最初の質問の文に置く `承認: #<設計 PR の番号>` の 1 行。`request-ask` が設計承認のリクエストに組む質問を見分ける唯一のマーカーで、質問の文のほかの場所で PR を指しても設計承認のリクエストにならない | — | — | — |
 | 回答の引き継ぎ | — | 起き直した一時レーンの同じ質問へ、前の起動で送ったリクエストの回答を当てるか、回答待ちのリクエストの id を返すこと。どちらの場合も新しいリクエストの行を書かず、計画のジャーナルに `reused` の行で残る | — | — | — |
@@ -752,6 +752,19 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 割り当て表 | `allocations` | テスト環境の割り当ての一覧（worktree-registry.json） | 台帳 | — | `plugins/ndf-next/skills/development-workflow/references/glossary.md` |
 | 実行の一覧 | `durable_runs` | PostgreSQL のときに起動した実行のキーを書き、片付けで消す表（ndf_runs） | 台帳 | — | `plugins/ndf-next/skills/development-workflow/references/glossary.md` |
 | 使用量ログ | `usage_log` | 応答ごとの使用量を追記する記録（usage.jsonl） | 帳簿 | — | `plugins/ndf-next/skills/development-workflow/references/glossary.md` |
+| リリースのワークフロー | — | 本番リリースのパイプライン。本番チャネルへ変更を届ける手順の並び | 本番のプラン | — | — |
+| 修正ステップ | — | 指摘や失敗を直すステップ（fix ステップ）。担う worker は修正用の worker | 直しのステップ、直しの worker | — | — |
+| HEAD | — | ブランチの最新のコミット | 先端（単独） | — | — |
+| ブランチ戦略の一覧 | — | 選べるブランチ戦略（merge_base_branch・release_branch・trunk）の一覧 | 取り込み方の表、取り込み方の行 | — | — |
+| バージョンアップ | — | リリースの単位のバージョンを上げること（version bump） | バージョン上げ | — | — |
+| バージョン種別のラベル | — | バージョンアップの種別（major・minor・patch）を示す PR のラベル | 上げ幅のラベル | — | — |
+| 検証ブランチ | — | マージの前に変更を試すためのブランチ（preview ブランチ） | 検証用ブランチ | — | — |
+| 一時マージコミット | — | merge queue が必須のチェックに通すために作る一時のマージコミット（merge group） | 一時のコミット | — | — |
+| merge queue への追加 | — | 承認済みのコミットを指定して PR を merge queue へ入れること（enqueue） | キューへの投入 | — | — |
+| パース | — | 設定や入力を読んで値を取り出すこと・解決すること | 読み分け | — | — |
+| セクション | — | 文書や設定ファイルの中の区切り | 節（単独） | — | — |
+| クリーンアップ | — | マージやリリースの後に、不要になったブランチ・worktree・一時ファイルを消すこと | 後片付け | — | — |
+| マージ先 | — | PR をマージする先のブランチ | 宛先 | — | — |
 
 ## NDF の Slack 通知（`ndf-notification`）
 
@@ -1019,30 +1032,30 @@ release が走らせるリリースの種別・リリースコマンド・公開
 | CD の案内 | — | CD が無いリポジトリで、工程がデプロイに入ったときに出す案内。CD の設定と方式の記録を促す。承認ゲートではない | — | — | `docs/specifications/ndf-release-via-cd.md` |
 | 手動反映の理由 | — | delivery の手動の行に書く、あえて CD を置かない理由。これがある行には CD の案内を出さない | — | — | `docs/specifications/ndf-release-via-cd.md` |
 | リリースの Pull Request | — | 本番チャネルへ変更を入れる Pull Request。リリースのテンプレートでは `release/v<バージョン>` が、経路 merge ではベースブランチが head になる | 昇格の Pull Request | — | `docs/specifications/ndf-release-pr-and-merge-route-terms.md` |
-| リリースの承認資料 | — | リリース承認ゲートで利用者か MVV 判定が見る承認資料。承認したコミットの欄を持つ。経路 merge では、この欄の SHA がリリースの Pull Request の先端のときだけ本番チャネルへマージする。リリースのテンプレートでは、承認したコミットから比べた先端までに版上げなど許可した差分のほかが無いことを確かめ、比べた先端をマージする | 昇格の承認資料 | — | `docs/specifications/ndf-release-pr-and-merge-route-terms.md` |
+| リリースの承認資料 | — | リリース承認ゲートで利用者か MVV 判定が見る承認資料。承認したコミットの欄を持つ。経路 merge では、この欄の SHA がリリースの Pull Request の HEAD のときだけ本番チャネルへマージする。リリースのテンプレートでは、承認したコミットから比べた HEAD までに版上げなど許可した差分のほかが無いことを確かめ、比べた HEAD をマージする | 昇格の承認資料 | — | `docs/specifications/ndf-release-pr-and-merge-route-terms.md` |
 | 他のプラグイン | — | リリースの設定の release.plugin 以外で、前のタグからの差分にファイルがあるプラグイン。release-steps.py changed-plugins が列挙する | — | — | `docs/specifications/ndf-release-other-plugin-levels-and-migration.md` |
-| 上げ幅 | — | 版数のどの桁を上げるか（MAJOR / MINOR / PATCH）。セマンティックバージョニングに従う | — | — | `docs/specifications/ndf-release-other-plugin-levels-and-migration.md` |
-| 移行の手順 | — | 利用者が新しいバージョンへ移るときに自分で行う操作（引数の置き換え・認証のし直し・導入し直しなど）。PR 本文の「移行の手順」の節が正 | — | — | `docs/specifications/ndf-release-other-plugin-levels-and-migration.md` |
-| 互換なしのフラグ | — | 要求の「影響」の表の「公開インタフェース」の行に書く、互換の経路を持たないことを示す語（互換なし / 互換の経路は持たない）。release-steps.py changed-plugins が上げ幅の候補を MAJOR にする材料 | — | — | `docs/specifications/ndf-release-other-plugin-levels-and-migration.md` |
-| 承認したコミット | — | リリース承認ゲートの承認資料が対象にした、ベースブランチの先端のコミットの SHA（40 桁）。本番チャネルへ入れてよい中身の上限を示す | — | — | `docs/specifications/ndf-release-approved-commit.md` |
-| 比べた先端 | — | リリースが承認したコミットと比べた時点の、本番チャネルへ出すブランチの先端のコミットの SHA（リリースのテンプレートでは `release/v<バージョン>`、経路 merge ではベースブランチ）。本番チャネルへマージしてよいのはこのコミットだけである | — | — | `docs/specifications/ndf-release-approved-commit.md` |
-| 確かめたコミット | — | 導入の確認を走らせた、ベースブランチの先頭のコミットの SHA（40 桁）。導入の確認の承認資料に書かれ、pace: fast / auto でリリースの Pull Request をマージしてよい先端はこのコミットに限る | — | — | `docs/specifications/ndf-release-approved-commit.md` |
-| 承認の外のコミット | — | 承認したコミットから比べた先端までに入ったコミットのうち、このバージョンのデプロイの PR のものでないもの。リリース対象（`plugins/`・`.claude-plugin/`）に触れるものがあればリリースは承認ゲートで止まる | — | — | `docs/specifications/ndf-release-approved-commit.md` |
+| バージョン種別 | — | 版数のどの桁を上げるか（MAJOR / MINOR / PATCH）。セマンティックバージョニングに従う | 上げ幅 | — | `docs/specifications/ndf-release-other-plugin-levels-and-migration.md` |
+| 移行の手順 | — | 利用者が新しいバージョンへ移るときに自分で行う操作（引数の置き換え・認証のし直し・導入し直しなど）。PR 本文の「移行の手順」のセクションが正 | — | — | `docs/specifications/ndf-release-other-plugin-levels-and-migration.md` |
+| 互換なしのフラグ | — | 要求の「影響」の表の「公開インタフェース」の行に書く、互換の経路を持たないことを示す語（互換なし / 互換の経路は持たない）。release-steps.py changed-plugins がバージョン種別の候補を MAJOR にする材料 | — | — | `docs/specifications/ndf-release-other-plugin-levels-and-migration.md` |
+| 承認したコミット | — | リリース承認ゲートの承認資料が対象にした、ベースブランチの HEAD のコミットの SHA（40 桁）。本番チャネルへ入れてよい中身の上限を示す | — | — | `docs/specifications/ndf-release-approved-commit.md` |
+| 比べた HEAD | — | リリースが承認したコミットと比べた時点の、本番チャネルへ出すブランチの HEAD のコミットの SHA（リリースのテンプレートでは `release/v<バージョン>`、経路 merge ではベースブランチ）。本番チャネルへマージしてよいのはこのコミットだけである | — | — | `docs/specifications/ndf-release-approved-commit.md` |
+| 確かめたコミット | — | 導入の確認を走らせた、ベースブランチの先頭のコミットの SHA（40 桁）。導入の確認の承認資料に書かれ、pace: fast / auto でリリースの Pull Request をマージしてよい HEAD はこのコミットに限る | — | — | `docs/specifications/ndf-release-approved-commit.md` |
+| 承認の外のコミット | — | 承認したコミットから比べた HEAD までに入ったコミットのうち、このバージョンのデプロイの PR のものでないもの。リリース対象（`plugins/`・`.claude-plugin/`）に触れるものがあればリリースは承認ゲートで止まる | — | — | `docs/specifications/ndf-release-approved-commit.md` |
 | 承認の記録 | — | 承認資料の欄の 1 つ。リリース承認ゲートを承認したときの承認したコミットの SHA と、承認した者・時刻を持つ。承認資料を書き直すと消え、承認し直すまでリリースは通らない | — | — | `docs/specifications/ndf-release-approved-commit.md` |
-| 更新情報の節 | — | plugin の README の `## 更新情報` の節。バージョンを名乗らず、CHANGELOG.md のバージョンの節を参照する固定の案内だけを持つ。リリースの手順（bump・changelog・notes）は書かない | — | — | `docs/specifications/ndf-release-readme-update-info.md` |
-| バージョンの節 | — | CHANGELOG.md の `## [<plugin> <基底のバージョン>]` の見出しから次の `## ` までの節。そのバージョンの利用者向けの変化と移行の手順の全件の SSOT | — | — | `docs/specifications/ndf-release-readme-update-info.md` |
-| 範囲の終点 | — | バージョンの節と承認資料の「含む PR」に並べる PR の範囲の、新しい側の端のコミット。出すバージョンのコミット（リリースのブランチの先頭か、承認に出すコミット）を指す | — | — | — |
-| リリースタグ | — | 正式版を出したときに本番チャネルのコミットへ打つタグ `<プラグイン>--v<バージョン>`。リリースタグのあるバージョンの節は工程から書き換えない | — | — | — |
+| 更新情報のセクション | — | plugin の README の `## 更新情報` のセクション。バージョンを名乗らず、CHANGELOG.md のバージョンのセクションを参照する固定の案内だけを持つ。リリースの手順（bump・changelog・notes）は書かない | — | — | `docs/specifications/ndf-release-readme-update-info.md` |
+| バージョンのセクション | — | CHANGELOG.md の `## [<plugin> <基底のバージョン>]` の見出しから次の `## ` までのセクション。そのバージョンの利用者向けの変化と移行の手順の全件の SSOT | — | — | `docs/specifications/ndf-release-readme-update-info.md` |
+| 範囲の終点 | — | バージョンのセクションと承認資料の「含む PR」に並べる PR の範囲の、新しい側の端のコミット。出すバージョンのコミット（リリースのブランチの先頭か、承認に出すコミット）を指す | — | — | — |
+| リリースタグ | — | 正式版を出したときに本番チャネルのコミットへ打つタグ `<プラグイン>--v<バージョン>`。リリースタグのあるバージョンのセクションは工程から書き換えない | — | — | — |
 | 子の箇条 | — | PR 本文の箇条書きで、前の項目より字下げした箇条。親の項目の一部として読む | — | — | `docs/specifications/ndf-release-readme-update-info.md` |
 | リリース後テストの記録 | — | release-verification が Pull Request へ残す、見出し `## リリース後テスト` から `合否:` までのブロック。`対象のバージョン:` の行と課題ごとの表を持つ | — | — | `docs/specifications/ndf-production-release-record.md` |
 | 課題の表 | — | リリース後テストの記録のうち、見出しに `課題` と `結果` の両方の列を持つ表。スプリントの課題を閉じる判定とリリースの承認資料が、課題ごとの合否をここから読む | — | — | `docs/specifications/ndf-sprint-close-acceptance-criteria.md` |
 | 補足の表 | — | リリース後テストの記録のうち、課題の表でない表（例: 主なテストの実行の表）。課題を閉じる判定にも承認資料にも使わない | — | — | `docs/specifications/ndf-sprint-close-acceptance-criteria.md` |
 | 版数を上げないリリース | — | 版数を変えず、既定ブランチへのマージかコミットの反映で本番へ届けるリリース | 版数を上げない配布 | — | `docs/specifications/ndf-production-release-record.md` |
 | 範囲の PR | — | 直前の正式版のタグから範囲の終点までに、ベースブランチへ merge commit か squash merge で入った PR と、スプリント経由の PR の和。`--prs` で渡した番号は、マージコミットが範囲の終点の祖先であるものだけを含む。版上げの PR と、PR でない番号（squash の件名の `(#N)` が課題を指すもの）は含まない | — | — | `docs/specifications/ndf-release-approval-included-prs.md` |
-| 版上げの PR | — | 今の NDF では、head のブランチが `release/` で始まる PR。版数と CHANGELOG だけを変え、中身の変更を持たない。ndf-next のリリース方式の行 `trunk` では、main へのマージの後に CD の `bump` が main の先端から作る main 宛ての PR で、head のブランチの名前（`release/v<バージョン>`）と、差分がバージョンの保存先・CHANGELOG のバージョンの節・`.ndf/release.json` の手順の書き先に限られることの両方で見分ける。名前が `release/` で始まるだけの PR は含まない | — | — | `docs/specifications/ndf-release-approval-included-prs.md` |
+| 版上げの PR | — | 今の NDF では、head のブランチが `release/` で始まる PR。版数と CHANGELOG だけを変え、中身の変更を持たない。ndf-next のリリース方式の行 `trunk` では、main へのマージの後に CD の `bump` が main の HEAD から作る main 宛ての PR で、head のブランチの名前（`release/v<バージョン>`）と、差分がバージョンの保存先・CHANGELOG のバージョンのセクション・`.ndf/release.json` の手順の書き先に限られることの両方で見分ける。名前が `release/` で始まるだけの PR は含まない | — | — | `docs/specifications/ndf-release-approval-included-prs.md` |
 | 合格の行 | — | リリース後テストの表で、`結果` の列が `合格` で始まる行 | — | — | `docs/specifications/ndf-sprint-close-acceptance-criteria.md` |
-| 手で足した節 | — | 承認資料の `## ` の節のうち、デプロイのステップ（approval-facts・notes --approval・changed-plugins --approval）が書く見出しに当たらないもの。作り直しの後も見出しと中身が残る | — | — | `plugins/ndf/skills/release/references/release-steps.md` |
-| 置き換える箇条 | — | 後の PR の本文の `## 置き換える箇条` の節に書く行。同じバージョンに含む前の PR の「利用者向けの変化」の箇条を指し、その箇条を CHANGELOG と承認資料の「配る中身」から除く | — | — | `plugins/ndf/skills/release/references/release-steps.md` |
+| 手で足したセクション | — | 承認資料の `## ` のセクションのうち、デプロイのステップ（approval-facts・notes --approval・changed-plugins --approval）が書く見出しに当たらないもの。作り直しの後も見出しと中身が残る | — | — | `plugins/ndf/skills/release/references/release-steps.md` |
+| 置き換える箇条 | — | 後の PR の本文の `## 置き換える箇条` のセクションに書く行。同じバージョンに含む前の PR の「利用者向けの変化」の箇条を指し、その箇条を CHANGELOG と承認資料の「配る中身」から除く | — | — | `plugins/ndf/skills/release/references/release-steps.md` |
 | スプリント経由の PR | — | 範囲の PR のうち、merge commit でベースブランチへ入った PR の 2 つ目の親の側（スプリントブランチ）へ merge commit で入った PR。変化と移行の手順はスプリント PR の本文が集めて持つ | — | — | `docs/specifications/ndf-release-approval-included-prs.md` |
 | 承認の材料 | — | 承認資料が集める 5 つの材料。レビュー（cross-review のラウンド数と見送った指摘）・リファクタリング（採用と取り消しの件数）・全体テスト（コマンド・合否・件数）・設計文書の未確認・未実施のリリース後テスト | — | — | `docs/specifications/ndf-release-approval-materials.md` |
 | マニフェスト | — | plugins/ndf/manifests/<ランタイム>-skills.txt。ランタイムごとに配る Skill の一覧で、デプロイの唯一の基準（#2231） | — | — | `docs/specifications/ndf-distribution-runtimes.md` |
@@ -1058,7 +1071,7 @@ release が走らせるリリースの種別・リリースコマンド・公開
 | リリース対象 | — | リリースで利用者へ届くファイルの集まり。ai-plugins では plugins/ と .claude-plugin/ | 配布物 | — | `docs/specifications/ndf-deploy-and-release-terms.md` |
 | アーティファクト | — | ビルドや署名で作る、公開操作で届ける生成物（パッケージ・署名したバイナリなど） | — | — | `docs/specifications/ndf-deploy-and-release-terms.md` |
 | 導入先のランタイム | — | マーケットプレイスのプラグインを導入できる形で届けるランタイム。#2231 の後は Claude Code と codex で、相手役のランタイムとは別に決まる（#2231） | 配布先のランタイム | — | `docs/specifications/ndf-distribution-runtimes.md` |
-| 利用者向けの変化なし | — | PR の本文の `## 利用者向けの変化` が「無し」（「なし」も同じ）だけを持つこと。承認資料の「含む PR」の行にマーカーを付け、CHANGELOG のバージョンの節と「配る中身」には載せない。節の無い本文（題名で代える）とは別に扱う | 配布物の変化なし | — | `docs/specifications/ndf-release-approval-included-prs.md` |
+| 利用者向けの変化なし | — | PR の本文の `## 利用者向けの変化` が「無し」（「なし」も同じ）だけを持つこと。承認資料の「含む PR」の行にマーカーを付け、CHANGELOG のバージョンのセクションと「配る中身」には載せない。セクションの無い本文（題名で代える）とは別に扱う | 配布物の変化なし | — | `docs/specifications/ndf-release-approval-included-prs.md` |
 | リリースの設定 | — | `.ndf/` に書く、そのリポジトリのリリースの設定（`.ndf/supervise.json` の release と `.ndf/release.json`） | 配布の宣言 | — | `docs/specifications/ndf-deploy-and-release-terms.md` |
 | リリースの形 | — | リリースの設定の release.form が表す、バージョンの出し方のテンプレートの種類 | 配布の形 | — | `docs/specifications/ndf-deploy-and-release-terms.md` |
 | リリースの手順 | — | バージョンを上げてから公開するまでの手順。`release` が持つ | 配布の手順 | — | `docs/specifications/ndf-deploy-and-release-terms.md` |
@@ -1071,7 +1084,7 @@ release が走らせるリリースの種別・リリースコマンド・公開
 | 衝突の解消の差分 | — | スプリントブランチをリリースブランチへ集めるマージのコミットが、親を自動でマージし直した結果（衝突のマーカーを含む）と比べて持つ差分。衝突の解消と、組み合わせのためにマージのコミットで足した変更が入る | — | — | `plugins/ndf/skills/worktree/references/declaration.md` |
 | 衝突の解消のレビューの PR | — | 衝突の解消の差分だけを PR の差分として見せるため、開発版のデプロイのプランが一時に作る PR。レビューで入った直しをリリースブランチへ移してから閉じる | — | — | `plugins/ndf/skills/release/references/release-steps.md` |
 | リリースの PR | — | 本番チャネル（main）へバージョンを入れる Pull Request。版上げまでのコミットを積み終えた状態で承認を求める | — | — | `docs/specifications/ndf-release-approval-on-pr.md` |
-| 証跡のチェック | — | リリースの PR に承認の証跡があり、書かれたコミットが PR の先端と一致し、書いた人が承認権限を持つときだけ通る必須ステータスチェック | — | — | `docs/specifications/ndf-release-approval-on-pr.md` |
+| 証跡のチェック | — | リリースの PR に承認の証跡があり、書かれたコミットが PR の HEAD と一致し、書いた人が承認権限を持つときだけ通る必須ステータスチェック | — | — | `docs/specifications/ndf-release-approval-on-pr.md` |
 | 承認権限 | — | リリースの承認の証跡を書いてよい権限。リポジトリの admin か maintain | — | — | `docs/specifications/ndf-release-approval-on-pr.md` |
 | リリースの場合 | — | CD の有無・本番チャネルの承認数・迂回の設定で決まる 4 つの場合（CD があり、レビューなしでマージできる / CD があり、レビューが必須 / CD があり、レビューが必須で迂回の設定がある / CD が無い）。承認を取る場所とマージの主体を決める | — | — | `docs/specifications/ndf-release-production-admin-merge.md` |
 | 承認資料のコメント | — | 承認を求める時点の承認資料を、リリースの PR へ置いたコメント。証跡とは別のマーカーを持ち、判定に数えない | — | — | `docs/specifications/ndf-release-approval-on-pr.md` |
@@ -1081,25 +1094,25 @@ release が走らせるリリースの種別・リリースコマンド・公開
 | 本番の PR | — | 本番チャネル（main）へ入れる Pull Request。CD のある場合は、この PR のマージで本番へ届く。ndf-next のリリース方式の行 `trunk` では main 宛てのスプリントの PR が兼ね、CD が作る版上げの PR は含まない。行 `merge_base_branch`・`release_branch` と今の NDF では、リリースのブランチから本番チャネルへ出す PR を指す | — | — | `docs/specifications/ndf-release-production-admin-merge.md` |
 | 管理者の迂回 | — | ruleset が迂回を許した役割の人が、必須の承認レビューと必須のチェックを満たさずにマージすること。`gh pr merge --admin` で打つ | — | — | `docs/specifications/ndf-release-production-admin-merge.md` |
 | 迂回の設定 | — | 本番の PR を管理者の迂回でマージすることを選ぶ、`.ndf/project.json` の `production_merge.admin` の値。`true` のときだけ設定があるとみなし、無いときは迂回しない | — | — | `docs/specifications/ndf-release-production-admin-merge.md` |
-| 迂回の記録 | — | 本番の PR を管理者の迂回でマージしたことを示す、本番の PR へ置くコメント。マージした先端と照らした承認の証跡を指す。証跡とは別のマーカーを持ち、承認の判定に数えない | — | — | `docs/specifications/ndf-release-production-admin-merge.md` |
-| 承認した head | — | 承認ゲートの承認か、利用者の GitHub でのマージ（キューへ入れる操作を含む）が対象にした本番の PR の head コミット。本番ブランチへ入れてよいのはこの head だけである | 承認した先端 | — | — |
-| head の一致の確認 | — | マージかキューへの投入の API に承認した head を渡し、PR の head が違えば GitHub に断らせることと、マージの前に承認の記録を読み直すこと | 先端の照合 | — | — |
+| 迂回の記録 | — | 本番の PR を管理者の迂回でマージしたことを示す、本番の PR へ置くコメント。マージした HEAD と照らした承認の証跡を指す。証跡とは別のマーカーを持ち、承認の判定に数えない | — | — | `docs/specifications/ndf-release-production-admin-merge.md` |
+| 承認済みのコミット | — | 承認ゲートの承認か、利用者の GitHub でのマージ（キューへ入れる操作を含む）が対象にした本番の PR の head コミット。本番ブランチへ入れてよいのはこの head だけである | 承認した head、承認した先端 | — | — |
+| head の一致の確認 | — | マージかmerge queue への追加の API に承認済みのコミット を渡し、PR の head が違えば GitHub に断らせることと、マージの前に承認の記録を読み直すこと | 先端の照合 | — | — |
 | 承認の経路 | — | 本番の PR の承認がどこで与えられたか。リリース承認ゲート（`gate`）か、利用者の GitHub でのマージ（`github-merge`）のどちらか | — | — | — |
-| 変更要求 | — | リリース承認ゲートで承認しない回答、または必須のチェックの落ちた本番の PR を出さずに止めること。直しを同じ本番の PR（スプリントの PR）へ入れ、新しい先端で承認を取り直す | — | — | — |
-| 直しのステップ | — | CI が落ちたときにコードを直して push するプランのステップ（テンプレートの `ci-fix`・`fix-push`・`fix-base` と、それに続く `push`） | — | — | — |
-| fix の worker | — | 要求での直しのステップの呼び方。CI が落ちたときにコードを直して push するステップ（テンプレートの `ci-fix` とそれに続く `push`） | — | — | — |
-| リリースブランチ | — | ndf-next のリリース方式の行 `trunk` では、版上げの PR の head になるブランチ（`release/v<バージョン>`）。main へのマージの後に CD が main の先端から作り、版上げの PR のマージで消える。行 `merge_base_branch`・`release_branch` では `ndf-workflow` の同じ語の意味（本番チャネルへ入れる変更を集めるブランチ） | — | — | — |
-| 版上げのコミット | — | リリース方式の行 `trunk` で、main へのマージの後に CD が作り、版上げの PR を通して main へ入るコミット。バージョンの保存先のファイル・CHANGELOG のバージョンの節・`.ndf/release.json` の手順の書き先だけを変える。PR はバージョンを触らない | — | — | — |
-| 上げ幅のラベル | — | main 宛ての PR が上げ幅（MAJOR・MINOR・PATCH）を示すラベル（`release:major` など）。CD がマージの時点に読んでバージョンを上げる | 上げ幅の宣言 | — | — |
-| 検証用ブランチ | — | main 宛ての開いた PR を集めて組む使い捨てのブランチ（ai-plugins では `verify/next`）。検証用マーケットプレイスが指し、main へ戻さない | 検証の ref | — | — |
-| 検証用マーケットプレイス | — | 正式版のマーケットプレイスと違う名前で検証用ブランチを指すマーケットプレイス。名前が違うので正式版と両方を登録できる。検証環境の種類の 1 つ | 2 つ目のマーケットプレイス | — | — |
+| 変更要求 | — | リリース承認ゲートで承認しない回答、または必須のチェックの落ちた本番の PR を出さずに止めること。直しを同じ本番の PR（スプリントの PR）へ入れ、新しい HEAD で承認を取り直す | — | — | — |
+| 修正ステップ | — | CI が落ちたときにコードを直して push するプランのステップ（テンプレートの `ci-fix`・`fix-push`・`fix-base` と、それに続く `push`） | 直しのステップ | — | — |
+| fix の worker | — | 要求での修正ステップの呼び方。CI が落ちたときにコードを直して push するステップ（テンプレートの `ci-fix` とそれに続く `push`） | — | — | — |
+| リリースブランチ | — | ndf-next のリリース方式の行 `trunk` では、版上げの PR の head になるブランチ（`release/v<バージョン>`）。main へのマージの後に CD が main の HEAD から作り、版上げの PR のマージで消える。行 `merge_base_branch`・`release_branch` では `ndf-workflow` の同じ語の意味（本番チャネルへ入れる変更を集めるブランチ） | — | — | — |
+| 版上げのコミット | — | リリース方式の行 `trunk` で、main へのマージの後に CD が作り、版上げの PR を通して main へ入るコミット。バージョンの保存先のファイル・CHANGELOG のバージョンのセクション・`.ndf/release.json` の手順の書き先だけを変える。PR はバージョンを触らない | — | — | — |
+| バージョン種別のラベル | — | main 宛ての PR がバージョン種別（MAJOR・MINOR・PATCH）を示すラベル（`release:major` など）。CD がマージの時点に読んでバージョンを上げる | 上げ幅のラベル、上げ幅の宣言 | — | — |
+| 検証ブランチ | — | main 宛ての開いた PR を集めて組む使い捨てのブランチ（ai-plugins では `verify/next`）。検証用マーケットプレイスが指し、main へ戻さない | 検証用ブランチ、検証の ref | — | — |
+| 検証用マーケットプレイス | — | 正式版のマーケットプレイスと違う名前で検証ブランチを指すマーケットプレイス。名前が違うので正式版と両方を登録できる。検証環境の種類の 1 つ | 2 つ目のマーケットプレイス | — | — |
 | ブランチ戦略 | — | リポジトリがどのブランチから作業を切り、どこへマージし、どこから本番へ出すかの決まり。リポジトリごとに `.ndf/worktree.json` の `branch_flow`（ブランチ運用の設定）で、リリース方式の表の行を選ぶ | — | — | — |
 | リリース方式の表 | — | ndf-next がブランチ戦略として選べる行の一覧（`plugins/ndf-next/contracts/domains/branch-flows.json`）。`merge_base_branch`・`release_branch` と、スプリントブランチを main から切って main へマージする `trunk` の行を持つ（行の名前は `.ndf/worktree.json` の `branch_flow.release_strategy` の値と同じ） | — | — | — |
-| merge queue | — | GitHub のマージキュー。キューへ入れた PR を、main の先端と前に並ぶ PR を合わせた一時のコミット（`gh-readonly-queue/main/...`）で必須のチェックに通し、通ったものだけを順にマージする | — | — | — |
+| merge queue | — | GitHub のマージキュー。キューへ入れた PR を、main の HEAD と前に並ぶ PR を合わせた一時マージコミット（`gh-readonly-queue/main/...`）で必須のチェックに通し、通ったものだけを順にマージする | — | — | — |
 | マージの方式 | — | 承認した複数の PR の組み合わせを確かめてから本番ブランチへマージする方式。`merge-queue`（merge queue を使う）か `strict`（最新の main のマージを必須にし、head が動けば承認を取り直す）。リポジトリごとに設定ファイルで選ぶ | — | — | — |
 | 検証環境 | — | マージの前に変更を試す場所。リポジトリごとに設定ファイルで種類を選ぶ。プラグインなら検証用マーケットプレイス、Web なら staging 環境 | — | — | — |
-| バージョン上げ | — | main へのマージの後に CD がバージョンを上げること。書き換えるファイルと流すコマンドは `.ndf/release.json` の手順で決める | — | — | — |
-| キューへの投入 | — | 承認した head を `expectedHeadOid` に渡して、本番の PR を merge queue へ入れること（GraphQL の `enqueuePullRequest`）。PR の head が違えば GitHub が断る | — | — | — |
+| バージョンアップ | — | main へのマージの後に CD がバージョンを上げること。書き換えるファイルと流すコマンドは `.ndf/release.json` の手順で決める | バージョン上げ | — | — |
+| merge queue への追加 | — | 承認済みのコミット を `expectedHeadOid` に渡して、本番の PR を merge queue へ入れること（GraphQL の `enqueuePullRequest`）。PR の head が違えば GitHub が断る | キューへの投入 | — | — |
 | バージョンの保存先 | — | リリースの単位のバージョンを持つファイルと、その読み書きのアダプタ（`plugin`・`json` など）。`.ndf/release.json` の `version_store` で選ぶ | — | — | — |
 
 ## NDF の指示書チェック（`ndf-instructions`）
@@ -1138,7 +1151,7 @@ backlog-refinement と out-of-scope が課題を分類し、起票するとき�
 | 提示の要約値 | — | 承認資料に載せた内容から作る sha256。issue-file.py の create では起票先・題・本文・ラベル、note では打つ先・番号・1 行から作り、同意の後の --approved に渡して、示した内容と打つ内容が同じことを確かめる | — | — | `docs/specifications/out-of-scope-issue-file.md` |
 | 上流リポジトリ | — | NDF の Skill・エージェント・hook の実体を持つリポジトリ | 配布元のリポジトリ | — | `plugins/ndf/skills/out-of-scope/references/issue-target.md` |
 | 開発対象リポジトリ | — | NDF を使って開発している側のリポジトリ。gh repo view が返すもの | 開発対象のリポジトリ | — | `plugins/ndf/skills/out-of-scope/references/issue-target.md` |
-| 品質のクォータ | — | 棚卸しの順位付けで、品質向上の Issue（定義したラベルの Issue）に先に割り当てる容量の割合。最低の件数を持ち、残りの容量を今の順位で埋める。.ndf/backlog.json の quality 節で定義したときだけ効く | — | — | `docs/specifications/ndf-workflow-development-loop.md` |
+| 品質のクォータ | — | 棚卸しの順位付けで、品質向上の Issue（定義したラベルの Issue）に先に割り当てる容量の割合。最低の件数を持ち、残りの容量を今の順位で埋める。.ndf/backlog.json の quality セクションで定義したときだけ効く | — | — | `docs/specifications/ndf-workflow-development-loop.md` |
 | プロダクトバックログ | — | open の課題を着手の順に並べた全体。マイルストーンの順（上の層）→ マイルストーンの中の順位（下の層）の辞書順で読む | — | — | — |
 | スプリントバックログの候補 | — | 1 つのマイルストーンの中の課題を順位で並べたもの。次のスプリントはその先頭から容量の分を切り出す | — | — | — |
 | 遅延コスト | — | 課題の着手を遅らせると失う量の相対値。実害の大きさ・時間的重要度・リスク低減の 3 つの見積の段階の和。略して CoD | — | — | — |
@@ -1177,8 +1190,8 @@ backlog-refinement と out-of-scope が課題を分類し、起票するとき�
 | 起票の後の検査 | — | 作られた open の Issue の本文が記載項目の定義を満たすかを判定する検査 | — | — | `docs/specifications/ndf-issue-items.md` |
 | 課題の保存先 | — | Issue を管理するシステム（GitHub・Redmine・リポジトリの中の markdown など）。.ndf/project.json の issues が示す | — | — | `docs/specifications/ndf-issue-items.md` |
 | 一致の検査 | — | 記載項目の定義と、フォーム・out-of-scope の骨格・仕様のテンプレートが食い違っていないかを確かめる検査。CI で動く | — | — | `docs/specifications/ndf-issue-items.md` |
-| 工程が足す節 | — | 起票の後に工程が Issue の本文へ書き足す節（進行・承認ゲートの回答・閉じた理由・再発など）。起票者は書かない | — | — | `docs/specifications/ndf-issue-items.md` |
-| 保存先ごとの表し方 | — | 記載項目を、課題の保存先ごとにどの欄・節・ラベルで表すかの対応 | — | — | `docs/specifications/ndf-issue-items.md` |
+| 工程が足すセクション | — | 起票の後に工程が Issue の本文へ書き足すセクション（進行・承認ゲートの回答・閉じた理由・再発など）。起票者は書かない | — | — | `docs/specifications/ndf-issue-items.md` |
+| 保存先ごとの表し方 | — | 記載項目を、課題の保存先ごとにどの欄・セクション・ラベルで表すかの対応 | — | — | `docs/specifications/ndf-issue-items.md` |
 | 棚卸しの実行 | — | 棚卸しを 1 回流すまとまり。オーナーを持つ実行は owner claim が返した識別子（run）で区別する | — | — | — |
 | 棚卸しの記録の保存先 | — | upkeep.py が記録を置くディレクトリ。$NDF_UPKEEP_STATE_DIR（既定は一時ディレクトリの ndf/backlog-refinement/）の下にリポジトリごとに置き、回をまたぐ記録と、実行の識別子を渡さない棚卸しの回（共有の保存先）と、実行ごとの保存先を持つ | — | — | — |
 | 候補の記録 | — | candidates が書く記録（candidates.json）。対象の件数・経路ごとの件数・open の件数を持ち、report と depth record が読む | — | — | — |

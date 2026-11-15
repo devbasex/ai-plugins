@@ -279,7 +279,7 @@ def _ndf_settings(decl: NdfSettingsSpec) -> list[str]:
             [str(r["order"]), "#" * r["level"] + " " + r["heading"], "必須" if r["required"] else "任意", r["meaning"]]
             for r in decl.sections
         ]
-        return [*head, "Markdown の設定。節の並び:\n", md_table(["順", "見出し", "必須か", "持つもの"], rows)]
+        return [*head, "Markdown の設定。セクションの並び:\n", md_table(["順", "見出し", "必須か", "持つもの"], rows)]
     if decl.schema is None:
         return [*head, "スキーマが無い（`ndf check` の spec-decl が落とす）。\n"]
     examples = "".join(f"例: `{json.dumps(ex, ensure_ascii=False)}`\n" for ex in opt(decl.schema, "examples"))

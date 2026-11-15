@@ -391,7 +391,7 @@ sweep 中にメインが落ちても、`sweep-pr<STATE_PR>-result.json` が無�
 - 残 deferred nit 一覧
 - レビューの重点の設定が読めなかったときは、その理由（基準 1・2・4 だけで続けた）
 
-`verify-sweep` を通していれば、`report` の出力に「## 最終スイープ」の節が入り、
+`verify-sweep` を通していれば、`report` の出力に「## 最終スイープ」のセクションが入り、
 GitHub 側で数え直した残件数と、0 件にできなかった場合の理由が含まれる。
 メインはこれに `sweep-pr<STATE_PR>-result.json` の `resolved` / `fixed_in_sweep` /
 `verification`（実行した検証コマンドと終了コード、実行しなかった場合はその理由）を
@@ -455,7 +455,7 @@ PR の head の worktree の `.ndf/review.json` を、`init`（新規は worktre
 変更ファイルなしで選ぶ（`paths` を持たないプロファイルか、既定）。`review_criteria.py reviewer|fixer` は
 `--changed-file <パス>`（繰り返し可）で選ぶ。
 
-書いたキーだけが既定を差し替え、書かないキーは既定のまま。プロファイルがあると、修正担当への節の見送りの句は
+書いたキーだけが既定を差し替え、書かないキーは既定のまま。プロファイルがあると、修正担当へのセクションの見送りの句は
 「対象のファイルを変えずに」になる。収束の判定・投稿の形・ラウンドのステップ・`review_kind` はプロファイルで変わらない。
 
 ```json

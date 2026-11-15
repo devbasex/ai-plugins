@@ -42,7 +42,7 @@ def test_judge_reports_stale_and_missing() -> None:
 
 
 def test_known_bug_answer_after_reapproval_reaches_the_record() -> None:
-    """リリース 8 の事例: 先端が動いた後の承認し直しの回答が、今の先端への承認として判定に届く。"""
+    """リリース 8 の事例: HEAD が動いた後の承認し直しの回答が、今の HEAD への承認として判定に届く。"""
     hub = FakeHub(pulls={7: pull(head=HEAD)}, comments_of={7: [_trail("approved", OTHER)]})
     assert trail.read(hub, 7).judgment.state == approval_decide.STALE
     got = trail.answer(hub, 7, "approved", "人", presented=HEAD)
@@ -64,7 +64,7 @@ def test_answer_is_refused_when_head_moved_since_presented() -> None:
 
 
 def test_present_refuses_material_for_another_commit() -> None:
-    """資料が対象にしたコミットが今の先端でなければ提示しない。先端と同じなら提示して先端を返す。"""
+    """資料が対象にしたコミットが今の HEAD でなければ提示しない。HEAD と同じなら提示して HEAD を返す。"""
     for shown in (OTHER, None):
         hub = FakeHub(pulls={7: pull(head=HEAD)})
         material = "# 資料\n" if shown is None else f"{approval_decide.HEAD_LINE} `{shown}`\n"
@@ -389,7 +389,7 @@ def test_admin_ndf_settings_counts_only_unedited_user_trails(comment: Authored) 
 
 
 def test_admin_record_ignores_records_by_untrusted_or_edited_comments() -> None:
-    """I7: 信用しない書き手か編集された、マーカーと先端の SHA を持つコメントがあっても、本物の記録を書く。"""
+    """I7: 信用しない書き手か編集された、マーカーと HEAD の SHA を持つコメントがあっても、本物の記録を書く。"""
     fake = trail.render_admin_record(HEAD, "")
     hub = AdminHub(
         pulls={7: pull()},
@@ -430,7 +430,7 @@ def test_approvals_reads_rules_then_protection_and_none_when_unreadable() -> Non
 
 
 def test_merged_admin_release_resume_writes_the_missing_record_once() -> None:
-    """I7: マージ済みの本番の PR の打ち直しは、利用者の証跡がマージした先端と一致し記録が無いときだけ書く。何度打っても 1 件。"""
+    """I7: マージ済みの本番の PR の打ち直しは、利用者の証跡がマージした HEAD と一致し記録が無いときだけ書く。何度打っても 1 件。"""
     hub = AdminHub(pulls={7: pull(merged=True), 9: pull(number=9, base="develop")}, comments_of={7: [_trail("approved", HEAD)]})
     hub.responses[("GET", "/repos/o/r/pulls")] = [{"number": 9}]
     first = _admin_lander(hub).land(7)
