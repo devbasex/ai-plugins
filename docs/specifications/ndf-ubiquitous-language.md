@@ -242,8 +242,8 @@ stateDiagram-v2
 | `review` | drive | `cross-review`（設計の既定 3 ラウンド） | `sync-review`（失敗は `ready`） |
 | `sync-review` | run | `git fetch -q && git merge -q --ff-only '@{u}'`（レビューの直しに追いつく） | `requirements-recheck` |
 | `requirements-recheck` | run | `spec-copy.py check <課題> <コピー>`（レビューの直しの後も、コピーが課題の本文と一致するか） | `survey-check`。0 以外は `on_fail` を置かずに止まる |
-| `survey-check` | run | `design-survey.py check --issue <課題>`（自前で作る決定に、外部の調査で比べた候補があるか。詳細設計を通るモードでは `--require-detail` を付け、詳細設計の文書の欠けと形も確かめる） | 0 → `glossary-check`。0 以外 → `fix-survey` |
-| `fix-survey` | work | 指摘の決定の作り方・比べた候補を直すか、外部の調査の表へ出典つきの候補の行を足してコミットする（push しない）。比べずに直せない指摘は直さずに「判断が要る」と報告する | `survey-recheck` |
+| `survey-check` | run | `design-survey.py check --issue <課題>`（自前で作る決定に、外部の調査で比べた候補があるか。詳細設計を通るモードでは `--require-detail` を付け、詳細設計の文書の欠けと形も確かめる。代表のリポジトリの設定があれば、振る舞いの表と人へ残す判断の番号も確かめる） | 0 → `glossary-check`。1 → `fix-survey`。2（設定が壊れている・文書や契約を読めない）は直しへ回さずに止まる |
+| `fix-survey` | work | 指摘の決定の作り方・比べた候補を直すか、外部の調査の表へ出典つきの候補の行を足してコミットする（push しない）。代表のリポジトリの指摘は、適用範囲の振る舞いの表と事情の欄を足し、扱えなくなることがある行には人へ残す判断に設定の番号の行を足す。比べずに直せない指摘は直さずに「判断が要る」と報告する | `survey-recheck` |
 | `survey-recheck` | run | `survey-check` と同じ | 0 → `glossary-check`。0 以外は `on_fail` を置かずに止まる |
 | `glossary-check` | run | `glossary.py check --diff origin/<base> --root .` | 0 → `push-glossary`。1 → `fix-glossary` |
 | `fix-glossary` | work | 未登録の語は用語集へ足す（`source` を空にし `pending_source` に設計文書を書く）か言い換え、廃止した語は言い換える。用語集を変えたら `render` してコミットする（push しない）。利用者が採るかを決めるべき語は直さずに「判断が要る」と報告する | `glossary-recheck` |
