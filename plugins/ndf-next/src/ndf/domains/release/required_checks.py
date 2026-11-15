@@ -15,6 +15,7 @@ from ndf.adapters import ci
 from ndf.adapters.github import GitHub, GitHubError, text_of
 from ndf.contracts import facts
 from ndf.domains.release import approval_decide
+from ndf.domains.release.shapes import list_of
 
 # 規則の種類（必須のチェック）
 REQUIRED_RULE = "required_status_checks"
@@ -51,12 +52,6 @@ def _status_run(status: dict, app: int | None = None) -> dict:
     return run
 
 
-def _list(raw: dict, key: str) -> list:
-    """`raw[key]` が配列ならそれ、ほかは空の配列。"""
-    got = raw.get(key)
-    return got if isinstance(got, list) else []
-
-
 def _app(value: object) -> int | None:
     """発行元のアプリの ID（指定が無い・どれでもよい（-1）なら None）。"""
     return value if isinstance(value, int) and not isinstance(value, bool) and value != ANY_APP and value > 0 else None
@@ -68,8 +63,8 @@ def _protection_checks(branch: dict) -> list[tuple[str, int | None]]:
     checks = protection.get("required_status_checks") if isinstance(protection, dict) else None
     if not isinstance(checks, dict):
         return []
-    contexts: list[tuple[str, int | None]] = [(text_of(c), None) for c in _list(checks, "contexts")]
-    return contexts + [(text_of(c["context"]), _app(c.get("app_id"))) for c in _list(checks, "checks") if isinstance(c, dict)]
+    contexts: list[tuple[str, int | None]] = [(text_of(c), None) for c in list_of(checks, "contexts")]
+    return contexts + [(text_of(c["context"]), _app(c.get("app_id"))) for c in list_of(checks, "checks") if isinstance(c, dict)]
 
 
 def _ruleset_checks(rules: list[dict]) -> list[tuple[str, int | None]]:
@@ -137,7 +132,7 @@ class RequiredChecks:
         書き手の bot のアプリを付ける（指定のアプリが付けた status を満たしたと数える。#3506）。`bots` は bot ごとのアプリの控え。"""
         if not apps:
             combined = self.hub.rest("GET", f"/repos/{self.hub.repo}/commits/{sha}/status", params={"per_page": 100})
-            statuses = _list(combined, "statuses") if isinstance(combined, dict) else []
+            statuses = list_of(combined, "statuses") if isinstance(combined, dict) else []
             return self.hub.check_runs(sha) + [_status_run(s) for s in statuses if isinstance(s, dict)]
         return self.hub.check_runs(sha) + [_status_run(s, self._status_app(s, apps, bots)) for s in self.hub.statuses(sha)]
 

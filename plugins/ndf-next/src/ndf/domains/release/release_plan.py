@@ -16,6 +16,7 @@ from typing import Any
 
 from ndf import identity
 from ndf.contracts import causes
+from ndf.domains.release.shapes import list_of
 
 # worker の起動の差し込み（雛形の `{{worker}}`）
 WORKER = "{{worker}}"
@@ -43,13 +44,11 @@ def merge_run() -> tuple[str, ...]:
 
 
 def _steps(plan: Mapping[str, Any]) -> list[Mapping[str, Any]]:
-    steps = plan["steps"] if "steps" in plan else []
-    return [s for s in steps if isinstance(s, Mapping)] if isinstance(steps, list) else []
+    return [s for s in list_of(plan, "steps") if isinstance(s, Mapping)]
 
 
 def _run(step: Mapping[str, Any]) -> list[str]:
-    got = step["run"] if "run" in step else []
-    return [str(a) for a in got] if isinstance(got, list) else []
+    return [str(a) for a in list_of(step, "run")]
 
 
 def forbidden(plan: Mapping[str, Any]) -> list[str]:
