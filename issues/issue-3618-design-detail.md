@@ -1,6 +1,6 @@
 # #3618 の詳細設計: 代表のリポジトリの種類を扱えなくする設計を設計承認の前に見つける
 
-設計文書 [issue-3618-design.md](issue-3618-design.md) の「構成要素」と「入出力の契約」を、ファイルと関数の粒度へ下ろした文書である。決定の番号（決定 1〜12）は [issue-3618-design-decisions.md](issue-3618-design-decisions.md) を指す。不変条件の番号（I1〜I7）は設計文書の「ドメインモデル」を指す。
+設計文書 [issue-3618-design.md](issue-3618-design.md) の「構成要素」と「入出力の契約」を、ファイルと関数の粒度へ下ろした文書である。決定の番号（決定 1〜16）は [issue-3618-design-decisions.md](issue-3618-design-decisions.md) を指す。不変条件の番号（I1〜I7）は設計文書の「ドメインモデル」を指す。
 
 この文書で使う語は設計文書の「用語」の表と同じである。とくに次の 3 語を使う。
 
@@ -60,7 +60,7 @@ plugins/ndf-next/
 | `plugins/ndf/scripts/lib/README.md` | 変更 | `design_repos.py` の行を「置いてあるもの」の表に足す | 無し |
 | `plugins/ndf/skills/design/schemas/design.schema.json` | 新設 | `.ndf/design.json` の JSON Schema。`design_json_schema()` の出力をそのまま置く | 無し |
 | `plugins/ndf/scripts/supervise_lib/procedures.py` | 変更 | `survey_steps` の直しの指示に 2 規則の直し方を足す | 無し |
-| `plugins/ndf/skills/design/references/design-template.md` | 変更 | 「適用範囲」に、振る舞いの表と「このリポジトリだけの事情」の欄の書き方を置く | 無し |
+| `plugins/ndf/skills/design/references/design-template.md` | 変更 | 「適用範囲」に、振る舞いの表と「このリポジトリだけの事情」の欄の書き方を、設定があるときに書く該当時の欄として置く（決定 14） | 無し |
 | `plugins/ndf/skills/requirements-design/references/spec-template.md` | 変更 | 方針を「このリポジトリの運用の決まり」と「作るものの振る舞い」に分ける節（該当時）を置く | 無し |
 | `plugins/ndf/scripts/data/issue-items.json` | 変更 | 起票の項目 `policy_split` を足す | 無し |
 | `plugins/ndf/skills/cross-review/scripts/review_lib/review_focus.py` | 変更 | `DESIGN_REVIEW_TEMPLATE` に汎用性の 1 行を足す | 無し |
@@ -97,7 +97,7 @@ plugins/ndf-next/
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `load_settings` | `plugins/ndf/scripts/lib/design_repos.py` | 新設 | `load_settings(root: Path) -> RepoSettings \| None` | リポジトリの根の `.ndf/design.json` を読み、形を確かめて内部の形へ直す | `root` はリポジトリの根の絶対パス | ファイルが無いか `representative_repos` が無ければ `None`。あれば `kinds` が空でなく重複が無く、`redline` が `[CPR][1-9][0-9]*` の形の `RepoSettings` を返す。形が合わなければ値を返さない | ファイルの読み取り。ファイルがあるときだけ `deps.require("schema", "pathmatch")`（依存が無ければ uv で起動し直す） |
 | `design_json_schema` | `plugins/ndf/scripts/lib/design_repos.py` | 新設 | `design_json_schema() -> str` | 設定の型から JSON Schema の文字列（末尾の改行つき・キーの順は型の定義の順）を作る | `deps.require("schema")` を呼べる | 同じ型からは同じ文字列が返る。`$schema` は draft 2020-12 | `deps.require("schema")` |
-| `applies` | `plugins/ndf/scripts/lib/design_repos.py` | 新設 | `applies(settings: RepoSettings, touched: set[str] \| None) -> bool` | 頭の設計文書に 2 規則を当てるかを決める | `settings` は `load_settings` の戻り値 | 判定表（「処理の手順」）のとおりの真偽を返す | 無し |
+| `applies` | `plugins/ndf/scripts/lib/design_repos.py` | 新設 | `applies(settings: RepoSettings, touched: set[str] \| None) -> bool` | 頭の設計文書に 2 規則を当てるかを決める（当てる範囲は決定 13） | `settings` は `load_settings` の戻り値 | 判定表（「処理の手順」）のとおりの真偽を返す | 無し |
 | `check_repos` | `plugins/ndf/scripts/lib/design_repos.py` | 新設 | `check_repos(path: str, text: str, settings: RepoSettings, left_ids: set[str]) -> list[dict]` | 頭の設計文書 1 本に 2 規則を当て、指摘の並びを返す | `applies` が真を返した文書である。`left_ids` は同じ文書の「人へ残す判断」の表の番号のセルから切り出したレッドラインの番号の集合 | 指摘はそれぞれ `name`（`<パス>:<行>`）・`rule`（2 規則のどちらか）・`text` を持ち、文書の行の順に並ぶ。表と事情の欄がそろい、扱えなくなることの行が無いか番号の行があれば空 | 無し |
 | `_scope_problems` | `plugins/ndf/scripts/lib/design_repos.py` | 新設 | `_scope_problems(text: str, settings: RepoSettings) -> tuple[list[tuple[int, str]], Table \| None]` | 「適用範囲」の節・振る舞いの表・種類ごとの行・事情の欄の欠けを（行, 理由）で並べ、見つけた表を返す | `text` は頭の設計文書の本文 | 欠けが無ければ並びは空。表が見つからなければ 2 つ目は `None` | 無し |
 | `_loss_rows` | `plugins/ndf/scripts/lib/design_repos.py` | 新設 | `_loss_rows(table: Table) -> tuple[list[int], list[int]]` | 振る舞いの表の行を「扱えなくなることがある行」と「扱えなくなることが空の行」に分け、文書の中の行番号で返す | `table` は `_behavior_table` が返した表 | セルが `無し` で始まる行はどちらにも入らない | 無し |
