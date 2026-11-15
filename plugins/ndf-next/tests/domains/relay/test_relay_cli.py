@@ -13,7 +13,7 @@ import pytest
 from ndf import cli as top
 from ndf import identity
 from ndf.contracts import causes
-from ndf.domains.relay import accounts, cli, marks, pending, registry
+from ndf.domains.relay import accounts, cli, cli_account, marks, pending, registry
 
 
 def test_relay_is_a_subcommand_of_ndf():
@@ -28,7 +28,7 @@ def test_help_lists_every_subcommand(capsys):
     assert set(cli.COMMANDS) == set(cli.HANDLERS)
     assert cli.main(["account", "--help"]) == 0
     out = capsys.readouterr().out
-    assert all(name in out for name in cli.ACCOUNT_COMMANDS)
+    assert all(name in out for name in cli_account.ACCOUNT_COMMANDS)
     assert cli.main(["fly"]) != 0
 
 
