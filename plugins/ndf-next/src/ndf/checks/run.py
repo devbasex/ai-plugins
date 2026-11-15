@@ -148,7 +148,9 @@ def main(argv: list[str]) -> int:
         ident = identity.load()
         rules = load_rules()
         repo_root = _repo_root(ident.root)
-        scope = Scope(repo_root, ident.root.resolve(), ident.name, args.base, _pr_body(args.event or os.environ.get("GITHUB_EVENT_PATH", "")))
+        scope = Scope(
+            repo_root, ident.root.resolve(), ident.name, args.base, _pr_body(args.event or os.environ.get("GITHUB_EVENT_PATH", ""))
+        )
         found = select(scope, rules, args.only, args.write_spec, written)
     except (CheckError, identity.IdentityError) as exc:
         return emit(str(exc), [], {}, "config_broken")
