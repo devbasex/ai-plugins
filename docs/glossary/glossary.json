@@ -7676,6 +7676,24 @@
       "context": "ndf-workflow",
       "meaning": "止まった一時レーンを、耐久ワークフローが同じ名前で起動し直すこと",
       "pending_source": "issues/issue-3597-requirements.md"
+    },
+    {
+      "term": "問いの対象",
+      "context": "ndf-workflow",
+      "meaning": "並列の計画で、区分つきの問いが操作する対象を表す 1 つの文字列。`<ブランチ名>@<先端のコミットの 40 桁>` か `#<課題か PR の番号>`。問いの `metadata.target` に載せる",
+      "pending_source": "issues/issue-3597-design.md"
+    },
+    {
+      "term": "答えの引き継ぎ",
+      "context": "ndf-workflow",
+      "meaning": "起き直した一時レーンの同じ問いへ、前の起動で送った依頼の答えを当てること。新しい依頼を作らず、計画の台帳に `reused` の行で残る",
+      "pending_source": "issues/issue-3597-design.md"
+    },
+    {
+      "term": "一時レーンの空き待ち",
+      "context": "ndf-workflow",
+      "meaning": "一時レーンの起動が、別の一時レーンが動いているために断られた後、耐久ワークフローが前の一時レーンが止まるまで区分 `spawn` の問いを立てずに待つこと。上限は既定 3,600 秒",
+      "pending_source": "issues/issue-3597-design.md"
     }
   ]
 }
