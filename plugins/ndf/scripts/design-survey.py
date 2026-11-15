@@ -2,6 +2,7 @@
 """design-survey.py: 設計文書の検査。自前で作る決定に外部の調査で比べた候補があるかと、人へ残す判断がレッドラインを名指すかを確かめる。LLM を呼ばず、読むだけ。
 
     python3 design-survey.py check (--issue N... | --file PATH...) [--require-detail] [--root DIR]
+    python3 design-survey.py schema [--out PATH]
 
 - `--issue`: HEAD の `issues/` から、名前の番号の並びにその番号を含む `issue-<番号>-design*.md` と
   `issue-<番号>-requirements.md` を読む。読んだ文書の名前のほかの番号もたどり、新しい番号が出なくなるまで読み足す
@@ -22,6 +23,10 @@
 （`detail_section`・`detail_failure`・`detail_reuse`・`detail_file`）を当てる。`--require-detail` を渡すと、詳細設計の
 文書の無いまとまりを `detail_missing` で指摘する（詳細設計を通る `standard`・`legacy-refactor` の設計のプランが渡す）。
 
+根に代表のリポジトリの設定（`.ndf/design.json` の `representative_repos`。#3618）があれば、頭の設計文書に
+`lib/design_repos.py` の 2 規則（`repo_scope_missing`・`repo_loss_unrouted`）を当てる。設定が壊れていれば終了コード 2。
+`schema` は設定の JSON Schema を出す（`skills/design/schemas/design.schema.json` の正本はこの出力）。
+
 終了コードは 0 = 指摘なし（作り方の行が 0 件の文書を含む）/ 1 = 指摘あり / 2 = 文書か git・契約・雛形を読めない /
 3 = `--issue` で文書が 1 つも見つからない。結果は lib/step_result.py の形の 1 行の JSON。
 手順は design の references/external-survey.md にある。
@@ -36,8 +41,26 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import deps  # noqa: E402
+from proc import git_root as _probe_root  # noqa: E402
 
-deps.require("md")
+
+def _required_groups(argv: list[str]) -> tuple[str, ...]:
+    """外部パッケージを読む前に、`--root` とサブコマンドの名前だけを読んで要る依存のグループを決める。"""
+    import design_repos  # 標準ライブラリだけで読める（外部パッケージは使う関数の中で読む）
+
+    ap = argparse.ArgumentParser(add_help=False)
+    ap.add_argument("--root", default=None)
+    ap.add_argument("cmd", nargs="?")
+    known, _ = ap.parse_known_args(argv)
+    try:
+        root = _probe_root(known.root)
+    except Exception:  # noqa: BLE001 - 根を決められなければ設定なしとして求め、本体が同じ誤りで止まる
+        root = None
+    return design_repos.dep_groups(root, known.cmd == "schema")
+
+
+deps.require("md", *_required_groups(sys.argv[1:]))  # md は静的に並べ、設定で増える分は dep_groups が決める
+import design_repos  # noqa: E402
 import md  # noqa: E402
 import doc_kinds  # noqa: E402
 from design_detail import RULES, DetailTemplateError, check_detail, is_detail  # noqa: E402
@@ -263,8 +286,26 @@ def detail_items(group: list[Doc], require: bool) -> list[dict]:
         raise StepError(str(exc), EXIT_UNREADABLE) from None
 
 
-def judge_docs(docs: list[Doc], require_detail: bool) -> tuple[list[dict], dict]:
-    """文書の並びに調査・レッドライン・詳細設計の判定を当て、指摘（判定の順）と metrics を返す。"""
+def repo_items(group: list[Doc], settings: design_repos.RepoSettings | None) -> list[dict]:
+    """まとまりの頭の設計文書ごとに、当てる範囲を決めて代表のリポジトリの 2 規則を当てる。"""
+    if settings is None:
+        return []
+    try:
+        heads = [d for d in group if doc_kinds.doc_kind(d.path, placed=False) == "design"]
+    except doc_kinds.DocKindsError as exc:
+        raise StepError(str(exc), EXIT_UNREADABLE) from None
+    items: list[dict] = []
+    for d in heads:
+        touched, _ = _result_files(d)
+        if not design_repos.applies(settings, touched):
+            continue
+        left_ids = {i for _, _, num, _ in _left_table_rows(d.text, md.md_sections(d.text)) for i in REDLINE_ID.findall(num)}
+        items += design_repos.check_repos(d.path, d.text, settings, left_ids)
+    return items
+
+
+def judge_docs(docs: list[Doc], require_detail: bool, settings: design_repos.RepoSettings | None = None) -> tuple[list[dict], dict]:
+    """文書の並びに調査・レッドライン・詳細設計・代表のリポジトリの判定を当て、指摘（判定の順）と metrics を返す。"""
     groups = survey_groups(docs)
     items: list[dict] = []
     metrics = {"docs": len(docs), "decisions": 0, "with_method": 0, "self_built": 0, "skipped": 0}
@@ -281,6 +322,11 @@ def judge_docs(docs: list[Doc], require_detail: bool) -> tuple[list[dict], dict]
     metrics["detail_docs"] = sum(1 for d in docs if is_detail(d.path))
     for rule in (*RULES, "detail_missing"):
         metrics[rule] = sum(1 for it in detail if it["rule"] == rule)
+    if settings is not None:  # 設定の無いリポジトリの結果は今と同じ（#3618 の I3）
+        repos = [it for g in groups for it in repo_items(g, settings)]
+        items += repos
+        for rule in design_repos.RULES:
+            metrics[rule] = sum(1 for it in repos if it["rule"] == rule)
     return items, metrics
 
 
@@ -294,16 +340,32 @@ def cmd_check(a):
             emit(result(TOOL, "stopped", f"設計文書が無い（{nums}）", metrics={"docs": 0}), EXIT_PRECONDITION)
     else:
         texts = read_files(root, a.file)
+    try:
+        settings = design_repos.load_settings(root)
+    except design_repos.RepoSettingsError as exc:
+        raise StepError(str(exc), EXIT_UNREADABLE) from None
     docs = [Doc(p, t) for p, t in texts]
-    items, metrics = judge_docs(docs, a.require_detail)
+    items, metrics = judge_docs(docs, a.require_detail, settings)
     names = ", ".join(d.path for d in docs)
     if items:
-        summary = (
-            f"文書 {len(docs)} 件（{names}）。決定の作り方と比べた候補・人へ残す判断のレッドライン・詳細設計に {len(items)} 件の指摘がある"
-        )
+        summary = f"文書 {len(docs)} 件（{names}）。決定の作り方と比べた候補・人へ残す判断のレッドライン・詳細設計・代表のリポジトリの振る舞いに {len(items)} 件の指摘がある"
         emit(result(TOOL, "stopped", summary, items, metrics), EXIT_VIOLATION)
     summary = f"文書 {len(docs)} 件（{names}）。自前で作る決定 {metrics['self_built']} 件・人へ残す判断・詳細設計 {metrics['detail_docs']} 件に指摘なし"
     emit(result(TOOL, "ok", summary, items, metrics), EXIT_OK)
+
+
+def cmd_schema(a):
+    text = design_repos.design_json_schema()
+    if a.out:
+        try:
+            Path(a.out).write_text(text, encoding="utf-8")
+        except OSError as exc:
+            raise StepError(f"スキーマを書けない: {a.out}: {exc}", EXIT_UNREADABLE) from None
+    sys.stdout.write(text)
+    if a.out:
+        sys.stdout.flush()
+        emit(result(TOOL, "ok", f"schema を書いた: {a.out}"))
+    return 0
 
 
 def build_parser():
@@ -316,6 +378,9 @@ def build_parser():
     g.add_argument("--file", nargs="+", help="読む文書のパス（worktree から読む）")
     p.add_argument("--require-detail", action="store_true", help="詳細設計の文書の無いまとまりを detail_missing で指摘する")
     p.set_defaults(func=cmd_check)
+    s = sub.add_parser("schema", parents=[common], help="代表のリポジトリの設定（.ndf/design.json）の JSON Schema を出す")
+    s.add_argument("--out", help="スキーマを書くパス（標準出力にも出す）")
+    s.set_defaults(func=cmd_schema)
     return ap
 
 

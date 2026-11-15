@@ -3,14 +3,24 @@
   "path": "plugins/ndf/scripts/design-survey.py",
   "summary": "design-survey.py: 設計文書の自前で作る決定に、外部の調査で比べた候補があるかを確かめる（#2519）。LLM を呼ばず、読むだけ。",
   "args": {
-    "options": [],
-    "positionals": [],
+    "options": [
+      "--root"
+    ],
+    "positionals": [
+      "cmd"
+    ],
     "subcommands": {
       "check": {
         "options": [
           "--file",
           "--issue",
           "--require-detail"
+        ],
+        "positionals": []
+      },
+      "schema": {
+        "options": [
+          "--out"
         ],
         "positionals": []
       }
