@@ -640,8 +640,8 @@
     {
       "term": "固定する理由（依存の版の）",
       "context": "ndf-workflow",
-      "meaning": "依存を最新の安定版へ上げない理由と、固定させている相手（例: githubkit 0.17.1 の `httpx<1.0.0`）。宣言の `[tool.ndf.deps.hold]` に書く",
-      "pending_source": "issues/issue-3347-design.md"
+      "meaning": "依存を上げる先へ上げずに今の版に止める理由と、止めさせている相手（例: githubkit 0.17.1 の `httpx<1.0.0`）。依存の更新の仕組み（Renovate）の依存ごとの規則に、理由の文として書く（#3370 の決定 5）",
+      "pending_source": "issues/issue-3370-design.md"
     },
     {
       "term": "安定版（依存の）",
@@ -6273,6 +6273,41 @@
       "source": "docs/specifications/cross-refactoring-implementation-budget.md"
     },
     {
+      "term": "古い起点",
+      "context": "ndf-cross-refactoring",
+      "meaning": "中断した cross-refactoring を続けるとき、Pull Request の今の head が、作業場所の work の HEAD と同じでもその祖先でもないこと。続けずに退避して今の head から始め直す",
+      "source": "",
+      "pending_source": "issues/issue-3483-requirements.md"
+    },
+    {
+      "term": "退避した作業場所",
+      "context": "ndf-cross-refactoring",
+      "meaning": "古い起点のために、消さずに rf<PR>.retired-<時刻> へ移した cross-refactoring の作業場所（work・read/<ランタイム>・logs）と状態ファイル。同じ Pull Request の作業場所の片付けが、作業の残りで外すかを決める",
+      "source": "",
+      "pending_source": "issues/issue-3483-design.md"
+    },
+    {
+      "term": "作業場所",
+      "context": "ndf-cross-refactoring",
+      "meaning": "ndf-next の cross-refactoring が Pull Request ごとに作る置き場 <置き場>/rf<PR>。書き込み用の work・担当ごとの読み取り用 read/<ランタイム>・logs・状態ファイルを持つ",
+      "source": "",
+      "pending_source": "issues/issue-3483-requirements.md"
+    },
+    {
+      "term": "状態ファイル",
+      "context": "ndf-cross-refactoring",
+      "meaning": "ndf-next の cross-refactoring の実行の進みを持つ rf<PR>/state.json。完了の記録が無ければ、同じコマンドを打ち直すと記録のある手順を流し直さずに続ける",
+      "source": "",
+      "pending_source": "issues/issue-3483-requirements.md"
+    },
+    {
+      "term": "退避の途中の印",
+      "context": "ndf-cross-refactoring",
+      "meaning": "作業場所の退避を始める前に退避した先へ置き、移し終えたら消すファイル。残っていれば、次の打ち直しは照合をせずに退避を続ける",
+      "source": "",
+      "pending_source": "issues/issue-3483-design.md"
+    },
+    {
       "term": "文書のファイル",
       "context": "ndf-workflow",
       "meaning": "差分のうち、文章として読まれるファイル。既定は Markdown と、用語集の設定が指す用語集のファイルで、プロジェクトの設定（.ndf/project.json の docs）で変えられる",
@@ -7020,8 +7055,9 @@
     {
       "term": "リリースの場合",
       "context": "ndf-release",
-      "meaning": "CD の有無とレビュー必須の有無で決まる 3 つの場合（CD があり、レビューなしでマージできる / CD があり、レビューが必須 / CD が無い）。承認を取る場所とマージの主体を決める",
-      "source": "docs/specifications/ndf-release-approval-on-pr.md"
+      "meaning": "CD の有無・本番チャネルの承認数・迂回の宣言で決まる 4 つの場合（CD があり、レビューなしでマージできる / CD があり、レビューが必須 / CD があり、レビューが必須で迂回の宣言がある / CD が無い）。承認を取る場所とマージの主体を決める",
+      "source": "docs/specifications/ndf-release-approval-on-pr.md",
+      "pending_source": "issues/issue-3506-design.md"
     },
     {
       "term": "承認資料のコメント",
@@ -7389,6 +7425,54 @@
       "context": "ndf-workflow",
       "meaning": "`plugins/ndf-next/bin/` のファイルごとに、起動スクリプトか内部の部品かを持つ事実の表（`plugins/ndf-next/contracts/domains/launchers.json`）",
       "pending_source": "issues/issue-3518-design.md"
+    },
+    {
+      "term": "上げる先（依存の版の）",
+      "context": "ndf-workflow",
+      "meaning": "#3347 の決定 106 の規則で選んだ依存の版のうち、最初のアップロードから 7 日たったもの",
+      "pending_source": "issues/issue-3370-requirements.md"
+    },
+    {
+      "term": "遅れ（依存の版の）",
+      "context": "ndf-workflow",
+      "meaning": "宣言の版が上げる先より古く、固定する理由も無い状態。週 1 回の検査が知らせる",
+      "pending_source": "issues/issue-3370-requirements.md"
+    },
+    {
+      "term": "依存の更新の仕組み",
+      "context": "ndf-workflow",
+      "meaning": "依存の版の遅れを知らせ、版を上げる手段。このリポジトリでは Renovate を GitHub Actions で動かす形（#3370 の決定 1）",
+      "pending_source": "issues/issue-3370-design.md"
+    },
+    {
+      "term": "依存の一覧の Issue",
+      "context": "ndf-workflow",
+      "meaning": "依存の更新の仕組みが遅れを知らせる 1 件の Issue。Renovate の Dependency Dashboard で、チェックを入れると更新の PR が作られる",
+      "pending_source": "issues/issue-3370-design.md"
+    },
+    {
+      "term": "本番の PR",
+      "context": "ndf-release",
+      "meaning": "リリースのブランチから本番チャネルへ出す Pull Request。CD のある場合は、この PR のマージで本番へ届く",
+      "pending_source": "issues/issue-3506-requirements.md"
+    },
+    {
+      "term": "管理者の迂回",
+      "context": "ndf-release",
+      "meaning": "ruleset が迂回を許した役割の人が、必須の承認レビューと必須のチェックを満たさずにマージすること。`gh pr merge --admin` で打つ",
+      "pending_source": "issues/issue-3506-requirements.md"
+    },
+    {
+      "term": "迂回の宣言",
+      "context": "ndf-release",
+      "meaning": "本番の PR を管理者の迂回でマージすることを選ぶ、`.ndf/project.json` の `production_merge.admin` の値。`true` のときだけ宣言があるとみなし、無いときは迂回しない",
+      "pending_source": "issues/issue-3506-requirements.md"
+    },
+    {
+      "term": "迂回の記録",
+      "context": "ndf-release",
+      "meaning": "本番の PR を管理者の迂回でマージしたことを示す、本番の PR へ置くコメント。マージした先端と照らした承認の証跡を指す。証跡とは別の印を持ち、承認の判定に数えない",
+      "pending_source": "issues/issue-3506-design.md"
     }
   ]
 }

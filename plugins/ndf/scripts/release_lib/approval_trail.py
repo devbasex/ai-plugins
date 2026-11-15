@@ -5,7 +5,10 @@
 判定に使わない。作成の後に編集された証跡は数えない（書き込み権限を持つ人は他人のコメントを編集できる）。
 
 - 書式の解釈と判定（`parse_trail`・`trails_of`・`judge`・`approved_review_commit`・`render_*`）は純粋な関数
-- GitHub の読み書き（`read_*`・`open_prs_at`・`post_status`・`write_trail`）は `gh` を通す。失敗は `TrailError`
+- GitHub の読み書き（`read_*`・`open_prs_at`・`post_status`・`write_trail`・`write_admin_record`）は `gh` を通す。失敗は `TrailError`
+
+迂回の記録（#3506）は本番の PR を管理者の迂回でマージしたことを示すコメントで、印 `ADMIN_MARK` を持つ。
+証跡の印を持たないため、証跡の判定にも `release-approval.yml` の起動の条件にも数えない。
 
 証跡の書式の印と行の名前はこのモジュールだけが持つ。手順書は書式を写さず、ここを指す。
 """
@@ -29,6 +32,10 @@ REVIEWER_PERMISSIONS = ("admin", "write")
 DESCRIPTION_LIMIT = 140  # commit status の説明の長さの上限
 TRAIL_LINE = "承認したコミット:"
 HEAD_LINE = "先端のコミット:"
+BY_LINE = "担い手:"
+ADMIN_MARK = "<!-- ndf:admin-merge -->"
+ADMIN_SHA_LINE = "マージした先端:"
+ADMIN_TRAIL_LINE = "照らした承認の証跡:"
 _SHA40 = re.compile(r"(?<![0-9a-fA-F])[0-9a-fA-F]{40}(?![0-9a-fA-F])")
 
 
@@ -38,6 +45,8 @@ class Trail(NamedTuple):
     created_at: str
     edited: bool
     comment_id: int | None
+    by: str | None = None  # 本文の `担い手:` の値（user / mvv）。照合の絞り込みにだけ使う
+    url: str = ""
 
 
 class Judgment(NamedTuple):
@@ -45,6 +54,7 @@ class Judgment(NamedTuple):
     description: str
     approver: str | None = None
     at: str | None = None
+    url: str | None = None  # 照らした証跡のコメントの URL（success のとき）
 
 
 class TrailError(Exception):
@@ -78,6 +88,20 @@ def parse_trail(body: str) -> str | None:
         return None
 
 
+def parse_by(body: str) -> str | None:
+    """本文の `担い手:` の行の値。行が無ければ None。"""
+    for line in (body or "").splitlines():
+        text = line.strip()
+        if text.startswith(BY_LINE):
+            return text[len(BY_LINE) :].strip()
+    return None
+
+
+def _author(c: dict) -> str:
+    """コメントの作成者の login。無ければ空。"""
+    return str((c.get("user") or {}).get("login") or "")
+
+
 def trails_of(comments: list[dict]) -> list[Trail]:
     """issue のコメントの並び → 証跡（作成の時刻の昇順）。証跡でないコメントは含まない。"""
     out = []
@@ -86,8 +110,8 @@ def trails_of(comments: list[dict]) -> list[Trail]:
             continue
         created = str(c.get("created_at") or "")
         updated = str(c.get("updated_at") or created)
-        login = str((c.get("user") or {}).get("login") or "")
-        out.append(Trail(sha, login, created, updated != created, c.get("id")))
+        body = c.get("body") or ""
+        out.append(Trail(sha, _author(c), created, updated != created, c.get("id"), parse_by(body), str(c.get("html_url") or "")))
     return sorted(out, key=lambda t: t.created_at)
 
 
@@ -95,24 +119,37 @@ def _cut(text: str) -> str:
     return text if len(text) <= DESCRIPTION_LIMIT else text[: DESCRIPTION_LIMIT - 1] + "…"
 
 
-def judge(trails: list[Trail], roles: dict[str, str | None], head: str) -> Judgment:
-    """承認権限（admin・maintain）を持つ人の最新の、編集されていない証跡と先端を照らす（I1〜I4）。"""
-    if not trails:
-        return Judgment("failure", "証跡が無い")
+def _narrow(trails: list[Trail], roles: dict[str, str | None], by: str | None) -> tuple[list[Trail], str]:
+    """証跡を担い手・未編集・承認権限の順に絞る。(残った証跡, 失敗の理由)。残れば理由は空。"""
+    if by is not None:
+        trails = [t for t in trails if t.by == by]
+        if not trails:
+            return [], f"担い手が {by} の証跡が無い"
     fresh = [t for t in trails if not t.edited]
     if not fresh:
-        return Judgment("failure", "編集された証跡だけがある")
+        return [], "編集された証跡だけがある"
     valid = [t for t in fresh if roles.get(t.login) in APPROVER_ROLES]
+    if valid:
+        return valid, ""
+    unread = sorted({t.login for t in fresh if roles.get(t.login) is None})
+    if unread:
+        return [], _cut(f"権限を読めない {', '.join(unread)}")
+    others = sorted({t.login for t in fresh})
+    return [], _cut(f"承認権限の無い {', '.join(others)} の証跡だけがある")
+
+
+def judge(trails: list[Trail], roles: dict[str, str | None], head: str, by: str | None = None) -> Judgment:
+    """承認権限（admin・maintain）を持つ人の最新の、編集されていない証跡と先端を照らす（I1〜I4）。
+    `by` を渡せば担い手がその値の証跡だけを数える（`cd-admin` は利用者の証跡だけ。#3506 の I9）。"""
+    if not trails:
+        return Judgment("failure", "証跡が無い")
+    valid, why = _narrow(trails, roles, by)
     if not valid:
-        unread = sorted({t.login for t in fresh if roles.get(t.login) is None})
-        if unread:
-            return Judgment("failure", _cut(f"権限を読めない {', '.join(unread)}"))
-        others = sorted({t.login for t in fresh})
-        return Judgment("failure", _cut(f"承認権限の無い {', '.join(others)} の証跡だけがある"))
+        return Judgment("failure", why)
     last = max(valid, key=lambda t: t.created_at)
     if last.sha != head.lower():
         return Judgment("failure", f"証跡 {last.sha[:7]} ≠ 先端 {head[:7]}", last.login, last.created_at)
-    return Judgment("success", _cut(f"承認: {last.login} {last.created_at}"), last.login, last.created_at)
+    return Judgment("success", _cut(f"承認: {last.login} {last.created_at}"), last.login, last.created_at, last.url or None)
 
 
 def approved_review_commit(reviews: list[dict], perms: dict[str, str | None]) -> str | None:
@@ -133,6 +170,14 @@ def approved_review_commit(reviews: list[dict], perms: dict[str, str | None]) ->
 def render_trail(sha: str, by: str) -> str:
     """証跡のコメントの本文。`担い手:` は監査のための記述で、判定に使わない。"""
     return f"{TRAIL_MARK}\n## リリース承認\n\n{TRAIL_LINE} `{ac.parse_sha(sha)}`\n担い手: {by}\n"
+
+
+def render_admin_record(sha: str, trail_url: str) -> str:
+    """迂回の記録の本文。証跡の印を持たない（証跡の判定に数えない）。"""
+    return (
+        f"{ADMIN_MARK}\n## 管理者の迂回でマージした\n\n{ADMIN_SHA_LINE} `{ac.parse_sha(sha)}`\n"
+        f"{ADMIN_TRAIL_LINE} {trail_url or '（読めない）'}\n宣言: `.ndf/project.json` の `production_merge.admin`\n"
+    )
 
 
 def render_request(material: str, head: str) -> str:
@@ -200,10 +245,10 @@ def read_review_commit(repo: str, pr: int) -> str | None:
     return approved_review_commit(reviews, read_permissions(repo, logins))
 
 
-def judge_trails_on(repo: str, pr: int, head: str) -> Judgment:
+def judge_trails_on(repo: str, pr: int, head: str, by: str | None = None) -> Judgment:
     """PR の上の証跡を先端 `head` で判定する。編集されていない証跡を書いた人の権限だけを読む（場合 1。I1〜I4）。"""
     trails = trails_of(read_comments(repo, pr))
-    return judge(trails, read_roles(repo, [t.login for t in trails if not t.edited]), head)
+    return judge(trails, read_roles(repo, [t.login for t in trails if not t.edited]), head, by)
 
 
 def read_head(repo: str, pr: int) -> tuple[str, str, str]:
@@ -232,7 +277,7 @@ def post_status(repo: str, sha: str, j: Judgment) -> None:
 
 
 def write_trail(repo: str, pr: int, sha: str, by: str) -> tuple[bool, str]:
-    """先端が `sha` のときだけ証跡のコメントを置く。同じ人の同じ SHA の編集されていない証跡があれば置かない。
+    """先端が `sha` のときだけ証跡のコメントを置く。同じ人・同じ担い手の同じ SHA の編集されていない証跡があれば置かない。
     (置いたか, コメントの URL)。先端が違えば TrailError("head_moved")。"""
     sha = ac.parse_sha(sha)
     head, _base, _state = read_head(repo, pr)
@@ -241,10 +286,31 @@ def write_trail(repo: str, pr: int, sha: str, by: str) -> tuple[bool, str]:
     me = gh_rest.viewer_login()
     comments = read_comments(repo, pr)
     for t in trails_of(comments):
-        if t.login == me and t.sha == sha and not t.edited:
+        if t.login == me and t.sha == sha and t.by == by and not t.edited:
             url = next((c.get("html_url") or "" for c in comments if c.get("id") == t.comment_id), "")
             return False, url
     a = gh_rest.comment(repo, pr, render_trail(sha, by))
     if not a.ok:
         raise TrailError("unreadable", f"証跡のコメントを置けない: {a.error[:200]}")
+    return True, (a.value or {}).get("url") or ""
+
+
+def write_admin_record(repo: str, pr: int, sha: str, trail_url: str) -> tuple[bool, str]:
+    """迂回の記録を置く。同じ先端の記録が既にあれば置かない（#3506 の I7）。(置いたか, コメントの URL)。
+
+    既にある記録に数えるのは、書き込みの権限（admin・write）を持つ人が書き、作成の後に編集されていないものだけ
+    （コメントできる誰かが印と SHA の入ったコメントを先に置いても、本物の記録を止められない）。"""
+    sha = ac.parse_sha(sha)
+    found = []
+    for c in read_comments(repo, pr):
+        body = str(c.get("body") or "") if isinstance(c, dict) else ""
+        if ADMIN_MARK in body and sha in [x.lower() for x in _line_shas(body, ADMIN_SHA_LINE)]:
+            found.append(c)
+    perms = read_permissions(repo, [_author(c) for c in found]) if found else {}
+    for c in found:
+        if perms.get(_author(c)) in REVIEWER_PERMISSIONS and str(c.get("updated_at") or "") == str(c.get("created_at") or ""):
+            return False, str(c.get("html_url") or "")
+    a = gh_rest.comment(repo, pr, render_admin_record(sha, trail_url))
+    if not a.ok:
+        raise TrailError("unreadable", f"迂回の記録を置けない: {a.error[:200]}")
     return True, (a.value or {}).get("url") or ""

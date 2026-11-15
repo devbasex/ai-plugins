@@ -28,11 +28,16 @@
     ndf route repeat --result <結果 JSON のファイル> --log <記録の JSONL>
         止まった結果の同じ原因の鍵（種類と落ちたテストの集まり）を記録へ足し、続いた回数が
         `supervise.step-rerun` の `same_cause` を超えたら `fix_limit` で止まる（人へ戻す）
-    ndf route test [--result <結果 JSON のファイル>] [--nodes-from <CI の結果 JSON のファイル>] -- <コマンド>
+    ndf route test [--result <結果 JSON のファイル>] -- <コマンド>
         手元のテストのコマンドを `ndf test-slot run` で打つ。シグナル（128 以上）を除く 0 以外の終了コードは
         どれも `test_failed` の止まった結果にし（`--result` があればそこへも書く。`ndf route repeat` が数える）、
-        `test-slot` 自身が止まった結果はそのまま返す。`--nodes-from` は CI の落ちたテストの node id を
-        シェルの引用へ通してコマンドの後ろへ足す（読めなければ `invalid`）
+        `test-slot` 自身が止まった結果はそのまま返す
+    ndf route test --failed-from <CI の結果 JSON のファイル> [--result <結果 JSON のファイル>]
+        CI の修正の後の確かめ（#3188）。CI で落ちたテストのファイルだけを、打った場所の宣言（`.ndf/project.json`）の
+        テストの suite の `scope_command` の `{paths}` へ入れて打つ。落ちたテストを持つ suite だけを打ち、全体テストは
+        打たない。落ちたテストが無い・どの suite にも当たらないファイルがあれば打たずに `precondition`、
+        CI の結果や宣言を読めなければ `invalid`。通ったときも落ちたときも、打ったコマンドと合否を結果 JSON の
+        `items` に並べる（`--result` があればそこへも書く）
 
 結果 JSON を標準出力へ 1 行で出す。
 """
@@ -43,9 +48,6 @@ import argparse
 import copy
 import json
 import re
-import shlex
-import subprocess
-import sys
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -55,6 +57,8 @@ from ndf import cli, contracts, identity
 from ndf.adapters import git, github
 from ndf.contracts import causes, exit_codes, limits, result
 from ndf.contracts.exit_codes import OK
+from ndf.contracts.routing import END
+from ndf.core.route import local_tests
 from ndf.core.plan import cli as plan_cli
 from ndf.core.plan import model, steps
 
@@ -65,6 +69,11 @@ PARAMS_FILE = "params.json"
 PARTS_FILE = "parts/steps.json"
 # 雛形のステップで共有のステップを引く鍵
 USE = "use"
+# 手元でテストを打つステップの id。CI テストの宣言（`test.ci.only`）があるリポジトリのプランからは外す（#3473）
+LOCAL_TEST_STEPS = ("test", "test-all", "ci-local")
+# ステップの行き先の鍵: 1 つの行き先を持つ鍵と、場合 → 行き先の対応表を持つ鍵（ステップを外すときに付け替える）
+TARGET_KEYS = ("next", "on_fail")
+TARGET_TABLE_KEYS = ("on_cause", "on_answer")
 # 同じ原因の続きの上限の宣言
 REPEAT_LIMIT = "supervise.step-rerun"
 # 作業場所を省いたときの置き場（リポジトリの根の下）
@@ -72,10 +81,6 @@ WORKTREES = ".worktrees"
 # base を省いたときに読むブランチの運用の宣言（リポジトリの根の下）と、その鍵
 BRANCH_DECLARATION = identity.FIXED_WORDS["declaration_dir"] + "/worktree.json"
 BASE_KEY = "base_branch"
-# 手元のテストを打つ枠のエントリポイント（`ndf route test` が後ろにコマンドを 1 つ足す）
-TEST_SLOT = (identity.FIXED_WORDS["entrypoint"], "test-slot", "run", "--")
-# これ以上の終了コードはシグナルで止まった子（シェルの 128 + シグナルの番号）。テストの落ちと読まない
-SIGNAL_EXIT_BASE = 128
 _PARAM = re.compile(r"\{\{([a-z_][a-z0-9_]*)\}\}")
 
 Value = Union[str, list[str]]
@@ -164,11 +169,50 @@ def _expand_step(raw: Mapping[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in merged.items() if v is not None}
 
 
-def expanded(t: Template) -> dict[str, Any]:
-    """`use` を開いたプランの形（差し込みは埋めない）。"""
+def expanded(t: Template, *, local_tests: bool = True) -> dict[str, Any]:
+    """`use` を開いたプランの形（差し込みは埋めない）。`local_tests` が偽なら手元のテストのステップを外す。"""
     plan = copy.deepcopy(dict(t.plan))
     plan["steps"] = [_expand_step(s) for s in plan["steps"]]
-    return plan
+    return plan if local_tests else without_steps(plan, LOCAL_TEST_STEPS)
+
+
+def _successors(found: Sequence[Mapping[str, Any]], drop: frozenset[str]) -> dict[str, str]:
+    """外すステップの id → 代わりの行き先（そのステップの `next`、無ければ並びの次。外すステップが続けば辿る）。"""
+    ids = [str(s["id"]) for s in found]
+    following = [*ids[1:], END]
+    plain = {i: str(s["next"]) if "next" in s else after for i, s, after in zip(ids, found, following)}
+    out: dict[str, str] = {}
+    for i in (x for x in ids if x in drop):
+        target = plain[i]
+        while target in drop and target != i:
+            target = plain[target]
+        out[i] = target
+    return out
+
+
+def _moved(target: Any, moved: Mapping[str, str]) -> Any:
+    """行き先 `target` が外したステップなら代わりの行き先、そうでなければそのまま。"""
+    return moved[target] if target in moved else target
+
+
+def _retarget(step: Mapping[str, Any], moved: Mapping[str, str]) -> dict[str, Any]:
+    """ステップの行き先（`next`・`on_fail`・`on_cause`・`on_answer`）のうち外したステップを代わりの行き先へ置き換える。"""
+    out = dict(step)
+    for key in TARGET_KEYS:
+        if key in out:
+            out[key] = _moved(out[key], moved)
+    for key in TARGET_TABLE_KEYS:
+        if isinstance(out.get(key), Mapping):
+            out[key] = {k: _moved(v, moved) for k, v in out[key].items()}
+    return out
+
+
+def without_steps(plan: Mapping[str, Any], ids: Iterable[str]) -> dict[str, Any]:
+    """プランから `ids` のステップを外し、そこへ向かう行き先を外したステップの続きへ付け替える。"""
+    drop = frozenset(ids)
+    found = list(plan["steps"])
+    moved = _successors(found, drop)
+    return {**plan, "steps": [_retarget(s, moved) for s in found if s["id"] not in drop]}
 
 
 def used_names(value: Any) -> set[str]:
@@ -235,11 +279,17 @@ def _value_of(name: str, given: Mapping[str, Value], defs: Mapping[str, Param]) 
     return value
 
 
-def resolve(t: Template, given: Mapping[str, Value]) -> dict[str, Value]:
+def needed(t: Template, *, local_tests: bool = True) -> tuple[str, ...]:
+    """組むプランが使う差し込みの名前（手元のテストのステップを外せば、そこだけが使う名前は要らない）。"""
+    used = used_names(expanded(t, local_tests=local_tests))
+    return tuple(n for n in t.params if n in used)
+
+
+def resolve(t: Template, given: Mapping[str, Value], *, local_tests: bool = True) -> dict[str, Value]:
     """差し込みの値を決める（与えた値 → 既定）。雛形に無い名前・欠けた値・並びかの食い違いは `RouteError`。"""
     defs = params()
     _check_unknown(t, given)
-    found = {name: _value_of(name, given, defs) for name in t.params}
+    found = {name: _value_of(name, given, defs) for name in needed(t, local_tests=local_tests)}
     values = {name: value for name, value in found.items() if value is not None}
     missing = [name for name, value in found.items() if value is None]
     if missing:
@@ -247,9 +297,13 @@ def resolve(t: Template, given: Mapping[str, Value]) -> dict[str, Value]:
     return values
 
 
-def render(t: Template, given: Mapping[str, Value]) -> dict[str, Any]:
-    """雛形を埋めたプラン（`model.parse` を通る形）。誤りは `RouteError`。"""
-    plan = _fill(expanded(t), resolve(t, given))
+def render(t: Template, given: Mapping[str, Value], *, local_tests: bool = True) -> dict[str, Any]:
+    """雛形を埋めたプラン（`model.parse` を通る形）。誤りは `RouteError`。
+
+    `local_tests` が偽（CI テストの宣言 `test.ci.only` があるリポジトリ）なら、手元でテストを打つステップ
+    （`LOCAL_TEST_STEPS`）を外して組む。テストは CI の結果で確かめる。
+    """
+    plan = _fill(expanded(t, local_tests=local_tests), resolve(t, given, local_tests=local_tests))
     try:
         model.parse(plan)
     except model.PlanError as exc:
@@ -272,8 +326,10 @@ def _param_name_errors(t: Template, used: set[str]) -> list[str]:
 
 
 def _sample_render_errors(t: Template) -> list[str]:
+    """試しの値で、手元のテストのステップを持つ形と外した形の両方を組む。"""
     try:
         render(t, _sample(t.params))
+        render(t, _sample(t.params), local_tests=False)
     except RouteError as exc:
         return [str(exc)]
     return []
@@ -312,9 +368,7 @@ def cause_key(found: Mapping[str, Any]) -> Optional[str]:
     kind = causes.kind_of(found.get("cause"))
     if found.get("status") != exit_codes.STOPPED or kind is None:
         return None
-    metrics = found.get("metrics") if isinstance(found.get("metrics"), Mapping) else {}
-    tests = metrics.get("failed_tests") if isinstance(metrics.get("failed_tests"), list) else []
-    return json.dumps([kind, sorted(str(t) for t in tests)], ensure_ascii=False)
+    return json.dumps([kind, sorted(local_tests.failed_tests_of(found))], ensure_ascii=False)
 
 
 def streak(history: Sequence[str], key: str) -> int:
@@ -366,18 +420,23 @@ def default_merge_method(repo: Path, base: str) -> Optional[str]:
     return github.pick_merge_method(None, allowed)
 
 
+def _omitted(t: Template, out: Mapping[str, Value], name: str) -> bool:
+    """雛形が差し込み `name` を使い、まだ値が無いか。"""
+    return name in t.params and name not in out
+
+
 def derived(t: Template, given: Mapping[str, Value], cwd: Path) -> dict[str, Value]:
     """省いた `repo`・`worktree`・`base`・`merge_method` を打った場所から決めて足す（決まらなければ足さない）。"""
     out = dict(given)
-    if "repo" in t.params and "repo" not in out:
+    if _omitted(t, out, "repo"):
         out["repo"] = repo_root(cwd)
-    if "worktree" in t.params and "worktree" not in out and isinstance(out.get("branch"), str):
+    if _omitted(t, out, "worktree") and isinstance(out.get("branch"), str):
         out["worktree"] = str(Path(str(out["repo"])) / WORKTREES / out["branch"])
-    if "base" in t.params and "base" not in out and "repo" in out:
+    if _omitted(t, out, "base") and "repo" in out:
         base = default_base(Path(str(out["repo"])))
         if base is not None:
             out["base"] = base
-    if "merge_method" in t.params and "merge_method" not in out and "repo" in out and isinstance(out.get("base"), str):
+    if _omitted(t, out, "merge_method") and "repo" in out and isinstance(out.get("base"), str):
         method = default_merge_method(Path(str(out["repo"])), str(out["base"]))
         if method is not None:
             out["merge_method"] = method
@@ -456,10 +515,7 @@ def _invalid(detail: str) -> int:
 
 def _stopped_key(a: argparse.Namespace) -> str:
     """結果ファイルの同じ原因の鍵。読めない・止まった結果でなければ `RouteError`。"""
-    try:
-        found = steps.last_json(Path(a.result).read_text(encoding="utf-8"))
-    except OSError as exc:
-        raise RouteError(f"結果 {a.result} を読めない: {exc.strerror or exc}") from None
+    found = local_tests.read_result(a.result, "結果", RouteError)
     key = cause_key(found) if found is not None else None
     if key is None:
         raise RouteError(f"結果 {a.result} は止まった結果でない")
@@ -489,52 +545,6 @@ def _cmd_repeat(a: argparse.Namespace) -> int:
     return result.emit(result.result(TOOL, OK, f"同じ原因は {count} 回目（上限 {same_cause}）", metrics=metrics))
 
 
-def _failed_nodes(path: Path) -> list[str]:
-    """CI の結果 JSON の落ちたテストの node id（`metrics.failed_tests`）。読めない・結果 JSON でなければ `RouteError`。"""
-    try:
-        found = steps.last_json(path.read_text(encoding="utf-8"))
-    except OSError as exc:
-        raise RouteError(f"CI の結果 {path} を読めない: {exc.strerror or exc}") from None
-    if found is None:
-        raise RouteError(f"CI の結果 {path} は結果 JSON でない")
-    metrics = found.get("metrics") if isinstance(found.get("metrics"), Mapping) else {}
-    nodes = metrics.get("failed_tests") if isinstance(metrics.get("failed_tests"), list) else []
-    return [str(n) for n in nodes]
-
-
-def _run_passing(argv: Sequence[str]) -> tuple[int, Optional[dict[str, Any]]]:
-    """`argv` を打ち、標準出力をそのまま流す。終了コードと、最後の行が結果 JSON ならそれを返す。"""
-    with subprocess.Popen(list(argv), stdout=subprocess.PIPE, text=True) as proc:
-        last = ""
-        for line in proc.stdout if proc.stdout is not None else ():
-            sys.stdout.write(line)
-            sys.stdout.flush()
-            if line.strip():
-                last = line
-    return proc.returncode, steps.last_json(last)
-
-
-def _cmd_test(a: argparse.Namespace) -> int:
-    nodes: list[str] = []
-    if a.nodes_from is not None:
-        try:
-            nodes = _failed_nodes(Path(a.nodes_from))
-        except RouteError as exc:
-            return _invalid(str(exc))
-    command = f"{a.command} {shlex.join(nodes)}" if nodes else a.command
-    code, own = _run_passing([*TEST_SLOT, command])
-    # 枠（test-slot）自身が止まった結果は出したまま返す。シグナルで止まった子はテストの落ちと読まない
-    if code == exit_codes.code_of("ok") or own is not None or code >= SIGNAL_EXIT_BASE:
-        return code
-    metrics = {"exit_code": code, "failed_tests": nodes}
-    found = result.stopped(TOOL, "test_failed", f"テストのコマンドが終了コード {code} で落ちた", metrics=metrics)
-    if a.result is not None:
-        out = Path(a.result)
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(json.dumps(found, ensure_ascii=False) + "\n", encoding="utf-8")
-    return result.emit(found)
-
-
 def _parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="ndf route", description="プランの雛形を選んで埋める・同じ原因の続きを数える")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -552,9 +562,9 @@ def _parser() -> argparse.ArgumentParser:
     rp.set_defaults(fn=_cmd_repeat)
     tp = sub.add_parser("test", help="手元のテストを打ち、落ちを test_failed にする")
     tp.add_argument("--result")
-    tp.add_argument("--nodes-from")
-    tp.add_argument("command")
-    tp.set_defaults(fn=_cmd_test)
+    tp.add_argument("--failed-from")
+    tp.add_argument("command", nargs="?")
+    tp.set_defaults(fn=local_tests.cmd_test)
     return p
 
 

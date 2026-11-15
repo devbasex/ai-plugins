@@ -14,28 +14,17 @@ from __future__ import annotations
 import json
 import subprocess
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from ndf.adapters import git
 from ndf.contracts import limits
 from ndf.core.converge import worktree
-from ndf.domains.crossrefactor import scope, tests_decide, verify_decide
-from ndf.domains.crossrefactor.diff_decide import in_scope
+from ndf.domains.crossrefactor import scope, verify_decide
 from ndf.testing import limits as test_limits
-from ndf.testing import slots, weight
+from ndf.testing import scoped, slots
 
 RUN_POLICY = "test-run.test"
-SCOPE_KEY = "scope_command"
-
-
-@dataclass(frozen=True)
-class Suite:
-    name: str
-    template: str
-    paths: tuple[str, ...]
-    test: bool
 
 
 def _read_declaration(path: Path) -> Any:
@@ -52,30 +41,21 @@ def _declaration(work: Path) -> Mapping[str, Any]:
     return test if isinstance(test, dict) else {}
 
 
-def _suite(raw: Mapping[str, Any]) -> Suite | None:
-    template = raw.get(SCOPE_KEY)
-    if not isinstance(template, str) or tests_decide.PATHS_SLOT not in template:
-        return None
-    paths = raw["paths"] if isinstance(raw.get("paths"), list) else ["."]
-    return Suite(str(raw["name"]), template, tuple(str(p) for p in paths), weight.is_test_suite(raw))
-
-
-def suites(work: Path) -> list[Suite]:
+def suites(work: Path) -> list[scoped.Suite]:
     """検証に使う suite。テストを CI に寄せる宣言があれば検査の suite だけ。"""
     decl = _declaration(work)
-    ci = decl.get("ci")
-    ci_only = isinstance(ci, dict) and ci.get("only") is True
+    ci_only = scoped.ci_only(decl)
     raws = decl.get("suites")
-    found = [s for s in (_suite(r) for r in (raws if isinstance(raws, list) else []) if isinstance(r, dict)) if s is not None]
+    found = [s for s in (scoped.suite_of(r) for r in (raws if isinstance(raws, list) else [])) if s is not None]
     return [s for s in found if not (s.test and ci_only)]
 
 
-def targets(work: Path, found: Sequence[Suite], changed: Sequence[str]) -> dict[str, list[str]]:
+def targets(work: Path, found: Sequence[scoped.Suite], changed: Sequence[str]) -> dict[str, list[str]]:
     """suite → 当てるファイル。検査は変えたファイル、テストは対応するテストのファイル。"""
     tests = list(scope.tests_for_change(work, changed).files) if any(s.test for s in found) else []
     out: dict[str, list[str]] = {}
     for s in found:
-        files = [f for f in (tests if s.test else changed) if in_scope(f, s.paths) and (work / f).is_file()]
+        files = [f for f in (tests if s.test else changed) if scoped.in_scope(f, s.paths) and (work / f).is_file()]
         if files:
             out[s.name] = files
     return out
@@ -90,22 +70,22 @@ def _passes(work: Path, command: str, timeout: float) -> bool:
     return done.returncode == 0
 
 
-def failing(work: Path, found: Sequence[Suite], picked: Mapping[str, Sequence[str]]) -> frozenset[str]:
+def failing(work: Path, found: Sequence[scoped.Suite], picked: Mapping[str, Sequence[str]]) -> frozenset[str]:
     """`picked`（suite → ファイル）を作業場所 `work` で打ち、落ちた鍵（`<suite>:<ファイル>`）を返す。"""
     timeout = limits.seconds(RUN_POLICY)
     by_name = {s.name: s for s in found}
     keys: set[str] = set()
     for name, files in picked.items():
         template = by_name[name].template
-        if _passes(work, tests_decide.fill_paths(template, files), timeout):
+        if _passes(work, scoped.fill_paths(template, files), timeout):
             continue
-        keys.update(verify_decide.failure_key(name, f) for f in files if not _passes(work, tests_decide.fill_paths(template, [f]), timeout))
+        keys.update(verify_decide.failure_key(name, f) for f in files if not _passes(work, scoped.fill_paths(template, [f]), timeout))
     return frozenset(keys)
 
 
-def tests_failing(work: Path, found: Sequence[Suite], tests: Sequence[str]) -> frozenset[str]:
+def tests_failing(work: Path, found: Sequence[scoped.Suite], tests: Sequence[str]) -> frozenset[str]:
     """足したテストのファイル `tests` をテストの suite で打ち、落ちた鍵を返す（どの suite にも当たらないファイルは打たない）。"""
-    picked = {s.name: [t for t in tests if in_scope(t, s.paths) and (work / t).is_file()] for s in found if s.test}
+    picked = {s.name: [t for t in tests if scoped.in_scope(t, s.paths) and (work / t).is_file()] for s in found if s.test}
     return failing(work, found, {n: fs for n, fs in picked.items() if fs})
 
 
@@ -118,7 +98,7 @@ def regroup(keys: Iterable[str]) -> dict[str, list[str]]:
     return out
 
 
-def at_commit(probe: Path, commit: str, found: Sequence[Suite], keys: Iterable[str]) -> frozenset[str]:
+def at_commit(probe: Path, commit: str, found: Sequence[scoped.Suite], keys: Iterable[str]) -> frozenset[str]:
     """別の作業場所 `probe` を `commit` へ合わせ、`keys` のうちそこで落ちる鍵を返す（項目の起点の失敗）。"""
     wanted = regroup(keys)
     if not wanted:

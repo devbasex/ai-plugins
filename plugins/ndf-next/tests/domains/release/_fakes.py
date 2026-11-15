@@ -30,9 +30,18 @@ class FakeHub:
     responses: dict[tuple[str, str], Any] = field(default_factory=dict)
     merged: list[int] = field(default_factory=list)
     merge_methods: list[str | None] = field(default_factory=list)
+    merge_required: list[bool] = field(default_factory=list)
     drop_comments: bool = False
     node_data: dict[int, dict] = field(default_factory=dict)
     runs: list[dict] = field(default_factory=list)
+    status_list: list[dict] = field(default_factory=list)
+    bot_apps: dict[str, int] = field(default_factory=dict)
+    # compare で読むコミット（先端の SHA ごと）と、読んだ (base, head)
+    commits_of: dict[str, list[dict]] = field(default_factory=dict)
+    compared: list[tuple[str, str]] = field(default_factory=list)
+    # マージキューに入っている PR と、キューから外した PR
+    queued: set[int] = field(default_factory=set)
+    dequeued: list[int] = field(default_factory=list)
 
     def pull(self, number: int) -> Pull:
         return self.pulls[number]
@@ -42,6 +51,10 @@ class FakeHub:
 
     def trusts(self, authored: Authored) -> bool:
         return authored.author in self.trusted
+
+    def token_trusted(self) -> bool:
+        # 書いたコメントの書き手は octocat（`rest` の POST）
+        return "octocat" in self.trusted
 
     def visibilities(self, repos: Any) -> dict[str, str]:
         return {r: "PRIVATE" for r in repos}
@@ -58,16 +71,41 @@ class FakeHub:
             raise got
         return got if got is not None else {}
 
+    def branch_rules(self, branch: str) -> list[dict]:
+        got = self.rest("GET", f"/repos/{self.repo}/rules/branches/{branch}")
+        return got if isinstance(got, list) else []
+
     def nodes(self, numbers: Any, node: str, fields: str) -> dict[int, dict]:
         return {int(n): self.node_data.get(int(n), {}) for n in numbers}
+
+    def commit_parents(self, sha: str) -> list[str]:
+        return [f"parent-of-{sha}"]
+
+    def compare_commits(self, base: str, head: str) -> list[dict]:
+        self.compared.append((base, head))
+        return list(self.commits_of.get(head, []))
 
     def check_runs(self, sha: str) -> list[dict]:
         return list(self.runs)
 
-    def merge(self, number: int, expect_head: str | None = None, method: str | None = None) -> MergeOutcome:
+    def statuses(self, sha: str) -> list[dict]:
+        return list(self.status_list)
+
+    def bot_app(self, login: str) -> int | None:
+        return self.bot_apps.get(login)
+
+    def merge(self, number: int, expect_head: str | None = None, method: str | None = None, require_method: bool = False) -> MergeOutcome:
         self.merged.append(number)
         self.merge_methods.append(method)
+        self.merge_required.append(require_method)
         return MergeOutcome(True, None, f"#{number} をマージした", self.pulls[number].head_sha)
+
+    def in_merge_queue(self, number: int) -> bool:
+        return number in self.queued
+
+    def dequeue(self, number: int) -> None:
+        self.queued.discard(number)
+        self.dequeued.append(number)
 
 
 def not_found() -> GitHubError:

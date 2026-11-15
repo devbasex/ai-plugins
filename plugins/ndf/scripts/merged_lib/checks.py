@@ -188,6 +188,8 @@ class GreenWatch:
         self.on_open = None  # 開いた PR を最初に読んだとき、draft を外す前に 1 度だけ呼ぶ（リリース承認ゲートの判定。#1336）
         # CI テストの宣言のあるリポジトリのテストのチェック（空なら head のすべて）。None なら今の判定のまま（#3056 の I7）
         self.test_checks: list[str] | None = None
+        # 管理者の迂回で本番チャネルへ入れるときの、宛先の規則と保護の必須のチェック（現れるまで待つ。迂回で飛ばさない）
+        self.required_checks: list[str] = []
 
     def wait(self):
         """終わるまで読み直す。読んだ中身（先頭のコミットとチェックの状態）が変わらない間は、間隔を 1.5 倍ずつ
@@ -404,11 +406,12 @@ class GreenWatch:
         )
 
     def _absent_test_checks(self, reading: CheckReading) -> list[str]:
-        """CI テストの宣言のテストのチェックのうち、head に現れないもの（待ちに数える）。"""
-        if not self.test_checks:
+        """CI テストの宣言のテストのチェックと迂回の必須のチェックのうち、head に現れないもの（待ちに数える）。"""
+        names = list(dict.fromkeys([*(self.test_checks or []), *self.required_checks]))
+        if not names:
             return []
         seen = [(i.label, str(i.key[-1])) for group in (reading.pending, reading.passed, reading.failed, reading.infra) for i in group]
-        return [f"{c}（現れない）" for c in self.test_checks if not any(c in pair for pair in seen)]
+        return [f"{c}（現れない）" for c in names if not any(c in pair for pair in seen)]
 
     def _check_deadline(self, reading: CheckReading, pending, passed):
         """締め切りを過ぎていれば止める（基盤待ちが残れば基盤待ちとして）。止めるときは emit で抜ける。"""

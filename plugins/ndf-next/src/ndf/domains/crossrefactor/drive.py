@@ -56,7 +56,7 @@ from ndf.domains.crossrefactor import (
     workspace,
 )
 from ndf.testing import limits as test_limits
-from ndf.testing import slots
+from ndf.testing import scoped, slots
 
 Status = items_decide.Status
 
@@ -325,14 +325,14 @@ def _implement(run: _Run, item: dict[str, Any]) -> bool:
     return _code(run, item, "implement", prompt_decide.implement(item)) is not None
 
 
-def _own_failures(run: _Run, item: dict[str, Any], found: Sequence[verify.Suite]) -> verify_decide.Attributed:
+def _own_failures(run: _Run, item: dict[str, Any], found: Sequence[scoped.Suite]) -> verify_decide.Attributed:
     """項目の起点から今までに増えた失敗（#3339）。打ち直して通った鍵はフレーキーとして除き、直しの依頼へ積む。"""
     changed = list(run.work.changed_files(item["start"], "HEAD"))
     now = verify.failing(run.ws.work, found, verify.targets(run.ws.work, found, changed))
     return _attribute(run, item, found, now)
 
 
-def _attribute(run: _Run, item: dict[str, Any], found: Sequence[verify.Suite], now: frozenset[str]) -> verify_decide.Attributed:
+def _attribute(run: _Run, item: dict[str, Any], found: Sequence[scoped.Suite], now: frozenset[str]) -> verify_decide.Attributed:
     """落ちた鍵 `now` から、項目の起点で元から落ちていた鍵を除き、打ち直して通った鍵をフレーキーとして直しの依頼へ積む。"""
     before = verify.at_commit(run.ws.reader(participants.FIXER), item["start"], found, now)
     got = verify_decide.attribute(before, now)

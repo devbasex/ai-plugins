@@ -42,7 +42,7 @@ def _collect_errors(errs: list[str], fn: Callable[[], list[str]]) -> None:
 def check_all() -> list[str]:
     """契約の表（事実の表・止まった理由の表・上限の宣言・スキーマ・契約の版）の誤りを並べる。空なら通る。"""
     errs: list[str] = []
-    for name in ("result", "causes", "limits", "release-verification", "route-chosen", "version"):
+    for name in ("result", "causes", "limits", "release-verification", "route-chosen", "version", "project-workflow"):
         _collect(errs, lambda name=name: contracts.schema_errors({}, contracts.schema_path(name)))
     policies = _collect(errs, limits.table)
     policy_names = set(policies) if policies is not None else None
