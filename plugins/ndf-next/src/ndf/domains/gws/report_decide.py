@@ -20,6 +20,6 @@ def tail(text: Optional[str]) -> str:
     return "\n".join(text.strip().splitlines()[-DETAIL_LINES:])
 
 
-def output_tail(stdout: Optional[str], stderr: Optional[str]) -> str:
-    """終わった外部のコマンドの標準出力と標準エラーをつないだ末尾（`tail`）。`None` は空として扱う。"""
-    return tail((stdout or "") + "\n" + (stderr or ""))
+def output_tail(stdout: str, stderr: str) -> str:
+    """終わった外部のコマンド（出力を文字列で受けたもの）の標準出力と標準エラーをつないだ末尾（`tail`）。"""
+    return tail(stdout + "\n" + stderr)

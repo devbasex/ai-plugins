@@ -57,7 +57,10 @@ def unauthenticated_gate(
 ) -> Outcome:
     """gws が未認証の承認ゲートの結果（state・routes の retry と cancel）と終了コードを組む。`retry_argv` は `ndf` の後ろの引数。"""
     routes = {"retry": result.command(*retry_argv), "cancel": None}
-    out = result.result(tool, result.GATE, summary, items=items, metrics={"state": rd.UNAUTHENTICATED, **(metrics or {})}, routes=routes)
+    shown: dict[str, Any] = {"state": rd.UNAUTHENTICATED}
+    if metrics is not None:
+        shown.update(metrics)
+    out = result.result(tool, result.GATE, summary, items=items, metrics=shown, routes=routes)
     return out, unauthenticated_code()
 
 
