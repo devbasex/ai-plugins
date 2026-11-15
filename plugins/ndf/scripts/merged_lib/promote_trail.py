@@ -31,6 +31,12 @@ def admin_after(root, repo, case, n, sha, trail_url):
     return run
 
 
+def admin_after_for(root, case, n, sha, trail_item: dict | None):
+    """`trail_before_merge` が返した証跡の行（`name` に URL か `#n`）から、迂回の記録を書く処理（`admin_after`）を組む。"""
+    url = (trail_item or {}).get("name") or ""
+    return admin_after(root, promote_repo(root), case, n, sha, url if url.startswith("http") else "")
+
+
 def trail_before_merge(root, a, n, case) -> dict | None:
     """promote のマージの前（#2773 の決定 14）: 場合 1 は照合した先端の証跡を置き、場合 2 は有効な人の承認のレビューのコミットと
     先端を照らす。照合する先端は a.expect_head（承認資料の承認したコミット）。場合 2 で一致しなければ承認ゲート（10）で止める。

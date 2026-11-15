@@ -455,10 +455,7 @@ def promote(a, cleanup):
             trail_item = promote_trail.trail_before_merge(root, a, n, case)
             a.no_admin = not case.admin_merge
             if case.admin_merge:
-                url = (trail_item or {}).get("name") or ""
-                after_merge = promote_trail.admin_after(
-                    root, promote_trail.promote_repo(root), case, n, a.expect_head, url if url.startswith("http") else ""
-                )
+                after_merge = promote_trail.admin_after_for(root, case, n, a.expect_head, trail_item)
     a.pr, a.no_cleanup = n, True
     approve = f"promote --head {a.head} --base {a.base} --gate-approved user --approved-from "
     merge_when_green(
