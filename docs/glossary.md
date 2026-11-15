@@ -215,6 +215,10 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 範囲テストのテンプレート | `scope_command` | {paths} を引用の外の 1 字句として含むテストのコマンド（宣言の scope_command か、{paths} を含む引数）。{paths} をシェルの引用で守った対象の並びへ置き換え、シェルで走らせる。{paths} には、改修の範囲テストではテストのファイルのパス、CI に任せる戦略の着手前のテストではテストの置き場所（ディレクトリかファイル）、静的解析では変更したファイルのパスが入る | 範囲テストの雛形 | — | `docs/specifications/cross-refactoring-scope-template-probe.md` |
 | JUnit の置き場 | `junit` | テストのコマンドが JUnit XML を書くファイルの、作業ディレクトリからの相対パス（宣言の suites[].junit）。NDF はコマンドへ引数を足さず、このファイルを読む | — | — | — |
 | スプリント | `sprint` | 1 回のリリースとして出す課題と Pull Request のセット。版数を持つプロジェクトでは 1 つの版になる。期間ではなく、1 回のリリースとして出す中身で切る。工程はスプリント単位で 1 回ずつ通し、モードもスプリントで 1 つにする | ミッション | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| エピック | `epic` | 複数のスプリント・レーン・版にまたがる作業のまとまり。並列の計画 1 つか、続く複数の並列の計画で進める | — | — | — |
+| エピックの土台 | — | エピックの全レーンが設計と実装の前に読む、1 か所に置く文書。用語・データ構造と状態の置き場・入出力の契約・設定と環境変数などの必須の節を持つ | — | — | — |
+| エピックの完了条件 | — | エピックが終わったと判定する、観測できる条件の一覧。並列の計画に書き、status が進み具合を出す | — | — | — |
+| プロジェクト | — | 主リポジトリ 1 つとサブリポジトリの集まり（Neural Development Factory の定義）。リポジトリが 1 本だけのときもその場合として含む。GitHub Projects・Claude Code の project など他のサービスの名前は、そのサービスの意味のまま使う | — | — | — |
 | スプリント状態ファイル | `sprint_state` | スプリントのプラン・done・承認ゲートの記録・MVV・版を持つファイル（パスは呼ぶ側が決め、手順書の例は `sprint-state.json`。目録 `sprint.json` とは別のファイル） | ミッション状態ファイル、ミッションの状態 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 開発ループ | — | スプリントを 1 つ終えるたびに、棚卸しの結果から次のスプリントを選んで続けて始める進め方。引数で切り替え、止まる条件に当たるまで繰り返す | — | — | `docs/specifications/ndf-workflow-development-loop.md` |
 | ループの 1 回 | — | 開発ループの 1 回分。次のスプリントの選定・スプリント 1 つ・棚卸しと止まる条件の判定からなり、スプリントと 1 対 1 | 周回 | — | `docs/specifications/ndf-workflow-development-loop.md` |
