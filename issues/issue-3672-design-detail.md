@@ -89,7 +89,7 @@ CI の検査は契約とコードを読むだけで、工程の部品から呼�
 | `plugins/ndf-next/src/ndf/domains/worktree/declaration.py` | 変更 | 起点と宛先をセクションから読み、スプリントの開始時のスナップショットを書く | `core/branch_strategy.py` |
 | `plugins/ndf-next/src/ndf/domains/release/declaration.py` | 変更 | `version_files` と supervise.json の `release` の読みを消し、セクションの `release` を読む | `core/branch_strategy.py` |
 | `plugins/ndf-next/src/ndf/domains/release/land.py` | 変更 | 承認した head をセクションの主体と方式で入れ、ruleset と版上げの PR を確かめる | `core/branch_strategy.py`・`adapters/github.py` |
-| `plugins/ndf-next/src/ndf/adapters/github.py` | 変更 | キューへの投入に先頭へ入れる指定を足す | 無し |
+| `plugins/ndf-next/src/ndf/adapters/github.py` | 変更 | キューへの投入に先頭へ入れる指定と、本番ブランチの ruleset の事実を読むメソッドを足す | 無し |
 | `plugins/ndf/skills/development-workflow/schemas/project.schema.json` | 変更 | `$defs/BranchStrategy` のコピー | 無し |
 | `plugins/ndf/skills/worktree/schemas/worktree.schema.json` | 変更 | 旧いキーの定義を消す（D5） | 無し |
 | `plugins/ndf/skills/release/schemas/release.schema.json` | 変更 | `version_files` の定義を消す（D7） | 無し |
@@ -102,7 +102,7 @@ CI の検査は契約とコードを読むだけで、工程の部品から呼�
 | `plugins/ndf/pyproject.toml` | 変更 | 任意の依存 `jsonschema`（11.0 と同じ版 4.26.0）を足す | 無し |
 | `plugins/ndf/uv.lock` | 変更 | 上の依存を固定する | 無し |
 | `plugins/ndf/scripts/lib/gh_graphql.py` | 変更 | merge queue の有無を読み、承認した head をキューへ入れる関数を足す | 無し |
-| `plugins/ndf/scripts/lib/release_case.py` | 変更 | 迂回の要否をセクションの `merge.admin` から読む | `lib/branch_strategy.py` |
+| `plugins/ndf/scripts/lib/release_case.py` | 変更 | 迂回の要否をセクションの `merge.admin` から読み、本番ブランチの ruleset の事実（`RuleFacts`）を読む関数を足す | `lib/branch_strategy.py` |
 | `plugins/ndf/scripts/project-decl.py` | 変更 | サブコマンド `branch-strategy` を足し、`drift` と旧い 4 か所の書き出しを消す（D14） | `project_lib/branch_strategy_*.py` |
 | `plugins/ndf/scripts/project_lib/branch_strategy_measure.py` | 新設 | 11.0 の `strategy_measure.py` と同じ責務 | `lib/branch_strategy.py`・`lib/gh_rest.py` |
 | `plugins/ndf/scripts/project_lib/branch_strategy_write.py` | 新設 | 11.0 の `strategy_write.py` と同じ責務 | `lib/branch_strategy.py` |
@@ -110,7 +110,7 @@ CI の検査は契約とコードを読むだけで、工程の部品から呼�
 | `plugins/ndf/scripts/project_lib/measure_branch_flow.py` | 削除 | （D15） | — |
 | `plugins/ndf/scripts/release_lib/promotion.py` | 削除 | （D17） | — |
 | `plugins/ndf/scripts/release_lib/strategy_route.py` | 新設 | 取り込み方の値から、版上げの PR の起点・宛先・同期の PR の要否を決める | `lib/branch_strategy.py` |
-| `plugins/ndf/scripts/release_lib/land.py` | 新設 | 承認した head をセクションの主体と方式で入れ、ruleset と版上げの PR を確かめる | `lib/branch_strategy.py`・`lib/gh_rest.py`・`lib/gh_graphql.py` |
+| `plugins/ndf/scripts/release_lib/land.py` | 新設 | 承認した head をセクションの主体と方式で入れ、ruleset と版上げの PR を確かめる | `lib/branch_strategy.py`・`lib/release_case.py`・`lib/gh_rest.py`・`lib/gh_graphql.py` |
 | `plugins/ndf/scripts/release_lib/approval_trail.py` | 変更 | 証跡の書き手をケースごとに 1 つに決める関数を足す | `lib/branch_strategy.py` |
 | `plugins/ndf/scripts/release-steps.py` | 変更 | サブコマンド `land` を足し、`wait_and_merge` の迂回の引数を消す | `release_lib/land.py`・`release_lib/strategy_route.py` |
 | `plugins/ndf/scripts/supervise_lib/decl.py` | 変更 | スプリントの開始時のスナップショットをセクションの全体にする（決定 9） | `lib/branch_strategy.py` |
@@ -136,6 +136,17 @@ CI の検査は契約とコードを読むだけで、工程の部品から呼�
 
 5 種の宣言の fixture は、11.0 の `plugins/ndf-next/tests/fixtures/branch_strategy/` の 1 か所に置く。10 系のテストはそのパスを読む（設計文書の「テスト設計」）。
 
+### 実装の PR への割り当て
+
+ai-plugins では、NDF の版と `.ndf/` の中身がいつも合うように、上の表のファイルを 2 本の PR に分ける（設計文書の「ai-plugins だけの事情」の手順 1・2）。
+
+| PR | 載せるファイル | 削除の一覧の検査のデータ（`scripts/legacy-branch-decl.json`） |
+| --- | --- | --- |
+| 実装の PR（手順 1。develop へ出し、今の出し方で main へ） | 上の表のうち、下の行に挙げる 5 つを除くすべて | ai-plugins の `.ndf/`・`release-dev.yml`・`check-pr-base.sh` の宛先の読み・`pr-base-guard.yml`・`AGENTS.md` を照らす行（D1〜D3・D27・D28・D36 のうち ai-plugins の分）を持たない |
+| 移行の PR（手順 2。main から切って main へ） | `.ndf/project.json`・`.ndf/worktree.json`・`.ndf/supervise.json`（`branch-strategy migrate` の出力）、`.github/workflows/release-dev.yml` の削除、`AGENTS.md`・`docs/versioning-and-distribution.md` | 上の列で除いた行を足す |
+
+検査のスクリプトに PR の段階を見分ける分岐は持たない。手順 1 のデータに行が無いことだけで、手順 2 へ回したファイルを照らさない。
+
 ## クラスと関数の構造
 
 型の関係は設計文書の「構成要素」の図を指し、ここでは描き直さない。
@@ -144,7 +155,8 @@ CI の検査は契約とコードを読むだけで、工程の部品から呼�
 | --- | --- | --- |
 | `plugins/ndf/scripts/lib/branch_strategy.py`・`plugins/ndf-next/src/ndf/core/branch_strategy.py` | `Strategy`（不変の値）・`StrategyError`・モジュール | 新設: `load`・`load_at_ref`・`validate`・`get`・`snapshot`・`snapshot_diff`・`Strategy.pr_target`・`Strategy.sprint_start_ref`・`main`（10 系だけ。`get` の CLI） |
 | `plugins/ndf/scripts/lib/branch_strategy_legacy.py`・`plugins/ndf-next/src/ndf/core/branch_strategy_legacy.py` | `Move`・`Found`・モジュール | 新設: `load_moves`・`find_legacy`・`legacy_reason` |
-| `plugins/ndf/scripts/project_lib/branch_strategy_measure.py`・`plugins/ndf-next/src/ndf/domains/project/strategy_measure.py` | `Samples`・`Measured`・モジュール | 新設: `collect_samples`・`count_key`・`doc_claims`・`pick_kind`・`measure` |
+| `plugins/ndf/scripts/project_lib/branch_strategy_measure.py`・`plugins/ndf-next/src/ndf/domains/project/strategy_measure.py` | `Samples`・`Measured`・モジュール | 新設: `classify_repo`・`collect_samples`・`count_key`・`decide_merge_method`・`rule_conflicts`・`doc_claims`・`pick_kind`・`measure` |
+| `plugins/ndf/scripts/lib/release_case.py`・`plugins/ndf-next/src/ndf/adapters/github.py` | `RuleFacts`（不変の値）。11.0 は `GitHub` | 新設: `read_rule_facts`（10 系）・`GitHub.rule_facts`（11.0） |
 | `plugins/ndf/scripts/project_lib/branch_strategy_write.py`・`plugins/ndf-next/src/ndf/domains/project/strategy_write.py` | `WritePlan`・モジュール | 新設: `init_values`・`apply_answers`・`plan_write`・`plan_remove`・`commit_plan` |
 | `plugins/ndf/scripts/project_lib/branch_strategy_migrate.py`・`plugins/ndf-next/src/ndf/domains/project/strategy_migrate.py` | モジュール | 新設: `plan_migration` |
 | `plugins/ndf/scripts/project-decl.py`・`plugins/ndf-next/src/ndf/domains/project/cli.py` | モジュール | 新設: `cmd_branch_strategy`。変更: `build_parser`（10 系）・`_parser`（11.0）。削除: `cmd_drift`・`_drift`・`_declared_flow`・`_merge_worktree_part`・`_flow_branches` |
@@ -180,11 +192,16 @@ CI の検査は契約とコードを読むだけで、工程の部品から呼�
 | `load_moves` | 10 系 `lib/branch_strategy_legacy.py`・11.0 `core/branch_strategy_legacy.py` | 新設 | `load_moves(path: Path \| None = None) -> list[Move]` | 移す行の表のうち、セクションへ移す行とセクションのキーの `remove` の行だけを読む | 表が JSON の配列 | 各 `Move` は `file`・`old`・`new_file`・`new`（`remove` は `new` が None）を持つ | 表のファイルを読む |
 | `find_legacy` | 同上 | 新設 | `find_legacy(files: dict[str, dict], moves: list[Move]) -> list[Found]` | 読んだ `.ndf/` の中身から旧いキーの位置を探す | `files` はファイル名 → 中身（無いファイルは入れない） | 旧いキーの位置（ファイルと JSON Pointer）の一覧。無ければ空 | 無し |
 | `legacy_reason` | 同上 | 新設 | `legacy_reason(found: list[Found], system: str) -> str` | 止まる理由の文（ファイル・キーの位置・移行のコマンド）を作る | `found` が空でない。`system` は `10` か `11` | 設計文書の「入出力の契約」の止まり方の文の形 | 無し |
-| `collect_samples` | 10 系 `project_lib/branch_strategy_measure.py`・11.0 `domains/project/strategy_measure.py` | 新設 | `collect_samples(root: Path, gh_repo: str \| None, deadline: float) -> Samples` | 直近のマージ済み PR・タグ・Release・ruleset・ワークフロー・版数のファイルを集める | `deadline` は `time.monotonic()` の値 | `Samples` は各事例の一覧と、読めなかった種類（`unreadable`）を持つ | `gh api` と `git` を呼ぶ（ネットワーク） |
-| `count_key` | 同上 | 新設 | `count_key(pointer: str, observed: list[tuple[Any, str]], rule: dict) -> Measured` | 測るキー 1 つについて、値ごとの事例を数えて値と根拠を決める | `observed` は（値・事例の参照）の並び。`rule` は既定の表の閾値 | 3 件以上かつ 9 割以上の値があれば `value` と `evidence`、無ければ `why` が `insufficient` か `conflict` | 無し |
+| `classify_repo` | 10 系 `project_lib/branch_strategy_measure.py`・11.0 `domains/project/strategy_measure.py` | 新設 | `classify_repo(root: Path, gh_repo: str \| None) -> tuple[str, list[dict]]` | 新規と既存を、設計文書の「作る・更新する」の 4 つ（既定ブランチのコミット・マージ済みの PR・タグと Release・ruleset とワークフローのファイル）で分ける | 無し | 4 つとも新規とみなす値のときだけ `"new"`、1 つでも外れるか読めなければ `"existing"`。2 つ目の値は見たものごとの根拠 | `git rev-list --count` と `gh api` を呼ぶ（ネットワーク） |
+| `collect_samples` | 同上 | 新設 | `collect_samples(root: Path, gh_repo: str \| None, deadline: float) -> Samples` | 直近のマージ済み PR・タグ・Release・ruleset・ワークフロー・版数のファイル・`plugin.json` を集める | `deadline` は `time.monotonic()` の値 | `Samples` は各事例の一覧・本番ブランチの `RuleFacts`・読めなかった種類（`unreadable`）を持つ | `gh api` と `git` を呼ぶ（ネットワーク） |
+| `count_key` | 同上 | 新設 | `count_key(pointer: str, observed: list[tuple[Any, str]], rule: dict) -> Measured` | 履歴から推すキー 1 つについて、値ごとの事例を数えて値と根拠を決める | `observed` は（値・事例の参照）の並び。`rule` は既定の表の閾値 | 3 件以上かつ 9 割以上の値があれば `value` と `evidence`、無ければ `why` が `insufficient` か `conflict` | 無し |
+| `decide_merge_method` | 同上 | 新設 | `decide_merge_method(facts: RuleFacts \| None, release_strategy: str) -> Measured` | 本番ブランチの ruleset と履歴から推した `release_strategy` の組で `merge.method` を決める（設計文書の `merge.method` の表） | `release_strategy` は `count_key` で決まった値。`facts` が None は ruleset を読めなかったこと | 表の 4 行のとおりの値と根拠 `ruleset`。`trunk` で ruleset が 2 つのどちらも求めないときは `why: conflict`。`facts` が None なら `why: insufficient` | 無し |
+| `rule_conflicts` | 同上 | 新設 | `rule_conflicts(values: dict, evidence: dict) -> list[dict]` | 測った値の組が組み合わせの規則に反するかを、規則に出るキーがすべて測ったキーである規則だけで調べる（I11。例は R10） | `values` は測るキーの値だけを持つ部分のセクション | 反する規則ごとに `{"pointer", "why": "conflict", "candidates", "evidence"}` の問い 1 件。候補は規則を満たす値の組。反しなければ空 | 無し |
 | `doc_claims` | 同上 | 新設 | `doc_claims(root: Path) -> list[dict]` | README・CONTRIBUTING・AGENTS.md からブランチ名と宛先を述べる行を拾う | 無し | 各要素は `{"pointer", "value", "ref": "<パス>:<行>"}` | 3 つの文書を読む |
 | `pick_kind` | 同上 | 新設 | `pick_kind(measured: dict[str, Measured], presets: dict) -> tuple[str \| None, list[str]]` | 測った値がすべて合う種類の既定の行を 1 つ選ぶ | `measured` の各値は決まっている | 合う行が 1 つならその名前と空の一覧、0 か 2 つ以上なら None と候補の一覧 | 無し |
-| `measure` | 同上 | 新設 | `measure(root: Path, gh_repo: str \| None, deadline: float) -> dict` | 既存のリポジトリを測り、作成の結果（値・根拠・問い）を組む | 無し | 結果はスキーマ `branch-strategy.result.schema.json` を通る。`questions` が空でなければ `status: ask` で、`values` は書く候補であって書いていない（I11） | `collect_samples`・`doc_claims` の副作用 |
+| `measure` | 同上 | 新設 | `measure(root: Path, gh_repo: str \| None, deadline: float) -> dict` | 既存のリポジトリを測り、作成の結果（値・根拠・問い）を組む。手順は設計文書の「作る・更新する」の図の既存の枝（履歴から推すキー → 今の正本で決まるキー → `rule_conflicts` → `pick_kind` → 埋めるキー）のとおり | 無し | 結果はスキーマ `branch-strategy.result.schema.json` を通る。`questions` が空でなければ `status: ask` で、`values` は書く候補であって書いていない（I11） | `collect_samples`・`doc_claims` の副作用 |
+| `read_rule_facts` | 10 系 `lib/release_case.py`（11.0 は `GitHub.rule_facts`） | 新設 | `read_rule_facts(root, branch: str) -> RuleFacts \| None` | 本番ブランチの ruleset から、有無・承認の数・merge queue の有無・最新の取り込みの要否・迂回の可否（`current_user_can_bypass`）を読む | 無し | ruleset が無ければ `present: False` の `RuleFacts`。読めなければ None | `gh api` で `rules/branches/<本番>` と、当たった ruleset ごとの `rulesets/<id>` を読む |
+| `GitHub.rule_facts` | 11.0 `adapters/github.py` | 新設 | `rule_facts(self, branch: str) -> Optional[RuleFacts]` | 10 系の `read_rule_facts` と同じ | 同上 | 同上 | 同上 |
 | `init_values` | 10 系 `project_lib/branch_strategy_write.py`・11.0 `domains/project/strategy_write.py` | 新設 | `init_values(kind: str, facts: dict, presets: dict) -> tuple[dict, list[dict]]` | 種類の既定の行に測った名前（本番ブランチ・プラグイン・ランタイム・ワークフロー）を入れたセクションと、merge queue が分からないときの問いを返す | `kind` が 5 つのどれか | セクションの値は既定の行と測った名前だけからできる。各値の根拠は `preset` か `repo` | 無し |
 | `apply_answers` | 同上 | 新設 | `apply_answers(result: dict, answers: dict) -> dict` | 問いへの答えをセクションの値へ入れ、既定から変えたら種類を `custom` にする | `answers` は pointer → 値。`result` は `measure` か `init` の結果 | 答えた pointer の根拠は `answer`。答えていない問いが残れば `status: ask` のまま | 無し |
 | `plan_write` | 同上 | 新設 | `plan_write(root: Path, section: dict) -> WritePlan` | 書く前の検査（`validate`）を通し、今の `.ndf/project.json` との差分とハッシュを作る | 無し | 検査に落ちれば `failed` を持つ計画（書かない）。通れば `diff`（JSON Patch）と `digest`（差分と今のファイルの中身の SHA-256） | `.ndf/project.json` を読む |
@@ -192,8 +209,8 @@ CI の検査は契約とコードを読むだけで、工程の部品から呼�
 | `commit_plan` | 同上 | 新設 | `commit_plan(root: Path, plan: WritePlan, digest: str \| None) -> None` | 計画を書く。ハッシュを渡したときは今のファイルから作り直した計画と一致するときだけ書く | `plan.failed` が空 | 書いた後のファイルは計画の差分を当てた中身と同じ。途中で止まってもファイルは書く前か後のどちらか | `.ndf/` のファイルを一時ファイルから置き換える |
 | `plan_migration` | 10 系 `project_lib/branch_strategy_migrate.py`・11.0 `domains/project/strategy_migrate.py` | 新設 | `plan_migration(root: Path, moves: list[Move]) -> WritePlan` | 旧い 4 か所の値を移す行の表どおりにセクションへ移し、旧いキーを消す差分を作る | 無し | 移した後のセクションが `validate` を通れば `diff` と `digest`。通らなければ `failed`。旧いキーが無く `remove` の行も当たらなければ空の差分 | `.ndf/` の 4 ファイルを読む |
 | `cmd_branch_strategy` | 10 系 `project-decl.py`・11.0 `domains/project/cli.py` | 新設 | `cmd_branch_strategy(a: argparse.Namespace) -> int` | 動詞（`init`・`measure`・`write`・`migrate`・`remove`）を受けて上の関数を組み、作成の結果を 1 行の JSON で出す | 引数が動詞ごとの必須を満たす（`init` は `--kind` を省ける。省けば問いを返す） | 終了コードは `ok` が 0、`ask` が 3、`stopped` が 1、引数の誤りが 2 | 動詞ごとの関数の副作用 |
-| `route_of` | 10 系 `release_lib/strategy_route.py` | 新設 | `route_of(strategy: Strategy) -> Route` | 取り込み方の値から、版上げの PR の起点・宛先・同期の PR の要否を決める | 無し | `merge_base_branch` は起点 base・同期あり、`release_branch` は起点 production・同期あり、`trunk` は起点 production・同期なし。承認の対象が `production_pr` なら版上げの PR は無い（`Route.release_pr` が偽） | 無し |
-| `ruleset_mismatch` | 10 系 `release_lib/land.py`・11.0 `domains/release/land.py` | 新設 | `ruleset_mismatch(strategy: Strategy, rules: list[dict], queue: bool) -> list[dict]` | セクションの値と本番ブランチの ruleset（承認の数・merge queue の有無・最新の取り込みの要否）の食い違いを並べる（I10） | `rules` は `rules/branches/<本番>` の応答 | 各要素は `{"key", "declared", "ruleset"}`。空なら一致 | 無し |
+| `route_of` | 10 系 `release_lib/strategy_route.py` | 新設 | `route_of(strategy: Strategy) -> Route` | 取り込み方の値から、版上げの PR の起点・宛先・同期の PR の要否を決める | 無し | `merge_base_branch` は起点 base・同期あり、`release_branch` は起点 production・同期あり、`trunk` は起点 production・同期なし。承認の対象が `production_pr` なら版上げの PR は無い（`Route.release_pr` が偽）。`merge_base_branch` で版数の置き場が `none` なら、base → production の PR そのものを承認の対象にし、版数と CHANGELOG を書かない（`Route.bump` が偽。R4） | 無し |
+| `ruleset_mismatch` | 10 系 `release_lib/land.py`・11.0 `domains/release/land.py` | 新設 | `ruleset_mismatch(strategy: Strategy, facts: RuleFacts) -> list[dict]` | セクションの値と本番ブランチの ruleset の食い違いを I10 の比べ方で並べる | `facts` は `read_rule_facts` の戻り値（None は呼び出し元で止める） | 各要素は `{"key", "declared", "ruleset"}`。空なら一致。ruleset が無いときは `merge-queue` の宣言だけを食い違いにする。`merge.admin: true` では承認の数を比べず、迂回の可否が `always`・`pull_requests_only` 以外なら食い違い | 無し |
 | `check_release_pr` | 同上 | 新設 | `check_release_pr(strategy: Strategy, pr: dict, prod: dict, queue: list[dict]) -> str \| None` | 版上げの PR がマージの方式ごとの確かめ（I7）を通るかを判定する | `pr` は head・切った時点の版数、`prod` は本番の先端と版数、`queue` はキューの PR | 通れば None。落ちれば理由の文 | 無し |
 | `land_approved` | 10 系 `release_lib/land.py`（11.0 は `Lander.land` の変更） | 新設 | `land_approved(root: Path, strategy: Strategy, pr: int, approved_head: str) -> dict` | 承認した head を、セクションの主体と方式で本番ブランチへ入れる | 承認の証跡が今の head にある | 返す `{"result": "merged" / "queued" / "human" / "stopped", "head", "reason"}`。`merged`・`queued` のとき入れた head は `approved_head` と同じ（I5） | `gh api` でマージかキューへの投入、PR のコメントを書く |
 | `Lander.land` | 11.0 `domains/release/land.py` | 変更 | `land(self, number: int) -> Landed`（変えない） | 10 系の `land_approved` と同じ手順で入れる。迂回はセクションの `merge.admin` だけで決める | 同上 | 同上（`Landed` の形は変えない） | 同上 |
@@ -228,6 +245,12 @@ CI の検査は契約とコードを読むだけで、工程の部品から呼�
 | `validate` | jsonschema が入っていない（10 系） | 依存のグループが未導入 | `deps.require("jsonschema")` | 止める（`deps` の既定の振る舞い） | `deps` の案内。終了コード 69 | `deps` が uv で入れて再実行できる |
 | `main` | pointer の値が無い | キーの誤り | `get` | 止める | 「`<pointer>` はセクションにありません」。終了コード 2 | 無し |
 | `load_moves` | 表が無い・形が違う | 導入の破損 | 表の読み込み | 止める | 表のパスと誤り。終了コード 2 | 再導入の後に再実行できる |
+| `classify_repo` | 見るものが読めない | 認証が無い・上限・ネットワーク | `git`・`gh api` の終了コード | 既存とみなして続ける（新規へ倒さない。読めなかったものを根拠に載せる） | `init` は既存の扱いで止まり `measure` を案内する。`measure` の問いに読めなかった種類が出る | 認証の後に打ち直せる |
+| `decide_merge_method` | ruleset を読めない | `read_rule_facts` が None | 引数 | 呼び出し元へ返す（`insufficient`。正本が読めないときだけ問う） | `status: ask`。終了コード 3 | 認証の後に `measure` を打ち直せる |
+| `decide_merge_method` | 値が決まらない | `trunk` で ruleset が merge queue も最新の取り込みも求めない | 表の 3 行目 | 呼び出し元へ返す（`conflict`。R2 と I10 を同時に満たす値が無い） | `status: ask`。終了コード 3 | 答えを `write --answers` で渡す。ruleset を直して打ち直してもよい |
+| `rule_conflicts` | （反する規則を返す関数。失敗は呼び出し元で扱う） | 測った値の組が規則に反する（例: タグがあり CD が無い。R10） | 規則ごとの判定 | 呼び出し元へ返す（`conflict` の問い。`stopped` にしない） | `status: ask`。終了コード 3 | 答えを渡す |
+| `read_rule_facts` | 読めない | 権限・ネットワーク | `gh api` の終了コード | 呼び出し元へ返す（None） | 呼び出し元の行のとおり | 打ち直せる |
+| `GitHub.rule_facts` | `read_rule_facts` と同じ | 同じ | 同じ | 同じ | 同じ | 同じ |
 | `collect_samples` | GitHub を読めない | 認証が無い・上限・ネットワーク | `gh api` の終了コード | 既定値で続ける（その種類の事例を 0 件として `unreadable` に載せる） | 結果の `questions` に `insufficient`（理由に読めなかった種類） | 認証の後に `measure` を打ち直せる |
 | `collect_samples` | 時間切れ | 標本が多い・応答が遅い | `deadline` を過ぎた | 既定値で続ける（集めた分だけで数える） | 結果の `warnings` に打ち切った種類 | 打ち直せる |
 | `doc_claims` | 文書が読めない | 文字コード・権限 | ファイルの読み込み | 既定値で続ける（その文書を飛ばす） | 結果の `warnings` にパス | 打ち直せる |
@@ -243,7 +266,8 @@ CI の検査は契約とコードを読むだけで、工程の部品から呼�
 | `cmd_branch_strategy` | 引数の誤り | 動詞・`--kind` の値の誤り | argparse | 止める | 使い方。終了コード 2 | 無し |
 | `ruleset_mismatch` | （食い違いを返す関数。失敗は呼び出し元で扱う） | — | — | 呼び出し元へ返す | `land_approved` の行のとおり | — |
 | `land_approved` | head が動いた | 承認の後にコミットが積まれた（#3661） | 証跡の head と今の head の比べ | 止める（I5・E10） | 承認を取り直す依頼。終了コード 1 | 何も入れない。承認を取り直して打ち直せる |
-| `land_approved` | ruleset とセクションが食い違う | `via: gate` で ruleset が承認を求める等 | `ruleset_mismatch` | 止める（I10） | セクションの値と ruleset の値。終了コード 1 | 何も入れない。ruleset かセクションを直して打ち直せる |
+| `land_approved` | ruleset とセクションが食い違う | `via: gate` で ruleset が承認を求める、ruleset の無いリポジトリで `merge-queue`、迂回の可否が `never`・`exempt` で `merge.admin: true` 等 | `ruleset_mismatch` | 止める（I10） | セクションの値と ruleset の値。終了コード 1 | 何も入れない。ruleset かセクションを直して打ち直せる |
+| `land_approved` | ruleset が読めない | 権限・ネットワーク | `read_rule_facts` が None | 止める（比べずに入れない） | 読めなかった理由。終了コード 1 | 打ち直せる |
 | `land_approved` | 版上げの PR が確かめに落ちる | `strict` で先端を含まない、`merge-queue` で版数が衝突する | `check_release_pr` | 止める（I7） | 理由と、版上げの PR を作り直す依頼。終了コード 1 | 何も入れない。作り直して承認を取り直す |
 | `land_approved` | GitHub がマージかキューへの投入を断る | head の食い違い・必須の検査の失敗・権限 | `gh api` の応答 | 止める（再試行しない。断られた理由が承認の前提を崩すため） | 応答の種類と本文。終了コード 1 | 何も入れていない。理由を直して打ち直せる |
 | `land_approved` | 人が先にマージした | `actor: human` か人の操作 | PR の状態が merged | 呼び出し元へ返す（`human`。人のマージの記録を書く） | `result: human`。終了コード 0 | 記録が既にあれば書かない（冪等） |
@@ -274,9 +298,15 @@ CI の検査は契約とコードを読むだけで、工程の部品から呼�
 | `load` | 旧いキーなし・セクションなし | 止まる（I3） |
 | `load` | 旧いキーなし・セクションあり・スキーマに落ちる | 止まる（落ちた規則） |
 | `load` | 旧いキーなし・セクションあり・スキーマを通る | `Strategy` を返す |
-| `cmd_branch_strategy` | `init`・`--kind` あり・履歴なし | `init_values` → `plan_write` → `commit_plan`。merge queue が分からなければ問いを返して書かない |
-| `cmd_branch_strategy` | `init`・`--kind` なし・履歴なし | `no_kind` の問い（5 つの種類を候補）。書かない（受け入れ条件 8） |
-| `cmd_branch_strategy` | `init`・履歴あり | 止まり、`measure` を打つよう案内する（既存のリポジトリに種類の既定を当てない） |
+| `cmd_branch_strategy` | `init`・`--kind` あり・`classify_repo` が `new` | `init_values` → `plan_write` → `commit_plan`。merge queue が分からなければ問いを返して書かない |
+| `cmd_branch_strategy` | `init`・`--kind` なし・`classify_repo` が `new` | `no_kind` の問い（5 つの種類を候補）。書かない（受け入れ条件 8） |
+| `cmd_branch_strategy` | `init`・`classify_repo` が `existing` | 止まり、`measure` を打つよう案内する（既存のリポジトリに種類の既定を当てない）。渡した種類は `measure` の問いの候補の先頭に置く |
+| `classify_repo` | 既定ブランチのコミット 1 本以下・PR 0 件・タグと Release 0 件・ruleset とワークフローが無い | `new` |
+| `classify_repo` | PR 0 件で、直接のコミットが 2 本以上か、タグ・ruleset・ワークフローのどれかがある | `existing`（`measure` では PR の宛先と起点から推すキーが 0 件になり `insufficient`。受け入れ条件 11） |
+| `decide_merge_method` | ruleset が merge queue を持つ | `merge-queue` |
+| `decide_merge_method` | ruleset が最新の取り込みを求める（merge queue は無い） | `strict` |
+| `decide_merge_method` | ruleset が有り、どちらも求めない | `trunk` は `conflict`、それ以外は `direct` |
+| `decide_merge_method` | ruleset が無い | `trunk` は `strict`、それ以外は `direct` |
 | `cmd_branch_strategy` | `measure` | `measure` の結果を出す。書かない |
 | `cmd_branch_strategy` | `write --answers <ファイル>`・`--dry-run` | `apply_answers` → `plan_write`。差分とハッシュを出し、書かない |
 | `cmd_branch_strategy` | `write --answers <ファイル>`・`--digest <ハッシュ>` | 同上の計画を作り直し、ハッシュが合えば `commit_plan` |
@@ -287,11 +317,15 @@ CI の検査は契約とコードを読むだけで、工程の部品から呼�
 | `count_key` | 総数 3 件以上・最多の値が 9 割以上 | その値と事例の一覧 |
 | `count_key` | 総数 3 件以上・最多の値が 9 割未満 | `conflict`（値ごとの件数を候補に） |
 | `measure` | 測るキーで問いが 1 つ以上 | 種類を選ばずに `ask`（測るキーの問いだけを返す） |
+| `measure` | 測るキーがすべて決まり、`rule_conflicts` が空でない | 種類を選ばずに `ask`（反した規則ごとの `conflict`） |
 | `measure` | 測るキーがすべて決まり、文書の述べる値と違うキーがある | 違うキーごとに `conflict`。`ask` |
 | `measure` | 測るキーがすべて決まり、文書と合い、種類が 1 つに決まる | 種類の既定から埋めるキーを足して `ok`（書く候補）。`approval.via` が `gate` で ruleset が承認を求めれば `conflict` を足して `ask` |
 | `measure` | 同上で種類が 0 か 2 つ以上 | `no_kind`。`ask` |
 | `measure` | 既にセクションがあり、測った値と違う | 違うキーを `diff` に出す（更新の材料）。書かない |
-| `route_of` | `merge_base_branch` | 版上げの PR は base から切り production へ。マージの後に production → base の同期の PR |
+| `route_of` | `merge_base_branch`・版数の置き場が `none` 以外 | 版上げの PR は base から切り production へ。マージの後に production → base の同期の PR |
+| `route_of` | `merge_base_branch`・版数の置き場が `none` | base → production の PR を承認の対象にする（`bump` が偽。版数・CHANGELOG・タグ・Release を作らない）。マージの後に同期の PR |
+| `ruleset_mismatch` | ruleset が有る | `merge-queue` ⇔ merge queue、`strict` ⇔ 最新の取り込み、`gate` ⇒ 承認 0・`review` ⇒ 承認 1 以上を比べる。`merge.admin: true` なら承認の数の代わりに迂回の可否を比べる |
+| `ruleset_mismatch` | ruleset が無い | `merge-queue` だけを食い違いにする。`strict` の先端は `check_release_pr`、`review` の head は `land_approved` が確かめる |
 | `route_of` | `release_branch` | production から切ったリリースブランチへ選んだスプリントを集め、production へ。同期の PR |
 | `route_of` | `trunk`・`release_pr` | production から切り production へ。同期の PR なし |
 | `route_of` | `trunk`・`production_pr` | 版上げの PR なし（スプリントの PR が本番の PR を兼ねる） |
@@ -325,7 +359,10 @@ CI の検査は契約とコードを読むだけで、工程の部品から呼�
 | `Samples` | 型（`prs`・`tags`・`releases`・`rulesets`・`workflows`・`version_files`・`unreadable`） | 10 系 `project_lib/branch_strategy_measure.py`・11.0 `domains/project/strategy_measure.py` | — |
 | `Measured` | 型（`value`・`evidence`・`why`・`candidates`） | 同上 | — |
 | `WritePlan` | 型（`files`・`diff`・`digest`・`failed`） | 10 系 `project_lib/branch_strategy_write.py`・11.0 `domains/project/strategy_write.py` | — |
-| `Route` | 型（`release_pr: bool`・`source`・`target`・`sync: bool`） | 10 系 `release_lib/strategy_route.py` | — |
+| `Route` | 型（`release_pr: bool`・`bump: bool`・`source`・`target`・`sync: bool`） | 10 系 `release_lib/strategy_route.py` | — |
+| `RuleFacts` | 型（`present: bool`・`approvals: int`・`queue: bool`・`up_to_date: bool`・`bypass: str \| None`） | 10 系 `lib/release_case.py`・11.0 `adapters/github.py` | — |
+| 新規とみなす値（コミットの数の上限） | 設定値 | 既定の表の `evidence` | `new_repo_max_commits: 1` |
+| 移す行の表の旧い位置 | データ | 移す行の表 | `.ndf/worktree.json` の `/branch_flow/promotion` と、#3613 の途中の位置 `/branch_flow/release_strategy` の 2 行を、マージの順に依らず 1 つの表に持つ |
 | 根拠の閾値（標本の最小の数・割合） | 設定値 | 既定の表 `branch-strategy-presets.json` の `evidence` | `min_samples: 3`・`min_ratio: 0.9` |
 | 標本の上限（PR・タグ・Release） | 設定値 | 同上の `evidence` | `limit: 100` |
 | 測るキーと種類の既定から埋めるキーの区分 | 設定値 | 同上の `measured_keys` | 設計文書の「作る・更新する」の表のとおり |
@@ -346,6 +383,7 @@ CI の検査は契約とコードを読むだけで、工程の部品から呼�
 | 複数のレーンが同じ本番ブランチへ入れる | 本番ブランチ | `merge-queue` は GitHub のキュー、`strict` は `sha` を付けたマージを GitHub が断る、`direct` は Git の衝突で止まる。NDF はロックを取らない（決定 7） | `land_approved` は PR が merged なら記録だけを書き、記録があれば書かない |
 | スプリントの開始と、セクションの更新 | セクションとプランの状態 | スプリントは開始時のスナップショットだけを読む（I13） | `strategy_snapshot` は控えがあれば上書きしない。違いは `snapshot_diff` が結果に出す |
 | 承認の証跡の書き手と、リリース承認ゲートの問い | PR のコメント | 書き手をケースごとに 1 つにする（`trail_writer`） | 今の head の証跡があれば問いを送らない（I12） |
+| `merge-queue` で、版上げの PR の承認から投入までにスプリントの PR がキューへ入る | 本番ブランチとキュー | NDF は排他を取らない（スプリントの PR の投入を止めない）。この扱いは設計文書の「人へ残す判断」に残っており、止める側に決まったときは `land_approved` の前にスプリントの PR の投入を止める手順を足す | 受け入れる側に決まったときは、承認の後に入った PR を GitHub Release の本文に並べる処理を CD のワークフローに足す。どちらの関数もこの文書では設けない |
 
 ## ログと記録の出力
 
@@ -378,7 +416,12 @@ CI の検査は契約とコードを読むだけで、工程の部品から呼�
 | `find_legacy` | 同上と #3613 の旧いキーの検査 | 同上、`issues/issue-3613-design.md` | 使えない。#3613 のマージの順に依らないため（決定 10） |
 | `legacy_reason` | `lib/legacy_names.py` の `refusal` | 同上 | 使えない。引数の名前の案内で、ファイルとキーの位置を持たない |
 | `collect_samples` | 10 系 `project_lib/measure_branch_flow.py` の `collect_flow`・`collect_reviews`、11.0 `domains/project/measure_flow.py`、10 系 `lib/release_case.py` の `read_approvals`、`lib/ci_workflows.py` | `grep -nE '^def ' plugins/ndf/scripts/project_lib/measure_branch_flow.py plugins/ndf/scripts/lib/release_case.py` | PR の起点の判定（`sprint_start`・`pr_kind`）と ruleset の読み（`read_approvals`）は新しいファイルへ移して使う。PR の読み方を 2 か所に持たない（決定 4） |
+| `classify_repo` | 10 系 `measure_branch_flow.py`・11.0 `measure_flow.py`、`project_lib/measure_repo.py` | `grep -rn 'rev-list --count\|def .*commit_count' plugins/ndf/scripts/project_lib plugins/ndf-next/src/ndf/domains/project --include=*.py` | 当たり無し。新しく書く。PR・タグ・ruleset の読みは `collect_samples` と同じ関数を使う |
 | `count_key` | `measure_branch_flow.py` の `confidence`・`infer_field` | 同上 | 数え方を移して使う。閾値は既定の表から読む形にする |
+| `decide_merge_method` | 10 系 `measure_branch_flow.py` の ruleset の読み（`gh api repos/<repo>/rulesets`）、11.0 `measure_flow.py` の `_rulesets` | `grep -rn 'rulesets' plugins/ndf/scripts plugins/ndf-next/src --include=*.py` | 使えない。ruleset を根拠の文として載せるだけで、方式を決めない。ruleset の読みは `read_rule_facts` へ寄せる |
+| `rule_conflicts` | 読む部品の `validate` | 「`validate`」の行 | 規則の正本はスキーマに 1 つだけ持つため、`validate` を部分の値へ当て、規則に出るキーがすべて測ったキーである規則の落ちだけを拾う。規則を関数の中に写さない |
+| `read_rule_facts` | 10 系 `lib/release_case.py` の `read_approvals`・`required_approvals`、11.0 `land.py` の `Lander.approvals` | `grep -nE '^def ' plugins/ndf/scripts/lib/release_case.py`、`grep -rn 'current_user_can_bypass' plugins/ndf/scripts plugins/ndf-next/src --include=*.py` | 承認の数の読みは使う。迂回の可否（`current_user_can_bypass`）の読みは当たり無しで、足す |
+| `GitHub.rule_facts` | 11.0 `land.py` の `Lander.approvals`・`Lander.required` | `grep -nE 'def (approvals\|required)' plugins/ndf-next/src/ndf/domains/release/land.py` | 承認の数の読みは `Lander` から `GitHub` へ移して使う。迂回の可否の読みは足す |
 | `doc_claims` | `project_lib/measure_repo.py`・11.0 `measure_repo.py` の文書の読み | `grep -n 'README\|CONTRIBUTING\|AGENTS' plugins/ndf/scripts/project_lib/measure_repo.py` | 使えない。文書から言語とテストを測る読みで、ブランチ名の行を拾わない |
 | `pick_kind` | 無し | `grep -rn 'preset' plugins/ndf/scripts plugins/ndf-next/src --include=*.py` | 当たり無し。新しく書く |
 | `measure` | 10 系 `project-decl.py` の `measure_project`、11.0 `cli.py` の `measure_project` | `grep -n 'def measure_project' -r plugins` | 使えない。リポジトリ全体の測定で、セクションの値と問いの形を返さない。`branch-strategy measure` は別に組む |
@@ -416,11 +459,16 @@ CI の検査は契約とコードを読むだけで、工程の部品から呼�
 | `snapshot_diff` | 違うキーを並べる | 同じなら空 | （異常なし） |
 | `Strategy.pr_target` | 5 種で宛先が設計文書の 2 つ目の表と同じ | `doc` の宛先が `sprint` のとき | 知らない種類で `ValueError` |
 | `Strategy.sprint_start_ref` | `base`・`production` の 2 値 | base と production が同じ（`trunk`） | （異常なし） |
-| `load_moves` | セクションへ移す行と `remove` の行だけを返す | #3613 の行（同じファイルの中の改名）を含む表から除く | 表が無い / 形が違う |
-| `find_legacy` | ai-plugins の今の 4 ファイルで全部の旧いキーを返す | `remove` の行のキーだけが残る | （異常なし） |
+| `load_moves` | セクションへ移す行と `remove` の行だけを返す | #3613 の行（同じファイルの中の改名）を含む表から除く / 途中の位置 `/branch_flow/release_strategy` の行を返す | 表が無い / 形が違う |
+| `find_legacy` | ai-plugins の今の 4 ファイルで全部の旧いキーを返す | `remove` の行のキーだけが残る / #3613 の `ndf settings migrate` を打った後の途中の位置だけが残る | （異常なし） |
 | `legacy_reason` | 10 系と 11.0 で違うコマンドを出す | 旧いキーが 1 つ | （異常なし） |
+| `classify_repo` | 4 つとも無い fixture で `new`、develop→main と trunk の fixture で `existing` | コミット 1 本だけで `new`、2 本で `existing` / PR 0 件でタグだけある fixture で `existing` | 読めないと `existing`（新規へ倒さない） |
 | `collect_samples` | 記録した `gh` の応答から事例を集める | PR が 0 件 | 読めない種類が `unreadable` に載る / 時間切れで打ち切る |
 | `count_key` | 3 件・9 割で値と根拠 | ちょうど 3 件・ちょうど 9 割 | 2 件で `insufficient` / 8 割で `conflict` |
+| `decide_merge_method` | 表の 4 行 × `trunk` かそれ以外の 8 通り | ruleset が無い develop→main で `direct`（受け入れ条件 9） | `trunk` で ruleset がどちらも求めないと `conflict` / 読めないと `insufficient` |
+| `rule_conflicts` | 規則を満たす測った値で空 | 規則に出るキーの一部が埋めるキーなら、その規則を見ない | タグと Release があり CD が無い fixture で R10 の `conflict` |
+| `read_rule_facts` | 記録した応答から 5 つの値を読む | ruleset が無いと `present: False` | 読めないと None |
+| `GitHub.rule_facts` | 同上 | 同上 | 同上 |
 | `doc_claims` | 文書の宛先の行を拾う | 文書が無い | 読めない文書を飛ばす |
 | `pick_kind` | develop→main と trunk の fixture で 1 つに決まる | `merge-queue`※ が `strict` と合う | 合う行が 0 / 2 つ以上で候補を返す |
 | `measure` | 受け入れ条件 9・10 の fixture で問いなしに値と根拠 | 既にセクションがあり測った値と同じなら空の差分 | 受け入れ条件 11 の fixture で `conflict`・`insufficient` / `via: gate` と ruleset の承認で `conflict` |
@@ -431,8 +479,8 @@ CI の検査は契約とコードを読むだけで、工程の部品から呼�
 | `commit_plan` | ハッシュが合えば書く | 2 回目は空の差分で書かない | ハッシュが違うと書かない / 書き込みの失敗でファイルが前のまま |
 | `plan_migration` | ai-plugins の今の 4 ファイルをセクションへ移す（受け入れ条件 20） | `remove` の行のキーだけを消す | 移した後に規則に落ちる / 表に無い値で問い / 途中で止まった状態から打ち直すと同じ結果 |
 | `cmd_branch_strategy` | 動詞ごとの終了コード（0・3・1） | `init` で `--kind` を省く | 引数の誤りで 2 |
-| `route_of` | 3 つの取り込み方と 2 つの承認の対象 | `trunk`・`production_pr` で版上げの PR が無い | （異常なし） |
-| `ruleset_mismatch` | 一致で空 | ruleset が無い（private の Free）と `strict` は一致 | `via: gate` で承認 1 / `merge-queue` でキューが無い |
+| `route_of` | 3 つの取り込み方と 2 つの承認の対象 | `trunk`・`production_pr` で版上げの PR が無い / `merge_base_branch`・`none` で `bump` が偽 | （異常なし） |
+| `ruleset_mismatch` | 一致で空 | ruleset が無い（private の Free）と `strict`・`direct` は一致 / `merge.admin: true` で迂回の可否が `pull_requests_only` なら一致 | `via: gate` で承認 1 / `merge-queue` でキューが無い / ruleset が無くて `merge-queue` / `merge.admin: true` で迂回の可否が `never`・`exempt` |
 | `check_release_pr` | 方式ごとの通る入力 | `merge-queue` で先端を含まないが版数が同じなら通る | `strict` で先端を含まない / `merge-queue` で版数の衝突・キューに別の版上げの PR |
 | `land_approved` | `merge-queue` で `queued`・`strict` で `merged` | 人が先にマージ済みで記録を 1 回だけ書く | #3661 の形で止まる / #3572 の形（承認の外のコミット）で止まる / ruleset の食い違い / GitHub が断る / 証跡を書けない |
 | `Lander.land` | 10 系と同じ入力で同じ結果 | 同じ | 同じ |
