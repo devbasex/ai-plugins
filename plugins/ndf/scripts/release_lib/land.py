@@ -95,7 +95,8 @@ def check_production_pr(strategy, pr: dict, prod: dict, queue: list[dict]) -> st
 class Port(Protocol):
     """GitHub との出入り（`land_approved` が使う分だけ）。"""
 
-    def pull(self, number: int) -> dict: ...  # {"state", "merged", "merged_by", "head", "base", "bump", "cut_version", "contains_tip"}
+    # {"state", "merged", "draft", "merged_by", "head", "base", "bump", "cut_version", "contains_tip"}
+    def pull(self, number: int) -> dict: ...
     def viewer(self) -> str | None: ...  # land を打った利用者の login。読めなければ None
     def production(self, branch: str) -> dict: ...  # {"tip", "version"}
     def queue(self, branch: str) -> list[dict]: ...
@@ -188,6 +189,9 @@ def land_approved(port: Port, strategy, pr: int, approval: Approval, pull: dict 
     if pull.get("state") == "closed":
         # 取り込みの記録の無い閉じた PR は、承認の後に取り消したものとみなす（参照の更新は PR のマージ API を通らない）
         return {**out, "reason": f"#{pr} はマージされずに閉じている。入れるなら開き直し、{REAPPROVE}"}
+    if pull.get("draft"):
+        # GitHub はドラフトのマージを拒むが、早送り（参照の更新）はマージの API を通らないため、どの経路でもここで止める
+        return {**out, "reason": f"#{pr} はドラフト。レビューの準備ができた（Ready for review）後に入れる"}
     mism = ruleset_mismatch(strategy, facts)
     if mism:
         return {**out, "reason": "セクションと ruleset が食い違う: " + json.dumps(mism, ensure_ascii=False)}
@@ -288,7 +292,14 @@ class GhPort:
         if not isinstance(d, dict):
             raise LandError(f"PR #{number} を読めない")
         head, base = str(d["head"]["sha"]).lower(), d["base"]["ref"]
-        row = {"number": int(number), "state": d["state"], "merged": bool(d.get("merged")), "head": head, "base": base}
+        row = {
+            "number": int(number),
+            "state": d["state"],
+            "merged": bool(d.get("merged")),
+            "draft": bool(d.get("draft")),
+            "head": head,
+            "base": base,
+        }
         row["title"] = d.get("title") or ""
         row["head_ref"] = str((d.get("head") or {}).get("ref") or "") or None
         row["merged_by"] = str((d.get("merged_by") or {}).get("login") or "") or None

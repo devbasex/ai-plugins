@@ -989,6 +989,13 @@ def test_land_stops_closed_pr_without_record():
     assert out["result"] == "stopped" and "閉じている" in out["reason"] and port.calls == []
 
 
+def test_land_stops_draft_pr_before_any_ingestion():
+    """ドラフトの PR は、マージの API を通らない早送りでも入れない。"""
+    port = FakePort({"head": H1, "base": "main", "draft": True, "contains_tip": True, "tip": "a" * 40}, facts(present=False))
+    out = land.land_approved(port, bs.Strategy(section("docs")), 6, land.Approval(H1))
+    assert out["result"] == "stopped" and "ドラフト" in out["reason"] and port.calls == []
+
+
 def test_land_uses_given_pull_and_verifies_checks():
     """読んだ PR を渡せば読み直さず、ruleset のある方式でも検査を確かめる。"""
     port = FakePort({"head": H1, "base": "main"}, facts())
