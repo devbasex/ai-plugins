@@ -290,6 +290,13 @@ def release_tag_before(root, plugin, current=None):
     return latest_release_tag(tags, plugin, template, current)
 
 
+def prev_release(root, plugin, end, current=None):
+    """前のリリースの起点（他のプラグインの差分と承認資料の比較元）。タグを作らない宣言（release.tag が null）なら前のリリースの
+    版上げのコミット（`publish.untagged_since`。宣言をタグ無しへ変える前の古いタグが残っていても使わない）、ほかは current を
+    除いて最も新しいタグ。決められなければ None。"""
+    return publish.untagged_since(root, plugin, end) or release_tag_before(root, plugin, current)
+
+
 def next_release(name, old, level="patch"):
     """上げ幅（既定は PATCH）で上げた正式版（`2.3.4` と `2.3.4-dev.1` の PATCH は `2.3.5`）。"""
     try:
@@ -300,7 +307,7 @@ def next_release(name, old, level="patch"):
 
 def other_plugins(root, a):
     """(前のタグ, 差分にあってまだ上げていない {名前: 前のタグの版}, 上げ済みの行)。"""
-    since = a.since or release_tag_before(root, a.plugin) or publish.since_without_tag(root, a.plugin, a.end)
+    since = a.since or prev_release(root, a.plugin, a.end) or tag_glob(a.plugin, tag_template_of(root))  # 無ければ差分を取れず止まる
     p = git(root, "diff", "--name-only", names.since_ref(root, since), a.end, check=False)
     if p.returncode:
         raise StepError(f"前のタグが無い: {since}", 2)
@@ -1051,13 +1058,13 @@ def cmd_approval_facts(a):
     base, prod, plugin = release_decl(root, a)
     git(root, "fetch", "-q", "origin", "--tags")
     cur_tag = tag_name(root, plugin, a.version)
-    prev = a.prev_tag or release_tag_before(root, plugin, cur_tag)
-    if not prev:
-        raise StepError("前のタグを決められない（--prev-tag を渡す）", EXIT_PRECONDITION)
     source_branch = (head := getattr(a, "head", None)) or base  # 選んで集める取り込み方は組んだリリースブランチの先頭を承認に出す（#3121）
     if head:
         git(root, "fetch", "-q", "origin", f"+refs/heads/{source_branch}:refs/remotes/origin/{source_branch}")
     approved_sha = git(root, "rev-parse", f"origin/{source_branch}").stdout.strip()
+    prev = a.prev_tag or prev_release(root, plugin, approved_sha, cur_tag)
+    if not prev:
+        raise StepError("前のタグを決められない（--prev-tag を渡す）", EXIT_PRECONDITION)
     keep = kept_sections(root, getattr(a, "approval", None))  # 前の承認資料の残す節（読めなければ書かずに止める。#1834）
     changes = instructions.changed_instructions(root, prev, approved_sha)
     prs, extra_out = included.section_range(root, prev, approved_sha, a.prs)  # 範囲の PR と --prs の和（#1274・#1885）

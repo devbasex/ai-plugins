@@ -760,12 +760,16 @@ def test_changed_plugins_without_the_tag_is_two(repo):
     assert code == 2 and "ndf--v" in res["summary"]
 
 
-def test_changed_plugins_without_tags_starts_from_the_last_release_bump(repo, monkeypatch):
+@pytest.mark.parametrize("stale_tag", [False, True])
+def test_changed_plugins_without_tags_starts_from_the_last_release_bump(repo, monkeypatch, stale_tag):
     """#3672 の round 11: タグを作らない宣言（CD の無い package-plugin は release.tag が null）では、本番ブランチの版を
-    初めて持ったコミット（前のリリースの版上げ）を差分の起点にし、存在しないタグで止まらない。"""
-    _release_steps_module(monkeypatch)  # lib/ を sys.path へ入れる
+    初めて持ったコミット（前のリリースの版上げ）を差分の起点にし、存在しないタグで止まらない。round 12: タグを作っていた
+    頃の古いタグが残っていても、そのタグを起点にしない（版上げを「上げ済み」と数えて抜かさない）。"""
+    mod = _release_steps_module(monkeypatch)  # lib/ を sys.path へ入れる
     from release_lib import publish
 
+    if stale_tag:
+        git(repo, "tag", "ndf--v0.9.0")  # タグ無しの宣言へ変える前に作ったタグ
     plugin_json(repo, "plugins/ndf", "1.0.0")
     plugin_json(repo, "plugins/mcp/mcp-serena", "2.3.4")
     git(repo, "add", "-A")
@@ -779,6 +783,7 @@ def test_changed_plugins_without_tags_starts_from_the_last_release_bump(repo, mo
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "bump ndf")
     assert publish.untagged_since(repo, "ndf", "HEAD") == shipped
+    assert mod.prev_release(repo, "ndf", "HEAD") == shipped  # approval-facts の比較元も同じ起点
     code, res = changed(repo)
     assert code == 0 and res["metrics"]["since"] == shipped, res
     assert [it["name"] for it in res["items"]] == ["mcp-serena"]

@@ -11,7 +11,7 @@ import os
 import tempfile
 
 import gh_parts
-from release_lib.names import changelog_span, tag_glob, tag_name, tag_template_of
+from release_lib.names import changelog_span, tag_name
 from step_result import StepError, git, plugin_dir
 
 
@@ -103,14 +103,8 @@ def publish(root, plugin, revision) -> tuple[str, str, list[dict]]:
     return ver, tag, tag_and_release(root, plugin, ver, tag, revision)
 
 
-def since_without_tag(root, plugin, end) -> str:
-    """前のタグが無いときの、他のプラグインの差分の起点。タグを作らない宣言（release.tag が null）なら前のリリースの版上げの
-    コミット（`untagged_since`）、ほかは宣言の形のタグのパターン（差分を取れず「前のタグが無い」で止まる）。"""
-    return untagged_since(root, plugin, end) or tag_glob(plugin, tag_template_of(root))
-
-
 def untagged_since(root, plugin, end) -> str | None:
-    """タグを作らない宣言（release.tag が null）で、他のプラグインの差分の起点にするコミット。本番ブランチの先端の `plugin` の版
+    """タグを作らない宣言（release.tag が null）で、他のプラグインの差分と承認資料の比較元の起点にするコミット。本番ブランチの先端の `plugin` の版
     （出した最新の版）を `end` の履歴で初めて持ったコミット（前のリリースの版上げ）。本番ブランチ・版を読めなければ None。"""
     import delivery
 
