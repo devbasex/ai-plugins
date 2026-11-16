@@ -469,7 +469,7 @@ GitHub は PR の head が違えば追加を断り、`land` は `refused` で止
 
 ### 決定 22: バージョンアップの対象をプラグインに決め打たないため、`.ndf/release.json` の `version_store` でバージョンの保存先のアダプタを選び、#3615 と境を分ける
 
-状態: 一部 superseded（設定のキーを `.ndf/release.json` の `version_store` にする部分は決定 27 の `branch_strategy.release.version_store`、#3615 との境の表の「設定のキー `version_store`」が入る場所と #3615 が足すキーの場所は決定 30。インタフェースとアダプタは有効）
+状態: 一部 superseded（設定のキーを `.ndf/release.json` の `version_store` にする部分は決定 27 の `branch_strategy.release.version_store`。#3615 との境の表の「設定のキー `version_store`」が入る場所と #3615 が足すキーの場所は決定 30。インタフェースとアダプタは有効）
 
 #3587 のバージョンアップ（`bump.py`、d7d5fe0b1 の時点）は、`write_bump`・`allowed_paths`・`planned_for`・`Bumper._tip`・`Bumper._plan` がどれも
 `plugins.load`（`.claude-plugin/marketplace.json` の読み）を呼び、`plugin.json` のバージョンを上げる。`pr_check._versions`・`cli._plugin_of`・

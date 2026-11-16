@@ -4,18 +4,12 @@
 
 - **今どうなっているか**: ndf-next のリリースのワークフロー（テンプレート `release.json`）は、承認ゲートの後に worker 1 つへリリースを任せる。worker は CI が落ちるとコードを直して本番の PR へ push できる（今の NDF でリリース 8・14 に同じ形が 2 回起きた）。ほぼ同時に承認された 2 つの PR は、main の必須のチェックが最新の取り込みを求めない（`strict` が偽）ため、組み合わせを CI に通さずに本番へ入る
 - **誰に効くか**: ndf-next を使うすべてのリポジトリ（Web サービス・アプリ・プラグイン）の、本番のリリースを承認する利用者と、リリースを実行するオーガナイザー・一時レーン
-- **変えると何が成り立つか**: 承認の後にコードを直すステップが無くなり、承認済みのコミットだけが本番へ入る。利用者の GitHub でのマージも承認として扱われる。ブランチ戦略・マージの方式・検証環境・バージョンの保存先はリポジトリごとに 1 つの設定ファイル `.ndf/branch-strategy.json` のセクション `branch_strategy` で選ぶ。develop と main を分けるリポジトリは既存のブランチ戦略のまま動く。GitHub flow を選んだリポジトリでは、同時に承認された PR の組み合わせを merge queue（使えなければ最新の取り込みの必須、どちらも使えない private の Free では NDF が順に確かめる `serial`）で確かめてから main へ入れる
+- **変えると何が成り立つか**: 承認の後にコードを直すステップが無くなり、承認済みのコミットだけが本番へ入る。利用者の GitHub でのマージも承認として扱われる。ブランチ戦略・マージの方式・検証環境・バージョンの保存先はリポジトリごとに 1 つの設定ファイル `.ndf/branch-strategy.json` のセクション `branch_strategy` で選ぶ。develop と main を分けるリポジトリは既存のブランチ戦略のまま動く。GitHub flow を選んだリポジトリでは、同時に承認された PR の組み合わせを merge queue で確かめてから main へ入れる。merge queue が使えなければ最新の取り込みの必須（`strict`）、どちらも使えない private の Free では NDF が順に確かめる `serial` を使う
 
 ## 適用範囲
 
 - **働く範囲**: ndf-next（`plugins/ndf-next/`）を使う利用者のリポジトリ。リリースのサブコマンド `ndf release-steps`（NDF の内部の呼び名は「副命令」）とリリースのワークフローのテンプレートが働く。ndf-next のリリースの workflow（`.github/workflows/ndf-next-release.yml`）も働く。今の NDF（`plugins/ndf/`）と今の CD（`.github/workflows/release-cd.yml`）は 11.0.0 の入れ替えまで変えない
 - **リポジトリごとに違うもの（設定ファイルで受ける）**: ブランチ戦略・マージの方式・検証環境・バージョンの保存先を、`.ndf/branch-strategy.json` のセクション `branch_strategy` の 1 か所で受ける。形と設定の例は「ブランチ戦略のセクション」にある。必須のチェックの待ちの秒は引数 `ci_budget` で受ける
-- **ai-plugins だけの事情（設定ファイルの値へ移すもの）**: 次の 5 つで、どれも ai-plugins の設定ファイルの値である。ndf-next のコードに決め打たない
-    - `trunk` 戦略
-    - `merge-queue`
-    - 検証マーケットプレイス `ai-plugins-next` と検証ブランチ `verify/next`
-    - バージョンの保存先 `plugin`
-    - タグ `ndf--v<バージョン>`
 - **キーと値の名前**: ブランチ戦略のキーと値は #3613 の改名の後の名前で書く。キーは `branch_strategy.release_strategy`、値は `merge_base_branch`・`release_branch`・`trunk` である。値とブランチ戦略の一覧の行の名前は同じである。改名と、旧い 3 つのファイルの値をセクションへ移す移行のコマンドは #3613 が持つ（決定 26・29）。要求（ [issue-3572-requirements.md](issue-3572-requirements.md) ）と利用者の指示の原文は改名の前の名前で書かれており、下の読み替えの表で読む
 - **当たるモード**: リリース承認ゲートを通る本番のリリース（デプロイの工程）と、その前後のスプリントの PR・検証環境の更新・CD のバージョンアップ
 
@@ -28,18 +22,34 @@
 
 受け入れ条件 1b・15・18・19 などの旧い名前は、この表で読み替えて満たす。要求の本文は書き換えない（利用者の指示の日付ごとの原文と、それを写した条件を保つため）。
 
-**代表のリポジトリでの振る舞い。** どのブランチ戦略も、承認の後に fix の worker を実行せず、承認済みのコミットとの一致の確認付きで本番の PR をマージする（決定 1・2）。
+### 代表のリポジトリでの振る舞い
+
+どのブランチ戦略も、承認の後に fix の worker を実行せず、承認済みのコミットとの一致の確認付きで本番の PR をマージする（決定 1・2）。
 
 | リポジトリ | 設定ファイルの値 | 何が起きるか |
 | --- | --- | --- |
 | ai-plugins（11.0.0 の入れ替えの後） | `trunk`・`merge-queue`・検証マーケットプレイス・`plugin` | スプリントを main から切り、PR を main へ出す。承認の後にキューへ入れ、GitHub が main と前に並ぶ PR を合わせて確かめてからマージする。CD がバージョンアップの PR で `plugin.json` を上げ、タグを作る。マージの前の PR は `ai-plugins-next` から試せる |
-| ai-plugins（入れ替えまで） | `.ndf/branch-strategy.json` は無い。今の NDF の値は旧いキー（`.ndf/worktree.json` の `base_branch: develop`・`branch_flow`、`.ndf/project.json` の `production_merge.admin`）にある | 今の NDF が旧いキーを読み、develop と main で動く（#3613 の前提 7）。この期間、ai-plugins のスプリント・マージ先・解析・リリースは ndf-next で実行しない（下の段落）。ndf-next のリリースの workflow は変数 `NDF_RELEASE_RUNNER` が ndf-next でないため動かない |
+| ai-plugins（入れ替えまで） | `.ndf/branch-strategy.json` は無い。今の NDF の値は旧いキー（`.ndf/worktree.json` の `base_branch: develop`・`branch_flow`、`.ndf/project.json` の `production_merge.admin`）にある | 今の NDF が旧いキーを読み、develop と main で動く（#3613 の前提 7）。この期間、ai-plugins のスプリント・マージ先・解析・リリースは ndf-next で実行しない（下の「ai-plugins の入れ替えまでの期間」）。ndf-next のリリースの workflow は変数 `NDF_RELEASE_RUNNER` が ndf-next でないため動かない |
 | GitHub flow の Web サービス（private の Pro・Team） | `trunk`・`strict`・`deploy`（staging）・`json`（`package.json`） | merge queue が使えないため `strict` を選ぶ。先に A がマージされると B はマージの前に止まり、main を取り込んだ新しい head で承認を取り直す。staging へは設定ファイルのコマンドで配る。CD が `package.json` のバージョンを上げる。ただし CD を起動する workflow のテンプレートは #3615 の範囲で、それが入るまでは、利用者が自分の workflow から main への push で `ndf release-steps bump`・`publish` を呼ぶ形になる（この課題が届けるのはサブコマンドと保存先 `json` のアダプタまで） |
-| GitHub flow の Web サービス（private の Free） | `trunk`・`serial`・`deploy`（staging）・`json`（`package.json`） | merge queue もブランチ保護（`strict`）も使えないため `serial` を選ぶ。承認の後、NDF が main のロックを取り、main の HEAD と承認済みのコミットを合わせた一時ブランチで CI を走らせ、通って main が動いていなければ承認済みのコミットのまま PR をマージする。A と B が同時に承認されると、B は A のロックが返った後に「A を入れた main + B」で確かめられ、承認は取り直さない。GitHub はマージを縛らないため、人が GitHub で本番の PR を直接マージする（経路 (b)）と、組み合わせを確かめずに入る。NDF はこの経路を止めず、確かめも検出もしない（I14 の保証の外。決定 32）。NDF が検出して止まるのは、`land` が自分でマージする直前に人が別の PR をマージして割り込んだときだけである。staging への配り方とバージョンは上の行と同じ |
+| GitHub flow の Web サービス（private の Free） | `trunk`・`serial`・`deploy`（staging）・`json`（`package.json`） | merge queue もブランチ保護（`strict`）も使えないため `serial` を選ぶ。承認の後、NDF が main のロックを取り、main の HEAD と承認済みのコミットを合わせた一時ブランチで CI を走らせ、通って main が動いていなければ承認済みのコミットのまま PR をマージする。A と B が同時に承認されると、B は A のロックが返った後に「A を入れた main + B」で確かめられ、承認は取り直さない。GitHub はマージを縛らないため、人が GitHub で本番の PR を直接マージする（経路 (b)）と、組み合わせを確かめずに入る。NDF はこの経路を止めず、確かめも検出もしない（組み合わせを確かめる保証の外。不変条件 I14・決定 32）。NDF が検出して止まるのは、`land` が自分でマージする直前に人が別の PR をマージして割り込んだときだけである。staging への配り方とバージョンは上の行と同じ |
 | develop を持つ Web・アプリ | `merge_base_branch` か `release_branch`・`base_branch: develop`・マージの方式は任意 | 既存のブランチ戦略のまま動く。スプリントは develop（`release_branch` は main）から切り、リリースブランチの PR が本番の PR になる。組み合わせは develop（かリリースブランチ）で既に CI を通っており、本番の PR は 1 度に 1 つのため、マージの方式を書かなくても止まらない。書けば ruleset との一致を確かめて使う。同期の PR は今のまま作る |
 | `.ndf/branch-strategy.json` の無いリポジトリ | どれも無い | ブランチ戦略は既定の `merge_base_branch` 戦略（本番ブランチはリポジトリの既定ブランチ）で、今と同じに動く。マージの方式は無く、今のマージ（head の一致の確認付き）を実行する。検証環境は使わない。CD のバージョンアップは `trunk` 戦略でだけ動くため実行されない |
 
-**ai-plugins の入れ替えまでの期間。** この期間は、#3587 が develop へ入ってから 11.0.0 の入れ替え（#3304）の PR がマージされるまでである。
+`trunk` 戦略では、承認資料（`assemble`）・バージョンアップ（`bump`）・タグと GitHub Release（`publish`）がバージョンの保存先のアダプタのインタフェースだけを通る。プラグインの登録（`.claude-plugin/marketplace.json`）は読まない（決定 22）。そのため上の表の `trunk`・保存先 `json` の Web サービスは、プラグインの登録が無くても承認からタグまで止まらない。既存のブランチ戦略（`merge_base_branch`・`release_branch`）では、承認資料・リリースブランチの組み立て・タグがプラグインの登録を読む。プラグインの登録を持たないリポジトリでこれらを作成できるようにするのは #3615 の範囲である。境は決定 22 の表にある。develop を持つ Web のリポジトリの既存のブランチ戦略の経路はこの課題で後退させないが、#3615 が直るまでは承認資料の組み立てで止まる（今と同じ）。
+
+### ai-plugins だけの事情
+
+次の 5 つは、どれも ai-plugins の設定ファイルの値である。ndf-next のコードに決め打たない。
+
+- `trunk` 戦略
+- `merge-queue`
+- 検証マーケットプレイス `ai-plugins-next` と検証ブランチ `verify/next`
+- バージョンの保存先 `plugin`
+- タグ `ndf--v<バージョン>`
+
+### ai-plugins の入れ替えまでの期間
+
+この期間は #3587 が develop へ入ってから 11.0.0 の入れ替え（#3304）の PR がマージされるまでである。
 この間、ai-plugins の開発は今の NDF で行い、ndf-next の工程（スプリントの分岐元・マージ先・解析・リリース）を ai-plugins で実行しない。ndf-next は新しいキーだけを読み、入れ替えまで `.ndf/` を書かない（#3613 の前提 7・I11）ため、
 この期間の ai-plugins には ndf-next が読む値が無い。それでも ndf-next を実行したときの読み取りの結果は次のとおりで、どれも ai-plugins の今の運用（develop へのスプリント）と合わない。
 
@@ -49,8 +59,6 @@
 | マージ先の既定（`core/route`）・リリースの設定の解決（`declaration.py`）・リポジトリの解析 | セクションのファイルが無いため既定の `merge_base_branch` 戦略と既定ブランチ（ai-plugins は `main`）を使う |
 
 入れ替えの PR が、移行のコマンドで `.ndf/branch-strategy.json` を作ってから ndf-next の工程を ai-plugins で使い始める。
-
-`trunk` 戦略の承認資料（`assemble`）・バージョンアップ（`bump`）・タグと GitHub Release（`publish`）は、バージョンの保存先のアダプタのインタフェースだけを通り、プラグインの登録（`.claude-plugin/marketplace.json`）を読まない（決定 22）。そのため上の表の `trunk`・保存先 `json` の Web サービスは、プラグインの登録が無くても承認からタグまで止まらない。既存のブランチ戦略（`merge_base_branch`・`release_branch`）の承認資料・リリースブランチの組み立て・タグを、プラグインの登録を持たないリポジトリで作成できるようにするのは #3615 の範囲である。境は決定 22 の表にある。develop を持つ Web のリポジトリの既存のブランチ戦略の経路はこの課題で後退させないが、#3615 が直るまでは承認資料の組み立てで止まる（今と同じ）。
 
 ## あるべき姿の根拠
 
@@ -382,7 +390,7 @@ graph TD
 セクションのスキーマは `trunk` 以外のブランチ戦略で `release.version_store` を落とす（「組み合わせの検査」）。`trunk` 戦略で保存先 `plugin` を選んだときも、
 プラグインの名前を含む行を書き換える追加のファイルはセクションの外にある。保存先は `.ndf/release.json` の `version_files` である（決定 22 の表）。
 次の 2 つは #3615 の範囲である。既存のブランチ戦略のバージョンの上げ方をセクションへ移すことと、プラグインの登録の無いリポジトリで既存のブランチ戦略のバージョンを上げることである。
-受け入れ条件 2l（セクションだけを読めばバージョンの上げ方が分かる）と 2r（develop を持つ Web サービスの例に `package.json` のバージョン）との差と、比べた候補は決定 31 にある。
+この形は受け入れ条件 2l（セクションだけを読めばバージョンの上げ方が分かる）と 2r（develop を持つ Web サービスの例に `package.json` のバージョン）と差がある。差と比べた候補は決定 31 にある。
 
 ### セクションのキー
 
@@ -436,7 +444,7 @@ graph TD
 | マージの方式と `production_merge.admin` の真の組み合わせ（方式があるとき迂回は使われない。I17） | `.ndf/branch-strategy.json` | `production_merge` のスキーマの `if`/`then`（`method` があれば `admin` は偽だけ） | 同上 |
 | マージの方式と ruleset の一致の確認・プランと公開範囲で使える方式か（I15・決定 33） | `.ndf/branch-strategy.json` の `production_merge.method` と、本番ブランチの規則とリポジトリの読み取り | `merge_method`（`land`・`land_bump` が呼ぶ） | 原因 `precondition`・理由に設定の値と ruleset の値と使える方式の一覧 |
 
-確かめ 8（[issue-3572-design-evidence.md](issue-3572-design-evidence.md) ）は、スキーマの案に次の例が通り、組み合わせを壊した 14 の例が落ちることを示す。通る例は、下の 2 つの例と、Web サービスの例を `trunk` 戦略へ書き換えた例（マージの方式が `strict` のものと `serial` のもの）である。
+スキーマの案の検査の結果は確かめ 8（[issue-3572-design-evidence.md](issue-3572-design-evidence.md) ）にある。次の例が通り、組み合わせを壊した 14 の例が落ちる。通る例は、下の 2 つの例と、Web サービスの例を `trunk` 戦略へ書き換えた例（マージの方式が `strict` のものと `serial` のもの）である。
 
 ### マージの方式の選び方（プランと公開範囲）
 
@@ -524,6 +532,29 @@ Web サービスの例はマージの方式を書かない（今のマージ）�
 ```json
 "production_merge": {"method": "serial"}
 ```
+
+## 入出力の契約
+
+`ndf release-steps` の結果 JSON（`contracts/schemas/io/release-steps.result.schema.json`）と引数。互換は持たない（ndf-next は未リリース）。
+
+| サブコマンド | 足す・変えるもの | 形 |
+| --- | --- | --- |
+| `merge` | `outputs.version`・`outputs.approval`・`outputs.method` | 予定のバージョン、`{"route": "gate" \| "github-merge", "by": <ログイン>, "approved_head": <SHA>, "merged_head": <SHA>, "merge_sha": <SHA>, "gate_head": <SHA か null>, "tested_base": <`serial` で確かめた本番ブランチの HEAD か null>}`、`merge-queue`・`strict`・`serial`・`null` |
+| `merge`（止まったとき） | `items`・`routes`・`outputs.suggested` | 落ちたチェック `{"kind": "check", "name": <名前>, "outcome": <結論>}`。キューから外れたときは `{"kind": "queue", "name": "removed", "detail": <理由>}`、ruleset との食い違いと使えない方式は `{"kind": "method", "name": <設定の値>, "detail": <ruleset の値と使える方式の一覧>}`。`serial` のロックの待ちの切れは `{"kind": "lock", "name": <持ち主の PR>}`、一時ブランチの衝突は `{"kind": "conflict", "name": <一時ブランチ>}`、確かめの外のマージは `{"kind": "serial", "name": "untested", "detail": <確かめた HEAD と第 1 親>}`。次の手は決定 3 の表 |
+| `merge` | 外すもの（`trunk` 戦略だけ） | `outputs.sync_pr` |
+| `answer` | 引数 `--route gate \| github-merge` | `github-merge` の回答者は `merged_by`、対象は `merged_head`。省けば `gate` |
+| `confirm`（新設） | `outputs.version`・`outputs.tag`・`outputs.bump_pr`・`outputs.bump_revision`・`items`・`routes` | 作ったバージョン・タグ・バージョンアップの PR・そのマージコミット。そろわなければ `stopped` で、`items` に `{"kind": "cd", "name": <bump か publish>, "detail": <理由>}`、次の手は `rerun` の 1 つ |
+| `guard`（新設） | 終了コード | 本番の PR なら 3（原因 `production_pr`）、head が検証ブランチなら 1（原因 `refused`）、ほかは 0 |
+| `bump`（新設） | `outputs.version`・`outputs.level`・`outputs.pr`・`outputs.state`・`outputs.store` | 上げたバージョン、バージョン種別、バージョンアップの PR、`merged`・`reused`・`published`・`not_applicable` のどれか、バージョンの保存先の種類 |
+| `pr-check`（新設） | 終了コード・`items` | 0 か 1。`items` に `{"kind": "version" \| "level" \| "verify-ref" \| "reviews", "name": <パスかラベル>, "detail": <理由>}` |
+| `verify-ref`（新設） | `outputs.ref`・`outputs.head`・`outputs.version`・`outputs.included`・`outputs.kind`・`items` | 作成したブランチと head、検証のバージョン（`deploy` では `null`）、含めた PR と head、種類、衝突は `{"kind": "conflict", "name": "#<番号>"}`、コマンドの失敗は `{"kind": "deploy", "name": <終了コード>, "detail": <理由>}` |
+| `assemble`・`materials` | 変えるもの | `trunk` 戦略ではブランチを作らず、`--pr` の本文の承認資料のセクションを書く。既存のブランチ戦略では今のまま（`--channel`・`--source` を残す） |
+
+バージョン種別のラベルは `release:major`・`release:minor`・`release:patch` である。どれも無ければ PATCH とし、1 つの PR に 2 つ以上あれば
+`pr-check` が落とす。範囲に複数の PR が入っていれば、最も大きいバージョン種別を採る（決定 7）。
+
+人のマージの記録は、本番の PR のコメントに置く（マーカー `<!-- ndf:merge-approval -->`）。行は `承認の経路:`・`承認した人:`・`マージした head:`・
+`マージコミット:`・`承認ゲートの承認の head:`・`マージの方式:` の 6 つで、1 回だけ書く。
 
 ## 処理の流れ
 
@@ -722,29 +753,6 @@ head が動いた（`refused`）・キューから外れた（`queue_removed`）
 4. 種類が `marketplace` なら、2 つを書き換えたコミットを足す。`.claude-plugin/marketplace.json` の `name` は検証マーケットプレイスの名前へ書き換える。リリース対象のバージョンは `<main のバージョン>-next.<組んだ時刻 UTC の YYYYMMDDHHMMSS>` へ書き換える。`deploy` なら書き換えない
 5. 前の検証ブランチの head を親に足したコミットを fast-forward で push する
 6. 種類が `deploy` なら、`{ref}`・`{head}` を置き換えたコマンドを `timeout_seconds` まで実行する。失敗すれば理由を結果に出す（検証ブランチは 5 のまま残す）
-
-## 入出力の契約
-
-`ndf release-steps` の結果 JSON（`contracts/schemas/io/release-steps.result.schema.json`）と引数。互換は持たない（ndf-next は未リリース）。
-
-| サブコマンド | 足す・変えるもの | 形 |
-| --- | --- | --- |
-| `merge` | `outputs.version`・`outputs.approval`・`outputs.method` | 予定のバージョン、`{"route": "gate" \| "github-merge", "by": <ログイン>, "approved_head": <SHA>, "merged_head": <SHA>, "merge_sha": <SHA>, "gate_head": <SHA か null>, "tested_base": <`serial` で確かめた本番ブランチの HEAD か null>}`、`merge-queue`・`strict`・`serial`・`null` |
-| `merge`（止まったとき） | `items`・`routes`・`outputs.suggested` | 落ちたチェック `{"kind": "check", "name": <名前>, "outcome": <結論>}`。キューから外れたときは `{"kind": "queue", "name": "removed", "detail": <理由>}`、ruleset との食い違いと使えない方式は `{"kind": "method", "name": <設定の値>, "detail": <ruleset の値と使える方式の一覧>}`。`serial` のロックの待ちの切れは `{"kind": "lock", "name": <持ち主の PR>}`、一時ブランチの衝突は `{"kind": "conflict", "name": <一時ブランチ>}`、確かめの外のマージは `{"kind": "serial", "name": "untested", "detail": <確かめた HEAD と第 1 親>}`。次の手は決定 3 の表 |
-| `merge` | 外すもの（`trunk` 戦略だけ） | `outputs.sync_pr` |
-| `answer` | 引数 `--route gate \| github-merge` | `github-merge` の回答者は `merged_by`、対象は `merged_head`。省けば `gate` |
-| `confirm`（新設） | `outputs.version`・`outputs.tag`・`outputs.bump_pr`・`outputs.bump_revision`・`items`・`routes` | 作ったバージョン・タグ・バージョンアップの PR・そのマージコミット。そろわなければ `stopped` で、`items` に `{"kind": "cd", "name": <bump か publish>, "detail": <理由>}`、次の手は `rerun` の 1 つ |
-| `guard`（新設） | 終了コード | 本番の PR なら 3（原因 `production_pr`）、head が検証ブランチなら 1（原因 `refused`）、ほかは 0 |
-| `bump`（新設） | `outputs.version`・`outputs.level`・`outputs.pr`・`outputs.state`・`outputs.store` | 上げたバージョン、バージョン種別、バージョンアップの PR、`merged`・`reused`・`published`・`not_applicable` のどれか、バージョンの保存先の種類 |
-| `pr-check`（新設） | 終了コード・`items` | 0 か 1。`items` に `{"kind": "version" \| "level" \| "verify-ref" \| "reviews", "name": <パスかラベル>, "detail": <理由>}` |
-| `verify-ref`（新設） | `outputs.ref`・`outputs.head`・`outputs.version`・`outputs.included`・`outputs.kind`・`items` | 作成したブランチと head、検証のバージョン（`deploy` では `null`）、含めた PR と head、種類、衝突は `{"kind": "conflict", "name": "#<番号>"}`、コマンドの失敗は `{"kind": "deploy", "name": <終了コード>, "detail": <理由>}` |
-| `assemble`・`materials` | 変えるもの | `trunk` 戦略ではブランチを作らず、`--pr` の本文の承認資料のセクションを書く。既存のブランチ戦略では今のまま（`--channel`・`--source` を残す） |
-
-バージョン種別のラベルは `release:major`・`release:minor`・`release:patch` である。どれも無ければ PATCH とし、1 つの PR に 2 つ以上あれば
-`pr-check` が落とす。範囲に複数の PR が入っていれば、最も大きいバージョン種別を採る（決定 7）。
-
-人のマージの記録は、本番の PR のコメントに置く（マーカー `<!-- ndf:merge-approval -->`）。行は `承認の経路:`・`承認した人:`・`マージした head:`・
-`マージコミット:`・`承認ゲートの承認の head:`・`マージの方式:` の 6 つで、1 回だけ書く。
 
 ## 非機能の実現方式
 
