@@ -143,8 +143,9 @@ origin にもローカルにも無いときは、既定ブランチへは落ち�
   同じく組み、`branch_flow` が壊れていれば止まる。ブランチの名前は、どちらでもメインディレクトリの設定から解く
 - 変えた宣言は、それから始めるスプリントにだけ効く。動いているスプリントは、開始時に目録（`sprint.json`）の
   `ブランチ運用` へ書いた値のまま進む
-- 既存のリポジトリの使い方から案を作るときは `project-decl.py measure` を打ち、宣言と実際の使い方のずれは
-  `project-decl.py drift` で見る（`development-workflow` の `references/project-analysis.md`）
+- 既存のリポジトリの使い方から案を作るときは `project-decl.py measure` を打つ。ブランチ戦略の宣言（`.ndf/project.json` の
+  `branch_strategy`）は `project-decl.py branch-strategy` が作り、値ごとの根拠を出す（`development-workflow` の
+  `references/project-analysis.md` の「ブランチ戦略の宣言」）
 
 ### レビューの単位
 

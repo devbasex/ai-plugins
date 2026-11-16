@@ -48,11 +48,16 @@ def check_production_pr(strategy, pr: dict, prod: dict, queue: list[dict]) -> st
     """本番の PR がマージの方式ごとの確かめを通るか。通れば None、落ちれば理由の文。
 
     `pr` は `head`・`bump`（版上げの PR か）・`cut_version`（切った時点の本番の版数）・`contains_tip`（head が本番の先端を含むか）、
-    `prod` は `tip`・`version`、`queue` はキューの PR（各 `number`・`bump`）。
+    `prod` は `tip`・`version`、`queue` はキューの PR（各 `number`・`bump`）と、承認したがまだキューへ入れていない版上げの PR
+    （`approved_release` が真の行）。`merge-queue` では、後者がある間は版上げでない本番の PR を入れない（決定 18）。
     """
     method = strategy.section["merge"]["method"]
     if method == "direct":
         return None
+    held = [q for q in queue if q.get("approved_release") and q.get("number") != pr.get("number")]
+    if method == "merge-queue" and not pr.get("bump") and held:
+        # 承認の範囲を版上げの PR の head に固定する（利用者の判断 3。決定 18）。版上げの PR がキューへ入るまで待つ
+        return f"版上げの PR #{held[0]['number']} を承認してからキューへ入れるまで、スプリントの PR はキューへ入れない。入った後に打ち直してください"
     if method == "strict":
         if not pr.get("contains_tip"):
             return f"head が本番ブランチの先端 {prod.get('tip', '')[:12]} を含まない。本番の PR を作り直し、{REAPPROVE}"
@@ -61,7 +66,7 @@ def check_production_pr(strategy, pr: dict, prod: dict, queue: list[dict]) -> st
         return None
     if pr.get("cut_version") != prod.get("version"):
         return f"本番ブランチの版数 {prod.get('version')} が、版上げの PR を切った時点の {pr.get('cut_version')} と違う。作り直し、{REAPPROVE}"
-    others = [q for q in queue if q.get("bump") and q.get("number") != pr.get("number")]
+    others = [q for q in queue if q.get("bump") and not q.get("approved_release") and q.get("number") != pr.get("number")]
     if others:
         return f"キューに別の版上げの PR（#{others[0]['number']}）がある。作り直し、{REAPPROVE}"
     return None

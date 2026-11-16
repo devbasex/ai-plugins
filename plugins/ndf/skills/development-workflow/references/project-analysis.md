@@ -148,13 +148,38 @@ Pull Request（最大 100 件）と origin のスプリントブランチで、�
 （[worktree の declaration.md](../../worktree/references/declaration.md) の「ブランチ運用を宣言するリポジトリ」）に合わない答えは、
 `write` が書かずに 1 で終わる。`write` が書くのは `worktree.json` に `branch_flow` が無いときと、前の `write` の値のままのときだけである。
 
-**ずれの検出は `drift` が行う。** `check` は `gh` を呼ばないため、`branch_flow` の形の誤り（3）だけを見る。振り返りと棚卸しは
-`measure` の後に `drift` を打ち、宣言（無ければ既定値の行）と測った値のずれを項目ごとに見る。ずれが無ければ `items` は空である。
+## ブランチ戦略の宣言
+
+ブランチ戦略・リリース・マージの方法論は、`.ndf/project.json` のセクション `branch_strategy` に 1 か所で書く（#3672）。
+**このセクションを作る・更新する・移す・消すのは `project-decl.py branch-strategy` だけで、人もエージェントも手で書かない。**
+結果は 1 行の JSON（`status`・`kind`・`values`・`evidence`・`questions`・`diff`・`digest`・`failed`）で、終了コードは
+`ok` が 0・`ask`（問いがあり書いていない）が 3・`stopped`（検査に落ちた・書けない）が 1 である。
 
 ```bash
-python3 "$SCRIPTS/project-decl.py" measure --out "$TMP/measure.json"
-python3 "$SCRIPTS/project-decl.py" drift --measure "$TMP/measure.json"
+# 新しいリポジトリ（既定ブランチのコミットが 1 本以下・マージ済みの PR・タグ・Release・ruleset・ワークフローが無い）
+python3 "$SCRIPTS/project-decl.py" branch-strategy init --kind plugin
+# 既存のリポジトリ: 事例と文書を測り、値ごとの根拠と問いを出す（書かない）
+python3 "$SCRIPTS/project-decl.py" branch-strategy measure > "$TMP/strategy.json"
+# 問いに答えて差分とハッシュを見る → ハッシュを渡して書く
+python3 "$SCRIPTS/project-decl.py" branch-strategy write --result "$TMP/strategy.json" --answers "$TMP/strategy-answers.json"
+python3 "$SCRIPTS/project-decl.py" branch-strategy write --result "$TMP/strategy.json" --answers "$TMP/strategy-answers.json" --digest <ハッシュ>
+# 旧い 4 か所（worktree.json・project.json・supervise.json・release.json）のキーを移す。差分を見てからハッシュを渡す
+python3 "$SCRIPTS/project-decl.py" branch-strategy migrate
+python3 "$SCRIPTS/project-decl.py" branch-strategy migrate --digest <ハッシュ>
+# NDF を外すとき
+python3 "$SCRIPTS/project-decl.py" branch-strategy remove --digest <ハッシュ>
 ```
+
+- `--kind` は代表のリポジトリの種類（`web-develop`・`web-trunk`・`mobile`・`docs`・`plugin`）。`init` で省くと、種類を問う結果
+  （`why: no_kind`）を返して書かない。既存のリポジトリで `init` を打つと、書かずに `measure` を案内する
+- `measure` は、履歴から推すキー（取り込み方・ベースブランチ・起点・タグの形・Release の有無・マージコミットの作り方）を
+  直近の事例が 3 件以上・9 割以上で合うときだけ値にし、既定ブランチ・版数のファイル・`plugin.json`・ワークフロー・
+  本番ブランチの ruleset はその 1 件で決める。足りない・食い違う（README・CONTRIBUTING・AGENTS.md の `--base` の行と
+  事例が違うときも）ときは書かずに問いを返す
+- 問い（`questions`）は `decision-request` の手順で人へ回す。答えのファイルは `{"<キーの位置>": <値>}` で、答えで
+  種類の既定から値を変えると `kind` は `custom` になる
+- 書く前に組み合わせの規則（R1〜R10。スキーマ `skills/development-workflow/schemas/project.schema.json` の
+  `$defs/BranchStrategy`）を通し、落ちれば 1 バイトも書かない
 
 宣言を変える・外すのは利用者の設定の書き換え（共通原則 C7）で、実装の中でコミットし、承認ゲートで人が見る。変えた宣言は
 それから始めるスプリントにだけ効く。

@@ -706,3 +706,15 @@ def test_cli_migrate_then_digest(tmp_path):
 
 def test_cli_bad_verb_is_2(tmp_path):
     assert run_decl(tmp_path, "nope").returncode == 2
+
+
+def test_sprint_pr_waits_while_release_pr_is_approved_decision_18():
+    """利用者の判断 3（固定する）: 版上げの PR の承認からキューへの投入まで、スプリントの PR をキューへ入れない。"""
+    plugin = bs.Strategy(section("plugin"))
+    prod = {"tip": "t" * 40, "version": "1.0.0"}
+    held = [{"number": 9, "approved_release": True}]
+    assert "#9" in land.check_production_pr(plugin, {"bump": False, "number": 3}, prod, held)
+    assert land.check_production_pr(plugin, {"bump": True, "cut_version": "1.0.0", "number": 9}, prod, held) is None
+    port = FakePort({"head": H1, "base": "main", "bump": False}, facts(queue=True), queue=held)
+    out = land.land_approved(port, plugin, 3, land.Approval(H1))
+    assert out["result"] == "stopped" and port.calls == []

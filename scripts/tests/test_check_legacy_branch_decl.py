@@ -56,3 +56,44 @@ def test_repository_data_shape():
     for allowed in ("plugins/ndf/scripts/project_lib/branch_strategy_migrate.py", "plugins/ndf/scripts/lib/branch_strategy_legacy.py",
                     "plugins/ndf/scripts/data/ndf-settings-renames.json", "CHANGELOG.md"):
         assert allowed not in paths
+
+
+# --- check-skill-repo-assumptions.py の branch_strategy_problems（受け入れ条件 16・I14） -----------------
+
+_SPEC2 = importlib.util.spec_from_file_location("check_skill_repo_assumptions", REPO_ROOT / "scripts/check-skill-repo-assumptions.py")
+assumptions = importlib.util.module_from_spec(_SPEC2)
+_SPEC2.loader.exec_module(assumptions)
+
+
+def _strategy_tree(tmp_path: Path) -> Path:
+    for rel in (assumptions.BRANCH_STRATEGY_SCHEMA, assumptions.BRANCH_STRATEGY_PRESETS, *assumptions.BRANCH_STRATEGY_CODE):
+        dst = tmp_path / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.write_text((REPO_ROOT / rel).read_text(encoding="utf-8"), encoding="utf-8")
+    return tmp_path
+
+
+def test_branch_strategy_problems_clean_on_repository():
+    assert assumptions.branch_strategy_problems(REPO_ROOT) == []
+
+
+def test_branch_strategy_problems_catch_each_kind(tmp_path):
+    root = _strategy_tree(tmp_path)
+    schema = root / assumptions.BRANCH_STRATEGY_SCHEMA
+    d = json.loads(schema.read_text(encoding="utf-8"))
+    d["BranchStrategy"]["properties"]["kind"]["default"] = "plugin"
+    schema.write_text(json.dumps(d), encoding="utf-8")
+    presets = root / assumptions.BRANCH_STRATEGY_PRESETS
+    p = json.loads(presets.read_text(encoding="utf-8"))
+    p["kinds"]["plugin"]["section"]["release"]["plugin"] = "ndf"
+    p["kinds"]["web-develop"]["section"]["merge"]["admin"] = True
+    presets.write_text(json.dumps(p, indent=1), encoding="utf-8")
+    code = root / assumptions.BRANCH_STRATEGY_CODE[1]
+    code.write_text(code.read_text(encoding="utf-8") + '\nTARGET = "develop"\n', encoding="utf-8")
+    text = "\n".join(assumptions.branch_strategy_problems(root))
+    assert "default" in text and '"plugin": "ndf"' in text and "merge.admin" in text and "決め打って" in text
+
+
+def test_branch_strategy_problems_unreadable_is_scan_error(tmp_path):
+    with pytest.raises(assumptions.ScanError):
+        assumptions.branch_strategy_problems(tmp_path)
