@@ -142,7 +142,7 @@ docs/
       "design": {"checks": ["cross-review"], "diff": "pr"},
       "spec": {"checks": [], "diff": "none"}
     },
-    "production_merge": {"method": "merge-queue", "admin": true},
+    "production_merge": {"method": "merge-queue"},
     "verify": {"kind": "marketplace", "ref": "verify/next", "marketplace": "ai-plugins-next"},
     "release": {"version_store": {"kind": "plugin"}}
   }

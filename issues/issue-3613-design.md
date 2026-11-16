@@ -265,7 +265,7 @@
 | 移行のコマンド（`src/ndf/domains/settings/cli.py`。新設。`cli.COMMANDS` に `settings` を足す） | `ndf settings migrate` を受け、差分を示すか、承認した差分を書く（「入出力の契約」） |
 | 設定のスキーマ（`contracts/schemas/ndf-settings/worktree.schema.json`・`mvv.schema.json`）と Skill の中のコピー（`skills/worktree/schemas/`・`skills/development-workflow/schemas/`） | 新しいキーと値だけを持つ。旧いキーを持たない（受け入れ条件 11） |
 | ブランチ戦略の一覧（`contracts/domains/branch-flows.json`） | 列 `promotion` を `release_strategy` に、行の値と id を新しい名前にする（「データ構造」） |
-| 設定を読む側（`domains/worktree/declaration.py` の `load`・スプリントの開始時の記録を読む `domains/worktree/merged.py`・MVV の設定を読む `domains/records/mvv.py`・`domains/records/preflight.py`） | 読んだ直後に設定の改名の関数で旧いキーを探し、1 つでもあれば止まる（I6）。承認ゲート（`progress/gate/`）は MVV の設定のパスだけを引いて中身を読まないため、止める検査を持たない |
+| 設定を読む側（`domains/worktree/declaration.py` の `load`・スプリントの開始時の記録を読む `domains/worktree/merged.py`・MVV の設定を読む `domains/records/mvv.py`・`domains/records/preflight.py`） | 読んだ直後に設定の改名の関数で旧いキーを探し、1 つでもあれば止まる（I6）。スプリントの開始時の記録には、キーの名前を改める行だけを当てる（記録は移した後の名前のまま持つ）。承認ゲート（`progress/gate/`）は MVV の設定のパスだけを引いて中身を読まないため、止める検査を持たない |
 | 規約の規則 spec-decl（`checks/spec_docs.py` の `_real_errors`） | 実物の設定に旧いキーがあれば、設定の改名の関数で変換した中身をスキーマと突き合わせる（決定 13） |
 | 入れ替えの課題（#3304）の本文 | 移行のコマンドを利用者のリポジトリごとに実行するステップを足す（受け入れ条件 14。実装の Pull Request をマージした後に本文を書き直す） |
 

@@ -155,7 +155,9 @@ the queue」である。外れる理由は、チェックの失敗・チェッ�
 ### スキーマの案
 
 スキーマの案は、実装（#3587）で次のパスに置く形の下書きである: `plugins/ndf-next/contracts/schemas/ndf-settings/branch-strategy.schema.json` 。
-`$defs.reviews` は今の `worktree.schema.json` の `branch_flow.reviews` をそのまま使った。取り出しは `jq '.properties.branch_flow.properties.reviews'` で行った。
+`$defs.reviews` は今の `plugins/ndf-next/contracts/schemas/declarations/worktree.schema.json` の `branch_flow.reviews` をそのまま写した。取り出しは `jq '.properties.branch_flow.properties.reviews'` で行った。
+セクションの形は 2 つに分けた。`$defs.flow` はリポジトリの解析が答えるブランチ運用の部分（`release_strategy`・`start`・`integrate`・`doc_prs`・`reviews`）とその組み合わせの規則で、`$defs.section` は `flow` を参照し、`trunk` が求める `production_merge.method`・`release.version_store` を足す。
+解析の回答はこの部分しか持たないため、`$defs.flow_answer`（`flow` にほかのキーを許さない形）で確かめる（詳細設計の `answer_problem`）。
 
 ```json
 {
@@ -173,15 +175,10 @@ the queue」である。外れる理由は、チェックの失敗・チェッ�
   "$defs": {
     "section": {
       "type": "object",
-      "additionalProperties": false,
+      "unevaluatedProperties": false,
       "properties": {
         "base_branch": {"type": "string", "minLength": 1},
         "production_branch": {"type": "string", "minLength": 1},
-        "release_strategy": {"enum": ["merge_base_branch", "release_branch", "trunk"], "default": "merge_base_branch"},
-        "start": {"enum": ["base", "production"], "default": "base"},
-        "integrate": {"enum": ["check", "release"], "default": "check"},
-        "doc_prs": {"enum": ["base", "sprint"], "default": "base"},
-        "reviews": {"$ref": "#/$defs/reviews"},
         "production_merge": {
           "type": "object",
           "additionalProperties": false,
@@ -227,6 +224,25 @@ the queue」である。外れる理由は、チェックの失敗・チェッ�
         }
       },
       "allOf": [
+        {"$ref": "#/$defs/flow"},
+        {
+          "if": {"properties": {"release_strategy": {"const": "trunk"}}, "required": ["release_strategy"]},
+          "then": {"properties": {"production_merge": {"required": ["method"]}, "release": {"required": ["version_store"]}},
+                   "required": ["production_merge", "release"]},
+          "else": {"properties": {"release": {"not": {"required": ["version_store"]}}}}
+        }
+      ]
+    },
+    "flow": {
+      "type": "object",
+      "properties": {
+        "release_strategy": {"enum": ["merge_base_branch", "release_branch", "trunk"], "default": "merge_base_branch"},
+        "start": {"enum": ["base", "production"], "default": "base"},
+        "integrate": {"enum": ["check", "release"], "default": "check"},
+        "doc_prs": {"enum": ["base", "sprint"], "default": "base"},
+        "reviews": {"$ref": "#/$defs/reviews"}
+      },
+      "allOf": [
         {
           "if": {"properties": {"release_strategy": {"const": "release_branch"}}, "required": ["release_strategy"]},
           "then": {"properties": {"start": {"const": "production"}, "doc_prs": {"const": "sprint"}, "integrate": {"const": "check"}},
@@ -235,21 +251,39 @@ the queue」である。外れる理由は、チェックの失敗・チェッ�
         {
           "if": {"properties": {"release_strategy": {"const": "trunk"}}, "required": ["release_strategy"]},
           "then": {"properties": {"start": {"const": "production"}, "doc_prs": {"const": "sprint"}, "integrate": {"const": "release"},
-                                  "production_merge": {"required": ["method"]}, "release": {"required": ["version_store"]},
                                   "reviews": {"not": {"required": ["release"]}}},
-                   "required": ["start", "doc_prs", "integrate", "production_merge", "release"]},
+                   "required": ["start", "doc_prs", "integrate"]},
           "else": {
             "if": {"properties": {"release_strategy": {"const": "release_branch"}}, "required": ["release_strategy"]},
             "then": true,
             "else": {"properties": {"start": {"const": "base"}, "doc_prs": {"const": "base"}, "integrate": {"const": "check"},
                                     "reviews": {"not": {"required": ["release"]}}}}
           }
-        },
-        {
-          "if": {"not": {"properties": {"release_strategy": {"const": "trunk"}}, "required": ["release_strategy"]}},
-          "then": {"properties": {"release": {"not": {"required": ["version_store"]}}}}
         }
       ]
+    },
+    "flow_answer": {"$ref": "#/$defs/flow", "unevaluatedProperties": false},
+    "reviews": {
+      "type": "object",
+      "description": "レビューの単位（#3163）。PR の種類ごとに掛けるレビューと対象の差分。書いていない種類は既定値",
+      "additionalProperties": false,
+      "properties": {
+        "impl": {"type": "object", "additionalProperties": false, "required": ["checks", "diff"],
+                 "properties": {"checks": {"type": "array", "uniqueItems": true, "items": {"type": "string", "enum": ["cross-refactoring", "cross-review", "behavior"]}},
+                                "diff": {"type": "string", "enum": ["pr", "none"]}}},
+        "sprint": {"type": "object", "additionalProperties": false, "required": ["checks", "diff"],
+                   "properties": {"checks": {"type": "array", "uniqueItems": true, "items": {"type": "string", "enum": ["cross-refactoring", "cross-review", "behavior"]}},
+                                  "diff": {"type": "string", "enum": ["unchecked", "none"]}}},
+        "release": {"type": "object", "additionalProperties": false, "required": ["checks", "diff"],
+                    "properties": {"checks": {"type": "array", "uniqueItems": true, "items": {"type": "string", "enum": ["cross-review"]}},
+                                   "diff": {"type": "string", "enum": ["pr", "resolution", "none"]}}},
+        "design": {"type": "object", "additionalProperties": false, "required": ["checks", "diff"],
+                   "properties": {"checks": {"type": "array", "uniqueItems": true, "items": {"type": "string", "enum": ["cross-review"]}},
+                                  "diff": {"type": "string", "enum": ["pr", "none"]}}},
+        "spec": {"type": "object", "additionalProperties": false, "required": ["checks", "diff"],
+                 "properties": {"checks": {"type": "array", "uniqueItems": true, "items": {"type": "string", "enum": ["cross-review"]}},
+                                "diff": {"type": "string", "enum": ["pr", "none"]}}}
+      }
     }
   }
 }
@@ -304,12 +338,14 @@ the queue」である。外れる理由は、チェックの失敗・チェッ�
 
 ### 検査の結果
 
-検査のスクリプトは `check.py`（jsonschema 4.26.0 の `Draft202012Validator`。ndf-next の依存と同じバージョン）で、上の 3 つのファイルを読む。
+検査のスクリプトは `check.py`（jsonschema 4.26.0 の `Draft202012Validator`。ndf-next の依存と同じバージョン）で、この文書のスキーマの案と 2 つの設定の例を読む。
 `web-trunk` の例は、Web サービスの例を `trunk` 戦略（`strict`・バージョンの保存先 `json` の `package.json`）へ書き換えたもので、スクリプトの中で作る。
 `web-trunk-serial` の例は、`web-trunk` のマージの方式を `serial` にしたもので、設計文書の「設定の例」の private の Free の 1 行と同じ値である。
 
+解析の回答の検査（`$defs.flow_answer`）は、ai-plugins の例から 4 項目（と `reviews`）を取り出した回答と、Web サービスの例の 4 項目で確かめた。
+
 ```text
-$ cd <作業ディレクトリ>/bs && /work/ai-plugins/.worktrees/design/issue-3572/plugins/ndf-next/.venv/bin/python -I check.py
+$ plugins/ndf-next/.venv/bin/python -I check.py issues/issue-3572-design-evidence.md
 ai-plugins: 通る
 web-develop: 通る
 壊した例 trunk でマージの方式が無い: 落ちる
@@ -331,6 +367,12 @@ release_branch の例: 通る
 節の無いファイル: 通る
 web-trunk-serial: 通る
 壊した例 serial と admin が真: 落ちる
+壊した例 表に無いキー: 落ちる
+回答 trunk の 4 項目: 通る
+回答 trunk の 4 項目と reviews: 通る
+回答 merge_base_branch の 4 項目: 通る
+壊した回答 trunk で start が base: 落ちる
+壊した回答 表に無いキー: 落ちる
 ```
 
 ### ai-plugins の今の設定ファイルの値

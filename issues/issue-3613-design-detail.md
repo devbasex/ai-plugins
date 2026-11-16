@@ -233,7 +233,7 @@ plugins/ndf-next/
 | `plugins/ndf-next/src/ndf/progress/store.py` | モジュール `store` | `ensure_schema`（変更）、`read_machine`・`create_machine`・`read_events`・`read_definition`・`run_lock` ほか（改名と引数の名前だけ） |
 | `plugins/ndf-next/src/ndf/progress/model.py` | モジュール `model` | `machine_id`（改名だけ） |
 | `plugins/ndf-next/src/ndf/progress/gate/checks.py` | モジュール `checks` | `mvv_decls`（引く列と値の名前だけ） |
-| `plugins/ndf-next/src/ndf/domains/settings/renames.py` | モジュール `renames` | `Rename`・`LegacyKey`（新設の型）、`load`・`legacy_keys`・`migrate`・`legacy_detail`（新設）、`_pointers`（新設の内部の関数） |
+| `plugins/ndf-next/src/ndf/domains/settings/renames.py` | モジュール `renames` | `Rename`・`LegacyKey`（新設の型）、`load`・`legacy_keys`・`migrate`・`legacy_detail`・`record_renames`（新設）、`_pointers`（新設の内部の関数） |
 | `plugins/ndf-next/src/ndf/domains/settings/cli.py` | モジュール `cli` | `main`・`plan`・`apply`（新設）、`_targets`・`_digest`（新設の内部の関数） |
 | `plugins/ndf-next/src/ndf/domains/relay/markers.py` | モジュール `markers` | `MarkerError`・`marker_path`（改名だけ）、`mark`・`take`（変えない） |
 | `plugins/ndf-next/src/ndf/domains/worktree/allocations.py` | クラス `Allocations` | `allocations_path`（改名だけ）、`Allocations` のメソッド（変えない） |
@@ -261,11 +261,12 @@ plugins/ndf-next/
 | `legacy_keys` | `plugins/ndf-next/src/ndf/domains/settings/renames.py` | 新設 | `legacy_keys(file: str, data: Mapping[str, Any]) -> list[LegacyKey]` | 設定の今の中身に実在する旧いキーを、配列の要素ごとの位置で返す。各行の `old` を中身にそのまま当て、親を改めた後の位置で書いた子の行は、親を移した後の中身でだけ当たる | `file` は表 `ndf-files` の ID。`data` は JSON のオブジェクト | 戻り値の `old` はどれも `data` の中に実在する位置（`/versions/0/vet`）で、表の並び・配列の添字の順に並ぶ。表に無い `file` なら空 | 無し（`load` を通して契約の表を読む） |
 | `migrate` | `plugins/ndf-next/src/ndf/domains/settings/renames.py` | 新設 | `migrate(file: str, data: Mapping[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]` | 旧いキーを新しいキーへ、旧い値を新しい値へ変えた中身と、JSON Patch の操作の列を返す | `legacy_keys` と同じ | 変換した中身に `legacy_keys` が 0 件。改名したキーは同じオブジェクトの中の元の並びの位置に置く。表に無いキーと、`values` に無い値は変わらない。操作の列はキーの改名が `move`、値の対応が `replace` で、当てる順に並ぶ。`move` と `replace` の直前には、元の位置の今の値を持つ `test` を置く。`data` は変えない（深いコピーを返す） | 無し |
 | `legacy_detail` | `plugins/ndf-next/src/ndf/domains/settings/renames.py` | 新設 | `legacy_detail(file: str, data: Mapping[str, Any], root: Path) -> Optional[str]` | 旧いキーが残れば、止まる理由の文（ファイル・旧いキーの位置 → 新しいキーの位置・実行するコマンド）を返す | `legacy_keys` と同じ。`root` は移行のコマンドへ渡すリポジトリの根 | 旧いキーが無ければ `None`。あれば文に旧いキーのすべての位置と `ndf settings migrate --root <root>` がある | 無し |
+| `record_renames` | `plugins/ndf-next/src/ndf/domains/settings/renames.py` | 新設 | `record_renames() -> dict[str, Rename]` | スプリントの開始時の記録に当てる行を、記録の旧いキーの名前ごとに返す | `load` と同じ | `worktree` の `/branch_flow/<名前>` の行のうち、新しいキーの位置の末尾の名前が `<名前>` と違う行だけ（いまは `promotion` → `release_strategy` の 1 行）。ファイルを移すだけで名前の変わらない行（`/branch_flow/start` など）を含まない | 無し（`load` を通して契約の表を読む） |
 | `plan` | `plugins/ndf-next/src/ndf/domains/settings/cli.py` | 新設 | `plan(root: Path) -> dict[str, Any]` | 改名表に当たる設定ファイルごとの差分と、差分のハッシュを結果 JSON にする | `root` はディレクトリ | 書き換えるものが無ければ `status: ok`。あれば `status: gate` で、`items` にファイルごとの差分、`metrics.digest` に差分のハッシュ、`next` に `--apply <差分のハッシュ>` を付けたコマンドがある。ファイルは 1 バイトも変わらない | `root` の下の `.ndf/` の設定ファイルを読む |
 | `apply` | `plugins/ndf-next/src/ndf/domains/settings/cli.py` | 新設 | `apply(root: Path, digest: str) -> dict[str, Any]` | 今の差分のハッシュが渡したハッシュと一致し、変換した中身が新しいスキーマに通るときだけ書く | `plan` と同じ。`digest` は `plan` が返した 64 桁の 16 進 | `status: ok` のとき、差分のあったファイルはどれも変換した中身で、新しいスキーマに通り、`legacy_keys` が 0 件。`stopped` のときはどのファイルも変わらない | `root` の下の `.ndf/` の設定ファイルを読み、差分のあるファイルを書き換える |
 | `main` | `plugins/ndf-next/src/ndf/domains/settings/cli.py` | 新設 | `main(argv: list[str]) -> int` | `ndf settings migrate --root <リポジトリ> [--apply <差分のハッシュ>]` を解き、結果 JSON を 1 行出して終了コードを返す | `argv` はサブコマンドの名前の後ろの引数 | 標準出力に結果 JSON が 1 行あり、終了コードは結果の `cause` の種類から `exit-codes.json` が決める値（`ok` と `gate` は 0） | 標準出力へ書く。`plan` か `apply` の副作用 |
 | `ndf_settings.load` | `plugins/ndf-next/src/ndf/domains/worktree/ndf_settings.py` | 変更 | `load(main_dir: Path) -> Optional[NdfSettings]`（型の名前だけ変わる） | メインディレクトリの worktree の設定を読み、旧いキーが残れば止まる | `main_dir` はメインディレクトリ | 共有設定が無ければ `None`。戻り値の設定に旧いキーは無い | 共有設定と個人設定を読む |
-| `read_flow_record` | `plugins/ndf-next/src/ndf/domains/worktree/merged.py` | 変更 | `read_flow_record(path: Optional[Path]) -> Optional[dict[str, Any]]`（変えない） | スプリントの開始時の記録を読み、`branch_flow` の旧いキーが残れば止まる | 無し | `path` が `None` なら `None`。戻り値に旧いキーは無い | `path` のファイルを読む |
+| `read_flow_record` | `plugins/ndf-next/src/ndf/domains/worktree/merged.py` | 変更 | `read_flow_record(path: Optional[Path]) -> Optional[dict[str, Any]]`（変えない） | スプリントの開始時の記録を読み、名前を改めた旧いキーが残れば止まる | 無し | `path` が `None` なら `None`。戻り値に `record_renames()` のキーは無い。#3572 の `BranchStrategy.as_record()` が書いた記録（`release_strategy`・`start`・`doc_prs`・`integrate`・`reviews`・2 つのブランチの名前）はそのまま返す | `path` のファイルを読む |
 | `decl_at` | `plugins/ndf-next/src/ndf/domains/records/mvv.py` | 変更 | `decl_at(root: Path, ref: str) -> dict[str, Any]`（変えない） | 参照にある MVV の設定を読み、旧いキーが残れば止まる | `root` は git のリポジトリ | 戻り値に旧いキーは無い | `git show` を実行する |
 | `worktree_version` | `plugins/ndf-next/src/ndf/domains/records/mvv.py` | 変更 | `worktree_version(root: Path) -> Optional[int]`（変えない） | worktree の MVV の設定の現行の版を返し、旧いキーが残れば止まる | 無し | 旧いキーの残る設定から版を返さない | MVV の設定のファイルを読む |
 | `mvv_checked` | `plugins/ndf-next/src/ndf/domains/records/preflight.py` | 変更 | `mvv_checked(root: Path) -> pd.Checked`（変えない） | MVV の状態を確かめ、旧いキーの残る設定・本文の不一致・読めない設定で止まる | 無し | 旧いキーが残れば `precondition` の `stopped` で、理由の文は `legacy_detail` の文 | MVV の設定と本文のファイルを読む |
@@ -282,6 +283,7 @@ plugins/ndf-next/
 | `ensure_schema` | SQLite で版を上げる前のバックアップが取れない | 保存先が書き込めない・容量が無い | `_backup_or_warn`（今と同じ） | 警告を残して続ける（今と同じ） | 結果 JSON の警告に理由が載る。終了コードは変わらない | 今と同じ |
 | `renames.load` | 改名表が無い・形が違う | 契約の表の編集の誤り | `facts.rows` の表の形の検査（`FactsError`） | 呼び出し元へ返す。契約の表の誤りは CI の `ndf check`（facts の規則）と単体テスト（I9）が先に落とす | 呼び手のサブコマンドが `stopped`（種類 `unknown`。`ndf.cli` が捕まえない例外を変える今の扱い）、終了コードは `exit-codes.json` の `unknown` の行 | 後始末は無い。表を直して再実行できる |
 | `legacy_keys` | 改名表の `old` が `*` の位置で配列でない値に当たる | 利用者の設定の `versions` が配列でない | `_pointers` が `*` を広げるとき | 当たらない位置として飛ばす（旧いキーに数えない）。形の誤りは読む側とスキーマが今と同じく扱う | 無し（旧いキーが無いとして返す） | 後始末は無い |
+| `record_renames` | 改名表が無い・形が違う | 契約の表の編集の誤り | `renames.load` の中（`FactsError`） | 呼び出し元へ返す（`renames.load` の行と同じ） | `ndf worktree merged` が `stopped`（種類 `unknown`）。終了コードは `exit-codes.json` の `unknown` の行 | 後始末は無い。クリーンアップを始める前に止まる。表を直して再実行できる |
 | `plan` | 設定が JSON として読めない・オブジェクトでない | 利用者の設定の破損 | `_targets` の `jsonfile.read_object`（`JsonFileError`） | 止める。ほかのファイルの差分も出さない（一部だけの差分に承認を求めない） | `stopped`（種類 `invalid`、行き先は conductor）。本文にファイルのパスと誤りの位置（`JSONDecodeError` の行と列）。終了コード 2 | 何も書いていない。設定を直して再実行できる |
 | `plan` | 設定ファイルが読めない（権限・入出力の誤り） | 利用者の環境 | `_targets` の `read_text`（`OSError`） | 止める | `stopped`（種類 `invalid`）。本文にパスと理由。終了コード 2 | 何も書いていない。再実行できる |
 | `apply` | 渡したハッシュが今の差分のハッシュと一致しない | 差分を示した後に設定が変わった・別のリポジトリのハッシュを渡した・書き換えるものが無い | `apply` の中で `_digest` を作り直して比べるとき | 止める。1 バイトも書かない | `stopped`（種類 `refused`、行き先は人）。本文に「示した差分と今の差分が違う。`ndf settings migrate --root <root>` で差分を示し直し、承認を取り直す」。終了コード 1 | 何も書いていない。示し直して承認を取り直せば再実行できる |
@@ -292,7 +294,7 @@ plugins/ndf-next/
 | `main` | `plan`・`apply` の失敗 | 上の各行 | `plan`・`apply` | 結果 JSON をそのまま出す | 上の各行と同じ | 上の各行と同じ |
 | `ndf_settings.load` | 旧いキーが残る | 移行のコマンドを実行していない | `load` の中で、共有設定を読んだ直後に `legacy_detail("worktree", data, main_dir)` が文を返す | 止める（`NdfSettingsError` を送出する）。既定の行へ倒さない | 呼び手の `worktree` のサブコマンドが `stopped`（種類 `precondition`、行き先は人）。本文は `legacy_detail` の文。終了コード 3 | 何も書いていない。移行のコマンドを実行すれば再実行できる |
 | `ndf_settings.load` | 共有設定が読めない・版が違う | 今と同じ | 今と同じ | 今と同じ（`NdfSettingsError`） | 今と同じ（`precondition`、終了コード 3） | 今と同じ |
-| `read_flow_record` | 記録の `branch_flow` のコピーに旧いキーが残る | 改名の前の ndf-next が書いた開始時の記録を渡した | `legacy_detail("worktree", {"branch_flow": 記録}, path.parent)` が文を返す | 止める（`NdfSettingsError`）。旧いキーを読まずに既定の行（スプリントブランチを残さない行）へ倒すと、残すはずのブランチを消すため | `ndf worktree merged` が `stopped`（種類 `precondition`）。本文は `legacy_detail` の文。終了コード 3 | クリーンアップを始める前に止まり、何も消していない。記録のキーを書き換えれば再実行できる |
+| `read_flow_record` | 記録に名前を改めた旧いキー（`promotion`）が残る | 改名の前の ndf-next が書いた開始時の記録を渡した | 記録の最上位のキーが `record_renames()` のキーに当たる | 止める（`NdfSettingsError`）。旧いキーを読まずに既定の行（スプリントブランチを残さない行）へ倒すと、残すはずのブランチを消すため | `ndf worktree merged` が `stopped`（種類 `precondition`）。本文は「開始時の記録 <path> に旧いキーが残る: <旧いキー> → <新しいキー>。記録のキーと値を改名表のとおりに書き換えてから再実行する」。設定ファイルでないため、移行のコマンドを案内しない。終了コード 3 | クリーンアップを始める前に止まり、何も消していない。記録のキーを書き換えれば再実行できる |
 | `decl_at` | 旧いキーが残る | 参照のブランチの MVV の設定を移行していない | `legacy_detail("mvv", raw, root)` が文を返す | 止める（`MvvError` を送出する） | `ndf records mvv signals` が `stopped`（種類 `precondition`）。本文は `legacy_detail` の文。終了コード 3 | 何も書いていない。移行してマージすれば再実行できる |
 | `decl_at` | 参照の設定が読めない | 今と同じ | 今と同じ | 今と同じ（`MvvError`） | 今と同じ（`precondition`） | 今と同じ |
 | `worktree_version` | 旧いキーが残る | worktree の MVV の設定を移行していない | `legacy_detail("mvv", raw, root)` が文を返す | 止める（`MvvError`） | `ndf records mvv answer` が `stopped`（種類 `precondition`）。本文は `legacy_detail` の文。終了コード 3 | 改訂の兆候の記録を書く前に止まり、何も書いていない。移行すれば再実行できる |
@@ -305,6 +307,7 @@ plugins/ndf-next/
 **SQLite の保存先では、版 1 の表は `ensure_schema` まで届かない。** チェックアウトの保存先の形の番号を 2 に上げたため、`durable` が版 1 の保存先を `<名前>.v1-<日付>` へ退避し、空の保存先で表を作り直す（今の `_retire_store` の経路）。`ensure_schema` が版 1 を見るのは PostgreSQL の接続先だけである。
 
 **旧いキーで止まる読む側は、設計文書の構成要素の表の「設定を読む側」より 1 つ多い。** スプリントの開始時の記録（`read_flow_record`）は `branch_flow` のコピーを持ち、`merged_decide.sprint_keep` がリリース方式を引く。コピーの旧いキーを読まないと、キーが無いとして既定の行（`keeps_sprint` が偽）を使い、選んで集めるリリース方式で残すべきスプリントブランチを消す。設計文書の I6 の「旧いキーが残る設定を読むと止まる」をこの記録にも当てる。
+記録に当てるのは、キーの名前を改める行だけである。記録は設定ファイルの `branch_flow` のコピーではなく、#3572 の `BranchStrategy.as_record()` の値（移した後の名前のまま）を持つ。そのため、ファイルを移すだけの行（`/branch_flow/start` など）を `{"branch_flow": 記録}` に当てると、新しく作った記録でも止まる。当てる行は改名表から `record_renames` が選び、記録のキーの名前を別に書かない。
 
 ## 処理の手順
 
@@ -394,7 +397,8 @@ plugins/ndf-next/
 | `plan` | ファイルごとの ID・相対パス・JSON Patch の操作の列・旧いキーの位置の数・インデントがそろうか | 結果 JSON の `items`（`kind: settings-file`）。差分のハッシュは `metrics.digest`、承認の後に実行するコマンドは `next` | 設定の中身の全文（差分の操作の列だけを出す。MVV の本文のハッシュなど、改名と関わらない値を出さない） |
 | `apply` | 書いたファイルの ID・相対パス・当てた操作の数 | 結果 JSON の `items` | 設定の中身の全文 |
 | `apply` | ハッシュの不一致・スキーマの誤り | 結果 JSON の `stopped` の本文。スキーマの誤りは位置と文 | 渡されたハッシュの値の全文（先頭 12 桁だけを出し、示し直しを促す） |
-| `ndf_settings.load`・`read_flow_record`・`decl_at`・`worktree_version`・`mvv_checked` | `legacy_detail` の文 | 呼び手のサブコマンドの結果 JSON の `stopped` の本文 | 設定の中身（キーの位置だけを出す） |
+| `ndf_settings.load`・`decl_at`・`worktree_version`・`mvv_checked` | `legacy_detail` の文 | 呼び手のサブコマンドの結果 JSON の `stopped` の本文 | 設定の中身（キーの位置だけを出す） |
+| `read_flow_record` | 開始時の記録の旧いキーと新しいキーの名前 | `ndf worktree merged` の結果 JSON の `stopped` の本文 | 記録の値（キーの名前だけを出す） |
 | `_real_errors` | 変換した後のスキーマの誤り | `ndf check` の spec-decl の指摘 | 旧いキーが残ること（spec-decl の指摘にしない。設計文書の決定 13） |
 
 ## 既存の部品の再利用
@@ -410,6 +414,7 @@ plugins/ndf-next/
 | `migrate` | ndf-next の `worktree/ndf_settings.py` の `_merge`（深い併合） | `grep -n "def _merge" -A10 plugins/ndf-next/src/ndf/domains/worktree/declaration.py` | 使えない。2 つの値を重ねる関数で、キーの名前を変えない |
 | `legacy_detail` | ndf-next の `ndf.domains.records.files.relpath` | `cat plugins/ndf-next/src/ndf/domains/records/files.py` | 使う。設定ファイルの相対パスを表 `ndf-files` と保存先の表から引く。パスを写さない |
 | `legacy_detail` | ndf-next の `ndf.contracts.result.command`（そのまま実行できるコマンドの組み立て） | `grep -n "def command" plugins/ndf-next/src/ndf/contracts/result.py` | 文の中のコマンドには使わない（文字の文で返すため）。`plan` の `next` の組み立てに使う |
+| `record_renames` | 同じモジュールの `renames.load` | 上の `renames.load` の行 | 使う。行を選ぶだけで、改名表を別に読まない |
 | `plan` | ndf-next の `ndf.contracts.schema_errors`（スキーマの誤りの一覧） | `grep -n "^def " plugins/ndf-next/src/ndf/contracts/__init__.py` | 使わない。`plan` は差分を示すだけで、スキーマの確かめは書く前の `apply` が行う |
 | `apply` | ndf-next の `ndf.contracts.schema_errors`（スキーマの誤りの一覧） | `grep -n "^def " plugins/ndf-next/src/ndf/contracts/__init__.py` | 使う。新しいスキーマ（`schemas/ndf-settings/<ID>.schema.json`）への確かめに使い、jsonschema を直接組まない |
 | `plan` | ndf-next の `ndf.domains.records.jsonfile.read_object` | `grep -n "^def " plugins/ndf-next/src/ndf/domains/records/jsonfile.py` | 使う。JSON のオブジェクトとして読めないときの誤りの形を今の読む側とそろえる |
@@ -440,7 +445,8 @@ plugins/ndf-next/
 | `apply` | `plan` が返したハッシュで実行すると 2 つのファイルが受け入れ条件 12 の値になり、新しいスキーマに通る。もう一度 `plan` を実行すると差分が 0 件（I10） | 書いたファイルがインデント 2・末尾の改行 1 つ。差分の無いファイルは書かない（更新時刻が変わらない） | `plan` の後に設定を変えてから実行すると `refused`（終了コード 1）で、どのファイルも変わらない。変える値が移すだけの値（`vet` の `at`）でも同じ。差分が 0 件のときに実行すると `refused`。改名と関わらない誤り（型の違う値）を持つ設定で `refused` になり、どのファイルも変わらない。2 つ目のファイルの書き込みを失敗させると `invalid` で、書き終えたファイルの一覧が本文にある |
 | `main` | `migrate --root <dir>` で結果 JSON を 1 行出し終了コード 0 | `--apply` の値が大文字の 16 進でも小文字にそろえない（`invalid`） | `migrate` の無い引数・`--root` の無い引数・63 桁の `--apply` で `invalid`（終了コード 2） |
 | `ndf_settings.load` | 新しいキーの設定を読み、`branch_flow.release_strategy` が `release_branch` の設定でブランチ戦略の一覧の `release-branch` の行に当たる | `branch_flow` の無い設定は既定の行（今と同じ） | 旧いキーの残る共有設定で `NdfSettingsError` を送出し、文に旧いキーと新しいキーの位置と移行のコマンドがある。`ndf worktree` のサブコマンドが `precondition`（終了コード 3）で止まる（受け入れ条件 13） |
-| `read_flow_record` | 新しいキーの記録を読む | `path` が `None` で `None` | 旧いキーの残る記録で `NdfSettingsError`。`ndf worktree merged` がブランチを 1 つも消さずに `precondition` で止まる |
+| `record_renames` | 改名表から `promotion` の 1 件を返す | — | `/branch_flow/start`・`/branch_flow/reviews` など名前の変わらない行を含まない |
+| `read_flow_record` | `BranchStrategy.as_record()` の値（`start`・`doc_prs`・`integrate`・`reviews`・`release_strategy` を持つ）の記録をそのまま返す | `path` が `None` で `None` | `promotion` の残る記録で `NdfSettingsError`。`ndf worktree merged` がブランチを 1 つも消さずに `precondition` で止まる |
 | `decl_at` | 新しいキーの参照の設定を読む | — | 旧いキーの残る参照の設定で `MvvError`、`ndf records mvv signals` が `precondition` で止まる |
 | `worktree_version` | 新しいキーの設定の現行の版を返す | — | 旧いキーの残る設定で `MvvError`、`ndf records mvv answer` が記録を書かずに `precondition` で止まる |
 | `mvv_checked` | 承認済みの新しいキーの設定で `ok` | 設定が無いと `absent` で `ok`（今と同じ） | 旧いキーの残る設定で、本文が承認の記録と一致していても `precondition` で止まる |

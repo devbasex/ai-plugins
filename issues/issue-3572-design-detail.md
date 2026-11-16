@@ -88,7 +88,7 @@ git grep -l 'from ndf.domains' origin/sprint/lrel-lock -- plugins/ndf-next/src/n
 | パス | 種類 | 役割 1 文 | 依存する先 |
 | --- | --- | --- | --- |
 | `plugins/ndf-next/src/ndf/core/branch_strategy.py` | 新設 | `.ndf/branch-strategy.json` をメインディレクトリから読み、セクションのスキーマで確かめ、既定を埋めた値を返す。セクションを読むどの領域もこれだけを通す | `ndf.contracts`・`ndf.contracts.facts`・`ndf.adapters.git` |
-| `plugins/ndf-next/contracts/schemas/ndf-settings/branch-strategy.schema.json` | 新設 | セクションのキーと組み合わせの検査（戦略が許す値・`trunk` 戦略で必須のキー・読まれない値）を持つ。中身は確かめ 8 の案（決定 28）。`production_merge.method` の列挙は `merge-queue`・`strict`・`serial` | 無し |
+| `plugins/ndf-next/contracts/schemas/ndf-settings/branch-strategy.schema.json` | 新設 | セクションのキーと組み合わせの検査（戦略が許す値・`trunk` 戦略で必須のキー・読まれない値）を持つ。中身は確かめ 8 の案（決定 28）。解析の回答に当たる部分を `$defs.flow`、回答の検査を `$defs.flow_answer` に分け、`$defs.section` は `flow` を参照する。`production_merge.method` の列挙は `merge-queue`・`strict`・`serial` | 無し |
 | `plugins/ndf-next/contracts/domains/ndf-files.json` | 変更 | 行 `branch-strategy`（`path: branch-strategy.json`・`keys`・`main_keys` が `["branch_strategy"]`）を足し、`worktree`・`project`・`release` の行の `keys`・`main_keys` から移したキーを外す | 無し |
 | `plugins/ndf-next/contracts/domains/branch-flows.json` | 変更 | 列 `start`・`doc_prs`・`integrate`・`review_kinds` を外し、`summary` の保存先の記述をセクションへ直す（決定 24 の 13 の行） | 無し |
 | `plugins/ndf-next/contracts/schemas/ndf-settings/worktree.schema.json` | 変更 | `base_branch`・`production_branch`・`branch_flow` を外す | 無し |
@@ -122,7 +122,7 @@ git grep -l 'from ndf.domains' origin/sprint/lrel-lock -- plugins/ndf-next/src/n
 | `plugins/ndf-next/skills/worktree/references/ndf-settings.md` | 変更 | `.ndf/worktree.json` の説明から移したキーを外し、セクションのファイルへの案内を置く | 無し |
 | `plugins/ndf-next/skills/worktree/schemas/worktree.schema.json` | 変更 | 移したキーを外す（契約のスキーマとは別のファイル。2 つの `diff` は一致しない） | 無し |
 | `plugins/ndf-next/skills/development-workflow/schemas/project.schema.json` | 変更 | `production_merge` と検証環境の行を外す（同上） | 無し |
-| `plugins/ndf-next/skills/development-workflow/references/production-merge.md` | 変更 | マージの方式と迂回の設定の保存先をセクションのキーへ直す。プランと公開範囲から方式を選ぶ表と、`serial` を使うリポジトリが必須のチェックを出す workflow の `push` の `branches` に `ndf-serial/**` を足す手順を書く（決定 32・33） | 無し |
+| `plugins/ndf-next/skills/development-workflow/references/production-merge.md` | 変更 | マージの方式と迂回の設定の保存先をセクションのキーへ直す。プランと公開範囲から方式を選ぶ表と、`serial` を使うリポジトリが必須のチェックを出す workflow の `push` の `branches` に `ndf-serial/**` を足し、`concurrency` の `group` を `${{ startsWith(github.ref, 'refs/heads/ndf-serial/') && github.ref || github.run_id }}`・`cancel-in-progress: true` にする手順を書く（一時ブランチを作った時点の M の run を、マージコミットの push が取り消す。決定 32・33） | 無し |
 | `plugins/ndf-next/skills/development-workflow/references/project-analysis.md` | 変更 | 解析が書くファイルにセクションのファイルを足し、`.ndf/worktree.json` のブランチの項目を外す | 無し |
 | `plugins/ndf-next/skills/development-workflow/references/parallel.md` | 変更 | ブランチ戦略の設定の保存先をセクションへ直す | 無し |
 | `plugins/ndf-next/skills/development-workflow/references/parallel-work.md` | 変更 | 同上 | 無し |
@@ -239,7 +239,7 @@ git grep -l -E 'branch_flow|"production_branch"|production_branch=|"base_branch"
 | `_flow_branches` | `domains/project/cli.py` | 変更 | `_flow_branches(tree: measure_repo.Tree, section: Optional[dict[str, Any]]) -> tuple[Optional[str], Optional[str]]` | ブランチ運用を測るベースブランチと本番ブランチをセクションから決める | 無し | 84e6c33b4 と同じ規則（無ければ既定ブランチ）で、読む先がセクション | 無し |
 | `default_flow` | `domains/project/measure_flow.py` | 変更 | `default_flow() -> dict[str, Any]` | 書いていないセクションが使う 4 項目を返す | 無し | `branch_strategy.defaults()` の値。ブランチ戦略の一覧の列を読まない | 契約のスキーマの読み込み |
 | `review_allowed` | `domains/project/measure_flow.py` | 変更 | `review_allowed(kind: str) -> tuple[list[str], list[str]]` | 種類が許す `checks` と `diff` を返す | `kind` は PR の種類 | セクションのスキーマの `$defs.reviews` の列挙 | 契約のスキーマの読み込み |
-| `answer_problem` | `domains/project/measure_flow.py` | 変更 | `answer_problem(value: Any) -> Optional[str]` | ブランチ運用の回答がセクションのスキーマに合わなければ理由を返す | 無し | `branch_strategy.problems({"version": 1, "branch_strategy": value})` の先頭 3 行。戦略が許す値と書ける PR の種類の破れもここに出る | 契約のスキーマの読み込み |
+| `answer_problem` | `domains/project/measure_flow.py` | 変更 | `answer_problem(value: Any) -> Optional[str]` | ブランチ運用の回答が、セクションのスキーマのうち回答に当たる部分に合わなければ理由を返す | `value` は解析の 4 項目（`release_strategy`・`start`・`integrate`・`doc_prs`）と `reviews` だけを持つ回答（`as_item` の測った値と `write.flow_problem` が渡す答え） | `contracts.schema_errors(value, f"{branch_strategy.SCHEMA}#/$defs/flow_answer")` の先頭 3 行。戦略が許す値と書ける PR の種類の破れもここに出る。`trunk` の回答に `production_merge`・`release` が無くても止めない（その 2 つは解析の回答に含まれず、セクション全体の検査 `branch_strategy.problems` が見る） | 契約のスキーマの読み込み |
 | `_start_from_table` | `domains/project/measure_flow.py` | 変更 | `_start_from_table(starts: dict[str, Any], strategy: dict[str, Any]) -> dict[str, Any]` | 動いているスプリントブランチが少なければ、戦略が許す分岐元を出す | 無し | 許す分岐元は `branch_strategy.allowed(<行>, "start")`。証跡のコマンドはセクションのスキーマを指す | 契約のスキーマの読み込み |
 | `declared_flow` | `domains/project/measure_flow.py` | 変更 | `declared_flow(section: Optional[dict[str, Any]]) -> tuple[dict[str, Any], dict[str, Any], bool]` | セクションを既定で埋めた 4 項目・書いたレビューの行・書いたかを返す | 無し | 4 項目のキーは `release_strategy`・`start`・`integrate`・`doc_prs`。セクションが合わなければ `ValueError` | 契約のスキーマの読み込み |
 | `drift` | `domains/project/measure_flow.py` | 変更 | `drift(section: Optional[dict[str, Any]], item: Optional[dict[str, Any]]) -> list[dict[str, Any]]` | セクションと測った値のずれを返す | 無し | 84e6c33b4 の判定のまま。比べる宣言の値がセクション | 契約のスキーマの読み込み |
@@ -259,11 +259,11 @@ git grep -l -E 'branch_flow|"production_branch"|production_branch=|"base_branch"
 | `release_message` | `domains/release/serial.py` | 新設 | `release_message(owner: int) -> str` | ロックを返すコミットのメッセージを作る | 無し | 1 行目 `ndf-lock: 返した` と行 `持ち主: #<owner>` | 無し |
 | `parse_lock` | `domains/release/serial.py` | 新設 | `parse_lock(message: str) -> LockState \| None` | ロックのコミットのメッセージを読む | 無し | 1 行目が `ndf-lock: 持ち主` か `ndf-lock: 返した` で、要る行がそろえば `LockState`。ほかは None | 無し |
 | `is_free` | `domains/release/serial.py` | 新設 | `is_free(state: LockState \| None, now: datetime) -> bool` | ロックを取ってよいかを返す | 無し | ブランチが無い（呼び手が None を渡さない）・`返した`・期限が `now` 以前なら真。`parse_lock` が None のコミットは偽（NDF の形でないコミットを上書きしない） | 無し |
-| `acquire` | `domains/release/serial.py` | 新設 | `acquire(hub: GitHub, production: str, owner: int, approved: str, expires: datetime, now: datetime) -> LockHold \| None` | ロックを 1 回だけ取りにいく | 無し | 取れたら `LockHold`。ほかの持ち主が期限の内か、fast-forward でなく断られたら None | GitHub: `ref_head`・`git_commit`・`create_commit`・`create_ref` か `update_ref`（`force: false`）。ブランチが無いとき、最初のロックのコミットは本番ブランチの HEAD のツリーで親を持たない |
+| `acquire` | `domains/release/serial.py` | 新設 | `acquire(hub: GitHub, production: str, owner: int, approved: str, expires: datetime, now: datetime) -> LockHold \| None` | ロックを 1 回だけ取りにいく | 無し | 取れたら `LockHold`。ほかの持ち主が期限の内か、fast-forward でなく断られたら None | GitHub: `ref_head`・`git_commit`・`create_commit`・`create_ref` か `update_ref`（`force: false`）。ロックのコミットのツリーは `EMPTY_TREE`（`.github/workflows/` を持たないため、ロックのブランチへの push で workflow が起動しない。決定 32）。ブランチが無いとき、最初のロックのコミットは親を持たない |
 | `wait_lock` | `domains/release/serial.py` | 新設 | `wait_lock(hub: GitHub, production: str, owner: int, approved: str, budget: float, clock: Callable[[], float], now: Callable[[], datetime], sleep: Callable[[float], None]) -> LockHold` | ロックが取れるまで `LOCK_POLL_SECONDS` ごとに `acquire` を繰り返す | `budget` は 0 より大きい | 期限は取った時刻 + `budget` | `acquire` と同じ・待ち |
-| `extend` | `domains/release/serial.py` | 新設 | `extend(hub: GitHub, hold: LockHold, expires: datetime, now: datetime) -> LockHold` | 作り直しの前にロックの期限を延ばす | `hold` は自分のロック | 期限を `expires` にしたコミットを足した `LockHold` | GitHub: `git_commit`・`create_commit`・`update_ref`（`force: false`） |
+| `extend` | `domains/release/serial.py` | 新設 | `extend(hub: GitHub, hold: LockHold, expires: datetime, now: datetime) -> LockHold` | 作り直しの前にロックの期限を延ばす | `hold` は自分のロック | 期限を `expires` にしたコミット（ツリーは `EMPTY_TREE`）を足した `LockHold` | GitHub: `git_commit`・`create_commit`・`update_ref`（`force: false`） |
 | `still_mine` | `domains/release/serial.py` | 新設 | `still_mine(hub: GitHub, hold: LockHold, now: datetime) -> bool` | マージの直前にロックがまだ自分のもので期限の内かを返す | 無し | ロックのブランチの HEAD が `hold.commit` で、`hold.expires` が `now` より後なら真 | GitHub: `ref_head` |
-| `release` | `domains/release/serial.py` | 新設 | `release(hub: GitHub, hold: LockHold) -> str \| None` | ロックを返す | 無し | HEAD が `hold.commit` なら `返した` のコミットを足して None。ほかの持ち主へ移っていれば足さずに None。返せなければ理由の文字列 | GitHub: `ref_head`・`git_commit`・`create_commit`・`update_ref`（`force: false`） |
+| `release` | `domains/release/serial.py` | 新設 | `release(hub: GitHub, hold: LockHold) -> str \| None` | ロックを返す | 無し | HEAD が `hold.commit` なら `返した` のコミット（ツリーは `EMPTY_TREE`）を足して None。ほかの持ち主へ移っていれば足さずに None。返せなければ理由の文字列 | GitHub: `ref_head`・`git_commit`・`create_commit`・`update_ref`（`force: false`） |
 | `sweep` | `domains/release/serial.py` | 新設 | `sweep(hub: GitHub, production: str) -> list[str]` | ロックを取った直後に、前の持ち主が残した一時ブランチを消す | ロックを持っている | 消したブランチの名前の一覧。`ndf-serial/<production>/` の下だけを消す | GitHub: `matching_refs`・`delete_ref` |
 | `build` | `domains/release/serial.py` | 新設 | `build(hub: GitHub, production: str, number: int, attempt: int, approved: str) -> Built` | 本番ブランチの HEAD（M）から一時ブランチを作り、承認済みのコミット（A）をマージする | ロックを持っている | `Built(base=M, ref=<一時ブランチ>, sha=<マージコミット>)`。A が既に M に含まれていれば `sha` は M | GitHub: `ref_head`・`create_ref`・`merge_branches` |
 | `observed_names` | `domains/release/serial.py` | 新設 | `observed_names(hub: GitHub, sha: str) -> tuple[str, ...]` | PR の head で走ったチェック（check run と commit status）の名前を返す（決定 32 の 1） | 無し | 名前の重なりを除いた並び。走っていなければ空 | GitHub: `check_runs`・`statuses`（`RequiredChecks.runs` を通す） |
@@ -287,7 +287,7 @@ git grep -l -E 'branch_flow|"production_branch"|production_branch=|"base_branch"
 | `update_ref` | `adapters/github.py` | 新設 | `update_ref(self, branch: str, sha: str) -> bool` | ブランチを fast-forward で進める | 無し | `force: false` だけを送る。200 なら真、422（fast-forward でない）なら偽 | 同上 |
 | `delete_ref` | `adapters/github.py` | 新設 | `delete_ref(self, branch: str) -> None` | 一時ブランチを消す | `branch` は `ndf-serial/` で始まる（ほかは `ValueError`。ロックのブランチと本番ブランチを消さない） | 204 か 404・422（無い）で返る | 同上 |
 | `git_commit` | `adapters/github.py` | 新設 | `git_commit(self, sha: str) -> GitCommit` | コミットのメッセージ・ツリー・親を読む | 無し | `GitCommit(message, tree, parents)`。`commit_parents` はこれを呼ぶ形にする | 同上 |
-| `create_commit` | `adapters/github.py` | 新設 | `create_commit(self, message: str, tree: str, parents: Sequence[str]) -> str` | ロックのコミットを作る（ref は動かさない） | 無し | 作ったコミットの SHA | 同上 |
+| `create_commit` | `adapters/github.py` | 新設 | `create_commit(self, message: str, tree: str, parents: Sequence[str]) -> str` | ロックのコミットを作る（ref は動かさない） | 無し | 作ったコミットの SHA。`serial` は `tree` に `EMPTY_TREE` だけを渡す | 同上 |
 | `merge_branches` | `adapters/github.py` | 新設 | `merge_branches(self, base: str, head: str, message: str) -> BranchMerge` | 一時ブランチへ承認済みのコミットをマージする（`POST /merges`。STD16） | `base` は `ndf-serial/` で始まる | 201 は `BranchMerge(sha=<SHA>, conflict=False)`、204 は `sha=None`（マージするものが無い）、409 は `conflict=True` | 同上 |
 | `_merge_result` | `domains/release/cli.py` | 変更 | `_merge_result(args: argparse.Namespace, done: land.Landed, version: str \| None = None) -> dict` | `serial` の止まり方を結果 JSON にする | 無し | `items` に `lock`・`conflict`・`serial` の行を足す。`untested_merge` はマージ済みでも次の手 `rerun` だけを出す（`_moves` の `released=True`）。`combination_failed` は `reject` だけ（`REJECT_ONLY`） | 無し |
 
@@ -393,6 +393,7 @@ git grep -l -E 'branch_flow|"production_branch"|production_branch=|"base_branch"
 | `RepoFacts` | 型（`private: bool`・`organization: bool`・`rules: str`（`read`・`plan`・`unknown`）） | `domains/release/merge_method.py` | — |
 | `Method.usable` | 欄（`tuple[str, ...] \| None`） | 同上 | None は行を決めなかった |
 | `LOCK_PREFIX`・`TEMP_PREFIX` | 定数 | `domains/release/serial.py` | `"ndf-lock/"`・`"ndf-serial/"` |
+| `EMPTY_TREE` | 定数 | 同上 | `"4b825dc642cb6eb9a060e54bf8d69288fbee4904"`（空のツリー。`git hash-object -t tree /dev/null` の値。ロックのコミットのツリー。決定 32） |
 | `REBUILD_LIMIT` | 定数 | 同上 | `3`（決定 32。最初に `serial` を使ったリポジトリの記録で見直す） |
 | `LOCK_POLL_SECONDS` | 定数 | 同上 | `30.0`（`land.QUEUE_POLL_SECONDS` と同じ間隔） |
 | `LockState` | 型（`owner: int`・`approved: str \| None`・`expires: datetime \| None`・`released: bool`） | 同上 | — |
@@ -484,7 +485,7 @@ git grep -l -E 'branch_flow|"production_branch"|production_branch=|"base_branch"
 | `_flow_branches` | セクションの 2 つの名前 | 片方が無ければ既定ブランチ | — |
 | `default_flow` | スキーマの既定 | — | — |
 | `review_allowed` | `impl` の `checks` と `diff` | — | — |
-| `answer_problem` | 合う回答で None | — | `trunk` で `start: base` の回答に理由 |
+| `answer_problem` | 合う回答で None。`trunk` の 4 項目だけ（`production_merge`・`release` の無い）回答で None | — | `trunk` で `start: base` の回答に理由。4 項目と `reviews` の外のキーを持つ回答に理由 |
 | `_start_from_table` | `trunk` で分岐元が `production` | 分岐元が測れていれば変えない | — |
 | `declared_flow` | セクションを既定で埋める | 書いていなければ「書いていない」 | 合わないセクションで `ValueError` |
 | `drift` | ずれの行 | ずれが無ければ空 | — |
@@ -494,7 +495,7 @@ git grep -l -E 'branch_flow|"production_branch"|production_branch=|"base_branch"
 | `lock_ref`・`temp_ref` | `ndf-lock/main`・`ndf-serial/main/12-1` | — | — |
 | `lock_message`・`parse_lock` | 作ったメッセージを読み戻すと同じ持ち主・コミット・期限 | `返した` を読む | NDF の形でないメッセージで None |
 | `is_free` | `返した` で真 | 期限ちょうどで真 | 期限の内で偽。None で偽 |
-| `acquire` | ブランチが無いとき作って取る。`返した` の上に足して取る | 期限切れの上に足して取る | 期限の内のロックで None。`update_ref` が偽で None。`force: true` を送らない |
+| `acquire` | ブランチが無いとき作って取る。`返した` の上に足して取る。作ったコミットの `tree` が `EMPTY_TREE` | 期限切れの上に足して取る | 期限の内のロックで None。`update_ref` が偽で None。`force: true` を送らない |
 | `wait_lock` | 2 回目の読みで取れる | — | `budget` を過ぎて `SerialStop`（`ci_pending`・`lock` の項目） |
 | `extend`・`still_mine`・`release` | 自分のロックを延ばす・返す | 期限ちょうどで `still_mine` が偽 | ほかの持ち主へ移っていれば `extend` は `SerialStop`、`release` は足さない |
 | `sweep` | `ndf-serial/main/` の下を消す | 残っていなければ空 | `ndf-lock/` と本番ブランチを消さない |
