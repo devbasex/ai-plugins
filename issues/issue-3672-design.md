@@ -85,7 +85,7 @@ GitHub との間は**腐敗防止層**で、ruleset と merge queue の語はリ
 | # | 集約 | 条件 | 破れたときの扱い |
 | --- | --- | --- | --- |
 | I1 | 宣言 | 節は `.ndf/project.json` の 1 か所にだけあり、旧い 4 か所に旧いキーが無い | I4 |
-| I2 | 宣言 | 作る・更新する・移す実行は、組み合わせの規則（「データ構造」の R1〜R9）を通った中身だけを書く | 書かずに落ちた規則とキーの位置を出す。ファイルは 1 バイトも変えない |
+| I2 | 宣言 | 作る・更新する・移す実行は、組み合わせの規則（「データ構造」の R1〜R10）を通った中身だけを書く | 書かずに落ちた規則とキーの位置を出す。ファイルは 1 バイトも変えない |
 | I3 | 宣言 | 節が無い・スキーマに落ちるリポジトリで、読む部品は既定値へ倒さない | 止まり、ファイル・キーの位置・作成のコマンドを理由に出す |
 | I4 | 宣言 | 旧いキーが残るリポジトリで、旧い経路は動かない | 読む部品が止まり、旧いキーの位置と移行のコマンドを理由に出す |
 | I5 | 承認とマージ | 承認した head と違う head をマージせず、キューへも入れない | マージの前に止まり、承認を取り直す依頼を出す（E10） |
@@ -93,8 +93,8 @@ GitHub との間は**腐敗防止層**で、ruleset と merge queue の語はリ
 | I7 | 承認とマージ | 版上げの PR は、マージの方式ごとの確かめ（「処理の流れ」の「版上げの PR の確かめ」の表）を通ったときだけマージかキューへの投入をする。`merge-queue` では先端を含むことを求めず、版数が衝突しないことだけを確かめて先頭へ入れる | 止まり、版上げの PR を作り直して承認を取り直す |
 | I8 | 宣言 | 旧いキーの名前は、移行のコマンドと旧い宣言の検査とそのテストの外に現れない | `check-legacy-branch-decl.py` が落ちる |
 | I9 | 承認とマージ | 正式版 1 本につき、人へ問う承認は 1 回である（宣言のどのケースでも） | 2 回目を求める組み合わせ（`via: gate` で ruleset が承認を求める）は I10 で止まる |
-| I10 | 承認とマージ | 節の値と本番ブランチの ruleset（merge queue の有無・最新の取り込みの要否・承認の数）が食い違わない | マージの前に止まり、節の値と ruleset の値を理由に出す |
-| I11 | 作成の結果 | 既存のリポジトリで書く値は、どれも根拠を 1 つ持つ。測るキーは 3 件以上・9 割以上の事例、種類の既定から埋めるキーは選んだ種類の既定の行、人の答えはその答え（「処理の流れ」の「作る・更新する」の表） | 測るキーで事例が足りないか食い違えば、書かずに根拠つきで問う（決定 6） |
+| I10 | 承認とマージ | 節の値と本番ブランチの ruleset が食い違わない。比べるのは 3 つで、`merge.method: merge-queue` ⇔ merge queue が有る、`merge.method: strict` ⇔ 最新の取り込みを求める（merge queue は無い）、`approval.via: gate` ⇒ 承認の数 0・`approval.via: review` ⇒ 承認の数 1 以上である | マージの前に止まり、節の値と ruleset の値を理由に出す |
+| I11 | 作成の結果 | 既存のリポジトリで書く値は、どれも根拠を 1 つ持つ。履歴から推すキーは 3 件以上・9 割以上の事例、今の正本で決まるキーはその正本 1 件、種類の既定から埋めるキーは選んだ種類の既定の行、人の答えはその答え（「処理の流れ」の「作る・更新する」の表） | 履歴から推すキーで事例が足りないか食い違うか、今の正本で決まるキーの正本が無いか読めなければ、書かずに根拠つきで問う（決定 6） |
 | I12 | 承認とマージ | 証跡の種類ごとに書き手は 1 つで、証跡が今の head にあれば同じ問いを送らない | 書き手が書けなければ止まり、問いを送り直さない |
 | I13 | スプリントのスナップショット | スプリントの中の部品は開始時のスナップショットを読む | スナップショットと今の節の違うキーを結果に出す |
 | I14 | 宣言 | 製品のスキーマと既定の表は `default` と ai-plugins の名前を持たない | `check-skill-repo-assumptions.py` が落ちる（決定 13） |
@@ -114,7 +114,7 @@ GitHub との間は**腐敗防止層**で、ruleset と merge queue の語はリ
 | E9 | 承認を受け、承認した head を記録した | リリース承認ゲートか GitHub のレビュー | E11 |
 | E10 | 承認の後に head が動いたか、版上げの PR がマージの方式ごとの確かめ（I7）に落ちたことを見つけ、承認を取り直す依頼を出した | リリースの `land` | 人 |
 | E11 | 承認した head を宣言の主体と方式でマージした | リリースの `land` か人 | E12 |
-| E12 | 正式版を出した（タグ・GitHub Release） | CD | リリース後テスト |
+| E12 | 正式版を出した | `release.cd` があれば CD（タグと GitHub Release を作り終えたとき）。`release.cd` が `null` ならリリースの `land`（E11 のマージを確かめたとき。タグと GitHub Release は作らない。R10） | リリース後テスト |
 | E13 | 宣言を更新した | 解析 `measure`・`write` | E7 |
 | E14 | 使わなくなったキーを消し、旧いキーの検査に載せた | NDF の版（移す行の表の `remove` の行）と解析 `branch-strategy migrate` | E7 |
 | E15 | NDF を外し、節を消した | 解析 `remove` | — |
@@ -126,8 +126,15 @@ GitHub との間は**腐敗防止層**で、ruleset と merge queue の語はリ
 | 代表のリポジトリの種類の既定 | 代表のリポジトリの種類（`web-develop`・`web-trunk`・`mobile`・`docs`・`plugin`）ごとの節の値の行。`branch-strategy-presets.json` に持つ | 追加 |
 | 承認の対象 | リリース承認ゲートで承認する PR。`release_pr`（版上げの PR）か `production_pr`（本番ブランチ宛ての各 PR） | 追加 |
 | 承認の受け方 | 承認をどこで受けるか。`gate`（リリース承認ゲート）か `review`（GitHub のレビューの承認をゲートの答えとして読む） | 追加 |
-| 版上げの PR | head が `release/v<版>` で、版数と CHANGELOG を書き、承認の対象 `release_pr` で承認を受ける本番ブランチ宛ての PR。`trunk` では本番ブランチから、ほかの行ではベースブランチか本番ブランチから切る | 意味の変更（`trunk` の行でもマージの前に作る形にそろえた） |
+| 版上げの PR | head が `release/v<版>` で、版数と CHANGELOG を書き、承認の対象 `release_pr` で承認を受ける本番ブランチ宛ての PR。`trunk` では本番ブランチから切り、版数と CHANGELOG だけを変える。ほかの行ではベースブランチか本番ブランチから切り、まだ本番へ出ていない変更も持つ | 意味の変更（`trunk` の行でもマージの前に作る形にそろえた） |
 | マージの方式 | 本番ブランチへのマージで組み合わせをどう確かめるか。`merge-queue`・`strict`（head が本番ブランチの先端を含むときだけマージ）・`direct`（確かめない） | 意味の変更（`direct` を足した） |
+| 本番の PR | 本番ブランチへ入れる PR。`trunk` では本番ブランチ宛てのスプリントの PR と版上げの PR、ほかの行では版上げの PR | 意味の変更（CD が作る版上げの PR を除く記述を外した） |
+| 版上げのコミット | 版上げの PR の中で、バージョンの置き場のファイルと CHANGELOG を変えるコミット。マージの前に入れる | 意味の変更（マージの後に CD が作る形を外した） |
+| バージョン上げ | 版上げの PR の中でバージョンを上げること。書き換えるファイルは `release.version_store` で決める | 意味の変更（マージの後に CD が上げる形を外した） |
+| ブランチ戦略 | 節 `branch_strategy` の `release_strategy` で取り込み方の表の行を選ぶ決まり | 意味の変更（旧い宣言を正本として指す記述を外した） |
+| 取り込み方の表 | 行の名前が節 `branch_strategy` の `release_strategy` の値と同じ一覧 | 同上 |
+| バージョンの置き場 | 節 `branch_strategy` の `release.version_store` で選ぶファイルとアダプタ | 同上 |
+| ブランチ運用の宣言 | 旧い宣言の 1 つ（`.ndf/worktree.json` の `branch_flow`）。ブランチ戦略の宣言へ移す | 意味の変更（旧い宣言と明記し、無いときの既定の振る舞いを外した。I3） |
 
 ブランチ戦略の宣言・旧い宣言・宣言の CRUD・値の根拠・代表のリポジトリの種類は、要求のステップで用語集へ足した意味のまま使う。
 
@@ -151,7 +158,7 @@ GitHub との間は**腐敗防止層**で、ruleset と merge queue の語はリ
 
 | 要素 | 責務 |
 | --- | --- |
-| スキーマ `$defs/BranchStrategy`（11.0 `contracts/schemas/declarations/project.schema.json` が正本、10 系 `skills/development-workflow/schemas/project.schema.json` がコピー） | 節のキー・値・組み合わせの規則 R1〜R9 |
+| スキーマ `$defs/BranchStrategy`（11.0 `contracts/schemas/declarations/project.schema.json` が正本、10 系 `skills/development-workflow/schemas/project.schema.json` がコピー） | 節のキー・値・組み合わせの規則 R1〜R10 |
 | 既定の表 `branch-strategy-presets.json`（11.0 `contracts/domains/` が正本、10 系 `scripts/data/` がコピー） | 代表のリポジトリの種類ごとの値 |
 | 移す行の表 `ndf-settings-renames.json`（11.0 `contracts/domains/` が正本、10 系 `scripts/data/` がコピー。11.0 の正本は #3613 が先にマージされていれば行を足し、されていなければこの課題が #3613 の行の形で新設する。決定 3） | 旧いキーの位置 → 新しいキーの位置・値の対応・消すキー |
 | 読む部品 `lib/branch_strategy.py`（10 系）・`ndf/core/branch_strategy.py`（11.0） | 節を読み、スキーマで検査し、旧いキーで止まる。シェルからは `branch_strategy.py get <キー>` で読む |
@@ -210,6 +217,7 @@ graph TD
 | R7 | `channels` の `dev` ⇒ base と production が違う | `trunk` で開発版チャネル |
 | R8 | `version_store.kind: none` ⇒ `tag: null` かつ `github_release: false` | 版数が無いのにタグの形がある |
 | R9 | `sprint.start`・`sprint.doc_prs` は取り込み方の表の行が許す値 | `merge_base_branch` で `start: production` |
+| R10 | `release.cd: null` ⇒ `tag: null` かつ `github_release: false`（タグと Release を作るのは CD だけ） | CD が無いのにタグの形がある |
 
 ### 代表のリポジトリの種類の既定
 
@@ -276,8 +284,8 @@ flowchart TD
     B -->|無い| C{種類を渡したか}
     C -->|渡した| D[既定の表の行と測った名前]
     C -->|無い| Q[問いを返す・書かない]
-    B -->|ある| E[測るキーを事例と文書から測る]
-    E --> F{測るキーに 3 件・9 割の根拠}
+    B -->|ある| E[履歴から推すキーと今の正本で決まるキーを測る]
+    E --> F{履歴は 3 件・9 割、正本は 1 件の根拠}
     F -->|無い・食い違う| Q
     F -->|ある| K{測った値に合う種類の既定が 1 つか}
     K -->|0 か 2 つ以上| Q
@@ -289,12 +297,13 @@ flowchart TD
     G -->|通る| W[節を書く]
 ```
 
-既存のリポジトリでは、キーを「測るキー」と「種類の既定から埋めるキー」に分ける。PR・タグ・ruleset・ワークフローの事例から数えられないキーを測ろうとすると、
-どのリポジトリでも根拠不足の問いになり、問う場面が食い違いと根拠不足に絞れないためである。
+既存のリポジトリでは、キーを「測るキー」と「種類の既定から埋めるキー」に分け、測るキーをさらに「履歴から推すキー」と「今の正本で決まるキー」に分ける。PR・タグ・ruleset・ワークフローの事例から数えられないキーを測ろうとすると、
+どのリポジトリでも根拠不足の問いになり、問う場面が食い違いと根拠不足に絞れないためである。ruleset・版数のファイル・ワークフローのように今の値を 1 か所に持つものは、1 件で値が決まるため事例の件数を求めない。
 
 | キーの分け方 | キー | 根拠 |
 | --- | --- | --- |
-| 測るキー | `release_strategy`・`branches`・`sprint.start`・`release.form`・`release.plugin`・`release.runtimes`・`release.version_store`・`release.tag`・`release.github_release`・`release.cd`・`channels`・`merge.method`・`merge.commit` | 事例（PR の宛先と起点・タグ・Release・ruleset・ワークフロー・版数のファイル・マージコミットの親の数）が 3 件以上・9 割以上で合う |
+| 測るキーのうち履歴から推すキー | `release_strategy`・`branches.base`・`sprint.start`・`release.tag`・`release.github_release`・`merge.commit` | 事例（PR の宛先と起点・タグ・Release・マージコミットの親の数）が 3 件以上・9 割以上で合う |
+| 測るキーのうち今の正本で決まるキー | `branches.production`・`release.form`・`release.plugin`・`release.runtimes`・`release.version_store`・`release.cd`・`channels`・`merge.method` | 正本 1 件（既定ブランチ・版数のファイルと `plugin.json`・ワークフローのファイル・本番ブランチの ruleset）。正本が無いか読めなければ根拠不足として問う。`merge.method` は「代表のリポジトリの種類の既定」の※のとおり |
 | 種類の既定から埋めるキー | `kind`・`sprint.integrate`・`sprint.doc_prs`・`reviews`・`approval.target`・`approval.via`・`merge.actor`・`merge.admin`・`verify`・`release.deliveries` | 選んだ種類の既定の行（根拠 `preset`）。`approval.via` は、ruleset が承認を求めるのに既定が `gate` なら食い違いとして問う（I10） |
 | 人の答えで書くキー | 問いを返したキー | 答え（根拠 `answer`）。答えも組み合わせの規則を通す（I2） |
 
@@ -324,7 +333,9 @@ flowchart TD
     E -->|同じ| F{ruleset と節が一致するか}
     F -->|違う| Y[止まって両方の値を出す]
     F -->|同じ| G[方式どおりにマージかキューへ]
-    G --> H[CD がタグと Release を作る]
+    G --> H{release.cd があるか}
+    H -->|ある| I[CD がタグと Release を作る]
+    H -->|無い| J[land がマージを確かめて正式版とする]
 ```
 
 ### 版上げの PR の確かめ
@@ -397,7 +408,7 @@ Codex の利用者は、起動時のマーケットプレイスの自動更新�
 | 受け入れ条件・不変条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
 | --- | --- | --- |
 | 1 | （設計承認ゲートを通ったマージ。置き換える設計と #3649・#3650 の行き先は [issue-3672-design-removal.md](issue-3672-design-removal.md) の表） | — |
-| 2・I2・R1〜R9 | 規則ごとに落ちる入力をスキーマへ渡すと落ち、5 種の既定は通る | 規則を 1 つ消すと、その規則の落ちる入力が通る |
+| 2・I2・R1〜R10 | 規則ごとに落ちる入力をスキーマへ渡すと落ち、5 種の既定は通る | 規則を 1 つ消すと、その規則の落ちる入力が通る |
 | 3 | スキーマに `promotion`・`whole`・`selected` が無く、`release_strategy` の値が改名表と同じ | 旧い名前を足すと落ちる |
 | 4・5・6 | 5 種の宣言から、10 系と 11.0 の部品が PR の宛先・リリースの PR・マージの主体と方式を「代表のリポジトリの種類の既定」の 2 つ目の表のとおりに返す | 表の 1 セルを変えると、その種類のテストが落ちる |
 | 7 | 文書と Skill の本文に、節を手で書く手順が無い | （`.md` の文言のテストを書かない規約により、削除の一覧の D31〜D33 を `check-legacy-branch-decl.py` が照らす） |

@@ -3,13 +3,15 @@
 設計文書 [issue-3672-design.md](issue-3672-design.md) から分けた外部の調査である。標準・仕様（`STD<数>`）・主要な製品（`PRD<数>`）・ライブラリとサービス（`LIB<数>`）の番号は、
 設計文書・[決定の記録](issue-3672-design-decisions.md)・[削除の一覧](issue-3672-design-removal.md) から参照される。
 
+## 外部の調査
+
 | 種類 | 調べるか | 理由 |
 | --- | --- | --- |
 | 標準・仕様 | 調べる | ブランチ戦略・版の規則・タグの形・マージの一致の確認は GitHub・Claude Code・Codex の仕様と公開の規約で決まる |
 | 主要な製品 | 調べる | plugin とマーケットプレイスを配るリポジトリの実際の運用を、ai-plugins の値の出典にする |
 | ライブラリとサービス | 調べる | 版上げ・組み合わせの確かめ・移行の差分を既存のツールに任せられるかを比べる |
 
-## 標準・仕様
+### 標準・仕様
 
 | # | 標準・仕様 | 何を定めているか | 設計への反映 | 出典 |
 | --- | --- | --- | --- | --- |
@@ -19,12 +21,12 @@
 | STD4 | Claude Code「Plugin loading」「Host a marketplace」 | 「Users get a new copy only when the plugin's computed version differs from the one they have」。版数は `plugin.json` を優先し、マーケットプレイスの項目と両方に書かない。チャネルの概念は無く、名前の違う 2 つのマーケットプレイスで別の ref を指す | 版上げの PR のマージをリリースにする（決定 8・12） | https://code.claude.com/docs/en/plugins/loading.md ・ https://code.claude.com/docs/en/plugins/host-marketplace.md （2026-11-16） |
 | STD5 | Claude Code「Host a marketplace」「Dependencies」 | タグの形は `<plugin-name>--v<version>`。`claude plugin tag --push` が版数の一致を確かめて作る。版の範囲の依存はこのタグで解決し、プレリリースを含まない | 種類 `plugin` のタグの形 `{plugin}--v{version}` | https://code.claude.com/docs/en/plugins/host-marketplace.md ・ https://code.claude.com/docs/en/plugins/dependencies.md （2026-11-16） |
 | STD6 | RFC 6902 JSON Patch | `test`・`move`・`replace` の操作の列 | 移行の差分（決定 10） | https://www.rfc-editor.org/rfc/rfc6902 （2026-11-16、#3613 の STD3） |
-| STD7 | JSON Schema「Conditional subschemas」 | `if`・`then`・`else` で値の組み合わせの規則を書ける（Draft 7 以降） | 組み合わせの規則 R1〜R9（決定 2） | https://json-schema.org/understanding-json-schema/reference/conditionals （2026-11-16、HTTP 200） |
+| STD7 | JSON Schema「Conditional subschemas」 | `if`・`then`・`else` で値の組み合わせの規則を書ける（Draft 7 以降） | 組み合わせの規則 R1〜R10（決定 2） | https://json-schema.org/understanding-json-schema/reference/conditionals （2026-11-16、HTTP 200） |
 | STD8 | GitHub Docs「GitHub flow」 | 既定ブランチから切ったブランチを PR で既定ブランチへマージし、ブランチを消す | 行 `trunk` の起点と宛先 | https://docs.github.com/en/get-started/using-github/github-flow （2026-11-16） |
 | STD9 | Semantic Versioning 2.0.0 | プレリリースは正式版より順序が下。`v1.2.3` の `v` は版数ではなくタグの慣習 | 版数は `plugin.json` に semver で持ち、タグに `v` を付ける | https://semver.org/ （2026-11-16） |
 | STD10 | Codex「Build plugins」と openai/codex のソース | キャッシュは `$MARKETPLACE/$PLUGIN/$VERSION/`。`.claude-plugin/marketplace.json` も読む。Git のマーケットプレイスは起動時に自動で更新され（`PluginGitMode::Automatic`）、リモートの revision が変わると、入れた plugin を版数を比べずに入れ直す（`NonCuratedCacheRefreshMode::ForceReinstall`） | Codex の利用者には、取得元の ref が進むたびに届く。ai-plugins の取得元の扱いを人へ残す（決定 12） | https://developers.openai.com/codex/plugins/build.md ・ https://github.com/openai/codex/blob/ca0bbbdf0c/codex-rs/core-plugins/src/manager.rs （`upgrade_configured_marketplaces_for_config_with_mode`）・ `codex-rs/core-plugins/src/loader.rs`（`refresh_non_curated_plugin_cache_with_mode`）（2026-11-16） |
 
-## 主要な製品
+### 主要な製品
 
 | # | 製品 | どう解いているか | 設計への反映 | 出典 |
 | --- | --- | --- | --- | --- |
@@ -35,7 +37,7 @@
 | PRD5 | git-flow（nvie/gitflow） | `git flow init` が開発と本番のブランチの名前を対話で問い、設定に書く。アーカイブ済み | 宣言を問いと答えで作る形は倣い、対話ではなく結果の問いで返す（決定 4） | `gh api repos/nvie/gitflow`（`archived: true`）と README（2026-11-16） |
 | PRD6 | anthropics/claude-code | タグ `v2.1.325` 形式と Release。公開したタグを変えられない ruleset を持つ | ai-plugins のタグの保護 | `gh api repos/anthropics/claude-code/rulesets`（2026-11-16） |
 
-## ライブラリとサービス
+### ライブラリとサービス
 
 | # | 候補 | 版 | ライセンス | 最後のリリースの日付 | 終了のアナウンス | 要件を満たすか | 出典 |
 | --- | --- | --- | --- | --- | --- | --- | --- |

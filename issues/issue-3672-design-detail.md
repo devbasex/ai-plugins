@@ -72,7 +72,7 @@ CI の検査は契約とコードを読むだけで、工程の部品から呼�
 
 | パス | 種類 | 役割 1 文 | 依存する先 |
 | --- | --- | --- | --- |
-| `plugins/ndf-next/contracts/schemas/declarations/project.schema.json` | 変更 | `$defs/BranchStrategy`（キー・値・R1〜R9）の正本を持ち、`production_merge`・`delivery` の定義を消す | 無し |
+| `plugins/ndf-next/contracts/schemas/declarations/project.schema.json` | 変更 | `$defs/BranchStrategy`（キー・値・R1〜R10）の正本を持ち、`production_merge`・`delivery` の定義を消す | 無し |
 | `plugins/ndf-next/contracts/schemas/declarations/worktree.schema.json` | 変更 | `base_branch`・`production_branch`・`branch_flow` の定義を消す（D5） | 無し |
 | `plugins/ndf-next/contracts/schemas/declarations/supervise.schema.json` | 変更 | `release` の定義を消す（D7） | 無し |
 | `plugins/ndf-next/contracts/schemas/declarations/release.schema.json` | 変更 | `version_files` の定義を消す（D7） | 無し |
@@ -168,7 +168,7 @@ CI の検査は契約とコードを読むだけで、工程の部品から呼�
 
 | 関数 | 置き場 | 種類 | シグネチャ | 責務 1 文 | 事前条件 | 事後条件 | 副作用 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `load` | 10 系 `lib/branch_strategy.py`・11.0 `core/branch_strategy.py` | 新設 | `load(root: Path) -> Strategy` | メインディレクトリの節を読み、旧いキーとスキーマで検査して型にする | `root` がリポジトリのメインディレクトリ | 返した `Strategy` はスキーマ（R1〜R9）を通り、旧い 4 か所に旧いキーが無い（I1・I3・I4） | `.ndf/` の 4 ファイルを読む |
+| `load` | 10 系 `lib/branch_strategy.py`・11.0 `core/branch_strategy.py` | 新設 | `load(root: Path) -> Strategy` | メインディレクトリの節を読み、旧いキーとスキーマで検査して型にする | `root` がリポジトリのメインディレクトリ | 返した `Strategy` はスキーマ（R1〜R10）を通り、旧い 4 か所に旧いキーが無い（I1・I3・I4） | `.ndf/` の 4 ファイルを読む |
 | `load_at_ref` | 同上 | 新設 | `load_at_ref(root: Path, ref: str) -> Strategy` | 指定したブランチの節を `git show <ref>:.ndf/project.json` で読み、`load` と同じ検査をする | `ref` が `origin/<名前>` の形で取得済み | `load` と同じ | `git show` を 4 回呼ぶ |
 | `validate` | 同上 | 新設 | `validate(section: dict) -> list[dict]` | 節をスキーマ `$defs/BranchStrategy` で検査し、落ちた規則とキーの位置を返す | `section` が JSON の値 | 返す各要素は `{"rule": "R<数>" か "shape", "pointer"}`。空なら通った | スキーマのファイルを読む（初回だけ。プロセスの中で使い回す） |
 | `get` | 同上 | 新設 | `get(strategy: Strategy, pointer: str) -> Any` | 節の中の 1 つの値を JSON Pointer で引く | `pointer` が `/` で始まる | 値があれば返す。無ければ `StrategyError` | 無し |
@@ -233,7 +233,7 @@ CI の検査は契約とコードを読むだけで、工程の部品から呼�
 | `doc_claims` | 文書が読めない | 文字コード・権限 | ファイルの読み込み | 既定値で続ける（その文書を飛ばす） | 結果の `warnings` にパス | 打ち直せる |
 | `measure` | 種類が決まらない | 合う既定の行が 0 か 2 つ以上 | `pick_kind` | 呼び出し元へ返す（`no_kind` の問い。書かない） | `status: ask`。終了コード 3 | 答えを `write --answers` で渡す |
 | `measure` | 事例が足りない・食い違う | 3 件・9 割に届かない、文書と事例が違う | `count_key`・`doc_claims` の比べ | 呼び出し元へ返す（`insufficient`・`conflict` の問い。書かない。I11） | `status: ask`。終了コード 3 | 同上 |
-| `plan_write` | 検査に落ちる | 答えが規則 R1〜R9 に反する | `validate` | 呼び出し元へ返す（書かない。I2） | `status: stopped`・`failed`。終了コード 1 | ファイルは変わらない。答えを直して打ち直せる |
+| `plan_write` | 検査に落ちる | 答えが規則 R1〜R10 に反する | `validate` | 呼び出し元へ返す（書かない。I2） | `status: stopped`・`failed`。終了コード 1 | ファイルは変わらない。答えを直して打ち直せる |
 | `plan_write` | `.ndf/project.json` が読めない | 破損 | JSON の読み込み | 止める | パスと誤り。終了コード 2 | 無し |
 | `plan_remove` | `.ndf/project.json` が読めない | 破損 | JSON の読み込み | 止める | パスと誤り。終了コード 2 | 無し |
 | `commit_plan` | ハッシュが合わない | 示した後にファイルが変わった・別の実行が先に書いた | 作り直した計画の `digest` との比べ | 止める | 「示した差分と今の差分が違います。打ち直してください」。終了コード 1 | ファイルは変わらない。差分を示す実行から打ち直す |
@@ -409,7 +409,7 @@ CI の検査は契約とコードを読むだけで、工程の部品から呼�
 | --- | --- | --- | --- |
 | `load` | 5 種の fixture がそれぞれ `Strategy` になる | 節だけがあり、旧い 3 ファイルが無い | 節が無い（I3）/ 旧いキーが 1 つ残る（I4）/ スキーマに落ちる / JSON が壊れている / 節が 2 か所（I1） |
 | `load_at_ref` | 宛先のブランチの節を読む | 宛先のブランチにだけ節がある | ブランチが無い / ファイルが無い |
-| `validate` | 5 種の既定が通る | 規則の境（`trunk` で base と production が同じ） | R1〜R9 の落ちる入力がそれぞれ落ちる（設計文書の「組み合わせの規則」）/ スキーマが無い / 10 系で依存が無い |
+| `validate` | 5 種の既定が通る | 規則の境（`trunk` で base と production が同じ） | R1〜R10 の落ちる入力がそれぞれ落ちる（設計文書の「組み合わせの規則」）/ スキーマが無い / 10 系で依存が無い |
 | `get` | pointer で値を引く | 値が `null`（`verify`） | 無い pointer |
 | `main` | `get /branches/base` が 1 行を出す | `--ref` を渡す | 無い pointer で 2 / 節が無いと 3 |
 | `snapshot` | ハッシュが節の中身だけで決まる | キーの順が違う同じ節で同じハッシュ | （副作用なし。異常なし） |

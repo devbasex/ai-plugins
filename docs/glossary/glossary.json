@@ -4048,7 +4048,7 @@
     {
       "term": "版上げの PR",
       "context": "ndf-release",
-      "meaning": "head が release/v<版> で、版数と CHANGELOG だけを変え、承認の対象 release_pr でリリース承認ゲートの承認を受ける本番ブランチ宛ての PR。取り込み方 trunk では本番ブランチから、ほかの行ではベースブランチか本番ブランチから、マージの前に切る",
+      "meaning": "head が release/v<版> で、版数と CHANGELOG を書き、承認の対象 release_pr でリリース承認ゲートの承認を受ける本番ブランチ宛ての PR。どの取り込み方でもマージの前に切る。取り込み方 trunk では本番ブランチから切り、版数と CHANGELOG だけを変える。ほかの行ではベースブランチか本番ブランチから切り、まだ本番へ出ていない変更（ベースブランチに入った変更か、集めたスプリント）も持つ",
       "source": "docs/specifications/ndf-release-approval-included-prs.md",
       "pending_source": "issues/issue-3672-design.md"
     },
@@ -6907,8 +6907,9 @@
     {
       "term": "ブランチ運用の宣言",
       "context": "ndf-workflow",
-      "meaning": "スプリントの起点・ベースブランチへ入れる時点・文書の Pull Request の宛先・本番への取り込み方を書いた `.ndf/worktree.json` の `branch_flow`。無ければ、ベースブランチから切りベースブランチを丸ごと本番チャネルへ出す既定の振る舞いになる",
-      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+      "meaning": "旧い宣言の 1 つ。スプリントの起点・ベースブランチへ入れる時点・文書の Pull Request の宛先・本番への取り込み方を書いた `.ndf/worktree.json` の `branch_flow`。ブランチ戦略の宣言（`.ndf/project.json` の節 `branch_strategy`）へ移し、残っていると読む部品が止まる",
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md",
+      "pending_source": "issues/issue-3672-design.md"
     },
     {
       "term": "スプリントの起点",
@@ -7592,8 +7593,9 @@
     {
       "term": "本番の PR",
       "context": "ndf-release",
-      "meaning": "本番チャネル（main）へ入れる Pull Request。CD のある場合は、この PR のマージで本番へ届く。ndf-next の取り込み方の行 `trunk` では main 宛てのスプリントの PR が兼ね、CD が作る版上げの PR は含まない。行 `merge_base_branch`・`release_branch` と今の NDF では、リリースのブランチから本番チャネルへ出す PR を指す",
-      "source": "docs/specifications/ndf-release-production-admin-merge.md"
+      "meaning": "本番ブランチ（main）へ入れる Pull Request。取り込み方の行 `trunk` では本番ブランチ宛てのスプリントの PR と版上げの PR を指し、行 `merge_base_branch`・`release_branch` では版上げの PR を指す",
+      "source": "docs/specifications/ndf-release-production-admin-merge.md",
+      "pending_source": "issues/issue-3672-design.md"
     },
     {
       "term": "管理者の迂回",
@@ -7718,8 +7720,8 @@
     {
       "term": "版上げのコミット",
       "context": "ndf-release",
-      "meaning": "取り込み方の行 `trunk` で、main へのマージの後に CD が作り、版上げの PR を通して main へ入るコミット。バージョンの置き場のファイル・CHANGELOG のバージョンの節・`.ndf/release.json` の手順の書き先だけを変える。PR はバージョンを触らない",
-      "pending_source": "issues/issue-3572-design.md"
+      "meaning": "版上げの PR の中で、バージョンの置き場のファイルと CHANGELOG のバージョンの節を変えるコミット。リリースの工程が版上げの PR のマージの前に入れる",
+      "pending_source": "issues/issue-3672-design.md"
     },
     {
       "term": "上げ幅のラベル",
@@ -7863,14 +7865,14 @@
     {
       "term": "ブランチ戦略",
       "context": "ndf-release",
-      "meaning": "リポジトリがどのブランチから作業を切り、どこへマージし、どこから本番へ出すかの決まり。リポジトリごとに `.ndf/worktree.json` の `branch_flow`（ブランチ運用の宣言）で、取り込み方の表の行を選ぶ",
-      "pending_source": "issues/issue-3572-requirements.md"
+      "meaning": "リポジトリがどのブランチから作業を切り、どこへマージし、どこから本番へ出すかの決まり。リポジトリごとに `.ndf/project.json` の節 `branch_strategy`（ブランチ戦略の宣言）の `release_strategy` で、取り込み方の表の行を選ぶ",
+      "pending_source": "issues/issue-3672-design.md"
     },
     {
       "term": "取り込み方の表",
       "context": "ndf-release",
-      "meaning": "ndf-next がブランチ戦略として選べる行の一覧（`plugins/ndf-next/contracts/domains/branch-flows.json`）。`merge_base_branch`・`release_branch` と、スプリントブランチを main から切って main へマージする `trunk` の行を持つ（行の名前は `.ndf/worktree.json` の `branch_flow.release_strategy` の値と同じ）",
-      "pending_source": "issues/issue-3572-requirements.md"
+      "meaning": "ndf-next がブランチ戦略として選べる行の一覧（`plugins/ndf-next/contracts/domains/branch-flows.json`）。`merge_base_branch`・`release_branch` と、スプリントブランチを main から切って main へマージする `trunk` の行を持つ（行の名前は `.ndf/project.json` の節 `branch_strategy` の `release_strategy` の値と同じ）",
+      "pending_source": "issues/issue-3672-design.md"
     },
     {
       "term": "merge queue",
@@ -7893,8 +7895,8 @@
     {
       "term": "バージョン上げ",
       "context": "ndf-release",
-      "meaning": "main へのマージの後に CD がバージョンを上げること。書き換えるファイルと流すコマンドは `.ndf/release.json` の手順で決める",
-      "pending_source": "issues/issue-3572-requirements.md"
+      "meaning": "版上げの PR の中でバージョンを上げること。書き換えるファイルは `.ndf/project.json` の節 `branch_strategy` の `release.version_store` で決める",
+      "pending_source": "issues/issue-3672-design.md"
     },
     {
       "term": "キューへの投入",
@@ -7905,8 +7907,8 @@
     {
       "term": "バージョンの置き場",
       "context": "ndf-release",
-      "meaning": "リリースの単位のバージョンを持つファイルと、その読み書きのアダプタ（`plugin`・`json` など）。`.ndf/release.json` の `version_store` で選ぶ",
-      "pending_source": "issues/issue-3572-design.md"
+      "meaning": "リリースの単位のバージョンを持つファイルと、その読み書きのアダプタ（`plugin`・`json` など）。`.ndf/project.json` の節 `branch_strategy` の `release.version_store` で選ぶ",
+      "pending_source": "issues/issue-3672-design.md"
     },
     {
       "term": "設計承認の依頼",
