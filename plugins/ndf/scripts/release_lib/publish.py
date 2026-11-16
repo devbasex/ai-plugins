@@ -11,7 +11,7 @@ import os
 import tempfile
 
 import gh_parts
-from release_lib.names import changelog_span, tag_name
+from release_lib.names import changelog_span, latest_release_tag, tag_glob, tag_name, tag_template_of
 from step_result import StepError, git, plugin_dir
 
 
@@ -103,18 +103,36 @@ def publish(root, plugin, revision) -> tuple[str, str, list[dict]]:
     return ver, tag, tag_and_release(root, plugin, ver, tag, revision)
 
 
-def untagged_since(root, plugin, end) -> str | None:
-    """タグを作らない宣言（release.tag が null）で、他のプラグインの差分と承認資料の比較元の起点にするコミット。本番ブランチの先端の `plugin` の版
-    （出した最新の版）を `end` の履歴で初めて持ったコミット（前のリリースの版上げ）。本番ブランチ・版を読めなければ None。"""
+def made_by(decl, tag) -> str:
+    """宣言が作らせる公開物の語（承認資料の同意と戻し方が書く）。`wants` と同じ値で決め、作らなければ空文字。"""
+    want_tag, want_release = wants(decl)
+    return "" if not want_tag else f"タグ {tag} と GitHub Release" if want_release else f"タグ {tag}"
+
+
+def _untagged_manifest(root, plugin):
+    """タグを作らない宣言（release.tag が null）なら (マニフェストの位置, 本番ブランチの参照)。ほかと読めなければ None。"""
     import delivery
 
     decl = delivery.load_delivery(root)
     if decl.production is None or wants(decl)[0]:
         return None
-    rel = manifest_rel(root, plugin)
+    try:
+        rel = manifest_rel(root, plugin)
+    except StepError:  # プラグインのマニフェストが無い: 版で起点を決められない
+        return None
     prod = f"origin/{decl.production}"
     if git(root, "rev-parse", "-q", "--verify", prod, check=False).returncode != 0:
         prod = decl.production
+    return rel, prod
+
+
+def untagged_since(root, plugin, end) -> str | None:
+    """タグを作らない宣言（release.tag が null）で、他のプラグインの差分・承認資料の比較元・版の節の PR の範囲の起点にするコミット。
+    本番ブランチの先端の `plugin` の版（出した最新の版）を `end` の履歴で初めて持ったコミット（前のリリースの版上げ）。
+    タグを作る宣言と、本番ブランチ・版を読めなければ None。"""
+    if (at := _untagged_manifest(root, plugin)) is None:
+        return None
+    rel, prod = at
     shipped = _version_or_none(root, plugin, prod)
     if shipped is None:
         return None
@@ -125,3 +143,30 @@ def untagged_since(root, plugin, end) -> str | None:
         elif found:
             break
     return found
+
+
+def untagged_before(root, plugin, ver) -> str | None:
+    """タグを作らない宣言で、出した版 `ver` の直前の正式版（リリース記録の直前の版）。本番ブランチの履歴で `plugin` の版を
+    新しい順に読み、`ver` と違い接尾辞の無い最初の版。タグを作る宣言と、読めなければ None。"""
+    if (at := _untagged_manifest(root, plugin)) is None:
+        return None
+    rel, prod = at
+    for c in git(root, "log", "--format=%H", prod, "--", rel, check=False).stdout.split():
+        v = _version_or_none(root, plugin, c)
+        if v and v != ver and "-" not in v:
+            return v
+    return None
+
+
+def release_tag_before(root, plugin, current=None):
+    """宣言の release.tag の形（無ければ `<plugin>--v<版>`）に合い接尾辞の無いタグのうち、current を除いて最も新しいもの。無ければ None。"""
+    template = tag_template_of(root)
+    tags = git(root, "tag", "--list", tag_glob(plugin, template), "--sort=-v:refname").stdout.split()
+    return latest_release_tag(tags, plugin, template, current)
+
+
+def prev_release(root, plugin, end, current=None):
+    """前のリリースの起点（他のプラグインの差分・承認資料の比較元・版の節と notes の PR の範囲）。タグを作らない宣言（release.tag が null）なら前のリリースの
+    版上げのコミット（`untagged_since`。宣言をタグ無しへ変える前の古いタグが残っていても使わない）、ほかは current を
+    除いて最も新しいタグ。決められなければ None。"""
+    return untagged_since(root, plugin, end) or release_tag_before(root, plugin, current)

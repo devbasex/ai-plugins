@@ -110,8 +110,9 @@ from release_lib.approval import HeadMoved  # noqa: E402
 from release_lib.context import ReleaseCtx  # noqa: E402
 from release_lib.notes_content import NotesContent  # noqa: E402
 from release_lib.names import changelog_section, changelog_span, h2_lines, next_h2, plugin_of, release_decl  # noqa: E402
-from release_lib.names import drop_untagged, latest_release_tag, require_untagged, tag_glob, tag_name, tag_template_of, tag_version  # noqa: E402
+from release_lib.names import drop_untagged, require_untagged, tag_glob, tag_name, tag_template_of, tag_version  # noqa: E402
 from release_lib.included import outside_items, outside_note  # noqa: E402
+from release_lib.publish import prev_release, release_tag_before  # noqa: E402
 from step_result import (
     EXIT_CD_FAILED,
     EXIT_GATE,
@@ -283,20 +284,6 @@ def cmd_bump(a):
     )
 
 
-def release_tag_before(root, plugin, current=None):
-    """宣言の release.tag の形（無ければ `<plugin>--v<版>`）に合い接尾辞の無いタグのうち、current を除いて最も新しいもの。無ければ None。"""
-    template = tag_template_of(root)
-    tags = git(root, "tag", "--list", tag_glob(plugin, template), "--sort=-v:refname").stdout.split()
-    return latest_release_tag(tags, plugin, template, current)
-
-
-def prev_release(root, plugin, end, current=None):
-    """前のリリースの起点（他のプラグインの差分と承認資料の比較元）。タグを作らない宣言（release.tag が null）なら前のリリースの
-    版上げのコミット（`publish.untagged_since`。宣言をタグ無しへ変える前の古いタグが残っていても使わない）、ほかは current を
-    除いて最も新しいタグ。決められなければ None。"""
-    return publish.untagged_since(root, plugin, end) or release_tag_before(root, plugin, current)
-
-
 def next_release(name, old, level="patch"):
     """上げ幅（既定は PATCH）で上げた正式版（`2.3.4` と `2.3.4-dev.1` の PATCH は `2.3.5`）。"""
     try:
@@ -385,7 +372,7 @@ def section_prs(root, a):
         plugin = plugin_of(root, a)
     except StepError:
         return included.with_extra([], a.prs), None, None, []
-    prev = release_tag_before(root, plugin, tag_name(root, plugin, a.version))
+    prev = prev_release(root, plugin, "HEAD", tag_name(root, plugin, a.version))  # タグを作らない宣言は前のリリースの版上げ
     head = git(root, "rev-parse", "HEAD", check=False)
     if head.returncode:  # コミットの無いリポジトリ: 範囲も終点も無い
         return included.with_extra([], a.prs), prev, None, []
@@ -905,10 +892,10 @@ def cmd_record(a):
     if pr is None:
         raise StepError(f"release/v{ver}（か release/v{ver}-sync）→ {base} のマージ済みの PR が無い", EXIT_PRECONDITION)
     n = pr["number"]
-    prev_tag = release_tag_before(root, plugin, current=tag)
-    template = tag_template_of(root)
-    prev = tag_version(prev_tag, plugin, template) if prev_tag else None
-    body = record.body_of(root, plugin, ver, tag, prev_tag, a.prs, cd, by_cd, tagged=by_cd or want_tag, template=template)
+    tagged, template = by_cd or want_tag, tag_template_of(root)  # タグを作らない宣言は残った古いタグを読まず、本番ブランチの版から
+    prev_tag = release_tag_before(root, plugin, current=tag) if tagged else None
+    prev = (tag_version(prev_tag, plugin, template) if prev_tag else None) if tagged else publish.untagged_before(root, plugin, ver)
+    body = record.body_of(root, plugin, ver, tag, prev_tag, a.prs, cd, by_cd, tagged=tagged, template=template, prev=prev)
     _emit_record(record.write(root, n, ver, prev, body, a.prs, f"v{ver}", cd), cd)
 
 
@@ -1065,6 +1052,7 @@ def cmd_approval_facts(a):
     prev = a.prev_tag or prev_release(root, plugin, approved_sha, cur_tag)
     if not prev:
         raise StepError("前のタグを決められない（--prev-tag を渡す）", EXIT_PRECONDITION)
+    made = publish.made_by(delivery.load_delivery(root), cur_tag)
     keep = kept_sections(root, getattr(a, "approval", None))  # 前の承認資料の残す節（読めなければ書かずに止める。#1834）
     changes = instructions.changed_instructions(root, prev, approved_sha)
     prs, extra_out = included.section_range(root, prev, approved_sha, a.prs)  # 範囲の PR と --prs の和（#1274・#1885）
@@ -1093,11 +1081,9 @@ def cmd_approval_facts(a):
             ("配る中身", NOTES_PENDING),
             ("開発版のデプロイで確かめたこと", NOTES_PENDING),
         ],
-        consent=[f"{plugin} v{a.version} を {prod} へ出し、タグ {cur_tag} と GitHub Release を作る"],
-        rollback=(
-            f"タグ {cur_tag} と GitHub Release を消し、{prod} を {prev} の内容へ戻す PR を出す。"
-            "導入済みの利用者の環境は利用者の側の操作（前の版の導入し直し）でしか戻せない。"
-        ),
+        consent=[f"{plugin} v{a.version} を {prod} へ出す" + (f"（{made}を作る）" if made else "")],  # 宣言が作らせる公開物だけ
+        rollback=f"{made + 'を消し、' if made else ''}{prod} を {prev} の内容へ戻す PR を出す。"
+        "導入済みの利用者の環境は利用者の側の操作（前の版の導入し直し）でしか戻せない。",
         sections=[(instructions.HEADING, instructions.instruction_lines(changes, prev, approved_sha))],
     )
     if keep:

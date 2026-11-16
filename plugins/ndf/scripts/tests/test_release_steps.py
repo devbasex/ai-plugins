@@ -789,6 +789,38 @@ def test_changed_plugins_without_tags_starts_from_the_last_release_bump(repo, mo
     assert [it["name"] for it in res["items"]] == ["mcp-serena"]
 
 
+def test_untagged_record_and_ranges_read_versions_not_stale_tags(repo, monkeypatch):
+    """#3672 の round 13: タグを作らない宣言では、残った古いタグでなく版から、版の節の PR の範囲の起点（前のリリースの版上げ）と
+    リリース記録の直前の版（接尾辞の無い前の正式版）を決める。プラグインのマニフェストが無ければどちらも決めない。"""
+    mod = _release_steps_module(monkeypatch)
+    from release_lib import publish
+
+    git(repo, "tag", "ndf--v0.9.0")  # タグ無しの宣言へ変える前に作ったタグ
+    commits = []
+    for ver in ("1.0.0", "1.0.1-dev.1", "1.0.1"):
+        plugin_json(repo, "plugins/ndf", ver)
+        git(repo, "add", "-A")
+        git(repo, "commit", "-q", "-m", ver)
+        commits.append(subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip())
+    git(repo, "update-ref", "refs/remotes/origin/main", commits[0])  # 本番ブランチは前のリリース
+    assert mod.prev_release(repo, "ndf", "HEAD", "ndf--v1.0.1") == commits[0]
+    git(repo, "update-ref", "refs/remotes/origin/main", commits[2])  # 1.0.1 を出した後
+    assert publish.untagged_before(repo, "ndf", "1.0.1") == "1.0.0"
+    assert publish.untagged_since(repo, "nothing", "HEAD") is None and publish.untagged_before(repo, "nothing", "1.0.1") is None
+
+
+@pytest.mark.parametrize(
+    ("release", "made"),
+    [({"tag": None}, ""), ({"tag": "v{version}", "github_release": False}, "タグ v1"), ({}, "タグ v1 と GitHub Release")],
+)
+def test_approval_names_only_the_artifacts_the_declaration_makes(monkeypatch, release, made):
+    """#3672 の round 13: 承認資料の同意と戻し方は、宣言が作らせる公開物（publish.wants）だけを書く。"""
+    _release_steps_module(monkeypatch)
+    from release_lib import publish
+
+    assert publish.made_by(SimpleNamespace(release=release), "v1") == made
+
+
 def v_tag_repo(root: Path) -> Path:
     """宣言の release.tag が `v{version}` のリポジトリ（#3672 の round 9）。タグは v1.0.0・v1.1.0・接尾辞つきの v1.2.0-dev.1。"""
     release = {**plugin_release(), "tag": "v{version}", "github_release": True, "cd": {"workflow": "release.yml"}}
