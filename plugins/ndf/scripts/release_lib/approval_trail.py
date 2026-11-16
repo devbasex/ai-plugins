@@ -168,9 +168,7 @@ def approved_review_commit(reviews: list[dict], perms: dict[str, str | None]) ->
         if r.get("state") in ("APPROVED", "CHANGES_REQUESTED", "DISMISSED"):
             last[str((r.get("user") or {}).get("login") or "")] = r
     got = [
-        r
-        for login, r in last.items()
-        if r.get("state") == "APPROVED" and perms.get(login) in REVIEWER_PERMISSIONS and r.get("commit_id")
+        r for login, r in last.items() if r.get("state") == "APPROVED" and perms.get(login) in REVIEWER_PERMISSIONS and r.get("commit_id")
     ]
     if not got:
         return None
