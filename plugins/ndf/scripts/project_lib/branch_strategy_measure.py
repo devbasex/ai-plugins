@@ -134,9 +134,7 @@ _LISTINGS = (
 
 
 def collect_samples(root: Path, api: Api, deadline: float, limit: int, clock: Callable[[], float] | None = None) -> Samples:
-    """直近のマージ済み PR・タグ・Release・本番ブランチの履歴・ruleset・ワークフロー・版数のファイルを集める。
-
-    `clock` は締切と比べる時計（既定は呼んだ時点の `time.monotonic`）。締切を超えたら残りの一覧だけを打ち切る。"""
+    """直近のマージ済み PR・タグ・Release・本番ブランチの履歴・ruleset・ワークフロー・版数のファイルを集める。`clock` は締切の時計（既定 time.monotonic）。"""
     clock = clock or time.monotonic
     s = Samples()
     s.production = _default_branch(root, api)
