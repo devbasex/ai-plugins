@@ -999,3 +999,72 @@ def test_verify_install_stops_when_user_config_changes(tmp_path, monkeypatch, ch
     out = emitted[0]
     assert out["status"] == "stopped" and out["metrics"]["user_env_unchanged"] is False
     assert key in [i["name"] for i in out["items"] if i["kind"] == "user_env"]
+
+
+# --- update_index の現状固定（I-024） ---------------------------------------
+
+
+def load_plan_to_spec():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("plan_to_spec_steps", SCRIPTS / "plan-to-spec-steps.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+@pytest.mark.parametrize(
+    "text,title,want",
+    [
+        (  # 一覧の最後のリンクの行の後へ、同じ区切りで足す
+            "# 索引\n\n- [a.md](a.md) — A\n- [b.md](b.md) — B\n\n後書き\n",
+            "X",
+            "# 索引\n\n- [a.md](a.md) — A\n- [b.md](b.md) — B\n- [x.md](x.md) — X\n\n後書き\n",
+        ),
+        (  # 説明が無ければ名前を使う
+            "# 索引\n\n- [a.md](a.md) — A\n",
+            None,
+            "# 索引\n\n- [a.md](a.md) — A\n- [x.md](x.md) — x.md\n",
+        ),
+        (  # 字下げ・記号（*）・区切り（: ）を最後の行から写す。# 付きのリンクも .md として数える
+            "# 索引\n\n  * [a.md](a.md): A\n  * [b.md](b.md#x): B\n",
+            "X",
+            "# 索引\n\n  * [a.md](a.md): A\n  * [b.md](b.md#x): B\n  * [x.md](x.md): X\n",
+        ),
+        (  # 区切りの無い行の後は — を使う
+            "# 索引\n\n- [a.md](a.md)\n",
+            "X",
+            "# 索引\n\n- [a.md](a.md)\n- [x.md](x.md) — X\n",
+        ),
+        (  # 表の最後の行の後へ表の行を足す
+            "# 索引\n\n| 仕様 | 内容 |\n| --- | --- |\n| [a.md](a.md) | A |\n| [b.md](b.md) | B |\n\n後書き\n",
+            "X",
+            "# 索引\n\n| 仕様 | 内容 |\n| --- | --- |\n| [a.md](a.md) | A |\n| [b.md](b.md) | B |\n| [x.md](x.md) | X |\n\n後書き\n",
+        ),
+        (  # 一覧と表があれば、後ろにある方へ足す
+            "# 索引\n\n- [a.md](a.md) — A\n\n| 仕様 | 内容 |\n| --- | --- |\n| [b.md](b.md) | B |\n",
+            "X",
+            "# 索引\n\n- [a.md](a.md) — A\n\n| 仕様 | 内容 |\n| --- | --- |\n| [b.md](b.md) | B |\n| [x.md](x.md) | X |\n",
+        ),
+        (  # .md でないリンクの行は数えない
+            "# 索引\n\n- [a.md](a.md) — A\n- [site](https://x.example/)\n",
+            "X",
+            "# 索引\n\n- [a.md](a.md) — A\n- [x.md](x.md) — X\n- [site](https://x.example/)\n",
+        ),
+        (  # 記号 + の一覧は数えず、末尾へ空行を挟んで足す
+            "# 索引\n\n+ [a.md](a.md) — A\n",
+            "X",
+            "# 索引\n\n+ [a.md](a.md) — A\n\n- [x.md](x.md) — X\n",
+        ),
+        (  # 一覧も表も無ければ、末尾の改行をそろえて空行の後へ足す
+            "# 索引\n\n本文だけ\n\n",
+            "X",
+            "# 索引\n\n本文だけ\n\n- [x.md](x.md) — X\n",
+        ),
+    ],
+)
+def test_update_index_inserts_after_the_last_indexed_line(tmp_path, text, title, want):
+    mod = load_plan_to_spec()
+    index = tmp_path / "README.md"
+    assert mod.update_index(index, text, "x.md", "x.md", title) is None
+    assert index.read_text(encoding="utf-8") == want
