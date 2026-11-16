@@ -1,6 +1,6 @@
 # #3672 の ai-plugins の値
 
-[issue-3672-design.md](issue-3672-design.md) の「ai-plugins だけの事情」の値の中身と、今の運用から変える点を置く。
+[issue-3672-design.md](issue-3672-design.md) の「ai-plugins だけの事情」の値の中身・今の運用から変える点・移行の順序と PR への割り当てを置く。
 
 ## ai-plugins の値
 
@@ -36,3 +36,38 @@ ai-plugins のセクションは、種類 `plugin` の既定（設計文書の�
 Codex の利用者は、起動時のマーケットプレイスの自動更新で、main が進むたびに版数を比べずに入れ直す（STD10）。取得元が main のままなら、スプリントの PR は版上げの PR を待たずに Codex の利用者へ届く。
 スプリントの PR は設計承認ゲート・cross-review・CI を通っている。Codex の利用者へ届く範囲を版上げの PR に合わせるには取得元の ref を変える必要があり、P1 に当たるため人へ残す（設計文書の「人へ残す判断」）。
 
+## 移行の順序
+
+ai-plugins の工程を動かす NDF は、ai-plugins に入れてある版である。旧い版の NDF は旧いキーだけを読み、新しい版の NDF は旧いキーがあると止まる（I4）。
+そのため、NDF の版と `.ndf/` の中身がいつも合うように、新しい NDF を出す PR と `.ndf/` を移す PR を分ける。順序は次のとおりである。
+
+| 手順 | 動かす NDF | 出す PR と宛先 | 中身 |
+| --- | --- | --- | --- |
+| 1 | 入れてある旧い版 | 実装の PR を develop へ、今の出し方（develop→main の PR）で main へ | 新しい NDF のコードと CI の検査。ai-plugins の `.ndf/`・`.github/workflows/release-dev.yml`・`AGENTS.md`・`docs/versioning-and-distribution.md`（手順 2 へ回す）と、`scripts/check-pr-base.sh`・`.github/workflows/pr-base-guard.yml`（手順 4 へ回す）は含めない（削除の一覧の D1〜D3・D27・D28・D36 のうち ai-plugins の分）。`.ndf/` は旧いままなので、旧い NDF の工程は止まらない |
+| 2 | 使わない（人がコマンドを打つ） | 移行の PR を main から切って main へ | `branch-strategy migrate` で移した `.ndf/`、手順 1 で手順 2 へ回したファイル。develop は手順 1 の同期の PR で main と同じ中身になっている。人が GitHub で中身を見てマージする |
+| 3 | 使わない | — | 人が main の ruleset を変える（C2。設計文書の「人へ残す判断」） |
+| 4 | 手順 1 で出した新しい版（入れ直す） | 宛先の検査の PR を main から切って main へ（スプリントの PR） | `scripts/check-pr-base.sh`・`.github/workflows/pr-base-guard.yml` |
+| 5 | 同上 | 版上げの PR を main から切って main へ | 変えた後の最初の正式版で、受け入れ条件 24 を確かめる（リリース後テスト） |
+
+- 手順 1 のリリースより前に始めたスプリントは、手順 1 のリリースまでに develop へ入れ終える。手順 1 のリリースから手順 3 を終えるまでは、新しいスプリントを始めない（新しい NDF は旧いキーで止まり、旧い NDF は新しいセクションを読めず、手順 3 の前は ruleset が承認 1 を求めて I10 で止まるため）
+- 手順 2 と 3 は NDF の工程を通さない。新しい NDF の読む部品（`load`）はメインディレクトリの `.ndf/` を読み、移行の PR がマージされるまでそこに旧いキーが残るため、I4 で止まる。worktree の用意（`resolve_base`）・承認の証跡（`trail_writer`）・マージ（`land_approved`）のどれも動かない
+- 移行の PR は、人が main から切った worktree で `branch-strategy migrate` を打ち（移行のコマンドは旧いキーを読む。I8）、`gh pr create` で作る。人は GitHub で中身を見てマージし、このマージがリリース承認を兼ねる。手順 2 と 3 で人へ問う承認はこの 1 回である。ruleset はまだ承認 1 を求めるため、承認を満たせなければ人が自分の権限で迂回してマージする
+- 移行の PR の宛先の検査（`guard`）は、手順 1 の旧い `check-pr-base.sh` が走る。旧い検査は、宛先の main の `branch_flow.promotion`（`whole`）を読んで選んで集める判定を外し、ベースブランチ（`base_branch`）を PR の中の `.ndf/worktree.json` から読む。移行の PR はそのキーを消すため、ベースブランチが無いとして通す
+- 新しい `check-pr-base.sh` を手順 4 へ回すのは、宛先のブランチのセクションを `load_at_ref` で読むためである。手順 1 か手順 2 に入れると、宛先の main にセクションが無いため止まり、develop→main の PR と移行の PR の検査が落ちる。手順 4 では main にセクションがあり、新しい NDF の工程で出せる
+- 手順 1 の間、旧い宣言の検査（`check-legacy-branch-decl.py`）は、手順 2・4 へ回したファイルを照らさない。手順 2 の移行の PR と手順 4 の宛先の検査の PR が、それぞれの行を検査の対象へ足す
+- 手順 2 から後、develop は更新されない。develop を消すかは人へ残す（設計文書の「人へ残す判断」）
+
+### PR への割り当て
+
+ai-plugins では、NDF の版と `.ndf/` の中身がいつも合うように、詳細設計（[issue-3672-design-detail.md](issue-3672-design-detail.md) ）の「ファイル配置」の表のファイルを 3 本の PR に分ける（上の「移行の順序」の手順 1・2・4）。
+
+| PR | 載せるファイル | 削除の一覧の検査のデータ（`scripts/legacy-branch-decl.json`） |
+| --- | --- | --- |
+| 実装の PR（手順 1。develop へ出し、今の出し方で main へ） | 「ファイル配置」の表のうち、下の 2 行に挙げる 8 つを除くすべて | 下の 2 行のファイルを照らす行（D1〜D3・D27・D28・D36 のうち ai-plugins の分）を持たない |
+| 移行の PR（手順 2。人が main から切って main へ。NDF の工程を通さない） | `.ndf/project.json`・`.ndf/worktree.json`・`.ndf/supervise.json`（`branch-strategy migrate` の出力）、`.github/workflows/release-dev.yml` の削除、`AGENTS.md`・`docs/versioning-and-distribution.md` の 6 つ | この行のファイルを照らす行（D1〜D3・D28・D36 のうち ai-plugins の分）を足す |
+| 宛先の検査の PR（手順 4。新しい NDF の工程で main から切って main へ） | `scripts/check-pr-base.sh`・`.github/workflows/pr-base-guard.yml` の 2 つ | この行のファイルを照らす行（D27）を足す |
+
+検査のスクリプトに PR の段階を見分ける分岐は持たない。手順 1 のデータに行が無いことだけで、手順 2・4 へ回したファイルを照らさない。
+新しい `check-pr-base.sh` は宛先のブランチのセクションを `load_at_ref` で読むため、main にセクションが入る手順 2 のマージより後に出す（上の「移行の順序」）。
+
+移行の PR と宛先の検査の PR をこの課題で出すかは、設計文書の「人へ残す判断」（C2・P1）に依る。#3641 で行う側に決まったときは、2 本の行をそのまま #3641 へ移し、実装の PR の中身は変えない。
