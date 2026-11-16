@@ -28,6 +28,7 @@ from supervise_lib import queue  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from pace_state import sprint_state  # noqa: E402
+import strategy_fixture  # noqa: E402
 
 AUTO = {"enabled": True, "modes": ["light", "standard", "legacy-refactor"], "verify": "true"}
 STAGES = ["設計", "設計承認ゲート", "設計の結果", "スプリントブランチ", "実装", "検査", "開発版", "本番"]
@@ -49,11 +50,11 @@ def make_repo(tmp_path: Path, pace: dict | None, prod: str = "main", form: bool 
     """宣言だけを持つリポジトリ。pace は pace.json の中身（None なら置かない）。"""
     repo = tmp_path / "repo"
     (repo / ".ndf").mkdir(parents=True)
-    (repo / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "base_branch": "develop", "production_branch": prod}))
     sup = load(REPO / ".ndf" / "supervise.json")
-    if not form:
-        sup.pop("release", None)
+    release = strategy_fixture.pop_release(sup)
     (repo / ".ndf" / "supervise.json").write_text(json.dumps(sup))
+    strategy_fixture.declare(repo, "develop", prod, release if form else None)
+    subprocess.run(["git", "init", "-q", "-b", "develop", str(repo)], check=True, capture_output=True)
     if pace is not None:
         (repo / ".ndf" / "pace.json").write_text(json.dumps({"version": 1, **pace}))
     return repo

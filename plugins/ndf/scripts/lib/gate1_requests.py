@@ -115,9 +115,10 @@ def merge_only(run, main: str | Path, pr: int, issue: int, old: str, new: str) -
 
     if not (old and new and old.strip("0")):
         return None
-    base = repo.base_branch(main)
-    if not base:
+    s = repo.strategy_or_none(main)
+    if s is None:
         return None
+    base = s.base
     cwd = str(main)
     if run(["git", "fetch", "-q", "origin", base, f"refs/pull/{pr}/head"], cwd=cwd)[0] != 0:
         return None

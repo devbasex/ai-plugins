@@ -48,6 +48,7 @@ from supervise_lib import engine, paths, templates, worker_steps  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import worker_fake  # noqa: E402
+import strategy_fixture  # noqa: E402
 
 
 def run_main(mod, argv, capsys):
@@ -297,6 +298,7 @@ def test_new_check_with_scope_uses_drive_steps(tmp_path):
         base="main",
         test_cmd="pytest {paths}",
         test_all=".",
+        flow=strategy_fixture.snapshot(),
     )
     steps = {s["id"]: s for s in templates.plan_check(a)["steps"]}
     assert steps["refactor"]["type"] == "drive" and "--workflow-step" in steps["refactor"]["cmd"]

@@ -111,7 +111,7 @@ SCRIPT_WORDS: dict[str, str] = {
     "runtime-list": r"claude,codex,kiro",
     "origin-develop": r"origin/develop",
     # 特定のブランチ名の決め打ち（#3309）。引用符の有無・`origin/` の付いた形を問わず拾う。名前は宣言か
-    # `lib/branch_flow.py` の定数から読む
+    # `lib/strategy_rows.py` の定数から読む
     "origin-main": r"origin/(?:main|master)\b",
     "quoted-main": r"[\"'](?:main|master)[\"']",
     "quoted-develop": r"[\"']develop[\"']",
@@ -387,6 +387,58 @@ def default_problems(defaults: list[tuple[str, int]], plugin_root: pathlib.Path)
     except (OSError, ValueError, LookupError):
         return [f"リモート名の既定が {places} にあるが、/{'/'.join(pointer)} ではない（{where}）"]
     return []
+
+
+# --- ブランチ戦略の宣言（#3672 の決定 13・I14） -------------------------------------------------
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
+BRANCH_STRATEGY_SCHEMA = "plugins/ndf/scripts/data/branch-strategy.schema.json"
+BRANCH_STRATEGY_PRESETS = "plugins/ndf/scripts/data/branch-strategy-presets.json"
+# 宣言を読んで振る舞いを決める部品。ブランチ名を決め打たず、セクションの値だけを読む
+BRANCH_STRATEGY_CODE = (
+    "plugins/ndf/scripts/lib/branch_strategy.py",
+    "plugins/ndf/scripts/release_lib/strategy_route.py",
+    "plugins/ndf/scripts/release_lib/land.py",
+)
+# 製品の既定に入れない ai-plugins の名前（リポジトリ・プラグイン・ワークフロー）
+AI_PLUGINS_NAMES = ("ai-plugins", "devbasex", '"plugin": "ndf"', "release-cd.yml", "release-dev.yml")
+PINNED_BRANCH = re.compile(r"""["'](develop|main|master)["']""")
+
+
+def _defaults_in(node, at: str = "") -> list[str]:
+    if isinstance(node, dict):
+        out = [at or "/"] if "default" in node else []
+        for k, v in node.items():
+            out += _defaults_in(v, f"{at}/{k}")
+        return out
+    if isinstance(node, list):
+        return [p for i, v in enumerate(node) for p in _defaults_in(v, f"{at}/{i}")]
+    return []
+
+
+def branch_strategy_problems(root: pathlib.Path) -> list[str]:
+    """スキーマの `default`・既定の表の ai-plugins の名前と迂回・宛先の決め打ちを見つける。1 件につき 1 行（パス:行と理由）。"""
+    problems = []
+    try:
+        schema = json.loads((root / BRANCH_STRATEGY_SCHEMA).read_text(encoding="utf-8"))
+        presets_text = (root / BRANCH_STRATEGY_PRESETS).read_text(encoding="utf-8")
+        presets = json.loads(presets_text)
+        code = {rel: (root / rel).read_text(encoding="utf-8") for rel in BRANCH_STRATEGY_CODE}
+    except (OSError, ValueError) as e:
+        raise ScanError(f"ブランチ戦略の宣言の検査の対象を読めない: {e}") from e
+    for at in _defaults_in(schema):
+        problems.append(f"{BRANCH_STRATEGY_SCHEMA}:{at}: スキーマに default がある（宣言は解析が書き、読む部品は既定値へ倒さない）")
+    for n, line in enumerate(presets_text.splitlines(), 1):
+        for name in AI_PLUGINS_NAMES:
+            if name in line:
+                problems.append(f"{BRANCH_STRATEGY_PRESETS}:{n}: ai-plugins の名前 {name} が既定の表にある")
+    for kind, row in (presets.get("kinds") or {}).items():
+        if (row.get("section") or {}).get("merge", {}).get("admin"):
+            problems.append(f"{BRANCH_STRATEGY_PRESETS}: 種類 {kind} の既定が管理者の迂回（merge.admin）を使う")
+    for rel, text in code.items():
+        for n, line in enumerate(text.splitlines(), 1):
+            if PINNED_BRANCH.search(line):
+                problems.append(f"{rel}:{n}: ブランチ名を決め打っている（セクションの branches から読む）")
+    return problems
 
 
 def _read(path: pathlib.Path) -> str:
@@ -712,6 +764,14 @@ def main() -> int:
     if result.default_problems:
         print_problems(result.default_problems)
         return 2
+    try:
+        strategy_problems = branch_strategy_problems(REPO_ROOT)
+    except ScanError as e:
+        print(f"{PREFIX} {e}", file=sys.stderr)
+        return 2
+    if strategy_problems:
+        print_problems(strategy_problems)
+        return 1
 
     try:
         rows = read_allow(pathlib.Path(args.allow))

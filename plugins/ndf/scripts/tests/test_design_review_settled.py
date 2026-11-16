@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from supervise_lib import commands, limits, sprint_waves  # noqa: E402
 from test_supervise_contract import cli  # noqa: E402
 from test_supervise_limits import drive  # noqa: E402
+import strategy_fixture  # noqa: E402
 
 pytestmark = pytest.mark.usefixtures("issue_bodies")
 
@@ -30,7 +31,15 @@ LIMITS = dict(max_attempts=2, max_cost=1.5, max_seconds=3600)
 
 
 def build(kind: str, tmp: Path) -> dict:
-    a = SimpleNamespace(base="main", mode="standard", name="m1", worktree=str(tmp), state=str(tmp / "state"), revise_notes=None)
+    a = SimpleNamespace(
+        base="main",
+        mode="standard",
+        name="m1",
+        worktree=str(tmp),
+        state=str(tmp / "state"),
+        revise_notes=None,
+        flow=strategy_fixture.snapshot(),
+    )
     fn = {"normal": sprint_waves.plan_sprint_design, "advise": sprint_waves.plan_advise_design, "mvv": sprint_waves.plan_mvv_design}[kind]
     return limits.fill(fn(a, 42, str(tmp)))
 

@@ -35,6 +35,9 @@ SKILL_MD = HERE.parent / "SKILL.md"
 PLUGIN_ROOT = HERE.parents[2]
 LIB = PLUGIN_ROOT / "scripts" / "lib"
 sys.path[:0] = [str(LIB), str(HERE)]
+import deps  # noqa: E402
+
+deps.require("jsonschema")  # --branch の起点はブランチ戦略の宣言（JSON Schema で検査する）から読む
 import gh_call  # noqa: E402
 import gh_sections  # noqa: E402
 import repo as repo_lib  # noqa: E402

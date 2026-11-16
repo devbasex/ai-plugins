@@ -52,6 +52,8 @@
     "container-reach.stop-grace": {"summary": "打ち切った起動の、SIGTERM から SIGKILL までの猶予", "seconds": 5},
     "context-decisions.git": {"summary": "worktree の根を調べる git の上限", "seconds": 5},
     "delivery.cd-result": {"summary": "CD の結果の待ちの上限。行の宣言が無いときの既定", "seconds": 1800},
+    "branch-strategy.measure": {"summary": "ブランチ戦略の宣言の measure が事例を集める締め切り（#3672）", "seconds": 120},
+    "branch-strategy.write-lock": {"summary": "ブランチ戦略の宣言を書く錠の待ちの上限（#3672。write・migrate・remove が共有する）", "seconds": 30},
     "delivery.cd-result-total": {"summary": "CD の結果の 1 回の読み取りの合計の上限", "seconds": 7200},
     "durable.poll": {"summary": "耐久キューと通知の問い合わせの間隔（1 ステップの上乗せを 1 秒以内に収める）", "interval": 0.2},
     "durable.wait-from-poll": {"summary": "外から耐久ワークフローを待つ問い合わせの間隔", "interval": 1},

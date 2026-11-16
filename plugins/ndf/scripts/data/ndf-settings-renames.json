@@ -1,0 +1,184 @@
+{
+  "summary": "設定のキーの改名表（#3613・#3672 の決定 3）。列は id・file（ndf-files の ID）・old・new_file・new（JSON Pointer）・values（旧い値 → 新しい値。無ければ値を変えない）・transform（値の形を変えて移す行）。new が null の行は移した後に消す旧いキー（remove の行）。new_file が project で new が /branch_strategy の下の行は、解析の branch-strategy migrate と旧い宣言の検査だけが読む（決定 10）。正本は plugins/ndf-next/contracts/domains/ndf-settings-renames.json、10 系の plugins/ndf/scripts/data/ndf-settings-renames.json はコピー（一致の検査は #3681）",
+  "rows": [
+    {
+      "id": "worktree-base-branch",
+      "file": "worktree",
+      "old": "/base_branch",
+      "new_file": "project",
+      "new": "/branch_strategy/branches/base",
+      "issue": 3672
+    },
+    {
+      "id": "worktree-production-branch",
+      "file": "worktree",
+      "old": "/production_branch",
+      "new_file": "project",
+      "new": "/branch_strategy/branches/production",
+      "issue": 3672
+    },
+    {
+      "id": "worktree-flow-start",
+      "file": "worktree",
+      "old": "/branch_flow/start",
+      "new_file": "project",
+      "new": "/branch_strategy/sprint/start",
+      "issue": 3672
+    },
+    {
+      "id": "worktree-flow-integrate",
+      "file": "worktree",
+      "old": "/branch_flow/integrate",
+      "new_file": "project",
+      "new": "/branch_strategy/sprint/integrate",
+      "issue": 3672
+    },
+    {
+      "id": "worktree-flow-doc-prs",
+      "file": "worktree",
+      "old": "/branch_flow/doc_prs",
+      "new_file": "project",
+      "new": "/branch_strategy/sprint/doc_prs",
+      "issue": 3672
+    },
+    {
+      "id": "worktree-flow-promotion",
+      "file": "worktree",
+      "old": "/branch_flow/promotion",
+      "new_file": "project",
+      "new": "/branch_strategy/release_strategy",
+      "issue": 3672,
+      "values": {
+        "whole": "merge_base_branch",
+        "selected": "release_branch"
+      }
+    },
+    {
+      "id": "worktree-flow-release-strategy",
+      "file": "worktree",
+      "old": "/branch_flow/release_strategy",
+      "new_file": "project",
+      "new": "/branch_strategy/release_strategy",
+      "issue": 3672,
+      "values": {
+        "merge_base_branch": "merge_base_branch",
+        "release_branch": "release_branch",
+        "trunk": "trunk"
+      }
+    },
+    {
+      "id": "worktree-flow-reviews",
+      "file": "worktree",
+      "old": "/branch_flow/reviews",
+      "new_file": "project",
+      "new": "/branch_strategy/reviews",
+      "issue": 3672
+    },
+    {
+      "id": "worktree-flow",
+      "file": "worktree",
+      "old": "/branch_flow",
+      "new_file": null,
+      "new": null,
+      "issue": 3672
+    },
+    {
+      "id": "project-production-merge-admin",
+      "file": "project",
+      "old": "/production_merge/admin",
+      "new_file": "project",
+      "new": "/branch_strategy/merge/admin",
+      "issue": 3672
+    },
+    {
+      "id": "project-production-merge",
+      "file": "project",
+      "old": "/production_merge",
+      "new_file": null,
+      "new": null,
+      "issue": 3672
+    },
+    {
+      "id": "project-delivery",
+      "file": "project",
+      "old": "/delivery",
+      "new_file": "project",
+      "new": "/branch_strategy/release/deliveries",
+      "issue": 3672
+    },
+    {
+      "id": "supervise-release-form",
+      "file": "supervise",
+      "old": "/release/form",
+      "new_file": "project",
+      "new": "/branch_strategy/release/form",
+      "issue": 3672
+    },
+    {
+      "id": "supervise-release-plugin",
+      "file": "supervise",
+      "old": "/release/plugin",
+      "new_file": "project",
+      "new": "/branch_strategy/release/plugin",
+      "issue": 3672
+    },
+    {
+      "id": "supervise-release-runtimes",
+      "file": "supervise",
+      "old": "/release/runtimes",
+      "new_file": "project",
+      "new": "/branch_strategy/release/runtimes",
+      "issue": 3672
+    },
+    {
+      "id": "supervise-release-dev-workflow",
+      "file": "supervise",
+      "old": "/release/dev_workflow",
+      "new_file": "project",
+      "new": "/branch_strategy/channels",
+      "issue": 3672,
+      "transform": "dev_channel"
+    },
+    {
+      "id": "supervise-release",
+      "file": "supervise",
+      "old": "/release",
+      "new_file": null,
+      "new": null,
+      "issue": 3672
+    },
+    {
+      "id": "release-version-files",
+      "file": "release",
+      "old": "/version_files",
+      "new_file": "project",
+      "new": "/branch_strategy/release/version_store/files",
+      "issue": 3672,
+      "transform": "version_files"
+    },
+    {
+      "id": "worktree-misplaced-section",
+      "file": "worktree",
+      "old": "/branch_strategy",
+      "new_file": null,
+      "new": null,
+      "issue": 3672
+    },
+    {
+      "id": "supervise-misplaced-section",
+      "file": "supervise",
+      "old": "/branch_strategy",
+      "new_file": null,
+      "new": null,
+      "issue": 3672
+    },
+    {
+      "id": "release-misplaced-section",
+      "file": "release",
+      "old": "/branch_strategy",
+      "new_file": null,
+      "new": null,
+      "issue": 3672
+    }
+  ]
+}

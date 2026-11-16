@@ -6,16 +6,22 @@
     "options": [],
     "positionals": [],
     "subcommands": {
+      "branch-strategy": {
+        "options": [
+          "--answers",
+          "--digest",
+          "--dry-run",
+          "--kind",
+          "--result",
+          "--root"
+        ],
+        "positionals": [
+          "verb"
+        ]
+      },
       "check": {
         "options": [
           "--force",
-          "--root"
-        ],
-        "positionals": []
-      },
-      "drift": {
-        "options": [
-          "--measure",
           "--root"
         ],
         "positionals": []
@@ -46,6 +52,8 @@
     }
   },
   "env": [
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
     "HOME",
     "MONITOR_NO_EARLY_ERROR",
     "NDF_DEPS_REEXEC",
@@ -59,14 +67,7 @@
     {
       "file": "project.json",
       "keys": [
-        "ndf_policies",
-        "production_merge"
-      ]
-    },
-    {
-      "file": "worktree.json",
-      "keys": [
-        "base_branch"
+        "ndf_policies"
       ]
     }
   ],

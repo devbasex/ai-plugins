@@ -184,8 +184,6 @@ LARAVEL_ANSWERS = {
         },
         "reason": "AGENTS.md:3",
     },
-    "branches": {"value": {"base": "main", "production": "main"}},
-    "delivery": {"unknown": "デプロイの設定がリポジトリに無い"},
     "issues": {"value": {"primary": "redmine", "others": ["github"]}},
     "ndf_policies": {"value": {"doc_lint": False, "reject_md_wording_tests": False}},
 }
@@ -214,7 +212,7 @@ def gh_calls(env):
     return [json.loads(line) for line in f.read_text(encoding="utf-8").splitlines()] if f.exists() else []
 
 
-KEYS = ("languages", "test", "test_duration", "ci", "services", "delivery", "issues", "checks", "ndf_policies", "instructions")
+KEYS = ("languages", "test", "test_duration", "ci", "services", "issues", "checks", "ndf_policies", "instructions")
 
 
 # --- AC1: 宣言の無いリポジトリで解析すると宣言ができる -----------------------------------
@@ -236,7 +234,6 @@ def test_analysis_creates_the_declaration_with_all_items(laravel, env, tmp_path)
     assert d["test"]["suites"][0]["container"]["service"] == "app"
     assert {"name": "pint", "config": "pint.json"} in d["checks"]["tools"]
     assert {"name": "larastan", "config": "composer.json"} in d["checks"]["tools"]
-    assert d["delivery"] == {"unknown": "デプロイの設定がリポジトリに無い"}
 
 
 def test_measure_proposes_materials_from_direct_dependencies_as_a_question(laravel, env, tmp_path):
@@ -257,7 +254,6 @@ def test_measure_reads_ci_junit_steps_and_required_checks(laravel, env, tmp_path
     assert ci["required_checks"] == ["phpunit"]
     assert ci["workflows"] == [{"path": ".github/workflows/test.yml", "jobs": 3, "wall_seconds": 390.0}]
     assert "redmine" in m["items"]["issues"]["candidates"]
-    assert any("main 1" in e["text"] for e in m["items"]["branches"]["evidence"])
 
 
 def test_ndf_record_is_listed_as_a_source(plain, env, tmp_path):
@@ -372,39 +368,19 @@ def test_without_gh_ci_items_are_unknown_and_measure_exits_0(laravel, env, tmp_p
 def test_hand_values_are_kept_and_mismatch_shows_both(laravel, env, tmp_path):
     hand = {"suites": [{"name": "unit", "runner": "phpunit", "command": "./vendor/bin/phpunit"}]}
     write(laravel, ".ndf/project.json", json.dumps({"version": 1, "test": hand}))
-    wt = {"$schema": "x", "version": 1, "guard": {"allow_paths": ["docs/"]}, "production_branch": "release"}
-    write(laravel, ".ndf/worktree.json", json.dumps(wt))
+    wt = json.dumps({"$schema": "x", "version": 1, "guard": {"allow_paths": ["docs/"]}})
+    write(laravel, ".ndf/worktree.json", wt)
     code, out, text, _ = analyze(env, laravel, tmp_path, LARAVEL_ANSWERS)
     assert code == 0, text
     d = decl(laravel)
     assert d["test"] == hand
     mm = [i for i in out["items"] if i["kind"] == "mismatch"]
-    assert {i["key"] for i in mm} == {"test", "worktree.json#production_branch"}
+    assert {i["key"] for i in mm} == {"test"}
     test_mm = next(i for i in mm if i["key"] == "test")
     assert test_mm["declared"] == hand and test_mm["analyzed"]["suites"][0]["name"] == "phpunit"
     assert "宣言 " in text and " / 解析 " in text
-    new_wt = json.loads((laravel / ".ndf" / "worktree.json").read_text(encoding="utf-8"))
-    assert list(new_wt) == ["$schema", "version", "guard", "production_branch", "base_branch"]
-    assert new_wt["production_branch"] == "release" and new_wt["base_branch"] == "main"
-    assert new_wt["guard"] == wt["guard"]
-
-
-def test_delivery_rows_on_production_or_base_are_written_as_channel(laravel, env, tmp_path):
-    """#2336 の決定 7: 本番・起点の名前を写した `branch` は worktree.json の値で `channel` に直し、ほかのブランチの行は変えない。"""
-    write(laravel, ".ndf/worktree.json", json.dumps({"version": 1, "production_branch": "release"}))
-    row = {"kind": "auto", "trigger": "push", "versioned": False}
-    rows = [
-        {**row, "target": "prod", "branch": "release"},
-        {**row, "target": "stg", "branch": "main"},
-        {**row, "target": "pre", "branch": "feature/x"},
-    ]
-    code, _, text, _ = analyze(env, laravel, tmp_path, {**LARAVEL_ANSWERS, "delivery": {"value": rows}})
-    assert code == 0, text
-    assert decl(laravel)["delivery"] == [
-        {**row, "target": "prod", "channel": "production"},
-        {**row, "target": "stg", "channel": "base"},
-        {**row, "target": "pre", "branch": "feature/x"},
-    ]
+    # ブランチの名前はブランチ戦略の宣言（branch-strategy の作成）が持ち、解析は worktree.json を書かない（#3672）
+    assert (laravel / ".ndf" / "worktree.json").read_text(encoding="utf-8") == wt
 
 
 def test_hand_secret_value_is_dropped_before_keeping(laravel, env, tmp_path):

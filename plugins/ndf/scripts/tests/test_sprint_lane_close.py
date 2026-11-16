@@ -24,12 +24,15 @@ import parallel_plan as pp  # noqa: E402
 import parallel_release  # noqa: E402
 from supervise_lib import sprint_lane_close as slc  # noqa: E402
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import strategy_fixture  # noqa: E402
+
 
 @pytest.fixture
 def a(tmp_path):
     return argparse.Namespace(
         worktree=str(tmp_path), name="s1", issue=[11, 12], mode="standard", base="develop", out=str(tmp_path / "out"), state=None,
-        test_limits={"ci_wait_timeout": 600},
+        test_limits={"ci_wait_timeout": 600}, flow=strategy_fixture.snapshot("web-develop", "develop", "main"),
     )  # fmt: skip
 
 

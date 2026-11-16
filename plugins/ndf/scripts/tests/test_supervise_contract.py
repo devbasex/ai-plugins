@@ -8,6 +8,7 @@
   （`run` の完了・承認ゲートで 0 / ほかは 3、`wait` の done 0 / attention 20 / 上限 3）を `contract.json` と突き合わせる
 
 固定した値は移す前の版で書き出したものである。移す移行ステップは、この固定を直さずに通す。
+`plans/` は、ブランチ戦略の宣言（#3672。plugin の種類）を置いたリポジトリで書き出し直した。
 """
 
 from __future__ import annotations
@@ -28,6 +29,8 @@ SUPERVISE = SCRIPTS / "supervise.py"
 PY = sys.executable
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import inproc  # noqa: E402
+import strategy_fixture  # noqa: E402
+from release_repo import push_origin  # noqa: E402
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "supervise-contract"
 SUBCOMMANDS = ["run", "history", "expected", "example", "new", "queue", "wait", "design-glossary", "note", "sync-check"]
@@ -76,13 +79,15 @@ def shape(res: dict) -> dict:
 def make_repo(tmp: Path) -> Path:
     root = tmp / "repo"
     (root / ".ndf").mkdir(parents=True)
-    (root / ".ndf" / "worktree.json").write_text('{"version": 1, "base_branch": "main", "production_branch": "main"}\n')
-    decl = {
-        "version": 1,
-        "test": {"command": "make test {paths}"},
-        "release": {"form": "package-plugin", "plugin": "foo", "runtimes": ["claude"]},
-    }
+    subprocess.run(["git", "init", "-q", "-b", "main", str(root)], check=True, capture_output=True)
+    strategy_fixture.declare(root, "main", release={"form": "package-plugin", "plugin": "foo", "runtimes": ["claude"]})
+    decl = {"version": 1, "test": {"command": "make test {paths}"}}
     (root / ".ndf" / "supervise.json").write_text(json.dumps(decl) + "\n")
+    # 種別リリースは本番ブランチの先頭（origin/main）の宣言を読む（#3308）
+    git = ["git", "-C", str(root), "-c", "user.email=t@example.com", "-c", "user.name=t"]
+    subprocess.run([*git, "add", "-A"], check=True, capture_output=True)
+    subprocess.run([*git, "commit", "-q", "-m", "init"], check=True, capture_output=True)
+    push_origin(root, "main")
     return root
 
 

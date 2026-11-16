@@ -14,6 +14,8 @@ import pytest
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS / "lib"))
 sys.path.insert(0, str(SCRIPTS))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import strategy_fixture  # noqa: E402
 import parallel_plan as pp  # noqa: E402
 import parallel_release as prl  # noqa: E402
 from relay_lib import hub as hb  # noqa: E402
@@ -295,23 +297,21 @@ def test_start_on_a_running_plan_outside_a_wrapper_still_answers(tmp_path, run_p
 
 # ---- 起動の前のリリースの検査（#2616 の受け入れ条件 16・17） ----
 
-AUTO = [{"kind": "auto", "channel": "base", "target": "stg"}, {"kind": "auto", "channel": "production", "target": "prod"}]
+ROW = {"trigger": "マージ", "versioned": False}
+AUTO = [{**ROW, "kind": "auto", "channel": "base", "target": "stg"}, {**ROW, "kind": "auto", "channel": "production", "target": "prod"}]
 
 
-def _declare(main, delivery=None, form=False):
-    (main / ".ndf" / "worktree.json").write_text(json.dumps({"base_branch": "develop", "production_branch": "main"}))
-    if delivery is not None:
-        (main / ".ndf" / "project.json").write_text(json.dumps({"delivery": delivery}))
-    if form:
-        (main / ".ndf" / "supervise.json").write_text(json.dumps({"release": {"form": "package-plugin", "plugin": "ndf"}}))
+def _declare(main, rows=None, form=False):
+    """ベースブランチ develop・本番ブランチ main のブランチ戦略の宣言（届け先の行 `rows`・`form` なら package-plugin）を置く。"""
+    release = {"form": "package-plugin", "plugin": "ndf"} if form else None
+    strategy_fixture.declare(main, "develop", "main", release, deliveries=rows)
 
 
 @pytest.mark.parametrize(
     "rows, form, at",
     [
-        ([{"kind": "manual", "target": "prod", "trigger": "手で流す"}], False, "delivery"),
-        (None, False, "delivery"),
-        ({"unknown": "調べていない"}, False, "delivery"),
+        ([{"kind": "manual", "target": "prod", "trigger": "手で流す", "versioned": False}], False, "release.deliveries"),
+        (None, False, "release.deliveries"),
         (None, True, "release.plugin"),
     ],
 )
@@ -337,7 +337,7 @@ def test_check_cli_counts_the_warning_and_exits_zero(tmp_path):
     main = _git_main(tmp_path)
     assert _cli(main, "init", "p1", stdin=json.dumps(BASE))[0] == 0
     code, res = _cli(main, "check", "p1")
-    assert code == 0 and [i["at"] for i in res["items"] if i.get("rule") == "release"] == ["delivery"]
+    assert code == 0 and [i["at"] for i in res["items"] if i.get("rule") == "release"] == ["release.deliveries"]
     warned = res["metrics"]["warnings"]
     _declare(main, AUTO)
     code, res = _cli(main, "check", "p1")

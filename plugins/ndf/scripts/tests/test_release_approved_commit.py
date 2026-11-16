@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import strategy_fixture  # noqa: E402
 
 SCRIPT = Path(__file__).resolve().parents[1] / "release-steps.py"
 VER = "1.2.3"
@@ -57,9 +58,7 @@ def world(tmp_path: Path):
     git(seed, "init", "-q", "-b", "develop")
     git(seed, "config", "user.email", "t@example.com")
     git(seed, "config", "user.name", "t")
-    (seed / ".ndf").mkdir()
-    (seed / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "base_branch": "trunk", "production_branch": "live"}))
-    (seed / ".ndf" / "supervise.json").write_text(json.dumps({"release": {"form": "package-plugin", "plugin": "foo"}}))
+    strategy_fixture.declare(seed, "trunk", "live", {"form": "package-plugin", "plugin": "foo"})
     commit(seed, "a.txt", "a\n", "init")
     git(seed, "remote", "add", "origin", str(origin))
     git(seed, "push", "-q", "origin", "HEAD:trunk", "HEAD:live")

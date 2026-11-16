@@ -152,6 +152,12 @@ def judge(trails: list[Trail], roles: dict[str, str | None], head: str, by: str 
     return Judgment("success", _cut(f"承認: {last.login} {last.created_at}"), last.login, last.created_at, last.url or None)
 
 
+def approved_trail(trails: list[Trail], roles: dict[str, str | None]) -> Trail | None:
+    """承認権限を持つ人の最新の、編集されていない証跡（`judge` が照らす証跡と同じ 1 件）。無ければ None（#3672 の land）。"""
+    valid, _ = _narrow(trails, roles, None)
+    return max(valid, key=lambda t: t.created_at) if valid else None
+
+
 def approved_review_commit(reviews: list[dict], perms: dict[str, str | None]) -> str | None:
     """必須レビューの承認者として有効な人（`permission` が admin か write）の最新の APPROVED のレビューのコミット（I8）。"""
     got = [
@@ -176,7 +182,7 @@ def render_admin_record(sha: str, trail_url: str) -> str:
     """迂回の記録の本文。証跡の印を持たない（証跡の判定に数えない）。"""
     return (
         f"{ADMIN_MARK}\n## 管理者の迂回でマージした\n\n{ADMIN_SHA_LINE} `{ac.parse_sha(sha)}`\n"
-        f"{ADMIN_TRAIL_LINE} {trail_url or '（読めない）'}\n宣言: `.ndf/project.json` の `production_merge.admin`\n"
+        f"{ADMIN_TRAIL_LINE} {trail_url or '（読めない）'}\n宣言: `.ndf/project.json` の `branch_strategy.merge.admin`\n"
     )
 
 
@@ -269,6 +275,14 @@ def open_prs_at(repo: str, sha: str, base: str) -> list[int]:
     return sorted(int(r["number"]) for r in rows if str((r.get("head") or {}).get("sha") or "").lower() == sha.lower())
 
 
+def open_prs_at_base(repo: str, base: str) -> list[dict]:
+    """`base` 宛ての開いた PR の番号と先端（番号の昇順）。"""
+    rows = _pages(f"repos/{repo}/pulls?state=open&base={base}&per_page=100", f"{base} 宛ての PR")
+    return sorted(
+        ({"number": int(r["number"]), "head": str((r.get("head") or {}).get("sha") or "").lower()} for r in rows), key=lambda r: r["number"]
+    )
+
+
 def post_status(repo: str, sha: str, j: Judgment) -> None:
     """先端へ `ndf/release-approval` の commit status を付ける（同じ名前は最新が効く）。"""
     args = [f"repos/{repo}/statuses/{sha}", "-X", "POST", "-f", f"state={j.state}"]
@@ -314,3 +328,19 @@ def write_admin_record(repo: str, pr: int, sha: str, trail_url: str) -> tuple[bo
     if not a.ok:
         raise TrailError("unreadable", f"迂回の記録を置けない: {a.error[:200]}")
     return True, (a.value or {}).get("url") or ""
+
+
+# 証跡の書き手（#3672 の I12）。ケースごとに 1 つだけで、ほかの部品は同じ証跡を書かない
+WRITER_ANSWER = "answer"  # リリース承認ゲートの答えを書く手順（`release-steps answer`）
+WRITER_LAND = "land"  # 人のマージの記録（`release-steps land` がマージ済みを見つけたとき）
+WRITER_GITHUB = "github"  # GitHub のレビューの承認（NDF は書かない）
+
+
+def trail_writer(strategy, merged_by_human: bool) -> str:
+    """承認の証跡の書き手をケースごとに 1 つ返す（設計文書の「承認とマージ」の表）。"""
+    sec = strategy.section
+    if sec["approval"]["via"] == "review":
+        return WRITER_GITHUB
+    if merged_by_human or sec["merge"]["actor"] == "human":
+        return WRITER_LAND
+    return WRITER_ANSWER

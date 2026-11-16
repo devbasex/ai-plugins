@@ -16,18 +16,19 @@ from sprint_loop_names import LOOP_DIR
 
 
 def base_tracking_ref(main: Path) -> str:
-    """ベースブランチ（`.ndf/worktree.json` の `base_branch` → 既定ブランチ）の `origin/<名>`。決まらなければ空。"""
+    """ベースブランチ（ブランチ戦略の宣言の `branches.base`）の `origin/<名>`。宣言を読めなければ空。"""
     import repo
 
-    b = repo.base_branch(main)
-    return f"origin/{b}" if b else ""
+    s = repo.strategy_or_none(main)
+    return f"origin/{s.base}" if s else ""
 
 
 def release_plugin(main: Path) -> str:
-    """配るプラグイン（`.ndf/supervise.json` の `release.plugin`）。無ければ空。"""
-    from supervise_lib.decl import read_decl
+    """配るプラグイン（ブランチ戦略の宣言の `release.plugin`）。無ければ空。"""
+    import repo
 
-    return str((read_decl([Path(main)], "supervise.json").get("release") or {}).get("plugin") or "")
+    s = repo.strategy_or_none(main)
+    return str((s.section["release"].get("plugin") if s else None) or "")
 
 
 def git_head(main: Path) -> str:

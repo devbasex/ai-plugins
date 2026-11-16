@@ -11,6 +11,7 @@ import re
 import tempfile
 from pathlib import Path
 
+import branch_strategy
 import gh_parts
 import repo
 from step_result import EXIT_PRECONDITION, EXIT_UNREADABLE, StepError
@@ -107,11 +108,13 @@ def pr_for_report(root, number):
 
 
 def require_base(root, given=None) -> str:
-    """宛先のブランチ。`--base` → `.ndf/worktree.json` の `base_branch` → 既定ブランチの順。決まらなければ止まる。"""
-    base = given or repo.base_branch(root)
-    if not base:
-        raise StepError("起点のブランチを決められない（.ndf/worktree.json の base_branch か --base を渡す）", EXIT_PRECONDITION)
-    return base
+    """宛先のブランチ。`--base` → ブランチ戦略の宣言のスプリントの PR の宛先の順。宣言を読めなければ止まる。"""
+    if given:
+        return given
+    try:
+        return repo.branch_strategy_of(root).pr_target("sprint")
+    except branch_strategy.StrategyError as e:
+        raise StepError(f"起点のブランチを決められない（--base を渡すか宣言を直す）: {e.reason}", EXIT_PRECONDITION) from e
 
 
 def target_pr(root, branch, a, must_exist):

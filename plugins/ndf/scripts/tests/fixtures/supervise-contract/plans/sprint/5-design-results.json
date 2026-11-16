@@ -14,7 +14,7 @@
       "type": "run",
       "stage": "計画",
       "timeout": 600,
-      "cmd": "python3 <NDF>/scripts/supervise.py design-results --manifest <TMP>/out/sprint/sprint.json --base main --root <TMP>/repo --design 16",
+      "cmd": "python3 <NDF>/scripts/supervise.py design-results --manifest <TMP>/out/sprint/sprint.json --base sprint/m9 --root <TMP>/repo --design 16",
       "next": "end"
     }
   ],

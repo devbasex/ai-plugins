@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 from collections import Counter
 from pathlib import Path
 
@@ -21,18 +22,30 @@ def _git(root: Path, *args: str) -> str | None:
     return r.stdout.strip() if r.returncode == 0 else None
 
 
+def _declared_base(root: Path) -> str | None:
+    """ブランチ戦略の宣言のベースブランチ（読む部品 `lib/branch_strategy.py`）。読めなければ None。"""
+    lib = root / "plugins" / "ndf" / "scripts" / "lib"
+    if str(lib) not in sys.path:
+        sys.path.insert(0, str(lib))
+    try:
+        import branch_strategy
+    except ImportError:
+        return None
+    try:
+        return branch_strategy.load_strategy(root).base
+    except branch_strategy.StrategyError:
+        return None
+
+
 def base_ref(root: Path, given: str | None) -> str:
     """比べる起点の merge-base（`<ref>@<sha>` の ref と sha）。決められなければ `RatchetError`。"""
     ref = given
     if not ref:
         name = os.environ.get("GITHUB_BASE_REF")
         if not name:
-            try:
-                name = json.loads((root / ".ndf" / "worktree.json").read_text(encoding="utf-8")).get("base_branch")
-            except (OSError, ValueError, AttributeError):
-                name = None
+            name = _declared_base(root)
         if not name:
-            raise RatchetError("起点のブランチが分からない（--base・GITHUB_BASE_REF・.ndf/worktree.json の base_branch）")
+            raise RatchetError("起点のブランチが分からない（--base・GITHUB_BASE_REF・ブランチ戦略の宣言の branches.base）")
         ref = f"origin/{name}"
     sha = _git(root, "merge-base", ref, "HEAD")
     if not sha:

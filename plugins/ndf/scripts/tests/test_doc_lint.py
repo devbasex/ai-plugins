@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import strategy_fixture  # noqa: E402
 
 SCRIPTS = Path(__file__).resolve().parents[1]
 PY = sys.executable
@@ -92,10 +93,10 @@ def test_uncommitted_changes_and_excludes(repo):
 
 
 def test_base_from_declaration(repo):
-    # --base が無ければ .ndf/worktree.json の base_branch（origin/<名前>）を起点にする
+    # --base が無ければブランチ戦略の宣言のベースブランチ（origin/<名前>）を起点にする
     git(repo, "remote", "add", "origin", str(repo))
     git(repo, "fetch", "-q", "origin")
-    write(repo, ".ndf/worktree.json", '{"version": 1, "base_branch": "develop"}\n')
+    strategy_fixture.declare(repo, "develop", "main")
     write(repo, "docs/c.md", "# 新規\n\n以前は別だった。\n")
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "docs")
@@ -106,7 +107,7 @@ def test_base_from_declaration(repo):
 
 def test_no_base_is_unreadable(repo):
     p = subprocess.run([PY, str(SCRIPTS / "doc-lint.py")], capture_output=True, text=True, cwd=repo)
-    assert p.returncode == 2 and "base_branch" in json.loads(p.stdout.strip().splitlines()[-1])["summary"]
+    assert p.returncode == 2 and "branch_strategy" in json.loads(p.stdout.strip().splitlines()[-1])["summary"]
 
 
 def test_unknown_base_is_unreadable(repo):

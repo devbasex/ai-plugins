@@ -23,6 +23,7 @@ from worktree_helpers import (
     drop_remote_tracking,
     git,
     write_declaration,
+    write_strategy,
 )
 
 
@@ -63,12 +64,15 @@ def context_of(result: dict) -> str:
     return text
 
 
-def declared(main_repo: Path, follow: object = None, **extra: object) -> None:
-    """宣言を書く。`follow` を渡すと `follow_branch` にその値をそのまま書く。"""
+def declared(main_repo: Path, follow: object = None, base: str | None = None, **extra: object) -> None:
+    """宣言を書く。`follow` を渡すと `follow_branch` にその値をそのまま書く。`base` を渡すと、ベースブランチをその名前、
+    本番ブランチを main にしたブランチ戦略の宣言を置く（起点はブランチ戦略の宣言だけから読む。#3672）。"""
     body: dict = {"version": 1, **extra}
     if follow is not None:
         body["follow_branch"] = follow
     write_declaration(main_repo, json.dumps(body))
+    if base is not None:
+        write_strategy(main_repo, base=base)
 
 
 def head_of(repo: Path) -> str:
@@ -204,7 +208,7 @@ def test_two_worktrees_follow_declared_base_branch(
     worktree: Path,
 ) -> None:
     expected = put_develop_on_origin_only(main_repo)
-    declared(main_repo, True, base_branch="develop")
+    declared(main_repo, True, base="develop")
     second = main_repo / ".worktrees" / "fix" / "y"
     git(main_repo, "worktree", "add", "-q", "-b", "fix/y", str(second))
 
@@ -313,7 +317,7 @@ def test_declared_base_branch_is_followed(main_repo: Path) -> None:
     git(main_repo, "commit", "-q", "--allow-empty", "-m", "develop work")
     expected = head_of(main_repo)
     git(main_repo, "checkout", "-q", "main")
-    declared(main_repo, True, base_branch="develop")
+    declared(main_repo, True, base="develop")
 
     run_session(main_repo)
 
@@ -344,7 +348,7 @@ def test_base_branch_without_local_branch_is_followed(main_repo: Path) -> None:
     「合わせられませんでした」を毎回出していた。
     """
     expected = put_develop_on_origin_only(main_repo)
-    declared(main_repo, True, base_branch="develop")
+    declared(main_repo, True, base="develop")
 
     result = run_session(main_repo)
 
@@ -356,7 +360,7 @@ def test_unfetched_base_branch_is_fetched_and_followed(main_repo: Path) -> None:
     """origin にあるだけで取得していない起点も、取得してから合わせる。"""
     expected = put_develop_on_origin_only(main_repo)
     drop_remote_tracking(main_repo, "develop")
-    declared(main_repo, True, base_branch="develop")
+    declared(main_repo, True, base="develop")
 
     result = run_session(main_repo)
 
@@ -370,7 +374,7 @@ def test_unresolvable_base_branch_does_not_follow(main_repo: Path) -> None:
     start = head_of(main_repo)
     git(main_repo, "commit", "-q", "--allow-empty", "-m", "more")
     git(main_repo, "checkout", "-q", "--detach", start)
-    declared(main_repo, True, base_branch="develop")
+    declared(main_repo, True, base="develop")
 
     result = run_session(main_repo)
 
@@ -505,7 +509,7 @@ def test_default_does_not_contact_origin(main_repo: Path, tmp_path: Path) -> Non
     呼び出しを記録し、origin へ向かう副命令が 1 つも無いことも見る。
     """
     git(main_repo, "remote", "add", "origin", str(tmp_path / "unreachable" / "origin.git"))
-    declared(main_repo, base_branch="develop")
+    declared(main_repo, base="develop")
     trace = tmp_path / "git-trace.log"
 
     run_session_traced = run_payload(

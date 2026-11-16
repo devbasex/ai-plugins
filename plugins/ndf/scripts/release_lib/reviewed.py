@@ -3,7 +3,7 @@ approval-check・approval-post・release-case から分けた）。
 
 - 本番: 開発版の PR → 本番の PR → CI の待ち → PR の上の承認（証跡かレビュー）と先端の照合 → マージ → 公開の後。
   マージは `cd-admin` だけ管理者の迂回で打ち、迂回したら本番の PR に迂回の記録を置く（#3506）。ほかの場合は迂回なし
-- 開発版: 宣言 `release.dev_workflow` の workflow に開発版の PR をマージさせ、結果を待つ
+- 開発版: ブランチ戦略の宣言の開発版のチャネル（`channels` の `dev`）の workflow に開発版の PR をマージさせ、結果を待つ
 - 証跡のチェック: 証跡を判定して PR の先端へ commit status を付ける（同じ先端の PR が並べば落とす。I10）
 
 本番の `ops` は `ProdOps`、開発版の `ops` は `release-steps.py`（find_pr・create_pr・merge_commit_of・_reusable_release_pr・
@@ -55,9 +55,9 @@ def refresh_release_pr_body(root, pr, body: Callable[[], str]):
 
 
 def dev_workflow_of(root) -> str | None:
-    """開発版の workflow のファイル名（`.ndf/supervise.json` の release.dev_workflow）。無ければ None（手元でマージする）。"""
-    got = (delivery.load_delivery(root).release or {}).get("dev_workflow")
-    return got if isinstance(got, str) and got else None
+    """開発版の workflow のファイル名（ブランチ戦略の宣言の `channels` の `dev` の `workflow`）。無ければ None（手元でマージする）。"""
+    s = repo_lib.strategy_or_none(root)
+    return s.dev_workflow if s else None
 
 
 def dev_workflow_ready(root, workflow) -> bool:
@@ -324,7 +324,7 @@ def release_dev_by_workflow(root, a, workflow, pr):
 
 
 def release_dev(ctx: ReleaseCtx, workflow, ops):
-    """宣言 release.dev_workflow のある開発版: PR を作るか使い回し、開いていれば workflow にマージさせる（#2773 の E10）。"""
+    """開発版のチャネルに workflow のある開発版: PR を作るか使い回し、開いていれば workflow にマージさせる（#2773 の E10）。"""
     root, a, plugin, plugins, branch, base = ctx.root, ctx.a, ctx.plugin, ctx.plugins, ctx.branch, ctx.base
     pr = ops._reusable_release_pr(root, branch, base)
     new = pr is None
@@ -349,7 +349,7 @@ def release_dev(ctx: ReleaseCtx, workflow, ops):
         "merge_commit": ops.merge_commit_of(root, merged),
         "plugins": ",".join(plugins),
     }
-    metrics["dev_workflow"] = workflow
+    metrics["dev_channel_workflow"] = workflow
     emit(result(TOOL, "ok", f"{plugin} v{a.version} を {base} へ出した（#{merged}・{workflow}）", items, metrics))
 
 

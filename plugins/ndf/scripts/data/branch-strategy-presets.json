@@ -1,0 +1,283 @@
+{
+  "summary": "代表のリポジトリの種類の既定（#3672 の決定 5）。各行の section は新規のリポジトリ（ワークフローが無い）で init が書く値で、release.cd は null、タグは null、Release は偽（R10）。CD のワークフローを測ったときは with_cd のタグと Release を書く。dev_channel が真の行は、開発版のワークフローを測ったときだけ dev のチャネル（ref はベースブランチ）を足す。merge_method_without_queue がある行は、merge queue を使えないと測ったときにその方式へ替え、分からなければ 2 つを候補に問う。main と develop は既定の名前で、init は測った既定ブランチの名前で置き換える",
+  "default_names": {
+    "production": "main",
+    "base": "develop"
+  },
+  "evidence": {
+    "min_samples": 3,
+    "min_ratio": 0.9,
+    "limit": 100,
+    "new_repo_max_commits": 1
+  },
+  "measured_keys": {
+    "history": [
+      "/release_strategy",
+      "/branches/base",
+      "/sprint/start",
+      "/release/tag",
+      "/release/github_release",
+      "/merge/commit"
+    ],
+    "source": [
+      "/branches/production",
+      "/release/plugin",
+      "/release/runtimes",
+      "/release/version_store",
+      "/release/cd",
+      "/channels",
+      "/merge/method"
+    ],
+    "preset": [
+      "/kind",
+      "/release/form",
+      "/sprint/integrate",
+      "/sprint/doc_prs",
+      "/reviews",
+      "/approval/target",
+      "/approval/via",
+      "/merge/actor",
+      "/merge/admin",
+      "/verify",
+      "/release/deliveries"
+    ]
+  },
+  "kinds": {
+    "web-develop": {
+      "section": {
+        "kind": "web-develop",
+        "release_strategy": "merge_base_branch",
+        "branches": {
+          "production": "main",
+          "base": "develop"
+        },
+        "sprint": {
+          "start": "base",
+          "integrate": "check",
+          "doc_prs": "base"
+        },
+        "release": {
+          "form": "service",
+          "version_store": {
+            "kind": "json",
+            "path": "package.json",
+            "pointer": "/version"
+          },
+          "tag": null,
+          "github_release": false,
+          "cd": null
+        },
+        "channels": [
+          {
+            "name": "stable",
+            "ref": "main"
+          }
+        ],
+        "approval": {
+          "target": "release_pr",
+          "via": "gate"
+        },
+        "merge": {
+          "actor": "ndf",
+          "method": "direct",
+          "commit": "merge",
+          "admin": false
+        },
+        "verify": null
+      },
+      "with_cd": {
+        "tag": "v{version}",
+        "github_release": true
+      },
+      "dev_channel": true
+    },
+    "web-trunk": {
+      "section": {
+        "kind": "web-trunk",
+        "release_strategy": "trunk",
+        "branches": {
+          "production": "main",
+          "base": "main"
+        },
+        "sprint": {
+          "start": "production",
+          "integrate": "release",
+          "doc_prs": "sprint"
+        },
+        "release": {
+          "form": "service",
+          "version_store": {
+            "kind": "none"
+          },
+          "tag": null,
+          "github_release": false,
+          "cd": null
+        },
+        "channels": [
+          {
+            "name": "stable",
+            "ref": "main"
+          }
+        ],
+        "approval": {
+          "target": "production_pr",
+          "via": "gate"
+        },
+        "merge": {
+          "actor": "ndf",
+          "method": "merge-queue",
+          "commit": "squash",
+          "admin": false
+        },
+        "verify": null
+      },
+      "with_cd": {
+        "tag": null,
+        "github_release": false
+      },
+      "dev_channel": false,
+      "merge_method_without_queue": "strict"
+    },
+    "mobile": {
+      "section": {
+        "kind": "mobile",
+        "release_strategy": "release_branch",
+        "branches": {
+          "production": "main",
+          "base": "develop"
+        },
+        "sprint": {
+          "start": "production",
+          "integrate": "check",
+          "doc_prs": "sprint"
+        },
+        "release": {
+          "form": "mobile",
+          "version_store": {
+            "kind": "json",
+            "path": "package.json",
+            "pointer": "/version"
+          },
+          "tag": null,
+          "github_release": false,
+          "cd": null
+        },
+        "channels": [
+          {
+            "name": "stable",
+            "ref": "main"
+          }
+        ],
+        "approval": {
+          "target": "release_pr",
+          "via": "gate"
+        },
+        "merge": {
+          "actor": "ndf",
+          "method": "direct",
+          "commit": "merge",
+          "admin": false
+        },
+        "verify": null
+      },
+      "with_cd": {
+        "tag": "v{version}",
+        "github_release": true
+      },
+      "dev_channel": true
+    },
+    "docs": {
+      "section": {
+        "kind": "docs",
+        "release_strategy": "trunk",
+        "branches": {
+          "production": "main",
+          "base": "main"
+        },
+        "sprint": {
+          "start": "production",
+          "integrate": "release",
+          "doc_prs": "sprint"
+        },
+        "release": {
+          "form": "document",
+          "version_store": {
+            "kind": "none"
+          },
+          "tag": null,
+          "github_release": false,
+          "cd": null
+        },
+        "channels": [
+          {
+            "name": "stable",
+            "ref": "main"
+          }
+        ],
+        "approval": {
+          "target": "production_pr",
+          "via": "gate"
+        },
+        "merge": {
+          "actor": "ndf",
+          "method": "strict",
+          "commit": "merge",
+          "admin": false
+        },
+        "verify": null
+      },
+      "with_cd": {
+        "tag": null,
+        "github_release": false
+      },
+      "dev_channel": false
+    },
+    "plugin": {
+      "section": {
+        "kind": "plugin",
+        "release_strategy": "trunk",
+        "branches": {
+          "production": "main",
+          "base": "main"
+        },
+        "sprint": {
+          "start": "production",
+          "integrate": "check",
+          "doc_prs": "sprint"
+        },
+        "release": {
+          "form": "package-plugin",
+          "version_store": {
+            "kind": "plugin"
+          },
+          "tag": null,
+          "github_release": false,
+          "cd": null
+        },
+        "channels": [
+          {
+            "name": "stable",
+            "ref": "main"
+          }
+        ],
+        "approval": {
+          "target": "release_pr",
+          "via": "gate"
+        },
+        "merge": {
+          "actor": "ndf",
+          "method": "merge-queue",
+          "commit": "merge",
+          "admin": false
+        },
+        "verify": null
+      },
+      "with_cd": {
+        "tag": "{plugin}--v{version}",
+        "github_release": true
+      },
+      "dev_channel": false,
+      "merge_method_without_queue": "strict"
+    }
+  }
+}

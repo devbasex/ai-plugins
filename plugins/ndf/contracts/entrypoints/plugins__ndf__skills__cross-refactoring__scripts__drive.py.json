@@ -45,14 +45,7 @@
       "file": "project.json",
       "keys": [
         "ndf_policies",
-        "production_merge",
         "test"
-      ]
-    },
-    {
-      "file": "worktree.json",
-      "keys": [
-        "base_branch"
       ]
     }
   ],

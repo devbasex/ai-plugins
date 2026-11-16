@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from worktree_helpers import GUARD, SESSION, SCRIPTS_DIR, git, run_lib, write_declaration
+from worktree_helpers import GUARD, SESSION, SCRIPTS_DIR, git, run_lib, write_declaration, write_strategy
 
 SETUP = SCRIPTS_DIR / "worktree-setup.sh"
 
@@ -322,105 +322,47 @@ def test_check_runs_from_inside_a_worktree(main_repo: Path, worktree: Path) -> N
     assert result["rc"] == 0, result
 
 
-def test_check_prints_undeclared_branches_as_default(main_repo: Path) -> None:
-    """宣言が無いとき、2 行目と 3 行目は既定ブランチへ落ちていることを示す。"""
+UNDECLARED = "不明（ブランチ戦略の宣言を読めない。project-decl.py branch-strategy で作る）"
+
+
+def test_check_prints_undeclared_branches_without_a_fallback(main_repo: Path) -> None:
+    """宣言が無いとき、2 行目と 3 行目は既定ブランチへ落とさずに「不明」と作り方を示す（#3672 の I3）。"""
     result = run(["check"], cwd=main_repo)
     assert result["out"].splitlines()[1:] == [
-        "開発の起点: main（未宣言。既定ブランチ）",
-        "本番のチャネル: main（未宣言。既定ブランチ）",
+        f"ベースブランチ: {UNDECLARED}",
+        f"本番ブランチ: {UNDECLARED}",
     ], result["out"]
 
 
 def test_check_prints_declared_branches(main_repo: Path) -> None:
     """宣言に書かれた名前は、実在を確かめずにそのまま出す（通信しない）。"""
-    write_declaration(
-        main_repo,
-        json.dumps({"version": 1, "base_branch": "develop", "production_branch": "release"}),
-    )
+    write_declaration(main_repo, json.dumps({"version": 1}))
+    write_strategy(main_repo, base="develop", production="release")
     result = run(["check"], cwd=main_repo)
     assert result["rc"] == 0, result
     assert result["out"].splitlines()[1:] == [
-        "開発の起点: develop（宣言）",
-        "本番のチャネル: release（宣言）",
-    ], result["out"]
-
-
-def test_check_prints_only_base_branch_declared(main_repo: Path) -> None:
-    """現状固定: base_branch だけを持つ宣言では、開発の起点は宣言値、本番の
-    チャネルは既定ブランチへ落ちる。2 つのキーは独立に判定される。"""
-    write_declaration(
-        main_repo,
-        json.dumps({"version": 1, "base_branch": "develop"}),
-    )
-    result = run(["check"], cwd=main_repo)
-    assert result["rc"] == 0, result
-    assert result["out"].splitlines()[1:] == [
-        "開発の起点: develop（宣言）",
-        "本番のチャネル: main（未宣言。既定ブランチ）",
-    ], result["out"]
-
-
-def test_check_prints_only_production_branch_declared(main_repo: Path) -> None:
-    """現状固定: production_branch だけを持つ宣言では、両者が逆になる。"""
-    write_declaration(
-        main_repo,
-        json.dumps({"version": 1, "production_branch": "release"}),
-    )
-    result = run(["check"], cwd=main_repo)
-    assert result["rc"] == 0, result
-    assert result["out"].splitlines()[1:] == [
-        "開発の起点: main（未宣言。既定ブランチ）",
-        "本番のチャネル: release（宣言）",
+        "ベースブランチ: develop（ブランチ戦略の宣言）",
+        "本番ブランチ: release（ブランチ戦略の宣言）",
     ], result["out"]
 
 
 def test_check_ignores_branches_in_an_unreadable_declaration(main_repo: Path) -> None:
-    """読めない宣言のキーは未宣言として扱う。"""
-    write_declaration(main_repo, json.dumps({"version": 99, "base_branch": "develop"}))
+    """スキーマに落ちる宣言のブランチ名は出さない。"""
+    write_declaration(main_repo, json.dumps({"version": 1}))
+    (main_repo / ".ndf" / "project.json").write_text(json.dumps({"branch_strategy": {"branches": {"base": "develop"}}}))
     result = run(["check"], cwd=main_repo)
-    assert result["rc"] == 3, result
-    assert result["out"].splitlines()[1] == "開発の起点: main（未宣言。既定ブランチ）", result["out"]
-
-
-def test_check_reports_an_unknown_default_branch(tmp_path: Path) -> None:
-    """origin/HEAD も main / master も無ければ「不明」と出す。"""
-    repo = tmp_path / "trunk"
-    repo.mkdir()
-    git(repo, "init", "-q", "-b", "trunk")
-    result = run(["check"], cwd=repo)
-    assert result["rc"] == 2, result
-    assert result["out"].splitlines()[1:] == [
-        "開発の起点: 不明（origin/HEAD が未設定）",
-        "本番のチャネル: 不明（origin/HEAD が未設定）",
-    ], result["out"]
-
-
-def test_check_mixes_declared_base_branch_with_an_unknown_default(tmp_path: Path) -> None:
-    """現状固定: base_branch だけを宣言し、origin/HEAD も main / master も無い
-    リポジトリでは、開発の起点は宣言値、本番のチャネルは「不明」が混在して出る。
-    宣言のキーは独立に判定され、片方の退避先が無くても rc は 0 のまま。"""
-    repo = tmp_path / "trunk"
-    repo.mkdir()
-    git(repo, "init", "-q", "-b", "trunk")
-    write_declaration(repo, json.dumps({"version": 1, "base_branch": "develop"}))
-
-    result = run(["check"], cwd=repo)
-
     assert result["rc"] == 0, result
-    assert result["out"].splitlines() == [
-        PRESENT_LINE,
-        "開発の起点: develop（宣言）",
-        "本番のチャネル: 不明（origin/HEAD が未設定）",
-    ], result["out"]
+    assert result["out"].splitlines()[1] == f"ベースブランチ: {UNDECLARED}", result["out"]
 
 
 def test_check_does_not_query_origin(main_repo: Path) -> None:
     """origin が到達できなくても、宣言に書かれた名前をそのまま出して終わる。"""
     git(main_repo, "remote", "add", "origin", "/nonexistent/origin.git")
-    write_declaration(main_repo, json.dumps({"version": 1, "base_branch": "develop"}))
+    write_declaration(main_repo, json.dumps({"version": 1}))
+    write_strategy(main_repo, base="develop", production="main")
     result = run(["check"], cwd=main_repo)
     assert result["rc"] == 0, result
-    assert "開発の起点: develop（宣言）" in result["out"], result["out"]
+    assert "ベースブランチ: develop（ブランチ戦略の宣言）" in result["out"], result["out"]
     assert "NOTE" not in result["err"], result["err"]
 
 
@@ -827,7 +769,7 @@ def test_ignored_keys_are_listed_in_one_line(main_repo: Path) -> None:
             {
                 "$schema": "https://example.com/worktree.schema.json",
                 "version": 1,
-                "base_branch": "main",
+                "branches": {"base": "main"},
                 "guard": {"allow_paths": ["/"]},
                 "testenv": {"port_band": [40000, 40999], "expose": {"enabled": True}},
             }
@@ -836,7 +778,7 @@ def test_ignored_keys_are_listed_in_one_line(main_repo: Path) -> None:
 
     for args in (["status"], ["check"]):
         out = run(args, cwd=main_repo)["out"]
-        assert "個人の宣言で反映しない項目: base_branch, guard, testenv.expose" in out, out
+        assert "個人の宣言で反映しない項目: branches, guard, testenv.expose" in out, out
         assert "version" not in out, out
         assert "$schema" not in out, out
 

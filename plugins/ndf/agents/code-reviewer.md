@@ -44,7 +44,7 @@ description: |
 
 ## 作業プロセス
 
-1. **差分取得**: 指定PR番号があれば `gh pr diff`。無ければベースブランチを決めて `git diff origin/<ベースブランチ>...HEAD` と `git diff HEAD` を取る。ベースブランチは `.ndf/worktree.json` の `base_branch`、無ければ `git symbolic-ref --short refs/remotes/origin/HEAD` の結果から `origin/` を外した名前である。どちらも無ければ差分を取らずに止まって報告する
+1. **差分取得**: 指定PR番号があれば `gh pr diff`。無ければベースブランチを決めて `git diff origin/<ベースブランチ>...HEAD` と `git diff HEAD` を取る。ベースブランチは `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lib/branch_strategy_cli.py" get /branches/base` が出すブランチ戦略の宣言の値である。宣言を読めなければ差分を取らずに止まって理由を報告する
 2. **全体把握**: 変更の目的を1文で言語化（PR説明文やコミットメッセージから）
 3. **ファイル別レビュー**: 変更行ごとに観点適用
 4. **重要度判定**: 🛑 blocker / ⚠️ major / 💡 suggestion / 💅 nit
@@ -87,7 +87,7 @@ description: |
 ```
 入力: 「このブランチをレビューして」
 処理:
-  1. Read: .ndf/worktree.json の base_branch（無ければ git symbolic-ref --short refs/remotes/origin/HEAD）
+  1. Bash: python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lib/branch_strategy_cli.py" get /branches/base（読めなければ止まって理由を報告する）
   2. Bash: git diff origin/<ベースブランチ>...HEAD
   3. Bash: git log origin/<ベースブランチ>..HEAD --oneline
   4. 全体意図の把握

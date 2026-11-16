@@ -17,6 +17,7 @@ SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import inproc  # noqa: E402
 from release_repo import push_origin  # noqa: E402
+import strategy_fixture  # noqa: E402
 
 PY = sys.executable
 
@@ -97,7 +98,7 @@ def check_shape(out):
 
 def test_cleanup_removes_merged_and_stops_on_unmerged(repo, env, tmp_path):
     # 取り込み先を main と宣言し、主ディレクトリ（develop）では pull させない
-    write(repo, ".ndf/worktree.json", json.dumps({"base_branch": "main"}))
+    strategy_fixture.declare(repo, "main")
     for b in ("feature/x", "feature/y"):
         git(repo, "worktree", "add", "-q", "-b", b, str(tmp_path / b.replace("/", "-")))
     wy = tmp_path / "feature-y"
@@ -133,7 +134,7 @@ def test_cleanup_removes_merged_and_stops_on_unmerged(repo, env, tmp_path):
 
 
 def test_cleanup_all_merged_is_ok(repo, env, tmp_path):
-    write(repo, ".ndf/worktree.json", json.dumps({"base_branch": "main"}))
+    strategy_fixture.declare(repo, "main")
     git(repo, "worktree", "add", "-q", "-b", "feature/x", str(tmp_path / "wx"))
     env["FAKE_GH_PRS"] = json.dumps({"1": {"headRefName": "feature/x", "state": "MERGED"}})
     code, out, err = call("merged-steps.py", ["cleanup", "1"], env, cwd=repo)
@@ -152,7 +153,8 @@ esac
 
 def testenv_repo(repo, env, tmp_path, *, stale=True):
     """テスト環境を宣言し、マージ済みの PR 1 件と（`stale` なら）残った割り当て 1 行を用意する。"""
-    write(repo, ".ndf/worktree.json", json.dumps({"version": 1, "base_branch": "main", "testenv": {}}))
+    strategy_fixture.declare(repo, "main")
+    write(repo, ".ndf/worktree.json", json.dumps({"version": 1, "testenv": {}}))
     git(repo, "worktree", "add", "-q", "-b", "feature/x", str(tmp_path / "wx"))
     env["FAKE_GH_PRS"] = json.dumps({"1": {"headRefName": "feature/x", "state": "MERGED"}})
     docker = tmp_path / "bin" / "docker"
@@ -209,7 +211,7 @@ def test_no_stale_assignment_leaves_the_cleanup_as_it_was(repo, env, tmp_path):
 
 def test_a_pull_failure_still_reclaims(repo, env, tmp_path):
     testenv_repo(repo, env, tmp_path)
-    write(repo, ".ndf/worktree.json", json.dumps({"version": 1, "base_branch": "develop", "testenv": {}}))
+    strategy_fixture.declare(repo, "develop", "main")
     git(repo, "remote", "add", "origin", str(tmp_path / "no-such-remote"))
     code, out, err = call("merged-steps.py", ["cleanup", "1", "--root", str(repo)], env)
     assert out["status"] == "stopped", err
@@ -224,7 +226,7 @@ def test_cleanup_waits_for_the_main_directory_lock(repo, env, tmp_path):
     sys.path.insert(0, str(SCRIPTS / "lib"))
     import locks
 
-    write(repo, ".ndf/worktree.json", json.dumps({"base_branch": "main"}))
+    strategy_fixture.declare(repo, "main")
     git(repo, "worktree", "add", "-q", "-b", "feature/x", str(tmp_path / "wx"))
     env["FAKE_GH_PRS"] = json.dumps({"1": {"headRefName": "feature/x", "state": "MERGED"}})
     held, hold = threading.Event(), 3.0
@@ -247,7 +249,7 @@ def test_cleanup_waits_for_the_main_directory_lock(repo, env, tmp_path):
 
 def test_cleanup_from_inside_the_worktree_it_removes(repo, env, tmp_path):
     # 計画の merge のステップは作業場所（消す作業ツリー）で打つ。消した後も主ディレクトリから続ける
-    write(repo, ".ndf/worktree.json", json.dumps({"base_branch": "main"}))
+    strategy_fixture.declare(repo, "main")
     wx = tmp_path / "wx"
     git(repo, "worktree", "add", "-q", "-b", "feature/x", str(wx))
     env["FAKE_GH_PRS"] = json.dumps({"1": {"headRefName": "feature/x", "state": "MERGED"}})
@@ -716,7 +718,11 @@ def test_phase_steps_rejects_bad_calls_with_2(env, args):
 
 
 def clone_with_upstream(tmp_path, repo):
-    """repo を origin にした主ディレクトリ（develop）と、origin へ a.md を足したコミットを返す。"""
+    """repo を origin にした主ディレクトリ（develop）と、origin へ a.md を足したコミットを返す。上流はブランチ戦略の宣言
+    （ベースブランチ develop）を持つ（宣言が無ければ片付けは pull しない。#3672 の I3）。"""
+    strategy_fixture.declare(repo, "develop", "main")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "decl")
     main = tmp_path / "main"
     git(tmp_path, "clone", "-q", "-b", "develop", str(repo), str(main))
     for k, v in (("user.email", "t@example.com"), ("user.name", "t"), ("commit.gpgsign", "false")):
@@ -786,22 +792,20 @@ def clone_with_main_and_develop(tmp_path, cur):
     return main
 
 
-@pytest.mark.parametrize("cur, result", [("main", "pulled"), ("develop", "kept")])
-def test_cleanup_base_defaults_to_origin_head_not_develop(tmp_path, env, cur, result):
-    # 宣言の無いリポジトリでは、起点は origin の HEAD（main）から決まる。develop があっても採らない
+@pytest.mark.parametrize("cur", ["main", "develop"])
+def test_cleanup_without_declaration_keeps_the_main_dir(tmp_path, env, cur):
+    # 宣言の無いリポジトリでは起点を既定ブランチ（origin の HEAD）へ倒さず、pull せずに理由を残す（#3672 の I3）
     main = clone_with_main_and_develop(tmp_path, cur)
     env["FAKE_GH_PRS"] = json.dumps({"1": {"headRefName": "feature/gone", "state": "MERGED"}})
     code, out, err = call("merged-steps.py", ["cleanup", "1", "--root", str(main)], env)
     assert code == 0, err
     item = {(i["kind"], i["name"]): i for i in out["items"]}[("main_dir", str(main))]
-    assert item["result"] == result
-    if result == "kept":
-        assert "main でなく develop" in item["reason"]
+    assert item["result"] == "kept" and "branch_strategy" in item["reason"]
 
 
 def test_cleanup_base_follows_declaration(tmp_path, env):
     main = clone_with_main_and_develop(tmp_path, "develop")
-    write(main, ".ndf/worktree.json", json.dumps({"version": 1, "base_branch": "develop"}))
+    strategy_fixture.declare(main, "develop", "main")
     env["FAKE_GH_PRS"] = json.dumps({"1": {"headRefName": "feature/gone", "state": "MERGED"}})
     code, out, err = call("merged-steps.py", ["cleanup", "1", "--root", str(main)], env)
     assert code == 0, err
@@ -841,14 +845,13 @@ def test_verify_install_source_comes_from_origin_and_declaration(repo):
 
     mod = load_verification()
     git(repo, "remote", "add", "origin", "https://github.com/devbasex/ai-plugins.git")
-    write(repo, ".ndf/worktree.json", json.dumps({"version": 1, "base_branch": "develop", "production_branch": "main"}))
-    write(repo, ".ndf/supervise.json", json.dumps({"release": {"form": "package-plugin", "plugin": "ndf", "runtimes": ["claude"]}}))
+    strategy_fixture.declare(repo, "develop", "main", {"form": "package-plugin", "plugin": "ndf", "runtimes": ["claude"]})
     write(repo, ".claude-plugin/marketplace.json", json.dumps({"name": "ai-plugins"}))
     where, plugins = mod.install_source(repo, argparse.Namespace(ref="develop", plugins=None))
     assert where == ("devbasex/ai-plugins", "ai-plugins", "main") and plugins == ["ndf"]
     with pytest.raises(mod.StepError, match="--ref trunk"):
         mod.install_source(repo, argparse.Namespace(ref="trunk", plugins=None))
-    write(repo, ".ndf/worktree.json", json.dumps({"version": 1, "base_branch": "trunk", "production_branch": "live"}))
+    strategy_fixture.declare(repo, "trunk", "live", {"form": "package-plugin", "plugin": "foo", "runtimes": ["claude"]})
     where, _ = mod.install_source(repo, argparse.Namespace(ref="trunk", plugins="foo"))
     assert where[2] == "live"
 

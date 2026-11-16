@@ -92,12 +92,12 @@ wt_follow_enabled() {
   printf '%s' "$decl" | jq -e '.follow_branch == true' >/dev/null 2>&1 || return 1
 }
 
-# 既定ブランチの候補を出す `default_branch_candidates.py`（`branch_flow.py` の定数を読む）の置き場。source した時点の自分の位置から決める
+# 既定ブランチの候補を出す `default_branch_candidates.py`（`strategy_rows.py` の定数を読む）の置き場。source した時点の自分の位置から決める
 # （`worktree-common.sh` と同じく、`cd` で戻らずプラグインルートを外さない）。
 _WT_BRANCH_FLOW_PY="$(dirname "${BASH_SOURCE[0]}")/default_branch_candidates.py"
 
 # 主ディレクトリの既定ブランチ名を出力する。origin の HEAD が指す先を優先し、
-# 取れなければ `branch_flow.py` の `DEFAULT_BRANCH_CANDIDATES` の順で存在するものを返す。
+# 取れなければ `strategy_rows.py` の `DEFAULT_BRANCH_CANDIDATES` の順で存在するものを返す。
 # 候補はここで並べない（置き場は定数の 1 か所。#3309）。python3 が無いか候補を読めなければ 1 を返す。
 wt_default_branch() {
   local main_dir="${1:-}" ref candidate candidates
@@ -148,79 +148,54 @@ wt_branch_exists() {
   return 1
 }
 
-# 宣言 JSON から指定されたキーの string 型の値だけを出力する。値が string でない、
-# キーが無い、JSON が空のいずれでも何も出力しない。実在確認・NOTE 出力・既定ブランチ
-# への落としは含まない。それらは呼び出し側が担う。
-_wt_declaration_string() {
-  local decl="${1:-}" key="${2:-}"
-  [ -n "$decl" ] || return 0
-  printf '%s' "$decl" |
-    jq -r --arg key "$key" 'if (.[$key]|type) == "string" then .[$key] else empty end' 2>/dev/null
+# ブランチ戦略の宣言（`.ndf/project.json` の `branch_strategy`）を読む部品の置き場（#3672）。
+_WT_STRATEGY_PY="$(dirname "${BASH_SOURCE[0]}")/branch_strategy_cli.py"
+
+# ブランチ戦略の宣言の値を 1 つ出力する（`branch_strategy_cli.py get <pointer>`）。宣言が無い・壊れている・
+# 旧いキーが残るときは、理由（ファイル・キーの位置・打つコマンド）を標準エラーへ出して 1 以上を返す。
+# **既定ブランチへ落とさない**（I3）。
+wt_strategy_get() {
+  local main_dir="${1:-}" pointer="${2:-}"
+  [ -n "$main_dir" ] && [ -n "$pointer" ] || return 1
+  python3 "$_WT_STRATEGY_PY" get "$pointer" --root "$main_dir"
 }
 
-# 宣言の指定されたキーからブランチ名を読み、実在を確認して出力する。指定が無ければ
-# 既定ブランチへ落とす。
-wt_declaration_branch() {
-  local main_dir="${1:-}" key="${2:-}" decl name=
-  [ -n "$main_dir" ] && [ -n "$key" ] || return 1
-  if decl=$(wt_declaration "$main_dir"); then
-    name=$(_wt_declaration_string "$decl" "$key")
+# 宣言から読んだブランチ名が origin かローカルに実在することを確かめて出力する。
+# **実在しないときは既定ブランチへ落とさない。** 落とすと、開発の変更が正式版から分岐したまま進む。
+_wt_existing_branch() {
+  local main_dir="${1:-}" what="${2:-}" name="${3:-}"
+  [ -n "$name" ] || return 1
+  if wt_branch_exists "$main_dir" "$name"; then
+    printf '%s\n' "$name"
+    return 0
   fi
-  if [ -n "$name" ]; then
-    if wt_branch_exists "$main_dir" "$name"; then
-      printf '%s\n' "$name"
-      return 0
-    fi
-    printf 'NOTE: .ndf/worktree.json の %s が指す %s は origin にもローカルにもありません\n' \
-      "$key" "$name" >&2
-    return 1
-  fi
-  wt_default_branch "$main_dir"
+  printf 'NOTE: ブランチ戦略の宣言の %s が指す %s は origin にもローカルにもありません\n' "$what" "$name" >&2
+  return 1
 }
 
-# 開発の起点ブランチ名を出力する。宣言の base_branch を優先し、指定が無ければ
-# 既定ブランチへ落とす。
-#
-# **指定された名前が実在しないときは既定ブランチへ落とさない。** 落とすと、開発の
-# 変更が正式版から分岐したまま進む。origin かローカルのどちらかに同名のブランチが
-# あることを確かめ、無ければ標準エラーへ案内を出して 1 を返す。
+# ベースブランチ（スプリントの PR の宛先。宣言の `branches.base`）の名前を出力する。
 wt_base_branch() {
-  wt_declaration_branch "${1:-}" base_branch
+  local main_dir="${1:-}" name
+  name=$(wt_strategy_get "$main_dir" /branches/base) || return 1
+  _wt_existing_branch "$main_dir" branches.base "$name"
 }
 
-# 本番のチャネルのブランチ名を出力する。宣言の production_branch を優先し、指定が
-# 無ければ既定ブランチへ落とす。
+# 本番ブランチ（宣言の `branches.production`）の名前を出力する。
 #
-# **`base_branch` は読まない**（#424 の決定 10）。`base_branch` は開発の起点であり、
-# 作業ツリーの分岐元を決める（`follow_branch: true` のときは主ディレクトリの追従先にも
-# なる）。このリポジトリの値は `develop` で、本番のチャネルと定める `main` とは別の
-# ブランチである。流用すると、開発版のチャネルへのマージが本番の扱いになる。
-#
-# **指定された名前が実在しないときは既定ブランチへ落とさない。** 本番のチャネルを
-# 取り違えると、承認を求める対象そのものが変わる。
+# **ベースブランチを流用しない**（#424 の決定 10）。本番ブランチを取り違えると、承認を求める対象そのものが変わる。
 wt_production_branch() {
-  wt_declaration_branch "${1:-}" production_branch
+  local main_dir="${1:-}" name
+  name=$(wt_strategy_get "$main_dir" /branches/production) || return 1
+  _wt_existing_branch "$main_dir" branches.production "$name"
 }
 
-# スプリントの起点ブランチ名を出力する（#3121）。宣言の branch_flow.start が `production`
-# なら本番のチャネル（wt_production_branch）、それ以外（キーが無いときを含む）は開発の
-# 起点（wt_base_branch）である。値の読み分けの正本は lib/branch_flow.py にあり、ここは
-# worktree の起点を決めるのに要る `start` だけを読む。表に無い値は落とさずに 1 を返す。
+# スプリントの起点ブランチ名を出力する（#3121）。宣言の `sprint.start` が `production` なら本番ブランチ、
+# `base` ならベースブランチである。読み分けの正本は lib/branch_strategy.py の `sprint_start_ref`。
 wt_start_branch() {
-  local main_dir="${1:-}" decl start=
+  local main_dir="${1:-}" name
   [ -n "$main_dir" ] || return 1
-  if decl=$(wt_declaration "$main_dir"); then
-    start=$(printf '%s' "$decl" |
-      jq -r 'if (.branch_flow|type) == "object" and (.branch_flow.start|type) == "string" then .branch_flow.start else empty end' 2>/dev/null)
-  fi
-  case "$start" in
-    "" | base) wt_base_branch "$main_dir" ;;
-    production) wt_production_branch "$main_dir" ;;
-    *)
-      printf 'NOTE: .ndf/worktree.json の branch_flow.start = %s は base か production で書いてください\n' "$start" >&2
-      return 1
-      ;;
-  esac
+  name=$(python3 "$_WT_STRATEGY_PY" start-ref --root "$main_dir") || return 1
+  _wt_existing_branch "$main_dir" sprint.start "$name"
 }
 
 # 主ディレクトリの追跡対象の未コミット変更を `<状態> <パス>` で 1 行 1 件出力する。

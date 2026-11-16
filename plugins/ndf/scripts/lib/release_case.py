@@ -4,7 +4,7 @@
 | --- | --- | --- | --- |
 | `cd-no-review` | CD の行があり、本番チャネルの承認数が 0（読めないときもここ。迂回の宣言は問わない） | リリースの PR の証跡のコメント | 利用者のアカウント |
 | `cd-review` | CD の行があり、承認数が 1 以上、迂回の宣言が無い | PR のレビューの承認 | 利用者のアカウント |
-| `cd-admin` | CD の行があり、承認数が 1 以上、迂回の宣言（`production_merge.admin: true`）がある | リリースの PR の証跡のコメント（利用者が書いたものだけ） | 利用者のアカウント（管理者の迂回） |
+| `cd-admin` | CD の行があり、承認数が 1 以上、迂回の宣言（ブランチ戦略の宣言の `merge.admin: true`）がある | リリースの PR の証跡のコメント（利用者が書いたものだけ） | 利用者のアカウント（管理者の迂回） |
 | `no-cd` | 本番チャネルへのマージで届く `kind: auto` の行が無い | 手元の承認資料 | NDF（今の工程） |
 
 CD の行は `lib/delivery.py` の `merge_rows`。承認数は本番チャネルの ruleset（`rules/branches/<branch>`）の
@@ -17,12 +17,11 @@ CD の行は `lib/delivery.py` の `merge_rows`。承認数は本番チャネル
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import NamedTuple
 
 import delivery
 import gh_call
-import project_decl
+import repo
 from step_result import EXIT_PRECONDITION, StepError
 
 CD_NO_REVIEW = "cd-no-review"
@@ -146,13 +145,13 @@ def case_of(root) -> Case:
     if not delivery.merge_rows(decl):
         return decide_case(False, None, "")
     approvals, why = read_approvals(root, decl.production)
-    return decide_case(True, approvals, why, project_decl.production_admin(root))
+    return decide_case(True, approvals, why, repo.branch_strategy_of(root).section["merge"]["admin"] is True)
 
 
 def case_at(root, strict: bool = False) -> Case:
-    """プランを組むときのリリースの場合。リポジトリ（`root`）が無ければ CD の無い場合（今のプランのまま）。
-    宣言を読めなければ、`strict` なら CaseUnreadable、そうでなければ CD の無い場合として返す。"""
-    if not root or not Path(root).is_dir():
+    """プランを組むときのリリースの場合。リポジトリ（`root`。git の木でないディレクトリを含む）が無ければ CD の無い場合
+    （今のプランのまま）。宣言を読めなければ、`strict` なら CaseUnreadable、そうでなければ CD の無い場合として返す。"""
+    if not root or repo.first_git_tree([root]) is None:
         return decide_case(False, None, "リポジトリが無い")
     try:
         return case_of(root)
@@ -160,3 +159,51 @@ def case_at(root, strict: bool = False) -> Case:
         if strict:
             raise
         return decide_case(False, None, "宣言を読めない")
+
+
+class RuleFacts(NamedTuple):
+    """本番ブランチの ruleset の事実（#3672 の I10）。`bypass` は当たった ruleset の `current_user_can_bypass`
+    （どれか 1 つでも越えられない値なら、その値。ruleset が無ければ None）。"""
+
+    present: bool
+    approvals: int
+    queue: bool
+    up_to_date: bool
+    bypass: str | None
+
+
+# 迂回の可否の強さ（弱いほうを全体の値にする）。`always`・`pull_requests_only` だけが本番の PR を越えられる
+_BYPASS_ORDER = ("never", "exempt", "pull_requests_only", "always")
+
+
+def rule_facts_of(rules: list, bypasses: list[str | None]) -> RuleFacts:
+    """`rules/branches/<branch>` の規則の配列と、当たった ruleset ごとの迂回の可否から事実を組む。"""
+    if not rules:
+        return RuleFacts(False, 0, False, False, None)
+    kinds = {r.get("type") for r in rules if isinstance(r, dict)}
+    up_to_date = any(
+        isinstance(r, dict)
+        and r.get("type") == "required_status_checks"
+        and (r.get("parameters") or {}).get("strict_required_status_checks_policy")
+        for r in rules
+    )
+    known = [b for b in bypasses if b in _BYPASS_ORDER]
+    bypass = min(known, key=_BYPASS_ORDER.index) if known else None
+    return RuleFacts(True, required_approvals(rules) or 0, "merge_queue" in kinds, bool(up_to_date), bypass)
+
+
+def read_rule_facts(root, branch: str) -> RuleFacts | None:
+    """本番ブランチの ruleset から、有無・承認の数・merge queue の有無・最新の取り込みの要否・迂回の可否を読む。
+    読めなければ None。"""
+    rules, why = _gh_read(root, f"repos/{{owner}}/{{repo}}/rules/branches/{branch}")
+    if why == "missing":
+        return RuleFacts(False, 0, False, False, None)
+    if not isinstance(rules, list):
+        return None
+    bypasses = []
+    for rid in sorted({r.get("ruleset_id") for r in rules if isinstance(r, dict) and r.get("ruleset_id")}):
+        got, _ = _gh_read(root, f"repos/{{owner}}/{{repo}}/rulesets/{rid}")
+        if not isinstance(got, dict):
+            return None
+        bypasses.append(got.get("current_user_can_bypass"))
+    return rule_facts_of(rules, bypasses)

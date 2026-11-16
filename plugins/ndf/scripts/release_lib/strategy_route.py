@@ -1,12 +1,23 @@
-"""選んで集める取り込み方（`branch_flow.promotion: selected`。#3121）のリリース（`release-steps.py` の release-branch と
-release から分けた）。
+"""strategy_route.py: 取り込み方の値から、版上げの PR の起点・宛先・同期の PR の要否を決める（#3672 の D17）。
 
-- リリースブランチを本番チャネルから組み、選んだリリースの単位（スプリントブランチ）だけを `--no-ff` でマージする（I5・E10）
-- 本番チャネルへ直接 Pull Request を出し、先頭が承認したコミットに版上げだけを積んだものであるときだけマージする（決定 14）
-- 本番チャネルへ入れてタグと GitHub Release を作った後に、リリースブランチをベースブランチへ戻すマージを開発版と同じ `-sync` の
-  ブランチで入れる（E13・決定 17）。戻すマージの失敗は本番の完了と分けて報告する
+取り込み方の名前で振る舞いを分ける分岐は、このモジュールの `route_of` の 1 か所に置く。
 
-どの取り込み方の行がこの経路を通るかは、呼び手が行の属性（`Promotion.selects_units`）で決める。出す（emit）のは呼び手である。
+| 取り込み方 | 承認の対象 | 版上げの PR | 起点 → 宛先 | 同期の PR |
+| --- | --- | --- | --- | --- |
+| `merge_base_branch` | `release_pr` | 有り（版数の置き場が `none` なら base → production の PR そのもの。`bump` が偽） | base → production | 有り |
+| `release_branch` | `release_pr` | 有り（選んだスプリントを集めたリリースブランチ） | production → production | 有り |
+| `trunk` | `release_pr` | 有り（版数と CHANGELOG だけ） | production → production | 無し |
+| `trunk` | `production_pr` | 無し（スプリントの PR が本番の PR を兼ねる） | — | 無し |
+
+選んで集める取り込み方（`release_branch`。行の属性 `selects_units`）のリリース（`release-steps.py` の release-branch と
+release）もここに置く（D17）。
+
+- リリースブランチを本番ブランチから組み、選んだリリースの単位（スプリントブランチ）だけを `--no-ff` でマージする
+- 本番ブランチへ直接 Pull Request を出し、先頭が承認したコミットに版上げだけを積んだものであるときだけマージする
+- 本番ブランチへ入れてタグと GitHub Release を作った後に、リリースブランチをベースブランチへ戻すマージを `-sync` の
+  ブランチで入れる。戻すマージの失敗は本番の完了と分けて報告する
+
+どの取り込み方の行がこの経路を通るかは、呼び手が行の属性で決める。出す（emit）のは呼び手である。
 """
 
 from __future__ import annotations
@@ -16,12 +27,38 @@ from pathlib import Path
 from typing import NamedTuple
 
 import approved_commit as ac
-import branch_flow
 import repo as repo_lib
+import strategy_rows
 from release_lib import approval, names, reviewed
 from release_lib.approval import HeadMoved
 from release_lib.context import ReleaseCtx
 from step_result import EXIT_GATE, EXIT_UNREADABLE, StepError, emit, git
+
+
+class Route(NamedTuple):
+    """版上げの経路。`release_pr` が偽なら版上げの PR を作らない。`bump` が偽なら版数・CHANGELOG・タグ・Release を作らない。"""
+
+    release_pr: bool
+    bump: bool
+    source: str | None
+    target: str
+    sync: bool
+    collects_units: bool = False
+
+
+def route_of(strategy) -> Route:
+    """`lib/branch_strategy.Strategy` から版上げの経路を決める。"""
+    sec = strategy.section
+    rs = sec["release_strategy"]
+    prod, base = sec["branches"]["production"], sec["branches"]["base"]
+    versioned = sec["release"]["version_store"]["kind"] != "none"
+    if sec["approval"]["target"] == "production_pr":
+        return Route(False, False, None, prod, False)
+    if rs == "merge_base_branch":
+        return Route(True, versioned, base, prod, True)
+    if rs == "release_branch":
+        return Route(True, True, prod, prod, True, collects_units=True)
+    return Route(True, True, prod, prod, False)
 
 
 class ReleaseBranches(NamedTuple):
@@ -37,14 +74,14 @@ def build_branch(root, branch: str, production: str, units: list[str]) -> dict:
 
     origin に `branch` が無ければ本番チャネルの先頭から切る。有れば（組み直し）その先頭から、動いた本番チャネルと単位を
     マージで足す（強制 push をしない。決定 6）。組むのは一時の作業ツリーで、呼び手の作業ツリーに触れない。
-    衝突すれば `branch_flow.ReleaseBuildError`（止めて人へ戻す。E10）。結果の欄（先頭と、組んだ時点の各先頭）を返す。"""
+    衝突すれば `strategy_rows.ReleaseBuildError`（止めて人へ戻す。E10）。結果の欄（先頭と、組んだ時点の各先頭）を返す。"""
     if not units:
-        raise branch_flow.ReleaseBuildError("選んだリリースの単位が無い（--units）")
+        raise strategy_rows.ReleaseBuildError("選んだリリースの単位が無い（--units）")
     git(root, "fetch", "-q", "origin")
     have = git(root, "ls-remote", "--exit-code", "--heads", "origin", f"refs/heads/{branch}", check=False).returncode == 0
     start = f"origin/{branch}" if have else f"origin/{production}"
     refs = [*([f"origin/{production}"] if have else []), *(f"origin/{u}" for u in units)]
-    row = next(r for r in branch_flow.PROMOTIONS.values() if r.selects_units)
+    row = next(r for r in strategy_rows.ROWS.values() if r.selects_units)
     tmp = Path(tempfile.mkdtemp(prefix="ndf-release-branch-"))
     wt = tmp / "wt"
     git(root, "worktree", "add", "-q", "--detach", str(wt), start)
@@ -95,7 +132,14 @@ def release_selected(ctx: ReleaseCtx, approved, ops, case=None) -> tuple:
         raise StepError("選んで集める取り込み方の release は --channel prod だけ（開発版はベースブランチで出す）", EXIT_UNREADABLE)
     tag = names.release_tag(plugin, a.version)
     metrics = {"channel": a.channel, "version": a.version, "release_pr": None, "sync_pr": None, "main_pr": None, "tag": None}
-    metrics.update({"merge_commit": None, "plugins": ",".join(plugins), "promotion": a.promotion, "approved_sha": approved})
+    metrics.update(
+        {
+            "merge_commit": None,
+            "plugins": ",".join(plugins),
+            "release_strategy": getattr(a, "release_strategy", None),
+            "approved_sha": approved,
+        }
+    )
     items: list[dict] = []
     git(root, "fetch", "-q", "origin", "--tags")
     done = ops.find_pr(root, branch, prod, states=("MERGED", "OPEN"))

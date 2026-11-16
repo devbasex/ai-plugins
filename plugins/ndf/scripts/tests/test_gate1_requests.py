@@ -14,6 +14,7 @@ SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS / "lib"))
 sys.path.insert(0, str(SCRIPTS))
 import design_pr_merge  # noqa: E402
+import strategy_fixture  # noqa: E402
 import gate1_requests as g1  # noqa: E402
 import parallel_lane as pl  # noqa: E402
 import parallel_plan as pp  # noqa: E402
@@ -40,8 +41,7 @@ def repo(tmp_path):
     subprocess.run(["git", "init", "-q", "--bare", "-b", "develop", str(bare)], check=True)
     wt = tmp_path / "wt"
     subprocess.run(["git", "clone", "-q", str(bare), str(wt)], check=True, capture_output=True)
-    (wt / ".ndf").mkdir()
-    (wt / ".ndf/worktree.json").write_text('{"version": 1, "base_branch": "develop", "production_branch": "main"}\n')
+    strategy_fixture.declare(wt, "develop", "main")
     commit(wt, "a.txt", "1")
     git(wt, "push", "-q", "origin", "HEAD:develop")
     git(wt, "switch", "-qc", "design")

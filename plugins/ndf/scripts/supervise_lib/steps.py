@@ -186,8 +186,8 @@ class StepContext:
         return cmd.replace("{pr}", number), None
 
     def base_branch(self) -> str | None:
-        """起点のブランチ。計画の base_branch、無ければ作業場所の .ndf/worktree.json の base_branch。"""
-        return self.plan.get("base_branch") or decl.declared_base_of([self.cwd])
+        """起点のブランチ。計画のベースブランチ、無ければ作業場所のブランチ戦略の宣言の `branches.base`。"""
+        return self.plan.get(decl.PLAN_BASE) or decl.declared_base_of([self.cwd])
 
     def inputs_text(self, step: dict) -> str:
         """judge と work の入力。今の実行の結果 → 前の実行の最後の結果（`--from` の再開のとき）→ 無い（名前と理由）の順（#1676）。"""
@@ -267,7 +267,7 @@ class RunStep:
         if "{base}" in cmd:
             base = ctx.base_branch()
             if not base:
-                return cmd, "cmd の {base} を置き換える起点のブランチが無い（計画か .ndf/worktree.json の base_branch）", None
+                return cmd, "cmd の {base} を置き換える起点のブランチが無い（計画かブランチ戦略の宣言）", None
             cmd = cmd.replace("{base}", base)
         cmd = cmd.replace("{state_dir}", str(ctx.state.dir))
         cmd = cmd.replace(plan_mod.PLAN_ISSUES, " ".join(str(int(i)) for i in ctx.plan.get("課題") or []))

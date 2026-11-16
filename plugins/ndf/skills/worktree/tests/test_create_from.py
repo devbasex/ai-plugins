@@ -11,7 +11,7 @@ import os
 import subprocess
 from pathlib import Path
 
-from worktree_helpers import SCRIPTS_DIR, add_origin, git, push_branch, write_declaration
+from worktree_helpers import SCRIPTS_DIR, add_origin, git, push_branch, write_strategy
 
 SETUP = SCRIPTS_DIR / "worktree-setup.sh"
 
@@ -40,7 +40,7 @@ def prepare(main_repo: Path) -> None:
     git(main_repo, "push", "-q", "origin", "develop")
     git(main_repo, "checkout", "-q", "main")
     git(main_repo, "branch", "-q", "-D", "develop")
-    write_declaration(main_repo, json.dumps({"version": 1, "base_branch": "develop"}))
+    write_strategy(main_repo, "develop", "main")
 
 
 def head(repo: Path, ref: str = "HEAD") -> str:
@@ -69,9 +69,9 @@ def test_from_starts_at_the_sprint_branch(main_repo: Path) -> None:
     issue = main_repo / ".worktrees" / "feat" / "issue-1"
     assert head(issue) == head(sprint)
     assert "起点: sprint/m1" in got.stdout
-    # 宣言の base_branch は変えない
-    decl = json.loads((main_repo / ".ndf" / "worktree.json").read_text(encoding="utf-8"))
-    assert decl["base_branch"] == "develop"
+    # 宣言のベースブランチは変えない
+    decl = json.loads((main_repo / ".ndf" / "project.json").read_text(encoding="utf-8"))
+    assert decl["branch_strategy"]["branches"]["base"] == "develop"
 
 
 def test_from_uses_the_remote_sprint_branch(main_repo: Path) -> None:

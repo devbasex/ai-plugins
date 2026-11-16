@@ -62,23 +62,15 @@
       "keys": [
         "docs",
         "ndf_policies",
-        "production_merge",
         "test"
       ]
     },
     {
       "file": "supervise.json",
       "keys": [
-        "release",
         "shared",
         "slow",
         "test"
-      ]
-    },
-    {
-      "file": "worktree.json",
-      "keys": [
-        "base_branch"
       ]
     }
   ],

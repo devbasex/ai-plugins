@@ -57,8 +57,8 @@
         "6": "review"
       },
       "on_fail": "abort",
-      "next": "review",
-      "gate_next": "end"
+      "gate_next": "end",
+      "next": "review"
     },
     {
       "id": "review",
@@ -226,7 +226,7 @@
       "next": "end"
     }
   ],
-  "base_branch": "main",
+  "ベースブランチ": "main",
   "テストの戦略": {
     "name": "local-full",
     "source": "derived:test_duration",

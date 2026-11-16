@@ -440,7 +440,7 @@ def counts(items: list[dict[str, Any]]) -> dict[str, int]:
 def main(argv: list[str] | None = None) -> int:
     import deps
 
-    deps.require("durable", "locks", "procs")
+    deps.require("durable", "locks", "procs", "jsonschema")
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
     sw = sub.add_parser("sweep", help="持ち主の終わった残る状態を片付ける")

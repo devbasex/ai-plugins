@@ -1,10 +1,10 @@
-"""選んで集める取り込み方（`branch_flow.promotion: selected`。#3121）のリリース。
+"""選んで集める取り込み方（ブランチ戦略の宣言の `release_strategy: release_branch`。#3121・#3672）のリリース。
 
 - リリースブランチは本番チャネルの先頭と選んだ単位のマージだけからなる（受け入れ条件 5・16・17・I5）
 - 承認資料の範囲は前のタグ..リリースブランチの先頭で、選んだ単位の中の PR だけが入る（受け入れ条件 6）
 - 承認の後に別の単位をマージした先端は承認の外として止まり、版上げだけなら通る（分冊の決定 14）
 - `new sprint` のリリースのプランが、開発版の後にリリースブランチを組み、本番は組んだブランチから本番チャネルへ直接出す
-- 宣言の無いリポジトリのリリースのプランは変わらない（受け入れ条件 2・I2）
+- ベースブランチを丸ごと出す宣言（merge_base_branch）のリリースのプランは変わらない（受け入れ条件 2・I2）
 - pace: fast はスプリントブランチを作らないため、選んで集める宣言と組まない
 """
 
@@ -21,12 +21,15 @@ SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(SCRIPTS))
 import inproc  # noqa: E402
+import strategy_fixture  # noqa: E402
 import supervise_lib  # noqa: E402,F401  lib/ を sys.path へ足す
 import approved_commit as ac  # noqa: E402
-from release_lib import included, promotion  # noqa: E402
+from release_lib import included  # noqa: E402
+from release_lib import strategy_route as promotion  # noqa: E402
 
 SUPERVISE = SCRIPTS / "supervise.py"
-SELECTED = {"start": "production", "integrate": "check", "doc_prs": "sprint", "promotion": "selected"}
+# 選んで集める取り込み方（release_branch）と、ベースブランチを丸ごと出す取り込み方（merge_base_branch）の種類
+SELECTED, WHOLE = "mobile", "web-develop"
 BRANCH = "release/v1.1.0"
 
 
@@ -151,14 +154,13 @@ def test_a_unit_merged_after_approval_is_outside_the_approval(history, tmp_path)
     assert not verdict.ok and verdict.reason == ac.OUTSIDE_COMMITS
 
 
-def make_repo(tmp_path: Path, flow=None, pace=None) -> Path:
+def make_repo(tmp_path: Path, flow: str = WHOLE, pace=None) -> Path:
     repo = tmp_path / "repo"
     (repo / ".ndf").mkdir(parents=True)
     subprocess.run(["git", "init", "-q", "-b", "develop", str(repo)], check=True)
-    wt = {"version": 1, "base_branch": "develop", "production_branch": "main", **({"branch_flow": flow} if flow else {})}
-    (repo / ".ndf" / "worktree.json").write_text(json.dumps(wt))
-    release = {"form": "package-plugin", "plugin": "ndf", "runtimes": ["claude"]}
-    (repo / ".ndf" / "supervise.json").write_text(json.dumps({"test": {"command": "true"}, "release": release}))
+    release = {**strategy_fixture.section("plugin")["release"], "plugin": "ndf", "runtimes": ["claude"]}
+    strategy_fixture.write_strategy(repo, flow, base="develop", production="main", release=release)
+    (repo / ".ndf" / "supervise.json").write_text(json.dumps({"test": {"command": "true"}}))
     if pace:
         (repo / ".ndf" / "pace.json").write_text(json.dumps(pace))
     git(repo, "add", "-A")
@@ -197,13 +199,13 @@ def test_selected_sprint_builds_the_release_branch_and_releases_it_directly(tmp_
     assert f"--head {BRANCH}" in step(dev, "facts")["cmd"] and f"--head {BRANCH}" in step(dev, "others")["cmd"]
     assert prod["起点のコミット"] == f"origin/{BRANCH}"
     assert "--base main" in step(prod, "bump")["cmd"]
-    assert "--promotion selected" in step(prod, "release")["cmd"]
+    assert "--release-strategy release_branch" in step(prod, "release")["cmd"]
     assert "origin develop" in step(prod, "verify")["cmd"]  # 作業ツリーはベースブランチを追う（本番チャネルは ff で入らない）
 
 
 @pytest.mark.usefixtures("issue_bodies")
-def test_without_a_declaration_the_release_plans_do_not_change(tmp_path):
-    """受け入れ条件 2・I2: 宣言が無ければリリースブランチを組まず、本番はベースブランチ経由のまま。"""
+def test_the_whole_flow_keeps_the_release_plans(tmp_path):
+    """受け入れ条件 2・I2: ベースブランチを丸ごと出す宣言ではリリースブランチを組まず、本番はベースブランチ経由のまま。"""
     repo = make_repo(tmp_path)
     p, out = new_sprint(tmp_path, repo)
     assert p.returncode == 0, p.stdout + p.stderr
@@ -211,7 +213,7 @@ def test_without_a_declaration_the_release_plans_do_not_change(tmp_path):
     assert step(dev, "release-branch") is None and step(dev, "verify")["next"] == "facts"
     assert "--head" not in step(dev, "facts")["cmd"] and "--head" not in step(dev, "others")["cmd"]
     assert "起点のコミット" not in prod
-    assert "--base develop" in step(prod, "bump")["cmd"] and "--promotion" not in step(prod, "release")["cmd"]
+    assert "--base develop" in step(prod, "bump")["cmd"] and "--release-strategy" not in step(prod, "release")["cmd"]
 
 
 @pytest.mark.usefixtures("issue_bodies")
@@ -220,7 +222,7 @@ def test_fast_pace_refuses_the_selected_flow(tmp_path):
     repo = make_repo(tmp_path, SELECTED, pace={"version": 1, "fast": {"enabled": True, "modes": ["standard"], "verify": "true"}})
     p, out = new_sprint(tmp_path, repo, "--pace", "fast")
     got = json.loads(p.stdout.strip().splitlines()[-1])
-    assert got["status"] == "stopped" and "branch_flow.promotion" in got["summary"]
+    assert got["status"] == "stopped" and "取り込み方 release_branch" in got["summary"]
     assert not (out / "sprint.json").exists()
 
 
@@ -324,7 +326,7 @@ _BASE_METRICS = {
     "tag": None,
     "merge_commit": None,
     "plugins": "ndf,pk",
-    "promotion": "selected",
+    "release_strategy": "release_branch",
 }
 
 
@@ -374,7 +376,7 @@ def selected(monkeypatch):
             return SimpleNamespace(returncode=0, stdout="")
 
         monkeypatch.setattr(promotion, "git", git)
-        a = SimpleNamespace(channel=channel, version="1.1.0", promotion="selected")
+        a = SimpleNamespace(channel=channel, version="1.1.0", release_strategy="release_branch")
         ctx = ReleaseCtx(Path("."), a, "ndf", ["ndf", "pk"], BRANCH, "develop", "main")
         return promotion.release_selected(ctx, approved, ops, case)
 

@@ -168,7 +168,7 @@
       ]
     }
   ],
-  "base_branch": "main",
+  "ベースブランチ": "main",
   "リポジトリ": "<TMP>/repo",
   "記録": "<NDF>/scripts/projects-sync.sh"
 }

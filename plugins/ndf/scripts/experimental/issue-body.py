@@ -7,7 +7,7 @@
 一致しなければ食い違った最初の行を出して 1 で終わる。
 
 書き込む前に、本文が `…` で指すリポジトリのパスのうち、手元にはあるが origin の起点のブランチ
-（`.ndf/worktree.json` の `base_branch`、無ければ origin/HEAD）に無いものを探す。あれば GitHub から
+（ブランチ戦略の宣言の `branches.base`）に無いものを探す。宣言を読めなければ照らさない。あれば GitHub から
 読めない参照として、書かずに 1 で終わる（コミット前の `issues/` のファイルを指して済ませないため）。
 ただし push 済みのリモートのブランチ（現在のブランチの upstream か `origin/<現在のブランチ>`）に
 あれば通し、そのブランチの blob の URL を結果に出す（設計 PR のブランチをマージする前に本文を書き直すため）。
@@ -17,13 +17,16 @@
 from __future__ import annotations
 
 import argparse
-import json
 import re
 import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import deps  # noqa: E402
+
+deps.require("jsonschema")
+import branch_strategy  # noqa: E402
 from step_result import emit, result  # noqa: E402
 
 TOOL = "issue-body"
@@ -41,16 +44,11 @@ def git(root, *args):
 
 
 def base_ref(root: Path) -> str | None:
+    """起点の ref（`origin/<ベースブランチ>`）。ブランチ戦略の宣言を読めなければ None（既定値へ倒さない）。"""
     try:
-        b = json.loads((root / ".ndf" / "worktree.json").read_text()).get("base_branch")
-    except (OSError, ValueError):
-        b = None
-    if b:
-        return f"origin/{b}"
-    p = git(root, "rev-parse", "--abbrev-ref", "origin/HEAD")
-    if p.returncode == 0:
-        return p.stdout.strip()
-    return "origin/main" if git(root, "rev-parse", "-q", "--verify", "origin/main").returncode == 0 else None
+        return f"origin/{branch_strategy.load_strategy(root).base}"
+    except branch_strategy.StrategyError:
+        return None
 
 
 def pushed_refs(root: Path, base: str) -> list[str]:

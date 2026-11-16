@@ -18,6 +18,7 @@ from test_release_steps import PY, SCRIPT, fake_gh, git  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
 import gh_sections  # noqa: E402
+import strategy_fixture  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "release_notes"
@@ -55,8 +56,7 @@ def release_repo(root: Path, readme: str, changelog: str, extra: dict[str, str] 
     git(root, "init", "-q")
     git(root, "config", "user.email", "t@example.com")
     git(root, "config", "user.name", "t")
-    write(root, ".ndf/worktree.json", json.dumps({"version": 1, "base_branch": "develop", "production_branch": "main"}))
-    write(root, ".ndf/supervise.json", json.dumps({"release": {"form": "package-plugin", "plugin": "ndf", "runtimes": ["claude"]}}))
+    strategy_fixture.declare(root, "develop", "main", {"form": "package-plugin", "plugin": "ndf", "runtimes": ["claude"]})
     write(root, "plugins/ndf/.claude-plugin/plugin.json", json.dumps({"name": "ndf", "version": "1.2.2"}))
     write(root, "plugins/ndf/README.md", readme)
     write(root, "CHANGELOG.md", changelog)

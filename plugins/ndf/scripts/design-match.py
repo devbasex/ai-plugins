@@ -27,7 +27,7 @@ from pathlib import Path, PurePosixPath
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import deps  # noqa: E402
 
-deps.require("md")
+deps.require("md", "jsonschema")
 import md  # noqa: E402
 import repo  # noqa: E402
 from design_docs import find_designs, git_list, read_files, require_repo  # noqa: E402

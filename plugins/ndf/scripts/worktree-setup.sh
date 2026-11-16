@@ -6,7 +6,7 @@
 #   check            宣言の状態を終了コードで返す（読み取り専用）
 #   create <ブランチ> [--from <起点>]
 #                    `.worktrees/<ブランチ>` に作業ツリーを作る。起点の既定はスプリント
-#                    の起点（宣言の branch_flow.start。無ければ base_branch）。課題の作業ツリーはスプリントブランチ（sprint/<名前>）を
+#                    の起点（ブランチ戦略の宣言の sprint.start）。課題の作業ツリーはスプリントブランチ（sprint/<名前>）を
 #                    --from に渡して切る。スプリントブランチそのものは --from を省いて切る
 #
 # 作業ツリー運用の仕組みは、リポジトリ側に宣言ファイルがあるときだけ動く。
@@ -65,9 +65,8 @@ SCHEMA_URL="https://raw.githubusercontent.com/devbasex/ai-plugins/main/plugins/n
 
 # check の各行に付く注記。意味（宣言由来・既定ブランチへの退避・退避先不明）を
 # 名前で表す。文言を変えるときはここだけを直す。
-readonly NOTE_DECLARED="（宣言）"
-readonly NOTE_DEFAULT_BRANCH="（未宣言。既定ブランチ）"
-readonly NOTE_UNKNOWN_FALLBACK="不明（origin/HEAD が未設定）"
+readonly NOTE_DECLARED="（ブランチ戦略の宣言）"
+readonly NOTE_UNDECLARED="不明（ブランチ戦略の宣言を読めない。project-decl.py branch-strategy で作る）"
 
 # --- init -------------------------------------------------------------------
 
@@ -259,32 +258,26 @@ do_status() {
 
 # --- check ------------------------------------------------------------------
 
-# 宣言のキーを行へ出す。**名前の実在は確かめない。** 確かめる wt_branch_exists は
+# ブランチ戦略の宣言の値を行へ出す。**名前の実在は確かめない。** 確かめる wt_branch_exists は
 # origin へ問い合わせることがあり、起動のたびに通信が走る。実在の確認は、その名前を
-# 使う時点の wt_base_branch / wt_production_branch が持つ。
+# 使う時点の wt_base_branch / wt_production_branch が持つ。既定ブランチへ落とさない（I3）。
 print_branch_line() {
-  local label="$1" key="$2" decl="$3" name='' fallback
-  if [ -n "$decl" ]; then
-    name=$(_wt_declaration_string "$decl" "$key")
-  fi
-  if [ -n "$name" ]; then
+  local label="$1" pointer="$2" name
+  if name=$(wt_strategy_get "$MAIN_DIR" "$pointer" 2>/dev/null) && [ -n "$name" ]; then
     printf '%s: %s%s\n' "$label" "$name" "$NOTE_DECLARED"
-  elif fallback=$(wt_default_branch "$MAIN_DIR"); then
-    printf '%s: %s%s\n' "$label" "$fallback" "$NOTE_DEFAULT_BRANCH"
   else
-    printf '%s: %s\n' "$label" "$NOTE_UNKNOWN_FALLBACK"
+    printf '%s: %s\n' "$label" "$NOTE_UNDECLARED"
   fi
 }
 
 do_check() {
-  local state decl=
+  local state
   state=$(wt_declaration_state "$MAIN_DIR") || return 1
-  [ "$state" = present ] && decl=$(wt_declaration "$MAIN_DIR")
 
   print_declaration_line "$state"
   print_local_declaration_lines
-  print_branch_line "開発の起点" base_branch "$decl"
-  print_branch_line "本番のチャネル" production_branch "$decl"
+  print_branch_line "ベースブランチ" /branches/base
+  print_branch_line "本番ブランチ" /branches/production
 
   case "$state" in
     present) return 0 ;;
@@ -297,9 +290,8 @@ do_check() {
 
 # 作業ツリーを `.worktrees/<ブランチ>` に作り、そのパスを出力する。
 #
-# 起点は --from があればそれ、無ければスプリントの起点（宣言の branch_flow.start が
-# 指すチャネル。無ければ base_branch、それも無ければ既定ブランチ）である。**宣言は
-# 書き換えない。** スプリントブランチはスプリントの起点から切り、課題の作業ツリーは
+# 起点は --from があればそれ、無ければスプリントの起点（ブランチ戦略の宣言の sprint.start が
+# 指すブランチ。宣言を読めなければ作らない）である。**宣言は書き換えない。** スプリントブランチはスプリントの起点から切り、課題の作業ツリーは
 # --from にスプリントブランチを渡して切る。
 # 起点の名前が origin にもローカルにも無いときは作らずに 1 で終わる。
 do_create() {

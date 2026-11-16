@@ -17,6 +17,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from release_repo import push_origin  # noqa: E402
+import strategy_fixture  # noqa: E402
 
 SCRIPTS = Path(__file__).resolve().parents[1]
 RELEASE_STEPS = SCRIPTS / "release-steps.py"
@@ -48,7 +49,7 @@ def make_repo(tmp_path: Path, version: str, *, plugin: str = "ndf", agents: str 
     git(root, "config", "user.email", "t@example.com")
     git(root, "config", "user.name", "t")
     git(root, "config", "gc.auto", "0")
-    write(root, ".ndf/worktree.json", json.dumps({"version": 1, "base_branch": "develop", "production_branch": "main"}))
+    strategy_fixture.declare(root, "develop", "main", {"form": "package-plugin", "plugin": plugin})
     write(root, f"{plugin_rel(plugin)}/.claude-plugin/plugin.json", json.dumps({"version": version}, indent=2))
     write(root, "README.md", f"**NDFプラグイン v{version}** の概要\n\n| **{plugin}** | {version} | 説明 |\n")
     if agents is None:

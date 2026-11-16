@@ -437,7 +437,7 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--root", type=Path, default=REPO, help="リポジトリの根（既定はこのスクリプトのリポジトリ）")
     ap.add_argument("--allow", type=Path, help=f"例外リストの置き場（既定は <root>/{ALLOW}/）")
-    ap.add_argument("--base", help="例外リストを比べる ref（既定は origin/<GITHUB_BASE_REF か .ndf/worktree.json の base_branch>）")
+    ap.add_argument("--base", help="例外リストを比べる ref（既定は origin/<GITHUB_BASE_REF かブランチ戦略の宣言の branches.base>）")
     ap.add_argument("--render", action="store_true", help=f"{INDEX} を書き直す")
     ap.add_argument("--draft", metavar="PATH", help="エントリポイントの項目の下書きを標準出力へ出す")
     ap.add_argument("files", nargs="*", help="合否を決めるファイル（省くと木全体の違反で決める）")

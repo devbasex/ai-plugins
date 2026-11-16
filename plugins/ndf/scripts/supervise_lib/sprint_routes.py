@@ -25,8 +25,8 @@ def pace_decl(a) -> dict | None:
 
 
 def dev_channel_of(a) -> delivery.DevChannel:
-    """開発版のチャネルの形（lib/delivery.py の dev_channel）。宣言は apply_routes が載せた a.delivery を使う。"""
-    decl = getattr(a, "delivery", None) or delivery_decl(a)
+    """開発版のチャネルの形（lib/delivery.py の dev_channel）。宣言は apply_routes が載せた a.delivery_decl を使う。"""
+    decl = getattr(a, "delivery_decl", None) or delivery_decl(a)
     return delivery.dev_channel(decl)
 
 
@@ -37,14 +37,14 @@ CD_RESULT_STAGE = "CD の結果"
 def with_cd_guidance(a, head: dict) -> tuple[dict, list[dict]]:
     """目録の頭へ CD の案内を載せ、(頭, 結果の items に足す並び) を返す。読むだけで、ステージにも終了コードにも効かない（I3）。
     `documentation` の提出と、宣言を読んでいない経路では出さない（I7）。"""
-    decl = getattr(a, "delivery", None)
+    decl = getattr(a, "delivery_decl", None)
     got = None if decl is None or getattr(a, "mode", None) == "documentation" else delivery.cd_guidance(decl)
     return ({**head, "CD の案内": got.as_item()}, [got.as_item()]) if got else (head, [])
 
 
 def direct_production(a, rs: list) -> str | None:
     """ベースブランチへのマージがそのまま本番系へ届く形の本番チャネル（無ければ None）。本番チャネルへ入れるリリースプランが無く、記録を書く主体が要る。"""
-    decl = getattr(a, "delivery", None)
+    decl = getattr(a, "delivery_decl", None)
     production = decl.production if decl else None
     hit = any(r.stage == delivery.STAGE_MERGED_BY_CHECK and r.production is not False and r.branch == production for r in rs)
     return production if production and hit else None
@@ -52,15 +52,15 @@ def direct_production(a, rs: list) -> str | None:
 
 def apply_routes(a) -> None:
     """a.routes（リリースの経路）を宣言から組む。雛形で組む経路でも版数は要らない（無ければデプロイのステップを流す時点に決める。#2164）。"""
-    a.delivery = delivery_decl(a)
-    a.routes = delivery.routes(a.delivery, tuple(RELEASE_FORMS))
+    a.delivery_decl = delivery_decl(a)
+    a.routes = delivery.routes(a.delivery_decl, tuple(RELEASE_FORMS))
 
 
 def routes_of(a) -> list:
     """リリースの経路（apply_decls が載せる a.routes。無ければ release.form だけから導く）。"""
     rs = getattr(a, "routes", None)
     if rs is None:
-        d = delivery.build({}, {}, a.release, base=a.base, production=getattr(a, "production_branch", None))
+        d = delivery.build(None, a.release, base=a.base, production=getattr(a, "production", None))
         rs = delivery.routes(d, tuple(RELEASE_FORMS))
     return rs
 

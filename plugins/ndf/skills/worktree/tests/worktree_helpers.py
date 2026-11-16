@@ -14,7 +14,7 @@ from pathlib import Path
 
 SCRIPTS_DIR = Path(__file__).resolve().parents[3] / "scripts"
 # 編集時の guard の判定（hook_lib）を同じプロセスで import する（#1142 の決定 20）
-for _p in (SCRIPTS_DIR / "lib", SCRIPTS_DIR):
+for _p in (SCRIPTS_DIR / "lib", SCRIPTS_DIR, SCRIPTS_DIR / "tests"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 LIB = SCRIPTS_DIR / "lib" / "worktree-common.sh"
@@ -83,6 +83,17 @@ def write_declaration(main_repo: Path, body: str) -> Path:
     path = ndf / "worktree.json"
     path.write_text(body, encoding="utf-8")
     return path
+
+
+def write_strategy(main_repo: Path, base: str = "main", production: str = "main") -> dict:
+    """ブランチ戦略の宣言（`.ndf/project.json` の `branch_strategy`）を置く。ベースブランチと本番ブランチが同じなら
+    `web-trunk`、違えば `web-develop` の種類の写しにする（#3672）。`.ndf/worktree.json` も無ければ置く。"""
+    import strategy_fixture
+
+    if not (main_repo / ".ndf" / "worktree.json").is_file():
+        write_declaration(main_repo, '{"version": 1}')
+    kind = "web-trunk" if base == production else "web-develop"
+    return strategy_fixture.write_strategy(main_repo, kind, base=base, production=production)
 
 
 def add_origin(main_repo: Path, name: str = "main") -> Path:
