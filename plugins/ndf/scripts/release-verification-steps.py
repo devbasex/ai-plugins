@@ -242,7 +242,7 @@ def install_source(root, a):
     names = a.plugins or (d.release or {}).get("plugin") or ""
     plugins = [p.strip() for p in names.split(",") if p.strip()]
     if not plugins:
-        raise StepError("確かめるプラグインを決められない（--plugins か .ndf/supervise.json の release.plugin）", EXIT_UNREADABLE)
+        raise StepError("確かめるプラグインを決められない（--plugins かブランチ戦略の宣言の release.plugin）", EXIT_UNREADABLE)
     return (slug, market_of(root, slug), d.production), plugins
 
 
