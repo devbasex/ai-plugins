@@ -1,10 +1,10 @@
-"""CHANGELOG の版の節を組み、差し込み、読み出す（純粋な関数）。
+"""CHANGELOG の版のセクションを組み、差し込み、読み出す（純粋な関数）。
 
 節は `## [<プラグイン名> <基底の版>] - <日付>` の見出しから次の `## ` の見出しの前までである。開発版は載せない
 （呼び手が本番の版のときだけ書く）。
 
-- 同じプラグインの同じ基底の版の節が既にあれば、その節だけを置き換える。ほかの節は 1 行も変えない
-- 無ければ、最初の版の節の前（前書きの後）へ差し込む。版の節が 1 つも無ければ末尾へ足す
+- 同じプラグインの同じ基底の版のセクションが既にあれば、その節だけを置き換える。ほかの節は 1 行も変えない
+- 無ければ、最初の版のセクションの前（前書きの後）へ差し込む。版のセクションが 1 つも無ければ末尾へ足す
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from typing import NamedTuple
 
 from ndf.domains.release import version_decide
 
-# 版の節の見出しの先頭
+# 版のセクションの見出しの先頭
 SECTION_MARK = "## "
 
 
@@ -43,7 +43,7 @@ def block(plugin: str, version: str, date: str, entries: Sequence[Entry]) -> lis
 
 
 def _span(lines: list[str], plugin: str, version: str) -> tuple[int, int] | None:
-    """版の節の (見出しの行, 次の節の行)。無ければ None。"""
+    """版のセクションの (見出しの行, 次の節の行)。無ければ None。"""
     key = changelog_key(plugin, version)
     at = next((i for i, line in enumerate(lines) if line == key or line.startswith(key + " ")), None)
     if at is None:
@@ -65,7 +65,7 @@ def insert(text: str, plugin: str, version: str, new: Sequence[str]) -> str:
 
 
 def notes(text: str, plugin: str, version: str) -> str | None:
-    """版の節の本文（見出しを除き、前後の空行を落とす）。節が無ければ None。"""
+    """版のセクションの本文（見出しを除き、前後の空行を落とす）。節が無ければ None。"""
     lines = text.split("\n")
     span = _span(lines, plugin, version)
     if span is None:

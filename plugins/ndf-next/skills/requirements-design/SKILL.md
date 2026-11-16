@@ -127,7 +127,7 @@ description: "Turn a vague request into verifiable acceptance criteria before im
    - 引き金の無いイベント
    - 失敗の経路の無いイベント
    - ほかのイベントの順序を仮定しているイベント
-3. 一覧は仕様の「ドメインイベント」の節に残す。設計のドメインモデルの節が同じ番号を引き継ぐ
+3. 一覧は仕様の「ドメインイベント」の節に残す。設計のドメインモデルのセクションが同じ番号を引き継ぐ
 
 ### 3b. 語を用語集と突き合わせる（`standard`）
 
@@ -154,7 +154,7 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 ### 5a. 要求と範囲を MVV と突き合わせる
 
 承認済みのプロジェクト MVV があれば、手順 1〜5 の要求と範囲を MVV と突き合わせる。**反する疑いがあれば、要求を書き切らずに
-人へ戻す**（理由と根拠の項目つき）。受け入れ条件の文に MVV の項目を書き込まない。MVV の節の読み方・人へ戻す形・「MVV なし」の
+人へ戻す**（理由と根拠の項目つき）。受け入れ条件の文に MVV の項目を書き込まない。MVV のセクションの読み方・人へ戻す形・「MVV なし」の
 ときの扱いは [project-mvv.md の「工程での読み方」](../development-workflow/references/project-mvv.md) にある。
 
 ### 6. 実装前に明文化する項目

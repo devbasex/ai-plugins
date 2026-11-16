@@ -223,7 +223,7 @@ REST の応答（`GET /repos/{repo}/pulls/{pr}`）の `base.sha` から読み、
 | --- | --- |
 | `review_scope.unavailable` の値 | 範囲を求められなかった |
 | `legacy` | `review_scope` を持たない前の版のラウンド |
-| `model_stage` | 設計 PR のモデルレビュー。指示どおりドメインモデルの節だけを読むため、照合すると誤って外す |
+| `model_stage` | 設計 PR のモデルレビュー。指示どおりドメインモデルのセクションだけを読むため、照合すると誤って外す |
 
 判定の出力と状態ファイル:
 
