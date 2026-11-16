@@ -307,7 +307,7 @@ def test_exact_match_gates_any_commit_added_after_the_approval(monkeypatch, stat
     ctx = ReleaseCtx(Path("."), a, "ndf", ["ndf"], BRANCH, "develop", "main")
     if merged:
         assert promotion._merge_exact(ctx, 30, case, [], {}, ops) == "m"
-        assert ops.merged == [{"expect": head, "ci_wait": 60.0, "gate_approved": "user", "no_admin": True}]
+        assert ops.merged == [{"expect": head, "ci_wait": 60.0, "gate_approved": "user"}]
         return
     with pytest.raises(SystemExit):
         promotion._merge_exact(ctx, 30, case, [], {}, ops)

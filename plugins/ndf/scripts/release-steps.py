@@ -514,17 +514,17 @@ def pr_check_buckets(root, n):
         return []
 
 
-def wait_and_merge(root, n, expect=None, ci_wait=3600.0, gate_approved=None, no_admin=False):
+def wait_and_merge(root, n, expect=None, ci_wait=3600.0, gate_approved=None):
     """PR のチェックを merge-when-green で待って（上限 ci_wait 秒）マージする。止まったらその summary で止める。
     CI の基盤待ち（75）は同じ 75 で、中身の失敗は 1 で止める（#1645）。後片付けは行わせない。expect を渡すと、
     PR の先端がその SHA のときだけマージし、違えば HeadMoved を投げる。gate_approved はリリース承認ゲートを通した担い手で、
-    宛先が自動反映の本番チャネルのときに要る（#2623 の I2）。no_admin なら管理者の迂回なしでマージする（#2773 の I7）。
+    宛先が自動反映の本番チャネルのときに要る（#2623 の I2）。管理者の迂回は引数でなく宣言から決める（`strategy_route.admin_bypass`。#3672 の I6）。
     """
     script = Path(__file__).resolve().parent / "merged-steps.py"
     cmd = [sys.executable, str(script), "merge-when-green", str(n), "--no-cleanup", "--interval", "5", "--timeout", f"{ci_wait:g}"]
     cmd += ["--expect-head", expect] if expect else []
+    cmd += [] if strategy_route.admin_bypass(root) else ["--no-admin"]
     cmd += ["--gate-approved", gate_approved] if gate_approved else []
-    cmd += ["--no-admin"] if no_admin else []
     p = run(cmd, cwd=root, check=False)
     out = step_read.last_json(p.stdout) or {}
     if p.returncode != 0:

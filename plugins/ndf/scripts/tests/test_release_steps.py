@@ -253,6 +253,7 @@ def _release_steps_module(monkeypatch):
 def test_wait_and_merge_delegates_to_merge_when_green(monkeypatch):
     """デプロイの PR の待ちは merge-when-green に任せる（上限と取り残されたチェックの再実行を持つ）。"""
     mod = _release_steps_module(monkeypatch)
+    monkeypatch.setattr(mod.strategy_route, "admin_bypass", lambda root: False)
     calls = []
     out = json.dumps({"tool": "merged", "status": "ok", "summary": "#5 をマージした", "items": []})
     monkeypatch.setattr(mod, "run", lambda cmd, **kw: calls.append(cmd) or subprocess.CompletedProcess(cmd, 0, out, ""))
@@ -268,6 +269,7 @@ def test_wait_and_merge_delegates_to_merge_when_green(monkeypatch):
 def test_wait_and_merge_passes_who_approved_only_when_given(monkeypatch):
     """自動反映の本番チャネルへのマージは --gate-approved が無ければ止まる。開発版の経路には渡さない（#2623 の I2）。"""
     mod = _release_steps_module(monkeypatch)
+    monkeypatch.setattr(mod.strategy_route, "admin_bypass", lambda root: False)
     calls = []
     out = json.dumps({"tool": "merged", "status": "ok", "summary": "#5 をマージした", "items": []})
     monkeypatch.setattr(mod, "run", lambda cmd, **kw: calls.append(cmd) or subprocess.CompletedProcess(cmd, 0, out, ""))
@@ -280,6 +282,7 @@ def test_wait_and_merge_passes_who_approved_only_when_given(monkeypatch):
 def test_wait_and_merge_stops_with_the_summary_of_merge_when_green(monkeypatch):
     """merge-when-green が止まったら、その summary を持って止まる（上限なしで待ち続けない）。"""
     mod = _release_steps_module(monkeypatch)
+    monkeypatch.setattr(mod.strategy_route, "admin_bypass", lambda root: False)
     out = json.dumps(
         {"tool": "merged", "status": "stopped", "summary": "#5 の取り残されたチェックが再実行でも動かない: build", "items": []}
     )
@@ -291,6 +294,7 @@ def test_wait_and_merge_stops_with_the_summary_of_merge_when_green(monkeypatch):
 def test_wait_and_merge_passes_the_ci_wait_as_the_timeout(monkeypatch):
     """release の --ci-wait は merge-when-green の --timeout へ渡す（ステップの timeout より先に止まる。#1645 の決定 7）。"""
     mod = _release_steps_module(monkeypatch)
+    monkeypatch.setattr(mod.strategy_route, "admin_bypass", lambda root: False)
     calls = []
     out = json.dumps({"tool": "merged", "status": "ok", "summary": "#5 をマージした", "items": []})
     monkeypatch.setattr(mod, "run", lambda cmd, **kw: calls.append(cmd) or subprocess.CompletedProcess(cmd, 0, out, ""))
@@ -304,6 +308,7 @@ def test_wait_and_merge_returns_infra_wait_as_75(monkeypatch, code, expected):
     """AC11: merge-when-green の基盤待ち（75）は 75 で、中身の失敗（1）は今のとおり 1 で止まる。
     ベースブランチとの衝突（4。#1917-8）もリリースの手順では 1 として止まる。"""
     mod = _release_steps_module(monkeypatch)
+    monkeypatch.setattr(mod.strategy_route, "admin_bypass", lambda root: False)
     summary = "#5 の CI の基盤待ち: Runner が付かずに取り消された（Lint / lint）。再実行 3 回で解けない"
     out = json.dumps({"tool": "merged", "status": "stopped", "summary": summary, "items": []})
     monkeypatch.setattr(mod, "run", lambda cmd, **kw: subprocess.CompletedProcess(cmd, code, out, ""))
@@ -1359,7 +1364,7 @@ def test_reviewed_prod_stops_at_the_gate_until_the_approval_matches(monkeypatch,
 def test_reviewed_prod_merges_the_approved_head_without_the_bypass(monkeypatch, tmp_path, case):
     """受け入れ条件 2・12・I7: 承認が先端と一致すれば、その先端に固定して --admin なしでマージし、公開の後へ進む。"""
     _, _, merged, published, _ = _reviewed_prod(monkeypatch, tmp_path, case, "success", found=OPEN_PROD_PR)
-    assert merged == [{"expect": HEAD, "ci_wait": 60.0, "gate_approved": "user", "no_admin": True}] and published == [9]
+    assert merged == [{"expect": HEAD, "ci_wait": 60.0, "gate_approved": "user"}] and published == [9]
 
 
 def test_reviewed_prod_merges_cd_admin_with_the_bypass_and_records_it(monkeypatch, tmp_path):
@@ -1369,7 +1374,7 @@ def test_reviewed_prod_merges_cd_admin_with_the_bypass_and_records_it(monkeypatc
     out, _, merged, published, _ = _reviewed_prod(
         monkeypatch, tmp_path, "cd-admin", "success", found=OPEN_PROD_PR, record=record, backs=backs
     )
-    assert merged == [{"expect": HEAD, "ci_wait": 60.0, "gate_approved": "user", "no_admin": False}] and published == [9]
+    assert merged == [{"expect": HEAD, "ci_wait": 60.0, "gate_approved": "user"}] and published == [9]
     assert {"kind": "pr", "name": "#9", "result": "merged", "base": "main", "admin": True} in out["items"]
     assert record == [(9, HEAD, "https://t/1")]
     assert {"kind": "comment", "name": "https://r/1", "result": "written", "record": "admin_merge"} in out["items"]
@@ -1554,15 +1559,41 @@ def test_prod_ops_wires_the_entry_functions_at_call_time(monkeypatch):
     assert {field: getattr(ops, field) for field in wired} == {field: getattr(mod, name) for field, name in wired.items()}
 
 
-def test_wait_and_merge_passes_no_admin(monkeypatch):
+@pytest.mark.parametrize(
+    "merge, bypass",
+    [
+        ({"method": "direct", "admin": True}, True),
+        ({"method": "direct", "admin": False}, False),
+        ({"method": "strict", "admin": False}, False),
+    ],
+)
+def test_wait_and_merge_takes_the_bypass_from_the_declaration(monkeypatch, tmp_path, merge, bypass):
+    """#3672 の I6: 管理者の迂回は引数でなく宣言の merge から決め、method が direct で admin が真のときだけ使う。"""
     mod = _release_steps_module(monkeypatch)
+    root = tmp_path / "r"
+    root.mkdir()
+    git(root, "init", "-q")
+    sec = strategy_fixture.section("web-develop")
+    strategy_fixture.write_strategy(root, "web-develop", merge={**sec["merge"], **merge})
     calls = []
     out = json.dumps({"tool": "merged", "status": "ok", "summary": "#5 をマージした", "items": []})
     monkeypatch.setattr(mod, "run", lambda cmd, **kw: calls.append(cmd) or subprocess.CompletedProcess(cmd, 0, out, ""))
     monkeypatch.setattr(mod, "merge_commit_of", lambda root, n: "c")
-    mod.wait_and_merge(".", 5)
-    mod.wait_and_merge(".", 5, no_admin=True)
-    assert "--no-admin" not in calls[0] and calls[1][-1] == "--no-admin"
+    mod.wait_and_merge(root, 5, gate_approved="user")
+    assert ("--no-admin" not in calls[0]) is bypass and calls[0][-2:] == ["--gate-approved", "user"]
+
+
+def test_wait_and_merge_stops_without_the_declaration(monkeypatch, tmp_path):
+    """#3672 の異常系: 宣言を読めなければ迂回の有無を既定へ倒さず、merge-when-green を呼ばずに止まる。"""
+    mod = _release_steps_module(monkeypatch)
+    root = tmp_path / "r"
+    root.mkdir()
+    git(root, "init", "-q")
+    calls = []
+    monkeypatch.setattr(mod, "run", lambda cmd, **kw: calls.append(cmd))
+    with pytest.raises(mod.StepError):
+        mod.wait_and_merge(root, 5)
+    assert calls == []
 
 
 @pytest.mark.parametrize("arg", ["approved_sha", "approval"])

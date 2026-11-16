@@ -61,6 +61,18 @@ def route_of(strategy) -> Route:
     return Route(True, True, prod, prod, False)
 
 
+def admin_bypass(root) -> bool:
+    """管理者の迂回でマージするか。宣言（メインディレクトリ）の `merge` が `method: direct` で `admin: true` のときだけ（#3672 の I6）。
+    宣言を読めなければ StepError で止める（迂回の有無を既定へ倒さない）。"""
+    import branch_strategy
+
+    try:
+        merge = repo_lib.branch_strategy_of(root).section["merge"]
+    except branch_strategy.StrategyError as e:
+        raise StepError(e.reason, e.exit_code) from e
+    return merge.get("admin") is True and merge.get("method") == "direct"
+
+
 class ReleaseBranches(NamedTuple):
     """選んで集める取り込み方のリリースが使う 3 つのブランチの役割。"""
 
