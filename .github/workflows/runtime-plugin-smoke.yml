@@ -17,6 +17,9 @@ on:
       - "scripts/runtime-smoke-test.sh"
       - "tests/runtime-smoke/**"
       - ".github/workflows/runtime-plugin-smoke.yml"
+      # ndf-next だけの変更は ndf-next.yml が確かめる（ci-heavy-skip.py の 2b と同じ範囲）
+      - "!plugins/ndf-next/**"
+      - "!scripts/ndf-next-parity/**"
 
 jobs:
   # デプロイの PR（版数と説明だけの差分、または develop で通ったコミットを進めるだけの main 宛の
@@ -33,24 +36,24 @@ jobs:
       skip: ${{ steps.decide.outputs.skip }}
     steps:
       - uses: actions/checkout@v7
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         with:
           fetch-depth: 0
       # 差分の分類がパスの照合に pathspec を使う。版は根の pyproject.toml の pin から読む
       - uses: actions/setup-python@v7
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         with:
           python-version: "3.x"
-      - if: github.event_name == 'pull_request'
+      - if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         run: python3 -m pip install --quiet "$(grep -oE 'pathspec==[0-9.]+' pyproject.toml)"
       - id: decide
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         env:
           GH_TOKEN: ${{ github.token }}
         run: >-
           python3 scripts/ci-heavy-skip.py --workflow runtime-plugin-smoke.yml
-          --base "${{ github.event.pull_request.base.sha }}"
-          --head "${{ github.event.pull_request.head.sha }}"
+          --base "${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}"
+          --head "${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}"
 
   # 省くときもジョブは起動し、ステップだけを飛ばして成功を返す。ruleset の必須のチェックは
   # matrix を展開した名前（runtime-smoke (claude) など）を待つ。ジョブごと飛ばすと

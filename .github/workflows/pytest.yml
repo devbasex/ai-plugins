@@ -27,6 +27,9 @@ on:
       - "conftest.py"
       - "pytest.ini"
       - "pyproject.toml"
+      # ndf-next だけの変更は ndf-next.yml が確かめる（ci-heavy-skip.py の 2b と同じ範囲）
+      - "!plugins/ndf-next/**"
+      - "!scripts/ndf-next-parity/**"
 
 # 同じ Pull Request で新しい push が来たら、古い実行を取り消す（#2154・#2291 の決定 5）。
 # push（main / develop）は実行ごとに別の組へ入れて最後まで回す。同じ組に新しい実行が入ると、
@@ -54,24 +57,24 @@ jobs:
       docs_tests: ${{ steps.decide.outputs.docs_tests }}
     steps:
       - uses: actions/checkout@v7
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         with:
           fetch-depth: 0
       # 差分の分類がパスの照合に pathspec を使う。版は根の pyproject.toml の pin から読む（宣言を 2 か所に置かない）
       - uses: actions/setup-python@v7
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         with:
           python-version: "3.x"
-      - if: github.event_name == 'pull_request'
+      - if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         run: python3 -m pip install --quiet "$(grep -oE 'pathspec==[0-9.]+' pyproject.toml)"
       - id: decide
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         env:
           GH_TOKEN: ${{ github.token }}
         run: >-
           python3 scripts/ci-heavy-skip.py --workflow pytest.yml
-          --base "${{ github.event.pull_request.base.sha }}"
-          --head "${{ github.event.pull_request.head.sha }}"
+          --base "${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}"
+          --head "${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}"
 
   # ファイル単位で 6 つのジョブへ分けて回す（#882。2 から 6 へ増やした: 2026-11-17 の利用者の指示）。割り当ては根の conftest.py が
   # SHARD_TOTAL / SHARD_INDEX から決める。各ジョブの中は -n auto で runner のコア数だけ

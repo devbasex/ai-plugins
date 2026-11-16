@@ -210,6 +210,21 @@ def test_ndf_next_only_diff_skips_heavy_jobs(mod, repo, workflow):
     assert d.skip and d.docs_tests == (), d.reason
 
 
+def test_merge_group_skips_only_docs_and_self_tested_diffs(mod, repo):
+    """merge queue の一時コミットでも、ndf-next だけ・文書だけの差分は省く。版数と説明だけの差分（本番の PR の規則）は省かない。"""
+    base = git(repo, "rev-parse", "HEAD")
+    write(repo, "plugins/ndf-next/src/ndf/cli.py", "X = 1\n")
+    head = commit(repo, "ndf-next")
+    assert decide(mod, repo, base, head, event="merge_group")[0]
+    git(repo, "switch", "-q", "-c", "release/v1.0.1", base)
+    bump(repo)
+    bumped = commit(repo, "bump")
+    skip, reason = decide(mod, repo, base, bumped, event="merge_group")
+    assert not skip, reason
+    write(repo, "plugins/ndf/scripts/tool.py", "print(3)\n")
+    assert not decide(mod, repo, base, commit(repo, "code"), event="merge_group")[0]
+
+
 def test_ndf_next_with_tested_docs_returns_their_tests(mod, repo):
     base = git(repo, "rev-parse", "HEAD")
     write(repo, "plugins/ndf-next/src/ndf/cli.py", "X = 1\n")
