@@ -113,19 +113,23 @@ def fake(table):
     return run, calls
 
 
-def test_read_approvals_falls_back_to_branch_protection(monkeypatch):
-    run, _ = fake({"rules/branches/main": (0, json.dumps([pr_rule(1)]))})
+UNPROTECTED = (0, json.dumps({"protected": True, "protection": {"enabled": False}}))
+CLASSIC_ON = (0, json.dumps({"protected": True, "protection": {"enabled": True}}))
+NOT_FOUND = (1, "gh: Not Found (HTTP 404)")
+
+
+def test_read_approvals_reads_the_same_facts_as_rule_facts(monkeypatch):
+    """承認数は ruleset と従来のブランチ保護を重ねた事実から引く（多いほう）。読めなければ None と理由。"""
+    classic = {"required_pull_request_reviews": {"required_approving_review_count": 2}}
+    run, _ = fake(
+        {"rules/branches/main": (0, json.dumps([pr_rule(1)])), "branches/main/protection": NOT_FOUND, "{repo}/branches/main": UNPROTECTED}
+    )
     monkeypatch.setattr(gh_call, "RUNNER", run)
     assert rc.read_approvals(".", "main") == (1, "")
-    run, _ = fake({"rules/branches/main": (0, "[]"), "protection/required_pull_request_reviews": (1, "gh: Not Found (HTTP 404)")})
+    run, _ = fake({"rules/branches/main": (0, "[]"), "branches/main/protection": NOT_FOUND, "{repo}/branches/main": UNPROTECTED})
     monkeypatch.setattr(gh_call, "RUNNER", run)
     assert rc.read_approvals(".", "main") == (0, "")
-    run, _ = fake(
-        {
-            "rules/branches/main": (0, "[]"),
-            "protection/required_pull_request_reviews": (0, json.dumps({"required_approving_review_count": 2})),
-        }
-    )
+    run, _ = fake({"rules/branches/main": (0, json.dumps([pr_rule(1)])), "branches/main/protection": (0, json.dumps(classic))})
     monkeypatch.setattr(gh_call, "RUNNER", run)
     assert rc.read_approvals(".", "main") == (2, "")
     run, _ = fake({})
@@ -145,12 +149,37 @@ def test_read_rule_facts_reads_branch_protection_without_ruleset(monkeypatch, ru
     run, _ = fake({"rules/branches/main": rules, "branches/main/protection": (0, json.dumps(protection))})
     monkeypatch.setattr(gh_call, "RUNNER", run)
     assert rc.read_rule_facts(".", "main") == rc.RuleFacts(True, 1, False, True, "always")
-    run, _ = fake({"rules/branches/main": rules, "branches/main/protection": (1, "gh: Branch not protected (HTTP 404)")})
+    run, _ = fake(
+        {
+            "rules/branches/main": rules,
+            "branches/main/protection": (1, "gh: Branch not protected (HTTP 404)"),
+            "{repo}/branches/main": UNPROTECTED,
+        }
+    )
     monkeypatch.setattr(gh_call, "RUNNER", run)
     assert rc.read_rule_facts(".", "main") == rc.RuleFacts(False, 0, False, False, None)
     run, _ = fake({"rules/branches/main": rules})  # 保護を読めない（403）なら止める
     monkeypatch.setattr(gh_call, "RUNNER", run)
     assert rc.read_rule_facts(".", "main") is None
+
+
+def test_read_rule_facts_does_not_read_hidden_protection_as_none(monkeypatch):
+    """管理者でない利用者には保護の照会が 404 を返しうる。保護がある（protection.enabled）なら読めない（None）とし、保護なしにしない。"""
+    run, _ = fake({"rules/branches/main": (0, "[]"), "branches/main/protection": NOT_FOUND, "{repo}/branches/main": CLASSIC_ON})
+    monkeypatch.setattr(gh_call, "RUNNER", run)
+    assert rc.read_rule_facts(".", "main") is None
+
+
+def test_read_rule_facts_overlays_ruleset_and_branch_protection(monkeypatch):
+    """ruleset（削除の禁止だけ）と従来の保護（必須レビュー・最新の取り込み）を併用する本番ブランチは、両方を重ねて読む。"""
+    classic = {
+        "required_pull_request_reviews": {"required_approving_review_count": 1},
+        "required_status_checks": {"strict": True},
+        "enforce_admins": {"enabled": True},
+    }
+    run, _ = fake({"rules/branches/main": (0, json.dumps([{"type": "deletion"}])), "branches/main/protection": (0, json.dumps(classic))})
+    monkeypatch.setattr(gh_call, "RUNNER", run)
+    assert rc.read_rule_facts(".", "main") == rc.RuleFacts(True, 1, False, True, "never")
 
 
 def _decl(rows):

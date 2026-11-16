@@ -8,7 +8,7 @@
 | `no-cd` | 本番チャネルへのマージで届く `kind: auto` の行が無い | 手元の承認資料 | NDF（今の工程） |
 
 CD の行は `lib/delivery.py` の `merge_rows`。承認数は本番チャネルの ruleset（`rules/branches/<branch>`）の
-`pull_request` 規則から読み、規則が無ければ従来のブランチ保護を読む。読めなければ `cd-no-review` へ倒す:
+`pull_request` 規則と従来のブランチ保護を重ねて読む（多いほう）。読めなければ `cd-no-review` へ倒す:
 その経路は管理者の迂回を使わないため、レビューが本当は必須なら GitHub がマージを拒んで止まるだけである。
 
 分岐は値どうしを比べず、場合の属性（`trail_approval`・`admin_merge`・`human_approval`）で書く。属性の正本は下の 3 つの集合である。
@@ -124,17 +124,11 @@ def _gh_read(root, path: str):
 
 
 def read_approvals(root, branch: str) -> tuple[int | None, str]:
-    """本番チャネルの承認数。規則が無ければ従来のブランチ保護を読む。読めなければ (None, 理由)。"""
-    rules, why = _gh_read(root, f"repos/{{owner}}/{{repo}}/rules/branches/{branch}")
-    if isinstance(rules, list) and (n := required_approvals(rules)) is not None:
-        return n, ""
-    path = f"repos/{{owner}}/{{repo}}/branches/{branch}/protection/required_pull_request_reviews"
-    got, why2 = _gh_read(root, path)
-    if isinstance(got, dict):
-        return int(got.get("required_approving_review_count") or 0), ""
-    if why2 == "missing" and isinstance(rules, list):
-        return 0, ""  # 規則を読め、ブランチ保護が無い
-    return None, f"本番チャネル {branch} の承認数を読めない（ruleset: {why or '規則が無い'}・ブランチ保護: {why2}）"
+    """本番チャネルの承認数。ruleset と従来のブランチ保護を重ねた事実（`read_rule_facts`）から引く。読めなければ (None, 理由)。"""
+    facts = read_rule_facts(root, branch)
+    if facts is None:
+        return None, f"本番チャネル {branch} の承認数を読めない（ruleset か従来のブランチ保護を読めない）"
+    return facts.approvals, ""
 
 
 def case_of(root) -> Case:
@@ -205,16 +199,42 @@ def classic_facts_of(protection: dict) -> RuleFacts:
     return RuleFacts(True, int(reviews.get("required_approving_review_count") or 0), False, up_to_date, "never" if enforced else "always")
 
 
+def merge_facts(a: RuleFacts, b: RuleFacts) -> RuleFacts:
+    """ruleset と従来のブランチ保護の事実を重ねる。GitHub は両方を効かせるため、厳しいほうを採る（迂回は弱いほう）。"""
+    if not a.present or not b.present:
+        return a if a.present else b
+    known = [x for x in (a.bypass, b.bypass) if x in _BYPASS_ORDER]
+    return RuleFacts(
+        True,
+        max(a.approvals, b.approvals),
+        a.queue or b.queue,
+        a.up_to_date or b.up_to_date,
+        min(known, key=_BYPASS_ORDER.index) if known else None,
+        a.queue_merge_method or b.queue_merge_method,
+    )
+
+
+def classic_facts_from(read, branch: str) -> RuleFacts | None:
+    """従来のブランチ保護の事実。保護が無ければ `present` が偽、読めなければ None。
+    保護の照会は管理者でない利用者に 404 を返しうるため、404 は読む権限で読める `branches/<b>` の `protection.enabled`
+    （ruleset を含まない、従来の保護だけの有無）で確かめる。保護があるのに詳細を読めないときは None。"""
+    protection, why = read(f"repos/{{owner}}/{{repo}}/branches/{branch}/protection")
+    if isinstance(protection, dict):
+        return classic_facts_of(protection)
+    if why != "missing":
+        return None
+    info, _ = read(f"repos/{{owner}}/{{repo}}/branches/{branch}")
+    enabled = (info.get("protection") or {}).get("enabled") if isinstance(info, dict) else None
+    return RuleFacts(False, 0, False, False, None) if enabled is False else None
+
+
 def rule_facts_from(read, branch: str) -> RuleFacts | None:
-    """本番ブランチの ruleset から、有無・承認の数・merge queue の有無・最新の取り込みの要否・迂回の可否を読む。
-    ruleset が無ければ従来のブランチ保護を読む（保護のある本番ブランチを「保護なし」の早送りの経路へ入れない）。読めなければ None。
-    `read` は `path → (値, 読めない理由)`（`_gh_read` の形）。宣言を書く測定と、宣言を照らす land が同じ事実を読むための正本。"""
+    """本番ブランチの ruleset と従来のブランチ保護から、有無・承認の数・merge queue の有無・最新の取り込みの要否・迂回の可否を読む。
+    GitHub は両方を重ねて効かせるため、両方を読んで重ねる（保護のある本番ブランチを「保護なし」の早送りの経路へ入れない）。読めなければ None。
+    `read` は `path → (値, 読めない理由)`（`_gh_read` の形）。宣言を書く測定・宣言を照らす land・承認数（`read_approvals`）が同じ事実を読むための正本。"""
     rules, why = read(f"repos/{{owner}}/{{repo}}/rules/branches/{branch}")
-    if why == "missing" or rules == []:
-        protection, why2 = read(f"repos/{{owner}}/{{repo}}/branches/{branch}/protection")
-        if why2 == "missing":
-            return RuleFacts(False, 0, False, False, None)
-        return classic_facts_of(protection) if isinstance(protection, dict) else None
+    if why == "missing":
+        rules = []
     if not isinstance(rules, list):
         return None
     bypasses = []
@@ -223,7 +243,8 @@ def rule_facts_from(read, branch: str) -> RuleFacts | None:
         if not isinstance(got, dict):
             return None
         bypasses.append(got.get("current_user_can_bypass"))
-    return rule_facts_of(rules, bypasses)
+    classic = classic_facts_from(read, branch)
+    return None if classic is None else merge_facts(rule_facts_of(rules, bypasses), classic)
 
 
 def read_rule_facts(root, branch: str) -> RuleFacts | None:

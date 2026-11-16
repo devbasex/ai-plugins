@@ -14,14 +14,11 @@ import json
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from release_lib.workflow_trigger import PullEvent, runs_on_pull_head
-
 TRAILER_PR = "NDF-Landed-PR"
 TRAILER_HEAD = "NDF-Approved-Head"
 TRAILER_TIP = "NDF-Tip"
 BYPASS_OK = ("always", "pull_requests_only")
 REAPPROVE = "承認を取り直してください"
-CHECKS_OK = ("success", "skipped", "neutral")
 
 
 def ruleset_mismatch(strategy, facts) -> list[dict]:
@@ -205,8 +202,9 @@ def land_approved(port: Port, strategy, pr: int, approval: Approval, pull: dict 
 
 HUMAN_MARK = "<!-- ndf:human-merge -->"
 _QUEUE_QUERY = (
-    "query($owner: String!, $name: String!, $branch: String!) { repository(owner: $owner, name: $name) {"
-    " mergeQueue(branch: $branch) { entries(first: 50) { nodes { pullRequest { number headRefOid } } } } } }"
+    "query($owner: String!, $name: String!, $branch: String!, $after: String) { repository(owner: $owner, name: $name) {"
+    " mergeQueue(branch: $branch) { entries(first: 100, after: $after) { pageInfo { hasNextPage endCursor }"
+    " nodes { pullRequest { number headRefOid } } } } } }"
 )
 
 
@@ -313,17 +311,31 @@ class GhPort:
         tip = self._git("rev-parse", f"origin/{branch}").stdout.strip()
         return {"tip": tip, "version": store_version(self.strategy, self._show(tip)) if tip else None}
 
-    def queue(self, branch: str) -> list[dict]:
+    def _queue_nodes(self, branch: str) -> list[dict]:
+        """merge queue の entries を pageInfo と after で最後まで読む（先頭の 1 ページで切ると、後ろの版上げを衝突の検査から外す）。"""
         import gh_graphql
-        from release_lib import approval_trail as trail
 
         owner, _, name = self.repo.partition("/")
-        a = gh_graphql.graphql(_QUEUE_QUERY, {"owner": owner, "name": name, "branch": branch})
-        if not a.ok or not isinstance(a.value, dict):
-            # 空のキューとみなすと、別の版上げとの衝突を調べずに入れる
-            raise LandError(f"本番ブランチ {branch} の merge queue を読めない: {str(a.error)[:300]}")
-        q = (a.value.get("repository") or {}).get("mergeQueue")
-        nodes = ((q or {}).get("entries") or {}).get("nodes") or []
+        nodes: list[dict] = []
+        after = None
+        while True:
+            a = gh_graphql.graphql(_QUEUE_QUERY, {"owner": owner, "name": name, "branch": branch, "after": after})
+            if not a.ok or not isinstance(a.value, dict):
+                # 空のキューとみなすと、別の版上げとの衝突を調べずに入れる
+                raise LandError(f"本番ブランチ {branch} の merge queue を読めない: {str(a.error)[:300]}")
+            entries = ((a.value.get("repository") or {}).get("mergeQueue") or {}).get("entries") or {}
+            nodes += entries.get("nodes") or []
+            page = entries.get("pageInfo") or {}
+            if not page.get("hasNextPage"):
+                return nodes
+            if not page.get("endCursor") or page.get("endCursor") == after:
+                raise LandError(f"本番ブランチ {branch} の merge queue を最後まで読めない（次のページの位置が無い）")
+            after = page["endCursor"]
+
+    def queue(self, branch: str) -> list[dict]:
+        from release_lib import approval_trail as trail
+
+        nodes = self._queue_nodes(branch)
         rows = [{"number": int(n["pullRequest"]["number"]), "head": str(n["pullRequest"]["headRefOid"]).lower()} for n in nodes]
         for r in rows:
             r["bump"] = self._bump_facts(r["number"], r["head"], branch)["bump"]
@@ -388,97 +400,9 @@ class GhPort:
         return any(HUMAN_MARK in str(c.get("body") or "") for c in trail.read_comments(self.repo, number))
 
     def checks_failing(self, sha: str, pull: dict | None = None) -> str | None:
-        import gh_checks
-        from release_lib import approval_trail as trail
+        from release_lib import land_checks
 
-        raw = gh_checks.fetch_check_runs(self.repo, sha, empty_ok=True)
-        status = self._rest(f"repos/{self.repo}/commits/{sha}/status")
-        if raw is None or not isinstance(status, dict):
-            return "検査の結果を読めない"
-        runs = [(str(r.get("name") or ""), gh_checks.run_result(r)) for r in gh_checks.fold_check_runs(raw)]
-        # 承認の証跡の status は検査でなく承認の印（承認の免除の経路では付かない）。reviewed.wait_ci_except と同じく除く
-        statuses = [c for c in status.get("statuses") or [] if c.get("context") != trail.STATUS_CONTEXT]
-        runs += [(str(c.get("context") or ""), str(c.get("state") or "")) for c in statuses]
-        if not runs:
-            return self._no_checks_reason(sha, pull or {})
-        bad = [f"{name}={res}" for name, res in runs if res not in CHECKS_OK]
-        return ", ".join(bad)[:300] or None
-
-    def _changed_files(self, base: str | None, sha: str) -> list[str] | None:
-        """PR の変更ファイル（宛先の origin と head の三点の差分。GitHub の PR の変更ファイルと同じ）。読めなければ None。
-        ASCII でないパスを引用符と 8 進の形にしないよう core.quotePath を切り、改行を含むパスも分けられるよう NUL で区切る。"""
-        if not base:
-            return None
-        return self._diff_names(f"origin/{base}...{sha}")
-
-    def _diff_names(self, *revs: str) -> list[str] | None:
-        r = self._git("-c", "core.quotePath=false", "diff", "--name-only", "-z", *revs)
-        return [f for f in r.stdout.split("\0") if f] if r.returncode == 0 else None
-
-    def _push_files(self, head_ref: str | None, sha: str, pull_files) -> list[str] | None:
-        """head を作った直近の push の変更ファイル（GitHub が push の paths に照らす before..after の二点の差分）。
-        直近の push が `sha` を作ったと確かめられない・比較元を読めないときは None（paths の絞り込みは動くとみなす）。
-        新しいブランチの push（before が 0）は、GitHub が押したコミットの最も古い祖先の親と比べるため、PR の変更ファイル（`pull_files()`）で代える。"""
-        from urllib.parse import quote
-
-        if not head_ref:
-            return None
-        # 種類で絞らない（強制 push・ブランチの作成も head を作る）。最新の 1 件が `sha` を作っていなければ比較元を決めない
-        d = self._rest(f"repos/{self.repo}/activity?ref={quote('refs/heads/' + head_ref, safe='/')}&per_page=1")
-        last = d[0] if isinstance(d, list) and d and isinstance(d[0], dict) else None
-        if last is None or last.get("after") != sha or not last.get("before"):
-            return None
-        before = str(last["before"])
-        if not before.strip("0"):
-            return pull_files()
-        if self._git("cat-file", "-e", f"{before}^{{commit}}").returncode != 0:
-            self._fetch(before)
-        return self._diff_names(before, sha)
-
-    def _workflows(self) -> list | None:
-        """有効・無効を問わず workflow の一覧を全ページ読む（既定の 1 ページ 30 件で切ると、後ろのページの PR の CI を見落とす）。読めなければ None。"""
-        out: list = []
-        page = 1
-        while True:
-            d = self._rest(f"repos/{self.repo}/actions/workflows?per_page=100&page={page}")
-            if not isinstance(d, dict) or not isinstance(d.get("workflows") or [], list):
-                return None
-            rows = d.get("workflows") or []
-            out += rows
-            total = d.get("total_count")
-            if len(rows) < 100 or (isinstance(total, int) and len(out) >= total):
-                return out
-            page += 1
-
-    def _no_checks_reason(self, sha: str, pull: dict) -> str | None:
-        """検査が 1 件も無いときの理由。PR の head で動く有効な workflow が無ければ None（検査なしで通す）。
-        本番への push・schedule でだけ動く workflow と、絞り込み（branches・paths）でこの PR に当たらない workflow は
-        PR の head に検査を作らないため数えない。動く workflow があれば push の直後で未開始とみなして止める。照会は検査が 0 件のときだけ打つ。"""
-        workflows = self._workflows()
-        if workflows is None:
-            return "検査がまだ 1 件も無く、workflow の一覧も読めない"
-        active = [str(w.get("path") or "") for w in workflows if isinstance(w, dict) and w.get("state") == "active"]
-        show = self._show(sha)
-        # パスを読めない workflow も動くとみなす。名前が空でも数に入れる（文字列の真偽で判定しない）
-        changed: list = []  # 変更ファイルは paths の絞り込みに当たったときだけ 1 回読む
-
-        def files() -> list[str] | None:
-            if not changed:
-                changed.append(self._changed_files(pull.get("base"), sha))
-            return changed[0]
-
-        pushed: list = []  # 直近の push の変更ファイルも、push の paths の絞り込みに当たったときだけ 1 回読む
-
-        def push_files() -> list[str] | None:
-            if not pushed:
-                pushed.append(self._push_files(pull.get("head_ref"), sha, files))
-            return pushed[0]
-
-        event = PullEvent(pull.get("head_ref"), pull.get("base"), files, push_files)
-        on_head = [p or "（パス不明）" for p in active if runs_on_pull_head(show(p) if p else None, event)]
-        if not on_head:
-            return None
-        return f"検査がまだ 1 件も無い（PR の head で動く workflow {', '.join(on_head)[:200]} がある。始まるのを待って打ち直してください）"
+        return land_checks.checks_failing(self, sha, pull)
 
 
 def approval_of(repo: str, strategy, pr: int) -> Approval | None:

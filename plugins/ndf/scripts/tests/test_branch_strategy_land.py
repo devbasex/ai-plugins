@@ -16,9 +16,23 @@ import pytest
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(SCRIPTS / "lib"), str(SCRIPTS)]
 import branch_strategy as bs  # noqa: E402
-from release_lib import approval_trail, land  # noqa: E402
+from release_lib import approval_trail, land, land_checks  # noqa: E402
+from release_lib.workflow_trigger import PullEvent, runs_on_pull_head  # noqa: E402
 
 FIX = Path(__file__).resolve().parent / "fixtures" / "branch_strategy"
+
+
+@pytest.fixture(autouse=True)
+def no_declared_checks(monkeypatch):
+    """手元のリポジトリの CI テストの宣言を読まない（宣言の検査名は個別のテストで差し替える）。"""
+    monkeypatch.setattr(land_checks, "declared_checks", lambda root: [])
+
+
+ST = "repos/o/r/commits/h/status?per_page=100&page=1"
+TIP_QUIET = {
+    "repos/o/r/commits/t/check-suites?per_page=100&page=1": {"check_suites": []},
+    "repos/o/r/commits/t/status?per_page=100&page=1": {"statuses": []},
+}
 
 
 def strategy(kind: str, **release) -> bs.Strategy:
@@ -111,24 +125,25 @@ def test_checks_failing_skips_trail_status_and_passes_repo_without_ci(monkeypatc
     port = land.GhPort(Path("."), "o/r", strategy("docs"))
     monkeypatch.setattr(gh_checks, "fetch_check_runs", lambda repo, sha, empty_ok=False: [])
     replies = {
-        "repos/o/r/commits/h/status": {"statuses": [{"context": approval_trail.STATUS_CONTEXT, "state": "failure"}]},
+        ST: {"statuses": [{"context": approval_trail.STATUS_CONTEXT, "state": "failure"}]},
         "repos/o/r/actions/workflows?per_page=100&page=1": {"workflows": []},
+        **TIP_QUIET,
     }
     monkeypatch.setattr(land.GhPort, "_rest", lambda self, path, method="GET", payload=None: replies.get(path))
-    assert port.checks_failing("h") is None
+    assert port.checks_failing("h", {"tip": "t"}) is None
     replies["repos/o/r/actions/workflows?per_page=100&page=1"] = {"workflows": [{"state": "active"}]}
     assert "まだ 1 件も無い" in port.checks_failing("h")
     # 本番への push・schedule でだけ動く workflow は PR の head に検査を作らないため、検査なしで通す
     files = {"cd.yml": "on:\n  push:\n    branches: [main]\n  schedule:\n    - cron: '0 0 * * *'\n"}
     monkeypatch.setattr(land.GhPort, "_show", lambda self, rev: files.get)
     replies["repos/o/r/actions/workflows?per_page=100&page=1"] = {"workflows": [{"state": "active", "path": "cd.yml"}]}
-    pull = {"head_ref": "release/v1", "base": "main"}
+    pull = {"head_ref": "release/v1", "base": "main", "tip": "t"}
     assert port.checks_failing("h", pull) is None
     # head のブランチ名を読めなければ、ブランチで絞った push も動くとみなす
     assert "まだ 1 件も無い" in port.checks_failing("h")
     files["cd.yml"] = "on: [pull_request]\n"
     assert "まだ 1 件も無い" in port.checks_failing("h", pull)
-    replies["repos/o/r/commits/h/status"] = {"statuses": [{"context": "ci", "state": "pending"}]}
+    replies[ST] = {"statuses": [{"context": "ci", "state": "pending"}]}
     assert port.checks_failing("h") == "ci=pending"
 
 
@@ -140,7 +155,7 @@ def test_no_checks_reason_reads_every_page_of_workflows(monkeypatch):
     monkeypatch.setattr(gh_checks, "fetch_check_runs", lambda repo, sha, empty_ok=False: [])
     cron = [{"state": "active", "path": f"cron{i}.yml"} for i in range(100)]
     replies = {
-        "repos/o/r/commits/h/status": {"statuses": []},
+        ST: {"statuses": []},
         "repos/o/r/actions/workflows?per_page=100&page=1": {"total_count": 101, "workflows": cron},
         "repos/o/r/actions/workflows?per_page=100&page=2": {"total_count": 101, "workflows": [{"state": "active", "path": "ci.yml"}]},
     }
@@ -150,6 +165,79 @@ def test_no_checks_reason_reads_every_page_of_workflows(monkeypatch):
     assert "ci.yml" in port.checks_failing("h", {"head_ref": "s", "base": "main"})
     del replies["repos/o/r/actions/workflows?per_page=100&page=2"]
     assert "読めない" in port.checks_failing("h", {"head_ref": "s", "base": "main"})
+
+
+def quiet_port(monkeypatch, replies, runs=()):
+    import gh_checks
+
+    monkeypatch.setattr(gh_checks, "fetch_check_runs", lambda repo, sha, empty_ok=False: list(runs))
+    monkeypatch.setattr(land.GhPort, "_rest", lambda self, path, method="GET", payload=None: replies.get(path))
+    monkeypatch.setattr(land.GhPort, "_show", lambda self, rev: {}.get)
+    return land.GhPort(Path("."), "o/r", strategy("docs"))
+
+
+def test_checks_failing_reads_every_page_of_statuses(monkeypatch):
+    """#3672 の round 8: commit status を全ページ読み、31 件目以降の pending を見落とさない。"""
+    ok = [{"context": f"c{i}", "state": "success"} for i in range(100)]
+    replies = {
+        ST: {"total_count": 101, "statuses": ok},
+        "repos/o/r/commits/h/status?per_page=100&page=2": {"total_count": 101, "statuses": [{"context": "late", "state": "pending"}]},
+    }
+    port = quiet_port(monkeypatch, replies)
+    assert port.checks_failing("h") == "late=pending"
+    del replies["repos/o/r/commits/h/status?per_page=100&page=2"]
+    assert "読めない" in port.checks_failing("h")
+
+
+def test_checks_failing_waits_for_declared_ci_checks(monkeypatch):
+    """#3672 の round 8: CI テストの宣言の検査がまだ登録されていなければ、ほかの検査が成功でも未完了で止める。"""
+    port = quiet_port(monkeypatch, {ST: {"statuses": [{"context": "lint", "state": "success"}]}})
+    monkeypatch.setattr(land_checks, "declared_checks", lambda root: ["test"])
+    assert "test" in port.checks_failing("h") and "始まって" in port.checks_failing("h")
+    monkeypatch.setattr(land_checks, "declared_checks", lambda root: ["lint"])
+    assert port.checks_failing("h") is None
+
+
+def test_no_checks_reason_waits_for_external_ci(monkeypatch):
+    """#3672 の round 8: workflow が無くても、本番ブランチの先端に Actions 以外の CI の結果があれば、検査の 0 件を通さない。"""
+    replies = {ST: {"statuses": []}, "repos/o/r/actions/workflows?per_page=100&page=1": {"workflows": []}, **TIP_QUIET}
+    port = quiet_port(monkeypatch, replies)
+    assert port.checks_failing("h", {"tip": "t"}) is None
+    replies["repos/o/r/commits/t/check-suites?per_page=100&page=1"] = {
+        "check_suites": [
+            {"app": {"slug": "github-actions"}, "latest_check_runs_count": 3},
+            {"app": {"slug": "circleci-checks"}, "latest_check_runs_count": 1},
+        ]
+    }
+    assert "circleci-checks" in port.checks_failing("h", {"tip": "t"})
+    replies.update(TIP_QUIET)
+    replies["repos/o/r/commits/t/status?per_page=100&page=1"] = {"statuses": [{"context": "ci/jenkins", "state": "success"}]}
+    assert "ci/jenkins" in port.checks_failing("h", {"tip": "t"})
+    del replies["repos/o/r/commits/t/check-suites?per_page=100&page=1"]
+    assert "読めない" in port.checks_failing("h", {"tip": "t"})
+
+
+def test_queue_reads_every_page_of_entries(monkeypatch):
+    """#3672 の round 8: merge queue の entries を pageInfo と after で最後まで読む。"""
+    import gh_graphql
+    import gh_quota
+
+    pages = {
+        None: {"nodes": [{"pullRequest": {"number": 1, "headRefOid": "A"}}], "pageInfo": {"hasNextPage": True, "endCursor": "c1"}},
+        "c1": {"nodes": [{"pullRequest": {"number": 2, "headRefOid": "B"}}], "pageInfo": {"hasNextPage": False, "endCursor": "c2"}},
+    }
+    seen = []
+
+    def graphql(query, variables):
+        seen.append(variables["after"])
+        return gh_quota.Attempt({"repository": {"mergeQueue": {"entries": pages[variables["after"]]}}})
+
+    monkeypatch.setattr(gh_graphql, "graphql", graphql)
+    port = land.GhPort(Path("."), "o/r", strategy("docs"))
+    assert [n["pullRequest"]["number"] for n in port._queue_nodes("main")] == [1, 2] and seen == [None, "c1"]
+    pages["c1"]["pageInfo"] = {"hasNextPage": True, "endCursor": "c1"}
+    with pytest.raises(land.LandError):
+        port._queue_nodes("main")
 
 
 def test_push_files_compare_the_last_push(tmp_path, monkeypatch):
@@ -167,16 +255,16 @@ def test_push_files_compare_the_last_push(tmp_path, monkeypatch):
     activity = [{"before": first, "after": head, "activity_type": "push"}]
     monkeypatch.setattr(land.GhPort, "_rest", lambda self, path, method="GET", payload=None: activity if "/activity?" in path else None)
     pull_files = lambda: ["docs/a.md"]  # noqa: E731
-    assert sorted(port._push_files("s", head, pull_files)) == ["docs/a.md", "src/a.py"]
+    assert sorted(land_checks.push_files(port, "s", head, pull_files)) == ["docs/a.md", "src/a.py"]
     on = "on:\n  push:\n    paths: ['src/**']\n"
-    assert land.runs_on_pull_head(on, land.PullEvent("s", "main", pull_files, lambda: port._push_files("s", head, pull_files)))
+    assert runs_on_pull_head(on, PullEvent("s", "main", pull_files, lambda: land_checks.push_files(port, "s", head, pull_files)))
     # 新しいブランチの push は PR の変更ファイルで代える
     activity[0]["before"] = "0" * 40
-    assert port._push_files("s", head, pull_files) == ["docs/a.md"]
+    assert land_checks.push_files(port, "s", head, pull_files) == ["docs/a.md"]
     # 直近の push が head を作っていない・head のブランチ名が無いときは決めない
     activity[0]["after"] = first
-    assert port._push_files("s", head, pull_files) is None
-    assert port._push_files(None, head, pull_files) is None
+    assert land_checks.push_files(port, "s", head, pull_files) is None
+    assert land_checks.push_files(port, None, head, pull_files) is None
 
 
 def test_landed_record_needs_same_tree_and_tip(tmp_path):
@@ -255,7 +343,7 @@ def test_changed_files_reads_non_ascii_paths_as_is(tmp_path):
     (root / "docs" / "設計.md").write_text("x\n", encoding="utf-8")
     sha = commit(root, "docs")
     port = land.GhPort(root, "o/r", strategy("docs"))
-    assert port._changed_files("main", sha) == ["docs/設計.md"]
+    assert land_checks.pull_changed_files(port, "main", sha) == ["docs/設計.md"]
 
 
 DOCS_ONLY = ["docs/a.md"]
@@ -299,10 +387,12 @@ DOCS_ONLY = ["docs/a.md"]
         ("pull_request:\n    types: labeled", DOCS_ONLY, False),
         ("pull_request:\n    types: [opened, synchronize]", DOCS_ONLY, True),
         ("pull_request_target:\n    types: [labeled]", DOCS_ONLY, False),
-        ("pull_request_target:\n    types: [reopened, closed]", DOCS_ONLY, True),
+        # pull_request_target は宛先のコミットで動き、head に検査を作らない（#3672 の round 8）
+        ("pull_request_target:\n    types: [reopened, closed]", DOCS_ONLY, False),
+        ("pull_request_target:", DOCS_ONLY, False),
     ],
 )
 def test_runs_on_pull_head_matches_the_filters_against_the_pull(on, files, runs):
     """#3672 の round 5: 絞り込みを PR の事実（head のブランチ・宛先・変更ファイル）と照らし、読めない事実は動くとみなす。"""
-    event = land.PullEvent("release/v1", "main", lambda: files, lambda: files)
-    assert land.runs_on_pull_head(f"on:\n  {on}\n", event) is runs
+    event = PullEvent("release/v1", "main", lambda: files, lambda: files)
+    assert runs_on_pull_head(f"on:\n  {on}\n", event) is runs

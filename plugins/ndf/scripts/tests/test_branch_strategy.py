@@ -510,6 +510,8 @@ def fake_api(prs, tags=(), releases=(), rules=None, rulesets=None, default="main
             return (rules, "") if rules is not None else (None, "missing")
         if path.endswith("/protection"):
             return (protection, "") if protection is not None else (None, "missing")
+        if path.endswith(f"/branches/{default}"):
+            return {"protection": {"enabled": protection is not None}}, ""
         if path.endswith("/rulesets"):
             return rulesets or [], ""
         if "/rulesets/" in path:
@@ -652,6 +654,7 @@ def test_collect_samples_reads_api_history_and_local_facts(tmp_path):
         "repos/{owner}/{repo}/releases?per_page=2",
         "repos/{owner}/{repo}/rules/branches/main",
         "repos/{owner}/{repo}/branches/main/protection",
+        "repos/{owner}/{repo}/branches/main",
     ]
 
 
@@ -669,7 +672,12 @@ def test_collect_samples_past_deadline_skips_api_lists_only(tmp_path):
     assert s.warnings == ["時間切れで打ち切った: prs", "時間切れで打ち切った: tags", "時間切れで打ち切った: releases"]
     assert s.production == "main" and s.rules is not None
     assert [c["subject"] for c in s.commits] == ["Merge pull request #1", "files", "init"]
-    assert seen == ["repos/{owner}/{repo}", "repos/{owner}/{repo}/rules/branches/main", "repos/{owner}/{repo}/branches/main/protection"]
+    assert seen == [
+        "repos/{owner}/{repo}",
+        "repos/{owner}/{repo}/rules/branches/main",
+        "repos/{owner}/{repo}/branches/main/protection",
+        "repos/{owner}/{repo}/branches/main",
+    ]
 
 
 @pytest.mark.parametrize("now, cut", [(9.0, []), (10.0, []), (11.0, ["prs", "tags", "releases"])])
@@ -689,7 +697,7 @@ def test_collect_samples_cuts_only_after_the_deadline(tmp_path, monkeypatch, now
     s = bsm.collect_samples(root, api, 10.0, 5)
     assert s.warnings == [f"時間切れで打ち切った: {k}" for k in cut]
     assert len([p for p in seen if "per_page" in p]) == 3 - len(cut)
-    assert seen[0] == "repos/{owner}/{repo}" and seen[-1] == "repos/{owner}/{repo}/branches/main/protection"
+    assert seen[0] == "repos/{owner}/{repo}" and seen[-1] == "repos/{owner}/{repo}/branches/main"
 
 
 def test_collect_samples_reads_the_clock_it_is_given(tmp_path):
