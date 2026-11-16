@@ -25,6 +25,7 @@
 | STD8 | GitHub Docs「GitHub flow」 | 既定ブランチから切ったブランチを PR で既定ブランチへマージし、ブランチを消す | 行 `trunk` の起点と宛先 | https://docs.github.com/en/get-started/using-github/github-flow （2026-11-16） |
 | STD9 | Semantic Versioning 2.0.0 | プレリリースは正式版より順序が下。`v1.2.3` の `v` は版数ではなくタグの慣習 | 版数は `plugin.json` に semver で持ち、タグに `v` を付ける | https://semver.org/ （2026-11-16） |
 | STD10 | Codex「Build plugins」と openai/codex のソース | キャッシュは `$MARKETPLACE/$PLUGIN/$VERSION/`。`.claude-plugin/marketplace.json` も読む。Git のマーケットプレイスは起動時に自動で更新され（`PluginGitMode::Automatic`）、リモートの revision が変わると、入れた plugin を版数を比べずに入れ直す（`NonCuratedCacheRefreshMode::ForceReinstall`） | Codex の利用者には、取得元の ref が進むたびに届く。ai-plugins の取得元の扱いを人へ残す（決定 12） | https://developers.openai.com/codex/plugins/build.md ・ https://github.com/openai/codex/blob/ca0bbbdf0c/codex-rs/core-plugins/src/manager.rs （`upgrade_configured_marketplaces_for_config_with_mode`）・ `codex-rs/core-plugins/src/loader.rs`（`refresh_non_curated_plugin_cache_with_mode`）（2026-11-16） |
+| STD11 | GitHub Docs「Creating rulesets for a repository」「About rulesets」と REST「Get a repository ruleset」 | ruleset の規則を越えられるのは、迂回の一覧に載せた役割・チーム・App だけである（「You can grant certain roles, teams, or apps bypass permissions for your ruleset」）。迂回の形は `always` と `pull_request`（PR を通すときだけ越える）。API は呼んだ者が越えられるかを `current_user_can_bypass`（`always`・`pull_requests_only`・`never`・`exempt`）で返す。`bypass_actors` は ruleset に書き込める者にだけ返る | I10 の `merge.admin: true` で比べる値 | https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/creating-rulesets-for-a-repository ・ https://docs.github.com/en/rest/repos/rules （2026-11-16）。実測: `gh api repos/devbasex/ai-plugins/rulesets/<id>` で main の ruleset「protect main」は `bypass_actors` が `RepositoryRole`（`actor_id` 5）・`bypass_mode: pull_request`、`current_user_can_bypass: pull_requests_only` を返した（2026-11-16） |
 
 ### 主要な製品
 
@@ -56,4 +57,4 @@
 | release-please でタグの区切りを `--v` にする設定 | release-please の README と manifest-releaser.md | 取得したページに記述が無い。LIB1 を採らない理由は上げ幅の読み方だけで足りる |
 | Codex のチャネルとタグの形の推奨 | build.md | 記述が無い |
 
-調べた量: 候補 22 件・取得の試み 39 回（上限の 30 回を 9 回超えた。超えた回は LIB1・LIB2 の版とライセンスの確かめの 2 回と、Codex の再導入の条件の確かめ（STD10）の 7 回）。
+調べた量: 候補 23 件・取得の試み 43 回（上限の 30 回を 13 回超えた。超えた回は LIB1・LIB2 の版とライセンスの確かめの 2 回、Codex の再導入の条件の確かめ（STD10）の 7 回、ruleset の迂回の一覧の確かめ（STD11）の 4 回）。

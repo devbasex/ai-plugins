@@ -109,7 +109,7 @@
 | D33 | 11.0 の Skill の本文・契約の文書（`plugins/ndf-next/docs/contracts/`）・エージェントの定義 26 ファイル（パスは同じ文書の D33-1〜D33-26） | 同上 | 同上 |
 | D34 | `docs/specifications/` の確定仕様 20 ファイル（パスは同じ文書の D34-1〜D34-20） | 旧いキーの説明 | この課題の確定仕様（`plan-to-spec`）が置き換え、旧い説明を消す |
 | D35 | `docs/glossary/glossary.json`・`docs/glossary.md` | 旧いキーを語として持つ項目 | 新しいセクションの語（設計文書の「用語」の表） |
-| D36 | `AGENTS.md`（19〜20 行目）・`docs/versioning-and-distribution.md` | `base_branch`・`follow_branch` の説明と、develop と開発版のチャネルの説明 | ai-plugins の値（設計文書の「ai-plugins の値」）の説明。C7 |
+| D36 | `AGENTS.md`（19〜20 行目）・`docs/versioning-and-distribution.md` | `base_branch`・`follow_branch` の説明と、develop と開発版のチャネルの説明 | ai-plugins の値（[issue-3672-design-ai-plugins.md](issue-3672-design-ai-plugins.md)）の説明。C7 |
 
 **テスト**
 
@@ -139,7 +139,7 @@
 
 | 設計 | この設計が置き換える部分 | 残る部分と行き先 |
 | --- | --- | --- |
-| #3119（閉じた） | ai-plugins のブランチ運用（スプリントブランチを main から切り、リリースブランチで届ける） | 無し。ai-plugins の値は設計文書の「ai-plugins の値」が持つ |
+| #3119（閉じた） | ai-plugins のブランチ運用（スプリントブランチを main から切り、リリースブランチで届ける） | 無し。ai-plugins の値は [issue-3672-design-ai-plugins.md](issue-3672-design-ai-plugins.md) が持つ |
 | #3121（閉じた） | ブランチ運用の宣言の形（起点・結合・リリースの組み方） | 無し。不合格の条件 7・10 は #3309・#3310 が持ち、この課題の子で解く |
 | #3572（`issues/issue-3572-design*.md`、PR #3628 でマージ済み） | 設定ファイルの形（3 か所に分けた形）・行の値・ai-plugins の値 | 承認した先端だけをマージする仕組み（本番のプランから worker を外す・head の一致の確認・`merge-queue` と `strict` の判定・人のマージの記録）は、この設計の I5〜I7 と決定 6・7 が取り込む。11.0 の実装はこの課題の 11.0 の読み手の部分で行う |
 | 設計 PR #3649（#3572 の出し直し、開いたまま） | 宣言を 1 つのセクションにまとめる差分（handoff `branch-strategy-one-file.md`）と ai-plugins の値 | **閉じる。** 取り込む部分は上の行と同じ。#3119 の設計の差分（決定 21・25）も、この設計の ai-plugins の値が置き換える |

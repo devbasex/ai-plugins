@@ -58,11 +58,21 @@ ai-plugins の運用が製品に入る経路が残る（#3617・#3618）。セ�
 | --- | --- | --- |
 | #3613 の行 | `/branch_flow/promotion` | `/branch_flow/release_strategy` |
 | この課題の行 | `.ndf/worktree.json#/branch_flow/promotion` | `.ndf/project.json#/branch_strategy/release_strategy` |
+| この課題の行（途中の位置） | `.ndf/worktree.json#/branch_flow/release_strategy` | `.ndf/project.json#/branch_strategy/release_strategy`（値は #3613 の名前のまま移す） |
 
 #3613 が先にマージされれば、その行をこの課題の実装で置き換える。後にマージされるなら、この課題が 11.0 の `contracts/domains/ndf-settings-renames.json` を新設する。
 形は #3613 の行の形（`file`・`old`・`new`）に `new_file` を足したもので、セクション `branch_strategy` へ移す行だけを持つ。
 #3613 はその後、同じファイルへ自分の行を足す。ただし上の表の #3613 の行は、この課題の行があるので足さない。
 どちらの順でも、この課題の移行のコマンドと旧い宣言の検査（決定 10）は #3613 のコマンドに依らずに動く。
+
+移す行の表が旧い位置として持つ一覧は、マージの順で次のとおりにする。#3613 が先にマージされ、その `ndf settings migrate` を打ったリポジトリには途中の位置が残るため、旧い宣言の検査がそれを見つけて移せるようにする。
+
+| マージの順 | 旧い位置として持つもの |
+| --- | --- |
+| #3613 が先 | `promotion` と途中の位置 `release_strategy`（どちらも `.ndf/worktree.json` の `/branch_flow/` の下） |
+| #3613 が後 | 同じ 2 つ。途中の位置を作るコマンドは無くなる（#3613 の行を足さない）が、表をマージの順で分けず 1 つにし、どちらの順でも同じ表で実装とテストができるようにする |
+
+途中の位置の行は、セクション `branch_strategy` へ移す行の 1 つとして、旧い宣言の検査（I4）と移行のコマンド（決定 10）が扱う。`.ndf/worktree.json` の `branch_flow` の下のキーは、どれも旧いキーである（削除の一覧の D1）。
 
 根拠: Value 14 / Value 11（MVV 版 8）
 
@@ -193,7 +203,7 @@ S1 の「リリースの形」と「CD の有無」に当たる。行を 2 つ�
 
 ### 決定 12: ai-plugins の値を plugin とマーケットプレイスの開発の慣行から決め、「plugin」の種類の既定と同じにする
 
-値と、今の運用から変える点は設計文書の「ai-plugins の値」にある。決めた順序は次のとおりである。
+値と、今の運用から変える点は [issue-3672-design-ai-plugins.md](issue-3672-design-ai-plugins.md) にある。決めた順序は次のとおりである。
 
 1. 利用者へ届く単位は Claude Code の仕様で決まる。既に入れた利用者には `plugin.json` の版数が変わったときだけ届き、版数を持たせれば「マージ」と「リリース」が分かれる（STD4）。
    そのため、ブランチを分けてリリースを分ける理由が無い。Codex は取得元の revision が変わるたびに版数を比べずに入れ直す（STD10）ので、この理由は Claude Code の利用者にだけ当てはまる。
