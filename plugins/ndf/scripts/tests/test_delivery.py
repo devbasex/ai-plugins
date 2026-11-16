@@ -153,9 +153,12 @@ def test_routes_fallbacks():
     assert [(r.route, r.stage) for r in none] == [("none", "none")]
     missing = delivery.routes(decl_of(), FORMS)
     assert [(r.route, r.stage) for r in missing] == [("manual", "manual")] and "release.deliveries" in missing[0].note
-    other = delivery.routes(decl_of(rows=[], release={"form": "service"}), FORMS)
+    other = delivery.routes(decl_of(release={"form": "service"}), FORMS)
     assert [(r.route, r.stage) for r in other] == [("template", "manual")]
     assert delivery.needs_version(other) is False
+    # 雛形の無い形でも、届け先の行があれば行ごとに決める（#3672 の決定 11。移した delivery の行の経路を保つ）
+    rows = SAMPLES["carmo-system-console"][1]
+    assert [(r.route, r.stage) for r in delivery.routes(decl_of(rows=rows, release={"form": "service"}), FORMS)] == [("merge", "merged-by-check")]
     assert delivery.needs_version(delivery.routes(sample("ai-plugins"), FORMS)) is True
 
 
@@ -251,7 +254,7 @@ PLUGIN = {"form": "package-plugin"}
         ([{**AUTO_PROD, "versioned": True}], None, delivery.SKIP, "リリースの Pull Request で届く"),
         ([{"kind": "auto", "branch": "other", "target": "x"}], None, delivery.REFUSE, "手で届ける"),
         (..., None, delivery.REFUSE, "release.deliveries も"),
-        ([AUTO_BASE], {"form": "docker"}, delivery.REFUSE, "雛形が無い"),
+        (..., {"form": "docker"}, delivery.REFUSE, "雛形が無い"),
     ],
 )
 def test_release_way_table(rows, release, way, said):

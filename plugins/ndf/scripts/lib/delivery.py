@@ -346,10 +346,13 @@ def _row_route(row: dict, decl: DeliveryDecl) -> Route:
 
 
 def routes(decl: DeliveryDecl, forms=()) -> list[Route]:
-    """リリースの経路。`release.form` があればそれ（`template`）だけで決まり、無ければ届け先（`release.deliveries`）の行ごとに決める。
-    `forms` は雛形のある `release.form` の値（無い形は手で行うステージへ落とす）。"""
+    """リリースの経路。`release.form` に雛形があればそれ（`template`）だけで決まり、無ければ届け先（`release.deliveries`）の
+    行ごとに決める。`forms` は雛形のある `release.form` の値。雛形の無い形で届け先も無ければ、手で行うステージへ落とす。
+
+    宣言のスキーマは `release.form` を必ず求める（#3672）。雛形の無い形（`service` など）でも届け先の行を読むのは、
+    移した `delivery` の行（決定 11）の経路を今のまま保つためである。"""
     form = (decl.release or {}).get("form") if decl.release else None
-    if form:
+    if form and (form in forms or decl.rows is None or decl.problems):
         return _template_route(decl, form, forms)
     if decl.rows is None:
         why = {
