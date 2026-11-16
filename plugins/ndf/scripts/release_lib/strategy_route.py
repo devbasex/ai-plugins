@@ -158,9 +158,9 @@ def release_selected(ctx: ReleaseCtx, approved, ops, case=None) -> tuple:
         main_pr = done["number"] if done else ops.create_pr(root, prod, branch, title, body)
         if case is not None:
             metrics["case"] = case.case
-            merge = _merge_exact(root, a, plugin, (branches.release, branches.production), main_pr, case, items, metrics, ops)
+            merge = _merge_exact(ctx, main_pr, case, items, metrics, ops)
         else:
-            merge, verdict = _merge_approved(root, a, plugin, branch, main_pr, approved, items, metrics, ops)
+            merge, verdict = _merge_approved(ctx, main_pr, approved, items, metrics, ops)
             metrics.update({"compared_head": verdict.tip, "tolerated": len(verdict.tolerated)})
             items += approval.tolerated_items(verdict)
         admin = case is not None and case.admin_merge
@@ -184,8 +184,9 @@ def _resume_merged(ctx: ReleaseCtx, main_pr, approved, case, ops) -> tuple[str, 
     return merge, rows
 
 
-def _merge_approved(root, a, plugin, branch, main_pr, approved, items, metrics, ops):
+def _merge_approved(ctx: ReleaseCtx, main_pr, approved, items, metrics, ops):
     """承認したコミットと比べ（`allowed_after`）、比べた先端だけを本番チャネルへ入れる。先端が動けば比べ直す。(マージ, 判定)。"""
+    root, a, plugin, branch = ctx.root, ctx.a, ctx.plugin, ctx.branch
     by = approval.approved_by(root, a)
     for left in range(ops.HEAD_MOVED_RETRIES, -1, -1):
         verdict = approval.check_approved(root, approved, branch, allowed_after(root, approved, branch, main_pr))
@@ -199,10 +200,10 @@ def _merge_approved(root, a, plugin, branch, main_pr, approved, items, metrics, 
     raise StepError("本番の PR をマージできない")  # 届かない（最後の回は gate で出る）
 
 
-def _merge_exact(root, a, plugin, refs, main_pr, case, items, metrics, ops):
+def _merge_exact(ctx: ReleaseCtx, main_pr, case, items, metrics, ops):
     """CD のある場合（#2773 の決定 7）: 本番の PR の先端が PR の上の承認と完全に一致するときだけ、1 回だけマージする（迂回は `cd-admin` だけ。#3506）。
-    承認の後のコミットの追加・組み直しで先端が動けば承認ゲート（10）で止め、入れ直さない。`refs` は (リリースブランチ, 本番チャネル)。"""
-    branch, prod = refs
+    承認の後のコミットの追加・組み直しで先端が動けば承認ゲート（10）で止め、入れ直さない。リリースブランチは `ctx.branch`、本番チャネルは `ctx.prod`。"""
+    root, a, plugin, branch, prod = ctx.root, ctx.a, ctx.plugin, ctx.branch, ctx.prod
     redo = f"release-steps.py release-branch で組み直したら承認資料を作り直し、本番の PR #{main_pr} の新しい先端で承認を取り直して打ち直す"
 
     def waiting(head, judged):

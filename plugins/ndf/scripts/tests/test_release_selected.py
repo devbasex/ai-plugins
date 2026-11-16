@@ -286,6 +286,7 @@ def test_exact_match_gates_any_commit_added_after_the_approval(monkeypatch, stat
     import release_case
 
     from release_lib import reviewed
+    from release_lib.context import ReleaseCtx
 
     head = "c" * 40
     codes = []
@@ -303,12 +304,13 @@ def test_exact_match_gates_any_commit_added_after_the_approval(monkeypatch, stat
     ops = _MergeOps(moved)
     a = type("A", (), {"version": "1.1.0", "ci_wait": 60.0})()
     case = release_case.decide_case(True, 0, "")
+    ctx = ReleaseCtx(Path("."), a, "ndf", ["ndf"], BRANCH, "develop", "main")
     if merged:
-        assert promotion._merge_exact(Path("."), a, "ndf", (BRANCH, "main"), 30, case, [], {}, ops) == "m"
+        assert promotion._merge_exact(ctx, 30, case, [], {}, ops) == "m"
         assert ops.merged == [{"expect": head, "ci_wait": 60.0, "gate_approved": "user", "no_admin": True}]
         return
     with pytest.raises(SystemExit):
-        promotion._merge_exact(Path("."), a, "ndf", (BRANCH, "main"), 30, case, [], {}, ops)
+        promotion._merge_exact(ctx, 30, case, [], {}, ops)
     assert codes == [10] and ops.merged == []
 
 
@@ -359,10 +361,10 @@ def selected(monkeypatch):
         lambda root, repo, case, pr: {"kind": "comment", "name": f"#{pr}", "record": "admin_merge"} if case.admin_merge else None,
     )
     monkeypatch.setattr(
-        promotion, "_merge_exact", lambda root, a, plugin, refs, pr, case, items, metrics, ops: (items.append({"exact": refs}), _EXACT)[1]
+        promotion, "_merge_exact", lambda ctx, pr, case, items, metrics, ops: (items.append({"exact": (ctx.branch, ctx.prod)}), _EXACT)[1]
     )
     verdict = SimpleNamespace(tip="t" * 40, tolerated=[SimpleNamespace(sha="s1", subject="版上げ")])
-    monkeypatch.setattr(promotion, "_merge_approved", lambda root, a, plugin, branch, pr, approved, items, metrics, ops: ("", verdict))
+    monkeypatch.setattr(promotion, "_merge_approved", lambda ctx, pr, approved, items, metrics, ops: ("", verdict))
     from release_lib.context import ReleaseCtx
 
     def run(approved, ops, case=None, ancestor=0, tag=1, channel="prod"):
