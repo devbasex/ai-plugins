@@ -146,7 +146,7 @@ def case_of(root) -> Case:
     if not delivery.merge_rows(decl):
         return decide_case(False, None, "")
     approvals, why = read_approvals(root, decl.production)
-    return decide_case(True, approvals, why, repo.strategy_of(root).section["merge"]["admin"] is True)
+    return decide_case(True, approvals, why, repo.branch_strategy_of(root).section["merge"]["admin"] is True)
 
 
 def case_at(root, strict: bool = False) -> Case:

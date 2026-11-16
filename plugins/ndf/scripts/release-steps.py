@@ -681,9 +681,8 @@ def cmd_release(a):
     branch = _prepare_release_branch(root, a, plugin)
     on_pr = case is not None and case.has_cd  # CD のある場合は承認を PR の上で照らす（#2773）
     ctx = ReleaseCtx(root, a, plugin, plugins, branch, base, prod)
-    if (rs := getattr(a, "release_strategy", None)) and strategy_rows.ROWS[
-        rs
-    ].selects_units:  # 本番ブランチへ直接出し、戻すマージを入れる（#3121）
+    # 本番ブランチへ直接出し、戻すマージを入れる（#3121）
+    if (rs := getattr(a, "release_strategy", None)) and strategy_rows.ROWS[rs].selects_units:
         ops = sys.modules[__name__]  # 戻すマージ（back）は公開の後に打ち、失敗を本番の完了と分けて出す
         got = strategy_route.release_selected(ctx, approved, ops, case if on_pr else None)
         _published(root, a, plugin, prod, *got)
@@ -1309,9 +1308,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--approved-sha", metavar="SHA", help="prod の CD が無い場合: 承認したコミット（approval-facts の metrics.approved_sha。40 桁）"
     )
     g.add_argument("--approval", help="prod の CD が無い場合: 承認資料（「承認したコミット」と「承認の記録」の欄を読む）")
-    p.add_argument(
-        "--release-strategy", choices=tuple(strategy_rows.ROWS), help="本番への取り込み方（スプリントの開始時の値。単位を選ぶ行だけ渡す）"
-    )
+    p.add_argument("--release-strategy", choices=tuple(strategy_rows.ROWS), help="本番への取り込み方（開始時の値。単位を選ぶ行だけ）")
     p.set_defaults(func=cmd_release)
     p = sub.add_parser(
         "release-branch", parents=[common], help="選んだスプリントブランチを本番チャネルから組んだリリースブランチへ集めて push する"

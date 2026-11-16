@@ -13,6 +13,7 @@ import pytest
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(SCRIPTS / "lib"), str(SCRIPTS)]
 import branch_strategy as bs  # noqa: E402
+import branch_strategy_cli as bs_cli  # noqa: E402
 import branch_strategy_legacy as legacy  # noqa: E402
 import release_case  # noqa: E402
 from project_lib import branch_strategy_measure as bsm  # noqa: E402
@@ -169,12 +170,12 @@ def test_load_at_ref_reads_target_branch(tmp_path):
 
 def test_cli_get_and_start_ref(tmp_path, capsys):
     root = make_repo(tmp_path, {"project.json": {"version": 1, "branch_strategy": section("mobile")}})
-    assert bs.main(["get", "/branches/base", "--root", str(root)]) == 0
+    assert bs_cli.main(["get", "/branches/base", "--root", str(root)]) == 0
     assert capsys.readouterr().out == "develop\n"
-    assert bs.main(["start-ref", "--root", str(root)]) == 0
+    assert bs_cli.main(["start-ref", "--root", str(root)]) == 0
     assert capsys.readouterr().out == "main\n"
-    assert bs.main(["get", "/nope", "--root", str(root)]) == 2
-    assert bs.main(["get", "/verify", "--root", str(root)]) == 0
+    assert bs_cli.main(["get", "/nope", "--root", str(root)]) == 2
+    assert bs_cli.main(["get", "/verify", "--root", str(root)]) == 0
     assert capsys.readouterr().out == "null\n"
 
 

@@ -73,21 +73,13 @@
       "file": "project.json",
       "keys": [
         "docs",
-        "ndf_policies",
-        "production_merge"
+        "ndf_policies"
       ]
     },
     {
       "file": "supervise.json",
       "keys": [
-        "release",
         "shared"
-      ]
-    },
-    {
-      "file": "worktree.json",
-      "keys": [
-        "base_branch"
       ]
     }
   ],

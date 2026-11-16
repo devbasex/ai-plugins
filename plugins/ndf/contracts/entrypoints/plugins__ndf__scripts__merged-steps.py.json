@@ -36,20 +36,12 @@
       "file": "project.json",
       "keys": [
         "ndf_policies",
-        "production_merge",
         "test"
-      ]
-    },
-    {
-      "file": "supervise.json",
-      "keys": [
-        "release"
       ]
     },
     {
       "file": "worktree.json",
       "keys": [
-        "base_branch",
         "tool_paths",
         "version"
       ]

@@ -112,7 +112,7 @@ def require_base(root, given=None) -> str:
     if given:
         return given
     try:
-        return repo.strategy_of(root).pr_target("sprint")
+        return repo.branch_strategy_of(root).pr_target("sprint")
     except branch_strategy.StrategyError as e:
         raise StepError(f"起点のブランチを決められない（--base を渡すか宣言を直す）: {e.reason}", EXIT_PRECONDITION) from e
 

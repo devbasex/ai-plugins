@@ -218,7 +218,7 @@ def build(
 def load_delivery(root) -> DeliveryDecl:
     """`root` のリポジトリ（メインディレクトリ）の宣言を読む。例外を上げず、読めない宣言は `problems` に書く。"""
     try:
-        return build(repo.strategy_of(root))
+        return build(repo.branch_strategy_of(root))
     except branch_strategy.StrategyError as e:
         return build(None, problems=[e.reason])
 

@@ -42,14 +42,12 @@
     {
       "file": "project.json",
       "keys": [
-        "ndf_policies",
-        "production_merge"
+        "ndf_policies"
       ]
     },
     {
       "file": "worktree.json",
       "keys": [
-        "base_branch",
         "tool_paths",
         "version"
       ]

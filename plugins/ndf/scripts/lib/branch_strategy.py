@@ -8,13 +8,12 @@
 - 組み合わせの規則 R2〜R10 はスキーマの `allOf` が持つ。値の等しさを比べる R1 だけは JSON Schema で書けないので
   `validate` が同じ番号で確かめる
 
-シェルからは `branch_strategy.py get <pointer>`・`start-ref` で読む。使う側は `deps.require("jsonschema")` を先に呼ぶ
-（`main` は自分で呼ぶ）。
+シェルからは `branch_strategy_cli.py get <pointer>`・`start-ref` で読む。使う側は `deps.require("jsonschema")` を先に呼ぶ
+（hook の経路でも読むため、このモジュールは `deps.require` を呼ばない）。
 """
 
 from __future__ import annotations
 
-import argparse
 import hashlib
 import json
 import subprocess
@@ -263,47 +262,3 @@ def snapshot_diff(snap: dict, now: Strategy) -> list[str]:
     """スナップショットと今のセクションの違うキーの位置を昇順で並べる（I13）。"""
     a, b = _section_leaves(snap["section"]), _section_leaves(now.section)
     return sorted(k for k in set(a) | set(b) if canonical_json(a.get(k, "\0missing")) != canonical_json(b.get(k, "\0missing")))
-
-
-def _print_value(v: Any) -> None:
-    sys.stdout.write((v if isinstance(v, str) else json.dumps(v, ensure_ascii=False)) + "\n")
-
-
-def main(argv: list[str] | None = None) -> int:
-    import deps
-
-    deps.require("jsonschema")
-    ap = argparse.ArgumentParser(prog="branch_strategy.py", description="ブランチ戦略の宣言の値を 1 つ読む")
-    sub = ap.add_subparsers(dest="cmd", required=True)
-    g = sub.add_parser("get", help="セクションの値を JSON Pointer で 1 つ読む")
-    g.add_argument("pointer")
-    g.add_argument("--ref", help="このブランチ（origin/<名前>）のセクションを読む")
-    g.add_argument("--root", default=".")
-    s = sub.add_parser("start-ref", help="スプリントの起点のブランチ名を出す")
-    s.add_argument("--root", default=".")
-    t = sub.add_parser("pr-target", help="PR の種類ごとの宛先のブランチ名を出す")
-    t.add_argument("kind", choices=PR_KINDS)
-    t.add_argument("--sprint-branch", help="doc_prs が sprint の宣言で、設計 PR の宛先にするスプリントブランチ")
-    t.add_argument("--root", default=".")
-    a = ap.parse_args(argv)
-    try:
-        if a.cmd == "get":
-            if not a.pointer.startswith("/"):
-                raise StrategyError(f"pointer は / で始める: {a.pointer!r}", EXIT_UNREADABLE)
-            strategy = load_at_ref(Path(a.root), a.ref) if a.ref else load_strategy(Path(a.root))
-            _print_value(get_value(strategy, a.pointer))
-        elif a.cmd == "start-ref":
-            _print_value(load_strategy(Path(a.root)).sprint_start_ref())
-        else:
-            _print_value(load_strategy(Path(a.root)).pr_target(a.kind, a.sprint_branch))
-    except ValueError as e:
-        sys.stderr.write(f"{e}\n")
-        return EXIT_UNREADABLE
-    except StrategyError as e:
-        sys.stderr.write(e.reason + "\n")
-        return e.exit_code
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())

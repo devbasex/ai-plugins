@@ -50,7 +50,7 @@ def slug(owner_repo_value: str | None) -> str | None:
 
 def read_worktree_decl(root, fallback: bool = True) -> tuple[dict, str | None]:
     """`.ndf/worktree.json`（worktree の振る舞いの設定）の中身と、読めなかった理由。置き場は `decl.read_json_setting`
-    （`root` → メインディレクトリ）。ブランチ名は持たない（ブランチ戦略の宣言 `strategy_of` が持つ。#3672）。
+    （`root` → メインディレクトリ）。ブランチ名は持たない（ブランチ戦略の宣言 `branch_strategy_of` が持つ。#3672）。
 
         `fallback=False` なら `root` の直下だけを読み、メインディレクトリへ探しに行かない。
         無ければ `({}, None)`。JSON として読めない・オブジェクトでなければ `({}, 理由)`（理由にファイルを書く）。
@@ -63,7 +63,7 @@ def read_worktree_decl(root, fallback: bool = True) -> tuple[dict, str | None]:
     return decl.load_file(f, WORKTREE_DECL.name) if f.is_file() else ({}, None)
 
 
-def strategy_of(root) -> branch_strategy.Strategy:
+def branch_strategy_of(root) -> branch_strategy.Strategy:
     """メインディレクトリのブランチ戦略の宣言（`.ndf/project.json` の `branch_strategy`）。
 
     メインディレクトリから読むのは、Pull Request の変更でブランチ名を動かせないようにするためである（#2363）。
@@ -102,7 +102,7 @@ def defer_for_base(root, base, text):
 
 def base_branch(root) -> str:
     """ベースブランチ（宣言の `branches.base`）。宣言を読めなければ `branch_strategy.StrategyError`。"""
-    return strategy_of(root).base
+    return branch_strategy_of(root).base
 
 
 def _ref_exists(root, ref: str) -> bool:
@@ -154,14 +154,14 @@ def existing_base_branch(root, remote: str = "origin") -> tuple[str | None, str]
 
 def production_branch(root) -> str:
     """本番ブランチ（宣言の `branches.production`）。宣言を読めなければ `branch_strategy.StrategyError`。"""
-    return strategy_of(root).production
+    return branch_strategy_of(root).production
 
 
 def strategy_or_none(root) -> branch_strategy.Strategy | None:
-    """`strategy_of` の、読めなければ `None` を返す形。決まらないことを呼び手が扱える箇所（照会を飛ばす・判定しない）だけが使う。
+    """`branch_strategy_of` の、読めなければ `None` を返す形。決まらないことを呼び手が扱える箇所（照会を飛ばす・判定しない）だけが使う。
     既定値へは倒さない（I3）。"""
     try:
-        return strategy_of(root)
+        return branch_strategy_of(root)
     except branch_strategy.StrategyError:
         return None
 
@@ -240,7 +240,7 @@ def kept_sprint_branch(root, branch: str | None, record: dict | None = None) -> 
     if not branch or not branch.startswith(strategy_rows.SPRINT_PREFIX):
         return None
     try:
-        strategy = branch_strategy.from_snapshot(record) if record else strategy_of(root)
+        strategy = branch_strategy.from_snapshot(record) if record else branch_strategy_of(root)
     except branch_strategy.StrategyError as e:
         return f"ブランチ戦略の{'開始時の記録' if record else '宣言'}を読めないため残す: {e.reason}"
     if proc.git_out(root, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}") is None:

@@ -41,7 +41,6 @@ from step_result import (
 )
 from closing import closing_issues, closing_words  # noqa: E402
 import repo  # noqa: E402
-import branch_strategy  # noqa: E402
 from repo import defer_for_base  # noqa: E402
 import tool_paths  # noqa: E402
 from design_diff import DESIGN_DIFF_HEADING  # noqa: E402
@@ -131,12 +130,8 @@ def cmd_plan(a):
     branch = current_branch(root)
     base = require_base(root, a.base)
     default = repo.default_branch(root)
-    try:
-        strategy = repo.strategy_of(root)
-        declared = {strategy.base, strategy.production}
-    except branch_strategy.StrategyError:
-        declared = set()
-    allowed = {b for b in (default, *declared) if b}
+    s = repo.strategy_or_none(root)
+    allowed = {b for b in (default, *((s.base, s.production) if s else ())) if b}
     items = [{"kind": "branch", "name": branch, "result": "ok"}, {"kind": "base", "name": base, "result": "ok"}]
     if branch in allowed:
         items[0]["result"] = "redirect"

@@ -141,7 +141,7 @@
           "--channel",
           "--ci-wait",
           "--plugins",
-          "--promotion",
+          "--release-strategy",
           "--version"
         ],
         "positionals": []
@@ -217,20 +217,12 @@
     {
       "file": "project.json",
       "keys": [
-        "ndf_policies",
-        "production_merge"
-      ]
-    },
-    {
-      "file": "supervise.json",
-      "keys": [
-        "release"
+        "ndf_policies"
       ]
     },
     {
       "file": "worktree.json",
       "keys": [
-        "base_branch",
         "tool_paths",
         "version"
       ]

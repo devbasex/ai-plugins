@@ -149,9 +149,9 @@ wt_branch_exists() {
 }
 
 # ブランチ戦略の宣言（`.ndf/project.json` の `branch_strategy`）を読む部品の置き場（#3672）。
-_WT_STRATEGY_PY="$(dirname "${BASH_SOURCE[0]}")/branch_strategy.py"
+_WT_STRATEGY_PY="$(dirname "${BASH_SOURCE[0]}")/branch_strategy_cli.py"
 
-# ブランチ戦略の宣言の値を 1 つ出力する（`branch_strategy.py get <pointer>`）。宣言が無い・壊れている・
+# ブランチ戦略の宣言の値を 1 つ出力する（`branch_strategy_cli.py get <pointer>`）。宣言が無い・壊れている・
 # 旧いキーが残るときは、理由（ファイル・キーの位置・打つコマンド）を標準エラーへ出して 1 以上を返す。
 # **既定ブランチへ落とさない**（I3）。
 wt_strategy_get() {

@@ -146,7 +146,7 @@ def glossary_ready(roots) -> bool:
 def strategy_of_roots(roots) -> branch_strategy.Strategy:
     """宣言を探す木の並びのうち、最初に存在する git の木のメインディレクトリのブランチ戦略の宣言。読めなければ DeclError。"""
     try:
-        return repo.strategy_of(repo.first_git_tree(roots))
+        return repo.branch_strategy_of(repo.first_git_tree(roots))
     except branch_strategy.StrategyError as e:
         raise DeclError(e.reason) from e
 
