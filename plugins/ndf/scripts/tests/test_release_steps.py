@@ -838,7 +838,8 @@ def test_trunk_release_refuses_the_dev_channel(monkeypatch, tmp_path):
 
 def test_release_takes_branches_and_names_from_the_declaration(monkeypatch, tmp_path):
     """#1336 の AC10: ベースブランチと本番チャネルを変えた宣言では、その名前で PR を作りタグを打つ（develop・main の直書きで動かない）。"""
-    found, created, calls, out = _release_prod(monkeypatch, tmp_path, ("trunk", "live"), "foo")
+    # NDF がタグを打つ形: CD の行の無い届け先（deliveries: []）。release.cd が null だとタグを持てない（R10）
+    found, created, calls, out = _release_prod(monkeypatch, tmp_path, ("trunk", "live"), "foo", [])
     assert found == [("release/v1.2.3", "trunk"), ("release/v1.2.3", "live"), ("release/v1.2.3", "live")]
     assert created == [("trunk", "release/v1.2.3", "Release: foo v1.2.3"), ("live", "release/v1.2.3", "Release: foo v1.2.3 を live へ")]
     assert ("tag", "-a", "foo--v1.2.3", "m-2", "-m", "foo v1.2.3") in calls
@@ -847,7 +848,7 @@ def test_release_takes_branches_and_names_from_the_declaration(monkeypatch, tmp_
 
 def test_release_with_the_ai_plugins_declaration_keeps_its_values(monkeypatch, tmp_path):
     """#1336 の I9: ai-plugins の宣言では、ブランチ develop / main・タグ ndf--v<版>・題 Release: ndf v<版> が今と同じに出る。"""
-    found, created, calls, out = _release_prod(monkeypatch, tmp_path, ("develop", "main"), "ndf")
+    found, created, calls, out = _release_prod(monkeypatch, tmp_path, ("develop", "main"), "ndf", [])
     assert found == [("release/v1.2.3", "develop"), ("release/v1.2.3", "main"), ("release/v1.2.3", "main")]
     assert created == [("develop", "release/v1.2.3", "Release: ndf v1.2.3"), ("main", "release/v1.2.3", "Release: ndf v1.2.3 を main へ")]
     assert out["metrics"]["tag"] == "ndf--v1.2.3"

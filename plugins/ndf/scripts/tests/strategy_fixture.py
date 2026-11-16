@@ -43,9 +43,13 @@ def snapshot(kind: str = "web-trunk", base: str | None = "main", production: str
 def write_strategy(root: Path, kind: str = "web-develop", base: str | None = None, production: str | None = None, **edits) -> dict:
     """`root/.ndf/project.json` にセクションを書き、書いたセクションを返す。ほかのキーは残す。
 
-    `edits` はセクションの最上位のキーを置き換える（`release={...}` など）。"""
+    `edits` はセクションの最上位のキーを置き換える（`release={...}` など）。`release.cd` が `null` なら R10 に合わせて
+    タグを `null`・GitHub Release を偽にする。"""
     sec = section(kind, base, production)
     sec.update(edits)
+    if sec["release"].get("cd") is None:
+        # CD の無い宣言はタグも GitHub Release も持たない（R10。タグと Release を作るのは CD だけ）
+        sec["release"] = {**sec["release"], "tag": None, "github_release": False}
     p = Path(root) / ".ndf" / "project.json"
     p.parent.mkdir(parents=True, exist_ok=True)
     doc = json.loads(p.read_text(encoding="utf-8")) if p.is_file() else {"version": 1}
@@ -71,8 +75,7 @@ def declare(
     kind = ("plugin" if plugin else "web-trunk") if production == base else "web-develop"
     rel = copy.deepcopy(section("plugin" if plugin else kind)["release"])
     if deliveries is None:
-        # CD が無ければタグと GitHub Release も作らない（R10）
-        rel.update({"cd": None, "tag": None, "github_release": False})
+        rel["cd"] = None  # タグと GitHub Release は write_strategy が R10 に合わせて外す
     rel.update(release or {})
     if deliveries is not None:
         rel["deliveries"] = deliveries

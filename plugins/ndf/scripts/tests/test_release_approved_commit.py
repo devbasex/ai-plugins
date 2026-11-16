@@ -58,7 +58,8 @@ def world(tmp_path: Path):
     git(seed, "init", "-q", "-b", "develop")
     git(seed, "config", "user.email", "t@example.com")
     git(seed, "config", "user.name", "t")
-    strategy_fixture.declare(seed, "trunk", "live", {"form": "package-plugin", "plugin": "foo"})
+    # NDF がタグと GitHub Release を作る形（CD の行の無い届け先）。release.cd が null だとタグを持てない（R10）
+    strategy_fixture.declare(seed, "trunk", "live", {"form": "package-plugin", "plugin": "foo"}, [])
     commit(seed, "a.txt", "a\n", "init")
     git(seed, "remote", "add", "origin", str(origin))
     git(seed, "push", "-q", "origin", "HEAD:trunk", "HEAD:live")
