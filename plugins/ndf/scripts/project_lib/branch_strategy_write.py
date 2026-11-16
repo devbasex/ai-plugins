@@ -151,7 +151,7 @@ def json_patch(before: Any, after: Any, prefix: str = "") -> list[dict]:
     if isinstance(before, dict) and isinstance(after, dict):
         ops = []
         for k in sorted(set(before) | set(after)):
-            p = f"{prefix}/{k.replace('~', '~0').replace('/', '~1')}"
+            p = f"{prefix}/{bs.escape_token(k)}"
             if k not in after:
                 ops.append({"op": "remove", "path": p})
             elif k not in before:

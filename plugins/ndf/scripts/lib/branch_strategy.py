@@ -128,8 +128,13 @@ def _rule_of(error, root: dict) -> str:
     return "shape"
 
 
+def escape_token(key) -> str:
+    """JSON Pointer の参照 1 つを書き出す（`~` → `~0`・`/` → `~1`）。"""
+    return str(key).replace("~", "~0").replace("/", "~1")
+
+
 def _pointer(parts) -> str:
-    return "".join("/" + str(p).replace("~", "~0").replace("/", "~1") for p in parts)
+    return "".join("/" + escape_token(p) for p in parts)
 
 
 def validate_section(section: Any) -> list[dict]:
@@ -253,7 +258,7 @@ def _section_leaves(value: Any, prefix: str = "") -> dict[str, Any]:
     if isinstance(value, dict) and value:
         out: dict[str, Any] = {}
         for k, v in value.items():
-            out.update(_section_leaves(v, f"{prefix}/{str(k).replace('~', '~0').replace('/', '~1')}"))
+            out.update(_section_leaves(v, f"{prefix}/{escape_token(k)}"))
         return out
     return {prefix: value}
 
