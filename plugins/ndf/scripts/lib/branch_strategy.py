@@ -184,11 +184,16 @@ def _check_files(files: dict[str, dict], system: str = "10") -> Strategy:
             f"`.ndf/project.json` にセクション `{SECTION}` がありません。`{legacy.COMMAND[system]} init --kind <種類>`"
             f"（既存のリポジトリは `{legacy.COMMAND[system]} measure`）で作ってください"
         )
-    failed = validate_section(project[SECTION])
+    return _validated(project[SECTION], f"`.ndf/project.json` の `{SECTION}` ")
+
+
+def _validated(section: Any, where_label: str) -> Strategy:
+    """`section` を検査して型にする。落ちれば「<where_label>がスキーマに落ちる: 規則 `位置`、…」で止める（EXIT_VIOLATION）。"""
+    failed = validate_section(section)
     if failed:
         where = "、".join(f"{f['rule']} `{f['pointer'] or '/'}`" for f in failed)
-        raise StrategyError(f"`.ndf/project.json` の `{SECTION}` がスキーマに落ちる: {where}", EXIT_VIOLATION)
-    return Strategy(project[SECTION])
+        raise StrategyError(f"{where_label}がスキーマに落ちる: {where}", EXIT_VIOLATION)
+    return Strategy(section)
 
 
 def load_strategy(root: Path) -> Strategy:
@@ -247,11 +252,7 @@ def from_snapshot(snap: Any) -> Strategy:
     section = snap.get("section") if isinstance(snap, dict) else None
     if not isinstance(section, dict):
         raise StrategyError(f"スプリントの開始時のスナップショット（`{SNAPSHOT_KEY}`）が無いか、形が違う。スプリントを始め直してください")
-    failed = validate_section(section)
-    if failed:
-        where = "、".join(f"{f['rule']} `{f['pointer'] or '/'}`" for f in failed)
-        raise StrategyError(f"スプリントの開始時のスナップショットがスキーマに落ちる: {where}", EXIT_VIOLATION)
-    return Strategy(section)
+    return _validated(section, "スプリントの開始時のスナップショット")
 
 
 def _section_leaves(value: Any, prefix: str = "") -> dict[str, Any]:
