@@ -24,11 +24,11 @@ from typing import Any, Callable
 
 import branch_strategy as bs
 from project_lib import branch_strategy_write as bw
+from release_lib.land import TRAILER_HEAD, TRAILER_PR, TRAILER_TIP
 
 Api = Callable[[str], tuple[Any, str]]
 VERSION = re.compile(r"\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.\-]+)?")
 RELEASE_PREFIX = "release/v"
-TRAILERS = ("NDF-Landed-PR", "NDF-Approved-Head", "NDF-Tip")
 DOCS = ("README.md", "CONTRIBUTING.md", "AGENTS.md")
 DOC_BASE = re.compile(r"--base\s+`?([A-Za-z0-9._/\-]+)`?")
 CD_MARKS = ("gh release create", "action-gh-release", "git push origin --tags", "git tag ")
@@ -172,7 +172,7 @@ def _collect_production_commits(root: Path, s: Samples, limit: int) -> None:
     if ref is None:
         s.unreadable.append("history")
         return
-    fmt = "%H%x00%P%x00%s%x00%(trailers:key=NDF-Landed-PR,key=NDF-Approved-Head,key=NDF-Tip,separator=%x1f)%x1e"
+    fmt = f"%H%x00%P%x00%s%x00%(trailers:key={TRAILER_PR},key={TRAILER_HEAD},key={TRAILER_TIP},separator=%x1f)%x1e"
     out = _git_strategy_out(root, "log", "--first-parent", f"-n{limit}", f"--format={fmt}", ref) or ""
     known = {p["number"] for p in s.prs}
     for rec in out.split("\x1e"):
@@ -181,9 +181,9 @@ def _collect_production_commits(root: Path, s: Samples, limit: int) -> None:
             continue
         sha, parents, subject, trailers = parts[0], parts[1].split(), parts[2], parts[3]
         tr = dict(t.split(": ", 1) for t in trailers.split("\x1f") if ": " in t)
-        s.commits.append({"sha": sha, "parents": len(parents), "subject": subject, "landed": tr.get("NDF-Landed-PR")})
-        if tr.get("NDF-Landed-PR") and parents and parents[0] == tr.get("NDF-Tip"):
-            n = int(tr["NDF-Landed-PR"]) if tr["NDF-Landed-PR"].isdigit() else None
+        s.commits.append({"sha": sha, "parents": len(parents), "subject": subject, "landed": tr.get(TRAILER_PR)})
+        if tr.get(TRAILER_PR) and parents and parents[0] == tr.get(TRAILER_TIP):
+            n = int(tr[TRAILER_PR]) if tr[TRAILER_PR].isdigit() else None
             if n and n not in known:
                 s.prs.append({"number": n, "base": s.production, "head": None, "landed": sha})
                 known.add(n)
