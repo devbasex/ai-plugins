@@ -429,6 +429,15 @@ def test_migrate_unknown_value_asks_and_rule_failure_stops(tmp_path):
     assert q2 == [] and any(f["rule"] == "R1" for f in plan2.failed)
 
 
+def test_migrate_fills_omitted_branch_from_default_branch(tmp_path):
+    """省いた production_branch は、旧い処理と同じく既定ブランチで補う（プリセットの main にしない）。"""
+    root = make_repo(tmp_path, {"worktree.json": {"version": 1, "base_branch": "develop"}})
+    git(root, "branch", "-m", "master")
+    plan, q = bmig.plan_migration(root, legacy.load_moves())
+    assert q == [] and not plan.failed
+    assert plan.files["project.json"]["branch_strategy"]["branches"] == {"production": "master", "base": "develop"}
+
+
 def test_migrate_remove_row_only(tmp_path):
     root = make_repo(
         tmp_path, {"project.json": {"version": 1, "branch_strategy": section("docs")}, "worktree.json": {"version": 1, "branch_flow": {}}}
@@ -751,6 +760,11 @@ def test_ruleset_mismatch():
     assert land.ruleset_mismatch(plugin, facts(queue=True, approvals=1))[0]["key"] == "approval.via"
     assert land.ruleset_mismatch(plugin, facts(queue=False))[0]["key"] == "merge.method"
     assert land.ruleset_mismatch(plugin, facts(present=False))[0]["key"] == "merge.method"
+    # キューの取り込み方が宣言の merge.commit と違えば食い違い
+    commit = plugin.section["merge"]["commit"]
+    assert land.ruleset_mismatch(plugin, facts(queue=True, queue_merge_method=commit.upper())) == []
+    other = next(m for m in ("MERGE", "SQUASH", "REBASE") if m.lower() != commit)
+    assert land.ruleset_mismatch(plugin, facts(queue=True, queue_merge_method=other))[0]["key"] == "merge.commit"
     docs = bs.Strategy(section("docs"))
     assert land.ruleset_mismatch(docs, facts(present=False)) == []
     admin = section("web-develop")
@@ -766,6 +780,9 @@ def test_check_production_pr():
     assert land.check_production_pr(plugin, {"bump": True, "cut_version": "0.9.0", "number": 1}, prod, [])
     assert land.check_production_pr(plugin, {"bump": True, "cut_version": "1.0.0", "number": 1}, prod, [{"number": 2, "bump": True}])
     assert land.check_production_pr(plugin, {"bump": False}, prod, []) is None
+    # 版数を比べられない PR（bump が None）は版上げとして確かめる（切った版数とキューの衝突）
+    assert land.check_production_pr(plugin, {"bump": None, "cut_version": None, "number": 1}, prod, [])
+    assert land.check_production_pr(plugin, {"bump": True, "cut_version": "1.0.0", "number": 1}, prod, [{"number": 2, "bump": None}])
     assert land.check_production_pr(docs, {"contains_tip": False}, prod, [])
     assert land.check_production_pr(docs, {"contains_tip": True}, prod, []) is None
     assert land.check_production_pr(dev, {}, prod, []) is None
@@ -859,7 +876,7 @@ def test_land_direct_and_strict():
     port3 = FakePort({"head": H1, "base": "main", "contains_tip": True, "tip": "a" * 40}, facts(present=False), prod={"tip": "b" * 40})
     assert land.land_approved(port3, bs.Strategy(section("docs")), 6, land.Approval(H1))["result"] == "merged"
     kinds = [c[0] for c in port3.calls]
-    assert kinds == ["checks", "commit", "ref"] and "NDF-Approved-Head: " + H1 in port3.calls[0][1]
+    assert kinds == ["checks", "commit", "ref"] and "NDF-Approved-Head: " + H1 in port3.calls[1][1]
     assert port3.calls[1][2] == ["a" * 40, H1]
 
 

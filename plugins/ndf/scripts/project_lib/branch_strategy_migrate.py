@@ -15,6 +15,7 @@ from pathlib import Path
 
 import branch_strategy as bs
 import branch_strategy_legacy as legacy
+import repo as repo_lib
 from project_lib import branch_strategy_write as bw
 
 # 取り込み方 → 足りないキーを埋める既定の行
@@ -34,8 +35,11 @@ def _cd_of(deliveries) -> dict | None:
     return None
 
 
-def _fill(section: dict, presets: dict, existing: dict | None = None) -> dict:
-    """移した値に、足りないキーを埋める。`existing` は途中で止まった移行が先に書いたセクション（打ち直しで値を落とさない）。"""
+def _fill(section: dict, presets: dict, existing: dict | None = None, default: str | None = None) -> dict:
+    """移した値に、足りないキーを埋める。`existing` は途中で止まった移行が先に書いたセクション（打ち直しで値を落とさない）。
+
+    `default` はリポジトリの既定ブランチ（`repo.default_branch`）。旧い宣言で省いた `base_branch`・`production_branch` は、
+    旧い処理がこの値で解決していたため、プリセットのブランチ名より先にこれで補う（宣言の書き換えで本番を変えない）。"""
     existing = existing or {}
     rs = section.get("release_strategy") or existing.get("release_strategy", "merge_base_branch")
     form = (section.get("release") or {}).get("form") or (existing.get("release") or {}).get("form")
@@ -50,6 +54,10 @@ def _fill(section: dict, presets: dict, existing: dict | None = None) -> dict:
         else:
             out[key] = value
     branches = out["branches"]
+    declared = {**(existing.get("branches") or {}), **(section.get("branches") or {})}
+    for key in ("base", "production"):
+        if default and key not in declared:
+            branches[key] = default
     if rs == "trunk":
         branches["base"] = branches["production"]
     _fill_release(out["release"], section, form, kind, presets, existing)
@@ -108,7 +116,7 @@ def plan_migration(root: Path, moves: list[legacy.Move]) -> tuple[bw.WritePlan, 
     if not any(m.new is not None for m in present) and bs.SECTION in project:
         # remove の行だけが当たった（使わなくなったキー）。セクションは今のまま
         return bw.plan_files(root, _by_name(after), lambda: plan_migration(root, moves)[0]), []
-    section = _fill(moved, bw.load_presets(), project.get(bs.SECTION))
+    section = _fill(moved, bw.load_presets(), project.get(bs.SECTION), repo_lib.default_branch(root))
     failed = bs.validate_section(section)
     if failed:
         where = [{**f, "legacy": sorted(f"{a}:{b}" for a, b in found)} for f in failed]

@@ -83,6 +83,43 @@ def test_bump_facts_compare_cut_and_head(tmp_path):
     assert port._bump_facts(7, head, "main")["contains_tip"] is False
 
 
+def test_bump_facts_unknown_when_version_unreadable(tmp_path):
+    """版数のファイルを初めて足す PR は、版数を比べられない（None）。承認の免除から外す。"""
+    root = repo_with_origin(tmp_path)
+    port = land.GhPort(root, "o/r", strategy("plugin", plugin="demo"))
+    git(root, "checkout", "-q", "-b", "first")
+    git(root, "rm", "-q", "-r", "plugins")
+    commit(root, "drop")
+    git(root, "push", "-q", "origin", "HEAD:main")
+    write_version(root, "1.0.0")
+    head = commit(root, "add version")
+    git(root, "push", "-q", "origin", f"{head}:refs/pull/8/head")
+    got = port._bump_facts(8, head, "main")
+    assert got["bump"] is None
+    trunk = strategy("plugin", plugin="demo").section
+    trunk["release_strategy"], trunk["approval"]["target"] = "trunk", "release_pr"
+    assert not land.exempt_from_gate(bs.Strategy(trunk), got)
+    assert land.exempt_from_gate(bs.Strategy(trunk), {**got, "bump": False})
+
+
+def test_checks_failing_skips_trail_status_and_passes_repo_without_ci(monkeypatch):
+    """承認の証跡の status は検査に数えない。検査も有効な workflow も無いリポジトリは検査なしで通す。"""
+    import gh_checks
+
+    port = land.GhPort(Path("."), "o/r", strategy("docs"))
+    monkeypatch.setattr(gh_checks, "fetch_check_runs", lambda repo, sha, empty_ok=False: [])
+    replies = {
+        "repos/o/r/commits/h/status": {"statuses": [{"context": approval_trail.STATUS_CONTEXT, "state": "failure"}]},
+        "repos/o/r/actions/workflows": {"workflows": []},
+    }
+    monkeypatch.setattr(land.GhPort, "_rest", lambda self, path, method="GET", payload=None: replies.get(path))
+    assert port.checks_failing("h") is None
+    replies["repos/o/r/actions/workflows"] = {"workflows": [{"state": "active"}]}
+    assert "まだ 1 件も無い" in port.checks_failing("h")
+    replies["repos/o/r/commits/h/status"] = {"statuses": [{"context": "ci", "state": "pending"}]}
+    assert port.checks_failing("h") == "ci=pending"
+
+
 def test_landed_record_needs_same_tree_and_tip(tmp_path):
     root = repo_with_origin(tmp_path)
     tip = git(root, "rev-parse", "HEAD")

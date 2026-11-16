@@ -33,6 +33,10 @@ def ruleset_mismatch(strategy, facts) -> list[dict]:
         return out
     if (method == "merge-queue") != facts.queue:
         out.append({"key": "merge.method", "declared": method, "ruleset": "merge queue あり" if facts.queue else "merge queue なし"})
+    queue_commit = str(facts.queue_merge_method or "").lower()
+    if method == "merge-queue" and facts.queue and queue_commit and queue_commit != sec["merge"]["commit"]:
+        # キューは自分の merge_method で取り込む。宣言の履歴の作り方（merge.commit）と違えば投入前に止める
+        out.append({"key": "merge.commit", "declared": sec["merge"]["commit"], "ruleset": f"merge queue の取り込み方 {queue_commit}"})
     if method == "strict" and not facts.up_to_date:
         out.append({"key": "merge.method", "declared": method, "ruleset": "最新の取り込みを求めない"})
     if admin:
@@ -45,10 +49,15 @@ def ruleset_mismatch(strategy, facts) -> list[dict]:
     return out
 
 
+def may_bump(row: dict) -> bool:
+    """版上げの PR でありうるか。`bump` が None（版数を比べられない）は版上げとみなす（承認の免除と衝突の検査から外さない）。"""
+    return row.get("bump", False) is not False
+
+
 def check_production_pr(strategy, pr: dict, prod: dict, queue: list[dict]) -> str | None:
     """本番の PR がマージの方式ごとの確かめを通るか。通れば None、落ちれば理由の文。
 
-    `pr` は `head`・`bump`（版上げの PR か）・`cut_version`（切った時点の本番の版数）・`contains_tip`（head が本番の先端を含むか）、
+    `pr` は `head`・`bump`（版上げの PR か。版数を比べられなければ None で、版上げとして確かめる）・`cut_version`（切った時点の本番の版数）・`contains_tip`（head が本番の先端を含むか）、
     `prod` は `tip`・`version`、`queue` はキューの PR（各 `number`・`bump`）と、承認したがまだキューへ入れていない版上げの PR
     （`approved_release` が真の行）。`merge-queue` では、後者がある間は版上げでない本番の PR を入れない（決定 18）。
     """
@@ -56,20 +65,20 @@ def check_production_pr(strategy, pr: dict, prod: dict, queue: list[dict]) -> st
     if method == "direct":
         return None
     held = [q for q in queue if q.get("approved_release") and q.get("number") != pr.get("number")]
-    if method == "merge-queue" and not pr.get("bump") and held:
+    if method == "merge-queue" and pr.get("bump") is not True and held:
         # 承認の範囲を版上げの PR の head に固定する（利用者の判断 3。決定 18）。版上げの PR がキューへ入るまで待つ
         return f"版上げの PR #{held[0]['number']} を承認してからキューへ入れるまで、スプリントの PR はキューへ入れない。入った後に打ち直してください"
     if method == "strict":
         if not pr.get("contains_tip"):
             return f"head が本番ブランチの先端 {prod.get('tip', '')[:12]} を含まない。本番の PR を作り直し、{REAPPROVE}"
         return None
-    if not pr.get("bump"):
+    if not may_bump(pr):
         return None
     if pr.get("cut_version") != prod.get("version"):
         return (
             f"本番ブランチの版数 {prod.get('version')} が、版上げの PR を切った時点の {pr.get('cut_version')} と違う。作り直し、{REAPPROVE}"
         )
-    others = [q for q in queue if q.get("bump") and not q.get("approved_release") and q.get("number") != pr.get("number")]
+    others = [q for q in queue if may_bump(q) and not q.get("approved_release") and q.get("number") != pr.get("number")]
     if others:
         return f"キューに別の版上げの PR（#{others[0]['number']}）がある。作り直し、{REAPPROVE}"
     return None
@@ -275,7 +284,12 @@ class GhPort:
         now = store_version(self.strategy, self._show(head))
         tip = self._git("rev-parse", f"origin/{branch}").stdout.strip()
         tip_in = bool(tip) and self._git("merge-base", "--is-ancestor", tip, head).returncode == 0
-        return {"bump": bool(cut and now and cut != now), "cut_version": cut, "contains_tip": tip_in, "tip": tip}
+        if self.strategy.section["release"]["version_store"]["kind"] == "none":
+            bump: bool | None = False
+        else:
+            # 片側を読めない（版数のファイルの初回の追加・読み取りの失敗）は None。版上げでないとは決めない
+            bump = cut != now if cut and now else None
+        return {"bump": bump, "cut_version": cut, "contains_tip": tip_in, "tip": tip}
 
     def pull(self, number: int) -> dict:
         d = self._rest(f"repos/{self.repo}/pulls/{int(number)}")
@@ -309,7 +323,7 @@ class GhPort:
             r["bump"] = self._bump_facts(r["number"], r["head"], branch)["bump"]
         queued = {r["number"] for r in rows}
         for n in trail.open_prs_at_base(self.repo, branch):
-            if n["number"] in queued or not self._bump_facts(n["number"], n["head"], branch)["bump"]:
+            if n["number"] in queued or self._bump_facts(n["number"], n["head"], branch)["bump"] is False:
                 continue
             got = approval_of(self.repo, self.strategy, n["number"])  # 宣言の承認の受け方（approval.via）で読む
             if got is not None and got.head == str(n["head"]).lower():
@@ -369,17 +383,29 @@ class GhPort:
 
     def checks_failing(self, sha: str) -> str | None:
         import gh_checks
+        from release_lib import approval_trail as trail
 
         raw = gh_checks.fetch_check_runs(self.repo, sha, empty_ok=True)
         status = self._rest(f"repos/{self.repo}/commits/{sha}/status")
         if raw is None or not isinstance(status, dict):
             return "検査の結果を読めない"
         runs = [(str(r.get("name") or ""), gh_checks.run_result(r)) for r in gh_checks.fold_check_runs(raw)]
-        runs += [(str(c.get("context") or ""), str(c.get("state") or "")) for c in status.get("statuses") or []]
+        # 承認の証跡の status は検査でなく承認の印（承認の免除の経路では付かない）。reviewed.wait_ci_except と同じく除く
+        statuses = [c for c in status.get("statuses") or [] if c.get("context") != trail.STATUS_CONTEXT]
+        runs += [(str(c.get("context") or ""), str(c.get("state") or "")) for c in statuses]
         if not runs:
-            return "検査がまだ 1 件も無い"
+            return self._no_checks_reason()
         bad = [f"{name}={res}" for name, res in runs if res not in CHECKS_OK]
         return ", ".join(bad)[:300] or None
+
+    def _no_checks_reason(self) -> str | None:
+        """検査が 1 件も無いときの理由。有効な workflow が無ければ CI を持たないリポジトリとして None（検査なしで通す）。
+        workflow があれば push の直後で未開始とみなして止める。照会は検査が 0 件のときだけ打つ。"""
+        d = self._rest(f"repos/{self.repo}/actions/workflows")
+        if not isinstance(d, dict):
+            return "検査がまだ 1 件も無く、workflow の一覧も読めない"
+        active = [w for w in d.get("workflows") or [] if isinstance(w, dict) and w.get("state") == "active"]
+        return "検査がまだ 1 件も無い（workflow はある。始まるのを待って打ち直してください）" if active else None
 
 
 def approval_of(repo: str, strategy, pr: int) -> Approval | None:
@@ -398,7 +424,8 @@ def exempt_from_gate(strategy, pull: dict) -> bool:
     """承認の証跡なしで入れてよいスプリントの PR か。trunk（スプリントの PR が本番を宛先にする）で、承認の対象が版上げの PR の
     ときの版上げでない PR だけ。ほかの取り込み方の本番宛ての PR（版数の置き場が無い版上げ・ホットフィックス）は承認ゲートを通す。"""
     sec = strategy.section
-    return sec["release_strategy"] == "trunk" and sec["approval"]["target"] == "release_pr" and not pull.get("bump")
+    # 版数を比べられない PR（bump が None）は版上げでありうるため免除しない
+    return sec["release_strategy"] == "trunk" and sec["approval"]["target"] == "release_pr" and pull.get("bump") is False
 
 
 def land_pr(root, repo: str, strategy, pr: int) -> dict:

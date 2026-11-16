@@ -170,6 +170,7 @@ class RuleFacts(NamedTuple):
     queue: bool
     up_to_date: bool
     bypass: str | None
+    queue_merge_method: str | None = None  # merge queue の規則の parameters.merge_method（MERGE / SQUASH / REBASE）
 
 
 # 迂回の可否の強さ（弱いほうを全体の値にする）。`always`・`pull_requests_only` だけが本番の PR を越えられる
@@ -189,7 +190,10 @@ def rule_facts_of(rules: list, bypasses: list[str | None]) -> RuleFacts:
     )
     known = [b for b in bypasses if b in _BYPASS_ORDER]
     bypass = min(known, key=_BYPASS_ORDER.index) if known else None
-    return RuleFacts(True, required_approvals(rules) or 0, "merge_queue" in kinds, bool(up_to_date), bypass)
+    queue_method = next(
+        ((r.get("parameters") or {}).get("merge_method") for r in rules if isinstance(r, dict) and r.get("type") == "merge_queue"), None
+    )
+    return RuleFacts(True, required_approvals(rules) or 0, "merge_queue" in kinds, bool(up_to_date), bypass, queue_method)
 
 
 def read_rule_facts(root, branch: str) -> RuleFacts | None:
