@@ -95,9 +95,8 @@ def check_production_pr(strategy, pr: dict, prod: dict, queue: list[dict]) -> st
 class Port(Protocol):
     """GitHub との出入り（`land_approved` が使う分だけ）。"""
 
-    # {"state", "merged", "draft", "merged_by", "head", "base", "bump", "cut_version", "contains_tip"}
+    # {"state", "merged", "draft", "head", "base", "bump", "cut_version", "contains_tip"}
     def pull(self, number: int) -> dict: ...
-    def viewer(self) -> str | None: ...  # land を打った利用者の login。読めなければ None
     def production(self, branch: str) -> dict: ...  # {"tip", "version"}
     def queue(self, branch: str) -> list[dict]: ...
     def rule_facts(self, branch: str) -> Any: ...
@@ -110,6 +109,8 @@ class Port(Protocol):
     def landed_record(self, branch: str, number: int, since: str | None) -> dict | None: ...
     def has_human_record(self, number: int) -> bool: ...
     def admin_record(self, number: int, sha: str, trail_url: str) -> str | None: ...  # 迂回の記録を書く。書けなければ理由の文
+    def admin_intent(self, number: int, sha: str) -> str | None: ...  # 迂回の意図の印を置く（同じ head は置き直さない）。置けなければ理由
+    def has_admin_intent(self, number: int, sha: str) -> bool: ...  # head `sha` の意図の印があるか。読めなければ TrailError
     def checks_failing(
         self, sha: str, pull: dict | None = None
     ) -> str | None: ...  # head の検査がすべて成功なら None、そろわなければ理由の文
@@ -163,9 +164,9 @@ def land_approved(port: Port, strategy, pr: int, approval: Approval, pull: dict 
     pull = pull if pull is not None else port.pull(pr)
     out = {"result": "stopped", "head": pull.get("head"), "reason": ""}
     admin = bool(merge["admin"] and merge["method"] == "direct")
-    if pull.get("merged") and admin and approval.head and pull.get("head") == approval.head and _merged_by_viewer(port, pull):
-        # 承認した head を land を打った利用者が迂回でマージした後に記録だけ落ちた打ち直し: 記録を補う（同じ先端の記録があれば書かない）。
-        # 別の人が GitHub の画面でマージした PR は、迂回でなく人のマージとして記録する
+    # 迂回でマージした後に記録だけ落ちた打ち直し: 承認した head の意図の印があれば記録を補う（同じ先端の記録があれば書かない）。
+    # 印の無いマージ（land が止まった後に GitHub の画面でマージしたものなど）は、迂回でなく人のマージとして記録する
+    if pull.get("merged") and admin and approval.head and pull.get("head") == approval.head and port.has_admin_intent(pr, approval.head):
         return _admin_recorded(port, pr, approval, out)
     if pull.get("merged"):
         if not port.has_human_record(pr):
@@ -215,16 +216,15 @@ def land_approved(port: Port, strategy, pr: int, approval: Approval, pull: dict 
             return {**out, "reason": f"head が含むと確かめた本番ブランチ {prod_branch} の先端を読めない"}
         got = fast_forward_land(port, prod_branch, pr, tip, approval.head, merge["commit"], pull.get("title", ""), approval.url)
         return {**out, "result": got["result"], "reason": got["reason"]}
+    if admin:
+        # 迂回の前に意図の印を置く。置けなければ迂回しない（印が無いとマージ済みの PR を迂回の記録で補えない）
+        err = port.admin_intent(pr, approval.head)
+        if err:
+            return {**out, "reason": f"#{pr} へ迂回の意図の印を置けない: {err}"}
     ok, why = port.merge(pr, approval.head, merge["commit"], admin)
     if ok and admin:
         return _admin_recorded(port, pr, approval, out)
     return {**out, "result": "merged" if ok else "stopped", "reason": why}
-
-
-def _merged_by_viewer(port: Port, pull: dict) -> bool:
-    """マージした人が land を打った利用者と同じか（NDF が迂回でマージした事実）。どちらかを読めなければ False（人のマージとして記録する）。"""
-    by = pull.get("merged_by")
-    return bool(by) and by == port.viewer()
 
 
 def _admin_recorded(port: Port, pr: int, approval: Approval, out: dict) -> dict:
@@ -302,14 +302,9 @@ class GhPort:
         }
         row["title"] = d.get("title") or ""
         row["head_ref"] = str((d.get("head") or {}).get("ref") or "") or None
-        row["merged_by"] = str((d.get("merged_by") or {}).get("login") or "") or None
         if not row["merged"]:
             row.update(self._bump_facts(number, head, base))
         return row
-
-    def viewer(self) -> str | None:
-        d = self._rest("user")
-        return str(d.get("login") or "") or None if isinstance(d, dict) else None
 
     def production(self, branch: str) -> dict:
         self._fetch(f"+refs/heads/{branch}:refs/remotes/origin/{branch}")
@@ -405,18 +400,31 @@ class GhPort:
         return any(HUMAN_MARK in str(c.get("body") or "") for c in trail.read_comments(self.repo, number))
 
     def admin_record(self, number: int, sha: str, trail_url: str) -> str | None:
+        return _trail_error(lambda t: t.write_admin_record(self.repo, number, sha, trail_url))
+
+    def admin_intent(self, number: int, sha: str) -> str | None:
+        return _trail_error(lambda t: t.write_admin_intent(self.repo, number, sha))
+
+    def has_admin_intent(self, number: int, sha: str) -> bool:
         from release_lib import approval_trail as trail
 
-        try:
-            trail.write_admin_record(self.repo, number, sha, trail_url)
-        except (trail.TrailError, ValueError) as e:
-            return str(e)[:200]
-        return None
+        return trail.has_admin_intent(self.repo, number, sha)  # 読めなければ TrailError（land_pr が止める）
 
     def checks_failing(self, sha: str, pull: dict | None = None) -> str | None:
         from release_lib import land_checks
 
         return land_checks.checks_failing(self, sha, pull)
+
+
+def _trail_error(write) -> str | None:
+    """`approval_trail` への書き込み `write(trail)` を打ち、書けなければ理由の文を返す。"""
+    from release_lib import approval_trail as trail
+
+    try:
+        write(trail)
+    except (trail.TrailError, ValueError) as e:
+        return str(e)[:200]
+    return None
 
 
 def admin_direct(strategy) -> bool:

@@ -8,7 +8,9 @@
 - GitHub の読み書き（`read_*`・`open_prs_at`・`post_status`・`write_trail`・`write_admin_record`）は `gh` を通す。失敗は `TrailError`
 
 迂回の記録（#3506）は本番の PR を管理者の迂回でマージしたことを示すコメントで、印 `ADMIN_MARK` を持つ。
-証跡の印を持たないため、証跡の判定にも `release-approval.yml` の起動の条件にも数えない。
+意図の印（`INTENT_MARK`）は land が迂回でマージする直前に置き、マージ済みの PR を迂回の記録で補ってよいかを決める
+（印の無いマージは人のマージとして記録する）。どちらも証跡の印を持たないため、証跡の判定にも
+`release-approval.yml` の起動の条件にも数えない。
 
 証跡の書式の印と行の名前はこのモジュールだけが持つ。手順書は書式を写さず、ここを指す。
 """
@@ -36,6 +38,8 @@ BY_LINE = "担い手:"
 ADMIN_MARK = "<!-- ndf:admin-merge -->"
 ADMIN_SHA_LINE = "マージした先端:"
 ADMIN_TRAIL_LINE = "照らした承認の証跡:"
+INTENT_MARK = "<!-- ndf:admin-intent -->"
+INTENT_SHA_LINE = "迂回でマージする先端:"
 _SHA40 = re.compile(r"(?<![0-9a-fA-F])[0-9a-fA-F]{40}(?![0-9a-fA-F])")
 
 
@@ -189,6 +193,11 @@ def render_admin_record(sha: str, trail_url: str) -> str:
     )
 
 
+def render_admin_intent(sha: str) -> str:
+    """迂回でマージする意図の印の本文。証跡の印を持たない（証跡の判定に数えない）。"""
+    return f"{INTENT_MARK}\n{INTENT_SHA_LINE} `{ac.parse_sha(sha)}`\n宣言: `.ndf/project.json` の `branch_strategy.merge.admin`\n"
+
+
 def render_request(material: str, head: str) -> str:
     """承認資料のコメントの本文（承認資料の印・先端の行・承認資料の本文）。証跡に数えない。"""
     return f"{REQUEST_MARK}\n{HEAD_LINE} `{head}`\n\n{material.rstrip()}\n"
@@ -312,25 +321,46 @@ def write_trail(repo: str, pr: int, sha: str, by: str) -> tuple[bool, str]:
     return True, (a.value or {}).get("url") or ""
 
 
-def write_admin_record(repo: str, pr: int, sha: str, trail_url: str) -> tuple[bool, str]:
-    """迂回の記録を置く。同じ先端の記録が既にあれば置かない（#3506 の I7）。(置いたか, コメントの URL)。
-
-    既にある記録に数えるのは、書き込みの権限（admin・write）を持つ人が書き、作成の後に編集されていないものだけ
-    （コメントできる誰かが印と SHA の入ったコメントを先に置いても、本物の記録を止められない）。"""
-    sha = ac.parse_sha(sha)
+def _trusted_mark(repo: str, pr: int, mark: str, label: str, sha: str) -> dict | None:
+    """印 `mark` と `label` の行に `sha` を持つコメントのうち、書き込みの権限（admin・write）を持つ人が書き、作成の後に
+    編集されていないもの（コメントできる誰かが印と SHA の入ったコメントを置いても数えない）。無ければ None。"""
     found = []
     for c in read_comments(repo, pr):
         body = str(c.get("body") or "") if isinstance(c, dict) else ""
-        if ADMIN_MARK in body and sha in [x.lower() for x in _line_shas(body, ADMIN_SHA_LINE)]:
+        if mark in body and sha in [x.lower() for x in _line_shas(body, label)]:
             found.append(c)
     perms = read_permissions(repo, [_author(c) for c in found]) if found else {}
     for c in found:
         if perms.get(_author(c)) in REVIEWER_PERMISSIONS and str(c.get("updated_at") or "") == str(c.get("created_at") or ""):
-            return False, str(c.get("html_url") or "")
+            return c
+    return None
+
+
+def write_admin_record(repo: str, pr: int, sha: str, trail_url: str) -> tuple[bool, str]:
+    """迂回の記録を置く。同じ先端の記録が既にあれば置かない（#3506 の I7。数える記録は `_trusted_mark`）。(置いたか, コメントの URL)。"""
+    sha = ac.parse_sha(sha)
+    got = _trusted_mark(repo, pr, ADMIN_MARK, ADMIN_SHA_LINE, sha)
+    if got is not None:
+        return False, str(got.get("html_url") or "")
     a = gh_rest.comment(repo, pr, render_admin_record(sha, trail_url))
     if not a.ok:
         raise TrailError("unreadable", f"迂回の記録を置けない: {a.error[:200]}")
     return True, (a.value or {}).get("url") or ""
+
+
+def has_admin_intent(repo: str, pr: int, sha: str) -> bool:
+    """先端 `sha` を迂回でマージする意図の印があるか（数える印は `_trusted_mark`）。"""
+    return _trusted_mark(repo, pr, INTENT_MARK, INTENT_SHA_LINE, ac.parse_sha(sha)) is not None
+
+
+def write_admin_intent(repo: str, pr: int, sha: str) -> bool:
+    """迂回でマージする意図の印を置く。同じ先端の印が既にあれば置かない。(置いたか)。置けなければ TrailError。"""
+    if has_admin_intent(repo, pr, sha):
+        return False
+    a = gh_rest.comment(repo, pr, render_admin_intent(sha))
+    if not a.ok:
+        raise TrailError("unreadable", f"迂回の意図の印を置けない: {a.error[:200]}")
+    return True
 
 
 # 証跡の書き手（#3672 の I12）。ケースごとに 1 つだけで、ほかの部品は同じ証跡を書かない

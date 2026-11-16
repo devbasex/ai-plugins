@@ -883,6 +883,8 @@ class FakePort:
         self.ref_ok = True
         self.failing = None
         self.record_error = None
+        self.intent_error = None
+        self.intents: set = set()  # 意図の印を置いた head
         self.pulls = 0
 
     def checks_failing(self, sha, pull=None):
@@ -892,9 +894,6 @@ class FakePort:
     def pull(self, n):
         self.pulls += 1
         return self._pull
-
-    def viewer(self):
-        return "lander"
 
     def production(self, b):
         return self._prod
@@ -938,6 +937,15 @@ class FakePort:
     def admin_record(self, n, sha, trail_url):
         self.calls.append(("admin_record", sha, trail_url))
         return self.record_error
+
+    def admin_intent(self, n, sha):
+        self.calls.append(("intent", sha))
+        if self.intent_error is None:
+            self.intents.add(sha)
+        return self.intent_error
+
+    def has_admin_intent(self, n, sha):
+        return sha in self.intents
 
 
 H1, H2 = "1" * 40, "2" * 40
@@ -1034,7 +1042,7 @@ def test_fast_forward_records_the_approval_trail():
 
 
 def test_land_admin_bypass_checks_and_records():
-    """管理者の迂回は承認した head の検査を確かめてからマージし、head と証跡の URL を記録する。記録だけ落ちたら打ち直しで補う。"""
+    """管理者の迂回は承認した head の検査を確かめ、意図の印を置いてからマージし、head と証跡の URL を記録する。"""
     admin = section("web-develop")
     admin["merge"]["admin"] = True
     rules, url = facts(approvals=1, bypass="pull_requests_only"), "https://github.com/o/r/pull/5#issuecomment-1"
@@ -1042,20 +1050,49 @@ def test_land_admin_bypass_checks_and_records():
     port.failing = "pytest=pending"
     out = land.land_approved(port, bs.Strategy(admin), 5, land.Approval(H1, url=url))
     assert out["result"] == "stopped" and port.calls == [("checks", H1)]
-    port.failing, port.record_error = None, "unreadable"
+    port.failing = None
+    port.calls = []
+    out = land.land_approved(port, bs.Strategy(admin), 5, land.Approval(H1, url=url))
+    # (c) 迂回のマージの前に、承認した head の意図の印を置く
+    assert out["result"] == "merged"
+    assert port.calls == [("checks", H1), ("intent", H1), ("merge", H1, "merge", True), ("admin_record", H1, url)]
+    port.record_error = "unreadable"
     port.calls = []
     out = land.land_approved(port, bs.Strategy(admin), 5, land.Approval(H1, url=url))
     assert out["result"] == "stopped" and "打ち直すと記録を補う" in out["reason"]
-    assert port.calls == [("checks", H1), ("merge", H1, "merge", True), ("admin_record", H1, url)]
-    # 打ち直し: land を打った利用者がマージ済みなら人のマージと記録せず、迂回の記録を補う
-    merged = FakePort({"head": H1, "base": "main", "merged": True, "merged_by": "lander"}, rules)
+
+
+def test_land_admin_stops_when_intent_cannot_be_placed():
+    """(d) 意図の印を置けなければ迂回のマージへ進まない（記録の追えない迂回をしない）。"""
+    admin = section("web-develop")
+    admin["merge"]["admin"] = True
+    port = FakePort({"head": H1, "base": "main"}, facts(approvals=1, bypass="pull_requests_only"))
+    port.intent_error = "unreadable"
+    out = land.land_approved(port, bs.Strategy(admin), 5, land.Approval(H1, url="u"))
+    assert out["result"] == "stopped" and "意図の印" in out["reason"]
+    assert port.calls == [("checks", H1), ("intent", H1)]
+
+
+def test_land_admin_merged_records_by_intent():
+    """マージ済みの PR を迂回の記録で補うのは、承認した head と同じ head の意図の印があるときだけ。"""
+    admin = section("web-develop")
+    admin["merge"]["admin"] = True
+    rules, url = facts(approvals=1, bypass="pull_requests_only"), "https://github.com/o/r/pull/5#issuecomment-1"
+    # (a) 印あり＋マージ済み: 人のマージと記録せず、迂回の記録を補う
+    merged = FakePort({"head": H1, "base": "main", "merged": True}, rules)
+    merged.intents.add(H1)
     out = land.land_approved(merged, bs.Strategy(admin), 5, land.Approval(H1, url=url))
     assert out["result"] == "merged" and merged.calls == [("admin_record", H1, url)]
-    # 別の人が GitHub の画面でマージした PR・マージした人を読めない PR は、迂回でなく人のマージとして記録する
-    for by in ("someone", None):
-        other = FakePort({"head": H1, "base": "main", "merged": True, "merged_by": by}, rules)
+    # (b) 印なし（land が止まった後に同じ人が GitHub の画面でマージした PR）・別の head の印だけ: 人のマージとして記録する
+    for intents in (set(), {H2}):
+        other = FakePort({"head": H1, "base": "main", "merged": True}, rules)
+        other.intents = intents
         assert land.land_approved(other, bs.Strategy(admin), 5, land.Approval(H1, url=url))["result"] == "human"
         assert [c[0] for c in other.calls] == ["comment"] and land.HUMAN_MARK in other.calls[0][1]
+    # マージした head が承認した head と違えば、印があっても迂回の記録にしない
+    moved = FakePort({"head": H2, "base": "main", "merged": True}, rules)
+    moved.intents.add(H1)
+    assert land.land_approved(moved, bs.Strategy(admin), 5, land.Approval(H1, url=url))["result"] == "human"
 
 
 def test_land_stops_when_base_is_not_production():

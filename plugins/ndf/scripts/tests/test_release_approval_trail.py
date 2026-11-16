@@ -249,6 +249,41 @@ def test_write_admin_record_counts_only_records_by_writers(monkeypatch, perm, up
     assert len(posted) == int(wrote)
 
 
+@pytest.mark.parametrize(
+    "body, perm, updated, found",
+    [
+        (at.render_admin_intent(A), "admin", None, True),
+        (at.render_admin_intent(A), "read", None, False),
+        (at.render_admin_intent(A), "write", "2026-11-14T00:00:00Z", False),
+        (at.render_admin_intent("b" * 40), "admin", None, False),
+        (at.render_admin_record(A, "u"), "admin", None, False),
+    ],
+)
+def test_admin_intent_counts_only_marks_for_the_head_by_writers(monkeypatch, body, perm, updated, found):
+    """迂回の意図の印は、同じ head を持ち、書き込みの権限を持つ人が書いた編集されていないものだけ数える。同じ印があれば置き直さない。"""
+    posted = []
+
+    class Ok:
+        ok, error, value = True, "", {"url": "https://x/c/9"}
+
+    monkeypatch.setattr(at.gh_rest, "comment", lambda repo, n, b: posted.append(b) or Ok())
+    monkeypatch.setattr(at, "read_comments", lambda repo, pr: [comment(body, login="someone", updated=updated)])
+    monkeypatch.setattr(at, "read_permissions", lambda repo, logins: {"someone": perm})
+    assert at.has_admin_intent("o/r", 5, A) is found
+    assert at.write_admin_intent("o/r", 5, A) is (not found)
+    assert posted == ([] if found else [at.render_admin_intent(A)])
+
+
+def test_write_admin_intent_raises_when_it_cannot_post(monkeypatch):
+    class Ng:
+        ok, error, value = False, "HTTP 403", None
+
+    monkeypatch.setattr(at.gh_rest, "comment", lambda repo, n, b: Ng())
+    monkeypatch.setattr(at, "read_comments", lambda repo, pr: [])
+    with pytest.raises(at.TrailError):
+        at.write_admin_intent("o/r", 5, A)
+
+
 def _workflow(name):
     return (ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8")
 
