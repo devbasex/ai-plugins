@@ -2,7 +2,7 @@
 
 ## 目的
 
-- **今どうなっているか**: `ndf gws check`・`ndf gws thumbnails` と google-workspace の Skill の本文は develop にある。ただし、OAuth でログインした gws（`credential_source` が `client_secret.json`・`auth_method` が `oauth2`）を未認証と判定し、`ndf gws check` が終了コード 11 を返す。document-systems の Skill の `system-gdrive.md` は旧い `slides-thumbnails.py` を呼び、試走の判定は機能の対応表の 3 行を `not_run`・`failed`・`failed` にしている
+- **今どうなっているか**: `ndf gws check`・`ndf gws thumbnails` と google-workspace の Skill の本文は develop にある。ただし、OAuth でログインした gws を未認証と判定し、`ndf gws check` が終了コード 11 を返す。ログインした gws の応答は、`credential_source` が `client_secret.json`・`auth_method` が `oauth2` である。document-systems の Skill の `system-gdrive.md` は旧い `slides-thumbnails.py` を呼ぶ。試走の判定は、機能の対応表の 3 行を `not_run`・`failed`・`failed` にしている
 - **誰に効くか**: ndf-next で Google Drive・Google スライドを扱う利用者と、入れ替え S2 #3304 の前に試走の判定を見る開発者
 - **変えると何が成り立つか**: ログイン済みの利用者が要らない `gws auth login` を頼まれない。ndf-next の本文が旧いスクリプトを 1 つも呼ばず、試走の判定が 3 行を `passed` にする
 
@@ -36,7 +36,7 @@
 | 試走の判定のコマンド（`scripts/ndf-next-parity/parity/trial/probe.py` の冒頭の説明と `judge_row`） | 実測（コードの読み取りと要求の再現） | `failed` は本文の `.py` 付きの旧いスクリプトの呼び出しで決まり、`passed` は試走の記録の `passed` で決まる |
 | 「試走 T2 の記録が失敗・未実施とした 3 行を通る形にする」（2026-11-16、設計承認ゲートの変更要求） | 利用者の指示の原文 | 3 行を `passed` にすることが完了の形である |
 
-要求と受け入れ条件は #3547 の本文にある（コピーは [issue-3547-requirements.md](issue-3547-requirements.md) ）。この文書は「どう作るか」だけを扱う。2 つのサブコマンドの作りは確定仕様 [ndf-next-gws-subcommands.md](../docs/specifications/ndf-next-gws-subcommands.md) にあり、この文書では変える所だけを書く。
+要求と受け入れ条件は #3547 の本文にある（コピーは [issue-3547-requirements.md](issue-3547-requirements.md) ）。この文書は「どう作るか」だけを扱う。2 つのサブコマンドの作りは確定仕様 [ndf-next-gws-subcommands.md](../docs/specifications/ndf-next-gws-subcommands.md) にある。この文書では変える所だけを書く。
 
 ## ドメインモデル
 
@@ -209,7 +209,7 @@ sequenceDiagram
 
 `ok` 以外が返ったら、その行を記録の `passed` に載せず、原因を直してから打ち直す（要求の E12・E13 の失敗の扱い）。
 
-Pull Request を出した後に develop が進み、試走の記録か機能の対応表が衝突したら、記録は両方の追記を残して合わせ、機能の対応表は手で合わせずに `--write` を打ち直した結果を採る。
+Pull Request を出した後に develop が進み、試走の記録か機能の対応表が衝突したら、記録は両方の追記を残して合わせる。機能の対応表は手で合わせず、`--write` を打ち直した結果を採る。
 
 ## 非機能の実現方式
 
@@ -223,7 +223,14 @@ Pull Request を出した後に develop が進み、試走の記録か機能の�
 
 ### 決定 1: ログイン済みの gws を認証済みにするため、`client_secret.json` の形を `auth_method` で分ける
 
-未認証は、`credential_source` が `none` の形と、`credential_source` が `client_secret.json` で `auth_method` が `none` の形の 2 つだけにし、それ以外は認証済みにする（I1。要求の前提 7）。gws の実装では、ログインの有無は `auth_method` が持ち、`credential_source` は OAuth クライアントの設定の出所を表す（PRD1）。このため `client_secret.json` の応答だけではログインの有無が決まらず、`auth_method` で分ける。読むキーは今の 3 つのままで、結果の形も変わらない。
+未認証は次の 2 つの形だけにし、それ以外は認証済みにする（I1。要求の前提 7）。
+
+| `credential_source` | `auth_method` |
+| --- | --- |
+| `none` | （問わない） |
+| `client_secret.json` | `none` |
+
+gws の実装では、ログインの有無は `auth_method` が持ち、`credential_source` は OAuth クライアントの設定の出所を表す（PRD1）。このため `client_secret.json` の応答だけではログインの有無が決まらず、`auth_method` で分ける。読むキーは今の 3 つのままで、結果の形も変わらない。
 
 `has_refresh_token`・`token_valid` を読む形は採らない。資格情報を復号して得る値で、読むキーを 3 つに限る非機能の条件（I4）から外れる。`auth_method` が `none` なら `credential_source` に依らず未認証とする形も採らない。要求の前提 7 は、`credential_source` が `environment_variables` の形を認証済みと決めており、それと食い違う。
 
@@ -234,7 +241,7 @@ Pull Request を出した後に develop が進み、試走の記録か機能の�
 
 ### 決定 2: ほかの行の記録の指し先を動かさないため、試走の記録は最新の記録へ追記する
 
-受け入れ条件 20 の 2 つの実行と 3 行の id は、新しい日付のファイルを作らず、`trial/` の最新の記録（2026-11-16 の時点で `trial/2026-11-16.json`）の `runs` と `passed` へ追記する（要求の未決 1）。試走の判定のコマンドは、どの記録にも載らない行の `record` を最新の記録へ向ける。新しいファイルを作ると、試走のスプリントが届かなかった `not_run` の 90 行（2026-11-16 の機能の対応表の `not_run` の 91 行から、この課題の 1 行を除いた数）の `record` が、2 つのサブコマンドだけを打った記録へ移る。その記録の `runs` には、それらの行で試走が止まった所が無い。
+受け入れ条件 20 の 2 つの実行と 3 行の id は、新しい日付のファイルを作らずに追記する（要求の未決 1）。追記先は `trial/` の最新の記録の `runs` と `passed` で、2026-11-16 の時点では `trial/2026-11-16.json` である。試走の判定のコマンドは、どの記録にも載らない行の `record` を最新の記録へ向ける。新しいファイルを作ると、試走のスプリントが届かなかった `not_run` の 90 行の `record` が、2 つのサブコマンドだけを打った記録へ移る。90 行は、2026-11-16 の機能の対応表の `not_run` の 91 行から、この課題の 1 行を除いた数である。その記録の `runs` には、それらの行で試走が止まった所が無い。
 
 追記は既存の要素を書き換えない（I7）。追記する実行には、打った日付と、ndf-next の何を打ったかを書く。新しいファイルにする形は、上の指し先の移動があるため採らない。
 
@@ -242,13 +249,13 @@ Pull Request を出した後に develop が進み、試走の記録か機能の�
 
 ### 決定 3: 描画の手段の SSOT を 1 か所にするため、system-gdrive.md はサブコマンドの名前と google-workspace の対応表を指す
 
-`system-gdrive.md` の Google スライドの行は、`google-workspace` の `ndf gws thumbnails <ID> <出力のディレクトリ>` が全ページを `p<番号>.png` で保存すると書き、大きさの値と終了コードの扱いは google-workspace の Skill の操作の対応表を指す。コマンドは google-workspace の Skill の本文と同じく、パスを付けない `ndf` で書く（Skill の本文は利用先のリポジトリでも読まれ、`plugins/ndf-next/bin/` はこのリポジトリだけのパスである）。引数の細部は google-workspace の Skill の本文が持ち、2 か所に写さない。サムネイルの大きさ・終了コード 11 の扱いまで `system-gdrive.md` に写す形は、同じ事実を 2 か所に持つため採らない。
+`system-gdrive.md` の Google スライドの行には、次のことを書く。`google-workspace` の `ndf gws thumbnails <ID> <出力のディレクトリ>` は、全ページを `p<番号>.png` で保存する。大きさの値と終了コードの扱いは、google-workspace の Skill の操作の対応表を指す。コマンドは google-workspace の Skill の本文と同じく、パスを付けない `ndf` で書く。Skill の本文は利用先のリポジトリでも読まれ、`plugins/ndf-next/bin/` はこのリポジトリだけのパスだからである。引数の細部は google-workspace の Skill の本文が持ち、2 か所に写さない。サムネイルの大きさ・終了コード 11 の扱いまで `system-gdrive.md` に写す形は、同じ事実を 2 か所に持つため採らない。
 
 根拠: Value 11（MVV 版 8）
 
 ### 決定 4: 試走の判定の手がかりと今の NDF の例外を保つため、機能の対応表の `now`・`to` と旧い許可ファイルを残す
 
-機能の対応表の 2 行の `now`（旧いスクリプトのパス）は、試走の判定のコマンドが ndf-next の本文の旧い呼び出しを探す手がかりで、`to`（`S1d`）は移行先の子を表す。`passed` は `now`・`to` に依らず記録と本文で決まり、前例の `entrypoint:scripts/project-decl.py` も `now`・`to` を変えずに `passed` になっている。旧い許可ファイルは今の `plugins/ndf/` の gws-check.py の例外で、今の NDF を変えないこの課題では消すと `check-ndf-contracts.py` が違反を返す。消すのは今の NDF を外す #3304 である（要求の S12・S13）。
+機能の対応表の 2 行の `now`（旧いスクリプトのパス）は、試走の判定のコマンドが ndf-next の本文の旧い呼び出しを探す手がかりである。`to`（`S1d`）は移行先の子を表す。`passed` は `now`・`to` に依らず、記録と本文で決まる。前例の `entrypoint:scripts/project-decl.py` も、`now`・`to` を変えずに `passed` になっている。旧い許可ファイルは、今の `plugins/ndf/` の gws-check.py の例外である。今の NDF を変えないこの課題で消すと、`check-ndf-contracts.py` が違反を返す。消すのは今の NDF を外す #3304 である（要求の S12・S13）。
 
 `now` を新しいサブコマンドへ書き換える形は、試走の判定のコマンドが旧い呼び出しを探せなくなるため採らない。
 
@@ -256,9 +263,14 @@ Pull Request を出した後に develop が進み、試走の記録か機能の�
 
 ### 決定 5: 試走の結果が実行ごとにぶれないよう、試走は Claude の起動を通さず `plugins/ndf-next/bin/ndf` を直に打つ
 
-受け入れ条件 20 の (a)・(b) は、`plugins/ndf-next/bin/ndf gws check` と `plugins/ndf-next/bin/ndf gws thumbnails <プレゼンテーションの ID> <出力のディレクトリ>` をシェルから打つ。(b) は、`system-gdrive.md` に書いた `ndf gws thumbnails <ID> <出力のディレクトリ>`（決定 3）の先頭の `ndf` を、ndf-next のエントリポイント `plugins/ndf-next/bin/ndf` に置き換えて打つ。「手順のとおりに打つ」は、`ndf` の後のサブコマンドと引数の並びが本文の行と同じであることで確かめ、記録には本文の行と打ったコマンドを並べて書く。`bin/ndf` は ndf-next のパッケージだけを読むため、ndf-next だけから打った実行になる。記録には打ったコマンドと、今の `plugins/ndf/` の scripts を経由していないことの確かめ（`bin/ndf` の解決先）を書く。`plugins/ndf-next/bin/ndf-claude -p` で Skill に打たせる形は、確かめたいサブコマンドの振る舞いに言語モデルの判断が入り、費用も掛かるため採らない。
+受け入れ条件 20 の (a)・(b) は、次の 2 つをシェルから打つ。
 
-この形は、要求の受け入れ条件 20 (a) と E12 の「ndf-next だけを読む起動から」を「今の `plugins/ndf/` を読まない `bin/ndf` をシェルから打つ」と読む。前提 9 が document-systems の Skill の行を `passed` にしてよいとする「その 1 か所を ndf-next だけで通した記録」は、`system-gdrive.md` の行のサブコマンドと引数の並びをそのまま打った実行で満たす。document-systems の Skill の行で試走の判定のコマンドが見るのは本文の旧い呼び出しの有無で（`judge_row`）、言語モデルが本文を読んだかは判定に入らないためである。「ndf-next の Skill だけを読み込んだ Claude の起動」と読む形は、試走の費用と結果のぶれが増え、判定の結果は変わらないため採らない。
+- (a): `plugins/ndf-next/bin/ndf gws check`
+- (b): `plugins/ndf-next/bin/ndf gws thumbnails <プレゼンテーションの ID> <出力のディレクトリ>`
+
+(b) は、`system-gdrive.md` に書いた `ndf gws thumbnails <ID> <出力のディレクトリ>`（決定 3）の先頭の `ndf` を置き換えて打つ。置き換え先は ndf-next のエントリポイント `plugins/ndf-next/bin/ndf` である。「手順のとおりに打つ」は、`ndf` の後のサブコマンドと引数の並びが本文の行と同じであることで確かめ、記録には本文の行と打ったコマンドを並べて書く。`bin/ndf` は ndf-next のパッケージだけを読むため、ndf-next だけから打った実行になる。記録には打ったコマンドと、今の `plugins/ndf/` の scripts を経由していないことの確かめ（`bin/ndf` の解決先）を書く。`plugins/ndf-next/bin/ndf-claude -p` で Skill に打たせる形は採らない。確かめたいサブコマンドの振る舞いに言語モデルの判断が入り、費用も掛かるためである。
+
+この形は、要求の受け入れ条件 20 (a) と E12 の「ndf-next だけを読む起動から」を「今の `plugins/ndf/` を読まない `bin/ndf` をシェルから打つ」と読む。前提 9 は、「その 1 か所を ndf-next だけで通した記録」があれば document-systems の Skill の行を `passed` にしてよいとする。この記録は、`system-gdrive.md` の行のサブコマンドと引数の並びをそのまま打った実行で満たす。document-systems の Skill の行で試走の判定のコマンドが見るのは、本文の旧い呼び出しの有無である（`judge_row`）。言語モデルが本文を読んだかは判定に入らない。「ndf-next の Skill だけを読み込んだ Claude の起動」と読む形は、試走の費用と結果のぶれが増え、判定の結果は変わらないため採らない。
 
 根拠: Value 2 / Value 3（MVV 版 8）
 
@@ -281,7 +293,7 @@ Pull Request を出した後に develop が進み、試走の記録か機能の�
 | 受け入れ条件 22 | 確定仕様と `env.md` の判定の文が I1・I2 と同じ | レビューで見る（`.md` の文言を検証するテストは書かない） |
 | 受け入れ条件 23 | `python3 scripts/check-ndf-contracts.py` が `ok`・使われていない例外 0 件 | 旧い許可ファイルを消すと違反が出る |
 
-I3・受け入れ条件 17 は、`ndf check` の事実の重複の規則（`const-fact`）では縛らない。この規則が比べるのは最上位の大文字の定数だけで（`plugins/ndf-next/src/ndf/checks/README.md` の 87 行目）、関数の中の条件式の書き写しは対象の外である。代わりに次の 2 つの検索で縛る。2026-11-16 の develop の上の結果:
+I3・受け入れ条件 17 は、`ndf check` の事実の重複の規則（`const-fact`）では縛らない。この規則が比べるのは最上位の大文字の定数だけである（`plugins/ndf-next/src/ndf/checks/README.md` の 87 行目）。関数の中の条件式の書き写しは対象の外である。代わりに次の 2 つの検索で縛る。2026-11-16 の develop の上の結果:
 
 ```console
 $ grep -rn "credential_source\|auth_method" plugins/ndf-next/src --include=*.py | grep -v "records/gws.py"
@@ -293,7 +305,7 @@ plugins/ndf-next/src/ndf/domains/records/gws.py:61:def authenticated(status: Map
 plugins/ndf-next/src/ndf/domains/records/cli.py:190:    if not gws.authenticated(status):
 ```
 
-受け入れ条件 13 の `env.md` の生成と検出は、2026-11-16 に、`env.json` の `GOOGLE_WORKSPACE_CLI_TOKEN` の行の `meaning` を仮に書き換えて確かめた（確かめた後に 2 つのファイルを戻した）:
+受け入れ条件 13 の `env.md` の生成と検出は、2026-11-16 に確かめた。`env.json` の `GOOGLE_WORKSPACE_CLI_TOKEN` の行の `meaning` を仮に書き換えて打ち、確かめた後に 2 つのファイルを戻した:
 
 | 打ったコマンド | 終了コード | 出力の要点 |
 | --- | --- | --- |
@@ -302,7 +314,16 @@ plugins/ndf-next/src/ndf/domains/records/cli.py:190:    if not gws.authenticated
 | `plugins/ndf-next/bin/ndf check --write-spec` | 0 | `"written": 1`。`git diff --stat` で `env.md` の 1 行が変わった |
 | `plugins/ndf-next/bin/ndf check --base origin/develop`（生成し直した後） | 0 | `"status": "ok"` |
 
-済んだ受け入れ条件（3〜9・11・12・14）は、develop のテストと生成物をそのまま使い、新しいテストを足さない。2026-11-16 に次で確かめた: Skill の本文の旧い参照の `grep -cE` が 0、`commands.md` の 73〜80 行目に `## ndf gws` と 2 つのサブコマンドの行、`git diff --stat origin/develop -- plugins/ndf/` が空、`check-ndf-contracts.py` が `violations: 0`・`allowed: 256`。テストの名前と PR #3577 の CI の結果は要求の受け入れ条件の根拠の欄にある（このリポジトリは手元でテストを走らせず CI で走らせる）。
+済んだ受け入れ条件（3〜9・11・12・14）は、develop のテストと生成物をそのまま使い、新しいテストを足さない。2026-11-16 に次で確かめた:
+
+| 確かめたこと | 結果 |
+| --- | --- |
+| Skill の本文の旧い参照の `grep -cE` | 0 |
+| `commands.md` の 73〜80 行目 | `## ndf gws` と 2 つのサブコマンドの行がある |
+| `git diff --stat origin/develop -- plugins/ndf/` | 空 |
+| `check-ndf-contracts.py` | `violations: 0`・`allowed: 256` |
+
+テストの名前と PR #3577 の CI の結果は、要求の受け入れ条件の根拠の欄にある（このリポジトリは手元でテストを走らせず CI で走らせる）。
 
 ## 設計の結果
 
@@ -312,7 +333,7 @@ plugins/ndf-next/src/ndf/domains/records/cli.py:190:    if not gws.authenticated
 
 ## 人へ残す判断
 
-無し。この変更は秘密・認証と認可・利用者のデータ・戻せない操作・他のリポジトリへの公開・利用者の設定のいずれにも当たらず（C1〜C8・P1・P2）、試走の実行の形は決定 5 で決めた。
+無し。この変更は秘密・認証と認可・利用者のデータ・戻せない操作・他のリポジトリへの公開・利用者の設定のいずれにも当たらない（C1〜C8・P1・P2）。試走の実行の形は決定 5 で決めた。
 
 ## 未確認のまま残ること
 

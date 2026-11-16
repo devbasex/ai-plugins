@@ -23,8 +23,8 @@ scripts/ndf-next-parity/parity/
 └── features.json                                   変更（trial の列を生成し直す）
 ```
 
-依存の向きは一方向で、循環は無い。`ndf gws check`・`ndf gws thumbnails`・`ndf records gws-check` が記録の gws の部品の
-`authenticated` を呼び、`authenticated` が `decide` を呼ぶ。`decide` はほかの部品を読まない。`env.md` は `env.json` から
+依存の向きは一方向で、循環は無い。`ndf gws check`・`ndf gws thumbnails`・`ndf records gws-check` は、記録の gws の部品の
+`authenticated` を呼ぶ。`authenticated` は `decide` を呼ぶ。`decide` はほかの部品を読まない。`env.md` は `env.json` から
 `ndf check --write-spec` が作り、機能の対応表の `trial` の列は試走の記録と ndf-next の本文から試走の判定のコマンドが作る。
 `system-gdrive.md` はサブコマンドの名前と google-workspace の Skill の操作の対応表を指すだけで、逆向きの参照は無い。
 
