@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf-next/contracts/causes.json",
+  "name": "plugin-manifest",
+  "kind": "not-a-violation",
+  "reason": "止まった理由の説明。プラグイン自身の定義（plugin.json）を読めないときの文で、利用先の値でない",
+  "count": 1
+}

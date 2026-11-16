@@ -91,6 +91,7 @@
 | [md.py](md.py) | Markdown の構造の読み取り（囲み・見出し・節・表・地の文・リンクとアンカー）。markdown-it-py を呼ぶのはここだけ。書き込みは読み取った行の区間で呼び出し側が行う | `cross-refactoring`（`refactor_lib/vocabulary.py`）・`relay_lib/mark.py`。ほかは D1〜D8 が呼び出し側を置き換える |
 | [mdtable.py](mdtable.py) | Markdown の表の組み立て（列の幅を揃えない行・セルの縦棒のエスケープ・数の列の右寄せ）。tabulate を呼ぶのはここだけ | `cross-refactoring`（`refactor_lib/plan.py`・`commands/report.py`）。ほかは D1〜D8 が呼び出し側を置き換える |
 | [glossary_banned.py](glossary_banned.py) | 禁止語の宣言（`.ndf/glossary.json` の `check.banned`）の形の確かめと、検査する範囲・行の照合。特定のプロジェクトの語を持たない。標準ライブラリと `pathmatch` だけ | `glossary.py check` |
+| [design_repos.py](design_repos.py) | 代表のリポジトリの設定（`.ndf/design.json`）の読み取りと形の確かめ（`design.schema.json` の正本の型）、頭の設計文書の「適用範囲」の振る舞いの表と人へ残す判断を結ぶ 2 規則（`repo_scope_missing`・`repo_loss_unrouted`。#3618）。先頭は標準ライブラリだけで、`md`・`schema`・`pathmatch` は使う関数の中で読む | `design-survey.py` |
 | [legacy_values.py](legacy_values.py) | 旧い値の読み替え。`scripts/data/legacy-values.json` を読み、記録の値を読む時点で新しい値へ変換する（`to_current`・`normalize_laps`）。標準ライブラリだけ | 記録を読むスクリプト |
 | [glossary_merge.py](glossary_merge.py) | 用語集の 3 方向の取り込み（祖先・自分・相手を語は `(context, term)`、コンテキストは `id` で突き合わせ、片側だけの変更を採り、両側の食い違いを語の衝突として返す）と、`git ls-files -u -z` の段の読み取り。ファイルも git も触らない。標準ライブラリだけ | `glossary.py merge` |
 | [merged_range.py](merged_range.py) | 範囲の first-parent のログから、merge commit と squash merge（件名の末尾 `(#N)`）でベースブランチへ入った PR を拾う。squash の head のブランチは GitHub から 100 件ずつ読む。どの PR を外すかは持たない（呼び手が決める） | `check-trigger.py`・`release_lib/included.py` |

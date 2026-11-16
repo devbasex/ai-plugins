@@ -31,6 +31,17 @@
               "type": "string"
             },
             "description": "full の起動で claude に足す引数の並び"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "notice"
+            ],
+            "description": "知らせの行の種類。導入済みのプラグインの一覧を読めなかったときだけ、引数の行の後ろに 1 件載る"
+          },
+          "reason": {
+            "type": "string",
+            "description": "知らせの理由の 1 文"
           }
         }
       }

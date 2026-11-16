@@ -1,7 +1,5 @@
 # 並列の計画のマシン全体の本数と課題の見込みの重なり
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `parallel.py`（P3）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
-
 [parallel.md](parallel.md) の続き。マシン全体のプランの本数（起動の待ち。理由 `machine-plans`）と、`parallel.py check` が出す
 課題の見込みの重なり（`I21`・`bundle-overlap`）の決まりを置く。
 

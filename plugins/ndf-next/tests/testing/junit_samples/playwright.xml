@@ -1,0 +1,19 @@
+<testsuites id="" name="" tests="3" failures="1" skipped="1" errors="0" time="0.412046">
+<testsuite name="login.spec.ts" timestamp="2026-11-15T18:04:28.066Z" hostname="" tests="3" failures="1" skipped="1" time="0.008" errors="0">
+<testcase name="login › shows form" classname="login.spec.ts" time="0.005">
+</testcase>
+<testcase name="login › rejects bad password" classname="login.spec.ts" time="0.003">
+<failure message="expect(received).toBe(expected) // Object.is equality" type="expect.toBe">
+<![CDATA[  login.spec.ts:4:3 › login › rejects bad password]]>
+</failure>
+</testcase>
+<testcase name="login › remembers me" classname="login.spec.ts">
+<properties>
+<property name="skip" value="">
+</property>
+</properties>
+<skipped>
+</skipped>
+</testcase>
+</testsuite>
+</testsuites>

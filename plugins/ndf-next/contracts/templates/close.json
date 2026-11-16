@@ -2,7 +2,7 @@
   "template": "close",
   "purpose": "close",
   "summary": "閉じ: 確定仕様化 → worker を打つ前の HEAD から変更が無ければ PR を作らずに終える → push → PR → CI → マージ",
-  "params": ["repo", "worktree", "branch", "base", "title", "body_file", "worker", "ci_budget", "required", "tests", "merge_method"],
+  "params": ["repo", "worktree", "branch", "remote", "base", "title", "body_file", "worker", "ci_budget", "required", "tests", "merge_method"],
   "plan": {
     "name": "close-{{branch}}",
     "repo": "{{repo}}",

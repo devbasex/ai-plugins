@@ -1,4 +1,4 @@
-"""GitHub のアダプターのテスト（`test_github.py`・`test_publish.py`・`test_issue_reproductions.py`）が共有する、
+"""GitHub のアダプターのテスト（`test_github.py`・`test_github_actions.py`・`test_publish.py`・`test_issue_reproductions.py`）が共有する、
 ネットワークへ出ないクライアントと PR の生の辞書の作り方。GraphQL の PR の節点も持つ。"""
 # `offline_client` は `test_ci_cli.py` の `_serve` とレート制限の応答も使う。
 
@@ -12,6 +12,22 @@ from githubkit import GitHub as Client
 from ndf.adapters import github
 
 Handler = Callable[[httpx.Request], httpx.Response]
+
+
+class RouteServer:
+    """要求を記録し、(メソッド, パス) ごとに応答を順に返す（最後の 1 つは繰り返す）。"""
+
+    def __init__(self, routes: dict[tuple[str, str], list[httpx.Response]]) -> None:
+        self.routes = routes
+        self.seen: list[httpx.Request] = []
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        self.seen.append(request)
+        queue = self.routes[(request.method, request.url.path)]
+        return queue.pop(0) if len(queue) > 1 else queue[0]
+
+    def sent(self, method: str) -> list[httpx.Request]:
+        return [r for r in self.seen if r.method == method]
 
 
 def offline_client(handler: Handler) -> Client:

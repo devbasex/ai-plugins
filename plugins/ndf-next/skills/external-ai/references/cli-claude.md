@@ -1,7 +1,5 @@
 # Claude CLI 固有の手順（ヘッドレス実行）
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `external-ai.py`（AD3+）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
-
 [← SKILL.md](../SKILL.md)
 
 claude 2.1.233 の実機で確認した内容である。ホストが Claude Code のときでも、

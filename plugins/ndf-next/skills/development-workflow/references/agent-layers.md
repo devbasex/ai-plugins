@@ -1,7 +1,5 @@
 # 3 層で工程を通す（conductor / supervisor / worker）
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `projects-sync.sh`（M7）・`stage-skills.py`（C5）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
-
 **工程を 3 層へ出し、2 つの承認ゲート以外を人間の入力なしで通す。** 人間と対話しているセッション
 （conductor）がフェーズごとにプラン（`ndf plan`）をキューで流し、プランが 1 つの作業を worker
 （毎回新しい `claude -p`）へ出す。**supervisor の役割は `ndf plan` が主に担い、`ndf plan` で対応できないとき

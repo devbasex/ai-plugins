@@ -20,7 +20,7 @@
         雛形を選んで埋め、プランのファイルを書く。`--add` は並びの名前へ値を 1 つ足す。`repo` を省けば打った場所の
         git の根、`worktree` を省けば根の `.worktrees/<branch>` にする（サブモジュールでもそのworktreeの根。#2054）。
         省いた作業場所が使えなければ書かずに止まる。`base` を省けば根の `.ndf/worktree.json` の `base_branch`、
-        宣言が無ければ `origin` の既定ブランチにする。`merge_method` を省けば `base` のブランチで許された方式
+        宣言が無ければリモート名（`.ndf/worktree.json` の `remote`）のリモートの既定ブランチにする。`merge_method` を省けば `base` のブランチで許された方式
         （ruleset とリポジトリの設定）の先頭にし、読めなければ無い差し込みとして止まる。`repo` の宣言
         （`.ndf/project.json`）がテストを CI に寄せる（`test.ci.only`）なら、手元のテストのステップを外す
     ndf route run <依頼の種類> --out <plan.json> [--set ...] [--add ...]
@@ -54,7 +54,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional, Union
 
-from ndf import cli, contracts, identity
+from ndf import cli, contracts
 from ndf.adapters import git, github
 from ndf.contracts import causes, exit_codes, limits, result
 from ndf.contracts.exit_codes import OK
@@ -81,7 +81,7 @@ REPEAT_LIMIT = "supervise.step-rerun"
 # 作業場所を省いたときの置き場（リポジトリの根の下）
 WORKTREES = ".worktrees"
 # base を省いたときに読むブランチの運用の宣言（リポジトリの根の下）と、その鍵
-BRANCH_DECLARATION = identity.FIXED_WORDS["declaration_dir"] + "/worktree.json"
+BRANCH_DECLARATION = git.WORKTREE_DECLARATION
 BASE_KEY = "base_branch"
 _PARAM = re.compile(r"\{\{([a-z_][a-z0-9_]*)\}\}")
 
@@ -370,7 +370,7 @@ def cause_key(found: Mapping[str, Any]) -> Optional[str]:
     kind = causes.kind_of(found.get("cause"))
     if found.get("status") != exit_codes.STOPPED or kind is None:
         return None
-    return json.dumps([kind, sorted(local_tests.failed_tests_of(found))], ensure_ascii=False)
+    return json.dumps([kind, sorted(local_tests.failed_tests_in(found))], ensure_ascii=False)
 
 
 def streak(history: Sequence[str], key: str) -> int:
@@ -396,8 +396,11 @@ def repo_root(cwd: Path) -> str:
     return git.Git(cwd).run("rev-parse", "--show-toplevel").strip()
 
 
-def default_base(repo: Path) -> Optional[str]:
-    """宛先のブランチの既定: ブランチの運用の宣言の `base_branch`、無ければ `origin` の既定ブランチ（決まらなければ None）。"""
+def default_base(repo: Path, remote: Optional[str] = None) -> Optional[str]:
+    """宛先のブランチの既定: ブランチの運用の宣言の `base_branch`、無ければリモートの既定ブランチ（決まらなければ None）。
+
+    `remote` は既定ブランチを読むリモート名（`--set remote=` で渡した値）。省けばこの作業場所のリモート名。
+    """
     try:
         declared = json.loads((repo / BRANCH_DECLARATION).read_text(encoding="utf-8")).get(BASE_KEY)
     except (OSError, ValueError, AttributeError):
@@ -405,21 +408,42 @@ def default_base(repo: Path) -> Optional[str]:
     if isinstance(declared, str) and declared:
         return declared
     try:
-        ref = git.Git(repo).run("symbolic-ref", "--short", "refs/remotes/origin/HEAD").strip()
-    except git.GitError:  # noqa: NDF401 外部コマンド: origin の既定ブランチを持たないリポジトリ
+        return git.Git(repo).remote_default_branch(remote)
+    except git.GitError:  # noqa: NDF401 外部コマンド: 宣言の remote が誤り
         return None
-    branch = ref.removeprefix("origin/")
-    return branch if branch else None
 
 
-def default_merge_method(repo: Path, base: str) -> Optional[str]:
-    """マージの方式の既定: 基底のブランチ `base` で許された方式の先頭（`github.pick_merge_method`）。読めなければ None。"""
+def default_merge_method(repo: Path, base: str, remote: Optional[str] = None) -> Optional[str]:
+    """マージの方式の既定: 基底のブランチ `base` で許された方式の先頭（`github.pick_merge_method`）。読めなければ None。
+
+    `remote` はリポジトリを読むリモート名（`--set remote=` で渡した値）。省けばこの作業場所のリモート名。
+    """
     try:
-        hub = github.GitHub(git.Git(repo).remote_repo(), github.client())
+        hub = github.GitHub(git.Git(repo).remote_repo(remote), github.client())
         allowed = hub.allowed_merge_methods(base)
     except (git.GitError, github.GitHubError):  # noqa: NDF401 外部コマンド: リモートか GitHub の設定を読めない
         return None
     return github.pick_merge_method(None, allowed)
+
+
+def _given_remote(out: Mapping[str, Value]) -> Optional[str]:
+    """決めた（渡したか求めた）リモート名。base と merge_method もこのリモートから決める（push の宛先とそろえる）。"""
+    remote = out.get("remote")
+    return remote if isinstance(remote, str) and remote else None
+
+
+def _remote_of_repo(repo: Path) -> str:
+    """省いた `remote` の値（I7: 宣言の `remote`、無ければスキーマの既定）。誤りは `RouteError`。
+
+    git の作業場所では、linked worktree から打ってもメインディレクトリの宣言を読む（`Git.remote`。取得・レビューの経路と
+    同じ宛先）。git の作業場所でない場所（`.git` が無い）にはメインディレクトリが無いため、git を起動せず `repo` の宣言を読む。
+    """
+    try:
+        if not (repo / ".git").exists():
+            return git.remote_of(repo)
+        return git.Git(repo).remote()
+    except git.GitError as exc:
+        raise RouteError(str(exc)) from None
 
 
 def _omitted(t: Template, out: Mapping[str, Value], name: str) -> bool:
@@ -428,18 +452,20 @@ def _omitted(t: Template, out: Mapping[str, Value], name: str) -> bool:
 
 
 def derived(t: Template, given: Mapping[str, Value], cwd: Path) -> dict[str, Value]:
-    """省いた `repo`・`worktree`・`base`・`merge_method` を打った場所から決めて足す（決まらなければ足さない）。"""
+    """省いた `repo`・`worktree`・`remote`・`base`・`merge_method` を打った場所から決めて足す（決まらなければ足さない）。"""
     out = dict(given)
     if _omitted(t, out, "repo"):
         out["repo"] = repo_root(cwd)
+    if _omitted(t, out, "remote") and "repo" in out:
+        out["remote"] = _remote_of_repo(Path(str(out["repo"])))
     if _omitted(t, out, "worktree") and isinstance(out.get("branch"), str):
         out["worktree"] = str(Path(str(out["repo"])) / WORKTREES / out["branch"])
     if _omitted(t, out, "base") and "repo" in out:
-        base = default_base(Path(str(out["repo"])))
+        base = default_base(Path(str(out["repo"])), _given_remote(out))
         if base is not None:
             out["base"] = base
     if _omitted(t, out, "merge_method") and "repo" in out and isinstance(out.get("base"), str):
-        method = default_merge_method(Path(str(out["repo"])), str(out["base"]))
+        method = default_merge_method(Path(str(out["repo"])), str(out["base"]), _given_remote(out))
         if method is not None:
             out["merge_method"] = method
     return out

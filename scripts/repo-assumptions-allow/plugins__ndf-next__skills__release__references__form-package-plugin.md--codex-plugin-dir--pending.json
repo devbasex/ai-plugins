@@ -1,0 +1,8 @@
+{
+  "path": "plugins/ndf-next/skills/release/references/form-package-plugin.md",
+  "name": "codex-plugin-dir",
+  "kind": "pending",
+  "reason": "リリースの形 package-plugin の本文。プラグインの CLI とマニフェストは形の中身だが、置き場の決め打ち（plugins/ndf）をリリースの形の表へ移すのは #3615 の受け持ち",
+  "count": 1,
+  "issue": 3615
+}

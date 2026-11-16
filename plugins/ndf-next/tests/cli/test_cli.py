@@ -115,6 +115,21 @@ def test_no_args_prints_usage(capsys):
     assert "使い方" in capsys.readouterr().out
 
 
+def test_usage_lists_user_commands_but_not_developer_commands(capsys, monkeypatch):
+    """使い方の表示に NDF 自身の開発の副命令（check・manifests）を出さず、名前で呼べば動く（#3617 の I11・I11a）。"""
+    assert cli.main(["--help"]) == 0
+    listed = {line.strip() for line in capsys.readouterr().out.splitlines() if line.startswith("  ")}
+    assert listed == set(cli.COMMANDS) - cli.DEVELOPER_COMMANDS
+    assert {"hooks", "worktree"} <= listed
+    calls = []
+    fake = types.ModuleType("fake_check")
+    fake.main = lambda argv: calls.append(argv) or 0
+    monkeypatch.setitem(sys.modules, "fake_check", fake)
+    monkeypatch.setitem(cli.COMMANDS, "check", "fake_check")
+    assert cli.main(["check", "--x"]) == 0
+    assert calls == [["--x"]]
+
+
 def test_unknown_subcommand_is_a_usage_error(capsys, last_result):
     assert cli.main(["no-such-command"]) == causes.exit_code("invalid")
     out = capsys.readouterr()

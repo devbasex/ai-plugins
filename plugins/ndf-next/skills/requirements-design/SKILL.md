@@ -5,8 +5,6 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 
 # 要求と受け入れ条件
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `glossary.py`（M7）・`projects-sync.sh`（M7）・`spec-copy.py`（M7）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
-
 実装を始める前に、**何を満たせば完了なのか**を観測可能な形へ確定させる。
 
 ## この Skill の責務

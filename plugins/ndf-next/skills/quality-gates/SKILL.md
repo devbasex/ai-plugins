@@ -5,8 +5,6 @@ description: "Require command evidence before declaring work complete. Use when 
 
 # 完了判定と検証の証跡
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `acceptance-check.py`（M1）・`design-match.py`（M1）・`merged-steps.py`（M8）・`projects-sync.sh`（M7）・`sprint-close.py`（M1）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
-
 **完了は宣言ではなく証跡で示す。** 実行したコマンドとその結果がなければ、完了していない
 ものとして扱う。
 

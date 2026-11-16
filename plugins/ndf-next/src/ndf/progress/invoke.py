@@ -33,7 +33,7 @@ import os
 import subprocess
 import sys
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Optional
 
@@ -703,13 +703,16 @@ def _skill_cause(failure: Optional[claude.Failure]) -> str:
 def _call_skill(run: StageRun, cwd: Path, call_claude: SkillCaller) -> StageResult:
     schema = contracts.load_json(contracts.schema_path("result"))
     call = claude.ClaudeCall(system=SKILL_SYSTEM, permission=claude.Permission.FULL, json_schema=schema)
-    reply = call_claude(claude.claude_args(call), skill_prompt(run), limits.seconds(SKILL_LIMIT), cwd)
+    argv, notice = claude.claude_launch(call, cwd=cwd)
+    reply = call_claude(argv, skill_prompt(run), limits.seconds(SKILL_LIMIT), cwd)
     if not reply.ok:
         kind = _skill_cause(reply.failure)
-        return StageResult(result.stopped(SKILL, kind, f"Skill {run.name} を回せない: {reply.error}"), {})
-    if not isinstance(reply.answer, dict) or result.errors(reply.answer):
-        return bad_report(run, "答えが結果 JSON の形に合わない")
-    return finished(run, reply.answer)
+        got = StageResult(result.stopped(SKILL, kind, f"Skill {run.name} を回せない: {reply.error}"), {})
+    elif not isinstance(reply.answer, dict) or result.errors(reply.answer):
+        got = bad_report(run, "答えが結果 JSON の形に合わない")
+    else:
+        got = finished(run, reply.answer)
+    return got if notice is None else replace(got, warnings=(*got.warnings, notice))
 
 
 def invoke(

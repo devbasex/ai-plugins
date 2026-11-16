@@ -16,8 +16,8 @@
     },
     "push": {
       "id": "push",
-      "run": ["git", "push", "origin", "HEAD:refs/heads/{{branch}}"],
-      "probe": ["sh", "-c", "test \"$(git ls-remote origin \"refs/heads/$0\" | cut -f1)\" = \"$(git rev-parse HEAD)\"", "{{branch}}"],
+      "run": ["git", "push", "--", "{{remote}}", "HEAD:refs/heads/{{branch}}"],
+      "probe": ["sh", "-c", "test \"$(git ls-remote -- \"$1\" \"refs/heads/$0\" | cut -f1)\" = \"$(git rev-parse HEAD)\"", "{{branch}}", "{{remote}}"],
       "exit_cause": {"1": "push_rejected"},
       "on_cause": {"push_rejected": "retry"},
       "retry": {"push_rejected": {"attempts": 1, "interval": 30}}
@@ -78,7 +78,7 @@
     },
     "base-sync": {
       "id": "base-sync",
-      "run": ["git", "pull", "--no-rebase", "--no-edit", "origin", "{{base}}"],
+      "run": ["git", "pull", "--no-rebase", "--no-edit", "--", "{{remote}}", "{{base}}"],
       "exit_cause": {"1": "base_conflict"},
       "on_cause": {"base_conflict": "fix-base"},
       "next": "push"

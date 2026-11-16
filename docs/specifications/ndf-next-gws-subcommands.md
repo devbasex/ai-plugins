@@ -171,7 +171,7 @@ gws の部品のものを使い、gws の群には置かない。
 | 承認資料の中身 | 4 つの節（対象を開くためのもの・承認の判断に使うもの・同意を求めること・戻し方）。取得元 npm の `@googleworkspace/cli`・打つコマンド `npm install -g @googleworkspace/cli`・入る先（`npm prefix -g` の値。読めなければその旨）・Google の公式サポート外で版は 0.x・戻し方 `npm uninstall -g @googleworkspace/cli` |
 | 結果のスキーマ | `gws.result.schema.json` は結果の契約を `allOf` で引き、`tool` を `gws` に固定し、`metrics`（`state`・3 つのキー・`pages`・`size`・`out_dir`）と `items` の要素（`name`・`result`・`objectId`・`detail`）を閉じる |
 | 引数のスキーマ | `gws.args.schema.json` と副命令の一覧は、`ndf check --write-spec` が受付の argparse の定義から書く生成物 |
-| 機能の対応表（`src/ndf/parity/features.json`） | 今の 2 本のスクリプトの 2 行は `to: S1d` を持ち、置き場 `S1d`（`src/ndf/domains/gws/`）の下のモジュールを持つ副命令 `gws` を試走が副命令の表から引く |
+| 機能の対応表（`scripts/ndf-next-parity/parity/features.json`） | 今の 2 本のスクリプトの 2 行は `to: S1d` を持ち、置き場 `S1d`（`src/ndf/domains/gws/`）の下のモジュールを持つ副命令 `gws` を試走が副命令の表から引く |
 
 ## セキュリティ
 

@@ -56,7 +56,7 @@ def sprint(repo, monkeypatch):
     held = route.params()
     patched = {n: replace(p, default=DEFAULTS[n]) if n in DEFAULTS else p for n, p in held.items()}
     monkeypatch.setattr(route, "params", lambda: patched)
-    monkeypatch.setattr(route, "default_merge_method", lambda repo, base: "squash")
+    monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None: "squash")
     monkeypatch.setattr(invoke, "issue_text", lambda place, n: (f"#{n} の題", f"#{n} の本文"))
     values = {"worktree": str(repo), "branch": BRANCH, "design_pr": 7, "pr": 8, "version": "11.0.0"}
     values["delivery"] = {"target": "t", "kind": "auto", "trigger": "cd", "channel": "production", "versioned": True}

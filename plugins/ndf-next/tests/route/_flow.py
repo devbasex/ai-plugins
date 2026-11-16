@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import os
+import shlex
 import subprocess
+import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Optional
@@ -13,6 +15,8 @@ from ndf.core import route
 from ndf.core.plan import assemble_decide, model, steps, transition_decide
 from ndf.core.plan.transition_decide import ANSWERED, SLEPT, AwaitAnswer, Outcome, Sleep, StepState
 
+# NDF のソースの置き場（子プロセスの `python -m ndf` が読む）
+SRC = Path(__file__).resolve().parents[2] / "src"
 # 台本が尽きるまでの手の数の上限（雛形のプランの上限より大きい）
 MAX_ACTS = 500
 
@@ -77,6 +81,12 @@ def fake_bin(tmp: Path, name: str, body: str) -> Path:
     path.write_text("#!/bin/sh\n" + body + "\n", encoding="utf-8")
     path.chmod(0o755)
     return bindir
+
+
+def ndf_bin(tmp: Path) -> Path:
+    """`tmp/bin/ndf` に、このテストの python で `python -m ndf` を打つコマンドを置く（PATH に `ndf` が無い環境でも雛形の `ndf` を打てる）。"""
+    src = shlex.quote(str(SRC))
+    return fake_bin(tmp, "ndf", f'PYTHONPATH={src}${{PYTHONPATH:+:$PYTHONPATH}} exec {shlex.quote(sys.executable)} -m ndf "$@"')
 
 
 def run_step(step: model.Step, cwd: Path, bindir: Optional[Path] = None, fill: Optional[dict[str, str]] = None) -> dict[str, Any]:
