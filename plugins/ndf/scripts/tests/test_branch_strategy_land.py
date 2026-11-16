@@ -439,3 +439,32 @@ def test_runs_on_pull_head_matches_the_filters_against_the_pull(on, files, runs)
     """#3672 の round 5: 絞り込みを PR の事実（head のブランチ・宛先・変更ファイル）と照らし、読めない事実は動くとみなす。"""
     event = PullEvent("release/v1", "main", lambda: files, lambda: files)
     assert runs_on_pull_head(f"on:\n  {on}\n", event) is runs
+
+
+def test_required_unmet_checks_source_app_before_admin_bypass(monkeypatch):
+    """迂回の前に、宛先の必須のチェックを発行元まで照らす（同じ名前の別の発行元の成功で通さない。#3506）。"""
+    import gh_checks
+    from merged_lib import required_checks as rc
+    from step_result import StepError
+
+    port = land.GhPort(Path("."), "o/r", strategy("docs"))
+    req = {"v": rc.Required(["ci", "lint"], {"ci": frozenset({7})})}
+    unmet = {"v": ["ci（アプリ 7）"]}
+    monkeypatch.setattr(rc, "required_checks_of", lambda root, branch: req["v"])
+    monkeypatch.setattr(rc, "unmet_sources", lambda root, sha, r: unmet["v"])
+    monkeypatch.setattr(
+        gh_checks, "fetch_check_runs", lambda repo, sha, empty_ok=False: [{"name": "ci", "status": "completed", "conclusion": "success"}]
+    )
+    monkeypatch.setattr(land.GhPort, "_rest", lambda self, path, method="GET", payload=None: {"statuses": []} if path == ST else None)
+    assert "アプリ 7" in port.required_unmet("main", "h")
+    # 発行元は通ったが、指定の無い必須のチェック lint がまだ先端に現れていない
+    unmet["v"] = []
+    assert "lint" in port.required_unmet("main", "h")
+    req["v"] = rc.Required(["ci"], {"ci": frozenset({7})})
+    assert port.required_unmet("main", "h") is None
+
+    def unreadable(root, branch):
+        raise StepError("HTTP 500", 3)
+
+    monkeypatch.setattr(rc, "required_checks_of", unreadable)
+    assert "照らせない" in port.required_unmet("main", "h")

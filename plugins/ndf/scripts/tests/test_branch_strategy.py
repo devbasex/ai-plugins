@@ -882,6 +882,7 @@ class FakePort:
         self.calls: list = []
         self.ref_ok = True
         self.failing = None
+        self.unmet = None  # 宛先の必須のチェック（発行元の指定を含む）を満たさない理由
         self.record_error = None
         self.intent_error = None
         self.intents: set = set()  # 意図の印を置いた head
@@ -890,6 +891,10 @@ class FakePort:
     def checks_failing(self, sha, pull=None):
         self.calls.append(("checks", sha))
         return self.failing
+
+    def required_unmet(self, b, sha):
+        self.calls.append(("required", sha))
+        return self.unmet
 
     def pull(self, n):
         self.pulls += 1
@@ -1055,7 +1060,12 @@ def test_land_admin_bypass_checks_and_records():
     out = land.land_approved(port, bs.Strategy(admin), 5, land.Approval(H1, url=url))
     # (c) 迂回のマージの前に、承認した head の意図の印を置く
     assert out["result"] == "merged"
-    assert port.calls == [("checks", H1), ("intent", H1), ("merge", H1, "merge", True), ("admin_record", H1, url)]
+    assert port.calls == [("checks", H1), ("required", H1), ("intent", H1), ("merge", H1, "merge", True), ("admin_record", H1, url)]
+    # 宛先の必須のチェックが指定の発行元で通っていなければ、意図の印を置かず迂回しない
+    port.unmet, port.calls = "宛先 main の必須のチェックが指定の発行元で通っていない: ci（アプリ 7）", []
+    out = land.land_approved(port, bs.Strategy(admin), 5, land.Approval(H1, url=url))
+    assert out["result"] == "stopped" and "アプリ 7" in out["reason"] and port.calls == [("checks", H1), ("required", H1)]
+    port.unmet = None
     port.record_error = "unreadable"
     port.calls = []
     out = land.land_approved(port, bs.Strategy(admin), 5, land.Approval(H1, url=url))
@@ -1070,7 +1080,7 @@ def test_land_admin_stops_when_intent_cannot_be_placed():
     port.intent_error = "unreadable"
     out = land.land_approved(port, bs.Strategy(admin), 5, land.Approval(H1, url="u"))
     assert out["result"] == "stopped" and "意図の印" in out["reason"]
-    assert port.calls == [("checks", H1), ("intent", H1)]
+    assert port.calls == [("checks", H1), ("required", H1), ("intent", H1)]
 
 
 def test_land_admin_merged_records_by_intent():

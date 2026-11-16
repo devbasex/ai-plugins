@@ -114,6 +114,9 @@ class Port(Protocol):
     def checks_failing(
         self, sha: str, pull: dict | None = None
     ) -> str | None: ...  # head の検査がすべて成功なら None、そろわなければ理由の文
+    def required_unmet(
+        self, branch: str, sha: str
+    ) -> str | None: ...  # 宛先の必須のチェック（発行元の指定を含む）を満たせば None、満たさなければ理由
 
 
 def trailers(pr: int, head: str, tip: str, trail_url: str = "") -> str:
@@ -217,6 +220,10 @@ def land_approved(port: Port, strategy, pr: int, approval: Approval, pull: dict 
         got = fast_forward_land(port, prod_branch, pr, tip, approval.head, merge["commit"], pull.get("title", ""), approval.url)
         return {**out, "result": got["result"], "reason": got["reason"]}
     if admin:
+        # 迂回は宛先の必須のチェックも飛ばすため、発行元の指定まで照らす（同じ名前の別の発行元の成功で迂回しない。#3506）
+        unmet = port.required_unmet(prod_branch, approval.head)
+        if unmet:
+            return {**out, "reason": f"head {approval.head[:12]} は迂回できない: {unmet}"}
         # 迂回の前に意図の印を置く。置けなければ迂回しない（印が無いとマージ済みの PR を迂回の記録で補えない）
         err = port.admin_intent(pr, approval.head)
         if err:
@@ -414,6 +421,11 @@ class GhPort:
         from release_lib import land_checks
 
         return land_checks.checks_failing(self, sha, pull)
+
+    def required_unmet(self, branch: str, sha: str) -> str | None:
+        from release_lib import land_checks
+
+        return land_checks.required_unmet(self, branch, sha)
 
 
 def _trail_error(write) -> str | None:

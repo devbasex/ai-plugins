@@ -4,6 +4,7 @@ GitHub の必須の検査を通らない取り込み（ruleset の無い `strict
 `port` は `land.GhPort`（`_rest`・`_show`・`_git`・`_fetch` を使う）。判定は止める側へ倒す: 読めない事実は検査が未完了とみなす。
 
 - `checks_failing`: check run と commit status（全ページ）・宣言の検査名から、そろっていなければ理由の文を返す
+- `required_unmet`: 管理者の迂回の前に、宛先が要求するチェックが先端に現れ、発行元の指定があればその発行元で通ったかを確かめる
 - `no_checks_reason`: 検査が 0 件のとき、PR の head で動く workflow か、Actions 以外の CI があれば待つ理由を返す
 """
 
@@ -68,6 +69,38 @@ def checks_failing(port, sha: str, pull: dict | None = None) -> str | None:
         return no_checks_reason(port, sha, pull or {})
     bad = [f"{name}={res}" for name, res in runs if res not in CHECKS_OK]
     return ", ".join(bad)[:300] or None
+
+
+def required_unmet(port, branch: str, sha: str) -> str | None:
+    """管理者の迂回の前に、宛先 `branch` の規則と従来の保護が要求するチェックを先端 `sha` で照らす。満たせば None、
+    満たさなければ理由の文。迂回は必須のチェックも飛ばすため、`merged-steps.py` の迂回と同じ `merged_lib.required_checks` で
+    発行元（`integration_id`・`app_id`）まで確かめる（同じ名前の別の発行元の成功で通さない。#3506）。発行元の指定の無い名前は
+    先端に現れたかだけを見る（結果の成否は `checks_failing` が確かめる）。読めなければ止める側へ倒す。"""
+    import gh_checks
+    from merged_lib import required_checks as rc
+    from step_result import StepError
+
+    try:
+        req = rc.required_checks_of(port.root, branch)
+        unmet = rc.unmet_sources(port.root, sha, req) if req.apps else []
+    except StepError as e:
+        return f"宛先 {branch} の必須のチェックを照らせない: {str(e)[:200]}"
+    if unmet:
+        return f"宛先 {branch} の必須のチェックが指定の発行元で通っていない: {', '.join(unmet)[:200]}"
+    plain = [n for n in req.names if n not in req.apps]
+    if not plain:
+        return None
+    raw = gh_checks.fetch_check_runs(port.repo, sha, empty_ok=True)
+    got = statuses(port, sha)
+    if raw is None or got is None:
+        return "宛先の必須のチェックの結果を読めない"
+    seen = {str(r.get("name") or "") for r in gh_checks.fold_check_runs(raw)} | {str(c.get("context") or "") for c in got}
+    absent = [n for n in plain if n not in seen]
+    return (
+        f"宛先 {branch} の必須のチェック {', '.join(absent)[:200]} がまだ始まっていない。始まるのを待って打ち直してください"
+        if absent
+        else None
+    )
 
 
 def pull_changed_files(port, base: str | None, sha: str) -> list[str] | None:
