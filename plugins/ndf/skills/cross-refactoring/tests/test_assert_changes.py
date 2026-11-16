@@ -300,11 +300,11 @@ def judged(tmp_path, monkeypatch, refactor, patch_lib, env_tmp_dir, cmd_setup, c
     flow = build_git_flow(tmp_path, monkeypatch, patch_lib, env_tmp_dir)
     work = flow["work"]
 
-    def _item(item_id, rank, symbol):
-        return planned_item(item_id, rank, symbol=symbol, command=["pytest", "-q", "tests/test_calc.py"])
-
     state = read_state(flow["path"])
-    state["items"] = [_item("I-001", 1, "add"), _item("I-002", 2, "total")]
+    state["items"] = [
+        planned_item("I-001", 1, symbol="add", command=["pytest", "-q", "tests/test_calc.py"]),
+        planned_item("I-002", 2, symbol="total", command=["pytest", "-q", "tests/test_calc.py"]),
+    ]
     state["plan"] = {
         "base_sha": git("rev-parse", "HEAD", cwd=work).stdout.strip(),
         "reserve": {"danger_whole_test": 0.1, "final_whole_test": 0.1, "fix": 5.5},
