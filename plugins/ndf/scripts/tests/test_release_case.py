@@ -138,6 +138,27 @@ def test_read_approvals_reads_the_same_facts_as_rule_facts(monkeypatch):
     assert n is None and "読めない" in why
 
 
+def test_read_approvals_reads_only_what_the_count_needs(monkeypatch):
+    """#3672 の round 9: 承認数だけが要る経路は迂回の可否（rulesets/<id>）を読まず、従来の保護が無い（protection.enabled が偽）
+    ときは保護の照会を省く。ruleset 1 件・従来の保護なしの本番ブランチで gh の照会は 2 回。"""
+    rule = {**pr_rule(1), "ruleset_id": 22}
+    run, calls = fake({"rules/branches/main": (0, json.dumps([rule])), "{repo}/branches/main": UNPROTECTED})
+    monkeypatch.setattr(gh_call, "RUNNER", run)
+    assert rc.read_approvals(".", "main") == (1, "")
+    assert [c.split()[-1] for c in calls] == ["repos/{owner}/{repo}/rules/branches/main", "repos/{owner}/{repo}/branches/main"]
+    # 迂回の可否が要る経路（land・測定）は従来どおり ruleset を読む
+    run, calls = fake(
+        {
+            "rules/branches/main": (0, json.dumps([rule])),
+            "rulesets/22": (0, json.dumps({"current_user_can_bypass": "never"})),
+            "{repo}/branches/main": UNPROTECTED,
+        }
+    )
+    monkeypatch.setattr(gh_call, "RUNNER", run)
+    assert rc.read_rule_facts(".", "main") == rc.RuleFacts(True, 1, False, False, "never")
+    assert any("rulesets/22" in c for c in calls)
+
+
 @pytest.mark.parametrize("rules", [(0, "[]"), (1, "gh: Not Found (HTTP 404)")])
 def test_read_rule_facts_reads_branch_protection_without_ruleset(monkeypatch, rules):
     """ruleset が無い本番ブランチは従来のブランチ保護を読み、保護があれば「保護なし」（早送りの経路）にしない。"""

@@ -125,7 +125,7 @@ def _gh_read(root, path: str):
 
 def read_approvals(root, branch: str) -> tuple[int | None, str]:
     """本番チャネルの承認数。ruleset と従来のブランチ保護を重ねた事実（`read_rule_facts`）から引く。読めなければ (None, 理由)。"""
-    facts = read_rule_facts(root, branch)
+    facts = read_rule_facts(root, branch, bypass=False)  # 迂回の可否は承認数に効かないため読まない
     if facts is None:
         return None, f"本番チャネル {branch} の承認数を読めない（ruleset か従来のブランチ保護を読めない）"
     return facts.approvals, ""
@@ -216,29 +216,28 @@ def merge_facts(a: RuleFacts, b: RuleFacts) -> RuleFacts:
 
 def classic_facts_from(read, branch: str) -> RuleFacts | None:
     """従来のブランチ保護の事実。保護が無ければ `present` が偽、読めなければ None。
-    保護の照会は管理者でない利用者に 404 を返しうるため、404 は読む権限で読める `branches/<b>` の `protection.enabled`
-    （ruleset を含まない、従来の保護だけの有無）で確かめる。保護があるのに詳細を読めないときは None。"""
-    protection, why = read(f"repos/{{owner}}/{{repo}}/branches/{branch}/protection")
-    if isinstance(protection, dict):
-        return classic_facts_of(protection)
-    if why != "missing":
-        return None
+    先に読む権限で読める `branches/<b>` の `protection.enabled`（ruleset を含まない、従来の保護だけの有無）を見て、
+    偽なら保護の照会を省く。保護の照会は管理者でない利用者に 404 を返しうるため、保護がある（か有無を読めない）のに詳細を読めないときは None。"""
     info, _ = read(f"repos/{{owner}}/{{repo}}/branches/{branch}")
     enabled = (info.get("protection") or {}).get("enabled") if isinstance(info, dict) else None
-    return RuleFacts(False, 0, False, False, None) if enabled is False else None
+    if enabled is False:
+        return RuleFacts(False, 0, False, False, None)
+    protection, _ = read(f"repos/{{owner}}/{{repo}}/branches/{branch}/protection")
+    return classic_facts_of(protection) if isinstance(protection, dict) else None
 
 
-def rule_facts_from(read, branch: str) -> RuleFacts | None:
+def rule_facts_from(read, branch: str, bypass: bool = True) -> RuleFacts | None:
     """本番ブランチの ruleset と従来のブランチ保護から、有無・承認の数・merge queue の有無・最新の取り込みの要否・迂回の可否を読む。
     GitHub は両方を重ねて効かせるため、両方を読んで重ねる（保護のある本番ブランチを「保護なし」の早送りの経路へ入れない）。読めなければ None。
-    `read` は `path → (値, 読めない理由)`（`_gh_read` の形）。宣言を書く測定・宣言を照らす land・承認数（`read_approvals`）が同じ事実を読むための正本。"""
+    `read` は `path → (値, 読めない理由)`（`_gh_read` の形）。宣言を書く測定・宣言を照らす land・承認数（`read_approvals`）が同じ事実を読むための正本。
+    `bypass` が偽なら ruleset ごとの迂回の可否（`rulesets/<id>`）を読まない（`bypass` は None。承認数だけが要る経路で照会を減らす）。"""
     rules, why = read(f"repos/{{owner}}/{{repo}}/rules/branches/{branch}")
     if why == "missing":
         rules = []
     if not isinstance(rules, list):
         return None
     bypasses = []
-    for rid in sorted({r.get("ruleset_id") for r in rules if isinstance(r, dict) and r.get("ruleset_id")}):
+    for rid in sorted({r.get("ruleset_id") for r in rules if isinstance(r, dict) and r.get("ruleset_id")}) if bypass else ():
         got, _ = read(f"repos/{{owner}}/{{repo}}/rulesets/{rid}")
         if not isinstance(got, dict):
             return None
@@ -247,6 +246,6 @@ def rule_facts_from(read, branch: str) -> RuleFacts | None:
     return None if classic is None else merge_facts(rule_facts_of(rules, bypasses), classic)
 
 
-def read_rule_facts(root, branch: str) -> RuleFacts | None:
+def read_rule_facts(root, branch: str, bypass: bool = True) -> RuleFacts | None:
     """`rule_facts_from` を gh で読む。"""
-    return rule_facts_from(lambda path: _gh_read(root, path), branch)
+    return rule_facts_from(lambda path: _gh_read(root, path), branch, bypass)

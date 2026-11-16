@@ -30,7 +30,7 @@ import waits
 from release_lib import approval, approval_trail
 from release_lib.approval import HeadMoved
 from release_lib.context import ReleaseCtx
-from release_lib.names import release_tag
+from release_lib.names import tag_name
 from release_lib.port_mark import NO_PORT_LINE, ensure_no_port_line
 from step_result import EXIT_GATE, EXIT_INFRA_WAIT, EXIT_PRECONDITION, EXIT_UNREADABLE, StepError, emit, gh_json, git, git_root, result
 
@@ -204,8 +204,8 @@ def _open_prod_pr(ctx: ReleaseCtx, items, metrics, ops: ProdOps, case=None) -> i
         ops.published(root, a, plugin, prod, done["number"], merge, items, metrics, back=admin_back())
     if done:
         return ensure_no_port_line(root, done)["number"]  # 前の版が作った本番の PR は port 検査の印を持たない
-    if git(root, "rev-parse", "-q", "--verify", f"refs/tags/{release_tag(plugin, ver)}", check=False).returncode == 0:
-        raise StepError(f"タグ {release_tag(plugin, ver)} は既にある")
+    if git(root, "rev-parse", "-q", "--verify", f"refs/tags/{tag_name(root, plugin, ver)}", check=False).returncode == 0:
+        raise StepError(f"タグ {tag_name(root, plugin, ver)} は既にある")
     if not ctx.sync:
         # trunk: 版上げの PR が本番の PR を兼ねる。承認と照らす前に本番ブランチへマージしない（#3672 の D17）
         title = f"Release: {plugin} v{ver}"

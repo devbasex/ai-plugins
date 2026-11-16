@@ -170,7 +170,7 @@ def release_selected(ctx: ReleaseCtx, approved, ops, case=None) -> tuple:
     branches = ReleaseBranches(release=branch, base=base, production=prod)
     if a.channel != "prod":
         raise StepError("選んで集める取り込み方の release は --channel prod だけ（開発版はベースブランチで出す）", EXIT_UNREADABLE)
-    tag = names.release_tag(plugin, a.version)
+    tag = names.tag_name(root, plugin, a.version)
     metrics = {"channel": a.channel, "version": a.version, "release_pr": None, "sync_pr": None, "main_pr": None, "tag": None}
     metrics.update(
         {

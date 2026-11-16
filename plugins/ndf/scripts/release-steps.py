@@ -110,7 +110,7 @@ from release_lib.approval import HeadMoved  # noqa: E402
 from release_lib.context import ReleaseCtx  # noqa: E402
 from release_lib.notes_content import NotesContent  # noqa: E402
 from release_lib.names import changelog_section, changelog_span, h2_lines, next_h2, plugin_of, release_decl  # noqa: E402
-from release_lib.names import drop_untagged, release_tag, require_untagged  # noqa: E402
+from release_lib.names import drop_untagged, require_untagged, tag_glob, tag_name, tag_template_of, tag_version  # noqa: E402
 from release_lib.included import outside_items, outside_note  # noqa: E402
 from step_result import (
     EXIT_CD_FAILED,
@@ -284,10 +284,10 @@ def cmd_bump(a):
 
 
 def release_tag_before(root, plugin, current=None):
-    """<plugin>--v で始まり接尾辞の無いタグのうち、current を除いて最も新しいもの。無ければ None。"""
-    head = f"{plugin}--v"
-    tags = git(root, "tag", "--list", f"{head}*", "--sort=-v:refname").stdout.split()
-    return next((t for t in tags if t != current and "-" not in t[len(head) :]), None)
+    """宣言の release.tag の形（無ければ `<plugin>--v<版>`）に合い接尾辞の無いタグのうち、current を除いて最も新しいもの。無ければ None。"""
+    template = tag_template_of(root)
+    tags = git(root, "tag", "--list", tag_glob(plugin, template), "--sort=-v:refname").stdout.split()
+    return next((t for t in tags if t != current and (v := tag_version(t, plugin, template)) and "-" not in v), None)
 
 
 def next_release(name, old, level="patch"):
@@ -300,7 +300,7 @@ def next_release(name, old, level="patch"):
 
 def other_plugins(root, a):
     """(前のタグ, 差分にあってまだ上げていない {名前: 前のタグの版}, 上げ済みの行)。"""
-    since = a.since or release_tag_before(root, a.plugin) or f"{a.plugin}--v*"
+    since = a.since or release_tag_before(root, a.plugin) or tag_glob(a.plugin, tag_template_of(root))
     p = git(root, "diff", "--name-only", f"refs/tags/{since}", a.end, check=False)
     if p.returncode:
         raise StepError(f"前のタグが無い: {since}", 2)
@@ -378,7 +378,7 @@ def section_prs(root, a):
         plugin = plugin_of(root, a)
     except StepError:
         return included.with_extra([], a.prs), None, None, []
-    prev = release_tag_before(root, plugin, release_tag(plugin, a.version))
+    prev = release_tag_before(root, plugin, tag_name(root, plugin, a.version))
     head = git(root, "rev-parse", "HEAD", check=False)
     if head.returncode:  # コミットの無いリポジトリ: 範囲も終点も無い
         return included.with_extra([], a.prs), prev, None, []
@@ -413,7 +413,7 @@ def _update_changelog(root, a, items, since=None) -> list[dict]:
     cl = root / "CHANGELOG.md"
     lines = cl.read_text(encoding="utf-8").split("\n")
     a.plugin = plugin_of(root, a)
-    require_untagged(root, release_tag(a.plugin, a.version), a.version)
+    require_untagged(root, tag_name(root, a.plugin, a.version), a.version)
     removed = drop_untagged(root, lines, a.plugin, since, a.version)
     head, (at, end) = f"## [{a.plugin} {base_of(a.version)}]", changelog_span(lines, a.plugin, a.version)
     if at is None:
@@ -722,7 +722,7 @@ def cmd_release(a):
         emit(result(TOOL, "ok", f"{plugin} v{ver} を {base} へ出した（#{release_pr}）", items, metrics))
 
     # 本番: release/v<版> → 本番チャネル、タグ、GitHub Release（利用者の承認を得てから呼ぶ）
-    tag = f"{plugin}--v{ver}"
+    tag = tag_name(root, plugin, ver)
     git(root, "fetch", "-q", "origin", "--tags")
     done = find_pr(root, branch, prod, states=("MERGED", "OPEN"))
     if done and done["state"] == "MERGED":
@@ -813,7 +813,7 @@ def _prepare_release_branch(root, a, plugin) -> str:
 
 def _published(root, a, plugin, prod, main_pr, merge, items, metrics, back=None):
     """本番チャネルへ入れた後: タグと GitHub Release（CD が無ければ）・退避先の回収の候補を足し、`back`（戻すマージ）を打って結果を出す。"""
-    ver, tag = a.version, release_tag(plugin, a.version)
+    ver, tag = a.version, tag_name(root, plugin, a.version)
     decl = delivery.load_delivery(root)
     by_cd = delivery.publishes_by_cd(decl)
     want_tag, want_release = publish.wants(decl)
@@ -884,7 +884,7 @@ def cmd_record(a):
         return record_merged(root, a, cd)
     ver = a.version
     base, _prod, plugin = release_decl(root, a)
-    tag = f"{plugin}--v{ver}"
+    tag = tag_name(root, plugin, ver)
     decl = delivery.load_delivery(root)
     by_cd = cd is not None and delivery.publishes_by_cd(decl)  # 公開物は CD が作り、照会を CD の結果へ置き換える
     want_tag, want_release = (False, False) if by_cd else publish.wants(decl)  # 宣言が作らせない公開物は求めない
@@ -899,8 +899,9 @@ def cmd_record(a):
         raise StepError(f"release/v{ver}（か release/v{ver}-sync）→ {base} のマージ済みの PR が無い", EXIT_PRECONDITION)
     n = pr["number"]
     prev_tag = release_tag_before(root, plugin, current=tag)
-    prev = prev_tag[len(f"{plugin}--v") :] if prev_tag else None
-    body = record.body_of(root, plugin, ver, tag, prev_tag, a.prs, cd, by_cd, tagged=by_cd or want_tag)
+    template = tag_template_of(root)
+    prev = tag_version(prev_tag, plugin, template) if prev_tag else None
+    body = record.body_of(root, plugin, ver, tag, prev_tag, a.prs, cd, by_cd, tagged=by_cd or want_tag, template=template)
     _emit_record(record.write(root, n, ver, prev, body, a.prs, f"v{ver}", cd), cd)
 
 
@@ -1049,7 +1050,7 @@ def cmd_approval_facts(a):
         raise StepError("リポジトリの owner/name を決められない", EXIT_PRECONDITION)
     base, prod, plugin = release_decl(root, a)
     git(root, "fetch", "-q", "origin", "--tags")
-    cur_tag = f"{plugin}--v{a.version}"
+    cur_tag = tag_name(root, plugin, a.version)
     prev = a.prev_tag or release_tag_before(root, plugin, cur_tag)
     if not prev:
         raise StepError("前のタグを決められない（--prev-tag を渡す）", EXIT_PRECONDITION)
@@ -1179,7 +1180,7 @@ def write_notes(root, version, plugin, bullets, migration=()):
     cl = root / "CHANGELOG.md"
     if not cl.is_file():
         raise StepError("CHANGELOG.md が無い", EXIT_PRECONDITION)
-    require_untagged(root, release_tag(plugin, version), version)
+    require_untagged(root, tag_name(root, plugin, version), version)
     lines = cl.read_text(encoding="utf-8").split("\n")
     head = f"## [{plugin} {base_of(version)}]"
     at = changelog_span(lines, plugin, version)[0]

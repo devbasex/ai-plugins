@@ -10,8 +10,10 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-# PR の head に check run を作るのは pull_request だけ。pull_request_target は宛先のコミットで動き、結果は head に付かない
-_HEAD_EVENTS = ("pull_request",)
+# pull_request_target の workflow の check run も PR の head の SHA に付く（観測: PR #3701 の head 97bc3bbf に、
+# on: pull_request_target だけの release-approval.yml の approval-check が head_sha=97bc3bbf で付いた。2026-11-16）。
+# 外すと pull_request_target で CI を回すリポジトリで、検査 0 件の head を早送りする。types の既定と branches・paths の照らし方は pull_request と同じ
+_HEAD_EVENTS = ("pull_request", "pull_request_target")
 # PR の head への push で起動する種類。`types` を書かなければこの 3 つで動く（GitHub の既定）
 _HEAD_TYPES = frozenset({"opened", "synchronize", "reopened"})
 
@@ -105,7 +107,7 @@ def _push_runs(spec: Any, event: PullEvent) -> bool:
 
 
 def runs_on_pull_head(text: str | None, event: PullEvent | None = None) -> bool:
-    """workflow の定義（YAML の字面）が PR の head に検査を作るか（pull_request_target は宛先のコミットで動くため数えない）。`on` の pull_request が絞り込み
+    """workflow の定義（YAML の字面）が PR の head に検査を作るか。`on` の pull_request・pull_request_target が絞り込み
     （起動の種類の types・宛先の branches・PR の変更ファイルの paths）でこの PR に当たるか、push が絞り込み（head のブランチの
     branches・直近の push の変更ファイルの paths）に当たれば真。読めない定義と、照らす事実（`event`）を読めない絞り込みは動くとみなす（検査なしで通さない側へ倒す）。"""
     import yamlio

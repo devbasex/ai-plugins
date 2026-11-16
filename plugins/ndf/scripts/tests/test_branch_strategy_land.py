@@ -387,9 +387,11 @@ DOCS_ONLY = ["docs/a.md"]
         ("pull_request:\n    types: labeled", DOCS_ONLY, False),
         ("pull_request:\n    types: [opened, synchronize]", DOCS_ONLY, True),
         ("pull_request_target:\n    types: [labeled]", DOCS_ONLY, False),
-        # pull_request_target は宛先のコミットで動き、head に検査を作らない（#3672 の round 8）
-        ("pull_request_target:\n    types: [reopened, closed]", DOCS_ONLY, False),
-        ("pull_request_target:", DOCS_ONLY, False),
+        # pull_request_target の check run も PR の head の SHA に付く（#3672 の round 9。round 8 の判断を取り消した）
+        ("pull_request_target:\n    types: [reopened, closed]", DOCS_ONLY, True),
+        ("pull_request_target:", DOCS_ONLY, True),
+        ("pull_request_target:\n    branches: [main]", DOCS_ONLY, True),
+        ("pull_request_target:\n    paths: ['src/**']", DOCS_ONLY, False),
     ],
 )
 def test_runs_on_pull_head_matches_the_filters_against_the_pull(on, files, runs):

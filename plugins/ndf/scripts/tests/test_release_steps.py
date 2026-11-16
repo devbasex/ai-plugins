@@ -760,6 +760,61 @@ def test_changed_plugins_without_the_tag_is_two(repo):
     assert code == 2 and "ndf--v" in res["summary"]
 
 
+def v_tag_repo(root: Path) -> Path:
+    """宣言の release.tag が `v{version}` のリポジトリ（#3672 の round 9）。タグは v1.0.0・v1.1.0・接尾辞つきの v1.2.0-dev.1。"""
+    release = {**plugin_release(), "tag": "v{version}", "github_release": True, "cd": {"workflow": "release.yml"}}
+    strategy_fixture.declare(root, "develop", "main", release)
+    plugin_json(root, "plugins/ndf", "1.0.0")
+    plugin_json(root, "plugins/mcp/mcp-serena", "2.3.4")
+    git(root, "add", "-A")
+    git(root, "commit", "-q", "-m", "base")
+    git(root, "tag", "v1.0.0")
+    git(root, "tag", "ndf--v1.0.5")  # 宣言の形に合わないタグは前の版に数えない
+    git(root, "commit", "-q", "--allow-empty", "-m", "next")
+    git(root, "tag", "v1.1.0")
+    git(root, "tag", "v1.2.0-dev.1")
+    (root / "plugins" / "mcp" / "mcp-serena" / "README.md").write_text("changed\n", encoding="utf-8")
+    git(root, "add", "-A")
+    git(root, "commit", "-q", "-m", "change serena")
+    return root
+
+
+def test_release_tags_follow_the_declared_shape(repo, monkeypatch):
+    """#3672 の round 9: タグの名前と検索の形は宣言の release.tag から引き、前版の検索・公開・記録が同じ形を使う。"""
+    root = v_tag_repo(repo)
+    mod = _release_steps_module(monkeypatch)
+    from release_lib import names, publish, record
+
+    assert names.tag_name(root, "ndf", "1.2.0-dev.1") == "v1.2.0"
+    assert mod.release_tag_before(root, "ndf") == "v1.1.0"
+    assert mod.release_tag_before(root, "ndf", current="v1.1.0") == "v1.0.0"
+    # 前のタグを渡さない changed-plugins も宣言の形で前版を引く
+    code, res = changed(root)
+    assert code == 0 and res["metrics"]["since"] == "v1.1.0", res
+    assert [i["name"] for i in res["items"]] == ["mcp-serena"]
+    # 公開もその形のタグを作る
+    plugin_json(root, "plugins/ndf", "1.3.0")
+    git(root, "commit", "-q", "-am", "bump")
+    made = []
+    monkeypatch.setattr(publish, "tag_and_release", lambda r, plugin, ver, tag, rev, release=True: made.append(tag) or [])
+    sha = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
+    assert publish.publish(root, "ndf", sha)[1] == "v1.3.0" and made == ["v1.3.0"]
+    # 記録は前のタグから宣言の形で版を引く
+    body = record.body_of(root, "ndf", "1.3.0", "v1.3.0", "v1.1.0", [1], by_cd=True, template="v{version}")
+    assert "1.1.0" in body and "v1.1.0" in body
+
+
+def test_release_tag_shape_defaults_without_a_declared_tag(monkeypatch):
+    """宣言に release.tag の形が無い（null を含む）ときは `<plugin>--v<版>`。"""
+    _release_steps_module(monkeypatch)  # lib/ を sys.path へ入れる
+    from release_lib import names
+
+    assert names.tag_template(None) == names.tag_template({"tag": None}) == "{plugin}--v{version}"
+    assert names.release_tag("ndf", "1.2.3", names.tag_template({"tag": "{plugin}@{version}"})) == "ndf@1.2.3"
+    assert names.tag_version("ndf--v1.2.3", "ndf") == "1.2.3"
+    assert names.tag_version("v1.2.3", "ndf") is None and names.tag_version("vnext", "ndf", "v{version}") is None
+
+
 def test_bump_raises_the_other_plugin_from_changed_plugins(repo):
     root = changed_repo(repo)
     push_origin(root)

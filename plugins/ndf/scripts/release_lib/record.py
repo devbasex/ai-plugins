@@ -46,10 +46,12 @@ def cd_fields(cd) -> dict:
     return {"cd_line": dist_record.cd_result_line(cd.value, cd.revision, " ".join(x for x in (urls, cd.reason) if x)), "failed": failed}
 
 
-def body_of(root, plugin, ver, tag, prev_tag, prs, cd=None, by_cd=False, tagged=True):
+def body_of(root, plugin, ver, tag, prev_tag, prs, cd=None, by_cd=False, tagged=True, template=None):
     """リリース記録の本文を返す。`by_cd` なら公開物は CD が作るため、タグの時刻を事実として書かない。
-    `tagged` が偽（宣言の release.tag が null）ならタグを作っていないため、タグを事実として書かない。"""
-    prev = prev_tag[len(f"{plugin}--v") :] if prev_tag else None
+    `tagged` が偽（宣言の release.tag が null）ならタグを作っていないため、タグを事実として書かない。`template` はタグの形（None なら既定の形）。"""
+    from release_lib import names
+
+    prev = names.tag_version(prev_tag, plugin, template or names.DEFAULT_TAG) if prev_tag else None
     if not tagged:
         done, version_note = f"v{ver} を出した（宣言がタグを作らない）", f"版 {ver}（宣言がタグを作らない）"
     else:

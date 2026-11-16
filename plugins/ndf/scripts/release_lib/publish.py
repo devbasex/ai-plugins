@@ -11,7 +11,7 @@ import os
 import tempfile
 
 import gh_parts
-from release_lib.names import changelog_span
+from release_lib.names import changelog_span, tag_name
 from step_result import StepError, git, plugin_dir
 
 
@@ -87,5 +87,5 @@ def publish(root, plugin, revision) -> tuple[str, str, list[dict]]:
     ver = version_at(root, plugin, revision)
     if "-" in ver:
         raise StepError(f"{revision[:8]} の版 {ver} に接尾辞があるため、タグも GitHub Release も作らない")
-    tag = f"{plugin}--v{ver}"
+    tag = tag_name(root, plugin, ver)
     return ver, tag, tag_and_release(root, plugin, ver, tag, revision)

@@ -33,9 +33,42 @@ def changelog_span(lines, plugin, version):
     return (None, None) if at is None else (at, next_h2(lines, at))
 
 
-def release_tag(plugin, version) -> str:
-    """基底の版のリリースタグ（version が空ならタグの接頭辞）。"""
-    return f"{plugin}--v{base_of(version)}"
+DEFAULT_TAG = "{plugin}--v{version}"  # 宣言に release.tag の形が無い（null を含む）ときのタグの形
+
+
+def tag_template(release) -> str:
+    """宣言の `release.tag`（`{version}` を含む形）。無い・null・`{version}` を含まないなら既定の形。"""
+    t = (release or {}).get("tag") if isinstance(release, dict) else None
+    return t if isinstance(t, str) and "{version}" in t else DEFAULT_TAG
+
+
+def tag_template_of(root) -> str:
+    """`root` のリポジトリの宣言から引くタグの形（`tag_template`）。前版の検索・公開・記録が同じ形を使う。"""
+    return tag_template(delivery.load_delivery(root).release)
+
+
+def release_tag(plugin, version, template=DEFAULT_TAG) -> str:
+    """基底の版のリリースタグ（形 `template` の `{plugin}`・`{version}` を埋める）。"""
+    return template.replace("{version}", base_of(version)).replace("{plugin}", plugin)
+
+
+def tag_name(root, plugin, version) -> str:
+    """`root` の宣言の形で作る、基底の版のリリースタグ。"""
+    return release_tag(plugin, version, tag_template_of(root))
+
+
+def tag_glob(plugin, template=DEFAULT_TAG) -> str:
+    """形 `template` のリリースタグを `git tag --list` で探すパターン（版の位置を `*` にする）。"""
+    return template.replace("{plugin}", plugin).replace("{version}", "*")
+
+
+def tag_version(tag, plugin, template=DEFAULT_TAG) -> str | None:
+    """形 `template` のリリースタグ `tag` の版（数字で始まる部分）。形に合わなければ None。"""
+    head, _, tail = template.replace("{plugin}", plugin).partition("{version}")
+    if not (tag.startswith(head) and tag.endswith(tail) and len(tag) > len(head) + len(tail)):
+        return None
+    v = tag[len(head) : len(tag) - len(tail)]
+    return v if v[0].isdigit() else None
 
 
 def tagged(root, tag) -> bool:
@@ -78,8 +111,9 @@ def drop_untagged(root, lines, plugin, since, version) -> list[dict]:
     （drop_untagged_sections。開発版と since の無いときは消さない。#2555 の I4）。"""
     if "-" in version or not since:
         return []
-    prev = since.removeprefix(release_tag(plugin, ""))
-    gone = drop_untagged_sections(lines, plugin, prev, version, lambda v: tagged(root, release_tag(plugin, v)))
+    template = tag_template_of(root)
+    prev = tag_version(since, plugin, template) or since
+    gone = drop_untagged_sections(lines, plugin, prev, version, lambda v: tagged(root, release_tag(plugin, v, template)))
     return [{"kind": "section", "name": "CHANGELOG.md", "result": "removed", "heading": h} for h in gone]
 
 

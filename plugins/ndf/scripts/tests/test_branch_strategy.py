@@ -653,7 +653,6 @@ def test_collect_samples_reads_api_history_and_local_facts(tmp_path):
         "repos/{owner}/{repo}/tags?per_page=2",
         "repos/{owner}/{repo}/releases?per_page=2",
         "repos/{owner}/{repo}/rules/branches/main",
-        "repos/{owner}/{repo}/branches/main/protection",
         "repos/{owner}/{repo}/branches/main",
     ]
 
@@ -675,7 +674,6 @@ def test_collect_samples_past_deadline_skips_api_lists_only(tmp_path):
     assert seen == [
         "repos/{owner}/{repo}",
         "repos/{owner}/{repo}/rules/branches/main",
-        "repos/{owner}/{repo}/branches/main/protection",
         "repos/{owner}/{repo}/branches/main",
     ]
 
@@ -731,7 +729,8 @@ def test_collect_samples_rulesets_and_unreadable_ruleset(tmp_path):
         return base(path)
 
     s = bsm.collect_samples(root, api, float("inf"), 5)
-    assert seen[-2:] == ["repos/{owner}/{repo}/rulesets/3", "repos/{owner}/{repo}/rulesets/7"]
+    # ruleset の照会だけを抜き出して順を照らす（後に従来のブランチ保護の照会が続く。#3672 の round 9）
+    assert [p for p in seen if "/rulesets/" in p] == ["repos/{owner}/{repo}/rulesets/3", "repos/{owner}/{repo}/rulesets/7"]
     assert s.rules == release_case.rule_facts_of(rules, ["never", "never"])
     assert s.rules.present and s.rules.queue
 
