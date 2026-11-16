@@ -301,7 +301,9 @@ def _pinned_flow(a) -> dict | None:
 def _strategy_snapshot(a, roots: list[Path]) -> dict:
     """スナップショットを今の宣言から作る。スプリントの目録に開始時の値があれば、`sprint_waves.pin_flow` がそれで置き換える（I13）。
 
-    種別リリース（スプリントに属さないリリース）は、本番ブランチの先頭の宣言から作る（#3308 の決定 1）。読めなければ止まる。"""
+    種別リリース（スプリントに属さないリリース）は、本番ブランチの先頭の宣言から作る（#3308 の決定 1）。読めなければ止まる。
+    ブランチの名前（`branches`・`channels`）は今の宣言の値で置き換える（#3308 の I5。本番ブランチの宣言が古い名前を持っていても
+    今の名前で組む）。置き換えた値がスキーマに落ちれば、読む側（`sprint_flow`）が止まる。"""
     strategy = strategy_of_roots(roots)
     if a.kind != "release":
         return branch_strategy.snapshot_section(strategy, f".ndf/project.json の {branch_strategy.SECTION}")
@@ -309,7 +311,8 @@ def _strategy_snapshot(a, roots: list[Path]) -> dict:
     got, where = repo.production_strategy(repo.first_git_tree(roots), production)
     if got is None:
         raise DeclError(f"本番ブランチの宣言を読めない: {where}")
-    return branch_strategy.snapshot_section(got, where)
+    names = {k: strategy.section[k] for k in ("branches", "channels")}
+    return branch_strategy.snapshot_section(branch_strategy.Strategy({**got.section, **names}), where)
 
 
 def sprint_flow(a) -> branch_strategy.Strategy:
