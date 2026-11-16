@@ -87,7 +87,7 @@ description: |
 ```
 入力: 「このブランチをレビューして」
 処理:
-  1. Read: .ndf/worktree.json の base_branch（無ければ git symbolic-ref --short refs/remotes/origin/HEAD）
+  1. Bash: python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lib/branch_strategy_cli.py" get /branches/base（読めなければ止まって理由を報告する）
   2. Bash: git diff origin/<ベースブランチ>...HEAD
   3. Bash: git log origin/<ベースブランチ>..HEAD --oneline
   4. 全体意図の把握

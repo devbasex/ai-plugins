@@ -149,8 +149,8 @@ fi
 ```bash
 branch="feature/<name>"
 git -C "$main_dir" fetch origin
-# 起点は開発の本流であって、既定ブランチとは限らない。設定の base_branch を
-# 優先し、無ければ origin の HEAD が指す先へ落ちる
+# 起点は開発の本流であって、既定ブランチとは限らない。ブランチ戦略の宣言の
+# branches.base を読み、宣言が無ければ既定ブランチへ倒さずに止まる
 base=$(wt_base_branch "$main_dir") || exit 1
 start="origin/$base"
 git -C "$main_dir" show-ref --verify --quiet "refs/remotes/origin/$base" || start="$base"
