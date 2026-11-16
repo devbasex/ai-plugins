@@ -441,8 +441,9 @@ def build_parser():
 
 
 def main(argv=None):
-    # 宣言の模型（pydantic）・ブランチ戦略の宣言の検査（jsonschema）・書き込みの錠（filelock）を 1 回で入れる（決定 23）
-    deps.require("schema", "jsonschema", "locks")
+    # 宣言の模型（pydantic）・ブランチ戦略の宣言の検査（jsonschema）・書き込みの錠（filelock）・
+    # YAML の読み書き（ruamel.yaml）を 1 回で入れる（決定 23）
+    deps.require("schema", "jsonschema", "locks", "yamlio")
     return main_with(build_parser(), lambda a: TOOL, argv)
 
 
