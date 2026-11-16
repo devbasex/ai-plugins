@@ -1,5 +1,36 @@
 # ブランチ運用の宣言（スプリントの起点・文書の宛先・本番への取り込み方）
 
+## この仕様の今の状態
+
+**この文書が書く仕組み（`.ndf/worktree.json` の `branch_flow`）の読み手は、課題 #3672 の手順 1 で消えた。**
+消したのは PR #3701（https://github.com/devbasex/ai-plugins/pull/3701 、`develop` へマージ済み）である。
+代わりにブランチ名と運用を持つのは、ブランチ戦略の宣言（`.ndf/project.json` の `branch_strategy`）である。
+本文は旧い宣言の仕様の記録として残し、消えたファイル・関数を指す箇所には「#3672 で削除」を添える。
+
+表のパスは、先頭が `plugins/` か `.ndf/` のものを除き `plugins/ndf/scripts/` から数える。
+
+| 消えたもの | 持っていたこと | 今それを担うもの（`develop`） |
+| --- | --- | --- |
+| `plugins/ndf/scripts/lib/branch_flow.py` | 宣言の読み分け・既定値・取り込み方の表・レビューの単位の表・スナップショットの形 | `lib/branch_strategy.py`（宣言を読む部品）・`lib/strategy_rows.py`（取り込み方の表とレビューの単位の表）・`data/branch-strategy.schema.json`（スキーマの本文。`project.schema.json` の `$defs/BranchStrategy` へ入る） |
+| `plugins/ndf/scripts/project_lib/measure_branch_flow.py` と `project-decl.py drift` | 既存のブランチの使い方の測定・ずれの検出 | `project-decl.py branch-strategy`（動詞 `init`・`measure`・`write`・`migrate`・`remove`。本体は `project_lib/branch_strategy_cmd.py`・`branch_strategy_measure.py`・`branch_strategy_write.py`・`branch_strategy_migrate.py`） |
+| `plugins/ndf/scripts/release_lib/promotion.py` | 取り込み方ごとのリリースブランチの組み方 | `release_lib/strategy_route.py` |
+| `lib/repo.py` の `production_decl`・`supervise_lib/decl.py` の `production_flow_decl` | 本番チャネルの宣言の読み取り | `lib/repo.py` の `branch_strategy_of`・`supervise_lib/decl.py` の `strategy_of_roots` |
+| `.ndf/worktree.json` の `branch_flow`・`base_branch`・`production_branch`（スキーマから外れた） | 宣言の置き場 | `.ndf/project.json` のセクション `branch_strategy` |
+| `tests/test_branch_flow.py`・`tests/test_project_decl_branch_flow.py` | 上の部品のテスト | `tests/test_branch_strategy.py`・`test_strategy_rows.py`・`test_branch_strategy_land.py` |
+
+新しい宣言は旧い宣言と次の 2 点で振る舞いが違う。
+
+- **宣言は任意でない。** セクションが無い・スキーマに合わないときは止まり、既定値へ倒さない（`lib/branch_strategy.py` の冒頭の説明）
+- **旧いキーが残ると止まる。** 旧い 4 か所（`.ndf/worktree.json`・`.ndf/project.json`・`.ndf/supervise.json`・`.ndf/release.json`）にキーが残れば、キーの位置と移行のコマンド（`project-decl.py branch-strategy migrate`）を理由に出す（`lib/branch_strategy_legacy.py`）
+
+**旧いキーを今も読むのは、ai-plugins の本番チャネル宛の検査だけである。** `scripts/check-pr-base.sh` と
+`.github/workflows/pr-base-guard.yml` が、宛先のブランチの `.ndf/worktree.json` の `branch_flow.promotion` を読む
+（`grep -rln branch_flow scripts plugins/ndf/scripts plugins/ndf/skills .github` を、テストを除いて打った結果がこの 2 ファイルだけ）。
+
+**新しい宣言の確定仕様は、#3672 の手順 2〜5 を終えた後に作る。** それまでの正本は課題の設計
+（`issues/issue-3672-design.md` と、同じ接頭辞の `-design-detail.md`・`-design-decisions.md`・`-design-removal.md`・
+`-design-ai-plugins.md` ほか）である。設計は #3672 の手順 2〜5 と 11.0 の作業（#3681）が使うため、確定仕様へまだ移さない。
+
 ## 概要
 
 NDF は、スプリントブランチをどこから切り、設計 PR と確定仕様化の PR をどこへ出し、本番チャネルへ何を入れるかを、
@@ -36,15 +67,15 @@ NDF は、スプリントブランチをどこから切り、設計 PR と確定
 
 | 要素 | 責務 |
 | --- | --- |
-| `plugins/ndf/scripts/lib/branch_flow.py` | 宣言の読み分け・既定値・取り込み方の表・スナップショットの形。特定のブランチ名（既定ブランチの候補・測る候補）の唯一の置き場 |
-| 宣言の契約とスキーマ（`plugins/ndf/contracts/settings/worktree.json.json`・`plugins/ndf/skills/worktree/schemas/worktree.schema.json`） | `branch_flow` のキーと置き場（メインディレクトリ）。スキーマの `branch_flow` は取り込み方の表から作る |
-| `plugins/ndf/scripts/lib/repo.py` | worktree の起点をスナップショットか宣言から解く。本番チャネルの宣言を読む（`production_decl`）。スプリントブランチの開始時の記録を目録から探し（`sprint_flow_record`）、後片付けでスプリントブランチを残すかを決める（`kept_sprint_branch`）。マージで消えたブランチを push し直す（`restore_branch`） |
-| `plugins/ndf/scripts/supervise_lib/`（`decl.py`・`sprint_waves.py`・`sprint.py`・`templates.py`・`release_flow.py`・`release_templates.py`） | スナップショットを目録へ記録し、起点・文書の宛先・ベースブランチの取り込みの元・リリースの組み方をスナップショットから組む。種別リリースのプランのスナップショットは、本番チャネルの宣言から作る（`decl.py` の `apply_decls`・`production_flow_decl`） |
+| `plugins/ndf/scripts/lib/branch_flow.py`（#3672 で削除。今は `lib/branch_strategy.py`・`lib/strategy_rows.py`） | 宣言の読み分け・既定値・取り込み方の表・スナップショットの形。特定のブランチ名（既定ブランチの候補・測る候補）の唯一の置き場 |
+| 宣言の契約とスキーマ（`plugins/ndf/contracts/settings/worktree.json.json`・`plugins/ndf/skills/worktree/schemas/worktree.schema.json`。#3672 で `branch_flow` を外した。今のスキーマは `data/branch-strategy.schema.json`） | `branch_flow` のキーと置き場（メインディレクトリ）。スキーマの `branch_flow` は取り込み方の表から作る |
+| `plugins/ndf/scripts/lib/repo.py` | worktree の起点をスナップショットか宣言から解く。本番チャネルの宣言を読む（`production_decl`。#3672 で削除。今は `branch_strategy_of`）。スプリントブランチの開始時の記録を目録から探し（`sprint_flow_record`）、後片付けでスプリントブランチを残すかを決める（`kept_sprint_branch`）。マージで消えたブランチを push し直す（`restore_branch`） |
+| `plugins/ndf/scripts/supervise_lib/`（`decl.py`・`sprint_waves.py`・`sprint.py`・`templates.py`・`release_flow.py`・`release_templates.py`） | スナップショットを目録へ記録し、起点・文書の宛先・ベースブランチの取り込みの元・リリースの組み方をスナップショットから組む。種別リリースのプランのスナップショットは、本番チャネルの宣言から作る（`decl.py` の `apply_decls`・`production_flow_decl`。`production_flow_decl` は #3672 で削除） |
 | `merged-steps.py` | マージの後の後片付けで、スプリントブランチの開始時の記録を `kept_sprint_branch` へ渡す |
 | `worktree-setup.sh`・`lib/worktree-branch.sh` | `create` の既定の起点をスプリントの起点にする |
-| `release-steps.py`・`release_lib/promotion.py` | 選んで集める取り込み方のリリースブランチを組み（`release-branch`）、本番チャネルへの Pull Request を承認したコミットと照合してマージし、戻すマージを入れる |
+| `release-steps.py`・`release_lib/promotion.py`（#3672 で削除。今は `release_lib/strategy_route.py`） | 選んで集める取り込み方のリリースブランチを組み（`release-branch`）、本番チャネルへの Pull Request を承認したコミットと照合してマージし、戻すマージを入れる |
 | `lib/pr_mode.py`・`pr-steps.py` | Pull Request の宛先の区分を `sprint` / `base` で返す |
-| `project-decl.py`・`project_lib/measure_branch_flow.py` | 測定（`measure`）・ずれの検出（`drift`）・書き出し（`write`）・形の検査（`check`） |
+| `project-decl.py`・`project_lib/measure_branch_flow.py`（#3672 で削除。今は `project-decl.py branch-strategy` と `project_lib/branch_strategy_*.py`） | 測定（`measure`）・ずれの検出（`drift`。#3672 で削除）・書き出し（`write`）・形の検査（`check`） |
 | `scripts/check-skill-repo-assumptions.py` | Skill の本文・手順書・スクリプト・エージェントの本文に、特定のブランチ名の決め打ちが入ると落とす |
 | `scripts/check-pr-base.sh`・`scripts/ci-heavy-skip.py`・`.github/workflows/pr-base-guard.yml` | ai-plugins の本番チャネル宛の検査と全体テストの省略の判定を、宛先のブランチの宣言で選ぶ |
 
@@ -65,6 +96,8 @@ NDF は、スプリントブランチをどこから切り、設計 PR と確定
 | スプリントの中のリリース（開発版・本番のステージ） | 開始時の記録 |
 | まとめたリリース（提示・本番。`lib/parallel_release.py` の `plan_parallel_release`） | 本番チャネルの宣言 |
 | `supervise.py new release`（`--channel dev`・`--channel prod`） | 本番チャネルの宣言 |
+
+次の図のクラスは `lib/branch_flow.py` にあった（#3672 で削除）。
 
 ```mermaid
 classDiagram
@@ -162,7 +195,7 @@ JSON のオブジェクトとして読めない・`version` が 1 でない）�
 承認資料の範囲が変わり、組み直しても承認を取り直す必要があるためである。提示のプランと本番のプランは同じスナップショットから組まれ、
 提示と本番で取り込み方は食い違わない。
 
-本番チャネルの宣言は次の順で読む（`repo.production_decl`）。
+本番チャネルの宣言は次の順で読む（`repo.production_decl`。#3672 で削除）。
 
 1. origin の `refs/heads/<本番チャネル>` を `refs/remotes/origin/<本番チャネル>` へ取り込み直す（本番チャネル宛の検査と同じ refspec。`GIT_TERMINAL_PROMPT=0`、上限は `plugins/ndf/contracts/limits.json` の `repo.production-fetch` の 60 秒）。失敗しても手元の追跡ブランチを読んで続ける
 2. 追跡ブランチの先頭の `.ndf/worktree.json` を `git show` で読む
@@ -287,6 +320,8 @@ sequenceDiagram
 
 ### 測定（`project-decl.py measure`）
 
+`measure` の `branch_flow` の項目は #3672 で削除した。ブランチ戦略の測定は `project-decl.py branch-strategy measure` が持つ。
+
 既存の出力に `branch_flow` の項目を足す。4 項目それぞれに `{value, confidence, evidence[]}` か `{unknown: 理由}` を出す。
 レビューの単位は項目の `reviews.<種類>` に、PR の種類ごとに直近のマージ済みの PR（最大 10 件）のレビューの印の有無から推した値を出す。この推定は `write` の書き出しへ渡さない。
 
@@ -297,6 +332,8 @@ sequenceDiagram
 - ベースブランチか本番チャネルを決められない・origin が GitHub でない・`gh` を使えないときは、`unknown` と理由を出す
 
 ### ずれの検出（`project-decl.py drift --measure FILE`）
+
+サブコマンド `drift` は #3672 で削除した（`project-decl.py --help` のサブコマンドは `check`・`measure`・`write`・`branch-strategy`・`schema`）。
 
 宣言（無ければ既定値の行）と `measure` の結果を項目ごとに比べる。ずれた項目ごとに `items` の行（項目・宣言の値・測った値・根拠・更新の案）を出す。
 レビューの単位は `branch_flow.reviews.<種類>` の行で出す。書いていない種類は、既定値の 2 列（課題のまとまりの記録の有無）のどちらとも違うときだけ出す。
@@ -364,7 +401,7 @@ ai-plugins の `.ndf/worktree.json` は `branch_flow` を持たず、既定値�
 - `new sprint` の打ち直しと `new close` が開始時の記録で組まれ、本番チャネルの宣言を壊しても止まらないこと
 - 宣言を変えた後に、変える前に始めたスプリントのスプリントブランチの作成と後片付けが、開始時の記録の起点と取り込み方で動くこと
 
-テストは `plugins/ndf/scripts/tests/test_branch_flow.py`・`test_sprint_branch_flow.py`・`test_project_decl_branch_flow.py`・`test_pr_mode.py`・`test_release_production_flow.py`・`test_sprint_start_record.py`、
+テストは `plugins/ndf/scripts/tests/test_branch_flow.py`（#3672 で削除）・`test_sprint_branch_flow.py`・`test_project_decl_branch_flow.py`（#3672 で削除）・`test_pr_mode.py`・`test_release_production_flow.py`・`test_sprint_start_record.py`、
 `scripts/tests/test_pr_base_guard.py`・`test_ci_heavy_skip.py` にある。
 
 ## 運用

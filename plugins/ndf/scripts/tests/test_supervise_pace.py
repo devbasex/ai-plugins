@@ -35,7 +35,7 @@ pytestmark = pytest.mark.usefixtures("issue_bodies")
 
 
 def cli(*args, cwd=None):
-    """既定ではこのリポジトリの宣言を移した写し（`strategy_fixture.like_root`。ai-plugins の .ndf/ は #3672 の手順 2 まで旧いキーのまま）で打つ。"""
+    """既定ではこのリポジトリの宣言を移した写し（`strategy_fixture.like_root`。移行の前の ai-plugins の形：develop → main・開発版のチャネル）で打つ。"""
     return inproc.run(SUPERVISE, *args, cwd=cwd or strategy_fixture.like_root())
 
 
@@ -159,7 +159,7 @@ def test_fast_sprint_is_refused_without_the_declaration(tmp_path):
     repo = tmp_path / "repo"
     (repo / ".ndf").mkdir(parents=True)
     sup = json.loads((REPO / ".ndf" / "supervise.json").read_text())
-    release = strategy_fixture.pop_release(sup)
+    release = strategy_fixture.ai_plugins_release()
     (repo / ".ndf" / "supervise.json").write_text(json.dumps(sup))
     strategy_fixture.declare(repo, "develop", "main", release)
     subprocess.run(["git", "init", "-q", "-b", "develop", str(repo)], check=True, capture_output=True)

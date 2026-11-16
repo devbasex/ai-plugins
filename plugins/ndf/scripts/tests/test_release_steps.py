@@ -332,7 +332,7 @@ def test_release_remakes_the_pr_when_merged_pr_misses_new_commits(monkeypatch, i
         return subprocess.CompletedProcess(args, rc, out, "")
 
     monkeypatch.setattr(mod, "git", git)
-    # ai-plugins の .ndf/ は #3672 の手順 2 まで旧いキーのまま残るため、宣言を移した写しで読む
+    # develop → main・開発版のチャネルの経路を、移行の前の ai-plugins の形の写しで読む
     monkeypatch.setattr(mod, "git_root", lambda r: strategy_fixture.like_root())
     monkeypatch.setattr(mod.bump, "require_bumped", lambda root, plugin, ver: None)
     monkeypatch.setattr(mod, "find_pr", lambda root, head, base, states: {"number": 7, "state": "MERGED"})
@@ -2156,8 +2156,11 @@ def test_dev_workflow_ready_reads_the_default_branch(monkeypatch, tmp_path, code
     assert seen[0][1] == "repos/o/r/contents/.github/workflows/release-dev.yml"
 
 
-def test_dev_run_title_comes_from_the_workflow_file():
+def test_dev_run_title_comes_from_the_workflow_file(tmp_path):
     sys.path.insert(0, str(SCRIPT.parent))
     from release_lib import reviewed
 
-    assert reviewed.dev_run_title(SCRIPT.parents[3], "release-dev.yml", 12) == "release-dev #12"
+    wf = tmp_path / ".github" / "workflows"
+    wf.mkdir(parents=True)
+    (wf / "release-dev.yml").write_text('name: release-dev\nrun-name: "release-dev #${{ inputs.pr }}"\n', encoding="utf-8")
+    assert reviewed.dev_run_title(tmp_path, "release-dev.yml", 12) == "release-dev #12"

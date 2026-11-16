@@ -13,6 +13,8 @@ name: Python tests
 # tests）に加えて、収集の仕方そのものを変える根の設定ファイルも対象へ入れる
 on:
   pull_request:
+  # merge queue の一時コミットで必須のチェックを回す（#3672 の手順 3）
+  merge_group:
   push:
     branches:
       - main
@@ -71,11 +73,11 @@ jobs:
           --base "${{ github.event.pull_request.base.sha }}"
           --head "${{ github.event.pull_request.head.sha }}"
 
-  # ファイル単位で 2 つのジョブへ分けて回す（#882）。割り当ては根の conftest.py が
+  # ファイル単位で 6 つのジョブへ分けて回す（#882。2 から 6 へ増やした: 2026-11-17 の利用者の指示）。割り当ては根の conftest.py が
   # SHARD_TOTAL / SHARD_INDEX から決める。各ジョブの中は -n auto で runner のコア数だけ
   # 並列に回す（pytest-xdist は --project が指す pyproject.toml の依存に入っている）
   pytest-shard:
-    name: pytest (${{ matrix.shard }}/2)
+    name: pytest (${{ matrix.shard }}/6)
     needs: ci-scope
     # 判定が落ちても回す（省くのは判定が skip=true を返したときだけ）
     if: ${{ !cancelled() && needs.ci-scope.outputs.skip != 'true' }}
@@ -83,7 +85,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1]
+        shard: [0, 1, 2, 3, 4, 5]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -115,7 +117,7 @@ jobs:
       # 項目ごとの名前と結果を JUnit XML に残す（ログは -q で件数だけ。#2346）
       - run: uv run --frozen --project . --all-extras pytest . -q -n auto --junitxml=pytest-junit-${{ matrix.shard }}.xml
         env:
-          SHARD_TOTAL: 2
+          SHARD_TOTAL: 6
           SHARD_INDEX: ${{ matrix.shard }}
       - uses: actions/upload-artifact@v7
         if: always()

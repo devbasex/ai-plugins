@@ -247,22 +247,15 @@ def test_case_of_stays_cd_no_review_when_approvals_are_unreadable(monkeypatch):
     assert rc.case_of(".").case == rc.CD_NO_REVIEW
 
 
-def test_ai_plugins_declaration_is_cd_admin(monkeypatch):
-    """受け入れ条件 9: ai-plugins の宣言を場合の判定に通すと、承認数 1 で cd-admin になる。旧い宣言が残っていれば（移行は
-    手順 2）、移行のコマンドが書く値を読む。"""
-    import branch_strategy_legacy as legacy
-
-    sys.path.insert(0, str(SCRIPTS))
-    from project_lib import branch_strategy_migrate as bmig
-
-    plan, _ = bmig.plan_migration(REPO, legacy.load_moves())
-    project = plan.files.get("project.json") or json.loads((REPO / ".ndf" / "project.json").read_text(encoding="utf-8"))
-    sec = project[branch_strategy.SECTION]
+def test_ai_plugins_declaration_is_cd_review(monkeypatch):
+    """受け入れ条件 9: ai-plugins の宣言を場合の判定に通すと、承認数 1 で cd-review になる（#3672 の手順 2 で
+    merge-queue・管理者の迂回なしへ移した）。迂回の宣言で cd-admin になる経路は test_case_of_reads_the_admin_declaration が見る。"""
+    sec = json.loads((REPO / ".ndf" / "project.json").read_text(encoding="utf-8"))[branch_strategy.SECTION]
     monkeypatch.setattr(rc.repo, "branch_strategy_of", lambda root: branch_strategy.Strategy(sec))
     monkeypatch.setattr(delivery, "load_delivery", lambda root: _decl([AUTO]))
     run, _ = fake({"rules/branches/main": (0, json.dumps([pr_rule(1)])), "{repo}/branches/main": UNPROTECTED})
     monkeypatch.setattr(gh_call, "RUNNER", run)
-    assert rc.case_of(".").case == rc.CD_ADMIN
+    assert rc.case_of(".").case == rc.CD_REVIEW
 
 
 # 現状固定（I-002）: decide_case が返す Case の全項目と、case_at・case_or_stop の経路。

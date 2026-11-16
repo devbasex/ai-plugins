@@ -6,6 +6,8 @@ name: Runtime plugin validation
 # マージ可能にならない。push の側は絞り込みを残す（マージの可否を決めないため）
 on:
   pull_request:
+  # merge queue の一時コミットで必須のチェックを回す（#3672 の手順 3）
+  merge_group:
   push:
     branches:
       - main

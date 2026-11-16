@@ -558,8 +558,8 @@ def test_queue_creates_worktrees_in_order_before_run(tmp_path, monkeypatch):
 
 
 def cli(*args, cwd=None):
-    """既定ではこのリポジトリの宣言の写しで打つ（作業場所に宣言が無いとき、今のディレクトリの .ndf/ を読む）。ai-plugins の
-    .ndf/ は #3672 の手順 2 まで旧いキーのまま残り、部品は旧いキーが残ると止まるため、移した写し（`like_root`）を使う。"""
+    """既定では移行の前の ai-plugins の形（develop → main・開発版のチャネル）の写し（`like_root`）で打つ（作業場所に宣言が
+    無いとき、今のディレクトリの .ndf/ を読む）。"""
     return inproc.run(SUPERVISE, *args, cwd=cwd or strategy_fixture.like_root())
 
 

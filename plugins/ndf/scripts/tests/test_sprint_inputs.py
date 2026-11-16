@@ -32,7 +32,7 @@ def sprint_args(tmp_path: Path, pace: str = "normal", issues=("11", "12"), desig
     args += ["--version", "10.18.0-dev.1", "--out", str(tmp_path / "m")]
     if pace != "normal":
         args += ["--pace", pace, "--state", str(sprint_state(tmp_path, "auto"))]
-    # fast は作業場所に宣言を持たないので、このリポジトリの宣言を移した写し（ai-plugins の .ndf/ は #3672 の手順 2 まで旧いキー）で打つ
+    # fast は作業場所に宣言を持たないので、このリポジトリの宣言を移した写し（移行の前の ai-plugins の形。`like_root`）で打つ
     return args, (repo if pace != "fast" else strategy_fixture.like_root())
 
 
