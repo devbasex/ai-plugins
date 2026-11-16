@@ -22,6 +22,7 @@ from worktree_helpers import (
     git,
     run_lib,
     write_declaration,
+    write_strategy,
 )
 
 TESTENV = SCRIPTS_DIR / "worktree-testenv.sh"
@@ -81,8 +82,6 @@ def run_session(cwd: Path) -> dict:
 
 SHARED = {
     "version": 1,
-    "base_branch": "develop",
-    "production_branch": "main",
     "guard": {"allow_paths": ["notes/"]},
     "localenv": {"kind": "compose", "copy_from_main": [".env", "vendor"]},
     "testenv": {
@@ -100,6 +99,7 @@ def shared(main_repo: Path) -> Path:
     # 突き合わせが「どちらも解決できない」で一致してしまう。
     git(main_repo, "branch", "develop")
     write_declaration(main_repo, json.dumps(SHARED))
+    write_strategy(main_repo, base="develop", production="main")
     return main_repo
 
 
@@ -222,8 +222,7 @@ def test_follow_branch_can_be_disabled_locally(main_repo: Path) -> None:
 
 OPERATIONAL_LOCAL = {
     "version": 1,
-    "base_branch": "main",
-    "production_branch": "develop",
+    "branches": {"base": "main", "production": "develop"},
     "guard": {"allow_paths": ["/"]},
     "future_field": {"a": 1},
 }
@@ -459,13 +458,13 @@ def test_ignored_lists_operational_and_expose_keys(shared: Path) -> None:
         {
             "$schema": "https://example.com/worktree.schema.json",
             "version": 1,
-            "base_branch": "main",
+            "branches": {"base": "main"},
             "guard": {"allow_paths": ["/"]},
             "testenv": {"port_band": [40000, 40999], "expose": {"enabled": True}},
         },
     )
 
-    assert local_ignored(shared) == ["base_branch", "guard", "testenv.expose"]
+    assert local_ignored(shared) == ["branches", "guard", "testenv.expose"]
 
 
 def test_ignored_lists_expose_when_it_is_the_only_testenv_key(main_repo: Path) -> None:
