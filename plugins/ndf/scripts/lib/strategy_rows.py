@@ -1,8 +1,8 @@
 """strategy_rows.py: 取り込み方の表とレビューの単位の表（#3672 の D11。`lib/branch_strategy.py` の補助）。
 
 取り込み方の表 `ROWS` の行の名前は、ブランチ戦略の宣言（`.ndf/project.json` の `branch_strategy`）の `release_strategy` の値
-（`merge_base_branch`・`release_branch`・`trunk`）と同じである。範囲の決め方・組み直しの判定・リリースブランチの組み方・
-スプリントブランチを残すかを行が持ち、呼ぶ側は行の属性とメソッドだけを読み、取り込み方の名前で分岐しない。
+（`merge_base_branch`・`release_branch`・`trunk`）と同じである。範囲の決め方・組み直しの判定・スプリントブランチを
+残すかを行が持ち（リリースブランチを組む Git の手順は `release_lib/strategy_route.py`）、呼ぶ側は行の属性とメソッドだけを読み、取り込み方の名前で分岐しない。
 
 レビューの単位（セクションの `reviews`。#3163）は、PR の種類ごとに掛けるレビュー（`checks`）と対象の差分（`diff`）を持つ。
 形と取り込み方との組み合わせ（R9）はスキーマが確かめ、実装の差分を覆うか（I4）と重なり（I12）だけを `review_problems` が確かめる。
@@ -24,7 +24,7 @@ MEASURE_CANDIDATES = ("main", "master", "develop")
 SPRINT_PREFIX = "sprint/"
 RELEASE_PREFIX = "release/v"
 
-# リリースブランチを組むマージの件名（`build_release_branch`）。範囲の PR（`release_lib/included.py`）が単位の中の PR を拾う目印
+# リリースブランチを組むマージの件名（`release_lib/strategy_route.py` の `_build_release_branch`）。範囲の PR（`release_lib/included.py`）が単位の中の PR を拾う目印
 UNIT_MERGE = re.compile(rf"^Merge (?:origin/)?{re.escape(SPRINT_PREFIX)}\S+ into {re.escape(RELEASE_PREFIX)}\S+$")
 
 
@@ -97,31 +97,6 @@ class Row:
         if self.selects_units:
             return (prev_tag or production_ref, head)
         return (production_ref, head)
-
-    def build_release_branch(self, root, branch: str, production_ref: str, units: list[str]) -> str:
-        """`production_ref` から `branch` を切り、`units` を `--no-ff` で順にマージして先頭の SHA を返す。
-
-        単位を選ばない行では使わない（ValueError）。衝突すれば取り消して ReleaseBuildError（E10）。同じ衝突の解き方は rerere で
-        再利用し、rerere が衝突をすべて解いたマージはそのままコミットして進む。組むのは detached HEAD で、ローカルの `branch` を
-        作らず動かさない。送るのは呼び手が HEAD を送る。"""
-        if not self.selects_units:
-            raise ValueError(f"取り込み方 {self.name} はリリースの単位を選ばない")
-        if not units:
-            raise ReleaseBuildError("選んだリリースの単位が無い")
-        p = git_run(root, "checkout", "-q", "--detach", production_ref)
-        if p.returncode != 0:
-            raise ReleaseBuildError(f"{production_ref} から {branch} を切れない: {p.stderr.strip()}")
-        for u in units:
-            if ancestor_of(root, u, "HEAD"):
-                continue
-            subject = unit_merge_subject(u, branch)
-            p = git_run(
-                root, "-c", "rerere.enabled=true", "-c", "rerere.autoupdate=true", "merge", "--no-ff", "--no-edit", "-m", subject, u
-            )
-            if p.returncode != 0 and not commit_resolved_merge(root, subject):
-                git_run(root, "merge", "--abort")
-                raise ReleaseBuildError(f"{u} を {branch} へマージできない（衝突は人が解く）: {(p.stdout + p.stderr).strip()[-400:]}")
-        return git_run(root, "rev-parse", "HEAD").stdout.strip()
 
 
 ROWS: dict[str, Row] = {

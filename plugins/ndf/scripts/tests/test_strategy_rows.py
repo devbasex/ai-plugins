@@ -10,8 +10,9 @@ from pathlib import Path
 import pytest
 
 SCRIPTS = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(SCRIPTS / "lib"))
+sys.path[:0] = [str(SCRIPTS / "lib"), str(SCRIPTS)]
 import strategy_rows as sr  # noqa: E402
+from release_lib.strategy_route import _build_release_branch  # noqa: E402
 
 
 def test_rows_are_named_by_release_strategy_values():
@@ -90,7 +91,7 @@ def test_release_branch_holds_only_the_selected_units(history):
     開発版の版上げはリリースブランチの祖先に入らない。"""
     repo, other, bump = history
     row = sr.ROWS["release_branch"]
-    head = row.build_release_branch(repo, "release/v1.1.0", "main", ["sprint/a"])
+    head = _build_release_branch(row, repo, "release/v1.1.0", "main", ["sprint/a"])
     anc = lambda c: subprocess.run(["git", "-C", str(repo), "merge-base", "--is-ancestor", c, head]).returncode == 0  # noqa: E731
     assert anc("sprint/a") and anc("main")
     assert not anc("sprint/b") and not anc(other) and not anc(bump)
@@ -105,7 +106,7 @@ def test_release_branch_stops_on_conflicts(history):
         git(repo, "checkout", "-q", "-b", f"sprint/{name}", "main")
         commit(repo, "same.txt", f"{name}\n", f"sprint {name}")
     with pytest.raises(sr.ReleaseBuildError):
-        sr.ROWS["release_branch"].build_release_branch(repo, "release/v2", "main", ["sprint/c", "sprint/d"])
+        _build_release_branch(sr.ROWS["release_branch"], repo, "release/v2", "main", ["sprint/c", "sprint/d"])
     assert git(repo, "status", "--porcelain") == ""
 
 
@@ -122,7 +123,7 @@ def test_release_branch_reuses_rerere_resolution(history):
     (repo / "same.txt").write_text("c\nd\n")
     git(repo, "add", "same.txt")
     git(repo, "commit", "-q", "--no-edit")
-    head = sr.ROWS["release_branch"].build_release_branch(repo, "release/v2", "main", ["sprint/c", "sprint/d"])
+    head = _build_release_branch(sr.ROWS["release_branch"], repo, "release/v2", "main", ["sprint/c", "sprint/d"])
     assert git(repo, "show", f"{head}:same.txt") == "c\nd"
     assert git(repo, "log", "-1", "--format=%s", head) == "Merge sprint/d into release/v2"
 
@@ -133,14 +134,14 @@ def test_release_branch_builds_while_branch_is_checked_out_elsewhere(history, tm
     git(repo, "branch", "release/v3", "main")
     git(repo, "worktree", "add", "-q", str(tmp_path / "prod"), "release/v3")
     before = git(repo, "rev-parse", "release/v3")
-    head = sr.ROWS["release_branch"].build_release_branch(repo, "release/v3", "main", ["sprint/a"])
+    head = _build_release_branch(sr.ROWS["release_branch"], repo, "release/v3", "main", ["sprint/a"])
     assert head != before
     assert git(repo, "rev-parse", "release/v3") == before
 
 
 def test_merge_base_branch_row_does_not_build_release_branches(history):
     with pytest.raises(ValueError):
-        sr.ROWS["merge_base_branch"].build_release_branch(history[0], "release/v1", "main", ["sprint/a"])
+        _build_release_branch(sr.ROWS["merge_base_branch"], history[0], "release/v1", "main", ["sprint/a"])
 
 
 def test_release_branch_keeps_sprint_branches_until_production_holds_them(history):

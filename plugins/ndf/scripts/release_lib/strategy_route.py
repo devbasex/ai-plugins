@@ -86,7 +86,7 @@ def build_branch(root, branch: str, production: str, units: list[str]) -> dict:
     wt = tmp / "wt"
     git(root, "worktree", "add", "-q", "--detach", str(wt), start)
     try:
-        head = row.build_release_branch(wt, branch, start, refs)
+        head = _build_release_branch(row, wt, branch, start, refs)
         git(wt, "push", "-q", "origin", f"HEAD:refs/heads/{branch}")
     finally:
         git(root, "worktree", "remove", str(wt), check=False)
@@ -100,6 +100,34 @@ def build_branch(root, branch: str, production: str, units: list[str]) -> dict:
         "production": git(root, "rev-parse", f"origin/{production}").stdout.strip(),
         "units": heads,
     }
+
+
+def _build_release_branch(row: strategy_rows.Row, root, branch: str, production_ref: str, units: list[str]) -> str:
+    """`production_ref` から `branch` を切り、`units` を `--no-ff` で順にマージして先頭の SHA を返す。
+
+    単位を選ばない行（`row.selects_units` が偽）では使わない（ValueError）。衝突すれば取り消して ReleaseBuildError（E10）。
+    同じ衝突の解き方は rerere で再利用し、rerere が衝突をすべて解いたマージはそのままコミットして進む。組むのは detached HEAD で、
+    ローカルの `branch` を作らず動かさない。送るのは呼び手が HEAD を送る。"""
+    if not row.selects_units:
+        raise ValueError(f"取り込み方 {row.name} はリリースの単位を選ばない")
+    if not units:
+        raise strategy_rows.ReleaseBuildError("選んだリリースの単位が無い")
+    p = strategy_rows.git_run(root, "checkout", "-q", "--detach", production_ref)
+    if p.returncode != 0:
+        raise strategy_rows.ReleaseBuildError(f"{production_ref} から {branch} を切れない: {p.stderr.strip()}")
+    for u in units:
+        if strategy_rows.ancestor_of(root, u, "HEAD"):
+            continue
+        subject = strategy_rows.unit_merge_subject(u, branch)
+        p = strategy_rows.git_run(
+            root, "-c", "rerere.enabled=true", "-c", "rerere.autoupdate=true", "merge", "--no-ff", "--no-edit", "-m", subject, u
+        )
+        if p.returncode != 0 and not strategy_rows.commit_resolved_merge(root, subject):
+            strategy_rows.git_run(root, "merge", "--abort")
+            raise strategy_rows.ReleaseBuildError(
+                f"{u} を {branch} へマージできない（衝突は人が解く）: {(p.stdout + p.stderr).strip()[-400:]}"
+            )
+    return strategy_rows.git_run(root, "rev-parse", "HEAD").stdout.strip()
 
 
 def head_ref(root, branch: str | None) -> str:
