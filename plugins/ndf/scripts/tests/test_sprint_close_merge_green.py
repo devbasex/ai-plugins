@@ -189,9 +189,12 @@ def repo(tmp_path):
     git(root, "config", "user.name", "t")
     git(root, "config", "commit.gpgsign", "false")
     (root / "keep.txt").write_text("x\n", encoding="utf-8")
+    # ブランチ戦略の宣言（develop → main）。develop 宛ての PR はリリース承認ゲートに当たらない。宣言を読めなければ
+    # 本番系へ出るかを決められず止まる（#3672 の I3）
+    strategy_fixture.declare(root, "develop", "main")
     git(root, "add", "-A")
     git(root, "commit", "-q", "-m", "init")
-    git(root, "branch", "main")  # 本番チャネル（既定ブランチ）。develop 宛ての PR はリリース承認ゲートに当たらない
+    git(root, "branch", "main")  # 本番チャネル
     return root
 
 

@@ -38,7 +38,8 @@ def write(root, rel, text):
     return p
 
 
-def make_repo(root: Path, decl: dict | None = None, tracked=SERENA) -> Path:
+def make_repo(root: Path, decl: dict | None = None, tracked=SERENA, strategy: bool = False) -> Path:
+    """`strategy` が真なら main だけのブランチ戦略の宣言（pr-steps.py が宛先を読む）もコミットする。"""
     root.mkdir(parents=True)
     git(root, "init", "-q", "-b", "main")
     git(root, "config", "user.email", "t@example.com")
@@ -48,6 +49,11 @@ def make_repo(root: Path, decl: dict | None = None, tracked=SERENA) -> Path:
         write(root, rel, "old\n")
     if decl is not None:
         write(root, ".ndf/worktree.json", json.dumps(decl))
+    if strategy:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import strategy_fixture
+
+        strategy_fixture.declare(root, "main")
     git(root, "add", "-A")
     git(root, "commit", "-q", "-m", "init")
     return root
@@ -170,7 +176,7 @@ def env(tmp_path):
 
 def dev_worktree(tmp_path, decl=None):
     """main を起点に feature/x へ移った開発 worktree。origin は bare。"""
-    root = make_repo(tmp_path / "repo", decl)
+    root = make_repo(tmp_path / "repo", decl, strategy=True)
     origin = tmp_path / "origin.git"
     subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(origin)], check=True)
     git(root, "remote", "add", "origin", str(origin))
