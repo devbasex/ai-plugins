@@ -23,6 +23,7 @@ import deps  # noqa: E402
 
 deps.require("md")
 import dist_record  # noqa: E402
+import strategy_fixture  # noqa: E402
 
 _spec = importlib.util.spec_from_file_location("sprint_close_harness_1273", HERE / "test_sprint_close_merge_green.py")
 harness = importlib.util.module_from_spec(_spec)
@@ -79,11 +80,7 @@ def repo(tmp_path: Path) -> Path:
         ["config", "tag.gpgsign", "false"],
     ):
         git(root, *args)
-    (root / ".ndf").mkdir()
-    (root / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "base_branch": "develop", "production_branch": "main"}))
-    (root / ".ndf" / "supervise.json").write_text(
-        json.dumps({"release": {"form": "package-plugin", "plugin": "ndf", "runtimes": ["claude"]}})
-    )
+    strategy_fixture.declare(root, "develop", "main", {"form": "package-plugin", "plugin": "ndf", "runtimes": ["claude"]})
     git(root, "add", "-A")
     git(root, "commit", "-q", "-m", "init")
     git(root, "remote", "add", "origin", str(origin))

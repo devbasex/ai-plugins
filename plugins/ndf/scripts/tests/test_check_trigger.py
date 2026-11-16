@@ -22,6 +22,7 @@ import inproc  # noqa: E402
 SCRIPT = SCRIPTS / "check-trigger.py"
 sys.path.insert(0, str(SCRIPTS / "lib"))
 from step_result import validate_result  # noqa: E402
+import strategy_fixture  # noqa: E402
 
 FAKE_GH = r"""#!{py}
 import json, os, sys
@@ -81,10 +82,7 @@ def repo(tmp_path):
         git(root, "config", k, v)
     git(root, "remote", "add", "origin", str(origin))
     write_decl(root, TRIGGERS)
-    (root / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "base_branch": "develop", "production_branch": "main"}))
-    (root / ".ndf" / "supervise.json").write_text(
-        json.dumps({"version": 1, "release": {"form": "package-plugin", "plugin": "ndf", "runtimes": ["claude"]}})
-    )
+    strategy_fixture.declare(root, "develop", "main", {"form": "package-plugin", "plugin": "ndf", "runtimes": ["claude"]})
     git(root, "add", "-A")
     git(root, "commit", "-q", "-m", "init")
     git(root, "tag", "-a", "ndf--v1.0.0", "-m", "v1.0.0")

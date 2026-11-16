@@ -26,6 +26,9 @@ import gh_graphql  # noqa: E402
 import gh_pr_info  # noqa: E402
 import gh_sections  # noqa: E402
 import repo  # noqa: E402
+
+sys.path.insert(0, str(PLUGIN_ROOT / "scripts" / "tests"))
+import strategy_fixture  # noqa: E402
 from step_result import validate_result  # noqa: E402
 
 PR = 1836
@@ -77,8 +80,7 @@ def _origin_and_clone(tmp_path: Path, branches=("develop",)) -> tuple[Path, Path
 
 
 def _declare(root: Path, base: str) -> None:
-    (root / ".ndf").mkdir(exist_ok=True)
-    (root / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "base_branch": base}), encoding="utf-8")
+    strategy_fixture.write_strategy(root, "web-develop", base=base)
 
 
 # ---------------- existing_base_branch（I1・I2） ----------------
@@ -111,21 +113,11 @@ def test_ls_remote_suffix_match_is_not_the_branch(tmp_path):
     assert repo.existing_base_branch(clone)[0] is None
 
 
-def test_no_declaration_uses_origin_head(tmp_path):
+def test_no_declaration_does_not_fall_back_to_the_default_branch(tmp_path):
+    """I3（#3672）: 宣言が無ければ origin/HEAD や main・master へ倒さず、決まらない理由を返す。"""
     _, clone = _origin_and_clone(tmp_path)
-    assert repo.existing_base_branch(clone) == ("main", "既定ブランチ")
-
-
-@pytest.mark.parametrize("branch", ["main", "master"])
-def test_no_declaration_no_origin_head_uses_local_main_or_master(tmp_path, branch):
-    root = _init(tmp_path / "r", branch)
-    assert repo.existing_base_branch(root) == (branch, "既定ブランチ")
-
-
-def test_nothing_decides_the_base(tmp_path):
-    root = _init(tmp_path / "r", "trunk")
-    name, why = repo.existing_base_branch(root)
-    assert name is None and why
+    name, why = repo.existing_base_branch(clone)
+    assert name is None and "branch_strategy" in why
 
 
 # ---------------- 本来の判定（I4）と検査（I3） ----------------

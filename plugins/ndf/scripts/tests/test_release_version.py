@@ -23,6 +23,7 @@ import sprint_loop as sl  # noqa: E402
 import sprint_loop_record as sl_record  # noqa: E402
 from supervise_lib import queue, queue_fill  # noqa: E402
 from supervise_lib.paths import state_dir_of  # noqa: E402
+import strategy_fixture  # noqa: E402
 
 
 def git(root: Path, *args: str) -> str:
@@ -83,8 +84,7 @@ class World:
         git(self.repo, "init", "-q", "-b", "develop")
         for k, v in (("user.email", "t@example.com"), ("user.name", "t"), ("commit.gpgsign", "false")):
             git(self.repo, "config", k, v)
-        (self.repo / ".ndf").mkdir()
-        (self.repo / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "base_branch": "develop", "production_branch": "main"}))
+        strategy_fixture.declare(self.repo, "develop", "main", {"form": "package-plugin", "plugin": "ndf"})
         git(self.repo, "remote", "add", "origin", str(self.origin))
         self.publish(version, "develop", "main", tag=True)
 

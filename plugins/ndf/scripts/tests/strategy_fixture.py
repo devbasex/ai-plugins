@@ -42,3 +42,20 @@ def write_strategy(root: Path, kind: str = "web-develop", base: str | None = Non
     doc["branch_strategy"] = sec
     p.write_text(json.dumps(doc, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return sec
+
+
+def declare(root: Path, base: str = "main", production: str | None = None, release: dict | None = None, deliveries: list | None = None, **edits) -> dict:
+    """ブランチ名とリリースの形から種類を選んで宣言を書く（旧い `worktree.json` のブランチ名・`supervise.json` の `release`・
+    `project.json` の `delivery` を入力にしていたテストの移し先）。
+
+    ベースブランチと本番ブランチが同じなら `web-trunk`、違えば `web-develop` の写しを使う。`release` の形が `package-plugin`
+    なら `plugin` の種類のリリースの値（版数の置き場・タグ）を土台にし、渡した値で上書きする。"""
+    production = production or base
+    kind = "web-trunk" if production == base else "web-develop"
+    rel = copy.deepcopy(section(kind)["release"])
+    if (release or {}).get("form") == "package-plugin":
+        rel = copy.deepcopy(section("plugin")["release"])
+    rel.update(release or {})
+    if deliveries is not None:
+        rel["deliveries"] = deliveries
+    return write_strategy(root, kind, base=base, production=production, release=rel, **edits)
