@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -239,9 +240,11 @@ def test_case_at_without_repository(tmp_path):
     assert rc.case_at(None) == expected
     assert rc.case_at("") == expected
     assert rc.case_at(tmp_path / "無い") == expected
+    assert rc.case_at(tmp_path) == expected  # git の木でないディレクトリ（宣言を探す木が無い）
 
 
 def test_case_at_on_unreadable_declaration(monkeypatch, tmp_path):
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)  # git の木でなければリポジトリが無い（CD の無い場合）
     monkeypatch.setattr(delivery, "load_delivery", lambda root: delivery.DeliveryDecl(problems=["壊れた"]))
     assert rc.case_at(tmp_path) == rc.Case(rc.NO_CD, *_NO_CD, "宣言を読めない")
     with pytest.raises(rc.CaseUnreadable):
@@ -249,6 +252,7 @@ def test_case_at_on_unreadable_declaration(monkeypatch, tmp_path):
 
 
 def test_case_at_delegates_to_case_of(monkeypatch, tmp_path):
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)  # git の木でなければリポジトリが無い（CD の無い場合）
     monkeypatch.setattr(delivery, "load_delivery", lambda root: _decl([AUTO]))
     run, _ = fake({"rules/branches/main": (0, json.dumps([pr_rule(0)]))})
     monkeypatch.setattr(gh_call, "RUNNER", run)

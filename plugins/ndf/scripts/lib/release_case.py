@@ -17,7 +17,6 @@ CD の行は `lib/delivery.py` の `merge_rows`。承認数は本番チャネル
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import NamedTuple
 
 import delivery
@@ -150,9 +149,9 @@ def case_of(root) -> Case:
 
 
 def case_at(root, strict: bool = False) -> Case:
-    """プランを組むときのリリースの場合。リポジトリ（`root`）が無ければ CD の無い場合（今のプランのまま）。
-    宣言を読めなければ、`strict` なら CaseUnreadable、そうでなければ CD の無い場合として返す。"""
-    if not root or not Path(root).is_dir():
+    """プランを組むときのリリースの場合。リポジトリ（`root`。git の木でないディレクトリを含む）が無ければ CD の無い場合
+    （今のプランのまま）。宣言を読めなければ、`strict` なら CaseUnreadable、そうでなければ CD の無い場合として返す。"""
+    if not root or repo.first_git_tree([root]) is None:
         return decide_case(False, None, "リポジトリが無い")
     try:
         return case_of(root)
