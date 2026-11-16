@@ -112,51 +112,67 @@ def single_plugin(s: Samples) -> tuple[str, list[str]] | None:
     return name, runtimes
 
 
+def _merged_prs(got: list) -> list[dict]:
+    return [
+        {"number": p["number"], "base": (p.get("base") or {}).get("ref"), "head": (p.get("head") or {}).get("ref")}
+        for p in got
+        if isinstance(p, dict) and p.get("merged_at")
+    ]
+
+
+def _tag_names(got: list) -> list[str]:
+    return [t["name"] for t in got if isinstance(t, dict) and t.get("name")]
+
+
+def _release_tags(got: list) -> list[str]:
+    return [r["tag_name"] for r in got if isinstance(r, dict) and r.get("tag_name")]
+
+
+# 集める一覧: (Samples の属性名, API のパス（{limit} を入れる）, 取り出し方)。属性名は打ち切り・読めないの記録の名前も兼ねる
+_LISTINGS = (
+    ("prs", "repos/{{owner}}/{{repo}}/pulls?state=closed&per_page={limit}", _merged_prs),
+    ("tags", "repos/{{owner}}/{{repo}}/tags?per_page={limit}", _tag_names),
+    ("releases", "repos/{{owner}}/{{repo}}/releases?per_page={limit}", _release_tags),
+)
+
+
 def collect_samples(root: Path, api: Api, deadline: float, limit: int) -> Samples:
     """直近のマージ済み PR・タグ・Release・本番ブランチの履歴・ruleset・ワークフロー・版数のファイルを集める。"""
     s = Samples()
     s.production = _default_branch(root, api)
     if s.production is None:
         s.unreadable.append("default_branch")
-    for kind, path in (
-        ("prs", f"repos/{{owner}}/{{repo}}/pulls?state=closed&per_page={limit}"),
-        ("tags", f"repos/{{owner}}/{{repo}}/tags?per_page={limit}"),
-        ("releases", f"repos/{{owner}}/{{repo}}/releases?per_page={limit}"),
-    ):
+    for attr, path, extract in _LISTINGS:
         if time.monotonic() > deadline:
-            s.warnings.append(f"時間切れで打ち切った: {kind}")
+            s.warnings.append(f"時間切れで打ち切った: {attr}")
             continue
-        got, why = api(path)
+        got, why = api(path.format(limit=limit))
         if not isinstance(got, list):
-            s.unreadable.append(kind)
+            s.unreadable.append(attr)
             continue
-        if kind == "prs":
-            s.prs = [
-                {"number": p["number"], "base": (p.get("base") or {}).get("ref"), "head": (p.get("head") or {}).get("ref")}
-                for p in got
-                if isinstance(p, dict) and p.get("merged_at")
-            ][:limit]
-        elif kind == "tags":
-            s.tags = [t["name"] for t in got if isinstance(t, dict) and t.get("name")][:limit]
-        else:
-            s.releases = [r["tag_name"] for r in got if isinstance(r, dict) and r.get("tag_name")][:limit]
+        setattr(s, attr, extract(got)[:limit])
     if s.production:
         _collect_production_commits(root, s, limit)
-        import release_case
-
-        rules, why = api(f"repos/{{owner}}/{{repo}}/rules/branches/{s.production}")
-        if why == "missing":
-            s.rules = release_case.RuleFacts(False, 0, False, False, None)
-        elif isinstance(rules, list):
-            byp = []
-            for rid in sorted({r.get("ruleset_id") for r in rules if isinstance(r, dict) and r.get("ruleset_id")}):
-                got, _ = api(f"repos/{{owner}}/{{repo}}/rulesets/{rid}")
-                byp.append(got.get("current_user_can_bypass") if isinstance(got, dict) else None)
-            s.rules = release_case.rule_facts_of(rules, byp)
-        else:
-            s.unreadable.append("ruleset")
+        _collect_rules(api, s)
     local_facts(root, s)
     return s
+
+
+def _collect_rules(api: Api, s: Samples) -> None:
+    """本番ブランチに効く ruleset を読み、承認の数・merge queue・迂回の可否の事実にする。"""
+    import release_case
+
+    rules, why = api(f"repos/{{owner}}/{{repo}}/rules/branches/{s.production}")
+    if why == "missing":
+        s.rules = release_case.RuleFacts(False, 0, False, False, None)
+    elif isinstance(rules, list):
+        byp = []
+        for rid in sorted({r.get("ruleset_id") for r in rules if isinstance(r, dict) and r.get("ruleset_id")}):
+            got, _ = api(f"repos/{{owner}}/{{repo}}/rulesets/{rid}")
+            byp.append(got.get("current_user_can_bypass") if isinstance(got, dict) else None)
+        s.rules = release_case.rule_facts_of(rules, byp)
+    else:
+        s.unreadable.append("ruleset")
 
 
 def _collect_production_commits(root: Path, s: Samples, limit: int) -> None:
