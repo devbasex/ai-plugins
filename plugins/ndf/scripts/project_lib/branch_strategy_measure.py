@@ -80,7 +80,7 @@ def _default_branch(root: Path, api: Api) -> str | None:
     return head.strip().split("/", 1)[-1] if head else None
 
 
-def _local_facts(root: Path, s: Samples) -> None:
+def local_facts(root: Path, s: Samples) -> None:
     wf = Path(root) / ".github" / "workflows"
     for p in sorted(wf.glob("*.y*ml")) if wf.is_dir() else []:
         try:
@@ -102,6 +102,19 @@ def _local_facts(root: Path, s: Samples) -> None:
         if name:
             runtimes = ["claude"] + (["codex"] if (pj.parent.parent / ".codex-plugin" / "plugin.json").is_file() else [])
             s.plugins[name] = runtimes
+
+
+def cd_workflows(s: Samples) -> list[str]:
+    """CD の印（Release・タグを作るコマンド）を含むワークフローの名前（昇順）。"""
+    return sorted(n for n, text in s.workflows.items() if any(m in text for m in CD_MARKS))
+
+
+def single_plugin(s: Samples) -> tuple[str, list[str]] | None:
+    """プラグインが 1 つだけのときの名前とランタイム。0 個か 2 個以上なら None。"""
+    if len(s.plugins) != 1:
+        return None
+    ((name, runtimes),) = s.plugins.items()
+    return name, runtimes
 
 
 def collect_samples(root: Path, api: Api, deadline: float, limit: int) -> Samples:
@@ -147,7 +160,7 @@ def collect_samples(root: Path, api: Api, deadline: float, limit: int) -> Sample
             s.rules = release_case.rule_facts_of(rules, byp)
         else:
             s.unreadable.append("ruleset")
-    _local_facts(root, s)
+    local_facts(root, s)
     return s
 
 
@@ -273,8 +286,9 @@ def _source_keys(s: Samples, release_strategy: str | None) -> dict[str, Measured
         out["/branches/production"] = Measured(s.production, [{"source": "repo", "ref": "default_branch", "value": s.production}])
     else:
         out["/branches/production"] = Measured(why="insufficient")
-    if len(s.plugins) == 1:
-        ((name, runtimes),) = s.plugins.items()
+    plugin = single_plugin(s)
+    if plugin:
+        name, runtimes = plugin
         out["/release/plugin"] = Measured(name, [{"source": "repo", "ref": "plugin.json", "value": name}])
         out["/release/runtimes"] = Measured(runtimes, [{"source": "repo", "ref": "plugin.json", "value": ",".join(runtimes)}])
         out["/release/version_store"] = Measured({"kind": "plugin"}, [{"source": "repo", "ref": "plugin.json", "value": "plugin"}])
@@ -285,7 +299,7 @@ def _source_keys(s: Samples, release_strategy: str | None) -> dict[str, Measured
         )
     else:
         out["/release/version_store"] = Measured({"kind": "none"}, [{"source": "repo", "ref": "版数のファイルが無い", "value": "none"}])
-    cd = sorted(n for n, text in s.workflows.items() if any(m in text for m in CD_MARKS))
+    cd = cd_workflows(s)
     out["/release/cd"] = Measured(
         {"workflow": cd[0]} if cd else None,
         [{"source": "workflow", "ref": cd[0] if cd else "CD のワークフローが無い", "value": cd[0] if cd else "null"}],

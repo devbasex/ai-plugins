@@ -38,14 +38,15 @@ def _bs_facts(root: Path, measure_mod) -> dict:
     import gh_graphql
 
     s = measure_mod.Samples()
-    measure_mod._local_facts(root, s)
+    measure_mod.local_facts(root, s)
     head = proc.git_out(root, "symbolic-ref", "--short", "HEAD")
     production = repo.default_branch(root) or (head or "").strip() or None
     facts = {"production": production}
-    if len(s.plugins) == 1:
-        ((name, runtimes),) = s.plugins.items()
+    plugin = measure_mod.single_plugin(s)
+    if plugin:
+        name, runtimes = plugin
         facts.update(plugin=name, runtimes=runtimes)
-    cd = sorted(n for n, text in s.workflows.items() if any(m in text for m in measure_mod.CD_MARKS))
+    cd = measure_mod.cd_workflows(s)
     facts["workflow"] = cd[0] if cd else None
     slug = repo.owner_repo(root)
     facts["merge_queue"] = gh_graphql.merge_queue_enabled(slug, production) if slug and production else None
