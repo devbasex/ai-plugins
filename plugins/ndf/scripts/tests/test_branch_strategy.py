@@ -596,6 +596,26 @@ def test_collect_samples_past_deadline_skips_api_lists_only(tmp_path):
     assert seen == ["repos/{owner}/{repo}", "repos/{owner}/{repo}/rules/branches/main"]
 
 
+@pytest.mark.parametrize("now, cut", [(9.0, []), (10.0, []), (11.0, ["prs", "tags", "releases"])])
+def test_collect_samples_cuts_only_after_the_deadline(tmp_path, monkeypatch, now, cut):
+    """締切の比較は「超えた」（>）。締切と等しい時刻では打ち切らない。打ち切っても ruleset とローカルの事実は集める。"""
+    from types import SimpleNamespace
+
+    root = history_repo(tmp_path, 1)
+    seen = []
+    base = fake_api([(1, "main", "a")], tags=["v1"])
+
+    def api(path):
+        seen.append(path)
+        return base(path)
+
+    monkeypatch.setattr(bsm, "time", SimpleNamespace(monotonic=lambda: now))
+    s = bsm.collect_samples(root, api, 10.0, 5)
+    assert s.warnings == [f"時間切れで打ち切った: {k}" for k in cut]
+    assert len([p for p in seen if "per_page" in p]) == 3 - len(cut)
+    assert seen[0] == "repos/{owner}/{repo}" and seen[-1] == "repos/{owner}/{repo}/rules/branches/main"
+
+
 def test_collect_samples_unreadable_default_branch_and_lists(tmp_path):
     root = history_repo(tmp_path, 0)
     s = bsm.collect_samples(root, lambda path: (None, "unknown"), float("inf"), 5)
