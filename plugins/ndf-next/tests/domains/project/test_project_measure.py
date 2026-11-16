@@ -398,8 +398,8 @@ def _pull(n: int, head: str, base: str, merged: bool = True, sha="abc") -> dict:
 class _FlowGh:
     repo = "o/r"
 
-    def __init__(self, pulls: list, marks: dict, rulesets=None, fail_marks: bool = False) -> None:
-        self.pulls, self.marks, self.rulesets, self.fail_marks = pulls, marks, rulesets, fail_marks
+    def __init__(self, pulls: list, comments: dict, rulesets=None, fail_comments: bool = False) -> None:
+        self.pulls, self.comments, self.rulesets, self.fail_comments = pulls, comments, rulesets, fail_comments
         self.paths: list[str] = []
 
     def get(self, path: str):
@@ -410,9 +410,9 @@ class _FlowGh:
             if self.rulesets is None:
                 raise measure_ci.GhUnavailable("forbidden")
             return self.rulesets
-        if self.fail_marks:
+        if self.fail_comments:
             raise measure_ci.GhUnavailable("no")
-        return self.marks.get(path, [])
+        return self.comments.get(path, [])
 
 
 _PR_CMD = measure_flow.PR_COMMAND
@@ -436,8 +436,8 @@ def _flow_pulls() -> list:
 
 
 def test_collect_flow_current_behavior_measured_when_all_high():
-    marks = {f"repos/o/r/pulls/{n}/reviews?per_page=100": [{"body": "## 🤖 cross-review ok"}] for n in range(1, 10)}
-    gh = _FlowGh(_flow_pulls(), marks, rulesets=[{"name": "main"}])
+    comments = {f"repos/o/r/pulls/{n}/reviews?per_page=100": [{"body": "## 🤖 cross-review ok"}] for n in range(1, 10)}
+    gh = _FlowGh(_flow_pulls(), comments, rulesets=[{"name": "main"}])
     item = measure_flow.collect_flow(_FlowTree(), gh, "develop", "main")
     assert gh.paths[0] == "repos/o/r/pulls?state=closed&per_page=100"
     assert item["status"] == "measured"
@@ -471,7 +471,7 @@ def test_collect_flow_current_behavior_measured_when_all_high():
 
 
 def test_collect_flow_current_behavior_unreadable_marks_are_counted():
-    gh = _FlowGh(_flow_pulls(), {}, rulesets=[], fail_marks=True)
+    gh = _FlowGh(_flow_pulls(), {}, rulesets=[], fail_comments=True)
     item = measure_flow.collect_flow(_FlowTree(), gh, "develop", "main")
     assert item["status"] == "measured"
     assert item["fields"]["release_strategy"]["evidence"][-1] == {"command": "gh api repos/o/r/rulesets", "text": "ルールセット: 無し"}
@@ -491,11 +491,11 @@ def test_collect_flow_current_behavior_release_and_unreadable_rulesets():
         _pull(3, "review/release/v1.0.0", "release/v1.0.0", merged=False),
         _pull(4, "feat/issue-9", "develop"),
     ]
-    marks = {
+    comments = {
         "repos/o/r/pulls/3/reviews?per_page=100": [{"body": "## 🤖 cross-review"}],
         "repos/o/r/issues/4/comments?per_page=100": [{"body": "x <!-- cross-refactoring plan -->"}],
     }
-    item = measure_flow.collect_flow(_FlowTree(), _FlowGh(pulls, marks), "develop", "main")
+    item = measure_flow.collect_flow(_FlowTree(), _FlowGh(pulls, comments), "develop", "main")
     assert item["status"] == "question"
     assert item["candidates"] == {"branch_flow": {}}
     assert item["evidence"] == []

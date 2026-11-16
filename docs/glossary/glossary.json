@@ -7894,14 +7894,14 @@
       "code": "ndf_settings_renames",
       "context": "ndf-workflow",
       "meaning": "利用者の設定（.ndf/）の旧いキーの位置・新しいキーの位置・値の対応を行ごとに持つコントラクトの表（contracts/domains/ndf-settings-renames.json）。移行のコマンド・設定を読む側の止める検査・規約の規則が同じ表を読む",
-      "pending_source": "issues/issue-3613-design.md"
+      "source": "plugins/ndf-next/skills/worktree/references/ndf-settings.md"
     },
     {
       "term": "移行のコマンド",
       "code": "settings_migrate",
       "context": "ndf-workflow",
       "meaning": "設定のキーの改名表に従い、利用者の .ndf/ を新しいキーへ書き換えるサブコマンド。差分と差分のハッシュを示す実行と、利用者が承認した差分のハッシュを渡して書く実行に分かれる",
-      "pending_source": "issues/issue-3613-design.md"
+      "source": "plugins/ndf-next/skills/worktree/references/ndf-settings.md"
     },
     {
       "term": "ブランチ戦略",

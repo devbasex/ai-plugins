@@ -139,7 +139,7 @@ flowchart TD
 
 宣言（メインディレクトリの `.ndf/project.json`）の判定・測定・書き出し・ずれ・スキーマを持つ。旧い `project-decl.py` の
 振る舞い（判定・書くファイルの置き場と形）を変えずに、副命令の形へ移したものである。宣言のスキーマの正本は
-`contracts/schemas/declarations/project.schema.json` である。
+`contracts/schemas/ndf-settings/project.schema.json` である。
 
 | 下位の命令 | 何をするか | 終了コード |
 | --- | --- | --- |

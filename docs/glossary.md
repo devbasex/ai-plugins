@@ -713,8 +713,8 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 選べる値の基準 | — | 設定で選べる値の集合ごとに、出所と値の一覧を持つファイル（`scripts/ndf-choices.json`）。値を減らすときは Issue の番号と理由を持つ例外を足す | — | — | `docs/specifications/ndf-next-repo-neutral-defaults.md` |
 | JUnit の成果物 | `junit_artifacts` | CI のジョブが上げた artifact のうち、JUnit の XML を持つもの。設定ファイルの `test.ci.junit_artifacts` が名前の glob で指し、CI で落ちたテストをログより先に読む元になる | — | — | `docs/specifications/ndf-next-ci-failed-tests-junit.md` |
 | ログのパーサー | — | 1 つのテストランナー（suite の `runner`）の CI のログの形から、落ちたテストを `<テストのファイル>::<テストの名前>` の並びで読む部品。外部ライブラリを呼ぶ唯一のモジュールの意味の「アダプター」とは別 | — | — | `docs/specifications/ndf-next-ci-failed-tests-junit.md` |
-| 設定のキーの改名表 | `ndf_settings_renames` | 利用者の設定（.ndf/）の旧いキーの位置・新しいキーの位置・値の対応を行ごとに持つコントラクトの表（contracts/domains/ndf-settings-renames.json）。移行のコマンド・設定を読む側の止める検査・規約の規則が同じ表を読む | — | — | — |
-| 移行のコマンド | `settings_migrate` | 設定のキーの改名表に従い、利用者の .ndf/ を新しいキーへ書き換えるサブコマンド。差分と差分のハッシュを示す実行と、利用者が承認した差分のハッシュを渡して書く実行に分かれる | — | — | — |
+| 設定のキーの改名表 | `ndf_settings_renames` | 利用者の設定（.ndf/）の旧いキーの位置・新しいキーの位置・値の対応を行ごとに持つコントラクトの表（contracts/domains/ndf-settings-renames.json）。移行のコマンド・設定を読む側の止める検査・規約の規則が同じ表を読む | — | — | `plugins/ndf-next/skills/worktree/references/ndf-settings.md` |
+| 移行のコマンド | `settings_migrate` | 設定のキーの改名表に従い、利用者の .ndf/ を新しいキーへ書き換えるサブコマンド。差分と差分のハッシュを示す実行と、利用者が承認した差分のハッシュを渡して書く実行に分かれる | — | — | `plugins/ndf-next/skills/worktree/references/ndf-settings.md` |
 | 設計承認のリクエスト | — | 並列の計画のレーン（開発ループのレーンと 1 スプリントのレーン）が設計承認ゲートでオーガナイザーへ送る、設計 PR の承認のリクエスト。計画のジャーナルの `kind: gate1` の行で、`answer --approved` が設計 PR をマージし、MVV 判定と古いリクエストの整理が掛かる | — | — | — |
 | 区分つきの質問 | — | `metadata.source` に区分（`ndf-gate:<番号>`・`ndf-ask:<名前>`）を持つ `AskUserQuestion`。並列の計画のレーンと一時レーンが出すと、質問の hook が `parallel.py request-ask` でオーガナイザーへ送り、計画のジャーナルの `kind: ask` の行になる。1 スプリントのレーンの区分 `ndf-gate:1` の質問が、承認の行で承認ゲートで終わった設計 PR を 1 本だけ指し、その PR が開いていて先頭のコミットを読めたときは `kind: gate1` の行（設計承認のリクエスト）になる | — | — | — |
 | 汎用性の後退 | — | NDF の変更の後に、代表のリポジトリの種類のどれかを NDF で扱えなくなること。その種類に要る選択肢（運用・リリースの形・テストのツール・CI など）を、代わりの形なしに無くすことで起きる。値の改名・作り直し・既定の変更・代わりの形のある値の削除は当たらない | — | — | `docs/specifications/ndf-design-representative-repos.md` |
