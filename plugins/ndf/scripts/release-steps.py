@@ -1012,33 +1012,33 @@ def cmd_approval_facts(a):
     prev = a.prev_tag or release_tag_before(root, plugin, cur_tag)
     if not prev:
         raise StepError("前のタグを決められない（--prev-tag を渡す）", EXIT_PRECONDITION)
-    src = (head := getattr(a, "head", None)) or base  # 選んで集める取り込み方は、組んだリリースブランチの先頭を承認に出す（#3121）
+    source_branch = (head := getattr(a, "head", None)) or base  # 選んで集める取り込み方は組んだリリースブランチの先頭を承認に出す（#3121）
     if head:
-        git(root, "fetch", "-q", "origin", f"+refs/heads/{src}:refs/remotes/origin/{src}")
-    dev = git(root, "rev-parse", f"origin/{src}").stdout.strip()
+        git(root, "fetch", "-q", "origin", f"+refs/heads/{source_branch}:refs/remotes/origin/{source_branch}")
+    approved_sha = git(root, "rev-parse", f"origin/{source_branch}").stdout.strip()
     keep = kept_sections(root, getattr(a, "approval", None))  # 前の承認資料の残す節（読めなければ書かずに止める。#1834）
-    changes = instructions.changed_instructions(root, prev, dev)
-    prs, extra_out = included.section_range(root, prev, dev, a.prs)  # 範囲の PR と --prs の和（#1274・#1885）
+    changes = instructions.changed_instructions(root, prev, approved_sha)
+    prs, extra_out = included.section_range(root, prev, approved_sha, a.prs)  # 範囲の PR と --prs の和（#1274・#1885）
     data = pr_many(root, [p.number for p in prs], "number,title,body,state,mergeCommit,url")
     outside = []
-    prs = _within_end(root, prs, data, dev, extra_out, outside)  # 終点は承認に出すコミット（#2555 の I2）
+    prs = _within_end(root, prs, data, approved_sha, extra_out, outside)  # 終点は承認に出すコミット（#2555 の I2）
 
-    stat = git(root, "diff", "--shortstat", f"origin/{prod}...{dev}").stdout.strip()
+    stat = git(root, "diff", "--shortstat", f"origin/{prod}...{approved_sha}").stdout.strip()
     files = int(m.group(1)) if (m := re.search(r"(\d+) files? changed", stat)) else 0
     ins = int(m.group(1)) if (m := re.search(r"(\d+) insertions?", stat)) else 0
     dels = int(m.group(1)) if (m := re.search(r"(\d+) deletions?", stat)) else 0
 
     checks = {p.number: pr_check_buckets(root, p.number) for p in prs}
     items, rows = included_pr_facts(prs, data, checks, repo)
-    compare = f"https://github.com/{repo}/compare/{prev}...{dev}"
+    compare = f"https://github.com/{repo}/compare/{prev}...{approved_sha}"
     path = approval_present(
         TOOL,
         f"v{a.version}",
         title=f"{plugin} v{a.version} のリリース",
-        targets=[{"url": compare, "title": f"{prev} → {src}（{dev[:8]}）", "base_head": f"{prod} ← {src}"}],
-        change=f"`{prod}...{src}` の差分 {files} ファイル / +{ins} / −{dels}",
+        targets=[{"url": compare, "title": f"{prev} → {source_branch}（{approved_sha[:8]}）", "base_head": f"{prod} ← {source_branch}"}],
+        change=f"`{prod}...{source_branch}` の差分 {files} ファイル / +{ins} / −{dels}",
         judge=[
-            ac.material_row(dev),
+            ac.material_row(approved_sha),
             ("版数", a.version),
             ("含む PR", "\n".join(rows) or "—"),
             ("配る中身", NOTES_PENDING),
@@ -1049,7 +1049,7 @@ def cmd_approval_facts(a):
             f"タグ {cur_tag} と GitHub Release を消し、{prod} を {prev} の内容へ戻す PR を出す。"
             "導入済みの利用者の環境は利用者の側の操作（前の版の導入し直し）でしか戻せない。"
         ),
-        sections=[(instructions.HEADING, instructions.instruction_lines(changes, prev, dev))],
+        sections=[(instructions.HEADING, instructions.instruction_lines(changes, prev, approved_sha))],
     )
     if keep:
         out = Path(path)
@@ -1067,12 +1067,12 @@ def cmd_approval_facts(a):
                 "deletions": dels,
                 "prev_tag": prev,
                 "compare": compare,
-                "approved_sha": dev,
+                "approved_sha": approved_sha,
                 "kept": [k.heading for k in keep],
                 "instructions": len(changes),
             },
             path,
-            f"利用者の承認を得たら release-steps.py release --version {a.version} --channel prod --approved-sha {dev}",
+            f"利用者の承認を得たら release-steps.py release --version {a.version} --channel prod --approved-sha {approved_sha}",
         ),
         EXIT_GATE,
     )
