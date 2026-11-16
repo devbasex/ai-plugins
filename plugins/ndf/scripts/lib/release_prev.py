@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 
 from release_tag import latest_release_tag, makes_tags, tag_glob, tag_template_of
 from step_result import StepError, base_of, git, plugin_dir
@@ -64,19 +65,60 @@ def _untagged_manifest(root, plugin, remote_only=False):
     return rel, prod
 
 
-def untagged_since(root, plugin, end) -> str | None:
-    """タグを作らない宣言（release.tag が null）で、他のプラグインの差分・承認資料の比較元・版の節の PR の範囲の起点にするコミット。
-    本番ブランチの先端の `plugin` の版（出した最新の版）を `end` の履歴で初めて持ったコミット（前のリリースの版上げ）。
+_BATCH = 200  # 版を一度に読むコミットの数（`git cat-file --batch` を 1 回起動する単位）
+
+
+def _blob_versions(root, specs: list[str]) -> list[str | None]:
+    """`<コミット>:<マニフェストの位置>` の並びの版を、`git cat-file --batch` 1 回でまとめて読む。読めない要素は None。"""
+    p = subprocess.run(
+        ["git", "-C", str(root), "cat-file", "--batch"], input="".join(f"{s}\n" for s in specs).encode(), capture_output=True, check=False
+    )
+    out, pos, vers = p.stdout, 0, []
+    for _ in specs:
+        nl = out.find(b"\n", pos)
+        if nl < 0:
+            break
+        head, pos = out[pos:nl].split(), nl + 1
+        if len(head) != 3 or head[1] != b"blob":
+            vers.append(None)  # `<名前> missing` など、中身の続かない行
+            continue
+        body, pos = out[pos : pos + int(head[2])], pos + int(head[2]) + 1
+        try:
+            ver = json.loads(body)["version"]
+        except (ValueError, KeyError, TypeError):
+            ver = None
+        vers.append(ver if isinstance(ver, str) and ver else None)
+    return vers + [None] * (len(specs) - len(vers))
+
+
+def _manifest_versions(root, rel: str, rev: str):
+    """`rev` の履歴で `rel` を変えたコミットと、そのコミットの版（読めなければ None）を新しい順に返す。
+    版は `_BATCH` 件ずつまとめて読み、コミットごとに git を起動しない。呼び手が途中でやめれば、残りは読まない。"""
+    commits = git(root, "log", "--format=%H", rev, "--", rel, check=False).stdout.split()
+    for i in range(0, len(commits), _BATCH):
+        part = commits[i : i + _BATCH]
+        yield from zip(part, _blob_versions(root, [f"{c}:{rel}" for c in part]))
+
+
+def untagged_since(root, plugin, end, exclude: str | None = None) -> str | None:
+    """タグを作らない宣言（release.tag が null）で、他のプラグインの差分・承認資料の比較元・版の節の PR の範囲・導入の確かめの差分の
+    起点にするコミット（前のリリースの版上げ）。比べる版を `end` の履歴で初めて持ったコミットを返す。
+    比べる版は、`exclude` が無ければ本番ブランチの先端の `plugin` の版（出した最新の版）、あれば `end` の履歴で `exclude` と違い
+    接尾辞の無い最も新しい版（本番へ出した後の導入の確かめで、確かめる版 `exclude` の直前の正式版）。
     タグを作る宣言と、本番ブランチ・版を読めなければ None。"""
     if (at := _untagged_manifest(root, plugin)) is None:
         return None
     rel, prod = at
-    shipped = version_or_none(root, plugin, prod)
-    if shipped is None:
+    target = None if exclude else version_or_none(root, plugin, prod)
+    if target is None and not exclude:
         return None
     found = None
-    for c in git(root, "log", "--format=%H", end, "--", rel, check=False).stdout.split():
-        if version_or_none(root, plugin, c) == shipped:
+    for c, v in _manifest_versions(root, rel, end):
+        if target is None:
+            if not v or v == exclude or "-" in v:
+                continue
+            target = v
+        if v == target:
             found = c  # 同じ版の続く並びの最も古いコミットまでさかのぼる
         elif found:
             break
@@ -89,8 +131,7 @@ def untagged_before(root, plugin, ver) -> str | None:
     if (at := _untagged_manifest(root, plugin)) is None:
         return None
     rel, prod = at
-    for c in git(root, "log", "--format=%H", prod, "--", rel, check=False).stdout.split():
-        v = version_or_none(root, plugin, c)
+    for _, v in _manifest_versions(root, rel, prod):
         if v and v != ver and "-" not in v:
             return v
     return None

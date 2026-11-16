@@ -806,6 +806,14 @@ def test_untagged_record_and_ranges_read_versions_not_stale_tags(repo, monkeypat
     assert mod.prev_release(repo, "ndf", "HEAD", "ndf--v1.0.1") == commits[0]
     git(repo, "update-ref", "refs/remotes/origin/main", commits[2])  # 1.0.1 を出した後
     assert publish.untagged_before(repo, "ndf", "1.0.1") == "1.0.0"
+    # round 15: 出した後の導入の確かめは、確かめる版を除いた直前の正式版の版上げを起点にする（今回の版上げを起点にしない）
+    assert publish.untagged_since(repo, "ndf", "HEAD") == commits[2]
+    assert publish.untagged_since(repo, "ndf", "HEAD", exclude="1.0.1") == commits[0]
+    import release_prev
+
+    monkeypatch.setattr(release_prev, "_BATCH", 2)  # 版をまとめて読む単位をまたいでも同じ答え
+    assert publish.untagged_since(repo, "ndf", "HEAD", exclude="1.0.1") == commits[0]
+    assert publish.untagged_before(repo, "ndf", "1.0.1") == "1.0.0"
     assert publish.untagged_since(repo, "nothing", "HEAD") is None and publish.untagged_before(repo, "nothing", "1.0.1") is None
 
 

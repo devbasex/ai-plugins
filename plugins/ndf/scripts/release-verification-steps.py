@@ -382,8 +382,9 @@ def cmd_verify_install(a):
     ref_rev = git(root, "rev-parse", f"origin/{a.ref}").stdout.strip()
     template = tag_template_of(root)  # タグの形は宣言の release.tag、プラグインは先頭（宣言の release.plugin）から決める
     cur = template.replace("{plugin}", plugins[0]).replace("{version}", a.expect)  # 確かめる版そのもののタグ（接尾辞を外さない）
-    # release-steps.py の prev_release と同じ起点: タグを作らない宣言は前のリリースの版上げ（残った古いタグを使わない）、ほかはタグ
-    prev = untagged_since(root, plugins[0], ref_rev) or latest_release_tag(
+    # release-steps.py の prev_release と同じ起点: タグを作らない宣言は前のリリースの版上げ（残った古いタグを使わない）、ほかはタグ。
+    # 本番へ出した後は本番ブランチの版が確かめる版そのものになるため、確かめる版を除いた直前の正式版の版上げを起点にする
+    prev = untagged_since(root, plugins[0], ref_rev, exclude=a.expect) or latest_release_tag(
         git(root, "tag", "--list", tag_glob(plugins[0], template), "--sort=-v:refname").stdout.split(), plugins[0], template, cur
     )
     ctx = VerifyContext(a.ref, a.expect, root, ref_rev, prev, runtimes, plugins, rel, where)

@@ -893,6 +893,9 @@ class FakePort:
         self.pulls += 1
         return self._pull
 
+    def viewer(self):
+        return "lander"
+
     def production(self, b):
         return self._prod
 
@@ -1037,10 +1040,15 @@ def test_land_admin_bypass_checks_and_records():
     out = land.land_approved(port, bs.Strategy(admin), 5, land.Approval(H1, url=url))
     assert out["result"] == "stopped" and "打ち直すと記録を補う" in out["reason"]
     assert port.calls == [("checks", H1), ("merge", H1, "merge", True), ("admin_record", H1, url)]
-    # 打ち直し: マージ済みでも人のマージと記録せず、迂回の記録を補う
-    merged = FakePort({"head": H1, "base": "main", "merged": True}, rules)
+    # 打ち直し: land を打った利用者がマージ済みなら人のマージと記録せず、迂回の記録を補う
+    merged = FakePort({"head": H1, "base": "main", "merged": True, "merged_by": "lander"}, rules)
     out = land.land_approved(merged, bs.Strategy(admin), 5, land.Approval(H1, url=url))
     assert out["result"] == "merged" and merged.calls == [("admin_record", H1, url)]
+    # 別の人が GitHub の画面でマージした PR・マージした人を読めない PR は、迂回でなく人のマージとして記録する
+    for by in ("someone", None):
+        other = FakePort({"head": H1, "base": "main", "merged": True, "merged_by": by}, rules)
+        assert land.land_approved(other, bs.Strategy(admin), 5, land.Approval(H1, url=url))["result"] == "human"
+        assert [c[0] for c in other.calls] == ["comment"] and land.HUMAN_MARK in other.calls[0][1]
 
 
 def test_land_stops_when_base_is_not_production():

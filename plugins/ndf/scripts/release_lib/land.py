@@ -95,7 +95,8 @@ def check_production_pr(strategy, pr: dict, prod: dict, queue: list[dict]) -> st
 class Port(Protocol):
     """GitHub との出入り（`land_approved` が使う分だけ）。"""
 
-    def pull(self, number: int) -> dict: ...  # {"state", "merged", "head", "base", "bump", "cut_version", "contains_tip"}
+    def pull(self, number: int) -> dict: ...  # {"state", "merged", "merged_by", "head", "base", "bump", "cut_version", "contains_tip"}
+    def viewer(self) -> str | None: ...  # land を打った利用者の login。読めなければ None
     def production(self, branch: str) -> dict: ...  # {"tip", "version"}
     def queue(self, branch: str) -> list[dict]: ...
     def rule_facts(self, branch: str) -> Any: ...
@@ -161,8 +162,9 @@ def land_approved(port: Port, strategy, pr: int, approval: Approval, pull: dict 
     pull = pull if pull is not None else port.pull(pr)
     out = {"result": "stopped", "head": pull.get("head"), "reason": ""}
     admin = bool(merge["admin"] and merge["method"] == "direct")
-    if pull.get("merged") and admin and approval.head and pull.get("head") == approval.head:
-        # 承認した head を迂回でマージした後に記録だけ落ちた打ち直し: 記録を補う（同じ先端の記録があれば書かない）
+    if pull.get("merged") and admin and approval.head and pull.get("head") == approval.head and _merged_by_viewer(port, pull):
+        # 承認した head を land を打った利用者が迂回でマージした後に記録だけ落ちた打ち直し: 記録を補う（同じ先端の記録があれば書かない）。
+        # 別の人が GitHub の画面でマージした PR は、迂回でなく人のマージとして記録する
         return _admin_recorded(port, pr, approval, out)
     if pull.get("merged"):
         if not port.has_human_record(pr):
@@ -213,6 +215,12 @@ def land_approved(port: Port, strategy, pr: int, approval: Approval, pull: dict 
     if ok and admin:
         return _admin_recorded(port, pr, approval, out)
     return {**out, "result": "merged" if ok else "stopped", "reason": why}
+
+
+def _merged_by_viewer(port: Port, pull: dict) -> bool:
+    """マージした人が land を打った利用者と同じか（NDF が迂回でマージした事実）。どちらかを読めなければ False（人のマージとして記録する）。"""
+    by = pull.get("merged_by")
+    return bool(by) and by == port.viewer()
 
 
 def _admin_recorded(port: Port, pr: int, approval: Approval, out: dict) -> dict:
@@ -283,9 +291,14 @@ class GhPort:
         row = {"number": int(number), "state": d["state"], "merged": bool(d.get("merged")), "head": head, "base": base}
         row["title"] = d.get("title") or ""
         row["head_ref"] = str((d.get("head") or {}).get("ref") or "") or None
+        row["merged_by"] = str((d.get("merged_by") or {}).get("login") or "") or None
         if not row["merged"]:
             row.update(self._bump_facts(number, head, base))
         return row
+
+    def viewer(self) -> str | None:
+        d = self._rest("user")
+        return str(d.get("login") or "") or None if isinstance(d, dict) else None
 
     def production(self, branch: str) -> dict:
         self._fetch(f"+refs/heads/{branch}:refs/remotes/origin/{branch}")
