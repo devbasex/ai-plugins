@@ -1,5 +1,5 @@
 {
- "summary": "テストのファイルごとの実測秒（CI の JUnit XML の合計）。根の conftest.py がジョブの割り当てに使う。作り直しは scripts/pytest-shard-durations.py",
+ "summary": "テストのファイルごとの実測秒（CI の JUnit XML の合計）。根の conftest.py がジョブの割り当てに使う。作り直しは scripts/pytest_shard.py seconds",
  "seconds": {
   "plugins/mcp/mcp-serena/tests/test_serena_lsp_check.py": 0.9,
   "plugins/mcp/mcp-serena/tests/test_serena_lsp_configure.py": 6.3,

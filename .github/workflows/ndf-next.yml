@@ -60,35 +60,28 @@ jobs:
           fi
 
   # 依存の環境は plugins/ndf-next/pyproject.toml と uv.lock が固定する（決定 78）。
-  # 起点を plugins/ndf-next に置き、テストの基準のディレクトリを根の pytest.ini から切り離す
+  # 起点を plugins/ndf-next に置き、テストの基準のディレクトリを根の pytest.ini から切り離す。
+  # テストはファイル単位で 6 つのジョブへ分けて回す（2026-11-17 の利用者の指示）。割り当ては根の今の NDF と同じ
+  # scripts/pytest_shard.py で、重さはファイルの項目数。各ジョブは自分のファイルを元と一時コピーの両方で打つ
   ndf-next-tests:
+    name: ndf-next-tests (${{ matrix.shard }}/6)
     needs: ndf-next-scope
     if: needs.ndf-next-scope.outputs.next == 'true'
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5]
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v10.3.3
         with:
           enable-cache: true
           cache-dependency-glob: plugins/ndf-next/uv.lock
-      - run: uv run --frozen --project . pytest -q -n auto
-      # 機能の対応表（リリース対象の外。#3617 の決定 10）も ndf-next の依存の環境で流す
-      - name: 機能の対応表のテスト
-        run: uv run --frozen --project . pytest -q -c pyproject.toml --rootdir . ../../scripts/ndf-next-parity/tests
-
-  # 名前を入れ替えの後の形（ディレクトリ plugins/ndf・plugin.json の name は identity.FINAL_NAME）にした一時コピーで、
-  # 検査とテストを打つ（#3347 の決定 101・IG3）。I1 の指摘の集合（プラグインの根からの相対パスと行）が元と一致し、
-  # テストが通ることを確かめる。ディレクトリ名を組み立てた文字列のパスは、コピーの中でテストが落とす
-  ndf-next-copy:
-    needs: ndf-next-scope
-    if: needs.ndf-next-scope.outputs.next == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10.3.3
-        with:
-          enable-cache: true
-          cache-dependency-glob: plugins/ndf-next/uv.lock
+      # 一時コピーは最初に作る（収集とテストが作業ツリーへ書く .venv・キャッシュを写さない）。
+      # 名前を入れ替えの後の形（ディレクトリ plugins/ndf・plugin.json の name は identity.FINAL_NAME）にした一時コピーで、
+      # 検査とテストを打つ（#3347 の決定 101・IG3）。I1 の指摘の集合（プラグインの根からの相対パスと行）が元と一致し、
+      # テストが通ることを確かめる。ディレクトリ名を組み立てた文字列のパスは、コピーの中でテストが落とす
       - name: 一時コピーを作る
         run: |
           copy="$RUNNER_TEMP/copy/plugins/ndf"
@@ -111,7 +104,21 @@ jobs:
           git -C "$RUNNER_TEMP/copy" add -A
           git -C "$RUNNER_TEMP/copy" -c user.name=ci -c user.email=ci@example.invalid commit -qm copy
           echo "COPY=$copy" >> "$GITHUB_ENV"
+      - name: このジョブのファイルを決める
+        env:
+          SHARD_INDEX: ${{ matrix.shard }}
+        run: |
+          uv run --frozen --project . pytest --collect-only -q > "$RUNNER_TEMP/collected.txt"
+          python3 ../../scripts/pytest_shard.py files --total 6 --index "$SHARD_INDEX" < "$RUNNER_TEMP/collected.txt" > "$RUNNER_TEMP/files.txt"
+          wc -l < "$RUNNER_TEMP/files.txt"
+      - name: 元でテストを打つ
+        run: xargs -r -a "$RUNNER_TEMP/files.txt" uv run --frozen --project . pytest -q -n auto
+      # 機能の対応表（リリース対象の外。#3617 の決定 10）も ndf-next の依存の環境で流す
+      - name: 機能の対応表のテスト
+        if: matrix.shard == 0
+        run: uv run --frozen --project . pytest -q -c pyproject.toml --rootdir . ../../scripts/ndf-next-parity/tests
       - name: I1 の指摘の集合が元とコピーで一致するか
+        if: matrix.shard == 0
         run: |
           bin/ndf check > "$RUNNER_TEMP/orig.out" || true
           (cd "$COPY" && bin/ndf check) > "$RUNNER_TEMP/copy.out" || true
@@ -128,10 +135,8 @@ jobs:
                   print(f"{label}: I1 {path}:{line}", file=sys.stderr)
           sys.exit(1 if orig != copy else 0)
           EOF
-      # 全件を打つ。ディレクトリ名・プラグイン名を組み立てた文字列はどのテストからも作れ、触れるテストを
-      # 絞る一覧は新しいモジュールの追加で古くなる（決定 101 は「テストが通ること」を確かめる）。
-      # 実測（PR #3443 の run 43581413222）: ndf-next-tests 74 秒・このジョブ 100 秒（コピーと I1 の照合を含む）。
-      # 並べて走るため待ち時間の増えは約 26 秒、runner の時間は 1 回あたり約 100 秒増える
+      # 全件を打つ（ジョブごとの自分のファイル）。ディレクトリ名・プラグイン名を組み立てた文字列はどのテストからも作れ、
+      # 触れるテストを絞る一覧は新しいモジュールの追加で古くなる（決定 101 は「テストが通ること」を確かめる）
       - name: コピーでテストを打つ
         working-directory: ${{ env.COPY }}
-        run: uv run --frozen --project . pytest -q -n auto
+        run: xargs -r -a "$RUNNER_TEMP/files.txt" uv run --frozen --project . pytest -q -n auto

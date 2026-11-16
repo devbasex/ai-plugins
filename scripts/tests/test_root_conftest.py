@@ -301,7 +301,9 @@ def test_the_shards_cover_every_item_exactly_once_without_splitting_a_file() -> 
 
 def test_heavy_files_spread_to_the_least_loaded_shards() -> None:
     """重いファイルから順に空いているジョブへ入り、実測の無いファイルは中央値で数える。"""
-    assign = _root_conftest_module()._assign_files
+    sys.path.insert(0, str(REPO_ROOT / "scripts"))
+    from pytest_shard import assign_files as assign
+
     seconds = {"a.py": 100.0, "b.py": 60.0, "c.py": 50.0, "d.py": 10.0}
 
     owner = assign(["a.py", "b.py", "c.py", "d.py", "new.py"], 2, seconds)
