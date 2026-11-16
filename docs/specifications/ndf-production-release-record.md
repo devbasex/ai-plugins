@@ -227,8 +227,8 @@ stateDiagram-v2
 
 ### `pace: normal` のスプリントの本番のステージ（#1914）
 
-`supervise.py new sprint`（`pace: normal`）は、`.ndf/supervise.json` に雛形のある `release.form` があり（`has_release_template`）、
-本番のブランチ（`--production-branch` → `.ndf/worktree.json` の `production_branch` → 既定ブランチ。決め方は `lib/repo.production_branch`）が決まっているとき（`has_prod_branch`）、
+`supervise.py new sprint`（`pace: normal`）は、ブランチ戦略の宣言（`.ndf/project.json` の `branch_strategy`）に雛形のある `release.form` があり（`has_release_template`）、
+本番のブランチ（`--production-branch` → ブランチ戦略の宣言の `branches.production`。決め方は `lib/repo.production_branch`。既定ブランチへは倒さない）が決まっているとき（`has_prod_branch`）、
 目録（`sprint.json`）の `ステージ` の末尾を次の 3 つにする（`supervise_lib/sprint.py` の `sprint_plans`。番号は前のステージの数で変わる）。
 
 | `name` | 持つキー | 中身 |

@@ -159,9 +159,9 @@ ndf-next の形の family にだけ掛ける語は次の 5 つである（今の
 
 | 箇所 | 契約 |
 | --- | --- |
-| コードレビューのエージェント（`plugins/ndf/agents/code-reviewer.md`） | 差分は `origin/<ベースブランチ>...HEAD` で取る。ベースブランチは `.ndf/worktree.json` の `base_branch`、無ければ `git symbolic-ref --short refs/remotes/origin/HEAD` から `origin/` を外した名前。どちらも無ければ差分を取らずに止まって報告する |
+| コードレビューのエージェント（`plugins/ndf/agents/code-reviewer.md`） | 差分は `origin/<ベースブランチ>...HEAD` で取る。ベースブランチはブランチ戦略の宣言（`.ndf/project.json` の `branch_strategy`）の `branches.base` を `lib/branch_strategy_cli.py get /branches/base` で読んだ名前。読めなければ差分を取らずに止まって報告する |
 | 並列の計画のリリースの照会（`plugins/ndf/scripts/lib/parallel_external.py` の `stages_of`・`prod_pr_url`） | 照会の `--base` は `repo.production_branch` の結果だけを使う。決まらなければ Pull Request を照会せず、届いた段は `release_branch` まで、URL は空になる |
-| Pull Request の宛先（`plugins/ndf/scripts/pr-steps.py` の `plan`・`create`） | 宛先は `--base` → `.ndf/worktree.json` の `base_branch` → 既定ブランチ（`origin/HEAD` → ローカルの `main` → `master`）の順に決める。どれも決まらなければ `gh_pr.require_base` が `EXIT_PRECONDITION` で止め、Pull Request を作るコマンドを打たない |
+| Pull Request の宛先（`plugins/ndf/scripts/pr-steps.py` の `plan`・`create`） | 宛先は `--base` → ブランチ戦略の宣言のスプリントの PR の宛先（`Strategy.pr_target("sprint")`）の順に決め、既定ブランチへ倒さない。どれも決まらなければ `gh_pr.require_base` が `EXIT_PRECONDITION` で止め、Pull Request を作るコマンドを打たない |
 | プランの見本（`supervise.py example`・`plugins/ndf/scripts/supervise_lib/plan.py`） | テストのステップの `cmd` は `<テストのコマンド>` のプレースホルダーで、`pr` のステップは `base` を持たない。書き換えずに走らせるとシェルが失敗するので、誤った成功にならない |
 
 本番のブランチを決める規則は `plugins/ndf/scripts/lib/repo.py` の 1 か所が持つ。宣言の無いリポジトリで既定ブランチを
@@ -289,8 +289,8 @@ python3 scripts/check-skill-repo-assumptions.py [--skills-dir D]... [--allow DIR
 - `--report` が規模の行を出し、当たりがあれば終了コード 1 のままであること
 - ndf-next の形の family で、`src/`・`contracts/`・`hooks/*.py` と追加の 5 語が当たり、`manifests/*-skills.txt` の family では当たらないこと
 - `remote-origin` が JSON Schema の `default` の値に当たらず、その件数が 1 か所でなければ終了コード 2 になること
-- `production_branch: prod` の宣言で、並列の計画の 2 つの照会が `--base prod` を渡すこと。宣言が無く既定ブランチが `main` なら `--base main` を渡すこと。本番が決まらないとき照会を打たないこと
-- 宣言も既定ブランチも無いリポジトリで、`pr-steps.py` の `plan`・`create` が止まり、Pull Request を作るコマンドを呼ばないこと
+- ブランチ戦略の宣言の `branches.production: prod` で、並列の計画の 2 つの照会が `--base prod` を渡すこと。宣言が無く本番が決まらないとき照会を打たないこと
+- 宣言の無いリポジトリで、`pr-steps.py` の `plan`・`create` が止まり、Pull Request を作るコマンドを呼ばないこと
 - `supervise.py example` の出力に `pytest` が無く、`pr` のステップが `base` を持たず、`supervise.py expected` が読めること
 
 ## 関連リンク

@@ -14,7 +14,7 @@
 
 ## コンテキスト
 
-変更はリリースのコンテキスト（`ndf-release`）に収まる。作り直しも同じ語を使い、同じ宣言のキーを読む。作り直しは旧いプラグイン（`plugins/ndf/`）のコードを読み込まない別のパッケージのため、マージの処理は共有しない。
+変更はリリースのコンテキスト（`ndf-release`）に収まる。作り直しも同じ語を使う。宣言のキーは、旧いプラグインがブランチ戦略の宣言の `merge.admin`、作り直しが `production_merge.admin` を読む（作り直しへのブランチ戦略の宣言の反映は #3681 が行う）。作り直しは旧いプラグイン（`plugins/ndf/`）のコードを読み込まない別のパッケージのため、マージの処理は共有しない。
 
 置き換えの期間の本番のマージの振る舞いの正本は、旧いプラグインの `merge-when-green`（`merged_lib/merge.py` の `_merge_pr`）である。迂回の条件は下の「常に成り立つ条件」の表が 1 か所で持ち、2 つの実装はそれぞれのテストで同じ行を縛る。食い違ったら作り直しの側を旧いプラグインに合わせる。
 
@@ -34,7 +34,7 @@
 
 | # | 条件 | 破れたときの扱い |
 | --- | --- | --- |
-| I1 | `production_merge.admin` が JSON の `true` のときだけ迂回の宣言があるとみなす。キーが無い・`true` 以外の値・型の違い・`Unknown` は宣言なし | 宣言なしの場合（`cd-no-review` / `cd-review`）で進む |
+| I1 | 迂回の宣言（旧いプラグインはブランチ戦略の宣言の `merge.admin`、作り直しは `production_merge.admin`）が JSON の `true` のときだけ迂回の宣言があるとみなす。キーが無い・`true` 以外の値・型の違い・`Unknown` は宣言なし | 宣言なしの場合（`cd-no-review` / `cd-review`）で進む |
 | I2a | 旧いプラグインで `cd-admin` になるのは、CD があり、本番チャネルの承認数が 1 以上と読め、宣言があるときだけである | 承認数が 0 か読めないときは、宣言があっても `cd-no-review` で進む |
 | I2b | 作り直しが迂回するのは、宣言があり、宛先が本番ブランチで、そのブランチの承認数が 1 以上と読めるときだけである | 迂回せず、記録を置かず、出力の `admin` を `false` にする |
 | I3 | 管理者の迂回でマージするのは `cd-admin` のときだけである | — |
@@ -72,7 +72,7 @@ I6b の読み直しは迂回の有無に依らず働く。宣言の無いリポ�
 | 経路 | マージまでの呼び出し |
 | --- | --- |
 | `release-steps.py release --channel prod` | `release_lib/reviewed.py` の `release_prod` → `merge_on_pr_approval` → `release-steps.py` の `wait_and_merge` → `merged-steps.py merge-when-green` → `_merge_pr` |
-| 選んで集める取り込み方の `release` | `release_lib/promotion.py` の `release_selected` → `_merge_exact` → `merge_on_pr_approval` → 以降は上と同じ |
+| 選んで集める取り込み方の `release` | `release_lib/strategy_route.py` の `release_selected` → `_merge_exact` → `merge_on_pr_approval` → 以降は上と同じ |
 | `merged-steps.py promote` | `merged_lib/merge.py` の `promote` → `merge_when_green` → `_merge_pr` |
 
 迂回は既存の `merge-when-green` の `--admin` の経路を使う。`merge-when-green` はチェックの通過を待ち、`--expect-head` で先端を照らし、`--match-head-commit` 付きでマージするため、I4・I5・I6a が既存の待ちと照合で成り立つ。迂回の指定を GitHub の API で直に打つと、待ちと先端の照合を 2 つ目に持つことになる。
@@ -137,6 +137,20 @@ sequenceDiagram
 
 ### 迂回の宣言（`.ndf/project.json`）
 
+旧いプラグイン（`plugins/ndf/`）は、ブランチ戦略の宣言（セクション `branch_strategy`）の `merge.admin` を読む。
+`merge.method` が `direct` のときだけ `true` を書ける（スキーマの組み合わせの規則）。宣言は解析の
+`project-decl.py branch-strategy` が書き、`.ndf/project.json` の最上位の `production_merge` は旧いキーとして読む部品が止まる。
+
+```json
+{
+  "branch_strategy": {
+    "merge": { "actor": "ndf", "method": "direct", "commit": "merge", "admin": true }
+  }
+}
+```
+
+作り直し（`plugins/ndf-next/`）は、次の最上位のキーを読む。
+
 ```json
 {
   "production_merge": {
@@ -175,8 +189,10 @@ sequenceDiagram
 
 マージした先端: `<40 桁の SHA>`
 照らした承認の証跡: <証跡のコメントの URL>
-宣言: `.ndf/project.json` の `production_merge.admin`
+宣言: `.ndf/project.json` の `branch_strategy.merge.admin`
 ```
+
+作り直しの記録の `宣言:` の行は `.ndf/project.json` の `production_merge.admin` を指す。
 
 - 印 `ndf:admin-merge` は証跡の印（`ndf:release-approval`）と別で、証跡の判定と `release-approval.yml` の起動の条件に掛からない
 - 書き手は `approval_trail.write_admin_record`（作り直しは `trail.write_admin_record`）で、同じ先端の記録があれば置かない

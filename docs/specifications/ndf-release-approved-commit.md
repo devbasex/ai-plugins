@@ -55,7 +55,7 @@ CD の宣言があるリポジトリの `release --channel prod` は、リリー
 | リリースの Pull Request | ベースブランチ → 本番チャネルの Pull Request を `merged-steps.py promote` が作ってマージするもの。head はベースブランチそのもの |
 | リリースの承認資料 | リリースの Pull Request のリリース承認ゲートで利用者（か MVV 判定）が見る `{state_dir}/work/approval-promote.md`。`normal` では `promote` のリリース承認ゲートの停止が、`fast` / `auto` では `prepare` が書く。「承認したコミット」の行を 1 行持つ |
 
-ベースブランチ・本番チャネル・プラグイン名は宣言（`.ndf/worktree.json` の `base_branch`・`production_branch` と `.ndf/supervise.json` の `release.plugin`）と引数から読み、
+ベースブランチ・本番チャネル・プラグイン名はブランチ戦略の宣言（`.ndf/project.json` の `branch_strategy` の `branches.base`・`branches.production`・`release.plugin`）と引数から読み、
 `develop` / `main` を埋め込まない。
 
 **比べた先端は `origin/release/v<版>` の先端とする。** ベースブランチの先端は比べる相手に入れない。 本番のリリースプランは、「起点のコミット」が
