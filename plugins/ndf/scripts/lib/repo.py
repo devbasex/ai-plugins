@@ -63,15 +63,29 @@ def read_worktree_decl(root, fallback: bool = True) -> tuple[dict, str | None]:
     return decl.load_file(f, WORKTREE_DECL.name) if f.is_file() else ({}, None)
 
 
+_PINNED: dict[str, branch_strategy.Strategy] = {}  # メインディレクトリ → 開始時のスナップショット（`pin_strategy`）
+
+
+def pin_strategy(root, strategy: branch_strategy.Strategy) -> None:
+    """このプロセスの間、`root` のメインディレクトリのブランチ戦略を `strategy`（スプリントの開始時のスナップショット）に固定する。
+    保存済みのプランが起動する 1 回きりの CLI（`release-steps.py release --strategy-snapshot`）が、今の宣言を読み直さずに
+    開始時の名前と経路で動くためである（I13・決定 9）。"""
+    top = decl.main_dir(root) if root else None
+    if top is None:
+        raise branch_strategy.StrategyError("ブランチ戦略の宣言を探す git の木が無い")
+    _PINNED[str(Path(top).resolve())] = strategy
+
+
 def branch_strategy_of(root) -> branch_strategy.Strategy:
-    """メインディレクトリのブランチ戦略の宣言（`.ndf/project.json` の `branch_strategy`）。
+    """メインディレクトリのブランチ戦略の宣言（`.ndf/project.json` の `branch_strategy`）。`pin_strategy` で固定していればその値。
 
     メインディレクトリから読むのは、Pull Request の変更でブランチ名を動かせないようにするためである（#2363）。
     セクションが無い・壊れている・旧いキーが残るときは `branch_strategy.StrategyError`（既定値へ倒さない。I3・I4）。"""
     top = decl.main_dir(root) if root else None
     if top is None:
         raise branch_strategy.StrategyError("ブランチ戦略の宣言を探す git の木が無い")
-    return branch_strategy.load_strategy(Path(top))
+    pinned = _PINNED.get(str(Path(top).resolve()))
+    return pinned if pinned is not None else branch_strategy.load_strategy(Path(top))
 
 
 def default_branch(root) -> str | None:

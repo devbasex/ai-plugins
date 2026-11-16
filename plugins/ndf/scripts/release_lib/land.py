@@ -405,15 +405,29 @@ class GhPort:
         return land_checks.checks_failing(self, sha, pull)
 
 
-def approval_of(repo: str, strategy, pr: int) -> Approval | None:
-    """証跡の書き手（`approval_trail.trail_writer`）に合わせて、承認した head と時刻を読む。無ければ None。"""
+def trail_by(root, strategy) -> str | None:
+    """land が承認として数える証跡の担い手。管理者の迂回でマージする宣言（`merge.admin` と `direct`）で、本番ブランチが
+    人の承認を求める（承認数が 1 以上か読めない）ときは利用者の証跡（担い手が user）だけを数える（cd-admin。#3506 の I9）。
+    MVV 判定の証跡で、人の承認を求める本番の PR を迂回してマージしないためである。それ以外は担い手で絞らない（None）。"""
+    sec = strategy.section
+    if sec["approval"]["via"] == "review" or not (sec["merge"]["admin"] and sec["merge"]["method"] == "direct"):
+        return None
+    import release_case
+
+    approvals, _ = release_case.read_approvals(root, sec["branches"]["production"])
+    return None if approvals == 0 else "user"
+
+
+def approval_of(repo: str, strategy, pr: int, by: str | None = None) -> Approval | None:
+    """証跡の書き手（`approval_trail.trail_writer`）に合わせて、承認した head と時刻を読む。無ければ None。
+    `by` を渡せば担い手がその値の証跡だけを数える（`trail_by`）。"""
     from release_lib import approval_trail as trail
 
     if strategy.section["approval"]["via"] == "review":
         sha = trail.read_review_commit(repo, pr)
         return Approval(sha) if sha else None
     trails = trail.trails_of(trail.read_comments(repo, pr))
-    last = trail.approved_trail(trails, trail.read_roles(repo, [t.login for t in trails if not t.edited])) if trails else None
+    last = trail.approved_trail(trails, trail.read_roles(repo, [t.login for t in trails if not t.edited]), by) if trails else None
     return Approval(last.sha, last.created_at) if last else None
 
 
@@ -431,7 +445,7 @@ def land_pr(root, repo: str, strategy, pr: int) -> dict:
 
     port = GhPort(root, repo, strategy)
     try:
-        approval = approval_of(repo, strategy, pr)
+        approval = approval_of(repo, strategy, pr, trail_by(root, strategy))
         if approval is None and strategy.section["merge"]["actor"] != "human":
             pull = port.pull(pr)
             if not pull.get("merged"):

@@ -48,6 +48,7 @@ from step_result import (
 )
 import limits
 import delivery  # noqa: E402
+from release_tag import latest_release_tag, tag_glob, tag_template_of  # noqa: E402
 import repo as repo_lib  # noqa: E402
 from release_lib.user_config import _json, _read_user_config, config_dirs, user_config_snapshot  # noqa: E402
 
@@ -378,10 +379,10 @@ def cmd_verify_install(a):
 
     git(root, "fetch", "-q", "origin", "--tags")
     ref_rev = git(root, "rev-parse", f"origin/{a.ref}").stdout.strip()
-    prefix = f"{plugins[0]}--v"  # タグの接頭辞は先頭のプラグイン（宣言の release.plugin）から決める
-    tags = git(root, "tag", "--list", f"{prefix}*", "--sort=-v:refname").stdout.split()
-    cur = f"{prefix}{a.expect}"
-    prev = next((t for t in tags if t != cur and "-" not in t[len(prefix) :]), None)
+    template = tag_template_of(root)  # タグの形は宣言の release.tag、プラグインは先頭（宣言の release.plugin）から決める
+    tags = git(root, "tag", "--list", tag_glob(plugins[0], template), "--sort=-v:refname").stdout.split()
+    cur = template.replace("{plugin}", plugins[0]).replace("{version}", a.expect)  # 確かめる版そのもののタグ（接尾辞を外さない）
+    prev = latest_release_tag(tags, plugins[0], template, cur)
     ctx = VerifyContext(a.ref, a.expect, root, ref_rev, prev, runtimes, plugins, rel, where)
 
     before = user_env_snapshot()

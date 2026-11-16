@@ -308,9 +308,30 @@ def test_approved_trail_is_the_one_judge_reads():
     assert approval_trail.approved_trail(trails, {}) is None
 
 
+def test_admin_land_counts_only_user_trails(monkeypatch):
+    """管理者の迂回でマージする宣言では、本番ブランチが人の承認を求める（承認数 1 以上か読めない）とき、
+    MVV 判定の証跡を承認に数えない（cd-admin。#3506 の I9）。承認数が 0 なら担い手で絞らない。"""
+    import release_case
+
+    t = approval_trail.Trail
+    trails = [t("a" * 40, "owner", "2026-11-16T01:00:00Z", False, 1, "user"), t("b" * 40, "owner", "2026-11-16T02:00:00Z", False, 2, "mvv")]
+    roles = {"owner": "admin"}
+    assert approval_trail.approved_trail(trails, roles).sha == "b" * 40
+    assert approval_trail.approved_trail(trails, roles, "user").sha == "a" * 40
+    assert approval_trail.approved_trail(trails[1:], roles, "user") is None
+
+    s = strategy("plugin", plugin="demo")
+    s.section["merge"].update(admin=True, method="direct")
+    for approvals, want in ((1, "user"), (None, "user"), (0, None)):
+        monkeypatch.setattr(release_case, "read_approvals", lambda root, branch, n=approvals: (n, ""))
+        assert land.trail_by(Path("."), s) == want
+    s.section["merge"]["admin"] = False
+    assert land.trail_by(Path("."), s) is None
+
+
 def test_run_stops_without_trail_and_lands_human_merge(monkeypatch):
     plugin = strategy("plugin", plugin="demo")
-    monkeypatch.setattr(land, "approval_of", lambda repo, s, pr: None)
+    monkeypatch.setattr(land, "approval_of", lambda repo, s, pr, by=None: None)
     monkeypatch.setattr(land.GhPort, "pull", lambda self, n: {"merged": False, "head": "h" * 40, "bump": True})
     got = land.land_pr(Path("."), "o/r", plugin, 5)
     assert got["result"] == "stopped" and "承認の証跡が無い" in got["reason"]
@@ -326,7 +347,7 @@ def test_run_stops_without_trail_and_lands_human_merge(monkeypatch):
     got = land.land_pr(Path("."), "o/r", strategy("web-develop"), 5)
     assert got["result"] == "stopped" and "承認の証跡が無い" in got["reason"] and len(seen) == 1
     monkeypatch.undo()
-    monkeypatch.setattr(land, "approval_of", lambda repo, s, pr: None)
+    monkeypatch.setattr(land, "approval_of", lambda repo, s, pr, by=None: None)
 
     recorded = []
     monkeypatch.setattr(land.GhPort, "pull", lambda self, n: {"merged": True, "head": "h" * 40})

@@ -804,6 +804,23 @@ def test_release_tags_follow_the_declared_shape(repo, monkeypatch):
     assert "1.1.0" in body and "v1.1.0" in body
 
 
+def test_release_reads_names_from_the_start_snapshot(repo, monkeypatch):
+    """#3672 の round 10: 保存済みのプランが渡す開始時のスナップショットで名前を解き、開始後に変えた宣言を読み直さない（I13・決定 9）。"""
+    root = v_tag_repo(repo)
+    mod = _release_steps_module(monkeypatch)
+    import branch_strategy
+    import repo as repo_lib
+    from release_lib import names
+
+    monkeypatch.setattr(repo_lib, "_PINNED", {})
+    snap = branch_strategy.snapshot_section(repo_lib.branch_strategy_of(root), "開始時")
+    snap["section"]["release"]["tag"] = "rel-{version}"
+    mod._pin_snapshot(root, json.dumps(snap, ensure_ascii=False))
+    assert names.tag_name(root, "ndf", "1.3.0") == "rel-1.3.0"  # 今の宣言（v{version}）でなく開始時の形
+    with pytest.raises(mod.StepError):
+        mod._pin_snapshot(root, "{")
+
+
 def test_release_tag_shape_defaults_without_a_declared_tag(monkeypatch):
     """宣言に release.tag の形が無い（null を含む）ときは `<plugin>--v<版>`。"""
     _release_steps_module(monkeypatch)  # lib/ を sys.path へ入れる

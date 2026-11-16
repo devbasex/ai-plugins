@@ -533,6 +533,17 @@ def test_observe_reads_base_production_and_release_tags(world):
     assert o.unreadable == []
 
 
+def test_observe_and_taken_follow_the_declared_tag_shape(world):
+    """宣言の release.tag が `v{version}` なら、その形のタグを出済みの版に数え、既定の形のタグは数えない（前版の検索・公開と同じ形）。"""
+    for t in ("v10.28.0", "v10.28.1-dev.1", "ndf--v10.29.0"):
+        git(world.repo, "tag", t)
+    git(world.repo, "push", "-q", "origin", "--tags")
+    o = rv.observe(world.repo, "ndf", "develop", None, template="v{version}")
+    assert o.tags == ["10.28.0"] and o.latest_tag == "10.28.0"
+    d = rv.taken(o, "10.28.0")
+    assert d.existing == "v10.28.0" and d.next_free == "10.28.1"
+
+
 def test_observe_without_production_does_not_read_it(world):
     o = rv.observe(world.repo, "ndf", "develop", None)
     assert o.production_ref == "" and o.production_version is None

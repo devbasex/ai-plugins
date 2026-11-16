@@ -110,7 +110,7 @@ from release_lib.approval import HeadMoved  # noqa: E402
 from release_lib.context import ReleaseCtx  # noqa: E402
 from release_lib.notes_content import NotesContent  # noqa: E402
 from release_lib.names import changelog_section, changelog_span, h2_lines, next_h2, plugin_of, release_decl  # noqa: E402
-from release_lib.names import drop_untagged, require_untagged, tag_glob, tag_name, tag_template_of, tag_version  # noqa: E402
+from release_lib.names import drop_untagged, latest_release_tag, require_untagged, tag_glob, tag_name, tag_template_of, tag_version  # noqa: E402
 from release_lib.included import outside_items, outside_note  # noqa: E402
 from step_result import (
     EXIT_CD_FAILED,
@@ -287,7 +287,7 @@ def release_tag_before(root, plugin, current=None):
     """宣言の release.tag の形（無ければ `<plugin>--v<版>`）に合い接尾辞の無いタグのうち、current を除いて最も新しいもの。無ければ None。"""
     template = tag_template_of(root)
     tags = git(root, "tag", "--list", tag_glob(plugin, template), "--sort=-v:refname").stdout.split()
-    return next((t for t in tags if t != current and (v := tag_version(t, plugin, template)) and "-" not in v), None)
+    return latest_release_tag(tags, plugin, template, current)
 
 
 def next_release(name, old, level="patch"):
@@ -670,8 +670,22 @@ def _merge_prod_pr(root, a, plugin, branch, prod, release_pr, approved, allowed,
     return main_pr, merge, verdict
 
 
+def _pin_snapshot(root, raw: str | None) -> None:
+    """`--strategy-snapshot`（スプリントの開始時のブランチ戦略のスナップショットの JSON）があれば、名前と経路をその値で解く。
+    保存済みのプランが、開始後に変えた宣言（branches・release.plugin・release_strategy）で出さないためである（I13・決定 9）。"""
+    if not raw:
+        return
+    try:
+        repo_lib.pin_strategy(root, branch_strategy.from_snapshot(json.loads(raw)))
+    except ValueError as e:
+        raise StepError(f"--strategy-snapshot を読めない: {e}", EXIT_PRECONDITION) from e
+    except branch_strategy.StrategyError as e:
+        raise StepError(e.reason, e.exit_code) from e
+
+
 def cmd_release(a):
     root = git_root(a.root)
+    _pin_snapshot(root, getattr(a, "strategy_snapshot", None))
     ver = a.version
     base, prod, plugin = release_decl(root, a)
     route = _release_route(root)
@@ -1350,6 +1364,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     g.add_argument("--approval", help="prod の CD が無い場合: 承認資料（「承認したコミット」と「承認の記録」の欄を読む）")
     p.add_argument("--release-strategy", choices=tuple(strategy_rows.ROWS), help="本番への取り込み方（開始時の値。単位を選ぶ行だけ）")
+    p.add_argument(
+        "--strategy-snapshot",
+        metavar="JSON",
+        help="スプリントの開始時のブランチ戦略のスナップショット（名前と経路を今の宣言でなくこれで解く）",
+    )
     p.set_defaults(func=cmd_release)
     p = sub.add_parser(
         "release-branch", parents=[common], help="選んだスプリントブランチを本番チャネルから組んだリリースブランチへ集めて push する"

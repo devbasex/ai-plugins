@@ -82,6 +82,7 @@ import gh_rest  # noqa: E402
 import merged_range  # noqa: E402
 import jsonio  # noqa: E402
 import proc  # noqa: E402
+import release_tag  # noqa: E402
 import repo  # noqa: E402
 import branch_strategy  # noqa: E402
 
@@ -238,13 +239,13 @@ def range_base(root: Path) -> str:
         raise Stop(f"起点のブランチが分からない: {e.reason}") from e
 
 
-def release_tag_prefix(root: Path) -> str | None:
-    """ブランチ戦略の宣言の `release` から正式版のタグの接頭辞を決める。package-plugin は `<plugin>--v`（照合の `*` は呼び手が足す）。
-    宣言を読めなければ None（範囲の起点を正式版のタグで決めない）。"""
+def release_tag_shape(root: Path) -> tuple[str, str] | None:
+    """ブランチ戦略の宣言の `release` から正式版のタグの (プラグイン, 形) を決める。形は `release.tag`（無ければ `<plugin>--v{version}`）。
+    package-plugin でない・宣言を読めなければ None（範囲の起点を正式版のタグで決めない）。"""
     strategy = repo.strategy_or_none(root)
     rel = strategy.section["release"] if strategy else {}
     if isinstance(rel, dict) and rel.get("form") == "package-plugin" and rel.get("plugin"):
-        return f"{rel['plugin']}--v"
+        return rel["plugin"], release_tag.tag_template(rel)
     return None
 
 
@@ -294,12 +295,12 @@ def range_start(root: Path, events: list[dict], since: str | None, review: bool 
     if since:
         sha = git_or_stop(root, "rev-parse", f"{since}^{{commit}}")
         return sha, commit_at(root, sha), f"--since {since}"
-    prefix = release_tag_prefix(root)
-    if prefix:
-        for tag in git_or_stop(root, "tag", "--list", f"{prefix}*", "--sort=-v:refname").split():
-            if "-" not in tag[len(prefix) :]:
-                sha = git_or_stop(root, "rev-parse", f"{tag}^{{commit}}")
-                return sha, commit_at(root, sha), f"正式版のタグ {tag}"
+    shape = release_tag_shape(root)
+    if shape:
+        tags = git_or_stop(root, "tag", "--list", release_tag.tag_glob(*shape), "--sort=-v:refname").split()
+        if tag := release_tag.latest_release_tag(tags, *shape):
+            sha = git_or_stop(root, "rev-parse", f"{tag}^{{commit}}")
+            return sha, commit_at(root, sha), f"正式版のタグ {tag}"
     base = range_base(root)
     sha = git_or_stop(root, "merge-base", f"origin/{base}", "HEAD")
     return sha, commit_at(root, sha), f"origin/{base} との分岐点"

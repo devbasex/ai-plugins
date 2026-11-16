@@ -152,9 +152,10 @@ def judge(trails: list[Trail], roles: dict[str, str | None], head: str, by: str 
     return Judgment("success", _cut(f"承認: {last.login} {last.created_at}"), last.login, last.created_at, last.url or None)
 
 
-def approved_trail(trails: list[Trail], roles: dict[str, str | None]) -> Trail | None:
-    """承認権限を持つ人の最新の、編集されていない証跡（`judge` が照らす証跡と同じ 1 件）。無ければ None（#3672 の land）。"""
-    valid, _ = _narrow(trails, roles, None)
+def approved_trail(trails: list[Trail], roles: dict[str, str | None], by: str | None = None) -> Trail | None:
+    """承認権限を持つ人の最新の、編集されていない証跡（`judge` が照らす証跡と同じ 1 件）。無ければ None（#3672 の land）。
+    `by` を渡せば担い手がその値の証跡だけを数える（`judge` の `by` と同じ。cd-admin は利用者の証跡だけ）。"""
+    valid, _ = _narrow(trails, roles, by)
     return max(valid, key=lambda t: t.created_at) if valid else None
 
 

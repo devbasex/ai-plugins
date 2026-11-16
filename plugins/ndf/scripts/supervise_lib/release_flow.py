@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import shlex
 
+import branch_strategy
 import strategy_rows
 
 from supervise_lib.decl import DeclError, sprint_flow
@@ -59,6 +60,13 @@ def release_strategy_flag(a) -> str:
     """本番の release に渡す取り込み方（行が単位を選ぶときだけ。本番ブランチへ直接出し、戻すマージを入れる。決定 17）。"""
     row = sprint_flow(a).row
     return f" --release-strategy {row.name}" if row.selects_units else ""
+
+
+def strategy_snapshot_flag(a) -> str:
+    """release に渡す開始時のブランチ戦略のスナップショット（`a.flow`）。保存済みのプランが今の宣言を読み直さず、開始時の
+    名前（ベースブランチ・本番ブランチ・プラグイン・タグの形）と経路で出すためである（I13・決定 9）。無ければ空。"""
+    flow = getattr(a, "flow", None)
+    return f" --strategy-snapshot {shlex.quote(branch_strategy.canonical_json(flow))}" if isinstance(flow, dict) and flow else ""
 
 
 def _production(a) -> str | None:
