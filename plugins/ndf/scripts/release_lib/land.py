@@ -408,10 +408,11 @@ class GhPort:
             return "検査がまだ 1 件も無く、workflow の一覧も読めない"
         active = [str(w.get("path") or "") for w in d.get("workflows") or [] if isinstance(w, dict) and w.get("state") == "active"]
         show = self._show(sha)
-        on_head = ", ".join(p for p in active if runs_on_pull_head(show(p) if p else None))[:200]
-        return (
-            f"検査がまだ 1 件も無い（PR の head で動く workflow {on_head} がある。始まるのを待って打ち直してください）" if on_head else None
-        )
+        # パスを読めない workflow も動くとみなす。名前が空でも数に入れる（文字列の真偽で判定しない）
+        on_head = [p or "（パス不明）" for p in active if runs_on_pull_head(show(p) if p else None)]
+        if not on_head:
+            return None
+        return f"検査がまだ 1 件も無い（PR の head で動く workflow {', '.join(on_head)[:200]} がある。始まるのを待って打ち直してください）"
 
 
 _HEAD_EVENTS = ("pull_request", "pull_request_target")

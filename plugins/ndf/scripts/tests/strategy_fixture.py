@@ -64,13 +64,15 @@ def declare(
     の写しを使う。`package-plugin` のリリースの値（版数の置き場・タグ）は `plugin` の種類のものを土台にし、渡した値で上書きする。
 
     旧い宣言では CD は `delivery` の行だけで決まった。`deliveries` も `release` の `cd` も渡さなければ CD の無い宣言にする
-    （種類の写しの `release.cd` を残すと、`release.cd` から CD の行を組む読み手が CD の有る場合として扱う）。"""
+    （種類の写しの `release.cd` を残すと、`release.cd` から CD の行を組む読み手が CD の有る場合として扱う）。CD の無い宣言は
+    R10 に合わせてタグを `null`・GitHub Release を偽にする。"""
     production = production or base
     plugin = (release or {}).get("form") == "package-plugin"
     kind = ("plugin" if plugin else "web-trunk") if production == base else "web-develop"
     rel = copy.deepcopy(section("plugin" if plugin else kind)["release"])
     if deliveries is None:
-        rel["cd"] = None
+        # CD が無ければタグと GitHub Release も作らない（R10）
+        rel.update({"cd": None, "tag": None, "github_release": False})
     rel.update(release or {})
     if deliveries is not None:
         rel["deliveries"] = deliveries
