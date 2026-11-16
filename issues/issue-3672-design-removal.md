@@ -29,6 +29,12 @@
 `version_store` は、コード・スキーマ・テスト・CI のどこにも無い（`grep -rn version_store .` の当たりは用語集 2 行と #3572 の設計文書だけ）。
 #3572 の設計が足すと決めたキーで、まだ実装されていないためである。新しい節の `release.version_store` はこの名前を引き継ぐ（決定 2）。
 
+ほかの `scripts/repo-assumptions-allow/` の例外（`worktree.schema.json`・`production-merge.md`・`project-analysis.md`・`declaration.md` を指すもの）は、指す先のファイルが残るため一覧に載せない。
+書き直した後に当たりが無くなった例外は、実装の PR で消す。
+
+複数のファイルにまたがる行（D32・D33・D34・D37）のパスは、[issue-3672-design-removal-paths.md](issue-3672-design-removal-paths.md) に 1 ファイル 1 行で並べた。
+その文書は語の集合に `dev_workflow`・`delivery` を足して数え直したため、上の表の件数と違う。
+
 `plugins/ndf/scripts/lib/gh_pr_info.py` と `plugins/ndf/skills/cross-review/scripts/` の当たりは、PR の宛先（`baseRefName`）を入れる変数の名前で、
 宣言を読んでいない。一覧に載せない。
 
@@ -38,13 +44,14 @@
 検査 `scripts/check-legacy-branch-decl.py`（新設）は、そのパスに語が 1 件でも残れば落ちる。パスのファイルが無いときは通す（ファイルごと消した行）。
 消す語は、宣言のキーとして読む形（`"base_branch"`・`'base_branch'`・`.base_branch`）と、文書で宣言のキーとして書く形（`` `base_branch` ``）である。
 
-旧いキーの名前が残ってよいのは、次の 4 つだけである（I8）。検査はこれらを一覧に載せない。
+旧いキーの名前が残ってよいのは、次の置き場だけである（I8）。検査はこれらを一覧に載せない。
 
 | 置き場 | 理由 |
 | --- | --- |
 | 10 系の移行のコマンド `plugins/ndf/scripts/project_lib/branch_strategy_migrate.py`（新設）とそのテスト | 旧い 4 か所を読んで新しい節へ移す |
 | 10 系の旧い宣言の検査 `plugins/ndf/scripts/lib/branch_strategy_legacy.py`（新設）とそのテスト | 旧いキーの位置を出して止める（受け入れ条件 22） |
-| 11.0 の改名表 `plugins/ndf-next/contracts/domains/ndf-settings-renames.json`（#3613 が新設）と、それを読む移行のコマンド・旧いキーの検査とそのテスト | 同上 |
+| 11.0 の移す行の表 `plugins/ndf-next/contracts/domains/ndf-settings-renames.json`（#3613 かこの課題が新設。決定 3）と、10 系のそのコピー `plugins/ndf/scripts/data/ndf-settings-renames.json` | 旧いキーの位置と移す先を持つ |
+| 11.0 の移行のコマンド `plugins/ndf-next/src/ndf/domains/project/strategy_migrate.py` と旧い宣言の検査 `plugins/ndf-next/src/ndf/core/branch_strategy_legacy.py`（どちらも新設）とそのテスト | 10 系の 2 行と同じ |
 | `CHANGELOG.md`・`docs/archive/`・`docs/development-history/`・`issues/` | 書いた日の記録で、以後の構成変更に追随しない |
 
 ### 一覧
@@ -107,16 +114,16 @@
 | D27 | `scripts/check-pr-base.sh`・`.github/workflows/pr-base-guard.yml` | 宛先のブランチの `.ndf/worktree.json` の `branch_flow.promotion`・`base_branch` の読み | `branch_strategy.py get` で宛先のブランチの節を読む |
 | D28 | `.github/workflows/ndf-next-release.yml`（99〜102 行目）・`.github/workflows/release-dev.yml`（43 行目） | jq での `.base_branch`・`.production_branch` の読み | 同上。`release-dev.yml` は ai-plugins が開発版をやめる（ai-plugins の値）ので消す |
 | D29 | `scripts/ci-heavy-skip.py`・`scripts/check-ndf-contracts.py`・`scripts/contracts_lib/ratchet.py`・`scripts/ndf-next-parity/parity/fixes.json` | 旧いキーの読みと期待値 | 新しい節のキー |
-| D30 | `scripts/repo-assumptions-allow/` の旧いファイルを指す 8 件・`scripts/script-structure-allow/` の `branch_flow.py` の 1 件 | ファイルを消す（指す先が無くなる） | 新しいファイルで当たれば同じ形で足す |
+| D30 | `scripts/repo-assumptions-allow/plugins__ndf__scripts__lib__branch_flow.py--quoted-develop--not-a-violation.json`・`scripts/repo-assumptions-allow/plugins__ndf__scripts__lib__branch_flow.py--quoted-main--not-a-violation.json`・`scripts/repo-assumptions-allow/plugins__ndf__scripts__lib__branch_flow.py--release-branch--not-a-violation.json`・`scripts/script-structure-allow/plugins__ndf__scripts__lib__branch_flow.py--lines.json` | ファイルを消す（指す先の `lib/branch_flow.py` を D11 で消す） | 新しいファイルで当たれば同じ形で足す |
 
 **文書と Skill の本文**
 
 | # | パス | 対象 | 置き換え先 |
 | --- | --- | --- | --- |
 | D31 | `plugins/ndf/skills/worktree/references/declaration.md`・`plugins/ndf-next/skills/worktree/references/declaration.md` | ブランチ運用の宣言の節（宣言の節を手で書く手順を含む） | 作成のコマンドを打つ手順と、新しい節を読む案内（受け入れ条件 7） |
-| D32 | `plugins/ndf/skills/` の `worktree/SKILL.md`・`merged/SKILL.md`・`retrospective/SKILL.md`・`development-workflow/references/project-analysis.md`・`development-workflow/references/glossary.md`・`pr/SKILL.md`・`deploy/SKILL.md`・`cherry-pick-pr/SKILL.md`・`release/references/release-steps.md`・`release/references/form-package-plugin.md`・`development-workflow/references/production-merge.md`・`agent-layers.md`・`development-workflow/SKILL.md`・`cross-review/docs/02-fix-and-rotation.md`・`release/SKILL.md`・`ndf-policies/SKILL.md`・`parallel.md`・`parallel-work.md`・`pace.md`・`loop.md`・`document-destinations.md`・`cross-review/docs/04-contracts.md` | 旧いキーの説明 | 新しい節のキーの説明 |
-| D33 | `plugins/ndf-next/` の上と同じ構成の Skill の本文と、`docs/contracts/declarations.md`・`docs/contracts/commands.md`・`agents/code-reviewer.md` | 同上 | 同上 |
-| D34 | `docs/specifications/ndf-branch-flow-declaration.md`・`ndf-supervise-production-default-branch.md`・`ndf-worktree-declaration-and-entry-points.md`・`ndf-branch-flow-review-units.md`・`ndf-release-production-admin-merge.md`・`ndf-entrypoint-contracts.md`・`ndf-workflow-unit-and-gates.md` と、旧いキーを書く残り 11 本の確定仕様 | 旧いキーの説明 | この課題の確定仕様（`plan-to-spec`）が置き換え、旧い説明を消す |
+| D32 | 10 系の Skill の本文とエージェントの定義 24 ファイル（パスは [issue-3672-design-removal-paths.md](issue-3672-design-removal-paths.md) の D32-1〜D32-24） | 旧いキーの説明 | 新しい節のキーの説明 |
+| D33 | 11.0 の Skill の本文・契約の文書（`plugins/ndf-next/docs/contracts/`）・エージェントの定義 26 ファイル（パスは同じ文書の D33-1〜D33-26） | 同上 | 同上 |
+| D34 | `docs/specifications/` の確定仕様 20 ファイル（パスは同じ文書の D34-1〜D34-20） | 旧いキーの説明 | この課題の確定仕様（`plan-to-spec`）が置き換え、旧い説明を消す |
 | D35 | `docs/glossary/glossary.json`・`docs/glossary.md` | 旧いキーを語として持つ項目 | 新しい節の語（設計文書の「用語」の表） |
 | D36 | `AGENTS.md`（19〜20 行目）・`docs/versioning-and-distribution.md` | `base_branch`・`follow_branch` の説明と、develop と開発版のチャネルの説明 | ai-plugins の値（設計文書の「ai-plugins の値」）の説明。C7 |
 
@@ -124,7 +131,7 @@
 
 | # | パス | 対象 | 置き換え先 |
 | --- | --- | --- | --- |
-| D37 | `plugins/ndf/scripts/tests/` の 67 ファイル・`plugins/ndf/skills/*/tests/` の 24 ファイル・`plugins/ndf-next/tests/` の 20 ファイル・`scripts/tests/` の 4 ファイル | 旧いキーを入力にした宣言の fixture | 新しい節の fixture。代表のリポジトリ 5 種の宣言は 1 か所の fixture にまとめる（テスト設計） |
+| D37 | `plugins/ndf/scripts/tests/` の 71 ファイル・`plugins/ndf/skills/*/tests/` の 23 ファイル・`plugins/ndf-next/tests/` の 23 ファイル・`scripts/tests/` の 4 ファイル（パスは同じ文書の D37a〜D37d） | 旧いキーを入力にした宣言の fixture | 新しい節の fixture。代表のリポジトリ 5 種の宣言は 1 か所の fixture にまとめる（テスト設計） |
 
 `branch_flow.py` を消すと、D12〜D21 の 10 系の読み手の参照は `branch_strategy.py` 1 本へ寄る。旧い分岐（行 `whole`・`selected` の名前で振る舞いを分ける `if`）は D11・D16・D17・D18・D27 にあり、`release_strategy` の値で分ける形へ替える。
 
@@ -136,7 +143,7 @@
 | #3121（閉じた） | ブランチ運用の宣言の形（起点・結合・リリースの組み方） | 無し。不合格の条件 7・10 は #3309・#3310 が持ち、この課題の子で解く |
 | #3572（`issues/issue-3572-design*.md`、PR #3628 でマージ済み） | 設定ファイルの形（3 か所に分けた形）・行の値・ai-plugins の値 | 承認した先端だけをマージする仕組み（本番のプランから worker を外す・head の一致の確認・`merge-queue` と `strict` の判定・人のマージの記録）は、この設計の I5〜I7 と決定 6・7 が取り込む。11.0 の実装はこの課題の 11.0 の読み手の部分で行う |
 | 設計 PR #3649（#3572 の出し直し、開いたまま） | 宣言を 1 つの節にまとめる差分（handoff `branch-strategy-one-file.md`）と ai-plugins の値 | **閉じる。** 取り込む部分は上の行と同じ。#3119 の設計の差分（決定 21・25）も、この設計の ai-plugins の値が置き換える |
-| #3641（設計 PR #3650、開いたまま） | 10 系の GitHub flow の行・設定のキー `promotion`・ai-plugins の行き先・マージの方式 `serial` | **設計 PR #3650 は閉じる。** 10 系の `trunk` の行と承認した先端のマージはこの設計の決定 6・7 が取り込む。`serial`（NDF が取るロック）は採らない（決定 7）。#3641 の Issue は、ai-plugins の移行（宣言の書き換え・ruleset・develop の扱い）の実施先の子として残る |
+| #3641（設計 PR #3650、開いたまま） | 10 系の GitHub flow の行・設定のキー `promotion`・ai-plugins の行き先・マージの方式 `serial` | **設計 PR #3650 は閉じる。** 10 系の `trunk` の行と承認した先端のマージはこの設計の決定 6・7 が取り込む。`serial`（NDF が取るロック）は採らない（決定 7）。#3641 の Issue の残り（ai-plugins の main の ruleset の変更と、develop と開発版の停止）は、受け入れ条件 24 の前提なのでこの課題の中で行う（設計文書の「ai-plugins だけの事情」） |
 | #3576 | ndf-next の常設のリリースブランチの取り込み方の宣言 | 宣言は `release_strategy` の値と `branches` が持つ。#3572 の設計の決定 13 のとおり閉じたまま |
 | #3615 | リリースの形と版数の置き場を宣言で選ぶ | 宣言は `release.form`・`release.version_store` が持つ。CD を起動する workflow のテンプレート（`json` の版数の置き場で CD を回す形）は #3615 に残る |
 | #3506（閉じた） | 管理者の迂回のマージの宣言の置き場・ndf-next・ai-plugins の値 | 宣言は `merge.admin` が持つ（I6） |
@@ -167,7 +174,7 @@
 | #3603 | 10 系 | 子として後で直す | 設計承認ゲートの問いの種類の不具合 |
 | #3608 | 10 系 | この Issue で解決 | 受け入れ条件 18（証跡の書き手を 1 つにする） |
 | #3611 | 10 系 | 子として後で直す | 承認資料の検査の結果の上書き |
-| #3641 | 10 系 | 子として後で直す | ai-plugins の移行の実施先（上の表） |
+| #3641 | 10 系 | この Issue で解決 | ruleset の変更と develop と開発版の停止は受け入れ条件 24 の前提で、この課題の中で終える（上の表） |
 | #3656 | 10 系 | 子として後で直す | 取り消された CI の読み違い |
 | #3661 | 10 系 | この Issue で解決 | 受け入れ条件 17 のテストの入力 |
 | #3671 | 10 系 | この Issue で解決 | 受け入れ条件 18 のテストの入力 |
@@ -181,4 +188,4 @@
 | #1338 | 両方 | この Issue で解決 | `merge.admin`・`merge.commit` と製品の既定（迂回なし） |
 | #3618 | 両方 | 子として後で直す | 守りの全体（レッドライン・設計の型・レビュー）のうち、CI の検査だけをこの Issue が足す |
 
-数: この Issue で解決 13 本、子として後で直す 19 本、閉じる 0 本（計 32 本）。
+数: この Issue で解決 14 本、子として後で直す 18 本、閉じる 0 本（計 32 本）。

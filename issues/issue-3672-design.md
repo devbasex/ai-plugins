@@ -25,9 +25,16 @@
 
 | 値 | 置く所 | 持つ Issue |
 | --- | --- | --- |
-| 種類 `plugin` の既定と同じ値（「ai-plugins の値」） | `.ndf/project.json` の `branch_strategy` | #3672（移行の実施は #3641） |
-| main の ruleset（承認の数 0・merge queue・タグの保護） | GitHub のリポジトリの設定 | #3641 |
-| develop の更新を止め、開発版（`-dev.N`・`release-dev.yml`）をやめる | `.ndf/` と `.github/workflows/` | #3641 |
+| 種類 `plugin` の既定と同じ値（「ai-plugins の値」） | `.ndf/project.json` の `branch_strategy` | #3672 |
+| main の ruleset（承認の数 0・merge queue・タグの保護） | GitHub のリポジトリの設定 | #3672（#3641 をこの課題の中で解決する） |
+| develop の更新を止め、開発版（`-dev.N`・`release-dev.yml`）をやめる | `.ndf/` と `.github/workflows/` | 同上 |
+
+3 行とも、受け入れ条件 24（承認 1 回で正式版を出す）の前に終える。ruleset が承認 1 を求めたままでは、`via: gate` の ai-plugins は I10 で止まるためである。
+順序は次のとおりである。
+
+1. この課題の実装の PR（ai-plugins の `.ndf/` の移行と `release-dev.yml` の削除を含む）を、今の出し方でリリース承認ゲートを通して出す
+2. 同じリリース承認ゲートの承認で、main の ruleset を変える（C2。「人へ残す判断」）
+3. 変えた後の最初の正式版で、受け入れ条件 24 を確かめる（リリース後テスト）
 
 ## あるべき姿の根拠
 
@@ -45,7 +52,9 @@
 | 分けた文書 | 中身 |
 | --- | --- |
 | [issue-3672-design-decisions.md](issue-3672-design-decisions.md) | 決定の記録（決定 1〜14） |
+| [issue-3672-design-research.md](issue-3672-design-research.md) | 外部の調査（STD1〜STD10・PRD1〜PRD6・LIB1〜LIB6）と確かめられなかったこと |
 | [issue-3672-design-removal.md](issue-3672-design-removal.md) | 削除の一覧（D1〜D37）・置き換える設計と設計 PR #3649・#3650 の行き先・子の Issue 32 本の行き先 |
+| [issue-3672-design-removal-paths.md](issue-3672-design-removal-paths.md) | 削除の一覧のうち複数のファイルにまたがる行（D32・D33・D34・D37）のパス |
 
 ## ドメインモデル
 
@@ -66,7 +75,7 @@ GitHub との間は**腐敗防止層**で、ruleset と merge queue の語はリ
 
 | 集約 | 持ち主（書き換えてよいもの） | 根 | エンティティ | 値オブジェクト |
 | --- | --- | --- | --- | --- |
-| ブランチ戦略の宣言 | 解析の `branch-strategy` サブコマンドだけ（決定 4） | 節 `branch_strategy` | — | ブランチ・スプリント・リリース・チャネル・承認・マージ・試す場 |
+| ブランチ戦略の宣言 | 解析の `branch-strategy` サブコマンドだけ（10 系 `project-decl.py`・11.0 `ndf project`。作る・更新する・移す・キーを消す・節を消すのすべて。決定 4・10） | 節 `branch_strategy` | — | ブランチ・スプリント・リリース・チャネル・承認・マージ・試す場 |
 | 作成の結果 | 解析（1 回の実行の出力。ファイルに残さない） | 実行 | 問い | 値・値の根拠・差分・差分のハッシュ |
 | スプリントのスナップショット | スプリントの経路（開始時に 1 回書く） | スプリント | — | 節の全体 |
 | 本番の PR の承認とマージの記録 | リリース（証跡の書き手はケースごとに 1 つ。I12） | PR | 承認の証跡・人のマージの記録 | 承認した head・マージした head |
@@ -81,11 +90,11 @@ GitHub との間は**腐敗防止層**で、ruleset と merge queue の語はリ
 | I4 | 宣言 | 旧いキーが残るリポジトリで、旧い経路は動かない | 読む部品が止まり、旧いキーの位置と移行のコマンドを理由に出す |
 | I5 | 承認とマージ | 承認した head と違う head をマージせず、キューへも入れない | マージの前に止まり、承認を取り直す依頼を出す（E10） |
 | I6 | 承認とマージ | 管理者の迂回は `merge.method: direct` のときだけ使う | スキーマの R3 で書けない |
-| I7 | 承認とマージ | 版上げの PR は、head が本番ブランチの先端を含むときだけマージかキューへの投入をする（`merge-queue` では先頭へ入れる） | 止まり、版上げの PR を作り直して承認を取り直す |
+| I7 | 承認とマージ | 版上げの PR は、マージの方式ごとの確かめ（「処理の流れ」の「版上げの PR の確かめ」の表）を通ったときだけマージかキューへの投入をする。`merge-queue` では先端を含むことを求めず、版数が衝突しないことだけを確かめて先頭へ入れる | 止まり、版上げの PR を作り直して承認を取り直す |
 | I8 | 宣言 | 旧いキーの名前は、移行のコマンドと旧い宣言の検査とそのテストの外に現れない | `check-legacy-branch-decl.py` が落ちる |
 | I9 | 承認とマージ | 正式版 1 本につき、人へ問う承認は 1 回である（宣言のどのケースでも） | 2 回目を求める組み合わせ（`via: gate` で ruleset が承認を求める）は I10 で止まる |
 | I10 | 承認とマージ | 節の値と本番ブランチの ruleset（merge queue の有無・最新の取り込みの要否・承認の数）が食い違わない | マージの前に止まり、節の値と ruleset の値を理由に出す |
-| I11 | 作成の結果 | 既存のリポジトリで書く値は、3 件以上・9 割以上の事例を根拠に持つ | 書かずに、食い違いか根拠不足を根拠つきで問う（決定 6） |
+| I11 | 作成の結果 | 既存のリポジトリで書く値は、どれも根拠を 1 つ持つ。測るキーは 3 件以上・9 割以上の事例、種類の既定から埋めるキーは選んだ種類の既定の行、人の答えはその答え（「処理の流れ」の「作る・更新する」の表） | 測るキーで事例が足りないか食い違えば、書かずに根拠つきで問う（決定 6） |
 | I12 | 承認とマージ | 証跡の種類ごとに書き手は 1 つで、証跡が今の head にあれば同じ問いを送らない | 書き手が書けなければ止まり、問いを送り直さない |
 | I13 | スプリントのスナップショット | スプリントの中の部品は開始時のスナップショットを読む | スナップショットと今の節の違うキーを結果に出す |
 | I14 | 宣言 | 製品のスキーマと既定の表は `default` と ai-plugins の名前を持たない | `check-skill-repo-assumptions.py` が落ちる（決定 13） |
@@ -99,15 +108,15 @@ GitHub との間は**腐敗防止層**で、ruleset と merge queue の語はリ
 | E3 | 食い違いか根拠不足を根拠つきで人へ問うた | 解析（結果の `questions`）→ `decision-request` | 人 |
 | E4 | 人の答えを宣言に書いた | 解析 `write --answers` | E5 |
 | E5 | 宣言を書いた | 解析 | 工程の部品（E7） |
-| E6 | 旧い宣言を新しい節へ移した | 移行のコマンド | E7 |
+| E6 | 旧い宣言を新しい節へ移した | 解析 `branch-strategy migrate`（移行のコマンド） | E7 |
 | E7 | 工程の部品が宣言を読んだ | 読む部品（`lib/branch_strategy.py`・`ndf.core.branch_strategy`） | E8〜E12 |
 | E8 | PR の宛先とスプリントの起点を決め、節のスナップショットを取った | スプリントの経路 | スプリントのスナップショット |
 | E9 | 承認を受け、承認した head を記録した | リリース承認ゲートか GitHub のレビュー | E11 |
-| E10 | 承認の後に head か本番ブランチの先端が動いたことを見つけ、承認を取り直す依頼を出した | リリースの `land` | 人 |
+| E10 | 承認の後に head が動いたか、版上げの PR がマージの方式ごとの確かめ（I7）に落ちたことを見つけ、承認を取り直す依頼を出した | リリースの `land` | 人 |
 | E11 | 承認した head を宣言の主体と方式でマージした | リリースの `land` か人 | E12 |
 | E12 | 正式版を出した（タグ・GitHub Release） | CD | リリース後テスト |
 | E13 | 宣言を更新した | 解析 `measure`・`write` | E7 |
-| E14 | 使わなくなったキーを消し、旧いキーの検査に載せた | NDF の版（移す行の表の `remove` の行）と移行のコマンド | E7 |
+| E14 | 使わなくなったキーを消し、旧いキーの検査に載せた | NDF の版（移す行の表の `remove` の行）と解析 `branch-strategy migrate` | E7 |
 | E15 | NDF を外し、節を消した | 解析 `remove` | — |
 
 ### 用語
@@ -124,59 +133,7 @@ GitHub との間は**腐敗防止層**で、ruleset と merge queue の語はリ
 
 ## 外部の調査
 
-| 種類 | 調べるか | 理由 |
-| --- | --- | --- |
-| 標準・仕様 | 調べる | ブランチ戦略・版の規則・タグの形・マージの一致の確認は GitHub・Claude Code・Codex の仕様と公開の規約で決まる |
-| 主要な製品 | 調べる | plugin とマーケットプレイスを配るリポジトリの実際の運用を、ai-plugins の値の出典にする |
-| ライブラリとサービス | 調べる | 版上げ・組み合わせの確かめ・移行の差分を既存のツールに任せられるかを比べる |
-
-### 標準・仕様
-
-| # | 標準・仕様 | 何を定めているか | 設計への反映 | 出典 |
-| --- | --- | --- | --- | --- |
-| STD1 | GitHub REST「Merge a pull request」 | `sha` は head が一致するときだけマージを許す。違えば 409 | I5 | https://docs.github.com/en/rest/pulls/pulls#merge-a-pull-request （2026-11-15、#3572 の STD1） |
-| STD2 | Trunk-Based Development | 短命のブランチで trunk へ入れ、リリース用のブランチは必要なときに切って消す。長く残るブランチを複数持つモデルより勧める | ai-plugins の `trunk`（決定 12） | https://trunkbaseddevelopment.com/ （2026-11-16） |
-| STD3 | GitHub Docs「Managing a merge queue」 | 本番ブランチの先端と前に並ぶ PR を合わせた一時のコミットで必須のチェックを回す。Organization の public か Enterprise Cloud の private で使える。workflow は `merge_group` で起動する | マージの方式 `merge-queue` と、使えないときの `strict`（決定 7） | https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue （2026-11-16） |
-| STD4 | Claude Code「Plugin loading」「Host a marketplace」 | 「Users get a new copy only when the plugin's computed version differs from the one they have」。版数は `plugin.json` を優先し、マーケットプレイスの項目と両方に書かない。チャネルの概念は無く、名前の違う 2 つのマーケットプレイスで別の ref を指す | 版上げの PR のマージをリリースにする（決定 8・12） | https://code.claude.com/docs/en/plugins/loading.md ・ https://code.claude.com/docs/en/plugins/host-marketplace.md （2026-11-16） |
-| STD5 | Claude Code「Host a marketplace」「Dependencies」 | タグの形は `<plugin-name>--v<version>`。`claude plugin tag --push` が版数の一致を確かめて作る。版の範囲の依存はこのタグで解決し、プレリリースを含まない | 種類 `plugin` のタグの形 `{plugin}--v{version}` | https://code.claude.com/docs/en/plugins/host-marketplace.md ・ https://code.claude.com/docs/en/plugins/dependencies.md （2026-11-16） |
-| STD6 | RFC 6902 JSON Patch | `test`・`move`・`replace` の操作の列 | 移行の差分（決定 10） | https://www.rfc-editor.org/rfc/rfc6902 （2026-11-16、#3613 の STD3） |
-| STD7 | JSON Schema「Conditional subschemas」 | `if`・`then`・`else` で値の組み合わせの規則を書ける（Draft 7 以降） | 組み合わせの規則 R1〜R9（決定 2） | https://json-schema.org/understanding-json-schema/reference/conditionals （2026-11-16、HTTP 200） |
-| STD8 | GitHub Docs「GitHub flow」 | 既定ブランチから切ったブランチを PR で既定ブランチへマージし、ブランチを消す | 行 `trunk` の起点と宛先 | https://docs.github.com/en/get-started/using-github/github-flow （2026-11-16） |
-| STD9 | Semantic Versioning 2.0.0 | プレリリースは正式版より順序が下。`v1.2.3` の `v` は版数ではなくタグの慣習 | 版数は `plugin.json` に semver で持ち、タグに `v` を付ける | https://semver.org/ （2026-11-16） |
-| STD10 | Codex「Build plugins」と openai/codex のソース | キャッシュは `$MARKETPLACE/$PLUGIN/$VERSION/`。マーケットプレイスの更新はリモートの revision を比べる。`.claude-plugin/marketplace.json` も読む | ai-plugins の取得の ref を変えない（決定 12） | https://developers.openai.com/codex/plugins/build.md ・ `codex-rs/core-plugins/src/marketplace_upgrade.rs`（2026-11-16） |
-
-### 主要な製品
-
-| # | 製品 | どう解いているか | 設計への反映 | 出典 |
-| --- | --- | --- | --- | --- |
-| PRD1 | anthropics/claude-plugins-official | main だけ。タグと Release は無い。外部の plugin は `sha` で固定し、毎晩 bump の PR を出す。merge commit を許し、承認 1 を求める | ai-plugins の main だけの開発と merge commit | `gh api repos/anthropics/claude-plugins-official/rulesets`・`branches`・`tags`（2026-11-16） |
-| PRD2 | anthropics/skills・wshobson/agents・openai/plugins | main だけ。タグも Release も無い。openai/plugins は squash を必須にする | main だけの開発 | `gh api repos/<r>/branches`・`tags`・`rulesets`（2026-11-16） |
-| PRD3 | openai/codex | main を trunk にして `release/*` を切る。プレリリースの Release を出す。squash と linear history を必須にする | リリースブランチは必要なときに切る（版上げの PR） | `gh api repos/openai/codex/rulesets`・`releases`（2026-11-16） |
-| PRD4 | obra/superpowers | `dev` を持ち、`dev→main` の Release の PR で出す。タグは `vX.Y.Z` | develop→main の行の実例。ai-plugins では採らない（決定 12） | `gh pr list -R obra/superpowers --state merged`（2026-11-16） |
-| PRD5 | git-flow（nvie/gitflow） | `git flow init` が開発と本番のブランチの名前を対話で問い、設定に書く。アーカイブ済み | 宣言を問いと答えで作る形は倣い、対話ではなく結果の問いで返す（決定 4） | `gh api repos/nvie/gitflow`（`archived: true`）と README（2026-11-16） |
-| PRD6 | anthropics/claude-code | タグ `v2.1.325` 形式と Release。公開したタグを変えられない ruleset を持つ | ai-plugins のタグの保護 | `gh api repos/anthropics/claude-code/rulesets`（2026-11-16） |
-
-### ライブラリとサービス
-
-| # | 候補 | 版 | ライセンス | 最後のリリースの日付 | 終了のアナウンス | 要件を満たすか | 出典 |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| LIB1 | release-please | v17.11.2 | Apache-2.0 | 2026-08-24 | 無し | 満たさない。上げ幅を Conventional Commits から読み、タグの既定 `<component>-v` が STD5 と違う | `gh api repos/googleapis/release-please/releases/latest`（2026-11-16） |
-| LIB2 | semantic-release | v25.0.9 | MIT | 2026-08-05 | 無し | 満たさない。LIB1 と同じくコミットの書式から上げ幅を読む | `gh api repos/semantic-release/semantic-release/releases/latest`（2026-11-16） |
-| LIB3 | GitHub merge queue | — | GitHub のサービス | — | 無し | 満たす（使えるリポジトリで）。組み合わせの確かめを自前で作らない | STD3 |
-| LIB4 | bors-ng | — | — | — | 有り（アーカイブ済み。GitHub の merge queue を案内） | 満たさない | `gh api repos/bors-ng/bors-ng`（2026-11-15、#3572 の LIB4） |
-| LIB5 | jsonpatch（Python） | 1.47 | PyPI に記載なし | 2026-11-11 | 無し | 満たすが採らない。移行で使う操作は 3 つで、依存を足す量が無い（#3613 の決定 12 と同じ） | https://pypi.org/pypi/jsonpatch/json （2026-11-16） |
-| LIB6 | GitHub REST API（pulls・tags・releases・rulesets・repos） | — | GitHub のサービス | — | 無し | 満たす。既存のリポジトリの事例をこの API で読む | https://docs.github.com/en/rest （2026-11-16） |
-
-### 確かめられなかったこと
-
-| 対象 | 試した手段 | 結果と理由 |
-| --- | --- | --- |
-| Codex が、版数が同じで commit だけ進んだ plugin を入れ直すか | `codex-rs/core-plugins/src/marketplace_upgrade.rs` と build.md | マーケットプレイスの revision の比較までは読んだが、plugin の再導入の条件は読んでいない。文書に記述が無い |
-| 各リポジトリのマージの設定（`allow_squash_merge` など） | `gh api repos/<r>` | 権限が無く空を返した。ruleset と commit の親の数から読んだ |
-| release-please でタグの区切りを `--v` にする設定 | release-please の README と manifest-releaser.md | 取得したページに記述が無い。LIB1 を採らない理由は上げ幅の読み方だけで足りる |
-| Codex のチャネルとタグの形の推奨 | build.md | 記述が無い |
-
-調べた量: 候補 22 件・取得の試み 32 回（上限の 30 回を 2 回超えた。超えた 2 回は LIB1・LIB2 の版とライセンスの確かめ）。
+標準・仕様（`STD<数>`）・主要な製品（`PRD<数>`）・ライブラリとサービス（`LIB<数>`）の調べと、確かめられなかったことは [issue-3672-design-research.md](issue-3672-design-research.md) にある。
 
 ## 機能一覧
 
@@ -196,10 +153,10 @@ GitHub との間は**腐敗防止層**で、ruleset と merge queue の語はリ
 | --- | --- |
 | スキーマ `$defs/BranchStrategy`（11.0 `contracts/schemas/declarations/project.schema.json` が正本、10 系 `skills/development-workflow/schemas/project.schema.json` がコピー） | 節のキー・値・組み合わせの規則 R1〜R9 |
 | 既定の表 `branch-strategy-presets.json`（11.0 `contracts/domains/` が正本、10 系 `scripts/data/` がコピー） | 代表のリポジトリの種類ごとの値 |
-| 移す行の表 `ndf-settings-renames.json`（11.0 `contracts/domains/` が正本、10 系 `scripts/data/` がコピー） | 旧いキーの位置 → 新しいキーの位置・値の対応・消すキー |
+| 移す行の表 `ndf-settings-renames.json`（11.0 `contracts/domains/` が正本、10 系 `scripts/data/` がコピー。11.0 の正本は #3613 が先にマージされていれば行を足し、されていなければこの課題が #3613 の行の形で新設する。決定 3） | 旧いキーの位置 → 新しいキーの位置・値の対応・消すキー |
 | 読む部品 `lib/branch_strategy.py`（10 系）・`ndf/core/branch_strategy.py`（11.0） | 節を読み、スキーマで検査し、旧いキーで止まる。シェルからは `branch_strategy.py get <キー>` で読む |
-| 旧い宣言の検査 `lib/branch_strategy_legacy.py`（10 系）・11.0 は #3613 の旧いキーの検査 | 旧いキーの位置を返す |
-| 解析のサブコマンド `branch-strategy`（10 系 `project-decl.py` と `project_lib/branch_strategy_{measure,write,migrate}.py`、11.0 `ndf project` と `domains/project/strategy_{measure,write}.py`） | 作る・測る・書く・移す・消す（決定 4） |
+| 旧い宣言の検査 `lib/branch_strategy_legacy.py`（10 系）・`ndf/core/branch_strategy_legacy.py`（11.0） | 移す行の表のうち節 `branch_strategy` へ移す行と `remove` の行を読み、旧いキーの位置を返す。#3613 の旧いキーの検査に依らない |
+| 解析のサブコマンド `branch-strategy`（10 系 `project-decl.py` と `project_lib/branch_strategy_{measure,write,migrate}.py`、11.0 `ndf project` と `domains/project/strategy_{measure,write,migrate}.py`） | 作る・測る・書く・移す・キーを消す・節を消す（決定 4・10） |
 | スプリントの経路（10 系 `supervise_lib/sprint_*`・`worktree-setup.sh`、11.0 `domains/worktree`） | 起点と宛先を節から決め、開始時に節のスナップショットを取る |
 | リリース（10 系 `release-steps.py`・`release_lib/`、11.0 `domains/release`） | 版上げの PR を作り、承認の証跡を書き手どおりに書き、承認した head を方式どおりにマージする |
 | CI の検査（`scripts/check-legacy-branch-decl.py`・`scripts/check-skill-repo-assumptions.py`・`scripts/check-ndf-contracts.py`・`scripts/check-pr-base.sh`） | 削除の一覧・汎用性・コピーの一致・宛先の検査 |
@@ -283,8 +240,8 @@ graph TD
 | 作る（既存） | 同上 | 解析 `branch-strategy measure` → 問いへの答え → `write --answers` | スキーマと、値ごとの根拠（I11） | 問い（E3）と、同上 |
 | 読む | worktree の用意・PR の作成・リリース・マージ・CI の宛先の検査 | 読む部品（10 系と 11.0 で 1 つずつ） | スキーマと旧いキー（I3・I4） | — |
 | 更新する | 人の依頼、または `measure` が節と事例のずれを出したとき | 解析 `branch-strategy measure`・`write` | 同上 | 同上 |
-| 移す | NDF の版を上げ、旧いキーがあると読む部品が止まったとき | 解析 `branch-strategy migrate`（10 系）・`ndf settings migrate`（11.0） | 示した差分のハッシュと新しいスキーマ | 示した差分と、同上 |
-| キーを消す | NDF の版でキーを外したとき | 移す行の表に `remove` の行を足し、移行のコマンドが消す | 同上 | 同上 |
+| 移す | NDF の版を上げ、旧いキーがあると読む部品が止まったとき | 解析 `branch-strategy migrate`（10 系 `project-decl.py`・11.0 `ndf project`） | 示した差分のハッシュと新しいスキーマ | 示した差分と、同上 |
+| キーを消す | NDF の版でキーを外したとき | 移す行の表に `remove` の行を足し、解析 `branch-strategy migrate` が消す | 同上 | 同上 |
 | 節を消す | NDF を外すと決めたとき | 解析 `branch-strategy remove` | — | 同上 |
 
 人もエージェントも節を手で書かない。Skill の本文と文書から手で書く手順を消す（削除の一覧の D31〜D33）。ai-plugins の `.ndf/` の書き換えは C7 で、設計承認ゲート（この設計）とリリース承認ゲートで人が見る。
@@ -298,14 +255,14 @@ graph TD
 | `status` | `ok`（書いた・書く差分を示した）・`ask`（問いがある。書いていない）・`stopped`（検査に落ちた。書いていない） |
 | `kind` | 選んだ代表のリポジトリの種類 |
 | `values` | 書く節の中身 |
-| `evidence` | キーの位置ごとの根拠の一覧。1 件は `{"source": "pr" / "tag" / "release" / "ruleset" / "workflow" / "doc" / "repo", "ref": "<番号・名前・パス:行>", "value": "<事例の値>"}` |
+| `evidence` | キーの位置ごとの根拠の一覧。1 件は `{"source": "pr" / "tag" / "release" / "ruleset" / "workflow" / "doc" / "repo" / "preset" / "answer", "ref": "<番号・名前・パス:行・種類の名前・答えのファイル>", "value": "<事例の値>"}`。`preset` は種類の既定の行から埋めた値、`answer` は人の答えで書いた値 |
 | `questions` | `{"pointer", "why": "conflict" / "insufficient" / "no_kind" / "merge_queue_unknown", "candidates", "evidence"}` の並び |
 | `diff`・`digest` | JSON Patch の差分と、そのハッシュ（`migrate`・`write --dry-run`） |
 | `failed` | 落ちた規則（`R<数>`）とキーの位置 |
 
 `questions` は `decision-request` の手順で人へ回し、答えは `write --answers <ファイル>` が受ける。
 
-読む部品が止まるときの理由の文は、ファイル・キーの位置・打つコマンドの 3 つを持つ（例: 「`.ndf/worktree.json` の `/branch_flow/promotion` は旧い宣言のキーです。`python3 "$SCRIPTS/project-decl.py" branch-strategy migrate` で移してください」）。
+読む部品が止まるときの理由の文は、ファイル・キーの位置・打つコマンドの 3 つを持つ（例: 「`.ndf/worktree.json` の `/branch_flow/promotion` は旧い宣言のキーです。`python3 "$SCRIPTS/project-decl.py" branch-strategy migrate` で移してください」。11.0 は `ndf project branch-strategy migrate` を示す）。
 
 ## 処理の流れ
 
@@ -317,15 +274,31 @@ flowchart TD
     B -->|無い| C{種類を渡したか}
     C -->|渡した| D[既定の表の行と測った名前]
     C -->|無い| Q[問いを返す・書かない]
-    B -->|ある| E[事例と文書を測る]
-    E --> F{全キーに 3 件・9 割の根拠}
+    B -->|ある| E[測るキーを事例と文書から測る]
+    E --> F{測るキーに 3 件・9 割の根拠}
     F -->|無い・食い違う| Q
-    F -->|ある| G[スキーマで検査]
+    F -->|ある| K{測った値に合う種類の既定が 1 つか}
+    K -->|0 か 2 つ以上| Q
+    K -->|1 つ| P[測らないキーを種類の既定の行から埋める]
+    P --> G[スキーマで検査]
     D --> G
     Q -->|答え| G
     G -->|落ちる| S[stopped・書かない]
     G -->|通る| W[節を書く]
 ```
+
+既存のリポジトリでは、キーを「測るキー」と「種類の既定から埋めるキー」に分ける。PR・タグ・ruleset・ワークフローの事例から数えられないキーを測ろうとすると、
+どのリポジトリでも根拠不足の問いになり、問う場面が食い違いと根拠不足に絞れないためである。
+
+| キーの分け方 | キー | 根拠 |
+| --- | --- | --- |
+| 測るキー | `release_strategy`・`branches`・`sprint.start`・`release.form`・`release.plugin`・`release.runtimes`・`release.version_store`・`release.tag`・`release.github_release`・`release.cd`・`channels`・`merge.method`・`merge.commit` | 事例（PR の宛先と起点・タグ・Release・ruleset・ワークフロー・版数のファイル・マージコミットの親の数）が 3 件以上・9 割以上で合う |
+| 種類の既定から埋めるキー | `kind`・`sprint.integrate`・`sprint.doc_prs`・`reviews`・`approval.target`・`approval.via`・`merge.actor`・`merge.admin`・`verify`・`release.deliveries` | 選んだ種類の既定の行（根拠 `preset`）。`approval.via` は、ruleset が承認を求めるのに既定が `gate` なら食い違いとして問う（I10） |
+| 人の答えで書くキー | 問いを返したキー | 答え（根拠 `answer`）。答えも組み合わせの規則を通す（I2） |
+
+種類（`kind`）は、測るキーの値と 5 つの種類の既定の行を比べ、測るキーがすべて合う行が 1 つだけのときにその種類にする（既定の行の `merge-queue`※ は、測った `merge-queue` と `strict` のどちらとも合うとみなす）。
+測った値は種類の既定より優先して書く（例: 種類 `plugin` で測った `merge.method` が `strict` なら `strict` を書く）。
+合う行が無いか 2 つ以上なら、候補の種類と測った値を添えて `no_kind` の問いを返す。答えで既定から値を変えたときの種類は `custom` にする。
 
 ### 承認とマージ
 
@@ -352,6 +325,23 @@ flowchart TD
     G --> H[CD がタグと Release を作る]
 ```
 
+### 版上げの PR の確かめ
+
+版上げの PR は、承認の後、マージかキューへの投入の前にマージの方式ごとに次を確かめる（I7）。承認した head の一致の確認（I5）はどの方式でも行う。
+
+| マージの方式 | 確かめること | 承認から投入までに本番ブランチへ別の PR が入ったとき |
+| --- | --- | --- |
+| `merge-queue` | 版数が衝突しない: 本番ブランチの先端の版数が、版上げの PR を切った時点の版数と同じで、キューに別の版上げの PR が無い | 版数が衝突しなければそのまま先頭へ入れる。組み合わせはキューが一時のコミットで確かめる（STD3）。衝突すれば止まり、作り直して承認を取り直す |
+| `strict` | head が本番ブランチの先端を含む | 止まり、作り直して承認を取り直す。`strict` は組み合わせを確かめる場が先端を含む head だけなので、この止まりを受け入れる |
+| `direct` | 確かめない（用語の「マージの方式」のとおり） | マージコミットで入れる。Git が衝突を返せば止まる |
+
+`merge-queue` で承認の後に入ったスプリントの PR は、その版に含まれる。スプリントの PR は設計承認ゲート・cross-review・CI を通っており、
+版上げの PR の承認の間もスプリントのマージを止めない（Value 5。承認の要らない作業は承認を待つ間も止めない）。
+承認した CHANGELOG はその PR の範囲のまま変えず、承認の後に入った PR は CD が GitHub Release の本文に「承認の後に入った変更」として並べる。
+
+`direct` を既定にする `web-develop` と `mobile` は、版上げの PR をマージした後に本番ブランチをベースブランチへ戻す同期の PR を作る（今の 10 系のリリースの工程のまま）。
+次の版上げの PR は本番ブランチの先端を含んだベースブランチから切られる。同期の PR はベースブランチ宛てで、承認の対象ではない。
+
 ## ai-plugins の値
 
 ai-plugins の節は、種類 `plugin` の既定（「代表のリポジトリの種類の既定」）に、測った名前（本番ブランチ `main`・プラグイン `ndf`・ランタイム `claude` と `codex`・ワークフロー `release-cd.yml`）を入れたものと一致させる（受け入れ条件 15）。
@@ -361,9 +351,9 @@ ai-plugins の節は、種類 `plugin` の既定（「代表のリポジトリ�
 | --- | --- | --- |
 | ブランチ戦略 | `trunk`。main だけで開発し、スプリントブランチは main から切って main へ戻す | STD2・STD8・PRD1・PRD2 |
 | 版の付け方 | semver を `plugins/<名前>/.claude-plugin/plugin.json` の `version` の 1 か所に持つ。マーケットプレイスの項目に `version` を書かない。開発版の接尾辞は使わない | STD4・STD9 |
-| リリースの単位 | 版上げの PR（main から切った `release/v<版>`）のマージ。スプリントの PR のマージは既存の利用者へ届かない | STD4・PRD3 |
+| リリースの単位 | 版上げの PR（main から切った `release/v<版>`）のマージ。スプリントの PR のマージは、Claude Code の既存の利用者へ届かない。Codex の利用者には main が進むたびに届く（「残る危険」） | STD4・STD10・PRD3 |
 | タグと Release | `ndf--v<版>` のタグと GitHub Release を、main へのマージで CD（`release-cd.yml`）が作る。公開したタグの更新と削除を ruleset で禁じる | STD5・PRD6 |
-| 利用者が取得する ref | 既定ブランチ main（今の登録のまま） | STD4・STD10 |
+| 利用者が取得する ref | 既定ブランチ main（今の登録のまま）。Codex の取得元を版上げの PR のマージでだけ進む ref へ移すかは人へ残す（「人へ残す判断」） | STD4・STD10 |
 | 承認の場所 | 版上げの PR でのリリース承認ゲートの 1 回。main の ruleset の承認の数を 0 にする | 決定 7・PRD1 |
 | マージの主体と方式 | NDF・merge queue・merge commit・迂回なし | STD3・PRD1 |
 | マージ前に試す場 | 無し | 決定 12 |
@@ -383,7 +373,8 @@ ai-plugins の節は、種類 `plugin` の既定（「代表のリポジトリ�
 | タグの形・GitHub Release・取得の ref・merge commit | — | 変えない | 公式の形と同じ（STD5）。取得の ref を変えると利用者の操作が要る（P1） |
 
 **残る危険。** 新しく入れる利用者と、入れ直す利用者は、main の先端（版上げの PR の前にマージしたスプリントを含む）を前の版数の表示のまま受け取る（STD4）。
-スプリントの PR は設計承認ゲート・cross-review・CI を通っており、受け入れる。マーケットプレイスの項目をタグへ固定する形は、Codex の扱いを確かめられていない（「確かめられなかったこと」）。
+Codex の利用者は、起動時のマーケットプレイスの自動更新で、main が進むたびに版数を比べずに入れ直す（STD10）。取得元が main のままなら、スプリントの PR は版上げの PR を待たずに Codex の利用者へ届く。
+スプリントの PR は設計承認ゲート・cross-review・CI を通っている。Codex の利用者へ届く範囲を版上げの PR に合わせるには取得元の ref を変える必要があり、P1 に当たるため人へ残す（「人へ残す判断」）。
 
 ## 非機能の実現方式
 
@@ -409,20 +400,20 @@ ai-plugins の節は、種類 `plugin` の既定（「代表のリポジトリ�
 | 4・5・6 | 5 種の宣言から、10 系と 11.0 の部品が PR の宛先・リリースの PR・マージの主体と方式を「代表のリポジトリの種類の既定」の 2 つ目の表のとおりに返す | 表の 1 セルを変えると、その種類のテストが落ちる |
 | 7 | 文書と Skill の本文に、節を手で書く手順が無い | （`.md` の文言のテストを書かない規約により、削除の一覧の D31〜D33 を `check-legacy-branch-decl.py` が照らす） |
 | 8 | 履歴の無い fixture で種類を渡すと既定と同じ節を書き、渡さないと `no_kind` の問いを返して書かない | 種類を推して書くようにすると落ちる |
-| 9・10 | develop→main と trunk の fixture で、その値と値ごとの根拠（PR の番号・タグ・ファイルと行）を返す | 根拠を落とすと落ちる |
+| 9・10 | develop→main と trunk の fixture で、問いを返さずにその値と値ごとの根拠（測るキーは PR の番号・タグ・ファイルと行、埋めたキーは種類の既定の行）を返す | 根拠を落とすか、埋めるキーを測って問うようにすると落ちる |
 | 11・I11 | 文書と事例が食い違う fixture と、PR が 0 件の fixture で、`conflict`・`insufficient` の問いを返して書かない | 閾値を下げるか、食い違いを無視すると落ちる |
 | 12 | 規則に落ちる答えでは 1 バイトも書かない。`remove` の行でキーを消し、旧いキーの検査がそのキーを返す。`remove` で節が消える | 書いてから検査するように壊すと落ちる |
 | 13・14 | （設計の文書の内容。テストにしない） | — |
 | 15 | ai-plugins の `.ndf/project.json` の節が、`init --kind plugin` に ai-plugins の測った事実を渡した結果と一致する | 片方だけを変えると落ちる |
 | 16・I14 | スキーマの `default`・既定の表の ai-plugins の名前・宛先の決め打ち・条件なしの `--admin` で `check-skill-repo-assumptions.py` が落ちる | 製品に `develop` を宛先として決め打つと落ちる |
-| 17・I5・I7 | #3661 の形（承認の後に head が動いた）と #3572 の形（承認の外のコミット）で、マージもキューへの投入もせずに承認を取り直す依頼で止まる。版上げの PR は本番ブランチの先端を含まなければ止まる | head の一致の確認を外すと落ちる |
+| 17・I5・I7 | #3661 の形（承認の後に head が動いた）と #3572 の形（承認の外のコミット）で、マージもキューへの投入もせずに承認を取り直す依頼で止まる。版上げの PR は、`strict` では先端を含まなければ止まり、`merge-queue` では先端を含まなくても版数が衝突しなければ先頭へ入れ、衝突すれば止まる | head の一致の確認を外すか、`merge-queue` で先端を含むことを求めると落ちる |
 | 18・I12 | #3671 の形（証跡が無いまま同じ問い）で、ケースごとの書き手が証跡を書き、今の head の証跡があれば問いを送らない | 書き手を 2 つにするか、証跡を読まずに問うと落ちる |
 | 19・I9・I10 | 5 種の宣言でリリースを 1 回流すと、人へ問う承認が 1 回。`via: gate` で ruleset が承認を求めると止まる | 2 つ目の承認の問いを足すと落ちる |
 | 20 | 移行のコマンドが ai-plugins の旧い 4 か所を新しい節へ移し、旧い 4 か所を読むのは移行のコマンドと旧い宣言の検査だけ | 読む部品に旧いキーの読みを戻すと `check-legacy-branch-decl.py` が落ちる |
 | 21・I8 | 削除の一覧の各行のパスに消す語が残れば落ちる | 一覧の行を 1 つ残すと落ちる |
 | 22・I3・I4 | 旧いキーを置いたリポジトリで、10 系と 11.0 の worktree の用意・PR の作成・リリース・マージが止まり、旧いキーの位置と移行のコマンドを出す | 既定値へ倒して進むように壊すと落ちる |
 | 23 | `glossary.py check` の廃止した語の当たりが 0 件 | 廃止した語を書くと落ちる |
-| 24 | （リリース後テスト。ai-plugins で 10 系の正式版を承認 1 回で出す） | — |
+| 24 | （リリース後テスト。ruleset を変えた後の最初の正式版を、ai-plugins で承認 1 回で出す。順序は「ai-plugins だけの事情」） | — |
 | 25 | （[issue-3672-design-removal.md](issue-3672-design-removal.md) の「子の Issue の行き先」） | — |
 | I1・I6・I13 | 節が 2 か所にあると止まる / `merge-queue` で迂回が書けない / スナップショットと今の節の違いを出す | それぞれ外すと落ちる |
 
@@ -430,7 +421,7 @@ ai-plugins の節は、種類 `plugin` の既定（「代表のリポジトリ�
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #3672 | 実装する | — | `plugins/ndf-next/contracts/schemas/declarations/project.schema.json`、`plugins/ndf-next/contracts/schemas/declarations/worktree.schema.json`、`plugins/ndf-next/contracts/schemas/declarations/supervise.schema.json`、`plugins/ndf-next/contracts/schemas/declarations/release.schema.json`、`plugins/ndf-next/contracts/domains/branch-strategy-presets.json`（新設）、`plugins/ndf-next/contracts/domains/ndf-settings-renames.json`、`plugins/ndf-next/contracts/domains/branch-flows.json`、`plugins/ndf-next/contracts/schemas/io/branch-strategy.result.schema.json`（新設）、`plugins/ndf-next/src/ndf/core/branch_strategy.py`（新設）、`plugins/ndf-next/src/ndf/domains/project/strategy_measure.py`（新設）、`plugins/ndf-next/src/ndf/domains/project/strategy_write.py`（新設）、`plugins/ndf-next/src/ndf/domains/project/cli.py`、`plugins/ndf-next/src/ndf/domains/worktree/declaration.py`、`plugins/ndf-next/src/ndf/domains/release/declaration.py`、`plugins/ndf-next/src/ndf/domains/release/land.py`、`plugins/ndf/skills/development-workflow/schemas/project.schema.json`、`plugins/ndf/skills/worktree/schemas/worktree.schema.json`、`plugins/ndf/skills/release/schemas/release.schema.json`、`plugins/ndf/scripts/data/branch-strategy-presets.json`（新設）、`plugins/ndf/scripts/data/ndf-settings-renames.json`（新設）、`plugins/ndf/scripts/lib/branch_strategy.py`（新設）、`plugins/ndf/scripts/lib/branch_strategy_legacy.py`（新設）、`plugins/ndf/scripts/lib/branch_flow.py`、`plugins/ndf/scripts/project-decl.py`、`plugins/ndf/scripts/project_lib/branch_strategy_measure.py`（新設）、`plugins/ndf/scripts/project_lib/branch_strategy_write.py`（新設）、`plugins/ndf/scripts/project_lib/branch_strategy_migrate.py`（新設）、`plugins/ndf/scripts/project_lib/measure_branch_flow.py`、`plugins/ndf/scripts/release_lib/promotion.py`、`plugins/ndf/scripts/release_lib/strategy_route.py`（新設）、`plugins/ndf/scripts/supervise_lib/decl.py`、`plugins/ndf/scripts/supervise_lib/sprint_waves.py`、`plugins/ndf/scripts/release-steps.py`、`plugins/ndf/scripts/worktree-setup.sh`、`plugins/ndf/skills/development-workflow/references/project-analysis.md`、`plugins/ndf/skills/worktree/references/declaration.md`、`scripts/check-legacy-branch-decl.py`（新設）、`scripts/legacy-branch-decl.json`（新設）、`scripts/check-skill-repo-assumptions.py`、`scripts/check-ndf-contracts.py`、`scripts/check-pr-base.sh`、`scripts/ndf-choices.json`、`.ndf/project.json`、`.ndf/worktree.json`、`.ndf/supervise.json`、`.github/workflows/release-dev.yml`、`AGENTS.md`、`docs/versioning-and-distribution.md`、`plugins/ndf/scripts/tests/test_branch_strategy.py`（新設）、`plugins/ndf-next/tests/test_branch_strategy.py`（新設）、`scripts/tests/test_check_legacy_branch_decl.py`（新設） |
+| #3672 | 実装する | — | `plugins/ndf-next/contracts/schemas/declarations/project.schema.json`、`plugins/ndf-next/contracts/schemas/declarations/worktree.schema.json`、`plugins/ndf-next/contracts/schemas/declarations/supervise.schema.json`、`plugins/ndf-next/contracts/schemas/declarations/release.schema.json`、`plugins/ndf-next/contracts/domains/branch-strategy-presets.json`（新設）、`plugins/ndf-next/contracts/domains/ndf-settings-renames.json`（#3613 の前にマージするなら新設）、`plugins/ndf-next/contracts/domains/branch-flows.json`、`plugins/ndf-next/contracts/schemas/io/branch-strategy.result.schema.json`（新設）、`plugins/ndf-next/src/ndf/core/branch_strategy.py`（新設）、`plugins/ndf-next/src/ndf/core/branch_strategy_legacy.py`（新設）、`plugins/ndf-next/src/ndf/domains/project/strategy_measure.py`（新設）、`plugins/ndf-next/src/ndf/domains/project/strategy_write.py`（新設）、`plugins/ndf-next/src/ndf/domains/project/strategy_migrate.py`（新設）、`plugins/ndf-next/src/ndf/domains/project/cli.py`、`plugins/ndf-next/src/ndf/domains/worktree/declaration.py`、`plugins/ndf-next/src/ndf/domains/release/declaration.py`、`plugins/ndf-next/src/ndf/domains/release/land.py`、`plugins/ndf/skills/development-workflow/schemas/project.schema.json`、`plugins/ndf/skills/worktree/schemas/worktree.schema.json`、`plugins/ndf/skills/release/schemas/release.schema.json`、`plugins/ndf/scripts/data/branch-strategy-presets.json`（新設）、`plugins/ndf/scripts/data/ndf-settings-renames.json`（新設）、`plugins/ndf/scripts/lib/branch_strategy.py`（新設）、`plugins/ndf/scripts/lib/branch_strategy_legacy.py`（新設）、`plugins/ndf/scripts/lib/branch_flow.py`、`plugins/ndf/scripts/project-decl.py`、`plugins/ndf/scripts/project_lib/branch_strategy_measure.py`（新設）、`plugins/ndf/scripts/project_lib/branch_strategy_write.py`（新設）、`plugins/ndf/scripts/project_lib/branch_strategy_migrate.py`（新設）、`plugins/ndf/scripts/project_lib/measure_branch_flow.py`、`plugins/ndf/scripts/release_lib/promotion.py`、`plugins/ndf/scripts/release_lib/strategy_route.py`（新設）、`plugins/ndf/scripts/supervise_lib/decl.py`、`plugins/ndf/scripts/supervise_lib/sprint_waves.py`、`plugins/ndf/scripts/release-steps.py`、`plugins/ndf/scripts/worktree-setup.sh`、`plugins/ndf/skills/development-workflow/references/project-analysis.md`、`plugins/ndf/skills/worktree/references/declaration.md`、`scripts/check-legacy-branch-decl.py`（新設）、`scripts/legacy-branch-decl.json`（新設）、`scripts/check-skill-repo-assumptions.py`、`scripts/check-ndf-contracts.py`、`scripts/check-pr-base.sh`、`scripts/ndf-choices.json`、`.ndf/project.json`、`.ndf/worktree.json`、`.ndf/supervise.json`、`.github/workflows/release-dev.yml`、`AGENTS.md`、`docs/versioning-and-distribution.md`、`plugins/ndf/scripts/tests/test_branch_strategy.py`（新設）、`plugins/ndf-next/tests/test_branch_strategy.py`（新設）、`scripts/tests/test_check_legacy_branch_decl.py`（新設） |
 
 削除の一覧（D1〜D37）の残りのファイルは、計画が上の表と [issue-3672-design-removal.md](issue-3672-design-removal.md) から実装の PR へ割る。
 
@@ -441,6 +432,7 @@ ai-plugins の節は、種類 `plugin` の既定（「代表のリポジトリ�
 | ai-plugins の版の規則を変え、開発版チャネル（develop・`-dev.N`）をやめる | P1 | リリース対象の版の規則とチャネルが利用者全員に効く |
 | ai-plugins の main の ruleset を変える（承認の数 0・merge queue・タグの保護） | C2 | 誰が何をマージできるかが変わる |
 | ai-plugins の `.ndf/` と `AGENTS.md`・`CLAUDE.md` の運用の節を書き換える | C7 | 利用者の設定と指示書の運用の節の書き換え |
+| ai-plugins の Codex の取得元を、版上げの PR のマージでだけ進む ref（CD が進めるブランチかタグ）へ移すか、main のままにして Codex の利用者にスプリントの PR が届くことを受け入れるか | P1 | 取得元の ref の変更は利用者全員に効く。main のままなら決定 12 の 1 番目の理由は Codex に当てはまらない（STD10）。移す場合、Codex のマーケットプレイスの登録が ref を指定できるかは未確認で、実装の前に確かめる |
 | ai-plugins の develop ブランチを消すか | C4 | ブランチの削除は戻せない。この設計は更新を止めるところまでを行い、消すかを決めない |
 
 ## 未確認のまま残ること
@@ -449,7 +441,7 @@ ai-plugins の節は、種類 `plugin` の既定（「代表のリポジトリ�
 | --- | --- |
 | merge queue の先頭へ入れる操作（`jump`）の権限 | 版上げの PR を先頭へ入れるのに要る権限を、NDF が打つトークンで持つか。実装で ai-plugins のキューへ入れて確かめる |
 | `enqueuePullRequest` に違う `expectedHeadOid` を渡したときの応答 | #3572 の確かめられなかったことと同じ。実装で確かめる |
-| Codex の利用者への届き方 | 版数が同じで main が進んだとき Codex が入れ直すか。リリース後テスト（受け入れ条件 24）で確かめる |
+| Codex のマーケットプレイスの登録で ref を指定できるか | 「人へ残す判断」で取得元を移すと決めたときに要る。build.md に記述が無く、確かめていない。実装の前に Codex の `marketplace add` の引数と設定のキーで確かめる |
 | 既存の事例の測り方の精度 | 3 件・9 割の基準で、代表のリポジトリ（nd-factory など）の節が人の答えと一致するか。実装の後に代表のリポジトリで測る |
 
 ## 出し直しの指摘への対応

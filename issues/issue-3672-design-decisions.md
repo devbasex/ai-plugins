@@ -1,7 +1,7 @@
 # #3672 の決定の記録
 
-設計文書 [issue-3672-design.md](issue-3672-design.md) から分けた決定の記録である。不変条件の番号（`I<数>`）と外部の調査の番号
-（`STD<数>`・`PRD<数>`・`LIB<数>`）は設計文書を、削除の一覧の番号（`D<数>`）は [issue-3672-design-removal.md](issue-3672-design-removal.md) を指す。
+設計文書 [issue-3672-design.md](issue-3672-design.md) から分けた決定の記録である。不変条件の番号（`I<数>`）は設計文書を、外部の調査の番号
+（`STD<数>`・`PRD<数>`・`LIB<数>`）は [issue-3672-design-research.md](issue-3672-design-research.md) を、削除の一覧の番号（`D<数>`）は [issue-3672-design-removal.md](issue-3672-design-removal.md) を指す。
 
 ## 決定の記録
 
@@ -49,14 +49,17 @@ ai-plugins の運用が製品に入る経路が残る（#3617・#3618）。節�
 #3613 の改名表の行は、同じファイルの中の位置の改名（`file`・`old`・`new`）だけを持つ。この課題では、行に `new_file`（移す先のファイル。無ければ同じファイル）を足し、
 旧い 4 か所から `.ndf/project.json` の `/branch_strategy/...` へ移す行を持たせる。#3613 の行 `/branch_flow/promotion` → `/branch_flow/release_strategy` は、
 この課題の行 `.ndf/worktree.json#/branch_flow/promotion` → `.ndf/project.json#/branch_strategy/release_strategy` が置き換える。
-#3613 が先にマージされれば、その行をこの課題の実装で置き換え、後にマージされれば #3613 の実装が置き換えた後の行を持つ。
+#3613 が先にマージされれば、その行をこの課題の実装で置き換える。後にマージされるなら、この課題が 11.0 の `contracts/domains/ndf-settings-renames.json` を #3613 の行の形（`file`・`old`・`new`）に `new_file` を足した形で新設し、
+節 `branch_strategy` へ移す行だけを持つ。#3613 はその後、同じファイルへ自分の行を足す（#3613 の行 `/branch_flow/promotion` → `/branch_flow/release_strategy` は、この課題の行があるので足さない）。
+どちらの順でも、この課題の移行のコマンドと旧い宣言の検査（決定 10）は #3613 のコマンドに依らずに動く。
 
 根拠: Value 14 / Value 11（MVV 版 8）
 
 ### 決定 4: 作る・更新する・消すの主体を、系ごとに今の解析のスクリプト 1 つにする
 
 要求の未決 3 を決める。10 系は `project-decl.py` に、11.0 は `ndf project` にサブコマンド `branch-strategy` を足す。サブコマンドの動詞は
-`init`（新規）・`measure`（既存の測定）・`write`（答えを受けて書く）・`migrate`（旧い宣言を移す）・`remove`（節を消す）である。2 つの系は同じ入出力の契約（設計文書の「入出力の契約」）を持つ。
+`init`（新規）・`measure`（既存の測定）・`write`（答えを受けて書く）・`migrate`（旧い宣言を移す・使わなくなったキーを消す）・`remove`（節を消す）である。
+節を書き換えるのはこのサブコマンドだけで、11.0 の移行も #3613 の `ndf settings migrate` ではなく `ndf project branch-strategy migrate` が行う（決定 10）。2 つの系は同じ入出力の契約（設計文書の「入出力の契約」）を持つ。
 Skill は `development-workflow` の `references/project-analysis.md` がこのサブコマンドを打つ手順を持ち、ほかの Skill と文書は宣言を手で書く手順を持たない（D31〜D33）。
 
 今の解析（`measure_branch_flow.py`・`measure_flow.py`）は、直近のマージ済み PR から起点と宛先を推す仕組みと、確からしさの基準をすでに持つ。
@@ -89,6 +92,10 @@ merge queue を使えるか（Organization の public か、Enterprise Cloud の
 
 文書（`README.md`・`CONTRIBUTING.md`・`AGENTS.md`）は、ブランチ名と宛先を述べる行を拾い、測った値と違えば食い違いとして問う（受け入れ条件 11）。
 文書だけが述べて事例が無い値も、根拠不足として問う。答えが組み合わせの検査を通れば書き、通らなければ理由を添えて問い直す（E4）。
+
+事例から数えられないキー（承認の受け方・マージの主体・スプリントの結合のしかたなど）は測らず、測ったキーから決めた種類の既定の行で埋める（設計文書の「作る・更新する」の表）。
+測れないキーまで 3 件・9 割を求めると、どのリポジトリでも問いになり、受け入れ条件 9・10（値と根拠が出る）と 11（食い違いと根拠不足だけで問う）を分けられない。
+埋めた値の根拠は種類の既定の行（`preset`）で、人の答えで書いた値の根拠はその答え（`answer`）である。どの値も根拠を 1 つ持つ（I11）。
 
 根拠: Value 13 / Value 1 / Value 14（MVV 版 8）
 
@@ -124,7 +131,13 @@ merge queue を使えるか（Organization の public か、Enterprise Cloud の
 #3572 の決定 7（マージの後に CD が版上げの PR を作り、迂回せずに入れてからタグを作る）は採らない。承認の後にもう 1 本の PR がマージの方式を通り、
 キューの追い越し・承認の無い PR の自動マージの止まり（#3641 の設計の I14）を別に守る必要がある。版上げを承認の前に置けば、承認した head に版数が入っている。
 
-版上げの PR は、head が本番ブランチの先端を含むときだけキューの先頭へ入れる（I7）。先端が動いたら作り直して承認を取り直す（E10）。
+版上げの PR は、マージの方式ごとの確かめ（I7。設計文書の「版上げの PR の確かめ」）を通ったときだけマージかキューへの投入をする。
+`merge-queue` では先端を含むことを求めず、版数が衝突しないことだけを確かめて先頭へ入れる。先端を含むことを求めると `strict` と同じ制約になり、
+活発な `trunk` ではスプリントの PR が 1 本入るたびに承認を取り直すことになって、正式版 1 本につき承認 1 回（受け入れ条件 19・24）を満たせない。
+組み合わせの確かめは、キューが本番ブランチの先端と合わせた一時のコミットで行う（STD3・要求の前提 4）。
+
+版上げの PR の承認の間、スプリントの PR のマージを止める形は採らない。承認を待つ間に承認の要らない作業を止めることになり（Value 5）、
+NDF がロックを取る形（#3641 の `serial`）と同じ役割を持つ。
 
 release-please（LIB1）は採らない。上げ幅を Conventional Commits から読み、このリポジトリの題の書式（`Add:`・`Fix:`）と合わず、タグの区切りも公式の形（STD5）と違う。
 版上げと CHANGELOG は、今の 10 系の `bump`・`changelog` を使い続ける。
@@ -143,7 +156,8 @@ release-please（LIB1）は採らない。上げ幅を Conventional Commits か�
 
 ### 決定 10: 10 系と 11.0 の移行のコマンドを、同じ移す行の表から作る
 
-要求の未決 2 を決める。10 系は `project-decl.py branch-strategy migrate`、11.0 は #3613 の `ndf settings migrate` を使う。
+要求の未決 2 を決める。10 系は `project-decl.py branch-strategy migrate`、11.0 は `ndf project branch-strategy migrate` を使う。
+#3613 の `ndf settings migrate` は、移す行の表のうち節 `branch_strategy` へ移す行と、その節のキーの `remove` の行を扱わない。節の持ち主を 1 つにし（決定 4・受け入れ条件 7・12）、#3613 のマージが後になっても 11.0 で移行と旧いキーの検査が動くようにするためである（受け入れ条件 20・22）。
 どちらも決定 3 の移す行の表（正本は 11.0 の `contracts/domains/ndf-settings-renames.json`、10 系はコピー）を読み、差分を示す実行と、示した差分のハッシュを渡して書く実行に分ける（#3613 の決定 12）。
 書く前に新しいスキーマで検査し、旧い 4 か所のキーを消して新しい節を書く。
 
@@ -170,7 +184,8 @@ S1 の「リリースの形」と「CD の有無」に当たる。行を 2 つ�
 値と、今の運用から変える点は設計文書の「ai-plugins の値」にある。決めた順序は次のとおりである。
 
 1. 利用者へ届く単位は Claude Code の仕様で決まる。既に入れた利用者には `plugin.json` の版数が変わったときだけ届き、版数を持たせれば「マージ」と「リリース」が分かれる（STD4）。
-   そのため、ブランチを分けてリリースを分ける理由が無い
+   そのため、ブランチを分けてリリースを分ける理由が無い。Codex は取得元の revision が変わるたびに版数を比べずに入れ直す（STD10）ので、この理由は Claude Code の利用者にだけ当てはまる。
+   Codex の取得元をどの ref にするかは、P1 に当たるため設計文書の「人へ残す判断」に置く
 2. 調べた 8 リポジトリのうち 7 つが main だけで開発し、develop を持つのは 1 つだった（PRD1〜PRD4）。trunk-based development も長く残るブランチを勧めない（STD2）
 3. タグは公式の形 `<plugin>--v<version>`（STD5）で、今の ai-plugins の形と同じである
 4. 利用者の取得元の登録は変えない。既定ブランチ main を指す今の登録のまま、版上げの PR のマージで届く（P1 の影響を最小にする）
