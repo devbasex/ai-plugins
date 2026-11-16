@@ -69,12 +69,17 @@ def test_selected_lane_builds_its_own_prod_plan(monkeypatch):
 
     from supervise_lib import sprint
 
+    import branch_strategy
+    import strategy_fixture
+
+    def flow(kind):
+        return branch_strategy.snapshot_section(branch_strategy.Strategy(strategy_fixture.section(kind)), "宣言")
+
     monkeypatch.setattr(sprint, "parallel_lane", lambda repo: ("p1", "la"))
-    flow = {"start": "production", "integrate": "check", "doc_prs": "sprint", "promotion": "selected"}
-    a = argparse.Namespace(flow=flow, base="develop", production_branch="main")
+    a = argparse.Namespace(flow=flow("mobile"), base="develop", production="main")
     assert sprint.release_lane(a, "/r") is None
     assert list(sprint.prod_plans(a, "/r", lambda: {"x": 1})) == ["release-prod"]
-    whole = argparse.Namespace(flow=None, base="develop", production_branch="main")
+    whole = argparse.Namespace(flow=flow("web-develop"), base="develop", production="main")
     assert sprint.release_lane(whole, "/r") == ("p1", "la")
 
 
@@ -200,12 +205,15 @@ def test_lane_prod_stage_chains_after_release(monkeypatch, tmp_path):
 
 
 def test_merged_on_production_checks_the_production_branch(tmp_path, monkeypatch):
-    """リリース済みの照合は origin/main 固定でなく、本番チャネル（repo.production_branch）の先を見る。"""
+    """リリース済みの照合は origin/main 固定でなく、本番ブランチ（ブランチ戦略の宣言の branches.production）の先を見る。"""
     import subprocess
 
+    import branch_strategy
     import repo
+    import strategy_fixture
 
-    monkeypatch.setattr(repo, "production_branch", lambda _root, decl=None: ("live", "宣言"))
+    live = branch_strategy.Strategy(strategy_fixture.section("web-develop", "develop", "live"))
+    monkeypatch.setattr(repo, "strategy_or_none", lambda _root: live)
     seen = []
 
     def run(cmd, **_kw):
@@ -215,7 +223,7 @@ def test_merged_on_production_checks_the_production_branch(tmp_path, monkeypatch
 
     assert pl.merged_on_production(tmp_path, [7], run=run) is True
     assert seen[-1][-1] == "origin/live"
-    monkeypatch.setattr(repo, "production_branch", lambda _root, decl=None: (None, "無い"))
+    monkeypatch.setattr(repo, "strategy_or_none", lambda _root: None)
     assert pl.merged_on_production(tmp_path, [7], run=run) is False
 
 

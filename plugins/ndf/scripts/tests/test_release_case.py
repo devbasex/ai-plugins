@@ -15,12 +15,27 @@ import pytest
 
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS / "lib"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import branch_strategy  # noqa: E402
 import delivery  # noqa: E402
 import gh_call  # noqa: E402
-import project_decl  # noqa: E402
 import release_case as rc  # noqa: E402
+import strategy_fixture  # noqa: E402
 
 REPO = SCRIPTS.parents[2]
+
+
+def declare_admin(monkeypatch, admin: bool, section: dict | None = None) -> None:
+    """場合の判定が読むブランチ戦略の宣言を、迂回の宣言（`merge.admin`）が `admin` のものに差し替える。"""
+    sec = section or strategy_fixture.section("web-develop")
+    sec["merge"] = {**sec["merge"], "admin": admin, **({"method": "direct"} if admin else {})}
+    monkeypatch.setattr(rc.repo, "branch_strategy_of", lambda root: branch_strategy.Strategy(sec))
+
+
+@pytest.fixture(autouse=True)
+def _no_admin(monkeypatch):
+    """既定は迂回の宣言の無い宣言（テストの作業ディレクトリの宣言を読まない）。"""
+    declare_admin(monkeypatch, False)
 
 
 def pr_rule(n):
@@ -82,23 +97,6 @@ def test_case_trail_attributes(case, user_trail, mvv_trail):
     assert (c.user_trail_only, c.mvv_may_trail) == (user_trail, mvv_trail)
     assert c.user_trail_only == (c.trail_approval and c.human_approval)
     assert c.mvv_may_trail == (c.trail_approval and not c.human_approval)
-
-
-@pytest.mark.parametrize(
-    "decl, admin",
-    [
-        ({"production_merge": {"admin": True}}, True),
-        ({}, False),
-        ({"production_merge": {"admin": False}}, False),
-        ({"production_merge": {"admin": "true"}}, False),
-        ({"production_merge": {"unknown": "決めていない"}}, False),
-        ({"production_merge": True}, False),
-    ],
-)
-def test_production_admin_is_true_only_for_json_true(monkeypatch, decl, admin):
-    """#3506 の I1: `production_merge.admin` が JSON の true のときだけ迂回の宣言があるとみなす。"""
-    monkeypatch.setattr(project_decl, "read_project_decl", lambda root: decl)
-    assert project_decl.production_admin(".") is admin
 
 
 def fake(table):
@@ -165,7 +163,7 @@ def test_case_of_raises_on_broken_decl(monkeypatch):
 @pytest.mark.parametrize("admin, case", [(True, rc.CD_ADMIN), (False, rc.CD_REVIEW)])
 def test_case_of_reads_the_admin_declaration(monkeypatch, admin, case):
     monkeypatch.setattr(delivery, "load_delivery", lambda root: _decl([AUTO]))
-    monkeypatch.setattr(project_decl, "production_admin", lambda root: admin)
+    declare_admin(monkeypatch, admin)
     run, _ = fake({"rules/branches/main": (0, json.dumps([pr_rule(1)]))})
     monkeypatch.setattr(gh_call, "RUNNER", run)
     assert rc.case_of(".").case == case
@@ -173,16 +171,24 @@ def test_case_of_reads_the_admin_declaration(monkeypatch, admin, case):
 
 def test_case_of_stays_cd_no_review_when_approvals_are_unreadable(monkeypatch):
     monkeypatch.setattr(delivery, "load_delivery", lambda root: _decl([AUTO]))
-    monkeypatch.setattr(project_decl, "production_admin", lambda root: True)
+    declare_admin(monkeypatch, True)
     run, _ = fake({})
     monkeypatch.setattr(gh_call, "RUNNER", run)
     assert rc.case_of(".").case == rc.CD_NO_REVIEW
 
 
 def test_ai_plugins_declaration_is_cd_admin(monkeypatch):
-    """受け入れ条件 9: ai-plugins の宣言を場合の判定に通すと、承認数 1 で cd-admin になる。"""
-    decl = json.loads((REPO / ".ndf" / "project.json").read_text(encoding="utf-8"))
-    monkeypatch.setattr(project_decl, "read_project_decl", lambda root: decl)
+    """受け入れ条件 9: ai-plugins の宣言を場合の判定に通すと、承認数 1 で cd-admin になる。旧い宣言が残っていれば（移行は
+    手順 2）、移行のコマンドが書く値を読む。"""
+    import branch_strategy_legacy as legacy
+
+    sys.path.insert(0, str(SCRIPTS))
+    from project_lib import branch_strategy_migrate as bmig
+
+    plan, _ = bmig.plan_migration(REPO, legacy.load_moves())
+    project = plan.files.get("project.json") or json.loads((REPO / ".ndf" / "project.json").read_text(encoding="utf-8"))
+    sec = project[branch_strategy.SECTION]
+    monkeypatch.setattr(rc.repo, "branch_strategy_of", lambda root: branch_strategy.Strategy(sec))
     monkeypatch.setattr(delivery, "load_delivery", lambda root: _decl([AUTO]))
     run, _ = fake({"rules/branches/main": (0, json.dumps([pr_rule(1)]))})
     monkeypatch.setattr(gh_call, "RUNNER", run)
