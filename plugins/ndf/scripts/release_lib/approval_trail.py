@@ -314,3 +314,19 @@ def write_admin_record(repo: str, pr: int, sha: str, trail_url: str) -> tuple[bo
     if not a.ok:
         raise TrailError("unreadable", f"迂回の記録を置けない: {a.error[:200]}")
     return True, (a.value or {}).get("url") or ""
+
+
+# 証跡の書き手（#3672 の I12）。ケースごとに 1 つだけで、ほかの部品は同じ証跡を書かない
+WRITER_ANSWER = "answer"  # リリース承認ゲートの答えを書く手順（`release-steps answer`）
+WRITER_LAND = "land"  # 人のマージの記録（`release-steps land` がマージ済みを見つけたとき）
+WRITER_GITHUB = "github"  # GitHub のレビューの承認（NDF は書かない）
+
+
+def trail_writer(strategy, merged_by_human: bool) -> str:
+    """承認の証跡の書き手をケースごとに 1 つ返す（設計文書の「承認とマージ」の表）。"""
+    sec = strategy.section
+    if sec["approval"]["via"] == "review":
+        return WRITER_GITHUB
+    if merged_by_human or sec["merge"]["actor"] == "human":
+        return WRITER_LAND
+    return WRITER_ANSWER

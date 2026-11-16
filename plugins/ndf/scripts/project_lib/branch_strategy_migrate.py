@@ -34,12 +34,13 @@ def _cd_of(deliveries) -> dict | None:
     return None
 
 
-def _fill(section: dict, presets: dict) -> dict:
-    rs = section.get("release_strategy", "merge_base_branch")
-    form = (section.get("release") or {}).get("form")
+def _fill(section: dict, presets: dict, existing: dict | None = None) -> dict:
+    """移した値に、足りないキーを埋める。`existing` は途中で止まった移行が先に書いたセクション（打ち直しで値を落とさない）。"""
+    rs = section.get("release_strategy") or (existing or {}).get("release_strategy", "merge_base_branch")
+    form = (section.get("release") or {}).get("form") or ((existing or {}).get("release") or {}).get("form")
     kind = FILL_KIND_BY_FORM.get(form, FILL_KIND[rs]) if rs == "trunk" else FILL_KIND[rs]
     row = presets["kinds"][kind]
-    out = copy.deepcopy(row["section"])
+    out = copy.deepcopy(existing) if isinstance(existing, dict) and existing else copy.deepcopy(row["section"])
     out["release_strategy"] = rs
     out["kind"] = "custom"
     for key, value in section.items():
@@ -51,7 +52,7 @@ def _fill(section: dict, presets: dict) -> dict:
     if rs == "trunk":
         branches["base"] = branches["production"]
     rel = out["release"]
-    if form == "package-plugin" and "version_store" not in (section.get("release") or {}):
+    if form == "package-plugin" and "version_store" not in (section.get("release") or {}) and not existing:
         rel["version_store"] = {"kind": "plugin"}
     files = rel.pop("_version_files", None)
     if files and rel["version_store"]["kind"] != "none":
@@ -62,6 +63,8 @@ def _fill(section: dict, presets: dict) -> dict:
     if rel["version_store"]["kind"] == "none":
         rel["tag"], rel["github_release"] = None, False
     dev = out.pop("_dev_workflow", None)
+    if dev is None and existing:
+        dev = next((c.get("workflow") for c in existing.get("channels", []) if c.get("name") == "dev"), None)
     out["channels"] = [{"name": "stable", "ref": branches["production"]}]
     if dev:
         out["channels"].append({"name": "dev", "ref": branches["base"], "workflow": dev})
@@ -107,7 +110,7 @@ def plan_migration(root: Path, moves: list[legacy.Move]) -> tuple[bw.WritePlan, 
         # remove の行だけが当たった（使わなくなったキー）。セクションは今のまま
         names = {legacy.FILES[fid]: doc for fid, doc in after.items()}
         return bw.plan_files(root, names, lambda: plan_migration(root, moves)[0]), []
-    section = _fill(moved, bw.load_presets())
+    section = _fill(moved, bw.load_presets(), project.get(bs.SECTION))
     failed = bs.validate(section)
     if failed:
         where = [{**f, "legacy": sorted(f"{a}:{b}" for a, b in found)} for f in failed]

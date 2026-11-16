@@ -1,0 +1,32 @@
+{
+  "web-develop": {
+    "production": "main",
+    "base": "develop",
+    "workflow": "deploy.yml",
+    "dev_workflow": "deploy-dev.yml"
+  },
+  "web-trunk": {
+    "production": "main",
+    "workflow": null,
+    "merge_queue": true
+  },
+  "mobile": {
+    "production": "main",
+    "base": "develop",
+    "workflow": "release.yml",
+    "dev_workflow": "beta.yml"
+  },
+  "docs": {
+    "production": "main"
+  },
+  "plugin": {
+    "production": "main",
+    "plugin": "example",
+    "runtimes": [
+      "claude",
+      "codex"
+    ],
+    "workflow": "release.yml",
+    "merge_queue": true
+  }
+}
