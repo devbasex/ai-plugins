@@ -25,6 +25,8 @@ from pathlib import Path
 from typing import Optional
 
 import parallel_external as pe
+from gate1_ids import gate1_id
+from parallel_question import first_item, ask_source, option_labels
 import parallel_ledger as plg
 import parallel_plan as pp
 from parallel_request_form import REQUEST_ID_RE, request_errors  # noqa: F401  依頼の形（契約の検査と外のレーンが読む）
@@ -228,16 +230,17 @@ def queue_max(cwd: Optional[str] = None) -> int:
 
 
 def merged_on_production(root: Path, prs: list[int], run=subprocess.run) -> bool:
-    """`prs` のマージのコミットがすべて本番チャネル（`repo.production_branch`）の `origin/<本番>` にあるか（I15）。
+    """`prs` のマージのコミットがすべて本番ブランチ（ブランチ戦略の宣言の `branches.production`）の `origin/<本番>` にあるか（I15）。
 
     本番チャネルが決まらないか、1 本でも分からなければ False。"""
     import repo
 
     if not prs:
         return False
-    prod = repo.production_branch(root)[0]
-    if not prod:
+    s = repo.strategy_or_none(root)
+    if s is None:
         return False
+    prod = s.production
     for n in prs:
         got = run(["gh", "pr", "view", str(n), "--json", "mergeCommit", "-q", ".mergeCommit.oid"], cwd=root, capture_output=True, text=True)
         sha = (got.stdout or "").strip()
@@ -296,8 +299,8 @@ def lane_request_id(state: Path, lane: str) -> str:
 
 def send_release_request(
     main: Path, name: str, lane: str, prs: list[int], issues: list[int], state: Path, verify_plan: Optional[str] = None
-) -> str:
-    """リリースの依頼を台帳へ書いて話題 `inbox` へ送る（`deliver_message`）。依頼の ID を返す。`verify_plan` は版の要るまとめの
+) -> plg.Sent:
+    """リリースの依頼を台帳へ書いて話題 `inbox` へ送る（`deliver_message`）。送った結果（値は依頼の ID）を返す。`verify_plan` は版の要るまとめの
     プラン（1 スプリントのレーンの依頼の経路。`released` の後に一時レーンが流す。#3058 の決定 4）。"""
     rid = lane_request_id(state, lane)
     msg = {
@@ -310,8 +313,7 @@ def send_release_request(
         "at": pe.utc_stamp(),
         **({"verify_plan": str(verify_plan)} if verify_plan else {}),
     }
-    deliver_message(main, name, msg, "inbox", rid)
-    return rid
+    return deliver_message(main, name, msg, "inbox", rid)
 
 
 def read_answer(main: Path, name: str, rid: str, timeout: float = 0) -> tuple[Optional[dict], Optional[dict]]:
@@ -367,29 +369,34 @@ def sender_of(main: Path, name: Optional[str], relay_dir: Optional[str], status=
     return None
 
 
-def _send_inbox(main: Path, name: str, msg: dict, key: str) -> None:
+def send_inbox(main: Path, name: str, msg: dict, key: str) -> plg.Sent:
     if pe.is_external(name):
         # 外のオーガナイザーのレーンは設計の承認と問いを依頼にしない（今どおり止まって人へ戻す。#2439）
         raise ValueError("外のオーガナイザーのレーンは問いを依頼にしない")
-    deliver_message(main, name, msg, "inbox", key)
+    return deliver_message(main, name, msg, "inbox", key)
 
 
-def deliver_message(main: Path, name: str, msg: dict, topic: str, key: str) -> None:
+def deliver_message(main: Path, name: str, msg: dict, topic: str, key: str) -> plg.Sent:
     """台帳へ書いてから耐久ワークフローへ知らせる（#2647 の I1）。台帳を書けなければ例外で返し、知らせない。
+    送った結果を返す。同じキーの行があれば書かず、中身が違えば知らせもしない（#3597 の決定 5。呼び出し元が 1 で断る）。
 
     知らせの失敗（記録が無い・開けない）は標準エラーへ出すだけにする。耐久ワークフローは次の観測で台帳から読む。
     冪等の鍵は `<ID>:<話題>:<key>`。"""
     import durable
 
     kind, lkey = plg.message_key(msg, topic, key)
-    plg.append_ledger_row(main, name, kind, lkey, msg, by=msg.get("lane") or ("organizer" if kind == "answer" else None))
+    if plg.append_ledger_row(main, name, kind, lkey, msg, by=msg.get("lane") or ("organizer" if kind == "answer" else None)):
+        got = plg.Sent(str(msg.get("id") or ""))
+    elif not (got := plg.resent(main, name, lkey, msg)).same:
+        return got
     if not record_exists(main, name):
-        return
+        return got
     wid = workflow_id(name)
     try:
         durable.send_to(KIND, record_identity(main, name), wid, msg, topic, f"{wid}:{topic}:{key}", start=record_start(main))
     except durable.DurableError as exc:
         print(f"parallel: 耐久ワークフローへ知らせられない（台帳には書いた）: {exc}", file=sys.stderr, flush=True)
+    return got
 
 
 def _head_sha(cwd: str) -> str:
@@ -397,26 +404,27 @@ def _head_sha(cwd: str) -> str:
     return got.stdout.strip() if got.returncode == 0 else ""
 
 
-def request_ask(main: Path, name: str, lane: str, tool_input: dict, cwd: str, ledger_id: str) -> str:
-    """承認ゲートの外の区分つきの問い（`kind: ask`）をオーガナイザーへ送る。id は `<送り手>-q<判定の記録の id>`。"""
+def request_ask(main: Path, name: str, lane: str, tool_input: dict, cwd: str, ledger_id: str, target: Optional[str] = None) -> plg.Sent:
+    """承認ゲートの外の区分つきの問い（`kind: ask`）をオーガナイザーへ送る。id は `<送り手>-q<判定の記録の id>`。
+    `target` は問いの対象（`ask_target`。#3608）で、行の `target` に残す（空なら null）。"""
     qs = (tool_input or {}).get("questions") or []
-    first = qs[0] if qs and isinstance(qs[0], dict) else {}
+    first = first_item(tool_input)
     rid = f"{lane}-q{ledger_id}"
     msg = {
         "kind": "ask",
         "id": rid,
         "lane": lane,
-        "source": ((tool_input or {}).get("metadata") or {}).get("source"),
+        "source": ask_source(tool_input),
         "question": first.get("question"),
-        "options": [o.get("label") for o in first.get("options") or [] if isinstance(o, dict)],
+        "options": option_labels(tool_input),
         "questions": qs,
         "cwd": cwd,
         "ledger_id": ledger_id,
         "stamp": _head_sha(cwd),
+        "target": target or None,
         "at": pe.utc_stamp(),
     }
-    _send_inbox(main, name, msg, rid)
-    return rid
+    return send_inbox(main, name, msg, rid)
 
 
 def request_gate1(
@@ -424,15 +432,15 @@ def request_gate1(
 ) -> str:
     """設計の承認の依頼（`kind: gate1`）。id は `<レーン>-g<設計 PR>-<先頭の SHA の 12 桁>`（同じ先頭の打ち直しは同じ id）。
     承認した設計をマージできずに利用者へ戻すとき（#2507）は、同じ先端でも別の依頼にするため `suffix` を足す。"""
-    rid = f"{lane}-g{pr}-{stamp[:12]}{suffix}"
+    rid = gate1_id(lane, pr, stamp, suffix)
     msg = {"kind": "gate1", "id": rid, "lane": lane, "issue": issue, "pr": pr, "report": report, "sprint_state": state, "stamp": stamp}
-    _send_inbox(main, name, {**msg, **extra, "at": pe.utc_stamp()}, rid)
+    send_inbox(main, name, {**msg, **extra, "at": pe.utc_stamp()}, rid)
     return rid
 
 
 def send_prior(main: Path, name: str, msg: dict) -> None:
     """前のループの待ちの依頼（`kind: gate1` と `loop`）を送る。id は行から決まり、同じ行の打ち直しは 1 つにまとまる。"""
-    _send_inbox(main, name, msg, msg["id"])
+    send_inbox(main, name, msg, msg["id"])
 
 
 def send_unmatched(main: Path, name: str, lane: str, answered: str, reason: str) -> None:
@@ -440,24 +448,7 @@ def send_unmatched(main: Path, name: str, lane: str, answered: str, reason: str)
     rid = f"{answered}-unmatched"
     text = f"依頼 {answered} への答えを当てられなかった: {reason}"
     msg = {"kind": "unmatched", "id": rid, "answered": answered, "lane": lane, "reason": reason, "question": text, "options": ["確かめた"]}
-    _send_inbox(main, name, {**msg, "at": pe.utc_stamp()}, rid)
-
-
-def request_gate2(main: Path, name: str, n: int, k: int, report: str) -> str:
-    """一時レーンが提示のプランのリリース承認ゲートで止まったときの依頼（`kind: gate2`）。id は `<計画名>-p<連番>-<提示>`、
-    stamp は提示したコミット（`presented.json`）。"""
-    import parallel_release as prl
-
-    try:
-        sha = json.loads((prl.release_dir(main, name, n, k) / "presented.json").read_text(encoding="utf-8")).get("sha") or ""
-    except (OSError, ValueError):
-        sha = ""
-    rid = f"{name}-p{n}-{k}"
-    lane = prl.helper_name(name, n)
-    _send_inbox(
-        main, name, {"kind": "gate2", "id": rid, "lane": lane, "n": n, "k": k, "report": report, "stamp": sha, "at": pe.utc_stamp()}, rid
-    )
-    return rid
+    send_inbox(main, name, {**msg, "at": pe.utc_stamp()}, rid)
 
 
 def send_answer(
@@ -470,19 +461,19 @@ def send_answer(
     stamp: Optional[str] = None,
     merge: Optional[dict] = None,
     by: str = "user",
-) -> None:
+) -> plg.Sent:
     """オーガナイザーの答えを送る。耐久ワークフローが `answer-<依頼>` を 1 回だけ立て、問いの一覧から外す。
     設計の承認では、答えの前に試みた承認した設計のマージの結果（`merge`）と、だれが承認したか（`by`: user / mvv）を載せる（#2507）。"""
     msg = {
         "kind": "answer", "id": rid, "result": result, "note": note, "choice": list(choice or []), "stamp": stamp,
         "merge": merge, "by": by, "at": pe.utc_stamp(),
     }  # fmt: skip
-    _send_inbox(main, name, msg, f"answer:{rid}")
+    return send_inbox(main, name, msg, f"answer:{rid}")
 
 
 def send_left_stopped(main: Path, name: str, lane: str) -> None:
     """人が止めたままにするレーンを耐久ワークフローへ知らせる（`parallel.py park --clear`）。次の停止で打った分も届くよう、鍵に時刻を入れる。"""
-    _send_inbox(main, name, {"kind": "left_stopped", "lane": lane}, f"left-stopped:{lane}:{time.time_ns()}")
+    send_inbox(main, name, {"kind": "left_stopped", "lane": lane}, f"left-stopped:{lane}:{time.time_ns()}")
 
 
 def requests_for(main: Path, name: str) -> list[dict]:
@@ -494,6 +485,6 @@ def requests_for(main: Path, name: str) -> list[dict]:
         return []
 
 
-def resume_plan(main: Path, name: str, msg: dict, key: str) -> None:
-    """リリースの承認と結果を送る（`key` は話題の中の冪等の鍵）。"""
-    deliver_message(main, name, msg, "resume", key)
+def resume_plan(main: Path, name: str, msg: dict, key: str) -> plg.Sent:
+    """リリースの承認と結果を送る（`key` は話題の中の冪等の鍵）。送った結果を返す。"""
+    return deliver_message(main, name, msg, "resume", key)

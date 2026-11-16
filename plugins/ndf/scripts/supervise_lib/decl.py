@@ -8,7 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-import branch_flow
+import branch_strategy
 import decl as setting_decl
 import delivery
 import formatting
@@ -21,8 +21,10 @@ from pydantic import ConfigDict, Field, StrictInt
 
 
 # プロジェクトごとの宣言（リポジトリの根の .ndf/）。形は plan.py の docstring の「宣言」の節にある
-WORKTREE_DECL = "worktree.json"  # base_branch（起点のブランチ）・production_branch（本番のブランチ）
+WORKTREE_DECL = "worktree.json"  # worktree の振る舞いの設定（ブランチ名は project.json の branch_strategy が持つ）
 SUPERVISE_DECL = "supervise.json"  # test・sync_checks・format・release・queue・impl_timeout・impl_stall_seconds・refactor_budget_minutes
+# 計画に書く起点のブランチ（PR の宛先）のキー。run のステップと pr のステップが読む
+PLAN_BASE = "ベースブランチ"
 GLOSSARY_DECL = "glossary.json"  # 用語集の設定（あれば glossary.py gate で用語集が揃っているかを見る）
 
 
@@ -82,27 +84,31 @@ def step_budgets(decl: dict) -> StepBudgets:
 def read_decl(roots, name: str) -> dict:
     """roots の順に .ndf/<name> を探し、最初に見つかった宣言を返す。どこにも無ければ {}。
 
-    契約がキーごとに別の置き場を宣言した値（`worktree.json` の `production_branch`）は、見つけた木から
-    `setting_decl.overlay_keys` で読み直す（Pull Request の変更で本番のブランチを動かせないようにする。#2363）。
+    契約がキーごとに別の置き場を宣言した値は、見つけた木から `setting_decl.overlay_keys` で読み直す（#2363）。
     """
     for r in roots:
         f = Path(r) / ".ndf" / name
-        if not f.is_file():
-            continue
-        try:
-            d = json.loads(f.read_text(encoding="utf-8"))
-        except ValueError as e:
-            raise DeclError(f"{f}: JSON として読めない: {e}") from e
-        try:
-            schema.load_shape(Decl, d, str(f))
-        except schema.ShapeError as e:
-            raise DeclError(f"{e}（最上位はオブジェクトで書く）") from e
-        if name in setting_decl.places():
-            d, why = setting_decl.overlay_keys(r, name, d, f)
-            if why:
-                raise DeclError(why)
-        return d
+        if f.is_file():
+            return _load_decl_file(r, name, f)
     return {}
+
+
+def _load_decl_file(root, name: str, f: Path) -> dict:
+    """見つけた宣言 `f` を読み、形を確かめ、契約が別の置き場を宣言したキーを読み直す。読めないか形が違えば DeclError。"""
+    try:
+        d = json.loads(f.read_text(encoding="utf-8"))
+    except ValueError as e:
+        raise DeclError(f"{f}: JSON として読めない: {e}") from e
+    try:
+        schema.load_shape(Decl, d, str(f))
+    except schema.ShapeError as e:
+        raise DeclError(f"{e}（最上位はオブジェクトで書く）") from e
+    if name not in setting_decl.places():
+        return d
+    d, why = setting_decl.overlay_keys(root, name, d, f)
+    if why:
+        raise DeclError(why)
+    return d
 
 
 def decl_roots(worktree: str, repo: str | None = None) -> list[Path]:
@@ -137,13 +143,20 @@ def glossary_ready(roots) -> bool:
     return False
 
 
-def declared_base_of(roots) -> str | None:
-    """.ndf/worktree.json の base_branch。無ければ None。"""
+def strategy_of_roots(roots) -> branch_strategy.Strategy:
+    """宣言を探す木の並びのうち、最初に存在する git の木のメインディレクトリのブランチ戦略の宣言。読めなければ DeclError。"""
     try:
-        v = read_decl(roots, WORKTREE_DECL).get("base_branch")
+        return repo.branch_strategy_of(repo.first_git_tree(roots))
+    except branch_strategy.StrategyError as e:
+        raise DeclError(e.reason) from e
+
+
+def declared_base_of(roots) -> str | None:
+    """ブランチ戦略の宣言のスプリントの PR の宛先（`branches.base`）。読めなければ None。"""
+    try:
+        return strategy_of_roots(roots).base
     except DeclError:
         return None
-    return v if isinstance(v, str) and v else None
 
 
 def sync_checks_of(decl: dict) -> list[tuple[str, str]]:
@@ -177,16 +190,23 @@ class QueueDecl(schema.Shape):
     shared: list[SharedList] = []
 
 
+def _with_default_resources(raw):
+    """queue の宣言の resources を既定へ重ねる（宣言したタグを項目ごとに）。resources が dict でなければ `raw` をそのまま返す。"""
+    if not isinstance(raw, dict):
+        return raw
+    declared = raw.get("resources") or {}
+    if not isinstance(declared, dict):
+        return raw
+    merged = {**QUEUE_RESOURCES, **declared}
+    return {**raw, "resources": {t: {**QUEUE_RESOURCES.get(t, {}), **r} if isinstance(r, dict) else r for t, r in merged.items()}}
+
+
 def queue_decl(decl: dict) -> dict:
     """supervise.json の queue を既定と合わせて `{"resources": {タグ: {limit, types, commands}}, "shared": [{path, touched_by}]}` で返す。
 
     無ければ既定（graphql の枠 2 本・共有の一覧は無し）。形が違えば DeclError。"""
-    raw = decl.get("queue") or {}
+    raw = _with_default_resources(decl.get("queue") or {})
     hint = '（queue は {"resources": {タグ: {"limit", "types", "commands"}}, "shared": [{"path", "touched_by"}]} で書く）'
-    declared = (raw.get("resources") or {}) if isinstance(raw, dict) else None
-    if isinstance(declared, dict):  # 既定へ、宣言したタグを項目ごとに重ねる
-        merged = {**QUEUE_RESOURCES, **declared}
-        raw = {**raw, "resources": {t: {**QUEUE_RESOURCES.get(t, {}), **r} if isinstance(r, dict) else r for t, r in merged.items()}}
     try:
         shape = schema.load_shape(QueueDecl, raw, "supervise.json: queue")
     except schema.ShapeError as e:
@@ -219,8 +239,8 @@ NEEDS = {
     "sprint": ("base", "test"),
     "close": ("base", "test"),
 }
-# 本番のブランチの出所（決め方の順。決め方の正本は `repo.production_of`）。エラーと案内の文面に使う（#2097 の決定 3）
-PRODUCTION_SOURCES = f"--production-branch・.ndf/{WORKTREE_DECL} の production_branch・既定ブランチ（origin/HEAD → main / master）"
+# 本番のブランチの出所。エラーと案内の文面に使う（#2097 の決定 3）
+PRODUCTION_SOURCES = f"--production-branch・.ndf/project.json の {branch_strategy.SECTION}.branches.production"
 # 本番のブランチを使う雛形（`--production-branch` を受ける種別と同じ）。ほかの種別では既定ブランチを問い合わせない（git の起動を増やさない）
 USES_PRODUCTION = ("release", "sprint", "close")
 
@@ -238,34 +258,37 @@ def scope_paths(a) -> list[str]:
 def apply_decls(a) -> None:
     """引数に無いものを .ndf/ の宣言から埋める。雛形に要るのにどちらにも無ければ DeclError。
 
-    - 起点のブランチ（a.base）: --base → worktree.json の base_branch
-    - 本番のブランチ（a.production_branch）: --production-branch → `repo.production_branch`（worktree.json の
-      production_branch → 既定ブランチ。決め方の正本は `repo.production_of`。#2097）。既定ブランチへの補完は
-      本番を使う雛形（`USES_PRODUCTION`）だけで行う
+    - ブランチ戦略（a.flow）: `.ndf/project.json` の `branch_strategy` のスナップショット（`branch_strategy.snapshot_section`。
+      決定 9）。宣言が無い・壊れている・旧いキーが残るときは既定値へ倒さずに DeclError（I3・I4）。種別リリース（スプリントに属さない
+      リリース）は本番ブランチの先頭の宣言（`production_strategy`）から作る（#3308）
+    - 起点のブランチ（a.base）: --base → 宣言のスプリントの PR の宛先（`branches.base`）
+    - 本番のブランチ（a.production）: --production-branch → 宣言の `branches.production`
     - テスト（a.strategy・a.test_limits・a.test_cmd・a.no_reports）: --test-cmd（雛形）→ project.json の test →
       supervise.json の test.command（project.json に test が無いときだけ。読んだことを a.test_note に残す。#1334 決定 3）。
       --test-all は廃止（知らせて無視する）
     - 同期とチェック（a.sync_checks）: supervise.json の sync_checks（無ければ計画に sync のステップを置かない）
     - 整形（a.format）: supervise.json の format（無ければ計画に format のステップを置かない）
     - 用語集の有無（a.glossary_ready）: `glossary_ready`（真なら実装の指示に用語集と突き合わせる行を入れる）
-    - デプロイ（a.release）: supervise.json の release
+    - リリース（a.release）: 宣言の `release`（形・プラグイン・ランタイム・版数の置き場・届け先）
     - 実装の上限（a.impl_timeout）・無進捗の許容時間（a.impl_stall_seconds）・想定最大時間（a.refactor_budget_minutes）:
       引数 → supervise.json の同じ名前の項目。
       宣言の形は引数があっても見る（#1916 の決定 5）
 
-    - ブランチ運用（a.flow）: worktree.json の branch_flow をブランチ名まで解いたスナップショット（`flow_snapshot`）。
-      宣言が壊れていれば既定値へ倒さずに DeclError（#3121 の I1）
-
-    リリースの経路（a.routes）は sprint と close だけが使い、`sprint_routes.apply_routes` が delivery_decl（宣言。a.delivery）で組む。
+    リリースの経路（a.routes）は sprint と close だけが使い、`sprint_routes.apply_routes` が delivery_decl（宣言。a.delivery_decl）で組む。
     """
     roots = decl_roots(a.worktree, getattr(a, "repo", None))
-    wt = read_decl(roots, WORKTREE_DECL)
     sv = read_decl(roots, SUPERVISE_DECL)
-    _apply_simple_decls(a, wt, sv)
-    if not a.production_branch and roots and a.kind in USES_PRODUCTION:
-        # 既定ブランチは、まだ作っていない worktree ではなく存在する木から解く（#2097 の決定 1）
-        a.production_branch = repo.production_branch(repo.first_git_tree(roots), wt)[0]
-    a.flow = flow_snapshot(a, wt)
+    _apply_simple_decls(a, sv)
+    if _pinned_flow(a) is None and getattr(a, "kind", None) in ("sprint", "close"):
+        # 打ち直しは、起点・本番のブランチ・リリースを開始時のスナップショットから導く（決定 9）。導いた後に
+        # a.flow だけを戻すと、古い目録のまま新しい本番ブランチやプラグインへ出す計画になる
+        pin_flow(a)
+    if _pinned_flow(a) is None:
+        a.flow = _strategy_snapshot(a, roots)
+    strategy = sprint_flow(a)
+    a.base = getattr(a, "base", None) or strategy.pr_target("sprint")
+    a.production = getattr(a, "production", None) or strategy.production
+    a.release = strategy.section["release"]
     decl, a.test_note = _project_decl(roots, sv)
     _apply_test_strategy(a, decl)
     if getattr(a, "glossary_ready", None) is None:
@@ -273,32 +296,64 @@ def apply_decls(a) -> None:
     _require_declared(a)
 
 
-FLOW_SOURCE = f".ndf/{WORKTREE_DECL} の {branch_flow.DECL_KEY}"
+def sprint_out(a) -> Path:
+    """スプリントの計画の置き場（`--out`、省けば `sprint-<名前>`）。`pin_flow` が読むため、procedures より下のここに置く。"""
+    return Path(a.out or f"sprint-{a.name}")
 
 
-def flow_snapshot(a, wt: dict) -> dict:
-    """ブランチ運用のスナップショット（`branch_flow.ResolvedFlow.as_snapshot`）。引数に既にあればそれを使う。
-    スプリントの目録に開始時の値があれば、`sprint_waves.pin_flow` がそれで置き換える（#3121 の I3）。宣言が壊れていれば DeclError。"""
-    if isinstance(getattr(a, "flow", None), dict) and a.flow:
-        return a.flow
+def pin_flow(a) -> None:
+    """スプリントの目録（`sprint.json`）に開始時に書いたブランチ戦略のスナップショットがあれば、`a.flow` をそれにする。`new sprint` を同じ
+    スプリントで打ち直したときと `new close` は、宣言ではなく開始時の値で組む（#3121 の決定 4）。"""
     try:
-        flow = branch_flow.of_decl(wt)
-    except branch_flow.FlowError as e:
-        raise DeclError(str(e)) from e
-    source = FLOW_SOURCE if flow.declared else f"既定値（{FLOW_SOURCE} が無い）"
-    return flow.resolve(a.base, getattr(a, "production_branch", None)).as_snapshot(source)
+        got = json.loads((sprint_out(a) / repo.SPRINT_MANIFEST).read_text(encoding="utf-8")).get(branch_strategy.SNAPSHOT_KEY)
+    except (OSError, ValueError, AttributeError):
+        return
+    if isinstance(got, dict) and got:
+        a.flow = got
 
 
-def sprint_flow(a) -> branch_flow.ResolvedFlow:
-    """引数のスナップショットを読む。無ければ（スナップショットを持たない呼び手）宣言の無いリポジトリの値（I3）。"""
-    return branch_flow.from_snapshot(getattr(a, "flow", None), getattr(a, "base", None), getattr(a, "production_branch", None))
+def _pinned_flow(a) -> dict | None:
+    """引数に既にあるブランチ戦略のスナップショット（空でない dict）。無ければ `None`。"""
+    flow = getattr(a, "flow", None)
+    return flow if isinstance(flow, dict) and flow else None
+
+
+def _strategy_snapshot(a, roots: list[Path]) -> dict:
+    """スナップショットを今の宣言から作る。スプリントの目録に開始時の値があれば、`pin_flow` がそれで置き換える（I13）。
+
+    種別リリース（スプリントに属さないリリース）は、本番ブランチの先頭の宣言から作る（#3308 の決定 1）。読めなければ止まる。
+    ブランチの名前（`branches`・`channels`）は今の宣言の値で置き換える（#3308 の I5。本番ブランチの宣言が古い名前を持っていても
+    今の名前で組む）。置き換えた値がスキーマに落ちれば、読む側（`sprint_flow`）が止まる。"""
+    strategy = strategy_of_roots(roots)
+    if a.kind != "release":
+        return branch_strategy.snapshot_section(strategy, f".ndf/project.json の {branch_strategy.SECTION}")
+    production = getattr(a, "production", None) or strategy.production
+    got, where = repo.production_strategy(repo.first_git_tree(roots), production)
+    if got is None:
+        # ベースブランチで移行を入れた後は、本番ブランチにセクションが届くのがリリースの後になる。止めるときに入れ方を示す。
+        # 本番ブランチ宛ての PR を直接作る案内はしない（本番宛ての PR をベースブランチに含まれる head に限るリポジトリで落ちる）
+        raise DeclError(
+            f"本番ブランチの宣言を読めない: {where}。移行（branch-strategy migrate）をベースブランチ {strategy.base} で入れた後なら、"
+            f"セクションはベースブランチを本番ブランチ {production} へ入れるリリースで届く。スプリントのリリース"
+            f"（`new sprint` の計画。宣言はベースブランチから読む）で本番ブランチへ入れてから打ち直してください"
+        )
+    names = {k: strategy.section[k] for k in ("branches", "channels")}
+    return branch_strategy.snapshot_section(branch_strategy.Strategy({**got.section, **names}), where)
+
+
+def sprint_flow(a) -> branch_strategy.Strategy:
+    """引数のスナップショット（`a.flow`）を読む。無い・壊れているときは DeclError（既定値へ倒さない。I3）。"""
+    try:
+        return branch_strategy.from_snapshot(getattr(a, "flow", None))
+    except branch_strategy.StrategyError as e:
+        raise DeclError(e.reason) from e
 
 
 def sync_source(a, pr) -> str:
     """ベースの取り込みの取り込み元の引数。選んで集める取り込み方は、宛先（ベースブランチ）ではなく
     スプリントの起点から取り込む（#3121 の I4）。それ以外は PR の宛先（`--pr`）。"""
     flow = sprint_flow(a)
-    return f"--base {shlex.quote(flow.start_branch)}" if flow.row.selects_units and flow.start_branch else f"--pr {pr}"
+    return f"--base {shlex.quote(flow.sprint_start_ref())}" if flow.row.selects_units else f"--pr {pr}"
 
 
 def check_flags(a, no_refactor: bool) -> str:
@@ -324,14 +379,12 @@ def check_issues(a) -> list[int]:
         return []
 
 
-def _apply_simple_decls(a, wt: dict, sv: dict) -> None:
+def _apply_simple_decls(a, sv: dict) -> None:
     """引数を優先し、無ければ宣言の値をそのまま写す項目。"""
     sv_test = supervise_shape(sv).test
     budgets = step_budgets(sv)
     for k in STEP_BUDGETS:
         setattr(a, k, getattr(a, k, None) or getattr(budgets, k))
-    a.base = getattr(a, "base", None) or wt.get("base_branch") or None
-    a.production_branch = getattr(a, "production_branch", None) or wt.get("production_branch") or None
     a.test_cmd = getattr(a, "test_cmd", None) or None
     if getattr(a, "test_all", None):
         print("⚠ --test-all は廃止しました（#1334）。全体テストは宣言の suites[].command で決まります", file=sys.stderr, flush=True)
@@ -339,7 +392,6 @@ def _apply_simple_decls(a, wt: dict, sv: dict) -> None:
     a.no_reports = sv_test.get("no_reports") or ""
     a.sync_checks = sync_checks_of(sv)
     a.format = format_of(sv)
-    a.release = sv.get("release") or None
 
 
 def _apply_test_strategy(a, decl: dict) -> None:
@@ -365,12 +417,12 @@ def _apply_test_strategy(a, decl: dict) -> None:
 def _require_declared(a) -> None:
     """計画の種別（a.kind）に要る宣言が揃わなければ DeclError。"""
     missing = {
-        "base": (not a.base, f"起点のブランチ（--base か .ndf/{WORKTREE_DECL} の base_branch）"),
+        "base": (not a.base, "起点のブランチ（--base かブランチ戦略の宣言）"),
         "test": (
             a.strategy is None,
             f"テストの宣言（.ndf/{project_decl.DECL.name} の test か --test-cmd、または .ndf/{SUPERVISE_DECL} の test.command）",
         ),
-        "release": (not isinstance(a.release, dict) or not a.release.get("form"), f"リリースの形（.ndf/{SUPERVISE_DECL} の release.form）"),
+        "release": (not isinstance(a.release, dict) or not a.release.get("form"), "リリースの形（ブランチ戦略の宣言の release.form）"),
     }
     lack = [missing[k][1] for k in NEEDS[a.kind] if missing[k][0]]
     if lack:
@@ -378,33 +430,13 @@ def _require_declared(a) -> None:
 
 
 def delivery_decl(a) -> "delivery.DeliveryDecl":
-    """リリースの判定に使う宣言（lib/delivery.py の DeliveryDecl）。起点と本番のブランチは引数（a.base・a.production_branch）が
+    """リリースの判定に使う宣言（lib/delivery.py の DeliveryDecl）。起点と本番のブランチは引数（a.base・a.production）が
     宣言より先に効く。読めない宣言は `problems` に書き、例外を上げない。"""
-    roots = decl_roots(a.worktree, getattr(a, "repo", None))
-    problems = []
     try:
-        wt = read_decl(roots, WORKTREE_DECL)
+        strategy = sprint_flow(a)
     except DeclError as e:
-        wt, problems = {}, [str(e)]
-    try:
-        project = read_decl(roots, project_decl.DECL.name)
-    except DeclError as e:
-        project, problems = {}, [*problems, str(e)]
-    return delivery.build(
-        wt,
-        project,
-        a.release,
-        default_branch=_default_branch_of(roots),
-        problems=problems,
-        base=a.base,
-        production=a.production_branch,
-    )
-
-
-def _default_branch_of(roots) -> str | None:
-    """宣言を探す木の並びのうち、最初に存在する git の木から解いた既定ブランチ（`apply_decls` と同じ木。#2097 の決定 2）。"""
-    tree = repo.first_git_tree(roots)
-    return repo.default_branch(tree) if tree is not None else None
+        return delivery.build(None, a.release, problems=[str(e)], base=a.base, production=a.production)
+    return delivery.build(strategy, a.release, base=a.base, production=a.production)
 
 
 def _project_decl(roots, sv: dict) -> tuple[dict, str | None]:
@@ -424,7 +456,7 @@ def decl_fields(a) -> dict:
     """スプリントの雛形が各計画へ引き継ぐ、宣言から埋めた値。"""
     keys = (
         "base",
-        "production_branch",
+        "production",
         "test_cmd",
         "test_kind",
         "test_paths",
@@ -446,7 +478,7 @@ def decl_fields(a) -> dict:
 
 def with_decls(plan: dict, a) -> dict:
     """計画に起点のブランチと、テストに成果物を作らせない指定を書く（run のステップと pr のステップが読む）。"""
-    plan["base_branch"] = a.base
+    plan[PLAN_BASE] = a.base
     if getattr(a, "no_reports", ""):
         plan["no_reports"] = a.no_reports
     return plan

@@ -156,3 +156,42 @@ def pr_status_parts(repo: str, pr: int) -> tuple[dict[str, Any] | None, str]:
         if isinstance(n, dict) and n.get("number") is not None
     ]
     return {"merge_state": node.get("mergeStateStatus"), "unresolved_threads": unresolved, "issues": issues}, ""
+
+
+# merge queue（#3672）。問い合わせの文は 11.0 の `adapters/github.py` と同じにする
+MERGE_QUEUE_QUERY = (
+    "query($owner: String!, $name: String!, $branch: String!) { repository(owner: $owner, name: $name) {"
+    " mergeQueue(branch: $branch) { id } } }"
+)
+PR_NODE_QUERY = "query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { id } } }"
+ENQUEUE_MUTATION = (
+    "mutation($id: ID!, $head: GitObjectID!, $jump: Boolean) {"
+    " enqueuePullRequest(input: {pullRequestId: $id, expectedHeadOid: $head, jump: $jump}) { clientMutationId } }"
+)
+
+
+def _owner_name(repo: str) -> tuple[str, str]:
+    owner, _, name = repo.partition("/")
+    return owner, name
+
+
+def merge_queue_enabled(repo: str, branch: str, run: Callable[..., gh_quota.Attempt] | None = None) -> bool | None:
+    """本番ブランチに merge queue があるか。読めなければ None。"""
+    owner, name = _owner_name(repo)
+    a = (run or graphql)(MERGE_QUEUE_QUERY, {"owner": owner, "name": name, "branch": branch})
+    if not a.ok or not isinstance(a.value, dict):
+        return None
+    return bool(((a.value.get("repository") or {}).get("mergeQueue")))
+
+
+def enqueue_pr(repo: str, pr: int, expected_head: str, jump: bool, run: Callable[..., gh_quota.Attempt] | None = None) -> gh_quota.Attempt:
+    """承認した head を指定してキューへ入れる。版上げの PR は `jump` で先頭へ入れる。head が違えば GitHub が断る。"""
+    owner, name = _owner_name(repo)
+    call = run or graphql
+    node = call(PR_NODE_QUERY, {"owner": owner, "name": name, "number": int(pr)})
+    pid = (
+        ((node.value or {}).get("repository") or {}).get("pullRequest", {}).get("id") if node.ok and isinstance(node.value, dict) else None
+    )
+    if not pid:
+        return gh_quota.Attempt(None, node.error or f"#{pr} の node id を読めない", "graphql")
+    return call(ENQUEUE_MUTATION, {"id": pid, "head": expected_head, "jump": bool(jump)})

@@ -1,0 +1,55 @@
+{
+  "document": {
+    "dsl": "1.0.3",
+    "namespace": "ndf",
+    "name": "design-detail",
+    "version": "1.0.0"
+  },
+  "input": {
+    "schema": {
+      "resource": {
+        "endpoint": "file:///workflow/stage-io.schema.json#/$defs/stage-in"
+      }
+    }
+  },
+  "output": {
+    "schema": {
+      "resource": {
+        "endpoint": "file:///workflow/stage-io.schema.json#/$defs/stage-out"
+      }
+    }
+  },
+  "metadata": {
+    "ndf": {
+      "stage": "詳細設計",
+      "phase": "design",
+      "inputs": [
+        "issues",
+        "worktree"
+      ]
+    }
+  },
+  "do": [
+    {
+      "design-detail": {
+        "call": "ndf.plan",
+        "with": {
+          "plan": "design-detail"
+        },
+        "metadata": {
+          "ndf": {
+            "kind": "work",
+            "range": "none"
+          }
+        },
+        "output": {
+          "schema": {
+            "resource": {
+              "endpoint": "file:///workflow/stage-io.schema.json#/$defs/report"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

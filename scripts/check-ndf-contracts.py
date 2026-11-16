@@ -298,6 +298,19 @@ class Checker:
         for kind, path, name, detail in sorted(code):
             out.append(v(kind, path, name, detail))
         self.core(entries, out)
+        self.match_contract_usage(out)
+        self.check_index(out)
+        metrics = {
+            "entrypoints": len(entries),
+            "candidates": len(cands),
+            "files": len(self.c.files),
+            "settings": len(self.c.settings),
+            "env": len(self.c.env),
+        }
+        return out, metrics
+
+    def match_contract_usage(self, out: list[dict]) -> None:
+        """契約全体の整合: 設定キーの重複と、どのエントリポイントも使わない環境変数・ファイルの項目。"""
         for file, s in sorted(self.c.settings.items()):
             for key, k in s["keys"].items():
                 if "duplicates" in k:
@@ -313,17 +326,12 @@ class Checker:
             out.append(
                 v("contract-stale", f"{CONTRACTS}/files/{name}.json", name, "どのエントリポイントも書き読みしないファイルの項目。消す")
             )
+
+    def check_index(self, out: list[dict]) -> None:
+        """逆引き（index.md）が項目から作り直した中身と一致するか。"""
         idx = self.root / INDEX
         if not idx.is_file() or idx.read_text(encoding="utf-8") != render(self.c, self.root):
             out.append(v("index-stale", INDEX, "", "逆引きが項目と一致しない。python3 scripts/check-ndf-contracts.py --render を打つ"))
-        metrics = {
-            "entrypoints": len(entries),
-            "candidates": len(cands),
-            "files": len(self.c.files),
-            "settings": len(self.c.settings),
-            "env": len(self.c.env),
-        }
-        return out, metrics
 
 
 def judge(root: Path, found: list[dict], allow: list[dict], targets: set[str], reach=None) -> tuple[list[dict], int, int]:
@@ -437,7 +445,7 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--root", type=Path, default=REPO, help="リポジトリの根（既定はこのスクリプトのリポジトリ）")
     ap.add_argument("--allow", type=Path, help=f"例外リストの置き場（既定は <root>/{ALLOW}/）")
-    ap.add_argument("--base", help="例外リストを比べる ref（既定は origin/<GITHUB_BASE_REF か .ndf/worktree.json の base_branch>）")
+    ap.add_argument("--base", help="例外リストを比べる ref（既定は origin/<GITHUB_BASE_REF かブランチ戦略の宣言の branches.base>）")
     ap.add_argument("--render", action="store_true", help=f"{INDEX} を書き直す")
     ap.add_argument("--draft", metavar="PATH", help="エントリポイントの項目の下書きを標準出力へ出す")
     ap.add_argument("files", nargs="*", help="合否を決めるファイル（省くと木全体の違反で決める）")

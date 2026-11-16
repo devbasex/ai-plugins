@@ -4,8 +4,10 @@
   "place": "worktree",
   "scope": "team",
   "readers": [
+    "plugins/ndf/scripts/lib/project_decl.py:read_project_decl",
     "plugins/ndf/scripts/lib/project_decl.py:read_project_decl_checked",
-    "plugins/ndf/scripts/lib/project_decl.py:read_project_decl"
+    "plugins/ndf/scripts/project_lib/branch_strategy_write.py:plan_remove",
+    "plugins/ndf/scripts/project_lib/branch_strategy_write.py:plan_write"
   ],
   "keys": {
     "$schema": {
@@ -30,10 +32,6 @@
     "services": {
       "summary": "services（このリポジトリの宣言にある最上位のキー）"
     },
-    "delivery": {
-      "summary": "リリースの経路の行。本番・ベースブランチで動く行は channel で指し、ブランチ名を写さない（branch は channel の無い行だけ）。本番マージの判定（リリース承認ゲート）に使うため、メインディレクトリから読む（#2363）",
-      "place": "main"
-    },
     "issues": {
       "summary": "issues（このリポジトリの宣言にある最上位のキー）"
     },
@@ -54,6 +52,10 @@
     },
     "analysis": {
       "summary": "analysis（このリポジトリの宣言にある最上位のキー）"
+    },
+    "branch_strategy": {
+      "summary": "ブランチ戦略の宣言（#3672）。ブランチ名・取り込み方・リリース・チャネル・承認・マージを 1 か所に持つ。作るのは project-decl.py branch-strategy だけ。本番マージの判定に使うため、メインディレクトリから読む（lib/branch_strategy.py）",
+      "place": "main"
     }
   }
 }

@@ -13,9 +13,10 @@ import gh_sections
 import mdtable
 from pr_mode import stages_in, with_mode_line
 from release_lib.others import MIGRATION_HEADING
-from repo import defer_for_base
+from repo import default_branch, defer_for_base
 from supervise_lib.claude import TAIL
 from supervise_lib.paths import DECISIONS_SH
+from supervise_lib import pr_marks
 from supervise_lib.pr_materials import CHANGES_HEADING, Materials, gather_materials
 import limits
 from supervise_lib.prompts import DESIGN_DIFF_HEADING, DESIGN_DIFF_NONE, PR_SYSTEM
@@ -187,7 +188,7 @@ class PrStep:
         """push して Draft の Pull Request を作る。既にあれば本文だけを書き直す。本文は既定で LLM に書かせる（body が llm でないときは機械生成のまま）。"""
         base = step.get("base") or ctx.base_branch()
         if not base:
-            msg = "PR の宛先（起点のブランチ）が分からない（ステップの base、計画か .ndf/worktree.json の base_branch）"
+            msg = "PR の宛先（起点のブランチ）が分からない（ステップの base、計画かブランチ戦略の宣言）"
             ctx.state.cur.update(exit=2, text=msg)
             return False, msg
         diff, err = self.design_diff(ctx, step)
@@ -215,10 +216,28 @@ class PrStep:
         body = with_mode_line(body, ctx.plan.get("モード"), stages)
         if step.get("decisions"):
             body = self.with_decisions(ctx, body, base)
+        marks = pr_marks.marks_conf(ctx.cwd)
+        if marks:  # 組み直した本文へ、今の本文の検査の印の行を引き継ぐ（#3529）
+            body = pr_marks.carry_marks(body, self._open_body(ctx, branch), marks, PR_FOOTER)
         ok, url = self._publish(ctx, base, branch, doc_title or title, body, retitle=doc_title is not None)
         if ok and url:
             ctx.state.cur["mode_stages"] = {"pr": url, "stages": stages}  # 本文へ書いた工程の並び（refresh_mode_line が読む）
+        # 既定ブランチ（本番チャネル）宛ての PR は、CI の検査も起点を渡さず I2・port を当てない（ndf-next-checks.yml）
+        judge = ok and url and marks and base != default_branch(ctx.cwd)
+        lack = pr_marks.missing_marks(body, marks, pr_marks.marked_diff(ctx.cwd, base, marks)) if judge else []
+        if lack:  # 出した後に止める。本文へ印を足して pr から再開すれば、上の引き継ぎが行を保つ
+            msg = (
+                f"PR {url} の本文に ndf-next の検査の印が無い（{', '.join(k for k, _ in lack)}）。"
+                f"{' と '.join(f for _, f in lack)} の行を本文へ足し、このステップから再開する"
+            )
+            ctx.state.cur.update(exit=1, text=msg, marks_missing=[k for k, _ in lack])
+            return False, msg
         return ok, url
+
+    def _open_body(self, ctx, branch: str) -> str:
+        """head が `branch` の開いた PR の今の本文。無い・読めなければ空。"""
+        p = gh_call.gh(["pr", "list", "--head", branch, "--state", "open", "--json", "body", "--jq", '.[0].body // ""'], cwd=ctx.cwd)
+        return p.stdout if p.returncode == 0 else ""
 
     def _push(self, ctx) -> tuple[str, str | None]:
         """HEAD を push する。`(ブランチ, 失敗の出力 | None)`。結果に押したコミット（`head`）を残し、失敗なら標準出力と

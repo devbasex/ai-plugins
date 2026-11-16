@@ -16,6 +16,7 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import NamedTuple
 
 import approved_commit as ac
 import gh_call
@@ -43,6 +44,16 @@ class IncludedPr:
     via: int | None = None
 
 
+class PrNotes(NamedTuple):
+    """notes_of が返す PR 1 本の中身。by_title は変化の箇条が無く題名で代えたか。"""
+
+    number: int
+    changes: list[str]
+    risks: list[str]
+    by_title: bool
+    migration: list[str]
+
+
 def _in_range(m: merged_range.Merge) -> bool:
     return bool(m.branch) and not m.branch.startswith(RELEASE_PREFIX)
 
@@ -67,10 +78,10 @@ def release_range(root: Path, prev: str, to: str, deps: bool = False) -> list[In
 
 
 def unit_merges(root: Path, prev: str, to: str, deps: bool = False) -> list[str]:
-    """`prev..to` の first-parent にある、リリースの単位をリリースブランチへ入れたマージ（`branch_flow.UNIT_MERGE`）の SHA。
+    """`prev..to` の first-parent にある、リリースの単位をリリースブランチへ入れたマージ（`strategy_rows.UNIT_MERGE`）の SHA。
     PR のマージではないため `merges_in` は拾わない。ベースブランチの first-parent には現れない（丸ごと出す取り込み方は変わらない）。
     deps なら、PR のマージでないマージ（単位へ依存先のスプリントブランチを取り込んだマージ。分冊の決定 18）も返す。"""
-    import branch_flow
+    import strategy_rows
 
     p = proc.git(root, "log", "--first-parent", "--merges", "--format=%H%x09%s", f"{prev}..{to}", check=False)
     if p.returncode != 0:
@@ -79,7 +90,7 @@ def unit_merges(root: Path, prev: str, to: str, deps: bool = False) -> list[str]
     return [
         sha
         for sha, _, subject in lines
-        if branch_flow.UNIT_MERGE.match(subject) or (deps and not merged_range.MERGE_SUBJECT.match(subject))
+        if strategy_rows.UNIT_MERGE.match(subject) or (deps and not merged_range.MERGE_SUBJECT.match(subject))
     ]
 
 
@@ -94,6 +105,32 @@ def with_extra(found, extra) -> list[IncludedPr]:
 def included_prs(found, extra) -> list[int]:
     """範囲の PR の番号と `--prs` の和（同じ番号は 1 つ）を番号の昇順で。"""
     return sorted({*(p.number if isinstance(p, IncludedPr) else p for p in found), *extra})
+
+
+# 通らなかったチェックがマージを止めなかった理由（#3585。含む PR はマージ済みのため、落ちたものは必須でない）
+CI_NOT_PASSED = {"skipping": "飛ばした", "fail": "必須でない失敗", "cancel": "必須でない取り消し", "pending": "必須でない未完了"}
+CI_NOT_PASSED_OTHER = "必須でない"  # CI_NOT_PASSED に無い bucket の理由
+CI_PASSED = "pass"  # 通ったとみなす bucket
+
+
+def ci_passed(checks: list[dict]) -> int:
+    """通ったチェック（bucket が pass）の数。"""
+    return sum(1 for c in checks if c.get("bucket") == CI_PASSED)
+
+
+def ci_fact(checks: list[dict]) -> str:
+    """「含む PR」の CI の欄。`CI <通った>/<全部>` に、通らなかったチェックの名前を理由ごとに足す（#3585）。"""
+    passed = ci_passed(checks)
+    by: dict[str, list[str]] = {}
+    for c in checks:
+        if c.get("bucket") != CI_PASSED:
+            by.setdefault(CI_NOT_PASSED.get(str(c.get("bucket")), CI_NOT_PASSED_OTHER), []).append(str(c.get("name") or "?"))
+    return "、".join([f"CI {passed}/{len(checks)}", *(f"{why}: {', '.join(names)}" for why, names in by.items())])
+
+
+def pr_refs(numbers, sep: str = " ") -> str:
+    """PR の番号の並びを `#<番号>` で sep につなぐ（承認資料・注記での PR の書き方）。"""
+    return sep.join(f"#{n}" for n in numbers)
 
 
 def included_row(n: int, title: str, facts: list[str], via: int | None, no_change: bool) -> str:
@@ -153,15 +190,19 @@ def pr_fields(numbers, cwd: str | None = None, comments: bool = False) -> tuple[
         if not isinstance(data, dict):
             return None, ("gh が無い" if r.returncode == 127 else (r.stderr or r.stdout).strip()[:300] or "応答を読めない")
         for n in chunk:
-            d = data.get(f"p{n}")
-            if isinstance(d, dict):
-                d = {
-                    **d,
-                    "closingIssuesReferences": list((d.get("closingIssuesReferences") or {}).get("nodes") or []),
-                    **({"comments": list((d.get("comments") or {}).get("nodes") or [])} if comments else {}),
-                }
-            out[n] = d if isinstance(d, dict) else None
+            out[n] = _as_pr_view(data.get(f"p{n}"), comments)
     return out, ""
+
+
+def _as_pr_view(d, comments: bool) -> dict | None:
+    """GraphQL の PR 1 件を `gh pr view --json` と同じ形へ（接続の nodes をリストへ）。dict でなければ None。"""
+    if not isinstance(d, dict):
+        return None
+    return {
+        **d,
+        "closingIssuesReferences": list((d.get("closingIssuesReferences") or {}).get("nodes") or []),
+        **({"comments": list((d.get("comments") or {}).get("nodes") or [])} if comments else {}),
+    }
 
 
 def read_prs(root: Path, prs, view, fields: str = "title,body,state", comments: bool = False) -> dict[int, dict]:
@@ -210,7 +251,7 @@ def outside_items(outside) -> list[dict]:
 
 def outside_note(outside) -> str:
     """drop_outside が外した番号の要約の注記（無ければ空）。"""
-    return f"（範囲の終点に入っていない {' '.join(f'#{n}' for n in outside)} は載せない）" if outside else ""
+    return f"（範囲の終点に入っていない {pr_refs(outside)} は載せない）" if outside else ""
 
 
 def as_included(prs) -> list[IncludedPr]:
@@ -226,7 +267,7 @@ def unmerged(d) -> bool:
 def require_merged(found, prs):
     """マージ済みが 0 件なら、書き込む前に前提エラーで止める（既存の節や欄を空で上書きしない）。"""
     if not found:
-        raise StepError(f"渡した PR {' '.join(f'#{n}' for n in prs)} にマージ済みが無い", EXIT_PRECONDITION)
+        raise StepError(f"渡した PR {pr_refs(prs)} にマージ済みが無い", EXIT_PRECONDITION)
     return found
 
 
@@ -250,8 +291,8 @@ def titles_of(prs: list[IncludedPr], data: dict, skipped=None) -> list[tuple[int
     return items
 
 
-def notes_of(prs: list[IncludedPr], data: dict, skipped=None, replacing=None, unreadable=None) -> list[tuple]:
-    """PR ごとに (番号, 利用者向けの変化の箇条, 未検証・残る危険の箇条, 題名で代えたか, 移行の手順の箇条) を返す。
+def notes_of(prs: list[IncludedPr], data: dict, skipped=None, replacing=None, unreadable=None) -> list[PrNotes]:
+    """PR ごとに PrNotes（番号, 利用者向けの変化の箇条, 未検証・残る危険の箇条, 題名で代えたか, 移行の手順の箇条）を返す。
     マージされていない PR は配る中身に入らないため載せず、番号を skipped へ足す。replacing を渡すと本文の
     `## 置き換える箇条` を足し、形に合わない行を unreadable へ items の行として足す（#1834）。
     スプリント経由の PR は変化と移行の手順をスプリント PR の本文に任せて危険だけを返し、利用者向けの変化なしの PR は
@@ -274,7 +315,7 @@ def notes_of(prs: list[IncludedPr], data: dict, skipped=None, replacing=None, un
                 {"kind": "replacement", "name": f"#{n}", "result": "unreadable", "text": t} for t in bad
             )
         if p.via is not None or no_change(d):
-            out.append((n, [], risks, False, []))
+            out.append(PrNotes(n, [], risks, False, []))
             continue
-        out.append((n, items or [f"{d['title'].strip()}（#{n}）"], risks, not items, others.migration_items(body, n)))
+        out.append(PrNotes(n, items or [f"{d['title'].strip()}（#{n}）"], risks, not items, others.migration_items(body, n)))
     return require_merged(out, [p.number for p in prs])

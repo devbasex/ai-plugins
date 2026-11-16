@@ -1,0 +1,165 @@
+"""MVV の記録の判断（純粋な関数。N8b・#2603・#2614・#2777・#2970）。
+
+- 記録の `repo` はメインディレクトリのパスにする（worktree で打った判定も同じ鍵で数える。#2603）
+- 承認ゲートの答えから覆しの種類を決める。「判定できない」を人が通したものは覆しに数えず、別の数にする
+  （AI が決められないときに人へ戻したのは MVV どおりである。#2777）。同じスプリント状態・承認ゲート・PR の組は 1 件
+- スプリント MVV の照合は、照合の入力の全体（スプリント MVV・プロジェクト MVV・共通原則・指示文）が同じで最新の
+  判定が「従う」なら、その判定を再利用する（判定の揺れで開発ループを止めない。#2614）
+- 改訂の兆候は、ベースブランチの宣言（現行の版）で数える（#2970）
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
+from typing import Any, Optional
+
+# 判定の語は承認ゲートの判定（`ndf.progress.gate.checks`）の綴りを使う
+from ndf.progress.gate.checks import FOLLOW, NOT_FOLLOW, UNKNOWN
+
+# 覆しの種類: 「従う」を人が退けた・「反する疑い」を人が通した・「判定できない」を人が通した（覆しに数えない）
+OVERRIDE_REJECT = "override_reject"
+OVERRIDE_PASS = "override_pass"
+OVERRIDE_UNKNOWN_PASS = "unknown_pass"
+OVERRIDES = (OVERRIDE_REJECT, OVERRIDE_PASS)
+# 照合の記録の種類（スプリント MVV の照合）
+VET_SPRINT = "sprint-mvv"
+# 改訂の設定（mvv.json の settings.revise_after）の鍵と、無いときの閾値
+REVISE_AFTER = "revise_after"
+OVERRIDE_LIMIT_KEY, UNKNOWN_LIMIT_KEY = "overrides", "unknowns"
+DEFAULT_LIMITS = {OVERRIDE_LIMIT_KEY: 3, UNKNOWN_LIMIT_KEY: 5}
+
+
+def override_kind(verdict: Optional[str], approved: bool) -> Optional[str]:
+    """MVV 判定と人の答えから覆しの種類を決める。覆しでなければ None。"""
+    if verdict == FOLLOW and not approved:
+        return OVERRIDE_REJECT
+    if verdict == NOT_FOLLOW and approved:
+        return OVERRIDE_PASS
+    if verdict == UNKNOWN and approved:
+        return OVERRIDE_UNKNOWN_PASS
+    return None
+
+
+def signal_kinds(verdict: Optional[str], approved: bool) -> list[str]:
+    """承認ゲートの答え 1 件から書く兆候の種類。「判定できない」は人の答えによらず `unknown` を数える。"""
+    kind = override_kind(verdict, approved)
+    return ([UNKNOWN] if verdict == UNKNOWN else []) + ([kind] if kind is not None else [])
+
+
+@dataclass(frozen=True)
+class Signals:
+    """改訂の兆候。`overrides` は覆し、`unknown_pass` は「判定できない」を人が通した数（覆しに数えない）。"""
+
+    version: Optional[int]
+    overrides: int
+    unknown_pass: int
+    unknown: int
+    revise: bool
+
+
+def _pair(row: Mapping[str, Any]) -> tuple[Any, Any, Any]:
+    return row.get("state"), row.get("gate"), row.get("pr")
+
+
+def _settings(decl: Mapping[str, Any]) -> dict[str, int]:
+    settings = decl.get("settings")
+    raw = settings.get(REVISE_AFTER) if isinstance(settings, Mapping) else None
+    got = dict(DEFAULT_LIMITS)
+    if isinstance(raw, Mapping):
+        got.update({k: int(raw[k]) for k in DEFAULT_LIMITS if isinstance(raw.get(k), int)})
+    return got
+
+
+def latest(decl: Mapping[str, Any]) -> Optional[Mapping[str, Any]]:
+    """宣言の現行の版の記録（versions の最後）。無ければ None。"""
+    versions = decl.get("versions")
+    if isinstance(versions, list) and versions and isinstance(versions[-1], Mapping):
+        return versions[-1]
+    return None
+
+
+def current_version(decl: Mapping[str, Any]) -> Optional[int]:
+    """宣言の現行の版（versions の最後の version）。無ければ None。"""
+    last = latest(decl)
+    v = last.get("version") if last is not None else None
+    return v if isinstance(v, int) else None
+
+
+class State:
+    """MVV の状態の語（承認ゲートの検査 1 の `MvvFacts.status` と同じ綴り）。"""
+
+    APPROVED = "approved"
+    MISMATCH = "mismatch"
+    UNAPPROVED = "unapproved"
+    ABSENT = "absent"
+    UNREADABLE = "unreadable"
+
+
+def status(decl: Optional[Mapping[str, Any]], body_sha256: Optional[str]) -> str:
+    """宣言と本文の sha256 から MVV の状態を決める（宣言が無ければ absent、本文が承認の記録と違えば mismatch）。"""
+    if decl is None:
+        return State.ABSENT
+    last = latest(decl)
+    if last is None or not isinstance(last.get("sha256"), str):
+        return State.UNAPPROVED
+    if body_sha256 is None:
+        return State.UNREADABLE
+    return State.APPROVED if last["sha256"] == body_sha256 else State.MISMATCH
+
+
+def count_signals(rows: Iterable[Mapping[str, Any]], decl: Mapping[str, Any], repo: str) -> Signals:
+    """宣言の現行の版で兆候を数える。覆しは同じ（スプリント状態・承認ゲート・PR）の組を 1 件にまとめる。
+
+    `repo` はメインディレクトリのパスで、記録の `repo` がこれと同じ行だけを数える。
+    """
+    version = current_version(decl)
+    mine = [r for r in rows if r.get("repo") == repo and r.get("version") == version]
+    pairs: dict[str, set[tuple[Any, Any, Any]]] = {k: set() for k in (*OVERRIDES, OVERRIDE_UNKNOWN_PASS, UNKNOWN)}
+    for r in mine:
+        kind = r.get("kind")
+        if kind in pairs:
+            pairs[kind].add(_pair(r))
+    limits = _settings(decl)
+    overrides = len(pairs[OVERRIDE_REJECT]) + len(pairs[OVERRIDE_PASS])
+    unknown = len(pairs[UNKNOWN])
+    revise = overrides >= limits[OVERRIDE_LIMIT_KEY] or unknown >= limits[UNKNOWN_LIMIT_KEY]
+    return Signals(version, overrides, len(pairs[OVERRIDE_UNKNOWN_PASS]), unknown, revise)
+
+
+def signals_ref(base_branch: str, remote: str) -> str:
+    """改訂の兆候を数える宣言を読む参照（ベースブランチ。本番のブランチの古い版を読まない）。"""
+    return f"{remote}/{base_branch}"
+
+
+def vet_key(inputs: Mapping[str, str]) -> str:
+    """照合の入力の全体を見分ける値（sha256）。どれか 1 字でも変われば別の値になる。"""
+    blob = json.dumps(dict(sorted(inputs.items())), ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def reusable(rows: Iterable[Mapping[str, Any]], key: str) -> Optional[Mapping[str, Any]]:
+    """同じ照合の入力の最新の判定が「従う」なら、その行（再利用の元）。無いか最新が「従う」でなければ None。
+
+    `repo` は見ない（メインディレクトリと worktree のどちらから打っても同じ）。壊れた行（辞書でない）は呼び手が除く。
+    """
+    last_vet: Optional[Mapping[str, Any]] = None
+    for r in rows:
+        if r.get("kind") == VET_SPRINT and r.get("key") == key:
+            last_vet = r
+    if last_vet is None or last_vet.get("verdict") != FOLLOW:
+        return None
+    return last_vet
+
+
+def reuse_row(origin: Mapping[str, Any], at: str, repo: str) -> dict[str, Any]:
+    """再利用したときに足す行。元の判定の時刻を持ち、費用と秒の実測値を持たない。"""
+    first = origin["reused_from"] if "reused_from" in origin else origin.get("at")
+    return {"at": at, "kind": VET_SPRINT, "key": origin["key"], "verdict": FOLLOW, "repo": repo, "reused_from": first}
+
+
+def judged_row(key: str, verdict: str, at: str, repo: str, cost: Mapping[str, Any]) -> dict[str, Any]:
+    """LLM が判定したときに足す行（照合の入力を見分ける値を持ち、次の照合が再利用できる）。"""
+    return {"at": at, "kind": VET_SPRINT, "key": key, "verdict": verdict, "repo": repo, **cost}

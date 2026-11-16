@@ -1218,10 +1218,232 @@ def test_banned_word_in_a_meaning_fails_structure_but_deprecated_column_does_not
     write_json(repo, DEFAULT_SOURCE, g)
     run(repo, "render")
     code, out, _ = run(repo, "check", "--rules", "structure")
-    assert code == 1 and [it["rule"] for it in out["items"]] == ["banned"]
+    # 「禁句」は廃止した語でもあるので、意味の説明の廃止した語の規則（#3190 の決定 8、既定で掛かる）も当たる
+    assert code == 1 and [it["rule"] for it in out["items"]] == ["banned", "deprecated_meaning"]
 
 
 @pytest.mark.parametrize("banned", [{"words": "禁句", "paths": ["a"]}, {"words": ["禁句"]}, {"words": [], "paths": ["a"]}, "禁句"])
 def test_banned_declaration_of_a_bad_shape_stops(repo, banned):
     declare_banned(repo, banned)
     assert run(repo, "check", "--rules", "structure")[0] == 2
+
+
+# --- 単独で照合する廃止した語と意味の説明の廃止した語（#3190） ----------------------
+
+
+def import_glossary_words():
+    sys.path.insert(0, str(SCRIPTS / "lib"))
+    import glossary_words
+
+    return glossary_words
+
+
+def step_glossary(**extra):
+    """`段` を 2 つの語の単独で照合する廃止した語に、`字で持` を 1 つの語のそれに持つ用語集。"""
+    g = shop_glossary()
+    g["terms"] += [
+        {"term": "ステップ", "context": "ordering", "meaning": "手順の 1 つ", "deprecated_standalone": ["段"]},
+        {"term": "ステージ", "context": "shipping", "meaning": "流れの区切り", "deprecated_standalone": ["段"]},
+        {"term": "文字列", "context": "ordering", "meaning": "文字の並び", "deprecated_standalone": ["字で持"]},
+    ]
+    for k, v in extra.items():
+        g[k] = v
+    return g
+
+
+def put(repo, g):
+    write_json(repo, DEFAULT_SOURCE, g)
+    code, _, err = run(repo, "render")
+    assert code == 0, err
+
+
+@pytest.mark.parametrize(
+    ("word", "edged"), [("段", True), ("字で持", True), ("人々", True), ("", False), ("ステップ", False), ("で持つ", False)]
+)
+def test_is_kanji_edged_looks_at_first_and_last_letter(word, edged):
+    assert import_glossary_words().is_kanji_edged(word) is edged
+
+
+@pytest.mark.parametrize(
+    ("word", "text", "hit"),
+    [
+        ("段", "第 1 段", True),
+        ("段", "3 段", True),
+        ("段", "段 の後", True),
+        ("段", "段階", False),
+        ("段", "手段", False),
+        ("字で持", "字で持ち", True),
+        ("字で持", "字で持つ", True),
+        ("字で持", "文字で持つ", False),
+        ("字で持", "数字で持つ", False),
+        ("字で持", "字数", False),
+        ("a.(", "xa.(y", True),
+        ("a.(", "xab(y", False),
+    ],
+)
+def test_standalone_part_skips_kanji_neighbours(word, text, hit):
+    import re
+
+    assert bool(re.search(import_glossary_words().standalone_part(word), text)) is hit
+
+
+def test_word_pattern_joins_plain_and_standalone_words():
+    gw = import_glossary_words()
+    assert gw.word_pattern([], standalone=[]) is None
+    p = gw.word_pattern(["旧呼称"], standalone=["段"])
+    assert [m.group(0) for m in p.finditer("旧呼称の第 1 段と段階")] == ["旧呼称", "段"]
+    both = gw.word_pattern(["段落"], standalone=["段落"])
+    assert both.search("前段落後")  # 両方にあれば words の側（部分一致）で組む
+
+
+def test_deprecated_standalone_of_and_all_deprecated_of():
+    gl = import_glossary()
+    assert gl.deprecated_standalone_of({"deprecated_standalone": ["段", "", 3, "字で持"]}) == ["段", "字で持"]
+    assert gl.deprecated_standalone_of({"deprecated_standalone": "段"}) == []
+    assert gl.deprecated_standalone_of({}) == []
+    t = {"deprecated": ["入口", "段落"], "deprecated_standalone": ["段落", "段"]}
+    assert gl.all_deprecated_of(t) == ["入口", "段落", "段"]
+
+
+def test_standalone_word_is_matched_alone_in_added_lines(repo):
+    put(repo, step_glossary())
+    write(repo, "issues/a.md", "段階と手段を見る。文字で持つ。字数と 1 字。\n")
+    assert run(repo, "check", "--diff", "develop")[0] == 0
+    write(repo, "issues/a.md", "レビューの第 1 段。\n3 段にする。\n値は字で持ち、渡す。\n")
+    code, out, _ = run(repo, "check", "--diff", "develop")
+    assert code == 1
+    assert [(it["rule"], it["line"], it["term"]) for it in out["items"]] == [
+        ("deprecated", 1, "段"),
+        ("deprecated", 2, "段"),
+        ("deprecated", 3, "字で持"),
+    ]
+    assert "ステップ / ステージ と書く" in out["items"][0]["detail"]
+    assert "文字列 と書く" in out["items"][2]["detail"]
+
+
+def test_build_word_patterns_takes_one_letter_standalone_but_not_live_words():
+    gl = import_glossary()
+    g = step_glossary()
+    words, _ = gl._build_word_patterns(g)
+    assert words.dep.search("第 1 段")
+    g["terms"].append({"term": "段", "context": "shipping", "meaning": "生きた語"})
+    words, _ = gl._build_word_patterns(g)
+    assert not words.dep.search("第 1 段")
+
+
+@pytest.mark.parametrize(
+    ("value", "needle"),
+    [
+        ("段", "空でない文字列の配列"),
+        (["段", ""], "空でない文字列の配列"),
+        (["段", 1], "空でない文字列の配列"),
+        (["ステプ"], "先頭か末尾を漢字"),
+        (["荷物"], "生きた語と重なる"),
+    ],
+)
+def test_malformed_deprecated_standalone_is_schema(repo, value, needle):
+    g = shop_glossary()
+    g["terms"].append({"term": "梱包", "context": "shipping", "meaning": "箱に詰めること", "deprecated_standalone": value})
+    put(repo, g)
+    code, out, _ = run(repo, "check", "--rules", "structure")
+    assert code == 1 and rules_of(out) == ["schema"]
+    assert any(needle in it["detail"] for it in out["items"]), out["items"]
+
+
+def test_well_formed_deprecated_standalone_passes_structure(repo):
+    put(repo, step_glossary())
+    code, out, err = run(repo, "check", "--rules", "structure")
+    assert code == 0, (out, err)
+
+
+def test_deprecated_word_in_term_meaning_is_deprecated_meaning(repo):
+    g = shop_glossary()
+    g["terms"][2]["meaning"] = "オーダーを 1 回で運ぶ箱。オーダーごとに分ける"
+    put(repo, g)
+    code, out, err = run_cli(repo, "check", "--rules", "structure")
+    assert code == 1
+    one = {
+        "rule": "deprecated_meaning",
+        "path": DEFAULT_SOURCE,
+        "line": 0,
+        "term": "荷物",
+        "detail": "意味の欄に廃止した語「オーダー」がある。注文 と書く",
+    }
+    assert out["items"] == [one, one]
+    assert f"ERROR: {DEFAULT_SOURCE}:0: deprecated_meaning: 荷物" in err
+    g["terms"][2]["meaning"] = "注文を 1 回で運ぶ箱"
+    put(repo, g)
+    assert run(repo, "check", "--rules", "structure")[0] == 0
+
+
+def test_deprecated_word_in_context_meaning_names_the_context_id(repo):
+    g = shop_glossary()
+    g["contexts"][1]["meaning"] = "確定した cart を届けるまで"
+    put(repo, g)
+    code, out, _ = run(repo, "check", "--rules", "structure")
+    assert code == 1
+    assert [(it["rule"], it["term"]) for it in out["items"]] == [("deprecated_meaning", "shipping")]
+    assert "荷物 と書く" in out["items"][0]["detail"]
+
+
+def test_standalone_word_in_meaning_is_matched_only_alone(repo):
+    g = step_glossary()
+    g["terms"][0]["meaning"] = "顧客が買うと決めた品の組。段階と手段を経る"
+    put(repo, g)
+    assert run(repo, "check", "--rules", "structure")[0] == 0
+    g["terms"][0]["meaning"] = "顧客が買うと決めた品の組。3 段で確かめる"
+    put(repo, g)
+    code, out, _ = run(repo, "check", "--rules", "structure")
+    assert code == 1 and [(it["rule"], it["term"]) for it in out["items"]] == [("deprecated_meaning", "注文")]
+
+
+@pytest.mark.parametrize(
+    ("meaning", "extra"),
+    [
+        ("`オーダー` は廃止した呼び名", []),  # インラインコードの中
+        ("在庫表を見る", [{"term": "在庫表", "context": "shipping", "meaning": "置いてある品の表"}]),  # 生きた語の出現の内側
+        ("配送のオーダーを受ける", [{"term": "オーダー", "context": "shipping", "meaning": "配送の依頼"}]),  # 別のコンテキストの生きた語
+    ],
+)
+def test_meaning_skips_inline_code_live_compounds_and_live_words(repo, meaning, extra):
+    g = shop_glossary()
+    g["terms"][1]["deprecated"] = ["在庫"]
+    g["terms"] += extra + [{"term": "梱包", "context": "shipping", "meaning": meaning}]
+    put(repo, g)
+    code, out, err = run(repo, "check", "--rules", "structure")
+    assert code == 0, (out, err)
+    g["terms"][-1]["meaning"] = "在庫を見る"  # 除き方に当たらない出現は当てる
+    put(repo, g)
+    assert run(repo, "check", "--rules", "structure")[0] == 1
+
+
+def test_structure_findings_builds_the_word_patterns_when_omitted(repo):
+    gl = import_glossary()
+    g = shop_glossary()
+    g["terms"][2]["meaning"] = "オーダーを運ぶ箱"
+    decl = gl.load_declaration(repo)
+    words, _ = gl._build_word_patterns(g)
+    omitted = gl.structure_findings(g, decl)
+    assert omitted == gl.structure_findings(g, decl, words)
+    assert [it["rule"] for it in omitted] == ["deprecated_meaning"]
+
+
+def test_render_lists_standalone_words_after_deprecated_words(repo):
+    g = step_glossary()
+    g["terms"][0]["deprecated_standalone"] = ["段"]
+    put(repo, g)
+    doc = (repo / DEFAULT_DOCUMENT).read_text()
+    assert "| 注文 | — | 顧客が買うと決めた品の組 | オーダー、段（単独） | — | `docs/ordering.md` |" in doc
+    assert "| 文字列 | — | 文字の並び | 字で持（単独） | — | — |" in doc
+
+
+def test_replacement_and_diff_read_both_deprecated_fields(repo):
+    gl = import_glossary()
+    g = step_glossary()
+    assert gl.replacement(g, "段") == "ステップ / ステージ"
+    assert gl.replacement(g, "字で持") == "文字列"
+    assert gl.replacement(g, "無い語") == "用語集の語"
+    before = json.loads(json.dumps(g))
+    g["terms"][5]["deprecated_standalone"] = ["字で持", "字で書"]
+    changes = gl.diff_items(before, g)
+    assert changes == [{"change": "deprecated", "context": "ordering", "term": "字で書", "before": None, "after": "文字列"}]

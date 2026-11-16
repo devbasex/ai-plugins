@@ -1,0 +1,155 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/io/plan.args.schema.json",
+  "title": "ndf plan の引数",
+  "description": "ndf plan が受ける引数。キーは引数の名前（オプションは -- の名前、位置引数は名前）。規約の生成が作り、手で直さない",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "check",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "plans": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-ndf-positional": true
+        }
+      },
+      "required": [
+        "subcommand",
+        "plans"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "next",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "plan": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "--from": {
+          "type": "string"
+        },
+        "--state-dir": {
+          "type": "string"
+        },
+        "--answer": {
+          "type": "string"
+        },
+        "--set": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "--fresh": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "subcommand",
+        "plan"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "pending",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "queue",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "plans": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-ndf-positional": true
+        },
+        "--then": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "--from": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "--resume": {
+          "type": "boolean"
+        },
+        "--fresh": {
+          "type": "boolean"
+        },
+        "--max": {
+          "type": "integer",
+          "description": "同時に流すプランの本数の上限（無ければ触るファイルの重ならない組の本数まで）"
+        },
+        "--queue-dir": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subcommand",
+        "plans"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "wait",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "plans": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-ndf-positional": true
+        },
+        "--state-dir": {
+          "type": "string"
+        },
+        "--timeout": {
+          "type": "number",
+          "default": 600.0
+        }
+      },
+      "required": [
+        "subcommand",
+        "plans"
+      ]
+    }
+  ]
+}

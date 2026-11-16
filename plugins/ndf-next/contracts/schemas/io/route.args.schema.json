@@ -1,0 +1,133 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/io/route.args.schema.json",
+  "title": "ndf route の引数",
+  "description": "ndf route が受ける引数。キーは引数の名前（オプションは -- の名前、位置引数は名前）。規約の生成が作り、手で直さない",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "render",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "purpose": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "--out": {
+          "type": "string"
+        },
+        "--set": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "--add": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "subcommand",
+        "purpose",
+        "--out"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "repeat",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--result": {
+          "type": "string"
+        },
+        "--log": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--result",
+        "--log"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "run",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "purpose": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "--out": {
+          "type": "string"
+        },
+        "--set": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "--add": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "subcommand",
+        "purpose",
+        "--out"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "templates",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "test",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--result": {
+          "type": "string"
+        },
+        "--failed-from": {
+          "type": "string"
+        },
+        "command": {
+          "type": "string",
+          "x-ndf-positional": true
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    }
+  ]
+}

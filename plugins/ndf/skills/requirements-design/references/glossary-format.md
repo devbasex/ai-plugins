@@ -78,6 +78,7 @@ NDF の `scripts/glossary.py` はこの形でだけ読み、語はすべて用�
 | `terms[].context` | 文字列 | 許さない | `contexts[].id` のどれか |
 | `terms[].meaning` | 文字列 | 許さない | 意味 |
 | `terms[].deprecated` | 文字列の配列 | 許す | 廃止した語（旧称）。2 文字以上 |
+| `terms[].deprecated_standalone` | 文字列の配列 | 許す | 単独で照合する廃止した語。1 文字でよい。各語の先頭か末尾が漢字である。先頭が漢字なら直前が漢字の出現に、末尾が漢字なら直後が漢字の出現に当てない（`段` は `段階`・`手段` に、`字で持` は `文字で持つ` に当たらない） |
 | `terms[].source` | 文字列 | 許す | 正本（その語の意味を決めている確定した文書のパスか URL）。空は「用語集そのものが正本」 |
 | `terms[].pending_source` | 文字列 | 許す | 確定前の出所（語を決めた設計文書のパス）。`plan-to-spec` の `spec-finalize` がその設計を消すときに、`source` を確定仕様へ移してこの項目を消す。指す文書が無ければ `check` の `schema` に当たる |
 | `terms[].code` | 文字列 | 許す | コードで使う識別子の基本形。英小文字の snake_case（例: `approval_gate`）。コードに現れない語は項目を書かない |
@@ -107,21 +108,23 @@ NDF の `scripts/glossary.py` はこの形でだけ読み、語はすべて用�
 
 ## 人が読む文書（`document`）
 
-`render` が、コンテキストごとの見出しと 6 列の表（語・識別子・意味・廃止した語・廃止した識別子・正本）を書く。セルの中の
+`render` が、コンテキストごとの見出しと 6 列の表（語・識別子・意味・廃止した語・廃止した識別子・正本）を書く。廃止した語の列は、
+`deprecated` の語の後に単独で照合する廃止した語を `段（単独）` の形で並べる。セルの中の
 `|` は `\|` に、改行は空白に置き換える。用語集を変えて `render` を打っていない変更は、`check` が
 `stale_document` で落とす。
 
 ## 用語チェックの規則
 
-`glossary.py check` の規則。`--rules structure` は上の 3 つだけ、`all`（既定）は 6 つを見る。
+`glossary.py check` の規則。`--rules structure` は上の 4 つだけ、`all`（既定）は 7 つを見る。
 語を引くときは `glossary.py lookup --term <語>`（部分一致。`--context <id>` で絞る・`--contexts` で id の一覧）を使い、用語集の JSON を
 その場の Python の 1 行で読まない。`check`・`diff`・`lookup` の結果の 1 つの値は `--field <JSON Pointer>` で `metrics` に返る（`status` と終了コードは変わらない）。
 
 | 規則 | 見るもの | 当たる条件 |
 | --- | --- | --- |
-| `schema` | 用語集 | 必須の項目が無い・廃止した語が同じコンテキストの生きた語と重なる・`context` が宣言されていない・1 文字の廃止した語・`code` / `deprecated_code` が snake_case でない・同じコンテキストで同じ `code` が 2 回ある・廃止した識別子が同じコンテキストの生きた識別子と重なる |
+| `schema` | 用語集 | 必須の項目が無い・廃止した語が同じコンテキストの生きた語と重なる・`context` が宣言されていない・1 文字の廃止した語・`deprecated_standalone` が空でない文字列の配列でない・単独で照合する廃止した語の先頭も末尾も漢字でない・単独で照合する廃止した語が同じコンテキストの生きた語と重なる・`code` / `deprecated_code` が snake_case でない・同じコンテキストで同じ `code` が 2 回ある・廃止した識別子が同じコンテキストの生きた識別子と重なる |
 | `duplicate` | 用語集 | 同じコンテキストで同じ語が 2 回ある |
 | `stale_document` | 文書 | 用語集から `render` した内容と一致しない |
+| `deprecated_meaning` | 用語集の意味の説明（`terms[].meaning`・`contexts[].meaning`） | どれかの項目の廃止した語（`deprecated`・`deprecated_standalone`）が現れる。除き方は `deprecated` と同じ。当たりの `detail` が見つけた語と置き換え先を示す。置き換え先のどの語の意味にも当たらない出現は、置き換え先へ写さず中身で書く |
 | `deprecated` | 追加した行（`--file` ならファイル全体） | 廃止した語が現れ、その語がどのコンテキストの生きた語にも無い |
 | `unregistered` | 追加した行のうち `term_sections` の節の表の 1 列目 | 生きた語としてどのコンテキストにも無い |
 | `deprecated_code` | コード（`.py` / `.sh` / `.js` / `.ts`）の追加した行（`--file` ならファイル全体） | 廃止した識別子か、その書き方を変えた形が現れ、その形がどの生きた識別子の書き方にも無い |

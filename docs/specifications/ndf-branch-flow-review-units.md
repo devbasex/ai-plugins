@@ -1,5 +1,40 @@
 # ブランチ運用の宣言のレビューの単位: PR の種類ごとに掛けるレビューと対象の差分を選ぶ
 
+## この仕様の今の状態
+
+**この文書が書く置き場（`.ndf/worktree.json` の `branch_flow.reviews`）の読み手は、課題 #3672 の手順 1 で消えた。**
+消したのは PR #3701（https://github.com/devbasex/ai-plugins/pull/3701 、`develop` へマージ済み）である。
+レビューの単位は、ブランチ戦略の宣言（`.ndf/project.json` の `branch_strategy`）の `reviews` へ移った。
+表と検査は `lib/strategy_rows.py`（`REVIEW_KINDS`・`CHECKS`・`DIFFS`・`REVIEW_ALLOWED`・`REVIEW_DEFAULTS`・`COVERING`・
+`review_problems`）が持つ。本文は旧い宣言の仕様の記録として残し、消えたファイル・関数を指す箇所には「#3672 で削除」を添える。
+
+表のパスは、先頭が `plugins/` か `.ndf/` のものを除き `plugins/ndf/scripts/` から数える。
+
+| 消えたもの | 持っていたこと | 今それを担うもの（`develop`） |
+| --- | --- | --- |
+| `plugins/ndf/scripts/lib/branch_flow.py` | 宣言の読み分け・既定値・取り込み方の表・レビューの単位の表・スナップショットの形 | `lib/branch_strategy.py`（宣言を読む部品）・`lib/strategy_rows.py`（取り込み方の表とレビューの単位の表）・`data/branch-strategy.schema.json`（スキーマの本文。`project.schema.json` の `$defs/BranchStrategy` へ入る） |
+| `plugins/ndf/scripts/project_lib/measure_branch_flow.py` と `project-decl.py drift` | 既存のブランチの使い方の測定・ずれの検出 | `project-decl.py branch-strategy`（動詞 `init`・`measure`・`write`・`migrate`・`remove`。本体は `project_lib/branch_strategy_cmd.py`・`branch_strategy_measure.py`・`branch_strategy_write.py`・`branch_strategy_migrate.py`） |
+| `plugins/ndf/scripts/release_lib/promotion.py` | 取り込み方ごとのリリースブランチの組み方 | `release_lib/strategy_route.py` |
+| `lib/repo.py` の `production_decl`・`supervise_lib/decl.py` の `production_flow_decl` | 本番チャネルの宣言の読み取り | `lib/repo.py` の `branch_strategy_of`・`supervise_lib/decl.py` の `strategy_of_roots` |
+| `.ndf/worktree.json` の `branch_flow`・`base_branch`・`production_branch`（スキーマから外れた） | 宣言の置き場 | `.ndf/project.json` のセクション `branch_strategy` |
+| `tests/test_branch_flow.py`・`tests/test_project_decl_branch_flow.py` | 上の部品のテスト | `tests/test_branch_strategy.py`・`test_strategy_rows.py`・`test_branch_strategy_land.py` |
+
+**既存の PR からレビューの単位を推す測定は、新しい宣言には無い。** `project_lib/branch_strategy_measure.py` に
+`reviews` の語は無く、測るキーの表（`data/branch-strategy-presets.json` の `measured_keys`）にも `reviews` が無い。
+
+新しい宣言は旧い宣言と次の 2 点で振る舞いが違う。
+
+- **宣言は任意でない。** セクションが無い・スキーマに合わないときは止まり、既定値へ倒さない（`lib/branch_strategy.py` の冒頭の説明）
+- **旧いキーが残ると止まる。** 旧い 4 か所（`.ndf/worktree.json`・`.ndf/project.json`・`.ndf/supervise.json`・`.ndf/release.json`）にキーが残れば、キーの位置と移行のコマンド（`project-decl.py branch-strategy migrate`）を理由に出す（`lib/branch_strategy_legacy.py`）
+
+**旧いキーを今も読むのは、ai-plugins の本番チャネル宛の検査だけである。** `scripts/check-pr-base.sh` と
+`.github/workflows/pr-base-guard.yml` が、宛先のブランチの `.ndf/worktree.json` の `branch_flow.promotion` を読む
+（`grep -rln branch_flow scripts plugins/ndf/scripts plugins/ndf/skills .github` を、テストを除いて打った結果がこの 2 ファイルだけ）。
+
+**新しい宣言の確定仕様は、#3672 の手順 2〜5 を終えた後に作る。** それまでの正本は課題の設計
+（`issues/issue-3672-design.md` と、同じ接頭辞の `-design-detail.md`・`-design-decisions.md`・`-design-removal.md`・
+`-design-ai-plugins.md` ほか）である。設計は #3672 の手順 2〜5 と 11.0 の作業（#3681）が使うため、確定仕様へまだ移さない。
+
 ## 概要
 
 リポジトリは、ブランチ運用の宣言（`.ndf/worktree.json` の `branch_flow`）の `reviews` に、PR の種類ごとに掛けるレビューと対象の差分（レビューの単位）を書ける。NDF のスプリントのプランは、その値のとおりにレビューのステップを置く・外す。宣言の無いリポジトリのプランは、`reviews` を持たない版の NDF と同じステップを組む。
@@ -26,11 +61,11 @@
 
 | コンテキスト | 何の語が 1 つの意味に決まるか |
 | --- | --- |
-| プロジェクトの宣言（`lib/branch_flow.py`・`project-decl.py`） | レビューの単位・掛けるレビュー・PR の種類・対象の差分。宣言の読み分け・検査と、既存の PR からの測定 |
+| プロジェクトの宣言（`lib/branch_flow.py`（#3672 で削除。今は `lib/strategy_rows.py`）・`project-decl.py`） | レビューの単位・掛けるレビュー・PR の種類・対象の差分。宣言の読み分け・検査と、既存の PR からの測定 |
 | 開発の工程（`ndf-workflow`） | スプリントの PR・未検査の差分・目録のスナップショット |
 | リリース（`ndf-release`） | リリースブランチの PR・衝突の解消の差分・衝突の解消のレビューの PR |
 
-プロジェクトの宣言は、許す値の表（`lib/branch_flow.py`）を公表された言語として開発の工程とリリースへ渡す。開発の工程はスプリントの開始時に宣言を目録へ書き込み、リリースは目録のスナップショットだけを読んで宣言のファイルを読み直さない。
+プロジェクトの宣言は、許す値の表（`lib/branch_flow.py`。#3672 で削除）を公表された言語として開発の工程とリリースへ渡す。開発の工程はスプリントの開始時に宣言を目録へ書き込み、リリースは目録のスナップショットだけを読んで宣言のファイルを読み直さない。
 
 ## 背景
 
@@ -90,7 +125,7 @@ I4 と I12 は読み分けの時点で検査する。そのため `supervise.py 
 
 設計 PR・確定仕様化の PR・リリースブランチの PR は文書かマージだけを持つため、cross-refactoring と振る舞いの確認を許さない。スプリントの PR は 1 スプリントに 1 回だけ検査するため、未検査の差分が PR の差分全体と同じになる。pace `fast` の検査の PR は未検査の差分で作るため、スプリントの PR には `unchecked` だけを許す。
 
-表は `lib/branch_flow.py` の `REVIEW_ALLOWED` に 1 つだけ置き、スキーマの断片（`schema_fragment()`）・読み分けの検査・測定の候補はそこから作る。
+表は `lib/branch_flow.py`（#3672 で削除。今は `lib/strategy_rows.py`）の `REVIEW_ALLOWED` に 1 つだけ置き、スキーマの断片（`schema_fragment()`）・読み分けの検査・測定の候補はそこから作る。
 
 ### 既定値の表
 
@@ -202,7 +237,7 @@ sequenceDiagram
 | `reviews.<種類>.checks` | `cross-review`・`cross-refactoring`・`behavior` の重複の無い並び | 掛けるレビュー。並びの順は意味を持たない |
 | `reviews.<種類>.diff` | `pr`・`unchecked`・`resolution`・`none` | 対象の差分 |
 
-スキーマは `plugins/ndf/skills/worktree/schemas/worktree.schema.json` の `branch_flow.reviews` で、`branch_flow.schema_fragment()` の出力と一致する。書き方の例は `worktree` の [references/declaration.md](../../plugins/ndf/skills/worktree/references/declaration.md) にある。`reviews` を持たない版の NDF は `additionalProperties: false` のため、`reviews` を書いた宣言を終了コード 2 で止める。
+スキーマは `plugins/ndf/skills/worktree/schemas/worktree.schema.json` の `branch_flow.reviews` で、`branch_flow.schema_fragment()` の出力と一致する（どちらも #3672 で削除。今は `data/branch-strategy.schema.json` の `reviews`）。書き方の例は `worktree` の [references/declaration.md](../../plugins/ndf/skills/worktree/references/declaration.md) にある。`reviews` を持たない版の NDF は `additionalProperties: false` のため、`reviews` を書いた宣言を終了コード 2 で止める。
 
 ### 目録のスナップショット
 
@@ -218,11 +253,11 @@ sequenceDiagram
 
 | 名前 | 置き場 | 値 |
 | --- | --- | --- |
-| `REVIEW_KINDS`・`CHECKS`・`DIFFS` | `lib/branch_flow.py` | 上の表の値。`CHECKS` の並びがステップを置く順の唯一の置き場 |
-| `REVIEW_ALLOWED`・`REVIEW_DEFAULTS`・`COVERING` | `lib/branch_flow.py` | 許す値・既定値・実装の差分を覆う行の表 |
-| `REVIEW_PREFIX`・`REVIEW_BASE_SUFFIX` | `lib/branch_flow.py` | `review/release/v`・`-base` |
+| `REVIEW_KINDS`・`CHECKS`・`DIFFS` | `lib/branch_flow.py`（#3672 で削除。今は `lib/strategy_rows.py`） | 上の表の値。`CHECKS` の並びがステップを置く順の唯一の置き場 |
+| `REVIEW_ALLOWED`・`REVIEW_DEFAULTS`・`COVERING` | `lib/branch_flow.py`（#3672 で削除。今は `lib/strategy_rows.py`） | 許す値・既定値・実装の差分を覆う行の表 |
+| `REVIEW_PREFIX`・`REVIEW_BASE_SUFFIX` | `lib/branch_flow.py`（#3672 で削除。今は `lib/strategy_rows.py`） | `review/release/v`・`-base` |
 | `STEP_IDS`・`DESIGN_REVIEW_IDS` | `supervise_lib/review_units.py` | 掛けるレビューごとのステップの `id`、設計のレビューのまとまりの `id` |
-| `REVIEW_SAMPLES` | `project_lib/measure_branch_flow.py` | `10` |
+| `REVIEW_SAMPLES` | `project_lib/measure_branch_flow.py`（#3672 で削除。後継は無い） | `10` |
 
 ## 外部連携
 
@@ -274,7 +309,7 @@ sequenceDiagram
 
 ## セキュリティ
 
-- レビューの単位はメインディレクトリの設定から読み、引数では受けない。PR の変更でレビューを外せないようにするためである
+- レビューの単位は、スプリントでは開始時にメインディレクトリの設定から、スプリントに属さないリリースでは本番チャネルの宣言から読み、引数では受けない。PR の変更でレビューを外せないようにするためである
 - 測定の結果には PR の本文とコメントの中身を載せず、印の有無だけを数える
 
 ## 運用
@@ -287,7 +322,7 @@ sequenceDiagram
 
 ## テスト観点
 
-- 5 種類それぞれに書いた値が `BranchFlow.reviews.row(<種類>)` で返り、スナップショットへ出して読み直しても同じであること
+- 5 種類それぞれに書いた値が `BranchFlow.reviews.row(<種類>)` で返り、スナップショットへ出して読み直しても同じであること（`BranchFlow` は #3672 で削除）
 - 種類ごとに 1 つずつ選んだ宣言で、実装・検査・pace `fast` の検査・設計・確定仕様化・開発版のデプロイのプランの `steps` に、選んだレビューの `id` だけが現れること
 - 宣言の無いリポジトリと `reviews` の無い宣言で、各プランの `steps` の `id` と `drive` の並びが `reviews` を持たない版と等しいこと（I5）
 - 衝突したマージを含むリリースブランチで `review-open` の PR の差分が衝突の解消の差分だけになり、衝突の無いマージだけなら終了コード 3、逆に当てられない範囲なら 1 になること（I8）
@@ -296,12 +331,12 @@ sequenceDiagram
 - 開いているレビューの PR が版ごとに 1 組までで、移していない直しを持つ組を閉じないこと（I11）
 - 実装の差分がどの PR でも cross-review されない宣言と、既定値と重なる宣言が終了コード 2 で止まり、両方の行に書いた重なりは通ること（I4・I12）
 - 種類に合わない値・知らないキー・表に無い値で、直すキーと許す値を出して止まること（I1〜I3）
-- `declaration.md` の宣言の例がスキーマと読み分けの両方を通り、スキーマが `schema_fragment()` と一致すること
+- `declaration.md` の宣言の例がスキーマと読み分けの両方を通り、スキーマが `schema_fragment()` と一致すること（`schema_fragment()` は #3672 で削除）
 - 開始時と違う `reviews` を宣言へ書いて打ち直しても、組むレビューのステップが変わらないこと（I6）
 - cross-refactoring を選んでも、CI テストの宣言の無いリポジトリとリファクタリングの無いモードでは assess・refactor が現れないこと（I7）
 - `measure` が標本から推した値と確からしさを出し、標本が 3 件に満たない種類は `unknown` になり、`drift` が既定値の 2 列のどちらとも違う種類だけを出すこと
 
-テストは `plugins/ndf/scripts/tests/` の `test_branch_flow.py`・`test_sprint_branch_flow.py`・`test_review_units.py`・`test_release_review_range.py`・`test_project_decl_branch_flow.py` にある。
+テストは `plugins/ndf/scripts/tests/` の `test_branch_flow.py`（#3672 で削除）・`test_sprint_branch_flow.py`・`test_review_units.py`・`test_release_review_range.py`・`test_project_decl_branch_flow.py`（#3672 で削除）にある。
 
 ## 関連リンク
 

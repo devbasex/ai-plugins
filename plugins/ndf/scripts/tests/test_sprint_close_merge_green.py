@@ -20,6 +20,7 @@ import pytest
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import inproc  # noqa: E402
+import strategy_fixture  # noqa: E402
 
 sys.path.insert(0, str(SCRIPTS / "lib"))
 import approved_commit  # noqa: E402
@@ -115,8 +116,31 @@ elif a[:3] == ["api", "-X", "PATCH"]:
 elif a[:3] == ["api", "-X", "POST"] and a[4].endswith("/comments"):  # 承認の証跡のコメント（#2773）
     st.setdefault("comments", []).append(json.load(sys.stdin)["body"])
     out = 'HTTP/2.0 201 Created\n\n{{"html_url": "https://github.com/o/r/pull/9#c1"}}'
+elif a[:1] == ["api"] and "--paginate" in a and "rules/branches/" in a[-1] and "rules_pages" in st:  # 規則の全ページ
+    if st.get("rules_fail"):
+        code = 1
+        sys.stderr.write("gh: Server Error (HTTP 502)\n")
+    else:
+        out = "".join(json.dumps(p) for p in st["rules_pages"])
 elif a[:1] == ["api"] and "rules/branches/" in a[-1]:
     out = json.dumps(st.get("rules", []))
+elif a[:1] == ["api"] and "/check-runs?" in a[-1]:  # 発行元を指定された必須のチェックの照合（#3506）
+    q = __import__("urllib.parse").parse.parse_qs(a[-1].split("?", 1)[1])
+    runs = [r for r in st.get("check_runs", []) if r.get("name") == q.get("check_name", [""])[0]]
+    out = json.dumps({{"total_count": len(runs), "check_runs": runs}})
+elif a[:1] == ["api"] and "/statuses?" in a[-1]:  # 先端の commit status の全件（発行元の照合。#3506）
+    out = json.dumps(st.get("status_list", []))
+elif a[:1] == ["api"] and a[-1].startswith("apps/"):  # bot の属するアプリ
+    app = st.get("bot_apps", {{}}).get(a[-1].split("/", 1)[1] + "[bot]")
+    if app is None:
+        code = 1
+        sys.stderr.write("gh: Not Found (HTTP 404)\n")
+    else:
+        out = json.dumps({{"id": app}})
+elif a[:1] == ["api"] and "/branches/" in a[-1] and "branch_protection" in st:  # 従来の保護（迂回の必須のチェック）
+    out = json.dumps({{"protection": st["branch_protection"]}})
+elif a[:1] == ["api"] and __import__("re").search(r"/branches/[^/]+$", a[-1]):  # 従来の保護の無いブランチ（#3672 の round 9）
+    out = json.dumps({{"protection": {{"enabled": False}}}})
 elif a[:1] == ["api"] and a[-1].endswith("/status"):  # 先端の commit status（ndf/release-approval の待ち）
     out = json.dumps({{"statuses": st.get("statuses", [])}})
 elif a[:1] == ["api"] and "/protection/" in a[-1]:
@@ -164,9 +188,12 @@ def repo(tmp_path):
     git(root, "config", "user.name", "t")
     git(root, "config", "commit.gpgsign", "false")
     (root / "keep.txt").write_text("x\n", encoding="utf-8")
+    # ブランチ戦略の宣言（develop → main）。develop 宛ての PR はリリース承認ゲートに当たらない。宣言を読めなければ
+    # 本番系へ出るかを決められず止まる（#3672 の I3）
+    strategy_fixture.declare(root, "develop", "main")
     git(root, "add", "-A")
     git(root, "commit", "-q", "-m", "init")
-    git(root, "branch", "main")  # 本番チャネル（既定ブランチ）。develop 宛ての PR はリリース承認ゲートに当たらない
+    git(root, "branch", "main")  # 本番チャネル
     return root
 
 
@@ -401,8 +428,7 @@ def test_merge_when_green_ok_when_local_change_blocks_pull(repo, gh, tmp_path):
     main = tmp_path / "main"
     git(tmp_path, "clone", "-q", "-b", "develop", str(repo), str(main))
     git(main, "remote", "set-head", "origin", "main")  # 既定ブランチは main。develop 宛てはリリース承認ゲートに当たらない
-    (main / ".ndf").mkdir()
-    (main / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "base_branch": "develop"}), encoding="utf-8")
+    strategy_fixture.declare(main, "develop", "main")
     (repo / "keep.txt").write_text("上流\n", encoding="utf-8")
     git(repo, "commit", "-q", "-am", "up")
     (main / "keep.txt").write_text("手元\n", encoding="utf-8")
@@ -702,7 +728,7 @@ def test_merge_when_green_readies_draft_before_merge(repo, gh):
     assert code == 0, (out, err)
     assert [i for i in out["items"] if i["kind"] == "pr"] == [
         {"kind": "pr", "name": "#5", "result": "ready"},
-        {"kind": "pr", "name": "#5", "result": "merged", "method": "merge", "head": "a"},
+        {"kind": "pr", "name": "#5", "result": "merged", "method": "merge", "head": "a", "admin": True},
     ]
     calls = [c[:2] for c in gh.get()["calls"] if c[0] == "pr" and c[1] in ("ready", "merge")]
     assert calls == [["pr", "ready"], ["pr", "merge"]]
@@ -815,21 +841,20 @@ def test_verification_verdicts_reads_a_missing_result_cell_as_not_passed():
 # --- リリース承認ゲート（自動反映の本番チャネルへのマージ。#1336） ------------------------
 
 
-def declare(repo, wt, rows=None):
-    """仮のリポジトリへサンプルと同じ宣言を置く（rows が None なら project.json を置かない）。"""
-    nd = repo / ".ndf"
-    nd.mkdir(exist_ok=True)
-    (nd / "worktree.json").write_text(json.dumps({"version": 1, **wt}) if isinstance(wt, dict) else wt, encoding="utf-8")
-    if rows is not None:
-        (nd / "project.json").write_text(json.dumps({"delivery": rows}, ensure_ascii=False), encoding="utf-8")
+def declare(repo, branches, rows=None, **edits):
+    """仮のリポジトリへサンプルと同じブランチ戦略の宣言を置く。`branches` は (ベースブランチ, 本番ブランチ)、`rows` は届け先の
+    行（None なら書かない）、`edits` はセクションの最上位のキーを置き換える。"""
+    strategy_fixture.declare(repo, *branches, deliveries=rows, **edits)
 
 
+DECL_PRODUCTION = ".ndf/project.json の branch_strategy.branches.production"
+DECL_ROW = ".ndf/project.json の branch_strategy.release.deliveries[0]"
 CONSOLE = (
-    {"base_branch": "main", "production_branch": "main"},
+    ("main", "main"),
     [{"target": "本番（ECS）", "kind": "auto", "trigger": "t", "branch": "main", "versioned": False}],
 )
 TRYGROUP = (
-    {"base_branch": "develop", "production_branch": "main"},
+    ("develop", "main"),
     [
         {"target": "stg", "kind": "auto", "trigger": "t", "branch": "develop", "versioned": False},
         {"target": "prd", "kind": "auto", "trigger": "t", "branch": "main", "versioned": False},
@@ -861,7 +886,7 @@ def test_merge_when_green_stops_production_merge_without_approval(repo, gh):
     assert code == 10, (out, err)
     assert out["status"] == "gate" and out["metrics"] == {"gate": "production-merge", "verdict": "production", "target": "main"}
     names = [i["name"] for i in out["items"] if i["kind"] == "decl"]
-    assert ".ndf/worktree.json の production_branch" in names and ".ndf/project.json の delivery[0]" in names
+    assert DECL_PRODUCTION in names and DECL_ROW in names
     assert "--gate-approved user" in out["next"] and Path(out["presentation_path"]).is_file()
     assert "https://github.com/o/r/pull/5" in Path(out["presentation_path"]).read_text(encoding="utf-8")
     assert merges(gh) == [] and not [c for c in gh.get()["calls"] if c[:2] == ["pr", "ready"]]
@@ -910,35 +935,39 @@ def test_merge_when_green_no_admin_merges_without_the_bypass(repo, gh):
     assert next(i for i in out["items"] if i.get("result") == "merged")["admin"] is False
 
 
-@pytest.mark.parametrize("broken", ["worktree", "project"])
+@pytest.mark.parametrize("broken", ["not-json", "schema"])
 def test_merge_when_green_stops_on_broken_declaration(repo, gh, broken):
     """AC7: 宣言が壊れていれば、本番系へ出るかを決められないとして止まる（止めない側へ倒さない）。"""
-    if broken == "worktree":
-        declare(repo, "{", CONSOLE[1])
-    else:
-        declare(repo, CONSOLE[0])
+    if broken == "not-json":
+        (repo / ".ndf").mkdir(exist_ok=True)
         (repo / ".ndf" / "project.json").write_text("[1,", encoding="utf-8")
+    else:
+        declare(repo, CONSOLE[0], "x")
     gh.set(pr_seq={"5": [to("develop")]})
     code, out, _ = call("merged-steps.py", ["merge-when-green", "5", "--interval", "0", "--no-cleanup"], gh.env, repo)
     assert code == 10 and out["metrics"]["verdict"] == "undetermined" and merges(gh) == []
-    assert f"{broken}.json" in out["summary"]
+    assert "project.json" in out["summary"]
     code, out, _ = call("merged-steps.py", ["merge-gate", "--base", "develop"], gh.env, repo)
     assert code == 10 and out["metrics"]["verdict"] == "undetermined"
 
 
 def test_merge_gate_judges_without_gh(repo, gh):
     """AC6・I3: merge-gate は宛先の引数と宣言だけで判定する（--pr が無ければ gh を呼ばない）。"""
-    declare(
-        repo,
-        {"base_branch": "develop", "production_branch": "main"},
-        [{"target": "ndf", "kind": "manual", "trigger": "t", "branch": "main", "versioned": True}],
-    )
+    declare(repo, ("develop", "main"), [{"target": "ndf", "kind": "manual", "trigger": "t", "branch": "main", "versioned": True}])
     code, out, _ = call("merged-steps.py", ["merge-gate", "--base", "develop"], gh.env, repo)
     assert code == 0 and out["metrics"]["verdict"] == "not-production"
     declare(repo, *CONSOLE)
     code, out, _ = call("merged-steps.py", ["merge-gate", "--base", "main"], gh.env, repo)
     assert code == 10 and out["metrics"]["gate"] == "production-merge"
     assert gh.get().get("calls", []) == []
+
+
+def test_merge_gate_passes_a_pr_a_person_already_merged(repo, gh):
+    """#3652: 本番の宛先でも、人がリリース承認ゲートでマージした PR は止めない（続く merge が already_merged で通る）。"""
+    declare(repo, *CONSOLE)
+    gh.set(pr_seq={"5": [dict(to("main"), state="MERGED", body=MANUAL_BODY.format(box=" "))]})
+    code, out, err = call("merged-steps.py", ["merge-gate", "--pr", "5"], gh.env, repo)
+    assert code == 0 and out["metrics"]["merged"] is True, (out, err)
 
 
 def test_promote_creates_pr_and_merges_after_approval_without_cleanup(repo, gh, tmp_path):
@@ -1163,8 +1192,11 @@ REVIEW_RULES = [{"type": "pull_request", "parameters": {"required_approving_revi
 REDO = "リリース承認ゲートからやり直す: プランなら run <プラン> --from promote（fast / auto は --from verify）"
 
 
-def _promote_cd(repo, gh, tmp_path, *args, material=True, **state):
-    declare(repo, *TRYGROUP)
+def _promote_cd(repo, gh, tmp_path, *args, material=True, admin=False, **state):
+    merge = (
+        {**strategy_fixture.section("web-develop")["merge"], "admin": True} if admin else strategy_fixture.section("web-develop")["merge"]
+    )
+    declare(repo, *TRYGROUP, merge=merge)
     gh.set(**{"open_prs": [{"number": 9}], "pr_seq": {"9": [dict(to("main", X), headRefName="develop")] * 3}, **state})
     extra = ["--approved-from", str(promote_material(tmp_path))] if material else []
     return call("merged-steps.py", promote_args(*extra, *(args or ("--gate-approved", "user"))), gh.env, repo)
@@ -1306,7 +1338,7 @@ def test_approved_on_pr_reads_trails_except_in_review_case(monkeypatch, case, co
 
     approval, seen = _approval_on_pr(monkeypatch, [_trail_comment(*c) for c in comments], roles=roles)
     got = approval.approved_on_pr("o/r", 9, head, release_case.decide_case(*case))
-    assert tuple(got) == expected
+    assert tuple(got)[:4] == expected
     if read_roles is None:
         assert "comments" not in seen and "roles" not in seen and seen["reviews"] == ("o/r", 9)
     else:
@@ -1319,7 +1351,7 @@ def test_approved_on_pr_does_not_read_roles_of_edited_trails(monkeypatch):
     comments = [_trail_comment(X, "adm", T0, T1), _trail_comment(X, "w", "2026-11-13T09:30:00Z", cid=2)]
     approval, seen = _approval_on_pr(monkeypatch, comments, roles={"w": "write"})
     got = approval.approved_on_pr("o/r", 9, X, release_case.decide_case(*NO_REVIEW))
-    assert tuple(got) == ("failure", "承認権限の無い w の証跡だけがある", None, None)
+    assert tuple(got)[:4] == ("failure", "承認権限の無い w の証跡だけがある", None, None)
     assert seen["roles"] == ["w"]
 
 
@@ -1351,5 +1383,206 @@ def test_approved_on_pr_review_case_matches_latest_valid_approval(monkeypatch, r
 
     approval, seen = _approval_on_pr(monkeypatch, reviews=reviews, perms=perms)
     got = approval.approved_on_pr("o/r", 9, head, release_case.decide_case(*REVIEW))
-    assert tuple(got) == expected
+    assert tuple(got)[:4] == expected
     assert seen["perms"] == asked
+
+
+# --- #3506: 迂回の宣言（cd-admin）の promote と、断られた後の先端の読み直し ------------------------
+
+
+def _promote_admin(repo, gh, tmp_path, *args, **state):
+    """迂回の宣言を置き、承認数 1 の本番チャネルへの promote を打つ（リリースの場合は cd-admin）。"""
+    return _promote_cd(repo, gh, tmp_path, *args, admin=True, **{"rules": REVIEW_RULES, **state})
+
+
+def _user_trail(sha=X):
+    sys.path.insert(0, str(SCRIPTS))
+    from release_lib import approval_trail
+
+    body = approval_trail.render_trail(sha, "user")
+    return {
+        "id": 5,
+        "body": body,
+        "user": {"login": "me"},
+        "created_at": "t",
+        "updated_at": "t",
+        "html_url": "https://github.com/o/r/pull/9#c5",
+    }
+
+
+def test_promote_admin_case_writes_trail_then_merges_with_the_bypass_and_records_it(repo, gh, tmp_path):
+    """#3506 の受け入れ条件 5・6: cd-admin の promote --gate-approved user は、証跡を書いてから先端に固定して迂回でマージし、
+    結果の行の admin が true になり、照らした証跡を指す迂回の記録を置く。"""
+    code, out, err = _promote_admin(repo, gh, tmp_path)
+    assert code == 0 and out["status"] == "ok", (out, err)
+    assert merges(gh) == [["pr", "merge", "9", "--admin", "--merge", "--match-head-commit", X]]
+    assert next(i for i in out["items"] if i.get("result") == "merged")["admin"] is True
+    trail, record = gh.get()["comments"]
+    assert "ndf:release-approval" in trail and "担い手: user" in trail
+    assert "<!-- ndf:admin-merge -->" in record and X in record and "https://github.com/o/r/pull/9#c1" in record
+    assert "ndf:release-approval" not in record
+    assert {"kind": "comment", "name": "https://github.com/o/r/pull/9#c1", "result": "written", "record": "admin_merge"} in out["items"]
+
+
+def test_promote_admin_case_does_not_let_mvv_replace_the_user_approval(repo, gh, tmp_path):
+    """#3506 の I9: cd-admin で --gate-approved mvv なら、証跡を書かずに承認ゲート（10）で止まり、マージしない。"""
+    code, out, err = _promote_admin(repo, gh, tmp_path, "--gate-approved", "mvv")
+    assert code == 10 and out["status"] == "gate", (out, err)
+    assert merges(gh) == [] and not gh.get().get("comments")
+
+
+def test_promote_admin_case_stops_when_the_head_moved(repo, gh, tmp_path):
+    """#3506 の受け入れ条件 4・5: 承認の後に先端が動いていれば、証跡を書かず head_moved の 1 で止まり、迂回しない。"""
+    code, out, err = _promote_admin(repo, gh, tmp_path, pr_seq={"9": [dict(to("main", Y), headRefName="develop")] * 3})
+    assert code == 1 and out["items"][-1]["result"] == "head_moved", (out, err)
+    assert merges(gh) == [] and not gh.get().get("comments")
+
+
+def test_promote_admin_case_does_not_merge_when_the_checks_fail(repo, gh, tmp_path):
+    """#3506 の受け入れ条件 3・5: チェックが落ちていれば迂回でマージせずに 1 で止まる。"""
+    failed = dict(to("main", X), headRefName="develop", statusCheckRollup=[run_("t", "FAILURE")])
+    code, out, err = _promote_admin(repo, gh, tmp_path, pr_seq={"9": [failed] * 3})
+    assert code == 1 and out["status"] == "stopped", (out, err)
+    assert merges(gh) == []
+
+
+def test_promote_admin_case_waits_for_every_required_check_of_the_base(repo, gh, tmp_path):
+    """#3506: 迂回は必須のチェックも飛ばすため、宛先の規則が要求するチェックが先端に現れなければ、ほかが通っても
+    迂回でマージせずに待ち、上限で止まる。"""
+    rules = REVIEW_RULES + [{"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": "must"}]}}]
+    passed = dict(to("main", X), headRefName="develop", statusCheckRollup=[run_("other")])
+    code, out, err = _promote_admin(
+        repo, gh, tmp_path, "--gate-approved", "user", "--timeout", "0", rules=rules, pr_seq={"9": [passed] * 3}
+    )
+    assert code == 1 and out["status"] == "stopped", (out, err)
+    assert "must（現れない）" in out["summary"] and merges(gh) == []
+
+
+ADMIN_ARGS = ("--gate-approved", "user", "--timeout", "0")
+MUST_RULE = [{"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": "must"}]}}]
+
+
+def test_promote_admin_case_reads_every_page_of_the_rules(repo, gh, tmp_path):
+    """#3506: 必須のチェックの規則が 2 ページ目にあっても読み、先端に現れなければ迂回でマージしない。"""
+    passed = dict(to("main", X), headRefName="develop", statusCheckRollup=[run_("other")])
+    code, out, err = _promote_admin(repo, gh, tmp_path, *ADMIN_ARGS, rules_pages=[REVIEW_RULES, MUST_RULE], pr_seq={"9": [passed] * 3})
+    assert code == 1 and "must（現れない）" in out["summary"] and merges(gh) == [], (out, err)
+
+
+def test_promote_admin_case_stops_when_a_page_of_the_rules_fails(repo, gh, tmp_path):
+    """#3506: 規則の全ページを読めなければ、迂回の前提を読めないとして止まり、マージしない。"""
+    passed = dict(to("main", X), headRefName="develop", statusCheckRollup=[run_("other")])
+    code, out, err = _promote_admin(
+        repo, gh, tmp_path, *ADMIN_ARGS, rules_pages=[REVIEW_RULES], rules_fail=True, pr_seq={"9": [passed] * 3}
+    )
+    assert code != 0 and out["status"] == "stopped" and "全ページを読めない" in out["summary"] and merges(gh) == [], (out, err)
+
+
+def _check_run(name, app, run_id=1, conclusion="success"):
+    return {"id": run_id, "name": name, "status": "completed", "conclusion": conclusion, "app": {"id": app}}
+
+
+@pytest.mark.parametrize(
+    ("runs", "merged"),
+    [
+        ([_check_run("must", 999)], False),  # 同じ名前の別のアプリの成功は数えない
+        ([_check_run("must", 15368, 1), _check_run("must", 15368, 2, "failure")], False),  # 指定のアプリの最新が落ちている
+        ([_check_run("must", 999, 1), _check_run("must", 15368, 2)], True),
+    ],
+)
+def test_promote_admin_case_checks_the_app_named_by_the_rule(repo, gh, tmp_path, runs, merged):
+    """#3506: 規則が発行元（integration_id）を指定した必須のチェックは、指定のアプリの check run が先端で通ったときだけ迂回でマージする。"""
+    must = {"context": "must", "integration_id": 15368}
+    rules = [*REVIEW_RULES, {"type": "required_status_checks", "parameters": {"required_status_checks": [must]}}]
+    passed = dict(to("main", X), headRefName="develop", statusCheckRollup=[run_("must")])
+    code, out, err = _promote_admin(repo, gh, tmp_path, rules_pages=[rules], rules=rules, check_runs=runs, pr_seq={"9": [passed] * 3})
+    if merged:
+        assert code == 0 and merges(gh) == [["pr", "merge", "9", "--admin", "--merge", "--match-head-commit", X]], (out, err)
+    else:
+        assert code == 1 and merges(gh) == [], (out, err)
+        assert {"kind": "check", "name": "must（アプリ 15368）", "result": "unmet_source"} in out["items"]
+
+
+def _status(context, creator, status_id, state="success"):
+    return {"id": status_id, "context": context, "state": state, "creator": {"login": creator}}
+
+
+@pytest.mark.parametrize(
+    ("statuses", "merged"),
+    [
+        ([_status("must", "someone", 1)], False),  # 利用者が付けた status は数えない
+        ([_status("must", "other-app[bot]", 1)], False),  # 別のアプリの bot が付けた status は数えない
+        ([_status("must", "github-actions[bot]", 2, "failure"), _status("must", "github-actions[bot]", 1)], False),  # 最新が落ちている
+        ([_status("must", "someone", 1), _status("must", "github-actions[bot]", 2)], True),
+    ],
+)
+def test_promote_admin_case_counts_the_status_of_the_app_named_by_the_rule(repo, gh, tmp_path, statuses, merged):
+    """#3506: 規則が発行元を指定した必須のチェックは、指定のアプリの bot が付けた commit status が先端で success でも満たす
+    （例: ndf/release-approval を GitHub Actions のアプリに限った cd-admin）。"""
+    must = {"context": "must", "integration_id": 15368}
+    rules = [*REVIEW_RULES, {"type": "required_status_checks", "parameters": {"required_status_checks": [must]}}]
+    passed = dict(to("main", X), headRefName="develop", statusCheckRollup=[run_("must")])
+    code, out, err = _promote_admin(
+        repo,
+        gh,
+        tmp_path,
+        rules_pages=[rules],
+        rules=rules,
+        status_list=statuses,
+        bot_apps={"github-actions[bot]": 15368, "other-app[bot]": 99},
+        pr_seq={"9": [passed] * 3},
+    )
+    if merged:
+        assert code == 0 and merges(gh) == [["pr", "merge", "9", "--admin", "--merge", "--match-head-commit", X]], (out, err)
+    else:
+        assert code == 1 and merges(gh) == [], (out, err)
+        assert {"kind": "check", "name": "must（アプリ 15368）", "result": "unmet_source"} in out["items"]
+
+
+def test_promote_admin_case_resume_writes_the_missing_record(repo, gh, tmp_path):
+    """#3506 の I7: マージ済みの本番の PR を打ち直すと、利用者の証跡が先端と一致し記録が無ければ記録だけを書く。"""
+    merged = dict(to("main", X), headRefName="develop", state="MERGED")
+    code, out, err = _promote_admin(repo, gh, tmp_path, pr_seq={"9": [merged] * 3}, issue_comments=[_user_trail()], perms={"me": "admin"})
+    assert code == 0, (out, err)
+    assert merges(gh) == []
+    (record,) = gh.get()["comments"]
+    assert "<!-- ndf:admin-merge -->" in record and "https://github.com/o/r/pull/9#c5" in record
+
+
+def test_promote_admin_case_keeps_an_existing_record(repo, gh, tmp_path):
+    sys.path.insert(0, str(SCRIPTS))
+    from release_lib import approval_trail
+
+    merged = dict(to("main", X), headRefName="develop", state="MERGED")
+    old = {
+        "id": 6,
+        "body": approval_trail.render_admin_record(X, "u"),
+        "user": {"login": "me"},
+        "created_at": "t",
+        "updated_at": "t",
+        "html_url": "https://github.com/o/r/pull/9#c6",
+    }
+    comments = [_user_trail(), old]
+    code, out, err = _promote_admin(repo, gh, tmp_path, pr_seq={"9": [merged] * 3}, issue_comments=comments, perms={"me": "admin"})
+    assert code == 0, (out, err)
+    assert not gh.get().get("comments")
+    assert {"kind": "comment", "name": "https://github.com/o/r/pull/9#c6", "result": "kept", "record": "admin_merge"} in out["items"]
+
+
+def test_merge_when_green_writes_admin_true_with_the_bypass(repo, gh):
+    """#3506 の I8: 迂回でマージした行にも admin を必ず書く。"""
+    gh.set(pr_seq={"5": [pending_pr(), passed_pr(), passed_pr()]})
+    code, out, err = call("merged-steps.py", ["merge-when-green", "5", "--interval", "0", "--no-cleanup"], gh.env, repo)
+    assert code == 0, (out, err)
+    assert next(i for i in out["items"] if i.get("result") == "merged")["admin"] is True
+
+
+@pytest.mark.parametrize("head, result", [("b", "head_moved"), ("a", "stopped")])
+def test_merge_when_green_rereads_the_head_after_a_refusal(repo, gh, head, result):
+    """#3506 の I6b: gh pr merge が断られたら PR を読み直し、先端が動いていれば head_moved で止める。同じなら今の stopped。"""
+    gh.set(pr_seq={"5": [pending_pr(), passed_pr(), passed_pr(head)]}, merge_code=1, merge_err="Head branch was modified")
+    code, out, err = call("merged-steps.py", ["merge-when-green", "5", "--interval", "0", "--no-cleanup"], gh.env, repo)
+    assert code == 1 and out["status"] == "stopped", (out, err)
+    assert out["items"][-1]["result"] == result
+    if result == "head_moved":
+        assert out["items"][-1] == {"kind": "pr", "name": "#5", "result": "head_moved", "head": "b", "expected": "a"}

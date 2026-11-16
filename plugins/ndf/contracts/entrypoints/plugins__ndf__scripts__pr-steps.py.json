@@ -36,6 +36,7 @@
     "NDF_RELAY_NAME",
     "NDF_SHARED_CONFIG_DIR",
     "NDF_STATE_HOME",
+    "NDF_STRATEGY_SNAPSHOT",
     "NDF_SUPERVISE_CLAUDE",
     "NDF_SUPERVISE_CLAUDE_FALLBACK",
     "NDF_SUPERVISE_LIMIT_SLEEP",
@@ -63,14 +64,12 @@
     {
       "file": "supervise.json",
       "keys": [
-        "release",
         "shared"
       ]
     },
     {
       "file": "worktree.json",
       "keys": [
-        "base_branch",
         "tool_paths",
         "version"
       ]

@@ -38,7 +38,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import supervise_lib  # noqa: E402,F401  lib/ を sys.path へ足す
 import deps  # noqa: E402
 
-deps.require("md", "mdtable", "schema", "locks", "durable", "versions", "procs", "waits")  # schema・waits は supervise_lib.paths が使う
+deps.require(
+    "md", "mdtable", "schema", "locks", "durable", "versions", "procs", "waits", "jsonschema"
+)  # schema・waits は supervise_lib.paths が使う
 import report_fields  # noqa: E402
 from supervise_lib.paths import sha256_of, state_dir_of  # noqa: E402
 import clock  # noqa: E402
@@ -277,8 +279,7 @@ def gate_locked(a) -> dict:
         override = pms.record_override(m, a.sprint, a.name, a.outcome, at, root, a.mvv_log, pr=a.pr)
         if a.outcome == "rejected":
             return reject_gate(a, m, repo, override, at)
-        # 利用者の承認は by と答えた PR を書き、承認ゲートの名と PR の組で置き換える（#1426 の決定 1。lib/gate_answer.py）
-        entry.update({**({"outcome": "approved", "by": "user"} if a.outcome else {}), **({"pr": a.pr} if a.pr else {})})
+        entry.update(gate_answer.user_keys(a.outcome, a.pr))
     if a.name == MVV_GATE:
         sha = mvv_sha(m)
         if sha is None:
@@ -288,7 +289,7 @@ def gate_locked(a) -> dict:
         judged, stop = mvv_judgement(a, m)
         if stop:
             return stop
-        entry.update(judged)
+        entry.update(gate_answer.mvv_keys(judged, a.pr, a.outcome))
     m["gates"] = gates = [g for g in m.get("gates", []) if not gate_answer.replaces(g, a.name, entry.get("pr"))] + [entry]
     jsonio.write_atomic(a.sprint, m, indent=1)
     who = "MVV 判定" if a.by == "mvv" else "承認"
@@ -549,11 +550,9 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--verdict", help="--by mvv: 判定")
     s.add_argument("--reasons", help="--by mvv: 理由（JSON の配列）")
     s.add_argument("--log", help="--by mvv: 判定のログ（mvv-gate.jsonl）のパス")
-    s.add_argument(
-        "--outcome", choices=("approved", "rejected"), help="--by user: 利用者の答え（省くと approved。記録に outcome を書かない）"
-    )
+    s.add_argument("--outcome", choices=("approved", "rejected"), help="答え（省くと approved で、記録に書かない）")
     s.add_argument("--mvv-log", default=str(pm.gate_log_path()), help="--by user: 直前の MVV 判定を読むログ（既定 mvv-gate.jsonl）")
-    s.add_argument("--pr", type=int, help="--by user: 答えた Pull Request。渡すとその PR の MVV 判定だけを直前の判定として比べる")
+    s.add_argument("--pr", type=int, help="答えた Pull Request（--by user はその PR の判定と比べ、--by mvv は承認と記録に残す）")
     s.add_argument("--root", help="覆しと差し戻しの記録の repo を読むリポジトリの根（既定はカレント）")
     s.add_argument("--withdraw", action="store_true", help="同じ名前の承認ゲートの MVV 判定の記録（by: mvv）を外す（無ければ何もしない）")
 

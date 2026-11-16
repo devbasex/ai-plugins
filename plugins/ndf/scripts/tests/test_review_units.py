@@ -11,17 +11,23 @@ import pytest
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS))
 import supervise_lib  # noqa: E402,F401  lib/ を sys.path へ足す
-import branch_flow  # noqa: E402
+import branch_strategy  # noqa: E402
+import strategy_rows  # noqa: E402
 from supervise_lib import release_flow, review_units as ru, sprint_close_steps, sprint_waves  # noqa: E402
 
-SELECTED = {"start": "production", "integrate": "check", "doc_prs": "sprint", "promotion": "selected"}
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import strategy_fixture  # noqa: E402
+from supervise_lib.decl import DeclError  # noqa: E402
+
+# 選んで集める取り込み方（release_branch）・本番ブランチから切るスプリント・検査の PR で結合（mobile の種類の写し）
+SELECTED = strategy_fixture.section("mobile")
 BEHAVIOR_IDS = ["behavior-targets", "behavior", "behavior-verify"]
 
 
-def args(reviews=None, bundles=None, mode="standard", flow=None, **kw) -> argparse.Namespace:
-    decl = flow if flow is not None else {**SELECTED, **({"reviews": reviews} if reviews is not None else {})}
-    snap = branch_flow.parse_flow(decl).resolve("develop", "main").as_snapshot("宣言")
-    return argparse.Namespace(flow=snap, bundles=bundles, base="develop", production_branch="main", mode=mode, scope=None, **kw)
+def args(reviews=None, bundles=None, mode="standard", **kw) -> argparse.Namespace:
+    sec = {**SELECTED, **({"reviews": reviews} if reviews is not None else {})}
+    snap = branch_strategy.snapshot_section(branch_strategy.Strategy(sec), "宣言")
+    return argparse.Namespace(flow=snap, bundles=bundles, base="develop", production="main", mode=mode, scope=None, **kw)
 
 
 def impl_plan() -> dict:
@@ -57,16 +63,17 @@ def targets(plan: dict) -> set[str]:
 
 
 def test_review_row_reads_the_snapshot_and_the_bundles():
-    a = args({"impl": {"checks": ["behavior"], "diff": "pr"}, "sprint": {"checks": list(branch_flow.CHECKS), "diff": "unchecked"}})
+    a = args({"impl": {"checks": ["behavior"], "diff": "pr"}, "sprint": {"checks": list(strategy_rows.CHECKS), "diff": "unchecked"}})
     assert ru.review_row(a, "impl").checks == ("behavior",)
     assert ru.review_row(args(), "impl").diff == "none"
     assert ru.review_row(args(bundles=[]), "impl").checks == ("cross-review",)
-    assert ru.review_row(argparse.Namespace(), "sprint").checks == branch_flow.CHECKS  # スナップショットの無い呼び手は既定値
+    with pytest.raises(DeclError):  # スナップショットの無い呼び手は既定値へ倒さずに止まる（#3672 の I3）
+        ru.review_row(argparse.Namespace(), "sprint")
 
 
 def test_chosen_checks_keep_the_order_and_drop_refactoring_when_suspended(monkeypatch):
     """I7: リファクタリングを止める条件は宣言より先に効く。"""
-    row = branch_flow.ReviewRow("impl", ("cross-review", "cross-refactoring"), "pr")
+    row = strategy_rows.ReviewRow("impl", ("cross-review", "cross-refactoring"), "pr")
     assert ru.chosen_checks(args(), row) == ("cross-refactoring", "cross-review")
     assert ru.chosen_checks(args(mode="light"), row) == ("cross-review",)
     monkeypatch.setattr(ru.templates, "refactor_suspended", lambda a: True)
@@ -74,7 +81,7 @@ def test_chosen_checks_keep_the_order_and_drop_refactoring_when_suspended(monkey
 
 
 def test_insert_reviews_places_every_chosen_review_before_ready():
-    plan = ru.insert_reviews(args(), impl_plan(), branch_flow.CHECKS)
+    plan = ru.insert_reviews(args(), impl_plan(), strategy_rows.CHECKS)
     at = ids(plan).index("ready")
     assert ids(plan)[2:at] == ["review-push", "assess", "refactor", "review", *BEHAVIOR_IDS, "review-pull"]
     assert plan["steps"][1]["next"] == "review-push" and plan["steps"][2]["next"] == "assess"

@@ -15,7 +15,7 @@
 この文書の `release --channel prod` の照合（I1〜I10・許可リスト・先端の入れ直し）は、本番チャネルへのマージで届く CD の宣言が無いリポジトリに当たる。
 CD の宣言があるリポジトリの `release --channel prod` は、リリースの PR の上の承認（証跡のコメントか承認のレビュー）が指すコミットと
 先端の完全な一致だけを通し、許可リストの許容・先端の入れ直し・`--approved-sha` / `--approval` の引数を使わない（渡すと 3）。
-リリースの Pull Request で届く経路（`promote`）は、CD の宣言があっても承認資料の照合をこの文書のとおりに行い、マージの前に証跡を置くかレビューの承認を照らして、管理者の迂回なしでマージする。
+リリースの Pull Request で届く経路（`promote`）は、CD の宣言があっても承認資料の照合をこの文書のとおりに行い、マージの前に証跡を置くかレビューの承認を照らしてマージする。管理者の迂回でマージするのは、迂回の宣言がある場合（`cd-admin`）だけである（[ndf-release-approval-on-pr.md](ndf-release-approval-on-pr.md)）。
 
 例: ndf のある版を本番へ出すとき、承認の 6 分後に別の PR がベースブランチへマージされた。
 
@@ -55,7 +55,7 @@ CD の宣言があるリポジトリの `release --channel prod` は、リリー
 | リリースの Pull Request | ベースブランチ → 本番チャネルの Pull Request を `merged-steps.py promote` が作ってマージするもの。head はベースブランチそのもの |
 | リリースの承認資料 | リリースの Pull Request のリリース承認ゲートで利用者（か MVV 判定）が見る `{state_dir}/work/approval-promote.md`。`normal` では `promote` のリリース承認ゲートの停止が、`fast` / `auto` では `prepare` が書く。「承認したコミット」の行を 1 行持つ |
 
-ベースブランチ・本番チャネル・プラグイン名は宣言（`.ndf/worktree.json` の `base_branch`・`production_branch` と `.ndf/supervise.json` の `release.plugin`）と引数から読み、
+ベースブランチ・本番チャネル・プラグイン名はブランチ戦略の宣言（`.ndf/project.json` の `branch_strategy` の `branches.base`・`branches.production`・`release.plugin`）と引数から読み、
 `develop` / `main` を埋め込まない。
 
 **比べた先端は `origin/release/v<版>` の先端とする。** ベースブランチの先端は比べる相手に入れない。 本番のリリースプランは、「起点のコミット」が
@@ -376,7 +376,7 @@ sequenceDiagram
 | --- | --- | --- |
 | 先端が確かめたコミットのまま CI が通った | 0 | 今と同じ。`items[]` に `{"kind": "pr", "result": "merged", "head": <X>, "gate_approved": "mvv"}` |
 | 先端が確かめたコミットでない（待つ間に変わった・別の先端でマージ済みを含む） | 1 | `status: stopped`・`items[]` に `{"kind": "pr", "name": "#<番号>", "result": "head_moved", "head": <Y>, "expected": <X>}`。`gh pr merge` は呼ばない |
-| 最後の読みとマージの間に先端が変わった | 1 | `--match-head-commit X` で GitHub がマージを拒み、既存の「`gh pr merge --admin` が失敗」（CD の宣言があるリポジトリでは「`gh pr merge（管理者の迂回なし）` が失敗」）になる |
+| 最後の読みとマージの間に先端が変わった | 1 | `--match-head-commit X` で GitHub がマージを拒む。拒否の後に PR を読み直し、先端が動いていれば `items[]` に `{"kind": "pr", "name": "#<番号>", "result": "head_moved", "head": <Y>, "expected": <X>}` を置いて止まる。読み直せなければ「`gh pr merge --admin` が失敗」（迂回しないときは「`gh pr merge（管理者の迂回なし）` が失敗」）になる |
 | 資料が無い・確かめたコミットの行が無いか 2 つ以上・40 桁の 16 進でない | 2 | `status: stopped`。リリースの Pull Request を探さず・作らず、`gh` を呼ばない |
 
 `--prepare` と一緒に渡したときも先に読み（読めなければ 2）、読めればマージへ進まない今の振る舞いのまま終える。

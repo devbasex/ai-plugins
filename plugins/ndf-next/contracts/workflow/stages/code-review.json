@@ -1,0 +1,56 @@
+{
+  "document": {
+    "dsl": "1.0.3",
+    "namespace": "ndf",
+    "name": "code-review",
+    "version": "1.0.0"
+  },
+  "input": {
+    "schema": {
+      "resource": {
+        "endpoint": "file:///workflow/stage-io.schema.json#/$defs/stage-in"
+      }
+    }
+  },
+  "output": {
+    "schema": {
+      "resource": {
+        "endpoint": "file:///workflow/stage-io.schema.json#/$defs/stage-out"
+      }
+    }
+  },
+  "metadata": {
+    "ndf": {
+      "stage": "コードレビュー",
+      "phase": "implement",
+      "inputs": [
+        "worktree",
+        "branch"
+      ]
+    }
+  },
+  "do": [
+    {
+      "code-review": {
+        "call": "ndf.plan",
+        "with": {
+          "plan": "cross-review"
+        },
+        "metadata": {
+          "ndf": {
+            "kind": "review",
+            "range": "sprint_diff",
+            "subject": "code"
+          }
+        },
+        "output": {
+          "schema": {
+            "resource": {
+              "endpoint": "file:///workflow/stage-io.schema.json#/$defs/report"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

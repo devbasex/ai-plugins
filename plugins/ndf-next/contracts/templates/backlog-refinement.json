@@ -1,0 +1,13 @@
+{
+  "template": "backlog-refinement",
+  "purpose": "backlog_refinement",
+  "summary": "棚卸し: worker が課題の一覧を棚卸しし、使わなくなったものの整理を提案する",
+  "params": ["repo", "worker"],
+  "plan": {
+    "name": "backlog-refinement",
+    "repo": "{{repo}}",
+    "steps": [
+      {"id": "work", "run": ["{{worker}}", "backlog-refinement"]}
+    ]
+  }
+}

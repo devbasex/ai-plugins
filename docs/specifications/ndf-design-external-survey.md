@@ -107,9 +107,9 @@ graph TD
 
 | ステップ | 種類 | 中身 | 失敗したとき |
 | --- | --- | --- | --- |
-| `survey-check` | run | `design-survey.py check --issue <番号>`。詳細設計を通るモード（`standard`・`legacy-refactor`）では `--require-detail` を付け、詳細設計の文書の欠けと形も確かめる | `fix-survey` へ |
+| `survey-check` | run | `design-survey.py check --issue <番号>`。詳細設計を通るモード（`standard`・`legacy-refactor`）では `--require-detail` を付け、詳細設計の文書の欠けと形も確かめる | 終了コード 1 は `fix-survey` へ。終了コード 2（代表のリポジトリの設定が壊れている・文書や契約を読めない）は直しへ回さずプランが止まる |
 | `fix-survey` | work（修正） | 指摘の行の作り方・比べた候補を直すか、表へ出典つきの候補の行を足してコミットする（push しない）。比べずに直せない指摘は「判断が要る」と報告する | — |
-| `survey-recheck` | run | `survey-check` と同じ | `on_fail` を持たず、プランが止まる |
+| `survey-recheck` | run | `survey-check` と同じ | `on_fail` を持たず、プランが止まる（終了コード 2 も同じ） |
 
 3 ステップは `requirements-recheck` の次、`glossary-check` の前に置く。push は後の `push-glossary` が行う。
 `design` の手順 5 は `--file` でコミット前の文書を読み、`--issue` は HEAD だけを読むためプランで使う。
@@ -126,7 +126,7 @@ graph TD
 - 表に無い番号に `unknown_candidate` を返し、同じまとまりの別のファイルの表にある番号では返さないこと。ほかのまとまりの表では解決しないこと
 - 3 語に無い作り方の値に `unknown_method` を返し、「自前で作る・標準に倣う」を自前で作る決定として扱うこと
 - コードブロックの中の `作り方: 自前で作る` に当たらないこと
-- このリポジトリの `issues/` の既存の設計文書と受け入れ条件のファイルに、`check --file` が 0 を返すこと
+- このリポジトリの `issues/` の既存の設計文書と受け入れ条件のファイルに、`check --file` が外部の調査の規則の指摘を返さないこと（人へ残す判断の番号の規則と代表のリポジトリの 2 規則は、規則より前に書いた文書を指摘するため数えない）
 - `.ndf/` を持たないリポジトリでも同じ結果を返すこと（MVV の宣言を読まない）
 - `--issue` に文書の無い番号を渡すと 3 を返すこと
 - `lib/design_docs.py` への移動の後も、`design-match.py` の既存のテストが変えずに通ること

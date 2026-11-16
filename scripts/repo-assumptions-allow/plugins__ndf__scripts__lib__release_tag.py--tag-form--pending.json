@@ -1,0 +1,8 @@
+{
+  "path": "plugins/ndf/scripts/lib/release_tag.py",
+  "name": "tag-form",
+  "kind": "pending",
+  "reason": "リリースの形 package-plugin のタグの形 <プラグイン>--v<版>。宣言の release.tag が無いときの既定の形で、タグの形の正本はここ 1 か所",
+  "count": 1,
+  "issue": 1756
+}

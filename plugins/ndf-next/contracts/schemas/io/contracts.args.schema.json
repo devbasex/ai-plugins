@@ -1,0 +1,168 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/io/contracts.args.schema.json",
+  "title": "ndf contracts の引数",
+  "description": "ndf contracts が受ける引数。キーは引数の名前（オプションは -- の名前、位置引数は名前）。規約の生成が作り、手で直さない",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "check",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "emit",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--tool": {
+          "type": "string"
+        },
+        "--status": {
+          "type": "string",
+          "enum": [
+            "ok",
+            "gate",
+            "stopped"
+          ]
+        },
+        "--summary": {
+          "type": "string"
+        },
+        "--cause": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "--cause-instance": {
+          "type": "string"
+        },
+        "--retry-after": {
+          "type": "number"
+        },
+        "--route": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "description": "CMD は {\"argv\": [\"ndf\", ...]} の JSON。- なら何も打たない"
+        },
+        "--gap": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "--item": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "items の 1 要素（JSON のオブジェクト）"
+        },
+        "--metrics": {
+          "type": "string",
+          "description": "metrics（JSON のオブジェクト）"
+        },
+        "--next": {
+          "type": "string",
+          "description": "次に打つコマンド（{\"argv\": [\"ndf\", ...], \"ask\": [...]} の JSON）"
+        },
+        "--outputs": {
+          "type": "string",
+          "description": "工程どうしで渡す値（JSON のオブジェクト）"
+        },
+        "--run-id": {
+          "type": "string"
+        },
+        "--presentation-path": {
+          "type": "string"
+        },
+        "--code": {
+          "type": "integer",
+          "description": "終了コード（省けば status と cause.kind から決める）"
+        },
+        "--out": {
+          "type": "string",
+          "description": "結果を 1 行で書くファイル（形が合うときだけ書く）"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--tool",
+        "--status",
+        "--summary"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "fact-ids",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "table": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "where": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-ndf-positional": true
+        }
+      },
+      "required": [
+        "subcommand",
+        "table"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "fact-value",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "table": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "id": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "column": {
+          "type": "string",
+          "x-ndf-positional": true
+        }
+      },
+      "required": [
+        "subcommand",
+        "table",
+        "id",
+        "column"
+      ]
+    }
+  ]
+}

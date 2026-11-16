@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import fnmatch
 import graphlib
+import json
 import re
 import shlex
 from pathlib import Path
@@ -158,7 +159,7 @@ class ParallelPlan(BaseModel):
         self._check_unique(home)
         self._check_limits(ctx)
         self._check_deps()
-        overlap = _issue_overlap(self.lanes, home)
+        overlap = _issue_overlap(live_lanes(self.lanes, ctx.get("ended")), home)  # 終わったレーンは数えない（#3021）
         if overlap:
             raise PydanticCustomError("I19", "レーンの間で課題かマイルストーンが重なる: {pairs}", {"pairs": overlap})
         return self
@@ -174,13 +175,13 @@ class ParallelPlan(BaseModel):
             raise PydanticCustomError("I1", "レーンの引継ぎ文書が重なる: {names}", {"names": ", ".join(dup)})
 
     def _check_limits(self, ctx: dict) -> None:
-        """レーン数とプラン本数の合計の上限（I2）。"""
-        cap = int(ctx.get("max_named") or DEFAULT_MAX_NAMED)
-        if len(self.lanes) > cap:
-            raise PydanticCustomError("I2", "レーンの数 {n} が同時に動かせる数の上限 {cap} を超える", {"n": len(self.lanes), "cap": cap})
-        total, limit = sum(ln.plans for ln in self.lanes), int(ctx.get("max_plans") or DEFAULT_MAX_PLANS)
-        if total > limit:
-            raise PydanticCustomError("I2", "プランの本数の合計 {n} が上限 {cap} を超える", {"n": total, "cap": limit})
+        """1 本で上限を超えるレーン（I2）。同時に動く数は起動のたびに耐久ワークフローが数えるため、宣言の合計は数えない（#3021）。"""
+        limit = int(ctx.get("max_plans") or DEFAULT_MAX_PLANS)
+        for ln in self.lanes:
+            if ln.plans > limit:
+                raise PydanticCustomError(
+                    "I2", "レーン {lane} のプランの本数 {n} が上限 {cap} を超える", {"lane": ln.name, "n": ln.plans, "cap": limit}
+                )
 
     def _check_deps(self) -> None:
         """依存先の存在と循環（I3）。"""
@@ -234,11 +235,15 @@ def _overlaps(a: Lane, b: Lane) -> bool:
     return False  # ループのマイルストーンとスプリントの課題の照合は課題の取得が要るため検査では見ない
 
 
-def touch_overlaps(plan: ParallelPlan, home: Optional[str] = None) -> list[dict]:
-    """触る場所が重なるレーンの組（I4。警告）。片方が他方の接頭辞か、glob が他方に当たれば重なる。同じリポジトリの間だけで見る。"""
-    out = []
-    for i, a in enumerate(plan.lanes):
-        for b in plan.lanes[i + 1 :]:
+def live_lanes(lanes: list[Lane], ended: Optional[Iterable[str]]) -> list[Lane]:  # 終わりの記録のあるレーンを除く（#3021）
+    return [ln for ln in lanes if ln.name not in set(ended or ())]
+
+
+def touch_overlaps(plan: ParallelPlan, home: Optional[str] = None, ended: Iterable[str] = ()) -> list[dict]:
+    """触る場所が重なるレーンの組（I4。警告）。接頭辞か glob が当たれば重なる。同じリポジトリの間・終わったレーンを除いて見る。"""
+    out, lanes = [], live_lanes(plan.lanes, ended)
+    for i, a in enumerate(lanes):
+        for b in lanes[i + 1 :]:
             if lane_repo_key(a, home) != lane_repo_key(b, home):
                 continue
             hits = sorted({f"{x}・{y}" for x in a.touches for y in b.touches if _touch_hit(x, y)})
@@ -278,16 +283,16 @@ def check_data(
     estimates: Optional[Mapping[str, Mapping[int, list[str]]]] = None,
     shared: Iterable[Mapping] | Mapping[str, list] = (),  # レーン → 共有の一覧（`touch_estimate.lane_estimates`）か 1 つの一覧
     estimate_error: Optional[str] = None,
+    ended: Iterable[str] = (),  # 終わりの記録のあるレーン名（`parallel_ledger.ended_lanes`）。上限と重なりから外す（#3021）
 ) -> tuple[Optional[ParallelPlan], list[dict], dict]:
     """下書きか `plan.json` の中身を検査する。(計画か None, items, metrics) を返す。items の `level` は error / warning。
     `home`（計画の置き場）を渡すと、`repo` を省いたレーンと同じ置き場を指すレーンを同じリポジトリとして重なりを見る。
     `estimates`（レーン → 課題 → 触る場所の見込み）を渡すと、同じ時間帯に動くレーンの課題の見込みの重なりを I21 の警告にする。
     見込みを集められなかったときは `estimate_error` に理由を渡し、I21 の警告を 1 つ出す（#2997 の決定 4）。"""
-    plans_cap, plans_note = max_plans()
-    named_cap, named_note = named_limit()
+    (plans_cap, plans_note), (named_cap, named_note) = max_plans(), named_limit()
     caps = {"max_plans": plans_cap, "max_named": named_cap}
     notes = [n for n in (plans_note, named_note) if n]
-    ctx = {**caps, "home": str(home) if home else None}
+    ctx = {**caps, "home": str(home) if home else None, "ended": (ended := set(ended))}
     try:
         plan = ParallelPlan.model_validate(data, context=ctx)
     except ValidationError as exc:
@@ -296,7 +301,8 @@ def check_data(
     items = _repo_items(plan)
     if items:
         return None, items, _metrics_of(items, caps, notes)  # I20 の誤りがある計画は書かない・起動しない
-    items = _overlap_items(plan, home)
+    live = live_lanes(plan.lanes, ended)  # 重なりの警告は同時に動きうるレーンだけで見る（#3021）
+    items = _overlap_items(plan, home, ended)
     if estimate_error:
         items.append({"level": "warning", "rule": "I21", "at": "lanes", "message": f"課題の見込みを集められない: {estimate_error}"})
     if estimates:
@@ -304,8 +310,8 @@ def check_data(
 
         key = str(home) if home else None
         same = lambda a, b: lane_repo_key(a, key) == lane_repo_key(b, key)  # noqa: E731
-        items += [{"level": "warning", "rule": "I21", "at": "lanes", **it} for it in te.lane_overlaps(plan.lanes, estimates, shared, same)]
-        items += te.bundle_overlaps(plan.lanes, estimates, shared)  # 同じスプリントの異なるまとまりの重なり（#3081 の I5a）
+        items += [{"level": "warning", "rule": "I21", "at": "lanes", **it} for it in te.lane_overlaps(live, estimates, shared, same)]
+        items += te.bundle_overlaps(live, estimates, shared)  # 同じスプリントの異なるまとまりの重なり（#3081 の I5a）
     return plan, items, _metrics_of(items, caps, notes)
 
 
@@ -328,17 +334,12 @@ def _repo_items(plan: ParallelPlan) -> list[dict]:
     ]
 
 
-def _overlap_items(plan: ParallelPlan, home: Optional[Path]) -> list[dict]:
+def _overlap_items(plan: ParallelPlan, home: Optional[Path], ended: Iterable[str] = ()) -> list[dict]:
     """触る場所の重なり（I4）を items（level=warning）として返す。"""
+    msg = lambda ov: f"触る場所が重なる: {'・'.join(ov['lanes'])}（{', '.join(ov['touches'])}）"  # noqa: E731
     return [
-        {
-            "level": "warning",
-            "rule": "I4",
-            "at": "lanes",
-            "message": f"触る場所が重なる: {'・'.join(ov['lanes'])}（{', '.join(ov['touches'])}）",
-            **ov,
-        }
-        for ov in touch_overlaps(plan, str(home) if home else None)
+        {"level": "warning", "rule": "I4", "at": "lanes", "message": msg(ov), **ov}
+        for ov in touch_overlaps(plan, str(home) if home else None, ended)
     ]
 
 
@@ -362,18 +363,17 @@ def plan_dir(main: Path, name: str) -> Path:
 
 def load_plan(main: Path, name: str) -> object:
     """`plan.json` の中身（JSON の値）。無ければ FileNotFoundError、読めなければ ValueError。"""
-    import json
-
     return json.loads((plan_dir(main, name) / "plan.json").read_text(encoding="utf-8"))
 
 
-# 上限を外して読む（上限は計画を作るときに見る。読むときは書かれた計画をそのまま受ける）
-_NO_LIMIT = {"max_plans": 10**6, "max_named": 10**6}
+_NO_LIMIT = {"max_plans": 10**6, "max_named": 10**6}  # 上限を外して読む（上限は作るときに見る。読むときは書かれた計画を受ける）
 
 
 def load_valid_plan(main: Path, name: str) -> ParallelPlan:
-    """`plan.json` を上限を外して検証した計画。例外は `load_plan` と検証のものをそのまま投げる。"""
-    return ParallelPlan.model_validate(load_plan(main, name), context=_NO_LIMIT)
+    """`plan.json` を上限を外して検証した計画。終わったレーンは書く側と同じく重なりに数えない（#3553）。例外はそのまま投げる。"""
+    import parallel_ledger as plg  # parallel_ledger が読み込み時にこのモジュールを読むため、ここで読む
+
+    return ParallelPlan.model_validate(load_plan(main, name), context={**_NO_LIMIT, "ended": plg.ended_lanes(main, name)})
 
 
 def waiting_text(w: Optional[dict]) -> Optional[str]:
@@ -461,8 +461,6 @@ def write_all(main: Path, plan: ParallelPlan, raw: dict) -> list[Path]:
     """`plan.json`・`plan.md`・引継ぎ文書を書く。在る引継ぎ文書・在る計画があれば 1 つも書かずに FileExistsError（I5）。
 
     引継ぎ文書の置き場と書き込みは handoff.py（`paths_of`・`write_doc`）に任せる。"""
-    import json
-
     import handoff
 
     d = plan_dir(main, plan.name)

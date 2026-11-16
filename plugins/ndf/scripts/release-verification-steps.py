@@ -6,7 +6,7 @@
     python3 release-verification-steps.py user-config-save --dir <控えを置くディレクトリ>
     python3 release-verification-steps.py user-config-check --dir <控えを置くディレクトリ>
 
-隔離した HOME で ref から導入し、導入された版と、前の正式版のタグから変わったファイルの中身が
+隔離した HOME で ref から導入し、導入された版と、前の正式版（タグ。タグを作らない宣言は前のリリースの版上げ）から変わったファイルの中身が
 ref と一致するかを確かめる。利用者の HOME の設定が変わっていないことも確かめる。
 結果は lib/step_result.py の形の 1 行の JSON。終了コードは 0 = ok / 1 = 不一致か導入の失敗 /
 2 = 呼び出しの誤り（未知の runtime・宣言に無い ref）/ 3 = plugin が無い。
@@ -31,6 +31,9 @@ from pathlib import Path
 from typing import NamedTuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import deps  # noqa: E402
+
+deps.require("jsonschema")  # 届け先はブランチ戦略の宣言（JSON Schema で検査する）から読む
 from step_result import (
     EXIT_UNREADABLE,
     StepError,
@@ -45,6 +48,8 @@ from step_result import (
 )
 import limits
 import delivery  # noqa: E402
+from release_prev import untagged_since  # noqa: E402
+from release_tag import latest_release_tag, tag_glob, tag_template_of  # noqa: E402
 import repo as repo_lib  # noqa: E402
 from release_lib.user_config import _json, _read_user_config, config_dirs, user_config_snapshot  # noqa: E402
 
@@ -226,20 +231,40 @@ def verify_codex(env, ref, plugins, expect, where):
     return res, dirs
 
 
+RELEASE_HEAD = re.compile(r"release/v\d+\.\d+\.\d+\Z")
+
+
+def open_release_pr_head(root, production: str | None, ref: str) -> bool:
+    """`ref` が本番チャネル宛ての開いた版上げの PR の head（`release/v<版>`）か（#3672 の決定 17。承認前の試用で導入を確かめる）。
+    任意の ref は受けない（#1336 の決定 8）。照会できなければ偽。"""
+    import gh_call
+
+    if not production or not RELEASE_HEAD.match(ref or ""):
+        return False
+    r = gh_call.gh(
+        ["pr", "list", "--base", production, "--head", ref, "--state", "open", "--json", "number", "-q", "length"], cwd=str(root)
+    )
+    return r.returncode == 0 and r.stdout.strip() not in ("", "0")
+
+
 def install_source(root, a):
     """導入元（owner/repo・マーケットプレイスの名前・本番チャネル）と、確かめるプラグイン。値は origin の URL と宣言から読む
-    （#1336 の決定 8）。--ref は宣言のベースブランチか本番チャネルに限る。"""
+    （#1336 の決定 8）。--ref は宣言のベースブランチか本番チャネル、本番チャネル宛ての開いた版上げの PR の head に限る（#3672 の決定 17）。"""
     d = delivery.load_delivery(root)
     slug = repo_lib.owner_repo(root)
     if not slug:
         raise StepError("導入元の owner/repo を origin の URL から決められない", EXIT_UNREADABLE)
     refs = [b for b in dict.fromkeys((d.base, d.production)) if b]
-    if a.ref not in refs:
-        raise StepError(f"--ref {a.ref} は宣言のベースブランチか本番チャネル（{' / '.join(refs) or '無し'}）でない", EXIT_UNREADABLE)
+    if a.ref not in refs and not open_release_pr_head(root, d.production, a.ref):
+        raise StepError(
+            f"--ref {a.ref} は宣言のベースブランチか本番チャネル（{' / '.join(refs) or '無し'}）でも、"
+            f"本番チャネル宛ての開いた版上げの PR の head（release/v<版>）でもない",
+            EXIT_UNREADABLE,
+        )
     names = a.plugins or (d.release or {}).get("plugin") or ""
     plugins = [p.strip() for p in names.split(",") if p.strip()]
     if not plugins:
-        raise StepError("確かめるプラグインを決められない（--plugins か .ndf/supervise.json の release.plugin）", EXIT_UNREADABLE)
+        raise StepError("確かめるプラグインを決められない（--plugins かブランチ戦略の宣言の release.plugin）", EXIT_UNREADABLE)
     return (slug, market_of(root, slug), d.production), plugins
 
 
@@ -355,10 +380,13 @@ def cmd_verify_install(a):
 
     git(root, "fetch", "-q", "origin", "--tags")
     ref_rev = git(root, "rev-parse", f"origin/{a.ref}").stdout.strip()
-    prefix = f"{plugins[0]}--v"  # タグの接頭辞は先頭のプラグイン（宣言の release.plugin）から決める
-    tags = git(root, "tag", "--list", f"{prefix}*", "--sort=-v:refname").stdout.split()
-    cur = f"{prefix}{a.expect}"
-    prev = next((t for t in tags if t != cur and "-" not in t[len(prefix) :]), None)
+    template = tag_template_of(root)  # タグの形は宣言の release.tag、プラグインは先頭（宣言の release.plugin）から決める
+    cur = template.replace("{plugin}", plugins[0]).replace("{version}", a.expect)  # 確かめる版そのもののタグ（接尾辞を外さない）
+    # release-steps.py の prev_release と同じ起点: タグを作らない宣言は前のリリースの版上げ（残った古いタグを使わない）、ほかはタグ。
+    # 本番へ出した後は本番ブランチの版が確かめる版そのものになるため、確かめる版を除いた直前の正式版の版上げを起点にする
+    prev = untagged_since(root, plugins[0], ref_rev, exclude=a.expect) or latest_release_tag(
+        git(root, "tag", "--list", tag_glob(plugins[0], template), "--sort=-v:refname").stdout.split(), plugins[0], template, cur
+    )
     ctx = VerifyContext(a.ref, a.expect, root, ref_rev, prev, runtimes, plugins, rel, where)
 
     before = user_env_snapshot()

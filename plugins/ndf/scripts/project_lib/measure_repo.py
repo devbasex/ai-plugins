@@ -15,7 +15,6 @@ import time
 import tomllib
 from pathlib import PurePosixPath
 
-import branch_flow
 
 from . import fingerprint
 from .compose import compose_services
@@ -66,18 +65,6 @@ RUNNERS = {  # 実行器 → 当てる設定ファイルの名前と依存の名
     "rspec": ((".rspec",), ("rspec",)),
 }
 DB_WORDS = ("mysql", "postgres", "mariadb", "redis", "mongo")
-DEPLOY_FILES = (
-    "amplify.yml",
-    "samconfig.toml",
-    "buildspec.yml",
-    "appspec.yml",
-    "serverless.yml",
-    "vercel.json",
-    "netlify.toml",
-    "fly.toml",
-    "Procfile",
-    "app.yaml",
-)
 CHECK_TOOLS = (  # 名前 → 設定ファイルの名前
     ("pint", ("pint.json",)),
     ("phpstan", ("phpstan.neon*",)),
@@ -96,7 +83,6 @@ INSTRUCTION_FILES = ("AGENTS.md", "CLAUDE.md", ".claude/CLAUDE.md", "KIRO.md", "
 OLD_GUIDE_MARK = "NDF_PLUGIN_GUIDE_START"
 TEST_WORDS = re.compile(r"phpunit|pytest|jest|vitest|rspec|go test|npm (?:run )?test|docker compose exec|run-[\w-]*tests?")
 POLICY_WORDS = re.compile(r"doc-lint|文体|文言テスト|markdown-writing|document-style|書き方")
-DEPLOY_WORDS = re.compile(r"deploy|release|publish|デプロイ|リリース|本番|amplify|sam |(?<![a-z])(?:stg|prd)(?![a-z])", re.I)
 IMPORT_TOKEN = re.compile(r"(?:^|\s)@([\w./-]+\.md)\b")
 
 
@@ -240,12 +226,16 @@ def _pyproject_tool_deps(c: dict) -> dict[str, str]:
 
 
 def _requirements_deps(tree: Tree) -> dict[str, str]:
-    """requirements*.txt の依存。同じ名前は先に出た行を採る。"""
+    """requirements*.txt の依存。同じ名前は先に出た行を採る。
+
+    オプションの行（`-r`・`-e`・`--extra-index-url` など `-` で始まる行）と URL の行はライブラリの名前を持たないので読まない。"""
     out: dict[str, str] = {}
     for f in tree.shallow("requirements*.txt"):
         for line in (tree.read(f) or "").splitlines():
+            if line.lstrip().startswith("-"):
+                continue
             name = re.split(r"[\s<>=!~\[;#]", line.strip(), 1)[0].lower()
-            if name:
+            if name and "://" not in name:
                 out.setdefault(name, line.strip())
     return out
 
@@ -358,58 +348,6 @@ def measure_test(tree: Tree, deps: dict, services: list[str]) -> dict:
     if not runners and not commands and not evidence:
         return measured({"suites": []})
     return question({"runners": runners, "commands": commands, "compose_services": services}, evidence)
-
-
-def _last_date(tree: Tree, ref: str) -> str | None:
-    out = tree.git("log", "-1", "--format=%cI", ref)
-    return out.strip() if out else None
-
-
-def measure_branches(tree: Tree) -> dict:
-    state = fingerprint.branch_state(tree.root)
-    local = (tree.git("for-each-ref", "--format=%(refname:short)", "refs/heads") or "").split()
-    evidence = []
-    names = []
-    for b in fingerprint.KNOWN_BRANCHES:
-        ref = f"origin/{b}" if b in state["present"] else (b if b in local else None)
-        if ref:
-            names.append(b)
-            evidence.append({"text": f"{ref} の最後のコミット: {_last_date(tree, ref)}"})
-    if state["head"]:
-        evidence.insert(0, {"text": f"origin の HEAD: {state['head']}"})
-    if not names and not state["head"]:
-        return unknown(f"origin の HEAD も {'・'.join(fingerprint.KNOWN_BRANCHES)} も無い")
-    base = [state["head"]] if state["head"] else []
-    base += [b for b in names if b not in base]
-    production = [b for b in branch_flow.DEFAULT_BRANCH_CANDIDATES if b in names] or base[:1]
-    return question({"base": base, "production": production}, evidence)
-
-
-def _versioned(tree: Tree) -> list[str]:
-    out = []
-    for f in tree.shallow("package.json", "composer.json"):
-        if tree.json(f).get("version"):
-            out.append(f"{f}: version")
-    for f in tree.shallow("pyproject.toml"):
-        c = tree.toml(f)
-        if (c.get("project") or {}).get("version") or ((c.get("tool") or {}).get("poetry") or {}).get("version"):
-            out.append(f"{f}: version")
-    out += [p for p in tree.files if p.endswith("plugin.json") and p.count("/") <= 3][:5]
-    return out
-
-
-def measure_delivery(tree: Tree) -> dict:
-    files = tree.shallow(*DEPLOY_FILES)
-    workflows = sorted(p for p in tree.files if p.startswith(".github/workflows/") and fingerprint.is_input(p))
-    docs = [p for p in INSTRUCTION_FILES if p in tree.files] + tree.shallow("README*.md")
-    evidence = tree.grep(workflows, DEPLOY_WORDS) + tree.grep(docs, DEPLOY_WORDS)
-    tags = (tree.git("tag", "--sort=-creatordate") or "").split()
-    candidates = {
-        "deploy_files": files,
-        "versioned": _versioned(tree),
-        "tags": {"count": len(tags), "latest": tags[:3]},
-    }
-    return question(candidates, evidence)
 
 
 def measure_issues_repo(tree: Tree) -> dict:

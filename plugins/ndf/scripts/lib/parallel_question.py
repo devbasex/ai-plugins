@@ -1,8 +1,19 @@
-"""並列の計画でレーンから届いた問いのまとめ方（#2436 の異常系 5）。`parallel_run` の問いの受け付けが使う。"""
+"""並列の計画の問いの判定（純粋な関数。ほかの `lib/` を読まない）。
+
+- 同じ原因の問いのまとめ方（#2436 の異常系 5）: `cause_of`。`parallel_run` の問いの受け付けが使う
+- 一時レーンの依頼と答えの一覧（#3597 の決定 8）: `asked_of`。`parallel.py helper` が使う
+- 区分つきの問いの対象の行の読み取り・同じ問いの前の依頼の引き当て・判定の記録の id からの結果の復元（#3603 の決定 7・8）:
+  `target_line`・`prior_of`・`outcome_of`。`parallel.py request-ask` と問いの hook が使う
+"""
 
 from __future__ import annotations
 
 import json
+import re
+from dataclasses import dataclass
+
+FULL_SHA = re.compile(r"[0-9a-f]{40}")  # コミットの 40 桁の SHA（`fullmatch` で使う）
+KIND_GATE1, KIND_REUSED, KIND_ASK = "gate1", "reused", "ask"  # 送り分けの結果の種類（台帳の行の kind と同じ。`parallel_ask.route_ask`）
 
 
 def cause_of(msg: dict) -> str:
@@ -21,3 +32,142 @@ def cause_of(msg: dict) -> str:
     text = re.sub(r"(/[^\s（）()]+)+", "<path>", text)
     text = re.sub(r"\d+", "<n>", text)
     return f"{msg.get('source')}|{json.dumps(msg.get('options') or [], ensure_ascii=False)}|{' '.join(text.split())}"
+
+
+def asked_of(rows: list[dict], lane: str, settled: set = frozenset()) -> list[dict]:
+    """一時レーン `lane` が送った依頼（`gate2`・`ask`）と、その答えの一覧（台帳の順。#3597 の決定 8）。`rows` は台帳の行で、
+    最初の `opened` の行より後のものを渡す。`settled` は処理済みのリリース承認ゲートの id（`parallel_ledger.settled_gates`）で、
+    確定か締め（`answer` の行を持たない処理）で済んだ `gate2` に `settled: true` を付ける。
+
+    答えの中身（`answer`）を載せるのは、id で問いの決まる `gate2` と、問いの対象（`target`）を持つ `ask` である（#3603 の決定 9）。
+    対象を持たない `ask` は、前の答えを今の問いへ当てられないため、答えがあっても `answered: true` だけを付ける（戻せない操作の答えを、
+    対象の分からない問いへ当てない）。レッドラインの区分の `ask` も `answered: true` だけにする（問いの中身を比べられるのは今の問いを
+    持つ `request-ask` だけのため）。判定の正本は `request-ask` の同じ問いの判定（`prior_of`）である。"""
+    answers = answers_by_id(rows)
+    out = []
+    for r in rows:
+        msg = r.get("msg") or {}
+        if r.get("kind") not in ("gate2", "ask") or msg.get("lane") != lane:
+            continue
+        item = {"id": r.get("id"), "kind": r.get("kind"), "source": msg.get("source"), "target": msg.get("target"), "at": r.get("at")}
+        if (a := answers.get(r.get("id"))) is not None:
+            if r.get("kind") == "gate2" or (msg.get("target") and not str(msg.get("source") or "").startswith(REDLINE_PREFIX)):
+                item["answer"] = a
+            else:
+                item["answered"] = True
+        if r.get("kind") == "gate2" and r.get("id") in settled:
+            item["settled"] = True
+        out.append(item)
+    return out
+
+
+def answers_by_id(rows: list[dict]) -> dict[str, dict]:
+    """依頼の id ごとの答えの中身 `{result, choice}`（同じ id の答えは 1 行だけ）。"""
+    return {
+        r.get("id"): {"result": (r.get("msg") or {}).get("result"), "choice": list((r.get("msg") or {}).get("choice") or [])}
+        for r in rows
+        if r.get("kind") == "answer"
+    }
+
+
+TARGET_PREFIX = "対象: "  # 対象の行の頭（区分つきの問いの最初の問いの文に置く 1 行。#3603 の決定 7）
+
+
+@dataclass(frozen=True)
+class AskTarget:
+    """対象の行の値（`raw`）と、先端を足した問いの対象（`target`。`<ブランチ名>@<40 桁>` か `#<番号>`。求められなければ空）。"""
+
+    raw: str
+    target: str
+
+
+@dataclass(frozen=True)
+class Prior:
+    """同じ問いの前の依頼の id と答え（`{result, choice}`。答え待ちなら None）。"""
+
+    id: str
+    answer: dict | None
+
+
+def first_item(tool_input: dict) -> dict:
+    """最初の問い（`questions[0]`）。無いか辞書でなければ空。"""
+    qs = (tool_input or {}).get("questions") or []
+    return qs[0] if qs and isinstance(qs[0], dict) else {}
+
+
+def ask_source(tool_input: dict):
+    """問いの区分（`metadata.source`）の値をそのまま返す。無ければ None。"""
+    return ((tool_input or {}).get("metadata") or {}).get("source")
+
+
+def option_labels(tool_input: dict) -> list:
+    """最初の問いの選択肢の label の並び。台帳の `ask` の行の `options` と同じ形。"""
+    return [o.get("label") for o in first_item(tool_input).get("options") or [] if isinstance(o, dict)]
+
+
+def first_question(tool_input: dict) -> str:
+    """最初の問いの文（`questions[0].question`）。無ければ空。"""
+    return str(first_item(tool_input).get("question") or "")
+
+
+def target_line(tool_input: dict) -> str:
+    """最初の問いの文の最後の対象の行（`対象: <ブランチ名>` か `対象: #<番号>`）の値。前後の空白を除く。無ければ空。"""
+    got = ""
+    for line in first_question(tool_input).splitlines():
+        s = line.strip()
+        if s.startswith(TARGET_PREFIX.strip()):
+            got = s[len(TARGET_PREFIX.strip()) :].strip()
+    return got
+
+
+REDLINE_PREFIX = "ndf-ask:redline:"  # 戻せない操作の区分。同じ問いの判定に問いの中身も使う（PR #3652 の指摘、#3603 の決定 8）
+
+
+def squeeze(text) -> str:
+    """問いの文面から空白（改行・字下げを含む）を除いたもの。言い回しの空白の違いだけは同じ問いとみなす。"""
+    return "".join(str(text or "").split())
+
+
+def same_body(msg: dict, source: str, question: str, options: list) -> bool:
+    """レッドラインの区分なら、前の依頼 `msg` の問いの文面（空白を除く）と選択肢の並びが今の問いと一致するか。ほかの区分は常に真。"""
+    if not str(source or "").startswith(REDLINE_PREFIX):
+        return True
+    return squeeze(msg.get("question")) == squeeze(question) and list(msg.get("options") or []) == list(options or [])
+
+
+def prior_of(rows: list[dict], lane: str, source: str, target: str, question: str = "", options: list | None = None) -> Prior | None:
+    """同じ一時レーンの名前・区分・問いの対象の `ask` の依頼のうち最も新しいものと、その答え（#3603 の決定 8）。
+    `rows` は最初の `opened` の行より後の台帳の行。`target` が空なら比べない（None。I6）。レッドラインの区分（`ndf-ask:redline:*`）は、
+    同じ区分・同じ対象で中身の違う問い（強制 push の許可とブランチの削除）へ答えを当てないため、問いの文面（`question`。空白を除く）と
+    選択肢の label の並び（`options`）も一致した依頼だけを引き当てる。"""
+    if not target:
+        return None
+    hit = None
+    for r in rows:
+        msg = r.get("msg") or {}
+        if r.get("kind") == "ask" and msg.get("lane") == lane and msg.get("source") == source and msg.get("target") == target:
+            if same_body(msg, source, question, options or []):
+                hit = r
+    if hit is None:
+        return None
+    return Prior(str(hit.get("id") or ""), answers_by_id(rows).get(hit.get("id")))
+
+
+def outcome_of(rows: list[dict], ledger_id: str) -> dict | None:
+    """判定の記録の id `ledger_id` を持つ `gate1`・`ask`・`reused` の最後の行から、`request-ask` の `metrics` と同じ形
+    （`kind`・`id`・`answer`・`target`・`sprint_state`）を戻す（hook が上限の秒を過ぎた後に保留の側へ倒すため。I10）。無ければ None。"""
+    if not ledger_id:
+        return None
+    hit = None
+    for r in rows:
+        if r.get("kind") in (KIND_GATE1, KIND_ASK, KIND_REUSED) and (r.get("msg") or {}).get("ledger_id") == ledger_id:
+            hit = r
+    if hit is None:
+        return None
+    msg = hit.get("msg") or {}
+    out = {"kind": hit["kind"], "id": str(msg.get("id") or hit.get("id") or ""), "target": msg.get("target")}
+    if hit["kind"] == KIND_GATE1:
+        out["sprint_state"] = msg.get("sprint_state")
+    if hit["kind"] == KIND_REUSED and msg.get("answered") and (a := answers_by_id(rows).get(out["id"])) is not None:
+        out["answer"] = a
+    return out

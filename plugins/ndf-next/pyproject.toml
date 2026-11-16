@@ -16,9 +16,9 @@ name = "ndf-rebuild"
 version = "0"
 requires-python = ">=3.11"
 dependencies = [
-    "dbos==3.1.0",
+    "dbos==3.4.0",
     "filelock==4.0.3",
-    "githubkit==0.16.1",
+    "githubkit==0.17.1",
     "httpx==0.28.1",
     "jsonschema==4.26.0",
     "markdown-it-py==4.2.0",
@@ -30,7 +30,9 @@ dependencies = [
     "pygments==2.21.0",
     "python-dotenv==1.2.3",
     "ruamel-yaml==0.19.1",
+    "ruff==0.16.9",  # 兆候の規則の一部を ruff で数える（決定 36。issues/issue-1142-design-smells.md）
     "semver==3.1.0",
+    "sqlalchemy==2.1.8",  # 台帳 ndf_runs と DB 側の鍵のロック（core/durable.py）。DBOS も同じ版を使う
     "slack-sdk==3.44.1",
     "tabulate==0.10.0",
     "tenacity==9.1.4",
@@ -52,6 +54,6 @@ package = false
 # テストの基準のディレクトリをここへ固定する（根の pytest.ini と conftest.py を読まない）。
 # テストのファイル名は tests/<パッケージ>/ をまたいで重なってよい（importlib で読む）
 [tool.pytest.ini_options]
-pythonpath = ["src"]
+pythonpath = ["src", "tests/support"]
 testpaths = ["tests"]
 addopts = "--import-mode=importlib"

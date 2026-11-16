@@ -138,7 +138,8 @@ def _failing_sets(plans: dict[str, dict]) -> dict[frozenset, tuple[str, dict]]:
 
 def test_every_fix_loop_shape_gets_through_each_fix_loop_three_times(plans, tmp_path):
     reps = _failing_sets(plans)
-    assert len(reps) >= 4, sorted(n for n, _ in reps.values())  # impl・check・release・release-prod の形
+    # impl・check・release（開発版）の形。本番のリリースは直しの段を持たず（#3572）、修正のループが無いので数えない
+    assert len(reps) >= 3, sorted(n for n, _ in reps.values())
     for failing, (name, plan) in reps.items():
         visits: dict[str, int] = {}
 
@@ -327,14 +328,14 @@ def _with_retries(route: tuple, *sids: str) -> list:
 
 def test_1676_1_the_design_route_with_a_retry_reaches_the_gate(plans, tmp_path):
     route = _with_retries(DESIGN_ROUTE, "design")
-    ran, text, _ = drive(tmp_path, plans["sprint/1-design-16"], scripted(route))
+    ran, text, _ = drive(tmp_path, plans["sprint/2-design-16"], scripted(route))
     assert ran == [r for r, _ in route] and "結果: 関門" in text
 
 
 def test_1623_3_two_slow_retries_do_not_use_up_the_limit(plans, tmp_path):
     route = _with_retries(DESIGN_ROUTE, "requirements", "design")
     # 上限をループを通らない最長の経路まで下げ、再試行を数えれば上限を超える流れにする
-    plan = {**plans["sprint/1-design-16"], "上限": limits.longest_path(plans["sprint/1-design-16"])}
+    plan = {**plans["sprint/2-design-16"], "上限": limits.longest_path(plans["sprint/2-design-16"])}
     ran, text, _ = drive(tmp_path, plan, scripted(route))
     assert len(ran) == len(DESIGN_ROUTE) + 2 > plan["上限"]
     assert "結果: 関門" in text

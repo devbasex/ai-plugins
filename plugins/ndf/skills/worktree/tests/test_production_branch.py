@@ -1,50 +1,39 @@
-"""本番のチャネルの解決を検証する（#424）。
+"""本番ブランチの解決を検証する（#424・#3672）。
 
-**開発の起点と本番のチャネルは別物である。** `base_branch` は作業ツリーの分岐元を
-決める鍵（`follow_branch: true` のときは主ディレクトリの追従先にもなる）で、この
-リポジトリでは `develop` を指す。本番のチャネルとして定めるのは `main` であるため、
-**流用すると開発版のチャネルへのマージが本番の扱いになる**（決定 10）。
-
-宣言が無いリポジトリでは既定ブランチを本番のチャネルとして扱う。
+**ベースブランチと本番ブランチは別物である。** 本番ブランチはブランチ戦略の宣言の `branches.production` だけが決め、
+ベースブランチ（`branches.base`）を流用しない。流用すると開発版のチャネルへのマージが本番の扱いになる（決定 10）。
+宣言が無いリポジトリでは既定ブランチへ倒さずに止まる（I3）。
 """
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
-from worktree_helpers import add_origin, git, resolve, write_declaration
+from worktree_helpers import add_origin, git, resolve, write_strategy
 
 
 def test_the_base_branch_is_not_borrowed(main_repo: Path) -> None:
-    """**`base_branch` は開発の起点である。** 流用すると開発版が本番の扱いになる。"""
     add_origin(main_repo)
     git(main_repo, "branch", "develop")
-    write_declaration(main_repo, json.dumps({"version": 1, "base_branch": "develop"}))
+    write_strategy(main_repo, base="develop", production="main")
     out, _, rc = resolve(main_repo, "wt_production_branch")
     assert rc == 0
     assert out == "main"
 
 
 def test_a_branch_that_does_not_exist_is_refused(main_repo: Path) -> None:
-    """本番のチャネルを取り違えると、リリースの承認の対象が変わる。既定へ落とさない。"""
+    """本番ブランチを取り違えると、リリースの承認の対象が変わる。既定へ落とさない。"""
     add_origin(main_repo)
-    write_declaration(main_repo, json.dumps({"version": 1, "production_branch": "nowhere"}))
+    git(main_repo, "branch", "develop")
+    write_strategy(main_repo, base="develop", production="nowhere")
     _out, err, rc = resolve(main_repo, "wt_production_branch")
     assert rc == 1
-    assert "production_branch" in err
+    assert "branches.production" in err
 
 
-def test_this_repository_declares_the_production_branch() -> None:
-    """このリポジトリでは `main` が正式版、`develop` が開発版である。"""
-    root = Path(__file__).resolve().parents[5]
-    declaration = json.loads((root / ".ndf" / "worktree.json").read_text(encoding="utf-8"))
-    assert declaration["production_branch"] == "main"
-    assert declaration["base_branch"] == "develop"
-
-
-def test_the_schema_documents_the_key() -> None:
-    root = Path(__file__).resolve().parents[1]
-    schema = json.loads((root / "schemas" / "worktree.schema.json").read_text(encoding="utf-8"))
-    described = schema["properties"]["production_branch"]["description"]
-    assert "base_branch" in described
+def test_without_a_declaration_it_stops_instead_of_using_the_default(main_repo: Path) -> None:
+    add_origin(main_repo)
+    out, err, rc = resolve(main_repo, "wt_production_branch")
+    assert rc != 0
+    assert out == ""
+    assert "branch-strategy" in err

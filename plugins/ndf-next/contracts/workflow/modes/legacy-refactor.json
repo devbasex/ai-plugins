@@ -1,0 +1,191 @@
+{
+  "document": {
+    "dsl": "1.0.3",
+    "namespace": "ndf",
+    "name": "legacy-refactor",
+    "version": "1.0.0"
+  },
+  "metadata": {
+    "ndf": {
+      "height": 3
+    }
+  },
+  "do": [
+    {
+      "作業場所の用意": {
+        "run": {
+          "workflow": {
+            "namespace": "ndf",
+            "name": "worktree",
+            "version": "1.0.0"
+          }
+        }
+      }
+    },
+    {
+      "設計": {
+        "run": {
+          "workflow": {
+            "namespace": "ndf",
+            "name": "design",
+            "version": "1.0.0"
+          }
+        }
+      }
+    },
+    {
+      "詳細設計": {
+        "run": {
+          "workflow": {
+            "namespace": "ndf",
+            "name": "design-detail",
+            "version": "1.0.0"
+          }
+        }
+      }
+    },
+    {
+      "ドキュメント再構成": {
+        "run": {
+          "workflow": {
+            "namespace": "ndf",
+            "name": "document-rebuild",
+            "version": "1.0.0"
+          }
+        }
+      }
+    },
+    {
+      "ドキュメントレビュー": {
+        "run": {
+          "workflow": {
+            "namespace": "ndf",
+            "name": "document-review",
+            "version": "1.0.0"
+          }
+        }
+      }
+    },
+    {
+      "計画": {
+        "run": {
+          "workflow": {
+            "namespace": "ndf",
+            "name": "plan",
+            "version": "1.0.0"
+          }
+        }
+      }
+    },
+    {
+      "実装": {
+        "run": {
+          "workflow": {
+            "namespace": "ndf",
+            "name": "implement",
+            "version": "1.0.0"
+          }
+        }
+      }
+    },
+    {
+      "リファクタリング": {
+        "run": {
+          "workflow": {
+            "namespace": "ndf",
+            "name": "refactor",
+            "version": "1.0.0"
+          }
+        }
+      }
+    },
+    {
+      "コードレビュー": {
+        "run": {
+          "workflow": {
+            "namespace": "ndf",
+            "name": "code-review",
+            "version": "1.0.0"
+          }
+        }
+      }
+    },
+    {
+      "完了判定": {
+        "run": {
+          "workflow": {
+            "namespace": "ndf",
+            "name": "quality-gates",
+            "version": "1.0.0"
+          }
+        }
+      }
+    },
+    {
+      "Pull Request": {
+        "run": {
+          "workflow": {
+            "namespace": "ndf",
+            "name": "pull-request",
+            "version": "1.0.0"
+          }
+        }
+      }
+    },
+    {
+      "後片付け": {
+        "run": {
+          "workflow": {
+            "namespace": "ndf",
+            "name": "cleanup",
+            "version": "1.0.0"
+          }
+        }
+      }
+    },
+    {
+      "デプロイ": {
+        "run": {
+          "workflow": {
+            "namespace": "ndf",
+            "name": "deploy",
+            "version": "1.0.0"
+          }
+        }
+      }
+    },
+    {
+      "リリース後テスト": {
+        "run": {
+          "workflow": {
+            "namespace": "ndf",
+            "name": "release-verification",
+            "version": "1.0.0"
+          }
+        }
+      }
+    },
+    {
+      "振り返り": {
+        "run": {
+          "workflow": {
+            "namespace": "ndf",
+            "name": "retrospective",
+            "version": "1.0.0"
+          }
+        }
+      }
+    },
+    {
+      "棚卸し": {
+        "run": {
+          "workflow": {
+            "namespace": "ndf",
+            "name": "backlog",
+            "version": "1.0.0"
+          }
+        }
+      }
+    }
+  ]
+}

@@ -45,6 +45,8 @@ __pycache__/
 
 # cross-review worktree tmp
 .cross_review/
+# cross-refactoring の作業ログ
+.cross_refactoring/
 
 # Serena MCP runtime data
 ${SERENA_HOME}/

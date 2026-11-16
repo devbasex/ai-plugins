@@ -3,7 +3,7 @@
 
     python3 doc-lint.py [--base <ref>] [--root DIR] [--exclude PREFIX...] [--all-lines]
 
-起点（--base と HEAD の分岐点。--base が無ければ origin/<.ndf/worktree.json の base_branch>）から追加した Markdown の行に、document-style のセルフチェックの
+起点（--base と HEAD の分岐点。--base が無ければ origin/<ブランチ戦略の宣言のベースブランチ>）から追加した Markdown の行に、document-style のセルフチェックの
 「検討痕跡・変更履歴」の語と、課題番号の由来・以前との比較の語を掛ける。コードブロックの中は見ない。
 掛けるのは `.ndf/project.json` の `ndf_policies.doc_lint` が `true` のときだけで、ほかは `skipped` の ok で 0 を返す。
 結果は lib/step_result.py の形の 1 行の JSON。終了コードは 0 = ヒット無し / 1 = ヒットあり / 2 = 読めない。
@@ -21,12 +21,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import deps  # noqa: E402
 
-deps.require("md", "mdtable", "textparse", "pathmatch")  # glossary.py の分を含めて 1 回で入れる（決定 23）
+deps.require("md", "mdtable", "textparse", "pathmatch", "jsonschema")  # glossary.py の分を含めて 1 回で入れる（決定 23）
 import md  # noqa: E402
 from step_result import EXIT_UNREADABLE, StepError, emit, main_with, result  # noqa: E402
 import proc  # noqa: E402
 import project_decl  # noqa: E402
 import repo  # noqa: E402
+import branch_strategy  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import glossary  # noqa: E402  追加した行の取り方を共有する
@@ -103,9 +104,10 @@ def generated_documents(root: Path) -> tuple[str, ...]:
 
 def _resolve_start(root, base_arg):
     """起点の ref と、HEAD との merge-base の sha。解決できなければ StepError。"""
-    base = base_arg or repo.declared_base(root, remote=True)
-    if not base:
-        raise StepError("起点が分からない（--base か .ndf/worktree.json の base_branch）", EXIT_UNREADABLE)
+    try:
+        base = base_arg or f"origin/{repo.base_branch(root)}"
+    except branch_strategy.StrategyError as e:
+        raise StepError(f"起点が分からない（--base かブランチ戦略の宣言）: {e.reason}", EXIT_UNREADABLE) from e
     p = proc.git(root, "merge-base", base, "HEAD", check=False)
     if p.returncode != 0:
         raise StepError(f"起点 {base} を解決できない: {p.stderr.strip()[:200]}", EXIT_UNREADABLE)
@@ -159,7 +161,7 @@ def cmd_lint(a):
 def build_parser():
     ap = argparse.ArgumentParser(prog="doc-lint.py", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--root", help="対象のリポジトリの根（既定はカレントの git の根）")
-    ap.add_argument("--base", help="起点の ref（既定 origin/<.ndf/worktree.json の base_branch>）")
+    ap.add_argument("--base", help="起点の ref（既定 origin/<ブランチ戦略の宣言の branches.base>）")
     ap.add_argument("--exclude", nargs="*", help=f"見ないパスの接頭辞（既定 {' '.join(DEFAULT_EXCLUDE)}）")
     ap.add_argument("--all-lines", action="store_true", help="変わったファイルの全行を見る")
     ap.set_defaults(func=cmd_lint)

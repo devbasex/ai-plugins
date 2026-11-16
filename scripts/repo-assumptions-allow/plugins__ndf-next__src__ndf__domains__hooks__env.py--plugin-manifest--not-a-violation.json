@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf-next/src/ndf/domains/hooks/env.py",
+  "name": "plugin-manifest",
+  "kind": "not-a-violation",
+  "reason": "プラグイン自身の定義（plugin.json）の読み手",
+  "count": 1
+}

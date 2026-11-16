@@ -19,6 +19,7 @@
     "NDF_PRESENTATION_DIR",
     "NDF_RUNTIME_SESSION",
     "NDF_STATE_HOME",
+    "NDF_STRATEGY_SNAPSHOT",
     "NDF_WHOLE_RUNS_DIR",
     "NDF_WORKTREE_BASE",
     "UV_PROJECT_ENVIRONMENT",
@@ -40,15 +41,8 @@
       ]
     },
     {
-      "file": "supervise.json",
-      "keys": [
-        "release"
-      ]
-    },
-    {
       "file": "worktree.json",
       "keys": [
-        "base_branch",
         "tool_paths",
         "version"
       ]

@@ -183,6 +183,8 @@
 | R4 | ファイルの形式の版 | 移さない（決定 28） |
 | R5 | 部分集合で、部分が全体の属性で決まるもの（例: 導入先のランタイム） | 全体の表に列を足し、部分は条件で引く |
 
+> **#3347:** この表の「決定 28」は系統 `dbos` の決定 28（[issue-1142-design-dbos.md](issue-1142-design-dbos.md)。形式の版を NDF の版から切り離す）である。作り直しでの扱いは、#1142 の作り直しの決定 77（next）と #3344 の差分が持つ。
+
 上の表に無い事実のうち、名前を挙げて移し先を決めたものは次のとおりである。
 
 | 事実 | 定義 | 規則 | 移し先 |
@@ -254,6 +256,8 @@ flowchart LR
 | `owner` | 文字列 | 表を書き換えてよいコンテキスト（[issue-1142-design.md](issue-1142-design.md) のコンテキストの名前） |
 | `columns` | 名前 → `{type, summary, optional?, ref?}` | 列。型は `boolean`・`string`・`integer`・`array`（文字列の配列）。`ref` は外部キーの先（例: `limits.json#monitor.phase.`）。列 `id` にも `ref` を書ける |
 | `rows` | 配列 | 並びは意味を持つ（工程の順のように順序が事実のときは並びで表す） |
+
+> **#3347:** この表の「決定 28」は系統 `dbos` の決定 28（[issue-1142-design-dbos.md](issue-1142-design-dbos.md)。形式の版を NDF の版から切り離す）である。作り直しでの扱いは、#1142 の作り直しの決定 77（next）と #3344 の差分が持つ。
 
 **基準の行**（`scripts/const-fact-baseline.json` の `rows`）:
 

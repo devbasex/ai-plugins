@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf-next/skills/development-workflow/references/production-merge.md",
+  "name": "develop-branch",
+  "kind": "not-a-violation",
+  "reason": "宣言に base_branch: develop・production_branch: main を書いたリポジトリの実例。名前は宣言から読むと本文が書いている",
+  "count": 5
+}

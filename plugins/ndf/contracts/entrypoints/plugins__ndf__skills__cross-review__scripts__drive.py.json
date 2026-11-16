@@ -39,6 +39,7 @@
     "NDF_SHARED_CONFIG_DIR",
     "NDF_STATE_HOME",
     "NDF_STEP_EXTEND_FILE",
+    "NDF_STRATEGY_SNAPSHOT",
     "NDF_SUPERVISE_CLAUDE_FALLBACK",
     "NDF_WHOLE_RUNS_DIR",
     "NDF_WORKTREE_BASE",
@@ -64,7 +65,6 @@
     {
       "file": "worktree.json",
       "keys": [
-        "base_branch",
         "tool_paths",
         "version"
       ]

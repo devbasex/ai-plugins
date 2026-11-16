@@ -89,6 +89,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> None:
+    import deps
+
+    deps.require("jsonschema")  # ベースブランチはブランチ戦略の宣言（JSON Schema で検査する）から読む
     a = build_parser().parse_args(argv)  # 引数の誤りは argparse が 2 で終える
     out, code = (cmd_record if a.cmd == "record" else cmd_count)(a)
     step_result.emit(out, code)

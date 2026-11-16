@@ -28,7 +28,7 @@ def add_run_parsers(sub) -> None:
 
 
 def add_release_parsers(sub) -> None:
-    """副命令 present・confirm・carried・settle・request・await・request-ask・request-gate2 の引数を足す。"""
+    """副命令 present・confirm・carried・settle・request・await・request-ask・design-answer・request-gate2 の引数を足す。"""
     p = sub.add_parser("present")
     p.add_argument("name", nargs="?")
     p.add_argument("n", type=int)
@@ -67,11 +67,17 @@ def add_release_parsers(sub) -> None:
     ra = sub.add_parser("request-ask")
     ra.add_argument("name")
     ra.add_argument("--lane", required=True)
+    da = sub.add_parser("design-answer")
+    da.add_argument("name")
+    da.add_argument("id")
+    da.add_argument("--state", required=True, help="スプリント状態のパス（承認ゲートの記録を書く）")
     rg = sub.add_parser("request-gate2")
     rg.add_argument("name")
     rg.add_argument("n", type=int)
     rg.add_argument("k", type=int)
-    rg.add_argument("--report", required=True)
+    rg.add_argument("--report", help="提示の承認資料（提示の依頼）")
+    rg.add_argument("--confirmed", action="store_true", help="確定の後に本番のプランが承認ゲートで終わったときの依頼（#3597）")
+    rg.add_argument("--done", help="--confirmed の本番のプランの done")
 
 
 def add_answer_parsers(sub) -> None:

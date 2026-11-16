@@ -1,0 +1,27 @@
+{
+  "summary": "雛形の差し込み（{{名前}}）の定義。雛形は使う名前を params に並べ、意味と既定はここだけが持つ。list が真の名前は文字列の並びを受け、引数の要素ごとに展開する（要素がその名前だけなら並びを差し込み、ほかの字を含めば値ごとに要素を作る）",
+  "params": {
+    "repo": {"summary": "リポジトリの根。省けば ndf route が打った場所の git の根（git rev-parse --show-toplevel）"},
+    "worktree": {"summary": "作業場所。省けばリポジトリの根の .worktrees/<branch>"},
+    "branch": {"summary": "作業のブランチ"},
+    "base": {"summary": "PR の宛先のブランチ。省けば ndf route がリポジトリの根の .ndf/worktree.json の base_branch、宣言が無ければリモート名のリモートの既定ブランチにする"},
+    "remote": {"summary": "取得・照合・差分の基準・送信に使う git のリモートの名前。省けば ndf route がリポジトリの根の .ndf/worktree.json の remote、無ければその既定にする"},
+    "title": {"summary": "PR の題"},
+    "body_file": {"summary": "PR の本文のファイル"},
+    "issue": {"summary": "作業の課題の番号（課題が 1 つのとき課題から写す）。実装のプランは worker の後に、この課題の受け入れ条件の確認の区分を照らす（ndf loop acceptance check）"},
+    "issues": {"summary": "作業の課題の番号の並び（工程の入力 issues から写す。課題が 2 つ以上のスプリントでも決まる）。完了判定は、この課題の設計文書に名前の出るテストが HEAD にあるかを判定する（ndf loop design-tests）", "list": true},
+    "test_command": {"summary": "手元で打つテストのシェルのコマンド 1 つ。CI の落ちの確かめ直しには使わない（落ちたテストを持つ suite の scope_command で打つ）"},
+    "whole_test_command": {"summary": "全体テストのシェルのコマンド 1 つ"},
+    "worker": {"summary": "worker の起動の引数の並び。最後に作業の名前（impl・fix・ci-fix・fix-base・fix-push・design・plan-to-spec・requirements・worktree・design-detail・document-sources・implementation-plan・quality-gates・release・release-verification・layout-review・retrospective・backlog-refinement）を足して打つ。既定は持たない（作業のプロンプトを書く処理がまだ無いため、決まらなければ実行の前に止まる）", "list": true},
+    "ci_budget": {"summary": "CI の待ちの合計の秒（ndf ci watch --budget）", "default": "3600"},
+    "required": {"summary": "待つ必須のチェックの名前", "list": true},
+    "tests": {"summary": "テストのチェックの名前（分割ジョブも数える）", "list": true, "default": []},
+    "merge_method": {"summary": "ndf ci merge --method のマージの仕方（squash・merge・rebase）。省けば ndf route が base のブランチで許された方式（ruleset とリポジトリの設定）の先頭にする"},
+    "refactor": {"summary": "リファクタリングの起動の引数の並び", "list": true},
+    "sync_command": {"summary": "生成物を生成元から作り直すシェルのコマンド 1 つ。リファクタリングが生成元に触れたときに push の前に打つ"},
+    "review": {"summary": "レビューの起動の引数の並び。設計のプランでは後ろに --findings と組み直しの結果のファイルを足して打ち、レビュー担当はその「足すべき内容」を 1 件ずつ直すか、理由を添えて見送る", "list": true},
+    "rebuild": {"summary": "文書の組み直しの起動の引数の並び。後ろに --out と結果のファイルを足して打ち、内容を足さずに見つけた「足すべき内容」をそのファイルの結果 JSON の items に残す", "list": true},
+    "behavior": {"summary": "振る舞いの確認の起動の引数の並び", "list": true},
+    "gate": {"summary": "承認ゲートの資料を作って人の答えを待つ起動の引数の並び（承認ゲートの結果 JSON を返す）。既定は工程の外で雛形を使うときの値で、ndf progress の工程から呼ぶプランでは承認を工程の承認ゲートが決めるため、待たずに通す起動を入れる", "list": true, "default": ["ndf", "answer", "ask"]}
+  }
+}

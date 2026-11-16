@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "limits.schema.json",
+  "title": "上限の宣言",
+  "description": "contracts/limits.json の形。方針の名前 → 説明と値。同じ名前の重なりは読み手（ndf.contracts.limits）が断る",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["owner", "policies"],
+  "properties": {
+    "owner": {"type": "string", "minLength": 1, "description": "宣言を書き換えてよい持ち主（子 Issue の記号とパッケージ）"},
+    "policies": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {"pattern": "^[a-z][a-z0-9-]*(\\.[a-z0-9][a-z0-9-]*)+$"},
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["summary"],
+        "minProperties": 2,
+        "properties": {
+          "summary": {"type": "string", "pattern": "\\S"},
+          "seconds": {"type": "number", "minimum": 0, "description": "上限の秒（合計・寿命・下限の秒）"},
+          "interval": {"type": "number", "minimum": 0, "description": "問い合わせ・打ち直しの間隔の秒"},
+          "factor": {"type": "number", "minimum": 1, "description": "倍率（間隔の伸び・実測に掛ける倍率）"},
+          "max_interval": {"type": "number", "minimum": 0, "description": "伸ばした間隔の頭打ちの秒"},
+          "per_call": {"type": "number", "minimum": 0, "description": "1 回の呼び出しの上限の秒"},
+          "attempts": {"type": "integer", "minimum": 1, "description": "打つ回数の上限（最初の 1 回を含む）"},
+          "same_cause": {"type": "integer", "minimum": 1, "description": "同じ原因で続けてよい回数"},
+          "count": {"type": "integer", "minimum": 1, "description": "秒でも回数でもない量の上限（行・文字・件）。単位は summary に書く"},
+          "p95_ms": {"type": "number", "minimum": 0, "description": "hook の予算: 所要の目標の p95 のミリ秒"},
+          "deadline": {"type": "number", "minimum": 0, "description": "hook の予算: 処理を打ち切る締め切りの秒"},
+          "margin": {"type": "number", "minimum": 0, "description": "hook の予算: 締め切りの手前に残す余白の秒"},
+          "timeout": {"type": "number", "minimum": 0, "description": "hook の予算: 登録に書く timeout の秒"},
+          "inject_chars": {"type": "integer", "minimum": 0, "description": "hook の予算: 会話へ入れる文の上限の字数"},
+          "gib": {"type": "number", "minimum": 0, "description": "重い起動 1 本が枠から取るメモリの重み（GiB）"}
+        }
+      }
+    }
+  }
+}

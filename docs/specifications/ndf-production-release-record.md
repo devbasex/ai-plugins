@@ -227,8 +227,8 @@ stateDiagram-v2
 
 ### `pace: normal` のスプリントの本番のステージ（#1914）
 
-`supervise.py new sprint`（`pace: normal`）は、`.ndf/supervise.json` に雛形のある `release.form` があり（`has_release_template`）、
-本番のブランチ（`--production-branch` → `.ndf/worktree.json` の `production_branch` → 既定ブランチ。決め方は `lib/repo.production_branch`）が決まっているとき（`has_prod_branch`）、
+`supervise.py new sprint`（`pace: normal`）は、ブランチ戦略の宣言（`.ndf/project.json` の `branch_strategy`）に雛形のある `release.form` があり（`has_release_template`）、
+本番のブランチ（`--production-branch` → ブランチ戦略の宣言の `branches.production`。決め方は `lib/repo.production_branch`。既定ブランチへは倒さない）が決まっているとき（`has_prod_branch`）、
 目録（`sprint.json`）の `ステージ` の末尾を次の 3 つにする（`supervise_lib/sprint.py` の `sprint_plans`。番号は前のステージの数で変わる）。
 
 | `name` | 持つキー | 中身 |
@@ -276,9 +276,9 @@ stateDiagram-v2
 無ければ `--answer-from` のリリース承認ゲートの利用者の承認の記録（`facts` の出力より後）があるときだけ書く。どれも無ければ書かずに承認ゲート（10）で終え、
 `bump` へ進まない。開発版のプランの状態は `--dev-state` か、キューの置き場 `{queue_state:release}` で埋める。
 本番チャネルへのマージで届く CD の宣言があるリポジトリでは、本番のプランは `approve` を先頭に置かない。版上げから `release`（本番の PR を作って承認ゲートの 10 で止まる）までを先に流し、
-承認資料をその PR へ置いた（`approval-post`）後に承認ゲートで止まる。承認の後は `approve-pr`（`approve --pr`）が PR へ承認の証跡を置き、`release` がマージする。レビューが必須の場合（`cd-review`）は `approve-pr` を置かず、PR のレビューの承認の後に `release` から続ける（証跡を書かない）。MVV 判定のプランで `cd-no-review` の場合は、`release` の承認待ちの 10 を承認ゲートに数えずに承認資料の組み立てへ進み、後の `mvv` が判定する。
+承認資料をその PR へ置いた（`approval-post`）後に承認ゲートで止まる。承認の後は `approve-pr`（`approve --pr`）が PR へ承認の証跡を置き、`release` がマージする。レビューが必須の場合（`cd-review`）は `approve-pr` を置かず、PR のレビューの承認の後に `release` から続ける（証跡を書かない）。迂回の宣言がある場合（`cd-admin`）は、MVV 判定のプランでも承認ゲートで終え、利用者の承認の後に `approve-pr` を `--by user` で打ち、`release` が管理者の迂回でマージする。MVV 判定のプランで `cd-no-review` の場合は、`release` の承認待ちの 10 を承認ゲートに数えずに承認資料の組み立てへ進み、後の `mvv` が判定する。
 `approve-pr` を `--by user` で置く本番のプランは、`--state` が無ければ組まずに `stopped`（終了コード 1）で止まる（`--answer-from` の承認の記録が無いと、承認の後も毎回 10 で止まるため）。
-CD のある場合の pace: normal のスプリントは「`リリース承認ゲート`」のステージを置かず、「本番」をデプロイの後へ `--then` でつなぐ。承認資料は本番の PR の先端で本番のプランが組むため、開発版の承認資料を待たない。リリース承認ゲートは本番のプランの `approval-post` の後に入り、「本番」のステージの `note` が承認の後の続け方（`cd-no-review` は `--from approve-pr`、`cd-review` はレビューの承認の後に `--from release`）を持つ。
+CD のある場合の pace: normal のスプリントは「`リリース承認ゲート`」のステージを置かず、「本番」をデプロイの後へ `--then` でつなぐ。承認資料は本番の PR の先端で本番のプランが組むため、開発版の承認資料を待たない。リリース承認ゲートは本番のプランの `approval-post` の後に入り、「本番」のステージの `note` が承認の後の続け方（`cd-no-review` と `cd-admin` は `--from approve-pr`、`cd-review` はレビューの承認の後に `--from release`）を持つ。
 
 | # | 常に成り立つ条件 | 破れたときの扱い |
 | --- | --- | --- |

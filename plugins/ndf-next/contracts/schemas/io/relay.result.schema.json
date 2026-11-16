@@ -1,0 +1,493 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "relay.result.schema.json",
+  "title": "ndf relay の結果 JSON",
+  "description": "ndf relay が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果の契約（result.schema.json）が持ち、ここは metrics と items の形だけを足す。metrics と items の要素は閉じていて、載せた項目のほかの項目を持つと通らない",
+  "allOf": [
+    {
+      "$ref": "../result.schema.json"
+    }
+  ],
+  "properties": {
+    "tool": {
+      "const": "relay"
+    },
+    "metrics": {
+      "type": "object",
+      "description": "ndf relay の計測値",
+      "additionalProperties": false,
+      "properties": {
+        "inside": {
+          "type": "boolean",
+          "description": "呼び手の claude がラッパーの直接の子か（notice）"
+        },
+        "stopped": {
+          "type": "integer",
+          "description": "停止の依頼が通ったラッパーの数（stop --all）"
+        },
+        "policy": {
+          "type": "string",
+          "description": "適用する再起動の方針（context resolve）"
+        },
+        "limit": {
+          "type": "integer",
+          "description": "適用する運用上限（context resolve）"
+        },
+        "samples": {
+          "type": "integer",
+          "description": "較正に使った標本の数の合計（context calibrate）"
+        },
+        "works": {
+          "type": "integer",
+          "description": "集計した作業の数（context report）"
+        },
+        "skipped": {
+          "type": "integer",
+          "description": "読めずに飛ばした判定の記録の行の数（context report）"
+        },
+        "no_policy_rows": {
+          "type": "integer",
+          "description": "方針の列が無く現行方式として読んだ行の数（context report）"
+        },
+        "accounts": {
+          "type": "integer",
+          "description": "登録したアカウントの数（account list）"
+        },
+        "keys": {
+          "type": "integer",
+          "description": "登録した API キーの数（account list）"
+        }
+      }
+    },
+    "items": {
+      "type": "array",
+      "description": "ndf relay の項目の並び",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "複製・エントリポイント・中継の印のパス（install・mark）"
+          },
+          "state": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "複製・エントリポイントの状態（install）か、ラッパーの状態（hub ls）、登録の状態（account list・check）"
+          },
+          "account": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "選ばれるアカウント（account）か、次に使うアカウント（decide）、API キーを結び付けたアカウント（account add-api-key・list）"
+          },
+          "kind": {
+            "type": "string",
+            "description": "次の手の種類（decide）か、待ちを抱えた実行の種類（pending）、登録の種類 oauth・metered・api_key（account の登録の副命令）"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "次の手の理由（decide）か、ラッパーの状態の理由（hub ls）、再起動の理由（context record）、確かめの失敗の区分（account add-bedrock・add-api-key・check）"
+          },
+          "prompt": {
+            "type": "string",
+            "description": "子へ送る 1 行（decide）"
+          },
+          "name": {
+            "type": "string",
+            "description": "名前つきのラッパー（hub）"
+          },
+          "running": {
+            "type": "boolean",
+            "description": "ラッパーが動いているか（hub ls）"
+          },
+          "cwd": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "ラッパーの作業場所（hub ls）"
+          },
+          "args": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "ラッパーへ渡す引数（hub ls）"
+          },
+          "role": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "ラッパーの役（hub ls）"
+          },
+          "plan": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "ラッパーの計画（hub ls）"
+          },
+          "starts": {
+            "type": "object",
+            "description": "その日の起動の回数（hub ls）"
+          },
+          "version": {
+            "type": "string",
+            "description": "ラッパーを起こしたプラグインの版（hub ls）"
+          },
+          "pending": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "description": "止める前に待ちを抱えていた実行（hub restart。読めなければ null）"
+          },
+          "run": {
+            "type": "string",
+            "description": "実行の名前（pending）か回の ID（next）"
+          },
+          "workflow": {
+            "type": "string",
+            "description": "耐久ワークフローの ID（pending）"
+          },
+          "status": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "耐久ワークフローの状態（pending）か、プランの終わり方（wait・queue。流れていれば null）"
+          },
+          "updated_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "最後に更新した時刻（pending）"
+          },
+          "text": {
+            "type": "string",
+            "description": "カットポイントのアナウンスの 1 文（notice）"
+          },
+          "position": {
+            "type": "string",
+            "enum": [
+              "relay",
+              "no-dir",
+              "not-running",
+              "not-child"
+            ],
+            "description": "呼び手とラッパーの位置（notice）"
+          },
+          "ok": {
+            "type": "boolean",
+            "description": "停止の依頼が通ったか（stop --all）"
+          },
+          "summary": {
+            "type": "string",
+            "description": "リレーハブの答えの要約（stop --all）"
+          },
+          "policy": {
+            "type": [
+              "string"
+            ],
+            "description": "再起動の方針（context resolve・record）"
+          },
+          "decide_from": {
+            "type": "integer",
+            "description": "判断開始の値（context resolve・record）"
+          },
+          "limit": {
+            "type": "integer",
+            "description": "運用上限（context resolve・record）"
+          },
+          "margin": {
+            "type": "integer",
+            "description": "容量の余白（context resolve・record）"
+          },
+          "sources": {
+            "type": "object",
+            "description": "値ごとの出所（context resolve・record）"
+          },
+          "config_error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "壊れていて読まなかった設定の理由（context resolve・record）"
+          },
+          "schema": {
+            "type": "integer",
+            "description": "判定の記録の行の版（context record）"
+          },
+          "at": {
+            "type": "string",
+            "description": "判定の記録の行か見込みを書いた時刻（context record・calibrate）"
+          },
+          "runtime": {
+            "type": "string",
+            "description": "記録したランタイム（context record）"
+          },
+          "source": {
+            "type": "string",
+            "description": "行の書き手（context record）、従量の接続の宣言の出所 env・saved（account list）"
+          },
+          "session_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "記録したセッション（context record）"
+          },
+          "transcript": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "会話の記録のパス（context record）"
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "モデル（context record）"
+          },
+          "work": {
+            "type": "string",
+            "description": "作業の識別子（context record・report）"
+          },
+          "event": {
+            "type": "string",
+            "description": "判定か印（context record）"
+          },
+          "stage": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "工程（context record）"
+          },
+          "context": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "コンテキストの量（context record）"
+          },
+          "window": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "窓の大きさ（context record）"
+          },
+          "effective_limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "効く上限（context record）"
+          },
+          "band": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "帯（context record。判定をしないので null）"
+          },
+          "verdict": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "判定（context record）"
+          },
+          "basis": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "継続の根拠（context record）"
+          },
+          "estimate": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "費用の見込み（context record）"
+          },
+          "missing": {
+            "type": "array",
+            "description": "取れなかった値（context record）"
+          },
+          "relay": {
+            "type": "boolean",
+            "description": "中継の下の記録か（context record）"
+          },
+          "passed_once": {
+            "type": "boolean",
+            "description": "一度通したか（context record）"
+          },
+          "restore_context": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "復元の量の中央値（context calibrate）"
+          },
+          "restore_calls": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "復元の呼び出し数の中央値（context calibrate）"
+          },
+          "handoff_calls": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "引継ぎの呼び出し数の中央値（context calibrate）"
+          },
+          "handoff_output": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "引継ぎの出力 token の中央値（context calibrate）"
+          },
+          "stage_calls": {
+            "type": "object",
+            "description": "工程ごとの呼び出し数の中央値（context calibrate）"
+          },
+          "stage_expiries": {
+            "type": "object",
+            "description": "工程ごとのキャッシュ切れの数の中央値（context calibrate）"
+          },
+          "samples": {
+            "type": "object",
+            "description": "値ごとの標本の数（context calibrate）"
+          },
+          "sessions": {
+            "type": "integer",
+            "description": "セッションの数（context report）"
+          },
+          "parts": {
+            "type": "object",
+            "description": "区分ごとの token・秒・費用（context report）"
+          },
+          "unknown_parts": {
+            "type": "object",
+            "description": "印の無い区間の数（context report）"
+          },
+          "restores": {
+            "type": "array",
+            "description": "セッションごとの復元の量（context report）"
+          },
+          "restarts": {
+            "type": "object",
+            "description": "理由ごとの再起動の数（context report）"
+          },
+          "restart_count": {
+            "type": "integer",
+            "description": "再起動の数（context report）"
+          },
+          "auto_compacts": {
+            "type": [
+              "integer",
+              "string"
+            ],
+            "description": "自動圧縮の数か「不明」（context report）"
+          },
+          "quality": {
+            "type": "object",
+            "description": "品質（context report）"
+          },
+          "no_policy_rows": {
+            "type": "integer",
+            "description": "方針の列が無い行の数（context report）"
+          },
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "アカウントのメールアドレス（account add・list）"
+          },
+          "org_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "アカウントの組織名（account add・list）"
+          },
+          "pinned": {
+            "type": "boolean",
+            "description": "次の区間から使うと指定したアカウントか（account list）"
+          },
+          "percent": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "使用率のキャッシュの使用率（account list。読めていなければ null）"
+          },
+          "capacity_declared": {
+            "type": "object",
+            "description": "宣言した 5 時間と週の枠の大きさ（account list・capacity）"
+          },
+          "provider": {
+            "type": "string",
+            "description": "従量の接続の提供元（account add-bedrock・list・check）"
+          },
+          "details": {
+            "type": "object",
+            "description": "従量の接続のプロファイル・地域・モデル（account add-bedrock・list・check）"
+          },
+          "keys": {
+            "type": "array",
+            "description": "環境変数の宣言の変数の名前（account list。値は出さない）"
+          },
+          "monthly_usd": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "API キーの月の額（account add-api-key・api-key-monthly・list）"
+          },
+          "replaced": {
+            "type": "boolean",
+            "description": "前の登録を置き換えたか（account add-bedrock・add-api-key）"
+          },
+          "use": {
+            "type": "string",
+            "description": "API キーへ切り替える使い方（account api-key-use）"
+          },
+          "weekly_at": {
+            "type": "number",
+            "description": "API キーへ切り替える週の使用率の閾値（account api-key-use）"
+          },
+          "url": {
+            "type": "string",
+            "description": "認可の URL（account add）"
+          },
+          "expires_at": {
+            "type": "string",
+            "description": "登録の途中の状態の期限（account add）"
+          }
+        }
+      }
+    }
+  }
+}

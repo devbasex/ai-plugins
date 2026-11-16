@@ -19,6 +19,8 @@ import pytest
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import inproc  # noqa: E402
+from develop_repo import seed_develop_repo  # noqa: E402
+import strategy_fixture  # noqa: E402
 
 PY = sys.executable
 EXIT_PRECONDITION = 3
@@ -105,20 +107,8 @@ def env(tmp_path):
 @pytest.fixture
 def repo(tmp_path):
     """develop を起点に feature/x で 1 コミット進めた作業ツリー。origin は bare。"""
-    origin = tmp_path / "origin.git"
-    subprocess.run(["git", "init", "-q", "--bare", "-b", "develop", str(origin)], check=True)
-    root = tmp_path / "repo"
-    root.mkdir()
-    git(root, "init", "-q", "-b", "develop")
-    git(root, "config", "user.email", "t@example.com")
-    git(root, "config", "user.name", "t")
-    git(root, "config", "commit.gpgsign", "false")
-    write(root, ".ndf/worktree.json", json.dumps({"base_branch": "develop", "production_branch": "main"}))
-    write(root, "keep.txt", "head\n")
-    git(root, "add", "-A")
-    git(root, "commit", "-q", "-m", "init")
-    git(root, "remote", "add", "origin", str(origin))
-    git(root, "push", "-q", "-u", "origin", "develop")
+    decl = json.dumps({"version": 1, "branch_strategy": strategy_fixture.section("web-develop", "develop", "main")})
+    root = seed_develop_repo(tmp_path, {".ndf/project.json": decl, "keep.txt": "head\n"})
     git(root, "checkout", "-q", "-b", "feature/x")
     write(root, "a.txt", "a\n")
     git(root, "add", "-A")
@@ -158,7 +148,7 @@ def test_plan_collects_branch_base_and_changes(repo, env):
 
 def _without_base(root):
     """宣言・`origin/HEAD`・`main`・`master` のどれからも起点が決まらない作業ツリーにする。"""
-    (root / ".ndf" / "worktree.json").unlink()
+    (root / ".ndf" / "project.json").unlink()
     git(root, "branch", "-m", "develop", "trunk")
     git(root, "add", "-A")
     git(root, "commit", "-q", "-m", "宣言を外す")
@@ -172,7 +162,7 @@ def test_undecided_base_stops_without_creating_a_pr(repo, env, tmp_path, command
     args = ["plan"] if command == "plan" else ["create", "--title", "t", "--body-file", str(body)]
     rc, out, err = call(args, env, repo)
     assert rc == EXIT_PRECONDITION, err
-    assert out["status"] == "stopped" and "base_branch" in out["summary"]
+    assert out["status"] == "stopped" and "起点のブランチを決められない" in out["summary"]
     log = Path(env["FAKE_GH_LOG"])
     assert not log.exists() or not any(c[:2] == ["pr", "create"] for c in gh_calls(env))
 

@@ -24,7 +24,7 @@ from pathlib import Path, PurePosixPath
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import deps  # noqa: E402
 
-deps.require("md", "durable", "waits")
+deps.require("md", "durable", "waits", "jsonschema")
 import jsonio  # noqa: E402
 import md  # noqa: E402
 import run_core  # noqa: E402

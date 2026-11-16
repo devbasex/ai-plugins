@@ -16,18 +16,19 @@ from sprint_loop_names import LOOP_DIR
 
 
 def base_tracking_ref(main: Path) -> str:
-    """ベースブランチ（`.ndf/worktree.json` の `base_branch` → 既定ブランチ）の `origin/<名>`。決まらなければ空。"""
+    """ベースブランチ（ブランチ戦略の宣言の `branches.base`）の `origin/<名>`。宣言を読めなければ空。"""
     import repo
 
-    b = repo.base_branch(main)
-    return f"origin/{b}" if b else ""
+    s = repo.strategy_or_none(main)
+    return f"origin/{s.base}" if s else ""
 
 
 def release_plugin(main: Path) -> str:
-    """配るプラグイン（`.ndf/supervise.json` の `release.plugin`）。無ければ空。"""
-    from supervise_lib.decl import read_decl
+    """配るプラグイン（ブランチ戦略の宣言の `release.plugin`）。無ければ空。"""
+    import repo
 
-    return str((read_decl([Path(main)], "supervise.json").get("release") or {}).get("plugin") or "")
+    s = repo.strategy_or_none(main)
+    return str((s.section["release"].get("plugin") if s else None) or "")
 
 
 def git_head(main: Path) -> str:
@@ -40,21 +41,30 @@ def git_head(main: Path) -> str:
     return (got.stdout or "").strip()
 
 
-def dev_version(main: Path) -> str:
-    """ベースブランチの配るプラグインの `plugin.json` の開発版の版数から接尾辞を外した版（出す版）。決まらなければ空。"""
-    import re
+class OriginUnfetchable(RuntimeError):
+    """origin を取り直せない。版を読めないこと（`NO_VERSION`）とは別の理由として、git の stderr を添えて伝える。"""
 
-    from release_version import plugin_json_rel
+
+def dev_version(main: Path, fetch: bool = True) -> str:
+    """まとめたリリースで出す版。ベースブランチの配るプラグインの `plugin.json` の版から接尾辞を外した版で、それが既に出した
+    最新の正式版のタグ以下なら、そのタグの次の PATCH（#3551。同期の PR が出した版へ揃えた後に、出した版で組まない）。
+    決まらなければ空。`fetch` を偽にすると origin を取り直さず手元の追跡ブランチとタグで決める（起動の前の検査が使う。
+    取り直しに落ちて版があるのに組めないと警告しないため）。取り直しに落ちたら `OriginUnfetchable` を上げる
+    （`step_build` が git の stderr を添えた理由で答え、版を読めないという実際と違う理由で組み直しを問わないため）。"""
+    import release_version as rv
 
     ref, plugin = base_tracking_ref(main), release_plugin(main)
-    rel = plugin_json_rel(main, ref, plugin) if ref and plugin else None
+    rel = rv.plugin_json_rel(main, ref, plugin) if ref and plugin else None
     if not rel:
         return ""
-    got = subprocess.run(["git", "show", f"{ref}:{rel}"], cwd=main, capture_output=True, text=True)
-    try:
-        return re.sub(r"-.*$", "", json.loads(got.stdout).get("version") or "") if got.returncode == 0 else ""
-    except ValueError:
-        return ""
+    if fetch and (err := rv.fetch_origin(main)) is not None:
+        raise OriginUnfetchable(f"origin を取り直せない: {err}")
+    import delivery
+    import release_tag
+
+    # タグを作らない宣言だけ本番ブランチを読み、出済みの版を見落とさない（タグを作る宣言はタグで足りる）
+    prod = None if release_tag.makes_tags_of(main) else delivery.load_delivery(main).production
+    return rv.collected_release(rv.observe(main, plugin, ref.removeprefix("origin/"), prod, fetch=False, rel=rel)) or ""
 
 
 def loop_records(main: Path, name: str) -> list[tuple]:

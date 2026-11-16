@@ -1,8 +1,8 @@
 """プロジェクトの宣言（`.ndf/project.json`）の読み取り（#1333）。Skill とスクリプトが宣言を読む唯一の入口。
 
 宣言は呼ばれた木（`root`）の `.ndf/` → メインディレクトリの順に読む（置き場は `decl.setting_path`。Pull Request が
-変えた宣言をその worktree で使う。#2317・#1709）。ただし本番マージの判定に使う `delivery` はメインディレクトリ → 呼ばれた木の
-順に読む（契約の `keys.delivery.place` が `main`。Pull Request の変更だけでリリース承認ゲートを緩められないようにする。#2363）。
+変えた宣言をその worktree で使う。#2317・#1709）。ただし本番マージの判定に使うブランチ戦略の宣言（`branch_strategy`）はメインディレクトリ → 呼ばれた木の
+順に読む（契約の `keys.branch_strategy.place` が `main`。Pull Request の変更だけでリリース承認ゲートを緩められないようにする。#2363）。
 `project-decl.py write` はメインディレクトリへ書く。
 読めない・無いときは `{}` を返し、例外を上げない。形の検証は `project-decl.py check` が持つ。標準ライブラリだけで書く。
 """

@@ -1,0 +1,10 @@
+{
+  "name": "ndf-branch-strategy-decl",
+  "pattern": ".ndf/{project,worktree,supervise,release}.json",
+  "kind": "record",
+  "place": "main",
+  "skill_readers": [],
+  "writers": [
+    "plugins/ndf/scripts/project_lib/branch_strategy_write.py:commit_plan"
+  ]
+}

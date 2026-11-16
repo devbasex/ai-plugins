@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "declarations/estimate.schema.json",
+  "title": "見積もりの宣言（.ndf/estimate.json）",
+  "description": "見積もりに使う実績の置き場と、Size の基準。読み手（estimate_records.Decl）は下のほかのキー（version・$schema を含む）を知らないキーとして止める",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "records_dir": {
+      "type": "string",
+      "description": "実績の記録の置き場（リポジトリの根から。絶対パスも可）"
+    },
+    "size_unit_seconds": {
+      "type": "number",
+      "description": "Size 1 の基準の秒。省くと、実績のある課題のうち所要時間の短い 4 分の 1 の中央値（4 課題以上のとき）"
+    },
+    "scale": {
+      "type": "array",
+      "description": "Size の取りうる値（小さい順に並べ替えて使う）。省くか空なら 1・2・3・5・8・13・20",
+      "items": {
+        "type": "integer"
+      }
+    },
+    "allocation_minutes": {
+      "type": "object",
+      "description": "cross-refactoring の配分の 1 件あたりの分を種類ごとに上書きする。省いた種類は初期値（skills/cross-refactoring/data/allocation-defaults.json）を使う。初期値に無い種類は止める。まだ読まない（M4 で読む。配分を決める処理は M4 #3298 で入る）",
+      "additionalProperties": {
+        "type": "number",
+        "exclusiveMinimum": 0
+      }
+    },
+    "window": {
+      "type": "integer",
+      "description": "読み手は読まない。書いてある宣言を断らないために残す（#2505）",
+      "deprecated": true
+    },
+    "min_samples": {
+      "type": "integer",
+      "description": "読み手は読まない。書いてある宣言を断らないために残す（#2505）",
+      "deprecated": true
+    }
+  },
+  "x-ndf-place": "worktree",
+  "x-ndf-read-by": [
+    {
+      "by": "ndf issues",
+      "when": "棚卸しの見積もりのとき"
+    },
+    {
+      "by": "ndf refactor",
+      "when": "リファクタリングの予算を決めるとき"
+    }
+  ],
+  "examples": [
+    {
+      "size_unit_seconds": 60,
+      "scale": [
+        1,
+        2,
+        3
+      ]
+    }
+  ]
+}

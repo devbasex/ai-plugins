@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf-next/contracts/schemas/declarations/worktree.schema.json",
+  "name": "quoted-develop",
+  "kind": "not-a-violation",
+  "reason": "宣言の例（examples）の base_branch の値。既定ではない",
+  "count": 1
+}

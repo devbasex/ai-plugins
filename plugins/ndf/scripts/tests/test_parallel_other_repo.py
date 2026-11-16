@@ -226,16 +226,15 @@ def test_release_mapping_skips_other_repo_lane(two_repos):
 # ---- レーンの追加と書き換え（受け入れ条件 7・8・I13） ----
 
 
-def test_lane_add_over_limit_suggests_cap(monkeypatch, two_repos):
+def test_lane_add_does_not_count_lanes_toward_the_cap(monkeypatch, two_repos):
+    """レーンを足しても、計画のレーンの数は上限に数えない。同時に動く数は起動のたびに数える（#3021）。"""
     x, _y = two_repos
-    monkeypatch.delenv("NDF_RELAY_MAX_NAMED", raising=False)
+    monkeypatch.setenv("NDF_RELAY_MAX_NAMED", "1")
     raw = pp.load_plan(x, "p3")
     new, name, err = plc.updated(raw, "add", None, _lane("lc", [3]))
     assert err is None and name == "lc"
     plan, items, _ = pp.check_data({**new, "lanes": [*new["lanes"], _lane("ld", [4])]}, home=x)
-    assert plan is None
-    hint = plc.cap_hint_items(items, 4)
-    assert any("cap --named 4" in (it.get("next") or "") for it in hint)
+    assert plan is not None and not [it for it in items if it["level"] == "error"]
 
 
 def test_lane_set_refuses_name_and_repo(two_repos):
@@ -262,8 +261,8 @@ def test_lane_cli_writes_plan_and_handoff(tmp_path, monkeypatch, two_repos):
     got = subprocess.run(
         [sys.executable, str(SCRIPTS / "parallel.py"), "lane", "p3", "add", "--from", str(src)], cwd=x, capture_output=True, text=True
     )
-    assert got.returncode == 1 and "cap --named 4" in got.stdout
-    assert len(pp.load_plan(x, "p3")["lanes"]) == 3  # 何も書かない
+    assert got.returncode == 0, got.stdout + got.stderr  # レーンの数は上限に数えない（#3021）
+    assert [ln["name"] for ln in pp.load_plan(x, "p3")["lanes"]] == ["la", "lfactory", "lc", "ld"]
     doc = y / ".ndf" / "handoff" / "issue-5.md"
     doc.write_text("作業の状態と利用者の指示\n")
     src.write_text(json.dumps({"touches": ["c/"]}))
@@ -489,3 +488,73 @@ def test_manual_commands_move_to_lane_repo(two_repos):
     x, y = two_repos
     cmds = pp.manual_commands(pp.load_valid_plan(x, "p3"), x)
     assert cmds[0].startswith(f"cd {x} && NDF_RELAY_NAME=la ") and cmds[1].startswith(f"cd {y} && NDF_RELAY_NAME=lfactory ")
+
+
+# ---- 現状固定: レーンの置き場の探索（lane_homes_in と lane_plans_in の振る舞い） ----
+
+
+def _raw_plan(home: Path, name: str, text: str) -> None:
+    d = pp.plan_dir(home, name)
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "plan.json").write_text(text)
+
+
+def _role(tmp_path: Path, role: str, plan: str) -> str:
+    d = tmp_path / "relay"
+    d.mkdir(exist_ok=True)
+    (d / pf.ROLE_FILE).write_text(json.dumps({"role": role, "plan": plan}))
+    return str(d)
+
+
+def test_lane_homes_in_empty_name_is_empty(two_repos, tmp_path):
+    x, _y = two_repos
+    relay_dir = _role(tmp_path, "helper", "ph")
+    for name in (None, ""):
+        assert pf.lane_homes_in(x, name, relay_dir) == []
+        assert pf.lane_plans_in(x, name, relay_dir) == []
+
+
+def test_lane_homes_in_own_main_and_sorted_plans(two_repos):
+    x, _y = two_repos
+    _plan(x, [_lane("la", [2])], name="p1")
+    _plan(x, [_lane("lb", [3])], name="p9")
+    assert pf.lane_homes_in(x, "la", None) == [(x, "p1"), (x, "p3")]
+    assert pf.lane_plans_in(x, "la", None) == ["p1", "p3"]
+    assert pf.lane_homes_in(x, "nope", None) == []
+    assert pf.lane_plans_in(x, "nope", None) == []
+
+
+def test_lane_homes_in_skips_broken_and_odd_plans(two_repos):
+    x, _y = two_repos
+    _raw_plan(x, "p0", "{broken")
+    _raw_plan(x, "p1", json.dumps([1]))
+    _plan(x, [None, "la", {"name": "la"}], name="p2")
+    _plan(x, [], name="p4")
+    _raw_plan(x, "p5", json.dumps({"lanes": None}))
+    assert pf.lane_homes_in(x, "la", None) == [(x, "p2"), (x, "p3")]
+    assert pf.lane_plans_in(x, "la", None) == ["p2", "p3"]
+
+
+def test_lane_homes_in_appends_helper_plan(two_repos, tmp_path):
+    x, y = two_repos
+    relay_dir = _role(tmp_path, "helper", "ph")
+    assert pf.lane_homes_in(y, "lfactory", relay_dir) == [(x, "p3"), (y, "ph")]
+    assert pf.lane_homes_in(y, "other", relay_dir) == [(y, "ph")]  # 一時レーンの計画は自分のメインディレクトリのもの
+    assert pf.lane_plans_in(x, "la", relay_dir) == ["p3", "ph"]
+    _role(tmp_path, "helper", "p3")
+    assert pf.lane_homes_in(y, "lfactory", relay_dir) == [(x, "p3")]  # 同じ計画名は重ねない
+    assert pf.lane_plans_in(x, "la", relay_dir) == ["p3"]
+    _role(tmp_path, "organizer", "ph")
+    assert pf.lane_homes_in(y, "other", relay_dir) == []
+    assert pf.lane_homes_in(y, "other", str(tmp_path / "missing")) == []
+
+
+def test_lane_plans_in_reads_only_own_main(two_repos):
+    x, y = two_repos
+    assert pf.lane_plans_in(y, "lfactory", None) == []  # 計画は x にあるため y からは見えない
+    assert pf.lane_homes_in(x, "lfactory", None) == []  # 宣言のリポジトリと違う
+    _plan(y, [_lane("ly", [1], repo=x)], name="py")
+    assert pf.lane_plans_in(y, "ly", None) == []  # 自分のメインディレクトリでもレーンのリポジトリが違えば当てない
+    assert pf.lane_homes_in(x, "ly", None) == []  # y は所在の一覧に無い
+    parallel_homes.record_home(y)
+    assert pf.lane_homes_in(x, "ly", None) == [(y, "py")]

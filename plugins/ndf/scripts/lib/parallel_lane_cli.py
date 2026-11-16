@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Optional
 
 import parallel_lane as pl
+import parallel_ledger as plg
 import parallel_plan as pp
 
 SET_KEYS = ("input", "plans", "touches", "after", "handoff")
@@ -26,18 +27,6 @@ FIXED_KEYS = ("name", "repo")
 def _read_lane_json(src: str) -> object:
     text = sys.stdin.read() if src == "-" else Path(src).read_text(encoding="utf-8")
     return json.loads(text)
-
-
-def cap_hint_items(items: list[dict], lanes: int) -> list[dict]:
-    """レーンの数が上限を超えた誤り（I2）があれば、上限の変え方の 1 行を足す（受け入れ条件 8）。"""
-    if not any(it.get("rule") == "I2" and "レーンの数" in str(it.get("message")) for it in items):
-        return items
-    relay = Path(__file__).resolve().parent.parent / "relay.py"
-    line = f"python3 {relay} cap --named {lanes}"
-    return [
-        *items,
-        {"level": "info", "rule": "limit", "message": f"レーン数の上限を変えるには、人の指示を受けてから {line} を打つ", "next": line},
-    ]
 
 
 def relaunch_items(main: Path, plan: pp.ParallelPlan, lane_name: str, body: dict) -> list[dict]:
@@ -162,9 +151,8 @@ def cmd_lane(a) -> None:
     new, lane_name, err = updated(raw, a.action, a.lane, body)
     if err:
         emit_reply("stopped", err, code=1)
-    plan, items, metrics = pp.check_data(new, home=main)
+    plan, items, metrics = pp.check_data(new, home=main, ended=plg.ended_lanes(main, a.name))
     if plan is None:
-        items = cap_hint_items(items, len(new.get("lanes") or []))
         emit_reply("stopped", f"並列の計画 {a.name} の検査に誤りがある（{metrics['errors']} 件）。何も書いていない", items, 1, **metrics)
     try:
         written = write_lane(main, plan, new, lane_name, a.action)

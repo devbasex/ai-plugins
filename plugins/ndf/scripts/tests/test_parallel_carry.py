@@ -14,7 +14,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import test_parallel_run as tpr  # noqa: E402
+import parallel_run_world as prw  # noqa: E402
 
 import deps  # noqa: E402
 import durable  # noqa: E402
@@ -23,12 +23,13 @@ import parallel_lane as pl  # noqa: E402
 import parallel_release as prl  # noqa: E402
 import parallel_helper as ph  # noqa: E402
 import parallel_run as prun  # noqa: E402
+import strategy_fixture  # noqa: E402
 
 deps.require("pathmatch")
 
-env = tpr.env
-event, until, start, resume, read, build_question = tpr.event, tpr.until, tpr.start, tpr.resume, tpr.read, tpr.build_question
-SCRIPTS = tpr.SCRIPTS
+env = prw.env
+event, until, start, resume, read, build_question = prw.event, prw.until, prw.start, prw.resume, prw.read, prw.build_question
+SCRIPTS = prw.SCRIPTS
 
 
 # ---- 判定（carry_check） ----
@@ -131,14 +132,14 @@ def test_carried_present_plan_rechecks_then_records_then_approves(tmp_path):
     from supervise_lib import limits
 
     d = tmp_path / "releases" / "4" / "2"
-    present, _ = prl.plan_parallel_release(SCRIPTS.parents[2], "p1", d, "1.2.3", carried=True)
+    present, _ = prl.plan_parallel_release(strategy_fixture.like_root(), "p1", d, "1.2.3", carried=True)
     by = {s["id"]: s for s in present["steps"]}
     assert limits.run_error(present) is None
     assert "mvv" not in by and "note" not in by
     assert (by["present"]["next"], by["carried"]["next"], by["record"]["next"]) == ("carried", "record", "approve")
     assert by["carried"]["gate_next"] == "end" and "carried p1 4" in by["carried"]["cmd"]  # 10 なら record を打たずに終わる
     assert "提示 1 の承認を引き継ぐ" in by["record"]["cmd"] and str(d / "answer.json") in by["record"]["cmd"]
-    plain, _ = prl.plan_parallel_release(SCRIPTS.parents[2], "p1", tmp_path / "releases" / "4" / "1", "1.2.3")
+    plain, _ = prl.plan_parallel_release(strategy_fixture.like_root(), "p1", tmp_path / "releases" / "4" / "1", "1.2.3")
     assert "mvv" in {s["id"] for s in plain["steps"]} and "carried" not in {s["id"] for s in plain["steps"]}
 
 
@@ -244,11 +245,16 @@ def test_build_failure_after_carry_answers_failed_and_asks(env, tmp_path, carry,
     def boom(*_a, **_k):
         raise RuntimeError("組み立ての失敗")
 
-    monkeypatch.setattr(prl, "build_plans", lambda m, n, s, k, v, builder_=None, **kw: boom() if k == 2 else tpr._build(
-        m, n, s, k, v, lambda *_a, **_k: ({"steps": []}, {"steps": []}), **kw))  # fmt: skip
+    monkeypatch.setattr(prl, "build_plans", lambda m, n, s, k, v, builder_=None, **kw: boom() if k == 2 else prw._build(
+        prw.ORIG_BUILD, m, n, s, k, v, lambda *_a, **_k: ({"steps": []}, {"steps": []}), **kw))  # fmt: skip
     rid = to_confirm(env, tmp_path)
     ans = read(main, rid)
     assert ans["result"] == "failed" and "組み立ての失敗" in ans["reason"] and build_question(main)["kind"] == "build"
+
+
+def test_world_keeps_original_build_without_patching_release_module():
+    """補助モジュールは差し替える前の build_plans を自分の定数に持ち、本番のモジュールへ属性を足さない。"""
+    assert prw.ORIG_BUILD is prl.build_plans and not hasattr(prl, "_orig_build")
 
 
 def test_answer_to_the_second_presentation_does_not_check_and_drops_carried(env, tmp_path, carry):

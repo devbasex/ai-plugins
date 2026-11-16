@@ -80,6 +80,7 @@ _RESUME_TEXTS = {
     REASON_RECOVERED: "上限が外れたためアカウントへ戻した。中断したところから続ける",
 }
 _RESUME_DEFAULT = "アカウントを替えた。中断したところから続ける"
+RESUME_TEXTS = frozenset([*_RESUME_TEXTS.values(), _RESUME_DEFAULT])  # 会話の外では意味を持たない入力（#3555）
 
 # 再登録・宣言の確かめのコマンド（relay.md が利用者に示している形）
 _RELAY_CMD = "python3 ~/.claude/ndf/relay.py"

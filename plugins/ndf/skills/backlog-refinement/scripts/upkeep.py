@@ -70,7 +70,7 @@ _LIB = Path(__file__).resolve().parents[3] / "scripts" / "lib"
 sys.path.insert(0, str(_LIB))
 import deps  # noqa: E402  外部パッケージの環境（upkeep_gh が投稿キューを読む）
 
-deps.require("locks")  # 深さの記録と見直しの持ち主の錠（upkeep_depth・upkeep_owner が最上位で読む。#2315）
+deps.require("locks", "jsonschema")  # 深さの記録と見直しの持ち主の錠（upkeep_depth・upkeep_owner が最上位で読む。#2315）
 import jsonio  # noqa: E402
 from step_result import EXIT_PAUSE, EXIT_PRECONDITION, EXIT_UNREADABLE, StepError, approval_present, common_parser  # noqa: E402
 from step_result import emit, git_root, main_with, result  # noqa: E402

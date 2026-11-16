@@ -58,6 +58,15 @@
           "n"
         ]
       },
+      "design-answer": {
+        "options": [
+          "--state"
+        ],
+        "positionals": [
+          "name",
+          "id"
+        ]
+      },
       "end": {
         "options": [
           "--lane",
@@ -136,6 +145,8 @@
       },
       "request-gate2": {
         "options": [
+          "--confirmed",
+          "--done",
           "--report"
         ],
         "positionals": [
@@ -231,6 +242,7 @@
     "NDF_MVV_STATE_DIR",
     "NDF_ORGANIZER_DIR",
     "NDF_ORGANIZER_LANE",
+    "NDF_PARALLEL_HELPER_WAIT_SECONDS",
     "NDF_PARALLEL_LAUNCH_SECONDS",
     "NDF_PARALLEL_MAX_PLANS",
     "NDF_PARALLEL_POLL",
@@ -243,6 +255,7 @@
     "NDF_RELAY_NAME",
     "NDF_SHARED_CONFIG_DIR",
     "NDF_STATE_HOME",
+    "NDF_STRATEGY_SNAPSHOT",
     "NDF_SUPERVISE_CLAUDE",
     "NDF_SUPERVISE_CLAUDE_FALLBACK",
     "NDF_SUPERVISE_LIMIT_SLEEP",
@@ -270,14 +283,7 @@
     {
       "file": "supervise.json",
       "keys": [
-        "release",
         "shared"
-      ]
-    },
-    {
-      "file": "worktree.json",
-      "keys": [
-        "base_branch"
       ]
     }
   ],
@@ -315,10 +321,10 @@
   "reads": [],
   "exit": {
     "0": "成功（status ok）",
-    "1": "失敗: 計画が無い・検査に誤り・動いていない・承認したコミットが無い（status stopped）",
+    "1": "失敗: 計画が無い・検査に誤り・動いていない・承認したコミットが無い・同じ id で中身の違う依頼が台帳にある（送らない。status stopped）",
     "2": "読めない・呼び出しの誤り（status stopped）",
     "3": "前提が無い（正常な否定の結果）: まだ変化が無い・答えがまだ無い（status stopped）",
-    "4": "本番のプランが承認ゲートで止まっている（status stopped）",
+    "4": "本番のプランが承認ゲートで止まっている・最後の起動が確定でない（status stopped）",
     "10": "承認ゲート: リリースの依頼を送った・依頼が退けられた（status gate）"
   },
   "callers": [

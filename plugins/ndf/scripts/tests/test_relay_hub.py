@@ -356,6 +356,31 @@ def test_restart_input_uses_last_section(dirs, tmp_path):
     assert hb.restart_input("a", row, w2) == (str(wt), ["--model", "x", "/goal 続き"])
 
 
+RESUME = "利用上限でアカウントを替えた。中断したところから続ける"
+
+
+def test_restart_resumes_the_lanes_own_conversation_after_limit_switch(dirs, tmp_path):
+    """#3555: 上限で替えた区間（`--resume <会話>` で続けた）を起こし直すときは、再開の文だけを新しい会話へ
+    打たず、そのレーンの会話を再開する。区間の記録の印（`resumed`）でも、印の無い古い記録でも同じ。"""
+    row = {"args": ["--", "最初"], "cwd": str(tmp_path)}
+    dirs("a", name="a", running=False, section=4, command=RESUME, from_session="s-lane", resumed=True)
+    assert hb.restart_input("a", row, hb.by_name(hb.scan_wrappers())["a"])[1] == ["--resume", "s-lane", RESUME]
+    dirs("b", name="b", running=False, section=4, command=RESUME, from_session="s-old")
+    assert hb.restart_input("b", row, hb.by_name(hb.scan_wrappers())["b"])[1] == ["--resume", "s-old", RESUME]
+
+
+def test_restart_refuses_when_the_conversation_cannot_be_decided(dirs, tmp_path):
+    """#3555: 再開する会話を決められない（会話の無い再開の文）ときは起こさず、spawn を案内して止まる。"""
+    dirs("a", name="a", running=False, section=4, command=RESUME, from_session="", resumed=True)
+    assert hb.restart_input("a", {"args": [], "cwd": str(tmp_path)}, hb.by_name(hb.scan_wrappers())["a"]) is None
+    # 前の誤った起こし直しが登録簿へ残した、再開の文だけの引数（区間 1）
+    assert hb.restart_input("c", {"args": [RESUME], "cwd": str(tmp_path)}, None) is None
+    hb.ensure_dirs()
+    hb.write_json_atomic(hb.hub_path(hb.REGISTRY), {"version": 1, "entries": {"a": {"session": "a", "args": []}}})
+    res = hb.Hub(None).process({"kind": "restart", "name": "a"})
+    assert res["status"] == "stopped" and "spawn --name a" in res["summary"]
+
+
 # ---------------------------------------------------------------- 待ち通知（AC19・決定 7）
 
 
@@ -810,6 +835,24 @@ def test_process_spawn_helper_role_and_plan(launched):
     assert launched[0]["env"] == {"NDF_RELAY_NAME": "h", "NDF_RELAY_SPAWNED": "1", "NDF_RELAY_ROLE": "helper", "NDF_RELAY_PLAN": "p1"}
     row = hb.read_registry()["h"]
     assert row["role"] == "helper" and row["plan"] == "p1"
+
+
+def test_helper_is_refused_as_helper_busy_with_the_running_name(launched):
+    """#3597 の決定 9: 一時レーンが動いていれば、次の一時レーンは `helper-busy` と動いている名前で断る。ほかの役割は `limit` のまま。"""
+    now = hb.Live(5, ["a", "p6-rel17"], {"a", "p6-rel17"}, helpers=1, helper_names=("p6-rel17",))
+    r = hb.Hub.judge("p6-rel10v", now, role="helper")
+    assert (r.reason, r.busy, r.code) == (hb.HELPER_BUSY, "p6-rel17", 3) and "p6-rel17" in r.message
+    res = hb.Hub.refuse("spawn", "p6-rel10v", r)
+    assert res["items"] == [{"name": "p6-rel10v", "result": "helper-busy", "busy": "p6-rel17"}]
+    over = hb.Hub.judge("b", hb.Live(99, ["a"], {"a"}), role=None)
+    assert over.reason == hb.LIMIT and over.busy == ""
+    assert "busy" not in hb.Hub.refuse("spawn", "b", over)["items"][0]
+
+
+def test_live_lists_the_running_helper_names():
+    reg = {"h1": {"session": "h1", "role": "helper"}, "x": {"session": "x"}}
+    got = hb.live([], reg, {"h1": {}, "x": {}})
+    assert got.helpers == 1 and got.helper_names == ("h1",)
 
 
 def test_process_spawn_other_role_is_ignored(launched):

@@ -27,7 +27,7 @@ sys.path.insert(0, str(HERE / "lib"))
 sys.path.insert(0, str(HERE))
 import deps  # noqa: E402
 
-deps.require("waits", "durable", "locks", "schema")
+deps.require("waits", "durable", "locks", "schema", "jsonschema")
 import ci_watch  # noqa: E402
 import gh_parts  # noqa: E402
 import limits  # noqa: E402

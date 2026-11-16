@@ -1,0 +1,214 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "loop.result.schema.json",
+  "title": "ndf loop の結果 JSON",
+  "description": "ndf loop が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果の契約（result.schema.json）が持ち、ここは metrics と items の形だけを足す。metrics と items の要素は閉じていて、載せた項目のほかの項目を持つと通らない",
+  "allOf": [
+    {
+      "$ref": "../result.schema.json"
+    }
+  ],
+  "properties": {
+    "tool": {
+      "const": "loop"
+    },
+    "metrics": {
+      "type": "object",
+      "description": "ndf loop の計測値",
+      "additionalProperties": false,
+      "properties": {
+        "lap": {
+          "type": "integer",
+          "description": "周の番号（select・lap）"
+        },
+        "remaining": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "周に残った課題（exclude）"
+        },
+        "head": {
+          "type": "string",
+          "description": "答えを記録した PR の先端（answer）"
+        },
+        "answer": {
+          "type": "string",
+          "description": "記録した答え（answer）"
+        },
+        "outcome": {
+          "type": "string",
+          "description": "周の締め方（lap）"
+        },
+        "streak": {
+          "type": "integer",
+          "description": "失敗の続いた周の数（lap）"
+        },
+        "status": {
+          "type": "string",
+          "description": "ループの状態（get）"
+        },
+        "record_pr": {
+          "type": "string",
+          "description": "閉じに渡すリリース記録の番号（close-plan）"
+        },
+        "verify": {
+          "type": "boolean",
+          "description": "リリース後テストを打つか（close-plan）"
+        },
+        "pace": {
+          "type": "string",
+          "description": "pace（close-plan）"
+        },
+        "designs": {
+          "type": "integer",
+          "description": "設計文書の数（design-tests）"
+        },
+        "names": {
+          "type": "integer",
+          "description": "拾った名前の数（design-tests）"
+        },
+        "skipped": {
+          "type": "integer",
+          "description": "飛ばした名前の数（design-tests）"
+        },
+        "missing": {
+          "type": "integer",
+          "description": "HEAD に無い名前の数（design-tests）"
+        },
+        "unverified": {
+          "type": "integer",
+          "description": "確かめられない名前の数（design-tests）"
+        },
+        "renamed": {
+          "type": "integer",
+          "description": "改名を当てて見つけた名前の数（design-tests）"
+        }
+      }
+    },
+    "items": {
+      "type": "array",
+      "description": "ndf loop の項目の並び",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "issue": {
+            "type": "integer",
+            "description": "課題の番号（select）"
+          },
+          "chosen": {
+            "type": "boolean",
+            "description": "選んだか（select）"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "外した理由の鍵（select）"
+          },
+          "text": {
+            "type": "string",
+            "description": "外した理由の文（select）"
+          },
+          "status": {
+            "type": "string",
+            "description": "ループの状態（get）"
+          },
+          "stop": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "止める要求か止めた理由（get）"
+          },
+          "holder": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "鍵を持つセッション（get）"
+          },
+          "laps": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            },
+            "description": "周の並び（get）"
+          },
+          "current": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "今の周（get）"
+          },
+          "rejections": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            },
+            "description": "設計承認ゲートの差し戻し（get）"
+          },
+          "created": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            },
+            "description": "起票した課題（get）"
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "閉じの手順（close-plan）"
+          },
+          "review": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "レビューの起動の引数（review-args）"
+          },
+          "kind": {
+            "type": "string",
+            "description": "受け入れ条件の criterion（acceptance）か名前の形の種類（design-tests）"
+          },
+          "name": {
+            "type": "string",
+            "description": "受け入れ条件の番号（acceptance）か拾った名前（design-tests）"
+          },
+          "result": {
+            "type": "string",
+            "description": "確認の区分（acceptance）か名前の判定（design-tests）"
+          },
+          "means": {
+            "type": "string",
+            "description": "マージ前に確かめた手段（acceptance）"
+          },
+          "doc": {
+            "type": "string",
+            "description": "名前を拾った設計文書（design-tests）"
+          },
+          "line": {
+            "type": "integer",
+            "description": "名前の行（design-tests）"
+          },
+          "section": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "名前の節（design-tests）"
+          },
+          "renamed_to": {
+            "type": "string",
+            "description": "当てた改名（design-tests）"
+          }
+        }
+      }
+    }
+  }
+}

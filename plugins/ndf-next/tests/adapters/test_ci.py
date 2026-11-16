@@ -1,0 +1,609 @@
+"""CI の結果の読み取りと落ちたチェックの分類（`ndf.adapters.ci`）。"""
+
+from __future__ import annotations
+
+import json
+import subprocess
+from collections.abc import Iterator
+from pathlib import Path
+
+import pytest
+
+from ndf.adapters import ci
+from ndf.contracts import causes, limits
+from ndf.testing import ci_logs
+
+from failed_hub import FakeHub, art as _art, xml as _xml, zip_of as _zip
+
+from ._ci_helpers import LOG, run
+
+
+# --- 1 件の読み方 ---
+
+
+def test_check_of_reads_in_progress_with_completed_at_and_conclusion_as_done() -> None:
+    # #2690: status だけが in_progress のまま、終わった時刻と結論のあるチェックを待ち続けない
+    c = ci.check_of(run("skill-check", status="in_progress", conclusion="success", completed_at="2026-11-06T13:46:38Z"))
+    assert (c.state, c.conclusion, c.failed) == ("done", "success", False)
+
+
+def test_check_of_reads_completed_at_without_conclusion_as_stale() -> None:
+    c = ci.check_of(run("skill-check", status="in_progress", completed_at="2026-11-06T13:46:38Z"))
+    assert c.state == "stale"
+
+
+@pytest.mark.parametrize(("status", "state"), [("queued", "queued"), ("waiting", "queued"), ("in_progress", "running")])
+def test_check_of_unfinished_states(status: str, state: str) -> None:
+    assert ci.check_of(run("pytest", status=status)).state == state
+
+
+def test_latest_prefers_rerun_and_unstarted_rerun() -> None:
+    old = run("pytest", conclusion="failure", rid=1)
+    rerun = run("pytest", conclusion="success", rid=2, started_at="2026-11-12T14:00:00Z", completed_at="2026-11-12T14:05:00Z")
+    assert ci.latest([old, rerun])[0].conclusion == "success"
+    queued = run("pytest", status="queued", rid=3, started_at=None)
+    assert ci.latest([old, rerun, queued])[0].state == "queued"
+
+
+@pytest.mark.parametrize(
+    ("name", "is_test"),
+    [("pytest", True), ("pytest (0/2)", True), ("Python tests / pytest (1/2)", True), ("pytest-lint", False), ("lint", False)],
+)
+def test_is_test_check_counts_shards(name: str, is_test: bool) -> None:
+    # #3153: 分割ジョブ `pytest (k/n)` を、その名前のテストのチェックとして数える
+    assert ci.is_test_check(name, ["pytest"]) is is_test
+
+
+# --- 必須のチェックの読み方と種類 ---
+
+
+def test_read_failed_shard_is_test_failure_while_aggregate_pending() -> None:
+    # #3153 の再現: シャードが落ち、まとめのチェックがまだ終わっていない
+    runs = [
+        run("pytest (0/2)", conclusion="failure", rid=11),
+        run("pytest (1/2)", rid=12),
+        run("pytest", status="in_progress", rid=13),
+    ]
+    reading = ci.read(runs, ["pytest"], ["pytest"])
+    assert reading.verdict == "test_failed"
+    assert [c.name for c in reading.failed_tests] == ["pytest (0/2)"]
+    assert ci.cause_of(reading, ["pytest"]) == "test_failed"
+
+
+def test_read_failed_non_test_check_is_check_failed() -> None:
+    reading = ci.read([run("pytest", rid=1), run("doc-lint", conclusion="failure", rid=2)], ["pytest", "doc-lint"], ["pytest"])
+    assert ci.cause_of(reading, ["pytest"]) == "check_failed"
+
+
+def test_read_test_failure_wins_over_other_failures() -> None:
+    runs = [run("pytest (0/2)", conclusion="failure", rid=1), run("doc-lint", conclusion="failure", rid=2)]
+    assert ci.cause_of(ci.read(runs, ["pytest", "doc-lint"], ["pytest"]), ["pytest"]) == "test_failed"
+
+
+def test_read_ignores_checks_that_are_not_required() -> None:
+    runs = [run("pytest", rid=1), run("optional", conclusion="failure", rid=2)]
+    assert ci.cause_of(ci.read(runs, ["pytest"], ["pytest"]), ["pytest"]) is None
+
+
+def test_missing_check_waits_until_the_list_settles() -> None:
+    # #2317: push の直後（ほかが終わっていない）は待ち、出そろった後も現れなければ名前を挙げて止まる
+    early = ci.read([run("pytest", rid=1), run("other", status="in_progress", rid=2)], ["pytest", "runtime-smoke (kiro)"], ["pytest"])
+    assert early.verdict == "pending"
+    settled = ci.read([run("pytest", rid=1), run("other", rid=2)], ["pytest", "runtime-smoke (kiro)"], ["pytest"])
+    assert (settled.verdict, settled.missing) == ("missing", ["runtime-smoke (kiro)"])
+    assert ci.cause_of(settled, ["pytest"]) == "precondition"
+
+
+def test_named_shards_are_required_one_by_one() -> None:
+    # 名指しした分割ジョブは畳まない。(0/2) だけが通っても (1/2) を待ち、出そろった後も無ければ名前を挙げる
+    required = ["pytest (0/2)", "pytest (1/2)"]
+    early = ci.read([run("pytest (0/2)", rid=1), run("other", status="in_progress", rid=2)], required, ["pytest"])
+    assert early.verdict == "pending"
+    settled = ci.read([run("pytest (0/2)", rid=1), run("CI / other", rid=2)], required, ["pytest"])
+    assert (settled.verdict, settled.missing) == ("missing", ["pytest (1/2)"])
+    both = ci.read([run("CI / pytest (0/2)", rid=1), run("pytest (1/2)", rid=2)], required, ["pytest"])
+    assert both.verdict == "passed"
+
+
+def test_empty_list_is_pending() -> None:
+    assert ci.read([], ["pytest"], ["pytest"]).verdict == "pending"
+
+
+def test_stale_check_is_infra_wait() -> None:
+    runs = [run("pytest", rid=1), run("skill-check", status="in_progress", completed_at="2026-11-06T13:46:38Z", rid=2)]
+    assert ci.cause_of(ci.read(runs, ["pytest", "skill-check"], ["pytest"]), ["pytest"]) == "infra_wait"
+
+
+def test_after_merge_inherits_merge_failures_while_reading_is_pending() -> None:
+    # #3153: マージの段階が読んだ落ちたシャードを引き継ぎ、読み直しが pending でも CI 以外と読まない
+    pending = ci.read([run("pytest", status="in_progress", rid=1)], ["pytest"], ["pytest"])
+    assert ci.cause_of(pending, ["pytest"], merge_failed=["pytest (1/2)"]) == "test_failed"
+    assert ci.cause_of(pending, ["pytest"], merge_failed=["doc-lint"]) == "check_failed"
+    assert ci.cause_of(pending, ["pytest"], merge_failed=[]) == "ci_pending"
+
+
+def test_after_merge_without_failed_checks_is_not_ci() -> None:
+    passed = ci.read([run("pytest", rid=1)], ["pytest"], ["pytest"])
+    assert ci.cause_of(passed, ["pytest"], merge_failed=[]) == "not_ci"
+    assert ci.cause_of(passed, ["pytest"]) is None
+
+
+def test_every_kind_is_in_the_causes_table() -> None:
+    for kind in ("test_failed", "check_failed", "ci_pending", "precondition", "infra_wait", "not_ci"):
+        assert causes.row(kind).kind == kind
+
+
+def test_split_failed() -> None:
+    assert ci.split_failed(["pytest (0/2)", "doc-lint"], ["pytest"]) == (["pytest (0/2)"], ["doc-lint"])
+
+
+@pytest.mark.parametrize(
+    ("names", "tests", "expected"),
+    [
+        ([], ["pytest"], ([], [])),
+        (["pytest", "doc-lint"], [], ([], ["pytest", "doc-lint"])),
+        (
+            ["doc-lint", "pytest", "W / pytest (1/2)", "doc-lint", "pytest"],
+            ["CI / pytest (0/3)"],
+            (["pytest", "W / pytest (1/2)", "pytest"], ["doc-lint", "doc-lint"]),
+        ),
+    ],
+)
+def test_split_failed_keeps_order_and_duplicates(names: list[str], tests: list[str], expected: tuple) -> None:
+    """現状固定: 空の入力・重なった名前・ワークフローの前置き・分割ジョブの分け方と並び。"""
+    assert ci.split_failed(names, tests) == expected
+
+
+def test_split_failed_and_read_accept_generators() -> None:
+    """現状固定: 名前とテストのチェックをジェネレーターで渡しても、1 度だけ読んで同じに分ける。"""
+    names = (n for n in ["pytest (0/2)", "lint", "pytest"])
+    assert ci.split_failed(names, (t for t in ["pytest"])) == (["pytest (0/2)", "pytest"], ["lint"])
+    runs = [
+        run("pytest (0/2)", conclusion="failure", rid=1),
+        run("lint", conclusion="failure", rid=2),
+        run("pytest", conclusion="failure", rid=3),
+    ]
+    reading = ci.read(iter(runs), iter(["pytest", "lint"]), (t for t in ["W / pytest"]))
+    assert [c.name for c in reading.failed_tests] == ["pytest", "pytest (0/2)"]
+    assert [c.name for c in reading.failed_other] == ["lint"]
+
+
+# --- 落ちたテストの拾い出し（#3188・#3616） ---
+
+
+def test_failed_test_nodes_and_files_from_log() -> None:
+    # 受け入れ条件 7: pytest のログの読み方は、ログのパーサーの一覧へ移しても入力と期待を変えない
+    nodes = ci_logs.pytest_failures(LOG)
+    assert nodes == ["tests/test_other.py", "tests/test_stage_check.py::test_names", "tests/test_stage_check.py::test_order[standard]"]
+    assert ci.files_of(nodes) == ["tests/test_other.py", "tests/test_stage_check.py"]
+
+
+PYTEST_SUITE = {"name": "pytest", "runner": "pytest", "command": "pytest", "ci_jobs": [".github/workflows/pytest.yml#pytest"]}
+VITEST_SUITE = {"name": "web", "runner": "vitest", "command": "npx vitest run", "ci_jobs": [".github/workflows/web.yml"]}
+TRACKED = frozenset({"tests/test_a.py", "tests/test_b.py", "web/src/sum.test.ts"})
+
+
+def _check(job: int, name: str = "") -> ci.Check:
+    return ci.Check(name if name else f"pytest ({job}/9)", "done", "failure", job)
+
+
+def _source(glob: str | None = None, suites: tuple = (PYTEST_SUITE,)) -> ci.FailedTestSource:
+    return ci.FailedTestSource(glob, suites, TRACKED)
+
+
+def test_junit_artifacts_are_read_once_per_run_and_shared_by_its_checks() -> None:
+    # 受け入れ条件 1・5: 分割ジョブの XML 2 本から重ねずに昇順。同じ実行のチェックは同じ run_id・found を持つ
+    hub = FakeHub(
+        {1: 9, 2: 9},
+        {9: ".github/workflows/pytest.yml"},
+        artifacts={9: [_art(31, "junit-0"), _art(32, "junit-1"), _art(33, "coverage")]},
+        zips={31: _zip(_xml(("tests/test_b.py", "t"), ("tests/test_a.py", "t"))), 32: _zip(_xml(("tests/test_a.py", "t")))},
+    )
+    got = ci.failed_tests_of(hub, [_check(1), _check(2)], _source("junit-*"))  # type: ignore[arg-type]
+    assert got.nodes == ["tests/test_a.py::t", "tests/test_b.py::t"]
+    assert [(r.source, r.run_id, r.found, r.runner, r.reason) for r in got.reads] == [("junit", 9, 2, "pytest", "")] * 2
+    assert (hub.count("workflow_run"), hub.count("run_artifacts"), hub.count("artifact_zip"), hub.count("job_log")) == (1, 1, 2, 0)
+    assert got.job_errors == []
+
+
+@pytest.mark.parametrize(
+    "arts",
+    [[], [_art(31, expired=True)], [_art(31, "coverage")], [_art(99)]],
+    ids=["none", "expired", "other-name", "gone-410"],
+)
+def test_missing_artifacts_fall_back_to_the_runner_log_parser(arts: list[dict]) -> None:
+    # 受け入れ条件 6: glob に当たる成果物が無い・期限切れ・410 なら、ログのパーサーで読む
+    hub = FakeHub({1: 9}, {9: ".github/workflows/pytest.yml"}, artifacts={9: arts}, logs={1: LOG})
+    got = ci.failed_tests_of(hub, [_check(1)], _source("junit-*"))  # type: ignore[arg-type]
+    (read,) = got.reads
+    assert (read.source, read.found) == ("log", 3)
+    assert read.reason
+    assert got.nodes == ci_logs.pytest_failures(LOG)
+
+
+def test_unresolved_testcase_moves_every_check_of_the_run_to_the_log() -> None:
+    xml = b'<testsuite><testcase classname="Suite" name="x"><failure/></testcase></testsuite>'
+    hub = FakeHub(
+        {1: 9, 2: 9},
+        {9: ".github/workflows/pytest.yml"},
+        artifacts={9: [_art(31)]},
+        zips={31: _zip(_xml(("tests/test_a.py", "t")), xml)},
+        logs={1: "FAILED tests/test_a.py::t - x\n", 2: "FAILED tests/test_b.py::u - x\n"},
+    )
+    got = ci.failed_tests_of(hub, [_check(1), _check(2)], _source("junit-*"))  # type: ignore[arg-type]
+    assert [r.source for r in got.reads] == ["log", "log"]
+    assert all("Suite x" in r.reason for r in got.reads)
+    assert got.nodes == ["tests/test_a.py::t", "tests/test_b.py::u"]
+
+
+def test_more_artifacts_than_the_room_are_not_fetched() -> None:
+    # 不変条件 I5: 当たる成果物が取得の枠を超える実行は ZIP を 1 本も取得せず、ログへ移す
+    cap = int(limits.value("github.failed-logs", "count"))
+    arts = [_art(100 + i, f"junit-{i}") for i in range(cap + 1)]
+    hub = FakeHub({1: 9}, {9: ".github/workflows/pytest.yml"}, artifacts={9: arts}, logs={1: LOG})
+    got = ci.failed_tests_of(hub, [_check(1)], _source("junit-*"))  # type: ignore[arg-type]
+    assert hub.count("artifact_zip") == 0
+    assert got.reads[0].source == "log"
+    assert "github.failed-logs" in got.reads[0].reason
+
+
+def test_too_large_artifact_is_not_fetched() -> None:
+    hub = FakeHub({1: 9}, {9: ".github/workflows/pytest.yml"}, artifacts={9: [_art(31, size_in_bytes=10**12)]}, logs={1: LOG})
+    got = ci.failed_tests_of(hub, [_check(1)], _source("junit-*"))  # type: ignore[arg-type]
+    assert hub.count("artifact_zip") == 0 and got.reads[0].source == "log"
+
+
+def test_a_runner_without_a_parser_does_not_read_the_log() -> None:
+    # 受け入れ条件 8: vitest の suite に当たるチェックのログに pytest の行があっても読まない
+    hub = FakeHub({1: 9}, {9: ".github/workflows/web.yml"}, logs={1: LOG})
+    got = ci.failed_tests_of(hub, [_check(1, "web")], _source(None, (PYTEST_SUITE, VITEST_SUITE)))  # type: ignore[arg-type]
+    (read,) = got.reads
+    assert (read.source, read.runner, got.nodes) == ("none", "vitest", [])
+    assert "vitest" in read.reason
+    assert hub.count("job_log") == 0
+
+
+def test_a_check_without_a_matching_suite_does_not_read_the_log() -> None:
+    hub = FakeHub({1: 9}, {9: ".github/workflows/other.yml"}, logs={1: LOG})
+    got = ci.failed_tests_of(hub, [_check(1)], _source())  # type: ignore[arg-type]
+    assert (got.reads[0].source, got.reads[0].runner, got.nodes) == ("none", None, [])
+    assert "ci_jobs" in got.reads[0].reason
+
+
+def test_a_parser_added_to_the_table_is_used_without_changing_the_assembly(monkeypatch: pytest.MonkeyPatch) -> None:
+    # 受け入れ条件 9
+    monkeypatch.setitem(ci_logs.PARSERS, "vitest", lambda text: ["web/src/sum.test.ts::" + text.strip()])
+    hub = FakeHub({1: 9}, {9: ".github/workflows/web.yml"}, logs={1: "breaks\n"})
+    got = ci.failed_tests_of(hub, [_check(1, "web")], _source(None, (VITEST_SUITE,)))  # type: ignore[arg-type]
+    assert got.nodes == ["web/src/sum.test.ts::breaks"]
+    assert got.reads[0].source == "log"
+
+
+def test_unreadable_job_is_recorded_and_other_checks_are_still_read() -> None:
+    hub = FakeHub({2: 9}, {9: ".github/workflows/pytest.yml"}, logs={2: LOG}, broken_jobs=frozenset({1}))
+    got = ci.failed_tests_of(hub, [_check(1), _check(2)], _source())  # type: ignore[arg-type]
+    assert [(r.source, r.run_id) for r in got.reads] == [("none", None), ("log", 9)]
+    assert "404" in got.reads[0].reason and len(got.job_errors) == 1
+    assert got.nodes == ci_logs.pytest_failures(LOG)
+
+
+def test_a_job_answer_without_run_id_is_unreadable_and_other_checks_are_still_read() -> None:
+    # 応答の形が違うジョブ（run_id が無い）も、外へ投げずに読み元 none にする
+    hub = FakeHub({2: 9}, {9: ".github/workflows/pytest.yml"}, logs={2: LOG})
+    real_job = hub.job
+    hub.job = lambda job_id: {"id": job_id} if job_id == 1 else real_job(job_id)  # type: ignore[method-assign]
+    got = ci.failed_tests_of(hub, [_check(1), _check(2)], _source())  # type: ignore[arg-type]
+    assert [(r.source, r.run_id) for r in got.reads] == [("none", None), ("log", 9)]
+    assert "run_id" in got.reads[0].reason and len(got.job_errors) == 1
+    assert got.nodes == ci_logs.pytest_failures(LOG)
+
+
+def test_unreadable_log_keeps_the_artifact_and_log_reasons() -> None:
+    hub = FakeHub({1: 9}, {9: ".github/workflows/pytest.yml"}, artifacts={9: []})
+    got = ci.failed_tests_of(hub, [_check(1)], _source("junit-*"))  # type: ignore[arg-type]
+    assert got.reads[0].source == "none"
+    assert "junit-*" in got.reads[0].reason and "403" in got.reads[0].reason
+    assert got.job_errors == []
+
+
+def test_checks_over_the_limit_are_not_read() -> None:
+    cap = int(limits.value("github.failed-logs", "count"))
+    hub = FakeHub(
+        {i: 9 for i in range(cap + 3)},
+        {9: ".github/workflows/pytest.yml"},
+        logs={i: f"FAILED tests/test_{i}.py::t - x\n" for i in range(cap + 3)},
+    )
+    got = ci.failed_tests_of(hub, [_check(i) for i in range(cap + 3)], _source())  # type: ignore[arg-type]
+    assert [j for k, j in hub.calls if k == "job_log"] == list(range(cap))
+    assert got.nodes == sorted(f"tests/test_{i}.py::t" for i in range(cap))
+    assert [r.source for r in got.reads[cap:]] == ["none"] * 3
+    assert hub.count("workflow_run") == 1
+
+
+@pytest.mark.parametrize(
+    ("workflow", "suites", "runner"),
+    [
+        (".github/workflows/pytest.yml", (PYTEST_SUITE,), "pytest"),
+        (".github/workflows/web.yml", (PYTEST_SUITE, VITEST_SUITE), "vitest"),
+        (".github/workflows/none.yml", (PYTEST_SUITE,), None),
+        (".github/workflows/pytest.yml", (PYTEST_SUITE, {**VITEST_SUITE, "ci_jobs": [".github/workflows/pytest.yml#web"]}), None),
+    ],
+)
+def test_runner_of_matches_the_workflow_file_only(workflow: str, suites: tuple, runner: str | None) -> None:
+    got, reason = ci.runner_of(workflow, suites)
+    assert got == runner
+    assert bool(reason) == (runner is None)
+
+
+def test_from_work_reads_the_declaration_and_every_tracked_file(tmp_path: Path) -> None:
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "top.py").write_text("", encoding="utf-8")
+    (tmp_path / "pkg" / "inner.py").write_text("", encoding="utf-8")
+    lint = {"name": "lint", "runner": "ruff", "command": "ruff", "kind": "lint"}
+    decl = {"test": {"ci": {"junit_artifacts": "junit-*"}, "suites": [PYTEST_SUITE, lint]}}
+    (tmp_path / ".ndf").mkdir()
+    (tmp_path / ".ndf" / "project.json").write_text(json.dumps(decl), encoding="utf-8")
+    subprocess.run(["git", "-C", str(tmp_path), "add", "top.py", "pkg/inner.py"], check=True)
+    got = ci.FailedTestSource.from_work(tmp_path / "pkg")
+    assert got.junit_artifacts == "junit-*"
+    assert [s["name"] for s in got.suites] == ["pytest"]
+    assert got.tracked == frozenset({"top.py", "pkg/inner.py"})
+
+
+def test_from_work_without_git_or_declaration_reads_nothing(tmp_path: Path) -> None:
+    got = ci.FailedTestSource.from_work(tmp_path)
+    assert got == ci.FailedTestSource(None, (), frozenset())
+
+
+# --- 待ち ---
+
+
+class Clock:
+    """眠りを記録し、時刻を進めるだけの時計。"""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+        self.sleeps: list[float] = []
+
+    def __call__(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+        self.now += seconds
+
+
+def _reader(readings: list[ci.Reading], clock: Clock, reads: list[float]):
+    it: Iterator[ci.Reading] = iter(readings)
+    last = readings[-1]
+
+    def read() -> ci.Reading:
+        reads.append(clock.now)
+        return next(it, last)
+
+    return read
+
+
+def _reading(**kw) -> ci.Reading:
+    base = {"failed_tests": [], "failed_other": [], "running": [], "queued": [], "stale": [], "missing": [], "settled": False}
+    return ci.Reading(**{**base, **kw})
+
+
+RUNNING = _reading(running=["pytest"])
+QUEUED = _reading(queued=["pytest"])
+PASSED = _reading(settled=True)
+
+
+def test_watch_reads_once_more_at_the_deadline() -> None:
+    # #2224: 最後の眠りを上限までの残りに縮め、上限の時刻に最後の 1 回を読む
+    clock, reads = Clock(), []
+    first = float(limits.policy("test-triage.check-wait").interval)
+    budget = first * 2
+    done = ci.Watch(_reader([RUNNING], clock, reads), budget, clock=clock, sleep=clock.sleep).run()
+    assert reads[-1] == budget
+    assert sum(clock.sleeps) == budget
+    assert done.cause(["pytest"]) == "ci_pending"
+
+
+def test_watch_returns_as_soon_as_checks_conclude() -> None:
+    clock, reads, seen = Clock(), [], []
+    w = ci.Watch(
+        _reader([RUNNING, PASSED], clock, reads), 3600, on_round=lambda r, t: seen.append((r.verdict, t)), clock=clock, sleep=clock.sleep
+    )
+    done = w.run()
+    assert done.rounds == 2 and done.cause(["pytest"]) is None
+    # #2317: 読むたびに、待っているものと経過を渡す
+    assert [v for v, _ in seen] == ["pending", "passed"]
+
+
+def test_watch_does_not_count_runner_wait_against_budget() -> None:
+    # #2719: ランナーの割り当てを待つ間は予算に数えない
+    clock, reads = Clock(), []
+    readings = [QUEUED] * 6 + [RUNNING, PASSED]
+    done = ci.Watch(_reader(readings, clock, reads), 5, clock=clock, sleep=clock.sleep).run()
+    assert done.cause(["pytest"]) is None
+    assert done.queued_for > 5
+
+
+def test_watch_remaining_does_not_shrink_while_waiting_for_a_runner() -> None:
+    # API の上限の待ちの締め切りは Watch の予算と同じ数え方: ランナー待ちが予算の秒を越えても残りは減らない
+    clock, seen = Clock(), []
+    w = ci.Watch(_reader([QUEUED] * 6 + [RUNNING, PASSED], clock, []), 5, clock=clock, sleep=clock.sleep)
+    w.on_round = lambda r, t: seen.append((clock.now, w.remaining()))
+    w.run()
+    queued_rounds = seen[1:6]
+    assert queued_rounds[-1][0] > 5
+    assert all(left == pytest.approx(5) for _, left in queued_rounds)
+
+
+def test_watch_counts_budget_from_the_given_start() -> None:
+    # 3394-11: 前の段階で待ち始めた呼び手は始まりの時刻を渡し、同じ予算を引き継ぐ
+    clock, reads = Clock(), []
+    clock.now = 100.0
+    w = ci.Watch(_reader([RUNNING], clock, reads), 30, clock=clock, sleep=clock.sleep, started=80.0)
+    assert w.started == 80.0 and w.remaining() == pytest.approx(10)
+    done = w.run()
+    assert reads[-1] == pytest.approx(110) and done.elapsed == pytest.approx(30)
+
+
+def test_watch_start_defaults_to_construction_time() -> None:
+    clock = Clock()
+    clock.now = 42.0
+    assert ci.Watch(_reader([RUNNING], clock, []), 5, clock=clock, sleep=clock.sleep).started == 42.0
+
+
+def test_watch_stops_with_infra_wait_when_runner_wait_exceeds_its_limit() -> None:
+    clock, reads = Clock(), []
+    done = ci.Watch(_reader([QUEUED], clock, reads), 5, clock=clock, sleep=clock.sleep).run()
+    assert done.runner_exhausted and done.cause(["pytest"]) == "infra_wait"
+    assert done.queued_for == pytest.approx(limits.seconds("ci.runner-wait"))
+
+
+# --- 現状固定（I-008 required_key）: 必須のチェックの照合の鍵と、鍵に当たるチェック ---
+
+
+@pytest.mark.parametrize(
+    ("name", "key"),
+    [
+        ("pytest", "pytest"),
+        ("pytest (0/2)", "pytest (0/2)"),
+        ("CI / pytest (1/2)", "pytest (1/2)"),
+        ("A / B / pytest (1/2)", "pytest (1/2)"),
+        ("  pytest  ", "pytest"),
+        ("pytest   (10/12)", "pytest   (10/12)"),
+        ("pytest(1/2)", "pytest(1/2)"),
+        ("pytest (1/2) (0/2)", "pytest (1/2) (0/2)"),
+        ("pytest (1/2) extra", "pytest (1/2) extra"),
+        ("pytest (a/b)", "pytest (a/b)"),
+        ("runtime-smoke (kiro)", "runtime-smoke (kiro)"),
+        ("CI/pytest", "CI/pytest"),
+        (" / pytest", "pytest"),
+        ("CI / ", ""),
+        ("", ""),
+    ],
+)
+def test_required_key_current_values(name: str, key: str) -> None:
+    """現状固定: 分割を名指しした名前は分割を保ち（前置きだけ外す）、ほかは bare_name と同じ。"""
+    assert ci.required_key(name) == key
+
+
+def test_required_key_matches_named_shard_only_and_bare_name_any_shard() -> None:
+    """現状固定: 分割を名指しした鍵は、前置きの有無によらずその分割だけに当たる。名指ししない鍵は全分割とまとめに当たる。"""
+    runs = [run("CI / pytest (0/2)", rid=1), run("pytest (1/2)", conclusion="failure", rid=2), run("W / pytest", rid=3)]
+    named = ci.read(runs, ["X / pytest (0/2)"], ["pytest"])
+    assert (named.verdict, named.missing, named.failed_tests) == ("passed", [], [])
+    bare = ci.read(runs, ["pytest"], ["pytest"])
+    assert bare.verdict == "test_failed"
+    assert [c.name for c in bare.failed_tests] == ["pytest (1/2)"]
+    other = ci.read(runs, ["pytest (2/2)"], ["pytest"])
+    assert (other.verdict, other.missing) == ("missing", ["pytest (2/2)"])
+
+
+def test_required_key_dedupes_required_names_by_key() -> None:
+    """現状固定: 前置きや分割の違う必須の名前は、同じ鍵に畳まれて 1 つだけ欠けたと挙がる。"""
+    reading = ci.read([run("other", rid=1)], ["pytest", "CI / pytest", "pytest (0/2)", "W / pytest (0/2)"], ["pytest"])
+    assert reading.missing == ["pytest", "pytest (0/2)"]
+
+
+# --- 現状固定（I-009 bare_name）: 照合に使う名前（前置きと分割の末尾を外す） ---
+
+
+@pytest.mark.parametrize(
+    ("name", "bare"),
+    [
+        ("pytest", "pytest"),
+        ("pytest (0/2)", "pytest"),
+        ("CI / pytest (1/2)", "pytest"),
+        ("A / B / pytest (1/2)", "pytest"),
+        ("  pytest  ", "pytest"),
+        ("pytest   (10/12)", "pytest"),
+        ("pytest(1/2)", "pytest"),
+        ("pytest (1/2) (0/2)", "pytest (1/2)"),
+        ("pytest (1/2) extra", "pytest (1/2) extra"),
+        ("pytest (a/b)", "pytest (a/b)"),
+        ("runtime-smoke (kiro)", "runtime-smoke (kiro)"),
+        ("CI/pytest", "CI/pytest"),
+        (" / pytest", "pytest"),
+        ("CI / ", ""),
+        ("", ""),
+    ],
+)
+def test_bare_name_current_values(name: str, bare: str) -> None:
+    """現状固定: 最後の ` / ` より後ろを取り、末尾の分割 `(k/n)` を 1 つだけ外して前後の空白を除く。"""
+    assert ci.bare_name(name) == bare
+
+
+@pytest.mark.parametrize(
+    ("name", "bare", "key"),
+    [
+        # 末尾の空白の後の分割は外さない（空白を除くのは分割を外した後）。現状の値として固定する
+        ("pytest (0/2) ", "pytest (0/2)", "pytest (0/2)"),
+        ("CI / pytest (1/2)\t", "pytest (1/2)", "pytest (1/2)"),
+        ("A / B /  pytest  ", "pytest", "pytest"),
+        ("CI / W / pytest (1/2)", "pytest", "pytest (1/2)"),
+    ],
+)
+def test_bare_name_and_required_key_strip_after_removing_prefix(name: str, bare: str, key: str) -> None:
+    """現状固定（I-009）: 前置きを最後の ` / ` で外し、bare_name は分割を外してから、required_key は分割を見る前に空白を除く。"""
+    assert (ci.bare_name(name), ci.required_key(name)) == (bare, key)
+
+
+def test_read_matches_required_with_multiple_prefixes_and_spaces() -> None:
+    """現状固定（I-009）: 複数の前置きと前後の空白のある必須の名前も、前置きを外した鍵でチェックに当たる。"""
+    runs = [run("A / B / pytest (0/2)", rid=1), run("lint ", conclusion="failure", rid=2)]
+    reading = ci.read(runs, ["X / Y / pytest (0/2) ", " lint"], ["pytest"])
+    assert (reading.verdict, reading.missing, [c.name for c in reading.failed_other]) == ("check_failed", [], ["lint "])
+
+
+def test_bare_names_is_the_set_of_bare_names() -> None:
+    """現状固定: 集合で返し、同じ照合の名前は 1 つに畳む。ジェネレーターも受ける。"""
+    assert ci.bare_names(["CI / pytest (0/2)", "pytest", "W / lint"]) == {"pytest", "lint"}
+    assert ci.bare_names(n for n in ["pytest (1/2)"]) == {"pytest"}
+    assert ci.bare_names([]) == set()
+
+
+@pytest.mark.parametrize(
+    ("name", "tests", "is_test"),
+    [
+        ("W / pytest (1/2)", ["CI / pytest (0/3)"], True),
+        ("pytest", ["pytest (1/2) (0/2)"], False),
+        ("pytest (1/2)", ["pytest (1/2) (0/2)"], False),
+        ("pytest (1/2) (5/9)", ["pytest (1/2) (0/2)"], True),
+        ("CI/pytest", ["pytest"], False),
+        ("pytest", [], False),
+    ],
+)
+def test_is_test_check_compares_bare_names_on_both_sides(name: str, tests: list[str], is_test: bool) -> None:
+    """現状固定: チェックの名前とテストのチェックの名前の両方を bare_name で揃えてから比べる。"""
+    assert ci.is_test_check(name, tests) is is_test
+
+
+def test_read_classifies_failures_by_bare_name() -> None:
+    """現状固定: 落ちたチェックをテストかどうかで分けるときも、両側を bare_name で揃える。"""
+    runs = [run("A / pytest (0/2)", conclusion="failure", rid=1), run("A / lint (0/2)", conclusion="failure", rid=2)]
+    reading = ci.read(runs, ["pytest", "lint"], ["W / pytest (5/9)"])
+    assert [c.name for c in reading.failed_tests] == ["A / pytest (0/2)"]
+    assert [c.name for c in reading.failed_other] == ["A / lint (0/2)"]
+
+
+def test_watch_stretches_the_interval_only_while_nothing_changes() -> None:
+    # 不足 g: 変化が無い間は間隔を伸ばし、読んだ結果が変わったら倍率 1 段だけ縮める（最初の値より短くしない）
+    policy = limits.policy("test-triage.check-wait")
+    first, factor = float(policy.interval), float(policy.factor)
+    other = _reading(running=["pytest", "doc-lint"])
+    clock, reads = Clock(), []
+    readings = [RUNNING, RUNNING, other, other, PASSED]
+    ci.Watch(_reader(readings, clock, reads), 3600, clock=clock, sleep=clock.sleep).run()
+    assert clock.sleeps == [first, first * factor, first, first * factor]
+
+
+def test_watch_steps_the_interval_back_one_factor_on_a_change() -> None:
+    # 変化のたびに最初の値まで戻さない。チェックが順に終わる CI でも間隔が伸び、読み取りの回数を抑える
+    policy = limits.policy("test-triage.check-wait")
+    first, factor = float(policy.interval), float(policy.factor)
+    other = _reading(running=["pytest", "doc-lint"])
+    clock, reads = Clock(), []
+    readings = [RUNNING, RUNNING, RUNNING, other, PASSED]
+    ci.Watch(_reader(readings, clock, reads), 3600, clock=clock, sleep=clock.sleep).run()
+    assert clock.sleeps == [first, first * factor, first * factor**2, first * factor]

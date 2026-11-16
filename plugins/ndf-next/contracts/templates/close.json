@@ -1,0 +1,27 @@
+{
+  "template": "close",
+  "purpose": "close",
+  "summary": "閉じ: 確定仕様化 → worker を打つ前の HEAD から変更が無ければ PR を作らずに終える → push → PR → CI → マージ",
+  "params": ["repo", "worktree", "branch", "remote", "base", "title", "body_file", "worker", "ci_budget", "required", "tests", "merge_method"],
+  "plan": {
+    "name": "close-{{branch}}",
+    "repo": "{{repo}}",
+    "worktree": "{{worktree}}",
+    "steps": [
+      {"use": "work-start"},
+      {"id": "spec", "run": ["{{worker}}", "plan-to-spec"]},
+      {"use": "changes-check"},
+      {"use": "push", "on_fail": "fix-push"},
+      {"use": "pr"},
+      {"use": "conflict-check"},
+      {"use": "ci"},
+      {"use": "merge", "next": "end"},
+      {"use": "repeat-check"},
+      {"use": "ci-fix"},
+      {"use": "ci-local"},
+      {"use": "fix-push"},
+      {"use": "base-sync"},
+      {"use": "fix-base"}
+    ]
+  }
+}

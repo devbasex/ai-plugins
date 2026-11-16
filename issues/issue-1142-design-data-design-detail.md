@@ -354,6 +354,8 @@ plugins/ndf/
 | `BASELINE` | 定数 | `scripts/check-ndf-contracts.py` | `"scripts/const-fact-baseline.json"` |
 | `WHOLE` | 定数 | `scripts/check-ndf-contracts.py` | 今の値に `BASELINE` を足す（基準を変えたらツリー全体を数える） |
 
+> **#3347:** この表の「決定 28」は系統 `dbos` の決定 28 である。作り直しでの扱いは、#1142 の作り直しの決定 77（next）と #3344 の差分が持つ。
+
 ## 並行と排他
 
 | 同時に走りうる処理 | 共有する資源 | 排他の取り方 | 冪等性と中断からの再開 |

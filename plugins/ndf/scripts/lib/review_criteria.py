@@ -385,6 +385,9 @@ PROFILE_WARNING = "レビューのプロファイルを読めないため、既�
 
 
 def main(argv=None) -> int:
+    import deps
+
+    deps.require("jsonschema")  # ベースブランチはブランチ戦略の宣言（JSON Schema で検査する）から読む
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("block", choices=("reviewer", "fixer"))
     ap.add_argument("--root", help="宣言を読む worktree の根（省くと宣言を読まない）")

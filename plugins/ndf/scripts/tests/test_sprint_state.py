@@ -673,3 +673,16 @@ def test_find_section_skips_headings_inside_a_fence():
     assert head_line == "## 今の会話の進み\n"
     assert text[body_start:body_end] == "\n本文\n\n"
     assert text[head_start:body_start] == head_line
+
+
+def test_an_mvv_design_approval_with_a_pr_keeps_the_pr_and_outcome(tmp_path):
+    """#3603 の I9: --by mvv --pr P --outcome approved の記録は pr と outcome を持ち、同じ承認ゲートの名と pr の記録を置き換える。
+    別の pr と --pr の無い記録は残す。"""
+    sprint = tmp_path / "state.json"
+    sprint.write_text(json.dumps({"gates": []}))
+    args = ("設計承認ゲート", "--what", "設計", "--by", "mvv", "--verdict", "unknown", "--outcome", "approved")
+    for pr in ("12", "12", "13"):
+        assert gate(str(sprint), tmp_path, *args, "--pr", pr)[0] == 0
+    assert gate(str(sprint), tmp_path, *args)[0] == 0
+    got = [(g.get("pr"), g.get("outcome"), g["by"]) for g in json.loads(sprint.read_text())["gates"]]
+    assert got == [(12, "approved", "mvv"), (13, "approved", "mvv"), (None, None, "mvv")]

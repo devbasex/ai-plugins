@@ -4,7 +4,6 @@
   動いていると返す計画である。状態を読めない計画は動いている計画として数える。宣言（`plan.json`）は JSON として読み、
   `lanes[].name` と `lanes[].plans` だけを取る（版の違う NDF の計画も数える。決定 8）。宣言を読めない計画は 0 本とし、
   `<置き場>:<計画名>` を出力の `unreadable` に載せる（I13）
-- 計画の検査と開始（`declared_plans`・`plan_warnings`）は宣言の合計を数え、超えても警告で通す（決定 3）
 - 耐久ワークフローの起動の判定（`admit_lanes`）は、動いているレーン（レーンの状態の一覧で `running`・`awaiting_approval` のもの）と、
   承認の答えを待って止まった宣言のレーン（`stopped` で、計画の台帳に答えていない問いを持つもの。決定 9）の合計を数える。
   数えてから起動するまでを起動の排他（`<状態の根>/parallel/admit.lock`）の中で行う（決定 4）。合計 0 のときは上限を見ずに起動する（I8）
@@ -132,30 +131,6 @@ def running_total(main: Path, rows: dict, own: Optional[str] = None, status=None
             total += n
             lanes.append({"plan": key, "lane": lane, "plans": n, "state": state})
     return {"total": total, "lanes": lanes, "unreadable": unreadable}
-
-
-def plan_warnings(main: Path, name: str, own_plans: int, status=None) -> list[dict]:
-    """検査と開始の警告（0 か 1 件）。他の動いている計画の宣言の合計とこの計画の宣言の合計の和が上限を超えるとき 1 件（I5・I6）。"""
-    limit = cap()[0]
-    got = declared_plans(main, name, status)
-    others = sum(p["plans"] for p in got["plans"])
-    if not got["plans"] and not got["unreadable"] or own_plans + others <= limit:
-        return []
-    total = own_plans + others
-    names = "、".join(p["plan"] + ("（状態を読めない）" if p["state"] == "unreadable" else "") for p in got["plans"])
-    tail = f"。宣言を読めない計画: {'、'.join(got['unreadable'])}" if got["unreadable"] else ""
-    message = f"マシンのプランの本数 {total} が上限 {limit} を超える（この計画 {own_plans}・他の計画 {others}: {names or '-'}）{tail}"
-    return [{
-        "level": "warning",
-        "rule": RULE,
-        "at": "lanes",
-        "message": message,
-        "machine_plans": total,
-        "own_plans": own_plans,
-        "max_plans": limit,
-        "plans": [{"plan": p["plan"], "plans": p["plans"]} for p in got["plans"]],
-        "unreadable": got["unreadable"],
-    }]  # fmt: skip
 
 
 def _relay_rows(main: Path) -> Optional[dict]:

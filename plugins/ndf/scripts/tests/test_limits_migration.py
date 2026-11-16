@@ -77,6 +77,7 @@ BEFORE = {
     "monitor-types.thread-join": {"seconds": 1},
     "notify.slack": {"seconds": 10},
     "parallel-launch.up": {"seconds": 120, "interval": 5},
+    "parallel-launch.helper-wait": {"seconds": 3600},  # #3597 で足した一時レーンの空き待ちの上限
     "parallel-repo.stall": {"seconds": 3600},
     "parallel-machine.admit-lock": {"seconds": 10},  # #2999 で足したレーンの起動の判定の排他
     "parallel-switch.long-wait": {"seconds": 14400},
@@ -89,6 +90,7 @@ BEFORE = {
     "usage-ledger.git": {"seconds": 10},
     "merged.main-lock": {"seconds": 600},
     "project.git": {"seconds": 60},
+    "repo.production-fetch": {"seconds": 60},  # #3308 で足した本番チャネルの取り込み
     "relay.bedrock": {"seconds": 60},
     "relay.handover-prepare": {"seconds": 600},
     "relay.hub-poll": {"interval": 0.5},
@@ -98,6 +100,7 @@ BEFORE = {
     "relay.runtime-install": {"seconds": 600},
     "release-steps.head-moved": {"attempts": 4},
     "release-steps.trail-status": {"seconds": 600, "interval": 10},  # #2773 で足した承認の証跡のチェックの待ち
+    "release-steps.port-rerun": {"seconds": 120, "interval": 5},  # #3573 で足した本文の印を足した後の打ち直しの待ち
     "release-steps.ci-wait": {"seconds": 3600, "interval": 15},  # #2773 で足した CD のある場合の本番の PR の待ち
     "release-steps.dev-workflow": {"seconds": 3900, "interval": 15},  # #2773 で足した開発版の workflow の待ち
     "release-verification-steps.env-i": {"seconds": 600},
@@ -141,6 +144,9 @@ BEFORE = {
     "google-workspace.call": {"seconds": 120},
     "google-workspace.install": {"seconds": 600},
     "google-workspace.thumbnails": {"seconds": 120},
+    # #3672 で足した上限（ブランチ戦略の宣言の解析と書き込みの錠）
+    "branch-strategy.measure": {"seconds": 120},
+    "branch-strategy.write-lock": {"seconds": 30},
 }
 
 

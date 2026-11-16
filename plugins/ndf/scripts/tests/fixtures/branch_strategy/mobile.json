@@ -1,0 +1,48 @@
+{
+  "kind": "mobile",
+  "release_strategy": "release_branch",
+  "branches": {
+    "production": "main",
+    "base": "develop"
+  },
+  "sprint": {
+    "start": "production",
+    "integrate": "check",
+    "doc_prs": "sprint"
+  },
+  "release": {
+    "form": "mobile",
+    "version_store": {
+      "kind": "json",
+      "path": "package.json",
+      "pointer": "/version"
+    },
+    "tag": "v{version}",
+    "github_release": true,
+    "cd": {
+      "workflow": "release.yml"
+    }
+  },
+  "channels": [
+    {
+      "name": "stable",
+      "ref": "main"
+    },
+    {
+      "name": "dev",
+      "ref": "develop",
+      "workflow": "beta.yml"
+    }
+  ],
+  "approval": {
+    "target": "release_pr",
+    "via": "gate"
+  },
+  "merge": {
+    "actor": "ndf",
+    "method": "direct",
+    "commit": "merge",
+    "admin": false
+  },
+  "verify": null
+}

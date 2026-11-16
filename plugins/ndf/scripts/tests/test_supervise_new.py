@@ -26,6 +26,8 @@ from supervise_lib.verify_steps import RECLAIM_LIMIT, with_margin  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from sprint_args import new_sprint_args  # noqa: E402
+import strategy_fixture  # noqa: E402
+from supervise_lib.decl import PLAN_BASE  # noqa: E402
 
 
 # new sprint は --design に無い課題の本文を gh で読む（#1767）。見本の本文で答える
@@ -40,15 +42,13 @@ def git(cwd, *args):
     return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True).stdout
 
 
-def plain_repo(tmp_path, release=None):
-    """main へのマージが配る形のリポジトリ（プラグインでない）を模す。"""
+def plain_repo(tmp_path, release=None, base="main", production=None, deliveries=None):
+    """main へのマージが配る形のリポジトリ（プラグインでない）を模す。ブランチ戦略の宣言は `strategy_fixture.declare` で置く。"""
     root = tmp_path / "other"
     (root / ".ndf").mkdir(parents=True)
-    (root / ".ndf" / "worktree.json").write_text('{"version": 1, "base_branch": "main"}\n')
-    decl = {"version": 1, "test": {"command": "make test {paths}"}}
-    if release is not None:
-        decl["release"] = release
-    (root / ".ndf" / "supervise.json").write_text(json.dumps(decl))
+    git(tmp_path, "init", "-q", "-b", base, str(root))
+    strategy_fixture.declare(root, base, production, release, deliveries)
+    (root / ".ndf" / "supervise.json").write_text(json.dumps({"version": 1, "test": {"command": "make test {paths}"}}))
     return root
 
 
@@ -59,7 +59,7 @@ def new_sprint(root, out, *extra):
 # --- #1192: リリースの雛形の無い形 -------------------------------------------------
 
 
-@pytest.mark.parametrize("release", [None, {"form": "merge"}])
+@pytest.mark.parametrize("release", [None, {"form": "document"}])
 def test_new_sprint_without_release_template_writes_until_check(tmp_path, release):
     root = plain_repo(tmp_path, release)
     out = tmp_path / "m"
@@ -69,7 +69,8 @@ def test_new_sprint_without_release_template_writes_until_check(tmp_path, releas
     assert res["status"] == "ok" and "/ndf:release" in res["next"]
     manifest = json.loads((out / "sprint.json").read_text())
     names = [w["name"] for w in manifest["ステージ"]]
-    assert names == ["設計", "設計承認ゲート", "設計 PR のマージ", "設計の結果", "スプリントブランチ", "実装", "検査", "リリース"]
+    # trunk の宣言は設計 PR をスプリントブランチへ出すので、スプリントブランチを先に切る（#3121）
+    assert names == ["スプリントブランチ", "設計", "設計承認ゲート", "設計 PR のマージ", "設計の結果", "実装", "検査", "リリース"]
     last = manifest["ステージ"][-1]
     assert last["manual"] == "/ndf:release" and "plans" not in last and "command" not in last
     assert any(it.get("manual") == "/ndf:release" for it in res["items"])
@@ -83,19 +84,7 @@ def test_new_sprint_with_package_plugin_keeps_release_stage(tmp_path):
     p = new_sprint(root, out)
     assert p.returncode == 0, p.stderr
     names = [w["name"] for w in json.loads((out / "sprint.json").read_text())["ステージ"]]
-    assert names[-1] == "デプロイ" and "/ndf:release" not in json.loads(p.stdout)["next"]
-    assert "production_branch" in json.loads(p.stdout)["next"]  # 本番のブランチが無いので本番を置かない（#1914 の決定 3）
-
-
-def test_normal_sprint_without_a_production_branch_keeps_gate_2_on_the_release(tmp_path):
-    root = plain_repo(tmp_path, {"form": "package-plugin", "plugin": "foo", "runtimes": ["claude"]})
-    state = tmp_path / "state.json"
-    state.write_text(json.dumps({"name": "m", "pace": "normal", "gates": []}))
-    out = tmp_path / "m"
-    p = new_sprint(root, out, "--state", str(state))
-    assert p.returncode == 0, p.stdout + p.stderr
-    last = json.loads((out / "sprint.json").read_text())["ステージ"][-1]
-    assert last["name"] == "デプロイ" and "--by user" in last["note"]
+    assert names[-3:] == ["デプロイ", "リリース承認ゲート", "本番"] and "/ndf:release" not in json.loads(p.stdout)["next"]
 
 
 def close_cli(root, out, *extra):
@@ -117,19 +106,16 @@ def close_cli(root, out, *extra):
     )
 
 
-@pytest.mark.parametrize("delivery", [None, {"unknown": "CI の設定を読めない"}])
-def test_new_close_without_release_form_puts_manual_stage(tmp_path, delivery):
-    """#1336 の AC5: delivery が無い・不明でも止まらず、手で行うデプロイのステージが入り、理由が note に出る。"""
+def test_new_close_without_release_template_puts_manual_stage(tmp_path):
+    """#1336 の AC5: リリースの形に雛形が無く届け先の行も無くても止まらず、手で行うデプロイのステージが入り、理由が note に出る。"""
     root = plain_repo(tmp_path)
-    if delivery is not None:
-        (root / ".ndf" / "project.json").write_text(json.dumps({"delivery": delivery}, ensure_ascii=False))
     out = tmp_path / "c"
     p = close_cli(root, out)
     assert p.returncode == 0, p.stderr
     manifest = json.loads((out / "sprint.json").read_text())
     assert [w["name"] for w in manifest["ステージ"]] == ["まとめ", "最終の検査", "リリース"]
     note = manifest["ステージ"][2]["note"]
-    assert "delivery" in note and ("不明" in note if delivery else "無い" in note)
+    assert "service" in note and "雛形が無い" in note
     close = json.loads(Path(manifest["ステージ"][0]["plans"][0]).read_text())
     assert "--record-pr {queue_record} " in next(s["cmd"] for s in close["steps"] if s["id"] == "close")  # #2230
     assert "unknown" not in json.dumps(close["steps"], ensure_ascii=False)
@@ -145,8 +131,7 @@ def release_plans(out: Path) -> dict[str, dict]:
 def test_new_sprint_and_close_without_versions_write_no_version(tmp_path):
     """#2164 の受け入れ条件 1・I1: 版を渡さずに作ったプランと sprint.json は具体的な版を持たず、作業場所・branch・承認資料は
     版の差し込みで書く。本番は開発版のプラン release の版の記録を読む（系列）。"""
-    root = plain_repo(tmp_path, {"form": "package-plugin", "plugin": "foo", "runtimes": ["claude"]})
-    (root / ".ndf" / "worktree.json").write_text('{"version": 1, "base_branch": "main", "production_branch": "live"}\n')
+    root = plain_repo(tmp_path, {"form": "package-plugin", "plugin": "foo", "runtimes": ["claude"]}, production="live")
     out = tmp_path / "m"
     p = cli(*new_sprint_args(root, out, "--level", "minor", name="m6", issue=("216",), version=None), cwd=root)
     assert p.returncode == 0, p.stderr
@@ -168,13 +153,13 @@ def test_new_sprint_and_close_without_versions_write_no_version(tmp_path):
 
 SAMPLES = {
     "carmo-system-console": (
-        {"base_branch": "main", "production_branch": "main"},
+        ("main", "main"),
         [{"target": "本番（ECS）", "kind": "auto", "trigger": "CodePipeline", "branch": "main", "versioned": False}],
         [("merge", "merged-by-check")],
         ["CD の結果"],
     ),
     "project-trygroup-prd": (
-        {"base_branch": "develop", "production_branch": "main"},
+        ("develop", "main"),
         [
             {"target": "stg", "kind": "auto", "trigger": "develop へのマージ", "branch": "develop", "versioned": False},
             {"target": "prd", "kind": "auto", "trigger": "main へのマージ", "branch": "main", "versioned": False},
@@ -183,7 +168,7 @@ SAMPLES = {
         ["本番"],
     ),
     "carmo-contractors-app": (
-        {"base_branch": "main", "production_branch": "main"},
+        ("main", "main"),
         [
             {"target": "web（Amplify）", "kind": "auto", "trigger": "push", "branch": "main", "versioned": False},
             {"target": "api", "kind": "manual", "trigger": "sam deploy --config-env prod", "versioned": False},
@@ -192,12 +177,12 @@ SAMPLES = {
         ["CD の結果", "リリース"],
     ),
     "with-ai-dev": (
-        {"base_branch": "main", "production_branch": "main"},
+        ("main", "main"),
         [{"target": "本番", "kind": "manual", "trigger": "手でデプロイする", "versioned": False}],
         [("manual", "manual")],
         ["リリース"],
     ),
-    "no-delivery": ({"base_branch": "main", "production_branch": "main"}, [], [("none", "none")], []),
+    "no-delivery": (("main", "main"), [], [("none", "none")], []),
 }
 
 # new close（fast のスプリントの終わり）がまとめと最終の検査の後に置くステージ。経路 merge だけなら「導入の確認」が加わる（#1457）
@@ -208,10 +193,8 @@ CLOSE_STAGES = {"carmo-system-console": ["導入の確認", "CD の結果"], "ca
 def test_samples_start_and_close_a_sprint_without_versions(tmp_path, name):
     """#1336 の AC3・AC4・AC11: 版数の無い宣言で new sprint と new close が --version・--prod・release.form 無しで通り、
     経路に合ったステージだけが検査の後に入る（ベースブランチへのマージで届く経路とデプロイしない宣言は置かない）。"""
-    wt, rows, expected, stages = SAMPLES[name]
-    root = plain_repo(tmp_path)
-    (root / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, **wt}))
-    (root / ".ndf" / "project.json").write_text(json.dumps({"delivery": rows}, ensure_ascii=False))
+    (base, production), rows, expected, stages = SAMPLES[name]
+    root = plain_repo(tmp_path, base=base, production=production, deliveries=rows)
     (root / ".ndf" / "pace.json").write_text(json.dumps({"version": 1, "fast": {"enabled": True, "verify": "true"}}))
     out = tmp_path / "m"
     p = cli(*new_sprint_args(root, out, name="m6", issue=("216",), version=None), cwd=root)
@@ -417,7 +400,7 @@ def test_pr_step_appends_existing_files(tmp_path, monkeypatch):
 def test_new_sprint_help_shows_only_its_arguments_and_declarations(tmp_path):
     p = cli("new", "sprint", "--help", cwd=tmp_path)
     assert p.returncode == 0
-    for word in ("--design", "--version", "base_branch", "test.command", "release.form", "/ndf:release"):
+    for word in ("--design", "--version", "branches.base", "test.command", "release.form", "/ndf:release"):
         assert word in p.stdout, word
     for word in ("--prs", "--channel", "--title", "--since-last"):
         assert word not in p.stdout, word
@@ -478,7 +461,7 @@ def test_new_fix_runs_tests_pr_and_merge_without_the_worker_step(tmp_path):
     assert not any(s["type"] == "work" and s.get("kind") == "実装" for s in plan["steps"])
     assert "merge-when-green" in steps["merge"]["cmd"] and steps["pr"]["title"] == "Fix: x"
     assert "tests/test_x.py" in steps["test-limited"]["cmd"] and plan["作業場所"] == str(root)
-    assert plan["課題"] == [] and plan["base_branch"] == "main"
+    assert plan["課題"] == [] and plan[PLAN_BASE] == "main"
 
 
 def test_new_fix_records_the_escape_and_takes_the_issue(tmp_path):
@@ -523,16 +506,8 @@ def plugin_repo(tmp_path):
     """ndf と mcp-serena を持ち、ndf--v1.0.0 の後に mcp-serena だけを変えたリポジトリ。"""
     root = tmp_path / "repo"
     (root / ".ndf").mkdir(parents=True)
-    (root / ".ndf" / "worktree.json").write_text('{"version": 1, "base_branch": "develop", "production_branch": "main"}\n')
-    (root / ".ndf" / "supervise.json").write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "test": {"command": "true {paths}"},
-                "release": {"form": "package-plugin", "plugin": "ndf", "runtimes": ["claude"]},
-            }
-        )
-    )
+    strategy_fixture.declare(root, "develop", "main", {"form": "package-plugin", "plugin": "ndf", "runtimes": ["claude"]})
+    (root / ".ndf" / "supervise.json").write_text(json.dumps({"version": 1, "test": {"command": "true {paths}"}}))
     for rel, v in (("plugins/ndf", "1.0.0"), ("plugins/mcp/mcp-serena", "2.3.4")):
         (root / rel / ".claude-plugin").mkdir(parents=True)
         (root / rel / ".claude-plugin" / "plugin.json").write_text(json.dumps({"version": v}, indent=2))
@@ -542,6 +517,7 @@ def plugin_repo(tmp_path):
     git(root, "add", "-A")
     git(root, "commit", "-q", "-m", "base")
     git(root, "tag", "ndf--v1.0.0")
+    push_origin(root, "main")  # 種別リリースは本番ブランチの先頭（origin/main）の宣言を読む（#3308）
     (root / "plugins" / "mcp" / "mcp-serena" / "README.md").write_text("changed\n")
     git(root, "add", "-A")
     git(root, "commit", "-q", "-m", "serena")
@@ -586,7 +562,7 @@ def test_prod_release_records_after_the_release_and_never_goes_back_to_it(tmp_pa
     assert "release-steps.py record --version 1.0.1 --prs 1 --cd-result {state_dir}/work/cd-result.json" in rec["cmd"]
     assert rec["pr_from"] == "release_pr_url" and rec["on_exit"] == {"5": "stop"}
     assert rec["on_fail"] == "judge-record" and steps["judge-record"]["choices"] == ["record", "stop"]
-    assert "record" not in steps["judge"]["choices"] and "record" not in steps["fix"]["inputs"]
+    assert "record" not in steps["judge"]["choices"] and "fix" not in steps  # #3572: 本番は直しの段を持たない
     dev = release_steps_of(root, tmp_path, "dev", "1.0.1-dev.1")
     assert "record" not in dev and "judge-record" not in dev and dev["release"]["next"] == "verify"
 
@@ -715,7 +691,7 @@ def test_plan_promote_with_mvv_judges_before_merging(tmp_path):
 
     from supervise_lib.delivery_templates import PromoteParams, plan_promote
 
-    a = argparse.Namespace(base="develop", production_branch="main", issue=[1], mode="standard", no_reports="")
+    a = argparse.Namespace(base="develop", production="main", issue=[1], mode="standard", no_reports="")
     plan = plan_promote(a, str(tmp_path), 600, PromoteParams(mvv=str(tmp_path / "s.json"), verify="true"))
     steps = {s["id"]: s for s in plan["steps"]}
     assert [s["id"] for s in plan["steps"]][:5] == ["verify", "prepare", "mvv", "note", "promote"]
@@ -724,7 +700,7 @@ def test_plan_promote_with_mvv_judges_before_merging(tmp_path):
     assert "--gate release" in steps["mvv"]["cmd"] and material in steps["mvv"]["cmd"]
     assert steps["promote"]["cmd"].endswith("--gate-approved mvv") and steps["promote"]["on_fail"] == "handoff"
     assert steps["note"]["on_fail"] == "handoff" and steps["handoff"]["gate_next"] == "end"
-    assert plan["base_branch"] == "develop"
+    assert plan[PLAN_BASE] == "develop"
 
 
 def test_a_lint_test_cmd_never_builds_a_whole_test_on_the_dot(tmp_path):
@@ -757,7 +733,9 @@ def _repo_1437(tmp_path, project=None):
     sv.pop("test")
     (root / ".ndf" / "supervise.json").write_text(json.dumps(sv))
     if project is not None:
-        (root / ".ndf" / "project.json").write_text(json.dumps(project))
+        # ブランチ戦略の宣言（project.json の branch_strategy）は残して、ほかのキーを置く
+        path = root / ".ndf" / "project.json"
+        path.write_text(json.dumps({**project, "branch_strategy": json.loads(path.read_text())["branch_strategy"]}))
     return root
 
 
@@ -906,11 +884,9 @@ def test_check_new_check_reports_since_last_with_pr_before_missing_id(capsys):
 
 
 def cd_sprint(tmp_path, wt, rows, *extra, name="r"):
-    """宣言の形ごとの作業用のリポジトリで new sprint を打ち、(目録, プランの並び) を返す。"""
-    root = plain_repo(tmp_path / name if (tmp_path / name).mkdir() is None else tmp_path)
-    (root / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, **wt}))
-    if rows is not None:
-        (root / ".ndf" / "project.json").write_text(json.dumps({"delivery": rows}, ensure_ascii=False))
+    """宣言の形ごとの作業用のリポジトリで new sprint を打ち、(目録, プランの並び) を返す。`wt` は (ベースブランチ, 本番ブランチ)。"""
+    (tmp_path / name).mkdir()
+    root = plain_repo(tmp_path / name, base=wt[0], production=wt[1], deliveries=rows)
     (root / ".ndf" / "pace.json").write_text(json.dumps({"version": 1, "fast": {"enabled": True, "verify": "true"}}))
     out = tmp_path / name / "m"
     p = cli(*new_sprint_args(root, out, name="m6", issue=("216",), version=None), *extra, cwd=root)
@@ -920,8 +896,8 @@ def cd_sprint(tmp_path, wt, rows, *extra, name="r"):
     return manifest, plans, json.loads(p.stdout)
 
 
-TWO_BRANCHES = {"base_branch": "develop", "production_branch": "main"}
-ONE_BRANCH = {"base_branch": "main", "production_branch": "main"}
+TWO_BRANCHES = ("develop", "main")
+ONE_BRANCH = ("main", "main")
 CD_ROW = {"target": "prd", "kind": "auto", "trigger": "main へのマージ", "branch": "main", "versioned": False}
 HAND_ROW = {"target": "aws", "kind": "manual", "trigger": "cdk deploy", "versioned": False}
 
@@ -976,9 +952,9 @@ def test_guidance_is_not_given_to_a_documentation_sprint(tmp_path):
     assert "CD の案内" not in manifest and not [i for i in res["items"] if i.get("kind") == "cd-guidance"]
 
 
-def test_guidance_is_given_when_delivery_is_missing(tmp_path):
+def test_guidance_is_given_when_deliveries_are_missing(tmp_path):
     manifest, _, _ = cd_sprint(tmp_path, TWO_BRANCHES, None)
-    assert "delivery" in manifest["CD の案内"]["missing"]
+    assert "release.deliveries" in manifest["CD の案内"]["missing"]
 
 
 # --- #3144: 設計単体のレビューと詳細設計の段 ----------------------------------------------

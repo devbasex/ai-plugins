@@ -22,6 +22,7 @@ import sprint_loop_record as sl_record  # noqa: E402
 import sprint_loop_select as sl_select  # noqa: E402
 import lap_cost  # noqa: E402
 import usage_ledger  # noqa: E402
+import strategy_fixture  # noqa: E402
 
 MVV_TEXT = "## Mission\n速く\n\n## Vision\n回る\n\n## Value\n実測\n"
 DECL = {
@@ -1106,7 +1107,7 @@ def test_new_sprint_refusal_stops_with_refused_and_resume_retries(env):
 
 def test_sprint_without_a_version_runs_when_no_template_route_needs_it(env):
     """#2623 の受け入れ条件 4: 版数の要らない経路では --dev なしでループの 1 回を始め、状態にも new sprint にも版を渡さない。"""
-    (env.main_dir() / ".ndf" / "project.json").write_text(json.dumps({"delivery": []}))
+    strategy_fixture.declare(env.main_dir(), "main", deliveries=[])
     start(env)
     sl_select.cmd_select(env, "l1")
     seen = []

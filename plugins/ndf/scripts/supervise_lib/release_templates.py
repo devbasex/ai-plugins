@@ -7,9 +7,18 @@ import shlex
 from pathlib import Path
 from typing import Callable, NamedTuple
 
+import release_case
 from gate_answer import RELEASE_GATE
 from supervise_lib.decl import PRODUCTION_SOURCES, DeclError, with_decls
-from supervise_lib.release_flow import REVIEW_RANGE_IDS, bump_others_cmd, promotion_flag, release_branch_step, release_ref, release_units
+from supervise_lib.release_flow import (
+    REVIEW_RANGE_IDS,
+    bump_others_cmd,
+    release_strategy_flag,
+    with_strategy_snapshot,
+    release_branch_step,
+    release_ref,
+    release_units,
+)
 from supervise_lib.release_flow import release_review_row, review_branch_drop, review_range_steps
 from supervise_lib.paths import MERGED_PY, MVV_PY, STEPS_PY, VERIFY_PY
 from supervise_lib.plan import QUEUE_PRS
@@ -36,13 +45,13 @@ RULE_RELEASE_DEV = (
     "の揺れなら同じステップをもう一度（retry）。認証や権限の不足・タグの重複は stop。"
 )
 RULE_RELEASE_PROD = (
-    "利用者はリリース承認ゲートを承認した。run のステップが落ちたら、直せるもの（版数の書き漏れ・文書の形）は fix。"
-    "外部の待ち（CI・ネットワーク）の揺れなら同じステップをもう一度。タグの重複・権限の不足は stop。"
+    "利用者はリリース承認ゲートを承認した。run のステップが落ちたら、外部の待ち（CI・ネットワーク）の揺れなら同じステップを"
+    "もう一度。タグの重複・権限の不足と、コードや設定に原因があるもの（版数の書き漏れ・文書の形）は stop。"
 )
 RULE_RELEASE_PROD_MVV = (
     "リリース承認ゲートは利用者か MVV 判定が承認した（先頭の mvv のステップが 0 を返したときだけ先へ進む）。"
-    "run のステップが落ちたら、直せるもの（版数の書き漏れ・文書の形）は fix。"
-    "外部の待ち（CI・ネットワーク）の揺れなら同じステップをもう一度。タグの重複・権限の不足は stop。"
+    "run のステップが落ちたら、外部の待ち（CI・ネットワーク）の揺れなら同じステップをもう一度。"
+    "タグの重複・権限の不足と、コードや設定に原因があるもの（版数の書き漏れ・文書の形）は stop。"
 )
 
 
@@ -52,7 +61,7 @@ def plan_release(a) -> dict:
     maker = RELEASE_FORMS.get(form)
     if not maker:
         raise DeclError(f"リリースの形 {form!r} の雛形が無い（雛形のある形: {', '.join(RELEASE_FORMS)}）。その形は /ndf:release で配る")
-    return maker(a)
+    return with_strategy_snapshot(maker(a), a)
 
 
 DEV_SERIES = "release"  # スプリントの本番のプランが版を読む開発版のプランの名前（#2164）
@@ -97,7 +106,7 @@ def _validate_release_decl(rel: dict, dev: bool, a) -> tuple[str, list[str]]:
         raise DeclError("supervise.json: release.plugin（配るプラグインの名前）が要る")
     if not isinstance(runtimes, list) or not runtimes or not all(isinstance(r, str) for r in runtimes):
         raise DeclError("supervise.json: release.runtimes（導入を確かめるランタイムの並び）が要る")
-    if not dev and not a.production_branch:
+    if not dev and not a.production:
         raise DeclError(f"リリースに要る本番のブランチが無い（{PRODUCTION_SOURCES}）")
     return plugin, runtimes
 
@@ -225,7 +234,7 @@ def _prepare_steps(
     return steps
 
 
-def _release_step(a, v: str, dev: bool, repo: str | None, approval: str, on_pr: str | None = None) -> dict:
+def _release_step(a, v: str, dev: bool, repo: str | None, approval: str, on_pr: release_case.Case | None = None) -> dict:
     """release のステップ。本番は承認資料を --approval で渡し（承認したコミットはステップの実行時に資料から読む）、
     承認の外の変更で承認ゲート（10）になったら verify へ進まない。MVV 判定のプランは handoff でリリース承認ゲートの by: mvv の
     記録を外して人へ戻し、それ以外は end で終える（#815 の I7）。
@@ -248,10 +257,10 @@ def _release_step(a, v: str, dev: bool, repo: str | None, approval: str, on_pr: 
     }
     if on_pr and not dev:
         # CD のある場合（#2773）: 承認はリリースの PR の上で取る。承認の前は本番の PR を作って 10 で止まり、承認資料を組んで置く
-        step["cmd"] += promotion_flag(a)
+        step["cmd"] += release_strategy_flag(a)
         step.update(cd_release_wait(a, on_pr, step["on_exit"]))
     elif not dev:
-        step["cmd"] += f" --approval {shlex.quote(material_path(repo, approval))}" + promotion_flag(a)
+        step["cmd"] += f" --approval {shlex.quote(material_path(repo, approval))}" + release_strategy_flag(a)
         step["gate_next"] = "handoff" if getattr(a, "mvv", None) else "end"
     return step
 
@@ -273,13 +282,13 @@ def _record_step(v: str, prs: str) -> dict:
 
 
 def _release_verify_steps(
-    a, v: str, dev: bool, repo: str | None, ref: str, rts: str, approval: str, prs: str, on_pr: str | None = None
+    a, v: str, dev: bool, repo: str | None, ref: str, rts: str, approval: str, prs: str, on_pr: release_case.Case | None = None
 ) -> list[dict]:
-    """release と verify（導入の確かめ）のステップ。本番は間に record（リリース記録）を挟む。`on_pr` は CD のある場合の名前。"""
+    """release と verify（導入の確かめ）のステップ。本番は間に record（リリース記録）を挟む。`on_pr` は CD のある場合。"""
     dev_next = ("release-branch" if release_units(a) else "end" if on_pr else "facts") if dev else "cleanup"
     return [
         _release_step(a, v, dev, repo, approval, on_pr),
-        *([] if dev else [cd_result_step(repo, a.production_branch, release_names(v)[1]), _record_step(v, prs)]),
+        *([] if dev else [cd_result_step(repo, a.production, release_names(v)[1]), _record_step(v, prs)]),
         {
             "id": "verify",
             "type": "run",
@@ -306,7 +315,7 @@ class _KindArgs(NamedTuple):
     v: str
     base: str
     units: list
-    cd: str | None  # CD のある場合の名前（release_cd.release_cd_case）。CD が無ければ None
+    cd: release_case.Case | None  # CD のある場合（release_cd.release_cd_case）。CD が無ければ None
 
 
 def _dev_approvals(c: _KindArgs) -> list[dict]:
@@ -391,7 +400,7 @@ def plan_release_package_plugin(a) -> dict:
     # まとめたリリース（#2436）の本番は、提示で作って承認した資料を渡す
     approval = getattr(a, "approval_path", None) or f"issues/approval-{plugin}-v{base}.md"
     steps = _prepare_steps(a, plugin, v, prs, dev, after_notes, repo, approval, on_pr)
-    ref = a.base if dev else a.production_branch
+    ref = a.base if dev else a.production
     if sync:
         steps.append({"id": "sync", "type": "run", "preset": "sync-check", "on_fail": "judge", "next": "release"})
     steps += _release_verify_steps(a, v, dev, repo, ref, rts, approval, prs, cd)
@@ -403,7 +412,7 @@ def plan_release_package_plugin(a) -> dict:
     steps += [release_branch_step(a, repo, base, units, reviews[0]["id"] if reviews else after_branch), *reviews] if dev and units else []
     ctx = _KindArgs(a, repo, approval, prs, rts, v, base, units, cd)
     steps += kind.approval_steps(ctx)
-    steps += judge_fix_steps(run_ids, after_notes)
+    steps += judge_fix_steps(run_ids, after_notes, fix=dev)  # 本番は承認の外のコミットを積まない（#3572）
     if not dev:
         steps.append(judge_record_step())
     kind.add_gate(steps, ctx)  # CD のある場合の承認ゲートは approval-post の後に置く（release_cd.cd_prod_steps）

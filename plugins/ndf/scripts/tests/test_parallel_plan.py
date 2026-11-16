@@ -14,6 +14,8 @@ import pytest
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS / "lib"))
 sys.path.insert(0, str(SCRIPTS))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import strategy_fixture  # noqa: E402
 import parallel_plan as pp  # noqa: E402
 import parallel_release as prl  # noqa: E402
 from relay_lib import hub as hb  # noqa: E402
@@ -59,7 +61,7 @@ def test_valid_plan_passes():
         (variant(x=lambda d: d["lanes"][0].__setitem__("name", "p1-rel1")), "I1"),
         (variant(x=lambda d: d["lanes"][1].__setitem__("name", "lroot")), "I1"),
         (variant(x=lambda d: d["lanes"][2].__setitem__("handoff", "loop-lflow")), "I1"),
-        (variant(x=lambda d: d["lanes"][0].__setitem__("plans", 3)), "I2"),
+        (variant(x=lambda d: d["lanes"][0].__setitem__("plans", 7)), "I2"),
         (variant(x=lambda d: d["lanes"].append({**d["lanes"][0], "name": "l4", "plans": 0})), "form"),
         (variant(x=lambda d: d["lanes"][2].__setitem__("after", ["nope"])), "I3"),
         (variant(x=lambda d: d["lanes"][1].__setitem__("after", ["lfac"])), "I3"),
@@ -75,18 +77,16 @@ def test_name_at_limit_passes():
     assert pp.check_data(variant(name="a" * 24))[0] is not None
 
 
-def test_total_plans_boundary(monkeypatch):
-    assert pp.check_data(BASE)[0] is not None  # 合計 6 は上限ちょうど
-    monkeypatch.setenv("NDF_PARALLEL_MAX_PLANS", "5")
+def test_only_a_single_lane_over_the_cap_is_refused(monkeypatch):
+    """上限は同時に動く数のためのもので、計画の宣言の合計とレーンの数は数えない（#3021）。1 本で上限を超えるレーンだけを断る。"""
+    monkeypatch.setenv("NDF_PARALLEL_MAX_PLANS", "2")
+    monkeypatch.setenv("NDF_RELAY_MAX_NAMED", "1")
+    assert pp.check_data(BASE)[0] is not None  # 合計 6・3 本でも、どのレーンも 2 以下
+    monkeypatch.setenv("NDF_PARALLEL_MAX_PLANS", "1")
     assert ("error", "I2") in rules_of(BASE)
     monkeypatch.setenv("NDF_PARALLEL_MAX_PLANS", "zero")
     _, _, metrics = pp.check_data(BASE)
     assert metrics["max_plans"] == 6 and metrics["notes"]
-
-
-def test_lane_count_over_named_cap(monkeypatch):
-    monkeypatch.setenv("NDF_RELAY_MAX_NAMED", "2")
-    assert ("error", "I2") in rules_of(BASE)
 
 
 def test_touch_overlap_is_warning():
@@ -99,6 +99,27 @@ def test_ready_lanes_waits_for_dependency():
     plan = pp.check_data(BASE)[0]
     assert [ln.name for ln in pp.ready_lanes(plan, set(), set())] == ["lroot", "lflow"]
     assert [ln.name for ln in pp.ready_lanes(plan, {"lroot", "lflow"}, {"lflow"})] == ["lfac"]
+
+
+def test_load_valid_plan_skips_ended_lanes_in_overlaps(tmp_path):
+    """読む側も終わったレーンを課題の重なり（I19）に数えない。lane add が通した計画を status などが読める（#3553）。"""
+    import parallel_ledger as plg
+    from pydantic import ValidationError
+
+    d = variant(
+        x=lambda d: d["lanes"].append(
+            {"name": "lnew", "input": {"kind": "sprint", "issues": [2400]}, "plans": 1, "touches": ["api/"], "handoff": "sprint-lnew"}
+        )
+    )
+    pdir = pp.plan_dir(tmp_path, "p1")
+    pdir.mkdir(parents=True)
+    (pdir / "plan.json").write_text(json.dumps(d), encoding="utf-8")
+    with pytest.raises(ValidationError):  # lfac が終わっていなければ重なる
+        pp.load_valid_plan(tmp_path, "p1")
+    assert plg.append_ledger_row(
+        tmp_path, "p1", "lane_end", "lane_end:lfac", {"kind": "lane_end", "id": "lfac", "lane": "lfac"}, rid="lfac"
+    )
+    assert [ln.name for ln in pp.load_valid_plan(tmp_path, "p1").lanes] == ["lroot", "lflow", "lfac", "lnew"]
 
 
 def test_a_sprint_lane_ends_on_its_end_record_and_a_loop_lane_keeps_its_end():
@@ -276,30 +297,28 @@ def test_start_on_a_running_plan_outside_a_wrapper_still_answers(tmp_path, run_p
 
 # ---- 起動の前のリリースの検査（#2616 の受け入れ条件 16・17） ----
 
-AUTO = [{"kind": "auto", "channel": "base", "target": "stg"}, {"kind": "auto", "channel": "production", "target": "prod"}]
+ROW = {"trigger": "マージ", "versioned": False}
+AUTO = [{**ROW, "kind": "auto", "channel": "base", "target": "stg"}, {**ROW, "kind": "auto", "channel": "production", "target": "prod"}]
 
 
-def _declare(main, delivery=None, form=False):
-    (main / ".ndf" / "worktree.json").write_text(json.dumps({"base_branch": "develop", "production_branch": "main"}))
-    if delivery is not None:
-        (main / ".ndf" / "project.json").write_text(json.dumps({"delivery": delivery}))
-    if form:
-        (main / ".ndf" / "supervise.json").write_text(json.dumps({"release": {"form": "package-plugin", "plugin": "ndf"}}))
+def _declare(main, rows=None, form=False):
+    """ベースブランチ develop・本番ブランチ main のブランチ戦略の宣言（届け先の行 `rows`・`form` なら package-plugin）を置く。"""
+    release = {"form": "package-plugin", "plugin": "ndf"} if form else None
+    strategy_fixture.declare(main, "develop", "main", release, deliveries=rows)
 
 
 @pytest.mark.parametrize(
     "rows, form, at",
     [
-        ([{"kind": "manual", "target": "prod", "trigger": "手で流す"}], False, "delivery"),
-        (None, False, "delivery"),
-        ({"unknown": "調べていない"}, False, "delivery"),
+        ([{"kind": "manual", "target": "prod", "trigger": "手で流す", "versioned": False}], False, "release.deliveries"),
+        (None, False, "release.deliveries"),
         (None, True, "release.plugin"),
     ],
 )
 def test_check_items_warns_when_a_release_cannot_be_built(tmp_path, monkeypatch, rows, form, at):
     import parallel_route as prt
 
-    monkeypatch.setattr(prt, "dev_version", lambda _m: "")
+    monkeypatch.setattr(prt, "dev_version", lambda _m, fetch=True: "")
     _declare(_git_main(tmp_path), rows, form)
     got = prt.check_items(tmp_path)
     assert [(g["level"], g["rule"], g["at"]) for g in got] == [("warning", "release", at)] and got[0]["message"]
@@ -309,7 +328,7 @@ def test_check_items_warns_when_a_release_cannot_be_built(tmp_path, monkeypatch,
 def test_check_items_is_silent_when_a_release_can_be_answered(tmp_path, monkeypatch, rows, form):
     import parallel_route as prt
 
-    monkeypatch.setattr(prt, "dev_version", lambda _m: "1.2.3")
+    monkeypatch.setattr(prt, "dev_version", lambda _m, fetch=True: "1.2.3")
     _declare(_git_main(tmp_path), rows, form)
     assert prt.check_items(tmp_path) == []
 
@@ -318,7 +337,7 @@ def test_check_cli_counts_the_warning_and_exits_zero(tmp_path):
     main = _git_main(tmp_path)
     assert _cli(main, "init", "p1", stdin=json.dumps(BASE))[0] == 0
     code, res = _cli(main, "check", "p1")
-    assert code == 0 and [i["at"] for i in res["items"] if i.get("rule") == "release"] == ["delivery"]
+    assert code == 0 and [i["at"] for i in res["items"] if i.get("rule") == "release"] == ["release.deliveries"]
     warned = res["metrics"]["warnings"]
     _declare(main, AUTO)
     code, res = _cli(main, "check", "p1")
@@ -367,3 +386,16 @@ def test_start_with_a_dead_run_pid_marks_the_session_before_continuing(tmp_path,
         pcli.start_plan(a, reply, main, checked, SCRIPTS / "parallel.py")
     assert marked == [("p1", False)] and out["metrics"]["organizer"] is True
     assert spawned and spawned[0][-2:] == ["run", "p1"]
+
+
+def test_ended_lanes_do_not_raise_overlaps():
+    """終わりの記録があるレーンは、触る場所（I4）と課題（I19）の重なりに数えない（#3021 の残り）。"""
+    d = variant(x=lambda d: d["lanes"].append(
+        {"name": "lnew", "input": {"kind": "sprint", "issues": [2400]}, "plans": 1, "touches": ["plugins/ndf/scripts/"], "handoff": "sprint-lnew"}
+    ))  # fmt: skip
+    assert ("error", "I19") in rules_of(d)  # lfac #2400 と重なる
+    plan, items, _ = pp.check_data(d, ended={"lfac", "lroot"})
+    assert plan is not None
+    assert not [it for it in items if it["rule"] in ("I4", "I19")]
+    plan, items, _ = pp.check_data(d, ended={"lfac"})
+    assert [it["lanes"] for it in items if it["rule"] == "I4"] == [["lroot", "lnew"]]

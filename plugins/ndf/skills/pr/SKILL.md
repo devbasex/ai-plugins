@@ -17,8 +17,8 @@ allowed-tools:
 
 ## 引数
 
-`/ndf:pr [--draft] [base] ["メッセージ"]`。`--draft` はドラフト PR、既知のベース名（既定ブランチ・設定の `base_branch` /
-`qa/*` / `release/*` / `staging/*` 等）はベース、それ以外はコミットメッセージ。既定の宛先は設定の `base_branch`、無ければ既定ブランチで、非ドラフト。
+`/ndf:pr [--draft] [base] ["メッセージ"]`。`--draft` はドラフト PR、既知のベース名（既定ブランチ・ブランチ戦略の宣言の `branches.base` /
+`qa/*` / `release/*` / `staging/*` 等）はベース、それ以外はコミットメッセージ。既定の宛先はブランチ戦略の宣言のスプリントの PR の宛先（`branches.base`）で、非ドラフト。
 
 ## push / PR 作成前の同意取得（必須）
 
@@ -149,11 +149,11 @@ URL は最終行に生のまま置く（Markdown リンクにすると利用者�
 | --- | --- | --- | --- |
 | `sprint/<名前>` | 課題の Pull Request。課題の worktree からスプリントブランチへ集める | 通さない。緑になったらスプリントブランチへ取り込む | `target: sprint` / `review: false` |
 | `sprint/<名前>`（並列の計画のレーンで、課題のまとまりの記録があるスプリント） | まとまりの Pull Request。まとまり 1 つにつき 1 本で、代表の課題の番号のブランチから出す | 通す（そのまとまりの差分だけを範囲にした `cross-review`）。収束してからスプリントブランチへ取り込む | `target: sprint` / `review: true` |
-| ベースブランチ（worktree の設定の `base_branch`） | スプリントの Pull Request（スプリントで 1 本）か、スプリントブランチを経ない単独の Pull Request | 通す（リファクタリング・`cross-review`・完了判定を 1 回）。まとまりの記録があるスプリントの Pull Request は `cross-review` を回さず、リファクタリングと完了判定だけを通す | `target: base` / `review: true` |
+| ベースブランチ（ブランチ戦略の宣言の `branches.base`） | スプリントの Pull Request（スプリントで 1 本）か、スプリントブランチを経ない単独の Pull Request | 通す（リファクタリング・`cross-review`・完了判定を 1 回）。まとまりの記録があるスプリントの Pull Request は `cross-review` を回さず、リファクタリングと完了判定だけを通す | `target: base` / `review: true` |
 
 課題の Pull Request は `--base sprint/<名前>` で出す。スプリントの Pull Request は、
 スプリントブランチの worktree からベースブランチ宛てに出し、本文にスプリントが閉じる課題を番号ごとに書く。
-開発の起点（`base_branch`）が既定ブランチと同じリポジトリでは、上のベースブランチの行の Pull Request が既定ブランチ宛になる。
+ベースブランチ（ブランチ戦略の宣言の `branches.base`）が既定ブランチと同じリポジトリでは、上のベースブランチの行の Pull Request が既定ブランチ宛になる。
 そのときの本文の扱いは次の節にある。
 
 ## closing keywords は本文だけに書く
@@ -200,7 +200,7 @@ URL は最終行に生のまま置く（Markdown リンクにすると利用者�
 | **本番チャネル** | **要る** |
 | head のブランチ名が `design/` で始まる Pull Request | **どのチャネルでも要る**（ドキュメントレビューの承認ゲート） |
 
-**規則は `/ndf:release` が持つ。** 本番チャネルは `.ndf/worktree.json` の `production_branch`、
+**規則は `/ndf:release` が持つ。** 本番チャネルは ブランチ戦略の宣言の `branches.production`、
 設定が無ければ既定ブランチ。全体像は `/ndf:development-workflow` の「人手の承認を求める承認ゲート」。
 
 この工程に入ったら `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "Pull Request"` を 1 行打つ（3 層では起動指示の「進捗記録」を使う）。

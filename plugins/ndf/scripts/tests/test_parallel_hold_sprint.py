@@ -11,8 +11,8 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-
-import test_parallel_run as tpr  # noqa: E402,F401  lib を sys.path へ足す
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import durable  # noqa: E402
 import parallel_answer as pa  # noqa: E402

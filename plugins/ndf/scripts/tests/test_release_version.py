@@ -23,6 +23,7 @@ import sprint_loop as sl  # noqa: E402
 import sprint_loop_record as sl_record  # noqa: E402
 from supervise_lib import queue, queue_fill  # noqa: E402
 from supervise_lib.paths import state_dir_of  # noqa: E402
+import strategy_fixture  # noqa: E402
 
 
 def git(root: Path, *args: str) -> str:
@@ -83,8 +84,7 @@ class World:
         git(self.repo, "init", "-q", "-b", "develop")
         for k, v in (("user.email", "t@example.com"), ("user.name", "t"), ("commit.gpgsign", "false")):
             git(self.repo, "config", k, v)
-        (self.repo / ".ndf").mkdir()
-        (self.repo / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "base_branch": "develop", "production_branch": "main"}))
+        strategy_fixture.declare(self.repo, "develop", "main", {"form": "package-plugin", "plugin": "ndf"})
         git(self.repo, "remote", "add", "origin", str(self.origin))
         self.publish(version, "develop", "main", tag=True)
 
@@ -302,7 +302,8 @@ def test_prod_plan_stops_when_the_release_is_already_tagged(tmp_path, world):
     world.publish("10.27.6", "develop", "main", tag=True)
     before = prod.read_text()
     err, info = fill(prod)
-    assert err and info["cause"] == "taken" and info["existing"] == "ndf--v10.27.6" and info["next_free"] == "10.27.7"
+    # World の宣言はタグを作らない（release.tag が null）ため、出済みの版はタグの名前でなく本番ブランチの版として示す
+    assert err and info["cause"] == "taken" and info["existing"] == "origin/main の版 10.27.6" and info["next_free"] == "10.27.7"
     assert prod.read_text() == before
 
 
@@ -352,7 +353,9 @@ def test_fill_stage_asks_the_condition_before_the_version(tmp_path, world, code,
 def looped(tmp: Path, world: World, dev: str = "", prod: str = "", extra: tuple[str, ...] = ()) -> dict:
     """開発ループと同じコマンドで実物の開発版のプランを組み、ループの 1 回の行を返す（dev_plan・prod_plan を持つ）。"""
     ndf = world.repo / ".ndf"
-    (ndf / "supervise.json").write_text((SCRIPTS.parents[2] / ".ndf" / "supervise.json").read_text())
+    # リリースの形は World が宣言に置いた
+    sup = json.loads((SCRIPTS.parents[2] / ".ndf" / "supervise.json").read_text())
+    (ndf / "supervise.json").write_text(json.dumps(sup))
     auto = {"enabled": True, "modes": ["standard"], "verify": "true"}
     (ndf / "pace.json").write_text(json.dumps({"version": 1, "auto": auto}))
     d = tmp / "lap"
@@ -450,3 +453,153 @@ def test_plan_finished_reads_the_result_of_the_report(tmp_path, world, report, w
         (sd / "report.md").write_text(report)
     assert queue_fill.plan_finished(str(plan)) is want
     assert queue_fill.plan_finished(None) is False
+
+
+# ---- 並列の計画のまとめたリリースの版（#3551） ----
+
+
+@pytest.mark.parametrize(
+    ("base", "latest", "want"),
+    [
+        ("10.27.67-dev.1", "10.27.66", "10.27.67"),  # 開発版の版上げが入った後（今と同じ）
+        ("10.27.66", "10.27.66", "10.27.67"),  # 同期の PR が出した版へ揃えた後（#3551 の事象）
+        ("10.27.66-dev.3", "10.27.66", "10.27.67"),  # 系列のタグがもうある
+        ("10.27.65", "10.27.66", "10.27.67"),  # ベースブランチが最新のタグより古い
+        ("10.27.5", None, "10.27.5"),  # タグが 1 つも無い
+    ],
+)
+def test_collected_release_is_above_the_latest_tag(base, latest, want):
+    assert rv.collected_release(obs(base, latest)) == want
+
+
+def test_collected_release_does_not_decide_when_something_is_unreadable():
+    o = obs("10.27.66", "10.27.66")
+    o.unreadable = ["tags"]
+    assert rv.collected_release(o) is None
+
+
+def test_dev_version_of_the_parallel_plan_skips_a_released_version(tmp_path, world):
+    """同期の PR で develop が出した版（タグあり）へ揃った後でも、まとめたリリースは次の版で組む（#3551）。"""
+    import parallel_repo
+
+    world.publish("10.27.6", "develop", "main", tag=True)
+    assert parallel_repo.dev_version(world.repo) == "10.27.7"
+    world.publish("10.27.7-dev.1", "develop")
+    assert parallel_repo.dev_version(world.repo) == "10.27.7"
+
+
+def test_dev_version_without_fetch_does_not_touch_origin(tmp_path, world, monkeypatch):
+    """起動の前の検査は origin を取り直さず、手元の追跡ブランチとタグで版を決める。"""
+    import parallel_repo
+
+    world.publish("10.27.6", "develop", "main", tag=True)
+    real = rv._git_run
+    seen = []
+    monkeypatch.setattr(rv, "_git_run", lambda repo, *a: seen.append(a[0]) or real(repo, *a))
+    assert parallel_repo.dev_version(world.repo, fetch=False) == "10.27.7" and "fetch" not in seen
+
+
+def test_dev_version_names_an_origin_fetch_failure_apart_from_an_unreadable_version(tmp_path, world, monkeypatch):
+    """取り直しに落ちたら、版を読めないという理由ではなく git の stderr を添えた取り直せない理由で止める。"""
+    import parallel_repo
+
+    world.publish("10.27.6", "develop", "main", tag=True)
+    real = rv._git_run
+    failed = subprocess.CompletedProcess(["git", "fetch"], 128, "", "fatal: unable to access origin")
+    monkeypatch.setattr(rv, "_git_run", lambda repo, *a: failed if a[0] == "fetch" else real(repo, *a))
+    with pytest.raises(parallel_repo.OriginUnfetchable, match="origin を取り直せない: fatal: unable to access origin"):
+        parallel_repo.dev_version(world.repo)
+    assert parallel_repo.dev_version(world.repo, fetch=False) == "10.27.7"
+
+
+# ---- observe の現状固定（I-002） ----
+
+
+def test_observe_reads_base_production_and_release_tags(world):
+    """正式版のタグだけを拾い、接尾辞つき・semver でない・別のプラグインのタグは外す。"""
+    world.publish("10.27.6", "develop", "main", tag=True)
+    for t in ("ndf--v10.27.7-dev.1", "ndf--vbroken", "other--v99.0.0"):
+        git(world.repo, "tag", t)
+    git(world.repo, "push", "-q", "origin", "--tags")
+    o = rv.observe(world.repo, "ndf", "develop", "main")
+    assert (o.plugin, o.base_ref, o.base_version, o.production_ref, o.production_version) == (
+        "ndf",
+        "origin/develop",
+        "10.27.6",
+        "origin/main",
+        "10.27.6",
+    )
+    assert sorted(o.tags) == ["10.27.5", "10.27.6"] and o.latest_tag == "10.27.6"
+    assert o.unreadable == []
+
+
+def test_untagged_declaration_counts_the_production_version_as_released(world):
+    """タグを作らない宣言（World の宣言は CD が無く release.tag が null）では、本番ブランチの正式版を出済みの版に数え、
+    出した版をもう一度出す計画を組まない（タグが無くても、まとめたリリースは次の PATCH を出す）。"""
+    import parallel_repo
+
+    world.publish("10.27.6", "develop", "main")
+    o = rv.observe(world.repo, "ndf", "develop", "main")
+    assert "10.27.6" in o.tags and o.latest_tag == "10.27.6"
+    assert rv.taken(o, "10.27.6").is_taken and rv.collected_release(o) == "10.27.7"
+    assert parallel_repo.dev_version(world.repo) == "10.27.7"
+
+
+def test_observe_counts_released_versions_by_the_given_declaration(world):
+    """#3701 の round 15: 出済みの版の数え方は渡した宣言（プランの開始時のスナップショット）のタグの有無で決め、今の宣言を
+    読み直さない。タグを作らない宣言で本番ブランチの版から数えた版は、作られていないタグの名前でなく本番ブランチの版として示す。"""
+    world.publish("10.27.6", "develop", "main")
+    tagged = rv.observe(world.repo, "ndf", "develop", "main", tagged=True)
+    assert "10.27.6" not in tagged.tags and not rv.taken(tagged, "10.27.6").is_taken
+    untagged = rv.observe(world.repo, "ndf", "develop", "main", tagged=False)
+    assert rv.taken(untagged, "10.27.6").existing == "origin/main の版 10.27.6"
+    assert "tagged" not in untagged.as_dict()
+
+
+def test_observe_and_taken_follow_the_declared_tag_shape(world):
+    """宣言の release.tag が `v{version}` なら、その形のタグを出済みの版に数え、既定の形のタグは数えない（前版の検索・公開と同じ形）。"""
+    for t in ("v10.28.0", "v10.28.1-dev.1", "ndf--v10.29.0"):
+        git(world.repo, "tag", t)
+    git(world.repo, "push", "-q", "origin", "--tags")
+    o = rv.observe(world.repo, "ndf", "develop", None, template="v{version}")
+    assert o.tags == ["10.28.0"] and o.latest_tag == "10.28.0"
+    d = rv.taken(o, "10.28.0")
+    assert d.existing == "v10.28.0" and d.next_free == "10.28.1"
+
+
+def test_observe_without_production_does_not_read_it(world):
+    o = rv.observe(world.repo, "ndf", "develop", None)
+    assert o.production_ref == "" and o.production_version is None
+    assert o.base_version == "10.27.5" and o.unreadable == []
+
+
+def test_observe_counts_missing_branches_as_unreadable(world):
+    o = rv.observe(world.repo, "ndf", "nosuch", "gone")
+    assert (o.base_ref, o.production_ref) == ("origin/nosuch", "origin/gone")
+    assert o.base_version is None and o.production_version is None
+    assert o.unreadable == ["origin/nosuch", "origin/gone"]
+    assert o.tags == ["10.27.5"]
+
+
+def test_observe_uses_the_given_rel_and_counts_a_wrong_one_as_unreadable(world):
+    ok = rv.observe(world.repo, "ndf", "develop", "main", rel="plugins/ndf/.claude-plugin/plugin.json")
+    assert (ok.base_version, ok.production_version, ok.unreadable) == ("10.27.5", "10.27.5", [])
+    bad = rv.observe(world.repo, "ndf", "develop", "main", rel="nope/plugin.json")
+    assert bad.base_version is None and bad.production_version is None
+    assert bad.unreadable == ["origin/develop", "origin/main"]
+
+
+def test_observe_without_tags_is_not_unreadable(world):
+    git(world.repo, "tag", "-d", "ndf--v10.27.5")
+    # タグを作る宣言で読む（World の宣言はタグを作らず、本番ブランチの版を出済みの版に数える）
+    o = rv.observe(world.repo, "ndf", "develop", "main", fetch=False, tagged=True)
+    assert o.tags == [] and o.latest_tag is None and o.unreadable == []
+
+
+def test_observe_counts_a_failed_fetch_as_origin_unreadable(world):
+    """取り直しに落ちても手元の origin/* は読む。fetch=False なら取り直さず、読めないにも数えない。"""
+    git(world.repo, "fetch", "-q", "origin")
+    git(world.repo, "remote", "set-url", "origin", str(world.origin) + "-missing")
+    o = rv.observe(world.repo, "ndf", "develop", "main")
+    assert o.unreadable == ["origin"] and o.base_version == "10.27.5" and o.tags == ["10.27.5"]
+    assert rv.observe(world.repo, "ndf", "develop", "main", fetch=False).unreadable == []

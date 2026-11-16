@@ -1,0 +1,603 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/io/relay.args.schema.json",
+  "title": "ndf relay の引数",
+  "description": "ndf relay が受ける引数。キーは引数の名前（オプションは -- の名前、位置引数は名前）。規約の生成が作り、手で直さない",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "account add",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "name": {
+          "type": "string",
+          "description": "アカウントの名前（英小文字・数字・- と _ の 32 字まで）",
+          "x-ndf-positional": true
+        },
+        "--code": {
+          "type": "string",
+          "description": "認可コード。- なら標準入力の 1 行（引数と記録に残さない）"
+        }
+      },
+      "required": [
+        "subcommand",
+        "name"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "account add-api-key",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "name": {
+          "type": "string",
+          "description": "API キーの名前",
+          "x-ndf-positional": true
+        },
+        "--account": {
+          "type": "string",
+          "description": "結び付ける登録済みアカウント"
+        },
+        "--key-file": {
+          "type": "string",
+          "description": "キーの値を 1 行目に持つファイル（省けば標準入力の 1 行）"
+        },
+        "--monthly": {
+          "type": "string",
+          "description": "月の額（ドル）"
+        }
+      },
+      "required": [
+        "subcommand",
+        "name",
+        "--account"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "account add-bedrock",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--profile": {
+          "type": "string",
+          "description": "AWS のプロファイル"
+        },
+        "--region": {
+          "type": "string",
+          "description": "地域（省けばプロファイルの region）"
+        },
+        "--model": {
+          "type": "string",
+          "description": "モデルの ID"
+        },
+        "--yes": {
+          "type": "boolean",
+          "description": "確かめが通れば保存する（前の宣言を置き換える）"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "account api-key-monthly",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "name": {
+          "type": "string",
+          "description": "API キーの名前",
+          "x-ndf-positional": true
+        },
+        "usd": {
+          "type": "string",
+          "description": "月の額（ドル。0 で外す）",
+          "x-ndf-positional": true
+        }
+      },
+      "required": [
+        "subcommand",
+        "name",
+        "usd"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "account api-key-use",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "off",
+            "always",
+            "near-limit"
+          ],
+          "description": "使い方（省けば今の値を出す）",
+          "x-ndf-positional": true
+        },
+        "--weekly-at": {
+          "type": "string",
+          "description": "閾値（百分率。1〜100）"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "account capacity",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "name": {
+          "type": "string",
+          "description": "アカウントの名前",
+          "x-ndf-positional": true
+        },
+        "five": {
+          "type": "string",
+          "description": "5 時間の枠（USD か -）",
+          "x-ndf-positional": true
+        },
+        "seven": {
+          "type": "string",
+          "description": "週の枠（USD か -）",
+          "x-ndf-positional": true
+        }
+      },
+      "required": [
+        "subcommand",
+        "name",
+        "five",
+        "seven"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "account check",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "target": {
+          "type": "string",
+          "description": "metered か API キーの名前",
+          "x-ndf-positional": true
+        }
+      },
+      "required": [
+        "subcommand",
+        "target"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "account clear",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "account list",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "account remove",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "target": {
+          "type": "string",
+          "description": "アカウントの名前・metered・API キーの名前",
+          "x-ndf-positional": true
+        }
+      },
+      "required": [
+        "subcommand",
+        "target"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "account show",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "account use",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "name": {
+          "type": "string",
+          "x-ndf-positional": true
+        }
+      },
+      "required": [
+        "subcommand",
+        "name"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "context calibrate",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--days": {
+          "type": "integer",
+          "default": 30,
+          "description": "較正に使う直近の日数"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "context record",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--verdict": {
+          "type": "string",
+          "enum": [
+            "再起動"
+          ],
+          "description": "再起動の行を書く（--reason と組む）"
+        },
+        "--event": {
+          "type": "string",
+          "enum": [
+            "引継ぎ開始",
+            "復元完了"
+          ],
+          "description": "印の行を書く"
+        },
+        "--reason": {
+          "type": "string",
+          "enum": [
+            "容量",
+            "運用上限",
+            "費用",
+            "独立性",
+            "手動",
+            "カットポイント",
+            "待ち"
+          ],
+          "description": "再起動の理由"
+        },
+        "--work": {
+          "type": "string",
+          "description": "作業の識別子（課題番号の並び）"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--work"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "context report",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--work": {
+          "type": "string",
+          "description": "集計する作業の識別子"
+        },
+        "--all": {
+          "type": "boolean",
+          "description": "記録にあるすべての作業を集計する"
+        },
+        "--since": {
+          "type": "string",
+          "description": "この日（YYYY-MM-DD）以降の判定の行だけを読む"
+        },
+        "--from": {
+          "type": "string",
+          "description": "この時刻（ISO 8601）からの呼び出しと行だけを数える"
+        },
+        "--until": {
+          "type": "string",
+          "description": "この時刻（ISO 8601）までの呼び出しと行だけを数える"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "context resolve",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--root": {
+          "type": "string",
+          "description": "設定を読むリポジトリ（省けば今の作業場所の git の根）"
+        },
+        "--policy": {
+          "type": "string",
+          "enum": [
+            "current",
+            "trial"
+          ],
+          "description": "方針を上書きする"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "decide",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "install",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--replace-old": {
+          "type": "boolean",
+          "description": "旧い NDF の複製を置き換える（旧いラッパーが動いていれば断る）"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "ls",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "mark",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "session_id": {
+          "type": "string",
+          "x-ndf-positional": true
+        }
+      },
+      "required": [
+        "subcommand",
+        "session_id"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "notice",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "pending",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "restart",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "name": {
+          "type": "string",
+          "x-ndf-positional": true
+        }
+      },
+      "required": [
+        "subcommand",
+        "name"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "run",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--name": {
+          "type": "string"
+        },
+        "rest": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-ndf-positional": true
+        },
+        "--prompt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "spawn",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--name": {
+          "type": "string"
+        },
+        "rest": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-ndf-positional": true
+        },
+        "--cwd": {
+          "type": "string"
+        },
+        "--role": {
+          "type": "string"
+        },
+        "--plan": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "status",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "stop",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "name": {
+          "type": "string",
+          "description": "止めるラッパーの名前",
+          "x-ndf-positional": true
+        },
+        "--all": {
+          "type": "boolean",
+          "description": "動いている名前つきのラッパーをすべて止める"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "uninstall",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    }
+  ]
+}

@@ -16,6 +16,9 @@ import pytest
 
 REPO = Path(__file__).resolve().parents[2]
 SCRIPT = REPO / "scripts" / "ci-heavy-skip.py"
+sys.path.insert(0, str(REPO / "plugins" / "ndf" / "scripts" / "tests"))
+import strategy_fixture  # noqa: E402
+
 RELEASE_STEPS = REPO / "plugins" / "ndf" / "scripts" / "release-steps.py"
 
 
@@ -74,6 +77,8 @@ def repo(tmp_path: Path) -> Path:
         "tested": [{"paths": ["docs/glossary.md", "docs/glossary/**"], "tests": ["scripts/tests/test_x.py"]}],
     }
     write(root, ".ndf/project.json", json.dumps({"version": 1, "docs": docs}))
+    # ブランチ戦略の宣言（develop → main。ベースブランチを丸ごと出す取り込み方）。規則 3 は宛先の宣言を読む
+    strategy_fixture.write_strategy(root, "web-develop", base="develop", production="main")
     commit(root, "base")
     return root
 
@@ -187,6 +192,51 @@ def test_skill_body_skips_pytest_but_not_runtime_smoke(mod, repo):
     assert decide(mod, repo, base, head)[0]
     skip, reason = decide(mod, repo, base, head, workflow="runtime-plugin-smoke.yml")
     assert not skip and "SKILL.md" in reason
+
+
+# --- 1c. 自分の CI で確かめる作り直しのディレクトリ（plugins/ndf-next/）と文書だけの差分 ------------
+
+
+@pytest.mark.parametrize("workflow", ["pytest.yml", "runtime-plugin-smoke.yml"])
+def test_ndf_next_only_diff_skips_heavy_jobs(mod, repo, workflow):
+    """#1142: plugins/ndf-next/ は ndf-next.yml のジョブで確かめるため、古い ndf の重いジョブを省く。"""
+    base = git(repo, "rev-parse", "HEAD")
+    write(repo, "plugins/ndf-next/src/ndf/checks/rules.py", "X = 1\n")
+    write(repo, "plugins/ndf-next/skills/a/SKILL.md", "---\nname: a\n---\n")
+    write(repo, ".github/workflows/ndf-next.yml", "on: pull_request\n")
+    write(repo, "issues/issue-1-design.md", "# 設計\n")
+    head = commit(repo, "ndf-next")
+    d = mod.decide(str(repo), "pull_request", base, head, "o/r", workflow, api=none_passed)
+    assert d.skip and d.docs_tests == (), d.reason
+
+
+def test_ndf_next_with_tested_docs_returns_their_tests(mod, repo):
+    base = git(repo, "rev-parse", "HEAD")
+    write(repo, "plugins/ndf-next/src/ndf/cli.py", "X = 1\n")
+    write(repo, "docs/glossary.md", "changed\n")
+    head = commit(repo, "ndf-next and glossary")
+    d = mod.decide(str(repo), "pull_request", base, head, "o/r", "pytest.yml", api=none_passed)
+    assert d.skip and d.docs_tests == ("scripts/tests/test_x.py",), d.reason
+
+
+@pytest.mark.parametrize(
+    "rel", ["plugins/ndf/scripts/tool.py", ".github/workflows/pytest.yml", "plugins/ndf-nextx/a.py", "scripts/tests/test_x.py"]
+)
+def test_ndf_next_with_other_code_still_runs(mod, repo, rel):
+    base = git(repo, "rev-parse", "HEAD")
+    write(repo, "plugins/ndf-next/src/ndf/cli.py", "X = 1\n")
+    write(repo, rel, "changed\n")
+    head = commit(repo, "ndf-next and more")
+    skip, reason = decide(mod, repo, base, head)
+    assert not skip, reason
+
+
+def test_ndf_next_diff_does_not_skip_when_docs_decl_is_unreadable(mod, repo):
+    write(repo, ".ndf/project.json", '{"version": 1, "docs": {"files": "x"}}')
+    base = commit(repo, "broken decl")
+    write(repo, "plugins/ndf-next/src/ndf/cli.py", "X = 1\n")
+    head = commit(repo, "ndf-next")
+    assert not decide(mod, repo, base, head)[0]
 
 
 def test_unreadable_docs_decl_does_not_skip(mod, repo):
@@ -401,39 +451,39 @@ def test_merge_when_green_accepts_skipped_heavy_jobs(monkeypatch):
 # --- 3. 宛先の宣言が選んで集める取り込み方なら規則 3 を当てない（#3121 の決定 15） -----------------
 
 
-SELECTED = {"start": "production", "integrate": "check", "doc_prs": "sprint", "promotion": "selected"}
+# 選んで集める取り込み方（release_branch）と、ベースブランチを丸ごと出す取り込み方（merge_base_branch）の種類
+SELECTED, WHOLE = "mobile", "web-develop"
 
 
-def declared_main(repo: Path, flow: dict | None, base_branch: str = "develop") -> tuple[str, str, str]:
-    """main に宣言（`.ndf/worktree.json`）を置いた形の release_history。main の先端を宣言のコミットにする。"""
+def declared_main(repo: Path, kind: str) -> tuple[str, str, str]:
+    """main にブランチ戦略の宣言（種類 `kind`）を置いた形の release_history。main の先端を宣言のコミットにする。"""
     main, p, m = release_history(repo)
     git(repo, "switch", "-q", "main")
-    wt = {"version": 1, "base_branch": base_branch, "production_branch": "main"}
-    if flow is not None:
-        wt["branch_flow"] = flow
-    write(repo, ".ndf/worktree.json", json.dumps(wt))
-    main = commit(repo, "decl")
+    strategy_fixture.write_strategy(repo, kind, base="develop", production="main")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "--allow-empty", "-m", "decl")  # 土台と同じ宣言でも宣言のコミットを置く
+    main = git(repo, "rev-parse", "HEAD")
     git(repo, "switch", "-q", "develop")
     git(repo, "merge", "-q", "--no-ff", "-m", "sync", "main")
     return main, p, git(repo, "rev-parse", "HEAD")
 
 
 def test_main_pr_runs_when_the_target_selects_units(mod, repo):
-    """受け入れ条件 18: 宛先の宣言が selected なら、develop で通っていても全体テストを省かない。"""
+    """受け入れ条件 18: 宛先の宣言が release_branch なら、develop で通っていても全体テストを省かない。"""
     main, _, m = declared_main(repo, SELECTED)
     skip, reason = decide(mod, repo, main, m, api=fake_api({m}))
     assert not skip and "選んだ単位" in reason
 
 
 def test_main_pr_keeps_rule_3_when_the_target_takes_the_whole_base(mod, repo):
-    """宣言が whole か branch_flow が無ければ今の規則 3 のまま（比べるブランチは宣言の base_branch）。"""
-    main, _, m = declared_main(repo, None)
+    """宣言が merge_base_branch なら今の規則 3 のまま（比べるブランチは宣言の branches.base）。"""
+    main, _, m = declared_main(repo, WHOLE)
     assert decide(mod, repo, main, m, api=fake_api({m}))[0]
 
 
 def test_a_head_that_rewrites_its_own_declaration_does_not_loosen_the_target(mod, repo):
-    """宣言は宛先から読む。head 側で whole へ書き換えても、宛先が selected なら省かない（決定 12 と同じ考え方）。"""
+    """宣言は宛先から読む。head 側で merge_base_branch へ書き換えても、宛先が release_branch なら省かない（決定 12 と同じ考え方）。"""
     main, _, _ = declared_main(repo, SELECTED)
-    write(repo, ".ndf/worktree.json", json.dumps({"version": 1, "base_branch": "develop"}))
+    strategy_fixture.write_strategy(repo, WHOLE, base="develop", production="main")
     m = commit(repo, "loosen")
     assert not decide(mod, repo, main, m, api=fake_api({m}))[0]

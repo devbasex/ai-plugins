@@ -34,9 +34,8 @@ plugins/ndf/
 
 ## インストール
 
-**以下は正式版（`main`）の手順です。** 検証中の開発版は `develop` に載ります。取得元へ
-`#develop` を足す形で、手順は
-[docs/versioning-and-distribution.md の「開発版を試す」](../../docs/versioning-and-distribution.md#開発版を試す)にあります。
+**取得元は既定ブランチ（`main`）です。** 正式版は `main` から切った版上げの Pull Request のマージで出ます。開発版のチャネル（`#develop`）は 10.27.75 の後でやめました。入れていた利用者が `main` へ戻す手順は
+[docs/versioning-and-distribution.md の「開発版から正式版へ戻す」](../../docs/versioning-and-distribution.md#開発版から正式版へ戻す)にあります。
 
 ### Claude Code
 
@@ -375,7 +374,7 @@ agy models   # 認証確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.27.63-dev.1/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.27.75/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -397,14 +396,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.27.63-dev.1/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.27.75/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.27.63-dev.1  <path>
+# => ndf@ai-plugins  installed, enabled  10.27.75  <path>
 ```
 
 抑止していない Skill（`document-style` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。

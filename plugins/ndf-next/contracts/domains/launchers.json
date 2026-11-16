@@ -1,0 +1,38 @@
+{
+  "summary": "プラグインの bin/ のファイルごとの種類。launcher は利用者と AI が打つ起動スクリプト、part は起動スクリプトが起こす内部の部品で、AI は直接打たない。bin/ のファイルはすべてこの表に行を持つ（ndf check の spec-io）",
+  "owner": "D2（contracts/domains。行は起動スクリプトを足す子が足す。初版は #3518）",
+  "columns": {
+    "kind": {
+      "type": "string",
+      "summary": "種類。launcher は起動スクリプト、part は内部の部品"
+    },
+    "passes_to": {
+      "type": "string",
+      "summary": "引数の渡し先。副命令の表（cli.COMMANDS）へ渡すなら ndf、claude へそのまま渡すなら claude、部品は起こす元"
+    },
+    "meaning": {
+      "type": "string",
+      "summary": "何をするか"
+    }
+  },
+  "rows": [
+    {
+      "id": "ndf",
+      "kind": "launcher",
+      "passes_to": "ndf",
+      "meaning": "依存の環境を用意し、ndf <副命令> [引数...] を副命令の表の main へ渡す。結果 JSON を標準出力の最後の 1 行に出す"
+    },
+    {
+      "id": "ndf-claude",
+      "kind": "launcher",
+      "passes_to": "claude",
+      "meaning": "このプラグインだけを読む claude を起こす。引数はそのまま claude の後ろへ渡す"
+    },
+    {
+      "id": "start.py",
+      "kind": "part",
+      "passes_to": "bin/ndf",
+      "meaning": "bin/ndf が依存の環境の python で起こし、環境の欠けを確かめてから python -m ndf を呼ぶ"
+    }
+  ]
+}

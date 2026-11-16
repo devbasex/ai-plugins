@@ -1,22 +1,35 @@
 name: ndf-next
 
-# 作り直しの NDF（plugins/ndf-next/。#1142）のテストと検査。入れ替え（S2）の PR がこのファイルを消す。
-# 必須のチェックにしないため、Pull Request でも paths で絞る（変えていない PR で回さない）
+# 作り直しの NDF（plugins/ndf-next/。#1142）のテスト。入れ替え（S2）の PR がこのファイルを消す。
+# 必須のチェックにしないため、Pull Request でも paths で絞る（変えていない PR で回さない）。
+# plugins/ndf/** の PR でも起動し、テストと一時コピーは ndf-next-scope が飛ばす（新しいプラグインを変えていない）。
+# PR 本文を読む検査（I2・port）は ndf-next-checks.yml にある。このワークフローは本文の編集では起動しない。
+# 起動すると同じ名前のテストのチェックが skipped で並び、push の実行の失敗が一覧から消える（#3445）
 on:
   pull_request:
+    types: [opened, synchronize, reopened]
     paths:
       - ".github/workflows/ndf-next.yml"
+      - ".github/workflows/ndf-next-checks.yml"
       - "plugins/ndf-next/**"
+      - "scripts/ndf-next-parity/**"
+      - "plugins/ndf/**"
   push:
     branches:
       - main
       - develop
     paths:
       - ".github/workflows/ndf-next.yml"
+      - ".github/workflows/ndf-next-checks.yml"
       - "plugins/ndf-next/**"
+      - "scripts/ndf-next-parity/**"
 
 permissions:
   contents: read
+
+env:
+  # 新しいプラグインを変えたかを見るパス（リポジトリの根から）。ndf-next-checks.yml にも同じ値がある
+  NEXT_PATHS: plugins/ndf-next scripts/ndf-next-parity .github/workflows/ndf-next.yml .github/workflows/ndf-next-checks.yml
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
@@ -27,9 +40,30 @@ defaults:
     working-directory: plugins/ndf-next
 
 jobs:
+  # 新しいプラグイン（とこの定義）を変えたか。plugins/ndf だけの PR ではテストと一時コピーを打たない
+  ndf-next-scope:
+    runs-on: ubuntu-latest
+    outputs:
+      next: ${{ steps.diff.outputs.next }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: diff
+        working-directory: .
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != pull_request ] \
+            || git diff --name-only "origin/$GITHUB_BASE_REF...HEAD" -- $NEXT_PATHS | grep -q .; then
+            echo next=true >> "$GITHUB_OUTPUT"
+          else
+            echo next=false >> "$GITHUB_OUTPUT"
+          fi
+
   # 依存の環境は plugins/ndf-next/pyproject.toml と uv.lock が固定する（決定 78）。
   # 起点を plugins/ndf-next に置き、テストの基準のディレクトリを根の pytest.ini から切り離す
   ndf-next-tests:
+    needs: ndf-next-scope
+    if: needs.ndf-next-scope.outputs.next == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -38,18 +72,66 @@ jobs:
           enable-cache: true
           cache-dependency-glob: plugins/ndf-next/uv.lock
       - run: uv run --frozen --project . pytest -q -n auto
+      # 機能の対応表（リリース対象の外。#3617 の決定 10）も ndf-next の依存の環境で流す
+      - name: 機能の対応表のテスト
+        run: uv run --frozen --project . pytest -q -c pyproject.toml --rootdir . ../../scripts/ndf-next-parity/tests
 
-  ndf-next-checks:
+  # 名前を入れ替えの後の形（ディレクトリ plugins/ndf・plugin.json の name は identity.FINAL_NAME）にした一時コピーで、
+  # 検査とテストを打つ（#3347 の決定 101・IG3）。I1 の指摘の集合（プラグインの根からの相対パスと行）が元と一致し、
+  # テストが通ることを確かめる。ディレクトリ名を組み立てた文字列のパスは、コピーの中でテストが落とす
+  ndf-next-copy:
+    needs: ndf-next-scope
+    if: needs.ndf-next-scope.outputs.next == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v10.3.3
-      # lock が宣言と食い違っていないか
-      - run: uv lock --check --project .
-      # Claude Code 用と Codex 用の定義が同じ名前と版を持つか
-      - run: >-
-          python3 -c 'import json, sys;
-          a, b = (json.load(open(p)) for p in (".claude-plugin/plugin.json", ".codex-plugin/plugin.json"));
-          diff = [k for k in ("name", "version") if a.get(k) != b.get(k)];
-          sys.exit(f"plugin.json の食い違い: {diff}" if diff else 0)'
-      - run: bash -n bin/ndf
+        with:
+          enable-cache: true
+          cache-dependency-glob: plugins/ndf-next/uv.lock
+      - name: 一時コピーを作る
+        run: |
+          copy="$RUNNER_TEMP/copy/plugins/ndf"
+          mkdir -p "$(dirname "$copy")"
+          cp -R . "$copy"
+          # src/ndf はパッケージとして入れない（pyproject.toml の tool.uv）ので、src をパスへ足して読む
+          PYTHONPATH=src uv run --frozen --project . python - "$copy" <<'EOF'
+          import json, pathlib, sys
+          from ndf import identity
+          from ndf.domains.hooks import registration
+          for rel in (".claude-plugin/plugin.json", ".codex-plugin/plugin.json"):
+              path = pathlib.Path(sys.argv[1], rel)
+              data = json.loads(path.read_text(encoding="utf-8"))
+              data["name"] = identity.FINAL_NAME
+              path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+          # hook の登録は名前から作る生成物なので、入れ替えの PR と同じく作り直す（ndf hooks render）
+          registration.write(pathlib.Path(sys.argv[1]))
+          EOF
+          git -C "$RUNNER_TEMP/copy" init -q
+          git -C "$RUNNER_TEMP/copy" add -A
+          git -C "$RUNNER_TEMP/copy" -c user.name=ci -c user.email=ci@example.invalid commit -qm copy
+          echo "COPY=$copy" >> "$GITHUB_ENV"
+      - name: I1 の指摘の集合が元とコピーで一致するか
+        run: |
+          bin/ndf check > "$RUNNER_TEMP/orig.out" || true
+          (cd "$COPY" && bin/ndf check) > "$RUNNER_TEMP/copy.out" || true
+          python3 - "$RUNNER_TEMP/orig.out" plugins/ndf-next/ "$RUNNER_TEMP/copy.out" plugins/ndf/ <<'EOF'
+          import json, sys
+          def i1(out, prefix):
+              report = json.loads(open(out, encoding="utf-8").read().strip().splitlines()[-1])
+              if report["status"] == "stopped" and report["cause"]["kind"] != "check_failed":
+                  sys.exit(f"検査が止まった（{out}）: {report['summary']}")
+              return {(i["path"].removeprefix(prefix), i["line"]) for i in report["items"] if i["rule"] == "I1"}
+          orig, copy = i1(sys.argv[1], sys.argv[2]), i1(sys.argv[3], sys.argv[4])
+          for label, rows in (("元だけ", orig - copy), ("コピーだけ", copy - orig)):
+              for path, line in sorted(rows):
+                  print(f"{label}: I1 {path}:{line}", file=sys.stderr)
+          sys.exit(1 if orig != copy else 0)
+          EOF
+      # 全件を打つ。ディレクトリ名・プラグイン名を組み立てた文字列はどのテストからも作れ、触れるテストを
+      # 絞る一覧は新しいモジュールの追加で古くなる（決定 101 は「テストが通ること」を確かめる）。
+      # 実測（PR #3443 の run 43581413222）: ndf-next-tests 74 秒・このジョブ 100 秒（コピーと I1 の照合を含む）。
+      # 並べて走るため待ち時間の増えは約 26 秒、runner の時間は 1 回あたり約 100 秒増える
+      - name: コピーでテストを打つ
+        working-directory: ${{ env.COPY }}
+        run: uv run --frozen --project . pytest -q -n auto

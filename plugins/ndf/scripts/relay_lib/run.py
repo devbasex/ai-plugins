@@ -113,6 +113,8 @@ class Relay(AccountSwitch, ho.Swapper):
             cwd=s.cwd,
             relay_version_dir=ho.own_dir(),
         )
+        if s.args[:1] == ["--resume"]:
+            row["resumed"] = True  # 前の会話を続けた区間。起こし直しはこの会話を再開する（#3555）
         if s.cwd_fallback is not None:
             row["cwd_fallback"] = s.cwd_fallback
         if s.carried is not None:

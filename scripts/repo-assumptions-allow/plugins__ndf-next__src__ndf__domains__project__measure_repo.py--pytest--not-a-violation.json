@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf-next/src/ndf/domains/project/measure_repo.py",
+  "name": "pytest",
+  "kind": "not-a-violation",
+  "reason": "テストの手段を見分ける言語ごとの表の 1 行（phpunit・jest・vitest などと並ぶ）",
+  "count": 5
+}

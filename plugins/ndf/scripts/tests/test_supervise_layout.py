@@ -43,6 +43,7 @@ MODULES = [
     "progress_watch",  # 実装のステップの進みの観測（#2505）
     "rerun",  # ステップの打ち直しの同じ原因の上限（#2343）
     "procedures",  # 単発とスプリントの雛形が共有する手順の定義（#1485）
+    "pr_marks",  # PR 本文の ndf-next の検査の印の引き継ぎ（#3529）
     "pr_materials",
     "design_stage",
     "paths",
@@ -145,18 +146,23 @@ def run(*args: str) -> subprocess.CompletedProcess:
 def lib_imports(name: str) -> set[str]:
     """supervise_lib の中の `name` が import する supervise_lib のモジュール。"""
     tree = ast.parse((PKG / f"{name}.py").read_text(encoding="utf-8"))
-    got: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("supervise_lib"):
-            if node.module == "supervise_lib":
-                got |= {a.name for a in node.names}
-            else:
-                got.add(node.module.split(".", 1)[1])
-        elif isinstance(node, ast.ImportFrom) and node.level:
-            got |= {a.name for a in node.names} if not node.module else {node.module}
-        elif isinstance(node, ast.Import):
-            got |= {a.name.split(".", 1)[1] for a in node.names if a.name.startswith("supervise_lib.")}
-    return got
+    return set().union(*(_imported_lib_names(node) for node in ast.walk(tree)))
+
+
+def _imported_lib_names(node: ast.AST) -> set[str]:
+    """AST のノード 1 つが参照する supervise_lib のモジュールの名前。import でなければ空。"""
+    if isinstance(node, ast.Import):
+        return {a.name.split(".", 1)[1] for a in node.names if a.name.startswith("supervise_lib.")}
+    if not isinstance(node, ast.ImportFrom):
+        return set()
+    module = node.module or ""
+    if module == "supervise_lib":
+        return {a.name for a in node.names}
+    if module.startswith("supervise_lib"):
+        return {module.split(".", 1)[1]}
+    if not node.level:
+        return set()
+    return {module} if module else {a.name for a in node.names}
 
 
 def test_subcommands_do_not_change():
@@ -227,6 +233,24 @@ def test_imports_have_no_cycle():
 # --- #2773: CD のある場合のリリースプランの並び -------------------------------------------------------------
 
 
+def _ai_plugins_strategy(monkeypatch) -> None:
+    """このリポジトリのブランチ戦略の宣言を読む部品を、移行のコマンドが書く値（ai-plugins の移行は手順 2 で、それまで `.ndf/` に
+    旧いキーが残る）を返すように差し替える。本番ブランチの先頭の宣言（#3308）も同じ値にする。"""
+    sys.path.insert(0, str(PKG.parent / "lib"))
+    sys.path.insert(0, str(PKG.parent))
+    import branch_strategy
+    import branch_strategy_legacy as legacy
+    import repo
+    from project_lib import branch_strategy_migrate as bmig
+
+    root = SCRIPTS.parents[2]
+    plan, _ = bmig.plan_migration(root, legacy.load_moves())
+    project = plan.files.get("project.json") or json.loads((root / ".ndf" / "project.json").read_text(encoding="utf-8"))
+    got = branch_strategy.Strategy(project[branch_strategy.SECTION])
+    monkeypatch.setattr(repo, "branch_strategy_of", lambda _root: got)
+    monkeypatch.setattr(repo, "production_strategy", lambda _root, _prod: (got, f"origin/{got.production} の宣言"))
+
+
 def _release_plan(tmp_path, monkeypatch, channel: str, version: str, cd: bool) -> dict:
     """new release をこのリポジトリの宣言で組む。cd なら場合の判定を「CD があり、レビューなしでマージできる」に固定する。"""
     sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -234,6 +258,7 @@ def _release_plan(tmp_path, monkeypatch, channel: str, version: str, cd: bool) -
     import inproc
     import release_case
 
+    _ai_plugins_strategy(monkeypatch)
     if cd:
         monkeypatch.setattr(release_case, "case_at", lambda root, strict=False: release_case.decide_case(True, 0, ""))
     out = tmp_path / f"{channel}-{cd}.json"
@@ -276,6 +301,7 @@ def test_cd_review_prod_plan_writes_no_trail_and_ends_at_the_gate(tmp_path, monk
     import inproc
     import release_case
 
+    _ai_plugins_strategy(monkeypatch)
     monkeypatch.setattr(release_case, "case_at", lambda root, strict=False: release_case.decide_case(True, 1, ""))
     out = tmp_path / "plan.json"
     extra = ["--mvv", str(tmp_path / "state.json")] if mvv else []
@@ -299,6 +325,7 @@ def test_cd_no_review_mvv_plan_does_not_count_the_awaiting_release_as_a_gate(tmp
     import inproc
     import release_case
 
+    _ai_plugins_strategy(monkeypatch)
     monkeypatch.setattr(release_case, "case_at", lambda root, strict=False: release_case.decide_case(True, 0, ""))
     out = tmp_path / "plan.json"
     extra = ["--mvv" if mvv else "--state", str(tmp_path / "state.json")]
@@ -344,3 +371,46 @@ def test_since_last_check_plan_drops_the_whole_test_only_with_cd(tmp_path, monke
     assert p.returncode == 0, p.stdout + p.stderr
     ids = {s["id"] for s in json.loads(out.read_text(encoding="utf-8"))["steps"]}
     assert ("test-all" in ids) is not cd
+
+
+# --- lib_imports の現状固定（I-020） ---
+
+_LIB_IMPORTS_SRC = """\
+import os
+import supervise_lib
+import supervise_lib.j
+import supervise_lib.k.l, json
+from os import path
+from supervise_lib import a, b
+from supervise_lib.c import x
+from supervise_lib.d.e import y
+from . import f, g
+from .h import z
+from ..i import w
+
+
+def nested():
+    from supervise_lib import m
+    import supervise_lib.n
+"""
+
+
+def test_lib_imports_reads_every_form_of_import(tmp_path: Path, monkeypatch):
+    monkeypatch.setitem(globals(), "PKG", tmp_path)
+    (tmp_path / "mod.py").write_text(_LIB_IMPORTS_SRC, encoding="utf-8")
+    assert lib_imports("mod") == {"a", "b", "c", "d.e", "f", "g", "h", "i", "j", "k.l", "m", "n"}
+
+
+def test_lib_imports_is_empty_without_supervise_lib_imports(tmp_path: Path, monkeypatch):
+    monkeypatch.setitem(globals(), "PKG", tmp_path)
+    (tmp_path / "mod.py").write_text("import os\nfrom os import path\nimport supervise_libx\n", encoding="utf-8")
+    assert lib_imports("mod") == set()
+
+
+# NOTE: 現状固定。`supervise_lib` で始まる別名のモジュール（`supervise_libx`）からの
+#       `from ... import` は `.` を持たないため IndexError で落ちる。
+def test_lib_imports_fails_on_a_module_that_only_shares_the_prefix(tmp_path: Path, monkeypatch):
+    monkeypatch.setitem(globals(), "PKG", tmp_path)
+    (tmp_path / "mod.py").write_text("from supervise_libx import q\n", encoding="utf-8")
+    with pytest.raises(IndexError):
+        lib_imports("mod")

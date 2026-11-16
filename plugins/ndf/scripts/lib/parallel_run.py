@@ -34,6 +34,7 @@ import parallel_release as pr
 import parallel_route as prt
 from parallel_files import RELAY
 from parallel_end import LaneEnding
+from parallel_gate2 import ConfirmedGate
 from parallel_helper import SUPERVISE, helper_spawn
 from parallel_launch import LaunchRouting
 from parallel_observe import _ask_helper, _asking_lanes, _plan_view, apply_observed_states
@@ -48,7 +49,7 @@ from parallel_repo import dev_version, git_head, mark_organizer, poll_seconds, r
 @durable.step(name="parallel.init")
 def step_init(main: str, name: str) -> dict:
     """計画を読み、検査し、オーガナイザーの印を書く。"""
-    plan, items, _ = pp.check_data(pp.load_plan(Path(main), name))
+    plan, items, _ = pp.check_data(pp.load_plan(Path(main), name), ended=plg.ended_lanes(Path(main), name))
     if plan is None:
         return {"ok": False, "items": items}
     mark_organizer(Path(main), name)
@@ -216,7 +217,7 @@ def render_progress(main: str, name: str, progress: dict) -> None:
 # ---- 耐久ワークフロー ----
 
 
-class _Run(LaneEnding, plg.RunState, prt.ReleaseRouting, AnswerRouting, ph.AnswerHold, LaunchRouting):
+class _Run(LaneEnding, plg.RunState, prt.ReleaseRouting, AnswerRouting, ph.AnswerHold, LaunchRouting, ConfirmedGate):
     """耐久ワークフローの中の値。打ち直すと記録から同じ値に戻る。レーンの終わりと版の要るまとめは `LaneEnding`（#3058）。"""
 
     write_hold, resume_lanes = staticmethod(step_answer_hold), staticmethod(step_resume_lanes)
@@ -383,7 +384,7 @@ class _Run(LaneEnding, plg.RunState, prt.ReleaseRouting, AnswerRouting, ph.Answe
         止まったものと数え、リリースの途中で止まった一時レーンならリリースを失敗として締める（依頼へ failed を答える）。
         リリースを組めない問いの「止める」は計画を止め、「直してから組み直す」は組み直しの依頼を入れ直す。保留したループの残りを流す
         一時レーンを起こせない問いの「止める」も計画を止める（保留の中身はループの記録に残る）。"""
-        if self.apply_end(q, choice):  # レーンの終わりの問いと版の要るまとめの一時レーンの問い（#3058）
+        if self.apply_end(q, choice) or self.apply_confirmed(q, choice):  # レーンの終わり・版の要るまとめ（#3058）・確定の後の依頼（#3597）
             return
         if q.get("kind") == "build":
             self.apply_build(q, choice)
@@ -766,6 +767,7 @@ def _observe_run(run: _Run, main: str) -> dict:
     apply_observed_states(run, rows)
     run.observe_ends(rows)  # 終わったレーンを止め、終わりの記録の無い停止と版の要るまとめを見張る（#3058）
     run.release_woken(rows)  # 動いて観えたら、または動いて観える前に今の再起動より後で止まったら、設計の答えの再起動を解く
+    run.launch_waiting(rows)  # 一時レーンの空き待ち: 待つ相手が止まって観えたら打ち直し、上限を過ぎたら問う（#3597）
     return seen
 
 

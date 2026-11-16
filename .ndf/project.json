@@ -300,19 +300,6 @@
     "compose_files": [],
     "databases": []
   },
-  "delivery": [
-    {
-      "target": "ndf プラグイン（Claude Code・Codex）",
-      "kind": "auto",
-      "trigger": ".github/workflows/release-cd.yml（main へのマージでタグと GitHub Release を作る）",
-      "channel": "production",
-      "versioned": true,
-      "publishes_release": true,
-      "result": {
-        "workflow": "release-cd.yml"
-      }
-    }
-  ],
   "issues": {
     "primary": "github",
     "others": [
@@ -348,6 +335,10 @@
       "**/*.md",
       "docs/glossary/glossary.json",
       "docs/metrics/ndf-token-usage/*.json"
+    ],
+    "behavior": [
+      "**/skills/**/*.md",
+      "**/agents/*.md"
     ],
     "tested": [
       {
@@ -433,7 +424,8 @@
         "tests": [
           "plugins/ndf/scripts/tests/test_mvv_gate.py",
           "plugins/ndf/scripts/tests/test_sprint_state.py",
-          "plugins/ndf/scripts/tests/test_supervise_pace_auto.py"
+          "plugins/ndf/scripts/tests/test_supervise_pace_auto.py",
+          "plugins/ndf-next/tests/progress/gate/test_gate_checks.py"
         ]
       },
       {
@@ -1063,6 +1055,17 @@
         "tests": [
           "plugins/playwright-kit/skills/playwright-planning/tests/test_plan_skeleton.py"
         ]
+      },
+      {
+        "paths": [
+          "docs/glossary.md",
+          ".ndf/mvv.md"
+        ],
+        "tests": [
+          "plugins/ndf-next/tests/domains/records/test_glossary.py",
+          "plugins/ndf-next/tests/domains/records/test_preflight.py",
+          "plugins/ndf-next/tests/domains/records/test_spec.py"
+        ]
       }
     ]
   },
@@ -1103,6 +1106,78 @@
       "ndf_policies": "9f70d0f7e679e584f06860208c0540040cb74a8b6c2161894239a60ebefc63ef",
       "instructions": "9137fe41c9b4a240dcee33f0311f83fb59a55b9165b80c22f8f20218dfc2a95f",
       "materials": "eec1b759fe58ecfcf4c8373becd6975fba410eebb3742cfa3142e56552c8e77b"
+    }
+  },
+  "branch_strategy": {
+    "kind": "plugin",
+    "release_strategy": "trunk",
+    "branches": {
+      "production": "main",
+      "base": "main"
+    },
+    "sprint": {
+      "start": "production",
+      "integrate": "check",
+      "doc_prs": "sprint"
+    },
+    "release": {
+      "form": "package-plugin",
+      "version_store": {
+        "kind": "plugin"
+      },
+      "tag": "{plugin}--v{version}",
+      "github_release": true,
+      "cd": {
+        "workflow": "release-cd.yml"
+      },
+      "deliveries": [
+        {
+          "target": "ndf プラグイン（Claude Code・Codex）",
+          "kind": "auto",
+          "trigger": ".github/workflows/release-cd.yml（main へのマージでタグと GitHub Release を作る）",
+          "channel": "production",
+          "versioned": true,
+          "publishes_release": true,
+          "result": {
+            "workflow": "release-cd.yml"
+          }
+        }
+      ],
+      "plugin": "ndf",
+      "runtimes": [
+        "claude",
+        "codex"
+      ]
+    },
+    "channels": [
+      {
+        "name": "stable",
+        "ref": "main"
+      }
+    ],
+    "approval": {
+      "target": "release_pr",
+      "via": "gate"
+    },
+    "merge": {
+      "actor": "ndf",
+      "method": "merge-queue",
+      "commit": "merge",
+      "admin": false
+    },
+    "verify": null,
+    "reviews": {
+      "impl": {
+        "checks": [],
+        "diff": "none"
+      },
+      "sprint": {
+        "checks": [
+          "cross-refactoring",
+          "cross-review"
+        ],
+        "diff": "unchecked"
+      }
     }
   }
 }

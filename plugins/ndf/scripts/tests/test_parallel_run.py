@@ -16,184 +16,42 @@ from pathlib import Path
 
 import pytest
 
-SCRIPTS = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(SCRIPTS / "lib"))
-sys.path.insert(0, str(SCRIPTS))
+import parallel_run_world as prw
+from parallel_run_world import (
+    ASK,
+    OLD,
+    SCRIPTS,
+    TEMPLATE_RELEASE,
+    build_question,
+    calls,
+    event,
+    helper_spawns,
+    helper_up,
+    lanes_spawned,
+    questions,
+    read,
+    resume,
+    set_state,
+    spawned,
+    start,
+    stop,
+    until,
+)
+
 import dbos  # noqa: E402,F401
 import durable  # noqa: E402
 import parallel_answer as pa  # noqa: E402
+import parallel_gate2 as pgate  # noqa: E402
 import parallel_lane as pl  # noqa: E402
+import parallel_ledger as plg  # noqa: E402
 import parallel_helper as ph  # noqa: E402
 import parallel_plan as pp  # noqa: E402
 import parallel_release as prl  # noqa: E402
 import parallel_reply  # noqa: E402
+import strategy_fixture  # noqa: E402
 import parallel_run as prun  # noqa: E402
 
-PLAN = {
-    "version": 1,
-    "name": "p1",
-    "rules": [],
-    "lanes": [
-        {"name": "la", "input": {"kind": "sprint", "issues": [1]}, "plans": 1, "touches": ["a/"]},
-        {"name": "lb", "input": {"kind": "sprint", "issues": [2]}, "plans": 1, "touches": ["b/"], "after": ["la"]},
-    ],
-}
-
-TEMPLATE_DECL = {"release": {"form": "package-plugin", "plugin": "ndf"}}
-# この印の後の記録の道（終わりの記録で数える・提示 1 で確定する。#3058・#3070）は test_parallel_end.py で確かめる。
-# ここの流れのテストは印の無い記録の道で確かめる（別のプロセスで記録するテストも同じ値にする）
-LEGACY_MARKS = ("parallel-lane-end", "parallel-approved-sha")
-
-
-def legacy_patched(orig):
-    return lambda n: False if n in LEGACY_MARKS else orig(n)
-
-
-FAKE = textwrap.dedent(
-    """
-    import json, os, sys
-    log, states = os.environ["FAKE_LOG"], os.environ["FAKE_STATES"]
-    with open(log, "a") as f:
-        f.write(json.dumps(sys.argv[1:]) + "\\n")
-    sub = sys.argv[1]
-    if sub == "ls" and os.path.exists(os.environ.get("FAKE_LS_FAIL", "")):
-        print("ls: hub に届かない", file=sys.stderr)
-        sys.exit(3)
-    if sub == "ls":
-        st = json.load(open(states)) if os.path.exists(states) else {}
-        rows = [{"name": n, **(s if isinstance(s, dict) else {"state": s})} for n, s in st.items()]
-        print(json.dumps({"items": rows, "metrics": {"hub": True, "tmux": True}}))
-    elif sub == "spawn" and sys.argv[3] in os.environ.get("FAKE_REFUSE", "").split():
-        print(json.dumps({"items": [{"result": "limit"}], "metrics": {}}))
-        sys.exit(1)
-    else:
-        # 一時レーンの起動と再起動は一覧へ running で現れる。FAKE_DOWN の回数だけは現れない（#2936 の受け入れ条件 3）
-        name = sys.argv[3] if sub == "spawn" else sys.argv[2] if sub == "restart" else None
-        if name and (sub == "restart" or "--role" in sys.argv):
-            down, used = int(os.environ.get("FAKE_DOWN") or 0), os.environ["FAKE_LOG"] + ".down"
-            n = int(open(used).read()) if os.path.exists(used) else 0
-            if n < down:
-                open(used, "w").write(str(n + 1))
-            else:
-                import time
-                st = json.load(open(states)) if os.path.exists(states) else {}
-                now = time.time()
-                at = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(now)) + f".{int(now % 1 * 1000):03d}Z"
-                st[name] = {"state": "running", "at": at, "role": "helper" if sub == "spawn" else None}
-                json.dump(st, open(states + ".tmp", "w"))
-                os.replace(states + ".tmp", states)
-        print(json.dumps({"items": [{"result": "started"}], "metrics": {}}))
-    """
-)
-
-
-@pytest.fixture
-def env(tmp_path, monkeypatch):
-    main = tmp_path / "repo"
-    (main / ".ndf").mkdir(parents=True)
-    (main / ".ndf" / "supervise.json").write_text(json.dumps(TEMPLATE_DECL))
-    subprocess.run(["git", "init", "-q", str(main)], check=True)
-    plan = pp.check_data(PLAN)[0]
-    pp.write_all(main, plan, PLAN)
-    fake = tmp_path / "fake_relay.py"
-    fake.write_text(FAKE)
-    log, states = tmp_path / "relay.log", tmp_path / "states.json"
-    monkeypatch.setenv("NDF_PARALLEL_RELAY", f"{sys.executable} {fake}")
-    monkeypatch.setenv("FAKE_LOG", str(log))
-    monkeypatch.setenv("FAKE_STATES", str(states))
-    monkeypatch.setenv("FAKE_LS_FAIL", str(tmp_path / "ls.fail"))
-    monkeypatch.setenv("NDF_PARALLEL_POLL", "0.2")
-    monkeypatch.setenv("NDF_PARALLEL_LAUNCH_SECONDS", "1")
-    monkeypatch.setattr(durable, "patched", legacy_patched(durable.patched))
-    heads = {"v": "sha1"}
-    monkeypatch.setattr(prun, "git_head", lambda _m: heads["v"])
-    monkeypatch.setattr(prun, "dev_version", lambda _m: "1.2.3")
-
-    def builder(_main, _name, d, _v, **_kw):
-        return {"steps": []}, {"steps": []}
-
-    monkeypatch.setattr(prl, "build_plans", lambda m, n, s, k, v, builder_=None, **kw: _build(m, n, s, k, v, builder, **kw))
-    yield {"main": main, "log": log, "states": states, "heads": heads}
-    _stop_running(main)
-    durable.close()
-
-
-_SEND_TO = durable.send_to  # テストの monkeypatch に左右されない後片付けの送り手
-
-
-def _stop_running(main):
-    """テストが残した耐久ワークフローを止め、スレッドが抜けるのを待つ。
-
-    close() は DBOS を止めてもワークフローのスレッドを止めない。残すと次のテストの同じ ID（parallel-p1）の起動が
-    重複として打ち切られ、前のテストのスレッドが次のテストの記録を読み書きする。
-    env の後片付けは monkeypatch を戻す前に走るため、テストが差し替えた `durable.send_to` ではなく元の関数で送る。"""
-    wid = pl.workflow_id("p1")
-    try:
-        if durable.status(wid) not in pl.RUNNING:
-            return
-        _SEND_TO(pl.KIND, pl.record_identity(main, "p1"), wid, {"kind": "stop", "force": True}, "inbox", f"{wid}:inbox:stop:force")
-        end = time.monotonic() + 15
-        while time.monotonic() < end and durable.status(wid) in pl.RUNNING:
-            time.sleep(0.1)
-    except Exception:  # 後片付けの失敗でテストの結果を変えない
-        pass
-
-
-def _build(m, n, s, k, v, builder, **kw):
-    return prl.__dict__["_orig_build"](m, n, s, k, v, builder, **kw)
-
-
-prl._orig_build = prl.build_plans
-
-
-def calls(log: Path, sub: str) -> list[list[str]]:
-    return [c for c in (json.loads(ln) for ln in log.read_text().splitlines()) if c[0] == sub] if log.exists() else []
-
-
-def event(main, name, key):
-    return durable.event(pl.workflow_id(name), key)
-
-
-def until(pred, timeout=30):
-    end = time.monotonic() + timeout
-    while time.monotonic() < end:
-        got = pred()
-        if got:
-            return got
-        time.sleep(0.1)
-    raise AssertionError("条件が成り立たないまま上限に達した")
-
-
-def start(main):
-    prun.open_parallel_record(main, "p1")
-    durable.start(durable.WorkflowRef(pl.workflow_id("p1"), 1, "start"), prun.parallel_workflow, str(main), "p1")
-
-
-def spawned(log):
-    return [c[2] for c in calls(log, "spawn")]
-
-
-def lanes_spawned(log):
-    """計画のレーンの起動（一時レーンの起動を除く）。"""
-    return [c[2] for c in calls(log, "spawn") if "--role" not in c]
-
-
-def helper_spawns(log):
-    """耐久ワークフローが打った一時レーンの起動（#2936）。"""
-    return [c[2] for c in calls(log, "spawn") if "--role" in c and c[c.index("--role") + 1] == "helper"]
-
-
-def helper_up(states, name):
-    """偽の relay.py が起動したレーンを一覧へ書くまで待つ（書く前に上書きすると、後から running に戻る）。"""
-    until(lambda: states.exists() and name in json.loads(states.read_text() or "{}"))
-
-
-def set_state(states, name, state, at=None):
-    """一覧の 1 行を書き換える（他の行は残す）。`at` を省けば今の時刻。"""
-    st = json.loads(states.read_text()) if states.exists() else {}
-    now = time.time()  # 一覧の at はミリ秒まで持つ（秒で切ると、打った直後の止まりを打つ前の行と読む）
-    st[name] = {"state": state, "at": at or time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(now)) + f".{int(now % 1 * 1000):03d}Z"}
-    states.write_text(json.dumps(st))
+env = prw.env  # fixture
 
 
 def test_flow_spawns_in_order_releases_without_waiting_and_finishes(env, tmp_path):
@@ -275,16 +133,6 @@ def test_send_request_is_idempotent(env, tmp_path):
 
 
 # ---- 現状固定（parallel_workflow の分岐。リファクタリングの前に今の振る舞いを記録する） ----
-
-
-def resume(main, msg, key):
-    durable.send_to(pl.KIND, pl.record_identity(main, "p1"), pl.workflow_id("p1"), msg, "resume", key)
-
-
-def stop(main):
-    wid = pl.workflow_id("p1")
-    durable.send_to(pl.KIND, pl.record_identity(main, "p1"), wid, {"kind": "stop"}, "inbox", f"{wid}:inbox:stop")
-    return durable.output_of(wid)
 
 
 def test_char_invalid_plan_stops_without_spawning(env):
@@ -446,13 +294,6 @@ def test_stop_force_after_a_pending_stop_stops_the_helper(env, tmp_path):
 
 # ---- 問いをオーガナイザーへ集める（受け入れ条件 6c・6d・6f）と一時レーン ----
 
-ASK = {"questions": [{"question": "gh の認証を直してよいか", "options": [{"label": "済んだ"}, {"label": "まだ"}]}],
-       "metadata": {"source": "ndf-ask:human-action"}}  # fmt: skip
-
-
-def questions(main):
-    return event(main, "p1", "questions") or {"items": []}
-
 
 def test_ask_request_raises_questions_and_the_answer_reaches_the_lane(env, tmp_path):
     main = env["main"]
@@ -523,7 +364,7 @@ def test_helper_task_follows_the_last_launch(env, tmp_path):
     )
     assert ph.helper_task(main, "p1", 1, 1)["gate2"].endswith("--report /r/issues/a.md")
     (d / "presented.json").write_text(json.dumps({"sha": "sha1", "prs": [10]}))
-    pl.request_gate2(main, "p1", 1, 1, str(d / "report.md"))
+    pgate.request_gate2(main, "p1", 1, 1, str(d / "report.md"))
     item = until(lambda: [i for i in questions(main)["items"] if i["kind"] == "gate2"])[0]
     assert item["id"] == "p1-p1-1" and item["stamp"] == "sha1"
     resume(main, {"n": 1, "phase": "confirm"}, "c1")
@@ -536,6 +377,425 @@ def test_helper_task_follows_the_last_launch(env, tmp_path):
         and "--from approve" in task["pipeline"]
         and f"queue {d / 'release.json'}" in task["pipeline"]
     )
+
+
+# ---- 現状固定（helper_task と request_confirmed の「確定の後」の判定。I-002 の重複の統合の前に今の振る舞いを固定する） ----
+
+
+def _helper_task_with(monkeypatch, tmp_path, launch, rows=()):
+    """最後の起動 launch と台帳の行 rows を差し替えて helper_task(main, "p1", 1, 1) を呼ぶ。(結果, リリースのディレクトリ)。"""
+    monkeypatch.setattr(ph, "last_launch", lambda main, name: dict(launch))
+    rows = [{**r, "_pos": i} for i, r in enumerate(rows)]
+    monkeypatch.setattr(plg, "read_ledger_rows", lambda main, name, offset=0: plg.Read(rows, 0, [], 0))
+    return ph.helper_task(tmp_path, "p1", 1, 1), prl.release_dir(tmp_path, "p1", 1, 1)
+
+
+def _present_task(d):
+    py = f"python3 {ph.HERE / 'parallel.py'}"
+    return {"n": 1, "k": 1, "dir": str(d), "gate2": f"{py} request-gate2 p1 1 1 --report ", "asked": [], "phase": "present",
+            "pipeline": f"{ph.SUPERVISE} queue {d / 'present.json'} --then {d / 'release.json'} --done {d / 'done.json'} && {ph.SUPERVISE} wait {d / 'done.json'}",
+            "settle": f"{py} settle p1 1 --done {d / 'done.json'}"}  # fmt: skip
+
+
+CONFIRMED_11 = {"action": "confirmed", "n": 1, "k": 1, "seq": 4, "purpose": "x"}
+
+
+def test_helper_task_current_confirmed_for_the_same_release(monkeypatch, tmp_path):
+    got, d = _helper_task_with(monkeypatch, tmp_path, CONFIRMED_11)
+    py = f"python3 {ph.HERE / 'parallel.py'}"
+    done = d / "release-done.json"
+    steps = [prl.record_answer_cmd(d, 1, 1), f"{ph.SUPERVISE} run {d / 'present.json'} --from approve",
+             f"{ph.SUPERVISE} queue {d / 'release.json'} --done {done}", f"{ph.SUPERVISE} wait {done}"]  # fmt: skip
+    assert got == {"n": 1, "k": 1, "dir": str(d), "gate2": f"{py} request-gate2 p1 1 1 --confirmed --done {done}", "asked": [],
+                   "phase": "confirmed", "pipeline": " && ".join(steps), "settle": f"{py} settle p1 1 --done {done}"}  # fmt: skip
+
+
+def test_helper_task_current_confirmed_retry_resumes_the_gated_release_queue(monkeypatch, tmp_path):
+    """打ち直す（#3597 の決定 2）: 前の本番のプランの done が残れば、同じ queue（関門の記録を返す）でなく queue --resume で流し直す。
+    関門の無い done（失敗で終えた）は開始を渡さずに流し直す。"""
+    d = prl.release_dir(tmp_path, "p1", 1, 1)
+    d.mkdir(parents=True)
+    done = d / "release-done.json"
+    done.write_text(json.dumps({"items": [{"result": "失敗"}]}))
+    got, _ = _helper_task_with(monkeypatch, tmp_path, CONFIRMED_11)
+    assert f"{ph.SUPERVISE} queue --resume {done} && {ph.SUPERVISE} wait {done}" in got["pipeline"]
+    assert f"queue {d / 'release.json'}" not in got["pipeline"]
+
+
+def test_helper_task_confirmed_retry_refuses_when_the_gated_step_is_unknown(monkeypatch, tmp_path):
+    """関門で止まった done から開始のステップを決められなければ、--from 無しの resume を組まずに error を返す（マージせずに完了と読ませない）。"""
+    d = prl.release_dir(tmp_path, "p1", 1, 1)
+    d.mkdir(parents=True)
+    (d / "release-done.json").write_text(json.dumps({"items": [{"plan": str(d / "release.json"), "result": "関門", "report": ""}]}))
+    got, _ = _helper_task_with(monkeypatch, tmp_path, CONFIRMED_11)
+    assert got["phase"] == "confirmed" and got["error"] and "pipeline" not in got and "settle" not in got
+
+
+def test_helper_task_marks_an_ask_merged_into_another_as_answered(monkeypatch, tmp_path):
+    """同じ原因として別レーンの問いへまとめられた ask は、台帳の answer が代表の id にしか無くても、自分の id の答えで answered になる。"""
+    rows = [{"kind": "opened", "id": "o"}, {"kind": "ask", "id": "m", "msg": {"lane": "p1-rel1", "source": "s"}, "at": "t1"}]
+    monkeypatch.setattr(ph.pl, "answers_of", lambda main, name, ids: {i: {"answer": {"result": "answered"}, "defer": None} for i in ids})
+    got, _ = _helper_task_with(monkeypatch, tmp_path, {}, rows)
+    assert got["asked"] == [{"id": "m", "kind": "ask", "source": "s", "target": None, "at": "t1", "answered": True}]
+
+
+def test_helper_task_confirmed_retry_resumes_from_the_step_that_gated(monkeypatch, tmp_path):
+    """打ち直しは関門を返したステップから流す（`--from`）。関門の後に成功したステップ（承認資料の投稿）だけを続けて完了にしない。"""
+    d = prl.release_dir(tmp_path, "p1", 1, 1)
+    state = tmp_path / "state"
+    state.mkdir(parents=True)
+    d.mkdir(parents=True)
+    rows = [{"kind": "step", "step": "release", "exit": 10}, {"kind": "step", "step": "facts", "exit": 10},
+            {"kind": "step", "step": "approval-post", "exit": 0}]  # fmt: skip
+    (state / "progress.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+    done = d / "release-done.json"
+    done.write_text(json.dumps({"items": [{"plan": str(d / "release.json"), "result": "関門", "report": str(state / "report.md")}]}))
+    got, _ = _helper_task_with(monkeypatch, tmp_path, CONFIRMED_11)
+    assert f"{ph.SUPERVISE} queue --resume {done} --from release=release && {ph.SUPERVISE} wait {done}" in got["pipeline"]
+
+
+def test_gate_step_picks_the_earliest_gated_step_in_plan_order(tmp_path):
+    """最後の実行の中では、facts の 10 が release の 10 より前に並んでも、プランの並びで前の release から流す。"""
+    rows = [{"kind": "run", "from": None}, {"kind": "step", "step": "facts", "exit": 10}, {"kind": "step", "step": "release", "exit": 10}]
+    assert pgate.gate_step(_gate_rows_done(tmp_path, rows)) == ("release", "release")
+
+
+def test_gate_step_ignores_gated_rows_of_a_previous_run(tmp_path):
+    """progress.jsonl は実行をまたいで追記される。前の実行の release の 10 が残っても、最後の実行の verify の 10 から流す。"""
+    rows = [{"kind": "run", "from": None}, {"kind": "step", "step": "release", "exit": 10},
+            {"kind": "run", "from": "release"}, {"kind": "step", "step": "release", "exit": 0},
+            {"kind": "step", "step": "verify", "exit": 10}]  # fmt: skip
+    assert pgate.gate_step(_gate_rows_done(tmp_path, rows)) == ("release", "verify")
+
+
+def _gate_rows_done(tmp_path, rows):
+    """progress.jsonl に rows を書いた状態と、release → verify → facts → approval-post のプランを指す関門の done。"""
+    state = tmp_path / "state"
+    state.mkdir()
+    (state / "progress.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+    plan = tmp_path / "release.json"
+    plan.write_text(json.dumps({"steps": [{"id": "release"}, {"id": "verify"}, {"id": "facts"}, {"id": "approval-post"}]}))
+    done = tmp_path / "release-done.json"
+    done.write_text(json.dumps({"items": [{"plan": str(plan), "result": "関門", "report": str(state / "report.md")}]}))
+    return done
+
+
+@pytest.mark.parametrize(
+    "launch",
+    [
+        {},
+        {**CONFIRMED_11, "carried": True},
+        {**CONFIRMED_11, "n": 2},
+        {**CONFIRMED_11, "k": 2},
+        {**CONFIRMED_11, "action": "release"},
+        {"action": "confirmed", "n": "1", "k": 1},
+    ],
+)
+def test_helper_task_current_is_present_unless_the_same_uncarried_confirm(monkeypatch, tmp_path, launch):
+    got, d = _helper_task_with(monkeypatch, tmp_path, launch)
+    assert got == _present_task(d)
+
+
+def test_helper_task_current_present_reads_the_approval_and_asked_after_opened(monkeypatch, tmp_path):
+    """提示の gate2 は承認資料のパスを添える。asked は最初の opened の行から後の、自分の名前の一時レーンの依頼と答え。
+    答えの中身は gate2 と対象を持つ ask に載せる（#3608）。確定で済んだ gate2 は settled。"""
+    d = prl.release_dir(tmp_path, "p1", 1, 1)
+    d.mkdir(parents=True)
+    (d / "present.json").write_text(json.dumps({"steps": [{"id": "present", "cwd": "/r", "cmd": "x --approval issues/a.md"}]}))
+    rows = [
+        {"kind": "gate2", "id": "old", "msg": {"lane": "p1-rel1"}, "at": "t0"},
+        {"kind": "opened", "id": "o"},
+        {"kind": "gate2", "id": "g", "msg": {"lane": "p1-rel1"}, "at": "t1"},
+        {"kind": "ask", "id": "a", "msg": {"lane": "p1-rel2", "source": "s"}, "at": "t2"},
+        {"kind": "ask", "id": "b", "msg": {"lane": "p1-rel1", "source": "s", "target": "t"}, "at": "t3"},
+        {"kind": "answer", "id": "g", "msg": {"result": "answered", "choice": ["c"]}},
+        {"kind": "answer", "id": "b", "msg": {"result": "answered", "choice": ["消す"]}},
+        {"kind": "gate2", "id": "h", "msg": {"lane": "p1-rel1", "n": "1"}, "at": "t4"},
+        {"kind": "resume", "id": "r", "msg": {"phase": "confirm", "n": "1"}},
+    ]
+    got, _ = _helper_task_with(monkeypatch, tmp_path, {}, rows)
+    assert got["gate2"].endswith("request-gate2 p1 1 1 --report /r/issues/a.md")
+    assert got["asked"] == [
+        {"id": "g", "kind": "gate2", "source": None, "target": None, "at": "t1", "answer": {"result": "answered", "choice": ["c"]}},
+        {"id": "b", "kind": "ask", "source": "s", "target": "t", "at": "t3", "answer": {"result": "answered", "choice": ["消す"]}},
+        {"id": "h", "kind": "gate2", "source": None, "target": None, "at": "t4", "settled": True},
+    ]
+    got, _ = _helper_task_with(monkeypatch, tmp_path, CONFIRMED_11, rows)
+    assert got["gate2"].endswith("--confirmed --done " + str(d / "release-done.json")) and len(got["asked"]) == 3
+
+
+@pytest.mark.parametrize(
+    "launch",
+    [{}, {**CONFIRMED_11, "carried": True}, {**CONFIRMED_11, "n": 2}, {**CONFIRMED_11, "k": 2}, {**CONFIRMED_11, "action": "release"}],
+)
+def test_request_confirmed_current_refuses_unless_the_same_uncarried_confirm(monkeypatch, tmp_path, launch):
+    monkeypatch.setattr(pgate, "last_launch", lambda main, name: dict(launch))
+    with pytest.raises(pgate.NotConfirmed, match="最後の起動が確定でない"):
+        pgate.request_confirmed(tmp_path, "p1", 1, 1, str(_gate_done(tmp_path)))
+
+
+def test_request_confirmed_current_refuses_a_done_without_a_gate(monkeypatch, tmp_path):
+    monkeypatch.setattr(pgate, "last_launch", lambda main, name: dict(CONFIRMED_11))
+    done = tmp_path / "ok-done.json"
+    done.write_text(json.dumps({"items": [{"result": "完了"}]}))
+    with pytest.raises(pgate.NotConfirmed, match="承認ゲートで止まっていない"):
+        pgate.request_confirmed(tmp_path, "p1", 1, 1, str(done))
+
+
+# ---- #3597: 確定の後の承認ゲート（受け入れ条件 1〜4・決定 2） ----
+
+
+def _gate_done(tmp_path, reason="有効な承認のレビューが無い", pr=3593):
+    """本番のプランが承認ゲートで終わった done（リリース 17 の形）。"""
+    st = tmp_path / "release-state"
+    st.mkdir(exist_ok=True)
+    out = {"tool": "release", "status": "gate", "summary": "リリース承認を待つ", "metrics": {"main_pr": pr, "reason": reason}}
+    (st / "11-release.out").write_text("log\n" + json.dumps(out, ensure_ascii=False) + "\n")
+    (st / "12-facts.out").write_text(json.dumps({"tool": "release", "status": "gate", "summary": "提示物を書いた", "metrics": {}}) + "\n")
+    rows = [
+        {"kind": "step", "step": "release", "exit": 10, "out": "11-release.out"},
+        {"kind": "step", "step": "facts", "exit": 10, "out": "12-facts.out"},
+    ]
+    (st / "progress.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+    done = tmp_path / "release-done.json"
+    done.write_text(json.dumps({"items": [{"plan": "release.json", "result": "関門", "exit": 10, "report": str(st / "report.md")}]}))
+    return done
+
+
+def _confirmed(env, tmp_path):
+    """提示 1 の依頼と確定の答えまで進めた計画。(main, リリースの依頼の id, 提示の承認資料のディレクトリ, 確定の起動の seq)。"""
+    main = env["main"]
+    start(main)
+    rid = pl.send_release_request(main, "p1", "la", [10], [1], tmp_path / "st")
+    until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "release")
+    d = prl.release_dir(main, "p1", 1, 1)
+    (d / "presented.json").write_text(json.dumps({"sha": "sha1", "prs": [10]}))
+    pgate.request_gate2(main, "p1", 1, 1, str(d / "report.md"))
+    until(lambda: [i for i in questions(main)["items"] if i["kind"] == "gate2"])
+    resume(main, {"n": 1, "phase": "confirm"}, "c1")
+    ev = until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "confirmed" and e)
+    until(lambda: not [i for i in questions(main)["items"] if i["kind"] == "gate2"])
+    return main, rid, d, ev["seq"]
+
+
+def _gate2_rows(main):
+    return [r for r in plg.read_ledger_rows(main, "p1").rows if r["kind"] == "gate2"]
+
+
+def test_a_gate_after_confirm_is_sent_as_a_new_request(env, tmp_path):
+    """受け入れ条件 1〜3: 確定の後の依頼は提示 1 と違う id で台帳へ 1 行増え、理由と本番の PR の番号を載せる。同じ依頼の再送は
+    送り済みで行が増えず、提示 1 の id で中身の違う依頼は送ったと返さない。"""
+    main, _, d, seq = _confirmed(env, tmp_path)
+    again = pgate.request_gate2(main, "p1", 1, 1, "other.md")  # リリース 17 の事象: 提示 1 の id で別の依頼を送った
+    assert (again.written, again.same, again.existing) == (False, False, "p1-p1-1")
+    done = _gate_done(tmp_path)
+    task = ph.helper_task(main, "p1", 1, 1)
+    assert task["phase"] == "confirmed" and "--confirmed --done" in task["gate2"] and "settle p1 1" in task["settle"]
+    got = pgate.request_confirmed(main, "p1", 1, 1, str(done))
+    assert got == f"p1-p1-1-c{seq}" and got.written
+    rows = _gate2_rows(main)
+    assert [r["id"] for r in rows] == ["p1-p1-1", got]
+    msg = rows[-1]["msg"]
+    assert (msg["after"], msg["reason"], msg["pr"], msg["options"]) == (
+        "confirmed",
+        "有効な承認のレビューが無い",
+        3593,
+        ["打ち直す", "差し戻す"],
+    )
+    item = until(lambda: [i for i in questions(main)["items"] if i["id"] == got])[0]
+    assert item["after"] == "confirmed" and "#3593" in item["question"]
+    same = pgate.request_confirmed(main, "p1", 1, 1, str(done))
+    assert (same.written, same.same, same.answered) == (False, True, False) and len(_gate2_rows(main)) == 2
+
+
+def test_request_confirmed_refuses_without_a_confirm_or_a_gate(env, tmp_path):
+    main = env["main"]
+    start(main)
+    pl.send_release_request(main, "p1", "la", [10], [1], tmp_path / "st")
+    until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "release")
+    with pytest.raises(pgate.NotConfirmed):
+        pgate.request_confirmed(main, "p1", 1, 1, str(_gate_done(tmp_path)))  # 確定の前
+    done = tmp_path / "ok-done.json"
+    done.write_text(json.dumps({"items": [{"result": "完了"}]}))
+    assert pgate.gate_detail(str(done)) is None
+
+
+def test_gate_detail_falls_back_to_the_path_when_outputs_are_missing(tmp_path):
+    done = _gate_done(tmp_path)
+    (tmp_path / "release-state" / "progress.jsonl").unlink()
+    reason, pr, report = pgate.gate_detail(str(done))
+    assert "承認ゲートの理由を読めない" in reason and pr is None and report.endswith("report.md")
+
+
+# ---- 現状固定（gate_detail の経路。I-001 の抽出の前に今の振る舞いを固定する） ----
+
+
+def _gate_state(tmp_path, rows, outs, items=None):
+    """progress.jsonl の行 rows（dict か生の文字列）と出力 outs（ファイル名 → 中身）を置いた done。items が無ければ関門の項目 1 つ。"""
+    st = tmp_path / "gate-state"
+    st.mkdir(exist_ok=True)
+    for name, body in outs.items():
+        (st / name).write_text(body if isinstance(body, str) else json.dumps(body, ensure_ascii=False) + "\n")
+    (st / "progress.jsonl").write_text("".join((r if isinstance(r, str) else json.dumps(r)) + "\n" for r in rows))
+    done = tmp_path / "gate-done.json"
+    got = items if items is not None else [{"result": "関門", "report": str(st / "report.md")}]
+    done.write_text(json.dumps({"items": got}, ensure_ascii=False))
+    return done, st
+
+
+def _step(out, exit=10, kind="step"):
+    return {"kind": kind, "exit": exit, "out": out}
+
+
+def test_gate_detail_current_reads_reason_and_pr_from_an_earlier_step_and_stops(tmp_path):
+    """末尾の行から読み、理由と番号がそろった行で止まる。それより前の行の値は使わない。"""
+    done, st = _gate_state(
+        tmp_path,
+        [_step("a.out"), _step("b.out"), _step("c.out")],
+        {
+            "a.out": {"summary": "最初", "metrics": {"reason": "古い理由", "main_pr": 1}},
+            "b.out": {"summary": "中", "metrics": {"reason": "理由 b", "main_pr": 2}},
+            "c.out": {"summary": "最後", "metrics": {}},
+        },
+    )
+    assert pgate.gate_detail(str(done)) == ("理由 b", 2, str(st / "report.md"))
+
+
+def test_gate_detail_current_takes_reason_and_pr_from_different_steps(tmp_path):
+    """理由と番号は、それぞれ末尾に近い行の値を別々の行から取る。"""
+    done, _ = _gate_state(
+        tmp_path,
+        [_step("a.out"), _step("b.out")],
+        {"a.out": {"metrics": {"reason": "理由 a", "main_pr": 7}}, "b.out": {"metrics": {"reason": "理由 b"}}},
+    )
+    assert pgate.gate_detail(str(done))[:2] == ("理由 b", 7)
+
+
+def test_gate_detail_current_falls_back_to_the_last_summary_without_a_reason(tmp_path):
+    done, _ = _gate_state(
+        tmp_path,
+        [_step("a.out"), _step("b.out"), _step("c.out")],
+        {"a.out": {"summary": "最初", "metrics": {"main_pr": 5}}, "b.out": {"summary": "後", "metrics": {}}, "c.out": {"metrics": {}}},
+    )
+    assert pgate.gate_detail(str(done))[:2] == ("後", 5)
+
+
+def test_gate_detail_current_ignores_other_rows_and_a_str_pr(tmp_path):
+    """終了コード 10 でない行・step でない行・JSON でない行・dict でない行は読まない。main_pr が文字列なら番号に取らない。
+    NOTE: 現状固定。bool は int の派生のため main_pr が true でも番号として取る。"""
+    done, _ = _gate_state(
+        tmp_path,
+        [_step("a.out"), "not json", "[1, 2]", _step("x.out", exit=0), _step("y.out", kind="event"), _step("b.out")],
+        {
+            "a.out": {"metrics": {"reason": "理由 a", "main_pr": 9}},
+            "b.out": {"summary": "b", "metrics": {"main_pr": "3593"}},
+            "x.out": {"metrics": {"reason": "読まない", "main_pr": 1}},
+            "y.out": {"metrics": {"reason": "読まない", "main_pr": 1}},
+        },
+    )
+    assert pgate.gate_detail(str(done))[:2] == ("理由 a", 9)
+    done, _ = _gate_state(tmp_path, [_step("t.out")], {"t.out": {"metrics": {"reason": "r", "main_pr": True}}})
+    assert pgate.gate_detail(str(done))[:2] == ("r", True)
+
+
+def test_gate_detail_current_reads_the_last_json_line_and_skips_unreadable_outputs(tmp_path):
+    """出力は最後の JSON の行を読む。出力のファイルが無い・JSON が無い・out の無い行は空として次の行へ進む。"""
+    lines = ["log", json.dumps({"metrics": {"reason": "前"}}), json.dumps({"metrics": {"reason": "後", "main_pr": 4}})]
+    done, _ = _gate_state(
+        tmp_path,
+        [_step("a.out"), _step("missing.out"), _step("text.out"), {"kind": "step", "exit": 10}],
+        {"a.out": "\n".join(lines) + "\n", "text.out": "JSON の無い出力\n"},
+    )
+    assert pgate.gate_detail(str(done))[:2] == ("後", 4)
+
+
+def test_gate_detail_current_without_any_value_returns_the_progress_path(tmp_path):
+    done, st = _gate_state(tmp_path, [_step("a.out")], {"a.out": {"metrics": {}}})
+    assert pgate.gate_detail(str(done)) == (f"承認ゲートの理由を読めない（{st / 'progress.jsonl'}）", None, str(st / "report.md"))
+
+
+def test_gate_detail_current_picks_the_first_gate_item_and_skips_non_dicts(tmp_path):
+    first, second = tmp_path / "s1", tmp_path / "s2"
+    items = ["x", None, {"result": "完了", "report": "/no"}, {"result": "関門", "report": str(first / "r.md")},
+             {"result": "関門", "report": str(second / "r.md")}]  # fmt: skip
+    done, _ = _gate_state(tmp_path, [], {}, items=items)
+    reason, pr, report = pgate.gate_detail(str(done))
+    assert (pr, report) == (None, str(first / "r.md")) and str(first / "progress.jsonl") in reason
+
+
+def test_gate_detail_current_without_a_report_reads_the_working_directory(tmp_path, monkeypatch):
+    """report が無い関門の項目は report を空にし、作業ディレクトリ（`.`）の progress.jsonl を読む。"""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "o.out").write_text(json.dumps({"metrics": {"reason": "ここ", "main_pr": 8}}) + "\n")
+    (tmp_path / "progress.jsonl").write_text(json.dumps(_step("o.out")) + "\n")
+    done = tmp_path / "d.json"
+    done.write_text(json.dumps({"items": [{"result": "関門", "report": None}]}))
+    assert pgate.gate_detail(str(done)) == ("ここ", 8, "")
+
+
+@pytest.mark.parametrize("body", ['{"items": null}', "{}", '{"items": []}'])
+def test_gate_detail_current_returns_none_without_items(tmp_path, body):
+    done = tmp_path / "d.json"
+    done.write_text(body)
+    assert pgate.gate_detail(str(done)) is None
+
+
+def test_gate_detail_current_raises_on_an_unreadable_done(tmp_path):
+    with pytest.raises(OSError):
+        pgate.gate_detail(str(tmp_path / "none.json"))
+    bad = tmp_path / "bad.json"
+    bad.write_text("{")
+    with pytest.raises(ValueError):
+        pgate.gate_detail(str(bad))
+
+
+def test_retry_after_a_confirmed_gate_relaunches_the_confirm_with_a_new_seq(env, tmp_path):
+    """決定 2 の「打ち直す」: 同じ承認のまま、答えた問いの id を添えた新しい目的で確定の起動を流し直す。"""
+    main, _, _, seq = _confirmed(env, tmp_path)
+    rid = pgate.request_confirmed(main, "p1", 1, 1, str(_gate_done(tmp_path)))
+    until(lambda: [i for i in questions(main)["items"] if i["id"] == rid])
+    pl.send_answer(main, "p1", rid, "answered", choice=["打ち直す"])
+    ev = until(lambda: (e := event(main, "p1", "pause")) and e.get("action") == "confirmed" and e["seq"] > seq and e)
+    assert ev["purpose"].endswith(f"-a{rid}") and (ev["n"], ev["k"]) == (1, 1)
+    again = pgate.request_confirmed(main, "p1", 1, 1, str(_gate_done(tmp_path)))
+    assert again == f"p1-p1-1-c{ev['seq']}" and again != rid and again.written  # 打ち直した後の依頼は別の id
+
+
+def test_reject_after_a_confirmed_gate_settles_rejected_and_closes_the_pr(env, tmp_path, monkeypatch):
+    """決定 2 の「差し戻す」: 範囲のレーンの依頼へ settle --rejected と同じ rejected が返り、本番の PR を閉じる呼び出しが 1 回起きる。"""
+    import gh_call
+
+    closed = []
+    monkeypatch.setattr(gh_call, "RUNNER", lambda args, stdin=None, **kw: closed.append(args) or gh_call.GhResult(0, "", ""))
+    main, req, _, _ = _confirmed(env, tmp_path)
+    rid = pgate.request_confirmed(main, "p1", 1, 1, str(_gate_done(tmp_path)))
+    until(lambda: [i for i in questions(main)["items"] if i["id"] == rid])
+    pl.send_answer(main, "p1", rid, "answered", choice=["差し戻す"])
+    ans, _ = pl.read_answer(main, "p1", req, timeout=30)
+    assert ans["result"] == "rejected" and rid in ans["reason"]
+    # 提示や範囲の読み取り（GraphQL）も同じ gh を通るため、PR を閉じる呼び出しだけを数える
+    closes = [a for a in closed if a[:2] == ["pr", "close"]]
+    assert [a[:3] for a in closes] == [["pr", "close", "3593"]] and rid in closes[0][-1]
+
+
+def test_close_release_pr_failure_is_returned_not_raised(monkeypatch):
+    import gh_call
+
+    monkeypatch.setattr(gh_call, "RUNNER", lambda args, stdin=None, **kw: gh_call.GhResult(1, "", "HTTP 401: Bad credentials\nmore"))
+    got = pgate.step_close_release_pr.__wrapped__("/m", 3593, "c")
+    assert got == {"closed": False, "reason": "HTTP 401: Bad credentials"}
+
+
+def test_a_stopped_helper_with_a_confirmed_gate_request_is_not_asked(env, tmp_path):
+    """受け入れ条件 4: 確定の後の依頼が問いの一覧にある一時レーンが止まっても、区分 helper の問いは立たない。"""
+    states = env["states"]
+    main, _, _, _ = _confirmed(env, tmp_path)
+    rid = pgate.request_confirmed(main, "p1", 1, 1, str(_gate_done(tmp_path)))
+    until(lambda: [i for i in questions(main)["items"] if i["id"] == rid])
+    helper_up(states, "p1-rel1")
+    set_state(states, "p1-rel1", "stopped")
+    time.sleep(1.5)  # 観測 2 回分より長く待つ（NDF_PARALLEL_POLL は 0.2 秒）
+    assert not [i for i in questions(main)["items"] if i["kind"] == "helper"]
 
 
 def test_request_ask_cli_refuses_a_sender_outside_the_plan_with_4(env, monkeypatch):
@@ -551,8 +811,6 @@ def test_request_ask_cli_refuses_a_sender_outside_the_plan_with_4(env, monkeypat
 
 
 # ---- 異常系（確定仕様 docs/specifications/ndf-parallel-organizer.md のエラー処理と一時レーンの停止） ----
-
-OLD = "2000-01-01T00:00:00Z"
 
 
 def test_a_stalled_lane_is_asked_once(env):
@@ -872,8 +1130,10 @@ def test_owner_is_woken_by_the_lane_side_wait_record(monkeypatch, tmp_path):
     (pp.plan_dir(tmp_path, "p1") / "plan.json").write_text(json.dumps(data))
     items = [{"id": "qa", "kind": "ask", "lane": "la"}, {"id": "qb", "kind": "ask", "lane": "lb"}]
     monkeypatch.setattr(durable, "event_from", lambda *_a, **_k: {"items": items})
+    import parallel_repo
+
     monkeypatch.setattr(
-        prun, "relay", lambda *_a, **_k: (0, {"items": [{"name": "la", "state": "running"}, {"name": "lb", "state": "running"}]})
+        parallel_repo, "relay", lambda *_a, **_k: (0, {"items": [{"name": "la", "state": "running"}, {"name": "lb", "state": "running"}]})
     )
     loop = tmp_path / ".ndf" / "loop" / "l1"
     loop.mkdir(parents=True)
@@ -1047,6 +1307,15 @@ def test_a_helper_that_stopped_after_asking_is_not_asked_about(monkeypatch):
     prun._ask_helper(run, rows)
     q = run.questions[0]
     assert (q["kind"], q["purpose"], q["launch"]["argv"], q["n"]) == ("helper", "rel-1-1-present", ["spawn", "x"], 1)
+
+
+def test_a_helper_whose_restart_waits_for_a_free_slot_is_not_asked_about(monkeypatch):
+    """答えの後の再起動が空き待ち（`waiting`）の間は、止まって観えても「リリースの途中で止まった」を問わない。"""
+    run, helper = _helper_run(monkeypatch)
+    run.launches[f"ans-{helper}-q1"] = {"lane": helper, "result": "waiting", "at": LAUNCHED}
+    for _ in range(3):
+        prun._ask_helper(run, {helper: {"state": "stopped", "at": AFTER}})
+    assert run.questions == [] and helper not in run.helper_seen
 
 
 LAUNCHED, BEFORE, AFTER = "2026-11-10T00:00:10Z", "2026-11-10T00:00:00.000Z", "2026-11-10T00:01:00.000Z"
@@ -1300,30 +1569,23 @@ def test_answering_rebuild_returns_the_status_command(tmp_path):
 
 # ---- リリースの組み方（#2616） ----
 
-WORKTREE = {"base_branch": "develop", "production_branch": "main"}
-CD = [{"kind": "auto", "channel": "base", "target": "stg"}, {"kind": "auto", "channel": "production", "target": "prod", "production": True}]
-HAND = [{"kind": "manual", "target": "prod", "trigger": "手で流す", "production": True}]
+ROW = {"trigger": "マージ", "versioned": False}
+CD = [
+    {**ROW, "kind": "auto", "channel": "base", "target": "stg"},
+    {**ROW, "kind": "auto", "channel": "production", "target": "prod", "production": True},
+]
+HAND = [{"kind": "manual", "target": "prod", "trigger": "手で流す", "versioned": False, "production": True}]
 
 
-def declare(main, delivery="absent", form=False):
-    """配る形の宣言を置く。`delivery` の既定は宣言が無い形。文字列はそのまま書く。`form` が真なら `release.form`。"""
-    sv = main / ".ndf" / "supervise.json"
-    sv.unlink(missing_ok=True)
-    if form:
-        sv.write_text(json.dumps(TEMPLATE_DECL))
-    (main / ".ndf" / "worktree.json").write_text(json.dumps(WORKTREE))
+def declare(main, rows="absent", form=False):
+    """ベースブランチ develop・本番ブランチ main のブランチ戦略の宣言を置く。`rows` は届け先の行（既定は書かない形）で、
+    文字列は宣言のファイルへそのまま書く。`form` が真ならリリースの形を雛形のある形（package-plugin）にする。"""
     pj = main / ".ndf" / "project.json"
     pj.unlink(missing_ok=True)
-    if delivery != "absent":
-        pj.write_text(delivery if isinstance(delivery, str) else json.dumps({"delivery": delivery}))
-
-
-def read(main, rid):
-    return until(lambda: pl.read_answer(main, "p1", rid)[0])
-
-
-def build_question(main):
-    return until(lambda: next((q for q in (event(main, "p1", "questions") or {}).get("items") or [] if q.get("kind") == "build"), None))
+    if isinstance(rows, str) and rows != "absent":
+        pj.write_text(rows)
+        return
+    strategy_fixture.declare(main, "develop", "main", TEMPLATE_RELEASE if form else None, deliveries=None if rows == "absent" else rows)
 
 
 def no_build_ran(main):
@@ -1357,8 +1619,7 @@ def test_merge_or_no_delivery_repo_answers_released_without_building(env, tmp_pa
     [
         (HAND, "手で流す"),
         ([CD[0], HAND[0]], "手で流す"),
-        ("absent", "delivery も"),
-        (json.dumps({"delivery": {"unknown": "調べていない"}}), "調べていない"),
+        ("absent", "雛形が無い"),
         ("{", "読めない"),
     ],
 )

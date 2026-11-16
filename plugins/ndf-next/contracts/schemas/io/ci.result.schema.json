@@ -1,0 +1,184 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ci.result.schema.json",
+  "title": "ndf ci の結果 JSON",
+  "description": "ndf ci が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果の契約（result.schema.json）が持ち、ここは metrics と items の形だけを足す。metrics と items の要素は閉じていて、載せた項目のほかの項目を持つと通らない",
+  "allOf": [
+    {
+      "$ref": "../result.schema.json"
+    },
+    {
+      "description": "watch が test_failed で止まった結果は、チェックごとの読み取りの記録 metrics.failed_test_reads を必ず持つ",
+      "if": {
+        "required": [
+          "cause"
+        ],
+        "properties": {
+          "cause": {
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "const": "test_failed"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "metrics"
+        ],
+        "properties": {
+          "metrics": {
+            "required": [
+              "failed_test_reads"
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "properties": {
+    "tool": {
+      "const": "ci"
+    },
+    "metrics": {
+      "type": "object",
+      "description": "ndf ci の計測値",
+      "additionalProperties": false,
+      "properties": {
+        "rounds": {
+          "type": "integer",
+          "description": "読んだ回数（watch）"
+        },
+        "elapsed": {
+          "type": "number",
+          "description": "待った秒（watch）"
+        },
+        "queued_for": {
+          "type": "number",
+          "description": "ランナーの割り当てを待った秒（watch）"
+        },
+        "failed_tests": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "落ちたテストの node id（watch が test_failed で止まったときだけ）"
+        },
+        "test_files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "落ちたテストのファイル（同上）"
+        },
+        "log_error": {
+          "type": "string",
+          "description": "落ちたテストのチェックのジョブかワークフローの実行を読めなかった理由（読めなかったチェックがあるときだけ。2 件以上は `; ` でつなぐ）"
+        },
+        "junit_artifacts": {
+          "type": "string",
+          "description": "読んだ設定ファイルの test.ci.junit_artifacts の glob（watch が test_failed で止まり、設定にあるときだけ）"
+        },
+        "failed_test_reads": {
+          "type": "array",
+          "description": "落ちたテストのチェックごとの読み取りの記録（watch が test_failed で止まったときだけ。入力の順）",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "check": {
+                "type": "string",
+                "description": "チェックの名前"
+              },
+              "run_id": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "description": "ジョブが属するワークフローの実行の識別子（ジョブを読めなければ null）"
+              },
+              "runner": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "チェックに当たる suite の runner（当たらなければ null）"
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "junit",
+                  "log",
+                  "none"
+                ],
+                "description": "読み元。junit は JUnit の成果物、log はジョブのログ、none は読めなかった"
+              },
+              "found": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "読めた件数（junit なら実行の成果物から読めた件数で、同じ実行の行は同じ値）"
+              },
+              "reason": {
+                "type": "string",
+                "description": "読めなかった理由（読めたときは空）"
+              }
+            },
+            "required": [
+              "check",
+              "run_id",
+              "runner",
+              "source",
+              "found",
+              "reason"
+            ]
+          }
+        }
+      }
+    },
+    "items": {
+      "type": "array",
+      "description": "ndf ci の項目の並び",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "check",
+              "pr"
+            ],
+            "description": "check は通らなかったチェック、pr はマージした（しようとした）PR"
+          },
+          "name": {
+            "type": "string",
+            "description": "チェックの名前（check）"
+          },
+          "result": {
+            "type": "string",
+            "description": "チェックの結論か missing・stale（check）"
+          },
+          "job": {
+            "type": "integer",
+            "description": "ジョブの id（check。分かるときだけ）"
+          },
+          "test": {
+            "type": "boolean",
+            "description": "テストのチェックか（check）"
+          },
+          "number": {
+            "type": "integer",
+            "description": "PR の番号（pr）"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      }
+    }
+  }
+}

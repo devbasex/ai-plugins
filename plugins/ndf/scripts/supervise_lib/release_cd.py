@@ -1,4 +1,4 @@
-"""CD のある場合（`lib/release_case.py` の cd-no-review / cd-review。#2773）の本番のリリースプランの部品と、リリースと本番チャネルへの
+"""CD のある場合（`lib/release_case.py` の cd-no-review / cd-review / cd-admin。#2773・#3506）の本番のリリースプランの部品と、リリースと本番チャネルへの
 マージのプランが共有する MVV 判定の部品（release_templates から分けた）。`release_templates` を import しない。"""
 
 from __future__ import annotations
@@ -17,8 +17,10 @@ MVV_NOTE = "{state_dir}/work/mvv-note.md"  # mvv-gate.py が書く判定の記�
 RULE_RELEASE_PROD_CD = (
     "CD のある場合（#2773）: release は本番の PR を作って承認を待つ間 10 で止まり、承認資料を組んで本番の PR へ置いたところで"
     "リリース承認ゲートに入る。承認の後は、レビューを必須にしないリポジトリ（cd-no-review）では approve-pr から、レビューが必須の"
-    "リポジトリ（cd-review）では MVV 判定のプランでも承認ゲートで終え、本番の PR のレビューの承認を得てから release から続ける。run のステップが落ちたら、直せるもの"
-    "（版数の書き漏れ・文書の形）は fix。外部の待ち（CI・ネットワーク）の揺れなら同じステップをもう一度。タグの重複・権限の不足は stop。"
+    "リポジトリ（cd-review）では MVV 判定のプランでも承認ゲートで終え、本番の PR のレビューの承認を得てから release から続ける。"
+    "迂回の宣言のあるリポジトリ（cd-admin）では MVV 判定のプランでも承認ゲートで終え、利用者の承認の後に approve-pr から続ける"
+    "（証跡は --by user で書き、release が管理者の迂回でマージする）。run のステップが落ちたら、外部の待ち（CI・ネットワーク）の"
+    "揺れなら同じステップをもう一度。タグの重複・権限の不足と、コードや設定に原因があるもの（版数の書き漏れ・文書の形）は stop。"
 )
 
 
@@ -26,25 +28,25 @@ class PlanRefused(DeclError):
     """プランを組めない（宣言の誤りではなく、渡した引数で組むと必ず止まるプランになる）。`new` は stopped の結果で止める。"""
 
 
-def release_cd_case(a, repo: str | None) -> str | None:
-    """CD のある場合なら場合の名前（`cd-no-review` / `cd-review`）、CD が無ければ None。宣言を読めなければ組まずに DeclError。"""
+def release_cd_case(a, repo: str | None) -> release_case.Case | None:
+    """CD のある場合なら場合（`cd-no-review` / `cd-review` / `cd-admin`）、CD が無ければ None。宣言を読めなければ組まずに DeclError。"""
     try:
         case = release_case.case_at(repo or a.worktree, strict=True)
     except release_case.CaseUnreadable as e:
         raise DeclError(f"リリースの場合を決められない: {e}") from e
-    return case.case if case.has_cd else None
+    return case if case.has_cd else None
 
 
-def cd_release_wait(a, case: str | None, on_exit: dict) -> dict:
+def cd_release_wait(a, case: release_case.Case | None, on_exit: dict) -> dict:
     """CD のある場合の本番の release が承認を待つ 10 の行き先（承認資料の組み立て facts）。MVV 判定のプランで場合 1 なら承認ゲートに
     数えず（on_exit）、後の mvv の判定に任せる（承認の後にマージまで済めば結果は完了。済まなければ mvv が承認ゲートを返す）。
-    場合 2 は MVV 判定でレビューの承認を代えられないため、MVV 判定のプランでも承認ゲート（gate_next）にする。"""
-    if getattr(a, "mvv", None) and case == release_case.CD_NO_REVIEW:
+    場合 2 と cd-admin は MVV 判定で人の承認を代えられないため、MVV 判定のプランでも承認ゲート（gate_next）にする。"""
+    if getattr(a, "mvv", None) and case is not None and case.mvv_may_trail:
         return {"on_exit": {**on_exit, str(EXIT_GATE): "facts"}}
     return {"gate_next": "facts"}
 
 
-def cd_prod_steps(a, v: str, prs: str, repo: str | None, approval: str, approval_steps: list[dict], case: str) -> list[dict]:
+def cd_prod_steps(a, v: str, prs: str, repo: str | None, approval: str, approval_steps: list[dict], case: release_case.Case) -> list[dict]:
     """CD のある場合の本番の、release が承認ゲート（10）で止まった後のステップ（#2773 の決定 6）: 承認資料を組む `approval_steps`
     （facts → explain → others → 助言の MVV 判定。release_templates の `_dev_approval_steps` を本番の PR の先端で組んだもの）→
     本番の PR へ置き（approval-post）→ リリース承認ゲート → 証跡（approve-pr）→ release（マージ）。MVV 判定のプランは approval-post の
@@ -54,9 +56,14 @@ def cd_prod_steps(a, v: str, prs: str, repo: str | None, approval: str, approval
     レビューが必須の場合（`cd-review`）は証跡を書かない（#2773 の I8・受け入れ条件 18）。approve-pr を置かず、承認の後は
     PR のレビューの承認を照合する release から続ける。MVV 判定はレビューの承認を代えられないため、MVV 判定のプランでも判定の
     記録を置いたところで承認ゲートとして終え（release へ戻すと release の 10 から MVV 判定までを上限まで繰り返す）、レビューの
-    承認の後に run <計画> --from release で続ける。"""
+    承認の後に run <計画> --from release で続ける。
+
+    迂回の宣言のある場合（`cd-admin`。#3506 の決定 8）は、MVV 判定のプランでも判定の記録を置いたところで承認ゲートとして終え、
+    その後に approve-pr を --by user で置く（利用者の承認の後に run <計画> --from approve-pr で続ける）。"""
     mvv = getattr(a, "mvv", None)
-    after_gate = "end" if case == release_case.CD_REVIEW else "approve-pr"
+    human = case.human_approval
+    trail = case.trail_approval
+    after_gate = "end" if human else "approve-pr"
     steps = approval_steps
     for s in steps:
         if s.get("next") == "end":  # others（助言の MVV 判定があれば mvv-note）の後は承認資料を置く
@@ -74,14 +81,14 @@ def cd_prod_steps(a, v: str, prs: str, repo: str | None, approval: str, approval
             after_gate,
         )
         steps += [handoff_step(state, RELEASE_GATE, "判定のコメント"), reject_step(state, RELEASE_GATE, "mvv", root=repo or ".")]
-    if after_gate == "approve-pr":
-        steps.append(_approve_pr_step(a, repo, v, "mvv" if mvv else "user"))
+    if trail:
+        steps.append(_approve_pr_step(a, repo, v, "mvv" if mvv and not human else "user"))
     return steps
 
 
 def _prod_pr_cmd(a, v: str) -> str:
     """本番の PR（版上げのブランチ → 本番チャネル）の番号を引くシェルの式。"""
-    return f'$(gh pr list --head release/v{v} --base {a.production_branch} --state open --json number --jq ".[0].number")'
+    return f'$(gh pr list --head release/v{v} --base {a.production} --state open --json number --jq ".[0].number")'
 
 
 def _deploy_pr_step(step_id: str, repo: str | None, subcommand: str, **extra) -> dict:

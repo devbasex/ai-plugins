@@ -1,5 +1,7 @@
 # 1142: 決定の記録
 
+> **#3347:** この文書の決定は系統 `decisions` の番号である。決定 65 は [issue-1142-design-scripted-flow.md](issue-1142-design-scripted-flow.md) の決定 65（系統 `scripted-flow`）とは別で、別の系統から指すときは `決定 65（decisions）` と書く。記号（X1・S1・C1〜C5・D1・D2 など）は前の企画（スプリント 1〜2c）のもので、作り直しの子（[issue-3347-design-detail.md](issue-3347-design-detail.md) の「実装計画」の X1 #3283 ほか）とは別である（#3347 の決定 102）。
+
 [issue-1142-design.md](issue-1142-design.md) の決定の節である。決定 1〜25 と 65〜68 を持つ。
 
 **残りの実装（K1〜K4・W1〜W8）へ進めるかを決めるときに読むのは、決定 65〜68 である。** 4 つとも利用者の方針（2026-11-13）から決めた。

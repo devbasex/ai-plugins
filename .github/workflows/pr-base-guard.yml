@@ -5,9 +5,13 @@ name: PR base branch guard
 # （開発の起点ブランチ宛の Pull Request には、この判定が当てはまらない）
 on:
   pull_request:
+  # merge queue の一時コミットで必須のチェックを回す（#3672 の手順 3）
+  merge_group:
 
 jobs:
   guard:
+    # PR の本文・宛先・head を読むため、merge queue では飛ばす（PR で通っている）
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

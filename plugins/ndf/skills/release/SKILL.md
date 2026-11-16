@@ -14,9 +14,9 @@ allowed-tools:
 リリースは、マージで取り込んだ変更を利用者の環境へ届けて終わる。取り込んだだけの変更は、利用者の環境では起きていない。
 
 **環境へ届ける手順は CD（継続的デリバリー）が持つ。NDF の工程が受け持つのは、CD を起こすマージ・その前のリリース承認ゲート・CD の結果の確かめの 3 つである。**
-CD はブランチへのマージを起点に環境へ反映する、NDF の工程の外の仕組みで、`.ndf/project.json` の `delivery` の `kind: auto` の行で宣言する。
+CD はブランチへのマージを起点に環境へ反映する、NDF の工程の外の仕組みで、ブランチ戦略の宣言の `release.deliveries` の `kind: auto` の行で宣言する。
 
-| `delivery` の宣言 | 工程の進み方 |
+| `release.deliveries` の宣言 | 工程の進み方 |
 | --- | --- |
 | CD がある（`kind: auto`） | 版上げ・タグ・公開の手順を NDF は打たない。リリースの Pull Request をリリース承認ゲートの後にマージし、CD の結果を読んでリリース記録へ残す |
 | `release.form` で版を上げて出す形 | 版上げと変更履歴は `release/v<版>` の Pull Request で行う。行の `publishes_release` が真なら、タグと GitHub Release は CD が作る |
@@ -27,14 +27,14 @@ CD はブランチへのマージを起点に環境へ反映する、NDF の工�
 
 ### リリースの場合
 
-**リリース承認を取る場所とマージする主体は、CD の有無とレビュー必須の有無で決まる。** 判定は `release-steps.py release-case` が出す
-（`metrics.case`。正本は `scripts/lib/release_case.py`）。CD の有無は `delivery` の本番チャネルへのマージで届く `kind: auto` の行、
-レビュー必須かは本番チャネルの ruleset の承認数で読む。ruleset を読めなければ「CD があり、レビューなしでマージできる」として扱う。
+**リリース承認を取る場所とマージする主体は、CD の有無・レビュー必須の有無・迂回の宣言で決まる。** 判定は `release-steps.py release-case` が出す（`metrics.case`。正本は `scripts/lib/release_case.py`）。
+CD の有無は `release.deliveries` の本番チャネルへのマージで届く `kind: auto` の行、レビュー必須かは本番チャネルの ruleset の承認数で読む。ruleset を読めなければ「CD があり、レビューなしでマージできる」として扱う。迂回の宣言はブランチ戦略の宣言（`.ndf/project.json` の `branch_strategy`）の `merge.admin`（`true` のときだけ宣言あり。`merge.method` が `direct` のときだけ書ける）。
 
 | 場合（`case`） | リリース承認を取る場所 | マージする主体 |
 | --- | --- | --- |
-| CD があり、レビューなしでマージできる（`cd-no-review`。ai-plugins） | マージの前に、リリースの PR へ承認の証跡のコメントを置く | 利用者のアカウントで NDF が `--admin` なしにマージする。main の必須チェック `ndf/release-approval` が証跡と先端の一致を確かめる |
+| CD があり、レビューなしでマージできる（`cd-no-review`） | マージの前に、リリースの PR へ承認の証跡のコメントを置く | 利用者のアカウントで NDF が `--admin` なしにマージする。main の必須チェック `ndf/release-approval` が証跡と先端の一致を確かめる |
 | CD があり、レビューが必須（`cd-review`） | リリースの PR のレビューの承認。証跡は書かない | 利用者のアカウントで NDF が `--admin` なしにマージする。承認のレビューのコミットが先端と一致したときだけ |
+| CD があり、レビューが必須で、迂回の宣言がある（`cd-admin`。ai-plugins） | マージの前に、リリースの PR へ利用者の承認の証跡（`--by user`）を置く。MVV 判定はこの承認を代えない | 利用者のアカウントで NDF が管理者の迂回（`--admin`）でマージする。証跡と先端の一致と CI の通過の後だけ。マージの後に本番の PR へ迂回の記録を置き、結果の行の `admin` が `true` |
 | CD が無い（`no-cd`） | 手元の承認資料（今の `release` の工程） | NDF。マージの後に手でリリースする |
 
 CD のある場合は、承認したコミットと本番の PR の先端が違えば（承認の後のコミット・スプリントの組み直し）マージされず、承認を取り直す。
@@ -282,7 +282,7 @@ Pull Request に入れる。`guide:` の行が出たら、その手引きに従�
 - **CD のある場合と開発版の workflow**: 進み方は references の「CD のある場合の本番」にある。承認と本番の PR の先端が一致したときだけ
   `--admin` なしでマージし、一致しなければ `gate`（10）で止まって承認を取り直す
 
-**本番チャネルへのマージの後のタグと GitHub Release は、`delivery` の行の `publishes_release` が真なら CD が作り、無ければ `--channel prod` が作る。**
+**本番チャネルへのマージの後のタグと GitHub Release は、`release.deliveries` の行の `publishes_release` が真なら CD が作り、無ければ `--channel prod` が作る。**
 リリースの手順は全体テストを流し直さない。テストは CI の必須チェックが受け持ち、マージはその通過を待つ。
 
 **提出は公開ではない形がある。** ストアの審査を経るものは、審査を通って初めて利用者へ届く。

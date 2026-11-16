@@ -1,14 +1,15 @@
-"""リリースのプランのうち、ブランチ運用の取り込み方（#3121）で変わる部分。`release_templates` が呼ぶ。
+"""リリースのプランのうち、ブランチ戦略の取り込み方（`release_strategy`）で変わる部分。`release_templates` が呼ぶ。
 
-取り込み方の行（`branch_flow.Promotion`）の属性だけを読み、取り込み方の名前で分岐しない。値はスプリントの開始時の
-スナップショット（`decl.sprint_flow`）から読む。単位を選ばない行（宣言の無いリポジトリの既定）では何も変えない（I2）。
+取り込み方の行（`strategy_rows.Row`）の属性だけを読み、取り込み方の名前で分岐しない。値はスプリントの開始時の
+スナップショット（`decl.sprint_flow`）から読む。単位を選ばない行では何も変えない。
 """
 
 from __future__ import annotations
 
 import shlex
 
-import branch_flow
+import branch_strategy
+import strategy_rows
 
 from supervise_lib.decl import DeclError, sprint_flow
 from supervise_lib.paths import STEPS_PY
@@ -19,7 +20,7 @@ def release_ref(a, dev: bool) -> str:
     """版を上げる比べ先。本番で行がリリースブランチを本番チャネルから組むなら本番チャネル。導入を確かめる前に作業ツリーへ取り込むのは
     ベースブランチのまま（ベースブランチは本番チャネルから分かれており、本番チャネルは fast-forward で入らない）。"""
     flow = sprint_flow(a)
-    return flow.row.release_from(flow) if not dev and flow.row.selects_units else a.base
+    return flow.production if not dev and flow.row.selects_units else a.base
 
 
 # changed-plugins の結果 JSON（最後の行）の items を「名前 版」の行にする
@@ -49,20 +50,30 @@ def release_units(a) -> list[str]:
     units = list(getattr(a, "units", None) or [])
     if not units:
         raise DeclError(
-            "取り込み方（branch_flow.promotion）がリリースの単位を選ぶが、単位（スプリントブランチ）が無い。"
+            "取り込み方（ブランチ戦略の宣言の release_strategy）がリリースの単位を選ぶが、単位（スプリントブランチ）が無い。"
             "まとめたリリースと pace: fast はこの取り込み方のリリースを組まない"
         )
     return units
 
 
-def promotion_flag(a) -> str:
-    """本番の release に渡す取り込み方（行が単位を選ぶときだけ。本番チャネルへ直接出し、戻すマージを入れる。決定 17）。"""
+def release_strategy_flag(a) -> str:
+    """本番の release に渡す取り込み方（行が単位を選ぶときだけ。本番ブランチへ直接出し、戻すマージを入れる。決定 17）。"""
     row = sprint_flow(a).row
-    return f" --promotion {row.name}" if row.selects_units else ""
+    return f" --release-strategy {row.name}" if row.selects_units else ""
+
+
+def with_strategy_snapshot(plan: dict, a) -> dict:
+    """プランへ開始時のブランチ戦略のスナップショット（`a.flow`）を書く。`supervise.py run` が全段へ環境変数で渡し（`repo.SNAPSHOT_ENV`）、
+    段と段が起動する子プロセス（merge-when-green など）が今の宣言を読み直さず、開始時の名前（ベースブランチ・本番ブランチ・
+    プラグイン・タグの形）と経路で動く（I13・決定 9）。無ければ書かない。"""
+    flow = getattr(a, "flow", None)
+    if isinstance(flow, dict) and flow:
+        plan[branch_strategy.SNAPSHOT_KEY] = flow
+    return plan
 
 
 def _production(a) -> str | None:
-    return sprint_flow(a).production_branch or a.production_branch
+    return sprint_flow(a).production or a.production
 
 
 def release_branch_step(a, repo: str | None, version: str, units: list[str], next_id: str = "facts") -> dict:
@@ -83,14 +94,14 @@ def release_branch_step(a, repo: str | None, version: str, units: list[str], nex
     }
 
 
-def release_review_row(a) -> branch_flow.ReviewRow:
+def release_review_row(a) -> strategy_rows.ReviewRow:
     """リリースブランチの PR のレビューの単位（目録のスナップショットから。この種類の既定値はまとまりの記録の有無で変わらない）。"""
-    return sprint_flow(a).flow.reviews.row("release", False)
+    return sprint_flow(a).reviews.row("release", False)
 
 
 def review_branch_drop(v: str) -> str:
     """後片付けの cmd へ足す、版 `v` の衝突の解消のレビューの一時のブランチが残っていれば消す shell の続き（#3163 の I11）。"""
-    heads = f"{branch_flow.REVIEW_PREFIX}{v} {branch_flow.REVIEW_PREFIX}{v}{branch_flow.REVIEW_BASE_SUFFIX}"
+    heads = f"{strategy_rows.REVIEW_PREFIX}{v} {strategy_rows.REVIEW_PREFIX}{v}{strategy_rows.REVIEW_BASE_SUFFIX}"
     return f' && for b in {heads}; do if git ls-remote -q --exit-code --heads origin "$b"; then git push -q origin --delete "$b" || exit 1; fi; done'
 
 
@@ -123,9 +134,9 @@ def review_range_steps(a, repo: str | None, version: str, after: str = "facts") 
 
 def fast_flow_refusal(a, pin) -> str | None:
     """pace: fast はスプリントブランチを作らないため、スプリントブランチを本番に届くまで使う取り込み方と組めない。
-    `pin` は目録の開始時の値を `a` へ読む関数（`sprint_waves.pin_flow`。同じスプリントの打ち直しは開始時の値で見る）。"""
+    `pin` は目録の開始時の値を `a` へ読む関数（`decl.pin_flow`。同じスプリントの打ち直しは開始時の値で見る）。"""
     pin(a)
     row = sprint_flow(a).row
     if row.keeps_sprint_branch:
-        return f"取り込み方 {row.name}（.ndf/worktree.json の branch_flow.promotion）はスプリントブランチを使うため fast と組めない"
+        return f"取り込み方 {row.name}（ブランチ戦略の宣言の release_strategy）はスプリントブランチを使うため fast と組めない"
     return None

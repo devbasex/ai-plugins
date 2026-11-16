@@ -1,10 +1,10 @@
-"""選んで集める取り込み方（`branch_flow.promotion: selected`。#3121）のリリース。
+"""選んで集める取り込み方（ブランチ戦略の宣言の `release_strategy: release_branch`。#3121・#3672）のリリース。
 
 - リリースブランチは本番チャネルの先頭と選んだ単位のマージだけからなる（受け入れ条件 5・16・17・I5）
 - 承認資料の範囲は前のタグ..リリースブランチの先頭で、選んだ単位の中の PR だけが入る（受け入れ条件 6）
 - 承認の後に別の単位をマージした先端は承認の外として止まり、版上げだけなら通る（分冊の決定 14）
 - `new sprint` のリリースのプランが、開発版の後にリリースブランチを組み、本番は組んだブランチから本番チャネルへ直接出す
-- 宣言の無いリポジトリのリリースのプランは変わらない（受け入れ条件 2・I2）
+- ベースブランチを丸ごと出す宣言（merge_base_branch）のリリースのプランは変わらない（受け入れ条件 2・I2）
 - pace: fast はスプリントブランチを作らないため、選んで集める宣言と組まない
 """
 
@@ -21,12 +21,15 @@ SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(SCRIPTS))
 import inproc  # noqa: E402
+import strategy_fixture  # noqa: E402
 import supervise_lib  # noqa: E402,F401  lib/ を sys.path へ足す
 import approved_commit as ac  # noqa: E402
-from release_lib import included, promotion  # noqa: E402
+from release_lib import included  # noqa: E402
+from release_lib import strategy_route as promotion  # noqa: E402
 
 SUPERVISE = SCRIPTS / "supervise.py"
-SELECTED = {"start": "production", "integrate": "check", "doc_prs": "sprint", "promotion": "selected"}
+# 選んで集める取り込み方（release_branch）と、ベースブランチを丸ごと出す取り込み方（merge_base_branch）の種類
+SELECTED, WHOLE = "mobile", "web-develop"
 BRANCH = "release/v1.1.0"
 
 
@@ -151,14 +154,13 @@ def test_a_unit_merged_after_approval_is_outside_the_approval(history, tmp_path)
     assert not verdict.ok and verdict.reason == ac.OUTSIDE_COMMITS
 
 
-def make_repo(tmp_path: Path, flow=None, pace=None) -> Path:
+def make_repo(tmp_path: Path, flow: str = WHOLE, pace=None) -> Path:
     repo = tmp_path / "repo"
     (repo / ".ndf").mkdir(parents=True)
     subprocess.run(["git", "init", "-q", "-b", "develop", str(repo)], check=True)
-    wt = {"version": 1, "base_branch": "develop", "production_branch": "main", **({"branch_flow": flow} if flow else {})}
-    (repo / ".ndf" / "worktree.json").write_text(json.dumps(wt))
-    release = {"form": "package-plugin", "plugin": "ndf", "runtimes": ["claude"]}
-    (repo / ".ndf" / "supervise.json").write_text(json.dumps({"test": {"command": "true"}, "release": release}))
+    release = {**strategy_fixture.section("plugin")["release"], "plugin": "ndf", "runtimes": ["claude"], "cd": None}  # CD の無い宣言
+    strategy_fixture.write_strategy(repo, flow, base="develop", production="main", release=release)
+    (repo / ".ndf" / "supervise.json").write_text(json.dumps({"test": {"command": "true"}}))
     if pace:
         (repo / ".ndf" / "pace.json").write_text(json.dumps(pace))
     git(repo, "add", "-A")
@@ -197,13 +199,13 @@ def test_selected_sprint_builds_the_release_branch_and_releases_it_directly(tmp_
     assert f"--head {BRANCH}" in step(dev, "facts")["cmd"] and f"--head {BRANCH}" in step(dev, "others")["cmd"]
     assert prod["起点のコミット"] == f"origin/{BRANCH}"
     assert "--base main" in step(prod, "bump")["cmd"]
-    assert "--promotion selected" in step(prod, "release")["cmd"]
+    assert "--release-strategy release_branch" in step(prod, "release")["cmd"]
     assert "origin develop" in step(prod, "verify")["cmd"]  # 作業ツリーはベースブランチを追う（本番チャネルは ff で入らない）
 
 
 @pytest.mark.usefixtures("issue_bodies")
-def test_without_a_declaration_the_release_plans_do_not_change(tmp_path):
-    """受け入れ条件 2・I2: 宣言が無ければリリースブランチを組まず、本番はベースブランチ経由のまま。"""
+def test_the_whole_flow_keeps_the_release_plans(tmp_path):
+    """受け入れ条件 2・I2: ベースブランチを丸ごと出す宣言ではリリースブランチを組まず、本番はベースブランチ経由のまま。"""
     repo = make_repo(tmp_path)
     p, out = new_sprint(tmp_path, repo)
     assert p.returncode == 0, p.stdout + p.stderr
@@ -211,7 +213,7 @@ def test_without_a_declaration_the_release_plans_do_not_change(tmp_path):
     assert step(dev, "release-branch") is None and step(dev, "verify")["next"] == "facts"
     assert "--head" not in step(dev, "facts")["cmd"] and "--head" not in step(dev, "others")["cmd"]
     assert "起点のコミット" not in prod
-    assert "--base develop" in step(prod, "bump")["cmd"] and "--promotion" not in step(prod, "release")["cmd"]
+    assert "--base develop" in step(prod, "bump")["cmd"] and "--release-strategy" not in step(prod, "release")["cmd"]
 
 
 @pytest.mark.usefixtures("issue_bodies")
@@ -220,7 +222,7 @@ def test_fast_pace_refuses_the_selected_flow(tmp_path):
     repo = make_repo(tmp_path, SELECTED, pace={"version": 1, "fast": {"enabled": True, "modes": ["standard"], "verify": "true"}})
     p, out = new_sprint(tmp_path, repo, "--pace", "fast")
     got = json.loads(p.stdout.strip().splitlines()[-1])
-    assert got["status"] == "stopped" and "branch_flow.promotion" in got["summary"]
+    assert got["status"] == "stopped" and "取り込み方 release_branch" in got["summary"]
     assert not (out / "sprint.json").exists()
 
 
@@ -284,6 +286,7 @@ def test_exact_match_gates_any_commit_added_after_the_approval(monkeypatch, stat
     import release_case
 
     from release_lib import reviewed
+    from release_lib.context import ReleaseCtx
 
     head = "c" * 40
     codes = []
@@ -301,10 +304,178 @@ def test_exact_match_gates_any_commit_added_after_the_approval(monkeypatch, stat
     ops = _MergeOps(moved)
     a = type("A", (), {"version": "1.1.0", "ci_wait": 60.0})()
     case = release_case.decide_case(True, 0, "")
+    ctx = ReleaseCtx(Path("."), a, "ndf", ["ndf"], BRANCH, "develop", "main")
     if merged:
-        assert promotion._merge_exact(Path("."), a, "ndf", (BRANCH, "main"), 30, case, [], {}, ops) == "m"
-        assert ops.merged == [{"expect": head, "ci_wait": 60.0, "gate_approved": "user", "no_admin": True}]
+        assert promotion._merge_exact(ctx, 30, case, [], {}, ops) == "m"
+        assert ops.merged == [{"expect": head, "ci_wait": 60.0, "gate_approved": "user", "admin": False}]
         return
     with pytest.raises(SystemExit):
-        promotion._merge_exact(Path("."), a, "ndf", (BRANCH, "main"), 30, case, [], {}, ops)
+        promotion._merge_exact(ctx, 30, case, [], {}, ops)
     assert codes == [10] and ops.merged == []
+
+
+# --- 現状固定（I-003）: release_selected の経路ごとの戻り値・items・metrics・止まり方 -----------------------------------
+
+from types import SimpleNamespace  # noqa: E402
+
+_APPROVED, _MERGED, _PROD_TIP, _EXACT = "a" * 40, "m" * 40, "p" * 40, "e" * 40
+_BASE_METRICS = {
+    "channel": "prod",
+    "version": "1.1.0",
+    "release_pr": None,
+    "sync_pr": None,
+    "main_pr": None,
+    "tag": None,
+    "merge_commit": None,
+    "plugins": "ndf,pk",
+    "release_strategy": "release_branch",
+}
+
+
+class _SelOps:
+    def __init__(self, found=None, merge_commit=_MERGED):
+        self.found, self.merge_commit, self.created = found, merge_commit, []
+
+    def find_pr(self, root, branch, prod, states=()):
+        return self.found
+
+    def merge_commit_of(self, root, n):
+        return self.merge_commit
+
+    def create_pr(self, root, base, head, title, body):
+        self.created.append((base, head, title, body))
+        return 41
+
+
+@pytest.fixture
+def selected(monkeypatch):
+    """git・本番の PR のマージ・戻すマージを差し替えた release_selected。`run(approved, ops, case, ancestor=, tag=)`。"""
+    from release_lib import reviewed
+
+    monkeypatch.setattr(promotion, "merge_back_after", lambda root, a, plugin, br, pr, ops: ("back", br, pr))
+    monkeypatch.setattr(reviewed, "admin_back", lambda back: ("admin_back", back))
+    monkeypatch.setattr(promotion.repo_lib, "owner_repo", lambda r: "o/r")
+    monkeypatch.setattr(
+        reviewed,
+        "admin_record_on_resume",
+        lambda root, repo, case, pr: {"kind": "comment", "name": f"#{pr}", "record": "admin_merge"} if case.admin_merge else None,
+    )
+    monkeypatch.setattr(
+        promotion, "_merge_exact", lambda ctx, pr, case, items, metrics, ops: (items.append({"exact": (ctx.branch, ctx.prod)}), _EXACT)[1]
+    )
+    verdict = SimpleNamespace(tip="t" * 40, tolerated=[SimpleNamespace(sha="s1", subject="版上げ")])
+    monkeypatch.setattr(promotion, "_merge_approved", lambda ctx, pr, approved, items, metrics, ops: ("", verdict))
+    from release_lib.context import ReleaseCtx
+
+    def run(approved, ops, case=None, ancestor=0, tag=1, channel="prod"):
+        def git(root, *args, check=True):
+            if args[0] == "merge-base":
+                return SimpleNamespace(returncode=ancestor, stdout="")
+            if args[:3] == ("rev-parse", "-q", "--verify"):
+                return SimpleNamespace(returncode=tag, stdout="")
+            if args[0] == "rev-parse":
+                return SimpleNamespace(returncode=0, stdout=_PROD_TIP + "\n")
+            return SimpleNamespace(returncode=0, stdout="")
+
+        monkeypatch.setattr(promotion, "git", git)
+        a = SimpleNamespace(channel=channel, version="1.1.0", release_strategy="release_branch")
+        ctx = ReleaseCtx(Path("."), a, "ndf", ["ndf", "pk"], BRANCH, "develop", "main")
+        return promotion.release_selected(ctx, approved, ops, case)
+
+    return run
+
+
+def _back(pr):
+    return ("admin_back", ("back", promotion.ReleaseBranches(BRANCH, "develop", "main"), pr))
+
+
+def test_release_selected_refuses_a_non_prod_channel(selected):
+    from step_result import EXIT_UNREADABLE, StepError
+
+    with pytest.raises(StepError) as e:
+        selected(_APPROVED, _SelOps(), channel="dev")
+    assert e.value.code == EXIT_UNREADABLE and "--channel prod だけ" in str(e.value)
+
+
+def test_release_selected_resumes_a_merged_production_pr(selected):
+    ops = _SelOps(found={"state": "MERGED", "number": 7})
+    assert selected(_APPROVED, ops) == (
+        7,
+        _MERGED,
+        [{"kind": "pr", "name": "#7", "result": "already_merged", "base": "main"}],
+        {**_BASE_METRICS, "approved_sha": _APPROVED},
+        _back(7),
+    )
+    assert ops.created == []
+
+
+def test_release_selected_resume_falls_back_to_the_production_tip(selected):
+    got = selected("", _SelOps(found={"state": "MERGED", "number": 7}, merge_commit=""))
+    assert got[:2] == (7, _PROD_TIP) and got[3] == {**_BASE_METRICS, "approved_sha": ""}
+
+
+def test_release_selected_resume_stops_when_the_merge_lacks_the_approval(selected):
+    from step_result import StepError
+
+    with pytest.raises(StepError) as e:
+        selected(_APPROVED, _SelOps(found={"state": "MERGED", "number": 7}), ancestor=1)
+    assert e.value.code == 1 and str(e.value) == "マージ済みの本番の PR #7 のコミット mmmmmmmm が承認したコミット aaaaaaaa を含まない"
+
+
+def test_release_selected_resume_writes_the_admin_record(selected):
+    import release_case
+
+    case = release_case.decide_case(True, 1, "", admin=True)
+    _, _, items, metrics, _ = selected(_APPROVED, _SelOps(found={"state": "MERGED", "number": 7}), case)
+    assert items == [
+        {"kind": "pr", "name": "#7", "result": "already_merged", "base": "main"},
+        {"kind": "comment", "name": "#7", "record": "admin_merge"},
+    ]
+    assert "case" not in metrics
+
+
+def test_release_selected_stops_when_the_tag_exists(selected):
+    from step_result import StepError
+
+    with pytest.raises(StepError) as e:
+        selected(_APPROVED, _SelOps(), tag=0)
+    assert e.value.code == 1 and str(e.value) == "タグ ndf--v1.1.0 は既にある"
+
+
+def test_release_selected_creates_the_pr_and_merges_the_approved_commit(selected):
+    ops = _SelOps()
+    assert selected(_APPROVED, ops) == (
+        41,
+        _PROD_TIP,
+        [
+            {"kind": "commit", "name": "s1", "result": "outside_unshipped", "subject": "版上げ"},
+            {"kind": "pr", "name": "#41", "result": "merged", "base": "main", "admin": False},
+        ],
+        {**_BASE_METRICS, "approved_sha": _APPROVED, "compared_head": "t" * 40, "tolerated": 1},
+        _back(41),
+    )
+    assert ops.created == [
+        (
+            "main",
+            BRANCH,
+            "Release: ndf v1.1.0 を main へ",
+            "ndf v1.1.0 を main へ出す（選んだスプリントブランチを main から組んだリリースブランチ）。\n\n"
+            "🤖 Generated with [Claude Code](https://claude.com/claude-code)",
+        )
+    ]
+
+
+@pytest.mark.parametrize("approvals, admin, case_name, merged_admin", [(1, True, "cd-admin", True), (0, False, "cd-no-review", False)])
+def test_release_selected_reuses_the_open_pr_with_exact_match(selected, approvals, admin, case_name, merged_admin):
+    import release_case
+
+    ops = _SelOps(found={"state": "OPEN", "number": 9})
+    case = release_case.decide_case(True, approvals, "", admin=admin)
+    assert selected("", ops, case) == (
+        9,
+        _EXACT,
+        [{"exact": (BRANCH, "main")}, {"kind": "pr", "name": "#9", "result": "merged", "base": "main", "admin": merged_admin}],
+        {**_BASE_METRICS, "approved_sha": "", "case": case_name},
+        _back(9),
+    )
+    assert ops.created == []

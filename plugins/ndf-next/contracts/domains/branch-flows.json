@@ -1,0 +1,19 @@
+{
+  "summary": "ブランチの運用の宣言（.ndf/worktree.json の branch_flow。メインディレクトリから読む）の取り込み方。行は promotion の値（列 promotion）ごとで、宣言の start・doc_prs・integrate はその行が許す値だけを取る。branch_flow が無い宣言は default の行を使う。表に合わない宣言は既定へ倒さずに止める。reviews は PR の種類（review_kinds）ごとのレビューの単位で、release は release_units が真の行だけが書ける",
+  "owner": "D2（contracts/domains）",
+  "columns": {
+    "promotion": {"type": "string", "summary": "宣言の promotion の値（本番への取り込み方）。whole はベースブランチを丸ごと、selected は選んだスプリントブランチを出す"},
+    "start": {"type": "array", "summary": "許すスプリントの起点。base はベースブランチ、production は本番チャネル"},
+    "doc_prs": {"type": "array", "summary": "許す設計 PR と確定仕様化の PR の宛先。base はベースブランチ、sprint はスプリントブランチ"},
+    "integrate": {"type": "array", "summary": "許すスプリントブランチをベースブランチへ入れる時点。check は検査の Pull Request のマージ"},
+    "default": {"type": "boolean", "summary": "branch_flow の無い宣言が使う行（1 行だけが真）。値は各列の先頭"},
+    "keeps_sprint": {"type": "boolean", "summary": "スプリントブランチを本番チャネルに含まれるまで残す"},
+    "release_from": {"type": "string", "summary": "リリースブランチを切る元。base はベースブランチ、production は本番チャネル"},
+    "release_units": {"type": "boolean", "summary": "リリースの単位（スプリントブランチ）を選んで集める。真の行だけが reviews の release を書け、pace の fast と並列の計画のまとめたリリースを組めない"},
+    "review_kinds": {"type": "array", "summary": "reviews に書ける PR の種類"}
+  },
+  "rows": [
+    {"id": "promote-whole", "promotion": "whole", "start": ["base"], "doc_prs": ["base"], "integrate": ["check"], "default": true, "keeps_sprint": false, "release_from": "base", "release_units": false, "review_kinds": ["impl", "sprint", "design", "spec"]},
+    {"id": "promote-selected", "promotion": "selected", "start": ["production"], "doc_prs": ["sprint"], "integrate": ["check"], "default": false, "keeps_sprint": true, "release_from": "production", "release_units": true, "review_kinds": ["impl", "sprint", "release", "design", "spec"]}
+  ]
+}
