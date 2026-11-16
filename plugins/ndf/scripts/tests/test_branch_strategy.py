@@ -616,6 +616,15 @@ def test_collect_samples_cuts_only_after_the_deadline(tmp_path, monkeypatch, now
     assert seen[0] == "repos/{owner}/{repo}" and seen[-1] == "repos/{owner}/{repo}/rules/branches/main"
 
 
+def test_collect_samples_reads_the_clock_it_is_given(tmp_path):
+    """時計を引数で渡せる。締切を超えた後の一覧だけを打ち切り、超える前に読んだ一覧は残す。"""
+    root = history_repo(tmp_path, 1)
+    ticks = iter([1.0, 2.0, 3.0])
+    s = bsm.collect_samples(root, fake_api([(1, "main", "a")], tags=["v1"]), 2.0, 5, clock=lambda: next(ticks))
+    assert s.warnings == ["時間切れで打ち切った: releases"]
+    assert [p["number"] for p in s.prs] == [1] and s.tags == ["v1"]
+
+
 def test_collect_samples_unreadable_default_branch_and_lists(tmp_path):
     root = history_repo(tmp_path, 0)
     s = bsm.collect_samples(root, lambda path: (None, "unknown"), float("inf"), 5)
