@@ -106,10 +106,7 @@ def cd_workflows(s: Samples) -> list[str]:
 
 def single_plugin(s: Samples) -> tuple[str, list[str]] | None:
     """プラグインが 1 つだけのときの名前とランタイム。0 個か 2 個以上なら None。"""
-    if len(s.plugins) != 1:
-        return None
-    ((name, runtimes),) = s.plugins.items()
-    return name, runtimes
+    return next(iter(s.plugins.items())) if len(s.plugins) == 1 else None
 
 
 def _merged_prs(got: list) -> list[dict]:
