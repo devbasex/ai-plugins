@@ -158,7 +158,9 @@ def test_routes_fallbacks():
     assert delivery.needs_version(other) is False
     # 雛形の無い形でも、届け先の行があれば行ごとに決める（#3672 の決定 11。移した delivery の行の経路を保つ）
     rows = SAMPLES["carmo-system-console"][1]
-    assert [(r.route, r.stage) for r in delivery.routes(decl_of(rows=rows, release={"form": "service"}), FORMS)] == [("merge", "merged-by-check")]
+    assert [(r.route, r.stage) for r in delivery.routes(decl_of(rows=rows, release={"form": "service"}), FORMS)] == [
+        ("merge", "merged-by-check")
+    ]
     assert delivery.needs_version(delivery.routes(sample("ai-plugins"), FORMS)) is True
 
 

@@ -206,7 +206,9 @@ def test_pr_head_cannot_add_a_strategy_absent_in_the_main_directory(repo_wt):
 
 def test_pr_head_cannot_move_the_branches(repo_wt):
     main, wt = repo_wt
-    _strategy(main, "web-develop", rows=[PROD_ROW, {"kind": "auto", "channel": "base", "target": "dev", "trigger": "t", "versioned": False}])
+    _strategy(
+        main, "web-develop", rows=[PROD_ROW, {"kind": "auto", "channel": "base", "target": "dev", "trigger": "t", "versioned": False}]
+    )
     _strategy(wt, "web-develop", base="feat", production="release")
     d = delivery.load_delivery(wt)
     assert (d.production, d.base) == ("main", "develop")

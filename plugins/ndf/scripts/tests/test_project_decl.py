@@ -383,7 +383,6 @@ def test_hand_values_are_kept_and_mismatch_shows_both(laravel, env, tmp_path):
     assert (laravel / ".ndf" / "worktree.json").read_text(encoding="utf-8") == wt
 
 
-
 def test_hand_secret_value_is_dropped_before_keeping(laravel, env, tmp_path):
     write(laravel, ".ndf/project.json", json.dumps({"version": 1, "issues": {"primary": "redmine", "others": [TOKEN]}}))
     code, out, text, _ = analyze(env, laravel, tmp_path, LARAVEL_ANSWERS)

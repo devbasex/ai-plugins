@@ -44,7 +44,9 @@ def write_strategy(root: Path, kind: str = "web-develop", base: str | None = Non
     return sec
 
 
-def declare(root: Path, base: str = "main", production: str | None = None, release: dict | None = None, deliveries: list | None = None, **edits) -> dict:
+def declare(
+    root: Path, base: str = "main", production: str | None = None, release: dict | None = None, deliveries: list | None = None, **edits
+) -> dict:
     """ブランチ名とリリースの形から種類を選んで宣言を書く（旧い `worktree.json` のブランチ名・`supervise.json` の `release`・
     `project.json` の `delivery` を入力にしていたテストの移し先）。
 
