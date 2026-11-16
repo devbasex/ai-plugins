@@ -65,7 +65,7 @@ def _bs_commit(root: Path, plan, digest: str | None, base: dict, bw, write: bool
     return _bs_emit({**base, "status": "ok", "diff": done.diff, "digest": done.digest})
 
 
-def run(a, root: Path) -> int:
+def run_branch_strategy(a, root: Path) -> int:
     """動詞（`init`・`measure`・`write`・`migrate`・`remove`）を受けて組み、作成の結果を 1 行の JSON で出す。"""
     presets = bw.load_presets()
     try:

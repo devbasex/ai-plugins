@@ -170,7 +170,7 @@ python3 "$SCRIPTS/project-decl.py" branch-strategy migrate --digest <ハッシ�
 python3 "$SCRIPTS/project-decl.py" branch-strategy remove --digest <ハッシュ>
 ```
 
-- `--kind` は代表のリポジトリの種類（`web-develop`・`web-trunk`・`mobile`・`docs`・`plugin`）。`init` で省くと、種類を問う結果
+- `--kind` は代表のリポジトリの種類（既定の表 `scripts/data/branch-strategy-presets.json` の `kinds` の名前）。`init` で省くと、種類を問う結果
   （`why: no_kind`）を返して書かない。既存のリポジトリで `init` を打つと、書かずに `measure` を案内する
 - `measure` は、履歴から推すキー（取り込み方・ベースブランチ・起点・タグの形・Release の有無・マージコミットの作り方）を
   直近の事例が 3 件以上・9 割以上で合うときだけ値にし、既定ブランチ・版数のファイル・`plugin.json`・ワークフロー・

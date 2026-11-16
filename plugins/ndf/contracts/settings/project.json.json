@@ -4,8 +4,10 @@
   "place": "worktree",
   "scope": "team",
   "readers": [
+    "plugins/ndf/scripts/lib/project_decl.py:read_project_decl",
     "plugins/ndf/scripts/lib/project_decl.py:read_project_decl_checked",
-    "plugins/ndf/scripts/lib/project_decl.py:read_project_decl"
+    "plugins/ndf/scripts/project_lib/branch_strategy_write.py:plan_remove",
+    "plugins/ndf/scripts/project_lib/branch_strategy_write.py:plan_write"
   ],
   "keys": {
     "$schema": {

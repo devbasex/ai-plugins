@@ -443,7 +443,7 @@ def cmd_branch_strategy(a):
     deps.require("jsonschema", "locks")
     from project_lib import branch_strategy_cmd
 
-    return branch_strategy_cmd.run(a, _main_dir(Path(a.root or ".").resolve()))
+    return branch_strategy_cmd.run_branch_strategy(a, _main_dir(Path(a.root or ".").resolve()))
 
 
 # --- schema -----------------------------------------------------------------
@@ -480,8 +480,10 @@ def build_parser():
     b = sub.add_parser("branch-strategy", help="ブランチ戦略の宣言（project.json の branch_strategy）を作る・測る・書く・移す・消す")
     b.add_argument("verb", choices=("init", "measure", "write", "migrate", "remove"))
     b.add_argument("--kind", choices=("web-develop", "web-trunk", "mobile", "docs", "plugin"), help="代表のリポジトリの種類")
-    for flag, h in (("--root", None), ("--result", "write: measure か init の結果"), ("--answers", "write: 答え（pointer → 値）"), ("--digest", "示した差分のハッシュ。渡すと一致するときだけ書く")):
-        b.add_argument(flag, help=h)
+    b.add_argument("--root")
+    b.add_argument("--result", help="write: measure か init の結果")
+    b.add_argument("--answers", help="write: 答え（pointer → 値）")
+    b.add_argument("--digest", help="示した差分のハッシュ。渡すと一致するときだけ書く")
     b.add_argument("--dry-run", action="store_true", help="init: 差分を示すだけで書かない")
     b.set_defaults(func=cmd_branch_strategy)
     s = sub.add_parser("schema", help="宣言の JSON Schema を出す")
