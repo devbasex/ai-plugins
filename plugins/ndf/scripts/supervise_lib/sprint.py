@@ -321,8 +321,8 @@ def sprint_command(a, drop: tuple[str, ...] = (), design: list[int] | None = Non
     """sprint が受ける引数をすべて写した起動の形。drop の引数を外し、design を渡せば --design へ足す。
     進め方を断ったときは --pace と --state を外した normal の形を示す。"""
     words = ["python3", str(SELF), "new", "sprint"]
-    for name, _, allowed in NEW_ARGS:
-        value = getattr(a, name.lstrip("-").replace("-", "_"), None)
+    for name, opts, allowed in NEW_ARGS:
+        value = getattr(a, opts.get("dest") or name.lstrip("-").replace("-", "_"), None)
         if name == "--design" and design:
             value = [*(value or []), *(n for n in design if n not in (value or []))]
         if "sprint" not in allowed.split() or name in drop or value in (None, [], False):

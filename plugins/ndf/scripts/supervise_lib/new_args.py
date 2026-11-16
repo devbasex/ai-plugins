@@ -418,7 +418,7 @@ def optional_help(kind: str) -> str:
 def fill_new_defaults(a) -> None:
     """種別の parser に無い引数を既定値で埋める（雛形は種別をまたいで属性を読む）。"""
     for name, kw, _ in NEW_ARGS:
-        dest = name.lstrip("-").replace("-", "_")
+        dest = kw.get("dest") or name.lstrip("-").replace("-", "_")
         if not hasattr(a, dest):
             setattr(a, dest, kw.get("default", False if kw.get("action") == "store_true" else None))
 
