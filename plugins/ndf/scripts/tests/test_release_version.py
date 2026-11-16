@@ -302,7 +302,8 @@ def test_prod_plan_stops_when_the_release_is_already_tagged(tmp_path, world):
     world.publish("10.27.6", "develop", "main", tag=True)
     before = prod.read_text()
     err, info = fill(prod)
-    assert err and info["cause"] == "taken" and info["existing"] == "ndf--v10.27.6" and info["next_free"] == "10.27.7"
+    # World の宣言はタグを作らない（release.tag が null）ため、出済みの版はタグの名前でなく本番ブランチの版として示す
+    assert err and info["cause"] == "taken" and info["existing"] == "origin/main の版 10.27.6" and info["next_free"] == "10.27.7"
     assert prod.read_text() == before
 
 
@@ -591,7 +592,8 @@ def test_observe_uses_the_given_rel_and_counts_a_wrong_one_as_unreadable(world):
 
 def test_observe_without_tags_is_not_unreadable(world):
     git(world.repo, "tag", "-d", "ndf--v10.27.5")
-    o = rv.observe(world.repo, "ndf", "develop", "main", fetch=False)
+    # タグを作る宣言で読む（World の宣言はタグを作らず、本番ブランチの版を出済みの版に数える）
+    o = rv.observe(world.repo, "ndf", "develop", "main", fetch=False, tagged=True)
     assert o.tags == [] and o.latest_tag is None and o.unreadable == []
 
 
