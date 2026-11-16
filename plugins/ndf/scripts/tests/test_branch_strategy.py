@@ -467,8 +467,17 @@ def test_migrate_implied_trunk_with_admin_asks_instead_of_failing(tmp_path):
     root = make_repo(tmp_path, old)
     plan, q = bmig.plan_migration(root, legacy.load_moves())
     assert not plan.failed and plan.files == {} and [x["pointer"] for x in q] == ["/release_strategy"]
-    assert {"release_strategy": "trunk", "merge.admin": False} in q[0]["candidates"]
+    assert {"/release_strategy": "trunk", "/merge/admin": False} in q[0]["candidates"]
     assert {"source": "repo", "ref": ".ndf/project.json:/production_merge/admin", "value": "True"} in q[0]["evidence"]
+    # 候補をそのまま答えに渡すと、問わずに移す
+    plan2, q2 = bmig.plan_migration(root, legacy.load_moves(), {"/release_strategy": "trunk", "/merge/admin": False})
+    assert q2 == [] and not plan2.failed
+    sec = plan2.files["project.json"]["branch_strategy"]
+    assert sec["release_strategy"] == "trunk" and sec["merge"]["admin"] is False
+    plan3, q3 = bmig.plan_migration(root, legacy.load_moves(), {"/release_strategy": "merge_base_branch", "/branches/base": "develop"})
+    assert q3 == [] and not plan3.failed
+    sec3 = plan3.files["project.json"]["branch_strategy"]
+    assert sec3["release_strategy"] == "merge_base_branch" and sec3["branches"] == {"production": "main", "base": "develop"}
 
 
 def test_migrate_remove_row_only(tmp_path):

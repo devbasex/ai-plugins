@@ -201,6 +201,16 @@ def test_run_stops_without_trail_and_lands_human_merge(monkeypatch):
     assert land.HUMAN_MARK in recorded[0]
 
 
+def test_changed_files_reads_non_ascii_paths_as_is(tmp_path):
+    """日本語のファイル名を引用符と 8 進の形にせず読み、paths の絞り込みに当てる（core.quotePath の既定を使わない）。"""
+    root = repo_with_origin(tmp_path)
+    (root / "docs").mkdir()
+    (root / "docs" / "設計.md").write_text("x\n", encoding="utf-8")
+    sha = commit(root, "docs")
+    port = land.GhPort(root, "o/r", strategy("docs"))
+    assert port._changed_files("main", sha) == ["docs/設計.md"]
+
+
 DOCS_ONLY = ["docs/a.md"]
 
 
@@ -226,6 +236,17 @@ DOCS_ONLY = ["docs/a.md"]
         ("pull_request_target:\n    branches-ignore: [main]", DOCS_ONLY, False),
         # 変更ファイルを読めなければ paths の絞り込みは動くとみなす
         ("pull_request:\n    paths: ['src/**']", None, True),
+        # push の paths・paths-ignore も PR の変更ファイルと照らす（どの push の差分も PR の変更ファイルの部分集合）
+        ("push:\n    paths: ['src/**']", DOCS_ONLY, False),
+        ("push:\n    branches: ['**']\n    paths: ['src/**']", DOCS_ONLY, False),
+        ("push:\n    branches: ['**']\n    paths: ['src/**']", ["src/a.py"], True),
+        ("push:\n    paths-ignore: ['docs/**']", DOCS_ONLY, False),
+        ("push:\n    branches: [main]\n    paths: ['docs/**']", DOCS_ONLY, False),
+        # GitHub の書き方: `**/` はディレクトリ 0 個にも当たり、`?` は直前の 1 文字の 0〜1 回
+        ("pull_request:\n    paths: ['docs/**/*.md']", DOCS_ONLY, True),
+        ("pull_request:\n    paths: ['**/a.md']", DOCS_ONLY, True),
+        ("pull_request:\n    paths: ['docs/*.mdx?']", DOCS_ONLY, True),
+        ("pull_request:\n    paths: ['docs/?.md']", DOCS_ONLY, False),
     ],
 )
 def test_runs_on_pull_head_matches_the_filters_against_the_pull(on, files, runs):

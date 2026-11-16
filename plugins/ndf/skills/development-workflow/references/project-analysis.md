@@ -144,6 +144,9 @@ python3 "$SCRIPTS/project-decl.py" branch-strategy write --result "$TMP/strategy
 # 旧い 4 か所（worktree.json・project.json・supervise.json・release.json）のキーを移す。差分を見てからハッシュを渡す
 python3 "$SCRIPTS/project-decl.py" branch-strategy migrate
 python3 "$SCRIPTS/project-decl.py" branch-strategy migrate --digest <ハッシュ>
+# 移行が問いを返したら、答え（候補の 1 つ。`{"/release_strategy": ..., "/merge/admin": ...}`）を渡して打ち直す（ハッシュを渡すときも同じ答えを渡す）
+python3 "$SCRIPTS/project-decl.py" branch-strategy migrate --answers "$TMP/migrate-answers.json"
+python3 "$SCRIPTS/project-decl.py" branch-strategy migrate --answers "$TMP/migrate-answers.json" --digest <ハッシュ>
 # NDF を外すとき
 python3 "$SCRIPTS/project-decl.py" branch-strategy remove --digest <ハッシュ>
 ```

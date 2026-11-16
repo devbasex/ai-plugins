@@ -134,6 +134,25 @@ def test_read_approvals_falls_back_to_branch_protection(monkeypatch):
     assert n is None and "読めない" in why
 
 
+@pytest.mark.parametrize("rules", [(0, "[]"), (1, "gh: Not Found (HTTP 404)")])
+def test_read_rule_facts_reads_branch_protection_without_ruleset(monkeypatch, rules):
+    """ruleset が無い本番ブランチは従来のブランチ保護を読み、保護があれば「保護なし」（早送りの経路）にしない。"""
+    protection = {
+        "required_pull_request_reviews": {"required_approving_review_count": 1},
+        "required_status_checks": {"strict": True},
+        "enforce_admins": {"enabled": False},
+    }
+    run, _ = fake({"rules/branches/main": rules, "branches/main/protection": (0, json.dumps(protection))})
+    monkeypatch.setattr(gh_call, "RUNNER", run)
+    assert rc.read_rule_facts(".", "main") == rc.RuleFacts(True, 1, False, True, "always")
+    run, _ = fake({"rules/branches/main": rules, "branches/main/protection": (1, "gh: Branch not protected (HTTP 404)")})
+    monkeypatch.setattr(gh_call, "RUNNER", run)
+    assert rc.read_rule_facts(".", "main") == rc.RuleFacts(False, 0, False, False, None)
+    run, _ = fake({"rules/branches/main": rules})  # 保護を読めない（403）なら止める
+    monkeypatch.setattr(gh_call, "RUNNER", run)
+    assert rc.read_rule_facts(".", "main") is None
+
+
 def _decl(rows):
     return delivery.DeliveryDecl(base="develop", production="main", rows=rows)
 

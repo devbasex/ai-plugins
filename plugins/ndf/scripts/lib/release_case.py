@@ -196,12 +196,24 @@ def rule_facts_of(rules: list, bypasses: list[str | None]) -> RuleFacts:
     return RuleFacts(True, required_approvals(rules) or 0, "merge_queue" in kinds, bool(up_to_date), bypass, queue_method)
 
 
+def classic_facts_of(protection: dict) -> RuleFacts:
+    """従来のブランチ保護（`branches/<branch>/protection`）から事実を組む。保護を読めるのは管理者だけなので、
+    管理者に保護を課さない（`enforce_admins` が偽）ときは迂回できる（`always`）とみなす。"""
+    reviews = protection.get("required_pull_request_reviews") or {}
+    up_to_date = bool((protection.get("required_status_checks") or {}).get("strict"))
+    enforced = bool((protection.get("enforce_admins") or {}).get("enabled"))
+    return RuleFacts(True, int(reviews.get("required_approving_review_count") or 0), False, up_to_date, "never" if enforced else "always")
+
+
 def read_rule_facts(root, branch: str) -> RuleFacts | None:
     """本番ブランチの ruleset から、有無・承認の数・merge queue の有無・最新の取り込みの要否・迂回の可否を読む。
-    読めなければ None。"""
+    ruleset が無ければ従来のブランチ保護を読む（保護のある本番ブランチを「保護なし」の早送りの経路へ入れない）。読めなければ None。"""
     rules, why = _gh_read(root, f"repos/{{owner}}/{{repo}}/rules/branches/{branch}")
-    if why == "missing":
-        return RuleFacts(False, 0, False, False, None)
+    if why == "missing" or rules == []:
+        protection, why2 = _gh_read(root, f"repos/{{owner}}/{{repo}}/branches/{branch}/protection")
+        if why2 == "missing":
+            return RuleFacts(False, 0, False, False, None)
+        return classic_facts_of(protection) if isinstance(protection, dict) else None
     if not isinstance(rules, list):
         return None
     bypasses = []

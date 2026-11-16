@@ -430,7 +430,7 @@ def build_parser():
     b.add_argument("--kind", choices=("web-develop", "web-trunk", "mobile", "docs", "plugin"), help="代表のリポジトリの種類")
     b.add_argument("--root")
     b.add_argument("--result", help="write: measure か init の結果")
-    b.add_argument("--answers", help="write: 答え（pointer → 値）")
+    b.add_argument("--answers", help="write・migrate: 答え（pointer → 値）")
     b.add_argument("--digest", help="示した差分のハッシュ。渡すと一致するときだけ書く")
     b.add_argument("--dry-run", action="store_true", help="init: 差分を示すだけで書かない")
     b.set_defaults(func=cmd_branch_strategy)

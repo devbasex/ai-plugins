@@ -96,9 +96,10 @@ def _implied_trunk_admin_question(moved: dict, existing: dict | None, section: d
     return {
         "pointer": "/release_strategy",
         "why": "conflict",
+        # 候補は `migrate --answers` へそのまま渡せる形（セクションの pointer → 値）。`<…>` は答える人が埋める値
         "candidates": [
-            {"release_strategy": "trunk", "merge.admin": False},
-            {"release_strategy": "merge_base_branch", "branches.base": "本番ブランチと別のベースブランチを書く"},
+            {"/release_strategy": "trunk", "/merge/admin": False},
+            {"/release_strategy": "merge_base_branch", "/branches/base": "<本番ブランチと別のベースブランチ>"},
         ],
         "evidence": evidence,
     }
@@ -131,25 +132,31 @@ def _channels(branches: dict, dev: str | None) -> list[dict]:
     return channels
 
 
-def plan_migration(root: Path, moves: list[legacy.Move]) -> tuple[bw.WritePlan, list[dict]]:
-    """旧い 4 か所の値をセクションへ移し、旧いキーを消す計画と、表に無い値への問いを返す。"""
+def plan_migration(root: Path, moves: list[legacy.Move], answers: dict | None = None) -> tuple[bw.WritePlan, list[dict]]:
+    """旧い 4 か所の値をセクションへ移し、旧いキーを消す計画と、表に無い値への問いを返す。
+
+    `answers` は問いへの答え（セクションの pointer → 値。`migrate --answers`）。移した値を上書きし、答えた pointer は問わない。"""
+    answers = answers or {}
     ndf = Path(root) / ".ndf"
     docs = {fid: bw.read_decl_file(ndf / name) for fid, name in legacy.FILES.items()}
     docs = {k: v for k, v in docs.items() if v is not None}
     found = {(f.file, f.pointer) for f in legacy.find_legacy(docs, moves)}
     present = [m for m in moves if m.file in docs and legacy.has_pointer(docs[m.file], m.old)]
     if not present:
-        return bw.WritePlan(digest=bw.EMPTY_DIGEST, rebuild=lambda: plan_migration(root, moves)[0]), []
+        return bw.WritePlan(digest=bw.EMPTY_DIGEST, rebuild=lambda: plan_migration(root, moves, answers)[0]), []
     after = {fid: copy.deepcopy(doc) for fid, doc in docs.items()}
     project = after.setdefault("project", {"version": 1})
     moved, questions = _collect_moved(docs, present)
+    questions = [q for q in questions if q["pointer"] not in answers]
+    for pointer, value in answers.items():
+        bw.set_pointer(moved, pointer, copy.deepcopy(value))
     if questions:
         return bw.WritePlan(), questions
     for m in sorted(present, key=lambda m: -len(m.old)):
         _remove_pointer(after[m.file], m.old)
     if not any(m.new is not None for m in present) and bs.SECTION in project:
         # remove の行だけが当たった（使わなくなったキー）。セクションは今のまま
-        return bw.plan_files(root, _by_name(after), lambda: plan_migration(root, moves)[0]), []
+        return bw.plan_files(root, _by_name(after), lambda: plan_migration(root, moves, answers)[0]), []
     section = _fill(moved, bw.load_presets(), project.get(bs.SECTION), repo_lib.default_branch(root))
     if asked := _implied_trunk_admin_question(moved, project.get(bs.SECTION), section, docs, present):
         return bw.WritePlan(), [asked]
@@ -158,7 +165,7 @@ def plan_migration(root: Path, moves: list[legacy.Move]) -> tuple[bw.WritePlan, 
         where = [{**f, "legacy": sorted(f"{a}:{b}" for a, b in found)} for f in failed]
         return bw.WritePlan(failed=where), []
     project[bs.SECTION] = section
-    return bw.plan_files(root, _by_name(after), lambda: plan_migration(root, moves)[0]), []
+    return bw.plan_files(root, _by_name(after), lambda: plan_migration(root, moves, answers)[0]), []
 
 
 def _collect_moved(docs: dict, present: list[legacy.Move]) -> tuple[dict, list[dict]]:

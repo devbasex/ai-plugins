@@ -165,7 +165,21 @@ def test_record_twice_posts_only_once(repo, gh):
 
 @pytest.mark.parametrize("missing", ["tag", "release", "pr"])
 def test_record_before_the_production_release_posts_nothing(repo, gh, missing):
-    """AC3・I1: タグ・GitHub Release・マージ済みの PR のどれかが無ければ、書かずに 3 で止まる。"""
+    """AC3・I1: 宣言が作らせるタグ・GitHub Release と、マージ済みの PR のどれかが無ければ、書かずに 3 で止まる。
+    タグと GitHub Release を作らせるのは CD のある宣言だけ（R10）なので、CD とタグを宣言する。"""
+    strategy_fixture.declare(
+        repo,
+        "develop",
+        "main",
+        {
+            "form": "package-plugin",
+            "plugin": "ndf",
+            "runtimes": ["claude"],
+            "cd": {"workflow": "release-cd.yml"},
+            "tag": "{plugin}--v{version}",
+            "github_release": True,
+        },
+    )
     if missing == "tag":
         git(repo, "push", "-q", "origin", ":refs/tags/ndf--v1.2.3")
     elif missing == "release":

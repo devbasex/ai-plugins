@@ -121,8 +121,9 @@ def _verb_write(a, root: Path, presets: dict) -> int:
 
 
 def _verb_migrate(a, root: Path, presets: dict) -> int:
-    """旧い 4 か所の宣言をセクションへ移す。"""
-    plan, questions = bmig.plan_migration(root, legacy.load_moves())
+    """旧い 4 か所の宣言をセクションへ移す。`--answers` は問いへの答え（セクションの pointer → 値）で、移した値を上書きする。"""
+    answers = jsonio.read(a.answers, want=dict) if a.answers else {}
+    plan, questions = bmig.plan_migration(root, legacy.load_moves(), answers)
     if questions:
         return _bs_emit({"status": "ask", "questions": questions})
     return _bs_commit(root, plan, a.digest, {})

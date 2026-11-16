@@ -405,11 +405,12 @@ class GhPort:
         return ", ".join(bad)[:300] or None
 
     def _changed_files(self, base: str | None, sha: str) -> list[str] | None:
-        """PR の変更ファイル（宛先の origin と head の三点の差分。GitHub の PR の変更ファイルと同じ）。読めなければ None。"""
+        """PR の変更ファイル（宛先の origin と head の三点の差分。GitHub の PR の変更ファイルと同じ）。読めなければ None。
+        ASCII でないパスを引用符と 8 進の形にしないよう core.quotePath を切り、改行を含むパスも分けられるよう NUL で区切る。"""
         if not base:
             return None
-        r = self._git("diff", "--name-only", f"origin/{base}...{sha}")
-        return r.stdout.split("\n")[:-1] if r.returncode == 0 else None
+        r = self._git("-c", "core.quotePath=false", "diff", "--name-only", "-z", f"origin/{base}...{sha}")
+        return [f for f in r.stdout.split("\0") if f] if r.returncode == 0 else None
 
     def _no_checks_reason(self, sha: str, pull: dict) -> str | None:
         """検査が 1 件も無いときの理由。PR の head で動く有効な workflow が無ければ None（検査なしで通す）。
