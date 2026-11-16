@@ -343,7 +343,7 @@ def rule_conflicts(values: dict, evidence: dict) -> list[dict]:
 
 
 def _preset_matches(row: dict, pointer: str, value: Any, presets_row: dict) -> bool:
-    got = bw._get(row, pointer)
+    got = bw.get_pointer(row, pointer)
     if pointer == "/merge/method" and got == "merge-queue":
         return value in ("merge-queue", presets_row.get("merge_method_without_queue"))
     if pointer == "/release/version_store":
@@ -391,9 +391,9 @@ def measure_strategy(
         return base
     values: dict = {}
     for p, m in measured.items():
-        bw._set(values, p, m.value)
+        bw.set_pointer(values, p, m.value)
     if rs == "trunk":
-        bw._set(values, "/branches/base", s.production)
+        bw.set_pointer(values, "/branches/base", s.production)
     conflicts = rule_conflicts(values, evidence) + _doc_conflicts(root, values, evidence)
     if conflicts:
         return {**base, "questions": conflicts}
@@ -422,12 +422,12 @@ def _doc_conflicts(root: Path, values: dict, evidence: dict) -> list[dict]:
     """文書（README など）の述べる PR の宛先が、測った値と食い違う箇所を問いにする。"""
     conflicts = []
     for c in doc_claims(root):
-        if bw._get(values, c["pointer"]) != c["value"]:
+        if bw.get_pointer(values, c["pointer"]) != c["value"]:
             conflicts.append(
                 {
                     "pointer": c["pointer"],
                     "why": "conflict",
-                    "candidates": [bw._get(values, c["pointer"]), c["value"]],
+                    "candidates": [bw.get_pointer(values, c["pointer"]), c["value"]],
                     "evidence": evidence.get(c["pointer"], []) + [{"source": "doc", "ref": c["ref"], "value": c["value"]}],
                 }
             )
@@ -438,7 +438,7 @@ def _section_from_kind(presets: dict, kind: str, measured: dict[str, Measured], 
     """種類の既定の行に測った値を入れたセクション。プラグインの無いリポジトリは plugin・runtimes を落とす。"""
     section = json.loads(json.dumps(presets["kinds"][kind]["section"]))
     for p, m in measured.items():
-        bw._set(section, p, m.value)
+        bw.set_pointer(section, p, m.value)
     section["branches"]["base"] = values["branches"]["base"]
     if section["release"].get("plugin") is None:
         section["release"].pop("plugin", None)

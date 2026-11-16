@@ -92,7 +92,7 @@ def _channels(branches: dict, dev: str | None) -> list[dict]:
 def plan_migration(root: Path, moves: list[legacy.Move]) -> tuple[bw.WritePlan, list[dict]]:
     """旧い 4 か所の値をセクションへ移し、旧いキーを消す計画と、表に無い値への問いを返す。"""
     ndf = Path(root) / ".ndf"
-    docs = {fid: bw._read_decl(ndf / name) for fid, name in legacy.FILES.items()}
+    docs = {fid: bw.read_decl(ndf / name) for fid, name in legacy.FILES.items()}
     docs = {k: v for k, v in docs.items() if v is not None}
     found = {(f.file, f.pointer) for f in legacy.find_legacy(docs, moves)}
     present = [m for m in moves if m.file in docs and legacy.has_pointer(docs[m.file], m.old)]
@@ -124,7 +124,7 @@ def _collect_moved(docs: dict, present: list[legacy.Move]) -> tuple[dict, list[d
     for m in present:
         if m.new is None:
             continue
-        value = bw._get(docs[m.file], m.old)
+        value = bw.get_pointer(docs[m.file], m.old)
         if m.values:
             if value not in m.values:
                 questions.append(_value_question(m, value))
@@ -151,7 +151,7 @@ def _put_moved(moved: dict, m: legacy.Move, value) -> None:
     elif m.transform == "version_files":
         moved.setdefault("release", {})["_version_files"] = [{"path": p} for p in value or []]
     else:
-        bw._set(moved, _section_rel(m.new), copy.deepcopy(value))
+        bw.set_pointer(moved, _section_rel(m.new), copy.deepcopy(value))
 
 
 def _by_name(after: dict) -> dict:
