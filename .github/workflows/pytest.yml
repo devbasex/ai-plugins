@@ -13,6 +13,8 @@ name: Python tests
 # tests）に加えて、収集の仕方そのものを変える根の設定ファイルも対象へ入れる
 on:
   pull_request:
+  # merge queue の一時コミットで必須のチェックを回す（#3672 の手順 3）
+  merge_group:
   push:
     branches:
       - main

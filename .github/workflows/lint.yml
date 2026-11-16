@@ -7,6 +7,8 @@ name: Lint
 # Pull Request では絞り込まずに常に起動する（pytest.yml と同じ理由）。数秒で終わる
 on:
   pull_request:
+  # merge queue の一時コミットで必須のチェックを回す（#3672 の手順 3）
+  merge_group:
   push:
     branches:
       - main
