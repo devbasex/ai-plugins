@@ -4042,14 +4042,17 @@
     {
       "term": "範囲の PR",
       "context": "ndf-release",
-      "meaning": "直前の正式版のタグから範囲の終点までに、ベースブランチへ merge commit か squash merge で入った PR と、スプリント経由の PR の和。`--prs` で渡した番号は、マージコミットが範囲の終点の祖先であるものだけを含む。版上げの PR と、PR でない番号（squash の件名の `(#N)` が課題を指すもの）は含まない",
+      "meaning": "直前の正式版のタグから範囲の終点までに、ベースブランチへ merge commit か squash merge で入った PR と、スプリント経由の PR の和。`--prs` で渡した番号は、マージコミットが範囲の終点の祖先であるものだけを含む。バージョンアップの PR と、PR でない番号（squash の件名の `(#N)` が課題を指すもの）は含まない",
       "source": "docs/specifications/ndf-release-approval-included-prs.md"
     },
     {
-      "term": "版上げの PR",
+      "term": "バージョンアップの PR",
       "context": "ndf-release",
-      "meaning": "今の NDF では、head のブランチが `release/` で始まる PR。版数と CHANGELOG だけを変え、中身の変更を持たない。ndf-next の取り込み方の行 `trunk` では、main へのマージの後に CD の `bump` が main の先端から作る main 宛ての PR で、head のブランチの名前（`release/v<バージョン>`）と、差分がバージョンの保存先・CHANGELOG のバージョンの節・`.ndf/release.json` の手順の書き先に限られることの両方で見分ける。名前が `release/` で始まるだけの PR は含まない",
-      "source": "docs/specifications/ndf-release-approval-included-prs.md"
+      "meaning": "今の NDF では、head のブランチが `release/` で始まる PR。バージョンと CHANGELOG だけを変え、中身の変更を持たない。ndf-next のブランチ戦略 `trunk` では、main へのマージの後に CD の `bump` が main の HEAD から作る main 宛ての PR で、head のブランチの名前（`release/v<バージョン>`）と、差分がバージョンの保存先・CHANGELOG のバージョンの節・`.ndf/release.json` の手順の書き先に限られることの両方で見分ける。名前が `release/` で始まるだけの PR は含まない",
+      "source": "docs/specifications/ndf-release-approval-included-prs.md",
+      "deprecated": [
+        "版上げの PR"
+      ]
     },
     {
       "term": "条件の Skill",
@@ -7591,7 +7594,7 @@
     {
       "term": "本番の PR",
       "context": "ndf-release",
-      "meaning": "本番チャネル（main）へ入れる Pull Request。CD のある場合は、この PR のマージで本番へ届く。ndf-next の取り込み方の行 `trunk` では main 宛てのスプリントの PR が兼ね、CD が作る版上げの PR は含まない。行 `merge_base_branch`・`release_branch` と今の NDF では、リリースのブランチから本番チャネルへ出す PR を指す",
+      "meaning": "本番チャネル（main）へ入れる Pull Request。CD のある場合は、この PR のマージで本番へ届く。ndf-next のブランチ戦略 `trunk` では main 宛てのスプリントの PR が兼ね、CD が作るバージョンアップの PR は含まない。既存のブランチ戦略 `merge_base_branch`・`release_branch` と今の NDF では、リリースのブランチから本番チャネルへ出す PR を指す",
       "source": "docs/specifications/ndf-release-production-admin-merge.md"
     },
     {
@@ -7712,14 +7715,17 @@
     {
       "term": "リリースブランチ",
       "context": "ndf-release",
-      "meaning": "ndf-next のブランチ戦略 `trunk` では、版上げの PR の head になるブランチ（`release/v<バージョン>`）。main へのマージの後に CD が main の HEADから作り、版上げの PR のマージで消える。行 `merge_base_branch`・`release_branch` では `ndf-workflow` の同じ語の意味（本番チャネルへ入れる変更を集めるブランチ）",
+      "meaning": "ndf-next のブランチ戦略 `trunk` では、バージョンアップの PR の head になるブランチ（`release/v<バージョン>`）。main へのマージの後に CD が main の HEAD から作り、バージョンアップの PR のマージで消える。既存のブランチ戦略 `merge_base_branch`・`release_branch` では `ndf-workflow` の同じ語の意味（本番チャネルへ入れる変更を集めるブランチ）",
       "pending_source": "issues/issue-3572-design.md"
     },
     {
-      "term": "版上げのコミット",
+      "term": "バージョンアップのコミット",
       "context": "ndf-release",
-      "meaning": "ブランチ戦略 `trunk` で、main へのマージの後に CD が作り、版上げの PR を通して main へ入るコミット。バージョンの保存先のファイル・CHANGELOG のバージョンのセクション・`.ndf/release.json` の手順の書き先だけを変える。PR はバージョンを触らない",
-      "pending_source": "issues/issue-3572-design.md"
+      "meaning": "ブランチ戦略 `trunk` で、main へのマージの後に CD が作り、バージョンアップの PR を通して main へ入るコミット。バージョンの保存先のファイル・CHANGELOG のバージョンのセクション・`.ndf/release.json` の手順の書き先だけを変える。PR はバージョンを触らない",
+      "pending_source": "issues/issue-3572-design.md",
+      "deprecated": [
+        "版上げのコミット"
+      ]
     },
     {
       "term": "バージョン種別のラベル",

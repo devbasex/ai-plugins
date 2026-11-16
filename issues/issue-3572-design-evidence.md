@@ -150,7 +150,7 @@ the queue」である。外れる理由は、チェックの失敗・チェッ�
 
 ## ブランチ戦略のセクションのスキーマ（受け入れ条件 2m・2r。確かめ 8、2026-11-16）
 
-設計文書の「ブランチ戦略のセクション」の 2 つの設定の例が、セクションのスキーマの案に通ることと、組み合わせを壊した設定が落ちることを確かめた。
+設計文書の「ブランチ戦略のセクション」の設定の例（2 つの全文と、マージの方式を `serial` にした 1 行）が、セクションのスキーマの案に通ることと、組み合わせを壊した設定が落ちることを確かめた。
 
 ### スキーマの案
 
@@ -186,7 +186,7 @@ the queue」である。外れる理由は、チェックの失敗・チェッ�
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "method": {"enum": ["merge-queue", "strict"]},
+            "method": {"enum": ["merge-queue", "strict", "serial"]},
             "admin": {"type": "boolean"}
           },
           "if": {"required": ["method"]},
@@ -306,6 +306,7 @@ the queue」である。外れる理由は、チェックの失敗・チェッ�
 
 検査のスクリプトは `check.py`（jsonschema 4.26.0 の `Draft202012Validator`。ndf-next の依存と同じバージョン）で、上の 3 つのファイルを読む。
 `web-trunk` の例は、Web サービスの例を `trunk` 戦略（`strict`・バージョンの保存先 `json` の `package.json`）へ書き換えたもので、スクリプトの中で作る。
+`web-trunk-serial` の例は、`web-trunk` のマージの方式を `serial` にしたもので、設計文書の「設定の例」の private の Free の 1 行と同じ値である。
 
 ```text
 $ cd <作業ディレクトリ>/bs && /work/ai-plugins/.worktrees/design/issue-3572/plugins/ndf-next/.venv/bin/python -I check.py
@@ -328,6 +329,8 @@ web-trunk: 通る
 方式の無い行で admin が真: 通る
 release_branch の例: 通る
 節の無いファイル: 通る
+web-trunk-serial: 通る
+壊した例 serial と admin が真: 落ちる
 ```
 
 ### ai-plugins の今の設定ファイルの値

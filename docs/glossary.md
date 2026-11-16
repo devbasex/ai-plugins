@@ -1002,8 +1002,8 @@ release が走らせるリリースの種別・リリースコマンド・公開
 | 課題の表 | — | リリース後テストの記録のうち、見出しに `課題` と `結果` の両方の列を持つ表。スプリントの課題を閉じる判定とリリースの承認資料が、課題ごとの合否をここから読む | — | — | `docs/specifications/ndf-sprint-close-acceptance-criteria.md` |
 | 補足の表 | — | リリース後テストの記録のうち、課題の表でない表（例: 主なテストの実行の表）。課題を閉じる判定にも承認資料にも使わない | — | — | `docs/specifications/ndf-sprint-close-acceptance-criteria.md` |
 | 版数を上げないリリース | — | 版数を変えず、既定ブランチへのマージかコミットの反映で本番へ届けるリリース | 版数を上げない配布 | — | `docs/specifications/ndf-production-release-record.md` |
-| 範囲の PR | — | 直前の正式版のタグから範囲の終点までに、ベースブランチへ merge commit か squash merge で入った PR と、スプリント経由の PR の和。`--prs` で渡した番号は、マージコミットが範囲の終点の祖先であるものだけを含む。版上げの PR と、PR でない番号（squash の件名の `(#N)` が課題を指すもの）は含まない | — | — | `docs/specifications/ndf-release-approval-included-prs.md` |
-| 版上げの PR | — | 今の NDF では、head のブランチが `release/` で始まる PR。版数と CHANGELOG だけを変え、中身の変更を持たない。ndf-next の取り込み方の行 `trunk` では、main へのマージの後に CD の `bump` が main の先端から作る main 宛ての PR で、head のブランチの名前（`release/v<バージョン>`）と、差分がバージョンの保存先・CHANGELOG のバージョンの節・`.ndf/release.json` の手順の書き先に限られることの両方で見分ける。名前が `release/` で始まるだけの PR は含まない | — | — | `docs/specifications/ndf-release-approval-included-prs.md` |
+| 範囲の PR | — | 直前の正式版のタグから範囲の終点までに、ベースブランチへ merge commit か squash merge で入った PR と、スプリント経由の PR の和。`--prs` で渡した番号は、マージコミットが範囲の終点の祖先であるものだけを含む。バージョンアップの PR と、PR でない番号（squash の件名の `(#N)` が課題を指すもの）は含まない | — | — | `docs/specifications/ndf-release-approval-included-prs.md` |
+| バージョンアップの PR | — | 今の NDF では、head のブランチが `release/` で始まる PR。バージョンと CHANGELOG だけを変え、中身の変更を持たない。ndf-next のブランチ戦略 `trunk` では、main へのマージの後に CD の `bump` が main の HEAD から作る main 宛ての PR で、head のブランチの名前（`release/v<バージョン>`）と、差分がバージョンの保存先・CHANGELOG のバージョンの節・`.ndf/release.json` の手順の書き先に限られることの両方で見分ける。名前が `release/` で始まるだけの PR は含まない | 版上げの PR | — | `docs/specifications/ndf-release-approval-included-prs.md` |
 | 合格の行 | — | リリース後テストの表で、`結果` の列が `合格` で始まる行 | — | — | `docs/specifications/ndf-sprint-close-acceptance-criteria.md` |
 | 手で足した節 | — | 承認資料の `## ` の節のうち、デプロイのステップ（approval-facts・notes --approval・changed-plugins --approval）が書く見出しに当たらないもの。作り直しの後も見出しと中身が残る | — | — | `plugins/ndf/skills/release/references/release-steps.md` |
 | 置き換える箇条 | — | 後の PR の本文の `## 置き換える箇条` の節に書く行。同じ版に含む前の PR の「利用者向けの変化」の箇条を指し、その箇条を CHANGELOG と承認資料の「配る中身」から除く | — | — | `plugins/ndf/skills/release/references/release-steps.md` |
@@ -1042,7 +1042,7 @@ release が走らせるリリースの種別・リリースコマンド・公開
 | 開発版の workflow | — | 手元で作った開発版の PR を、CI の必須チェックが通るのを待って develop へマージする GitHub Actions の workflow | — | — | `docs/specifications/ndf-release-approval-on-pr.md` |
 | 承認の証跡 | — | リリースの PR に置いた、承認したコミットの 40 桁の SHA を書いたコメント（証跡の印と `承認したコミット:` の行を持つ）。承認ラベルや承認ゲートの記録は含まない | — | — | `docs/specifications/ndf-release-approval-on-pr.md` |
 | 戻すマージ | — | 今の NDF（11.0.0 の入れ替えの前）だけの語。正式版のリリースの後、リリースブランチを `release/v<版>-sync` 経由でベースブランチへ取り込むマージ。版数を持つ箇所が衝突したら本番の版を取る。ndf-next（GitHub flow）は同期の PR を作らず、この操作を持たない | — | — | — |
-| 本番の PR | — | 本番チャネル（main）へ入れる Pull Request。CD のある場合は、この PR のマージで本番へ届く。ndf-next の取り込み方の行 `trunk` では main 宛てのスプリントの PR が兼ね、CD が作る版上げの PR は含まない。行 `merge_base_branch`・`release_branch` と今の NDF では、リリースのブランチから本番チャネルへ出す PR を指す | — | — | `docs/specifications/ndf-release-production-admin-merge.md` |
+| 本番の PR | — | 本番チャネル（main）へ入れる Pull Request。CD のある場合は、この PR のマージで本番へ届く。ndf-next のブランチ戦略 `trunk` では main 宛てのスプリントの PR が兼ね、CD が作るバージョンアップの PR は含まない。既存のブランチ戦略 `merge_base_branch`・`release_branch` と今の NDF では、リリースのブランチから本番チャネルへ出す PR を指す | — | — | `docs/specifications/ndf-release-production-admin-merge.md` |
 | 管理者の迂回 | — | ruleset が迂回を許した役割の人が、必須の承認レビューと必須のチェックを満たさずにマージすること。`gh pr merge --admin` で打つ | — | — | `docs/specifications/ndf-release-production-admin-merge.md` |
 | 迂回の宣言 | — | 本番の PR を管理者の迂回でマージすることを選ぶ、`.ndf/project.json` の `production_merge.admin` の値。`true` のときだけ宣言があるとみなし、無いときは迂回しない。ndf-next ではブランチ戦略のセクションの `production_merge.admin` | — | — | `docs/specifications/ndf-release-production-admin-merge.md` |
 | 迂回の記録 | — | 本番の PR を管理者の迂回でマージしたことを示す、本番の PR へ置くコメント。マージした先端と照らした承認の証跡を指す。証跡とは別の印を持ち、承認の判定に数えない | — | — | `docs/specifications/ndf-release-production-admin-merge.md` |
@@ -1052,8 +1052,8 @@ release が走らせるリリースの種別・リリースコマンド・公開
 | 差し戻し | — | リリース承認ゲートで承認しない答え、または必須のチェックの落ちた本番の PR を出さずに止めること。直しを同じ本番の PR（スプリントの PR）へ入れ、新しい先端で承認を取り直す | — | — | — |
 | 直しのステップ | — | CI が落ちたときにコードを直して push するプランのステップ（雛形の `ci-fix`・`fix-push`・`fix-base` と、それに続く `push`） | — | — | — |
 | fix の worker | — | 要求での直しのステップの呼び方。CI が落ちたときにコードを直して push するステップ（雛形の `ci-fix` とそれに続く `push`） | — | — | — |
-| リリースブランチ | — | ndf-next のブランチ戦略 `trunk` では、版上げの PR の head になるブランチ（`release/v<バージョン>`）。main へのマージの後に CD が main の HEADから作り、版上げの PR のマージで消える。行 `merge_base_branch`・`release_branch` では `ndf-workflow` の同じ語の意味（本番チャネルへ入れる変更を集めるブランチ） | — | — | — |
-| 版上げのコミット | — | ブランチ戦略 `trunk` で、main へのマージの後に CD が作り、版上げの PR を通して main へ入るコミット。バージョンの保存先のファイル・CHANGELOG のバージョンのセクション・`.ndf/release.json` の手順の書き先だけを変える。PR はバージョンを触らない | — | — | — |
+| リリースブランチ | — | ndf-next のブランチ戦略 `trunk` では、バージョンアップの PR の head になるブランチ（`release/v<バージョン>`）。main へのマージの後に CD が main の HEAD から作り、バージョンアップの PR のマージで消える。既存のブランチ戦略 `merge_base_branch`・`release_branch` では `ndf-workflow` の同じ語の意味（本番チャネルへ入れる変更を集めるブランチ） | — | — | — |
+| バージョンアップのコミット | — | ブランチ戦略 `trunk` で、main へのマージの後に CD が作り、バージョンアップの PR を通して main へ入るコミット。バージョンの保存先のファイル・CHANGELOG のバージョンのセクション・`.ndf/release.json` の手順の書き先だけを変える。PR はバージョンを触らない | 版上げのコミット | — | — |
 | バージョン種別のラベル | — | main 宛ての PR がバージョン種別（MAJOR・MINOR・PATCH）を示すラベル（`release:major` など）。CD がマージの時点に読んでバージョンを上げる | 上げ幅の宣言、上げ幅のラベル | — | — |
 | 検証ブランチ | — | main 宛ての開いた PR を集めて作成する使い捨てのブランチ（ai-plugins では `verify/next`）。検証マーケットプレイスが指し、main へ戻さない | 検証の ref、検証用ブランチ | — | — |
 | 検証マーケットプレイス | — | 正式版のマーケットプレイスと違う名前で検証ブランチを指すマーケットプレイス。名前が違うので正式版と両方を登録できる。検証環境の種類の 1 つ | 2 つ目のマーケットプレイス、検証用マーケットプレイス | — | — |
