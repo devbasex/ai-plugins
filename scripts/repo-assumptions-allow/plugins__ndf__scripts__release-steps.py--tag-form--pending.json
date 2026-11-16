@@ -3,6 +3,6 @@
   "name": "tag-form",
   "kind": "pending",
   "reason": "リリースの形 package-plugin のタグの形 <プラグイン>--v<版>。別の形のタグを宣言で受けるまで残す",
-  "count": 12,
+  "count": 6,
   "issue": 1756
 }
