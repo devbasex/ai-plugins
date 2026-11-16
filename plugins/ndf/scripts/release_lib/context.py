@@ -16,3 +16,4 @@ class ReleaseCtx:
     branch: str  # リリースブランチ
     base: str  # ベースブランチ（開発版のチャネル）
     prod: str  # 本番チャネル
+    sync: bool = True  # 版上げの PR をベースブランチへ入れる段がある（`strategy_route.route_of` の `sync`。trunk は偽）

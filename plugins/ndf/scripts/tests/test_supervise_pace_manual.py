@@ -241,3 +241,28 @@ def test_separate_branches_keep_their_stages(tmp_path, form):
     names = [w["name"] for w in manifest["ステージ"]]
     assert names == (pa.STAGES if form else [*pa.STAGES[:6], "リリース"]), names
     assert all("production" not in r for r in manifest["リリースの経路"]) is form
+
+
+@pytest.mark.parametrize(
+    "kind, verify, auto, fast",
+    [
+        ("plugin", None, True, True),
+        ("web-trunk", {"command": "x"}, True, False),
+        ("web-trunk", None, False, False),
+        ("docs", None, False, False),
+    ],
+)
+def test_trial_before_approval_decides_auto_and_fast(monkeypatch, kind, verify, auto, fast):
+    """#3672 の決定 15: 開発版のチャネルの無い宣言では、承認前の試用（承認の対象と verify）で auto・fast を決める。"""
+    import delivery
+    from types import SimpleNamespace
+
+    import branch_strategy as bs
+    from supervise_lib import sprint_routes
+
+    sec = {**strategy_fixture.section(kind), "verify": verify}
+    monkeypatch.setattr(sprint_routes, "dev_channel_of", lambda a: delivery.DevChannel(None, "開発版のチャネルが無い（試験）"))
+    monkeypatch.setattr(sprint_routes, "sprint_flow", lambda a: bs.Strategy(sec))
+    a = SimpleNamespace()
+    assert (sprint_routes.trial_refusal(a, "auto") is None) is auto
+    assert (sprint_routes.trial_refusal(a, "fast") is None) is fast

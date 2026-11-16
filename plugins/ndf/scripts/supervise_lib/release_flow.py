@@ -123,7 +123,7 @@ def review_range_steps(a, repo: str | None, version: str, after: str = "facts") 
 
 def fast_flow_refusal(a, pin) -> str | None:
     """pace: fast はスプリントブランチを作らないため、スプリントブランチを本番に届くまで使う取り込み方と組めない。
-    `pin` は目録の開始時の値を `a` へ読む関数（`sprint_waves.pin_flow`。同じスプリントの打ち直しは開始時の値で見る）。"""
+    `pin` は目録の開始時の値を `a` へ読む関数（`decl.pin_flow`。同じスプリントの打ち直しは開始時の値で見る）。"""
     pin(a)
     row = sprint_flow(a).row
     if row.keeps_sprint_branch:

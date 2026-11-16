@@ -390,14 +390,22 @@ def measure_strategy(
     for u in s.unreadable:
         for q in questions:
             q.setdefault("unreadable", []).append(u)
-    base = {"status": "ask", "kind": None, "values": {}, "evidence": [], "questions": questions, "warnings": s.warnings}
-    if questions:
-        return base
+    # 問いを返すときも、確定した値と根拠を持つ（答えを足した後に `complete_answers` が種類の既定から全体を組む）
     values: dict = {}
     for p, m in measured.items():
-        bw.set_pointer(values, p, m.value)
+        if not m.why:
+            bw.set_pointer(values, p, m.value)
     if rs == "trunk":
         bw.set_pointer(values, "/branches/base", s.production)
+    kept = [
+        {"source": e["source"], "ref": e["ref"], "value": e["value"], "pointer": p}
+        for p, m in measured.items()
+        if not m.why
+        for e in m.evidence
+    ]
+    base = {"status": "ask", "kind": None, "values": values, "evidence": kept, "questions": questions, "warnings": s.warnings}
+    if questions:
+        return base
     conflicts = rule_conflicts(values, evidence) + _doc_conflicts(root, values, evidence)
     if conflicts:
         return {**base, "questions": conflicts}
@@ -436,6 +444,40 @@ def _doc_conflicts(root: Path, values: dict, evidence: dict) -> list[dict]:
                 }
             )
     return conflicts
+
+
+def complete_answers(prior: dict, answers: dict, presets: dict | None = None) -> dict:
+    """問いを返した測った結果（確定した値と根拠だけを持つ）に答えを入れ、種類の既定の行から完全なセクションを組む。
+
+    種類は答えの `/kind`、無ければ確定した値と答えに合う 1 つ。決まらなければ種類の問いを返す。答えが既定から変えた値は
+    `apply_answers` が種類を `custom` にする。"""
+    presets = presets or bw.load_presets()
+    rest = {p: v for p, v in answers.items() if p != "/kind"}
+    known = json.loads(json.dumps(prior.get("values") or {}))
+    for p, v in rest.items():
+        bw.set_pointer(known, p, v)
+    asked = {
+        "status": "ask",
+        "kind": None,
+        "values": known,
+        "evidence": prior.get("evidence") or [],
+        "warnings": prior.get("warnings") or [],
+    }
+    if not bw.get_pointer(known, "/branches/base"):
+        return {**asked, "questions": [{"pointer": "/branches/base", "why": "missing", "candidates": [], "evidence": []}]}
+    pointers = {e["pointer"] for e in prior.get("evidence") or [] if e.get("pointer") and e.get("source") != "preset"}
+    kind = answers.get("/kind")
+    if kind is None:
+        kind, candidates = pick_kind({p: Measured(bw.get_pointer(known, p)) for p in pointers | set(rest)}, presets)
+        if kind is None:
+            return {**asked, "questions": [{"pointer": "/kind", "why": "no_kind", "candidates": candidates, "evidence": []}]}
+    measured = {p: Measured(bw.get_pointer(known, p)) for p in pointers - set(rest) - {"/branches/base"}}
+    section = _section_from_kind(presets, kind, measured, known)
+    evidence = [
+        *asked["evidence"],
+        *({"source": "preset", "ref": kind, "value": p, "pointer": p} for p in presets["measured_keys"]["preset"]),
+    ]
+    return bw.apply_answers({**asked, "kind": kind, "values": section, "evidence": evidence, "questions": []}, rest)
 
 
 def _section_from_kind(presets: dict, kind: str, measured: dict[str, Measured], values: dict) -> dict:

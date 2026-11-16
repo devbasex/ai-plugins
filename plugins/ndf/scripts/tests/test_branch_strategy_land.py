@@ -72,7 +72,8 @@ def test_bump_facts_compare_cut_and_head(tmp_path):
     head = commit(root, "bump")
     git(root, "push", "-q", "origin", f"{head}:refs/pull/7/head")
     port = land.GhPort(root, "o/r", strategy("plugin", plugin="demo"))
-    assert port._bump_facts(7, head, "main") == {"bump": True, "cut_version": "1.0.0", "contains_tip": True}
+    tip = git(root, "rev-parse", "main")
+    assert port._bump_facts(7, head, "main") == {"bump": True, "cut_version": "1.0.0", "contains_tip": True, "tip": tip}
     assert port.production("main")["version"] == "1.0.0"
 
     # 本番ブランチが進むと、head は先端を含まない（strict の確かめが落ちる）
@@ -126,9 +127,17 @@ def test_approved_trail_is_the_one_judge_reads():
 def test_run_stops_without_trail_and_lands_human_merge(monkeypatch):
     plugin = strategy("plugin", plugin="demo")
     monkeypatch.setattr(land, "approval_of", lambda repo, s, pr: None)
-    monkeypatch.setattr(land.GhPort, "pull", lambda self, n: {"merged": False, "head": "h" * 40})
+    monkeypatch.setattr(land.GhPort, "pull", lambda self, n: {"merged": False, "head": "h" * 40, "bump": True})
     got = land.land_pr(Path("."), "o/r", plugin, 5)
     assert got["result"] == "stopped" and "承認の証跡が無い" in got["reason"]
+
+    # 承認の対象が版上げの PR なら、版上げでないスプリントの PR は証跡なしで今の head を入れに進む（決定 8）
+    seen = []
+    monkeypatch.setattr(land.GhPort, "pull", lambda self, n: {"merged": False, "head": "s" * 40, "bump": False})
+    monkeypatch.setattr(land, "land_approved", lambda port, s, n, a: seen.append(a.head) or {"result": "queued"})
+    assert land.land_pr(Path("."), "o/r", plugin, 5)["result"] == "queued" and seen == ["s" * 40]
+    monkeypatch.undo()
+    monkeypatch.setattr(land, "approval_of", lambda repo, s, pr: None)
 
     recorded = []
     monkeypatch.setattr(land.GhPort, "pull", lambda self, n: {"merged": True, "head": "h" * 40})

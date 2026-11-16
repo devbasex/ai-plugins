@@ -204,6 +204,11 @@ def _open_prod_pr(ctx: ReleaseCtx, items, metrics, ops: ProdOps, case=None) -> i
         return ensure_no_port_line(root, done)["number"]  # 前の版が作った本番の PR は port 検査の印を持たない
     if git(root, "rev-parse", "-q", "--verify", f"refs/tags/{release_tag(plugin, ver)}", check=False).returncode == 0:
         raise StepError(f"タグ {release_tag(plugin, ver)} は既にある")
+    if not ctx.sync:
+        # trunk: 版上げの PR が本番の PR を兼ねる。承認と照らす前に本番ブランチへマージしない（#3672 の D17）
+        title = f"Release: {plugin} v{ver}"
+        body = f"{plugin} v{ver} を {prod} へ出す版上げの PR。\n\n{NO_PORT_LINE}\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+        return ops.create_pr(root, prod, branch, title, body)
     release_pr, merged_pr, _ = ops.merge_release_pr(root, a, plugin, plugins, branch, base)
     metrics.update({"release_pr": release_pr, "sync_pr": merged_pr if merged_pr != release_pr else None})
     repo_lib.restore_branch(root, branch, run_git=git)  # 開発版の PR のマージで消えた版上げのブランチを戻す

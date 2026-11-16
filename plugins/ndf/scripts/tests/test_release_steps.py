@@ -766,7 +766,7 @@ def test_bump_raises_the_other_plugin_from_changed_plugins(repo):
     assert got["version"] == "2.3.5"
 
 
-def _release_prod(monkeypatch, root: Path, branches: tuple[str, str], plugin: str, deliveries: list | None = None):
+def _release_prod(monkeypatch, root: Path, branches: tuple[str, str], plugin: str, deliveries: list | None = None, channel: str = "prod"):
     """release --channel prod を git と gh を差し替えて流し、(PR の作成, 呼んだ git, 結果) を返す。`branches` は
     (ベースブランチ, 本番ブランチ)。"""
     import argparse
@@ -786,11 +786,19 @@ def _release_prod(monkeypatch, root: Path, branches: tuple[str, str], plugin: st
     monkeypatch.setattr(mod.publish, "git", git)
     monkeypatch.setattr(mod, "git_root", lambda r: root)
     monkeypatch.setattr(mod.bump, "require_bumped", lambda r, plugin, ver: None)
-    monkeypatch.setattr(mod, "find_pr", lambda r, head, base, states: found.append((head, base)))
+
+    def find_pr(r, head, base, states):
+        found.append((head, base))
+        # 作った PR は開いたまま見つかる（trunk の版上げの PR は本番の PR を兼ねる）
+        hit = [i for i, c in enumerate(created, 1) if (c[0], c[1]) == (base, head)]
+        return {"number": hit[0], "state": "OPEN"} if hit and "OPEN" in states else None
+
+    monkeypatch.setattr(mod, "find_pr", find_pr)
+    monkeypatch.setattr(mod.port_mark, "ensure_no_port_line", lambda r, pr: pr)  # 使い回す PR の本文は書き直さない
     monkeypatch.setattr(mod, "changelog_section", lambda r, ver, plugin: "")
     monkeypatch.setattr(mod, "run_checks", lambda r: [])
     monkeypatch.setattr(mod, "create_pr", lambda r, base, head, title, body: created.append((base, head, title)) or len(created))
-    monkeypatch.setattr(mod, "wait_and_merge", lambda r, n, expect=None, **kw: f"m-{n}")
+    monkeypatch.setattr(mod, "wait_and_merge", lambda r, n, expect=None, **kw: calls.append(("merge", n, expect)) or f"m-{n}")
     monkeypatch.setattr(mod.approval, "release_pr_allowed", lambda r, n, view: None)
     monkeypatch.setattr(
         mod.approval, "check_approved", lambda r, approved, base, allowed: mod.ac.Verdict(True, approved, "b" * 40, "match")
@@ -801,9 +809,26 @@ def _release_prod(monkeypatch, root: Path, branches: tuple[str, str], plugin: st
     monkeypatch.setattr(mod.reviewed, "release_case_or_stop", lambda r: mod.reviewed.release_case.decide_case(False, None, ""))
     with pytest.raises(SystemExit) as e:
         mod.cmd_release(
-            argparse.Namespace(root=str(root), version="1.2.3", plugins=None, channel="prod", approved_sha="a" * 40, ci_wait=3600.0)
+            argparse.Namespace(root=str(root), version="1.2.3", plugins=None, channel=channel, approved_sha="a" * 40, ci_wait=3600.0)
         )
     return found, created, calls, e.value.code
+
+
+def test_trunk_release_merges_the_release_pr_only_after_the_approval_check(monkeypatch, tmp_path):
+    """#3672 の D17: trunk では版上げの PR が本番の PR を兼ね、開発版の PR の段（承認と照らさないマージ）を通らない。"""
+    found, created, calls, out = _release_prod(monkeypatch, tmp_path, ("main", "main"), "foo")
+    assert created == [("main", "release/v1.2.3", "Release: foo v1.2.3")]
+    assert [c for c in calls if c[0] == "merge"] == [("merge", 1, "b" * 40)]  # 照合した先端だけを 1 回入れる
+    assert out["metrics"]["main_pr"] == 1
+
+
+def test_trunk_release_refuses_the_dev_channel(monkeypatch, tmp_path):
+    """#3672: trunk には開発版のチャネルが無く、--channel dev は本番へ入れずに止まる。"""
+    import importlib
+
+    mod = importlib.import_module("step_result")
+    with pytest.raises(mod.StepError, match="開発版のチャネルが無い"):
+        _release_prod(monkeypatch, tmp_path, ("main", "main"), "foo", channel="dev")
 
 
 def test_release_takes_branches_and_names_from_the_declaration(monkeypatch, tmp_path):

@@ -525,6 +525,15 @@ def test_measure_doc_conflict_and_insufficient(tmp_path):
     assert res2["status"] == "ask" and {q["why"] for q in res2["questions"]} >= {"insufficient"}
 
 
+def test_answering_the_asked_questions_completes_the_section(tmp_path):
+    """問いを返した結果も確定した値を持ち、表示された問いに答えるだけで種類の既定から全体を組める。"""
+    root = history_repo(tmp_path, 4, {"CONTRIBUTING.md": "`--base develop` で出す\n"})
+    res = bsm.measure_strategy(root, fake_api([(i, "main", f"sprint/{i}") for i in range(1, 5)]))
+    assert res["values"]["release_strategy"] == "trunk" and res["evidence"]
+    got = bsm.complete_answers(res, {"/branches/base": "main"})
+    assert got["status"] == "ok" and got["kind"] == "docs" and bs.validate_section(got["values"]) == []
+
+
 def test_measure_tags_without_cd_asks_r10(tmp_path):
     root = history_repo(tmp_path, 4)
     res = bsm.measure_strategy(
@@ -839,10 +848,27 @@ def test_land_direct_and_strict():
     port2 = FakePort({"head": H1, "base": "main", "contains_tip": False}, facts(present=False))
     out = land.land_approved(port2, bs.Strategy(section("docs")), 6, land.Approval(H1))
     assert out["result"] == "stopped" and port2.calls == []
-    port3 = FakePort({"head": H1, "base": "main", "contains_tip": True}, facts(present=False))
+    # 親は head が含むと確かめた先端（pull の tip）で、取り直した先端（production の tip）ではない
+    port3 = FakePort({"head": H1, "base": "main", "contains_tip": True, "tip": "a" * 40}, facts(present=False), prod={"tip": "b" * 40})
     assert land.land_approved(port3, bs.Strategy(section("docs")), 6, land.Approval(H1))["result"] == "merged"
     kinds = [c[0] for c in port3.calls]
     assert kinds == ["commit", "ref"] and "NDF-Approved-Head: " + H1 in port3.calls[0][1]
+    assert port3.calls[0][2] == ["a" * 40, H1]
+
+
+def test_land_stops_when_base_is_not_production():
+    port = FakePort({"head": H1, "base": "develop", "contains_tip": True, "tip": "a" * 40}, facts(present=False))
+    out = land.land_approved(port, bs.Strategy(section("docs")), 6, land.Approval(H1))
+    assert out["result"] == "stopped" and "本番ブランチ" in out["reason"] and port.calls == []
+
+
+def test_land_reads_queue_only_for_merge_queue():
+    class NoQueue(FakePort):
+        def queue(self, b):
+            raise AssertionError("queue を読んだ")
+
+    port = NoQueue({"head": H1, "base": "main"}, facts())
+    assert land.land_approved(port, bs.Strategy(section("web-develop")), 5, land.Approval(H1))["result"] == "merged"
 
 
 def test_land_ruleset_mismatch_and_human():

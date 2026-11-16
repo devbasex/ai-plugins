@@ -279,6 +279,10 @@ def apply_decls(a) -> None:
     roots = decl_roots(a.worktree, getattr(a, "repo", None))
     sv = read_decl(roots, SUPERVISE_DECL)
     _apply_simple_decls(a, sv)
+    if _pinned_flow(a) is None and getattr(a, "kind", None) in ("sprint", "close"):
+        # 打ち直しは、起点・本番のブランチ・リリースを開始時のスナップショットから導く（決定 9）。導いた後に
+        # a.flow だけを戻すと、古い目録のまま新しい本番ブランチやプラグインへ出す計画になる
+        pin_flow(a)
     if _pinned_flow(a) is None:
         a.flow = _strategy_snapshot(a, roots)
     strategy = sprint_flow(a)
@@ -292,6 +296,19 @@ def apply_decls(a) -> None:
     _require_declared(a)
 
 
+def pin_flow(a) -> None:
+    """スプリントの目録（`sprint.json`）に開始時に書いたブランチ戦略のスナップショットがあれば、`a.flow` をそれにする。`new sprint` を同じ
+    スプリントで打ち直したときと `new close` は、宣言ではなく開始時の値で組む（#3121 の決定 4）。"""
+    from supervise_lib.procedures import sprint_out
+
+    try:
+        got = json.loads((sprint_out(a) / repo.SPRINT_MANIFEST).read_text(encoding="utf-8")).get(branch_strategy.SNAPSHOT_KEY)
+    except (OSError, ValueError, AttributeError):
+        return
+    if isinstance(got, dict) and got:
+        a.flow = got
+
+
 def _pinned_flow(a) -> dict | None:
     """引数に既にあるブランチ戦略のスナップショット（空でない dict）。無ければ `None`。"""
     flow = getattr(a, "flow", None)
@@ -299,7 +316,7 @@ def _pinned_flow(a) -> dict | None:
 
 
 def _strategy_snapshot(a, roots: list[Path]) -> dict:
-    """スナップショットを今の宣言から作る。スプリントの目録に開始時の値があれば、`sprint_waves.pin_flow` がそれで置き換える（I13）。
+    """スナップショットを今の宣言から作る。スプリントの目録に開始時の値があれば、`pin_flow` がそれで置き換える（I13）。
 
     種別リリース（スプリントに属さないリリース）は、本番ブランチの先頭の宣言から作る（#3308 の決定 1）。読めなければ止まる。
     ブランチの名前（`branches`・`channels`）は今の宣言の値で置き換える（#3308 の I5。本番ブランチの宣言が古い名前を持っていても
@@ -310,7 +327,12 @@ def _strategy_snapshot(a, roots: list[Path]) -> dict:
     production = getattr(a, "production", None) or strategy.production
     got, where = repo.production_strategy(repo.first_git_tree(roots), production)
     if got is None:
-        raise DeclError(f"本番ブランチの宣言を読めない: {where}")
+        # ベースブランチで移行を入れた後は、本番ブランチにセクションが届くのがリリースの後になる。止めるときに入れ方を示す
+        raise DeclError(
+            f"本番ブランチの宣言を読めない: {where}。移行（branch-strategy migrate）をベースブランチで入れた後なら、"
+            f"本番ブランチ {production} の作業ツリーで `project-decl.py branch-strategy migrate` を打ち、"
+            f"その差分を本番ブランチ宛ての PR で入れてから打ち直してください"
+        )
     names = {k: strategy.section[k] for k in ("branches", "channels")}
     return branch_strategy.snapshot_section(branch_strategy.Strategy({**got.section, **names}), where)
 

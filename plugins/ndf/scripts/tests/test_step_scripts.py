@@ -856,6 +856,27 @@ def test_verify_install_source_comes_from_origin_and_declaration(repo):
     assert where[2] == "live"
 
 
+def test_verify_install_accepts_the_head_of_an_open_release_pr(repo, monkeypatch):
+    """#3672 の決定 17: 本番チャネル宛ての開いた版上げの PR の head（release/v<版>）を受け、任意の ref は受けない。"""
+    import argparse
+
+    import gh_call
+
+    mod = load_verification()
+    git(repo, "remote", "add", "origin", "https://github.com/devbasex/ai-plugins.git")
+    strategy_fixture.declare(repo, "main", "main", {"form": "package-plugin", "plugin": "ndf", "runtimes": ["claude"]})
+    write(repo, ".claude-plugin/marketplace.json", json.dumps({"name": "ai-plugins"}))
+    asked = []
+    monkeypatch.setattr(gh_call, "gh", lambda args, stdin=None, cwd=None: asked.append(args) or gh_call.GhResult(0, "1\n", ""))
+    where, _ = mod.install_source(repo, argparse.Namespace(ref="release/v1.2.3", plugins=None))
+    assert where[2] == "main" and asked[0][:6] == ["pr", "list", "--base", "main", "--head", "release/v1.2.3"]
+    with pytest.raises(mod.StepError, match="--ref feature/x"):
+        mod.install_source(repo, argparse.Namespace(ref="feature/x", plugins=None))
+    monkeypatch.setattr(gh_call, "gh", lambda args, stdin=None, cwd=None: gh_call.GhResult(0, "0\n", ""))
+    with pytest.raises(mod.StepError, match="--ref release/v1.2.4"):
+        mod.install_source(repo, argparse.Namespace(ref="release/v1.2.4", plugins=None))
+
+
 @pytest.mark.parametrize(
     "case",
     ["ok", "version_mismatch", "failed", "file_mismatch", "user_env_changed"],

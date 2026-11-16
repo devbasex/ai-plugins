@@ -9,7 +9,7 @@ import release_case
 from gate_answer import DESIGN_GATE, RELEASE_GATE
 from pace import PaceError, read_pace
 from sprint_mvv import MVV_PACES
-from supervise_lib.decl import DeclError, decl_roots, delivery_decl
+from supervise_lib.decl import DeclError, decl_roots, delivery_decl, sprint_flow
 from supervise_lib.paths import HERE, SELF
 from supervise_lib.plan import QUEUE_PRS, sprint_state_path
 from supervise_lib.delivery_templates import GATE_2_MATERIAL, PromoteParams, plan_cd_result, plan_gate_2, plan_promote, plan_verify
@@ -28,6 +28,26 @@ def dev_channel_of(a) -> delivery.DevChannel:
     """開発版のチャネルの形（lib/delivery.py の dev_channel）。宣言は apply_routes が載せた a.delivery_decl を使う。"""
     decl = getattr(a, "delivery_decl", None) or delivery_decl(a)
     return delivery.dev_channel(decl)
+
+
+def trial_refusal(a, pace: str) -> str | None:
+    """承認前の試用（#3672 の決定 15）で `pace`（`auto`・`fast`）を断る理由。許すなら None。上の行から順に最初に当たった行で決まる。
+
+    1・2 行目（開発版のチャネル・手動反映の本番系）は `dev_channel_of` が判定する。3 行目以降はセクションの承認の対象と `verify` で決まる:
+    `approval.target: release_pr` は版上げの PR の head からの導入の確認で両方を許し、`production_pr` で `verify` があれば
+    `auto` だけを許し、`verify` が無ければ両方を断る。"""
+    channel = dev_channel_of(a)
+    if channel.ok:
+        return None
+    try:
+        sec = sprint_flow(a).section
+    except DeclError as e:
+        return str(e)
+    if sec["approval"]["target"] == "release_pr":
+        return None
+    if sec.get("verify") is not None:
+        return None if pace == "auto" else f"{channel.reason}。承認前の試用は verify の試す場だけで、fast は断る（決定 15）"
+    return f"{channel.reason}。承認前の試用が無い（approval.target: production_pr で verify が null。決定 15）"
 
 
 MANUAL_RELEASE = "/ndf:release"

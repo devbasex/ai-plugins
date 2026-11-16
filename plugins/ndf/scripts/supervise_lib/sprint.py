@@ -16,7 +16,8 @@ from supervise_lib.release_flow import fast_flow_refusal
 from supervise_lib.design_merge import plan_design_merge
 from supervise_lib.sprint_bundles import apply_bundle_design, bundle_refusal
 from supervise_lib.review_units import fast_review_row
-from supervise_lib.sprint_waves import design_read, flow_head, pin_flow, plan_advise_design, plan_design_results, plan_fast_check, with_base
+from supervise_lib.decl import pin_flow
+from supervise_lib.sprint_waves import design_read, flow_head, plan_advise_design, plan_design_results, plan_fast_check, with_base
 from supervise_lib.sprint_waves import plan_fast_impl, plan_mvv_design, plan_mvv_release, plan_sprint_branch, plan_sprint_check
 from supervise_lib.sprint_waves import plan_sprint_design, plan_sprint_release, sprint_branch, sprint_branch_first, sprint_impl_plans
 from supervise_lib.new_args import NEW_ARGS
@@ -30,7 +31,7 @@ from supervise_lib.sprint_routes import (
     normal_gate_2,
     normal_prod_waves,
     MVV_PACES,
-    dev_channel_of,
+    trial_refusal,
     has_record,
     has_release_template,
     pace_decl,
@@ -238,8 +239,7 @@ def pace_refusal(a) -> str | None:
         return f".ndf/pace.json の {name}.verify（導入の確認のコマンド）が無い"
     if a.mode not in sec["modes"]:
         return f"モード {a.mode} は {name} に入れられない（入れられるモード: {' / '.join(sec['modes'])}）"
-    channel = dev_channel_of(a)
-    if why := (fast_flow_refusal(a, pin_flow) if name == "fast" else None) or (None if channel.ok else channel.reason):
+    if why := (fast_flow_refusal(a, pin_flow) if name == "fast" else None) or trial_refusal(a, name):
         return why
     mroot = next((r for r in roots if any((r / ".ndf" / f).is_file() for f in ("mvv.md", "mvv.json"))), roots[0])
     return mvv_refusal(a.state, mroot, name)

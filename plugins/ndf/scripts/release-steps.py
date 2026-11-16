@@ -137,6 +137,7 @@ import gh_parts  # noqa: E402
 import repo as repo_lib  # noqa: E402
 import strategy_rows  # noqa: E402
 import delivery  # noqa: E402
+import branch_strategy  # noqa: E402
 from release_lib.declared_steps import DECLARATION, DeclarationError, load_steps, run_steps  # noqa: E402,F401
 
 
@@ -673,6 +674,12 @@ def cmd_release(a):
     root = git_root(a.root)
     ver = a.version
     base, prod, plugin = release_decl(root, a)
+    route = _release_route(root)
+    if not route.sync and a.channel == "dev":
+        # trunk には開発版のチャネルが無い。開発版の PR の段（release/v<版> → ベースブランチ）は本番ブランチへ入れてしまう
+        raise StepError(
+            f"ベースブランチ {base} が本番ブランチと同じ（trunk）で、開発版のチャネルが無い。--channel prod で出す", EXIT_PRECONDITION
+        )
     case = reviewed.release_case_or_stop(root) if a.channel == "prod" else None
     try:
         approved = approval.approved_of(root, a, plugin, case)
@@ -681,7 +688,7 @@ def cmd_release(a):
     plugins = [s.strip() for s in (a.plugins or plugin).split(",") if s.strip()]
     branch = _prepare_release_branch(root, a, plugin)
     on_pr = case is not None and case.has_cd  # CD のある場合は承認を PR の上で照らす（#2773）
-    ctx = ReleaseCtx(root, a, plugin, plugins, branch, base, prod)
+    ctx = ReleaseCtx(root, a, plugin, plugins, branch, base, prod, sync=route.sync)
     # 本番ブランチへ直接出し、戻すマージを入れる（#3121）
     if (rs := getattr(a, "release_strategy", None)) and strategy_rows.ROWS[rs].selects_units:
         ops = sys.modules[__name__]  # 戻すマージ（back）は公開の後に打ち、失敗を本番の完了と分けて出す
@@ -691,7 +698,12 @@ def cmd_release(a):
         reviewed.release_prod(ctx, case, _prod_ops())
     if a.channel == "dev" and (wf := reviewed.dev_workflow_of(root)) and reviewed.dev_workflow_ready(root, wf):
         reviewed.release_dev(ctx, wf, sys.modules[__name__])
-    release_pr, merged_pr, release_commit = _merge_release_pr(root, a, plugin, plugins, branch, base)
+    if ctx.sync:
+        release_pr, merged_pr, release_commit = _merge_release_pr(root, a, plugin, plugins, branch, base)
+    else:
+        # trunk: 版上げの PR が本番の PR を兼ね、承認と照らしてから入れる（_merge_new_prod）
+        release_pr = merged_pr = _open_trunk_release_pr(ctx)
+        release_commit = None
     metrics = {
         "channel": a.channel,
         "version": ver,
@@ -702,7 +714,7 @@ def cmd_release(a):
         "merge_commit": release_commit,
         "plugins": ",".join(plugins),
     }
-    items = [{"kind": "pr", "name": f"#{release_pr}", "result": "merged", "base": base}]
+    items = [{"kind": "pr", "name": f"#{release_pr}", "result": "merged" if ctx.sync else "opened", "base": base}]
     if metrics["sync_pr"]:
         items[0]["result"] = "compared"  # 取り込みは -sync の PR が行い、元の PR は照合にだけ使う
         items.append({"kind": "pr", "name": f"#{merged_pr}", "result": "merged", "base": base, "head": f"{branch}-sync"})
@@ -719,6 +731,24 @@ def cmd_release(a):
     else:
         main_pr, merge = _merge_new_prod(ctx, approved, release_pr, tag, items, metrics)
     _published(root, a, plugin, prod, main_pr, merge, items, metrics)
+
+
+def _release_route(root) -> strategy_route.Route:
+    """宣言（メインディレクトリ）から版上げの経路を決める（取り込み方の分岐は `strategy_route.route_of` の 1 か所）。"""
+    try:
+        return strategy_route.route_of(repo_lib.branch_strategy_of(root))
+    except branch_strategy.StrategyError as e:
+        raise StepError(e.reason, e.exit_code) from e
+
+
+def _open_trunk_release_pr(ctx) -> int:
+    """trunk の版上げの PR（release/v<版> → 本番ブランチ）を使い回すか作り、番号を返す。マージはしない。"""
+    root, a, plugin, branch, prod = ctx.root, ctx.a, ctx.plugin, ctx.branch, ctx.prod
+    found = find_pr(root, branch, prod, states=("OPEN", "MERGED"))
+    if found:
+        return found["number"]
+    body = _release_pr_body(root, a, plugin, ctx.plugins)
+    return create_pr(root, prod, branch, f"Release: {plugin} v{a.version}", body)
 
 
 def _resume_merged_prod(ctx, approved, main_pr, items, metrics):
@@ -784,14 +814,25 @@ def _prepare_release_branch(root, a, plugin) -> str:
 def _published(root, a, plugin, prod, main_pr, merge, items, metrics, back=None):
     """本番チャネルへ入れた後: タグと GitHub Release（CD が無ければ）・退避先の回収の候補を足し、`back`（戻すマージ）を打って結果を出す。"""
     ver, tag = a.version, release_tag(plugin, a.version)
-    by_cd = delivery.publishes_by_cd(delivery.load_delivery(root))
-    if not by_cd:
-        items += publish.tag_and_release(root, plugin, ver, tag, merge)
-    metrics.update({"main_pr": main_pr, "tag": None if by_cd else tag, "publisher": "cd" if by_cd else "ndf", "merge_commit": merge})
+    decl = delivery.load_delivery(root)
+    by_cd = delivery.publishes_by_cd(decl)
+    # 宣言の release.tag が null ならタグも GitHub Release も、github_release が偽なら GitHub Release を作らない
+    rel = decl.release or {}
+    want_tag = rel.get("tag", "") is not None
+    want_release = want_tag and rel.get("github_release", True) is not False
+    if not by_cd and want_tag:
+        items += publish.tag_and_release(root, plugin, ver, tag, merge, release=want_release)
+    made = tag if want_tag else None
+    metrics.update({"main_pr": main_pr, "tag": None if by_cd else made, "publisher": "cd" if by_cd else "ndf", "merge_commit": merge})
     swept, sweep_metrics, nxt = _sweep_candidates(root, merge)
     items += swept
     metrics.update(sweep_metrics)
-    done = f"{tag} と GitHub Release は CD が作る" if by_cd else f"{tag} と GitHub Release を作った"
+    if by_cd:
+        done = f"{tag} と GitHub Release は CD が作る"
+    elif not want_tag:
+        done = "宣言がタグと GitHub Release を作らない（release.tag が null）"
+    else:
+        done = f"{tag} と GitHub Release を作った" if want_release else f"{tag} を作った（宣言の release.github_release が偽）"
     status, code, done = back(items, metrics, done) if back else ("ok", None, done)
     emit(result(TOOL, status, f"{plugin} v{ver} を {prod} へ出し、{done}", items, metrics, None, nxt), code)
 
@@ -903,7 +944,8 @@ def record_merged(root, a, cd=None):
 def cmd_publish(a):
     """`--revision` のコミットの版でリリースタグと GitHub Release のうち足りないものを作る（CD のワークフローと切り戻しの手段）。"""
     root = git_root(a.root)
-    _base, _prod, plugin = release_decl(root, a)
+    # 使うのはプラグイン名だけ。宣言の全体を検査すると、移行の途中（旧いキーが残る版）の CD で止まり、タグが作られない
+    plugin = getattr(a, "plugin", None) or plugin_of(root, a)
     sha = git(root, "rev-parse", "--verify", f"{a.revision}^{{commit}}", check=False).stdout.strip()
     if not sha:
         raise StepError(f"コミット {a.revision} を読めない")

@@ -137,6 +137,9 @@ def land_approved(port: Port, strategy, pr: int, approval: Approval) -> dict:
         return {**out, "result": "human"}
     if merge["actor"] == "human":
         return {**out, "result": "human", "reason": "人のマージを待つ"}
+    if pull.get("base") != prod_branch:
+        # 早送りは本番ブランチの参照を動かすため、宛先が本番ブランチでない PR を入れない
+        return {**out, "reason": f"#{pr} の宛先 {pull.get('base')} が本番ブランチ {prod_branch} でない"}
     if pull.get("head") != approval.head:
         return {**out, "reason": f"承認した head {approval.head[:12]} と今の head {str(pull.get('head'))[:12]} が違う。{REAPPROVE}"}
     facts = port.rule_facts(prod_branch)
@@ -150,16 +153,20 @@ def land_approved(port: Port, strategy, pr: int, approval: Approval) -> dict:
     mism = ruleset_mismatch(strategy, facts)
     if mism:
         return {**out, "reason": "セクションと ruleset が食い違う: " + json.dumps(mism, ensure_ascii=False)}
-    is_prod_pr = pull.get("base") == prod_branch
-    if is_prod_pr:
-        why = check_production_pr(strategy, pull, port.production(prod_branch), port.queue(prod_branch))
+    if merge["method"] != "direct":
+        # キューを読むのは merge-queue の確かめに要るときだけ（キューの照会は本番宛ての PR の数だけ git と API を打つ）
+        queue = port.queue(prod_branch) if merge["method"] == "merge-queue" else []
+        why = check_production_pr(strategy, pull, port.production(prod_branch), queue)
         if why:
             return {**out, "reason": why}
     if merge["method"] == "merge-queue":
         ok, why = port.enqueue(pr, approval.head, bool(pull.get("bump")))
         return {**out, "result": "queued" if ok else "stopped", "reason": why}
     if merge["method"] == "strict" and not facts.present:
-        tip = port.production(prod_branch)["tip"]
+        # 親は head が含むと確かめた先端に固定する。取り直すと、確かめた後に進んだ先端を親にして間の変更を消す
+        tip = pull.get("tip")
+        if not tip:
+            return {**out, "reason": f"head が含むと確かめた本番ブランチ {prod_branch} の先端を読めない"}
         got = fast_forward_land(port, prod_branch, pr, tip, approval.head, merge["commit"], pull.get("title", ""))
         return {**out, "result": got["result"], "reason": got["reason"]}
     ok, why = port.merge(pr, approval.head, merge["commit"], bool(merge["admin"] and merge["method"] == "direct"))
@@ -252,8 +259,9 @@ class GhPort:
         base = self._git("merge-base", head, f"origin/{branch}").stdout.strip()
         cut = store_version(self.strategy, self._show(base)) if base else None
         now = store_version(self.strategy, self._show(head))
-        tip_in = self._git("merge-base", "--is-ancestor", f"origin/{branch}", head).returncode == 0
-        return {"bump": bool(cut and now and cut != now), "cut_version": cut, "contains_tip": tip_in}
+        tip = self._git("rev-parse", f"origin/{branch}").stdout.strip()
+        tip_in = bool(tip) and self._git("merge-base", "--is-ancestor", tip, head).returncode == 0
+        return {"bump": bool(cut and now and cut != now), "cut_version": cut, "contains_tip": tip_in, "tip": tip}
 
     def pull(self, number: int) -> dict:
         d = self._rest(f"repos/{self.repo}/pulls/{int(number)}")
@@ -277,7 +285,10 @@ class GhPort:
 
         owner, _, name = self.repo.partition("/")
         a = gh_graphql.graphql(_QUEUE_QUERY, {"owner": owner, "name": name, "branch": branch})
-        q = ((a.value or {}).get("repository") or {}).get("mergeQueue") if a.ok and isinstance(a.value, dict) else None
+        if not a.ok or not isinstance(a.value, dict):
+            # 空のキューとみなすと、別の版上げとの衝突を調べずに入れる
+            raise LandError(f"本番ブランチ {branch} の merge queue を読めない: {str(a.error)[:300]}")
+        q = (a.value.get("repository") or {}).get("mergeQueue")
         nodes = ((q or {}).get("entries") or {}).get("nodes") or []
         rows = [{"number": int(n["pullRequest"]["number"]), "head": str(n["pullRequest"]["headRefOid"]).lower()} for n in nodes]
         for r in rows:
@@ -286,7 +297,8 @@ class GhPort:
         for n in trail.open_prs_at_base(self.repo, branch):
             if n["number"] in queued or not self._bump_facts(n["number"], n["head"], branch)["bump"]:
                 continue
-            if trail.judge_trails_on(self.repo, n["number"], n["head"]).state == "success":
+            got = approval_of(self.repo, self.strategy, n["number"])  # 宣言の承認の受け方（approval.via）で読む
+            if got is not None and got.head == str(n["head"]).lower():
                 rows.append({"number": n["number"], "bump": True, "approved_release": True})
         return rows
 
@@ -364,6 +376,9 @@ def land_pr(root, repo: str, strategy, pr: int) -> dict:
         if approval is None and strategy.section["merge"]["actor"] != "human":
             pull = port.pull(pr)
             if not pull.get("merged"):
+                if strategy.section["approval"]["target"] == "release_pr" and not pull.get("bump"):
+                    # 承認の対象が版上げの PR なら、スプリントの PR は承認ゲートを通らずに検査の後で入る（決定 8）
+                    return land_approved(port, strategy, pr, Approval(str(pull.get("head") or "")))
                 return {"result": "stopped", "head": pull.get("head"), "reason": f"#{pr} に承認の証跡が無い。{REAPPROVE}"}
         return land_approved(port, strategy, pr, approval or Approval(""))
     except (LandError, TrailError) as e:
@@ -374,10 +389,13 @@ def land_cli(root, repo: str | None, pr: int) -> dict:
     """`release-steps.py land` の入口。宣言を読めなければ StepError（`branch_strategy` の終了コード）で止める。"""
     import branch_strategy
     import gh_call
+    import repo as repo_lib
     from step_result import StepError
 
     try:
-        strategy = branch_strategy.load_strategy(root)
+        # メインディレクトリの宣言を読む。作業ツリーの宣言は PR の変更でマージの主体・方式を差し替えられる
+        strategy = repo_lib.branch_strategy_of(root)
     except branch_strategy.StrategyError as e:
         raise StepError(e.reason, e.exit_code) from e
-    return land_pr(root, gh_call.resolve_repo(repo) or "", strategy, pr)
+    # owner/repo は --root の origin から決める。今のディレクトリから決めると、別のリポジトリの同じ番号の PR を操作し得る
+    return land_pr(root, gh_call.resolve_repo(repo, cwd=root) or "", strategy, pr)

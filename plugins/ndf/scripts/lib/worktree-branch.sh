@@ -151,13 +151,28 @@ wt_branch_exists() {
 # ブランチ戦略の宣言（`.ndf/project.json` の `branch_strategy`）を読む部品の置き場（#3672）。
 _WT_STRATEGY_PY="$(dirname "${BASH_SOURCE[0]}")/branch_strategy_cli.py"
 
+# 宣言を読む python を出す。hook の環境（SessionStart が用意し jsonschema を持つ。`NDF_HOOK_PYTHON` か
+# `~/.cache/ndf/roots<プラグインの根>/bin/python`）があればそれを使う。素の python3 で起動すると、入口の
+# `deps.require("jsonschema")` が uv の環境で起動し直し、SessionStart の hook のたびに起動が 2 回になる。
+_wt_strategy_python() {
+  local root py="${NDF_HOOK_PYTHON:-}"
+  if [ -z "$py" ]; then
+    root=$(cd -P "$(dirname "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd -P) && py="$HOME/.cache/ndf/roots$root/bin/python"
+  fi
+  if [ -n "$py" ] && [ -x "$py" ]; then
+    printf '%s\n' "$py"
+  else
+    printf 'python3\n'
+  fi
+}
+
 # ブランチ戦略の宣言の値を 1 つ出力する（`branch_strategy_cli.py get <pointer>`）。宣言が無い・壊れている・
 # 旧いキーが残るときは、理由（ファイル・キーの位置・打つコマンド）を標準エラーへ出して 1 以上を返す。
 # **既定ブランチへ落とさない**（I3）。
 wt_strategy_get() {
   local main_dir="${1:-}" pointer="${2:-}"
   [ -n "$main_dir" ] && [ -n "$pointer" ] || return 1
-  python3 "$_WT_STRATEGY_PY" get "$pointer" --root "$main_dir"
+  "$(_wt_strategy_python)" "$_WT_STRATEGY_PY" get "$pointer" --root "$main_dir"
 }
 
 # 宣言から読んだブランチ名が origin かローカルに実在することを確かめて出力する。
@@ -194,7 +209,7 @@ wt_production_branch() {
 wt_start_branch() {
   local main_dir="${1:-}" name
   [ -n "$main_dir" ] || return 1
-  name=$(python3 "$_WT_STRATEGY_PY" start-ref --root "$main_dir") || return 1
+  name=$("$(_wt_strategy_python)" "$_WT_STRATEGY_PY" start-ref --root "$main_dir") || return 1
   _wt_existing_branch "$main_dir" sprint.start "$name"
 }
 

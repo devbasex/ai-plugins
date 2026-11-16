@@ -110,6 +110,9 @@ def _verb_write(a, root: Path, presets: dict) -> int:
     prior = jsonio.read(a.result, want=dict) if a.result else bsm.measure_strategy(root, prefer=a.kind)
     answers = jsonio.read(a.answers, want=dict) if a.answers else {}
     res = bw.apply_answers(prior, answers)
+    if res["status"] == "ok" and "approval" not in res["values"]:
+        # 問いを返した結果は確定した値だけを持つ。答えを足した後に種類の既定から全体を組む
+        res = bsm.complete_answers(prior, answers, presets)
     if res["status"] == "ask":
         return _bs_emit(res)
     base = {k: res.get(k) for k in ("kind", "values", "evidence")}

@@ -68,10 +68,10 @@ def _ensure_release(root, plugin, ver, tag, revision) -> dict:
     return {"kind": "release", "name": tag, "result": "created"}
 
 
-def tag_and_release(root, plugin, ver, tag, revision) -> list[dict]:
-    """タグと GitHub Release のうち足りないものを作り、items（tag・release の 1 件ずつ）を返す。"""
+def tag_and_release(root, plugin, ver, tag, revision, release: bool = True) -> list[dict]:
+    """タグと GitHub Release のうち足りないものを作り、items（tag・release の 1 件ずつ）を返す。`release` が偽ならタグだけ。"""
     item = _ensure_tag(root, plugin, ver, tag, revision)
-    return [item, _ensure_release(root, plugin, ver, tag, revision)]
+    return [item, _ensure_release(root, plugin, ver, tag, revision)] if release else [item]
 
 
 def publish(root, plugin, revision) -> tuple[str, str, list[dict]]:

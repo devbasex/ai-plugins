@@ -207,18 +207,19 @@ def rest_cached(path: str) -> RestResponse:
 _REPO_URL = re.compile(r"(?:github\.com[:/])(?P<owner>[^/]+)/(?P<name>[^/]+?)(?:\.git)?/?$")
 
 
-def resolve_repo(repo: str | None = None) -> str | None:
-    """`owner/repo` を決める。渡された値 → `origin` の URL → `gh repo view` の順。"""
+def resolve_repo(repo: str | None = None, cwd=None) -> str | None:
+    """`owner/repo` を決める。渡された値 → `origin` の URL → `gh repo view` の順。`cwd` を渡すとそのリポジトリで読む。"""
     if repo:
         return repo
     try:
-        p = subprocess.run(["git", "remote", "get-url", "origin"], capture_output=True, text=True)
+        where = ["-C", str(cwd)] if cwd is not None else []
+        p = subprocess.run(["git", *where, "remote", "get-url", "origin"], capture_output=True, text=True)
         m = _REPO_URL.search(p.stdout.strip()) if p.returncode == 0 else None
     except OSError:
         m = None
     if m:
         return f"{m.group('owner')}/{m.group('name')}"
-    r = gh(["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"])
+    r = gh(["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"], cwd=cwd)
     return r.stdout.strip() or None if r.returncode == 0 else None
 
 

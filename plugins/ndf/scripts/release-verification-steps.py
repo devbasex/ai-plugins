@@ -229,16 +229,36 @@ def verify_codex(env, ref, plugins, expect, where):
     return res, dirs
 
 
+RELEASE_HEAD = re.compile(r"release/v\d+\.\d+\.\d+\Z")
+
+
+def open_release_pr_head(root, production: str | None, ref: str) -> bool:
+    """`ref` が本番チャネル宛ての開いた版上げの PR の head（`release/v<版>`）か（#3672 の決定 17。承認前の試用で導入を確かめる）。
+    任意の ref は受けない（#1336 の決定 8）。照会できなければ偽。"""
+    import gh_call
+
+    if not production or not RELEASE_HEAD.match(ref or ""):
+        return False
+    r = gh_call.gh(
+        ["pr", "list", "--base", production, "--head", ref, "--state", "open", "--json", "number", "-q", "length"], cwd=str(root)
+    )
+    return r.returncode == 0 and r.stdout.strip() not in ("", "0")
+
+
 def install_source(root, a):
     """導入元（owner/repo・マーケットプレイスの名前・本番チャネル）と、確かめるプラグイン。値は origin の URL と宣言から読む
-    （#1336 の決定 8）。--ref は宣言のベースブランチか本番チャネルに限る。"""
+    （#1336 の決定 8）。--ref は宣言のベースブランチか本番チャネル、本番チャネル宛ての開いた版上げの PR の head に限る（#3672 の決定 17）。"""
     d = delivery.load_delivery(root)
     slug = repo_lib.owner_repo(root)
     if not slug:
         raise StepError("導入元の owner/repo を origin の URL から決められない", EXIT_UNREADABLE)
     refs = [b for b in dict.fromkeys((d.base, d.production)) if b]
-    if a.ref not in refs:
-        raise StepError(f"--ref {a.ref} は宣言のベースブランチか本番チャネル（{' / '.join(refs) or '無し'}）でない", EXIT_UNREADABLE)
+    if a.ref not in refs and not open_release_pr_head(root, d.production, a.ref):
+        raise StepError(
+            f"--ref {a.ref} は宣言のベースブランチか本番チャネル（{' / '.join(refs) or '無し'}）でも、"
+            f"本番チャネル宛ての開いた版上げの PR の head（release/v<版>）でもない",
+            EXIT_UNREADABLE,
+        )
     names = a.plugins or (d.release or {}).get("plugin") or ""
     plugins = [p.strip() for p in names.split(",") if p.strip()]
     if not plugins:

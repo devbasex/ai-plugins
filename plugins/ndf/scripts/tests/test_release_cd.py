@@ -513,7 +513,7 @@ def test_workflow_gives_write_only_to_the_publish_job_and_no_new_secret():
     assert list(w["jobs"]) == ["publish"] and w["jobs"]["publish"]["permissions"] == {"contents": "write"}
     text = (ROOT / ".github" / "workflows" / "release-cd.yml").read_text(encoding="utf-8")
     assert "secrets." not in text and "github.token" in text
-    assert 'release-steps.py publish --root . --revision "$GITHUB_SHA"' in text
+    assert 'release-steps.py publish --root . --plugin ndf --revision "$GITHUB_SHA"' in text
 
 
 # --- #3506: 迂回の宣言（cd-admin）の本番のプランの部品 ------------------------------------------

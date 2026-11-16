@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import functools
-import json
 import shlex
 import subprocess
 import sys
@@ -173,17 +172,6 @@ def sprint_branch_first(a, waves: list[dict]) -> list[dict]:
     head = [w for w in waves if w["name"] == "スプリントブランチ"]
     rest = [w for w in waves if w["name"] != "スプリントブランチ"]
     return [{k: v for k, v in w.items() if k != "then_of"} for w in head] + rest
-
-
-def pin_flow(a) -> None:
-    """スプリントの目録（`sprint.json`）に開始時に書いたブランチ戦略のスナップショットがあれば、`a.flow` をそれにする。`new sprint` を同じ
-    スプリントで打ち直したときと `new close` は、宣言ではなく開始時の値で組む（#3121 の決定 4）。"""
-    try:
-        got = json.loads((sprint_out(a) / SPRINT_MANIFEST).read_text(encoding="utf-8")).get(branch_strategy.SNAPSHOT_KEY)
-    except (OSError, ValueError, AttributeError):
-        return
-    if isinstance(got, dict) and got:
-        a.flow = got
 
 
 def flow_head(a) -> dict:
