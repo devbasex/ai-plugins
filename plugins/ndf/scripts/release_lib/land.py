@@ -14,6 +14,8 @@ import json
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from release_lib.workflow_trigger import PullEvent, runs_on_pull_head
+
 TRAILER_PR = "NDF-Landed-PR"
 TRAILER_HEAD = "NDF-Approved-Head"
 TRAILER_TIP = "NDF-Tip"
@@ -99,7 +101,9 @@ class Port(Protocol):
     def comment(self, number: int, body: str) -> bool: ...
     def landed_record(self, branch: str, number: int, since: str | None) -> dict | None: ...
     def has_human_record(self, number: int) -> bool: ...
-    def checks_failing(self, sha: str) -> str | None: ...  # head の検査がすべて成功なら None、そろわなければ理由の文
+    def checks_failing(
+        self, sha: str, pull: dict | None = None
+    ) -> str | None: ...  # head の検査がすべて成功なら None、そろわなければ理由の文
 
 
 def trailers(pr: int, head: str, tip: str) -> str:
@@ -179,7 +183,7 @@ def land_approved(port: Port, strategy, pr: int, approval: Approval, pull: dict 
             return {**out, "reason": why}
     if verify_checks or (merge["method"] == "strict" and not facts.present):
         # ruleset の無い strict の参照の更新と承認なしの取り込みは、GitHub の必須の検査を通らない
-        failing = port.checks_failing(approval.head)
+        failing = port.checks_failing(approval.head, pull)
         if failing:
             return {**out, "reason": f"head {approval.head[:12]} の検査がそろっていない: {failing}"}
     if merge["method"] == "merge-queue":
@@ -299,6 +303,7 @@ class GhPort:
         head, base = str(d["head"]["sha"]).lower(), d["base"]["ref"]
         row = {"number": int(number), "state": d["state"], "merged": bool(d.get("merged")), "head": head, "base": base}
         row["title"] = d.get("title") or ""
+        row["head_ref"] = str((d.get("head") or {}).get("ref") or "") or None
         if not row["merged"]:
             row.update(self._bump_facts(number, head, base))
         return row
@@ -382,7 +387,7 @@ class GhPort:
 
         return any(HUMAN_MARK in str(c.get("body") or "") for c in trail.read_comments(self.repo, number))
 
-    def checks_failing(self, sha: str) -> str | None:
+    def checks_failing(self, sha: str, pull: dict | None = None) -> str | None:
         import gh_checks
         from release_lib import approval_trail as trail
 
@@ -395,51 +400,39 @@ class GhPort:
         statuses = [c for c in status.get("statuses") or [] if c.get("context") != trail.STATUS_CONTEXT]
         runs += [(str(c.get("context") or ""), str(c.get("state") or "")) for c in statuses]
         if not runs:
-            return self._no_checks_reason(sha)
+            return self._no_checks_reason(sha, pull or {})
         bad = [f"{name}={res}" for name, res in runs if res not in CHECKS_OK]
         return ", ".join(bad)[:300] or None
 
-    def _no_checks_reason(self, sha: str) -> str | None:
+    def _changed_files(self, base: str | None, sha: str) -> list[str] | None:
+        """PR の変更ファイル（宛先の origin と head の三点の差分。GitHub の PR の変更ファイルと同じ）。読めなければ None。"""
+        if not base:
+            return None
+        r = self._git("diff", "--name-only", f"origin/{base}...{sha}")
+        return r.stdout.split("\n")[:-1] if r.returncode == 0 else None
+
+    def _no_checks_reason(self, sha: str, pull: dict) -> str | None:
         """検査が 1 件も無いときの理由。PR の head で動く有効な workflow が無ければ None（検査なしで通す）。
-        本番への push・schedule でだけ動く workflow は PR の head に検査を作らないため数えない。動く workflow があれば
-        push の直後で未開始とみなして止める。照会は検査が 0 件のときだけ打つ。"""
+        本番への push・schedule でだけ動く workflow と、絞り込み（branches・paths）でこの PR に当たらない workflow は
+        PR の head に検査を作らないため数えない。動く workflow があれば push の直後で未開始とみなして止める。照会は検査が 0 件のときだけ打つ。"""
         d = self._rest(f"repos/{self.repo}/actions/workflows")
         if not isinstance(d, dict):
             return "検査がまだ 1 件も無く、workflow の一覧も読めない"
         active = [str(w.get("path") or "") for w in d.get("workflows") or [] if isinstance(w, dict) and w.get("state") == "active"]
         show = self._show(sha)
         # パスを読めない workflow も動くとみなす。名前が空でも数に入れる（文字列の真偽で判定しない）
-        on_head = [p or "（パス不明）" for p in active if runs_on_pull_head(show(p) if p else None)]
+        changed: list = []  # 変更ファイルは paths の絞り込みに当たったときだけ 1 回読む
+
+        def files() -> list[str] | None:
+            if not changed:
+                changed.append(self._changed_files(pull.get("base"), sha))
+            return changed[0]
+
+        event = PullEvent(pull.get("head_ref"), pull.get("base"), files)
+        on_head = [p or "（パス不明）" for p in active if runs_on_pull_head(show(p) if p else None, event)]
         if not on_head:
             return None
         return f"検査がまだ 1 件も無い（PR の head で動く workflow {', '.join(on_head)[:200]} がある。始まるのを待って打ち直してください）"
-
-
-_HEAD_EVENTS = ("pull_request", "pull_request_target")
-
-
-def runs_on_pull_head(text: str | None) -> bool:
-    """workflow の定義（YAML の字面）が PR の head に検査を作るか。`on` に pull_request・pull_request_target を持つか、
-    ブランチで絞らない push を持てば真。読めない定義は動くとみなす（検査なしで通さない側へ倒す）。"""
-    import yamlio
-
-    try:
-        doc = yamlio.load_yaml(text, "workflow") if text is not None else None
-    except yamlio.YamlError:
-        doc = None
-    if not isinstance(doc, dict):
-        return True
-    on = doc.get("on", doc.get(True))  # YAML 1.1 の読み手では `on` が真偽値のキーになる
-    if isinstance(on, str):
-        on = {on: None}
-    elif isinstance(on, list):
-        on = {str(e): None for e in on}
-    if not isinstance(on, dict):
-        return True
-    if any(e in on for e in _HEAD_EVENTS):
-        return True
-    push = on.get("push", False)
-    return push is None or (isinstance(push, dict) and not any(k in push for k in ("branches", "branches-ignore", "tags", "tags-ignore")))
 
 
 def approval_of(repo: str, strategy, pr: int) -> Approval | None:

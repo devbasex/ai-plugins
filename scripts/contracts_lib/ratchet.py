@@ -23,7 +23,8 @@ def _git(root: Path, *args: str) -> str | None:
 
 
 def _declared_base(root: Path) -> str | None:
-    """ブランチ戦略の宣言のベースブランチ（読む部品 `lib/branch_strategy.py`）。読めなければ None。"""
+    """ブランチ戦略の宣言のベースブランチ（読む部品 `lib/branch_strategy.py`）。読めなければ None。
+    宣言の検査に要る jsonschema が無ければ `RatchetError`（素の Python で落とさず、--base か uv の環境を案内する）。"""
     lib = root / "plugins" / "ndf" / "scripts" / "lib"
     if str(lib) not in sys.path:
         sys.path.insert(0, str(lib))
@@ -35,6 +36,10 @@ def _declared_base(root: Path) -> str | None:
         return branch_strategy.load_strategy(root).base
     except branch_strategy.StrategyError:
         return None
+    except ImportError as e:
+        raise RatchetError(
+            f"ブランチ戦略の宣言を読むのに {e.name or 'jsonschema'} が要る。--base を渡すか、uv の環境（uv run）で打つ"
+        ) from e
 
 
 def base_ref(root: Path, given: str | None) -> str:

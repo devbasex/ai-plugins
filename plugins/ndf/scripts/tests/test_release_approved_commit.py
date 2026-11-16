@@ -106,7 +106,7 @@ class FakeGitHub:
         self.created.append((base, head))
         return {("trunk", f"release/v{VER}"): 1, ("live", f"release/v{VER}"): 2, ("trunk", SYNC): 3}[(base, head)]
 
-    def wait_and_merge(self, r, n, expect=None, ci_wait=3600.0, gate_approved=None):
+    def wait_and_merge(self, r, n, expect=None, ci_wait=3600.0, gate_approved=None, admin=None):
         self.merged.append((n, expect))
         if n in (1, 3):
             return self._merge_into_base(n)

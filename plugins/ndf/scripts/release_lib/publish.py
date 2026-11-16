@@ -15,6 +15,14 @@ from release_lib.names import changelog_span
 from step_result import StepError, git, plugin_dir
 
 
+def wants(decl) -> tuple[bool, bool]:
+    """宣言が作らせる公開物: (タグ, GitHub Release)。release.tag が null ならタグも GitHub Release も、github_release が偽なら
+    GitHub Release を作らない。作る側（`release-steps.py` の `_published`）と確かめる側（`cmd_record`）が同じ値を使う。"""
+    rel = decl.release or {}
+    tag = rel.get("tag", "") is not None
+    return tag, tag and rel.get("github_release", True) is not False
+
+
 def version_at(root, plugin, revision) -> str:
     """`revision` のコミットの plugin.json の版。読めなければ 1 で止める。"""
     rel = (plugin_dir(root, plugin) / ".claude-plugin" / "plugin.json").relative_to(root).as_posix()

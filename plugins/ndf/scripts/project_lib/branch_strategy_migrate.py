@@ -80,6 +80,30 @@ def _implied_strategy(declared: dict, default: str | None) -> str:
     return "trunk" if base and base == production else "merge_base_branch"
 
 
+def _implied_trunk_admin_question(moved: dict, existing: dict | None, section: dict, docs: dict, present: list[legacy.Move]) -> dict | None:
+    """取り込み方を補って trunk にした結果、管理者の迂回（`merge.admin`）が真なら、宣言を組まずに問う 1 件を返す。
+    迂回は `merge.method` を direct にし、trunk は merge-queue か strict だけを受ける（R2）ため、組むと移行が止まる。
+    取り込み方を書いた宣言は補っていないため問わず、組み合わせの規則で止める。"""
+    if moved.get("release_strategy") or (existing or {}).get("release_strategy"):
+        return None
+    if section["release_strategy"] != "trunk" or section["merge"].get("admin") is not True:
+        return None
+    evidence = [
+        {"source": "repo", "ref": f".ndf/{legacy.FILES[m.file]}:{m.old}", "value": str(bw.get_pointer(docs[m.file], m.old))}
+        for m in present
+        if m.new is not None and _section_rel(m.new) in ("/merge/admin", "/branches/base", "/branches/production")
+    ]
+    return {
+        "pointer": "/release_strategy",
+        "why": "conflict",
+        "candidates": [
+            {"release_strategy": "trunk", "merge.admin": False},
+            {"release_strategy": "merge_base_branch", "branches.base": "本番ブランチと別のベースブランチを書く"},
+        ],
+        "evidence": evidence,
+    }
+
+
 def _fill_kind(rs: str, form: str | None) -> str:
     """足りないキーを埋める種類の行。trunk はリリースの形で選び、ほかは取り込み方で選ぶ。"""
     return FILL_KIND_BY_FORM.get(form, FILL_KIND[rs]) if rs == "trunk" else FILL_KIND[rs]
@@ -127,6 +151,8 @@ def plan_migration(root: Path, moves: list[legacy.Move]) -> tuple[bw.WritePlan, 
         # remove の行だけが当たった（使わなくなったキー）。セクションは今のまま
         return bw.plan_files(root, _by_name(after), lambda: plan_migration(root, moves)[0]), []
     section = _fill(moved, bw.load_presets(), project.get(bs.SECTION), repo_lib.default_branch(root))
+    if asked := _implied_trunk_admin_question(moved, project.get(bs.SECTION), section, docs, present):
+        return bw.WritePlan(), [asked]
     failed = bs.validate_section(section)
     if failed:
         where = [{**f, "legacy": sorted(f"{a}:{b}" for a, b in found)} for f in failed]

@@ -89,7 +89,9 @@ class ProdOps:
     merge_commit_of: Callable  # (root, n) -> str | None
     merge_release_pr: Callable  # (root, a, plugin, plugins, branch, base) -> (release_pr, merged_pr, commit)
     published: Callable  # (root, a, plugin, prod, main_pr, merge, items, metrics, back=None) 公開の後。結果を出して終わる
-    wait_and_merge: Callable  # (root, n, *, expect, ci_wait, gate_approved) -> マージコミット。迂回は宣言の merge から決まる
+    wait_and_merge: (
+        Callable  # (root, n, *, expect, ci_wait, gate_approved, admin) -> マージコミット。迂回は場合（case.admin_merge）で決める
+    )
     pr_check_buckets: Callable  # (root, n) -> チェックの並び
 
 
@@ -236,7 +238,7 @@ def merge_on_pr_approval(root, repo, a, case, main_pr, prod, items, metrics, ops
     if case.trail_approval:
         wait_trail_status(root, repo, prod, head, limits.policy("release-steps.trail-status").seconds)
     try:
-        merge = ops.wait_and_merge(root, main_pr, expect=head, ci_wait=a.ci_wait, gate_approved="user")
+        merge = ops.wait_and_merge(root, main_pr, expect=head, ci_wait=a.ci_wait, gate_approved="user", admin=case.admin_merge)
     except HeadMoved:
         summary, nxt = moved(head)
         emit(result(TOOL, "gate", summary, items, metrics, None, nxt), EXIT_GATE)

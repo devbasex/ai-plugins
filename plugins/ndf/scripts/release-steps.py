@@ -514,16 +514,16 @@ def pr_check_buckets(root, n):
         return []
 
 
-def wait_and_merge(root, n, expect=None, ci_wait=3600.0, gate_approved=None):
+def wait_and_merge(root, n, expect=None, ci_wait=3600.0, gate_approved=None, admin=None):
     """PR のチェックを merge-when-green で待って（上限 ci_wait 秒）マージする。止まったらその summary で止める。
     CI の基盤待ち（75）は同じ 75 で、中身の失敗は 1 で止める（#1645）。後片付けは行わせない。expect を渡すと、
     PR の先端がその SHA のときだけマージし、違えば HeadMoved を投げる。gate_approved はリリース承認ゲートを通した担い手で、
-    宛先が自動反映の本番チャネルのときに要る（#2623 の I2）。管理者の迂回は引数でなく宣言から決める（`strategy_route.admin_bypass`。#3672 の I6）。
+    宛先が自動反映の本番チャネルのときに要る（#2623 の I2）。管理者の迂回は `admin`（CD のある本番は `case.admin_merge`）で、省けば宣言から決める（#3672 の I6）。
     """
     script = Path(__file__).resolve().parent / "merged-steps.py"
     cmd = [sys.executable, str(script), "merge-when-green", str(n), "--no-cleanup", "--interval", "5", "--timeout", f"{ci_wait:g}"]
     cmd += ["--expect-head", expect] if expect else []
-    cmd += [] if strategy_route.admin_bypass(root) else ["--no-admin"]
+    cmd += [] if (strategy_route.admin_bypass(root) if admin is None else admin) else ["--no-admin"]
     cmd += ["--gate-approved", gate_approved] if gate_approved else []
     p = run(cmd, cwd=root, check=False)
     out = step_read.last_json(p.stdout) or {}
@@ -816,10 +816,7 @@ def _published(root, a, plugin, prod, main_pr, merge, items, metrics, back=None)
     ver, tag = a.version, release_tag(plugin, a.version)
     decl = delivery.load_delivery(root)
     by_cd = delivery.publishes_by_cd(decl)
-    # 宣言の release.tag が null ならタグも GitHub Release も、github_release が偽なら GitHub Release を作らない
-    rel = decl.release or {}
-    want_tag = rel.get("tag", "") is not None
-    want_release = want_tag and rel.get("github_release", True) is not False
+    want_tag, want_release = publish.wants(decl)
     if not by_cd and want_tag:
         items += publish.tag_and_release(root, plugin, ver, tag, merge, release=want_release)
     made = tag if want_tag else None
@@ -888,11 +885,13 @@ def cmd_record(a):
     ver = a.version
     base, _prod, plugin = release_decl(root, a)
     tag = f"{plugin}--v{ver}"
-    by_cd = cd is not None and delivery.publishes_by_cd(delivery.load_delivery(root))  # 公開物は CD が作り、照会を CD の結果へ置き換える
-    if not by_cd and git(root, "ls-remote", "--exit-code", "--tags", "origin", f"refs/tags/{tag}", check=False).returncode != 0:
+    decl = delivery.load_delivery(root)
+    by_cd = cd is not None and delivery.publishes_by_cd(decl)  # 公開物は CD が作り、照会を CD の結果へ置き換える
+    want_tag, want_release = (False, False) if by_cd else publish.wants(decl)  # 宣言が作らせない公開物は求めない
+    if want_tag and git(root, "ls-remote", "--exit-code", "--tags", "origin", f"refs/tags/{tag}", check=False).returncode != 0:
         raise StepError(f"origin にタグ {tag} が無い（リリースが済んでいない）", EXIT_PRECONDITION)
     git(root, "fetch", "-q", "origin", "--tags", check=False)  # 直前の正式版とタグの時刻を読む
-    if not by_cd and gh_parts.gh(["release", "view", tag, "--json", "tagName"], cwd=root).returncode != 0:
+    if want_release and gh_parts.gh(["release", "view", tag, "--json", "tagName"], cwd=root).returncode != 0:
         raise StepError(f"GitHub Release {tag} が無い（リリースが済んでいない）", EXIT_PRECONDITION)
     # 版数の衝突を -sync で取り込んだときは、元の PR がマージされずに閉じていることがある（#2436）
     pr = find_pr(root, f"release/v{ver}", base, states=("MERGED",)) or find_pr(root, f"release/v{ver}-sync", base, states=("MERGED",))
@@ -901,7 +900,7 @@ def cmd_record(a):
     n = pr["number"]
     prev_tag = release_tag_before(root, plugin, current=tag)
     prev = prev_tag[len(f"{plugin}--v") :] if prev_tag else None
-    body = record.body_of(root, plugin, ver, tag, prev_tag, a.prs, cd, by_cd)
+    body = record.body_of(root, plugin, ver, tag, prev_tag, a.prs, cd, by_cd, tagged=by_cd or want_tag)
     _emit_record(record.write(root, n, ver, prev, body, a.prs, f"v{ver}", cd), cd)
 
 

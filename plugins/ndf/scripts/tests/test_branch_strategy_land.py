@@ -11,6 +11,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(SCRIPTS / "lib"), str(SCRIPTS)]
 import branch_strategy as bs  # noqa: E402
@@ -120,9 +122,12 @@ def test_checks_failing_skips_trail_status_and_passes_repo_without_ci(monkeypatc
     files = {"cd.yml": "on:\n  push:\n    branches: [main]\n  schedule:\n    - cron: '0 0 * * *'\n"}
     monkeypatch.setattr(land.GhPort, "_show", lambda self, rev: files.get)
     replies["repos/o/r/actions/workflows"] = {"workflows": [{"state": "active", "path": "cd.yml"}]}
-    assert port.checks_failing("h") is None
-    files["cd.yml"] = "on: [pull_request]\n"
+    pull = {"head_ref": "release/v1", "base": "main"}
+    assert port.checks_failing("h", pull) is None
+    # head のブランチ名を読めなければ、ブランチで絞った push も動くとみなす
     assert "まだ 1 件も無い" in port.checks_failing("h")
+    files["cd.yml"] = "on: [pull_request]\n"
+    assert "まだ 1 件も無い" in port.checks_failing("h", pull)
     replies["repos/o/r/commits/h/status"] = {"statuses": [{"context": "ci", "state": "pending"}]}
     assert port.checks_failing("h") == "ci=pending"
 
@@ -194,3 +199,36 @@ def test_run_stops_without_trail_and_lands_human_merge(monkeypatch):
     monkeypatch.setattr(land.GhPort, "comment", lambda self, n, body: recorded.append(body) or True)
     assert land.land_pr(Path("."), "o/r", plugin, 5)["result"] == "human"
     assert land.HUMAN_MARK in recorded[0]
+
+
+DOCS_ONLY = ["docs/a.md"]
+
+
+@pytest.mark.parametrize(
+    "on, files, runs",
+    [
+        # push のブランチの絞り込みは head のブランチ名と照らす（#3672 の round 5）
+        ("push:\n    branches: [main]", DOCS_ONLY, False),
+        ("push:\n    branches-ignore: [main]", DOCS_ONLY, True),
+        ("push:\n    branches: ['**']", DOCS_ONLY, True),
+        ("push:\n    branches: ['release/*']", DOCS_ONLY, True),
+        ("push:\n    branches: ['release/*', '!release/v1']", DOCS_ONLY, False),
+        ("push:\n    branches-ignore: ['release/**']", DOCS_ONLY, False),
+        ("push:\n    tags: ['v*']", DOCS_ONLY, False),
+        # pull_request の branches は宛先、paths・paths-ignore は変更ファイルと照らす
+        ("pull_request:\n    paths: ['src/**']", DOCS_ONLY, False),
+        ("pull_request:\n    paths: ['src/**']", ["src/x/a.py", "docs/a.md"], True),
+        ("pull_request:\n    paths: ['*.md']", DOCS_ONLY, False),
+        ("pull_request:\n    paths-ignore: ['docs/**']", DOCS_ONLY, False),
+        ("pull_request:\n    paths-ignore: ['docs/**']", ["docs/a.md", "a.py"], True),
+        ("pull_request:\n    branches: [develop]", DOCS_ONLY, False),
+        ("pull_request:\n    branches: [main]\n    paths: ['docs/**']", DOCS_ONLY, True),
+        ("pull_request_target:\n    branches-ignore: [main]", DOCS_ONLY, False),
+        # 変更ファイルを読めなければ paths の絞り込みは動くとみなす
+        ("pull_request:\n    paths: ['src/**']", None, True),
+    ],
+)
+def test_runs_on_pull_head_matches_the_filters_against_the_pull(on, files, runs):
+    """#3672 の round 5: 絞り込みを PR の事実（head のブランチ・宛先・変更ファイル）と照らし、読めない事実は動くとみなす。"""
+    event = land.PullEvent("release/v1", "main", lambda: files)
+    assert land.runs_on_pull_head(f"on:\n  {on}\n", event) is runs

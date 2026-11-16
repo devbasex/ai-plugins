@@ -294,7 +294,7 @@ def test_renaming_an_allow_item_with_the_same_kind_and_name_passes(tree: Path):
 
 def test_moving_two_allow_items_with_the_same_kind_and_name_offsets_both(monkeypatch):
     """同じ kind・name の項目を 2 つ同時に付け替えても、消した 2 件で足した 2 件を相殺する。"""
-    sys.path.insert(0, str(REPO / "scripts"))
+    monkeypatch.setattr(sys, "path", [str(REPO / "scripts"), *sys.path])
     from contracts_lib import ratchet
 
     rows = {f"{p}.json": {"kind": "env-undeclared", "name": "NDF_Y", "path": p} for p in ("a", "b", "c", "d")}
@@ -326,6 +326,24 @@ def test_first_version_before_ci_runs_the_check_is_initial(tree: Path):
 def test_ci_without_a_base_stops_with_3(tree: Path):
     code, r = run(tree, env=dict(env_clean(), CI="true"))
     assert code == 3
+
+
+def test_declared_base_without_jsonschema_stops_with_a_ratchet_error(tmp_path: Path, monkeypatch):
+    """#3672 の round 5: 宣言を読む部品が jsonschema を import できなければ、ModuleNotFoundError で落ちず、
+    --base か uv の環境を案内する RatchetError（CI の中では 3）で止まる。"""
+    monkeypatch.setattr(sys, "path", [str(REPO / "scripts"), *sys.path])
+    from contracts_lib import ratchet
+
+    lib = tmp_path / "plugins" / "ndf" / "scripts" / "lib"
+    lib.mkdir(parents=True)
+    (lib / "branch_strategy.py").write_text(
+        "class StrategyError(Exception):\n    pass\n\n\ndef load_strategy(root):\n    import jsonschema_absent_for_test\n",
+        encoding="utf-8",
+    )
+    monkeypatch.delitem(sys.modules, "branch_strategy", raising=False)
+    with pytest.raises(ratchet.RatchetError, match="--base"):
+        ratchet._declared_base(tmp_path)
+    sys.modules.pop("branch_strategy", None)
 
 
 # --- Checker.entry の分岐ごとの現状固定（I-001） ---
@@ -1050,7 +1068,7 @@ def test_declared_writer_of_a_passed_file_is_not_file_dynamic(tree: Path):
 
 def test_base_knows_runs_once_per_kind(monkeypatch):
     """merge-base の検査を読む git show は、種類ごとに 1 回だけ起こす。"""
-    sys.path.insert(0, str(REPO / "scripts"))
+    monkeypatch.setattr(sys, "path", [str(REPO / "scripts"), *sys.path])
     from contracts_lib import ratchet
 
     calls = []

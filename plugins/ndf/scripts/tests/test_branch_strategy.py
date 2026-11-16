@@ -458,6 +458,19 @@ def test_migrate_fills_omitted_branch_from_default_branch(tmp_path):
     assert sec["branches"] == {"production": "main", "base": "main"}
 
 
+def test_migrate_implied_trunk_with_admin_asks_instead_of_failing(tmp_path):
+    """#3672 の round 5: 取り込み方を補って trunk にした宣言に管理者の迂回があれば、組んで R2 で止めずに問いを返す。"""
+    old = {
+        "worktree.json": {"version": 1, "production_branch": "main"},
+        "project.json": {"version": 1, "production_merge": {"admin": True}},
+    }
+    root = make_repo(tmp_path, old)
+    plan, q = bmig.plan_migration(root, legacy.load_moves())
+    assert not plan.failed and plan.files == {} and [x["pointer"] for x in q] == ["/release_strategy"]
+    assert {"release_strategy": "trunk", "merge.admin": False} in q[0]["candidates"]
+    assert {"source": "repo", "ref": ".ndf/project.json:/production_merge/admin", "value": "True"} in q[0]["evidence"]
+
+
 def test_migrate_remove_row_only(tmp_path):
     root = make_repo(
         tmp_path, {"project.json": {"version": 1, "branch_strategy": section("docs")}, "worktree.json": {"version": 1, "branch_flow": {}}}
@@ -835,7 +848,7 @@ class FakePort:
         self.failing = None
         self.pulls = 0
 
-    def checks_failing(self, sha):
+    def checks_failing(self, sha, pull=None):
         self.calls.append(("checks", sha))
         return self.failing
 
