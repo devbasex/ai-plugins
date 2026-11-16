@@ -34,7 +34,7 @@ SUPERVISE = SCRIPTS / "supervise.py"
 # 単位を選ぶ取り込み方（release_branch）は mobile の種類、ベースブランチを丸ごと出す取り込み方（merge_base_branch）は
 # web-develop の種類の写し。リリースの形はどちらも package-plugin（雛形でプランを組む）
 SELECTED, WHOLE = "mobile", "web-develop"
-RELEASE = {**strategy_fixture.section("plugin")["release"], "plugin": "ndf", "runtimes": ["claude"]}
+RELEASE = {**strategy_fixture.section("plugin")["release"], "plugin": "ndf", "runtimes": ["claude"], "cd": None}  # CD の無い宣言
 NO_FILE = object()
 # 旧い宣言のキー（project.json に残ると止まる）。名前は移す行の表（branch_strategy_legacy）から引く
 LEGACY_KEY = next(m.old for m in legacy.load_moves() if m.file == "project" and m.old.count("/") == 1).lstrip("/")

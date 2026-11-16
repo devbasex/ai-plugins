@@ -41,7 +41,8 @@ def _fill(section: dict, presets: dict, existing: dict | None = None, default: s
     `default` はリポジトリの既定ブランチ（`repo.default_branch`）。旧い宣言で省いた `base_branch`・`production_branch` は、
     旧い処理がこの値で解決していたため、プリセットのブランチ名より先にこれで補う（宣言の書き換えで本番を変えない）。"""
     existing = existing or {}
-    rs = section.get("release_strategy") or existing.get("release_strategy", "merge_base_branch")
+    declared = {**(existing.get("branches") or {}), **(section.get("branches") or {})}
+    rs = section.get("release_strategy") or existing.get("release_strategy") or _implied_strategy(declared, default)
     form = (section.get("release") or {}).get("form") or (existing.get("release") or {}).get("form")
     kind = _fill_kind(rs, form)
     row = presets["kinds"][kind]
@@ -54,7 +55,6 @@ def _fill(section: dict, presets: dict, existing: dict | None = None, default: s
         else:
             out[key] = value
     branches = out["branches"]
-    declared = {**(existing.get("branches") or {}), **(section.get("branches") or {})}
     for key in ("base", "production"):
         if default and key not in declared:
             branches[key] = default
@@ -68,6 +68,16 @@ def _fill(section: dict, presets: dict, existing: dict | None = None, default: s
     if out["merge"].get("admin"):
         out["merge"]["method"] = "direct"
     return out
+
+
+def _implied_strategy(declared: dict, default: str | None) -> str:
+    """旧い宣言に取り込み方が無いときの取り込み方。省いたブランチ名を既定ブランチで補った結果、ベースブランチと本番ブランチが
+    同じなら trunk（旧い処理は既定ブランチで取り込みと本番を兼ねた。merge_base_branch にすると R1 で移行が止まる）。
+    両方を書いて同じ名前にした宣言は補っていないため、今のとおり組み合わせの規則で止める。"""
+    if "base" in declared and "production" in declared:
+        return "merge_base_branch"
+    base, production = declared.get("base", default), declared.get("production", default)
+    return "trunk" if base and base == production else "merge_base_branch"
 
 
 def _fill_kind(rs: str, form: str | None) -> str:

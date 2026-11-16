@@ -158,7 +158,7 @@ def make_repo(tmp_path: Path, flow: str = WHOLE, pace=None) -> Path:
     repo = tmp_path / "repo"
     (repo / ".ndf").mkdir(parents=True)
     subprocess.run(["git", "init", "-q", "-b", "develop", str(repo)], check=True)
-    release = {**strategy_fixture.section("plugin")["release"], "plugin": "ndf", "runtimes": ["claude"]}
+    release = {**strategy_fixture.section("plugin")["release"], "plugin": "ndf", "runtimes": ["claude"], "cd": None}  # CD の無い宣言
     strategy_fixture.write_strategy(repo, flow, base="develop", production="main", release=release)
     (repo / ".ndf" / "supervise.json").write_text(json.dumps({"test": {"command": "true"}}))
     if pace:

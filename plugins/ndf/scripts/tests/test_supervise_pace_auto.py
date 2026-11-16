@@ -161,7 +161,9 @@ def test_auto_is_refused_for_operation_mode_without_a_dev_channel_and_without_mv
     repo = make_repo(tmp_path, {"auto": {**AUTO, "modes": ["operation", "standard"]}})
     p, _ = new_sprint(tmp_path, repo, sprint_state(tmp_path, "auto"), "--mode", "operation")
     assert p.returncode == 1 and "モード operation" in json.loads(p.stdout)["summary"]
-    repo2 = make_repo(tmp_path / "b", {"auto": AUTO}, prod="develop")
+    # 開発版のチャネルが無く、承認前の試用も無い宣言（web-trunk: production_pr で verify が null。#3672 の決定 15）。
+    # plugin の種類（release_pr）は版上げの PR の head で試すため auto を許す
+    repo2 = make_repo(tmp_path / "b", {"auto": AUTO}, prod="develop", form=False)
     p, _ = new_sprint(tmp_path / "b", repo2, sprint_state(tmp_path / "b", "auto"))
     assert p.returncode == 1 and "開発版のチャネル" in json.loads(p.stdout)["summary"]
     repo3 = make_repo(tmp_path / "c", {"auto": AUTO})

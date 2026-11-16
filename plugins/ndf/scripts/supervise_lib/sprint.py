@@ -173,7 +173,8 @@ def close_plan(a, repo: str) -> dict:
     stats = f"{CHECK_PY} stats --root {shlex.quote(repo)}"
     record_pr = str(a.record_pr) if getattr(a, "record_pr", None) else record_pr_ref(a)
     verify = has_record(record_pr)
-    target = sprint_flow(a).pr_target("doc", sprint_branch(a))  # 確定仕様化の PR の宛先（#3121）
+    # 確定仕様化の PR の宛先（#3121）。取り込みの後に組むため、trunk ではスプリントブランチでなく本番ブランチ
+    target = sprint_flow(a).pr_target("doc", sprint_branch(a), integrated=True)
     plan = with_decls({
             "フェーズ": "まとめ",
             "課題": a.issue,

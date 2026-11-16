@@ -177,6 +177,16 @@ def test_cli_get_and_start_ref(tmp_path, capsys):
     assert bs_cli.main(["get", "/nope", "--root", str(root)]) == 2
     assert bs_cli.main(["get", "/verify", "--root", str(root)]) == 0
     assert capsys.readouterr().out == "null\n"
+    # 作業ツリーの宣言を PR の変更で書き換えても、--ref の無い読み取りはメインディレクトリの宣言を読む
+    wt = tmp_path / "wt"
+    git(root, "worktree", "add", "-q", "-b", "feature/x", str(wt))
+    doc = json.loads((wt / ".ndf" / "project.json").read_text(encoding="utf-8"))
+    doc["branch_strategy"]["branches"]["base"] = "feature/x"
+    (wt / ".ndf" / "project.json").write_text(json.dumps(doc), encoding="utf-8")
+    assert bs_cli.main(["get", "/branches/base", "--root", str(wt)]) == 0
+    assert capsys.readouterr().out == "develop\n"
+    assert bs_cli.main(["pr-target", "sprint", "--root", str(wt)]) == 0
+    assert capsys.readouterr().out != "feature/x\n"
 
 
 def test_snapshot_digest_and_diff():
@@ -220,6 +230,10 @@ def test_sprint_start_and_doc_target():
     assert bs.Strategy(section("web-develop")).sprint_start_ref() == "develop"
     assert bs.Strategy(section("mobile")).sprint_start_ref() == "main"
     assert bs.Strategy(section("mobile")).pr_target("doc", "sprint/x") == "sprint/x"
+    # trunk で取り込みを終えた後の確定仕様化は本番ブランチへ（設計 PR はスプリントブランチのまま）
+    docs = bs.Strategy(section("docs"))
+    assert docs.pr_target("doc", "sprint/x") == "sprint/x" and docs.pr_target("doc", "sprint/x", integrated=True) == "main"
+    assert bs.Strategy(section("mobile")).pr_target("doc", "sprint/x", integrated=True) == "sprint/x"
     with pytest.raises(ValueError):
         bs.Strategy(section("mobile")).pr_target("doc")
     with pytest.raises(ValueError):
@@ -436,6 +450,12 @@ def test_migrate_fills_omitted_branch_from_default_branch(tmp_path):
     plan, q = bmig.plan_migration(root, legacy.load_moves())
     assert q == [] and not plan.failed
     assert plan.files["project.json"]["branch_strategy"]["branches"] == {"production": "master", "base": "develop"}
+    # base_branch を省き、補った結果が本番ブランチと同じ（旧い処理は既定ブランチで兼ねた）なら trunk として移す
+    root2 = make_repo(tmp_path / "b", {"worktree.json": {"version": 1, "production_branch": "main"}})
+    plan2, q2 = bmig.plan_migration(root2, legacy.load_moves())
+    sec = plan2.files["project.json"]["branch_strategy"] if not plan2.failed else None
+    assert q2 == [] and not plan2.failed and sec["release_strategy"] == "trunk"
+    assert sec["branches"] == {"production": "main", "base": "main"}
 
 
 def test_migrate_remove_row_only(tmp_path):
@@ -512,6 +532,19 @@ def test_measure_develop_main(tmp_path):
     refs = {(e["pointer"], e["source"]) for e in res["evidence"]}
     assert ("/release_strategy", "pr") in refs and ("/release/tag", "tag") in refs and ("/release/form", "preset") in refs
     assert bs.validate_section(v) == []
+
+
+def test_measure_does_not_take_a_sprint_branch_as_the_base(tmp_path):
+    """課題の PR → sprint/s1 → develop → main の履歴では、一時的なスプリントブランチを長く残るブランチに数えず、
+    スプリントの PR（sprint/<名前> → develop）を標本にする。"""
+    root = history_repo(tmp_path, 4, {"package.json": '{"version": "1.0.0"}'})
+    prs = [(i, "sprint/s1", f"issue/{i}") for i in range(1, 4)]
+    prs += [(10 + i, "develop", f"sprint/s{i}") for i in range(1, 5)] + [(20, "main", "develop")]
+    res = bsm.measure_strategy(root, fake_api(prs))
+    assert res["values"]["branches"]["base"] == "develop"
+    assert not any(q["pointer"] == "/branches/base" for q in res["questions"])
+    base_refs = {e["ref"] for e in res["evidence"] if e["pointer"] == "/branches/base"}
+    assert base_refs and base_refs <= {f"#{10 + i}" for i in range(1, 5)}
 
 
 def test_measure_trunk_without_tags(tmp_path):
@@ -861,6 +894,10 @@ def test_land_stops_when_head_moved_3661():
 
 def test_land_queue_jumps_release_pr():
     port = FakePort({"head": H1, "base": "main", "bump": True, "cut_version": "1.0.0"}, facts(queue=True))
+    out = land.land_approved(port, bs.Strategy(section("plugin")), 5, land.Approval(H1))
+    assert out["result"] == "queued" and port.calls == [("enqueue", H1, True)]
+    # 版数を比べられない承認済みの PR（版数のファイルを初めて足す最初のリリースなど）も版上げとして先頭へ入れる
+    port = FakePort({"head": H1, "base": "main", "bump": None, "cut_version": "1.0.0"}, facts(queue=True))
     out = land.land_approved(port, bs.Strategy(section("plugin")), 5, land.Approval(H1))
     assert out["result"] == "queued" and port.calls == [("enqueue", H1, True)]
 

@@ -69,17 +69,22 @@ class Strategy:
         """スプリントブランチを切る元のブランチの名前（スプリントの起点）。"""
         return self.base if self.section["sprint"]["start"] == "base" else self.production
 
-    def pr_target(self, kind: str, sprint_branch: str | None = None) -> str:
+    def pr_target(self, kind: str, sprint_branch: str | None = None, integrated: bool = False) -> str:
         """PR の種類（`sprint`・`doc`・`release`）ごとの宛先のブランチ名。
 
         `sprint` はスプリントの PR（ベースブランチ。`trunk` ではベースブランチと本番ブランチが同じ）、`release` は
         版上げの PR（本番ブランチ）。`doc` は設計 PR と確定仕様化の PR で、`sprint.doc_prs` が `base` ならベースブランチ、
         `sprint` ならスプリントブランチ（`sprint_branch` に渡す。渡さなければ ValueError）。
+
+        `integrated` はスプリントの取り込みを終えた後の PR（確定仕様化）。`trunk` ではスプリントブランチが本番へ入った後で、
+        そこを宛先にすると本番へ届かない（消えていれば作業場も作れない）ため、スプリントの PR と同じ宛先（本番ブランチ）にする。
         """
         if kind not in PR_KINDS:
             raise ValueError(f"PR の種類は {'・'.join(PR_KINDS)} のどれか: {kind!r}")
         if kind == "release":
             return self.production
+        if integrated and self.release_strategy == "trunk":
+            return self.base
         if kind == "doc" and self.section["sprint"]["doc_prs"] == "sprint":
             if not sprint_branch:
                 raise ValueError("doc_prs が sprint の宣言では、設計 PR の宛先にスプリントブランチを渡す")

@@ -159,14 +159,18 @@ def approved_trail(trails: list[Trail], roles: dict[str, str | None]) -> Trail |
 
 
 def approved_review_commit(reviews: list[dict], perms: dict[str, str | None]) -> str | None:
-    """必須レビューの承認者として有効な人（`permission` が admin か write）の最新の APPROVED のレビューのコミット（I8）。"""
+    """必須レビューの承認者として有効な人（`permission` が admin か write）の最新の APPROVED のレビューのコミット（I8）。
+
+    人ごとに最後の判定（APPROVED・CHANGES_REQUESTED・DISMISSED。COMMENTED は判定を変えない）だけを数える。承認の後に
+    同じ人が差し戻していれば、その人の前の承認は使わない（GitHub のレビューの判定と同じ）。"""
+    last: dict[str, dict] = {}
+    for r in sorted((r for r in reviews or [] if isinstance(r, dict)), key=lambda r: str(r.get("submitted_at") or "")):
+        if r.get("state") in ("APPROVED", "CHANGES_REQUESTED", "DISMISSED"):
+            last[str((r.get("user") or {}).get("login") or "")] = r
     got = [
         r
-        for r in reviews or []
-        if isinstance(r, dict)
-        and r.get("state") == "APPROVED"
-        and perms.get(str((r.get("user") or {}).get("login") or "")) in REVIEWER_PERMISSIONS
-        and r.get("commit_id")
+        for login, r in last.items()
+        if r.get("state") == "APPROVED" and perms.get(login) in REVIEWER_PERMISSIONS and r.get("commit_id")
     ]
     if not got:
         return None

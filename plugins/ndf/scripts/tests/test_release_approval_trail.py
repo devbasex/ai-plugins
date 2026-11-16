@@ -107,6 +107,10 @@ def test_approved_review_commit_counts_only_effective_reviewers():
     assert at.approved_review_commit(reviews, {"w": "admin", "r": "write", "x": None}) == B
     assert at.approved_review_commit([rv("w", "COMMENTED", A, "1")], perms) is None
     assert at.approved_review_commit(reviews, {}) is None
+    # 承認の後に同じ人が差し戻したら、その人の前の承認は使わない。後で承認し直せばその承認を使う
+    back = [rv("w", "APPROVED", A, "1"), rv("w", "CHANGES_REQUESTED", A, "2")]
+    assert at.approved_review_commit(back, perms) is None
+    assert at.approved_review_commit([*back, rv("w", "APPROVED", B, "3")], perms) == B
 
 
 class FakeGh:

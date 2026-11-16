@@ -183,7 +183,8 @@ def land_approved(port: Port, strategy, pr: int, approval: Approval, pull: dict 
         if failing:
             return {**out, "reason": f"head {approval.head[:12]} の検査がそろっていない: {failing}"}
     if merge["method"] == "merge-queue":
-        ok, why = port.enqueue(pr, approval.head, bool(pull.get("bump")))
+        # 版数を比べられない承認済みの PR（bump が None）も版上げとして先頭へ入れる。後ろへ並ぶと先に並んだ変更が承認の外で入る
+        ok, why = port.enqueue(pr, approval.head, may_bump(pull))
         return {**out, "result": "queued" if ok else "stopped", "reason": why}
     if merge["method"] == "strict" and not facts.present:
         # 親は head が含むと確かめた先端に固定する。取り直すと、確かめた後に進んだ先端を親にして間の変更を消す
@@ -394,18 +395,50 @@ class GhPort:
         statuses = [c for c in status.get("statuses") or [] if c.get("context") != trail.STATUS_CONTEXT]
         runs += [(str(c.get("context") or ""), str(c.get("state") or "")) for c in statuses]
         if not runs:
-            return self._no_checks_reason()
+            return self._no_checks_reason(sha)
         bad = [f"{name}={res}" for name, res in runs if res not in CHECKS_OK]
         return ", ".join(bad)[:300] or None
 
-    def _no_checks_reason(self) -> str | None:
-        """検査が 1 件も無いときの理由。有効な workflow が無ければ CI を持たないリポジトリとして None（検査なしで通す）。
-        workflow があれば push の直後で未開始とみなして止める。照会は検査が 0 件のときだけ打つ。"""
+    def _no_checks_reason(self, sha: str) -> str | None:
+        """検査が 1 件も無いときの理由。PR の head で動く有効な workflow が無ければ None（検査なしで通す）。
+        本番への push・schedule でだけ動く workflow は PR の head に検査を作らないため数えない。動く workflow があれば
+        push の直後で未開始とみなして止める。照会は検査が 0 件のときだけ打つ。"""
         d = self._rest(f"repos/{self.repo}/actions/workflows")
         if not isinstance(d, dict):
             return "検査がまだ 1 件も無く、workflow の一覧も読めない"
-        active = [w for w in d.get("workflows") or [] if isinstance(w, dict) and w.get("state") == "active"]
-        return "検査がまだ 1 件も無い（workflow はある。始まるのを待って打ち直してください）" if active else None
+        active = [str(w.get("path") or "") for w in d.get("workflows") or [] if isinstance(w, dict) and w.get("state") == "active"]
+        show = self._show(sha)
+        on_head = ", ".join(p for p in active if runs_on_pull_head(show(p) if p else None))[:200]
+        return (
+            f"検査がまだ 1 件も無い（PR の head で動く workflow {on_head} がある。始まるのを待って打ち直してください）" if on_head else None
+        )
+
+
+_HEAD_EVENTS = ("pull_request", "pull_request_target")
+
+
+def runs_on_pull_head(text: str | None) -> bool:
+    """workflow の定義（YAML の字面）が PR の head に検査を作るか。`on` に pull_request・pull_request_target を持つか、
+    ブランチで絞らない push を持てば真。読めない定義は動くとみなす（検査なしで通さない側へ倒す）。"""
+    import yamlio
+
+    try:
+        doc = yamlio.load_yaml(text, "workflow") if text is not None else None
+    except yamlio.YamlError:
+        doc = None
+    if not isinstance(doc, dict):
+        return True
+    on = doc.get("on", doc.get(True))  # YAML 1.1 の読み手では `on` が真偽値のキーになる
+    if isinstance(on, str):
+        on = {on: None}
+    elif isinstance(on, list):
+        on = {str(e): None for e in on}
+    if not isinstance(on, dict):
+        return True
+    if any(e in on for e in _HEAD_EVENTS):
+        return True
+    push = on.get("push", False)
+    return push is None or (isinstance(push, dict) and not any(k in push for k in ("branches", "branches-ignore", "tags", "tags-ignore")))
 
 
 def approval_of(repo: str, strategy, pr: int) -> Approval | None:

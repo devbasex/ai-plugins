@@ -5,7 +5,8 @@
     python3 branch_strategy_cli.py pr-target {sprint|doc|release} [--sprint-branch <名前>] [--root DIR]
 
 宣言が無い・壊れている・旧いキーが残るときは理由（ファイル・キーの位置・打つコマンド）を標準エラーへ出して止まる。
-既定値へ倒さない（I3・I4）。`deps.require` を呼ぶのはこの入口だけで、読む部品（hook の経路でも読む）は呼ばない。
+既定値へ倒さない（I3・I4）。`--ref` の無い読み取りは、`--root` の作業ツリーでなくメインディレクトリの宣言を読む
+（`repo.branch_strategy_of`。PR の変更でベースブランチなどを差し替えられないようにする。#2363）。`deps.require` を呼ぶのはこの入口だけで、読む部品（hook の経路でも読む）は呼ばない。
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ def _print_value(v: Any) -> None:
 def main(argv: list[str] | None = None) -> int:
     deps.require("jsonschema")
     import branch_strategy as bs
+    import repo
     from branch_strategy import StrategyError
     from exit_codes import EXIT_UNREADABLE
 
@@ -49,12 +51,12 @@ def main(argv: list[str] | None = None) -> int:
         if a.cmd == "get":
             if not a.pointer.startswith("/"):
                 raise StrategyError(f"pointer は / で始める: {a.pointer!r}", EXIT_UNREADABLE)
-            strategy = bs.load_at_ref(Path(a.root), a.ref) if a.ref else bs.load_strategy(Path(a.root))
+            strategy = bs.load_at_ref(Path(a.root), a.ref) if a.ref else repo.branch_strategy_of(Path(a.root))
             _print_value(bs.get_value(strategy, a.pointer))
         elif a.cmd == "start-ref":
-            _print_value(bs.load_strategy(Path(a.root)).sprint_start_ref())
+            _print_value(repo.branch_strategy_of(Path(a.root)).sprint_start_ref())
         else:
-            _print_value(bs.load_strategy(Path(a.root)).pr_target(a.kind, a.sprint_branch))
+            _print_value(repo.branch_strategy_of(Path(a.root)).pr_target(a.kind, a.sprint_branch))
     except ValueError as e:
         sys.stderr.write(f"{e}\n")
         return EXIT_UNREADABLE

@@ -22,8 +22,9 @@ from pathlib import Path
 from typing import Any, Callable
 
 import branch_strategy as bs
+import legacy_names
 import proc
-from strategy_rows import RELEASE_PREFIX
+from strategy_rows import RELEASE_PREFIX, SPRINT_PREFIX
 from project_lib import branch_strategy_conflicts as conflicts_of
 from project_lib import branch_strategy_write as bw
 from release_lib.land import TRAILER_HEAD, TRAILER_PR, TRAILER_TIP
@@ -250,9 +251,12 @@ def _tag_shape(tag: str, plugins: dict) -> str | None:
 
 def _history_keys(s: Samples, rule: dict) -> dict[str, Measured]:
     prod = s.production
-    # 長く残るブランチ（ほかの PR の宛先）からの PR と版上げの PR は、スプリントの事例に数えない
-    long_lived = {p.get("base") for p in s.prs}
-    units = [p for p in s.prs if p.get("base") and not (p.get("head") or "").startswith(RELEASE_PREFIX) and p.get("head") not in long_lived]
+    # 長く残るブランチ（ほかの PR の宛先）からの PR と版上げの PR は、スプリントの事例に数えない。スプリントブランチは課題の PR の
+    # 宛先でも一時的なブランチで、長く残るブランチに数えない（課題の PR → sprint/s1 → develop では sprint/s1 → develop を標本にする）
+    temporary = legacy_names.branch_prefixes(SPRINT_PREFIX)
+    long_lived = {b for p in s.prs if (b := p.get("base") or "") and not b.startswith(temporary)}
+    units = [p for p in s.prs if p.get("base") in long_lived and p.get("head") not in long_lived]
+    units = [p for p in units if not (p.get("head") or "").startswith(RELEASE_PREFIX)]
     strat = [("trunk" if p["base"] == prod else "merge_base_branch", f"#{p['number']}") for p in units]
     out = {"/release_strategy": count_key("/release_strategy", strat, rule)}
     out["/branches/base"] = count_key("/branches/base", [(p["base"], f"#{p['number']}") for p in units], rule)

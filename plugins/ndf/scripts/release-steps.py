@@ -96,7 +96,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import deps  # noqa: E402
 
-deps.require("schema", "versions", "bump", "md", "mdtable", "durable", "waits", "jsonschema")
+deps.require("schema", "versions", "bump", "md", "mdtable", "durable", "waits", "jsonschema", "yamlio")
 import approved_commit as ac  # noqa: E402
 import step_read  # noqa: E402
 

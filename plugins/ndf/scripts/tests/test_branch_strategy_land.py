@@ -116,6 +116,13 @@ def test_checks_failing_skips_trail_status_and_passes_repo_without_ci(monkeypatc
     assert port.checks_failing("h") is None
     replies["repos/o/r/actions/workflows"] = {"workflows": [{"state": "active"}]}
     assert "まだ 1 件も無い" in port.checks_failing("h")
+    # 本番への push・schedule でだけ動く workflow は PR の head に検査を作らないため、検査なしで通す
+    files = {"cd.yml": "on:\n  push:\n    branches: [main]\n  schedule:\n    - cron: '0 0 * * *'\n"}
+    monkeypatch.setattr(land.GhPort, "_show", lambda self, rev: files.get)
+    replies["repos/o/r/actions/workflows"] = {"workflows": [{"state": "active", "path": "cd.yml"}]}
+    assert port.checks_failing("h") is None
+    files["cd.yml"] = "on: [pull_request]\n"
+    assert "まだ 1 件も無い" in port.checks_failing("h")
     replies["repos/o/r/commits/h/status"] = {"statuses": [{"context": "ci", "state": "pending"}]}
     assert port.checks_failing("h") == "ci=pending"
 
