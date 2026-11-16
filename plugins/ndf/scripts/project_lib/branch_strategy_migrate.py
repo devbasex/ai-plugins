@@ -92,7 +92,7 @@ def _channels(branches: dict, dev: str | None) -> list[dict]:
 def plan_migration(root: Path, moves: list[legacy.Move]) -> tuple[bw.WritePlan, list[dict]]:
     """旧い 4 か所の値をセクションへ移し、旧いキーを消す計画と、表に無い値への問いを返す。"""
     ndf = Path(root) / ".ndf"
-    docs = {fid: bw.read_decl(ndf / name) for fid, name in legacy.FILES.items()}
+    docs = {fid: bw.read_decl_file(ndf / name) for fid, name in legacy.FILES.items()}
     docs = {k: v for k, v in docs.items() if v is not None}
     found = {(f.file, f.pointer) for f in legacy.find_legacy(docs, moves)}
     present = [m for m in moves if m.file in docs and legacy.has_pointer(docs[m.file], m.old)]

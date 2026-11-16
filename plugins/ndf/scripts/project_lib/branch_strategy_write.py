@@ -139,7 +139,7 @@ def get_pointer(doc: Any, pointer: str) -> Any:
     return cur
 
 
-def read_decl(path: Path) -> dict | None:
+def read_decl_file(path: Path) -> dict | None:
     try:
         return jsonio.read(path, missing=None, want=dict)
     except jsonio.JsonReadError as e:
@@ -172,7 +172,7 @@ def plan_files(root: Path, after: dict[str, Any], rebuild: Callable[[], WritePla
     for name in WRITE_ORDER:
         if name not in after:
             continue
-        before = read_decl(ndf / name)
+        before = read_decl_file(ndf / name)
         befores[name] = before
         ops = json_patch(before or {}, after[name] or {})
         if ops:
@@ -187,7 +187,7 @@ def plan_write(root: Path, section: dict) -> WritePlan:
     failed = bs.validate_section(section)
     if failed:
         return WritePlan(failed=failed)
-    project = read_decl(Path(root) / ".ndf" / "project.json")
+    project = read_decl_file(Path(root) / ".ndf" / "project.json")
     after = dict(project) if project else {"version": 1}
     after[bs.SECTION] = section
     return plan_files(root, {"project.json": after}, lambda: plan_write(root, section))
@@ -195,7 +195,7 @@ def plan_write(root: Path, section: dict) -> WritePlan:
 
 def plan_remove(root: Path) -> WritePlan:
     """セクションを消す差分とハッシュを作る。セクションが無ければ空の差分。"""
-    project = read_decl(Path(root) / ".ndf" / "project.json")
+    project = read_decl_file(Path(root) / ".ndf" / "project.json")
     if not project or bs.SECTION not in project:
         return WritePlan(digest=EMPTY_DIGEST, rebuild=lambda: plan_remove(root))
     after = {k: v for k, v in project.items() if k != bs.SECTION}
