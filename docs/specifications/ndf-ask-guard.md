@@ -269,7 +269,7 @@ classDiagram
 
 ### 並列の計画のレーンの問い
 
-判定が通す問い（`gate`・`redline`・`allowed`）を並列の計画のレーンか一時レーン（`NDF_RELAY_NAME` が計画のレーンの名前か、役割のファイルが `helper`。`parallel_files.lane_name_in_plans` がファイルだけを読んで決める）が出したとき、hook は `parallel.py request-ask <計画名> --lane <名>` を上限 8 秒で打ってオーガナイザーへ送り、依頼の `id` が返れば保留の手順を添えた `deny` を返す。送れなければ今どおり通す。止める問い（`deny`・`advise`）は送らない。保留の手順の正本は `asking.md` の「並列の計画のレーン」にある。
+判定が通す問い（`gate`・`redline`・`allowed`）を並列の計画のレーンか一時レーン（`NDF_RELAY_NAME` が計画のレーンの名前か、役割のファイルが `helper`。`parallel_files.lane_name_in_plans` がファイルだけを読んで決める）が出したとき、hook は `parallel.py request-ask <計画名> --lane <名>` を上限 8 秒で打ってオーガナイザーへ送り、`request-ask` の結果の種類ごとに `deny` の理由を選ぶ。設計承認の依頼（`gate1`）は、引継ぎ文書へ `parallel.py design-answer <計画> <依頼> --state <スプリント状態>` の 1 行を書いて止まる手順を、答えのある答えの引き継ぎ（`reused`）は前の依頼の id とその答えを、ほか（`ask`・答え待ちの `reused`）は保留の手順を返す。`request-ask` には上限の尽きる時刻（`deadline_at`）を渡し、上限を過ぎたときは台帳を 1 回読んで判定の記録の id の行があればその種類の `deny` を返す。行が無い・送れなければ通す。止める問い（`deny`・`advise`）は送らない。保留の手順の正本は `asking.md` の「並列の計画のレーン」にある。
 
 ### `ask.py`
 

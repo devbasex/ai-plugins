@@ -58,6 +58,15 @@
           "n"
         ]
       },
+      "design-answer": {
+        "options": [
+          "--state"
+        ],
+        "positionals": [
+          "name",
+          "id"
+        ]
+      },
       "end": {
         "options": [
           "--lane",

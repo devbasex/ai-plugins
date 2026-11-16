@@ -25,6 +25,8 @@ from pathlib import Path
 from typing import Optional
 
 import parallel_external as pe
+from gate1_ids import gate1_id
+from parallel_question import first_item, ask_source, option_labels
 import parallel_ledger as plg
 import parallel_plan as pp
 from parallel_request_form import REQUEST_ID_RE, request_errors  # noqa: F401  依頼の形（契約の検査と外のレーンが読む）
@@ -401,22 +403,24 @@ def _head_sha(cwd: str) -> str:
     return got.stdout.strip() if got.returncode == 0 else ""
 
 
-def request_ask(main: Path, name: str, lane: str, tool_input: dict, cwd: str, ledger_id: str) -> plg.Sent:
-    """承認ゲートの外の区分つきの問い（`kind: ask`）をオーガナイザーへ送る。id は `<送り手>-q<判定の記録の id>`。"""
+def request_ask(main: Path, name: str, lane: str, tool_input: dict, cwd: str, ledger_id: str, target: Optional[str] = None) -> plg.Sent:
+    """承認ゲートの外の区分つきの問い（`kind: ask`）をオーガナイザーへ送る。id は `<送り手>-q<判定の記録の id>`。
+    `target` は問いの対象（`ask_target`。#3608）で、行の `target` に残す（空なら null）。"""
     qs = (tool_input or {}).get("questions") or []
-    first = qs[0] if qs and isinstance(qs[0], dict) else {}
+    first = first_item(tool_input)
     rid = f"{lane}-q{ledger_id}"
     msg = {
         "kind": "ask",
         "id": rid,
         "lane": lane,
-        "source": ((tool_input or {}).get("metadata") or {}).get("source"),
+        "source": ask_source(tool_input),
         "question": first.get("question"),
-        "options": [o.get("label") for o in first.get("options") or [] if isinstance(o, dict)],
+        "options": option_labels(tool_input),
         "questions": qs,
         "cwd": cwd,
         "ledger_id": ledger_id,
         "stamp": _head_sha(cwd),
+        "target": target or None,
         "at": pe.utc_stamp(),
     }
     return send_inbox(main, name, msg, rid)
@@ -427,7 +431,7 @@ def request_gate1(
 ) -> str:
     """設計の承認の依頼（`kind: gate1`）。id は `<レーン>-g<設計 PR>-<先頭の SHA の 12 桁>`（同じ先頭の打ち直しは同じ id）。
     承認した設計をマージできずに利用者へ戻すとき（#2507）は、同じ先端でも別の依頼にするため `suffix` を足す。"""
-    rid = f"{lane}-g{pr}-{stamp[:12]}{suffix}"
+    rid = gate1_id(lane, pr, stamp, suffix)
     msg = {"kind": "gate1", "id": rid, "lane": lane, "issue": issue, "pr": pr, "report": report, "sprint_state": state, "stamp": stamp}
     send_inbox(main, name, {**msg, **extra, "at": pe.utc_stamp()}, rid)
     return rid

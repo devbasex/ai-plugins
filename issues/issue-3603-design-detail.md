@@ -173,7 +173,7 @@ docs/
 | `cmd_request_ask` | 送り手が `sprint`・区分が `ndf-gate:1`・`design_gate` が中身を返す・その id の `gate1` の行が既にある | 書かない。既にある id を `metrics.kind: gate1`・`already: true` で返す（I2） |
 | `cmd_request_ask` | 送り手が `helper`・`ask_target` が空でない・`prior_of` が前の依頼を返す | 書く直前に `_expired` を見て、`record_reused` が真なら `metrics.kind: reused` と `answer`（答えがあれば）を返す。偽なら次の行 |
 | `cmd_request_ask` | ほか（開発ループのレーン・区分が `ndf-gate:1` でない・`design_gate` が `None`・対象が空・前の依頼が無い・`record_reused` が偽） | 書く直前に `_expired` を見て、`request_ask` で `ask` の行を 1 行書く（`target` は `ask_target` の値か `null`）。`metrics.kind: ask` |
-| `answer_design` | 答えが `approved` | 承認ゲートの記録が無ければ `sprint-state.py gate <状態> 設計承認ゲート --what <要約> --pr P --by <答えの by> --outcome approved` を打つ（`by: mvv` なら `--verdict`・`--reasons`・`--log` も渡す）。`ok`・0。`next` は `sprint.json` の設計 PR のマージのステージの `resume` |
+| `answer_design` | 答えが `approved` | 承認ゲートの記録が無ければ `sprint-state.py gate <状態> 設計承認ゲート --what <要約> --pr P --by <答えの by> --outcome approved` を打つ（`by: mvv` なら `--verdict`・`--reasons`・`--log` も渡す）。`ok`・0。`next` は `sprint.json` の設計 PR のマージのステージの `resume`（そのキューをまだ起動していなければ、前の起動の一覧が無いため `command`） |
 | `answer_design` | 答えが `revise` | 報告のあるプランの状態ディレクトリの `work/design-revise-<P>.md` へ答えの `note` を書く。`gate`・10 |
 | `answer_design` | 答えが `rejected` | 記録が無ければ `--by <答えの by> --outcome rejected` を打つ。`gate`・10 |
 | `held_text` | `kind: gate1` | `design_hold_text(id, plan, sprint_state)` |

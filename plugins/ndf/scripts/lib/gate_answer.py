@@ -58,11 +58,37 @@ def replaces(old: dict, name: str, pr: int | None) -> bool:
     return canonical(old.get("name")) == canonical(name) and old.get("pr") == pr
 
 
+def user_keys(outcome: str | None, pr: int | None) -> dict:
+    """`sprint-state.py gate --by user` の記録に足す鍵。利用者の承認は by と答えた PR を書き、承認ゲートの名と PR の組で
+    置き換える（`replaces`）。"""
+    return {**({"outcome": "approved", "by": "user"} if outcome else {}), **({"pr": pr} if pr else {})}
+
+
+def mvv_keys(judged: dict, pr: int | None, outcome: str | None) -> dict:
+    """`sprint-state.py gate --by mvv` の記録に足す鍵（MVV 判定の鍵 `judged`）。`pr` があれば答えた PR と承認を残す
+    （設計 PR のマージのプランが PR ごとに引く。#3603 の I9）。`pr` が無ければ判定の鍵だけ。"""
+    if not pr:
+        return judged
+    return {**judged, "pr": pr, **({"outcome": "approved"} if outcome == "approved" else {})}
+
+
 def gates_of(state: str | Path) -> list[dict]:
     """状態ファイルの承認ゲートの記録。読めなければ空。"""
     data = jsonio.read(state, missing={}, broken={})
     gates = data.get("gates") if isinstance(data, dict) else None
     return [g for g in gates or [] if isinstance(g, dict)]
+
+
+def design_gate_record(state: str | Path | None, pr: int, by: str, outcome: str) -> dict | None:
+    """スプリント状態の設計承認ゲートの記録のうち、`pr`・`by`・`outcome` が一致する最後の 1 件。無ければ None。
+    `parallel.py design-answer` が書く前に確かめ、`supervise.py design-approved` が MVV 判定の承認を読む（同じ条件で読み書きする）。"""
+    if not state:
+        return None
+    hits = [
+        g for g in gates_of(state)
+        if canonical(g.get("name")) == DESIGN_GATE and g.get("pr") == pr and g.get("by") == by and g.get("outcome") == outcome
+    ]  # fmt: skip
+    return hits[-1] if hits else None
 
 
 def approved(state: str | Path | None, gate: str, pr: int | None = None, after: str | None = None) -> Answer | None:
