@@ -160,3 +160,49 @@ def case_at(root, strict: bool = False) -> Case:
         if strict:
             raise
         return decide_case(False, None, "宣言を読めない")
+
+
+class RuleFacts(NamedTuple):
+    """本番ブランチの ruleset の事実（#3672 の I10）。`bypass` は当たった ruleset の `current_user_can_bypass`
+    （どれか 1 つでも越えられない値なら、その値。ruleset が無ければ None）。"""
+
+    present: bool
+    approvals: int
+    queue: bool
+    up_to_date: bool
+    bypass: str | None
+
+
+# 迂回の可否の強さ（弱いほうを全体の値にする）。`always`・`pull_requests_only` だけが本番の PR を越えられる
+_BYPASS_ORDER = ("never", "exempt", "pull_requests_only", "always")
+
+
+def rule_facts_of(rules: list, bypasses: list[str | None]) -> RuleFacts:
+    """`rules/branches/<branch>` の規則の配列と、当たった ruleset ごとの迂回の可否から事実を組む。"""
+    if not rules:
+        return RuleFacts(False, 0, False, False, None)
+    kinds = {r.get("type") for r in rules if isinstance(r, dict)}
+    up_to_date = any(
+        isinstance(r, dict) and r.get("type") == "required_status_checks" and (r.get("parameters") or {}).get("strict_required_status_checks_policy")
+        for r in rules
+    )
+    known = [b for b in bypasses if b in _BYPASS_ORDER]
+    bypass = min(known, key=_BYPASS_ORDER.index) if known else None
+    return RuleFacts(True, required_approvals(rules) or 0, "merge_queue" in kinds, bool(up_to_date), bypass)
+
+
+def read_rule_facts(root, branch: str) -> RuleFacts | None:
+    """本番ブランチの ruleset から、有無・承認の数・merge queue の有無・最新の取り込みの要否・迂回の可否を読む。
+    読めなければ None。"""
+    rules, why = _gh_read(root, f"repos/{{owner}}/{{repo}}/rules/branches/{branch}")
+    if why == "missing":
+        return RuleFacts(False, 0, False, False, None)
+    if not isinstance(rules, list):
+        return None
+    bypasses = []
+    for rid in sorted({r.get("ruleset_id") for r in rules if isinstance(r, dict) and r.get("ruleset_id")}):
+        got, _ = _gh_read(root, f"repos/{{owner}}/{{repo}}/rulesets/{rid}")
+        if not isinstance(got, dict):
+            return None
+        bypasses.append(got.get("current_user_can_bypass"))
+    return rule_facts_of(rules, bypasses)

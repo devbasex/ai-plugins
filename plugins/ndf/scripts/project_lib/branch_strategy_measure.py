@@ -1,0 +1,393 @@
+"""branch_strategy_measure.py: 既存のリポジトリの事例と文書を測り、セクションの値・値ごとの根拠・問いを出す（#3672 の決定 6・I11）。
+
+キーの分け方は既定の表（`data/branch-strategy-presets.json`）の `measured_keys` が持つ。
+
+- 履歴から推すキー: 事例が `min_samples` 件以上・`min_ratio` 以上で合うときだけ値にする（`count_key`）
+- 今の正本で決まるキー: 既定ブランチ・版数のファイル・`plugin.json`・ワークフロー・本番ブランチの ruleset の 1 件で決める。
+  正本が無いことは値の根拠にし、読めないときだけ問う
+- 種類の既定から埋めるキー: 測った値がすべて合う種類の行（`pick_kind`）から埋める
+
+食い違いと根拠不足は書かずに問う（`questions`）。GitHub は `api`（`path → (値, 読めない理由)`）で読み、テストは差し替える。
+取り込み方 `release_branch` は事例（PR の宛先）から見分けられないため、測った値は `merge_base_branch` か `trunk` になる。
+`release_branch` のリポジトリは、起点（`sprint.start`）と組み合わせの規則が合わずに問いになり、答えで書く。
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import subprocess
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Callable
+
+import branch_strategy as bs
+from project_lib import branch_strategy_write as bw
+
+Api = Callable[[str], tuple[Any, str]]
+VERSION = re.compile(r"\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.\-]+)?")
+RELEASE_PREFIX = "release/v"
+TRAILERS = ("NDF-Landed-PR", "NDF-Approved-Head", "NDF-Tip")
+DOCS = ("README.md", "CONTRIBUTING.md", "AGENTS.md")
+DOC_BASE = re.compile(r"--base\s+`?([A-Za-z0-9._/\-]+)`?")
+CD_MARKS = ("gh release create", "action-gh-release", "git push origin --tags", "git tag ")
+
+
+@dataclass
+class Samples:
+    """集めた事例。各一覧は `(値, 事例の参照)` か事実の行。`unreadable` は読めなかった種類。"""
+
+    production: str | None = None
+    prs: list[dict] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)
+    releases: list[str] = field(default_factory=list)
+    commits: list[dict] = field(default_factory=list)
+    rules: Any = None
+    workflows: dict[str, str] = field(default_factory=dict)
+    version_files: dict[str, Any] = field(default_factory=dict)
+    plugins: dict[str, list[str]] = field(default_factory=dict)
+    unreadable: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+
+@dataclass
+class Measured:
+    """1 つのキーの測った結果。`why` が None なら `value` と `evidence` が決まっている。"""
+
+    value: Any = None
+    evidence: list[dict] = field(default_factory=list)
+    why: str | None = None
+    candidates: list = field(default_factory=list)
+
+
+def _git(root: Path, *args: str) -> str | None:
+    r = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True)
+    return r.stdout if r.returncode == 0 else None
+
+
+def default_api(root: Path) -> Api:
+    import release_case
+
+    return lambda path: release_case._gh_read(root, path)
+
+
+def _default_branch(root: Path, api: Api) -> str | None:
+    repo, _ = api("repos/{owner}/{repo}")
+    if isinstance(repo, dict) and repo.get("default_branch"):
+        return repo["default_branch"]
+    head = _git(root, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+    return head.strip().split("/", 1)[-1] if head else None
+
+
+def _local_facts(root: Path, s: Samples) -> None:
+    wf = Path(root) / ".github" / "workflows"
+    for p in sorted(wf.glob("*.y*ml")) if wf.is_dir() else []:
+        try:
+            s.workflows[p.name] = p.read_text(encoding="utf-8")
+        except OSError:
+            s.warnings.append(f"読めないワークフロー: {p}")
+    pkg = Path(root) / "package.json"
+    if pkg.is_file():
+        try:
+            if "version" in json.loads(pkg.read_text(encoding="utf-8")):
+                s.version_files["package.json"] = "/version"
+        except (OSError, ValueError):
+            s.warnings.append("読めない: package.json")
+    for pj in sorted(Path(root).glob("plugins/*/.claude-plugin/plugin.json")) + sorted(Path(root).glob(".claude-plugin/plugin.json")):
+        try:
+            name = json.loads(pj.read_text(encoding="utf-8")).get("name")
+        except (OSError, ValueError):
+            continue
+        if name:
+            runtimes = ["claude"] + (["codex"] if (pj.parent.parent / ".codex-plugin" / "plugin.json").is_file() else [])
+            s.plugins[name] = runtimes
+
+
+def collect_samples(root: Path, api: Api, deadline: float, limit: int = 100) -> Samples:
+    """直近のマージ済み PR・タグ・Release・本番ブランチの履歴・ruleset・ワークフロー・版数のファイルを集める。"""
+    s = Samples()
+    s.production = _default_branch(root, api)
+    if s.production is None:
+        s.unreadable.append("default_branch")
+    for kind, path in (("prs", f"repos/{{owner}}/{{repo}}/pulls?state=closed&per_page={limit}"),
+                       ("tags", f"repos/{{owner}}/{{repo}}/tags?per_page={limit}"),
+                       ("releases", f"repos/{{owner}}/{{repo}}/releases?per_page={limit}")):
+        if time.monotonic() > deadline:
+            s.warnings.append(f"時間切れで打ち切った: {kind}")
+            continue
+        got, why = api(path)
+        if not isinstance(got, list):
+            s.unreadable.append(kind)
+            continue
+        if kind == "prs":
+            s.prs = [
+                {"number": p["number"], "base": (p.get("base") or {}).get("ref"), "head": (p.get("head") or {}).get("ref")}
+                for p in got if isinstance(p, dict) and p.get("merged_at")
+            ][:limit]
+        elif kind == "tags":
+            s.tags = [t["name"] for t in got if isinstance(t, dict) and t.get("name")][:limit]
+        else:
+            s.releases = [r["tag_name"] for r in got if isinstance(r, dict) and r.get("tag_name")][:limit]
+    if s.production:
+        _collect_commits(root, s, limit)
+        import release_case
+
+        rules, why = api(f"repos/{{owner}}/{{repo}}/rules/branches/{s.production}")
+        if why == "missing":
+            s.rules = release_case.RuleFacts(False, 0, False, False, None)
+        elif isinstance(rules, list):
+            byp = []
+            for rid in sorted({r.get("ruleset_id") for r in rules if isinstance(r, dict) and r.get("ruleset_id")}):
+                got, _ = api(f"repos/{{owner}}/{{repo}}/rulesets/{rid}")
+                byp.append(got.get("current_user_can_bypass") if isinstance(got, dict) else None)
+            s.rules = release_case.rule_facts_of(rules, byp)
+        else:
+            s.unreadable.append("ruleset")
+    _local_facts(root, s)
+    return s
+
+
+def _collect_commits(root: Path, s: Samples, limit: int) -> None:
+    """本番ブランチの最初の親の履歴を 1 回の `git log` で読む。NDF が入れた取り込みの記録（trailer）の PR も事例にする。"""
+    ref = next((r for r in (f"origin/{s.production}", s.production) if _git(root, "rev-parse", "--verify", "--quiet", r)), None)
+    if ref is None:
+        s.unreadable.append("history")
+        return
+    fmt = "%H%x00%P%x00%s%x00%(trailers:key=NDF-Landed-PR,key=NDF-Approved-Head,key=NDF-Tip,separator=%x1f)%x1e"
+    out = _git(root, "log", "--first-parent", f"-n{limit}", f"--format={fmt}", ref) or ""
+    known = {p["number"] for p in s.prs}
+    for rec in out.split("\x1e"):
+        parts = rec.strip("\n").split("\x00")
+        if len(parts) < 4:
+            continue
+        sha, parents, subject, trailers = parts[0], parts[1].split(), parts[2], parts[3]
+        tr = dict(t.split(": ", 1) for t in trailers.split("\x1f") if ": " in t)
+        s.commits.append({"sha": sha, "parents": len(parents), "subject": subject, "landed": tr.get("NDF-Landed-PR")})
+        if tr.get("NDF-Landed-PR") and parents and parents[0] == tr.get("NDF-Tip"):
+            n = int(tr["NDF-Landed-PR"]) if tr["NDF-Landed-PR"].isdigit() else None
+            if n and n not in known:
+                s.prs.append({"number": n, "base": s.production, "head": None, "landed": sha})
+                known.add(n)
+
+
+def count_key(pointer: str, observed: list[tuple[Any, str]], rule: dict) -> Measured:
+    """履歴から推すキー 1 つについて、値ごとの事例を数えて値と根拠を決める。"""
+    total = len(observed)
+    if total < rule["min_samples"]:
+        return Measured(why="insufficient", evidence=[{"source": "pr", "ref": r, "value": str(v)} for v, r in observed])
+    counts: dict[str, list] = {}
+    for v, r in observed:
+        counts.setdefault(bs.canonical(v), []).append((v, r))
+    best = max(counts.values(), key=len)
+    if len(best) / total >= rule["min_ratio"]:
+        return Measured(best[0][0], [{"source": "pr", "ref": r, "value": str(v)} for v, r in best])
+    return Measured(why="conflict", candidates=[json.loads(k) for k in sorted(counts, key=lambda k: -len(counts[k]))],
+                    evidence=[{"source": "pr", "ref": r, "value": str(v)} for v, r in observed])
+
+
+def decide_merge_method(facts, release_strategy: str) -> Measured:
+    """本番ブランチの ruleset と履歴から推した取り込み方の組で `merge.method` を決める。"""
+    if facts is None:
+        return Measured(why="insufficient", evidence=[{"source": "ruleset", "ref": "unreadable", "value": ""}])
+    trunk = release_strategy == "trunk"
+    if facts.present and facts.queue:
+        v = "merge-queue"
+    elif facts.present and facts.up_to_date:
+        v = "strict"
+    elif facts.present:
+        if trunk:
+            return Measured(why="conflict", candidates=["merge-queue", "strict"], evidence=[{"source": "ruleset", "ref": "present", "value": "no queue, no up-to-date"}])
+        v = "direct"
+    else:
+        v = "strict" if trunk else "direct"
+    return Measured(v, [{"source": "ruleset", "ref": "present" if facts.present else "absent", "value": v},
+                        {"source": "pr", "ref": "release_strategy", "value": release_strategy}])
+
+
+def _tag_shape(tag: str, plugins: dict) -> str | None:
+    if not VERSION.search(tag):
+        return None
+    shape = VERSION.sub("{version}", tag, count=1)
+    for name in plugins:
+        if shape.startswith(f"{name}--"):
+            return "{plugin}" + shape[len(name):]
+    return shape
+
+
+def _history_keys(s: Samples, rule: dict) -> dict[str, Measured]:
+    prod = s.production
+    # 長く残るブランチ（ほかの PR の宛先）からの PR と版上げの PR は、スプリントの事例に数えない
+    long_lived = {p.get("base") for p in s.prs}
+    units = [p for p in s.prs if p.get("base") and not (p.get("head") or "").startswith(RELEASE_PREFIX) and p.get("head") not in long_lived]
+    strat = [("trunk" if p["base"] == prod else "merge_base_branch", f"#{p['number']}") for p in units]
+    out = {"/release_strategy": count_key("/release_strategy", strat, rule)}
+    out["/branches/base"] = count_key("/branches/base", [(p["base"], f"#{p['number']}") for p in units], rule)
+    out["/sprint/start"] = count_key("/sprint/start", [("production" if p["base"] == prod else "base", f"#{p['number']}") for p in units], rule)
+    if not s.tags and not s.releases and "tags" not in s.unreadable and "releases" not in s.unreadable:
+        zero = [{"source": "tag", "ref": "0 件", "value": "0"}, {"source": "release", "ref": "0 件", "value": "0"}]
+        out["/release/tag"] = Measured(None, zero)
+        out["/release/github_release"] = Measured(False, zero)
+    else:
+        shapes = [(sh, t) for t in s.tags if (sh := _tag_shape(t, s.plugins))]
+        out["/release/tag"] = _relabel(count_key("/release/tag", shapes, rule), "tag")
+        rel = set(s.releases)
+        out["/release/github_release"] = _relabel(count_key("/release/github_release", [(t in rel, t) for t in s.tags], rule), "release")
+    merges = [("merge" if c["parents"] >= 2 else "squash", c["sha"][:12]) for c in s.commits if c["parents"] >= 2 or re.search(r"\(#\d+\)$", c["subject"]) or c.get("landed")]
+    out["/merge/commit"] = _relabel(count_key("/merge/commit", merges, rule), "pr")
+    return out
+
+
+def _relabel(m: Measured, source: str) -> Measured:
+    for e in m.evidence:
+        e["source"] = source
+    return m
+
+
+def _source_keys(s: Samples, release_strategy: str | None) -> dict[str, Measured]:
+    out: dict[str, Measured] = {}
+    if s.production:
+        out["/branches/production"] = Measured(s.production, [{"source": "repo", "ref": "default_branch", "value": s.production}])
+    else:
+        out["/branches/production"] = Measured(why="insufficient")
+    if len(s.plugins) == 1:
+        (name, runtimes), = s.plugins.items()
+        out["/release/plugin"] = Measured(name, [{"source": "repo", "ref": "plugin.json", "value": name}])
+        out["/release/runtimes"] = Measured(runtimes, [{"source": "repo", "ref": "plugin.json", "value": ",".join(runtimes)}])
+        out["/release/version_store"] = Measured({"kind": "plugin"}, [{"source": "repo", "ref": "plugin.json", "value": "plugin"}])
+    elif s.version_files:
+        (path, pointer), = list(s.version_files.items())[:1]
+        out["/release/version_store"] = Measured({"kind": "json", "path": path, "pointer": pointer}, [{"source": "repo", "ref": path, "value": pointer}])
+    else:
+        out["/release/version_store"] = Measured({"kind": "none"}, [{"source": "repo", "ref": "版数のファイルが無い", "value": "none"}])
+    cd = sorted(n for n, text in s.workflows.items() if any(m in text for m in CD_MARKS))
+    out["/release/cd"] = Measured({"workflow": cd[0]} if cd else None, [{"source": "workflow", "ref": cd[0] if cd else "CD のワークフローが無い", "value": cd[0] if cd else "null"}])
+    channels = [{"name": "stable", "ref": s.production}] if s.production else []
+    out["/channels"] = Measured(channels, [{"source": "workflow", "ref": "stable", "value": s.production or ""}])
+    out["/merge/method"] = decide_merge_method(s.rules, release_strategy) if release_strategy else Measured(why="insufficient")
+    return out
+
+
+def doc_claims(root: Path) -> list[dict]:
+    """README・CONTRIBUTING・AGENTS.md から PR の宛先（`--base <名前>`）を述べる行を拾う。"""
+    claims = []
+    for name in DOCS:
+        p = Path(root) / name
+        if not p.is_file():
+            continue
+        try:
+            lines = p.read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeDecodeError):
+            continue
+        for i, line in enumerate(lines, 1):
+            for m in DOC_BASE.finditer(line):
+                claims.append({"pointer": "/branches/base", "value": m.group(1), "ref": f"{name}:{i}"})
+    return claims
+
+
+def rule_conflicts(values: dict, evidence: dict) -> list[dict]:
+    """測った値の組が組み合わせの規則に反するかを、規則に出るキーがすべて測ったキーである規則だけで調べる（例は R10）。"""
+    rel = values.get("release", {})
+    if "cd" in rel and "tag" in rel and rel.get("cd") is None and (rel.get("tag") is not None or rel.get("github_release")):
+        return [{"pointer": "/release/cd", "why": "conflict",
+                 "candidates": [{"release.cd": "CD のワークフローを足す"}, {"release.tag": None, "release.github_release": False}],
+                 "evidence": evidence.get("/release/tag", []) + evidence.get("/release/cd", [])}]
+    return []
+
+
+def _matches(row: dict, pointer: str, value: Any, presets_row: dict) -> bool:
+    got = bw._get(row, pointer)
+    if pointer == "/merge/method" and got == "merge-queue":
+        return value in ("merge-queue", presets_row.get("merge_method_without_queue"))
+    if pointer == "/release/version_store":
+        return got.get("kind") == (value or {}).get("kind")
+    return bs.canonical(got) == bs.canonical(value)
+
+
+COMPARED = ("/release_strategy", "/sprint/start", "/release/version_store", "/merge/commit", "/merge/method")
+
+
+def pick_kind(measured: dict[str, Measured], presets: dict) -> tuple[str | None, list[str]]:
+    """測った値がすべて合う種類の既定の行を 1 つ選ぶ。形・CD とその産物・チャネルは比べない。"""
+    hits = [k for k, row in presets["kinds"].items()
+            if all(_matches(row["section"], p, measured[p].value, row) for p in COMPARED if p in measured)]
+    if len(hits) == 1:
+        return hits[0], []
+    return None, hits or list(presets["kinds"])
+
+
+def measure(root: Path, api: Api | None = None, deadline: float | None = None, presets: dict | None = None, prefer: str | None = None) -> dict:
+    """既存のリポジトリを測り、作成の結果（値・根拠・問い）を組む。書かない。"""
+    presets = presets or bw.load_presets()
+    rule = presets["evidence"]
+    s = collect_samples(root, api or default_api(root), deadline or (time.monotonic() + 120), rule["limit"])
+    hist = _history_keys(s, rule)
+    rs = hist["/release_strategy"].value if hist["/release_strategy"].why is None else None
+    src = _source_keys(s, rs)
+    measured = {**hist, **src}
+    evidence = {p: m.evidence for p, m in measured.items()}
+    questions = [{"pointer": p, "why": m.why, "candidates": m.candidates, "evidence": m.evidence} for p, m in measured.items() if m.why]
+    for u in s.unreadable:
+        for q in questions:
+            q.setdefault("unreadable", []).append(u)
+    base = {"status": "ask", "kind": None, "values": {}, "evidence": [], "questions": questions, "warnings": s.warnings}
+    if questions:
+        return base
+    values: dict = {}
+    for p, m in measured.items():
+        bw._set(values, p, m.value)
+    if rs == "trunk":
+        bw._set(values, "/branches/base", s.production)
+    conflicts = rule_conflicts(values, evidence)
+    for c in doc_claims(root):
+        if bw._get(values, c["pointer"]) != c["value"]:
+            conflicts.append({"pointer": c["pointer"], "why": "conflict", "candidates": [bw._get(values, c["pointer"]), c["value"]],
+                              "evidence": evidence.get(c["pointer"], []) + [{"source": "doc", "ref": c["ref"], "value": c["value"]}]})
+    if conflicts:
+        return {**base, "questions": conflicts}
+    kind, candidates = pick_kind(measured, presets)
+    if kind is None:
+        if prefer in candidates:
+            candidates = [prefer] + [c for c in candidates if c != prefer]
+        return {**base, "questions": [{"pointer": "/kind", "why": "no_kind", "candidates": candidates, "evidence": []}]}
+    row = presets["kinds"][kind]["section"]
+    section = json.loads(json.dumps(row))
+    for p, m in measured.items():
+        bw._set(section, p, m.value)
+    section["branches"]["base"] = values["branches"]["base"]
+    if section["release"].get("plugin") is None:
+        section["release"].pop("plugin", None)
+        section["release"].pop("runtimes", None)
+    flat = [{"source": e["source"], "ref": e["ref"], "value": e["value"], "pointer": p} for p, evs in evidence.items() for e in evs]
+    flat += [{"source": "preset", "ref": kind, "value": p, "pointer": p} for p in presets["measured_keys"]["preset"]]
+    out = {"status": "ok", "kind": kind, "values": section, "evidence": flat, "questions": [], "warnings": s.warnings}
+    if section["approval"]["via"] == "gate" and s.rules is not None and s.rules.approvals > 0:
+        out["status"] = "ask"
+        out["questions"] = [{"pointer": "/approval/via", "why": "conflict", "candidates": ["gate", "review"],
+                             "evidence": [{"source": "ruleset", "ref": "required_approving_review_count", "value": str(s.rules.approvals)}]}]
+    return out
+
+
+def classify_repo(root: Path, api: Api | None = None, presets: dict | None = None) -> tuple[str, list[dict]]:
+    """新規（4 つとも無い）か既存かを分ける。読めないものは既存とみなす（新規へ倒さない）。"""
+    presets = presets or bw.load_presets()
+    api = api or default_api(root)
+    ev = []
+    n = _git(root, "rev-list", "--count", "HEAD")
+    commits = int(n.strip()) if n and n.strip().isdigit() else None
+    ev.append({"source": "repo", "ref": "commits", "value": str(commits)})
+    existing = commits is None or commits > presets["evidence"]["new_repo_max_commits"]
+    for kind, path in (("pr", "repos/{owner}/{repo}/pulls?state=closed&per_page=1"), ("tag", "repos/{owner}/{repo}/tags?per_page=1"),
+                       ("release", "repos/{owner}/{repo}/releases?per_page=1")):
+        got, why = api(path)
+        hit = not isinstance(got, list) or bool(got)
+        ev.append({"source": kind, "ref": path, "value": "unreadable" if not isinstance(got, list) else str(len(got))})
+        existing = existing or hit
+    wf = Path(root) / ".github" / "workflows"
+    has_wf = wf.is_dir() and any(wf.glob("*.y*ml"))
+    rules, why = api("repos/{owner}/{repo}/rulesets")
+    has_rules = not isinstance(rules, list) or bool(rules)
+    ev.append({"source": "workflow", "ref": ".github/workflows", "value": str(has_wf)})
+    ev.append({"source": "ruleset", "ref": "rulesets", "value": "unreadable" if not isinstance(rules, list) else str(len(rules))})
+    existing = existing or has_wf or has_rules
+    return ("existing" if existing else "new"), ev

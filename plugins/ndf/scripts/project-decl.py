@@ -6,6 +6,7 @@
     python3 project-decl.py write   --measure FILE [--answers FILE] [--dry-run] [--root DIR]
     python3 project-decl.py drift   --measure FILE [--root DIR]
     python3 project-decl.py schema  [--out FILE]
+    python3 project-decl.py branch-strategy {init|measure|write|migrate|remove} [--kind 種類] [--answers FILE] [--digest HASH] [--root DIR]
 
 `development-workflow` の手順 0 が `check` を打ち、2 なら measure → 答え（conductor が書く）→ write を通す。
 答え方と再解析は `skills/development-workflow/references/project-analysis.md` にある。
@@ -17,6 +18,10 @@
 - `write`: 0 = 書けた・書くものが無い / 1 = 書けない・ブランチ運用の答えが取り込み方の表に合わない / 3 = 既存の宣言が壊れている（作り直さない）
 - `drift`: ブランチ運用の宣言（無ければ既定値の行）と `measure` の結果のずれを項目ごとに出す（#3121）。0 = 比べた（ずれが無ければ
   items は空）/ 1 = 測定の結果を読めない / 3 = 宣言が壊れている
+- `branch-strategy`: ブランチ戦略の宣言（`.ndf/project.json` の `branch_strategy`。#3672）を作る・測る・書く・移す・消す唯一の
+  入口。結果は作成の結果の 1 行の JSON（`status`・`kind`・`values`・`evidence`・`questions`・`diff`・`digest`・`failed`）。
+  0 = ok / 3 = ask（問いがあり書いていない）/ 1 = stopped（検査に落ちた・書けない）/ 2 = 引数の誤り。`write`・`migrate`・
+  `remove` は `--digest` を省くと差分とハッシュを示すだけで書かず、渡すと一致するときだけ書く
 - `schema`: 宣言の JSON Schema（`skills/development-workflow/schemas/project.schema.json` の正本）を出す
 
 結果は lib/step_result.py の形の 1 行の JSON で、その前に人が読む行を出す。宣言はメインディレクトリの `.ndf/` に置く。
@@ -450,6 +455,100 @@ def cmd_drift(a):
     emit(result(TOOL, "ok", mbf.print_drift(rows), rows, {"drift": len(rows), "declared": declared.declared}))
 
 
+# --- branch-strategy（#3672） ------------------------------------------------------------
+
+
+BS_EXIT = {"ok": 0, "ask": EXIT_PRECONDITION, "stopped": 1}
+
+
+def _bs_emit(out: dict) -> int:
+    out.setdefault("kind", None)
+    for k in ("values", "evidence", "questions", "diff", "failed", "warnings"):
+        out.setdefault(k, {} if k == "values" else [])
+    sys.stdout.write(json.dumps(out, ensure_ascii=False) + "\n")
+    return BS_EXIT[out["status"]]
+
+
+def _bs_facts(root: Path, measure_mod) -> dict:
+    """`init` が既定の行へ入れる測った名前（既定ブランチ・プラグイン・CD と開発版のワークフロー・merge queue）。"""
+    import gh_graphql
+
+    s = measure_mod.Samples()
+    measure_mod._local_facts(root, s)
+    head = proc.git_out(root, "symbolic-ref", "--short", "HEAD")
+    production = repo.default_branch(root) or (head or "").strip() or None
+    facts = {"production": production}
+    if len(s.plugins) == 1:
+        (name, runtimes), = s.plugins.items()
+        facts.update(plugin=name, runtimes=runtimes)
+    cd = sorted(n for n, text in s.workflows.items() if any(m in text for m in measure_mod.CD_MARKS))
+    facts["workflow"] = cd[0] if cd else None
+    slug = repo.owner_repo(root)
+    facts["merge_queue"] = gh_graphql.merge_queue_enabled(slug, production) if slug and production else None
+    return facts
+
+
+def _bs_commit(root: Path, plan, digest: str | None, base: dict, bw, write: bool = False) -> int:
+    """`digest` を渡すか `write` が真なら書き、どちらも無ければ差分とハッシュを示すだけにする。"""
+    if plan.failed:
+        return _bs_emit({**base, "status": "stopped", "failed": plan.failed})
+    if digest is None and not write:
+        return _bs_emit({**base, "status": "ok", "diff": plan.diff, "digest": plan.digest})
+    try:
+        done = bw.commit_plan(root, plan, digest)
+    except bw.WriteError as e:
+        return _bs_emit({**base, "status": "stopped", "failed": [{"rule": "write", "pointer": "", "reason": e.reason}]})
+    return _bs_emit({**base, "status": "ok", "diff": done.diff, "digest": done.digest})
+
+
+def cmd_branch_strategy(a):
+    """ブランチ戦略の宣言を作る・測る・書く・移す・消す（`init`・`measure`・`write`・`migrate`・`remove`）。"""
+    deps.require("jsonschema", "locks")
+    import branch_strategy as bs
+    import branch_strategy_legacy as legacy
+    from project_lib import branch_strategy_measure as bsm
+    from project_lib import branch_strategy_migrate as bmig
+    from project_lib import branch_strategy_write as bw
+
+    root = _main_dir(Path(a.root or ".").resolve())
+    presets = bw.load_presets()
+    try:
+        if a.verb == "init":
+            state, seen = bsm.classify_repo(root, presets=presets)
+            base = {"kind": a.kind, "evidence": seen}
+            if state != "new":
+                return _bs_emit({**base, "status": "stopped", "failed": [{"rule": "existing", "pointer": "",
+                                 "reason": "既存のリポジトリです。`branch-strategy measure` で測ってください"}]})
+            if not a.kind:
+                return _bs_emit({**base, "status": "ask", "questions": [{"pointer": "/kind", "why": "no_kind", "candidates": list(bw.KINDS), "evidence": []}]})
+            facts = _bs_facts(root, bsm)
+            section, questions = bw.init_values(a.kind, facts, presets)
+            base = {"kind": a.kind, "values": section, "evidence": bw.evidence_of(section, facts)}
+            if questions:
+                return _bs_emit({**base, "status": "ask", "questions": questions})
+            return _bs_commit(root, bw.plan_write(root, section), a.digest, base, bw, write=not a.dry_run)
+        if a.verb == "measure":
+            return _bs_emit(bsm.measure(root, prefer=a.kind))
+        if a.verb == "write":
+            prior = jsonio.read(a.result, want=dict) if a.result else bsm.measure(root, prefer=a.kind)
+            answers = jsonio.read(a.answers, want=dict) if a.answers else {}
+            res = bw.apply_answers(prior, answers)
+            if res["status"] == "ask":
+                return _bs_emit(res)
+            base = {k: res.get(k) for k in ("kind", "values", "evidence")}
+            base["kind"] = res["values"].get("kind")
+            return _bs_commit(root, bw.plan_write(root, res["values"]), a.digest, base, bw)
+        if a.verb == "migrate":
+            plan, questions = bmig.plan_migration(root, legacy.load_moves())
+            if questions:
+                return _bs_emit({"status": "ask", "questions": questions})
+            return _bs_commit(root, plan, a.digest, {}, bw)
+        return _bs_commit(root, bw.plan_remove(root), a.digest, {}, bw)
+    except (bs.StrategyError, bw.WriteError, legacy.LegacyTableError, jsonio.JsonReadError) as e:
+        sys.stderr.write(f"{getattr(e, 'reason', e)}\n")
+        return getattr(e, "exit_code", EXIT_UNREADABLE)
+
+
 # --- schema -----------------------------------------------------------------
 
 
@@ -485,6 +584,15 @@ def build_parser():
     d.add_argument("--root")
     d.add_argument("--measure", required=True)
     d.set_defaults(func=cmd_drift)
+    b = sub.add_parser("branch-strategy", help="ブランチ戦略の宣言（project.json の branch_strategy）を作る・測る・書く・移す・消す")
+    b.add_argument("verb", choices=("init", "measure", "write", "migrate", "remove"))
+    b.add_argument("--root")
+    b.add_argument("--kind", choices=("web-develop", "web-trunk", "mobile", "docs", "plugin"), help="代表のリポジトリの種類（init。measure・write では問いの候補の先頭）")
+    b.add_argument("--result", help="write: measure か init の結果のファイル（省けば測り直す）")
+    b.add_argument("--answers", help="write: 問いへの答え（pointer → 値）のファイル")
+    b.add_argument("--digest", help="示した差分のハッシュ。渡すと一致するときだけ書く（省けば差分を示すだけ）")
+    b.add_argument("--dry-run", action="store_true", help="init: 差分を示すだけで書かない")
+    b.set_defaults(func=cmd_branch_strategy)
     s = sub.add_parser("schema", help="宣言の JSON Schema を出す")
     s.add_argument("--out")
     s.set_defaults(func=cmd_schema)
