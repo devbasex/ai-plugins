@@ -92,9 +92,14 @@ jobs:
           ref: ${{ (inputs.step == 'assemble' && github.sha) || github.event.repository.default_branch }}
           persist-credentials: false
       - id: read
+        # 宣言に無いブランチは、スキーマのとおりリモートの HEAD（GitHub の既定ブランチ）で補う（#3617）
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
-          echo "base=$(jq -r '.base_branch // "develop"' .ndf/worktree.json)" >> "$GITHUB_OUTPUT"
-          echo "production=$(jq -r '.production_branch // "main"' .ndf/worktree.json)" >> "$GITHUB_OUTPUT"
+          decl=.ndf/worktree.json
+          [ -f "$decl" ] || decl=/dev/null
+          echo "base=$(jq -rn --arg d "$DEFAULT_BRANCH" '(input? // {}) | .base_branch // $d' "$decl")" >> "$GITHUB_OUTPUT"
+          echo "production=$(jq -rn --arg d "$DEFAULT_BRANCH" '(input? // {}) | .production_branch // $d' "$decl")" >> "$GITHUB_OUTPUT"
 
   assemble:
     needs: branches

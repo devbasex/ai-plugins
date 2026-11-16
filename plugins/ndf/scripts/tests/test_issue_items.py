@@ -83,13 +83,23 @@ def defined(**changes) -> dict:
 
 def test_the_default_definition_fills_every_kind_and_level():
     d = ii.load_definition()
-    assert d.kinds == ["不具合", "機能", "調査", "運用"] and len(d.items) == 30
+    assert d.kinds == ["不具合", "機能", "調査", "運用"] and len(d.items) == 31
     for it in d.items:
         assert set(it.need) == set(d.kinds) and set(it.need.values()) <= set(ii.NEEDS)
         assert it.level.strip()
         assert "該当時" not in it.need.values() or it.when
     for store in ii.STORE_NAMES:
         assert all(d.rep(it, store).get("type") for it in d.items)
+
+
+def test_the_policy_split_is_conditional_for_feature_and_operation_only():
+    """方針の分け方（#3618）は機能・運用で該当時、不具合・調査で不要。依頼に方針が無ければ欠けにならない。"""
+    d = ii.load_definition()
+    item = d.by_id["policy_split"]
+    assert item.name == "方針の分け方" and item.when and item.key is None
+    assert item.need == {"不具合": "不要", "機能": "該当時", "調査": "不要", "運用": "該当時"}
+    assert [it.id for it in d.items].index("policy_split") == [it.id for it in d.items].index("boundary") + 1
+    assert "方針の分け方" not in [g.heading for g in ii.judge_body("## 目的\n\nx\n", ["enhancement"], {}, d)[1]]
 
 
 @pytest.mark.parametrize("breaks", ["need", "level", "when"])

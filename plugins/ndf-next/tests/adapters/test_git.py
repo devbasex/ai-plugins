@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -9,6 +10,7 @@ from pathlib import Path
 import git_sandbox
 import pytest
 
+from ndf import identity
 from ndf.adapters import git
 
 FULL = "2bb66a6c14a618cbac108b61737ad49cfb1ac48b"
@@ -76,7 +78,7 @@ def test_repo_of_url(url: str, repo: str | None) -> None:
 
 def test_remote_repo_refuses_non_github_remote() -> None:
     with pytest.raises(git.GitError, match="GitHub"):
-        git.Git(runner=_fake(stdout="https://gitlab.com/x/y.git\n")).remote_repo()
+        git.Git(runner=_fake(stdout="https://gitlab.com/x/y.git\n")).remote_repo("origin")
 
 
 def test_parse_shortstat_sums_insertions_and_deletions() -> None:
@@ -400,3 +402,56 @@ def test_has_ref_with_real_repository(tmp_path: Path) -> None:
     assert g.has_ref("refs/heads/main") is True
     assert g.has_ref("refs/heads/none") is False
     assert g.has_ref("main") is False  # 完全な参照の名前だけを見る
+
+
+def _declare(main: Path, decl: object) -> None:
+    (main / ".ndf").mkdir(exist_ok=True)
+    (main / ".ndf" / "worktree.json").write_text(json.dumps(decl), encoding="utf-8")
+
+
+def test_default_remote_comes_from_the_schema_default() -> None:
+    """既定のリモート名はスキーマの `default` の 1 か所から読む（#3617 の I7a）。"""
+    rel, pointer = git.REMOTE_SCHEMA
+    node = json.loads((identity.ROOT / rel).read_text(encoding="utf-8"))
+    for key in pointer:
+        node = node[key]
+    assert git.default_remote() == node == git.ORIGIN
+
+
+def test_remote_of_reads_the_declaration_then_the_default(tmp_path: Path) -> None:
+    """宣言の `remote` を返し、宣言か鍵が無ければ既定（受け入れ条件 8・9）。"""
+    assert git.remote_of(tmp_path) == git.default_remote()
+    _declare(tmp_path, {"version": 1})
+    assert git.remote_of(tmp_path) == git.default_remote()
+    _declare(tmp_path, {"version": 1, "remote": "upstream"})
+    assert git.remote_of(tmp_path) == "upstream"
+
+
+@pytest.mark.parametrize("value", ["", "-x", 3])
+def test_remote_of_refuses_broken_values(tmp_path: Path, value: object) -> None:
+    _declare(tmp_path, {"version": 1, "remote": value})
+    with pytest.raises(git.RemoteError):
+        git.remote_of(tmp_path)
+
+
+def test_unknown_module_attribute_is_an_attribute_error() -> None:
+    with pytest.raises(AttributeError):
+        git.NO_SUCH_NAME  # noqa: B018
+
+
+def test_remote_reads_the_main_directory_from_a_linked_worktree(tmp_path: Path) -> None:
+    """linked worktree からでも、メインディレクトリの宣言のリモート名を読む。"""
+    path, _ = _init_repo(tmp_path, {"a": "a\n"})
+    _declare(path, {"version": 1, "remote": "upstream"})
+    linked = tmp_path / "linked"
+    subprocess.run(["git", "-C", str(path), "worktree", "add", "-q", "--detach", str(linked)], check=True)
+    assert git.Git(linked).remote() == "upstream"
+
+
+def test_remote_repo_uses_the_declared_remote(tmp_path: Path) -> None:
+    path, _ = _init_repo(tmp_path, {"a": "a\n"})
+    subprocess.run(["git", "-C", str(path), "remote", "add", "upstream", "https://github.com/o/up.git"], check=True)
+    _declare(path, {"version": 1, "remote": "upstream"})
+    assert git.Git(path).remote_repo() == "o/up"
+    with pytest.raises(git.GitError):
+        git.Git(path).remote_repo("origin")

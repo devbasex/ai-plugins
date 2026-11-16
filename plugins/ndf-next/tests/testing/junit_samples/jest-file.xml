@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="jest tests" tests="3" failures="1" errors="0" time="0.195">
+  <testsuite name="sum" errors="0" failures="1" skipped="1" timestamp="2026-11-15T18:04:27" time="0.09" tests="3">
+    <testcase classname="sum adds" name="sum adds" time="0.002" file="web/src/sum.jest.test.js">
+    </testcase>
+    <testcase classname="sum breaks" name="sum breaks" time="0.002" file="web/src/sum.jest.test.js">
+      <failure>Error: expect(received).toBe(expected) // Object.is equality</failure>
+    </testcase>
+    <testcase classname="sum later" name="sum later" time="0" file="web/src/sum.jest.test.js">
+      <skipped/>
+    </testcase>
+  </testsuite>
+</testsuites>

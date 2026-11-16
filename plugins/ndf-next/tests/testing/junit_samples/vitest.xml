@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="3" failures="1" errors="0" time="0.009944451">
+    <testsuite name="web/src/sum.test.ts" timestamp="2026-11-15T18:04:25.522Z" hostname="ci" tests="3" failures="1" errors="0" skipped="1" time="0.009944451">
+        <testcase classname="web/src/sum.test.ts" name="sum &gt; adds" time="0.00192287">
+        </testcase>
+        <testcase classname="web/src/sum.test.ts" name="sum &gt; breaks" time="0.006356692">
+            <failure message="expected 2 to be 3 // Object.is equality" type="AssertionError">
+AssertionError: expected 2 to be 3 // Object.is equality
+            </failure>
+        </testcase>
+        <testcase classname="web/src/sum.test.ts" name="sum &gt; later" time="0">
+            <skipped/>
+        </testcase>
+    </testsuite>
+</testsuites>

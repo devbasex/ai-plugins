@@ -1,7 +1,5 @@
 # ラッパーでカットポイントを自動にする（Claude Code だけ）
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `handoff.py`（M7）・`hook.py`（M3a）・`mvv-gate.py`（P2）・`sprint-state.py`（P1b）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
-
 **`/ndf:development-workflow` のカットポイントで人が行っていた「`/exit`・起動し直し・
 次のコマンドの貼り付け」を、ラッパー（`ndf relay`）が行う。** 人が入力するのは承認ゲートの答えだけになる。
 
@@ -314,7 +312,7 @@ cat ~/.local/state/ndf/relay/*/log.jsonl | jq -c 'select(.event == "stop")'
 cat ~/.local/state/ndf/relay/*/log.jsonl | jq -c 'select(.event == "prose_wait")'   # 止めた回数
 ```
 
-入出力の契約と決定の理由は、ai-plugins の確定仕様 `docs/specifications/ndf-relay-segment-restart.md` にある。
+入出力の契約と決定の理由は、NDF のリポジトリの確定仕様 `docs/specifications/ndf-relay-segment-restart.md` にある。
 
 ## 付則: `/goal` を付けた場合
 

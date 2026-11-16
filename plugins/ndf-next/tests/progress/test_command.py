@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from ndf import contracts, identity
-from ndf.adapters.git import GitError
+from ndf.adapters.git import Git, GitError
 from ndf.contracts import causes
 from ndf.core import durable
 from ndf.progress import command, definition, model, store
@@ -463,3 +463,65 @@ def test_append_rebuilds_after_a_conflict_and_raises_when_the_attempts_run_out(r
     with store.open_store(store.default_url(root), root) as st, pytest.raises(store.Conflict):
         command._append(st, tid, build)
     assert calls["n"] == command.APPEND_ATTEMPTS and len(builds) == command.APPEND_ATTEMPTS
+
+
+def _git(repo: Path, *args: str) -> None:
+    env = ["-c", "user.name=t", "-c", "user.email=t@example.com"]
+    subprocess.run(["git", "-C", str(repo), *env, *args], check=True, capture_output=True)
+
+
+def _docs_repo(repo: Path, remote: str, changed: dict[str, str], project: dict | None = None) -> None:
+    """`<remote>/main` を指す ref と、その上に `changed` を足したコミットを持たせる。"""
+    if project is not None:
+        (repo / ".ndf").mkdir(exist_ok=True)
+        (repo / ".ndf" / "project.json").write_text(json.dumps(project), encoding="utf-8")
+    (repo / "README.md").write_text("base\n", encoding="utf-8")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "base")
+    _git(repo, "update-ref", f"refs/remotes/{remote}/main", "HEAD")
+    for name, text in changed.items():
+        (repo / name).parent.mkdir(parents=True, exist_ok=True)
+        (repo / name).write_text(text, encoding="utf-8")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "change")
+
+
+@pytest.mark.parametrize(
+    ("changed", "kind"),
+    [
+        ({"docs/a.md": "# a\n", "skills/s/SKILL.md": "# s\n"}, "not_applicable"),  # 振る舞いの文書の既定は無し（受け入れ条件 11）
+        ({"docs/a.md": "# a\n", "src/a.py": "a = 1\n"}, None),
+    ],
+)
+def test_docs_only_without_declaration_skips_only_markdown(repo, capsys, last_result, changed, kind):
+    _docs_repo(repo, "origin", changed)
+    code, out = _run(capsys, last_result, "docs-only", "--base", "main")
+    assert (out["cause"]["kind"] if out["status"] == "stopped" else None) == kind
+
+
+def test_docs_only_follows_the_docs_declaration_and_the_remote(repo, capsys, last_result):
+    """`docs.files` にすべて当たれば文書だけ、1 つ外れれば違う。リモート名は宣言から読む（受け入れ条件 8・10）。"""
+    (repo / ".ndf").mkdir()
+    (repo / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "remote": "upstream"}), encoding="utf-8")
+    _docs_repo(repo, "upstream", {"openapi/a.yaml": "a: 1\n"}, {"docs": {"files": ["**/*.md", "openapi/*.yaml"]}})
+    _, out = _run(capsys, last_result, "docs-only", "--base", "main")
+    assert out["cause"]["kind"] == "not_applicable"
+    (repo / "src.py").write_text("x = 1\n", encoding="utf-8")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "code")
+    _, out = _run(capsys, last_result, "docs-only", "--base", "main")
+    assert out["status"] == "ok"
+
+
+def test_docs_only_matches_the_stage_condition(repo, capsys, last_result):
+    """`assess` と工程の条件 `docs_only_diff` は同じ判定を使う（I8a）。"""
+    _docs_repo(repo, "origin", {"skills/s/SKILL.md": "# s\n"}, {"docs": {"behavior": ["skills/**/*.md"]}})
+    _, out = _run(capsys, last_result, "docs-only", "--base", "main")
+    assert out["status"] == "ok"
+    assert command.docs_only(Git(repo), "origin/main...HEAD", repo) is False
+
+
+def test_docs_only_without_the_remote_ref_is_a_precondition(repo, capsys, last_result):
+    _docs_repo(repo, "origin", {"a.md": "# a\n"})
+    _, out = _run(capsys, last_result, "docs-only", "--base", "develop")
+    assert out["cause"]["kind"] == "precondition"

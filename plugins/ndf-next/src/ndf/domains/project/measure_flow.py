@@ -4,7 +4,7 @@
 測るのは宣言の 4 項目（`start`・`integrate`・`doc_prs`・`promotion`）で、項目ごとに推した値・確からしさ・根拠（打った
 コマンドと結果の要約）を出す。根拠が足りない項目は値を出さず `unknown` と理由を出す。
 
-- 標本は直近のマージ済みの Pull Request（最大 100 件）と、origin のスプリントブランチである
+- 標本は直近のマージ済みの Pull Request（最大 100 件）と、リモート名のリモートのスプリントブランチである
 - 確からしさ: 推した値に合う標本の割合が 0.9 以上で `高`、0.6 以上で `中`。標本が 3 件未満か 0.6 未満なら `unknown`
 - 守らせている仕組み（ルールセット）は根拠の行としてだけ出す
 
@@ -150,7 +150,7 @@ def _start_from_table(starts: dict[str, Any], promotion: dict[str, Any]) -> dict
 
 def infer(prs: list[dict[str, str]], base: str, production: str, release_kinds: list[str], sprint_starts: list[str]) -> dict[str, Any]:
     """4 項目を推す。`prs` はマージ済みの PR の `{"base", "head"}`、`release_kinds` は本番チャネル宛ての PR の取り込み方、
-    `sprint_starts` は本番チャネルに含まれていない origin のスプリントブランチごとの起点のチャネル。"""
+    `sprint_starts` は本番チャネルに含まれていないリモートのスプリントブランチごとの起点のチャネル。"""
     integrate = Counter("check" for p in prs if p["head"].startswith(Branch.SPRINT) and p["base"] == base)
     docs = Counter(
         "sprint" if p["base"].startswith(Branch.SPRINT) else "base" if p["base"] == base else "other"
@@ -166,7 +166,7 @@ def infer(prs: list[dict[str, str]], base: str, production: str, release_kinds: 
     }
     starts = infer_field(
         Counter(sprint_starts),
-        "git merge-base <スプリントブランチ> origin/<ベースブランチ>・origin/<本番チャネル> と git rev-list --first-parent",
+        "git merge-base <スプリントブランチ> <リモート名>/<ベースブランチ>・<リモート名>/<本番チャネル> と git rev-list --first-parent",
         "本番に入っていないスプリントブランチの起点",
     )
     return {"start": _start_from_table(starts, out["promotion"]), **out}
@@ -208,18 +208,18 @@ def classify_release(tree: Tree, merge_commit: str, head: str, base: str) -> Opt
 
 def sprint_start(tree: Tree, ref: str, base: str, production: str) -> Optional[str]:
     """本番チャネルに含まれていないスプリントブランチの起点のチャネル（`base` / `production`。旧いと同じ 3 段の判定）。"""
-    prod, origin_base = f"origin/{production}", f"origin/{base}"
-    if _succeeds(tree, "merge-base", "--is-ancestor", ref, prod):
+    remote_prod, remote_base = f"{tree.remote}/{production}", f"{tree.remote}/{base}"
+    if _succeeds(tree, "merge-base", "--is-ancestor", ref, remote_prod):
         return None
-    mb_prod = _out(tree, "merge-base", ref, prod).strip()
-    if mb_prod and not _succeeds(tree, "merge-base", "--is-ancestor", mb_prod, origin_base):
+    mb_prod = _out(tree, "merge-base", ref, remote_prod).strip()
+    if mb_prod and not _succeeds(tree, "merge-base", "--is-ancestor", mb_prod, remote_base):
         return "production"
-    mb = _out(tree, "merge-base", ref, origin_base).strip()
+    mb = _out(tree, "merge-base", ref, remote_base).strip()
     if not mb:
         return None
-    if not _succeeds(tree, "merge-base", "--is-ancestor", mb, prod):
+    if not _succeeds(tree, "merge-base", "--is-ancestor", mb, remote_prod):
         return "base"
-    chain = _out(tree, "rev-list", "--first-parent", f"^{mb}^@", prod).split()
+    chain = _out(tree, "rev-list", "--first-parent", f"^{mb}^@", remote_prod).split()
     return "production" if mb in chain else "base"
 
 
@@ -236,20 +236,35 @@ def _rulesets(gh: Gh) -> dict[str, str]:
 def collect_flow(tree: Tree, gh: Gh, base: str, production: str) -> dict[str, Any]:
     """git と gh で標本を集めて推す。gh が使えなければ `GhUnavailable`（呼ぶ側が項目を不明にする）。"""
     pulls = [p for p in seq(gh.get(f"repos/{gh.repo}/pulls?state=closed&per_page={PR_LIMIT}")) if isinstance(p, dict)]
-    prs = [
+    prs = _merged_prs(pulls)
+    item = as_item(_infer_flow(tree, prs, base, production), [_rulesets(gh)])
+    item[REVIEWS_KEY] = _reviews(gh, pulls, base, production)
+    return item
+
+
+def _merged_prs(pulls: list[dict[str, Any]]) -> list[dict[str, str]]:
+    """REST の Pull Request のうちマージ済みのものを、推す標本の `{"base", "head", "merge"}` にする。"""
+    return [
         {"base": p["base"]["ref"], "head": p["head"]["ref"], "merge": str(p["merge_commit_sha"]) if p.get("merge_commit_sha") else ""}
         for p in pulls
         if p.get("merged_at")
     ]
+
+
+def _infer_flow(tree: Tree, prs: list[dict[str, str]], base: str, production: str) -> dict[str, Any]:
+    """git で本番チャネル宛ての PR の取り込み方とスプリントブランチの起点を採り、4 項目を推す。"""
     kinds = [classify_release(tree, p["merge"], p["head"], base) for p in prs if p["base"] == production and p["merge"]]
-    refs = tree.refs(f"refs/remotes/origin/{Branch.SPRINT}")
+    refs = tree.refs(f"refs/remotes/{tree.remote}/{Branch.SPRINT}")
     starts = [sprint_start(tree, r, base, production) for r in refs]
-    item = as_item(infer(prs, base, production, [k for k in kinds if k], [s for s in starts if s]), [_rulesets(gh)])
+    return infer(prs, base, production, [k for k in kinds if k], [s for s in starts if s])
+
+
+def _reviews(gh: Gh, pulls: list[dict[str, Any]], base: str, production: str) -> dict[str, Any]:
+    """レビューの単位の項目。gh で読めなければ各項目を不明にする（4 項目の測定を止めない）。"""
     try:
-        item[REVIEWS_KEY] = mask(collect_reviews(gh, pulls, base, production))
+        return mask(collect_reviews(gh, pulls, base, production))
     except GhUnavailable as exc:  # レビューの単位は 4 項目の測定を止めない
-        item[REVIEWS_KEY] = {k: {"unknown": f"読めない: {str(exc)[:120]}", "evidence": []} for k in REVIEW_KINDS}
-    return item
+        return {k: {"unknown": f"読めない: {str(exc)[:120]}", "evidence": []} for k in REVIEW_KINDS}
 
 
 def measure(tree: Tree, gh_repo: Optional[str], base: Optional[str], production: Optional[str]) -> dict[str, Any]:
@@ -257,7 +272,7 @@ def measure(tree: Tree, gh_repo: Optional[str], base: Optional[str], production:
     if not base or not production:
         return unknown("ベースブランチか本番チャネルを決められない")
     if not gh_repo:
-        return unknown("origin が GitHub でない（gh で Pull Request を読めない）")
+        return unknown(f"{tree.remote} が GitHub でない（gh で Pull Request を読めない）")
     try:
         return collect_flow(tree, Gh(tree.root, gh_repo, tree.deadline), base, production)
     except GhUnavailable as exc:

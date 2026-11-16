@@ -8,8 +8,6 @@ allowed-tools:
 
 # Skill 利用統計スキル
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `skill-stats.py`（M7）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
-
 Claude Code の transcript JSONL ファイル (`~/.claude/projects/*.jsonl`) を解析し、NDFプラグインのskill利用統計を算出する。
 
 ## 用途
@@ -60,7 +58,7 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/skill-stats/scripts/skill-stats.py "$@"
 
 ### プロジェクトの決定方法
 
-transcript JSONL 先頭の `cwd` フィールドを優先してプロジェクトラベルを決める (例: `/work/ai-plugins` → `ai-plugins`)。取得できない場合は transcript ディレクトリ名 (例: `-work-ai-plugins`) を復元 (`-` → `/`) して使用する。
+transcript JSONL 先頭の `cwd` フィールドを優先してプロジェクトラベルを決める (例: `/work/app` → `app`)。取得できない場合は transcript ディレクトリ名 (例: `-work-app`) を復元 (`-` → `/`) して使用する。
 
 ## 集計項目
 

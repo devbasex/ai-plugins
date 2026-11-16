@@ -12,6 +12,7 @@ on:
       - ".github/workflows/ndf-next.yml"
       - ".github/workflows/ndf-next-checks.yml"
       - "plugins/ndf-next/**"
+      - "scripts/ndf-next-parity/**"
       - "plugins/ndf/**"
   push:
     branches:
@@ -21,13 +22,14 @@ on:
       - ".github/workflows/ndf-next.yml"
       - ".github/workflows/ndf-next-checks.yml"
       - "plugins/ndf-next/**"
+      - "scripts/ndf-next-parity/**"
 
 permissions:
   contents: read
 
 env:
   # 新しいプラグインを変えたかを見るパス（リポジトリの根から）。ndf-next-checks.yml にも同じ値がある
-  NEXT_PATHS: plugins/ndf-next .github/workflows/ndf-next.yml .github/workflows/ndf-next-checks.yml
+  NEXT_PATHS: plugins/ndf-next scripts/ndf-next-parity .github/workflows/ndf-next.yml .github/workflows/ndf-next-checks.yml
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
@@ -70,6 +72,9 @@ jobs:
           enable-cache: true
           cache-dependency-glob: plugins/ndf-next/uv.lock
       - run: uv run --frozen --project . pytest -q -n auto
+      # 機能の対応表（リリース対象の外。#3617 の決定 10）も ndf-next の依存の環境で流す
+      - name: 機能の対応表のテスト
+        run: uv run --frozen --project . pytest -q -c pyproject.toml --rootdir . ../../scripts/ndf-next-parity/tests
 
   # 名前を入れ替えの後の形（ディレクトリ plugins/ndf・plugin.json の name は identity.FINAL_NAME）にした一時コピーで、
   # 検査とテストを打つ（#3347 の決定 101・IG3）。I1 の指摘の集合（プラグインの根からの相対パスと行）が元と一致し、

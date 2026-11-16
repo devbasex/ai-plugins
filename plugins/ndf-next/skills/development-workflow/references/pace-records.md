@@ -1,7 +1,5 @@
 # 記録の読み方と閾値の見直し（`pace`）
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `check-trigger.py`（M1）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
-
 [pace.md](pace.md) の続きである。自動で通した承認ゲートの記録と、検査の記録（`check-trigger.py record` / `stats`）の読み方を持つ。
 
 **自動で通した承認ゲートは 3 か所に残る。** スプリント状態ファイルの `gates[]` に `by: mvv`（`verdict`・`reasons`・`log`）の行、
