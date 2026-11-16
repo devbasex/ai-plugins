@@ -8,13 +8,13 @@
 
 1. `project-decl.py check` が 2 で終わる（`.ndf/project.json` が無い）
 2. conductor が `project-decl.py measure --out "$TMP/measure.json"` を打つ。言語（PHP 8.3・Laravel 10）・CI の JUnit の合計・
-   ワークフロー・必須のチェック・compose の `mysql` を「測った値」として、テストの走らせ方・起点と本番・リリース・課題の正本・
+   ワークフロー・必須のチェック・compose の `mysql` を「測った値」として、テストの走らせ方・課題の正本・
    NDF の方針の検査を「問い」として、候補と根拠を付けて返す
 3. conductor が問いに答える。`AGENTS.md` の `docker compose exec app ./vendor/bin/phpunit` の行を根拠にテストを
-   「PHPUnit・`app` のコンテナ越し」と決め、マージ先が `main` に揃っていることから起点と本番を `main` と決め、答えのファイルを書く
-4. `project-decl.py write` が `.ndf/project.json` を作り、`.ndf/worktree.json` に欠けていた `base_branch`・`production_branch` だけを足す。
-   書いた差分と、項目ごとの出所（測った / 判断した / 不明 / 手の値を保った）が出る
-5. 手順 0 の出力が `宣言: あり。解析: 作成した（.ndf/project.json・.ndf/worktree.json。不明 無し）` になる
+   「PHPUnit・`app` のコンテナ越し」と決め、答えのファイルを書く
+4. `project-decl.py write` が `.ndf/project.json` を作る。書いた差分と、項目ごとの出所（測った / 判断した / 不明 / 手の値を保った）が出る。
+   ブランチ名・取り込み方・リリース・届け先は、続けて `project-decl.py branch-strategy measure` が測る（下の「ブランチ戦略の宣言」）
+5. 手順 0 の出力が `宣言: あり。解析: 作成した（.ndf/project.json。不明 無し）` になる
 
 ## 手順 0 での扱い
 
@@ -69,8 +69,6 @@ CI の壁時計（`ci.workflows[].wall_seconds`）とテストの所要の `ci-s
 | 項目 | 答えの `value` の形 | 決め方 |
 | --- | --- | --- |
 | `test`（P2） | `{"strategy"?, "ci"?: {"check"?, "junit_artifacts"?}, "suites": [{"name", "runner", "command", "scope_command"?, "junit"?, "container"?: {"service", "compose_files"}, "needs", "paths", "kind"?, "ci_jobs"?}]}` | 指示書・README の走らせ方の行を正とする。コンテナ越しなら `container` を書き、`scope_command` の `{paths}`（引用の外の、空白で区切った 1 語）にシェルの引用で守った範囲のパスの並びが入る。入るパスの種類は場所で違い、cross-refactoring の改修の範囲テストではテストのファイルのパス（計画の `test_targets` の `::` より前）、全体テストを CI に任せる戦略の着手前のテストでは `--scope` のテストの置き場所（ディレクトリかファイル）、静的解析の suite では変更したファイルのパスが入る。テストの `scope_command` はテストのファイルのパスを受けるコマンドで書く。ディレクトリしか受けないランナーは、範囲テストをファイルで受ける形と全体テストをディレクトリで走らせる形に分ける（unittest なら `scope_command` を `python3 -m unittest {paths}`、`command` を `python3 -m unittest discover -s <テストのディレクトリ>` にする。`python3 -m unittest tests/test_x.py tests/test_y.py` と `discover -s tests` はどちらも終了コード 0、`discover -s tests/test_x.py` は 1、テストの無いディレクトリを渡した `discover -s scripts/storylib` は 5 で終わる）。ファイルを受けない `scope_command` は、cross-refactoring の `init` がテストのファイルを入れた試走で見分けて改修の前に止める。`command` と `scope_command` はシェルで走らせる。`kind` は suite の種別で、`test`（既定）か `lint`（静的解析。整形の検査を含む）。静的解析の suite は変更したファイルのうち `paths` に当たるものにかかり、`paths` の要素には接頭辞のほかに glob（`*.sh` など）を書ける。`junit` はコマンドが JUnit XML を書く相対パス（pytest は `-o junit_family=xunit1 --junitxml=<パス>` をコマンドに書く。無ければ落ちたテストの見分けが全体の走らせ直しへ落ちる）。`strategy` は `local-full`（全体テストを手元で走らせる）/ `local-scoped-ci-whole`（範囲は手元、全体は CI に任せる。`ci.check` に待つチェック、`ci.junit_artifacts` に JUnit の成果物の名前の glob）/ `round-only`（パスでテストを選べない。suite の `command` をそのまま走らせる）。空なら所要と suite から導く（600 秒を超え CI が読めれば `local-scoped-ci-whole`。`scope_command` が無ければ `round-only`。ほかは `local-full`）ので、その既定を答えとして示し、手元で全体テストを回さない方針があるときだけ書き換える。`ci_jobs` は suite と同じ検査を走らせる CI のジョブ（`<ワークフローのファイル>#<job id>` か `<ワークフローのファイル>`）で、ワークフローのファイルから答える。CI テストの宣言（`ci.only`）は答えない。書き出しが、テストの suite の `ci_jobs` のファイルがリポジトリにあれば `true` を書き、条件を満たさなくなれば解析が書いた値を消す（人が書いた値は変えない）。宣言があれば手元でテストを走らせず、合否を PR の CI の結果で決める |
-| `branches`（P6） | `{"base": "<起点>", "production": "<本番>"}` | origin の HEAD・直近 100 件のマージ先・最後のコミットの日時を見る。長くコミットの無いブランチ（使われなくなった開発用のブランチなど）は採らない |
-| `delivery`（P7） | `[{"target", "kind": "auto" / "manual", "trigger", "channel"?: "production" / "base", "branch"?, "versioned", "production"?, "manual_reason"?, "result"?, "publishes_release"?}]` | リリースの設定ファイル・ワークフローの `deploy` の行・版数の置き場とタグから決める。本番のブランチ・ベースブランチへのマージで動く行は `channel`（`"production"` / `"base"`）で書き、ブランチ名を写さない。`branch` はほかのブランチで動く行だけに書く（`write` は本番・起点の名前を写した `branch` を `channel` に直す）。`production`（本番系へ届くか。[pace.md](pace.md) の「手動反映の本番系の形」）は解析では書かず、利用者が書く。`manual_reason`（CD を置かない理由）・`result`（結果の読み方）・`publishes_release`（公開の担い手）も利用者が書き、解析をやり直しても `target` が同じ行に残る（書き方は `release` の `references/cd-setup.md`） |
 | `issues`（P8） | `{"primary", "others"}`。名前は `github`・`markdown`・`redmine`・`external` など | 名前だけを書き、URL や識別子を書かない |
 | `ndf_policies`（P9） | `{"doc_lint": bool, "reject_md_wording_tests": bool}` | 指示書に NDF の文体の規則・`.md` の文言テストを退ける方針があるときだけ `true`。無ければ両方 `false` |
 | `materials` | `{"product"?: {"kind", "users"?}, "needs"?: {"usage", "market"}, "seeds"?: {"libraries", "environment"}, "deferred_milestones", "cause_types"?, "code_measures"?, "failures"?}` | 棚卸しの見直しと大整理が読む材料の宣言（`backlog-refinement` の `references/research.md`）。候補は README の冒頭と直接の依存から出る。調べる依存（`seeds.libraries`）は候補から人が残すものだけにする。利用の記録（`needs.usage`）の読むコマンドと範囲（`scope.aggregate_only`・`days`・`mask`）・市場と競合・周辺環境・後回しのマイルストーンは人が書く。決められなければ `{"unknown": "<理由>"}` と書き、見直しはすべての側面を飛ばす |
@@ -86,9 +84,7 @@ CI の壁時計（`ci.workflows[].wall_seconds`）とテストの所要の `ci-s
                                 "junit": "build/ndf/junit.xml",
                                 "container": {"service": "app", "compose_files": ["docker-compose.yml"]},
                                 "needs": ["mysql"], "paths": ["tests"]}]},
-          "reason": "AGENTS.md:34 の手順。全体は約 64 分で CI が 24 本に分けて回すため CI に任せる"},
- "branches": {"value": {"base": "main", "production": "main"}, "reason": "マージ先の多くが main。develop が無い"},
- "delivery": {"unknown": "デプロイの設定がリポジトリに無い"}}
+          "reason": "AGENTS.md:34 の手順。全体は約 64 分で CI が 24 本に分けて回すため CI に任せる"}}
 ```
 
 `value` が項目の形に合わなければ、`write` はその項目を `{"unknown": "答えが形に合わない: <箇所>"}` にして続ける。
@@ -100,7 +96,7 @@ CI の壁時計（`ci.workflows[].wall_seconds`）とテストの所要の `ci-s
 - 新しい解析で不明になった項目は、前の値を残す
 - `ci` のワークフローの行に新しい解析の壁時計が無ければ、前の解析の同じパスの行の壁時計を残し、出力に `ci#<パス>: 不明（新しい解析に壁時計が無い）（前の値を残した）` の行が出る
 - 秘密の形の値は、手で書いた値でも捨てて `{"unknown": "秘密の形"}` にする。値は宣言・差分・出力のどれにも出ない
-- `.ndf/worktree.json` には、`base_branch`・`production_branch` のうち無いキーだけを足す。ほかのキーと順序は変えない
+- ブランチ名とブランチ戦略（`branch_strategy`）は書かない。書くのは `project-decl.py branch-strategy` だけである
 - 解析の結果が前と同じなら、ファイルを書かない
 - 宣言はメインディレクトリの `.ndf/` に書く。コミットするかは下の「`.ndf/` の追跡」に従う。`.gitignore` の対象なら、そのことが出力に出る
 
@@ -129,24 +125,6 @@ clone した全員と CI で同じ値のまま効き、変える Pull Request �
 | --- | --- |
 | 指示書（`AGENTS.md`・`CLAUDE.md`・`.claude/CLAUDE.md`・`KIRO.md`・`GEMINI.md`）が 1 つも無い | 指示書が無いこと |
 | 先頭に `NDF_PLUGIN_GUIDE_START` の印を持つファイルを、指示書が `@` で読み込んでいる | 古い NDF の案内の読み込みを外すか消すこと |
-
-## ブランチ運用
-
-`measure` は `branch_flow`（P6 のブランチ運用）も測る。宣言の 4 項目（`start`・`integrate`・`doc_prs`・`promotion`）ごとに、
-推した値・確からしさ（`高` / `中`）・根拠（打ったコマンドと結果の要約）を `fields` に出す。標本は直近のマージ済みの
-Pull Request（最大 100 件）と origin のスプリントブランチで、合う割合が 0.9 以上なら `高`、0.6 以上なら `中` である。
-標本が 3 件未満か 0.6 未満の項目は値を出さず、`unknown` と理由を出す。4 項目がすべて `高` なら測った値、ほかは問いになる。
-
-| 項目 | 何から推すか |
-| --- | --- |
-| `start` | 本番チャネルに入っていないスプリントブランチの分岐点。本番チャネルにだけあるコミットなら `production`、ベースブランチにだけあるコミットなら `base`。丸ごとのリリースで後から本番に入った分岐点は、本番チャネルの first-parent の列に無ければ `base`。少なければ `promotion` の行が許す値 |
-| `integrate` | head がスプリントブランチで宛先がベースブランチの Pull Request |
-| `doc_prs` | 設計 PR（`design/*`）と確定仕様化の PR（`spec/*`）の宛先 |
-| `promotion` | 本番チャネル宛ての Pull Request の head。ベースブランチそのもの・リリースブランチの first-parent の列がマージ前の本番チャネルへ届かないなら `whole`、届けば `selected` |
-
-答えは `branch_flow` に `{"value": {"start": ..., "integrate": ..., "doc_prs": ..., "promotion": ...}}` で書く。取り込み方の表
-（[worktree の declaration.md](../../worktree/references/declaration.md) の「ブランチ運用を宣言するリポジトリ」）に合わない答えは、
-`write` が書かずに 1 で終わる。`write` が書くのは `worktree.json` に `branch_flow` が無いときと、前の `write` の値のままのときだけである。
 
 ## ブランチ戦略の宣言
 
@@ -178,6 +156,8 @@ python3 "$SCRIPTS/project-decl.py" branch-strategy remove --digest <ハッシュ
   事例が違うときも）ときは書かずに問いを返す
 - 問い（`questions`）は `decision-request` の手順で人へ回す。答えのファイルは `{"<キーの位置>": <値>}` で、答えで
   種類の既定から値を変えると `kind` は `custom` になる
+- 届け先（`/release/deliveries`。本番ブランチ・ベースブランチへのマージで動く行は `channel` で指し、ブランチ名を写さない）は
+  リリースの設定ファイル・ワークフローの `deploy` の行・版数の置き場とタグを見て、答えのファイルで渡す
 - 書く前に組み合わせの規則（R1〜R10。スキーマ `skills/development-workflow/schemas/project.schema.json` の
   `$defs/BranchStrategy`）を通し、落ちれば 1 バイトも書かない
 

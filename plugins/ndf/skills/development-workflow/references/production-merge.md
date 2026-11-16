@@ -6,10 +6,10 @@
 ## 例: project-trygroup-prd の 2 本のマージ
 
 宣言が `.ndf/worktree.json` の `base_branch: develop`・`production_branch: main` と、`.ndf/project.json` の
-`delivery` に `develop` へのマージで stg・`main` へのマージで prd へ自動で反映する 2 行を持つとき:
+`release.deliveries` に `develop` へのマージで stg・`main` へのマージで prd へ自動で反映する 2 行を持つとき:
 
 1. 実装の Pull Request（`develop` 宛て）は、`develop` が本番チャネルでないため止まらずにマージする
-2. リリースの Pull Request（`develop` → `main`）は、`main` が本番チャネルで `delivery` に `kind: auto`・`branch: main` の行が
+2. リリースの Pull Request（`develop` → `main`）は、`main` が本番チャネルで `release.deliveries` に `kind: auto`・`branch: main` の行が
    あるため、`merged-steps.py` が終了コード 10 で止まり、承認資料を書く
 3. 利用者が承認したら、同じコマンドに `--gate-approved user` を付けて打ち直し、マージする
 
@@ -38,8 +38,8 @@ CD のある場合のマージの後は、CD の workflow がタグと GitHub Re
 | --- | --- | --- |
 | 本番チャネルでない | 当たらない | そのまま進む |
 | 自動反映の本番チャネル | 当たる | 承認を得るまで進めない |
-| 本番チャネルで、`delivery` が無い・不明、または宣言が読めない | 決められないため当たるとして扱う | 承認を得るまで進めない。`delivery` を宣言すれば次から判定できる |
-| 本番チャネルで、`delivery` に `kind: auto` のその行が無い（手で反映・リリースしない） | 当たらない | そのまま進む。本番への反映は `release` の工程で承認を取る |
+| 本番チャネルで、`release.deliveries` が無い・不明、または宣言が読めない | 決められないため当たるとして扱う | 承認を得るまで進めない。`release.deliveries` を宣言すれば次から判定できる |
+| 本番チャネルで、`release.deliveries` に `kind: auto` のその行が無い（手で反映・リリースしない） | 当たらない | そのまま進む。本番への反映は `release` の工程で承認を取る |
 
 **判定と止める場所は `merged-steps.py` が持つ**（本体は `lib/delivery.py` の `judge_target`。`gh` を呼ばず、宣言と宛先だけで決める）。
 `merge-when-green` は最初の読みで宛先を判定し、当たれば CI を待たずに終了コード 10（`metrics.gate: production-merge`）で止まり、

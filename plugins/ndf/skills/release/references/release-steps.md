@@ -206,7 +206,7 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --roo
   版数の外の箇所が衝突すれば解かずに 1 で止まる（`release_lib/version_merge.py`）。`metrics.release_pr` は照合に使う
   `release/v<版>` の Pull Request、`metrics.sync_pr` は `-sync` で取り込んだときのその Pull Request である。
   `prod` は続けて `release/v<版>` を head にした本番チャネル宛の Pull Request をマージし、タグと GitHub Release を作る。
-  `delivery` の行が `publishes_release: true` なら、この 2 つは CD が作り、`release` は作らない（`metrics.tag` は `null`、`metrics.publisher` は `cd`）。
+  `release.deliveries` の行が `publishes_release: true` なら、この 2 つは CD が作り、`release` は作らない（`metrics.tag` は `null`、`metrics.publisher` は `cd`）。
   本番チャネル宛の Pull Request がマージ済みなら（途中で止まったリリースの再開）、比較とマージを飛ばし、タグと GitHub Release のうち
   無いものだけを作る（`items[]` の `result: already_merged`・`exists`）。`items[]`
   （マージした Pull Request と、`release` が作ったときのタグ・GitHub Release）がリリース完了の確認で照会した結果である。
