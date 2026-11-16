@@ -20,6 +20,7 @@ import pytest
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import inproc  # noqa: E402
+import strategy_fixture  # noqa: E402
 
 sys.path.insert(0, str(SCRIPTS / "lib"))
 import approved_commit  # noqa: E402
@@ -425,8 +426,7 @@ def test_merge_when_green_ok_when_local_change_blocks_pull(repo, gh, tmp_path):
     main = tmp_path / "main"
     git(tmp_path, "clone", "-q", "-b", "develop", str(repo), str(main))
     git(main, "remote", "set-head", "origin", "main")  # 既定ブランチは main。develop 宛てはリリース承認ゲートに当たらない
-    (main / ".ndf").mkdir()
-    (main / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "base_branch": "develop"}), encoding="utf-8")
+    strategy_fixture.declare(main, "develop", "main")
     (repo / "keep.txt").write_text("上流\n", encoding="utf-8")
     git(repo, "commit", "-q", "-am", "up")
     (main / "keep.txt").write_text("手元\n", encoding="utf-8")
@@ -839,21 +839,20 @@ def test_verification_verdicts_reads_a_missing_result_cell_as_not_passed():
 # --- リリース承認ゲート（自動反映の本番チャネルへのマージ。#1336） ------------------------
 
 
-def declare(repo, wt, rows=None):
-    """仮のリポジトリへサンプルと同じ宣言を置く（rows が None なら project.json を置かない）。"""
-    nd = repo / ".ndf"
-    nd.mkdir(exist_ok=True)
-    (nd / "worktree.json").write_text(json.dumps({"version": 1, **wt}) if isinstance(wt, dict) else wt, encoding="utf-8")
-    if rows is not None:
-        (nd / "project.json").write_text(json.dumps({"delivery": rows}, ensure_ascii=False), encoding="utf-8")
+def declare(repo, branches, rows=None, **edits):
+    """仮のリポジトリへサンプルと同じブランチ戦略の宣言を置く。`branches` は (ベースブランチ, 本番ブランチ)、`rows` は届け先の
+    行（None なら書かない）、`edits` はセクションの最上位のキーを置き換える。"""
+    strategy_fixture.declare(repo, *branches, deliveries=rows, **edits)
 
 
+DECL_PRODUCTION = ".ndf/project.json の branch_strategy.branches.production"
+DECL_ROW = ".ndf/project.json の branch_strategy.release.deliveries[0]"
 CONSOLE = (
-    {"base_branch": "main", "production_branch": "main"},
+    ("main", "main"),
     [{"target": "本番（ECS）", "kind": "auto", "trigger": "t", "branch": "main", "versioned": False}],
 )
 TRYGROUP = (
-    {"base_branch": "develop", "production_branch": "main"},
+    ("develop", "main"),
     [
         {"target": "stg", "kind": "auto", "trigger": "t", "branch": "develop", "versioned": False},
         {"target": "prd", "kind": "auto", "trigger": "t", "branch": "main", "versioned": False},
@@ -885,7 +884,7 @@ def test_merge_when_green_stops_production_merge_without_approval(repo, gh):
     assert code == 10, (out, err)
     assert out["status"] == "gate" and out["metrics"] == {"gate": "production-merge", "verdict": "production", "target": "main"}
     names = [i["name"] for i in out["items"] if i["kind"] == "decl"]
-    assert ".ndf/worktree.json の production_branch" in names and ".ndf/project.json の delivery[0]" in names
+    assert DECL_PRODUCTION in names and DECL_ROW in names
     assert "--gate-approved user" in out["next"] and Path(out["presentation_path"]).is_file()
     assert "https://github.com/o/r/pull/5" in Path(out["presentation_path"]).read_text(encoding="utf-8")
     assert merges(gh) == [] and not [c for c in gh.get()["calls"] if c[:2] == ["pr", "ready"]]
@@ -934,29 +933,25 @@ def test_merge_when_green_no_admin_merges_without_the_bypass(repo, gh):
     assert next(i for i in out["items"] if i.get("result") == "merged")["admin"] is False
 
 
-@pytest.mark.parametrize("broken", ["worktree", "project"])
+@pytest.mark.parametrize("broken", ["not-json", "schema"])
 def test_merge_when_green_stops_on_broken_declaration(repo, gh, broken):
     """AC7: 宣言が壊れていれば、本番系へ出るかを決められないとして止まる（止めない側へ倒さない）。"""
-    if broken == "worktree":
-        declare(repo, "{", CONSOLE[1])
-    else:
-        declare(repo, CONSOLE[0])
+    if broken == "not-json":
+        (repo / ".ndf").mkdir(exist_ok=True)
         (repo / ".ndf" / "project.json").write_text("[1,", encoding="utf-8")
+    else:
+        declare(repo, CONSOLE[0], "x")
     gh.set(pr_seq={"5": [to("develop")]})
     code, out, _ = call("merged-steps.py", ["merge-when-green", "5", "--interval", "0", "--no-cleanup"], gh.env, repo)
     assert code == 10 and out["metrics"]["verdict"] == "undetermined" and merges(gh) == []
-    assert f"{broken}.json" in out["summary"]
+    assert "project.json" in out["summary"]
     code, out, _ = call("merged-steps.py", ["merge-gate", "--base", "develop"], gh.env, repo)
     assert code == 10 and out["metrics"]["verdict"] == "undetermined"
 
 
 def test_merge_gate_judges_without_gh(repo, gh):
     """AC6・I3: merge-gate は宛先の引数と宣言だけで判定する（--pr が無ければ gh を呼ばない）。"""
-    declare(
-        repo,
-        {"base_branch": "develop", "production_branch": "main"},
-        [{"target": "ndf", "kind": "manual", "trigger": "t", "branch": "main", "versioned": True}],
-    )
+    declare(repo, ("develop", "main"), [{"target": "ndf", "kind": "manual", "trigger": "t", "branch": "main", "versioned": True}])
     code, out, _ = call("merged-steps.py", ["merge-gate", "--base", "develop"], gh.env, repo)
     assert code == 0 and out["metrics"]["verdict"] == "not-production"
     declare(repo, *CONSOLE)
@@ -1196,10 +1191,10 @@ REDO = "リリース承認ゲートからやり直す: プランなら run <プ�
 
 
 def _promote_cd(repo, gh, tmp_path, *args, material=True, admin=False, **state):
-    declare(repo, *TRYGROUP)
-    if admin:
-        p = repo / ".ndf" / "project.json"
-        p.write_text(json.dumps({**json.loads(p.read_text(encoding="utf-8")), "production_merge": {"admin": True}}), encoding="utf-8")
+    merge = (
+        {**strategy_fixture.section("web-develop")["merge"], "admin": True} if admin else strategy_fixture.section("web-develop")["merge"]
+    )
+    declare(repo, *TRYGROUP, merge=merge)
     gh.set(**{"open_prs": [{"number": 9}], "pr_seq": {"9": [dict(to("main", X), headRefName="develop")] * 3}, **state})
     extra = ["--approved-from", str(promote_material(tmp_path))] if material else []
     return call("merged-steps.py", promote_args(*extra, *(args or ("--gate-approved", "user"))), gh.env, repo)
