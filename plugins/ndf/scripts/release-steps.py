@@ -809,6 +809,15 @@ def cmd_release_case(a):
     reviewed.release_case_out(a)
 
 
+def cmd_land(a):
+    """承認した head だけを宣言の主体と方式で本番ブランチへ入れる（#3672 の I5・I7。本体は release_lib/land.py）。"""
+    deps.require("jsonschema")
+    from release_lib import land
+
+    got = land.land_cli(git_root(a.root), a.repo, a.pr)
+    emit(result(TOOL, "stopped" if got["result"] == "stopped" else "ok", got["reason"] or f"#{a.pr}: {got['result']}", [], got))
+
+
 def _sweep_candidates(root, merge):
     """後片付け: この版に入ったブランチの退避先（merged の worktree-trash）を回収の候補として挙げる（#824）。
     退避先は Git にも本番のコミットにも無い利用者のファイルを含むため、本番の承認だけでは消さない（C3・C4）。
@@ -1368,6 +1377,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--pr", type=int, required=True)
     p.add_argument("--approval", required=True, help="承認資料")
     p.set_defaults(func=cmd_approval_post)
+    p = sub.add_parser("land", parents=[common], help="承認した head だけを宣言の主体と方式で本番ブランチへ入れる（キューへの投入を含む）")
+    p.add_argument("--pr", type=int, required=True, help="入れる PR の番号")
+    p.add_argument("--repo", help="owner/repo（既定は origin）")
+    p.set_defaults(func=cmd_land)
     p = sub.add_parser("release-case", parents=[common], help="リリースの場合（cd-no-review / cd-review / no-cd）を出す")
     p.set_defaults(func=cmd_release_case)
 

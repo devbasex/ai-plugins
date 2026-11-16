@@ -152,6 +152,12 @@ def judge(trails: list[Trail], roles: dict[str, str | None], head: str, by: str 
     return Judgment("success", _cut(f"承認: {last.login} {last.created_at}"), last.login, last.created_at, last.url or None)
 
 
+def approved_trail(trails: list[Trail], roles: dict[str, str | None]) -> Trail | None:
+    """承認権限を持つ人の最新の、編集されていない証跡（`judge` が照らす証跡と同じ 1 件）。無ければ None（#3672 の land）。"""
+    valid, _ = _narrow(trails, roles, None)
+    return max(valid, key=lambda t: t.created_at) if valid else None
+
+
 def approved_review_commit(reviews: list[dict], perms: dict[str, str | None]) -> str | None:
     """必須レビューの承認者として有効な人（`permission` が admin か write）の最新の APPROVED のレビューのコミット（I8）。"""
     got = [
@@ -267,6 +273,14 @@ def open_prs_at(repo: str, sha: str, base: str) -> list[int]:
     """`base` 宛ての開いた PR のうち、先端が `sha` のものの番号（昇順）。"""
     rows = _pages(f"repos/{repo}/pulls?state=open&base={base}&per_page=100", f"{base} 宛ての PR")
     return sorted(int(r["number"]) for r in rows if str((r.get("head") or {}).get("sha") or "").lower() == sha.lower())
+
+
+def open_prs_at_base(repo: str, base: str) -> list[dict]:
+    """`base` 宛ての開いた PR の番号と先端（番号の昇順）。"""
+    rows = _pages(f"repos/{repo}/pulls?state=open&base={base}&per_page=100", f"{base} 宛ての PR")
+    return sorted(
+        ({"number": int(r["number"]), "head": str((r.get("head") or {}).get("sha") or "").lower()} for r in rows), key=lambda r: r["number"]
+    )
 
 
 def post_status(repo: str, sha: str, j: Judgment) -> None:

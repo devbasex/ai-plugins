@@ -164,3 +164,220 @@ def land_approved(port: Port, strategy, pr: int, approval: Approval) -> dict:
         return {**out, "result": got["result"], "reason": got["reason"]}
     ok, why = port.merge(pr, approval.head, merge["commit"], bool(merge["admin"] and merge["method"] == "direct"))
     return {**out, "result": "merged" if ok else "stopped", "reason": why}
+
+
+# --- GitHub と手元の git での実装（`release-steps.py land` が使う） ---------------------------------------------
+
+HUMAN_MARK = "<!-- ndf:human-merge -->"
+_QUEUE_QUERY = (
+    "query($owner: String!, $name: String!, $branch: String!) { repository(owner: $owner, name: $name) {"
+    " mergeQueue(branch: $branch) { entries(first: 50) { nodes { pullRequest { number headRefOid } } } } } }"
+)
+
+
+def manifest_paths(strategy) -> list[str]:
+    """版数の置き場が `plugin` のとき、版数を持つ `plugin.json` の候補（測る部品と同じ 2 つの置き場）。"""
+    name = strategy.section["release"].get("plugin")
+    return [f"plugins/{name}/.claude-plugin/plugin.json", ".claude-plugin/plugin.json"] if name else [".claude-plugin/plugin.json"]
+
+
+def store_version(strategy, show) -> str | None:
+    """`show(path)` で読めるファイルから版数を引く。置き場が `none`・読めないときは None。"""
+    import json_pick
+
+    store = strategy.section["release"]["version_store"]
+    if store["kind"] == "none":
+        return None
+    rows = [(p, "/version") for p in manifest_paths(strategy)] if store["kind"] == "plugin" else [(store["path"], store["pointer"])]
+    for path, pointer in rows:
+        text = show(path)
+        if text is None:
+            continue
+        try:
+            value, found = json_pick.resolve_pointer(json.loads(text), pointer)
+        except ValueError:
+            return None
+        return value if found and isinstance(value, str) and value else None
+    return None
+
+
+def parse_landed(log: str, pr: int) -> dict | None:
+    """`git log --format=%H%x00%T%x00%P%x00<trailers>%x1e` の出力から、PR の取り込みの記録の最新の 1 件を引く。"""
+    for row in log.split("\x1e"):
+        parts = row.strip("\n").split("\x00")
+        if len(parts) < 4:
+            continue
+        sha, tree, parents, trail = parts[0].strip(), parts[1], parts[2].split(), parts[3]
+        values = dict(line.split(": ", 1) for line in trail.splitlines() if ": " in line)
+        if values.get(TRAILER_PR, "").strip() == str(pr):
+            return {
+                "commit": sha,
+                "tree": tree,
+                "head": values.get(TRAILER_HEAD, "").strip(),
+                "tip": values.get(TRAILER_TIP, "").strip(),
+                "first_parent": parents[0] if parents else "",
+            }
+    return None
+
+
+class LandError(Exception):
+    """GitHub から land に要る事実を読めない。"""
+
+
+class GhPort:
+    """`Port` の GitHub 版。版数と先端の比べは手元の git（origin から取り直す）で、書き込みは gh で行う。"""
+
+    def __init__(self, root, repo: str, strategy) -> None:
+        self.root, self.repo, self.strategy = root, repo, strategy
+
+    def _git(self, *args: str):
+        import subprocess
+
+        return subprocess.run(["git", "-C", str(self.root), *args], capture_output=True, text=True)
+
+    def _fetch(self, *refspecs: str) -> None:
+        self._git("fetch", "--quiet", "origin", *refspecs)
+
+    def _show(self, rev: str):
+        return lambda path: (lambda r: r.stdout if r.returncode == 0 else None)(self._git("show", f"{rev}:{path}"))
+
+    def _rest(self, path: str, method: str = "GET", payload: Any = None):
+        import gh_call
+
+        resp = gh_call.request(path, method, payload)
+        return resp.body if resp.ok and not resp.error else None
+
+    def _bump_facts(self, number: int, head: str, branch: str) -> dict:
+        self._fetch(f"+refs/pull/{int(number)}/head:refs/ndf/land/{int(number)}", f"+refs/heads/{branch}:refs/remotes/origin/{branch}")
+        base = self._git("merge-base", head, f"origin/{branch}").stdout.strip()
+        cut = store_version(self.strategy, self._show(base)) if base else None
+        now = store_version(self.strategy, self._show(head))
+        tip_in = self._git("merge-base", "--is-ancestor", f"origin/{branch}", head).returncode == 0
+        return {"bump": bool(cut and now and cut != now), "cut_version": cut, "contains_tip": tip_in}
+
+    def pull(self, number: int) -> dict:
+        d = self._rest(f"repos/{self.repo}/pulls/{int(number)}")
+        if not isinstance(d, dict):
+            raise LandError(f"PR #{number} を読めない")
+        head, base = str(d["head"]["sha"]).lower(), d["base"]["ref"]
+        row = {"number": int(number), "state": d["state"], "merged": bool(d.get("merged")), "head": head, "base": base}
+        row["title"] = d.get("title") or ""
+        if not row["merged"]:
+            row.update(self._bump_facts(number, head, base))
+        return row
+
+    def production(self, branch: str) -> dict:
+        self._fetch(f"+refs/heads/{branch}:refs/remotes/origin/{branch}")
+        tip = self._git("rev-parse", f"origin/{branch}").stdout.strip()
+        return {"tip": tip, "version": store_version(self.strategy, self._show(tip)) if tip else None}
+
+    def queue(self, branch: str) -> list[dict]:
+        import gh_graphql
+        from release_lib import approval_trail as trail
+
+        owner, _, name = self.repo.partition("/")
+        a = gh_graphql.graphql(_QUEUE_QUERY, {"owner": owner, "name": name, "branch": branch})
+        q = ((a.value or {}).get("repository") or {}).get("mergeQueue") if a.ok and isinstance(a.value, dict) else None
+        nodes = ((q or {}).get("entries") or {}).get("nodes") or []
+        rows = [{"number": int(n["pullRequest"]["number"]), "head": str(n["pullRequest"]["headRefOid"]).lower()} for n in nodes]
+        for r in rows:
+            r["bump"] = self._bump_facts(r["number"], r["head"], branch)["bump"]
+        queued = {r["number"] for r in rows}
+        for n in trail.open_prs_at_base(self.repo, branch):
+            if n["number"] in queued or not self._bump_facts(n["number"], n["head"], branch)["bump"]:
+                continue
+            if trail.judge_trails_on(self.repo, n["number"], n["head"]).state == "success":
+                rows.append({"number": n["number"], "bump": True, "approved_release": True})
+        return rows
+
+    def rule_facts(self, branch: str) -> Any:
+        import release_case
+
+        return release_case.read_rule_facts(self.root, branch)
+
+    def merge(self, number: int, sha: str, commit: str, admin: bool) -> tuple[bool, str]:
+        import gh_call
+
+        args = ["pr", "merge", str(int(number)), "--repo", self.repo, f"--{commit}", "--match-head-commit", sha]
+        r = gh_call.gh(args + (["--admin"] if admin else []))
+        return (True, "") if r.returncode == 0 else (False, (r.stderr or r.stdout).strip()[:300] or "マージできない")
+
+    def enqueue(self, number: int, head: str, jump: bool) -> tuple[bool, str]:
+        import gh_graphql
+
+        a = gh_graphql.enqueue_pr(self.repo, number, head, jump)
+        return (True, "") if a.ok else (False, f"キューへ入れられない: {str(a.error)[:300]}")
+
+    def create_commit(self, message: str, tree_of: str, parents: list[str]) -> str | None:
+        tree = self._git("rev-parse", f"{tree_of}^{{tree}}").stdout.strip()
+        d = self._rest(f"repos/{self.repo}/git/commits", "POST", {"message": message, "tree": tree, "parents": parents}) if tree else None
+        return d.get("sha") if isinstance(d, dict) else None
+
+    def update_ref(self, branch: str, sha: str) -> bool:
+        return self._rest(f"repos/{self.repo}/git/refs/heads/{branch}", "PATCH", {"sha": sha, "force": False}) is not None
+
+    def close(self, number: int, comment: str) -> bool:
+        return (
+            self.comment(number, comment) and self._rest(f"repos/{self.repo}/pulls/{int(number)}", "PATCH", {"state": "closed"}) is not None
+        )
+
+    def comment(self, number: int, body: str) -> bool:
+        import gh_rest
+
+        return gh_rest.comment(self.repo, number, body).ok
+
+    def landed_record(self, branch: str, number: int, since: str | None) -> dict | None:
+        self._fetch(f"+refs/heads/{branch}:refs/remotes/origin/{branch}")
+        fmt = f"%H%x00%T%x00%P%x00%(trailers:key={TRAILER_PR},key={TRAILER_HEAD},key={TRAILER_TIP})%x1e"
+        r = self._git("log", f"origin/{branch}", f"--format={fmt}", *([f"--since={since}"] if since else ["-n", "200"]))
+        rec = parse_landed(r.stdout, number) if r.returncode == 0 else None
+        if not rec or not rec["head"]:
+            return None
+        head_tree = self._git("rev-parse", f"{rec['head']}^{{tree}}").stdout.strip()
+        return {**rec, "tree_ok": bool(head_tree) and head_tree == rec["tree"], "first_parent_is_tip": rec["first_parent"] == rec["tip"]}
+
+    def has_human_record(self, number: int) -> bool:
+        from release_lib import approval_trail as trail
+
+        return any(HUMAN_MARK in str(c.get("body") or "") for c in trail.read_comments(self.repo, number))
+
+
+def approval_of(repo: str, strategy, pr: int) -> Approval | None:
+    """証跡の書き手（`approval_trail.trail_writer`）に合わせて、承認した head と時刻を読む。無ければ None。"""
+    from release_lib import approval_trail as trail
+
+    if strategy.section["approval"]["via"] == "review":
+        sha = trail.read_review_commit(repo, pr)
+        return Approval(sha) if sha else None
+    trails = trail.trails_of(trail.read_comments(repo, pr))
+    last = trail.approved_trail(trails, trail.read_roles(repo, [t.login for t in trails if not t.edited])) if trails else None
+    return Approval(last.sha, last.created_at) if last else None
+
+
+def land_pr(root, repo: str, strategy, pr: int) -> dict:
+    """`release-steps.py land` の本体。承認の証跡を読み、`land_approved` を GitHub 版の Port で呼ぶ。"""
+    from release_lib.approval_trail import TrailError
+
+    port = GhPort(root, repo, strategy)
+    try:
+        approval = approval_of(repo, strategy, pr)
+        if approval is None and strategy.section["merge"]["actor"] != "human":
+            pull = port.pull(pr)
+            if not pull.get("merged"):
+                return {"result": "stopped", "head": pull.get("head"), "reason": f"#{pr} に承認の証跡が無い。{REAPPROVE}"}
+        return land_approved(port, strategy, pr, approval or Approval(""))
+    except (LandError, TrailError) as e:
+        return {"result": "stopped", "head": None, "reason": str(e)}
+
+
+def land_cli(root, repo: str | None, pr: int) -> dict:
+    """`release-steps.py land` の入口。宣言を読めなければ StepError（`branch_strategy` の終了コード）で止める。"""
+    import branch_strategy
+    import gh_call
+    from step_result import StepError
+
+    try:
+        strategy = branch_strategy.load_strategy(root)
+    except branch_strategy.StrategyError as e:
+        raise StepError(e.reason, e.exit_code) from e
+    return land_pr(root, gh_call.resolve_repo(repo) or "", strategy, pr)

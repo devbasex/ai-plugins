@@ -95,6 +95,13 @@
         ],
         "positionals": []
       },
+      "land": {
+        "options": [
+          "--pr",
+          "--repo"
+        ],
+        "positionals": []
+      },
       "notes": {
         "options": [
           "--approval",
