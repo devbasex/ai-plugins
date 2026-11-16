@@ -27,9 +27,9 @@
 | プロジェクト MVV（Mission / Vision / Value・固有の操作 `P<番号>`） | `.ndf/mvv.md`（本文）と `.ndf/mvv.json`（版の履歴。形は `schemas/mvv.schema.json`） | `project-mvv.py approve` だけ（利用者の承認の後） |
 | スプリント MVV（`R<番号>` を含む） | スプリント状態ファイルの隣の `mvv.md` | `sprint-state.py init`（`fast` / `auto` は必須で、コピーできなければ止まる。`normal` は `--mvv` か `--milestone` からコピーできたときだけコピーし、止めない。[pace.md](pace.md)） |
 
-判断の地点へ渡す MVV の節は、共通原則の本文全体 → プロジェクト MVV（無ければ「MVV なし」とその理由）→ スプリント MVV →
+判断の地点へ渡す MVV のセクションは、共通原則の本文全体 → プロジェクト MVV（無ければ「MVV なし」とその理由）→ スプリント MVV →
 判断の決まり（取れる行動は「進める」か「止めて人へ戻す（理由と根拠つき）」の 2 つ・根拠の項目の番号を返す）の順で、
-`project-mvv.py context` で同じ文を読める。スプリント MVV の節は、プロジェクト MVV が承認済みで、スプリントが特定できるとき
+`project-mvv.py context` で同じ文を読める。スプリント MVV のセクションは、プロジェクト MVV が承認済みで、スプリントが特定できるとき
 （`context --sprint <状態>` / `--mvv <ファイル>` / `--milestone M`）だけ入る。見出しに本文の sha256 の先頭 8 文字が付き、
 その項目は根拠の欄で頭に「スプリント」を付ける（`スプリント Value 4`。`R<番号>` はそのまま）。特定できなければ止めずに
 プロジェクト MVV だけの節になる。
@@ -109,7 +109,7 @@ README・指示書（`AGENTS.md` / `CLAUDE.md` など）・依頼文（`--reques
 
 ## 判断の地点と記録
 
-| 地点 | MVV の節の渡り方 | 渡した事実と根拠の記録 |
+| 地点 | MVV のセクションの渡り方 | 渡した事実と根拠の記録 |
 | --- | --- | --- |
 | 承認ゲートの MVV 判定（`auto` / `fast`） | `mvv-gate.py` の材料の先頭 | `mvv-gate.jsonl` の `project_mvv`・`basis`・`pace`・`sprint_mvv`。「従う」でレッドラインが無ければ状態の承認ゲートの記録（`by: mvv`） |
 | 承認ゲートの助言の MVV 判定（`normal` と `ndf progress new`） | `mvv-gate.py check --advise` の材料の先頭 | `mvv-gate.jsonl` の `pace: normal` の行。判定の記録を設計承認ゲートでは設計 PR のコメント、リリース承認ゲートでは承認資料の末尾へ置く。承認ゲートの記録は書かない（承認は利用者） |
@@ -129,7 +129,7 @@ README・指示書（`AGENTS.md` / `CLAUDE.md` など）・依頼文（`--reques
 
 ### 工程での読み方（`requirements-design`・`design`・`tdd-cycle`）
 
-1. MVV の節を読む。supervise の worker はシステムプロンプトの末尾にある。無ければ `project-mvv.py context` を打つ
+1. MVV のセクションを読む。supervise の worker はシステムプロンプトの末尾にある。無ければ `project-mvv.py context` を打つ
    （課題にマイルストーンがあれば `--milestone M`、起動指示がスプリント MVV のファイルを名指せば `--mvv <ファイル>` を付ける）。
    「MVV なし」なら、この手順を飛ばして今どおり進む
 2. 工程の判断（要求と範囲・設計の決定・実装の選択）を MVV と突き合わせる。優先順位は判断の決まりのとおりで、プロジェクト MVV が

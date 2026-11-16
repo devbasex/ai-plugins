@@ -172,23 +172,23 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --roo
   `--approved-sha` が資料の今の値と違えば（提示の後に書き直された）書かずに `stopped`（1）で止まるので、
   資料を提示し直して承認を取り直す。形の誤りは 2、資料・欄が無いと 3
 - `bump`: `items[]` に手で直す箇所が載っていれば直す。plugin の README には触れない
-- `changelog`: CHANGELOG.md の版の節へ見出しと PR のタイトルを並べるだけで、本文は書かない。plugin の README は
+- `changelog`: CHANGELOG.md の版のセクションへ見出しと PR のタイトルを並べるだけで、本文は書かない。plugin の README は
   書かない。未マージの PR は載せず、番号を
   `metrics.unmerged` へ出す。すべて未マージなら `stopped`（3）で止まるので、マージしてから打ち直すか `--prs` を直す
-- `notes`: 各 PR の本文の `## 利用者向けの変化` の箇条（1 行目の末尾に `（#番号）`）で、CHANGELOG.md の版の節を
+- `notes`: 各 PR の本文の `## 利用者向けの変化` の箇条（1 行目の末尾に `（#番号）`）で、CHANGELOG.md の版のセクションを
   組み直す。plugin の README は読まず書かない（README は CHANGELOG.md を参照する固定の「`## 更新情報`」の節だけを
   持つ）。字下げした子の箇条は独立した項目にせず、親の項目の下に 1 段の入れ子（`  - `）で残す。節が無い・「無し」の
   PR は題名で代える（`metrics.fallback` が件数）。`--approval` を渡すと CHANGELOG は変えず、承認資料の 2 つの欄と、
   PR の本文の `## 未検証・残る危険` を集めた節と `## 移行の手順` の節（0 件なら「- 無し」）を書く。
   `## 未検証・残る危険` の節が既にあれば行を消さず、PR の箇条のうち無いものだけを足す（足したら「- PR の本文に
   記載が無い」の行を外す）。PR の本文の
-  `## 移行の手順` の箇条は、CHANGELOG.md の版の節では `### 移行の手順` の下へ `（#番号）` つきで並ぶ（0 件なら
+  `## 移行の手順` の箇条は、CHANGELOG.md の版のセクションでは `### 移行の手順` の下へ `（#番号）` つきで並ぶ（0 件なら
   見出しを作らない）。`--approval` のとき、欄を書く PR は承認資料の「`含む PR`」の欄の PR で、`--prs` は
   欄に足さない。`--prs` に「`含む PR`」に無い番号があれば欄を書かずに `stopped`（3）で止まるので、
   `approval-facts` で承認資料を作り直す。未マージの PR は載せず、番号を `metrics.unmerged` へ出す。
   `stopped`（3）は changelog や approval-facts を先に打つ。渡した PR がすべて未マージのときも 3 で止まるので、
   マージしてから打ち直すか `--prs` を直す。
-  後の PR の本文の `## 置き換える箇条` が指す前の PR の箇条は、CHANGELOG.md の版の節にも「`配る中身`」にも
+  後の PR の本文の `## 置き換える箇条` が指す前の PR の箇条は、CHANGELOG.md の版のセクションにも「`配る中身`」にも
   載せない（前の PR の本文は書き換えない）。書き方は下の「置き換える箇条」。置き換えごとに `items[]` へ
   `kind: replacement`・`name: #<後>→#<前>`・`result`（`removed` / `not_found`。形に合わない行は `unreadable`）を
   出し、除いた箇条の数を `metrics.replaced` へ出す。見つからない置き換えは何も除かず、終了コードは 0 のまま
@@ -267,7 +267,7 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --roo
 ### 置き換える箇条
 
 同じ版の後の PR が前の PR の振る舞いを変えたときは、後の PR の本文に次の節を書き、前の PR の「利用者向けの変化」の
-箇条を CHANGELOG.md の版の節と承認資料の「`配る中身`」から外す。マージ済みの前の PR の本文は直さない。
+箇条を CHANGELOG.md の版のセクションと承認資料の「`配る中身`」から外す。マージ済みの前の PR の本文は直さない。
 
 ```markdown
 ## 置き換える箇条

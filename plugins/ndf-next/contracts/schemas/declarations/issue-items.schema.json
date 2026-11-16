@@ -38,7 +38,7 @@
     },
     "record_headings": {
       "type": "array",
-      "description": "工程が足す節の見出しの語",
+      "description": "工程が足すセクションの見出しの語",
       "items": {
         "type": "string"
       }
