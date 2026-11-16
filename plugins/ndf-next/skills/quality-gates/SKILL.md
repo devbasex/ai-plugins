@@ -5,7 +5,7 @@ description: "Require command evidence before declaring work complete. Use when 
 
 # 完了判定と検証の証跡
 
-**完了は設定ではなく証跡で示す。** 実行したコマンドとその結果がなければ、完了していない
+**完了は証跡（実行したコマンドとその結果）で示す。** 実行したコマンドとその結果がなければ、完了していない
 ものとして扱う。
 
 ## 証跡として必要なもの

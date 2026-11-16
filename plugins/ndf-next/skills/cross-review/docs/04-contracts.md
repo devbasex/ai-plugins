@@ -144,7 +144,7 @@
   `observed` は実測値、`unobserved` は取れなかった理由の符号（`no_record` / `ambiguous` / `no_model_field` /
   `unsupported` / `unreadable`）で、どちらか一方が入る。取れるのは claude と codex で、agy と kiro は `unsupported`。
   前のラウンドの値は書き換えない。反証の起動（`critique.sh`）の分は残さない
-- `review_findings` — マージした指摘を **per-item** で蓄積する（#156）。各要素は
+- `review_findings` — マージした指摘を **per-item** で蓄積する。各要素は
   `finding_id`（`<担当>-r<ラウンド>-<索引>`）を持つ。**マージの時点で採番し、統合・
   反証・実行検証の記録がどの指摘を指すかをこの値で結ぶ。** 担当とラウンドを含めるため、
   別の担当が同じ索引を持っても衝突しない。要素は

@@ -60,7 +60,7 @@ CD のある場合は、承認したコミットと本番の PR の HEAD が違�
 
 **下の 4 つ（スライド / 文書 / 表計算 / ページ）は `documentation` モードのリリースである。**
 上の 5 つと違い、**リリースが生成と提出の 2 つの手順になる**。生成は対になる下書き先へ行い、その間に
-生成物の内容検証と体裁レビューと制作物承認が入る。**投稿の手順は形ではなく置き先のシステムが
+生成物の内容検証と体裁レビューと制作物承認が入る。**投稿の手順は置き先のシステムが
 持つ**（`document-systems` の `system-<名前>.md`）。
 
 形ごとの詳細は [references/distribution-forms.md](references/distribution-forms.md) の索引から辿る。
@@ -172,7 +172,7 @@ Pull Request が最後かどうかを判断できない。
 - CD があり、レビューなしでマージできる場合: 本番の PR の HEAD を承認に出し、`approval-post` で承認資料を置き、承認を得たら
   `approve --pr` で証跡を書く（打ち方は references の「CD のある場合の本番」）。誰がいつ承認したかは証跡のコメントの作成者と作成時刻で読む
 - CD があり、レビューが必須の場合: 本番の PR のレビューの承認がリリース承認である
-変更を要求されたら直後に変更要求の記録へ 1 行書く（[approval-request.md](../development-workflow/references/approval-request.md) の「回答を記録する」）。
+変更の要求を受けたら、その場で変更要求の記録へ 1 行書く（[approval-request.md](../development-workflow/references/approval-request.md) の「回答を記録する」）。
 
 **本番リリースの承認は、この工程の中で必ず求める。** 前の工程（コードレビュー・完了判定）を通ったことは
 承認の代わりにならない。それらが決めるのはマージしてよいかで、利用者へ出してよいかは本番リリースの承認が決める。

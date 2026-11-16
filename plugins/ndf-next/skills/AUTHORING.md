@@ -407,7 +407,7 @@ Skill ごとの実測値は [`issues/old/skill-frontmatter-by-runtime.csv`](../.
 Codex は起動時に全 Skill の `name` と `description` とファイルパスを一覧として読み込み、この
 一覧に総量予算を設けている。予算を超えると Codex はまず `description` を短縮し、それでも
 収まらない場合は一部の Skill を一覧から省略して警告を表示する。**300 文字は 1 個あたりの
-上限であって、全 Skill に一律で使ってよいスロットではない。** 総量が予算へ収まることを条件に配分し、
+上限であり、各 Skill の取り分は総量の予算から決まる。** 総量が予算へ収まることを条件に配分し、
 超過分を逃がす。
 
 逃がし先は導入先のランタイムで選ぶ。Claude Code だけに配る Skill は `when_to_use` へ移してよい。

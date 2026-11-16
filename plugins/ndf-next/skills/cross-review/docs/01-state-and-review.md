@@ -169,7 +169,7 @@ round エントリを保存する前に**コメントのスナップショット
 **要点**: メインは launcher を **並列バックグラウンド** で起動するだけ。
 各担当は **投稿しない。** 指摘ファイル（`<席>-review-pr<PR>-round<R>-payload.json`）と
 結果ファイル（`<席>-review-pr<PR>-result.json`）を一時の名前で書き、指摘ファイル → 結果の順に
-改名する。投稿はマージ（`read-result`）が行う（#730）。**本文はメイン context に載せない**。
+改名する。投稿はマージ（`read-result`）が行う。**本文はメイン context に載せない**。
 
 ### 2.1 launcher 起動 + monitor
 
