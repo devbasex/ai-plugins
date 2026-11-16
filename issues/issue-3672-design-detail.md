@@ -187,7 +187,7 @@ ai-plugins で上の表のファイルを 3 本の PR（実装の PR・移行の
 | `find_legacy` | 同上 | 新設 | `find_legacy(files: dict[str, dict], moves: list[Move]) -> list[Found]` | 読んだ `.ndf/` の中身から旧いキーの位置を探す | `files` はファイル名 → 中身（無いファイルは入れない） | 旧いキーの位置（ファイルと JSON Pointer）の一覧。無ければ空 | 無し |
 | `legacy_reason` | 同上 | 新設 | `legacy_reason(found: list[Found], system: str) -> str` | 止まる理由の文（ファイル・キーの位置・移行のコマンド）を作る | `found` が空でない。`system` は `10` か `11` | 設計文書の「入出力の契約」の止まり方の文の形 | 無し |
 | `classify_repo` | 10 系 `project_lib/branch_strategy_measure.py`・11.0 `domains/project/strategy_measure.py` | 新設 | `classify_repo(root: Path, gh_repo: str \| None) -> tuple[str, list[dict]]` | 新規と既存を、設計文書の「作る・更新する」の 4 つ（既定ブランチのコミット・マージ済みの PR・タグと Release・ruleset とワークフローのファイル）で分ける | 無し | 4 つとも新規とみなす値のときだけ `"new"`、1 つでも外れるか読めなければ `"existing"`。2 つ目の値は見たものごとの根拠 | `git rev-list --count` と `gh api` を呼ぶ（ネットワーク） |
-| `collect_samples` | 同上 | 新設 | `collect_samples(root: Path, gh_repo: str \| None, deadline: float) -> Samples` | 直近のマージ済み PR・タグ・Release・ruleset・ワークフロー・版数のファイル・`plugin.json` を集める | `deadline` は `time.monotonic()` の値 | `Samples` は各事例の一覧・本番ブランチの `RuleFacts`・読めなかった種類（`unreadable`）を持つ。PR の事例には、マージされずに閉じた PR のうち取り込みの記録のコメントがあり本番ブランチが記録のコミットを含むものを、記録のコミットで取り込んだ PR として入れる（設計文書の「本番の PR の確かめ」の取り込みの記録） | `gh api` と `git` を呼ぶ（ネットワーク） |
+| `collect_samples` | 同上 | 新設 | `collect_samples(root: Path, gh_repo: str \| None, deadline: float) -> Samples` | 直近のマージ済み PR・タグ・Release・ruleset・ワークフロー・版数のファイル・`plugin.json` を集める | `deadline` は `time.monotonic()` の値 | `Samples` は各事例の一覧・本番ブランチの `RuleFacts`・読めなかった種類（`unreadable`）を持つ。PR の事例には、本番ブランチの直近の履歴を `git log` の 1 回で読み、取り込みの記録の trailer を持ち最初の親が `NDF-Tip` のコミットを、`NDF-Landed-PR` の PR を取り込んだ事例として入れる（設計文書の「本番の PR の確かめ」の取り込みの記録）。マージされずに閉じた PR のコメントは読まない | `gh api` と `git` を呼ぶ（ネットワーク） |
 | `count_key` | 同上 | 新設 | `count_key(pointer: str, observed: list[tuple[Any, str]], rule: dict) -> Measured` | 履歴から推すキー 1 つについて、値ごとの事例を数えて値と根拠を決める | `observed` は（値・事例の参照）の並び。`rule` は既定の表の閾値 | 3 件以上かつ 9 割以上の値があれば `value` と `evidence`、無ければ `why` が `insufficient` か `conflict`。`release.tag`・`release.github_release` はタグと Release がどちらも 0 件なら、0 件を根拠に `null`・`false` を返す | 無し |
 | `decide_merge_method` | 同上 | 新設 | `decide_merge_method(facts: RuleFacts \| None, release_strategy: str) -> Measured` | 本番ブランチの ruleset と履歴から推した `release_strategy` の組で `merge.method` を決める（設計文書の `merge.method` の表） | `release_strategy` は `count_key` で決まった値。`facts` が None は ruleset を読めなかったこと | 表の 4 行のとおりの値と根拠 `ruleset`。`trunk` で ruleset が 2 つのどちらも求めないときは `why: conflict`。`facts` が None なら `why: insufficient` | 無し |
 | `rule_conflicts` | 同上 | 新設 | `rule_conflicts(values: dict, evidence: dict) -> list[dict]` | 測った値の組が組み合わせの規則に反するかを、規則に出るキーがすべて測ったキーである規則だけで調べる（I11。例は R10） | `values` は測るキーの値だけを持つ部分のセクション | 反する規則ごとに `{"pointer", "why": "conflict", "candidates", "evidence"}` の問い 1 件。候補は規則を満たす値の組。反しなければ空 | 無し |
@@ -206,7 +206,7 @@ ai-plugins で上の表のファイルを 3 本の PR（実装の PR・移行の
 | `route_of` | 10 系 `release_lib/strategy_route.py` | 新設 | `route_of(strategy: Strategy) -> Route` | 取り込み方の値から、版上げの PR の起点・宛先・同期の PR の要否を決める | 無し | `merge_base_branch` は起点 base・同期あり、`release_branch` は起点 production・同期あり、`trunk` は起点 production・同期なし。承認の対象が `production_pr` なら版上げの PR は無い（`Route.release_pr` が偽）。`merge_base_branch` で版数の置き場が `none` なら、base → production の PR そのものを承認の対象にし、版数と CHANGELOG を書かない（`Route.bump` が偽。R4） | 無し |
 | `ruleset_mismatch` | 10 系 `release_lib/land.py`・11.0 `domains/release/land.py` | 新設 | `ruleset_mismatch(strategy: Strategy, facts: RuleFacts) -> list[dict]` | セクションの値と本番ブランチの ruleset の食い違いを I10 の比べ方で並べる | `facts` は `read_rule_facts` の戻り値（None は呼び出し元で止める） | 各要素は `{"key", "declared", "ruleset"}`。空なら一致。ruleset が無いときは `merge-queue` の宣言だけを食い違いにする。`merge.admin: true` では承認の数を比べず、迂回の可否が `always`・`pull_requests_only` 以外なら食い違い | 無し |
 | `check_production_pr` | 同上 | 新設 | `check_production_pr(strategy: Strategy, pr: dict, prod: dict, queue: list[dict]) -> str \| None` | 本番の PR（版上げの PR と、本番の PR を兼ねるスプリントの PR）がマージの方式ごとの確かめ（I7）を通るかを判定する | `pr` は head・版上げの PR かどうか・切った時点の版数（版上げの PR だけ）、`prod` は本番の先端と版数、`queue` はキューの PR | 通れば None。落ちれば理由の文 | 無し |
-| `fast_forward_land` | 同上（11.0 は `GitHub.fast_forward` を呼ぶ `Lander` の内部） | 新設 | `fast_forward_land(repo: str, production: str, tip: str, head: str, commit: str) -> dict` | ruleset の無い `strict` で、確かめた先端 `tip` から本番ブランチが進んでいないときだけ承認した head を入れる（設計文書の「本番の PR の確かめ」の `strict` の入れ方） | `head` が `tip` を含む（`check_production_pr` を通った）。`commit` は `merge`・`squash`・`rebase` | 返す `{"result": "merged" / "stopped", "commit", "reason"}`。`merged` のとき本番ブランチの先端は入れたコミットで、その木は `head` の木と同じ。本番ブランチが `tip` から進んでいれば何も変えずに `stopped` | `gh api` で `git/commits` を作り（`rebase` は作らない）、参照を進める前に入れるコミットの SHA と `tip` を書いた取り込みの記録のコメントを PR に付け、`git/refs/heads/<本番>` を `force: false` で更新する。`squash` では PR を閉じる |
+| `fast_forward_land` | 同上（11.0 は `GitHub.fast_forward` を呼ぶ `Lander` の内部） | 新設 | `fast_forward_land(repo: str, production: str, pr: int, tip: str, head: str, commit: str) -> dict` | ruleset の無い `strict` で、確かめた先端 `tip` から本番ブランチが進んでいないときだけ承認した head を入れる（設計文書の「本番の PR の確かめ」の `strict` の入れ方） | `head` が `tip` を含む（`check_production_pr` を通った）。`commit` は `merge`・`squash`・`rebase` | 返す `{"result": "merged" / "stopped", "commit", "reason"}`。`merged` のとき本番ブランチの先端は入れたコミットで、その木は `head` の木と同じ。本番ブランチが `tip` から進んでいれば何も変えずに `stopped` | `gh api` で `git/commits` を作り（`rebase` は作らない）、作るコミットのメッセージへ取り込みの記録の trailer（`NDF-Landed-PR`・`NDF-Approved-Head`・`NDF-Tip`）を入れ、`git/refs/heads/<本番>` を `force: false` で更新する。`squash` では PR を閉じる |
 | `GitHub.fast_forward` | 11.0 `adapters/github.py` | 新設 | `fast_forward(self, branch: str, tip: str, head: str, commit: str) -> Optional[str]` | 10 系の `fast_forward_land` の GitHub の呼び出しの部分 | 同上 | 入れたコミットの SHA。早送りでなく断られれば None | 同上 |
 | `land_approved` | 10 系 `release_lib/land.py`（11.0 は `Lander.land` の変更） | 新設 | `land_approved(root: Path, strategy: Strategy, pr: int, approved_head: str) -> dict` | 承認した head を、セクションの主体と方式で本番ブランチへ入れる | 承認の証跡が今の head にある | 返す `{"result": "merged" / "queued" / "human" / "stopped", "head", "reason"}`。`merged`・`queued` のとき入れた head は `approved_head` と同じ（I5） | `gh api` でマージかキューへの投入、PR のコメントを書く |
 | `Lander.land` | 11.0 `domains/release/land.py` | 変更 | `land(self, number: int) -> Landed`（変えない） | 10 系の `land_approved` と同じ手順で入れる。迂回はセクションの `merge.admin` だけで決める | 同上 | 同上（`Landed` の形は変えない） | 同上 |
@@ -271,7 +271,7 @@ ai-plugins で上の表のファイルを 3 本の PR（実装の PR・移行の
 | `land_approved` | 証跡のコメントが書けない | 権限・上限 | `gh api` の応答 | 止める（I12。問いを送り直さない） | 書けなかった理由。終了コード 1 | 打ち直せる |
 | `Lander.land` | 10 系の `land_approved` と同じ | 同じ | 同じ | 同じ | `Landed` の `result` と理由（形は変えない） | 同じ |
 | `fast_forward_land` | 参照の更新を断られる | 確かめた先端から本番ブランチが進んだ（別のレーンが先に入れた） | `git/refs` の更新の応答（早送りでない） | 止める（再試行しない。確かめが古くなったため） | 呼び出し元の `land_approved` が承認を取り直す依頼を出す。終了コード 1 | 本番ブランチは変わらない。作ったコミットはどこからも指されない。本番の PR を先端から作り直し、承認を取り直して打ち直せる |
-| `fast_forward_land` | コミットを作れない・PR を閉じられない | 権限・ネットワーク | `gh api` の応答 | 止める | 応答の種類と本文。終了コード 1 | 参照を進める前なら本番ブランチは変わらない（記録のコメントが残っても、本番ブランチが記録のコミットを含まないため使われない）。進めた後に閉じられなければ、打ち直した `land_approved` が `check_production_pr` の前に取り込みの記録を読み、本番ブランチが記録のコミットを含むので、確かめと参照の更新を省いて閉じるところから続ける |
+| `fast_forward_land` | コミットを作れない・PR を閉じられない | 権限・ネットワーク | `gh api` の応答 | 止める | 応答の種類と本文。終了コード 1 | 参照を進める前なら本番ブランチは変わらない（作ったコミットは本番ブランチから辿れないため、記録として読まれない）。進めた後に閉じられなければ、打ち直した `land_approved` が `check_production_pr` の前に本番ブランチの履歴から取り込みの記録を読み、記録を信じる 3 つの条件がそろうので、確かめと参照の更新を省いて閉じるところから続ける |
 | `GitHub.fast_forward` | `fast_forward_land` の GitHub の呼び出しと同じ | 同じ | 同じ | 同じ（参照の更新を早送りでないと断られたら None を返し、`Lander` が止める） | `Lander.land` の行のとおり | 同じ |
 | `merge_queue_enabled` | 読めない | 権限・ネットワーク | GraphQL の応答 | 呼び出し元へ返す（None。`init` は `merge_queue_unknown` の問いにする） | 問いとして出る | 打ち直せる |
 | `enqueue_pr` | 断られる | head の食い違い・`jump` の権限が無い | GraphQL の誤り | 呼び出し元へ返す（`land_approved` が止める） | 上の `land_approved` の行 | 同上 |
@@ -340,7 +340,8 @@ ai-plugins で上の表のファイルを 3 本の PR（実装の PR・移行の
 | `check_production_pr` | `strict`・含まない | 落ちる |
 | `check_production_pr` | `direct` | 通る（確かめない） |
 | `land_approved` | PR が merged | `human`（記録を書く） |
-| `land_approved` | `strict`・ruleset が無い・PR が開いているか閉じている・取り込みの記録があり本番ブランチが記録のコミットを含む | `check_production_pr` と参照の更新を省き、PR を閉じて `merged`（参照を進めた後に止まった打ち直し）。この判定は `check_production_pr` より先に行う |
+| `land_approved` | `strict`・ruleset が無い・PR が開いているか閉じている・本番ブランチの履歴に、その PR の取り込みの記録があり、最初の親が `NDF-Tip`・木が `NDF-Approved-Head` の木と同じ・`NDF-Approved-Head` が PR の今の head と承認の証跡の head の両方と同じ | `check_production_pr` と参照の更新を省き、PR を閉じて `merged`（参照を進めた後に止まった打ち直し）。この判定は `check_production_pr` より先に行う |
+| `land_approved` | `strict`・ruleset が無い・その PR の取り込みの記録が本番ブランチにあるが、3 つの条件のどれかが外れる（例: H1 を入れた後に PR へ H2 を足して承認し直した） | 記録を使わず `check_production_pr` から始める。H2 が先端を含まなければ止まり、作り直して承認を取り直す依頼を出す |
 | `land_approved` | 証跡の head ≠ 今の head | `stopped`（I5） |
 | `land_approved` | `ruleset_mismatch` が空でない | `stopped`（I10） |
 | `land_approved` | 本番の PR（版上げの PR か、本番の PR を兼ねるスプリントの PR）で `check_production_pr` が落ちる | `stopped`（I7） |
@@ -352,8 +353,8 @@ ai-plugins で上の表のファイルを 3 本の PR（実装の PR・移行の
 | `fast_forward_land` | 本番ブランチの先端が `tip` のまま | `merge` は親が `tip` と `head` のコミット、`squash` は親が `tip` のコミット（どちらも `head` の木）を作り、参照を進める。`rebase` は参照を `head` へ進める |
 | `fast_forward_land` | 本番ブランチが `tip` から進んだ | 参照の更新を GitHub が断り（早送りでない）、作ったコミットはどこからも指されずに残る。`stopped` |
 
-- 繰り返しの終わる条件: `collect_samples` は PR 100 件・タグ 100 件・Release 100 件の上限か `deadline` で終わる。ほかの関数は繰り返しを持たないか、入力の長さで終わる
-- 計算量の注意: `collect_samples` の PR ごとの `git` の呼び出し（起点の判定）は PR の数に比例する。上限 100 件で打ち切る。`scan_rows` は削除の一覧の行の数（ファイル約 300）×語の数で、CI の 1 ジョブの中に収まる
+- 繰り返しの終わる条件: `collect_samples` は PR 100 件・タグ 100 件・Release 100 件・取り込みの記録を探す本番ブランチのコミット 100 件の上限か `deadline` で終わる。マージされずに閉じた PR は数えず、その PR ごとの呼び出しをしない。ほかの関数は繰り返しを持たないか、入力の長さで終わる
+- 計算量の注意: `collect_samples` の PR ごとの `git` の呼び出し（起点の判定）は PR の数に比例する。上限 100 件で打ち切る。取り込みの記録は本番ブランチの履歴を読む `git log` の 1 回で拾い、`gh api` の呼び出しは PR の数で増えない。`scan_rows` は削除の一覧の行の数（ファイル約 300）×語の数で、CI の 1 ジョブの中に収まる
 
 ## 内部のデータと定数
 
@@ -371,7 +372,7 @@ ai-plugins で上の表のファイルを 3 本の PR（実装の PR・移行の
 | 新規とみなす値（コミットの数の上限） | 設定値 | 既定の表の `evidence` | `new_repo_max_commits: 1` |
 | 移す行の表の旧い位置 | データ | 移す行の表 | `.ndf/worktree.json` の `/branch_flow/promotion` と、#3613 の途中の位置 `/branch_flow/release_strategy` の 2 行を、マージの順に依らず 1 つの表に持つ |
 | 根拠の閾値（標本の最小の数・割合） | 設定値 | 既定の表 `branch-strategy-presets.json` の `evidence` | `min_samples: 3`・`min_ratio: 0.9` |
-| 標本の上限（PR・タグ・Release） | 設定値 | 同上の `evidence` | `limit: 100` |
+| 標本の上限（PR・タグ・Release・取り込みの記録を探す本番ブランチのコミット） | 設定値 | 同上の `evidence` | `limit: 100` |
 | 測るキーと種類の既定から埋めるキーの区分 | 設定値 | 同上の `measured_keys` | 設計文書の「作る・更新する」の表のとおり |
 | 作成のコマンドの文（系ごと） | 定数 | 10 系 `lib/branch_strategy_legacy.py`・11.0 `core/branch_strategy_legacy.py` の `COMMAND` | 10 系 `python3 "$SCRIPTS/project-decl.py" branch-strategy`・11.0 `ndf project branch-strategy` |
 | スキーマの置き場 | 定数 | 読む部品の `SCHEMA` | 11.0 `declarations/project.schema.json#/$defs/BranchStrategy`、10 系は `skills/development-workflow/schemas/project.schema.json` の同じ定義 |
@@ -445,7 +446,7 @@ ai-plugins で上の表のファイルを 3 本の PR（実装の PR・移行の
 | `ruleset_mismatch` | 10 系 `lib/release_case.py` の `required_approvals`、11.0 `land.py` の `Lander.approvals`・`required` | `grep -nE 'def (required_approvals|approvals|required)' -r plugins` | 承認の数の読みは使う。merge queue と最新の取り込みの要否の読みを足す |
 | `check_production_pr` | `release_lib/promotion.py` の `allowed_after` | 同上 | 使えない。行 `selected` の許す PR の判定で、方式ごとの確かめを持たない |
 | `land_approved` | 10 系 `release-steps.py` の `wait_and_merge`、`release_lib/promotion.py` の `_merge_exact`、`lib/gh_rest.py` の `pr_merge(sha=)` | `grep -n 'def wait_and_merge\|def _merge_exact\|def pr_merge' -r plugins/ndf/scripts` | `pr_merge(sha=)` と `wait_and_merge` の CI の待ちを使う。head の一致の確認は `_merge_exact` の手順を移す |
-| `fast_forward_land` | 10 系 `lib/gh_rest.py` の `_rest`・`comment`、11.0 `adapters/github.py` の `GitHub.rest`・`GitHub.commit_parents` | `grep -rnE "git/refs\|git/commits\|def (fast_forward\|update_ref\|create_commit)" plugins/ndf/scripts plugins/ndf-next/src --include=*.py` | コミットを作って参照を早送りで進める部品は当たり無し（当たりは 11.0 のタグの参照を作る `tagging.py` とコミットの親を読む `commit_parents` だけ）。REST の呼び出しは `_rest`、記録のコメントは `comment` を使い、コミットの作成と参照の更新を新しく書く |
+| `fast_forward_land` | 10 系 `lib/gh_rest.py` の `_rest`、11.0 `adapters/github.py` の `GitHub.rest`・`GitHub.commit_parents` | `grep -rnE "git/refs\|git/commits\|def (fast_forward\|update_ref\|create_commit)" plugins/ndf/scripts plugins/ndf-next/src --include=*.py` | コミットを作って参照を早送りで進める部品は当たり無し（当たりは 11.0 のタグの参照を作る `tagging.py` とコミットの親を読む `commit_parents` だけ）。REST の呼び出しは `_rest` を使い、コミットの作成（取り込みの記録の trailer を含む）と参照の更新を新しく書く |
 | `GitHub.fast_forward` | 11.0 `adapters/github.py` の `GitHub.rest`・`GitHub.commit_parents` | 同上 | 同上。REST の呼び出しは `GitHub.rest` を使う |
 | `trail_writer` | `release_lib/approval_trail.py` の `judge`・`write_trail`・`write_admin_record` | `grep -nE '^def ' plugins/ndf/scripts/release_lib/approval_trail.py` | 書く関数は使う。書き手を決める関数は無いので足す |
 | `merge_queue_enabled` | 11.0 `adapters/github.py` の `_MERGE_QUEUE_STATE`、10 系 `lib/gh_graphql.py` の `graphql` | `grep -rn 'mergeQueue\|enqueuePullRequest' plugins/ndf/scripts plugins/ndf-next/src --include=*.py` | 10 系に当たり無し。`graphql` を使い、問い合わせの文は 11.0 と同じにする |
@@ -474,7 +475,7 @@ ai-plugins で上の表のファイルを 3 本の PR（実装の PR・移行の
 | `find_legacy` | ai-plugins の今の 4 ファイルで全部の旧いキーを返す | `remove` の行のキーだけが残る / #3613 の `ndf settings migrate` を打った後の途中の位置だけが残る | （異常なし） |
 | `legacy_reason` | 10 系と 11.0 で違うコマンドを出す | 旧いキーが 1 つ | （異常なし） |
 | `classify_repo` | 4 つとも無い fixture で `new`、develop→main と trunk の fixture で `existing` | コミット 1 本だけで `new`、2 本で `existing` / PR 0 件でタグだけある fixture で `existing` | 読めないと `existing`（新規へ倒さない） |
-| `collect_samples` | 記録した `gh` の応答から事例を集める / `squash` で参照を進めて閉じた PR を、取り込みの記録のコミットで取り込んだ PR として数える | PR が 0 件 / 取り込みの記録はあるが本番ブランチが記録のコミットを含まない閉じた PR は数えない | 読めない種類が `unreadable` に載る / 時間切れで打ち切る |
+| `collect_samples` | 記録した `gh` の応答から事例を集める / `squash` で参照を進めて閉じた PR を、本番ブランチの記録のコミットで取り込んだ PR として数え、閉じた PR のコメントは読まない（`gh` の呼び出しの数が閉じた PR の数で増えない） | PR が 0 件 / 最初の親が `NDF-Tip` でない記録のコミットは数えない / 閉じた PR のコメントに記録の形の文があっても数えない | 読めない種類が `unreadable` に載る / 時間切れで打ち切る |
 | `count_key` | 3 件・9 割で値と根拠 | ちょうど 3 件・ちょうど 9 割 | 2 件で `insufficient` / 8 割で `conflict` |
 | `decide_merge_method` | 表の 4 行 × `trunk` かそれ以外の 8 通り | ruleset が無い develop→main で `direct`（受け入れ条件 9） | `trunk` で ruleset がどちらも求めないと `conflict` / 読めないと `insufficient` |
 | `rule_conflicts` | 規則を満たす測った値で空 | 規則に出るキーの一部が埋めるキーなら、その規則を見ない | タグと Release があり CD が無い fixture で R10 の `conflict` |
@@ -493,8 +494,8 @@ ai-plugins で上の表のファイルを 3 本の PR（実装の PR・移行の
 | `route_of` | 3 つの取り込み方と 2 つの承認の対象 | `trunk`・`production_pr` で版上げの PR が無い / `merge_base_branch`・`none` で `bump` が偽 | （異常なし） |
 | `ruleset_mismatch` | 一致で空 | ruleset が無い（private の Free）と `strict`・`direct` は一致 / `merge.admin: true` で迂回の可否が `pull_requests_only` なら一致 | `via: gate` で承認 1 / `merge-queue` でキューが無い / ruleset が無くて `merge-queue` / `merge.admin: true` で迂回の可否が `never`・`exempt` |
 | `check_production_pr` | 方式ごとの通る入力 | `merge-queue` で先端を含まないが版数が同じなら通る / `merge-queue` の版上げでない本番の PR は通る | `strict` で先端を含まない（版上げの PR と、`docs`・`web-trunk` の本番の PR を兼ねるスプリントの PR の両方） / `merge-queue` で版数の衝突・キューに別の版上げの PR |
-| `fast_forward_land` | 先端が `tip` のままで `merge`・`squash`・`rebase` の 3 つが入る | 同じ `tip` で確かめた 2 つの PR を続けて入れると、2 つ目は断られる | 本番ブランチが進んでいると参照を変えずに `stopped` / 参照を進める前に取り込みの記録のコメントが付く |
-| `land_approved` | `merge-queue` で `queued`・`strict` で `merged` | 人が先にマージ済みで記録を 1 回だけ書く / `squash` で参照を進めた後に閉じられず止まった状態から打ち直すと、`check_production_pr` で止まらずに PR を閉じて `merged` | #3661 の形で止まる / #3572 の形（承認の外のコミット）で止まる / ruleset の食い違い / GitHub が断る / 証跡を書けない |
+| `fast_forward_land` | 先端が `tip` のままで `merge`・`squash`・`rebase` の 3 つが入る | 同じ `tip` で確かめた 2 つの PR を続けて入れると、2 つ目は断られる | 本番ブランチが進んでいると参照を変えずに `stopped` / 作ったコミットのメッセージに 3 つの trailer が入る |
+| `land_approved` | `merge-queue` で `queued`・`strict` で `merged` | 人が先にマージ済みで記録を 1 回だけ書く / `squash` で参照を進めた後に閉じられず止まった状態から打ち直すと、`check_production_pr` で止まらずに PR を閉じて `merged` | #3661 の形で止まる / #3572 の形（承認の外のコミット）で止まる / ruleset の食い違い / GitHub が断る / 証跡を書けない / PR のコメントに記録の形の文があっても使わず確かめから始める / 本番ブランチの記録の最初の親が `NDF-Tip` でないか木が承認した head の木と違えば使わない / H1 を入れた後に PR へ H2 を足して承認し直すと、H1 の記録を使わず確かめから始め、閉じて `merged` を返さない |
 | `Lander.land` | 10 系と同じ入力で同じ結果 | 同じ | 同じ |
 | `Lander._bypass` | `direct`・`admin: true` で真 | `direct`・`admin: false` で偽 | （スキーマが R3 で他の組み合わせを止める） |
 | `trail_writer` | 表の 4 ケース | 人が先にマージした `via: gate` | （異常なし） |
