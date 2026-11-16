@@ -33,27 +33,27 @@ def _bs_emit(out: dict) -> int:
     return BS_EXIT[out["status"]]
 
 
-def _bs_facts(root: Path, measure_mod) -> dict:
+def _bs_facts(root: Path) -> dict:
     """`init` が既定の行へ入れる測った名前（既定ブランチ・プラグイン・CD と開発版のワークフロー・merge queue）。"""
     import gh_graphql
 
-    s = measure_mod.Samples()
-    measure_mod.local_facts(root, s)
+    s = bsm.Samples()
+    bsm.local_facts(root, s)
     head = proc.git_out(root, "symbolic-ref", "--short", "HEAD")
     production = repo.default_branch(root) or (head or "").strip() or None
     facts = {"production": production}
-    plugin = measure_mod.single_plugin(s)
+    plugin = bsm.single_plugin(s)
     if plugin:
         name, runtimes = plugin
         facts.update(plugin=name, runtimes=runtimes)
-    cd = measure_mod.cd_workflows(s)
+    cd = bsm.cd_workflows(s)
     facts["workflow"] = cd[0] if cd else None
     slug = repo.owner_repo(root)
     facts["merge_queue"] = gh_graphql.merge_queue_enabled(slug, production) if slug and production else None
     return facts
 
 
-def _bs_commit(root: Path, plan, digest: str | None, base: dict, bw, write: bool = False) -> int:
+def _bs_commit(root: Path, plan, digest: str | None, base: dict, write: bool = False) -> int:
     """`digest` を渡すか `write` が真なら書き、どちらも無ければ差分とハッシュを示すだけにする。"""
     if plan.failed:
         return _bs_emit({**base, "status": "stopped", "failed": plan.failed})
@@ -95,12 +95,12 @@ def run_branch_strategy(a, root: Path) -> int:
                         "questions": [{"pointer": "/kind", "why": "no_kind", "candidates": list(bw.KINDS), "evidence": []}],
                     }
                 )
-            facts = _bs_facts(root, bsm)
+            facts = _bs_facts(root)
             section, questions = bw.init_values(a.kind, facts, presets)
             base = {"kind": a.kind, "values": section, "evidence": bw.evidence_of(section, facts)}
             if questions:
                 return _bs_emit({**base, "status": "ask", "questions": questions})
-            return _bs_commit(root, bw.plan_write(root, section), a.digest, base, bw, write=not a.dry_run)
+            return _bs_commit(root, bw.plan_write(root, section), a.digest, base, write=not a.dry_run)
         if a.verb == "measure":
             return _bs_emit(bsm.measure_strategy(root, prefer=a.kind))
         if a.verb == "write":
@@ -111,13 +111,13 @@ def run_branch_strategy(a, root: Path) -> int:
                 return _bs_emit(res)
             base = {k: res.get(k) for k in ("kind", "values", "evidence")}
             base["kind"] = res["values"].get("kind")
-            return _bs_commit(root, bw.plan_write(root, res["values"]), a.digest, base, bw)
+            return _bs_commit(root, bw.plan_write(root, res["values"]), a.digest, base)
         if a.verb == "migrate":
             plan, questions = bmig.plan_migration(root, legacy.load_moves())
             if questions:
                 return _bs_emit({"status": "ask", "questions": questions})
-            return _bs_commit(root, plan, a.digest, {}, bw)
-        return _bs_commit(root, bw.plan_remove(root), a.digest, {}, bw)
+            return _bs_commit(root, plan, a.digest, {})
+        return _bs_commit(root, bw.plan_remove(root), a.digest, {})
     except (bs.StrategyError, bw.WriteError, legacy.LegacyTableError, jsonio.JsonReadError) as e:
         sys.stderr.write(f"{getattr(e, 'reason', e)}\n")
         return getattr(e, "exit_code", EXIT_UNREADABLE)
