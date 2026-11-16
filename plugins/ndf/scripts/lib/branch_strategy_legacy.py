@@ -75,13 +75,13 @@ def load_moves(path: Path | None = None) -> list[Move]:
         raise LegacyTableError(f"{p}: 移す行の表を読めない（{e}）") from e
 
 
-def _pointer_tokens(pointer: str) -> list[str]:
+def pointer_tokens(pointer: str) -> list[str]:
     return [t.replace("~1", "/").replace("~0", "~") for t in pointer.split("/")[1:]]
 
 
 def has_pointer(doc, pointer: str) -> bool:
     cur = doc
-    for t in _pointer_tokens(pointer):
+    for t in pointer_tokens(pointer):
         if not isinstance(cur, dict) or t not in cur:
             return False
         cur = cur[t]

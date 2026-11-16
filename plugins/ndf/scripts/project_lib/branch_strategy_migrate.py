@@ -160,7 +160,7 @@ def _by_name(after: dict) -> dict:
 
 
 def _remove_pointer(doc: dict, pointer: str) -> None:
-    toks = [t.replace("~1", "/").replace("~0", "~") for t in pointer.split("/")[1:]]
+    toks = legacy.pointer_tokens(pointer)
     cur = doc
     for t in toks[:-1]:
         if not isinstance(cur, dict) or t not in cur:

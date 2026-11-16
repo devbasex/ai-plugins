@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 import branch_strategy as bs
+import branch_strategy_legacy as legacy
 import jsonio
 
 PRESETS = Path(__file__).resolve().parents[1] / "data" / "branch-strategy-presets.json"
@@ -103,7 +104,7 @@ def evidence_of(section: dict, facts: dict) -> list[dict]:
 
 
 def set_pointer(doc: dict, pointer: str, value: Any) -> None:
-    toks = [t.replace("~1", "/").replace("~0", "~") for t in pointer.split("/")[1:]]
+    toks = legacy.pointer_tokens(pointer)
     cur = doc
     for t in toks[:-1]:
         cur = cur.setdefault(t, {})
@@ -128,7 +129,7 @@ def apply_answers(result: dict, answers: dict) -> dict:
 
 def get_pointer(doc: Any, pointer: str) -> Any:
     cur = doc
-    for t in [t.replace("~1", "/").replace("~0", "~") for t in pointer.split("/")[1:]]:
+    for t in legacy.pointer_tokens(pointer):
         if not isinstance(cur, dict) or t not in cur:
             return None
         cur = cur[t]
