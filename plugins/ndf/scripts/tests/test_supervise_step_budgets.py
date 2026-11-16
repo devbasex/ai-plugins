@@ -18,6 +18,7 @@ sys.path.insert(0, str(SCRIPTS))
 from supervise_lib import decl, paths, sprint_waves  # noqa: E402
 from supervise_lib.verify_steps import with_margin  # noqa: E402
 import inproc  # noqa: E402
+import strategy_fixture  # noqa: E402
 
 # new sprint は --design に無い課題の本文を gh で読む（#1767）。見本の本文で答える
 pytestmark = pytest.mark.usefixtures("issue_bodies")
@@ -26,7 +27,8 @@ pytestmark = pytest.mark.usefixtures("issue_bodies")
 def repo(tmp_path, **sv) -> Path:
     root = tmp_path / "r"
     (root / ".ndf").mkdir(parents=True)
-    (root / ".ndf" / "worktree.json").write_text('{"version": 1, "base_branch": "main"}\n')
+    strategy_fixture.declare(root, "main")
+    subprocess.run(["git", "init", "-q", "-b", "main", str(root)], check=True, capture_output=True)
     (root / ".ndf" / "supervise.json").write_text(json.dumps({"version": 1, "test": {"command": "make test {paths}"}, **sv}))
     return root
 

@@ -65,7 +65,7 @@ def test_load_defaults_without_a_declaration(tmp_path):
     assert tool_paths.load_entries(make_repo(tmp_path / "r")) == SERENA
 
 
-@pytest.mark.parametrize("decl", [{"version": 1}, {"version": 2}, {"base_branch": "develop"}])
+@pytest.mark.parametrize("decl", [{"version": 1}, {"version": 2}, {"guard": {}}])
 def test_load_defaults_without_tool_paths(tmp_path, decl):
     assert tool_paths.load_entries(make_repo(tmp_path / "r", decl)) == SERENA
 
