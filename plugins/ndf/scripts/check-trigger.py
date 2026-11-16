@@ -23,8 +23,8 @@
 | review | --review を渡し、前回のレビューからの範囲に PR が 1 本以上ある（開発版ごとの実装レビュー。ほかのトリガーは見ない） |
 
 **範囲の起点（前回の検査）は、origin の `check-done/review`（`--review`）か `check-done/check`（それ以外）→
-手元の記録 → `--since` → 正式版のタグ → 起点のブランチとの分岐点の順に決める。** `record` が結果 merged / no_change の
-とき `to` をこのブランチへ送る（構造改善を含む検査は両方、`--review` は `check-done/review` だけ）。落ちた検査は
+手元の記録 → `--since` → 正式版のタグ（タグを作らない宣言は前の版上げ）→ 起点のブランチとの分岐点の順に決める。** `record` が
+結果 merged / no_change のとき `to` をこのブランチへ送る（構造改善を含む検査は両方、`--review` は `check-done/review` だけ）。落ちた検査は
 送らないため、次の回は同じ起点から数え直す。ブランチは origin にあるため、手元の記録が消えても、別のマシンから
 続けても、検査を通らずにデプロイされた変更を範囲から落とさない。初めて使うリポジトリでは、どこまで見たかを
 `--since <ref>` で渡す。
@@ -82,6 +82,7 @@ import gh_rest  # noqa: E402
 import merged_range  # noqa: E402
 import jsonio  # noqa: E402
 import proc  # noqa: E402
+import release_prev  # noqa: E402
 import release_tag  # noqa: E402
 import repo  # noqa: E402
 import branch_strategy  # noqa: E402
@@ -296,6 +297,8 @@ def range_start(root: Path, events: list[dict], since: str | None, review: bool 
         sha = git_or_stop(root, "rev-parse", f"{since}^{{commit}}")
         return sha, commit_at(root, sha), f"--since {since}"
     shape = release_tag_shape(root)
+    if shape and (bumped := release_prev.untagged_since(root, shape[0], "HEAD")):  # タグを作らない宣言: 残った古いタグより先に使う
+        return bumped, commit_at(root, bumped), f"前のリリースの版上げ {bumped[:12]}（宣言がタグを作らない）"
     if shape:
         tags = git_or_stop(root, "tag", "--list", release_tag.tag_glob(*shape), "--sort=-v:refname").split()
         if tag := release_tag.latest_release_tag(tags, *shape):

@@ -809,6 +809,36 @@ def test_untagged_record_and_ranges_read_versions_not_stale_tags(repo, monkeypat
     assert publish.untagged_since(repo, "nothing", "HEAD") is None and publish.untagged_before(repo, "nothing", "1.0.1") is None
 
 
+def test_untagged_changelog_and_guards_read_the_shipped_version(repo, monkeypatch):
+    """#3701 の round 15: タグを作らない宣言では、版の節の消し方（前のリリースの起点が版上げのコミット）と、出した版へ書かない・
+    出し直さない確かめ（タグの有無の代わりに origin の本番ブランチの版）も版から決める。手元の本番ブランチの版は数えない。"""
+    _release_steps_module(monkeypatch)
+    from release_lib import names, publish
+    from step_result import StepError
+
+    git(repo, "tag", "ndf--v0.9.0")  # タグ無しの宣言へ変える前に作ったタグ
+    plugin_json(repo, "plugins/ndf", "1.0.0")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "release 1.0.0")
+    shipped = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
+    git(repo, "update-ref", "refs/heads/main", shipped)  # 手元の本番ブランチだけ: 出済みの版に数えない
+    assert names.shipped_note(repo, "ndf", "1.0.0") is None
+    git(repo, "update-ref", "refs/remotes/origin/main", shipped)  # origin の本番ブランチへ 1.0.0 を出した
+    assert publish.prev_release(repo, "ndf", "HEAD", "ndf--v1.0.3") == shipped
+    lines = "# C\n\n## [ndf 1.0.2]\n\n- b\n\n## [ndf 1.0.1]\n\n- a\n\n## [ndf 1.0.0]\n\n- 前の版\n\n## [ndf 0.9.0]\n\n- 古い版\n".split(
+        "\n"
+    )
+    gone = names.drop_untagged(repo, lines, "ndf", shipped, "1.0.3")
+    assert [g["heading"] for g in gone] == ["## [ndf 1.0.2]", "## [ndf 1.0.1]"]
+    assert "## [ndf 1.0.0]" in lines and "## [ndf 0.9.0]" in lines
+    assert "1.0.0" in names.shipped_note(repo, "ndf", "1.0.0-dev.2") and "1.0.0" in names.shipped_note(repo, "ndf", "0.9.5")
+    assert names.shipped_note(repo, "ndf", "1.0.1") is None
+    with pytest.raises(StepError) as e:
+        names.require_unreleased(repo, "ndf", "1.0.0")
+    assert e.value.code == 3 and "本番ブランチの版 1.0.0" in str(e.value)
+    names.require_unreleased(repo, "ndf", "1.0.1-dev.1")  # まだ出ていない版の節へは書く
+
+
 @pytest.mark.parametrize(
     ("release", "made"),
     [({"tag": None}, ""), ({"tag": "v{version}", "github_release": False}, "タグ v1"), ({}, "タグ v1 と GitHub Release")],

@@ -38,11 +38,12 @@ class Observed:
     tags: list[str] = field(default_factory=list)  # 正式版のタグの版（タグの形から版を取り出したもの）
     unreadable: list[str] = field(default_factory=list)
     template: str = release_tag.DEFAULT_TAG  # タグの形（宣言の release.tag）
+    tagged: bool = True  # 宣言がタグを作るか（偽なら本番ブランチの正式版も出済みの版に数える）
 
     def as_dict(self) -> dict:
         """版の記録の `observed`（読んだ値）。タグの一覧と読めなかったものは載せない。"""
         d = asdict(self)
-        for k in ("tags", "unreadable", "plugin", "template"):
+        for k in ("tags", "unreadable", "plugin", "template", "tagged"):
             d.pop(k)
         return d
 
@@ -112,13 +113,16 @@ def observe(
     fetch: bool = True,
     rel: str | None = None,
     template: str | None = None,
+    tagged: bool | None = None,
 ) -> Observed:
     """origin を取り直してから、ベースブランチ・本番のブランチ・タグを読む。本番のブランチが無ければ読まない（読めないに数えない）。
     タグが 1 つも無いことは読めないに数えない。取り直しに落ちたら、読んだ値が古いかもしれないため `origin` を読めないに数える。
     `rel` は `plugin.json` のリポジトリの根からの位置で、省けばベースブランチの木から探す。`template` はタグの形で、
     省けば `repo` の宣言の `release.tag` から引く（前版の検索・公開と同じ形で、出済みの版を見落とさない）。
-    タグを作らない宣言（`release.tag` が null）では、本番のブランチの正式版も出済みの版として `tags` と `latest_tag` に入れる。"""
+    タグを作らない宣言（`release.tag` が null）では、本番のブランチの正式版も出済みの版として `tags` と `latest_tag` に入れる。
+    `tagged` は宣言がタグを作るかで、省けば `repo` の宣言から引く（プランの開始時のスナップショットで動く側は `template` と一緒に渡す）。"""
     template = template or release_tag.tag_template_of(repo)
+    tagged = release_tag.makes_tags_of(repo) if tagged is None else tagged
     unreadable: list[str] = []
     if fetch and fetch_origin(repo) is not None:
         unreadable.append("origin")
@@ -137,10 +141,10 @@ def observe(
         unreadable.append("tags")
     else:
         tags = _release_tags(p.stdout, plugin, template)
-    if prod_version and "-" not in prod_version and prod_version not in tags and not release_tag.makes_tags_of(repo):
+    if prod_version and "-" not in prod_version and prod_version not in tags and not tagged:
         tags.append(prod_version)  # タグを作らない宣言では、本番ブランチの正式版を出済みの版とする（出した版をもう一度出さない）
     latest = max(tags, key=versions.version_order) if tags else None
-    return Observed(plugin, base_ref, base_version, prod_ref, prod_version, latest, tags, unreadable, template)
+    return Observed(plugin, base_ref, base_version, prod_ref, prod_version, latest, tags, unreadable, template, tagged)
 
 
 def _max_base(vs: list[str | None]) -> str:
@@ -184,7 +188,9 @@ def taken(obs: Observed, version: str, how: str = "explicit", level: str = "patc
             d.next_free = decide_dev(obs, level).version
         return d
     if version in obs.tags:
-        d.existing = release_tag.release_tag(obs.plugin, version, obs.template)
+        # タグを作らない宣言で本番ブランチの版から数えた版は、作られていないタグの名前でなく本番ブランチの版として示す
+        untagged = not obs.tagged and version == obs.production_version
+        d.existing = f"{obs.production_ref} の版 {version}" if untagged else release_tag.release_tag(obs.plugin, version, obs.template)
         nxt = version
         while nxt in obs.tags:
             nxt = versions.next_patch(nxt)

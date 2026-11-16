@@ -232,6 +232,7 @@ class _Fill:
         # 本番ブランチとタグの形は、プランが持つ開始時のスナップショットから引く（段と同じ値。I13・決定 9）
         decl = delivery.load_delivery(self.repo, info.get(branch_strategy.SNAPSHOT_KEY))
         self.production, self.template = decl.production, release_tag.tag_template(decl.release)
+        self.tagged = release_tag.makes_tags(decl.release)  # 出済みの版の数え方も開始時の宣言で決める（タグの形と同じ値）
         self.plugin = self.field.get("プラグイン")
         self.level = self.field.get("上げ幅") or "patch"
         self.explicit = self.field.get("明示") or None
@@ -243,7 +244,7 @@ class _Fill:
     def observe(self):
         import release_version
 
-        return release_version.observe(self.repo, self.plugin, self.base, self.production, template=self.template)
+        return release_version.observe(self.repo, self.plugin, self.base, self.production, template=self.template, tagged=self.tagged)
 
     def branch_of(self, version: str) -> str:
         b = self.info.get("branch")

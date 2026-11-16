@@ -545,6 +545,17 @@ def test_untagged_declaration_counts_the_production_version_as_released(world):
     assert parallel_repo.dev_version(world.repo) == "10.27.7"
 
 
+def test_observe_counts_released_versions_by_the_given_declaration(world):
+    """#3701 の round 15: 出済みの版の数え方は渡した宣言（プランの開始時のスナップショット）のタグの有無で決め、今の宣言を
+    読み直さない。タグを作らない宣言で本番ブランチの版から数えた版は、作られていないタグの名前でなく本番ブランチの版として示す。"""
+    world.publish("10.27.6", "develop", "main")
+    tagged = rv.observe(world.repo, "ndf", "develop", "main", tagged=True)
+    assert "10.27.6" not in tagged.tags and not rv.taken(tagged, "10.27.6").is_taken
+    untagged = rv.observe(world.repo, "ndf", "develop", "main", tagged=False)
+    assert rv.taken(untagged, "10.27.6").existing == "origin/main の版 10.27.6"
+    assert "tagged" not in untagged.as_dict()
+
+
 def test_observe_and_taken_follow_the_declared_tag_shape(world):
     """宣言の release.tag が `v{version}` なら、その形のタグを出済みの版に数え、既定の形のタグは数えない（前版の検索・公開と同じ形）。"""
     for t in ("v10.28.0", "v10.28.1-dev.1", "ndf--v10.29.0"):

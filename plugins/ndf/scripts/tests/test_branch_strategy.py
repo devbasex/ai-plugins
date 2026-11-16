@@ -949,17 +949,17 @@ def test_land_stops_when_head_moved_3661():
 def test_land_queue_jumps_release_pr():
     port = FakePort({"head": H1, "base": "main", "bump": True, "cut_version": "1.0.0"}, facts(queue=True))
     out = land.land_approved(port, bs.Strategy(section("plugin")), 5, land.Approval(H1))
-    assert out["result"] == "queued" and port.calls == [("enqueue", H1, True)]
+    assert out["result"] == "queued" and port.calls == [("checks", H1), ("enqueue", H1, True)]
     # 版数を比べられない承認済みの PR（版数のファイルを初めて足す最初のリリースなど）も版上げとして先頭へ入れる
     port = FakePort({"head": H1, "base": "main", "bump": None, "cut_version": "1.0.0"}, facts(queue=True))
     out = land.land_approved(port, bs.Strategy(section("plugin")), 5, land.Approval(H1))
-    assert out["result"] == "queued" and port.calls == [("enqueue", H1, True)]
+    assert out["result"] == "queued" and port.calls == [("checks", H1), ("enqueue", H1, True)]
 
 
 def test_land_direct_and_strict():
     port = FakePort({"head": H1, "base": "main"}, facts())
     assert land.land_approved(port, bs.Strategy(section("web-develop")), 5, land.Approval(H1))["result"] == "merged"
-    assert port.calls == [("merge", H1, "merge", False)]
+    assert port.calls == [("checks", H1), ("merge", H1, "merge", False)]
     port2 = FakePort({"head": H1, "base": "main", "contains_tip": False}, facts(present=False))
     out = land.land_approved(port2, bs.Strategy(section("docs")), 6, land.Approval(H1))
     assert out["result"] == "stopped" and port2.calls == []
@@ -987,11 +987,40 @@ def test_land_stops_closed_pr_without_record():
 
 
 def test_land_uses_given_pull_and_verifies_checks():
-    """読んだ PR を渡せば読み直さず、verify_checks なら ruleset のある方式でも検査を確かめる。"""
+    """読んだ PR を渡せば読み直さず、ruleset のある方式でも検査を確かめる。"""
     port = FakePort({"head": H1, "base": "main"}, facts())
     port.failing = "lint=failure"
-    out = land.land_approved(port, bs.Strategy(section("web-develop")), 5, land.Approval(H1), pull=port._pull, verify_checks=True)
+    out = land.land_approved(port, bs.Strategy(section("web-develop")), 5, land.Approval(H1), pull=port._pull)
     assert out["result"] == "stopped" and port.pulls == 0 and ("merge", H1, "merge", False) not in port.calls
+
+
+@pytest.mark.parametrize(
+    ("kind", "pull", "rules"),
+    [
+        ("web-develop", {}, {}),  # direct（宣言の迂回なし）
+        ("plugin", {"bump": True, "cut_version": "1.0.0"}, {"queue": True}),  # merge queue への投入
+        ("docs", {"contains_tip": True, "tip": "a" * 40}, {"present": False}),  # ruleset の無い strict の早送り
+        ("docs", {"contains_tip": True, "tip": "a" * 40}, {"up_to_date": True}),  # ruleset のある strict
+    ],
+)
+def test_land_checks_the_approved_head_on_every_path(kind, pull, rules):
+    """#3701 の round 15: 取り込みのどの経路でも、承認した head の検査がそろうまでマージ・投入・参照の更新をしない。"""
+    port = FakePort({"head": H1, "base": "main", **pull}, facts(**rules))
+    port.failing = "pytest=failure"
+    out = land.land_approved(port, bs.Strategy(section(kind)), 5, land.Approval(H1))
+    assert out["result"] == "stopped" and "pytest=failure" in out["reason"] and port.calls == [("checks", H1)], out
+    port.failing, port.calls = None, []
+    assert land.land_approved(port, bs.Strategy(section(kind)), 5, land.Approval(H1))["result"] in ("merged", "queued")
+    assert port.calls[0] == ("checks", H1) and len(port.calls) > 1
+
+
+def test_fast_forward_records_the_approval_trail():
+    """#3701 の round 15: 早送りの取り込みのコミットは、PR・承認した head・先端と並べて承認の証跡の URL を trailer に残す。"""
+    url = "https://github.com/o/r/pull/6#issuecomment-1"
+    port = FakePort({"head": H1, "base": "main", "contains_tip": True, "tip": "a" * 40}, facts(present=False))
+    assert land.land_approved(port, bs.Strategy(section("docs")), 6, land.Approval(H1, url=url))["result"] == "merged"
+    message = next(c[1] for c in port.calls if c[0] == "commit")
+    assert f"{land.TRAILER_TRAIL}: {url}" in message and land.parse_landed(f"c\x00t\x00a\x00{message}\x1e", 6)["head"] == H1
 
 
 def test_land_admin_bypass_checks_and_records():

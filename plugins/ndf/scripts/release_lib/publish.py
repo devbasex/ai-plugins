@@ -6,14 +6,24 @@ CD のワークフローと手動の経路（`release --channel prod`）がこ�
 
 from __future__ import annotations
 
-import json
 import os
 import tempfile
 
 import gh_parts
 from release_tag import makes_tags
-from release_lib.names import changelog_span, latest_release_tag, tag_glob, tag_name, tag_template_of
-from step_result import StepError, git, plugin_dir
+from release_lib.names import changelog_span, tag_name
+
+# 前のリリースの起点と出済みの版の正本（lib/release_prev.py）を再び公開する
+from release_prev import (  # noqa: F401
+    manifest_rel,
+    prev_release,
+    release_tag_before,
+    shipped_untagged,
+    untagged_before,
+    untagged_since,
+    version_at,
+)
+from step_result import StepError, git
 
 
 def wants(decl) -> tuple[bool, bool]:
@@ -22,31 +32,6 @@ def wants(decl) -> tuple[bool, bool]:
     rel = decl.release or {}
     tag = makes_tags(rel)
     return tag, tag and rel.get("github_release", True) is not False
-
-
-def manifest_rel(root, plugin) -> str:
-    """`plugin` のマニフェストのリポジトリの根からの位置（version_at・untagged_since が読む）。"""
-    return (plugin_dir(root, plugin) / ".claude-plugin" / "plugin.json").relative_to(root).as_posix()
-
-
-def version_at(root, plugin, revision) -> str:
-    """`revision` のコミットの plugin.json の版。読めなければ 1 で止める。"""
-    rel = manifest_rel(root, plugin)
-    p = git(root, "show", f"{revision}:{rel}", check=False)
-    try:
-        ver = json.loads(p.stdout)["version"] if p.returncode == 0 else None
-    except (ValueError, KeyError, TypeError):
-        ver = None
-    if not isinstance(ver, str) or not ver:
-        raise StepError(f"{str(revision)[:8]} の {rel} の版を読めない")
-    return ver
-
-
-def _version_or_none(root, plugin, revision) -> str | None:
-    try:
-        return version_at(root, plugin, revision)
-    except StepError:
-        return None
 
 
 def _notes_at(root, plugin, ver, revision) -> str:
@@ -108,66 +93,3 @@ def made_by(decl, tag) -> str:
     """宣言が作らせる公開物の語（承認資料の同意と戻し方が書く）。`wants` と同じ値で決め、作らなければ空文字。"""
     want_tag, want_release = wants(decl)
     return "" if not want_tag else f"タグ {tag} と GitHub Release" if want_release else f"タグ {tag}"
-
-
-def _untagged_manifest(root, plugin):
-    """タグを作らない宣言（release.tag が null）なら (マニフェストの位置, 本番ブランチの参照)。ほかと読めなければ None。"""
-    import delivery
-
-    decl = delivery.load_delivery(root)
-    if decl.production is None or wants(decl)[0]:
-        return None
-    try:
-        rel = manifest_rel(root, plugin)
-    except StepError:  # プラグインのマニフェストが無い: 版で起点を決められない
-        return None
-    prod = f"origin/{decl.production}"
-    if git(root, "rev-parse", "-q", "--verify", prod, check=False).returncode != 0:
-        prod = decl.production
-    return rel, prod
-
-
-def untagged_since(root, plugin, end) -> str | None:
-    """タグを作らない宣言（release.tag が null）で、他のプラグインの差分・承認資料の比較元・版の節の PR の範囲の起点にするコミット。
-    本番ブランチの先端の `plugin` の版（出した最新の版）を `end` の履歴で初めて持ったコミット（前のリリースの版上げ）。
-    タグを作る宣言と、本番ブランチ・版を読めなければ None。"""
-    if (at := _untagged_manifest(root, plugin)) is None:
-        return None
-    rel, prod = at
-    shipped = _version_or_none(root, plugin, prod)
-    if shipped is None:
-        return None
-    found = None
-    for c in git(root, "log", "--format=%H", end, "--", rel, check=False).stdout.split():
-        if _version_or_none(root, plugin, c) == shipped:
-            found = c  # 同じ版の続く並びの最も古いコミットまでさかのぼる
-        elif found:
-            break
-    return found
-
-
-def untagged_before(root, plugin, ver) -> str | None:
-    """タグを作らない宣言で、出した版 `ver` の直前の正式版（リリース記録の直前の版）。本番ブランチの履歴で `plugin` の版を
-    新しい順に読み、`ver` と違い接尾辞の無い最初の版。タグを作る宣言と、読めなければ None。"""
-    if (at := _untagged_manifest(root, plugin)) is None:
-        return None
-    rel, prod = at
-    for c in git(root, "log", "--format=%H", prod, "--", rel, check=False).stdout.split():
-        v = _version_or_none(root, plugin, c)
-        if v and v != ver and "-" not in v:
-            return v
-    return None
-
-
-def release_tag_before(root, plugin, current=None):
-    """宣言の release.tag の形（無ければ既定の形 `release_tag.DEFAULT_TAG`）に合い接尾辞の無いタグのうち、current を除いて最も新しいもの。無ければ None。"""
-    template = tag_template_of(root)
-    tags = git(root, "tag", "--list", tag_glob(plugin, template), "--sort=-v:refname").stdout.split()
-    return latest_release_tag(tags, plugin, template, current)
-
-
-def prev_release(root, plugin, end, current=None):
-    """前のリリースの起点（他のプラグインの差分・承認資料の比較元・版の節と notes の PR の範囲）。タグを作らない宣言（release.tag が null）なら前のリリースの
-    版上げのコミット（`untagged_since`。宣言をタグ無しへ変える前の古いタグが残っていても使わない）、ほかは current を
-    除いて最も新しいタグ。決められなければ None。"""
-    return untagged_since(root, plugin, end) or release_tag_before(root, plugin, current)

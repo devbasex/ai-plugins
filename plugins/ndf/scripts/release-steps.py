@@ -110,7 +110,7 @@ from release_lib.approval import HeadMoved  # noqa: E402
 from release_lib.context import ReleaseCtx  # noqa: E402
 from release_lib.notes_content import NotesContent  # noqa: E402
 from release_lib.names import changelog_section, changelog_span, h2_lines, next_h2, plugin_of, release_decl  # noqa: E402
-from release_lib.names import drop_untagged, require_untagged, tag_glob, tag_name, tag_template_of, tag_version  # noqa: E402
+from release_lib.names import drop_untagged, require_unreleased, shipped_note, tag_glob, tag_name, tag_template_of, tag_version  # noqa: E402
 from release_lib.included import outside_items, outside_note  # noqa: E402
 from release_lib.publish import prev_release, release_tag_before  # noqa: E402
 from step_result import (
@@ -407,7 +407,7 @@ def _update_changelog(root, a, items, since=None) -> list[dict]:
     cl = root / "CHANGELOG.md"
     lines = cl.read_text(encoding="utf-8").split("\n")
     a.plugin = plugin_of(root, a)
-    require_untagged(root, tag_name(root, a.plugin, a.version), a.version)
+    require_unreleased(root, a.plugin, a.version)
     removed = drop_untagged(root, lines, a.plugin, since, a.version)
     head, (at, end) = f"## [{a.plugin} {base_of(a.version)}]", changelog_span(lines, a.plugin, a.version)
     if at is None:
@@ -762,6 +762,8 @@ def _merge_new_prod(ctx, approved, release_pr, tag, items, metrics):
     root, a, plugin, branch, prod = ctx.root, ctx.a, ctx.plugin, ctx.branch, ctx.prod
     if git(root, "rev-parse", "-q", "--verify", f"refs/tags/{tag}", check=False).returncode == 0:
         raise StepError(f"タグ {tag} は既にある")
+    if why := shipped_note(root, plugin, a.version):  # タグを作らない宣言は本番ブランチの版で確かめる
+        raise StepError(why)
     # 承認したコミットの後に、版上げの外のコミットが release/v<版> に無いか（#815・#2436 の R2）。
     # 照合に渡すのは元の release/v<版> の PR で、-sync の PR は渡さない（承認の後のベースブランチの変更を含むため）
     allowed = approval.release_pr_allowed(root, release_pr, pr_view)
@@ -1051,7 +1053,10 @@ def cmd_approval_facts(a):
     approved_sha = git(root, "rev-parse", f"origin/{source_branch}").stdout.strip()
     prev = a.prev_tag or prev_release(root, plugin, approved_sha, cur_tag)
     if not prev:
-        raise StepError("前のタグを決められない（--prev-tag を渡す）", EXIT_PRECONDITION)
+        raise StepError(
+            "前のリリースの起点（前のタグか、タグを作らない宣言では前の版上げのコミット）を決められない（--prev-tag を渡す）",
+            EXIT_PRECONDITION,
+        )
     made = publish.made_by(delivery.load_delivery(root), cur_tag)
     keep = kept_sections(root, getattr(a, "approval", None))  # 前の承認資料の残す節（読めなければ書かずに止める。#1834）
     changes = instructions.changed_instructions(root, prev, approved_sha)
@@ -1173,7 +1178,7 @@ def write_notes(root, version, plugin, bullets, migration=()):
     cl = root / "CHANGELOG.md"
     if not cl.is_file():
         raise StepError("CHANGELOG.md が無い", EXIT_PRECONDITION)
-    require_untagged(root, tag_name(root, plugin, version), version)
+    require_unreleased(root, plugin, version)
     lines = cl.read_text(encoding="utf-8").split("\n")
     head = f"## [{plugin} {base_of(version)}]"
     at = changelog_span(lines, plugin, version)[0]

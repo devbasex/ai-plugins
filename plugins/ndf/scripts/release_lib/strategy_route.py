@@ -170,7 +170,6 @@ def release_selected(ctx: ReleaseCtx, approved, ops, case=None) -> tuple:
     branches = ReleaseBranches(release=branch, base=base, production=prod)
     if a.channel != "prod":
         raise StepError("選んで集める取り込み方の release は --channel prod だけ（開発版はベースブランチで出す）", EXIT_UNREADABLE)
-    tag = names.tag_name(root, plugin, a.version)
     metrics = {"channel": a.channel, "version": a.version, "release_pr": None, "sync_pr": None, "main_pr": None, "tag": None}
     metrics.update(
         {
@@ -188,8 +187,11 @@ def release_selected(ctx: ReleaseCtx, approved, ops, case=None) -> tuple:
         merge, rows = _resume_merged(ctx, main_pr, approved, case, ops)
         items += rows
     else:
+        tag = names.tag_name(root, plugin, a.version)
         if git(root, "rev-parse", "-q", "--verify", f"refs/tags/{tag}", check=False).returncode == 0:
             raise StepError(f"タグ {tag} は既にある")
+        if why := names.shipped_note(root, plugin, a.version):  # タグを作らない宣言は本番ブランチの版で確かめる
+            raise StepError(why)
         title = f"Release: {plugin} v{a.version} を {prod} へ"
         body = (
             f"{plugin} v{a.version} を {prod} へ出す（選んだスプリントブランチを {prod} から組んだリリースブランチ）。\n\n"

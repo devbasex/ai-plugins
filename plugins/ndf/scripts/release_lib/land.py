@@ -3,7 +3,9 @@
 - `ruleset_mismatch`: セクションの値と本番ブランチの ruleset の食い違い（I10）
 - `check_production_pr`: 本番の PR のマージの方式ごとの確かめ（I7）
 - `fast_forward_land`: ruleset の無い `strict` で、確かめた先端から本番ブランチが進んでいないときだけ入れる
-- `land_approved`: 上を組み、マージかキューへの投入をする。承認した head と今の head が違えば止まる（I5・E10）
+- `land_approved`: 上を組み、マージかキューへの投入をする。承認した head と今の head が違えば止まる（I5・E10）。
+  どの取り込み（マージ・管理者の迂回・キュー・早送り）の前にも承認した head の検査がすべて成功したことを確かめ、
+  管理者の迂回は head と承認の証跡の URL を記録し（記録だけ落ちれば打ち直しで補う）、早送りはコミットの trailer に残す
 
 GitHub との出入りは `Port` に閉じる（テストは差し替える）。NDF はロックを取らない（決定 7）。
 """
@@ -14,9 +16,16 @@ import json
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-TRAILER_PR = "NDF-Landed-PR"
-TRAILER_HEAD = "NDF-Approved-Head"
-TRAILER_TIP = "NDF-Tip"
+from release_lib.land_read import (  # noqa: F401 -- 版数と取り込みの記録の読み方（land_read）を再び公開する
+    TRAILER_HEAD,
+    TRAILER_PR,
+    TRAILER_TIP,
+    TRAILER_TRAIL,
+    manifest_paths,
+    parse_landed,
+    store_version,
+)
+
 BYPASS_OK = ("always", "pull_requests_only")
 REAPPROVE = "承認を取り直してください"
 
@@ -104,17 +113,18 @@ class Port(Protocol):
     ) -> str | None: ...  # head の検査がすべて成功なら None、そろわなければ理由の文
 
 
-def trailers(pr: int, head: str, tip: str) -> str:
-    return f"{TRAILER_PR}: {pr}\n{TRAILER_HEAD}: {head}\n{TRAILER_TIP}: {tip}"
+def trailers(pr: int, head: str, tip: str, trail_url: str = "") -> str:
+    return f"{TRAILER_PR}: {pr}\n{TRAILER_HEAD}: {head}\n{TRAILER_TIP}: {tip}" + (f"\n{TRAILER_TRAIL}: {trail_url}" if trail_url else "")
 
 
-def fast_forward_land(port: Port, production: str, pr: int, tip: str, head: str, commit: str, title: str = "") -> dict:
-    """確かめた先端 `tip` から本番ブランチが進んでいないときだけ承認した head を入れる（早送りだけの参照の更新）。"""
+def fast_forward_land(port: Port, production: str, pr: int, tip: str, head: str, commit: str, title: str = "", trail_url: str = "") -> dict:
+    """確かめた先端 `tip` から本番ブランチが進んでいないときだけ承認した head を入れる（早送りだけの参照の更新）。
+    取り込みのコミットの trailer に PR・承認した head・先端・承認の証跡の URL を残す（`rebase` は head そのものを入れ、残さない）。"""
     if commit == "rebase":
         sha = head
     else:
         parents = [tip, head] if commit == "merge" else [tip]
-        message = f"{title or f'Land #{pr}'}\n\n{trailers(pr, head, tip)}\n"
+        message = f"{title or f'Land #{pr}'}\n\n{trailers(pr, head, tip, trail_url)}\n"
         sha = port.create_commit(message, head, parents)
         if not sha:
             return {"result": "stopped", "commit": None, "reason": "取り込みのコミットを作れない"}
@@ -138,13 +148,12 @@ class Approval:
     url: str = ""  # 証跡のコメントの URL（管理者の迂回の記録が承認を指す）
 
 
-def land_approved(
-    port: Port, strategy, pr: int, approval: Approval, pull: dict | None = None, verify_checks: bool = False, rules: Any = None
-) -> dict:
+def land_approved(port: Port, strategy, pr: int, approval: Approval, pull: dict | None = None, rules: Any = None) -> dict:
     """承認した head を、セクションの主体と方式で本番ブランチへ入れる。
 
-    `pull` は読んだ PR、`rules` は読んだ本番ブランチの ruleset の事実（どちらも省けば読む）。`verify_checks` が真なら、入れる前に head の検査の成功を確かめる
-    （承認ゲートを通らずに入れるスプリントの PR。ruleset の無い `strict` では常に確かめる）。
+    `pull` は読んだ PR、`rules` は読んだ本番ブランチの ruleset の事実（どちらも省けば読む）。どの取り込みの経路（direct・管理者の迂回・
+    merge queue・ruleset のある strict・ruleset の無い strict の早送り・承認なしで入れるスプリントの PR）でも、入れる前に承認した
+    head の検査がすべて成功したことを確かめる（GitHub の必須の検査は ruleset が名指す分だけで、迂回と早送りは通らない）。
     """
     sec = strategy.section
     prod_branch = sec["branches"]["production"]
@@ -186,11 +195,9 @@ def land_approved(
         why = check_production_pr(strategy, pull, port.production(prod_branch), queue)
         if why:
             return {**out, "reason": why}
-    if verify_checks or admin or (merge["method"] == "strict" and not facts.present):
-        # ruleset の無い strict の参照の更新・承認なしの取り込み・管理者の迂回は、GitHub の必須の検査を通らない
-        failing = port.checks_failing(approval.head, pull)
-        if failing:
-            return {**out, "reason": f"head {approval.head[:12]} の検査がそろっていない: {failing}"}
+    failing = port.checks_failing(approval.head, pull)  # 取り込みのすべての経路で、入れる前に確かめる
+    if failing:
+        return {**out, "reason": f"head {approval.head[:12]} の検査がそろっていない: {failing}"}
     if merge["method"] == "merge-queue":
         # 版数を比べられない承認済みの PR（bump が None）も版上げとして先頭へ入れる。後ろへ並ぶと先に並んだ変更が承認の外で入る
         ok, why = port.enqueue(pr, approval.head, may_bump(pull))
@@ -200,7 +207,7 @@ def land_approved(
         tip = pull.get("tip")
         if not tip:
             return {**out, "reason": f"head が含むと確かめた本番ブランチ {prod_branch} の先端を読めない"}
-        got = fast_forward_land(port, prod_branch, pr, tip, approval.head, merge["commit"], pull.get("title", ""))
+        got = fast_forward_land(port, prod_branch, pr, tip, approval.head, merge["commit"], pull.get("title", ""), approval.url)
         return {**out, "result": got["result"], "reason": got["reason"]}
     ok, why = port.merge(pr, approval.head, merge["commit"], admin)
     if ok and admin:
@@ -225,51 +232,6 @@ _QUEUE_QUERY = (
     " mergeQueue(branch: $branch) { entries(first: 100, after: $after) { pageInfo { hasNextPage endCursor }"
     " nodes { pullRequest { number headRefOid } } } } } }"
 )
-
-
-def manifest_paths(strategy) -> list[str]:
-    """版数の置き場が `plugin` のとき、版数を持つ `plugin.json` の候補（測る部品と同じ 2 つの置き場）。"""
-    name = strategy.section["release"].get("plugin")
-    return [f"plugins/{name}/.claude-plugin/plugin.json", ".claude-plugin/plugin.json"] if name else [".claude-plugin/plugin.json"]
-
-
-def store_version(strategy, show) -> str | None:
-    """`show(path)` で読めるファイルから版数を引く。置き場が `none`・読めないときは None。"""
-    import json_pick
-
-    store = strategy.section["release"]["version_store"]
-    if store["kind"] == "none":
-        return None
-    rows = [(p, "/version") for p in manifest_paths(strategy)] if store["kind"] == "plugin" else [(store["path"], store["pointer"])]
-    for path, pointer in rows:
-        text = show(path)
-        if text is None:
-            continue
-        try:
-            value, found = json_pick.resolve_pointer(json.loads(text), pointer)
-        except ValueError:
-            return None
-        return value if found and isinstance(value, str) and value else None
-    return None
-
-
-def parse_landed(log: str, pr: int) -> dict | None:
-    """`git log --format=%H%x00%T%x00%P%x00<trailers>%x1e` の出力から、PR の取り込みの記録の最新の 1 件を引く。"""
-    for row in log.split("\x1e"):
-        parts = row.strip("\n").split("\x00")
-        if len(parts) < 4:
-            continue
-        sha, tree, parents, trail = parts[0].strip(), parts[1], parts[2].split(), parts[3]
-        values = dict(line.split(": ", 1) for line in trail.splitlines() if ": " in line)
-        if values.get(TRAILER_PR, "").strip() == str(pr):
-            return {
-                "commit": sha,
-                "tree": tree,
-                "head": values.get(TRAILER_HEAD, "").strip(),
-                "tip": values.get(TRAILER_TIP, "").strip(),
-                "first_parent": parents[0] if parents else "",
-            }
-    return None
 
 
 class LandError(Exception):
@@ -483,7 +445,7 @@ def land_pr(root, repo: str, strategy, pr: int) -> dict:
             if not pull.get("merged"):
                 if exempt_from_gate(strategy, pull):
                     # trunk で承認の対象が版上げの PR なら、スプリントの PR は承認ゲートを通らずに検査の後で入る（決定 8）
-                    return land_approved(port, strategy, pr, Approval(str(pull.get("head") or "")), pull=pull, verify_checks=True)
+                    return land_approved(port, strategy, pr, Approval(str(pull.get("head") or "")), pull=pull)
                 return {"result": "stopped", "head": pull.get("head"), "reason": f"#{pr} に承認の証跡が無い。{REAPPROVE}"}
         return land_approved(port, strategy, pr, approval or Approval(""), rules=rules)
     except (LandError, TrailError) as e:

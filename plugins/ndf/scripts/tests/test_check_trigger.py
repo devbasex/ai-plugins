@@ -315,6 +315,21 @@ def test_range_starts_at_the_latest_release_tag_not_a_prerelease(repo, env):
     assert out["metrics"]["from"] == tagged and out["metrics"]["prs"] == 1
 
 
+def test_untagged_declaration_starts_at_the_last_release_bump_not_a_stale_tag(repo, env):
+    """#3701 の round 15: タグを作らない宣言（fixture は CD が無く release.tag が null）では、本番ブランチの版を初めて持った
+    コミット（前のリリースの版上げ）を範囲の起点にし、宣言をタグ無しへ変える前の古いタグ（ndf--v1.0.0）へ戻らない。"""
+    merge_pr(repo, 11, "feat/a", {"app/a.py": 1})  # 古いタグの後・前のリリースの前（範囲の外）
+    (repo / "plugins" / "ndf" / ".claude-plugin").mkdir(parents=True)
+    (repo / "plugins" / "ndf" / ".claude-plugin" / "plugin.json").write_text(json.dumps({"version": "1.1.0"}))
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "release 1.1.0")
+    bumped = git(repo, "rev-parse", "HEAD")
+    git(repo, "push", "-q", "origin", "develop", "HEAD:main")  # 本番ブランチへ 1.1.0 を出した
+    merge_pr(repo, 12, "feat/b", {"app/b.py": 1})
+    code, out, _ = call(repo, env, "eval")
+    assert out["metrics"]["from"] == bumped and out["metrics"]["prs"] == 1, out
+
+
 def test_since_overrides_the_tag(repo, env):
     first = git(repo, "rev-parse", "HEAD")
     merge_pr(repo, 11, "feat/a", {"app/a.py": 1})
