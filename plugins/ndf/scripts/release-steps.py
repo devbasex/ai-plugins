@@ -108,6 +108,7 @@ import limits
 from release_lib import version_merge  # noqa: E402
 from release_lib.approval import HeadMoved  # noqa: E402
 from release_lib.context import ReleaseCtx  # noqa: E402
+from release_lib.notes_content import NotesContent  # noqa: E402
 from release_lib.names import changelog_section, changelog_span, h2_lines, next_h2, plugin_of, release_decl  # noqa: E402
 from release_lib.names import drop_untagged, release_tag, require_untagged  # noqa: E402
 from release_lib.included import outside_items, outside_note  # noqa: E402
@@ -1198,39 +1199,37 @@ def cmd_notes(a):
     after, rep_items = replaced.apply(before, reps)  # 後の PR が置き換えた箇条を除く（#1834）
     rep_items += bad
     gone = sum(len(before[n]) - len(after[n]) for n in before)
-    bullets = [f"- {i}" for x in notes for i in after[x.number]]
-    risks = [f"- {i}" for x in notes for i in x.risks]
-    migration = [f"- {i}" for x in notes for i in x.migration]
+    c = NotesContent.of(notes, after, skipped, rep_items, gone)
     fallback = sum(1 for x in notes if x.by_title)
     if path:
-        _emit_approval_notes(root, a, path, prs, data, notes, bullets, risks, migration, skipped, rep_items, gone)
+        _emit_approval_notes(root, a, path, prs, data, c)
         return
-    items = write_notes(root, a.version, plugin_of(root, a), bullets, migration) + unmerged_items(skipped) + rep_items
+    items = write_notes(root, a.version, plugin_of(root, a), c.bullets, c.migration) + unmerged_items(skipped) + rep_items
     emit(
         result(
             TOOL,
             "ok",
             f"{len(notes)} 件の PR の利用者向けの変化を書いた{unmerged_note(skipped)}{outside_note(outside)}",
             items + outside_items(outside),
-            _notes_metrics(a, notes, bullets, migration, skipped, gone, fallback=fallback, outside=outside),
+            _notes_metrics(a, c, fallback=fallback, outside=outside),
         )
     )
 
 
-def _notes_metrics(a, notes, bullets, migration, skipped, gone, **extra):
+def _notes_metrics(a, c: NotesContent, **extra):
     """notes の 2 つの経路に共通の metrics。経路ごとの鍵（approval / fallback）は extra で migration の後へ入れる。"""
     return {
         "version": a.version,
-        "prs": len(notes),
-        "lines": len(bullets),
-        "migration": len(migration),
+        "prs": len(c.notes),
+        "lines": len(c.bullets),
+        "migration": len(c.migration),
         **extra,
-        "unmerged": skipped,
-        "replaced": gone,
+        "unmerged": c.skipped,
+        "replaced": c.gone,
     }
 
 
-def _emit_approval_notes(root, a, path, prs, data, notes, bullets, risks, migration, skipped, rep_items, gone):
+def _emit_approval_notes(root, a, path, prs, data, c: NotesContent):
     """承認の資料（--approval）の経路: 資料を集めて提示物の欄を書き、結果を出す。"""
     verified = [r for r in (a.verified or "").split(",") if r]
     base = release_decl(root, a)[0]
@@ -1244,16 +1243,16 @@ def _emit_approval_notes(root, a, path, prs, data, notes, bullets, risks, migrat
         data,
         lambda r, n: issue_body(root, n) if materials.same_repo(r, decl[1]) else issue_body(root, n, repo=r),
     )
-    results, machine = materials.check_lines(m), materials.risk_lines(m, bool(risks), materials.now_jst())
-    items = materials.write_approval(path, a.version, bullets, risks, verified, ref, migration, results, machine)
-    items += materials.items_of(m) + unmerged_items(skipped) + rep_items
+    results, machine = materials.check_lines(m), materials.risk_lines(m, bool(c.risks), materials.now_jst())
+    items = materials.write_approval(path, a.version, c.bullets, c.risks, verified, ref, c.migration, results, machine)
+    items += materials.items_of(m) + unmerged_items(c.skipped) + c.rep_items
     emit(
         result(
             TOOL,
             "ok",
-            f"提示物の欄を {len(notes)} 件の PR から書いた{unmerged_note(skipped)}",
+            f"提示物の欄を {len(c.notes)} 件の PR から書いた{unmerged_note(c.skipped)}",
             items,
-            _notes_metrics(a, notes, bullets, migration, skipped, gone, approval=str(path)),
+            _notes_metrics(a, c, approval=str(path)),
         )
     )
 
