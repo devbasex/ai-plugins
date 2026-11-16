@@ -729,6 +729,10 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | ai-plugins だけの事情 | — | ai-plugins の運用で決めた値（ブランチの運用・リリースの形・マーケットプレイスの名前など）。NDF の既定や振る舞いへ入れず、ai-plugins の .ndf/ の設定に置く | — | — | `docs/specifications/ndf-design-representative-repos.md` |
 | 製品の約束 | — | NDF が利用者の多様なリポジトリへ約束する価値。ai-plugins の MVV の Value 1〜14 と Vision が持つ | — | — | `docs/specifications/ndf-design-representative-repos.md` |
 | 設計の検査 | — | 設計文書を書いた後に工程が走らせる、言語モデルを呼ばない決まった検査（design-survey.py check。設計のプランのステップ survey-check） | — | — | `docs/specifications/ndf-design-representative-repos.md` |
+| ブランチ戦略の宣言 | — | リポジトリのブランチ戦略・リリース・マージの方法論を表す、1 つの設定ファイルの 1 つの節。スプリントの起点・PR の宛先・結合のしかた・リリースの形と版数の置き場・チャネル・承認を取る場所・マージの主体と方式・マージ前に試す場・CD の有無を持つ | — | — | — |
+| 旧い宣言 | — | ブランチ戦略の宣言へ移す前の、.ndf/worktree.json・.ndf/project.json・.ndf/release.json などに分かれたブランチ戦略・マージ・リリースのキー。移行のコマンドと旧い宣言の検査だけが読む | — | — | — |
+| 宣言の CRUD | — | ブランチ戦略の宣言を作る・読む・更新する・消すの主体と時点。作る・更新する・消すは同じ Skill かスクリプトが行い、人やエージェントが手で書かない | — | — | — |
+| 値の根拠 | — | 既存リポジトリでブランチ戦略の宣言の値を決めた事例（PR・ブランチ・タグ・Release・ruleset・CI のワークフロー）か文書の箇所。番号・パス・行で指し、宣言の作成の結果に残す | — | — | — |
 
 ## NDF の Slack 通知（`ndf-notification`）
 
