@@ -31,12 +31,12 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
-import zlib
 from pathlib import Path
 
 import pytest
@@ -195,9 +195,11 @@ def pytest_sessionfinish(session, exitstatus) -> None:
     run_state.sweep_states(None, kinds=("test-tmp",), tmp_only=True)
 
 
-# ジョブの分割（#882）。**分ける単位はファイルで、割り当てはパスの剰余だけで決める。**
+# ジョブの分割（#882）。**分ける単位はファイルで、割り当ては実測時間で決める。**
 # 同じファイルのテストは同じジョブへ入るため、ファイル単位の前提（モジュールの読み込み・
-# 一時ディレクトリ）が割れない。偏りが出たら実測時間での割り当てへ進む。
+# 一時ディレクトリ）が割れない。CI の実測秒（scripts/pytest-shard-durations.json）の重いファイルから順に、
+# いちばん空いているジョブへ入れる。実測の無いファイルは中央値で数える。どのジョブも同じファイルの一覧から
+# 同じ順で決めるため、和は全体と一致し重ならない（パスの剰余の割り当ては 3.3〜7.3 分に偏った）。
 SHARD_TOTAL_ENV = "SHARD_TOTAL"
 SHARD_INDEX_ENV = "SHARD_INDEX"
 
@@ -216,16 +218,43 @@ def _shard() -> tuple[int, int] | None:
     return int(index), int(total)
 
 
+SHARD_DURATIONS = ROOT / "scripts" / "pytest-shard-durations.json"
+
+
+def _shard_seconds() -> dict[str, float]:
+    """ファイルごとの実測秒。読めなければ空（全ファイルを同じ重さとして数える）。"""
+    try:
+        return {k: float(v) for k, v in json.loads(SHARD_DURATIONS.read_text(encoding="utf-8"))["seconds"].items()}
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return {}
+
+
+def _assign_files(files: list[str], total: int, seconds: dict[str, float]) -> dict[str, int]:
+    """重いファイルから順に、いちばん空いているジョブ（同じなら番号の小さい方）へ割り当てる。"""
+    known = sorted(seconds[f] for f in files if f in seconds)
+    default = known[len(known) // 2] if known else 1.0
+    load = [0.0] * total
+    owner = {}
+    for f in sorted(files, key=lambda f: (-seconds.get(f, default), f)):
+        i = min(range(total), key=lambda j: (load[j], j))
+        owner[f] = i
+        load[i] += seconds.get(f, default)
+    return owner
+
+
 def _select_shard(config, items) -> None:
     shard = _shard()
     if shard is None:
         return
     index, total = shard
-    kept, dropped = [], []
+    rels = {}
     for item in items:
         path = Path(str(item.fspath)).resolve()
-        rel = path.relative_to(ROOT).as_posix() if path.is_relative_to(ROOT) else path.as_posix()
-        (kept if zlib.crc32(rel.encode()) % total == index else dropped).append(item)
+        rels[id(item)] = path.relative_to(ROOT).as_posix() if path.is_relative_to(ROOT) else path.as_posix()
+    owner = _assign_files(sorted(set(rels.values())), total, _shard_seconds())
+    kept, dropped = [], []
+    for item in items:
+        (kept if owner[rels[id(item)]] == index else dropped).append(item)
     if dropped:
         config.hook.pytest_deselected(items=dropped)
         items[:] = kept

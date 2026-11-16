@@ -299,6 +299,18 @@ def test_the_shards_cover_every_item_exactly_once_without_splitting_a_file() -> 
     assert not set.intersection(*files), "同じファイルが複数の shard に割れた"
 
 
+def test_heavy_files_spread_to_the_least_loaded_shards() -> None:
+    """重いファイルから順に空いているジョブへ入り、実測の無いファイルは中央値で数える。"""
+    assign = _root_conftest_module()._assign_files
+    seconds = {"a.py": 100.0, "b.py": 60.0, "c.py": 50.0, "d.py": 10.0}
+
+    owner = assign(["a.py", "b.py", "c.py", "d.py", "new.py"], 2, seconds)
+
+    # 中央値は 60。a(100) → 0、b(60) → 1、new(60) → 1（120）、c(50) → 0（150）、d(10) → 1（130）
+    assert owner == {"a.py": 0, "b.py": 1, "new.py": 1, "c.py": 0, "d.py": 1}
+    assert assign(["x.py", "y.py"], 3, {}) == {"x.py": 0, "y.py": 1}
+
+
 # 前提のコマンドの一覧のキーをファイルの中のクラスまで絞る（#2346）。tmux を使う結合テストの組だけに
 # tmux を課し、同じファイルのほかのテストは tmux の無い実行環境でも走ることを確かめる。
 TMUX_FILE = "plugins/ndf/scripts/tests/test_relay_hub.py"
