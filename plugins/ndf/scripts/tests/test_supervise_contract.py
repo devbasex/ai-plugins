@@ -80,9 +80,7 @@ def make_repo(tmp: Path) -> Path:
     root = tmp / "repo"
     (root / ".ndf").mkdir(parents=True)
     subprocess.run(["git", "init", "-q", "-b", "main", str(root)], check=True, capture_output=True)
-    # 固定したプランは CD のある plugin の種類の宣言で書き出した（release.cd を残す。無いと R10 でタグも外れる）
-    release = {"form": "package-plugin", "plugin": "foo", "runtimes": ["claude"], "cd": {"workflow": "release.yml"}}
-    strategy_fixture.declare(root, "main", release=release)
+    strategy_fixture.declare(root, "main", release={"form": "package-plugin", "plugin": "foo", "runtimes": ["claude"]})
     decl = {"version": 1, "test": {"command": "make test {paths}"}}
     (root / ".ndf" / "supervise.json").write_text(json.dumps(decl) + "\n")
     # 種別リリースは本番ブランチの先頭（origin/main）の宣言を読む（#3308）
