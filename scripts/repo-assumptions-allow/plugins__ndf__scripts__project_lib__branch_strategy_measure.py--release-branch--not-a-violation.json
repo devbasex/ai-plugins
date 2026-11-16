@@ -1,7 +1,0 @@
-{
-  "path": "plugins/ndf/scripts/project_lib/branch_strategy_measure.py",
-  "name": "release-branch",
-  "kind": "not-a-violation",
-  "reason": "版上げの PR の頭（NDF が決める名前の規則）。解析がスプリントの事例から版上げの PR を除くために読む（#3672）",
-  "count": 1
-}

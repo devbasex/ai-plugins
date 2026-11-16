@@ -23,12 +23,12 @@ from pathlib import Path
 from typing import Any, Callable
 
 import branch_strategy as bs
+from strategy_rows import RELEASE_PREFIX
 from project_lib import branch_strategy_write as bw
 from release_lib.land import TRAILER_HEAD, TRAILER_PR, TRAILER_TIP
 
 Api = Callable[[str], tuple[Any, str]]
 VERSION = re.compile(r"\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.\-]+)?")
-RELEASE_PREFIX = "release/v"
 DOCS = ("README.md", "CONTRIBUTING.md", "AGENTS.md")
 DOC_BASE = re.compile(r"--base\s+`?([A-Za-z0-9._/\-]+)`?")
 CD_MARKS = ("gh release create", "action-gh-release", "git push origin --tags", "git tag ")
