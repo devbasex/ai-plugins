@@ -29,8 +29,11 @@ PRESETS = Path(__file__).resolve().parents[1] / "data" / "branch-strategy-preset
 KINDS = ("web-develop", "web-trunk", "mobile", "docs", "plugin")
 LOCK_TARGET = "ndf-branch-strategy"
 LOCK_LIMIT = "branch-strategy.write-lock"
-# 書く順（I1 の途中の状態を作らない順）。セクションを先に書き、旧い 3 ファイルのキーを後に消す
-WRITE_ORDER = ("project.json", "worktree.json", "supervise.json", "release.json")
+# 書く順（I1 の途中の状態を作らない順）。セクションを先に書き、旧い 3 ファイルのキーを後に消す。
+# legacy.FILES は project を先頭に書いてあり、その並びをそのまま使う
+WRITE_ORDER = tuple(legacy.FILES.values())
+# 変える中身が無い計画のハッシュ
+EMPTY_DIGEST = bs.strategy_digest({"diff": [], "before": {}})
 
 
 class WriteError(Exception):
@@ -194,7 +197,7 @@ def plan_remove(root: Path) -> WritePlan:
     """セクションを消す差分とハッシュを作る。セクションが無ければ空の差分。"""
     project = read_decl(Path(root) / ".ndf" / "project.json")
     if not project or bs.SECTION not in project:
-        return WritePlan(digest=bs.strategy_digest({"diff": [], "before": {}}), rebuild=lambda: plan_remove(root))
+        return WritePlan(digest=EMPTY_DIGEST, rebuild=lambda: plan_remove(root))
     after = {k: v for k, v in project.items() if k != bs.SECTION}
     return plan_files(root, {"project.json": after}, lambda: plan_remove(root))
 

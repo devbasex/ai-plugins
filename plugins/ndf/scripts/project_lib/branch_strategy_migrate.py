@@ -97,7 +97,7 @@ def plan_migration(root: Path, moves: list[legacy.Move]) -> tuple[bw.WritePlan, 
     found = {(f.file, f.pointer) for f in legacy.find_legacy(docs, moves)}
     present = [m for m in moves if m.file in docs and legacy.has_pointer(docs[m.file], m.old)]
     if not present:
-        return bw.WritePlan(digest=bs.strategy_digest({"diff": [], "before": {}}), rebuild=lambda: plan_migration(root, moves)[0]), []
+        return bw.WritePlan(digest=bw.EMPTY_DIGEST, rebuild=lambda: plan_migration(root, moves)[0]), []
     after = {fid: copy.deepcopy(doc) for fid, doc in docs.items()}
     project = after.setdefault("project", {"version": 1})
     moved, questions = _collect_moved(docs, present)
