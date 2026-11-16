@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 from typing import NamedTuple
 
+import check_sources
 import delivery
 import gh_call
 import repo
@@ -165,6 +166,8 @@ class RuleFacts(NamedTuple):
     up_to_date: bool
     bypass: str | None
     queue_merge_method: str | None = None  # merge queue の規則の parameters.merge_method（MERGE / SQUASH / REBASE）
+    # 必須のチェックの（名前, 発行元のアプリの ID か None）。管理者の迂回の前に発行元まで照らす（#3506）
+    required: tuple[tuple[str, int | None], ...] = ()
 
 
 # 迂回の可否の強さ（弱いほうを全体の値にする）。`always`・`pull_requests_only` だけが本番の PR を越えられる
@@ -187,7 +190,8 @@ def rule_facts_of(rules: list, bypasses: list[str | None]) -> RuleFacts:
     queue_method = next(
         ((r.get("parameters") or {}).get("merge_method") for r in rules if isinstance(r, dict) and r.get("type") == "merge_queue"), None
     )
-    return RuleFacts(True, required_approvals(rules) or 0, "merge_queue" in kinds, bool(up_to_date), bypass, queue_method)
+    required = tuple(check_sources.rule_pairs(rules))
+    return RuleFacts(True, required_approvals(rules) or 0, "merge_queue" in kinds, bool(up_to_date), bypass, queue_method, required)
 
 
 def classic_facts_of(protection: dict) -> RuleFacts:
@@ -211,6 +215,7 @@ def merge_facts(a: RuleFacts, b: RuleFacts) -> RuleFacts:
         a.up_to_date or b.up_to_date,
         min(known, key=_BYPASS_ORDER.index) if known else None,
         a.queue_merge_method or b.queue_merge_method,
+        a.required + b.required,
     )
 
 
@@ -223,7 +228,9 @@ def classic_facts_from(read, branch: str) -> RuleFacts | None:
     if enabled is False:
         return RuleFacts(False, 0, False, False, None)
     protection, _ = read(f"repos/{{owner}}/{{repo}}/branches/{branch}/protection")
-    return classic_facts_of(protection) if isinstance(protection, dict) else None
+    # 必須のチェックは発行元（`app_id`）まで載る `branches/<b>` の応答から引く（迂回の前に読み直さない）
+    required = tuple(check_sources.protection_pairs(info))
+    return classic_facts_of(protection)._replace(required=required) if isinstance(protection, dict) else None
 
 
 def rule_facts_from(read, branch: str, bypass: bool = True) -> RuleFacts | None:

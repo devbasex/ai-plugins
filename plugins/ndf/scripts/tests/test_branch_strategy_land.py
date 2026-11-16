@@ -17,6 +17,7 @@ import pytest
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(SCRIPTS / "lib"), str(SCRIPTS)]
 import branch_strategy as bs  # noqa: E402
+import release_case  # noqa: E402
 from release_lib import approval_trail, land, land_checks  # noqa: E402
 from release_lib.workflow_trigger import PullEvent, runs_on_pull_head  # noqa: E402
 
@@ -441,30 +442,58 @@ def test_runs_on_pull_head_matches_the_filters_against_the_pull(on, files, runs)
     assert runs_on_pull_head(f"on:\n  {on}\n", event) is runs
 
 
-def test_required_unmet_checks_source_app_before_admin_bypass(monkeypatch):
-    """迂回の前に、宛先の必須のチェックを発行元まで照らす（同じ名前の別の発行元の成功で通さない。#3506）。"""
+def test_checks_failing_checks_required_source_app_before_admin_bypass(monkeypatch):
+    """迂回の前に、宛先の必須のチェックを発行元まで照らす（同じ名前の別の発行元の成功で通さない。#3506）。
+    検査の読み（check run と commit status）は 1 回で、必須のチェックの照合にも使う。"""
     import gh_checks
-    from merged_lib import required_checks as rc
-    from step_result import StepError
 
     port = land.GhPort(Path("."), "o/r", strategy("docs"))
-    req = {"v": rc.Required(["ci", "lint"], {"ci": frozenset({7})})}
-    unmet = {"v": ["ci（アプリ 7）"]}
-    monkeypatch.setattr(rc, "required_checks_of", lambda root, branch: req["v"])
-    monkeypatch.setattr(rc, "unmet_sources", lambda root, sha, r: unmet["v"])
-    monkeypatch.setattr(
-        gh_checks, "fetch_check_runs", lambda repo, sha, empty_ok=False: [{"name": "ci", "status": "completed", "conclusion": "success"}]
-    )
-    monkeypatch.setattr(land.GhPort, "_rest", lambda self, path, method="GET", payload=None: {"statuses": []} if path == ST else None)
-    assert "アプリ 7" in port.required_unmet("main", "h")
-    # 発行元は通ったが、指定の無い必須のチェック lint がまだ先端に現れていない
-    unmet["v"] = []
-    assert "lint" in port.required_unmet("main", "h")
-    req["v"] = rc.Required(["ci"], {"ci": frozenset({7})})
-    assert port.required_unmet("main", "h") is None
+    reads: list = []
+    other = {"id": 1, "name": "ci", "status": "completed", "conclusion": "success", "app": {"id": 9}}
+    runs = {"v": [other]}
 
-    def unreadable(root, branch):
-        raise StepError("HTTP 500", 3)
+    def fetch(repo, sha, empty_ok=False):
+        reads.append("check-runs")
+        return runs["v"]
 
-    monkeypatch.setattr(rc, "required_checks_of", unreadable)
-    assert "照らせない" in port.required_unmet("main", "h")
+    replies = {
+        ST: {"statuses": [{"context": approval_trail.STATUS_CONTEXT, "state": "success"}]},
+        "repos/o/r/commits/h/statuses?per_page=100&page=1": [],
+    }
+    monkeypatch.setattr(gh_checks, "fetch_check_runs", fetch)
+    monkeypatch.setattr(land.GhPort, "_rest", lambda self, path, method="GET", payload=None: reads.append(path) or replies.get(path))
+    required = (("ci", 7), ("lint", None))
+    # 同じ名前の別のアプリ（9）の成功では通さない
+    assert "アプリ 7" in port.checks_failing("h", {"tip": "t"}, required)
+    # 指定のアプリで通ったが、指定の無い必須のチェック lint がまだ先端に現れていない
+    runs["v"] = [other, {**other, "id": 2, "app": {"id": 7}}]
+    reads.clear()
+    assert "lint" in port.checks_failing("h", {"tip": "t"}, required)
+    assert reads == ["check-runs", ST]  # 必須のチェックの照合で検査を読み直さない
+    # 承認の証跡の status を発行元の指定なしで必須にした宛先は、証跡の status が現れていれば通す
+    assert port.checks_failing("h", {"tip": "t"}, (("ci", 7), (approval_trail.STATUS_CONTEXT, None))) is None
+    # 指定のアプリの bot が付けた commit status でも満たせる
+    runs["v"] = [other]
+    replies["repos/o/r/commits/h/statuses?per_page=100&page=1"] = [
+        {"id": 3, "context": "ci", "state": "success", "creator": {"login": "app7[bot]"}}
+    ]
+    replies["apps/app7"] = {"id": 7}
+    assert port.checks_failing("h", {"tip": "t"}, (("ci", 7),)) is None
+    # commit status を読めなければ止める
+    replies["repos/o/r/commits/h/statuses?per_page=100&page=1"] = None
+    assert "読めない" in port.checks_failing("h", {"tip": "t"}, (("ci", 7),))
+
+
+def test_rule_facts_carry_required_checks_with_sources():
+    """必須のチェックは ruleset の事実と同じ 1 回の読み（規則と従来の保護）から、発行元の指定まで引く。"""
+    rules = [
+        {"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": "ci", "integration_id": 7}]}},
+    ]
+    info = {"protection": {"enabled": True, "required_status_checks": {"contexts": ["lint"], "checks": [{"context": "e2e", "app_id": -1}]}}}
+    replies = {
+        "repos/{owner}/{repo}/rules/branches/main": rules,
+        "repos/{owner}/{repo}/branches/main": info,
+        "repos/{owner}/{repo}/branches/main/protection": {},
+    }
+    got = release_case.rule_facts_from(lambda path: (replies.get(path), ""), "main", bypass=False)
+    assert got.required == (("ci", 7), ("lint", None), ("e2e", None))

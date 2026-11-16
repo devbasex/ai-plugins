@@ -112,11 +112,8 @@ class Port(Protocol):
     def admin_intent(self, number: int, sha: str) -> str | None: ...  # 迂回の意図の印を置く（同じ head は置き直さない）。置けなければ理由
     def has_admin_intent(self, number: int, sha: str) -> bool: ...  # head `sha` の意図の印があるか。読めなければ TrailError
     def checks_failing(
-        self, sha: str, pull: dict | None = None
-    ) -> str | None: ...  # head の検査がすべて成功なら None、そろわなければ理由の文
-    def required_unmet(
-        self, branch: str, sha: str
-    ) -> str | None: ...  # 宛先の必須のチェック（発行元の指定を含む）を満たせば None、満たさなければ理由
+        self, sha: str, pull: dict | None = None, required: tuple = ()
+    ) -> str | None: ...  # head の検査と宛先の必須のチェック `required`（発行元の指定を含む）がそろえば None、そろわなければ理由の文
 
 
 def trailers(pr: int, head: str, tip: str, trail_url: str = "") -> str:
@@ -205,7 +202,7 @@ def land_approved(port: Port, strategy, pr: int, approval: Approval, pull: dict 
         why = check_production_pr(strategy, pull, port.production(prod_branch), queue)
         if why:
             return {**out, "reason": why}
-    failing = port.checks_failing(approval.head, pull)  # 取り込みのすべての経路で、入れる前に確かめる
+    failing = port.checks_failing(approval.head, pull, facts.required if admin else ())  # 迂回は必須を発行元まで（#3506）
     if failing:
         return {**out, "reason": f"head {approval.head[:12]} の検査がそろっていない: {failing}"}
     if merge["method"] == "merge-queue":
@@ -220,10 +217,6 @@ def land_approved(port: Port, strategy, pr: int, approval: Approval, pull: dict 
         got = fast_forward_land(port, prod_branch, pr, tip, approval.head, merge["commit"], pull.get("title", ""), approval.url)
         return {**out, "result": got["result"], "reason": got["reason"]}
     if admin:
-        # 迂回は宛先の必須のチェックも飛ばすため、発行元の指定まで照らす（同じ名前の別の発行元の成功で迂回しない。#3506）
-        unmet = port.required_unmet(prod_branch, approval.head)
-        if unmet:
-            return {**out, "reason": f"head {approval.head[:12]} は迂回できない: {unmet}"}
         # 迂回の前に意図の印を置く。置けなければ迂回しない（印が無いとマージ済みの PR を迂回の記録で補えない）
         err = port.admin_intent(pr, approval.head)
         if err:
@@ -417,15 +410,10 @@ class GhPort:
 
         return trail.has_admin_intent(self.repo, number, sha)  # 読めなければ TrailError（land_pr が止める）
 
-    def checks_failing(self, sha: str, pull: dict | None = None) -> str | None:
+    def checks_failing(self, sha: str, pull: dict | None = None, required: tuple = ()) -> str | None:
         from release_lib import land_checks
 
-        return land_checks.checks_failing(self, sha, pull)
-
-    def required_unmet(self, branch: str, sha: str) -> str | None:
-        from release_lib import land_checks
-
-        return land_checks.required_unmet(self, branch, sha)
+        return land_checks.checks_failing(self, sha, pull, required)
 
 
 def _trail_error(write) -> str | None:

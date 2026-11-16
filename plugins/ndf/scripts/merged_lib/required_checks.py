@@ -13,19 +13,12 @@ from typing import NamedTuple
 from urllib.parse import quote
 
 import gh_parts
+from check_sources import bot_app, latest_passed, protection_pairs, rule_pairs, status_passed
 from merged_lib.checks import TOOL
 from step_result import EXIT_UNREADABLE, StepError, emit, result
 
 # 一覧の 1 ページの件数（REST の上限）
 PER_PAGE = 100
-# 従来の保護の `app_id` で「どの発行元でもよい」を表す値
-ANY_APP = -1
-# 必須のチェックを満たす check run の結論（rollup の判定と同じく SKIPPED・NEUTRAL は通過）
-PASSED = frozenset({"success", "neutral", "skipped"})
-# 必須のチェックを満たす commit status の状態
-STATUS_PASSED = "success"
-# GitHub App の bot の login の末尾（`<アプリの slug>[bot]`。commit status の書き手からアプリを引く）
-BOT_SUFFIX = "[bot]"
 
 
 class Required(NamedTuple):
@@ -77,11 +70,6 @@ def _gh_json(root, path: str):
         raise StepError(f"gh api {path} の応答を読めない: {e}", EXIT_UNREADABLE) from e
 
 
-def _app(value) -> int | None:
-    """発行元のアプリの ID（指定が無い・どれでもよい（-1）なら None）。"""
-    return value if isinstance(value, int) and not isinstance(value, bool) and value != ANY_APP and value > 0 else None
-
-
 def _rule_checks(root, branch: str) -> list[tuple[str, int | None]]:
     """宛先の規則（ruleset）の全ページの必須のチェック（名前, 発行元）。"""
     pages = _gh_pages(root, f"repos/{{owner}}/{{repo}}/rules/branches/{quote(branch, safe='')}") or []
@@ -90,25 +78,12 @@ def _rule_checks(root, branch: str) -> list[tuple[str, int | None]]:
         if not isinstance(page, list):
             raise StepError(f"{branch} の規則を読めない: 規則の配列でない: {type(page).__name__}", EXIT_UNREADABLE)
         rules += page
-    return [
-        (str(c["context"]), _app(c.get("integration_id")))
-        for r in rules
-        if isinstance(r, dict) and r.get("type") == "required_status_checks"
-        for c in (r.get("parameters") or {}).get("required_status_checks") or []
-        if isinstance(c, dict) and c.get("context")
-    ]
+    return rule_pairs(rules)
 
 
 def _protection_checks(root, branch: str) -> list[tuple[str, int | None]]:
     """宛先の従来の保護の必須のチェック（名前, 発行元）。`contexts` は発行元を持たない。"""
-    got = _gh_json(root, f"repos/{{owner}}/{{repo}}/branches/{quote(branch, safe='')}") or {}
-    checks = (got.get("protection") or {}).get("required_status_checks") if isinstance(got, dict) else None
-    if not isinstance(checks, dict):
-        return []
-    out = [(str(c), None) for c in checks.get("contexts") or [] if c]
-    return out + [
-        (str(c["context"]), _app(c.get("app_id"))) for c in checks.get("checks") or [] if isinstance(c, dict) and c.get("context")
-    ]
+    return protection_pairs(_gh_json(root, f"repos/{{owner}}/{{repo}}/branches/{quote(branch, safe='')}"))
 
 
 def required_checks_of(root, branch: str) -> Required:
@@ -136,36 +111,6 @@ def admin_required_checks(root, n: int, base: str) -> Required:
         emit(result(TOOL, "stopped", str(e), [{"kind": "pr", "name": f"#{n}", "result": "stopped", "reason": str(e)[:200]}]), e.code)
 
 
-def _latest_passed(runs: list, app: int) -> bool:
-    """発行元 `app` の check run のうち最新（ID が最大）が終わって通ったか。"""
-    mine = [r for r in runs if isinstance(r, dict) and ((r.get("app") or {}).get("id")) == app]
-    if not mine:
-        return False
-    last = max(mine, key=lambda r: int(r.get("id") or 0))
-    return last.get("status") == "completed" and str(last.get("conclusion") or "").lower() in PASSED
-
-
-def _bot_app(root, login: str, cache: dict[str, int | None]) -> int | None:
-    """GitHub App の bot（`<slug>[bot]`）が属するアプリの ID。bot でない・アプリが無ければ None。読めなければ StepError。"""
-    if login not in cache:
-        slug = login.removesuffix(BOT_SUFFIX)
-        got = _gh_json(root, f"apps/{quote(slug, safe='')}") if slug and slug != login else None
-        cache[login] = _app(got.get("id")) if isinstance(got, dict) else None
-    return cache[login]
-
-
-def _status_passed(root, statuses: list, name: str, app: int, cache: dict[str, int | None]) -> bool:
-    """名前 `name` の commit status のうち、発行元 `app` の bot が付けた最新（ID が最大）が success か。"""
-    mine = [
-        s
-        for s in statuses
-        if isinstance(s, dict)
-        and s.get("context") == name
-        and _bot_app(root, str((s.get("creator") or {}).get("login") or ""), cache) == app
-    ]
-    return bool(mine) and max(mine, key=lambda s: int(s.get("id") or 0)).get("state") == STATUS_PASSED
-
-
 def unmet_sources(root, sha: str, req: Required) -> list[str]:
     """発行元を指定された必須のチェックのうち、指定のアプリの check run も、そのアプリの bot が付けた commit status も
     先端 `sha` で通っていないもの（`名前（アプリ ID）`）。読めなければ StepError（全ページを読めないまま迂回しない）。
@@ -174,12 +119,16 @@ def unmet_sources(root, sha: str, req: Required) -> list[str]:
     for name in sorted(req.apps):
         pages = _gh_pages(root, f"repos/{{owner}}/{{repo}}/commits/{sha}/check-runs?check_name={quote(name, safe='')}") or []
         runs = [r for page in pages if isinstance(page, dict) for r in page.get("check_runs") or []]
-        unmet += [(name, app) for app in sorted(req.apps[name]) if not _latest_passed(runs, app)]
+        unmet += [(name, app) for app in sorted(req.apps[name]) if not latest_passed(runs, app)]
     if unmet:
         pages = _gh_pages(root, f"repos/{{owner}}/{{repo}}/commits/{sha}/statuses") or []
         statuses = [s for page in pages if isinstance(page, list) for s in page]
         cache: dict[str, int | None] = {}
-        unmet = [(name, app) for name, app in unmet if not _status_passed(root, statuses, name, app, cache)]
+        unmet = [
+            (name, app)
+            for name, app in unmet
+            if not status_passed(statuses, name, app, lambda login: bot_app(lambda path: _gh_json(root, path), login, cache))
+        ]
     return [f"{name}（アプリ {app}）" for name, app in unmet]
 
 

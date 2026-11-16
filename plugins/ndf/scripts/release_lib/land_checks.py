@@ -4,7 +4,8 @@ GitHub の必須の検査を通らない取り込み（ruleset の無い `strict
 `port` は `land.GhPort`（`_rest`・`_show`・`_git`・`_fetch` を使う）。判定は止める側へ倒す: 読めない事実は検査が未完了とみなす。
 
 - `checks_failing`: check run と commit status（全ページ）・宣言の検査名から、そろっていなければ理由の文を返す
-- `required_unmet`: 管理者の迂回の前に、宛先が要求するチェックが先端に現れ、発行元の指定があればその発行元で通ったかを確かめる
+- `required_unmet`: 管理者の迂回の前に、宛先が要求するチェックが先端に現れ、発行元の指定があればその発行元で通ったかを
+  `checks_failing` と同じ読みで確かめる
 - `no_checks_reason`: 検査が 0 件のとき、PR の head で動く workflow か、Actions 以外の CI があれば待つ理由を返す
 """
 
@@ -33,13 +34,19 @@ def _keyed_pages(port, path: str, key: str) -> list | None:
         page += 1
 
 
+def _status_rows(port, sha: str) -> list | None:
+    """`sha` の commit status（context ごとの最新）を全ページ読む（承認の証跡の status を含む）。読めなければ None。"""
+    rows = _keyed_pages(port, f"repos/{port.repo}/commits/{sha}/status", "statuses")
+    return None if rows is None else [c for c in rows if isinstance(c, dict)]
+
+
 def statuses(port, sha: str) -> list | None:
-    """`sha` の commit status（context ごとの最新）を全ページ読み、承認の証跡の status を除く。読めなければ None。"""
+    """`sha` の commit status を全ページ読み、承認の証跡の status を除く。読めなければ None。"""
     from release_lib import approval_trail as trail
 
-    rows = _keyed_pages(port, f"repos/{port.repo}/commits/{sha}/status", "statuses")
+    rows = _status_rows(port, sha)
     # 承認の証跡の status は検査でなく承認の印（承認の免除の経路では付かない）。reviewed.wait_ci_except と同じく除く
-    return None if rows is None else [c for c in rows if isinstance(c, dict) and c.get("context") != trail.STATUS_CONTEXT]
+    return None if rows is None else [c for c in rows if c.get("context") != trail.STATUS_CONTEXT]
 
 
 def declared_checks(root) -> list[str]:
@@ -51,15 +58,22 @@ def declared_checks(root) -> list[str]:
     return test_strategy.ci_checks(decl) if test_strategy.declares_ci_only(decl) else []
 
 
-def checks_failing(port, sha: str, pull: dict | None = None) -> str | None:
-    """head の検査がすべて成功なら None、そろわなければ理由の文。宣言の検査名がまだ登録されていなければ未完了とする。"""
+def checks_failing(port, sha: str, pull: dict | None = None, required: tuple = ()) -> str | None:
+    """head の検査がすべて成功なら None、そろわなければ理由の文。宣言の検査名がまだ登録されていなければ未完了とする。
+    `required` は管理者の迂回で飛ばす宛先の必須のチェック（`RuleFacts.required`）で、同じ 1 回の読みで発行元まで照らす（`required_unmet`）。"""
     import gh_checks
+    from release_lib import approval_trail as trail
 
     raw = gh_checks.fetch_check_runs(port.repo, sha, empty_ok=True)
-    got = statuses(port, sha)
-    if raw is None or got is None:
+    rows = _status_rows(port, sha)
+    if raw is None or rows is None:
         return "検査の結果を読めない"
-    runs = [(str(r.get("name") or ""), gh_checks.run_result(r)) for r in gh_checks.fold_check_runs(raw)]
+    folded = gh_checks.fold_check_runs(raw)
+    unmet = required_unmet(port, sha, required, raw, folded, rows)
+    if unmet:
+        return unmet
+    got = [c for c in rows if c.get("context") != trail.STATUS_CONTEXT]
+    runs = [(str(r.get("name") or ""), gh_checks.run_result(r)) for r in folded]
     runs += [(str(c.get("context") or ""), str(c.get("state") or "")) for c in got]
     names = {name for name, _ in runs}
     absent = [c for c in declared_checks(port.root) if c not in names]
@@ -71,36 +85,43 @@ def checks_failing(port, sha: str, pull: dict | None = None) -> str | None:
     return ", ".join(bad)[:300] or None
 
 
-def required_unmet(port, branch: str, sha: str) -> str | None:
-    """管理者の迂回の前に、宛先 `branch` の規則と従来の保護が要求するチェックを先端 `sha` で照らす。満たせば None、
-    満たさなければ理由の文。迂回は必須のチェックも飛ばすため、`merged-steps.py` の迂回と同じ `merged_lib.required_checks` で
-    発行元（`integration_id`・`app_id`）まで確かめる（同じ名前の別の発行元の成功で通さない。#3506）。発行元の指定の無い名前は
-    先端に現れたかだけを見る（結果の成否は `checks_failing` が確かめる）。読めなければ止める側へ倒す。"""
-    import gh_checks
-    from merged_lib import required_checks as rc
-    from step_result import StepError
+def required_unmet(port, sha: str, required: tuple, raw: list, folded: list, rows: list) -> str | None:
+    """管理者の迂回の前に、宛先が要求するチェック `required`（名前, 発行元）を先端 `sha` の読んだ結果で照らす。満たせば None、
+    満たさなければ理由の文。迂回は必須のチェックも飛ばすため、発行元（`integration_id`・`app_id`）の指定があれば、そのアプリの
+    check run か、そのアプリの bot が付けた commit status で通ったかを確かめる（同じ名前の別の発行元の成功で通さない。#3506）。
+    指定の無い名前は先端に現れたかだけを見る（承認の証跡の status も必須にされうるため除かない。成否は `checks_failing` が見る）。
+    bot の付けた commit status は、check run で満たせない発行元の指定があるときだけ読む。読めなければ止める側へ倒す。"""
+    import check_sources as cs
 
-    try:
-        req = rc.required_checks_of(port.root, branch)
-        unmet = rc.unmet_sources(port.root, sha, req) if req.apps else []
-    except StepError as e:
-        return f"宛先 {branch} の必須のチェックを照らせない: {str(e)[:200]}"
+    apps = sorted({(n, a) for n, a in required if a is not None})
+    unmet = [(n, a) for n, a in apps if not cs.latest_passed([r for r in raw if r.get("name") == n], a)]
     if unmet:
-        return f"宛先 {branch} の必須のチェックが指定の発行元で通っていない: {', '.join(unmet)[:200]}"
-    plain = [n for n in req.names if n not in req.apps]
-    if not plain:
-        return None
-    raw = gh_checks.fetch_check_runs(port.repo, sha, empty_ok=True)
-    got = statuses(port, sha)
-    if raw is None or got is None:
-        return "宛先の必須のチェックの結果を読めない"
-    seen = {str(r.get("name") or "") for r in gh_checks.fold_check_runs(raw)} | {str(c.get("context") or "") for c in got}
-    absent = [n for n in plain if n not in seen]
-    return (
-        f"宛先 {branch} の必須のチェック {', '.join(absent)[:200]} がまだ始まっていない。始まるのを待って打ち直してください"
-        if absent
-        else None
-    )
+        listed = _status_list(port, sha)
+        if listed is None:
+            return "宛先の必須のチェックの commit status を読めない"
+        cache: dict = {}
+        unmet = [(n, a) for n, a in unmet if not cs.status_passed(listed, n, a, lambda login: cs.bot_app(port._rest, login, cache))]
+    if unmet:
+        return "宛先の必須のチェックが指定の発行元で通っていない: " + ", ".join(f"{n}（アプリ {a}）" for n, a in unmet)[:200]
+    seen = {str(r.get("name") or "") for r in folded} | {str(c.get("context") or "") for c in rows}
+    absent = sorted({n for n, a in required if a is None and n not in seen})
+    if absent:
+        return f"宛先の必須のチェック {', '.join(absent)[:200]} がまだ始まっていない。始まるのを待って打ち直してください"
+    return None
+
+
+def _status_list(port, sha: str) -> list | None:
+    """`sha` の commit status の全件（書き手 `creator` を含む。全ページ）。読めなければ None。"""
+    out: list = []
+    page = 1
+    while True:
+        d = port._rest(f"repos/{port.repo}/commits/{sha}/statuses?per_page={_PAGE}&page={page}")
+        if not isinstance(d, list):
+            return None
+        out += [s for s in d if isinstance(s, dict)]
+        if len(d) < _PAGE:
+            return out
+        page += 1
 
 
 def pull_changed_files(port, base: str | None, sha: str) -> list[str] | None:

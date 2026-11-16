@@ -883,18 +883,16 @@ class FakePort:
         self.ref_ok = True
         self.failing = None
         self.unmet = None  # 宛先の必須のチェック（発行元の指定を含む）を満たさない理由
+        self.required: tuple = ()  # checks_failing へ渡された宛先の必須のチェック
         self.record_error = None
         self.intent_error = None
         self.intents: set = set()  # 意図の印を置いた head
         self.pulls = 0
 
-    def checks_failing(self, sha, pull=None):
+    def checks_failing(self, sha, pull=None, required=()):
         self.calls.append(("checks", sha))
-        return self.failing
-
-    def required_unmet(self, b, sha):
-        self.calls.append(("required", sha))
-        return self.unmet
+        self.required = required
+        return self.failing or (self.unmet if required else None)
 
     def pull(self, n):
         self.pulls += 1
@@ -1050,7 +1048,8 @@ def test_land_admin_bypass_checks_and_records():
     """管理者の迂回は承認した head の検査を確かめ、意図の印を置いてからマージし、head と証跡の URL を記録する。"""
     admin = section("web-develop")
     admin["merge"]["admin"] = True
-    rules, url = facts(approvals=1, bypass="pull_requests_only"), "https://github.com/o/r/pull/5#issuecomment-1"
+    rules = facts(approvals=1, bypass="pull_requests_only", required=(("ci", 7),))
+    url = "https://github.com/o/r/pull/5#issuecomment-1"
     port = FakePort({"head": H1, "base": "main"}, rules)
     port.failing = "pytest=pending"
     out = land.land_approved(port, bs.Strategy(admin), 5, land.Approval(H1, url=url))
@@ -1060,11 +1059,13 @@ def test_land_admin_bypass_checks_and_records():
     out = land.land_approved(port, bs.Strategy(admin), 5, land.Approval(H1, url=url))
     # (c) 迂回のマージの前に、承認した head の意図の印を置く
     assert out["result"] == "merged"
-    assert port.calls == [("checks", H1), ("required", H1), ("intent", H1), ("merge", H1, "merge", True), ("admin_record", H1, url)]
+    assert port.calls == [("checks", H1), ("intent", H1), ("merge", H1, "merge", True), ("admin_record", H1, url)]
+    # 迂回は宛先の必須のチェック（ruleset の事実の 1 回の読み）を同じ検査の読みで照らす
+    assert port.required == (("ci", 7),)
     # 宛先の必須のチェックが指定の発行元で通っていなければ、意図の印を置かず迂回しない
-    port.unmet, port.calls = "宛先 main の必須のチェックが指定の発行元で通っていない: ci（アプリ 7）", []
+    port.unmet, port.calls = "宛先の必須のチェックが指定の発行元で通っていない: ci（アプリ 7）", []
     out = land.land_approved(port, bs.Strategy(admin), 5, land.Approval(H1, url=url))
-    assert out["result"] == "stopped" and "アプリ 7" in out["reason"] and port.calls == [("checks", H1), ("required", H1)]
+    assert out["result"] == "stopped" and "アプリ 7" in out["reason"] and port.calls == [("checks", H1)]
     port.unmet = None
     port.record_error = "unreadable"
     port.calls = []
@@ -1080,7 +1081,7 @@ def test_land_admin_stops_when_intent_cannot_be_placed():
     port.intent_error = "unreadable"
     out = land.land_approved(port, bs.Strategy(admin), 5, land.Approval(H1, url="u"))
     assert out["result"] == "stopped" and "意図の印" in out["reason"]
-    assert port.calls == [("checks", H1), ("required", H1), ("intent", H1)]
+    assert port.calls == [("checks", H1), ("intent", H1)]
 
 
 def test_land_admin_merged_records_by_intent():
