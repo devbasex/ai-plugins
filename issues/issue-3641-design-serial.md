@@ -172,11 +172,12 @@ stateDiagram-v2
 | 待ち | 終わる条件 | 上限を超えたとき |
 | --- | --- | --- |
 | ロックの待ち | ブランチが無くなる・期限を過ぎる | `lock_busy`。`summary` に持ち主の PR の番号と期限 |
-| 一時マージコミットのチェック | `.ndf/project.json` の `ci.required_checks` の名前のチェックが一時マージコミットにそろって終わる。名前ごとに check run を見て、check run が無ければ commit status の `context` を見る（外部の CI は commit status でだけ結果を出す） | `ci_pending`。ロックを返す |
+| 一時マージコミットのチェック | `.ndf/project.json` の `ci.required_checks` の名前のチェックが一時マージコミットにそろって終わる。名前ごとに check run と commit status の `context` の両方を見て、付いている出どころの最新がどれも成功するまで待つ（外部の CI は commit status でだけ結果を出す。同じ名前の両方が付いていれば両方の成功を求める）。ruleset が名前に発行元のアプリを指定していれば、そのアプリのものだけを数える | `ci_pending`。ロックを返す |
 | 作り直しの後のチェック | 同上 | 同上 |
 
 - **作り直しの回数に別の上限を置かない。** 作り直すたびにチェックを待ち直すが、全体の時間は `ci_budget` が区切る。main への入りが速いリポジトリでは `ci_pending` で止まり、`land` を再実行すると最初から（ロックを取るところから）続く
 - **見るチェックは `.ndf/project.json` の `ci.required_checks` である。** merge queue と `strict` は ruleset の必須のチェックを GitHub が見るが、`serial` を使う private の Free には ruleset が無い。`serial` で `ci.required_checks` が空なら、確かめるものが無いため `precondition` で止まる
+- **同じ名前の別の発行元の成功では通さない。** ruleset かブランチ保護が必須のチェックの名前に発行元のアプリを指定していれば、そのアプリの check run と、そのアプリの bot が付けた commit status だけを数える（#3506 の迂回のマージと同じ規則）。指定の無い名前だけを、発行元を問わず名前で照らす
 - **チェックが 1 つでも失敗すれば `staging_failed` で止まる。** 同じ一時マージコミットで再実行しない（組み合わせが落ちたなら、同じ組み合わせで落ちる。merge queue の `queue_removed` と同じ扱い）。ロックを返し、スプリントの経路へ差し戻す
 - 待ちは `lib/waits.py` を使い、自前の `sleep` の繰り返しを書かない
 
