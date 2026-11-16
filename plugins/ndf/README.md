@@ -34,9 +34,8 @@ plugins/ndf/
 
 ## インストール
 
-**以下は正式版（`main`）の手順です。** 検証中の開発版は `develop` に載ります。取得元へ
-`#develop` を足す形で、手順は
-[docs/versioning-and-distribution.md の「開発版を試す」](../../docs/versioning-and-distribution.md#開発版を試す)にあります。
+**取得元は既定ブランチ（`main`）です。** 正式版は `main` から切った版上げの Pull Request のマージで出ます。開発版のチャネル（`#develop`）は 10.27.75 の後でやめました。入れていた利用者が `main` へ戻す手順は
+[docs/versioning-and-distribution.md の「開発版から正式版へ戻す」](../../docs/versioning-and-distribution.md#開発版から正式版へ戻す)にあります。
 
 ### Claude Code
 

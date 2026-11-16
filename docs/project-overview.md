@@ -38,8 +38,8 @@ ai-plugins/
 
 ## インストール方法
 
-**以下は正式版（`main`）の手順です。** 検証中の開発版は `develop` に載ります。手順は
-[versioning-and-distribution.md の「開発版を試す」](versioning-and-distribution.md#開発版を試す)にあります。
+**取得元は既定ブランチ（`main`）です。** 開発版のチャネル（`develop`）は 10.27.75 の後でやめました。入れていた利用者の戻し方は
+[versioning-and-distribution.md の「開発版から正式版へ戻す」](versioning-and-distribution.md#開発版から正式版へ戻す)にあります。
 
 ### Codex
 ```bash

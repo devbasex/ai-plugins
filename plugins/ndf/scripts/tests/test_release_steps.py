@@ -2156,8 +2156,11 @@ def test_dev_workflow_ready_reads_the_default_branch(monkeypatch, tmp_path, code
     assert seen[0][1] == "repos/o/r/contents/.github/workflows/release-dev.yml"
 
 
-def test_dev_run_title_comes_from_the_workflow_file():
+def test_dev_run_title_comes_from_the_workflow_file(tmp_path):
     sys.path.insert(0, str(SCRIPT.parent))
     from release_lib import reviewed
 
-    assert reviewed.dev_run_title(SCRIPT.parents[3], "release-dev.yml", 12) == "release-dev #12"
+    wf = tmp_path / ".github" / "workflows"
+    wf.mkdir(parents=True)
+    (wf / "release-dev.yml").write_text('name: release-dev\nrun-name: "release-dev #${{ inputs.pr }}"\n', encoding="utf-8")
+    assert reviewed.dev_run_title(tmp_path, "release-dev.yml", 12) == "release-dev #12"

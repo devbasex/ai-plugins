@@ -1,23 +1,27 @@
 # 版とリリース
 
-NDF プラグインの版数の付け方と、正式版のリリース・開発版のデプロイの手順・実測・一覧を持つ。**この主題の正本である。**
+NDF プラグインの版数の付け方と、正式版のリリースの手順・実測・一覧を持つ。**この主題の正本である。**
 判断の基準（何を選ぶか）は [AGENTS.md](../AGENTS.md) の「版とリリースの方針」にあり、この文書は
 どう動くかとどう確かめるかを扱う。リリース済み版ごとの判断は確定仕様（[specifications/](specifications/)）にある（v10.17.51 までは [archive/version-decisions/](archive/version-decisions/)）。
 
 ## チャネルと ref
 
-**デプロイのチャネルは 2 つに分ける。`main` が正式版、`develop` が開発版である。**
-開発の変更は `develop` へマージし、正式版として出すときだけ `develop` の承認したコミットを
-`main` へ送る。**これにより、マージとリリースが別の操作になる。**
-
-分けない場合、マージした時点で常用する利用者へ届く。レビューを通った変更であっても、利用者の
-環境で動くかはリリースした後にしか分からない。`release` が定めた「開発版のデプロイ → 本番リリース」の
-2 段階が、チャネルが 1 つでは 1 段階に潰れる。
+**チャネルは正式版の 1 つで、`main`（既定ブランチ）に置く。** 開発は `main` だけで行い（ブランチ戦略 `trunk`。
+宣言は `.ndf/project.json` の `branch_strategy`）、スプリントの Pull Request は `main` から切って `main` へ戻す。
+正式版は、`main` から切った版上げの Pull Request（`release/v<版>`）のマージで出る。
 
 | チャネル | ref | 何が載るか | 誰が登録するか |
 | --- | --- | --- | --- |
-| 正式版 | `main`（既定ブランチ） | 正式版として承認された版だけが載る | 常用する利用者 |
-| 開発版 | `develop` | マージされた変更がそのまま載る | 開発者と、検証に参加する利用者 |
+| 正式版 | `main`（既定ブランチ） | 版上げの Pull Request で版数を上げた正式版と、その後にマージしたスプリントの変更 | 利用者 |
+
+**10.27.75 までは `develop` の開発版チャネルを持っていた。** やめたのは、長く残る 2 本のブランチの間で
+版数と検査の範囲を運ぶ事故を無くすためである（#3672）。入れていた利用者の戻し方は「開発版から正式版へ戻す」にある。
+
+**`main` に載ったスプリントの変更が届く時点はランタイムで違う。** Claude Code は版数でキャッシュするため、
+既存の利用者へ届くのは版上げの Pull Request で版数が変わった時点である。新しく入れる利用者と入れ直す利用者は、
+`main` の先端を前の版数の表示のまま受け取る。Codex は起動時のマーケットプレイスの自動更新で、`main` が進むたびに
+版数を比べずに入れ直すため、スプリントの変更は版上げを待たずに届く。スプリントの Pull Request は
+設計承認ゲート・cross-review・CI を通ってから入る。
 
 **正式版を既定ブランチへ載せるのは、利用者の取得手順を変えないためである。** 取得元の登録に
 ref は保存されず（Claude Code の `known_marketplaces.json` は URL だけを持つ）、登録した時点の
@@ -34,10 +38,6 @@ ref がそのまま基準になる。そのため**既定ブランチを別の�
 Codex は全ブランチを取得するが、登録した ref を基準にするため、clone を手で別のブランチへ
 切り替えても `codex plugin list` の版数は変わらない。
 
-**1 人の利用者は片方のチャネルしか持てない。** 取得元は名前ごとに 1 つしか登録できないため
-（後述）、正式版と開発版を同時には入れられない。常用する利用者が開発版を試すときは、一時的に
-登録し直すか、`claude --plugin-dir` で読み込む。
-
 ## 版の付け方と開発版のデプロイ
 
 **セマンティックバージョニング**:
@@ -53,7 +53,11 @@ semver の順序で除外されるのは、プラグイン間の依存解決（`
 
 **接尾辞には、チャネルを分けるうえでの役割もある。** 公式ドキュメントは release channel の
 注意として、**2 つのチャネルが同じ版数へ解決されると更新が飛ばされる**と書いている。
-`develop` の版数へ接尾辞を付けておけば、`main` の版数と必ず異なる。
+開発版チャネルの版数へ接尾辞を付けておけば、正式版の版数と必ず異なる。
+
+**ai-plugins は 10.27.75 の後、開発版を出さない**（チャネルが正式版の 1 つになったため）。下の表と規則は、
+NDF が開発版チャネルを持つリポジトリで使う版の形として残す。リリース前の直しを使いたいときは、
+スプリントの終わりを待たずに直しを含む正式版の PATCH を版上げの Pull Request で出す。
 
 | 版 | 形 | 意味 |
 | --- | --- | --- |
@@ -107,16 +111,18 @@ codex plugin add ndf@ai-plugins
 claude --plugin-dir plugins/ndf                                             # Claude Code
 ```
 
-## 開発版を試す
+## 開発版から正式版へ戻す
+
+**`#develop` / `--ref develop` で登録していた利用者は、`main` へ登録し直す。** `develop` は 10.27.75 の後は
+更新されないため、登録したままでは新しい版が届かない。登録を切り替えたら、続けて導入の操作を実行する。
 
 ```bash
-# 検証に参加する利用者（開発版）— ref を明示し、続けて導入する
-claude plugin marketplace add https://github.com/devbasex/ai-plugins.git#develop
-claude plugin install ndf@ai-plugins   # 導入済みなら claude plugin update ndf@ai-plugins
+claude plugin marketplace add https://github.com/devbasex/ai-plugins
+claude plugin update ndf@ai-plugins    # 未導入なら claude plugin install ndf@ai-plugins
 
 # Codex は同名の取得元の上書きを拒むため、先に外す
 codex plugin marketplace remove ai-plugins
-codex plugin marketplace add devbasex/ai-plugins --ref develop
+codex plugin marketplace add devbasex/ai-plugins
 codex plugin add ndf@ai-plugins
 ```
 
@@ -128,101 +134,68 @@ ref の書き方は `owner/repo@ref` と `git-url#ref` の 2 つで、
 `claude plugin marketplace add --help` には出ないが実機で動く。Codex は `--ref` を持ち、
 `owner/repo@ref` も受け取る。`claude plugin install` に版を指定する手段は無い（これは確定）。
 
+**承認の前に版上げの Pull Request の中身を試すときは、その head（`release/v<版>`）から隔離した設定ディレクトリへ入れる。**
+`release-verification-steps.py verify-install --ref release/v<版>` が行い、手順は「取得元の登録を確かめる」にある。
+
 **サードパーティのマーケットプレイスは自動更新が既定で無効である。** `main` へ出した版が
 即座に全利用者へ届くわけではなく、利用者が `marketplace update` を実行した時点で届く。
 
 ## 正式版を出す
 
-**`develop` は開発の本流で、`main` は動かした先である。** 正式版のたびに、`develop` から `release/v<版>` を切って
-版上げ・変更履歴・トークン消費の記録のコミットを積み、`release/v<版>` を先に `develop` へ取り込んでから、`release/v<版>` を
-head にした `main` 宛の Pull Request（リリースの PR）を作る。リリース承認はこのリリースの PR の先端に対して**マージの前に**取る。
-`main` へ直接コミットしない。`main` 宛の Pull Request は `develop` に含まれるコミットだけを出す（head は
-`develop` か、先頭が `origin/develop` の祖先の `release/v<版>`。`scripts/check-pr-base.sh`）。
+**正式版のたびに、`main` から `release/v<版>` を切って版上げ・変更履歴・トークン消費の記録のコミットを積み、
+`main` 宛の Pull Request（版上げの PR）を作る。** リリース承認はこの PR の先端に対して**マージの前に**取る。
+`main` へ直接コミットしない。スプリントの Pull Request も `main` から切って `main` へ出す。
 
-**ai-plugins は CD があるため、リリース承認はリリースの PR の上で取る**（`release` の Skill の「リリースの場合」。判定は
-`release-steps.py release-case`）。`main` の ruleset の承認数が 0 なら、承認資料と承認の証跡（承認したコミットの 40 桁）を
-リリースの PR へコメントで置く。誰がいつ承認したかは、GitHub が付けた証跡のコメントの作成者と作成時刻で読む。
-`.github/workflows/release-approval.yml` が証跡を確かめて PR の先端へ必須チェック `ndf/release-approval` を付け、証跡の無い PR・
-証跡と先端の違う PR・承認権限（admin か maintain）の無い人の証跡だけの PR は `main` へマージできない。承認数が 1 以上なら、
-リリースの PR のレビューの承認をリリース承認とみなす。
+**リリース承認ゲートは版上げの PR での 1 回である。** `main` の ruleset はレビューの承認を求めない（承認の数 0）。
+承認資料と承認の証跡（承認したコミットの 40 桁）を版上げの PR へコメントで置き、誰がいつ承認したかは、
+GitHub が付けた証跡のコメントの作成者と作成時刻で読む。`.github/workflows/release-approval.yml` が証跡を確かめて
+PR の先端へ必須チェック `ndf/release-approval` を付け、証跡の無い PR・証跡と先端の違う PR・承認権限（admin か maintain）の
+無い人の証跡だけの PR は `main` へマージできない。
 
-**承認の後に `develop` が進んでも、デプロイは止まらない。** 承認の対象はリリースの PR の先端で、`develop` の先端は比べる相手に
-入れない。承認の後に `release/v<版>` へコミットが足されれば先端が動き、承認を取り直すまでマージされない。承認の後に `develop` へ
-入った変更は、この版の `main` には入らず次のリリースで出る。
+**マージは NDF が merge queue へ入れて行い、管理者の迂回（`--admin`）を使わない。** マージの方式は merge commit である。
+承認の後に `release/v<版>` へコミットが足されれば先端が動き、承認を取り直すまでマージされない。
 
-**`release/v<版>` を `develop` へ取り込むときに版数を持つ箇所が衝突したら、本番の版を取る。** 承認の後に
-開発版のデプロイが `develop` の版数を上げていると衝突する。`release/v<版>` そのものへは `develop` を取り込まず
-（取り込むと承認の外のコミットが `main` へ出る）、`release/v<版>-sync` に `origin/develop` を取り込んで衝突した塊の
-`release/v<版>` の側を取り、`release/v<版>-sync` → `develop` の Pull Request で取り込む。版数の外の箇所が
-衝突すれば解かずに止まる。取り込んだ後の `develop` の版数は本番の版になり、次の開発版のデプロイは次に空いている版で
-決め直す。取り込みはマージのコミットで行い（squash と rebase では行わない）、`release/v<版>` の先頭を
-`develop` の祖先に残す。
-
-**`git push origin develop:main` は使えない。** `main` / `develop` を守る ruleset の bypass は
-`pull_request` で作ってあり、**このモードは Pull Request のマージだけを通し、直接 push は
-管理者でも拒む**。必須のチェックは Pull Request で走るため、`develop` の先端のコミットには
-`push` 起動の 1 個しか結果が付いていない。必須のチェックの一覧は
-`gh api repos/<owner>/<repo>/rules/branches/develop` で読み、ワークフローのジョブとの食い違いは
+**`main` へ直接 push しない。** `main` を守る ruleset は Pull Request のマージだけを通す。必須のチェックの一覧は
+`gh api repos/<owner>/<repo>/rules/branches/main` で読み、ワークフローのジョブとの食い違いは
 突き合わせのチェック（`required-checks-check`、`scripts/check-required-checks.py`）が Pull Request ごとに知らせる。
 
-```console
-$ git push origin develop:main
-remote:
-remote: - 10 of 11 required status checks have not succeeded: .
-remote:
- ! [remote rejected] develop -> main (push declined due to repository rule violations)
-```
-
-この例は必須のチェックが 11 個だったときの観測である。必須のチェックの数を N とすると、
-`N-1 of N` になる。
-
-**この手順では `main` に `develop` へ無いマージコミットが 1 つ積まれる。** そのため `main` は
-`develop` の fast-forward から外れる。**それでよい。** リリースした版を指すのは `main` の先端である。
-`main` と `develop` が同じコミットを指すことは求めない。中身が出した `release/v<版>` と一致していることは
-差分で確かめる（承認の後に `develop` が進んでいれば、`develop` とは一致しない）。
-
 ```bash
-python3 plugins/ndf/scripts/release-steps.py release --version <版> --channel prod --root .   # リリースの PR を作り、承認を待って 10
+python3 plugins/ndf/scripts/release-steps.py release --version <版> --channel prod --root .   # 版上げの PR を作り、承認を待って 10
 python3 plugins/ndf/scripts/release-steps.py approval-post --pr <番号> --approval <承認資料> --root .
 python3 plugins/ndf/scripts/release-steps.py approve --pr <番号> --approved-sha <先端> --by user --root .   # 承認を得てから
 python3 plugins/ndf/scripts/release-steps.py release --version <版> --channel prod --root .   # 先端と承認が一致すればマージ
-git fetch origin && git diff --stat origin/release/v<版> origin/main   # 空であること
 ```
 
-**リリースの PR のマージは管理者の bypass（`--admin`）を使わない。** マージは利用者のアカウントで、承認した先端に固定して行い、
-`main` への push が CD を起動する。必須のチェックか承認が足りなければ GitHub がマージを拒む。
-
-**Pull Request のベースは `develop` である。** 既定ブランチが `main` であるため、`gh pr create`
-は指定しないと `main` を宛先にする。**`--base develop` を必ず付ける。**
+**Pull Request の宛先は `main` である。** 既定ブランチが `main` のため、`gh pr create` は指定しなくても `main` を宛先にする。
 
 **リリースの Pull Request では、重いチェック（`pytest` と `runtime-smoke (*)`）を省く。** 同じ中身を
 2 度試さないためである。判定は各 workflow の `ci-scope` のジョブ（チェックの名前は `pytest-scope`・
 `runtime-smoke-scope`）が `scripts/ci-heavy-skip.py` で行い、次のどちらかのときだけ省く。
 
-- 差分が版数と説明だけ（版上げの `release/v<版>` → `develop`）。説明は `CHANGELOG.md`・
+- 差分が版数と説明だけ（版上げの `release/v<版>` → `main`）。説明は `CHANGELOG.md`・
   `README.md`・`AGENTS.md`・`plugins/**/README.md`・この文書・`docs/metrics/ndf-token-usage/`
   の記録で、`plugin.json` と `marketplace.json` は `version` / `description` の行だけ
-- `develop` への push でその workflow を通ったコミットがあり、head がそこから版数と説明しか
-  変えていない（`main` 宛の本番の Pull Request）。`main` の側に `develop` へ無い変更があれば省かない
+- 宛先のブランチへの push でその workflow を通ったコミットがあり、head がそこから版数と説明しか
+  変えていない
 
-コードやテストを 1 行でも変えた差分では省かない。`develop` / `main` への push では常に回す。
+コードやテストを 1 行でも変えた差分では省かない。`main` への push では常に回す。
 省いても必須のチェックの名前は変わらず、結果は成功で返る。`pytest` はまとめのジョブが、
 `runtime-smoke (*)` はステップだけを飛ばしたジョブが返す。版数の整合のチェック
 （`runtime-plugin-validate` など）は常に回す。
 
-**`main` を進めるのが `release` の「本番リリース」である。** そちらには承認が要る。`develop`
-へのマージは「開発版のデプロイ」にあたり、承認なしで進めてよい（`/ndf:release`）。開発版の PR は手元で作り、マージは
-`.github/workflows/release-dev.yml`（`.ndf/supervise.json` の `release.dev_workflow`）が CI の必須チェックの通過を待って行う。
+**版上げの PR のマージが `release` の「本番リリース」である。** そちらには承認が要る。スプリントの Pull Request の
+`main` へのマージは承認なしで進めてよい（`/ndf:release`）。
 
 **正式版のリリースの Pull Request には、版ごとのトークン消費の記録が載る。** `release` の手順 3 で
 `.ndf/release.json` のリリースコマンド（`scripts/token-usage-snapshot.py --released <版>`）が走り、
 `docs/metrics/ndf-token-usage/<集計日>.md` / `.json` を書く。前の行との比が ±30% を超えた版の
-読み取りだけを、[手引き](metrics/ndf-token-usage/README.md) に従って書き足す。開発版のデプロイでは残さない。
+読み取りだけを、[手引き](metrics/ndf-token-usage/README.md) に従って書き足す。
 
 **正式版のリリースタグと GitHub Release は CD が作る。** タグは利用者が過去の版へ戻るときの目印になる。
 `main` へのマージで `.github/workflows/release-cd.yml` が `release-steps.py publish --revision <マージのコミット>` を走らせ、
 そのコミットの `plugin.json` の版で `ndf--v<版>` のタグと、`CHANGELOG.md` の版の節を本文にした GitHub Release の
-うち足りないものを作る。版に接尾辞（開発版）があれば何も作らない。宣言は `.ndf/project.json` の `delivery` にある。
+うち足りないものを作る。版に接尾辞（開発版）があれば何も作らない。宣言は `.ndf/project.json` の `branch_strategy.release` にある。
+**公開したタグの更新と削除は ruleset で禁じる。**
 
 **手元からタグを打たない。** 同じ名前のタグが別のコミットを指して origin にあると、CD の publish は
 「origin のタグが別のコミットを指す」で止まり、直すにはタグの付け替え（強制 push）が要る。
@@ -259,9 +232,8 @@ CHANGELOG.md を参照する固定の「`## 更新情報`」の節だけを持�
 **説明文書の本文が 5 箇所である。** いずれも利用者が読む入口にあり、古いまま残ると現行版を
 誤って伝えるか、書かれたとおりに実行できない。
 
-**指示書（`AGENTS.md` / `CLAUDE.md`）には版数を書かない。** 開発版のデプロイの `bump` が版数を
-`-dev.<連番>` 付きへ書き換えると、Pull Request で上限に収まった指示書の読み込み量がデプロイの時点で
-伸び、指示書のチェックで止まるためである。
+**指示書（`AGENTS.md` / `CLAUDE.md`）には版数を書かない。** 版上げの `bump` が版数を書き換えると、
+Pull Request で上限に収まった指示書の読み込み量が版上げの時点で伸び、指示書のチェックで止まるためである。
 
 | 箇所 | 何を書くか | 突き合わせ先 |
 | --- | --- | --- |
@@ -289,7 +261,7 @@ CHANGELOG.md を参照する固定の「`## 更新情報`」の節だけを持�
 | 版の形の表の 1 列目の `正式版` / `開発版` / `公開前の確認版` | 3 つの行が 1 つずつある。正式版の行は接尾辞を持たず、開発版の行は `-dev.<連番>`、公開前の確認版の行は `-rc.<連番>` で終わる。開発版と公開前の確認版の行の基底は、正式版の行の基底より大きい |
 | 「の次を開発するなら」 | 1 つ以上ある。右側の基底が左側の基底より大きく、右側が `-dev.<連番>` で終わる |
 
-**この 2 つは現行版と比べない。** `develop` の版は接尾辞付きになりうるため、現行版との一致を求めると
+**この 2 つは現行版と比べない。** 開発版チャネルを持つリポジトリの版は接尾辞付きになりうるため、現行版との一致を求めると
 開発版を出すたびに正しい例が落ちる。正式版の行を現行版へ結び付けるのは、上の基底の規則である。
 
 **位置を決める語は言い換えられない。** 言い換えると読み取れないこととして落ちる。1 列目に同じ語を持つ
@@ -346,7 +318,7 @@ CHANGELOG.md を参照する固定の「`## 更新情報`」の節だけを持�
 ## 取得元の登録を確かめる
 
 **取得元の登録そのものを確かめるときは、設定ディレクトリを隔離する。** 「ランタイムごとの取得と導入」の手元での確認（`claude --plugin-dir`）はリリース対象を
-直接読み込む確認で、取得元の登録から導入までの経路は通らない。開発版チャネルの取得手順は
+直接読み込む確認で、取得元の登録から導入までの経路は通らない。版上げの PR の head を承認の前に試す手順は
 その経路そのものであるため、別の設定ディレクトリを与えて確かめる。**利用者の登録には触れない**
 （claude 2.1.261 / codex-cli 0.153.2 で実測）。
 
@@ -354,11 +326,11 @@ CHANGELOG.md を参照する固定の「`## 更新情報`」の節だけを持�
 ISO=$(mktemp -d "$HOME/.ndf-channel-check.XXXXXX"); mkdir -p "$ISO/claude" "$ISO/codex"
 
 CLAUDE_CONFIG_DIR="$ISO/claude" claude plugin marketplace add \
-  'https://github.com/devbasex/ai-plugins.git#develop'
+  'https://github.com/devbasex/ai-plugins.git#release/v<版>'
 CLAUDE_CONFIG_DIR="$ISO/claude" claude plugin install ndf@ai-plugins
 CLAUDE_CONFIG_DIR="$ISO/claude" claude plugin list          # 版数を見る
 
-CODEX_HOME="$ISO/codex" codex plugin marketplace add devbasex/ai-plugins --ref develop
+CODEX_HOME="$ISO/codex" codex plugin marketplace add devbasex/ai-plugins --ref release/v<版>
 CODEX_HOME="$ISO/codex" codex plugin add ndf@ai-plugins
 CODEX_HOME="$ISO/codex" codex plugin list                   # 版数を見る
 
@@ -369,9 +341,10 @@ rm -rf "$ISO"
   `CODEX_HOME points to "..." , but that path does not exist` で落ちる
 - **隔離先は `$HOME` の下に置く。** `/tmp` の下に置くと Codex が
   `Refusing to create helper binaries under temporary dir "/tmp"` を出す（登録と導入は通る）
-- 取れたことの裏付けは clone の checkout で見る。`develop` の ref で登録すると
+- 取れたことの裏付けは clone の checkout で見る。`release/v<版>` の ref で登録すると
   `git -C "$ISO/claude/plugins/marketplaces/ai-plugins" config --get remote.origin.fetch` は
-  `+refs/heads/develop:refs/remotes/origin/develop` を返す（正式版の登録は `main` のまま）
+  登録した ref を指す refspec を返す（`develop` で実測した値は `+refs/heads/develop:refs/remotes/origin/develop`。正式版の登録は `main` のまま）
+- NDF の工程では `release-verification-steps.py verify-install --ref <ref>` が同じ手順を行う
 
 ## 利用者が過去の版へ戻る
 
