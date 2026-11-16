@@ -362,7 +362,7 @@ def routes(decl: DeliveryDecl, forms=()) -> list[Route]:
         }[decl.rows_state]
         return [Route(MANUAL, "（不明）", None, STAGE_MANUAL, f"{why}ため、リリースの経路を決められない")]
     if not decl.rows:
-        return [Route(NONE, "（無し）", None, STAGE_NONE, "delivery が [] で、デプロイしない")]
+        return [Route(NONE, "（無し）", None, STAGE_NONE, "release.deliveries が [] で、デプロイしない")]
     return [_row_route(row, decl) for row in decl.rows]
 
 

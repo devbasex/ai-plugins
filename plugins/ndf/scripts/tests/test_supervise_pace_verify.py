@@ -16,6 +16,7 @@ import pytest
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import inproc  # noqa: E402
+import strategy_fixture  # noqa: E402
 
 SUPERVISE = SCRIPTS / "supervise.py"
 STEPS = SCRIPTS / "release-steps.py"
@@ -42,9 +43,8 @@ def make_repo(tmp_path: Path, rows, auto: str = "echo check-stg", fast: str = "e
     repo = tmp_path / "repo"
     (repo / ".ndf").mkdir(parents=True)
     subprocess.run(["git", "init", "-q", "-b", "develop", str(repo)], check=True)
-    (repo / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "base_branch": "develop", "production_branch": "main"}))
+    strategy_fixture.declare(repo, "develop", "main", deliveries=rows)
     (repo / ".ndf" / "supervise.json").write_text(json.dumps({"test": {"command": "true"}}))
-    (repo / ".ndf" / "project.json").write_text(json.dumps({"delivery": rows}, ensure_ascii=False))
     secs = {k: {"enabled": True, "modes": MODES, **({"verify": v} if v else {})} for k, v in (("auto", auto), ("fast", fast))}
     (repo / ".ndf" / "pace.json").write_text(json.dumps({"version": 1, **secs}))
     commit_all(repo)
@@ -130,7 +130,7 @@ def test_the_promote_plan_uses_the_declared_branch_names(tmp_path):
     #2104 の AC5・I7: normal の promote はリリースの承認資料を書き、両方の promote-approved が同じ資料で照合する。"""
     from supervise_lib.delivery_templates import PromoteParams, plan_promote
 
-    a = type("A", (), {"base": "trunk", "production_branch": "stable", "issue": "11", "mode": "standard"})()
+    a = type("A", (), {"base": "trunk", "production": "stable", "issue": "11", "mode": "standard"})()
     normal = steps_of(plan_promote(a, str(tmp_path), 600, PromoteParams(verify="true")))
     fast = steps_of(plan_promote(a, str(tmp_path), 600, PromoteParams(mvv=str(tmp_path / "state.json"), verify="true")))
     base = f"{SCRIPTS / 'merged-steps.py'} promote --head trunk --base stable --timeout 600"
