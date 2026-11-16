@@ -56,7 +56,7 @@ PR がマージ済みなら、比較とマージを飛ばし、タグと GitHub 
 ここまでは CD の無い場合（`lib/release_case.py` の no-cd）である。CD のある場合（cd-no-review / cd-review。#2773）の prod は
 承認したコミットの引数を受けず、本番の PR の先端を PR の承認の証跡（cd-no-review）か承認のレビュー（cd-review）と比べ、
 一致すれば管理者の迂回なしでマージし、一致しなければ本番の PR を開いたまま承認ゲート（10）で止まる。dev は
-`.ndf/supervise.json` の release.dev_workflow があれば、開発版の PR のマージをその workflow に任せて結果を待つ。
+ブランチ戦略の宣言の開発版のチャネル（`channels` の `dev`）に workflow があれば、開発版の PR のマージをその workflow に任せて結果を待つ。
 
 record は release --channel prod の後に、本番のリリースの PR（release/v<版> → ベースブランチ。マージ済みが無ければ
 release/v<版>-sync → ベースブランチ）へリリース記録
@@ -66,8 +66,8 @@ release/v<版>-sync → ベースブランチ）へリリース記録
 `record --promote` はリリースの Pull Request で届く経路で、最後にマージしたリリースの Pull Request（--head → --base）へ同じ形の記録を書く。
 `版:` はマージのコミット（`<本番チャネル> <短い SHA>`）である（#837）。
 
-ブランチ（ベースブランチ・本番チャネル）は `.ndf/worktree.json` の base_branch・production_branch（無ければ既定ブランチ）、
-プラグイン（タグ `<名前>--v<版>`・題 `Release: <名前> v<版>`）は引数 → `.ndf/supervise.json` の release.plugin から読む（#1336）。
+ブランチ（ベースブランチ・本番ブランチ）はブランチ戦略の宣言（`.ndf/project.json` の branch_strategy.branches）、
+プラグイン（タグ `<名前>--v<版>`・題 `Release: <名前> v<版>`）は引数 → ブランチ戦略の宣言の release.plugin から読む（#1336）。
 CHANGELOG.md の置き場と見出し・`plugins/<名前>/` の配置・版の形は、形 package-plugin の約束である（form-package-plugin.md）。
 
 notes は PR 本文の `## 利用者向けの変化` の節（無い・「無し」の PR は題名）から、CHANGELOG.md の版の節を
@@ -103,7 +103,7 @@ import step_read  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from merged_lib import trash  # noqa: E402
 from release_lib import approval, bump, carry, cd_result, changed, deploy, included, instructions, materials  # noqa: E402
-from release_lib import others, port_mark, promotion, publish, record, replaced, review_range, reviewed  # noqa: E402
+from release_lib import others, port_mark, publish, record, replaced, review_range, reviewed, strategy_route  # noqa: E402
 import limits
 from release_lib import version_merge  # noqa: E402
 from release_lib.approval import HeadMoved  # noqa: E402
@@ -134,7 +134,7 @@ from step_result import (
 )
 import gh_parts  # noqa: E402
 import repo as repo_lib  # noqa: E402
-import branch_flow  # noqa: E402
+import strategy_rows  # noqa: E402
 import delivery  # noqa: E402
 from release_lib.declared_steps import DECLARATION, DeclarationError, load_steps, run_steps  # noqa: E402,F401
 
@@ -321,7 +321,7 @@ def cmd_changed_plugins(a):
         raise StepError("引数の組み合わせが違う（--decided は --prs・--approval と並べない。--set は --approval と使う）", 2)
     if a.set:
         return emit(changed.set_levels(TOOL, changed.approval_path(root, a.approval), a.set))
-    a.end = promotion.head_ref(root, getattr(a, "head", None))  # 選んで集める取り込み方はリリースブランチの先頭（#3121）
+    a.end = strategy_route.head_ref(root, getattr(a, "head", None))  # 選んで集める取り込み方はリリースブランチの先頭（#3121）
     since, pending, already = other_plugins(root, a)
     skipped, decided = [], None
     if a.decided and pending:
@@ -681,9 +681,11 @@ def cmd_release(a):
     branch = _prepare_release_branch(root, a, plugin)
     on_pr = case is not None and case.has_cd  # CD のある場合は承認を PR の上で照らす（#2773）
     ctx = ReleaseCtx(root, a, plugin, plugins, branch, base, prod)
-    if branch_flow.PROMOTIONS[getattr(a, "promotion", "whole")].selects_units:  # 本番チャネルへ直接出し、戻すマージを入れる（#3121）
+    if (rs := getattr(a, "release_strategy", None)) and strategy_rows.ROWS[
+        rs
+    ].selects_units:  # 本番ブランチへ直接出し、戻すマージを入れる（#3121）
         ops = sys.modules[__name__]  # 戻すマージ（back）は公開の後に打ち、失敗を本番の完了と分けて出す
-        got = promotion.release_selected(ctx, approved, ops, case if on_pr else None)
+        got = strategy_route.release_selected(ctx, approved, ops, case if on_pr else None)
         _published(root, a, plugin, prod, *got)
     if on_pr:
         reviewed.release_prod(ctx, case, _prod_ops())
@@ -1078,12 +1080,12 @@ def cmd_approval_facts(a):
 
 
 def cmd_release_branch(a):
-    """選んで集める取り込み方のリリースブランチを本番チャネルから組んで push する（#3121 の E10。本体は release_lib/promotion.py）。"""
+    """選んで集める取り込み方のリリースブランチを本番チャネルから組んで push する（#3121 の E10。本体は release_lib/strategy_route.py）。"""
     root = git_root(a.root)
     prod = a.production or release_decl(root, a)[1]
     try:
-        got = promotion.build_branch(root, f"{branch_flow.RELEASE_PREFIX}{a.version}", prod, a.units)
-    except branch_flow.ReleaseBuildError as e:
+        got = strategy_route.build_branch(root, f"{strategy_rows.RELEASE_PREFIX}{a.version}", prod, a.units)
+    except strategy_rows.ReleaseBuildError as e:
         raise StepError(str(e)) from e
     items = [{"kind": "branch", "name": u, "result": "merged", "head": h} for u, h in got["units"].items()]
     emit(result(TOOL, "ok", f"{got['branch']} を {prod} から組んだ（先頭 {got['head'][:12]}）", items, got))
@@ -1308,7 +1310,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--approved-sha", metavar="SHA", help="prod の CD が無い場合: 承認したコミット（approval-facts の metrics.approved_sha。40 桁）"
     )
     g.add_argument("--approval", help="prod の CD が無い場合: 承認資料（「承認したコミット」と「承認の記録」の欄を読む）")
-    p.add_argument("--promotion", choices=tuple(branch_flow.PROMOTIONS), default="whole", help="本番への取り込み方（開始時の値）")
+    p.add_argument(
+        "--release-strategy", choices=tuple(strategy_rows.ROWS), help="本番への取り込み方（スプリントの開始時の値。単位を選ぶ行だけ渡す）"
+    )
     p.set_defaults(func=cmd_release)
     p = sub.add_parser(
         "release-branch", parents=[common], help="選んだスプリントブランチを本番チャネルから組んだリリースブランチへ集めて push する"

@@ -1,7 +1,7 @@
 """リリースの設定から、マージの宛先の判定とリリースの経路を決める（#1336）。
 
-宣言は `.ndf/worktree.json`（ベースブランチ・本番チャネル）・`.ndf/project.json` の `delivery`・`.ndf/supervise.json` の
-`release` の 3 つ。ファイルと git の参照（既定ブランチ）だけを読み、`gh` を呼ばない。判定は保存せず、呼ぶたびに作り直す。
+宣言はブランチ戦略の宣言（`.ndf/project.json` の `branch_strategy`。ブランチ名・`release`・`release.deliveries`）の 1 か所
+（#3672）。メインディレクトリのファイルだけを読み、`gh` を呼ばない。判定は保存せず、呼ぶたびに作り直す。
 
 - `judge_target`: 宛先のブランチへのマージが自動反映の本番チャネルへ入るか（`production` / `not-production` /
   `undetermined`）。決められないときは `undetermined` にし、止める側へ倒す
@@ -15,13 +15,10 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
-from pathlib import Path
 
+import branch_strategy
 import limits
-import decl
-import project_decl
 import repo
 
 PRODUCTION, NOT_PRODUCTION, UNDETERMINED = "production", "not-production", "undetermined"
@@ -46,14 +43,13 @@ MANUAL_PRODUCTION = "manual-production"  # 起点と本番チャネルが同じ�
 DEFAULT_RESULT_TIMEOUT, RESULT_TOTAL_LIMIT = limits.seconds("delivery.cd-result"), limits.seconds("delivery.cd-result-total")
 
 CD_SETUP_REF = "ndf の release の Skill の references/cd-setup.md"
-WT = f".ndf/{repo.WORKTREE_DECL.name}"
-PJ = str(project_decl.DECL)
-SV = ".ndf/supervise.json"
+DECL = f".ndf/project.json の {branch_strategy.SECTION}"
+DL = f"{DECL}.release.deliveries"
 
 
 @dataclass
 class DeliveryDecl:
-    """判定に使う宣言の値。`rows` は `delivery` が並びなら並び、不明か無ければ `None`（`[]` は届けない）。"""
+    """判定に使う宣言の値。`rows` は `release.deliveries` の並び、無ければ `None`（`[]` は届けない）。"""
 
     base: str | None = None
     production: str | None = None
@@ -61,7 +57,7 @@ class DeliveryDecl:
     release: dict | None = None
     problems: list[str] = field(default_factory=list)
     sources: dict = field(default_factory=dict)
-    unknown: str | None = None  # delivery が {"unknown": ...} のときの理由
+    unknown: str | None = None  # 届け先が不明のときの理由（宣言はスキーマで並びに限るので、今は使わない）
 
     @property
     def rows_state(self) -> str | None:
@@ -130,7 +126,7 @@ class CdGuidance:
         '{"target": "<届け先>", "kind": "auto", "trigger": "<CD の名前>", "channel": "production", "versioned": false, '
         '"result": {"workflow": "<ワークフローのファイル名>"}}'
     )
-    manual_reason_how: str = f"あえて CD を置かないなら、{PJ} の delivery の手動の行に manual_reason（理由）と trigger（手順）を書く"
+    manual_reason_how: str = f"あえて CD を置かないなら、{DL} の手動の行に manual_reason（理由）と trigger（手順）を書く"
 
     def as_item(self) -> dict:
         return {
@@ -169,26 +165,16 @@ def _row_problem(row: dict, where: str) -> str | None:
     return _result_problem(row["result"], where) if row.get("result") is not None else None
 
 
-def _rows_of(project: dict, problems: list[str]) -> tuple[list[dict] | None, str | None]:
-    if "delivery" not in project or project.get("delivery") is None:
-        return None, None
-    v = project["delivery"]
-    if isinstance(v, dict) and isinstance(v.get("unknown"), str):
-        return None, v["unknown"]
-    if not isinstance(v, list):
-        problems.append(f'{PJ} の delivery: 並びでも {{"unknown": ...}} でもない')
-        return None, None
+def _rows_of(release: dict | None, problems: list[str]) -> list[dict] | None:
+    """`release.deliveries` の行（形はスキーマ `$defs/Delivery` が確かめた）。無ければ None。"""
+    v = (release or {}).get("deliveries")
+    if v is None:
+        return None
     for i, row in enumerate(v):
-        if not isinstance(row, dict) or row.get("kind") not in ("auto", "manual"):
-            problems.append(f"{PJ} の delivery[{i}]: kind が auto / manual のオブジェクトでない")
-            return None, None
-        if row.get("channel") is not None and row["channel"] not in ("production", "base"):
-            problems.append(f"{PJ} の delivery[{i}]: channel が production / base でない")
-            return None, None
-        if why := _row_problem(row, f"delivery[{i}]"):
-            problems.append(f"{PJ} の {why}")
-            return None, None
-    return v, None
+        if why := _row_problem(row, f"deliveries[{i}]"):
+            problems.append(f"{DECL}.release の {why}")
+            return None
+    return v
 
 
 def _resolve_channels(rows: list[dict] | None, base: str | None, production: str | None) -> list[dict] | None:
@@ -203,83 +189,38 @@ def _resolve_channels(rows: list[dict] | None, base: str | None, production: str
 
 
 def build(
-    wt: dict,
-    project: dict,
+    strategy: branch_strategy.Strategy | None,
     release=None,
     *,
-    default_branch: str | None = None,
     problems: list[str] | None = None,
     base: str | None = None,
     production: str | None = None,
-    channel_base: str | None = None,
 ) -> DeliveryDecl:
-    """読んだ宣言の中身から組む。`base` / `production` を渡せばそれを先に使う（引数が宣言より先に効く）。
+    """読んだ宣言から組む。`base` / `production` を渡せばそれを先に使う（引数が宣言より先に効く）。
 
-    `channel_base` を渡せば、`channel: base` の行はそのブランチへ解く（認可に関わる判定の値。`load_delivery` が
-    メインディレクトリの `base_branch` を渡す）。渡さなければ起点（`base`）で解く。
+    `release` を渡せば宣言の `release` の代わりに使う（スプリントのスナップショットの値）。`channel: base` の行は宣言の
+    `branches.base` で解く（認可に関わる判定の値。Pull Request の head の値で行を本番から外せないようにする。#2363）。
+    宣言を読めなかった（`strategy` が None）ときは、ブランチ名が決まらず判定は止める側へ倒れる。
     """
     problems = list(problems or [])
     sources = {}
-    wt_base = wt.get("base_branch") if isinstance(wt.get("base_branch"), str) and wt.get("base_branch") else None
-    b = base or wt_base or default_branch
-    sources["base"] = "引数" if base else (f"{WT} の base_branch" if wt_base else "既定ブランチ")
-    p, sources["production"] = (production, "引数") if production else repo.production_of(wt, default_branch)
-    rows, unknown = _rows_of(project, problems)
-    rows = _resolve_channels(rows, channel_base or b, p)
-    rel = release if isinstance(release, dict) else None
-    return DeliveryDecl(b, p, rows, rel, problems, sources, unknown)
-
-
-def _read_supervise(f: Path) -> tuple[dict, str | None]:
-    try:
-        data = json.loads(f.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as e:
-        return {}, f"{SV}: JSON として読めない（{e}）"
-    return (data, None) if isinstance(data, dict) else ({}, f"{SV}: 最上位がオブジェクトでない")
+    sec = strategy.section if strategy is not None else {}
+    b = base or (strategy.base if strategy else None)
+    sources["base"] = "引数" if base else f"{DECL}.branches.base"
+    p = production or (strategy.production if strategy else None)
+    sources["production"] = "引数" if production else f"{DECL}.branches.production"
+    rel = release if isinstance(release, dict) else sec.get("release")
+    rows = _rows_of(rel, problems)
+    rows = _resolve_channels(rows, (strategy.base if strategy else None) or b, p)
+    return DeliveryDecl(b, p, rows, rel if isinstance(rel, dict) else None, problems, sources, None)
 
 
 def load_delivery(root) -> DeliveryDecl:
-    """`root` のリポジトリの宣言を読む。例外を上げず、壊れた宣言は `problems` に書く。"""
-    problems = []
-    wt, why = repo.read_worktree_decl(root)
-    if why:
-        problems.append(why)
-    project, why = project_decl.read_project_decl_checked(root)
-    if why:
-        problems.append(why)
-    sv = {}
-    main = repo.main_dir(root)
-    for base in dict.fromkeys(p for p in (Path(root), main) if p):
-        f = Path(base) / SV
-        if f.is_file():
-            sv, why = _read_supervise(f)
-            if why:
-                problems.append(why)
-            break
-    default = repo.default_branch(root)
-    return build(
-        wt,
-        project,
-        sv.get("release"),
-        default_branch=default,
-        problems=problems,
-        channel_base=_main_base(wt, main, root) or default,
-    )
-
-
-def _main_base(wt: dict, main, root) -> str | None:
-    """`channel: base` を解く起点のブランチ。メインディレクトリの `worktree.json` の `base_branch` から読む。
-
-    `channel: base` の行は本番チャネルの判定（リリース承認ゲート）に効くため、Pull Request の head の `base_branch` で
-    行を本番から外せないようにする（#2363 round 6）。メインディレクトリにファイルかキーが無ければ `None`（既定ブランチ）で、
-    呼ばれた木の値で補わない。メインディレクトリが解けない（git でない）か呼ばれた木そのものなら、読んだ `wt` の値を使う。
-    """
-    if main is None or Path(main).resolve() == Path(root).resolve():
-        got = wt.get("base_branch")
-    else:
-        f = Path(main) / WT
-        got = decl.load_file(f, repo.WORKTREE_DECL.name)[0].get("base_branch") if f.is_file() else None
-    return got if isinstance(got, str) and got else None
+    """`root` のリポジトリ（メインディレクトリ）の宣言を読む。例外を上げず、読めない宣言は `problems` に書く。"""
+    try:
+        return build(repo.strategy_of(root))
+    except branch_strategy.StrategyError as e:
+        return build(None, problems=[e.reason])
 
 
 def _row_text(row: dict) -> str:
@@ -306,7 +247,7 @@ def cd_guidance(decl: DeliveryDecl) -> CdGuidance | None:
     if decl.problems:
         return None
     if decl.rows is None:
-        return CdGuidance(f"{PJ} の delivery の宣言")
+        return CdGuidance(f"{DL} の宣言")
     rows = [r for r in decl.rows if r.get("kind") == "manual" and not str(r.get("manual_reason") or "").strip()]
     if rows:
         return CdGuidance("CD か、CD を置かない理由（manual_reason）", tuple(str(r.get("target") or "") for r in rows))
@@ -330,16 +271,16 @@ def dev_channel(decl: DeliveryDecl) -> DevChannel:
         return DevChannel(SEPARATE_BRANCH)
     if decl.rows_state:
         why = {"problems": "読めない", "unknown": "不明", "absent": "無い"}[decl.rows_state]
-        return _no_channel(f"起点と本番のブランチが同じで、{PJ} の delivery が{why}")
+        return _no_channel(f"ベースブランチと本番ブランチが同じで、{DL} が{why}")
     hit = _first_merge_row(decl)
     if hit:
-        return _no_channel(f"delivery[{hit[0]}] が本番チャネル {decl.production} へのマージで自動で本番系へ届く")
+        return _no_channel(f"deliveries[{hit[0]}] が本番チャネル {decl.production} へのマージで自動で本番系へ届く")
     prod = [(i, r) for i, r in enumerate(decl.rows) if r.get("production") is True]
     if not prod:
         return _no_channel("起点と本番のブランチが同じで、本番系へ届く行（production: true）が宣言されていない")
     for i, row in prod:
         if row.get("kind") != "manual":
-            return _no_channel(f"delivery[{i}] は本番系へ自動で届く")
+            return _no_channel(f"deliveries[{i}] は本番系へ自動で届く")
     return DevChannel(MANUAL_PRODUCTION)
 
 
@@ -353,29 +294,29 @@ def judge_target(decl: DeliveryDecl, target: str) -> Verdict:
     def v(value, reason):
         return Verdict(target, value, reason, items)
 
-    append_decl(decl.sources.get("production", f"{WT} の production_branch"), decl.production or "（無し）")
+    append_decl(decl.sources.get("production", f"{DECL}.branches.production"), decl.production or "（無し）")
 
     if decl.problems:
         return v(UNDETERMINED, "宣言を読めない: " + " / ".join(decl.problems))
     if not target:
         return v(UNDETERMINED, "Pull Request の宛先のブランチを読めない")
     if not decl.production:
-        return v(UNDETERMINED, "本番チャネルを決められない（production_branch も origin/HEAD も無い）")
+        return v(UNDETERMINED, "本番ブランチを決められない（ブランチ戦略の宣言が無い）")
     if target != decl.production:
         return v(NOT_PRODUCTION, f"宛先 {target} は本番チャネル {decl.production} でない")
     if decl.rows is None:
-        why = {"unknown": f"delivery が不明（{decl.unknown}）", "absent": "delivery が無い"}[decl.rows_state]
-        append_decl(f"{PJ} の delivery", {"unknown": "unknown", "absent": "（無し）"}[decl.rows_state])
+        why = {"unknown": f"届け先が不明（{decl.unknown}）", "absent": "release.deliveries が無い"}[decl.rows_state]
+        append_decl(DL, {"unknown": "unknown", "absent": "（無し）"}[decl.rows_state])
         return v(
             UNDETERMINED,
-            f"宛先 {target} は本番チャネルだが、{why}ため反映の仕方を決められない（project-decl.py で delivery を宣言すれば次から判定できる）",
+            f"宛先 {target} は本番チャネルだが、{why}ため反映の仕方を決められない（project-decl.py branch-strategy で release.deliveries を書けば次から判定できる）",
         )
     hit = _first_merge_row(decl)
     if hit:
         i, row = hit
-        append_decl(f"{PJ} の delivery[{i}]", _row_text(row))
-        return v(PRODUCTION, f"delivery[{i}]（{row.get('target')}）は {target} へのマージで自動で反映する")
-    append_decl(f"{PJ} の delivery", f"{len(decl.rows)} 行")
+        append_decl(f"{DL}[{i}]", _row_text(row))
+        return v(PRODUCTION, f"deliveries[{i}]（{row.get('target')}）は {target} へのマージで自動で反映する")
+    append_decl(DL, f"{len(decl.rows)} 行")
     return v(NOT_PRODUCTION, f"{target} へのマージで自動で反映する delivery の行が無い")
 
 
@@ -413,8 +354,8 @@ def routes(decl: DeliveryDecl, forms=()) -> list[Route]:
     if decl.rows is None:
         why = {
             "problems": "宣言を読めない（" + " / ".join(decl.problems) + "）",
-            "unknown": f"{PJ} の delivery が不明（{decl.unknown}）",
-            "absent": f"{PJ} に delivery も {SV} に release.form も無い",
+            "unknown": f"{DL} が不明（{decl.unknown}）",
+            "absent": f"{DECL} に release.deliveries も release.form も無い",
         }[decl.rows_state]
         return [Route(MANUAL, "（不明）", None, STAGE_MANUAL, f"{why}ため、リリースの経路を決められない")]
     if not decl.rows:
@@ -439,10 +380,10 @@ def release_way(decl: DeliveryDecl, forms=()) -> ReleaseWay:
     rs = routes(decl, forms)
     if needs_version(rs):
         return ReleaseWay(BUILD)
-    fix = f"{PJ} の delivery か {SV} の release.form を直す"
+    fix = f"{DL} か {DECL}.release.form を直す"
     if decl.problems:
         return ReleaseWay(REFUSE, f"宣言を読めない（{' / '.join(decl.problems)}）。{fix}")
     manual = [str(r.note) for r in rs if r.stage == STAGE_MANUAL]
     if manual:
         return ReleaseWay(REFUSE, f"{' / '.join(manual)}。{fix}")
-    return ReleaseWay(SKIP, f"{' / '.join(_reach_text(r) for r in rs)}（{PJ} の delivery）")
+    return ReleaseWay(SKIP, f"{' / '.join(_reach_text(r) for r in rs)}（{DL}）")

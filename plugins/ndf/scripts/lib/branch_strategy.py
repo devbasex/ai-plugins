@@ -27,9 +27,12 @@ if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import branch_strategy_legacy as legacy  # noqa: E402
+import strategy_rows as rows  # noqa: E402
 from exit_codes import EXIT_PRECONDITION, EXIT_UNREADABLE, EXIT_VIOLATION  # noqa: E402
 
 SECTION = legacy.SECTION
+# スプリントの目録（`sprint.json`）とプランの引数に控える、開始時のスナップショットのキー（決定 9）
+SNAPSHOT_KEY = "ブランチ戦略"
 SCHEMA = Path(__file__).resolve().parents[2] / "skills" / "development-workflow" / "schemas" / "project.schema.json"
 DEF = "BranchStrategy"
 PR_KINDS = ("sprint", "doc", "release")
@@ -84,6 +87,25 @@ class Strategy:
             return sprint_branch
         return self.base
 
+    @property
+    def row(self) -> rows.Row:
+        """取り込み方の表の行（行の名前は `release_strategy` の値）。"""
+        return rows.ROWS[self.release_strategy]
+
+    @property
+    def reviews(self) -> rows.ReviewUnits:
+        """レビューの単位（`reviews`。書いていない種類は既定値）。"""
+        return rows.reviews_of(self.section.get("reviews"))
+
+    @property
+    def dev_workflow(self) -> str | None:
+        """開発版のチャネル（`channels` の `dev`）のワークフローのファイル名。開発版が無ければ None。"""
+        return next((c["workflow"] for c in self.section["channels"] if c["name"] == "dev"), None)
+
+    def check_target(self) -> str:
+        """検査の Pull Request の宛先（スプリントの PR と同じ。`trunk` ではベースブランチと本番ブランチが同じ）。"""
+        return self.pr_target("sprint")
+
 
 def _schema() -> dict:
     if "doc" not in _schema_cache:
@@ -130,6 +152,8 @@ def validate_section(section: Any) -> list[dict]:
         same = branches.get("base") is not None and branches.get("base") == branches.get("production")
         if ("release_strategy" in section) and ((section["release_strategy"] == "trunk") != same):
             failed.append({"rule": "R1", "pointer": "/branches"})
+    if not failed and isinstance(section, dict) and section.get("reviews"):
+        failed += [{"rule": "reviews", "pointer": "/reviews", "why": why} for why in rows.review_problems(section["reviews"])]
     return sorted(failed, key=lambda f: (f["rule"], f["pointer"]))
 
 
@@ -210,6 +234,20 @@ def snapshot_section(strategy: Strategy, source: str) -> dict:
     """スプリントの開始時に控えるセクションの全体（決定 9）。"""
     section = json.loads(json.dumps(strategy.section))
     return {"source": source, "digest": strategy_digest(section), "section": section}
+
+
+def from_snapshot(snap: Any) -> Strategy:
+    """スプリントの開始時のスナップショット（`snapshot_section` の形）を読む（I13）。
+
+    スナップショットはセクションの全体を持つので、今の宣言を読み直さない。形が違う・スキーマに落ちるときは止まる（I3）。"""
+    section = snap.get("section") if isinstance(snap, dict) else None
+    if not isinstance(section, dict):
+        raise StrategyError(f"スプリントの開始時のスナップショット（`{SNAPSHOT_KEY}`）が無いか、形が違う。スプリントを始め直してください")
+    failed = validate_section(section)
+    if failed:
+        where = "、".join(f"{f['rule']} `{f['pointer'] or '/'}`" for f in failed)
+        raise StrategyError(f"スプリントの開始時のスナップショットがスキーマに落ちる: {where}", EXIT_VIOLATION)
+    return Strategy(section)
 
 
 def _section_leaves(value: Any, prefix: str = "") -> dict[str, Any]:

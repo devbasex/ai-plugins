@@ -84,7 +84,7 @@ def drop_untagged(root, lines, plugin, since, version) -> list[dict]:
 
 
 def plugin_of(root, a) -> str:
-    """配るプラグイン: --plugin → `.ndf/supervise.json` の release.plugin。決まらなければ止める。"""
+    """配るプラグイン: --plugin → ブランチ戦略の宣言の release.plugin。決まらなければ止める。"""
     return _plugin_from(a, delivery.load_delivery(root))
 
 
@@ -93,7 +93,7 @@ def _plugin_from(a, d):
     arg = getattr(a, "plugin", None) or (getattr(a, "plugins", None) or "").split(",")[0].strip() or None
     plugin = arg or (d.release or {}).get("plugin")
     if not plugin:
-        raise StepError("配るプラグインを決められない（--plugin か .ndf/supervise.json の release.plugin）", EXIT_PRECONDITION)
+        raise StepError("配るプラグインを決められない（--plugin かブランチ戦略の宣言の release.plugin）", EXIT_PRECONDITION)
     return plugin
 
 
@@ -107,13 +107,11 @@ def changelog_section(root, version, plugin):
 
 def release_decl(root, a=None):
     """リリースのブランチと名前（#1336 の決定 8）: (ベースブランチ, 本番チャネル, 配るプラグイン)。
-    ブランチは `.ndf/worktree.json` の base_branch・production_branch（無ければ既定ブランチ）、プラグインは引数の
-    --plugin / --plugins → `.ndf/supervise.json` の release.plugin の順に決める。決まらなければ止める。"""
+    ブランチはブランチ戦略の宣言の `branches`、プラグインは引数の --plugin / --plugins → 宣言の release.plugin の順に
+    決める。決まらなければ止める。"""
     d = delivery.load_delivery(root)
     if d.problems:
         raise StepError("宣言を読めない: " + " / ".join(d.problems), EXIT_PRECONDITION)
     if not (d.base and d.production):
-        raise StepError(
-            "ベースブランチか本番チャネルを決められない（.ndf/worktree.json の base_branch・production_branch）", EXIT_PRECONDITION
-        )
+        raise StepError("ベースブランチか本番ブランチを決められない（ブランチ戦略の宣言の branches）", EXIT_PRECONDITION)
     return d.base, d.production, _plugin_from(a, d)

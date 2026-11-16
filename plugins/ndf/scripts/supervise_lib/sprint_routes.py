@@ -60,7 +60,7 @@ def routes_of(a) -> list:
     """リリースの経路（apply_decls が載せる a.routes。無ければ release.form だけから導く）。"""
     rs = getattr(a, "routes", None)
     if rs is None:
-        d = delivery.build({}, {}, a.release, base=a.base, production=getattr(a, "production_branch", None))
+        d = delivery.build(None, a.release, base=a.base, production=getattr(a, "production", None))
         rs = delivery.routes(d, tuple(RELEASE_FORMS))
     return rs
 

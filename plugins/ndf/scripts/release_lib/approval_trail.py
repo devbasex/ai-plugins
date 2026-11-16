@@ -182,7 +182,7 @@ def render_admin_record(sha: str, trail_url: str) -> str:
     """迂回の記録の本文。証跡の印を持たない（証跡の判定に数えない）。"""
     return (
         f"{ADMIN_MARK}\n## 管理者の迂回でマージした\n\n{ADMIN_SHA_LINE} `{ac.parse_sha(sha)}`\n"
-        f"{ADMIN_TRAIL_LINE} {trail_url or '（読めない）'}\n宣言: `.ndf/project.json` の `production_merge.admin`\n"
+        f"{ADMIN_TRAIL_LINE} {trail_url or '（読めない）'}\n宣言: `.ndf/project.json` の `branch_strategy.merge.admin`\n"
     )
 
 

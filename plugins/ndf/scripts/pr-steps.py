@@ -25,7 +25,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import deps  # noqa: E402
 
-deps.require("md", "durable", "waits")
+deps.require("md", "durable", "waits", "jsonschema")
 import md  # noqa: E402
 from step_result import (
     EXIT_PRECONDITION,
@@ -41,6 +41,7 @@ from step_result import (
 )
 from closing import closing_issues, closing_words  # noqa: E402
 import repo  # noqa: E402
+import branch_strategy  # noqa: E402
 from repo import defer_for_base  # noqa: E402
 import tool_paths  # noqa: E402
 from design_diff import DESIGN_DIFF_HEADING  # noqa: E402
@@ -130,8 +131,12 @@ def cmd_plan(a):
     branch = current_branch(root)
     base = require_base(root, a.base)
     default = repo.default_branch(root)
-    declared = repo.declared_base(root)
-    allowed = {b for b in (default, declared) if b}
+    try:
+        strategy = repo.strategy_of(root)
+        declared = {strategy.base, strategy.production}
+    except branch_strategy.StrategyError:
+        declared = set()
+    allowed = {b for b in (default, *declared) if b}
     items = [{"kind": "branch", "name": branch, "result": "ok"}, {"kind": "base", "name": base, "result": "ok"}]
     if branch in allowed:
         items[0]["result"] = "redirect"

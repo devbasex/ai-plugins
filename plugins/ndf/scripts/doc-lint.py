@@ -21,12 +21,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import deps  # noqa: E402
 
-deps.require("md", "mdtable", "textparse", "pathmatch")  # glossary.py の分を含めて 1 回で入れる（決定 23）
+deps.require("md", "mdtable", "textparse", "pathmatch", "jsonschema")  # glossary.py の分を含めて 1 回で入れる（決定 23）
 import md  # noqa: E402
 from step_result import EXIT_UNREADABLE, StepError, emit, main_with, result  # noqa: E402
 import proc  # noqa: E402
 import project_decl  # noqa: E402
 import repo  # noqa: E402
+import branch_strategy  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import glossary  # noqa: E402  追加した行の取り方を共有する
@@ -103,9 +104,10 @@ def generated_documents(root: Path) -> tuple[str, ...]:
 
 def _resolve_start(root, base_arg):
     """起点の ref と、HEAD との merge-base の sha。解決できなければ StepError。"""
-    base = base_arg or repo.declared_base(root, remote=True)
-    if not base:
-        raise StepError("起点が分からない（--base か .ndf/worktree.json の base_branch）", EXIT_UNREADABLE)
+    try:
+        base = base_arg or f"origin/{repo.base_branch(root)}"
+    except branch_strategy.StrategyError as e:
+        raise StepError(f"起点が分からない（--base かブランチ戦略の宣言）: {e.reason}", EXIT_UNREADABLE) from e
     p = proc.git(root, "merge-base", base, "HEAD", check=False)
     if p.returncode != 0:
         raise StepError(f"起点 {base} を解決できない: {p.stderr.strip()[:200]}", EXIT_UNREADABLE)

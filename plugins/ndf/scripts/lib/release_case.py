@@ -4,7 +4,7 @@
 | --- | --- | --- | --- |
 | `cd-no-review` | CD の行があり、本番チャネルの承認数が 0（読めないときもここ。迂回の宣言は問わない） | リリースの PR の証跡のコメント | 利用者のアカウント |
 | `cd-review` | CD の行があり、承認数が 1 以上、迂回の宣言が無い | PR のレビューの承認 | 利用者のアカウント |
-| `cd-admin` | CD の行があり、承認数が 1 以上、迂回の宣言（`production_merge.admin: true`）がある | リリースの PR の証跡のコメント（利用者が書いたものだけ） | 利用者のアカウント（管理者の迂回） |
+| `cd-admin` | CD の行があり、承認数が 1 以上、迂回の宣言（ブランチ戦略の宣言の `merge.admin: true`）がある | リリースの PR の証跡のコメント（利用者が書いたものだけ） | 利用者のアカウント（管理者の迂回） |
 | `no-cd` | 本番チャネルへのマージで届く `kind: auto` の行が無い | 手元の承認資料 | NDF（今の工程） |
 
 CD の行は `lib/delivery.py` の `merge_rows`。承認数は本番チャネルの ruleset（`rules/branches/<branch>`）の
@@ -22,7 +22,7 @@ from typing import NamedTuple
 
 import delivery
 import gh_call
-import project_decl
+import repo
 from step_result import EXIT_PRECONDITION, StepError
 
 CD_NO_REVIEW = "cd-no-review"
@@ -146,7 +146,7 @@ def case_of(root) -> Case:
     if not delivery.merge_rows(decl):
         return decide_case(False, None, "")
     approvals, why = read_approvals(root, decl.production)
-    return decide_case(True, approvals, why, project_decl.production_admin(root))
+    return decide_case(True, approvals, why, repo.strategy_of(root).section["merge"]["admin"] is True)
 
 
 def case_at(root, strict: bool = False) -> Case:

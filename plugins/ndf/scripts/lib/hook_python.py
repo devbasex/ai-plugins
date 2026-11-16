@@ -22,8 +22,8 @@ from pathlib import Path
 PLUGIN_ROOT = Path(__file__).resolve().parents[2]
 # hook の経路が使う外部パッケージのグループ（pyproject.toml の extra と deps.GROUPS の名前）。procs と md は、token の
 # guard がラッパーの告知を relay_lib から読むときに使う
-GROUPS = ("shparse", "locks", "notify", "procs", "md")
-MODULES = ("tree_sitter", "tree_sitter_bash", "filelock", "dotenv", "slack_sdk", "httpx")
+GROUPS = ("shparse", "locks", "notify", "procs", "md", "jsonschema")
+MODULES = ("tree_sitter", "tree_sitter_bash", "filelock", "dotenv", "slack_sdk", "httpx", "jsonschema")
 OVERRIDE_ENV = "NDF_HOOK_PYTHON"
 REEXEC_ENV = "NDF_HOOK_REEXEC"
 

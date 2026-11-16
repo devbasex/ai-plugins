@@ -55,7 +55,7 @@ def parallel_lane(repo: str) -> tuple[str, str] | None:
 
 
 def release_lane(a, repo: str) -> tuple[str, str] | None:
-    """まとめたリリースへ依頼を送るレーンなら `parallel_lane` の値。取り込み方の行が単位を選ぶ（`selected`）なら、まとめた
+    """まとめたリリースへ依頼を送るレーンなら `parallel_lane` の値。取り込み方の行が単位を選ぶ（`release_branch`）なら、まとめた
     リリースは組まないため None（レーンもリリース承認ゲートと自分の本番のプランで出す。#3121）。"""
     return None if sprint_flow(a).row.selects_units else parallel_lane(repo)
 
@@ -171,7 +171,7 @@ def close_plan(a, repo: str) -> dict:
     stats = f"{CHECK_PY} stats --root {shlex.quote(repo)}"
     record_pr = str(a.record_pr) if getattr(a, "record_pr", None) else record_pr_ref(a)
     verify = has_record(record_pr)
-    target = sprint_flow(a).doc_target(sprint_branch(a))  # 確定仕様化の PR の宛先（#3121）
+    target = sprint_flow(a).pr_target("doc", sprint_branch(a))  # 確定仕様化の PR の宛先（#3121）
     plan = with_decls({
             "フェーズ": "まとめ",
             "課題": a.issue,
@@ -266,7 +266,7 @@ def advises(a, closing: bool = False) -> bool:
 
 def has_prod_branch(a) -> bool:
     """本番のブランチ（`PRODUCTION_SOURCES` の順で決まる値）があるか。"""
-    return bool(getattr(a, "production_branch", None))
+    return bool(getattr(a, "production", None))
 
 
 PACE_PLANS = {"fast": fast_sprint_plans, "auto": auto_sprint_plans}  # 進め方ごとのステージの組み立て（normal は sprint_plans）

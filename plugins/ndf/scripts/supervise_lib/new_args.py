@@ -12,7 +12,7 @@ from supervise_lib.templates import fix_worktree
 
 DECL_HELP = "要る設定（引数が先に効く）: {needs}。new は作業場所 → 元のリポジトリ → 今のディレクトリの順に .ndf/ を探す"
 DECL_WORDS = {
-    "base": "起点のブランチ（--base か .ndf/worktree.json の base_branch）",
+    "base": "起点のブランチ（--base かブランチ戦略の宣言の branches.base）",
     "test": "テストの宣言（.ndf/project.json の test。無ければ --test-cmd か .ndf/supervise.json の test.command。{paths} を範囲に置き換える）",
     "release": "リリースの形（.ndf/supervise.json の release.form。雛形のある形: package-plugin）",
     "impl_timeout": "実装の上限（--impl-timeout か .ndf/supervise.json の impl_timeout。書いたときだけ効く）",
@@ -112,10 +112,14 @@ NEW_ARGS = [
         },
         "impl fix check release sprint close",
     ),
-    ("--base", {"help": "起点のブランチ（PR の宛先。既定は .ndf/worktree.json の base_branch）"}, "impl fix check release sprint close"),
+    (
+        "--base",
+        {"help": "起点のブランチ（PR の宛先。既定はブランチ戦略の宣言のスプリントの PR の宛先）"},
+        "impl fix check release sprint close",
+    ),
     (
         "--production-branch",
-        {"help": "本番のブランチ（既定は .ndf/worktree.json の production_branch → 既定ブランチ（origin/HEAD → main / master））"},
+        {"dest": "production", "help": "本番のブランチ（既定はブランチ戦略の宣言の branches.production）"},
         "release sprint close",
     ),
     (

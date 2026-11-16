@@ -43,10 +43,13 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE / "lib"))
 import deps  # noqa: E402
 
-deps.require("schema", "pathmatch")  # 全体テストの実測（whole_runs → estimate_records）が pydantic を、差分の分類が pathspec を使う
+deps.require(
+    "schema", "pathmatch", "jsonschema"
+)  # 全体テストの実測（whole_runs → estimate_records）が pydantic を、差分の分類が pathspec を使う
 import container_reach  # noqa: E402
 import diff_kinds  # noqa: E402
 import repo as repo_lib  # noqa: E402
+import branch_strategy  # noqa: E402
 import secret_redact  # noqa: E402
 import step_result  # noqa: E402
 import test_strategy as ts  # noqa: E402
@@ -101,9 +104,11 @@ def _git_out(root: pathlib.Path, *args: str) -> str | None:
 
 
 def _base_sha(root: pathlib.Path, base: str | None) -> str | None:
-    """着手前の HEAD とみなす SHA = `--base`（無ければ worktree.json の base_branch）と HEAD の merge-base。"""
-    branch = base or repo_lib.declared_base(root) or repo_lib.base_branch(root)
-    if not branch:
+    """着手前の HEAD とみなす SHA = `--base`（無ければブランチ戦略の宣言の `branches.base`）と HEAD の merge-base。
+    宣言を読めなければ None（差分で分けずに全体を測る）。"""
+    try:
+        branch = base or repo_lib.base_branch(root)
+    except branch_strategy.StrategyError:
         return None
     for ref in (f"origin/{branch}", branch):
         sha = _git_out(root, "merge-base", ref, "HEAD")

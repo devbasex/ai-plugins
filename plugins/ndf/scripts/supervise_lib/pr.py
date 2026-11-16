@@ -188,7 +188,7 @@ class PrStep:
         """push して Draft の Pull Request を作る。既にあれば本文だけを書き直す。本文は既定で LLM に書かせる（body が llm でないときは機械生成のまま）。"""
         base = step.get("base") or ctx.base_branch()
         if not base:
-            msg = "PR の宛先（起点のブランチ）が分からない（ステップの base、計画か .ndf/worktree.json の base_branch）"
+            msg = "PR の宛先（起点のブランチ）が分からない（ステップの base、計画かブランチ戦略の宣言）"
             ctx.state.cur.update(exit=2, text=msg)
             return False, msg
         diff, err = self.design_diff(ctx, step)

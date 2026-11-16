@@ -269,7 +269,7 @@ def stages_of(root: Path, version: str, run=subprocess.run) -> list[str]:
     if not version:
         return []
     head = f"release/v{version}"
-    prod = repo.production_branch(root)[0]
+    prod = s.production if (s := repo.strategy_or_none(root)) else None
     pulls = []
     if prod:
         got = run(
@@ -291,7 +291,7 @@ def stages_of(root: Path, version: str, run=subprocess.run) -> list[str]:
 
 
 def prod_pr_url(root: Path, version: str, run=subprocess.run) -> Optional[str]:
-    prod = repo.production_branch(root)[0]
+    prod = s.production if (s := repo.strategy_or_none(root)) else None
     if not prod:
         return None
     got = run(
