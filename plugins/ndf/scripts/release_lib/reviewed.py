@@ -406,7 +406,7 @@ def _pr_to_judge(a, root, repo: str, decl, head: str, base: str, state: str) -> 
     if base != prod:
         emit(result(TOOL, "ok", f"PR #{a.pr} の宛先 {base} が本番チャネルでない（何も付けない）", [], {"pr": a.pr, "base": base}))
     if decl.base == prod and not (ref := approval_trail.read_head_ref(repo, a.pr)).startswith(RELEASE_PREFIX):
-        # trunk ではスプリントの PR も本番宛てになる。リリース承認を取るのは版上げの PR（release/v<版>）だけ（#3672）
+        # trunk ではスプリントの PR も本番宛てになる。リリース承認を取るのは版上げの PR（head が RELEASE_PREFIX）だけ（#3672）
         emit(result(TOOL, "ok", f"PR #{a.pr} は版上げの PR でない（head {ref}。何も付けない）", [], {"pr": a.pr, "head_ref": ref}))
     if (case := release_case_or_stop(root)).case == release_case.CD_REVIEW and not trail_required(root, repo, prod):
         msg = f"リリースの場合が {case.case}（レビューで承認する）で、証跡のチェックを付けない"
