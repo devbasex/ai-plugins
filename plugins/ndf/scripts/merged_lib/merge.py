@@ -218,15 +218,8 @@ def merge_gate(a):
     if verdict.stops:
         info = info or (pr_state(root, a.pr) if a.pr else None)
         gate_stop(a.pr, verdict, info)
-    emit(
-        result(
-            TOOL,
-            "ok",
-            f"宛先 {base} へのマージはリリース承認ゲートに当たらない（{verdict.reason}）",
-            verdict.items,
-            {"verdict": verdict.value, "target": base},
-        )
-    )
+    msg = f"宛先 {base} へのマージはリリース承認ゲートに当たらない（{verdict.reason}）"
+    emit(result(TOOL, "ok", msg, verdict.items, {"verdict": verdict.value, "target": base}))
 
 
 # --- merge-when-green ---------------------------------------------------------
