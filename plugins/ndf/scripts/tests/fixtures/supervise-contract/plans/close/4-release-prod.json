@@ -189,12 +189,59 @@
       "from_only": true
     }
   ],
-  "base_branch": "main",
+  "ベースブランチ": "main",
   "リポジトリ": "<TMP>/repo",
   "記録": "<NDF>/scripts/projects-sync.sh",
   "実行の条件": {
     "cmd": "python3 <NDF>/scripts/check-trigger.py changed --id m9-final --root <TMP>/repo",
     "skip_code": 3
   },
-  "スプリント状態": "<TMP>/out/sprint/sprint.json"
+  "スプリント状態": "<TMP>/out/sprint/sprint.json",
+  "ブランチ戦略": {
+    "digest": "8541a847687a2283a3ec444cf3c72a8bcbe94d8115220bfd07be68f00f3f9476",
+    "section": {
+      "approval": {
+        "target": "release_pr",
+        "via": "gate"
+      },
+      "branches": {
+        "base": "main",
+        "production": "main"
+      },
+      "channels": [
+        {
+          "name": "stable",
+          "ref": "main"
+        }
+      ],
+      "kind": "plugin",
+      "merge": {
+        "actor": "ndf",
+        "admin": false,
+        "commit": "merge",
+        "method": "merge-queue"
+      },
+      "release": {
+        "cd": null,
+        "form": "package-plugin",
+        "github_release": false,
+        "plugin": "foo",
+        "runtimes": [
+          "claude"
+        ],
+        "tag": null,
+        "version_store": {
+          "kind": "plugin"
+        }
+      },
+      "release_strategy": "trunk",
+      "sprint": {
+        "doc_prs": "sprint",
+        "integrate": "check",
+        "start": "production"
+      },
+      "verify": null
+    },
+    "source": ".ndf/project.json の branch_strategy"
+  }
 }

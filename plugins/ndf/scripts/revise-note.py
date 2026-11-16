@@ -14,7 +14,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import deps  # noqa: E402
 
-deps.require("md")
+deps.require("md", "jsonschema")
 import design_pr_merge  # noqa: E402
 import revise_note  # noqa: E402
 import run_core  # noqa: E402

@@ -95,6 +95,13 @@
         ],
         "positionals": []
       },
+      "land": {
+        "options": [
+          "--pr",
+          "--repo"
+        ],
+        "positionals": []
+      },
       "notes": {
         "options": [
           "--approval",
@@ -134,7 +141,7 @@
           "--channel",
           "--ci-wait",
           "--plugins",
-          "--promotion",
+          "--release-strategy",
           "--version"
         ],
         "positionals": []
@@ -196,6 +203,7 @@
     "NDF_LOCK_DIR",
     "NDF_PRESENTATION_DIR",
     "NDF_STATE_HOME",
+    "NDF_STRATEGY_SNAPSHOT",
     "NDF_WHOLE_RUNS_DIR",
     "UV_PROJECT_ENVIRONMENT",
     "XDG_STATE_HOME"
@@ -210,20 +218,12 @@
     {
       "file": "project.json",
       "keys": [
-        "ndf_policies",
-        "production_merge"
-      ]
-    },
-    {
-      "file": "supervise.json",
-      "keys": [
-        "release"
+        "ndf_policies"
       ]
     },
     {
       "file": "worktree.json",
       "keys": [
-        "base_branch",
         "tool_paths",
         "version"
       ]

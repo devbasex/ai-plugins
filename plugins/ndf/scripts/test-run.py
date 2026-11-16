@@ -43,7 +43,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE / "lib"))
 import deps  # noqa: E402
 
-deps.require("schema", "pathmatch")  # 全体テストの実測（whole_runs → estimate_records）が pydantic を、差分の分類が pathspec を使う
+deps.require("schema", "pathmatch", "jsonschema")  # 全体テストの実測（pydantic）・差分の分類（pathspec）・起点の宣言（jsonschema）
 import container_reach  # noqa: E402
 import diff_kinds  # noqa: E402
 import repo as repo_lib  # noqa: E402
@@ -101,8 +101,8 @@ def _git_out(root: pathlib.Path, *args: str) -> str | None:
 
 
 def _base_sha(root: pathlib.Path, base: str | None) -> str | None:
-    """着手前の HEAD とみなす SHA = `--base`（無ければ worktree.json の base_branch）と HEAD の merge-base。"""
-    branch = base or repo_lib.declared_base(root) or repo_lib.base_branch(root)
+    """着手前の HEAD とみなす SHA = `--base`（無ければ宣言の `branches.base`。読めなければ None）と HEAD の merge-base。"""
+    branch = base or getattr(repo_lib.strategy_or_none(root), "base", None)
     if not branch:
         return None
     for ref in (f"origin/{branch}", branch):
@@ -476,7 +476,7 @@ def main(argv=None) -> int:
     )
     for p in (scope, whole):
         p.add_argument("--root", default=".")
-        p.add_argument("--base", default=None, help="着手前の HEAD とみなす起点のブランチ（既定は .ndf/worktree.json の base_branch）")
+        p.add_argument("--base", default=None, help="着手前の HEAD とみなす起点のブランチ（既定はブランチ戦略の宣言の branches.base）")
         p.add_argument("--template", default=None, help="範囲テストの雛形（{paths} を含むコマンド。宣言より先に効く）")
         p.add_argument("--test-kind", choices=ts.KINDS, default=ts.TEST, help="--template の種別（test = テスト / lint = 静的解析）")
         p.add_argument(

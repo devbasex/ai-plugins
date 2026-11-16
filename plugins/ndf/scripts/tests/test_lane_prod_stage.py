@@ -24,12 +24,16 @@ import sprint_loop_gate as sl_gate  # noqa: E402
 from pace_state import sprint_state  # noqa: E402
 from supervise_lib import queue, sprint  # noqa: E402
 from test_supervise_pace_verify import PRD, STG, make_repo  # noqa: E402
+import strategy_fixture  # noqa: E402
 
 SUPERVISE = SCRIPTS / "supervise.py"
 LANE = "loop-l20261107"
 
 # new sprint は --design に無い課題の本文を gh で読む（#1767）。見本の本文で答える
 pytestmark = pytest.mark.usefixtures("issue_bodies")
+
+# スプリントの開始時のスナップショット（部品は a.flow だけを読み、無ければ止まる。#3672 の I3）
+FLOW = strategy_fixture.snapshot()
 
 
 @pytest.fixture
@@ -75,7 +79,7 @@ def test_promote_route_lane_keeps_one_promote_plan(tmp_path, org, pace):
 
 def test_template_route_lane_requests_the_release_with_the_issue_placeholder(org):
     """受け入れ条件 2 / I2・I3: テンプレートの経路のレーンの本番はリリースの依頼で、コマンドは課題の番号を持たない。"""
-    a = argparse.Namespace(issue=[11, 12, 13], mode="standard")
+    a = argparse.Namespace(issue=[11, 12, 13], mode="standard", flow=FLOW)
     got = sprint.prod_plans(a, "/r", lambda: pytest.fail("レーンでは本番のプランを組まない"))
     plan = got["release-request"]
     cmd = plan["steps"][0]["cmd"]
@@ -94,7 +98,7 @@ def test_dropped_issues_leave_the_promote_plan(tmp_path, org):
 
 def run_request(tmp_path, org, issues, moved) -> tuple[dict, dict]:
     """リリースの依頼のプランを組み、moved を外してから queue で流す。(依頼のファイル, 依頼の控え) を返す。"""
-    a = argparse.Namespace(issue=list(issues), mode="standard")
+    a = argparse.Namespace(issue=list(issues), mode="standard", flow=FLOW)
     plan = parallel_release.plan_release_request(a, str(tmp_path), "--external", LANE)
     path = tmp_path / "prod.json"
     path.write_text(json.dumps(plan, ensure_ascii=False), encoding="utf-8")
@@ -130,7 +134,7 @@ def lane_close_waves(monkeypatch) -> dict:
     monkeypatch.setattr(sprint, "plan_fast_check", lambda *a, **k: {"steps": []})
     monkeypatch.setattr(sprint, "close_plan", lambda *a, **k: {"steps": []})
     monkeypatch.setattr(sprint, "plan_mvv_release", lambda a, repo, v, ch, condition=None, **k: {"実行の条件": condition})
-    a = argparse.Namespace(issue=[11], mode="standard", name="lgate-1", worktree="/r", pace=None, state=None, version=None)
+    a = argparse.Namespace(issue=[11], mode="standard", name="lgate-1", worktree="/r", pace=None, state=None, version=None, flow=FLOW)
     return {w["name"]: w.get("plans") for w in sprint.close_waves(a)}
 
 
@@ -144,14 +148,14 @@ def test_lane_close_request_carries_the_dev_condition(org, monkeypatch):
 
 def test_prod_plans_without_condition_keeps_the_request_unconditional(org):
     """#3083 の受け入れ条件 4 / I2: 条件を省いた呼び出し（new sprint・pace: fast の本番）のリリースの依頼は実行条件を持たない。"""
-    a = argparse.Namespace(issue=[11], mode="standard")
+    a = argparse.Namespace(issue=[11], mode="standard", flow=FLOW)
     plan = sprint.prod_plans(a, "/r", lambda: pytest.fail("レーンでは本番のプランを組まない"))["release-request"]
     assert "実行の条件" not in plan
 
 
 def run_close_request(tmp_path, org, code: int, prs: list[str]) -> dict:
     """実行条件の終了コードを code にしたまとめのリリースの依頼のプランを、前のステージの Pull Request prs で埋めてから queue で流す。"""
-    a = argparse.Namespace(issue=[11], mode="standard")
+    a = argparse.Namespace(issue=[11], mode="standard", flow=FLOW)
     cond = {"cmd": f"exit {code}", "skip_code": 3}
     plan = sprint.prod_plans(a, str(tmp_path), lambda: pytest.fail("レーンでは本番のプランを組まない"), condition=cond)
     path = tmp_path / "prod.json"

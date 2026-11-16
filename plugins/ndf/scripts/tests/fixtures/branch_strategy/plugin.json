@@ -1,0 +1,46 @@
+{
+  "kind": "plugin",
+  "release_strategy": "trunk",
+  "branches": {
+    "production": "main",
+    "base": "main"
+  },
+  "sprint": {
+    "start": "production",
+    "integrate": "check",
+    "doc_prs": "sprint"
+  },
+  "release": {
+    "form": "package-plugin",
+    "version_store": {
+      "kind": "plugin"
+    },
+    "tag": "{plugin}--v{version}",
+    "github_release": true,
+    "cd": {
+      "workflow": "release.yml"
+    },
+    "plugin": "example",
+    "runtimes": [
+      "claude",
+      "codex"
+    ]
+  },
+  "channels": [
+    {
+      "name": "stable",
+      "ref": "main"
+    }
+  ],
+  "approval": {
+    "target": "release_pr",
+    "via": "gate"
+  },
+  "merge": {
+    "actor": "ndf",
+    "method": "merge-queue",
+    "commit": "merge",
+    "admin": false
+  },
+  "verify": null
+}

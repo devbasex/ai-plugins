@@ -423,9 +423,16 @@ def test_ci_only_scope_without_lint_files_passes_without_running_tests(tmp_path,
 
 def test_ci_only_whole_lint_runs_only_the_lint_commands(tmp_path):
     """`whole --only-kind lint` は command を持つ静的解析だけを手元で打ち、テストの suite（false）も CI も待たない。"""
+    import subprocess
+
+    import strategy_fixture
+
     decl = _ci_only_decl()
     decl["test"]["suites"][1]["command"] = "sh -n bad.sh"
     root = _repo(tmp_path, decl)
+    # 変更の起点は宣言の branches.base（無ければ既定ブランチへ倒さない。#3672 の I3）。今のブランチを起点にする
+    head = subprocess.run(["git", "-C", str(root), "branch", "--show-current"], capture_output=True, text=True, check=True).stdout.strip()
+    strategy_fixture.declare(root, head)
     (root / "bad.sh").write_text("echo hi\n", encoding="utf-8")
     code, out = _run(root, "whole", "--only-kind", "lint")
     assert code == 0, out

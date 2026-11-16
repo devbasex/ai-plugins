@@ -17,6 +17,7 @@ SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import inproc  # noqa: E402
 from release_repo import push_origin  # noqa: E402
+import strategy_fixture  # noqa: E402
 
 PY = sys.executable
 
@@ -97,7 +98,7 @@ def check_shape(out):
 
 def test_cleanup_removes_merged_and_stops_on_unmerged(repo, env, tmp_path):
     # 取り込み先を main と宣言し、主ディレクトリ（develop）では pull させない
-    write(repo, ".ndf/worktree.json", json.dumps({"base_branch": "main"}))
+    strategy_fixture.declare(repo, "main")
     for b in ("feature/x", "feature/y"):
         git(repo, "worktree", "add", "-q", "-b", b, str(tmp_path / b.replace("/", "-")))
     wy = tmp_path / "feature-y"
@@ -133,7 +134,7 @@ def test_cleanup_removes_merged_and_stops_on_unmerged(repo, env, tmp_path):
 
 
 def test_cleanup_all_merged_is_ok(repo, env, tmp_path):
-    write(repo, ".ndf/worktree.json", json.dumps({"base_branch": "main"}))
+    strategy_fixture.declare(repo, "main")
     git(repo, "worktree", "add", "-q", "-b", "feature/x", str(tmp_path / "wx"))
     env["FAKE_GH_PRS"] = json.dumps({"1": {"headRefName": "feature/x", "state": "MERGED"}})
     code, out, err = call("merged-steps.py", ["cleanup", "1"], env, cwd=repo)
@@ -152,7 +153,8 @@ esac
 
 def testenv_repo(repo, env, tmp_path, *, stale=True):
     """テスト環境を宣言し、マージ済みの PR 1 件と（`stale` なら）残った割り当て 1 行を用意する。"""
-    write(repo, ".ndf/worktree.json", json.dumps({"version": 1, "base_branch": "main", "testenv": {}}))
+    strategy_fixture.declare(repo, "main")
+    write(repo, ".ndf/worktree.json", json.dumps({"version": 1, "testenv": {}}))
     git(repo, "worktree", "add", "-q", "-b", "feature/x", str(tmp_path / "wx"))
     env["FAKE_GH_PRS"] = json.dumps({"1": {"headRefName": "feature/x", "state": "MERGED"}})
     docker = tmp_path / "bin" / "docker"
@@ -209,7 +211,7 @@ def test_no_stale_assignment_leaves_the_cleanup_as_it_was(repo, env, tmp_path):
 
 def test_a_pull_failure_still_reclaims(repo, env, tmp_path):
     testenv_repo(repo, env, tmp_path)
-    write(repo, ".ndf/worktree.json", json.dumps({"version": 1, "base_branch": "develop", "testenv": {}}))
+    strategy_fixture.declare(repo, "develop", "main")
     git(repo, "remote", "add", "origin", str(tmp_path / "no-such-remote"))
     code, out, err = call("merged-steps.py", ["cleanup", "1", "--root", str(repo)], env)
     assert out["status"] == "stopped", err
@@ -224,7 +226,7 @@ def test_cleanup_waits_for_the_main_directory_lock(repo, env, tmp_path):
     sys.path.insert(0, str(SCRIPTS / "lib"))
     import locks
 
-    write(repo, ".ndf/worktree.json", json.dumps({"base_branch": "main"}))
+    strategy_fixture.declare(repo, "main")
     git(repo, "worktree", "add", "-q", "-b", "feature/x", str(tmp_path / "wx"))
     env["FAKE_GH_PRS"] = json.dumps({"1": {"headRefName": "feature/x", "state": "MERGED"}})
     held, hold = threading.Event(), 3.0
@@ -247,7 +249,7 @@ def test_cleanup_waits_for_the_main_directory_lock(repo, env, tmp_path):
 
 def test_cleanup_from_inside_the_worktree_it_removes(repo, env, tmp_path):
     # 計画の merge のステップは作業場所（消す作業ツリー）で打つ。消した後も主ディレクトリから続ける
-    write(repo, ".ndf/worktree.json", json.dumps({"base_branch": "main"}))
+    strategy_fixture.declare(repo, "main")
     wx = tmp_path / "wx"
     git(repo, "worktree", "add", "-q", "-b", "feature/x", str(wx))
     env["FAKE_GH_PRS"] = json.dumps({"1": {"headRefName": "feature/x", "state": "MERGED"}})
@@ -716,7 +718,11 @@ def test_phase_steps_rejects_bad_calls_with_2(env, args):
 
 
 def clone_with_upstream(tmp_path, repo):
-    """repo を origin にした主ディレクトリ（develop）と、origin へ a.md を足したコミットを返す。"""
+    """repo を origin にした主ディレクトリ（develop）と、origin へ a.md を足したコミットを返す。上流はブランチ戦略の宣言
+    （ベースブランチ develop）を持つ（宣言が無ければ片付けは pull しない。#3672 の I3）。"""
+    strategy_fixture.declare(repo, "develop", "main")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "decl")
     main = tmp_path / "main"
     git(tmp_path, "clone", "-q", "-b", "develop", str(repo), str(main))
     for k, v in (("user.email", "t@example.com"), ("user.name", "t"), ("commit.gpgsign", "false")):
@@ -786,22 +792,20 @@ def clone_with_main_and_develop(tmp_path, cur):
     return main
 
 
-@pytest.mark.parametrize("cur, result", [("main", "pulled"), ("develop", "kept")])
-def test_cleanup_base_defaults_to_origin_head_not_develop(tmp_path, env, cur, result):
-    # 宣言の無いリポジトリでは、起点は origin の HEAD（main）から決まる。develop があっても採らない
+@pytest.mark.parametrize("cur", ["main", "develop"])
+def test_cleanup_without_declaration_keeps_the_main_dir(tmp_path, env, cur):
+    # 宣言の無いリポジトリでは起点を既定ブランチ（origin の HEAD）へ倒さず、pull せずに理由を残す（#3672 の I3）
     main = clone_with_main_and_develop(tmp_path, cur)
     env["FAKE_GH_PRS"] = json.dumps({"1": {"headRefName": "feature/gone", "state": "MERGED"}})
     code, out, err = call("merged-steps.py", ["cleanup", "1", "--root", str(main)], env)
     assert code == 0, err
     item = {(i["kind"], i["name"]): i for i in out["items"]}[("main_dir", str(main))]
-    assert item["result"] == result
-    if result == "kept":
-        assert "main でなく develop" in item["reason"]
+    assert item["result"] == "kept" and "branch_strategy" in item["reason"]
 
 
 def test_cleanup_base_follows_declaration(tmp_path, env):
     main = clone_with_main_and_develop(tmp_path, "develop")
-    write(main, ".ndf/worktree.json", json.dumps({"version": 1, "base_branch": "develop"}))
+    strategy_fixture.declare(main, "develop", "main")
     env["FAKE_GH_PRS"] = json.dumps({"1": {"headRefName": "feature/gone", "state": "MERGED"}})
     code, out, err = call("merged-steps.py", ["cleanup", "1", "--root", str(main)], env)
     assert code == 0, err
@@ -841,16 +845,36 @@ def test_verify_install_source_comes_from_origin_and_declaration(repo):
 
     mod = load_verification()
     git(repo, "remote", "add", "origin", "https://github.com/devbasex/ai-plugins.git")
-    write(repo, ".ndf/worktree.json", json.dumps({"version": 1, "base_branch": "develop", "production_branch": "main"}))
-    write(repo, ".ndf/supervise.json", json.dumps({"release": {"form": "package-plugin", "plugin": "ndf", "runtimes": ["claude"]}}))
+    strategy_fixture.declare(repo, "develop", "main", {"form": "package-plugin", "plugin": "ndf", "runtimes": ["claude"]})
     write(repo, ".claude-plugin/marketplace.json", json.dumps({"name": "ai-plugins"}))
     where, plugins = mod.install_source(repo, argparse.Namespace(ref="develop", plugins=None))
     assert where == ("devbasex/ai-plugins", "ai-plugins", "main") and plugins == ["ndf"]
     with pytest.raises(mod.StepError, match="--ref trunk"):
         mod.install_source(repo, argparse.Namespace(ref="trunk", plugins=None))
-    write(repo, ".ndf/worktree.json", json.dumps({"version": 1, "base_branch": "trunk", "production_branch": "live"}))
+    strategy_fixture.declare(repo, "trunk", "live", {"form": "package-plugin", "plugin": "foo", "runtimes": ["claude"]})
     where, _ = mod.install_source(repo, argparse.Namespace(ref="trunk", plugins="foo"))
     assert where[2] == "live"
+
+
+def test_verify_install_accepts_the_head_of_an_open_release_pr(repo, monkeypatch):
+    """#3672 の決定 17: 本番チャネル宛ての開いた版上げの PR の head（release/v<版>）を受け、任意の ref は受けない。"""
+    import argparse
+
+    import gh_call
+
+    mod = load_verification()
+    git(repo, "remote", "add", "origin", "https://github.com/devbasex/ai-plugins.git")
+    strategy_fixture.declare(repo, "main", "main", {"form": "package-plugin", "plugin": "ndf", "runtimes": ["claude"]})
+    write(repo, ".claude-plugin/marketplace.json", json.dumps({"name": "ai-plugins"}))
+    asked = []
+    monkeypatch.setattr(gh_call, "gh", lambda args, stdin=None, cwd=None: asked.append(args) or gh_call.GhResult(0, "1\n", ""))
+    where, _ = mod.install_source(repo, argparse.Namespace(ref="release/v1.2.3", plugins=None))
+    assert where[2] == "main" and asked[0][:6] == ["pr", "list", "--base", "main", "--head", "release/v1.2.3"]
+    with pytest.raises(mod.StepError, match="--ref feature/x"):
+        mod.install_source(repo, argparse.Namespace(ref="feature/x", plugins=None))
+    monkeypatch.setattr(gh_call, "gh", lambda args, stdin=None, cwd=None: gh_call.GhResult(0, "0\n", ""))
+    with pytest.raises(mod.StepError, match="--ref release/v1.2.4"):
+        mod.install_source(repo, argparse.Namespace(ref="release/v1.2.4", plugins=None))
 
 
 @pytest.mark.parametrize(
@@ -996,3 +1020,72 @@ def test_verify_install_stops_when_user_config_changes(tmp_path, monkeypatch, ch
     out = emitted[0]
     assert out["status"] == "stopped" and out["metrics"]["user_env_unchanged"] is False
     assert key in [i["name"] for i in out["items"] if i["kind"] == "user_env"]
+
+
+# --- update_index の現状固定（I-024） ---------------------------------------
+
+
+def load_plan_to_spec():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("plan_to_spec_steps", SCRIPTS / "plan-to-spec-steps.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+@pytest.mark.parametrize(
+    "text,title,want",
+    [
+        (  # 一覧の最後のリンクの行の後へ、同じ区切りで足す
+            "# 索引\n\n- [a.md](a.md) — A\n- [b.md](b.md) — B\n\n後書き\n",
+            "X",
+            "# 索引\n\n- [a.md](a.md) — A\n- [b.md](b.md) — B\n- [x.md](x.md) — X\n\n後書き\n",
+        ),
+        (  # 説明が無ければ名前を使う
+            "# 索引\n\n- [a.md](a.md) — A\n",
+            None,
+            "# 索引\n\n- [a.md](a.md) — A\n- [x.md](x.md) — x.md\n",
+        ),
+        (  # 字下げ・記号（*）・区切り（: ）を最後の行から写す。# 付きのリンクも .md として数える
+            "# 索引\n\n  * [a.md](a.md): A\n  * [b.md](b.md#x): B\n",
+            "X",
+            "# 索引\n\n  * [a.md](a.md): A\n  * [b.md](b.md#x): B\n  * [x.md](x.md): X\n",
+        ),
+        (  # 区切りの無い行の後は — を使う
+            "# 索引\n\n- [a.md](a.md)\n",
+            "X",
+            "# 索引\n\n- [a.md](a.md)\n- [x.md](x.md) — X\n",
+        ),
+        (  # 表の最後の行の後へ表の行を足す
+            "# 索引\n\n| 仕様 | 内容 |\n| --- | --- |\n| [a.md](a.md) | A |\n| [b.md](b.md) | B |\n\n後書き\n",
+            "X",
+            "# 索引\n\n| 仕様 | 内容 |\n| --- | --- |\n| [a.md](a.md) | A |\n| [b.md](b.md) | B |\n| [x.md](x.md) | X |\n\n後書き\n",
+        ),
+        (  # 一覧と表があれば、後ろにある方へ足す
+            "# 索引\n\n- [a.md](a.md) — A\n\n| 仕様 | 内容 |\n| --- | --- |\n| [b.md](b.md) | B |\n",
+            "X",
+            "# 索引\n\n- [a.md](a.md) — A\n\n| 仕様 | 内容 |\n| --- | --- |\n| [b.md](b.md) | B |\n| [x.md](x.md) | X |\n",
+        ),
+        (  # .md でないリンクの行は数えない
+            "# 索引\n\n- [a.md](a.md) — A\n- [site](https://x.example/)\n",
+            "X",
+            "# 索引\n\n- [a.md](a.md) — A\n- [x.md](x.md) — X\n- [site](https://x.example/)\n",
+        ),
+        (  # 記号 + の一覧は数えず、末尾へ空行を挟んで足す
+            "# 索引\n\n+ [a.md](a.md) — A\n",
+            "X",
+            "# 索引\n\n+ [a.md](a.md) — A\n\n- [x.md](x.md) — X\n",
+        ),
+        (  # 一覧も表も無ければ、末尾の改行をそろえて空行の後へ足す
+            "# 索引\n\n本文だけ\n\n",
+            "X",
+            "# 索引\n\n本文だけ\n\n- [x.md](x.md) — X\n",
+        ),
+    ],
+)
+def test_update_index_inserts_after_the_last_indexed_line(tmp_path, text, title, want):
+    mod = load_plan_to_spec()
+    index = tmp_path / "README.md"
+    assert mod.update_index(index, text, "x.md", "x.md", title) is None
+    assert index.read_text(encoding="utf-8") == want

@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf/scripts/release_lib/land_read.py",
+  "name": "plugin-manifest",
+  "kind": "not-a-violation",
+  "reason": "land（release_lib/land_read.py が読み方を持つ）が版数を読むのは、ブランチ戦略の宣言の release.version_store.kind が plugin のときだけ（#3672）。置き場は解析（branch_strategy_measure.py）が測る 2 つの候補と同じで、release.plugin の名前を宣言から受ける",
+  "count": 4
+}

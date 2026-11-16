@@ -20,29 +20,10 @@
     "NDF_DEPS_REEXEC",
     "NDF_DEPS_VENV",
     "NDF_PRESENTATION_DIR",
+    "NDF_STRATEGY_SNAPSHOT",
     "UV_PROJECT_ENVIRONMENT"
   ],
-  "settings": [
-    {
-      "file": "project.json",
-      "keys": [
-        "ndf_policies",
-        "production_merge"
-      ]
-    },
-    {
-      "file": "supervise.json",
-      "keys": [
-        "release"
-      ]
-    },
-    {
-      "file": "worktree.json",
-      "keys": [
-        "base_branch"
-      ]
-    }
-  ],
+  "settings": [],
   "stdin": "none",
   "stdout": "step-result",
   "writes": [

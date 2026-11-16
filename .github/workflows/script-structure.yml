@@ -8,6 +8,9 @@ name: Script structure
 # 突き合わせ、scripts/contract-allow/ の例外のほかに当たれば落とす。例外リストはベースブランチとの
 # merge-base より増えると落とすため、履歴をすべて取る（fetch-depth: 0）。
 #
+# script-structure-check の 2 つ目の手順は、#3672 の削除の一覧（scripts/legacy-branch-decl.json）の各行のパスに、旧いブランチ
+# 戦略の宣言のキーが残っていないかを照らす（受け入れ条件 21）。
+#
 # script-structure-check の後半の手順は、Issue の記載項目の定義（plugins/ndf/scripts/data/issue-items.json）と、
 # GitHub のフォーム・out-of-scope の本文の骨格・仕様のテンプレートが食い違っていないかを確かめる（#2737 の一致の検査）。
 #
@@ -27,6 +30,9 @@ on:
       - "scripts/check-ndf-contracts.py"
       - "scripts/contracts_lib/**"
       - "scripts/contract-allow/**"
+      - "scripts/check-legacy-branch-decl.py"
+      - "scripts/legacy-branch-decl.json"
+      - "scripts/tests/**"
 
 permissions:
   contents: read
@@ -41,6 +47,8 @@ jobs:
           python-version: "3.10"
       - name: Check the script structure
         run: python3 scripts/check-script-structure.py
+      - name: Check that the legacy branch declaration keys are removed
+        run: python3 scripts/check-legacy-branch-decl.py
       # フォームの YAML と Markdown を読む部品は uv の環境から入る（deps.require が uv.lock の環境で起動し直す）
       - uses: astral-sh/setup-uv@v10.3.3
         with:
@@ -58,5 +66,6 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.10"
+      # 起点はイベントから決める（Pull Request は宛先、push は送った先のブランチ）。宣言を読む経路（jsonschema が要る）へ進めない
       - name: Check the NDF entrypoint contracts
-        run: python3 scripts/check-ndf-contracts.py
+        run: python3 scripts/check-ndf-contracts.py --base "origin/${GITHUB_BASE_REF:-$GITHUB_REF_NAME}"

@@ -19,6 +19,13 @@ SCRIPT = Path(__file__).resolve().parents[1] / "release-steps.py"
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import inproc  # noqa: E402
 from release_repo import push_origin  # noqa: E402
+import strategy_fixture  # noqa: E402
+
+
+def plugin_release(plugin: str = "ndf") -> dict:
+    """配るプラグインを持つリリースの形（ブランチ戦略の宣言の `release`）。"""
+    return {"form": "package-plugin", "plugin": plugin, "runtimes": ["claude"]}
+
 
 PY = sys.executable
 
@@ -38,11 +45,7 @@ def repo(tmp_path: Path) -> Path:
     (root / "out").mkdir()
     (root / "out" / "old.md").write_text("old\n", encoding="utf-8")
     # ai-plugins と同じ宣言（ブランチと配るプラグインは宣言から読む。#1336）
-    (root / ".ndf").mkdir()
-    (root / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "base_branch": "develop", "production_branch": "main"}))
-    (root / ".ndf" / "supervise.json").write_text(
-        json.dumps({"release": {"form": "package-plugin", "plugin": "ndf", "runtimes": ["claude"]}})
-    )
+    strategy_fixture.declare(root, "develop", "main", plugin_release())
     git(root, "add", "-A")
     git(root, "commit", "-q", "-m", "t")
     return root
@@ -250,6 +253,7 @@ def _release_steps_module(monkeypatch):
 def test_wait_and_merge_delegates_to_merge_when_green(monkeypatch):
     """デプロイの PR の待ちは merge-when-green に任せる（上限と取り残されたチェックの再実行を持つ）。"""
     mod = _release_steps_module(monkeypatch)
+    monkeypatch.setattr(mod.strategy_route, "admin_bypass", lambda root: False)
     calls = []
     out = json.dumps({"tool": "merged", "status": "ok", "summary": "#5 をマージした", "items": []})
     monkeypatch.setattr(mod, "run", lambda cmd, **kw: calls.append(cmd) or subprocess.CompletedProcess(cmd, 0, out, ""))
@@ -265,6 +269,7 @@ def test_wait_and_merge_delegates_to_merge_when_green(monkeypatch):
 def test_wait_and_merge_passes_who_approved_only_when_given(monkeypatch):
     """自動反映の本番チャネルへのマージは --gate-approved が無ければ止まる。開発版の経路には渡さない（#2623 の I2）。"""
     mod = _release_steps_module(monkeypatch)
+    monkeypatch.setattr(mod.strategy_route, "admin_bypass", lambda root: False)
     calls = []
     out = json.dumps({"tool": "merged", "status": "ok", "summary": "#5 をマージした", "items": []})
     monkeypatch.setattr(mod, "run", lambda cmd, **kw: calls.append(cmd) or subprocess.CompletedProcess(cmd, 0, out, ""))
@@ -277,6 +282,7 @@ def test_wait_and_merge_passes_who_approved_only_when_given(monkeypatch):
 def test_wait_and_merge_stops_with_the_summary_of_merge_when_green(monkeypatch):
     """merge-when-green が止まったら、その summary を持って止まる（上限なしで待ち続けない）。"""
     mod = _release_steps_module(monkeypatch)
+    monkeypatch.setattr(mod.strategy_route, "admin_bypass", lambda root: False)
     out = json.dumps(
         {"tool": "merged", "status": "stopped", "summary": "#5 の取り残されたチェックが再実行でも動かない: build", "items": []}
     )
@@ -288,6 +294,7 @@ def test_wait_and_merge_stops_with_the_summary_of_merge_when_green(monkeypatch):
 def test_wait_and_merge_passes_the_ci_wait_as_the_timeout(monkeypatch):
     """release の --ci-wait は merge-when-green の --timeout へ渡す（ステップの timeout より先に止まる。#1645 の決定 7）。"""
     mod = _release_steps_module(monkeypatch)
+    monkeypatch.setattr(mod.strategy_route, "admin_bypass", lambda root: False)
     calls = []
     out = json.dumps({"tool": "merged", "status": "ok", "summary": "#5 をマージした", "items": []})
     monkeypatch.setattr(mod, "run", lambda cmd, **kw: calls.append(cmd) or subprocess.CompletedProcess(cmd, 0, out, ""))
@@ -301,6 +308,7 @@ def test_wait_and_merge_returns_infra_wait_as_75(monkeypatch, code, expected):
     """AC11: merge-when-green の基盤待ち（75）は 75 で、中身の失敗（1）は今のとおり 1 で止まる。
     ベースブランチとの衝突（4。#1917-8）もリリースの手順では 1 として止まる。"""
     mod = _release_steps_module(monkeypatch)
+    monkeypatch.setattr(mod.strategy_route, "admin_bypass", lambda root: False)
     summary = "#5 の CI の基盤待ち: Runner が付かずに取り消された（Lint / lint）。再実行 3 回で解けない"
     out = json.dumps({"tool": "merged", "status": "stopped", "summary": summary, "items": []})
     monkeypatch.setattr(mod, "run", lambda cmd, **kw: subprocess.CompletedProcess(cmd, code, out, ""))
@@ -324,7 +332,8 @@ def test_release_remakes_the_pr_when_merged_pr_misses_new_commits(monkeypatch, i
         return subprocess.CompletedProcess(args, rc, out, "")
 
     monkeypatch.setattr(mod, "git", git)
-    monkeypatch.setattr(mod, "git_root", lambda r: ".")
+    # ai-plugins の .ndf/ は #3672 の手順 2 まで旧いキーのまま残るため、宣言を移した写しで読む
+    monkeypatch.setattr(mod, "git_root", lambda r: strategy_fixture.like_root())
     monkeypatch.setattr(mod.bump, "require_bumped", lambda root, plugin, ver: None)
     monkeypatch.setattr(mod, "find_pr", lambda root, head, base, states: {"number": 7, "state": "MERGED"})
     monkeypatch.setattr(mod, "changelog_section", lambda root, ver, plugin: "")
@@ -359,6 +368,8 @@ def test_release_stops_before_the_pr_when_plugin_json_is_not_bumped(monkeypatch,
         mod, "git", lambda r, *args, check=True: pushed.append(args) if args[0] == "push" else real_git(r, *args, check=check)
     )
     monkeypatch.setattr(mod, "find_pr", lambda r, head, base, states: (_ for _ in ()).throw(SystemExit("pr")))
+    # 手元でマージする経路（宣言の web-develop の開発版のチャネルは workflow を持つが、ここでは起動しない）
+    monkeypatch.setattr(mod.reviewed, "dev_workflow_of", lambda root: None)
     with pytest.raises((mod.StepError, SystemExit)) as e:
         mod.cmd_release(argparse.Namespace(root=str(repo), version="1.2.3", plugins=None, channel="dev", ci_wait=3600.0))
     if version == "1.2.3":
@@ -749,6 +760,182 @@ def test_changed_plugins_without_the_tag_is_two(repo):
     assert code == 2 and "ndf--v" in res["summary"]
 
 
+@pytest.mark.parametrize("stale_tag", [False, True])
+def test_changed_plugins_without_tags_starts_from_the_last_release_bump(repo, monkeypatch, stale_tag):
+    """#3672 の round 11: タグを作らない宣言（CD の無い package-plugin は release.tag が null）では、本番ブランチの版を
+    初めて持ったコミット（前のリリースの版上げ）を差分の起点にし、存在しないタグで止まらない。round 12: タグを作っていた
+    頃の古いタグが残っていても、そのタグを起点にしない（版上げを「上げ済み」と数えて抜かさない）。"""
+    mod = _release_steps_module(monkeypatch)  # lib/ を sys.path へ入れる
+    from release_lib import publish
+
+    if stale_tag:
+        git(repo, "tag", "ndf--v0.9.0")  # タグ無しの宣言へ変える前に作ったタグ
+    plugin_json(repo, "plugins/ndf", "1.0.0")
+    plugin_json(repo, "plugins/mcp/mcp-serena", "2.3.4")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "release 1.0.0")
+    shipped = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
+    git(repo, "update-ref", "refs/remotes/origin/main", shipped)  # 本番ブランチは前のリリース
+    (repo / "plugins" / "mcp" / "mcp-serena" / "README.md").write_text("changed\n", encoding="utf-8")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "change serena")
+    plugin_json(repo, "plugins/ndf", "1.0.1")  # この版の bump の後に bump-others が走る
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "bump ndf")
+    assert publish.untagged_since(repo, "ndf", "HEAD") == shipped
+    assert mod.prev_release(repo, "ndf", "HEAD") == shipped  # approval-facts の比較元も同じ起点
+    code, res = changed(repo)
+    assert code == 0 and res["metrics"]["since"] == shipped, res
+    assert [it["name"] for it in res["items"]] == ["mcp-serena"]
+
+
+def test_untagged_record_and_ranges_read_versions_not_stale_tags(repo, monkeypatch):
+    """#3672 の round 13: タグを作らない宣言では、残った古いタグでなく版から、版の節の PR の範囲の起点（前のリリースの版上げ）と
+    リリース記録の直前の版（接尾辞の無い前の正式版）を決める。プラグインのマニフェストが無ければどちらも決めない。"""
+    mod = _release_steps_module(monkeypatch)
+    from release_lib import publish
+
+    git(repo, "tag", "ndf--v0.9.0")  # タグ無しの宣言へ変える前に作ったタグ
+    commits = []
+    for ver in ("1.0.0", "1.0.1-dev.1", "1.0.1"):
+        plugin_json(repo, "plugins/ndf", ver)
+        git(repo, "add", "-A")
+        git(repo, "commit", "-q", "-m", ver)
+        commits.append(subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip())
+    git(repo, "update-ref", "refs/remotes/origin/main", commits[0])  # 本番ブランチは前のリリース
+    assert mod.prev_release(repo, "ndf", "HEAD", "ndf--v1.0.1") == commits[0]
+    git(repo, "update-ref", "refs/remotes/origin/main", commits[2])  # 1.0.1 を出した後
+    assert publish.untagged_before(repo, "ndf", "1.0.1") == "1.0.0"
+    # round 15: 出した後の導入の確かめは、確かめる版を除いた直前の正式版の版上げを起点にする（今回の版上げを起点にしない）
+    assert publish.untagged_since(repo, "ndf", "HEAD") == commits[2]
+    assert publish.untagged_since(repo, "ndf", "HEAD", exclude="1.0.1") == commits[0]
+    import release_prev
+
+    monkeypatch.setattr(release_prev, "_BATCH", 2)  # 版をまとめて読む単位をまたいでも同じ答え
+    assert publish.untagged_since(repo, "ndf", "HEAD", exclude="1.0.1") == commits[0]
+    assert publish.untagged_before(repo, "ndf", "1.0.1") == "1.0.0"
+    assert publish.untagged_since(repo, "nothing", "HEAD") is None and publish.untagged_before(repo, "nothing", "1.0.1") is None
+
+
+def test_untagged_changelog_and_guards_read_the_shipped_version(repo, monkeypatch):
+    """#3701 の round 15: タグを作らない宣言では、版の節の消し方（前のリリースの起点が版上げのコミット）と、出した版へ書かない・
+    出し直さない確かめ（タグの有無の代わりに origin の本番ブランチの版）も版から決める。手元の本番ブランチの版は数えない。"""
+    _release_steps_module(monkeypatch)
+    from release_lib import names, publish
+    from step_result import StepError
+
+    git(repo, "tag", "ndf--v0.9.0")  # タグ無しの宣言へ変える前に作ったタグ
+    plugin_json(repo, "plugins/ndf", "1.0.0")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "release 1.0.0")
+    shipped = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
+    git(repo, "update-ref", "refs/heads/main", shipped)  # 手元の本番ブランチだけ: 出済みの版に数えない
+    assert names.shipped_note(repo, "ndf", "1.0.0") is None
+    git(repo, "update-ref", "refs/remotes/origin/main", shipped)  # origin の本番ブランチへ 1.0.0 を出した
+    assert publish.prev_release(repo, "ndf", "HEAD", "ndf--v1.0.3") == shipped
+    lines = "# C\n\n## [ndf 1.0.2]\n\n- b\n\n## [ndf 1.0.1]\n\n- a\n\n## [ndf 1.0.0]\n\n- 前の版\n\n## [ndf 0.9.0]\n\n- 古い版\n".split(
+        "\n"
+    )
+    gone = names.drop_untagged(repo, lines, "ndf", shipped, "1.0.3")
+    assert [g["heading"] for g in gone] == ["## [ndf 1.0.2]", "## [ndf 1.0.1]"]
+    assert "## [ndf 1.0.0]" in lines and "## [ndf 0.9.0]" in lines
+    assert "1.0.0" in names.shipped_note(repo, "ndf", "1.0.0-dev.2") and "1.0.0" in names.shipped_note(repo, "ndf", "0.9.5")
+    assert names.shipped_note(repo, "ndf", "1.0.1") is None
+    with pytest.raises(StepError) as e:
+        names.require_unreleased(repo, "ndf", "1.0.0")
+    assert e.value.code == 3 and "本番ブランチの版 1.0.0" in str(e.value)
+    names.require_unreleased(repo, "ndf", "1.0.1-dev.1")  # まだ出ていない版の節へは書く
+
+
+@pytest.mark.parametrize(
+    ("release", "made"),
+    [({"tag": None}, ""), ({"tag": "v{version}", "github_release": False}, "タグ v1"), ({}, "タグ v1 と GitHub Release")],
+)
+def test_approval_names_only_the_artifacts_the_declaration_makes(monkeypatch, release, made):
+    """#3672 の round 13: 承認資料の同意と戻し方は、宣言が作らせる公開物（publish.wants）だけを書く。"""
+    _release_steps_module(monkeypatch)
+    from release_lib import publish
+
+    assert publish.made_by(SimpleNamespace(release=release), "v1") == made
+
+
+def v_tag_repo(root: Path) -> Path:
+    """宣言の release.tag が `v{version}` のリポジトリ（#3672 の round 9）。タグは v1.0.0・v1.1.0・接尾辞つきの v1.2.0-dev.1。"""
+    release = {**plugin_release(), "tag": "v{version}", "github_release": True, "cd": {"workflow": "release.yml"}}
+    strategy_fixture.declare(root, "develop", "main", release)
+    plugin_json(root, "plugins/ndf", "1.0.0")
+    plugin_json(root, "plugins/mcp/mcp-serena", "2.3.4")
+    git(root, "add", "-A")
+    git(root, "commit", "-q", "-m", "base")
+    git(root, "tag", "v1.0.0")
+    git(root, "tag", "ndf--v1.0.5")  # 宣言の形に合わないタグは前の版に数えない
+    git(root, "commit", "-q", "--allow-empty", "-m", "next")
+    git(root, "tag", "v1.1.0")
+    git(root, "tag", "v1.2.0-dev.1")
+    (root / "plugins" / "mcp" / "mcp-serena" / "README.md").write_text("changed\n", encoding="utf-8")
+    git(root, "add", "-A")
+    git(root, "commit", "-q", "-m", "change serena")
+    return root
+
+
+def test_release_tags_follow_the_declared_shape(repo, monkeypatch):
+    """#3672 の round 9: タグの名前と検索の形は宣言の release.tag から引き、前版の検索・公開・記録が同じ形を使う。"""
+    root = v_tag_repo(repo)
+    mod = _release_steps_module(monkeypatch)
+    from release_lib import names, publish, record
+
+    assert names.tag_name(root, "ndf", "1.2.0-dev.1") == "v1.2.0"
+    assert mod.release_tag_before(root, "ndf") == "v1.1.0"
+    assert mod.release_tag_before(root, "ndf", current="v1.1.0") == "v1.0.0"
+    # 前のタグを渡さない changed-plugins も宣言の形で前版を引く
+    code, res = changed(root)
+    assert code == 0 and res["metrics"]["since"] == "v1.1.0", res
+    assert [i["name"] for i in res["items"]] == ["mcp-serena"]
+    # 公開もその形のタグを作る
+    plugin_json(root, "plugins/ndf", "1.3.0")
+    git(root, "commit", "-q", "-am", "bump")
+    made = []
+    monkeypatch.setattr(publish, "tag_and_release", lambda r, plugin, ver, tag, rev, release=True: made.append(tag) or [])
+    sha = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
+    assert publish.publish(root, "ndf", sha)[1] == "v1.3.0" and made == ["v1.3.0"]
+    # 記録は前のタグから宣言の形で版を引く
+    body = record.body_of(root, "ndf", "1.3.0", "v1.3.0", "v1.1.0", [1], by_cd=True, template="v{version}")
+    assert "1.1.0" in body and "v1.1.0" in body
+
+
+def test_release_reads_names_from_the_start_snapshot(repo, monkeypatch):
+    """#3672 の round 11: プランが環境変数で渡す開始時のスナップショットで名前を解き、開始後に変えた宣言を読み直さない
+    （段が起動する子プロセスも環境変数を受け継ぐ。I13・決定 9）。"""
+    root = v_tag_repo(repo)
+    _release_steps_module(monkeypatch)  # lib/ を sys.path へ入れる
+    import branch_strategy
+    import repo as repo_lib
+    from release_lib import names
+
+    monkeypatch.delenv(repo_lib.SNAPSHOT_ENV, raising=False)
+    snap = branch_strategy.snapshot_section(repo_lib.branch_strategy_of(root), "開始時")
+    snap["section"]["release"]["tag"] = "rel-{version}"
+    monkeypatch.setenv(repo_lib.SNAPSHOT_ENV, repo_lib.snapshot_env(root, snap))
+    assert names.tag_name(root, "ndf", "1.3.0") == "rel-1.3.0"  # 今の宣言（v{version}）でなく開始時の形
+    other = json.loads(repo_lib.snapshot_env(root, snap))
+    monkeypatch.setenv(repo_lib.SNAPSHOT_ENV, json.dumps({**other, "top": "/elsewhere"}))
+    assert names.tag_name(root, "ndf", "1.3.0") == "v1.3.0"  # 別のリポジトリのスナップショットは効かない
+    monkeypatch.setenv(repo_lib.SNAPSHOT_ENV, "{")
+    with pytest.raises(branch_strategy.StrategyError):
+        repo_lib.branch_strategy_of(root)
+
+
+def test_release_tag_shape_defaults_without_a_declared_tag(monkeypatch):
+    """宣言に release.tag の形が無い（null を含む）ときは `<plugin>--v<版>`。"""
+    _release_steps_module(monkeypatch)  # lib/ を sys.path へ入れる
+    from release_lib import names
+
+    assert names.tag_template(None) == names.tag_template({"tag": None}) == "{plugin}--v{version}"
+    assert names.release_tag("ndf", "1.2.3", names.tag_template({"tag": "{plugin}@{version}"})) == "ndf@1.2.3"
+    assert names.tag_version("ndf--v1.2.3", "ndf") == "1.2.3"
+    assert names.tag_version("v1.2.3", "ndf") is None and names.tag_version("vnext", "ndf", "v{version}") is None
+
+
 def test_bump_raises_the_other_plugin_from_changed_plugins(repo):
     root = changed_repo(repo)
     push_origin(root)
@@ -760,15 +947,13 @@ def test_bump_raises_the_other_plugin_from_changed_plugins(repo):
     assert got["version"] == "2.3.5"
 
 
-def _release_prod(monkeypatch, root: Path, wt: dict, plugin: str):
-    """release --channel prod を git と gh を差し替えて流し、(PR の作成, 呼んだ git, 結果) を返す。"""
+def _release_prod(monkeypatch, root: Path, branches: tuple[str, str], plugin: str, deliveries: list | None = None, channel: str = "prod"):
+    """release --channel prod を git と gh を差し替えて流し、(PR の作成, 呼んだ git, 結果) を返す。`branches` は
+    (ベースブランチ, 本番ブランチ)。"""
     import argparse
 
-    (root / ".ndf").mkdir(exist_ok=True)
-    (root / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, **wt}))
-    (root / ".ndf" / "supervise.json").write_text(
-        json.dumps({"release": {"form": "package-plugin", "plugin": plugin, "runtimes": ["claude"]}})
-    )
+    subprocess.run(["git", "init", "-q", str(root)], check=True)  # 宣言はメインディレクトリ（git の木）から読む（#3672）
+    strategy_fixture.declare(root, *branches, plugin_release(plugin), deliveries)
     mod = _release_steps_module(monkeypatch)
     calls, created, found = [], [], []
 
@@ -782,11 +967,19 @@ def _release_prod(monkeypatch, root: Path, wt: dict, plugin: str):
     monkeypatch.setattr(mod.publish, "git", git)
     monkeypatch.setattr(mod, "git_root", lambda r: root)
     monkeypatch.setattr(mod.bump, "require_bumped", lambda r, plugin, ver: None)
-    monkeypatch.setattr(mod, "find_pr", lambda r, head, base, states: found.append((head, base)))
+
+    def find_pr(r, head, base, states):
+        found.append((head, base))
+        # 作った PR は開いたまま見つかる（trunk の版上げの PR は本番の PR を兼ねる）
+        hit = [i for i, c in enumerate(created, 1) if (c[0], c[1]) == (base, head)]
+        return {"number": hit[0], "state": "OPEN"} if hit and "OPEN" in states else None
+
+    monkeypatch.setattr(mod, "find_pr", find_pr)
+    monkeypatch.setattr(mod.port_mark, "ensure_no_port_line", lambda r, pr: pr)  # 使い回す PR の本文は書き直さない
     monkeypatch.setattr(mod, "changelog_section", lambda r, ver, plugin: "")
     monkeypatch.setattr(mod, "run_checks", lambda r: [])
     monkeypatch.setattr(mod, "create_pr", lambda r, base, head, title, body: created.append((base, head, title)) or len(created))
-    monkeypatch.setattr(mod, "wait_and_merge", lambda r, n, expect=None, **kw: f"m-{n}")
+    monkeypatch.setattr(mod, "wait_and_merge", lambda r, n, expect=None, **kw: calls.append(("merge", n, expect)) or f"m-{n}")
     monkeypatch.setattr(mod.approval, "release_pr_allowed", lambda r, n, view: None)
     monkeypatch.setattr(
         mod.approval, "check_approved", lambda r, approved, base, allowed: mod.ac.Verdict(True, approved, "b" * 40, "match")
@@ -797,14 +990,32 @@ def _release_prod(monkeypatch, root: Path, wt: dict, plugin: str):
     monkeypatch.setattr(mod.reviewed, "release_case_or_stop", lambda r: mod.reviewed.release_case.decide_case(False, None, ""))
     with pytest.raises(SystemExit) as e:
         mod.cmd_release(
-            argparse.Namespace(root=str(root), version="1.2.3", plugins=None, channel="prod", approved_sha="a" * 40, ci_wait=3600.0)
+            argparse.Namespace(root=str(root), version="1.2.3", plugins=None, channel=channel, approved_sha="a" * 40, ci_wait=3600.0)
         )
     return found, created, calls, e.value.code
 
 
+def test_trunk_release_merges_the_release_pr_only_after_the_approval_check(monkeypatch, tmp_path):
+    """#3672 の D17: trunk では版上げの PR が本番の PR を兼ね、開発版の PR の段（承認と照らさないマージ）を通らない。"""
+    found, created, calls, out = _release_prod(monkeypatch, tmp_path, ("main", "main"), "foo")
+    assert created == [("main", "release/v1.2.3", "Release: foo v1.2.3")]
+    assert [c for c in calls if c[0] == "merge"] == [("merge", 1, "b" * 40)]  # 照合した先端だけを 1 回入れる
+    assert out["metrics"]["main_pr"] == 1
+
+
+def test_trunk_release_refuses_the_dev_channel(monkeypatch, tmp_path):
+    """#3672: trunk には開発版のチャネルが無く、--channel dev は本番へ入れずに止まる。"""
+    import importlib
+
+    mod = importlib.import_module("step_result")
+    with pytest.raises(mod.StepError, match="開発版のチャネルが無い"):
+        _release_prod(monkeypatch, tmp_path, ("main", "main"), "foo", channel="dev")
+
+
 def test_release_takes_branches_and_names_from_the_declaration(monkeypatch, tmp_path):
     """#1336 の AC10: ベースブランチと本番チャネルを変えた宣言では、その名前で PR を作りタグを打つ（develop・main の直書きで動かない）。"""
-    found, created, calls, out = _release_prod(monkeypatch, tmp_path, {"base_branch": "trunk", "production_branch": "live"}, "foo")
+    # NDF がタグを打つ形: CD の行の無い届け先（deliveries: []）。release.cd が null だとタグを持てない（R10）
+    found, created, calls, out = _release_prod(monkeypatch, tmp_path, ("trunk", "live"), "foo", [])
     assert found == [("release/v1.2.3", "trunk"), ("release/v1.2.3", "live"), ("release/v1.2.3", "live")]
     assert created == [("trunk", "release/v1.2.3", "Release: foo v1.2.3"), ("live", "release/v1.2.3", "Release: foo v1.2.3 を live へ")]
     assert ("tag", "-a", "foo--v1.2.3", "m-2", "-m", "foo v1.2.3") in calls
@@ -813,7 +1024,7 @@ def test_release_takes_branches_and_names_from_the_declaration(monkeypatch, tmp_
 
 def test_release_with_the_ai_plugins_declaration_keeps_its_values(monkeypatch, tmp_path):
     """#1336 の I9: ai-plugins の宣言では、ブランチ develop / main・タグ ndf--v<版>・題 Release: ndf v<版> が今と同じに出る。"""
-    found, created, calls, out = _release_prod(monkeypatch, tmp_path, {"base_branch": "develop", "production_branch": "main"}, "ndf")
+    found, created, calls, out = _release_prod(monkeypatch, tmp_path, ("develop", "main"), "ndf", [])
     assert found == [("release/v1.2.3", "develop"), ("release/v1.2.3", "main"), ("release/v1.2.3", "main")]
     assert created == [("develop", "release/v1.2.3", "Release: ndf v1.2.3"), ("main", "release/v1.2.3", "Release: ndf v1.2.3 を main へ")]
     assert out["metrics"]["tag"] == "ndf--v1.2.3"
@@ -1117,9 +1328,7 @@ CD_ROW = {"target": "ndf", "kind": "auto", "trigger": "release-cd.yml", "channel
 )
 def test_release_publishes_only_when_no_row_declares_the_cd_does(monkeypatch, tmp_path, row, by_cd):
     """受け入れ条件 20・I11: 公開の担い手は宣言の publishes_release だけで決まり、両方で打たない。"""
-    (tmp_path / ".ndf").mkdir()
-    (tmp_path / ".ndf" / "project.json").write_text(json.dumps({"delivery": [row]}, ensure_ascii=False))
-    _, _, calls, out = _release_prod(monkeypatch, tmp_path, {"base_branch": "develop", "production_branch": "main"}, "ndf")
+    _, _, calls, out = _release_prod(monkeypatch, tmp_path, ("develop", "main"), "ndf", [row])
     tagged = ("tag", "-a", "ndf--v1.2.3", "m-2", "-m", "ndf v1.2.3") in calls
     assert tagged is (not by_cd)
     assert out["metrics"]["tag"] == (None if by_cd else "ndf--v1.2.3")
@@ -1152,11 +1361,9 @@ def _record(monkeypatch, root, **args):
     """record を gh と git を差し替えて流し、(結果, 投稿した本文, 終了コード) を返す。"""
     import argparse
 
-    (root / ".ndf").mkdir(exist_ok=True)
-    (root / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "base_branch": "develop", "production_branch": "main"}))
-    (root / ".ndf" / "supervise.json").write_text(
-        json.dumps({"release": {"form": "package-plugin", "plugin": "ndf", "runtimes": ["claude"]}})
-    )
+    if not (root / ".ndf" / "project.json").is_file():  # 届け先の行を持つ宣言は呼び手が先に置く
+        strategy_fixture.declare(root, "develop", "main", plugin_release())
+    subprocess.run(["git", "init", "-q", str(root)], check=True)  # 宣言はメインディレクトリ（git の木）から読む（#3672）
     mod = _release_steps_module(monkeypatch)
     posted, codes = [], []
     monkeypatch.setattr(mod, "git_root", lambda r: root)
@@ -1213,15 +1420,21 @@ def test_record_stops_with_5_after_writing_a_failure(monkeypatch, tmp_path):
 
 def test_record_by_cd_replaces_the_tag_check_with_the_result(monkeypatch, tmp_path):
     """公開物を CD が作る形はタグの照会を CD の結果へ置き換える。結果のファイルが無ければ今と同じく前提で止まる。"""
-    (tmp_path / ".ndf").mkdir()
-    row = {**CD_ROW, "publishes_release": True}
-    (tmp_path / ".ndf" / "project.json").write_text(json.dumps({"delivery": [row]}, ensure_ascii=False))
+    strategy_fixture.declare(tmp_path, "develop", "main", plugin_release(), [{**CD_ROW, "publishes_release": True}])
     out, posted, _ = _record(monkeypatch, tmp_path, version="1.2.3", cd_result=_cd_file(tmp_path, "undetermined", "待ちの上限"))
     assert out["status"] == "ok" and "CD の結果: 未確定" in posted[0][1] and "公開は CD が担う" in posted[0][1]
     import step_result
 
     with pytest.raises(step_result.StepError):
         _record(monkeypatch, tmp_path, version="1.2.3")
+
+
+def test_record_without_cd_does_not_require_the_publications_the_declaration_skips(monkeypatch, tmp_path):
+    """#3672 の round 5: CD の無い宣言（R10 で release.tag が null・github_release が偽）は、_published が作らないタグと
+    GitHub Release を record でも求めず、タグを事実として書かずに記録を書く。"""
+    out, posted, code = _record(monkeypatch, tmp_path, version="1.2.3")
+    assert code is None and out["status"] == "ok"
+    assert "宣言がタグを作らない" in posted[0][1] and "ndf--v1.2.3" not in posted[0][1]
 
 
 def test_cd_result_reads_the_merge_commit_of_the_last_pr_not_the_branch_tip(monkeypatch):
@@ -1336,7 +1549,7 @@ def test_reviewed_prod_stops_at_the_gate_until_the_approval_matches(monkeypatch,
 def test_reviewed_prod_merges_the_approved_head_without_the_bypass(monkeypatch, tmp_path, case):
     """受け入れ条件 2・12・I7: 承認が先端と一致すれば、その先端に固定して --admin なしでマージし、公開の後へ進む。"""
     _, _, merged, published, _ = _reviewed_prod(monkeypatch, tmp_path, case, "success", found=OPEN_PROD_PR)
-    assert merged == [{"expect": HEAD, "ci_wait": 60.0, "gate_approved": "user", "no_admin": True}] and published == [9]
+    assert merged == [{"expect": HEAD, "ci_wait": 60.0, "gate_approved": "user", "admin": False}] and published == [9]
 
 
 def test_reviewed_prod_merges_cd_admin_with_the_bypass_and_records_it(monkeypatch, tmp_path):
@@ -1346,7 +1559,7 @@ def test_reviewed_prod_merges_cd_admin_with_the_bypass_and_records_it(monkeypatc
     out, _, merged, published, _ = _reviewed_prod(
         monkeypatch, tmp_path, "cd-admin", "success", found=OPEN_PROD_PR, record=record, backs=backs
     )
-    assert merged == [{"expect": HEAD, "ci_wait": 60.0, "gate_approved": "user", "no_admin": False}] and published == [9]
+    assert merged == [{"expect": HEAD, "ci_wait": 60.0, "gate_approved": "user", "admin": True}] and published == [9]
     assert {"kind": "pr", "name": "#9", "result": "merged", "base": "main", "admin": True} in out["items"]
     assert record == [(9, HEAD, "https://t/1")]
     assert {"kind": "comment", "name": "https://r/1", "result": "written", "record": "admin_merge"} in out["items"]
@@ -1493,7 +1706,7 @@ def test_release_selected_writes_admin_on_the_production_row(monkeypatch, tmp_pa
     """#3506 の I8: 選んで集める取り込み方でも、本番の PR の行に迂回の有無を書く。"""
     import argparse
 
-    from release_lib import promotion
+    from release_lib import strategy_route as promotion
     from release_lib.context import ReleaseCtx
 
     monkeypatch.setattr(
@@ -1531,15 +1744,59 @@ def test_prod_ops_wires_the_entry_functions_at_call_time(monkeypatch):
     assert {field: getattr(ops, field) for field in wired} == {field: getattr(mod, name) for field, name in wired.items()}
 
 
-def test_wait_and_merge_passes_no_admin(monkeypatch):
+@pytest.mark.parametrize(
+    "merge, bypass",
+    [
+        ({"method": "direct", "admin": True}, True),
+        ({"method": "direct", "admin": False}, False),
+        ({"method": "strict", "admin": False}, False),
+    ],
+)
+def test_wait_and_merge_takes_the_bypass_from_the_declaration(monkeypatch, tmp_path, merge, bypass):
+    """#3672 の I6: 管理者の迂回は引数でなく宣言の merge から決め、method が direct で admin が真のときだけ使う。"""
     mod = _release_steps_module(monkeypatch)
+    root = tmp_path / "r"
+    root.mkdir()
+    git(root, "init", "-q")
+    sec = strategy_fixture.section("web-develop")
+    strategy_fixture.write_strategy(root, "web-develop", merge={**sec["merge"], **merge})
     calls = []
     out = json.dumps({"tool": "merged", "status": "ok", "summary": "#5 をマージした", "items": []})
     monkeypatch.setattr(mod, "run", lambda cmd, **kw: calls.append(cmd) or subprocess.CompletedProcess(cmd, 0, out, ""))
     monkeypatch.setattr(mod, "merge_commit_of", lambda root, n: "c")
-    mod.wait_and_merge(".", 5)
-    mod.wait_and_merge(".", 5, no_admin=True)
-    assert "--no-admin" not in calls[0] and calls[1][-1] == "--no-admin"
+    mod.wait_and_merge(root, 5, gate_approved="user")
+    assert ("--no-admin" not in calls[0]) is bypass and calls[0][-2:] == ["--gate-approved", "user"]
+
+
+@pytest.mark.parametrize("admin", [True, False])
+def test_wait_and_merge_takes_the_bypass_from_the_case_over_the_declaration(monkeypatch, tmp_path, admin):
+    """#3672 の round 5: CD のある場合は呼び手が渡す場合（case.admin_merge）で迂回を決め、宣言の merge.admin を見ない
+    （cd-no-review に倒れた場合に宣言だけで必須のレビューを越えない）。"""
+    mod = _release_steps_module(monkeypatch)
+    root = tmp_path / "r"
+    root.mkdir()
+    git(root, "init", "-q")
+    sec = strategy_fixture.section("web-develop")
+    strategy_fixture.write_strategy(root, "web-develop", merge={**sec["merge"], "method": "direct", "admin": not admin})
+    calls = []
+    out = json.dumps({"tool": "merged", "status": "ok", "summary": "#5 をマージした", "items": []})
+    monkeypatch.setattr(mod, "run", lambda cmd, **kw: calls.append(cmd) or subprocess.CompletedProcess(cmd, 0, out, ""))
+    monkeypatch.setattr(mod, "merge_commit_of", lambda root, n: "c")
+    mod.wait_and_merge(root, 5, gate_approved="user", admin=admin)
+    assert ("--no-admin" not in calls[0]) is admin
+
+
+def test_wait_and_merge_stops_without_the_declaration(monkeypatch, tmp_path):
+    """#3672 の異常系: 宣言を読めなければ迂回の有無を既定へ倒さず、merge-when-green を呼ばずに止まる。"""
+    mod = _release_steps_module(monkeypatch)
+    root = tmp_path / "r"
+    root.mkdir()
+    git(root, "init", "-q")
+    calls = []
+    monkeypatch.setattr(mod, "run", lambda cmd, **kw: calls.append(cmd))
+    with pytest.raises(mod.StepError):
+        mod.wait_and_merge(root, 5)
+    assert calls == []
 
 
 @pytest.mark.parametrize("arg", ["approved_sha", "approval"])
@@ -1770,7 +2027,7 @@ def test_release_dev_runs_the_declared_workflow_only_for_an_open_pr(monkeypatch,
         monkeypatch.setattr(mod, "_reusable_release_pr", lambda r, b, base, s=state: {"number": 4, "state": s})
         with pytest.raises(SystemExit) as e:
             rv.release_dev(ReleaseCtx(tmp_path, a, "ndf", ["ndf"], "release/v1.2.3-dev.1", "develop", "main"), "release-dev.yml", mod)
-        assert e.value.code["metrics"]["dev_workflow"] == "release-dev.yml"
+        assert e.value.code["metrics"]["dev_channel_workflow"] == "release-dev.yml"
     assert runs == [("release-dev.yml", 4)]
     # 使い回す開いた PR だけ、本文を今の版の本文（ndf-next の port 検査の印を持つ）へ書き直す（#3343）
     assert [n for n, _ in refreshed] == ["4"] and mod.port_mark.NO_PORT_LINE in refreshed[0][1]

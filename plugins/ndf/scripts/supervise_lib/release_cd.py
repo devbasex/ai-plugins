@@ -88,7 +88,7 @@ def cd_prod_steps(a, v: str, prs: str, repo: str | None, approval: str, approval
 
 def _prod_pr_cmd(a, v: str) -> str:
     """本番の PR（版上げのブランチ → 本番チャネル）の番号を引くシェルの式。"""
-    return f'$(gh pr list --head release/v{v} --base {a.production_branch} --state open --json number --jq ".[0].number")'
+    return f'$(gh pr list --head release/v{v} --base {a.production} --state open --json number --jq ".[0].number")'
 
 
 def _deploy_pr_step(step_id: str, repo: str | None, subcommand: str, **extra) -> dict:

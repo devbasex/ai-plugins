@@ -1,4 +1,4 @@
-"""リリースの経路（`reviewed.release_prod`・`reviewed.release_dev`・`promotion.release_selected`）へ同じ組で渡る値（`release-steps.py`
+"""リリースの経路（`reviewed.release_prod`・`reviewed.release_dev`・`strategy_route.release_selected`）へ同じ組で渡る値（`release-steps.py`
 の release が 1 度組む）。"""
 
 from __future__ import annotations
@@ -16,3 +16,4 @@ class ReleaseCtx:
     branch: str  # リリースブランチ
     base: str  # ベースブランチ（開発版のチャネル）
     prod: str  # 本番チャネル
+    sync: bool = True  # 版上げの PR をベースブランチへ入れる段がある（`strategy_route.route_of` の `sync`。trunk は偽）

@@ -264,7 +264,7 @@ sequenceDiagram
 
 入力は設計 PR・課題・問いの時点の先頭・今の先頭で、出力は `True`（取り込みだけ）・`False`（違う）・`None`（判定できない）の 3 値である。
 
-1. 起点ブランチを `.ndf/worktree.json` の `base_branch` から読む。読めなければ `None`
+1. 起点ブランチをブランチ戦略の宣言（`.ndf/project.json` の `branch_strategy`）の `branches.base` から読む。読めなければ `None`
 2. `git fetch -q origin <起点> refs/pull/<PR>/head`。失敗すれば `None`
 3. `git rev-list --first-parent --parents <前>..<今>` の各コミットが親を 2 つ以上持ち、最初のコミットの 1 つ目の親が問いの時点の先頭で、
    2 つ目以降の親がすべて `origin/<起点>` の祖先（`git merge-base --is-ancestor`）であることを確かめる。外れれば `False`

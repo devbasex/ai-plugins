@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import subprocess
 import sys
 from pathlib import Path
@@ -10,9 +9,11 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
+import branch_strategy  # noqa: E402
 import proc  # noqa: E402
 import repo  # noqa: E402
 import step_result  # noqa: E402
+import strategy_fixture  # noqa: E402
 
 
 def git_init(path: Path, origin: str | None = None) -> Path:
@@ -85,13 +86,13 @@ def test_main_dir_from_a_linked_worktree(tmp_path):
     assert repo.main_dir(tmp_path / "nothing") is None
 
 
-def test_declared_base(tmp_path):
-    assert repo.declared_base(tmp_path) is None
-    decl = tmp_path / ".ndf" / "worktree.json"
-    decl.parent.mkdir()
-    decl.write_text(json.dumps({"base_branch": "develop"}))
-    assert repo.declared_base(tmp_path) == "develop"
-    assert repo.declared_base(tmp_path, remote=True) == "origin/develop"
-    for broken in ("{", "[]", json.dumps({"base_branch": ""}), json.dumps({"base_branch": 3})):
-        decl.write_text(broken)
-        assert repo.declared_base(tmp_path) is None
+def test_base_branch_reads_the_strategy_and_never_falls_back(tmp_path):
+    """#3672 の I3: ベースブランチは宣言の `branches.base` だけから読み、宣言が無い・壊れているときは止まる。"""
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    with pytest.raises(branch_strategy.StrategyError):
+        repo.base_branch(tmp_path)
+    strategy_fixture.declare(tmp_path, "develop", "main")
+    assert repo.base_branch(tmp_path) == "develop" and repo.production_branch(tmp_path) == "main"
+    (tmp_path / ".ndf" / "project.json").write_text("{")
+    with pytest.raises(branch_strategy.StrategyError):
+        repo.base_branch(tmp_path)

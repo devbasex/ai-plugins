@@ -25,7 +25,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import deps  # noqa: E402
 
-deps.require("md", "durable", "waits")
+deps.require("md", "durable", "waits", "jsonschema")
 import md  # noqa: E402
 from step_result import (
     EXIT_PRECONDITION,
@@ -130,8 +130,8 @@ def cmd_plan(a):
     branch = current_branch(root)
     base = require_base(root, a.base)
     default = repo.default_branch(root)
-    declared = repo.declared_base(root)
-    allowed = {b for b in (default, declared) if b}
+    s = repo.strategy_or_none(root)
+    allowed = {b for b in (default, *((s.base, s.production) if s else ())) if b}
     items = [{"kind": "branch", "name": branch, "result": "ok"}, {"kind": "base", "name": base, "result": "ok"}]
     if branch in allowed:
         items[0]["result"] = "redirect"
@@ -458,7 +458,7 @@ def build_parser():
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("plan", parents=[common_parser()], help="ブランチ・起点・既存 PR・変更量を集める")
     p.add_argument("--draft", action="store_true")
-    p.add_argument("--base", help="起点のブランチ（既定は .ndf/worktree.json の base_branch か既定ブランチ）")
+    p.add_argument("--base", help="起点のブランチ（既定はブランチ戦略の宣言の branches.base）")
     p.add_argument("--message", help="使う予定のコミットメッセージ（閉じる語をチェックする）")
     p.add_argument("--force", action="store_true", help="起点が main 以外でも進める")
     p.set_defaults(func=cmd_plan)

@@ -76,7 +76,7 @@ Practices「Small CLs」 https://google.github.io/eng-practices/review/developer
 | 計画の描画（`parallel_bundles.render_rows`） | `plan.md` に「課題のまとまり」の表を足す（欄のあるレーンだけ） |
 | レーンのまとまりの読み出し（`parallel_bundles.bundles_of`） | 動いている計画のこのレーンのまとまりの一覧を返す。壊れた計画のレーンでは `BrokenPlanError` を投げる |
 | スプリントの組み立て（`supervise_lib/sprint_bundles.py`・`sprint_waves.py`・`absorb.py`・`design_stage.py`） | 設計の課題を代表へ寄せ、実装のステージをまとまりごとのプランにする |
-| レビューの単位（`supervise_lib/review_units.py`） | ブランチ運用の宣言のレビューの単位（`branch_flow.reviews`）を解き、実装のプランへ cross-review を差し込み、検査のプランから選ばないレビューを外す |
+| レビューの単位（`supervise_lib/review_units.py`） | ブランチ戦略の宣言のレビューの単位（`.ndf/project.json` の `branch_strategy.reviews`）を解き、実装のプランへ cross-review を差し込み、検査のプランから選ばないレビューを外す |
 | レビューのステップ（`supervise_lib/templates.py` の `review_step`） | コードレビューの cross-review のステップを 1 か所で組む。検査のプランとまとまりの実装のプランが共有する |
 | レビュー範囲（cross-review の `review_lib/review_scope.py`・`commands/start_round.py`） | 全差分の base を、base のブランチの今の先頭との merge base にする |
 | 宛て先の区分（`lib/pr_mode.py` の `needs_review`・`pr-steps.py` の `bundled_sprint`） | まとまりの記録のあるスプリントブランチ宛てを、レビューを通す区分として返す |

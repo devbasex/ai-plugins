@@ -12,7 +12,6 @@ import pytest
 
 SCRIPTS = Path(__file__).resolve().parents[1]
 SUPERVISE = SCRIPTS / "supervise.py"
-REPO = SCRIPTS.parents[2]
 PY = sys.executable
 
 sys.path.insert(0, str(SCRIPTS))
@@ -20,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import supervise  # noqa: E402
 from supervise_lib import sprint_inputs  # noqa: E402
 from test_supervise_pace_auto import AUTO, make_repo, sprint_state  # noqa: E402
+import strategy_fixture  # noqa: E402
 
 NO_SECTION = "## 目的\n\n直す\n\n## 何をするか\n\n- 直す\n"
 
@@ -32,7 +32,8 @@ def sprint_args(tmp_path: Path, pace: str = "normal", issues=("11", "12"), desig
     args += ["--version", "10.18.0-dev.1", "--out", str(tmp_path / "m")]
     if pace != "normal":
         args += ["--pace", pace, "--state", str(sprint_state(tmp_path, "auto"))]
-    return args, (repo if pace != "fast" else REPO)
+    # fast は作業場所に宣言を持たないので、このリポジトリの宣言を移した写し（ai-plugins の .ndf/ は #3672 の手順 2 まで旧いキー）で打つ
+    return args, (repo if pace != "fast" else strategy_fixture.like_root())
 
 
 def run(args: list[str], cwd: Path) -> tuple[subprocess.CompletedProcess, dict]:

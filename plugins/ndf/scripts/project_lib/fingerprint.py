@@ -7,12 +7,9 @@
 from __future__ import annotations
 
 import fnmatch
-import json
 import subprocess
-from pathlib import Path
 
-import branch_flow
-from project_lib import WORKTREE_FILE
+import strategy_rows
 import limits
 
 WORKFLOWS = ".github/workflows/*"
@@ -46,7 +43,7 @@ INPUT_NAMES = (
     "KIRO.md",
     "GEMINI.md",
 )
-KNOWN_BRANCHES = branch_flow.MEASURE_CANDIDATES  # 測る候補の正本は lib/branch_flow.py（#3121）
+KNOWN_BRANCHES = strategy_rows.MEASURE_CANDIDATES  # 測る候補の正本は lib/strategy_rows.py（#3121）
 
 
 def _git_text(root, *args) -> str | None:
@@ -93,20 +90,11 @@ def branch_state(root, declared=()) -> dict:
 
 
 def declared_branches(main_dir) -> list[str]:
-    """`.ndf/worktree.json` の起点と本番の名前（読めなければ空）。"""
-    f = Path(main_dir) / WORKTREE_FILE
-    try:
-        data = json.loads(f.read_text(encoding="utf-8")) if f.is_file() else {}
-    except (OSError, ValueError):
-        return []
-    if not isinstance(data, dict):
-        return []
-    return [v for v in branch_names(data) if v]
+    """ブランチ戦略の宣言のベースブランチと本番ブランチの名前（読めなければ空）。"""
+    import repo
 
-
-def branch_names(data: dict) -> list[str]:
-    """worktree.json の中身から起点と本番の名前（文字列のものだけ）。"""
-    return [v for v in (data.get("base_branch"), data.get("production_branch")) if isinstance(v, str)]
+    st = repo.strategy_or_none(main_dir)
+    return sorted({st.base, st.production}) if st else []
 
 
 def diff(recorded: dict, current: dict) -> list[str]:

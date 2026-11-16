@@ -20,6 +20,7 @@ sys.path.insert(0, str(SCRIPTS))
 import formatting  # noqa: E402
 import result_posts  # noqa: E402
 from supervise_lib import decl, templates  # noqa: E402
+import strategy_fixture  # noqa: E402
 
 # 行末の空白を消す整形。`check` は行末の空白があれば 1 で落ちる検査（pre-push に使う）
 STRIP = "sed -i 's/[[:space:]]*$//' *.txt"
@@ -34,11 +35,11 @@ def git(cwd, *args) -> str:
 
 def make_repo(root: Path, supervise: dict | None = None, project: dict | None = None) -> Path:
     (root / ".ndf").mkdir(parents=True)
-    (root / ".ndf" / "worktree.json").write_text(json.dumps({"base_branch": "main"}))
     if supervise is not None:
         (root / ".ndf" / "supervise.json").write_text(json.dumps(supervise))
     if project is not None:
         (root / ".ndf" / "project.json").write_text(json.dumps(project))
+    strategy_fixture.declare(root, "main")
     git(root, "init", "-q", "-b", "main")
     git(root, "config", "user.email", "t@example.com")
     git(root, "config", "user.name", "t")

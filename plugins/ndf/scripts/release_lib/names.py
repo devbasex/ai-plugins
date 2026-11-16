@@ -13,6 +13,8 @@ import re
 import delivery
 import md
 import proc
+from release_prev import base_key
+from release_tag import DEFAULT_TAG, latest_release_tag, release_tag, tag_glob, tag_template, tag_template_of, tag_version  # noqa: F401 -- 形の解き方の正本（lib/release_tag.py）を再び公開する
 from step_result import EXIT_PRECONDITION, StepError, base_of
 
 
@@ -33,9 +35,9 @@ def changelog_span(lines, plugin, version):
     return (None, None) if at is None else (at, next_h2(lines, at))
 
 
-def release_tag(plugin, version) -> str:
-    """基底の版のリリースタグ（version が空ならタグの接頭辞）。"""
-    return f"{plugin}--v{base_of(version)}"
+def tag_name(root, plugin, version) -> str:
+    """`root` の宣言の形で作る、基底の版のリリースタグ。"""
+    return release_tag(plugin, version, tag_template_of(root))
 
 
 def tagged(root, tag) -> bool:
@@ -43,30 +45,37 @@ def tagged(root, tag) -> bool:
     return proc.git(root, "rev-parse", "-q", "--verify", f"refs/tags/{tag}", check=False).returncode == 0
 
 
-def require_untagged(root, tag, version):
-    """リリースタグのある版の節は書き換えない（#2555 の I3）。基底の版のリリースタグ tag があれば書き込む前に止める。"""
+def shipped_note(root, plugin, version) -> str | None:
+    """タグを作らない宣言（release.tag が null）で `version` の基底の版がもう本番ブランチへ出ていれば理由の文、ほかは None
+    （`release_prev.shipped_untagged`。タグを作る宣言は基底の版のリリースタグの有無で確かめる）。"""
+    import release_prev
+
+    if shipped := release_prev.shipped_untagged(root, plugin, version):
+        return f"本番ブランチの版 {shipped} までに {base_of(version)} は出ている（宣言がタグを作らない）"
+    return None
+
+
+def require_unreleased(root, plugin, version):
+    """出した版の節は書き換えない（#2555 の I3）。基底の版のリリースタグがあるか、タグを作らない宣言で本番ブランチへ
+    出ていれば（`shipped_note`）書き込む前に止める。"""
+    tag = tag_name(root, plugin, version)
     if tagged(root, tag):
         raise StepError(f"{base_of(version)} はリリースタグ {tag} があるため版の節へ書かない", EXIT_PRECONDITION)
-
-
-def _base_key(v):
-    try:
-        return tuple(int(x) for x in base_of(v).split("."))
-    except ValueError:
-        return None
+    if why := shipped_note(root, plugin, version):
+        raise StepError(f"{base_of(version)} の版の節へ書かない: {why}", EXIT_PRECONDITION)
 
 
 def drop_untagged_sections(lines, plugin, prev, version, has_tag) -> list[str]:
     """前のリリースタグの版 prev より新しく出す正式版 version より古い、リリースタグの無い版（has_tag(版) が偽）の節を
     lines から消し（その場で書き換える）、消した見出しを返す（#2555 の I4）。prev が無ければ消さない。"""
-    lo, hi = _base_key(prev or ""), _base_key(version)
+    lo, hi = base_key(prev or ""), base_key(version)
     if lo is None or hi is None:
         return []
     head = f"## [{plugin} "
     gone = []
     for at in reversed(h2_lines(lines)):
         m = re.match(rf"{re.escape(head)}([^\]\s]+)\]", lines[at])
-        key = m and _base_key(m.group(1))
+        key = m and base_key(m.group(1))
         if key and lo < key < hi and not has_tag(m.group(1)):
             gone.append(lines[at])
             del lines[at : next_h2(lines, at)]
@@ -74,17 +83,21 @@ def drop_untagged_sections(lines, plugin, prev, version, has_tag) -> list[str]:
 
 
 def drop_untagged(root, lines, plugin, since, version) -> list[dict]:
-    """正式版 version なら、前のリリースタグ since より新しくタグの無い版の節を lines から消し、消した節の結果の項目を返す
-    （drop_untagged_sections。開発版と since の無いときは消さない。#2555 の I4）。"""
+    """正式版 version なら、前のリリースの起点 since（タグか、タグを作らない宣言では前のリリースの版上げのコミット）の版より
+    新しくタグの無い版の節を lines から消し、消した節の結果の項目を返す（drop_untagged_sections。開発版と since の無いときは消さない。#2555 の I4）。"""
     if "-" in version or not since:
         return []
-    prev = since.removeprefix(release_tag(plugin, ""))
-    gone = drop_untagged_sections(lines, plugin, prev, version, lambda v: tagged(root, release_tag(plugin, v)))
+    import release_prev
+
+    template = tag_template_of(root)
+    # タグを作らない宣言の since は前のリリースの版上げのコミット（`release_prev.prev_release`）: その版を前の版にする
+    prev = tag_version(since, plugin, template) or release_prev.version_or_none(root, plugin, since) or since
+    gone = drop_untagged_sections(lines, plugin, prev, version, lambda v: tagged(root, release_tag(plugin, v, template)))
     return [{"kind": "section", "name": "CHANGELOG.md", "result": "removed", "heading": h} for h in gone]
 
 
 def plugin_of(root, a) -> str:
-    """配るプラグイン: --plugin → `.ndf/supervise.json` の release.plugin。決まらなければ止める。"""
+    """配るプラグイン: --plugin → ブランチ戦略の宣言の release.plugin。決まらなければ止める。"""
     return _plugin_from(a, delivery.load_delivery(root))
 
 
@@ -93,7 +106,7 @@ def _plugin_from(a, d):
     arg = getattr(a, "plugin", None) or (getattr(a, "plugins", None) or "").split(",")[0].strip() or None
     plugin = arg or (d.release or {}).get("plugin")
     if not plugin:
-        raise StepError("配るプラグインを決められない（--plugin か .ndf/supervise.json の release.plugin）", EXIT_PRECONDITION)
+        raise StepError("配るプラグインを決められない（--plugin かブランチ戦略の宣言の release.plugin）", EXIT_PRECONDITION)
     return plugin
 
 
@@ -107,13 +120,16 @@ def changelog_section(root, version, plugin):
 
 def release_decl(root, a=None):
     """リリースのブランチと名前（#1336 の決定 8）: (ベースブランチ, 本番チャネル, 配るプラグイン)。
-    ブランチは `.ndf/worktree.json` の base_branch・production_branch（無ければ既定ブランチ）、プラグインは引数の
-    --plugin / --plugins → `.ndf/supervise.json` の release.plugin の順に決める。決まらなければ止める。"""
+    ブランチはブランチ戦略の宣言の `branches`、プラグインは引数の --plugin / --plugins → 宣言の release.plugin の順に
+    決める。決まらなければ止める。"""
     d = delivery.load_delivery(root)
     if d.problems:
         raise StepError("宣言を読めない: " + " / ".join(d.problems), EXIT_PRECONDITION)
     if not (d.base and d.production):
-        raise StepError(
-            "ベースブランチか本番チャネルを決められない（.ndf/worktree.json の base_branch・production_branch）", EXIT_PRECONDITION
-        )
+        raise StepError("ベースブランチか本番ブランチを決められない（ブランチ戦略の宣言の branches）", EXIT_PRECONDITION)
     return d.base, d.production, _plugin_from(a, d)
+
+
+def since_ref(root, since: str) -> str:
+    """差分の起点 `since` の参照。手元にあるタグなら `refs/tags/<名前>`、無ければそのまま（コミット）。"""
+    return f"refs/tags/{since}" if tagged(root, since) else since

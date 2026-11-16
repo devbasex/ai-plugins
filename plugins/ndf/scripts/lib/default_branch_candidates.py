@@ -1,4 +1,4 @@
-"""既定ブランチの候補（`branch_flow.DEFAULT_BRANCH_CANDIDATES`）を 1 行 1 件で出す、シェルのスクリプト向けの入口。
+"""既定ブランチの候補（`strategy_rows.DEFAULT_BRANCH_CANDIDATES`）を 1 行 1 件で出す、シェルのスクリプト向けの入口。
 
 `worktree-branch.sh` の `wt_default_branch` が、候補を自分で並べずにここから読む（#3309）。
 """
@@ -10,7 +10,7 @@ from pathlib import Path
 
 # `python3 -I` は自分の置き場を sys.path に足さない
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from branch_flow import DEFAULT_BRANCH_CANDIDATES  # noqa: E402
+from strategy_rows import DEFAULT_BRANCH_CANDIDATES  # noqa: E402
 
 
 def main(argv: list[str] | None = None) -> int:

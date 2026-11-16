@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from worktree_helpers import SCRIPTS_DIR, add_origin, git, write_declaration
+from worktree_helpers import SCRIPTS_DIR, add_origin, git, write_declaration, write_strategy
 
 DEPS = SCRIPTS_DIR / "worktree-deps.sh"
 SETUP = SCRIPTS_DIR / "worktree-setup.sh"
@@ -47,6 +47,7 @@ def repo(main_repo: Path) -> Path:
     (main_repo / "vendor" / "autoload.php").write_text("<?php\n", encoding="utf-8")
     (main_repo / ".env").write_text("APP=1\n", encoding="utf-8")
     add_origin(main_repo)
+    write_strategy(main_repo)  # 起点はブランチ戦略の宣言（ベースブランチ main）から読む（#3672）
     return main_repo
 
 

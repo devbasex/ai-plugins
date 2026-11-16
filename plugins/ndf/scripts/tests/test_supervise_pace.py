@@ -27,6 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from pace_state import sprint_state  # noqa: E402
 from sprint_args import new_sprint_args  # noqa: E402
 import inproc  # noqa: E402
+import strategy_fixture  # noqa: E402
 
 
 # new sprint は --design に無い課題の本文を gh で読む（#1767）。見本の本文で答える
@@ -34,7 +35,8 @@ pytestmark = pytest.mark.usefixtures("issue_bodies")
 
 
 def cli(*args, cwd=None):
-    return inproc.run(SUPERVISE, *args, cwd=cwd or REPO)
+    """既定ではこのリポジトリの宣言を移した写し（`strategy_fixture.like_root`。ai-plugins の .ndf/ は #3672 の手順 2 まで旧いキーのまま）で打つ。"""
+    return inproc.run(SUPERVISE, *args, cwd=cwd or strategy_fixture.like_root())
 
 
 def load(path) -> dict:
@@ -156,8 +158,11 @@ def test_fast_sprint_is_refused_for_operation_mode(tmp_path):
 def test_fast_sprint_is_refused_without_the_declaration(tmp_path):
     repo = tmp_path / "repo"
     (repo / ".ndf").mkdir(parents=True)
-    (repo / ".ndf" / "worktree.json").write_text('{"version": 1, "base_branch": "develop", "production_branch": "main"}')
-    (repo / ".ndf" / "supervise.json").write_text((REPO / ".ndf" / "supervise.json").read_text())
+    sup = json.loads((REPO / ".ndf" / "supervise.json").read_text())
+    release = strategy_fixture.pop_release(sup)
+    (repo / ".ndf" / "supervise.json").write_text(json.dumps(sup))
+    strategy_fixture.declare(repo, "develop", "main", release)
+    subprocess.run(["git", "init", "-q", "-b", "develop", str(repo)], check=True, capture_output=True)
     out = tmp_path / "m"
     p = cli(*new_sprint_args(repo, out, "--pace", "fast", "--state", str(sprint_state(tmp_path, "fast")), version="1.0.0-dev.1"), cwd=repo)
     assert p.returncode == 1 and "pace.json" in json.loads(p.stdout)["summary"]

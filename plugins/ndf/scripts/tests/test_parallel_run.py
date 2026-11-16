@@ -21,7 +21,7 @@ from parallel_run_world import (
     ASK,
     OLD,
     SCRIPTS,
-    TEMPLATE_DECL,
+    TEMPLATE_RELEASE,
     build_question,
     calls,
     event,
@@ -48,6 +48,7 @@ import parallel_helper as ph  # noqa: E402
 import parallel_plan as pp  # noqa: E402
 import parallel_release as prl  # noqa: E402
 import parallel_reply  # noqa: E402
+import strategy_fixture  # noqa: E402
 import parallel_run as prun  # noqa: E402
 
 env = prw.env  # fixture
@@ -1568,22 +1569,23 @@ def test_answering_rebuild_returns_the_status_command(tmp_path):
 
 # ---- リリースの組み方（#2616） ----
 
-WORKTREE = {"base_branch": "develop", "production_branch": "main"}
-CD = [{"kind": "auto", "channel": "base", "target": "stg"}, {"kind": "auto", "channel": "production", "target": "prod", "production": True}]
-HAND = [{"kind": "manual", "target": "prod", "trigger": "手で流す", "production": True}]
+ROW = {"trigger": "マージ", "versioned": False}
+CD = [
+    {**ROW, "kind": "auto", "channel": "base", "target": "stg"},
+    {**ROW, "kind": "auto", "channel": "production", "target": "prod", "production": True},
+]
+HAND = [{"kind": "manual", "target": "prod", "trigger": "手で流す", "versioned": False, "production": True}]
 
 
-def declare(main, delivery="absent", form=False):
-    """配る形の宣言を置く。`delivery` の既定は宣言が無い形。文字列はそのまま書く。`form` が真なら `release.form`。"""
-    sv = main / ".ndf" / "supervise.json"
-    sv.unlink(missing_ok=True)
-    if form:
-        sv.write_text(json.dumps(TEMPLATE_DECL))
-    (main / ".ndf" / "worktree.json").write_text(json.dumps(WORKTREE))
+def declare(main, rows="absent", form=False):
+    """ベースブランチ develop・本番ブランチ main のブランチ戦略の宣言を置く。`rows` は届け先の行（既定は書かない形）で、
+    文字列は宣言のファイルへそのまま書く。`form` が真ならリリースの形を雛形のある形（package-plugin）にする。"""
     pj = main / ".ndf" / "project.json"
     pj.unlink(missing_ok=True)
-    if delivery != "absent":
-        pj.write_text(delivery if isinstance(delivery, str) else json.dumps({"delivery": delivery}))
+    if isinstance(rows, str) and rows != "absent":
+        pj.write_text(rows)
+        return
+    strategy_fixture.declare(main, "develop", "main", TEMPLATE_RELEASE if form else None, deliveries=None if rows == "absent" else rows)
 
 
 def no_build_ran(main):
@@ -1617,8 +1619,7 @@ def test_merge_or_no_delivery_repo_answers_released_without_building(env, tmp_pa
     [
         (HAND, "手で流す"),
         ([CD[0], HAND[0]], "手で流す"),
-        ("absent", "delivery も"),
-        (json.dumps({"delivery": {"unknown": "調べていない"}}), "調べていない"),
+        ("absent", "雛形が無い"),
         ("{", "読めない"),
     ],
 )

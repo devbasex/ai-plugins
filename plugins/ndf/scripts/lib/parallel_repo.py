@@ -16,18 +16,19 @@ from sprint_loop_names import LOOP_DIR
 
 
 def base_tracking_ref(main: Path) -> str:
-    """ベースブランチ（`.ndf/worktree.json` の `base_branch` → 既定ブランチ）の `origin/<名>`。決まらなければ空。"""
+    """ベースブランチ（ブランチ戦略の宣言の `branches.base`）の `origin/<名>`。宣言を読めなければ空。"""
     import repo
 
-    b = repo.base_branch(main)
-    return f"origin/{b}" if b else ""
+    s = repo.strategy_or_none(main)
+    return f"origin/{s.base}" if s else ""
 
 
 def release_plugin(main: Path) -> str:
-    """配るプラグイン（`.ndf/supervise.json` の `release.plugin`）。無ければ空。"""
-    from supervise_lib.decl import read_decl
+    """配るプラグイン（ブランチ戦略の宣言の `release.plugin`）。無ければ空。"""
+    import repo
 
-    return str((read_decl([Path(main)], "supervise.json").get("release") or {}).get("plugin") or "")
+    s = repo.strategy_or_none(main)
+    return str((s.section["release"].get("plugin") if s else None) or "")
 
 
 def git_head(main: Path) -> str:
@@ -58,7 +59,12 @@ def dev_version(main: Path, fetch: bool = True) -> str:
         return ""
     if fetch and (err := rv.fetch_origin(main)) is not None:
         raise OriginUnfetchable(f"origin を取り直せない: {err}")
-    return rv.collected_release(rv.observe(main, plugin, ref.removeprefix("origin/"), None, fetch=False, rel=rel)) or ""
+    import delivery
+    import release_tag
+
+    # タグを作らない宣言だけ本番ブランチを読み、出済みの版を見落とさない（タグを作る宣言はタグで足りる）
+    prod = None if release_tag.makes_tags_of(main) else delivery.load_delivery(main).production
+    return rv.collected_release(rv.observe(main, plugin, ref.removeprefix("origin/"), prod, fetch=False, rel=rel)) or ""
 
 
 def loop_records(main: Path, name: str) -> list[tuple]:

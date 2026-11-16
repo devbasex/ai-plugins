@@ -30,6 +30,7 @@ import design_results  # noqa: E402
 import manual_checks  # noqa: E402
 from supervise_lib import admission, design_stage, engine, pr_materials, procedures  # noqa: E402
 from supervise_lib.paths import HERE  # noqa: E402
+import strategy_fixture  # noqa: E402
 
 RECORD = str(HERE / "projects-sync.sh")
 PACE = {"enabled": True, "modes": ["light", "standard", "legacy-refactor"], "verify": "true"}
@@ -50,8 +51,11 @@ def ids(plan: dict) -> list[str]:
 def make_repo(tmp_path: Path, base: str = "develop") -> Path:
     repo = tmp_path / "repo"
     (repo / ".ndf").mkdir(parents=True)
-    (repo / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "base_branch": base, "production_branch": "main"}))
-    (repo / ".ndf" / "supervise.json").write_text((REPO / ".ndf" / "supervise.json").read_text())
+    sup = json.loads((REPO / ".ndf" / "supervise.json").read_text())
+    release = strategy_fixture.pop_release(sup)
+    (repo / ".ndf" / "supervise.json").write_text(json.dumps(sup))
+    strategy_fixture.declare(repo, base, "main", release)
+    subprocess.run(["git", "init", "-q", "-b", base, str(repo)], check=True, capture_output=True)
     (repo / ".ndf" / "pace.json").write_text(json.dumps({"version": 1, "fast": PACE, "auto": PACE}))
     return repo
 

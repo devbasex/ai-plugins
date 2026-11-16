@@ -1,26 +1,24 @@
-"""開発の起点ブランチの解決を検証する（issue #202）。
+"""ベースブランチの解決を検証する（issue #202・#3672）。
 
-既定ブランチと開発の起点は別物である。宣言に起点が書かれていればそれを使い、
-無ければ既定ブランチへ落とす。書かれた名前が実在しないときは既定へ落とさない。
+既定ブランチとベースブランチは別物である。ベースブランチはブランチ戦略の宣言の `branches.base` から読み、
+宣言が無いときも書かれた名前が実在しないときも既定ブランチへ落とさない。
 落とすと、開発版のつもりの変更が正式版から分岐したまま進む。
 """
 
 from __future__ import annotations
 
-import json
 import re
 from pathlib import Path
 
-import pytest
 
-from worktree_helpers import SCRIPTS_DIR, add_origin, git, push_branch, resolve, run_lib, write_declaration
+from worktree_helpers import SCRIPTS_DIR, add_origin, git, push_branch, resolve, run_lib, write_strategy
 
 
 def test_local_only_branch_is_used(main_repo: Path) -> None:
     """origin へ送る前でも、ローカルに同名のブランチがあれば起点として使える。"""
     add_origin(main_repo)
     git(main_repo, "branch", "develop")
-    write_declaration(main_repo, json.dumps({"version": 1, "base_branch": "develop"}))
+    write_strategy(main_repo, base="develop", production="main")
     out, _, rc = resolve(main_repo, "wt_base_branch")
     assert rc == 0
     assert out == "develop"
@@ -36,7 +34,7 @@ def test_unfetched_remote_branch_is_used(main_repo: Path) -> None:
     add_origin(main_repo)
     push_branch(main_repo, "develop")
     git(main_repo, "update-ref", "-d", "refs/remotes/origin/develop")
-    write_declaration(main_repo, json.dumps({"version": 1, "base_branch": "develop"}))
+    write_strategy(main_repo, base="develop", production="main")
     out, err, rc = resolve(main_repo, "wt_base_branch")
     assert rc == 0, err
     assert out == "develop"
@@ -52,7 +50,7 @@ def test_remote_branch_with_matching_tail_is_not_used(main_repo: Path) -> None:
     add_origin(main_repo)
     push_branch(main_repo, "feature/develop")
     git(main_repo, "update-ref", "-d", "refs/remotes/origin/feature/develop")
-    write_declaration(main_repo, json.dumps({"version": 1, "base_branch": "develop"}))
+    write_strategy(main_repo, base="develop", production="main")
     out, err, rc = resolve(main_repo, "wt_base_branch")
     assert rc == 1
     assert out == ""
@@ -61,38 +59,21 @@ def test_remote_branch_with_matching_tail_is_not_used(main_repo: Path) -> None:
 
 def test_missing_branch_does_not_fall_back(main_repo: Path) -> None:
     add_origin(main_repo)
-    write_declaration(main_repo, json.dumps({"version": 1, "base_branch": "develop"}))
+    write_strategy(main_repo, base="develop", production="main")
     out, err, rc = resolve(main_repo, "wt_base_branch")
     assert rc == 1
     assert out == ""
     assert "develop" in err
-    assert "base_branch" in err
+    assert "branches.base" in err
 
 
-@pytest.mark.parametrize("value", [1, ["develop"], None, "", {"name": "develop"}])
-def test_non_string_value_falls_back(main_repo: Path, value: object) -> None:
+def test_without_a_declaration_it_stops(main_repo: Path) -> None:
+    """宣言が無いリポジトリでは既定ブランチへ倒さず、作成のコマンドを示して止まる（I3）。"""
     add_origin(main_repo)
-    push_branch(main_repo, "develop")
-    write_declaration(main_repo, json.dumps({"version": 1, "base_branch": value}))
-    out, _, rc = resolve(main_repo, "wt_base_branch")
-    assert rc == 0
-    assert out == "main"
-
-
-def test_unsupported_version_falls_back(main_repo: Path) -> None:
-    add_origin(main_repo)
-    push_branch(main_repo, "develop")
-    write_declaration(main_repo, json.dumps({"version": 99, "base_branch": "develop"}))
-    out, _, rc = resolve(main_repo, "wt_base_branch")
-    assert rc == 0
-    assert out == "main"
-
-
-def test_without_origin_head_falls_back_to_local_default(main_repo: Path) -> None:
-    """origin を持たないリポジトリでも、既定ブランチの解決はこれまでどおり働く。"""
-    out, _, rc = resolve(main_repo, "wt_base_branch")
-    assert rc == 0
-    assert out == "main"
+    out, err, rc = resolve(main_repo, "wt_base_branch")
+    assert rc != 0
+    assert out == ""
+    assert "branch-strategy" in err
 
 
 # --- 手順が示すコマンド ------------------------------------------------------
@@ -133,18 +114,17 @@ def test_documented_steps_branch_from_declared_base(main_repo: Path) -> None:
     expected = head_of(main_repo)
     git(main_repo, "push", "-q", "origin", "develop")
     git(main_repo, "checkout", "-q", "main")
-    write_declaration(main_repo, json.dumps({"version": 1, "base_branch": "develop"}))
+    write_strategy(main_repo, base="develop", production="main")
 
     created = run_documented_steps(main_repo)
 
     assert head_of(created) == expected
 
 
-def test_documented_steps_fall_back_to_default(main_repo: Path) -> None:
-    """宣言に起点が無いリポジトリでは、これまでどおり既定ブランチから分岐する。"""
+def test_documented_steps_stop_without_a_declaration(main_repo: Path) -> None:
+    """宣言が無いリポジトリでは、既定ブランチから分岐せずに止まる。"""
     add_origin(main_repo)
-    expected = head_of(main_repo)
-
-    created = run_documented_steps(main_repo)
-
-    assert head_of(created) == expected
+    snippet = create_snippet().replace("feature/<name>", "feature/x")
+    got = run_lib(f'main_dir="{main_repo}"\nSCRIPTS="{SCRIPTS_DIR}"\n{snippet}', cwd=main_repo)
+    assert got.returncode != 0
+    assert not (main_repo / ".worktrees" / "feature" / "x").exists()

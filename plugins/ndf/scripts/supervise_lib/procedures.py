@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import shlex
-from pathlib import Path
 
 from supervise_lib.paths import CHECK_PY, DESIGN_MATCH_PY, DESIGN_SURVEY_PY, HERE, MERGED_PY, SPEC_COPY_PY
 from supervise_lib.prompts import DESIGN_MATCH_PROMPT
@@ -212,11 +211,6 @@ def absorbed_condition(issue: int, host: int) -> dict:
 def closed_condition(issue: int) -> dict:
     """設計で「閉じる」とした課題の実装プランを飛ばす `実行の条件`（実装の PR を持たずにスプリント PR で閉じる）。"""
     return _skip_condition(f"#{issue} は設計で閉じるとした（実装の PR を持たずにスプリント PR で閉じる）")
-
-
-def sprint_out(a) -> Path:
-    """スプリントの計画の置き場（`--out`、省けば `sprint-<名前>`）。"""
-    return Path(a.out or f"sprint-{a.name}")
 
 
 def survey_steps(n: int, next_id: str, require_detail: bool = False) -> list:

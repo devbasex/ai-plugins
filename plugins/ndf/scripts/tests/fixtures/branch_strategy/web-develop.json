@@ -1,0 +1,48 @@
+{
+  "kind": "web-develop",
+  "release_strategy": "merge_base_branch",
+  "branches": {
+    "production": "main",
+    "base": "develop"
+  },
+  "sprint": {
+    "start": "base",
+    "integrate": "check",
+    "doc_prs": "base"
+  },
+  "release": {
+    "form": "service",
+    "version_store": {
+      "kind": "json",
+      "path": "package.json",
+      "pointer": "/version"
+    },
+    "tag": "v{version}",
+    "github_release": true,
+    "cd": {
+      "workflow": "deploy.yml"
+    }
+  },
+  "channels": [
+    {
+      "name": "stable",
+      "ref": "main"
+    },
+    {
+      "name": "dev",
+      "ref": "develop",
+      "workflow": "deploy-dev.yml"
+    }
+  ],
+  "approval": {
+    "target": "release_pr",
+    "via": "gate"
+  },
+  "merge": {
+    "actor": "ndf",
+    "method": "direct",
+    "commit": "merge",
+    "admin": false
+  },
+  "verify": null
+}

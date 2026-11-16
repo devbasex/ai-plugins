@@ -8,7 +8,9 @@
 - GitHub の読み書き（`read_*`・`open_prs_at`・`post_status`・`write_trail`・`write_admin_record`）は `gh` を通す。失敗は `TrailError`
 
 迂回の記録（#3506）は本番の PR を管理者の迂回でマージしたことを示すコメントで、印 `ADMIN_MARK` を持つ。
-証跡の印を持たないため、証跡の判定にも `release-approval.yml` の起動の条件にも数えない。
+意図の印（`INTENT_MARK`）は land が迂回でマージする直前に置き、マージ済みの PR を迂回の記録で補ってよいかを決める
+（印の無いマージは人のマージとして記録する）。どちらも証跡の印を持たないため、証跡の判定にも
+`release-approval.yml` の起動の条件にも数えない。
 
 証跡の書式の印と行の名前はこのモジュールだけが持つ。手順書は書式を写さず、ここを指す。
 """
@@ -36,6 +38,8 @@ BY_LINE = "担い手:"
 ADMIN_MARK = "<!-- ndf:admin-merge -->"
 ADMIN_SHA_LINE = "マージした先端:"
 ADMIN_TRAIL_LINE = "照らした承認の証跡:"
+INTENT_MARK = "<!-- ndf:admin-intent -->"
+INTENT_SHA_LINE = "迂回でマージする先端:"
 _SHA40 = re.compile(r"(?<![0-9a-fA-F])[0-9a-fA-F]{40}(?![0-9a-fA-F])")
 
 
@@ -152,15 +156,24 @@ def judge(trails: list[Trail], roles: dict[str, str | None], head: str, by: str 
     return Judgment("success", _cut(f"承認: {last.login} {last.created_at}"), last.login, last.created_at, last.url or None)
 
 
+def approved_trail(trails: list[Trail], roles: dict[str, str | None], by: str | None = None) -> Trail | None:
+    """承認権限を持つ人の最新の、編集されていない証跡（`judge` が照らす証跡と同じ 1 件）。無ければ None（#3672 の land）。
+    `by` を渡せば担い手がその値の証跡だけを数える（`judge` の `by` と同じ。cd-admin は利用者の証跡だけ）。"""
+    valid, _ = _narrow(trails, roles, by)
+    return max(valid, key=lambda t: t.created_at) if valid else None
+
+
 def approved_review_commit(reviews: list[dict], perms: dict[str, str | None]) -> str | None:
-    """必須レビューの承認者として有効な人（`permission` が admin か write）の最新の APPROVED のレビューのコミット（I8）。"""
+    """必須レビューの承認者として有効な人（`permission` が admin か write）の最新の APPROVED のレビューのコミット（I8）。
+
+    人ごとに最後の判定（APPROVED・CHANGES_REQUESTED・DISMISSED。COMMENTED は判定を変えない）だけを数える。承認の後に
+    同じ人が差し戻していれば、その人の前の承認は使わない（GitHub のレビューの判定と同じ）。"""
+    last: dict[str, dict] = {}
+    for r in sorted((r for r in reviews or [] if isinstance(r, dict)), key=lambda r: str(r.get("submitted_at") or "")):
+        if r.get("state") in ("APPROVED", "CHANGES_REQUESTED", "DISMISSED"):
+            last[str((r.get("user") or {}).get("login") or "")] = r
     got = [
-        r
-        for r in reviews or []
-        if isinstance(r, dict)
-        and r.get("state") == "APPROVED"
-        and perms.get(str((r.get("user") or {}).get("login") or "")) in REVIEWER_PERMISSIONS
-        and r.get("commit_id")
+        r for login, r in last.items() if r.get("state") == "APPROVED" and perms.get(login) in REVIEWER_PERMISSIONS and r.get("commit_id")
     ]
     if not got:
         return None
@@ -176,8 +189,13 @@ def render_admin_record(sha: str, trail_url: str) -> str:
     """迂回の記録の本文。証跡の印を持たない（証跡の判定に数えない）。"""
     return (
         f"{ADMIN_MARK}\n## 管理者の迂回でマージした\n\n{ADMIN_SHA_LINE} `{ac.parse_sha(sha)}`\n"
-        f"{ADMIN_TRAIL_LINE} {trail_url or '（読めない）'}\n宣言: `.ndf/project.json` の `production_merge.admin`\n"
+        f"{ADMIN_TRAIL_LINE} {trail_url or '（読めない）'}\n宣言: `.ndf/project.json` の `branch_strategy.merge.admin`\n"
     )
+
+
+def render_admin_intent(sha: str) -> str:
+    """迂回でマージする意図の印の本文。証跡の印を持たない（証跡の判定に数えない）。"""
+    return f"{INTENT_MARK}\n{INTENT_SHA_LINE} `{ac.parse_sha(sha)}`\n宣言: `.ndf/project.json` の `branch_strategy.merge.admin`\n"
 
 
 def render_request(material: str, head: str) -> str:
@@ -269,6 +287,14 @@ def open_prs_at(repo: str, sha: str, base: str) -> list[int]:
     return sorted(int(r["number"]) for r in rows if str((r.get("head") or {}).get("sha") or "").lower() == sha.lower())
 
 
+def open_prs_at_base(repo: str, base: str) -> list[dict]:
+    """`base` 宛ての開いた PR の番号と先端（番号の昇順）。"""
+    rows = _pages(f"repos/{repo}/pulls?state=open&base={base}&per_page=100", f"{base} 宛ての PR")
+    return sorted(
+        ({"number": int(r["number"]), "head": str((r.get("head") or {}).get("sha") or "").lower()} for r in rows), key=lambda r: r["number"]
+    )
+
+
 def post_status(repo: str, sha: str, j: Judgment) -> None:
     """先端へ `ndf/release-approval` の commit status を付ける（同じ名前は最新が効く）。"""
     args = [f"repos/{repo}/statuses/{sha}", "-X", "POST", "-f", f"state={j.state}"]
@@ -295,22 +321,59 @@ def write_trail(repo: str, pr: int, sha: str, by: str) -> tuple[bool, str]:
     return True, (a.value or {}).get("url") or ""
 
 
-def write_admin_record(repo: str, pr: int, sha: str, trail_url: str) -> tuple[bool, str]:
-    """迂回の記録を置く。同じ先端の記録が既にあれば置かない（#3506 の I7）。(置いたか, コメントの URL)。
-
-    既にある記録に数えるのは、書き込みの権限（admin・write）を持つ人が書き、作成の後に編集されていないものだけ
-    （コメントできる誰かが印と SHA の入ったコメントを先に置いても、本物の記録を止められない）。"""
-    sha = ac.parse_sha(sha)
+def _trusted_mark(repo: str, pr: int, mark: str, label: str, sha: str) -> dict | None:
+    """印 `mark` と `label` の行に `sha` を持つコメントのうち、書き込みの権限（admin・write）を持つ人が書き、作成の後に
+    編集されていないもの（コメントできる誰かが印と SHA の入ったコメントを置いても数えない）。無ければ None。"""
     found = []
     for c in read_comments(repo, pr):
         body = str(c.get("body") or "") if isinstance(c, dict) else ""
-        if ADMIN_MARK in body and sha in [x.lower() for x in _line_shas(body, ADMIN_SHA_LINE)]:
+        if mark in body and sha in [x.lower() for x in _line_shas(body, label)]:
             found.append(c)
     perms = read_permissions(repo, [_author(c) for c in found]) if found else {}
     for c in found:
         if perms.get(_author(c)) in REVIEWER_PERMISSIONS and str(c.get("updated_at") or "") == str(c.get("created_at") or ""):
-            return False, str(c.get("html_url") or "")
+            return c
+    return None
+
+
+def write_admin_record(repo: str, pr: int, sha: str, trail_url: str) -> tuple[bool, str]:
+    """迂回の記録を置く。同じ先端の記録が既にあれば置かない（#3506 の I7。数える記録は `_trusted_mark`）。(置いたか, コメントの URL)。"""
+    sha = ac.parse_sha(sha)
+    got = _trusted_mark(repo, pr, ADMIN_MARK, ADMIN_SHA_LINE, sha)
+    if got is not None:
+        return False, str(got.get("html_url") or "")
     a = gh_rest.comment(repo, pr, render_admin_record(sha, trail_url))
     if not a.ok:
         raise TrailError("unreadable", f"迂回の記録を置けない: {a.error[:200]}")
     return True, (a.value or {}).get("url") or ""
+
+
+def has_admin_intent(repo: str, pr: int, sha: str) -> bool:
+    """先端 `sha` を迂回でマージする意図の印があるか（数える印は `_trusted_mark`）。"""
+    return _trusted_mark(repo, pr, INTENT_MARK, INTENT_SHA_LINE, ac.parse_sha(sha)) is not None
+
+
+def write_admin_intent(repo: str, pr: int, sha: str) -> bool:
+    """迂回でマージする意図の印を置く。同じ先端の印が既にあれば置かない。(置いたか)。置けなければ TrailError。"""
+    if has_admin_intent(repo, pr, sha):
+        return False
+    a = gh_rest.comment(repo, pr, render_admin_intent(sha))
+    if not a.ok:
+        raise TrailError("unreadable", f"迂回の意図の印を置けない: {a.error[:200]}")
+    return True
+
+
+# 証跡の書き手（#3672 の I12）。ケースごとに 1 つだけで、ほかの部品は同じ証跡を書かない
+WRITER_ANSWER = "answer"  # リリース承認ゲートの答えを書く手順（`release-steps answer`）
+WRITER_LAND = "land"  # 人のマージの記録（`release-steps land` がマージ済みを見つけたとき）
+WRITER_GITHUB = "github"  # GitHub のレビューの承認（NDF は書かない）
+
+
+def trail_writer(strategy, merged_by_human: bool) -> str:
+    """承認の証跡の書き手をケースごとに 1 つ返す（設計文書の「承認とマージ」の表）。"""
+    sec = strategy.section
+    if sec["approval"]["via"] == "review":
+        return WRITER_GITHUB
+    if merged_by_human or sec["merge"]["actor"] == "human":
+        return WRITER_LAND
+    return WRITER_ANSWER

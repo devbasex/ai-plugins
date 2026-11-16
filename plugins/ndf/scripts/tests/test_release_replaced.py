@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
 
 from release_lib import replaced  # noqa: E402
 from test_release_steps import PY, SCRIPT, git, notes_repo  # noqa: E402
+import strategy_fixture  # noqa: E402
 
 OLD = "- init は Draft でない場合に処理を止める（#1821）"
 BODIES = {
@@ -36,9 +37,7 @@ def repo(tmp_path: Path) -> Path:
     root = tmp_path / "repo"
     root.mkdir()
     git(root, "init", "-q")
-    (root / ".ndf").mkdir()
-    (root / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "base_branch": "develop", "production_branch": "main"}))
-    (root / ".ndf" / "supervise.json").write_text(json.dumps({"release": {"form": "package-plugin", "plugin": "ndf"}}))
+    strategy_fixture.declare(root, "develop", "main", {"form": "package-plugin", "plugin": "ndf"})
     notes_repo(root)
     return root
 

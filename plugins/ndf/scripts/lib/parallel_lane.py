@@ -230,16 +230,17 @@ def queue_max(cwd: Optional[str] = None) -> int:
 
 
 def merged_on_production(root: Path, prs: list[int], run=subprocess.run) -> bool:
-    """`prs` のマージのコミットがすべて本番チャネル（`repo.production_branch`）の `origin/<本番>` にあるか（I15）。
+    """`prs` のマージのコミットがすべて本番ブランチ（ブランチ戦略の宣言の `branches.production`）の `origin/<本番>` にあるか（I15）。
 
     本番チャネルが決まらないか、1 本でも分からなければ False。"""
     import repo
 
     if not prs:
         return False
-    prod = repo.production_branch(root)[0]
-    if not prod:
+    s = repo.strategy_or_none(root)
+    if s is None:
         return False
+    prod = s.production
     for n in prs:
         got = run(["gh", "pr", "view", str(n), "--json", "mergeCommit", "-q", ".mergeCommit.oid"], cwd=root, capture_output=True, text=True)
         sha = (got.stdout or "").strip()

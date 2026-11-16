@@ -15,6 +15,7 @@ sys.path.insert(0, str(SCRIPTS))
 import supervise_lib  # noqa: E402,F401  lib/ を sys.path へ足す
 import revise_note as rn  # noqa: E402
 from supervise_lib import sprint_waves  # noqa: E402
+import strategy_fixture  # noqa: E402
 
 
 def row(note="- 絞る", by=None, count=1, at="2026-11-05T00:00:00Z", missing=None):
@@ -130,7 +131,13 @@ def test_history_appends_keeps_the_note_and_skips_the_same_round():
 
 def plan_args(tmp_path, notes=None):
     return SimpleNamespace(
-        base="main", mode="standard", name="m1", worktree=str(tmp_path), state=str(tmp_path / "state"), revise_notes=notes
+        base="main",
+        mode="standard",
+        name="m1",
+        worktree=str(tmp_path),
+        state=str(tmp_path / "state"),
+        revise_notes=notes,
+        flow=strategy_fixture.snapshot(),  # スプリントの開始時のスナップショット（#3672 の I3）
     )
 
 

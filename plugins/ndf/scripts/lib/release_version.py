@@ -4,7 +4,7 @@
 開発版と本番・キューと `bump` で版の規則を分けない（#2164 の決定 4）。ファイルを書かない。
 
 - `observe(repo, plugin, base, production)`: `git fetch -q origin --tags` の後に、origin のベースブランチと本番のブランチの
-  `plugin.json` の版と、`<plugin>--v<版>` の正式版のタグを読む。読めなかったものは `unreadable` に名前で入れる
+  `plugin.json` の版と、宣言の `release.tag` の形（`lib/release_tag.py`。既定は `<plugin>--v<版>`）の正式版のタグを読む。読めなかったものは `unreadable` に名前で入れる
 - `fetch_origin(repo)`: `git fetch -q origin --tags` を打ち、落ちたら git の stderr を返す（取り直せないことを版を読めないことと分けて伝える側が使う）
 - `decide_dev(obs, level)`: 次に空いている開発版
 - `collected_release(obs)`: 並列の計画のまとめたリリースで出す正式版（最新のタグより大きい版）
@@ -21,6 +21,7 @@ import subprocess
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+import release_tag
 import versions
 
 LEVELS = ("patch", "minor", "major")
@@ -34,13 +35,15 @@ class Observed:
     production_ref: str  # origin/<本番のブランチ>。本番のブランチを宣言していなければ空
     production_version: str | None
     latest_tag: str | None  # 最新の正式版のタグの版（タグが 1 つも無ければ None）
-    tags: list[str] = field(default_factory=list)  # 正式版のタグの版（`<plugin>--v` を外したもの）
+    tags: list[str] = field(default_factory=list)  # 正式版のタグの版（タグの形から版を取り出したもの）
     unreadable: list[str] = field(default_factory=list)
+    template: str = release_tag.DEFAULT_TAG  # タグの形（宣言の release.tag）
+    tagged: bool = True  # 宣言がタグを作るか（偽なら本番ブランチの正式版も出済みの版に数える）
 
     def as_dict(self) -> dict:
         """版の記録の `observed`（読んだ値）。タグの一覧と読めなかったものは載せない。"""
         d = asdict(self)
-        for k in ("tags", "unreadable", "plugin"):
+        for k in ("tags", "unreadable", "plugin", "template", "tagged"):
             d.pop(k)
         return d
 
@@ -85,13 +88,12 @@ def _version_at(repo: str | Path, ref: str, rel: str) -> str | None:
     return v if isinstance(v, str) and versions.parse_version(v) else None
 
 
-def _release_tags(stdout: str, plugin: str) -> list[str]:
-    """`git tag --list` の出力から、プラグインの接頭辞を外した正式版（接尾辞の無い SemVer）だけを出た順に返す。"""
-    head = f"{plugin}--v"
+def _release_tags(stdout: str, plugin: str, template: str = release_tag.DEFAULT_TAG) -> list[str]:
+    """`git tag --list` の出力から、形 `template` のタグの版を取り出した正式版（接尾辞の無い SemVer）だけを出た順に返す。"""
     tags: list[str] = []
     for t in stdout.split():
-        v = t[len(head) :]
-        ver = versions.parse_version(v)
+        v = release_tag.tag_version(t, plugin, template)
+        ver = versions.parse_version(v) if v else None
         if ver is not None and not ver.prerelease:
             tags.append(v)
     return tags
@@ -103,10 +105,24 @@ def fetch_origin(repo: str | Path) -> str | None:
     return None if p.returncode == 0 else ((p.stderr or "").strip() or f"git fetch の終了コード {p.returncode}")
 
 
-def observe(repo: str | Path, plugin: str, base: str, production: str | None, fetch: bool = True, rel: str | None = None) -> Observed:
+def observe(
+    repo: str | Path,
+    plugin: str,
+    base: str,
+    production: str | None,
+    fetch: bool = True,
+    rel: str | None = None,
+    template: str | None = None,
+    tagged: bool | None = None,
+) -> Observed:
     """origin を取り直してから、ベースブランチ・本番のブランチ・タグを読む。本番のブランチが無ければ読まない（読めないに数えない）。
     タグが 1 つも無いことは読めないに数えない。取り直しに落ちたら、読んだ値が古いかもしれないため `origin` を読めないに数える。
-    `rel` は `plugin.json` のリポジトリの根からの位置で、省けばベースブランチの木から探す。"""
+    `rel` は `plugin.json` のリポジトリの根からの位置で、省けばベースブランチの木から探す。`template` はタグの形で、
+    省けば `repo` の宣言の `release.tag` から引く（前版の検索・公開と同じ形で、出済みの版を見落とさない）。
+    タグを作らない宣言（`release.tag` が null）では、本番のブランチの正式版も出済みの版として `tags` と `latest_tag` に入れる。
+    `tagged` は宣言がタグを作るかで、省けば `repo` の宣言から引く（プランの開始時のスナップショットで動く側は `template` と一緒に渡す）。"""
+    template = template or release_tag.tag_template_of(repo)
+    tagged = release_tag.makes_tags_of(repo) if tagged is None else tagged
     unreadable: list[str] = []
     if fetch and fetch_origin(repo) is not None:
         unreadable.append("origin")
@@ -119,14 +135,16 @@ def observe(repo: str | Path, plugin: str, base: str, production: str | None, fe
     prod_version = _version_at(repo, prod_ref, rel) if prod_ref and rel else None
     if prod_ref and prod_version is None:
         unreadable.append(prod_ref)
-    p = _git_run(repo, "tag", "--list", f"{plugin}--v*")
+    p = _git_run(repo, "tag", "--list", release_tag.tag_glob(plugin, template))
     tags: list[str] = []
     if p.returncode:
         unreadable.append("tags")
     else:
-        tags = _release_tags(p.stdout, plugin)
+        tags = _release_tags(p.stdout, plugin, template)
+    if prod_version and "-" not in prod_version and prod_version not in tags and not tagged:
+        tags.append(prod_version)  # タグを作らない宣言では、本番ブランチの正式版を出済みの版とする（出した版をもう一度出さない）
     latest = max(tags, key=versions.version_order) if tags else None
-    return Observed(plugin, base_ref, base_version, prod_ref, prod_version, latest, tags, unreadable)
+    return Observed(plugin, base_ref, base_version, prod_ref, prod_version, latest, tags, unreadable, template, tagged)
 
 
 def _max_base(vs: list[str | None]) -> str:
@@ -170,7 +188,9 @@ def taken(obs: Observed, version: str, how: str = "explicit", level: str = "patc
             d.next_free = decide_dev(obs, level).version
         return d
     if version in obs.tags:
-        d.existing = f"{obs.plugin}--v{version}"
+        # タグを作らない宣言で本番ブランチの版から数えた版は、作られていないタグの名前でなく本番ブランチの版として示す
+        untagged = not obs.tagged and version == obs.production_version
+        d.existing = f"{obs.production_ref} の版 {version}" if untagged else release_tag.release_tag(obs.plugin, version, obs.template)
         nxt = version
         while nxt in obs.tags:
             nxt = versions.next_patch(nxt)
