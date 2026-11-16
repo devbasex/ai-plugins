@@ -35,7 +35,8 @@ pytestmark = pytest.mark.usefixtures("issue_bodies")
 
 
 def cli(*args, cwd=None):
-    return inproc.run(SUPERVISE, *args, cwd=cwd or REPO)
+    """既定ではこのリポジトリの宣言を移した写し（`strategy_fixture.like_root`。ai-plugins の .ndf/ は #3672 の手順 2 まで旧いキーのまま）で打つ。"""
+    return inproc.run(SUPERVISE, *args, cwd=cwd or strategy_fixture.like_root())
 
 
 def load(path) -> dict:

@@ -327,7 +327,8 @@ def test_release_remakes_the_pr_when_merged_pr_misses_new_commits(monkeypatch, i
         return subprocess.CompletedProcess(args, rc, out, "")
 
     monkeypatch.setattr(mod, "git", git)
-    monkeypatch.setattr(mod, "git_root", lambda r: ".")
+    # ai-plugins の .ndf/ は #3672 の手順 2 まで旧いキーのまま残るため、宣言を移した写しで読む
+    monkeypatch.setattr(mod, "git_root", lambda r: strategy_fixture.like_root())
     monkeypatch.setattr(mod.bump, "require_bumped", lambda root, plugin, ver: None)
     monkeypatch.setattr(mod, "find_pr", lambda root, head, base, states: {"number": 7, "state": "MERGED"})
     monkeypatch.setattr(mod, "changelog_section", lambda root, ver, plugin: "")
@@ -362,6 +363,8 @@ def test_release_stops_before_the_pr_when_plugin_json_is_not_bumped(monkeypatch,
         mod, "git", lambda r, *args, check=True: pushed.append(args) if args[0] == "push" else real_git(r, *args, check=check)
     )
     monkeypatch.setattr(mod, "find_pr", lambda r, head, base, states: (_ for _ in ()).throw(SystemExit("pr")))
+    # 手元でマージする経路（宣言の web-develop の開発版のチャネルは workflow を持つが、ここでは起動しない）
+    monkeypatch.setattr(mod.reviewed, "dev_workflow_of", lambda root: None)
     with pytest.raises((mod.StepError, SystemExit)) as e:
         mod.cmd_release(argparse.Namespace(root=str(repo), version="1.2.3", plugins=None, channel="dev", ci_wait=3600.0))
     if version == "1.2.3":
@@ -768,6 +771,7 @@ def _release_prod(monkeypatch, root: Path, branches: tuple[str, str], plugin: st
     (ベースブランチ, 本番ブランチ)。"""
     import argparse
 
+    subprocess.run(["git", "init", "-q", str(root)], check=True)  # 宣言はメインディレクトリ（git の木）から読む（#3672）
     strategy_fixture.declare(root, *branches, plugin_release(plugin), deliveries)
     mod = _release_steps_module(monkeypatch)
     calls, created, found = [], [], []
@@ -1152,6 +1156,7 @@ def _record(monkeypatch, root, **args):
 
     if not (root / ".ndf" / "project.json").is_file():  # 届け先の行を持つ宣言は呼び手が先に置く
         strategy_fixture.declare(root, "develop", "main", plugin_release())
+    subprocess.run(["git", "init", "-q", str(root)], check=True)  # 宣言はメインディレクトリ（git の木）から読む（#3672）
     mod = _release_steps_module(monkeypatch)
     posted, codes = [], []
     monkeypatch.setattr(mod, "git_root", lambda r: root)
@@ -1486,7 +1491,7 @@ def test_release_selected_writes_admin_on_the_production_row(monkeypatch, tmp_pa
     """#3506 の I8: 選んで集める取り込み方でも、本番の PR の行に迂回の有無を書く。"""
     import argparse
 
-    from release_lib import promotion
+    from release_lib import strategy_route as promotion
     from release_lib.context import ReleaseCtx
 
     monkeypatch.setattr(

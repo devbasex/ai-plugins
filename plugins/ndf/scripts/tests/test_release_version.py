@@ -352,7 +352,10 @@ def test_fill_stage_asks_the_condition_before_the_version(tmp_path, world, code,
 def looped(tmp: Path, world: World, dev: str = "", prod: str = "", extra: tuple[str, ...] = ()) -> dict:
     """開発ループと同じコマンドで実物の開発版のプランを組み、ループの 1 回の行を返す（dev_plan・prod_plan を持つ）。"""
     ndf = world.repo / ".ndf"
-    (ndf / "supervise.json").write_text((SCRIPTS.parents[2] / ".ndf" / "supervise.json").read_text())
+    # ai-plugins の supervise.json の旧いキー release は外す（リリースの形は World が宣言に置いた。#3672 の手順 2 まで残る）
+    sup = json.loads((SCRIPTS.parents[2] / ".ndf" / "supervise.json").read_text())
+    strategy_fixture.pop_release(sup)
+    (ndf / "supervise.json").write_text(json.dumps(sup))
     auto = {"enabled": True, "modes": ["standard"], "verify": "true"}
     (ndf / "pace.json").write_text(json.dumps({"version": 1, "auto": auto}))
     d = tmp / "lap"
@@ -479,7 +482,6 @@ def test_dev_version_of_the_parallel_plan_skips_a_released_version(tmp_path, wor
     """同期の PR で develop が出した版（タグあり）へ揃った後でも、まとめたリリースは次の版で組む（#3551）。"""
     import parallel_repo
 
-    (world.repo / ".ndf" / "supervise.json").write_text(json.dumps({"release": {"plugin": "ndf"}}))
     world.publish("10.27.6", "develop", "main", tag=True)
     assert parallel_repo.dev_version(world.repo) == "10.27.7"
     world.publish("10.27.7-dev.1", "develop")
@@ -490,7 +492,6 @@ def test_dev_version_without_fetch_does_not_touch_origin(tmp_path, world, monkey
     """起動の前の検査は origin を取り直さず、手元の追跡ブランチとタグで版を決める。"""
     import parallel_repo
 
-    (world.repo / ".ndf" / "supervise.json").write_text(json.dumps({"release": {"plugin": "ndf"}}))
     world.publish("10.27.6", "develop", "main", tag=True)
     real = rv._git_run
     seen = []
@@ -502,7 +503,6 @@ def test_dev_version_names_an_origin_fetch_failure_apart_from_an_unreadable_vers
     """取り直しに落ちたら、版を読めないという理由ではなく git の stderr を添えた取り直せない理由で止める。"""
     import parallel_repo
 
-    (world.repo / ".ndf" / "supervise.json").write_text(json.dumps({"release": {"plugin": "ndf"}}))
     world.publish("10.27.6", "develop", "main", tag=True)
     real = rv._git_run
     failed = subprocess.CompletedProcess(["git", "fetch"], 128, "", "fatal: unable to access origin")

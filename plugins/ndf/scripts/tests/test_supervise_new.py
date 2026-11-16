@@ -517,6 +517,7 @@ def plugin_repo(tmp_path):
     git(root, "add", "-A")
     git(root, "commit", "-q", "-m", "base")
     git(root, "tag", "ndf--v1.0.0")
+    push_origin(root, "main")  # 種別リリースは本番ブランチの先頭（origin/main）の宣言を読む（#3308）
     (root / "plugins" / "mcp" / "mcp-serena" / "README.md").write_text("changed\n")
     git(root, "add", "-A")
     git(root, "commit", "-q", "-m", "serena")
@@ -732,7 +733,9 @@ def _repo_1437(tmp_path, project=None):
     sv.pop("test")
     (root / ".ndf" / "supervise.json").write_text(json.dumps(sv))
     if project is not None:
-        (root / ".ndf" / "project.json").write_text(json.dumps(project))
+        # ブランチ戦略の宣言（project.json の branch_strategy）は残して、ほかのキーを置く
+        path = root / ".ndf" / "project.json"
+        path.write_text(json.dumps({**project, "branch_strategy": json.loads(path.read_text())["branch_strategy"]}))
     return root
 
 

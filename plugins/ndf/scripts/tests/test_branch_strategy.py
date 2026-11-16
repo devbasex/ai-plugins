@@ -360,7 +360,11 @@ AI_PLUGINS_OLD = {
             "integrate": "check",
             "doc_prs": "base",
             "promotion": "whole",
-            "reviews": {"impl": {"checks": [], "diff": "none"}},
+            # ai-plugins の宣言と同じ形（スプリントの PR が cross-review を掛ける。掛けないとレビューの単位の規則に落ちる）
+            "reviews": {
+                "impl": {"checks": [], "diff": "none"},
+                "sprint": {"checks": ["cross-refactoring", "cross-review"], "diff": "unchecked"},
+            },
         },
     },
     "project.json": {
@@ -470,7 +474,7 @@ def history_repo(tmp_path, merges: int, extra: dict | None = None) -> Path:
         p.write_text(text, encoding="utf-8")
     c = ["-c", "user.email=t@example.com", "-c", "user.name=t"]
     git(root, *c, "add", "-A")
-    git(root, *c, "commit", "-qm", "files")
+    git(root, *c, "commit", "-q", "--allow-empty", "-m", "files")
     for i in range(merges):
         git(root, "checkout", "-qb", f"sprint/{i}")
         git(root, *c, "commit", "-q", "--allow-empty", "-m", f"work {i}")

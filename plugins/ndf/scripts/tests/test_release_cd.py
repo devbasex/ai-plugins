@@ -527,7 +527,7 @@ def _cd_steps(case, mvv, tmp_path):
 
     case = release_case.Case(case, "", "", "")
     state = tmp_path / "state"
-    a = argparse.Namespace(mvv=str(state) if mvv else None, mode="standard", production_branch="main", state=str(state))
+    a = argparse.Namespace(mvv=str(state) if mvv else None, mode="standard", production="main", state=str(state))
     approval = [{"id": "facts", "next": "explain"}, {"id": "others", "next": "end"}]
     steps = release_cd.cd_prod_steps(a, "1.2.3", "9", None, "approval.md", approval, case)
     return {s["id"]: s for s in steps}, release_cd.cd_release_wait(a, case, {})

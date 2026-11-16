@@ -17,6 +17,9 @@ sys.path.insert(0, str(SCRIPTS))
 import parallel_external as pe  # noqa: E402
 import parallel_lane as pl  # noqa: E402
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import strategy_fixture  # noqa: E402
+
 FORM = json.loads((ROOT / "contracts" / "forms" / "parallel-external.json").read_text(encoding="utf-8"))
 PARALLEL = SCRIPTS / "parallel.py"
 
@@ -168,9 +171,10 @@ def _presented(d: Path, k: int = 1) -> None:
     )
 
 
-def _declare(root: Path, **branches) -> None:
-    (root / ".ndf").mkdir(exist_ok=True)
-    (root / ".ndf" / "worktree.json").write_text(json.dumps(branches), encoding="utf-8")
+def _declare(root: Path, production: str) -> None:
+    """ベースブランチ develop・本番ブランチ `production` のブランチ戦略の宣言（メインディレクトリから読むので git の木にする）。"""
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    strategy_fixture.declare(root, "develop", production)
 
 
 def _recording_run(calls: list[list[str]], merged: bool = True):
@@ -188,14 +192,15 @@ def _bases(calls: list[list[str]]) -> list[str]:
 
 
 def test_production_queries_use_the_declared_branch(tmp_path):
-    _declare(tmp_path, production_branch="prod")
+    _declare(tmp_path, "prod")
     calls: list[list[str]] = []
     assert pe.stages_of(tmp_path, "1.2.3", _recording_run(calls)) == ["release_branch", "prod_pr_opened", "main_merged"]
     assert pe.prod_pr_url(tmp_path, "1.2.3", _recording_run(calls)) == "https://github.com/o/r/pull/900"
     assert _bases(calls) == ["prod", "prod"]
 
 
-def test_production_queries_fall_back_to_the_default_branch(tmp_path):
+def test_production_queries_do_not_fall_back_to_the_default_branch(tmp_path):
+    """宣言の無いリポジトリでは既定ブランチへ倒さず、本番の Pull Request を照会しない（#3672 の I3）。"""
     root = tmp_path / "repo"
     root.mkdir()
     subprocess.run(["git", "init", "-q", "-b", "main", str(root)], check=True)
@@ -206,7 +211,7 @@ def test_production_queries_fall_back_to_the_default_branch(tmp_path):
     calls: list[list[str]] = []
     pe.stages_of(root, "1.2.3", _recording_run(calls))
     pe.prod_pr_url(root, "1.2.3", _recording_run(calls))
-    assert _bases(calls) == ["main", "main"]
+    assert _bases(calls) == []
 
 
 def test_undecided_production_branch_does_not_query_pull_requests(tmp_path):
@@ -217,7 +222,7 @@ def test_undecided_production_branch_does_not_query_pull_requests(tmp_path):
 
 
 def test_settle_writes_main_merged_and_auto_presented(tmp_path):
-    _declare(tmp_path, production_branch="main")
+    _declare(tmp_path, "main")
     d = tmp_path / "org"
     _presented(d)
     pe.put_json(

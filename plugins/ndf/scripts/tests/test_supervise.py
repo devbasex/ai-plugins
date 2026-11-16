@@ -557,12 +557,10 @@ def test_queue_creates_worktrees_in_order_before_run(tmp_path, monkeypatch):
         assert git(repo / ".worktrees" / b, "rev-parse", "--abbrev-ref", "HEAD").strip() == b
 
 
-REPO = SCRIPTS.parents[2]  # このリポジトリの根（.ndf/ の宣言を持つ）
-
-
 def cli(*args, cwd=None):
-    """既定ではこのリポジトリの根で打つ（作業場所に宣言が無いとき、今のディレクトリの .ndf/ を読む）。"""
-    return inproc.run(SUPERVISE, *args, cwd=cwd or REPO)
+    """既定ではこのリポジトリの宣言の写しで打つ（作業場所に宣言が無いとき、今のディレクトリの .ndf/ を読む）。ai-plugins の
+    .ndf/ は #3672 の手順 2 まで旧いキーのまま残り、部品は旧いキーが残ると止まるため、移した写し（`like_root`）を使う。"""
+    return inproc.run(SUPERVISE, *args, cwd=cwd or strategy_fixture.like_root())
 
 
 AI_PLUGINS_WORDS = ("plugins/", "playwright-kit", "build-runtime-plugins", "claude,codex,kiro", "develop", "scripts/check-")
@@ -3223,7 +3221,7 @@ def test_release_package_plugin_plan_shape_by_channel_cd_and_mvv(tmp_path, monke
     out = tmp_path / "plan.json"
     extra = ["--mvv", str(tmp_path / "state.json")] if mvv else ["--state", str(tmp_path / "state.json")] if cd else []
     args = ["new", "release", "--version", version, "--prs", "995", "--channel", channel, *extra]
-    p = inproc.run(SUPERVISE, *args, "--worktree", f"/r/.worktrees/release/v{version}", "--out", str(out), cwd=REPO)
+    p = inproc.run(SUPERVISE, *args, "--worktree", f"/r/.worktrees/release/v{version}", "--out", str(out), cwd=strategy_fixture.like_root())
     assert p.returncode == 0, p.stdout + p.stderr
     got = json.loads(out.read_text())
     assert [s["id"] for s in got["steps"]] == ids
@@ -3248,7 +3246,7 @@ def test_cd_prod_plan_without_state_stops(tmp_path, monkeypatch):
     monkeypatch.setattr(release_case, "case_at", lambda root, strict=False: release_case.decide_case(True, 0, ""))
     out = tmp_path / "plan.json"
     args = ["new", "release", "--version", "10.17.11", "--prs", "995", "--channel", "prod"]
-    p = inproc.run(SUPERVISE, *args, "--worktree", "/r/.worktrees/release/v10.17.11", "--out", str(out), cwd=REPO)
+    p = inproc.run(SUPERVISE, *args, "--worktree", "/r/.worktrees/release/v10.17.11", "--out", str(out), cwd=strategy_fixture.like_root())
     assert p.returncode != 0 and not out.exists()
     assert json.loads(p.stdout)["status"] == "stopped" and "--state" in json.loads(p.stdout)["summary"]
 
@@ -3273,7 +3271,7 @@ def test_release_package_plugin_plan_links_by_channel_cd_and_mvv(tmp_path, monke
     out = tmp_path / "plan.json"
     extra = ["--mvv", str(tmp_path / "state.json")] if mvv else ["--state", str(tmp_path / "state.json")] if cd else []
     args = ["new", "release", "--version", version, "--prs", "995", "--channel", channel, *extra]
-    p = inproc.run(SUPERVISE, *args, "--worktree", f"/r/.worktrees/release/v{version}", "--out", str(out), cwd=REPO)
+    p = inproc.run(SUPERVISE, *args, "--worktree", f"/r/.worktrees/release/v{version}", "--out", str(out), cwd=strategy_fixture.like_root())
     assert p.returncode == 0, p.stdout + p.stderr
     steps = {s["id"]: s for s in json.loads(out.read_text())["steps"]}
     assert {i: steps[i].get("next") for i in nexts} == nexts

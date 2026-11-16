@@ -119,7 +119,8 @@ def test_values_from_the_declaration_or_the_argument_reach_impl_and_refactor(tmp
     assert steps(tmp_path / "i.json")["impl"]["timeout"] == 5000
     assert new_check(root, tmp_path / "c.json", *budget_arg).returncode == 0
     assert_budget(steps(tmp_path / "c.json")["refactor"], 45)
-    assert sorted(p.name for p in (root / ".ndf").iterdir()) == ["supervise.json", "worktree.json"]
+    # 宣言は project.json の branch_strategy（#3672）
+    assert sorted(p.name for p in (root / ".ndf").iterdir()) == ["project.json", "supervise.json"]
 
 
 def test_the_argument_wins_over_the_declaration(tmp_path):
@@ -159,7 +160,15 @@ def test_fast_sprint_plans_take_the_values_through_decl_fields(tmp_path):
     """AC5: pace: fast の実装と検査のプランも decl_fields から同じ値を受ける。"""
     a = argparse.Namespace(**{k: None for k in decl.decl_fields(argparse.Namespace())})
     a.__dict__.update(
-        impl_timeout=5000, refactor_budget_minutes=45, base="main", name="m1", tests=None, mode="standard", issue=[11], state=None
+        impl_timeout=5000,
+        refactor_budget_minutes=45,
+        base="main",
+        name="m1",
+        tests=None,
+        mode="standard",
+        issue=[11],
+        state=None,
+        flow=strategy_fixture.snapshot(),
     )
     impl = next(s for s in sprint_waves.plan_fast_impl(a, 11, str(tmp_path))["steps"] if s["id"] == "impl")
     assert impl["timeout"] == 5000

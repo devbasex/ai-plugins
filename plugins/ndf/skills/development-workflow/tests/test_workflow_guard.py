@@ -49,7 +49,21 @@ BY_BRANCH = json.dumps([{"number": 290, "head": {"ref": "design/parallel-batch-0
 
 @pytest.fixture()
 def repo(tmp_path: Path) -> Path:
-    return init_repo(tmp_path / "main")
+    """ベースブランチ develop・本番ブランチ main の宣言を持つリポジトリ（宣言が無ければマージの判定は止める側へ倒す。#3672）。"""
+    root = init_repo(tmp_path / "main")
+    _strategy_fixture().declare(root, "develop", "main")
+    for args in (("add", "-A"), ("commit", "-qm", "decl")):
+        subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True)
+    return root
+
+
+def _strategy_fixture():
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts" / "tests"))
+    import strategy_fixture
+
+    return strategy_fixture
 
 
 @pytest.fixture()
@@ -785,12 +799,7 @@ def test_conflicting_modes_apply_the_highest_to_every_issue(repo: Path, state: P
 
 def _declare(repo: Path, production: str, rows: list) -> None:
     """ベースブランチ develop・本番ブランチ `production`・届け先の行 `rows` のブランチ戦略の宣言を置く。"""
-    import sys
-
-    sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts" / "tests"))
-    import strategy_fixture
-
-    strategy_fixture.declare(repo, "develop", production, deliveries=rows)
+    _strategy_fixture().declare(repo, "develop", production, deliveries=rows)
 
 
 TRYGROUP_ROWS = [

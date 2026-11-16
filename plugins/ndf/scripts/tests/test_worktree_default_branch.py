@@ -1,4 +1,4 @@
-"""#3309: `wt_default_branch` は既定ブランチの候補を自分で並べず、`branch_flow.DEFAULT_BRANCH_CANDIDATES` から読む。
+"""#3309: `wt_default_branch` は既定ブランチの候補を自分で並べず、`strategy_rows.DEFAULT_BRANCH_CANDIDATES` から読む。
 
 origin の HEAD を解けない一時リポジトリで、候補の順に存在するローカルのブランチが選ばれることを確かめる。
 """
@@ -14,7 +14,7 @@ import pytest
 LIB = Path(__file__).resolve().parents[1] / "lib"
 COMMON = LIB / "worktree-common.sh"
 sys.path.insert(0, str(LIB))
-from branch_flow import DEFAULT_BRANCH_CANDIDATES  # noqa: E402
+from strategy_rows import DEFAULT_BRANCH_CANDIDATES  # noqa: E402
 
 
 def make_repo(tmp_path: Path, branches: list[str]) -> Path:
@@ -57,6 +57,6 @@ def test_no_candidate_returns_1(tmp_path: Path) -> None:
     assert got.stdout == ""
 
 
-def test_candidates_come_from_branch_flow() -> None:
+def test_candidates_come_from_strategy_rows() -> None:
     got = subprocess.run([sys.executable, "-I", str(LIB / "default_branch_candidates.py")], capture_output=True, text=True, check=True)
     assert tuple(got.stdout.split()) == DEFAULT_BRANCH_CANDIDATES

@@ -30,6 +30,16 @@ def section(kind: str = "web-develop", base: str | None = None, production: str 
     return sec
 
 
+def snapshot(kind: str = "web-trunk", base: str | None = "main", production: str | None = None, **edits) -> dict:
+    """スプリントの開始時のスナップショット（`branch_strategy.snapshot_section` の形）。引数の名前空間を直に組むテストが
+    `flow` に渡す（部品は `a.flow` だけを読み、無ければ止まる。I3）。`edits` はセクションの最上位のキーを置き換える。"""
+    import branch_strategy
+
+    sec = section(kind, base, production)
+    sec.update(edits)
+    return branch_strategy.snapshot_section(branch_strategy.Strategy(sec), "宣言")
+
+
 def write_strategy(root: Path, kind: str = "web-develop", base: str | None = None, production: str | None = None, **edits) -> dict:
     """`root/.ndf/project.json` にセクションを書き、書いたセクションを返す。ほかのキーは残す。
 
@@ -69,3 +79,66 @@ def pop_release(supervise: dict) -> dict | None:
     開発版のワークフローはチャネルの値なので移さない。"""
     old = supervise.pop("release", None)
     return {k: old[k] for k in ("form", "plugin", "runtimes") if k in old} if isinstance(old, dict) else None
+
+
+ROOT = Path(__file__).resolve().parents[4]  # このリポジトリ（ai-plugins）の根
+
+
+def migrated_ndf(src: Path = ROOT) -> dict[str, dict]:
+    """`src/.ndf/` の JSON（ファイル名 → 中身）を、旧い宣言を移行のコマンド（`branch-strategy migrate`）の値へ移して返す。
+
+    ai-plugins の `.ndf/` は手順 2 まで旧いキーのまま残る（#3672 の移行の順序）。部品は旧いキーが残ると止まる（I4）ので、
+    ai-plugins の宣言で組んだ形を確かめるテストは、移した写しで打つ。"""
+    import branch_strategy_legacy as legacy
+    from project_lib import branch_strategy_migrate as bmig
+
+    plan, questions = bmig.plan_migration(src, legacy.load_moves())
+    assert not questions and not plan.failed, (questions, plan.failed)
+    files = {p.name: json.loads(p.read_text(encoding="utf-8")) for p in sorted((Path(src) / ".ndf").glob("*.json"))}
+    files.update(plan.files)
+    return files
+
+
+def repo_like(dest: Path, src: Path = ROOT) -> Path:
+    """`migrated_ndf` の `.ndf/` だけを持つ git のリポジトリを `dest/repo` に作って返す。
+
+    ベースブランチ develop を checkout し、bare の origin（`dest/origin.git`）へ develop と main を送る（種別リリースが
+    本番ブランチの先頭の宣言を読めるように）。"""
+    import subprocess
+
+    from git_fixture import init_with_origin
+
+    root = init_with_origin(Path(dest))
+    ndf = root / ".ndf"
+    ndf.mkdir()
+    for name, doc in migrated_ndf(src).items():
+        (ndf / name).write_text(json.dumps(doc, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    md = Path(src) / ".ndf" / "mvv.md"
+    if md.is_file():
+        (ndf / "mvv.md").write_text(md.read_text(encoding="utf-8"), encoding="utf-8")
+    for args in (
+        ("add", "-A"),
+        ("commit", "-q", "-m", "init"),
+        ("push", "-q", "-u", "origin", "develop"),
+        ("push", "-q", "origin", "develop:main"),
+    ):
+        subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, check=True)
+    subprocess.run(["git", "-C", str(root), "fetch", "-q", "origin"], capture_output=True, text=True, check=True)
+    return root
+
+
+_LIKE: list[Path] = []
+
+
+def like_root() -> Path:
+    """`repo_like` のリポジトリをプロセスに 1 つだけ作って返す（このリポジトリの根を今のディレクトリにしていたテストの移し先）。
+    プロセスの終わりに消す。テストは中身を書き換えない。"""
+    if not _LIKE:
+        import atexit
+        import shutil
+        import tempfile
+
+        d = Path(tempfile.mkdtemp(prefix="ndf-like-"))
+        atexit.register(shutil.rmtree, d, True)
+        _LIKE.append(repo_like(d))
+    return _LIKE[0]

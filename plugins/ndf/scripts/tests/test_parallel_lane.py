@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 
 SCRIPTS = Path(__file__).resolve().parents[1]
@@ -14,6 +15,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import parallel_lane as pl  # noqa: E402
 import parallel_plan as pp  # noqa: E402
 from parallel_lane_world import PLAN, parallel_cli as _cli, plan_main as _main, run_cli as _run  # noqa: E402
+import strategy_fixture  # noqa: E402
+
+# スプリントの開始時のスナップショットだけを持つ引数（部品は a.flow だけを読み、無ければ止まる。#3672 の I3）
+FLOW_ARGS = SimpleNamespace(flow=strategy_fixture.snapshot())
 
 
 def test_lane_only_while_plan_is_running(tmp_path):
@@ -49,7 +54,7 @@ def test_non_lane_sprint_keeps_prod_plan(monkeypatch):
     from supervise_lib import sprint
 
     monkeypatch.setattr(sprint, "parallel_lane", lambda repo: None)
-    assert list(sprint.prod_plans(None, "/r", lambda: {"x": 1})) == ["release-prod"]
+    assert list(sprint.prod_plans(FLOW_ARGS, "/r", lambda: {"x": 1})) == ["release-prod"]
     monkeypatch.setattr(sprint, "parallel_lane", lambda repo: ("p1", "la"))
     import parallel_release
 
@@ -58,7 +63,7 @@ def test_non_lane_sprint_keeps_prod_plan(monkeypatch):
         "plan_release_request",
         lambda a, repo, plan, lane, prs=None: {"フェーズ": "リリースの依頼", "plan": plan, "lane": lane},
     )
-    got = sprint.prod_plans(None, "/r", lambda: {"x": 1})
+    got = sprint.prod_plans(FLOW_ARGS, "/r", lambda: {"x": 1})
     assert got == {"release-request": {"フェーズ": "リリースの依頼", "plan": "p1", "lane": "la"}}
 
 
@@ -112,7 +117,7 @@ def test_lane_request_without_prs_uses_previous_stage_prs(monkeypatch):
     seen = {}
     monkeypatch.setattr(sprint, "parallel_lane", lambda repo: ("p1", "la"))
     monkeypatch.setattr(parallel_release, "plan_release_request", lambda a, repo, plan, lane, prs=None: seen.setdefault("prs", prs))
-    sprint.prod_plans(None, "/r", lambda: {})
+    sprint.prod_plans(FLOW_ARGS, "/r", lambda: {})
     assert seen["prs"] == ["{queue_prs}"]
 
 
@@ -139,7 +144,7 @@ def test_present_plan_starts_and_collects_range_only(tmp_path):
     from supervise_lib import limits
 
     d = tmp_path / "releases" / "1" / "1"
-    present, _ = parallel_release.plan_parallel_release(SCRIPTS.parents[2], "p1", d, "1.2.3")
+    present, _ = parallel_release.plan_parallel_release(strategy_fixture.like_root(), "p1", d, "1.2.3")
     by = {s["id"]: s for s in present["steps"]}
     assert limits.run_error(present) is None  # on_fail が無いステップを指さない
     assert not any(by[i].get("on_fail") for i in ("facts", "explain", "others"))
@@ -153,7 +158,7 @@ def test_release_plan_keeps_base_branch_and_takes_approved_commit_for_worktree(t
     from supervise_lib import paths
 
     d = tmp_path / "releases" / "1" / "1"
-    _, release = parallel_release.plan_parallel_release(SCRIPTS.parents[2], "p1", d, "1.2.3")
+    _, release = parallel_release.plan_parallel_release(strategy_fixture.like_root(), "p1", d, "1.2.3")
     assert release["起点"].startswith("origin/") and release["起点のコミット"] == "{queue_approved:present}"
     plan = {**release, "起点のコミット": "abc123"}
     assert paths._resolve_base(plan, str(tmp_path)) == ("abc123", None)  # 作業ツリーは承認したコミットから
@@ -199,7 +204,7 @@ def test_lane_prod_stage_chains_after_release(monkeypatch, tmp_path):
     for f in ("plan_sprint_branch", "sprint_impl_plans", "plan_sprint_check", "plan_sprint_release"):
         monkeypatch.setattr(sprint, f, lambda *a, **k: {})
     monkeypatch.setattr(sprint, "prod_plans", lambda a, repo, build, prs=None: {"release-request": {}})
-    a = argparse.Namespace(worktree=str(tmp_path), design=[], issue=[1], version=None, pace="normal")
+    a = argparse.Namespace(worktree=str(tmp_path), design=[], issue=[1], version=None, pace="normal", flow=FLOW_ARGS.flow)
     waves = sprint.sprint_plans(a)
     assert waves[-1]["name"] == "本番" and waves[-1]["then_of"] == waves[0]["name"]  # 先頭の command へ --then でつなぐ
 
@@ -293,7 +298,7 @@ def test_production_plan_has_no_fix_step_after_the_approval(tmp_path):
     import parallel_release
 
     d = tmp_path / "releases" / "1" / "1"
-    _, release = parallel_release.plan_parallel_release(SCRIPTS.parents[2], "p1", d, "1.2.3")
+    _, release = parallel_release.plan_parallel_release(strategy_fixture.like_root(), "p1", d, "1.2.3")
     steps = {s["id"]: s for s in release["steps"]}
     assert not [s for s in release["steps"] if s.get("type") == "work" and s.get("kind") == "修正"]
     assert "fix" not in steps and "fix" not in steps["judge"]["choices"] and "stop" in steps["judge"]["choices"]

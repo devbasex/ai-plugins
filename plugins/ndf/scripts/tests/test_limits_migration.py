@@ -144,6 +144,9 @@ BEFORE = {
     "google-workspace.call": {"seconds": 120},
     "google-workspace.install": {"seconds": 600},
     "google-workspace.thumbnails": {"seconds": 120},
+    # #3672 で足した上限（ブランチ戦略の宣言の解析と書き込みの錠）
+    "branch-strategy.measure": {"seconds": 120},
+    "branch-strategy.write-lock": {"seconds": 30},
 }
 
 

@@ -7,8 +7,32 @@
   "作業場所": "<TMP>/repo",
   "規則": "全体テストが落ちたら（落ちたテストだけの再実行でも落ちた後）、変更に起因するなら fix、変更に無関係なら ready。2 回直しても同じなら abort。",
   "Pull Request": "5",
-  "上限": 45,
+  "上限": 47,
   "steps": [
+    {
+      "id": "assess",
+      "type": "run",
+      "preset": "assess",
+      "stage": "構造改善",
+      "skip_to": "review",
+      "on_fail": "refactor",
+      "next": "refactor"
+    },
+    {
+      "id": "refactor",
+      "type": "drive",
+      "drive": "cross-refactoring",
+      "kind": "構造改善",
+      "stage": "構造改善",
+      "timeout": 11880,
+      "cmd": "ndf_scope=$(python3 <NDF>/scripts/refactor-scope.py --pr 5) || exit 2; python3 <NDF>/skills/cross-refactoring/scripts/drive.py 5 --workflow-step --scope $ndf_scope",
+      "on_exit": {
+        "6": "review"
+      },
+      "on_fail": "abort",
+      "gate_next": "end",
+      "next": "review"
+    },
     {
       "id": "review",
       "type": "drive",
@@ -151,14 +175,14 @@
     {
       "id": "record",
       "type": "run",
-      "cmd": "python3 <NDF>/scripts/check-trigger.py record --id pr-5 --state {state_dir} --root . --review --target-pr 5",
+      "cmd": "python3 <NDF>/scripts/check-trigger.py record --id pr-5 --state {state_dir} --root . --target-pr 5",
       "on_fail": "abort",
       "next": "end"
     },
     {
       "id": "abort",
       "type": "run",
-      "cmd": "python3 <NDF>/scripts/check-trigger.py record --id pr-5 --state {state_dir} --root . --review --target-pr 5 --failed",
+      "cmd": "python3 <NDF>/scripts/check-trigger.py record --id pr-5 --state {state_dir} --root . --target-pr 5 --failed",
       "next": "end"
     },
     {

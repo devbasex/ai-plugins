@@ -718,7 +718,11 @@ def test_phase_steps_rejects_bad_calls_with_2(env, args):
 
 
 def clone_with_upstream(tmp_path, repo):
-    """repo を origin にした主ディレクトリ（develop）と、origin へ a.md を足したコミットを返す。"""
+    """repo を origin にした主ディレクトリ（develop）と、origin へ a.md を足したコミットを返す。上流はブランチ戦略の宣言
+    （ベースブランチ develop）を持つ（宣言が無ければ片付けは pull しない。#3672 の I3）。"""
+    strategy_fixture.declare(repo, "develop", "main")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "decl")
     main = tmp_path / "main"
     git(tmp_path, "clone", "-q", "-b", "develop", str(repo), str(main))
     for k, v in (("user.email", "t@example.com"), ("user.name", "t"), ("commit.gpgsign", "false")):
@@ -788,17 +792,15 @@ def clone_with_main_and_develop(tmp_path, cur):
     return main
 
 
-@pytest.mark.parametrize("cur, result", [("main", "pulled"), ("develop", "kept")])
-def test_cleanup_base_defaults_to_origin_head_not_develop(tmp_path, env, cur, result):
-    # 宣言の無いリポジトリでは、起点は origin の HEAD（main）から決まる。develop があっても採らない
+@pytest.mark.parametrize("cur", ["main", "develop"])
+def test_cleanup_without_declaration_keeps_the_main_dir(tmp_path, env, cur):
+    # 宣言の無いリポジトリでは起点を既定ブランチ（origin の HEAD）へ倒さず、pull せずに理由を残す（#3672 の I3）
     main = clone_with_main_and_develop(tmp_path, cur)
     env["FAKE_GH_PRS"] = json.dumps({"1": {"headRefName": "feature/gone", "state": "MERGED"}})
     code, out, err = call("merged-steps.py", ["cleanup", "1", "--root", str(main)], env)
     assert code == 0, err
     item = {(i["kind"], i["name"]): i for i in out["items"]}[("main_dir", str(main))]
-    assert item["result"] == result
-    if result == "kept":
-        assert "main でなく develop" in item["reason"]
+    assert item["result"] == "kept" and "branch_strategy" in item["reason"]
 
 
 def test_cleanup_base_follows_declaration(tmp_path, env):

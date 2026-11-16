@@ -58,7 +58,7 @@ def pr_blocks() -> dict[str, tuple[int, str]]:
     blocks = bash_blocks(section(read(RETROSPECTIVE), PR_SECTION))
     found: dict[str, tuple[int, str]] = {}
     for index, block in enumerate(blocks):
-        if "dev_base=$(jq" in block:
+        if "dev_base=$(python3" in block:
             found["dev_base"] = (index, block)
         elif re.search(r"^record_base=\$dev_base$", block, re.M):
             found["no_issue"] = (index, block)
@@ -116,7 +116,11 @@ def run_stages(work: pathlib.Path, case: str) -> subprocess.CompletedProcess:
         'printf "%s %s %s\\n" "$dev_base" "$record_base" '
         '"$(git rev-parse "origin/$record_base")"\n'
     )
-    return subprocess.run(["bash", "-c", script], cwd=str(work), capture_output=True, text=True)
+    # 手順 1 は宣言を `$CLAUDE_PLUGIN_ROOT/scripts/lib/branch_strategy_cli.py` で読む。python3 はテストの python（依存のある環境）
+    env = dict(
+        os.environ, CLAUDE_PLUGIN_ROOT=str(SKILLS.parent), PATH=f"{pathlib.Path(sys.executable).parent}{os.pathsep}{os.environ['PATH']}"
+    )
+    return subprocess.run(["bash", "-c", script], cwd=str(work), capture_output=True, text=True, env=env)
 
 
 @pytest.mark.parametrize(
@@ -143,7 +147,7 @@ def test_retrospective_stops_when_the_declared_branch_is_missing(clone: pathlib.
         done = run_stages(clone, case)
         assert done.returncode == 1, done.stdout
         assert done.stdout == ""
-        assert "base_branch が指す no-such-branch" in done.stderr
+        assert "branches.base が指す no-such-branch" in done.stderr
 
 
 def test_retrospective_group_stops_without_the_distribution_branch(clone: pathlib.Path) -> None:
