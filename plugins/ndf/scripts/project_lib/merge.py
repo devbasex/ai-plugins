@@ -2,7 +2,7 @@
 
 - I7 を最初に当てる: 書く値・既存の値のどちらかが秘密の形なら、その項目を `{"unknown": "秘密の形"}` にし、値を出さない
 - I1: 置き換えてよいのは、キーが無い項目と、前の `write` の値のまま（`analysis.written` の指紋が一致する）項目だけ
-- I2: `worktree.json` は `base_branch`・`production_branch`・`branch_flow` の無いキー（と前の `write` の値のままのキー）だけを変える
+- I2: ブランチ名とブランチ戦略は書かない（`project-decl.py branch-strategy` だけが書く。#3672）
 - I3: 新しい解析で不明でも、前の値があれば残す。`ci` のワークフローの行の壁時計も、新しい行に無ければ同じパスの前の値を残す（#1664 の I6）
 """
 
@@ -13,11 +13,10 @@ import hashlib
 import json
 from typing import Any, Callable
 
-from . import BRANCH_FLOW, BRANCHES, ITEM_KEYS
+from . import ITEM_KEYS
 from .secret import has_secret, redact
 
 SECRET_REASON = "秘密の形"
-WORKTREE_KEYS = (("base_branch", "base"), ("production_branch", "production"))
 
 
 def value_digest(value: Any) -> str:
@@ -67,21 +66,6 @@ def _carry_walls(cur: Any, new: Any) -> tuple[Any, list[dict]]:
     return ({**new, "workflows": workflows} if rows else new), rows
 
 
-DELIVERY_KEPT = ("manual_reason", "result", "publishes_release")  # 利用者が書く欄。解析の答えに無ければ残す（#2623 の I6）
-
-
-def _carry_delivery(cur: Any, new: Any) -> Any:
-    """`delivery` の新しい値で、前の値の同じ `target` の行にある利用者の欄を引き継ぐ。"""
-    if not isinstance(cur, list) or not isinstance(new, list):
-        return new
-    before = {r.get("target"): r for r in cur if isinstance(r, dict)}
-    out = []
-    for row in new:
-        old = before.get(row.get("target")) if isinstance(row, dict) else None
-        out.append({**{k: old[k] for k in DELIVERY_KEPT if k in old and k not in row}, **row} if old else row)
-    return out
-
-
 def merge_item(key: str, cur: Any, has_cur: bool, new: Any, origin: str, written: dict) -> tuple[Any, list[dict], bool]:
     """1 項目を決める。返すのは (書く値, 出力の行, 解析の値か)。解析の値なら呼ぶ側が `written` に指紋を持つ。"""
     if has_cur and has_secret(cur):
@@ -107,8 +91,6 @@ def merge_item(key: str, cur: Any, has_cur: bool, new: Any, origin: str, written
     if key == "ci":
         new, carried = _carry_walls(cur, new)
         rows += carried
-    if key == "delivery":
-        new = _carry_delivery(cur, new)
     return new, rows + [put(new)], True
 
 
@@ -128,80 +110,6 @@ def merge_project(existing: dict | None, measure: dict, answers: dict, check, an
     doc.pop("analysis", None)
     doc["analysis"] = {**analysis, "written": written}
     return doc, rows
-
-
-def branch_answer(measure: dict, answers: dict, check) -> tuple[dict, str]:
-    """P6 の値（`{"base", "production"}`）と出所。"""
-    value, origin = resolve_item(BRANCHES, (measure.get("items") or {}).get(BRANCHES), answers, check)
-    return ({} if is_unknown(value) else dict(value or {})), origin
-
-
-def delivery_channels(answers: dict, names: dict) -> dict:
-    """`delivery` の答えの行で、本番・起点のブランチ名を写した `branch` を `channel` に直す（#2336 の決定 7）。
-
-    `names` は `{"production": 名前, "base": 名前}`。両方に当たる名前は本番を採る。ほかのブランチの行は変えない。
-    """
-    ans = answers.get("delivery")
-    rows = ans.get("value") if isinstance(ans, dict) else None
-    if not isinstance(rows, list):
-        return answers
-    by_name = {}
-    for channel in ("base", "production"):
-        name = names.get(channel)
-        if isinstance(name, str) and name:
-            by_name[name] = channel
-    out = []
-    for row in rows:
-        if isinstance(row, dict) and not row.get("channel") and row.get("branch") in by_name:
-            row = {**{k: v for k, v in row.items() if k != "branch"}, "channel": by_name[row["branch"]]}
-        out.append(row)
-    return {**answers, "delivery": {**ans, "value": out}}
-
-
-def merge_worktree(existing: dict, branches: dict, origin: str, written_before: dict) -> tuple[dict, list[dict], dict]:
-    """`worktree.json` に欠けた 2 キーを足す（I2）。返すのは (新しい中身, 出力の行, 書いたキーの指紋)。"""
-    doc = dict(existing)
-    rows, written = [], {}
-    for wkey, bkey in WORKTREE_KEYS:
-        new = branches.get(bkey)
-        tag = f"worktree.json#{wkey}"
-        if not isinstance(new, str) or not new or has_secret(new):
-            if wkey not in doc:
-                rows.append({"kind": "unknown", "key": tag, "reason": "起点・本番を決められない"})
-            elif written_before.get(tag) == value_digest(doc[wkey]):
-                written[tag] = written_before[tag]
-            continue
-        if wkey not in doc:
-            doc[wkey] = new
-            rows.append({"kind": "written", "key": tag, "origin": origin})
-            written[tag] = value_digest(new)
-        elif written_before.get(tag) == value_digest(doc[wkey]):
-            doc[wkey] = new
-            rows.append({"kind": "written" if doc[wkey] != existing[wkey] else "kept", "key": tag, "origin": origin})
-            written[tag] = value_digest(new)
-        elif doc[wkey] != new:
-            rows.append({"kind": "mismatch", "key": tag, "declared": doc[wkey], "analyzed": new})
-        else:
-            rows.append({"kind": "kept", "key": tag})
-    return doc, rows, written
-
-
-def flow_answer(measure: dict, answers: dict, check) -> tuple[Any, str]:
-    """ブランチ運用（`branch_flow`）の値と出所。`check` は表に合わない組を返す（#3121 の I1）。"""
-    return resolve_item(BRANCH_FLOW, (measure.get("items") or {}).get(BRANCH_FLOW), answers, check)
-
-
-def merge_flow(doc: dict, value: Any, origin: str, written_before: dict) -> tuple[dict, list[dict], dict]:
-    """`worktree.json` の `branch_flow` を I1・I2 の規則で書く。不明・前の `write` の値でない手の値は変えない。"""
-    tag = f"worktree.json#{BRANCH_FLOW}"
-    if is_unknown(value) or not isinstance(value, dict):
-        reason = value["unknown"] if is_unknown(value) else "値が無い"
-        return doc, ([] if BRANCH_FLOW in doc else [{"kind": "unknown", "key": tag, "reason": reason}]), {}
-    if BRANCH_FLOW in doc and written_before.get(tag) != value_digest(doc[BRANCH_FLOW]):
-        if value_digest(doc[BRANCH_FLOW]) == value_digest(value):
-            return doc, [{"kind": "kept", "key": tag}], {}
-        return doc, [{"kind": "mismatch", "key": tag, "declared": doc[BRANCH_FLOW], "analyzed": value}], {}
-    return {**doc, BRANCH_FLOW: value}, [{"kind": "written", "key": tag, "origin": origin}], {tag: value_digest(value)}
 
 
 def unified(path: str, old: str | None, new: str) -> str:

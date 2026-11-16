@@ -274,7 +274,7 @@ def apply_decls(a) -> None:
       引数 → supervise.json の同じ名前の項目。
       宣言の形は引数があっても見る（#1916 の決定 5）
 
-    リリースの経路（a.routes）は sprint と close だけが使い、`sprint_routes.apply_routes` が delivery_decl（宣言。a.delivery）で組む。
+    リリースの経路（a.routes）は sprint と close だけが使い、`sprint_routes.apply_routes` が delivery_decl（宣言。a.delivery_decl）で組む。
     """
     roots = decl_roots(a.worktree, getattr(a, "repo", None))
     sv = read_decl(roots, SUPERVISE_DECL)

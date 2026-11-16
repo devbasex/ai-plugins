@@ -111,7 +111,7 @@ SCRIPT_WORDS: dict[str, str] = {
     "runtime-list": r"claude,codex,kiro",
     "origin-develop": r"origin/develop",
     # 特定のブランチ名の決め打ち（#3309）。引用符の有無・`origin/` の付いた形を問わず拾う。名前は宣言か
-    # `lib/branch_flow.py` の定数から読む
+    # `lib/strategy_rows.py` の定数から読む
     "origin-main": r"origin/(?:main|master)\b",
     "quoted-main": r"[\"'](?:main|master)[\"']",
     "quoted-develop": r"[\"']develop[\"']",

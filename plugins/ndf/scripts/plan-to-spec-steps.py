@@ -23,7 +23,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import deps  # noqa: E402
 
-deps.require("md", "mdtable", "textparse", "pathmatch")  # glossary.py の分を含めて 1 回で入れる（決定 23）
+deps.require("md", "mdtable", "textparse", "pathmatch", "jsonschema")  # glossary.py の分を含めて 1 回で入れる（決定 23）
 import md  # noqa: E402
 import repo  # noqa: E402
 from step_result import (

@@ -1,5 +1,5 @@
 {
- "summary": "#3672 の削除の一覧（issues/issue-3672-design-removal.md の D 行）を 1 ファイル 1 行で持つ。scripts/check-legacy-branch-decl.py が、各行のパスに消す語が宣言のキーの形（\"語\"・'語'・.語・`語`）で残れば落とす。パスのファイルが無い行は通す。この表は 10 系と CI の行だけを持つ（11.0 の行は #3681、ai-plugins の .ndf/・方針の文書の行は移行の PR、宛先の検査（scripts/check-pr-base.sh とそのテスト scripts/tests/test_pr_base_guard.py）の行は宛先の検査の PR が足す）。旧いキーの名前が残ってよい置き場（移行のコマンド・旧い宣言の検査・移す行の表とそれらのテスト、CHANGELOG.md・docs/archive/・docs/development-history/・issues/）は載せない",
+ "summary": "#3672 の削除の一覧（issues/issue-3672-design-removal.md の D 行）を 1 ファイル 1 行で持つ。scripts/check-legacy-branch-decl.py が、各行のパスに消す語が宣言のキーの形（\"語\"・'語'・.語・`語`）で残れば落とす。パスのファイルが無い行は通す。この表は 10 系と CI の行だけを持つ（11.0 の行は #3681、ai-plugins の .ndf/・方針の文書の行は移行の PR、宛先の検査（scripts/check-pr-base.sh とそのテスト scripts/tests/test_pr_base_guard.py）の行は宛先の検査の PR が足す）。旧いキーの名前が残ってよい置き場（移行のコマンド・旧い宣言の検査・移す行の表とそれらのテスト、CHANGELOG.md・docs/archive/・docs/development-history/・issues/）は載せない。D21（pr-review-steps.py）の語に base_branch を入れないのは、gh_pr_info の PR の宛先の欄の名前で、宣言を読まないため",
  "rows": [
   {
    "id": "D5",
@@ -787,7 +787,6 @@
    "words": [
     "branch_flow",
     "production_merge",
-    "base_branch",
     "production_branch",
     "promotion",
     "dev_workflow",

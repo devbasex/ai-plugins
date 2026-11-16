@@ -96,7 +96,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import deps  # noqa: E402
 
-deps.require("schema", "versions", "bump", "md", "mdtable", "durable", "waits")
+deps.require("schema", "versions", "bump", "md", "mdtable", "durable", "waits", "jsonschema")
 import approved_commit as ac  # noqa: E402
 import step_read  # noqa: E402
 
@@ -813,7 +813,6 @@ def cmd_release_case(a):
 
 def cmd_land(a):
     """承認した head だけを宣言の主体と方式で本番ブランチへ入れる（#3672 の I5・I7。本体は release_lib/land.py）。"""
-    deps.require("jsonschema")
     from release_lib import land
 
     got = land.land_cli(git_root(a.root), a.repo, a.pr)

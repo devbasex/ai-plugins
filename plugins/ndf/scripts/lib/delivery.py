@@ -346,7 +346,7 @@ def _row_route(row: dict, decl: DeliveryDecl) -> Route:
 
 
 def routes(decl: DeliveryDecl, forms=()) -> list[Route]:
-    """リリースの経路。`release.form` があればそれ（`template`）だけで決まり、無ければ `delivery` の行ごとに決める。
+    """リリースの経路。`release.form` があればそれ（`template`）だけで決まり、無ければ届け先（`release.deliveries`）の行ごとに決める。
     `forms` は雛形のある `release.form` の値（無い形は手で行うステージへ落とす）。"""
     form = (decl.release or {}).get("form") if decl.release else None
     if form:

@@ -31,6 +31,9 @@ from pathlib import Path
 from typing import NamedTuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import deps  # noqa: E402
+
+deps.require("jsonschema")  # 届け先はブランチ戦略の宣言（JSON Schema で検査する）から読む
 from step_result import (
     EXIT_UNREADABLE,
     StepError,

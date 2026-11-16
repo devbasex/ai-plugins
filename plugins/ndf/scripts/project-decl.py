@@ -38,11 +38,9 @@ import jsonio  # noqa: E402
 import ndf_tracking  # noqa: E402
 import proc  # noqa: E402
 import repo  # noqa: E402
-import branch_flow  # noqa: E402
 from step_result import EXIT_PRECONDITION, EXIT_UNREADABLE, StepError, emit, main_with, result  # noqa: E402
 
-from project_lib import ANALYZER, BRANCH_FLOW, BRANCHES, DECL_FILE, ITEM_KEYS, WORKTREE_FILE, ci_tests, fingerprint, merge  # noqa: E402
-from project_lib import measure_branch_flow as mbf  # noqa: E402
+from project_lib import ANALYZER, DECL_FILE, ITEM_KEYS, WORKTREE_FILE, ci_tests, fingerprint, merge  # noqa: E402
 from project_lib import measure_ci as mci  # noqa: E402
 from project_lib import measure_repo as mr  # noqa: E402
 from project_lib.measure_materials import measure_materials  # noqa: E402
@@ -56,9 +54,6 @@ P_NUMBER = {
     "test_duration": "P3",
     "ci": "P4",
     "services": "P5",
-    BRANCHES: "P6",
-    BRANCH_FLOW: "P6",
-    "delivery": "P7",
     "issues": "P8",
     "checks": "P9",
     "ndf_policies": "P9",
@@ -72,7 +67,6 @@ def _main_dir(root: Path) -> Path:
 
 
 def _load_model():
-    deps.require("schema")
     from project_lib import model
 
     return model
@@ -101,14 +95,6 @@ def _load_decl(main: Path, model):
     return data
 
 
-def _declared_flow(main: Path) -> "branch_flow.BranchFlow":
-    """worktree.json の branch_flow（無ければ既定値の行）。壊れていれば 3（#3121 の I1）。"""
-    try:
-        return branch_flow.of_decl(_read_decl_json(main / WORKTREE_FILE, str(WORKTREE_FILE)) or {})
-    except branch_flow.FlowError as e:
-        raise StepError(f"{WORKTREE_FILE}: {e}", EXIT_PRECONDITION) from None
-
-
 # --- check ------------------------------------------------------------------
 
 
@@ -122,7 +108,6 @@ def cmd_check(a):
     model = _load_model()
     main = _main_dir(root)
     data = _load_decl(main, model)
-    _declared_flow(main)
     reasons = []
     if data is None:
         reasons.append("宣言が無い")
@@ -174,8 +159,6 @@ def _measure_tree_items(tree, step, items: dict) -> dict:
         items["services"], services = got
     for key, fn in (
         ("test", lambda: mr.measure_test(tree, dep, services)),
-        (BRANCHES, lambda: mr.measure_branches(tree)),
-        ("delivery", lambda: mr.measure_delivery(tree)),
         ("checks", lambda: mr.measure_checks(tree, dep)),
         ("ndf_policies", lambda: mr.measure_policies(tree)),
         ("instructions", lambda: mr.measure_instructions(tree)),
@@ -195,13 +178,8 @@ def _measure_ci_items(tree, step, items: dict, root: Path, deadline: float, repo
     if ci_part:
         items["ci"], items["test_duration"] = ci_part["ci"], ci_part["test_duration"]
         notes += ci_part["notes"]
-        if ci_part.get("merges") and items.get(BRANCHES, {}).get("status") == "question":
-            counts = "・".join(f"{k} {v}" for k, v in sorted(ci_part["merges"].items(), key=lambda kv: -kv[1]))
-            items[BRANCHES]["evidence"].append({"text": f"直近 100 件のマージ先: {counts}"})
     else:
         items.setdefault("test_duration", items.get("ci") or mr.unknown("時間切れ"))
-    if (flow := step(BRANCH_FLOW, lambda: mbf.measure_flow(root, _github_repo(root), deadline))) is not None:
-        items[BRANCH_FLOW] = flow
     if "issues" not in items:
         items["issues"] = mci.measure_issues(repo_issues, ci_part or {})
     return notes
@@ -234,7 +212,7 @@ def measure_project(root: Path, budget: float) -> dict:
     return {
         "analyzer": ANALYZER,
         "elapsed_seconds": round(time.monotonic() - start, 1),
-        "items": {k: items[k] for k in (*ITEM_KEYS, BRANCHES, BRANCH_FLOW) if k in items},
+        "items": {k: items[k] for k in ITEM_KEYS if k in items},
         "inputs": fingerprint.inputs(root, tree.files),
         "branch_state": fingerprint.branch_state(root, fingerprint.declared_branches(_main_dir(root))),
         "skipped_files": tree.skipped,
@@ -296,7 +274,7 @@ def _same_but_time(old: dict | None, new: dict) -> bool:
 
 def _row_line(row: dict) -> str:
     key, kind = row["key"], row["kind"]
-    p = P_NUMBER.get(key.split("#")[0], "P6" if key.startswith("worktree.json") else "")
+    p = P_NUMBER.get(key.split("#")[0], "")
     if kind == "mismatch":
         return f"  {p} {key}: 食い違い 宣言 {json.dumps(row['declared'], ensure_ascii=False)} / 解析 {json.dumps(row['analyzed'], ensure_ascii=False)}"
     if kind == "unknown":
@@ -317,29 +295,6 @@ def _put_text(path: Path, text: str) -> None:
         tmp.replace(path)
     except OSError as e:
         raise StepError(f"{path} を書けない: {e}", 1) from None
-
-
-def _merge_worktree_part(main, wt, meas, answers, check, written_before):
-    files = []
-    if wt is None:
-        rows = [
-            {
-                "kind": "note",
-                "key": str(WORKTREE_FILE),
-                "text": "worktree.json が無い（worktree-setup.sh init を先に通す）。起点と本番を書かない",
-            }
-        ]
-        branches, _ = merge.branch_answer(meas, answers, check)
-        return files, rows, {}, [], branches
-    branches, origin = merge.branch_answer(meas, answers, check)
-    new_wt, rows, wt_written = merge.merge_worktree(wt, branches, origin, written_before)
-    new_wt, flow_rows, flow_written = merge.merge_flow(new_wt, *merge.flow_answer(meas, answers, mbf.answer_problem), written_before)
-    rows, wt_written = rows + flow_rows, {**wt_written, **flow_written}
-    if new_wt != wt:
-        files.append((main / WORKTREE_FILE, str(WORKTREE_FILE), (main / WORKTREE_FILE).read_text(encoding="utf-8"), merge.dumps(new_wt)))
-    declared = fingerprint.branch_names(new_wt)
-    names = {bkey: new_wt.get(wkey) for wkey, bkey in merge.WORKTREE_KEYS}
-    return files, rows, wt_written, declared, names
 
 
 def _gitignore_note(main) -> list:
@@ -363,30 +318,24 @@ def cmd_write(a):
     model = _load_model()
     main = _main_dir(root)
     existing = _load_decl(main, model)
-    wt = _read_decl_json(main / WORKTREE_FILE, str(WORKTREE_FILE))
     try:
         meas = jsonio.read(a.measure, want=dict)
         answers = jsonio.read(a.answers, want=dict) if a.answers else {}
     except jsonio.JsonReadError as e:
         raise StepError(f"測定の結果か答えを読めない: {e}", 1) from None
     check = _checker(model)
-    if bad := mbf.bad_answer(answers.get(BRANCH_FLOW)):
-        raise StepError(f"ブランチ運用の答えが取り込み方の表に合わないため書かない: {bad}", 1)
     questions = {k for k, m in (meas.get("items") or {}).items() if m.get("status") == "question"}
     rows = [{"kind": "ignored", "key": k} for k in answers if k not in questions]
     written_before = ((existing or {}).get("analysis") or {}).get("written") or {}
 
-    files, wt_rows, wt_written, declared, names = _merge_worktree_part(main, wt, meas, answers, check, written_before)
-    answers = merge.delivery_channels(answers, names)
-    rows += wt_rows
+    files: list = []
     analysis = {
         "analyzer": ANALYZER,
         "at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
         "inputs": meas.get("inputs") or {},
-        "branches": fingerprint.branch_state(root, declared),
+        "branches": fingerprint.branch_state(root, fingerprint.declared_branches(main)),
     }
     doc, item_rows = merge.merge_project(existing, meas, answers, check, analysis, model.SCHEMA_URL)
-    doc["analysis"]["written"].update(wt_written)
     doc, ci_row = _declare_ci_tests(doc, existing, written_before, root)
     rows = item_rows + [ci_row] + rows
     try:
@@ -440,7 +389,6 @@ def _report_write(files, rows, dry_run):
 
 def cmd_branch_strategy(a):
     """ブランチ戦略の宣言を作る・測る・書く・移す・消す。本体は `project_lib/branch_strategy_cmd.py`。"""
-    deps.require("jsonschema", "locks")
     from project_lib import branch_strategy_cmd
 
     return branch_strategy_cmd.run_branch_strategy(a, _main_dir(Path(a.root or ".").resolve()))
@@ -493,6 +441,8 @@ def build_parser():
 
 
 def main(argv=None):
+    # 宣言の模型（pydantic）・ブランチ戦略の宣言の検査（jsonschema）・書き込みの錠（filelock）を 1 回で入れる（決定 23）
+    deps.require("schema", "jsonschema", "locks")
     return main_with(build_parser(), lambda a: TOOL, argv)
 
 
