@@ -31,6 +31,8 @@ from supervise_lib import claude, commands, engine, flow, paths, plan, pr as pr_
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import worker_fake  # noqa: E402
 from supervise_lib.prompts import PR_SYSTEM  # noqa: E402
+from supervise_lib.decl import PLAN_BASE  # noqa: E402
+import strategy_fixture  # noqa: E402
 import gh_call  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -229,10 +231,10 @@ def test_run_step_without_no_reports_adds_nothing(tmp_path, monkeypatch):
 
 def test_preset_fills_base_branch(tmp_path, monkeypatch):
     monkeypatch.setitem(paths.PRESETS, "echo-base", "echo base={base}")
-    s, _ = run_plan(tmp_path, [{"id": "t", "type": "run", "preset": "echo-base", "next": "end"}], base_branch="trunk")
+    s, _ = run_plan(tmp_path, [{"id": "t", "type": "run", "preset": "echo-base", "next": "end"}], **{PLAN_BASE: "trunk"})
     assert "base=trunk" in s.state.results["t"]["text"]
     s, _ = run_plan(tmp_path, [{"id": "t", "type": "run", "preset": "echo-base", "next": "end"}])
-    assert s.state.results["t"]["exit"] == 2 and "base_branch" in s.state.results["t"]["text"]
+    assert s.state.results["t"]["exit"] == 2 and "起点のブランチが無い" in s.state.results["t"]["text"]
 
 
 def test_skip_to_jumps_over_steps(tmp_path):
@@ -566,13 +568,26 @@ def cli(*args, cwd=None):
 AI_PLUGINS_WORDS = ("plugins/", "playwright-kit", "build-runtime-plugins", "claude,codex,kiro", "develop", "scripts/check-")
 
 
-def foreign_repo(tmp_path, supervise=None):
-    """main だけ・pytest でない・プラグインを配らないリポジトリを模す。"""
+def foreign_repo(tmp_path, supervise=None, release=None, production=None):
+    """main だけ・pytest でない・プラグインを配らないリポジトリを模す。ブランチ戦略の宣言はベースブランチ main・本番ブランチ
+    `production`（省けば main）・リリースの形 `release`。リリースの形を渡したときは、種別リリースが本番ブランチの先頭の宣言を
+    読めるように、宣言をコミットして bare の origin へ main と本番ブランチを送る。"""
     root = tmp_path / "other"
     (root / ".ndf").mkdir(parents=True)
-    (root / ".ndf" / "worktree.json").write_text('{"version": 1, "base_branch": "main"}\n')
+    git(root, "init", "-q", "-b", "main")
+    strategy_fixture.declare(root, "main", production, release)
     if supervise is not None:
         (root / ".ndf" / "supervise.json").write_text(json.dumps(supervise))
+    if release is not None:
+        for k, v in (("user.email", "t@example.com"), ("user.name", "t"), ("commit.gpgsign", "false")):
+            git(root, "config", k, v)
+        git(root, "add", "-A")
+        git(root, "commit", "-q", "-m", "init")
+        origin = tmp_path / "origin.git"
+        subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(origin)], check=True)
+        git(root, "remote", "add", "origin", str(origin))
+        git(root, "push", "-q", "origin", "main", *([f"main:{production}"] if production and production != "main" else []))
+        git(root, "fetch", "-q", "origin")
     return root
 
 
@@ -604,7 +619,7 @@ def test_new_impl_in_other_repo_uses_declarations_only(tmp_path):
     assert plan["テストの時間"]["basis"]["unknown_duration"] is True
     assert steps["test-limited"]["timeout"] == 990 and steps["test-all"]["timeout"] == 1980
     assert steps["merge"]["cmd"].endswith("merge-when-green {pr} --timeout 3600") and steps["merge"]["timeout"] == 4290
-    assert steps["pr"]["base"] == "main" and plan["base_branch"] == "main" and "no_reports" not in plan
+    assert steps["pr"]["base"] == "main" and plan[PLAN_BASE] == "main" and "no_reports" not in plan
     for cmd in run_cmds(plan):
         assert not any(w in cmd for w in AI_PLUGINS_WORDS), cmd
     # デプロイしたスクリプトは置き場からの絶対パスで呼ぶ
@@ -615,12 +630,20 @@ def test_new_impl_in_other_repo_uses_declarations_only(tmp_path):
 def test_new_impl_without_declaration_stops(tmp_path):
     root = tmp_path / "bare"
     root.mkdir()
-    p = cli(
-        "new", "impl", "--issue", "1", "--worktree", str(root), "--tests", "t", "--title", "T", "--out", str(tmp_path / "p.json"), cwd=root
-    )
-    assert p.returncode == 2 and "base_branch" in p.stderr and "test.command" in p.stderr
+    git(root, "init", "-q", "-b", "main")
+
+    def new_impl(*extra):
+        args = ("new", "impl", "--issue", "1", "--worktree", str(root), "--tests", "t", "--title", "T", *extra)
+        return cli(*args, "--out", str(tmp_path / "p.json"), cwd=root)
+
+    # ブランチ戦略の宣言が無ければ、既定値へ倒さずに作り方を示して止まる（#3672 の I3）
+    p = new_impl()
+    assert p.returncode == 2 and "branch-strategy init" in p.stderr
+    strategy_fixture.declare(root, "main")
+    p = new_impl()
+    assert p.returncode == 2 and "test.command" in p.stderr
     assert not (tmp_path / "p.json").exists()
-    # 引数で渡せば宣言が無くても作れる
+    # テストの宣言が無くても、引数で渡せば作れる
     p = cli(
         "new",
         "impl",
@@ -651,8 +674,8 @@ def test_new_impl_without_declaration_stops(tmp_path):
     assert plan["テストの戦略"]["name"] == "round-only"
 
 
-def test_new_release_needs_release_form(tmp_path):
-    root = foreign_repo(tmp_path, {"version": 1, "release": {"form": "service"}})
+def test_new_release_stops_on_a_form_without_a_template(tmp_path):
+    root = foreign_repo(tmp_path, {"version": 1}, {"form": "service"})
     wt = f"{root}/.worktrees/release/v1"
     p = cli(
         "new",
@@ -670,28 +693,10 @@ def test_new_release_needs_release_form(tmp_path):
         cwd=root,
     )
     assert p.returncode == 2 and "service" in p.stderr and "/ndf:release" in p.stderr
-    root2 = foreign_repo(tmp_path / "b", {"version": 1})
-    p = cli(
-        "new",
-        "release",
-        "--version",
-        "1.0.0",
-        "--prs",
-        "3",
-        "--channel",
-        "dev",
-        "--worktree",
-        f"{root2}/.worktrees/release/v1",
-        "--out",
-        str(tmp_path / "r.json"),
-        cwd=root2,
-    )
-    assert p.returncode == 2 and "release.form" in p.stderr
 
 
 def test_new_release_package_plugin_from_declaration(tmp_path):
-    root = foreign_repo(tmp_path, {"version": 1, "release": {"form": "package-plugin", "plugin": "foo", "runtimes": ["claude"]}})
-    (root / ".ndf" / "worktree.json").write_text('{"version": 1, "base_branch": "main", "production_branch": "stable"}\n')
+    root = foreign_repo(tmp_path, {"version": 1}, {"form": "package-plugin", "plugin": "foo", "runtimes": ["claude"]}, "stable")
     wt = f"{root}/.worktrees/release/v1"
     for channel, ref in (("dev", "main"), ("prod", "stable")):
         out = tmp_path / f"{channel}.json"
@@ -1931,8 +1936,7 @@ def test_pr_base_from_declaration(tmp_path, monkeypatch):
     git(root, "push", "-q", "origin", "trunk")
     git(root, "checkout", "-q", "feat/x")
     advance_develop(root)
-    (root / ".ndf").mkdir()
-    (root / ".ndf" / "worktree.json").write_text('{"version": 1, "base_branch": "trunk"}\n')
+    strategy_fixture.declare(root, "trunk", "main")
     plan = {
         "フェーズ": "実装",
         "課題": [1],
@@ -1953,7 +1957,7 @@ def test_pr_without_base_stops(tmp_path, monkeypatch):
     }
     s = engine.Engine(plan, tmp_path / "state")
     assert "結果: 完了" not in s.run()
-    assert "base_branch" in s.state.results["pr"]["text"]
+    assert "起点のブランチ" in s.state.results["pr"]["text"]
 
 
 @pytest.mark.parametrize("llm_footer", [True, False])
@@ -3086,7 +3090,8 @@ CARMO_PROJECT = json.loads((Path(__file__).parent / "fixtures" / "carmo_project.
 
 def _carmo_repo(tmp_path):
     root = foreign_repo(tmp_path)
-    (root / ".ndf" / "project.json").write_text(json.dumps(CARMO_PROJECT))
+    path = root / ".ndf" / "project.json"
+    path.write_text(json.dumps({**CARMO_PROJECT, **json.loads(path.read_text(encoding="utf-8"))}))
     return root
 
 
