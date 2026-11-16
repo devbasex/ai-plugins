@@ -154,19 +154,12 @@ def collect_samples(root: Path, api: Api, deadline: float, limit: int, clock: Ca
 
 
 def _collect_rules(api: Api, s: Samples) -> None:
-    """本番ブランチに効く ruleset を読み、承認の数・merge queue・迂回の可否の事実にする。"""
+    """本番ブランチに効く ruleset（無ければ従来のブランチ保護）を読み、承認の数・merge queue・迂回の可否の事実にする。
+    land が宣言を照らすときと同じ正本（`release_case.rule_facts_from`）で読み、書く側と照らす側の事実をそろえる。"""
     import release_case
 
-    rules, why = api(f"repos/{{owner}}/{{repo}}/rules/branches/{s.production}")
-    if why == "missing":
-        s.rules = release_case.RuleFacts(False, 0, False, False, None)
-    elif isinstance(rules, list):
-        byp = []
-        for rid in sorted({r.get("ruleset_id") for r in rules if isinstance(r, dict) and r.get("ruleset_id")}):
-            got, _ = api(f"repos/{{owner}}/{{repo}}/rulesets/{rid}")
-            byp.append(got.get("current_user_can_bypass") if isinstance(got, dict) else None)
-        s.rules = release_case.rule_facts_of(rules, byp)
-    else:
+    s.rules = release_case.rule_facts_from(api, s.production)
+    if s.rules is None:
         s.unreadable.append("ruleset")
 
 

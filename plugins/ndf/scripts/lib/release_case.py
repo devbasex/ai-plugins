@@ -205,12 +205,13 @@ def classic_facts_of(protection: dict) -> RuleFacts:
     return RuleFacts(True, int(reviews.get("required_approving_review_count") or 0), False, up_to_date, "never" if enforced else "always")
 
 
-def read_rule_facts(root, branch: str) -> RuleFacts | None:
+def rule_facts_from(read, branch: str) -> RuleFacts | None:
     """本番ブランチの ruleset から、有無・承認の数・merge queue の有無・最新の取り込みの要否・迂回の可否を読む。
-    ruleset が無ければ従来のブランチ保護を読む（保護のある本番ブランチを「保護なし」の早送りの経路へ入れない）。読めなければ None。"""
-    rules, why = _gh_read(root, f"repos/{{owner}}/{{repo}}/rules/branches/{branch}")
+    ruleset が無ければ従来のブランチ保護を読む（保護のある本番ブランチを「保護なし」の早送りの経路へ入れない）。読めなければ None。
+    `read` は `path → (値, 読めない理由)`（`_gh_read` の形）。宣言を書く測定と、宣言を照らす land が同じ事実を読むための正本。"""
+    rules, why = read(f"repos/{{owner}}/{{repo}}/rules/branches/{branch}")
     if why == "missing" or rules == []:
-        protection, why2 = _gh_read(root, f"repos/{{owner}}/{{repo}}/branches/{branch}/protection")
+        protection, why2 = read(f"repos/{{owner}}/{{repo}}/branches/{branch}/protection")
         if why2 == "missing":
             return RuleFacts(False, 0, False, False, None)
         return classic_facts_of(protection) if isinstance(protection, dict) else None
@@ -218,8 +219,13 @@ def read_rule_facts(root, branch: str) -> RuleFacts | None:
         return None
     bypasses = []
     for rid in sorted({r.get("ruleset_id") for r in rules if isinstance(r, dict) and r.get("ruleset_id")}):
-        got, _ = _gh_read(root, f"repos/{{owner}}/{{repo}}/rulesets/{rid}")
+        got, _ = read(f"repos/{{owner}}/{{repo}}/rulesets/{rid}")
         if not isinstance(got, dict):
             return None
         bypasses.append(got.get("current_user_can_bypass"))
     return rule_facts_of(rules, bypasses)
+
+
+def read_rule_facts(root, branch: str) -> RuleFacts | None:
+    """`rule_facts_from` を gh で読む。"""
+    return rule_facts_from(lambda path: _gh_read(root, path), branch)

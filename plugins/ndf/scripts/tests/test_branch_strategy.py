@@ -492,7 +492,7 @@ def test_migrate_remove_row_only(tmp_path):
 # --- 測る（受け入れ条件 9・10・11） ------------------------------------------------------------
 
 
-def fake_api(prs, tags=(), releases=(), rules=None, rulesets=None, default="main"):
+def fake_api(prs, tags=(), releases=(), rules=None, rulesets=None, default="main", protection=None):
     data = {
         "repos/{owner}/{repo}": {"default_branch": default},
         "pulls": [{"number": n, "merged_at": "x", "base": {"ref": b}, "head": {"ref": h}} for n, b, h in prs],
@@ -508,6 +508,8 @@ def fake_api(prs, tags=(), releases=(), rules=None, rulesets=None, default="main
                 return data[key], ""
         if "/rules/branches/" in path:
             return (rules, "") if rules is not None else (None, "missing")
+        if path.endswith("/protection"):
+            return (protection, "") if protection is not None else (None, "missing")
         if path.endswith("/rulesets"):
             return rulesets or [], ""
         if "/rulesets/" in path:
@@ -649,6 +651,7 @@ def test_collect_samples_reads_api_history_and_local_facts(tmp_path):
         "repos/{owner}/{repo}/tags?per_page=2",
         "repos/{owner}/{repo}/releases?per_page=2",
         "repos/{owner}/{repo}/rules/branches/main",
+        "repos/{owner}/{repo}/branches/main/protection",
     ]
 
 
@@ -666,7 +669,7 @@ def test_collect_samples_past_deadline_skips_api_lists_only(tmp_path):
     assert s.warnings == ["時間切れで打ち切った: prs", "時間切れで打ち切った: tags", "時間切れで打ち切った: releases"]
     assert s.production == "main" and s.rules is not None
     assert [c["subject"] for c in s.commits] == ["Merge pull request #1", "files", "init"]
-    assert seen == ["repos/{owner}/{repo}", "repos/{owner}/{repo}/rules/branches/main"]
+    assert seen == ["repos/{owner}/{repo}", "repos/{owner}/{repo}/rules/branches/main", "repos/{owner}/{repo}/branches/main/protection"]
 
 
 @pytest.mark.parametrize("now, cut", [(9.0, []), (10.0, []), (11.0, ["prs", "tags", "releases"])])
@@ -686,7 +689,7 @@ def test_collect_samples_cuts_only_after_the_deadline(tmp_path, monkeypatch, now
     s = bsm.collect_samples(root, api, 10.0, 5)
     assert s.warnings == [f"時間切れで打ち切った: {k}" for k in cut]
     assert len([p for p in seen if "per_page" in p]) == 3 - len(cut)
-    assert seen[0] == "repos/{owner}/{repo}" and seen[-1] == "repos/{owner}/{repo}/rules/branches/main"
+    assert seen[0] == "repos/{owner}/{repo}" and seen[-1] == "repos/{owner}/{repo}/branches/main/protection"
 
 
 def test_collect_samples_reads_the_clock_it_is_given(tmp_path):
@@ -731,6 +734,10 @@ def test_collect_samples_rulesets_and_unreadable_ruleset(tmp_path):
 
     s2 = bsm.collect_samples(root, broken, float("inf"), 5)
     assert s2.rules is None and s2.unreadable == ["ruleset"]
+    # ruleset が無ければ、land と同じく従来のブランチ保護を読む（#3672 の round 7）
+    protection = {"required_pull_request_reviews": {"required_approving_review_count": 1}, "enforce_admins": {"enabled": True}}
+    s3 = bsm.collect_samples(root, fake_api([], rules=[], protection=protection), float("inf"), 5)
+    assert s3.rules == release_case.classic_facts_of(protection) and s3.rules.present and not s3.rules.up_to_date
 
 
 def test_collect_samples_missing_history_and_landed_trailer(tmp_path):

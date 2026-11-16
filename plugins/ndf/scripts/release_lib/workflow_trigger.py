@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from typing import Any
 
 _HEAD_EVENTS = ("pull_request", "pull_request_target")
+# PR の head への push で起動する種類。`types` を書かなければこの 3 つで動く（GitHub の既定）
+_HEAD_TYPES = frozenset({"opened", "synchronize", "reopened"})
 
 
 @dataclass(frozen=True)
@@ -19,7 +21,8 @@ class PullEvent:
 
     head_ref: str | None = None  # head のブランチ名（push の branches・branches-ignore）
     base: str | None = None  # 宛先のブランチ名（pull_request の branches・branches-ignore）
-    files: Any = lambda: None  # () -> 変更ファイルの並び | None（pull_request・push の paths・paths-ignore）
+    files: Any = lambda: None  # () -> PR の変更ファイル（三点の差分）の並び | None（pull_request の paths・paths-ignore）
+    push_files: Any = lambda: None  # () -> 直近の push の変更ファイル（二点の差分）| None（push の paths）
 
 
 def _filter_re(pattern: str) -> re.Pattern:
@@ -62,12 +65,12 @@ def _ref_runs(spec: dict, name: str | None, key: str) -> bool | None:
     return None
 
 
-def _paths_run(spec: dict, event: PullEvent) -> bool:
-    """paths・paths-ignore の絞り込みが PR の変更ファイルに当たるか。どの push の差分も PR の変更ファイル（base...head）の
-    部分集合なので、push の絞り込みにも同じ照らし方を使う。読めない・空の差分・両方を書いた（GitHub が受けない）形は動くとみなす。"""
+def _paths_run(spec: dict, read_files) -> bool:
+    """paths・paths-ignore の絞り込みが変更ファイル（`read_files()`）に当たるか。照らす差分はイベントで違う
+    （pull_request は PR の三点の差分、push はその push の二点の差分）。読めない・空の差分・両方を書いた（GitHub が受けない）形は動くとみなす。"""
     if "paths" not in spec and "paths-ignore" not in spec:
         return True
-    files = event.files()
+    files = read_files()
     if not files or ("paths" in spec and "paths-ignore" in spec):
         return True
     if "paths" in spec:
@@ -76,29 +79,34 @@ def _paths_run(spec: dict, event: PullEvent) -> bool:
 
 
 def _pull_runs(spec: Any, event: PullEvent) -> bool:
-    """pull_request の絞り込みが PR に当たるか。branches は宛先、paths・paths-ignore は変更ファイルと照らす（両方が当たって動く）。"""
+    """pull_request の絞り込みが PR の head への push に当たるか。types は opened・synchronize・reopened のどれかを含むとき
+    （書かなければ既定でこの 3 つ）だけ動く。branches は宛先、paths・paths-ignore は PR の変更ファイルと照らす（すべてが当たって動く）。"""
     if not isinstance(spec, dict):
         return True
+    types = spec.get("types")
+    if types is not None and not _HEAD_TYPES & {str(t) for t in (types if isinstance(types, list) else [types])}:
+        return False
     if _ref_runs(spec, event.base, "branches") is False:
         return False
-    return _paths_run(spec, event)
+    return _paths_run(spec, event.files)
 
 
 def _push_runs(spec: Any, event: PullEvent) -> bool:
-    """push の絞り込みが head のブランチへの push に当たるか。branches は head のブランチ、paths・paths-ignore は PR の
-    変更ファイルと照らす（両方が当たって動く）。tags だけを絞った push はブランチの push で動かない。"""
+    """push の絞り込みが head のブランチへの push に当たるか。branches は head のブランチ、paths・paths-ignore はその push の
+    変更ファイル（before..after の二点の差分。PR の三点の差分に無いファイルも含みうる）と照らす（両方が当たって動く）。
+    tags だけを絞った push はブランチの push で動かない。"""
     if not isinstance(spec, dict):
         return True
     branch = _ref_runs(spec, event.head_ref, "branches")
     if branch is False or (branch is None and any(k in spec for k in ("tags", "tags-ignore"))):
         return False
-    return _paths_run(spec, event)
+    return _paths_run(spec, event.push_files)
 
 
 def runs_on_pull_head(text: str | None, event: PullEvent | None = None) -> bool:
     """workflow の定義（YAML の字面）が PR の head に検査を作るか。`on` の pull_request・pull_request_target が絞り込み
-    （宛先の branches・変更ファイルの paths）でこの PR に当たるか、push が絞り込み（head のブランチの branches・
-    変更ファイルの paths）に当たれば真。読めない定義と、照らす事実（`event`）を読めない絞り込みは動くとみなす（検査なしで通さない側へ倒す）。"""
+    （起動の種類の types・宛先の branches・PR の変更ファイルの paths）でこの PR に当たるか、push が絞り込み（head のブランチの
+    branches・直近の push の変更ファイルの paths）に当たれば真。読めない定義と、照らす事実（`event`）を読めない絞り込みは動くとみなす（検査なしで通さない側へ倒す）。"""
     import yamlio
 
     event = event or PullEvent()

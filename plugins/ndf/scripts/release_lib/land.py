@@ -409,17 +409,55 @@ class GhPort:
         ASCII でないパスを引用符と 8 進の形にしないよう core.quotePath を切り、改行を含むパスも分けられるよう NUL で区切る。"""
         if not base:
             return None
-        r = self._git("-c", "core.quotePath=false", "diff", "--name-only", "-z", f"origin/{base}...{sha}")
+        return self._diff_names(f"origin/{base}...{sha}")
+
+    def _diff_names(self, *revs: str) -> list[str] | None:
+        r = self._git("-c", "core.quotePath=false", "diff", "--name-only", "-z", *revs)
         return [f for f in r.stdout.split("\0") if f] if r.returncode == 0 else None
+
+    def _push_files(self, head_ref: str | None, sha: str, pull_files) -> list[str] | None:
+        """head を作った直近の push の変更ファイル（GitHub が push の paths に照らす before..after の二点の差分）。
+        直近の push が `sha` を作ったと確かめられない・比較元を読めないときは None（paths の絞り込みは動くとみなす）。
+        新しいブランチの push（before が 0）は、GitHub が押したコミットの最も古い祖先の親と比べるため、PR の変更ファイル（`pull_files()`）で代える。"""
+        from urllib.parse import quote
+
+        if not head_ref:
+            return None
+        # 種類で絞らない（強制 push・ブランチの作成も head を作る）。最新の 1 件が `sha` を作っていなければ比較元を決めない
+        d = self._rest(f"repos/{self.repo}/activity?ref={quote('refs/heads/' + head_ref, safe='/')}&per_page=1")
+        last = d[0] if isinstance(d, list) and d and isinstance(d[0], dict) else None
+        if last is None or last.get("after") != sha or not last.get("before"):
+            return None
+        before = str(last["before"])
+        if not before.strip("0"):
+            return pull_files()
+        if self._git("cat-file", "-e", f"{before}^{{commit}}").returncode != 0:
+            self._fetch(before)
+        return self._diff_names(before, sha)
+
+    def _workflows(self) -> list | None:
+        """有効・無効を問わず workflow の一覧を全ページ読む（既定の 1 ページ 30 件で切ると、後ろのページの PR の CI を見落とす）。読めなければ None。"""
+        out: list = []
+        page = 1
+        while True:
+            d = self._rest(f"repos/{self.repo}/actions/workflows?per_page=100&page={page}")
+            if not isinstance(d, dict) or not isinstance(d.get("workflows") or [], list):
+                return None
+            rows = d.get("workflows") or []
+            out += rows
+            total = d.get("total_count")
+            if len(rows) < 100 or (isinstance(total, int) and len(out) >= total):
+                return out
+            page += 1
 
     def _no_checks_reason(self, sha: str, pull: dict) -> str | None:
         """検査が 1 件も無いときの理由。PR の head で動く有効な workflow が無ければ None（検査なしで通す）。
         本番への push・schedule でだけ動く workflow と、絞り込み（branches・paths）でこの PR に当たらない workflow は
         PR の head に検査を作らないため数えない。動く workflow があれば push の直後で未開始とみなして止める。照会は検査が 0 件のときだけ打つ。"""
-        d = self._rest(f"repos/{self.repo}/actions/workflows")
-        if not isinstance(d, dict):
+        workflows = self._workflows()
+        if workflows is None:
             return "検査がまだ 1 件も無く、workflow の一覧も読めない"
-        active = [str(w.get("path") or "") for w in d.get("workflows") or [] if isinstance(w, dict) and w.get("state") == "active"]
+        active = [str(w.get("path") or "") for w in workflows if isinstance(w, dict) and w.get("state") == "active"]
         show = self._show(sha)
         # パスを読めない workflow も動くとみなす。名前が空でも数に入れる（文字列の真偽で判定しない）
         changed: list = []  # 変更ファイルは paths の絞り込みに当たったときだけ 1 回読む
@@ -429,7 +467,14 @@ class GhPort:
                 changed.append(self._changed_files(pull.get("base"), sha))
             return changed[0]
 
-        event = PullEvent(pull.get("head_ref"), pull.get("base"), files)
+        pushed: list = []  # 直近の push の変更ファイルも、push の paths の絞り込みに当たったときだけ 1 回読む
+
+        def push_files() -> list[str] | None:
+            if not pushed:
+                pushed.append(self._push_files(pull.get("head_ref"), sha, files))
+            return pushed[0]
+
+        event = PullEvent(pull.get("head_ref"), pull.get("base"), files, push_files)
         on_head = [p or "（パス不明）" for p in active if runs_on_pull_head(show(p) if p else None, event)]
         if not on_head:
             return None

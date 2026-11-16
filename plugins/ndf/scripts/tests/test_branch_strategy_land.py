@@ -112,16 +112,16 @@ def test_checks_failing_skips_trail_status_and_passes_repo_without_ci(monkeypatc
     monkeypatch.setattr(gh_checks, "fetch_check_runs", lambda repo, sha, empty_ok=False: [])
     replies = {
         "repos/o/r/commits/h/status": {"statuses": [{"context": approval_trail.STATUS_CONTEXT, "state": "failure"}]},
-        "repos/o/r/actions/workflows": {"workflows": []},
+        "repos/o/r/actions/workflows?per_page=100&page=1": {"workflows": []},
     }
     monkeypatch.setattr(land.GhPort, "_rest", lambda self, path, method="GET", payload=None: replies.get(path))
     assert port.checks_failing("h") is None
-    replies["repos/o/r/actions/workflows"] = {"workflows": [{"state": "active"}]}
+    replies["repos/o/r/actions/workflows?per_page=100&page=1"] = {"workflows": [{"state": "active"}]}
     assert "まだ 1 件も無い" in port.checks_failing("h")
     # 本番への push・schedule でだけ動く workflow は PR の head に検査を作らないため、検査なしで通す
     files = {"cd.yml": "on:\n  push:\n    branches: [main]\n  schedule:\n    - cron: '0 0 * * *'\n"}
     monkeypatch.setattr(land.GhPort, "_show", lambda self, rev: files.get)
-    replies["repos/o/r/actions/workflows"] = {"workflows": [{"state": "active", "path": "cd.yml"}]}
+    replies["repos/o/r/actions/workflows?per_page=100&page=1"] = {"workflows": [{"state": "active", "path": "cd.yml"}]}
     pull = {"head_ref": "release/v1", "base": "main"}
     assert port.checks_failing("h", pull) is None
     # head のブランチ名を読めなければ、ブランチで絞った push も動くとみなす
@@ -130,6 +130,53 @@ def test_checks_failing_skips_trail_status_and_passes_repo_without_ci(monkeypatc
     assert "まだ 1 件も無い" in port.checks_failing("h", pull)
     replies["repos/o/r/commits/h/status"] = {"statuses": [{"context": "ci", "state": "pending"}]}
     assert port.checks_failing("h") == "ci=pending"
+
+
+def test_no_checks_reason_reads_every_page_of_workflows(monkeypatch):
+    """#3672 の round 7: workflow の一覧を全ページ読み、2 ページ目にある PR の CI を見落とさない。"""
+    import gh_checks
+
+    port = land.GhPort(Path("."), "o/r", strategy("docs"))
+    monkeypatch.setattr(gh_checks, "fetch_check_runs", lambda repo, sha, empty_ok=False: [])
+    cron = [{"state": "active", "path": f"cron{i}.yml"} for i in range(100)]
+    replies = {
+        "repos/o/r/commits/h/status": {"statuses": []},
+        "repos/o/r/actions/workflows?per_page=100&page=1": {"total_count": 101, "workflows": cron},
+        "repos/o/r/actions/workflows?per_page=100&page=2": {"total_count": 101, "workflows": [{"state": "active", "path": "ci.yml"}]},
+    }
+    monkeypatch.setattr(land.GhPort, "_rest", lambda self, path, method="GET", payload=None: replies.get(path))
+    files = {"ci.yml": "on: [pull_request]\n", **{w["path"]: "on:\n  schedule:\n    - cron: '0 0 * * *'\n" for w in cron}}
+    monkeypatch.setattr(land.GhPort, "_show", lambda self, rev: files.get)
+    assert "ci.yml" in port.checks_failing("h", {"head_ref": "s", "base": "main"})
+    del replies["repos/o/r/actions/workflows?per_page=100&page=2"]
+    assert "読めない" in port.checks_failing("h", {"head_ref": "s", "base": "main"})
+
+
+def test_push_files_compare_the_last_push(tmp_path, monkeypatch):
+    """#3672 の round 7: push の paths は直近の push の before..after と照らす。途中で変えて最後の push で戻した
+    ファイルは PR の変更ファイルに無くても、その push の差分に入る。比較元を決められなければ None（動くとみなす）。"""
+    root = repo_with_origin(tmp_path)
+    (root / "src").mkdir()
+    (root / "src" / "a.py").write_text("x\n", encoding="utf-8")
+    first = commit(root, "change src")
+    (root / "src" / "a.py").unlink()
+    (root / "docs").mkdir()
+    (root / "docs" / "a.md").write_text("x\n", encoding="utf-8")
+    head = commit(root, "revert src, add docs")
+    port = land.GhPort(root, "o/r", strategy("docs"))
+    activity = [{"before": first, "after": head, "activity_type": "push"}]
+    monkeypatch.setattr(land.GhPort, "_rest", lambda self, path, method="GET", payload=None: activity if "/activity?" in path else None)
+    pull_files = lambda: ["docs/a.md"]  # noqa: E731
+    assert sorted(port._push_files("s", head, pull_files)) == ["docs/a.md", "src/a.py"]
+    on = "on:\n  push:\n    paths: ['src/**']\n"
+    assert land.runs_on_pull_head(on, land.PullEvent("s", "main", pull_files, lambda: port._push_files("s", head, pull_files)))
+    # 新しいブランチの push は PR の変更ファイルで代える
+    activity[0]["before"] = "0" * 40
+    assert port._push_files("s", head, pull_files) == ["docs/a.md"]
+    # 直近の push が head を作っていない・head のブランチ名が無いときは決めない
+    activity[0]["after"] = first
+    assert port._push_files("s", head, pull_files) is None
+    assert port._push_files(None, head, pull_files) is None
 
 
 def test_landed_record_needs_same_tree_and_tip(tmp_path):
@@ -247,9 +294,15 @@ DOCS_ONLY = ["docs/a.md"]
         ("pull_request:\n    paths: ['**/a.md']", DOCS_ONLY, True),
         ("pull_request:\n    paths: ['docs/*.mdx?']", DOCS_ONLY, True),
         ("pull_request:\n    paths: ['docs/?.md']", DOCS_ONLY, False),
+        # types は opened・synchronize・reopened のどれかを含むときだけ PR の head で動く（書かなければ既定で動く）
+        ("pull_request:\n    types: [closed]", DOCS_ONLY, False),
+        ("pull_request:\n    types: labeled", DOCS_ONLY, False),
+        ("pull_request:\n    types: [opened, synchronize]", DOCS_ONLY, True),
+        ("pull_request_target:\n    types: [labeled]", DOCS_ONLY, False),
+        ("pull_request_target:\n    types: [reopened, closed]", DOCS_ONLY, True),
     ],
 )
 def test_runs_on_pull_head_matches_the_filters_against_the_pull(on, files, runs):
     """#3672 の round 5: 絞り込みを PR の事実（head のブランチ・宛先・変更ファイル）と照らし、読めない事実は動くとみなす。"""
-    event = land.PullEvent("release/v1", "main", lambda: files)
+    event = land.PullEvent("release/v1", "main", lambda: files, lambda: files)
     assert land.runs_on_pull_head(f"on:\n  {on}\n", event) is runs
