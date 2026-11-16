@@ -238,3 +238,64 @@ GitHub flow を前提に置き、今の運用の値をそのまま移す形は�
 閉じる操作そのものは計画の運用が行う（要求の「含まない」）。
 
 根拠: Value 11 / Value 14（MVV 版 8）
+
+### 決定 15: `pace: auto`・`fast` と開発ループの「開発版のチャネル」の条件を、セクションから決まる「承認前の試用」に代える
+
+今の `supervise.py new sprint --pace fast|auto` は、開発版のチャネル（`lib/delivery.py` の `dev_channel`）を使ってよい条件にする。
+ai-plugins は開発版をやめ、代表の種類 `web-trunk`・`docs`・`plugin` も開発版を持たないため、このままでは `auto`・`fast` と開発ループが断られる（影響評価 [issue-3672-design-impact.md](issue-3672-design-impact.md) の「既存の機能と設定」）。
+条件が守りたいのは「本番へ届く前に、変更を入れて使えるところがある」ことで、開発版はその 1 つの形にすぎない。
+そこで条件を、セクションの値から決まる**承認前の試用**に代える。判定は上の行から順に、最初に当たった行で決まる。
+
+| セクションの値 | 承認前の試用 | 実践投入 | `auto` | `fast` |
+| --- | --- | --- | --- | --- |
+| `channels` に `dev` がある（`web-develop`・`mobile` の既定） | 開発版のデプロイ（今のまま） | ベースブランチへ入り、開発版として使われる（今のまま） | 許す | 許す |
+| `release.deliveries` の本番系の行（`production: true`）がすべて手動で、本番ブランチへのマージで自動で本番系へ届く行が無い（今の手動反映の本番系の形） | 今のまま | 今のまま | 許す | 許す |
+| `approval.target: release_pr`（`plugin` の既定） | 版上げの PR の head からの導入の確認（決定 17） | スプリントの PR が本番ブランチへ入る。版数が変わらないため Claude Code の既存の利用者へは届かず（STD4）、版上げの PR の head から入れて使う | 許す | 許す |
+| `approval.target: production_pr` で `verify` が `null` でない | `verify` の試す場で本番の PR の head を試す | 無い（マージがそのまま本番へ届く） | 許す | 断る |
+| `approval.target: production_pr` で `verify` が `null`（`web-trunk`・`docs` の既定） | 無い | 無い | 断る | 断る |
+
+- **導入の確認の条件は残す。** `.ndf/pace.json` の `<セクション>.verify` のコマンドは `{ref}` を持てるようにし、試用のステージが試用の ref（開発版のブランチ・版上げの PR の head のブランチ）で置き換える。ai-plugins の値は `--ref develop` を `--ref {ref}` に替える
+- **開発ループは `auto` に従う。** ループの 1 回は `auto` で組むため、表の `auto` の列で決まる。`channels` に `dev` が無い宣言では、ループと relay の `--dev`（開発版の版数）を受けず、パイプラインの「開発版」のステージは試用のステージになる
+- **断る行は、今も断られる形である。** 起点と本番ブランチが同じで、マージが自動で本番へ届くリポジトリは、今の `dev_channel` でも開発版のチャネルが無いとされる。そのため代表の種類で扱えなくなる選択肢は無い（P2 に当たらない）。`docs` は `documentation` モードで、もともと `pace` の対象のモードに入らない
+- **`fast` の実践投入は、Codex の利用者へ届きうる。** `plugin` の行では、スプリントの PR のマージで main が進み、Codex の利用者は版数を比べずに入れ直す（STD10）。この差は Codex の取得元の判断（設計文書の「人へ残す判断」）に従い、ここでは新しく決めない
+- **置き場。** 判定は `lib/delivery.py` の `dev_channel` から、10 系の読む部品 `lib/branch_strategy.py` の試用を返す関数へ移す（D12・D16）。11.0 の `src` には `dev_channel` に当たる判定が無く（`grep -rn dev_channel plugins/ndf-next/src` が 0 件、2026-11-16）、`pace.md`（D33-12）を同じ表へ直す
+
+開発版をやめたリポジトリで `auto`・`fast` を断ったままにする形は採らない。ai-plugins は今 `fast`・`auto`・ループを使っており（`.ndf/pace.json`）、移行の後に進め方が `normal` だけになる。
+
+根拠: Value 5 / Value 4 / Value 1（MVV 版 8）
+
+### 決定 16: リリース前の直しは、開発版の代わりに正式版の PATCH を早く出して届け、実験版の経路を広げない
+
+今はリリース前の直しを開発版（`-dev.N`）でレーンへすぐ入れている（例: lguard の 10.27.73-dev.2）。開発版をやめた後の手段として、次の 2 つを比べた。
+
+| 案 | 得 | 失 |
+| --- | --- | --- |
+| 実験版の経路（`plugins/ndf/scripts/experimental/`）で代える | 承認もリリースも待たない | 実験版は「呼んだときだけ働くもの」に限り、既定で動くものから参照できない（`AGENTS.md` の「安定版と実験版」・`test_experimental.py`）。hook・Skill の本文・結果 JSON の契約の直しを載せられず、レーンが既定の振る舞いのまま直しを使う手段にならない |
+| 正式版の頻度を上げる | 直しが既定の振る舞いとして、すべてのレーンと利用者へ届く | 正式版 1 本ごとにリリース承認ゲートが 1 回要る |
+
+**正式版の頻度を上げる案を採る。** この設計の後の ai-plugins では、正式版 1 本の費用は版上げの PR 1 本と承認 1 回で、merge queue と承認した head の一致の確認がマージを担う（決定 7・12）。
+承認の後に止まった 6/15 回の原因（2 つ目の承認・版数の衝突・リリースブランチの消失）も無くなるため、開発版で避けていた正式版の重さが残らない。
+`pace: auto`・`fast` では、リリース承認ゲートは MVV 判定で通せる（決定 15 で `plugin` の行を許す）。
+
+- リリース前の直しを要るレーンがあれば、スプリントの終わりを待たずに、その直しを含む PATCH の版上げの PR を出してよい。今の「版を上げるのはスプリント単位でマージが終わった後」（`AGENTS.md` の「版とリリースの方針」）を改める
+- 承認の前の確かめは、版上げの PR の head から入れて行う（決定 17）
+- 実験版の経路は今のまま変えない
+
+版を出す単位の規則を変えることは、P1（版の規則の変更）と C7（`AGENTS.md` の運用のセクション）に当たるため、設計文書の「人へ残す判断」に載せる。値は [issue-3672-design-ai-plugins.md](issue-3672-design-ai-plugins.md) の「今の運用から変える点」に書く。
+
+根拠: Value 5 / Value 15 / Value 1（MVV 版 8）
+
+### 決定 17: 開発版の無いリポジトリでは承認前の試用で確かめ、版上げの PR の head からの導入を `verify-install` で受ける
+
+承認資料のリリースの「判断に使うもの」は「開発版のデプロイで確かめたこと」を求め（`plugins/ndf/skills/development-workflow/references/approval-request.md`）、
+`release-verification-steps.py verify-install --ref` は宣言のベースブランチか本番チャネルしか受けない（`install_source`）。ai-plugins は develop から入れて確かめている（`.ndf/pace.json`）。
+開発版の無いリポジトリでは、承認の前に確かめる ref が無い。
+
+- **承認資料の項目を「承認前の試用で確かめたこと」に替える。** 試用の種類（決定 15 の表の行）と、確かめた ref・版・結果を書く。試用が無い行では「試用なし（CI と検査の結果だけ）」と書き、空欄にしない
+- **`verify-install --ref` は、本番ブランチ宛ての開いた版上げの PR の head のブランチ（`release/v<版>`）も受ける。** 受ける ref は宣言の `branches.base`・`branches.production` と、`gh pr list --base <本番> --state open` で見つかる版上げの PR の head に限る。任意の ref は受けない（#1336 の決定 8 の「宣言の場所からだけ入れる」を保つ）。`--expect` はその head の版数である
+- **承認した後のリリース後テストは今のまま**、本番チャネルから入れて確かめる
+- `approval.target: production_pr` で `verify` があるリポジトリは、`verify` の試す場で本番の PR の head を試した結果を書く。`verify` の形は #3572 のまま変えない
+
+Claude Code は取得元を `https://github.com/<owner>/<repo>.git#<ref>` で、Codex は `--ref <ref>` で受ける（今の `verify_claude`・`verify_codex`）。`/` を含むブランチ名をこの形で受けるかは確かめていない（設計文書の「未確認のまま残ること」）。
+
+根拠: Value 13 / Value 5 / Value 4（MVV 版 8）

@@ -1,6 +1,6 @@
 # #3672 の削除の一覧のパス
 
-[issue-3672-design-removal.md](issue-3672-design-removal.md) の削除の一覧のうち、複数のファイルにまたがる行（D32・D33・D34・D37）のパスを 1 ファイル 1 行で並べた文書である。
+[issue-3672-design-removal.md](issue-3672-design-removal.md) の削除の一覧のうち、複数のファイルにまたがる行（D32・D33・D34・D36・D37）のパスを 1 ファイル 1 行で並べた文書である。
 実装はこの表の各行を `scripts/legacy-branch-decl.json` の 1 行にする。`scripts/check-legacy-branch-decl.py` は、各行のパスに消す語が残らないことを照らす（受け入れ条件 21）。
 行の番号は `D<番号>-<連番>` で、消す語と置き換え先は削除の一覧の同じ番号の行のとおりである。
 
@@ -103,6 +103,22 @@ grep -rlE "$W" plugins/ndf/scripts/tests plugins/ndf/skills/*/tests plugins/ndf-
 | D34-18 | `docs/specifications/ndf-worktree-declaration-and-entry-points.md` |
 | D34-19 | `docs/specifications/pr-review-steps-script.md` |
 | D34-20 | `docs/specifications/README.md` |
+
+## D36: ai-plugins の方針の文書
+
+D36 だけは、`AGENTS.md` をセクションごとに分けて並べる。検査が照らすのはファイルの単位で、セクションは書き直す範囲を示す。
+消す語は宣言のキーの語に加え、`develop` を PR の宛先・起点・チャネルとして書く形と、開発版の接尾辞（`-dev.N`）である。
+
+| # | パス | セクション | 書き直す中身 |
+| --- | --- | --- | --- |
+| D36-1 | `AGENTS.md` | 「Git運用ルール」 | PR の宛先 develop・`.ndf/worktree.json` の `base_branch`・`--base develop` の付け忘れの検査を、ブランチ戦略のセクションと `trunk` の宛先 main へ |
+| D36-2 | `AGENTS.md` | 「版とリリースの方針」 | チャネルの表（開発版 develop）・開発版の接尾辞・「版を上げるのはスプリント単位でマージが終わった後」を、正式版だけのチャネルと PATCH を早く出してよい規則へ（決定 16） |
+| D36-3 | `AGENTS.md` | 「安定版と実験版」 | 安定版の直しは正式版の PATCH で届け、実験版の経路は変えないことを足す（決定 16） |
+| D36-4 | `AGENTS.md` | 「ベストプラクティス」 | 「`develop` 宛の PR を通じてマージ」「`main` / `develop` に直接コミット」の 2 行 |
+| D36-5 | `CLAUDE.md` | 「版ごとの判断の記録」 | 今は develop・開発版を書いていない。書き足されないよう照らす |
+| D36-6 | `CONTRIBUTING.md` | 全体 | `--base develop`・`origin/develop` から worktree を切る手順・develop の取り込み |
+| D36-7 | `plugins/ndf/README.md` | 37〜39 行目 | 開発版を `#develop` から試す案内 |
+| D36-8 | `docs/versioning-and-distribution.md` | 全体 | チャネル・開発版のデプロイ・開発版を試す手順。開発版を入れた利用者が登録を main へ戻す手順を足す |
 
 ## D37: テスト
 

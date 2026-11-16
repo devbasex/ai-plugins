@@ -32,7 +32,7 @@
 ほかの `scripts/repo-assumptions-allow/` の例外は、一覧に載せない。`worktree.schema.json`・`production-merge.md`・`project-analysis.md`・`declaration.md` を指す例外で、指す先のファイルが残るためである。
 書き直した後に当たりが無くなった例外は、実装の PR で消す。
 
-複数のファイルにまたがる行（D32・D33・D34・D37）のパスは、[issue-3672-design-removal-paths.md](issue-3672-design-removal-paths.md) に 1 ファイル 1 行で並べた。
+複数のファイルにまたがる行（D32・D33・D34・D36・D37）のパスは、[issue-3672-design-removal-paths.md](issue-3672-design-removal-paths.md) に 1 ファイル 1 行で並べた。
 その文書は語の集合に `dev_workflow`・`delivery` を足して数え直したため、上の表の件数と違う。
 
 `plugins/ndf/scripts/lib/gh_pr_info.py` と `plugins/ndf/skills/cross-review/scripts/` の当たりは、一覧に載せない。
@@ -109,7 +109,7 @@
 | D33 | 11.0 の Skill の本文・契約の文書（`plugins/ndf-next/docs/contracts/`）・エージェントの定義 26 ファイル（パスは同じ文書の D33-1〜D33-26） | 同上 | 同上 |
 | D34 | `docs/specifications/` の確定仕様 20 ファイル（パスは同じ文書の D34-1〜D34-20） | 旧いキーの説明 | この課題の確定仕様（`plan-to-spec`）が置き換え、旧い説明を消す |
 | D35 | `docs/glossary/glossary.json`・`docs/glossary.md` | 旧いキーを語として持つ項目 | 新しいセクションの語（設計文書の「用語」の表） |
-| D36 | `AGENTS.md`（19〜20 行目）・`docs/versioning-and-distribution.md` | `base_branch`・`follow_branch` の説明と、develop と開発版のチャネルの説明 | ai-plugins の値（[issue-3672-design-ai-plugins.md](issue-3672-design-ai-plugins.md)）の説明。C7 |
+| D36 | `AGENTS.md`（19〜20 行目と、「Git運用ルール」「版とリリースの方針」「安定版と実験版」「ベストプラクティス」のセクション）・`CLAUDE.md`（「版ごとの判断の記録」のセクション）・`CONTRIBUTING.md`・`plugins/ndf/README.md`・`docs/versioning-and-distribution.md`（パスとセクションは同じ文書の D36-1〜D36-8） | `base_branch`・`follow_branch` の説明と、develop と開発版のチャネルの説明（PR の宛先 develop・`--base develop` の検査・チャネルの表・開発版の接尾辞・開発版を試す手順）。「版を上げるのはスプリント単位」の規則（決定 16） | ai-plugins の値（[issue-3672-design-ai-plugins.md](issue-3672-design-ai-plugins.md)）の説明。安定版の直しは正式版の PATCH で届ける（決定 16）。C7 |
 
 **テスト**
 
@@ -187,5 +187,6 @@
 | #3623 | 11.0 | 子として後で直す | リリース対象のファイルの範囲 |
 | #1338 | 両方 | この Issue で解決 | `merge.admin`・`merge.commit` と製品の既定（迂回なし） |
 | #3618 | 両方 | 子として後で直す | 守りの全体（レッドライン・設計の型・レビュー）のうち、CI の検査だけをこの Issue が足す |
+| #3679 | 10 系 | 範囲の外 | 版の要るまとめの一時レーンの作り直し（リリース後テストの判断待ち・保留が問いにならない不具合）で、ブランチ戦略の宣言に依らない。この Issue でも子としても直さない |
 
-数: この Issue で解決 14 本、子として後で直す 18 本、閉じる 0 本（計 32 本）。
+数: この Issue で解決 14 本、子として後で直す 18 本、閉じる 0 本（計 32 本）。範囲の外の #3679 は子の Issue ではないため数に入れない（影響評価 [issue-3672-design-impact.md](issue-3672-design-impact.md) の「既存の機能と設定」）。

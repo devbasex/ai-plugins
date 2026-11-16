@@ -1880,8 +1880,9 @@
     {
       "term": "実践投入",
       "context": "ndf-workflow",
-      "meaning": "pace: fast の検証の場所。実装の Pull Request が develop（開発版のチャネル）へ入り、開発版としてデプロイされ使われること。fast の検査はその後にトリガーで通る",
-      "source": "plugins/ndf/skills/development-workflow/references/pace.md"
+      "meaning": "pace: fast の検証の場所。実装の Pull Request がベースブランチへ入り、承認前の試用（開発版のデプロイ・版上げの PR の head からのインストールなど）で使われること。fast の検査はその後にトリガーで通る",
+      "source": "plugins/ndf/skills/development-workflow/references/pace.md",
+      "pending_source": "issues/issue-3672-design.md"
     },
     {
       "term": "resume",
@@ -8000,6 +8001,13 @@
       "meaning": "リポジトリのブランチ戦略・リリース・マージの方法論を表す、1 つの設定ファイルの 1 つのセクション。スプリントの起点・PR の宛先・結合のしかた・リリースの形と版数の置き場・チャネル・承認を取る場所・マージの主体と方式・マージ前に試す場・CD の有無を持つ",
       "source": "",
       "pending_source": "issues/issue-3672-requirements.md"
+    },
+    {
+      "term": "承認前の試用",
+      "context": "ndf-workflow",
+      "meaning": "リリース承認ゲートの前に、変更を入れて使えるところ。ブランチ戦略の宣言の値から、開発版のデプロイ・版上げの PR の head からのインストール・verify の試す場のどれかに決まる。pace: auto / fast を使ってよい条件になる",
+      "source": "",
+      "pending_source": "issues/issue-3672-design.md"
     },
     {
       "term": "旧い宣言",
