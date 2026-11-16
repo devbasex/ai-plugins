@@ -29,6 +29,9 @@ import pr_mode  # noqa: E402
 import project_mvv_signals as pms  # noqa: E402
 from supervise_lib import sprint_waves  # noqa: E402
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import strategy_fixture  # noqa: E402
+
 PY = sys.executable
 SUPERVISE = SCRIPTS / "supervise.py"
 OLD_SCRIPTS = ("mission-state.py", "mission-close.py", "bundle-close.py")
@@ -53,11 +56,19 @@ def notices(stderr: str) -> list[str]:
 # ---------------------------------------------------------------- 入口の引数（AC4・I1）
 
 
+def declared(root: Path) -> Path:
+    """`root` を main だけのブランチ戦略の宣言を持つ git の木にする（計画の雛形は宣言の無い木では止まる。#3672 の I3）。"""
+    subprocess.run(["git", "init", "-q", "-b", "main", str(root)], check=True, capture_output=True)
+    strategy_fixture.declare(root, "main")
+    return root
+
+
 def new_sprint_args(tmp_path: Path, out: Path) -> list[str]:
     return ["--name", "m9", "--worktree", str(tmp_path), "--issue", "11", "--design", "11", "--version", "10.18.0-dev.1", "--out", str(out)]
 
 
 def test_new_mission_writes_the_same_plans_as_new_sprint(tmp_path):
+    declared(tmp_path)
     out = tmp_path / "out"
     new = run(SUPERVISE, "new", "sprint", *new_sprint_args(tmp_path, out))
     assert new.returncode == 0, new.stdout + new.stderr
@@ -71,6 +82,7 @@ def test_new_mission_writes_the_same_plans_as_new_sprint(tmp_path):
 
 
 def test_new_check_with_mission_is_the_same_as_with_sprint(tmp_path):
+    declared(tmp_path)
     state = tmp_path / "state.json"
     state.write_text(json.dumps({"name": "m", "issues": [11], "gates": []}))
     out = tmp_path / "check.json"
