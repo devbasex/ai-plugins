@@ -77,7 +77,8 @@ sequenceDiagram
     L->>G: PR の状態を読む（マージ済み・head の一致・方式の判定・承認の数）
     L->>G: git push --force-with-lease=ndf-serial/main:（空）で一時マージコミットを push（ロックを取る）
     alt 既にある
-        L->>G: ロックの期限を読み、過ぎていれば期待する値つきで引き取る。過ぎていなければ待つ
+        L->>G: ロックの期限を読み、過ぎていれば引き取る。過ぎていなければ待つ
+        L->>G: main の HEAD を読み直して一時マージコミットを作り直し、期待する値つきで push（取る・引き取る）
     end
     G->>CI: ndf-serial/main への push で必須のチェック
     CI-->>L: 一時マージコミットのチェックの結果
@@ -110,7 +111,7 @@ stateDiagram-v2
     止まる --> [*]
 ```
 
-止まる遷移とマージ済みへの遷移は、どれもロックを返してから終わる（返せなかったときの扱いは「ロック」）。
+止まる遷移とマージ済みへの遷移は、どれもロックを返してから終わる（返せなかったときの扱いは「ロック」）。マージの関数が例外を投げたとき（マージの API の 409・405・422）も、ロックを取った後の処理を `try`/`finally` で囲み、`finally` で返す。
 
 ### 一時マージコミット
 
@@ -144,10 +145,10 @@ stateDiagram-v2
 
 | 操作 | コマンド | 断られたときの意味 |
 | --- | --- | --- |
-| 取る | `git push --force-with-lease=refs/heads/ndf-serial/main: origin <一時マージコミット>:refs/heads/ndf-serial/main` | ほかの持ち主がいる。ロックの期限を読む |
+| 取る | `git push --force-with-lease=refs/heads/ndf-serial/main: origin <一時マージコミット>:refs/heads/ndf-serial/main` | ほかの持ち主がいる。ロックの期限を読む。待った後に取り直すときは、待つ間に先の持ち主のマージで main が動くため、main の HEAD で一時マージコミットを作り直してから push する（古い組み合わせで CI を走らせない） |
 | 作り直す（main が動いた） | `--force-with-lease=refs/heads/ndf-serial/main:<自分の一時マージコミット>` で新しい一時マージコミットを push | 自分のロックがほかの工程に引き取られた。マージせずに `lock_busy` で止まる |
 | 返す | `git push --force-with-lease=refs/heads/ndf-serial/main:<自分の一時マージコミット> origin :refs/heads/ndf-serial/main` | 既に引き取られている。何もせず、`items` に `lock_release: taken_over` を足す |
-| 引き取る（期限を過ぎた） | `--force-with-lease=refs/heads/ndf-serial/main:<期限を過ぎたコミット>` で自分の一時マージコミットを push | ほかの工程が先に引き取った。待ちへ戻る |
+| 引き取る（期限を過ぎた） | main の HEAD で一時マージコミットを作り直し、`--force-with-lease=refs/heads/ndf-serial/main:<期限を過ぎたコミット>` で push | ほかの工程が先に引き取った。待ちへ戻る |
 
 この 4 つの振る舞い（空の期待する値で無いときだけ作る・違う期待する値で更新も削除も断る）は、手元の bare リポジトリで確かめた（2026-11-16、git 2.53.0）。GitHub の受け手での振る舞いは「確かめられなかったこと」に書いた。
 
@@ -171,7 +172,7 @@ stateDiagram-v2
 | 待ち | 終わる条件 | 上限を超えたとき |
 | --- | --- | --- |
 | ロックの待ち | ブランチが無くなる・期限を過ぎる | `lock_busy`。`summary` に持ち主の PR の番号と期限 |
-| 一時マージコミットのチェック | `.ndf/project.json` の `ci.required_checks` の名前のチェックが一時マージコミットにそろって終わる | `ci_pending`。ロックを返す |
+| 一時マージコミットのチェック | `.ndf/project.json` の `ci.required_checks` の名前のチェックが一時マージコミットにそろって終わる。名前ごとに check run を見て、check run が無ければ commit status の `context` を見る（外部の CI は commit status でだけ結果を出す） | `ci_pending`。ロックを返す |
 | 作り直しの後のチェック | 同上 | 同上 |
 
 - **作り直しの回数に別の上限を置かない。** 作り直すたびにチェックを待ち直すが、全体の時間は `ci_budget` が区切る。main への入りが速いリポジトリでは `ci_pending` で止まり、`land` を再実行すると最初から（ロックを取るところから）続く
@@ -193,6 +194,7 @@ ai-plugins は `merge-queue` を使うため、この課題では ai-plugins の
 版上げの PR は、リリースのワークフローの `confirm`（`trunk_cd.confirm`）が `serial` の同じ手順（ロック → 一時マージコミットのチェック → マージ）で入れる。
 
 - `confirm` は、版上げの PR が I3 の判定（`is_bump_pr`）を通り、利用者の設定と指示書を変えていないことを確かめてから入れる（I5。今の自動マージのリクエストの前の確かめと同じ）
+- ruleset が承認を 1 件以上求め、版上げの PR の `reviewDecision` が `APPROVED` でなければ、`confirm` はロックを取らずに `precondition` で止まり、`summary` に求める承認の数と版上げの PR の番号を出す（I14）。一時マージコミットの CI を待ち切った後にマージの API が拒むのを避けるためである
 - 版上げの PR の head は CD が作ったコミットで、承認済みのコミットの代わりに `confirm` が読んだ head を `sha` に渡す
 - `confirm` が走らずに版上げの PR が残ったとき（人が画面で本番の PR をマージしたなど）は、次のリリースの `confirm` が入れるか、人が画面でマージする。開いた版上げの PR がある間、CD は新しく作らない（I9）
 
