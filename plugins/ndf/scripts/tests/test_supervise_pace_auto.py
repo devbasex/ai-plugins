@@ -51,7 +51,7 @@ def make_repo(tmp_path: Path, pace: dict | None, prod: str = "main", form: bool 
     repo = tmp_path / "repo"
     (repo / ".ndf").mkdir(parents=True)
     sup = load(REPO / ".ndf" / "supervise.json")
-    release = {k: v for k, v in (sup.pop("release", None) or {}).items() if k != "dev_workflow"}
+    release = strategy_fixture.pop_release(sup)
     (repo / ".ndf" / "supervise.json").write_text(json.dumps(sup))
     strategy_fixture.declare(repo, "develop", prod, release if form else None)
     subprocess.run(["git", "init", "-q", "-b", "develop", str(repo)], check=True, capture_output=True)

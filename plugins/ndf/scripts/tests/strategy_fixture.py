@@ -59,3 +59,12 @@ def declare(root: Path, base: str = "main", production: str | None = None, relea
     if deliveries is not None:
         rel["deliveries"] = deliveries
     return write_strategy(root, kind, base=base, production=production, release=rel, **edits)
+
+
+def pop_release(supervise: dict) -> dict | None:
+    """`supervise.json` の中身から旧いキー `release` を外し、宣言の `release` へ移せる値（形・プラグイン・ランタイム）を返す。
+
+    ai-plugins の `.ndf/supervise.json` を写すテストが使う（ai-plugins の移行は手順 2 で、それまで旧いキーが残る）。
+    開発版のワークフローはチャネルの値なので移さない。"""
+    old = supervise.pop("release", None)
+    return {k: old[k] for k in ("form", "plugin", "runtimes") if k in old} if isinstance(old, dict) else None

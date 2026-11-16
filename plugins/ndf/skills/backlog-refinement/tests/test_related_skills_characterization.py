@@ -15,6 +15,7 @@ import os
 import pathlib
 import re
 import subprocess
+import sys
 
 import pytest
 
@@ -100,8 +101,11 @@ def clone(tmp_path: pathlib.Path) -> pathlib.Path:
 
 
 def declare(work: pathlib.Path, branch: str) -> None:
-    (work / ".ndf").mkdir(exist_ok=True)
-    (work / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "base_branch": branch}), encoding="utf-8")
+    """ベースブランチ `branch`・本番ブランチ main のブランチ戦略の宣言を置く（#3672）。"""
+    sys.path.insert(0, str(SKILLS.parent / "scripts" / "tests"))
+    import strategy_fixture
+
+    strategy_fixture.declare(work, branch, "main")
 
 
 def run_stages(work: pathlib.Path, case: str) -> subprocess.CompletedProcess:

@@ -158,7 +158,7 @@ def test_fast_sprint_is_refused_without_the_declaration(tmp_path):
     repo = tmp_path / "repo"
     (repo / ".ndf").mkdir(parents=True)
     sup = json.loads((REPO / ".ndf" / "supervise.json").read_text())
-    release = {k: v for k, v in (sup.pop("release", None) or {}).items() if k != "dev_workflow"}
+    release = strategy_fixture.pop_release(sup)
     (repo / ".ndf" / "supervise.json").write_text(json.dumps(sup))
     strategy_fixture.declare(repo, "develop", "main", release)
     subprocess.run(["git", "init", "-q", "-b", "develop", str(repo)], check=True, capture_output=True)
