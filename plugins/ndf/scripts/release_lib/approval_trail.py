@@ -281,6 +281,14 @@ def read_head(repo: str, pr: int) -> tuple[str, str, str]:
     return str(head).lower(), str(base), str(state)
 
 
+def read_head_ref(repo: str, pr: int) -> str:
+    """PR の head のブランチ名。"""
+    try:
+        return str(json.loads(_gh_api([f"repos/{repo}/pulls/{int(pr)}"], f"PR #{pr}"))["head"]["ref"])
+    except (ValueError, KeyError, TypeError) as e:
+        raise TrailError("unreadable", f"PR #{pr} の head のブランチを読めない: {e}")
+
+
 def open_prs_at(repo: str, sha: str, base: str) -> list[int]:
     """`base` 宛ての開いた PR のうち、先端が `sha` のものの番号（昇順）。"""
     rows = _pages(f"repos/{repo}/pulls?state=open&base={base}&per_page=100", f"{base} 宛ての PR")

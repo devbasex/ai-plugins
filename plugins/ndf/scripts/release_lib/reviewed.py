@@ -30,6 +30,7 @@ import waits
 from release_lib import approval, approval_trail
 from release_lib.approval import HeadMoved
 from release_lib.context import ReleaseCtx
+from release_lib.included import RELEASE_PREFIX
 from release_lib.names import shipped_note, tag_name
 from release_lib.port_mark import NO_PORT_LINE, ensure_no_port_line
 from step_result import EXIT_GATE, EXIT_INFRA_WAIT, EXIT_PRECONDITION, EXIT_UNREADABLE, StepError, emit, gh_json, git, git_root, result
@@ -398,11 +399,15 @@ def judge_pr(repo, pr, head, prod):
     return approval_trail.judge_trails_on(repo, pr, head)
 
 
-def _pr_to_judge(a, root, repo: str, prod: str, head: str, base: str, state: str) -> int:
-    """証跡を判定する PR の番号。本番チャネル宛てでない・レビューで承認する場合・閉じて同じ先端の開いた PR が無いときは、
-    何も付けずに ok で終える。閉じた PR は同じ先端の開いた PR を判定し直す（I10）。"""
+def _pr_to_judge(a, root, repo: str, decl, head: str, base: str, state: str) -> int:
+    """証跡を判定する PR の番号。本番チャネル宛てでない・trunk で版上げの PR でない・レビューで承認する場合・閉じて同じ先端の
+    開いた PR が無いときは、何も付けずに ok で終える。閉じた PR は同じ先端の開いた PR を判定し直す（I10）。"""
+    prod = decl.production
     if base != prod:
         emit(result(TOOL, "ok", f"PR #{a.pr} の宛先 {base} が本番チャネルでない（何も付けない）", [], {"pr": a.pr, "base": base}))
+    if decl.base == prod and not (ref := approval_trail.read_head_ref(repo, a.pr)).startswith(RELEASE_PREFIX):
+        # trunk ではスプリントの PR も本番宛てになる。リリース承認を取るのは版上げの PR（release/v<版>）だけ（#3672）
+        emit(result(TOOL, "ok", f"PR #{a.pr} は版上げの PR でない（head {ref}。何も付けない）", [], {"pr": a.pr, "head_ref": ref}))
     if (case := release_case_or_stop(root)).case == release_case.CD_REVIEW and not trail_required(root, repo, prod):
         msg = f"リリースの場合が {case.case}（レビューで承認する）で、証跡のチェックを付けない"
         emit(result(TOOL, "ok", msg, [], {"pr": a.pr, "case": case.case}))
@@ -432,11 +437,12 @@ def approval_check(a):
     ただし本番チャネルの ruleset が証跡のチェックを必須にしていれば、レビュー必須でも判定して付ける（決定 12 の手順 3。
     承認数 1 のまま確認用の PR で success が付くことを確かめる移行の途中）。"""
     root = git_root(a.root)
-    prod = delivery.load_delivery(root).production
+    decl = delivery.load_delivery(root)
+    prod = decl.production
     repo, head = repo_or_stop(root), None
     try:
         head, base, state = approval_trail.read_head(repo, a.pr)
-        pr = _pr_to_judge(a, root, repo, prod, head, base, state)
+        pr = _pr_to_judge(a, root, repo, decl, head, base, state)
         j = _judge_and_post(repo, pr, head, prod)
     except approval_trail.TrailError as e:
         if head:
