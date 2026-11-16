@@ -36,9 +36,10 @@ def _cd_of(deliveries) -> dict | None:
 
 def _fill(section: dict, presets: dict, existing: dict | None = None) -> dict:
     """移した値に、足りないキーを埋める。`existing` は途中で止まった移行が先に書いたセクション（打ち直しで値を落とさない）。"""
-    rs = section.get("release_strategy") or (existing or {}).get("release_strategy", "merge_base_branch")
-    form = (section.get("release") or {}).get("form") or ((existing or {}).get("release") or {}).get("form")
-    kind = FILL_KIND_BY_FORM.get(form, FILL_KIND[rs]) if rs == "trunk" else FILL_KIND[rs]
+    existing = existing or {}
+    rs = section.get("release_strategy") or existing.get("release_strategy", "merge_base_branch")
+    form = (section.get("release") or {}).get("form") or (existing.get("release") or {}).get("form")
+    kind = _fill_kind(rs, form)
     row = presets["kinds"][kind]
     out = copy.deepcopy(existing) if isinstance(existing, dict) and existing else copy.deepcopy(row["section"])
     out["release_strategy"] = rs
@@ -51,7 +52,23 @@ def _fill(section: dict, presets: dict, existing: dict | None = None) -> dict:
     branches = out["branches"]
     if rs == "trunk":
         branches["base"] = branches["production"]
-    rel = out["release"]
+    _fill_release(out["release"], section, form, kind, presets, existing)
+    dev = out.pop("_dev_workflow", None)
+    if dev is None and existing:
+        dev = next((c.get("workflow") for c in existing.get("channels", []) if c.get("name") == "dev"), None)
+    out["channels"] = _channels(branches, dev)
+    if out["merge"].get("admin"):
+        out["merge"]["method"] = "direct"
+    return out
+
+
+def _fill_kind(rs: str, form: str | None) -> str:
+    """足りないキーを埋める種類の行。trunk はリリースの形で選び、ほかは取り込み方で選ぶ。"""
+    return FILL_KIND_BY_FORM.get(form, FILL_KIND[rs]) if rs == "trunk" else FILL_KIND[rs]
+
+
+def _fill_release(rel: dict, section: dict, form: str | None, kind: str, presets: dict, existing: dict) -> None:
+    """版数の置き場・CD・タグ・GitHub Release を決める。"""
     if form == "package-plugin" and "version_store" not in (section.get("release") or {}) and not existing:
         rel["version_store"] = {"kind": "plugin"}
     files = rel.pop("_version_files", None)
@@ -62,15 +79,14 @@ def _fill(section: dict, presets: dict, existing: dict | None = None) -> dict:
     rel["tag"], rel["github_release"] = (with_cd["tag"], with_cd["github_release"]) if rel["cd"] else (None, False)
     if rel["version_store"]["kind"] == "none":
         rel["tag"], rel["github_release"] = None, False
-    dev = out.pop("_dev_workflow", None)
-    if dev is None and existing:
-        dev = next((c.get("workflow") for c in existing.get("channels", []) if c.get("name") == "dev"), None)
-    out["channels"] = [{"name": "stable", "ref": branches["production"]}]
+
+
+def _channels(branches: dict, dev: str | None) -> list[dict]:
+    """本番チャネルと、開発版のワークフローがあれば開発版チャネル。"""
+    channels = [{"name": "stable", "ref": branches["production"]}]
     if dev:
-        out["channels"].append({"name": "dev", "ref": branches["base"], "workflow": dev})
-    if out["merge"].get("admin"):
-        out["merge"]["method"] = "direct"
-    return out
+        channels.append({"name": "dev", "ref": branches["base"], "workflow": dev})
+    return channels
 
 
 def plan_migration(root: Path, moves: list[legacy.Move]) -> tuple[bw.WritePlan, list[dict]]:
