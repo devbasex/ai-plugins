@@ -14,14 +14,25 @@
   - マージの方式: `.ndf/project.json` の `production_merge.method`
 - **当たるモード**: `standard`（ブランチ戦略・リリースのワークフロー・CD の振る舞いを変え、公開の設定に値を足す）
 
-### 代表のリポジトリでの振る舞い（受け入れ条件 16）
+### 代表のリポジトリでの振る舞い
 
-| リポジトリ | 設定の値 | 振る舞い |
+受け入れ条件 16 の表。ai-plugins の行は次の「ai-plugins だけの事情」に置く。
+
+| 代表のリポジトリ | 設定の要点 | 直した後に起きること | この種類で扱えなくなること |
+| --- | --- | --- | --- |
+| Web サービス（nd-factory） | `promotion: selected`（変えない） | 今のまま。スプリントの分岐元・PR のマージ先・リリースブランチの組み立て・同期の PR・開発版のデプロイ（`release-steps release --channel dev`）は変わらない | 無し（設定の値を変えず、振る舞いも変わらない） |
+| Web サービス（設定ファイルの無いリポジトリ） | どれも無い（既定の `whole`） | 今のまま。develop があれば develop を分岐元にし、開発版のデプロイを使える。マージの方式は無く、今のマージ（head の一致の確認付き）を実行する | 無し（既定は `whole` のまま） |
+| Web サービス（private の Free で GitHub flow を選ぶ） | `promotion: trunk`・`method: serial` | merge queue もブランチ保護（ruleset）も使えない（STD9・STD10・STD11）。リリース承認ゲートの後に、`land` が本番ブランチごとのロックを取り、main の HEAD と承認済みのコミットを合わせた一時マージコミットで `.ndf/project.json` の `ci.required_checks` を走らせてからマージする。承認は取り直さない。版上げの PR も `confirm` が同じ手順で入れる（ [issue-3641-design-serial.md](issue-3641-design-serial.md) ）。ブランチ戦略 `trunk` は開発版のデプロイを持たない | 無し（GitHub flow は新しく選べる形で、staging への反映が要るリポジトリは今の `whole`・`selected` を選べる） |
+| モバイルアプリ | 設定を変えなければ今のまま。GitHub flow を選ぶなら `promotion: trunk` と、公開範囲とプランで使える方式 | ストアへの提出などのリリースの形は変わらない。GitHub flow を選ぶとスプリントの PR を main へ出し、マージの後に CD が版上げとタグを作る | 無し（今のブランチ戦略は残り、GitHub flow は足す選択肢） |
+| 業務文書だけ | 設定を変えなければ今のまま | 文書の提出の工程と提出先は変わらない。ブランチ戦略の値を読むのは worktree の分岐元と PR のマージ先だけ | 無し（ブランチ戦略の既定と提出の工程を変えない） |
+
+### ai-plugins だけの事情
+
+| 値 | 置く所 | 持つ Issue |
 | --- | --- | --- |
-| ai-plugins（切り替えの後） | `promotion: trunk`・`method: merge-queue` | スプリントを main から切り、スプリントの PR を main へ出す。リリース承認ゲートの後に、承認済みのコミットを merge queue へ入れる。マージの後に CD が版上げの PR を作り、そのマージでタグと GitHub Release を作る。同期の PR と開発版のステージは、ブランチ戦略 `trunk` が持たない（I8・I12） |
-| nd-factory（`selected`） | `promotion: selected`（変えない） | 今のまま。スプリントの分岐元・PR のマージ先・リリースブランチの組み立て・同期の PR・開発版のデプロイ（`release-steps release --channel dev`）は変わらない |
-| 設定ファイルの無いリポジトリ | どれも無い（既定の `whole`） | 今のまま。develop があれば develop を分岐元にし、開発版のデプロイを使える。マージの方式は無く、今のマージ（head の一致の確認付き）を実行する |
-| private の Free の Web サービス（GitHub flow を選ぶ） | `promotion: trunk`・`method: serial` | merge queue もブランチ保護（ruleset）も使えない（STD9・STD10・STD11）。リリース承認ゲートの後に、`land` が本番ブランチごとのロックを取り、main の HEAD と承認済みのコミットを合わせた一時マージコミットで `.ndf/project.json` の `ci.required_checks` を走らせてからマージする。承認は取り直さない。版上げの PR も `confirm` が同じ手順で入れる（ [issue-3641-design-serial.md](issue-3641-design-serial.md) ）。開発版のデプロイは持たない（ai-plugins と同じ） |
+| ブランチ戦略を GitHub flow にする（`promotion: trunk`）。スプリントを main から切り、リリース承認ゲートの後に承認済みのコミットを merge queue へ入れ、マージの後に CD が版上げの PR・タグ・GitHub Release を作る。同期の PR と開発版のステージは持たない（I8・I12） | `.ndf/worktree.json` の `branch_flow.promotion` | #3641 |
+| マージの方式 `merge-queue`（Organization の public のリポジトリ） | `.ndf/project.json` の `production_merge.method` | #3641 |
+| 開発版のデプロイを使わない（`release.dev_workflow` を外す） | `.ndf/supervise.json` | #3641 |
 
 **ai-plugins は Organization の public のリポジトリで、`merge-queue` のまま使う。** `serial` の追加は ai-plugins の設定の値・振る舞い・切り替えの手順を変えない。方式を選ぶ表（所有者・公開範囲・プラン → 使える方式）は [issue-3641-design-serial.md](issue-3641-design-serial.md) の「マージの方式を選ぶ表」にある。
 
