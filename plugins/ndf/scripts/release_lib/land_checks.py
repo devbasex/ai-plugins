@@ -78,8 +78,9 @@ def pull_changed_files(port, base: str | None, sha: str) -> list[str] | None:
 
 
 def diff_names(port, *revs: str) -> list[str] | None:
-    """差分のファイル名。ASCII でないパスを引用符と 8 進の形にしないよう core.quotePath を切り、改行を含むパスも分けられるよう NUL で区切る。"""
-    r = port._git("-c", "core.quotePath=false", "diff", "--name-only", "-z", *revs)
+    """差分のファイル名。ASCII でないパスを引用符と 8 進の形にしないよう core.quotePath を切り、改行を含むパスも分けられるよう NUL で区切る。
+    名前の変更は元と先の両方を数える（`--no-renames`。変更の検出で元の名前が落ちると、元の側の paths の絞り込みを見落とす）。"""
+    r = port._git("-c", "core.quotePath=false", "diff", "--no-renames", "--name-only", "-z", *revs)
     return [f for f in r.stdout.split("\0") if f] if r.returncode == 0 else None
 
 

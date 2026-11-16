@@ -139,9 +139,8 @@ elif a[:1] == ["api"] and a[-1].startswith("apps/"):  # bot の属するアプ�
         out = json.dumps({{"id": app}})
 elif a[:1] == ["api"] and "/branches/" in a[-1] and "branch_protection" in st:  # 従来の保護（迂回の必須のチェック）
     out = json.dumps({{"protection": st["branch_protection"]}})
-elif a[:1] == ["api"] and __import__("re").search(r"/branches/[^/]+$", a[-1]):
-    code = 1
-    sys.stderr.write("gh: Not Found (HTTP 404)\n")
+elif a[:1] == ["api"] and __import__("re").search(r"/branches/[^/]+$", a[-1]):  # 従来の保護の無いブランチ（#3672 の round 9）
+    out = json.dumps({{"protection": {{"enabled": False}}}})
 elif a[:1] == ["api"] and a[-1].endswith("/status"):  # 先端の commit status（ndf/release-approval の待ち）
     out = json.dumps({{"statuses": st.get("statuses", [])}})
 elif a[:1] == ["api"] and "/protection/" in a[-1]:

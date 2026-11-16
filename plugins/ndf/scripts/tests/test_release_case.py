@@ -219,7 +219,7 @@ def test_case_of_without_cd_does_not_call_gh(monkeypatch):
 
 def test_case_of_ai_plugins_shape_is_cd_no_review(monkeypatch):
     monkeypatch.setattr(delivery, "load_delivery", lambda root: _decl([AUTO]))
-    run, _ = fake({"rules/branches/main": (0, json.dumps([pr_rule(0)]))})
+    run, _ = fake({"rules/branches/main": (0, json.dumps([pr_rule(0)])), "{repo}/branches/main": UNPROTECTED})
     monkeypatch.setattr(gh_call, "RUNNER", run)
     assert rc.case_of(".").case == rc.CD_NO_REVIEW
 
@@ -234,7 +234,7 @@ def test_case_of_raises_on_broken_decl(monkeypatch):
 def test_case_of_reads_the_admin_declaration(monkeypatch, admin, case):
     monkeypatch.setattr(delivery, "load_delivery", lambda root: _decl([AUTO]))
     declare_admin(monkeypatch, admin)
-    run, _ = fake({"rules/branches/main": (0, json.dumps([pr_rule(1)]))})
+    run, _ = fake({"rules/branches/main": (0, json.dumps([pr_rule(1)])), "{repo}/branches/main": UNPROTECTED})
     monkeypatch.setattr(gh_call, "RUNNER", run)
     assert rc.case_of(".").case == case
 
@@ -260,7 +260,7 @@ def test_ai_plugins_declaration_is_cd_admin(monkeypatch):
     sec = project[branch_strategy.SECTION]
     monkeypatch.setattr(rc.repo, "branch_strategy_of", lambda root: branch_strategy.Strategy(sec))
     monkeypatch.setattr(delivery, "load_delivery", lambda root: _decl([AUTO]))
-    run, _ = fake({"rules/branches/main": (0, json.dumps([pr_rule(1)]))})
+    run, _ = fake({"rules/branches/main": (0, json.dumps([pr_rule(1)])), "{repo}/branches/main": UNPROTECTED})
     monkeypatch.setattr(gh_call, "RUNNER", run)
     assert rc.case_of(".").case == rc.CD_ADMIN
 
@@ -323,7 +323,7 @@ def test_case_at_on_unreadable_declaration(monkeypatch, tmp_path):
 def test_case_at_delegates_to_case_of(monkeypatch, tmp_path):
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)  # git の木でなければリポジトリが無い（CD の無い場合）
     monkeypatch.setattr(delivery, "load_delivery", lambda root: _decl([AUTO]))
-    run, _ = fake({"rules/branches/main": (0, json.dumps([pr_rule(0)]))})
+    run, _ = fake({"rules/branches/main": (0, json.dumps([pr_rule(0)])), "{repo}/branches/main": UNPROTECTED})
     monkeypatch.setattr(gh_call, "RUNNER", run)
     assert rc.case_at(tmp_path) == rc.Case(rc.CD_NO_REVIEW, *_TRAIL, "本番チャネルの承認数が 0")
 
