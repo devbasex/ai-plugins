@@ -232,7 +232,7 @@ R4 が `merge_base_branch` を外すのは、版数を持たない develop→mai
 | `plugin` | `trunk` | main / main | production / check / sprint | package-plugin / plugin / `{plugin}--v{version}` / 真 | stable main | release_pr / gate | ndf / merge-queue※ / merge / 偽 |
 
 ※ merge queue を使えない（STD3 の条件に当たらない）と測ったら `strict` にし、分からなければ 2 つを候補に問う。`main`・`develop` は既定の名前で、`init` は測った既定ブランチの名前で置き換える。
-`verify` はどの種類も `null` にする。表のタグ・Release の列は、CD のワークフローを持つリポジトリの値で、既存のリポジトリで種類を選ぶときに測った値と比べる。
+`verify` はどの種類も `null` にする。表のタグ・Release の列は、CD のワークフローを持つリポジトリの値である。既存のリポジトリで種類を選ぶときは比べず、測った値で書く（「作る・更新する」の種類の決め方）。
 新規のリポジトリ（ワークフローのファイルが無い）では、`init` はワークフローを作らず、どの種類も `release.cd: null`・タグ `null`・Release 偽を書く（R10）。存在しない CD を指す宣言を作らないためである。
 版数を持つ種類（`web-develop`・`mobile`・`plugin`）では、版上げの PR のマージを `land` が確かめた時点で正式版とする（E12）。CD のワークフローを足した後に `measure` と `write` で更新すると、`release.cd` とタグ・Release が測った値で書かれる。`init` の結果の `warnings` にこの手順を出す。
 
@@ -342,7 +342,8 @@ ruleset が無い develop→main のリポジトリ（受け入れ条件 9 の f
 
 種類（`kind`）は、測るキーの値と 5 つの種類の既定の行を比べて決める。測るキーがすべて合う行が 1 つだけのとき、その種類にする。
 リリースの形（`release.form`）は比べない。既定ブランチ・版数のファイルと `plugin.json`・ワークフロー・ruleset のどれからも `service`・`document`・`mobile` を見分けられないため、選んだ種類の既定の行から埋める。
-5 つの行は形を見なくても、取り込み方（`web-develop`・`mobile` と trunk の 3 つ）・版数の置き場（`plugin`）・マージコミットの作り方（`web-trunk` の `squash` と `docs` の `merge`）で分かれる。既定の行の `merge-queue`※ は、測った `merge-queue` と `strict` のどちらとも合うとみなす。
+CD とその産物（`release.cd`・`release.tag`・`release.github_release`）と、ワークフローから測るチャネル（`channels`）も比べず、測った値で書く。既定の行のこれらの値は CD を持つリポジトリの値で、版数のファイルがあって CD もタグも無い既存のリポジトリ（R10 に沿う）が、どの行とも合わなくなるためである。
+5 つの行は形と CD を見なくても、取り込み方（`web-develop`・`mobile` と trunk の 3 つ）・版数の置き場（`plugin`）・マージコミットの作り方（`web-trunk` の `squash` と `docs` の `merge`）で分かれる。既定の行の `merge-queue`※ は、測った `merge-queue` と `strict` のどちらとも合うとみなす。
 測った値は種類の既定より優先して書く（例: 種類 `plugin` で測った `merge.method` が `strict` なら `strict` を書く）。
 合う行が無いか 2 つ以上なら、候補の種類と測った値を添えて `no_kind` の問いを返す。答えで既定から値を変えたときの種類は `custom` にする。
 
@@ -392,7 +393,15 @@ flowchart TD
 | 最新の取り込みを求める（I10 で一致） | REST のマージを `sha`（承認した head）付きで呼ぶ | ruleset が最新でない head のマージを断る |
 | 無い（GitHub Free の private など） | NDF が入れるコミットを作り、本番ブランチの参照を早送りだけで進める。入れるコミットは、`merge` なら親が確かめた先端と承認した head の 2 つ、`squash` なら親が確かめた先端 1 つで、どちらも承認した head の木を持つ（head が先端を含むため、木はマージの結果と同じ）。`rebase` は承認した head そのもの。参照は `PATCH /repos/{owner}/{repo}/git/refs/heads/<本番>` に `force: false` で渡す | 早送りでない更新を GitHub が断る（[GitHub REST: Update a reference](https://docs.github.com/en/rest/git/refs#update-a-reference) の `force`、取得日 2026-11-16） |
 
-参照を進めた後、`merge` と `rebase` では PR の head が本番ブランチに入る。`squash` では入らないため、`land` は入れたコミットを書いたコメントを付けて PR を閉じる。
+`land` は参照を進める前に、入れるコミットの SHA と確かめた先端を書いた取り込みの記録のコメントを PR に付ける。参照を進めた後、`merge` と `rebase` では PR の head が本番ブランチに入る。`squash` では入らないため、`land` は PR を閉じる。
+取り込みの記録は次の 2 か所で読む。
+
+| 読む所 | 読み方 | 理由 |
+| --- | --- | --- |
+| `land` の打ち直し | 本番の PR の確かめの前に読む。本番ブランチが記録のコミットを含めば、参照を進めた後に止まったものとして、確かめと参照の更新を省いて PR を閉じるところから続ける。含まなければ記録を使わず確かめから始める | 本番の先端は NDF が作った `squash` のコミットで、head はそれを含まない。確かめから始めると止まり、閉じるところへ届かない |
+| 解析の事例の収集 | マージされずに閉じた PR のうち、取り込みの記録があり、本番ブランチが記録のコミットを含むものを、取り込んだ PR として数える。マージコミットの親の数は記録のコミットから読む | NDF が `squash` で入れた PR を履歴から落とすと、事例が減って根拠不足で止まるか、古いマージの方式を推す |
+
+参照の更新を断られたときは、記録のコミットを本番ブランチが含まないため、どちらからも数えない。
 
 `merge-queue` で承認の後に入ったスプリントの PR は、その版に含まれる。スプリントの PR は設計承認ゲート・cross-review・CI を通っており、
 版上げの PR の承認の間もスプリントのマージを止めない（Value 5。承認の要らない作業は承認を待つ間も止めない）。
