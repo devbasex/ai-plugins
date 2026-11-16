@@ -4048,8 +4048,9 @@
     {
       "term": "版上げの PR",
       "context": "ndf-release",
-      "meaning": "今の NDF では、head のブランチが `release/` で始まる PR。版数と CHANGELOG だけを変え、中身の変更を持たない。ndf-next の取り込み方の行 `trunk` では、main へのマージの後に CD の `bump` が main の先端から作る main 宛ての PR で、head のブランチの名前（`release/v<バージョン>`）と、差分がバージョンの置き場・CHANGELOG のバージョンの節・`.ndf/release.json` の手順の書き先に限られることの両方で見分ける。名前が `release/` で始まるだけの PR は含まない",
-      "source": "docs/specifications/ndf-release-approval-included-prs.md"
+      "meaning": "head が release/v<版> で、版数と CHANGELOG だけを変え、承認の対象 release_pr でリリース承認ゲートの承認を受ける本番ブランチ宛ての PR。取り込み方 trunk では本番ブランチから、ほかの行ではベースブランチか本番ブランチから、マージの前に切る",
+      "source": "docs/specifications/ndf-release-approval-included-prs.md",
+      "pending_source": "issues/issue-3672-design.md"
     },
     {
       "term": "条件の Skill",
@@ -7880,8 +7881,8 @@
     {
       "term": "マージの方式",
       "context": "ndf-release",
-      "meaning": "承認した複数の PR の組み合わせを確かめてから本番ブランチへマージする方式。`merge-queue`（merge queue を使う）か `strict`（最新の main の取り込みを必須にし、head が動けば承認を取り直す）。リポジトリごとに設定ファイルで選ぶ",
-      "pending_source": "issues/issue-3572-requirements.md"
+      "meaning": "本番ブランチへのマージで、同時に承認した PR の組み合わせをどう確かめるか。merge-queue（merge queue を使う）・strict（head が本番ブランチの先端を含むときだけマージ）・direct（確かめない）のどれかで、ブランチ戦略の宣言の merge.method が決める",
+      "pending_source": "issues/issue-3672-design.md"
     },
     {
       "term": "検証環境",
@@ -8000,6 +8001,27 @@
       "meaning": "既存リポジトリでブランチ戦略の宣言の値を決めた事例（PR・ブランチ・タグ・Release・ruleset・CI のワークフロー）か文書の箇所。番号・パス・行で指し、宣言の作成の結果に残す",
       "source": "",
       "pending_source": "issues/issue-3672-requirements.md"
+    },
+    {
+      "term": "代表のリポジトリの種類の既定",
+      "context": "ndf-workflow",
+      "meaning": "代表のリポジトリの種類（web-develop・web-trunk・mobile・docs・plugin）ごとのブランチ戦略の宣言の値の行。branch-strategy-presets.json に持ち、新規のリポジトリで宣言を作るときに書く",
+      "source": "",
+      "pending_source": "issues/issue-3672-design.md"
+    },
+    {
+      "term": "承認の対象",
+      "context": "ndf-workflow",
+      "meaning": "リリース承認ゲートで承認する PR。release_pr（版上げの PR）か production_pr（本番ブランチ宛ての各 PR）で、ブランチ戦略の宣言の approval.target が決める",
+      "source": "",
+      "pending_source": "issues/issue-3672-design.md"
+    },
+    {
+      "term": "承認の受け方",
+      "context": "ndf-workflow",
+      "meaning": "リリースの承認をどこで受けるか。gate（リリース承認ゲート）か review（GitHub のレビューの承認をゲートの答えとして読む）で、ブランチ戦略の宣言の approval.via が決める",
+      "source": "",
+      "pending_source": "issues/issue-3672-design.md"
     }
   ]
 }
