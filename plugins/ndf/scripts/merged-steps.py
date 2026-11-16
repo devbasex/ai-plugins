@@ -20,7 +20,7 @@ merge-when-green: PR が draft なら `gh pr ready` で外し、CI のチェッ�
 渡すと、PR を読むたびに先端をその SHA と比べ、違えば待ち直さず（マージ済みでも）止まる（items[].result: head_moved。#815）。
 最初の読みで宛先（baseRefName）を判定し、自動反映の本番チャネルか判定できない宛先なら、--gate-approved が無い限り
 CI を待たずにリリース承認ゲートで止まる（status: gate・metrics.gate: production-merge。判定は lib/delivery.py。#1336）。
-merge-gate: 宛先の判定だけを行う（0 = 進めてよい / 10 = リリース承認ゲート）。
+merge-gate: 宛先の判定だけを行う（0 = 進めてよい / 10 = リリース承認ゲート）。--pr の PR がマージ済みなら判定せず 0（人がマージした後に止めない）。
 promote: リリースの Pull Request（ベースブランチ → 本番チャネル）を探すか作り、merge-when-green と同じ判定と待ちでマージする（後片付けはしない）。
 --prepare は用意して承認資料を書くところで 0 で終える。--expect-head-from は導入の確認の承認資料の確かめたコミットを --expect-head と同じ照合に使う（違えば head_moved で 1、読めなければ 2。どちらもマージせず、プランの handoff がリリース承認ゲートの by: mvv の記録を外して 10 を返し、リリース承認ゲートへ戻す。流し直しは run <プラン> --from verify。#1529）。リリース承認ゲートで止まるときは先端を「承認したコミット」として承認資料（--out）と metrics.approved_sha に載せ、--approved-from はその資料の承認したコミットを同じ照合に使う（--gate-approved user に要る。#2104）。
 実行が終わったのにチェックが pending のまま --stale-after 秒続けば、そのジョブを 1 度だけ `gh run rerun --job` で再実行し、

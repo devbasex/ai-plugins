@@ -210,6 +210,8 @@ def merge_gate(a):
         except StepError:
             if not a.base:
                 raise
+        if (info or {}).get("state") == "MERGED":  # 人がマージした後は止める理由が無い。続く merge は already_merged で通る
+            emit(result(TOOL, "ok", f"#{a.pr} はマージ済み。リリース承認ゲートの判定は要らない", [], {"merged": True}))
         manual_gate(a.pr, info)
     base = a.base or (info or {}).get("baseRefName") or ""
     verdict = delivery.judge_target(delivery.load_delivery(root), base)
