@@ -34,6 +34,8 @@
   "env": [
     "CLAUDE_CONFIG_DIR",
     "CODEX_HOME",
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
     "LANG",
     "NDF_DEPS_REEXEC",
     "NDF_DEPS_VENV",

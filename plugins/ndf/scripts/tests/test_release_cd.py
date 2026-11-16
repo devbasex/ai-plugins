@@ -40,6 +40,8 @@ def decl_of(rows, branches=BRANCHES):
     sec = strategy_fixture.section(kind, *branches)
     if rows is not None:
         sec["release"]["deliveries"] = rows
+    else:
+        sec["release"]["cd"] = None  # 届け先を書かない宣言（`release.cd` があればそこから行を組む）
     return delivery.build(branch_strategy.Strategy(sec))
 
 
@@ -132,6 +134,18 @@ def test_a_recorded_reason_goes_to_the_manual_stage_with_the_trigger():
 )
 def test_publishes_by_cd_needs_the_declaration(rows, want):
     assert delivery.publishes_by_cd(decl_of(rows)) is want
+
+
+def test_release_cd_without_deliveries_reads_as_a_cd_row():
+    """measure・init が作る `release.cd` だけの宣言は、CD の有りと公開の担当を `release.cd` から読む（codex-r2-1）。"""
+    sec = strategy_fixture.section("web-develop", *BRANCHES)
+    sec["release"].pop("deliveries", None)
+    sec["release"].update(cd={"workflow": "release-cd.yml"}, tag="v{version}", github_release=True)
+    decl = delivery.build(branch_strategy.Strategy(sec))
+    assert delivery.publishes_by_cd(decl) and delivery.cd_guidance(decl) is None
+    assert [r["branch"] for r in delivery.merge_rows(decl)] == ["main"]
+    sec["release"].update(cd=None, tag=None, github_release=False)
+    assert delivery.build(branch_strategy.Strategy(sec)).rows is None
 
 
 # ---------------- 宣言のモデルと解析（I6）----------------

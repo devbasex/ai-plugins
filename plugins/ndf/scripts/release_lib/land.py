@@ -19,6 +19,7 @@ TRAILER_HEAD = "NDF-Approved-Head"
 TRAILER_TIP = "NDF-Tip"
 BYPASS_OK = ("always", "pull_requests_only")
 REAPPROVE = "承認を取り直してください"
+CHECKS_OK = ("success", "skipped", "neutral")
 
 
 def ruleset_mismatch(strategy, facts) -> list[dict]:
@@ -89,6 +90,7 @@ class Port(Protocol):
     def comment(self, number: int, body: str) -> bool: ...
     def landed_record(self, branch: str, number: int, since: str | None) -> dict | None: ...
     def has_human_record(self, number: int) -> bool: ...
+    def checks_failing(self, sha: str) -> str | None: ...  # head の検査がすべて成功なら None、そろわなければ理由の文
 
 
 def trailers(pr: int, head: str, tip: str) -> str:
@@ -124,12 +126,16 @@ class Approval:
     at: str | None = None
 
 
-def land_approved(port: Port, strategy, pr: int, approval: Approval) -> dict:
-    """承認した head を、セクションの主体と方式で本番ブランチへ入れる。"""
+def land_approved(port: Port, strategy, pr: int, approval: Approval, pull: dict | None = None, verify_checks: bool = False) -> dict:
+    """承認した head を、セクションの主体と方式で本番ブランチへ入れる。
+
+    `pull` は読んだ PR（省けば読む）。`verify_checks` が真なら、入れる前に head の検査の成功を確かめる
+    （承認ゲートを通らずに入れるスプリントの PR。ruleset の無い `strict` では常に確かめる）。
+    """
     sec = strategy.section
     prod_branch = sec["branches"]["production"]
     merge = sec["merge"]
-    pull = port.pull(pr)
+    pull = pull if pull is not None else port.pull(pr)
     out = {"result": "stopped", "head": pull.get("head"), "reason": ""}
     if pull.get("merged"):
         if not port.has_human_record(pr):
@@ -150,6 +156,9 @@ def land_approved(port: Port, strategy, pr: int, approval: Approval) -> dict:
         if rec and rec.get("head") == approval.head and rec.get("tree_ok") and rec.get("first_parent_is_tip"):
             if pull.get("state") == "closed" or port.close(pr, f"{rec.get('commit')} で本番ブランチへ入れた"):
                 return {**out, "result": "merged"}
+    if pull.get("state") == "closed":
+        # 取り込みの記録の無い閉じた PR は、承認の後に取り消したものとみなす（参照の更新は PR のマージ API を通らない）
+        return {**out, "reason": f"#{pr} はマージされずに閉じている。入れるなら開き直し、{REAPPROVE}"}
     mism = ruleset_mismatch(strategy, facts)
     if mism:
         return {**out, "reason": "セクションと ruleset が食い違う: " + json.dumps(mism, ensure_ascii=False)}
@@ -159,6 +168,11 @@ def land_approved(port: Port, strategy, pr: int, approval: Approval) -> dict:
         why = check_production_pr(strategy, pull, port.production(prod_branch), queue)
         if why:
             return {**out, "reason": why}
+    if verify_checks or (merge["method"] == "strict" and not facts.present):
+        # ruleset の無い strict の参照の更新と承認なしの取り込みは、GitHub の必須の検査を通らない
+        failing = port.checks_failing(approval.head)
+        if failing:
+            return {**out, "reason": f"head {approval.head[:12]} の検査がそろっていない: {failing}"}
     if merge["method"] == "merge-queue":
         ok, why = port.enqueue(pr, approval.head, bool(pull.get("bump")))
         return {**out, "result": "queued" if ok else "stopped", "reason": why}
@@ -353,6 +367,20 @@ class GhPort:
 
         return any(HUMAN_MARK in str(c.get("body") or "") for c in trail.read_comments(self.repo, number))
 
+    def checks_failing(self, sha: str) -> str | None:
+        import gh_checks
+
+        raw = gh_checks.fetch_check_runs(self.repo, sha, empty_ok=True)
+        status = self._rest(f"repos/{self.repo}/commits/{sha}/status")
+        if raw is None or not isinstance(status, dict):
+            return "検査の結果を読めない"
+        runs = [(str(r.get("name") or ""), gh_checks.run_result(r)) for r in gh_checks.fold_check_runs(raw)]
+        runs += [(str(c.get("context") or ""), str(c.get("state") or "")) for c in status.get("statuses") or []]
+        if not runs:
+            return "検査がまだ 1 件も無い"
+        bad = [f"{name}={res}" for name, res in runs if res not in CHECKS_OK]
+        return ", ".join(bad)[:300] or None
+
 
 def approval_of(repo: str, strategy, pr: int) -> Approval | None:
     """証跡の書き手（`approval_trail.trail_writer`）に合わせて、承認した head と時刻を読む。無ければ None。"""
@@ -366,6 +394,13 @@ def approval_of(repo: str, strategy, pr: int) -> Approval | None:
     return Approval(last.sha, last.created_at) if last else None
 
 
+def exempt_from_gate(strategy, pull: dict) -> bool:
+    """承認の証跡なしで入れてよいスプリントの PR か。trunk（スプリントの PR が本番を宛先にする）で、承認の対象が版上げの PR の
+    ときの版上げでない PR だけ。ほかの取り込み方の本番宛ての PR（版数の置き場が無い版上げ・ホットフィックス）は承認ゲートを通す。"""
+    sec = strategy.section
+    return sec["release_strategy"] == "trunk" and sec["approval"]["target"] == "release_pr" and not pull.get("bump")
+
+
 def land_pr(root, repo: str, strategy, pr: int) -> dict:
     """`release-steps.py land` の本体。承認の証跡を読み、`land_approved` を GitHub 版の Port で呼ぶ。"""
     from release_lib.approval_trail import TrailError
@@ -376,9 +411,9 @@ def land_pr(root, repo: str, strategy, pr: int) -> dict:
         if approval is None and strategy.section["merge"]["actor"] != "human":
             pull = port.pull(pr)
             if not pull.get("merged"):
-                if strategy.section["approval"]["target"] == "release_pr" and not pull.get("bump"):
-                    # 承認の対象が版上げの PR なら、スプリントの PR は承認ゲートを通らずに検査の後で入る（決定 8）
-                    return land_approved(port, strategy, pr, Approval(str(pull.get("head") or "")))
+                if exempt_from_gate(strategy, pull):
+                    # trunk で承認の対象が版上げの PR なら、スプリントの PR は承認ゲートを通らずに検査の後で入る（決定 8）
+                    return land_approved(port, strategy, pr, Approval(str(pull.get("head") or "")), pull=pull, verify_checks=True)
                 return {"result": "stopped", "head": pull.get("head"), "reason": f"#{pr} に承認の証跡が無い。{REAPPROVE}"}
         return land_approved(port, strategy, pr, approval or Approval(""))
     except (LandError, TrailError) as e:

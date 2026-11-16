@@ -296,11 +296,14 @@ def apply_decls(a) -> None:
     _require_declared(a)
 
 
+def sprint_out(a) -> Path:
+    """スプリントの計画の置き場（`--out`、省けば `sprint-<名前>`）。`pin_flow` が読むため、procedures より下のここに置く。"""
+    return Path(a.out or f"sprint-{a.name}")
+
+
 def pin_flow(a) -> None:
     """スプリントの目録（`sprint.json`）に開始時に書いたブランチ戦略のスナップショットがあれば、`a.flow` をそれにする。`new sprint` を同じ
     スプリントで打ち直したときと `new close` は、宣言ではなく開始時の値で組む（#3121 の決定 4）。"""
-    from supervise_lib.procedures import sprint_out
-
     try:
         got = json.loads((sprint_out(a) / repo.SPRINT_MANIFEST).read_text(encoding="utf-8")).get(branch_strategy.SNAPSHOT_KEY)
     except (OSError, ValueError, AttributeError):
@@ -327,11 +330,12 @@ def _strategy_snapshot(a, roots: list[Path]) -> dict:
     production = getattr(a, "production", None) or strategy.production
     got, where = repo.production_strategy(repo.first_git_tree(roots), production)
     if got is None:
-        # ベースブランチで移行を入れた後は、本番ブランチにセクションが届くのがリリースの後になる。止めるときに入れ方を示す
+        # ベースブランチで移行を入れた後は、本番ブランチにセクションが届くのがリリースの後になる。止めるときに入れ方を示す。
+        # 本番ブランチ宛ての PR を直接作る案内はしない（本番宛ての PR をベースブランチに含まれる head に限るリポジトリで落ちる）
         raise DeclError(
-            f"本番ブランチの宣言を読めない: {where}。移行（branch-strategy migrate）をベースブランチで入れた後なら、"
-            f"本番ブランチ {production} の作業ツリーで `project-decl.py branch-strategy migrate` を打ち、"
-            f"その差分を本番ブランチ宛ての PR で入れてから打ち直してください"
+            f"本番ブランチの宣言を読めない: {where}。移行（branch-strategy migrate）をベースブランチ {strategy.base} で入れた後なら、"
+            f"セクションはベースブランチを本番ブランチ {production} へ入れるリリースで届く。スプリントのリリース"
+            f"（`new sprint` の計画。宣言はベースブランチから読む）で本番ブランチへ入れてから打ち直してください"
         )
     names = {k: strategy.section[k] for k in ("branches", "channels")}
     return branch_strategy.snapshot_section(branch_strategy.Strategy({**got.section, **names}), where)

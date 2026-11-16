@@ -17,7 +17,8 @@ from gate_answer import DESIGN_GATE
 from supervise_lib.decl import decl_fields, sprint_flow
 from supervise_lib.design_steps import detail_design_runs, gate_steps, pr_steps, writing_steps
 from supervise_lib.paths import GLOSSARY_PY, MVV_PY, PUSH_DESIGN, SELF, SPEC_COPY_PY, WORKTREE_SETUP
-from supervise_lib.procedures import DESIGN_RESULTS, pr_step, rebuild_step, requirements_path, sprint_materials, sprint_out, with_record
+from supervise_lib.procedures import DESIGN_RESULTS, pr_step, rebuild_step, requirements_path, sprint_materials, with_record
+from supervise_lib.decl import sprint_out
 from supervise_lib.procedures import design_path, survey_steps
 from supervise_lib.release_templates import DEV_SERIES, MVV_NOTE, advise_steps, plan_release, release_names
 from supervise_lib.sprint_revise import with_revise_mvv, with_revise_note

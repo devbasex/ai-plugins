@@ -134,8 +134,13 @@ def test_run_stops_without_trail_and_lands_human_merge(monkeypatch):
     # 承認の対象が版上げの PR なら、版上げでないスプリントの PR は証跡なしで今の head を入れに進む（決定 8）
     seen = []
     monkeypatch.setattr(land.GhPort, "pull", lambda self, n: {"merged": False, "head": "s" * 40, "bump": False})
-    monkeypatch.setattr(land, "land_approved", lambda port, s, n, a: seen.append(a.head) or {"result": "queued"})
-    assert land.land_pr(Path("."), "o/r", plugin, 5)["result"] == "queued" and seen == ["s" * 40]
+    monkeypatch.setattr(
+        land, "land_approved", lambda port, s, n, a, **kw: seen.append((a.head, kw["verify_checks"])) or {"result": "queued"}
+    )
+    assert land.land_pr(Path("."), "o/r", plugin, 5)["result"] == "queued" and seen == [("s" * 40, True)]
+    # trunk でない取り込み方の本番宛ての PR は、版上げでなくても承認ゲートを通す（承認の免除は trunk だけ）
+    got = land.land_pr(Path("."), "o/r", strategy("web-develop"), 5)
+    assert got["result"] == "stopped" and "承認の証跡が無い" in got["reason"] and len(seen) == 1
     monkeypatch.undo()
     monkeypatch.setattr(land, "approval_of", lambda repo, s, pr: None)
 

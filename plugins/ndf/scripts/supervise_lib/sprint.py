@@ -22,7 +22,8 @@ from supervise_lib.sprint_waves import plan_fast_impl, plan_mvv_design, plan_mvv
 from supervise_lib.sprint_waves import plan_sprint_design, plan_sprint_release, sprint_branch, sprint_branch_first, sprint_impl_plans
 from supervise_lib.new_args import NEW_ARGS
 from supervise_lib.paths import CHECK_PY, SELF
-from supervise_lib.procedures import sprint_out, with_record
+from supervise_lib.decl import sprint_out
+from supervise_lib.procedures import with_record
 from supervise_lib.release_templates import strip_suffix
 from supervise_lib.release_verify import release_verify_steps
 from supervise_lib.plan import QUEUE_PRS, sprint_state_path

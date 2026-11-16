@@ -676,7 +676,7 @@ def cmd_release(a):
     base, prod, plugin = release_decl(root, a)
     route = _release_route(root)
     if not route.sync and a.channel == "dev":
-        # trunk には開発版のチャネルが無い。開発版の PR の段（release/v<版> → ベースブランチ）は本番ブランチへ入れてしまう
+        # trunk には開発版のチャネルが無い。開発版の PR の段（版上げのブランチ → ベースブランチ）は本番ブランチへ入れてしまう
         raise StepError(
             f"ベースブランチ {base} が本番ブランチと同じ（trunk）で、開発版のチャネルが無い。--channel prod で出す", EXIT_PRECONDITION
         )
@@ -742,7 +742,7 @@ def _release_route(root) -> strategy_route.Route:
 
 
 def _open_trunk_release_pr(ctx) -> int:
-    """trunk の版上げの PR（release/v<版> → 本番ブランチ）を使い回すか作り、番号を返す。マージはしない。"""
+    """trunk の版上げの PR（版上げのブランチ → 本番ブランチ）を使い回すか作り、番号を返す。マージはしない。"""
     root, a, plugin, branch, prod = ctx.root, ctx.a, ctx.plugin, ctx.branch, ctx.prod
     found = find_pr(root, branch, prod, states=("OPEN", "MERGED"))
     if found:

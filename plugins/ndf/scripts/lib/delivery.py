@@ -177,6 +177,29 @@ def _rows_of(release: dict | None, problems: list[str]) -> list[dict] | None:
     return v
 
 
+def _cd_rows(release: dict | None) -> list[dict] | None:
+    """`release.cd.workflow` だけを持つ宣言（measure・init が作る形）の、本番ブランチへのマージで届く 1 行。
+
+    移行（`branch_strategy_migrate._cd_of`）が行から `cd` を作る向きの逆で、タグと GitHub Release は `tag`・`github_release` から読む。
+    `deliveries` を持つ宣言は行が正本で、ここを通らない。読むのは CD の有無・公開の担当・CD の結果（`merge_rows`）と CD の案内だけで、
+    経路（`routes`）と承認の判定は `deliveries` の行だけで決める。"""
+    cd = (release or {}).get("cd")
+    wf = cd.get("workflow") if isinstance(cd, dict) else None
+    if not (isinstance(wf, str) and wf.strip()):
+        return None
+    return [
+        {
+            "target": "本番",
+            "kind": "auto",
+            "trigger": wf,
+            "channel": "production",
+            "versioned": bool(release.get("tag")),
+            "publishes_release": bool(release.get("tag")) and bool(release.get("github_release")),
+            "result": {"workflow": wf},
+        }
+    ]
+
+
 def _resolve_channels(rows: list[dict] | None, base: str | None, production: str | None) -> list[dict] | None:
     """`channel`（`production` / `base`）を持つ行を、読んだ時点で 1 回だけブランチ名へ解いて `branch` に入れる。
 
@@ -233,8 +256,9 @@ def reaches_by_merge(row: dict, production: str | None) -> bool:
 
 
 def merge_rows(decl: DeliveryDecl) -> list[dict]:
-    """本番チャネルへのマージで自動で本番系へ届く行のすべて（CD の結果を読む対象）。"""
-    return [r for r in decl.rows or [] if reaches_by_merge(r, decl.production)]
+    """本番チャネルへのマージで自動で本番系へ届く行のすべて（CD の結果を読む対象）。`deliveries` が無ければ `release.cd` から組む。"""
+    rows = decl.rows if decl.rows is not None else _resolve_channels(_cd_rows(decl.release), decl.base, decl.production)
+    return [r for r in rows or [] if reaches_by_merge(r, decl.production)]
 
 
 def publishes_by_cd(decl: DeliveryDecl) -> bool:
@@ -247,7 +271,7 @@ def cd_guidance(decl: DeliveryDecl) -> CdGuidance | None:
     if decl.problems:
         return None
     if decl.rows is None:
-        return CdGuidance(f"{DL} の宣言")
+        return None if _cd_rows(decl.release) else CdGuidance(f"{DL} の宣言")
     rows = [r for r in decl.rows if r.get("kind") == "manual" and not str(r.get("manual_reason") or "").strip()]
     if rows:
         return CdGuidance("CD か、CD を置かない理由（manual_reason）", tuple(str(r.get("target") or "") for r in rows))

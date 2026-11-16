@@ -782,8 +782,15 @@ class FakePort:
         )
         self.calls: list = []
         self.ref_ok = True
+        self.failing = None
+        self.pulls = 0
+
+    def checks_failing(self, sha):
+        self.calls.append(("checks", sha))
+        return self.failing
 
     def pull(self, n):
+        self.pulls += 1
         return self._pull
 
     def production(self, b):
@@ -852,8 +859,31 @@ def test_land_direct_and_strict():
     port3 = FakePort({"head": H1, "base": "main", "contains_tip": True, "tip": "a" * 40}, facts(present=False), prod={"tip": "b" * 40})
     assert land.land_approved(port3, bs.Strategy(section("docs")), 6, land.Approval(H1))["result"] == "merged"
     kinds = [c[0] for c in port3.calls]
-    assert kinds == ["commit", "ref"] and "NDF-Approved-Head: " + H1 in port3.calls[0][1]
-    assert port3.calls[0][2] == ["a" * 40, H1]
+    assert kinds == ["checks", "commit", "ref"] and "NDF-Approved-Head: " + H1 in port3.calls[0][1]
+    assert port3.calls[1][2] == ["a" * 40, H1]
+
+
+def test_land_strict_without_ruleset_stops_until_checks_pass():
+    """ruleset の無い strict の参照の更新は、承認した head の検査がそろうまで入れない（codex-r2-2）。"""
+    port = FakePort({"head": H1, "base": "main", "contains_tip": True, "tip": "a" * 40}, facts(present=False))
+    port.failing = "pytest=pending"
+    out = land.land_approved(port, bs.Strategy(section("docs")), 6, land.Approval(H1))
+    assert out["result"] == "stopped" and "pytest=pending" in out["reason"] and port.calls == [("checks", H1)]
+
+
+def test_land_stops_closed_pr_without_record():
+    """取り込みの記録の無い閉じた PR は入れない（承認の後の取り消し。codex-r2-3）。"""
+    port = FakePort({"head": H1, "base": "main", "state": "closed", "contains_tip": True, "tip": "a" * 40}, facts(present=False))
+    out = land.land_approved(port, bs.Strategy(section("docs")), 6, land.Approval(H1))
+    assert out["result"] == "stopped" and "閉じている" in out["reason"] and port.calls == []
+
+
+def test_land_uses_given_pull_and_verifies_checks():
+    """読んだ PR を渡せば読み直さず、verify_checks なら ruleset のある方式でも検査を確かめる。"""
+    port = FakePort({"head": H1, "base": "main"}, facts())
+    port.failing = "lint=failure"
+    out = land.land_approved(port, bs.Strategy(section("web-develop")), 5, land.Approval(H1), pull=port._pull, verify_checks=True)
+    assert out["result"] == "stopped" and port.pulls == 0 and ("merge", H1, "merge", False) not in port.calls
 
 
 def test_land_stops_when_base_is_not_production():
