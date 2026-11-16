@@ -84,6 +84,25 @@ def plan_migration(root: Path, moves: list[legacy.Move]) -> tuple[bw.WritePlan, 
         return bw.WritePlan(digest=bs.strategy_digest({"diff": [], "before": {}}), rebuild=lambda: plan_migration(root, moves)[0]), []
     after = {fid: copy.deepcopy(doc) for fid, doc in docs.items()}
     project = after.setdefault("project", {"version": 1})
+    moved, questions = _collect_moved(docs, present)
+    if questions:
+        return bw.WritePlan(), questions
+    for m in sorted(present, key=lambda m: -len(m.old)):
+        _remove_pointer(after[m.file], m.old)
+    if not any(m.new is not None for m in present) and bs.SECTION in project:
+        # remove の行だけが当たった（使わなくなったキー）。セクションは今のまま
+        return bw.plan_files(root, _by_name(after), lambda: plan_migration(root, moves)[0]), []
+    section = _fill(moved, bw.load_presets(), project.get(bs.SECTION))
+    failed = bs.validate_section(section)
+    if failed:
+        where = [{**f, "legacy": sorted(f"{a}:{b}" for a, b in found)} for f in failed]
+        return bw.WritePlan(failed=where), []
+    project[bs.SECTION] = section
+    return bw.plan_files(root, _by_name(after), lambda: plan_migration(root, moves)[0]), []
+
+
+def _collect_moved(docs: dict, present: list[legacy.Move]) -> tuple[dict, list[dict]]:
+    """旧いキーの値を移す先へ集める。値の対応表に無い値は問いにする。"""
     moved: dict = {}
     questions = []
     for m in present:
@@ -92,38 +111,36 @@ def plan_migration(root: Path, moves: list[legacy.Move]) -> tuple[bw.WritePlan, 
         value = bw._get(docs[m.file], m.old)
         if m.values:
             if value not in m.values:
-                questions.append(
-                    {
-                        "pointer": _section_rel(m.new),
-                        "why": "insufficient",
-                        "candidates": sorted(set(m.values.values())),
-                        "evidence": [{"source": "repo", "ref": f".ndf/{legacy.FILES[m.file]}:{m.old}", "value": str(value)}],
-                    }
-                )
+                questions.append(_value_question(m, value))
                 continue
             value = m.values[value]
-        if m.transform == "dev_channel":
-            moved["_dev_workflow"] = value
-        elif m.transform == "version_files":
-            moved.setdefault("release", {})["_version_files"] = [{"path": p} for p in value or []]
-        else:
-            bw._set(moved, _section_rel(m.new), copy.deepcopy(value))
-    if questions:
-        return bw.WritePlan(), questions
-    for m in sorted(present, key=lambda m: -len(m.old)):
-        _remove_pointer(after[m.file], m.old)
-    if not any(m.new is not None for m in present) and bs.SECTION in project:
-        # remove の行だけが当たった（使わなくなったキー）。セクションは今のまま
-        names = {legacy.FILES[fid]: doc for fid, doc in after.items()}
-        return bw.plan_files(root, names, lambda: plan_migration(root, moves)[0]), []
-    section = _fill(moved, bw.load_presets(), project.get(bs.SECTION))
-    failed = bs.validate_section(section)
-    if failed:
-        where = [{**f, "legacy": sorted(f"{a}:{b}" for a, b in found)} for f in failed]
-        return bw.WritePlan(failed=where), []
-    project[bs.SECTION] = section
-    names = {legacy.FILES[fid]: doc for fid, doc in after.items()}
-    return bw.plan_files(root, names, lambda: plan_migration(root, moves)[0]), []
+        _put_moved(moved, m, value)
+    return moved, questions
+
+
+def _value_question(m: legacy.Move, value) -> dict:
+    """値の対応表に無い旧い値への問い 1 件。"""
+    return {
+        "pointer": _section_rel(m.new),
+        "why": "insufficient",
+        "candidates": sorted(set(m.values.values())),
+        "evidence": [{"source": "repo", "ref": f".ndf/{legacy.FILES[m.file]}:{m.old}", "value": str(value)}],
+    }
+
+
+def _put_moved(moved: dict, m: legacy.Move, value) -> None:
+    """transform に合わせて、移す値を置く。"""
+    if m.transform == "dev_channel":
+        moved["_dev_workflow"] = value
+    elif m.transform == "version_files":
+        moved.setdefault("release", {})["_version_files"] = [{"path": p} for p in value or []]
+    else:
+        bw._set(moved, _section_rel(m.new), copy.deepcopy(value))
+
+
+def _by_name(after: dict) -> dict:
+    """ファイルの ID → 中身を、`.ndf/` の下のファイル名 → 中身へ写す。"""
+    return {legacy.FILES[fid]: doc for fid, doc in after.items()}
 
 
 def _remove_pointer(doc: dict, pointer: str) -> None:
