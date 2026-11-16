@@ -58,6 +58,7 @@ GROUPS = {
     "md": ["markdown_it", "mdit_py_plugins"],
     "mdtable": ["tabulate"],
     "schema": ["pydantic"],
+    "jsonschema": ["jsonschema"],
     "procs": ["psutil"],
     "locks": ["filelock"],
     "shparse": ["tree_sitter", "tree_sitter_bash"],

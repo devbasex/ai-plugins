@@ -56,6 +56,7 @@
     "NDF_ESTIMATE_DIR",
     "NDF_PRESENTATION_DIR",
     "NDF_STATE_HOME",
+    "NDF_STRATEGY_SNAPSHOT",
     "NDF_SV_STATE_DIR",
     "NDF_WHOLE_RUNS_DIR",
     "UV_PROJECT_ENVIRONMENT",
@@ -71,20 +72,7 @@
     {
       "file": "project.json",
       "keys": [
-        "ndf_policies",
-        "production_merge"
-      ]
-    },
-    {
-      "file": "supervise.json",
-      "keys": [
-        "release"
-      ]
-    },
-    {
-      "file": "worktree.json",
-      "keys": [
-        "base_branch"
+        "ndf_policies"
       ]
     }
   ],

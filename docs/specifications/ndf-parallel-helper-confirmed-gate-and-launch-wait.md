@@ -26,9 +26,8 @@
 | 一時レーンの起動が、前の一時レーンが動いている間に同じ秒に 2 回断られ、待たずに区分 `spawn` の問いになった | 断りの結果の値 `helper-busy` で他の断りと分け、耐久ワークフローが前の一時レーンが止まるまで待ってから打ち直す |
 
 起き直した一時レーンが、答えのある区分つきの問い（例: `-D` でのブランチの削除）を新しい id で送り直す事象は、
-この仕様の範囲に含めない。問いの入力（`AskUserQuestion` の `metadata`）は `source` 以外の欄を受け付けず、
-問いの操作の対象を問いの hook へ渡せないためである。#3608 が扱う。この仕様が持つのは、一時レーンが自分の依頼と
-答えを読む一覧（`asked`）までである。
+この仕様の範囲に含めない。[ndf-parallel-sprint-design-gate-and-helper-reused-answers.md](ndf-parallel-sprint-design-gate-and-helper-reused-answers.md)
+が扱う。この仕様が持つのは、一時レーンが自分の依頼と答えを読む一覧（`asked`）までである。
 
 ## 用語
 

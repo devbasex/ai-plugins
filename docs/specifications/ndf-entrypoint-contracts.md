@@ -96,7 +96,7 @@ NDF は Skill の手順をスクリプトにしながら育ってきたため、
 | `scripts/lib/allowlist.py`・`scripts/lib/py_imports.py` | 例外リストの読み込み・ファイル名の規則・`unused-allow` の判定と、エントリポイントからの import のたどり。`check-script-structure.py` と共有する |
 | `scripts/contract-allow/` | 契約の構造チェックの例外リスト |
 | `plugins/ndf/scripts/lib/decl.py` | 設定の置き場の解決とメインディレクトリの決め方 |
-| `plugins/ndf/scripts/lib/repo.py`（`production_of`・`production_branch`） | 本番のブランチの決め方の正本 |
+| `plugins/ndf/scripts/lib/repo.py`（`production_branch`）・`plugins/ndf/scripts/lib/branch_strategy.py` | 本番のブランチの決め方の正本 |
 | `plugins/ndf/scripts/lib/delivery.py` | `delivery` の行の `channel` をブランチ名へ解く |
 | `plugins/ndf/scripts/lib/test_strategy.py`（`decl_of`） | テストのコマンドを `project.json` の `test` から読み、`supervise.json` の `test` を移行の読みで受ける |
 
@@ -240,7 +240,7 @@ python3 scripts/check-ndf-contracts.py --draft <エントリポイントのパ�
 `git ls-tree` で merge-base の例外リストを読み、今の木にだけある項目を `allow-added` で落とす。足した項目が今の
 違反に当たっていても落とす。
 
-- **起点**: `--base` → `GITHUB_BASE_REF` → `.ndf/worktree.json` の `base_branch` の順に名前を決め、`origin/<名前>` と
+- **起点**: `--base` → `GITHUB_BASE_REF` → ブランチ戦略の宣言（`.ndf/project.json` の `branch_strategy`）の `branches.base` の順に名前を決め、`origin/<名前>` と
   HEAD の merge-base を取る。CI のジョブは `fetch-depth: 0` で取得する
 - **付け替え**: 同じ差分で同じ `kind`・`name` の項目を消している追加は、ファイルの移動に伴う付け替えとして数えない
 - **初版**: merge-base の `.github/workflows/script-structure.yml` が `check-ndf-contracts.py` を走らせていなければ、
@@ -261,8 +261,8 @@ python3 scripts/check-ndf-contracts.py --draft <エントリポイントのパ�
 個人の設定は追跡されず worktree に写らないため、メインディレクトリにしか無い。読み手ごとに順を選ばせない
 （読み手ごとに逆の順で読んでいたことが #2317・#1709 の原因だった）。
 
-**認可に関わる値はチームの設定でもメインディレクトリから読む。** `project.json` の `delivery`・`worktree.json` の
-`production_branch`（キーごとの `keys.<キー>.place: "main"`）と `runtimes.json`（ファイルの `place: "main"`）である。
+**認可に関わる値はチームの設定でもメインディレクトリから読む。** `project.json` のブランチ戦略の宣言 `branch_strategy`
+（キーごとの `keys.<キー>.place: "main"`）と `runtimes.json`（ファイルの `place: "main"`）である。
 Pull Request の変更だけでリリース承認ゲートの判定やランタイムの制限を緩められないようにするためである。
 `read_json_setting` は `main` のキーの値をメインディレクトリのファイルの値で上書きし、そこにキーかファイルが無ければ
 キーを消す（呼ばれた木の値で補わない。補うと、メインディレクトリに無いファイルを Pull Request が足すだけで判定を
@@ -285,13 +285,12 @@ Pull Request の変更だけでリリース承認ゲートの判定やランタ�
 
 ### 1 か所へ寄せた値
 
-**本番のブランチは `.ndf/worktree.json` の `production_branch`（無ければ既定ブランチ）だけが持つ。** 決め方は
-`lib/repo.py` の `production_of`・`production_branch` の 1 か所で、`supervise_lib/decl.py` と `lib/delivery.py` は
-独自に後退しない。既定ブランチを解く木も `lib/repo.py` の `first_git_tree` 1 つで選び（宣言を探す木の並びのうち、
-最初に存在する git の木）、まだ作っていない worktree のパスを渡しても既定ブランチへ後退する。`worktree.json` に寄せるのは、ベースブランチと並ぶ値であり、シェル
-（`lib/worktree-branch.sh`）と `project-decl.py write` も既にここを読み書きするためである。
+**本番のブランチはブランチ戦略の宣言（`.ndf/project.json` の `branch_strategy`）の `branches.production` だけが持つ。**
+決め方は `lib/repo.py` の `production_branch`（読む部品 `lib/branch_strategy.py`）の 1 か所で、`supervise_lib/decl.py` と
+`lib/delivery.py` は独自に後退しない。宣言が無い・読めないときは既定ブランチへ倒さずに止まる。シェル（`lib/worktree-branch.sh`）も
+同じ読む部品を `lib/branch_strategy_cli.py` で読む。
 
-`.ndf/project.json` の `delivery` の行は、本番のブランチ・ベースブランチへのマージで動くことを `channel` で指し、
+ブランチ戦略の宣言の `release.deliveries` の行は、本番のブランチ・ベースブランチへのマージで動くことを `channel` で指し、
 ブランチ名を写さない。
 
 | キー | 意味 |
@@ -301,7 +300,7 @@ Pull Request の変更だけでリリース承認ゲートの判定やランタ�
 
 `lib/delivery.py` の `build` は、行を読んだ時点で `channel` を 1 回だけブランチ名へ解いて行の `branch` に入れる。
 行の `branch` を読む既存の規則はそのまま当てはまる。`load_delivery` は `channel: base` をメインディレクトリの
-`base_branch` で解く（認可に関わる判定の値のため）。`project-decl.py write` は本番のブランチに当たる行を
+ブランチ戦略の宣言の `branches.base` で解く（認可に関わる判定の値のため）。`project-decl.py branch-strategy` は本番のブランチに当たる行を
 `"channel": "production"` で書く。
 
 **テストのコマンドは `project.json` の `test.suites` だけが持つ。** `supervise.json` の `test.command`・`test.all` は、
@@ -381,9 +380,9 @@ done
 - merge-base に無い例外の項目を足した木で `allow-added` になり、同じ `kind`・`name` の付け替えは通ること。merge-base の CI が
   チェックを走らせていない木では `ratchet: initial` で通り、例外リストを丸ごと消した後の木で足すと落ちること。CI の中で
   起点を決められないとき 3、手元では `ratchet: skipped` で 0 になること
-- 本番のブランチを読む経路が `repo.production_branch` だけで、`delivery` の行が `channel` で本番を指すこと。
+- 本番のブランチを読む経路が `repo.production_branch` だけで、`release.deliveries` の行が `channel` で本番を指すこと。
   `duplicates` を宣言して例外の項目が無い木で `setting-duplicate` が出ること
-- 古い置き場だけを持つ `.ndf/`（`delivery` の行が `branch` だけ・`supervise.json` の `test` だけ）で寄せる前と同じ値を得て、
+- 古い置き場だけを持つ `.ndf/`（`supervise.json` の `test` だけ）で寄せる前と同じ値を得て、
   両方あれば新しい置き場が勝つこと
 - worktree とメインディレクトリで `project.json` が違う木で、`test-run.py` の待つチェック（#2317）と cross-refactoring の
   `init` の戦略（#1709）が worktree の値を使い、`main` の置き場の設定は逆に読むこと。認可に関わるキーは Pull Request の

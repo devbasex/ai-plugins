@@ -23,7 +23,6 @@
     "plugins/ndf/README.md",
     "plugins/ndf/scripts/lib/README.md",
     "plugins/ndf/scripts/lib/run_state_kinds.py",
-    "plugins/ndf/scripts/lib/worktree-common.sh",
-    "plugins/ndf/scripts/project-decl.py"
+    "plugins/ndf/scripts/lib/worktree-common.sh"
   ]
 }

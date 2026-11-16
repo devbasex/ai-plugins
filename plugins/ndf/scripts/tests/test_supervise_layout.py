@@ -233,6 +233,24 @@ def test_imports_have_no_cycle():
 # --- #2773: CD のある場合のリリースプランの並び -------------------------------------------------------------
 
 
+def _ai_plugins_strategy(monkeypatch) -> None:
+    """このリポジトリのブランチ戦略の宣言を読む部品を、移行のコマンドが書く値（ai-plugins の移行は手順 2 で、それまで `.ndf/` に
+    旧いキーが残る）を返すように差し替える。本番ブランチの先頭の宣言（#3308）も同じ値にする。"""
+    sys.path.insert(0, str(PKG.parent / "lib"))
+    sys.path.insert(0, str(PKG.parent))
+    import branch_strategy
+    import branch_strategy_legacy as legacy
+    import repo
+    from project_lib import branch_strategy_migrate as bmig
+
+    root = SCRIPTS.parents[2]
+    plan, _ = bmig.plan_migration(root, legacy.load_moves())
+    project = plan.files.get("project.json") or json.loads((root / ".ndf" / "project.json").read_text(encoding="utf-8"))
+    got = branch_strategy.Strategy(project[branch_strategy.SECTION])
+    monkeypatch.setattr(repo, "branch_strategy_of", lambda _root: got)
+    monkeypatch.setattr(repo, "production_strategy", lambda _root, _prod: (got, f"origin/{got.production} の宣言"))
+
+
 def _release_plan(tmp_path, monkeypatch, channel: str, version: str, cd: bool) -> dict:
     """new release をこのリポジトリの宣言で組む。cd なら場合の判定を「CD があり、レビューなしでマージできる」に固定する。"""
     sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -240,6 +258,7 @@ def _release_plan(tmp_path, monkeypatch, channel: str, version: str, cd: bool) -
     import inproc
     import release_case
 
+    _ai_plugins_strategy(monkeypatch)
     if cd:
         monkeypatch.setattr(release_case, "case_at", lambda root, strict=False: release_case.decide_case(True, 0, ""))
     out = tmp_path / f"{channel}-{cd}.json"
@@ -282,6 +301,7 @@ def test_cd_review_prod_plan_writes_no_trail_and_ends_at_the_gate(tmp_path, monk
     import inproc
     import release_case
 
+    _ai_plugins_strategy(monkeypatch)
     monkeypatch.setattr(release_case, "case_at", lambda root, strict=False: release_case.decide_case(True, 1, ""))
     out = tmp_path / "plan.json"
     extra = ["--mvv", str(tmp_path / "state.json")] if mvv else []
@@ -305,6 +325,7 @@ def test_cd_no_review_mvv_plan_does_not_count_the_awaiting_release_as_a_gate(tmp
     import inproc
     import release_case
 
+    _ai_plugins_strategy(monkeypatch)
     monkeypatch.setattr(release_case, "case_at", lambda root, strict=False: release_case.decide_case(True, 0, ""))
     out = tmp_path / "plan.json"
     extra = ["--mvv" if mvv else "--state", str(tmp_path / "state.json")]

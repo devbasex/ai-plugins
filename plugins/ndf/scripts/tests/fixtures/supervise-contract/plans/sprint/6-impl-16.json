@@ -213,7 +213,7 @@
       "next": "base-sync"
     }
   ],
-  "base_branch": "sprint/m9",
+  "ベースブランチ": "sprint/m9",
   "テストの戦略": {
     "name": "local-full",
     "source": "derived:test_duration",

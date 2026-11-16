@@ -23,7 +23,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import deps  # noqa: E402
 
-deps.require("md", "mdtable", "textparse", "pathmatch")  # glossary.py の分を含めて 1 回で入れる（決定 23）
+deps.require("md", "mdtable", "textparse", "pathmatch", "jsonschema")  # glossary.py の分を含めて 1 回で入れる（決定 23）
 import md  # noqa: E402
 import repo  # noqa: E402
 from step_result import (
@@ -44,15 +44,21 @@ import glossary  # noqa: E402
 TOOL = "plan-to-spec"
 
 
-def update_index(index, text, name, link, title):
-    """索引の表（| [..](..) | .. |）か一覧（- [..](..)）の最後の行の後へ 1 行を足す。"""
+def _last_index_line(text: str) -> tuple[int | None, str | None]:
+    """`.md` へのリンクを持つ表の行か一覧の項目のうち、最後の行の番号と形（`table` / `list`）。無ければ (None, None)。"""
     lines = text.split("\n")
-    desc = title or name
     linked = {ln.line for ln in md.links(text) if ln.href.split("#", 1)[0].endswith(".md")}
     rows = {tb.start + 2 + k for tb in md.tables(text) for k in range(len(tb.rows))}
     items = {t.map[0] for t in md.md_tokens(text) if t.type == "list_item_open" and t.map and lines[t.map[0]].lstrip()[:2] in ("- ", "* ")}
     found = [(i, "table" if i in rows else "list") for i in sorted(linked) if i in rows or i in items]
-    last, kind = found[-1] if found else (None, None)
+    return found[-1] if found else (None, None)
+
+
+def update_index(index, text, name, link, title):
+    """索引の表（| [..](..) | .. |）か一覧（- [..](..)）の最後の行の後へ 1 行を足す。"""
+    lines = text.split("\n")
+    desc = title or name
+    last, kind = _last_index_line(text)
     if last is None:
         body = text.rstrip("\n") + "\n\n" + f"- [{name}]({link}) — {desc}" + "\n"
     else:

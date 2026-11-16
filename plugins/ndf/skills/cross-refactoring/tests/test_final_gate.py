@@ -311,40 +311,14 @@ def test_the_verification_never_uses_the_ci(
     """
     import argparse
 
-    from crossref_helpers import CALC, build_git_flow, commit_with_trailers, git, item_trailers, write_state
+    from crossref_helpers import CALC, build_git_flow, commit_with_trailers, git, item_trailers, planned_item, write_state
 
     flow = build_git_flow(tmp_path, monkeypatch, patch_lib, env_tmp_dir, ci_check="tests")
     read_ci: list = []
     patch_lib("check_run_result", lambda *a, **k: read_ci.append(a) or "success")
     work = flow["work"]
     state = read_state(flow["path"])
-    state["items"] = [
-        {
-            "id": "I-001",
-            "rank": 1,
-            "path": "src/calc.py",
-            "symbol": "total",
-            "smell": "long_method",
-            "technique": "extract_method",
-            "severity": "major",
-            "proposed_by": ["codex"],
-            "tier": "high",
-            "risk": False,
-            "tests": [],
-            "test_targets": ["tests/test_calc.py"],
-            "command": ["pytest", "-q", "tests/test_calc.py"],
-            "command_source": "targets",
-            "estimate": {"test": 0.0, "implement": 1.3, "verify": 0.2},
-            "start_deadline": "2099-01-01T00:00:00+00:00",
-            "test_start_deadline": None,
-            "status": "planned",
-            "commits": {"test": None, "implement": None, "fix": []},
-            "seconds": {},
-            "fix_count": 0,
-            "danger": [],
-            "estimated_diff_lines": 20,
-        }
-    ]
+    state["items"] = [planned_item("I-001", 1, symbol="total", command=["pytest", "-q", "tests/test_calc.py"])]
     state["plan"] = {
         "base_sha": git("rev-parse", "HEAD", cwd=work).stdout.strip(),
         "reserve": {"danger_whole_test": 0.1, "final_whole_test": 0.0, "fix": 5.5},

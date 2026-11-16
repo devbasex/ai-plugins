@@ -1,13 +1,13 @@
-"""レビューの単位（`branch_flow.reviews`。#3163）でプランへレビューのステップを差し込む・外す。
+"""レビューの単位（ブランチ戦略の宣言の `reviews`。#3163）でプランへレビューのステップを差し込む・外す。
 
 プランのテンプレートは、目録のスナップショット（`a.flow`）と課題のまとまりの記録の有無（`a.bundles`）から PR の種類の行を
 解き（`review_row`）、ここの関数でステップを置く。ステップの中身は既存の部品（`templates._inspect_steps`・`review_step`・
-`paths.BEHAVIOR_STEPS`）から作り、並びは `branch_flow.CHECKS` の順（リファクタリング → cross-review → 振る舞いの確認）にする。
+`paths.BEHAVIOR_STEPS`）から作り、並びは `strategy_rows.CHECKS` の順（リファクタリング → cross-review → 振る舞いの確認）にする。
 宣言のファイルは読まない（I6）。"""
 
 from __future__ import annotations
 
-import branch_flow
+import strategy_rows
 
 from supervise_lib.decl import sprint_flow
 from supervise_lib import templates
@@ -35,28 +35,28 @@ def _redirect(steps: list[dict], old: str, new: str) -> None:
             st["on_exit"] = {c: new if v == old else v for c, v in st["on_exit"].items()}
 
 
-def review_row(a, kind: str, bundled: bool | None = None) -> branch_flow.ReviewRow:
+def review_row(a, kind: str, bundled: bool | None = None) -> strategy_rows.ReviewRow:
     """引数のスナップショットとまとまりの記録の有無から種類の行を解く。`bundled` を渡せばそれを使う。"""
     if bundled is None:
         bundled = getattr(a, "bundles", None) is not None
-    return sprint_flow(a).flow.reviews.row(kind, bundled)
+    return sprint_flow(a).reviews.row(kind, bundled)
 
 
-def fast_review_row(a) -> branch_flow.ReviewRow:
+def fast_review_row(a) -> strategy_rows.ReviewRow:
     """pace: fast の検査のスプリントの PR の行。fast は課題のまとまりで実装を組まないため、まとまりの記録の無い列で解く。"""
     return review_row(a, "sprint", bundled=False)
 
 
-def chosen_checks(a, row: branch_flow.ReviewRow) -> tuple[str, ...]:
+def chosen_checks(a, row: strategy_rows.ReviewRow) -> tuple[str, ...]:
     """行の掛けるレビュー。リファクタリングを止める条件に当たれば cross-refactoring を外す（I7）。"""
     off = templates.refactor_suspended(a) or getattr(a, "mode", None) in templates.NO_REFACTOR_MODES
-    return tuple(c for c in branch_flow.CHECKS if row.runs(c) and not (off and c == "cross-refactoring"))
+    return tuple(c for c in strategy_rows.CHECKS if row.runs(c) and not (off and c == "cross-refactoring"))
 
 
 def drop_unchosen(plan: dict, checks: tuple[str, ...]) -> dict:
     """選ばないレビューのステップを外し、外したステップへの遷移をそのステップの `next` へ付け替える。"""
     steps = plan["steps"]
-    for check in branch_flow.CHECKS:
+    for check in strategy_rows.CHECKS:
         if check in checks:
             continue
         for sid in STEP_IDS[check]:

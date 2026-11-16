@@ -15,20 +15,14 @@
     "NDF_DEPS_REEXEC",
     "NDF_DEPS_VENV",
     "NDF_PRESENTATION_DIR",
+    "NDF_STRATEGY_SNAPSHOT",
     "UV_PROJECT_ENVIRONMENT"
   ],
   "settings": [
     {
       "file": "project.json",
       "keys": [
-        "ndf_policies",
-        "production_merge"
-      ]
-    },
-    {
-      "file": "worktree.json",
-      "keys": [
-        "base_branch"
+        "ndf_policies"
       ]
     }
   ],

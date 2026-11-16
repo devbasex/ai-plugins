@@ -1,0 +1,2577 @@
+{
+ "summary": "#3672 の削除の一覧（issues/issue-3672-design-removal.md の D 行）を 1 ファイル 1 行で持つ。scripts/check-legacy-branch-decl.py が、各行のパスに消す語が宣言のキーの形（\"語\"・'語'・.語・`語`）で残れば落とす。パスのファイルが無い行は通す。この表は 10 系と CI の行だけを持つ（11.0 の行は #3681、ai-plugins の .ndf/・方針の文書の行は移行の PR、宛先の検査（scripts/check-pr-base.sh とそのテスト scripts/tests/test_pr_base_guard.py）の行は宛先の検査の PR が足す）。旧いキーの名前が残ってよい置き場（移行のコマンド・旧い宣言の検査・移す行の表とそれらのテスト、CHANGELOG.md・docs/archive/・docs/development-history/・issues/）は載せない。D21（pr-review-steps.py）と D32 の cross-review の docs（02-fix-and-rotation.md・04-contracts.md）の語に base_branch を入れないのは、gh_pr_info の PR の宛先の欄と cross-review の状態の欄の名前で、宣言を読まないため。同じ欄を入力にする D37 のテスト（pr-review・cross-review・cross-refactoring・run_state・drive_review）の行も同じ理由で base_branch を語に入れない",
+ "rows": [
+  {
+   "id": "D5",
+   "path": "plugins/ndf/skills/worktree/schemas/worktree.schema.json",
+   "words": [
+    "base_branch",
+    "production_branch",
+    "branch_flow"
+   ]
+  },
+  {
+   "id": "D6",
+   "path": "plugins/ndf/skills/development-workflow/schemas/project.schema.json",
+   "words": [
+    "production_merge",
+    "delivery"
+   ]
+  },
+  {
+   "id": "D7",
+   "path": "plugins/ndf/skills/release/schemas/release.schema.json",
+   "words": [
+    "version_files"
+   ]
+  },
+  {
+   "id": "D11",
+   "path": "plugins/ndf/scripts/lib/branch_flow.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D12",
+   "path": "plugins/ndf/scripts/lib/repo.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D12",
+   "path": "plugins/ndf/scripts/lib/worktree-branch.sh",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D12",
+   "path": "plugins/ndf/scripts/lib/worktree-declaration.sh",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D12",
+   "path": "plugins/ndf/scripts/lib/decl.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D12",
+   "path": "plugins/ndf/scripts/lib/delivery.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D12",
+   "path": "plugins/ndf/scripts/lib/project_decl.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D12",
+   "path": "plugins/ndf/scripts/lib/release_case.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D13",
+   "path": "plugins/ndf/scripts/lib/parallel_repo.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D13",
+   "path": "plugins/ndf/scripts/lib/parallel_lane.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D13",
+   "path": "plugins/ndf/scripts/lib/parallel_external.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D13",
+   "path": "plugins/ndf/scripts/lib/parallel_release.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D13",
+   "path": "plugins/ndf/scripts/lib/parallel_route.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D13",
+   "path": "plugins/ndf/scripts/lib/gate1_requests.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D13",
+   "path": "plugins/ndf/scripts/lib/default_branch_candidates.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D14",
+   "path": "plugins/ndf/scripts/project-decl.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D14",
+   "path": "plugins/ndf/scripts/project_lib/__init__.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D14",
+   "path": "plugins/ndf/scripts/project_lib/merge.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D14",
+   "path": "plugins/ndf/scripts/project_lib/model.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D14",
+   "path": "plugins/ndf/scripts/project_lib/fingerprint.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D14",
+   "path": "plugins/ndf/scripts/project_lib/measure_repo.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D15",
+   "path": "plugins/ndf/scripts/project_lib/measure_branch_flow.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D16",
+   "path": "plugins/ndf/scripts/supervise_lib/decl.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D16",
+   "path": "plugins/ndf/scripts/supervise_lib/review_units.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D16",
+   "path": "plugins/ndf/scripts/supervise_lib/release_flow.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D16",
+   "path": "plugins/ndf/scripts/supervise_lib/steps.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D16",
+   "path": "plugins/ndf/scripts/supervise_lib/plan.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D16",
+   "path": "plugins/ndf/scripts/supervise_lib/paths.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D16",
+   "path": "plugins/ndf/scripts/supervise_lib/new_args.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D16",
+   "path": "plugins/ndf/scripts/supervise_lib/pr.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D16",
+   "path": "plugins/ndf/scripts/supervise_lib/slow.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D16",
+   "path": "plugins/ndf/scripts/supervise_lib/release_templates.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D16",
+   "path": "plugins/ndf/scripts/supervise_lib/delivery_templates.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D16",
+   "path": "plugins/ndf/scripts/supervise_lib/release_cd.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D16",
+   "path": "plugins/ndf/scripts/supervise_lib/sprint.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D16",
+   "path": "plugins/ndf/scripts/supervise_lib/sprint_routes.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D16",
+   "path": "plugins/ndf/scripts/supervise_lib/sprint_waves.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D17",
+   "path": "plugins/ndf/scripts/release_lib/promotion.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D18",
+   "path": "plugins/ndf/scripts/release_lib/review_range.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D18",
+   "path": "plugins/ndf/scripts/release_lib/included.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D18",
+   "path": "plugins/ndf/scripts/release_lib/names.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D18",
+   "path": "plugins/ndf/scripts/release_lib/approval_trail.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D18",
+   "path": "plugins/ndf/scripts/release_lib/context.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D18",
+   "path": "plugins/ndf/scripts/release_lib/reviewed.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D19",
+   "path": "plugins/ndf/scripts/release-steps.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D19",
+   "path": "plugins/ndf/scripts/merged-steps.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D19",
+   "path": "plugins/ndf/scripts/pr-steps.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D19",
+   "path": "plugins/ndf/scripts/pr_steps_lib/gh_pr.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D19",
+   "path": "plugins/ndf/scripts/test-run.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D19",
+   "path": "plugins/ndf/scripts/doc-lint.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D19",
+   "path": "plugins/ndf/scripts/check-trigger.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D19",
+   "path": "plugins/ndf/scripts/experimental/issue-body.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D20",
+   "path": "plugins/ndf/scripts/worktree-setup.sh",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D20",
+   "path": "plugins/ndf/scripts/worktree-session.sh",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D21",
+   "path": "plugins/ndf/skills/pr-review/scripts/pr-review-steps.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D29",
+   "path": "scripts/ci-heavy-skip.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D29",
+   "path": "scripts/check-ndf-contracts.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D29",
+   "path": "scripts/contracts_lib/ratchet.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D29",
+   "path": "scripts/ndf-next-parity/parity/fixes.json",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D30",
+   "path": "scripts/repo-assumptions-allow/plugins__ndf__scripts__lib__branch_flow.py--quoted-develop--not-a-violation.json",
+   "words": [
+    "branch_flow"
+   ]
+  },
+  {
+   "id": "D30",
+   "path": "scripts/repo-assumptions-allow/plugins__ndf__scripts__lib__branch_flow.py--quoted-main--not-a-violation.json",
+   "words": [
+    "branch_flow"
+   ]
+  },
+  {
+   "id": "D30",
+   "path": "scripts/repo-assumptions-allow/plugins__ndf__scripts__lib__branch_flow.py--release-branch--not-a-violation.json",
+   "words": [
+    "branch_flow"
+   ]
+  },
+  {
+   "id": "D30",
+   "path": "scripts/script-structure-allow/plugins__ndf__scripts__lib__branch_flow.py--lines.json",
+   "words": [
+    "branch_flow"
+   ]
+  },
+  {
+   "id": "D31",
+   "path": "plugins/ndf/skills/worktree/references/declaration.md",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D32-1",
+   "path": "plugins/ndf/agents/code-reviewer.md",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D32-2",
+   "path": "plugins/ndf/skills/cherry-pick-pr/SKILL.md",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D32-3",
+   "path": "plugins/ndf/skills/cross-review/docs/02-fix-and-rotation.md",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D32-4",
+   "path": "plugins/ndf/skills/cross-review/docs/04-contracts.md",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D32-5",
+   "path": "plugins/ndf/skills/deploy/SKILL.md",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D32-6",
+   "path": "plugins/ndf/skills/development-workflow/references/agent-layers.md",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D32-7",
+   "path": "plugins/ndf/skills/development-workflow/references/document-destinations.md",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D32-8",
+   "path": "plugins/ndf/skills/development-workflow/references/glossary.md",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D32-9",
+   "path": "plugins/ndf/skills/development-workflow/references/loop.md",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D32-10",
+   "path": "plugins/ndf/skills/development-workflow/references/pace.md",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D32-11",
+   "path": "plugins/ndf/skills/development-workflow/references/parallel.md",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D32-12",
+   "path": "plugins/ndf/skills/development-workflow/references/parallel-work.md",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D32-13",
+   "path": "plugins/ndf/skills/development-workflow/references/production-merge.md",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D32-14",
+   "path": "plugins/ndf/skills/development-workflow/references/project-analysis.md",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D32-15",
+   "path": "plugins/ndf/skills/development-workflow/SKILL.md",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D32-16",
+   "path": "plugins/ndf/skills/merged/SKILL.md",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D32-17",
+   "path": "plugins/ndf/skills/ndf-policies/SKILL.md",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D32-18",
+   "path": "plugins/ndf/skills/pr/SKILL.md",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D32-19",
+   "path": "plugins/ndf/skills/release/references/cd-setup.md",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D32-20",
+   "path": "plugins/ndf/skills/release/references/form-package-plugin.md",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D32-21",
+   "path": "plugins/ndf/skills/release/references/release-steps.md",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D32-22",
+   "path": "plugins/ndf/skills/release/SKILL.md",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D32-23",
+   "path": "plugins/ndf/skills/retrospective/SKILL.md",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D32-24",
+   "path": "plugins/ndf/skills/worktree/SKILL.md",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-1",
+   "path": "plugins/ndf/scripts/tests/fixtures/supervise-contract/plans/check.json",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-2",
+   "path": "plugins/ndf/scripts/tests/fixtures/supervise-contract/plans/close/1-close.json",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-3",
+   "path": "plugins/ndf/scripts/tests/fixtures/supervise-contract/plans/close/2-check.json",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-4",
+   "path": "plugins/ndf/scripts/tests/fixtures/supervise-contract/plans/close/3-release.json",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-5",
+   "path": "plugins/ndf/scripts/tests/fixtures/supervise-contract/plans/close/4-release-prod.json",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-6",
+   "path": "plugins/ndf/scripts/tests/fixtures/supervise-contract/plans/close/sprint.json",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-7",
+   "path": "plugins/ndf/scripts/tests/fixtures/supervise-contract/plans/fix.json",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-8",
+   "path": "plugins/ndf/scripts/tests/fixtures/supervise-contract/plans/impl.json",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-9",
+   "path": "plugins/ndf/scripts/tests/fixtures/supervise-contract/plans/release.json",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-10",
+   "path": "plugins/ndf/scripts/tests/fixtures/supervise-contract/plans/sprint/10-release-prod.json",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-11",
+   "path": "plugins/ndf/scripts/tests/fixtures/supervise-contract/plans/sprint/6-impl-16.json",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-12",
+   "path": "plugins/ndf/scripts/tests/fixtures/supervise-contract/plans/sprint/6-impl-17.json",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-13",
+   "path": "plugins/ndf/scripts/tests/fixtures/supervise-contract/plans/sprint/7-check.json",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-14",
+   "path": "plugins/ndf/scripts/tests/fixtures/supervise-contract/plans/sprint/8-release.json",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-15",
+   "path": "plugins/ndf/scripts/tests/fixtures/supervise-contract/plans/sprint/sprint.json",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-16",
+   "path": "plugins/ndf/scripts/tests/fixtures/wait_notice_corpus.json",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-17",
+   "path": "plugins/ndf/scripts/tests/release_repo.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-18",
+   "path": "plugins/ndf/scripts/tests/test_branch_flow.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-19",
+   "path": "plugins/ndf/scripts/tests/test_bump_keeps_instructions.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-20",
+   "path": "plugins/ndf/scripts/tests/test_check_trigger.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-21",
+   "path": "plugins/ndf/scripts/tests/test_delivery.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-22",
+   "path": "plugins/ndf/scripts/tests/test_design_pr_merge.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-23",
+   "path": "plugins/ndf/scripts/tests/test_doc_lint.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-24",
+   "path": "plugins/ndf/scripts/tests/test_drive_review.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-25",
+   "path": "plugins/ndf/scripts/tests/test_experimental.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-26",
+   "path": "plugins/ndf/scripts/tests/test_gate1_requests.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-27",
+   "path": "plugins/ndf/scripts/tests/test_impl_format_steps.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-28",
+   "path": "plugins/ndf/scripts/tests/test_lib_decl.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-29",
+   "path": "plugins/ndf/scripts/tests/test_lib_proc.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-30",
+   "path": "plugins/ndf/scripts/tests/test_parallel_external.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-31",
+   "path": "plugins/ndf/scripts/tests/test_parallel_lane.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-32",
+   "path": "plugins/ndf/scripts/tests/test_parallel_plan.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-33",
+   "path": "plugins/ndf/scripts/tests/test_parallel_run.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-34",
+   "path": "plugins/ndf/scripts/tests/test_production_default_branch.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-35",
+   "path": "plugins/ndf/scripts/tests/test_project_decl_branch_flow.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-36",
+   "path": "plugins/ndf/scripts/tests/test_project_decl.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-37",
+   "path": "plugins/ndf/scripts/tests/test_pr_steps.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-38",
+   "path": "plugins/ndf/scripts/tests/test_push_fix.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-39",
+   "path": "plugins/ndf/scripts/tests/test_release_approval_trail.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-40",
+   "path": "plugins/ndf/scripts/tests/test_release_approved_commit.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-41",
+   "path": "plugins/ndf/scripts/tests/test_release_case.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-42",
+   "path": "plugins/ndf/scripts/tests/test_release_cd.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-43",
+   "path": "plugins/ndf/scripts/tests/test_release_notes_changelog.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-44",
+   "path": "plugins/ndf/scripts/tests/test_release_production_flow.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-45",
+   "path": "plugins/ndf/scripts/tests/test_release_record.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-46",
+   "path": "plugins/ndf/scripts/tests/test_release_replaced.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-47",
+   "path": "plugins/ndf/scripts/tests/test_release_selected.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-48",
+   "path": "plugins/ndf/scripts/tests/test_release_steps.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-49",
+   "path": "plugins/ndf/scripts/tests/test_release_version_merge.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-50",
+   "path": "plugins/ndf/scripts/tests/test_release_version.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-51",
+   "path": "plugins/ndf/scripts/tests/test_review_units.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-52",
+   "path": "plugins/ndf/scripts/tests/test_run_state.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-53",
+   "path": "plugins/ndf/scripts/tests/test_sprint_branch_flow.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-54",
+   "path": "plugins/ndf/scripts/tests/test_sprint_close_merge_green.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-55",
+   "path": "plugins/ndf/scripts/tests/test_sprint_loop.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-56",
+   "path": "plugins/ndf/scripts/tests/test_sprint_procedures.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-57",
+   "path": "plugins/ndf/scripts/tests/test_sprint_start_record.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-58",
+   "path": "plugins/ndf/scripts/tests/test_stage_skills.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-59",
+   "path": "plugins/ndf/scripts/tests/test_step_scripts.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-60",
+   "path": "plugins/ndf/scripts/tests/test_supervise_contract.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-61",
+   "path": "plugins/ndf/scripts/tests/test_supervise_new.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-62",
+   "path": "plugins/ndf/scripts/tests/test_supervise_pace_auto.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-63",
+   "path": "plugins/ndf/scripts/tests/test_supervise_pace_manual.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-64",
+   "path": "plugins/ndf/scripts/tests/test_supervise_pace.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-65",
+   "path": "plugins/ndf/scripts/tests/test_supervise_pace_verify.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-66",
+   "path": "plugins/ndf/scripts/tests/test_supervise_pr_marks.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-67",
+   "path": "plugins/ndf/scripts/tests/test_supervise.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-68",
+   "path": "plugins/ndf/scripts/tests/test_supervise_step_budgets.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-69",
+   "path": "plugins/ndf/scripts/tests/test_tool_paths.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-70",
+   "path": "plugins/ndf/scripts/tests/test_worktree_default_branch.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37a-71",
+   "path": "plugins/ndf/scripts/tests/test_worktree_lib_split.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37b-1",
+   "path": "plugins/ndf/skills/backlog-refinement/tests/fixtures/overhaul-20261101.json",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37b-2",
+   "path": "plugins/ndf/skills/backlog-refinement/tests/test_related_skills_characterization.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37b-3",
+   "path": "plugins/ndf/skills/cross-refactoring/tests/crossref_helpers.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37b-4",
+   "path": "plugins/ndf/skills/cross-refactoring/tests/test_prepare_worktrees.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37b-5",
+   "path": "plugins/ndf/skills/cross-review/tests/test_review_criteria_flow.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37b-6",
+   "path": "plugins/ndf/skills/cross-review/tests/test_review_scope.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37b-7",
+   "path": "plugins/ndf/skills/cross-review/tests/test_rotate_pr_queue.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37b-8",
+   "path": "plugins/ndf/skills/cross-review/tests/test_state_judge_ci.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37b-9",
+   "path": "plugins/ndf/skills/cross-review/tests/test_state_offline_fetch.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37b-10",
+   "path": "plugins/ndf/skills/cross-review/tests/test_state_reopen.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37b-11",
+   "path": "plugins/ndf/skills/cross-review/tests/test_state_rest_metadata.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37b-12",
+   "path": "plugins/ndf/skills/cross-review/tests/test_state_resume_args.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37b-13",
+   "path": "plugins/ndf/skills/cross-review/tests/test_state_review_pool.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37b-14",
+   "path": "plugins/ndf/skills/development-workflow/tests/test_workflow_guard.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37b-15",
+   "path": "plugins/ndf/skills/pr-review/tests/test_pr_review_steps.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37b-16",
+   "path": "plugins/ndf/skills/worktree/tests/test_base_branch.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37b-17",
+   "path": "plugins/ndf/skills/worktree/tests/test_branch_resolution.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37b-18",
+   "path": "plugins/ndf/skills/worktree/tests/test_create_from.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37b-19",
+   "path": "plugins/ndf/skills/worktree/tests/test_declaration_local.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37b-20",
+   "path": "plugins/ndf/skills/worktree/tests/test_production_branch.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37b-21",
+   "path": "plugins/ndf/skills/worktree/tests/test_session.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37b-22",
+   "path": "plugins/ndf/skills/worktree/tests/test_setup.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37b-23",
+   "path": "plugins/ndf/skills/worktree/tests/worktree_helpers.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37d-1",
+   "path": "scripts/tests/test_base_branch_consistency.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37d-2",
+   "path": "scripts/tests/test_check_ndf_contracts.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D37d-3",
+   "path": "scripts/tests/test_ci_heavy_skip.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  }
+ ]
+}

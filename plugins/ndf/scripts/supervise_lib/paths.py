@@ -88,15 +88,15 @@ def _prepare_deps(wt, **kw) -> str | None:
 
 
 def _resolve_base(plan: dict, repo: str) -> tuple[str | None, str | None]:
-    """作業ツリーの起点（起点のコミット → 起点 → base_branch → 宣言の順）を決め、origin なら fetch する。(起点, 誤りの文) を返す。
+    """作業ツリーの起点（起点のコミット → 起点 → 計画のベースブランチ → 宣言の順）を決め、origin なら fetch する。(起点, 誤りの文) を返す。
 
     「起点のコミット」は作業ツリーだけが読む（まとめたリリースの本番のプランが承認したコミットを入れる）。版の判定と
     probe の {base} は「起点」（`origin/<ベースブランチ>`）を読むため、承認したコミットを「起点」へ入れない。"""
     base = plan.get("起点のコミット") or plan.get("起点")
     if not base:
-        b = plan.get("base_branch") or decl.declared_base_of([repo])
+        b = plan.get(decl.PLAN_BASE) or decl.declared_base_of([repo])
         if not b:
-            return None, "作業ツリーの起点が分からない（計画の 起点 か base_branch、または .ndf/worktree.json の base_branch）"
+            return None, f"作業ツリーの起点が分からない（計画の 起点 か {decl.PLAN_BASE}、またはブランチ戦略の宣言）"
         base = f"origin/{b}"
     if base.startswith("origin/"):
         subprocess.run(["git", "-C", repo, "fetch", "-q", "origin"], capture_output=True, text=True)

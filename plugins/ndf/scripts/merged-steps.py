@@ -53,10 +53,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import deps  # noqa: E402
 
-deps.require("waits", "durable", "md", "mdtable", "procs", "locks", "schema", "versions")
+deps.require("waits", "durable", "md", "mdtable", "procs", "locks", "schema", "versions", "jsonschema")
 from step_result import StepError, approval_present, common_parser, emit, git, git_root, main_with, repo_slug, result, run  # noqa: E402
 import container_reach  # noqa: E402
-import branch_flow  # noqa: E402
+import branch_strategy  # noqa: E402
+import strategy_rows  # noqa: E402
 import gh_parts  # noqa: E402
 import repo  # noqa: E402
 import run_state  # noqa: E402
@@ -193,7 +194,7 @@ def _cleanup_pr(ctx: CleanupContext, n):
     branch, merge_commit = got
     # 選んで集める取り込み方は本番に届くまで残す（#3121 の決定 7）。残すかは目録の開始時の記録で決める（#3310）。
     # 記録は .ndf/ の目録を全部読むため、スプリントブランチのときだけ探す
-    record = repo.sprint_flow_record(ctx.main_dir, branch) if (branch or "").startswith(branch_flow.SPRINT_PREFIX) else None
+    record = repo.sprint_flow_record(ctx.main_dir, branch) if (branch or "").startswith(strategy_rows.SPRINT_PREFIX) else None
     if why := repo.kept_sprint_branch(ctx.main_dir, branch, record):
         ctx.add("branch", branch, "kept", why)
     elif _remove_pr_worktrees(ctx, branch, merge_commit):
@@ -204,11 +205,10 @@ def _cleanup_pr(ctx: CleanupContext, n):
 
 def _update_main_dir(main_dir, add):
     """主ディレクトリが base にいれば pull --ff-only する。失敗の理由（無ければ None）を返す。"""
-    base = repo.base_branch(main_dir)
-    if not base:
-        add(
-            "main_dir", main_dir, "kept", "起点が決まらない（宣言の base_branch も origin の HEAD も main / master も無い）ため pull しない"
-        )
+    try:
+        base = repo.base_branch(main_dir)
+    except branch_strategy.StrategyError as e:
+        add("main_dir", main_dir, "kept", f"ベースブランチが決まらないため pull しない: {e.reason}")
         return None
     cur = git(main_dir, "branch", "--show-current", check=False).stdout.strip()
     if cur != base:

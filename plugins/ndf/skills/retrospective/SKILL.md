@@ -56,7 +56,7 @@ RECORD_REPO="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
 Pull Request と違う場所へ記録が残り得る。`gh repo view` が別のリポジトリを返す位置に
 いるときは、推測せずに名前を利用者に確かめる。
 
-**ブランチ運用の宣言と実際の使い方のずれも見る。** `project-decl.py measure --out <一時ファイル>` の後に `project-decl.py drift --measure <一時ファイル>` を打ち、`items` に行があれば項目・根拠・更新の案を振り返りの「次に変えること」へ載せる。宣言を変えるかは利用者の設定の書き換え（共通原則 C7）なので、案として示し、自分では書き換えない（手順は `development-workflow` の [references/project-analysis.md](../development-workflow/references/project-analysis.md) の「ブランチ運用」）。
+**ブランチ戦略の宣言と実際の使い方のずれも見る。** `project-decl.py branch-strategy measure` を打ち、`values` が今のセクション（`.ndf/project.json` の `branch_strategy`）と違うキーか `questions` があれば、キー・根拠・更新の案を振り返りの「次に変えること」へ載せる。宣言を変えるかは利用者の設定の書き換え（共通原則 C7）なので、案として示し、自分では書き換えない（手順は `development-workflow` の [references/project-analysis.md](../development-workflow/references/project-analysis.md) の「ブランチ戦略の宣言」）。
 
 ### 1. 起票の取りこぼしを拾う
 
@@ -164,7 +164,7 @@ python3 "$CLAUDE_PLUGIN_ROOT/skills/skill-stats/scripts/skill-stats.py" \
 
 | 手順 | 入力 | 出力 | 止まる条件 |
 | --- | --- | --- | --- |
-| 1. 開発の起点を解決する | `.ndf/worktree.json` の `base_branch`、origin | `$dev_base` | 設定したブランチが origin にもローカルにも無い |
+| 1. 開発の起点を解決する | ブランチ戦略の宣言の `branches.base`、origin | `$dev_base` | 設定したブランチが origin にもローカルにも無い |
 | 2. 記録対象の基準ブランチを決める | 下表の場合、`$dev_base`（起点の issue を持たない変更だけが使う） | `$record_base` | スプリントをリリースした先のブランチを判別できない |
 | 3. 基準コミットから Pull Request を引く | `$record_base`、`$RECORD_REPO` | マージ済みの Pull Request 1 件の番号 | マージ済みへ絞った結果が 1 件でない |
 
@@ -174,49 +174,33 @@ python3 "$CLAUDE_PLUGIN_ROOT/skills/skill-stats/scripts/skill-stats.py" \
 `pr-review` / `cherry-pick-pr` と同じ解決を使う。
 
 ```bash
-# 起点は開発の本流であって、既定ブランチとは限らない。宣言（`.ndf/worktree.json` の
-# `base_branch`）を先に読み、その名前が実在することを確かめる。取得済みの参照に無ければ
-# origin へ問い合わせる（取得していないだけの場合を「無い」と読まないため）。実在しなければ
-# 既定ブランチへ落とさずに止まる。宣言が無ければ origin の HEAD が指す先を使い、それも
-# 取れなければ慣例の名前のうちローカルにあるものへ落とす
-# （共通ライブラリ `wt_base_branch` と同じ順序）
-dev_base=$(jq -r 'select(.version == 1) | .base_branch | select(type == "string")' \
-  .ndf/worktree.json 2>/dev/null)
-if [ -n "$dev_base" ]; then
-  dev_base_found=0
-  if git show-ref --verify --quiet "refs/remotes/origin/$dev_base" ||
-     git show-ref --verify --quiet "refs/heads/$dev_base"; then
-    dev_base_found=1
-  else
-    # `git ls-remote` のパターンは参照名の末尾に一致する。問い合わせの成功だけを見ると
-    # `refs/heads/x/refs/heads/<ベースブランチ>` のような別のブランチでも「ある」と読むため、
-    # 返った行の参照名そのものを照合する（共通ライブラリ `wt_branch_exists` と同じ形）
-    dev_base_listing=$(GIT_TERMINAL_PROMPT=0 git ls-remote --heads origin \
-      "refs/heads/$dev_base" 2>/dev/null)
-    while IFS= read -r line; do
-      case "$line" in *$'\t'"refs/heads/$dev_base") dev_base_found=1; break ;; esac
-    done <<<"$dev_base_listing"
-  fi
-  [ "$dev_base_found" -eq 1 ] || {
-    printf 'NOTE: .ndf/worktree.json の base_branch が指す %s は origin にもローカルにもありません\n' \
-      "$dev_base" >&2
-    exit 1
-  }
+# 起点はブランチ戦略の宣言（`.ndf/project.json` の `branch_strategy.branches.base`）。宣言が無い・壊れている・
+# 旧い宣言のキーが残るときは、理由（ファイル・キーの位置・打つコマンド）を出して止まる。既定ブランチへ落とさない
+dev_base=$(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lib/branch_strategy_cli.py" get /branches/base) || exit 1
+# 名前の実在を確かめる。取得済みの参照に無ければ origin へ問い合わせる（取得していないだけの場合を「無い」と読まないため）。
+# `git ls-remote` のパターンは参照名の末尾に一致するので、返った行の参照名そのものを照合する（共通ライブラリ `wt_branch_exists` と同じ形）
+dev_base_found=0
+if git show-ref --verify --quiet "refs/remotes/origin/$dev_base" ||
+   git show-ref --verify --quiet "refs/heads/$dev_base"; then
+  dev_base_found=1
 else
-  dev_base=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')
-  for candidate in main master; do
-    [ -n "$dev_base" ] && break
-    git show-ref --verify --quiet "refs/heads/$candidate" && dev_base=$candidate
-  done
-  dev_base=${dev_base:-main}
+  dev_base_listing=$(GIT_TERMINAL_PROMPT=0 git ls-remote --heads origin \
+    "refs/heads/$dev_base" 2>/dev/null)
+  while IFS= read -r line; do
+    case "$line" in *$'\t'"refs/heads/$dev_base") dev_base_found=1; break ;; esac
+  done <<<"$dev_base_listing"
 fi
+[ "$dev_base_found" -eq 1 ] || {
+  printf 'NOTE: ブランチ戦略の宣言の branches.base が指す %s は origin にもローカルにもありません\n' "$dev_base" >&2
+  exit 1
+}
 ```
 
 **手順 2: 記録対象の基準ブランチを決める**
 
 | 場合 | 起点にするコミット |
 | --- | --- |
-| 起点の issue を持たない変更 | その変更をマージした先のブランチ（起点。`.ndf/worktree.json` の `base_branch`）の先頭 |
+| 起点の issue を持たない変更 | その変更をマージした先のブランチ（起点。ブランチ戦略の宣言の `branches.base`）の先頭 |
 | スプリント | そのスプリントをリリースした先（正式版のチャネルのブランチ）の先頭 |
 
 **スプリントを対象にする場合は、そのスプリントをリリースした先を使う。**

@@ -15,6 +15,7 @@
     "NDF_LOCK_DIR",
     "NDF_PRESENTATION_DIR",
     "NDF_STATE_HOME",
+    "NDF_STRATEGY_SNAPSHOT",
     "UV_PROJECT_ENVIRONMENT",
     "XDG_STATE_HOME"
   ],
@@ -22,7 +23,6 @@
     {
       "file": "worktree.json",
       "keys": [
-        "base_branch",
         "tool_paths",
         "version"
       ]

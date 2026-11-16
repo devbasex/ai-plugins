@@ -1,4 +1,4 @@
-"""リポジトリの識別（#1142 の L0）: メインディレクトリ・`owner/repo`・slug・起点（宣言のベースブランチと既定ブランチ）。
+"""リポジトリの識別（#1142 の L0）: メインディレクトリ・`owner/repo`・slug・既定ブランチと、ブランチ戦略の宣言のブランチ名。
 
 git だけで決める（`proc` の上に置く）。`gh repo view` まで使って決めるのは `gh_call.resolve_repo` で、
 GitHub を呼ぶのは `gh_*` のモジュールだけにする。
@@ -12,10 +12,11 @@ import re
 import subprocess
 from pathlib import Path
 
-import branch_flow
+import branch_strategy
 import decl
 import limits
 import proc
+import strategy_rows
 from closing import defer_closing
 
 ORIGIN_URL = re.compile(r"[:/](?P<owner>[^/:]+)/(?P<name>[^/]+?)(?:\.git)?/?$")
@@ -25,9 +26,6 @@ SPRINT_MANIFEST = "sprint.json"
 PLAN_STATE_SUFFIX = "-state"
 # 確定仕様の置き場（リポジトリの根からの相対）。確定仕様化と設計との突き合わせが同じものを読む
 SPEC_DIR = "docs/specifications"
-# 既定ブランチの候補を理由の文言に載せる形（「 / 」区切りと「・」区切り）
-_CANDIDATES_TEXT = " / ".join(branch_flow.DEFAULT_BRANCH_CANDIDATES)
-_CANDIDATES_LIST = "・".join(branch_flow.DEFAULT_BRANCH_CANDIDATES)
 
 
 # メインディレクトリの決め方の正本は decl.main_dir（サブモジュールは core.worktree。#2054）
@@ -51,11 +49,11 @@ def slug(owner_repo_value: str | None) -> str | None:
 
 
 def read_worktree_decl(root, fallback: bool = True) -> tuple[dict, str | None]:
-    """`.ndf/worktree.json` の中身と、読めなかった理由。置き場は `decl.read_json_setting`（`root` → メインディレクトリ。
-    `production_branch` だけはメインディレクトリ → `root`。Pull Request の変更で本番チャネルを動かせないようにする。#2363）。
+    """`.ndf/worktree.json`（worktree の振る舞いの設定）の中身と、読めなかった理由。置き場は `decl.read_json_setting`
+    （`root` → メインディレクトリ）。ブランチ名は持たない（ブランチ戦略の宣言 `branch_strategy_of` が持つ。#3672）。
 
-    `fallback=False` なら `root` の直下だけを読み、メインディレクトリへ探しに行かない。
-    無ければ `({}, None)`。JSON として読めない・オブジェクトでなければ `({}, 理由)`（理由にファイルを書く）。
+        `fallback=False` なら `root` の直下だけを読み、メインディレクトリへ探しに行かない。
+        無ければ `({}, None)`。JSON として読めない・オブジェクトでなければ `({}, 理由)`（理由にファイルを書く）。
     """
     if not root:
         return {}, None
@@ -65,24 +63,52 @@ def read_worktree_decl(root, fallback: bool = True) -> tuple[dict, str | None]:
     return decl.load_file(f, WORKTREE_DECL.name) if f.is_file() else ({}, None)
 
 
-def _branch_value(v) -> str | None:
-    return v if isinstance(v, str) and v else None
+# スプリントの開始時のブランチ戦略のスナップショット（`{"top": メインディレクトリ, "snapshot": snapshot_section の形}` の JSON）。
+# 保存済みのプランの全段（`supervise.py run` が渡す）と、段が起動する子プロセスが、今の宣言でなく開始時の名前と経路で解く（I13・決定 9）
+SNAPSHOT_ENV = "NDF_STRATEGY_SNAPSHOT"
 
 
-def declared_base(root, remote: bool = False) -> str | None:
-    """`.ndf/worktree.json` の `base_branch`。`remote` なら `origin/<名前>`。宣言が無い・読めなければ `None`。"""
-    v = _branch_value(read_worktree_decl(root)[0].get("base_branch"))
-    if v is None:
+def snapshot_env(root, snapshot) -> str | None:
+    """`root` のメインディレクトリに効かせる `SNAPSHOT_ENV` の値。メインディレクトリかスナップショットが無ければ None（渡さない）。"""
+    top = decl.main_dir(root) if root else None
+    if top is None or not isinstance(snapshot, dict) or not snapshot:
         return None
-    return f"origin/{v}" if remote else v
+    return json.dumps({"top": str(Path(top).resolve()), "snapshot": snapshot}, ensure_ascii=False)
+
+
+def _pinned(top: str) -> branch_strategy.Strategy | None:
+    """`SNAPSHOT_ENV` が `top` のメインディレクトリのスナップショットを持てばその戦略。無い・別のリポジトリなら None。"""
+    raw = os.environ.get(SNAPSHOT_ENV)
+    if not raw:
+        return None
+    try:
+        got = json.loads(raw)
+    except ValueError as e:
+        raise branch_strategy.StrategyError(f"{SNAPSHOT_ENV} を読めない: {e}") from e
+    if not isinstance(got, dict):
+        raise branch_strategy.StrategyError(f"{SNAPSHOT_ENV} の形が違う（オブジェクトでない）")
+    return branch_strategy.from_snapshot(got.get("snapshot")) if got.get("top") == top else None
+
+
+def branch_strategy_of(root) -> branch_strategy.Strategy:
+    """メインディレクトリのブランチ戦略の宣言（`.ndf/project.json` の `branch_strategy`）。`SNAPSHOT_ENV` が開始時の
+    スナップショットを渡していればその値。
+
+    メインディレクトリから読むのは、Pull Request の変更でブランチ名を動かせないようにするためである（#2363）。
+    セクションが無い・壊れている・旧いキーが残るときは `branch_strategy.StrategyError`（既定値へ倒さない。I3・I4）。"""
+    top = decl.main_dir(root) if root else None
+    if top is None:
+        raise branch_strategy.StrategyError("ブランチ戦略の宣言を探す git の木が無い")
+    pinned = _pinned(str(Path(top).resolve()))
+    return pinned if pinned is not None else branch_strategy.load_strategy(Path(top))
 
 
 def default_branch(root) -> str | None:
-    """既定ブランチ。origin の HEAD の指す先 → ローカルの候補（`branch_flow.DEFAULT_BRANCH_CANDIDATES`）の順。どれも無ければ `None`。"""
+    """既定ブランチ。origin の HEAD の指す先 → ローカルの候補（`strategy_rows.DEFAULT_BRANCH_CANDIDATES`）の順。どれも無ければ `None`。"""
     head = proc.git_out(root, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
     if head:
         return head.split("/", 1)[-1]
-    for b in branch_flow.DEFAULT_BRANCH_CANDIDATES:
+    for b in strategy_rows.DEFAULT_BRANCH_CANDIDATES:
         if proc.git_out(root, "rev-parse", "--verify", "--quiet", f"refs/heads/{b}") is not None:
             return b
     return None
@@ -103,9 +129,9 @@ def defer_for_base(root, base, text):
     return defer_closing(text) if merge_closes_issues(root, base) else (text or "", [])
 
 
-def base_branch(root) -> str | None:
-    """開発の起点。`.ndf/worktree.json` の `base_branch` → 既定ブランチ（`default_branch`）の順。決まらなければ `None`。"""
-    return declared_base(root) or default_branch(root)
+def base_branch(root) -> str:
+    """ベースブランチ（宣言の `branches.base`）。宣言を読めなければ `branch_strategy.StrategyError`。"""
+    return branch_strategy_of(root).base
 
 
 def _ref_exists(root, ref: str) -> bool:
@@ -141,45 +167,32 @@ def _remote_has_branch(root, remote: str, name: str) -> bool:
 def existing_base_branch(root, remote: str = "origin") -> tuple[str | None, str]:
     """差分の起点にするベースブランチと、その出所（または決まらない理由）。
 
-    宣言（`.ndf/worktree.json` の `base_branch`）があれば、取得済みの参照 → `remote` への問い合わせの順に
-    実在を確かめ、無ければ既定ブランチへ落とさずに `(None, 理由)` を返す。宣言が無ければ `default_branch`。
+    宣言の `branches.base` を、取得済みの参照 → `remote` への問い合わせの順に実在を確かめる。無ければ既定ブランチへ
+    落とさずに `(None, 理由)` を返す。宣言を読めなければ `(None, 理由)`。
     """
-    name = declared_base(root)
-    if name:
-        if _ref_exists(root, f"refs/remotes/{remote}/{name}") or _ref_exists(root, f"refs/heads/{name}"):
-            return name, "宣言（取得済みの参照）"
-        if _remote_has_branch(root, remote, name):
-            return name, f"宣言（{remote} へ問い合わせ）"
-        return None, f"{name} は {remote} にもローカルにも無い"
-    d = default_branch(root)
-    if d:
-        return d, "既定ブランチ"
-    return None, f"宣言も {remote} の HEAD も {_CANDIDATES_TEXT} も無い"
+    try:
+        name = base_branch(root)
+    except branch_strategy.StrategyError as e:
+        return None, e.reason
+    if _ref_exists(root, f"refs/remotes/{remote}/{name}") or _ref_exists(root, f"refs/heads/{name}"):
+        return name, "宣言（取得済みの参照）"
+    if _remote_has_branch(root, remote, name):
+        return name, f"宣言（{remote} へ問い合わせ）"
+    return None, f"{name} は {remote} にもローカルにも無い"
 
 
-def production_of(wt: dict, default: str | None) -> tuple[str | None, str]:
-    """本番チャネルの決め方の正本（#2097）。`worktree.json` の中身の `production_branch` → `default`（既定ブランチ）の順。"""
-    v = _branch_value(wt.get("production_branch"))
-    if v:
-        return v, f"{WORKTREE_DECL} の production_branch"
-    if default:
-        return default, f"既定ブランチ（origin/HEAD → ローカルの {_CANDIDATES_TEXT}）"
-    return None, f"production_branch も既定ブランチ（origin/HEAD・{_CANDIDATES_LIST}）も無い"
+def production_branch(root) -> str:
+    """本番ブランチ（宣言の `branches.production`）。宣言を読めなければ `branch_strategy.StrategyError`。"""
+    return branch_strategy_of(root).production
 
 
-def production_branch(root, decl: dict | None = None) -> tuple[str | None, str]:
-    """本番チャネルと、その出所。`.ndf/worktree.json` の `production_branch` → 既定ブランチ（`default_branch`）の順。
-
-    `decl` を渡せばそれを `worktree.json` の中身として使う（読み直さない）。決まらなければ `(None, 理由)`。
-    `root` が `None`（既定ブランチを解ける木が無い）なら既定ブランチを問い合わせない。
-    """
-    if decl is not None:
-        wt = decl
-    else:
-        wt = read_worktree_decl(root)[0] if root is not None else {}
-    if _branch_value(wt.get("production_branch")) or root is None:
-        return production_of(wt, None)
-    return production_of(wt, default_branch(root))
+def strategy_or_none(root) -> branch_strategy.Strategy | None:
+    """`branch_strategy_of` の、読めなければ `None` を返す形。決まらないことを呼び手が扱える箇所（照会を飛ばす・判定しない）だけが使う。
+    既定値へは倒さない（I3）。"""
+    try:
+        return branch_strategy_of(root)
+    except branch_strategy.StrategyError:
+        return None
 
 
 # 本番チャネルを取り込み直す上限（秒）。応答の無い origin でプランの組み立てを止め続けないため（#3308）
@@ -194,45 +207,25 @@ def _fetch_tracking(root, name: str) -> bool:
     return p is not None and p.returncode == 0
 
 
-def production_decl(root, production: str | None) -> tuple[dict | None, str]:
-    """本番チャネルの宣言（`origin/<本番チャネル>` の先頭の `.ndf/worktree.json`）。#3308 の前提 1。
+def production_strategy(root, production: str | None) -> tuple[branch_strategy.Strategy | None, str]:
+    """本番ブランチの先頭（`origin/<本番ブランチ>`）の宣言。#3308 の前提 1。
 
     読めたら `(宣言, 読んだ場所)`、読めなければ `(None, 読めない理由)`。取り込み直しに失敗しても手元の追跡ブランチを読む
-    （前提 4）。読めないときの扱いは `main` 宛の検査と同じく、呼び手が宣言の無いリポジトリとして組む（決定 3）。"""
+    （前提 4）。読めないときの扱いは呼び手が決める（止まる。I3）。"""
     if not production:
-        return None, "本番チャネルの名前が決まらない"
+        return None, "本番ブランチの名前が決まらない"
     if root is None:
         return None, "宣言を探す木に git の木が無い"
     _fetch_tracking(root, production)
     ref = f"origin/{production}"
-    if proc.git_out(root, "rev-parse", "--verify", "--quiet", f"refs/remotes/{ref}") is None:
-        return None, f"{ref} が無い"
-    text = proc.git_out(root, "show", f"refs/remotes/{ref}:{WORKTREE_DECL.as_posix()}")
-    if text is None:
-        return None, f"{ref} に {WORKTREE_DECL.as_posix()} が無い"
-    where = f"{ref} の {WORKTREE_DECL.as_posix()}"
     try:
-        wt = json.loads(text)
-    except ValueError:
-        wt = None
-    if not isinstance(wt, dict):
-        return None, f"{where} を JSON のオブジェクトとして読めない"
-    if wt.get("version") != 1:
-        return None, f"{where} の version が 1 でない"
-    return wt, where
-
-
-def resolved_flow(root, base: str | None = None, production: str | None = None) -> branch_flow.ResolvedFlow:
-    """ブランチ運用の宣言をブランチ名まで解く（`base`・`production` を渡せばそれを使う）。宣言が壊れていれば `branch_flow.FlowError`。"""
-    wt = read_worktree_decl(root)[0] if root else {}
-    flow = branch_flow.of_decl(wt)
-    base = base or base_branch(root)
-    production = production or production_branch(root, wt)[0]
-    return flow.resolve(base, production)
+        return branch_strategy.load_at_ref(Path(root), f"refs/remotes/{ref}"), f"{ref} の .ndf/project.json の {branch_strategy.SECTION}"
+    except branch_strategy.StrategyError as e:
+        return None, f"{ref}: {e.reason}"
 
 
 def sprint_flow_record(root, branch: str | None) -> dict | None:
-    """スプリントブランチ `branch` の開始時の記録（目録 `sprint.json` の `ブランチ運用`。#3310）。無ければ `None`。
+    """スプリントブランチ `branch` の開始時の記録（目録 `sprint.json` のスナップショット。#3310）。無ければ `None`。
 
     メインディレクトリの `.ndf/` の下の目録のうち、`ブランチ` が `branch` のもの（`ブランチ` を持たない目録は
     `sprint/<スプリント>`）を探し、更新の新しい目録の記録を返す。プランの状態ディレクトリ（`<プラン>-state`）の中は
@@ -260,8 +253,8 @@ def _sprint_record_candidate(path: Path, branch: str) -> tuple[float, str, dict]
         return None
     if not isinstance(got, dict):
         return None
-    own = got.get("ブランチ") or f"{branch_flow.SPRINT_PREFIX}{got.get('スプリント')}"
-    snap = got.get(branch_flow.SNAPSHOT_KEY)
+    own = got.get("ブランチ") or f"{strategy_rows.SPRINT_PREFIX}{got.get('スプリント')}"
+    snap = got.get(branch_strategy.SNAPSHOT_KEY)
     if own == branch and isinstance(snap, dict) and snap:
         return mtime, str(path), snap
     return None
@@ -270,20 +263,20 @@ def _sprint_record_candidate(path: Path, branch: str) -> tuple[float, str, dict]
 def kept_sprint_branch(root, branch: str | None, record: dict | None = None) -> str | None:
     """後片付けでスプリントブランチを残す理由（#3121 の決定 7）。消してよければ None。
 
-    選んで集める取り込み方では、スプリントブランチはリリースの単位として本番チャネルに含まれるまで要る。
-    取り込み方と本番チャネルは、そのスプリントの開始時の記録（`record`）で決め、記録の無いスプリントだけ今の宣言で決める
+    選んで集める取り込み方（`release_branch`）では、スプリントブランチはリリースの単位として本番ブランチに含まれるまで要る。
+    取り込み方と本番ブランチは、そのスプリントの開始時の記録（`record`）で決め、記録の無いスプリントだけ今の宣言で決める
     （#3308 の設計の決定 1・決定 6）。宣言か記録が読めなければ消さない側（残す）へ倒す。"""
-    if not branch or not branch.startswith(branch_flow.SPRINT_PREFIX):
+    if not branch or not branch.startswith(strategy_rows.SPRINT_PREFIX):
         return None
     try:
-        flow = branch_flow.from_snapshot(record, None, production_branch(root)[0]) if record else resolved_flow(root)
-    except branch_flow.FlowError as e:
-        return f"ブランチ運用の{'開始時の記録' if record else '宣言'}を読めないため残す: {e}"
-    if not flow.production_branch or proc.git_out(root, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}") is None:
+        strategy = branch_strategy.from_snapshot(record) if record else branch_strategy_of(root)
+    except branch_strategy.StrategyError as e:
+        return f"ブランチ戦略の{'開始時の記録' if record else '宣言'}を読めないため残す: {e.reason}"
+    if proc.git_out(root, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}") is None:
         return None
-    ref = f"origin/{flow.production_branch}"
-    if branch_flow.sprint_branch_kept(root, f"refs/heads/{branch}", ref, flow.row):
-        return f"取り込み方 {flow.row.name} では {ref} に含まれるまでスプリントブランチを残す"
+    ref = f"origin/{strategy.production}"
+    if strategy_rows.sprint_branch_kept(root, f"refs/heads/{branch}", ref, strategy.row):
+        return f"取り込み方 {strategy.row.name} では {ref} に含まれるまでスプリントブランチを残す"
     return None
 
 

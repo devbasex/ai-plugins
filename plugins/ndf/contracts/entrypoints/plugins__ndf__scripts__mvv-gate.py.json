@@ -48,6 +48,7 @@
     "NDF_PRESENTATION_DIR",
     "NDF_SHARED_CONFIG_DIR",
     "NDF_STATE_HOME",
+    "NDF_STRATEGY_SNAPSHOT",
     "NDF_SUPERVISE_CLAUDE",
     "NDF_SUPERVISE_CLAUDE_FALLBACK",
     "NDF_SUPERVISE_LIMIT_SLEEP",
@@ -65,14 +66,7 @@
     {
       "file": "project.json",
       "keys": [
-        "ndf_policies",
-        "production_merge"
-      ]
-    },
-    {
-      "file": "worktree.json",
-      "keys": [
-        "base_branch"
+        "ndf_policies"
       ]
     }
   ],

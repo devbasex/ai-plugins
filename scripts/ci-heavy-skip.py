@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
 """配布の PR と文書だけの PR で重いジョブ（pytest・runtime smoke）を省けるかを差分から決める（#1055・#2925）。
 
-省くのは次のどれかに当たる Pull Request だけ。push では常に回す（develop で通った
+省くのは次のどれかに当たる Pull Request だけ。push では常に回す（ベースブランチで通った
 という記録を、省かずに回した結果だけにするため）。
 
-1. PR の差分（merge-base..head）が版数と説明だけ。版上げの PR（release/v<版> → develop）
+1. PR の差分（merge-base..head）が版数と説明だけ。版上げの PR（release/v<版> → 宛先）
 2. PR の差分が文書のファイルだけ（NDF の差分の分類 `lib/diff_kinds.py`。宣言は `.ndf/project.json` の `docs`）。
    テストが読む文書があれば `docs_tests` に対応するテストを出し、文書のテストのジョブが走らせる
 2b. PR の差分のうち文書でないファイルが、作り直しのディレクトリ（`SELF_TESTED`。#1142 の `plugins/ndf-next/` と、その機能の対応表の `scripts/ndf-next-parity/`）と
    その workflow だけ。そのディレクトリは自分の workflow（`ndf-next.yml`）のテストと検査で確かめ、根のテストと
    runtime smoke はそのディレクトリを読まない（マーケットプレイスに載せていない。#1142 の決定 74）。
    入れ替え（#1142 の S2）で ndf-next.yml と一緒に `SELF_TESTED` を消す
-3. head の first-parent の祖先 A のうち、A..head の差分が版数と説明だけで、A が develop への
-   push でこの workflow を通ったものがある。本番の PR（develop → main）。base が merge-base
+3. head の first-parent の祖先 A のうち、A..head の差分が版数と説明だけで、A がベースブランチへの
+   push でこの workflow を通ったものがある。本番の PR（ベースブランチ → 本番ブランチ）。base が merge-base
    から中身を足していないこと（マージの結果が head の木と同じになること）も求める。宛先（base のコミット）の
-   `.ndf/worktree.json` の `branch_flow` が選んで集める取り込み方なら当てない。リリースブランチは develop と違う
-   組み合わせなので、全体テストを省かない（#3121 の決定 15）。比べるブランチ（--branch）の既定は宛先の宣言の
-   `base_branch` で、読めなければ develop
+   ブランチ戦略の宣言（`.ndf/project.json` の `branch_strategy`）が選んで集める取り込み方なら当てない。リリースブランチは
+   ベースブランチと違う組み合わせなので、全体テストを省かない（#3121 の決定 15）。比べるブランチ（--branch）の既定は
+   宛先の宣言の `branches.base` で、宣言を読めなければ省かない
 
 「版数と説明だけ」の判定:
 - 文書のファイルのうちテストが読まないものは中身を問わない。行数の上限・リンク・古さは
@@ -44,8 +44,8 @@ from typing import Callable, NamedTuple, Optional
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 from ndf_wrappers import require  # noqa: E402  根の lock で包みの依存を解決する（#1142 の決定 19）
 
-require("pathmatch")
-import branch_flow  # noqa: E402
+require("pathmatch", "jsonschema")
+import branch_strategy  # noqa: E402
 import diff_kinds  # noqa: E402
 
 BEHAVIOR_AS_CODE = {"runtime-plugin-smoke.yml"}
@@ -62,7 +62,6 @@ MANIFEST_RE = re.compile(
 )
 MANIFEST_LINE_RE = re.compile(r'^\s*"(version|description)"\s*:')
 ANCESTOR_LIMIT = 20
-FALLBACK_BRANCH = "develop"  # 宛先の宣言に base_branch が無いときに比べるブランチ
 
 
 def git(root: str, *args: str) -> subprocess.CompletedProcess:
@@ -140,22 +139,13 @@ def passed_on_branch(repo: str, workflow: str, sha: str, branch: str, api: Calla
     )
 
 
-def target_decl(root: str, base: str) -> dict:
-    """宛先（base のコミット）の `.ndf/worktree.json`。Pull Request の変更で判定を緩められないよう、head ではなく宛先から読む。"""
-    p = git(root, "show", f"{base}:.ndf/worktree.json")
+def target_strategy(root: str, base: str) -> tuple[branch_strategy.Strategy | None, str]:
+    """宛先（base のコミット）のブランチ戦略の宣言と、読めない理由。Pull Request の変更で判定を緩められないよう、
+    head ではなく宛先から読む。"""
     try:
-        data = json.loads(p.stdout) if p.returncode == 0 else {}
-    except ValueError:
-        return {}
-    return data if isinstance(data, dict) else {}
-
-
-def selects_units(decl: dict) -> tuple[bool, str]:
-    """宛先の宣言が、選んだ単位を集める取り込み方か。読めない宣言は省かない側（真）へ倒す。"""
-    try:
-        return branch_flow.of_decl(decl).row.selects_units, ""
-    except branch_flow.FlowError as e:
-        return True, f"宛先の branch_flow を読めない（{e}）"
+        return branch_strategy.load_at_ref(Path(root), base), ""
+    except branch_strategy.StrategyError as e:
+        return None, f"宛先のブランチ戦略の宣言を読めない（{e.reason}）"
 
 
 def _docs_or_self_tested(k: diff_kinds.DiffKinds, as_code: bool) -> Optional[Decision]:
@@ -187,14 +177,15 @@ def _promotion_decision(
 ) -> Decision:
     """規則 3: 本番の PR で、head の祖先のうち比べるブランチで通り、そこからの差分が版数と説明だけのコミットを探す。"""
     # base が merge-base から中身を足していなければ、マージの結果は head と同じ木になる
-    # （main は develop のマージしか受けないので、main のマージのコミットは develop に無くてよい）
+    # （本番ブランチはベースブランチのマージしか受けないので、本番ブランチのマージのコミットはベースブランチに無くてよい）
     if git(root, "diff", "--quiet", mb_sha, base).returncode != 0:
         return Decision(False, f"{why}（base に head の無い変更がある）")
-    decl = target_decl(root, base)
-    selected, broken = selects_units(decl)
-    if selected:
-        return Decision(False, f"{why}（{broken or '宛先の取り込み方が選んだ単位を集めるため、リリースブランチの組み合わせを試す'}）")
-    branch = branch or (decl.get("base_branch") if isinstance(decl.get("base_branch"), str) else "") or FALLBACK_BRANCH
+    strategy, broken = target_strategy(root, base)
+    if strategy is None:
+        return Decision(False, f"{why}（{broken}）")
+    if strategy.row.selects_units:
+        return Decision(False, f"{why}（宛先の取り込み方が選んだ単位を集めるため、リリースブランチの組み合わせを試す）")
+    branch = branch or strategy.base
     revs = git(root, "rev-list", "--first-parent", f"--max-count={ANCESTOR_LIMIT}", head)
     for sha in revs.stdout.split():
         if sha != head and not version_only(root, sha, head, as_code)[0]:
@@ -232,7 +223,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--head", default="")
     ap.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
     ap.add_argument("--workflow", required=True, help="workflow のファイル名（例: pytest.yml）")
-    ap.add_argument("--branch", default="", help="比べるブランチ（既定は宛先の宣言の base_branch）")
+    ap.add_argument("--branch", default="", help="比べるブランチ（既定は宛先のブランチ戦略の宣言の branches.base）")
     a = ap.parse_args(argv)
     if a.event == "pull_request" and not (a.base and a.head):
         d = Decision(False, "--base と --head が無い")

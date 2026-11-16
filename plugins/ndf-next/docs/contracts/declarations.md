@@ -143,7 +143,7 @@ Issue の種類ごとの記載項目（必須・該当時・不要）と水準�
 | `kind_labels` | object | — | — | 任意 | 種類 → GitHub のラベルの名前 |
 | `kinds` | array of string | — | — | 必須 | Issue の種類の並び |
 | `last` | string | `"request"` | — | 任意 | 書き手が書く節の最後に置く項目の id |
-| `record_headings` | array of string | — | — | 任意 | 工程が足す節の見出しの語 |
+| `record_headings` | array of string | — | — | 任意 | 工程が足すセクションの見出しの語 |
 | `version` | integer | — | `1` | 必須 | 宣言の形の版。読み手は知らない版を読まない |
 
 例: `{"version": 1, "kinds": ["不具合", "機能"], "items": [{"id": "purpose", "name": "目的", "need": {"不具合": "必須", "機能": "必須"}, "level": "何を良くするかを 1〜2 文で書く"}]}`

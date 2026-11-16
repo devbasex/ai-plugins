@@ -1,14 +1,17 @@
 """release-steps.py のテストに共通する一時の git リポジトリの土台。
 
-origin は bare（ベースブランチは trunk）。seed は git の利用者と、リリースの設定（`.ndf/worktree.json` の
-ベースブランチ trunk・本番チャネル live と、`.ndf/supervise.json` の package-plugin）を持つ。
+origin は bare（ベースブランチは trunk）。seed は git の利用者と、ブランチ戦略の宣言（`.ndf/project.json` の
+`branch_strategy`。ベースブランチ trunk・本番ブランチ live・リリースの形 package-plugin）を持つ。
 """
 
 from __future__ import annotations
 
-import json
 import subprocess
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import strategy_fixture  # noqa: E402
 
 
 def _git(root: Path, *args: str) -> None:
@@ -23,9 +26,7 @@ def seed_release_repo(tmp_path: Path) -> tuple[Path, Path]:
     _git(seed, "init", "-q", "-b", "trunk")
     _git(seed, "config", "user.email", "t@example.com")
     _git(seed, "config", "user.name", "t")
-    (seed / ".ndf").mkdir()
-    (seed / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "base_branch": "trunk", "production_branch": "live"}))
-    (seed / ".ndf" / "supervise.json").write_text(json.dumps({"release": {"form": "package-plugin", "plugin": "foo"}}))
+    strategy_fixture.declare(seed, "trunk", "live", {"form": "package-plugin", "plugin": "foo"})
     return origin, seed
 
 

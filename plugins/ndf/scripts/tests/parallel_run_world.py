@@ -20,6 +20,7 @@ import pytest
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS / "lib"))
 sys.path.insert(0, str(SCRIPTS))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 # 読み込む順は元の test_parallel_run.py と同じに保つ（耐久ステップの登録を DBOS の起動より前に済ませる）
 import dbos  # noqa: E402,F401
 import durable  # noqa: E402
@@ -32,6 +33,7 @@ import parallel_plan as pp  # noqa: E402
 import parallel_release as prl  # noqa: E402
 import parallel_reply  # noqa: E402,F401
 import parallel_run as prun  # noqa: E402
+import strategy_fixture  # noqa: E402
 
 PLAN = {
     "version": 1,
@@ -43,7 +45,8 @@ PLAN = {
     ],
 }
 
-TEMPLATE_DECL = {"release": {"form": "package-plugin", "plugin": "ndf"}}
+# 雛形でリリースを組む形（ブランチ戦略の宣言の release）
+TEMPLATE_RELEASE = {"form": "package-plugin", "plugin": "ndf"}
 # この印の後の記録の道（終わりの記録で数える・提示 1 で確定する。#3058・#3070）は test_parallel_end.py で確かめる。
 # ここの流れのテストは印の無い記録の道で確かめる（別のプロセスで記録するテストも同じ値にする）
 LEGACY_MARKS = ("parallel-lane-end", "parallel-approved-sha")
@@ -95,8 +98,8 @@ FAKE = textwrap.dedent(
 def env(tmp_path, monkeypatch):
     main = tmp_path / "repo"
     (main / ".ndf").mkdir(parents=True)
-    (main / ".ndf" / "supervise.json").write_text(json.dumps(TEMPLATE_DECL))
-    subprocess.run(["git", "init", "-q", str(main)], check=True)
+    subprocess.run(["git", "init", "-q", "-b", "main", str(main)], check=True)
+    strategy_fixture.declare(main, "main", release=TEMPLATE_RELEASE)
     plan = pp.check_data(PLAN)[0]
     pp.write_all(main, plan, PLAN)
     fake = tmp_path / "fake_relay.py"

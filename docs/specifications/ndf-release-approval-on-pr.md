@@ -29,7 +29,7 @@ CD（本番チャネルへのマージで届くデプロイ）を持つリポジ
 | `cd-admin` | CD があり、レビューが必須で、迂回の宣言がある | リリースの PR の証跡のコメント（利用者が書いたものだけ） | 利用者のアカウント（管理者の迂回） |
 | `no-cd` | CD が無い | 手元の承認資料（従来の経路） | NDF |
 
-迂回の宣言は `.ndf/project.json` の `production_merge.admin` である。JSON の `true` のときだけ宣言があるとみなし、キーが無い・型が違う・`unknown` は宣言なしとして扱う。契約の置き場は `main` で、`delivery` と同じくメインディレクトリから読む（PR の変更だけで迂回を選べない）。
+迂回の宣言はブランチ戦略の宣言（`.ndf/project.json` の `branch_strategy`）の `merge.admin` である。JSON の `true` のときだけ宣言があるとみなし、`merge.method` が `direct` のときだけ書ける（スキーマの組み合わせの規則）。契約の置き場は `main` で、`release.deliveries` と同じくメインディレクトリから読む（PR の変更だけで迂回を選べない）。
 
 ## 背景
 
@@ -84,7 +84,7 @@ CD（本番チャネルへのマージで届くデプロイ）を持つリポジ
 
 I10 があるのは、commit status が SHA に付き、同じ先端を持つ main 宛ての PR のすべてに効くためである。リリースの PR は 1 つの版に 1 本で、同じ先端の PR を並べる正当な場面は無い。
 
-`cd-no-review` と `cd-review` では、先端と承認の完全な一致だけを通す。`docs/`・`issues/` の下だけを変えたコミットを承認の外でも許す許容（`no-cd` の照合）は使わない。証跡のチェックと手元の照合が別の答えを返さないためである。選んで集める取り込み方（`promotion: selected`）も同じ比較に掛ける（`release_lib/promotion.py`）。
+`cd-no-review` と `cd-review` では、先端と承認の完全な一致だけを通す。`docs/`・`issues/` の下だけを変えたコミットを承認の外でも許す許容（`no-cd` の照合）は使わない。証跡のチェックと手元の照合が別の答えを返さないためである。選んで集める取り込み方（ブランチ戦略の宣言の `release_strategy: release_branch`）も同じ比較に掛ける（`release_lib/strategy_route.py`）。
 
 ### リリースの場合の判定
 

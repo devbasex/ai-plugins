@@ -34,7 +34,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import deps  # noqa: E402
 
-deps.require("md")
+deps.require("md", "jsonschema")
 import handoff_doc  # noqa: E402
 import repo  # noqa: E402
 import run_core  # noqa: E402

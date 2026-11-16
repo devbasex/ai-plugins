@@ -21,6 +21,7 @@ from supervise_lib import engine, plan as plan_mod, pr as pr_step, procedures  #
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import worker_fake  # noqa: E402
+import strategy_fixture  # noqa: E402
 
 # bad というファイルがあれば落ちる pre-push フック。指摘は標準出力へ書く（決定 8）
 HOOK = "#!/bin/sh\nif git ls-files --error-unmatch bad >/dev/null 2>&1; then echo 'ERROR: bad が残っている（目印の検査）'; exit 1; fi\n"
@@ -178,8 +179,11 @@ def test_on_fail_without_on_fail_only_still_takes_every_failure(repo, tmp_path):
 def new_plan(tmp_path: Path, kind: str, decl: dict, *extra: str) -> dict:
     repo = tmp_path / "r"
     (repo / ".ndf").mkdir(parents=True)
-    (repo / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "base_branch": "main"}))
+    decl = dict(decl)
+    release = decl.pop("release", None)
     (repo / ".ndf" / "supervise.json").write_text(json.dumps(decl))
+    strategy_fixture.declare(repo, "main", release=release)
+    subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True, capture_output=True)
     out = tmp_path / f"{kind}.json"
     p = subprocess.run([PY, str(SUPERVISE), "new", kind, *extra, "--out", str(out)], capture_output=True, text=True, cwd=repo)
     assert p.returncode == 0, p.stdout + p.stderr

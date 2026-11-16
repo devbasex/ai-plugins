@@ -5,9 +5,9 @@
       "フェーズ": "検査", "課題": [818], "モード": "standard",
       "作業場所": "/abs/worktree",
       "branch": "feat/issue-818-x",         # 省略可。作業場所が無ければ起動時に作業ツリーを作る
-      "起点": "origin/<起点のブランチ>",    # branch から作るときの起点（既定 origin/<base_branch>）。版の判定もこのブランチを読む
+      "起点": "origin/<起点のブランチ>",    # branch から作るときの起点（既定 origin/<ベースブランチ>）。版の判定もこのブランチを読む
       "起点のコミット": "<sha>",            # 省略可。作業ツリーだけをこのコミットから作る（起点より先に読む）
-      "base_branch": "<起点のブランチ>",     # 起点のブランチ。pr のステップの宛先と preset の {base}（既定は .ndf/worktree.json）
+      "ベースブランチ": "<起点のブランチ>",  # 起点のブランチ。pr のステップの宛先と preset の {base}（既定はブランチ戦略の宣言）
       "no_reports": "-p no:x",              # run のステップの PYTEST_ADDOPTS に足す（既定は .ndf/supervise.json の test.no_reports）
       "リポジトリ": "/abs/repo",             # 作業ツリーの元（省略時は作業場所の /.worktrees/ より前）
                                             # git worktree add が .git/config の lock で落ちたら 5 回までやり直す
@@ -70,7 +70,8 @@ drive のステップ: `cmd`（または `"drive": "cross-review" | "cross-refac
 作業ツリーが違うとき）。work のステップでは worker へ渡す「作業場所」もその `cwd` になる。
 
 宣言（リポジトリの根の `.ndf/`。new は作業場所 → 元のリポジトリ → 今のディレクトリの順に探す。引数が先に効く）:
-- `worktree.json` の `base_branch`（起点のブランチ。PR の宛先・差分の起点）と `production_branch`（本番のブランチ）
+- `project.json` のブランチ戦略の宣言（`branch_strategy`。起点のブランチ・本番のブランチ・リリースの形）。作るのは
+  `project-decl.py branch-strategy` だけで、手で書かない
 - `supervise.json`（無ければ、要る雛形は「宣言が無い」と止まる）:
       {"version": 1,
        "test": {"command": "<テストのコマンド。{paths} を範囲に置き換える>", "all": "<全体の範囲（既定 .）>",
@@ -78,7 +79,6 @@ drive のステップ: `cmd`（または `"drive": "cross-review" | "cross-refac
        "sync_checks": [{"name": "<名前>", "command": "<同期かチェックのコマンド>"}, ...],   # 省略可。無ければ sync のステップを置かない
        "format": [{"name": "<名前>", "command": "<整形のコマンド>"}, ...],   # 省略可。無ければ format のステップを置かず、送信の前にも整形しない
                                             # 終了コード 0 = 違反が残らない / 1 = 整形で直らない違反 / ほか = 仕組みの失敗
-       "release": {"form": "package-plugin", "plugin": "<名前>", "runtimes": ["claude", ...]},
        "impl_timeout": <1 以上の整数>,              # 省略可。impl のステップの経過時間の上限（秒）。無ければ上限なし
        "impl_stall_seconds": <1 以上の整数>,        # 省略可。impl のステップの無進捗の許容時間（秒）。無ければ 1800
        "refactor_budget_minutes": <1 以上の整数>}   # 省略可。構造改善の想定最大時間（分）。refactor に --budget-minutes で渡す
@@ -134,7 +134,7 @@ run のステップ:
   `next`）へ進み、最後まで進めば報告は `結果: 関門`。結果 JSON の `presentation_path` を報告の `提示物` に写す。
   `"presentation_to": "<パス>"` があれば提示物をそのパス（ステップの作業場所から）へ写し、そちらを載せる
 - テストの成果物を作らない（計画の `no_reports` を `PYTEST_ADDOPTS` に足す）。作らせるときは `"reports": true`
-- `cmd` の `{base}` は起点のブランチ（計画か .ndf/worktree.json の `base_branch`）に置き換わる。
+- `cmd` の `{base}` は起点のブランチ（計画のベースブランチかブランチ戦略の宣言）に置き換わる。
   `{state_dir}` は計画の状態ディレクトリに、`{plan_issues}` は流す時点の計画の `課題` の番号の空白区切り（空なら空文字）に置き換わる
 - `"on_exit": {"<終了コード>": "<ステップの id> | end | stop"}`（run と drive。drive は 0・1 と、欠けの残る終わりの 6）: 終了コードを読んだら `skip_to` の次・承認ゲート（10〜19）の
   前に見る。当たれば `on_fail` へ行かない。`stop` は `結果: 止まった`・`理由: ステップ <id> が終了コード <n> で止めた:

@@ -3,7 +3,7 @@ approval-check・approval-post・release-case から分けた）。
 
 - 本番: 開発版の PR → 本番の PR → CI の待ち → PR の上の承認（証跡かレビュー）と先端の照合 → マージ → 公開の後。
   マージは `cd-admin` だけ管理者の迂回で打ち、迂回したら本番の PR に迂回の記録を置く（#3506）。ほかの場合は迂回なし
-- 開発版: 宣言 `release.dev_workflow` の workflow に開発版の PR をマージさせ、結果を待つ
+- 開発版: ブランチ戦略の宣言の開発版のチャネル（`channels` の `dev`）の workflow に開発版の PR をマージさせ、結果を待つ
 - 証跡のチェック: 証跡を判定して PR の先端へ commit status を付ける（同じ先端の PR が並べば落とす。I10）
 
 本番の `ops` は `ProdOps`、開発版の `ops` は `release-steps.py`（find_pr・create_pr・merge_commit_of・_reusable_release_pr・
@@ -30,7 +30,7 @@ import waits
 from release_lib import approval, approval_trail
 from release_lib.approval import HeadMoved
 from release_lib.context import ReleaseCtx
-from release_lib.names import release_tag
+from release_lib.names import shipped_note, tag_name
 from release_lib.port_mark import NO_PORT_LINE, ensure_no_port_line
 from step_result import EXIT_GATE, EXIT_INFRA_WAIT, EXIT_PRECONDITION, EXIT_UNREADABLE, StepError, emit, gh_json, git, git_root, result
 
@@ -55,9 +55,9 @@ def refresh_release_pr_body(root, pr, body: Callable[[], str]):
 
 
 def dev_workflow_of(root) -> str | None:
-    """開発版の workflow のファイル名（`.ndf/supervise.json` の release.dev_workflow）。無ければ None（手元でマージする）。"""
-    got = (delivery.load_delivery(root).release or {}).get("dev_workflow")
-    return got if isinstance(got, str) and got else None
+    """開発版の workflow のファイル名（ブランチ戦略の宣言の `channels` の `dev` の `workflow`）。無ければ None（手元でマージする）。"""
+    s = repo_lib.strategy_or_none(root)
+    return s.dev_workflow if s else None
 
 
 def dev_workflow_ready(root, workflow) -> bool:
@@ -89,7 +89,9 @@ class ProdOps:
     merge_commit_of: Callable  # (root, n) -> str | None
     merge_release_pr: Callable  # (root, a, plugin, plugins, branch, base) -> (release_pr, merged_pr, commit)
     published: Callable  # (root, a, plugin, prod, main_pr, merge, items, metrics, back=None) 公開の後。結果を出して終わる
-    wait_and_merge: Callable  # (root, n, *, expect, ci_wait, gate_approved, no_admin) -> マージコミット
+    wait_and_merge: (
+        Callable  # (root, n, *, expect, ci_wait, gate_approved, admin) -> マージコミット。迂回は場合（case.admin_merge）で決める
+    )
     pr_check_buckets: Callable  # (root, n) -> チェックの並び
 
 
@@ -202,8 +204,15 @@ def _open_prod_pr(ctx: ReleaseCtx, items, metrics, ops: ProdOps, case=None) -> i
         ops.published(root, a, plugin, prod, done["number"], merge, items, metrics, back=admin_back())
     if done:
         return ensure_no_port_line(root, done)["number"]  # 前の版が作った本番の PR は port 検査の印を持たない
-    if git(root, "rev-parse", "-q", "--verify", f"refs/tags/{release_tag(plugin, ver)}", check=False).returncode == 0:
-        raise StepError(f"タグ {release_tag(plugin, ver)} は既にある")
+    if git(root, "rev-parse", "-q", "--verify", f"refs/tags/{tag_name(root, plugin, ver)}", check=False).returncode == 0:
+        raise StepError(f"タグ {tag_name(root, plugin, ver)} は既にある")
+    if why := shipped_note(root, plugin, ver):  # タグを作らない宣言は本番ブランチの版で確かめる
+        raise StepError(why)
+    if not ctx.sync:
+        # trunk: 版上げの PR が本番の PR を兼ねる。承認と照らす前に本番ブランチへマージしない（#3672 の D17）
+        title = f"Release: {plugin} v{ver}"
+        body = f"{plugin} v{ver} を {prod} へ出す版上げの PR。\n\n{NO_PORT_LINE}\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+        return ops.create_pr(root, prod, branch, title, body)
     release_pr, merged_pr, _ = ops.merge_release_pr(root, a, plugin, plugins, branch, base)
     metrics.update({"release_pr": release_pr, "sync_pr": merged_pr if merged_pr != release_pr else None})
     repo_lib.restore_branch(root, branch, run_git=git)  # 開発版の PR のマージで消えた版上げのブランチを戻す
@@ -231,7 +240,7 @@ def merge_on_pr_approval(root, repo, a, case, main_pr, prod, items, metrics, ops
     if case.trail_approval:
         wait_trail_status(root, repo, prod, head, limits.policy("release-steps.trail-status").seconds)
     try:
-        merge = ops.wait_and_merge(root, main_pr, expect=head, ci_wait=a.ci_wait, gate_approved="user", no_admin=not case.admin_merge)
+        merge = ops.wait_and_merge(root, main_pr, expect=head, ci_wait=a.ci_wait, gate_approved="user", admin=case.admin_merge)
     except HeadMoved:
         summary, nxt = moved(head)
         emit(result(TOOL, "gate", summary, items, metrics, None, nxt), EXIT_GATE)
@@ -324,7 +333,7 @@ def release_dev_by_workflow(root, a, workflow, pr):
 
 
 def release_dev(ctx: ReleaseCtx, workflow, ops):
-    """宣言 release.dev_workflow のある開発版: PR を作るか使い回し、開いていれば workflow にマージさせる（#2773 の E10）。"""
+    """開発版のチャネルに workflow のある開発版: PR を作るか使い回し、開いていれば workflow にマージさせる（#2773 の E10）。"""
     root, a, plugin, plugins, branch, base = ctx.root, ctx.a, ctx.plugin, ctx.plugins, ctx.branch, ctx.base
     pr = ops._reusable_release_pr(root, branch, base)
     new = pr is None
@@ -349,7 +358,7 @@ def release_dev(ctx: ReleaseCtx, workflow, ops):
         "merge_commit": ops.merge_commit_of(root, merged),
         "plugins": ",".join(plugins),
     }
-    metrics["dev_workflow"] = workflow
+    metrics["dev_channel_workflow"] = workflow
     emit(result(TOOL, "ok", f"{plugin} v{a.version} を {base} へ出した（#{merged}・{workflow}）", items, metrics))
 
 

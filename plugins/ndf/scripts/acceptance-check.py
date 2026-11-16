@@ -28,7 +28,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import deps  # noqa: E402
 
-deps.require("md", "mdtable", "locks", "durable", "waits")
+deps.require("md", "mdtable", "locks", "durable", "waits", "jsonschema")
 import acceptance  # noqa: E402
 import gh_call  # noqa: E402
 import gh_parts  # noqa: E402

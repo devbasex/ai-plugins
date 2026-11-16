@@ -34,7 +34,7 @@ def check_items(main: Path) -> list[dict]:
     """起動の前の検査の警告。リリースを組めないなら 1 件。起動は断らない（レーンがリリースの依頼を送らない計画もある）。"""
     got = way_of(main)
     if got.way == delivery.REFUSE:
-        return [{"level": "warning", "rule": "release", "at": "delivery", "message": got.reason}, *start_warnings(main)]
+        return [{"level": "warning", "rule": "release", "at": "release.deliveries", "message": got.reason}, *start_warnings(main)]
     if got.way == delivery.BUILD and not dev_version(main, fetch=False):  # 起動の前は取り直さない（取り直すのは step_build だけ）
         return [{"level": "warning", "rule": "release", "at": "release.plugin", "message": NO_VERSION}, *start_warnings(main)]
     return start_warnings(main)

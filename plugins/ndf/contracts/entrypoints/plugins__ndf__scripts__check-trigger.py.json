@@ -13,6 +13,7 @@
     "NDF_DEPS_VENV",
     "NDF_PRESENTATION_DIR",
     "NDF_STATE_HOME",
+    "NDF_STRATEGY_SNAPSHOT",
     "TMPDIR",
     "UV_PROJECT_ENVIRONMENT",
     "XDG_STATE_HOME"
@@ -22,14 +23,7 @@
       "file": "project.json",
       "keys": [
         "docs",
-        "ndf_policies",
-        "production_merge"
-      ]
-    },
-    {
-      "file": "worktree.json",
-      "keys": [
-        "base_branch"
+        "ndf_policies"
       ]
     }
   ],

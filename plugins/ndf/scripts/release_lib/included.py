@@ -78,10 +78,10 @@ def release_range(root: Path, prev: str, to: str, deps: bool = False) -> list[In
 
 
 def unit_merges(root: Path, prev: str, to: str, deps: bool = False) -> list[str]:
-    """`prev..to` の first-parent にある、リリースの単位をリリースブランチへ入れたマージ（`branch_flow.UNIT_MERGE`）の SHA。
+    """`prev..to` の first-parent にある、リリースの単位をリリースブランチへ入れたマージ（`strategy_rows.UNIT_MERGE`）の SHA。
     PR のマージではないため `merges_in` は拾わない。ベースブランチの first-parent には現れない（丸ごと出す取り込み方は変わらない）。
     deps なら、PR のマージでないマージ（単位へ依存先のスプリントブランチを取り込んだマージ。分冊の決定 18）も返す。"""
-    import branch_flow
+    import strategy_rows
 
     p = proc.git(root, "log", "--first-parent", "--merges", "--format=%H%x09%s", f"{prev}..{to}", check=False)
     if p.returncode != 0:
@@ -90,7 +90,7 @@ def unit_merges(root: Path, prev: str, to: str, deps: bool = False) -> list[str]
     return [
         sha
         for sha, _, subject in lines
-        if branch_flow.UNIT_MERGE.match(subject) or (deps and not merged_range.MERGE_SUBJECT.match(subject))
+        if strategy_rows.UNIT_MERGE.match(subject) or (deps and not merged_range.MERGE_SUBJECT.match(subject))
     ]
 
 

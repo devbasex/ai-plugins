@@ -8,8 +8,8 @@
     "reader": {"type": "string", "summary": "部品を読む工程"}
   },
   "rows": [
-    {"id": "changes", "kind": "section", "text": "## 利用者向けの変化", "order": 10, "reader": "デプロイの説明文と CHANGELOG の版の節（M2）"},
-    {"id": "migration", "kind": "section", "text": "## 移行の手順", "order": 20, "reader": "CHANGELOG の版の節の「移行の手順」と承認資料（M2）"},
+    {"id": "changes", "kind": "section", "text": "## 利用者向けの変化", "order": 10, "reader": "デプロイの説明文と CHANGELOG の版のセクション（M2）"},
+    {"id": "migration", "kind": "section", "text": "## 移行の手順", "order": 20, "reader": "CHANGELOG の版のセクションの「移行の手順」と承認資料（M2）"},
     {"id": "consent", "kind": "section", "text": "## 同意を求めること", "order": 30, "reader": "リリースの承認資料（M2）"},
     {"id": "others", "kind": "section", "text": "## 版を上げる他のプラグイン", "order": 40, "reader": "リリースの版の上げ（M2）"},
     {"id": "mode", "kind": "line", "text": "モード: ", "order": 50, "reader": "工程の記録（P1）"},

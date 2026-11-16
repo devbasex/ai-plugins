@@ -107,6 +107,10 @@ def test_approved_review_commit_counts_only_effective_reviewers():
     assert at.approved_review_commit(reviews, {"w": "admin", "r": "write", "x": None}) == B
     assert at.approved_review_commit([rv("w", "COMMENTED", A, "1")], perms) is None
     assert at.approved_review_commit(reviews, {}) is None
+    # 承認の後に同じ人が差し戻したら、その人の前の承認は使わない。後で承認し直せばその承認を使う
+    back = [rv("w", "APPROVED", A, "1"), rv("w", "CHANGES_REQUESTED", A, "2")]
+    assert at.approved_review_commit(back, perms) is None
+    assert at.approved_review_commit([*back, rv("w", "APPROVED", B, "3")], perms) == B
 
 
 class FakeGh:
@@ -243,6 +247,41 @@ def test_write_admin_record_counts_only_records_by_writers(monkeypatch, perm, up
     got = at.write_admin_record("o/r", 5, A, "https://x/c/3")
     assert got == ((True, "https://x/c/9") if wrote else (False, "https://x/c/1"))
     assert len(posted) == int(wrote)
+
+
+@pytest.mark.parametrize(
+    "body, perm, updated, found",
+    [
+        (at.render_admin_intent(A), "admin", None, True),
+        (at.render_admin_intent(A), "read", None, False),
+        (at.render_admin_intent(A), "write", "2026-11-14T00:00:00Z", False),
+        (at.render_admin_intent("b" * 40), "admin", None, False),
+        (at.render_admin_record(A, "u"), "admin", None, False),
+    ],
+)
+def test_admin_intent_counts_only_marks_for_the_head_by_writers(monkeypatch, body, perm, updated, found):
+    """迂回の意図の印は、同じ head を持ち、書き込みの権限を持つ人が書いた編集されていないものだけ数える。同じ印があれば置き直さない。"""
+    posted = []
+
+    class Ok:
+        ok, error, value = True, "", {"url": "https://x/c/9"}
+
+    monkeypatch.setattr(at.gh_rest, "comment", lambda repo, n, b: posted.append(b) or Ok())
+    monkeypatch.setattr(at, "read_comments", lambda repo, pr: [comment(body, login="someone", updated=updated)])
+    monkeypatch.setattr(at, "read_permissions", lambda repo, logins: {"someone": perm})
+    assert at.has_admin_intent("o/r", 5, A) is found
+    assert at.write_admin_intent("o/r", 5, A) is (not found)
+    assert posted == ([] if found else [at.render_admin_intent(A)])
+
+
+def test_write_admin_intent_raises_when_it_cannot_post(monkeypatch):
+    class Ng:
+        ok, error, value = False, "HTTP 403", None
+
+    monkeypatch.setattr(at.gh_rest, "comment", lambda repo, n, b: Ng())
+    monkeypatch.setattr(at, "read_comments", lambda repo, pr: [])
+    with pytest.raises(at.TrailError):
+        at.write_admin_intent("o/r", 5, A)
 
 
 def _workflow(name):

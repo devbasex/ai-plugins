@@ -1,15 +1,18 @@
 """Skill の手順が、共通ライブラリと同じ起点ブランチを解決することを検証する。
 
 起点を扱う Skill は作業ツリーの仕組みを前提にしないため、手順には共通ライブラリを
-読み込まずに動く数行を書いている。複製である以上、両者が食い違う経路が残る。同じ入力に
-対して同じ名前を返すことを、ここで突き合わせる（issue #202）。
+読み込まずに動く数行（宣言の読みはブランチ戦略の CLI、名前の実在の確認は手順の中）を書いている。
+複製である以上、両者が食い違う経路が残る。同じ入力に対して同じ名前を返すか、同じく失敗することを、
+ここで突き合わせる（issue #202・#3672）。
 """
 
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -23,12 +26,15 @@ from branch_repo_helpers import (
 )
 
 ROOT = Path(__file__).resolve().parents[2]
-LIB = ROOT / "plugins" / "ndf" / "scripts" / "lib" / "worktree-common.sh"
-SKILLS = ROOT / "plugins" / "ndf" / "skills"
+PLUGIN = ROOT / "plugins" / "ndf"
+LIB = PLUGIN / "scripts" / "lib" / "worktree-common.sh"
+SKILLS = PLUGIN / "skills"
+sys.path.insert(0, str(PLUGIN / "scripts" / "tests"))
+import strategy_fixture  # noqa: E402
 
 # 起点を解決する手順を持つ Skill と、その手順を見分ける目印。
 INLINE_SKILLS = ("cherry-pick-pr", "deploy", "merged", "retrospective")
-MARKER = "dev_base=$(jq"
+MARKER = "dev_base=$(python3"
 
 
 @pytest.fixture()
@@ -87,6 +93,7 @@ def run_inline(name: str, repo: Path) -> subprocess.CompletedProcess:
         cwd=str(repo),
         capture_output=True,
         text=True,
+        env={**os.environ, "CLAUDE_PLUGIN_ROOT": str(PLUGIN)},
     )
 
 
@@ -99,30 +106,37 @@ def run_library(repo: Path) -> subprocess.CompletedProcess:
     )
 
 
-def resolve_inline(name: str, repo: Path) -> str:
+def resolve_inline(name: str, repo: Path) -> str | None:
+    """解決した名前。失敗したら None（失敗したときは何も出力しない）。"""
     got = run_inline(name, repo)
-    assert got.returncode == 0, got.stderr
-    return got.stdout.strip()
+    assert got.returncode == 0 or got.stdout.strip() == "", got.stdout
+    return got.stdout.strip() if got.returncode == 0 else None
 
 
-def resolve_library(repo: Path) -> str:
+def resolve_library(repo: Path) -> str | None:
     got = run_library(repo)
-    assert got.returncode == 0, got.stderr
-    return got.stdout.strip()
+    assert got.returncode == 0 or got.stdout.strip() == "", got.stdout
+    return got.stdout.strip() if got.returncode == 0 else None
 
 
-def write_declaration(repo: Path, body: dict) -> None:
+def write_declaration(repo: Path, body) -> None:
+    """`.ndf/project.json` を書く。文字列はそのまま、dict は JSON にして書く。"""
     ndf = repo / ".ndf"
     ndf.mkdir(exist_ok=True)
-    (ndf / "worktree.json").write_text(json.dumps(body), encoding="utf-8")
+    (ndf / "project.json").write_text(body if isinstance(body, str) else json.dumps(body), encoding="utf-8")
+
+
+def strategy(base: str, production: str = "main") -> dict:
+    kind = "web-trunk" if base == production else "web-develop"
+    return {"version": 1, "branch_strategy": strategy_fixture.section(kind, base, production)}
 
 
 DECLARATIONS = {
     "宣言なし": None,
-    "起点の指定なし": {"version": 1},
-    "起点あり": {"version": 1, "base_branch": "develop"},
-    "版が対応外": {"version": 99, "base_branch": "develop"},
-    "文字列でない": {"version": 1, "base_branch": 7},
+    "セクションなし": {"version": 1},
+    "起点あり": strategy("develop"),
+    "起点が本番と同じ": strategy("main"),
+    "壊れた JSON": "{not json",
 }
 
 
@@ -149,8 +163,8 @@ def test_inline_resolution_matches_library_without_origin_head(name: str, case: 
         write_declaration(repo_without_origin_head, body)
     got = resolve_inline(name, repo_without_origin_head)
     assert got == resolve_library(repo_without_origin_head)
-    # 宣言が起点を指していない経路は、慣例の名前のうち実在する `master` へ落ちる。
-    assert got == ("develop" if case == "起点あり" else "master")
+    # 宣言が起点を指していない経路は、既定ブランチ（`master`）へ落とさずに失敗する（#3672 の I3）。
+    assert got == ("develop" if case == "起点あり" else None)
 
 
 @pytest.mark.parametrize("name", INLINE_SKILLS)
@@ -161,7 +175,7 @@ def test_inline_matches_library_when_declared_branch_is_missing(name: str, repo_
     この後の `git fetch origin "$dev_base"` で落ちるため、失敗する位置が遠くなるだけで、
     起点を解決できていないことは変わらない。
     """
-    write_declaration(repo_without_develop, {"version": 1, "base_branch": "develop"})
+    write_declaration(repo_without_develop, strategy("develop"))
     inline = run_inline(name, repo_without_develop)
     library = run_library(repo_without_develop)
     assert inline.returncode != 0, inline.stdout
@@ -179,7 +193,7 @@ def test_inline_matches_library_when_declared_branch_is_unfetched(name: str, rep
     起点を `develop` へ移した直後の作業ディレクトリがこの形になる。取得済みの参照だけを
     見ると「無い」と読み、`git fetch` を挟むまで解決が失敗し続ける。
     """
-    write_declaration(repo_with_unfetched_develop, {"version": 1, "base_branch": "develop"})
+    write_declaration(repo_with_unfetched_develop, strategy("develop"))
     assert resolve_inline(name, repo_with_unfetched_develop) == "develop"
     assert resolve_library(repo_with_unfetched_develop) == "develop"
 
@@ -192,7 +206,7 @@ def test_inline_matches_library_when_only_a_lookalike_branch_exists(name: str, r
     `refs/heads/x/refs/heads/develop` が返る。問い合わせの成功だけを見ると、起点が未作成
     なのに解決できたことになり、手順だけが実在しない名前を返す。
     """
-    write_declaration(repo_with_lookalike_develop, {"version": 1, "base_branch": "develop"})
+    write_declaration(repo_with_lookalike_develop, strategy("develop"))
     inline = run_inline(name, repo_with_lookalike_develop)
     library = run_library(repo_with_lookalike_develop)
     assert inline.returncode != 0, inline.stdout
@@ -213,7 +227,8 @@ def write_local_declaration(repo: Path, body: dict) -> None:
     (ndf / "worktree.local.json").write_text(json.dumps(body), encoding="utf-8")
 
 
-LOCAL_BASE_BRANCH = {"version": 1, "base_branch": "main"}
+# 個人の宣言にブランチ名を書いても、起点は共有の宣言（`.ndf/project.json`）だけが決める
+LOCAL_BASE_BRANCH = {"version": 1, "branches": {"base": "main"}}
 
 
 @pytest.mark.parametrize("name", INLINE_SKILLS)

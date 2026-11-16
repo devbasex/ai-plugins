@@ -1,0 +1,5 @@
+{
+  "name": "NDF_STRATEGY_SNAPSHOT",
+  "set_by": "runtime",
+  "summary": "スプリントの開始時のブランチ戦略のスナップショット（{\"top\": メインディレクトリ, \"snapshot\": ...} の JSON）。supervise.py run がプランの「ブランチ戦略」から段ごとに入れ、段と子プロセスは今の宣言でなくこの値で名前と経路を解く。無いときと別のメインディレクトリの値のときは今の宣言を読む（plugins/ndf/scripts/lib/repo.py の branch_strategy_of）"
+}

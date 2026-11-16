@@ -213,7 +213,7 @@
       "next": "base-sync"
     }
   ],
-  "base_branch": "main",
+  "ベースブランチ": "main",
   "テストの戦略": {
     "name": "local-full",
     "source": "derived:test_duration",

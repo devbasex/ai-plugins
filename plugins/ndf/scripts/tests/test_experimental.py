@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import strategy_fixture  # noqa: E402
 
 SCRIPTS = Path(__file__).resolve().parents[1]
 EXP = SCRIPTS / "experimental"
@@ -207,8 +208,7 @@ def _body_repo(tmp_path):
         run("git", "config", k, v, cwd=clone)
     (clone / "docs").mkdir()
     (clone / "docs" / "pushed.md").write_text("x\n")
-    (clone / ".ndf").mkdir()
-    (clone / ".ndf" / "worktree.json").write_text('{"base_branch": "develop"}\n')
+    strategy_fixture.declare(clone, "develop", "main")
     run("git", "add", "-A", cwd=clone)
     run("git", "commit", "-qm", "init", cwd=clone)
     run("git", "push", "-q", "origin", "HEAD:develop", cwd=clone)

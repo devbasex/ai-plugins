@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf/scripts/lib/strategy_rows.py",
+  "name": "quoted-main",
+  "kind": "not-a-violation",
+  "reason": "ブランチ名の既定ブランチの候補と測る候補の唯一の置き場（#3121 の受け入れ条件 7）。既定ブランチを origin の HEAD から決められないときの候補と、project-decl.py が測る候補だけをここに置く",
+  "count": 4
+}

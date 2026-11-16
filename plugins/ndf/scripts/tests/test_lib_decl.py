@@ -15,11 +15,14 @@ import pytest
 
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS / "lib"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import branch_strategy  # noqa: E402
 import decl  # noqa: E402
 import delivery  # noqa: E402
 import project_decl  # noqa: E402
 import repo  # noqa: E402
 import runtime_policy  # noqa: E402
+import strategy_fixture as sf  # noqa: E402
 
 GIT = ["git", "-c", "user.email=a@b", "-c", "user.name=a", "-c", "init.defaultBranch=main", "-c", "protocol.file.allow=always"]
 
@@ -100,16 +103,24 @@ def test_main_dir_of_a_submodule_worktree_is_the_submodule(tmp_path: Path):
     assert project_decl.read_project_decl(wt) == {"from": "sub"}
 
 
-def test_production_branch_has_one_resolver():
-    """#2097: 宣言に production_branch が無ければ、どの読み手も既定ブランチを使う。"""
-    assert repo.production_of({"production_branch": "release"}, "main")[0] == "release"
-    assert repo.production_of({}, "main")[0] == "main"
-    d = delivery.build({"base_branch": "develop"}, {}, default_branch="main")
-    assert d.production == "main"
+def _sec(kind: str = "web-develop", rows: list[dict] | None = None, **branches) -> dict:
+    sec = sf.section(kind, **branches)
+    if rows is not None:
+        sec["release"] = dict(sec["release"], deliveries=rows)
+    return sec
 
 
-def _rows(rows: list[dict], wt: dict | None = None):
-    return delivery.build(wt or {"base_branch": "develop", "production_branch": "main"}, {"delivery": rows}, default_branch="main")
+def test_branch_names_have_one_resolver():
+    """#2097・#3672: ベースブランチと本番ブランチはブランチ戦略の宣言の 1 か所から読み、既定ブランチへ倒さない。"""
+    d = delivery.build(branch_strategy.Strategy(_sec()))
+    assert (d.base, d.production) == ("develop", "main")
+    d = delivery.build(None, problems=["宣言が無い"])
+    assert d.production is None
+    assert delivery.judge_target(d, "main").value == delivery.UNDETERMINED
+
+
+def _rows(rows: list[dict]):
+    return delivery.build(branch_strategy.Strategy(_sec(rows=rows)))
 
 
 ROW = {"target": "本番", "kind": "auto", "trigger": "main へのマージ", "versioned": True}
@@ -134,9 +145,8 @@ def test_null_channel_reads_the_branch():
     assert not d.problems and d.rows[0]["branch"] == "main"
 
 
-def test_bad_channel_is_a_problem():
-    d = _rows([dict(ROW, channel="staging")])
-    assert d.rows is None and any("channel" in p for p in d.problems)
+def test_bad_channel_is_rejected_by_the_schema():
+    assert branch_strategy.validate_section(_sec(rows=[dict(ROW, channel="staging")]))
 
 
 def test_old_supervise_test_command_is_read_only_without_project_suites(repo_wt):
@@ -153,88 +163,70 @@ def test_old_supervise_test_command_is_read_only_without_project_suites(repo_wt)
     assert "make test" not in json.dumps(got)
 
 
-# 認可に関わる値（本番マージの判定・本番のブランチ・使ってよいランタイム）はメインディレクトリから読む（#2363）。
+# 認可に関わる値（ブランチ戦略の宣言・使ってよいランタイム）はメインディレクトリから読む（#2363）。
 # Pull Request の変更だけでリリース承認ゲートやランタイムの制限を緩められないようにする。
 
 PROD_ROW = dict(ROW, channel="production")
 
 
+def _strategy(root: Path, kind: str = "web-develop", rows: list[dict] | None = None, **branches) -> None:
+    doc = json.loads((root / ".ndf/project.json").read_text()) if (root / ".ndf/project.json").is_file() else {}
+    doc["branch_strategy"] = _sec(kind, rows, **branches)
+    wj(root / ".ndf/project.json", doc)
+
+
 def test_authorization_values_are_declared_main_in_the_contract():
     assert decl.places()["runtimes.json"] == "main"
-    assert decl.key_places("project.json")["delivery"] == "main"
-    assert decl.key_places("worktree.json")["production_branch"] == "main"
-    assert "test" not in decl.key_places("project.json") and "base_branch" not in decl.key_places("worktree.json")
+    assert decl.key_places("project.json")["branch_strategy"] == "main"
+    assert "test" not in decl.key_places("project.json")
 
 
-def test_pr_head_delivery_does_not_loosen_the_merge_gate(repo_wt):
+def test_pr_head_strategy_does_not_loosen_the_merge_gate(repo_wt):
     main, wt = repo_wt
-    wj(main / ".ndf/worktree.json", {"base_branch": "main", "production_branch": "main"})
-    wj(main / ".ndf/project.json", {"test": "main", "delivery": [PROD_ROW]})
-    wj(wt / ".ndf/project.json", {"test": "wt", "delivery": []})
+    wj(main / ".ndf/project.json", {"test": "main"})
+    _strategy(main, "web-trunk", rows=[PROD_ROW])
+    wj(wt / ".ndf/project.json", {"test": "wt"})
+    _strategy(wt, "web-trunk", rows=[])
     assert delivery.judge_target(delivery.load_delivery(wt), "main").value == delivery.PRODUCTION
     # 認可に関わらない値は今のまま Pull Request の head を先に読む（#2317・#1709）
     assert project_decl.read_project_decl(wt)["test"] == "wt"
 
 
-def test_pr_head_cannot_drop_delivery_absent_in_the_main_directory(repo_wt):
-    """メインディレクトリの宣言に delivery が無ければ、head が足した delivery でも判定を緩めない（undetermined）。"""
+def test_pr_head_cannot_add_a_strategy_absent_in_the_main_directory(repo_wt):
+    """メインディレクトリに宣言が無ければ、head が足した宣言で判定を緩めない（止める側へ倒す。#2363 round 5）。"""
     main, wt = repo_wt
     wj(main / ".ndf/project.json", {"test": "main"})
-    wj(wt / ".ndf/project.json", {"test": "wt", "delivery": []})
-    assert "delivery" not in project_decl.read_project_decl(wt)
-    assert delivery.judge_target(delivery.load_delivery(wt), "main").value == delivery.UNDETERMINED
-
-
-def test_pr_head_cannot_move_the_production_branch(repo_wt):
-    main, wt = repo_wt
-    wj(main / ".ndf/worktree.json", {"base_branch": "main", "production_branch": "main"})
-    wj(main / ".ndf/project.json", {"delivery": [PROD_ROW]})
-    wj(wt / ".ndf/worktree.json", {"base_branch": "feat", "production_branch": "release"})
+    _strategy(wt, "web-trunk", rows=[PROD_ROW])
+    assert "branch_strategy" not in project_decl.read_project_decl(wt)
     d = delivery.load_delivery(wt)
-    assert d.production == "main" and d.base == "feat"
-    assert repo.production_branch(wt)[0] == "main"
-    assert delivery.judge_target(d, "main").value == delivery.PRODUCTION
-
-
-def test_pr_head_cannot_add_authorization_values_absent_in_the_main_directory(repo_wt):
-    """メインディレクトリにファイルが無いときも、head が足したファイルの認可の値で判定を緩めない（#2363 round 5）。"""
-    main, wt = repo_wt
-    wj(main / ".ndf/project.json", {"delivery": [PROD_ROW]})
-    wj(wt / ".ndf/project.json", {"delivery": [PROD_ROW]})
-    wj(wt / ".ndf/worktree.json", {"base_branch": "feat", "production_branch": "x"})
-    d = delivery.load_delivery(wt)
-    assert d.production == "main" and d.base == "feat"
-    assert delivery.judge_target(d, "main").value == delivery.PRODUCTION
+    assert d.problems and delivery.judge_target(d, "main").value == delivery.UNDETERMINED
     (main / ".ndf/project.json").unlink()
     assert delivery.judge_target(delivery.load_delivery(wt), "main").value == delivery.UNDETERMINED
 
 
-def test_pr_head_base_branch_does_not_move_a_base_channel_row(repo_wt):
-    """`channel: base` の行は、メインディレクトリの base_branch で解く（head の base_branch で本番から外せない。#2363 round 6）。"""
+def test_pr_head_cannot_move_the_branches(repo_wt):
     main, wt = repo_wt
-    base_row = {"kind": "auto", "channel": "base", "target": "prod"}
-    wj(main / ".ndf/worktree.json", {"base_branch": "main", "production_branch": "main"})
-    wj(main / ".ndf/project.json", {"delivery": [base_row]})
-    wj(wt / ".ndf/worktree.json", {"base_branch": "develop", "production_branch": "main"})
+    _strategy(
+        main, "web-develop", rows=[PROD_ROW, {"kind": "auto", "channel": "base", "target": "dev", "trigger": "t", "versioned": False}]
+    )
+    _strategy(wt, "web-develop", base="feat", production="release")
     d = delivery.load_delivery(wt)
-    assert d.base == "develop" and d.rows[0]["branch"] == "main"
+    assert (d.production, d.base) == ("main", "develop")
+    assert [r["branch"] for r in d.rows] == ["main", "develop"]
+    assert repo.production_branch(wt) == "main"
     assert delivery.judge_target(d, "main").value == delivery.PRODUCTION
-    (main / ".ndf/worktree.json").unlink()  # メインディレクトリに無ければ既定ブランチで解き、head の値で補わない
-    assert delivery.load_delivery(wt).rows[0]["branch"] == repo.default_branch(wt)
 
 
 def test_authorization_values_are_read_in_the_main_directory_itself(repo_wt):
     main, _ = repo_wt
-    wj(main / ".ndf/worktree.json", {"production_branch": "release"})
-    wj(main / ".ndf/project.json", {"delivery": [PROD_ROW]})
+    _strategy(main, "web-trunk", rows=[PROD_ROW], base="release")
     d = delivery.load_delivery(main)
     assert d.production == "release" and d.rows and d.rows[0]["branch"] == "release"
 
 
 def test_main_dir_is_resolved_once_per_root(repo_wt, monkeypatch):
     main, wt = repo_wt
-    wj(main / ".ndf/worktree.json", {"production_branch": "main"})
-    wj(main / ".ndf/project.json", {"delivery": [PROD_ROW]})
+    _strategy(main, "web-trunk", rows=[PROD_ROW])
     decl._MAIN_DIRS.clear()
     calls = []
     real = decl.proc.git_out
@@ -247,7 +239,7 @@ def test_broken_main_declaration_is_a_problem_not_a_fallback(repo_wt):
     main, wt = repo_wt
     (main / ".ndf").mkdir()
     (main / ".ndf/project.json").write_text("{")
-    wj(wt / ".ndf/project.json", {"delivery": [PROD_ROW]})
+    _strategy(wt, "web-trunk", rows=[PROD_ROW])
     assert delivery.judge_target(delivery.load_delivery(wt), "main").value == delivery.UNDETERMINED
 
 
@@ -260,12 +252,13 @@ def test_pr_head_runtimes_does_not_widen_the_allowed_runtimes(repo_wt):
         runtime_policy.check_runtime("codex", wt)
 
 
-def test_supervise_plan_reads_the_production_branch_from_the_main_directory(repo_wt):
-    """雛形の引数（supervise_lib/decl.read_decl）も、head の production_branch で本番チャネルを動かせない。"""
+def test_supervise_plan_reads_the_branches_from_the_main_directory(repo_wt):
+    """雛形の引数（supervise_lib/decl）も、head の宣言でブランチ名を動かせない。"""
     sys.path.append(str(SCRIPTS))
     import supervise_lib.decl as sdecl  # noqa: PLC0415
 
     main, wt = repo_wt
-    wj(main / ".ndf/worktree.json", {"base_branch": "main", "production_branch": "main"})
-    wj(wt / ".ndf/worktree.json", {"base_branch": "feat", "production_branch": "release"})
-    assert sdecl.read_decl([wt, main], sdecl.WORKTREE_DECL) == {"base_branch": "feat", "production_branch": "main"}
+    _strategy(main, "web-develop")
+    _strategy(wt, "web-develop", base="feat", production="release")
+    got = sdecl.strategy_of_roots([wt, main])
+    assert (got.base, got.production) == ("develop", "main")

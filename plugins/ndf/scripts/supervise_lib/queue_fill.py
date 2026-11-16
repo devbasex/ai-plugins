@@ -219,7 +219,9 @@ class _Fill:
     """1 本のプランの版の差し込み。状態ディレクトリの版の記録と差し込み前の写しを読み書きする。"""
 
     def __init__(self, plan: str, text: str, info: dict, items: list[dict]):
+        import branch_strategy
         import delivery
+        import release_tag
 
         self.path, self.text, self.info, self.items = Path(plan), text, info, items
         self.field = info["版"]
@@ -227,7 +229,10 @@ class _Fill:
         self.sd.mkdir(parents=True, exist_ok=True)
         self.repo = info.get("リポジトリ") or "."
         self.base = str(info.get("起点") or "").removeprefix("origin/")
-        self.production = delivery.load_delivery(self.repo).production
+        # 本番ブランチとタグの形は、プランが持つ開始時のスナップショットから引く（段と同じ値。I13・決定 9）
+        decl = delivery.load_delivery(self.repo, info.get(branch_strategy.SNAPSHOT_KEY))
+        self.production, self.template = decl.production, release_tag.tag_template(decl.release)
+        self.tagged = release_tag.makes_tags(decl.release)  # 出済みの版の数え方も開始時の宣言で決める（タグの形と同じ値）
         self.plugin = self.field.get("プラグイン")
         self.level = self.field.get("上げ幅") or "patch"
         self.explicit = self.field.get("明示") or None
@@ -239,7 +244,7 @@ class _Fill:
     def observe(self):
         import release_version
 
-        return release_version.observe(self.repo, self.plugin, self.base, self.production)
+        return release_version.observe(self.repo, self.plugin, self.base, self.production, template=self.template, tagged=self.tagged)
 
     def branch_of(self, version: str) -> str:
         b = self.info.get("branch")
