@@ -417,6 +417,9 @@ def cmd_signals(a):
 
 
 def cmd_schema(a):
+    import deps
+
+    deps.require("schema")
     text = pmd.mvv_json_schema()
     if a.out:
         Path(a.out).write_text(text, encoding="utf-8")
@@ -474,9 +477,6 @@ def build_parser():
 
 
 def main(argv=None):
-    import deps
-
-    deps.require("schema", "jsonschema")  # 宣言の模型（pydantic）と、ベースブランチを読むブランチ戦略の宣言（jsonschema）
     argv = legacy_names.rewrite_argv("project-mvv.py", sys.argv[1:] if argv is None else list(argv))
     return main_with(build_parser(), lambda a: TOOL, argv)
 

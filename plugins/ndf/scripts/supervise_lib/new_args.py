@@ -119,7 +119,7 @@ NEW_ARGS = [
     ),
     (
         "--production-branch",
-        {"dest": "production", "help": "本番のブランチ（既定はブランチ戦略の宣言の branches.production）"},
+        {"dest": "production", "metavar": "PRODUCTION_BRANCH", "help": "本番のブランチ（既定はブランチ戦略の宣言の branches.production）"},
         "release sprint close",
     ),
     (
