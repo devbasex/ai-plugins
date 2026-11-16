@@ -141,7 +141,7 @@
       "next": "release"
     }
   ],
-  "base_branch": "main",
+  "ベースブランチ": "main",
   "リポジトリ": "o/r",
   "記録": "<NDF>/scripts/projects-sync.sh"
 }

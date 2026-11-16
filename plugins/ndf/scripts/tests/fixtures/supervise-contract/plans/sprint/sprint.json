@@ -1,26 +1,64 @@
 {
   "スプリント": "m9",
   "ブランチ": "sprint/m9",
-  "ブランチ運用": {
-    "start": "base",
-    "integrate": "check",
-    "doc_prs": "base",
-    "promotion": "whole",
-    "start_branch": "main",
-    "base_branch": "main",
-    "production_branch": "main",
-    "source": "既定値（.ndf/worktree.json の branch_flow が無い）",
-    "reviews": {}
+  "ブランチ戦略": {
+    "source": ".ndf/project.json の branch_strategy",
+    "digest": "7e0e34adef7cbda5785312d42ec8eae34d77cb3b3df24bd1425bc82bb35c5ae0",
+    "section": {
+      "kind": "plugin",
+      "release_strategy": "trunk",
+      "branches": {
+        "production": "main",
+        "base": "main"
+      },
+      "sprint": {
+        "start": "production",
+        "integrate": "check",
+        "doc_prs": "sprint"
+      },
+      "release": {
+        "form": "package-plugin",
+        "version_store": {
+          "kind": "plugin"
+        },
+        "tag": "{plugin}--v{version}",
+        "github_release": true,
+        "cd": {
+          "workflow": "release.yml"
+        },
+        "plugin": "foo",
+        "runtimes": [
+          "claude"
+        ]
+      },
+      "channels": [
+        {
+          "name": "stable",
+          "ref": "main"
+        }
+      ],
+      "approval": {
+        "target": "release_pr",
+        "via": "gate"
+      },
+      "merge": {
+        "actor": "ndf",
+        "method": "merge-queue",
+        "commit": "merge",
+        "admin": false
+      },
+      "verify": null
+    }
   },
   "CD の案内": {
     "kind": "cd-guidance",
     "name": "CD の案内",
     "result": "guided",
-    "missing": ".ndf/project.json の delivery の宣言",
+    "missing": ".ndf/project.json の branch_strategy.release.deliveries の宣言",
     "rows": [],
     "steps_ref": "ndf の release の Skill の references/cd-setup.md",
     "example": "{\"target\": \"<届け先>\", \"kind\": \"auto\", \"trigger\": \"<CD の名前>\", \"channel\": \"production\", \"versioned\": false, \"result\": {\"workflow\": \"<ワークフローのファイル名>\"}}",
-    "manual_reason_how": "あえて CD を置かないなら、.ndf/project.json の delivery の手動の行に manual_reason（理由）と trigger（手順）を書く"
+    "manual_reason_how": "あえて CD を置かないなら、.ndf/project.json の branch_strategy.release.deliveries の手動の行に manual_reason（理由）と trigger（手順）を書く"
   },
   "リリースの経路": [
     {
@@ -34,44 +72,44 @@
   "ステージ": [
     {
       "wave": 1,
-      "name": "設計",
+      "name": "スプリントブランチ",
       "plans": [
-        "<TMP>/out/sprint/1-design-16.json"
+        "<TMP>/out/sprint/1-sprint-branch.json"
       ],
-      "command": "python3 <NDF>/scripts/supervise.py queue <TMP>/out/sprint/1-design-16.json --max 3 --done <TMP>/out/sprint/done-1.json",
+      "command": "python3 <NDF>/scripts/supervise.py queue <TMP>/out/sprint/1-sprint-branch.json --max 3 --done <TMP>/out/sprint/done-1.json",
       "resume": "python3 <NDF>/scripts/supervise.py queue --resume <TMP>/out/sprint/done-1.json"
     },
     {
       "wave": 2,
+      "name": "設計",
+      "plans": [
+        "<TMP>/out/sprint/2-design-16.json"
+      ],
+      "command": "python3 <NDF>/scripts/supervise.py queue <TMP>/out/sprint/2-design-16.json --max 3 --done <TMP>/out/sprint/done-2.json",
+      "resume": "python3 <NDF>/scripts/supervise.py queue --resume <TMP>/out/sprint/done-2.json"
+    },
+    {
+      "wave": 3,
       "name": "設計承認ゲート",
       "gate": "設計 Pull Request の承認を取り、承認された PR ごとに `gh pr edit <設計 PR> --add-label design-approved` を打ってから「設計 PR のマージ」のステージの command を打つ。後続のステージは --then で続けて流れる。証跡の無い設計 PR のマージは承認ゲートで止まり、後続は流れない"
     },
     {
-      "wave": 3,
+      "wave": 4,
       "name": "設計 PR のマージ",
       "plans": [
-        "<TMP>/out/sprint/3-design-merge-16.json"
+        "<TMP>/out/sprint/4-design-merge-16.json"
       ],
-      "command": "python3 <NDF>/scripts/supervise.py queue <TMP>/out/sprint/3-design-merge-16.json --max 3 --done <TMP>/out/sprint/done-3.json --then <TMP>/out/sprint/4-design-results.json --then <TMP>/out/sprint/5-sprint-branch.json --then <TMP>/out/sprint/6-impl-16.json <TMP>/out/sprint/6-impl-17.json --then <TMP>/out/sprint/7-check.json --then <TMP>/out/sprint/8-release.json",
-      "resume": "python3 <NDF>/scripts/supervise.py queue --resume <TMP>/out/sprint/done-3.json"
-    },
-    {
-      "wave": 4,
-      "name": "設計の結果",
-      "plans": [
-        "<TMP>/out/sprint/4-design-results.json"
-      ],
-      "then_of": "設計 PR のマージ",
-      "resume": "python3 <NDF>/scripts/supervise.py queue --resume <TMP>/out/sprint/done-3.json"
+      "command": "python3 <NDF>/scripts/supervise.py queue <TMP>/out/sprint/4-design-merge-16.json --max 3 --done <TMP>/out/sprint/done-4.json --then <TMP>/out/sprint/5-design-results.json --then <TMP>/out/sprint/6-impl-16.json <TMP>/out/sprint/6-impl-17.json --then <TMP>/out/sprint/7-check.json --then <TMP>/out/sprint/8-release.json",
+      "resume": "python3 <NDF>/scripts/supervise.py queue --resume <TMP>/out/sprint/done-4.json"
     },
     {
       "wave": 5,
-      "name": "スプリントブランチ",
+      "name": "設計の結果",
       "plans": [
-        "<TMP>/out/sprint/5-sprint-branch.json"
+        "<TMP>/out/sprint/5-design-results.json"
       ],
       "then_of": "設計 PR のマージ",
-      "resume": "python3 <NDF>/scripts/supervise.py queue --resume <TMP>/out/sprint/done-3.json"
+      "resume": "python3 <NDF>/scripts/supervise.py queue --resume <TMP>/out/sprint/done-4.json"
     },
     {
       "wave": 6,
@@ -81,7 +119,7 @@
         "<TMP>/out/sprint/6-impl-17.json"
       ],
       "then_of": "設計 PR のマージ",
-      "resume": "python3 <NDF>/scripts/supervise.py queue --resume <TMP>/out/sprint/done-3.json"
+      "resume": "python3 <NDF>/scripts/supervise.py queue --resume <TMP>/out/sprint/done-4.json"
     },
     {
       "wave": 7,
@@ -90,7 +128,7 @@
         "<TMP>/out/sprint/7-check.json"
       ],
       "then_of": "設計 PR のマージ",
-      "resume": "python3 <NDF>/scripts/supervise.py queue --resume <TMP>/out/sprint/done-3.json"
+      "resume": "python3 <NDF>/scripts/supervise.py queue --resume <TMP>/out/sprint/done-4.json"
     },
     {
       "wave": 8,
@@ -99,7 +137,7 @@
         "<TMP>/out/sprint/8-release.json"
       ],
       "then_of": "設計 PR のマージ",
-      "resume": "python3 <NDF>/scripts/supervise.py queue --resume <TMP>/out/sprint/done-3.json"
+      "resume": "python3 <NDF>/scripts/supervise.py queue --resume <TMP>/out/sprint/done-4.json"
     },
     {
       "wave": 9,

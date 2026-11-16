@@ -189,7 +189,7 @@
       "from_only": true
     }
   ],
-  "base_branch": "main",
+  "ベースブランチ": "main",
   "リポジトリ": "<TMP>/repo",
   "記録": "<NDF>/scripts/projects-sync.sh",
   "実行の条件": {

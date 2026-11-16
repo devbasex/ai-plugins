@@ -48,13 +48,12 @@ def declare(root: Path, base: str = "main", production: str | None = None, relea
     """ブランチ名とリリースの形から種類を選んで宣言を書く（旧い `worktree.json` のブランチ名・`supervise.json` の `release`・
     `project.json` の `delivery` を入力にしていたテストの移し先）。
 
-    ベースブランチと本番ブランチが同じなら `web-trunk`、違えば `web-develop` の写しを使う。`release` の形が `package-plugin`
-    なら `plugin` の種類のリリースの値（版数の置き場・タグ）を土台にし、渡した値で上書きする。"""
+    ベースブランチと本番ブランチが同じなら `web-trunk`（リリースの形が `package-plugin` なら `plugin`）、違えば `web-develop`
+    の写しを使う。`package-plugin` のリリースの値（版数の置き場・タグ）は `plugin` の種類のものを土台にし、渡した値で上書きする。"""
     production = production or base
-    kind = "web-trunk" if production == base else "web-develop"
-    rel = copy.deepcopy(section(kind)["release"])
-    if (release or {}).get("form") == "package-plugin":
-        rel = copy.deepcopy(section("plugin")["release"])
+    plugin = (release or {}).get("form") == "package-plugin"
+    kind = ("plugin" if plugin else "web-trunk") if production == base else "web-develop"
+    rel = copy.deepcopy(section("plugin" if plugin else kind)["release"])
     rel.update(release or {})
     if deliveries is not None:
         rel["deliveries"] = deliveries

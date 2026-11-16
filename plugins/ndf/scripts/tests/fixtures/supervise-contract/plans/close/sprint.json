@@ -2,26 +2,64 @@
   "スプリント": "m9",
   "進め方": "fast",
   "状態": "<TMP>/out/sprint/sprint.json",
-  "ブランチ運用": {
-    "start": "base",
-    "integrate": "check",
-    "doc_prs": "base",
-    "promotion": "whole",
-    "start_branch": "main",
-    "base_branch": "main",
-    "production_branch": "main",
-    "source": "既定値（.ndf/worktree.json の branch_flow が無い）",
-    "reviews": {}
+  "ブランチ戦略": {
+    "source": ".ndf/project.json の branch_strategy",
+    "digest": "7e0e34adef7cbda5785312d42ec8eae34d77cb3b3df24bd1425bc82bb35c5ae0",
+    "section": {
+      "kind": "plugin",
+      "release_strategy": "trunk",
+      "branches": {
+        "production": "main",
+        "base": "main"
+      },
+      "sprint": {
+        "start": "production",
+        "integrate": "check",
+        "doc_prs": "sprint"
+      },
+      "release": {
+        "form": "package-plugin",
+        "version_store": {
+          "kind": "plugin"
+        },
+        "tag": "{plugin}--v{version}",
+        "github_release": true,
+        "cd": {
+          "workflow": "release.yml"
+        },
+        "plugin": "foo",
+        "runtimes": [
+          "claude"
+        ]
+      },
+      "channels": [
+        {
+          "name": "stable",
+          "ref": "main"
+        }
+      ],
+      "approval": {
+        "target": "release_pr",
+        "via": "gate"
+      },
+      "merge": {
+        "actor": "ndf",
+        "method": "merge-queue",
+        "commit": "merge",
+        "admin": false
+      },
+      "verify": null
+    }
   },
   "CD の案内": {
     "kind": "cd-guidance",
     "name": "CD の案内",
     "result": "guided",
-    "missing": ".ndf/project.json の delivery の宣言",
+    "missing": ".ndf/project.json の branch_strategy.release.deliveries の宣言",
     "rows": [],
     "steps_ref": "ndf の release の Skill の references/cd-setup.md",
     "example": "{\"target\": \"<届け先>\", \"kind\": \"auto\", \"trigger\": \"<CD の名前>\", \"channel\": \"production\", \"versioned\": false, \"result\": {\"workflow\": \"<ワークフローのファイル名>\"}}",
-    "manual_reason_how": "あえて CD を置かないなら、.ndf/project.json の delivery の手動の行に manual_reason（理由）と trigger（手順）を書く"
+    "manual_reason_how": "あえて CD を置かないなら、.ndf/project.json の branch_strategy.release.deliveries の手動の行に manual_reason（理由）と trigger（手順）を書く"
   },
   "リリースの経路": [
     {

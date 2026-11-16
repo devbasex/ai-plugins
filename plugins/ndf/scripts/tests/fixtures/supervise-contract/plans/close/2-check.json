@@ -10,55 +10,31 @@
   "リポジトリ": "<TMP>/repo",
   "規則": "全体テストが落ちたら（落ちたテストだけの再実行でも落ちた後）、検査の修正に起因するなら fix、修正に無関係なら finish。2 回直しても同じなら abort。",
   "実行の条件": {
-    "cmd": "git -C <TMP>/repo fetch -q origin && python3 <NDF>/scripts/check-trigger.py eval --id m9-final --root <TMP>/repo --sprint m9 --issue 15 --final",
+    "cmd": "git -C <TMP>/repo fetch -q origin && python3 <NDF>/scripts/check-trigger.py eval --id m9-final --root <TMP>/repo --review --sprint m9 --issue 15",
     "skip_code": 3
   },
-  "上限": 35,
+  "上限": 33,
   "steps": [
     {
       "id": "prepare",
       "type": "run",
-      "stage": "構造改善",
+      "stage": "実装レビュー",
       "timeout": 600,
-      "cmd": "python3 <NDF>/scripts/check-trigger.py prepare --id m9-final --state {state_dir} --root . --sprint m9 --issue 15",
+      "cmd": "python3 <NDF>/scripts/check-trigger.py prepare --id m9-final --state {state_dir} --root . --review --sprint m9 --issue 15",
       "on_fail": "abort-before-pr",
       "next": "pr"
     },
     {
       "id": "pr",
       "type": "pr",
-      "stage": "構造改善",
+      "stage": "実装レビュー",
       "base": "check-base/m9-final",
       "title": "検査: m9-final",
       "body": "template",
       "on_fail": "abort-before-pr",
-      "summary": "前回の検査からの差分に構造改善と実装レビューを 1 回ずつ通す（m9-final）。範囲・立ったトリガー・先に見る範囲は `python3 <NDF>/scripts/check-trigger.py scope --id m9-final` と状態ディレクトリの check.json にある。検査の後に宛先を起点のブランチへ付け替える",
+      "summary": "前回の検査からの差分に実装レビューを 1 回ずつ通す（m9-final）。範囲・立ったトリガー・先に見る範囲は `python3 <NDF>/scripts/check-trigger.py scope --id m9-final` と状態ディレクトリの check.json にある。検査の後に宛先を起点のブランチへ付け替える",
       "changes": "無し（検査の修正だけ）",
-      "next": "assess"
-    },
-    {
-      "id": "assess",
-      "type": "run",
-      "preset": "assess",
-      "stage": "構造改善",
-      "skip_to": "review",
-      "on_fail": "refactor",
-      "next": "refactor"
-    },
-    {
-      "id": "refactor",
-      "type": "drive",
-      "drive": "cross-refactoring",
-      "kind": "構造改善",
-      "stage": "構造改善",
-      "timeout": 11880,
-      "cmd": "ndf_scope=$(python3 <NDF>/scripts/check-trigger.py scope --id m9-final --state {state_dir} --root .) || exit 2; python3 <NDF>/skills/cross-refactoring/scripts/drive.py {pr} --workflow-step --scope $ndf_scope",
-      "on_exit": {
-        "6": "review"
-      },
-      "on_fail": "abort",
-      "next": "review",
-      "gate_next": "end"
+      "next": "review"
     },
     {
       "id": "review",
@@ -209,24 +185,24 @@
     {
       "id": "record",
       "type": "run",
-      "cmd": "python3 <NDF>/scripts/check-trigger.py record --id m9-final --state {state_dir} --root . --pr {pr}",
+      "cmd": "python3 <NDF>/scripts/check-trigger.py record --id m9-final --state {state_dir} --root . --review --pr {pr}",
       "on_fail": "abort",
       "next": "end"
     },
     {
       "id": "abort",
       "type": "run",
-      "cmd": "python3 <NDF>/scripts/check-trigger.py record --id m9-final --state {state_dir} --root . --failed --pr {pr}",
+      "cmd": "python3 <NDF>/scripts/check-trigger.py record --id m9-final --state {state_dir} --root . --review --failed --pr {pr}",
       "next": "end"
     },
     {
       "id": "abort-before-pr",
       "type": "run",
-      "cmd": "python3 <NDF>/scripts/check-trigger.py record --id m9-final --state {state_dir} --root . --failed",
+      "cmd": "python3 <NDF>/scripts/check-trigger.py record --id m9-final --state {state_dir} --root . --review --failed",
       "next": "end"
     }
   ],
-  "base_branch": "main",
+  "ベースブランチ": "main",
   "テストの戦略": {
     "name": "local-full",
     "source": "derived:test_duration",
