@@ -380,7 +380,33 @@ def measure_strategy(
         bw._set(values, p, m.value)
     if rs == "trunk":
         bw._set(values, "/branches/base", s.production)
-    conflicts = rule_conflicts(values, evidence)
+    conflicts = rule_conflicts(values, evidence) + _doc_conflicts(root, values, evidence)
+    if conflicts:
+        return {**base, "questions": conflicts}
+    kind, candidates = pick_kind(measured, presets)
+    if kind is None:
+        if prefer in candidates:
+            candidates = [prefer] + [c for c in candidates if c != prefer]
+        return {**base, "questions": [{"pointer": "/kind", "why": "no_kind", "candidates": candidates, "evidence": []}]}
+    section = _section_from_kind(presets, kind, measured, values)
+    out = {
+        "status": "ok",
+        "kind": kind,
+        "values": section,
+        "evidence": _flat_evidence(evidence, presets, kind),
+        "questions": [],
+        "warnings": s.warnings,
+    }
+    approval = _approval_question(section, s.rules)
+    if approval:
+        out["status"] = "ask"
+        out["questions"] = approval
+    return out
+
+
+def _doc_conflicts(root: Path, values: dict, evidence: dict) -> list[dict]:
+    """文書（README など）の述べる PR の宛先が、測った値と食い違う箇所を問いにする。"""
+    conflicts = []
     for c in doc_claims(root):
         if bw._get(values, c["pointer"]) != c["value"]:
             conflicts.append(
@@ -391,35 +417,40 @@ def measure_strategy(
                     "evidence": evidence.get(c["pointer"], []) + [{"source": "doc", "ref": c["ref"], "value": c["value"]}],
                 }
             )
-    if conflicts:
-        return {**base, "questions": conflicts}
-    kind, candidates = pick_kind(measured, presets)
-    if kind is None:
-        if prefer in candidates:
-            candidates = [prefer] + [c for c in candidates if c != prefer]
-        return {**base, "questions": [{"pointer": "/kind", "why": "no_kind", "candidates": candidates, "evidence": []}]}
-    row = presets["kinds"][kind]["section"]
-    section = json.loads(json.dumps(row))
+    return conflicts
+
+
+def _section_from_kind(presets: dict, kind: str, measured: dict[str, Measured], values: dict) -> dict:
+    """種類の既定の行に測った値を入れたセクション。プラグインの無いリポジトリは plugin・runtimes を落とす。"""
+    section = json.loads(json.dumps(presets["kinds"][kind]["section"]))
     for p, m in measured.items():
         bw._set(section, p, m.value)
     section["branches"]["base"] = values["branches"]["base"]
     if section["release"].get("plugin") is None:
         section["release"].pop("plugin", None)
         section["release"].pop("runtimes", None)
+    return section
+
+
+def _flat_evidence(evidence: dict, presets: dict, kind: str) -> list[dict]:
+    """キーごとの根拠と、種類の既定から埋めたキーの根拠を 1 本の並びにする。"""
     flat = [{"source": e["source"], "ref": e["ref"], "value": e["value"], "pointer": p} for p, evs in evidence.items() for e in evs]
     flat += [{"source": "preset", "ref": kind, "value": p, "pointer": p} for p in presets["measured_keys"]["preset"]]
-    out = {"status": "ok", "kind": kind, "values": section, "evidence": flat, "questions": [], "warnings": s.warnings}
-    if section["approval"]["via"] == "gate" and s.rules is not None and s.rules.approvals > 0:
-        out["status"] = "ask"
-        out["questions"] = [
+    return flat
+
+
+def _approval_question(section: dict, rules) -> list[dict]:
+    """承認ゲートで受ける行なのに本番ブランチの ruleset が承認を求めるときの問い（無ければ空）。"""
+    if section["approval"]["via"] == "gate" and rules is not None and rules.approvals > 0:
+        return [
             {
                 "pointer": "/approval/via",
                 "why": "conflict",
                 "candidates": ["gate", "review"],
-                "evidence": [{"source": "ruleset", "ref": "required_approving_review_count", "value": str(s.rules.approvals)}],
+                "evidence": [{"source": "ruleset", "ref": "required_approving_review_count", "value": str(rules.approvals)}],
             }
         ]
-    return out
+    return []
 
 
 def classify_repo(root: Path, api: Api | None = None, presets: dict | None = None) -> tuple[str, list[dict]]:
