@@ -22,7 +22,7 @@
     },
     "branch_strategy": {
       "type": "object",
-      "description": "10 系の NDF（plugins/ndf/）のブランチ戦略の宣言（#3672）。ndf-next はまだ読まない。読む形は #3681 が決める"
+      "description": "10 系の NDF のブランチ戦略の宣言（#3672）。ndf-next はまだ読まない。読む形は #3681 が決める"
     },
     "languages": {
       "anyOf": [
