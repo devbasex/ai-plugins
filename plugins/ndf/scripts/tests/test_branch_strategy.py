@@ -602,6 +602,19 @@ def test_answering_the_asked_questions_completes_the_section(tmp_path):
     assert got["status"] == "ok" and got["kind"] == "docs" and bs.validate_section(got["values"]) == []
 
 
+def test_answering_other_questions_still_asks_the_required_review(tmp_path):
+    """#3672 の round 11: 別の問いを返した測定も本番の必須レビューの数を持ち、答えを足した後に承認の方法の食い違いを問う。"""
+    root = history_repo(tmp_path, 4, {"CONTRIBUTING.md": "`--base develop` で出す\n"})
+    protection = {"required_pull_request_reviews": {"required_approving_review_count": 1}, "enforce_admins": {"enabled": True}}
+    api = fake_api([(i, "main", f"sprint/{i}") for i in range(1, 5)], rules=[], protection=protection)
+    res = bsm.measure_strategy(root, api)
+    assert res["status"] == "ask" and res["facts"]["required_approvals"] == 1
+    got = bsm.complete_answers(res, {"/branches/base": "main"})
+    assert got["status"] == "ask" and [q["pointer"] for q in got["questions"]] == ["/approval/via"]
+    done = bsm.complete_answers(res, {"/branches/base": "main", "/approval/via": "review"})
+    assert done["status"] == "ok" and done["values"]["approval"]["via"] == "review"
+
+
 def test_measure_tags_without_cd_asks_r10(tmp_path):
     root = history_repo(tmp_path, 4)
     res = bsm.measure_strategy(
@@ -1045,6 +1058,19 @@ def test_cli_migrate_then_digest(tmp_path):
     done = run_decl(root, "migrate", "--digest", out["digest"])
     assert done.returncode == 0, done.stderr
     assert bs.load_strategy(root).section["release_strategy"] == "merge_base_branch"
+
+
+def test_cli_write_answers_keeps_the_declared_section(tmp_path):
+    """#3672 の round 11: 既存のセクションへの write --answers は今の宣言を土台にし、答えたキーだけを変える（測り直して既定へ戻さない）。"""
+    declared = section("docs")
+    declared["merge"]["actor"] = "human"
+    root = make_repo(tmp_path, {"project.json": {"version": 1, "branch_strategy": declared}})
+    answers = tmp_path / "answers.json"
+    answers.write_text(json.dumps({"/merge/commit": "squash"}), encoding="utf-8")
+    shown = run_decl(root, "write", "--answers", str(answers))
+    out = json.loads(shown.stdout.strip().splitlines()[-1])
+    assert out["status"] == "ok", shown.stdout + shown.stderr
+    assert out["values"]["merge"] == {**declared["merge"], "commit": "squash"}
 
 
 def test_cli_bad_verb_is_2(tmp_path):

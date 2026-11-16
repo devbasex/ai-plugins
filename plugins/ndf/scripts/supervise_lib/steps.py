@@ -283,6 +283,16 @@ class RunStep:
             addopts.append(no_reports)
         env["PYTEST_ADDOPTS"] = " ".join(a for a in addopts if a)
 
+    def _snapshot_env(self, ctx, step: dict, env: dict) -> None:
+        """プランが開始時のブランチ戦略のスナップショットを持てば、段と子プロセスへ環境変数で渡す（I13・決定 9）。"""
+        import branch_strategy
+        import repo as repo_lib
+
+        snap = ctx.plan.get(branch_strategy.SNAPSHOT_KEY)
+        got = repo_lib.snapshot_env(step.get("cwd", ctx.cwd), snap) if snap else None  # 段の作業場所のメインディレクトリに効かせる
+        if got:
+            env[repo_lib.SNAPSHOT_ENV] = got
+
     def _extend_hook(self, ctx, step: dict, extend_file: Path, timeout):
         """延長の締め切りを返す関数を作る。子が書いた見込みの秒で締め切りを後ろへずらす。"""
         return lambda started: (t := self.extension(ctx, step, Path(extend_file), timeout)) and started + t
@@ -298,6 +308,7 @@ class RunStep:
             return 2, err
         env = dict(os.environ)
         self._pytest_env(ctx, step, env)
+        self._snapshot_env(ctx, step, env)
         # 子が起動する CLI の使用量の帳簿の行にプランとステップを付ける（#1953 の決定 7・決定 11）
         env.update(NDF_USAGE_PLAN=getattr(ctx, "plan_path", None) or "", NDF_USAGE_STEP=str(step.get("id") or ""))
         extend = None

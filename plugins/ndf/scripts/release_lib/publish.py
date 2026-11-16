@@ -11,7 +11,7 @@ import os
 import tempfile
 
 import gh_parts
-from release_lib.names import changelog_span, tag_name
+from release_lib.names import changelog_span, tag_glob, tag_name, tag_template_of
 from step_result import StepError, git, plugin_dir
 
 
@@ -23,9 +23,14 @@ def wants(decl) -> tuple[bool, bool]:
     return tag, tag and rel.get("github_release", True) is not False
 
 
+def manifest_rel(root, plugin) -> str:
+    """`plugin` のマニフェストのリポジトリの根からの位置（version_at・untagged_since が読む）。"""
+    return (plugin_dir(root, plugin) / ".claude-plugin" / "plugin.json").relative_to(root).as_posix()
+
+
 def version_at(root, plugin, revision) -> str:
     """`revision` のコミットの plugin.json の版。読めなければ 1 で止める。"""
-    rel = (plugin_dir(root, plugin) / ".claude-plugin" / "plugin.json").relative_to(root).as_posix()
+    rel = manifest_rel(root, plugin)
     p = git(root, "show", f"{revision}:{rel}", check=False)
     try:
         ver = json.loads(p.stdout)["version"] if p.returncode == 0 else None
@@ -34,6 +39,13 @@ def version_at(root, plugin, revision) -> str:
     if not isinstance(ver, str) or not ver:
         raise StepError(f"{str(revision)[:8]} の {rel} の版を読めない")
     return ver
+
+
+def _version_or_none(root, plugin, revision) -> str | None:
+    try:
+        return version_at(root, plugin, revision)
+    except StepError:
+        return None
 
 
 def _notes_at(root, plugin, ver, revision) -> str:
@@ -89,3 +101,33 @@ def publish(root, plugin, revision) -> tuple[str, str, list[dict]]:
         raise StepError(f"{revision[:8]} の版 {ver} に接尾辞があるため、タグも GitHub Release も作らない")
     tag = tag_name(root, plugin, ver)
     return ver, tag, tag_and_release(root, plugin, ver, tag, revision)
+
+
+def since_without_tag(root, plugin, end) -> str:
+    """前のタグが無いときの、他のプラグインの差分の起点。タグを作らない宣言（release.tag が null）なら前のリリースの版上げの
+    コミット（`untagged_since`）、ほかは宣言の形のタグのパターン（差分を取れず「前のタグが無い」で止まる）。"""
+    return untagged_since(root, plugin, end) or tag_glob(plugin, tag_template_of(root))
+
+
+def untagged_since(root, plugin, end) -> str | None:
+    """タグを作らない宣言（release.tag が null）で、他のプラグインの差分の起点にするコミット。本番ブランチの先端の `plugin` の版
+    （出した最新の版）を `end` の履歴で初めて持ったコミット（前のリリースの版上げ）。本番ブランチ・版を読めなければ None。"""
+    import delivery
+
+    decl = delivery.load_delivery(root)
+    if decl.production is None or wants(decl)[0]:
+        return None
+    rel = manifest_rel(root, plugin)
+    prod = f"origin/{decl.production}"
+    if git(root, "rev-parse", "-q", "--verify", prod, check=False).returncode != 0:
+        prod = decl.production
+    shipped = _version_or_none(root, plugin, prod)
+    if shipped is None:
+        return None
+    found = None
+    for c in git(root, "log", "--format=%H", end, "--", rel, check=False).stdout.split():
+        if _version_or_none(root, plugin, c) == shipped:
+            found = c  # 同じ版の続く並びの最も古いコミットまでさかのぼる
+        elif found:
+            break
+    return found

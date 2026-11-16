@@ -760,6 +760,30 @@ def test_changed_plugins_without_the_tag_is_two(repo):
     assert code == 2 and "ndf--v" in res["summary"]
 
 
+def test_changed_plugins_without_tags_starts_from_the_last_release_bump(repo, monkeypatch):
+    """#3672 の round 11: タグを作らない宣言（CD の無い package-plugin は release.tag が null）では、本番ブランチの版を
+    初めて持ったコミット（前のリリースの版上げ）を差分の起点にし、存在しないタグで止まらない。"""
+    _release_steps_module(monkeypatch)  # lib/ を sys.path へ入れる
+    from release_lib import publish
+
+    plugin_json(repo, "plugins/ndf", "1.0.0")
+    plugin_json(repo, "plugins/mcp/mcp-serena", "2.3.4")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "release 1.0.0")
+    shipped = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
+    git(repo, "update-ref", "refs/remotes/origin/main", shipped)  # 本番ブランチは前のリリース
+    (repo / "plugins" / "mcp" / "mcp-serena" / "README.md").write_text("changed\n", encoding="utf-8")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "change serena")
+    plugin_json(repo, "plugins/ndf", "1.0.1")  # この版の bump の後に bump-others が走る
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "bump ndf")
+    assert publish.untagged_since(repo, "ndf", "HEAD") == shipped
+    code, res = changed(repo)
+    assert code == 0 and res["metrics"]["since"] == shipped, res
+    assert [it["name"] for it in res["items"]] == ["mcp-serena"]
+
+
 def v_tag_repo(root: Path) -> Path:
     """宣言の release.tag が `v{version}` のリポジトリ（#3672 の round 9）。タグは v1.0.0・v1.1.0・接尾辞つきの v1.2.0-dev.1。"""
     release = {**plugin_release(), "tag": "v{version}", "github_release": True, "cd": {"workflow": "release.yml"}}
@@ -805,20 +829,25 @@ def test_release_tags_follow_the_declared_shape(repo, monkeypatch):
 
 
 def test_release_reads_names_from_the_start_snapshot(repo, monkeypatch):
-    """#3672 の round 10: 保存済みのプランが渡す開始時のスナップショットで名前を解き、開始後に変えた宣言を読み直さない（I13・決定 9）。"""
+    """#3672 の round 11: プランが環境変数で渡す開始時のスナップショットで名前を解き、開始後に変えた宣言を読み直さない
+    （段が起動する子プロセスも環境変数を受け継ぐ。I13・決定 9）。"""
     root = v_tag_repo(repo)
-    mod = _release_steps_module(monkeypatch)
+    _release_steps_module(monkeypatch)  # lib/ を sys.path へ入れる
     import branch_strategy
     import repo as repo_lib
     from release_lib import names
 
-    monkeypatch.setattr(repo_lib, "_PINNED", {})
+    monkeypatch.delenv(repo_lib.SNAPSHOT_ENV, raising=False)
     snap = branch_strategy.snapshot_section(repo_lib.branch_strategy_of(root), "開始時")
     snap["section"]["release"]["tag"] = "rel-{version}"
-    mod._pin_snapshot(root, json.dumps(snap, ensure_ascii=False))
+    monkeypatch.setenv(repo_lib.SNAPSHOT_ENV, repo_lib.snapshot_env(root, snap))
     assert names.tag_name(root, "ndf", "1.3.0") == "rel-1.3.0"  # 今の宣言（v{version}）でなく開始時の形
-    with pytest.raises(mod.StepError):
-        mod._pin_snapshot(root, "{")
+    other = json.loads(repo_lib.snapshot_env(root, snap))
+    monkeypatch.setenv(repo_lib.SNAPSHOT_ENV, json.dumps({**other, "top": "/elsewhere"}))
+    assert names.tag_name(root, "ndf", "1.3.0") == "v1.3.0"  # 別のリポジトリのスナップショットは効かない
+    monkeypatch.setenv(repo_lib.SNAPSHOT_ENV, "{")
+    with pytest.raises(branch_strategy.StrategyError):
+        repo_lib.branch_strategy_of(root)
 
 
 def test_release_tag_shape_defaults_without_a_declared_tag(monkeypatch):

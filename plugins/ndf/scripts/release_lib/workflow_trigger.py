@@ -14,6 +14,10 @@ from typing import Any
 # on: pull_request_target だけの release-approval.yml の approval-check が head_sha=97bc3bbf で付いた。2026-11-16）。
 # 外すと pull_request_target で CI を回すリポジトリで、検査 0 件の head を早送りする。types の既定と branches・paths の照らし方は pull_request と同じ
 _HEAD_EVENTS = ("pull_request", "pull_request_target")
+# どの側の定義で起動を決めるか。pull_request・push は PR の head（その push のコミット）の定義、pull_request_target は宛先の
+# ブランチの定義で動く（GitHub の文書「Events that trigger workflows」の pull_request_target）。PR の head で書き換えても起動は変わらない
+HEAD_DEFINED = ("pull_request", "push")
+BASE_DEFINED = ("pull_request_target",)
 # PR の head への push で起動する種類。`types` を書かなければこの 3 つで動く（GitHub の既定）
 _HEAD_TYPES = frozenset({"opened", "synchronize", "reopened"})
 
@@ -106,10 +110,11 @@ def _push_runs(spec: Any, event: PullEvent) -> bool:
     return _paths_run(spec, event.push_files)
 
 
-def runs_on_pull_head(text: str | None, event: PullEvent | None = None) -> bool:
+def runs_on_pull_head(text: str | None, event: PullEvent | None = None, events=HEAD_DEFINED + BASE_DEFINED) -> bool:
     """workflow の定義（YAML の字面）が PR の head に検査を作るか。`on` の pull_request・pull_request_target が絞り込み
     （起動の種類の types・宛先の branches・PR の変更ファイルの paths）でこの PR に当たるか、push が絞り込み（head のブランチの
-    branches・直近の push の変更ファイルの paths）に当たれば真。読めない定義と、照らす事実（`event`）を読めない絞り込みは動くとみなす（検査なしで通さない側へ倒す）。"""
+    branches・直近の push の変更ファイルの paths）に当たれば真。`events` の種類だけを照らす（定義を読んだ側の種類。`HEAD_DEFINED`・
+    `BASE_DEFINED`）。読めない定義と、照らす事実（`event`）を読めない絞り込みは動くとみなす（検査なしで通さない側へ倒す）。"""
     import yamlio
 
     event = event or PullEvent()
@@ -126,6 +131,6 @@ def runs_on_pull_head(text: str | None, event: PullEvent | None = None) -> bool:
         on = {str(e): None for e in on}
     if not isinstance(on, dict):
         return True
-    if any(_pull_runs(on[e], event) for e in _HEAD_EVENTS if e in on):
+    if any(_pull_runs(on[e], event) for e in _HEAD_EVENTS if e in on and e in events):
         return True
-    return "push" in on and _push_runs(on["push"], event)
+    return "push" in on and "push" in events and _push_runs(on["push"], event)

@@ -103,7 +103,7 @@ import step_read  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from merged_lib import trash  # noqa: E402
 from release_lib import approval, bump, carry, cd_result, changed, deploy, included, instructions, materials  # noqa: E402
-from release_lib import others, port_mark, publish, record, replaced, review_range, reviewed, strategy_route  # noqa: E402
+from release_lib import names, others, port_mark, publish, record, replaced, review_range, reviewed, strategy_route  # noqa: E402
 import limits
 from release_lib import version_merge  # noqa: E402
 from release_lib.approval import HeadMoved  # noqa: E402
@@ -300,8 +300,8 @@ def next_release(name, old, level="patch"):
 
 def other_plugins(root, a):
     """(前のタグ, 差分にあってまだ上げていない {名前: 前のタグの版}, 上げ済みの行)。"""
-    since = a.since or release_tag_before(root, a.plugin) or tag_glob(a.plugin, tag_template_of(root))
-    p = git(root, "diff", "--name-only", f"refs/tags/{since}", a.end, check=False)
+    since = a.since or release_tag_before(root, a.plugin) or publish.since_without_tag(root, a.plugin, a.end)
+    p = git(root, "diff", "--name-only", names.since_ref(root, since), a.end, check=False)
     if p.returncode:
         raise StepError(f"前のタグが無い: {since}", 2)
     pending, already = {}, []
@@ -330,7 +330,7 @@ def cmd_changed_plugins(a):
         decided = changed.approval_path(root, a.decided)
         rows = changed.decided_rows(decided, pending, already)
     elif a.prs is not None:  # 候補は範囲の PR と --prs の和の本文から出す（#1885。develop へ直接入った互換の無い変更を拾う）
-        prs = included.included_prs(included.release_range(root, f"refs/tags/{since}", a.end), a.prs)
+        prs = included.included_prs(included.release_range(root, names.since_ref(root, since), a.end), a.prs)
         data = included.pr_fields(prs, cwd=str(root))[0] or {}
         view = lambda n: data[n] if isinstance(data.get(n), dict) else pr_view(root, n, "body,state,mergeCommit")  # noqa: E731  読めない PR は根拠に書く（I4）
         rows = changed.candidate_rows(root, prs, pending, view, skipped)
@@ -670,22 +670,8 @@ def _merge_prod_pr(root, a, plugin, branch, prod, release_pr, approved, allowed,
     return main_pr, merge, verdict
 
 
-def _pin_snapshot(root, raw: str | None) -> None:
-    """`--strategy-snapshot`（スプリントの開始時のブランチ戦略のスナップショットの JSON）があれば、名前と経路をその値で解く。
-    保存済みのプランが、開始後に変えた宣言（branches・release.plugin・release_strategy）で出さないためである（I13・決定 9）。"""
-    if not raw:
-        return
-    try:
-        repo_lib.pin_strategy(root, branch_strategy.from_snapshot(json.loads(raw)))
-    except ValueError as e:
-        raise StepError(f"--strategy-snapshot を読めない: {e}", EXIT_PRECONDITION) from e
-    except branch_strategy.StrategyError as e:
-        raise StepError(e.reason, e.exit_code) from e
-
-
 def cmd_release(a):
     root = git_root(a.root)
-    _pin_snapshot(root, getattr(a, "strategy_snapshot", None))
     ver = a.version
     base, prod, plugin = release_decl(root, a)
     route = _release_route(root)
@@ -1224,8 +1210,8 @@ def notes_prs(root, a):
     path = path if path.is_absolute() else root / path
     listed = included.read_included_rows(path)
     if missing := [n for n in a.prs if n not in {p.number for p in listed}]:
-        names = " ".join(f"#{n}" for n in missing)
-        raise StepError(f"--prs の {names} が承認資料の「含む PR」に無い（approval-facts で承認資料を作り直す）", EXIT_PRECONDITION)
+        absent = " ".join(f"#{n}" for n in missing)
+        raise StepError(f"--prs の {absent} が承認資料の「含む PR」に無い（approval-facts で承認資料を作り直す）", EXIT_PRECONDITION)
     return listed, path, None, []
 
 
@@ -1364,11 +1350,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     g.add_argument("--approval", help="prod の CD が無い場合: 承認資料（「承認したコミット」と「承認の記録」の欄を読む）")
     p.add_argument("--release-strategy", choices=tuple(strategy_rows.ROWS), help="本番への取り込み方（開始時の値。単位を選ぶ行だけ）")
-    p.add_argument(
-        "--strategy-snapshot",
-        metavar="JSON",
-        help="スプリントの開始時のブランチ戦略のスナップショット（名前と経路を今の宣言でなくこれで解く）",
-    )
     p.set_defaults(func=cmd_release)
     p = sub.add_parser(
         "release-branch", parents=[common], help="選んだスプリントブランチを本番チャネルから組んだリリースブランチへ集めて push する"

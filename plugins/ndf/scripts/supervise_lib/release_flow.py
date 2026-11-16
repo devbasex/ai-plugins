@@ -62,11 +62,14 @@ def release_strategy_flag(a) -> str:
     return f" --release-strategy {row.name}" if row.selects_units else ""
 
 
-def strategy_snapshot_flag(a) -> str:
-    """release に渡す開始時のブランチ戦略のスナップショット（`a.flow`）。保存済みのプランが今の宣言を読み直さず、開始時の
-    名前（ベースブランチ・本番ブランチ・プラグイン・タグの形）と経路で出すためである（I13・決定 9）。無ければ空。"""
+def with_strategy_snapshot(plan: dict, a) -> dict:
+    """プランへ開始時のブランチ戦略のスナップショット（`a.flow`）を書く。`supervise.py run` が全段へ環境変数で渡し（`repo.SNAPSHOT_ENV`）、
+    段と段が起動する子プロセス（merge-when-green など）が今の宣言を読み直さず、開始時の名前（ベースブランチ・本番ブランチ・
+    プラグイン・タグの形）と経路で動く（I13・決定 9）。無ければ書かない。"""
     flow = getattr(a, "flow", None)
-    return f" --strategy-snapshot {shlex.quote(branch_strategy.canonical_json(flow))}" if isinstance(flow, dict) and flow else ""
+    if isinstance(flow, dict) and flow:
+        plan[branch_strategy.SNAPSHOT_KEY] = flow
+    return plan
 
 
 def _production(a) -> str | None:

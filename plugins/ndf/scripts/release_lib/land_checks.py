@@ -9,7 +9,7 @@ GitHub の必須の検査を通らない取り込み（ruleset の無い `strict
 
 from __future__ import annotations
 
-from release_lib.workflow_trigger import PullEvent, runs_on_pull_head
+from release_lib.workflow_trigger import BASE_DEFINED, HEAD_DEFINED, PullEvent, runs_on_pull_head
 
 CHECKS_OK = ("success", "skipped", "neutral")
 _PAGE = 100
@@ -149,8 +149,24 @@ def no_checks_reason(port, sha: str, pull: dict) -> str | None:
         return cache["push"]
 
     event = PullEvent(pull.get("head_ref"), pull.get("base"), files, pushed)
-    # パスを読めない workflow も動くとみなす。名前が空でも数に入れる（文字列の真偽で判定しない）
-    on_head = [p or "（パス不明）" for p in active if runs_on_pull_head(show(p) if p else None, event)]
+    tip = pull.get("tip") or ""
+    show_tip = port._show(tip) if tip else None
+
+    def runs(p: str) -> bool:
+        if not p:  # パスを読めない workflow も動くとみなす
+            return True
+        head = show(p)
+        if runs_on_pull_head(head, event, HEAD_DEFINED):
+            return True
+        # pull_request_target は宛先の先端の定義で起動を決める（PR の head の書き換えで起動の条件を外させない）。先端が無ければ head の定義で数え、
+        # 先端に定義が無ければこの種類では動かない
+        if show_tip is None:
+            return runs_on_pull_head(head, event, BASE_DEFINED)
+        text = show_tip(p)
+        return text is not None and runs_on_pull_head(text, event, BASE_DEFINED)
+
+    # 名前が空でも数に入れる（文字列の真偽で判定しない）
+    on_head = [p or "（パス不明）" for p in active if runs(p)]
     if on_head:
         return f"検査がまだ 1 件も無い（PR の head で動く workflow {', '.join(on_head)[:200]} がある。始まるのを待って打ち直してください）"
     parent = port._git("rev-parse", "--verify", "--quiet", f"{sha}^").stdout.strip()

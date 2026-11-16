@@ -63,28 +63,43 @@ def read_worktree_decl(root, fallback: bool = True) -> tuple[dict, str | None]:
     return decl.load_file(f, WORKTREE_DECL.name) if f.is_file() else ({}, None)
 
 
-_PINNED: dict[str, branch_strategy.Strategy] = {}  # メインディレクトリ → 開始時のスナップショット（`pin_strategy`）
+# スプリントの開始時のブランチ戦略のスナップショット（`{"top": メインディレクトリ, "snapshot": snapshot_section の形}` の JSON）。
+# 保存済みのプランの全段（`supervise.py run` が渡す）と、段が起動する子プロセスが、今の宣言でなく開始時の名前と経路で解く（I13・決定 9）
+SNAPSHOT_ENV = "NDF_STRATEGY_SNAPSHOT"
 
 
-def pin_strategy(root, strategy: branch_strategy.Strategy) -> None:
-    """このプロセスの間、`root` のメインディレクトリのブランチ戦略を `strategy`（スプリントの開始時のスナップショット）に固定する。
-    保存済みのプランが起動する 1 回きりの CLI（`release-steps.py release --strategy-snapshot`）が、今の宣言を読み直さずに
-    開始時の名前と経路で動くためである（I13・決定 9）。"""
+def snapshot_env(root, snapshot) -> str | None:
+    """`root` のメインディレクトリに効かせる `SNAPSHOT_ENV` の値。メインディレクトリかスナップショットが無ければ None（渡さない）。"""
     top = decl.main_dir(root) if root else None
-    if top is None:
-        raise branch_strategy.StrategyError("ブランチ戦略の宣言を探す git の木が無い")
-    _PINNED[str(Path(top).resolve())] = strategy
+    if top is None or not isinstance(snapshot, dict) or not snapshot:
+        return None
+    return json.dumps({"top": str(Path(top).resolve()), "snapshot": snapshot}, ensure_ascii=False)
+
+
+def _pinned(top: str) -> branch_strategy.Strategy | None:
+    """`SNAPSHOT_ENV` が `top` のメインディレクトリのスナップショットを持てばその戦略。無い・別のリポジトリなら None。"""
+    raw = os.environ.get(SNAPSHOT_ENV)
+    if not raw:
+        return None
+    try:
+        got = json.loads(raw)
+    except ValueError as e:
+        raise branch_strategy.StrategyError(f"{SNAPSHOT_ENV} を読めない: {e}") from e
+    if not isinstance(got, dict):
+        raise branch_strategy.StrategyError(f"{SNAPSHOT_ENV} の形が違う（オブジェクトでない）")
+    return branch_strategy.from_snapshot(got.get("snapshot")) if got.get("top") == top else None
 
 
 def branch_strategy_of(root) -> branch_strategy.Strategy:
-    """メインディレクトリのブランチ戦略の宣言（`.ndf/project.json` の `branch_strategy`）。`pin_strategy` で固定していればその値。
+    """メインディレクトリのブランチ戦略の宣言（`.ndf/project.json` の `branch_strategy`）。`SNAPSHOT_ENV` が開始時の
+    スナップショットを渡していればその値。
 
     メインディレクトリから読むのは、Pull Request の変更でブランチ名を動かせないようにするためである（#2363）。
     セクションが無い・壊れている・旧いキーが残るときは `branch_strategy.StrategyError`（既定値へ倒さない。I3・I4）。"""
     top = decl.main_dir(root) if root else None
     if top is None:
         raise branch_strategy.StrategyError("ブランチ戦略の宣言を探す git の木が無い")
-    pinned = _PINNED.get(str(Path(top).resolve()))
+    pinned = _pinned(str(Path(top).resolve()))
     return pinned if pinned is not None else branch_strategy.load_strategy(Path(top))
 
 

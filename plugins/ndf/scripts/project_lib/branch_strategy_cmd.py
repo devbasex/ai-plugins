@@ -105,9 +105,19 @@ def _verb_measure(a, root: Path, presets: dict) -> int:
     return _bs_emit(bsm.measure_strategy(root, prefer=a.kind))
 
 
+def _declared_section(root: Path) -> dict | None:
+    """読めるセクションがあれば、それを確定した値として持つ測った結果の形。無い・読めなければ None（測り直す）。"""
+    try:
+        section = bs.load_strategy(root).section
+    except bs.StrategyError:
+        return None
+    return {"status": "ok", "kind": section.get("kind"), "values": section, "evidence": [], "questions": []}
+
+
 def _verb_write(a, root: Path, presets: dict) -> int:
-    """測った結果（無ければ測り直す）に答えを入れて書く。"""
-    prior = jsonio.read(a.result, want=dict) if a.result else bsm.measure_strategy(root, prefer=a.kind)
+    """測った結果に答えを入れて書く。`--result` が無ければ今のセクションを土台にし（答えたキーだけを変え、利用者が決めた
+    merge.actor・verify・reviews を種類の既定へ戻さない）、セクションも無ければ測り直す。"""
+    prior = jsonio.read(a.result, want=dict) if a.result else _declared_section(root) or bsm.measure_strategy(root, prefer=a.kind)
     answers = jsonio.read(a.answers, want=dict) if a.answers else {}
     res = bw.apply_answers(prior, answers)
     if res["status"] == "ok" and "approval" not in res["values"]:

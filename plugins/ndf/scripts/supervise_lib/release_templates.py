@@ -14,7 +14,7 @@ from supervise_lib.release_flow import (
     REVIEW_RANGE_IDS,
     bump_others_cmd,
     release_strategy_flag,
-    strategy_snapshot_flag,
+    with_strategy_snapshot,
     release_branch_step,
     release_ref,
     release_units,
@@ -61,7 +61,7 @@ def plan_release(a) -> dict:
     maker = RELEASE_FORMS.get(form)
     if not maker:
         raise DeclError(f"リリースの形 {form!r} の雛形が無い（雛形のある形: {', '.join(RELEASE_FORMS)}）。その形は /ndf:release で配る")
-    return maker(a)
+    return with_strategy_snapshot(maker(a), a)
 
 
 DEV_SERIES = "release"  # スプリントの本番のプランが版を読む開発版のプランの名前（#2164）
@@ -248,7 +248,7 @@ def _release_step(a, v: str, dev: bool, repo: str | None, approval: str, on_pr: 
         "type": "run",
         "stage": "デプロイ",
         "timeout": max(2400 if dev else 3000, with_margin((1 if dev else 2) * ci_wait)),
-        "cmd": f"{STEPS_PY} release --version {v} --ci-wait {ci_wait} --channel {a.channel}{strategy_snapshot_flag(a)}",
+        "cmd": f"{STEPS_PY} release --version {v} --ci-wait {ci_wait} --channel {a.channel}",
         "on_exit": dict(INFRA_WAIT_STOP),
         "on_fail": "judge",
         "next": "verify" if dev else "cd-result",

@@ -367,7 +367,10 @@ def measure_strategy(
         if not m.why
         for e in m.evidence
     ]
+    # 本番の必須レビューの数は、問いを返すときも持つ（答えを足した後に `complete_answers` が承認の方法の食い違いを問い直す）
+    facts = {"required_approvals": s.rules.approvals if s.rules is not None else None}
     base = {"status": "ask", "kind": None, "values": values, "evidence": kept, "questions": questions, "warnings": s.warnings}
+    base["facts"] = facts
     if questions:
         return base
     conflicts = conflicts_of.rule_conflicts(values, evidence) + conflicts_of.doc_conflicts(root, values, evidence)
@@ -386,8 +389,9 @@ def measure_strategy(
         "evidence": _flat_evidence(evidence, presets, kind),
         "questions": [],
         "warnings": s.warnings,
+        "facts": facts,
     }
-    approval = _approval_question(section, s.rules)
+    approval = _approval_question(section, facts["required_approvals"])
     if approval:
         out["status"] = "ask"
         out["questions"] = approval
@@ -410,6 +414,7 @@ def complete_answers(prior: dict, answers: dict, presets: dict | None = None) ->
         "values": known,
         "evidence": prior.get("evidence") or [],
         "warnings": prior.get("warnings") or [],
+        "facts": prior.get("facts") or {},
     }
     if not bw.get_pointer(known, "/branches/base"):
         return {**asked, "questions": [{"pointer": "/branches/base", "why": "missing", "candidates": [], "evidence": []}]}
@@ -425,7 +430,9 @@ def complete_answers(prior: dict, answers: dict, presets: dict | None = None) ->
         *asked["evidence"],
         *({"source": "preset", "ref": kind, "value": p, "pointer": p} for p in presets["measured_keys"]["preset"]),
     ]
-    return bw.apply_answers({**asked, "kind": kind, "values": section, "evidence": evidence, "questions": []}, rest)
+    done = bw.apply_answers({**asked, "kind": kind, "values": section, "evidence": evidence, "questions": []}, rest)
+    approval = [] if "/approval/via" in rest else _approval_question(done["values"], asked["facts"].get("required_approvals"))
+    return {**done, "status": "ask", "questions": approval} if approval else done
 
 
 def _section_from_kind(presets: dict, kind: str, measured: dict[str, Measured], values: dict) -> dict:
@@ -447,15 +454,15 @@ def _flat_evidence(evidence: dict, presets: dict, kind: str) -> list[dict]:
     return flat
 
 
-def _approval_question(section: dict, rules) -> list[dict]:
-    """承認ゲートで受ける行なのに本番ブランチの ruleset が承認を求めるときの問い（無ければ空）。"""
-    if section["approval"]["via"] == "gate" and rules is not None and rules.approvals > 0:
+def _approval_question(section: dict, approvals: int | None) -> list[dict]:
+    """承認ゲートで受ける行なのに本番ブランチの ruleset が承認を求める（必須レビューの数 `approvals` が 1 以上）ときの問い（無ければ空）。"""
+    if section["approval"]["via"] == "gate" and isinstance(approvals, int) and approvals > 0:
         return [
             {
                 "pointer": "/approval/via",
                 "why": "conflict",
                 "candidates": ["gate", "review"],
-                "evidence": [{"source": "ruleset", "ref": "required_approving_review_count", "value": str(rules.approvals)}],
+                "evidence": [{"source": "ruleset", "ref": "required_approving_review_count", "value": str(approvals)}],
             }
         ]
     return []

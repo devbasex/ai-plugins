@@ -238,10 +238,11 @@ def build(
     return DeliveryDecl(b, p, rows, rel if isinstance(rel, dict) else None, problems, sources, None)
 
 
-def load_delivery(root) -> DeliveryDecl:
-    """`root` のリポジトリ（メインディレクトリ）の宣言を読む。例外を上げず、読めない宣言は `problems` に書く。"""
+def load_delivery(root, snapshot=None) -> DeliveryDecl:
+    """`root` のリポジトリ（メインディレクトリ）の宣言を読む。`snapshot`（プランが持つ開始時のスナップショット）を渡せばその値で組む。
+    例外を上げず、読めない宣言は `problems` に書く。"""
     try:
-        return build(repo.branch_strategy_of(root))
+        return build(branch_strategy.from_snapshot(snapshot) if snapshot else repo.branch_strategy_of(root))
     except branch_strategy.StrategyError as e:
         return build(None, problems=[e.reason])
 

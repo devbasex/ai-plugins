@@ -136,10 +136,12 @@ class Approval:
     at: str | None = None
 
 
-def land_approved(port: Port, strategy, pr: int, approval: Approval, pull: dict | None = None, verify_checks: bool = False) -> dict:
+def land_approved(
+    port: Port, strategy, pr: int, approval: Approval, pull: dict | None = None, verify_checks: bool = False, rules: Any = None
+) -> dict:
     """承認した head を、セクションの主体と方式で本番ブランチへ入れる。
 
-    `pull` は読んだ PR（省けば読む）。`verify_checks` が真なら、入れる前に head の検査の成功を確かめる
+    `pull` は読んだ PR、`rules` は読んだ本番ブランチの ruleset の事実（どちらも省けば読む）。`verify_checks` が真なら、入れる前に head の検査の成功を確かめる
     （承認ゲートを通らずに入れるスプリントの PR。ruleset の無い `strict` では常に確かめる）。
     """
     sec = strategy.section
@@ -158,7 +160,7 @@ def land_approved(port: Port, strategy, pr: int, approval: Approval, pull: dict 
         return {**out, "reason": f"#{pr} の宛先 {pull.get('base')} が本番ブランチ {prod_branch} でない"}
     if pull.get("head") != approval.head:
         return {**out, "reason": f"承認した head {approval.head[:12]} と今の head {str(pull.get('head'))[:12]} が違う。{REAPPROVE}"}
-    facts = port.rule_facts(prod_branch)
+    facts = rules if rules is not None else port.rule_facts(prod_branch)
     if facts is None:
         return {**out, "reason": f"本番ブランチ {prod_branch} の ruleset を読めない"}
     if merge["method"] == "strict" and not facts.present:
@@ -405,17 +407,19 @@ class GhPort:
         return land_checks.checks_failing(self, sha, pull)
 
 
-def trail_by(root, strategy) -> str | None:
-    """land が承認として数える証跡の担い手。管理者の迂回でマージする宣言（`merge.admin` と `direct`）で、本番ブランチが
-    人の承認を求める（承認数が 1 以上か読めない）ときは利用者の証跡（担い手が user）だけを数える（cd-admin。#3506 の I9）。
-    MVV 判定の証跡で、人の承認を求める本番の PR を迂回してマージしないためである。それ以外は担い手で絞らない（None）。"""
+def admin_direct(strategy) -> bool:
+    """証跡で受け、管理者の迂回でマージする宣言（`merge.admin` と `direct`）か。担い手を決めるのに本番ブランチの承認数が要る。"""
     sec = strategy.section
-    if sec["approval"]["via"] == "review" or not (sec["merge"]["admin"] and sec["merge"]["method"] == "direct"):
-        return None
-    import release_case
+    return sec["approval"]["via"] != "review" and bool(sec["merge"]["admin"]) and sec["merge"]["method"] == "direct"
 
-    approvals, _ = release_case.read_approvals(root, sec["branches"]["production"])
-    return None if approvals == 0 else "user"
+
+def trail_by(strategy, facts) -> str | None:
+    """land が承認として数える証跡の担い手。管理者の迂回でマージする宣言（`admin_direct`）で、本番ブランチが人の承認を求める
+    （ruleset の事実 `facts` の承認数が 1 以上か読めない）ときは利用者の証跡（担い手が user）だけを数える（cd-admin。#3506 の I9）。
+    MVV 判定の証跡で、人の承認を求める本番の PR を迂回してマージしないためである。それ以外は担い手で絞らない（None）。"""
+    if not admin_direct(strategy):
+        return None
+    return None if facts is not None and facts.approvals == 0 else "user"
 
 
 def approval_of(repo: str, strategy, pr: int, by: str | None = None) -> Approval | None:
@@ -445,7 +449,9 @@ def land_pr(root, repo: str, strategy, pr: int) -> dict:
 
     port = GhPort(root, repo, strategy)
     try:
-        approval = approval_of(repo, strategy, pr, trail_by(root, strategy))
+        # 担い手を決める承認数と land_approved が照らす事実は同じ照会で、1 回だけ読む
+        rules = port.rule_facts(strategy.section["branches"]["production"]) if admin_direct(strategy) else None
+        approval = approval_of(repo, strategy, pr, trail_by(strategy, rules))
         if approval is None and strategy.section["merge"]["actor"] != "human":
             pull = port.pull(pr)
             if not pull.get("merged"):
@@ -453,7 +459,7 @@ def land_pr(root, repo: str, strategy, pr: int) -> dict:
                     # trunk で承認の対象が版上げの PR なら、スプリントの PR は承認ゲートを通らずに検査の後で入る（決定 8）
                     return land_approved(port, strategy, pr, Approval(str(pull.get("head") or "")), pull=pull, verify_checks=True)
                 return {"result": "stopped", "head": pull.get("head"), "reason": f"#{pr} に承認の証跡が無い。{REAPPROVE}"}
-        return land_approved(port, strategy, pr, approval or Approval(""))
+        return land_approved(port, strategy, pr, approval or Approval(""), rules=rules)
     except (LandError, TrailError) as e:
         return {"result": "stopped", "head": None, "reason": str(e)}
 

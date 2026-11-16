@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
@@ -145,6 +146,28 @@ def test_checks_failing_skips_trail_status_and_passes_repo_without_ci(monkeypatc
     assert "まだ 1 件も無い" in port.checks_failing("h", pull)
     replies[ST] = {"statuses": [{"context": "ci", "state": "pending"}]}
     assert port.checks_failing("h") == "ci=pending"
+
+
+def test_no_checks_reason_reads_pull_request_target_from_the_base_tip(monkeypatch):
+    """#3672 の round 11: pull_request_target は宛先の先端の定義で起動を決め、PR の head での書き換えで「検査なし」にさせない。"""
+    import gh_checks
+
+    port = land.GhPort(Path("."), "o/r", strategy("docs"))
+    monkeypatch.setattr(gh_checks, "fetch_check_runs", lambda repo, sha, empty_ok=False: [])
+    replies = {
+        ST: {"statuses": []},
+        "repos/o/r/actions/workflows?per_page=100&page=1": {"workflows": [{"state": "active", "path": "ci.yml"}]},
+        **TIP_QUIET,
+    }
+    monkeypatch.setattr(land.GhPort, "_rest", lambda self, path, method="GET", payload=None: replies.get(path))
+    target, cron = "on: [pull_request_target]\n", "on:\n  schedule:\n    - cron: '0 0 * * *'\n"
+    trees = {"h": {"ci.yml": cron}, "t": {"ci.yml": target}}
+    monkeypatch.setattr(land.GhPort, "_show", lambda self, rev: trees[rev].get)
+    pull = {"head_ref": "s", "base": "main", "tip": "t"}
+    assert "ci.yml" in port.checks_failing("h", pull)
+    # head で足しただけの pull_request_target は宛先の定義に無いため動かない
+    trees.update({"h": {"ci.yml": target}, "t": {"ci.yml": cron}})
+    assert port.checks_failing("h", pull) is None
 
 
 def test_no_checks_reason_reads_every_page_of_workflows(monkeypatch):
@@ -308,11 +331,9 @@ def test_approved_trail_is_the_one_judge_reads():
     assert approval_trail.approved_trail(trails, {}) is None
 
 
-def test_admin_land_counts_only_user_trails(monkeypatch):
+def test_admin_land_counts_only_user_trails():
     """管理者の迂回でマージする宣言では、本番ブランチが人の承認を求める（承認数 1 以上か読めない）とき、
     MVV 判定の証跡を承認に数えない（cd-admin。#3506 の I9）。承認数が 0 なら担い手で絞らない。"""
-    import release_case
-
     t = approval_trail.Trail
     trails = [t("a" * 40, "owner", "2026-11-16T01:00:00Z", False, 1, "user"), t("b" * 40, "owner", "2026-11-16T02:00:00Z", False, 2, "mvv")]
     roles = {"owner": "admin"}
@@ -322,11 +343,10 @@ def test_admin_land_counts_only_user_trails(monkeypatch):
 
     s = strategy("plugin", plugin="demo")
     s.section["merge"].update(admin=True, method="direct")
-    for approvals, want in ((1, "user"), (None, "user"), (0, None)):
-        monkeypatch.setattr(release_case, "read_approvals", lambda root, branch, n=approvals: (n, ""))
-        assert land.trail_by(Path("."), s) == want
+    for facts, want in ((SimpleNamespace(approvals=1), "user"), (None, "user"), (SimpleNamespace(approvals=0), None)):
+        assert land.trail_by(s, facts) == want
     s.section["merge"]["admin"] = False
-    assert land.trail_by(Path("."), s) is None
+    assert land.trail_by(s, SimpleNamespace(approvals=1)) is None
 
 
 def test_run_stops_without_trail_and_lands_human_merge(monkeypatch):

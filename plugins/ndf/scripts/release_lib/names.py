@@ -117,3 +117,8 @@ def release_decl(root, a=None):
     if not (d.base and d.production):
         raise StepError("ベースブランチか本番ブランチを決められない（ブランチ戦略の宣言の branches）", EXIT_PRECONDITION)
     return d.base, d.production, _plugin_from(a, d)
+
+
+def since_ref(root, since: str) -> str:
+    """差分の起点 `since` の参照。手元にあるタグなら `refs/tags/<名前>`、無ければそのまま（コミット）。"""
+    return f"refs/tags/{since}" if tagged(root, since) else since
