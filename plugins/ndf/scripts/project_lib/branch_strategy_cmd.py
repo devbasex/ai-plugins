@@ -66,58 +66,79 @@ def _bs_commit(root: Path, plan, digest: str | None, base: dict, write: bool = F
     return _bs_emit({**base, "status": "ok", "diff": done.diff, "digest": done.digest})
 
 
+def _verb_init(a, root: Path, presets: dict) -> int:
+    """新規のリポジトリだけに、種類の既定の行へ測った名前を入れたセクションを書く。"""
+    state, seen = bsm.classify_repo(root, presets=presets)
+    base = {"kind": a.kind, "evidence": seen}
+    if state != "new":
+        return _bs_emit(
+            {
+                **base,
+                "status": "stopped",
+                "failed": [
+                    {
+                        "rule": "existing",
+                        "pointer": "",
+                        "reason": "既存のリポジトリです。`branch-strategy measure` で測ってください",
+                    }
+                ],
+            }
+        )
+    if not a.kind:
+        return _bs_emit(
+            {
+                **base,
+                "status": "ask",
+                "questions": [{"pointer": "/kind", "why": "no_kind", "candidates": list(bw.KINDS), "evidence": []}],
+            }
+        )
+    facts = _bs_facts(root)
+    section, questions = bw.init_values(a.kind, facts, presets)
+    base = {"kind": a.kind, "values": section, "evidence": bw.evidence_of(section, facts)}
+    if questions:
+        return _bs_emit({**base, "status": "ask", "questions": questions})
+    return _bs_commit(root, bw.plan_write(root, section), a.digest, base, write=not a.dry_run)
+
+
+def _verb_measure(a, root: Path, presets: dict) -> int:
+    """既存のリポジトリを測った結果を出す。書かない。"""
+    return _bs_emit(bsm.measure_strategy(root, prefer=a.kind))
+
+
+def _verb_write(a, root: Path, presets: dict) -> int:
+    """測った結果（無ければ測り直す）に答えを入れて書く。"""
+    prior = jsonio.read(a.result, want=dict) if a.result else bsm.measure_strategy(root, prefer=a.kind)
+    answers = jsonio.read(a.answers, want=dict) if a.answers else {}
+    res = bw.apply_answers(prior, answers)
+    if res["status"] == "ask":
+        return _bs_emit(res)
+    base = {k: res.get(k) for k in ("kind", "values", "evidence")}
+    base["kind"] = res["values"].get("kind")
+    return _bs_commit(root, bw.plan_write(root, res["values"]), a.digest, base)
+
+
+def _verb_migrate(a, root: Path, presets: dict) -> int:
+    """旧い 4 か所の宣言をセクションへ移す。"""
+    plan, questions = bmig.plan_migration(root, legacy.load_moves())
+    if questions:
+        return _bs_emit({"status": "ask", "questions": questions})
+    return _bs_commit(root, plan, a.digest, {})
+
+
+def _verb_remove(a, root: Path, presets: dict) -> int:
+    """セクションを消す。"""
+    return _bs_commit(root, bw.plan_remove(root), a.digest, {})
+
+
+# 動詞 → 本体。動詞の選択肢は project-decl.py の argparse（choices）が閉じる
+VERBS = {"init": _verb_init, "measure": _verb_measure, "write": _verb_write, "migrate": _verb_migrate, "remove": _verb_remove}
+
+
 def run_branch_strategy(a, root: Path) -> int:
     """動詞（`init`・`measure`・`write`・`migrate`・`remove`）を受けて組み、作成の結果を 1 行の JSON で出す。"""
     presets = bw.load_presets()
     try:
-        if a.verb == "init":
-            state, seen = bsm.classify_repo(root, presets=presets)
-            base = {"kind": a.kind, "evidence": seen}
-            if state != "new":
-                return _bs_emit(
-                    {
-                        **base,
-                        "status": "stopped",
-                        "failed": [
-                            {
-                                "rule": "existing",
-                                "pointer": "",
-                                "reason": "既存のリポジトリです。`branch-strategy measure` で測ってください",
-                            }
-                        ],
-                    }
-                )
-            if not a.kind:
-                return _bs_emit(
-                    {
-                        **base,
-                        "status": "ask",
-                        "questions": [{"pointer": "/kind", "why": "no_kind", "candidates": list(bw.KINDS), "evidence": []}],
-                    }
-                )
-            facts = _bs_facts(root)
-            section, questions = bw.init_values(a.kind, facts, presets)
-            base = {"kind": a.kind, "values": section, "evidence": bw.evidence_of(section, facts)}
-            if questions:
-                return _bs_emit({**base, "status": "ask", "questions": questions})
-            return _bs_commit(root, bw.plan_write(root, section), a.digest, base, write=not a.dry_run)
-        if a.verb == "measure":
-            return _bs_emit(bsm.measure_strategy(root, prefer=a.kind))
-        if a.verb == "write":
-            prior = jsonio.read(a.result, want=dict) if a.result else bsm.measure_strategy(root, prefer=a.kind)
-            answers = jsonio.read(a.answers, want=dict) if a.answers else {}
-            res = bw.apply_answers(prior, answers)
-            if res["status"] == "ask":
-                return _bs_emit(res)
-            base = {k: res.get(k) for k in ("kind", "values", "evidence")}
-            base["kind"] = res["values"].get("kind")
-            return _bs_commit(root, bw.plan_write(root, res["values"]), a.digest, base)
-        if a.verb == "migrate":
-            plan, questions = bmig.plan_migration(root, legacy.load_moves())
-            if questions:
-                return _bs_emit({"status": "ask", "questions": questions})
-            return _bs_commit(root, plan, a.digest, {})
-        return _bs_commit(root, bw.plan_remove(root), a.digest, {})
+        return VERBS[a.verb](a, root, presets)
     except (bs.StrategyError, bw.WriteError, legacy.LegacyTableError, jsonio.JsonReadError) as e:
         sys.stderr.write(f"{getattr(e, 'reason', e)}\n")
         return getattr(e, "exit_code", EXIT_UNREADABLE)
