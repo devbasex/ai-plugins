@@ -52,5 +52,6 @@ def test_a_restored_kiro_installer_is_found(tmp_path: Path) -> None:
 
 def test_a_kiro_release_runtime_is_found(tmp_path: Path) -> None:
     (tmp_path / ".ndf").mkdir()
-    (tmp_path / ".ndf/supervise.json").write_text(json.dumps({"release": {"runtimes": ["claude", "codex", "kiro"]}}), encoding="utf-8")
+    decl = {"branch_strategy": {"release": {"runtimes": ["claude", "codex", "kiro"]}}}
+    (tmp_path / ".ndf/project.json").write_text(json.dumps(decl), encoding="utf-8")
     assert release_runtimes(tmp_path) - DISTRIBUTED == {"kiro"}
