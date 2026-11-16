@@ -17,25 +17,34 @@ sys.path.insert(0, str(SCRIPTS))
 import deps  # noqa: E402
 
 deps.require("schema", "md", "yamlio")
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import branch_strategy  # noqa: E402
 import delivery  # noqa: E402
+import strategy_fixture  # noqa: E402
 import dist_record  # noqa: E402
-from project_lib import merge, model  # noqa: E402
+from project_lib import model  # noqa: E402
 from release_lib import cd_result, record  # noqa: E402
 
 STEPS = SCRIPTS / "release-steps.py"
-WT = {"version": 1, "base_branch": "develop", "production_branch": "main"}
+BRANCHES = ("develop", "main")
+PLUGIN_RELEASE = {"form": "package-plugin", "plugin": "ndf", "runtimes": ["claude"]}
 CD_PROD = {"target": "prd", "kind": "auto", "trigger": "main へのマージ", "channel": "production", "versioned": False}
 CD_BASE = {"target": "stg", "kind": "auto", "trigger": "develop へのマージ", "channel": "base", "versioned": False}
 HAND = {"target": "aws", "kind": "manual", "trigger": "cdk deploy", "versioned": False}
 PLUGIN_CD = {**CD_PROD, "versioned": True, "publishes_release": True, "result": {"workflow": "release-cd.yml"}}
 
 
-def decl_of(rows, wt=WT, release=None):
-    return delivery.build(wt, {"delivery": rows}, release)
+def decl_of(rows, branches=BRANCHES):
+    """届け先の行 `rows`（None なら書かない）を持つブランチ戦略の宣言から組んだ判定の宣言。"""
+    kind = "web-trunk" if branches[0] == branches[1] else "web-develop"
+    sec = strategy_fixture.section(kind, *branches)
+    if rows is not None:
+        sec["release"]["deliveries"] = rows
+    return delivery.build(branch_strategy.Strategy(sec))
 
 
-def routes_of(rows, wt=WT):
-    return [(r.route, r.stage) for r in delivery.routes(decl_of(rows, wt))]
+def routes_of(rows, branches=BRANCHES):
+    return [(r.route, r.stage) for r in delivery.routes(decl_of(rows, branches))]
 
 
 # ---------------- 経路（受け入れ条件 5）----------------
@@ -59,10 +68,9 @@ def test_a_versioned_manual_row_stays_manual():
 # ---------------- CD の案内（受け入れ条件 9〜14）----------------
 
 
-@pytest.mark.parametrize("project", [{}, {"delivery": {"unknown": "調べていない"}}])
-def test_guidance_has_the_four_contents_when_the_declaration_is_missing(project):
-    item = delivery.cd_guidance(delivery.build(WT, project)).as_item()
-    assert item["kind"] == "cd-guidance" and "delivery" in item["missing"]
+def test_guidance_has_the_four_contents_when_the_declaration_is_missing():
+    item = delivery.cd_guidance(decl_of(None)).as_item()
+    assert item["kind"] == "cd-guidance" and "release.deliveries" in item["missing"]
     assert "cd-setup.md" in item["steps_ref"] and '"kind": "auto"' in item["example"] and "manual_reason" in item["manual_reason_how"]
 
 
@@ -133,16 +141,6 @@ def test_model_accepts_the_new_fields_and_old_rows():
     assert model.Delivery.model_validate({**PLUGIN_CD, "result": {"command": "x {revision}", "timeout_seconds": 60}})
     assert model.Delivery.model_validate({**HAND, "manual_reason": "人が確かめる"})
     assert model.Delivery.model_validate(HAND)
-
-
-def test_reanalysis_keeps_the_user_fields_of_the_same_target():
-    cur = [{**HAND, "manual_reason": "人が確かめる"}, PLUGIN_CD]
-    digest = merge.value_digest(cur)
-    new = [HAND, {**PLUGIN_CD, "result": {"workflow": "other.yml"}}, CD_BASE]
-    value, _, ours = merge.merge_item("delivery", cur, True, new, "判断した", {"delivery": digest})
-    assert ours and value[0]["manual_reason"] == "人が確かめる"
-    assert value[1]["result"] == {"workflow": "other.yml"} and value[1]["publishes_release"] is True  # 答えの値が先に効く
-    assert value[2] == CD_BASE
 
 
 # ---------------- 結果の読み取り（受け入れ条件 7・8、I13）----------------
@@ -339,11 +337,7 @@ def pub(tmp_path, monkeypatch):
     git(root, "config", "user.email", "t@example.com")
     git(root, "config", "user.name", "t")
     git(root, "remote", "add", "origin", str(bare))
-    (root / ".ndf").mkdir()
-    (root / ".ndf" / "worktree.json").write_text(json.dumps(WT))
-    (root / ".ndf" / "supervise.json").write_text(
-        json.dumps({"release": {"form": "package-plugin", "plugin": "ndf", "runtimes": ["claude"]}})
-    )
+    strategy_fixture.declare(root, *BRANCHES, PLUGIN_RELEASE)
     (root / "plugins" / "ndf" / ".claude-plugin").mkdir(parents=True)
     set_version(root, "1.2.3")
     (root / "CHANGELOG.md").write_text("# Changelog\n\n## [ndf 1.2.3] - 2026-01-01\n\n- 変更 A\n\n## [ndf 1.2.2] - 2025-12-01\n\n- 前\n")
@@ -464,17 +458,18 @@ def guidance(root, env):
 def test_guidance_command_keeps_the_exit_code_and_does_not_touch_the_declaration(pub):
     root, env, _ = pub
     f = root / ".ndf" / "project.json"
+    before = f.read_text()
     code, out = guidance(root, env)
-    assert code == 0 and out["items"][0]["kind"] == "cd-guidance" and not f.exists()
-    text = json.dumps({"delivery": [{**HAND, "manual_reason": "人が確かめる"}]})
-    f.write_text(text)
+    assert code == 0 and out["items"][0]["kind"] == "cd-guidance" and f.read_text() == before
+    strategy_fixture.declare(root, *BRANCHES, PLUGIN_RELEASE, [{**HAND, "manual_reason": "人が確かめる"}])
+    text = f.read_text()
     code, out = guidance(root, env)
     assert code == 0 and out["items"] == [] and f.read_text() == text
 
 
 def test_guidance_command_stops_on_a_broken_declaration(pub):
     root, env, _ = pub
-    (root / ".ndf" / "project.json").write_text(json.dumps({"delivery": "x"}))
+    strategy_fixture.declare(root, *BRANCHES, PLUGIN_RELEASE, "x")
     assert guidance(root, env)[0] == 3
 
 
@@ -487,8 +482,19 @@ def workflow() -> dict:
     return YAML(typ="safe").load((ROOT / ".github" / "workflows" / "release-cd.yml").read_text(encoding="utf-8"))
 
 
+def ai_plugins_section() -> dict:
+    """ai-plugins のブランチ戦略の宣言。旧い宣言が残っていれば（移行は手順 2）、移行のコマンドが書く値を読む。"""
+    import branch_strategy_legacy as legacy
+    from project_lib import branch_strategy_migrate as bmig
+
+    plan, questions = bmig.plan_migration(ROOT, legacy.load_moves())
+    assert not questions and not plan.failed
+    project = plan.files.get("project.json") or json.loads((ROOT / ".ndf" / "project.json").read_text(encoding="utf-8"))
+    return project[branch_strategy.SECTION]
+
+
 def test_ai_plugins_declares_the_cd_row_and_the_workflow_exists():
-    rows = json.loads((ROOT / ".ndf" / "project.json").read_text(encoding="utf-8"))["delivery"]
+    rows = ai_plugins_section()["release"]["deliveries"]
     row = next(r for r in rows if r.get("channel") == "production")
     assert row["kind"] == "auto" and row["publishes_release"] is True and row["versioned"] is True
     name = row["result"]["workflow"]
@@ -541,10 +547,3 @@ def test_cd_no_review_and_cd_review_plans_stay_as_they_were(tmp_path):
     assert "--by mvv" in steps["approve-pr"]["cmd"] and steps["note"]["next"] == "approve-pr" and "on_exit" in wait
     steps, wait = _cd_steps("cd-review", True, tmp_path)
     assert "approve-pr" not in steps and steps["note"]["next"] == "end" and wait == {"gate_next": "facts"}
-
-
-def test_model_accepts_the_production_merge_declaration():
-    model.validate_decl({"version": 1, "production_merge": {"admin": True}})
-    model.validate_decl({"version": 1, "production_merge": {"unknown": "決めていない"}})
-    with pytest.raises(Exception):
-        model.validate_decl({"version": 1, "production_merge": {"admin": "true"}})

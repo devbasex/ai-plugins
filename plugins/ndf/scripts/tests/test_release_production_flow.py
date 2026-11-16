@@ -25,6 +25,7 @@ import strategy_fixture  # noqa: E402
 from git_fixture import git, main_and_develop  # noqa: E402
 import supervise_lib  # noqa: E402,F401  lib/ を sys.path へ足す
 import branch_strategy  # noqa: E402
+import branch_strategy_legacy as legacy  # noqa: E402
 import parallel_release  # noqa: E402
 import repo as repo_lib  # noqa: E402
 from supervise_lib import decl as sdecl  # noqa: E402
@@ -35,6 +36,8 @@ SUPERVISE = SCRIPTS / "supervise.py"
 SELECTED, WHOLE = "mobile", "web-develop"
 RELEASE = {**strategy_fixture.section("plugin")["release"], "plugin": "ndf", "runtimes": ["claude"]}
 NO_FILE = object()
+# 旧い宣言のキー（project.json に残ると止まる）。名前は移す行の表（branch_strategy_legacy）から引く
+LEGACY_KEY = next(m.old for m in legacy.load_moves() if m.file == "project" and m.old.count("/") == 1).lstrip("/")
 # 実装の差分がどこかで cross-review される組（#3163 の I4）。release の行だけを本番ブランチの宣言の値として確かめる
 REVIEWS = {
     "impl": {"checks": ["cross-review"], "diff": "pr"},
@@ -53,7 +56,9 @@ def write_decl(tree: Path, value=WHOLE, **edits) -> None:
     if value is NO_FILE:
         return
     if value in strategy_fixture.KINDS:
-        strategy_fixture.write_strategy(tree, value, base=edits.pop("base", "develop"), production=edits.pop("production", "main"), release=RELEASE, **edits)
+        strategy_fixture.write_strategy(
+            tree, value, base=edits.pop("base", "develop"), production=edits.pop("production", "main"), release=RELEASE, **edits
+        )
     else:
         path.write_text(value)
 
@@ -131,7 +136,7 @@ def test_both_selected_keeps_the_selected_flow(tmp_path):
         (NO_FILE, "セクション `branch_strategy` がありません"),
         ("{not json", "JSON として読めない"),
         ("[1]", "セクション `branch_strategy` がありません"),
-        ('{"version": 1, "delivery": []}', "旧い宣言のキー"),
+        (json.dumps({"version": 1, LEGACY_KEY: []}), "旧い宣言のキー"),
     ],
     ids=["no-file", "not-json", "array", "legacy-key"],
 )
