@@ -533,6 +533,18 @@ def test_observe_reads_base_production_and_release_tags(world):
     assert o.unreadable == []
 
 
+def test_untagged_declaration_counts_the_production_version_as_released(world):
+    """タグを作らない宣言（World の宣言は CD が無く release.tag が null）では、本番ブランチの正式版を出済みの版に数え、
+    出した版をもう一度出す計画を組まない（タグが無くても、まとめたリリースは次の PATCH を出す）。"""
+    import parallel_repo
+
+    world.publish("10.27.6", "develop", "main")
+    o = rv.observe(world.repo, "ndf", "develop", "main")
+    assert "10.27.6" in o.tags and o.latest_tag == "10.27.6"
+    assert rv.taken(o, "10.27.6").is_taken and rv.collected_release(o) == "10.27.7"
+    assert parallel_repo.dev_version(world.repo) == "10.27.7"
+
+
 def test_observe_and_taken_follow_the_declared_tag_shape(world):
     """宣言の release.tag が `v{version}` なら、その形のタグを出済みの版に数え、既定の形のタグは数えない（前版の検索・公開と同じ形）。"""
     for t in ("v10.28.0", "v10.28.1-dev.1", "ndf--v10.29.0"):

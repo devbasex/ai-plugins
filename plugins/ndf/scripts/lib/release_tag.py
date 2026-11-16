@@ -17,6 +17,18 @@ def tag_template(release) -> str:
     return t if isinstance(t, str) and "{version}" in t else DEFAULT_TAG
 
 
+def makes_tags(release) -> bool:
+    """宣言がタグを作らせるか。`release.tag` が null ならタグを作らない（無い・形の文字列なら作る）。"""
+    return (release or {}).get("tag", "") is not None if isinstance(release, dict) else True
+
+
+def makes_tags_of(root) -> bool:
+    """`root` のリポジトリの宣言がタグを作らせるか（`makes_tags`）。"""
+    import delivery
+
+    return makes_tags(delivery.load_delivery(root).release)
+
+
 def tag_template_of(root) -> str:
     """`root` のリポジトリの宣言から引くタグの形（`tag_template`）。前版の検索・公開・記録が同じ形を使う。"""
     import delivery

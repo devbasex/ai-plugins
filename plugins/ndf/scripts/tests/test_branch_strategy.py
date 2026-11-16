@@ -882,6 +882,7 @@ class FakePort:
         self.calls: list = []
         self.ref_ok = True
         self.failing = None
+        self.record_error = None
         self.pulls = 0
 
     def checks_failing(self, sha, pull=None):
@@ -930,6 +931,10 @@ class FakePort:
 
     def has_human_record(self, n):
         return any(c[0] == "comment" for c in self.calls)
+
+    def admin_record(self, n, sha, trail_url):
+        self.calls.append(("admin_record", sha, trail_url))
+        return self.record_error
 
 
 H1, H2 = "1" * 40, "2" * 40
@@ -987,6 +992,26 @@ def test_land_uses_given_pull_and_verifies_checks():
     port.failing = "lint=failure"
     out = land.land_approved(port, bs.Strategy(section("web-develop")), 5, land.Approval(H1), pull=port._pull, verify_checks=True)
     assert out["result"] == "stopped" and port.pulls == 0 and ("merge", H1, "merge", False) not in port.calls
+
+
+def test_land_admin_bypass_checks_and_records():
+    """管理者の迂回は承認した head の検査を確かめてからマージし、head と証跡の URL を記録する。記録だけ落ちたら打ち直しで補う。"""
+    admin = section("web-develop")
+    admin["merge"]["admin"] = True
+    rules, url = facts(approvals=1, bypass="pull_requests_only"), "https://github.com/o/r/pull/5#issuecomment-1"
+    port = FakePort({"head": H1, "base": "main"}, rules)
+    port.failing = "pytest=pending"
+    out = land.land_approved(port, bs.Strategy(admin), 5, land.Approval(H1, url=url))
+    assert out["result"] == "stopped" and port.calls == [("checks", H1)]
+    port.failing, port.record_error = None, "unreadable"
+    port.calls = []
+    out = land.land_approved(port, bs.Strategy(admin), 5, land.Approval(H1, url=url))
+    assert out["result"] == "stopped" and "打ち直すと記録を補う" in out["reason"]
+    assert port.calls == [("checks", H1), ("merge", H1, "merge", True), ("admin_record", H1, url)]
+    # 打ち直し: マージ済みでも人のマージと記録せず、迂回の記録を補う
+    merged = FakePort({"head": H1, "base": "main", "merged": True}, rules)
+    out = land.land_approved(merged, bs.Strategy(admin), 5, land.Approval(H1, url=url))
+    assert out["result"] == "merged" and merged.calls == [("admin_record", H1, url)]
 
 
 def test_land_stops_when_base_is_not_production():

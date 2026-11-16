@@ -116,7 +116,8 @@ def observe(
     """origin を取り直してから、ベースブランチ・本番のブランチ・タグを読む。本番のブランチが無ければ読まない（読めないに数えない）。
     タグが 1 つも無いことは読めないに数えない。取り直しに落ちたら、読んだ値が古いかもしれないため `origin` を読めないに数える。
     `rel` は `plugin.json` のリポジトリの根からの位置で、省けばベースブランチの木から探す。`template` はタグの形で、
-    省けば `repo` の宣言の `release.tag` から引く（前版の検索・公開と同じ形で、出済みの版を見落とさない）。"""
+    省けば `repo` の宣言の `release.tag` から引く（前版の検索・公開と同じ形で、出済みの版を見落とさない）。
+    タグを作らない宣言（`release.tag` が null）では、本番のブランチの正式版も出済みの版として `tags` と `latest_tag` に入れる。"""
     template = template or release_tag.tag_template_of(repo)
     unreadable: list[str] = []
     if fetch and fetch_origin(repo) is not None:
@@ -136,6 +137,8 @@ def observe(
         unreadable.append("tags")
     else:
         tags = _release_tags(p.stdout, plugin, template)
+    if prod_version and "-" not in prod_version and prod_version not in tags and not release_tag.makes_tags_of(repo):
+        tags.append(prod_version)  # タグを作らない宣言では、本番ブランチの正式版を出済みの版とする（出した版をもう一度出さない）
     latest = max(tags, key=versions.version_order) if tags else None
     return Observed(plugin, base_ref, base_version, prod_ref, prod_version, latest, tags, unreadable, template)
 

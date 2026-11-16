@@ -98,6 +98,7 @@ class Port(Protocol):
     def comment(self, number: int, body: str) -> bool: ...
     def landed_record(self, branch: str, number: int, since: str | None) -> dict | None: ...
     def has_human_record(self, number: int) -> bool: ...
+    def admin_record(self, number: int, sha: str, trail_url: str) -> str | None: ...  # 迂回の記録を書く。書けなければ理由の文
     def checks_failing(
         self, sha: str, pull: dict | None = None
     ) -> str | None: ...  # head の検査がすべて成功なら None、そろわなければ理由の文
@@ -134,6 +135,7 @@ class Approval:
 
     head: str
     at: str | None = None
+    url: str = ""  # 証跡のコメントの URL（管理者の迂回の記録が承認を指す）
 
 
 def land_approved(
@@ -149,6 +151,10 @@ def land_approved(
     merge = sec["merge"]
     pull = pull if pull is not None else port.pull(pr)
     out = {"result": "stopped", "head": pull.get("head"), "reason": ""}
+    admin = bool(merge["admin"] and merge["method"] == "direct")
+    if pull.get("merged") and admin and approval.head and pull.get("head") == approval.head:
+        # 承認した head を迂回でマージした後に記録だけ落ちた打ち直し: 記録を補う（同じ先端の記録があれば書かない）
+        return _admin_recorded(port, pr, approval, out)
     if pull.get("merged"):
         if not port.has_human_record(pr):
             port.comment(pr, f"<!-- ndf:human-merge -->\n人がマージした先端: {pull.get('head')}")
@@ -180,8 +186,8 @@ def land_approved(
         why = check_production_pr(strategy, pull, port.production(prod_branch), queue)
         if why:
             return {**out, "reason": why}
-    if verify_checks or (merge["method"] == "strict" and not facts.present):
-        # ruleset の無い strict の参照の更新と承認なしの取り込みは、GitHub の必須の検査を通らない
+    if verify_checks or admin or (merge["method"] == "strict" and not facts.present):
+        # ruleset の無い strict の参照の更新・承認なしの取り込み・管理者の迂回は、GitHub の必須の検査を通らない
         failing = port.checks_failing(approval.head, pull)
         if failing:
             return {**out, "reason": f"head {approval.head[:12]} の検査がそろっていない: {failing}"}
@@ -196,8 +202,19 @@ def land_approved(
             return {**out, "reason": f"head が含むと確かめた本番ブランチ {prod_branch} の先端を読めない"}
         got = fast_forward_land(port, prod_branch, pr, tip, approval.head, merge["commit"], pull.get("title", ""))
         return {**out, "result": got["result"], "reason": got["reason"]}
-    ok, why = port.merge(pr, approval.head, merge["commit"], bool(merge["admin"] and merge["method"] == "direct"))
+    ok, why = port.merge(pr, approval.head, merge["commit"], admin)
+    if ok and admin:
+        return _admin_recorded(port, pr, approval, out)
     return {**out, "result": "merged" if ok else "stopped", "reason": why}
+
+
+def _admin_recorded(port: Port, pr: int, approval: Approval, out: dict) -> dict:
+    """管理者の迂回でマージした head と承認の証跡の URL を記録する（`approval_trail.write_admin_record`）。書けなければ止め、
+    打ち直すとマージ済みの分岐から記録を補う。"""
+    err = port.admin_record(pr, approval.head, approval.url)
+    if err:
+        return {**out, "reason": f"#{pr} を迂回でマージしたが、迂回の記録を書けない: {err}。打ち直すと記録を補う"}
+    return {**out, "result": "merged"}
 
 
 # --- GitHub と手元の git での実装（`release-steps.py land` が使う） ---------------------------------------------
@@ -401,6 +418,15 @@ class GhPort:
 
         return any(HUMAN_MARK in str(c.get("body") or "") for c in trail.read_comments(self.repo, number))
 
+    def admin_record(self, number: int, sha: str, trail_url: str) -> str | None:
+        from release_lib import approval_trail as trail
+
+        try:
+            trail.write_admin_record(self.repo, number, sha, trail_url)
+        except (trail.TrailError, ValueError) as e:
+            return str(e)[:200]
+        return None
+
     def checks_failing(self, sha: str, pull: dict | None = None) -> str | None:
         from release_lib import land_checks
 
@@ -432,7 +458,7 @@ def approval_of(repo: str, strategy, pr: int, by: str | None = None) -> Approval
         return Approval(sha) if sha else None
     trails = trail.trails_of(trail.read_comments(repo, pr))
     last = trail.approved_trail(trails, trail.read_roles(repo, [t.login for t in trails if not t.edited]), by) if trails else None
-    return Approval(last.sha, last.created_at) if last else None
+    return Approval(last.sha, last.created_at, last.url) if last else None
 
 
 def exempt_from_gate(strategy, pull: dict) -> bool:

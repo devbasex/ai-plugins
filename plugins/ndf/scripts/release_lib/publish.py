@@ -11,6 +11,7 @@ import os
 import tempfile
 
 import gh_parts
+from release_tag import makes_tags
 from release_lib.names import changelog_span, latest_release_tag, tag_glob, tag_name, tag_template_of
 from step_result import StepError, git, plugin_dir
 
@@ -19,7 +20,7 @@ def wants(decl) -> tuple[bool, bool]:
     """宣言が作らせる公開物: (タグ, GitHub Release)。release.tag が null ならタグも GitHub Release も、github_release が偽なら
     GitHub Release を作らない。作る側（`release-steps.py` の `_published`）と確かめる側（`cmd_record`）が同じ値を使う。"""
     rel = decl.release or {}
-    tag = rel.get("tag", "") is not None
+    tag = makes_tags(rel)
     return tag, tag and rel.get("github_release", True) is not False
 
 
@@ -159,7 +160,7 @@ def untagged_before(root, plugin, ver) -> str | None:
 
 
 def release_tag_before(root, plugin, current=None):
-    """宣言の release.tag の形（無ければ `<plugin>--v<版>`）に合い接尾辞の無いタグのうち、current を除いて最も新しいもの。無ければ None。"""
+    """宣言の release.tag の形（無ければ既定の形 `release_tag.DEFAULT_TAG`）に合い接尾辞の無いタグのうち、current を除いて最も新しいもの。無ければ None。"""
     template = tag_template_of(root)
     tags = git(root, "tag", "--list", tag_glob(plugin, template), "--sort=-v:refname").stdout.split()
     return latest_release_tag(tags, plugin, template, current)

@@ -59,7 +59,12 @@ def dev_version(main: Path, fetch: bool = True) -> str:
         return ""
     if fetch and (err := rv.fetch_origin(main)) is not None:
         raise OriginUnfetchable(f"origin を取り直せない: {err}")
-    return rv.collected_release(rv.observe(main, plugin, ref.removeprefix("origin/"), None, fetch=False, rel=rel)) or ""
+    import delivery
+    import release_tag
+
+    # タグを作らない宣言だけ本番ブランチを読み、出済みの版を見落とさない（タグを作る宣言はタグで足りる）
+    prod = None if release_tag.makes_tags_of(main) else delivery.load_delivery(main).production
+    return rv.collected_release(rv.observe(main, plugin, ref.removeprefix("origin/"), prod, fetch=False, rel=rel)) or ""
 
 
 def loop_records(main: Path, name: str) -> list[tuple]:
