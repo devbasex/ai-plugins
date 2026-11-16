@@ -536,6 +536,115 @@ def test_measure_tags_without_cd_asks_r10(tmp_path):
     assert res["status"] == "ask" and res["questions"][0]["pointer"] == "/release/cd"
 
 
+# --- collect_samples の現状固定（I-023） ------------------------------------------------------
+
+
+def test_collect_samples_reads_api_history_and_local_facts(tmp_path):
+    root = history_repo(
+        tmp_path,
+        2,
+        {
+            "package.json": '{"version": "1.0.0"}',
+            ".github/workflows/release.yml": "run: gh release create v1\n",
+            "plugins/p/.claude-plugin/plugin.json": '{"name": "p"}',
+            "plugins/p/.codex-plugin/plugin.json": '{"name": "p"}',
+        },
+    )
+    seen = []
+    base = fake_api([(1, "develop", "a"), (2, "main", "develop"), (3, "develop", "c")], tags=["v1", "v2"], releases=["v1"])
+
+    def api(path):
+        seen.append(path)
+        if "/pulls?" in path:
+            got, why = base(path)
+            return got + [{"number": 99, "merged_at": None, "base": {"ref": "x"}, "head": {"ref": "y"}}, "junk"], why
+        return base(path)
+
+    s = bsm.collect_samples(root, api, float("inf"), 2)
+    assert s.production == "main"
+    assert s.prs == [{"number": 1, "base": "develop", "head": "a"}, {"number": 2, "base": "main", "head": "develop"}]
+    assert s.tags == ["v1", "v2"] and s.releases == ["v1"]
+    assert s.rules == release_case.RuleFacts(False, 0, False, False, None)
+    assert [c["subject"] for c in s.commits] == ["Merge pull request #2", "Merge pull request #1"]
+    assert all(c["parents"] == 2 and c["landed"] is None for c in s.commits)
+    assert list(s.workflows) == ["release.yml"] and s.version_files == {"package.json": "/version"}
+    assert s.plugins == {"p": ["claude", "codex"]}
+    assert s.unreadable == [] and s.warnings == []
+    assert seen == [
+        "repos/{owner}/{repo}",
+        "repos/{owner}/{repo}/pulls?state=closed&per_page=2",
+        "repos/{owner}/{repo}/tags?per_page=2",
+        "repos/{owner}/{repo}/releases?per_page=2",
+        "repos/{owner}/{repo}/rules/branches/main",
+    ]
+
+
+def test_collect_samples_past_deadline_skips_api_lists_only(tmp_path):
+    root = history_repo(tmp_path, 1)
+    seen = []
+    base = fake_api([(1, "main", "a")], tags=["v1"])
+
+    def api(path):
+        seen.append(path)
+        return base(path)
+
+    s = bsm.collect_samples(root, api, float("-inf"), 5)
+    assert s.prs == [] and s.tags == [] and s.releases == []
+    assert s.warnings == ["時間切れで打ち切った: prs", "時間切れで打ち切った: tags", "時間切れで打ち切った: releases"]
+    assert s.production == "main" and s.rules is not None
+    assert [c["subject"] for c in s.commits] == ["Merge pull request #1", "files", "init"]
+    assert seen == ["repos/{owner}/{repo}", "repos/{owner}/{repo}/rules/branches/main"]
+
+
+def test_collect_samples_unreadable_default_branch_and_lists(tmp_path):
+    root = history_repo(tmp_path, 0)
+    s = bsm.collect_samples(root, lambda path: (None, "unknown"), float("inf"), 5)
+    assert s.production is None
+    assert s.unreadable == ["default_branch", "prs", "tags", "releases"]
+    assert s.commits == [] and s.rules is None
+
+
+def test_collect_samples_rulesets_and_unreadable_ruleset(tmp_path):
+    root = history_repo(tmp_path, 0)
+    rules = [
+        {"type": "merge_queue", "ruleset_id": 7},
+        {"type": "pull_request", "ruleset_id": 3, "parameters": {"required_approving_review_count": 1}},
+    ]
+    seen = []
+    base = fake_api([], rules=rules)
+
+    def api(path):
+        seen.append(path)
+        return base(path)
+
+    s = bsm.collect_samples(root, api, float("inf"), 5)
+    assert seen[-2:] == ["repos/{owner}/{repo}/rulesets/3", "repos/{owner}/{repo}/rulesets/7"]
+    assert s.rules == release_case.rule_facts_of(rules, ["never", "never"])
+    assert s.rules.present and s.rules.queue
+
+    def broken(path):
+        if "/rules/branches/" in path:
+            return {"message": "x"}, "error"
+        return base(path)
+
+    s2 = bsm.collect_samples(root, broken, float("inf"), 5)
+    assert s2.rules is None and s2.unreadable == ["ruleset"]
+
+
+def test_collect_samples_missing_history_and_landed_trailer(tmp_path):
+    root = history_repo(tmp_path, 0)
+    s = bsm.collect_samples(root, fake_api([], default="nothere"), float("inf"), 5)
+    assert s.production == "nothere" and "history" in s.unreadable and s.commits == []
+
+    tip = git(root, "rev-parse", "HEAD").strip()
+    c = ["-c", "user.email=t@example.com", "-c", "user.name=t"]
+    git(root, *c, "commit", "-q", "--allow-empty", "-m", f"Land\n\nNDF-Landed-PR: 42\nNDF-Tip: {tip}")
+    s2 = bsm.collect_samples(root, fake_api([(42, "main", "x")]), float("inf"), 5)
+    assert s2.commits[0]["landed"] == "42" and s2.prs == [{"number": 42, "base": "main", "head": "x"}]
+    s3 = bsm.collect_samples(root, fake_api([]), float("inf"), 5)
+    assert s3.prs == [{"number": 42, "base": "main", "head": None, "landed": s3.commits[0]["sha"]}]
+
+
 def test_count_key_thresholds():
     rule = {"min_samples": 3, "min_ratio": 0.9}
     assert bsm.count_key("/x", [("a", "1"), ("a", "2")], rule).why == "insufficient"
