@@ -4,7 +4,7 @@
   "状態": "<TMP>/out/sprint/sprint.json",
   "ブランチ戦略": {
     "source": ".ndf/project.json の branch_strategy",
-    "digest": "7e0e34adef7cbda5785312d42ec8eae34d77cb3b3df24bd1425bc82bb35c5ae0",
+    "digest": "8541a847687a2283a3ec444cf3c72a8bcbe94d8115220bfd07be68f00f3f9476",
     "section": {
       "kind": "plugin",
       "release_strategy": "trunk",
@@ -22,11 +22,9 @@
         "version_store": {
           "kind": "plugin"
         },
-        "tag": "{plugin}--v{version}",
-        "github_release": true,
-        "cd": {
-          "workflow": "release.yml"
-        },
+        "tag": null,
+        "github_release": false,
+        "cd": null,
         "plugin": "foo",
         "runtimes": [
           "claude"
