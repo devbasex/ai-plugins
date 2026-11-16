@@ -1,6 +1,6 @@
 # #3641 の決定の記録: 今の NDF に GitHub flow を入れ、ai-plugins を移す
 
-設計文書は [issue-3641-design.md](issue-3641-design.md) にある。切り替えの手順は [issue-3641-design-switch.md](issue-3641-design-switch.md) にある。
+設計文書は [issue-3641-design.md](issue-3641-design.md) にある。切り替えの手順は [issue-3641-design-switch.md](issue-3641-design-switch.md) にある。マージの方式 `serial` は [issue-3641-design-serial.md](issue-3641-design-serial.md) にある。
 外部の調査の番号（`STD<数>`・`PRD<数>`・`LIB<数>`）は設計文書の「外部の調査」の表を指す。
 
 ## 決定の記録
@@ -71,6 +71,8 @@ ai-plugins は `merge-queue` を選ぶ。`strict` では、CD の版上げの PR
 | 自前で組み合わせのブランチを作成して確かめる | 採らない。merge queue が同じことを持つ（STD3） |
 | 設定を書かせず ruleset から方式を推す | 採らない。リポジトリの持ち主の意図と ruleset の食い違いを検出できない |
 | `merge-queue` だけを作る | 採らない。merge queue を使えない GitHub flow のリポジトリ（Organization の public でも GitHub Enterprise Cloud の private でもないもの）が選べない |
+
+`strict` もブランチ保護（ruleset）の機能で、private の Free では使えない（STD10・STD11）。そのリポジトリのための 3 つ目の値 `serial` は決定 14、方式を選ぶ表は決定 15 にある。
 
 - 作り方: ライブラリやサービスを使う・自前で作る
 - 比べた候補: LIB1 / STD3 / STD1
@@ -199,3 +201,63 @@ develop の ruleset（承認 0）は変えない。切り替えの後は NDF の
 利用者の環境（SessionStart の通知など）へ知らせる形は採らない。最後の開発版へ通知のコードを入れるには develop へもう 1 回リリースが要り、開発版をやめる決定と食い違う。
 
 根拠: Value 1 / Value 6 / C4 / C6（MVV 版 7）
+
+### 決定 14: merge queue もブランチ保護も使えないリポジトリで GitHub flow を選べるよう、マージの方式に `serial` を足し、NDF がロックを取って 1 本ずつ一時マージコミットで確かめてからマージする
+
+private の Free のリポジトリでは merge queue もブランチ保護も ruleset も使えない（STD9・STD10・STD11）。`merge-queue` と `strict` だけでは、このリポジトリは GitHub flow を選べない（利用者の指摘、2026-11-16 08:3x）。
+`serial` は bors-ng（PRD3）の形に倣う。マージの前に「本番ブランチの HEAD と承認済みのコミットを合わせた一時マージコミット」を一時ブランチへ push し、そこで必須のチェックを走らせる。通って HEAD が動いていなければ、承認済みのコミットを `sha` に渡して PR をマージする（STD1）。HEAD が動いていれば作り直す（I15）。本番の PR の head へは push せず、承認は承認済みのコミットに付いたままで取り直さない。
+bors-ng と違う点は 2 つある。まとめ（batch）を作らず 1 本ずつ入れる。main を fast-forward せず PR のマージの API で入れ、PR をマージ済みの状態にする（人のマージの記録 I11 と同じ形で追え、main へ直接 push する権限が要らない）。
+
+得失:
+
+| | 得 | 失 |
+| --- | --- | --- |
+| `serial` | どのプランでも使える（PR のマージの API・push・チェックの照会だけを使う）。承認を取り直さない | 排他は NDF の工程どうしにだけ効き、人の画面でのマージを止められない。1 本ずつで、マージの待ちが CI の時間 × 本数になる |
+| `strict` | GitHub が人の画面でのマージにも最新の取り込みを強制する | private の Free では使えない。main が進むたびに承認の取り直しが要る |
+
+**ロックの格納場所は、一時マージコミットを置くブランチ `ndf-serial/<本番ブランチ>` そのものにする。** 持ち主の情報（PR の番号・承認済みのコミット・`<ホスト名>:<pid>`・期限）は HEAD のコミットのトレーラーに書く。取る・作り直す・返す・引き取るは、どれも期待する値つきの push（`--force-with-lease=<ref>:<期待する値>`。空なら「無いこと」を求める。STD14）で行う（I16）。
+
+| 比べた格納場所 | 採否と理由 |
+| --- | --- |
+| 一時ブランチ `ndf-serial/<本番ブランチ>` | 採る。一時ブランチはどのみち要り、ロックと 1 つにまとめれば片方だけが残る形が無い。リポジトリに書き込める工程どうしで、マシンとコンテナをまたいで排他できる |
+| 別の ref（`refs/ndf/lock/main` など）と一時ブランチの 2 つ | 採らない。2 つを揃えて書き換える必要があり、片方だけが残る形が増える |
+| PR のラベル・コメント・Issue | 採らない。GitHub の API に比較交換（期待する値つきの更新）が無く、2 つの工程が同時に取れる |
+| 手元の持ち主のコンポーネント（`lib/lease.py`）・ファイルロック（`lib/locks.py`） | 採らない。コンテナの中の状態のディレクトリに記録を置き、ほかの開発者のマシンや別のコンテナの `land` を排他できない |
+| GitHub Actions の `concurrency` | 採らない。`land` は workflow の外（開発者のマシンのリリースのワークフロー）で動く |
+
+**取りこぼしは期限で扱う。** 期限（`NDF-Serial-Deadline`）は持ち主の `land` の開始の時刻に `ci_budget` の秒を足した値で、余白を足さない。持ち主は期限を過ぎたらマージせず、ロックを返して `ci_pending` で止まる。期限を過ぎたロックだけをほかの工程が引き取る。2 つの工程が重なっても、作り直しと返却は期待する値つきで、マージの直前に HEAD を読み直すため、確かめていない組み合わせは main へ入らない。トレーラーの無いブランチ（人が作ったなど）は消さずに `lock_busy` で止まる。
+
+**CI の待ちの上限は `ci_budget` の 1 つにする。** ロックの待ち・一時マージコミットのチェックの待ち・作り直しの後の待ちを、すべてこの上限の中で数える。作り直しの回数に別の上限を置かない（全体の時間が区切る）。見るチェックは `.ndf/project.json` の `ci.required_checks` で、空なら `precondition` で止まる（ruleset の無いリポジトリでは GitHub が必須のチェックを持たない）。チェックが失敗すれば同じ一時マージコミットで再実行せず `staging_failed` で止まる。
+
+| 比べた候補 | 採否と理由 |
+| --- | --- |
+| bors-ng をそのまま使う | 採らない。2024-04-04 にアーカイブされ、作者は GitHub の merge queue を勧める（PRD3）。サーバーを別に動かす必要がある |
+| まとめ（batch）と二分探索 | 採らない。並列のレーンは最大 6 本で、まとめの得より実装の量が大きい（最小限のコード） |
+| 本番の PR の head へ main を取り込み、承認を取り直す | 採らない。`strict` と同じ承認の取り直しが要り、merge queue を使えない理由で承認の回数が増える（Value 1） |
+| main を一時マージコミットへ fast-forward する | 採らない。main への直接の push が要り、ブランチ保護のある行では迂回の権限が要る。PR がマージ済みの状態にならない |
+| 一時マージコミットを作らず PR の head のチェックだけでマージする | 採らない。同時に承認された 2 本の組み合わせを確かめない（受け入れ条件 8） |
+
+- 作り方: 自前で作る・標準に倣う
+- 比べた候補: PRD3 / STD1 / STD9 / STD10 / STD11 / STD14
+
+根拠: Value 1 / Value 4 / Value 12 / C2（MVV 版 7）
+
+### 決定 15: 設定の方式がそのリポジトリで働かないことをマージの前に知らせるため、所有者・公開範囲・プランから使える方式を選ぶ表を置き、プランを読めないときは断らずに ruleset の検証へ任せる
+
+使える方式は所有者の種類・公開範囲・プランで決まる（STD9・STD10・STD11・STD12）。表は [issue-3641-design-serial.md](issue-3641-design-serial.md) の「マージの方式を選ぶ表」にある。`check_method` は I6 の ruleset の検証の前に、`release_lib/method_select.py` の `usable_methods` で表を引き、設定の方式が表で使えなければ `method_unavailable` で止まり、使える方式を `outputs.usable_methods` に出す（I17）。
+プランは Organization なら `GET /orgs/{org}` の `plan.name`、個人アカウントなら所有者が自分のときだけ `GET /user` の `plan.name` で読む。owner でない利用者には返らない（STD13 の実測）。
+
+**プランを読めないときは「不明」とし、断らない。** `serial` はどのプランでも使えるため、そのまま続ける。`merge-queue`・`strict` は I6 の ruleset の検証に任せ、食い違えば `precondition` の `summary` に「プランを読めないため、確かに使えるのは `serial` だけ」と読めなかった理由を足す。表は案内で、方式が実際に働くかは ruleset が直接示すためである。
+
+| 比べた候補 | 採否と理由 |
+| --- | --- |
+| プランを読めなければ止める | 採らない。Organization の owner でない開発者は GitHub flow を使えなくなる |
+| 表を置かず ruleset の検証（I6）だけに任せる | 採らない。private の Free では ruleset が無く、`merge-queue`・`strict` の設定が「ruleset と食い違う」とだけ出て、使える方式が分からない（受け入れ条件 22） |
+| 表から方式を自動で選ぶ（設定を書かせない） | 採らない。決定 5 と同じく、持ち主の意図と実際の食い違いを検出できない。表は勧める方式を出すだけにする |
+| Enterprise Cloud のプランの名前を推して表に当てる | 採らない。値を確かめていない（設計文書の「確かめられなかったこと」）。`free`・`pro`・`team` 以外は「不明」にする |
+| internal を private と別の行にする | 採らない。STD9 が internal を名指さず、確かめられない。private と同じに扱い、実際に使えなければ I6 が止める |
+
+- 作り方: 標準に倣う
+- 比べた候補: STD9 / STD10 / STD11 / STD12 / STD13
+
+根拠: Value 4 / Value 12（MVV 版 7）

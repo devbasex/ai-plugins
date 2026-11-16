@@ -54,7 +54,7 @@ ai-plugins のブランチ運用を、develop と main の 2 本から GitHub fl
 | head の一致の確認 | マージの API に承認済みのコミットを渡し、head が違えば GitHub にマージを断らせること（`gh pr merge --match-head-commit`） |
 | 同期の PR | 本番のリリースの後に、main の変更を develop へ戻す PR（`release/v<バージョン>-sync`） |
 | merge queue | GitHub の機能。キューへ入れた PR を、main の HEAD と前に並ぶ PR を合わせた一時マージコミットで必須のチェックに通し、通ったものだけを順にマージする |
-| マージの方式 | 承認した複数の PR の組み合わせを確かめてから main へマージする方式。`merge-queue`（merge queue を使う）か `strict`（main の ruleset の「マージの前に最新の main を取り込む」を必須にし、head が動けば承認を取り直す） |
+| マージの方式 | 承認した複数の PR の組み合わせを確かめてから main へマージする方式。`merge-queue`（merge queue を使う）か `strict`（main の ruleset の「マージの前に最新の main を取り込む」を必須にし、head が動けば承認を取り直す）か `serial`（GitHub の機能に頼らず NDF が本番ブランチごとのロックを取って 1 本ずつマージする。2026-11-16 の追加の決定） |
 | 検証用マーケットプレイス | 正式版と違う名前で、マージの前の PR を集めたブランチを指すマーケットプレイス（#3572 の設計の `ai-plugins-next`） |
 | 切り替えの手順 | ai-plugins を develop と main の運用から GitHub flow へ切り替える一度きりの手順。利用者が新しい版へ移るときの「移行の手順」とは別 |
 | 開発版 | ベースブランチ（develop）に載るチャネル（開発版チャネル）と、そこへ出す接尾辞 `-dev.N` 付きの版。取得元に `develop` の ref を登録した利用者へ、マージされた変更がそのまま届く |
@@ -78,7 +78,7 @@ ai-plugins のブランチ運用を、develop と main の 2 本から GitHub fl
 
 - 今の NDF（`plugins/ndf/`）のブランチ戦略に GitHub flow を足し、worktree の分岐元・スプリントの PR のマージ先・リリースのワークフロー・承認とマージ・CD がそのブランチ戦略に従って動くようにする
 - CD（`.github/workflows/release-cd.yml` など）が、GitHub flow でマージの後にバージョン・タグ・CHANGELOG・GitHub Release を作るようにする
-- 同時に承認された PR の組み合わせの確かめ（merge queue か `strict`）と、設定と ruleset の食い違いの検出
+- 同時に承認された PR の組み合わせの確かめ（merge queue か `strict` か `serial`）と、設定と ruleset の食い違いの検出。リポジトリの所有者・公開範囲・プランから使える方式を選ぶ表
 - ai-plugins の設定（`.ndf/worktree.json`・`.ndf/project.json`）・`AGENTS.md`・`docs/versioning-and-distribution.md` の書き換えと、切り替えの手順
 - main の ruleset の変更の手順（実行は人の承認の後）
 - ai-plugins のリリースの手順と設定から、開発版のデプロイ（開発版チャネル・`-dev.N` の版上げの PR・`develop` からの導入の確かめ）を外す
@@ -120,7 +120,7 @@ GitHub flow の振る舞い:
 - [ ] 6. 人が GitHub で本番の PR をマージした後に工程を再開すると、工程はマージ済みとして後の工程（CD の確かめ・クリーンアップ）へ進み、もう一度マージしない
 - [ ] 7. GitHub flow のリリースのワークフローに、承認の後にコードを直して本番の PR へ push するステップが無い。CI が落ちれば止まり、差し戻す
 - [ ] 8. ほぼ同時に承認された 2 本の PR は、main の HEAD ともう一方を合わせたコミットで必須のチェックを通ってから main へ入る。通らなければ後の 1 本はマージされない
-- [ ] 9. 設定のマージの方式（`merge-queue` か `strict`）と main の ruleset の実際の設定が食い違えば、工程はマージの前に止まり、設定の値と ruleset の値を理由に出す
+- [ ] 9. 設定のマージの方式（`merge-queue` か `strict` か `serial`）と main の ruleset の実際の設定が食い違えば、工程はマージの前に止まり、設定の値と ruleset の値を理由に出す
 
 ai-plugins が移った後:
 
@@ -136,10 +136,17 @@ ai-plugins が移った後:
 設計に書くこと:
 
 - [ ] 15. 設計が、ai-plugins の移った後の設定の値を、#3613 の改名表で新しい 1 つのセクション（`release_strategy: trunk`）へ移す対応を表で示す
-- [ ] 16. 設計の「適用範囲」に、ai-plugins（GitHub flow・開発版なし）・nd-factory（`selected`）・宣言の無いリポジトリ（`whole`）の振る舞いの表があり、開発版のデプロイの機能が ai-plugins の外で残ることを示す
+- [ ] 16. 設計の「適用範囲」に、ai-plugins（GitHub flow・開発版なし）・nd-factory（`selected`）・宣言の無いリポジトリ（`whole`）・private の Free の Web サービスの振る舞いの表があり、開発版のデプロイの機能が ai-plugins の外で残ることを示す
 - [ ] 17. 設計の切り替えの手順が、develop にあって main に無い変更の扱い・動いているレーンのブランチと PR の付け替え・develop のブランチの扱い・開発版チャネルの利用者への知らせ・設定と `AGENTS.md` と `docs/versioning-and-distribution.md` の書き換えを、順序つきで書く
 - [ ] 18. 設計が、main の ruleset の変更（merge queue の追加・`strict`・承認の数）の具体的な値と、実行の前に人の承認で止まる箇所を書く
 - [ ] 19. 設計の「影響」に、触る場所と lfix-rel（`plugins/ndf/scripts/lib/parallel_*.py`・hook）の重なりの有無を、検索の結果つきで書く
+
+merge queue も `strict` も使えないリポジトリ（2026-11-16 08:3x の追加の決定）:
+
+- [ ] 20. マージの方式 `serial` を選んだリポジトリで、工程は本番ブランチごとのロックを取り、main の HEAD と承認済みのコミットを合わせた一時ブランチで必須のチェックを走らせる。通って main が動いていなければ、承認済みのコミットのまま main へマージする。main が動いていれば一時ブランチを作り直し、承認を取り直さない（本番の PR の head へ push しない）
+- [ ] 21. `serial` のロックの持ち主のプロセスが落ちても、ロックは期限の後にほかの工程が引き取れる。期限を過ぎた持ち主はマージしない
+- [ ] 22. 設定のマージの方式が、リポジトリの所有者・公開範囲・プランから使えない方式なら、工程はマージの前に止まり、使える方式を理由に出す。設計は、プランと公開範囲から使える方式を選ぶ表と、プランを読めないとき（権限不足・API の失敗）の扱いを書く
+- [ ] 23. 設計の外部の調査に、merge queue・ブランチ保護・ruleset の提供条件を GitHub の公式文書の出典（URL と取得日）つきで書く。確かめられなかった項目は「確かめられなかったこと」に書く
 
 ## 非機能の条件
 
@@ -188,7 +195,7 @@ ai-plugins が移った後:
 
 | # | 項目 | 誰が決めるか | 期限 |
 | --- | --- | --- | --- |
-| 1 | 同時の承認の確かめを merge queue と `strict` のどちらにするか（ai-plugins は Organization が持つ public のリポジトリ） | 設計（設計承認ゲートで利用者） | 設計承認 |
+| 1 | 同時の承認の確かめを merge queue と `strict` と `serial` のどれにするか（ai-plugins は Organization が持つ public のリポジトリ） | 設計（設計承認ゲートで利用者） | 設計承認 |
 | ~~2~~ | ~~検証用マーケットプレイスを今回入れるか後に回すか~~ → 後に回す（2026-11-16、利用者の追加の決定。前提 10） | — | — |
 | 3 | 今の NDF での設定の格納場所と値の名前（今の `promotion` へ値を足すか、新しい 1 つのセクションを先に使うか）と、移行のコマンドの改名表の行 | 設計 | 設計承認 |
 | 4 | develop のブランチを消すか残すか、開発版チャネル（`#develop`）を登録した利用者へどう知らせるか | 設計（設計承認ゲートで利用者） | 設計承認 |
@@ -282,3 +289,11 @@ ai-plugins が移った後:
 > - 上の「方針」の「マージの前に試す場（2 つ目のマーケットプレイス）は、最小限に入れるか後に回すかを設計で決める」は、この決定で「後に回す」に決まった
 
 （書き手: 起票者（並列の計画 p6 のオーガナイザー）が利用者の決定（`ndf-ask:redline:P1` の答え）として記録した文、日付: 2026-11-16。決定そのものは利用者のもので、文は起票者の記録である）
+
+> ## 追加の決定（2026-11-16 08:3x JST、利用者の指摘。#3649 宛て）
+>
+> merge queue は GitHub でも使えないプランがあるため、それが使えない場合の代替案を定義しておく必要があります。
+
+（書き手: 利用者、日付: 2026-11-16。指摘の全文は `.ndf/handoff/terms-release-map.md` の「追記: merge queue が使えない場合の代わり」にある）
+
+起票者の記録（設計の worker、2026-11-16）: 今の設計は `merge-queue` か `strict` だけを受けていた。`strict` もブランチ保護（ruleset）の機能で private の Free では使えないため、private の Free のリポジトリが GitHub flow を選べなかった（代表のリポジトリの種類を扱えない形）。指摘に合わせ、マージの方式に `serial`（NDF がロックを取って 1 本ずつマージする。bors-ng の形）を足し、プランと公開範囲から使える方式を選ぶ表を設計に置く。受け入れ条件 9・16 を書き換え、20〜23 を足した。ai-plugins は Organization の public で merge queue のまま、振る舞いと切り替えの手順は変えない
