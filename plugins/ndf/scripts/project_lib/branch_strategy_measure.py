@@ -120,19 +120,16 @@ def _merged_prs(got: list) -> list[dict]:
     ]
 
 
-def _tag_names(got: list) -> list[str]:
-    return [t["name"] for t in got if isinstance(t, dict) and t.get("name")]
-
-
-def _release_tags(got: list) -> list[str]:
-    return [r["tag_name"] for r in got if isinstance(r, dict) and r.get("tag_name")]
+def _values_of(key: str) -> Callable[[list], list[str]]:
+    """一覧の各要素から `key` の値（空でないもの）を取り出す関数。"""
+    return lambda got: [x[key] for x in got if isinstance(x, dict) and x.get(key)]
 
 
 # 集める一覧: (Samples の属性名, API のパス（{limit} を入れる）, 取り出し方)。属性名は打ち切り・読めないの記録の名前も兼ねる
 _LISTINGS = (
     ("prs", "repos/{{owner}}/{{repo}}/pulls?state=closed&per_page={limit}", _merged_prs),
-    ("tags", "repos/{{owner}}/{{repo}}/tags?per_page={limit}", _tag_names),
-    ("releases", "repos/{{owner}}/{{repo}}/releases?per_page={limit}", _release_tags),
+    ("tags", "repos/{{owner}}/{{repo}}/tags?per_page={limit}", _values_of("name")),
+    ("releases", "repos/{{owner}}/{{repo}}/releases?per_page={limit}", _values_of("tag_name")),
 )
 
 
