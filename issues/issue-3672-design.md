@@ -2,7 +2,7 @@
 
 ## 目的
 
-- **今どうなっているか**: ブランチ戦略・マージ・リリースの設定が `.ndf/worktree.json`・`.ndf/project.json`・`.ndf/release.json`・`.ndf/supervise.json` の 4 か所に分かれ、10 系と 11.0 が別々の設計（#3641・#3572）で読む。ai-plugins の develop→main・`--admin` が製品の既定に入り込み、p6 で承認したリリース 15 回のうち 6 回が承認の後に止まった
+- **今どうなっているか**: ブランチ戦略・マージ・リリースの設定が `.ndf/worktree.json`・`.ndf/project.json`・`.ndf/release.json`・`.ndf/supervise.json` の 4 か所に分かれている。10 系と 11.0 は、それを別々の設計（#3641・#3572）で読む。ai-plugins の develop→main・`--admin` が製品の既定に入り込み、p6 で承認したリリース 15 回のうち 6 回が承認の後に止まった
 - **誰に効くか**: NDF を使うすべてのリポジトリの持ち主とリリースの承認者。ai-plugins の開発者
 - **変えると何が成り立つか**: 1 つの節を読めば方法論が分かり、節は Skill のスクリプトが作る。10 系と 11.0 は同じ節とスキーマで動く。承認は正式版 1 本につき 1 回で、承認した head だけがマージされる。ai-plugins は plugin 開発の慣行に沿った値を、製品の既定と同じ形で持つ
 
@@ -184,7 +184,7 @@ graph TD
 
 ### 節のキー
 
-| S1 の事柄 | キー | 値 |
+| 要求の S1 の事柄 | キー | 値 |
 | --- | --- | --- |
 | （作成の記録） | `kind` | `web-develop`・`web-trunk`・`mobile`・`docs`・`plugin`・`custom`（答えで既定から変えたとき） |
 | 結合のしかた | `release_strategy` | `merge_base_branch`・`release_branch`・`trunk`（#3613 の改名表の名前） |
@@ -222,7 +222,7 @@ graph TD
 | `plugin` | `trunk` | main / main | production / check / sprint | package-plugin / plugin / `{plugin}--v{version}` / 真 | stable main | release_pr / gate | ndf / merge-queue※ / merge / 偽 |
 
 ※ merge queue を使えない（STD3 の条件に当たらない）と測ったら `strict` にし、分からなければ 2 つを候補に問う。`main`・`develop` は既定の名前で、`init` は測った既定ブランチの名前で置き換える。
-`verify` はどの種類も `null`、`release.cd` は版数を持つ種類だけ `{"workflow": "release-cd.yml"}` の形で、ファイル名は測ったワークフローの名前で置き換える。
+`verify` はどの種類も `null` にする。`release.cd` は版数を持つ種類だけ `{"workflow": "release-cd.yml"}` の形で、ファイル名は測ったワークフローの名前で置き換える。
 
 | 種類 | スプリントの PR の宛先 | リリースの PR | 人へ問う承認 | マージの主体と方式（10 系と 11.0 で同じ） |
 | --- | --- | --- | --- | --- |
@@ -232,7 +232,7 @@ graph TD
 | `docs` | main（本番の PR を兼ねる） | 無し | 本番の PR ごとに 1 回 | NDF が先端を含むかを確かめ、`sha` 付きでマージ |
 | `plugin` | main（検査の後に NDF がキューへ） | main から切った `release/v<版>` → main | 版上げの PR で 1 回 | NDF が承認した head をキューの先頭へ入れる |
 
-## 宣言の CRUD
+### 宣言の CRUD
 
 | 操作 | 時点 | 主体 | 書く前の検査 | 人が見る場所 |
 | --- | --- | --- | --- | --- |
@@ -248,7 +248,7 @@ graph TD
 
 ## 入出力の契約
 
-解析の `branch-strategy` の結果は 1 行の JSON で、10 系と 11.0 で同じ形にする（スキーマは `contracts/schemas/io/branch-strategy.result.schema.json`、10 系はコピー）。
+解析の `branch-strategy` の結果は 1 行の JSON で、10 系と 11.0 で同じ形にする。スキーマは `contracts/schemas/io/branch-strategy.result.schema.json` で、10 系はそのコピーを持つ。
 
 | キー | 中身 |
 | --- | --- |
@@ -262,7 +262,9 @@ graph TD
 
 `questions` は `decision-request` の手順で人へ回し、答えは `write --answers <ファイル>` が受ける。
 
-読む部品が止まるときの理由の文は、ファイル・キーの位置・打つコマンドの 3 つを持つ（例: 「`.ndf/worktree.json` の `/branch_flow/promotion` は旧い宣言のキーです。`python3 "$SCRIPTS/project-decl.py" branch-strategy migrate` で移してください」。11.0 は `ndf project branch-strategy migrate` を示す）。
+読む部品が止まるときの理由の文は、ファイル・キーの位置・打つコマンドの 3 つを持つ。10 系の例は次のとおりで、11.0 は `ndf project branch-strategy migrate` を示す。
+
+> `.ndf/worktree.json` の `/branch_flow/promotion` は旧い宣言のキーです。`python3 "$SCRIPTS/project-decl.py" branch-strategy migrate` で移してください
 
 ## 処理の流れ
 
@@ -296,7 +298,7 @@ flowchart TD
 | 種類の既定から埋めるキー | `kind`・`sprint.integrate`・`sprint.doc_prs`・`reviews`・`approval.target`・`approval.via`・`merge.actor`・`merge.admin`・`verify`・`release.deliveries` | 選んだ種類の既定の行（根拠 `preset`）。`approval.via` は、ruleset が承認を求めるのに既定が `gate` なら食い違いとして問う（I10） |
 | 人の答えで書くキー | 問いを返したキー | 答え（根拠 `answer`）。答えも組み合わせの規則を通す（I2） |
 
-種類（`kind`）は、測るキーの値と 5 つの種類の既定の行を比べ、測るキーがすべて合う行が 1 つだけのときにその種類にする（既定の行の `merge-queue`※ は、測った `merge-queue` と `strict` のどちらとも合うとみなす）。
+種類（`kind`）は、測るキーの値と 5 つの種類の既定の行を比べて決める。測るキーがすべて合う行が 1 つだけのとき、その種類にする。既定の行の `merge-queue`※ は、測った `merge-queue` と `strict` のどちらとも合うとみなす。
 測った値は種類の既定より優先して書く（例: 種類 `plugin` で測った `merge.method` が `strict` なら `strict` を書く）。
 合う行が無いか 2 つ以上なら、候補の種類と測った値を添えて `no_kind` の問いを返す。答えで既定から値を変えたときの種類は `custom` にする。
 
@@ -339,12 +341,12 @@ flowchart TD
 版上げの PR の承認の間もスプリントのマージを止めない（Value 5。承認の要らない作業は承認を待つ間も止めない）。
 承認した CHANGELOG はその PR の範囲のまま変えず、承認の後に入った PR は CD が GitHub Release の本文に「承認の後に入った変更」として並べる。
 
-`direct` を既定にする `web-develop` と `mobile` は、版上げの PR をマージした後に本番ブランチをベースブランチへ戻す同期の PR を作る（今の 10 系のリリースの工程のまま）。
+`direct` を既定にする `web-develop` と `mobile` は、版上げの PR をマージした後に同期の PR を作る。同期の PR は本番ブランチをベースブランチへ戻すもので、今の 10 系のリリースの工程のままである。
 次の版上げの PR は本番ブランチの先端を含んだベースブランチから切られる。同期の PR はベースブランチ宛てで、承認の対象ではない。
 
 ## ai-plugins の値
 
-ai-plugins の節は、種類 `plugin` の既定（「代表のリポジトリの種類の既定」）に、測った名前（本番ブランチ `main`・プラグイン `ndf`・ランタイム `claude` と `codex`・ワークフロー `release-cd.yml`）を入れたものと一致させる（受け入れ条件 15）。
+ai-plugins の節は、種類 `plugin` の既定（「代表のリポジトリの種類の既定」）に測った名前を入れたものと一致させる（受け入れ条件 15）。測った名前は、本番ブランチ `main`・プラグイン `ndf`・ランタイム `claude` と `codex`・ワークフロー `release-cd.yml` である。
 決めた理由と出典は決定 12 にある。
 
 | 項目 | 値 | 出典 |

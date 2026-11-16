@@ -1,7 +1,7 @@
 # #3672 の削除の一覧のパス
 
 [issue-3672-design-removal.md](issue-3672-design-removal.md) の削除の一覧のうち、複数のファイルにまたがる行（D32・D33・D34・D37）のパスを 1 ファイル 1 行で並べた文書である。
-実装はこの表の各行を `scripts/legacy-branch-decl.json` の 1 行にし、`scripts/check-legacy-branch-decl.py` が各行のパスに消す語が残らないことを照らす（受け入れ条件 21）。
+実装はこの表の各行を `scripts/legacy-branch-decl.json` の 1 行にする。`scripts/check-legacy-branch-decl.py` は、各行のパスに消す語が残らないことを照らす（受け入れ条件 21）。
 行の番号は `D<番号>-<連番>` で、消す語と置き換え先は削除の一覧の同じ番号の行のとおりである。
 
 ## 数えたコマンド

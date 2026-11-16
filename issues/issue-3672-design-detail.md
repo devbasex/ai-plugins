@@ -1,8 +1,13 @@
 # #3672 の詳細設計: ブランチ戦略の宣言を 1 つの節で表し、10 系と 11.0 をその節だけで動かす
 
 設計文書 [issue-3672-design.md](issue-3672-design.md) の「構成要素」と「データ構造」「処理の流れ」を、ファイルと関数の粒度へ下ろした文書である。
-不変条件（`I<数>`）・組み合わせの規則（`R<数>`）・ドメインイベント（`E<数>`）は設計文書を、決定の番号は [issue-3672-design-decisions.md](issue-3672-design-decisions.md) を、
-削除の一覧の番号（`D<数>`）は [issue-3672-design-removal.md](issue-3672-design-removal.md) を指す。
+本文の番号は次の文書を指す。
+
+| 番号 | 指す文書 |
+| --- | --- |
+| 不変条件（`I<数>`）・組み合わせの規則（`R<数>`）・ドメインイベント（`E<数>`） | 設計文書 |
+| 決定の番号 | [issue-3672-design-decisions.md](issue-3672-design-decisions.md) |
+| 削除の一覧（`D<数>`） | [issue-3672-design-removal.md](issue-3672-design-removal.md) |
 
 **10 系と 11.0 は同じ名前・同じ責務の関数を 1 つずつ持つ。** 表では 1 行に両方の置き場を並べ、シグネチャは 10 系の形で書く（11.0 は同じ引数を `Path`・`Optional` の型注釈で持つ）。
 2 つの系の結果の形は、設計文書の「入出力の契約」のスキーマ 1 つで縛る。
@@ -90,7 +95,7 @@ CI の検査は契約とコードを読むだけで、工程の部品から呼�
 | `plugins/ndf/skills/release/schemas/release.schema.json` | 変更 | `version_files` の定義を消す（D7） | 無し |
 | `plugins/ndf/scripts/data/branch-strategy-presets.json` | 新設 | 既定の表のコピー | 無し |
 | `plugins/ndf/scripts/data/ndf-settings-renames.json` | 新設 | 移す行の表のコピー | 無し |
-| `plugins/ndf/scripts/lib/branch_strategy.py` | 新設 | 11.0 の読む部品と同じ責務。シェルから `get` で読む口を持つ | `lib/branch_strategy_legacy.py`・`lib/deps.py` |
+| `plugins/ndf/scripts/lib/branch_strategy.py` | 新設 | 11.0 の読む部品と同じ責務。シェルから `get` で読む CLI を持つ | `lib/branch_strategy_legacy.py`・`lib/deps.py` |
 | `plugins/ndf/scripts/lib/branch_strategy_legacy.py` | 新設 | 11.0 の旧い宣言の検査と同じ責務 | 無し |
 | `plugins/ndf/scripts/lib/branch_flow.py` | 削除 | （D11） | — |
 | `plugins/ndf/scripts/lib/deps.py` | 変更 | 依存のグループ `jsonschema` を足す | 無し |
@@ -129,7 +134,7 @@ CI の検査は契約とコードを読むだけで、工程の部品から呼�
 | `plugins/ndf-next/tests/test_branch_strategy.py` | 新設 | 11.0 の単体テスト | 5 種の宣言の fixture |
 | `scripts/tests/test_check_legacy_branch_decl.py` | 新設 | 削除の一覧の検査のテスト | `scripts/check-legacy-branch-decl.py` |
 
-5 種の宣言の fixture は 11.0 の `plugins/ndf-next/tests/fixtures/branch_strategy/` に 1 か所置き、10 系のテストはそのパスを読む（設計文書の「テスト設計」）。
+5 種の宣言の fixture は、11.0 の `plugins/ndf-next/tests/fixtures/branch_strategy/` の 1 か所に置く。10 系のテストはそのパスを読む（設計文書の「テスト設計」）。
 
 ## クラスと関数の構造
 
@@ -167,7 +172,7 @@ CI の検査は契約とコードを読むだけで、工程の部品から呼�
 | `load_at_ref` | 同上 | 新設 | `load_at_ref(root: Path, ref: str) -> Strategy` | 指定したブランチの節を `git show <ref>:.ndf/project.json` で読み、`load` と同じ検査をする | `ref` が `origin/<名前>` の形で取得済み | `load` と同じ | `git show` を 4 回呼ぶ |
 | `validate` | 同上 | 新設 | `validate(section: dict) -> list[dict]` | 節をスキーマ `$defs/BranchStrategy` で検査し、落ちた規則とキーの位置を返す | `section` が JSON の値 | 返す各要素は `{"rule": "R<数>" か "shape", "pointer"}`。空なら通った | スキーマのファイルを読む（初回だけ。プロセスの中で使い回す） |
 | `get` | 同上 | 新設 | `get(strategy: Strategy, pointer: str) -> Any` | 節の中の 1 つの値を JSON Pointer で引く | `pointer` が `/` で始まる | 値があれば返す。無ければ `StrategyError` | 無し |
-| `main` | 10 系 `lib/branch_strategy.py` | 新設 | `main(argv: list[str]) -> int`（`get <pointer> [--ref <ref>] [--root <dir>]`） | シェルから節の値を 1 つ読む口 | 引数が 1 つの pointer | 値を標準出力へ 1 行で出し 0。止まれば理由を標準エラーへ出す | `.ndf/` を読む |
+| `main` | 10 系 `lib/branch_strategy.py` | 新設 | `main(argv: list[str]) -> int`（`get <pointer> [--ref <ref>] [--root <dir>]`） | シェルから節の値を 1 つ読む CLI | 引数が 1 つの pointer | 値を標準出力へ 1 行で出し 0。止まれば理由を標準エラーへ出す | `.ndf/` を読む |
 | `snapshot` | 10 系 `lib/branch_strategy.py`・11.0 `core/branch_strategy.py` | 新設 | `snapshot(strategy: Strategy, source: str) -> dict` | スプリントの開始時に控える節の全体を作る | `strategy` が `load` の戻り値 | `{"source", "digest", "section"}`。`digest` は節の正規化した JSON の SHA-256 | 無し |
 | `snapshot_diff` | 同上 | 新設 | `snapshot_diff(snap: dict, now: Strategy) -> list[str]` | スナップショットと今の節の違うキーの位置を並べる（I13） | `snap` が `snapshot` の戻り値 | 違うキーの JSON Pointer の昇順の一覧。同じなら空 | 無し |
 | `Strategy.pr_target` | 同上 | 新設 | `pr_target(self, kind: str) -> str` | PR の種類（`sprint`・`doc`・`release`）ごとの宛先のブランチ名を返す | `kind` が 3 つのどれか | 設計文書の「代表のリポジトリの種類の既定」の 2 つ目の表の宛先と同じ | 無し |
@@ -328,7 +333,8 @@ CI の検査は契約とコードを読むだけで、工程の部品から呼�
 | スキーマの置き場 | 定数 | 読む部品の `SCHEMA` | 11.0 `declarations/project.schema.json#/$defs/BranchStrategy`、10 系は `skills/development-workflow/schemas/project.schema.json` の同じ定義 |
 | ハッシュの算法 | 定数 | 書く部品の `DIGEST` | SHA-256（正規化した JSON。キーの昇順・区切りの空白なし） |
 
-閾値を 1 か所に持つため、今の解析の `MIN_FLOW_SAMPLES`・`HIGH`・`MID`（11.0 `measure_flow.py`、10 系 `measure_branch_flow.py`）は、測る部品を置き換える時点で消す。
+閾値を 1 か所に持つため、今の解析の `MIN_FLOW_SAMPLES`・`HIGH`・`MID` は、測る部品を置き換える時点で消す。
+これらの定数は 11.0 では `measure_flow.py`、10 系では `measure_branch_flow.py` にある。
 2 つの系がそれぞれの定数を持たず、既定の表の値を読む。
 
 ## 並行と排他

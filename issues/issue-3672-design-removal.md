@@ -29,30 +29,14 @@
 `version_store` は、コード・スキーマ・テスト・CI のどこにも無い（`grep -rn version_store .` の当たりは用語集 2 行と #3572 の設計文書だけ）。
 #3572 の設計が足すと決めたキーで、まだ実装されていないためである。新しい節の `release.version_store` はこの名前を引き継ぐ（決定 2）。
 
-ほかの `scripts/repo-assumptions-allow/` の例外（`worktree.schema.json`・`production-merge.md`・`project-analysis.md`・`declaration.md` を指すもの）は、指す先のファイルが残るため一覧に載せない。
+ほかの `scripts/repo-assumptions-allow/` の例外は、一覧に載せない。`worktree.schema.json`・`production-merge.md`・`project-analysis.md`・`declaration.md` を指す例外で、指す先のファイルが残るためである。
 書き直した後に当たりが無くなった例外は、実装の PR で消す。
 
 複数のファイルにまたがる行（D32・D33・D34・D37）のパスは、[issue-3672-design-removal-paths.md](issue-3672-design-removal-paths.md) に 1 ファイル 1 行で並べた。
 その文書は語の集合に `dev_workflow`・`delivery` を足して数え直したため、上の表の件数と違う。
 
-`plugins/ndf/scripts/lib/gh_pr_info.py` と `plugins/ndf/skills/cross-review/scripts/` の当たりは、PR の宛先（`baseRefName`）を入れる変数の名前で、
-宣言を読んでいない。一覧に載せない。
-
-### CI の検査が照らす形
-
-一覧の各行は、実装で `scripts/legacy-branch-decl.json`（新設）の 1 行になる。行は「パス」と「消す語」を持ち、
-検査 `scripts/check-legacy-branch-decl.py`（新設）は、そのパスに語が 1 件でも残れば落ちる。パスのファイルが無いときは通す（ファイルごと消した行）。
-消す語は、宣言のキーとして読む形（`"base_branch"`・`'base_branch'`・`.base_branch`）と、文書で宣言のキーとして書く形（`` `base_branch` ``）である。
-
-旧いキーの名前が残ってよいのは、次の置き場だけである（I8）。検査はこれらを一覧に載せない。
-
-| 置き場 | 理由 |
-| --- | --- |
-| 10 系の移行のコマンド `plugins/ndf/scripts/project_lib/branch_strategy_migrate.py`（新設）とそのテスト | 旧い 4 か所を読んで新しい節へ移す |
-| 10 系の旧い宣言の検査 `plugins/ndf/scripts/lib/branch_strategy_legacy.py`（新設）とそのテスト | 旧いキーの位置を出して止める（受け入れ条件 22） |
-| 11.0 の移す行の表 `plugins/ndf-next/contracts/domains/ndf-settings-renames.json`（#3613 かこの課題が新設。決定 3）と、10 系のそのコピー `plugins/ndf/scripts/data/ndf-settings-renames.json` | 旧いキーの位置と移す先を持つ |
-| 11.0 の移行のコマンド `plugins/ndf-next/src/ndf/domains/project/strategy_migrate.py` と旧い宣言の検査 `plugins/ndf-next/src/ndf/core/branch_strategy_legacy.py`（どちらも新設）とそのテスト | 10 系の 2 行と同じ |
-| `CHANGELOG.md`・`docs/archive/`・`docs/development-history/`・`issues/` | 書いた日の記録で、以後の構成変更に追随しない |
+`plugins/ndf/scripts/lib/gh_pr_info.py` と `plugins/ndf/skills/cross-review/scripts/` の当たりは、一覧に載せない。
+どちらも PR の宛先（`baseRefName`）を入れる変数の名前で、宣言を読んでいない。
 
 ### 一覧
 
@@ -134,6 +118,22 @@
 | D37 | `plugins/ndf/scripts/tests/` の 71 ファイル・`plugins/ndf/skills/*/tests/` の 23 ファイル・`plugins/ndf-next/tests/` の 23 ファイル・`scripts/tests/` の 4 ファイル（パスは同じ文書の D37a〜D37d） | 旧いキーを入力にした宣言の fixture | 新しい節の fixture。代表のリポジトリ 5 種の宣言は 1 か所の fixture にまとめる（テスト設計） |
 
 `branch_flow.py` を消すと、D12〜D21 の 10 系の読み手の参照は `branch_strategy.py` 1 本へ寄る。旧い分岐（行 `whole`・`selected` の名前で振る舞いを分ける `if`）は D11・D16・D17・D18・D27 にあり、`release_strategy` の値で分ける形へ替える。
+
+### CI の検査が照らす形
+
+一覧の各行は、実装で `scripts/legacy-branch-decl.json`（新設）の 1 行になる。行は「パス」と「消す語」を持ち、
+検査 `scripts/check-legacy-branch-decl.py`（新設）は、そのパスに語が 1 件でも残れば落ちる。パスのファイルが無いときは通す（ファイルごと消した行）。
+消す語は、宣言のキーとして読む形（`"base_branch"`・`'base_branch'`・`.base_branch`）と、文書で宣言のキーとして書く形（`` `base_branch` ``）である。
+
+旧いキーの名前が残ってよいのは、次の置き場だけである（I8）。検査はこれらを一覧に載せない。
+
+| 置き場 | 理由 |
+| --- | --- |
+| 10 系の移行のコマンド `plugins/ndf/scripts/project_lib/branch_strategy_migrate.py`（新設）とそのテスト | 旧い 4 か所を読んで新しい節へ移す |
+| 10 系の旧い宣言の検査 `plugins/ndf/scripts/lib/branch_strategy_legacy.py`（新設）とそのテスト | 旧いキーの位置を出して止める（受け入れ条件 22） |
+| 11.0 の移す行の表 `plugins/ndf-next/contracts/domains/ndf-settings-renames.json`（#3613 かこの課題が新設。決定 3）と、10 系のそのコピー `plugins/ndf/scripts/data/ndf-settings-renames.json` | 旧いキーの位置と移す先を持つ |
+| 11.0 の移行のコマンド `plugins/ndf-next/src/ndf/domains/project/strategy_migrate.py` と旧い宣言の検査 `plugins/ndf-next/src/ndf/core/branch_strategy_legacy.py`（どちらも新設）とそのテスト | 10 系の 2 行と同じ |
+| `CHANGELOG.md`・`docs/archive/`・`docs/development-history/`・`issues/` | 書いた日の記録で、以後の構成変更に追随しない |
 
 ## 置き換える設計と開いている設計 PR の行き先
 
