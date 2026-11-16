@@ -497,3 +497,19 @@ def test_rule_facts_carry_required_checks_with_sources():
     }
     got = release_case.rule_facts_from(lambda path: (replies.get(path), ""), "main", bypass=False)
     assert got.required == (("ci", 7), ("lint", None), ("e2e", None))
+
+
+def test_rule_facts_read_every_page_of_rules():
+    """規則が既定の 1 ページ（30 件）を超えても、31 件目以降の必須のチェックを落とさない。途中のページを読めなければ None。"""
+    filler = [{"type": "deletion"}] * 30
+    must = {"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": "ci", "integration_id": 7}]}}
+    base = "repos/{owner}/{repo}/rules/branches/main"
+    replies = {
+        base: filler,
+        f"{base}?page=2": [must],
+        "repos/{owner}/{repo}/branches/main": {"protection": {"enabled": False}},
+    }
+    read = lambda path: (replies.get(path), "")  # noqa: E731
+    assert release_case.rule_facts_from(read, "main", bypass=False).required == (("ci", 7),)
+    replies[f"{base}?page=2"] = None
+    assert release_case.rule_facts_from(read, "main", bypass=False) is None

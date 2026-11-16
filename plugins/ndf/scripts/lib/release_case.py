@@ -233,15 +233,36 @@ def classic_facts_from(read, branch: str) -> RuleFacts | None:
     return classic_facts_of(protection)._replace(required=required) if isinstance(protection, dict) else None
 
 
+# GitHub の REST の既定の 1 ページの件数（`per_page` を付けないときの値）
+_DEFAULT_PER_PAGE = 30
+
+
+def _all_rules(read, path: str) -> list | None:
+    """`rules/branches/<b>` の規則を全ページ読む。1 ページ目は `path` のまま（既定の件数）読み、満ちたページが続く間
+    `?page=<n>` で次を読む。1 ページ目が 404 なら規則なし（空）、途中のページを読めなければ None（必須のチェックを
+    欠いたまま迂回へ進めない）。"""
+    rules, why = read(path)
+    if why == "missing":
+        return []
+    if not isinstance(rules, list):
+        return None
+    got, page = rules, 1
+    while len(got) >= _DEFAULT_PER_PAGE:
+        page += 1
+        got, _ = read(f"{path}?page={page}")
+        if not isinstance(got, list):
+            return None
+        rules = rules + got
+    return rules
+
+
 def rule_facts_from(read, branch: str, bypass: bool = True) -> RuleFacts | None:
     """本番ブランチの ruleset と従来のブランチ保護から、有無・承認の数・merge queue の有無・最新の取り込みの要否・迂回の可否を読む。
     GitHub は両方を重ねて効かせるため、両方を読んで重ねる（保護のある本番ブランチを「保護なし」の早送りの経路へ入れない）。読めなければ None。
     `read` は `path → (値, 読めない理由)`（`_gh_read` の形）。宣言を書く測定・宣言を照らす land・承認数（`read_approvals`）が同じ事実を読むための正本。
     `bypass` が偽なら ruleset ごとの迂回の可否（`rulesets/<id>`）を読まない（`bypass` は None。承認数だけが要る経路で照会を減らす）。"""
-    rules, why = read(f"repos/{{owner}}/{{repo}}/rules/branches/{branch}")
-    if why == "missing":
-        rules = []
-    if not isinstance(rules, list):
+    rules = _all_rules(read, f"repos/{{owner}}/{{repo}}/rules/branches/{branch}")
+    if rules is None:
         return None
     bypasses = []
     for rid in sorted({r.get("ruleset_id") for r in rules if isinstance(r, dict) and r.get("ruleset_id")}) if bypass else ():
