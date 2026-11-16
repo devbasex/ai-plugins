@@ -497,7 +497,7 @@ def test_helper_task_current_is_present_unless_the_same_uncarried_confirm(monkey
 
 def test_helper_task_current_present_reads_the_approval_and_asked_after_opened(monkeypatch, tmp_path):
     """提示の gate2 は承認資料のパスを添える。asked は最初の opened の行から後の、自分の名前の一時レーンの依頼と答え。
-    答えの中身は gate2 だけに載せ、ask は answered だけ（#3608 まで対象を比べられない）。確定で済んだ gate2 は settled。"""
+    答えの中身は gate2 と対象を持つ ask に載せる（#3608）。確定で済んだ gate2 は settled。"""
     d = prl.release_dir(tmp_path, "p1", 1, 1)
     d.mkdir(parents=True)
     (d / "present.json").write_text(json.dumps({"steps": [{"id": "present", "cwd": "/r", "cmd": "x --approval issues/a.md"}]}))
@@ -516,7 +516,7 @@ def test_helper_task_current_present_reads_the_approval_and_asked_after_opened(m
     assert got["gate2"].endswith("request-gate2 p1 1 1 --report /r/issues/a.md")
     assert got["asked"] == [
         {"id": "g", "kind": "gate2", "source": None, "target": None, "at": "t1", "answer": {"result": "answered", "choice": ["c"]}},
-        {"id": "b", "kind": "ask", "source": "s", "target": "t", "at": "t3", "answered": True},
+        {"id": "b", "kind": "ask", "source": "s", "target": "t", "at": "t3", "answer": {"result": "answered", "choice": ["消す"]}},
         {"id": "h", "kind": "gate2", "source": None, "target": None, "at": "t4", "settled": True},
     ]
     got, _ = _helper_task_with(monkeypatch, tmp_path, CONFIRMED_11, rows)

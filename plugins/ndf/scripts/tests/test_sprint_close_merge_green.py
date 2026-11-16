@@ -965,6 +965,14 @@ def test_merge_gate_judges_without_gh(repo, gh):
     assert gh.get().get("calls", []) == []
 
 
+def test_merge_gate_passes_a_pr_a_person_already_merged(repo, gh):
+    """#3652: 本番の宛先でも、人がリリース承認ゲートでマージした PR は止めない（続く merge が already_merged で通る）。"""
+    declare(repo, *CONSOLE)
+    gh.set(pr_seq={"5": [dict(to("main"), state="MERGED", body=MANUAL_BODY.format(box=" "))]})
+    code, out, err = call("merged-steps.py", ["merge-gate", "--pr", "5"], gh.env, repo)
+    assert code == 0 and out["metrics"]["merged"] is True, (out, err)
+
+
 def test_promote_creates_pr_and_merges_after_approval_without_cleanup(repo, gh, tmp_path):
     """I7: リリースの Pull Request を作り、承認が無ければ止め、承認があればマージして後片付けをしない。"""
     declare(repo, *TRYGROUP)

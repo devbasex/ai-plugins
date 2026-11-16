@@ -3,7 +3,7 @@
 レーンのリポジトリでレーンのスプリントを探し、次に始めるプラン（ステージの並びの先頭から見て、結果が完了でも承認ゲートでもない
 プランを持つ最初のステージの、そのプラン）を求め、承認の要らないプラン（`parallel_hold.needs_approval` が偽）があるかを返す。
 決められない（スプリントが見つからない・読めない・次に始めるプランが無い）ときは偽を返し、今と同じく起こさない（I5）。
-`parallel_answer.owner_next` だけが使う。ファイルを読むだけで書かない。
+`parallel_answer.owner_next` だけが使う（`sprint_manifest`・`stage_plans` は `parallel_design_gate` も使う）。ファイルを読むだけで書かない。
 """
 
 from __future__ import annotations
@@ -31,6 +31,24 @@ def find_sprint(repo: Path, issues: list) -> Optional[Path]:
     return max(hits)[1] if hits else None
 
 
+def sprint_manifest(sprint: Path) -> dict:
+    """スプリントの `sprint.json` の中身。読めない・辞書でなければ空（`parallel_design_gate` も使う）。"""
+    try:
+        got = json.loads((Path(sprint) / "sprint.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return got if isinstance(got, dict) else {}
+
+
+def stage_plans(sprint: Path, stage: dict) -> list[Path]:
+    """ステージの `plans` のパス。相対パスはスプリントのディレクトリの直下のファイル名として解く。
+
+    `supervise.py new sprint` はプランを `<--out>/<番号>-<鍵>.json` へ書き、目録には `--out` のままのパス（相対なら
+    打った場所から見たパス。例 `.ndf/sprint-s1/1-design-7.json`）を載せる。プランは常に目録と同じディレクトリにあるため、
+    相対パスへスプリントのパスを前置せず、ファイル名だけを使う。"""
+    return [Path(p) if Path(p).is_absolute() else Path(sprint) / Path(p).name for p in stage.get("plans") or []]
+
+
 def _result(plan: Path) -> str:
     """プランの報告の結果。報告が無ければ未着手（空）。"""
     from supervise_lib.paths import report_result, state_dir_of
@@ -46,12 +64,8 @@ def next_plans(sprint: Path) -> list[Path]:
     読めない・次に始めるプランが無ければ空。"""
     from supervise_lib.queue_fill import FINISHED
 
-    try:
-        stages = json.loads((Path(sprint) / "sprint.json").read_text(encoding="utf-8")).get("ステージ") or []
-    except (OSError, ValueError, AttributeError):
-        return []
-    for stage in stages:
-        plans = [Path(p) if Path(p).is_absolute() else Path(sprint) / p for p in (stage or {}).get("plans") or []]
+    for stage in sprint_manifest(sprint).get("ステージ") or []:
+        plans = stage_plans(sprint, stage or {})
         todo = [p for p in plans if _result(p) not in FINISHED]
         if todo:
             return todo

@@ -227,3 +227,27 @@ def test_an_answer_to_a_replaced_question_needs_a_merge_only_move(tmp_path, monk
     assert "取り込み以外" in got["unmatched"]
     monkeypatch.setattr(g1, "merge_only", lambda *a: True)
     assert g1.answer_prior(tmp_path, tmp_path, {**Q, "stamp": "b" * 40}, {"result": "rejected"}, "a" * 40, run=Gh("b" * 40)) == {}
+
+
+# ---- #3603: sprint_loop_gate から移した部品（入出力は今と同じ） ----
+
+
+def test_pr_numbers_report_pr_and_last_verdict_moved_unchanged(tmp_path, monkeypatch):
+    import project_mvv as pm
+    import sprint_loop_gate as slg
+
+    assert slg.pr_numbers is g1.pr_numbers and slg.report_pr is g1.report_pr and slg.last_verdict is g1.last_verdict
+    assert g1.pr_numbers(["https://github.com/o/r/pull/12", "#13", None]) == [12, 13] and g1.pr_numbers(7) == [7]
+    report = tmp_path / "report.md"
+    report.write_text("- 結果: 関門\n- Pull Request: https://github.com/o/r/pull/12\n")
+    assert g1.report_pr({"report": str(report)}) == 12 and g1.report_pr({"report": str(tmp_path / "none")}) is None
+    state = tmp_path / "s.json"
+    log = tmp_path / "mvv-gate.jsonl"
+    rows = [
+        {"gate": "design", "sprint": str(state), "pr": [12], "verdict": "a"},
+        {"gate": "design", "sprint": str(state), "pr": [13], "verdict": "b"},
+    ]
+    log.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    monkeypatch.setattr(pm, "gate_log_path", lambda: log)
+    assert g1.last_verdict(str(state), "design")["verdict"] == "b" and g1.last_verdict(str(state), "design", 12)["verdict"] == "a"
+    assert g1.last_verdict(str(tmp_path / "other"), "design") == {}

@@ -142,3 +142,31 @@ def test_an_answer_to_an_id_outside_the_list_warns(cli, capsys):
 def test_an_answer_to_an_id_in_the_list_has_no_warning(cli, capsys):
     code, res = answer(cli, capsys, "la-g501-a", "--choice", "はい")
     assert code == 0 and "warning" not in res["metrics"]
+
+
+def sprint_gate1(rid, state, pr=701, **kw):
+    """1 スプリントのレーンが request-ask で送る設計承認の依頼（#3603。判定の記録の id と課題・報告を持つ）。"""
+    extra = dict(sprint_state=str(state), issue=7, report="/r/report.md", reasons=["判定を読めない"], ledger_id="L1")
+    return gate1(rid, lane="ls", pr=pr, **extra, **kw)
+
+
+def test_a_sprint_lane_design_request_is_merged_on_approval(cli, capsys, tmp_path):
+    """受け入れ条件 2: 1 スプリントのレーンの設計承認の依頼への承認も、設計 PR をマージして metrics.merge を返す。"""
+    cli["items"] = [sprint_gate1("ls-g701-a", tmp_path / "s.json")]
+    code, out = answer(cli, capsys, "ls-g701-a", "--approved")
+    assert code == 0 and cli["merges"] == [(701, "a" * 40)] and out["metrics"]["merge"]["result"] == "merged"
+
+
+def test_sprint_lane_design_requests_get_the_mvv_mark_and_drops(tmp_path):
+    """受け入れ条件 6・7・8: 1 スプリントのレーンの依頼にも MVV 判定の印と、古い依頼の resend・settled が付く。"""
+    state = tmp_path / "s.json"
+    state.write_text("{}")
+    old = sprint_gate1("ls-g701-old", state, stamp="0" * 40, at="2026-11-04T00:00:00Z")
+    new = sprint_gate1("ls-g701-new", state)
+    red = sprint_gate1("ls-g702-x", state, pr=702, boundary=["C4 に当たる"])
+    other = {"kind": "ask", "id": "lc-q1", "lane": "lc"}
+    before = {q["id"]: q for q in pa.after_items([old, new, red, other], other)}
+    assert before["ls-g701-old"]["drop"] == "resend" and before["ls-g701-new"]["mvv"]["eligible"] is True
+    assert before["ls-g702-x"]["mvv"]["eligible"] is False and "レッドライン" in before["ls-g702-x"]["mvv"]["why"]
+    after = {q["id"]: q for q in pa.after_items([old, new], new)}
+    assert after["ls-g701-old"]["drop"] == "settled"
