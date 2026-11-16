@@ -50,6 +50,7 @@
 | `counts-json` | `counts.json` | result | tmp | `plugins/ndf/skills/backlog-refinement/scripts/upkeep.py` | — |
 | `decisions-jsonl` | `*.decisions.jsonl` | record | state-dir | `plugins/ndf/scripts/context-policy.py`<br>`plugins/ndf/scripts/hook.py`<br>`plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/skills/skill-stats/scripts/skill-stats.py` | — |
 | `deferred-json` | `deferred.json` | state | main | `plugins/ndf/scripts/parallel.py` | — |
+| `design-schema-json` | `design.schema.json` | report | worktree | `plugins/ndf/scripts/design-survey.py:cmd_schema` | — |
 | `drive-prx-report-md` | `drive-pr*-report.md` | report | tmp | `plugins/ndf/skills/cross-review/scripts/drive.py` | — |
 | `estimates-json` | `estimates.json` | result | tmp | `plugins/ndf/skills/backlog-refinement/scripts/upkeep.py` | — |
 | `handoff-mark-json` | `*.handoff.json` | state | state-dir | `plugins/ndf/scripts/context-policy.py`<br>`plugins/ndf/scripts/hook.py`<br>`plugins/ndf/scripts/parallel.py`<br>`plugins/ndf/scripts/sprint-state.py`<br>`plugins/ndf/skills/skill-stats/scripts/skill-stats.py` | — |

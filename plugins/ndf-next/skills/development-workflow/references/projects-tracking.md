@@ -1,7 +1,5 @@
 # 進行をボードへ記録する
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `projects-sync.sh`（M7）。行き先は[機能の対応表](../../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
-
 工程の進行を GitHub Projects のボードへ残す。セッションが変わっても、いまどの工程にいるか・
 どのモードで判定したか・対応する worktree と実装計画のファイルがどれかを引き継げる。
 
@@ -21,7 +19,7 @@
 ```json
 {
   "version": 1,
-  "owner": "devbasex",
+  "owner": "<owner>",
   "number": 1
 }
 ```
@@ -54,7 +52,7 @@ Pull Request が出る場合も、既定の `Linked pull requests` に並ぶた�
 名前を変えたい場合は設定で差し替える。
 
 ```json
-{ "version": 1, "owner": "devbasex", "number": 1,
+{ "version": 1, "owner": "<owner>", "number": 1,
   "fields": { "stage": "Stage", "plan": "Plan file" } }
 ```
 
@@ -145,9 +143,9 @@ bash "$SCRIPTS/projects-sync.sh" 186 plan "issues/issue-186.md"
 
 ## 対象のアイテムの選び方
 
-ボードは組織単位で持てる。`devbasex` のボードには ai-plugins / devbase / devbase-samples の
-issue が同居する。**issue 番号はリポジトリごとに独立している**ため、`ai-plugins#186` と
-`devbase#186` は別の課題でありながら同じ番号を持つ。番号だけで選ぶと、並び順によっては
+ボードは組織単位で持てる。組織 `<owner>` のボードには、その組織の複数のリポジトリ（`<repo-a>`・`<repo-b>` など）の
+issue が同居する。**issue 番号はリポジトリごとに独立している**ため、`<repo-a>#186` と
+`<repo-b>#186` は別の課題でありながら同じ番号を持つ。番号だけで選ぶと、並び順によっては
 別のリポジトリのアイテムの工程・モード・パスを書き換える。
 
 そこで `projects-sync.sh` は、番号に加えて**アイテムの所属リポジトリも照合する**。いま開いて
@@ -155,8 +153,8 @@ issue が同居する。**issue 番号はリポジトリごとに独立してい
 `.content.repository` と突き合わせる。どちらも `<owner>/<repo>` の形である。
 
 ```console
-$ gh project item-list 1 --owner devbasex --format json | jq -r '.items[0].content.repository'
-devbasex/ai-plugins
+$ gh project item-list 1 --owner <owner> --format json | jq -r '.items[0].content.repository'
+<owner>/<repo-a>
 ```
 
 一致するアイテムが無いときは、何も出力せず終了コード 0 で終わる。リポジトリ名を取得できない
@@ -202,7 +200,7 @@ NOTE: ボードのアイテムは 1200 件あり、取得の上限 1000 を超�
 **日本語のフィールド名の先頭 1 文字を壊す**（`進行` が `���行` になる）。値は壊れない。
 
 ```console
-$ gh project item-list 1 --owner devbasex --format json | jq '.items[0] | keys'
+$ gh project item-list 1 --owner <owner> --format json | jq '.items[0] | keys'
 [ "content", "id", "labels", "repository", "status", "title", "___ード", "___行" ]
 ```
 

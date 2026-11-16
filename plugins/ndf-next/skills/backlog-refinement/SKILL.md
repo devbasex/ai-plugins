@@ -10,8 +10,6 @@ allowed-tools:
 
 # 蓄積した課題を棚卸しする
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `ask.py`（P2）・`estimate.py`（P3）・`glossary.py`（M7）・`issue-items.py`（M6）・`projects-sync.sh`（M7）・`sprint-close.py`（M1）・`upkeep.py`（M6）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
-
 **変更をまたいで溜まった課題そのものを見直す。** 起票はその場で行い、その変更から出た
 取りこぼしは振り返りが拾うが、**一覧の全体を現状に合わせる手順**はどちらも持たない。
 

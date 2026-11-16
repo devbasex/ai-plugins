@@ -26,7 +26,7 @@ ndf-next（`plugins/ndf-next/`。今の `plugins/ndf/` と入れ替わる作り�
 | 結果の `items`・`metrics` の形（手書き） | `contracts/schemas/io/project.result.schema.json`・`statusline.result.schema.json`・`materials.result.schema.json`・`relay.result.schema.json` |
 | 結果の契約と終了コードの区分 | [`contracts/schemas/result.schema.json`](../../plugins/ndf-next/contracts/schemas/result.schema.json) と [`docs/contracts/exit-codes.md`](../../plugins/ndf-next/docs/contracts/exit-codes.md) |
 | `$SCRIPTS` の決め方の正本 | [ndf-next の `development-workflow/references/scripts-lookup.md`](../../plugins/ndf-next/skills/development-workflow/references/scripts-lookup.md) |
-| 機能の対応表の列の意味（`to`・`not_built`・`unowned`・`now`） | [`src/ndf/parity/README.md`](../../plugins/ndf-next/src/ndf/parity/README.md) |
+| 機能の対応表の列の意味（`to`・`not_built`・`unowned`・`now`） | [`scripts/ndf-next-parity/README.md`](../../scripts/ndf-next-parity/README.md) |
 | 宣言と入出力の規約・`ndf check` の規則 | [ndf-next-declarations-and-io-contracts.md](ndf-next-declarations-and-io-contracts.md) |
 
 パスは、ことわりが無い限り `plugins/ndf-next/` からの相対である。
@@ -40,7 +40,7 @@ ndf-next（`plugins/ndf-next/`。今の `plugins/ndf/` と入れ替わる作り�
 
 | 上流（正本） | 下流（合わせる側） | 関係 | 何を合わせるか |
 | --- | --- | --- | --- |
-| 呼び出しの契約（`bin/ndf` の副命令の表・規約のページ・結果のスキーマ） | 作り直しの計画（機能の対応表・子の表・試走の記録） | 公表された言語 | 判定（`ndf.parity.trial.probe`）は、本文をこの形のとおりに読み、旧い名前が残るかで対応表の行を判定する。どちらも相手の内部を読まない |
+| 呼び出しの契約（`bin/ndf` の副命令の表・規約のページ・結果のスキーマ） | 作り直しの計画（機能の対応表・子の表・試走の記録） | 公表された言語 | 判定（`parity.trial.probe`）は、本文をこの形のとおりに読み、旧い名前が残るかで対応表の行を判定する。どちらも相手の内部を読まない |
 | 結果の契約（`ndf.contracts`） | 足した副命令（`project`・`statusline`・`materials`・`relay` の足した下位の命令） | 順応者 | 結果 JSON の外枠（`tool`・`status`・`summary`・`items`・`metrics`）・止まった理由の種類・終了コードの表 |
 | 旧いプラグインの状態の置き場 | 足した副命令 | 順応者 | 入れ替えの前は旧い実装と同じ置き場・同じ形・同じ排他で読み書きする（「旧い実装と並ぶ間の状態」） |
 
@@ -56,7 +56,7 @@ ndf-next（`plugins/ndf-next/`。今の `plugins/ndf/` と入れ替わる作り�
 | 機能の対応表の行 | 行の `to` に書いた子。`to` を持たない `not_built` の行は起票した課題（#3569） | 対応表の行 | 行き先の子・作らない理由 |
 | 機能の対応表の試走の結果 | 判定（`probe --write`）だけ | 対応表の行の `trial` | 試走の結果・理由・記録のファイル |
 | 子の表の行 | オーガナイザー | 子の表（`src/ndf/checks/children.json`） | 記号・番号・パッケージ・依存・順番・レーン |
-| 試走の記録 | 試走をした worker | `src/ndf/parity/trial/<日付>.json` | 日付・起動の版・通した行 |
+| 試走の記録 | 試走をした worker | `scripts/ndf-next-parity/parity/trial/<日付>.json` | 日付・起動の版・通した行 |
 
 ### 常に成り立つ条件
 
@@ -272,11 +272,11 @@ symlink なら参照先へ書く。表示の本体（`domains/statusline/statusl
 | 置き場 | 内容 |
 | --- | --- |
 | `src/ndf/cli.py` の `COMMANDS` | `"project": "ndf.domains.project.cli"`・`"statusline": "ndf.domains.statusline.cli"`・`"materials": "ndf.domains.materials.cli"` |
-| `src/ndf/parity/features.json` | 行 `entrypoint:scripts/project-decl.py`・`statusline-switch.sh`・`statusline.sh`・`mode-materials.py` の `to` は S1e。`places` の `S1e` は `src/ndf/domains/project/`・`statusline/`・`materials/`。`supervise.py`・`test-run.py`・`context-policy.py`・`relay.py`・`stage-check.sh` の行は副命令を持つ子（C2・M3b・P1a）のまま |
+| `scripts/ndf-next-parity/parity/features.json` | 行 `entrypoint:scripts/project-decl.py`・`statusline-switch.sh`・`statusline.sh`・`mode-materials.py` の `to` は S1e。`places` の `S1e` は `src/ndf/domains/project/`・`statusline/`・`materials/`。`supervise.py`・`test-run.py`・`context-policy.py`・`relay.py`・`stage-check.sh` の行は副命令を持つ子（C2・M3b・P1a）のまま |
 | `src/ndf/checks/children.json` | 子 S1e（#3569）: パッケージ `ndf.domains.project`・`ndf.domains.statusline`・`ndf.domains.materials` と `ndf.domains.relay` の足したモジュール（`account_*`・`cli`・`cli_account`・`cli_context`・`context_*`）、順番 8、レーン lr-t2。T2 の `needs` に S1e が入る |
 | `contracts/limits.json` | `project.measure`（120 秒）・`project.git`（60 秒）・`statusline.lock`（10 秒）。アカウントの排他と認証は既存の `claude-accounts.lock`・`relay.claude-auth`・`relay.login-url` を使う |
 | `contracts/domains/env.json` | 読む環境変数 `NDF_ACCOUNTS_DIR`・`NDF_SHARED_CONFIG_DIR`・`NDF_CONTEXT_DIR` の行 |
-| `src/ndf/parity/trial/2026-11-16.json` | T2 #3411 の 2 回目の試走の記録。手順 0 の `$SCRIPTS` は空のままで、宣言の判定・測定・書き出しは `ndf project` で通った |
+| `scripts/ndf-next-parity/parity/trial/2026-11-16.json` | T2 #3411 の 2 回目の試走の記録。手順 0 の `$SCRIPTS` は空のままで、宣言の判定・測定・書き出しは `ndf project` で通った |
 
 ## セキュリティ
 
@@ -287,7 +287,7 @@ symlink なら参照先へ書く。表示の本体（`domains/statusline/statusl
 
 ## テスト観点
 
-- `python -m ndf.parity.trial.probe` の判定で、10 本の行と、それを呼ぶ `skill:install-wrapper`・`skill:statusline`・
+- `python -m parity.trial.probe` の判定で、10 本の行と、それを呼ぶ `skill:install-wrapper`・`skill:statusline`・
   `agent:supervisor`・`agent:supervisor-waits` が `failed` でなく、`failed` の行の理由に 10 本の名前が出ないこと
 - 10 本の行のそれぞれが `to` か `not_built` の一方だけを持ち、足した副命令の `ndf <副命令> --help` が終了コード 0 で終わること
 - `ndf check` の規則 spec-io・spec-skill・spec-docs・child-deps が通ること

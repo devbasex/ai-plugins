@@ -9,8 +9,6 @@ allowed-tools:
 
 # マージ後クリーンアップコマンド
 
-> 次のスクリプトの副命令は新しいエントリポイント `bin/ndf` にまだ無いため、今の名前のまま残した: `merged-steps.py`（M8）・`projects-sync.sh`（M7）・`release-steps.py`（M2）。行き先は[機能の対応表](../../src/ndf/parity/features.json)の行で、入れ替えの前の試走（T2 #3411）が行ごとに確かめる。
-
 PR マージ後の後始末をまとめて実行する。対象 PR のブランチ削除に加えて、残っているマージ済みブランチの整理とベースブランチの取り込みもこの Skill で扱う。
 
 ## 用途の切り分け（最初に判定する）
@@ -155,10 +153,12 @@ python3 "$SCRIPTS/merged-steps.py" merge-when-green <PR番号> --root <メイン
   いたときだけ `--recheck` 秒後に 1 度確かめ直す。rollup が空のうちはマージせず、`--no-checks-after`
   秒を過ぎても空なら CI の無いリポジトリとしてマージする（`items` に `no_checks` が載る）
 - 失敗したチェックが 1 つでもあれば、マージせずに `stopped`（1）で止まる。`items[].name` が失敗したチェック
-- 通れば `gh pr merge --admin` でマージし、続けて上の `cleanup` と同じ後片付けを行う。`--no-admin` なら `--admin` を付けず
-  （ruleset の迂回を使わない）、マージの行に `admin: false` が残る。必須のチェックやレビューが足りなければ GitHub が拒み、
-  `stopped`（1）で止まる。CD のある場合の本番チャネルへのマージ（`release-steps.py release --channel prod`・`promote`）と
-  開発版の workflow が付ける（`release` の Skill の「リリースの場合」）。`promote --gate-approved` は CD のある場合、マージの前に
+- 通ればマージし、続けて上の `cleanup` と同じ後片付けを行う。**管理者の迂回（`--admin`）は使わない側を既定にする。** 迂回を
+  使うのは、`.ndf/project.json` の `production_merge.admin` で迂回を宣言し、かつ本番ブランチの ruleset が承認を 1 以上求めると
+  読めるときの、本番ブランチ宛ての PR だけである（下の cd-admin）。どちらかが欠ければ `--no-admin` を付けて打つ（このスクリプトは
+  付けないと `gh pr merge --admin` で打つ）。`--no-admin` ならマージの行に `admin: false` が残り、必須のチェックやレビューが
+  足りなければ GitHub が拒んで `stopped`（1）で止まる。CD のある場合の本番チャネルへのマージ（`release-steps.py release
+  --channel prod`・`promote`）と開発版の workflow も `--no-admin` を付ける（`release` の Skill の「リリースの場合」）。`promote --gate-approved` は CD のある場合、マージの前に
   承認したコミットの証跡をリリースの Pull Request へ書き（cd-no-review）か承認のレビューのコミットと先端を照らし（cd-review。
   違えば `gate`（10））、自分で `--no-admin` を付けてマージする。迂回の宣言のある場合（cd-admin）は、`--gate-approved user` の
   ときだけ証跡を書いて迂回でマージし、迂回の記録を置く（`--gate-approved mvv` なら証跡を書かずに `gate`（10））。マージの行には

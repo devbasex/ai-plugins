@@ -7,10 +7,17 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+from typing import Any
+
 import pytest
 
+from ndf.adapters import ci
 from ndf.contracts import causes
-from ndf.domains.crossrefactor import final_gate_decide, probe_decide
+from ndf.domains.crossrefactor import final_gate, final_gate_decide, probe_decide
+
+from failed_hub import FakeHub, art, xml, zip_of
 
 
 def test_fix_that_changes_a_file_outside_the_plan_is_not_taken():
@@ -74,3 +81,68 @@ def test_probe_budget_keeps_the_floor_when_the_baseline_used_almost_everything()
 
 def test_probe_floor_comes_from_the_limits_declaration():
     assert probe_decide.probe_floor() == 120
+
+
+# --- 最後の確かめが落ちたテストを読む（#3616） ---
+
+FAILED = ci.Reading([ci.Check("pytest", "done", "failure", 1)], [], [], [], [], [], True)
+PASSED = ci.Reading([], [], [], [], [], [], True)
+
+
+class _Git:
+    """最後の確かめが読む git（直しのコミットは無い）。`cwd` は設定ファイルを置いた作業場所。"""
+
+    def __init__(self, cwd: Path) -> None:
+        self.cwd = cwd
+
+    def rev_parse(self, ref: str) -> str:
+        return "a" * 40
+
+    def run(self, *args: str) -> str:
+        return ""
+
+
+def _artifact_hub(**kw: Any) -> FakeHub:
+    """ジョブ 1 は実行 9（pytest.yml）で、成果物 junit-0 に落ちたテストが 1 件ある偽の GitHub。"""
+    return _NoLog(
+        {1: 9},
+        {9: ".github/workflows/pytest.yml"},
+        artifacts={9: [art(31)]},
+        zips={31: zip_of(xml(("tests/test_a.py", "t")))},
+        **kw,
+    )
+
+
+class _NoLog(FakeHub):
+    def job_log(self, job_id: int) -> str:
+        raise AssertionError("成果物から読めたのにログを読んだ")
+
+
+def test_final_gate_passes_the_work_declaration_to_the_failed_test_assembly(tmp_path, monkeypatch):
+    decl = {"test": {"ci": {"junit_artifacts": "junit-*"}, "suites": [{"name": "pytest", "runner": "pytest", "command": "pytest"}]}}
+    (tmp_path / ".ndf").mkdir()
+    (tmp_path / ".ndf" / "project.json").write_text(json.dumps(decl), encoding="utf-8")
+    monkeypatch.setattr(final_gate, "send", lambda g, branch: "b" * 40)
+    monkeypatch.setattr(final_gate, "ensure_mergeable", lambda hub, pr, sleep: None)
+    results = [ci.WatchResult(FAILED, 1, 0.0, 0.0), ci.WatchResult(PASSED, 1, 0.0, 0.0)]
+    seen: list[Any] = []
+
+    def failed_tests(hub: Any, watched: ci.WatchResult, source: ci.FailedTestSource) -> list[str]:
+        seen.append(source)
+        # 追跡するファイルは git の無い作業場所では空なので、照らす先を足して既定の組み立てへ渡す
+        return final_gate._failed_tests(
+            hub, watched, ci.FailedTestSource(source.junit_artifacts, source.suites, frozenset({"tests/test_a.py"}))
+        )
+
+    fixed: list[Any] = []
+    port = final_gate.CiPort(lambda hub, sha, cfg: results.pop(0), failed_tests)
+    cfg = final_gate.GateConfig(7, "b", ("pytest",), ("pytest",), ("tests",), 1)
+    got = final_gate.run_gate(_Git(tmp_path), _artifact_hub(), cfg, lambda failed, n: fixed.append(failed) or True, lambda s: None, port)  # type: ignore[arg-type]
+    assert got["status"] == "passed"
+    assert seen[0].junit_artifacts == "junit-*" and [s["name"] for s in seen[0].suites] == ["pytest"]
+    assert fixed == [["tests/test_a.py::t"]]
+
+
+def test_final_gate_default_reader_returns_empty_when_nothing_is_read():
+    watched = ci.WatchResult(FAILED, 1, 0.0, 0.0)
+    assert final_gate._failed_tests(_artifact_hub(broken_jobs=frozenset({1})), watched, ci.FailedTestSource()) == []  # type: ignore[arg-type]

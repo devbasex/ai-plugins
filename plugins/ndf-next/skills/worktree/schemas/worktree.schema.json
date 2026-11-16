@@ -20,6 +20,12 @@
         1
       ]
     },
+    "remote": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[^-]",
+      "description": "取得・照合・差分の基準・送信に使う git のリモートの名前。未指定なら既定の名前（既定はプラグインの contracts/schemas/declarations/worktree.schema.json の remote の default の 1 か所にある）を使う。- で始まる名前は受けない"
+    },
     "base_branch": {
       "type": "string",
       "description": "開発の起点ブランチ。worktreeの分岐元になり、follow_branch が true のときはメインディレクトリの追従先にもなる。未指定なら origin の HEAD が指すブランチを使う。指定した名前が origin にもローカルにも無いときは既定へ落とさず解決に失敗する"

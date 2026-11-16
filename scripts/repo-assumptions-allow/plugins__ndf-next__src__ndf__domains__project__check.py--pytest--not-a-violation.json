@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf-next/src/ndf/domains/project/check.py",
+  "name": "pytest",
+  "kind": "not-a-violation",
+  "reason": "解析が探す設定ファイルの表の 1 行（言語ごとの候補の 1 つ）",
+  "count": 1
+}
