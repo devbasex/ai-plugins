@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import re
 import shlex
 import sys
 from collections.abc import Callable
@@ -20,7 +19,7 @@ import revise_note
 from state_get import NOT_DONE
 import step_result
 from design_pr_merge import MERGED_RESULTS  # 正本は design_pr_merge。sprint_loop・sprint_loop_select はここから読む
-from gate1_requests import carried_over, design_head, lane_unmatched
+from gate1_requests import carried_over, design_head, lane_unmatched, last_verdict, pr_numbers, report_pr
 from lap_cost import lap_cost
 from lap_close import closed_versions, copy_state_gates
 from sprint_loop_argv import redo_sprint_argv, stage_plan
@@ -163,42 +162,6 @@ def plan_info(plan: str) -> dict:
         return legacy_values.current_plan(json.loads(Path(plan).read_text(encoding="utf-8")))
     except (OSError, ValueError):
         return {}
-
-
-def pr_numbers(value) -> list[int]:
-    """判定の記録の `pr`（mvv-gate.py の `--pr` の並び。古い記録や手で渡した値は 1 つの数）を番号の並びにする。"""
-    items = value if isinstance(value, list) else [value]
-    out = []
-    for x in items:
-        m = re.search(r"(\d+)\s*$", str(x if x is not None else ""))
-        if m:
-            out.append(int(m.group(1)))
-    return out
-
-
-def report_pr(item: dict) -> int | None:
-    """done の項目の報告にある計画の Pull Request の番号（設計のプランなら設計 PR）。読めなければ None。"""
-    try:
-        text = Path(item.get("report") or "").read_text(encoding="utf-8")
-    except OSError:
-        return None
-    m = re.search(r"^- Pull Request: (.*)$", text, re.M)
-    nums = pr_numbers(m.group(1).strip()) if m else []
-    return nums[0] if nums else None
-
-
-def last_verdict(state_path: str, gate: str, pr: int | None = None) -> dict:
-    """MVV 判定の記録（状態の置き場の jsonl）の、このループの 1 回の状態の最後の判定の行（承認ゲートの種類は design / release）。pr を渡せば、その PR を判定した行に
-    絞る（並行の設計で別の課題の判定を写さない）。無ければ空。"""
-    try:
-        rows = jsonio.read_jsonl(pm.gate_log_path(), missing=[], skip_broken=True)
-    except jsonio.JsonReadError:
-        rows = []
-    sp = str(Path(state_path).resolve())
-    hits = [r for r in rows if r.get("gate") == gate and str(Path(r.get("sprint") or "").resolve()) == sp]
-    if pr is not None:
-        hits = [r for r in hits if pr in pr_numbers(r.get("pr"))]
-    return hits[-1] if hits else {}
 
 
 def gate_copy(name: str, row: dict) -> dict:

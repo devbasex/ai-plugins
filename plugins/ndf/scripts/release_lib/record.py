@@ -46,17 +46,25 @@ def cd_fields(cd) -> dict:
     return {"cd_line": dist_record.cd_result_line(cd.value, cd.revision, " ".join(x for x in (urls, cd.reason) if x)), "failed": failed}
 
 
-def body_of(root, plugin, ver, tag, prev_tag, prs, cd=None, by_cd=False):
-    """リリース記録の本文を返す。`by_cd` なら公開物は CD が作るため、タグの時刻を事実として書かない。"""
-    prev = prev_tag[len(f"{plugin}--v") :] if prev_tag else None
-    at = None if by_cd else tag_time_jst(root, tag)
-    done = f"{tag} の公開は CD が担う" if by_cd else f"{at + ' に ' if at else ''}{tag} を出した"
+def body_of(root, plugin, ver, tag, prev_tag, prs, cd=None, by_cd=False, tagged=True, template=None, prev=None):
+    """リリース記録の本文を返す。`by_cd` なら公開物は CD が作るため、タグの時刻を事実として書かない。
+    `tagged` が偽（宣言の release.tag が null）ならタグを作っていないため、タグを事実として書かない。`template` はタグの形（None なら既定の形）。
+    `prev` は直前の版（タグを作らない宣言で版から決めたもの）。無ければ prev_tag の版。"""
+    from release_lib import names
+
+    prev = prev or (names.tag_version(prev_tag, plugin, template or names.DEFAULT_TAG) if prev_tag else None)
+    if not tagged:
+        done, version_note = f"v{ver} を出した（宣言がタグを作らない）", f"版 {ver}（宣言がタグを作らない）"
+    else:
+        at = None if by_cd else tag_time_jst(root, tag)
+        done = f"{tag} の公開は CD が担う" if by_cd else f"{at + ' に ' if at else ''}{tag} を出した"
+        version_note = f"タグ {tag}。直前はタグ {prev_tag}" if prev_tag else f"タグ {tag}。直前の正式版のタグは無い"
     return dist_record.format_record(
         prev,
         ver,
         prs,
         stage_note=f"リリース承認ゲートの承認の後、{done}",
-        version_note=f"タグ {tag}。直前はタグ {prev_tag}" if prev_tag else f"タグ {tag}。直前の正式版のタグは無い",
+        version_note=version_note,
         **cd_fields(cd),
     )
 

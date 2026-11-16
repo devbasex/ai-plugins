@@ -33,4 +33,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GIT_COMMITTER_NAME: github-actions[bot]
           GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
-        run: python3 plugins/ndf/scripts/release-steps.py publish --root . --revision "$GITHUB_SHA"
+        run: python3 plugins/ndf/scripts/release-steps.py publish --root . --plugin ndf --revision "$GITHUB_SHA"

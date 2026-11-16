@@ -21,6 +21,7 @@ PY = sys.executable
 sys.path.insert(0, str(SCRIPTS))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from supervise_lib import queue  # noqa: E402
+import strategy_fixture  # noqa: E402
 from test_supervise_pace_auto import load, sprint_state, steps_of  # noqa: E402
 
 SEC = {"enabled": True, "modes": ["light", "standard", "legacy-refactor"], "verify": "echo stack-ok"}
@@ -34,13 +35,12 @@ pytestmark = pytest.mark.usefixtures("issue_bodies")
 
 
 def make_repo(tmp_path: Path, rows, verify: str = "echo stack-ok") -> Path:
-    """起点も本番チャネルも main の git リポジトリ（carmo-cdk の形）。rows が ... なら delivery を書かない。"""
+    """起点も本番チャネルも main の git リポジトリ（carmo-cdk の形）。rows が ... なら届け先の行を書かない。"""
     repo = tmp_path / "repo"
     (repo / ".ndf").mkdir(parents=True)
     subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
-    (repo / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "base_branch": "main", "production_branch": "main"}))
+    strategy_fixture.declare(repo, "main", deliveries=None if rows is ... else rows)
     (repo / ".ndf" / "supervise.json").write_text(json.dumps({"test": {"command": "true"}}))
-    (repo / ".ndf" / "project.json").write_text(json.dumps({} if rows is ... else {"delivery": rows}))
     sec = {**SEC, "verify": verify}
     (repo / ".ndf" / "pace.json").write_text(json.dumps({"version": 1, "auto": sec, "fast": sec}))
     return repo
@@ -216,15 +216,15 @@ def test_deploy_facts_catches_up_when_origin_moved_ahead(tmp_path):
 
 
 def test_the_model_accepts_production_and_keeps_old_declarations():
-    """AC7: production は任意の真偽値。書いていない宣言（ai-plugins の .ndf/project.json）も今と同じく通る。"""
+    """AC7: 届け先の行の production は任意の真偽値（ブランチ戦略の宣言のスキーマ）。書いていない行も通る。"""
     sys.path.insert(0, str(SCRIPTS / "lib"))
-    import schema
-    from project_lib import model
+    import branch_strategy
 
-    model.validate_item("delivery", [STG, PRD])
-    model.validate_decl(json.loads((SCRIPTS.parents[2] / ".ndf" / "project.json").read_text()))
-    with pytest.raises(schema.ShapeError):
-        model.validate_item("delivery", [{**PRD, "production": "yes"}])
+    sec = strategy_fixture.section("web-trunk")
+    sec["release"]["deliveries"] = [STG, PRD, AUTO_MAIN]
+    assert branch_strategy.validate_section(sec) == []
+    sec["release"]["deliveries"] = [{**PRD, "production": "yes"}]
+    assert branch_strategy.validate_section(sec)
 
 
 @pytest.mark.parametrize("form", [True, False])
@@ -234,11 +234,35 @@ def test_separate_branches_keep_their_stages(tmp_path, form):
 
     repo = pa.make_repo(tmp_path, {"auto": pa.AUTO}, form=form)
     if not form:
-        rows = [{**STG, "branch": "develop"}, PRD]
-        (repo / ".ndf" / "project.json").write_text(json.dumps({"delivery": rows}))
+        strategy_fixture.declare(repo, "develop", "main", deliveries=[{**STG, "branch": "develop"}, PRD])
     p, out = pa.new_sprint(tmp_path, repo, pa.sprint_state(tmp_path, "auto"))
     assert p.returncode == 0, p.stdout + p.stderr
     manifest = load(out / "sprint.json")
     names = [w["name"] for w in manifest["ステージ"]]
     assert names == (pa.STAGES if form else [*pa.STAGES[:6], "リリース"]), names
     assert all("production" not in r for r in manifest["リリースの経路"]) is form
+
+
+@pytest.mark.parametrize(
+    "kind, verify, auto, fast",
+    [
+        ("plugin", None, True, True),
+        ("web-trunk", {"command": "x"}, True, False),
+        ("web-trunk", None, False, False),
+        ("docs", None, False, False),
+    ],
+)
+def test_trial_before_approval_decides_auto_and_fast(monkeypatch, kind, verify, auto, fast):
+    """#3672 の決定 15: 開発版のチャネルの無い宣言では、承認前の試用（承認の対象と verify）で auto・fast を決める。"""
+    import delivery
+    from types import SimpleNamespace
+
+    import branch_strategy as bs
+    from supervise_lib import sprint_routes
+
+    sec = {**strategy_fixture.section(kind), "verify": verify}
+    monkeypatch.setattr(sprint_routes, "dev_channel_of", lambda a: delivery.DevChannel(None, "開発版のチャネルが無い（試験）"))
+    monkeypatch.setattr(sprint_routes, "sprint_flow", lambda a: bs.Strategy(sec))
+    a = SimpleNamespace()
+    assert (sprint_routes.trial_refusal(a, "auto") is None) is auto
+    assert (sprint_routes.trial_refusal(a, "fast") is None) is fast

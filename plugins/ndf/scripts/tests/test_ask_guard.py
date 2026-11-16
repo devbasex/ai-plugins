@@ -403,3 +403,100 @@ def test_a_denied_question_is_not_sent(proj, monkeypatch, forwarded):
     lane_plan(proj)
     monkeypatch.setenv("NDF_RELAY_NAME", "la")
     assert is_deny(decide(proj, None)) and forwarded["calls"] == []
+
+
+# ---------------------------------------------------------------- #3603: 結果の種類ごとの拒否の理由と、上限の秒を過ぎたときの復元
+
+
+def _forward_with(monkeypatch, metrics=None, raise_timeout=False, before=None):
+    from hook_lib import ask_guard
+
+    box = {"calls": []}
+
+    def fake(main, plan, lane, payload, timeout=None):
+        box["calls"].append(payload)
+        if before:
+            before(payload)
+        if raise_timeout:
+            raise subprocess.TimeoutExpired("parallel.py", timeout or 0)
+        return 0, {"metrics": {"id": f"{lane}-q{payload['ledger_id']}", **(metrics or {})}}
+
+    monkeypatch.setattr(ask_guard, "run_request_ask", fake)
+    return box
+
+
+def test_a_design_approval_request_is_held_with_the_design_answer_step(proj, monkeypatch):
+    """受け入れ条件 1・3: 設計承認の依頼（gate1）は design-answer の 1 行と依頼の id を引継ぎ文書へ書いて止まる手順を返す。"""
+    lane_plan(proj)
+    monkeypatch.setenv("NDF_RELAY_NAME", "la")
+    _forward_with(monkeypatch, {"kind": "gate1", "id": "la-g12-0123456789ab", "sprint_state": "/w/state.json"})
+    out = json.dumps(decide(proj, "ndf-gate:1"), ensure_ascii=False)
+    assert "design-answer p1 la-g12-0123456789ab --state /w/state.json" in out and "設計承認の依頼" in out
+
+
+def test_the_design_answer_step_keeps_a_path_with_spaces_as_one_argument():
+    """空白を含むスプリント状態のパスも、再開コマンドの 1 つの引数のまま返す。"""
+    import shlex
+
+    from hook_lib import ask_guard
+
+    text = ask_guard.design_hold_text("la-g12-0123456789ab", "p1", "/workspace/My Project/.ndf/sprint-s1/state.json")
+    line = next(s for s in text.splitlines() if "design-answer" in s)
+    words = shlex.split(line[line.index("python3") : line.index(" と依頼")])
+    assert words[words.index("--state") + 1] == "/workspace/My Project/.ndf/sprint-s1/state.json"
+
+
+def test_a_reused_answer_is_returned_in_the_deny(proj, monkeypatch):
+    """受け入れ条件 13: 同じ問いの前の答えは、その答えを載せた deny で返す（人へ問い直さない）。"""
+    lane_plan(proj)
+    monkeypatch.setenv("NDF_RELAY_NAME", "la")
+    _forward_with(monkeypatch, {"kind": "reused", "id": "la-qold", "answer": {"result": "answered", "choice": ["消す"]}})
+    out = decide(proj, "ndf-ask:cost")
+    text = json.dumps(out, ensure_ascii=False)
+    assert is_deny(out) and "la-qold" in text and "消す" in text and "design-answer" not in text
+
+
+def test_a_reused_request_without_answer_is_held_by_the_prior_id(proj, monkeypatch):
+    """受け入れ条件 15: 答え待ちの同じ問いは、前の依頼の id で今の保留の手順を返す。"""
+    lane_plan(proj)
+    monkeypatch.setenv("NDF_RELAY_NAME", "la")
+    _forward_with(monkeypatch, {"kind": "reused", "id": "la-qold"})
+    text = json.dumps(decide(proj, "ndf-ask:cost"), ensure_ascii=False)
+    assert "（依頼 la-qold）" in text and "オーガナイザーへ送った" in text
+
+
+def test_the_payload_carries_the_deadline(proj, monkeypatch):
+    """I10: request-ask へ hook の上限の秒が尽きる時刻（UNIX 時刻の秒）を渡す。"""
+    import time
+
+    lane_plan(proj)
+    monkeypatch.setenv("NDF_RELAY_NAME", "la")
+    box = _forward_with(monkeypatch)
+    decide(proj, "ndf-ask:cost")
+    assert time.time() < box["calls"][0]["deadline_at"] <= time.time() + 10
+
+
+def test_a_timeout_after_writing_holds_by_the_ledger_row(proj, monkeypatch):
+    """I10: 台帳へ書いた後に上限の秒を過ぎたら、判定の記録の id の行の種類の deny を返す（問いを人へも通さない）。"""
+    import parallel_ledger as plg
+
+    lane_plan(proj)
+    monkeypatch.setenv("NDF_RELAY_NAME", "la")
+
+    def write(payload):
+        lid = payload["ledger_id"]
+        plg.append_ledger_row(proj, "p1", "opened", "opened:1", None)
+        msg = {"kind": "gate1", "id": "la-g12-0123456789ab", "lane": "la", "sprint_state": "/w/s.json", "ledger_id": lid}
+        plg.append_ledger_row(proj, "p1", "gate1", "gate1:la-g12-0123456789ab", msg)
+
+    _forward_with(monkeypatch, raise_timeout=True, before=write)
+    out = decide(proj, "ndf-gate:1")
+    assert is_deny(out) and "design-answer p1 la-g12-0123456789ab" in json.dumps(out, ensure_ascii=False)
+
+
+def test_a_timeout_before_writing_passes_the_question(proj, monkeypatch):
+    """受け入れ条件 12: 台帳へ書く前に上限の秒を過ぎたら、今どおり問いを通す。"""
+    lane_plan(proj)
+    monkeypatch.setenv("NDF_RELAY_NAME", "la")
+    _forward_with(monkeypatch, raise_timeout=True)
+    assert not is_deny(decide(proj, "ndf-gate:1"))

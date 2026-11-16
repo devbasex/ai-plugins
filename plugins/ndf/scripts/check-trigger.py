@@ -23,8 +23,8 @@
 | review | --review を渡し、前回のレビューからの範囲に PR が 1 本以上ある（開発版ごとの実装レビュー。ほかのトリガーは見ない） |
 
 **範囲の起点（前回の検査）は、origin の `check-done/review`（`--review`）か `check-done/check`（それ以外）→
-手元の記録 → `--since` → 正式版のタグ → 起点のブランチとの分岐点の順に決める。** `record` が結果 merged / no_change の
-とき `to` をこのブランチへ送る（構造改善を含む検査は両方、`--review` は `check-done/review` だけ）。落ちた検査は
+手元の記録 → `--since` → 正式版のタグ（タグを作らない宣言は前の版上げ）→ 起点のブランチとの分岐点の順に決める。** `record` が
+結果 merged / no_change のとき `to` をこのブランチへ送る（構造改善を含む検査は両方、`--review` は `check-done/review` だけ）。落ちた検査は
 送らないため、次の回は同じ起点から数え直す。ブランチは origin にあるため、手元の記録が消えても、別のマシンから
 続けても、検査を通らずにデプロイされた変更を範囲から落とさない。初めて使うリポジトリでは、どこまで見たかを
 `--since <ref>` で渡す。
@@ -82,7 +82,10 @@ import gh_rest  # noqa: E402
 import merged_range  # noqa: E402
 import jsonio  # noqa: E402
 import proc  # noqa: E402
+import release_prev  # noqa: E402
+import release_tag  # noqa: E402
 import repo  # noqa: E402
+import branch_strategy  # noqa: E402
 
 TOOL = "check-trigger"
 SKIP_BRANCHES = ("release/", "check/")
@@ -162,13 +165,6 @@ def load_decl(root: Path) -> dict:
         raise Stop(str(e))
 
 
-def optional_decl(root: Path, name: str) -> dict:
-    try:
-        return json_or_stop(root / ".ndf" / name, name)
-    except Stop:
-        return {}
-
-
 def area_of(path: str, decl: dict) -> tuple[str, bool]:
     """(領域の名前, 共通層か)。どの領域にも当たらなければ、ディレクトリの先頭 3 階層を名前にする。"""
     for a in decl["areas"]:
@@ -237,21 +233,20 @@ def append_event(root: Path, row: dict) -> None:
 
 
 def range_base(root: Path) -> str:
-    """起点のブランチ: `.ndf/worktree.json` の base_branch、無ければ origin の HEAD。"""
-    base = repo.declared_base(root)
-    if base:
-        return base
-    head = git_or_stop(root, "symbolic-ref", "--short", "refs/remotes/origin/HEAD", check=False)
-    if head.startswith("origin/"):
-        return head[len("origin/") :]
-    raise Stop("起点のブランチが分からない（.ndf/worktree.json の base_branch）")
+    """起点のブランチ: ブランチ戦略の宣言の `branches.base`。宣言を読めなければ止まる（既定値へ倒さない）。"""
+    try:
+        return repo.base_branch(root)
+    except branch_strategy.StrategyError as e:
+        raise Stop(f"起点のブランチが分からない: {e.reason}") from e
 
 
-def release_tag_prefix(root: Path) -> str | None:
-    """リリースの設定から正式版のタグの接頭辞を決める。package-plugin は `<plugin>--v`（照合の `*` は呼び手が足す）。"""
-    rel = optional_decl(root, "supervise.json").get("release") or {}
+def release_tag_shape(root: Path) -> tuple[str, str] | None:
+    """ブランチ戦略の宣言の `release` から正式版のタグの (プラグイン, 形) を決める。形は `release.tag`（無ければ `<plugin>--v{version}`）。
+    package-plugin でない・宣言を読めなければ None（範囲の起点を正式版のタグで決めない）。"""
+    strategy = repo.strategy_or_none(root)
+    rel = strategy.section["release"] if strategy else {}
     if isinstance(rel, dict) and rel.get("form") == "package-plugin" and rel.get("plugin"):
-        return f"{rel['plugin']}--v"
+        return rel["plugin"], release_tag.tag_template(rel)
     return None
 
 
@@ -301,12 +296,14 @@ def range_start(root: Path, events: list[dict], since: str | None, review: bool 
     if since:
         sha = git_or_stop(root, "rev-parse", f"{since}^{{commit}}")
         return sha, commit_at(root, sha), f"--since {since}"
-    prefix = release_tag_prefix(root)
-    if prefix:
-        for tag in git_or_stop(root, "tag", "--list", f"{prefix}*", "--sort=-v:refname").split():
-            if "-" not in tag[len(prefix) :]:
-                sha = git_or_stop(root, "rev-parse", f"{tag}^{{commit}}")
-                return sha, commit_at(root, sha), f"正式版のタグ {tag}"
+    shape = release_tag_shape(root)
+    if shape and (bumped := release_prev.untagged_since(root, shape[0], "HEAD")):  # タグを作らない宣言: 残った古いタグより先に使う
+        return bumped, commit_at(root, bumped), f"前のリリースの版上げ {bumped[:12]}（宣言がタグを作らない）"
+    if shape:
+        tags = git_or_stop(root, "tag", "--list", release_tag.tag_glob(*shape), "--sort=-v:refname").split()
+        if tag := release_tag.latest_release_tag(tags, *shape):
+            sha = git_or_stop(root, "rev-parse", f"{tag}^{{commit}}")
+            return sha, commit_at(root, sha), f"正式版のタグ {tag}"
     base = range_base(root)
     sha = git_or_stop(root, "merge-base", f"origin/{base}", "HEAD")
     return sha, commit_at(root, sha), f"origin/{base} との分岐点"
@@ -1078,6 +1075,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     ap = build_parser()
     a = ap.parse_args(argv)
+    deps.require("pathmatch", "jsonschema")  # 起点のブランチはブランチ戦略の宣言（JSON Schema で検査する）から読む
     try:
         root = repo_root(a.root)
         if a.cmd == "scope":

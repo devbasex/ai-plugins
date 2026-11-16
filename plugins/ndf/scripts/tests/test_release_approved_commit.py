@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import strategy_fixture  # noqa: E402
 
 SCRIPT = Path(__file__).resolve().parents[1] / "release-steps.py"
 VER = "1.2.3"
@@ -57,9 +58,8 @@ def world(tmp_path: Path):
     git(seed, "init", "-q", "-b", "develop")
     git(seed, "config", "user.email", "t@example.com")
     git(seed, "config", "user.name", "t")
-    (seed / ".ndf").mkdir()
-    (seed / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "base_branch": "trunk", "production_branch": "live"}))
-    (seed / ".ndf" / "supervise.json").write_text(json.dumps({"release": {"form": "package-plugin", "plugin": "foo"}}))
+    # NDF がタグと GitHub Release を作る形（CD の行の無い届け先）。release.cd が null だとタグを持てない（R10）
+    strategy_fixture.declare(seed, "trunk", "live", {"form": "package-plugin", "plugin": "foo"}, [])
     commit(seed, "a.txt", "a\n", "init")
     git(seed, "remote", "add", "origin", str(origin))
     git(seed, "push", "-q", "origin", "HEAD:trunk", "HEAD:live")
@@ -106,7 +106,7 @@ class FakeGitHub:
         self.created.append((base, head))
         return {("trunk", f"release/v{VER}"): 1, ("live", f"release/v{VER}"): 2, ("trunk", SYNC): 3}[(base, head)]
 
-    def wait_and_merge(self, r, n, expect=None, ci_wait=3600.0, gate_approved=None):
+    def wait_and_merge(self, r, n, expect=None, ci_wait=3600.0, gate_approved=None, admin=None):
         self.merged.append((n, expect))
         if n in (1, 3):
             return self._merge_into_base(n)

@@ -18,7 +18,8 @@
 | `request <計画名> --lane <名> --state <パス> [--prs ...] [--issues ...] [--verify-plan <パス>]` | リリースの依頼を送る（10）か、すでに `main` にあれば送らない（0。版の要るまとめのプランがあれば待ちを知らせる） |
 | `end <計画名> --lane <名> [--request <依頼の記録>]` / `verified <計画名> <依頼> [--done <D>]` | 終わりの記録を書く（依頼の答えが差し戻しか失敗なら書かずに 10）・版の要るまとめの流すものを返すか結果を送る（`lib/parallel_end.py`。#3058） |
 | `await <計画名> --from <パス> [--timeout 秒]` | 依頼の答えを読む（released 0・rejected 10・failed 1・まだ無い 3） |
-| `request-ask <計画名> --lane <名>` | 標準入力の問い（`tool_input`・`cwd`・`ledger_id`）をオーガナイザーへ送る（送り手でなければ 4） |
+| `request-ask <計画名> --lane <名>` | 標準入力の問い（`tool_input`・`cwd`・`ledger_id`・`deadline_at`）を、設計承認の依頼（1 スプリントのレーンの承認の行つきの `ndf-gate:1`）・同じ問いの前の依頼（一時レーン）・`ask` の依頼の最初に当たったものとして送る（`metrics.kind`。送り手でなければ 4、上限の秒を過ぎたら書かずに 2） |
+| `design-answer <計画名> <依頼> --state <スプリント状態>` | 1 スプリントのレーンが設計承認の依頼の答えを読み、承認ゲートの記録を書いて続きを返す（承認 0・直しと差し戻し 10・まだ無い 3。`lib/parallel_design_gate.py`。#3603） |
 | `request-gate2 <計画名> <連番> <提示> --report <承認資料>` | 一時レーンがリリース承認ゲート の依頼を送る |
 | `answer <計画名> <依頼> (--approved [--by mvv] \\| --revise --note <パス> \\| --rejected \\| --choice <答え>...)` | 問いの答えを送る（止まった持ち主の再起動は耐久ワークフローが打つ。`metrics.next` は一覧の失敗の問いで選んだ 1 行だけ。今の問いの一覧に無い依頼なら `metrics.warning`）。設計の承認では設計 PR をマージしてから送り、結果を `metrics.merge` に、答えの後に残る依頼を `metrics.after` に載せる |
 | `helper <計画名> <連番> <提示>` | 一時レーンが流すもの（`phase`・`pipeline`・`settle`・`gate2`）を返す |
@@ -43,7 +44,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import deps  # noqa: E402
 
-deps.require("durable", "schema", "md", "mdtable", "versions", "procs", "waits", "pathmatch")
+deps.require("durable", "schema", "md", "mdtable", "versions", "procs", "waits", "pathmatch", "jsonschema")
 
 import decl  # noqa: E402
 import parallel_answer as pa  # noqa: E402
@@ -363,6 +364,10 @@ def cmd_await(a) -> None:
 
 
 def cmd_request_ask(a) -> None:
+    """問いを設計承認の依頼・同じ問い・`ask` の依頼の最初に当たったものへ送る（`lib/parallel_ask.py`。#3603）。"""
+    import parallel_ask as pask
+    import parallel_question as pq
+
     main = main_of()
     try:
         got = json.loads(sys.stdin.read() or "{}")
@@ -375,11 +380,31 @@ def cmd_request_ask(a) -> None:
         reply("stopped", f"{a.lane} は計画 {who[0]} の送り手で、{a.name} の送り手でない", code=4)
     main = who.home  # 計画の置き場（別のリポジトリのレーンでは自分のリポジトリと違う。#2733）
     q = accepting(main, a.name)
-    rid = sent(
-        pl.request_ask, main, a.name, a.lane, got.get("tool_input") or {}, got.get("cwd") or os.getcwd(), str(got.get("ledger_id") or "")
-    )
-    again = _request_resent_fields(rid)
-    reply("ok", f"問いの依頼 {rid} を{_sent_verb(again, 'オーガナイザーへ送った')}{QUEUED if q else ''}", id=str(rid), **again, **q)
+    try:
+        rows = plg.current_rows(main, a.name)
+        out = pask.route_ask(main, a.name, a.lane, {**got, "cwd": got.get("cwd") or os.getcwd()}, rows)
+    except OSError as exc:  # LockTimeout も OSError（TimeoutError）
+        reply("stopped", f"計画の台帳を読めない・書けない: {exc}", code=2)
+    if out.kind == pask.KIND_LATE:
+        reply("stopped", "hook の上限の秒が尽きた（台帳へ書かない。問いは通す）", code=2)
+    if out.kind == pq.KIND_GATE1:
+        verb = "は送ってある" if out.metrics.get("already") else f"をオーガナイザーへ送った{QUEUED if q else ''}"
+        reply("ok", f"設計承認の依頼 {out.id} {verb}", kind=pq.KIND_GATE1, id=out.id, **out.metrics, **q)
+    if out.kind == pq.KIND_REUSED:
+        how = "前の答えを使う" if "answer" in out.metrics else "答え待ちの依頼を引き継ぐ"
+        reply("ok", f"同じ問いの依頼 {out.id} がある（{how}）", kind=pq.KIND_REUSED, id=out.id, **out.metrics, **q)
+    again = _request_resent_fields(out.sent)
+    msg = f"問いの依頼 {out.id} を{_sent_verb(again, 'オーガナイザーへ送った')}{QUEUED if q else ''}"
+    reply("ok", msg, kind=pq.KIND_ASK, id=out.id, **out.metrics, **again, **q)
+
+
+def cmd_design_answer(a) -> None:
+    """設計承認の依頼の答えを読み、スプリント状態へ承認ゲートの記録を書いて続きを返す（#3603 の決定 4）。"""
+    import parallel_design_gate as pdg
+
+    got = pdg.answer_design(pl.plan_home(main_of(), a.name), a.name, a.id, Path(a.state))  # 送ったときと同じ計画の置き場の台帳（#2733）
+    nxt = got.metrics.get("next") if got.status == "gate" else None
+    reply(got.status, got.summary, code=got.code or None, next_step=nxt, **got.metrics)
 
 
 def _send_gate2(main: Path, a) -> plg.Sent:

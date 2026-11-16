@@ -34,7 +34,9 @@ SCRIPTS = HERE.parent
 sys.path[:0] = [str(SCRIPTS), str(SCRIPTS / "lib")]
 import deps  # noqa: E402
 
-deps.require("durable", "locks", "md", "mdtable", "procs", "schema", "versions", "waits")  # supervise_lib を読むと各グループの包みへ届く
+deps.require(
+    "durable", "locks", "md", "mdtable", "procs", "schema", "versions", "waits", "jsonschema"
+)  # supervise_lib を読むと各グループの包みへ届く
 from step_result import EXIT_PRECONDITION, EXIT_UNREADABLE, result  # noqa: E402
 from supervise_lib import admission, decl  # noqa: E402
 from supervise_lib.paths import is_dir_entry  # noqa: E402

@@ -417,7 +417,7 @@ mvv-gate.py check --sprint <状態> --gate design|release [--material F...] [--p
 4. `--pr` の変更したファイルが `boundary_paths` に当たらない
 5. `--pr` が `.ndf/mvv.md`・`.ndf/mvv.json` を変えない（共通原則の C7。宣言では外せない）
 
-通れば最小構成の `claude -p` に MVV の節（NDF の共通原則 → プロジェクト MVV → スプリント MVV → 判断の決まり）とエビデンスを
+通れば最小構成の `claude -p` に MVV のセクション（NDF の共通原則 → プロジェクト MVV → スプリント MVV → 判断の決まり）とエビデンスを
 渡し、`verdict`（follow / not_follow / unknown）・`reasons`・`boundary`・`basis`（根拠の項目）を JSON で返させる。**「従う」で `boundary` が空のときだけ** `sprint-state.py gate` で承認ゲートの記録（`by: mvv`・判定・
 理由・ログのパス）を書いて 0 を返す。ほか（従わない・判定できない・読めない・エビデンスが無い・記録を書けない）は 10 で、
 利用者の承認へ戻る。判定はすべて `mvv-gate.jsonl` へ 1 行ずつ残る（`project_mvv` の参照と `basis` を含む）。

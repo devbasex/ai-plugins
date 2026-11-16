@@ -23,6 +23,7 @@ import deps  # noqa: E402
 
 deps.require("md")
 import dist_record  # noqa: E402
+import strategy_fixture  # noqa: E402
 
 _spec = importlib.util.spec_from_file_location("sprint_close_harness_1273", HERE / "test_sprint_close_merge_green.py")
 harness = importlib.util.module_from_spec(_spec)
@@ -79,11 +80,7 @@ def repo(tmp_path: Path) -> Path:
         ["config", "tag.gpgsign", "false"],
     ):
         git(root, *args)
-    (root / ".ndf").mkdir()
-    (root / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "base_branch": "develop", "production_branch": "main"}))
-    (root / ".ndf" / "supervise.json").write_text(
-        json.dumps({"release": {"form": "package-plugin", "plugin": "ndf", "runtimes": ["claude"]}})
-    )
+    strategy_fixture.declare(root, "develop", "main", {"form": "package-plugin", "plugin": "ndf", "runtimes": ["claude"]})
     git(root, "add", "-A")
     git(root, "commit", "-q", "-m", "init")
     git(root, "remote", "add", "origin", str(origin))
@@ -145,7 +142,9 @@ def test_format_record_is_read_back_by_parse_record():
 
 
 def test_record_posts_one_comment_to_the_release_pr(repo, gh):
-    """AC2・AC3: タグと GitHub Release があれば、本番のリリースの PR へ記録を 1 件書き、直前の正式版はタグから取る。"""
+    """AC2・AC3: タグと GitHub Release があれば、本番のリリースの PR へ記録を 1 件書き、直前の正式版はタグから取る。
+    タグを読むのはタグを作らせる宣言だけ（R10。タグを作らせるのは CD のある宣言）なので、CD とタグを宣言する。"""
+    declare_tagged(repo)
     code, out, err = record(repo, gh.env)
     assert code == 0, (out, err)
     assert [i["result"] for i in out["items"]] == ["posted"]
@@ -166,9 +165,28 @@ def test_record_twice_posts_only_once(repo, gh):
     assert len(gh.comments()) == 1
 
 
+def declare_tagged(repo: Path) -> None:
+    """タグと GitHub Release を作らせる宣言（R10 により CD のある宣言）を置く。"""
+    strategy_fixture.declare(
+        repo,
+        "develop",
+        "main",
+        {
+            "form": "package-plugin",
+            "plugin": "ndf",
+            "runtimes": ["claude"],
+            "cd": {"workflow": "release-cd.yml"},
+            "tag": "{plugin}--v{version}",
+            "github_release": True,
+        },
+    )
+
+
 @pytest.mark.parametrize("missing", ["tag", "release", "pr"])
 def test_record_before_the_production_release_posts_nothing(repo, gh, missing):
-    """AC3・I1: タグ・GitHub Release・マージ済みの PR のどれかが無ければ、書かずに 3 で止まる。"""
+    """AC3・I1: 宣言が作らせるタグ・GitHub Release と、マージ済みの PR のどれかが無ければ、書かずに 3 で止まる。
+    タグと GitHub Release を作らせるのは CD のある宣言だけ（R10）なので、CD とタグを宣言する。"""
+    declare_tagged(repo)
     if missing == "tag":
         git(repo, "push", "-q", "origin", ":refs/tags/ndf--v1.2.3")
     elif missing == "release":

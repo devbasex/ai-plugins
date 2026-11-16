@@ -23,6 +23,7 @@ import parallel_lane as pl  # noqa: E402
 import parallel_release as prl  # noqa: E402
 import parallel_helper as ph  # noqa: E402
 import parallel_run as prun  # noqa: E402
+import strategy_fixture  # noqa: E402
 
 deps.require("pathmatch")
 
@@ -131,14 +132,14 @@ def test_carried_present_plan_rechecks_then_records_then_approves(tmp_path):
     from supervise_lib import limits
 
     d = tmp_path / "releases" / "4" / "2"
-    present, _ = prl.plan_parallel_release(SCRIPTS.parents[2], "p1", d, "1.2.3", carried=True)
+    present, _ = prl.plan_parallel_release(strategy_fixture.like_root(), "p1", d, "1.2.3", carried=True)
     by = {s["id"]: s for s in present["steps"]}
     assert limits.run_error(present) is None
     assert "mvv" not in by and "note" not in by
     assert (by["present"]["next"], by["carried"]["next"], by["record"]["next"]) == ("carried", "record", "approve")
     assert by["carried"]["gate_next"] == "end" and "carried p1 4" in by["carried"]["cmd"]  # 10 なら record を打たずに終わる
     assert "提示 1 の承認を引き継ぐ" in by["record"]["cmd"] and str(d / "answer.json") in by["record"]["cmd"]
-    plain, _ = prl.plan_parallel_release(SCRIPTS.parents[2], "p1", tmp_path / "releases" / "4" / "1", "1.2.3")
+    plain, _ = prl.plan_parallel_release(strategy_fixture.like_root(), "p1", tmp_path / "releases" / "4" / "1", "1.2.3")
     assert "mvv" in {s["id"] for s in plain["steps"]} and "carried" not in {s["id"] for s in plain["steps"]}
 
 

@@ -1,0 +1,77 @@
+{
+  "kind": "custom",
+  "release_strategy": "merge_base_branch",
+  "branches": {
+    "production": "main",
+    "base": "develop"
+  },
+  "sprint": {
+    "start": "base",
+    "integrate": "check",
+    "doc_prs": "base"
+  },
+  "release": {
+    "form": "package-plugin",
+    "version_store": {
+      "kind": "plugin"
+    },
+    "tag": "{plugin}--v{version}",
+    "github_release": true,
+    "cd": {
+      "workflow": "release-cd.yml"
+    },
+    "deliveries": [
+      {
+        "target": "ndf プラグイン（Claude Code・Codex）",
+        "kind": "auto",
+        "trigger": ".github/workflows/release-cd.yml（main へのマージでタグと GitHub Release を作る）",
+        "channel": "production",
+        "versioned": true,
+        "publishes_release": true,
+        "result": {
+          "workflow": "release-cd.yml"
+        }
+      }
+    ],
+    "plugin": "ndf",
+    "runtimes": [
+      "claude",
+      "codex"
+    ]
+  },
+  "channels": [
+    {
+      "name": "stable",
+      "ref": "main"
+    },
+    {
+      "name": "dev",
+      "ref": "develop",
+      "workflow": "release-dev.yml"
+    }
+  ],
+  "approval": {
+    "target": "release_pr",
+    "via": "gate"
+  },
+  "merge": {
+    "actor": "ndf",
+    "method": "direct",
+    "commit": "merge",
+    "admin": true
+  },
+  "verify": null,
+  "reviews": {
+    "impl": {
+      "checks": [],
+      "diff": "none"
+    },
+    "sprint": {
+      "checks": [
+        "cross-refactoring",
+        "cross-review"
+      ],
+      "diff": "unchecked"
+    }
+  }
+}

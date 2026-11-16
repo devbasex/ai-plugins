@@ -6,26 +6,32 @@ CD のワークフローと手動の経路（`release --channel prod`）がこ�
 
 from __future__ import annotations
 
-import json
 import os
 import tempfile
 
 import gh_parts
-from release_lib.names import changelog_span
-from step_result import StepError, git, plugin_dir
+from release_tag import makes_tags
+from release_lib.names import changelog_span, tag_name
+
+# 前のリリースの起点と出済みの版の正本（lib/release_prev.py）を再び公開する
+from release_prev import (  # noqa: F401
+    manifest_rel,
+    prev_release,
+    release_tag_before,
+    shipped_untagged,
+    untagged_before,
+    untagged_since,
+    version_at,
+)
+from step_result import StepError, git
 
 
-def version_at(root, plugin, revision) -> str:
-    """`revision` のコミットの plugin.json の版。読めなければ 1 で止める。"""
-    rel = (plugin_dir(root, plugin) / ".claude-plugin" / "plugin.json").relative_to(root).as_posix()
-    p = git(root, "show", f"{revision}:{rel}", check=False)
-    try:
-        ver = json.loads(p.stdout)["version"] if p.returncode == 0 else None
-    except (ValueError, KeyError, TypeError):
-        ver = None
-    if not isinstance(ver, str) or not ver:
-        raise StepError(f"{str(revision)[:8]} の {rel} の版を読めない")
-    return ver
+def wants(decl) -> tuple[bool, bool]:
+    """宣言が作らせる公開物: (タグ, GitHub Release)。release.tag が null ならタグも GitHub Release も、github_release が偽なら
+    GitHub Release を作らない。作る側（`release-steps.py` の `_published`）と確かめる側（`cmd_record`）が同じ値を使う。"""
+    rel = decl.release or {}
+    tag = makes_tags(rel)
+    return tag, tag and rel.get("github_release", True) is not False
 
 
 def _notes_at(root, plugin, ver, revision) -> str:
@@ -68,10 +74,10 @@ def _ensure_release(root, plugin, ver, tag, revision) -> dict:
     return {"kind": "release", "name": tag, "result": "created"}
 
 
-def tag_and_release(root, plugin, ver, tag, revision) -> list[dict]:
-    """タグと GitHub Release のうち足りないものを作り、items（tag・release の 1 件ずつ）を返す。"""
+def tag_and_release(root, plugin, ver, tag, revision, release: bool = True) -> list[dict]:
+    """タグと GitHub Release のうち足りないものを作り、items（tag・release の 1 件ずつ）を返す。`release` が偽ならタグだけ。"""
     item = _ensure_tag(root, plugin, ver, tag, revision)
-    return [item, _ensure_release(root, plugin, ver, tag, revision)]
+    return [item, _ensure_release(root, plugin, ver, tag, revision)] if release else [item]
 
 
 def publish(root, plugin, revision) -> tuple[str, str, list[dict]]:
@@ -79,5 +85,11 @@ def publish(root, plugin, revision) -> tuple[str, str, list[dict]]:
     ver = version_at(root, plugin, revision)
     if "-" in ver:
         raise StepError(f"{revision[:8]} の版 {ver} に接尾辞があるため、タグも GitHub Release も作らない")
-    tag = f"{plugin}--v{ver}"
+    tag = tag_name(root, plugin, ver)
     return ver, tag, tag_and_release(root, plugin, ver, tag, revision)
+
+
+def made_by(decl, tag) -> str:
+    """宣言が作らせる公開物の語（承認資料の同意と戻し方が書く）。`wants` と同じ値で決め、作らなければ空文字。"""
+    want_tag, want_release = wants(decl)
+    return "" if not want_tag else f"タグ {tag} と GitHub Release" if want_release else f"タグ {tag}"

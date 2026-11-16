@@ -186,8 +186,8 @@ class StepContext:
         return cmd.replace("{pr}", number), None
 
     def base_branch(self) -> str | None:
-        """起点のブランチ。計画の base_branch、無ければ作業場所の .ndf/worktree.json の base_branch。"""
-        return self.plan.get("base_branch") or decl.declared_base_of([self.cwd])
+        """起点のブランチ。計画のベースブランチ、無ければ作業場所のブランチ戦略の宣言の `branches.base`。"""
+        return self.plan.get(decl.PLAN_BASE) or decl.declared_base_of([self.cwd])
 
     def inputs_text(self, step: dict) -> str:
         """judge と work の入力。今の実行の結果 → 前の実行の最後の結果（`--from` の再開のとき）→ 無い（名前と理由）の順（#1676）。"""
@@ -267,7 +267,7 @@ class RunStep:
         if "{base}" in cmd:
             base = ctx.base_branch()
             if not base:
-                return cmd, "cmd の {base} を置き換える起点のブランチが無い（計画か .ndf/worktree.json の base_branch）", None
+                return cmd, "cmd の {base} を置き換える起点のブランチが無い（計画かブランチ戦略の宣言）", None
             cmd = cmd.replace("{base}", base)
         cmd = cmd.replace("{state_dir}", str(ctx.state.dir))
         cmd = cmd.replace(plan_mod.PLAN_ISSUES, " ".join(str(int(i)) for i in ctx.plan.get("課題") or []))
@@ -282,6 +282,16 @@ class RunStep:
         if no_reports and not step.get("reports"):
             addopts.append(no_reports)
         env["PYTEST_ADDOPTS"] = " ".join(a for a in addopts if a)
+
+    def _snapshot_env(self, ctx, step: dict, env: dict) -> None:
+        """プランが開始時のブランチ戦略のスナップショットを持てば、段と子プロセスへ環境変数で渡す（I13・決定 9）。"""
+        import branch_strategy
+        import repo as repo_lib
+
+        snap = ctx.plan.get(branch_strategy.SNAPSHOT_KEY)
+        got = repo_lib.snapshot_env(step.get("cwd", ctx.cwd), snap) if snap else None  # 段の作業場所のメインディレクトリに効かせる
+        if got:
+            env[repo_lib.SNAPSHOT_ENV] = got
 
     def _extend_hook(self, ctx, step: dict, extend_file: Path, timeout):
         """延長の締め切りを返す関数を作る。子が書いた見込みの秒で締め切りを後ろへずらす。"""
@@ -298,6 +308,7 @@ class RunStep:
             return 2, err
         env = dict(os.environ)
         self._pytest_env(ctx, step, env)
+        self._snapshot_env(ctx, step, env)
         # 子が起動する CLI の使用量の帳簿の行にプランとステップを付ける（#1953 の決定 7・決定 11）
         env.update(NDF_USAGE_PLAN=getattr(ctx, "plan_path", None) or "", NDF_USAGE_STEP=str(step.get("id") or ""))
         extend = None

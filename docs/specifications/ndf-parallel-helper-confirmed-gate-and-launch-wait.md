@@ -26,9 +26,8 @@
 | 一時レーンの起動が、前の一時レーンが動いている間に同じ秒に 2 回断られ、待たずに区分 `spawn` の問いになった | 断りの結果の値 `helper-busy` で他の断りと分け、耐久ワークフローが前の一時レーンが止まるまで待ってから打ち直す |
 
 起き直した一時レーンが、答えのある区分つきの問い（例: `-D` でのブランチの削除）を新しい id で送り直す事象は、
-この仕様の範囲に含めない。問いの入力（`AskUserQuestion` の `metadata`）は `source` 以外の欄を受け付けず、
-問いの操作の対象を問いの hook へ渡せないためである。#3608 が扱う。この仕様が持つのは、一時レーンが自分の依頼と
-答えを読む一覧（`asked`）までである。
+この仕様の範囲に含めない。[ndf-parallel-sprint-design-gate-and-helper-reused-answers.md](ndf-parallel-sprint-design-gate-and-helper-reused-answers.md)
+が扱う。この仕様が持つのは、一時レーンが自分の依頼と答えを読む一覧（`asked`）までである。
 
 ## 用語
 
@@ -157,8 +156,8 @@ IETF の Idempotency-Key の標準案（処理済みの再送には最初の結�
 | 欄 | 中身 |
 | --- | --- |
 | `asked[]` | 自分の名前の一時レーンが送った `gate2`・`ask` の依頼を台帳の順に並べる。各要素は `id`・`kind`・`source`・`target`・`at` |
-| `asked[].answer` | `gate2` に答えの行があれば `result`・`choice` |
-| `asked[].answered` | `ask` に答えがあれば `true`。代表の問いへまとめられた依頼は、依頼ごとの答えがあれば `true` |
+| `asked[].answer` | `gate2` と、問いの対象（`target`）を持つ `ask` に答えの行があれば `result`・`choice` |
+| `asked[].answered` | 問いの対象を持たない `ask` に答えがあれば `true`。代表の問いへまとめられた依頼は、依頼ごとの答えがあれば `true` |
 | `asked[].settled` | 確定か締めで処理済みの `gate2` に `true` |
 
 起き直した一時レーンは、答えのある `gate2` を出し直さない。`ask` は操作の対象を比べられないため、答えの中身を載せず、

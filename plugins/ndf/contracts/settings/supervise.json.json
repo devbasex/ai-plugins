@@ -23,9 +23,6 @@
     "queue": {
       "summary": "queue（このリポジトリの宣言にある最上位のキー）"
     },
-    "release": {
-      "summary": "release（このリポジトリの宣言にある最上位のキー）"
-    },
     "slow": {
       "summary": "slow（読む箇所 plugins/ndf/scripts/supervise_lib/slow.py:77）"
     },

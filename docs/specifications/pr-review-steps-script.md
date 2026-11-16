@@ -66,7 +66,7 @@
 | `pr-review/scripts/pr-review-steps.py`（`collect`・`collect_pr`・`collect_branch`・`pr_of_current_branch`・`finish_review`・`perspectives`・`delegate_prompt`・`cmd_delegate`） | 対象の決定・文脈ファイルとプロンプトを書く・子のスクリプト（`gh_parts.py` / `external-ai.py`）を argv の配列で起動する・結果 JSON |
 | `pr-review/scripts/pr_review_findings.py`（`check_findings`・`decide_event`・`build_payload`・`branch_report`・`load_findings`） | 指摘ファイルの検査・本来の判定・payload と `--branch` の報告の組み立て。外部へアクセスせず、指摘ファイルを書き換えない |
 | `pr-review/scripts/pr_review_context.py`（`_pr_sections`） | PR モードの文脈ファイルの節（対象・受け入れ条件の在りか・差分・未解決のスレッド） |
-| `plugins/ndf/scripts/lib/repo.py`（`existing_base_branch`） | 宣言のベースブランチの実在の確認（取得済みの参照 → `git ls-remote` の参照名の完全一致）と、宣言が無いときの既定ブランチ |
+| `plugins/ndf/scripts/lib/repo.py`（`existing_base_branch`） | ブランチ戦略の宣言のベースブランチ（`branches.base`）の実在の確認（取得済みの参照 → `git ls-remote` の参照名の完全一致）。宣言が無い・読めないときは既定ブランチへ倒さずに理由を返す |
 | `plugins/ndf/scripts/lib/gh_graphql.py`（`UNRESOLVED_THREADS_QUERY`・`UNRESOLVED_THREADS_JQ`・`unresolved_threads`）・`gh_pr_info.py`（`_thread_items`） | 未解決のスレッドと最初のコメントの本文 |
 | `gh_parts.py review-post`・`external-ai.py run` | 投稿・自分の PR の `COMMENT` への格下げ・位置の拒否の退避 / 外部 CLI の起動・上限つきの待ち・回収（どちらも既存のまま） |
 
@@ -118,7 +118,7 @@ graph LR
 テストはすべて `plugins/ndf/skills/pr-review/tests/test_pr_review_steps.py` にある（`unresolved_threads` の 4 列の
 読み取りは `plugins/ndf/scripts/tests/test_gh_parts.py` も見る）。
 
-- `existing_base_branch` が、宣言が取得済みの参照にある / `git ls-remote` でだけ見つかる / どこにも無い（既定ブランチへ落とさない）/ 宣言が無く origin の HEAD がある / 宣言も origin の HEAD も無く `main` か `master` がある / どれも無い、の 6 通りで決まった値を返し、`ls-remote` の末尾一致を「ある」と読まないこと
+- `existing_base_branch` が、宣言が取得済みの参照にある / `git ls-remote` でだけ見つかる / どこにも無い（既定ブランチへ落とさない）/ 宣言が無い・読めない（既定ブランチへ落とさない）の 4 通りで決まった値を返し、`ls-remote` の末尾一致を「ある」と読まないこと
 - `collect --branch` がベースブランチ・変更ファイル・統計・履歴を出し、差分の起点が merge-base で、宣言のベースブランチが無ければ 3 で止まること
 - `collect` が未解決のスレッドの位置と本文を文脈ファイルへ渡し、前回の指摘ファイルを消し、スレッドを取れなければ止まること。`metrics` と節の形、差分・スレッド・本文の無い PR、止まる場合の終了コードと文が固定されていること
 - `pr-review` のスクリプトが `.ndf/worktree.json` を自分で読まないこと

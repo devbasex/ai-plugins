@@ -2,7 +2,8 @@
 
 設計 PR ごとに 1 本のプラン `design-merge-<N>` を組む: `approved`（承認の証跡を確かめる）→ `merge-gate` → `merge`。
 PR の番号は設計のプランの報告から `{queue_pr:design-<N>}` で読み、conductor は書き込まない。承認の証跡は承認ラベル
-`design-approved` か、スプリント状態ファイルの設計承認ゲートの利用者の承認の記録（`--pr N`）である。
+`design-approved` か、スプリント状態ファイルの設計承認ゲートの利用者の承認の記録（`--pr N`）である。並列の計画の
+設計承認の依頼の答えでマージ済みの PR は、その PR の MVV 判定の承認の記録（`parallel.py design-answer` が書く）でも通す（#3603）。
 """
 
 from __future__ import annotations
@@ -62,8 +63,14 @@ def _gh_out(args: list[str]) -> tuple[int, str]:
     return p.returncode, p.stdout if p.returncode == 0 else p.stderr
 
 
+def mvv_approval(state: str | None, pr: int) -> dict | None:
+    """スプリント状態の設計承認ゲートの `pr` の MVV 判定の承認の記録（`by: mvv`・`outcome: approved`）の最後の 1 件。無ければ None。"""
+    return gate_answer.design_gate_record(state, pr, "mvv", "approved")
+
+
 def cmd_design_approved(pr: int, state: str | None, gh: Callable[[list[str]], tuple[int, str]] = _gh_out) -> tuple[dict, int]:
     """承認ラベルがあれば 0。無く、状態に設計承認ゲートの `--pr N` の利用者の承認の記録があればラベルを付けて 0。
+    どちらも無く、PR がマージ済みで `--pr N` の MVV 判定の承認の記録（`mvv_approval`）があれば 0（ラベルは付けない。#3603 の I9）。
     証跡が無い・PR が 0 なら 10（承認ゲート）。gh が読めない・書けないなら 2。"""
     metrics = {"pr": pr, "state": state or ""}
     if not pr:
@@ -82,6 +89,15 @@ def cmd_design_approved(pr: int, state: str | None, gh: Callable[[list[str]], tu
     if LABEL in names:  # 完全一致だけ（design-approved-pending などの別ラベルを承認に数えない）
         return result(TOOL, "ok", f"PR {pr} に承認ラベルがある", [{"kind": "label", "name": LABEL, "result": "kept"}], metrics), 0
     answer = gate_answer.approved(state, DESIGN_GATE, pr=pr)
+    if answer is None and (mvv := mvv_approval(state, pr)) is not None:
+        code, out = gh(["pr", "view", str(pr), "--json", "state", "--jq", ".state"])
+        if code != 0:
+            return result(TOOL, "stopped", f"PR {pr} の状態を読めない: {out.strip()[-300:]}", [], metrics), EXIT_UNREADABLE
+        if out.strip() == "MERGED":  # 承認の答えでマージ済み。守るマージの操作が残っていない（#3603 の決定 5・I9）
+            return result(
+                TOOL, "ok", f"PR {pr} はマージ済みで、MVV 判定の承認の記録がある（{mvv.get('at') or '-'}）",
+                [{"kind": "mvv", "result": "kept"}], metrics,
+            ), 0  # fmt: skip
     if answer is None:
         nxt = f'承認を取り、sprint-state.py gate <状態> "{DESIGN_GATE}" --what <要約> --pr {pr} --by user --outcome approved（状態が無ければ gh pr edit {pr} --add-label {LABEL}）の後に queue --resume で続ける'
         return result(

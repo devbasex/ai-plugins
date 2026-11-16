@@ -8,12 +8,16 @@ name: Glossary
 # 見る文書は宣言の check.paths（設計の文書）に限る。
 on:
   pull_request:
+  # merge queue の一時コミットで必須のチェックを回す（#3672 の手順 3）
+  merge_group:
 
 permissions:
   contents: read
 
 jobs:
   glossary-check:
+    # PR の本文・宛先・head を読むため、merge queue では飛ばす（PR で通っている）
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

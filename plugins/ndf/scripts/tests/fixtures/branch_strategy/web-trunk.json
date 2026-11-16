@@ -1,0 +1,39 @@
+{
+  "kind": "web-trunk",
+  "release_strategy": "trunk",
+  "branches": {
+    "production": "main",
+    "base": "main"
+  },
+  "sprint": {
+    "start": "production",
+    "integrate": "release",
+    "doc_prs": "sprint"
+  },
+  "release": {
+    "form": "service",
+    "version_store": {
+      "kind": "none"
+    },
+    "tag": null,
+    "github_release": false,
+    "cd": null
+  },
+  "channels": [
+    {
+      "name": "stable",
+      "ref": "main"
+    }
+  ],
+  "approval": {
+    "target": "production_pr",
+    "via": "gate"
+  },
+  "merge": {
+    "actor": "ndf",
+    "method": "merge-queue",
+    "commit": "squash",
+    "admin": false
+  },
+  "verify": null
+}

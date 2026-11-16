@@ -107,6 +107,10 @@ def test_approved_review_commit_counts_only_effective_reviewers():
     assert at.approved_review_commit(reviews, {"w": "admin", "r": "write", "x": None}) == B
     assert at.approved_review_commit([rv("w", "COMMENTED", A, "1")], perms) is None
     assert at.approved_review_commit(reviews, {}) is None
+    # 承認の後に同じ人が差し戻したら、その人の前の承認は使わない。後で承認し直せばその承認を使う
+    back = [rv("w", "APPROVED", A, "1"), rv("w", "CHANGES_REQUESTED", A, "2")]
+    assert at.approved_review_commit(back, perms) is None
+    assert at.approved_review_commit([*back, rv("w", "APPROVED", B, "3")], perms) == B
 
 
 class FakeGh:
@@ -245,6 +249,41 @@ def test_write_admin_record_counts_only_records_by_writers(monkeypatch, perm, up
     assert len(posted) == int(wrote)
 
 
+@pytest.mark.parametrize(
+    "body, perm, updated, found",
+    [
+        (at.render_admin_intent(A), "admin", None, True),
+        (at.render_admin_intent(A), "read", None, False),
+        (at.render_admin_intent(A), "write", "2026-11-14T00:00:00Z", False),
+        (at.render_admin_intent("b" * 40), "admin", None, False),
+        (at.render_admin_record(A, "u"), "admin", None, False),
+    ],
+)
+def test_admin_intent_counts_only_marks_for_the_head_by_writers(monkeypatch, body, perm, updated, found):
+    """迂回の意図の印は、同じ head を持ち、書き込みの権限を持つ人が書いた編集されていないものだけ数える。同じ印があれば置き直さない。"""
+    posted = []
+
+    class Ok:
+        ok, error, value = True, "", {"url": "https://x/c/9"}
+
+    monkeypatch.setattr(at.gh_rest, "comment", lambda repo, n, b: posted.append(b) or Ok())
+    monkeypatch.setattr(at, "read_comments", lambda repo, pr: [comment(body, login="someone", updated=updated)])
+    monkeypatch.setattr(at, "read_permissions", lambda repo, logins: {"someone": perm})
+    assert at.has_admin_intent("o/r", 5, A) is found
+    assert at.write_admin_intent("o/r", 5, A) is (not found)
+    assert posted == ([] if found else [at.render_admin_intent(A)])
+
+
+def test_write_admin_intent_raises_when_it_cannot_post(monkeypatch):
+    class Ng:
+        ok, error, value = False, "HTTP 403", None
+
+    monkeypatch.setattr(at.gh_rest, "comment", lambda repo, n, b: Ng())
+    monkeypatch.setattr(at, "read_comments", lambda repo, pr: [])
+    with pytest.raises(at.TrailError):
+        at.write_admin_intent("o/r", 5, A)
+
+
 def _workflow(name):
     return (ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8")
 
@@ -262,7 +301,9 @@ def test_approval_workflow_runs_on_default_branch_definition_only():
     assert "statuses: write" in text and "contents: write" not in text
 
 
-def test_dev_workflow_uses_dispatch_and_token_only():
-    text = _workflow("release-dev.yml")
-    assert _triggers(text) == {"workflow_dispatch"}
-    assert "secrets." not in text and "--no-admin" in text
+def test_ai_plugins_has_no_dev_channel_workflow():
+    """ai-plugins は trunk へ移り開発版のチャネルを持たない（#3672 の手順 2）。宣言にチャネル dev が無く、開発版の
+    ワークフロー（release-dev.yml）も残っていない。"""
+    sec = json.loads((ROOT / ".ndf" / "project.json").read_text(encoding="utf-8"))["branch_strategy"]
+    assert [ch["name"] for ch in sec["channels"]] == ["stable"]
+    assert not (ROOT / ".github" / "workflows" / "release-dev.yml").exists()

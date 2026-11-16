@@ -37,9 +37,17 @@ def _read_root_conftest() -> str:
     return ROOT_CONFTEST.read_text(encoding="utf-8")
 
 
-def _run_pytest(target: str, *args: str, path: str | None = None, env_extra: dict | None = None):
+def _child_env() -> dict:
+    """子の pytest へ渡す環境。読み飛ばしの指定と、CI のシャードの割り当て（`SHARD_TOTAL`・`SHARD_INDEX`）を外す。
+    シャードを受け継ぐと、対象のファイルが別のシャードに当たったとき子が全件を選び外して終わる。"""
     env = dict(os.environ)
-    env.pop("NDF_TESTS_ALLOW_MISSING_COMMANDS", None)
+    for key in ("NDF_TESTS_ALLOW_MISSING_COMMANDS", "SHARD_TOTAL", "SHARD_INDEX"):
+        env.pop(key, None)
+    return env
+
+
+def _run_pytest(target: str, *args: str, path: str | None = None, env_extra: dict | None = None):
+    env = _child_env()
     if path is not None:
         env["PATH"] = path
     env.update(env_extra or {})
@@ -242,8 +250,7 @@ def test_the_isolation_holds_from_a_bundle_directory() -> None:
     足さないと再現しない。
     """
     bundle = REPO_ROOT / "plugins/ndf/skills/cross-review/tests"
-    env = dict(os.environ)
-    env.pop("NDF_TESTS_ALLOW_MISSING_COMMANDS", None)
+    env = _child_env()
     env.update({"MONITOR_STALL_AGY": "1800", "MONITOR_TIMEOUT": "1800"})
 
     result = subprocess.run(

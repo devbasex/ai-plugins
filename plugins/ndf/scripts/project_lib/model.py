@@ -7,9 +7,10 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Annotated, Literal, Optional, Union
 
-from pydantic import Field, StrictBool
+from pydantic import Field, StrictBool, TypeAdapter
 
 import schema
 
@@ -172,12 +173,6 @@ class NdfPolicies(schema.Shape):
     reject_md_wording_tests: bool
 
 
-class ProductionMerge(schema.Shape):
-    """本番の PR のマージの方式（#3506）。`admin` が true なら、本番チャネルが承認レビューを必須にするとき管理者の迂回でマージする。利用者が手で書き、解析は書かない。"""
-
-    admin: StrictBool
-
-
 class Import(schema.Shape):
     from_: str = Field(alias="from")
     to: str
@@ -205,7 +200,7 @@ class Analysis(schema.Shape):
 
 
 class Branches(schema.Shape):
-    """P6 の答えの形。宣言では worktree.json の base_branch・production_branch へ書く。"""
+    """P6 の答えの形（ベースブランチと本番ブランチ）。宣言ではブランチ戦略の宣言の `branches` へ書く。"""
 
     base: Optional[str] = None
     production: Optional[str] = None
@@ -307,14 +302,15 @@ class ProjectDecl(schema.Shape):
     test_duration: Optional[Union[TestDuration, Unknown]] = None
     ci: Optional[Union[Ci, Unknown]] = None
     services: Optional[Union[Services, Unknown]] = None
-    delivery: Optional[Union[list[Delivery], Unknown]] = None
     issues: Optional[Union[Issues, Unknown]] = None
     checks: Optional[Union[Checks, Unknown]] = None
     ndf_policies: Optional[Union[NdfPolicies, Unknown]] = None
     instructions: Optional[Union[Instructions, Unknown]] = None
     materials: Optional[Union[Materials, Unknown]] = None
     docs: Optional[Union[Docs, Unknown]] = None
-    production_merge: Optional[Union[ProductionMerge, Unknown]] = None
+    # ブランチ戦略の宣言（#3672）。形と組み合わせの規則は JSON Schema（`BRANCH_STRATEGY_DEFS`）だけが持ち、
+    # `lib/branch_strategy.py` の `validate` が jsonschema で確かめる。ここは置き場だけを許す
+    branch_strategy: Optional[dict] = None
     analysis: Optional[Analysis] = None
 
     model_config = {**schema.Shape.model_config, "populate_by_name": True}
@@ -338,8 +334,18 @@ def validate_item(key: str, value) -> None:
         raise schema.ShapeError(f"{key}: 不明は答えの unknown で渡す", [(key, "不明は答えの unknown で渡す")])
 
 
+# `$defs/BranchStrategy` の本文（#3672）。pydantic では if/then の組み合わせの規則を書けないため、JSON のまま持って差し込む
+BRANCH_STRATEGY_DEFS = Path(__file__).resolve().parents[1] / "data" / "branch-strategy.schema.json"
+
+
 def json_schema() -> str:
     """公開する JSON Schema の本文（生成物。`project.schema.json` に置く）。"""
     body = ProjectDecl.model_json_schema(by_alias=True)
+    defs = json.loads(BRANCH_STRATEGY_DEFS.read_text(encoding="utf-8"))
+    body["$defs"].update({k: v for k, v in defs.items() if not k.startswith("$")})
+    # 届け先の行（`release.deliveries`）の形は pydantic の `Delivery` が持つ。`$defs/BranchStrategy` から参照する
+    rows = TypeAdapter(list[Delivery]).json_schema(by_alias=True, ref_template="#/$defs/{model}")
+    body["$defs"].update(rows.get("$defs") or {})
+    body["properties"]["branch_strategy"] = {"$ref": "#/$defs/BranchStrategy"}
     body = {"$schema": "https://json-schema.org/draft/2020-12/schema", "$id": SCHEMA_URL, **body}
     return json.dumps(body, ensure_ascii=False, indent=2) + "\n"

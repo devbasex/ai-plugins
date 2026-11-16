@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -15,12 +16,27 @@ import pytest
 
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS / "lib"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import branch_strategy  # noqa: E402
 import delivery  # noqa: E402
 import gh_call  # noqa: E402
-import project_decl  # noqa: E402
 import release_case as rc  # noqa: E402
+import strategy_fixture  # noqa: E402
 
 REPO = SCRIPTS.parents[2]
+
+
+def declare_admin(monkeypatch, admin: bool, section: dict | None = None) -> None:
+    """場合の判定が読むブランチ戦略の宣言を、迂回の宣言（`merge.admin`）が `admin` のものに差し替える。"""
+    sec = section or strategy_fixture.section("web-develop")
+    sec["merge"] = {**sec["merge"], "admin": admin, **({"method": "direct"} if admin else {})}
+    monkeypatch.setattr(rc.repo, "branch_strategy_of", lambda root: branch_strategy.Strategy(sec))
+
+
+@pytest.fixture(autouse=True)
+def _no_admin(monkeypatch):
+    """既定は迂回の宣言の無い宣言（テストの作業ディレクトリの宣言を読まない）。"""
+    declare_admin(monkeypatch, False)
 
 
 def pr_rule(n):
@@ -84,23 +100,6 @@ def test_case_trail_attributes(case, user_trail, mvv_trail):
     assert c.mvv_may_trail == (c.trail_approval and not c.human_approval)
 
 
-@pytest.mark.parametrize(
-    "decl, admin",
-    [
-        ({"production_merge": {"admin": True}}, True),
-        ({}, False),
-        ({"production_merge": {"admin": False}}, False),
-        ({"production_merge": {"admin": "true"}}, False),
-        ({"production_merge": {"unknown": "決めていない"}}, False),
-        ({"production_merge": True}, False),
-    ],
-)
-def test_production_admin_is_true_only_for_json_true(monkeypatch, decl, admin):
-    """#3506 の I1: `production_merge.admin` が JSON の true のときだけ迂回の宣言があるとみなす。"""
-    monkeypatch.setattr(project_decl, "read_project_decl", lambda root: decl)
-    assert project_decl.production_admin(".") is admin
-
-
 def fake(table):
     calls = []
 
@@ -114,25 +113,94 @@ def fake(table):
     return run, calls
 
 
-def test_read_approvals_falls_back_to_branch_protection(monkeypatch):
-    run, _ = fake({"rules/branches/main": (0, json.dumps([pr_rule(1)]))})
+UNPROTECTED = (0, json.dumps({"protected": True, "protection": {"enabled": False}}))
+CLASSIC_ON = (0, json.dumps({"protected": True, "protection": {"enabled": True}}))
+NOT_FOUND = (1, "gh: Not Found (HTTP 404)")
+
+
+def test_read_approvals_reads_the_same_facts_as_rule_facts(monkeypatch):
+    """承認数は ruleset と従来のブランチ保護を重ねた事実から引く（多いほう）。読めなければ None と理由。"""
+    classic = {"required_pull_request_reviews": {"required_approving_review_count": 2}}
+    run, _ = fake(
+        {"rules/branches/main": (0, json.dumps([pr_rule(1)])), "branches/main/protection": NOT_FOUND, "{repo}/branches/main": UNPROTECTED}
+    )
     monkeypatch.setattr(gh_call, "RUNNER", run)
     assert rc.read_approvals(".", "main") == (1, "")
-    run, _ = fake({"rules/branches/main": (0, "[]"), "protection/required_pull_request_reviews": (1, "gh: Not Found (HTTP 404)")})
+    run, _ = fake({"rules/branches/main": (0, "[]"), "branches/main/protection": NOT_FOUND, "{repo}/branches/main": UNPROTECTED})
     monkeypatch.setattr(gh_call, "RUNNER", run)
     assert rc.read_approvals(".", "main") == (0, "")
-    run, _ = fake(
-        {
-            "rules/branches/main": (0, "[]"),
-            "protection/required_pull_request_reviews": (0, json.dumps({"required_approving_review_count": 2})),
-        }
-    )
+    run, _ = fake({"rules/branches/main": (0, json.dumps([pr_rule(1)])), "branches/main/protection": (0, json.dumps(classic))})
     monkeypatch.setattr(gh_call, "RUNNER", run)
     assert rc.read_approvals(".", "main") == (2, "")
     run, _ = fake({})
     monkeypatch.setattr(gh_call, "RUNNER", run)
     n, why = rc.read_approvals(".", "main")
     assert n is None and "読めない" in why
+
+
+def test_read_approvals_reads_only_what_the_count_needs(monkeypatch):
+    """#3672 の round 9: 承認数だけが要る経路は迂回の可否（rulesets/<id>）を読まず、従来の保護が無い（protection.enabled が偽）
+    ときは保護の照会を省く。ruleset 1 件・従来の保護なしの本番ブランチで gh の照会は 2 回。"""
+    rule = {**pr_rule(1), "ruleset_id": 22}
+    run, calls = fake({"rules/branches/main": (0, json.dumps([rule])), "{repo}/branches/main": UNPROTECTED})
+    monkeypatch.setattr(gh_call, "RUNNER", run)
+    assert rc.read_approvals(".", "main") == (1, "")
+    assert [c.split()[-1] for c in calls] == ["repos/{owner}/{repo}/rules/branches/main", "repos/{owner}/{repo}/branches/main"]
+    # 迂回の可否が要る経路（land・測定）は従来どおり ruleset を読む
+    run, calls = fake(
+        {
+            "rules/branches/main": (0, json.dumps([rule])),
+            "rulesets/22": (0, json.dumps({"current_user_can_bypass": "never"})),
+            "{repo}/branches/main": UNPROTECTED,
+        }
+    )
+    monkeypatch.setattr(gh_call, "RUNNER", run)
+    assert rc.read_rule_facts(".", "main") == rc.RuleFacts(True, 1, False, False, "never")
+    assert any("rulesets/22" in c for c in calls)
+
+
+@pytest.mark.parametrize("rules", [(0, "[]"), (1, "gh: Not Found (HTTP 404)")])
+def test_read_rule_facts_reads_branch_protection_without_ruleset(monkeypatch, rules):
+    """ruleset が無い本番ブランチは従来のブランチ保護を読み、保護があれば「保護なし」（早送りの経路）にしない。"""
+    protection = {
+        "required_pull_request_reviews": {"required_approving_review_count": 1},
+        "required_status_checks": {"strict": True},
+        "enforce_admins": {"enabled": False},
+    }
+    run, _ = fake({"rules/branches/main": rules, "branches/main/protection": (0, json.dumps(protection))})
+    monkeypatch.setattr(gh_call, "RUNNER", run)
+    assert rc.read_rule_facts(".", "main") == rc.RuleFacts(True, 1, False, True, "always")
+    run, _ = fake(
+        {
+            "rules/branches/main": rules,
+            "branches/main/protection": (1, "gh: Branch not protected (HTTP 404)"),
+            "{repo}/branches/main": UNPROTECTED,
+        }
+    )
+    monkeypatch.setattr(gh_call, "RUNNER", run)
+    assert rc.read_rule_facts(".", "main") == rc.RuleFacts(False, 0, False, False, None)
+    run, _ = fake({"rules/branches/main": rules})  # 保護を読めない（403）なら止める
+    monkeypatch.setattr(gh_call, "RUNNER", run)
+    assert rc.read_rule_facts(".", "main") is None
+
+
+def test_read_rule_facts_does_not_read_hidden_protection_as_none(monkeypatch):
+    """管理者でない利用者には保護の照会が 404 を返しうる。保護がある（protection.enabled）なら読めない（None）とし、保護なしにしない。"""
+    run, _ = fake({"rules/branches/main": (0, "[]"), "branches/main/protection": NOT_FOUND, "{repo}/branches/main": CLASSIC_ON})
+    monkeypatch.setattr(gh_call, "RUNNER", run)
+    assert rc.read_rule_facts(".", "main") is None
+
+
+def test_read_rule_facts_overlays_ruleset_and_branch_protection(monkeypatch):
+    """ruleset（削除の禁止だけ）と従来の保護（必須レビュー・最新の取り込み）を併用する本番ブランチは、両方を重ねて読む。"""
+    classic = {
+        "required_pull_request_reviews": {"required_approving_review_count": 1},
+        "required_status_checks": {"strict": True},
+        "enforce_admins": {"enabled": True},
+    }
+    run, _ = fake({"rules/branches/main": (0, json.dumps([{"type": "deletion"}])), "branches/main/protection": (0, json.dumps(classic))})
+    monkeypatch.setattr(gh_call, "RUNNER", run)
+    assert rc.read_rule_facts(".", "main") == rc.RuleFacts(True, 1, False, True, "never")
 
 
 def _decl(rows):
@@ -151,7 +219,7 @@ def test_case_of_without_cd_does_not_call_gh(monkeypatch):
 
 def test_case_of_ai_plugins_shape_is_cd_no_review(monkeypatch):
     monkeypatch.setattr(delivery, "load_delivery", lambda root: _decl([AUTO]))
-    run, _ = fake({"rules/branches/main": (0, json.dumps([pr_rule(0)]))})
+    run, _ = fake({"rules/branches/main": (0, json.dumps([pr_rule(0)])), "{repo}/branches/main": UNPROTECTED})
     monkeypatch.setattr(gh_call, "RUNNER", run)
     assert rc.case_of(".").case == rc.CD_NO_REVIEW
 
@@ -165,28 +233,29 @@ def test_case_of_raises_on_broken_decl(monkeypatch):
 @pytest.mark.parametrize("admin, case", [(True, rc.CD_ADMIN), (False, rc.CD_REVIEW)])
 def test_case_of_reads_the_admin_declaration(monkeypatch, admin, case):
     monkeypatch.setattr(delivery, "load_delivery", lambda root: _decl([AUTO]))
-    monkeypatch.setattr(project_decl, "production_admin", lambda root: admin)
-    run, _ = fake({"rules/branches/main": (0, json.dumps([pr_rule(1)]))})
+    declare_admin(monkeypatch, admin)
+    run, _ = fake({"rules/branches/main": (0, json.dumps([pr_rule(1)])), "{repo}/branches/main": UNPROTECTED})
     monkeypatch.setattr(gh_call, "RUNNER", run)
     assert rc.case_of(".").case == case
 
 
 def test_case_of_stays_cd_no_review_when_approvals_are_unreadable(monkeypatch):
     monkeypatch.setattr(delivery, "load_delivery", lambda root: _decl([AUTO]))
-    monkeypatch.setattr(project_decl, "production_admin", lambda root: True)
+    declare_admin(monkeypatch, True)
     run, _ = fake({})
     monkeypatch.setattr(gh_call, "RUNNER", run)
     assert rc.case_of(".").case == rc.CD_NO_REVIEW
 
 
-def test_ai_plugins_declaration_is_cd_admin(monkeypatch):
-    """受け入れ条件 9: ai-plugins の宣言を場合の判定に通すと、承認数 1 で cd-admin になる。"""
-    decl = json.loads((REPO / ".ndf" / "project.json").read_text(encoding="utf-8"))
-    monkeypatch.setattr(project_decl, "read_project_decl", lambda root: decl)
+def test_ai_plugins_declaration_is_cd_review(monkeypatch):
+    """受け入れ条件 9: ai-plugins の宣言を場合の判定に通すと、承認数 1 で cd-review になる（#3672 の手順 2 で
+    merge-queue・管理者の迂回なしへ移した）。迂回の宣言で cd-admin になる経路は test_case_of_reads_the_admin_declaration が見る。"""
+    sec = json.loads((REPO / ".ndf" / "project.json").read_text(encoding="utf-8"))[branch_strategy.SECTION]
+    monkeypatch.setattr(rc.repo, "branch_strategy_of", lambda root: branch_strategy.Strategy(sec))
     monkeypatch.setattr(delivery, "load_delivery", lambda root: _decl([AUTO]))
-    run, _ = fake({"rules/branches/main": (0, json.dumps([pr_rule(1)]))})
+    run, _ = fake({"rules/branches/main": (0, json.dumps([pr_rule(1)])), "{repo}/branches/main": UNPROTECTED})
     monkeypatch.setattr(gh_call, "RUNNER", run)
-    assert rc.case_of(".").case == rc.CD_ADMIN
+    assert rc.case_of(".").case == rc.CD_REVIEW
 
 
 # 現状固定（I-002）: decide_case が返す Case の全項目と、case_at・case_or_stop の経路。
@@ -233,9 +302,11 @@ def test_case_at_without_repository(tmp_path):
     assert rc.case_at(None) == expected
     assert rc.case_at("") == expected
     assert rc.case_at(tmp_path / "無い") == expected
+    assert rc.case_at(tmp_path) == expected  # git の木でないディレクトリ（宣言を探す木が無い）
 
 
 def test_case_at_on_unreadable_declaration(monkeypatch, tmp_path):
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)  # git の木でなければリポジトリが無い（CD の無い場合）
     monkeypatch.setattr(delivery, "load_delivery", lambda root: delivery.DeliveryDecl(problems=["壊れた"]))
     assert rc.case_at(tmp_path) == rc.Case(rc.NO_CD, *_NO_CD, "宣言を読めない")
     with pytest.raises(rc.CaseUnreadable):
@@ -243,8 +314,9 @@ def test_case_at_on_unreadable_declaration(monkeypatch, tmp_path):
 
 
 def test_case_at_delegates_to_case_of(monkeypatch, tmp_path):
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)  # git の木でなければリポジトリが無い（CD の無い場合）
     monkeypatch.setattr(delivery, "load_delivery", lambda root: _decl([AUTO]))
-    run, _ = fake({"rules/branches/main": (0, json.dumps([pr_rule(0)]))})
+    run, _ = fake({"rules/branches/main": (0, json.dumps([pr_rule(0)])), "{repo}/branches/main": UNPROTECTED})
     monkeypatch.setattr(gh_call, "RUNNER", run)
     assert rc.case_at(tmp_path) == rc.Case(rc.CD_NO_REVIEW, *_TRAIL, "本番チャネルの承認数が 0")
 

@@ -96,7 +96,7 @@ class PromoteParams:
 
 
 def plan_promote(a, repo: str, ci_wait: int, params: PromoteParams = PromoteParams(), condition: dict | None = None) -> dict:
-    """本番チャネルへ入れるリリースプラン（#1336 の F5）: ベースブランチ（a.base）から本番チャネル（a.production_branch）への Pull Request を
+    """本番チャネルへ入れるリリースプラン（#1336 の F5）: ベースブランチ（a.base）から本番チャネル（a.production）への Pull Request を
     `merged-steps.py promote` が作り（あれば使い）、リリース承認ゲートの後にマージする。後片付けはしない（head はベースブランチ）。
     マージの後に cd-result が CD の結果を読み、record（`release-steps.py record --promote`）がリリースの Pull Request へリリース記録を書き、
     その PR を計画の Pull Request にする（まとめの close が `{queue_record}` で探す。#837・#3126）。record が落ちたら judge-record へ進み、
@@ -109,7 +109,7 @@ def plan_promote(a, repo: str, ci_wait: int, params: PromoteParams = PromotePara
       確かめたコミットのときだけマージする（#1529）。note か promote が落ちたら handoff が承認ゲートへ落とす
     """
     mvv, verify = params.mvv, params.verify
-    head, base = a.base, params.production or a.production_branch
+    head, base = a.base, params.production or a.production
     if not base:
         raise DeclError(f"本番チャネルへのマージに要る本番チャネルが無い（{PRODUCTION_SOURCES}）")
     promote = f"{MERGED_PY} promote --head {shlex.quote(head)} --base {shlex.quote(base)}"

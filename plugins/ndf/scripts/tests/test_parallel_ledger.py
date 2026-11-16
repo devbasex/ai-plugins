@@ -438,3 +438,13 @@ def test_ended_lanes_reads_lane_end_rows(tmp_path):
     plg.append_ledger_row(tmp_path, "p1", "lane_end", "lane_end:la", {"kind": "lane_end", "id": "la", "lane": "la"}, by="la")
     plg.append_ledger_row(tmp_path, "p1", "request", "request:r1", {"id": "r1", "lane": "lb"}, by="lb")
     assert plg.ended_lanes(tmp_path, "p1") == {"la"}
+
+
+def test_a_reused_row_is_not_restored_into_the_workflow_state(tmp_path):
+    """#3608 の I8: 答えの引き継ぎの行（reused）は台帳に残るが、耐久ワークフローの状態へ反映しない。"""
+    plg.append_ledger_row(tmp_path, "p1", "opened", "opened:1", None)
+    _add(tmp_path, _req(1))
+    msg = {"kind": "reused", "id": "p1-rel1-qa", "lane": "p1-rel1", "source": "s", "target": "#1", "ledger_id": "L1", "answered": True}
+    assert plg.append_ledger_row(tmp_path, "p1", "reused", "reused:L1", msg, by="p1-rel1")
+    assert "reused" in plg.kinds(tmp_path, "p1")
+    assert [r["kind"] for r in plg.restore(tmp_path, "p1")["rows"]] == ["request"]

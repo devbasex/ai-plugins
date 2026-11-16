@@ -16,12 +16,14 @@ from supervise_lib.release_flow import fast_flow_refusal
 from supervise_lib.design_merge import plan_design_merge
 from supervise_lib.sprint_bundles import apply_bundle_design, bundle_refusal
 from supervise_lib.review_units import fast_review_row
-from supervise_lib.sprint_waves import design_read, flow_head, pin_flow, plan_advise_design, plan_design_results, plan_fast_check, with_base
+from supervise_lib.decl import pin_flow
+from supervise_lib.sprint_waves import design_read, flow_head, plan_advise_design, plan_design_results, plan_fast_check, with_base
 from supervise_lib.sprint_waves import plan_fast_impl, plan_mvv_design, plan_mvv_release, plan_sprint_branch, plan_sprint_check
 from supervise_lib.sprint_waves import plan_sprint_design, plan_sprint_release, sprint_branch, sprint_branch_first, sprint_impl_plans
 from supervise_lib.new_args import NEW_ARGS
 from supervise_lib.paths import CHECK_PY, SELF
-from supervise_lib.procedures import sprint_out, with_record
+from supervise_lib.decl import sprint_out
+from supervise_lib.procedures import with_record
 from supervise_lib.release_templates import strip_suffix
 from supervise_lib.release_verify import release_verify_steps
 from supervise_lib.plan import QUEUE_PRS, sprint_state_path
@@ -30,7 +32,7 @@ from supervise_lib.sprint_routes import (
     normal_gate_2,
     normal_prod_waves,
     MVV_PACES,
-    dev_channel_of,
+    trial_refusal,
     has_record,
     has_release_template,
     pace_decl,
@@ -55,7 +57,7 @@ def parallel_lane(repo: str) -> tuple[str, str] | None:
 
 
 def release_lane(a, repo: str) -> tuple[str, str] | None:
-    """まとめたリリースへ依頼を送るレーンなら `parallel_lane` の値。取り込み方の行が単位を選ぶ（`selected`）なら、まとめた
+    """まとめたリリースへ依頼を送るレーンなら `parallel_lane` の値。取り込み方の行が単位を選ぶ（`release_branch`）なら、まとめた
     リリースは組まないため None（レーンもリリース承認ゲートと自分の本番のプランで出す。#3121）。"""
     return None if sprint_flow(a).row.selects_units else parallel_lane(repo)
 
@@ -171,7 +173,8 @@ def close_plan(a, repo: str) -> dict:
     stats = f"{CHECK_PY} stats --root {shlex.quote(repo)}"
     record_pr = str(a.record_pr) if getattr(a, "record_pr", None) else record_pr_ref(a)
     verify = has_record(record_pr)
-    target = sprint_flow(a).doc_target(sprint_branch(a))  # 確定仕様化の PR の宛先（#3121）
+    # 確定仕様化の PR の宛先（#3121）。取り込みの後に組むため、trunk ではスプリントブランチでなく本番ブランチ
+    target = sprint_flow(a).pr_target("doc", sprint_branch(a), integrated=True)
     plan = with_decls({
             "フェーズ": "まとめ",
             "課題": a.issue,
@@ -238,8 +241,7 @@ def pace_refusal(a) -> str | None:
         return f".ndf/pace.json の {name}.verify（導入の確認のコマンド）が無い"
     if a.mode not in sec["modes"]:
         return f"モード {a.mode} は {name} に入れられない（入れられるモード: {' / '.join(sec['modes'])}）"
-    channel = dev_channel_of(a)
-    if why := (fast_flow_refusal(a, pin_flow) if name == "fast" else None) or (None if channel.ok else channel.reason):
+    if why := (fast_flow_refusal(a, pin_flow) if name == "fast" else None) or trial_refusal(a, name):
         return why
     mroot = next((r for r in roots if any((r / ".ndf" / f).is_file() for f in ("mvv.md", "mvv.json"))), roots[0])
     return mvv_refusal(a.state, mroot, name)
@@ -266,7 +268,7 @@ def advises(a, closing: bool = False) -> bool:
 
 def has_prod_branch(a) -> bool:
     """本番のブランチ（`PRODUCTION_SOURCES` の順で決まる値）があるか。"""
-    return bool(getattr(a, "production_branch", None))
+    return bool(getattr(a, "production", None))
 
 
 PACE_PLANS = {"fast": fast_sprint_plans, "auto": auto_sprint_plans}  # 進め方ごとのステージの組み立て（normal は sprint_plans）
@@ -321,8 +323,8 @@ def sprint_command(a, drop: tuple[str, ...] = (), design: list[int] | None = Non
     """sprint が受ける引数をすべて写した起動の形。drop の引数を外し、design を渡せば --design へ足す。
     進め方を断ったときは --pace と --state を外した normal の形を示す。"""
     words = ["python3", str(SELF), "new", "sprint"]
-    for name, _, allowed in NEW_ARGS:
-        value = getattr(a, name.lstrip("-").replace("-", "_"), None)
+    for name, opts, allowed in NEW_ARGS:
+        value = getattr(a, opts.get("dest") or name.lstrip("-").replace("-", "_"), None)
         if name == "--design" and design:
             value = [*(value or []), *(n for n in design if n not in (value or []))]
         if "sprint" not in allowed.split() or name in drop or value in (None, [], False):

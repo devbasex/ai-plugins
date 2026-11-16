@@ -21,14 +21,11 @@ ITEM_KEYS = (
     "test_duration",
     "ci",
     "services",
-    "delivery",
     "issues",
     "checks",
     "ndf_policies",
     "instructions",
     "materials",
 )
-BRANCHES = "branches"  # P6。宣言では worktree.json の base_branch・production_branch へ書く
-BRANCH_FLOW = "branch_flow"  # P6 のブランチ運用（#3121）。宣言では worktree.json の branch_flow へ書く
 DECL_FILE = project_decl.DECL
 WORKTREE_FILE = repo.WORKTREE_DECL

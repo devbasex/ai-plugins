@@ -15,6 +15,7 @@ SCRIPTS = Path(__file__).resolve().parents[1]
 PY = sys.executable
 sys.path.insert(0, str(SCRIPTS))
 from supervise_lib import engine, pr as pr_step, sprint_waves  # noqa: E402
+import strategy_fixture  # noqa: E402
 
 H1 = "設計の承認: 題から目的が読めない → 題と承認資料の先頭で読める（#1）"
 DOC = "issues/issue-1-design.md"
@@ -208,7 +209,9 @@ def test_sync_title_failure_does_not_stop_the_plan(doc_dir, gh_log, monkeypatch,
 
 
 def plan_args(tmp_path: Path) -> SimpleNamespace:
-    return SimpleNamespace(base="main", mode="standard", name="m1", worktree=str(tmp_path), state=str(tmp_path / "state"))
+    return SimpleNamespace(
+        base="main", mode="standard", name="m1", worktree=str(tmp_path), state=str(tmp_path / "state"), flow=strategy_fixture.snapshot()
+    )
 
 
 def steps_of(plan: dict) -> dict:

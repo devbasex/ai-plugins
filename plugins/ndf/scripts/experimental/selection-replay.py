@@ -37,7 +37,7 @@ sys.path.insert(0, str(SCRIPTS / "lib"))
 sys.path.insert(0, str(SCRIPTS))
 import deps  # noqa: E402
 
-deps.require("md", "schema")
+deps.require("md", "schema", "jsonschema", "waits")
 
 import touch_estimate as te  # noqa: E402
 from step_result import EXIT_PRECONDITION, EXIT_UNREADABLE, emit, result  # noqa: E402

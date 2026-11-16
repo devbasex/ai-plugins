@@ -18,6 +18,7 @@ from supervise_lib import engine, pr as pr_step  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import inproc  # noqa: E402
 from gh_fake import install_gh_pr_create  # noqa: E402
+import strategy_fixture  # noqa: E402
 
 HEADING = "## 設計と違う点"
 
@@ -44,7 +45,7 @@ def new_impl(tmp_path, *extra) -> dict:
         "--out",
         str(out),
         *extra,
-        cwd=SCRIPTS.parents[2],
+        cwd=strategy_fixture.like_root(),  # 移行の前の ai-plugins の形の写し（`like_root`）
     )
     assert p.returncode == 0, p.stderr
     return json.loads(out.read_text())

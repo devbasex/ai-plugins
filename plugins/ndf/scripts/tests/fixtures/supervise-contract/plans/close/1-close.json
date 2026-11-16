@@ -253,7 +253,7 @@
       "next": "end"
     }
   ],
-  "base_branch": "main",
+  "ベースブランチ": "main",
   "記録": "<NDF>/scripts/projects-sync.sh",
   "スプリント状態": "<TMP>/out/sprint/sprint.json"
 }

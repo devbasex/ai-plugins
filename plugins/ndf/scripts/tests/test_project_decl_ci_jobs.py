@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
@@ -50,7 +49,11 @@ def test_declarations_without_the_keys_still_read():
 
 
 def test_this_repository_declaration_is_valid():
-    model.validate_decl(json.loads((SCRIPTS.parents[2] / ".ndf" / "project.json").read_text(encoding="utf-8")))
+    """このリポジトリの宣言を、移行のコマンドで移した中身で検査する。ai-plugins の `.ndf/` は #3672 の手順 2（移行の PR）まで
+    旧いキー（`delivery`・`production_merge`）のまま残し、手順 2 の後は移した中身がそのまま読まれる。"""
+    import strategy_fixture
+
+    model.validate_decl(strategy_fixture.migrated_ndf()["project.json"])
 
 
 class FakeGh:

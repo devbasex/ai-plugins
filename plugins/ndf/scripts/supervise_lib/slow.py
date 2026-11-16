@@ -1,7 +1,7 @@
 """遅れの見張り（#1142 の C1）。run・work・drive のステップの待ちの中で、想定より遅いステップに手を打つ。
 
 `SlowWatch` は `Engine` が持ち、ハンドラーからは `ctx.slow` として使う。`ctx` から読むもの: `plan`・`steps`・
-`cwd`・`state`（途中の報告と worker の行）・`claude`（判定の claude -p）・`base_branch()`・`plan_path`。
+`cwd`・`state`（途中の報告と worker の行）・`claude`（判定の claude -p）・`base_branch()`（計画か宣言の起点のブランチ）・`plan_path`。
 """
 
 from __future__ import annotations

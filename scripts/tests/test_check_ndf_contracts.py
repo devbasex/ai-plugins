@@ -35,7 +35,7 @@ def main():
     a = ap.parse_args()
     v = os.environ.get("NDF_X")
     decl = repo.read_worktree_decl(a.root)[0]
-    base = decl.get("base_branch")
+    base = decl.get("guard")
     Path("out.json").write_text("{}")
     return 0
 
@@ -57,7 +57,7 @@ ENTRY = {
     "callers": ["plugins/ndf/skills/a/SKILL.md"],
     "args": {"options": ["--root"], "positionals": []},
     "env": ["NDF_X"],
-    "settings": [{"file": "worktree.json", "keys": ["base_branch"]}],
+    "settings": [{"file": "worktree.json", "keys": ["guard"]}],
     "stdin": "none",
     "stdout": "none",
     "writes": ["out"],
@@ -70,7 +70,7 @@ SETTING = {
     "place": "worktree",
     "scope": "team",
     "readers": ["plugins/ndf/scripts/lib/repo.py:read_worktree_decl"],
-    "keys": {"base_branch": {"summary": "ベースブランチ"}},
+    "keys": {"guard": {"summary": "作業ツリーのガード"}},
 }
 
 
@@ -151,7 +151,7 @@ def test_draft_rejects_a_non_entrypoint(tree: Path):
     [
         ('ap.add_argument("--root")', 'ap.add_argument("--root")\n    ap.add_argument("--new")', "arg-undeclared", "--new"),
         ('os.environ.get("NDF_X")', 'os.environ.get("NDF_X") or os.getenv("NDF_Y")', "env-undeclared", "NDF_Y"),
-        ('decl.get("base_branch")', 'decl.get("base_branch") or decl.get("zzz")', "setting-undeclared", "worktree.json#zzz"),
+        ('decl.get("guard")', 'decl.get("guard") or decl.get("zzz")', "setting-undeclared", "worktree.json#zzz"),
         (
             'Path("out.json").write_text("{}")',
             'Path("out.json").write_text("{}")\n    open("other.json", "w")',
@@ -173,7 +173,7 @@ def test_reads_and_writes_outside_the_contract_fail(tree: Path, old, new, kind, 
     [
         ('ap.add_argument("--root")', 'ap.add_argument("--rootx")', "arg:--root"),
         ('v = os.environ.get("NDF_X")', "v = None", "env:NDF_X"),
-        ('base = decl.get("base_branch")', "base = None", "setting:worktree.json#base_branch"),
+        ('base = decl.get("guard")', "base = None", "setting:worktree.json#guard"),
         ('Path("out.json").write_text("{}")', "pass", "write:out"),
     ],
 )
@@ -190,11 +190,11 @@ def test_setting_opened_outside_its_reader_fails(tree: Path):
 
 
 def test_duplicate_setting_needs_an_allow_item(tree: Path):
-    s = dict(SETTING, keys={"base_branch": {"summary": "x", "duplicates": "project.json#base"}})
+    s = dict(SETTING, keys={"guard": {"summary": "x", "duplicates": "project.json#base"}})
     wj(tree / "plugins/ndf/contracts/settings/worktree.json.json", s)
     run(tree, "--render")
     code, r = run(tree)
-    assert ("setting-duplicate", "worktree.json#base_branch") in kinds(r)
+    assert ("setting-duplicate", "worktree.json#guard") in kinds(r)
 
 
 def test_callers_must_exist_and_name_the_entrypoint(tree: Path):
@@ -233,10 +233,10 @@ def test_malformed_item_stops_with_2(tree: Path):
 def test_key_place_main_is_accepted_and_other_values_stop_with_2(tree: Path):
     """認可に関わるキーはキーごとの place でメインディレクトリから読むと宣言できる（#2363）。"""
     f = tree / "plugins/ndf/contracts/settings/worktree.json.json"
-    wj(f, dict(SETTING, keys={"base_branch": {"summary": "ベースブランチ", "place": "main"}}))
+    wj(f, dict(SETTING, keys={"guard": {"summary": "作業ツリーのガード", "place": "main"}}))
     assert run(tree, "--render")[0] == 0
     assert run(tree)[0] == 0
-    wj(f, dict(SETTING, keys={"base_branch": {"summary": "ベースブランチ", "place": "tmp"}}))
+    wj(f, dict(SETTING, keys={"guard": {"summary": "作業ツリーのガード", "place": "tmp"}}))
     assert run(tree)[0] == 2
 
 
@@ -294,7 +294,7 @@ def test_renaming_an_allow_item_with_the_same_kind_and_name_passes(tree: Path):
 
 def test_moving_two_allow_items_with_the_same_kind_and_name_offsets_both(monkeypatch):
     """同じ kind・name の項目を 2 つ同時に付け替えても、消した 2 件で足した 2 件を相殺する。"""
-    sys.path.insert(0, str(REPO / "scripts"))
+    monkeypatch.setattr(sys, "path", [str(REPO / "scripts"), *sys.path])
     from contracts_lib import ratchet
 
     rows = {f"{p}.json": {"kind": "env-undeclared", "name": "NDF_Y", "path": p} for p in ("a", "b", "c", "d")}
@@ -326,6 +326,24 @@ def test_first_version_before_ci_runs_the_check_is_initial(tree: Path):
 def test_ci_without_a_base_stops_with_3(tree: Path):
     code, r = run(tree, env=dict(env_clean(), CI="true"))
     assert code == 3
+
+
+def test_declared_base_without_jsonschema_stops_with_a_ratchet_error(tmp_path: Path, monkeypatch):
+    """#3672 の round 5: 宣言を読む部品が jsonschema を import できなければ、ModuleNotFoundError で落ちず、
+    --base か uv の環境を案内する RatchetError（CI の中では 3）で止まる。"""
+    monkeypatch.setattr(sys, "path", [str(REPO / "scripts"), *sys.path])
+    from contracts_lib import ratchet
+
+    lib = tmp_path / "plugins" / "ndf" / "scripts" / "lib"
+    lib.mkdir(parents=True)
+    (lib / "branch_strategy.py").write_text(
+        "class StrategyError(Exception):\n    pass\n\n\ndef load_strategy(root):\n    import jsonschema_absent_for_test\n",
+        encoding="utf-8",
+    )
+    monkeypatch.delitem(sys.modules, "branch_strategy", raising=False)
+    with pytest.raises(ratchet.RatchetError, match="--base"):
+        ratchet._declared_base(tmp_path)
+    sys.modules.pop("branch_strategy", None)
 
 
 # --- Checker.entry の分岐ごとの現状固定（I-001） ---
@@ -461,7 +479,7 @@ def test_entry_reads_with_file_item_passes(tree: Path):
 
 
 def test_entry_setting_without_settings_item_is_stale(tree: Path):
-    _entry(tree, settings=[{"file": "worktree.json", "keys": ["base_branch"]}, {"file": "nope.json", "keys": []}])
+    _entry(tree, settings=[{"file": "worktree.json", "keys": ["guard"]}, {"file": "nope.json", "keys": []}])
     code, r = run(tree)
     assert code == 1 and ("contract-stale", "setting:nope.json") in kinds(r)
 
@@ -500,7 +518,7 @@ def test_entry_external_contract_has_no_caller_check(tree: Path):
 def test_entry_reports_every_kind_at_once(tree: Path):
     edit(tree, 'ap.add_argument("--root")', 'ap.add_argument("--new")')
     edit(tree, 'os.environ.get("NDF_X")', 'os.getenv("NDF_Y")')
-    edit(tree, 'decl.get("base_branch")', 'decl.get("zzz")')
+    edit(tree, 'decl.get("guard")', 'decl.get("zzz")')
     edit(tree, 'Path("out.json").write_text("{}")', 'open("other.json", "w")')
     _entry(tree, reads=["nothing"], exit={"unknown": "不明"})
     (tree / "plugins/ndf/skills/a/SKILL.md").write_text("nothing\n")
@@ -513,7 +531,7 @@ def test_entry_reports_every_kind_at_once(tree: Path):
             ("env-undeclared", "NDF_Y"),
             ("contract-stale", "env:NDF_X"),
             ("setting-undeclared", "worktree.json#zzz"),
-            ("contract-stale", "setting:worktree.json#base_branch"),
+            ("contract-stale", "setting:worktree.json#guard"),
             ("file-undeclared", "other.json"),
             ("contract-stale", "write:out"),
             ("contract-stale", "read:nothing"),
@@ -558,9 +576,9 @@ def test_visit_call_env_reads(src, env, dynamic):
 
 
 def test_visit_call_get_on_reader_variable_is_a_setting_key():
-    src = "def g():\n    d = read_decl()\n    d.get('base_branch')\n    other.get('x')\n"
+    src = "def g():\n    d = read_decl()\n    d.get('guard')\n    other.get('x')\n"
     f = _scan_call(src, settings={"worktree.json": {}}, readers={"lib.py:read_decl": ["worktree.json"]})
-    assert f.setting_keys == {("worktree.json", "base_branch"): 3}
+    assert f.setting_keys == {("worktree.json", "guard"): 3}
     assert f.env == {}
 
 
@@ -1050,7 +1068,7 @@ def test_declared_writer_of_a_passed_file_is_not_file_dynamic(tree: Path):
 
 def test_base_knows_runs_once_per_kind(monkeypatch):
     """merge-base の検査を読む git show は、種類ごとに 1 回だけ起こす。"""
-    sys.path.insert(0, str(REPO / "scripts"))
+    monkeypatch.setattr(sys, "path", [str(REPO / "scripts"), *sys.path])
     from contracts_lib import ratchet
 
     calls = []

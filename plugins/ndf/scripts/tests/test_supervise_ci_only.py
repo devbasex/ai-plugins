@@ -23,7 +23,8 @@ def _repo(tmp_path, only=True):
     decl["test"]["suites"].append(LINT)
     if only:
         decl["test"]["ci"]["only"] = True
-    (root / ".ndf" / "project.json").write_text(json.dumps(decl))
+    path = root / ".ndf" / "project.json"
+    path.write_text(json.dumps({**decl, "branch_strategy": json.loads(path.read_text())["branch_strategy"]}))  # ブランチ戦略の宣言は残す
     return root
 
 
@@ -84,7 +85,8 @@ def test_whole_lint_from_the_template_keeps_the_target_paths(tmp_path):
     root = foreign_repo(tmp_path)
     decl = json.loads(json.dumps(CARMO_PROJECT))
     decl["test"]["ci"]["only"] = True
-    (root / ".ndf" / "project.json").write_text(json.dumps(decl))
+    path = root / ".ndf" / "project.json"
+    path.write_text(json.dumps({**decl, "branch_strategy": json.loads(path.read_text())["branch_strategy"]}))
     _, steps = _steps(
         tmp_path, root, "impl", "--issue", "1", "--tests", "src", "--title", "T", "--test-kind", "lint", "--test-cmd", "mypy {paths}"
     )

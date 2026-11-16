@@ -300,19 +300,6 @@
     "compose_files": [],
     "databases": []
   },
-  "delivery": [
-    {
-      "target": "ndf プラグイン（Claude Code・Codex）",
-      "kind": "auto",
-      "trigger": ".github/workflows/release-cd.yml（main へのマージでタグと GitHub Release を作る）",
-      "channel": "production",
-      "versioned": true,
-      "publishes_release": true,
-      "result": {
-        "workflow": "release-cd.yml"
-      }
-    }
-  ],
   "issues": {
     "primary": "github",
     "others": [
@@ -1082,9 +1069,6 @@
       }
     ]
   },
-  "production_merge": {
-    "admin": true
-  },
   "analysis": {
     "analyzer": 3,
     "at": "2026-11-10T15:17:12+00:00",
@@ -1122,6 +1106,78 @@
       "ndf_policies": "9f70d0f7e679e584f06860208c0540040cb74a8b6c2161894239a60ebefc63ef",
       "instructions": "9137fe41c9b4a240dcee33f0311f83fb59a55b9165b80c22f8f20218dfc2a95f",
       "materials": "eec1b759fe58ecfcf4c8373becd6975fba410eebb3742cfa3142e56552c8e77b"
+    }
+  },
+  "branch_strategy": {
+    "kind": "plugin",
+    "release_strategy": "trunk",
+    "branches": {
+      "production": "main",
+      "base": "main"
+    },
+    "sprint": {
+      "start": "production",
+      "integrate": "check",
+      "doc_prs": "sprint"
+    },
+    "release": {
+      "form": "package-plugin",
+      "version_store": {
+        "kind": "plugin"
+      },
+      "tag": "{plugin}--v{version}",
+      "github_release": true,
+      "cd": {
+        "workflow": "release-cd.yml"
+      },
+      "deliveries": [
+        {
+          "target": "ndf プラグイン（Claude Code・Codex）",
+          "kind": "auto",
+          "trigger": ".github/workflows/release-cd.yml（main へのマージでタグと GitHub Release を作る）",
+          "channel": "production",
+          "versioned": true,
+          "publishes_release": true,
+          "result": {
+            "workflow": "release-cd.yml"
+          }
+        }
+      ],
+      "plugin": "ndf",
+      "runtimes": [
+        "claude",
+        "codex"
+      ]
+    },
+    "channels": [
+      {
+        "name": "stable",
+        "ref": "main"
+      }
+    ],
+    "approval": {
+      "target": "release_pr",
+      "via": "gate"
+    },
+    "merge": {
+      "actor": "ndf",
+      "method": "merge-queue",
+      "commit": "merge",
+      "admin": false
+    },
+    "verify": null,
+    "reviews": {
+      "impl": {
+        "checks": [],
+        "diff": "none"
+      },
+      "sprint": {
+        "checks": [
+          "cross-refactoring",
+          "cross-review"
+        ],
+        "diff": "unchecked"
+      }
     }
   }
 }

@@ -162,3 +162,41 @@ def test_design_approved_needs_a_label_or_the_users_answer_for_that_pr(tmp_path)
     assert (code, out["items"][0]["result"]) == (0, "added")
     assert ["pr", "edit", "2", "--add-label", "design-approved"] in calls
     assert design_merge.cmd_design_approved(2, str(state), lambda args: (1, "boom"))[1] == 2
+
+
+def test_design_approved_passes_a_merged_pr_with_the_mvv_approval(tmp_path):
+    """#3603 の I9: 承認ラベルも利用者の承認の記録も無いとき、マージ済みでその PR の MVV 判定の承認の記録があれば 0（ラベルは付けない）。
+    開いている PR と MVV 判定の記録だけ・マージ済みで記録が無いときは今どおり 10。"""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from supervise_lib import design_merge
+
+    calls = []
+
+    def gh(pr_state):
+        def run(args):
+            calls.append(args)
+            if args[:2] == ["pr", "view"]:
+                return (0, pr_state) if "state" in args else (0, "[]")
+            return 0, ""
+
+        return run
+
+    mvv = {
+        "name": "設計承認ゲート",
+        "what": "x",
+        "at": "2026-11-15T00:00:00Z",
+        "by": "mvv",
+        "verdict": "unknown",
+        "pr": 3,
+        "outcome": "approved",
+    }
+    state = tmp_path / "state.json"
+    state.write_text(json.dumps({"gates": [mvv, {**mvv, "pr": 4, "outcome": None}]}, ensure_ascii=False))
+    out, code = design_merge.cmd_design_approved(3, str(state), gh("MERGED\n"))
+    assert (code, out["items"]) == (0, [{"kind": "mvv", "result": "kept"}])
+    assert not any(a[:2] == ["pr", "edit"] for a in calls)
+    assert design_merge.cmd_design_approved(3, str(state), gh("OPEN\n"))[1] == 10
+    assert design_merge.cmd_design_approved(4, str(state), gh("MERGED\n"))[1] == 10  # outcome の無い記録は数えない
+    assert design_merge.cmd_design_approved(5, str(state), gh("MERGED\n"))[1] == 10  # 記録が無い
+    assert design_merge.cmd_design_approved(3, str(state), lambda args: (0, "[]") if "labels" in args else (1, "boom"))[1] == 2
+    assert design_merge.mvv_approval(None, 3) is None and design_merge.mvv_approval(str(tmp_path / "none.json"), 3) is None
