@@ -1577,16 +1577,15 @@ CD = [
 HAND = [{"kind": "manual", "target": "prod", "trigger": "手で流す", "versioned": False, "production": True}]
 
 
-def declare(main, delivery="absent", form=False):
-    """ベースブランチ develop・本番ブランチ main のブランチ戦略の宣言を置く。`delivery` は届け先の行（既定は書かない形）で、
+def declare(main, rows="absent", form=False):
+    """ベースブランチ develop・本番ブランチ main のブランチ戦略の宣言を置く。`rows` は届け先の行（既定は書かない形）で、
     文字列は宣言のファイルへそのまま書く。`form` が真ならリリースの形を雛形のある形（package-plugin）にする。"""
     pj = main / ".ndf" / "project.json"
     pj.unlink(missing_ok=True)
-    if isinstance(delivery, str) and delivery != "absent":
-        pj.write_text(delivery)
+    if isinstance(rows, str) and rows != "absent":
+        pj.write_text(rows)
         return
-    rows = None if delivery == "absent" else delivery
-    strategy_fixture.declare(main, "develop", "main", TEMPLATE_RELEASE if form else None, deliveries=rows)
+    strategy_fixture.declare(main, "develop", "main", TEMPLATE_RELEASE if form else None, deliveries=None if rows == "absent" else rows)
 
 
 def no_build_ran(main):

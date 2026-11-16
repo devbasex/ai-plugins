@@ -784,10 +784,13 @@ def test_conflicting_modes_apply_the_highest_to_every_issue(repo: Path, state: P
 
 
 def _declare(repo: Path, production: str, rows: list) -> None:
-    nd = repo / ".ndf"
-    nd.mkdir(exist_ok=True)
-    (nd / "worktree.json").write_text(json.dumps({"version": 1, "base_branch": "develop", "production_branch": production}))
-    (nd / "project.json").write_text(json.dumps({"delivery": rows}))
+    """ベースブランチ develop・本番ブランチ `production`・届け先の行 `rows` のブランチ戦略の宣言を置く。"""
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts" / "tests"))
+    import strategy_fixture
+
+    strategy_fixture.declare(repo, "develop", production, deliveries=rows)
 
 
 TRYGROUP_ROWS = [

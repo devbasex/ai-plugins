@@ -301,10 +301,10 @@ ROW = {"trigger": "マージ", "versioned": False}
 AUTO = [{**ROW, "kind": "auto", "channel": "base", "target": "stg"}, {**ROW, "kind": "auto", "channel": "production", "target": "prod"}]
 
 
-def _declare(main, delivery=None, form=False):
-    """ベースブランチ develop・本番ブランチ main のブランチ戦略の宣言（届け先の行 `delivery`・`form` なら package-plugin）を置く。"""
+def _declare(main, rows=None, form=False):
+    """ベースブランチ develop・本番ブランチ main のブランチ戦略の宣言（届け先の行 `rows`・`form` なら package-plugin）を置く。"""
     release = {"form": "package-plugin", "plugin": "ndf"} if form else None
-    strategy_fixture.declare(main, "develop", "main", release, deliveries=delivery)
+    strategy_fixture.declare(main, "develop", "main", release, deliveries=rows)
 
 
 @pytest.mark.parametrize(
