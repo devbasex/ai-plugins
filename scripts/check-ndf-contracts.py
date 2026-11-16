@@ -298,6 +298,19 @@ class Checker:
         for kind, path, name, detail in sorted(code):
             out.append(v(kind, path, name, detail))
         self.core(entries, out)
+        self.match_contract_usage(out)
+        self.check_index(out)
+        metrics = {
+            "entrypoints": len(entries),
+            "candidates": len(cands),
+            "files": len(self.c.files),
+            "settings": len(self.c.settings),
+            "env": len(self.c.env),
+        }
+        return out, metrics
+
+    def match_contract_usage(self, out: list[dict]) -> None:
+        """契約全体の整合: 設定キーの重複と、どのエントリポイントも使わない環境変数・ファイルの項目。"""
         for file, s in sorted(self.c.settings.items()):
             for key, k in s["keys"].items():
                 if "duplicates" in k:
@@ -313,17 +326,12 @@ class Checker:
             out.append(
                 v("contract-stale", f"{CONTRACTS}/files/{name}.json", name, "どのエントリポイントも書き読みしないファイルの項目。消す")
             )
+
+    def check_index(self, out: list[dict]) -> None:
+        """逆引き（index.md）が項目から作り直した中身と一致するか。"""
         idx = self.root / INDEX
         if not idx.is_file() or idx.read_text(encoding="utf-8") != render(self.c, self.root):
             out.append(v("index-stale", INDEX, "", "逆引きが項目と一致しない。python3 scripts/check-ndf-contracts.py --render を打つ"))
-        metrics = {
-            "entrypoints": len(entries),
-            "candidates": len(cands),
-            "files": len(self.c.files),
-            "settings": len(self.c.settings),
-            "env": len(self.c.env),
-        }
-        return out, metrics
 
 
 def judge(root: Path, found: list[dict], allow: list[dict], targets: set[str], reach=None) -> tuple[list[dict], int, int]:
