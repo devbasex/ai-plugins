@@ -16,13 +16,13 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
 import branch_strategy as bs
+import proc
 from strategy_rows import RELEASE_PREFIX
 from project_lib import branch_strategy_write as bw
 from release_lib.land import TRAILER_HEAD, TRAILER_PR, TRAILER_TIP
@@ -61,11 +61,6 @@ class Measured:
     candidates: list = field(default_factory=list)
 
 
-def _git_strategy_out(root: Path, *args: str) -> str | None:
-    r = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True)
-    return r.stdout if r.returncode == 0 else None
-
-
 def default_api(root: Path) -> Api:
     import release_case
 
@@ -76,8 +71,8 @@ def _default_branch(root: Path, api: Api) -> str | None:
     repo, _ = api("repos/{owner}/{repo}")
     if isinstance(repo, dict) and repo.get("default_branch"):
         return repo["default_branch"]
-    head = _git_strategy_out(root, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
-    return head.strip().split("/", 1)[-1] if head else None
+    head = proc.git_out(root, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+    return head.split("/", 1)[-1] if head else None
 
 
 def local_facts(root: Path, s: Samples) -> None:
@@ -166,14 +161,12 @@ def collect_samples(root: Path, api: Api, deadline: float, limit: int) -> Sample
 
 def _collect_production_commits(root: Path, s: Samples, limit: int) -> None:
     """本番ブランチの最初の親の履歴を 1 回の `git log` で読む。NDF が入れた取り込みの記録（trailer）の PR も事例にする。"""
-    ref = next(
-        (r for r in (f"origin/{s.production}", s.production) if _git_strategy_out(root, "rev-parse", "--verify", "--quiet", r)), None
-    )
+    ref = next((r for r in (f"origin/{s.production}", s.production) if proc.git_out(root, "rev-parse", "--verify", "--quiet", r)), None)
     if ref is None:
         s.unreadable.append("history")
         return
     fmt = f"%H%x00%P%x00%s%x00%(trailers:key={TRAILER_PR},key={TRAILER_HEAD},key={TRAILER_TIP},separator=%x1f)%x1e"
-    out = _git_strategy_out(root, "log", "--first-parent", f"-n{limit}", f"--format={fmt}", ref) or ""
+    out = proc.git_out(root, "log", "--first-parent", f"-n{limit}", f"--format={fmt}", ref) or ""
     known = {p["number"] for p in s.prs}
     for rec in out.split("\x1e"):
         parts = rec.strip("\n").split("\x00")
@@ -472,8 +465,8 @@ def classify_repo(root: Path, api: Api | None = None, presets: dict | None = Non
     presets = presets or bw.load_presets()
     api = api or default_api(root)
     ev = []
-    n = _git_strategy_out(root, "rev-list", "--count", "HEAD")
-    commits = int(n.strip()) if n and n.strip().isdigit() else None
+    n = proc.git_out(root, "rev-list", "--count", "HEAD")
+    commits = int(n) if n and n.isdigit() else None
     ev.append({"source": "repo", "ref": "commits", "value": str(commits)})
     existing = commits is None or commits > presets["evidence"]["new_repo_max_commits"]
     for kind, path in (
