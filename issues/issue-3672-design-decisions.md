@@ -128,8 +128,8 @@ merge queue を使えるか（Organization の public か、Enterprise Cloud の
 - `approval.via: review` は、本番ブランチの ruleset が PR のレビューの承認を求めるリポジトリのための値である。GitHub のレビューの承認を、リリース承認ゲートの答えとして読む。
   NDF は問いを送らず、証跡も書かない。2 つ目の承認（03-release の §1.2 のリリース 8・14・23）は、この値か ruleset の承認の数 0 で起きなくなる
 - `approval.via: gate` で ruleset がレビューの承認を求めるときは、組み合わせの不一致として止まる（I10）。2 つ目の承認を求める工程を作らない
-- マージの方式は `merge-queue`・`strict`・`direct` の 3 つにする（要求の未決 6）。`strict` は、NDF が head が本番ブランチの先端を含むかを確かめてからマージする方式で、
-  ruleset が無いリポジトリ（private の Free）でも NDF の確かめだけで働く。ruleset があれば GitHub も同じ規則を強制する
+- マージの方式は `merge-queue`・`strict`・`direct` の 3 つにする（要求の未決 6）。`strict` は、NDF が head が本番ブランチの先端を含むかを確かめてからマージする方式である。
+  ruleset が無いリポジトリ（private の Free）でも、NDF の確かめだけで働く。ruleset があれば GitHub も同じ規則を強制する
 - #3641 の `serial`（NDF が本番ブランチごとのロックを取り、一時のマージコミットで CI を回す）は採らない。merge queue と同じ役割を自前で作ることになり（LIB3・LIB4）、
   使えないリポジトリは `strict` で組み合わせを確かめられる
 - 管理者の迂回（`merge.admin: true`）は `direct` のときだけ許す。`merge-queue`・`strict` で迂回すると、組み合わせの確かめを飛ばす（#3572 の I17）

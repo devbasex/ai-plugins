@@ -5,7 +5,7 @@
 ## ai-plugins の値
 
 ai-plugins のセクションは、種類 `plugin` の既定（設計文書の「代表のリポジトリの種類の既定」）に測った名前を入れたものと一致させる（受け入れ条件 15）。測った名前は、本番ブランチ `main`・プラグイン `ndf`・ランタイム `claude` と `codex`・ワークフロー `release-cd.yml` である。
-決めた理由は [issue-3672-design-decisions.md](issue-3672-design-decisions.md) の決定 12、出典は [issue-3672-design-research.md](issue-3672-design-research.md) にある。
+決めた理由は [issue-3672-design-decisions.md](issue-3672-design-decisions.md) の決定 12 にある。出典は [issue-3672-design-research.md](issue-3672-design-research.md) にある。
 
 | 項目 | 値 | 出典 |
 | --- | --- | --- |

@@ -88,7 +88,7 @@
 | D25 | `domains/hooks/strict.py` | `delivery` の読み | 同上 |
 | D26 | `core/route/__init__.py`・`progress/command.py` | `base_branch`・`production_branch` の読み | 同上 |
 
-`domains/worktree/follow.py`・`session_decide.py`・`__init__.py` は `follow_branch` だけを読む。`follow_branch` は worktree の振る舞いの設定で `.ndf/worktree.json` に残し（決定 1）、追従先のブランチ名は新しいセクションの `branches.base` から読む。
+`domains/worktree/follow.py`・`session_decide.py`・`__init__.py` は `follow_branch` だけを読む。`follow_branch` は worktree の振る舞いの設定なので、`.ndf/worktree.json` に残す（決定 1）。追従先のブランチ名は新しいセクションの `branches.base` から読む。
 `domains/records/mvv.py`・`mvv_decide.py` の当たりは引数の名前 `base_branch` で、宣言を読んでいない。2 つとも一覧に載せない。
 
 **CI と補助のスクリプト**
