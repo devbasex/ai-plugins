@@ -183,7 +183,9 @@ def rule_facts_of(rules: list, bypasses: list[str | None]) -> RuleFacts:
         return RuleFacts(False, 0, False, False, None)
     kinds = {r.get("type") for r in rules if isinstance(r, dict)}
     up_to_date = any(
-        isinstance(r, dict) and r.get("type") == "required_status_checks" and (r.get("parameters") or {}).get("strict_required_status_checks_policy")
+        isinstance(r, dict)
+        and r.get("type") == "required_status_checks"
+        and (r.get("parameters") or {}).get("strict_required_status_checks_policy")
         for r in rules
     )
     known = [b for b in bypasses if b in _BYPASS_ORDER]

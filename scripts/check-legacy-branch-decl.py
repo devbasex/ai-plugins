@@ -33,8 +33,13 @@ def load_rows(path: Path) -> list[dict]:
     except (OSError, ValueError, KeyError, TypeError) as e:
         raise DataError(f"{path}: 一覧を読めない（{e}）") from e
     for r in rows if isinstance(rows, list) else [None]:
-        if not (isinstance(r, dict) and re.fullmatch(r"D\d+[a-d]?(-\d+)?", str(r.get("id"))) and isinstance(r.get("path"), str)
-                and isinstance(r.get("words"), list) and r["words"]):
+        if not (
+            isinstance(r, dict)
+            and re.fullmatch(r"D\d+[a-d]?(-\d+)?", str(r.get("id")))
+            and isinstance(r.get("path"), str)
+            and isinstance(r.get("words"), list)
+            and r["words"]
+        ):
             raise DataError(f"{path}: 形が違う行: {r!r}")
     return rows
 

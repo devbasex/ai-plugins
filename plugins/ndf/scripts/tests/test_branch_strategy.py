@@ -66,7 +66,7 @@ def _broken(kind: str, edit) -> list[str]:
         ("R1", "web-develop", lambda s: s["branches"].update(base="main")),
         ("R2", "docs", lambda s: s["merge"].update(method="direct")),
         ("R3", "plugin", lambda s: s["merge"].update(admin=True)),
-        ("R4", "plugin", lambda s: (s["release"].update(version_store={"kind": "none"}, tag=None, github_release=False))),
+        ("R4", "plugin", lambda s: s["release"].update(version_store={"kind": "none"}, tag=None, github_release=False)),
         ("R5", "web-develop", lambda s: s["approval"].update(target="production_pr")),
         ("R6", "web-trunk", lambda s: s["sprint"].update(integrate="check")),
         ("R7", "docs", lambda s: s["channels"].append({"name": "dev", "ref": "main", "workflow": "d.yml"})),
@@ -258,7 +258,9 @@ def test_find_legacy_on_ai_plugins_like_files():
     found = {(f.file, f.pointer) for f in legacy.find_legacy(files, legacy.load_moves())}
     assert ("worktree.json", "/branch_flow/promotion") in found and ("project.json", "/delivery") in found
     assert ("worktree.json", "/branch_flow") not in found  # 子の位置だけを出す
-    assert legacy.legacy_reason(legacy.find_legacy(files, legacy.load_moves()), "11").endswith("`ndf project branch-strategy migrate` で移してください")
+    assert legacy.legacy_reason(legacy.find_legacy(files, legacy.load_moves()), "11").endswith(
+        "`ndf project branch-strategy migrate` で移してください"
+    )
 
 
 # --- 作る・書く・消す（受け入れ条件 8・12） -----------------------------------------------------
@@ -347,13 +349,39 @@ def test_lock_is_shared(tmp_path):
 # --- 移行（受け入れ条件 20） --------------------------------------------------------------------
 
 AI_PLUGINS_OLD = {
-    "worktree.json": {"version": 1, "base_branch": "develop", "production_branch": "main", "guard": {"allow_paths": [".ndf/"]},
-                      "branch_flow": {"start": "base", "integrate": "check", "doc_prs": "base", "promotion": "whole",
-                                      "reviews": {"impl": {"checks": [], "diff": "none"}}}},
-    "project.json": {"version": 1, "production_merge": {"admin": True},
-                     "delivery": [{"target": "p", "kind": "auto", "trigger": "t", "channel": "production", "versioned": True,
-                                   "publishes_release": True, "result": {"workflow": "release-cd.yml"}}]},
-    "supervise.json": {"version": 1, "test": {"command": "x"}, "release": {"form": "package-plugin", "plugin": "ndf", "runtimes": ["claude", "codex"], "dev_workflow": "release-dev.yml"}},
+    "worktree.json": {
+        "version": 1,
+        "base_branch": "develop",
+        "production_branch": "main",
+        "guard": {"allow_paths": [".ndf/"]},
+        "branch_flow": {
+            "start": "base",
+            "integrate": "check",
+            "doc_prs": "base",
+            "promotion": "whole",
+            "reviews": {"impl": {"checks": [], "diff": "none"}},
+        },
+    },
+    "project.json": {
+        "version": 1,
+        "production_merge": {"admin": True},
+        "delivery": [
+            {
+                "target": "p",
+                "kind": "auto",
+                "trigger": "t",
+                "channel": "production",
+                "versioned": True,
+                "publishes_release": True,
+                "result": {"workflow": "release-cd.yml"},
+            }
+        ],
+    },
+    "supervise.json": {
+        "version": 1,
+        "test": {"command": "x"},
+        "release": {"form": "package-plugin", "plugin": "ndf", "runtimes": ["claude", "codex"], "dev_workflow": "release-dev.yml"},
+    },
 }
 
 
@@ -397,7 +425,9 @@ def test_migrate_unknown_value_asks_and_rule_failure_stops(tmp_path):
 
 
 def test_migrate_remove_row_only(tmp_path):
-    root = make_repo(tmp_path, {"project.json": {"version": 1, "branch_strategy": section("docs")}, "worktree.json": {"version": 1, "branch_flow": {}}})
+    root = make_repo(
+        tmp_path, {"project.json": {"version": 1, "branch_strategy": section("docs")}, "worktree.json": {"version": 1, "branch_flow": {}}}
+    )
     plan, _ = bmig.plan_migration(root, legacy.load_moves())
     bw.commit_plan(root, plan, plan.digest)
     assert bs.load_strategy(root).section == section("docs")
@@ -449,8 +479,15 @@ def history_repo(tmp_path, merges: int, extra: dict | None = None) -> Path:
 
 
 def test_measure_develop_main(tmp_path):
-    root = history_repo(tmp_path, 4, {"package.json": '{"version": "1.0.0"}', "CONTRIBUTING.md": "PR は `gh pr create --base develop` で出す\n",
-                                       ".github/workflows/release.yml": "run: gh release create v1\n"})
+    root = history_repo(
+        tmp_path,
+        4,
+        {
+            "package.json": '{"version": "1.0.0"}',
+            "CONTRIBUTING.md": "PR は `gh pr create --base develop` で出す\n",
+            ".github/workflows/release.yml": "run: gh release create v1\n",
+        },
+    )
     prs = [(i, "develop", f"sprint/{i}") for i in range(1, 5)] + [(9, "main", "develop")]
     api = fake_api(prs, tags=["v1.0.0", "v1.1.0", "v1.2.0"], releases=["v1.0.0", "v1.1.0", "v1.2.0"])
     res = bsm.measure_strategy(root, api)
@@ -485,7 +522,12 @@ def test_measure_doc_conflict_and_insufficient(tmp_path):
 
 def test_measure_tags_without_cd_asks_r10(tmp_path):
     root = history_repo(tmp_path, 4)
-    res = bsm.measure_strategy(root, fake_api([(i, "main", f"sprint/{i}") for i in range(1, 5)], tags=["v1.0.0", "v1.0.1", "v1.0.2"], releases=["v1.0.0", "v1.0.1", "v1.0.2"]))
+    res = bsm.measure_strategy(
+        root,
+        fake_api(
+            [(i, "main", f"sprint/{i}") for i in range(1, 5)], tags=["v1.0.0", "v1.0.1", "v1.0.2"], releases=["v1.0.0", "v1.0.1", "v1.0.2"]
+        ),
+    )
     assert res["status"] == "ask" and res["questions"][0]["pointer"] == "/release/cd"
 
 
@@ -530,8 +572,13 @@ def test_classify_repo(tmp_path):
 
 def test_pick_kind_ambiguous_and_queue_matches_strict():
     presets = bw.load_presets()
-    m = {"/release_strategy": bsm.Measured("trunk"), "/sprint/start": bsm.Measured("production"),
-         "/release/version_store": bsm.Measured({"kind": "plugin"}), "/merge/commit": bsm.Measured("merge"), "/merge/method": bsm.Measured("strict")}
+    m = {
+        "/release_strategy": bsm.Measured("trunk"),
+        "/sprint/start": bsm.Measured("production"),
+        "/release/version_store": bsm.Measured({"kind": "plugin"}),
+        "/merge/commit": bsm.Measured("merge"),
+        "/merge/method": bsm.Measured("strict"),
+    }
     assert bsm.pick_kind(m, presets) == ("plugin", [])
     m["/release/version_store"] = bsm.Measured({"kind": "json", "path": "p", "pointer": "/v"})
     kind, cands = bsm.pick_kind(m, presets)
@@ -574,7 +621,13 @@ def test_check_production_pr():
 
 class FakePort:
     def __init__(self, pull, rules, prod=None, queue=(), record=None):
-        self._pull, self._rules, self._prod, self._queue, self._record = pull, rules, prod or {"tip": "t" * 40, "version": "1.0.0"}, list(queue), record
+        self._pull, self._rules, self._prod, self._queue, self._record = (
+            pull,
+            rules,
+            prod or {"tip": "t" * 40, "version": "1.0.0"},
+            list(queue),
+            record,
+        )
         self.calls: list = []
         self.ref_ok = True
 
@@ -688,8 +741,9 @@ def test_trail_writer_one_per_case_3671():
 
 
 def run_decl(root: Path, *args: str) -> subprocess.CompletedProcess:
-    return subprocess.run([sys.executable, str(SCRIPTS / "project-decl.py"), "branch-strategy", *args, "--root", str(root)],
-                          capture_output=True, text=True)
+    return subprocess.run(
+        [sys.executable, str(SCRIPTS / "project-decl.py"), "branch-strategy", *args, "--root", str(root)], capture_output=True, text=True
+    )
 
 
 def test_cli_migrate_then_digest(tmp_path):

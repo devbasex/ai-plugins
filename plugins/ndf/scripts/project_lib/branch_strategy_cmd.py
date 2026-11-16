@@ -43,7 +43,7 @@ def _bs_facts(root: Path, measure_mod) -> dict:
     production = repo.default_branch(root) or (head or "").strip() or None
     facts = {"production": production}
     if len(s.plugins) == 1:
-        (name, runtimes), = s.plugins.items()
+        ((name, runtimes),) = s.plugins.items()
         facts.update(plugin=name, runtimes=runtimes)
     cd = sorted(n for n, text in s.workflows.items() if any(m in text for m in measure_mod.CD_MARKS))
     facts["workflow"] = cd[0] if cd else None
@@ -73,10 +73,27 @@ def run_branch_strategy(a, root: Path) -> int:
             state, seen = bsm.classify_repo(root, presets=presets)
             base = {"kind": a.kind, "evidence": seen}
             if state != "new":
-                return _bs_emit({**base, "status": "stopped", "failed": [{"rule": "existing", "pointer": "",
-                                 "reason": "既存のリポジトリです。`branch-strategy measure` で測ってください"}]})
+                return _bs_emit(
+                    {
+                        **base,
+                        "status": "stopped",
+                        "failed": [
+                            {
+                                "rule": "existing",
+                                "pointer": "",
+                                "reason": "既存のリポジトリです。`branch-strategy measure` で測ってください",
+                            }
+                        ],
+                    }
+                )
             if not a.kind:
-                return _bs_emit({**base, "status": "ask", "questions": [{"pointer": "/kind", "why": "no_kind", "candidates": list(bw.KINDS), "evidence": []}]})
+                return _bs_emit(
+                    {
+                        **base,
+                        "status": "ask",
+                        "questions": [{"pointer": "/kind", "why": "no_kind", "candidates": list(bw.KINDS), "evidence": []}],
+                    }
+                )
             facts = _bs_facts(root, bsm)
             section, questions = bw.init_values(a.kind, facts, presets)
             base = {"kind": a.kind, "values": section, "evidence": bw.evidence_of(section, facts)}

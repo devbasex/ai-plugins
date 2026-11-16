@@ -67,7 +67,9 @@ def load_moves(path: Path | None = None) -> list[Move]:
         for r in rows:
             if not _concerns_section(r):
                 continue
-            moves.append(Move(r["id"], r["file"], r["old"], r.get("new_file"), r.get("new"), dict(r.get("values") or {}), r.get("transform")))
+            moves.append(
+                Move(r["id"], r["file"], r["old"], r.get("new_file"), r.get("new"), dict(r.get("values") or {}), r.get("transform"))
+            )
         return moves
     except (OSError, ValueError, KeyError, TypeError) as e:
         raise LegacyTableError(f"{p}: 移す行の表を読めない（{e}）") from e

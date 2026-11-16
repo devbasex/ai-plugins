@@ -92,8 +92,14 @@ def plan_migration(root: Path, moves: list[legacy.Move]) -> tuple[bw.WritePlan, 
         value = bw._get(docs[m.file], m.old)
         if m.values:
             if value not in m.values:
-                questions.append({"pointer": _section_rel(m.new), "why": "insufficient", "candidates": sorted(set(m.values.values())),
-                                  "evidence": [{"source": "repo", "ref": f".ndf/{legacy.FILES[m.file]}:{m.old}", "value": str(value)}]})
+                questions.append(
+                    {
+                        "pointer": _section_rel(m.new),
+                        "why": "insufficient",
+                        "candidates": sorted(set(m.values.values())),
+                        "evidence": [{"source": "repo", "ref": f".ndf/{legacy.FILES[m.file]}:{m.old}", "value": str(value)}],
+                    }
+                )
                 continue
             value = m.values[value]
         if m.transform == "dev_channel":

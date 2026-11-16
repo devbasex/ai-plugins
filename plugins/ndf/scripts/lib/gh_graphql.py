@@ -189,7 +189,9 @@ def enqueue_pr(repo: str, pr: int, expected_head: str, jump: bool, run: Callable
     owner, name = _owner_name(repo)
     call = run or graphql
     node = call(PR_NODE_QUERY, {"owner": owner, "name": name, "number": int(pr)})
-    pid = ((node.value or {}).get("repository") or {}).get("pullRequest", {}).get("id") if node.ok and isinstance(node.value, dict) else None
+    pid = (
+        ((node.value or {}).get("repository") or {}).get("pullRequest", {}).get("id") if node.ok and isinstance(node.value, dict) else None
+    )
     if not pid:
         return gh_quota.Attempt(None, node.error or f"#{pr} の node id を読めない", "graphql")
     return call(ENQUEUE_MUTATION, {"id": pid, "head": expected_head, "jump": bool(jump)})

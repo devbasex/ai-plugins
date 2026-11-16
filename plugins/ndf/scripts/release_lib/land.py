@@ -65,7 +65,9 @@ def check_production_pr(strategy, pr: dict, prod: dict, queue: list[dict]) -> st
     if not pr.get("bump"):
         return None
     if pr.get("cut_version") != prod.get("version"):
-        return f"本番ブランチの版数 {prod.get('version')} が、版上げの PR を切った時点の {pr.get('cut_version')} と違う。作り直し、{REAPPROVE}"
+        return (
+            f"本番ブランチの版数 {prod.get('version')} が、版上げの PR を切った時点の {pr.get('cut_version')} と違う。作り直し、{REAPPROVE}"
+        )
     others = [q for q in queue if q.get("bump") and not q.get("approved_release") and q.get("number") != pr.get("number")]
     if others:
         return f"キューに別の版上げの PR（#{others[0]['number']}）がある。作り直し、{REAPPROVE}"
@@ -104,7 +106,11 @@ def fast_forward_land(port: Port, production: str, pr: int, tip: str, head: str,
         if not sha:
             return {"result": "stopped", "commit": None, "reason": "取り込みのコミットを作れない"}
     if not port.update_ref(production, sha):
-        return {"result": "stopped", "commit": sha, "reason": f"本番ブランチ {production} が確かめた先端から進んだ（早送りでない）。本番の PR を作り直し、{REAPPROVE}"}
+        return {
+            "result": "stopped",
+            "commit": sha,
+            "reason": f"本番ブランチ {production} が確かめた先端から進んだ（早送りでない）。本番の PR を作り直し、{REAPPROVE}",
+        }
     if commit == "squash" and not port.close(pr, f"{sha} で本番ブランチへ入れた（squash）"):
         return {"result": "stopped", "commit": sha, "reason": f"#{pr} を閉じられない。打ち直すと記録から閉じるところへ進む"}
     return {"result": "merged", "commit": sha, "reason": ""}

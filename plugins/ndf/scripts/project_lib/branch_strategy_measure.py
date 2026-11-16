@@ -110,9 +110,11 @@ def collect_samples(root: Path, api: Api, deadline: float, limit: int) -> Sample
     s.production = _default_branch(root, api)
     if s.production is None:
         s.unreadable.append("default_branch")
-    for kind, path in (("prs", f"repos/{{owner}}/{{repo}}/pulls?state=closed&per_page={limit}"),
-                       ("tags", f"repos/{{owner}}/{{repo}}/tags?per_page={limit}"),
-                       ("releases", f"repos/{{owner}}/{{repo}}/releases?per_page={limit}")):
+    for kind, path in (
+        ("prs", f"repos/{{owner}}/{{repo}}/pulls?state=closed&per_page={limit}"),
+        ("tags", f"repos/{{owner}}/{{repo}}/tags?per_page={limit}"),
+        ("releases", f"repos/{{owner}}/{{repo}}/releases?per_page={limit}"),
+    ):
         if time.monotonic() > deadline:
             s.warnings.append(f"時間切れで打ち切った: {kind}")
             continue
@@ -123,7 +125,8 @@ def collect_samples(root: Path, api: Api, deadline: float, limit: int) -> Sample
         if kind == "prs":
             s.prs = [
                 {"number": p["number"], "base": (p.get("base") or {}).get("ref"), "head": (p.get("head") or {}).get("ref")}
-                for p in got if isinstance(p, dict) and p.get("merged_at")
+                for p in got
+                if isinstance(p, dict) and p.get("merged_at")
             ][:limit]
         elif kind == "tags":
             s.tags = [t["name"] for t in got if isinstance(t, dict) and t.get("name")][:limit]
@@ -150,7 +153,9 @@ def collect_samples(root: Path, api: Api, deadline: float, limit: int) -> Sample
 
 def _collect_production_commits(root: Path, s: Samples, limit: int) -> None:
     """本番ブランチの最初の親の履歴を 1 回の `git log` で読む。NDF が入れた取り込みの記録（trailer）の PR も事例にする。"""
-    ref = next((r for r in (f"origin/{s.production}", s.production) if _git_strategy_out(root, "rev-parse", "--verify", "--quiet", r)), None)
+    ref = next(
+        (r for r in (f"origin/{s.production}", s.production) if _git_strategy_out(root, "rev-parse", "--verify", "--quiet", r)), None
+    )
     if ref is None:
         s.unreadable.append("history")
         return
@@ -182,8 +187,11 @@ def count_key(pointer: str, observed: list[tuple[Any, str]], rule: dict) -> Meas
     best = max(counts.values(), key=len)
     if len(best) / total >= rule["min_ratio"]:
         return Measured(best[0][0], [{"source": "pr", "ref": r, "value": str(v)} for v, r in best])
-    return Measured(why="conflict", candidates=[json.loads(k) for k in sorted(counts, key=lambda k: -len(counts[k]))],
-                    evidence=[{"source": "pr", "ref": r, "value": str(v)} for v, r in observed])
+    return Measured(
+        why="conflict",
+        candidates=[json.loads(k) for k in sorted(counts, key=lambda k: -len(counts[k]))],
+        evidence=[{"source": "pr", "ref": r, "value": str(v)} for v, r in observed],
+    )
 
 
 def decide_merge_method(facts, release_strategy: str) -> Measured:
@@ -197,12 +205,21 @@ def decide_merge_method(facts, release_strategy: str) -> Measured:
         v = "strict"
     elif facts.present:
         if trunk:
-            return Measured(why="conflict", candidates=["merge-queue", "strict"], evidence=[{"source": "ruleset", "ref": "present", "value": "no queue, no up-to-date"}])
+            return Measured(
+                why="conflict",
+                candidates=["merge-queue", "strict"],
+                evidence=[{"source": "ruleset", "ref": "present", "value": "no queue, no up-to-date"}],
+            )
         v = "direct"
     else:
         v = "strict" if trunk else "direct"
-    return Measured(v, [{"source": "ruleset", "ref": "present" if facts.present else "absent", "value": v},
-                        {"source": "pr", "ref": "release_strategy", "value": release_strategy}])
+    return Measured(
+        v,
+        [
+            {"source": "ruleset", "ref": "present" if facts.present else "absent", "value": v},
+            {"source": "pr", "ref": "release_strategy", "value": release_strategy},
+        ],
+    )
 
 
 def _tag_shape(tag: str, plugins: dict) -> str | None:
@@ -211,7 +228,7 @@ def _tag_shape(tag: str, plugins: dict) -> str | None:
     shape = VERSION.sub("{version}", tag, count=1)
     for name in plugins:
         if shape.startswith(f"{name}--"):
-            return "{plugin}" + shape[len(name):]
+            return "{plugin}" + shape[len(name) :]
     return shape
 
 
@@ -223,7 +240,9 @@ def _history_keys(s: Samples, rule: dict) -> dict[str, Measured]:
     strat = [("trunk" if p["base"] == prod else "merge_base_branch", f"#{p['number']}") for p in units]
     out = {"/release_strategy": count_key("/release_strategy", strat, rule)}
     out["/branches/base"] = count_key("/branches/base", [(p["base"], f"#{p['number']}") for p in units], rule)
-    out["/sprint/start"] = count_key("/sprint/start", [("production" if p["base"] == prod else "base", f"#{p['number']}") for p in units], rule)
+    out["/sprint/start"] = count_key(
+        "/sprint/start", [("production" if p["base"] == prod else "base", f"#{p['number']}") for p in units], rule
+    )
     if not s.tags and not s.releases and "tags" not in s.unreadable and "releases" not in s.unreadable:
         zero = [{"source": "tag", "ref": "0 件", "value": "0"}, {"source": "release", "ref": "0 件", "value": "0"}]
         out["/release/tag"] = Measured(None, zero)
@@ -233,7 +252,11 @@ def _history_keys(s: Samples, rule: dict) -> dict[str, Measured]:
         out["/release/tag"] = _relabel(count_key("/release/tag", shapes, rule), "tag")
         rel = set(s.releases)
         out["/release/github_release"] = _relabel(count_key("/release/github_release", [(t in rel, t) for t in s.tags], rule), "release")
-    merges = [("merge" if c["parents"] >= 2 else "squash", c["sha"][:12]) for c in s.commits if c["parents"] >= 2 or re.search(r"\(#\d+\)$", c["subject"]) or c.get("landed")]
+    merges = [
+        ("merge" if c["parents"] >= 2 else "squash", c["sha"][:12])
+        for c in s.commits
+        if c["parents"] >= 2 or re.search(r"\(#\d+\)$", c["subject"]) or c.get("landed")
+    ]
     out["/merge/commit"] = _relabel(count_key("/merge/commit", merges, rule), "pr")
     return out
 
@@ -251,17 +274,22 @@ def _source_keys(s: Samples, release_strategy: str | None) -> dict[str, Measured
     else:
         out["/branches/production"] = Measured(why="insufficient")
     if len(s.plugins) == 1:
-        (name, runtimes), = s.plugins.items()
+        ((name, runtimes),) = s.plugins.items()
         out["/release/plugin"] = Measured(name, [{"source": "repo", "ref": "plugin.json", "value": name}])
         out["/release/runtimes"] = Measured(runtimes, [{"source": "repo", "ref": "plugin.json", "value": ",".join(runtimes)}])
         out["/release/version_store"] = Measured({"kind": "plugin"}, [{"source": "repo", "ref": "plugin.json", "value": "plugin"}])
     elif s.version_files:
-        (path, pointer), = list(s.version_files.items())[:1]
-        out["/release/version_store"] = Measured({"kind": "json", "path": path, "pointer": pointer}, [{"source": "repo", "ref": path, "value": pointer}])
+        ((path, pointer),) = list(s.version_files.items())[:1]
+        out["/release/version_store"] = Measured(
+            {"kind": "json", "path": path, "pointer": pointer}, [{"source": "repo", "ref": path, "value": pointer}]
+        )
     else:
         out["/release/version_store"] = Measured({"kind": "none"}, [{"source": "repo", "ref": "版数のファイルが無い", "value": "none"}])
     cd = sorted(n for n, text in s.workflows.items() if any(m in text for m in CD_MARKS))
-    out["/release/cd"] = Measured({"workflow": cd[0]} if cd else None, [{"source": "workflow", "ref": cd[0] if cd else "CD のワークフローが無い", "value": cd[0] if cd else "null"}])
+    out["/release/cd"] = Measured(
+        {"workflow": cd[0]} if cd else None,
+        [{"source": "workflow", "ref": cd[0] if cd else "CD のワークフローが無い", "value": cd[0] if cd else "null"}],
+    )
     channels = [{"name": "stable", "ref": s.production}] if s.production else []
     out["/channels"] = Measured(channels, [{"source": "workflow", "ref": "stable", "value": s.production or ""}])
     out["/merge/method"] = decide_merge_method(s.rules, release_strategy) if release_strategy else Measured(why="insufficient")
@@ -289,9 +317,14 @@ def rule_conflicts(values: dict, evidence: dict) -> list[dict]:
     """測った値の組が組み合わせの規則に反するかを、規則に出るキーがすべて測ったキーである規則だけで調べる（例は R10）。"""
     rel = values.get("release", {})
     if "cd" in rel and "tag" in rel and rel.get("cd") is None and (rel.get("tag") is not None or rel.get("github_release")):
-        return [{"pointer": "/release/cd", "why": "conflict",
-                 "candidates": [{"release.cd": "CD のワークフローを足す"}, {"release.tag": None, "release.github_release": False}],
-                 "evidence": evidence.get("/release/tag", []) + evidence.get("/release/cd", [])}]
+        return [
+            {
+                "pointer": "/release/cd",
+                "why": "conflict",
+                "candidates": [{"release.cd": "CD のワークフローを足す"}, {"release.tag": None, "release.github_release": False}],
+                "evidence": evidence.get("/release/tag", []) + evidence.get("/release/cd", []),
+            }
+        ]
     return []
 
 
@@ -309,14 +342,19 @@ COMPARED = ("/release_strategy", "/sprint/start", "/release/version_store", "/me
 
 def pick_kind(measured: dict[str, Measured], presets: dict) -> tuple[str | None, list[str]]:
     """測った値がすべて合う種類の既定の行を 1 つ選ぶ。形・CD とその産物・チャネルは比べない。"""
-    hits = [k for k, row in presets["kinds"].items()
-            if all(_preset_matches(row["section"], p, measured[p].value, row) for p in COMPARED if p in measured)]
+    hits = [
+        k
+        for k, row in presets["kinds"].items()
+        if all(_preset_matches(row["section"], p, measured[p].value, row) for p in COMPARED if p in measured)
+    ]
     if len(hits) == 1:
         return hits[0], []
     return None, hits or list(presets["kinds"])
 
 
-def measure_strategy(root: Path, api: Api | None = None, deadline: float | None = None, presets: dict | None = None, prefer: str | None = None) -> dict:
+def measure_strategy(
+    root: Path, api: Api | None = None, deadline: float | None = None, presets: dict | None = None, prefer: str | None = None
+) -> dict:
     """既存のリポジトリを測り、作成の結果（値・根拠・問い）を組む。書かない。"""
     presets = presets or bw.load_presets()
     rule = presets["evidence"]
@@ -345,8 +383,14 @@ def measure_strategy(root: Path, api: Api | None = None, deadline: float | None 
     conflicts = rule_conflicts(values, evidence)
     for c in doc_claims(root):
         if bw._get(values, c["pointer"]) != c["value"]:
-            conflicts.append({"pointer": c["pointer"], "why": "conflict", "candidates": [bw._get(values, c["pointer"]), c["value"]],
-                              "evidence": evidence.get(c["pointer"], []) + [{"source": "doc", "ref": c["ref"], "value": c["value"]}]})
+            conflicts.append(
+                {
+                    "pointer": c["pointer"],
+                    "why": "conflict",
+                    "candidates": [bw._get(values, c["pointer"]), c["value"]],
+                    "evidence": evidence.get(c["pointer"], []) + [{"source": "doc", "ref": c["ref"], "value": c["value"]}],
+                }
+            )
     if conflicts:
         return {**base, "questions": conflicts}
     kind, candidates = pick_kind(measured, presets)
@@ -367,8 +411,14 @@ def measure_strategy(root: Path, api: Api | None = None, deadline: float | None 
     out = {"status": "ok", "kind": kind, "values": section, "evidence": flat, "questions": [], "warnings": s.warnings}
     if section["approval"]["via"] == "gate" and s.rules is not None and s.rules.approvals > 0:
         out["status"] = "ask"
-        out["questions"] = [{"pointer": "/approval/via", "why": "conflict", "candidates": ["gate", "review"],
-                             "evidence": [{"source": "ruleset", "ref": "required_approving_review_count", "value": str(s.rules.approvals)}]}]
+        out["questions"] = [
+            {
+                "pointer": "/approval/via",
+                "why": "conflict",
+                "candidates": ["gate", "review"],
+                "evidence": [{"source": "ruleset", "ref": "required_approving_review_count", "value": str(s.rules.approvals)}],
+            }
+        ]
     return out
 
 
@@ -381,8 +431,11 @@ def classify_repo(root: Path, api: Api | None = None, presets: dict | None = Non
     commits = int(n.strip()) if n and n.strip().isdigit() else None
     ev.append({"source": "repo", "ref": "commits", "value": str(commits)})
     existing = commits is None or commits > presets["evidence"]["new_repo_max_commits"]
-    for kind, path in (("pr", "repos/{owner}/{repo}/pulls?state=closed&per_page=1"), ("tag", "repos/{owner}/{repo}/tags?per_page=1"),
-                       ("release", "repos/{owner}/{repo}/releases?per_page=1")):
+    for kind, path in (
+        ("pr", "repos/{owner}/{repo}/pulls?state=closed&per_page=1"),
+        ("tag", "repos/{owner}/{repo}/tags?per_page=1"),
+        ("release", "repos/{owner}/{repo}/releases?per_page=1"),
+    ):
         got, why = api(path)
         hit = not isinstance(got, list) or bool(got)
         ev.append({"source": kind, "ref": path, "value": "unreadable" if not isinstance(got, list) else str(len(got))})

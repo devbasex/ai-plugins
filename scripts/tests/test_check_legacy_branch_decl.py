@@ -53,8 +53,12 @@ def test_repository_data_shape():
     assert {"D11", "D15", "D17", "D31", "D32"} <= ids
     paths = {r["path"] for r in rows}
     # 旧いキーが残ってよい置き場（I8）は一覧に載せない
-    for allowed in ("plugins/ndf/scripts/project_lib/branch_strategy_migrate.py", "plugins/ndf/scripts/lib/branch_strategy_legacy.py",
-                    "plugins/ndf/scripts/data/ndf-settings-renames.json", "CHANGELOG.md"):
+    for allowed in (
+        "plugins/ndf/scripts/project_lib/branch_strategy_migrate.py",
+        "plugins/ndf/scripts/lib/branch_strategy_legacy.py",
+        "plugins/ndf/scripts/data/ndf-settings-renames.json",
+        "CHANGELOG.md",
+    ):
         assert allowed not in paths
 
 
