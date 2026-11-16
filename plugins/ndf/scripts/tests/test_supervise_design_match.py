@@ -45,7 +45,7 @@ def new_impl(tmp_path, *extra) -> dict:
         "--out",
         str(out),
         *extra,
-        cwd=strategy_fixture.like_root(),  # このリポジトリの宣言を移した写し（#3672 の手順 2 まで旧いキーが残る）
+        cwd=strategy_fixture.like_root(),  # 移行の前の ai-plugins の形の写し（`like_root`）
     )
     assert p.returncode == 0, p.stderr
     return json.loads(out.read_text())

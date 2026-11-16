@@ -332,7 +332,7 @@ def test_release_remakes_the_pr_when_merged_pr_misses_new_commits(monkeypatch, i
         return subprocess.CompletedProcess(args, rc, out, "")
 
     monkeypatch.setattr(mod, "git", git)
-    # ai-plugins の .ndf/ は #3672 の手順 2 まで旧いキーのまま残るため、宣言を移した写しで読む
+    # develop → main・開発版のチャネルの経路を、移行の前の ai-plugins の形の写しで読む
     monkeypatch.setattr(mod, "git_root", lambda r: strategy_fixture.like_root())
     monkeypatch.setattr(mod.bump, "require_bumped", lambda root, plugin, ver: None)
     monkeypatch.setattr(mod, "find_pr", lambda root, head, base, states: {"number": 7, "state": "MERGED"})

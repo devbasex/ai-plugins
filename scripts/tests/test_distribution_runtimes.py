@@ -2,7 +2,7 @@
 
 agy と Kiro CLI へは何も配らず、cross-review / cross-refactoring の相手役として起動するだけにした。
 その導入物（`agy-skills.txt`・`kiro-skills.txt`・`dev.agy/`・`dev.kiro/`）がどのプラグインにも戻らないこと、
-リリースの対象ランタイム（`.ndf/supervise.json` の `release.runtimes`）が `claude`・`codex` の中に
+リリースの対象ランタイム（`.ndf/project.json` の `branch_strategy.release.runtimes`）が `claude`・`codex` の中に
 収まることを確かめる。生成の手順は agy・kiro の導入物を作らないため、手で足したものはここでしか見つからない。
 """
 
@@ -25,8 +25,8 @@ def retired_paths(root: Path) -> list[str]:
 
 
 def release_runtimes(root: Path) -> set[str]:
-    data = json.loads((root / ".ndf/supervise.json").read_text(encoding="utf-8"))
-    return set(data["release"]["runtimes"])
+    data = json.loads((root / ".ndf/project.json").read_text(encoding="utf-8"))
+    return set(data["branch_strategy"]["release"]["runtimes"])
 
 
 def test_no_plugin_ships_agy_or_kiro_files() -> None:

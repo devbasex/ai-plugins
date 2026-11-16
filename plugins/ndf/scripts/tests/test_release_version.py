@@ -353,9 +353,8 @@ def test_fill_stage_asks_the_condition_before_the_version(tmp_path, world, code,
 def looped(tmp: Path, world: World, dev: str = "", prod: str = "", extra: tuple[str, ...] = ()) -> dict:
     """開発ループと同じコマンドで実物の開発版のプランを組み、ループの 1 回の行を返す（dev_plan・prod_plan を持つ）。"""
     ndf = world.repo / ".ndf"
-    # ai-plugins の supervise.json の旧いキー release は外す（リリースの形は World が宣言に置いた。#3672 の手順 2 まで残る）
+    # リリースの形は World が宣言に置いた
     sup = json.loads((SCRIPTS.parents[2] / ".ndf" / "supervise.json").read_text())
-    strategy_fixture.pop_release(sup)
     (ndf / "supervise.json").write_text(json.dumps(sup))
     auto = {"enabled": True, "modes": ["standard"], "verify": "true"}
     (ndf / "pace.json").write_text(json.dumps({"version": 1, "auto": auto}))

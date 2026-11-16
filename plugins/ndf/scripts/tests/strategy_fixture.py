@@ -82,13 +82,25 @@ def declare(
     return write_strategy(root, kind, base=base, production=production, release=rel, **edits)
 
 
-def pop_release(supervise: dict) -> dict | None:
-    """`supervise.json` の中身から旧いキー `release` を外し、宣言の `release` へ移せる値（形・プラグイン・ランタイム）を返す。
+AI_PLUGINS_DEVELOP = Path(__file__).resolve().parent / "fixtures" / "ai-plugins-develop.json"
+# 移行（#3672 の手順 2）の前の ai-plugins の宣言（develop → main・開発版のチャネル release-dev.yml・管理者の迂回）を、
+# 移行のコマンドが書いた値のまま凍結した写し。ai-plugins は trunk へ移ったため、develop → main の経路と開発版を
+# 確かめるテストはこの写しを読む
+AI_PLUGINS_DEVELOP_VERIFY = "python3 plugins/ndf/scripts/release-verification-steps.py verify-install --ref develop --runtimes claude,codex"
 
-    ai-plugins の `.ndf/supervise.json` を写すテストが使う（ai-plugins の移行は手順 2 で、それまで旧いキーが残る）。
-    開発版のワークフローはチャネルの値なので移さない。"""
-    old = supervise.pop("release", None)
-    return {k: old[k] for k in ("form", "plugin", "runtimes") if k in old} if isinstance(old, dict) else None
+
+def ai_plugins_develop_section() -> dict:
+    """移行の前の ai-plugins のブランチ戦略の宣言（`AI_PLUGINS_DEVELOP`）の写し。"""
+    return json.loads(AI_PLUGINS_DEVELOP.read_text(encoding="utf-8"))
+
+
+def ai_plugins_release() -> dict:
+    """移行の前の ai-plugins のリリースの値（形・プラグイン・ランタイム）。`declare` の `release` に渡す。
+
+    ai-plugins の `.ndf/supervise.json` を写して develop → main の宣言を置くテストが使う（旧いキー `release` は移行で
+    無くなった）。開発版のワークフローはチャネルの値なので含めない。"""
+    rel = ai_plugins_develop_section()["release"]
+    return {k: rel[k] for k in ("form", "plugin", "runtimes")}
 
 
 ROOT = Path(__file__).resolve().parents[4]  # このリポジトリ（ai-plugins）の根
@@ -97,8 +109,7 @@ ROOT = Path(__file__).resolve().parents[4]  # このリポジトリ（ai-plugins
 def migrated_ndf(src: Path = ROOT) -> dict[str, dict]:
     """`src/.ndf/` の JSON（ファイル名 → 中身）を、旧い宣言を移行のコマンド（`branch-strategy migrate`）の値へ移して返す。
 
-    ai-plugins の `.ndf/` は手順 2 まで旧いキーのまま残る（#3672 の移行の順序）。部品は旧いキーが残ると止まる（I4）ので、
-    ai-plugins の宣言で組んだ形を確かめるテストは、移した写しで打つ。"""
+    旧いキーの残る `.ndf/` でも、部品は旧いキーが残ると止まる（I4）ので、移した写しで打てる。旧いキーが無ければ中身のまま。"""
     import branch_strategy_legacy as legacy
     from project_lib import branch_strategy_migrate as bmig
 
@@ -110,7 +121,9 @@ def migrated_ndf(src: Path = ROOT) -> dict[str, dict]:
 
 
 def repo_like(dest: Path, src: Path = ROOT) -> Path:
-    """`migrated_ndf` の `.ndf/` だけを持つ git のリポジトリを `dest/repo` に作って返す。
+    """`migrated_ndf` の `.ndf/` を持ち、ブランチ戦略を移行の前の ai-plugins の宣言（`AI_PLUGINS_DEVELOP`。develop → main・
+    開発版のチャネル）に置き換えた git のリポジトリを `dest/repo` に作って返す。`pace.json` の導入の確認も移行の前の値
+    （`--ref develop`）にする。
 
     ベースブランチ develop を checkout し、bare の origin（`dest/origin.git`）へ develop と main を送る（種別リリースが
     本番ブランチの先頭の宣言を読めるように）。"""
@@ -121,7 +134,13 @@ def repo_like(dest: Path, src: Path = ROOT) -> Path:
     root = init_with_origin(Path(dest))
     ndf = root / ".ndf"
     ndf.mkdir()
-    for name, doc in migrated_ndf(src).items():
+    files = migrated_ndf(src)
+    files["project.json"] = {**files.get("project.json", {"version": 1}), "branch_strategy": ai_plugins_develop_section()}
+    pace = files.get("pace.json")
+    for name in ("fast", "auto"):
+        if isinstance(pace, dict) and isinstance(pace.get(name), dict) and pace[name].get("verify"):
+            pace[name]["verify"] = AI_PLUGINS_DEVELOP_VERIFY
+    for name, doc in files.items():
         (ndf / name).write_text(json.dumps(doc, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     md = Path(src) / ".ndf" / "mvv.md"
     if md.is_file():
@@ -141,7 +160,8 @@ _LIKE: list[Path] = []
 
 
 def like_root() -> Path:
-    """`repo_like` のリポジトリをプロセスに 1 つだけ作って返す（このリポジトリの根を今のディレクトリにしていたテストの移し先）。
+    """`repo_like` のリポジトリ（移行の前の ai-plugins の形）をプロセスに 1 つだけ作って返す（このリポジトリの根を今の
+    ディレクトリにしていたテストの移し先）。
     プロセスの終わりに消す。テストは中身を書き換えない。"""
     if not _LIKE:
         import atexit

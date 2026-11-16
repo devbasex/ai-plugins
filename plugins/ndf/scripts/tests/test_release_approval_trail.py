@@ -301,7 +301,9 @@ def test_approval_workflow_runs_on_default_branch_definition_only():
     assert "statuses: write" in text and "contents: write" not in text
 
 
-def test_dev_workflow_uses_dispatch_and_token_only():
-    text = _workflow("release-dev.yml")
-    assert _triggers(text) == {"workflow_dispatch"}
-    assert "secrets." not in text and "--no-admin" in text
+def test_ai_plugins_has_no_dev_channel_workflow():
+    """ai-plugins は trunk へ移り開発版のチャネルを持たない（#3672 の手順 2）。宣言にチャネル dev が無く、開発版の
+    ワークフロー（release-dev.yml）も残っていない。"""
+    sec = json.loads((ROOT / ".ndf" / "project.json").read_text(encoding="utf-8"))["branch_strategy"]
+    assert [ch["name"] for ch in sec["channels"]] == ["stable"]
+    assert not (ROOT / ".github" / "workflows" / "release-dev.yml").exists()

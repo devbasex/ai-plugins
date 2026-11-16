@@ -52,7 +52,7 @@ def make_repo(tmp_path: Path, base: str = "develop") -> Path:
     repo = tmp_path / "repo"
     (repo / ".ndf").mkdir(parents=True)
     sup = json.loads((REPO / ".ndf" / "supervise.json").read_text())
-    release = strategy_fixture.pop_release(sup)
+    release = strategy_fixture.ai_plugins_release()
     (repo / ".ndf" / "supervise.json").write_text(json.dumps(sup))
     strategy_fixture.declare(repo, base, "main", release)
     subprocess.run(["git", "init", "-q", "-b", base, str(repo)], check=True, capture_output=True)
