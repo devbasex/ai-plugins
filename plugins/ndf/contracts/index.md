@@ -232,8 +232,8 @@
 | `backlog-refinement.owner-lock` | seconds 5 | 棚卸しの持ち主の宣言の排他を待つ上限 | `plugins/ndf/skills/backlog-refinement/scripts/upkeep_owner.py:<module>` |
 | `backlog-refinement.research-grace` | seconds 300 | 調べの項目が動かないとみなすまでの秒の既定（設定の research.grace で上書きする） | `plugins/ndf/skills/backlog-refinement/scripts/upkeep_research.py:_ticker.tick` |
 | `backlog-refinement.research-poll` | interval 30 | 棚卸しの調べの並列の空きを見回る間隔 | `plugins/ndf/skills/backlog-refinement/scripts/upkeep_research.py:<module>` |
-| `branch-strategy.measure` | seconds 120 | ブランチ戦略の宣言の measure が事例を集める締め切り（#3672） | `plugins/ndf/scripts/project_lib/branch_strategy_measure.py:measure_strategy` |
-| `branch-strategy.write-lock` | seconds 30 | ブランチ戦略の宣言を書く錠の待ちの上限（#3672。write・migrate・remove が共有する） | `plugins/ndf/scripts/project_lib/branch_strategy_write.py:commit_plan` |
+| `branch-strategy.measure` | seconds 120 | ブランチ戦略の宣言の measure が事例を集める締め切り | `plugins/ndf/scripts/project_lib/branch_strategy_measure.py:measure_strategy` |
+| `branch-strategy.write-lock` | seconds 30 | ブランチ戦略の宣言を書く錠の待ちの上限（write・migrate・remove が共有する） | `plugins/ndf/scripts/project_lib/branch_strategy_write.py:commit_plan` |
 | `claude-account-dir.lock` | seconds 2 | .claude.json の排他の待ちの上限 | `plugins/ndf/scripts/lib/claude_account_dir.py:<module>` |
 | `claude-accounts.expiry-margin` | seconds 60 | 残りがこの秒数以下のアクセストークンは期限切れとみなす | `plugins/ndf/scripts/lib/claude_accounts.py:<module>` |
 | `claude-accounts.lock` | seconds 30 | アカウントの置き場の排他を待つ上限 | `plugins/ndf/scripts/lib/claude_accounts.py:<module>` |

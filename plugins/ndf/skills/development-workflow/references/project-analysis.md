@@ -128,7 +128,7 @@ clone した全員と CI で同じ値のまま効き、変える Pull Request �
 
 ## ブランチ戦略の宣言
 
-ブランチ戦略・リリース・マージの方法論は、`.ndf/project.json` のセクション `branch_strategy` に 1 か所で書く（#3672）。
+ブランチ戦略・リリース・マージの方法論は、`.ndf/project.json` のセクション `branch_strategy` に 1 か所で書く。
 **このセクションを作る・更新する・移す・消すのは `project-decl.py branch-strategy` だけで、人もエージェントも手で書かない。**
 結果は 1 行の JSON（`status`・`kind`・`values`・`evidence`・`questions`・`diff`・`digest`・`failed`）で、終了コードは
 `ok` が 0・`ask`（問いがあり書いていない）が 3・`stopped`（検査に落ちた・書けない）が 1 である。
