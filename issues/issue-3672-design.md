@@ -93,8 +93,8 @@ GitHub との間は**腐敗防止層**で、ruleset と merge queue の語はリ
 | I7 | 承認とマージ | 版上げの PR は、マージの方式ごとの確かめ（「処理の流れ」の「版上げの PR の確かめ」の表）を通ったときだけマージかキューへの投入をする。`merge-queue` では先端を含むことを求めず、版数が衝突しないことだけを確かめて先頭へ入れる | 止まり、版上げの PR を作り直して承認を取り直す |
 | I8 | 宣言 | 旧いキーの名前は、移行のコマンドと旧い宣言の検査とそのテストの外に現れない | `check-legacy-branch-decl.py` が落ちる |
 | I9 | 承認とマージ | 正式版 1 本につき、人へ問う承認は 1 回である（宣言のどのケースでも） | 2 回目を求める組み合わせ（`via: gate` で ruleset が承認を求める）は I10 で止まる |
-| I10 | 承認とマージ | 節の値と本番ブランチの ruleset が食い違わない。比べるのは 3 つで、`merge.method: merge-queue` ⇔ merge queue が有る、`merge.method: strict` ⇔ 最新の取り込みを求める（merge queue は無い）、`approval.via: gate` ⇒ 承認の数 0・`approval.via: review` ⇒ 承認の数 1 以上である | マージの前に止まり、節の値と ruleset の値を理由に出す |
-| I11 | 作成の結果 | 既存のリポジトリで書く値は、どれも根拠を 1 つ持つ。履歴から推すキーは 3 件以上・9 割以上の事例、今の正本で決まるキーはその正本 1 件、種類の既定から埋めるキーは選んだ種類の既定の行、人の答えはその答え（「処理の流れ」の「作る・更新する」の表） | 履歴から推すキーで事例が足りないか食い違うか、今の正本で決まるキーの正本が無いか読めなければ、書かずに根拠つきで問う（決定 6） |
+| I10 | 承認とマージ | 節の値と本番ブランチの ruleset が食い違わない。ruleset が有るとき比べるのは 3 つで、`merge.method: merge-queue` ⇔ merge queue が有る、`merge.method: strict` ⇔ 最新の取り込みを求める（merge queue は無い）、`approval.via: gate` ⇒ 承認の数 0・`approval.via: review` ⇒ 承認の数 1 以上である。`merge.admin: true` のときは承認の数を比べない（管理者の迂回が ruleset の承認の要求を越える）。ruleset が無いとき（GitHub Free の private など）は merge queue が無いことだけを見て、`merge-queue` なら止まる。`strict` の先端の確かめは I7、`review` の承認した head の確かめは I5 で NDF 自身が行う | マージの前に止まり、節の値と ruleset の値を理由に出す |
+| I11 | 作成の結果 | 既存のリポジトリで書く値は、どれも根拠を 1 つ持つ。履歴から推すキーは 3 件以上・9 割以上の事例、今の正本で決まるキーはその正本 1 件、種類の既定から埋めるキーは選んだ種類の既定の行、人の答えはその答え（「処理の流れ」の「作る・更新する」の表） | 履歴から推すキーで事例が足りないか食い違うか、今の正本で決まるキーの正本が読めない（API の誤り・権限）か、測った値の組が組み合わせの規則に反すれば、書かずに根拠つきで問う（決定 6）。正本が無いことは値の根拠として書く |
 | I12 | 承認とマージ | 証跡の種類ごとに書き手は 1 つで、証跡が今の head にあれば同じ問いを送らない | 書き手が書けなければ止まり、問いを送り直さない |
 | I13 | スプリントのスナップショット | スプリントの中の部品は開始時のスナップショットを読む | スナップショットと今の節の違うキーを結果に出す |
 | I14 | 宣言 | 製品のスキーマと既定の表は `default` と ai-plugins の名前を持たない | `check-skill-repo-assumptions.py` が落ちる（決定 13） |
@@ -287,7 +287,9 @@ flowchart TD
     B -->|ある| E[履歴から推すキーと今の正本で決まるキーを測る]
     E --> F{履歴は 3 件・9 割、正本は 1 件の根拠}
     F -->|無い・食い違う| Q
-    F -->|ある| K{測った値に合う種類の既定が 1 つか}
+    F -->|ある| R{測った値の組が組み合わせの規則を通るか}
+    R -->|反する| Q
+    R -->|通る| K{測った値に合う種類の既定が 1 つか}
     K -->|0 か 2 つ以上| Q
     K -->|1 つ| P[測らないキーを種類の既定の行から埋める]
     P --> G[スキーマで検査]
@@ -303,9 +305,11 @@ flowchart TD
 | キーの分け方 | キー | 根拠 |
 | --- | --- | --- |
 | 測るキーのうち履歴から推すキー | `release_strategy`・`branches.base`・`sprint.start`・`release.tag`・`release.github_release`・`merge.commit` | 事例（PR の宛先と起点・タグ・Release・マージコミットの親の数）が 3 件以上・9 割以上で合う |
-| 測るキーのうち今の正本で決まるキー | `branches.production`・`release.form`・`release.plugin`・`release.runtimes`・`release.version_store`・`release.cd`・`channels`・`merge.method` | 正本 1 件（既定ブランチ・版数のファイルと `plugin.json`・ワークフローのファイル・本番ブランチの ruleset）。正本が無いか読めなければ根拠不足として問う。`merge.method` は「代表のリポジトリの種類の既定」の※のとおり |
+| 測るキーのうち今の正本で決まるキー | `branches.production`・`release.form`・`release.plugin`・`release.runtimes`・`release.version_store`・`release.cd`・`channels`・`merge.method` | 正本 1 件（既定ブランチ・版数のファイルと `plugin.json`・ワークフローのファイル・本番ブランチの ruleset）。正本が読めない（API の誤り・権限）ときだけ根拠不足として問う。正本が無いことは値の根拠にする（ワークフローが無い ⇒ `release.cd: null`・`channels` は stable だけ、版数のファイルが無い ⇒ `version_store: none`、`plugin.json` が無い ⇒ `release.plugin`・`release.runtimes` を書かない、ruleset が無い ⇒ merge queue が無いとみなす）。`merge.method` は「代表のリポジトリの種類の既定」の※のとおり |
 | 種類の既定から埋めるキー | `kind`・`sprint.integrate`・`sprint.doc_prs`・`reviews`・`approval.target`・`approval.via`・`merge.actor`・`merge.admin`・`verify`・`release.deliveries` | 選んだ種類の既定の行（根拠 `preset`）。`approval.via` は、ruleset が承認を求めるのに既定が `gate` なら食い違いとして問う（I10） |
 | 人の答えで書くキー | 問いを返したキー | 答え（根拠 `answer`）。答えも組み合わせの規則を通す（I2） |
+
+測った値の組が組み合わせの規則に反するときは、スキーマの検査で `stopped` にせず、食い違いとして値の組と根拠を添えて問う（I11）。例: タグと GitHub Release の事例があるのに CD のワークフローが無いリポジトリ（手でタグを打つ・外部の CI が作る）は R10 に反するため、CD のワークフローを足すか、タグと Release を作らない宣言にするかを問う。
 
 種類（`kind`）は、測るキーの値と 5 つの種類の既定の行を比べて決める。測るキーがすべて合う行が 1 つだけのとき、その種類にする。既定の行の `merge-queue`※ は、測った `merge-queue` と `strict` のどちらとも合うとみなす。
 測った値は種類の既定より優先して書く（例: 種類 `plugin` で測った `merge.method` が `strict` なら `strict` を書く）。
