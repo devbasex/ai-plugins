@@ -14,7 +14,7 @@ DECL_HELP = "要る設定（引数が先に効く）: {needs}。new は作業場
 DECL_WORDS = {
     "base": "起点のブランチ（--base かブランチ戦略の宣言の branches.base）",
     "test": "テストの宣言（.ndf/project.json の test。無ければ --test-cmd か .ndf/supervise.json の test.command。{paths} を範囲に置き換える）",
-    "release": "リリースの形（.ndf/supervise.json の release.form。雛形のある形: package-plugin）",
+    "release": "リリースの形（ブランチ戦略の宣言の release.form。雛形のある形: package-plugin）",
     "impl_timeout": "実装の上限（--impl-timeout か .ndf/supervise.json の impl_timeout。書いたときだけ効く）",
     "impl_stall_seconds": "無進捗の許容時間（--impl-stall か .ndf/supervise.json の impl_stall_seconds。既定 1800 秒）",
     "refactor_budget_minutes": "構造改善の想定最大時間（--refactor-budget-minutes か .ndf/supervise.json の refactor_budget_minutes）",
@@ -409,7 +409,7 @@ def add_new_parsers(sub, epilog: str) -> None:
 def optional_help(kind: str) -> str:
     """--help の「任意の設定」の 1 文（受ける種別だけ）。"""
     words = [
-        DECL_WORDS[k] + ("（無ければ .ndf/project.json の delivery からリリースの経路を導く）" if k == "release" else "")
+        DECL_WORDS[k] + ("（雛形の無い形なら、宣言の release.deliveries からリリースの経路を導く）" if k == "release" else "")
         for k in OPTIONAL_DECLS.get(kind, ())
     ]
     return "。\n任意の設定: " + "・".join(words) if words else ""

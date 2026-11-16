@@ -161,7 +161,7 @@ def cmd_lint(a):
 def build_parser():
     ap = argparse.ArgumentParser(prog="doc-lint.py", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--root", help="対象のリポジトリの根（既定はカレントの git の根）")
-    ap.add_argument("--base", help="起点の ref（既定 origin/<.ndf/worktree.json の base_branch>）")
+    ap.add_argument("--base", help="起点の ref（既定 origin/<ブランチ戦略の宣言の branches.base>）")
     ap.add_argument("--exclude", nargs="*", help=f"見ないパスの接頭辞（既定 {' '.join(DEFAULT_EXCLUDE)}）")
     ap.add_argument("--all-lines", action="store_true", help="変わったファイルの全行を見る")
     ap.set_defaults(func=cmd_lint)

@@ -200,7 +200,7 @@ class Analysis(schema.Shape):
 
 
 class Branches(schema.Shape):
-    """P6 の答えの形。宣言では worktree.json の base_branch・production_branch へ書く。"""
+    """P6 の答えの形（ベースブランチと本番ブランチ）。宣言ではブランチ戦略の宣言の `branches` へ書く。"""
 
     base: Optional[str] = None
     production: Optional[str] = None

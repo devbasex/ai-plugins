@@ -476,7 +476,7 @@ def main(argv=None) -> int:
     )
     for p in (scope, whole):
         p.add_argument("--root", default=".")
-        p.add_argument("--base", default=None, help="着手前の HEAD とみなす起点のブランチ（既定は .ndf/worktree.json の base_branch）")
+        p.add_argument("--base", default=None, help="着手前の HEAD とみなす起点のブランチ（既定はブランチ戦略の宣言の branches.base）")
         p.add_argument("--template", default=None, help="範囲テストの雛形（{paths} を含むコマンド。宣言より先に効く）")
         p.add_argument("--test-kind", choices=ts.KINDS, default=ts.TEST, help="--template の種別（test = テスト / lint = 静的解析）")
         p.add_argument(
