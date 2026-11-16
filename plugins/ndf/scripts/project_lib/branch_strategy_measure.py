@@ -61,7 +61,7 @@ class Measured:
     candidates: list = field(default_factory=list)
 
 
-def _git(root: Path, *args: str) -> str | None:
+def _git_strategy_out(root: Path, *args: str) -> str | None:
     r = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True)
     return r.stdout if r.returncode == 0 else None
 
@@ -76,7 +76,7 @@ def _default_branch(root: Path, api: Api) -> str | None:
     repo, _ = api("repos/{owner}/{repo}")
     if isinstance(repo, dict) and repo.get("default_branch"):
         return repo["default_branch"]
-    head = _git(root, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+    head = _git_strategy_out(root, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
     return head.strip().split("/", 1)[-1] if head else None
 
 
@@ -104,7 +104,7 @@ def _local_facts(root: Path, s: Samples) -> None:
             s.plugins[name] = runtimes
 
 
-def collect_samples(root: Path, api: Api, deadline: float, limit: int = 100) -> Samples:
+def collect_samples(root: Path, api: Api, deadline: float, limit: int) -> Samples:
     """直近のマージ済み PR・タグ・Release・本番ブランチの履歴・ruleset・ワークフロー・版数のファイルを集める。"""
     s = Samples()
     s.production = _default_branch(root, api)
@@ -130,7 +130,7 @@ def collect_samples(root: Path, api: Api, deadline: float, limit: int = 100) -> 
         else:
             s.releases = [r["tag_name"] for r in got if isinstance(r, dict) and r.get("tag_name")][:limit]
     if s.production:
-        _collect_commits(root, s, limit)
+        _collect_production_commits(root, s, limit)
         import release_case
 
         rules, why = api(f"repos/{{owner}}/{{repo}}/rules/branches/{s.production}")
@@ -148,14 +148,14 @@ def collect_samples(root: Path, api: Api, deadline: float, limit: int = 100) -> 
     return s
 
 
-def _collect_commits(root: Path, s: Samples, limit: int) -> None:
+def _collect_production_commits(root: Path, s: Samples, limit: int) -> None:
     """本番ブランチの最初の親の履歴を 1 回の `git log` で読む。NDF が入れた取り込みの記録（trailer）の PR も事例にする。"""
-    ref = next((r for r in (f"origin/{s.production}", s.production) if _git(root, "rev-parse", "--verify", "--quiet", r)), None)
+    ref = next((r for r in (f"origin/{s.production}", s.production) if _git_strategy_out(root, "rev-parse", "--verify", "--quiet", r)), None)
     if ref is None:
         s.unreadable.append("history")
         return
     fmt = "%H%x00%P%x00%s%x00%(trailers:key=NDF-Landed-PR,key=NDF-Approved-Head,key=NDF-Tip,separator=%x1f)%x1e"
-    out = _git(root, "log", "--first-parent", f"-n{limit}", f"--format={fmt}", ref) or ""
+    out = _git_strategy_out(root, "log", "--first-parent", f"-n{limit}", f"--format={fmt}", ref) or ""
     known = {p["number"] for p in s.prs}
     for rec in out.split("\x1e"):
         parts = rec.strip("\n").split("\x00")
@@ -178,7 +178,7 @@ def count_key(pointer: str, observed: list[tuple[Any, str]], rule: dict) -> Meas
         return Measured(why="insufficient", evidence=[{"source": "pr", "ref": r, "value": str(v)} for v, r in observed])
     counts: dict[str, list] = {}
     for v, r in observed:
-        counts.setdefault(bs.canonical(v), []).append((v, r))
+        counts.setdefault(bs.canonical_json(v), []).append((v, r))
     best = max(counts.values(), key=len)
     if len(best) / total >= rule["min_ratio"]:
         return Measured(best[0][0], [{"source": "pr", "ref": r, "value": str(v)} for v, r in best])
@@ -295,13 +295,13 @@ def rule_conflicts(values: dict, evidence: dict) -> list[dict]:
     return []
 
 
-def _matches(row: dict, pointer: str, value: Any, presets_row: dict) -> bool:
+def _preset_matches(row: dict, pointer: str, value: Any, presets_row: dict) -> bool:
     got = bw._get(row, pointer)
     if pointer == "/merge/method" and got == "merge-queue":
         return value in ("merge-queue", presets_row.get("merge_method_without_queue"))
     if pointer == "/release/version_store":
         return got.get("kind") == (value or {}).get("kind")
-    return bs.canonical(got) == bs.canonical(value)
+    return bs.canonical_json(got) == bs.canonical_json(value)
 
 
 COMPARED = ("/release_strategy", "/sprint/start", "/release/version_store", "/merge/commit", "/merge/method")
@@ -310,17 +310,21 @@ COMPARED = ("/release_strategy", "/sprint/start", "/release/version_store", "/me
 def pick_kind(measured: dict[str, Measured], presets: dict) -> tuple[str | None, list[str]]:
     """測った値がすべて合う種類の既定の行を 1 つ選ぶ。形・CD とその産物・チャネルは比べない。"""
     hits = [k for k, row in presets["kinds"].items()
-            if all(_matches(row["section"], p, measured[p].value, row) for p in COMPARED if p in measured)]
+            if all(_preset_matches(row["section"], p, measured[p].value, row) for p in COMPARED if p in measured)]
     if len(hits) == 1:
         return hits[0], []
     return None, hits or list(presets["kinds"])
 
 
-def measure(root: Path, api: Api | None = None, deadline: float | None = None, presets: dict | None = None, prefer: str | None = None) -> dict:
+def measure_strategy(root: Path, api: Api | None = None, deadline: float | None = None, presets: dict | None = None, prefer: str | None = None) -> dict:
     """既存のリポジトリを測り、作成の結果（値・根拠・問い）を組む。書かない。"""
     presets = presets or bw.load_presets()
     rule = presets["evidence"]
-    s = collect_samples(root, api or default_api(root), deadline or (time.monotonic() + 120), rule["limit"])
+    if deadline is None:
+        import limits
+
+        deadline = time.monotonic() + limits.seconds("branch-strategy.measure")
+    s = collect_samples(root, api or default_api(root), deadline, rule["limit"])
     hist = _history_keys(s, rule)
     rs = hist["/release_strategy"].value if hist["/release_strategy"].why is None else None
     src = _source_keys(s, rs)
@@ -373,7 +377,7 @@ def classify_repo(root: Path, api: Api | None = None, presets: dict | None = Non
     presets = presets or bw.load_presets()
     api = api or default_api(root)
     ev = []
-    n = _git(root, "rev-list", "--count", "HEAD")
+    n = _git_strategy_out(root, "rev-list", "--count", "HEAD")
     commits = int(n.strip()) if n and n.strip().isdigit() else None
     ev.append({"source": "repo", "ref": "commits", "value": str(commits)})
     existing = commits is None or commits > presets["evidence"]["new_repo_max_commits"]

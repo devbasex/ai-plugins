@@ -120,7 +120,7 @@ def apply_answers(result: dict, answers: dict) -> dict:
         out.setdefault("evidence", []).append({"source": "answer", "ref": pointer, "value": json.dumps(value, ensure_ascii=False)})
     answered = set(answers)
     out["questions"] = [q for q in out.get("questions", []) if q["pointer"] not in answered]
-    if values.get("kind") in KINDS and any(bs.canonical(_get(before, p)) != bs.canonical(v) for p, v in answers.items()):
+    if values.get("kind") in KINDS and any(bs.canonical_json(_get(before, p)) != bs.canonical_json(v) for p, v in answers.items()):
         values["kind"] = "custom"
     out["status"] = "ask" if out["questions"] else "ok"
     return out
@@ -135,7 +135,7 @@ def _get(doc: Any, pointer: str) -> Any:
     return cur
 
 
-def _read_json(path: Path) -> dict | None:
+def _read_decl(path: Path) -> dict | None:
     try:
         return jsonio.read(path, missing=None, want=dict)
     except jsonio.JsonReadError as e:
@@ -155,7 +155,7 @@ def json_patch(before: Any, after: Any, prefix: str = "") -> list[dict]:
             else:
                 ops.extend(json_patch(before[k], after[k], p))
         return ops
-    if bs.canonical(before) != bs.canonical(after):
+    if bs.canonical_json(before) != bs.canonical_json(after):
         return [{"op": "replace", "path": prefix, "value": after}]
     return []
 
@@ -168,22 +168,22 @@ def plan_files(root: Path, after: dict[str, Any], rebuild: Callable[[], WritePla
     for name in WRITE_ORDER:
         if name not in after:
             continue
-        before = _read_json(ndf / name)
+        before = _read_decl(ndf / name)
         befores[name] = before
         ops = json_patch(before or {}, after[name] or {})
         if ops:
             plan.files[name] = after[name]
             plan.diff.extend({"file": f".ndf/{name}", **op} for op in ops)
-    plan.digest = bs.digest_of({"diff": plan.diff, "before": befores})
+    plan.digest = bs.strategy_digest({"diff": plan.diff, "before": befores})
     return plan
 
 
 def plan_write(root: Path, section: dict) -> WritePlan:
     """書く前に `validate` を通し、今の `.ndf/project.json` との差分とハッシュを作る。落ちれば `failed` だけを持つ。"""
-    failed = bs.validate(section)
+    failed = bs.validate_section(section)
     if failed:
         return WritePlan(failed=failed)
-    project = _read_json(Path(root) / ".ndf" / "project.json")
+    project = _read_decl(Path(root) / ".ndf" / "project.json")
     after = dict(project) if project else {"version": 1}
     after[bs.SECTION] = section
     return plan_files(root, {"project.json": after}, lambda: plan_write(root, section))
@@ -191,9 +191,9 @@ def plan_write(root: Path, section: dict) -> WritePlan:
 
 def plan_remove(root: Path) -> WritePlan:
     """セクションを消す差分とハッシュを作る。セクションが無ければ空の差分。"""
-    project = _read_json(Path(root) / ".ndf" / "project.json")
+    project = _read_decl(Path(root) / ".ndf" / "project.json")
     if not project or bs.SECTION not in project:
-        return WritePlan(digest=bs.digest_of({"diff": [], "before": {}}), rebuild=lambda: plan_remove(root))
+        return WritePlan(digest=bs.strategy_digest({"diff": [], "before": {}}), rebuild=lambda: plan_remove(root))
     after = {k: v for k, v in project.items() if k != bs.SECTION}
     return plan_files(root, {"project.json": after}, lambda: plan_remove(root))
 

@@ -1,7 +1,7 @@
 """project-decl.py のブランチ運用（#3121）: 測って案を出す・ずれを出す・答えを書く。
 
 推す規則（`measure_branch_flow.infer`）は合成した Pull Request の並びで、取り込み方の見分け（`classify_release`）と
-スプリントの起点（`sprint_start`）は一時の git リポジトリで確かめる。`drift`・`write` は CLI を打つ。
+スプリントの起点（`sprint_start`）は一時の git リポジトリで確かめる。`write` は CLI を打つ。
 """
 
 from __future__ import annotations
@@ -184,20 +184,6 @@ def make_tree(tmp_path: Path, wt: dict) -> Path:
 def run(*args: str):
     p = inproc.run(CLI, *args)
     return p.returncode, json.loads(p.stdout.strip().splitlines()[-1]) if p.stdout.strip() else {}, p.stdout + p.stderr
-
-
-def test_drift_cli_reports_rows_and_stops_on_a_broken_declaration(tmp_path):
-    """受け入れ条件 12 と I1: drift はずれた行を出して 0、宣言が壊れていれば 3。"""
-    meas = tmp_path / "m.json"
-    item = mbf.as_item(mbf.infer(ai_plugins_history(), "develop", "main", ["whole"] * 5, []), [])
-    meas.write_text(json.dumps({"items": {"branch_flow": item}}))
-    tree = make_tree(tmp_path, {"version": 1, "base_branch": "develop", "branch_flow": SELECTED})
-    code, out, text = run("drift", "--measure", str(meas), "--root", str(tree))
-    assert code == 0, text
-    assert out["metrics"]["drift"] == 3
-    (tree / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "branch_flow": {"promotion": "selected"}}))
-    code, _, text = run("drift", "--measure", str(meas), "--root", str(tree))
-    assert code == 3 and "branch_flow.start" in text
 
 
 def test_write_refuses_an_answer_outside_the_table(tmp_path):

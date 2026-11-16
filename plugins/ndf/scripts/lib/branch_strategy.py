@@ -111,7 +111,7 @@ def _pointer(parts) -> str:
     return "".join("/" + str(p).replace("~", "~0").replace("/", "~1") for p in parts)
 
 
-def validate(section: Any) -> list[dict]:
+def validate_section(section: Any) -> list[dict]:
     """セクションをスキーマで検査し、落ちた規則とキーの位置を返す。空なら通った。"""
     from jsonschema import Draft202012Validator
 
@@ -146,7 +146,7 @@ def _read_files(read) -> dict[str, dict]:
     return files
 
 
-def _check(files: dict[str, dict], system: str = "10") -> Strategy:
+def _check_files(files: dict[str, dict], system: str = "10") -> Strategy:
     found = legacy.find_legacy(files, legacy.load_moves())
     if found:
         raise StrategyError(legacy.legacy_reason(found, system))
@@ -156,14 +156,14 @@ def _check(files: dict[str, dict], system: str = "10") -> Strategy:
             f"`.ndf/project.json` にセクション `{SECTION}` がありません。`{legacy.COMMAND[system]} init --kind <種類>`"
             f"（既存のリポジトリは `{legacy.COMMAND[system]} measure`）で作ってください"
         )
-    failed = validate(project[SECTION])
+    failed = validate_section(project[SECTION])
     if failed:
         where = "、".join(f"{f['rule']} `{f['pointer'] or '/'}`" for f in failed)
         raise StrategyError(f"`.ndf/project.json` の `{SECTION}` がスキーマに落ちる: {where}", EXIT_VIOLATION)
     return Strategy(project[SECTION])
 
 
-def load(root: Path) -> Strategy:
+def load_strategy(root: Path) -> Strategy:
     """メインディレクトリのセクションを読み、旧いキーとスキーマで検査して型にする（I1・I3・I4）。"""
     ndf = Path(root) / ".ndf"
 
@@ -171,7 +171,7 @@ def load(root: Path) -> Strategy:
         p = ndf / name
         return p.read_text(encoding="utf-8") if p.is_file() else None
 
-    return _check(_read_files(read))
+    return _check_files(_read_files(read))
 
 
 def load_at_ref(root: Path, ref: str) -> Strategy:
@@ -184,10 +184,10 @@ def load_at_ref(root: Path, ref: str) -> Strategy:
         r = subprocess.run(["git", "-C", str(root), "show", f"{ref}:.ndf/{name}"], capture_output=True, text=True)
         return r.stdout if r.returncode == 0 else None
 
-    return _check(_read_files(read))
+    return _check_files(_read_files(read))
 
 
-def get(strategy: Strategy, pointer: str) -> Any:
+def get_value(strategy: Strategy, pointer: str) -> Any:
     """セクションの中の 1 つの値を JSON Pointer で引く。無ければ StrategyError。"""
     import json_pick
 
@@ -197,34 +197,34 @@ def get(strategy: Strategy, pointer: str) -> Any:
     return value
 
 
-def canonical(value: Any) -> str:
+def canonical_json(value: Any) -> str:
     """正規化した JSON（キーの昇順・区切りの空白なし）。ハッシュの入力。"""
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
-def digest_of(value: Any) -> str:
-    return hashlib.sha256(canonical(value).encode("utf-8")).hexdigest()
+def strategy_digest(value: Any) -> str:
+    return hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()
 
 
-def snapshot(strategy: Strategy, source: str) -> dict:
+def snapshot_section(strategy: Strategy, source: str) -> dict:
     """スプリントの開始時に控えるセクションの全体（決定 9）。"""
     section = json.loads(json.dumps(strategy.section))
-    return {"source": source, "digest": digest_of(section), "section": section}
+    return {"source": source, "digest": strategy_digest(section), "section": section}
 
 
-def _leaves(value: Any, prefix: str = "") -> dict[str, Any]:
+def _section_leaves(value: Any, prefix: str = "") -> dict[str, Any]:
     if isinstance(value, dict) and value:
         out: dict[str, Any] = {}
         for k, v in value.items():
-            out.update(_leaves(v, f"{prefix}/{str(k).replace('~', '~0').replace('/', '~1')}"))
+            out.update(_section_leaves(v, f"{prefix}/{str(k).replace('~', '~0').replace('/', '~1')}"))
         return out
     return {prefix: value}
 
 
 def snapshot_diff(snap: dict, now: Strategy) -> list[str]:
     """スナップショットと今のセクションの違うキーの位置を昇順で並べる（I13）。"""
-    a, b = _leaves(snap["section"]), _leaves(now.section)
-    return sorted(k for k in set(a) | set(b) if canonical(a.get(k, "\0missing")) != canonical(b.get(k, "\0missing")))
+    a, b = _section_leaves(snap["section"]), _section_leaves(now.section)
+    return sorted(k for k in set(a) | set(b) if canonical_json(a.get(k, "\0missing")) != canonical_json(b.get(k, "\0missing")))
 
 
 def _print_value(v: Any) -> None:
@@ -232,6 +232,9 @@ def _print_value(v: Any) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    import deps
+
+    deps.require("jsonschema")
     ap = argparse.ArgumentParser(prog="branch_strategy.py", description="ブランチ戦略の宣言の値を 1 つ読む")
     sub = ap.add_subparsers(dest="cmd", required=True)
     g = sub.add_parser("get", help="セクションの値を JSON Pointer で 1 つ読む")
@@ -249,12 +252,12 @@ def main(argv: list[str] | None = None) -> int:
         if a.cmd == "get":
             if not a.pointer.startswith("/"):
                 raise StrategyError(f"pointer は / で始める: {a.pointer!r}", EXIT_UNREADABLE)
-            strategy = load_at_ref(Path(a.root), a.ref) if a.ref else load(Path(a.root))
-            _print_value(get(strategy, a.pointer))
+            strategy = load_at_ref(Path(a.root), a.ref) if a.ref else load_strategy(Path(a.root))
+            _print_value(get_value(strategy, a.pointer))
         elif a.cmd == "start-ref":
-            _print_value(load(Path(a.root)).sprint_start_ref())
+            _print_value(load_strategy(Path(a.root)).sprint_start_ref())
         else:
-            _print_value(load(Path(a.root)).pr_target(a.kind, a.sprint_branch))
+            _print_value(load_strategy(Path(a.root)).pr_target(a.kind, a.sprint_branch))
     except ValueError as e:
         sys.stderr.write(f"{e}\n")
         return EXIT_UNREADABLE
@@ -265,7 +268,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    import deps
-
-    deps.require("jsonschema")
     sys.exit(main())

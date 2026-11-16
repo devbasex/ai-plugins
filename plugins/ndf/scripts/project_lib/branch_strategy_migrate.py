@@ -22,7 +22,7 @@ FILL_KIND = {"merge_base_branch": "web-develop", "release_branch": "mobile", "tr
 FILL_KIND_BY_FORM = {"package-plugin": "plugin", "document": "docs"}
 
 
-def _rel(pointer: str) -> str:
+def _section_rel(pointer: str) -> str:
     return pointer[len("/" + bs.SECTION) :]
 
 
@@ -76,12 +76,12 @@ def _fill(section: dict, presets: dict, existing: dict | None = None) -> dict:
 def plan_migration(root: Path, moves: list[legacy.Move]) -> tuple[bw.WritePlan, list[dict]]:
     """旧い 4 か所の値をセクションへ移し、旧いキーを消す計画と、表に無い値への問いを返す。"""
     ndf = Path(root) / ".ndf"
-    docs = {fid: bw._read_json(ndf / name) for fid, name in legacy.FILES.items()}
+    docs = {fid: bw._read_decl(ndf / name) for fid, name in legacy.FILES.items()}
     docs = {k: v for k, v in docs.items() if v is not None}
     found = {(f.file, f.pointer) for f in legacy.find_legacy(docs, moves)}
     present = [m for m in moves if m.file in docs and legacy.has_pointer(docs[m.file], m.old)]
     if not present:
-        return bw.WritePlan(digest=bs.digest_of({"diff": [], "before": {}}), rebuild=lambda: plan_migration(root, moves)[0]), []
+        return bw.WritePlan(digest=bs.strategy_digest({"diff": [], "before": {}}), rebuild=lambda: plan_migration(root, moves)[0]), []
     after = {fid: copy.deepcopy(doc) for fid, doc in docs.items()}
     project = after.setdefault("project", {"version": 1})
     moved: dict = {}
@@ -92,7 +92,7 @@ def plan_migration(root: Path, moves: list[legacy.Move]) -> tuple[bw.WritePlan, 
         value = bw._get(docs[m.file], m.old)
         if m.values:
             if value not in m.values:
-                questions.append({"pointer": _rel(m.new), "why": "insufficient", "candidates": sorted(set(m.values.values())),
+                questions.append({"pointer": _section_rel(m.new), "why": "insufficient", "candidates": sorted(set(m.values.values())),
                                   "evidence": [{"source": "repo", "ref": f".ndf/{legacy.FILES[m.file]}:{m.old}", "value": str(value)}]})
                 continue
             value = m.values[value]
@@ -101,17 +101,17 @@ def plan_migration(root: Path, moves: list[legacy.Move]) -> tuple[bw.WritePlan, 
         elif m.transform == "version_files":
             moved.setdefault("release", {})["_version_files"] = [{"path": p} for p in value or []]
         else:
-            bw._set(moved, _rel(m.new), copy.deepcopy(value))
+            bw._set(moved, _section_rel(m.new), copy.deepcopy(value))
     if questions:
         return bw.WritePlan(), questions
     for m in sorted(present, key=lambda m: -len(m.old)):
-        _remove(after[m.file], m.old)
+        _remove_pointer(after[m.file], m.old)
     if not any(m.new is not None for m in present) and bs.SECTION in project:
         # remove の行だけが当たった（使わなくなったキー）。セクションは今のまま
         names = {legacy.FILES[fid]: doc for fid, doc in after.items()}
         return bw.plan_files(root, names, lambda: plan_migration(root, moves)[0]), []
     section = _fill(moved, bw.load_presets(), project.get(bs.SECTION))
-    failed = bs.validate(section)
+    failed = bs.validate_section(section)
     if failed:
         where = [{**f, "legacy": sorted(f"{a}:{b}" for a, b in found)} for f in failed]
         return bw.WritePlan(failed=where), []
@@ -120,7 +120,7 @@ def plan_migration(root: Path, moves: list[legacy.Move]) -> tuple[bw.WritePlan, 
     return bw.plan_files(root, names, lambda: plan_migration(root, moves)[0]), []
 
 
-def _remove(doc: dict, pointer: str) -> None:
+def _remove_pointer(doc: dict, pointer: str) -> None:
     toks = [t.replace("~1", "/").replace("~0", "~") for t in pointer.split("/")[1:]]
     cur = doc
     for t in toks[:-1]:

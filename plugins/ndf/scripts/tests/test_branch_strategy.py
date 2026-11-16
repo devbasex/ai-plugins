@@ -50,13 +50,13 @@ def make_repo(tmp_path: Path, ndf: dict[str, dict]) -> Path:
 
 @pytest.mark.parametrize("kind", KINDS)
 def test_five_kinds_pass_schema(kind):
-    assert bs.validate(section(kind)) == []
+    assert bs.validate_section(section(kind)) == []
 
 
 def _broken(kind: str, edit) -> list[str]:
     s = section(kind)
     edit(s)
-    return [f["rule"] for f in bs.validate(s)]
+    return [f["rule"] for f in bs.validate_section(s)]
 
 
 @pytest.mark.parametrize(
@@ -83,14 +83,14 @@ def test_trunk_without_version_store_is_the_r4_example():
     """要求の例「trunk なのに版数の置き場が無い」は、release_pr の trunk で落ち、production_pr の trunk（web-trunk・docs）は通る。"""
     s = section("plugin")
     s["release"].update(version_store={"kind": "none"}, tag=None, github_release=False, cd=None)
-    assert [f["rule"] for f in bs.validate(s)] == ["R4"]
-    assert bs.validate(section("web-trunk")) == [] and bs.validate(section("docs")) == []
+    assert [f["rule"] for f in bs.validate_section(s)] == ["R4"]
+    assert bs.validate_section(section("web-trunk")) == [] and bs.validate_section(section("docs")) == []
 
 
 def test_merge_base_branch_without_version_store_passes():
     s = section("web-develop")
     s["release"].update(version_store={"kind": "none"}, tag=None, github_release=False)
-    assert bs.validate(s) == []
+    assert bs.validate_section(s) == []
 
 
 def test_schema_has_no_old_names():
@@ -114,13 +114,13 @@ def test_presets_carry_no_repo_specific_names():
 @pytest.mark.parametrize("kind", KINDS)
 def test_load_reads_each_kind(tmp_path, kind):
     root = make_repo(tmp_path, {"project.json": {"version": 1, "branch_strategy": section(kind)}})
-    assert bs.load(root).section == section(kind)
+    assert bs.load_strategy(root).section == section(kind)
 
 
 def test_load_stops_without_section(tmp_path):
     root = make_repo(tmp_path, {"project.json": {"version": 1}})
     with pytest.raises(bs.StrategyError) as e:
-        bs.load(root)
+        bs.load_strategy(root)
     assert "branch-strategy init" in e.value.reason and e.value.exit_code == 3
 
 
@@ -141,7 +141,7 @@ def test_load_stops_on_legacy_key(tmp_path, files, where):
         ndf[k] = {**ndf.get(k, {}), **v}
     root = make_repo(tmp_path, ndf)
     with pytest.raises(bs.StrategyError) as e:
-        bs.load(root)
+        bs.load_strategy(root)
     assert where in e.value.reason and "branch-strategy migrate" in e.value.reason
 
 
@@ -150,11 +150,11 @@ def test_load_stops_on_schema_and_broken_json(tmp_path):
     bad["merge"]["method"] = "direct"
     root = make_repo(tmp_path, {"project.json": {"version": 1, "branch_strategy": bad}})
     with pytest.raises(bs.StrategyError) as e:
-        bs.load(root)
+        bs.load_strategy(root)
     assert "R2" in e.value.reason and e.value.exit_code == 1
     (root / ".ndf" / "project.json").write_text("{", encoding="utf-8")
     with pytest.raises(bs.StrategyError) as e:
-        bs.load(root)
+        bs.load_strategy(root)
     assert e.value.exit_code == 2
 
 
@@ -180,9 +180,9 @@ def test_cli_get_and_start_ref(tmp_path, capsys):
 
 def test_snapshot_digest_and_diff():
     s = bs.Strategy(section("plugin"))
-    snap = bs.snapshot(s, "start")
+    snap = bs.snapshot_section(s, "start")
     reordered = bs.Strategy(json.loads(json.dumps(section("plugin"), sort_keys=True)))
-    assert bs.snapshot(reordered, "start")["digest"] == snap["digest"]
+    assert bs.snapshot_section(reordered, "start")["digest"] == snap["digest"]
     assert bs.snapshot_diff(snap, s) == []
     changed = section("plugin")
     changed["merge"]["method"] = "strict"
@@ -268,7 +268,7 @@ def test_find_legacy_on_ai_plugins_like_files():
 def test_init_values_new_repo_has_no_cd(kind):
     sec, q = bw.init_values(kind, {"production": "main", "merge_queue": True}, bw.load_presets())
     assert q == [] and sec["release"]["cd"] is None and sec["release"]["tag"] is None and sec["release"]["github_release"] is False
-    assert bs.validate(sec) == []
+    assert bs.validate_section(sec) == []
 
 
 def test_init_values_fixtures_and_names():
@@ -310,7 +310,7 @@ def test_write_digest_and_idempotent(tmp_path):
         bw.commit_plan(root, plan, "0" * 64)
     assert "branch_strategy" not in json.loads((root / ".ndf" / "project.json").read_text())
     bw.commit_plan(root, plan, plan.digest)
-    assert bs.load(root).section == section("docs")
+    assert bs.load_strategy(root).section == section("docs")
     again = bw.plan_write(root, section("docs"))
     assert again.diff == []
 
@@ -362,7 +362,7 @@ def test_migrate_moves_old_keys(tmp_path):
     plan, q = bmig.plan_migration(root, legacy.load_moves())
     assert q == [] and not plan.failed
     bw.commit_plan(root, plan, plan.digest)
-    s = bs.load(root).section
+    s = bs.load_strategy(root).section
     assert s["release_strategy"] == "merge_base_branch" and s["branches"] == {"production": "main", "base": "develop"}
     assert s["merge"]["admin"] is True and s["merge"]["method"] == "direct"
     assert s["release"]["cd"] == {"workflow": "release-cd.yml"} and s["release"]["tag"] == "{plugin}--v{version}"
@@ -380,11 +380,11 @@ def test_migrate_resumes_after_partial_write(tmp_path):
     plan, _ = bmig.plan_migration(root, legacy.load_moves())
     (root / ".ndf" / "project.json").write_text(json.dumps(plan.files["project.json"]), encoding="utf-8")
     with pytest.raises(bs.StrategyError):
-        bs.load(root)  # セクションと旧いキーが両方ある（I1）
+        bs.load_strategy(root)  # セクションと旧いキーが両方ある（I1）
     again, _ = bmig.plan_migration(root, legacy.load_moves())
     bw.commit_plan(root, again, again.digest)
     first = plan.files["project.json"]["branch_strategy"]
-    assert bs.load(root).section == first  # 先に消えた project.json の値（迂回・delivery）も落とさない
+    assert bs.load_strategy(root).section == first  # 先に消えた project.json の値（迂回・delivery）も落とさない
 
 
 def test_migrate_unknown_value_asks_and_rule_failure_stops(tmp_path):
@@ -400,7 +400,7 @@ def test_migrate_remove_row_only(tmp_path):
     root = make_repo(tmp_path, {"project.json": {"version": 1, "branch_strategy": section("docs")}, "worktree.json": {"version": 1, "branch_flow": {}}})
     plan, _ = bmig.plan_migration(root, legacy.load_moves())
     bw.commit_plan(root, plan, plan.digest)
-    assert bs.load(root).section == section("docs")
+    assert bs.load_strategy(root).section == section("docs")
 
 
 # --- 測る（受け入れ条件 9・10・11） ------------------------------------------------------------
@@ -453,20 +453,20 @@ def test_measure_develop_main(tmp_path):
                                        ".github/workflows/release.yml": "run: gh release create v1\n"})
     prs = [(i, "develop", f"sprint/{i}") for i in range(1, 5)] + [(9, "main", "develop")]
     api = fake_api(prs, tags=["v1.0.0", "v1.1.0", "v1.2.0"], releases=["v1.0.0", "v1.1.0", "v1.2.0"])
-    res = bsm.measure(root, api)
+    res = bsm.measure_strategy(root, api)
     assert res["status"] == "ok", res["questions"]
     v = res["values"]
     assert res["kind"] == "web-develop" and v["release_strategy"] == "merge_base_branch" and v["branches"]["base"] == "develop"
     assert v["merge"]["method"] == "direct" and v["release"]["tag"] == "v{version}" and v["release"]["cd"] == {"workflow": "release.yml"}
     refs = {(e["pointer"], e["source"]) for e in res["evidence"]}
     assert ("/release_strategy", "pr") in refs and ("/release/tag", "tag") in refs and ("/release/form", "preset") in refs
-    assert bs.validate(v) == []
+    assert bs.validate_section(v) == []
 
 
 def test_measure_trunk_without_tags(tmp_path):
     root = history_repo(tmp_path, 4)
     api = fake_api([(i, "main", f"sprint/{i}") for i in range(1, 5)])
-    res = bsm.measure(root, api)
+    res = bsm.measure_strategy(root, api)
     assert res["status"] == "ok", res["questions"]
     v = res["values"]
     assert res["kind"] == "docs" and v["release_strategy"] == "trunk" and v["merge"]["method"] == "strict"
@@ -476,16 +476,16 @@ def test_measure_trunk_without_tags(tmp_path):
 
 def test_measure_doc_conflict_and_insufficient(tmp_path):
     root = history_repo(tmp_path, 4, {"CONTRIBUTING.md": "`--base develop` で出す\n"})
-    res = bsm.measure(root, fake_api([(i, "main", f"sprint/{i}") for i in range(1, 5)]))
+    res = bsm.measure_strategy(root, fake_api([(i, "main", f"sprint/{i}") for i in range(1, 5)]))
     assert res["status"] == "ask" and any(q["why"] == "conflict" and q["pointer"] == "/branches/base" for q in res["questions"])
     root2 = history_repo(tmp_path / "b", 0)
-    res2 = bsm.measure(root2, fake_api([]))
+    res2 = bsm.measure_strategy(root2, fake_api([]))
     assert res2["status"] == "ask" and {q["why"] for q in res2["questions"]} >= {"insufficient"}
 
 
 def test_measure_tags_without_cd_asks_r10(tmp_path):
     root = history_repo(tmp_path, 4)
-    res = bsm.measure(root, fake_api([(i, "main", f"sprint/{i}") for i in range(1, 5)], tags=["v1.0.0", "v1.0.1", "v1.0.2"], releases=["v1.0.0", "v1.0.1", "v1.0.2"]))
+    res = bsm.measure_strategy(root, fake_api([(i, "main", f"sprint/{i}") for i in range(1, 5)], tags=["v1.0.0", "v1.0.1", "v1.0.2"], releases=["v1.0.0", "v1.0.1", "v1.0.2"]))
     assert res["status"] == "ask" and res["questions"][0]["pointer"] == "/release/cd"
 
 
@@ -701,7 +701,7 @@ def test_cli_migrate_then_digest(tmp_path):
     assert "branch_strategy" not in json.loads((root / ".ndf" / "project.json").read_text())
     done = run_decl(root, "migrate", "--digest", out["digest"])
     assert done.returncode == 0, done.stderr
-    assert bs.load(root).section["release_strategy"] == "merge_base_branch"
+    assert bs.load_strategy(root).section["release_strategy"] == "merge_base_branch"
 
 
 def test_cli_bad_verb_is_2(tmp_path):
