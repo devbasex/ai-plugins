@@ -63,3 +63,45 @@ def test_legacy_reason_names_file_pointer_and_command():
         "`ndf project branch-strategy migrate` で移してください"
     )
     assert 'project-decl.py" branch-strategy migrate' in legacy.legacy_reason(found[:1], "10")
+
+
+# --- 値を引く（strategy_write.get_pointer）と在るかを見る（has_pointer）の現状固定 ----------------------------------
+_PTR_DOC = {"a": {"b/c": 1, "z": None, "f": False, "e": "", "~": {"x": [1]}}, "l": [{"y": 2}]}
+
+
+@pytest.mark.parametrize(
+    "pointer, has, got",
+    [
+        ("/a/b~1c", True, 1),
+        ("/a/~0/x", True, [1]),
+        ("/a/z", True, None),  # 値が null: 在るが、引くと無いと同じ None
+        ("/a/f", True, False),
+        ("/a/e", True, ""),
+        ("/a/q", False, None),
+        ("/a/b~1c/q", False, None),  # 途中が object でない
+        ("/l/0", False, None),  # 配列はどちらもたどらない
+        ("/a/~0/x/0", False, None),
+        ("/a/", False, None),
+    ],
+)
+def test_get_pointer_and_has_pointer_walk_the_same_objects(pointer, has, got):
+    from ndf.domains.project import strategy_write as bw
+
+    assert legacy.has_pointer(_PTR_DOC, pointer) is has
+    assert bw.get_pointer(_PTR_DOC, pointer) == got
+    assert type(bw.get_pointer(_PTR_DOC, pointer)) is type(got)
+
+
+def test_get_pointer_and_has_pointer_on_the_whole_document():
+    from ndf.domains.project import strategy_write as bw
+
+    assert legacy.has_pointer(_PTR_DOC, "") is True and bw.get_pointer(_PTR_DOC, "") is _PTR_DOC
+    assert legacy.has_pointer("text", "") is True and bw.get_pointer("text", "") == "text"
+    assert legacy.has_pointer("text", "/a") is False and bw.get_pointer("text", "/a") is None
+
+
+@pytest.mark.parametrize("value", [None, "", False, 0, {}, []])
+def test_find_legacy_reports_a_key_whatever_its_value(value):
+    """現状固定: 旧いキーは値が null や空でも、キーが在れば見つける（値を引く get_pointer とは違う）。"""
+    found = legacy.find_legacy({"worktree": {"base_branch": value}}, legacy.load_moves())
+    assert legacy.Found("worktree.json", "/base_branch") in found
