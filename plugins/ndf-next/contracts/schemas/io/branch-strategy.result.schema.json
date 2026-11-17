@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "branch-strategy.result.schema.json",
+  "title": "ブランチ戦略の宣言の作成の結果",
+  "description": "解析の branch-strategy（11.0 は ndf project branch-strategy、10 系は project-decl.py branch-strategy）が標準出力へ出す 1 行の JSON（#3672 の「入出力の契約」）。正本はこのファイルで、10 系の plugins/ndf/scripts/data/branch-strategy.result.schema.json はコピー（scripts/check-ndf-contracts.py が 1 バイトの違いも落とす）",
+  "type": "object",
+  "required": ["status"],
+  "additionalProperties": false,
+  "properties": {
+    "status": {
+      "enum": ["ok", "ask", "stopped"],
+      "description": "ok は書いた・書く差分を示した、ask は問いがあり書いていない、stopped は検査に落ちて書いていない"
+    },
+    "kind": {
+      "type": ["string", "null"],
+      "description": "選んだ代表のリポジトリの種類（決まっていなければ null）"
+    },
+    "values": {
+      "type": "object",
+      "description": "書くセクションの中身（status が ask なら書く候補で、書いていない）"
+    },
+    "evidence": {
+      "type": "array",
+      "description": "キーの位置ごとの根拠",
+      "items": {
+        "type": "object",
+        "required": ["source", "ref"],
+        "additionalProperties": false,
+        "properties": {
+          "source": {
+            "enum": ["pr", "tag", "release", "ruleset", "workflow", "doc", "repo", "preset", "answer"],
+            "description": "根拠の種類。preset は種類の既定の行から埋めた値、answer は人の答えで書いた値"
+          },
+          "ref": {"type": "string", "description": "番号・名前・パス:行・種類の名前・答えのファイル"},
+          "value": {"description": "事例の値"},
+          "pointer": {"type": "string", "description": "根拠を付けたセクションのキーの位置（JSON Pointer）"}
+        }
+      }
+    },
+    "questions": {
+      "type": "array",
+      "description": "人へ回す問い（decision-request の手順で回し、答えは write --answers が受ける）",
+      "items": {
+        "type": "object",
+        "required": ["pointer", "why", "candidates", "evidence"],
+        "additionalProperties": false,
+        "properties": {
+          "pointer": {"type": "string", "description": "問うキーの位置（JSON Pointer。種類は /kind）"},
+          "why": {
+            "enum": ["conflict", "insufficient", "no_kind", "merge_queue_unknown", "missing"],
+            "description": "問う理由。conflict は根拠が食い違う、insufficient は根拠が足りない、no_kind は種類が決まらない、merge_queue_unknown は merge queue の有無が分からない、missing は値が無い"
+          },
+          "candidates": {"type": "array", "description": "選べる値（先頭が推す値）"},
+          "evidence": {"type": "array", "description": "問いの根拠"}
+        }
+      }
+    },
+    "diff": {
+      "type": "array",
+      "description": "書く差分（JSON Patch。migrate・write --dry-run）",
+      "items": {"type": "object"}
+    },
+    "digest": {
+      "type": ["string", "null"],
+      "description": "差分のハッシュ。書くときに渡す"
+    },
+    "failed": {
+      "type": "array",
+      "description": "落ちた規則（R<数>・shape など）とキーの位置",
+      "items": {
+        "type": "object",
+        "required": ["rule", "pointer"],
+        "properties": {
+          "rule": {"type": "string"},
+          "pointer": {"type": "string"},
+          "reason": {"type": "string"},
+          "why": {"type": "string"}
+        }
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "description": "測れなかったもの（読めないファイル・時間切れ）",
+      "items": {"type": "string"}
+    },
+    "facts": {
+      "type": "object",
+      "description": "答えを足した後の問い直しに使う、測った事実"
+    }
+  }
+}

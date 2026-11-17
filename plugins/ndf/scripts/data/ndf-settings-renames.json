@@ -1,5 +1,5 @@
 {
-  "summary": "設定のキーの改名表（#3613・#3672 の決定 3）。列は id・file（ndf-files の ID）・old・new_file・new（JSON Pointer）・values（旧い値 → 新しい値。無ければ値を変えない）・transform（値の形を変えて移す行）。new が null の行は移した後に消す旧いキー（remove の行）。new_file が project で new が /branch_strategy の下の行は、解析の branch-strategy migrate と旧い宣言の検査だけが読む（決定 10）。正本は plugins/ndf-next/contracts/domains/ndf-settings-renames.json、10 系の plugins/ndf/scripts/data/ndf-settings-renames.json はコピー（一致の検査は #3681）",
+  "summary": "設定のキーの改名表（#3613・#3672 の決定 3）。列は id・file（ndf-files の ID）・old・new_file・new（JSON Pointer）・values（旧い値 → 新しい値。無ければ値を変えない）・transform（値の形を変えて移す行）。new が null の行は移した後に消す旧いキー（remove の行）。new_file が project で new が /branch_strategy の下の行は、解析の branch-strategy migrate と旧い宣言の検査だけが読む（決定 10）。正本は plugins/ndf-next/contracts/data/ndf-settings-renames.json、10 系の plugins/ndf/scripts/data/ndf-settings-renames.json はコピー（scripts/check-ndf-contracts.py が 1 バイトの違いも落とす）",
   "rows": [
     {
       "id": "worktree-base-branch",

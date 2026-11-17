@@ -1,5 +1,5 @@
 {
-  "$comment": "#3672 の $defs/BranchStrategy の本文。project_lib/model.py の json_schema() が project.schema.json の $defs へ入れる。11.0 の contracts/schemas/declarations/project.schema.json の同じ定義と一致させる（#3681 が検査を足す）",
+  "$comment": "#3672 の $defs/BranchStrategy の本文。project_lib/model.py の json_schema() が project.schema.json の $defs へ入れる。正本は plugins/ndf-next/contracts/schemas/declarations/project.schema.json の同じ名前の定義で、これはコピー（scripts/check-ndf-contracts.py が生成した project.schema.json の定義との違いを落とす）",
   "BranchStrategy": {
     "title": "BranchStrategy",
     "description": "ブランチ戦略の宣言（#3672）。.ndf/project.json のセクション branch_strategy。解析の branch-strategy サブコマンドだけが作る・更新する・移す・消す。組み合わせの規則は allOf の R2〜R10。値の等しさを比べる R1（trunk ⇔ base と production が同じ）は JSON Schema で書けないため、読む部品の validate が同じ番号で確かめる",
