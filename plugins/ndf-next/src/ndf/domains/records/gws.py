@@ -37,12 +37,17 @@ def auth_status(limit: str = "gws.auth-status") -> dict[str, Any]:
     # 失敗した応答の JSON を認証の判定へ渡さない
     if done.returncode != 0:
         raise GwsError(f"gws auth status が終了コード {done.returncode} で終わった", done.stderr)
+    return _parse_status(done.stdout, done.stderr)
+
+
+def _parse_status(stdout: str, stderr: str) -> dict[str, Any]:
+    """成功した `gws auth status` の標準出力を読む。JSON でない・状態のキーがそろわなければ `GwsError`（`stderr` を添える）。"""
     try:
-        raw = json.loads(done.stdout)
+        raw = json.loads(stdout)
     except json.JSONDecodeError as exc:
-        raise GwsError(f"gws auth status を読めない: {exc}", done.stderr) from exc
+        raise GwsError(f"gws auth status を読めない: {exc}", stderr) from exc
     if not isinstance(raw, dict) or any(k not in raw for k in STATUS_KEYS):
-        raise GwsError(f"gws auth status の出力に {' / '.join(STATUS_KEYS)} のどれかが無い", done.stderr)
+        raise GwsError(f"gws auth status の出力に {' / '.join(STATUS_KEYS)} のどれかが無い", stderr)
     return raw
 
 
