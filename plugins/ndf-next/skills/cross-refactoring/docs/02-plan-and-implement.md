@@ -42,7 +42,7 @@ rf_eval merge-plan "$ID"          # TESTS_NEEDED=0|1。2 = 項目 0 件（readop
 
 ### `merge-plan` がすること
 
-1. **グレードを決める。** Jev が使えるときは改善候補ごとに `score`（low / medium / high）を質問、
+1. **グレードを決める。** Jev が使えるときは改善候補ごとに `score`（low / medium / high）を問い合わせ、
    確信度 0.6 以上なら Jev のグレード、未満か失敗なら実装担当のグレード（失敗は `judge.failures` に数える）
 2. **同じ変更を統合する。** 同じ `path` + `symbol` の組の中の 2 件だけを比べる。Jev が
    確信度 0.8 以上で「同じ」と回答したら統合し、それ以外は実装担当の `merge_into` に従う。

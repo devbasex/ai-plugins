@@ -11,7 +11,7 @@
 2. `project-mvv.py collect` がコミット 3787 件・課題 574 件で履歴モードを選び、出典つきの材料 `materials.json` を
    リポジトリの外（`~/.claude/ndf/state/project-mvv/<根の名前>/`）へ書く（実測 6.2 秒）
 3. `project-mvv.py propose --materials <materials.json>` が候補 A・B と「利用者に決めてもらう点」を `candidates.md` に書く
-4. conductor が `candidates.md` を示し、分かれる点を `AskUserQuestion`（`metadata.source` は `ndf-ask:redline:C7`。`.ndf/mvv.*` を書くため）で質問、回答から本文を固める。
+4. conductor が `candidates.md` を示し、分かれる点を `AskUserQuestion`（`metadata.source` は `ndf-ask:redline:C7`。`.ndf/mvv.*` を書くため）で質問し、回答から本文を固める。
    この例では、利用者が承認した `issues/` の MVV の草案の文面がそのまま本文になる。**ここまで `.ndf/` に何も書かない**
 5. `project-mvv.py vet --kind candidate --body <本文>` が「従う」（0）を返す
 6. 利用者が同じ本文を承認した後に `project-mvv.py approve --body <本文> --by <承認者>` を打つ。`.ndf/mvv.md`（本文）と
@@ -68,7 +68,7 @@
 `settings.trend_commits` / `trend_issues` か `--trend-commits` / `--trend-issues` で変える）に満たないと、
 README・指示書（`AGENTS.md` / `CLAUDE.md` など）・リクエスト文（`--request-file`）だけを材料にする。
 
-**Claude Code 以外のランタイム。** `AskUserQuestion` が無ければ、同じテンプレートの文面を会話で示して質問、質問の先頭に区分の名前（`ndf-ask:redline:C7`）を書く。
+**Claude Code 以外のランタイム。** `AskUserQuestion` が無ければ、同じテンプレートの文面を会話で示して質問し、質問の先頭に区分の名前（`ndf-ask:redline:C7`）を書く。
 
 ## 改訂
 
@@ -85,7 +85,7 @@ README・指示書（`AGENTS.md` / `CLAUDE.md` など）・リクエスト文（
 | 1 | 理由をファイルに書き、`project-mvv.py collect` → `project-mvv.py propose --materials <materials.json> --current --reason-file <理由>` |
 | 2 | 改訂案（`candidates.md`。末尾に現行との差分）を示し、分かれる点を問う |
 | 3 | `project-mvv.py vet --kind revision --body <本文>` |
-| 4 | 承認を質問、承認の後に `project-mvv.py approve --body <本文> --by <承認者> --reason <理由>` |
+| 4 | 承認を求め、承認の後に `project-mvv.py approve --body <本文> --by <承認者> --reason <理由>` |
 
 `approve` はバージョンを 1 つ上げ、理由と前のバージョンとの差分（`changes`。項目の単位で added / changed / removed）を追記する。過去のバージョンは
 書き換えない。`project-mvv.py show --version N` でバージョン N の本文を、`show --diff M` でバージョン M から現行への差分を出す。

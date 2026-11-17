@@ -39,7 +39,7 @@ allowed-tools:
 この Skill は自然文のリクエストでも起動する。インストールは**外部のマーケットプレイスの登録**と
 **Claude Code のプラグインの導入**を伴い、利用者が明示的に頼んでいない操作になりうる。
 **ステップ3 を実行する前に、以下の 4 点を一覧で提示して利用者の同意を得る。同意が得られなければ
-インストールを行わず、その Skill を使わない方法で作業を続けるか、作業を中断する。** 同意は `AskUserQuestion` で質問、
+インストールを行わず、その Skill を使わない方法で作業を続けるか、作業を中断する。** 同意は `AskUserQuestion` で質問し、
 `metadata.source` に `ndf-ask:legal`（取得する Skill のライセンスへの同意）を付ける（区分の SSOT は
 `development-workflow` の `references/asking.md`）。
 

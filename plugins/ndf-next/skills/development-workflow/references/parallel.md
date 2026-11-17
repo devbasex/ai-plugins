@@ -22,7 +22,7 @@
 
 | `wait` が返したもの | すること |
 | --- | --- |
-| `questions` | 届いているリクエスト（`items`）を下の「質問の仕方」で質問、リクエストごとに回答を送る。回答を送ったリクエストだけが残る一覧では返らない。`metrics.batch` が `true` なら業務時間外に溜めたリクエストのまとめで、`metrics.deferred` があれば業務時間外に今問うリクエストだけが返っている（下の「業務時間外のリクエスト」） |
+| `questions` | 届いているリクエスト（`items`）を下の「質問の仕方」で質問し、リクエストごとに回答を送る。回答を送ったリクエストだけが残る一覧では返らない。`metrics.batch` が `true` なら業務時間外に溜めたリクエストのまとめで、`metrics.deferred` があれば業務時間外に今問うリクエストだけが返っている（下の「業務時間外のリクエスト」） |
 | `answer_hold` | `metrics.changes` の各行の `line` を利用者へそのまま 1 行ずつ出す（質問にしない）。出した最後の `n` を、以後の `wait` の `--changes-after` に渡す（下の「回答待ちの停止」） |
 | `finished` / `stopped` | レーンごとの結果（リリースしたバージョン・停止理由）を要約し、`metrics.prior_waits`（回答のまだの前のループの待ち）があれば並べ、`[ndf-parallel] finished p1` の行を出して終える |
 | 終了コード 3 | 上限（既定 1800 秒）で戻ったときは、下の「長い待ちの状況報告と切り替え」に従う。業務時間外にリクエストを溜めただけのときも 3 で、`metrics.next` の 1 行を打ち直す |
@@ -96,9 +96,9 @@
 4. 残りがあれば、上の「質問の仕方」の区分の順と 4 件ずつで、まとめて `AskUserQuestion` を出す。残りが無ければ
    `wait p1 --after <metrics.seq>` を背景で打ち直す
 
-リリース承認ゲートは、提示 1 なら「承認」「変更を要求する」で質問、`parallel.py confirm p1 <連番>` か
+リリース承認ゲートは、提示 1 なら「承認」「変更を要求する」で質問し、`parallel.py confirm p1 <連番>` か
 `parallel.py settle p1 <連番> --rejected` を打つ。出し直しの提示（`represent: true`）なら加わった範囲を添えて
-「新しい範囲で出す」「最初の範囲だけ出す」「変更を要求する」で質問、`confirm --take new` / `--take first` / `settle --rejected` を打つ。
+「新しい範囲で出す」「最初の範囲だけ出す」「変更を要求する」で質問し、`confirm --take new` / `--take first` / `settle --rejected` を打つ。
 
 `wait` が `action: carried` の知らせを返したら、出し直しを省いた確定の確かめ直し（下の `parallel.py carried`）が通り、新しい範囲で出すことを指す。
 回答の時点では返さない。

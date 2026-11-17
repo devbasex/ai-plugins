@@ -131,7 +131,7 @@ def _cmd_head(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, A
     head = approved_head(run.read(st, a.machine_id), a.gate, st.root)
     if head is None:
         raise model.Refused(f"ステートマシン {a.machine_id} に、{model.gate_label(a.gate)}で head を見て承認した回答が無い")
-    summary = f"{model.gate_label(a.gate)}で承認済みのコミット は {head}"
+    summary = f"{model.gate_label(a.gate)}で承認済みのコミットは {head}"
     return result.result(TOOL, result.OK, summary, metrics={"machine_id": a.machine_id, "gate": a.gate, "head": head})
 
 
