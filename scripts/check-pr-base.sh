@@ -56,28 +56,20 @@ strategy_value() {
   printf '%s\n' "$out"
 }
 
-release_strategy=$(strategy_value /release_strategy) || exit 1
-
-case "$release_strategy" in
-trunk) exit 0 ;;
-release_branch | merge_base_branch) ;;
-*)
-  echo "::error::${target} の宣言の release_strategy が分かりません: ${release_strategy}"
-  exit 1
-  ;;
-esac
-
-if [ "$release_strategy" = "release_branch" ]; then
+# release_branch: 選んだスプリントブランチを集めた release/v<版> だけを通す。終了コードを返す。
+check_release_branch() {
+  local first stray c
+  local -a sprints
   case "$head_ref" in
   release/v*) ;;
   *)
     echo "::error::${target} 宛の Pull Request は、${target} から切って承認したスプリントブランチを集めた release/v<版> からだけです（分岐元: ${head_ref}）"
-    exit 1
+    return 1
     ;;
   esac
   if [ -z "$head_sha" ] || ! git merge-base --is-ancestor "refs/remotes/origin/$target" "$head_sha" 2>/dev/null; then
     echo "::error::${head_ref} の先頭（${head_sha:-SHA の指定なし}）が origin/${target} の子孫ではありません。${target} から切り直してください"
-    exit 1
+    return 1
   fi
   GIT_TERMINAL_PROMPT=0 git fetch -q origin 'refs/heads/sprint/*:refs/remotes/origin/sprint/*' 2>/dev/null || true
   first=$(git rev-list --first-parent "refs/remotes/origin/$target..$head_sha")
@@ -90,41 +82,62 @@ if [ "$release_strategy" = "release_branch" ]; then
   done < <(git rev-list "$head_sha" "^refs/remotes/origin/$target" "${sprints[@]}")
   if [ -n "$stray" ]; then
     echo "::error::${head_ref} に、スプリントブランチ（origin の sprint/*）にも組むマージと版上げにも無いコミットがあります:${stray}。承認したスプリントブランチだけを ${target} から集め直してください"
-    exit 1
+    return 1
   fi
-  exit 0
-fi
+  return 0
+}
 
-# merge_base_branch: ベースブランチからだけ通す
-dev_base=$(strategy_value /branches/base) || exit 1
+# merge_base_branch: ベースブランチからだけ通す。終了コードを返す。
+check_merge_base_branch() {
+  local dev_base listing found line
+  dev_base=$(strategy_value /branches/base) || return 1
 
-# 起点ブランチをまだ作っていない間は、すべての Pull Request を通す。
-#
-# 照合先は `refs/heads/<名前>` と完全な参照名で渡す。`git ls-remote` のパターンは参照名の
-# 末尾に一致するため、`develop` とだけ渡すと `refs/heads/feature/develop` にも一致し、
-# 起点が未作成なのにチェックが有効になる（git 2.53.0 で実測）。返った行の参照名とも突き合わせ、
-# 末尾一致で別のブランチを拾わないようにする（`wt_branch_exists` と同じ形）。
-listing=$(GIT_TERMINAL_PROMPT=0 git ls-remote --heads origin "refs/heads/$dev_base" 2>/dev/null) ||
-  exit 0
-found=0
-while IFS= read -r line; do
-  case "$line" in *$'\t'"refs/heads/$dev_base") found=1; break ;; esac
-done <<<"$listing"
-[ "$found" -eq 1 ] || exit 0
+  # 起点ブランチをまだ作っていない間は、すべての Pull Request を通す。
+  #
+  # 照合先は `refs/heads/<名前>` と完全な参照名で渡す。`git ls-remote` のパターンは参照名の
+  # 末尾に一致するため、`develop` とだけ渡すと `refs/heads/feature/develop` にも一致し、
+  # 起点が未作成なのにチェックが有効になる（git 2.53.0 で実測）。返った行の参照名とも突き合わせ、
+  # 末尾一致で別のブランチを拾わないようにする（`wt_branch_exists` と同じ形）。
+  listing=$(GIT_TERMINAL_PROMPT=0 git ls-remote --heads origin "refs/heads/$dev_base" 2>/dev/null) ||
+    return 0
+  found=0
+  while IFS= read -r line; do
+    case "$line" in *$'\t'"refs/heads/$dev_base") found=1; break ;; esac
+  done <<<"$listing"
+  [ "$found" -eq 1 ] || return 0
 
-[ "$head_ref" = "$dev_base" ] && exit 0
+  [ "$head_ref" = "$dev_base" ] && return 0
 
-case "$head_ref" in
-release/v*)
-  if [ -n "$head_sha" ] &&
-    GIT_TERMINAL_PROMPT=0 git fetch -q origin "refs/heads/$dev_base:refs/remotes/origin/$dev_base" 2>/dev/null &&
-    git merge-base --is-ancestor "$head_sha" "refs/remotes/origin/$dev_base" 2>/dev/null; then
-    exit 0
-  fi
-  echo "::error::${head_ref} の先頭（${head_sha:-SHA の指定なし}）が origin/${dev_base} に含まれていません。${dev_base} へ取り込んでから既定ブランチへ出してください"
+  case "$head_ref" in
+  release/v*)
+    if [ -n "$head_sha" ] &&
+      GIT_TERMINAL_PROMPT=0 git fetch -q origin "refs/heads/$dev_base:refs/remotes/origin/$dev_base" 2>/dev/null &&
+      git merge-base --is-ancestor "$head_sha" "refs/remotes/origin/$dev_base" 2>/dev/null; then
+      return 0
+    fi
+    echo "::error::${head_ref} の先頭（${head_sha:-SHA の指定なし}）が origin/${dev_base} に含まれていません。${dev_base} へ取り込んでから既定ブランチへ出してください"
+    return 1
+    ;;
+  esac
+
+  echo "::error::既定ブランチ宛の Pull Request は ${dev_base} からのみです。--base ${dev_base} を付けてください（分岐元: ${head_ref}）"
+  return 1
+}
+
+release_strategy=$(strategy_value /release_strategy) || exit 1
+
+case "$release_strategy" in
+trunk) exit 0 ;;
+release_branch)
+  check_release_branch
+  exit $?
+  ;;
+merge_base_branch)
+  check_merge_base_branch
+  exit $?
+  ;;
+*)
+  echo "::error::${target} の宣言の release_strategy が分かりません: ${release_strategy}"
   exit 1
   ;;
 esac
-
-echo "::error::既定ブランチ宛の Pull Request は ${dev_base} からのみです。--base ${dev_base} を付けてください（分岐元: ${head_ref}）"
-exit 1
