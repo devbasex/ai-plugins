@@ -178,9 +178,8 @@ ndf-next の形のプラグインは、Skill の一覧を `manifests/skills.json
   `Git.remote()` か `remote_of` から引く
 - `adapters/git.py` はリモート名の文字列を持たず、`ndf.contracts`（`jsonschema` を読み込む）を読まない。hook の起動を延ばさない
   ためである
-- `git.ORIGIN` はリリースの部品（`domains/release/gather.py`・`assemble.py`）のためにモジュールの `__getattr__` で残り、値は
-  `default_remote()` である。この 2 ファイルは宣言の `remote` を読まず既定のリモート名を使う。リリースの部品を作り直す
-  #3615 が `git.ORIGIN` を消す
+- `adapters/git.py` は既定のリモート名の定数（`ORIGIN`）を持たない。リリースの部品（`domains/release/`）は、コマンドの
+  入口が `remote_of(<メインディレクトリ>)` で 1 回だけ求めたリモート名を受け取って使い、リモート名を自分で書かない（#3615）
 
 ### 文書だけの判定
 
