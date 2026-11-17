@@ -470,8 +470,10 @@ def plan_release_package_plugin(a) -> dict:
         steps.append(_cleanup_step(v, prs, repo, release_review_row(a).diff != "none"))
     steps += [release_branch_step(a, repo, base, units, reviews[0]["id"] if reviews else after_branch), *reviews] if dev and units else []
     ctx = _KindArgs(a, repo, approval, prs, rts, v, base, units, cd)
-    steps += kind.approval_steps(ctx)
-    steps += judge_fix_steps(run_ids, after_notes, fix=dev)  # 本番は承認の外のコミットを積まない（#3572）
+    approvals = kind.approval_steps(ctx)
+    judges = judge_fix_steps(run_ids, after_notes, fix=dev)  # 本番は承認の外のコミットを積まない（#3572）
+    # trunk は試用の枝と取り込みの枝の間に judge を置き、limits.longest_path が枝 → judge → 枝の経路も数える（#1909 の決定 2）
+    steps += [*judges, *approvals] if trunk else [*approvals, *judges]
     if not dev:
         steps.append(judge_record_step())
     kind.add_gate(steps, ctx)  # CD のある場合の承認ゲートは approval-post の後に置く（release_cd.cd_prod_steps）

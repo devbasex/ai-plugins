@@ -15,8 +15,8 @@
     "明示": "1.2.0",
     "系列": null
   },
-  "規則": "trunk の本番（#3703）: release は承認の前に版上げの PR を開いて 10 で止まり、その head（release/v<版>）から導入を確かめ（trial）、承認資料を作ってからリリース承認ゲートに入る。承認の後は approve から続け、release が宣言のマージの主体と方式で本番ブランチへ入れる。merge queue へ入れた・人のマージを待つ（6）なら release-landed で打ち直す。run のステップが落ちたら、外部の待ち（CI・ネットワーク）の揺れなら同じステップをもう一度。試用の導入の失敗・タグの重複・権限の不足と、コードや設定に原因があるもの（版数の書き漏れ・文書の形）は stop。",
-  "上限": 12,
+  "規則": "trunk の本番（#3703）: release は承認の前に版上げの PR を開いて 10 で止まり、その head（版上げのブランチ）から導入を確かめ（trial）、承認資料を作ってからリリース承認ゲートに入る。承認の後は approve から続け、release が宣言のマージの主体と方式で本番ブランチへ入れる。merge queue へ入れた・人のマージを待つ（6）なら release-landed で打ち直す。run のステップが落ちたら、外部の待ち（CI・ネットワーク）の揺れなら同じステップをもう一度。試用の導入の失敗・タグの重複・権限の不足と、コードや設定に原因があるもの（版数の書き漏れ・文書の形）は stop。",
+  "上限": 16,
   "steps": [
     {
       "id": "bump",
@@ -138,6 +138,44 @@
       "next": "end"
     },
     {
+      "id": "judge",
+      "type": "judge",
+      "inputs": [
+        "bump",
+        "bump-others",
+        "changelog",
+        "notes",
+        "snapshot",
+        "release",
+        "verify",
+        "release-landed",
+        "trial",
+        "facts",
+        "explain",
+        "others",
+        "approve",
+        "cleanup"
+      ],
+      "question": "落ちたステップを同じ形でもう一度（retry）か、止める（stop）か。retry なら decision に落ちたステップの id を返す。リリースのプランではコードを直さない。原因がコードや設定にあるなら stop を選ぶ（直しはベースブランチ宛ての Pull Request で入れる）",
+      "choices": [
+        "bump",
+        "bump-others",
+        "changelog",
+        "notes",
+        "snapshot",
+        "release",
+        "verify",
+        "release-landed",
+        "trial",
+        "facts",
+        "explain",
+        "others",
+        "approve",
+        "cleanup",
+        "stop"
+      ]
+    },
+    {
       "id": "trial",
       "type": "run",
       "stage": "デプロイ",
@@ -182,44 +220,6 @@
       "cmd": "python3 <NDF>/scripts/release-steps.py approve --approval issues/approval-foo-v1.2.0.md --facts-from {state_dir} --by user",
       "next": "release",
       "gate_next": "end"
-    },
-    {
-      "id": "judge",
-      "type": "judge",
-      "inputs": [
-        "bump",
-        "bump-others",
-        "changelog",
-        "notes",
-        "snapshot",
-        "release",
-        "verify",
-        "release-landed",
-        "trial",
-        "facts",
-        "explain",
-        "others",
-        "approve",
-        "cleanup"
-      ],
-      "question": "落ちたステップを同じ形でもう一度（retry）か、止める（stop）か。retry なら decision に落ちたステップの id を返す。リリースのプランではコードを直さない。原因がコードや設定にあるなら stop を選ぶ（直しはベースブランチ宛ての Pull Request で入れる）",
-      "choices": [
-        "bump",
-        "bump-others",
-        "changelog",
-        "notes",
-        "snapshot",
-        "release",
-        "verify",
-        "release-landed",
-        "trial",
-        "facts",
-        "explain",
-        "others",
-        "approve",
-        "cleanup",
-        "stop"
-      ]
     },
     {
       "id": "judge-record",

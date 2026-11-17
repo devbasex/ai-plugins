@@ -153,14 +153,11 @@ def trial_verify(a) -> str | None:
     return cmd
 
 
-def trunk_prod_waves(
-    a, repo: str, build, then_of: str, note: str | None = None, prs: list[str] | None = None, condition: dict | None = None
-) -> list[dict]:
+def trunk_prod_waves(prod_plan: dict, then_of: str, note: str | None = None) -> list[dict]:
     """trunk（`decl.trunk_release`）の本番のステージ 1 つ。開発版のステージを置かず、本番のプランが版上げの PR を開いて承認前の
-    試用をし、承認資料を作ってから承認を待つ（#3703 の決定 4・6・7）。レーンならリリースの依頼のプラン（`prod_plans`）。"""
-    from supervise_lib.sprint import prod_plans
-
-    wave = {"name": "本番", "plans": prod_plans(a, repo, build, prs, condition), "then_of": then_of}
+    試用をし、承認資料を作ってから承認を待つ（#3703 の決定 4・6・7）。`prod_plan` は呼び手が組んだ `sprint.prod_plans` の値
+    （レーンならリリースの依頼のプラン）。`sprint` を読み込まないよう値で受ける（`normal_prod_waves` と同じ）。"""
+    wave = {"name": "本番", "plans": prod_plan, "then_of": then_of}
     if note:
         wave["note"] = note
     return [wave]

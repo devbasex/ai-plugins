@@ -2429,7 +2429,7 @@ def _trunk(monkeypatch, tmp_path, ops, approved=HEAD):
     try:
         return tr.release_trunk(ctx, ops)
     except SystemExit as e:
-        return e.value.code, codes[-1]
+        return e.code, codes[-1]
 
 
 def test_release_trunk_opens_the_release_pr_and_stops_at_the_gate_without_the_approval(monkeypatch, tmp_path):

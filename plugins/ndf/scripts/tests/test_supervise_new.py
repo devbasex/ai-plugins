@@ -653,7 +653,9 @@ def test_release_step_stops_on_infra_wait_and_outlasts_the_ci_wait(tmp_path, cha
     """#1645 の AC12・I9: release のステップは 75 で judge を通らず止まり、timeout は 待つ PR の数 × --ci-wait より長い。"""
     root = plugin_repo(tmp_path)
     rel = release_steps_of(root, tmp_path, channel, version)["release"]
-    assert rel["on_exit"] == {"75": "stop"} and rel["on_fail"] == "judge"
+    # 本番の 6（merge queue へ入れた・人のマージを待つ）は release-landed で打ち直す（#3703 の決定 3・9）
+    landed = {"6": "release-landed"} if channel == "prod" else {}
+    assert rel["on_exit"] == {"75": "stop", **landed} and rel["on_fail"] == "judge"
     ci_wait = int(rel["cmd"].split("--ci-wait ", 1)[1].split()[0])
     assert rel["timeout"] > prs * ci_wait
 
