@@ -1,7 +1,7 @@
 """リリース（段階ごとのモジュール。#1142 の M2。旧い子 RF8 #2995）。
 
-リリースは GitHub Actions の workflow（ai-plugins は `.github/workflows/ndf-next-release.yml`、利用者のリポジトリは
-`skills/release/assets/workflows/ndf-release.yml` から再利用可能なワークフローを呼ぶ）が行い、会話のセッションは承認資料の
+リリースは GitHub Actions の workflow（利用者のリポジトリは `skills/release/assets/workflows/ndf-release.yml` を置いて
+再利用可能なワークフローを呼ぶ）が行い、会話のセッションは承認資料の
 提示と、回答を証跡のコメントに書くことだけを持つ（#3395 の決定 128）。承認の SSOT はリリースの PR の証跡だけである。
 
 段階とオーナー:

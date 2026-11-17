@@ -90,8 +90,8 @@ def test_pubspec_version(text: str, want: str | None) -> None:
         ("version: 1.2.3\n", "version: 1.2.4\n"),
         ("version: 1.2.3+abc\n", "version: 1.2.4+abc\n"),
         (
-            "# c\nname: a  # x\nversion: 1.2.3+1 # 版\nenv:\n  version: 9\n",
-            "# c\nname: a  # x\nversion: 1.2.4+2 # 版\nenv:\n  version: 9\n",
+            "# c\nname: a  # x\nversion: 1.2.3+1 # note\nenv:\n  version: 9\n",
+            "# c\nname: a  # x\nversion: 1.2.4+2 # note\nenv:\n  version: 9\n",
         ),
     ],
 )

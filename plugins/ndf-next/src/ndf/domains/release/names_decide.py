@@ -5,7 +5,7 @@
 
 | キー | 既定 | 例 |
 | --- | --- | --- |
-| `tag` | 無し（必須のキー。`null` はタグを作らない） | `v{version}`・`{plugin}--v{version}` |
+| `tag` | 無し（必須のキー。`null` はタグを作らない） | `v{version}`・`{plugin}@{version}` |
 | `branch` | `DEFAULT_BRANCH` | `rel-{version}` |
 | `changelog_heading` | `DEFAULT_HEADING` | `## [{version}] - {date}`（Keep a Changelog） |
 
@@ -118,11 +118,8 @@ class NameFormats:
 
 def formats_of(release: Mapping[str, Any]) -> NameFormats:
     """設定の `release` のセクションの書式（`branch`・`changelog_heading` が無ければ既定）。"""
-    return NameFormats(
-        release.get("tag"),
-        release.get("branch", DEFAULT_BRANCH),
-        release.get("changelog_heading", DEFAULT_HEADING),
-    )
+    named = {key: release[key] for key in ("branch", "changelog_heading") if key in release}
+    return NameFormats(release["tag"], **named)
 
 
 def highest_tag(formats: NameFormats, unit: str, tags: Iterable[str]) -> Optional[tuple[str, str]]:

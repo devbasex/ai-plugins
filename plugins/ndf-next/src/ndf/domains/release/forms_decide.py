@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from typing import NamedTuple
+from typing import NamedTuple, Optional
 
 from ndf.contracts import facts
 
@@ -26,11 +26,12 @@ class Form(NamedTuple):
     label: str
     reach: str
     supported: bool
-    why: str
+    why: Optional[str]
 
 
 def _where() -> str:
-    return f"plugins/ndf-next/contracts/{facts.location(TABLE)}"
+    """表の在りか（`contracts/` からの相対）。"""
+    return f"contracts/{facts.location(TABLE)}"
 
 
 def form_of(name: str) -> Form:
@@ -39,7 +40,7 @@ def form_of(name: str) -> Form:
     if name not in known:
         raise FormUnsupported(f"リリースの形 {name!r} はリリースの形の表（{_where()}）に無い。取れる形: {', '.join(known)}")
     row = facts.row(TABLE, name)
-    form = Form(row["id"], row["label"], row["reach"], row["supported"], row.get("why", ""))
+    form = Form(row["id"], row["label"], row["reach"], row["supported"], facts.column(TABLE, "why").get(name))
     if not form.supported:
         raise FormUnsupported(f"リリースの形 {name}（{form.label}）は release-steps が扱わない（{_where()}）: {form.why}")
     return form

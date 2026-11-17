@@ -86,9 +86,7 @@ def _hub(args: argparse.Namespace) -> GitHub:
 
 
 def _target(args: argparse.Namespace, remote: str) -> assemble.Target:
-    return assemble.Target(
-        args.channel, args.level, args.base, args.production, remote, args.plugin, tuple(args.units or ()), args.target_pr
-    )
+    return assemble.Target(args.channel, args.level, args.base, args.production, remote, args.plugin, tuple(args.units), args.target_pr)
 
 
 def cmd_assemble(args: argparse.Namespace) -> dict:
@@ -258,7 +256,7 @@ def _target_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--channel", choices=version_decide.CHANNELS, required=True)
     p.add_argument("--level", choices=version_decide.LEVELS, default="patch")
     p.add_argument("--plugin", help="ブランチの名前にバージョンを使う単位（省けば単位の順の先頭）")
-    p.add_argument("--units", nargs="+", help="集めるスプリントブランチ（release_branch の設定で必須）")
+    p.add_argument("--units", nargs="+", default=(), help="集めるスプリントブランチ（release_branch の設定で必須）")
     p.add_argument("--pr", dest="target_pr", type=int, help="本番の PR の番号（承認の対象が production_pr の設定で必須）")
 
 

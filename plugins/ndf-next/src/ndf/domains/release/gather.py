@@ -13,7 +13,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Any, Optional
+from typing import Any, NamedTuple, Optional
 
 from ndf.adapters import git as git_mod
 from ndf.adapters.github import GitHub, text_of
@@ -28,6 +28,16 @@ PULL_SELECTION = (
 )
 # first-parent の各コミットを読む形（SHA・親・件名を NUL で区切る）
 _LOG_FORMAT = "--format=%H%x00%P%x00%s"
+
+
+class Scope(NamedTuple):
+    """バージョンアップの計画を読む範囲: 保存先と単位と、単位ごとの範囲の起点（`since_by_unit`）と終点（`until`）。"""
+
+    repo_git: git_mod.Git
+    store: store_mod.VersionStore
+    units: Sequence[store_mod.Unit]
+    since_by_unit: Mapping[str, str]
+    until: str
 
 
 def fetch(repo_git: git_mod.Git, remote: str, name: str) -> None:
@@ -98,7 +108,7 @@ def introduced(repo_git: git_mod.Git, store: store_mod.VersionStore, unit: store
             if store.read(repo_git, sha, unit) != current:
                 break
             last = sha
-    except (git_mod.GitError, store_mod.StoreError):  # noqa: NDF401 履歴: 浅い取得で読めなければ次の候補（最初のコミット）へ進む
+    except (git_mod.GitError, store_mod.StoreError):  # noqa: NDF401 外部コマンド: 浅い取得で git log が読めなければ次の候補（最初のコミット）へ進む
         return None
     return last
 
@@ -164,23 +174,15 @@ def changes(
 
 
 def plan_bumps(
-    repo_git: git_mod.Git,
-    store: store_mod.VersionStore,
-    ref: str,
-    units: Sequence[store_mod.Unit],
-    change_list: Sequence[changes_decide.Change],
-    decl: NdfSettings,
-    since_by_unit: Mapping[str, str],
-    level: str,
-    channel: str,
+    scope: Scope, change_list: Sequence[changes_decide.Change], decl: NdfSettings, level: str, channel: str
 ) -> list[version_decide.Planned]:
-    """バージョンを上げる単位と次のバージョンと範囲の起点（単位の順）。`ref` の保存先にバージョンが無い単位は `INITIAL` から上げる。"""
+    """バージョンを上げる単位と次のバージョンと範囲の起点（単位の順）。範囲の終点の保存先にバージョンが無い単位は `INITIAL` から上げる。"""
     wanted = {c.plugin for c in change_list if changes_decide.needs_bump(c, decl.bump_undistributed)}
     out = []
-    for unit in units:
+    for unit in scope.units:
         if unit.name in wanted:
-            current = store.read(repo_git, ref, unit) or store_mod.INITIAL
-            since = repo_git.rev_parse(since_by_unit[unit.name])
+            current = scope.store.read(scope.repo_git, scope.until, unit) or store_mod.INITIAL
+            since = scope.repo_git.rev_parse(scope.since_by_unit[unit.name])
             out.append(version_decide.Planned(unit.name, current, version_decide.next_version(current, level, channel), since))
     return out
 

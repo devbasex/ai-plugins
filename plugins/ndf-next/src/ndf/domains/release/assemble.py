@@ -107,6 +107,7 @@ class Built:
 class _Setting:
     """1 回の実行で設定から決めたもの。"""
 
+    strategy: Strategy
     kind: SpanKind
     form: forms_decide.Form
     formats: names_decide.NameFormats
@@ -116,7 +117,7 @@ class _Setting:
 def _setting(strategy: Strategy) -> _Setting:
     release = strategy.section["release"]
     form = forms_decide.form_of(release["form"])
-    return _Setting(since_decide.kind_of(strategy), form, names_decide.formats_of(release), route_decide.route_of(strategy).bump)
+    return _Setting(strategy, since_decide.kind_of(strategy), form, names_decide.formats_of(release), route_decide.route_of(strategy).bump)
 
 
 def _provisional(formats: names_decide.NameFormats) -> str:
@@ -219,19 +220,20 @@ def _since_by_unit(
 
 
 def _facts(
-    root: Path, hub: GitHub, target: Target, strategy: Strategy, setting: _Setting, until: str, fork: Optional[str]
+    root: Path, hub: GitHub, target: Target, setting: _Setting, until: str, fork: Optional[str]
 ) -> tuple[materials_decide.Facts, store_mod.VersionStore]:
     """作業場所（HEAD が範囲の終点）から承認資料の材料を読む。バージョンを持つ設定で上げるものが無ければ `NothingToRelease`。"""
     repo_git = git_mod.Git(root)
     decl = decl_mod.load(root)
-    store = store_mod.load(root, strategy, hub.repo)
+    store = store_mod.load(root, setting.strategy, hub.repo)
     found = store.units()
     since_by_unit = _since_by_unit(repo_git, target, setting, store, found, fork)
     change_list = gather.changes(repo_git, since_by_unit, until, found, decl)
     planned: list[version_decide.Planned] = []
     if setting.versioned:
+        scope = gather.Scope(repo_git, store, found, since_by_unit, until)
         planned = gather.clear_shipped(
-            gather.plan_bumps(repo_git, store, until, found, change_list, decl, since_by_unit, target.level, target.channel),
+            gather.plan_bumps(scope, change_list, decl, target.level, target.channel),
             gather.shipped(repo_git, target.remote, store, setting.formats, found, target.ref(target.production)),
             target.level,
             target.channel,
@@ -269,13 +271,13 @@ def collect(root: Path, hub: GitHub, target: Target, strategy: Strategy) -> mate
             raise AssembleError("release_branch の設定では --units に集めるスプリントブランチを渡す")
         try:
             with units.scratch(repo_git, target.remote, target.production, target.units, _provisional(setting.formats)) as made:
-                return _facts(made.path, hub, target, strategy, setting, made.head, None)[0]
+                return _facts(made.path, hub, target, setting, made.head, None)[0]
         except units.UnitsError as exc:
             raise AssembleError(str(exc)) from None
     until, fork = _span(repo_git, target, setting.kind, hub)
     if setting.kind != SpanKind.PR and repo_git.rev_parse("HEAD") != repo_git.rev_parse(until):
         raise AssembleError(f"worktreeの HEAD が {until} の HEAD でない（範囲の終点で打つ）")
-    return _facts(root, hub, target, strategy, setting, until, fork)[0]
+    return _facts(root, hub, target, setting, until, fork)[0]
 
 
 def _build_units(repo_git: git_mod.Git, target: Target, branch: str) -> str:
@@ -300,7 +302,7 @@ def assemble(root: Path, hub: GitHub, target: Target, strategy: Strategy) -> Bui
     else:
         until, fork = _span(repo_git, target, setting.kind, hub)
         repo_git.run("switch", "--quiet", "--detach", until)
-    facts, store = _facts(root, hub, target, strategy, setting, until, fork)
+    facts, store = _facts(root, hub, target, setting, until, fork)
     if target.is_production:
         opened = open_releases(hub, target, setting.formats)
         if opened:

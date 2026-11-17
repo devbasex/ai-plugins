@@ -22,14 +22,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple, Optional, Protocol
 
+import semver
+
 from ndf.adapters import git as git_mod
 from ndf.core import json_pointer
 from ndf.core.branch_strategy import Strategy
 from ndf.domains.release import names_decide
 from ndf.domains.release import plugins as plugins_mod
 
-# `read` が None の単位を上げるときの起点
-INITIAL = "0.0.0"
+# `read` が None の単位を上げるときの起点（まだ出していない単位の今のバージョン）
+INITIAL = str(semver.Version(0, 0, 0))
 # `pubspec.yaml` の最上位の `version:` の行（インデントの無い行だけ）
 _PUBSPEC_LINE = re.compile(r"^version:[ \t]*(?P<quote>['\"]?)(?P<value>[^'\"\s#]+)(?P=quote)(?P<tail>[ \t]*(?:#.*)?)$", re.MULTILINE)
 
@@ -94,7 +96,7 @@ def pubspec_replace(text: str, new: str) -> str:
 
 @dataclass
 class PluginStore:
-    """マーケットプレイスに登録したプラグインごとにバージョンを持つ保存先（ai-plugins の設定）。"""
+    """マーケットプレイスに登録したプラグインごとにバージョンを持つ保存先。"""
 
     root: Path
     files: tuple[dict, ...] = ()
@@ -233,24 +235,18 @@ class NoneStore:
 
 
 # 種類 → アダプターのクラス（設定のスキーマの `version_store` の `oneOf` の種類と同じ集合。テストが照らす）
-KINDS: dict[str, type] = {
-    "plugin": PluginStore,
-    "json": JsonStore,
-    "pubspec": PubspecStore,
-    "tag": TagStore,
-    "none": NoneStore,
-}
+KINDS: dict[str, type] = {cls.kind: cls for cls in (PluginStore, JsonStore, PubspecStore, TagStore, NoneStore)}
 
 
 def load(root: Path, strategy: Strategy, repo_name: str) -> VersionStore:
     """設定の保存先の種類のアダプター。表に無い種類は `StoreError`。`repo_name` は `owner/name` か `name`。"""
     release = strategy.section["release"]
     store = release["version_store"]
-    kind = store.get("kind")
+    kind = store["kind"] if "kind" in store else None
     if kind not in KINDS:
         raise StoreError(f"バージョンの保存先の種類 {kind!r} は扱えない。取れる種類: {', '.join(KINDS)}")
-    name = release.get("plugin") or repo_name.rsplit("/", 1)[-1]
-    files = tuple(store.get("files", ()))
+    name = release["plugin"] if "plugin" in release else repo_name.rsplit("/", 1)[-1]
+    files = tuple(store["files"]) if "files" in store else ()
     if kind == "plugin":
         return PluginStore(Path(root), files)
     if kind == "json":

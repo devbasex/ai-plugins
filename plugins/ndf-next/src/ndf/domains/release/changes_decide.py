@@ -19,8 +19,6 @@ import pathspec
 from ndf import identity
 from ndf.contracts import facts
 
-# テストのファイルの表（リリース対象に関わらないファイルの既定）
-TEST_FILES = "test-files"
 # 指示書のファイルの表
 INSTRUCTION_FILES = "instruction-files"
 
@@ -42,7 +40,7 @@ def default_undistributed() -> tuple[str, ...]:
 
     保存先の行（`dir`）は `<名前>/`（どの深さのそのディレクトリの下も当たる）、名前の行は fnmatch の形のまま（どの深さの
     そのファイル名にも当たる）。"""
-    return tuple(f"{r['pattern']}/" if r["where"] == "dir" else r["pattern"] for r in facts.rows(TEST_FILES))
+    return tuple(f"{r['pattern']}/" if r["where"] == "dir" else r["pattern"] for r in facts.rows("test-files"))
 
 
 def _under(path: str, directory: str) -> str | None:

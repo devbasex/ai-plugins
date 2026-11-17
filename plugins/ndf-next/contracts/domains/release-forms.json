@@ -1,11 +1,12 @@
 {
   "summary": "リリースの形（設定 .ndf/project.json の branch_strategy.release.form の値）ごとの届き方と、ndf-next での扱い。id の集合は設定のスキーマの release.form の列挙と同じ。supported が偽の形では release-steps の materials・assemble・publish が何もせずに止まり、why を理由に出す。今の NDF の release Skill の 9 種のうち、スライド・文書・表計算・ページは document の 1 行で受ける（#3615 の決定 1）",
   "owner": "D2（contracts/domains。行はリリースの形を足す子が足す。初版は #3615）",
+  "shared_names": true,
   "columns": {
     "label": {"type": "string", "summary": "形の名前（承認資料に出す）"},
     "reach": {"type": "string", "summary": "利用者へ届く仕組み（承認資料の届き方の 1 行）"},
     "supported": {"type": "boolean", "summary": "release-steps が扱うか"},
-    "why": {"type": "string", "summary": "扱わない理由と、扱う予定の版（supported が偽の行だけ）", "optional": true}
+    "why": {"type": "string", "summary": "扱わない理由と、扱う予定のバージョン（supported が偽の行だけ）", "optional": true}
   },
   "rows": [
     {"id": "package-plugin", "label": "パッケージ・プラグイン", "reach": "タグと GitHub Release を作り、パッケージの登録先やマーケットプレイスから利用者が取得する", "supported": true},

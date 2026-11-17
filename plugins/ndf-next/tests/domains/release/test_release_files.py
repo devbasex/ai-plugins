@@ -203,7 +203,7 @@ def test_release_steps_parser_current_behavior() -> None:
         req("--channel", choices=("production", "dev")),
         opt("--level", "patch", ("major", "minor", "patch")),
         opt("--plugin"),
-        opt("--units"),
+        ("--units", False, (), None, None, "_StoreAction"),
         ("--pr", False, None, None, int, "_StoreAction"),
     ]
     pr = req("--pr", int)

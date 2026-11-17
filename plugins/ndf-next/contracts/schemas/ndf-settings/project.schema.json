@@ -689,12 +689,12 @@
             "branch": {
               "type": "string",
               "pattern": "\\{version\\}",
-              "default": "release/v{version}"
+              "description": "リリースブランチの名前の書式（{version} を置き換える）。無ければ ndf-next の names_decide.DEFAULT_BRANCH"
             },
             "changelog_heading": {
               "type": "string",
               "pattern": "^## .*\\{version\\}",
-              "default": "## [{plugin} {version}] - {date}"
+              "description": "CHANGELOG の見出しの書式（{plugin}・{version}・{date} を置き換える）。無ければ ## [{plugin} {version}] - {date}"
             },
             "github_release": {
               "type": "boolean"
