@@ -395,14 +395,7 @@ sequenceDiagram
 
 図に描かない要素は、構成要素図の注記に挙げたものと、材料の収集と組み立ての中で呼ばれる判断（名前・変化・バージョンの計算・CHANGELOG・含む PR・承認資料）である。
 
-範囲の終点はリリース方式で決まる。範囲の起点もリリース方式で決まる（用語「範囲の起点」と I4）。
-
-| リリース方式 | 範囲の終点 |
-| --- | --- |
-| `merge_base_branch` | ベースブランチの HEAD |
-| `trunk` の `release_pr` | 本番ブランチの HEAD |
-| `release_branch` | 選んだスプリントを集めた先頭 |
-| `production_pr` | `--pr` の PR の先頭 |
+範囲の終点はリリース方式で決まる。`merge_base_branch` はベースブランチの HEAD、`trunk` の `release_pr` は本番ブランチの HEAD である。`release_branch` は選んだスプリントを集めた先頭、`production_pr` は `--pr` の PR の先頭である。範囲の起点もリリース方式で決まる（用語「範囲の起点」と I4）。
 
 ## 非機能の実現方式
 
