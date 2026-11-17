@@ -85,9 +85,10 @@ def pull_facts(hub: GitHub, numbers: Sequence[int]) -> list[materials_decide.Pul
 def included(repo_git: git_mod.Git, since: str, until: str, production: str, formats: names_decide.NameFormats) -> list[int]:
     """範囲の first-parent の件名の PR と、リリースの単位のマージ（第 1 親..第 2 親）の中の PR の番号（本番ブランチから戻す PR と
     リリースブランチからのマージを除く。#3615 の決定 8）。"""
-    rows = [line.split("\0") for line in repo_git.log_of(f"{since}..{until}", "--first-parent", _LOG_FORMAT).splitlines() if line]
-    subjects = [r[2] for r in rows if len(r) == 3]
-    for sha, parents, subject in (r for r in rows if len(r) == 3):
+    split = (line.split("\0") for line in repo_git.log_of(f"{since}..{until}", "--first-parent", _LOG_FORMAT).splitlines() if line)
+    rows = [r for r in split if len(r) == 3]
+    subjects = [r[2] for r in rows]
+    for sha, parents, subject in rows:
         pair = parents.split()
         if len(pair) == 2 and included_decide.is_unit_merge(subject, formats.is_release_branch):
             subjects += repo_git.log_of(f"{pair[0]}..{pair[1]}", "--first-parent", "--format=%s").splitlines()
