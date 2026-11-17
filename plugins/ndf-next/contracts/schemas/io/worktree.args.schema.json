@@ -60,7 +60,11 @@
         },
         "--from": {
           "type": "string",
-          "description": "ベースブランチ（既定はスプリントの起点）"
+          "description": "worktree を切る起点（既定はブランチ戦略の宣言のスプリントの起点）"
+        },
+        "--state-dir": {
+          "type": "string",
+          "description": "スプリントの状態の置き場。渡すとブランチ戦略の宣言の全体をスナップショットとして控える（スプリントの開始）"
         }
       },
       "required": [
@@ -216,9 +220,9 @@
           },
           "x-ndf-positional": true
         },
-        "--flow-record": {
+        "--snapshot": {
           "type": "string",
-          "description": "スプリントの開始時の記録（branch_flow の写しと production_branch）"
+          "description": "スプリントの開始時のブランチ戦略のスナップショット（create --state-dir が書いたファイル）"
         }
       },
       "required": [

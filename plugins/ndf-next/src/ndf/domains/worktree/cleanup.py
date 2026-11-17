@@ -3,7 +3,8 @@
 1. メインディレクトリの `git worktree list` から、置き場 `.worktrees/` の下の worktree を集める
 2. git だけで分かる事実（detached・鎖・今の位置・未コミットの変更）を読み、残すものを先に決める
 3. 残りのブランチの PR を GitHub から 1 回のクエリで読む（`adapters.github.GitHub.pulls_by_head`）。消すと決まっても、
-   選んで集める取り込み方のスプリントブランチは本番チャネルに含まれるまで残す（`merged_decide.sprint_keep`。今の宣言で決める）
+   選んで集める取り込み方のスプリントブランチは本番ブランチに含まれるまで残す（`merged_decide.sprint_keep`。今のブランチ戦略の
+   宣言で決め、消す候補にスプリントブランチがあるときだけ宣言を読む）
 4. 消すと決めた worktree の公開を閉じてテスト環境を破棄し（`testenv_sweep.close_for_removal`。できなければ消さない）、
    追跡していないファイル（無視したものを含む）を先に退避し（`trash.evacuate`。退避できなければ消さない）、
    `git worktree remove`（`--force` を付けない）で消し（断られたら退避したファイルを戻す。`trash.restore`）、ブランチを `git branch -d` で消す
@@ -14,13 +15,15 @@
 
 from __future__ import annotations
 
+import functools
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Optional, Protocol
+from typing import Callable, Iterable, Optional, Protocol
 
 from ndf.adapters.git import Git, GitError
 from ndf.adapters.github import Pull
+from ndf.core.branch_strategy import Strategy
 from ndf.domains.worktree import cleanup_decide, declaration, merged_decide, repo, testenv_sweep, trash
 from ndf.domains.worktree.cleanup_decide import KEEP_SPRINT, REMOVE, Facts, PullState
 
@@ -116,23 +119,25 @@ def _remove(g: Git, item: repo.Worktree, merge: str = "") -> Outcome:
     return Outcome(item.path, item.branch, REMOVE, removed=True, branch_deleted=True, note=evacuated)
 
 
-def _sprint_keep(g: Git, item: repo.Worktree, flow: Optional[dict], remote: str) -> Optional[str]:
-    """`merged` が残したスプリントブランチを、本番チャネルに含まれる前に消さない（残す理由。消してよければ `None`）。"""
+def _sprint_keep(g: Git, item: repo.Worktree, strategy: Callable[[], Strategy], remote: str) -> Optional[str]:
+    """`merged` が残したスプリントブランチを、本番ブランチに含まれる前に消さない（残す理由。消してよければ `None`）。"""
     branch = str(item.branch)
-    if not branch.startswith(merged_decide.SPRINT_PREFIX):  # スプリントでなければ本番チャネルを読まない
+    if not branch.startswith(merged_decide.SPRINT_PREFIX):  # スプリントでなければ宣言も本番ブランチも読まない
         return None
-    return merged_decide.sprint_keep(branch, flow, repo.contained_in_production(g, branch, flow, remote), remote)
+    got = strategy()
+    return merged_decide.sprint_keep(branch, got, repo.contained_in_production(g, branch, got.production, remote), remote)
 
 
 def cleanup(main_dir: Path, cwd: Path, hub: PullReader, dry_run: bool = False, git: Optional[Git] = None) -> list[Outcome]:
     """片付けを行い、worktree ごとの結果を返す。"""
     g = git if git is not None else Git(main_dir)
-    flow = repo.declared_flow(declaration.load(main_dir))
+    declaration.load(main_dir)  # 旧いキーの残る worktree の宣言では片付けない
+    strategy = functools.cache(lambda: declaration.strategy(main_dir))
     remote = g.remote()  # エントリポイントで 1 回だけ求める（worktree ごとに `git worktree list` を打たない）
     out: list[Outcome] = []
     for item, facts in survey(main_dir, cwd, hub, g):
         verdict = cleanup_decide.decide(facts)
-        keep = _sprint_keep(g, item, flow, remote) if verdict == REMOVE else None
+        keep = _sprint_keep(g, item, strategy, remote) if verdict == REMOVE else None
         if keep is not None:
             out.append(Outcome(item.path, item.branch, KEEP_SPRINT, note=keep))
         elif verdict == REMOVE and not dry_run:

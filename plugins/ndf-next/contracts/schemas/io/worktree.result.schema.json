@@ -143,7 +143,42 @@
           },
           "base": {
             "type": "string",
-            "description": "起点（create）"
+            "description": "起点（create）・ベースブランチ（check。ブランチ戦略の宣言の branches.base）"
+          },
+          "snapshot": {
+            "type": "object",
+            "description": "スプリントの開始時のブランチ戦略のスナップショット（create に --state-dir を渡したとき）",
+            "additionalProperties": false,
+            "required": [
+              "path",
+              "written",
+              "digest",
+              "changed"
+            ],
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "スナップショットのファイル"
+              },
+              "written": {
+                "type": "boolean",
+                "description": "今回書いたか（既にあれば書き換えない）"
+              },
+              "digest": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "セクションを正規化した JSON の SHA-256"
+              },
+              "changed": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "スナップショットと今のセクションの違うキーの位置（JSON Pointer の昇順）"
+              }
+            }
           },
           "start_ref": {
             "type": "string",
@@ -225,19 +260,13 @@
             "type": "string",
             "description": "宣言の状態の説明（check）"
           },
-          "base_branch": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "ベースブランチ（check）"
+          "production": {
+            "type": "string",
+            "description": "本番ブランチ（check。ブランチ戦略の宣言の branches.production）"
           },
-          "production_branch": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "本番のブランチ（check）"
+          "sprint_start": {
+            "type": "string",
+            "description": "スプリントの起点（check。ブランチの名前。Strategy.sprint_start_ref）"
           },
           "local_ignored": {
             "type": "array",

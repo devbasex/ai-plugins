@@ -1,8 +1,11 @@
 """作業場所の用意: ブランチの worktree を `<メインディレクトリ>/.worktrees/<ブランチ>` に作る。
 
-起点は `start` を渡せばそれ、無ければスプリントの起点（宣言の `branch_flow.start` が指すチャネル。`base` は
-`base_branch`、`production` は `production_branch`。宣言が無い・値が無ければ origin の既定ブランチ）である。
+起点は `start` を渡せばそれ、無ければスプリントの起点（ブランチ戦略の宣言 `.ndf/project.json` の `branch_strategy` の
+`Strategy.sprint_start_ref`。`sprint.start` が `base` なら `branches.base`、`production` なら `branches.production`）である。
+宣言が無い・旧いキーが残る・スキーマに落ちるときは既定ブランチへ倒さずに止める（旧いキーは位置と移行のコマンドを出す）。
 宣言は書き換えない。課題の worktree はスプリントブランチを `start` に渡して切る。
+
+`state_dir` を渡すと（スプリントの開始）、セクションの全体をその下へ控える（`declaration.write_start_snapshot`）。
 
 - 取得（`git fetch origin`）は作る前に 1 回だけ行う。失敗しても止めず `warnings` に載せる（origin の無い
   リポジトリでもローカルのブランチから切れる）。hook は取得しない（hook の外で通信する決まり）
@@ -15,14 +18,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from ndf.adapters.git import Git
 from ndf.domains.worktree import declaration, repo
 
 
 class CreateError(Exception):
-    """作れない。`kind` は止まった理由の表の種類（`invalid`・`precondition`・`refused`）。"""
+    """作れない。`kind` は止まった理由の表の種類（`invalid`・`precondition`・`refused`・`unknown`）。"""
 
     def __init__(self, kind: str, detail: str) -> None:
         super().__init__(detail)
@@ -37,22 +40,15 @@ class Created:
     start_ref: str
     new_branch: bool
     warnings: list[str] = field(default_factory=list)
+    snapshot: Optional[dict[str, Any]] = None
 
 
-def start_branch(git: Git, decl: Optional[declaration.Declaration], remote: Optional[str] = None) -> str:
-    """スプリントのベースブランチ。決められなければ `CreateError`（precondition）。`remote` を省けばこの作業場所のリモート名。"""
-    name: Optional[str] = None
-    if decl is not None:
-        try:
-            channel = decl.start_channel
-        except declaration.DeclarationError as exc:
-            raise CreateError("precondition", str(exc)) from exc
-        name = decl.production_branch if channel == "production" else decl.base_branch
-    if name is None:
-        name = git.remote_default_branch(remote)
-    if name is None:
-        raise CreateError("precondition", "ベースブランチを決められない（宣言の base_branch も origin の既定ブランチも無い）")
-    return name
+def start_branch(main_dir: Path) -> str:
+    """スプリントの起点（ブランチの名前）。決められなければ `CreateError`（precondition）。"""
+    try:
+        return declaration.sprint_start(main_dir)
+    except declaration.DeclarationError as exc:
+        raise CreateError("precondition", str(exc)) from exc
 
 
 def _check_name(git: Git, branch: str) -> None:
@@ -83,25 +79,36 @@ def _start_ref(git: Git, base: str, remote: str) -> str:
     raise CreateError("precondition", f"ベースブランチがリモート {remote} にもローカルにも無い: {base}")
 
 
-def create(main_dir: Path, branch: str, start: Optional[str] = None, git: Optional[Git] = None) -> Created:
+def _snapshot(main_dir: Path, state_dir: Optional[Path]) -> Optional[dict[str, Any]]:
+    if state_dir is None:
+        return None
+    try:
+        return declaration.write_start_snapshot(main_dir, state_dir)
+    except declaration.DeclarationError as exc:
+        raise CreateError("precondition", str(exc)) from exc
+    except OSError as exc:
+        raise CreateError("unknown", f"スプリントの開始時のスナップショットを書けない: {exc}") from exc
+
+
+def create(
+    main_dir: Path, branch: str, start: Optional[str] = None, git: Optional[Git] = None, state_dir: Optional[Path] = None
+) -> Created:
     """worktree を作る。git の失敗は `GitError` のまま返す（呼び手が結果 JSON にする）。"""
     g = git if git is not None else Git(main_dir)
     _check_name(g, branch)
     target = repo.worktree_path(main_dir, branch)
     _check_place(g, main_dir, target)
+    try:
+        declaration.load(main_dir)  # 旧いキーの残る worktree の宣言では作らない
+    except declaration.DeclarationError as exc:
+        raise CreateError("precondition", str(exc)) from exc
+    base = start_branch(main_dir) if start is None else start
+    snap = _snapshot(main_dir, state_dir)
     remote = g.remote()
     warnings = _fetch(g, remote)
-    if start is None:
-        try:
-            decl = declaration.load(main_dir)
-        except declaration.DeclarationError as exc:
-            raise CreateError("precondition", str(exc)) from exc
-        base = start_branch(g, decl, remote)
-    else:
-        base = start
     ref = _start_ref(g, base, remote)
     if g.has_ref(f"refs/heads/{branch}"):
         g.run("worktree", "add", "-q", str(target), branch)
-        return Created(target, branch, base, branch, False, warnings)
+        return Created(target, branch, base, branch, False, warnings, snap)
     g.run("worktree", "add", "-q", "--no-track", "-b", branch, str(target), ref)
-    return Created(target, branch, base, ref, True, warnings)
+    return Created(target, branch, base, ref, True, warnings, snap)
