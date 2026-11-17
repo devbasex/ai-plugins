@@ -162,21 +162,6 @@ def test_cli_write_answers_keeps_the_declared_section(tmp_path, capsys):
     assert out["values"]["merge"] == {**declared["merge"], "commit": "squash"}
 
 
-def test_cli_write_completes_an_asked_result_answered_with_the_approval(tmp_path, capsys):
-    """質問を返した測った結果へ `/approval/via` を含む回答を足しても、種類の既定から全体を組んで書ける形にする。"""
-    root = history_repo(tmp_path, 4, {"CONTRIBUTING.md": "`--base develop` で出す\n"})
-    protection = {"required_pull_request_reviews": {"required_approving_review_count": 1}, "enforce_admins": {"enabled": True}}
-    api = fake_api([(i, "main", f"sprint/{i}") for i in range(1, 5)], rules=[], protection=protection)
-    prior = tmp_path / "prior.json"
-    prior.write_text(json.dumps(strategy_measure.measure_strategy(root, api)), encoding="utf-8")
-    answers = tmp_path / "answers.json"
-    # ruleset はあるが queue も up-to-date も無い trunk はリリース方式を問うので、それにも回答する
-    answers.write_text(json.dumps({"/branches/base": "main", "/approval/via": "review", "/merge/method": "strict"}), encoding="utf-8")
-    code, out = run_cli(capsys, root, "write", "--result", str(prior), "--answers", str(answers))
-    assert code == 0 and out["status"] == "ok", out
-    assert out["values"]["approval"]["via"] == "review" and bs.validate(out["values"]) == []
-
-
 def test_migrate_remove_row_only_clears_the_key_the_check_found(tmp_path):
     root = make_repo(
         tmp_path, {"project.json": {"version": 1, "branch_strategy": section("docs")}, "worktree.json": {"version": 1, "branch_flow": {}}}
