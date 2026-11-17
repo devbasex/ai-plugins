@@ -45,19 +45,15 @@ def _tiers() -> str:
     return "・".join(budget_decide.TIER_ORDER)
 
 
-def _estimate_example() -> str:
-    """計画の担当へ示す見積りの形（予算の選び方が読む `budget_decide.ESTIMATE_PARTS` の鍵。値は分）。"""
-    return "{" + ", ".join(f'"{part}": <分>' for part in budget_decide.ESTIMATE_PARTS) + "}"
-
-
 def plan(pr: int, proposals: Sequence[Mapping[str, Any]]) -> str:
     lines = [f"- {p['path']} {p['symbol']}: {p['title']}（{p['reason']}）" for p in proposals]
     return (
         f"PR #{pr} のリファクタリングの提案から、採る項目を選んで並べる（重なるものは 1 つにする）。\n"
         + "\n".join(lines)
-        + f"\n項目ごとにグレード（tier: {_tiers()}）と見積り（estimate: テストの追加と実装の分）を付ける。"
+        + f"\n項目ごとにグレード（tier: {_tiers()}）と、手法（technique: extract_function などの snake_case の識別子）と、"
+        + "直す前に振る舞いを固定するテストを足すか（tests: true / false）を付ける。所要の分は書かない（配分の表から見積もる）。"
         + '\n最後の行に JSON {"items": [{"path": "<ファイル>", "symbol": "<関数名>", "title": "<要約>", "reason": "<理由>",'
-        + f' "tier": "<グレード>", "estimate": {_estimate_example()}}}]}} を出す。'
+        + ' "tier": "<グレード>", "technique": "<手法>", "tests": <真偽>}]} を出す。'
     )
 
 

@@ -113,6 +113,8 @@ NEXT = "plugins/ndf-next"
 COPY_FILES = (
     ("plugins/ndf-next/contracts/data/branch-strategy-presets.json", "plugins/ndf/scripts/data/branch-strategy-presets.json"),
     ("plugins/ndf-next/contracts/data/ndf-settings-renames.json", "plugins/ndf/scripts/data/ndf-settings-renames.json"),
+    # 共通原則の本文（MVV 判定の材料。#3745）
+    ("plugins/ndf-next/contracts/data/ndf-common-principles.md", "plugins/ndf/scripts/data/ndf-common-principles.md"),
     (
         "plugins/ndf-next/contracts/schemas/io/branch-strategy.result.schema.json",
         "plugins/ndf/scripts/data/branch-strategy.result.schema.json",
@@ -257,21 +259,28 @@ class Checker:
                 v("contract-stale", rel, f"arg:{s + ':' if s else ''}{n}", f"契約の args の {k} がコードから拾えない。{cf} から消す")
             )
         if got == want:
-            code_order: dict[str, list[str]] = {}
-            for s, p in f["positionals"]:
-                code_order.setdefault(s, []).append(p)
-            for s, names in sorted(positional_order(e["args"]).items()):
-                if names and names != code_order.get(s, []):
-                    where = f"{s}:" if s else ""
-                    order = ", ".join(code_order[s])
-                    out.append(
-                        v(
-                            "contract-stale",
-                            rel,
-                            f"arg-order:{where}",
-                            f"契約の positionals の順がコードの登録順と違う。{cf} を {order} の順にする",
-                        )
+            out.extend(self.positional_order_errors(rel, e["args"], f["positionals"]))
+
+    def positional_order_errors(self, rel: str, args: dict, positionals: list) -> list[dict]:
+        """契約の positionals の順とコードの登録順の食い違い（引数の集合が一致したときだけ呼ぶ）。"""
+        cf = self.c.entry_files[rel]
+        code_order: dict[str, list[str]] = {}
+        for s, p in positionals:
+            code_order.setdefault(s, []).append(p)
+        errors = []
+        for s, names in sorted(positional_order(args).items()):
+            if names and names != code_order.get(s, []):
+                where = f"{s}:" if s else ""
+                order = ", ".join(code_order[s])
+                errors.append(
+                    v(
+                        "contract-stale",
+                        rel,
+                        f"arg-order:{where}",
+                        f"契約の positionals の順がコードの登録順と違う。{cf} を {order} の順にする",
                     )
+                )
+        return errors
 
     def match_env(self, rel: str, e: dict, f: dict, out: list[dict]) -> None:
         cf = self.c.entry_files[rel]

@@ -3,6 +3,7 @@
 - 初期値は `skills/cross-refactoring/data/allocation-defaults.json` の `values`（種類ごとの `minutes`）で、`initial` が真
 - 宣言 `.ndf/estimate.json` の `allocation_minutes` は種類ごとの分で、書いた種類だけ初期値より先に効く
 - 初期値に無い種類を宣言に書いたとき・分が 0 以下のときは止める（黙って捨てない）
+- 履歴の実測で置き換えた配分の表は `allocation_history_decide` が作る
 """
 
 from __future__ import annotations
@@ -17,8 +18,13 @@ class AllocationError(ValueError):
     """初期値のファイルか宣言の形が違う。"""
 
 
+def is_number(value: Any) -> bool:
+    """bool を除いた int か float か（JSON の数として読める値か）。"""
+    return not isinstance(value, bool) and isinstance(value, (int, float))
+
+
 def _positive(value: Any, where: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+    if not is_number(value) or value <= 0:
         raise AllocationError(f"{where} が 0 より大きい数でない: {value!r}")
     return float(value)
 

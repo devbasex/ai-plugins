@@ -6,6 +6,7 @@ import json
 
 import pytest
 
+from ndf import identity
 from ndf.domains.records import files
 from ndf.domains.relay import cli, context_policy, context_records, registry
 
@@ -50,8 +51,8 @@ def test_context_dir_follows_the_legacy_state_root(tmp_path):
     assert context_records.context_dir({"NDF_CONTEXT_DIR": str(tmp_path)}) == tmp_path
     env = {"NDF_STATE_HOME": str(tmp_path / "s")}
     assert context_records.context_dir(env) == tmp_path / "s" / "context"
-    assert registry.legacy_root(env) == registry.legacy_state_root(env) / "relay"
-    assert registry.legacy_state_root({"XDG_STATE_HOME": str(tmp_path)}) == tmp_path / "ndf"
+    assert registry.legacy_root(env) == identity.legacy_state_root(env) / "relay"
+    assert identity.legacy_state_root({"XDG_STATE_HOME": str(tmp_path)}) == tmp_path / "ndf"
 
 
 def test_recorded_work_normalizes_issue_numbers():
@@ -176,4 +177,56 @@ def test_estimate_samples_restore_handoff_and_stage_segments(tmp_path):
         "stage_calls": {},
         "stage_expiries": {},
         "samples": {"restore": 0, "handoff": 0},
+    }
+
+
+def test_estimate_stage_segments_current_behavior_edges(tmp_path):
+    """現状固定（I-026）: 工程の区間の切り方の端。根拠は仕様ではなく今の出力。
+
+    - 区切りは工程つきの「継続」の行だけ（工程の無い行・別の判定・読めない時刻は区切らない）。行の並びは時刻で並べ直す
+    - 区間は [始まり, 次の区切り) で、始まりちょうどの呼び出しは入る。時刻の無い呼び出しは数えない
+    - 間隔がちょうど 1 時間はキャッシュ切れに数えず、1 秒でも超えれば数える
+    - 呼び出しの無い区間と最後の区間は標本にしない。同じ工程の区間は別の標本として足す
+    """
+    calls = [
+        "2026-11-15T01:00:00Z",
+        "2026-11-15T01:10:00Z",
+        "2026-11-15T02:10:00Z",
+        "2026-11-15T03:10:00Z",
+        "2026-11-15T04:10:01Z",
+        None,
+        "2026-11-15T04:20:00Z",
+        "2026-11-15T06:00:00Z",
+    ]
+    lines: list[dict] = [{"type": "user", "message": {"content": "始める"}}]
+    for i, ts in enumerate(calls):
+        usage = {"input_tokens": 1, "output_tokens": 1, "cache_read_input_tokens": 0}
+        entry: dict = {"type": "assistant", "message": {"id": f"m{i}", "model": "x", "usage": usage}}
+        if ts is not None:
+            entry["timestamp"] = ts
+        lines.append(entry)
+    t = tmp_path / "t.jsonl"
+    t.write_text("\n".join(json.dumps(x) for x in lines) + "\n", encoding="utf-8")
+    go = context_policy.CONTINUE
+    rows = [
+        {"at": "2026-11-15T04:30:00Z", "session_id": "s", "stage": "empty", "verdict": go},
+        {"at": "2026-11-15T00:59:00Z", "session_id": "s", "transcript": str(t), "stage": "a", "verdict": go},
+        {"at": "2026-11-15T01:05:00Z", "session_id": "s", "verdict": go},
+        {"at": "2026-11-15T01:06:00Z", "session_id": "s", "stage": "x", "verdict": "再起動"},
+        {"at": "not a time", "session_id": "s", "stage": "y", "verdict": go},
+        {"at": "2026-11-15T02:10:00Z", "session_id": "s", "stage": "b", "verdict": go},
+        {"at": "2026-11-15T04:40:00Z", "session_id": "s", "stage": "a", "verdict": go},
+        {"at": "2026-11-15T07:00:00Z", "session_id": "s", "stage": "last", "verdict": go},
+    ]
+    got = context_records.estimate(rows, None)
+    got.pop("at")
+    # 区間: a=[00:59,02:10) 2 呼び出し・切れ 0 / b=[02:10,04:30) 4 呼び出し・切れ 1 / empty は空 / a=[04:40,07:00) 1 呼び出し / last は最後
+    assert got == {
+        "restore_context": None,
+        "restore_calls": None,
+        "handoff_calls": None,
+        "handoff_output": None,
+        "stage_calls": {"a": 1.5, "*": 2.0, "b": 4.0},
+        "stage_expiries": {"a": 0.0, "*": 0.0, "b": 1.0},
+        "samples": {"restore": 0, "handoff": 0, "stage:a": 2, "stage:*": 3, "stage:b": 1},
     }

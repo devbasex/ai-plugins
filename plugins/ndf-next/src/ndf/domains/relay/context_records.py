@@ -19,11 +19,12 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional
 
+from ndf import identity
 from ndf.adapters import git
 from ndf.contracts import facts
 from ndf.domains.records import jsonl, usage_decide
 from ndf.domains.relay import context_policy as cp
-from ndf.domains.relay import registry, signals
+from ndf.domains.relay import signals
 
 SCHEMA = 1
 LOCAL = "_local"
@@ -44,7 +45,7 @@ _SLUG = re.compile(r"([^/:]+)/([^/]+?)(?:\.git)?/?$")
 def context_dir(environ: Mapping[str, str]) -> Path:
     """旧い置き場（`NDF_CONTEXT_DIR` → `<旧い状態の根>/context`）。"""
     explicit = environ.get("NDF_CONTEXT_DIR")
-    return Path(explicit) if explicit else registry.legacy_state_root(environ) / "context"
+    return Path(explicit) if explicit else identity.legacy_state_root(environ) / "context"
 
 
 def toplevel(cwd: Optional[Path]) -> Optional[Path]:
@@ -173,7 +174,7 @@ def fill_work(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     last: dict[str, str] = {}
     out = []
     for r in rows:
-        sid, work = r.get("session_id"), r.get("work") if r.get("work") else ""
+        sid, work = r.get("session_id"), r.get("work") if r.get("work") else ""  # noqa: NDF501 ファイル: 作業の識別子の無い行は下で前の行から補う
         if not work and sid in last:
             r = {**r, "work": last[sid]}
         elif work and sid:
@@ -339,7 +340,7 @@ def mark_bounds(marks: list[dict[str, Any]], by_next: bool) -> tuple[Optional[fl
     return (restored[0] if by_next and restored else None), (handoffs[-1] if handoffs else None)
 
 
-def _restore_sample(calls: list[dict[str, Any]], restore_end: Optional[float]) -> Optional[tuple[int, int]]:
+def restore_sample(calls: list[dict[str, Any]], restore_end: Optional[float]) -> Optional[tuple[int, int]]:
     """引継ぎ文書で始まり復元の印があるセッションの、最初の復元までの (直前のコンテキスト量, 呼び出し数)。"""
     if restore_end is None:
         return None
@@ -359,13 +360,12 @@ def _stage_segments(calls: list[dict[str, Any]], rows: list[dict[str, Any]]) -> 
     """「継続」の判定で区切った工程ごとの (工程, 呼び出し数, キャッシュ切れの数)。最後の区間と空の区間は除く。"""
     launches = sorted((t, r["stage"]) for r in rows if r.get("stage") and r.get("verdict") == cp.CONTINUE and (t := parse_ts(r.get("at"))))
     out = []
-    for (start, stage), nxt in zip(launches, [t for t, _ in launches[1:]] + [None]):
-        if nxt is None:
-            continue
+    for (start, stage), (nxt, _) in zip(launches, launches[1:]):
         seg = [c for c in calls if c["ts"] is not None and start <= c["ts"] < nxt]
-        if seg:
-            gaps = sum(1 for a, b in zip(seg, seg[1:]) if b["ts"] - a["ts"] > CACHE_1H)
-            out.append((stage, len(seg), gaps))
+        if not seg:
+            continue
+        gaps = sum(1 for a, b in zip(seg, seg[1:]) if b["ts"] - a["ts"] > CACHE_1H)
+        out.append((stage, len(seg), gaps))
     return out
 
 
@@ -382,7 +382,7 @@ def _sampled(sessions: Mapping[str, Any], cache: Mapping[str, Any], by_session: 
         calls, _, by_next = cache[sid]
         marks = by_session[sid] if sid in by_session else []
         restore_end, handoff_from = mark_bounds(marks, by_next)
-        restore = _restore_sample(calls, restore_end)
+        restore = restore_sample(calls, restore_end)
         if restore is not None:
             acc["restore_context"].append(restore[0])
             acc["restore_calls"].append(restore[1])

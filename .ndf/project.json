@@ -425,6 +425,7 @@
           "plugins/ndf/scripts/tests/test_mvv_gate.py",
           "plugins/ndf/scripts/tests/test_sprint_state.py",
           "plugins/ndf/scripts/tests/test_supervise_pace_auto.py",
+          "plugins/ndf-next/tests/domains/records/test_mvv_gate.py",
           "plugins/ndf-next/tests/progress/gate/test_gate_checks.py"
         ]
       },

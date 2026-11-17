@@ -70,7 +70,7 @@ def ledger_call(row: Mapping[str, Any]) -> Optional[dict[str, Any]]:
     if not isinstance(u, dict):
         return None
     seconds = row.get("seconds") if isinstance(row.get("seconds"), (int, float)) else None
-    model = row.get("model") if row.get("model") else None
+    model = row.get("model") if row.get("model") else None  # noqa: NDF501 ファイル: model の無い台帳の行は model を持たない
     return cr.usage_call(u, cr.parse_ts(row.get("at")), model) | {"seconds": seconds}
 
 
@@ -147,51 +147,60 @@ class _Scope(NamedTuple):
         return self.windows[sid] if sid in self.windows else ALL_TIME
 
 
+class _Session(NamedTuple):
+    """集計する 1 つのセッション: ID・会話の記録・そのセッションの作業の区間（`_Scope.windows_of` から組む）。"""
+
+    sid: str
+    transcript: Optional[str]
+    windows: Windows
+
+
 def _subagents_dir(transcript: str) -> Path:
     """セッションの会話の記録の隣の、サブエージェントの会話の記録の置き場（`<記録>/subagents`）。"""
     return Path(str(transcript).removesuffix(".jsonl")) / "subagents"
 
 
-def _add_subagents(ndf: dict[str, Any], transcript: str, scope: _Scope, windows: Windows) -> None:
-    """会話の記録の隣の `subagents/` の呼び出しと秒を、NDF が起動した分へ足す。"""
-    sub = _subagents_dir(transcript)
+def _add_subagents(ndf: dict[str, Any], session: _Session, scope: _Scope) -> None:
+    """会話の記録の隣の `subagents/` の呼び出しと秒を、NDF が起動した分へ足す（会話の記録のあるセッションだけ）。"""
+    sub = _subagents_dir(str(session.transcript))
     for f in sorted(sub.glob("*.jsonl")) if sub.is_dir() else []:
         if f.stem.removeprefix("agent-") in scope.excluded:
             continue  # 帳簿へ書いたサブエージェントは帳簿の行で数える
-        calls = [c for c in cr.read_calls(f, scope.seen)[0] if _within(c["ts"], windows)]
+        calls = [c for c in cr.read_calls(f, scope.seen)[0] if _within(c["ts"], session.windows)]
         for c in calls:
             _add_call(ndf, c)
         ndf["seconds"] += busy_seconds(c["ts"] for c in calls)
 
 
-def _ledger_owned(row: Mapping[str, Any], sid: str, transcript: Optional[str]) -> bool:
+def _ledger_owned(row: Mapping[str, Any], session: _Session) -> bool:
     """台帳の行がこのセッションのものか。親のセッション（`parent_session_id`）か、サブエージェントの会話の記録
     （`transcript`）がこのセッションの `subagents/` の下にあるかで結び付ける。
 
     時刻が重なるだけの行は数えない（複数のリポジトリやレーンを同時に使うと、別の作業の使用量が入って重複して数えられる）。
     """
-    if row.get("parent_session_id") == sid:
+    if row.get("parent_session_id") == session.sid:
         return True
     path = row.get("transcript")
-    return bool(transcript) and isinstance(path, str) and Path(path).parent == _subagents_dir(str(transcript))
+    return bool(session.transcript) and isinstance(path, str) and Path(path).parent == _subagents_dir(str(session.transcript))
 
 
-def _add_ledger(ndf: dict[str, Any], sid: str, transcript: Optional[str], scope: _Scope, windows: Windows) -> None:
+def _add_ledger(ndf: dict[str, Any], session: _Session, scope: _Scope) -> None:
     """このセッションのものと結び付いた台帳の行（`_ledger_owned`）を、NDF が起動した分へ 1 回だけ足す。"""
     for row in scope.ledger:
         at = cr.parse_ts(row.get("at"))
-        mine = _ledger_owned(row, sid, transcript)
+        mine = _ledger_owned(row, session)
         key = ("ledger", _ledger_sid(row), row.get("at"), row.get("step"))
-        c = ledger_call(row) if mine and key not in scope.seen and _within(at, windows) else None
+        c = ledger_call(row) if mine and key not in scope.seen and _within(at, session.windows) else None
         if c is not None:
             scope.seen.add(key)
             _add_call(ndf, c)
-            ndf["seconds"] += c["seconds"] if c["seconds"] else 0.0
+            ndf["seconds"] += c["seconds"] if c["seconds"] else 0.0  # noqa: NDF501 ファイル: 秒の無い台帳の行は 0 秒
 
 
 def session_parts(sid: str, transcript: Optional[str], marks: list[dict[str, Any]], scope: _Scope) -> dict[str, Any]:
     """1 つのセッションの呼び出しを区分へ時刻で排他に割り当てる。そのセッションの作業の区間の呼び出しだけを数える。"""
-    windows = scope.windows_of(sid)
+    session = _Session(sid, transcript, scope.windows_of(sid))
+    windows = session.windows
     calls, compacts, by_next = cr.read_calls(transcript, scope.seen) if transcript and sid not in scope.excluded else ([], None, False)
     calls = [c for c in calls if _within(c["ts"], windows)]
     restore_end, handoff_from = cr.mark_bounds(marks, by_next)
@@ -202,14 +211,14 @@ def session_parts(sid: str, transcript: Optional[str], marks: list[dict[str, Any
         _add_call(parts[b], c)
         times[b].append(c["ts"])
     if transcript:
-        _add_subagents(parts[identity.FINAL_NAME], transcript, scope, windows)
-    _add_ledger(parts[identity.FINAL_NAME], sid, transcript, scope, windows)
+        _add_subagents(parts[identity.FINAL_NAME], session, scope)
+    _add_ledger(parts[identity.FINAL_NAME], session, scope)
     for b, ts in times.items():
         parts[b]["seconds"] += busy_seconds(ts)
-    restored = [c for c in calls if restore_end is not None and c["ts"] is not None and c["ts"] <= restore_end]
+    restored = cr.restore_sample(calls, restore_end)
     return {
         "parts": parts,
-        "restore": {"context": restored[-1]["context"], "calls": len(restored)} if restored else None,
+        "restore": None if restored is None else {"context": restored[0], "calls": restored[1]},
         "compacts": None if compacts is None else sum(1 for at in compacts if _within(at, windows)),  # 作業の区間の圧縮だけ
         "restore_known": not by_next or restore_end is not None,
         "handoff_known": handoff_from is not None,

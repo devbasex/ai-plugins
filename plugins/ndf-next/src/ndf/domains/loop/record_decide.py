@@ -17,6 +17,7 @@
 | `lap-closed` | `lap`・`outcome`・`reason` | 周を締めた |
 | `stop-requested` | `by`・`reason` | 止める要求。鍵は返さない（#2820） |
 | `loop-halted` | `by`・`reason` | ループを止めた状態にした（`--now` か、要求の後の周の境。#2435） |
+| `row-bound` | `table` | レーンの行の進行表に結び付けた。止めた後に `ndf progress next <table>` で行を終える（#3558） |
 """
 
 from __future__ import annotations
@@ -40,6 +41,7 @@ VERSION_SHIPPED = "version-shipped"
 LAP_CLOSED = "lap-closed"
 STOP_REQUESTED = "stop-requested"
 LOOP_HALTED = "loop-halted"
+ROW_BOUND = "row-bound"
 
 # 周の結果の値（記録の形。変えない）
 DONE, FAILED, RETURNED, HELD = "完了", "失敗", "人へ戻した", "保留"
@@ -117,6 +119,7 @@ class LoopState:
     lease_until: float = 0.0
     requested: Optional[Stop] = None
     stopped: Optional[Stop] = None
+    row: Optional[str] = None
 
     @property
     def current(self) -> Optional[Lap]:
@@ -163,6 +166,7 @@ REQUIRED: dict[str, tuple[str, ...]] = {
     LAP_CLOSED: ("lap", "outcome", "reason"),
     STOP_REQUESTED: ("by", "reason"),
     LOOP_HALTED: ("by", "reason"),
+    ROW_BOUND: ("table",),
 }
 
 
@@ -236,6 +240,8 @@ def apply(state: LoopState, ev: Mapping[str, Any]) -> LoopState:
         return replace(state, requested=Stop(ev["by"], ev["reason"], float(ev["at"])))
     if kind == LOOP_HALTED:
         return replace(state, stopped=Stop(ev["by"], ev["reason"], float(ev["at"])))
+    if kind == ROW_BOUND:
+        return replace(state, row=str(ev["table"]))
     return _apply_lap(state, ev)
 
 

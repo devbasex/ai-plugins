@@ -10,6 +10,10 @@
 - `stop` は止める要求を置くだけで鍵を返さない。鍵を返すのは周の境（`lap` で締めたとき）と期限切れだけである
 - `stop --now` はその場でループを止めた状態にし、締めていない周を保留で締める（#2435）。鍵は返さないが、
   止めたループへの書き込みはすべて断るので、別のセッションが周の途中へ入ることは無い
+
+レーンの行（#3558）: `start --row <進行表の ID>` はループをレーンの行の進行表に結び付ける。結び付けたループが
+止まると、次の 1 手は `ndf progress next <進行表の ID>` になり、工程の無い進行表が完了してレーンの行を終える
+（行の終わりを写すのはスプリントと同じ `lane.end_row` だけ）。
 """
 
 from __future__ import annotations
@@ -19,12 +23,15 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Optional
 
 from ndf.domains.loop import lap_decide
+from ndf.domains.release.approval_decide import APPROVED
 from ndf.domains.loop import record_decide as rec
 
 # 止める要求を置ける主体: 人・オーガナイザー（人の指示を受けて）
 STOP_BY = ("human", "organizer")
 # 断りの種類（止まった理由の表の種類）
 REFUSED, PRECONDITION, INVALID = "refused", "precondition", "invalid"
+# 次の 1 手の副命令の名前（`Step.tool`）: 開発ループ自身と、結び付けた進行表
+LOOP_TOOL, PROGRESS_TOOL = "loop", "progress"
 
 
 @dataclass(frozen=True)
@@ -37,6 +44,7 @@ class Step:
     args: tuple[str, ...]
     ask: tuple[str, ...] = ()
     session: bool = False
+    tool: str = LOOP_TOOL
 
 
 @dataclass(frozen=True)
@@ -78,10 +86,10 @@ def get_step(name: str) -> Step:
 
 
 def next_step(state: rec.LoopState, name: str) -> Optional[Step]:
-    """ループの今の状態から、次に打つ 1 手。止めたループは None。"""
+    """ループの今の状態から、次に打つ 1 手。止めたループはレーンの行の進行表を終える手（結び付けていなければ None）。"""
     lap = state.current
     if state.status == rec.HALTED:
-        return None
+        return Step(("next", state.row), tool=PROGRESS_TOOL) if state.row is not None else None
     if lap is None:
         if state.requested is not None:
             return _step("lap", name, session=True)
@@ -89,6 +97,11 @@ def next_step(state: rec.LoopState, name: str) -> Optional[Step]:
     if lap.remaining and lap.mode is None:
         return _step("sprint", name, ask=("mode", "basis"), session=True)
     return _step("lap", name, session=True)
+
+
+def _decided(state: rec.LoopState, c: Ctx, summary: str, events: Sequence[dict[str, Any]], **kw: Any) -> Decision:
+    """事象 `events` を書く判断。次の 1 手は事象を当てた後の状態から引く。"""
+    return Decision(summary, tuple(events), next=next_step(rec.apply_all(state, events), c.name), **kw)
 
 
 def _lease_refusal(state: rec.LoopState, c: Ctx) -> Optional[Decision]:
@@ -103,15 +116,21 @@ def _lease_refusal(state: rec.LoopState, c: Ctx) -> Optional[Decision]:
     return None
 
 
-def start(state: rec.LoopState, c: Ctx, ttl: float) -> Decision:
-    """鍵を取る（持っていれば延ばす）。ほかのセッションの生きた鍵があれば断る。"""
+def start(state: rec.LoopState, c: Ctx, ttl: float, row: Optional[str] = None) -> Decision:
+    """鍵を取る（持っていれば延ばす）。ほかのセッションの生きた鍵があれば断る。
+
+    `row` はレーンの行の進行表の ID。初めてなら結び付け、別の進行表に結び付いたループは断る。
+    """
     if state.status == rec.HALTED:
         return refuse(REFUSED, f"ループ {c.name} は止めた。新しい名前で始める")
     if state.held_by_other(c.session, c.now):
         return refuse(REFUSED, f"ループ {c.name} の鍵はセッション {state.holder} が持つ（期限 {state.lease_until:.0f}）", get_step(c.name))
-    ev = rec.event(rec.LEASE_TAKEN, c.now, session=c.session, until=c.now + ttl)
-    after = rec.apply(state, ev)
-    return Decision(f"ループ {c.name} の鍵を取った", (ev,), next=next_step(after, c.name))
+    if row is not None and state.row is not None and row != state.row:
+        return refuse(REFUSED, f"ループ {c.name} はレーンの行の進行表 {state.row} に結び付いている（渡したのは {row}）", get_step(c.name))
+    events = [rec.event(rec.LEASE_TAKEN, c.now, session=c.session, until=c.now + ttl)]
+    if row is not None and state.row is None:
+        events.append(rec.event(rec.ROW_BOUND, c.now, table=row))
+    return _decided(state, c, f"ループ {c.name} の鍵を取った", events)
 
 
 def _halt_event(by: str, now: float) -> dict[str, Any]:
@@ -142,7 +161,7 @@ def open_lap(state: rec.LoopState, c: Ctx, issues: Sequence[int]) -> Decision:
         return refuse(REFUSED, f"周 {state.current.number} を締めていない", next_step(state, c.name))
     stop = _boundary(state, c)
     if stop:
-        return Decision(f"止める要求があり、周を始めずにループ {c.name} を止めた", tuple(stop))
+        return _decided(state, c, f"止める要求があり、周を始めずにループ {c.name} を止めた", stop)
     if not issues:
         return refuse(PRECONDITION, "選べる課題が無い", get_step(c.name))
     number = state.laps[-1].number + 1 if state.laps else 1
@@ -224,7 +243,9 @@ def answer(state: rec.LoopState, c: Ctx, pr: int, given: str, head: Optional[str
 
     先端は呼び手が 1 回だけ読んだ値（`head`）を使い、ゲートを出した時点と違えば答えを書かずに断る（#2714）。
     書いた答えの先端を `metrics.head` で返し、マージはその値を `--match-head-commit` に渡す。
-    `revise`・`rejected` は差し戻しとして記録に残る（#2400）。
+    `revise`・`rejected` は差し戻しとして記録に残る（#2400）。続けない答えなので、止まったプランを流さずに
+    周を「人へ戻した」で締める（#2466）。止める要求があればその場で止める。答えの中身（答え・note）は記録に残り、
+    持ち主は `get` の `rejections` で読む。通常の答え（`approved`）は周を締めず、持ち主が読んで続ける
     """
     refusal, lap = _open_lap(state, c, lease=False)
     if refusal is not None:
@@ -237,7 +258,15 @@ def answer(state: rec.LoopState, c: Ctx, pr: int, given: str, head: Optional[str
     if head != shown:
         return refuse(PRECONDITION, f"PR #{pr} の先端がゲートを出した {shown[:12]} から {str(head)[:12]} へ動いた。資料を出し直す", regate)
     ev = rec.event(rec.GATE_ANSWERED, c.now, lap=lap.number, pr=pr, answer=given, head=head, note=note)
-    return Decision(f"PR #{pr} の答え {given} を記録した", (ev,), metrics={"head": head, "answer": given})
+    metrics = {"head": head, "answer": given}
+    if given == APPROVED:
+        return Decision(f"PR #{pr} の答え {given} を記録した", (ev,), metrics=metrics)
+    why = f"設計承認ゲートの答え {given} で人へ戻した" + (f": {note.strip()}" if note.strip() else "")
+    events = [ev, rec.event(rec.LAP_CLOSED, c.now, lap=lap.number, outcome=rec.RETURNED, reason=why)]
+    if state.requested is not None:
+        events.append(_halt_event(state.requested.by, c.now))
+    return _decided(state, c, f"PR #{pr} の答え {given} を記録し、周 {lap.number} を{rec.RETURNED}で締めた", events,
+                    metrics={**metrics, "lap": lap.number, "outcome": rec.RETURNED})  # fmt: skip
 
 
 def _closing_events(lap: rec.Lap, facts: lap_decide.LapFacts, now: float) -> list[dict[str, Any]]:
@@ -264,7 +293,7 @@ def close_lap(state: rec.LoopState, c: Ctx, facts: lap_decide.LapFacts, ttl: flo
     if lap is None:
         stop = _boundary(state, c)
         if stop:
-            return Decision(f"止める要求があり、ループ {c.name} を止めた", tuple(stop))
+            return _decided(state, c, f"止める要求があり、ループ {c.name} を止めた", stop)
         return refuse(PRECONDITION, "締めていない周が無い", next_step(state, c.name))
     events = _closing_events(lap, facts, c.now)
     outcome, why = events[-1]["outcome"], events[-1]["reason"]
@@ -296,10 +325,9 @@ def stop(state: rec.LoopState, c: Ctx, by: str, reason: str, at_once: bool) -> D
     text = reason.strip() if reason.strip() else "理由の記載なし"
     events = [rec.event(rec.STOP_REQUESTED, c.now, by=by, reason=text)]
     if not at_once:
-        after = rec.apply(state, events[0])
-        return Decision(f"ループ {c.name} へ止める要求を置いた。周の境で止まる", tuple(events), next=next_step(after, c.name))
+        return _decided(state, c, f"ループ {c.name} へ止める要求を置いた。周の境で止まる", events)
     lap = state.current
     if lap is not None:
         events.append(_close_event(lap, lap_decide.LapFacts(released=lap.released, held=True), c.now)[0])
     events.append(_halt_event(by, c.now))
-    return Decision(f"ループ {c.name} を止めた（{rec.USER_STOP}）", tuple(events))
+    return _decided(state, c, f"ループ {c.name} を止めた（{rec.USER_STOP}）", events)

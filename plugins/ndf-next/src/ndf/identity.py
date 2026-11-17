@@ -37,7 +37,7 @@ import itertools
 import json
 import logging
 import os
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
@@ -142,6 +142,18 @@ def _state_home() -> Path:
         if value:
             return Path(value).expanduser()
     return Path.home() / ".local" / "state"
+
+
+def legacy_state_root(environ: Mapping[str, str]) -> Path:
+    """旧い NDF の状態の根（`NDF_STATE_HOME` → `XDG_STATE_HOME/ndf` → `~/.local/state/ndf`）。
+
+    旧い NDF のプラグイン名は入れ替えの後の名前 `FINAL_NAME` と同じ（#1142 の決定 73）。
+    """
+    explicit = environ.get("NDF_STATE_HOME")
+    if explicit:
+        return Path(explicit)
+    xdg = environ.get("XDG_STATE_HOME")
+    return Path(xdg) / FINAL_NAME if xdg else Path.home() / ".local" / "state" / FINAL_NAME
 
 
 def _config_home() -> Path:

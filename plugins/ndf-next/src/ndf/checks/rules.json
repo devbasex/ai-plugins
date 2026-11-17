@@ -19,7 +19,7 @@
     "PLR1702": {"kind": 3, "mark": "none", "by": "ruff", "summary": "深い入れ子"},
     "NDF401": {"kind": 4, "mark": "boundary", "summary": "定数を返して黙る except"},
     "NDF402": {"kind": 4, "mark": "boundary", "summary": "contextlib.suppress"},
-    "NDF501": {"kind": 5, "mark": "boundary", "summary": "空の既定への or"},
+    "NDF501": {"kind": 5, "mark": "boundary", "summary": "空の既定への落とし（`x or 空` と `x if x else 空`）"},
     "NDF502": {
       "kind": 5,
       "mark": "boundary",

@@ -238,14 +238,16 @@ def first_input(conn: Any, plan_id: str, act: Launch) -> str:
     declared = view.lane_repo(act.lane)
     if declared != view.repo:
         raise launch.Unsupported(f"レーン {act.lane} はリポジトリ {declared} を宣言しているが、置き場を解決できない（計画は {view.repo}）")
-    if act.cancel is not None:
-        return launch.prompt(view.name, act.lane, launch.cancel_commands(act.cancel))
-    if act.resume is not None:
-        return launch.prompt(view.name, act.lane, launch.resume_commands(act.resume))
-    if act.goal is not None:
-        return launch.goal_prompt(view.name, act.lane, act.goal)
     rows = lane.fold_lane(store.read_events(conn, view.lanes[act.lane].table_id))
     row = next(r for r in rows if r.key == act.row)
+    # 開発ループの行のループの名前（レーン名）。続け方と中止の仕方がスプリントの行と違う（#3558）
+    loop = launch.loop_of(act.lane, row)
+    if act.cancel is not None:
+        return launch.prompt(view.name, act.lane, launch.cancel_commands(act.cancel, loop))
+    if act.resume is not None:
+        return launch.prompt(view.name, act.lane, launch.resume_commands(act.resume, loop))
+    if act.goal is not None:
+        return launch.goal_prompt(view.name, act.lane, act.goal, loop)
     return launch.prompt(view.name, act.lane, launch.start_commands(view.name, act.lane, view.lanes[act.lane].table_id, row))
 
 

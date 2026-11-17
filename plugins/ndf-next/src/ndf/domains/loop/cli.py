@@ -1,6 +1,6 @@
 """`ndf loop` の副命令（開発ループ）。
 
-    ndf loop start <名前> --session <S>                       # 持ち主の鍵を取る（持っていれば延ばす）
+    ndf loop start <名前> --session <S> [--row <進行表の ID>]  # 持ち主の鍵を取る（持っていれば延ばす）。レーンの行に結び付ける（#3558）
     ndf loop select <名前> --session <S> --candidates <JSON> [--first <課題>...] [--size <N>]   # 選んで周を始める
     ndf loop sprint <名前> --session <S> --mode <M> --basis <根拠>   # 周のモードを根拠つきで決める（#2923）
     ndf loop exclude <名前> --session <S> --issue <N> --reason <理由>   # 周の途中で課題を外す（#2788）
@@ -15,6 +15,7 @@
     ndf loop review-args --purpose design|code --pr <N> --state-dir <D> --base <B>
     ndf loop acceptance record|show|check --issue <N> ...      # 受け入れ条件の確認の区分（#2144・#1682。`acceptance`）
     ndf loop design-tests (--issue <N>... | --design <パス>...)   # 設計に名前の出るテストが HEAD にあるか（#2118。`design_tests`）
+    ndf loop check-trigger --base <B> [--head <H>] [--exclude <SHA>...] [--threshold <N>]   # 検査のトリガーの行数（#3087。`check_trigger`）
 
 書き込む副命令は、記録の排他の下で記録を読み、判断（`control_decide`）を受けて事象を追記する。断りと止まりは
 止まった理由の種類と、打てる次の 1 手（`next`）を返す（SF11）。
@@ -35,19 +36,19 @@ from filelock import Timeout
 from ndf import cli, contracts, identity
 from ndf.adapters import git, github
 from ndf.adapters.git import GitError
-from ndf.contracts import limits, result
-from ndf.domains.loop import acceptance, acceptance_decide, design_tests
+from ndf.contracts import facts, limits, result
+from ndf.domains.loop import acceptance, acceptance_decide, check_trigger, design_tests
 from ndf.domains.loop import control_decide as ctl
 from ndf.domains.loop import lap_decide, select_decide, sprint_decide, store
 from ndf.domains.loop import record_decide as rec
 from ndf.domains.release.approval_decide import APPROVED, REJECTED
-from ndf.progress import definition, run
+from ndf.progress import definition
 
 TOOL = cli.tool_of(__name__)
 # 持ち主の鍵の期限の契約の名前
 LEASE_POLICY = "loop.lease"
 # 設計承認ゲートで受ける答え（事実の表 answers の行）
-GATE_ANSWERS = (APPROVED, run.REVISE, REJECTED)
+GATE_ANSWERS = (APPROVED, str(facts.row(result.ANSWERS, "revise")["id"]), REJECTED)
 
 
 def _command(step: Optional[ctl.Step], session: Optional[str], cwd: Path) -> Optional[dict[str, Any]]:
@@ -57,6 +58,8 @@ def _command(step: Optional[ctl.Step], session: Optional[str], cwd: Path) -> Opt
     """
     if step is None:
         return None
+    if step.tool != ctl.LOOP_TOOL:
+        return result.command(step.tool, *step.args, ask=step.ask)
     args = [TOOL, "--cwd", str(cwd), *step.args]
     ask = step.ask
     if step.session:
@@ -91,6 +94,7 @@ def view(state: rec.LoopState) -> dict[str, Any]:
         "status": state.status,
         "stop": {"by": stop.by, "reason": stop.reason} if stop is not None else None,
         "holder": state.holder,
+        "row": state.row,
         "laps": [_lap_dict(lap) for lap in state.laps],
         "current": _lap_dict(state.current) if state.current is not None else None,
         "rejections": state.rejections(),
@@ -185,7 +189,8 @@ def _named(sub: Any, cmd: str, help_text: str, write: Optional[Write] = None, se
 
 
 def _add_writes(sub: Any) -> None:
-    _named(sub, "start", "持ち主の鍵を取る", lambda s, c, a: ctl.start(s, c, limits.seconds(LEASE_POLICY)), True)
+    t = _named(sub, "start", "持ち主の鍵を取る", lambda s, c, a: ctl.start(s, c, limits.seconds(LEASE_POLICY), a.row), True)
+    t.add_argument("--row", default=None, help="結び付けるレーンの行の進行表の ID（`ndf progress new --loop` の結果）")
     s = _named(sub, "select", "候補から課題を選んで周を始める", _select, True)
     s.add_argument("--candidates", type=Path, required=True, help="候補の行の JSON の配列のファイル")
     s.add_argument("--first", type=int, nargs="*", default=[], help="先頭に選ぶ課題（直して出し直すと答えた課題）")
@@ -241,6 +246,7 @@ def _parser() -> argparse.ArgumentParser:
     r.add_argument("--base", required=True)
     acceptance.add_parsers(sub)
     design_tests.add_parser(sub)
+    check_trigger.add_parser(sub)
     return p
 
 

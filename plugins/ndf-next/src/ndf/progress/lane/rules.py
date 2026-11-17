@@ -26,7 +26,7 @@ def _next_of(edges: Mapping[tuple[str, str], set[tuple[str, str]]], node: tuple[
 
 def _target(ref: str) -> tuple[str, Optional[str]]:
     lane, _, row = ref.partition("/")
-    return lane, (row if row else None)
+    return lane, (row if row else None)  # noqa: NDF501 ファイル: 計画の参照に行の名前が無ければレーン全体を指す
 
 
 def after_met(ref: str, lanes: Lanes) -> bool:

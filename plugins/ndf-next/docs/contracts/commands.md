@@ -161,21 +161,22 @@
 | `ndf loop acceptance record` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`--pre-merge`（array of string・任意）: '<条件の番号>=<手段（テスト名・実行したコマンド）>'<br>`--post-release`（array of integer・任意）: リリースの後でしか確かめられない条件の番号<br>`--issue`（integer・必須） |
 | `ndf loop acceptance show` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`--issue`（integer・必須） |
 | `ndf loop answer` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`name`（string・必須・位置）<br>`--pr`（integer・必須）<br>`--answer`（string・必須・値 `approved`・`revise`・`rejected`）<br>`--note`（string・任意・既定 `""`）: 差し戻しの理由など |
+| `ndf loop check-trigger` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`--base`（string・必須）: 範囲の始め（前回の検査の位置）<br>`--head`（string・任意・既定 `"HEAD"`）: 範囲の終わり<br>`--exclude`（array of string・任意）: 数えない PR（検査・リリース）の取り込みのコミット<br>`--threshold`（integer・任意）: 行数の閾値（既定は .ndf/pace.json の triggers.lines） |
 | `ndf loop close-plan` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`--pace`（string・必須）<br>`--route`（array of string・必須・値 `promote`・`merged-by-check`・`manual`・`none`）<br>`--mvv`（boolean・任意）: MVV の判定がある<br>`--record-pr`（integer・任意）: リリース記録の PR の番号（0 は記録なし）<br>`--retrospective-due`（boolean・任意） |
 | `ndf loop created` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`name`（string・必須・位置）<br>`issues`（array of integer・必須・位置） |
 | `ndf loop design-tests` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`--issue`（array of integer・任意）: HEAD の issues/issue-<N>-design*.md を読む<br>`--design`（array of string・任意）: 作業場所の設計文書のパス |
 | `ndf loop exclude` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`name`（string・必須・位置）<br>`--session`（string・必須）: 打ったセッションの識別子<br>`--issue`（integer・必須）<br>`--reason`（string・必須） |
 | `ndf loop gate` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`name`（string・必須・位置）<br>`--pr`（integer・必須） |
-| `ndf loop get` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`name`（string・必須・位置）<br>`--field`（string・任意・値 `status`・`stop`・`holder`・`laps`・`current`・`rejections`・`created`） |
+| `ndf loop get` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`name`（string・必須・位置）<br>`--field`（string・任意・値 `status`・`stop`・`holder`・`row`・`laps`・`current`・`rejections`・`created`） |
 | `ndf loop lap` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`name`（string・必須・位置）<br>`--session`（string・必須）: 打ったセッションの識別子<br>`--failed`（boolean・任意）: 手順の失敗の印<br>`--failure-key`（string・任意）<br>`--version`（array of string・任意）: この周で出した版（記録に無いもの）<br>`--returned`（boolean・任意）: リリースを承認されずに人へ戻した<br>`--unreadable`（string・任意）: 版の記録を読めなかった理由 |
 | `ndf loop released` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`name`（string・必須・位置）<br>`--version`（string・必須） |
 | `ndf loop review-args` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`--purpose`（string・必須・値 `design`・`code`）: cross-review run の --purpose<br>`--pr`（integer・必須）<br>`--state-dir`（string・必須）<br>`--base`（string・必須） |
 | `ndf loop select` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`name`（string・必須・位置）<br>`--session`（string・必須）: 打ったセッションの識別子<br>`--candidates`（string・必須）: 候補の行の JSON の配列のファイル<br>`--first`（array of integer・任意）: 先頭に選ぶ課題（直して出し直すと答えた課題）<br>`--size`（integer・任意・既定 `1`）: 周に入れる課題の数 |
 | `ndf loop sprint` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`name`（string・必須・位置）<br>`--session`（string・必須）: 打ったセッションの識別子<br>`--mode`（string・必須）<br>`--basis`（string・必須）: モードの判定の根拠 |
-| `ndf loop start` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`name`（string・必須・位置）<br>`--session`（string・必須）: 打ったセッションの識別子 |
+| `ndf loop start` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`name`（string・必須・位置）<br>`--session`（string・必須）: 打ったセッションの識別子<br>`--row`（string・任意）: 結び付けるレーンの行の進行表の ID（`ndf progress new --loop` の結果） |
 | `ndf loop stop` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`name`（string・必須・位置）<br>`--by`（string・必須・値 `human`・`organizer`）<br>`--reason`（string・任意・既定 `""`）<br>`--now`（boolean・任意）: 周の境を待たずにその場で止める |
 
-結果の `metrics`: `answer`（string）・`designs`（integer）・`head`（string）・`lap`（integer）・`missing`（integer）・`names`（integer）・`outcome`（string）・`pace`（string）・`record_pr`（string）・`remaining`（array of integer）・`renamed`（integer）・`skipped`（integer）・`status`（string）・`streak`（integer）・`unverified`（integer）・`verify`（boolean）。`items` の要素: `chosen`（boolean）・`created`（array of integer）・`current`（object か null）・`doc`（string）・`holder`（string か null）・`issue`（integer）・`kind`（string）・`laps`（array of object）・`line`（integer）・`means`（string）・`name`（string）・`reason`（string か null）・`rejections`（array of object）・`renamed_to`（string）・`result`（string）・`review`（array of string）・`section`（string か null）・`status`（string）・`steps`（array of string）・`stop`（object か null）・`text`（string）
+結果の `metrics`: `answer`（string）・`designs`（integer）・`excluded`（integer）・`head`（string）・`lap`（integer）・`lines`（integer）・`missing`（integer）・`names`（integer）・`outcome`（string）・`pace`（string）・`record_pr`（string）・`remaining`（array of integer）・`renamed`（integer）・`skipped`（integer）・`status`（string）・`streak`（integer）・`threshold`（integer）・`unverified`（integer）・`verify`（boolean）。`items` の要素: `chosen`（boolean）・`created`（array of integer）・`current`（object か null）・`doc`（string）・`holder`（string か null）・`issue`（integer）・`kind`（string）・`laps`（array of object）・`line`（integer）・`means`（string）・`name`（string）・`reason`（string か null）・`rejections`（array of object）・`renamed_to`（string）・`result`（string）・`review`（array of string）・`row`（string か null）・`section`（string か null）・`status`（string）・`steps`（array of string）・`stop`（object か null）・`text`（string）・`threshold`（integer）・`trigger`（string）・`value`（integer）
 
 ## `ndf manifests`
 
@@ -232,7 +233,7 @@
 | `ndf progress docs-only` | `--base`（string・必須）: ベースブランチ<br>`--remote`（string・任意）: リモート名（省けば worktree の宣言の remote か既定） |
 | `ndf progress enable` | `table_id`（string・必須・位置）<br>`stage`（string・必須・位置）: 工程の名前（工程表の行名）<br>`--reason`（string・必須） |
 | `ndf progress finish` | `table_id`（string・必須・位置）<br>`stage`（string・必須・位置）: 工程の名前（工程表の行名）<br>`--reason`（string・必須）<br>`--output`（string・必須）: 工程の出力の規約に合う JSON のファイル |
-| `ndf progress new` | `name`（string・必須・位置）: スプリント名<br>`--mode`（string・必須）<br>`--issues`（array of integer・必須）<br>`--pace`（string・任意・既定 `"normal"`）<br>`--disable`（array of string・任意）: <工程>=<理由><br>`--requirements`（string・任意）: 要求と受け入れ条件の出力（工程の出力の規約に合う JSON）<br>`--parent`（string・任意）: 親の進行表（レーンの進行表）の ID |
+| `ndf progress new` | `name`（string・必須・位置）: スプリント名<br>`--mode`（string・任意）<br>`--issues`（array of integer・任意）<br>`--loop`（string・任意）: 開発ループの行の進行表を作る（工程なし。ループの名前）<br>`--pace`（string・任意・既定 `"normal"`）<br>`--disable`（array of string・任意）: <工程>=<理由><br>`--requirements`（string・任意）: 要求と受け入れ条件の出力（工程の出力の規約に合う JSON）<br>`--parent`（string・任意）: 親の進行表（レーンの進行表）の ID |
 | `ndf progress restore` | `--from`（string・必須） |
 | `ndf progress retry` | `table_id`（string・必須・位置）<br>`stage`（string・必須・位置）: 工程の名前（工程表の行名）<br>`--reason`（string・必須） |
 | `ndf progress show` | `table_id`（string・必須・位置） |
@@ -266,6 +267,7 @@
 | `ndf records gws-check` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ） |
 | `ndf records handoff check` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`path`（string・必須・位置）<br>`--trim`（boolean・任意）: 雛形に無い節を退避先へ移してから確かめる<br>`--history`（string・任意）: 退避先（--trim のとき要る） |
 | `ndf records mvv answer` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`--version`（integer・任意）: 答えたときの MVV の版（無ければ worktree の宣言の現行の版） |
+| `ndf records mvv gate` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`--gate`（string・必須・値 `design`・`release`）: 承認ゲートの区分 |
 | `ndf records mvv signals` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`--base`（string・必須）: ベースブランチ |
 | `ndf records preflight` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ） |
 | `ndf records spec finalize` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`--spec`（array of string・必須）: 溶かした先の確定仕様（複数可）<br>`--remove`（array of string・任意）: 消す設計（複数可）<br>`--source-of`（array of string・任意）: <語>=<ファイル> で語の正本を明示する<br>`--message（-m）`（string・任意）: コミットの件名。無ければコミットせずパスだけを出す |

@@ -7,17 +7,20 @@
   `row start` は計画が記録した形の番号と自分のものを比べ、違えば `format_mismatch` で止まる（P3-1）。
   スプリント名は `<計画>-<レーン>-<行>-<要約>` にし、別の計画が同じレーン名を使っても、名前の区切りが曖昧な組
   （計画 `dev-api`／レーン `tests` と計画 `dev`／レーン `api-tests` など）でも重ならない
-- 開発ループの行（`kind: loop`）は、レーン名をループの名前にして `ndf loop start <レーン> --session <S>` で始め、
-  スプリントの行と同じく `ndf lanes row start <計画> <レーン> <行> --sprint <レーン>` で行を実行中にする（行の ID は
-  レーン名）。`--session` は起きた conductor が自分のセッションで埋める。ほかの kind は起こす入力を組めないので
-  `Unsupported` で断る
+- 開発ループの行（`kind: loop`）も、レーンの子の進行表を作る（#3558）。`ndf progress new <スプリント名> --loop <レーン>
+  --parent <レーンの進行表の ID>` で工程の無い進行表を作り、返った ID で `ndf lanes row start ... --sprint <ID>` を打ち、
+  レーン名をループの名前にして `ndf loop start <レーン> --row <ID> --session <S>` で始める。`--session` は起きた
+  conductor が自分のセッションで埋める。ループが止まると、ループの次の 1 手が `ndf progress next <ID>` になり、
+  進行表の完了と同じ口（`lane.end_row`）で行を終える。ほかの kind は起こす入力を組めないので `Unsupported` で断る
 - 答えの後の next を打つ: `ndf lanes row resumed <スプリントの ID>` で答えの後の next の印を書いてから、
-  `ndf progress next <スプリントの ID>` で承認ゲートの続きを流す（3346-5）
+  `ndf progress next <スプリントの ID>` で承認ゲートの続きを流す（3346-5）。開発ループの行は `progress next` の代わりに
+  `ndf loop get <レーン>` で次の 1 手を読む（工程の無い進行表へ next を打つと行が終わる）
 - 止めた計画で実行中のスプリントを中止する: `ndf progress cancel <スプリントの ID> --reason <理由>` の後に
-  `ndf lanes row end <スプリントの ID> --outcome cancelled` で行を中止にする（`progress cancel` はレーンの行を書かない）
+  `ndf lanes row end <スプリントの ID> --outcome cancelled` で行を中止にする（`progress cancel` はレーンの行を書かない）。
+  開発ループの行は、先に `ndf loop stop <レーン> --by organizer --now` でループをその場で止める
 - 認証の失敗で `/goal` が外れたレーンを起こし直す: 入力の先頭に `/goal` を置き、`ndf progress next <スプリントの ID>` で
-  止まった所から続ける（`goal_prompt`。#3243）。アカウントが使えるかは `account_ok` が自分の副命令
-  （`ndf relay account show`）で読む
+  止まった所から続ける（`goal_prompt`。#3243）。開発ループの行は `ndf loop get <レーン>` で続ける。アカウントが
+  使えるかは `account_ok` が自分の副命令（`ndf relay account show`）で読む
 
 ラッパーの名前は `<計画>-<レーン>-<要約>` に固定し、同じレーンを 2 本起こさない（ラッパーが動いていれば `spawn` が断る）。
 要約はリポジトリ・計画・レーンの 3 つから作る。ラッパーの登録簿は利用者単位で共通なので、別のリポジトリが同じ
@@ -89,6 +92,10 @@ def wrapper_name(repo: str, plan: str, lane: str) -> str:
     return f"{readable}-{digest}"
 
 
+# 起こせる行の種類（行の入力の `kind`）: スプリントの行と開発ループの行
+SPRINT_KIND, LOOP_KIND = "sprint", "loop"
+
+
 class Unsupported(Exception):
     """起こす入力を組めない行（開発ループの行など）。打ち直しても起こせない。"""
 
@@ -104,10 +111,12 @@ def start_commands(plan: str, lane: str, lane_table: str, row: LaneRow) -> list[
     開発ループの行は `loop_commands`。スプリントの行でも開発ループの行でもなければ `Unsupported`。
     """
     kind = row.input.get("kind")
-    if kind == "loop":
-        return loop_commands(plan, lane, row)
-    if kind != "sprint":
-        raise Unsupported(f"行 {lane}/{row.key} は {kind} の行で、起こす入力を組めない（起こせるのは sprint と loop の行だけ）")
+    if kind == LOOP_KIND:
+        return loop_commands(plan, lane, lane_table, row)
+    if kind != SPRINT_KIND:
+        raise Unsupported(
+            f"行 {lane}/{row.key} は {kind} の行で、起こす入力を組めない（起こせるのは {SPRINT_KIND} と {LOOP_KIND} の行だけ）"
+        )
     args = [str(a) for a in row.args]
     mode = [] if "--mode" in args else ["--mode", DEFAULT_MODE]
     issues = [str(i) for i in row.input["issues"]]
@@ -117,34 +126,51 @@ def start_commands(plan: str, lane: str, lane_table: str, row: LaneRow) -> list[
     return [new, start]
 
 
-def loop_commands(plan: str, lane: str, row: LaneRow) -> list[dict[str, Any]]:
-    """開発ループの行を始めるコマンドの並び。ループの名前と行の ID はレーン名、`--session` は打つ側が埋める。"""
-    start = result.command("loop", "start", lane, ask=("session",))
-    row_start = result.command("lanes", "row", "start", plan, lane, row.key, "--sprint", lane)
-    return [start, row_start]
+def loop_commands(plan: str, lane: str, lane_table: str, row: LaneRow) -> list[dict[str, Any]]:
+    """開発ループの行を始めるコマンドの並び。レーンの子の進行表（工程なし）を作り、行を実行中にしてからループを始める。
+
+    ループの名前はレーン名。`--sprint`・`--row` は打つ側が `new` の結果の ID で、`--session` は自分のセッションで埋める。
+    """
+    new = result.command("progress", "new", sprint_name(plan, lane, row.key), "--loop", lane, "--parent", lane_table)
+    row_start = result.command("lanes", "row", "start", plan, lane, row.key, "--sprint", ask=("sprint",))
+    start = result.command("loop", "start", lane, "--row", ask=("sprint", "session"))
+    return [new, row_start, start]
 
 
-def cancel_commands(sprint_id: str) -> list[dict[str, Any]]:
-    """止めた計画で実行中のスプリントを中止し、レーンの行を中止にするコマンドの並び。"""
+def loop_of(lane: str, row: LaneRow) -> Optional[str]:
+    """開発ループの行ならループの名前（レーン名）。ほかの行は None。"""
+    return lane if row.input.get("kind") == LOOP_KIND else None
+
+
+def _going_on(sprint_id: str, loop: Optional[str]) -> dict[str, Any]:
+    """止まった所から続けるコマンド。開発ループの行はループの次の 1 手を読む（進行表へ next を打つと行が終わる）。"""
+    return result.command("loop", "get", loop) if loop is not None else result.command("progress", "next", sprint_id)
+
+
+def cancel_commands(sprint_id: str, loop: Optional[str] = None) -> list[dict[str, Any]]:
+    """止めた計画で実行中のスプリントを中止し、レーンの行を中止にするコマンドの並び。
+
+    `loop` は開発ループの行のループの名前で、先にループをその場で止める。
+    """
+    halt = [result.command("loop", "stop", loop, "--by", "organizer", "--reason", STOP_REASON, "--now")] if loop is not None else []
     cancel = result.command("progress", "cancel", sprint_id, "--reason", STOP_REASON)
     end = result.command("lanes", "row", "end", sprint_id, "--outcome", CANCELLED)
-    return [cancel, end]
+    return [*halt, cancel, end]
 
 
-def resume_commands(sprint_id: str) -> list[dict[str, Any]]:
-    """答えが載った行で、答えの後の next の印を書いてから next を打つコマンドの並び。"""
+def resume_commands(sprint_id: str, loop: Optional[str] = None) -> list[dict[str, Any]]:
+    """答えが載った行で、答えの後の next の印を書いてから続けるコマンドの並び（`loop` は開発ループの行のループの名前）。"""
     mark = result.command("lanes", "row", "resumed", sprint_id)
-    nxt = result.command("progress", "next", sprint_id)
-    return [mark, nxt]
+    return [mark, _going_on(sprint_id, loop)]
 
 
 # 起こし直しの入力の先頭に置く、claude の目標を入れる命令（#3243）
 GOAL = "/goal"
 
 
-def goal_prompt(plan: str, lane: str, sprint_id: str) -> str:
+def goal_prompt(plan: str, lane: str, sprint_id: str, loop: Optional[str] = None) -> str:
     """認証の失敗で `/goal` が外れたレーンを起こし直す入力。目標を入れ直し、スプリントを止まった所から続ける。"""
-    return f"{GOAL} {prompt(plan, lane, [result.command('progress', 'next', sprint_id)])}"
+    return f"{GOAL} {prompt(plan, lane, [_going_on(sprint_id, loop)])}"
 
 
 def prompt(plan: str, lane: str, commands: list[dict[str, Any]]) -> str:

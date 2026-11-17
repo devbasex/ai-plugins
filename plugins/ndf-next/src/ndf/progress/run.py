@@ -9,7 +9,8 @@
   行き先が `retry`）はここで方針どおりに打ち直し、conductor へ返すのは人か conductor の判断が要る止まりだけで、
   `routes` を持つ（SF8）。終了コードは止まった理由の種類から引く
 - 承認ゲート（`ndf.listen`）とプランの中の承認ゲートは、行を実行中のまま `work` を抜け、`next` が `gate` と `routes` を返す。
-  答えは `answer`（と `ndf answer`。`ndf.progress.gate`）が事象 `answered` で残す。差し戻しには指摘ファイルが要る（3365-4）
+  答えは `answer`（と `ndf answer`。`ndf.progress.gate`）が事象 `answered` で残す。差し戻しには指摘ファイルが要る（3365-4）。
+  直前の MVV 判定が省けると決めた承認ゲートは、答えた者 `service:mvv` の承認を書いて人へ問わずに通す（#3745）
 - スプリントの完了と同じトランザクションで `Env.ended` を打つ（レーンの行を終える口。決定 17。`ndf.progress.gate.lane_env`）
 - 工程の出力は工程の出力の規約で照らしてから終了の印を付ける。合わなければ印を付けず失敗にする（受け入れ条件 8）
 - 課題の工程表とスプリント PR の「通した工程」は終了の印から作る（受け入れ条件 6）。書けなくても工程は進め、
@@ -271,7 +272,8 @@ def _running_move(v: View, s: stages.StageDef) -> Move:
         return Move(Action.RESUME, s, None, prog)
     listen = invoke.is_listen(step)
     waiting = listen or (prog.waiting is not None and prog.waiting["step"] == step.id)
-    if waiting and prog.answer is None:
+    skip = listen and prog.waiting is None and model.mvv_skip(prog.done, s.before(step.id), step.gate) is not None
+    if waiting and prog.answer is None and not skip:
         return Move(Action.GATE, s, step, prog)
     return Move(Action.CONSUME if listen else Action.RESUME, s, step, prog, prog.answer)
 
@@ -615,17 +617,29 @@ def gate_report(step: stages.StepDef, answer: model.Event) -> dict[str, Any]:
     return result.result(TOOL, result.OK, summary, metrics={"answer": p["answer"], "seq": answer.seq})
 
 
-def _consume(d: Drive, v: View, m: Move) -> None:
-    """承認ゲートの答えを読む。承認ならステップを終え、承認しないなら行を失敗にして conductor へ返す。"""
-    assert m.stage is not None and m.step is not None and m.event is not None and m.progress is not None
+def _consume(d: Drive, v: View, m: Move) -> Optional[dict[str, Any]]:
+    """承認ゲートの答えを読む。答えが無ければ直前の MVV 判定が省けると決めた承認ゲートで、`service:mvv` の承認を書く。
+
+    省いた答えを書いたら、同じ駆動では読まずに `next` を返して止まる。答えを読む前の照合（`gate.recheck`）は副命令の
+    エントリポイントでだけ打つため、続けて読むと判定の後に進んだ PR の head でも承認ゲートを省いてしまう。次の `next` が照合を通してから読む。
+    """
+    assert m.stage is not None and m.step is not None and m.progress is not None
+    if m.event is None:
+        held = model.mvv_skip(m.progress.done, m.stage.before(m.step.id), m.step.gate)
+        qid = model.question_id(v.table_id, v.rev, m.stage.name, m.step.id, m.progress.anchor)
+        payload, reason = model.mvv_answer(m.step.id, invoke.LISTEN, APPROVED, held, qid)
+        d.write(model.EventDraft(ANSWERED, CONDUCTOR, m.stage.name, reason=reason, payload=payload, rev=v.rev))
+        summary = f"{reason}。答えは照合を通してから読むので next を打つ"
+        return result.result(TOOL, result.OK, summary, metrics=_metrics(v, m), next=_cmd("next", d.table_id))
     if payload_of(m.event)["answer"] == APPROVED:
         rep = gate_report(m.step, m.event)
         payload = {"step": m.step.id, "status": FINISHED, "report": rep, "generation": m.progress.generation}
         d.write(model.EventDraft(STEP_EVENT, ACTOR, m.stage.name, payload=payload, rev=v.rev))
-        return
+        return None
     detail = f"承認ゲート {m.step.gate} で承認されなかった（{m.event.draft.reason}）"
     d.write(_failed(m.stage, m.step.id, v.rev, "refused", detail))
     d.synced()
+    return None
 
 
 def _complete(d: Drive, v: View) -> dict[str, Any]:
@@ -668,8 +682,9 @@ def _step(d: Drive, v: View, m: Move) -> Optional[dict[str, Any]]:
 
 def _drive(d: Drive) -> dict[str, Any]:
     first = read(d.st, d.table_id)
-    # 1 手ごとに行かステップが 1 つ進む（行ごとに始めと終わり、ステップごとに流すと答えの読み取り）。手の数はこの数を超えない
-    for _ in range(3 * (len(first.snap.stages) + len(first.snap.steps()))):
+    # 1 手ごとに行かステップが 1 つ進む（行ごとに始めと終わり、ステップごとに流すと答えの読み取り）に、最後の完了の 1 手を
+    # 足す。手の数はこの数を超えない。工程の無い進行表（開発ループの行。#3558）も完了の 1 手で終わる
+    for _ in range(3 * (len(first.snap.stages) + len(first.snap.steps())) + 1):
         v = read(d.st, d.table_id)
         out = _step(d, v, decide(v))
         if out is not None:
@@ -787,22 +802,6 @@ def answer(st: store.Store, table_id: str, stage: str, value: str, reason: str, 
 # --- work（next が起こす作業） ----------------------------------------------------------------
 
 
-def retry_delay(cause: Optional[dict[str, Any]], used: int) -> Optional[float]:
-    """打ち直しで直る止まりの次の待ちの秒。打ち直さない（行き先が retry でない・回数が尽きた）なら None。"""
-    kind = causes.kind_of(cause)
-    if cause is None or kind is None or kind not in causes.table() or causes.row(kind).route != "retry":
-        return None
-    pol = causes.policy_of(kind)
-    if pol is None or pol.attempts is None or used >= pol.attempts:
-        return None
-    if causes.row(kind).requires_retry_after:
-        after = cause.get("retry_after")
-        return float(after) if isinstance(after, (int, float)) else None
-    base = pol.interval if pol.interval is not None else 0.0
-    delay = base * ((pol.factor if pol.factor is not None else 1.0) ** used)
-    return min(delay, pol.max_interval) if pol.max_interval is not None else delay
-
-
 def _retrying(call: Callable[[bool], invoke.StageResult], sleep: Callable[[float], None]) -> invoke.StageResult:
     """打ち直しで直る止まりを方針どおりに打ち直す。`call(again)` の `again` は打ち直しか（プランは止まったステップから
     新しい回を始める。`invoke.plan_start`・`invoke.plan_attempt`）。
@@ -811,7 +810,7 @@ def _retrying(call: Callable[[bool], invoke.StageResult], sleep: Callable[[float
     """
     used = 0
     res = call(False)
-    while res.status == result.STOPPED and (delay := retry_delay(res.cause, used)) is not None:
+    while res.status == result.STOPPED and (delay := causes.retry_delay(res.cause, used)) is not None:
         sleep(delay)
         used += 1
         again = call(True)

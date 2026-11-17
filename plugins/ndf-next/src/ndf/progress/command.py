@@ -2,6 +2,7 @@
 
 ndf progress new <スプリント名> --mode <モード> --issues <番号>... [--pace <進め方>] [--disable <工程>=<理由>]...
                  [--requirements <要求と受け入れ条件の出力>] [--parent <親の進行表の ID>]
+ndf progress new <スプリント名> --loop <ループの名前> --parent <レーンの進行表の ID>
 ndf progress show <進行表の ID>
 ndf progress disable|enable|retry <進行表の ID> <工程> --reason <理由>
 ndf progress finish <進行表の ID> <工程> --output <出力のファイル> --reason <理由>
@@ -11,6 +12,10 @@ ndf progress docs-only --base <ベースブランチ> [--remote <リモート名
 
 結果は結果 JSON の 1 行で返す。この副命令を打つのはレーンの conductor で、書く事象の書き手は conductor になる。
 工程を流す `next` と、承認ゲートの答えを書く `answer` は P1b（#3092）が足す。
+
+`--loop` はレーンの開発ループの行（`kind: loop`）の進行表を作る。工程を持たないので、開発ループが止まった後に
+`ndf progress next` を打つと完了になり、スプリントと同じ口（`Env.ended`）でレーンの行を終える。計画を止めたときは
+スプリントと同じく `ndf progress cancel` で中止にする（#3558）。
 """
 
 from __future__ import annotations
@@ -39,11 +44,15 @@ ACTOR = "conductor"
 # 番号のぶつかり（同時の追記）で読み直して書き直す回数
 APPEND_ATTEMPTS = 3
 PROJECT_FILE = identity.FIXED_WORDS["declaration_dir"] + "/project.json"
+# プロジェクト MVV の宣言（表 ndf-files の mvv。スプリントの文脈の mvv_ref の出所）
+MVV_FILE = identity.FIXED_WORDS["declaration_dir"] + "/" + facts.value("ndf-files", "mvv", "path")
 # 副命令 disable・enable が書く事象の種類
 TOGGLE_KINDS = {"disable": "disabled", "enable": "enabled"}
 # 進行表の作成の時点で済んでいる工程（要求と受け入れ条件）の終了の理由
 DONE_AT_CREATION = "進行表の作成の時点で済んでいる"
 REQUIREMENTS_STAGE = "要求と受け入れ条件"  # `--requirements` が終了の印を付ける工程（工程表の行名）
+# 開発ループの行の進行表の定義（工程を持たない。モードの名前の代わりに置く）
+LOOP_SNAPSHOT = stages.Snapshot(mode="loop", version="1.0.0", sha256="", height=0, stages=())
 
 
 # --- 置き場とリポジトリ ------------------------------------------------------------------
@@ -328,13 +337,21 @@ def _requirements(snap: stages.Snapshot, path: str | None) -> list[tuple[str, st
     return [(stage.name, path)]
 
 
+def mvv_ref(cwd: Path) -> str | None:
+    """スプリントが参照する承認済みプロジェクト MVV の sha256（MVV の宣言の versions の最後）。宣言・承認が無ければ None。"""
+    versions = declaration(cwd, MVV_FILE).get("versions")
+    last = versions[-1] if isinstance(versions, list) and versions and isinstance(versions[-1], dict) else {}
+    sha = last.get("sha256")
+    return sha if isinstance(sha, str) else None
+
+
 def _prepare_new(a: argparse.Namespace, cwd: Path, snap: stages.Snapshot) -> tuple[dict[str, Any], list[model.EventDraft]]:
     """引数の --disable と文脈を確かめ、保存する定義の改訂の文書と最初の事象の下書きを作る。"""
     disables = dict(item.split("=", 1) for item in a.disable)
     unknown = stages.unknown_stages(snap, disables)
     if unknown:
         raise definition.WorkflowDefError([f"--disable の工程がモード {a.mode} に無い: {', '.join(unknown)}"])
-    context = {"issues": a.issues, "mode": a.mode, "pace": a.pace}
+    context = {"issues": a.issues, "mode": a.mode, "pace": a.pace, "mvv_ref": mvv_ref(cwd)}
     errs = contracts.schema_errors(context, definition.CONTEXT)
     if errs:
         raise definition.WorkflowDefError([f"スプリントの文脈: {e}" for e in errs])
@@ -343,9 +360,31 @@ def _prepare_new(a: argparse.Namespace, cwd: Path, snap: stages.Snapshot) -> tup
     return doc, _new_drafts(snap, enabled, _requirements(snap, a.requirements))
 
 
-def _cmd_new(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any]:
+def _loop_new(a: argparse.Namespace) -> tuple[stages.Snapshot, dict[str, Any], list[model.EventDraft]]:
+    """開発ループの行の進行表（工程なし）。レーンの子にしか作れず、スプリントの引数とは混ぜない。"""
+    mixed = [
+        flag
+        for flag, given in (("--mode", a.mode), ("--issues", a.issues), ("--requirements", a.requirements), ("--disable", a.disable))
+        if given
+    ]
+    if mixed:
+        raise definition.WorkflowDefError([f"--loop は {', '.join(mixed)} と一緒に渡せない"])
+    if a.parent is None:
+        raise definition.WorkflowDefError(["--loop にはレーンの進行表（--parent）が要る"])
+    doc = {**stages.snapshot_dict(LOOP_SNAPSHOT), "context": {"issues": []}, "enablement": {}}
+    return LOOP_SNAPSHOT, doc, []
+
+
+def _sprint_new(a: argparse.Namespace, cwd: Path) -> tuple[stages.Snapshot, dict[str, Any], list[model.EventDraft]]:
+    if a.mode is None or not a.issues:
+        raise definition.WorkflowDefError(["--mode と --issues（開発ループの行なら --loop）を渡す"])
     snap = definition.load_definition(a.mode)
     doc, drafts = _prepare_new(a, cwd, snap)
+    return snap, doc, drafts
+
+
+def _cmd_new(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any]:
+    snap, doc, drafts = _loop_new(a) if a.loop is not None else _sprint_new(a, cwd)
     with store.transaction(st) as conn:
         tid = store.create_table(conn, ("sprint", repo_id(cwd, st.root), a.name), a.parent, doc, drafts)
         rev, _, _, events = read_current(conn, tid)
@@ -488,8 +527,9 @@ def parser() -> argparse.ArgumentParser:
     sub = ap.add_subparsers(dest="action", required=True)
     new = sub.add_parser("new", help="スプリントの進行表を作る")
     new.add_argument("name", help="スプリント名")
-    new.add_argument("--mode", required=True)
-    new.add_argument("--issues", type=int, nargs="+", required=True)
+    new.add_argument("--mode")
+    new.add_argument("--issues", type=int, nargs="+")
+    new.add_argument("--loop", help="開発ループの行の進行表を作る（工程なし。ループの名前）")
     new.add_argument("--pace", default="normal")
     new.add_argument("--disable", type=_disable_item, action="append", default=[], help="<工程>=<理由>")
     new.add_argument("--requirements", help="要求と受け入れ条件の出力（工程の出力の規約に合う JSON）")

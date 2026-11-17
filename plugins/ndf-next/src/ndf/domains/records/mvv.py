@@ -15,7 +15,7 @@ from typing import Any, Optional
 
 from ndf import identity
 from ndf.adapters import git as git_mod
-from ndf.adapters.github import PER_PAGE, GitHub, GitHubError
+from ndf.adapters.github import PER_PAGE, GitHub, GitHubError, Pull
 from ndf.contracts import facts, limits
 from ndf.domains.records import files, jsonl
 from ndf.domains.records import mvv_decide as md
@@ -133,19 +133,29 @@ def vet_sprint(root: Path, inputs: Mapping[str, str], judge: Judge, reuse: bool 
     return row
 
 
-def _changed(hub: GitHub, number: int) -> list[Changed]:
-    """PR の変えたファイル（`github.list-pages` ページまで）。超えれば `GitHubError`。"""
+def pr_files(hub: GitHub, number: int) -> list[dict[str, Any]]:
+    """PR の変えたファイル（GitHub の files の行。`github.list-pages` ページまで）。超えれば `GitHubError`。"""
     pages = int(limits.value("github.list-pages", "count"))
-    out: list[Changed] = []
+    out: list[dict[str, Any]] = []
     for page in range(1, pages + 1):
-        files = hub.rest("GET", f"/repos/{hub.repo}/pulls/{int(number)}/files", params={"per_page": PER_PAGE, "page": page})
-        out += [Changed(str(f["filename"]), f["previous_filename"] if "previous_filename" in f else None,
-                        f["status"] == "renamed") for f in files]  # fmt: skip
-        if len(files) < PER_PAGE:
+        got = hub.rest("GET", f"/repos/{hub.repo}/pulls/{int(number)}/files", params={"per_page": PER_PAGE, "page": page})
+        out += got
+        if len(got) < PER_PAGE:
             return out
     raise GitHubError(f"PR #{number} の変更ファイルが {pages} ページを超えた（github.list-pages）")
 
 
-def pr_facts(hub: GitHub, number: int, base: MvvFacts) -> MvvFacts:
-    """PR の本文と変えたファイルを読み、機械の検査の事実を埋める（検査 6 の `body`・`claimed`）。"""
-    return mm.facts_from_pr(base, hub.pull(number).body, _changed(hub, number))
+def changed_of(rows: list[dict[str, Any]]) -> list[Changed]:
+    """GitHub の files の行 → 機械の検査の変えたファイル（名前を変えた前のパスを持つ）。"""
+    return [Changed(str(f["filename"]), f["previous_filename"] if "previous_filename" in f else None,
+                    f["status"] == "renamed") for f in rows]  # fmt: skip
+
+
+def pr_facts(
+    hub: GitHub, number: int, base: MvvFacts, rows: Optional[list[dict[str, Any]]] = None, pull: Optional[Pull] = None
+) -> MvvFacts:
+    """PR の本文と変えたファイルを読み、機械の検査の事実を埋める（検査 6 の `body`・`claimed`）。
+
+    `rows` は読み済みの変えたファイル（`pr_files` の結果）、`pull` は読み済みの PR。無ければここで読む。"""
+    body = (pull if pull is not None else hub.pull(number)).body
+    return mm.facts_from_pr(base, body, changed_of(rows if rows is not None else pr_files(hub, number)))

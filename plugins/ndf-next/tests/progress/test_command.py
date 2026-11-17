@@ -341,7 +341,8 @@ def test_new_stores_the_context_the_enablement_and_the_parent(repo, capsys, last
     )
     table, doc = _stored(out["metrics"]["table_id"])
     assert table["parent_id"] == "lane:abc:l1" and table["level"] == "sprint" and table["name"] == "s1"
-    assert doc["context"] == {"issues": [1, 2], "mode": "standard", "pace": "fast"}
+    # MVV の宣言が無いリポジトリでは、承認済み MVV の参照は null（#3745）
+    assert doc["context"] == {"issues": [1, 2], "mode": "standard", "pace": "fast", "mvv_ref": None}
     assert doc["mode"] == "standard" and [s["name"] for s in doc["stages"]] == [r["stage"] for r in out["items"]]
     en = doc["enablement"]
     assert en["振り返り"] == {"enabled": False, "reason": "不要", "source": "sprint"}
@@ -393,6 +394,19 @@ def test_new_of_an_unknown_mode_is_invalid(repo, capsys, last_result):
     code, out = _run(capsys, last_result, "new", "s1", "--mode", "nope", "--issues", "1")
     assert code == 2 and out["cause"]["kind"] == "invalid"
     assert out["items"][0]["error"].startswith("モード nope の定義が無い")
+
+
+def test_new_needs_the_mode_and_the_issues_or_a_loop(repo, capsys, last_result):
+    code, out = _run(capsys, last_result, "new", "s1", "--issues", "1")
+    assert code == 2 and "--loop" in out["items"][0]["error"]
+
+
+def test_a_loop_table_takes_neither_the_sprint_arguments_nor_a_missing_lane(repo, capsys, last_result):
+    # #3558: 開発ループの行の進行表は工程を持たず、レーンの子にしか作らない
+    code, out = _run(capsys, last_result, "new", "s1", "--loop", "lr", "--mode", "standard", "--parent", "x")
+    assert code == 2 and "--mode" in out["items"][0]["error"]
+    code, out = _run(capsys, last_result, "new", "s1", "--loop", "lr")
+    assert code == 2 and "--parent" in out["items"][0]["error"]
 
 
 def test_new_with_duplicated_issues_is_invalid(repo, capsys, last_result):

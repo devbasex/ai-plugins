@@ -12,6 +12,8 @@
 - 検証は項目が触るモジュールに対応するテストと検査だけを打ち（#3049）、項目の起点から在った失敗をその項目の失敗に
   数えない（#3339。`verify_decide.attribute`）
 - 最終ゲートは `final_gate` が回す（衝突は待たずに止める #2680・対象範囲の外の直しは取り込まない #3038）
+- 計画の項目の見積りは配分の表（初期値・宣言 `.ndf/estimate.json` の `allocation_minutes`・履歴の実測）から出し、
+  最終ゲートを通った実行の実測を履歴へ足す（`allocation`・#3643）
 - 計画の項目は実装の予算で選び、コーディングの工程の起動の秒の累計が安全網に当たれば項目を取り消さずに止める
   （`budget_decide`）
 - 修正が停滞か振動した項目は、修正担当と別のランタイムに成立を判定させる（`judge_decide`）
@@ -35,8 +37,12 @@ from ndf.adapters import agents, git, github, publish
 from ndf.contracts import limits
 from ndf.core.converge import participants, worktree
 from ndf.domains.crossrefactor import (
+    allocation,
+    allocation_decide,
+    allocation_history_decide,
     budget_decide,
     collect,
+    cost_decide,
     final_gate,
     finished_decide,
     flaky_decide,
@@ -209,31 +215,43 @@ def _net(run: _Run) -> budget_decide.SafetyNet:
 
 
 def _launch(run: _Run, req: launch.Request) -> Optional[dict[str, Any]]:
-    """担当を 1 回起動し、工程別の所要と安全網の累計へ秒を足す。コーディングの工程は安全網に当たっていれば起動しない。
+    """担当を 1 回起動し、工程別の所要と安全網の累計へ秒を、工程別の費用へ起動の費用を足す。コーディングの工程は安全網に当たっていれば起動しない。
 
     安全網の残りで監視の上限を縮めた起動が上限に達したら、所要を保存してから項目を取り消さずに止める（安全網を
     大きくして打ち直すと、起点の記録からその項目をやり直す）。
     """
-    coding = req.phase in launch_decide.coding_phases()
-    capped = False
-    if coding:
-        net = _net(run)
-        if net.halted:
-            raise DriveStopped("fix_limit", net.reason())
-        capped = net.remaining_seconds < launch.phase_limit(req.phase)
-        req = replace(req, timeout=min(launch.phase_limit(req.phase), net.remaining_seconds))
+    req, capped = _guarded(run, req)
     began = run.ports.clock()
     got, status = launch.run(req, run.dirs(), run.ports.launcher)
-    spent = run.ports.clock() - began
-    seconds = dict(run.state_get("phase_seconds", {}))
-    seconds[req.phase] = round((seconds[req.phase] if req.phase in seconds else 0.0) + spent, 1)
-    run.state["phase_seconds"] = seconds
-    if coding:
-        run.state["coding_seconds"] = _net(run).add(req.phase, spent).used_seconds
+    _record_spent(run, req, run.ports.clock() - began)
     run.save()
     if capped and status.state == agents.AgentState.TIMEOUT:
         raise DriveStopped("fix_limit", _net(run).reason())
     return got
+
+
+def _guarded(run: _Run, req: launch.Request) -> tuple[launch.Request, bool]:
+    """コーディングの工程なら安全網に当たっていないかを確かめ、監視の上限を安全網の残りまで縮める。
+
+    (起動する Request, 上限を縮めたか) を返す。コーディングでない工程はそのまま返す。
+    """
+    if req.phase not in launch_decide.coding_phases():
+        return req, False
+    net = _net(run)
+    if net.halted:
+        raise DriveStopped("fix_limit", net.reason())
+    capped = net.remaining_seconds < launch.phase_limit(req.phase)
+    return replace(req, timeout=min(launch.phase_limit(req.phase), net.remaining_seconds)), capped
+
+
+def _record_spent(run: _Run, req: launch.Request, spent: float) -> None:
+    """起動 1 回の秒を工程別の所要へ、費用を工程別の費用へ、コーディングの工程なら安全網の累計へ足す（保存はしない）。"""
+    seconds = dict(run.state_get("phase_seconds", {}))
+    seconds[req.phase] = round((seconds[req.phase] if req.phase in seconds else 0.0) + spent, 1)
+    run.state["phase_seconds"] = seconds
+    run.state["phase_cost"] = cost_decide.add(run.state_get("phase_cost", {}), req.phase, launch.cost(req, run.dirs()))
+    if req.phase in launch_decide.coding_phases():
+        run.state["coding_seconds"] = _net(run).add(req.phase, spent).used_seconds
 
 
 def _propose(run: _Run) -> list[dict[str, Any]]:
@@ -262,13 +280,30 @@ def _plan(run: _Run) -> None:
         got = _launch(run, req)
         planned = got["items"] if got is not None else None
     items, skipped = items_decide.plan_items(planned if planned is not None else proposals, _touched(run))
-    budget = None
-    if planned is not None:
-        # 見積りは計画の担当だけが返す。提案をそのまま項目にしたときは予算で選ばない
-        picked = budget_decide.select(items, run.cfg.budget)
-        items, skipped, budget = picked.adopted, skipped + picked.skipped, picked.budget.as_json()
-    run.state.update(items=items, skipped=skipped, plan_fallback=planned is None and bool(proposals), budget=budget)
+    table = _allocation_table(run)
+    for item in items:
+        # 見積りは配分の表から出す（手法と、テストを足すか）。担当の申告の分は使わない（#3643）
+        item["estimate"] = allocation_history_decide.item_estimate(table, item.get("technique"), wants_tests(item))
+    picked = budget_decide.select(items, run.cfg.budget)
+    run.state.update(
+        items=picked.adopted,
+        skipped=skipped + picked.skipped,
+        plan_fallback=planned is None and bool(proposals),
+        budget=picked.budget.as_json(),
+        plan={"table_source": table["source"], "table": table},
+    )
     run.save()
+
+
+def _allocation_table(run: _Run) -> dict[str, Any]:
+    """配分の表。宣言の形が違えば止まる。履歴が無ければ初期値で計画することを 1 行知らせる。"""
+    try:
+        table = allocation.table(run.work, run.cfg.repo)
+    except allocation_decide.AllocationError as exc:
+        raise DriveStopped("invalid", f"配分の表を作れない: {exc}") from None
+    if table["source"] != allocation_history_decide.HISTORY_SOURCE:
+        print("ℹ 配分の履歴が無いか読めないため、初期値（と宣言の allocation_minutes）で計画する", file=sys.stderr)
+    return table
 
 
 def _reset(run: _Run, sha: str) -> None:
@@ -287,10 +322,19 @@ def _undo_item(run: _Run, item: dict[str, Any], status: Status, reason: str) -> 
     _close(run, item, status, reason)
 
 
-def _code(run: _Run, item: dict[str, Any], phase: str, prompt: str) -> Optional[dict[str, Any]]:
+# 起動 1 回の秒の数え先（`_tally_item`・`_tally_fix`）
+Tally = Callable[[float], None]
+
+
+def _code(run: _Run, item: dict[str, Any], phase: str, prompt: str, tally: Tally) -> Optional[dict[str, Any]]:
     """コードを書く工程を 1 回流す。結果が無ければ起点まで取り消して項目を見送り、None を返す（#3313）。"""
     _record_phase(run, phase)
-    got = _launch(run, launch.Request(phase, participants.FIXER, prompt, item["id"]))
+    before = _phase_seconds(run, phase)
+    try:
+        got = _launch(run, launch.Request(phase, participants.FIXER, prompt, item["id"]))
+    finally:
+        tally(_phase_seconds(run, phase) - before)
+        run.save()
     if got is not None:
         return got
     # 振り替える担当は無い（コードを書くのは修正担当だけ）。項目は採らないので、起点の記録の有無に依らず項目の起点まで戻す
@@ -299,9 +343,40 @@ def _code(run: _Run, item: dict[str, Any], phase: str, prompt: str) -> Optional[
     return None
 
 
+def _phase_seconds(run: _Run, phase: str) -> float:
+    spent = run.state_get("phase_seconds", {})
+    return float(spent[phase]) if phase in spent else 0.0
+
+
+def _tally_item(item: dict[str, Any], key: str) -> Tally:
+    """起動の秒を項目の実測（`seconds` の `test`・`implement`。配分の履歴の材料）へ足す数え先。"""
+
+    def tally(seconds: float) -> None:
+        spent = dict(item["seconds"]) if "seconds" in item else {}
+        spent[key] = round((spent[key] if key in spent else 0.0) + seconds, 1)
+        item["seconds"] = spent
+
+    return tally
+
+
+def _tally_fix(run: _Run) -> Tally:
+    """起動の秒を実行の修正の集計（`fix_stats`。配分の履歴の `fix` の材料）へ足す数え先。"""
+
+    def tally(seconds: float) -> None:
+        held = run.state_get("fix_stats", {})
+        run.state["fix_stats"] = allocation_history_decide.add_stat(held, allocation_history_decide.SECTION_COUNT["fix"], seconds)
+
+    return tally
+
+
+def wants_tests(item: Mapping[str, Any]) -> bool:
+    """項目がテストを足す工程を持つか（計画の担当が `tests: false` と返した項目だけ持たない）。見積りと実行の両方がこれを読む。"""
+    return item.get("tests") is not False
+
+
 def _add_tests(run: _Run, item: dict[str, Any]) -> bool:
     """振る舞いを固定するテストを足す。足したテストが全体の実行に収集されなければ項目を戻す（#620）。"""
-    got = _code(run, item, "add-tests", prompt_decide.add_tests(item))
+    got = _code(run, item, "add-tests", prompt_decide.add_tests(item), _tally_item(item, "test"))
     if got is None:
         return False
     tests = [str(t) for t in got["tests"]] if isinstance(got.get("tests"), list) else []
@@ -322,7 +397,7 @@ def _add_tests(run: _Run, item: dict[str, Any]) -> bool:
 
 
 def _implement(run: _Run, item: dict[str, Any]) -> bool:
-    return _code(run, item, "implement", prompt_decide.implement(item)) is not None
+    return _code(run, item, "implement", prompt_decide.implement(item), _tally_item(item, "implement")) is not None
 
 
 def _own_failures(run: _Run, item: dict[str, Any], found: Sequence[scoped.Suite]) -> verify_decide.Attributed:
@@ -385,7 +460,9 @@ def _verify(run: _Run, item: dict[str, Any]) -> None:
     fixes = 0
     reason = ""
     for _ in range(run.cfg.max_fix + 3):
+        began = run.ports.clock()
         got = _own_failures(run, item, found)
+        _count_verify(run, run.ports.clock() - began)
         history.append(got.own)
         rounds.append(sorted(got.own))
         item.update(history=rounds, inherited=sorted(got.inherited))
@@ -399,10 +476,19 @@ def _verify(run: _Run, item: dict[str, Any]) -> None:
             break
         if regroup:
             history = [got.own]
-        if _code(run, item, "fix", prompt_decide.fix(item, got.own)) is None:
+        if _code(run, item, "fix", prompt_decide.fix(item, got.own), _tally_fix(run)) is None:
             return
         fixes += 1
     _undo_item(run, item, Status.REVERTED, f"検証が通らない: {reason}")
+
+
+def _count_verify(run: _Run, seconds: float) -> None:
+    """検証 1 回の秒を実行の検証の集計（配分の履歴の `verify` の材料）へ足す。"""
+    held = run.state_get("verify_stats", {})
+    run.state["verify_stats"] = allocation_history_decide.add_stat(
+        held, allocation_history_decide.SECTION_COUNT["verify"], max(0.0, seconds)
+    )
+    run.save()
 
 
 def _ask_flaky(run: _Run, flaky: frozenset[str]) -> None:
@@ -468,7 +554,8 @@ def _items(run: _Run) -> None:
         item = cast(dict[str, Any], found)
         item["start"] = run.work.rev_parse("HEAD")
         run.save()
-        if _add_tests(run, item) and _implement(run, item):
+        # テストを足さない項目は、見積りに入れていない add-tests の担当を起動しない
+        if (not wants_tests(item) or _add_tests(run, item)) and _implement(run, item):
             _verify(run, item)
         _flaky_fix(run)
 
@@ -496,7 +583,7 @@ def _final(run: _Run) -> None:
 
 
 def _step_metrics(run: _Run) -> dict[str, Any]:
-    """予算・安全網・成立の判定・フレーキーの直しの数。"""
+    """予算・安全網・成立の判定・フレーキーの直しの数・担当の起動の費用（不明は 0 と区別する）。"""
     items = run.state_get("items", [])
     net = _net(run)
     flaky = run.state_get("flaky_fixes", [])
@@ -506,6 +593,7 @@ def _step_metrics(run: _Run) -> dict[str, Any]:
         "coding_minutes": round(net.used_seconds / 60, 1),
         "judged": sum(len(i["feasibility"]) for i in items if "feasibility" in i),
         "flaky_fixed": sum(1 for f in flaky if f["result"] == flaky_decide.KEPT),
+        **cost_decide.totals(run.state_get("phase_cost", {})),
     }
 
 
@@ -607,6 +695,8 @@ def drive(cfg: RunConfig, ports: Optional[Ports] = None) -> Finish:
         counts = items_decide.counts(run.state["items"]) if "items" in run.state else {}
         return _publish(run, Finish(kind, detail, metrics={**counts, **_step_metrics(run)}))
     finish = _publish(run, _summary(run))
+    # 配分の履歴は最終ゲートを通った実行だけを足す（止まった実行は足さない）
+    allocation.record_run(run.work, run.state, _now())
     run.state["done"] = {"head": run.work.rev_parse("HEAD"), "args": cfg.args(), "result": finish.as_json()}
     run.save()
     workspace.release(git.Git(cfg.repo), run.ws)

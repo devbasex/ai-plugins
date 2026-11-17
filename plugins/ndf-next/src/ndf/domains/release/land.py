@@ -156,7 +156,7 @@ def ruleset_mismatch(strategy: Strategy, facts: RuleFacts) -> list[dict]:
     迂回の可否が `always`・`pull_requests_only` 以外なら食い違い。
     """
     sec = strategy.section
-    method, via, admin = sec["merge"]["method"], sec["approval"]["via"], sec["merge"]["admin"]
+    method = sec["merge"]["method"]
     out: list[dict] = []
     if not facts.present:
         if method == "merge-queue":
@@ -170,14 +170,20 @@ def ruleset_mismatch(strategy: Strategy, facts: RuleFacts) -> list[dict]:
         out.append({"key": "merge.commit", "declared": sec["merge"]["commit"], "ruleset": f"merge queue の取り込み方 {queue_commit}"})
     if method == "strict" and not facts.up_to_date:
         out.append({"key": "merge.method", "declared": method, "ruleset": "最新の取り込みを求めない"})
+    return out + _approval_mismatch(strategy, facts)
+
+
+def _approval_mismatch(strategy: Strategy, facts: RuleFacts) -> list[dict]:
+    """管理者の迂回と承認の数の食い違い。`merge.admin: true` なら迂回の可否だけを比べ、承認の数は比べない。"""
+    sec = strategy.section
+    via, admin = sec["approval"]["via"], sec["merge"]["admin"]
     if admin:
-        if facts.bypass not in BYPASS_OK:
-            out.append({"key": "merge.admin", "declared": True, "ruleset": f"迂回の可否 {facts.bypass}"})
-    elif via == "gate" and facts.approvals > 0:
-        out.append({"key": "approval.via", "declared": via, "ruleset": f"承認の数 {facts.approvals}"})
-    elif via == "review" and facts.approvals < 1:
-        out.append({"key": "approval.via", "declared": via, "ruleset": "承認の数 0"})
-    return out
+        return [] if facts.bypass in BYPASS_OK else [{"key": "merge.admin", "declared": True, "ruleset": f"迂回の可否 {facts.bypass}"}]
+    if via == "gate" and facts.approvals > 0:
+        return [{"key": "approval.via", "declared": via, "ruleset": f"承認の数 {facts.approvals}"}]
+    if via == "review" and facts.approvals < 1:
+        return [{"key": "approval.via", "declared": via, "ruleset": "承認の数 0"}]
+    return []
 
 
 def bump_of(cut: Optional[str], head: Optional[str], prod: Optional[str], *, optional: bool) -> Optional[bool]:
@@ -647,7 +653,7 @@ class Lander:
         """本番ブランチへ入れた版上げを、ベースブランチへ戻す PR でマージする（マージ済みからの再開でも打つ）。
         同期の PR が要らない取り込み方（`route_decide.route_of` の `sync` が偽）では戻さない。"""
         merged_sha = landed or self.hub.pull(pull.number).merge_sha
-        landed = merged_sha if merged_sha else None
+        landed = merged_sha if merged_sha else None  # noqa: NDF501 ネットワーク: マージの sha を返さない応答は未着として扱う
         if not route_decide.route_of(self.strategy).sync:
             return Landed(True, None, f"#{pull.number} を本番ブランチへ入れた", production_sha=landed)
         number = self._open_sync()

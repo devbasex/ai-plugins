@@ -19,7 +19,7 @@ import strategy_fixture
 from ndf import contracts
 from ndf.adapters.github import GitHubError
 from ndf.contracts import causes, result
-from ndf.progress import command, definition, invoke, model, run, stages, store
+from ndf.progress import command, definition, gate, invoke, model, run, stages, store
 
 ISSUE = 3092
 
@@ -122,9 +122,9 @@ def test_work_flows_rows_until_the_design_gate_and_returns_routes(repo, st, env,
     assert result.code_for(out) == 10
     labels = _labels(st, tid)
     assert labels["要求と受け入れ条件"] == labels["作業場所の用意"] == "finished" and labels["設計"] == "running"
-    assert [c.step for c in env.fake.calls] == ["requirements", "worktree", "design", "design-review"]
-    # 作業場所の用意の出力が文脈に入り、設計の入力に届く
-    assert env.fake.calls[2].inputs == {"issues": [ISSUE], "worktree": str(repo)}
+    assert [c.step for c in env.fake.calls] == ["requirements", "worktree", "design", "design-review", "design-mvv"]
+    # 作業場所の用意の出力が文脈に入り、設計の入力に届く（MVV 判定の材料のモード・進め方・承認済み MVV の参照も）
+    assert env.fake.calls[2].inputs == {"issues": [ISSUE], "worktree": str(repo), "mode": "standard", "pace": "normal", "mvv_ref": None}
 
 
 def test_answers_carry_the_sprint_to_completion_and_the_records_follow_the_marks(repo, st, env, capsys):
@@ -188,8 +188,90 @@ def test_revise_needs_a_notes_file_and_reruns_the_stage_with_the_notes(repo, st,
     out = lanes.turn(st, tid, repo, env.env)
     assert out["status"] == "gate" and out["metrics"]["stage"] == "設計"
     rerun = env.fake.calls[before:]
-    assert [c.step for c in rerun] == ["design", "design-review"] and {c.notes for c in rerun} == {"節 2 の根拠が足りない"}
+    assert [c.step for c in rerun] == ["design", "design-review", "design-mvv"] and {c.notes for c in rerun} == {"節 2 の根拠が足りない"}
     assert rerun[0].work_dir.name == "design-g1"
+
+
+JUDGED = "a" * 40
+
+
+def _mvv(kind: str, skip: bool, why: list[str]):
+    """承認ゲートの直前の MVV 判定のステップの偽の結果（出力 mvv_gate。判定した PR の head は JUDGED）。"""
+    held = {
+        "gate": kind,
+        "skip": skip,
+        "verdict": {"verdict": "follow", "reasons": ["Value 1"], "boundary": []},
+        "why": why,
+        "head": JUDGED,
+    }
+    return lambda r: invoke.finished(r, result.result("script", "ok", "MVV 判定", outputs={"mvv_gate": held}))
+
+
+def test_a_skippable_mvv_verdict_passes_the_design_gate_as_service_mvv(repo, st, env, capsys):
+    tid = _new(capsys, "standard", "--pace", "fast")
+    env.fake.script["design-mvv"] = [_mvv("design", True, [])]
+    # 省いた答えを書いた駆動はそこで止まり、答えは次の next が照合（recheck）を通してから読む
+    wrote = lanes.turn(st, tid, repo, env.env)
+    assert wrote["status"] == "ok" and wrote["next"]["argv"][2] == "next" and wrote["metrics"]["stage"] == "設計"
+    assert gate.recheck(st, tid, lambda q: gate.Target(JUDGED)) is None
+    out = lanes.turn(st, tid, repo, env.env)
+    # 設計承認ゲートは人へ問わずに通り、次に人を待つのはリリース承認ゲート（判定は省かない）
+    assert out["status"] == "gate" and out["metrics"]["stage"] == "デプロイ"
+    assert _labels(st, tid)["設計"] == "finished"
+    (answered,) = [e for e in run.read(st, tid).events if e.draft.kind == "answered"]
+    p = answered.draft.payload
+    assert (answered.draft.row_key, p["answer"], p["by"], p["step"]) == ("設計", "approved", "service:mvv", "design-gate")
+    assert p["mvv_gate"]["skip"] is True and answered.draft.actor == "conductor"
+    # 人の答えと同じく問いの id・区分・見た head を持ち、承認した head（ndf answer head）が読める
+    assert (p["gate"], p["seen"]["head"], len(p["gate_id"])) == ("design", JUDGED, model.QUESTION_ID_LENGTH)
+    assert gate.approved_head(run.read(st, tid), "design") == JUDGED
+
+
+def test_an_mvv_approval_whose_head_moved_goes_back_to_a_human(repo, st, env, capsys):
+    # 省いた答えを書いた後、読む前に PR の head が判定の head から進んだら、待ちへ戻して人へ問う（同じ判定で省き直さない）
+    tid = _new(capsys, "standard", "--pace", "fast")
+    env.fake.script["design-mvv"] = [_mvv("design", True, [])]
+    lanes.turn(st, tid, repo, env.env)  # 省いた答えを書いたところで駆動が止まる
+    moved = "b" * 40
+    why = gate.recheck(st, tid, lambda q: gate.Target(moved))
+    assert why is not None and moved in why
+    out = lanes.turn(st, tid, repo, env.env)
+    assert out["status"] == "gate" and out["metrics"]["stage"] == "設計"
+    assert [e.draft.payload["by"] for e in run.read(st, tid).events if e.draft.kind == "answered"] == ["service:mvv"]
+
+
+@pytest.mark.parametrize(
+    "held",
+    [
+        _mvv("design", False, ["レッドラインに当たる: C2・C4"]),
+        # 別の区分の承認ゲートを省くと決めた判定は、この承認ゲートを省かない
+        _mvv("release", True, []),
+    ],
+)
+def test_an_mvv_verdict_that_may_not_skip_waits_for_a_human(repo, st, env, capsys, held):
+    tid = _new(capsys, "standard", "--pace", "fast")
+    env.fake.script["design-mvv"] = [held]
+    out = lanes.turn(st, tid, repo, env.env)
+    assert out["status"] == "gate" and out["metrics"]["stage"] == "設計"
+    assert not [e for e in run.read(st, tid).events if e.draft.kind == "answered"]
+
+
+def test_the_dedicated_mvv_verdict_that_keeps_the_gate_wins_over_an_earlier_skip(repo, st, env, capsys):
+    # 先の設計のステップが省けると書いても、直前の判定がレッドラインで止めた承認ゲートは省かない
+    tid = _new(capsys, "standard", "--pace", "fast")
+    env.fake.script["design"] = [_mvv("design", True, [])]
+    env.fake.script["design-mvv"] = [_mvv("design", False, ["レッドラインに当たる: C2"])]
+    out = lanes.turn(st, tid, repo, env.env)
+    assert out["status"] == "gate" and out["metrics"]["stage"] == "設計"
+    assert not [e for e in run.read(st, tid).events if e.draft.kind == "answered"]
+
+
+def test_new_writes_the_approved_mvv_reference_into_the_context(repo, st, capsys):
+    (repo / ".ndf").mkdir()
+    sha = "a" * 64
+    (repo / ".ndf" / "mvv.json").write_text(json.dumps({"versions": [{"version": 1, "sha256": "b" * 64}, {"version": 2, "sha256": sha}]}))
+    tid = _new(capsys)
+    assert run.read(st, tid).context()["mvv_ref"] == sha
 
 
 def test_answer_is_refused_where_nothing_waits(repo, st, env, capsys):
@@ -488,7 +570,8 @@ def test_a_step_naming_an_unknown_mode_is_refused():
     docs = {
         p.stem: contracts.load_json(f"workflow/stages/{p.name}") for p in (contracts.contracts_dir() / "workflow/stages").glob("*.json")
     }
-    docs["design"]["do"][2]["design-gate"]["metadata"]["ndf"]["modes"] = ["heavy"]
+    gate = next(step["design-gate"] for step in docs["design"]["do"] if "design-gate" in step)
+    gate["metadata"]["ndf"]["modes"] = ["heavy"]
     with pytest.raises(definition.WorkflowDefError, match="heavy は定義の無いモード"):
         definition.build(contracts.load_json("workflow/modes/standard.json"), docs)
 
@@ -542,12 +625,12 @@ def test_replace_section_is_idempotent_and_keeps_the_rest():
 
 
 def test_retry_delay_follows_the_cause_table():
-    assert run.retry_delay(causes.cause("transient", "x"), 0) == 2.0
-    assert run.retry_delay(causes.cause("transient", "x"), 5) is None
-    assert run.retry_delay(causes.cause("test_failed", "x"), 0) is None
-    assert run.retry_delay(causes.cause("usage_limit", "x"), 0) is None
-    assert run.retry_delay(causes.cause("usage_limit", "x", retry_after=30), 0) == 30.0
-    assert run.retry_delay(None, 0) is None
+    assert causes.retry_delay(causes.cause("transient", "x"), 0) == 2.0
+    assert causes.retry_delay(causes.cause("transient", "x"), 5) is None
+    assert causes.retry_delay(causes.cause("test_failed", "x"), 0) is None
+    assert causes.retry_delay(causes.cause("usage_limit", "x"), 0) is None
+    assert causes.retry_delay(causes.cause("usage_limit", "x", retry_after=30), 0) == 30.0
+    assert causes.retry_delay(None, 0) is None
 
 
 def test_cli_next_launches_the_work_in_another_process(repo, capsys):

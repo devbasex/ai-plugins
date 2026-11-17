@@ -399,3 +399,87 @@ def test_human_merge_record_is_written_once_by_the_land_writer() -> None:
     assert lander.land(7).merged and lander.land(7).merged
     records = [c.body for c in hub.comments(7) if trail.HUMAN_MARK in c.body]
     assert len(records) == 1 and H1 in records[0]
+
+
+# --- 現状固定: ruleset_mismatch の全経路（I-005 のリファクタリングの前に今の出力を記録する） -------------------------
+
+
+def _decl(kind: str, merge: dict[str, Any] | None = None, approval: dict[str, Any] | None = None) -> Strategy:
+    sec = section(kind)
+    sec["merge"].update(merge or {})
+    sec["approval"].update(approval or {})
+    return Strategy(sec)
+
+
+def _row(key: str, declared: Any, ruleset: str) -> dict[str, Any]:
+    return {"key": key, "declared": declared, "ruleset": ruleset}
+
+
+@pytest.mark.parametrize(
+    ("kind", "merge", "approval", "kw", "expected"),
+    [
+        # ruleset が無い: merge-queue の宣言だけが食い違い（キューの有無は見ない）
+        ("web-develop", {}, {}, {"present": False}, []),
+        (
+            "plugin",
+            {},
+            {},
+            {"present": False, "queue": True},
+            [_row("merge.method", "merge-queue", "ruleset が無い（merge queue が無い）")],
+        ),
+        ("web-develop", {}, {"via": "review"}, {"present": False}, []),
+        # キューの有無と宣言の食い違い
+        ("web-develop", {}, {}, {"queue": True}, [_row("merge.method", "direct", "merge queue あり")]),
+        ("plugin", {}, {}, {"queue": False, "queue_merge_method": "SQUASH"}, [_row("merge.method", "merge-queue", "merge queue なし")]),
+        # キューの取り込み方（大文字小文字を問わない）
+        ("plugin", {}, {}, {"queue": True, "queue_merge_method": "merge"}, []),
+        ("web-trunk", {}, {}, {"queue": True}, []),
+        (
+            "web-trunk",
+            {},
+            {},
+            {"queue": True, "queue_merge_method": "MERGE"},
+            [_row("merge.commit", "squash", "merge queue の取り込み方 merge")],
+        ),
+        # strict と最新の取り込み
+        ("docs", {}, {}, {"up_to_date": True}, []),
+        (
+            "docs",
+            {},
+            {},
+            {"queue": True, "approvals": 1},
+            [
+                _row("merge.method", "strict", "merge queue あり"),
+                _row("merge.method", "strict", "最新の取り込みを求めない"),
+                _row("approval.via", "gate", "承認の数 1"),
+            ],
+        ),
+        # admin は承認の数を比べず、迂回の可否だけを見る
+        ("web-develop", {"admin": True}, {}, {"approvals": 3}, [_row("merge.admin", True, "迂回の可否 None")]),
+        ("web-develop", {"admin": True}, {}, {"bypass": "never"}, [_row("merge.admin", True, "迂回の可否 never")]),
+        ("web-develop", {"admin": True}, {}, {"bypass": "always"}, []),
+        ("web-develop", {"admin": True}, {"via": "review"}, {"bypass": "always"}, []),
+        (
+            "docs",
+            {"admin": True},
+            {},
+            {"bypass": "exempt", "approvals": 2},
+            [_row("merge.method", "strict", "最新の取り込みを求めない"), _row("merge.admin", True, "迂回の可否 exempt")],
+        ),
+        # 承認の経路
+        ("web-develop", {}, {}, {"approvals": 1}, [_row("approval.via", "gate", "承認の数 1")]),
+        ("web-develop", {}, {"via": "review"}, {"approvals": 0}, [_row("approval.via", "review", "承認の数 0")]),
+        ("web-develop", {}, {"via": "review"}, {"approvals": 1}, []),
+        # 複数の食い違いは見つけた順に並ぶ
+        (
+            "plugin",
+            {},
+            {},
+            {"queue": False, "approvals": 2, "queue_merge_method": "SQUASH"},
+            [_row("merge.method", "merge-queue", "merge queue なし"), _row("approval.via", "gate", "承認の数 2")],
+        ),
+    ],
+)
+def test_ruleset_mismatch_current_behavior(kind: str, merge: dict, approval: dict, kw: dict, expected: list) -> None:
+    """現状固定（I-005）。根拠は仕様ではなく今の出力で、行の中身と並びの両方を固定する。"""
+    assert land.ruleset_mismatch(_decl(kind, merge, approval), facts(**kw)) == expected
