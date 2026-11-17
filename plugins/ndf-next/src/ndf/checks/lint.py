@@ -40,16 +40,25 @@ def scan(sources: list[Source], rules: dict[str, Any]) -> dict[Path, list[tuple[
     """ファイルごとの `(行, 規則)`。ruff を起動できない・結果を読めないときは `CheckError`。"""
     if not sources:
         return {}
+    return collect(run_ruff(rules, [s.path for s in sources]), sources)
+
+
+def run_ruff(rules: dict[str, Any], paths: list[Path]) -> list[dict[str, Any]]:
+    """ruff を起動し、JSON の結果（指摘の並び）を返す。起動できない・止まった・読めないときは `CheckError`。"""
     try:
-        done = subprocess.run(command(rules, [s.path for s in sources]), capture_output=True, text=True, check=False)
+        done = subprocess.run(command(rules, paths), capture_output=True, text=True, check=False)
     except OSError as exc:
         raise CheckError(f"ruff を起動できない: {exc}") from exc
     if done.returncode not in (0, EXIT_FOUND):
         raise CheckError(f"ruff が終了コード {done.returncode} で止まった: {done.stderr.strip()[:300]}")
     try:
-        found = json.loads(done.stdout)
+        return json.loads(done.stdout)
     except ValueError as exc:
         raise CheckError(f"ruff の結果を読めない: {exc}") from exc
+
+
+def collect(found: list[dict[str, Any]], sources: list[Source]) -> dict[Path, list[tuple[int, str]]]:
+    """ruff の指摘をファイルごとの `(行, 規則)` へまとめる。`except` の見出しの行は `except` の行へ寄せる。"""
     by_path = {s.path.resolve(): s for s in sources}
     headers: dict[Path, dict[int, int]] = {}
     hits: dict[Path, list[tuple[int, str]]] = defaultdict(list)
