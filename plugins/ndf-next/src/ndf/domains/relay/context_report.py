@@ -206,10 +206,10 @@ def session_parts(sid: str, transcript: Optional[str], marks: list[dict[str, Any
     _add_ledger(parts[identity.FINAL_NAME], sid, transcript, scope, windows)
     for b, ts in times.items():
         parts[b]["seconds"] += busy_seconds(ts)
-    restored = [c for c in calls if restore_end is not None and c["ts"] is not None and c["ts"] <= restore_end]
+    restored = cr.restore_sample(calls, restore_end)
     return {
         "parts": parts,
-        "restore": {"context": restored[-1]["context"], "calls": len(restored)} if restored else None,
+        "restore": None if restored is None else {"context": restored[0], "calls": restored[1]},
         "compacts": None if compacts is None else sum(1 for at in compacts if _within(at, windows)),  # 作業の区間の圧縮だけ
         "restore_known": not by_next or restore_end is not None,
         "handoff_known": handoff_from is not None,

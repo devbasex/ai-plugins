@@ -340,7 +340,7 @@ def mark_bounds(marks: list[dict[str, Any]], by_next: bool) -> tuple[Optional[fl
     return (restored[0] if by_next and restored else None), (handoffs[-1] if handoffs else None)
 
 
-def _restore_sample(calls: list[dict[str, Any]], restore_end: Optional[float]) -> Optional[tuple[int, int]]:
+def restore_sample(calls: list[dict[str, Any]], restore_end: Optional[float]) -> Optional[tuple[int, int]]:
     """引継ぎ文書で始まり復元の印があるセッションの、最初の復元までの (直前のコンテキスト量, 呼び出し数)。"""
     if restore_end is None:
         return None
@@ -383,7 +383,7 @@ def _sampled(sessions: Mapping[str, Any], cache: Mapping[str, Any], by_session: 
         calls, _, by_next = cache[sid]
         marks = by_session[sid] if sid in by_session else []
         restore_end, handoff_from = mark_bounds(marks, by_next)
-        restore = _restore_sample(calls, restore_end)
+        restore = restore_sample(calls, restore_end)
         if restore is not None:
             acc["restore_context"].append(restore[0])
             acc["restore_calls"].append(restore[1])
