@@ -18,7 +18,7 @@ NDF が読む環境変数と、NDF が子のプロセスへ渡す環境変数で
 | `GITHUB_EVENT_PATH` | ci | path | — | GitHub Actions の事象の JSON。検査が PR 本文を読む | 内部（予告なく変えてよい） |
 | `GITHUB_REPOSITORY` | ci | string | — | GitHub Actions が渡す owner/repo | 内部（予告なく変えてよい） |
 | `GIT_ASKPASS` | user | path | — | git の認証の問い合わせ先。VS Code の窓の中の値は窓を閉じると固まるため、中継が起動するセッションへ渡さない | 内部（予告なく変えてよい） |
-| `GOOGLE_WORKSPACE_CLI_TOKEN` | user | string | 秘密 | gws（Google Workspace の CLI）へ渡すトークン。あれば gws の認証の確かめは、gws auth status が auth_method: none を返しても認証済みとする。無ければ gws auth status の credential_source で決める | 内部（予告なく変えてよい） |
+| `GOOGLE_WORKSPACE_CLI_TOKEN` | user | string | 秘密 | gws（Google Workspace の CLI）へ渡すトークン。あれば gws の認証の確かめは、gws auth status が auth_method: none を返しても認証済みとする。無ければ gws auth status で決め、credential_source が none のときと、client_secret.json で auth_method が none のときだけ未認証とする | 内部（予告なく変えてよい） |
 | `HOME` | user | path | — | 利用者のホームディレクトリ。worktree の書き込み先の判定が ~ で始まるパスを解くときと、学習の結果のキャッシュの保存先を求めるときに読む。無ければ ~ を空として解く | 内部（予告なく変えてよい） |
 | `KIRO_AGENT` | runtime | string | — | Kiro のエージェントの名前（ホストの推定） | 内部（予告なく変えてよい） |
 | `KIRO_PLUGIN_ROOT` | runtime | path | — | Kiro のプラグインの根（ホストの推定） | 内部（予告なく変えてよい） |

@@ -15,7 +15,7 @@ import pytest
 from ndf.contracts import limits
 from ndf.domains.gws import report_decide as rd
 
-from . import Fakes, assert_routes, run_gws, status_rule
+from . import UNAUTHENTICATED_SOURCES, Fakes, assert_routes, run_gws, status_rule
 
 PID = "pres-1"
 GET = ["slides", "presentations", "get"]
@@ -74,7 +74,7 @@ def test_bad_arguments_return_2(fakes: Fakes, capsys, last_result, argv: list[st
     assert (code, got["cause"]["kind"]) == (2, "invalid")
 
 
-@pytest.mark.parametrize("source", ["none", "client_secret.json"], ids=["no-token", "client-secret-only-2067"])
+@pytest.mark.parametrize("source", UNAUTHENTICATED_SOURCES)
 def test_unauthenticated_returns_11(fakes: Fakes, tmp_path: Path, capsys, last_result, source: str) -> None:
     fakes.add("gws", [status_rule(source), {"prefix": GET, "code": 1, "err": "401 Unauthorized\n"}])
     fakes.add("curl", _curl())
@@ -95,6 +95,13 @@ def test_gws_failure_stops_with_1_and_shows_the_tail(fakes: Fakes, tmp_path: Pat
     assert (code, got["cause"]["kind"], got["items"][0]["result"]) == (1, "unknown", "gws-failed")
     detail = got["items"][0]["detail"].splitlines()
     assert len(detail) == rd.DETAIL_LINES and detail[-1] == "e29"
+
+
+def test_gws_failure_when_logged_in_stops_with_1_not_11(fakes: Fakes, tmp_path: Path, capsys, last_result) -> None:
+    fakes.add("gws", [status_rule("client_secret.json", "oauth2"), {"prefix": GET, "code": 1, "err": "boom\n"}])
+    fakes.add("curl", _curl())
+    code, got = run_gws(capsys, last_result, "thumbnails", PID, str(tmp_path / "out"))
+    assert (code, got["status"], got["items"][0]["result"]) == (1, "stopped", "gws-failed")
 
 
 @pytest.mark.parametrize("status", [{"prefix": AUTH, "code": 1}, {"prefix": AUTH, "sleep": 10}], ids=["exit-1", "over-the-limit"])

@@ -15,7 +15,6 @@ PostgreSQL を入れてある（サービスは止まっている）。手元に
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 from collections.abc import Callable
@@ -24,6 +23,7 @@ from pathlib import Path
 
 import postgres_server
 import pytest
+import result_json
 
 from ndf import cli
 from ndf.checks import spec_model
@@ -144,12 +144,7 @@ def start_postgres() -> Callable[[pytest.TempPathFactory], AbstractContextManage
     return postgres_server.start_postgres
 
 
-def _last_result(stdout: str) -> dict:
-    """標準出力の最後の 1 行（前後の空白を除いた後）を結果 JSON として読む。"""
-    return json.loads(stdout.strip().splitlines()[-1])
-
-
 @pytest.fixture
 def last_result():
     """標準出力の最後の 1 行を結果 JSON として読む関数（`last_result(stdout)`）。"""
-    return _last_result
+    return result_json.last_result

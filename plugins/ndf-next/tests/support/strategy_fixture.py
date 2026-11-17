@@ -1,7 +1,7 @@
 """代表のリポジトリ 5 種のブランチ戦略の設定（`tests/fixtures/branch_strategy/`）を読み、テストのリポジトリへ置く補助。
 
 5 種の設定は 1 か所にあり、10 系のテスト（`plugins/ndf/scripts/tests/strategy_fixture.py`）も同じファイルを読む。
-11 系の project（`domains/project/test_branch_strategy_cmd.py`）と release（`domains/release/_fakes.py`）のテストも、
+11 系の project（`domains/project/test_branch_strategy_*.py`）と release（`domains/release/_fakes.py`）のテストも、
 設定の読み込みを持たずにここの `FIX`・`KINDS`・`section` を使う。
 `EXPECTED` は 10 系の `lib/branch_strategy.py` が同じ設定から返す PR のマージ先とスプリントの起点（#3681 の受け入れ条件 1）。
 """

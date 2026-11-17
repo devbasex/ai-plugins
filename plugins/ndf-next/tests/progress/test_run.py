@@ -15,6 +15,7 @@ from types import SimpleNamespace
 import git_sandbox
 import pytest
 import strategy_fixture
+from result_json import last_result
 
 from ndf import contracts
 from ndf.adapters.github import GitHubError
@@ -38,7 +39,7 @@ lanes = _load_lanes()
 
 def _main(capsys, fn, *argv: str) -> tuple[int, dict]:
     code = fn(list(argv))
-    return code, json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    return code, last_result(capsys.readouterr().out)
 
 
 def _new(capsys, mode: str = "standard", *extra: str) -> str:
