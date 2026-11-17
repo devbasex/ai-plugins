@@ -170,8 +170,8 @@ plugins/ndf-next/
 | `since_decide.until_of` | `plugins/ndf-next/src/ndf/domains/release/since_decide.py` | 新設 | `until_of(kind: SpanKind, base_head: str, production_head: str, units_head: str \| None, pr_head: str \| None) -> str` | 範囲の終点を範囲の取り方から決める | `units` では `units_head`、`pr` では `pr_head` が空でない | 設計文書の「処理の流れ」の終点の表のとおり | 無し |
 | `version_store.load` | `plugins/ndf-next/src/ndf/domains/release/version_store.py` | 新設 | `load(root: Path, strategy: Strategy, repo_name: str) -> VersionStore` | 設定の保存先の種類から 1 つのアダプターを作る（I2） | `root` は範囲の終点を取り出した作業場所 | 返るアダプターの `kind` は設定の種類 | 無し |
 | `version_store.tags_at` | `plugins/ndf-next/src/ndf/domains/release/version_store.py` | 新設 | `tags_at(git: Git, ref: str) -> list[str]` | `ref` から辿れるタグの名前を並べる | タグを手元へ取得済み（`gather.fetch_tags`） | 名前の一覧（順は不定） | 外部コマンド `git tag --list --merged` |
-| `version_store.pubspec_version` | `plugins/ndf-next/src/ndf/domains/release/version_store.py` | 新設 | `pubspec_version(text: str) -> str \| None` | `pubspec.yaml` の最上位の `version:` の行の `+` の前を読む | 無し | 行が無ければ `None` | 無し |
-| `version_store.pubspec_replace` | `plugins/ndf-next/src/ndf/domains/release/version_store.py` | 新設 | `pubspec_replace(text: str, new: str) -> str` | 最上位の `version:` の行だけを置き換え、数のビルド番号を 1 つ上げる（決定 3） | 行が 1 つある | ほかの行は 1 文字も変わらない。数でないビルド番号はそのまま残る | 無し |
+| `version_store.pubspec_version` | `plugins/ndf-next/src/ndf/domains/release/version_store.py` | 新設 | `pubspec_version(text: str) -> str \| None` | `pubspec.yaml` の最上位の `version:` の行の値を読み、`+` があればその前を返す（ビルド番号は任意） | 無し | 行が無ければ `None`。`version: 1.2.3` は `1.2.3` | 無し |
+| `version_store.pubspec_replace` | `plugins/ndf-next/src/ndf/domains/release/version_store.py` | 新設 | `pubspec_replace(text: str, new: str) -> str` | 最上位の `version:` の行だけを置き換え、数のビルド番号を 1 つ上げる（決定 3） | 行が 1 つある | ほかの行は 1 文字も変わらない。数でないビルド番号はそのまま残る。ビルド番号が無ければ付けない | 無し |
 | `PluginStore.units` | `plugins/ndf-next/src/ndf/domains/release/version_store.py` | 新設 | `units(self) -> list[Unit]` | マーケットプレイスの登録のプラグインを単位にする | 作業場所に登録がある | 登録の順 | ファイル（登録の読み） |
 | `PluginStore.read` | `plugins/ndf-next/src/ndf/domains/release/version_store.py` | 新設 | `read(self, git: Git, ref: str, unit: Unit) -> str \| None` | `ref` のプラグインの定義のバージョンを読む | `ref` が解決できる | 定義が無ければ `None` | 外部コマンド `git ls-tree`・`git show` |
 | `PluginStore.write` | `plugins/ndf-next/src/ndf/domains/release/version_store.py` | 新設 | `write(self, unit: Unit, new: str) -> list[str]` | 今の `plugins.bump` で定義・登録の説明・`files` を書き換える | 作業場所はリリースブランチ | 書き換えたパスを返す | ファイル（書き換え） |
@@ -204,7 +204,7 @@ plugins/ndf-next/
 | `assemble._facts` | `plugins/ndf-next/src/ndf/domains/release/assemble.py` | 変更 | `_facts(root: Path, hub: GitHub, target: Target, strategy: Strategy, since: str \| None, until: str) -> Facts` | 作業場所から承認資料の材料を読む | 作業場所の HEAD は `until` | `planned` の各行に範囲の起点がある。バージョンを持つ保存先で上げるものが無ければ `NothingToRelease` | 外部コマンド（git）・ネットワーク（PR の題と CI） |
 | `assemble.collect` | `plugins/ndf-next/src/ndf/domains/release/assemble.py` | 変更 | `collect(root: Path, hub: GitHub, target: Target, strategy: Strategy) -> Facts` | ブランチを残さずに承認資料の材料を組む。`units` は一時の作業場所で組む | 形は扱う形 | 手元のブランチ・作業場所は呼ぶ前と同じ | 外部コマンド（git）・ファイル（一時ディレクトリ）・ネットワーク |
 | `assemble.assemble` | `plugins/ndf-next/src/ndf/domains/release/assemble.py` | 変更 | `assemble(root: Path, hub: GitHub, target: Target, strategy: Strategy) -> Built` | リリース方式に合わせてリリースブランチを組み、PR を作る | 形は扱う形 | リモートにリリースブランチと PR がある。`pr` の取り方では `NoReleasePr` | 外部コマンド（git）・ネットワーク（PR の作成と本文） |
-| `tagging._tag` | `plugins/ndf-next/src/ndf/domains/release/tagging.py` | 変更 | `_tag(hub: GitHub, tag: str, revision: str) -> Made` | タグが無ければ作り、あれば指す先を比べる（決定 12） | 無し | タグは `revision` を指す | ネットワーク（ref の読みと作成） |
+| `tagging._tag` | `plugins/ndf-next/src/ndf/domains/release/tagging.py` | 変更 | `_tag(hub: GitHub, tag: str, revision: str) -> Made` | タグが無ければ作り、あればコミットまでたどった指す先を比べる（決定 12）。ref の `object.type` が `tag`（注釈付きタグ）なら `git/tags/{object.sha}` を読んでコミットまでたどり、`commit` ならその `object.sha` を使う | 無し | タグは `revision` を指す | ネットワーク（ref とタグオブジェクトの読み、作成） |
 | `tagging._released` | `plugins/ndf-next/src/ndf/domains/release/tagging.py` | 変更 | `_released(git: Git, store: VersionStore, hub: GitHub, formats: NameFormats, revision: str) -> list[tuple[Unit, str]]` | そのコミットで出したバージョンを保存先から求める（決定 2） | 無し | 接尾辞の無いバージョンだけを返す | 外部コマンド（git）・ネットワーク（`_released_by_branch` を通る） |
 | `tagging._released_by_branch` | `plugins/ndf-next/src/ndf/domains/release/tagging.py` | 新設 | `_released_by_branch(hub: GitHub, formats: NameFormats, revision: str) -> str \| None` | コミットに結び付いたマージ済みの PR の head の名前をブランチの書式で読む | 無し | 結び付いた PR が無いか書式に合わなければ `None` | ネットワーク（コミットの PR の読み） |
 | `tagging.publish` | `plugins/ndf-next/src/ndf/domains/release/tagging.py` | 変更 | `publish(root: Path, hub: GitHub, revision: str, strategy: Strategy) -> list[Made]` | 形を確かめ、出したバージョンのタグと（設定が真なら）GitHub Release を作る | 形は扱う形 | 書式が `None` なら空。作るタグと Release は 1 件ずつ結果に並ぶ | ネットワーク（ref と Release の作成）・ファイル（CHANGELOG の読み） |
@@ -287,7 +287,7 @@ plugins/ndf-next/
 | `assemble.assemble` | 同じ名前のリリースブランチがある | 前の組み立てが残っている | `git ls-remote --heads` | 止める（`AssembleError`） | `precondition`（I6） | 何も書いていない。前の PR を片付けて再実行できる |
 | `assemble.assemble` | 別のリリースの PR が開いている | 同じリポジトリの別の組み立て | `open_releases` | 止める（`ReleaseOpen`） | `refused`（今と同じ） | 何も書いていない |
 | `assemble.assemble` | PR を作れない | 権限・同じ head の PR | REST の失敗 | 呼び出し元へ返す（`GitHubError`） | `unknown` か `infra_wait` | ブランチはリモートに残る。PR を手で作るかブランチを消して再実行する |
-| `tagging._tag` | タグが別のコミットを指す | 前の操作の誤り・保存先 `tag` の衝突 | 既存の ref の `object.sha` と `revision` の比べ | 止める（`TagMoved`） | `refused`。タグ・今の指す先・出したコミット（I7） | タグは動かさない。人が直した後に再実行できる |
+| `tagging._tag` | タグが別のコミットを指す | 前の操作の誤り・保存先 `tag` の衝突 | 既存の ref をコミットまでたどった SHA と `revision` の比べ（注釈付きタグはタグオブジェクトの `object.sha`。ref の `object.sha` を直接比べない） | 止める（`TagMoved`） | `refused`。タグ・今の指す先・出したコミット（I7） | タグは動かさない。人が直した後に再実行できる |
 | `tagging._released` | 結び付いた PR が無い | 保存先 `tag` で、リリースの PR を通らないコミット | `_released_by_branch` が `None` | 既定で続ける（空） | `publish` が `not_applicable` | 何も書いていない |
 | `tagging._released_by_branch` | PR の読みの失敗 | ネットワーク | REST の失敗 | 呼び出し元へ返す（`GitHubError`） | `unknown` か `infra_wait` | 何も書いていない。再実行できる |
 | `tagging.publish` | タグの書式が無い | 設定の `tag` が `null` | `formats.tag` | 既定で続ける（空） | `not_applicable`。タグを作らない設定と出す | 何も書いていない |
@@ -344,8 +344,8 @@ plugins/ndf-next/
 | 関数 | 条件の組み合わせ | 結果 |
 | --- | --- | --- |
 | `tagging._tag` | タグが無い | 作る（`created`） |
-| `tagging._tag` | タグがあり `revision` を指す | `exists` |
-| `tagging._tag` | タグがあり別のコミットを指す | `TagMoved` で止まる |
+| `tagging._tag` | タグがあり、コミットまでたどった先が `revision`（軽量タグ・注釈付きタグのどちらも） | `exists` |
+| `tagging._tag` | タグがあり、コミットまでたどった先が別のコミット | `TagMoved` で止まる |
 
 `assemble` の分岐:
 
@@ -489,8 +489,8 @@ plugins/ndf-next/
 | `since_decide.until_of` | 判定表の 4 行 | — | — |
 | `version_store.load` | 5 つの種類でそのクラス | `KINDS` とスキーマの `oneOf` の種類が一致 | 表に無い種類で `StoreError` |
 | `version_store.tags_at` | 辿れるタグだけを返す | 別のブランチだけにあるタグを返さない | 無い ref で `GitError` |
-| `version_store.pubspec_version` | `version: 1.2.3+45` で `1.2.3` | `+` の無い行・インデントのある `version:`（最上位でない）を読まない | 行が無いと `None` |
-| `version_store.pubspec_replace` | `1.2.3+45` を `1.2.4+46` に | 数でないビルド番号はそのまま。コメントの行が 1 文字も変わらない | 行が 2 つで `StoreError` |
+| `version_store.pubspec_version` | `version: 1.2.3+45` で `1.2.3` | `+` の無い `version: 1.2.3` も `1.2.3` と読む。インデントのある `version:`（最上位でない）は読まない | 行が無いと `None` |
+| `version_store.pubspec_replace` | `1.2.3+45` を `1.2.4+46` に | `1.2.3` を `1.2.4` に（ビルド番号を付けない）。数でないビルド番号はそのまま。コメントの行が 1 文字も変わらない | 行が 2 つで `StoreError` |
 | `PluginStore.units` | 登録の順で単位が並ぶ | 根に置いたプラグイン（`dir` が空） | 登録が無いと `PluginsError` |
 | `PluginStore.paths` | 登録・定義・`files` が並ぶ | — | 登録が無いと `PluginsError` |
 | `PluginStore.read` | ref のバージョン | 定義が無い ref で `None` | 壊れた定義で `PluginsError` |
@@ -518,7 +518,7 @@ plugins/ndf-next/
 | `assemble._facts` | 単位ごとの起点を持つ計画 | 保存先 `none` で計画が空でも資料を組む | バージョンを持つ保存先で上げるものが無いと `NothingToRelease` |
 | `assemble.collect` | Web・Flutter・Swift・業務文書・nd-factory のコピーで `ok`（受け入れ条件 2〜4・12） | 呼ぶ前と後で手元のブランチと作業場所が同じ | `desktop` で `precondition`（受け入れ条件 13）。一時の作業場所の失敗で `UnitsError` |
 | `assemble.assemble` | ai-plugins の設定で名前が直す前と同じ（I9）。`json`・`pubspec` で保存先が書き換わる（受け入れ条件 4） | 保存先 `tag` で空のコミットの PR | 同じ名前のブランチで `AssembleError`（I6）。`pr` の取り方で `NoReleasePr` |
-| `tagging._tag` | 無ければ `created` | 同じコミットなら `exists` | 別のコミットなら `TagMoved`（I7） |
+| `tagging._tag` | 無ければ `created` | 同じコミットなら `exists`。注釈付きタグ（ref が `type=tag, sha=T`、タグオブジェクト T が `type=commit, sha=C`）で `revision=C` なら `exists`、別のコミット D なら `TagMoved`。軽量タグも同じ表で見る | 別のコミットなら `TagMoved`（I7） |
 | `tagging._released` | ファイルを持つ保存先で値の変わった単位 | 接尾辞付きを除く | 保存先 `tag` で結び付いた PR が無いと空 |
 | `tagging._released_by_branch` | head の名前のバージョン | 書式に合わない head で `None` | REST の失敗で `GitHubError` |
 | `tagging.publish` | `v1.2.3` のタグを作る（受け入れ条件 5） | `tag` が `null` で空 | `desktop` で `FormUnsupported` |
