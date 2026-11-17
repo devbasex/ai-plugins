@@ -96,6 +96,12 @@ class Target:
         """リモートのブランチの参照（`<remote>/<name>`）。"""
         return f"{self.remote}/{name}"
 
+    def required_units(self) -> tuple[str, ...]:
+        """`release_branch` の設定で集めるスプリントブランチ。空なら `AssembleError`。"""
+        if not self.units:
+            raise AssembleError(_UNITS_REQUIRED)
+        return self.units
+
 
 @dataclass(frozen=True)
 class Built:
@@ -150,12 +156,6 @@ def _span(repo_git: git_mod.Git, target: Target, kind: SpanKind, hub: GitHub) ->
     if done.returncode != 0:
         raise git_mod.GitError(f"{target.remote} の #{target.pr} の先頭を取得できない: {done.stderr.strip()}")
     return head, repo_git.merge_base(target.ref(target.production), head)
-
-
-def _require_units(target: Target) -> None:
-    """`release_branch` の設定で集めるスプリントブランチが無ければ `AssembleError`。"""
-    if not target.units:
-        raise AssembleError(_UNITS_REQUIRED)
 
 
 @contextmanager
@@ -288,10 +288,10 @@ def collect(root: Path, hub: GitHub, target: Target, strategy: Strategy) -> mate
     setting = _setting(strategy)
     repo_git = git_mod.Git(root)
     if setting.kind == SpanKind.UNITS:
-        _require_units(target)
+        selected = target.required_units()
         with (
             _units_errors(),
-            units.scratch(repo_git, target.remote, target.production, target.units, _provisional(setting.formats)) as made,
+            units.scratch(repo_git, target.remote, target.production, selected, _provisional(setting.formats)) as made,
         ):
             return _facts(made.path, hub, target, setting, made.head, None)[0]
     until, fork = _span(repo_git, target, setting.kind, hub)
@@ -314,7 +314,7 @@ def assemble(root: Path, hub: GitHub, target: Target, strategy: Strategy) -> Bui
         )
     repo_git = git_mod.Git(root)
     if setting.kind == SpanKind.UNITS:
-        _require_units(target)
+        target.required_units()
         until, fork = _build_units(repo_git, target, _provisional(setting.formats)), None
     else:
         until, fork = _span(repo_git, target, setting.kind, hub)
