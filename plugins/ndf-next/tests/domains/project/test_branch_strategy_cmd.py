@@ -243,7 +243,8 @@ def test_cli_write_completes_an_asked_result_answered_with_the_approval(tmp_path
     prior = tmp_path / "prior.json"
     prior.write_text(json.dumps(strategy_measure.measure_strategy(root, api)), encoding="utf-8")
     answers = tmp_path / "answers.json"
-    answers.write_text(json.dumps({"/branches/base": "main", "/approval/via": "review"}), encoding="utf-8")
+    # ruleset はあるが queue も up-to-date も無い trunk は取り込み方を問うので、それにも答える
+    answers.write_text(json.dumps({"/branches/base": "main", "/approval/via": "review", "/merge/method": "strict"}), encoding="utf-8")
     code, out = run_cli(capsys, root, "write", "--result", str(prior), "--answers", str(answers))
     assert code == 0 and out["status"] == "ok", out
     assert out["values"]["approval"]["via"] == "review" and bs.validate(out["values"]) == []

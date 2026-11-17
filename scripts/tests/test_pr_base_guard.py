@@ -19,7 +19,7 @@ from branch_repo_helpers import push_branch
 
 ROOT = Path(__file__).resolve().parents[2]
 GUARD = ROOT / "scripts" / "check-pr-base.sh"
-PRESETS = ROOT / "plugins" / "ndf" / "scripts" / "tests" / "fixtures" / "branch_strategy"
+PRESETS = ROOT / "plugins" / "ndf-next" / "tests" / "fixtures" / "branch_strategy"
 LIB = ROOT / "plugins" / "ndf" / "scripts" / "lib"
 
 

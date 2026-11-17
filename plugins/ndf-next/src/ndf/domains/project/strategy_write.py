@@ -126,7 +126,9 @@ def apply_answers(result: dict, answers: dict) -> dict:
     before = copy.deepcopy(values)
     for pointer, value in answers.items():
         json_pointer.put(values, pointer, value)
-        out.setdefault("evidence", []).append({"source": "answer", "ref": pointer, "value": json.dumps(value, ensure_ascii=False)})
+        out.setdefault("evidence", []).append(
+            {"source": "answer", "ref": pointer, "value": json.dumps(value, ensure_ascii=False), "pointer": pointer}
+        )
     answered = set(answers)
     out["questions"] = [q for q in seq(out.get("questions")) if q["pointer"] not in answered]
     if values.get("kind") in kinds() and any(

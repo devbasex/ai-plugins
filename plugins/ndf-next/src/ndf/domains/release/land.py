@@ -183,7 +183,7 @@ def ruleset_mismatch(strategy: Strategy, facts: RuleFacts) -> list[dict]:
 def bump_of(cut: Optional[str], head: Optional[str], prod: Optional[str], *, optional: bool) -> Optional[bool]:
     """版上げの PR か。切った時点 `cut` と `head` の版数が違えば真・同じなら偽。
 
-    `optional` は版数が任意の置き場か（`version_store.kind` が `plugin`。プラグインの定義の `version` は任意）。任意の置き場で
+    `optional` は版数が任意の置き場か（`version_store.kind` が `plugin` か `none`。プラグインの定義の `version` は任意で、`none` は版数を持たない）。任意の置き場で
     切った時点・head・本番 `prod` のどれにも版数が無ければ偽（版を上げようがない）。明示の置き場（`json` の path・pointer）で
     読めないのは宣言の誤りで、片側を読めないときと同じく None（版上げとして衝突を確かめ、版数を読めずに止まる）。"""
     if cut and head:
@@ -469,7 +469,7 @@ class Lander:
         fork = cmp.get("merge_base_commit")
         fork_sha = text_of(fork.get("sha")) if isinstance(fork, dict) else ""
         cut = self._version_at(fork_sha, rows) if fork_sha else None
-        optional = self.strategy.version_store["kind"] == "plugin"
+        optional = self.strategy.version_store["kind"] != "json"
         bump = bump_of(cut, self._version_at(head, rows), prod.get("version"), optional=optional)
         return {"number": number, "bump": bump, "cut_version": cut, "contains_tip": cmp.get("behind_by") == 0, "tip": tip}
 
