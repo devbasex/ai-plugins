@@ -97,6 +97,11 @@ def next_step(state: rec.LoopState, name: str) -> Optional[Step]:
     return _step("lap", name, session=True)
 
 
+def _decided(state: rec.LoopState, c: Ctx, summary: str, events: Sequence[dict[str, Any]], **kw: Any) -> Decision:
+    """事象 `events` を書く判断。次の 1 手は事象を当てた後の状態から引く。"""
+    return Decision(summary, tuple(events), next=next_step(rec.apply_all(state, events), c.name), **kw)
+
+
 def _lease_refusal(state: rec.LoopState, c: Ctx) -> Optional[Decision]:
     """鍵を持たないセッションの書き込みの断り。止めたループへの書き込みも断る。"""
     if state.status == rec.HALTED:
@@ -123,8 +128,7 @@ def start(state: rec.LoopState, c: Ctx, ttl: float, row: Optional[str] = None) -
     events = [rec.event(rec.LEASE_TAKEN, c.now, session=c.session, until=c.now + ttl)]
     if row is not None and state.row is None:
         events.append(rec.event(rec.ROW_BOUND, c.now, table=row))
-    after = rec.apply_all(state, events)
-    return Decision(f"ループ {c.name} の鍵を取った", tuple(events), next=next_step(after, c.name))
+    return _decided(state, c, f"ループ {c.name} の鍵を取った", events)
 
 
 def _halt_event(by: str, now: float) -> dict[str, Any]:
@@ -155,9 +159,7 @@ def open_lap(state: rec.LoopState, c: Ctx, issues: Sequence[int]) -> Decision:
         return refuse(REFUSED, f"周 {state.current.number} を締めていない", next_step(state, c.name))
     stop = _boundary(state, c)
     if stop:
-        return Decision(
-            f"止める要求があり、周を始めずにループ {c.name} を止めた", tuple(stop), next=next_step(rec.apply_all(state, stop), c.name)
-        )
+        return _decided(state, c, f"止める要求があり、周を始めずにループ {c.name} を止めた", stop)
     if not issues:
         return refuse(PRECONDITION, "選べる課題が無い", get_step(c.name))
     number = state.laps[-1].number + 1 if state.laps else 1
@@ -261,9 +263,8 @@ def answer(state: rec.LoopState, c: Ctx, pr: int, given: str, head: Optional[str
     events = [ev, rec.event(rec.LAP_CLOSED, c.now, lap=lap.number, outcome=rec.RETURNED, reason=why)]
     if state.requested is not None:
         events.append(_halt_event(state.requested.by, c.now))
-    after = rec.apply_all(state, events)
-    return Decision(f"PR #{pr} の答え {given} を記録し、周 {lap.number} を{rec.RETURNED}で締めた", tuple(events),
-                    next=next_step(after, c.name), metrics={**metrics, "lap": lap.number, "outcome": rec.RETURNED})  # fmt: skip
+    return _decided(state, c, f"PR #{pr} の答え {given} を記録し、周 {lap.number} を{rec.RETURNED}で締めた", events,
+                    metrics={**metrics, "lap": lap.number, "outcome": rec.RETURNED})  # fmt: skip
 
 
 def _closing_events(lap: rec.Lap, facts: lap_decide.LapFacts, now: float) -> list[dict[str, Any]]:
@@ -290,7 +291,7 @@ def close_lap(state: rec.LoopState, c: Ctx, facts: lap_decide.LapFacts, ttl: flo
     if lap is None:
         stop = _boundary(state, c)
         if stop:
-            return Decision(f"止める要求があり、ループ {c.name} を止めた", tuple(stop), next=next_step(rec.apply_all(state, stop), c.name))
+            return _decided(state, c, f"止める要求があり、ループ {c.name} を止めた", stop)
         return refuse(PRECONDITION, "締めていない周が無い", next_step(state, c.name))
     events = _closing_events(lap, facts, c.now)
     outcome, why = events[-1]["outcome"], events[-1]["reason"]
@@ -322,10 +323,9 @@ def stop(state: rec.LoopState, c: Ctx, by: str, reason: str, at_once: bool) -> D
     text = reason.strip() if reason.strip() else "理由の記載なし"
     events = [rec.event(rec.STOP_REQUESTED, c.now, by=by, reason=text)]
     if not at_once:
-        after = rec.apply(state, events[0])
-        return Decision(f"ループ {c.name} へ止める要求を置いた。周の境で止まる", tuple(events), next=next_step(after, c.name))
+        return _decided(state, c, f"ループ {c.name} へ止める要求を置いた。周の境で止まる", events)
     lap = state.current
     if lap is not None:
         events.append(_close_event(lap, lap_decide.LapFacts(released=lap.released, held=True), c.now)[0])
     events.append(_halt_event(by, c.now))
-    return Decision(f"ループ {c.name} を止めた（{rec.USER_STOP}）", tuple(events), next=next_step(rec.apply_all(state, events), c.name))
+    return _decided(state, c, f"ループ {c.name} を止めた（{rec.USER_STOP}）", events)
