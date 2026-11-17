@@ -27,9 +27,9 @@
 - **宣言は任意でない。** セクションが無い・スキーマに合わないときは止まり、既定値へ倒さない（`lib/branch_strategy.py` の冒頭の説明）
 - **旧いキーが残ると止まる。** 旧い 4 か所（`.ndf/worktree.json`・`.ndf/project.json`・`.ndf/supervise.json`・`.ndf/release.json`）にキーが残れば、キーの位置と移行のコマンド（`project-decl.py branch-strategy migrate`）を理由に出す（`lib/branch_strategy_legacy.py`）
 
-**旧いキーを今も読むのは、ai-plugins の本番チャネル宛の検査だけである。** `scripts/check-pr-base.sh` と
-`.github/workflows/pr-base-guard.yml` が、宛先のブランチの `.ndf/worktree.json` の `branch_flow.promotion` を読む
-（`grep -rln branch_flow scripts plugins/ndf/scripts plugins/ndf/skills .github` を、テストを除いて打った結果がこの 2 ファイルだけ）。
+**ai-plugins の本番チャネル宛の検査も新しい宣言を読む。** `scripts/check-pr-base.sh`（`.github/workflows/pr-base-guard.yml` が走らせる）は、
+宛先のブランチの `.ndf/project.json` のセクション `branch_strategy` を `lib/branch_strategy_cli.py get --ref` で読み、
+`release_strategy` の値で判定を分ける（#3672 の D27）。旧い値 `selected` は今の `release_branch` にあたる。
 
 **新しい宣言の確定仕様は、#3672 の手順 2〜5 を終えた後に作る。** それまでの正本は課題の設計
 （`issues/issue-3672-design.md` と、同じ接頭辞の `-design-detail.md`・`-design-decisions.md`・`-design-removal.md`・
