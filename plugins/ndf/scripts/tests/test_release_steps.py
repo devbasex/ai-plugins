@@ -1814,9 +1814,20 @@ def test_cd_cases_refuse_the_approved_commit_argument(monkeypatch, arg):
     assert mod.approval.approved_of(".", a, "ndf", _case("no-cd")) == "a" * 40
 
 
-def _check(monkeypatch, tmp_path, base="main", state="open", rounds=([5], [5]), role="admin", case="cd-no-review", required=()):
+def _check(
+    monkeypatch,
+    tmp_path,
+    base="main",
+    state="open",
+    rounds=([5], [5]),
+    role="admin",
+    case="cd-no-review",
+    required=(),
+    decl_base="develop",
+    head_ref="release/v1.2.3",
+):
     """approval-check を流し、(結果, 付けた状態の並び) を返す。rounds は open_prs_at が順に返す番号。required は本番チャネルの
-    ruleset の必須チェックの名前。"""
+    ruleset の必須チェックの名前。decl_base は宣言のベースブランチ（本番と同じなら trunk）、head_ref は PR の head のブランチ。"""
     import argparse
 
     mod = _release_steps_module(monkeypatch)
@@ -1824,7 +1835,8 @@ def _check(monkeypatch, tmp_path, base="main", state="open", rounds=([5], [5]), 
     posted, left = [], list(rounds)
     monkeypatch.setattr(rv, "release_case_or_stop", lambda r: _case(case))
     monkeypatch.setattr(rv, "git_root", lambda r: tmp_path)
-    monkeypatch.setattr(rv.delivery, "load_delivery", lambda r: rv.delivery.DeliveryDecl(base="develop", production="main"))
+    monkeypatch.setattr(rv.delivery, "load_delivery", lambda r: rv.delivery.DeliveryDecl(base=decl_base, production="main"))
+    monkeypatch.setattr(at, "read_head_ref", lambda repo, n: head_ref)
     monkeypatch.setattr(rv, "repo_or_stop", lambda r: "o/r")
     monkeypatch.setattr(at, "read_head", lambda repo, n: (HEAD, base, state))
     monkeypatch.setattr(at, "open_prs_at", lambda repo, sha, b: left.pop(0) if len(left) > 1 else left[0])
@@ -1853,6 +1865,15 @@ def test_approval_check_fails_for_write_role_and_skips_other_bases(monkeypatch, 
     assert posted == ["failure"]
     out, posted = _check(monkeypatch, tmp_path, base="develop")
     assert posted == [] and out["status"] == "ok"
+
+
+def test_approval_check_on_trunk_judges_only_the_version_bump_pr(monkeypatch, tmp_path):
+    """trunk（ベースと本番が同じ）では、スプリントの PR も本番宛てになる。証跡を見るのは版上げの PR（release/v<版>）だけで、
+    ほかの PR には何も付けない（付けると証跡が無い failure でスプリントのマージが止まる）。"""
+    out, posted = _check(monkeypatch, tmp_path, decl_base="main", head_ref="spec/aifac-1")
+    assert posted == [] and out["status"] == "ok" and out["metrics"]["head_ref"] == "spec/aifac-1"
+    out, posted = _check(monkeypatch, tmp_path, decl_base="main", head_ref="release/v10.28.0")
+    assert posted == ["success"]
 
 
 def test_approval_check_posts_nothing_for_cd_review(monkeypatch, tmp_path):
