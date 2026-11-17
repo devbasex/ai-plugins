@@ -30,6 +30,8 @@
 
 #3572 の保存先のアダプター（決定 22）は、マージしていないブランチ `sprint/lrel-lock` にだけあり、main には無い（`git ls-tree origin/main plugins/ndf-next/src/ndf/domains/release/` に `version_store.py` が無い。2026-11-17）。並列の計画 p8 では #3572 の残り（レーン lr-rel-rest）がこの課題の後に流れる。そのため、インタフェースは決定 22 の 4 つのメソッド（`units`・`read`・`write`・`paths`）のまま、この課題が main に置く。
 
+保存先の設定は、前提 2 に従い `.ndf/project.json` の `branch_strategy.release.version_store` から読む。決定 22 は同じキーを `.ndf/release.json` に置くとしており、前提 2 と前提 3 はこの点で両立しない。main の設定のスキーマは #3681 で既に `branch_strategy.release.version_store` を持つため、この設計は前提 2 の側を採り、ブランチの実装との突き合わせの結果（設計文書の「未確認のまま残ること」）を lr-rel-rest が合わせる。この読み方は設計文書の「人へ残す判断」の 4 に載せた。
+
 | 種類 | バージョンの単位 | 読む | 書く | 書き換えてよいパス |
 | --- | --- | --- | --- | --- |
 | `plugin` | マーケットプレイスの登録の各プラグイン | ref のプラグインの定義の `version` | 今の `plugins.bump`（定義・登録の説明・`files`） | 登録・定義・`files` |
@@ -64,6 +66,8 @@
 
 要求の未決 3 の回答である。置き換えの語は今の `release.tag` の `{plugin}`・`{version}` に合わせ、CHANGELOG の見出しだけ `{date}`（`YYYY-MM-DD`）を足す。キーが無いときの既定は今の形（`release/v{version}`・`## [{plugin} {version}] - {date}`）である。`tag` は今のスキーマで必須のキーで、`null` はタグを作らないことを表すため、既定を持たせない（ai-plugins は `{plugin}--v{version}` を書いている）。
 
+そのため、受け入れ条件 7 の「名前の書式の設定が無いとき、タグは今の形」のうちタグの部分は、「設定が無い」場合が起きない。タグの部分は、ai-plugins の設定の値 `{plugin}--v{version}` で今の形 `<プラグイン>--v<バージョン>` になることで満たすと読む。リリースブランチと CHANGELOG の見出しは、キーが無いとき既定で今の形になる。この読み方は設計文書の「人へ残す判断」の 5 に載せた。
+
 名前を読み戻すときは、書式の置き換えの語の外を正規表現の文字としてエスケープし、`{version}` を SemVer の形、`{plugin}` をその単位の名前、`{date}` を日付の形に置き換えた全体一致で読む（I3）。CHANGELOG のセクションは、見出しの書式から `{date}` 以降を除いた先頭で探す（今の `changelog_key` と同じ探し方）。リリースブランチを見分ける箇所（`included_decide`・`assemble.open_releases`・`land`・`record`）は、接頭辞 `release/v` の代わりにブランチの書式で読む。
 
 採らなかった案: 書式を `prefix`・`separator` の組で持つ案は、Keep a Changelog の `## [1.2.3] - <日付>`（STD2）のように前後の両方に文字がある形を書けない。semantic-release の `${version}` の語（`tagFormat`）にそろえる案は、確かめられず（外部の調査の「確かめられなかったこと」）、今の設定の `{version}` と食い違う。
@@ -78,6 +82,8 @@
 既定は `plugins/ndf-next/contracts/domains/test-files.json` の行（保存先の行はバージョンの単位の根からの相対パスのディレクトリの 1 階層の名前、名前の行はファイル名の fnmatch）から作り、設定の `undistributed`（gitignore の形）を**足す**。要求の受け入れ条件 8 の「足せる」に合わせ、置き換える形をやめる。
 
 今の既定は `**/conftest.py` を含み、ai-plugins には `plugins/ndf/conftest.py` があるため、表に無いままでは直した後にこのファイルの変更でバージョンが上がる（受け入れ条件 7・15 と既存のテスト `test_release_decide.py` の #2217 の行に反する）。表に列 `role`（`test` が既定、`support` はテストを支えるファイル）を足し、行 `python-conftest`（名前 `conftest.py`・`support`）を置く。リリース対象外の既定は両方の役割の行を使い、cross-refactoring のテストの判定（`is_test_file`）は `test` の行だけを使う。`conftest.py` を `test` の行にすると、cross-refactoring が変わった `conftest.py` そのものをテストとして流し、集めるテストが 0 件になる。
+
+テストのファイルの表の持ち主は #1142 の子 D2（表の `owner`）で、cross-review・cross-refactoring・試走の候補・リリースが読む共有カーネルである。列と行の追加は表の `columns` に型を書く形で行い、読む側の cross-refactoring を同じ PR で合わせる（設計文書の「ドメインモデル」のコンテキスト）。
 
 採らなかった案: リリースの部品に `conftest.py` だけの既定を別に持つ案は、テストのファイルの見分け方が 2 か所になる（Value 11）。
 
@@ -98,6 +104,13 @@
 
 単位ごとの変化は、その単位の起点からの範囲で数える。含む PR は、バージョンを上げる単位の範囲の件名から読んだ番号の和にする。起点の順 1〜3 を当てるのは `trunk` の `release_pr` と `release_branch` である。`merge_base_branch` は今のとおり本番ブランチの HEAD を起点にする。ベースブランチを丸ごと出すため、本番ブランチの HEAD より前は出し済みである。
 
+用語は 2 つに分ける。「範囲の起点」は差分の範囲の古い側の端で、上のとおりリリース方式で決まる。「前のリリースの起点」は上の順 1〜3 で決まるコミットで、範囲の起点に使うのは `trunk` の `release_pr` と `release_branch` だけである。
+
+受け入れ条件の読み方を 2 つ決める。どちらも設計文書の「人へ残す判断」に載せた。
+
+- 受け入れ条件 12 が挙げる `web-trunk`・`docs` は、リリース方式 `production_pr`・保存先 `none`・タグ無しで、前のバージョンのタグを持たない。この 2 つは「範囲が `origin/main..origin/main` の空にならない」ことで満たすと読み、要求 E3 の「最初のコミットから」は当てない（「人へ残す判断」の 1）
+- 受け入れ条件 7 と受け入れ条件 12 は、ai-plugins（`trunk`・`release_pr`）で食い違う。直す前の範囲は空で、受け入れ条件 12 を満たすと `materials` の範囲が変わる。#1142 の「現行と同等」は既知の不具合を引き継がないため、受け入れ条件 12 を優先する。受け入れ条件 7 の「同じ」は、同じ範囲を与えたときの名前と承認資料の行の形で判定する（I9。「人へ残す判断」の 2）
+
 採らなかった案: 全単位で 1 つの起点（最も古いタグ）にする案は、変化の無い単位まで古い変更でバージョンが上がる。
 
 - 作り方: 自前で作る
@@ -108,6 +121,8 @@
 ### 決定 7: `.claude-plugin` の無いリポジトリを確かめる設定として、nd-factory の設定のコピーを `release_branch`・保存先 `tag`・CD ありで組む
 
 前提 6 の nd-factory の今の値（起点 `qa/dev`・本番 `main`・選んで集める・CD の無い手動の反映・バージョンなし）は、ブランチ戦略の設定へ移すと規則 R4（`release_branch` でバージョンの保存先が要る）に落ちる。リリースブランチの名前がバージョンを持つためである。バージョンのファイルを持たないリポジトリが `release_branch` を選ぶ形は保存先 `tag` で、R11 と R10 により CD（置いたテンプレートの workflow）が要る。テストの設定のコピーは `release_strategy: release_branch`・`branches: {production: main, base: qa/dev}`・`form: service`・`version_store: {kind: tag}`・`tag: v{version}`・`github_release: false`・`cd: {workflow: ndf-release.yml}`・`deliveries` は手動の 1 行とする。nd-factory のリポジトリは書き換えない。
+
+このため、受け入れ条件 3 のテストの設定は前提 6 の値そのものではない。前提 6 の値（`release_branch`・バージョンを持たない・CD の無い手動の反映）のリポジトリは、この設計の後も ndf-next のリリースを使えない。R4 は #3681 が入れた規則で、この設計が扱える範囲を狭めるものではないが、nd-factory の今の運用を扱うかは設計文書の「人へ残す判断」の 3 に載せた。
 
 採らなかった案: 保存先 `none` のまま R4 を緩める案は、リリースブランチの名前のバージョンを決められない。
 
@@ -164,3 +179,15 @@ ndf-next の `land.version_rows` と 10 系の `release_lib/land_read.py` は、
 `children.json` に `"B2": {"issue": 3615, "packages": [], "needs": ["B1", "M2"], "order": 9, "lane": "lrel-form2", "closed": false}` を足し、S2 の `needs` に `B2` を足す。パッケージ `ndf.domains.release` のオーナーは M2 のままで、この子は新しいパッケージを持たない。#1142 の本文の子の表にも同じ行を足す（X4・G1 を足した設計と同じく、この設計の決定を子の表の SSOTとする）。
 
 根拠: Value 14（MVV 版 8）
+
+### 決定 14: 設定の置き場を 1 か所にする前提 2 と既存のキーを両立させるため、`.ndf/release.json` の既存のキーはそのまま読み、新しいキーは `branch_strategy.release` に置く
+
+前提 2 は、リリースの形とリリースの形の設定を `branch_strategy.release` に置き、新しいキーもそこに足すと定める。この設計が足すキー（`branch`・`changelog_heading`・`version_store` の種類 `pubspec`・`tag`）はすべて `branch_strategy.release` に置く。
+
+`.ndf/release.json` の `steps`・`undistributed`・`bump_undistributed`・`changelog` は、main で既にあるキーである（`plugins/ndf-next/contracts/domains/ndf-files.json` の行 `release` の `keys`。2026-11-17）。この設計はキーを足さず、`undistributed` の意味だけを「既定を置き換える」から「既定へ足す」に変える（決定 5）。OpenAPI の `info.version` の書き換えは既存の `steps` の 1 行で受け、CHANGELOG のパスは既存の `changelog` で受ける。これらはリリースの形ではなくリリースの段階で流す手順とファイルの置き場であり、前提 2 の「新しいキー」に当たらないとみなす。
+
+`.ndf/release.json` のキーを `branch_strategy.release` へ移すかは、同じファイルの `version_store` を扱う #3572 の決定 22 との突き合わせ（設計文書の「人へ残す判断」の 4）と合わせて決める。
+
+採らなかった案: この課題で 4 つのキーを `branch_strategy.release` へ移す案は、#3572 のブランチの `bump`・`pr-check` が読む `.ndf/release.json` と食い違いを増やし、lr-rel-rest の突き合わせの量を増やす。
+
+根拠: Value 4 / Value 8 / Value 11（MVV 版 8）

@@ -8535,7 +8535,14 @@
     {
       "term": "前のリリースの起点",
       "context": "ndf-release",
-      "meaning": "差分の範囲を集め始めるコミット。前のバージョンのタグ、無ければ本番ブランチで今のバージョンが入ったコミット、それも無ければ本番ブランチの最初のコミット。バージョンの単位ごとに決まる",
+      "meaning": "前に出したバージョンの位置を表すコミット。前のバージョンのタグ、無ければ本番ブランチで今のバージョンが入ったコミット、それも無ければ本番ブランチの最初のコミット。バージョンの単位ごとに決まる。範囲の起点に使うのは、リリース方式が `trunk` の `release_pr` と `release_branch` のときだけである",
+      "source": "",
+      "pending_source": "issues/issue-3615-design.md"
+    },
+    {
+      "term": "範囲の起点",
+      "context": "ndf-release",
+      "meaning": "承認資料とリリースブランチに集める差分の範囲の、古い側の端のコミット。リリース方式で決まる。`merge_base_branch` は本番ブランチの HEAD、`trunk` の `release_pr` と `release_branch` はバージョンの単位ごとの前のリリースの起点、`production_pr` は本番の PR と本番ブランチの分岐点",
       "source": "",
       "pending_source": "issues/issue-3615-design.md"
     },
