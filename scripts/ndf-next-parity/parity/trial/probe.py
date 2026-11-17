@@ -156,8 +156,11 @@ def _by_script(row: Mapping[str, Any], calls: Mapping[str, set[str]]) -> dict[st
 
 
 def _by_workflow(row: Mapping[str, Any], repo: Path, scripts: Mapping[str, Mapping[str, Any]]) -> dict[str, str] | None:
-    """workflow の行。旧いスクリプトの名前を書いていれば `failed`。"""
-    called = resolve(row["now"], (repo / row["now"]).read_text(encoding="utf-8"), scripts)
+    """workflow の行。旧いスクリプトの名前を書いていれば `failed`。workflow が消えていれば旧い呼び出しも無い。"""
+    path = repo / row["now"]
+    if not path.is_file():
+        return None
+    called = resolve(row["now"], path.read_text(encoding="utf-8"), scripts)
     named = sorted(_label(now, scripts) for now in called)
     if named:
         return _failed(f"{row['now']} が旧いプラグインのスクリプトを直に呼ぶ: {'・'.join(named)}（移行先 {row['to']}）")

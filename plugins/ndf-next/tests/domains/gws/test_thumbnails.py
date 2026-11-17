@@ -97,6 +97,13 @@ def test_gws_failure_stops_with_1_and_shows_the_tail(fakes: Fakes, tmp_path: Pat
     assert len(detail) == rd.DETAIL_LINES and detail[-1] == "e29"
 
 
+def test_gws_failure_when_logged_in_stops_with_1_not_11(fakes: Fakes, tmp_path: Path, capsys, last_result) -> None:
+    fakes.add("gws", [status_rule("client_secret.json", "oauth2"), {"prefix": GET, "code": 1, "err": "boom\n"}])
+    fakes.add("curl", _curl())
+    code, got = run_gws(capsys, last_result, "thumbnails", PID, str(tmp_path / "out"))
+    assert (code, got["status"], got["items"][0]["result"]) == (1, "stopped", "gws-failed")
+
+
 @pytest.mark.parametrize("status", [{"prefix": AUTH, "code": 1}, {"prefix": AUTH, "sleep": 10}], ids=["exit-1", "over-the-limit"])
 def test_unreadable_status_after_a_failure_is_a_plain_failure(
     fakes: Fakes, tmp_path: Path, capsys, last_result, monkeypatch, status: dict

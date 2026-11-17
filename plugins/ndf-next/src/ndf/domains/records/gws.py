@@ -1,8 +1,9 @@
 """gws（Google Workspace の CLI）の認証を確かめる口（#2067）。
 
-`gws auth status` の JSON を読み、`decide` で決める。トークンの値は読まず、あるかだけを見る。クライアントの設定だけがあり
-トークンが無い状態（`credential_source` が `none` か `client_secret.json`）は未認証。トークンを環境変数で渡した状態は
-`auth_method: none` を返しても認証済み。
+`gws auth status` の JSON を読み、`decide` で決める。トークンの値は読まず、あるかだけを見る。未認証は 2 つの形だけ:
+`credential_source` が `none` のときと、クライアントの設定だけがありトークンが無い（`credential_source` が
+`client_secret.json` で `auth_method` が `none`）とき。OAuth でログインした状態（`client_secret.json` と `oauth2`）は
+認証済み。トークンを環境変数で渡した状態は `auth_method: none` を返しても認証済み。
 """
 
 from __future__ import annotations
@@ -54,8 +55,11 @@ def decide(status: Mapping[str, Any], token_in_env: bool) -> bool:
     """`gws auth status` の結果から認証済みかを決める（純粋な判断）。"""
     if token_in_env:
         return True
-    # クライアントの設定だけでトークンの無い認証の出所（gws auth status の credential_source の値）
-    return status.get("credential_source") not in ("none", "client_secret.json")
+    source = status.get("credential_source")
+    if source == "none":
+        return False
+    # クライアントの設定だけがありトークンが無い形（#2067）。OAuth でログインすれば auth_method が none でなくなる
+    return not (source == "client_secret.json" and status.get("auth_method") == "none")
 
 
 def authenticated(status: Mapping[str, Any], env: Optional[Mapping[str, str]] = None) -> bool:

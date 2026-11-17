@@ -62,6 +62,13 @@ def test_a_missing_skill_or_destination_fails(plugin):
     assert "src/m8/" in got["entrypoint:scripts/merged-steps.py"]["reason"]
 
 
+def test_a_removed_workflow_is_not_a_failure(plugin):
+    features = _features()
+    features["locations"]["M2"] = ["src/m8/"]
+    features["rows"].append({"id": "workflow:gone.yml", "kind": "workflow", "now": ".github/workflows/gone.yml", "to": "M2"})
+    assert probe.judge(features, root=plugin, repo=plugin)["workflow:gone.yml"]["result"] == "not_run"
+
+
 def test_a_name_inside_a_longer_name_is_not_a_call():
     assert probe.callers("state.py", {"a.md": "sprint-state.py run"}) == []
     assert probe.callers("state.py", {"a.md": "$CR/state.py start"}) == ["a.md"]

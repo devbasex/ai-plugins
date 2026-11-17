@@ -45,6 +45,9 @@ def test_gws_client_secret_only_is_not_authenticated() -> None:
     assert gws.authenticated(no_token, {"GOOGLE_WORKSPACE_CLI_TOKEN": "t"}) is True
     assert gws.authenticated({"credential_source": "token_cache"}, {}) is True
     assert gws.authenticated({"credential_source": "none"}, {}) is False
+    assert gws.authenticated({"credential_source": "none", "auth_method": "oauth2"}, {}) is False
+    assert gws.authenticated({"auth_method": "oauth2", "credential_source": "client_secret.json"}, {}) is True
+    assert gws.authenticated({"auth_method": "none", "credential_source": "environment_variables"}, {}) is True
 
 
 @dataclass

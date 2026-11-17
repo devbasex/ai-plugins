@@ -69,7 +69,7 @@ Google のネイティブ形式（スライド / ドキュメント / スプレ�
 
 | 対象 | 手段 |
 | --- | --- |
-| Google スライド | **ページごとのサムネイル。** `google-workspace` の `slides-thumbnails.py` が全ページを `p<番号>.png` で保存する。Google Slides の描画をそのまま見られる |
+| Google スライド | **ページごとのサムネイル。** `ndf gws thumbnails <ID> <出力のディレクトリ>` が全ページを `p<番号>.png` で保存する（引数と終了コードは `google-workspace` の対応表）。Google Slides の描画をそのまま見られる |
 | Google ドキュメント | `google-workspace` の対応表のエクスポート（`mimeType` は `application/pdf`）で PDF にしてから、ページを画像へ変換する |
 
 **体裁レビューはこの経路を使う。**

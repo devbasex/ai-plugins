@@ -45,6 +45,18 @@ def test_token_in_env_is_authenticated_even_when_source_is_none(fakes: Fakes, ca
     assert (code, got["metrics"]["state"]) == (0, "authenticated")
 
 
+def test_logged_in_with_client_secret_is_authenticated(fakes: Fakes, capsys, last_result) -> None:
+    fakes.add("gws", [status_rule("client_secret.json", "oauth2")])
+    code, got = run_gws(capsys, last_result, "check")
+    assert (code, got["status"]) == (0, "ok")
+    assert got["metrics"] == {
+        "state": "authenticated",
+        "credential_source": "client_secret.json",
+        "auth_method": "oauth2",
+        "client_config_exists": True,
+    }
+
+
 @pytest.mark.parametrize(
     ("source", "client"),
     [("none", True), ("none", False), ("client_secret.json", True)],
