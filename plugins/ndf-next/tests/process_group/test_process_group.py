@@ -46,12 +46,20 @@ def test_group_that_ends_on_sigterm_gets_no_sigkill(short_grace):
         _cleanup(proc)
 
 
-@pytest.mark.parametrize("send_first", [True, False])
-def test_descendants_ignoring_sigterm_are_killed_after_the_grace(short_grace, send_first):
+@pytest.mark.parametrize(
+    ("send_first", "leader_reaped"),
+    [
+        (True, False),
+        # シグナルを転送した後の経路: 先頭は回収されたが子孫が残る
+        (False, True),
+        # CLI が自力で終えて回収された後に子孫だけが残る経路（adapters/agents の run_agent。3394-9）
+        (True, True),
+    ],
+)
+def test_descendants_ignoring_sigterm_are_killed_after_the_grace(short_grace, send_first, leader_reaped):
     proc = _start(STUBBORN)
     try:
-        if not send_first:
-            # シグナルを転送した後の経路: 先頭は回収されたが子孫が残る
+        if leader_reaped:
             os.killpg(proc.pid, signal.SIGTERM)
             proc.wait()
             assert process_group.alive(proc, proc.pid)
