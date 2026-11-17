@@ -26,6 +26,7 @@ from pathlib import Path
 from ndf.adapters import git as git_mod
 from ndf.adapters.github import PER_PAGE, GitHub, text_of
 from ndf.adapters.publish import Publisher
+from ndf.core import branch_strategy
 from ndf.domains.release import changelog_decide, changes_decide, gather, materials_decide, version_decide
 from ndf.domains.release import declaration as decl_mod
 from ndf.domains.release import plugins as plugins_mod
@@ -108,8 +109,11 @@ def _write(root: Path, decl: decl_mod.Declaration, facts: materials_decide.Facts
     found = plugins_mod.by_name(plugins_mod.load(root))
     entries = [changelog_decide.Entry(p.number, p.title) for p in facts.pulls]
     log_path = root / decl.changelog
+    # 版上げで書き換える追加のファイルはブランチ戦略の宣言の版数の置き場が持つ（無ければ止まる。旧い release.json を読まない）
+    store = branch_strategy.load(root).section["release"]["version_store"]
+    extra_files = store["files"] if "files" in store else []
     for p in facts.planned:
-        plugins_mod.bump(root, found[p.plugin], p.next, decl.version_files)
+        plugins_mod.bump(root, found[p.plugin], p.next, extra_files)
         if facts.channel == version_decide.PRODUCTION and log_path.is_file():
             new = changelog_decide.block(p.plugin, p.next, date.today().isoformat(), entries)
             log_path.write_text(changelog_decide.insert(log_path.read_text(encoding="utf-8"), p.plugin, p.next, new), encoding="utf-8")

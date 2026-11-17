@@ -14,7 +14,7 @@ from ndf.domains.release import cli as release_cli
 from ndf.domains.release import declaration as decl_mod
 from ndf.domains.release import plugins as plugins_mod
 
-from ._fakes import FakeHub, clone, init_repo, write_json
+from ._fakes import FakeHub, clone, init_repo, section, write_json
 
 
 def _node(number: int, title: str, conclusion: str) -> dict:
@@ -32,6 +32,7 @@ def _origin_with_change(tmp_path: Path, test_only: bool, extra: tuple[str, ...] 
         seed / ".claude-plugin" / "marketplace.json", {"plugins": [{"name": "kit", "source": "./tools/kit", "description": "Kit (v1.2.3)"}]}
     )
     write_json(seed / "tools" / "kit" / ".claude-plugin" / "plugin.json", {"name": "kit", "version": "1.2.3"})
+    write_json(seed / ".ndf" / "project.json", {"version": 1, "branch_strategy": section("plugin")})
     (seed / "CHANGELOG.md").write_text("# 変更履歴\n\n## [kit 1.2.3] - 2026-01-01\n\n- 前\n", encoding="utf-8")
     git_sandbox.sh(seed, "add", "-A")
     git_sandbox.sh(seed, "commit", "-q", "-m", "init")

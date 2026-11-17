@@ -101,11 +101,11 @@
         },
         "--base": {
           "type": "string",
-          "description": "ベースブランチ（宣言 worktree.json の base_branch）"
+          "description": "ベースブランチ（宣言 project.json の branch_strategy.branches.base）"
         },
         "--production": {
           "type": "string",
-          "description": "本番ブランチ（宣言 worktree.json の production_branch）"
+          "description": "本番ブランチ（宣言 project.json の branch_strategy.branches.production）"
         },
         "--channel": {
           "type": "string",
@@ -235,11 +235,11 @@
         },
         "--base": {
           "type": "string",
-          "description": "ベースブランチ（宣言 worktree.json の base_branch）"
+          "description": "ベースブランチ（宣言 project.json の branch_strategy.branches.base）"
         },
         "--production": {
           "type": "string",
-          "description": "本番ブランチ（宣言 worktree.json の production_branch）"
+          "description": "本番ブランチ（宣言 project.json の branch_strategy.branches.production）"
         },
         "--channel": {
           "type": "string",
@@ -293,14 +293,6 @@
         "--pr": {
           "type": "integer"
         },
-        "--base": {
-          "type": "string",
-          "description": "ベースブランチ（宣言 worktree.json の base_branch）"
-        },
-        "--production": {
-          "type": "string",
-          "description": "本番ブランチ（宣言 worktree.json の production_branch）"
-        },
         "--budget": {
           "type": "number",
           "description": "必須のチェックを待つ秒"
@@ -309,8 +301,6 @@
       "required": [
         "subcommand",
         "--pr",
-        "--base",
-        "--production",
         "--budget"
       ]
     },

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import argparse
 import json
+import subprocess
 from collections.abc import Callable
 
 import pytest
@@ -13,9 +15,10 @@ from typing import Any
 
 from ndf.adapters import ci
 from ndf.adapters.github import MERGE_QUEUE_PENDING, Authored, GitHubError, MergeOutcome, Pull
-from ndf.domains.release import approval_decide, declaration, land, trail
+from ndf.domains.release import approval_decide, land, trail
+from ndf.domains.release import cli as release_cli
 
-from ._fakes import HEAD, OTHER, FakeHub, not_found, pull
+from ._fakes import HEAD, OTHER, FakeHub, pull, section, strategy
 
 
 def _trail(answer: str, sha: str, author: str = "octocat") -> Authored:
@@ -72,7 +75,8 @@ def test_present_refuses_material_for_another_commit() -> None:
             trail.present(hub, 7, material)
         assert hub.comments_of == {}
     hub = FakeHub(pulls={7: pull(head=HEAD)})
-    assert trail.present(hub, 7, f"{approval_decide.HEAD_LINE} `{HEAD}`\n") == HEAD
+    shown = trail.present(hub, 7, f"{approval_decide.HEAD_LINE} `{HEAD}`\n")
+    assert shown.head == HEAD and shown.asked
     assert approval_decide.REQUEST_MARK in hub.comments_of[7][0].body
 
 
@@ -105,7 +109,7 @@ def _lander(hub: FakeHub, failed: bool, calls: list[int]) -> land.Lander:
         }
     ]
     hub.responses[("GET", "/repos/o/r/rules/branches/develop")] = []
-    return land.Lander(hub, "develop", "main", 60.0, wait=_wait(failed, calls))
+    return land.Lander(hub, strategy(), 60.0, wait=_wait(failed, calls))
 
 
 def test_production_merge_needs_approval() -> None:
@@ -131,7 +135,7 @@ def test_production_merge_rechecks_approval_after_waiting() -> None:
         return ci.WatchResult(_reading(False), 1, 0.0, 0.0)
 
     lander = _lander(hub, False, [])
-    done = land.Lander(hub, lander.base, lander.production, lander.budget, wait=wait).land(7)
+    done = land.Lander(hub, lander.strategy, lander.budget, wait=wait).land(7)
     assert not done.merged and done.kind == "refused" and hub.merged == []
 
 
@@ -140,11 +144,11 @@ def test_production_merge_then_sync_back_to_base() -> None:
     hub.responses[("POST", "/repos/o/r/pulls")] = {"number": 8}
     done = _lander(hub, False, []).land(7)
     assert done.merged and done.sync_pr == 8 and hub.merged == [7, 8]
-    # 本番ブランチとベースブランチの祖先の関係を保つため、どちらも merge commit で入れる
-    assert hub.merge_methods == [land.MERGE_METHOD, land.MERGE_METHOD] == ["merge", "merge"]
+    # 本番の PR は宣言の merge.commit（web-develop は merge）、戻す PR は祖先の関係を保つ merge commit で入れる
+    assert hub.merge_methods == ["merge", land.SYNC_METHOD] == ["merge", "merge"]
     # 本番へのマージは merge commit を必須とし、キューの方式が違えば入れない
     assert hub.merge_required == [True, True]
-    assert land.Lander(hub, "develop", "main", 1.0).required("main").names == ["pytest"]
+    assert land.Lander(hub, strategy(), 1.0).required("main").names == ["pytest"]
 
 
 def test_required_includes_classic_branch_protection() -> None:
@@ -153,7 +157,7 @@ def test_required_includes_classic_branch_protection() -> None:
     hub.responses[("GET", "/repos/o/r/branches/main")] = {
         "protection": {"required_status_checks": {"contexts": ["lint"], "checks": [{"context": "build"}]}}
     }
-    assert land.Lander(hub, "develop", "main", 1.0).required("main").names == ["build", "lint"]
+    assert land.Lander(hub, strategy(), 1.0).required("main").names == ["build", "lint"]
 
 
 def test_commit_status_counts_as_required_check() -> None:
@@ -169,7 +173,7 @@ def test_commit_status_counts_as_required_check() -> None:
     hub.responses[("GET", f"/repos/o/r/commits/{HEAD}/status")] = {
         "statuses": [{"context": "ext-ci", "state": "success", "updated_at": "t1", "created_at": "t0", "id": 3}]
     }
-    done = land.Lander(hub, "develop", "main", 1.0, wait=wait).land(8)
+    done = land.Lander(hub, strategy(), 1.0, wait=wait).land(8)
     reading = readers[0]()
     assert reading.missing == [] and reading.running == [] and done.merged and hub.merged == [8]
 
@@ -196,7 +200,7 @@ def test_required_check_with_a_named_app_counts_only_that_app() -> None:
     hub.responses[("GET", "/repos/o/r/branches/main")] = {
         "protection": {"required_status_checks": {"checks": [{"context": "build", "app_id": 7}, {"context": "lint", "app_id": -1}]}}
     }
-    lander = land.Lander(hub, "develop", "main", 1.0)
+    lander = land.Lander(hub, strategy(), 1.0)
     assert lander.required("main") == land.Required(["build", "lint", "pytest"], {"pytest": frozenset({15368}), "build": frozenset({7})})
     runs = [_run("pytest", 999, 1), _run("build", 7, 2), _run("lint", 42, 3)]
     hub.status_list = [_status("pytest", "someone", 4)]
@@ -209,7 +213,7 @@ def test_required_check_with_a_named_app_counts_only_that_app() -> None:
     hub.runs = runs
     hub.pulls = {7: pull()}
     hub.comments_of = {7: [_trail("approved", HEAD)]}
-    done = land.Lander(hub, "develop", "main", 1.0, wait=wait).land(7)
+    done = land.Lander(hub, strategy(), 1.0, wait=wait).land(7)
     assert readers[0]().missing == ["pytest"] and not done.merged and hub.merged == []
     hub.runs = [*runs, _run("pytest", 15368, 5)]
     assert readers[0]().missing == []
@@ -231,7 +235,7 @@ def _named_app_lander(hub: FakeHub) -> tuple[land.Lander, list[Callable[[], ci.R
         readers.append(reader)
         return ci.WatchResult(reader(), 1, 0.0, 0.0)
 
-    return land.Lander(hub, "develop", "main", 1.0, wait=wait), readers
+    return land.Lander(hub, strategy(), 1.0, wait=wait), readers
 
 
 def test_required_check_with_a_named_app_counts_that_apps_commit_status() -> None:
@@ -284,7 +288,7 @@ def test_sync_without_diff_is_done_but_other_422_raises() -> None:
         _lander(hub, False, []).land(7)
 
 
-# --- #3506: 迂回の宣言（production_merge.admin）のある本番のマージ ------------------------------------
+# --- #3506: 迂回の宣言（branch_strategy の merge.admin）のある本番のマージ ------------------------------------
 
 REVIEW_RULE = {"type": "pull_request", "parameters": {"required_approving_review_count": 1}}
 
@@ -311,9 +315,8 @@ def _admin_lander(hub: FakeHub, admin: bool = True, approvals: int = 1, failed: 
     base = _lander(hub, failed, [])
     rules = hub.responses[("GET", "/repos/o/r/rules/branches/main")]
     hub.responses[("GET", "/repos/o/r/rules/branches/main")] = [*rules, *([REVIEW_RULE] if approvals else [])]
-    hub.responses[("GET", "/repos/o/r/branches/main/protection/required_pull_request_reviews")] = not_found()
     hub.responses[("POST", "/repos/o/r/pulls")] = {"number": 8}
-    return land.Lander(hub, base.base, base.production, base.budget, wait=wait if wait is not None else base.wait, admin=admin)
+    return land.Lander(hub, strategy(admin=admin), base.budget, wait=wait if wait is not None else base.wait)
 
 
 def _mvv_trail(sha: str = HEAD) -> Authored:
@@ -406,27 +409,28 @@ def test_authored_from_rest_marks_edited_comments() -> None:
     assert Authored.from_rest({**raw, "updated_at": "t2"}).edited
 
 
-@pytest.mark.parametrize("admin, approvals", [(False, 1), (True, 0)])
-def test_without_the_bypass_the_merge_stays_as_it_was(admin: bool, approvals: int) -> None:
-    """受け入れ条件 8（迂回しない）・I2b: 宣言が無い・承認数 0 なら今のマージで、記録を置かず admin は偽。"""
+@pytest.mark.parametrize("admin", [True, False])
+def test_without_the_bypass_the_merge_stays_as_it_was(admin: bool) -> None:
+    """受け入れ条件 8（迂回しない）・I2b: 本番ブランチの承認数が 0 なら今のマージで、記録を置かず admin は偽。"""
     hub = AdminHub(pulls={7: pull(), 8: pull(number=8, base="develop")}, comments_of={7: [_trail("approved", HEAD)]})
-    done = _admin_lander(hub, admin=admin, approvals=approvals).land(7)
+    done = _admin_lander(hub, admin=admin, approvals=0).land(7)
     assert done.merged and not done.admin and done.admin_record is None
     assert hub.admin_merged == [] and hub.merged == [7, 8] and _records(hub) == []
 
 
-def test_approvals_reads_rules_then_protection_and_none_when_unreadable() -> None:
-    hub = FakeHub()
-    lander = land.Lander(hub, "develop", "main", 1.0, admin=True)
-    hub.responses[("GET", "/repos/o/r/rules/branches/main")] = [REVIEW_RULE]
-    assert lander.approvals("main") == 1
-    hub.responses[("GET", "/repos/o/r/rules/branches/main")] = []
-    hub.responses[("GET", "/repos/o/r/branches/main/protection/required_pull_request_reviews")] = {"required_approving_review_count": 2}
-    assert lander.approvals("main") == 2
-    hub.responses[("GET", "/repos/o/r/branches/main/protection/required_pull_request_reviews")] = not_found()
-    assert lander.approvals("main") == 0
-    hub.responses[("GET", "/repos/o/r/rules/branches/main")] = GitHubError("壊れた", 500)
-    assert lander.approvals("main") is None and not lander._bypass(pull())
+def test_gate_with_a_ruleset_that_asks_for_review_stops_without_the_bypass() -> None:
+    """#3672 の I10: approval.via が gate で迂回の宣言が無いのに本番ブランチが承認を求めれば、食い違いとして止まる。"""
+    hub = AdminHub(pulls={7: pull(), 8: pull(number=8, base="develop")}, comments_of={7: [_trail("approved", HEAD)]})
+    done = _admin_lander(hub, admin=False, approvals=1).land(7)
+    assert not done.merged and done.kind == "refused" and "approval.via" in done.detail
+    assert hub.admin_merged == [] and hub.merged == []
+
+
+def test_admin_declaration_stops_when_the_ruleset_cannot_be_bypassed() -> None:
+    """#3672 の I10: 迂回の宣言があっても、本番ブランチの ruleset を越えられなければ（never・exempt）入れない。"""
+    hub = AdminHub(pulls={7: pull()}, comments_of={7: [_trail("approved", HEAD)]}, bypass="exempt")
+    done = _admin_lander(hub).land(7)
+    assert not done.merged and done.kind == "refused" and "merge.admin" in done.detail and hub.admin_merged == []
 
 
 def test_merged_admin_release_resume_writes_the_missing_record_once() -> None:
@@ -449,29 +453,8 @@ def test_admin_record_failure_is_reported_apart_from_the_merge() -> None:
     assert done.merged and done.admin and done.admin_record is None and done.record_error and hub.admin_merged == [7]
 
 
-@pytest.mark.parametrize(
-    "body, admin",
-    [
-        ({"production_merge": {"admin": True}}, True),
-        ({"production_merge": {"admin": "true"}}, False),
-        ({"production_merge": {"unknown": "未定"}}, False),
-        ({}, False),
-        (None, False),
-        ("{", False),
-    ],
-)
-def test_production_admin_reads_only_json_true(tmp_path: Path, body: Any, admin: bool) -> None:
-    path = tmp_path / declaration.PROJECT_FILE
-    if body is not None:
-        path.parent.mkdir(parents=True)
-        path.write_text(body if isinstance(body, str) else json.dumps(body), encoding="utf-8")
-    assert declaration.production_admin(tmp_path) is admin
-
-
-def test_production_admin_reads_the_main_directory_before_the_worktree(tmp_path: Path) -> None:
-    """I1: PR の作業場所の宣言だけに迂回を足しても選べない。メインディレクトリの宣言だけが効く。"""
-    import subprocess
-
+def test_merge_reads_the_strategy_of_the_main_directory_not_the_worktree(tmp_path: Path) -> None:
+    """I1: PR の作業場所の宣言だけに迂回を足しても選べない。メインディレクトリの宣言だけが効く（#2363・#3506）。"""
     main, wt = tmp_path / "main", tmp_path / "wt"
 
     def git(*args: str, cwd: Path = main) -> None:
@@ -482,11 +465,12 @@ def test_production_admin_reads_the_main_directory_before_the_worktree(tmp_path:
     git("commit", "-q", "--allow-empty", "-m", "init")
     git("worktree", "add", "-q", "--detach", str(wt))
     for root, admin in ((main, False), (wt, True)):
-        (root / declaration.PROJECT_FILE).parent.mkdir(parents=True)
-        (root / declaration.PROJECT_FILE).write_text(json.dumps({"production_merge": {"admin": admin}}), encoding="utf-8")
-    assert declaration.production_admin(wt) is False
-    (main / declaration.PROJECT_FILE).unlink()
-    assert declaration.production_admin(wt) is False  # メインディレクトリに無ければ作業場所の宣言で補わない（#2363）
+        doc = section("web-develop")
+        doc["merge"]["admin"] = admin
+        (root / ".ndf").mkdir()
+        (root / ".ndf" / "project.json").write_text(json.dumps({"version": 1, "branch_strategy": doc}), encoding="utf-8")
+    got = release_cli._strategy(argparse.Namespace(root=str(wt)))
+    assert got.section["merge"]["admin"] is False
 
 
 def test_issue_3487_production_merge_stops_before_merging_with_untrusted_token() -> None:
@@ -506,7 +490,9 @@ class _QueueHub(FakeHub):
     # キューへ入れた後に PR を読んだ回数
     reads: int = 0
 
-    def merge(self, number: int, expect_head: str | None = None, method: str | None = None, require_method: bool = False) -> MergeOutcome:
+    def merge(
+        self, number: int, expect_head: str | None = None, method: str | None = None, require_method: bool = False, jump: bool = False
+    ) -> MergeOutcome:
         self.merged.append(number)
         self.queued.add(number)
         return MergeOutcome(False, MERGE_QUEUE_PENDING, "キューへ入れた", self.pulls[number].head_sha)
@@ -531,7 +517,7 @@ def _queue_lander(hub: _QueueHub, now: list[float], budget: float, on_poll: Call
         if on_poll is not None:
             on_poll()
 
-    return land.Lander(hub, base.base, base.production, budget, wait=base.wait, clock=lambda: now[0], sleep=sleep)
+    return land.Lander(hub, base.strategy, budget, wait=base.wait, clock=lambda: now[0], sleep=sleep)
 
 
 def test_merge_queue_waits_until_merged_then_syncs() -> None:
@@ -567,7 +553,7 @@ def test_one_budget_is_shared_by_the_release_pr_and_the_sync_pr() -> None:
         budgets.append(budget)
         return ci.WatchResult(_reading(False), 1, 0.0, 0.0)
 
-    done = land.Lander(hub, lander.base, lander.production, 600.0, wait=wait, clock=lander.clock, sleep=lander.sleep).land(7)
+    done = land.Lander(hub, lander.strategy, 600.0, wait=wait, clock=lander.clock, sleep=lander.sleep).land(7)
     assert done.merged and done.sync_pr == 8
     assert budgets == [600.0, 600.0 - 2 * land.QUEUE_POLL_SECONDS]
 

@@ -8,7 +8,8 @@
 
 - プラグインの定義の `version`
 - マーケットプレイスのそのプラグインの `description` の中の `(v<今の版>)`
-- 宣言 `version_files` のファイルの、そのプラグインの名前を含む行の中の今の版（前後に版の続きが無いものだけ）
+- ブランチ戦略の宣言の追加のファイル（`.ndf/project.json` の `branch_strategy.release.version_store.files`）。`pointer` の
+  無い行は、そのプラグインの名前を含む行の中の今の版（前後に版の続きが無いもの）、`pointer` のある行は JSON のその位置の版
 """
 
 from __future__ import annotations
@@ -122,8 +123,31 @@ def _bump_lines(path: Path, plugin: Plugin, old: str, new: str) -> bool:
     return True
 
 
-def bump(root: Path, plugin: Plugin, new: str, version_files: Sequence[str] = ()) -> list[str]:
-    """版を `new` へ書き換え、書き換えたファイル（リポジトリの根から）を返す。"""
+def _bump_pointer(path: Path, pointer: str, old: str, new: str) -> bool:
+    """JSON のファイル `path` の `pointer` の位置の版が `old` なら `new` へ書き換える。書き換えたか。"""
+    data = _read_json(path)
+    keys = [t.replace("~1", "/").replace("~0", "~") for t in pointer.split("/")[1:]]
+    cur: object = data
+    for key in keys[:-1]:
+        cur = cur.get(key) if isinstance(cur, dict) else None
+    if not keys or not isinstance(cur, dict) or cur.get(keys[-1]) != old:
+        return False
+    cur[keys[-1]] = new
+    _write_json(path, data)
+    return True
+
+
+def _bump_file(root: Path, row: dict, plugin: Plugin, old: str, new: str) -> bool:
+    path = root / row["path"]
+    if not path.is_file():
+        return False
+    pointer = row.get("pointer")
+    return _bump_pointer(path, pointer, old, new) if pointer else _bump_lines(path, plugin, old, new)
+
+
+def bump(root: Path, plugin: Plugin, new: str, extra_files: Sequence[dict] = ()) -> list[str]:
+    """版を `new` へ書き換え、書き換えたファイル（リポジトリの根から）を返す。`extra_files` は宣言の
+    `release.version_store.files` の行（`path` と、あれば `pointer`）。"""
     old = version(root, plugin)
     written = []
     for path in plugin.manifests(root):
@@ -133,5 +157,5 @@ def bump(root: Path, plugin: Plugin, new: str, version_files: Sequence[str] = ()
         written.append(path.relative_to(root).as_posix())
     if _bump_marketplace(root, plugin, old, new):
         written.append(MARKETPLACE.as_posix())
-    written += [rel for rel in version_files if (root / rel).is_file() and _bump_lines(root / rel, plugin, old, new)]
+    written += [row["path"] for row in extra_files if _bump_file(root, row, plugin, old, new)]
     return written

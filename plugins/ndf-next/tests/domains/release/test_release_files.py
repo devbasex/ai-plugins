@@ -46,16 +46,21 @@ def test_issue_1756_plugins_come_from_the_marketplace(tmp_path: Path) -> None:
 def test_bump_writes_manifests_marketplace_and_declared_files(tmp_path: Path) -> None:
     root = _repo(tmp_path)
     kit = plugins_mod.by_name(plugins_mod.load(root))["kit"]
-    written = plugins_mod.bump(root, kit, "1.2.4", ["README.md"])
+    write_json(root / "package.json", {"name": "kit", "meta": {"version": "1.2.3"}})
+    # 宣言の release.version_store.files の行。pointer の無い行は名前を含む行、ある行は JSON のその位置を書き換える
+    files = [{"path": "README.md"}, {"path": "package.json", "pointer": "/meta/version"}, {"path": "missing.md"}]
+    written = plugins_mod.bump(root, kit, "1.2.4", files)
     assert written == [
         "tools/kit/.claude-plugin/plugin.json",
         "tools/kit/.codex-plugin/plugin.json",
         ".claude-plugin/marketplace.json",
         "README.md",
+        "package.json",
     ]
     assert plugins_mod.version(root, kit) == "1.2.4"
     assert "Kit (v1.2.4)" in (root / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8")
     assert (root / "README.md").read_text(encoding="utf-8") == "| kit | 1.2.4 |\n| other | 1.2.3 |\n"
+    assert json.loads((root / "package.json").read_text(encoding="utf-8"))["meta"]["version"] == "1.2.4"
 
 
 def test_versions_must_agree_between_manifests(tmp_path: Path) -> None:
@@ -165,7 +170,7 @@ def test_release_steps_parser_current_behavior() -> None:
         "answer": common
         + [pr, req("--answer", choices=("approved", "rejected")), req("--presented"), req("--by", choices=("user", "mvv"))],
         "approval-check": common + [pr, req("--production")],
-        "merge": common + [pr, req("--base"), req("--production"), req("--budget", float)],
+        "merge": common + [pr, req("--budget", float)],
         "record": common + [pr, req("--production")],
         "verification-record": common + [pr, req("--record")],
         "records": common + [pr],
@@ -187,8 +192,9 @@ def test_release_steps_parser_parses_and_requires_a_command() -> None:
         parser.parse_args([])
     args = parser.parse_args(["cleanup", "--branch", "a", "--branch", "b"])
     assert vars(args) == {"command": "cleanup", "root": ".", "repo": None, "branch": ["a", "b"]}
-    args = parser.parse_args(["merge", "--pr", "3", "--base", "develop", "--production", "main", "--budget", "1.5"])
-    assert (args.pr, args.budget, args.base, args.production) == (3, 1.5, "develop", "main")
+    # merge のブランチの名前は宣言（branch_strategy.branches）から読み、引数で受けない
+    args = parser.parse_args(["merge", "--pr", "3", "--budget", "1.5"])
+    assert (args.pr, args.budget) == (3, 1.5) and not hasattr(args, "base")
 
 
 def test_declaration_parse_reads_every_key(tmp_path: Path) -> None:
@@ -198,14 +204,11 @@ def test_declaration_parse_reads_every_key(tmp_path: Path) -> None:
         "steps": [{"name": "a", "stage": "verify", "command": ["echo", "{version}"], "writes": ["x"], "timeout_seconds": 5}],
         "undistributed": ["docs/"],
         "bump_undistributed": True,
-        "version_files": ["README.md"],
         "changelog": "docs/CL.md",
     }
     write_json(decl_mod.path_of(tmp_path), raw)
     got = decl_mod.load(tmp_path)
-    assert got == decl_mod.Declaration(
-        (decl_mod.Step("a", "verify", ("echo", "{version}"), ("x",), 5.0),), ("docs/",), True, ("README.md",), "docs/CL.md"
-    )
+    assert got == decl_mod.Declaration((decl_mod.Step("a", "verify", ("echo", "{version}"), ("x",), 5.0),), ("docs/",), True, "docs/CL.md")
     assert got.raw == raw
     write_json(decl_mod.path_of(tmp_path), {"version": 1, "undistributed": []})
     assert decl_mod.load(tmp_path) == decl_mod.Declaration(undistributed=())
@@ -232,7 +235,6 @@ def test_declaration_parse_accepts_bool_timeout_as_number(tmp_path: Path) -> Non
         ({"version": 1, "bump_undistributed": None}, "bump_undistributed は真偽、changelog は文字列"),
         ({"version": 1, "changelog": 3}, "bump_undistributed は真偽、changelog は文字列"),
         ({"version": 1, "undistributed": "x"}, "undistributed は文字列の配列"),
-        ({"version": 1, "version_files": [1]}, "version_files は文字列の配列"),
         ({"version": 1, "steps": [1]}, "steps の行がオブジェクトでない: 1"),
         (
             {"version": 1, "steps": [{"name": "a", "stage": "x", "command": ["t"]}]},

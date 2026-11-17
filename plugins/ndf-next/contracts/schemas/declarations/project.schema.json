@@ -22,7 +22,7 @@
     },
     "branch_strategy": {
       "$ref": "#/$defs/BranchStrategy",
-      "description": "ブランチ戦略の宣言（#3672）。ブランチの名前・取り込み方・リリース・承認・マージを 1 か所で持ち、ndf project branch-strategy だけが作る・更新する・移す・消す。工程の部品は ndf.core.branch_strategy で読む"
+      "description": "ブランチ戦略の宣言。ブランチの名前・取り込み方・リリース・承認・マージを 1 か所で持ち、ndf project branch-strategy だけが作る・更新する・移す・消す。工程の部品は ndf.core.branch_strategy で読む"
     },
     "languages": {
       "anyOf": [
@@ -86,25 +86,6 @@
       ],
       "default": null,
       "description": "テストと動作の確かめに要るコンテナ・compose のファイル・データベース"
-    },
-    "delivery": {
-      "anyOf": [
-        {
-          "items": {
-            "$ref": "#/$defs/Delivery"
-          },
-          "type": "array"
-        },
-        {
-          "$ref": "#/$defs/Unknown"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "description": "旧い宣言。ndf project branch-strategy migrate が branch_strategy.release.deliveries へ移す。解析は測らない・書かない",
-      "deprecated": true
     },
     "issues": {
       "anyOf": [
@@ -196,22 +177,6 @@
       "default": null,
       "description": "差分の文書のファイルの分け方（文書・振る舞いを決める文書・テストが読む文書とそのテスト）"
     },
-    "production_merge": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/ProductionMerge"
-        },
-        {
-          "$ref": "#/$defs/Unknown"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "description": "旧い宣言。ndf project branch-strategy migrate が branch_strategy.merge へ移す。解析は測らない・書かない",
-      "deprecated": true
-    },
     "analysis": {
       "anyOf": [
         {
@@ -263,7 +228,7 @@
     },
     {
       "by": "ndf release-steps",
-      "when": "本番のマージで production_merge をメインディレクトリから読む"
+      "when": "本番のマージで branch_strategy（マージの主体・方式・迂回）をメインディレクトリから読む"
     },
     {
       "by": "ndf refactor",
@@ -285,9 +250,6 @@
             "command": "uv run pytest -q"
           }
         ]
-      },
-      "production_merge": {
-        "admin": false
       }
     }
   ],
@@ -2028,21 +1990,6 @@
         "kind"
       ],
       "title": "Product",
-      "type": "object"
-    },
-    "ProductionMerge": {
-      "additionalProperties": false,
-      "description": "本番の PR のマージの方式（#3506）。`admin` が true なら、本番チャネルが承認レビューを必須にするとき管理者の迂回でマージする。利用者が手で書き、解析は書かない。",
-      "properties": {
-        "admin": {
-          "title": "Admin",
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "admin"
-      ],
-      "title": "ProductionMerge",
       "type": "object"
     },
     "Seeds": {
