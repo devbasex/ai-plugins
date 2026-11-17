@@ -1,6 +1,6 @@
 # #3615 の詳細設計: 設定したリリースの形とバージョンの保存先で、承認資料・リリースブランチ・タグを組む
 
-設計文書 [issue-3615-design.md](issue-3615-design.md) の「構成要素」と「構造」を、ファイルと関数の粒度へ下ろした文書である。決定の番号（決定 1〜14）は [issue-3615-design-decisions.md](issue-3615-design-decisions.md) を、不変条件の番号（I1〜I9）とドメインイベントの番号（E1〜E9）は設計文書の「ドメインモデル」を指す。
+設計文書 [issue-3615-design.md](issue-3615-design.md) の「構成要素」と「構造」を、ファイルと関数の粒度へ下ろした文書である。決定の番号（決定 1〜14）は [issue-3615-design-decisions.md](issue-3615-design-decisions.md) を指す。不変条件の番号（I1〜I9）とドメインイベントの番号（E1〜E9）は、設計文書の「ドメインモデル」を指す。
 
 この文書で使う語:
 
@@ -58,7 +58,17 @@ plugins/ndf-next/
         └── test_release_assemble.py  test_release_decide.py  test_release_files.py  test_release_materials.py
 ```
 
-依存の向きは一方向である。判断のモジュール（名前が `_decide.py` で終わるもの）は、ほかの判断のモジュールとコントラクトの表だけを読み、git・GitHub・ファイルを読まない。外部との接続のモジュール（`version_store`・`units`・`gather`・`assemble`・`tagging`・`land`・`record`）は判断のモジュールと `adapters/git.py`・`adapters/github.py` を読む。`cli` は外部との接続のモジュールを読み、どのモジュールも `cli` を読まない。`version_store` は `names_decide`（タグの読み戻し）と `plugins` を読み、`gather` を読まない。`gather` は `version_store`・`since_decide` を読み、`assemble` を読まない。循環は無い。
+依存の向きは一方向で、循環は無い。
+
+| モジュール | 読むもの | 読まないもの |
+| --- | --- | --- |
+| 判断のモジュール（名前が `_decide.py` で終わるもの） | ほかの判断のモジュール・コントラクトの表だけ | git・GitHub・ファイル |
+| 外部との接続のモジュール（`version_store`・`units`・`gather`・`assemble`・`tagging`・`land`・`record`） | 判断のモジュール・`adapters/git.py`・`adapters/github.py` | — |
+| `cli` | 外部との接続のモジュール | — |
+| `version_store` | `names_decide`（タグの読み戻し）・`plugins` | `gather` |
+| `gather` | `version_store`・`since_decide` | `assemble` |
+
+どのモジュールも `cli` を読まない。
 
 | パス | 種類 | 役割 1 文 | 依存する先 |
 | --- | --- | --- | --- |
@@ -221,7 +231,15 @@ plugins/ndf-next/
 | `tests_decide.is_test_file` | `plugins/ndf-next/src/ndf/domains/crossrefactor/tests_decide.py` | 変更 | `is_test_file(path: str) -> bool` | 表の役割 `test` の行（列が無い行は `test`）だけで見分ける | 無し | `conftest.py` は偽 | 無し |
 | `land_read.store_version` | `plugins/ndf/scripts/release_lib/land_read.py` | 変更 | `store_version(strategy, show) -> str \| None` | `plugin`・`json` 以外の保存先で `None` を返す（決定 11） | 無し | `pubspec`・`tag` で読み出しの例外が出ない | 無し |
 
-`PluginStore.paths`・`JsonStore.units`・`JsonStore.paths`・`TagStore.units`・`TagStore.paths`・`NoneStore.units`・`NoneStore.write`・`NoneStore.paths`・`PubspecStore.units`・`PubspecStore.paths` は、上の同じ名前のメソッドと同じ形で、値だけが決定 2 の表の行に従う（`TagStore.paths`・`NoneStore.paths` は空）。`cli._target_args` は引数 `--units`（`nargs="+"`）と `--pr`（`int`）を足すだけで、ここに書かない。
+次のメソッドは、上の同じ名前のメソッドと同じ形で、値だけが決定 2 の表の行に従う（`TagStore.paths`・`NoneStore.paths` は空）。
+
+- `PluginStore`: `paths`
+- `JsonStore`: `units`・`paths`
+- `TagStore`: `units`・`paths`
+- `NoneStore`: `units`・`write`・`paths`
+- `PubspecStore`: `units`・`paths`
+
+`cli._target_args` は引数 `--units`（`nargs="+"`）と `--pr`（`int`）を足すだけで、ここに書かない。
 
 ## 異常系の処理
 
@@ -349,7 +367,7 @@ plugins/ndf-next/
 | `materials_decide.render` | `versioned` が偽 | 節「バージョン」を出さない |
 | `materials_decide.render` | いつも | 節「届き方」に `reach_line` の 1 行 |
 
-- 繰り返しの終わる条件: `gather.introduced` は本番ブランチの保存先のパスを変えたコミットを新しい順に読み、今のバージョンと違う値に当たった時点で止める（10 系の `untagged_since` と同じ）。`units.build` は `--units` の数だけ回る
+- 繰り返しの終わる条件: `gather.introduced` は本番ブランチの保存先のパスを変えたコミットを新しい順に読む。今のバージョンと違う値に当たった時点で止める（10 系の `untagged_since` と同じ）。`units.build` は `--units` の数だけ回る
 - 計算量の注意: `gather.introduced` は保存先のパスを変えたコミットだけを `git log -- <パス>` で絞ってから `git show` を打つ。単位ごとに 1 回で、ai-plugins の 12 単位でもタグがあれば打たない（タグが先に決まる）。`gather.shipped` はリモートのタグを `ls-remote` 1 回で読む（今と同じ）
 
 ## 内部のデータと定数

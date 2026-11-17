@@ -2,7 +2,7 @@
 
 ## 目的
 
-- **今どうなっているか**: ndf-next のリリースの部分（`plugins/ndf-next/src/ndf/domains/release/`）は、バージョンとバージョンの単位を Claude Code のマーケットプレイスの登録とプラグインの定義からしか読めない。`.claude-plugin` の無いリポジトリでは承認資料・リリースブランチの組み立て・タグのどれも前提の誤りで止まる。base と production が同じ設定では、差分の範囲が空になる
+- **今どうなっているか**: ndf-next のリリースの部分は `plugins/ndf-next/src/ndf/domains/release/` にある。この部分は、バージョンとバージョンの単位を Claude Code のマーケットプレイスの登録とプラグインの定義からしか読めない。`.claude-plugin` の無いリポジトリでは承認資料・リリースブランチの組み立て・タグのどれも前提の誤りで止まる。base と production が同じ設定では、差分の範囲が空になる
 - **誰に効くか**: NDF を使う Web サービス・モバイルアプリ・業務文書だけのリポジトリの開発者と、NDF のリリースを自分のリポジトリから起動したい利用者
 - **変えると何が成り立つか**: 設定のリリースの形・バージョンの保存先・名前の書式で、プラグインの登録が無いリポジトリでも承認資料を組み、リリースブランチを作り、タグを打てる。今の NDF の release Skill のリリースの形 9 種の扱いが表で決まる
 
@@ -56,11 +56,11 @@
 | cross-refactoring（`ndf.domains.crossrefactor`） | 集めるテストのファイル |
 | 10 系の NDF（`plugins/ndf`） | 10 系のリリースの部品（`release_lib`）と、ndf-next のスキーマのコピー |
 
-開発の工程が上流、リリースが下流の関係で、**公開された言語**でつなぐ。リリースは、ブランチ戦略の設定のスキーマ（`contracts/schemas/ndf-settings/project.schema.json`）とリリースの形の表を読む。設定を書くのは解析の `ndf project branch-strategy` だけである。
+開発の工程が上流、リリースが下流の関係で、**公表された言語**でつなぐ。リリースは、ブランチ戦略の設定のスキーマ（`contracts/schemas/ndf-settings/project.schema.json`）とリリースの形の表を読む。設定を書くのは解析の `ndf project branch-strategy` だけである。
 
 テストのファイルの表は、コントラクトの表のコンテキストが持つ**共有カーネル**である。リリースと cross-refactoring はどちらも表を読む側で、表の列と行の追加は持ち主 D2 の決めた形（列の型を `columns` に書く）に従う。この課題は列 `role` と行 `python-conftest` を足す（決定 5）。cross-refactoring は列 `role` が `test` の行だけを読むよう、読む側を合わせる。10 系の NDF とは**順応者**の関係で、ndf-next のスキーマを変えるとコピーを合わせる（決定 11）。
 
-要求の「プロジェクト構造」が挙げる触る場所（`domains/release/`・リリースのテスト・`contracts/`・`issues/`）の外へ及ぶのは次の 4 つで、どれもこの課題の受け入れ条件を満たすのに要る。範囲を広げることは「人へ残す判断」の 6 に載せる。
+要求の「プロジェクト構造」が挙げる触る場所（`domains/release/`・リリースのテスト・`contracts/`・`issues/`）の外へ及ぶのは次の 4 つである。どれもこの課題の受け入れ条件を満たすのに要る。範囲を広げることは「人へ残す判断」の 6 に載せる。
 
 | 触る場所 | 要る理由 |
 | --- | --- |
@@ -259,9 +259,13 @@ graph TB
   CLI --> SCH
 ```
 
-図に描かない要素: マージ・記録（名前の判断を呼ぶだけ）、リリースの設定（材料の収集と組み立てが読む）、cross-refactoring のテストの判定・10 系のバージョンの読み・子の表・テンプレートと手順の文書（コードの依存を持たない）。
+図に描かない要素:
 
-配置: `release-steps` は、ai-plugins では同じコミットの `plugins/ndf-next/bin/ndf` を、利用者のリポジトリでは再利用可能なワークフローが固定した ai-plugins のタグを取り出した `bin/ndf` を GitHub Actions の runner で動かす。会話のセッションは `materials`・`present`・`answer` を手元で動かす。
+- マージ・記録（名前の判断を呼ぶだけ）
+- リリースの設定（材料の収集と組み立てが読む）
+- cross-refactoring のテストの判定・10 系のバージョンの読み・子の表・テンプレートと手順の文書（コードの依存を持たない）
+
+配置: `release-steps` は GitHub Actions の runner で動く。ai-plugins では同じコミットの `plugins/ndf-next/bin/ndf` を動かす。利用者のリポジトリでは、再利用可能なワークフローが固定した ai-plugins のタグを取り出し、その `bin/ndf` を動かす。会話のセッションは `materials`・`present`・`answer` を手元で動かす。
 
 ## 構造
 
@@ -391,7 +395,14 @@ sequenceDiagram
 
 図に描かない要素は、構成要素図の注記に挙げたものと、材料の収集と組み立ての中で呼ばれる判断（名前・変化・バージョンの計算・CHANGELOG・含む PR・承認資料）である。
 
-範囲の終点はリリース方式で決まる。`merge_base_branch` はベースブランチの HEAD、`trunk` の `release_pr` は本番ブランチの HEAD、`release_branch` は選んだスプリントを集めた先頭、`production_pr` は `--pr` の PR の先頭である。範囲の起点もリリース方式で決まる（用語「範囲の起点」と I4）。
+範囲の終点はリリース方式で決まる。範囲の起点もリリース方式で決まる（用語「範囲の起点」と I4）。
+
+| リリース方式 | 範囲の終点 |
+| --- | --- |
+| `merge_base_branch` | ベースブランチの HEAD |
+| `trunk` の `release_pr` | 本番ブランチの HEAD |
+| `release_branch` | 選んだスプリントを集めた先頭 |
+| `production_pr` | `--pr` の PR の先頭 |
 
 ## 非機能の実現方式
 
@@ -445,7 +456,7 @@ sequenceDiagram
 
 **1. 受け入れ条件 12 の `web-trunk`・`docs` を、要求 E3 の「タグが無ければ本番ブランチの最初のコミットから」のとおりに満たすか**
 
-- この設計の読み方: 2 つの種類はリリース方式 `production_pr`・保存先 `none`・タグ無し（`contracts/data/branch-strategy-presets.json`）で、前のバージョンのタグが無い。範囲は本番の PR（分岐点..PR の先頭）にし、「範囲が `origin/main..origin/main` の空にならない」ことで受け入れ条件 12 を満たすとする。要求 E3 の「最初のコミットから」は `trunk` の `release_pr` と `release_branch` にだけ当てる（決定 6）
+- この設計の読み方: 2 つの種類は、リリース方式 `production_pr`・保存先 `none`・タグ無しである（`contracts/data/branch-strategy-presets.json`）。そのため前のバージョンのタグが無い。範囲は本番の PR（分岐点..PR の先頭）にし、「範囲が `origin/main..origin/main` の空にならない」ことで受け入れ条件 12 を満たすとする。要求 E3 の「最初のコミットから」は `trunk` の `release_pr` と `release_branch` にだけ当てる（決定 6）
 - 理由: 毎回のマージがリリースになる方式で最初のコミットから集めると、出し済みの変更をすべて承認資料に並べる
 - 読み方を変えたときの影響: E3 のとおりにすると、`docs` の承認資料が毎回リポジトリの全履歴になる
 
@@ -463,9 +474,9 @@ sequenceDiagram
 
 **4. #3572 の決定 22 との食い違いを、この課題とレーン lr-rel-rest のどちらで解くか**
 
-- この設計の読み方: この課題は前提 2 に従い、保存先の設定を `.ndf/project.json` の `branch_strategy.release.version_store` から読み、インタフェースを決定 22 の表の 4 つのメソッドで main に置く。ブランチの実装との突き合わせの結果（「未確認のまま残ること」の 1 行目）は lr-rel-rest が合わせる
+- この設計の読み方: この課題は前提 2 に従い、保存先の設定を `.ndf/project.json` の `branch_strategy.release.version_store` から読む。インタフェースは決定 22 の表の 4 つのメソッドで main に置く。ブランチの実装との突き合わせの結果（「未確認のまま残ること」の 1 行目）は lr-rel-rest が合わせる
 - 理由: 前提 2（設定は `branch_strategy.release` の 1 か所）と前提 3（決定 22 と食い違わない）は、読む設定ファイルについて両立しない。main の設定のスキーマは #3681 で既に `branch_strategy.release.version_store` を持つ
-- 読み方を変えたときの影響: 決定 22 の形（`.ndf/release.json`・5 つのメソッド）に合わせると、前提 2 を外し、設定のスキーマの `version_store` を `.ndf/release.json` へ移す設計になる
+- 読み方を変えたときの影響: 決定 22 の形（`.ndf/release.json`・5 つのメソッド）に合わせると、前提 2 を外すことになる。設定のスキーマの `version_store` は `.ndf/release.json` へ移す設計になる
 
 **5. 受け入れ条件 7 の「名前の書式の設定が無いとき、タグは今の形」をどう読むか**
 
