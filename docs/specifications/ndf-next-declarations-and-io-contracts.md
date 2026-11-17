@@ -34,7 +34,7 @@ Skill の本文から `ndf` を打つ AI が読み手である。
 
 | 用語 | 指すもの |
 | --- | --- |
-| 宣言 | `.ndf/` に置く、人が決める設定のファイル。置き場の表で種類が `declaration`、置き場が `ndf` の行 |
+| 宣言 | `.ndf/` に置く、人が決める設定のファイル。置き場の表で種類が `ndf_settings`、置き場が `ndf` の行 |
 | 契約のページ | 宣言と入出力の規約を面ごとに表した生成物（`docs/contracts/` の 8 ページ）。手で書かない |
 | 公開する面の表 | エントリポイントの表（`contracts/domains/entrypoints.json`）と、置き場の表の列 `reader` を持つ行 |
 | Skill の入出力の表 | `contracts/domains/skill-io.json`。Skill ごとの `/goal` の終わりの条件・読む宣言・結果の形と、公開しない Skill の引数と環境変数 |

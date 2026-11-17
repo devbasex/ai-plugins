@@ -272,7 +272,7 @@ symlink なら参照先へ書く。表示の本体（`domains/statusline/statusl
 | 置き場 | 内容 |
 | --- | --- |
 | `src/ndf/cli.py` の `COMMANDS` | `"project": "ndf.domains.project.cli"`・`"statusline": "ndf.domains.statusline.cli"`・`"materials": "ndf.domains.materials.cli"` |
-| `scripts/ndf-next-parity/parity/features.json` | 行 `entrypoint:scripts/project-decl.py`・`statusline-switch.sh`・`statusline.sh`・`mode-materials.py` の `to` は S1e。`places` の `S1e` は `src/ndf/domains/project/`・`statusline/`・`materials/`。`supervise.py`・`test-run.py`・`context-policy.py`・`relay.py`・`stage-check.sh` の行は副命令を持つ子（C2・M3b・P1a）のまま |
+| `scripts/ndf-next-parity/parity/features.json` | 行 `entrypoint:scripts/project-decl.py`・`statusline-switch.sh`・`statusline.sh`・`mode-materials.py` の `to` は S1e。`locations` の `S1e` は `src/ndf/domains/project/`・`statusline/`・`materials/`。`supervise.py`・`test-run.py`・`context-policy.py`・`relay.py`・`stage-check.sh` の行は副命令を持つ子（C2・M3b・P1a）のまま |
 | `src/ndf/checks/children.json` | 子 S1e（#3569）: パッケージ `ndf.domains.project`・`ndf.domains.statusline`・`ndf.domains.materials` と `ndf.domains.relay` の足したモジュール（`account_*`・`cli`・`cli_account`・`cli_context`・`context_*`）、順番 8、レーン lr-t2。T2 の `needs` に S1e が入る |
 | `contracts/limits.json` | `project.measure`（120 秒）・`project.git`（60 秒）・`statusline.lock`（10 秒）。アカウントの排他と認証は既存の `claude-accounts.lock`・`relay.claude-auth`・`relay.login-url` を使う |
 | `contracts/domains/env.json` | 読む環境変数 `NDF_ACCOUNTS_DIR`・`NDF_SHARED_CONFIG_DIR`・`NDF_CONTEXT_DIR` の行 |

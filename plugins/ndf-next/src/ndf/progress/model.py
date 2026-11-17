@@ -133,9 +133,9 @@ def gate_label(gate: str) -> str:
     return table()["gates"][gate]
 
 
-def question_id(table_id: str, rev: int, stage: str, step: str, anchor: int) -> str:
+def question_id(machine_id: str, rev: int, stage: str, step: str, anchor: int) -> str:
     """承認ゲートの質問の id。待ちに入った事象の番号（`anchor`）を含むため、変更要求で流し直した質問は別の id になる。"""
-    text = f"{table_id}\0{rev}\0{stage}\0{step}\0{anchor}"
+    text = f"{machine_id}\0{rev}\0{stage}\0{step}\0{anchor}"
     return hashlib.sha256(text.encode()).hexdigest()[:QUESTION_ID_LENGTH]
 
 
