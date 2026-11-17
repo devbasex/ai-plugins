@@ -8,7 +8,7 @@
 
 ## 適用範囲
 
-- **働く範囲**: この設計 PR は `issues/` と用語集だけを変える。用語集で変えるのは正本の `docs/glossary/glossary.json` と、そこから `glossary.py render` で作る `docs/glossary.md` の 2 本である。`.ndf/glossary.json` は正本の置き場を名指す設定で、変えない（C7 に当たらない）。受け入れ条件 19 が守る対象は本文の「`plugins/`・`.github/`・`.ndf/` のファイルを変えない」と読み、括弧書きの「差分が `issues/` に閉じる」は用語集の 2 本を除いて満たす（用語集への反映は「用語」の表が求め、配布物と利用者の設定には触れない）設計が決めた手順は、ai-plugins の入れ替えの子（R0・R1・#3304）と、11.0.0 を入れるすべての利用者の手元（CHANGELOG の案内）で働く
+- **働く範囲**: この設計 PR は `issues/` と用語集だけを変える。用語集で変えるのは正本の `docs/glossary/glossary.json` と、そこから `glossary.py render` で作る `docs/glossary.md` の 2 本である。`.ndf/glossary.json` は正本の置き場を名指す設定で、変えない（C7 に当たらない）。受け入れ条件 19 が守る対象は本文の「`plugins/`・`.github/`・`.ndf/` のファイルを変えない」と読み、括弧書きの「差分が `issues/` に閉じる」は用語集の 2 本を除いて満たす（用語集への反映は「用語」の表が求め、リリース対象と利用者の設定には触れない）設計が決めた手順は、ai-plugins の入れ替えの子（R0・R1・#3304）と、11.0.0 を入れるすべての利用者の手元（CHANGELOG の案内）で働く
 - **プロジェクトごとに違うもの**: 足さない。利用先のリポジトリの宣言は、今の移行のコマンド（`ndf project branch-strategy migrate`）で移す
 - **当たるモード**: `standard`
 
