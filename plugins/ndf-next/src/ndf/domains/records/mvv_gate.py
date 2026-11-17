@@ -113,14 +113,15 @@ def _judged(root: Path, gate_name: str, inputs: Mapping[str, Any], open_hub: Cal
     hub = open_hub(root)
     number = pr_number(root, gate_name, inputs, hub)
     rows = mvv.pr_files(hub, number)
-    facts = mm.facts_from_pr(facts, hub.pull(number).body, mvv.changed_of(rows))
+    facts = mvv.pr_facts(hub, number, facts, rows)
+    shared = principles()
     materials = {
-        "NDF の共通原則": principles(),
+        "NDF の共通原則": shared,
         "プロジェクト MVV": project,
         f"Pull Request #{number} の本文": facts.body if facts.body is not None else "",
         "変えたファイルと差分": mm.patch_material(rows),
     }
-    text = mm.prompt(mm.redlines(principles(), project), materials)
+    text = mm.prompt(mm.redlines(shared, project), materials)
     verdict = _verdict(mvv.vet_sprint(root, {"gate": gate_name, "question": mm.SYSTEM, "material": text}, judge_with(ask)))
     skip, why = may_skip(facts, verdict)
     return mm.gate_outcome(gate_name, verdict, skip, why)

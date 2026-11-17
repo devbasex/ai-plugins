@@ -151,11 +151,9 @@ def changed_of(rows: list[dict[str, Any]]) -> list[Changed]:
                     f["status"] == "renamed") for f in rows]  # fmt: skip
 
 
-def _changed(hub: GitHub, number: int) -> list[Changed]:
-    """PR の変えたファイル（`github.list-pages` ページまで）。超えれば `GitHubError`。"""
-    return changed_of(pr_files(hub, number))
+def pr_facts(hub: GitHub, number: int, base: MvvFacts, rows: Optional[list[dict[str, Any]]] = None) -> MvvFacts:
+    """PR の本文と変えたファイルを読み、機械の検査の事実を埋める（検査 6 の `body`・`claimed`）。
 
-
-def pr_facts(hub: GitHub, number: int, base: MvvFacts) -> MvvFacts:
-    """PR の本文と変えたファイルを読み、機械の検査の事実を埋める（検査 6 の `body`・`claimed`）。"""
-    return mm.facts_from_pr(base, hub.pull(number).body, _changed(hub, number))
+    `rows` は読み済みの変えたファイル（`pr_files` の結果）。無ければここで読む。"""
+    body = hub.pull(number).body
+    return mm.facts_from_pr(base, body, changed_of(rows if rows is not None else pr_files(hub, number)))
