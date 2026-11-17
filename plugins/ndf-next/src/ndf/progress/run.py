@@ -676,8 +676,9 @@ def _step(d: Drive, v: View, m: Move) -> Optional[dict[str, Any]]:
 
 def _drive(d: Drive) -> dict[str, Any]:
     first = read(d.st, d.table_id)
-    # 1 手ごとに行かステップが 1 つ進む（行ごとに始めと終わり、ステップごとに流すと答えの読み取り）。手の数はこの数を超えない
-    for _ in range(3 * (len(first.snap.stages) + len(first.snap.steps()))):
+    # 1 手ごとに行かステップが 1 つ進む（行ごとに始めと終わり、ステップごとに流すと答えの読み取り）に、最後の完了の 1 手を
+    # 足す。手の数はこの数を超えない。工程の無い進行表（開発ループの行。#3558）も完了の 1 手で終わる
+    for _ in range(3 * (len(first.snap.stages) + len(first.snap.steps())) + 1):
         v = read(d.st, d.table_id)
         out = _step(d, v, decide(v))
         if out is not None:

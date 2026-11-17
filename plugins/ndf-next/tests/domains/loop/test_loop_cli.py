@@ -88,7 +88,7 @@ def test_next_of_get_targets_the_repo_and_asks_for_the_session(
 
 
 def test_issue_2714_answer_reads_the_head_once(loop: Callable[..., dict], tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    heads = iter(["a" * 40, "a" * 40, "c" * 40])
+    heads = iter(["a" * 40, "c" * 40, "a" * 40])
     calls: list[int] = []
 
     def head_of(cwd: Path, pr: int) -> str:
@@ -99,11 +99,18 @@ def test_issue_2714_answer_reads_the_head_once(loop: Callable[..., dict], tmp_pa
     loop("start", "demo", "--session", "s1")
     loop("select", "demo", "--session", "s1", "--candidates", _candidates(tmp_path, [{"issue": 1}]))
     loop("gate", "demo", "--pr", "9")
-    ok = loop("answer", "demo", "--pr", "9", "--answer", "revise", "--note", "直す")
-    assert ok["metrics"]["head"] == "a" * 40 and len(calls) == 2
     moved = loop("answer", "demo", "--pr", "9", "--answer", "approved")
-    assert moved["cause"]["kind"] == "precondition" and len(calls) == 3
+    assert moved["cause"]["kind"] == "precondition" and len(calls) == 2
+    ok = loop("answer", "demo", "--pr", "9", "--answer", "revise", "--note", "直す")
+    assert ok["metrics"]["head"] == "a" * 40 and len(calls) == 3
     assert loop("get", "demo", "--field", "rejections")["items"][0]["rejections"][0]["note"] == "直す"
+
+
+def test_issue_3558_a_halted_loop_bound_to_a_row_points_at_the_row_table(loop: Callable[..., dict], tmp_path: Path) -> None:
+    loop("start", "demo", "--session", "s1", "--row", "t1")
+    out = loop("stop", "demo", "--by", "organizer", "--now")
+    assert out["next"] == {"argv": [result.ENTRY, "progress", "next", "t1"]}
+    assert loop("get", "demo", "--field", "row")["items"][0]["row"] == "t1"
 
 
 def test_issue_2435_stop_now_is_read_as_stopped(loop: Callable[..., dict], tmp_path: Path) -> None:

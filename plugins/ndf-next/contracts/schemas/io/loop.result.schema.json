@@ -83,6 +83,18 @@
         "renamed": {
           "type": "integer",
           "description": "改名を当てて見つけた名前の数（design-tests）"
+        },
+        "lines": {
+          "type": "integer",
+          "description": "範囲の変更行数。除く PR の分を数えない（check-trigger）"
+        },
+        "threshold": {
+          "type": "integer",
+          "description": "行数の閾値（check-trigger）"
+        },
+        "excluded": {
+          "type": "integer",
+          "description": "数えなかった PR のコミットの数（check-trigger）"
         }
       }
     },
@@ -129,6 +141,13 @@
               "null"
             ],
             "description": "鍵を持つセッション（get）"
+          },
+          "row": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "結び付けたレーンの行の進行表の ID（get）"
           },
           "laps": {
             "type": "array",
@@ -206,6 +225,18 @@
           "renamed_to": {
             "type": "string",
             "description": "当てた改名（design-tests）"
+          },
+          "trigger": {
+            "type": "string",
+            "description": "立ったトリガーの名前（check-trigger）"
+          },
+          "value": {
+            "type": "integer",
+            "description": "トリガーの測った値（check-trigger）"
+          },
+          "threshold": {
+            "type": "integer",
+            "description": "トリガーの閾値（check-trigger）"
           }
         }
       }

@@ -126,6 +126,44 @@
       "additionalProperties": false,
       "properties": {
         "subcommand": {
+          "const": "check-trigger",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        },
+        "--base": {
+          "type": "string",
+          "description": "範囲の始め（前回の検査の位置）"
+        },
+        "--head": {
+          "type": "string",
+          "default": "HEAD",
+          "description": "範囲の終わり"
+        },
+        "--exclude": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "数えない PR（検査・リリース）の取り込みのコミット"
+        },
+        "--threshold": {
+          "type": "integer",
+          "description": "行数の閾値（既定は .ndf/pace.json の triggers.lines）"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--base"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
           "const": "close-plan",
           "description": "下位の命令（入れ子は空白でつなぐ）"
         },
@@ -310,6 +348,7 @@
             "status",
             "stop",
             "holder",
+            "row",
             "laps",
             "current",
             "rejections",
@@ -534,6 +573,10 @@
         "--session": {
           "type": "string",
           "description": "打ったセッションの識別子"
+        },
+        "--row": {
+          "type": "string",
+          "description": "結び付けるレーンの行の進行表の ID（`ndf progress new --loop` の結果）"
         }
       },
       "required": [

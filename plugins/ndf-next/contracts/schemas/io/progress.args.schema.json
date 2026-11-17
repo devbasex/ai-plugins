@@ -159,6 +159,10 @@
             "type": "integer"
           }
         },
+        "--loop": {
+          "type": "string",
+          "description": "開発ループの行の進行表を作る（工程なし。ループの名前）"
+        },
         "--pace": {
           "type": "string",
           "default": "normal"
@@ -181,9 +185,7 @@
       },
       "required": [
         "subcommand",
-        "name",
-        "--mode",
-        "--issues"
+        "name"
       ]
     },
     {

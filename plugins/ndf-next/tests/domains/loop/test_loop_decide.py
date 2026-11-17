@@ -177,10 +177,45 @@ def test_issue_2714_moved_head_refuses_the_answer() -> None:
 
 def test_issue_2400_revise_answer_is_kept_as_a_rejection() -> None:
     state = _gated()
-    state = _apply(state, ctl.answer(state, _ctx(), 77, "revise", "a" * 40, "受け入れ条件が足りない"))
     state = _apply(state, ctl.answer(state, _ctx(), 77, "approved", "a" * 40, ""))
+    state = _apply(state, ctl.answer(state, _ctx(), 77, "revise", "a" * 40, "受け入れ条件が足りない"))
     got = state.rejections()
     assert [(r["pr"], r["answer"], r["note"]) for r in got] == [(77, "revise", "受け入れ条件が足りない")]
+
+
+@pytest.mark.parametrize("given", ["revise", "rejected"])
+def test_issue_2466_an_answer_not_to_go_on_returns_the_lap_to_the_human(given: str) -> None:
+    """続けない答えは止まったプランを流さず、周を「人へ戻した」で締め、答えの中身を理由に残す。"""
+    state = _gated()
+    d = ctl.answer(state, _ctx(), 77, given, "a" * 40, "まだ")
+    after = _apply(state, d)
+    assert _kinds(d) == [rec.GATE_ANSWERED, rec.LAP_CLOSED]
+    assert after.current is None and after.laps[-1].outcome == rec.RETURNED and "まだ" in str(after.laps[-1].reason)
+    assert d.metrics["outcome"] == rec.RETURNED and _argv(d.next) == ("select",)
+    assert ctl.answer(after, _ctx(), 77, "approved", "a" * 40, "").kind == ctl.PRECONDITION
+
+
+def test_issue_2466_an_approval_keeps_the_lap_open_and_a_stop_request_halts_on_return() -> None:
+    state = _gated()
+    approved = ctl.answer(state, _ctx(), 77, "approved", "a" * 40, "")
+    assert _kinds(approved) == [rec.GATE_ANSWERED] and _apply(state, approved).current is not None
+    stopping = _apply(state, ctl.stop(state, _ctx(None), "human", "終わり", False))
+    d = ctl.answer(stopping, _ctx(), 77, "rejected", "a" * 40, "")
+    assert _kinds(d) == [rec.GATE_ANSWERED, rec.LAP_CLOSED, rec.LOOP_HALTED] and _apply(stopping, d).status == rec.HALTED
+
+
+def test_issue_3558_a_loop_bound_to_a_lane_row_ends_the_row_once_halted() -> None:
+    """レーンの行に結び付けたループは、止まると次の 1 手が行の進行表への `progress next` になる。"""
+    bound = ctl.start(rec.LoopState(), _ctx(), TTL, "t1")
+    assert _kinds(bound) == [rec.LEASE_TAKEN, rec.ROW_BOUND]
+    state = _apply(rec.LoopState(), bound)
+    assert state.row == "t1" and ctl.start(state, _ctx(), TTL, "t2").kind == ctl.REFUSED
+    assert _kinds(ctl.start(state, _ctx(), TTL, "t1")) == [rec.LEASE_TAKEN]
+    state = _apply(state, ctl.open_lap(state, _ctx(), (1,)))
+    d = ctl.stop(state, _ctx(None), "organizer", "", True)
+    assert d.next == ctl.Step(("next", "t1"), tool="progress")
+    assert ctl.next_step(_apply(state, d), "demo") == d.next
+    assert ctl.stop(_running((1,)), _ctx(None), "organizer", "", True).next is None
 
 
 @pytest.mark.parametrize(
