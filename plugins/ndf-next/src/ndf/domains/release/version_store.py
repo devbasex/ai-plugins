@@ -102,6 +102,10 @@ class PluginStore:
     files: tuple[dict, ...] = ()
     kind: str = "plugin"
 
+    @classmethod
+    def from_setting(cls, root: Path, name: str, store: dict, release: dict) -> "PluginStore":
+        return cls(Path(root), tuple(store["files"]) if "files" in store else ())
+
     def _plugins(self) -> dict[str, plugins_mod.Plugin]:
         return plugins_mod.by_name(plugins_mod.load(self.root))
 
@@ -131,6 +135,10 @@ class JsonStore:
     pointer: str
     files: tuple[dict, ...] = ()
     kind: str = "json"
+
+    @classmethod
+    def from_setting(cls, root: Path, name: str, store: dict, release: dict) -> "JsonStore":
+        return cls(Path(root), name, store["path"], store["pointer"], tuple(store["files"]) if "files" in store else ())
 
     def units(self) -> list[Unit]:
         return [Unit(self.name, "")]
@@ -170,6 +178,10 @@ class PubspecStore:
     path: str
     kind: str = "pubspec"
 
+    @classmethod
+    def from_setting(cls, root: Path, name: str, store: dict, release: dict) -> "PubspecStore":
+        return cls(Path(root), name, store["path"])
+
     def units(self) -> list[Unit]:
         return [Unit(self.name, "")]
 
@@ -200,6 +212,10 @@ class TagStore:
     formats: names_decide.NameFormats
     kind: str = "tag"
 
+    @classmethod
+    def from_setting(cls, root: Path, name: str, store: dict, release: dict) -> "TagStore":
+        return cls(name, names_decide.formats_of(release))
+
     def units(self) -> list[Unit]:
         return [Unit(self.name, "")]
 
@@ -220,6 +236,10 @@ class NoneStore:
 
     name: str
     kind: str = "none"
+
+    @classmethod
+    def from_setting(cls, root: Path, name: str, store: dict, release: dict) -> "NoneStore":
+        return cls(name)
 
     def units(self) -> list[Unit]:
         return [Unit(self.name, "")]
@@ -242,17 +262,8 @@ def load(root: Path, strategy: Strategy, repo_name: str) -> VersionStore:
     """設定の保存先の種類のアダプター。表に無い種類は `StoreError`。`repo_name` は `owner/name` か `name`。"""
     release = strategy.section["release"]
     store = release["version_store"]
-    kind = store["kind"] if "kind" in store else None
+    kind = store.get("kind")
     if kind not in KINDS:
         raise StoreError(f"バージョンの保存先の種類 {kind!r} は扱えない。取れる種類: {', '.join(KINDS)}")
     name = release["plugin"] if "plugin" in release else repo_name.rsplit("/", 1)[-1]
-    files = tuple(store["files"]) if "files" in store else ()
-    if kind == "plugin":
-        return PluginStore(Path(root), files)
-    if kind == "json":
-        return JsonStore(Path(root), name, store["path"], store["pointer"], files)
-    if kind == "pubspec":
-        return PubspecStore(Path(root), name, store["path"])
-    if kind == "tag":
-        return TagStore(name, names_decide.formats_of(release))
-    return NoneStore(name)
+    return KINDS[kind].from_setting(root, name, store, release)
