@@ -19,7 +19,9 @@ import pytest
 
 from ndf.core.branch_strategy import Strategy
 from ndf.domains.release import assemble
+from ndf.adapters import git as git_mod
 from ndf.domains.release import cli as release_cli
+from ndf.domains.release import units as units_mod
 
 from ._fakes import FakeHub, configure, pull, section, write_json
 
@@ -233,3 +235,50 @@ def test_unsupported_form_stops_every_step(tmp_path: Path, monkeypatch: pytest.M
         got = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
         assert code != 0 and got["cause"]["kind"] == "precondition", argv
         assert "desktop" in got["cause"]["detail"] and "release-forms.json" in got["cause"]["detail"]
+
+
+def _sprints_origin(tmp_path: Path) -> Path:
+    """本番（main）と、新しいファイルを足す sprint/a、main に入り済みの sprint/old、sprint/a と同じファイルを違う中身で足す
+    sprint/clash を持つ origin の、main を取り出した clone。"""
+    seed = _seed(tmp_path, {"a.txt": "a\n"})
+    git_sandbox.sh(seed, "branch", "sprint/old")
+    for name, text in (("sprint/a", "from a\n"), ("sprint/clash", "from clash\n")):
+        git_sandbox.sh(seed, "switch", "-q", "-c", name, "main")
+        _commit(seed, {"shared.txt": text}, name)
+    git_sandbox.sh(seed, "switch", "-q", "main")
+    return _publish(tmp_path, seed, "main")
+
+
+def test_units_build_merges_each_sprint_on_a_detached_head(tmp_path: Path) -> None:
+    """現状固定（I-014）: 本番の HEAD から detached HEAD で単位を順に `--no-ff` でマージし、本番に入り済みの単位は飛ばして
+    先頭の SHA を返す。マージの件名は `Merge <スプリント> into <リリースブランチ>`。手元のブランチは作らず動かさない。"""
+    work = _sprints_origin(tmp_path)
+    repo_git = git_mod.Git(work)
+    head = units_mod.build(repo_git, "origin", "main", ["sprint/old", "sprint/a"], "release/v1.0.1")
+    assert head == git_sandbox.sh(work, "rev-parse", "HEAD").strip()
+    assert git_sandbox.sh(work, "log", "--format=%s", "origin/main..HEAD").splitlines() == [
+        "Merge sprint/a into release/v1.0.1",
+        "sprint/a",
+    ]
+    assert git_sandbox.sh(work, "rev-parse", "HEAD^1").strip() == git_sandbox.sh(work, "rev-parse", "origin/main").strip()
+    assert repo_git.attempt("symbolic-ref", "-q", "HEAD").returncode != 0
+    assert git_sandbox.sh(work, "for-each-ref", "--format=%(refname:short) %(objectname)", "refs/heads") == (
+        "main " + git_sandbox.sh(work, "rev-parse", "origin/main")
+    )
+
+
+@pytest.mark.parametrize(
+    ("units", "match"),
+    [
+        ([], "--units"),
+        (["sprint/none"], "origin の sprint/none を取得できない"),
+        (["sprint/a", "sprint/clash"], "sprint/clash を release/v1.0.1 へマージできない"),
+    ],
+)
+def test_units_build_stops_without_units_unknown_sprint_or_conflict(tmp_path: Path, units: list[str], match: str) -> None:
+    """現状固定（I-014）: 単位が無い・取得できない・衝突するときは `UnitsError`。衝突したマージは取り消す。"""
+    work = _sprints_origin(tmp_path)
+    with pytest.raises(units_mod.UnitsError, match=match):
+        units_mod.build(git_mod.Git(work), "origin", "main", units, "release/v1.0.1")
+    assert git_sandbox.sh(work, "status", "--porcelain").strip() == ""
+    assert not (work / ".git" / "MERGE_HEAD").exists()
