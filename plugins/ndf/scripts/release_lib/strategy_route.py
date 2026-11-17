@@ -142,19 +142,11 @@ def release_selected(ctx: ReleaseCtx, approved, ops, case=None) -> tuple:
     回数）。(本番の PR, マージコミット, items, metrics, 戻すマージ) を返し、戻すマージ（`merge_back_after`）は呼び手が公開の後に打つ。
     承認の外の変更は承認ゲート（10）で止め、組み直しへ戻す。`case` が CD のある場合（#2773）なら、承認したコミットを引数で受けず、
     本番の PR の先端と PR の上の承認（証跡かレビュー）の完全な一致だけで通す（`_merge_exact`。許可リストの許容を使わない）。"""
-    root, a, plugin, plugins, branch, base, prod = ctx.root, ctx.a, ctx.plugin, ctx.plugins, ctx.branch, ctx.base, ctx.prod
+    root, a, plugin, branch, base, prod = ctx.root, ctx.a, ctx.plugin, ctx.branch, ctx.base, ctx.prod
     branches = ReleaseBranches(release=branch, base=base, production=prod)
     if a.channel != "prod":
         raise StepError("選んで集める取り込み方の release は --channel prod だけ（開発版はベースブランチで出す）", EXIT_UNREADABLE)
-    metrics = {"channel": a.channel, "version": a.version, "release_pr": None, "sync_pr": None, "main_pr": None, "tag": None}
-    metrics.update(
-        {
-            "merge_commit": None,
-            "plugins": ",".join(plugins),
-            "release_strategy": getattr(a, "release_strategy", None),
-            "approved_sha": approved,
-        }
-    )
+    metrics = ctx.prod_metrics(release_strategy=getattr(a, "release_strategy", None), approved_sha=approved)
     items: list[dict] = []
     git(root, "fetch", "-q", "origin", "--tags")
     done = ops.find_pr(root, branch, prod, states=("MERGED", "OPEN"))

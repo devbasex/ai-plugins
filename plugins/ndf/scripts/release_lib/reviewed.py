@@ -97,19 +97,9 @@ class ProdOps:
 def release_prod(ctx: ReleaseCtx, case, ops: ProdOps):
     """CD のある場合の本番: 開発版の PR → 本番の PR → CI の待ち → 承認の照合 → マージ（`cd-admin` だけ迂回）→ 公開の後（#2773・#3506）。
     承認が先端と一致しなければ本番の PR を開いたまま承認ゲート（10）で止める。"""
-    root, a, plugin, plugins, prod = ctx.root, ctx.a, ctx.plugin, ctx.plugins, ctx.prod
+    root, a, plugin, prod = ctx.root, ctx.a, ctx.plugin, ctx.prod
     ver = a.version
-    metrics = {
-        "channel": "prod",
-        "version": ver,
-        "case": case.case,
-        "release_pr": None,
-        "sync_pr": None,
-        "main_pr": None,
-        "tag": None,
-        "merge_commit": None,
-        "plugins": ",".join(plugins),
-    }
+    metrics = ctx.prod_metrics(case=case.case)
     items: list[dict] = []
     main_pr = _open_prod_pr(ctx, items, metrics, ops, case)
     repo = repo_or_stop(root)

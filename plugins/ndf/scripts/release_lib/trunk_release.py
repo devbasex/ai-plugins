@@ -92,16 +92,7 @@ def waiting_out(ctx: ReleaseCtx, pr: int, head: str, approved: str | None, items
 
 
 def _metrics(ctx: ReleaseCtx, pr: int | None) -> dict:
-    return {
-        "channel": "prod",
-        "version": ctx.a.version,
-        "release_pr": pr,
-        "sync_pr": None,
-        "main_pr": pr,
-        "tag": None,
-        "merge_commit": None,
-        "plugins": ",".join(ctx.plugins),
-    }
+    return ctx.prod_metrics(release_pr=pr, main_pr=pr)
 
 
 def _landed_pr(ctx: ReleaseCtx, ops):
