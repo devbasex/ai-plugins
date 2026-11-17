@@ -483,3 +483,28 @@ def _row(key: str, declared: Any, ruleset: str) -> dict[str, Any]:
 def test_ruleset_mismatch_current_behavior(kind: str, merge: dict, approval: dict, kw: dict, expected: list) -> None:
     """現状固定（I-005）。根拠は仕様ではなく今の出力で、行の中身と並びの両方を固定する。"""
     assert land.ruleset_mismatch(_decl(kind, merge, approval), facts(**kw)) == expected
+
+
+def _held_hub(open_at: list[tuple[int, str]]) -> StrategyHub:
+    """承認済みの版上げの PR #7（キューの外）と、版上げでない PR #8・承認されていない版上げの PR #9 が本番ブランチ宛てに開いている。"""
+    other = "8" * 40
+    hub = _queue_hub(head=H1, approved=H1)
+    # `land` はリリースのブランチの PR だけを受ける（plugin）。#8 は版数が本番と同じで版上げでない
+    hub.pulls[8] = pull(number=8, head=other)
+    hub.pulls[9] = pull(number=9, head=H2)
+    hub.comments_of[8] = [_trail("approved", other)]
+    hub.versions.update({other: "1.0.0", H2: "1.0.2"})
+    hub.open_at = open_at
+    return hub
+
+
+def test_land_holds_a_non_bump_pr_while_an_approved_release_pr_is_outside_the_queue() -> None:
+    """現状固定（I-013）: 公開の `land` を通して決定 18 を固定する。キューの外に今の head が承認された版上げの PR（#7）が
+    あれば、版上げでない PR（#8）は入れずに止まる。承認されていない版上げの PR（#9）だけなら保留しない。"""
+    hub = _held_hub([(7, H1), (8, "8" * 40), (9, H2)])
+    done = _lander(hub, strategy("plugin")).land(8)
+    assert not done.merged and done.kind == "refused" and "#7" in done.detail and "#9" not in done.detail
+    assert hub.merged == [] and hub.merge_jumps == []
+    hub = _held_hub([(8, "8" * 40), (9, H2)])
+    done = _lander(hub, strategy("plugin")).land(8)
+    assert done.merged and hub.merged == [8] and hub.merge_jumps == [False]
