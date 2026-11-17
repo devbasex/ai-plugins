@@ -9,7 +9,7 @@
 | 種類 | 条件 |
 | --- | --- |
 | `missing` | 宣言が無い |
-| `broken` | 宣言か `.ndf/worktree.json` が読めない・宣言がスキーマに合わない |
+| `broken` | 宣言が読めない・スキーマに合わない |
 | `stale` | 解析の記録が無い・解析器の版が古い・入力の指紋かブランチの構成が変わった・`--force` |
 | `fresh` | それ以外 |
 """
@@ -23,6 +23,7 @@ from typing import Any, NamedTuple, Optional
 from ndf import contracts
 from ndf.contracts import facts
 from ndf.adapters import git
+from ndf.core import branch_strategy as bs
 from ndf.domains.records import files, jsonfile
 
 # 解析器の版。測る項目・入力のパスの表を変えたら上げる（上がると check が古いと判定する。旧い project_lib と同じ値）
@@ -106,11 +107,13 @@ def branch_state(repo: git.Git, declared: tuple[str, ...] = (), remote: Optional
     return {"head": head, "present": present}
 
 
-def declared_branches(worktree: Optional[dict[str, Any]]) -> tuple[str, ...]:
-    """`.ndf/worktree.json` の起点と本番の名前（文字列のものだけ）。"""
-    if worktree is None:
+def declared_branches(decl: Optional[dict[str, Any]]) -> tuple[str, ...]:
+    """宣言のブランチ戦略（`branch_strategy.branches`）のベースブランチと本番ブランチの名前（文字列のものだけ）。"""
+    section = decl.get(bs.SECTION) if isinstance(decl, dict) else None
+    branches = section.get("branches") if isinstance(section, dict) else None
+    if not isinstance(branches, dict):
         return ()
-    return tuple(worktree[k] for k in ("base_branch", "production_branch") if k in worktree and isinstance(worktree[k], str))
+    return tuple(branches[k] for k in ("base", "production") if k in branches and isinstance(branches[k], str))
 
 
 def diff(recorded: dict[str, Any], current: dict[str, str]) -> list[str]:
@@ -138,23 +141,22 @@ def repo_dirs(root: Path) -> tuple[git.Git, Path]:
     return top, main
 
 
-def load(main: Path) -> tuple[Optional[dict[str, Any]], Optional[dict[str, Any]]]:
-    """宣言と `.ndf/worktree.json`。読めない・宣言がスキーマに合わなければ `JsonFileError`。"""
+def load(main: Path) -> Optional[dict[str, Any]]:
+    """宣言（無ければ None）。読めない・スキーマに合わなければ `JsonFileError`。"""
     decl = _read(files.path(main, "project"))
-    worktree = _read(files.path(main, "worktree"))
     if decl is not None:
         errs = contracts.schema_errors(decl, SCHEMA)
         if errs:
             raise jsonfile.JsonFileError(f"{files.relpath('project')} が形に合わない: {'; '.join(errs[:5])}")
-    return decl, worktree
+    return decl
 
 
-def _stale_reasons(repo: git.Git, analysis: dict[str, Any], worktree: Optional[dict[str, Any]]) -> list[str]:
+def _stale_reasons(repo: git.Git, analysis: dict[str, Any], decl: dict[str, Any]) -> list[str]:
     reasons: list[str] = []
     if analysis["analyzer"] < ANALYZER:
         reasons.append(f"解析器の版が古い（{analysis['analyzer']} < {ANALYZER}）")
     reasons += [f"変わった入力: {p}" for p in diff(analysis["inputs"], inputs(repo))]
-    now = branch_state(repo, declared_branches(worktree))
+    now = branch_state(repo, declared_branches(decl))
     if analysis["branches"] != now:
         reasons.append(f"変わった入力: ブランチの構成（{analysis['branches']} → {now}）")
     return reasons
@@ -164,7 +166,7 @@ def judge(root: Path, force: bool) -> Judged:
     """宣言が新しい・無い・古い・壊れているのどれかを決める。判定できなければ `CheckError`。"""
     repo, main = repo_dirs(root)
     try:
-        decl, worktree = load(main)
+        decl = load(main)
     except jsonfile.JsonFileError as exc:
         return Judged(BROKEN, [f"{exc}。直してから打ち直す"])
     if decl is None:
@@ -172,7 +174,7 @@ def judge(root: Path, force: bool) -> Judged:
     analysis = decl["analysis"] if "analysis" in decl and isinstance(decl["analysis"], dict) else None
     if analysis is None:
         return Judged(STALE, ["解析の記録（analysis）が無い（手で書いた宣言）"])
-    reasons = _stale_reasons(repo, analysis, worktree)
+    reasons = _stale_reasons(repo, analysis, decl)
     if not reasons and force:
         reasons.append("変わった入力: 強制（--force）")
     return Judged(STALE if reasons else FRESH, reasons, len(analysis["inputs"]))

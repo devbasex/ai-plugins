@@ -203,7 +203,7 @@ worktree・チーム・公開・[pace.schema.json](../../contracts/schemas/decla
 
 ## `.ndf/project.json`（project）
 
-worktree（印のキーはメインディレクトリ）・チーム・公開・[project.schema.json](../../contracts/schemas/declarations/project.schema.json)。読む工程: `ndf records preflight`（工程の前の確かめで、知らないキーを数える）・`ndf release-steps`（本番のマージで production_merge をメインディレクトリから読む）・`ndf refactor`（リファクタリングで test.suites の収集のコマンドを読む）・`ndf progress`（進行表を作るときに workflow.stages の工程の有効・無効を読む）
+worktree・チーム・公開・[project.schema.json](../../contracts/schemas/declarations/project.schema.json)。読む工程: `ndf records preflight`（工程の前の確かめで、知らないキーを数える）・`ndf release-steps`（本番のマージで production_merge をメインディレクトリから読む）・`ndf refactor`（リファクタリングで test.suites の収集のコマンドを読む）・`ndf progress`（進行表を作るときに workflow.stages の工程の有効・無効を読む）
 
 言語・テスト・CI・リリースの経路・課題の置き場の宣言。人と解析（M7）が書く。無ければ既定で動く
 
@@ -214,14 +214,14 @@ worktree（印のキーはメインディレクトリ）・チーム・公開・
 | `branch_strategy` | BranchStrategy | — | — | 任意 | ブランチ戦略の宣言（#3672）。ブランチの名前・取り込み方・リリース・承認・マージを 1 か所で持ち、ndf project branch-strategy だけが作る・更新する・移す・消す。工程の部品は ndf.core.branch_strategy で読む |
 | `checks` | Checks か Unknown か null | — | — | 任意 | 静的解析・整形の Tool の並び |
 | `ci` | Ci か Unknown か null | — | — | 任意 | CI の提供元・ワークフロー・必須のチェック |
-| `delivery` | array of Delivery か Unknown か null | — | — | 任意 | リリースの経路の行。本番・ベースブランチで動く行は channel で指し、ブランチ名を写さない |
+| `delivery`（非推奨。読み手は読まない） | array of Delivery か Unknown か null | — | — | 任意 | 旧い宣言。ndf project branch-strategy migrate が branch_strategy.release.deliveries へ移す。解析は測らない・書かない |
 | `docs` | Docs か Unknown か null | — | — | 任意 | 差分の文書のファイルの分け方（文書・振る舞いを決める文書・テストが読む文書とそのテスト） |
 | `instructions` | Instructions か Unknown か null | — | — | 任意 | 指示書のファイル・読み込み・注記 |
 | `issues` | Issues か Unknown か null | — | — | 任意 | 課題の置き場（primary と others） |
 | `languages` | array of Language か Unknown か null | — | — | 任意 | 言語ごとの名前・フレームワーク・ファイルの数・版の並び。解析（M7）が書く |
 | `materials` | Materials か Unknown か null | — | — | 任意 | 材料の宣言（見直しと大整理が読むニーズとシーズの調査の読み先・後回しのマイルストーン・原因の型・裏付けの計測） |
 | `ndf_policies` | NdfPolicies か Unknown か null | — | — | 任意 | NDF の方針の採否（doc_lint・reject_md_wording_tests など） |
-| `production_merge`（メインディレクトリから読む） | ProductionMerge か Unknown か null | — | — | 任意 | 本番の Pull Request のマージの方式。admin が true なら、本番チャネルが承認レビューを必須にするとき、承認ゲートの承認の後に管理者の迂回でマージする |
+| `production_merge`（非推奨。読み手は読まない） | ProductionMerge か Unknown か null | — | — | 任意 | 旧い宣言。ndf project branch-strategy migrate が branch_strategy.merge へ移す。解析は測らない・書かない |
 | `services` | Services か Unknown か null | — | — | 任意 | テストと動作の確かめに要るコンテナ・compose のファイル・データベース |
 | `test` | Test か Unknown か null | — | — | 任意 | テストの戦略（suites）。テストのコマンドの正本 |
 | `test_duration`（非推奨。読み手は読まない） | TestDuration か Unknown か null | — | — | 任意 | 読み手は読まない（今の版の読み手が読む値。11.0.0 の後に消す） |

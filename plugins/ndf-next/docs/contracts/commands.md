@@ -245,13 +245,13 @@
 
 | 呼び方 | 引数 |
 | --- | --- |
+| `ndf project branch-strategy` | `verb`（string・必須・位置・値 `init`・`measure`・`write`・`migrate`・`remove`）: init・measure・write・migrate・remove<br>`--kind`（string・任意・値 `web-develop`・`web-trunk`・`mobile`・`docs`・`plugin`）: 代表のリポジトリの種類（init は必須。measure・write は候補の先頭にする）<br>`--answers`（string・任意）: 問いへの答え（セクションの JSON Pointer → 値）<br>`--result`（string・任意）: write の土台にする measure の結果（省けば今のセクション、無ければ測り直す）<br>`--digest`（string・任意）: 示した差分のハッシュ。合うときだけ書く<br>`--dry-run`（boolean・任意）: init で書かずに差分とハッシュだけを示す<br>`--root`（string・任意・既定 `"."`）: リポジトリの作業場所 |
 | `ndf project check` | `--force`（boolean・任意）: 新しくても古いと判定する（手動の再解析）<br>`--root`（string・任意・既定 `"."`）: リポジトリの作業場所 |
-| `ndf project drift` | `--measure`（string・必須）: ndf project measure の測定の結果<br>`--root`（string・任意・既定 `"."`）: リポジトリの作業場所 |
 | `ndf project measure` | `--out`（string・必須）: 測定の結果の置き場（リポジトリの外の一時ディレクトリ）<br>`--budget`（number・任意・既定 `120.0`）: 締め切りの秒（既定 120）<br>`--root`（string・任意・既定 `"."`）: リポジトリの作業場所 |
 | `ndf project schema` | `--out`（string・任意）: 書く先。省けば標準出力 |
 | `ndf project write` | `--measure`（string・必須）: ndf project measure の測定の結果<br>`--answers`（string・任意）: 問いの項目への答え（キー → {value} か {unknown}）<br>`--dry-run`（boolean・任意）: 書かずに差分だけを出す<br>`--root`（string・任意・既定 `"."`）: リポジトリの作業場所 |
 
-結果の `metrics`: `declared`（boolean）・`drifted`（integer）・`dry_run`（boolean）・`elapsed_seconds`（number）・`files`（array of string）・`inputs`（integer）・`measured`（integer）・`out`（string）・`question`（integer）・`unknown`（integer）・`unknown_items`（array of string）・`written`（integer）。`items` の要素: `analyzed`（—）・`confidence`（string か null）・`declared`（—）・`evidence`（array）・`kept_previous`（boolean）・`key`（string）・`kind`（string）・`measured`（—）・`name`（string）・`origin`（string）・`pattern`（string）・`proposal`（string）・`reason`（string）・`result`（string）・`source`（string）・`text`（string）
+結果の `metrics`: `dry_run`（boolean）・`elapsed_seconds`（number）・`files`（array of string）・`inputs`（integer）・`measured`（integer）・`out`（string）・`question`（integer）・`unknown`（integer）・`unknown_items`（array of string）・`written`（integer）。`items` の要素: `analyzed`（—）・`declared`（—）・`kept_previous`（boolean）・`key`（string）・`kind`（string）・`name`（string）・`origin`（string）・`pattern`（string）・`reason`（string）・`result`（string）・`source`（string）・`text`（string）
 
 ## `ndf records`
 

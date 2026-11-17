@@ -1,7 +1,0 @@
-{
-  "path": "plugins/ndf-next/src/ndf/domains/project/measure_repo.py",
-  "name": "plugin-manifest",
-  "kind": "not-a-violation",
-  "reason": "配布の手段を推す材料としてプラグインの定義を探す（見つけたときの根拠の 1 つ）",
-  "count": 1
-}

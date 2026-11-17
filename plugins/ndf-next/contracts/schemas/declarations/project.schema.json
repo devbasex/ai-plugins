@@ -103,7 +103,8 @@
         }
       ],
       "default": null,
-      "description": "リリースの経路の行。本番・ベースブランチで動く行は channel で指し、ブランチ名を写さない"
+      "description": "旧い宣言。ndf project branch-strategy migrate が branch_strategy.release.deliveries へ移す。解析は測らない・書かない",
+      "deprecated": true
     },
     "issues": {
       "anyOf": [
@@ -208,7 +209,8 @@
         }
       ],
       "default": null,
-      "description": "本番の Pull Request のマージの方式。admin が true なら、本番チャネルが承認レビューを必須にするとき、承認ゲートの承認の後に管理者の迂回でマージする"
+      "description": "旧い宣言。ndf project branch-strategy migrate が branch_strategy.merge へ移す。解析は測らない・書かない",
+      "deprecated": true
     },
     "analysis": {
       "anyOf": [

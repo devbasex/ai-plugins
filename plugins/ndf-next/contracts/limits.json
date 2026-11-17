@@ -61,6 +61,8 @@
     "hook.metrics-keep": {"summary": "hook の計測の記録を残す秒（14 日）。SessionStart のエントリポイントだけが古い日のファイルを消す（決定 94）", "seconds": 1209600},
     "hook.venv-keep": {"summary": "根の目印から指されない依存の環境を残す秒（7 日）。.last-used の更新時刻から数える（決定 89）", "seconds": 604800},
     "hook.unattended-mark": {"summary": "人のいない実行の印のうち、SessionEnd で消し残したものを次の SessionStart が消すまでの秒（7 日）", "seconds": 604800},
+    "branch-strategy.measure": {"summary": "ブランチ戦略の宣言の measure が事例を集める締め切り（#3672）", "seconds": 120},
+    "branch-strategy.write-lock": {"summary": "ブランチ戦略の宣言を書く錠の待ちの上限（#3672。write・migrate・remove が共有する）", "seconds": 30},
     "auth.probe": {"summary": "認証の確かめのコマンドの上限", "seconds": 120},
     "claude-account-dir.lock": {"summary": ".claude.json の排他の待ちの上限", "seconds": 2},
     "claude-accounts.expiry-margin": {"summary": "残りがこの秒数以下のアクセストークンは期限切れとみなす", "seconds": 60},
