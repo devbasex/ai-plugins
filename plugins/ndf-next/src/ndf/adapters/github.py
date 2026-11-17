@@ -700,12 +700,24 @@ class GitHub:
                 return rows
         raise _too_many_pages(spec.what, pages, spec.cap)
 
-    def _pages(self, path: str) -> list[dict]:
-        """配列を返す REST の一覧を、短いページが来るまで読む。`github.list-pages` ページを超えたら途中で切らずに止まる。"""
+    def reviews(self, number: int) -> list[dict]:
+        """PR のレビューを REST の形のまま古い順にすべて読む（`approval.via: review` の承認の判定が使う）。"""
+        return self._pages(f"/repos/{self.repo}/pulls/{int(number)}/reviews")
+
+    def open_heads(self, base: str) -> list[tuple[int, str]]:
+        """`base` 宛ての開いた PR の番号と head の SHA（番号の昇順）。承認したがキューへ入れていない版上げの PR を探す（決定 18）。
+
+        一覧の応答は `merged`・`mergeable_state` を持たないため `Pull` にしない。"""
+        rows = self._pages(f"/repos/{self.repo}/pulls", {"state": "open", "base": base})
+        return sorted((int(p["number"]), text_of(p["head"]["sha"])) for p in rows)
+
+    def _pages(self, path: str, query: Optional[dict] = None) -> list[dict]:
+        """配列を返す REST の一覧を、短いページが来るまで読む。`github.list-pages` ページを超えたら途中で切らずに止まる。
+        `query` はページの指定に足す絞り込み。"""
         pages = _page_cap("github.list-pages")
         rows: list[dict] = []
         for page in range(1, pages + 1):
-            body = self.rest("GET", path, params={"per_page": PER_PAGE, "page": page})
+            body = self.rest("GET", path, params={**(query or {}), "per_page": PER_PAGE, "page": page})
             rows.extend(body)
             if len(body) < PER_PAGE:
                 return rows

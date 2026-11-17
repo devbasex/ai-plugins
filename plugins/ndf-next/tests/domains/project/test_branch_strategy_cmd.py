@@ -627,3 +627,35 @@ def test_collect_production_commits_marks_history_unreadable_without_the_branch(
     assert s.production == "gone"
     assert s.commits == []
     assert "history" in s.unreadable
+
+
+def test_default_api_reads_the_repository_of_the_declared_remote(tmp_path, monkeypatch):
+    """`{owner}/{repo}` は宣言したリモートの URL から求めたリポジトリで埋める（gh の選ぶ取得元に任せない）。"""
+    root = make_repo(tmp_path, {"project.json": {"version": 1}})
+    git(root, "remote", "add", "origin", "https://github.com/volare/target.git")
+    read: list[str] = []
+
+    def get(self, path):
+        read.append(path)
+        return {"default_branch": "main"}
+
+    monkeypatch.setattr(strategy_measure.Gh, "get", get)
+    api = strategy_measure.default_api(root, 1e18)
+    assert api("repos/{owner}/{repo}/rules/branches/main") == ({"default_branch": "main"}, "")
+    assert read == ["repos/volare/target/rules/branches/main"]
+
+
+def test_default_api_without_a_github_remote_reads_nothing(tmp_path, monkeypatch):
+    """リモートから測るリポジトリを求められなければ、gh を呼ばずに読めなかったとして返す。"""
+    root = make_repo(tmp_path, {"project.json": {"version": 1}})
+    monkeypatch.setattr(strategy_measure.Gh, "get", lambda self, path: pytest.fail("gh を呼んだ"))
+    got, why = strategy_measure.default_api(root, 1e18)("repos/{owner}/{repo}")
+    assert got is None and why
+
+
+def test_unreadable_kinds_on_questions_follow_the_result_schema(tmp_path):
+    """読めなかった種類（権限の不足・通信の失敗）を添えた問いも、作成の結果の形に通る。"""
+    root = history_repo(tmp_path, 0)
+    got = strategy_measure.measure_strategy(root, api=lambda path: (None, "gh が失敗した: HTTP 403"))
+    assert got["questions"] and any("unreadable" in q for q in got["questions"])
+    assert_result_shape(got)

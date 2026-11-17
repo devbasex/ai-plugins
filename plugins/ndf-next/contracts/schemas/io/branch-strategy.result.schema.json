@@ -51,7 +51,12 @@
             "description": "問う理由。conflict は根拠が食い違う、insufficient は根拠が足りない、no_kind は種類が決まらない、merge_queue_unknown は merge queue の有無が分からない、missing は値が無い"
           },
           "candidates": {"type": "array", "description": "選べる値（先頭が推す値）"},
-          "evidence": {"type": "array", "description": "問いの根拠"}
+          "evidence": {"type": "array", "description": "問いの根拠"},
+          "unreadable": {
+            "type": "array",
+            "description": "測るのに読めなかった種類（default_branch・prs・tags・releases・ruleset・history。権限の不足・通信の失敗）。読めた問いには無い",
+            "items": {"type": "string"}
+          }
         }
       }
     },

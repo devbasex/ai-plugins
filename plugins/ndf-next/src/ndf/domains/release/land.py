@@ -17,8 +17,8 @@
 8. 本番ブランチへ入れた後、同期の PR が要る取り込み方（`route_decide.route_of` の `sync`）なら、本番ブランチから
    ベースブランチ宛ての PR を作り（開いたものがあれば使い直す）、必須のチェックの後に merge commit でマージする
 
-`approval.via: review` の宣言では、承認は GitHub のレビュー（ruleset の承認の規則）が持ち、NDF は証跡を読まない（書き手は
-`github`。`trail.trail_writer`）。迂回でマージするときの証跡の照合は、担い手が MVV 判定の証跡を数えない（#3506 の I9）。
+`approval.via: review` の宣言では、承認は GitHub のレビュー（ruleset の承認の規則）が持ち、NDF は証跡の代わりに write 以上の人の
+最新の承認のレビューのコミットを今の head と比べる（書き手は `github`。`trail.trail_writer`）。迂回でマージするときの証跡の照合は、担い手が MVV 判定の証跡を数えない（#3506 の I9）。
 """
 
 from __future__ import annotations
@@ -38,8 +38,8 @@ from ndf.adapters.publish import Publisher
 from ndf.contracts import facts
 from ndf.core import json_pointer
 from ndf.core.branch_strategy import TRAILER_HEAD, TRAILER_PR, TRAILER_TIP, Strategy
-from ndf.domains.release import approval_decide, route_decide, trail, version_decide
-from ndf.domains.release.plugins import CLAUDE_MANIFEST, PLUGINS_DIR
+from ndf.domains.release import approval_decide, plugins, route_decide, trail, version_decide
+from ndf.domains.release.plugins import CLAUDE_MANIFEST, MARKETPLACE, PLUGINS_DIR
 
 # 規則の種類（必須のチェック）
 REQUIRED_RULE = "required_status_checks"
@@ -214,11 +214,24 @@ def check_production_pr(strategy: Strategy, pr: dict, prod: dict, queue: list[di
     return None
 
 
-def manifest_paths(strategy: Strategy) -> list[str]:
-    """版数の置き場が `plugin` のとき、版数を持つプラグインの定義の候補（10 系の `land_read.manifest_paths` と同じ）。"""
+def manifest_paths(strategy: Strategy, show: Callable[[str], Optional[str]]) -> list[str]:
+    """版数の置き場が `plugin` のとき、版数を持つプラグインの定義の候補。
+
+    置き場は `plugins.load` と同じく、`show` で読んだマーケットプレイスの登録の `source` から求める（`./tools/kit` などの
+    配置も読む）。登録を読めない・名前の行が無いときは、10 系の `land_read.manifest_paths` と同じ `plugins/<名前>` と根の候補。"""
     name = strategy.release_plugin
     manifest = CLAUDE_MANIFEST.as_posix()
-    return [f"{PLUGINS_DIR}/{name}/{manifest}", manifest] if name else [manifest]
+    if not name:
+        return [manifest]
+    text = show(MARKETPLACE.as_posix())
+    try:
+        data = json.loads(text) if text is not None else None
+        found = plugins.by_name(plugins.entries(data)) if isinstance(data, dict) else {}
+    except (ValueError, plugins.PluginsError):  # noqa: NDF401 ファイル: 登録を読めなければ名前で引く候補へ戻す
+        found = {}
+    if name in found:
+        return [f"{found[name].dir}/{manifest}"]
+    return [f"{PLUGINS_DIR}/{name}/{manifest}", manifest]
 
 
 def store_version(strategy: Strategy, show: Callable[[str], Optional[str]]) -> Optional[str]:
@@ -226,7 +239,7 @@ def store_version(strategy: Strategy, show: Callable[[str], Optional[str]]) -> O
     store = strategy.version_store
     if store["kind"] == "none":
         return None
-    rows = [(p, "/version") for p in manifest_paths(strategy)] if store["kind"] == "plugin" else [(store["path"], store["pointer"])]
+    rows = [(p, "/version") for p in manifest_paths(strategy, show)] if store["kind"] == "plugin" else [(store["path"], store["pointer"])]
     for path, pointer in rows:
         text = show(path)
         if text is None:
@@ -340,9 +353,12 @@ class Lander:
     def _refusal(self, pull: Pull, human_only: bool = False) -> Landed | None:
         """本番ブランチ宛ての PR の証跡を読み直し、`pull` の先端が承認されていなければ止まった結果（承認されていれば None）。
         `human_only` なら担い手が MVV 判定の証跡を数えない（迂回の前提。#3506 の I9）。承認の後に先端が動けば、証跡は
-        古い先端へのものになり止まる（#3661）。`approval.via: review` では GitHub が承認を持ち、読まない。"""
-        if pull.base_ref != self.production or self._by_review():
+        古い先端へのものになり止まる（#3661）。`approval.via: review` では証跡の代わりに GitHub のレビューの承認を読む
+        （迂回・ruleset の無い早送りでも、今の head を承認したレビューの無い PR を入れない）。"""
+        if pull.base_ref != self.production:
             return None
+        if self._by_review():
+            return self._review_refusal(pull, self.hub.pull(pull.number))
         got = trail.check(self.hub, pull.number, human_only)
         if got.pull.head_sha != pull.head_sha:
             return Landed(
@@ -351,6 +367,26 @@ class Lander:
         if not got.judgment.approved:
             return Landed(False, "refused", f"#{pull.number} は承認されていない: {got.judgment.detail}。{REAPPROVE}")
         return None
+
+    def _review_refusal(self, pull: Pull, now: Pull) -> Landed | None:
+        """`approval.via: review`: 読み直した PR `now` の先端が `pull` から動いたか、write 以上の人の最新の承認のレビューが
+        今の先端へのものでなければ止まった結果（承認されていれば None。10 系の `approval_of` と同じ読み方）。"""
+        if now.head_sha != pull.head_sha:
+            return Landed(False, "refused", f"#{pull.number} の先端が {pull.head_sha[:12]} から {now.head_sha[:12]} へ動いた。{REAPPROVE}")
+        if trail.review_commit(self.hub, pull.number) != pull.head_sha.lower():
+            return Landed(
+                False,
+                "refused",
+                f"#{pull.number} の先端 {pull.head_sha[:12]} を承認した GitHub のレビューが無い（approval.via: review）。{REAPPROVE}",
+            )
+        return None
+
+    def _approved_at(self, number: int, head: str) -> bool:
+        """PR `number` の今の先端 `head` が、宣言の承認の受け方（`approval.via`）で承認されているか。"""
+        if self._by_review():
+            return trail.review_commit(self.hub, number) == head.lower()
+        got = trail.read(self.hub, number)
+        return got.pull.head_sha == head and got.judgment.approved
 
     def _blocker(self, pull: Pull, deadline: float, bypass: bool = False) -> Landed | None:
         """マージの前の停止条件を順に確かめ、止まった結果（進めてよければ None）。
@@ -406,9 +442,19 @@ class Lander:
         return {"number": number, "bump": bump, "cut_version": cut, "contains_tip": cmp.get("behind_by") == 0, "tip": tip}
 
     def _queue_rows(self, number: int, tip: str) -> list[dict]:
-        """本番ブランチの merge queue の PR（自分を除く）と、版上げの PR か。全ページを読む（後ろの版上げを衝突の検査から外さない）。"""
+        """本番ブランチの merge queue の PR（自分を除く）と、版上げの PR か。全ページを読む（後ろの版上げを衝突の検査から外さない）。
+
+        キューの外の、本番ブランチ宛てで開いており今の head が承認された版上げの PR（版上げでないと分かるものを除く）は
+        `approved_release` の行で足す（10 系の `GhPort.queue` と同じ。`check_production_pr` の保留の検査。決定 18）。"""
         rows = merge_queue.heads(self.hub, self.production)
-        return [self._bump_facts(n, h, tip) for n, h in rows if n != number]
+        out = [self._bump_facts(n, h, tip) for n, h in rows if n != number]
+        queued = {n for n, _ in rows}
+        for n, head in self.hub.open_heads(self.production):
+            if n == number or n in queued or self._bump_facts(n, head, tip)["bump"] is False:
+                continue
+            if self._approved_at(n, head):
+                out.append({"number": n, "bump": True, "approved_release": True})
+        return out
 
     def _gate(self, pull: Pull) -> Gate:
         """本番の PR を入れる前の確かめ（ruleset とセクションの一致・マージの方式ごとの確かめ）。"""
@@ -491,6 +537,8 @@ class Lander:
         """
         if pull.base_ref != self.production:
             return None
+        if self._by_review():
+            return self._review_refusal(pull, now)
         got = trail.judged(self.hub, now)
         if got.pull.head_sha != pull.head_sha:
             return Landed(False, "refused", f"#{pull.number} の先端がキューの待ちの間に {got.pull.head_sha[:12]} へ動いた")

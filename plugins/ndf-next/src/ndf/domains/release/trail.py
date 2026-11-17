@@ -29,7 +29,7 @@ from typing import NamedTuple
 import re
 
 from ndf import identity
-from ndf.adapters.github import Authored, GitHub, GitHubError, Pull
+from ndf.adapters.github import WRITE_PERMISSIONS, Authored, GitHub, GitHubError, Pull, text_of
 from ndf.adapters.publish import Publisher
 from ndf.core.branch_strategy import Strategy
 from ndf.domains.release import approval_decide
@@ -76,6 +76,10 @@ STATUS_STATE = {
     approval_decide.STALE: "pending",
     approval_decide.MISSING: "pending",
 }
+
+
+# レビューの判定を変える状態（COMMENTED は変えない。GitHub のレビューの判定と同じ）
+REVIEW_VERDICTS = frozenset({"APPROVED", "CHANGES_REQUESTED", "DISMISSED"})
 
 
 class TrailError(Exception):
@@ -192,6 +196,26 @@ def post_status(hub: GitHub, sha: str, judgment: approval_decide.Judgment) -> No
         "description": judgment.detail[:140],
     }
     hub.rest("POST", f"/repos/{hub.repo}/statuses/{sha}", payload)
+
+
+def review_commit(hub: GitHub, number: int) -> str | None:
+    """`approval.via: review` の承認: write 以上の権限を持つ人の最新の承認のレビューのコミット（無ければ None）。
+
+    人ごとに最後の判定（`REVIEW_VERDICTS`）だけを数え、承認の後に同じ人が差し戻していれば前の承認を使わない（10 系の
+    `approval_trail.approved_review_commit` と同じ）。"""
+    last: dict[str, dict] = {}
+    for r in sorted((r for r in hub.reviews(number) if isinstance(r, dict)), key=lambda r: text_of(r.get("submitted_at"))):
+        if r.get("state") in REVIEW_VERDICTS:
+            user = r.get("user")
+            last[text_of(user.get("login")) if isinstance(user, dict) else ""] = r
+    got = [
+        r
+        for login, r in last.items()
+        if r.get("state") == "APPROVED" and text_of(r.get("commit_id")) and login and hub.permission(login) in WRITE_PERMISSIONS
+    ]
+    if not got:
+        return None
+    return text_of(max(got, key=lambda r: text_of(r.get("submitted_at")))["commit_id"]).lower()
 
 
 def check(hub: GitHub, number: int, human_only: bool = False) -> Read:

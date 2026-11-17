@@ -435,12 +435,20 @@ def slug_of_url(url: str) -> Optional[str]:
 
 
 def _deliveries(repo_root: Path) -> Optional[list]:
-    """ブランチ戦略の宣言の届け先の行（`branch_strategy.release.deliveries`）。無い・読めなければ None（呼び手が止める）。"""
+    """ブランチ戦略の宣言の届け先の行（`branch_strategy.release.deliveries`）。読めなければ None（呼び手が止める）。
+
+    `deliveries` はスキーマで任意で、ブランチ戦略のプリセットは書かない。`release` のセクションまで読めてキーが無ければ、
+    自動で本番へ届く届け先が無いとして空の行を返す（キーが無いことと読めないことを分ける）。宣言のファイル・
+    `branch_strategy`・`release` が無いか形が違う・`deliveries` が配列でなければ読めないとする。"""
     try:
         data = json.loads((repo_root / _PROJECT_FILE).read_text(encoding="utf-8"))
     except (OSError, ValueError):  # noqa: NDF401 ファイル: 宣言を読めないことを None で返し、呼び手が止める
         return None
     cur: object = data.get(_SECTION) if isinstance(data, dict) else None
-    for key in _DELIVERIES:
+    *parents, leaf = _DELIVERIES
+    for key in parents:
         cur = cur.get(key) if isinstance(cur, dict) else None
-    return cur if isinstance(cur, list) else None
+    if not isinstance(cur, dict):
+        return None
+    rows = cur.get(leaf, [])
+    return rows if isinstance(rows, list) else None

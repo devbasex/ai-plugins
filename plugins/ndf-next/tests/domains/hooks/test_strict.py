@@ -37,6 +37,21 @@ def test_old_top_level_delivery_is_not_read(tmp_path):
     assert got is not None and got.kind == "deny" and "branch_strategy.release.deliveries" in got.reason
 
 
+def test_declaration_without_deliveries_passes_but_a_broken_one_is_denied(tmp_path):
+    """ブランチ戦略のプリセット（`deliveries` を書かない）で作った宣言は、自動で本番へ届く届け先が無いとして通す。
+    `deliveries` が配列でない宣言は読めないとして止める。"""
+    repo = make_repo(tmp_path / "r", deliveries=[])
+    decl = repo / ".ndf" / "project.json"
+    data = json.loads(decl.read_text(encoding="utf-8"))
+    del data["branch_strategy"]["release"]["deliveries"]
+    decl.write_text(json.dumps(data), encoding="utf-8")
+    assert _check(repo, "gh pr merge 12 --merge") is None
+    data["branch_strategy"]["release"]["deliveries"] = "auto"
+    decl.write_text(json.dumps(data), encoding="utf-8")
+    got = _check(repo, "gh pr merge 12 --merge")
+    assert got is not None and got.kind == "deny" and "branch_strategy.release.deliveries" in got.reason
+
+
 @pytest.mark.parametrize("flag", ["-R other/repo", "--repo other/repo", "--repo=other/repo", "-Rother/repo"])
 def test_repo_flag_naming_another_repository_is_judged_by_that_repository(tmp_path, flag):
     # 作業ディレクトリ（手動の宣言）の宣言で別のリポジトリの宛先を判定しない（#2446）

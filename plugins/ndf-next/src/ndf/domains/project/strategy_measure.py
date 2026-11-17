@@ -87,13 +87,26 @@ class Measured:
     candidates: list = field(default_factory=list)
 
 
+# API のパスの中で、測るリポジトリ（`<所有者>/<リポジトリ>`）へ置き換える置き場
+REPO_PLACEHOLDER = "{owner}/{repo}"
+
+
 def default_api(root: Path, deadline: float) -> Api:
-    """`gh api` で読む `api`。`{owner}/{repo}` は `gh` が作業場所のリモートから埋める。"""
+    """`gh api` で読む `api`。パスの `{owner}/{repo}` は、作業場所の宣言したリモート（`.ndf/worktree.json` の `remote`、
+    無ければ既定）の URL から求めたリポジトリで埋める（`gh` の選ぶ取得元に任せると、リモートが違う構成で別のリポジトリを測る）。
+    リポジトリを求められなければ、どのパスも読めなかったとして返す（解析の項目は問いになる）。"""
     gh = Gh(Path(root), "", deadline)
+    try:
+        repo: Optional[str] = Git(cwd=Path(root)).remote_repo()
+        why = ""
+    except GitError as exc:  # noqa: NDF401 外部コマンド: 測るリポジトリを求められなければ読まずに問いへ回す
+        repo, why = None, f"測るリポジトリをリモートから求められない: {exc}"
 
     def read(path: str) -> tuple[Any, str]:
+        if repo is None:
+            return None, why
         try:
-            return gh.get(path), ""
+            return gh.get(path.replace(REPO_PLACEHOLDER, repo)), ""
         except GhUnavailable as exc:
             return None, ("missing" if "404" in str(exc) else str(exc))
 

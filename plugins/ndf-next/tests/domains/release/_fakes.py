@@ -59,6 +59,9 @@ class FakeHub:
     rules_unreadable: bool = False
     # GraphQL の応答（クエリの先頭の語で引く）
     graphql_data: dict[str, Any] = field(default_factory=dict)
+    # PR ごとのレビュー（REST の形）と、本番ブランチ宛てで開いている PR の (番号, head)
+    reviews_of: dict[int, list[dict]] = field(default_factory=dict)
+    open_at: list[tuple[int, str]] = field(default_factory=list)
 
     def pull(self, number: int) -> Pull:
         return self.pulls[number]
@@ -68,6 +71,15 @@ class FakeHub:
 
     def trusts(self, authored: Authored) -> bool:
         return authored.author in self.trusted
+
+    def permission(self, login: str) -> str:
+        return "write" if login in self.trusted else "read"
+
+    def reviews(self, number: int) -> list[dict]:
+        return list(self.reviews_of.get(number, []))
+
+    def open_heads(self, base: str) -> list[tuple[int, str]]:
+        return list(self.open_at)
 
     def token_trusted(self) -> bool:
         # 書いたコメントの書き手は octocat（`rest` の POST）

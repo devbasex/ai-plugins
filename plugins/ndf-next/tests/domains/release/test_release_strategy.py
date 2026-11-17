@@ -207,6 +207,79 @@ def test_strict_without_ruleset_fast_forwards_only_a_head_that_contains_the_tip(
     assert not _lander(hub, strategy("docs")).land(7).merged and not any(m == "PATCH" for m, _, _ in hub.requests)
 
 
+def _review(state: str, sha: str, login: str = "octocat", at: str = "2026-01-01T00:00:00Z") -> dict:
+    return {"state": state, "commit_id": sha, "user": {"login": login}, "submitted_at": at}
+
+
+def _by_review(kind: str) -> Strategy:
+    s = section(kind)
+    s["approval"]["via"] = "review"
+    return Strategy(s)
+
+
+def test_review_approval_is_required_even_for_fast_forward() -> None:
+    """`approval.via: review`: ruleset の無い早送りでも、write 以上の人が今の head を承認したレビューが無ければ入れない。"""
+    hub = _strict_hub(H1, H1, behind=0)
+    hub.comments_of = {}
+    done = _lander(hub, _by_review("docs")).land(7)
+    assert not done.merged and done.kind == "refused" and "レビュー" in done.detail
+    assert not any(m == "PATCH" for m, _, _ in hub.requests)
+    # write の権限を持たない人の承認・古い head への承認・承認の後の差し戻しは数えない
+    for reviews in (
+        [_review("APPROVED", H1, login="mallory")],
+        [_review("APPROVED", H2)],
+        [_review("APPROVED", H1), _review("CHANGES_REQUESTED", H1, at="2026-01-02T00:00:00Z")],
+    ):
+        hub = _strict_hub(H1, H1, behind=0)
+        hub.reviews_of = {7: reviews}
+        assert not _lander(hub, _by_review("docs")).land(7).merged
+    hub = _strict_hub(H1, H1, behind=0)
+    hub.comments_of = {}
+    hub.reviews_of = {7: [_review("COMMENTED", H2), _review("APPROVED", H1)]}
+    assert _lander(hub, _by_review("docs")).land(7).merged
+
+
+def test_queue_wait_reads_the_review_under_review_approval() -> None:
+    """`approval.via: review`: キューの待ちの承認の確かめも GitHub のレビューで読み、NDF の証跡を求めない。"""
+    hub = _queue_hub(head=H1, approved=H1)
+    hub.comments_of = {}
+    hub.reviews_of = {7: [_review("APPROVED", H1)]}
+    lander = _lander(hub, _by_review("plugin"))
+    assert lander._queued_refusal(hub.pull(7), hub.pull(7)) is None
+    hub.reviews_of = {}
+    refused = lander._queued_refusal(hub.pull(7), hub.pull(7))
+    assert refused is not None and refused.kind == "refused"
+
+
+def test_approved_release_pr_outside_the_queue_holds_other_prs() -> None:
+    """決定 18: キューの外の、今の head が承認された版上げの PR を `approved_release` の行で足し、版上げでない PR を保留する。"""
+    hub = _queue_hub(head=H1, approved=H1)
+    hub.pulls[9] = pull(number=9, head=H2)
+    hub.versions[H2] = "1.0.2"
+    hub.open_at = [(7, H1), (8, "8" * 40), (9, H2)]
+    rows = _lander(hub, strategy("plugin"))._queue_rows(8, TIP)
+    assert rows == [{"number": 7, "bump": True, "approved_release": True}]
+    why = land.check_production_pr(strategy("plugin"), {"number": 8, "bump": False}, {"tip": TIP, "version": "1.0.0"}, rows)
+    assert why is not None and "#7" in why
+
+
+def test_manifest_path_follows_the_marketplace_source() -> None:
+    """版数の読み先は `plugins.load` と同じくマーケットプレイスの `source` から求める（`./tools/kit` の配置も読む）。
+    登録を読めない・名前の行が無ければ `plugins/<名前>` と根の候補へ戻す。"""
+    s = section("plugin")
+    s["release"]["plugin"] = "kit"
+    kit = Strategy(s)
+    files = {
+        ".claude-plugin/marketplace.json": json.dumps({"plugins": [{"name": "kit", "source": "./tools/kit"}]}),
+        "tools/kit/.claude-plugin/plugin.json": json.dumps({"version": "2.3.4"}),
+    }
+    assert land.manifest_paths(kit, files.get) == ["tools/kit/.claude-plugin/plugin.json"]
+    assert land.store_version(kit, files.get) == "2.3.4"
+    assert land.manifest_paths(kit, {}.get) == ["plugins/kit/.claude-plugin/plugin.json", ".claude-plugin/plugin.json"]
+    broken = {".claude-plugin/marketplace.json": "{"}
+    assert land.manifest_paths(kit, broken.get)[0] == "plugins/kit/.claude-plugin/plugin.json"
+
+
 def test_human_actor_is_left_to_the_human() -> None:
     """`merge.actor: human` なら NDF はマージしない。"""
     hub = _queue_hub(head=H1, approved=H1)
