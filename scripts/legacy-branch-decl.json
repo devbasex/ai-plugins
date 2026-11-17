@@ -2954,6 +2954,20 @@
   },
   {
    "id": "D23",
+   "path": "plugins/ndf-next/src/ndf/domains/project/strategy_cli.py",
+   "words": [
+    "branch_flow",
+    "production_merge",
+    "base_branch",
+    "production_branch",
+    "promotion",
+    "dev_workflow",
+    "delivery",
+    "version_files"
+   ]
+  },
+  {
+   "id": "D23",
    "path": "plugins/ndf-next/src/ndf/domains/project/check.py",
    "words": [
     "branch_flow",
