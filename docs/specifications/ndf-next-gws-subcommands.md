@@ -93,17 +93,21 @@ graph TD
 | I6 | 承認ゲートの結果は `routes` を持ち、キーは答えの語彙の中、行き先の `argv` の先頭は `ndf` | 結果の部品（`result.emit`）が出す前に落とす |
 | I7 | サムネイルのファイル名はページ順に `p1.png` から振り、`items` の並びもページ順である | 1 ページでも保存できなければ `ok` を返さない |
 | I8 | サムネイルの保存は、全ページを保存できたときは `gws auth status` を打たない。gws が失敗したときは 1 回だけ打ち、打ち直さない | 読めなかったときは未認証でないとして、元の gws の失敗で返す |
-| I9 | 認証の状態の読み取りと認証済みかの判定は、ndf-next の中で記録の gws の部品の 1 か所にある。`ndf gws check`・`ndf gws thumbnails`・`ndf records gws-check` が同じ `authenticated` を呼ぶ | `ndf check` の事実の重複の規則（`const-fact`）が、判定の値の集まりの書き写しを落とす |
+| I9 | 認証の状態の読み取りと認証済みかの判定は、ndf-next の中で記録の gws の部品の 1 か所にある。`ndf gws check`・`ndf gws thumbnails`・`ndf records gws-check` が同じ `authenticated` を呼ぶ | 呼び出し元の検索で、記録の gws の部品の外に `credential_source`・`auth_method` を読む行が無いことを確かめる |
 
 ### 認証済みの判定
 
-トークンを環境変数 `GOOGLE_WORKSPACE_CLI_TOKEN` で渡していれば認証済みとする。渡していなければ、`credential_source` が
-`none` か `client_secret.json` のとき未認証、それ以外は認証済みとする。環境変数は値を読まず、あるかだけを見る。
+トークンを環境変数 `GOOGLE_WORKSPACE_CLI_TOKEN` で渡していれば認証済みとする。渡していなければ、未認証は次の 2 つの
+形だけで、それ以外は認証済みとする。環境変数は値を読まず、あるかだけを見る。
+
+- `credential_source` が `none`
+- `credential_source` が `client_secret.json` で、`auth_method` が `none`
 
 `client_secret.json` だけがありトークンが無い状態で、gws 0.22.5 の `gws auth status` は
 `credential_source: client_secret.json`・`auth_method: none` を返す。この状態を未認証にするため、今の `gws-check.py` の
-判定（`credential_source` が `none` でなければ認証済み）とは同じにしない（#2067）。判定は #2067 を直した記録の
-gws の部品のものを使い、gws の群には置かない。
+判定（`credential_source` が `none` でなければ認証済み）とは同じにしない（#2067）。OAuth でログインした状態は
+`credential_source: client_secret.json`・`auth_method: oauth2` を返し、gws は認証済みで動くため認証済みとする
+（gws 0.22.5 の実測）。判定は #2067 を直した記録の gws の部品のものを使い、gws の群には置かない。
 
 ### gws の確認の結果
 
@@ -199,8 +203,8 @@ gws の部品のものを使い、gws の群には置かない。
 
 | 観点 | 満たすこと |
 | --- | --- |
-| 認証済み（I3） | `credential_source` が `token_env_var` で `auth_method` が `none` の応答と、環境変数のトークンがあり `credential_source` が `none` の応答で、`ok`・0・`authenticated` と 3 つのキーが返ること |
-| 未認証（I3・I9） | トークンが無く `credential_source` が `none` の応答と、`client_secret.json` の応答（#2067 の形）の両方で、`gate`・11・`unauthenticated` と gws が返した `client_config_exists` が返り、後者が `ndf records gws-check` と同じ答えになること |
+| 認証済み（I3） | `credential_source` が `token_env_var` で `auth_method` が `none` の応答と、`credential_source` が `client_secret.json` で `auth_method` が `oauth2` の応答（OAuth でログインした状態）と、環境変数のトークンがあり `credential_source` が `none` の応答で、`ok`・0・`authenticated` と 3 つのキーが返ること |
+| 未認証（I3・I9） | トークンが無く `credential_source` が `none` の応答と、`client_secret.json` で `auth_method` が `none` の応答（#2067 の形）の両方で、`gate`・11・`unauthenticated` と gws が返した `client_config_exists` が返り、後者が `ndf records gws-check` と同じ答えになること |
 | 同意なしに入れない（I1） | gws が無く npm があり印が無いとき、npm の `install` が起動されず、`gate`・10・`missing` と承認資料が返ること。2 回打っても承認資料は 1 つであること |
 | 同意したときの導入 | 印を付けると npm が `install -g @googleworkspace/cli` で 1 回だけ起動され、入った gws で確かめ直すこと。gws が既にあれば npm を起動しないこと。npm の失敗・打ち切り・入れた後も見つからないときに `stopped`・1 になること |
 | npm が無い（I5） | `stopped`・3・`uninstallable` になること |
@@ -208,7 +212,7 @@ gws の部品のものを使い、gws の群には置かない。
 | 資格情報を写さない（I4） | 応答に余分のキーを混ぜても結果に現れないこと |
 | 承認ゲートの行き先（I6） | 10・11 の結果の `routes` のキーが答えの語彙の中にあり、`argv` の先頭が `ndf` であること |
 | サムネイルの保存（I7・I8） | 3 ページで `p1.png`〜`p3.png` がページ順に保存され、`items`・`metrics` が返り、`auth status` が打たれないこと。大きさが gws に渡ること |
-| サムネイルの失敗（I8） | 未認証で `gate`・11 と同じ引数の `routes`。未認証でない失敗と認証の状態を読めないときで `stopped`・1 と出力の末尾。`auth status` は 1 回だけ。JSON でない応答・ID の欠けで 2。curl の失敗で 1、打ち切りで `interrupted`。gws か curl が無く 3。出力のディレクトリを作れず 1 |
+| サムネイルの失敗（I8） | 未認証で `gate`・11 と同じ引数の `routes`。OAuth でログインした状態の失敗を含む未認証でない失敗と認証の状態を読めないときで `stopped`・1 と出力の末尾。`auth status` は 1 回だけ。JSON でない応答・ID の欠けで 2。curl の失敗で 1、打ち切りで `interrupted`。gws か curl が無く 3。出力のディレクトリを作れず 1 |
 | 引数 | 足りない・3 つ以外の大きさ・知らない引数で `stopped`・2 になること |
 | 定数と契約の一致 | gws の状態の 4 つの値と大きさの 3 つが、結果のスキーマの列挙と一致すること |
 | 記録の部品の互換 | `auth_status()` を引数なしで呼ぶと上限が `gws.auth-status` のままで、`GwsError` が標準エラーを持つこと |
