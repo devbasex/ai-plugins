@@ -39,6 +39,7 @@ from ndf.contracts import facts
 from ndf.core import json_pointer
 from ndf.core.branch_strategy import TRAILER_HEAD, TRAILER_PR, TRAILER_TIP, Strategy
 from ndf.domains.release import approval_decide, route_decide, trail, version_decide
+from ndf.domains.release.plugins import CLAUDE_MANIFEST, PLUGINS_DIR
 
 # 規則の種類（必須のチェック）
 REQUIRED_RULE = "required_status_checks"
@@ -214,9 +215,10 @@ def check_production_pr(strategy: Strategy, pr: dict, prod: dict, queue: list[di
 
 
 def manifest_paths(strategy: Strategy) -> list[str]:
-    """版数の置き場が `plugin` のとき、版数を持つ `plugin.json` の候補（10 系の `land_read.manifest_paths` と同じ）。"""
+    """版数の置き場が `plugin` のとき、版数を持つプラグインの定義の候補（10 系の `land_read.manifest_paths` と同じ）。"""
     name = strategy.release_plugin
-    return [f"plugins/{name}/.claude-plugin/plugin.json", ".claude-plugin/plugin.json"] if name else [".claude-plugin/plugin.json"]
+    manifest = CLAUDE_MANIFEST.as_posix()
+    return [f"{PLUGINS_DIR}/{name}/{manifest}", manifest] if name else [manifest]
 
 
 def store_version(strategy: Strategy, show: Callable[[str], Optional[str]]) -> Optional[str]:

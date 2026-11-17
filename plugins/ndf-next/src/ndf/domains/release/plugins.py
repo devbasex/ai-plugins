@@ -22,8 +22,12 @@ from pathlib import Path
 
 # マーケットプレイスの登録（リポジトリの根から）
 MARKETPLACE = Path(".claude-plugin") / "marketplace.json"
-# プラグインの定義（プラグインの置き場から。先頭は必ずあり、ほかはあるものだけ）
-MANIFESTS = (Path(".claude-plugin") / "plugin.json", Path(".codex-plugin") / "plugin.json")
+# プラグインの定義（プラグインの置き場から）。Claude Code の定義は必ずあり、Codex の定義はあるものだけ
+CLAUDE_MANIFEST = Path(".claude-plugin") / "plugin.json"
+CODEX_MANIFEST = Path(".codex-plugin") / "plugin.json"
+MANIFESTS = (CLAUDE_MANIFEST, CODEX_MANIFEST)
+# 名前で引くプラグインの置き場の親（リポジトリの根からの `<PLUGINS_DIR>/<名前>`。版数の置き場の候補と測定が使う）
+PLUGINS_DIR = "plugins"
 
 
 class PluginsError(Exception):

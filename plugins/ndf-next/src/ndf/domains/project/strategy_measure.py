@@ -3,7 +3,7 @@
 キーの分け方は既定の表（`contracts/data/branch-strategy-presets.json`）の `measured_keys` が持つ。
 
 - 履歴から推すキー: 事例が `min_samples` 件以上・`min_ratio` 以上で合うときだけ値にする（`count_key`）
-- 今の正本で決まるキー: 既定ブランチ・版数のファイル・`plugin.json`・ワークフロー・本番ブランチの ruleset の 1 件で決める。
+- 今の正本で決まるキー: 既定ブランチ・版数のファイル・プラグインの定義・ワークフロー・本番ブランチの ruleset の 1 件で決める。
   正本が無いことは値の根拠にし、読めないときだけ問う
 - 種類の既定から埋めるキー: 測った値がすべて合う種類の行（`pick_kind`）から埋める
 
@@ -32,6 +32,7 @@ from ndf.domains.project import check
 from ndf.domains.project import strategy_write as bw
 from ndf.domains.project.items import obj, seq
 from ndf.domains.project.measure_ci import Gh, GhUnavailable
+from ndf.domains.release.plugins import CLAUDE_MANIFEST, CODEX_MANIFEST, PLUGINS_DIR
 
 Api = Callable[[str], tuple[Any, str]]
 VERSION = re.compile(r"\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.\-]+)?")
@@ -134,7 +135,7 @@ def _default_branch(root: Path, api: Api) -> Optional[str]:
 
 
 def local_facts(root: Path, s: Samples) -> None:
-    """ワークフロー・版数のファイル（`package.json`）・プラグインの `plugin.json` を作業場所から読む。"""
+    """ワークフロー・版数のファイル（`package.json`）・プラグインの定義（`CLAUDE_MANIFEST`）を作業場所から読む。"""
     wf = Path(root) / ".github" / "workflows"
     for p in sorted(wf.glob("*.y*ml")) if wf.is_dir() else []:
         try:
@@ -148,13 +149,14 @@ def local_facts(root: Path, s: Samples) -> None:
                 s.version_files["package.json"] = "/version"
         except (OSError, ValueError):
             s.warnings.append("読めない: package.json")
-    for pj in sorted(Path(root).glob("plugins/*/.claude-plugin/plugin.json")) + sorted(Path(root).glob(".claude-plugin/plugin.json")):
+    manifest = CLAUDE_MANIFEST.as_posix()
+    for pj in sorted(Path(root).glob(f"{PLUGINS_DIR}/*/{manifest}")) + sorted(Path(root).glob(manifest)):
         try:
             name = json.loads(pj.read_text(encoding="utf-8")).get("name")
-        except (OSError, ValueError):  # noqa: S112 ファイル: 読めない plugin.json はプラグインに数えない
+        except (OSError, ValueError):  # noqa: S112 ファイル: 読めないプラグインの定義はプラグインに数えない
             continue
         if name:
-            runtimes = ["claude"] + (["codex"] if (pj.parent.parent / ".codex-plugin" / "plugin.json").is_file() else [])
+            runtimes = ["claude"] + (["codex"] if (pj.parent.parent / CODEX_MANIFEST).is_file() else [])
             s.plugins[name] = runtimes
 
 
@@ -431,9 +433,10 @@ def _source_keys(s: Samples, release_strategy: Optional[str]) -> dict[str, Measu
     plugin = single_plugin(s)
     if plugin:
         name, runtimes = plugin
-        out["/release/plugin"] = Measured(name, [{"source": "repo", "ref": "plugin.json", "value": name}])
-        out["/release/runtimes"] = Measured(runtimes, [{"source": "repo", "ref": "plugin.json", "value": ",".join(runtimes)}])
-        out["/release/version_store"] = Measured({"kind": "plugin"}, [{"source": "repo", "ref": "plugin.json", "value": "plugin"}])
+        ref = CLAUDE_MANIFEST.name
+        out["/release/plugin"] = Measured(name, [{"source": "repo", "ref": ref, "value": name}])
+        out["/release/runtimes"] = Measured(runtimes, [{"source": "repo", "ref": ref, "value": ",".join(runtimes)}])
+        out["/release/version_store"] = Measured({"kind": "plugin"}, [{"source": "repo", "ref": ref, "value": "plugin"}])
     elif s.version_files:
         path, pointer = next(iter(s.version_files.items()))
         out["/release/version_store"] = Measured(
