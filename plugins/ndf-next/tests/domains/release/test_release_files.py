@@ -6,6 +6,7 @@ import argparse
 import json
 from pathlib import Path
 
+import git_sandbox
 import pytest
 
 from ndf import cli
@@ -15,7 +16,7 @@ from ndf.domains.release import cli as release_cli
 from ndf.domains.release import ndf_settings as decl_mod
 from ndf.domains.release import plugins as plugins_mod
 
-from ._fakes import FakeHub, not_found, pull, write_json
+from ._fakes import FakeHub, init_repo, not_found, pull, strategy, write_json
 
 
 def _repo(root: Path) -> Path:
@@ -88,20 +89,61 @@ def test_declared_step_failure_is_reported(tmp_path: Path) -> None:
         decl_mod.run_step(tmp_path, decl_mod.Step("落ちる", "production", ("false",)), "1.0.0")
 
 
-def test_publish_creates_missing_tag_and_release_for_bumped_plugins(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    root = _repo(tmp_path)
+def _bumped_repo(tmp_path: Path) -> tuple[Path, str]:
+    """kit を 1.2.2 から 1.2.3 へ上げたコミットを HEAD に持つリポジトリと、その SHA。"""
+    root = _repo(init_repo(tmp_path / "repo"))
+    for rel in ("tools/kit/.claude-plugin/plugin.json", "tools/kit/.codex-plugin/plugin.json"):
+        write_json(root / rel, {"name": "kit", "version": "1.2.2"})
+    git_sandbox.sh(root, "add", "-A")
+    git_sandbox.sh(root, "commit", "-q", "-m", "init")
+    for rel in ("tools/kit/.claude-plugin/plugin.json", "tools/kit/.codex-plugin/plugin.json"):
+        write_json(root / rel, {"name": "kit", "version": "1.2.3"})
     (root / "CHANGELOG.md").write_text("# 変更履歴\n\n## [kit 1.2.3] - 2026-01-01\n\n- 直した（#5）\n", encoding="utf-8")
-    monkeypatch.setattr(git_mod.Git, "changed_files", lambda self, a, b: ["tools/kit/.claude-plugin/plugin.json"])
+    git_sandbox.sh(root, "add", "-A")
+    git_sandbox.sh(root, "commit", "-q", "-m", "Release: kit v1.2.3")
+    return root, git_sandbox.sh(root, "rev-parse", "HEAD").strip()
+
+
+def test_publish_creates_missing_tag_and_release_for_bumped_plugins(tmp_path: Path) -> None:
+    root, head = _bumped_repo(tmp_path)
     hub = FakeHub()
     hub.responses[("GET", "/repos/o/r/git/ref/tags/kit--v1.2.3")] = not_found()
     hub.responses[("GET", "/repos/o/r/releases/tags/kit--v1.2.3")] = not_found()
-    made = tagging.publish(root, hub, "d" * 40)
+    made = tagging.publish(root, hub, head, strategy("plugin"))
     assert [m.item() for m in made] == [
         {"kind": "tag", "name": "kit--v1.2.3", "result": "created"},
         {"kind": "release", "name": "kit--v1.2.3", "result": "created"},
     ]
     release = next(p for m, path, p in hub.requests if m == "POST" and path.endswith("/releases"))
     assert release["body"] == "- 直した（#5）" and release["name"] == "kit v1.2.3"
+
+
+@pytest.mark.parametrize(
+    ("ref", "objects", "want"),
+    [
+        ({"object": {"type": "commit", "sha": "HEAD"}}, {}, "exists"),
+        ({"object": {"type": "tag", "sha": "t" * 40}}, {"t" * 40: "HEAD"}, "exists"),
+        ({"object": {"type": "commit", "sha": "e" * 40}}, {}, "moved"),
+        ({"object": {"type": "tag", "sha": "t" * 40}}, {"t" * 40: "e" * 40}, "moved"),
+    ],
+)
+def test_issue_3615_publish_compares_where_an_existing_tag_points(tmp_path: Path, ref: dict, objects: dict, want: str) -> None:
+    """I7: 同じ名前のタグがあれば、コミットまでたどった指す先（注釈付きタグはタグオブジェクトの先）を比べ、違えば止まる。"""
+    root, head = _bumped_repo(tmp_path)
+    hub = FakeHub()
+    fill = {"HEAD": head}
+    ref = {"object": {**ref["object"], "sha": fill.get(ref["object"]["sha"], ref["object"]["sha"])}}
+    hub.responses[("GET", "/repos/o/r/git/ref/tags/kit--v1.2.3")] = ref
+    for sha, target in objects.items():
+        hub.responses[("GET", f"/repos/o/r/git/tags/{sha}")] = {"object": {"type": "commit", "sha": fill.get(target, target)}}
+    if want == "moved":
+        with pytest.raises(tagging.TagMoved, match="kit--v1.2.3"):
+            tagging.publish(root, hub, head, strategy("plugin"))
+        assert not [r for r in hub.requests if r[0] == "POST"]
+        assert release_cli._stopped_of(tagging.TagMoved("x"))["cause"]["kind"] == "refused"
+        return
+    made = tagging.publish(root, hub, head, strategy("plugin"))
+    assert made[0] == tagging.Made("tag", "kit--v1.2.3", "exists")
 
 
 def _entry(path: str, branch: str | None) -> git_mod.WorktreeEntry:
@@ -161,6 +203,8 @@ def test_release_steps_parser_current_behavior() -> None:
         req("--channel", choices=("production", "dev")),
         opt("--level", "patch", ("major", "minor", "patch")),
         opt("--plugin"),
+        opt("--units"),
+        ("--pr", False, None, None, int, "_StoreAction"),
     ]
     pr = req("--pr", int)
     expected = {
@@ -198,7 +242,7 @@ def test_release_steps_parser_parses_and_requires_a_command() -> None:
 
 
 def test_ndf_settings_parse_reads_every_key(tmp_path: Path) -> None:
-    """現状固定（_parse）: すべてのキーを読み、空の配列は既定でなく空のまま。生の設定を `raw` に持つ。"""
+    """現状固定（_parse）: すべてのキーを読む。`undistributed` は既定（テストのファイルの表）へ足す形で、無ければ空。生の設定を `raw` に持つ。"""
     raw = {
         "version": 1,
         "steps": [{"name": "a", "stage": "verify", "command": ["echo", "{version}"], "writes": ["x"], "timeout_seconds": 5}],
