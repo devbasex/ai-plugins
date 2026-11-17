@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 from filelock import FileLock
+from strategy_fixture import FIX, KINDS, section
 
 from ndf import contracts
 from ndf.core import branch_strategy as bs
@@ -21,16 +22,10 @@ from ndf.core import json_pointer
 from ndf.domains.project import cli, strategy_measure, strategy_migrate
 from ndf.domains.project import strategy_write as bw
 
-FIX = Path(__file__).resolve().parents[2] / "fixtures" / "branch_strategy"
 REPO_ROOT = Path(__file__).resolve().parents[5]  # このリポジトリ（ai-plugins）の根
 PROJECT_SRC = Path(cli.__file__).resolve().parent
 RESULT_SCHEMA = "schemas/io/branch-strategy.result.schema.json"
-KINDS = ("web-develop", "web-trunk", "mobile", "docs", "plugin")
 C = ["-c", "user.email=t@example.com", "-c", "user.name=t"]
-
-
-def section(kind: str) -> dict:
-    return json.loads((FIX / f"{kind}.json").read_text(encoding="utf-8"))
 
 
 def git(root: Path, *args: str) -> str:

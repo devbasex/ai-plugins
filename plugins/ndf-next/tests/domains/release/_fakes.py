@@ -8,19 +8,13 @@ from pathlib import Path
 from typing import Any
 
 import git_sandbox
+from strategy_fixture import KINDS, section  # noqa: F401 代表の 5 種の宣言（10 系のテストも同じファイルを読む）
 
 from ndf.adapters.github import Authored, GitHubError, MergeOutcome, Pull, RuleFacts, rule_facts_of
 from ndf.core.branch_strategy import Strategy
 
 HEAD = "a" * 40
 OTHER = "b" * 40
-# 代表の 5 種のブランチ戦略の宣言（10 系のテストも同じファイルを読む）
-FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "branch_strategy"
-KINDS = ("web-develop", "web-trunk", "mobile", "docs", "plugin")
-
-
-def section(kind: str) -> dict:
-    return json.loads((FIXTURES / f"{kind}.json").read_text(encoding="utf-8"))
 
 
 def strategy(kind: str = "web-develop", **merge: Any) -> Strategy:
