@@ -99,17 +99,25 @@ def _released_by_branch(hub: GitHub, formats: names_decide.NameFormats, revision
     return None
 
 
+def _released_by_files(
+    repo_git: git_mod.Git, store: store_mod.VersionStore, found: list[store_mod.Unit], revision: str
+) -> list[tuple[store_mod.Unit, str]]:
+    """ファイルを持つ保存先で、そのコミットと第 1 親でバージョンが変わった単位（単位の順）。"""
+    out = []
+    for unit in found:
+        now = store.read(repo_git, revision, unit)
+        if now is not None and now != store.read(repo_git, f"{revision}^1", unit):
+            out.append((unit, now))
+    return out
+
+
 def _released(
     repo_git: git_mod.Git, store: store_mod.VersionStore, hub: GitHub, formats: names_decide.NameFormats, revision: str
 ) -> list[tuple[store_mod.Unit, str]]:
     """そのコミットで出したバージョン（単位の順。接尾辞の付いたバージョンを除く）。"""
     found = store.units()
     if store.paths():
-        out = []
-        for unit in found:
-            now = store.read(repo_git, revision, unit)
-            if now is not None and now != store.read(repo_git, f"{revision}^1", unit):
-                out.append((unit, now))
+        out = _released_by_files(repo_git, store, found, revision)
     else:
         version = _released_by_branch(hub, formats, revision)
         out = [(unit, version) for unit in found] if version is not None else []
