@@ -136,11 +136,11 @@ def _bump_marketplace(root: Path, plugin: Plugin, old: str, new: str) -> bool:
     return changed
 
 
-def _bump_lines(path: Path, plugin: Plugin, old: str, new: str) -> bool:
-    """`path` の、プラグインの名前を含む行の中の今のバージョンを書き換える。書き換えたか。"""
+def _bump_lines(path: Path, name: str, old: str, new: str) -> bool:
+    """`path` の、単位の名前 `name` を含む行の中の今のバージョンを書き換える。書き換えたか。"""
     text = path.read_text(encoding="utf-8")
     token = _token(old)
-    lines = [token.sub(new, line) if plugin.name in line else line for line in text.split("\n")]
+    lines = [token.sub(new, line) if name in line else line for line in text.split("\n")]
     out = "\n".join(lines)
     if out == text:
         return False
@@ -168,12 +168,18 @@ def _bump_pointer(path: Path, pointer: str, old: str, new: str) -> bool:
     return True
 
 
-def _bump_file(root: Path, row: dict, plugin: Plugin, old: str, new: str) -> bool:
+def _bump_file(root: Path, row: dict, name: str, old: str, new: str) -> bool:
     path = root / row["path"]
     if not path.is_file():
         return False
     pointer = row.get("pointer")
-    return _bump_pointer(path, pointer, old, new) if pointer else _bump_lines(path, plugin, old, new)
+    return _bump_pointer(path, pointer, old, new) if pointer else _bump_lines(path, name, old, new)
+
+
+def bump_files(root: Path, files: Sequence[dict], name: str, old: str, new: str) -> list[str]:
+    """設定の `release.version_store.files` の行（`path` と、あれば `pointer`）を単位 `name` の `old` から `new` へ書き換え、
+    書き換えたパスを設定の順に返す（無いファイル・書き換えの無いファイルは返さない）。"""
+    return [row["path"] for row in files if _bump_file(root, row, name, old, new)]
 
 
 def bump(root: Path, plugin: Plugin, new: str, extra_files: Sequence[dict] = ()) -> list[str]:
@@ -188,5 +194,5 @@ def bump(root: Path, plugin: Plugin, new: str, extra_files: Sequence[dict] = ())
         written.append(path.relative_to(root).as_posix())
     if _bump_marketplace(root, plugin, old, new):
         written.append(MARKETPLACE.as_posix())
-    written += [row["path"] for row in extra_files if _bump_file(root, row, plugin, old, new)]
+    written += bump_files(root, extra_files, plugin.name, old, new)
     return written

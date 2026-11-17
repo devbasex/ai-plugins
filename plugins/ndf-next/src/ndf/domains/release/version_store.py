@@ -162,8 +162,7 @@ class JsonStore:
         old = self._value(target.read_text(encoding="utf-8"))
         if not plugins_mod._bump_pointer(target, self.pointer, old, new):
             raise StoreError(f"{self.path} の {self.pointer} を書き換えられない")
-        owner = plugins_mod.Plugin(unit.name, unit.dir)
-        return [self.path, *(row["path"] for row in self.files if plugins_mod._bump_file(self.root, row, owner, old, new))]
+        return [self.path, *plugins_mod.bump_files(self.root, self.files, unit.name, old, new)]
 
     def paths(self) -> frozenset[str]:
         return frozenset({self.path, *(row["path"] for row in self.files)})
