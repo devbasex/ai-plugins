@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from fnmatch import fnmatch
 from pathlib import Path
@@ -135,8 +136,6 @@ def _read_bytes(root: Path, rel: str) -> bytes | None:
 
 def _def_closure(defs: dict, start: str) -> list[str]:
     """`start` から `#/$defs/<名前>` の参照でたどれる定義の名前（昇順）。"""
-    import re
-
     seen: set[str] = set()
     todo = [start]
     while todo:
@@ -163,30 +162,46 @@ def _dump(value) -> str:
     return json.dumps(value, ensure_ascii=False, indent=2)
 
 
+def _file_copy_mismatches(root: Path) -> list[dict]:
+    """表と結果のスキーマの、正本とコピーのファイルの 1 バイトの違い。"""
+    out = []
+    for origin, dest in COPY_FILES:
+        a, b = _read_bytes(root, origin), _read_bytes(root, dest)
+        if a is None or a != b:
+            why = "正本が無い" if a is None else ("コピーが無い" if b is None else "正本と 1 バイト以上違う")
+            out.append(v("copy-mismatch", dest, origin, f"{why}。正本 {origin} を直してから cp {origin} {dest} で写す"))
+    return out
+
+
+def _skips(mine: dict | None, name: str, whole: bool) -> bool:
+    """比べない定義か。たどれる定義をすべては持たないコピーが持たない定義（根を除く）は比べない。"""
+    return mine is not None and name not in mine and not whole and name != COPY_DEF_ROOT
+
+
+def _def_copy_mismatches(root: Path) -> list[dict]:
+    """`$defs/BranchStrategy` からたどれる定義の、正本とコピーの中身とキーの順の違い。"""
+    defs = _defs_of(root, COPY_DEFS_ORIGIN)
+    if defs is None or COPY_DEF_ROOT not in defs:
+        return [v("copy-mismatch", COPY_DEFS_ORIGIN, COPY_DEF_ROOT, f"正本に $defs/{COPY_DEF_ROOT} が無いか、読めない")]
+    out = []
+    names = _def_closure(defs, COPY_DEF_ROOT)
+    for dest, whole in COPY_DEFS:
+        mine = _defs_of(root, dest)
+        for name in names:
+            if _skips(mine, name, whole):
+                continue
+            if mine is None or name not in mine or _dump(mine[name]) != _dump(defs[name]):
+                detail = f"$defs/{name} が正本 {COPY_DEFS_ORIGIN} と違う（無い・読めないを含む）。正本の定義をそのまま写す"
+                out.append(v("copy-mismatch", dest, name, detail))
+    return out
+
+
 def copy_mismatches(root: Path) -> list[dict]:
     """11.0 の契約（正本）と 10 系のコピーの違い。表と結果のスキーマはファイルの 1 バイトの違いも、スキーマの定義は
     `$defs/BranchStrategy` からたどれる定義の中身とキーの順の違いも落とす。正本を直してからコピーへ写す。"""
     if not (root / NEXT).is_dir():
         return []
-    out = []
-    for origin, copy in COPY_FILES:
-        a, b = _read_bytes(root, origin), _read_bytes(root, copy)
-        if a is None or a != b:
-            why = "正本が無い" if a is None else ("コピーが無い" if b is None else "正本と 1 バイト以上違う")
-            out.append(v("copy-mismatch", copy, origin, f"{why}。正本 {origin} を直してから cp {origin} {copy} で写す"))
-    defs = _defs_of(root, COPY_DEFS_ORIGIN)
-    if defs is None or COPY_DEF_ROOT not in defs:
-        return [*out, v("copy-mismatch", COPY_DEFS_ORIGIN, COPY_DEF_ROOT, f"正本に $defs/{COPY_DEF_ROOT} が無いか、読めない")]
-    names = _def_closure(defs, COPY_DEF_ROOT)
-    for copy, whole in COPY_DEFS:
-        mine = _defs_of(root, copy)
-        for name in names:
-            if mine is not None and name not in mine and not whole and name != COPY_DEF_ROOT:
-                continue
-            if mine is None or name not in mine or _dump(mine[name]) != _dump(defs[name]):
-                detail = f"$defs/{name} が正本 {COPY_DEFS_ORIGIN} と違う（無い・読めないを含む）。正本の定義をそのまま写す"
-                out.append(v("copy-mismatch", copy, name, detail))
-    return out
+    return _file_copy_mismatches(root) + _def_copy_mismatches(root)
 
 
 class Checker:
