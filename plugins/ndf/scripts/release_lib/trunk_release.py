@@ -68,11 +68,6 @@ def open_release_pr(ctx: ReleaseCtx, ops) -> int:
     return ops.create_pr(root, prod, branch, f"Release: {plugin} v{a.version}", body)
 
 
-def _rerun_command(ctx: ReleaseCtx) -> str:
-    material = getattr(ctx.a, "approval", None)
-    return f"release-steps.py release --version {ctx.a.version} --channel prod" + (f" --approval {material}" if material else "")
-
-
 def waiting_out(ctx: ReleaseCtx, pr: int, head: str, approved: str | None, items: list[dict], metrics: dict, moved: bool = False) -> dict:
     """承認ゲート（10）の結果。`next` に承認資料の作り直しと承認の取り直しを載せる。"""
     a, plugin = ctx.a, ctx.plugin
@@ -85,7 +80,7 @@ def waiting_out(ctx: ReleaseCtx, pr: int, head: str, approved: str | None, items
         summary = f"{plugin} v{a.version} のリリース承認を待つ（版上げの PR #{pr}・head {head[:8]}）"
     nxt = (
         f"{RELEASE_PREFIX}{a.version} の head {head[:8]} で承認資料（release-steps.py approval-facts）を作り直して承認を得て、"
-        f"release-steps.py approve --approval {material} --approved-sha {head} --by user で承認の記録を書き、{_rerun_command(ctx)} を打ち直す"
+        f"release-steps.py approve --approval {material} --approved-sha {head} --by user で承認の記録を書き、{prod_land.rerun_command(a)} を打ち直す"
     )
     row = {"kind": "pr", "name": f"#{pr}", "result": "awaiting_approval", "base": ctx.prod, "head": head}
     m = {**metrics, "main_pr": pr, "compared_head": head, "approved_sha": approved}

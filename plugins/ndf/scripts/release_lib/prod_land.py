@@ -137,6 +137,12 @@ def land(root, a, pr: int, head: str, trail_url: str = "") -> str | None:
     raise StepError(f"PR #{pr} を本番ブランチ {prod} へ入れられない: {got.get('reason') or got['result']}")
 
 
+def rerun_command(a) -> str:
+    """本番の release の打ち直しのコマンド（`a` は release の引数。承認資料があれば --approval を添える）。"""
+    material = getattr(a, "approval", None)
+    return f"release-steps.py release --version {a.version} --channel prod" + (f" --approval {material}" if material else "")
+
+
 def pending_result(plugin: str, version: str, prod: str, tag: str, pending: LandPending, nxt: str, metrics: dict | None = None) -> dict:
     """公開の欠けの結果: `stopped`・`gaps` に公開の行・`next` に打ち直し（終了コード 6 で出す）。"""
     why = PENDING_REASONS.get(pending.result, pending.reason)
