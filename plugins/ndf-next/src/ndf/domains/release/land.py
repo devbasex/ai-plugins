@@ -32,7 +32,7 @@ from http import HTTPStatus
 from typing import NamedTuple, Optional
 from urllib.parse import quote
 
-from ndf.adapters import ci
+from ndf.adapters import ci, merge_queue
 from ndf.adapters.github import BYPASS_ORDER, MERGE_COMMIT, MERGE_QUEUE_PENDING, GitHub, GitHubError, MergeOutcome, Pull, RuleFacts, text_of
 from ndf.adapters.publish import Publisher
 from ndf.contracts import facts
@@ -405,7 +405,7 @@ class Lander:
 
     def _queue_rows(self, number: int, tip: str) -> list[dict]:
         """本番ブランチの merge queue の PR（自分を除く）と、版上げの PR か。全ページを読む（後ろの版上げを衝突の検査から外さない）。"""
-        rows = self.hub.merge_queue_heads(self.production)
+        rows = merge_queue.heads(self.hub, self.production)
         return [self._bump_facts(n, h, tip) for n, h in rows if n != number]
 
     def _gate(self, pull: Pull) -> Gate:

@@ -974,35 +974,3 @@ def test_rule_facts_merges_classic_protection_with_the_stricter_values() -> None
     a = github.RuleFacts(True, 1, True, False, "always", "SQUASH")
     b = github.RuleFacts(True, 2, False, True, "exempt")
     assert github.merge_facts(a, b) == github.RuleFacts(True, 2, True, True, "exempt", "SQUASH")
-
-
-def test_merge_queue_heads_reads_every_page_then_stops_at_the_limit() -> None:
-    """merge queue を `after` のカーソルで先頭から順に全ページ読み、番号と head の SHA をキューの並びで返す。
-    キューが無ければ空で、`QUEUE_PAGES` ページで読み切れなければ GitHubError。"""
-    seen: list[dict] = []
-
-    def handler_of(pages: dict) -> Callable[[httpx.Request], httpx.Response]:
-        def handler(request: httpx.Request) -> httpx.Response:
-            variables = json.loads(request.content)["variables"]
-            seen.append(variables)
-            queue = pages[variables["after"]]
-            return httpx.Response(200, json={"data": {"repository": {"mergeQueue": queue}}})
-
-        return handler
-
-    def page(nodes: list[tuple], cursor: str | None) -> dict:
-        info = {"hasNextPage": cursor is not None, "endCursor": cursor}
-        return {"entries": {"nodes": [{"pullRequest": {"number": n, "headRefOid": h}} for n, h in nodes], "pageInfo": info}}
-
-    pages = {None: page([(8, HEAD)], "c1"), "c1": page([("9", OTHER)], None)}
-    assert _hub(handler_of(pages)).merge_queue_heads("main") == [(8, HEAD), (9, OTHER)]
-    owner, name = REPO.split("/")
-    assert seen == [
-        {"owner": owner, "name": name, "branch": "main", "after": None},
-        {"owner": owner, "name": name, "branch": "main", "after": "c1"},
-    ]
-    assert _hub(handler_of({None: None})).merge_queue_heads("main") == []
-    seen.clear()
-    with pytest.raises(github.GitHubError, match=f"merge queue を {github.QUEUE_PAGES} ページで読み切れない"):
-        _hub(handler_of({None: page([], "c1"), "c1": page([], "c1")})).merge_queue_heads("main")
-    assert len(seen) == github.QUEUE_PAGES

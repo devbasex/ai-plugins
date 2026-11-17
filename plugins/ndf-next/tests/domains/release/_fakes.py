@@ -10,7 +10,7 @@ from typing import Any
 import git_sandbox
 from strategy_fixture import KINDS, section  # noqa: F401 代表の 5 種の宣言（10 系のテストも同じファイルを読む）
 
-from ndf.adapters.github import Authored, GitHub, GitHubError, MergeOutcome, Pull, RuleFacts, rule_facts_of
+from ndf.adapters.github import Authored, GitHubError, MergeOutcome, Pull, RuleFacts, rule_facts_of
 from ndf.core.branch_strategy import Strategy
 
 HEAD = "a" * 40
@@ -102,10 +102,6 @@ class FakeHub:
     def graphql(self, query: str, variables: dict[str, Any]) -> dict[str, Any]:
         self.requests.append(("GRAPHQL", query.split("{", 1)[0].strip(), variables))
         return self.graphql_data
-
-    def merge_queue_heads(self, branch: str) -> list[tuple[int, str]]:
-        """`GitHub.merge_queue_heads` のページの読み方を、この偽物の `graphql` の応答で通す。"""
-        return GitHub.merge_queue_heads(self, branch)  # type: ignore[arg-type]
 
     def nodes(self, numbers: Any, node: str, fields: str) -> dict[int, dict]:
         return {int(n): self.node_data.get(int(n), {}) for n in numbers}

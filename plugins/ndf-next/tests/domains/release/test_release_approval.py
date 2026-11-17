@@ -14,7 +14,8 @@ from pathlib import Path
 from typing import Any
 
 from ndf.adapters import ci
-from ndf.adapters.github import MERGE_QUEUE_PENDING, QUEUE_PAGES, Authored, GitHubError, MergeOutcome, Pull
+from ndf.adapters.github import MERGE_QUEUE_PENDING, Authored, GitHubError, MergeOutcome, Pull
+from ndf.adapters.merge_queue import QUEUE_PAGES
 from ndf.domains.release import approval_decide, land, trail
 from ndf.domains.release import cli as release_cli
 
@@ -577,7 +578,7 @@ def test_merge_queue_dequeues_when_approval_is_revoked_while_waiting() -> None:
     assert not done.merged and done.kind == "refused" and hub.dequeued == [7] and 7 not in hub.queued
 
 
-# --- 本番の PR の確かめが読む merge queue（`Lander._queue_rows` と `GitHub.merge_queue_heads` の現状固定） ------------------------------------
+# --- 本番の PR の確かめが読む merge queue（`Lander._queue_rows` と `merge_queue.heads` の現状固定） ------------------------------------
 _TIP, _H8, _H9 = "c" * 40, "8" * 40, "9" * 40
 
 
