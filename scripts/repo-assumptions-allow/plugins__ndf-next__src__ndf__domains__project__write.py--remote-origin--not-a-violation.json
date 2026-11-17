@@ -3,5 +3,5 @@
   "name": "remote-origin",
   "kind": "not-a-violation",
   "reason": "結果の行の鍵の名前 origin（書いた値の出所）。リモート名でない",
-  "count": 4
+  "count": 2
 }

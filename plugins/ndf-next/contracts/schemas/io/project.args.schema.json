@@ -9,6 +9,64 @@
       "additionalProperties": false,
       "properties": {
         "subcommand": {
+          "const": "branch-strategy",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "verb": {
+          "type": "string",
+          "enum": [
+            "init",
+            "measure",
+            "write",
+            "migrate",
+            "remove"
+          ],
+          "description": "init・measure・write・migrate・remove",
+          "x-ndf-positional": true
+        },
+        "--kind": {
+          "type": "string",
+          "enum": [
+            "web-develop",
+            "web-trunk",
+            "mobile",
+            "docs",
+            "plugin"
+          ],
+          "description": "代表のリポジトリの種類（init は必須。measure・write は候補の先頭にする）"
+        },
+        "--answers": {
+          "type": "string",
+          "description": "問いへの答え（セクションの JSON Pointer → 値）"
+        },
+        "--result": {
+          "type": "string",
+          "description": "write の土台にする measure の結果（省けば今のセクション、無ければ測り直す）"
+        },
+        "--digest": {
+          "type": "string",
+          "description": "示した差分のハッシュ。合うときだけ書く"
+        },
+        "--dry-run": {
+          "type": "boolean",
+          "description": "init で書かずに差分とハッシュだけを示す"
+        },
+        "--root": {
+          "type": "string",
+          "default": ".",
+          "description": "リポジトリの作業場所"
+        }
+      },
+      "required": [
+        "subcommand",
+        "verb"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
           "const": "check",
           "description": "下位の命令（入れ子は空白でつなぐ）"
         },
@@ -24,29 +82,6 @@
       },
       "required": [
         "subcommand"
-      ]
-    },
-    {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "subcommand": {
-          "const": "drift",
-          "description": "下位の命令（入れ子は空白でつなぐ）"
-        },
-        "--measure": {
-          "type": "string",
-          "description": "ndf project measure の測定の結果"
-        },
-        "--root": {
-          "type": "string",
-          "default": ".",
-          "description": "リポジトリの作業場所"
-        }
-      },
-      "required": [
-        "subcommand",
-        "--measure"
       ]
     },
     {
