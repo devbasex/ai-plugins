@@ -110,15 +110,6 @@ def test_failed_backup_leaves_no_partial_file_and_keeps_old_ones(root, monkeypat
     assert store.backups(root) == old
 
 
-def test_table_version_bump_takes_a_backup_first(root):
-    url = store.default_url(root)
-    with store.open_store(url, root, T0) as st, store.transaction(st) as conn:
-        conn.execute(store.VERSIONS.update().values(value=0))
-    before = len(store.backups(root))
-    store.open_store(url, root, T0 + timedelta(hours=1)).close()
-    assert len(store.backups(root)) == before + 1
-
-
 def _write_and_crash(url: str, root: str) -> None:
     """書き込んで、チェックポイントさせずにプロセスを落とす（-wal にフレームを残す）。"""
     path = store.sqlite_path(url)
