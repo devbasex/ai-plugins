@@ -170,7 +170,7 @@ def test_release_steps_parser_current_behavior() -> None:
         "answer": common
         + [pr, req("--answer", choices=("approved", "rejected")), req("--presented"), req("--by", choices=("user", "mvv"))],
         "approval-check": common + [pr, req("--production")],
-        "merge": common + [pr, req("--base"), req("--production"), req("--budget", float)],
+        "merge": common + [pr, req("--budget", float)],
         "record": common + [pr, req("--production")],
         "verification-record": common + [pr, req("--record")],
         "records": common + [pr],

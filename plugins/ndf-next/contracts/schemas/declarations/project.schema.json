@@ -22,7 +22,7 @@
     },
     "branch_strategy": {
       "$ref": "#/$defs/BranchStrategy",
-      "description": "ブランチ戦略の宣言（#3672）。ブランチの名前・取り込み方・リリース・承認・マージを 1 か所で持ち、ndf project branch-strategy だけが作る・更新する・移す・消す。工程の部品は ndf.core.branch_strategy で読む"
+      "description": "ブランチ戦略の宣言。ブランチの名前・取り込み方・リリース・承認・マージを 1 か所で持ち、ndf project branch-strategy だけが作る・更新する・移す・消す。工程の部品は ndf.core.branch_strategy で読む"
     },
     "languages": {
       "anyOf": [
