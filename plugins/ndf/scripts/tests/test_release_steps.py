@@ -2633,6 +2633,10 @@ def test_release_retry_command_keeps_how_the_approval_was_given(approval, approv
     a.release_strategy = "release_branch"
     want = "release-steps.py release --version 1.2.3 --channel prod --release-strategy release_branch" + tail
     assert prod_land.release_retry_command(a) == want
+    # 選んだプラグインも引き継ぐ（落とすと宣言の release.plugin へ切り替わる。#3732）
+    a.plugins = "foo,bar"
+    want = "release-steps.py release --version 1.2.3 --channel prod --plugins foo,bar --release-strategy release_branch" + tail
+    assert prod_land.release_retry_command(a) == want
 
 
 def test_release_trunk_lands_the_approved_head(monkeypatch, tmp_path):

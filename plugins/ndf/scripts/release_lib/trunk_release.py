@@ -81,6 +81,8 @@ def waiting_out(ctx: ReleaseCtx, pr: int, head: str, approved: str | None, items
         summary = f"{plugin} v{a.version} のリリース承認を待つ（版上げの PR #{pr}・head {head[:8]}）"
     redo = f"{RELEASE_PREFIX}{a.version} の head {head[:8]} で承認資料（release-steps.py approval-facts）を作り直して承認を得て、"
     retry = f"release-steps.py release --version {a.version} --channel prod"
+    if plugins := getattr(a, "plugins", None):
+        retry += f" --plugins {plugins}"  # 選んだプラグインを引き継ぐ（落とすと宣言の release.plugin へ切り替わる）
     if getattr(a, "approved_sha", None) and not getattr(a, "approval", None):
         # 承認したコミットで始めたなら、合わなかった古い SHA ではなく今の head を承認として渡し直す（古い SHA の打ち直しは毎回 10 で止まる）
         nxt = f"{redo}{retry} --approved-sha {head} を打ち直す"
