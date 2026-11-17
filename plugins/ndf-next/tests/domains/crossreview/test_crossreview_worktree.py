@@ -6,12 +6,13 @@ import shutil
 from pathlib import Path
 
 import pytest
+from result_json import last_result
 
 from ndf.adapters import git
 from ndf.core.converge import worktree
 from ndf.domains.crossreview import cli
 
-from ._repos import BRANCH, Repos, last_result, sh
+from ._repos import BRANCH, Repos, sh
 
 
 def _listed(repos: Repos, path: Path) -> bool:

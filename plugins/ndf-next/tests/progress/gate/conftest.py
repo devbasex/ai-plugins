@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import importlib.util
-import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -16,6 +15,7 @@ from ndf.progress import command, gate, lane, plan, run, store
 from plan_decls import REPO
 from plan_decls import decl as _decl
 from plan_decls import doc as _doc
+from result_json import last_result
 
 ISSUE = 3092
 
@@ -50,7 +50,7 @@ def new_table(capsys):
 
     def make(*extra: str) -> str:
         code = command.main(["new", "s1", "--mode", "standard", "--issues", str(ISSUE), *extra])
-        out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+        out = last_result(capsys.readouterr().out)
         assert code == 0, out
         return out["metrics"]["machine_id"]
 
