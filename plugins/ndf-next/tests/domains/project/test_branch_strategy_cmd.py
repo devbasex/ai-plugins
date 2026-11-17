@@ -537,9 +537,7 @@ def test_rule_facts_merge_rulesets_and_classic_protection():
 # --- ai-plugins の値（受け入れ条件 15） --------------------------------------------------------
 
 
-@pytest.mark.skipif(
-    not (REPO_ROOT / ".ndf" / "project.json").is_file(), reason="プラグインだけを写した実行にはリポジトリの宣言が無い"
-)
+@pytest.mark.skipif(not (REPO_ROOT / ".ndf" / "project.json").is_file(), reason="プラグインだけを写した実行にはリポジトリの宣言が無い")
 def test_ai_plugins_section_is_the_plugin_row_with_its_measured_facts():
     """ai-plugins の `.ndf/project.json` のセクションは、`init --kind plugin` に ai-plugins の測った事実を渡した結果と一致する。
     移行が持ち込んだ利用者の値（届け先 `release.deliveries`・レビューの単位 `reviews`）だけが init の外にある。"""
