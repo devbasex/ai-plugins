@@ -146,7 +146,7 @@ I1 は入れ替え（S2）の前後で同じ箇所を当てる。開発の間の
 
 - Python のパッケージの形（`src/ndf`・`ndf.` で始まるモジュール名）は照合しない。パッケージ名はプラグイン名から切り離した固定の名前である
 - 宣言の置き場 `.ndf`・エントリポイントの名前 `ndf`（`bin/ndf`）・工程の定義の名前空間 `ndf` は、プラグイン名から求めない固定の語で、`identity.FIXED_WORDS` に置く。コードはこの表から引き、I1 は `identity.py` の `FIXED_WORDS` と `FINAL_NAME` の定義の行だけを通す
-- CI（`.github/workflows/ndf-next.yml` の `ndf-next-copy`）は、プラグインを一時ディレクトリの `plugins/ndf/` へ写して `plugin.json` の `name` を `identity.FINAL_NAME` にし、検査とテストを打つ。I1 の指摘の集合（プラグインの根からの相対パスと行）が元と違えば落ちる
+- CI（`.github/workflows/ndf-next.yml` の `ndf-next-tests`。6 つのジョブがそれぞれ自分のファイルを元と写しで打つ）は、プラグインを一時ディレクトリの `plugins/ndf/` へ写して `plugin.json` の `name` を `identity.FINAL_NAME` にし、検査とテストを打つ。I1 の指摘の集合（プラグインの根からの相対パスと行）が元と違えば落ちる
 
 ### I1 と Skill 本文の前置き
 

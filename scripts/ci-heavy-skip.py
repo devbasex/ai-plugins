@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """配布の PR と文書だけの PR で重いジョブ（pytest・runtime smoke）を省けるかを差分から決める（#1055・#2925）。
 
-省くのは次のどれかに当たる Pull Request だけ。push では常に回す（ベースブランチで通った
-という記録を、省かずに回した結果だけにするため）。
+省くのは次のどれかに当たる Pull Request だけ。merge queue の一時コミット（merge_group）は 2・2b だけで省く。
+push では常に回す（ベースブランチで通ったという記録を、省かずに回した結果だけにするため）。
 
 1. PR の差分（merge-base..head）が版数と説明だけ。版上げの PR（release/v<版> → 宛先）
 2. PR の差分が文書のファイルだけ（NDF の差分の分類 `lib/diff_kinds.py`。宣言は `.ndf/project.json` の `docs`）。
@@ -198,7 +198,7 @@ def _promotion_decision(
 def decide(
     root: str, event: str, base: str, head: str, repo: str, workflow: str, branch: str = "", api: Callable[[str], dict] = gh_api
 ) -> Decision:
-    if event != "pull_request":
+    if event not in ("pull_request", "merge_group"):
         return Decision(False, f"{event or '不明'} のイベントでは省かない")
     mb = git(root, "merge-base", base, head)
     if mb.returncode != 0:
@@ -209,6 +209,9 @@ def decide(
     found = _docs_or_self_tested(k, as_code)
     if found is not None:
         return found
+    if event == "merge_group":
+        # merge queue の一時コミットで省くのは 2・2b だけ。版上げの PR はキューの中で全件を回す
+        return Decision(False, "merge queue では文書だけ・作り直しのディレクトリだけの差分のほかは省かない")
     ok, why = _version_only_of(root, mb_sha, head, k)
     if ok:
         return Decision(True, "差分が版数と説明だけ")
@@ -225,7 +228,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--workflow", required=True, help="workflow のファイル名（例: pytest.yml）")
     ap.add_argument("--branch", default="", help="比べるブランチ（既定は宛先のブランチ戦略の宣言の branches.base）")
     a = ap.parse_args(argv)
-    if a.event == "pull_request" and not (a.base and a.head):
+    if a.event in ("pull_request", "merge_group") and not (a.base and a.head):
         d = Decision(False, "--base と --head が無い")
     else:
         d = decide(a.root, a.event, a.base, a.head, a.repo, a.workflow, a.branch)

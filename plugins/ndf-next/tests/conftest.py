@@ -6,7 +6,8 @@
 テストの間に副命令が出す結果 JSON は、すべて結果の契約（形と、状態・止まった理由と終了コードの対応）と副命令の結果の
 スキーマ（`contracts/schemas/io/<副命令>.result.schema.json`）で確かめる（fixture `_checked_emit`。#3518 の決定 9）。
 形の誤った結果をわざと作るテストは印 `ndf_bad_result` を付ける。全体の実行の終わりに、ok の出力を 1 度も確かめなかった
-副命令があれば、その名前を出して落とす（`pytest_sessionfinish`）。
+副命令があれば、その名前を出して落とす（`pytest_sessionfinish`）。CI はテストをファイル単位で 6 つのジョブへ分けるため、
+各ジョブは環境変数 `NDF_OK_TOOLS_OUT` のファイルへ記録を書き、後のジョブ `ndf-next-ok-tools` が合わせて確かめる。
 
 使い捨ての PostgreSQL は `initdb` と `pg_ctl` で起こす（fixture `start_postgres`。実体は `support/postgres_server.py`）。GitHub Actions の ubuntu の Runner は
 PostgreSQL を入れてある（サービスは止まっている）。手元に無ければ飛ばし、CI（環境変数 `CI`）では落とす。
@@ -15,6 +16,7 @@ PostgreSQL を入れてある（サービスは止まっている）。手元に
 from __future__ import annotations
 
 import json
+import os
 import sys
 from collections.abc import Callable
 from contextlib import AbstractContextManager
@@ -32,8 +34,10 @@ PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 BAD_RESULT_MARK = "ndf_bad_result"
 # 並列の実行で worker から controller へ ok を確かめた副命令を渡す鍵
 OK_TOOLS_KEY = "ndf_ok_tools"
-# 全体の実行を狭める引数（どれかがあれば ok の出力の確かめを行わない）
-NARROWING_OPTIONS = ("keyword", "markexpr", "deselect", "lf", "last_failed", "failedfirst")
+# 全体の実行を狭める引数（どれかがあれば ok の出力の確かめを行わない）。収集だけの実行もテストを打たないので含める
+NARROWING_OPTIONS = ("keyword", "markexpr", "deselect", "lf", "last_failed", "failedfirst", "collectonly")
+# ok を確かめた副命令の名前を書き出すファイル（CI の分けたジョブが使う）
+OK_TOOLS_OUT_ENV = "NDF_OK_TOOLS_OUT"
 _ok_tools: set[str] = set()
 
 
@@ -102,6 +106,9 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     if hasattr(config, "workeroutput"):
         config.workeroutput[OK_TOOLS_KEY] = sorted(_ok_tools)
         return
+    out = os.environ.get(OK_TOOLS_OUT_ENV)
+    if out:
+        Path(out).write_text("".join(f"{t}\n" for t in sorted(_ok_tools)), encoding="utf-8")
     if not is_full_run(config) or exitstatus != 0:
         return
     missing = sorted(set(cli.COMMANDS) - _ok_tools)
@@ -122,6 +129,7 @@ def _isolated_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.delenv("CLAUDE_PLUGIN_ROOT", raising=False)
     monkeypatch.delenv("NDF_CALLER_PLUGIN_ROOT", raising=False)
     monkeypatch.delenv("NDF_STATE_HOME", raising=False)
+    monkeypatch.delenv(OK_TOOLS_OUT_ENV, raising=False)
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
     # エントリポイント（`ndf.cli`）が副命令の前に旧い置き場（`<CLAUDE_CONFIG_DIR>/<名前>/state` など）を退避しうるため

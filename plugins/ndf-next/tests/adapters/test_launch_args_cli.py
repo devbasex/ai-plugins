@@ -21,7 +21,7 @@ def test_launch_args_adds_a_notice_when_the_list_is_unreadable(capsys, last_resu
     """一覧を読めなくても ok のまま、知らせの行を 1 件足す（I10a）。
 
     自分の名前が旧い NDF の名前（`identity.FINAL_NAME`）なら一覧を読まないため、名前を旧い NDF と違う値に固定する
-    （CI の ndf-next-copy は `plugins/ndf` へ改名した写しで走る）。
+    （CI の ndf-next-tests は `plugins/ndf` へ改名した写しでも走る）。
     """
     monkeypatch.setattr(identity, "name_of", lambda _root: "ndf-next")
     monkeypatch.setattr(claude, "list_plugins", lambda **_: None)

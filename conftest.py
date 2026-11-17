@@ -36,7 +36,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import zlib
 from pathlib import Path
 
 import pytest
@@ -48,6 +47,8 @@ import pytest
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "scripts"))
 pytest_plugins = ["pytester", "pytest_child_cleanup"]
+
+import pytest_shard  # noqa: E402  ジョブの割り当て（scripts/ を上でパスへ足した）
 
 # `plugins/<family>/dev.agy/skills/` は配布 Skill への symlink である。実体は
 # `plugins/<family>/skills/` にあり、そちらを収集する。両方をたどると同じテストが 2 度
@@ -195,9 +196,11 @@ def pytest_sessionfinish(session, exitstatus) -> None:
     run_state.sweep_states(None, kinds=("test-tmp",), tmp_only=True)
 
 
-# ジョブの分割（#882）。**分ける単位はファイルで、割り当てはパスの剰余だけで決める。**
+# ジョブの分割（#882）。**分ける単位はファイルで、割り当ては実測時間で決める。**
 # 同じファイルのテストは同じジョブへ入るため、ファイル単位の前提（モジュールの読み込み・
-# 一時ディレクトリ）が割れない。偏りが出たら実測時間での割り当てへ進む。
+# 一時ディレクトリ）が割れない。CI の実測秒（scripts/pytest-shard-seconds.json）の重いファイルから順に、
+# いちばん空いているジョブへ入れる（scripts/pytest_shard.py。ndf-next.yml も同じ割り当てを使う）。どのジョブも同じファイルの一覧から
+# 同じ順で決めるため、和は全体と一致し重ならない（パスの剰余の割り当ては 3.3〜7.3 分に偏った）。
 SHARD_TOTAL_ENV = "SHARD_TOTAL"
 SHARD_INDEX_ENV = "SHARD_INDEX"
 
@@ -221,11 +224,14 @@ def _select_shard(config, items) -> None:
     if shard is None:
         return
     index, total = shard
-    kept, dropped = [], []
+    rels = {}
     for item in items:
         path = Path(str(item.fspath)).resolve()
-        rel = path.relative_to(ROOT).as_posix() if path.is_relative_to(ROOT) else path.as_posix()
-        (kept if zlib.crc32(rel.encode()) % total == index else dropped).append(item)
+        rels[id(item)] = path.relative_to(ROOT).as_posix() if path.is_relative_to(ROOT) else path.as_posix()
+    owner = pytest_shard.assign_files(sorted(set(rels.values())), total, pytest_shard.read_seconds())
+    kept, dropped = [], []
+    for item in items:
+        (kept if owner[rels[id(item)]] == index else dropped).append(item)
     if dropped:
         config.hook.pytest_deselected(items=dropped)
         items[:] = kept
