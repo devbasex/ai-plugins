@@ -54,6 +54,10 @@ RUN_KIND = "run"  # 履歴の実行の行（`kind` を持たない旧い行も�
 STRUCTURE_PREFIX = "structure/"  # 改善項目の種類（`structure/<手法>`）
 WINDOW = 10  # 種類ごとに遡る、その種類を含む行の数
 DEFAULTS_SOURCE, HISTORY_SOURCE = "defaults", "history"  # 表の材料（`plan.table_source`）
+SECTION_COUNT = {"verify": "items", "fix": "launches"}  # 実行の行の工程の区分と件数の鍵（`drive` の `verify_stats`・`fix_stats` と同じ）
+TEST_KIND = "test"  # テストを足した工程の種類
+SECONDS = "seconds"  # 秒の鍵
+COUNT = "count"  # 種類ごとの件数の鍵
 
 
 def _num(value: Any) -> float:
@@ -82,11 +86,11 @@ def _field(holder: Mapping[str, Any], key: str) -> float:
 
 
 def _sample(entry: Mapping[str, Any], count_key: str) -> tuple[float, float]:
-    return (_field(entry, count_key), _field(entry, "seconds"))
+    return (_field(entry, count_key), _field(entry, SECONDS))
 
 
 def _kind_samples(rows: Sequence[Mapping[str, Any]], kind: str) -> list[tuple[float, float]]:
-    return [_sample(e, "count") for r in rows if (e := _mapping(_mapping(r, "kinds"), kind))]
+    return [_sample(e, COUNT) for r in rows if (e := _mapping(_mapping(r, "kinds"), kind))]
 
 
 def _structure_samples(rows: Sequence[Mapping[str, Any]]) -> list[tuple[float, float]]:
@@ -94,7 +98,7 @@ def _structure_samples(rows: Sequence[Mapping[str, Any]]) -> list[tuple[float, f
     out = []
     for r in rows:
         kinds = _mapping(r, "kinds")
-        parts = [_sample(_mapping(kinds, n), "count") for n in kinds if str(n).startswith(STRUCTURE_PREFIX)]
+        parts = [_sample(_mapping(kinds, n), COUNT) for n in kinds if str(n).startswith(STRUCTURE_PREFIX)]
         out.append((sum(c for c, _ in parts), sum(s for _, s in parts)))
     return out
 
@@ -121,9 +125,9 @@ def build_table(rows: Sequence[Mapping[str, Any]], values: Mapping[str, float]) 
 
     return {
         "source": HISTORY_SOURCE if runs else DEFAULTS_SOURCE,
-        "test": pick(_per_unit(_kind_samples(runs, "test")), "test"),
-        "verify": pick(_per_unit(_section_samples(runs, "verify", "items")), "verify"),
-        "fix": pick(_per_unit(_section_samples(runs, "fix", "launches")), "fix"),
+        TEST_KIND: pick(_per_unit(_kind_samples(runs, TEST_KIND)), TEST_KIND),
+        "verify": pick(_per_unit(_section_samples(runs, "verify", SECTION_COUNT["verify"])), "verify"),
+        "fix": pick(_per_unit(_section_samples(runs, "fix", SECTION_COUNT["fix"])), "fix"),
         "structure": pick(_per_unit(_structure_samples(runs)), "structure"),
         "kinds": kinds,
     }
@@ -146,17 +150,17 @@ def run_row(state: Mapping[str, Any], at: str) -> dict[str, Any]:
     kinds: dict[str, dict[str, float]] = {}
 
     def add(kind: str, seconds: Any) -> None:
-        bucket = kinds.setdefault(kind, {"count": 0, "seconds": 0.0})
-        bucket["count"] += 1
-        bucket["seconds"] = round(bucket["seconds"] + _num(seconds), 1)
+        bucket = kinds.setdefault(kind, {COUNT: 0, SECONDS: 0.0})
+        bucket[COUNT] += 1
+        bucket[SECONDS] = round(bucket[SECONDS] + _num(seconds), 1)
 
     raw = state["items"] if "items" in state else None
     for item in raw if isinstance(raw, list) else []:
         if not isinstance(item, Mapping) or (item["status"] if "status" in item else None) != "adopted":
             continue
         spent = _mapping(item, "seconds")
-        if "test" in spent:
-            add("test", spent["test"])
+        if TEST_KIND in spent:
+            add(TEST_KIND, spent[TEST_KIND])
         if "implement" in spent:
             add(f"{STRUCTURE_PREFIX}{_technique(item)}", spent["implement"])
     fix, verify = _mapping(state, "fix_stats"), _mapping(state, "verify_stats")
@@ -166,6 +170,11 @@ def run_row(state: Mapping[str, Any], at: str) -> dict[str, Any]:
         "at": at,
         "pr": state["pr"] if "pr" in state else None,
         "kinds": kinds,
-        "verify": {"items": _field(verify, "items"), "seconds": _field(verify, "seconds")},
-        "fix": {"launches": _field(fix, "launches"), "seconds": _field(fix, "seconds")},
+        "verify": _section_row(verify, SECTION_COUNT["verify"]),
+        "fix": _section_row(fix, SECTION_COUNT["fix"]),
     }
+
+
+def _section_row(stats: Mapping[str, Any], count_key: str) -> dict[str, float]:
+    """工程の集計（`verify_stats`・`fix_stats`）から履歴の行の区分（件数と秒）を作る。"""
+    return {count_key: _field(stats, count_key), SECONDS: _field(stats, SECONDS)}
