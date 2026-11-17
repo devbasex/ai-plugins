@@ -96,6 +96,7 @@ import json
 import re
 import sys
 from pathlib import Path
+from typing import NamedTuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import deps  # noqa: E402
@@ -1037,14 +1038,17 @@ def included_pr_facts(prs, data, checks, repo):
     return items, rows
 
 
-def cmd_approval_facts(a):
-    root = git_root(a.root)
-    repo = repo_lib.owner_repo(root)
-    if not repo:
-        raise StepError("リポジトリの owner/name を決められない", EXIT_PRECONDITION)
-    base, prod, plugin = release_decl(root, a)
-    git(root, "fetch", "-q", "origin", "--tags")
-    cur_tag = tag_name(root, plugin, a.version)
+class ApprovalRange(NamedTuple):
+    """承認に出す範囲: 承認に出すブランチ・その先頭のコミット・前のリリースの起点（タグか版上げのコミット）。"""
+
+    source_branch: str
+    approved_sha: str
+    prev: str
+
+
+def _approval_range(root, a, base, plugin, cur_tag) -> ApprovalRange:
+    """承認に出す範囲を決める。`--head` があればそのブランチを取ってきて先頭を、無ければベースブランチの先頭を承認に出す。
+    前のリリースの起点は --prev-tag → `prev_release` の順で決め、決まらなければ止める。"""
     source_branch = (head := getattr(a, "head", None)) or base  # 選んで集める取り込み方は組んだリリースブランチの先頭を承認に出す（#3121）
     if head:
         git(root, "fetch", "-q", "origin", f"+refs/heads/{source_branch}:refs/remotes/origin/{source_branch}")
@@ -1055,6 +1059,18 @@ def cmd_approval_facts(a):
             "前のリリースの起点（前のタグか、タグを作らない宣言では前の版上げのコミット）を決められない（--prev-tag を渡す）",
             EXIT_PRECONDITION,
         )
+    return ApprovalRange(source_branch, approved_sha, prev)
+
+
+def cmd_approval_facts(a):
+    root = git_root(a.root)
+    repo = repo_lib.owner_repo(root)
+    if not repo:
+        raise StepError("リポジトリの owner/name を決められない", EXIT_PRECONDITION)
+    base, prod, plugin = release_decl(root, a)
+    git(root, "fetch", "-q", "origin", "--tags")
+    cur_tag = tag_name(root, plugin, a.version)
+    source_branch, approved_sha, prev = _approval_range(root, a, base, plugin, cur_tag)
     made = publish.made_by(delivery.load_delivery(root), cur_tag)
     keep = kept_sections(root, getattr(a, "approval", None))  # 前の承認資料の残す節（読めなければ書かずに止める。#1834）
     changes = instructions.changed_instructions(root, prev, approved_sha)
