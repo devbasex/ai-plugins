@@ -47,7 +47,7 @@ ITEM = {"id": "I-002", "path": "src/b.py", "symbol": "g", "title": "t2"}
 COMMIT = '結果は {"commit": "<最後のコミット>"}。'
 
 
-def test_plan_prompt_lists_proposals_with_tier_and_estimate():
+def test_plan_prompt_lists_proposals_with_tier_technique_and_tests():
     proposals = [
         {"path": "src/a.py", "symbol": "f", "title": "t", "reason": "r"},
         {"path": "src/b.py", "symbol": "g", "title": "t2", "reason": "r2"},
@@ -55,9 +55,10 @@ def test_plan_prompt_lists_proposals_with_tier_and_estimate():
     assert prompt_decide.plan(7, proposals) == (
         "PR #7 のリファクタリングの提案から、採る項目を選んで並べる（重なるものは 1 つにする）。\n"
         "- src/a.py f: t（r）\n- src/b.py g: t2（r2）\n"
-        "項目ごとにグレード（tier: high・medium・low）と見積り（estimate: テストの追加と実装の分）を付ける。\n"
+        "項目ごとにグレード（tier: high・medium・low）と、手法（technique: extract_function などの snake_case の識別子）と、"
+        "直す前に振る舞いを固定するテストを足すか（tests: true / false）を付ける。所要の分は書かない（配分の表から見積もる）。\n"
         '最後の行に JSON {"items": [{"path": "<ファイル>", "symbol": "<関数名>", "title": "<要約>", "reason": "<理由>",'
-        ' "tier": "<グレード>", "estimate": {"test": <分>, "implement": <分>}}]} を出す。'
+        ' "tier": "<グレード>", "technique": "<手法>", "tests": <真偽>}]} を出す。'
     )
 
 

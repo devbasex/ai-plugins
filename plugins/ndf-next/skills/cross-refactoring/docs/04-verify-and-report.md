@@ -324,10 +324,12 @@ Pull Request に残る。**修正の回数はここでは進めない。** 進�
 **配分テーブルは保存しない。** リファクタリング計画のたびに、利用者の手元の履歴から集計する（決定 7）。
 
 - 履歴の置き場所: `<metrics>/<owner>--<repo>/cross-refactoring-allocation.jsonl`。
-  根は実行の要約と同じ（`NDF_METRICS_DIR` → `$XDG_STATE_HOME/ndf/metrics` →
-  `~/.claude/ndf/state/metrics`）。`NDF_METRICS=0` でも書く（リファクタリング計画の材料として扱い、計測の設定に従わない）
-- 行は 2 種類ある（`kind`）。実行の行（`run`）は 1 実行 = 1 行で、**最終ゲートが通った実行だけ**を `report` が追記する
-  （単独起動は `cross-review` が `approved` のときだけ）。中断した実行と、最終ゲートが通らなかった実行は追記しない。
+  根は実行の要約と同じ（`NDF_METRICS_DIR` → `$NDF_STATE_HOME/metrics` → `$XDG_STATE_HOME/ndf/metrics` →
+  `~/.local/state/ndf/metrics`）。`NDF_METRICS=0` でも書く（リファクタリング計画の材料として扱い、計測の設定に従わない）。
+  リモートが GitHub でない作業場所では読み書きしない
+- 行は 2 種類ある（`kind`）。実行の行（`run`）は 1 実行 = 1 行で、**最終ゲートが通った実行だけ**を `report`（`bin/ndf` の
+  drive では実行の終わり）が追記する（単独起動は `cross-review` が `approved` のときだけ）。中断した実行と、最終ゲートが
+  通らなかった実行は追記しない。
   着手前のテストの行（`init_test`）は `init` が着手前のテストの後に、最終ゲートの成否と打ち切りを問わず 1 行足す。
   項目の行（`item`）は改善項目を採った実行が、**終わり方（最終ゲートの通過 `final_gate`・安全網や打ち消しの衝突で止めた
   `safety_net`・中断 `aborted`）を問わず**、採った項目ごとに 1 行足す（`item_actuals.append_item_rows`。#2457 決定 10）。項目の
@@ -351,9 +353,10 @@ Pull Request に残る。**修正の回数はここでは進めない。** 進�
 
 初期値は `data/allocation-defaults.json` にあり、初期値であること（`initial`）と出所（実測を記録した URL の `source.url`）と式を持つ。
 値は NDF のリポジトリの実測なので、利用先が `.ndf/estimate.json` の `allocation_minutes` で種類ごとに上書きする
-（省いた種類は初期値）宣言を置く。ただし配分を決める処理は M4 #3298 で入るため、今はこの宣言をまだ読まない（M4 で読む）。
+（省いた種類は初期値）宣言を置く。初期値に無い種類・0 以下の分を書いた宣言は、計画の前に止まる。
 **担当の申告ではなく適用の CLI の実測の秒を件数で割った値**である（決定 9）。履歴が
-無い・読めないときは初期値でリファクタリング計画し、1 行知らせる（`plan.table_source` が `defaults`）。
+無い・読めないときは初期値（と宣言）でリファクタリング計画し、1 行知らせる（`plan.table_source` が `defaults`）。
+計画の担当は項目ごとに手法（`technique`）とテストを足すか（`tests`）を返し、見積りはこの表から付ける（担当は分を書かない）。
 
 ## 報告
 

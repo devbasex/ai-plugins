@@ -6,6 +6,7 @@ import json
 
 import pytest
 
+from ndf import identity
 from ndf.domains.records import files
 from ndf.domains.relay import cli, context_policy, context_records, registry
 
@@ -50,8 +51,8 @@ def test_context_dir_follows_the_legacy_state_root(tmp_path):
     assert context_records.context_dir({"NDF_CONTEXT_DIR": str(tmp_path)}) == tmp_path
     env = {"NDF_STATE_HOME": str(tmp_path / "s")}
     assert context_records.context_dir(env) == tmp_path / "s" / "context"
-    assert registry.legacy_root(env) == registry.legacy_state_root(env) / "relay"
-    assert registry.legacy_state_root({"XDG_STATE_HOME": str(tmp_path)}) == tmp_path / "ndf"
+    assert registry.legacy_root(env) == identity.legacy_state_root(env) / "relay"
+    assert identity.legacy_state_root({"XDG_STATE_HOME": str(tmp_path)}) == tmp_path / "ndf"
 
 
 def test_recorded_work_normalizes_issue_numbers():
