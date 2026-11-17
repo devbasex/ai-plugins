@@ -417,7 +417,6 @@ def _defaults_in(node, at: str = "") -> list[str]:
 
 def branch_strategy_problems(root: pathlib.Path) -> list[str]:
     """スキーマの `default`・既定の表の ai-plugins の名前と迂回・宛先の決め打ちを見つける。1 件につき 1 行（パス:行と理由）。"""
-    problems = []
     try:
         schema = json.loads((root / BRANCH_STRATEGY_SCHEMA).read_text(encoding="utf-8"))
         presets_text = (root / BRANCH_STRATEGY_PRESETS).read_text(encoding="utf-8")
@@ -425,20 +424,45 @@ def branch_strategy_problems(root: pathlib.Path) -> list[str]:
         code = {rel: (root / rel).read_text(encoding="utf-8") for rel in BRANCH_STRATEGY_CODE}
     except (OSError, ValueError) as e:
         raise ScanError(f"ブランチ戦略の宣言の検査の対象を読めない: {e}") from e
-    for at in _defaults_in(schema):
-        problems.append(f"{BRANCH_STRATEGY_SCHEMA}:{at}: スキーマに default がある（宣言は解析が書き、読む部品は既定値へ倒さない）")
-    for n, line in enumerate(presets_text.splitlines(), 1):
-        for name in AI_PLUGINS_NAMES:
-            if name in line:
-                problems.append(f"{BRANCH_STRATEGY_PRESETS}:{n}: ai-plugins の名前 {name} が既定の表にある")
-    for kind, row in (presets.get("kinds") or {}).items():
-        if (row.get("section") or {}).get("merge", {}).get("admin"):
-            problems.append(f"{BRANCH_STRATEGY_PRESETS}: 種類 {kind} の既定が管理者の迂回（merge.admin）を使う")
-    for rel, text in code.items():
-        for n, line in enumerate(text.splitlines(), 1):
-            if PINNED_BRANCH.search(line):
-                problems.append(f"{rel}:{n}: ブランチ名を決め打っている（セクションの branches から読む）")
-    return problems
+    return [
+        *_schema_default_problems(schema),
+        *_preset_name_problems(presets_text),
+        *_preset_admin_problems(presets),
+        *_pinned_branch_problems(code),
+    ]
+
+
+def _schema_default_problems(schema: dict) -> list[str]:
+    return [
+        f"{BRANCH_STRATEGY_SCHEMA}:{at}: スキーマに default がある（宣言は解析が書き、読む部品は既定値へ倒さない）"
+        for at in _defaults_in(schema)
+    ]
+
+
+def _preset_name_problems(presets_text: str) -> list[str]:
+    return [
+        f"{BRANCH_STRATEGY_PRESETS}:{n}: ai-plugins の名前 {name} が既定の表にある"
+        for n, line in enumerate(presets_text.splitlines(), 1)
+        for name in AI_PLUGINS_NAMES
+        if name in line
+    ]
+
+
+def _preset_admin_problems(presets: dict) -> list[str]:
+    return [
+        f"{BRANCH_STRATEGY_PRESETS}: 種類 {kind} の既定が管理者の迂回（merge.admin）を使う"
+        for kind, row in (presets.get("kinds") or {}).items()
+        if (row.get("section") or {}).get("merge", {}).get("admin")
+    ]
+
+
+def _pinned_branch_problems(code: dict[str, str]) -> list[str]:
+    return [
+        f"{rel}:{n}: ブランチ名を決め打っている（セクションの branches から読む）"
+        for rel, text in code.items()
+        for n, line in enumerate(text.splitlines(), 1)
+        if PINNED_BRANCH.search(line)
+    ]
 
 
 def _read(path: pathlib.Path) -> str:
