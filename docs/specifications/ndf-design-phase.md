@@ -7,6 +7,9 @@
 題を作るスクリプトの契約である。承認する人が読む欄（題・目的・適用範囲・目指す姿・目指す姿の根拠・用語・決定の見出し）の
 書き方は [design-template.md の「承認する人が読む欄」](../../plugins/ndf/skills/design/references/design-template.md#承認する人が読む欄)、
 承認資料への載せ方は [approval-request.md](../../plugins/ndf/skills/development-workflow/references/approval-request.md) が正である。
+**「目指す姿」の欄は 11.0 から入る。** 10 系の上の 2 つの文書には無く、11.0 では
+[11.0 の design-template.md の「承認する人が読む欄」](../../plugins/ndf-next/skills/design/references/design-template.md#承認する人が読む欄) と
+[11.0 の approval-request.md](../../plugins/ndf-next/skills/development-workflow/references/approval-request.md) が正である。
 
 ## 概要
 
