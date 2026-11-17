@@ -360,13 +360,12 @@ def _stage_segments(calls: list[dict[str, Any]], rows: list[dict[str, Any]]) -> 
     """「継続」の判定で区切った工程ごとの (工程, 呼び出し数, キャッシュ切れの数)。最後の区間と空の区間は除く。"""
     launches = sorted((t, r["stage"]) for r in rows if r.get("stage") and r.get("verdict") == cp.CONTINUE and (t := parse_ts(r.get("at"))))
     out = []
-    for (start, stage), nxt in zip(launches, [t for t, _ in launches[1:]] + [None]):
-        if nxt is None:
-            continue
+    for (start, stage), (nxt, _) in zip(launches, launches[1:]):
         seg = [c for c in calls if c["ts"] is not None and start <= c["ts"] < nxt]
-        if seg:
-            gaps = sum(1 for a, b in zip(seg, seg[1:]) if b["ts"] - a["ts"] > CACHE_1H)
-            out.append((stage, len(seg), gaps))
+        if not seg:
+            continue
+        gaps = sum(1 for a, b in zip(seg, seg[1:]) if b["ts"] - a["ts"] > CACHE_1H)
+        out.append((stage, len(seg), gaps))
     return out
 
 
