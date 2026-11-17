@@ -29,7 +29,8 @@ ERR_NO_MATERIAL_HEADING = "「{item}」が{body}なのに、区間の報告よ�
 ERR_BAD_MATERIAL = "「{item}」が{body}でも {url_prefix} の URL でもない: {value}"
 
 # 条件の種類（`when` の要素の鍵）ごとの照合。種類はこの表と `report_text.CONDITION_TEXTS`（文の型）の鍵だけ
-MATCHERS = {"prefix": str.startswith, "equals": str.__eq__}
+PREFIX, EQUALS = "prefix", "equals"
+MATCHERS = {PREFIX: str.startswith, EQUALS: str.__eq__}
 
 
 class FormError(ValueError):

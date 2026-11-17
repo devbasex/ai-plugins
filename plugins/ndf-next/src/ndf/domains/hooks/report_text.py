@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 
-from ndf.domains.hooks.report import NONE_VALUE, RESULT_ITEM, Condition, Material, ReportForm
+from ndf.domains.hooks.report import EQUALS, NONE_VALUE, PREFIX, RESULT_ITEM, Condition, Material, ReportForm
 
 # 形の説明の言い回し。値・項目の名前・条件の値・材料の 4 欄は持たず、契約の `shape` から埋める
 TEXT_HEAD = "区間の報告の形（契約のファイルから作った説明）:"
@@ -22,7 +22,7 @@ TEXT_ALWAYS = "要る項目: {items}"
 TEXT_PREFIX = "「{item}」が {cond} で始まるとき「{need}」も要る"
 TEXT_EQUALS = "「{item}」が {cond} のとき「{need}」も要る"
 # 条件の種類（`when` の要素の鍵）ごとの文の型。種類は `report.MATCHERS` と同じ鍵
-CONDITION_TEXTS = {"prefix": TEXT_PREFIX, "equals": TEXT_EQUALS}
+CONDITION_TEXTS = {PREFIX: TEXT_PREFIX, EQUALS: TEXT_EQUALS}
 TEXT_MATERIAL = (
     "- 材料の書き方: 「{item}」は {body} か、{url_prefix} で始まる URL（空白で区切って並べてよい）。"
     "{body} と書くときは、結果の行より前に「{heading}」の行を置き、その節に材料を書く"

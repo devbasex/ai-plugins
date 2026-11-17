@@ -18,9 +18,7 @@ STRUCTURE_PREFIX = "structure/"  # 改善項目の種類（`structure/<手法>`�
 WINDOW = 10  # 種類ごとに遡る、その種類を含む行の数
 DEFAULTS_SOURCE, HISTORY_SOURCE = "defaults", "history"  # 表の材料（`plan.table_source`）
 SECTION_COUNT = {"verify": "items", "fix": "launches"}  # 実行の行の工程の区分と件数の鍵（`drive` の `verify_stats`・`fix_stats` と同じ）
-TEST_KIND = "test"  # テストを足した工程の種類
 SECONDS = "seconds"  # 秒の鍵
-COUNT = "count"  # 種類ごとの件数の鍵
 
 
 def _num(value: Any) -> float:
@@ -53,7 +51,7 @@ def _sample(entry: Mapping[str, Any], count_key: str) -> tuple[float, float]:
 
 
 def _kind_samples(rows: Sequence[Mapping[str, Any]], kind: str) -> list[tuple[float, float]]:
-    return [_sample(e, COUNT) for r in rows if (e := _mapping(_mapping(r, "kinds"), kind))]
+    return [_sample(e, "count") for r in rows if (e := _mapping(_mapping(r, "kinds"), kind))]
 
 
 def _structure_samples(rows: Sequence[Mapping[str, Any]]) -> list[tuple[float, float]]:
@@ -61,7 +59,7 @@ def _structure_samples(rows: Sequence[Mapping[str, Any]]) -> list[tuple[float, f
     out = []
     for r in rows:
         kinds = _mapping(r, "kinds")
-        parts = [_sample(_mapping(kinds, n), COUNT) for n in kinds if str(n).startswith(STRUCTURE_PREFIX)]
+        parts = [_sample(_mapping(kinds, n), "count") for n in kinds if str(n).startswith(STRUCTURE_PREFIX)]
         out.append((sum(c for c, _ in parts), sum(s for _, s in parts)))
     return out
 
@@ -88,7 +86,7 @@ def build_table(rows: Sequence[Mapping[str, Any]], values: Mapping[str, float]) 
 
     return {
         "source": HISTORY_SOURCE if runs else DEFAULTS_SOURCE,
-        TEST_KIND: pick(_per_unit(_kind_samples(runs, TEST_KIND)), TEST_KIND),
+        "test": pick(_per_unit(_kind_samples(runs, "test")), "test"),
         "verify": pick(_per_unit(_section_samples(runs, "verify", SECTION_COUNT["verify"])), "verify"),
         "fix": pick(_per_unit(_section_samples(runs, "fix", SECTION_COUNT["fix"])), "fix"),
         "structure": pick(_per_unit(_structure_samples(runs)), "structure"),
@@ -113,8 +111,8 @@ def run_row(state: Mapping[str, Any], at: str) -> dict[str, Any]:
     kinds: dict[str, dict[str, float]] = {}
 
     def add(kind: str, seconds: Any) -> None:
-        bucket = kinds.setdefault(kind, {COUNT: 0, SECONDS: 0.0})
-        bucket[COUNT] += 1
+        bucket = kinds.setdefault(kind, {"count": 0, SECONDS: 0.0})
+        bucket["count"] += 1
         bucket[SECONDS] = round(bucket[SECONDS] + _num(seconds), 1)
 
     raw = state["items"] if "items" in state else None
@@ -122,8 +120,8 @@ def run_row(state: Mapping[str, Any], at: str) -> dict[str, Any]:
         if not isinstance(item, Mapping) or (item["status"] if "status" in item else None) != "adopted":
             continue
         spent = _mapping(item, "seconds")
-        if TEST_KIND in spent:
-            add(TEST_KIND, spent[TEST_KIND])
+        if "test" in spent:
+            add("test", spent["test"])
         if "implement" in spent:
             add(f"{STRUCTURE_PREFIX}{_technique(item)}", spent["implement"])
     fix, verify = _mapping(state, "fix_stats"), _mapping(state, "verify_stats")
