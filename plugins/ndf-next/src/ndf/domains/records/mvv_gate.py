@@ -1,7 +1,7 @@
 """承認ゲートの直前の MVV 判定（`ndf records mvv gate`。#3745・#3017）。
 
 工程の定義で承認ゲート（設計・リリース）の直前に置く判定のステップの本体。進め方が fast・auto のときだけ、
-MVV 判定の前の機械の検査を当て、通れば LLM のアダプター（`ndf.adapters.llm`）で判定を打ち（`mvv.vet_sprint`。同じ材料の
+MVV 判定の前の機械の検査を当て、通れば LLM のアダプター（`ndf.adapters.llm`）で判定を打ち（`mvv.mvv_validate_sprint`。同じ材料の
 「従う」は記録を再利用する）、承認ゲートを省けるか（`ndf.progress.gate.checks.may_skip`）を出力の `mvv_gate` に書く。
 承認ゲートのステップ（`ndf.progress.run`）はその結果だけを読み、省けるなら答えた者 `service:mvv` の承認で通す。
 
@@ -89,7 +89,7 @@ def pr_number(root: Path, gate: str, inputs: Mapping[str, Any], hub: GitHub) -> 
 
 
 def judge_with(ask: Ask) -> mvv.Judge:
-    """`mvv.vet_sprint` へ渡す判定の関数。答えの判定の語と、費用・判定の中身（理由・レッドライン・根拠）を返す。"""
+    """`mvv.mvv_validate_sprint` へ渡す判定の関数。答えの判定の語と、費用・判定の中身（理由・レッドライン・根拠）を返す。"""
     schema = contracts.load_json(contracts.schema_path(VERDICT_SCHEMA))
 
     def judge(inputs: Mapping[str, str]) -> tuple[str, Mapping[str, Any]]:
@@ -130,7 +130,7 @@ def _judged(root: Path, gate_name: str, inputs: Mapping[str, Any], open_hub: Cal
         "変えたファイルと差分": mm.patch_material(rows),
     }
     text = mm.prompt(mm.redlines(shared, project), materials)
-    verdict = _verdict(mvv.vet_sprint(root, {"gate": gate_name, "question": mm.SYSTEM, "material": text}, judge_with(ask)))
+    verdict = _verdict(mvv.mvv_validate_sprint(root, {"gate": gate_name, "question": mm.SYSTEM, "material": text}, judge_with(ask)))
     skip, why = may_skip(facts, verdict)
     return _recorded(hub, number, mm.gate_outcome(gate_name, verdict, skip, why, pull.head_sha))
 

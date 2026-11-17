@@ -148,7 +148,7 @@ def test_follow_without_redlines_skips_and_the_record_is_reused(repo: Path, note
     # 同じ材料の「従う」は記録を再利用し、理由とレッドラインも引き継ぐ
     again = mvv_gate.gate(repo, "design", _inputs(), _hub(5, case), ask)
     assert again == out and len(ask.calls) == 1
-    rows, _ = jsonl.read_rows(mvv.record_path("mvv-vet"))
+    rows, _ = jsonl.read_rows(mvv.record_path("mvv-validation"))
     assert [r["boundary"] for r in rows] == [[], []] and "reused_from" in rows[1]
 
 

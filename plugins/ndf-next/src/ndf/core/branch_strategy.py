@@ -8,7 +8,7 @@
 - 組み合わせの規則 R2〜R10 はスキーマの `allOf` が持つ。値の等しさを比べる R1 だけは JSON Schema で書けないので
   `validate` が同じ番号で確かめる
 
-スキーマの正本は 11.0 の契約（`contracts/schemas/declarations/project.schema.json`）で、10 系の
+スキーマの正本は 11.0 の契約（`contracts/schemas/ndf-settings/project.schema.json`）で、10 系の
 `scripts/lib/branch_strategy.py` は同じ責務を 10 系の置き場で持つ。
 """
 
@@ -32,7 +32,7 @@ from ndf.core import json_pointer
 SECTION = legacy.SECTION
 DECL_DIR = legacy.DECL_DIR
 PROJECT = f"{DECL_DIR}/project.json"
-SCHEMA = contracts.schema_path("declarations/project")
+SCHEMA = contracts.schema_path("ndf-settings/project")
 DEF = "BranchStrategy"
 PR_KINDS = ("sprint", "doc", "release")
 # 止まる理由の区分（`contracts/facts/exit-codes.json` の id）

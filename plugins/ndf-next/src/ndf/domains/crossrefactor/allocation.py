@@ -44,8 +44,8 @@ def _object(path: Path) -> dict[str, Any]:
 
 
 def _declared(root: Path) -> Optional[dict[str, Any]]:
-    place = facts.value("ndf-files", "estimate", "place")
-    path = root / facts.value("places", place, "path") / facts.value("ndf-files", "estimate", "path")
+    location = facts.value("ndf-files", "estimate", "location")
+    path = root / facts.value("locations", location, "path") / facts.value("ndf-files", "estimate", "path")
     return _object(path) if path.is_file() else None
 
 

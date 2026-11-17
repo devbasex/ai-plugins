@@ -567,7 +567,7 @@ def test_a_loop_row_ends_through_its_table_and_is_cancelled_with_the_loop_halted
         assert '"--loop"' in run.first_input(conn, pid, Launch("lr", "r1"))
         view, _ = lane.read_plan(conn, pid)
         _, doc, drafts = command._loop_new(argparse.Namespace(loop="lr", mode=None, issues=None, requirements=None, disable=[], parent="x"))
-        sid = store.create_table(conn, ("sprint", REPO, "lr-r1"), view.lanes["lr"].table_id, doc, drafts)
+        sid = store.create_machine(conn, ("sprint", REPO, "lr-r1"), view.lanes["lr"].machine_id, doc, drafts)
         lane.start_row(conn, pid, "lr", "r1", sid)
         cancel = run.first_input(conn, pid, Launch("lr", "r1", cancel=sid))
         goal = run.first_input(conn, pid, Launch("lr", "r1", goal=sid))
@@ -576,7 +576,7 @@ def test_a_loop_row_ends_through_its_table_and_is_cancelled_with_the_loop_halted
     out = table_run.advance(opened, sid, tmp_path, env)
     assert out["status"] == "ok" and out["metrics"]["state"] == "completed"
     with store.transaction(opened) as conn:
-        ended = [e for e in store.read_events(conn, view.lanes["lr"].table_id) if e.draft.kind == "row_ended"]
+        ended = [e for e in store.read_events(conn, view.lanes["lr"].machine_id) if e.draft.kind == "row_ended"]
     assert [(e.draft.row_key, e.draft.state) for e in ended] == [("r1", "completed")]
 
 

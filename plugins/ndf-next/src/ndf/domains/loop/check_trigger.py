@@ -29,7 +29,7 @@ from ndf.contracts import facts, result
 TOOL = cli.tool_of(f"{__package__}.cli")
 LINES = "lines"
 # 閾値の宣言（対象のリポジトリのルートからの位置。表 ndf-files の pace）
-PACE = Path(identity.FIXED_WORDS["declaration_dir"]) / facts.value("ndf-files", "pace", "path")
+PACE = Path(identity.FIXED_WORDS["ndf_settings_dir"]) / facts.value("ndf-files", "pace", "path")
 
 
 @dataclass(frozen=True)

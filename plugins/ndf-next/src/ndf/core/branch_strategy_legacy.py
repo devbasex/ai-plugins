@@ -19,7 +19,7 @@ from ndf.core import json_pointer
 MOVES = "data/ndf-settings-renames.json"
 SECTION = "branch_strategy"
 # 利用先のリポジトリの宣言の置き場（`.ndf`）
-DECL_DIR = identity.FIXED_WORDS["declaration_dir"]
+DECL_DIR = identity.FIXED_WORDS["ndf_settings_dir"]
 # 表の file（ndf-files の ID）→ `.ndf/` の下のファイル名
 FILES = {"project": "project.json", "worktree": "worktree.json", "supervise": "supervise.json", "release": "release.json"}
 # 系ごとの解析のサブコマンド（作成・移行のコマンドの文）
