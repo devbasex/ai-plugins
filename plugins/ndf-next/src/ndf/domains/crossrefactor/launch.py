@@ -9,6 +9,7 @@
   `--output-format json` は完了まで標準出力を出さないため、担当は同じ `.cross_refactoring/` の進捗ファイルへ
   作業の途中で追記し、無進捗の監視はそのファイルの増え方も測る
 - 担当が結果を出さずに終わったら None を返す（続け方は `phase_decide.on_no_result` が決める）
+- 起動の費用は担当の標準出力の報告から読む（`cost_decide`）。claude 以外のランタイムは費用を報告しないので不明（None）
 """
 
 from __future__ import annotations
@@ -23,7 +24,7 @@ from typing import Any, Optional
 from ndf.adapters import agents, claude
 from ndf.contracts import limits
 from ndf.core.converge import participants
-from ndf.domains.crossrefactor import launch_decide
+from ndf.domains.crossrefactor import cost_decide, launch_decide
 
 Launcher = Callable[[agents.Launch], agents.AgentStatus]
 # 読み取りの工程の claude に許す Tool（読むだけ）
@@ -119,10 +120,22 @@ def _collect_file(submit: Path, collect: Path) -> Optional[dict[str, Any]]:
     return data if isinstance(data, dict) else None
 
 
+def _stem(req: Request, dirs: Dirs) -> Path:
+    return dirs.logs / f"{req.runtime}-{req.phase}-{req.stem}"
+
+
+def cost(req: Request, dirs: Dirs) -> Optional[float]:
+    """終わった起動の費用（USD）。claude 以外のランタイム・出力が無い・報告が無いときは None（不明）。"""
+    out = agents.AgentPaths.at(_stem(req, dirs)).out
+    if req.runtime != participants.FIXER or not out.is_file():
+        return None
+    return cost_decide.reported(out.read_text(encoding="utf-8", errors="replace"))
+
+
 def run(req: Request, dirs: Dirs, launcher: Launcher = agents.run_agent) -> tuple[Optional[dict[str, Any]], agents.AgentStatus]:
     """担当を起動して結果を回収する。返すのは (結果。出さなければ None, 監視の結果)。"""
     where = place_of(req, dirs)
-    stem = dirs.logs / f"{req.runtime}-{req.phase}-{req.stem}"
+    stem = _stem(req, dirs)
     read_only = req.phase in launch_decide.read_only_phases()
     if read_only:
         spec = _read_only(req, Path(where.workdir), stem)

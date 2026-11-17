@@ -3,6 +3,7 @@
 - #750: 提案の担当が結果ファイルを提出先に書けず結果が無い（提出先が読み取り用ディレクトリの外）
 - #2057: drive が完了した回を返す案内に、持たない --reopen を書く
 - #3313: テストを足す担当が結果を出さずに終わると、起点が記録されておらず範囲を確定できずに止まる
+- #3747: 起動の費用が常に 0 で記録される（報告しない CLI も 0 と書く）
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ import pytest
 
 from ndf.adapters import agents
 from ndf.contracts import facts
-from ndf.domains.crossrefactor import finished_decide, launch, launch_decide, phase_decide
+from ndf.domains.crossrefactor import cost_decide, finished_decide, launch, launch_decide, phase_decide
 
 DIRS = (P("/rf/read"), P("/rf/work"), P("/tmp/rf"))
 
@@ -90,3 +91,35 @@ def test_no_result_with_an_origin_undoes_and_reassigns():
     assert (got.kind, got.undo) == (phase_decide.REASSIGN, ("c0ffee", "beef"))
     nothing_written = phase_decide.on_no_result({"base_sha": "c0ffee"}, "c0ffee", spare=False)
     assert (nothing_written.kind, nothing_written.undo) == (phase_decide.SKIP, None)
+
+
+@pytest.mark.parametrize(
+    ("output", "want"),
+    [
+        ('{"result": "済んだ", "total_cost_usd": 1.5}', 1.5),
+        ('{"result": "済んだ"}', None),
+        ('{"total_cost_usd": true}', None),
+        ("途中で切れた出力", None),
+    ],
+)
+def test_reported_cost_is_the_usd_in_the_output_or_unknown(output, want):
+    assert cost_decide.reported(output) == want
+
+
+def test_phase_costs_keep_unknown_launches_apart_from_zero():
+    got = cost_decide.add(cost_decide.add(cost_decide.add({}, "implement", 0.5), "implement", None), "propose", None)
+    assert got == {"implement": {"usd": 0.5, "known": 1, "unknown": 1}, "propose": {"usd": 0.0, "known": 0, "unknown": 1}}
+    assert cost_decide.totals(got) == {"cost": 0.5, "cost_unknown": 2}
+    assert cost_decide.totals({"propose": got["propose"]}) == {"cost": None, "cost_unknown": 1}
+    assert cost_decide.totals(cost_decide.add({}, "fix", 0.0)) == {"cost": 0.0, "cost_unknown": 0}
+
+
+@pytest.mark.parametrize(("runtime", "want"), [("claude", 0.75), ("codex", None)])
+def test_launch_cost_reads_only_the_claude_report(tmp_path: Path, runtime, want):
+    dirs = launch.Dirs(tmp_path / "read", tmp_path / "work", tmp_path / "logs")
+    req = launch.Request("implement", runtime, "直す", "rf1-r1")
+    assert launch.cost(req, dirs) is None  # 出力が無ければ不明
+    out = agents.AgentPaths.at(dirs.logs / f"{runtime}-implement-rf1-r1").out
+    out.parent.mkdir(parents=True)
+    out.write_text('{"result": "済んだ", "total_cost_usd": 0.75}', encoding="utf-8")
+    assert launch.cost(req, dirs) == want
