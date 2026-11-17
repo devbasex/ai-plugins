@@ -79,13 +79,13 @@ def test_has_pointer(pointer, want):
     ],
 )
 def test_get_pointer(pointer, want):
-    assert jp.get(DOC, pointer) == want
+    assert jp.value_of(DOC, pointer) == want
 
 
 def test_get_pointer_empty_returns_the_document_itself():
-    assert jp.get(DOC, "") is DOC
-    assert jp.get(None, "") is None
-    assert jp.get(None, "/a") is None
+    assert jp.value_of(DOC, "") is DOC
+    assert jp.value_of(None, "") is None
+    assert jp.value_of(None, "/a") is None
 
 
 def test_set_pointer_creates_objects_and_unescapes():

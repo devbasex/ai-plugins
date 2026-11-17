@@ -143,7 +143,7 @@ def _implied_trunk_admin_question(
     if section["release_strategy"] != "trunk" or section["merge"].get("admin") is not True:
         return None
     evidence = [
-        {"source": "repo", "ref": f"{bs.DECL_DIR}/{legacy.FILES[m.file]}:{m.old}", "value": str(json_pointer.get(docs[m.file], m.old))}
+        {"source": "repo", "ref": f"{bs.DECL_DIR}/{legacy.FILES[m.file]}:{m.old}", "value": str(json_pointer.value_of(docs[m.file], m.old))}
         for m in present
         if m.new is not None and _section_rel(m.new) in ("/merge/admin", "/branches/base", "/branches/production")
     ]
@@ -186,7 +186,7 @@ def _collect_moved(docs: dict, present: list[legacy.Move]) -> tuple[dict, list[d
     for m in present:
         if m.new is None:
             continue
-        value = json_pointer.get(docs[m.file], m.old)
+        value = json_pointer.value_of(docs[m.file], m.old)
         if m.values:
             if value not in m.values:
                 questions.append(_value_question(m, value))

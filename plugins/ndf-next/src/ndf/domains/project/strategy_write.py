@@ -130,7 +130,7 @@ def apply_answers(result: dict, answers: dict) -> dict:
     answered = set(answers)
     out["questions"] = [q for q in seq(out.get("questions")) if q["pointer"] not in answered]
     if values.get("kind") in kinds() and any(
-        bs.canonical_json(json_pointer.get(before, p)) != bs.canonical_json(v) for p, v in answers.items()
+        bs.canonical_json(json_pointer.value_of(before, p)) != bs.canonical_json(v) for p, v in answers.items()
     ):
         values["kind"] = "custom"
     out["status"] = "ask" if out["questions"] else "ok"

@@ -66,7 +66,7 @@ def test_legacy_reason_names_file_pointer_and_command():
     assert 'project-decl.py" branch-strategy migrate' in legacy.legacy_reason(found[:1], "10")
 
 
-# --- 値を引く（json_pointer.get）と在るかを見る（json_pointer.has）の現状固定 ----------------------------------
+# --- 値を引く（json_pointer.value_of）と在るかを見る（json_pointer.has）の現状固定 ----------------------------------
 _PTR_DOC = {"a": {"b/c": 1, "z": None, "f": False, "e": "", "~": {"x": [1]}}, "l": [{"y": 2}]}
 
 
@@ -87,14 +87,14 @@ _PTR_DOC = {"a": {"b/c": 1, "z": None, "f": False, "e": "", "~": {"x": [1]}}, "l
 )
 def test_get_pointer_and_has_pointer_walk_the_same_objects(pointer, has, got):
     assert jp.has(_PTR_DOC, pointer) is has
-    assert jp.get(_PTR_DOC, pointer) == got
-    assert type(jp.get(_PTR_DOC, pointer)) is type(got)
+    assert jp.value_of(_PTR_DOC, pointer) == got
+    assert type(jp.value_of(_PTR_DOC, pointer)) is type(got)
 
 
 def test_get_pointer_and_has_pointer_on_the_whole_document():
-    assert jp.has(_PTR_DOC, "") is True and jp.get(_PTR_DOC, "") is _PTR_DOC
-    assert jp.has("text", "") is True and jp.get("text", "") == "text"
-    assert jp.has("text", "/a") is False and jp.get("text", "/a") is None
+    assert jp.has(_PTR_DOC, "") is True and jp.value_of(_PTR_DOC, "") is _PTR_DOC
+    assert jp.has("text", "") is True and jp.value_of("text", "") == "text"
+    assert jp.has("text", "/a") is False and jp.value_of("text", "/a") is None
 
 
 @pytest.mark.parametrize("value", [None, "", False, 0, {}, []])

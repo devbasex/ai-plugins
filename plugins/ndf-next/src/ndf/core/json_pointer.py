@@ -1,6 +1,6 @@
 """JSON Pointer（RFC 6901）の分解・書き出し・たどり方。
 
-宣言の読み書き（`has`・`get`・`put`・`remove`）は object だけをたどる。配列の添字もたどるのは `resolve` だけで、
+宣言の読み書き（`has`・`value_of`・`put`・`remove`）は object だけをたどる。配列の添字もたどるのは `resolve` だけで、
 版数のファイルとセクションの値を引く側（`branch_strategy.get`・`release.land.store_version`）が使う。
 """
 
@@ -30,10 +30,10 @@ _MISSING = object()
 
 def has(doc: Any, pointer: str) -> bool:
     """object だけをたどって、キーが在るか（値が null でも在る）。"""
-    return get(doc, pointer, _MISSING) is not _MISSING
+    return value_of(doc, pointer, _MISSING) is not _MISSING
 
 
-def get(doc: Any, pointer: str, default: Any = None) -> Any:
+def value_of(doc: Any, pointer: str, default: Any = None) -> Any:
     """object だけをたどった値。途中が無い・object でなければ `default`。"""
     cur = doc
     for t in tokens(pointer):

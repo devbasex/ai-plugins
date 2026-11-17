@@ -456,7 +456,7 @@ def _source_keys(s: Samples, release_strategy: Optional[str]) -> dict[str, Measu
 
 
 def _preset_matches(row: dict, pointer: str, value: Any, presets_row: dict) -> bool:
-    got = json_pointer.get(row, pointer)
+    got = json_pointer.value_of(row, pointer)
     if pointer == "/merge/method" and got == "merge-queue":
         return value in ("merge-queue", presets_row.get("merge_method_without_queue"))
     if pointer == "/release/version_store":
@@ -512,12 +512,12 @@ def doc_conflicts(root: Path, values: dict, evidence: dict) -> list[dict]:
     """文書（README など）の述べる PR の宛先が、測った値と食い違う箇所を問いにする。"""
     conflicts = []
     for c in doc_claims(root):
-        if json_pointer.get(values, c["pointer"]) != c["value"]:
+        if json_pointer.value_of(values, c["pointer"]) != c["value"]:
             conflicts.append(
                 {
                     "pointer": c["pointer"],
                     "why": "conflict",
-                    "candidates": [json_pointer.get(values, c["pointer"]), c["value"]],
+                    "candidates": [json_pointer.value_of(values, c["pointer"]), c["value"]],
                     "evidence": seq(evidence.get(c["pointer"])) + [{"source": "doc", "ref": c["ref"], "value": c["value"]}],
                 }
             )
@@ -607,15 +607,15 @@ def complete_answers(prior: dict, answers: dict, presets: Optional[dict] = None)
         "warnings": seq(prior.get("warnings")),
         "facts": obj(prior.get("facts")),
     }
-    if not json_pointer.get(known, "/branches/base"):
+    if not json_pointer.value_of(known, "/branches/base"):
         return {**asked, "questions": [{"pointer": "/branches/base", "why": "missing", "candidates": [], "evidence": []}]}
     pointers = {e["pointer"] for e in seq(prior.get("evidence")) if e.get("pointer") and e.get("source") != "preset"}
     kind = answers.get("/kind")
     if kind is None:
-        kind, candidates = pick_kind({p: Measured(json_pointer.get(known, p)) for p in pointers | set(rest)}, presets)
+        kind, candidates = pick_kind({p: Measured(json_pointer.value_of(known, p)) for p in pointers | set(rest)}, presets)
         if kind is None:
             return {**asked, "questions": [{"pointer": "/kind", "why": "no_kind", "candidates": candidates, "evidence": []}]}
-    measured = {p: Measured(json_pointer.get(known, p)) for p in pointers - set(rest) - {"/branches/base"}}
+    measured = {p: Measured(json_pointer.value_of(known, p)) for p in pointers - set(rest) - {"/branches/base"}}
     section = _section_from_kind(presets, kind, measured, known)
     evidence = [
         *asked["evidence"],
