@@ -437,27 +437,38 @@ def append_events(
     last = events[-1].seq if events else 0
     if last != expect_seq:
         raise Conflict(f"ステートマシン {machine_id} の最後の番号は {last}（読んだ番号 {expect_seq}）")
-    return _write_drafts(conn, machine_id, level, events, drafts, now or datetime.now(UTC))
+    ctx = _Append(conn, machine_id, level, events, now or datetime.now(UTC))
+    return _write_drafts(ctx, drafts)
 
 
-def _write_drafts(
-    conn: sa.Connection, machine_id: str, level: str, events: list[model.Event], drafts: list[model.EventDraft], at: datetime
-) -> list[int]:
+@dataclass(frozen=True)
+class _Append:
+    """1 回の追記の文脈。`events` は読んだ事象の並びで、書いた事象を足していく（呼び手と同じリストを共有する）。"""
+
+    conn: sa.Connection
+    machine_id: str
+    level: str
+    events: list[model.Event]
+    at: datetime
+
+
+def _write_drafts(ctx: _Append, drafts: list[model.EventDraft]) -> list[int]:
     """下書きを順に書き、番号を返す。重複のキーが既にある下書きは書かずに今の番号を返す。`events` へ書いた事象を足す。"""
     written = []
     for draft in drafts:
-        known = _deduped(conn, draft.dedupe_key)
-        written.append(known if known is not None else _write_draft(conn, machine_id, level, events, draft, at))
+        known = _deduped(ctx.conn, draft.dedupe_key)
+        written.append(known if known is not None else _write_draft(ctx, draft))
     return written
 
 
-def _write_draft(conn: sa.Connection, machine_id: str, level: str, events: list[model.Event], draft: model.EventDraft, at: datetime) -> int:
+def _write_draft(ctx: _Append, draft: model.EventDraft) -> int:
     """1 件を確かめて次の番号で書き、`events` へ足して番号を返す。"""
+    level, events = ctx.level, ctx.events
     model.check_event(level, model.rows_for(level, events, draft), model.table_state(level, events), draft)
     written_draft = model.recorded(level, draft)
     seq = (events[-1].seq if events else 0) + 1
-    _insert(conn, machine_id, seq, written_draft, at)
-    events.append(model.Event(seq, at, written_draft))
+    _insert(ctx.conn, ctx.machine_id, seq, written_draft, ctx.at)
+    events.append(model.Event(seq, ctx.at, written_draft))
     return seq
 
 
