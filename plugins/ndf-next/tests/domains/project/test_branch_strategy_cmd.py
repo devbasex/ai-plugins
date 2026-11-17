@@ -264,9 +264,7 @@ def test_migrate_remove_row_only_clears_the_key_the_check_found(tmp_path):
 # --- 移す（受け入れ条件 20） -------------------------------------------------------------------
 
 # ai-plugins の移行前の設定（plugins/ndf/scripts/tests/test_branch_strategy.py と共有する入力）
-AI_PLUGINS_OLD = json.loads(
-    (Path(__file__).resolve().parents[5] / "scripts/tests/fixtures/ai-plugins-old-settings.json").read_text(encoding="utf-8")
-)
+AI_PLUGINS_OLD = json.loads((FIX / "ai-plugins-old-settings.json").read_text(encoding="utf-8"))
 
 
 def test_migrate_moves_old_keys(tmp_path):
