@@ -15,7 +15,7 @@ from ndf.core import branch_strategy as bs
 from ndf.core import branch_strategy_legacy as legacy
 from ndf.domains.project import strategy_migrate
 from ndf.domains.project import strategy_write as bw
-from ndf.domains.release import land, plugins
+from ndf.domains.release import plugins
 
 DOC = {"a": {"b/c": 1, "d~e": {"f": None}, "": 2}, "l": [{"x": 3}], "n": 0}
 
@@ -122,7 +122,8 @@ def test_set_pointer_failures():
     ],
 )
 def test_land_pick(pointer, want):
-    assert land._pick(DOC, pointer) == want
+    """版数のファイルの読み方（`land.store_version`）が使う、配列もたどる `resolve`。見つからなければ値は None。"""
+    assert bs.resolve(DOC, pointer)[1] == want
 
 
 def test_remove_pointer():
