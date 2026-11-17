@@ -89,11 +89,8 @@ def resolve(path: str, body: str, scripts: Mapping[str, Mapping[str, Any]]) -> s
     1 つだけのときのそれ、の順に解決する。どれでも決まらなければ、同じ名前のすべてを呼ぶとみなす（見落とさない側へ倒す）。
     """
     home = "/".join(path.split("/")[:2]) + "/scripts/" if path.startswith("skills/") else None
-    by_name: dict[str, list[str]] = {}
-    for now in scripts:
-        by_name.setdefault(Path(now).name, []).append(now)
     found = set()
-    for name, nows in by_name.items():
+    for name, nows in _by_name_index(scripts).items():
         if not _pattern(name).search(body):
             continue
         written = [now for now in nows if _pattern(now).search(body)]
@@ -102,6 +99,14 @@ def resolve(path: str, body: str, scripts: Mapping[str, Mapping[str, Any]]) -> s
             continue
         found.update(_by_name(name, nows, home))
     return found
+
+
+def _by_name_index(scripts: Mapping[str, Mapping[str, Any]]) -> dict[str, list[str]]:
+    """旧いスクリプトのファイル名 → その名前を持つ `now` の一覧。"""
+    by_name: dict[str, list[str]] = {}
+    for now in scripts:
+        by_name.setdefault(Path(now).name, []).append(now)
+    return by_name
 
 
 def _by_name(name: str, nows: list[str], home: str | None) -> list[str]:
@@ -119,7 +124,7 @@ def _calls(bodies: Mapping[str, str], scripts: Mapping[str, Mapping[str, Any]]) 
 def _label(now: str, scripts: Mapping[str, Mapping[str, Any]]) -> str:
     """理由に書く名前。同じ名前が他にもあれば `now` のパスで書く。"""
     name = Path(now).name
-    return name if sum(Path(n).name == name for n in scripts) == 1 else now
+    return name if len(_by_name_index(scripts)[name]) == 1 else now
 
 
 def _is_script(now: str) -> bool:
