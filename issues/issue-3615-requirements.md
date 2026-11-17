@@ -1,4 +1,4 @@
-# #3615: ndf-next のリリース: プラグインの配布の形でしか動かない（plugin.json・marketplace.json 決め打ち）。宣言の配布の形で選び、今の ndf の 11 種と同等にする
+# #3615: ndf-next のリリース: プラグインのリリースの形でしか動かない（plugin.json・marketplace.json 決め打ち）。設定したリリースの形で選び、今の ndf の 11 種と同等にする
 
 正は課題の本文（#3615）で、この文書はその写しである。`spec-copy.py write` で作り直す。手で直さない。
 
