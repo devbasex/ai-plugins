@@ -25,7 +25,7 @@
 
 **ai-plugins の本番チャネル宛の検査も新しい宣言を読む。** `scripts/check-pr-base.sh`（`.github/workflows/pr-base-guard.yml` が走らせる）は、
 宛先のブランチの `.ndf/project.json` のセクション `branch_strategy` を `lib/branch_strategy_cli.py get --ref` で読み、
-`release_strategy` の値で判定を分ける（#3672 の D27）。下の「ai-plugins の本番チャネル宛の検査」の `selected` は今の `release_branch` にあたる。
+`release_strategy` の値で判定を分ける。下の「ai-plugins の本番チャネル宛の検査」の `selected` は今の `release_branch` にあたる。
 
 **新しい宣言の確定仕様は、#3672 の手順 2〜5 を終えた後に作る。** それまでの正本は課題の設計
 （`issues/issue-3672-design.md` と、同じ接頭辞の `-design-detail.md`・`-design-decisions.md`・`-design-removal.md`・
@@ -343,7 +343,7 @@ sequenceDiagram
 ### ai-plugins の本番チャネル宛の検査
 
 必須のステータスチェック `guard`（`.github/workflows/pr-base-guard.yml`）が `scripts/check-pr-base.sh` を走らせる。宣言は Pull Request の変更で
-緩められないよう、宛先のブランチの `.ndf/project.json` のセクション `branch_strategy` から、`plugins/ndf/scripts/lib/branch_strategy_cli.py get --ref origin/<宛先>` で読む（#3672 の D27）。
+緩められないよう、宛先のブランチの `.ndf/project.json` のセクション `branch_strategy` から、`plugins/ndf/scripts/lib/branch_strategy_cli.py get --ref origin/<宛先>` で読む。
 セクションが無い・スキーマに合わない・旧いキーが残るときは、読みの部品が出す理由（ファイル・キーの位置・打つコマンド）を添えて落とし、既定の判定へ倒さない。
 
 判定は `release_strategy` の値で分ける。`trunk` はベースブランチと本番チャネルが同じなので通す。
