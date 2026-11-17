@@ -20,11 +20,13 @@ trunk（版上げの PR が本番の PR を兼ねる）では、承認の記録�
 
 分かれた経路まで常に承認を取り直す形は採らない。分かれた経路の承認は開発版の時点のコミットを対象にし、本番のプランの bump・changelog・消費の記録が承認の後に必ず積まれるため、どのリリースも承認ゲートへ戻る。
 
+分かれた経路の扱いは、要求の前提 2（承認した head と PR の今の head の一致）と受け入れ条件 6（承認していないコミットを本番ブランチへ入れない）を「許容の比べ方を承認の延長とみなす」と読んだ上に立つ。この読み替えと、`land_approved` へ渡す承認の SHA が人の承認した head でなくなることは、設計文書の「人へ残す判断」の 1 で人が決める。不変条件は trunk（I2）と分かれた経路（I9）に分けて持つ。
+
 根拠: Value 1 / C4（MVV 版 9）
 
 ### 決定 3: キューの検査の結果を公開の前提にするため、`queued` では公開せず、打ち直しで公開する
 
-`land_approved` が `queued` を返したら、`release` はタグと GitHub Release を作らず、公開を欠けとして `stopped`・終了コード 6（欠けが残る）で返す。`next` は同じコマンドの打ち直しである。打ち直したとき、PR がマージ済みなら今の再開の経路（`_resume_merged_prod`・`_open_prod_pr` のマージ済みの分岐）で無いものだけを公開する。PR がまだキューにあれば、`--ci-wait` を上限にキューのマージを待ち、入れば公開し、上限なら 75 で返す。キューから外れて開いていれば、`land_approved` を打ち直して宣言どおりに入れ直す。
+`land_approved` が `queued` を返したら、`release` はタグと GitHub Release を作らず、公開を欠けとして `stopped`・終了コード 6（欠けが残る）で返す。`next` は同じコマンドの打ち直しである。打ち直したとき、PR がマージ済みなら今の再開の経路（`_resume_merged_prod`・`_open_prod_pr` のマージ済みの分岐）で無いものだけを公開する。PR がまだキューにあれば、`--ci-wait` を上限にキューのマージを待ち、入れば公開し、上限なら 75 で返す。キューから外れて開いていれば、`land_approved` を打ち直して宣言どおりに入れ直し、その実行の結果（キューへ入れたなら 6、入れたなら 0、照合や検査で止まれば 10・1・75）で返す。キューにあるかは GitHub の GraphQL API の PR の項目 `isInMergeQueue` を `ProdOps.queue_state` で読む（設計文書の「キューにあるかの読み方」に実測がある）。
 
 本番のプランの release のステップは、6 を受けたら `release-landed`（同じコマンドを打つ別のステップ）へ進み、そこでの 6 は止める。1 回目は待たずに返し、2 回目で待つため、受け入れ条件 1（キューへ入れた直後は公開しない）と、プランが人を介さず本番まで流れることが両立する。
 
@@ -57,6 +59,8 @@ trunk の本番のプランの「版」の欄は「系列」を空にし、「�
 
 CD の無い trunk の本番のプランは、release（1 回目）の 10 の後に、今の開発版のプランと同じ `facts → explain → others` を `--head release/v<版>` で組んで承認資料を書く。承認の場所は今の CD の無い場合（`release_case` の `no-cd`）のまま手元の承認資料の記録で、`approve` のステップが自分のプランの facts の出力（`{queue_state?:release-prod}`）から承認した SHA を読み、版上げの PR の head と同じ SHA を記録する。normal は others の後で終えてリリース承認ゲートへ進み（ゲートのステージを計画に置かない）、fast・auto は others の後に MVV 判定を置く（今の `_add_prod_mvv_gate` の判定を先頭から others の後へ移す）。
 
+ゲートで止まる仕組みは今の CD のある本番のプランと同じものを使う。normal の release（1 回目）は 10 を `gate_next: trial` で受け、実行の基盤がこれを承認ゲートとして記録するため、others の後で完了しても結果は「関門」になり、キューの結果は `gate` になる。キューは前のステージがすべて完了したときだけ次のステージを流すため、承認の前に後続のステージは動かない。プランの中の approve・release（2 回目）・cd-result は、承認の後に `run <プラン> --from approve` を打つまで動かない。fast・auto は 10 を `on_exit` で trial へ送り、承認ゲートかは MVV 判定が決める。新しい終了コード・状態は足さない。
+
 CD の無い trunk でも承認を PR の上の証跡へ移す形は採らない。CD の有無から決まるリリースの場合（`release_case`）は、全体テストを流すかなどほかの判断にも使われており、承認の場所だけを取り込み方で変えると、同じ場合の名前が 2 つの意味を持つ。
 
 根拠: Value 1 / Value 11（MVV 版 9）
@@ -71,7 +75,7 @@ S2 は CD のある trunk だけを対象にしていたが、CD の無い trunk
 
 ### 決定 8: 本番ブランチへ入れる経路を 1 か所にするため、4 つの呼び出しを本番の取り込みへ集め、`ProdOps.wait_and_merge` を `ProdOps.land` に替える
 
-本番ブランチ宛てのマージを持つ 4 か所（`_merge_prod_pr`・`reviewed.merge_on_pr_approval`・`strategy_route._merge_approved`・CD の無い trunk）は、すべて `prod_land.land(root, a, pr, head, trail_url)` を呼ぶ。`land` は宣言（メインディレクトリの `branch_strategy`。`land_cli` と同じ読み方）を読み、GitHub 版の Port（`GhPort`）で `land_approved` を呼ぶ。ベースブランチへ入れるマージ（開発版の PR・`-sync` の PR・戻すマージ）は `wait_and_merge` のまま残す（不変条件 I8）。
+本番ブランチ宛てのマージを持つ 4 か所（`_merge_prod_pr`・`reviewed.merge_on_pr_approval`・`strategy_route._merge_approved`・CD の無い trunk。一覧は設計文書の「本番ブランチへ入れる経路」）は、すべて `prod_land.land(root, a, pr, head, trail_url)` を呼ぶ。`reviewed.merge_on_pr_approval` は `reviewed.release_prod` と `strategy_route._merge_exact` の 2 つから呼ばれ、`_merge_exact` は自分ではマージしないため、1 か所を替えれば両方の呼び出し元が本番の取り込みを通る。`land` は宣言（メインディレクトリの `branch_strategy`。`land_cli` と同じ読み方）を読み、GitHub 版の Port（`GhPort`）で `land_approved` を呼ぶ。ベースブランチへ入れるマージ（開発版の PR・`-sync` の PR・戻すマージ）は `wait_and_merge` のまま残す（不変条件 I8）。
 
 `merge-when-green` に宣言の主体と方式の分岐を足す形は採らない。主体・方式・履歴の作り方・ruleset との照合・迂回の記録・早送りは `land_approved` が既に持ち（#3672 の I5・I7・I10）、2 か所に持つと宣言の読み方が分かれる。`gh pr merge --auto`（PRD1 のキューへの投入）を直接打つ形も、ruleset との照合と承認した head の固定を持たないため採らない。
 
@@ -103,5 +107,7 @@ S2 は CD のある trunk だけを対象にしていたが、CD の無い trunk
 ### 決定 12: スプリントの終わりの計画も同じ規則で本番まで流れるよう、`new close` にも開発版を置かない規則を当てる
 
 `close_waves`（`new close`）は最終の検査の後に開発版と本番を置いており、trunk でも開発版のプランを作る。同じ判定（`trunk_release(a)`）で開発版のステージを外し、本番のプランだけを置く。課題の対象範囲は `new sprint` を挙げているが、同じ計画の組み立てを使う `new close` に残すと、trunk のスプリントの終わりが同じ 3 で止まる。
+
+この決定は要求の対象範囲を広げるため、設計文書の「人へ残す判断」の 2 で人が決める。
 
 根拠: Value 7（MVV 版 9）
