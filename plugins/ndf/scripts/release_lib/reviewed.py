@@ -1,8 +1,8 @@
 """CD のある場合（`lib/release_case.py` の cd-no-review / cd-review / cd-admin）のリリースの経路（#2773。`release-steps.py` の release・
 approval-check・approval-post・release-case から分けた）。
 
-- 本番: 開発版の PR → 本番の PR → CI の待ち → PR の上の承認（証跡かレビュー）と先端の照合 → マージ → 公開の後。
-  マージは `cd-admin` だけ管理者の迂回で打ち、迂回したら本番の PR に迂回の記録を置く（#3506）。ほかの場合は迂回なし
+- 本番: 開発版の PR → 本番の PR → CI の待ち → PR の上の承認（証跡かレビュー）と先端の照合 → 本番の取り込み → 公開の後。
+  本番の取り込み（`prod_land.land`）が宣言の主体と方式で入れ、迂回とその記録は `land_approved` が持つ（#3703 の決定 10）
 - 開発版: ブランチ戦略の宣言の開発版のチャネル（`channels` の `dev`）の workflow に開発版の PR をマージさせ、結果を待つ
 - 証跡のチェック: 証跡を判定して PR の先端へ commit status を付ける（同じ先端の PR が並べば落とす。I10）
 
@@ -90,9 +90,7 @@ class ProdOps:
     merge_commit_of: Callable  # (root, n) -> str | None
     merge_release_pr: Callable  # (root, a, plugin, plugins, branch, base) -> (release_pr, merged_pr, commit)
     published: Callable  # (root, a, plugin, prod, main_pr, merge, items, metrics, back=None) 公開の後。結果を出して終わる
-    wait_and_merge: (
-        Callable  # (root, n, *, expect, ci_wait, gate_approved, admin) -> マージコミット。迂回は場合（case.admin_merge）で決める
-    )
+    land: Callable  # (root, a, pr, head, trail_url="") -> マージコミット。本番の取り込み（`prod_land.land`。#3703）
     pr_check_buckets: Callable  # (root, n) -> チェックの並び
 
 
@@ -224,8 +222,9 @@ def _open_prod_pr(ctx: ReleaseCtx, items, metrics, ops: ProdOps, case=None) -> i
 
 def merge_on_pr_approval(root, repo, a, case, main_pr, prod, items, metrics, ops, *, waiting, moved, waiting_items=()):
     """CD のある場合（#2773 の決定 7）の照合とマージ: 本番の PR の先端が PR の上の承認（証跡かレビュー）と完全に一致するときだけ、
-    1 回だけマージする。迂回は `cd-admin` だけで、迂回したら迂回の記録を書き、その行を items へ足す（#3506）。
-    承認が無ければ CI を待って承認ゲート（10）で止め、承認の後に先端が動いても同じゲートで止める。
+    本番の取り込み（`ops.land`。#3703）で宣言の主体と方式で入れる。迂回とその記録は `land_approved` が持つ（決定 10）。
+    承認が無ければ CI を待って承認ゲート（10）で止め、承認の後に先端が動いても同じゲートで止める。merge queue へ入れた・人のマージを
+    待つときは `prod_land.LandPending` で抜ける。
     `waiting(head, judged)` と `moved(head)` は承認ゲートの (要約, 次の手) を返す。`waiting_items` は承認待ちのときだけ items に足す。
     マージコミット（読めなければ None）を返す。"""
     try:
@@ -238,16 +237,11 @@ def merge_on_pr_approval(root, repo, a, case, main_pr, prod, items, metrics, ops
         wait_ci_except(root, main_pr, (approval_trail.STATUS_CONTEXT,), a.ci_wait, ops)
         summary, nxt = waiting(head, judged)
         emit(result(TOOL, "gate", summary, items + list(waiting_items), metrics, None, nxt), EXIT_GATE)
-    if case.trail_approval:
-        wait_trail_status(root, repo, prod, head, limits.policy("release-steps.trail-status").seconds)
     try:
-        merge = ops.wait_and_merge(root, main_pr, expect=head, ci_wait=a.ci_wait, gate_approved="user", admin=case.admin_merge)
+        return ops.land(root, a, main_pr, head, judged.url or "")
     except HeadMoved:
         summary, nxt = moved(head)
         emit(result(TOOL, "gate", summary, items, metrics, None, nxt), EXIT_GATE)
-    if case.admin_merge:
-        items.append(admin_record_item(repo, main_pr, head, judged.url or ""))
-    return merge
 
 
 def wait_ci_except(root, n, skip, timeout, ops):

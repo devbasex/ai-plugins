@@ -78,13 +78,79 @@ def test_new_sprint_without_release_template_writes_until_check(tmp_path, releas
     assert waves["設計 PR のマージ"]["command"].endswith(" ".join(waves["検査"]["plans"]))  # 検査の後に流す計画は無い
 
 
+PLUGIN_RELEASE = {"form": "package-plugin", "plugin": "foo", "runtimes": ["claude"]}
+
+
 def test_new_sprint_with_package_plugin_keeps_release_stage(tmp_path):
-    root = plain_repo(tmp_path, {"form": "package-plugin", "plugin": "foo", "runtimes": ["claude"]})
+    """#3703 の受け入れ条件 13: ベースブランチと本番ブランチが分かれた宣言は、今までどおり開発版のデプロイ・リリース承認ゲート・本番を置く。"""
+    root = plain_repo(tmp_path, PLUGIN_RELEASE, production="live")
     out = tmp_path / "m"
     p = new_sprint(root, out)
     assert p.returncode == 0, p.stderr
-    names = [w["name"] for w in json.loads((out / "sprint.json").read_text())["ステージ"]]
-    assert names[-3:] == ["デプロイ", "リリース承認ゲート", "本番"] and "/ndf:release" not in json.loads(p.stdout)["next"]
+    stages = json.loads((out / "sprint.json").read_text())["ステージ"]
+    assert [w["name"] for w in stages][-3:] == ["デプロイ", "リリース承認ゲート", "本番"]
+    assert "/ndf:release" not in json.loads(p.stdout)["next"]
+    assert "dev" in plan_channels(stages)
+
+
+def plan_channels(stages: list[dict]) -> list[str]:
+    """ステージのプランの「版」の「チャネル」の並び（「版」の欄の無いプランは数えない）。"""
+    plans = [json.loads(Path(f).read_text()) for st in stages for f in st.get("plans", [])]
+    return [p["版"]["チャネル"] for p in plans if isinstance(p.get("版"), dict)]
+
+
+def trunk_plugin_repo(tmp_path):
+    """trunk（ベースブランチと本番ブランチが main）のプラグインのリポジトリ。fast・auto の導入の確認は `{ref}` を持つ。"""
+    root = plain_repo(tmp_path, PLUGIN_RELEASE)
+    pace = {"enabled": True, "modes": ["light", "standard", "legacy-refactor"], "verify": "verify-install --ref {ref} --runtimes claude"}
+    (root / ".ndf" / "pace.json").write_text(json.dumps({"version": 1, "fast": pace, "auto": pace}))
+    return root
+
+
+@pytest.mark.parametrize("pace", ["normal", "fast", "auto"])
+def test_trunk_sprint_has_no_dev_release_plan(tmp_path, pace):
+    """#3703 の受け入れ条件 8・10・I5・I6: trunk の new sprint はどの進め方でもチャネル dev のプランを作らず、本番のプランは
+    release の 10 の後に版上げの PR の head で導入を確かめてから承認資料を作る。fast・auto は pace.json の {ref} を置き換える。"""
+    from pace_state import sprint_state
+
+    root = trunk_plugin_repo(tmp_path)
+    out = tmp_path / "m"
+    extra = ("--pace", pace, "--state", str(sprint_state(tmp_path, pace))) if pace != "normal" else ()
+    p = cli(*new_sprint_args(root, out, *extra, name="m6", issue=("216",), version=None), cwd=root)
+    assert p.returncode == 0, p.stdout + p.stderr
+    stages = json.loads((out / "sprint.json").read_text())["ステージ"]
+    names = [w["name"] for w in stages]
+    assert plan_channels(stages) == ["prod"]
+    assert names[-1] == "本番" and "デプロイ" not in names and "開発版" not in names and "リリース承認ゲート" not in names
+    prod = json.loads(Path(stages[-1]["plans"][0]).read_text())
+    assert prod["版"]["系列"] is None and prod["版"]["明示"] is None  # 版はキューが origin から決める（受け入れ条件 9）
+    steps = {s["id"]: s for s in prod["steps"]}
+    ten = steps["release"].get("on_exit", {}).get("10") or steps["release"].get("gate_next")
+    assert ten == "trial" and steps["trial"]["next"] == "facts"
+    assert "release/v{release_version}" in steps["trial"]["cmd"] and "{ref}" not in steps["trial"]["cmd"]
+    assert "--expect {release_version}" in steps["trial"]["cmd"]
+    assert "--ref release/v{release_version}" in steps["explain"]["cmd"]  # 承認資料の欄の ref は版上げの PR の head（受け入れ条件 11）
+    assert "--approval" not in steps["notes"]["cmd"]  # bump の後の notes は欄を書かない
+    assert steps["release"]["on_exit"]["6"] == "release-landed" and steps["release-landed"]["on_exit"]["6"] == "stop"
+    assert steps["approve"]["next"] == "release" and "--facts-from {state_dir}" in steps["approve"]["cmd"]
+    if pace == "normal":
+        assert (
+            steps["others"]["next"] == "end" and steps["release"]["gate_next"] == "trial"
+        )  # others の後に承認ゲートで終わる（受け入れ条件 12）
+    else:
+        assert steps["others"]["next"] == "mvv" and steps["note"]["next"] == "approve" and "--by mvv" in steps["approve"]["cmd"]
+
+
+def test_trunk_close_has_no_dev_release_plan(tmp_path):
+    """#3703 の決定 12: trunk の new close も開発版のステージを置かず、変更があったときだけ本番が流れる。"""
+    root = trunk_plugin_repo(tmp_path)
+    (root / "s.json").write_text("{}")
+    p = close_cli(root, tmp_path / "c")
+    assert p.returncode == 0, p.stderr
+    stages = json.loads((tmp_path / "c" / "sprint.json").read_text())["ステージ"]
+    assert [w["name"] for w in stages] == ["まとめ", "最終の検査", "本番"] and plan_channels(stages) == ["prod"]
+    prod = json.loads(Path(stages[-1]["plans"][0]).read_text())
+    assert prod["実行の条件"]["skip_code"] == 3
 
 
 def close_cli(root, out, *extra):
@@ -587,7 +653,9 @@ def test_release_step_stops_on_infra_wait_and_outlasts_the_ci_wait(tmp_path, cha
     """#1645 の AC12・I9: release のステップは 75 で judge を通らず止まり、timeout は 待つ PR の数 × --ci-wait より長い。"""
     root = plugin_repo(tmp_path)
     rel = release_steps_of(root, tmp_path, channel, version)["release"]
-    assert rel["on_exit"] == {"75": "stop"} and rel["on_fail"] == "judge"
+    # 本番の 6（merge queue へ入れた・人のマージを待つ）は release-landed で打ち直す（#3703 の決定 3・9）
+    landed = {"6": "release-landed"} if channel == "prod" else {}
+    assert rel["on_exit"] == {"75": "stop", **landed} and rel["on_fail"] == "judge"
     ci_wait = int(rel["cmd"].split("--ci-wait ", 1)[1].split()[0])
     assert rel["timeout"] > prs * ci_wait
 

@@ -266,8 +266,8 @@ def test_wait_and_merge_delegates_to_merge_when_green(monkeypatch):
     assert "--watch" not in cmd
 
 
-def test_wait_and_merge_passes_who_approved_only_when_given(monkeypatch):
-    """自動反映の本番チャネルへのマージは --gate-approved が無ければ止まる。開発版の経路には渡さない（#2623 の I2）。"""
+def test_wait_and_merge_merges_only_into_the_base_branch(monkeypatch):
+    """#3703 の I8: wait_and_merge はベースブランチ宛ての PR だけを入れ、本番の承認の担い手や先端の指定を渡さない（本番は prod_land）。"""
     mod = _release_steps_module(monkeypatch)
     monkeypatch.setattr(mod.strategy_route, "admin_bypass", lambda root: False)
     calls = []
@@ -275,8 +275,7 @@ def test_wait_and_merge_passes_who_approved_only_when_given(monkeypatch):
     monkeypatch.setattr(mod, "run", lambda cmd, **kw: calls.append(cmd) or subprocess.CompletedProcess(cmd, 0, out, ""))
     monkeypatch.setattr(mod, "merge_commit_of", lambda root, n: "c")
     mod.wait_and_merge(".", 5)
-    mod.wait_and_merge(".", 5, gate_approved="mvv")
-    assert "--gate-approved" not in calls[0] and calls[1][-2:] == ["--gate-approved", "mvv"]
+    assert "--gate-approved" not in calls[0] and "--expect-head" not in calls[0]
 
 
 def test_wait_and_merge_stops_with_the_summary_of_merge_when_green(monkeypatch):
@@ -443,7 +442,7 @@ def test_notes_fills_approval_cells(repo, tmp_path):
     approval.parent.mkdir()
     approval.write_text(
         "# t\n\n## 2. 承認の判断に使うもの\n\n| 項目 | 内容 |\n| --- | --- |\n| 版数 | 1.2.3 |\n"
-        "| 含む PR | #11 題名 A<br>#12 題名 B |\n| 配る中身 | （未記入） |\n| 開発版のデプロイで確かめたこと | （未記入） |\n\n## 同意を求めること\n\n- [ ] x\n",
+        "| 含む PR | #11 題名 A<br>#12 題名 B |\n| 配る中身 | （未記入） |\n| 承認前の試用で確かめたこと | （未記入） |\n\n## 同意を求めること\n\n- [ ] x\n",
         encoding="utf-8",
     )
     before = (repo / "CHANGELOG.md").read_text(encoding="utf-8")
@@ -471,7 +470,7 @@ def test_notes_fills_approval_cells(repo, tmp_path):
     assert p.returncode == 0, p.stdout + p.stderr
     text = approval.read_text(encoding="utf-8")
     assert "| 配る中身 | - 計画を課題番号だけで作れる（#11）<br>- ステップの順が変わる （続き）（#11）<br>- 題名 B（#12） |" in text
-    assert "| 開発版のデプロイで確かめたこと | Claude Code・Codex・Kiro の 3 経路で develop から ndf 1.2.3-dev.1 を導入し" in text
+    assert "| 承認前の試用で確かめたこと | Claude Code・Codex・Kiro の 3 経路で develop から ndf 1.2.3-dev.1 を導入し" in text
     assert (
         "## 未検証・残る危険\n\n- 実機の CI とは未照合（#11）\n- 無い材料: レビュー・リファクタリング・全体テスト・設計文書の未確認・未実施のリリース後テスト\n\n## 移行の手順\n\n- 無し\n\n## 同意を求めること"
         in text
@@ -521,7 +520,7 @@ def test_notes_and_changelog_stop_when_no_pr_is_merged(repo, tmp_path):
     approval = repo / "issues" / "approval.md"
     approval.parent.mkdir()
     approval.write_text(
-        "| 含む PR | #13 未マージ |\n| 配る中身 | 前の中身 |\n| 開発版のデプロイで確かめたこと | 前の確認 |\n", encoding="utf-8"
+        "| 含む PR | #13 未マージ |\n| 配る中身 | 前の中身 |\n| 承認前の試用で確かめたこと | 前の確認 |\n", encoding="utf-8"
     )
     files = [repo / "CHANGELOG.md", pdir / "README.md", approval]
     before = [f.read_bytes() for f in files]
@@ -947,9 +946,11 @@ def test_bump_raises_the_other_plugin_from_changed_plugins(repo):
     assert got["version"] == "2.3.5"
 
 
-def _release_prod(monkeypatch, root: Path, branches: tuple[str, str], plugin: str, deliveries: list | None = None, channel: str = "prod"):
+def _release_prod(
+    monkeypatch, root: Path, branches: tuple[str, str], plugin: str, deliveries: list | None = None, channel: str = "prod", land=None
+):
     """release --channel prod を git と gh を差し替えて流し、(PR の作成, 呼んだ git, 結果) を返す。`branches` は
-    (ベースブランチ, 本番ブランチ)。"""
+    (ベースブランチ, 本番ブランチ)。結果の `_code` は終了コード、`land` は本番の取り込みの差し替え。"""
     import argparse
 
     subprocess.run(["git", "init", "-q", str(root)], check=True)  # 宣言はメインディレクトリ（git の木）から読む（#3672）
@@ -979,13 +980,16 @@ def _release_prod(monkeypatch, root: Path, branches: tuple[str, str], plugin: st
     monkeypatch.setattr(mod, "changelog_section", lambda r, ver, plugin: "")
     monkeypatch.setattr(mod, "run_checks", lambda r: [])
     monkeypatch.setattr(mod, "create_pr", lambda r, base, head, title, body: created.append((base, head, title)) or len(created))
-    monkeypatch.setattr(mod, "wait_and_merge", lambda r, n, expect=None, **kw: calls.append(("merge", n, expect)) or f"m-{n}")
+    monkeypatch.setattr(mod, "wait_and_merge", lambda r, n, **kw: calls.append(("base-merge", n)) or f"m-{n}")
+    monkeypatch.setattr(mod, "land", land or (lambda r, a, n, head, trail_url="": calls.append(("merge", n, head)) or f"m-{n}"))
+    monkeypatch.setattr(mod, "pr_view", lambda r, n, fields: {"headRefOid": "a" * 40})
+    monkeypatch.setattr(mod.reviewed, "wait_ci_except", lambda *a, **k: None)
     monkeypatch.setattr(mod.approval, "release_pr_allowed", lambda r, n, view: None)
     monkeypatch.setattr(
         mod.approval, "check_approved", lambda r, approved, base, allowed: mod.ac.Verdict(True, approved, "b" * 40, "match")
     )
     monkeypatch.setattr(mod.gh_parts, "gh", lambda args, cwd=None: subprocess.CompletedProcess(args, 0, "", ""))
-    monkeypatch.setattr(mod, "emit", lambda obj, *a, **k: (_ for _ in ()).throw(SystemExit(obj)))
+    monkeypatch.setattr(mod, "emit", lambda obj, code=None, *a, **k: (_ for _ in ()).throw(SystemExit({**obj, "_code": code})))
     # CD の無い場合（場合 3）の経路。CD の行の有無は公開の担い手だけに効かせる（#2773 の受け入れ条件 19）
     monkeypatch.setattr(mod.reviewed, "release_case_or_stop", lambda r: mod.reviewed.release_case.decide_case(False, None, ""))
     with pytest.raises(SystemExit) as e:
@@ -999,7 +1003,8 @@ def test_trunk_release_merges_the_release_pr_only_after_the_approval_check(monke
     """#3672 の D17: trunk では版上げの PR が本番の PR を兼ね、開発版の PR の段（承認と照らさないマージ）を通らない。"""
     found, created, calls, out = _release_prod(monkeypatch, tmp_path, ("main", "main"), "foo")
     assert created == [("main", "release/v1.2.3", "Release: foo v1.2.3")]
-    assert [c for c in calls if c[0] == "merge"] == [("merge", 1, "b" * 40)]  # 照合した先端だけを 1 回入れる
+    # 承認した head と同じ版上げの PR の head だけを本番の取り込みで 1 回入れ、ベースブランチ宛てのマージを打たない（#3703 の I2）
+    assert [c for c in calls if c[0] in ("merge", "base-merge")] == [("merge", 1, "a" * 40)]
     assert out["metrics"]["main_pr"] == 1
 
 
@@ -1018,6 +1023,8 @@ def test_release_takes_branches_and_names_from_the_declaration(monkeypatch, tmp_
     found, created, calls, out = _release_prod(monkeypatch, tmp_path, ("trunk", "live"), "foo", [])
     assert found == [("release/v1.2.3", "trunk"), ("release/v1.2.3", "live"), ("release/v1.2.3", "live")]
     assert created == [("trunk", "release/v1.2.3", "Release: foo v1.2.3"), ("live", "release/v1.2.3", "Release: foo v1.2.3 を live へ")]
+    # 開発版の PR はベースブランチへ wait_and_merge、本番の PR は比べた先端で本番の取り込みへ（#3703 の I1・I8・I9）
+    assert [c for c in calls if c[0] in ("merge", "base-merge")] == [("base-merge", 1), ("merge", 2, "b" * 40)]
     assert ("tag", "-a", "foo--v1.2.3", "m-2", "-m", "foo v1.2.3") in calls
     assert out["metrics"]["tag"] == "foo--v1.2.3" and [i["base"] for i in out["items"] if i["kind"] == "pr"] == ["trunk", "live"]
 
@@ -1278,7 +1285,7 @@ def test_notes_copy_the_migration_steps_under_their_heading(repo, tmp_path):
     approval = repo / "issues" / "approval.md"
     approval.parent.mkdir()
     approval.write_text(
-        "# t\n\n| 項目 | 内容 |\n| --- | --- |\n| 含む PR | #12 題名 B<br>#13 移行 |\n| 配る中身 | x |\n| 開発版のデプロイで確かめたこと | x |\n\n## 同意を求めること\n\n- [ ] x\n",
+        "# t\n\n| 項目 | 内容 |\n| --- | --- |\n| 含む PR | #12 題名 B<br>#13 移行 |\n| 配る中身 | x |\n| 承認前の試用で確かめたこと | x |\n\n## 同意を求めること\n\n- [ ] x\n",
         encoding="utf-8",
     )
     args = [PY, str(SCRIPT), "notes", "--root", str(repo), "--version", "1.2.3-dev.1", "--prs", "12", "13", "--approval", str(approval)]
@@ -1335,26 +1342,23 @@ def test_release_publishes_only_when_no_row_declares_the_cd_does(monkeypatch, tm
     assert out["metrics"]["publisher"] == ("cd" if by_cd else "ndf")
 
 
-@pytest.mark.parametrize(("by", "use_material", "expected"), [("mvv", True, "mvv"), ("user", True, "user"), (None, False, "user")])
-def test_the_production_merge_carries_who_approved(monkeypatch, tmp_path, by, use_material, expected):
-    """受け入れ条件 6・I2: 照合を通った本番のマージは、承認の担い手を渡して CD で届く本番チャネルのゲートを通る。"""
+def test_the_separated_production_merge_lands_the_compared_tip(monkeypatch, tmp_path):
+    """#3703 の受け入れ条件 7・I1・I9: 分かれた経路の CD の無い本番の PR は、比べた先端で本番の取り込み（land）を 1 回通り、
+    wait_and_merge を本番ブランチ宛てに呼ばない。"""
     import argparse
 
     mod = _release_steps_module(monkeypatch)
     sha = "a" * 40
-    material = tmp_path / "approval.md"
-    material.write_text(f"| 項目 | 値 |\n| --- | --- |\n| 承認したコミット | {sha} |\n", encoding="utf-8")
-    if by:
-        mod.ac.record_approval(material, sha, by, "2026-11-07T10:00")
-    seen = []
+    seen, merged = [], []
     monkeypatch.setattr(mod, "find_pr", lambda *a, **k: None)
     monkeypatch.setattr(mod, "create_pr", lambda *a: seen.append(a[-1]) or 9)
-    monkeypatch.setattr(mod, "wait_and_merge", lambda r, n, **kw: seen.append(kw) or "m")
-    a = argparse.Namespace(version="1.2.3", ci_wait=60.0, approval=str(material) if use_material else None)
+    monkeypatch.setattr(mod, "wait_and_merge", lambda *a, **kw: merged.append(a))
+    monkeypatch.setattr(mod, "land", lambda r, a, n, head, trail_url="": seen.append((n, head)) or "m")
+    a = argparse.Namespace(version="1.2.3", ci_wait=60.0, approval=None)
     verdict = mod.ac.Verdict(True, sha, "b" * 40, "match")
-    mod._merge_prod_pr(tmp_path, a, "ndf", "release/v1.2.3", "main", 7, sha, None, verdict, [], {})
+    main_pr, merge, _ = mod._merge_prod_pr(tmp_path, a, "ndf", "release/v1.2.3", "main", 7, sha, None, verdict, [], {})
     # 本番の PR も旧いプラグインの変更を運ぶので、本文に ndf-next の port 検査の印を持つ
-    assert mod.port_mark.NO_PORT_LINE in seen[0] and seen[1]["gate_approved"] == expected and seen[1]["expect"] == "b" * 40
+    assert mod.port_mark.NO_PORT_LINE in seen[0] and seen[1] == (9, "b" * 40) and (main_pr, merge) == (9, "m") and merged == []
 
 
 def _record(monkeypatch, root, **args):
@@ -1483,8 +1487,8 @@ OPEN_PROD_PR = {"number": 9, "state": "OPEN"}
 MERGED_PROD_PR = {"number": 9, "state": "MERGED"}
 
 
-def _reviewed_prod(monkeypatch, tmp_path, case, state, found=None, wait_and_merge=None, record=None, backs=None):
-    """reviewed.release_prod を git と gh を差し替えて流し、(結果, 終了コード, wait_and_merge の引数, 公開した PR) を返す。
+def _reviewed_prod(monkeypatch, tmp_path, case, state, found=None, land=None, record=None, backs=None):
+    """reviewed.release_prod を git と gh を差し替えて流し、(結果, 終了コード, 本番の取り込み（land）の引数, 公開した PR) を返す。
     `record` は迂回の記録の書き込みの差し替え（呼ばれた引数を足す並びか、投げる例外）。`backs` は公開の後の (items, back) を足す。"""
     import argparse
 
@@ -1525,7 +1529,7 @@ def _reviewed_prod(monkeypatch, tmp_path, case, state, found=None, wait_and_merg
         merge_commit_of=lambda r, n: "m",
         merge_release_pr=lambda *a: (7, 7, "c"),
         published=published_,
-        wait_and_merge=wait_and_merge or (lambda r, n, **kw: merged.append(kw) or "m"),
+        land=land or (lambda r, a, n, head, trail_url="": merged.append({"pr": n, "head": head, "trail_url": trail_url}) or "m"),
         pr_check_buckets=lambda r, n: [],
     )
     codes = _exits(monkeypatch, rv)
@@ -1547,22 +1551,22 @@ def test_reviewed_prod_stops_at_the_gate_until_the_approval_matches(monkeypatch,
 
 @pytest.mark.parametrize("case", ["cd-no-review", "cd-review"])
 def test_reviewed_prod_merges_the_approved_head_without_the_bypass(monkeypatch, tmp_path, case):
-    """受け入れ条件 2・12・I7: 承認が先端と一致すれば、その先端に固定して --admin なしでマージし、公開の後へ進む。"""
+    """受け入れ条件 2・12・I7・#3703 の受け入れ条件 7: 承認が先端と一致すれば、その先端と証跡の URL で本番の取り込み（land）を
+    1 回通り、公開の後へ進む（迂回するかは land_approved が宣言から決める）。"""
     _, _, merged, published, _ = _reviewed_prod(monkeypatch, tmp_path, case, "success", found=OPEN_PROD_PR)
-    assert merged == [{"expect": HEAD, "ci_wait": 60.0, "gate_approved": "user", "admin": False}] and published == [9]
+    assert merged == [{"pr": 9, "head": HEAD, "trail_url": "https://t/1"}] and published == [9]
 
 
 def test_reviewed_prod_merges_cd_admin_with_the_bypass_and_records_it(monkeypatch, tmp_path):
-    """#3506 の受け入れ条件 1・6・I3・I8: cd-admin で証跡が先端と一致すれば、先端に固定して迂回でマージし、
-    結果の行の admin が true になり、照らした証跡を指す迂回の記録を 1 件書く。"""
+    """#3506 の受け入れ条件 1・6・I3・I8・#3703 の決定 10: cd-admin で証跡が先端と一致すれば、先端と証跡の URL で本番の取り込みを
+    通り、結果の行の admin が true になる。迂回の記録は land_approved が書き、ここでは書かない（2 回書かない）。"""
     record, backs = [], []
     out, _, merged, published, _ = _reviewed_prod(
         monkeypatch, tmp_path, "cd-admin", "success", found=OPEN_PROD_PR, record=record, backs=backs
     )
-    assert merged == [{"expect": HEAD, "ci_wait": 60.0, "gate_approved": "user", "admin": True}] and published == [9]
+    assert merged == [{"pr": 9, "head": HEAD, "trail_url": "https://t/1"}] and published == [9]
     assert {"kind": "pr", "name": "#9", "result": "merged", "base": "main", "admin": True} in out["items"]
-    assert record == [(9, HEAD, "https://t/1")]
-    assert {"kind": "comment", "name": "https://r/1", "result": "written", "record": "admin_merge"} in out["items"]
+    assert record == [] and not any(i.get("record") == "admin_merge" for i in out["items"])
     items, back = backs[0]
     assert back(items, {}, "done") == ("ok", None, "done")
 
@@ -1586,13 +1590,11 @@ def test_reviewed_prod_cd_admin_stops_at_the_gate_when_the_head_moves(monkeypatc
     """#3506 の受け入れ条件 4・I6a・I6b: 迂回の前に先端が動けば（merge-when-green の head_moved）マージせず 10 で止まる。"""
     from release_lib.approval import HeadMoved
 
-    def moved(r, n, **kw):
+    def moved(r, a, n, head, trail_url=""):
         raise HeadMoved("先端が動いた")
 
     record = []
-    out, code, _, published, _ = _reviewed_prod(
-        monkeypatch, tmp_path, "cd-admin", "success", found=OPEN_PROD_PR, wait_and_merge=moved, record=record
-    )
+    out, code, _, published, _ = _reviewed_prod(monkeypatch, tmp_path, "cd-admin", "success", found=OPEN_PROD_PR, land=moved, record=record)
     assert code == 10 and out["status"] == "gate" and published == [] and record == []
 
 
@@ -1601,33 +1603,13 @@ def test_reviewed_prod_cd_admin_does_not_merge_when_the_checks_fail(monkeypatch,
     """#3506 の受け入れ条件 3・I5: チェックが落ちたら 1、上限なら 75 で止まり、迂回の記録を書かない。"""
     from step_result import StepError
 
-    def failed(r, n, **kw):
+    def failed(r, a, n, head, trail_url=""):
         raise StepError("PR #9 をマージできない: チェックが落ちた", code)
 
     record = []
     with pytest.raises(StepError) as e:
-        _reviewed_prod(monkeypatch, tmp_path, "cd-admin", "success", found=OPEN_PROD_PR, wait_and_merge=failed, record=record)
+        _reviewed_prod(monkeypatch, tmp_path, "cd-admin", "success", found=OPEN_PROD_PR, land=failed, record=record)
     assert e.value.code == code and record == []
-
-
-def test_reviewed_prod_reports_an_unwritten_record_apart_from_the_release(monkeypatch, tmp_path):
-    """#3506 の決定 7: 記録を書けなければ本番の完了と分けて 1 で報告する。"""
-    from release_lib import approval_trail
-
-    backs = []
-    out, *_ = _reviewed_prod(
-        monkeypatch,
-        tmp_path,
-        "cd-admin",
-        "success",
-        found=OPEN_PROD_PR,
-        record=approval_trail.TrailError("unreadable", "書けない"),
-        backs=backs,
-    )
-    assert any(i.get("record") == "admin_merge" and i["result"] == "unwritten" for i in out["items"])
-    items, back = backs[0]
-    status, code, done = back(items, {}, "done")
-    assert (status, code) == ("stopped", 1) and "迂回の記録を書けなかった（本番は出ている）" in done
 
 
 @pytest.mark.parametrize("review", ["APPROVED", "REVIEW_REQUIRED"])
@@ -1735,7 +1717,7 @@ def test_prod_ops_wires_the_entry_functions_at_call_time(monkeypatch):
         "merge_commit_of": "merge_commit_of",
         "merge_release_pr": "_merge_release_pr",
         "published": "_published",
-        "wait_and_merge": "wait_and_merge",
+        "land": "land",
         "pr_check_buckets": "pr_check_buckets",
     }
     for name in wired.values():
@@ -1764,8 +1746,8 @@ def test_wait_and_merge_takes_the_bypass_from_the_declaration(monkeypatch, tmp_p
     out = json.dumps({"tool": "merged", "status": "ok", "summary": "#5 をマージした", "items": []})
     monkeypatch.setattr(mod, "run", lambda cmd, **kw: calls.append(cmd) or subprocess.CompletedProcess(cmd, 0, out, ""))
     monkeypatch.setattr(mod, "merge_commit_of", lambda root, n: "c")
-    mod.wait_and_merge(root, 5, gate_approved="user")
-    assert ("--no-admin" not in calls[0]) is bypass and calls[0][-2:] == ["--gate-approved", "user"]
+    mod.wait_and_merge(root, 5)
+    assert ("--no-admin" not in calls[0]) is bypass
 
 
 @pytest.mark.parametrize("admin", [True, False])
@@ -1782,7 +1764,7 @@ def test_wait_and_merge_takes_the_bypass_from_the_case_over_the_declaration(monk
     out = json.dumps({"tool": "merged", "status": "ok", "summary": "#5 をマージした", "items": []})
     monkeypatch.setattr(mod, "run", lambda cmd, **kw: calls.append(cmd) or subprocess.CompletedProcess(cmd, 0, out, ""))
     monkeypatch.setattr(mod, "merge_commit_of", lambda root, n: "c")
-    mod.wait_and_merge(root, 5, gate_approved="user", admin=admin)
+    mod.wait_and_merge(root, 5, admin=admin)
     assert ("--no-admin" not in calls[0]) is admin
 
 
@@ -2185,3 +2167,325 @@ def test_dev_run_title_comes_from_the_workflow_file(tmp_path):
     wf.mkdir(parents=True)
     (wf / "release-dev.yml").write_text('name: release-dev\nrun-name: "release-dev #${{ inputs.pr }}"\n', encoding="utf-8")
     assert reviewed.dev_run_title(tmp_path, "release-dev.yml", 12) == "release-dev #12"
+
+
+# --- #3703: 本番の取り込み（prod_land）と CD の無い trunk の本番（trunk_release） --------------------------------------
+
+
+class _LandPort:
+    """`land.Port` の偽物。取り込みの呼び出しを `calls` に残す。"""
+
+    def __init__(self, head=HEAD, method="merge-queue", commit="merge"):
+        self.head, self.calls = head, []
+        self.facts = SimpleNamespace(
+            present=True,
+            queue=method == "merge-queue",
+            queue_merge_method=commit,
+            up_to_date=True,
+            bypass="never",
+            approvals=0,
+            required=(),
+        )
+
+    def pull(self, n):
+        row = {"number": n, "state": "open", "merged": False, "draft": False, "head": self.head, "base": "main", "title": "Release"}
+        return {**row, "bump": True, "cut_version": "1.0.0", "contains_tip": True, "tip": "t" * 40}
+
+    def production(self, branch):
+        return {"tip": "t" * 40, "version": "1.0.0"}
+
+    def queue(self, branch):
+        return []
+
+    def rule_facts(self, branch):
+        return self.facts
+
+    def merge(self, n, sha, commit, admin):
+        self.calls.append(("merge", sha, commit, admin))
+        return True, ""
+
+    def enqueue(self, n, head, jump):
+        self.calls.append(("enqueue", head))
+        return True, ""
+
+    def checks_failing(self, sha, pull=None, required=()):
+        return None
+
+    def has_human_record(self, n):
+        return False
+
+    def comment(self, n, body):
+        return True
+
+
+def _prod_land(monkeypatch, merge=None, state="open", head=HEAD, ci=None, after_wait="merged"):
+    """prod_land.land の外（宣言・GitHub・待ち）を差し替え、(モジュール, 偽の Port) を返す。"""
+    import branch_strategy
+
+    from release_lib import prod_land as pl
+
+    sec = strategy_fixture.section("plugin")
+    sec["merge"] = {**sec["merge"], **(merge or {})}
+    port = _LandPort(head, sec["merge"]["method"], sec["merge"]["commit"])
+    monkeypatch.setattr(pl, "_strategy", lambda root: branch_strategy.Strategy(sec))
+    monkeypatch.setattr(pl, "_repo", lambda root: "o/r")
+    monkeypatch.setattr(pl.land_lib, "GhPort", lambda root, repo, strategy: port)
+    monkeypatch.setattr(pl, "queue_state", lambda root, pr: state)
+    monkeypatch.setattr(pl, "wait_queued", lambda root, pr, timeout: after_wait)
+    monkeypatch.setattr(pl, "_merge_commit", lambda root, pr: "m" * 40)
+    monkeypatch.setattr(pl, "git", lambda *a, **k: None)
+    monkeypatch.setattr(pl.reviewed, "wait_ci_except", ci or (lambda *a: None))
+    monkeypatch.setattr(pl.reviewed, "wait_trail_status", lambda *a, **k: None)
+    return pl, port
+
+
+_LAND_ARGS = SimpleNamespace(ci_wait=60.0)
+
+
+def test_prod_land_puts_the_pr_in_the_merge_queue_without_merging(monkeypatch):
+    """#3703 の受け入れ条件 1・I4: merge-queue の宣言では PR を merge queue へ入れ、直接マージせず、公開の欠け（LandPending）で返す。"""
+    pl, port = _prod_land(monkeypatch)
+    with pytest.raises(pl.LandPending) as e:
+        pl.land(Path("."), _LAND_ARGS, 9, HEAD)
+    assert e.value.result == "queued" and port.calls == [("enqueue", HEAD)]
+
+
+def test_prod_land_leaves_the_merge_to_a_human(monkeypatch):
+    """#3703 の受け入れ条件 3: merge.actor が human ならマージも merge queue への投入もせず、人のマージを待つ。"""
+    pl, port = _prod_land(monkeypatch, {"actor": "human"})
+    with pytest.raises(pl.LandPending) as e:
+        pl.land(Path("."), _LAND_ARGS, 9, HEAD)
+    assert e.value.result == "human" and port.calls == []
+
+
+@pytest.mark.parametrize("method", ["strict", "direct"])
+@pytest.mark.parametrize("commit", ["merge", "squash", "rebase"])
+def test_prod_land_merges_with_the_declared_history(monkeypatch, method, commit):
+    """#3703 の受け入れ条件 4: strict・direct は宣言の merge.commit の方式で承認した head を入れる。"""
+    pl, port = _prod_land(monkeypatch, {"method": method, "commit": commit})
+    assert pl.land(Path("."), _LAND_ARGS, 9, HEAD) == "m" * 40
+    assert port.calls == [("merge", HEAD, commit, False)]
+
+
+@pytest.mark.parametrize("code", [1, 75])
+def test_prod_land_waits_for_the_checks_before_landing(monkeypatch, code):
+    """#3703 の受け入れ条件 5・I3: 検査の中身の失敗は 1、上限は 75 で止まり、本番ブランチも merge queue も変えない。"""
+    from step_result import StepError
+
+    def ci(*a):
+        raise StepError("落ちた", code)
+
+    pl, port = _prod_land(monkeypatch, ci=ci)
+    with pytest.raises(StepError) as e:
+        pl.land(Path("."), _LAND_ARGS, 9, HEAD)
+    assert e.value.code == code and port.calls == []
+
+
+def test_prod_land_does_not_land_a_moved_head(monkeypatch):
+    """#3703 の受け入れ条件 6・I2: 承認した head と PR の今の head が違えば、入れずに HeadMoved を投げる（merge queue へも入れない）。"""
+    from release_lib.approval import HeadMoved
+
+    pl, port = _prod_land(monkeypatch, head="d" * 40)
+    with pytest.raises(HeadMoved):
+        pl.land(Path("."), _LAND_ARGS, 9, HEAD)
+    assert port.calls == []
+
+
+@pytest.mark.parametrize(
+    ("state", "after", "want"),
+    [("merged", None, "merged"), ("queued", "merged", "merged"), ("queued", "queued", 75), ("closed", None, 1), ("queued", "closed", 1)],
+)
+def test_prod_land_rerun_reads_the_merge_queue(monkeypatch, state, after, want):
+    """#3703 の決定 3: 打ち直しで merge queue にあれば上限まで待ち、マージされればマージコミット、上限なら 75、閉じていれば 1。
+    どれも入れ直さない。"""
+    from step_result import StepError
+
+    pl, port = _prod_land(monkeypatch, state=state, after_wait=after)
+    if want == "merged":
+        assert pl.land(Path("."), _LAND_ARGS, 9, HEAD) == "m" * 40
+    else:
+        with pytest.raises(StepError) as e:
+            pl.land(Path("."), _LAND_ARGS, 9, HEAD)
+        assert e.value.code == want
+    assert port.calls == []
+
+
+def test_prod_land_reenqueues_a_pr_that_left_the_merge_queue(monkeypatch):
+    """#3703 の決定 3: merge queue から外れて開いていれば、検査の待ちと head の照合からやり直して入れ直す。"""
+    pl, port = _prod_land(monkeypatch, state="queued", after_wait="open")
+    with pytest.raises(pl.LandPending):
+        pl.land(Path("."), _LAND_ARGS, 9, HEAD)
+    assert port.calls == [("enqueue", HEAD)]
+
+
+@pytest.mark.parametrize(
+    ("node", "want"),
+    [
+        ({"merged": True, "state": "MERGED", "isInMergeQueue": False}, "merged"),
+        ({"merged": False, "state": "OPEN", "isInMergeQueue": True}, "queued"),
+        ({"merged": False, "state": "OPEN", "isInMergeQueue": False}, "open"),
+        ({"merged": False, "state": "CLOSED", "isInMergeQueue": False}, "closed"),
+    ],
+)
+def test_queue_state_maps_the_pr_to_four_states(monkeypatch, node, want):
+    from release_lib import prod_land as pl
+
+    monkeypatch.setattr(pl, "_repo", lambda root: "o/r")
+    got = SimpleNamespace(ok=True, value={"repository": {"pullRequest": node}}, error="")
+    monkeypatch.setattr(pl.gh_graphql, "graphql", lambda q, v: got)
+    assert pl.queue_state(Path("."), 9) == want
+
+
+def test_queue_state_does_not_guess_when_unreadable(monkeypatch):
+    """読めなければ merge queue に無いとみなさず止まる（merge queue に残る PR を二重に入れない）。"""
+    from release_lib import prod_land as pl
+    from step_result import StepError
+
+    monkeypatch.setattr(pl, "_repo", lambda root: "o/r")
+    monkeypatch.setattr(pl.gh_graphql, "graphql", lambda q, v: SimpleNamespace(ok=False, value=None, error="boom"))
+    with pytest.raises(StepError):
+        pl.queue_state(Path("."), 9)
+
+
+@pytest.mark.parametrize("result", ["queued", "human"])
+def test_pending_result_reports_the_publish_gap(result):
+    """#3703 の受け入れ条件 1・3・決定 9: merge queue へ入れた・人のマージを待つは stopped と gaps の公開の行で返す（終了コード 6）。"""
+    from release_lib import prod_land as pl
+    from step_result import code_for
+
+    out = pl.pending_result("foo", "1.2.3", "main", "foo--v1.2.3", pl.LandPending(result, "", 9), "打ち直す")
+    assert out["status"] == "stopped" and code_for(out) == 6 and out["next"] == "打ち直す"
+    assert out["gaps"] == [{"kind": "publish", "name": "foo--v1.2.3", "reason": pl.PENDING_REASONS[result]}]
+    assert out["items"] == [{"kind": "pr", "name": "#9", "result": result, "base": "main"}]
+
+
+def test_cmd_release_returns_6_and_publishes_nothing_while_the_merge_queue_holds_the_pr(monkeypatch, tmp_path):
+    """#3703 の受け入れ条件 1・I4: 本番の取り込みが merge queue へ入れたら、タグも GitHub Release も作らずに 6 で返す。"""
+    from release_lib import prod_land as pl
+
+    def land(r, a, n, head, trail_url=""):
+        raise pl.LandPending("queued", "", n)
+
+    found, created, calls, out = _release_prod(monkeypatch, tmp_path, ("main", "main"), "foo", land=land)
+    assert out["_code"] == 6 and out["status"] == "stopped" and out["gaps"][0]["kind"] == "publish"
+    assert not any(c[0] == "tag" for c in calls)
+
+
+class _TrunkOps:
+    """trunk_release が読む `release-steps.py` の操作の偽物。"""
+
+    def __init__(self, head=HEAD, merged=None, open_pr=None, land=None):
+        self.head, self.merged_pr, self.open_pr = head, merged, open_pr
+        self.created, self.landed = [], []
+        self._land = land
+
+    def git(self, root, *args, check=True):
+        rc = 1 if args[:3] == ("rev-parse", "-q", "--verify") else 0
+        return subprocess.CompletedProcess(args, rc, "p" * 40 if args[0] == "rev-parse" else "", "")
+
+    def find_pr(self, root, head, base, states):
+        if "MERGED" in states and self.merged_pr:
+            return {"number": self.merged_pr, "state": "MERGED"}
+        if "OPEN" in states and self.open_pr:
+            return {"number": self.open_pr, "state": "OPEN"}
+        return None
+
+    def create_pr(self, root, base, head, title, body):
+        self.created.append((base, head))
+        return 5
+
+    def _release_pr_body(self, root, a, plugin, plugins):
+        return "body"
+
+    def pr_view(self, root, n, fields):
+        return {"headRefOid": self.head}
+
+    def merge_commit_of(self, root, n):
+        return "m" * 40
+
+    def pr_check_buckets(self, root, n):
+        return []
+
+    def land(self, root, a, n, head, trail_url=""):
+        if self._land:
+            return self._land(root, a, n, head)
+        self.landed.append((n, head))
+        return "m" * 40
+
+
+def _trunk(monkeypatch, tmp_path, ops, approved=HEAD):
+    """trunk_release.release_trunk を偽の操作で流す。止まれば (結果, 終了コード)、戻れば戻り値を返す。"""
+    import argparse
+
+    from release_lib import trunk_release as tr
+    from release_lib.context import ReleaseCtx
+
+    codes = _exits(monkeypatch, tr)
+    monkeypatch.setattr(tr, "tag_name", lambda root, plugin, ver: f"{plugin}--v{ver}")
+    monkeypatch.setattr(tr, "shipped_note", lambda root, plugin, ver: None)
+    monkeypatch.setattr(tr.reviewed, "wait_ci_except", lambda *a: None)
+    a = argparse.Namespace(version="1.2.3", ci_wait=60.0, approved_sha=approved, approval=None)
+    ctx = ReleaseCtx(tmp_path, a, "foo", ["foo"], "release/v1.2.3", "main", "main", sync=False)
+    try:
+        return tr.release_trunk(ctx, ops)
+    except SystemExit as e:
+        return e.code, codes[-1]
+
+
+def test_release_trunk_opens_the_release_pr_and_stops_at_the_gate_without_the_approval(monkeypatch, tmp_path):
+    """#3703 の決定 4・受け入れ条件 12: 承認の前の 1 回目は版上げの PR を開いて 10 で止まり、本番の取り込みを打たない。"""
+    ops = _TrunkOps()
+    out, code = _trunk(monkeypatch, tmp_path, ops, approved=None)
+    assert code == 10 and out["status"] == "gate" and ops.created == [("main", "release/v1.2.3")] and ops.landed == []
+    assert out["items"][-1]["result"] == "awaiting_approval" and "approve" in out["next"]
+
+
+def test_release_trunk_lands_the_approved_head(monkeypatch, tmp_path):
+    """#3703 の受け入れ条件 7・I1: 承認と版上げの PR の head が同じなら、開いた PR を使い回して本番の取り込みを 1 回通る。"""
+    ops = _TrunkOps(open_pr=4)
+    pr, merge, items, metrics = _trunk(monkeypatch, tmp_path, ops)
+    assert (pr, merge) == (4, "m" * 40) and ops.created == [] and ops.landed == [(4, HEAD)]
+    assert items[-1]["result"] == "merged" and metrics["approved_sha"] == HEAD
+
+
+def test_release_trunk_does_not_land_commits_after_the_approval(monkeypatch, tmp_path):
+    """#3703 の受け入れ条件 6・I2: 承認の後に版上げのブランチへ積まれた head は入れず、承認ゲート（10）で取り直しを求める。"""
+    ops = _TrunkOps(head="d" * 40, open_pr=4)
+    out, code = _trunk(monkeypatch, tmp_path, ops)
+    assert code == 10 and ops.landed == [] and "approve" in out["next"]
+
+
+def test_release_trunk_stops_at_the_gate_when_the_head_moves_while_landing(monkeypatch, tmp_path):
+    from release_lib.approval import HeadMoved
+
+    def moved(*a):
+        raise HeadMoved("動いた")
+
+    out, code = _trunk(monkeypatch, tmp_path, _TrunkOps(open_pr=4, land=moved))
+    assert code == 10 and "動いた" in out["summary"]
+
+
+@pytest.mark.parametrize(("head", "ok"), [(HEAD, True), ("d" * 40, False)])
+def test_release_trunk_resumes_a_merged_release_pr_by_its_head(monkeypatch, tmp_path, head, ok):
+    """#3703 の受け入れ条件 2・I2: マージ済みの版上げの PR は、その head が承認の SHA と同じときだけ公開へ進み、入れ直さない。"""
+    from step_result import StepError
+
+    ops = _TrunkOps(head=head, merged=4)
+    if ok:
+        pr, merge, items, _ = _trunk(monkeypatch, tmp_path, ops)
+        assert (pr, merge, items[-1]["result"]) == (4, "m" * 40, "already_merged") and ops.landed == []
+        return
+    with pytest.raises(StepError) as e:
+        _trunk(monkeypatch, tmp_path, ops)
+    assert e.value.code == 1 and ops.landed == []
+
+
+def test_release_trunk_resumes_a_fast_forwarded_pr_from_the_landed_record(monkeypatch, tmp_path):
+    """#3703 の I2: ruleset の無い strict の squash で閉じた PR は、取り込みの記録があればマージ済みと同じに公開へ進む。"""
+    from release_lib import trunk_release as tr
+
+    ops = _TrunkOps()
+    ops.find_pr = lambda root, head, base, states: {"number": 4, "state": "CLOSED"} if states == ("CLOSED",) else None
+    monkeypatch.setattr(tr.prod_land, "landed_commit", lambda root, pr, head: "f" * 40)
+    pr, merge, items, _ = _trunk(monkeypatch, tmp_path, ops)
+    assert (pr, merge, items[-1]["result"]) == (4, "f" * 40, "already_merged") and ops.landed == []

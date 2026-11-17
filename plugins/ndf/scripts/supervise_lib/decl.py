@@ -349,6 +349,16 @@ def sprint_flow(a) -> branch_strategy.Strategy:
         raise DeclError(e.reason) from e
 
 
+def trunk_release(a) -> bool:
+    """計画の引数のスナップショットの取り込み方が、版上げの PR があり開発版の PR（ベースブランチへの取り込み）を作らない形（trunk）か。
+    trunk では開発版のステージを置かず、本番のプランが版上げの PR の head で承認前の試用をする（#3703 の決定 4・7）。
+    取り込み方の分岐の正本は `release_lib/route.route_of`（GitHub の照会の部品に依存しない）。"""
+    from release_lib.route import route_of
+
+    route = route_of(sprint_flow(a))
+    return route.release_pr and not route.sync
+
+
 def sync_source(a, pr) -> str:
     """ベースの取り込みの取り込み元の引数。選んで集める取り込み方は、宛先（ベースブランチ）ではなく
     スプリントの起点から取り込む（#3121 の I4）。それ以外は PR の宛先（`--pr`）。"""

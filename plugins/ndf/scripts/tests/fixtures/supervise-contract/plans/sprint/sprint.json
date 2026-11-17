@@ -97,7 +97,7 @@
       "plans": [
         "<TMP>/out/sprint/4-design-merge-16.json"
       ],
-      "command": "python3 <NDF>/scripts/supervise.py queue <TMP>/out/sprint/4-design-merge-16.json --max 3 --done <TMP>/out/sprint/done-4.json --then <TMP>/out/sprint/5-design-results.json --then <TMP>/out/sprint/6-impl-16.json <TMP>/out/sprint/6-impl-17.json --then <TMP>/out/sprint/7-check.json --then <TMP>/out/sprint/8-release.json",
+      "command": "python3 <NDF>/scripts/supervise.py queue <TMP>/out/sprint/4-design-merge-16.json --max 3 --done <TMP>/out/sprint/done-4.json --then <TMP>/out/sprint/5-design-results.json --then <TMP>/out/sprint/6-impl-16.json <TMP>/out/sprint/6-impl-17.json --then <TMP>/out/sprint/7-check.json --then <TMP>/out/sprint/8-release-prod.json",
       "resume": "python3 <NDF>/scripts/supervise.py queue --resume <TMP>/out/sprint/done-4.json"
     },
     {
@@ -130,26 +130,13 @@
     },
     {
       "wave": 8,
-      "name": "デプロイ",
-      "plans": [
-        "<TMP>/out/sprint/8-release.json"
-      ],
-      "then_of": "設計 PR のマージ",
-      "resume": "python3 <NDF>/scripts/supervise.py queue --resume <TMP>/out/sprint/done-4.json"
-    },
-    {
-      "wave": 9,
-      "name": "リリース承認ゲート",
-      "gate": "開発版のデプロイが書いた承認資料（<TMP>/repo/issues/approval-foo-v1.2.0.md）を示して本番へのリリースの承認を取り、承認されたら `python3 <NDF>/scripts/release-steps.py approve --approval <TMP>/repo/issues/approval-foo-v1.2.0.md --approved-sha <approval-facts の metrics.approved_sha> --by user` で承認を記録してから「本番」のステージの command を打つ（差し戻されたら打たない）"
-    },
-    {
-      "wave": 10,
       "name": "本番",
       "plans": [
-        "<TMP>/out/sprint/10-release-prod.json"
+        "<TMP>/out/sprint/8-release-prod.json"
       ],
-      "command": "python3 <NDF>/scripts/supervise.py queue <TMP>/out/sprint/10-release-prod.json --max 3 --done <TMP>/out/sprint/done-10.json",
-      "resume": "python3 <NDF>/scripts/supervise.py queue --resume <TMP>/out/sprint/done-10.json"
+      "note": "リリース承認ゲートは本番のプランの中にある: 版上げの PR を開いて承認前の試用（trial）をし、承認資料を書いたところで承認ゲートとして終わる。承認資料を示して本番へのリリースの承認を取り、利用者が答えたら `python3 <NDF>/scripts/release-steps.py approve --approval <承認資料> --approved-sha <facts の metrics.approved_sha> --by user` で承認を記録し、承認されたら `python3 <NDF>/scripts/supervise.py run <本番のプラン> --from approve` で承認の記録を書いて取り込みへ進む（差し戻されたら打たない）",
+      "then_of": "設計 PR のマージ",
+      "resume": "python3 <NDF>/scripts/supervise.py queue --resume <TMP>/out/sprint/done-4.json"
     }
   ]
 }

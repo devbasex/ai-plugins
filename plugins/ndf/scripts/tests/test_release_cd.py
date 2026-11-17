@@ -561,3 +561,23 @@ def test_cd_no_review_and_cd_review_plans_stay_as_they_were(tmp_path):
     assert "--by mvv" in steps["approve-pr"]["cmd"] and steps["note"]["next"] == "approve-pr" and "on_exit" in wait
     steps, wait = _cd_steps("cd-review", True, tmp_path)
     assert "approve-pr" not in steps and steps["note"]["next"] == "end" and wait == {"gate_next": "facts"}
+
+
+@pytest.mark.parametrize(("case", "mvv", "want"), [("cd-admin", False, {"gate_next": "trial"}), ("cd-no-review", True, None)])
+def test_cd_trunk_plan_tries_the_release_pr_head_before_the_material(tmp_path, case, mvv, want):
+    """#3703 の受け入れ条件 10・決定 7: CD のある trunk の本番は、release の 10 の行き先を承認前の試用（trial）にし、
+    trial を facts の前に置く。分かれた宣言は今までどおり facts へ進む。"""
+    import argparse
+
+    import release_case
+    from supervise_lib import release_cd
+
+    c = release_case.Case(case, "", "", "")
+    a = argparse.Namespace(mvv=str(tmp_path / "s") if mvv else None, mode="standard", production="main", state=str(tmp_path / "s"))
+    trial = {"id": "trial", "next": "facts"}
+    approval = [{"id": "facts", "next": "explain"}, {"id": "others", "next": "end"}]
+    steps = release_cd.cd_prod_steps(a, "1.2.3", "9", None, "approval.md", approval, c, trial)
+    assert steps[0] == trial and steps[1]["id"] == "facts"
+    wait = release_cd.cd_release_wait(a, c, {}, trunk=True)
+    assert (wait == want) if want else (wait["on_exit"]["10"] == "trial")
+    assert release_cd.cd_release_wait(a, c, {}) in ({"gate_next": "facts"}, {"on_exit": {"10": "facts"}})

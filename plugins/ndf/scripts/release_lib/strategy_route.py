@@ -1,6 +1,7 @@
 """strategy_route.py: 取り込み方の値から、版上げの PR の起点・宛先・同期の PR の要否を決める（#3672 の D17）。
 
-取り込み方の名前で振る舞いを分ける分岐は、このモジュールの `route_of` の 1 か所に置く。
+取り込み方の名前で振る舞いを分ける分岐は `route_of` の 1 か所に置く（本体は依存の無い `release_lib/route.py`。計画の組み立てが
+GitHub の照会の部品を読まずに使えるよう分けた。#3703）。
 
 | 取り込み方 | 承認の対象 | 版上げの PR | 起点 → 宛先 | 同期の PR |
 | --- | --- | --- | --- | --- |
@@ -32,33 +33,8 @@ import strategy_rows
 from release_lib import approval, names, reviewed
 from release_lib.approval import HeadMoved
 from release_lib.context import ReleaseCtx
+from release_lib.route import Route, route_of  # noqa: F401  取り込み方の分岐の正本（呼び手はここから読む）
 from step_result import EXIT_GATE, EXIT_UNREADABLE, StepError, emit, git
-
-
-class Route(NamedTuple):
-    """版上げの経路。`release_pr` が偽なら版上げの PR を作らない。`bump` が偽なら版数・CHANGELOG・タグ・Release を作らない。"""
-
-    release_pr: bool
-    bump: bool
-    source: str | None
-    target: str
-    sync: bool
-    collects_units: bool = False
-
-
-def route_of(strategy) -> Route:
-    """`lib/branch_strategy.Strategy` から版上げの経路を決める。"""
-    sec = strategy.section
-    rs = sec["release_strategy"]
-    prod, base = sec["branches"]["production"], sec["branches"]["base"]
-    versioned = sec["release"]["version_store"]["kind"] != "none"
-    if sec["approval"]["target"] == "production_pr":
-        return Route(False, False, None, prod, False)
-    if rs == "merge_base_branch":
-        return Route(True, versioned, base, prod, True)
-    if rs == "release_branch":
-        return Route(True, True, prod, prod, True, collects_units=True)
-    return Route(True, True, prod, prod, False)
 
 
 def admin_bypass(root) -> bool:
@@ -162,7 +138,7 @@ def allowed_after(root, approved: str, branch: str, n: int) -> ac.AllowedPR:
 
 def release_selected(ctx: ReleaseCtx, approved, ops, case=None) -> tuple:
     """`branch`（リリースブランチ）→ 本番チャネルの Pull Request を使い回すか作り、承認と比べた先端だけをマージする。
-    `ops` は `release-steps.py`（find_pr・create_pr・wait_and_merge・merge_commit_of・_merged_sync_pr・_merge_sync_pr と版の再試行の
+    `ops` は `release-steps.py`（find_pr・create_pr・land（本番の取り込み）・merge_commit_of・_merged_sync_pr・_merge_sync_pr と版の再試行の
     回数）。(本番の PR, マージコミット, items, metrics, 戻すマージ) を返し、戻すマージ（`merge_back_after`）は呼び手が公開の後に打つ。
     承認の外の変更は承認ゲート（10）で止め、組み直しへ戻す。`case` が CD のある場合（#2773）なら、承認したコミットを引数で受けず、
     本番の PR の先端と PR の上の承認（証跡かレビュー）の完全な一致だけで通す（`_merge_exact`。許可リストの許容を使わない）。"""
@@ -227,15 +203,15 @@ def _resume_merged(ctx: ReleaseCtx, main_pr, approved, case, ops) -> tuple[str, 
 
 
 def _merge_approved(ctx: ReleaseCtx, main_pr, approved, items, metrics, ops):
-    """承認したコミットと比べ（`allowed_after`）、比べた先端だけを本番チャネルへ入れる。先端が動けば比べ直す。(マージ, 判定)。"""
+    """承認したコミットと比べ（`allowed_after`）、比べた先端だけを本番の取り込み（`ops.land`）で本番チャネルへ入れる。先端が動けば比べ直す（I9）。
+    (マージ, 判定)。merge queue へ入れた・人のマージを待つときは `prod_land.LandPending` で抜ける。"""
     root, a, plugin, branch = ctx.root, ctx.a, ctx.plugin, ctx.branch
-    by = approval.approved_by(root, a)
     for left in range(ops.HEAD_MOVED_RETRIES, -1, -1):
         verdict = approval.check_approved(root, approved, branch, allowed_after(root, approved, branch, main_pr))
         if not verdict.ok:
             emit(approval.gate(root, a, plugin, branch, verdict, items, metrics), EXIT_GATE)
         try:
-            return ops.wait_and_merge(root, main_pr, expect=verdict.tip, ci_wait=a.ci_wait, gate_approved=by), verdict
+            return ops.land(root, a, main_pr, verdict.tip), verdict
         except HeadMoved:
             if not left:
                 emit(approval.gate(root, a, plugin, branch, verdict, items, metrics, moved=True), EXIT_GATE)

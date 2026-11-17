@@ -416,8 +416,12 @@ def approval_cell(text: str) -> str:
     return mdtable.cell_text(text.replace("\n", "<br>"))
 
 
+# 承認資料の欄「承認前の試用で確かめたこと」（#3703 の決定 11。分かれた経路の開発版のデプロイも trunk の版上げの PR の head も同じ欄）
+TRIAL_ROW = "承認前の試用で確かめたこと"
+
+
 def write_approval(path: Path, version, bullets, risks, verified, ref, migration=(), results=None, machine=()) -> list[dict]:
-    """notes --approval が承認資料の「配る中身」「開発版のデプロイで確かめたこと」の欄と、`## 検査の結果`・
+    """notes --approval が承認資料の「配る中身」「承認前の試用で確かめたこと」の欄と、`## 検査の結果`・
     `## 未検証・残る危険`・`## 移行の手順` の節を書く。資料か欄が無ければ StepError（3）。"""
     if not path.is_file():
         raise StepError(f"提示物 {path} が無い（先に approval-facts を走らせる）", EXIT_PRECONDITION)
@@ -428,7 +432,7 @@ def write_approval(path: Path, version, bullets, risks, verified, ref, migration
         if verified
         else "—"
     )
-    rows = {"配る中身": "\n".join(bullets) or "—", "開発版のデプロイで確かめたこと": check}
+    rows = {"配る中身": "\n".join(bullets) or "—", TRIAL_ROW: check}
     lines = path.read_text(encoding="utf-8").split("\n")
     done = []
     for i, line in enumerate(lines):

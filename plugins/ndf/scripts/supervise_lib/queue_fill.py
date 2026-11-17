@@ -372,6 +372,8 @@ def _fill_prod(f: _Fill, rec: dict | None):
     if rec is not None and rec.get("how") != "series":
         f.ensure_filled(rec)
         return None, None
+    if not f.explicit and not f.field.get("系列"):
+        return _fill_decided(f)  # trunk の本番は開発版のプランを持たない（#3703 の決定 5）
     series, series_from = (None, None) if f.explicit else f.series_record()
     if not f.explicit and series is None:
         return _stopped("no_series")
@@ -395,13 +397,29 @@ def _fill_prod(f: _Fill, rec: dict | None):
     return None, None
 
 
+def _fill_decided(f: _Fill):
+    """明示の版も系列も無い本番（trunk）: origin から次の正式版を決めて記録を書く。記録があれば決め直さない（I7。呼び手が先に返す）。"""
+    import release_version
+
+    obs = f.observe()
+    if obs.unreadable:
+        return _stopped("unreadable", unreadable=obs.unreadable)
+    d = release_version.decide_release(obs, f.level)
+    t = release_version.taken(obs, d.version, "decided", f.level)
+    if t.is_taken:
+        return _stopped("taken", t.version, t.existing, t.next_free)
+    rec = f.write_record(d.version, "decided", obs.as_dict())
+    f.ensure_filled(rec)
+    return None, None
+
+
 def fill_release_version(plan: str, items: list[dict]) -> tuple[str | None, dict | None]:
     """リリースプランの版の差し込み（`{release_version}`・`{release_base}`）を、版の記録の値で埋める（#2164）。
     (埋められない理由, キューの項目に載せる `version`) を返す。どちらも None なら流してよい。「版」の欄を持たないプランは触らない。
 
     開発版は、記録が無ければ origin から次に空いている版を決めて（明示の版はまだ出ていないかを確かめて）記録を書く。記録が
     あれば記録の版を使い、それがもう出ていて自分のリリースのマージ済みの PR が無ければ決め直す（明示の版は止める）。本番は
-    明示の版か `系列` の開発版の記録の base で出し、タグがあれば止める。リリース承認ゲートの後に開発版の記録の版が変わったら止める。"""
+    明示の版か `系列` の開発版の記録の base で出し、タグがあれば止める。系列も明示も無い本番（trunk）は origin から次の正式版を決めて記録する。リリース承認ゲートの後に開発版の記録の版が変わったら止める。"""
     try:
         text = Path(plan).read_text()
         info = json.loads(text)
