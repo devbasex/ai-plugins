@@ -36,19 +36,19 @@ from filelock import Timeout
 from ndf import cli, contracts, identity
 from ndf.adapters import git, github
 from ndf.adapters.git import GitError
-from ndf.contracts import limits, result
+from ndf.contracts import facts, limits, result
 from ndf.domains.loop import acceptance, acceptance_decide, check_trigger, design_tests
 from ndf.domains.loop import control_decide as ctl
 from ndf.domains.loop import lap_decide, select_decide, sprint_decide, store
 from ndf.domains.loop import record_decide as rec
 from ndf.domains.release.approval_decide import APPROVED, REJECTED
-from ndf.progress import definition, run
+from ndf.progress import definition
 
 TOOL = cli.tool_of(__name__)
 # 持ち主の鍵の期限の契約の名前
 LEASE_POLICY = "loop.lease"
 # 設計承認ゲートで受ける答え（事実の表 answers の行）
-GATE_ANSWERS = (APPROVED, run.REVISE, REJECTED)
+GATE_ANSWERS = (APPROVED, str(facts.row(result.ANSWERS, "revise")["id"]), REJECTED)
 
 
 def _command(step: Optional[ctl.Step], session: Optional[str], cwd: Path) -> Optional[dict[str, Any]]:
