@@ -51,9 +51,14 @@ def _implied_strategy(declared: dict, default: Optional[str]) -> str:
     return "trunk" if base and base == production else "merge_base_branch"
 
 
+def _kind_for_form(form: Optional[str], default: str) -> str:
+    """リリースの形に対応する種類の行。表に無い形（無いときを含む）は `default`。"""
+    return FILL_KIND_BY_FORM[form] if form in FILL_KIND_BY_FORM else default
+
+
 def _fill_kind(rs: str, form: Optional[str]) -> str:
     """足りないキーを埋める種類の行。trunk はリリースの形で選び、ほかは取り込み方で選ぶ。"""
-    return FILL_KIND_BY_FORM[form] if rs == "trunk" and form in FILL_KIND_BY_FORM else FILL_KIND[rs]
+    return _kind_for_form(form, FILL_KIND[rs]) if rs == "trunk" else FILL_KIND[rs]
 
 
 def _fill_release(rel: dict, section: dict, form: Optional[str], kind: str, presets: dict, existing: dict) -> None:
@@ -64,7 +69,7 @@ def _fill_release(rel: dict, section: dict, form: Optional[str], kind: str, pres
     if files and rel["version_store"]["kind"] != "none":
         rel["version_store"]["files"] = files
     rel["cd"] = _cd_of(rel.get("deliveries"))
-    with_cd = presets["kinds"][FILL_KIND_BY_FORM[form] if form in FILL_KIND_BY_FORM else kind]["with_cd"]
+    with_cd = presets["kinds"][_kind_for_form(form, kind)]["with_cd"]
     rel["tag"], rel["github_release"] = (with_cd["tag"], with_cd["github_release"]) if rel["cd"] else (None, False)
     if rel["version_store"]["kind"] == "none":
         rel["tag"], rel["github_release"] = None, False
