@@ -18,7 +18,7 @@ on:
         required: true
         type: string
       ndf_ref:
-        description: 動かす NDF の ai-plugins のタグ（uses: の参照と同じ値）
+        description: "動かす NDF の ai-plugins のタグ（uses: の参照と同じ値）"
         required: true
         type: string
       channel:
