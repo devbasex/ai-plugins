@@ -24,22 +24,21 @@ def join(parts: Iterable[Any]) -> str:
     return "".join("/" + escape(p) for p in parts)
 
 
+# `has` が「無い」を値の null と分けるための印
+_MISSING = object()
+
+
 def has(doc: Any, pointer: str) -> bool:
     """object だけをたどって、キーが在るか（値が null でも在る）。"""
+    return get(doc, pointer, _MISSING) is not _MISSING
+
+
+def get(doc: Any, pointer: str, default: Any = None) -> Any:
+    """object だけをたどった値。途中が無い・object でなければ `default`。"""
     cur = doc
     for t in tokens(pointer):
         if not isinstance(cur, dict) or t not in cur:
-            return False
-        cur = cur[t]
-    return True
-
-
-def get(doc: Any, pointer: str) -> Any:
-    """object だけをたどった値。途中が無ければ None。"""
-    cur = doc
-    for t in tokens(pointer):
-        if not isinstance(cur, dict) or t not in cur:
-            return None
+            return default
         cur = cur[t]
     return cur
 
