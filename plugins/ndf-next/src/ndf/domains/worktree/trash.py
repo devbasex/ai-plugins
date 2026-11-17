@@ -99,6 +99,12 @@ def evacuate(main: Git, worktree: Path, branch: str, head: str, merge: str = "")
         **({"merge_commit": merge} if merge else {}),
     }
     record_of(dest).write_text(json.dumps(record, ensure_ascii=False), encoding="utf-8")
+    _move_all(worktree, dest, moved, discarded)
+    return Evacuated(dest, moved, discarded)
+
+
+def _move_all(worktree: Path, dest: Path, moved: tuple[str, ...], discarded: tuple[str, ...]) -> None:
+    """`moved` を `worktree` から `dest` へ移す。途中で移せなければ移した分を戻して `TrashError`。"""
     for i, rel in enumerate(moved):
         try:
             (dest / rel).parent.mkdir(parents=True, exist_ok=True)
@@ -107,7 +113,6 @@ def evacuate(main: Git, worktree: Path, branch: str, head: str, merge: str = "")
             back = restore(worktree, Evacuated(dest, moved[:i], discarded))
             kept = f"（移した分を戻せない: {back}）" if back is not None else ""
             raise TrashError(f"{rel} を退避先 {dest} へ移せない: {exc}{kept}") from exc
-    return Evacuated(dest, moved, discarded)
 
 
 def restore(worktree: Path, got: Evacuated) -> Optional[str]:
