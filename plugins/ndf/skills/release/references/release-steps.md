@@ -150,7 +150,7 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --roo
     マージが足されていれば、閉じた後に 1 で止める（`review-open` から打ち直すと、足したマージだけを範囲に取る）
   - 本番のリリースのプランの後片付けは、その版の一時のブランチが残っていれば消す
 
-- `approval-facts`: `gate` なら `presentation_path` の承認資料の「`配る中身`」と「`開発版のデプロイで確かめたこと`」を
+- `approval-facts`: `gate` なら `presentation_path` の承認資料の「`配る中身`」と「`承認前の試用で確かめたこと`」を
   `notes --approval` で埋めて利用者へ示し、承認（`AskUserQuestion` の `metadata.source` は `ndf-gate:2`）を得てから `next` のコマンドを打つ。`stopped`
   （3 = 前のタグを決められない）なら `--prev-tag` を渡して打ち直す。`metrics.approved_sha` と承認資料の
   「`承認したコミット`」が承認の対象（打った時点の `origin/<ベースブランチ>` の 40 桁）で、`next` の

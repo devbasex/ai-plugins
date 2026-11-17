@@ -162,7 +162,7 @@ def allowed_after(root, approved: str, branch: str, n: int) -> ac.AllowedPR:
 
 def release_selected(ctx: ReleaseCtx, approved, ops, case=None) -> tuple:
     """`branch`（リリースブランチ）→ 本番チャネルの Pull Request を使い回すか作り、承認と比べた先端だけをマージする。
-    `ops` は `release-steps.py`（find_pr・create_pr・wait_and_merge・merge_commit_of・_merged_sync_pr・_merge_sync_pr と版の再試行の
+    `ops` は `release-steps.py`（find_pr・create_pr・land（本番の取り込み）・merge_commit_of・_merged_sync_pr・_merge_sync_pr と版の再試行の
     回数）。(本番の PR, マージコミット, items, metrics, 戻すマージ) を返し、戻すマージ（`merge_back_after`）は呼び手が公開の後に打つ。
     承認の外の変更は承認ゲート（10）で止め、組み直しへ戻す。`case` が CD のある場合（#2773）なら、承認したコミットを引数で受けず、
     本番の PR の先端と PR の上の承認（証跡かレビュー）の完全な一致だけで通す（`_merge_exact`。許可リストの許容を使わない）。"""
@@ -227,15 +227,15 @@ def _resume_merged(ctx: ReleaseCtx, main_pr, approved, case, ops) -> tuple[str, 
 
 
 def _merge_approved(ctx: ReleaseCtx, main_pr, approved, items, metrics, ops):
-    """承認したコミットと比べ（`allowed_after`）、比べた先端だけを本番チャネルへ入れる。先端が動けば比べ直す。(マージ, 判定)。"""
+    """承認したコミットと比べ（`allowed_after`）、比べた先端だけを本番の取り込み（`ops.land`）で本番チャネルへ入れる。先端が動けば比べ直す（I9）。
+    (マージ, 判定)。merge queue へ入れた・人のマージを待つときは `prod_land.LandPending` で抜ける。"""
     root, a, plugin, branch = ctx.root, ctx.a, ctx.plugin, ctx.branch
-    by = approval.approved_by(root, a)
     for left in range(ops.HEAD_MOVED_RETRIES, -1, -1):
         verdict = approval.check_approved(root, approved, branch, allowed_after(root, approved, branch, main_pr))
         if not verdict.ok:
             emit(approval.gate(root, a, plugin, branch, verdict, items, metrics), EXIT_GATE)
         try:
-            return ops.wait_and_merge(root, main_pr, expect=verdict.tip, ci_wait=a.ci_wait, gate_approved=by), verdict
+            return ops.land(root, a, main_pr, verdict.tip), verdict
         except HeadMoved:
             if not left:
                 emit(approval.gate(root, a, plugin, branch, verdict, items, metrics, moved=True), EXIT_GATE)

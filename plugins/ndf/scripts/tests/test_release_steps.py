@@ -443,7 +443,7 @@ def test_notes_fills_approval_cells(repo, tmp_path):
     approval.parent.mkdir()
     approval.write_text(
         "# t\n\n## 2. 承認の判断に使うもの\n\n| 項目 | 内容 |\n| --- | --- |\n| 版数 | 1.2.3 |\n"
-        "| 含む PR | #11 題名 A<br>#12 題名 B |\n| 配る中身 | （未記入） |\n| 開発版のデプロイで確かめたこと | （未記入） |\n\n## 同意を求めること\n\n- [ ] x\n",
+        "| 含む PR | #11 題名 A<br>#12 題名 B |\n| 配る中身 | （未記入） |\n| 承認前の試用で確かめたこと | （未記入） |\n\n## 同意を求めること\n\n- [ ] x\n",
         encoding="utf-8",
     )
     before = (repo / "CHANGELOG.md").read_text(encoding="utf-8")
@@ -471,7 +471,7 @@ def test_notes_fills_approval_cells(repo, tmp_path):
     assert p.returncode == 0, p.stdout + p.stderr
     text = approval.read_text(encoding="utf-8")
     assert "| 配る中身 | - 計画を課題番号だけで作れる（#11）<br>- ステップの順が変わる （続き）（#11）<br>- 題名 B（#12） |" in text
-    assert "| 開発版のデプロイで確かめたこと | Claude Code・Codex・Kiro の 3 経路で develop から ndf 1.2.3-dev.1 を導入し" in text
+    assert "| 承認前の試用で確かめたこと | Claude Code・Codex・Kiro の 3 経路で develop から ndf 1.2.3-dev.1 を導入し" in text
     assert (
         "## 未検証・残る危険\n\n- 実機の CI とは未照合（#11）\n- 無い材料: レビュー・リファクタリング・全体テスト・設計文書の未確認・未実施のリリース後テスト\n\n## 移行の手順\n\n- 無し\n\n## 同意を求めること"
         in text
@@ -521,7 +521,7 @@ def test_notes_and_changelog_stop_when_no_pr_is_merged(repo, tmp_path):
     approval = repo / "issues" / "approval.md"
     approval.parent.mkdir()
     approval.write_text(
-        "| 含む PR | #13 未マージ |\n| 配る中身 | 前の中身 |\n| 開発版のデプロイで確かめたこと | 前の確認 |\n", encoding="utf-8"
+        "| 含む PR | #13 未マージ |\n| 配る中身 | 前の中身 |\n| 承認前の試用で確かめたこと | 前の確認 |\n", encoding="utf-8"
     )
     files = [repo / "CHANGELOG.md", pdir / "README.md", approval]
     before = [f.read_bytes() for f in files]
@@ -1278,7 +1278,7 @@ def test_notes_copy_the_migration_steps_under_their_heading(repo, tmp_path):
     approval = repo / "issues" / "approval.md"
     approval.parent.mkdir()
     approval.write_text(
-        "# t\n\n| 項目 | 内容 |\n| --- | --- |\n| 含む PR | #12 題名 B<br>#13 移行 |\n| 配る中身 | x |\n| 開発版のデプロイで確かめたこと | x |\n\n## 同意を求めること\n\n- [ ] x\n",
+        "# t\n\n| 項目 | 内容 |\n| --- | --- |\n| 含む PR | #12 題名 B<br>#13 移行 |\n| 配る中身 | x |\n| 承認前の試用で確かめたこと | x |\n\n## 同意を求めること\n\n- [ ] x\n",
         encoding="utf-8",
     )
     args = [PY, str(SCRIPT), "notes", "--root", str(repo), "--version", "1.2.3-dev.1", "--prs", "12", "13", "--approval", str(approval)]
