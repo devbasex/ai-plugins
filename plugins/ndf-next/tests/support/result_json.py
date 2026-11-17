@@ -1,7 +1,6 @@
-"""サブコマンドの標準出力から結果 JSON を読む補助。
+"""標準出力の最後の行の結果 JSON。"""
 
-テストは `from result_json import last_result` で読む。fixture `last_result`（`tests/conftest.py`）も同じ関数を返す。
-"""
+# テストは `from result_json import last_result` で読む。fixture `last_result`（`tests/conftest.py`）も同じ関数を返す。
 
 from __future__ import annotations
 
