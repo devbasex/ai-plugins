@@ -146,7 +146,6 @@ import gh_parts  # noqa: E402
 import repo as repo_lib  # noqa: E402
 import strategy_rows  # noqa: E402
 import delivery  # noqa: E402
-import branch_strategy  # noqa: E402
 from release_lib.declared_steps import DECLARATION, DeclarationError, load_steps, run_steps  # noqa: E402,F401
 
 
@@ -742,10 +741,7 @@ def _release(a, root, base, prod, plugin, route):
 
 def _release_route(root) -> strategy_route.Route:
     """宣言（メインディレクトリ）から版上げの経路を決める（取り込み方の分岐は `strategy_route.route_of` の 1 か所）。"""
-    try:
-        return strategy_route.route_of(repo_lib.branch_strategy_of(root))
-    except branch_strategy.StrategyError as e:
-        raise StepError(e.reason, e.exit_code) from e
+    return strategy_route.route_of(strategy_route.strategy_or_stop(root))
 
 
 def _resume_merged_prod(ctx, approved, main_pr, items, metrics):

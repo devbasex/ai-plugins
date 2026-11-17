@@ -38,15 +38,21 @@ from release_lib.route import Route, route_of  # noqa: F401  取り込み方の�
 from step_result import EXIT_GATE, EXIT_UNREADABLE, StepError, emit, git
 
 
-def admin_bypass(root) -> bool:
-    """管理者の迂回でマージするか。宣言（メインディレクトリ）の `merge` が `method: direct` で `admin: true` のときだけ（#3672 の I6）。
-    宣言を読めなければ StepError で止める（迂回の有無を既定へ倒さない）。"""
+def strategy_or_stop(root):
+    """メインディレクトリのブランチ戦略の宣言（作業ツリーの宣言は PR の変更で差し替えられる）。読めなければ StepError で止める
+    （理由と終了コードは `StrategyError` のもの。既定へ倒さない）。"""
     import branch_strategy
 
     try:
-        merge = repo_lib.branch_strategy_of(root).section["merge"]
+        return repo_lib.branch_strategy_of(root)
     except branch_strategy.StrategyError as e:
         raise StepError(e.reason, e.exit_code) from e
+
+
+def admin_bypass(root) -> bool:
+    """管理者の迂回でマージするか。宣言（メインディレクトリ）の `merge` が `method: direct` で `admin: true` のときだけ（#3672 の I6）。
+    宣言を読めなければ StepError で止める（迂回の有無を既定へ倒さない）。"""
+    merge = strategy_or_stop(root).section["merge"]
     return merge.get("admin") is True and merge.get("method") == "direct"
 
 

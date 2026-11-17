@@ -17,14 +17,12 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
-import branch_strategy
 import gh_call
 import gh_graphql
 import gh_parts
 import limits
-import repo as repo_lib
 import waits
-from release_lib import approval_trail, land as land_lib, reviewed
+from release_lib import approval_trail, land as land_lib, reviewed, strategy_route
 from release_lib.approval import HeadMoved
 from step_result import EXIT_INFRA_WAIT, StepError, gh_json, git, result
 
@@ -61,11 +59,8 @@ def _repo(root) -> str:
 
 
 def _strategy(root):
-    try:
-        # メインディレクトリの宣言を読む（`land_cli` と同じ。作業ツリーの宣言は PR の変更で差し替えられる）
-        return repo_lib.branch_strategy_of(root)
-    except branch_strategy.StrategyError as e:
-        raise StepError(e.reason, e.exit_code) from e
+    # メインディレクトリの宣言を読む（`land_cli` と同じ。作業ツリーの宣言は PR の変更で差し替えられる）
+    return strategy_route.strategy_or_stop(root)
 
 
 def queue_state(root, pr: int) -> str:
