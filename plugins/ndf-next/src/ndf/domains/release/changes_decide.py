@@ -21,6 +21,8 @@ from ndf.contracts import facts
 
 # 指示書のファイルの表
 INSTRUCTION_FILES = "instruction-files"
+# テストのファイルの表（`crossrefactor.tests_decide.TABLE` と同じ表。領域をまたいで読まないので名前をここにも置く）
+TEST_FILES_TABLE = "test-files"
 
 
 class Change(NamedTuple):
@@ -40,7 +42,7 @@ def default_undistributed() -> tuple[str, ...]:
 
     保存先の行（`dir`）は `<名前>/`（どの深さのそのディレクトリの下も当たる）、名前の行は fnmatch の形のまま（どの深さの
     そのファイル名にも当たる）。"""
-    return tuple(f"{r['pattern']}/" if r["where"] == "dir" else r["pattern"] for r in facts.rows("test-files"))
+    return tuple(f"{r['pattern']}/" if r["where"] == "dir" else r["pattern"] for r in facts.rows(TEST_FILES_TABLE))
 
 
 def _under(path: str, directory: str) -> str | None:
