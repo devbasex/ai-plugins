@@ -18,6 +18,9 @@ from ndf.contracts import limits
 
 # 状態の応答が必ず持つキー（gws auth status が成功したときの形）。どれかが無ければ読めない応答として止まる
 STATUS_KEYS = ("credential_source", "auth_method", "client_config_exists")
+# 未認証の形（credential_source, auth_method）。auth_method の None は値を問わない印。docstring の 2 つの形に 1 行ずつ対応する。
+# 2 行目はクライアントの設定だけがありトークンが無い形（#2067）。OAuth でログインすれば auth_method が none でなくなる
+UNAUTHENTICATED = (("none", None), ("client_secret.json", "none"))
 
 
 class GwsError(RuntimeError):
@@ -58,13 +61,8 @@ def public_keys(status: Mapping[str, Any], keys: Sequence[str] = STATUS_KEYS) ->
 
 def decide(status: Mapping[str, Any], token_in_env: bool) -> bool:
     """`gws auth status` の結果から認証済みかを決める（純粋な判断）。"""
-    if token_in_env:
-        return True
-    source = status.get("credential_source")
-    if source == "none":
-        return False
-    # クライアントの設定だけがありトークンが無い形（#2067）。OAuth でログインすれば auth_method が none でなくなる
-    return not (source == "client_secret.json" and status.get("auth_method") == "none")
+    source, method = status.get("credential_source"), status.get("auth_method")
+    return token_in_env or not any(source == s and m in (None, method) for s, m in UNAUTHENTICATED)
 
 
 def authenticated(status: Mapping[str, Any], env: Optional[Mapping[str, str]] = None) -> bool:
