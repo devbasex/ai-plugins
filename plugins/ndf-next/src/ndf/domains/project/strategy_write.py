@@ -32,7 +32,6 @@ from ndf.domains.records import jsonfile
 from ndf.domains.relay import signals
 
 PRESETS = "data/branch-strategy-presets.json"
-KINDS = ("web-develop", "web-trunk", "mobile", "docs", "plugin")
 LOCK_NAME = "ndf-branch-strategy.lock"
 LOCK_LIMIT = "branch-strategy.write-lock"
 # 書く順（I1 の途中の状態を作らない順）。セクションを先に書き、旧い 3 ファイルのキーを後に消す。
@@ -70,14 +69,19 @@ def load_presets() -> dict:
     return contracts.load_json(PRESETS)
 
 
+def kinds() -> tuple[str, ...]:
+    """代表のリポジトリの種類（既定の表の `kinds` のキーの並び）。"""
+    return tuple(load_presets()["kinds"])
+
+
 def init_values(kind: str, facts: dict, presets: dict) -> tuple[dict, list[dict]]:
     """種類の既定の行に測った名前を入れたセクションと、merge queue が分からないときの問いを返す。
 
     `facts` のキー: `production`（既定ブランチ）・`base`（ベースブランチ。無ければ既定の名前）・`plugin`・`runtimes`・
     `workflow`（CD のワークフロー。無ければ None）・`dev_workflow`（開発版のワークフロー）・`merge_queue`（真偽か None）。
     """
-    if kind not in KINDS:
-        raise ValueError(f"種類は {'・'.join(KINDS)} のどれか: {kind!r}")
+    if kind not in kinds():
+        raise ValueError(f"種類は {'・'.join(kinds())} のどれか: {kind!r}")
     row = presets["kinds"][kind]
     sec = copy.deepcopy(row["section"])
     names = presets["default_names"]
@@ -125,7 +129,7 @@ def apply_answers(result: dict, answers: dict) -> dict:
         out.setdefault("evidence", []).append({"source": "answer", "ref": pointer, "value": json.dumps(value, ensure_ascii=False)})
     answered = set(answers)
     out["questions"] = [q for q in seq(out.get("questions")) if q["pointer"] not in answered]
-    if values.get("kind") in KINDS and any(
+    if values.get("kind") in kinds() and any(
         bs.canonical_json(json_pointer.get(before, p)) != bs.canonical_json(v) for p, v in answers.items()
     ):
         values["kind"] = "custom"

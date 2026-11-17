@@ -263,7 +263,7 @@ def _bs_init(args: argparse.Namespace, root: Path, presets: dict[str, Any]) -> i
         reason = f"既存のリポジトリです。`{legacy.COMMAND['11']} measure` で測ってください"
         return _bs_emit({**base, "status": "stopped", "failed": [{"rule": "existing", "pointer": "", "reason": reason}]})
     if not args.kind:
-        question = {"pointer": "/kind", "why": "no_kind", "candidates": list(bw.KINDS), "evidence": []}
+        question = {"pointer": "/kind", "why": "no_kind", "candidates": list(bw.kinds()), "evidence": []}
         return _bs_emit({**base, "status": "ask", "questions": [question]})
     facts = strategy_measure.init_facts(root, api)
     section, questions = bw.init_values(args.kind, facts, presets)
@@ -378,7 +378,7 @@ def _parser() -> argparse.ArgumentParser:
     w.set_defaults(handler=_write)
     b = sub.add_parser("branch-strategy", help="ブランチ戦略の宣言（branch_strategy）を作る・測る・書く・移す・消す")
     b.add_argument("verb", choices=tuple(_bs_verbs()), help="init・measure・write・migrate・remove")
-    b.add_argument("--kind", choices=bw.KINDS, help="代表のリポジトリの種類（init は必須。measure・write は候補の先頭にする）")
+    b.add_argument("--kind", choices=bw.kinds(), help="代表のリポジトリの種類（init は必須。measure・write は候補の先頭にする）")
     b.add_argument("--answers", help="問いへの答え（セクションの JSON Pointer → 値）")
     b.add_argument("--result", help="write の土台にする measure の結果（省けば今のセクション、無ければ測り直す）")
     b.add_argument("--digest", help="示した差分のハッシュ。合うときだけ書く")

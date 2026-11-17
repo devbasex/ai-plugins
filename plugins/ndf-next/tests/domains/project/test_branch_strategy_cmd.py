@@ -113,6 +113,12 @@ def test_init_values_new_repo_has_no_cd(kind):
     assert bs.validate(sec) == []
 
 
+def test_kinds_follow_the_presets_and_the_schema_enum():
+    """種類の一覧は既定の表のキーの並びで、スキーマの enum（`custom` を除く）と同じ。"""
+    enum = contracts.load_json(bs.SCHEMA)["$defs"]["BranchStrategy"]["properties"]["kind"]["enum"]
+    assert bw.kinds() == tuple(bw.load_presets()["kinds"]) == tuple(k for k in enum if k != "custom")
+
+
 def test_init_values_fixtures_and_names():
     facts = json.loads((FIX / "facts.json").read_text(encoding="utf-8"))
     for kind in KINDS:
