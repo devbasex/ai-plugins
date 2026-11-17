@@ -31,7 +31,7 @@ from typing import Any, Iterable, Optional, Protocol
 from ndf.adapters.git import Git
 from ndf.adapters.github import Pull
 from ndf.core.branch_strategy import Strategy
-from ndf.domains.worktree import declaration, mainlock, merged_decide, outcomes, repo, testenv, testenv_sweep, trash
+from ndf.domains.worktree import declaration, mainlock, merged_decide, outcomes, removal, repo, testenv, trash
 
 # 未コミットの変更を理由に並べるパスの上限
 LISTED = 5
@@ -71,37 +71,33 @@ def _remove_worktree(main: Git, item: repo.Worktree, rec: Record, merge: str = "
     if item.locked:  # 公開を閉じる・テスト環境を破棄するより先に見る（locked は何も動かさずに残す）
         rec.add("worktree", str(item.path), outcomes.KEPT, "locked の worktree（git worktree unlock の後に片付ける）")
         return False
-    closed = testenv_sweep.close_for_removal(item.path)
-    if closed is not None:
-        rec.add("worktree", str(item.path), outcomes.KEPT, closed)
+
+    def remove() -> Optional[str]:
+        done = main.attempt("worktree", "remove", str(item.path))
+        return None if done.returncode == 0 else f"git worktree remove が断った: {done.stderr.strip()}"
+
+    got = removal.remove_evacuating(main, item, merge, remove)
+    if got.closed is not None:
+        rec.add("worktree", str(item.path), outcomes.KEPT, got.closed)
         return False
-    why = ""
-    got: Optional[trash.Evacuated] = None
-    if item.path.is_dir() and trash.leftovers(item.path):
-        try:
-            got = trash.evacuate(main, item.path, str(item.branch), item.head, merge)
-        except trash.TrashError as exc:
-            rec.add("worktree", str(item.path), outcomes.KEPT, f"退避できないため外さない: {exc}")
-            return False
-        why = f"退避先 {got.dest}" if got.dest is not None else "退避するものは無かった"
-        if got.discarded:
-            why += f"（捨てた生成物: {', '.join(got.discarded)}）"
-    done = main.attempt("worktree", "remove", str(item.path))
-    if done.returncode != 0:
-        refused = f"git worktree remove が断った: {done.stderr.strip()}"
-        back = _restore_note(item.path, got)
-        rec.add("worktree", str(item.path), outcomes.KEPT, "。".join(filter(None, [refused, back])))
+    if got.trash_error is not None:
+        rec.add("worktree", str(item.path), outcomes.KEPT, f"退避できないため外さない: {got.trash_error}")
         return False
-    rec.add("worktree", str(item.path), outcomes.REMOVED, why)
+    if got.refused is not None:
+        rec.add("worktree", str(item.path), outcomes.KEPT, "。".join(filter(None, [got.refused, got.back])))
+        return False
+    rec.add("worktree", str(item.path), outcomes.REMOVED, _evacuated_note(got.got))
     return True
 
 
-def _restore_note(worktree: Path, got: Optional[trash.Evacuated]) -> str:
-    """外せなかった worktree へ退避したファイルを戻し、その結果の説明（退避していなければ空）。"""
-    if got is None or got.dest is None:
+def _evacuated_note(got: Optional[trash.Evacuated]) -> str:
+    """退避の結果の説明（退避していなければ空。捨てた生成物も添える）。"""
+    if got is None:
         return ""
-    failed = trash.restore(worktree, got)
-    return f"退避したファイルを戻せなかった: {failed}" if failed is not None else "退避したファイルを worktree へ戻した"
+    why = f"退避先 {got.dest}" if got.dest is not None else "退避するものは無かった"
+    if got.discarded:
+        why += f"（捨てた生成物: {', '.join(got.discarded)}）"
+    return why
 
 
 def _delete_branch(main: Git, branch: str, rec: Record) -> None:

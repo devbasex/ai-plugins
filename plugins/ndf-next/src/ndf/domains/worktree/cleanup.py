@@ -24,7 +24,7 @@ from typing import Callable, Iterable, Optional, Protocol
 from ndf.adapters.git import Git, GitError
 from ndf.adapters.github import Pull
 from ndf.core.branch_strategy import Strategy
-from ndf.domains.worktree import cleanup_decide, declaration, merged_decide, repo, testenv_sweep, trash
+from ndf.domains.worktree import cleanup_decide, declaration, merged_decide, removal, repo
 from ndf.domains.worktree.cleanup_decide import KEEP_SPRINT, REMOVE, Facts, PullState
 
 
@@ -91,27 +91,21 @@ def _merge_commit(facts: Facts) -> str:
 
 
 def _remove(g: Git, item: repo.Worktree, merge: str = "") -> Outcome:
-    closed = testenv_sweep.close_for_removal(item.path)
-    if closed is not None:
-        return Outcome(item.path, item.branch, REMOVE, note=f"worktree を消さなかった: {closed}")
-    evacuated = ""
-    got: Optional[trash.Evacuated] = None
-    if item.path.is_dir() and trash.leftovers(item.path):  # 無視したファイルは git worktree remove が黙って消す
+    def remove() -> Optional[str]:
         try:
-            got = trash.evacuate(g, item.path, str(item.branch), item.head, merge)
-        except trash.TrashError as exc:
-            return Outcome(item.path, item.branch, REMOVE, note=f"退避できないため worktree を消さなかった: {exc}")
-        evacuated = f"退避先 {got.dest}" if got.dest is not None else ""
-    try:
-        g.run("worktree", "remove", str(item.path))
-    except GitError as exc:
-        failed = trash.restore(item.path, got) if got is not None else None
-        back = (
-            f"退避したファイルを戻せなかった: {failed}"
-            if failed is not None
-            else ("退避したファイルを worktree へ戻した" if evacuated else "")
-        )
-        return Outcome(item.path, item.branch, REMOVE, note="。".join(filter(None, [f"worktree を消せなかった: {exc}", back])))
+            g.run("worktree", "remove", str(item.path))
+        except GitError as exc:
+            return f"worktree を消せなかった: {exc}"
+        return None
+
+    got = removal.remove_evacuating(g, item, merge, remove)
+    if got.closed is not None:
+        return Outcome(item.path, item.branch, REMOVE, note=f"worktree を消さなかった: {got.closed}")
+    if got.trash_error is not None:
+        return Outcome(item.path, item.branch, REMOVE, note=f"退避できないため worktree を消さなかった: {got.trash_error}")
+    if got.refused is not None:
+        return Outcome(item.path, item.branch, REMOVE, note="。".join(filter(None, [got.refused, got.back])))
+    evacuated = f"退避先 {got.got.dest}" if got.got is not None and got.got.dest is not None else ""
     refused = repo.delete_merged_branch(g, str(item.branch))
     if refused is not None:
         note = f"ブランチは残した（git がマージ済みと認めない。{repo.MANUAL_FORCE}）: {refused}"

@@ -12,7 +12,7 @@ import strategy_fixture
 from ndf.adapters.git import Completed, Git
 from ndf.adapters.github import Pull
 from ndf.core import branch_strategy as bs
-from ndf.domains.worktree import create, declaration, follow, merged, setup, trash
+from ndf.domains.worktree import create, declaration, follow, merged, removal, setup, trash
 
 
 def _pull(number: int, branch: str, merged_: bool) -> Pull:
@@ -194,7 +194,7 @@ def test_after_merge_does_not_close_testenv_of_locked_worktree(main_repo: Path, 
     wt = _land(main_repo, run_git, "feat/l")
     run_git(main_repo, "worktree", "lock", str(wt))
     closed: list[Path] = []
-    monkeypatch.setattr(merged.testenv_sweep, "close_for_removal", lambda path: closed.append(path))
+    monkeypatch.setattr(removal.testenv_sweep, "close_for_removal", lambda path: closed.append(path))
     merged.after_merge(main_repo, [6], FakeHub({6: _pull(6, "feat/l", True)}))
     assert closed == [] and wt.exists()
 
