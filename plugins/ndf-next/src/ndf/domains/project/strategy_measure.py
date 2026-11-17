@@ -285,21 +285,37 @@ def _collect_production_commits(root: Path, s: Samples, limit: int) -> None:
     if ref is None:
         s.unreadable.append("history")
         return
-    fmt = f"%H%x00%P%x00%s%x00%(trailers:key={TRAILER_PR},key={TRAILER_HEAD},key={TRAILER_TIP},separator=%x1f)%x1e"
-    out = _git_out(root, "log", "--first-parent", f"-n{limit}", f"--format={fmt}", ref)
+    out = _git_out(root, "log", "--first-parent", f"-n{limit}", f"--format={LOG_FORMAT}", ref)
     known = {p["number"] for p in s.prs}
+    for sha, parents, subject, tr in _log_records(out):
+        s.commits.append({"sha": sha, "parents": len(parents), "subject": subject, "landed": tr.get(TRAILER_PR)})
+        n = _landed_pr(parents, tr)
+        if n and n not in known:
+            s.prs.append({"number": n, "base": s.production, "head": None, "landed": sha})
+            known.add(n)
+
+
+# 履歴の 1 件の形（SHA・親・件名・trailer を NUL で、trailer どうしを 0x1f で、件どうしを 0x1e で区切る）
+LOG_FORMAT = f"%H%x00%P%x00%s%x00%(trailers:key={TRAILER_PR},key={TRAILER_HEAD},key={TRAILER_TIP},separator=%x1f)%x1e"
+
+
+def _log_records(out: Optional[str]) -> list[tuple[str, list[str], str, dict[str, str]]]:
+    """`LOG_FORMAT` の出力を `(SHA, 親の並び, 件名, trailer の名前 → 値)` の並びへ分ける。欠けた件は飛ばす。"""
+    got = []
     for rec in out.split("\x1e") if out else []:
         parts = rec.strip("\n").split("\x00")
         if len(parts) < 4:
             continue
-        sha, parents, subject, trailers = parts[0], parts[1].split(), parts[2], parts[3]
-        tr = dict(t.split(": ", 1) for t in trailers.split("\x1f") if ": " in t)
-        s.commits.append({"sha": sha, "parents": len(parents), "subject": subject, "landed": tr.get(TRAILER_PR)})
-        if tr.get(TRAILER_PR) and parents and parents[0] == tr.get(TRAILER_TIP):
-            n = int(tr[TRAILER_PR]) if tr[TRAILER_PR].isdigit() else None
-            if n and n not in known:
-                s.prs.append({"number": n, "base": s.production, "head": None, "landed": sha})
-                known.add(n)
+        tr = dict(t.split(": ", 1) for t in parts[3].split("\x1f") if ": " in t)
+        got.append((parts[0], parts[1].split(), parts[2], tr))
+    return got
+
+
+def _landed_pr(parents: list[str], tr: dict[str, str]) -> Optional[int]:
+    """取り込みの記録の PR の番号。記録が無い・最初の親が記録の先端と違う・数字でなければ None。"""
+    if tr.get(TRAILER_PR) and parents and parents[0] == tr.get(TRAILER_TIP):
+        return int(tr[TRAILER_PR]) if tr[TRAILER_PR].isdigit() else None
+    return None
 
 
 def count_key(pointer: str, observed: list[tuple[Any, str]], rule: dict) -> Measured:
