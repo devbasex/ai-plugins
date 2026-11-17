@@ -41,12 +41,16 @@ fi
 GIT_TERMINAL_PROMPT=0 git fetch -q origin "refs/heads/$target:refs/remotes/origin/$target" 2>/dev/null || true
 
 # 宛先のブランチのセクションの値を 1 つ読む。読めなければ理由を出して落とす。
+# 標準エラーは分けて受ける（uv が環境を作るときの行を値に混ぜない）。
 strategy_value() {
-  local out
-  if ! out=$(python3 "$STRATEGY_CLI" get --ref "refs/remotes/origin/$target" "$1" 2>&1); then
-    echo "::error::${target} のブランチ戦略の宣言を読めません: ${out//$'\n'/ }"
+  local out err
+  err=$(mktemp)
+  if ! out=$(python3 "$STRATEGY_CLI" get --ref "refs/remotes/origin/$target" "$1" 2>"$err"); then
+    echo "::error::${target} のブランチ戦略の宣言を読めません: $(tr '\n' ' ' <"$err")"
+    rm -f "$err"
     return 1
   fi
+  rm -f "$err"
   printf '%s\n' "$out"
 }
 
