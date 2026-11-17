@@ -148,19 +148,9 @@ lflow・lbr2・lsw は after から外す。lr-* は今 after に lrebuild を�
 
 **入れ替え（S2）**
 
-| # | 手順 | 確かめ |
-| ---: | --- | --- |
-| 1 | 今の NDF で動いているスプリントとプランが無いことを確かめる。あれば終わるのを待つ | `parallel.py status`・`supervise.py` の状態 |
-| 2 | `git rm -r plugins/ndf` の後に `git mv plugins/ndf-next plugins/ndf` を打つ | — |
-| 3 | `plugin.json` 2 本の `name` を `ndf`、版を `11.0.0` にし、`plugin.json` の `description` の版も直す。hook の登録（`hooks/claude.json`・`codex.json`）は名前から作る生成物なので、`bin/ndf hooks render` で作り直す | `claude plugin validate .`・`bin/ndf hooks render --check` |
-| 4 | `.ndf/project.json` の suite のパスと `scripts/*-allow/` の許可ファイルを新しい中身に合わせて作り直す（旧い許可は消す） | 既存の検査のスクリプト |
-| 5 | ルートの `pyproject.toml`・`conftest.py` の今の NDF 向けの記述を新しい側へ寄せ、`.github/workflows/ndf-next.yml` を消す。根の `scripts/` のうち `manifests/<ランタイム>-skills.txt` を読むもの（`build-runtime-plugins.sh`・`lib/validate_manifests.py`・`check-skill-frontmatter.py`・`check-skill-repo-assumptions.py`・`check-doc-staleness.py`）を、配る Skill の表 `manifests/skills.json` を読む形へ寄せる。検査（`src/ndf/checks/`）から、子の表のコピー `children.json` と規則 `child-deps`（#3347 の決定 97）、旧いプラグインのディレクトリを見る規則 `I2`・`port`（#3343）を消す | 既存の CI のジョブ |
-| 6 | `CHANGELOG.md` に入れ替えを書き、手順 2〜6 を 1 本の PR にする | — |
-| 7 | 起動のスクリプト `plugins/ndf/bin/ndf-claude` で主要な Skill を 1 回ずつ起動する。外す設定は自分と同じ名前の行を除くので、入れ替えた自分は外れない | 振る舞いの確認。起動の init の `plugins` に `ndf` が 1 つだけあり、その `path` が `plugins/ndf` であること（`tests/bin/test_ndf_claude.py` の確かめを `NDF_LAUNCH_LIVE=1` で打つ） |
-| 8 | develop へ入れて開発版としてデプロイし、リリース承認ゲートを通して main へ出す | リリース後テスト |
-| 9 | ラベル `rebuild-1142` の開いている Issue が S2 自身を除いて 0 件であることを確かめる。残れば理由を添えて閉じるか、オーガナイザーへ送る | `gh issue list --label rebuild-1142 --state open` |
+**入れ替えの手順は [issue-3341-design-swap.md](issue-3341-design-swap.md) が持つ（#3341 で書き直した）。** 前の子（R0 の外からの参照の検査と書き換えの表・R1 の退避の直し）、当日の手順 S2-0〜S2-15（版上げの PR `release/v11.0.0` で `main` へ出し、マージキューを迂回しない）、利用者の手順 U1〜U5、戻し方 B1〜B6 がそこにある。判断は [issue-3341-design.md](issue-3341-design.md)、外からの参照の対応表は [issue-3341-design-refs.md](issue-3341-design-refs.md)、状態の置き場の一覧と退避の規則は [issue-3341-design-places.md](issue-3341-design-places.md) にある。
 
-戻すときは、入れ替えの PR を revert する。
+ここにあった手順 1〜9（`develop` へ入れて開発版としてデプロイし、`11.0.0-dev.1` を経て出す形と、「入れ替えの PR を revert すれば戻る」）は、#3672（ai-plugins を trunk にし `develop` のチャネルをやめた）と #3341 の決定に合わない。#3304 を実装するレーンは、この節でなく上の手順を読む。revert で戻るのはツリーだけで、戻し方は issue-3341-design-swap.md の「戻し方」にある。
 
 ## ファイル配置
 
