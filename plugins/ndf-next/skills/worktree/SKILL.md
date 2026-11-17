@@ -149,8 +149,8 @@ fi
 ```bash
 branch="feature/<name>"
 git -C "$main_dir" fetch origin
-# 起点は開発の本流であって、既定ブランチとは限らない。設定の base_branch を
-# 優先し、無ければ origin の HEAD が指す先へ落ちる
+# 起点は開発の本流であって、既定ブランチとは限らない。ブランチ戦略の宣言の
+# branches.base を読み、宣言が無ければ既定ブランチへ倒さずに止まる
 base=$(wt_base_branch "$main_dir") || exit 1
 start="origin/$base"
 git -C "$main_dir" show-ref --verify --quiet "refs/remotes/origin/$base" || start="$base"
@@ -162,8 +162,8 @@ cd "$main_dir/.worktrees/$branch"
 既存のブランチで作業を続けるなら `-b` を外す。
 
 **スプリントの中では、課題の worktree をスプリントブランチから切る。** スプリント
-ブランチ（`sprint/<名前>`）そのものはスプリントの起点（設定の `branch_flow.start` が指すチャネル。
-無ければ `base_branch`）から切り、課題の worktree は `--from` にスプリントブランチを渡す。設定は変えない。
+ブランチ（`sprint/<名前>`）そのものはスプリントの起点（ブランチ戦略の宣言の `sprint.start` が指すブランチ）から切り、
+課題の worktree は `--from` にスプリントブランチを渡す。宣言は変えない。
 
 ```bash
 # スプリントブランチ。起点はスプリントの起点
@@ -178,8 +178,8 @@ bash "$SCRIPTS/worktree-setup.sh" create feat/issue-<番号>-<名前> --from spr
 
 **既定ブランチと開発の起点は別物である。** 既定ブランチに正式版を置き、開発の本流を
 別のブランチ（ベースブランチ）に置くリポジトリでは、既定ブランチから分岐すると開発中の
-変更が正式版から枝分かれする。起点は設定（[references/declaration.md](references/declaration.md)
-の `base_branch`）から取り、設定が無ければ `origin` の HEAD が指すブランチへ落ちる。
+変更が正式版から枝分かれする。起点はブランチ戦略の宣言（[references/declaration.md](references/declaration.md)
+の「ブランチ名とブランチ戦略」）から取り、宣言が無ければ理由を出して止まる。既定ブランチへは落ちない。
 
 設定した名前が origin にもローカルにも無いときは、`wt_base_branch` が名前を挙げて失敗する。
 既定ブランチへは落ちない。**まだ取得していないだけのブランチは「無い」とは読まない。**

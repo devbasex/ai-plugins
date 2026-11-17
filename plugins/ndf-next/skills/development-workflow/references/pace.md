@@ -88,7 +88,7 @@ conductor は `normal` で進める。`fast` と `auto` の条件は同じで、
 
 | 条件 | 確かめ方 |
 | --- | --- |
-| 開発版のチャネルがある | `.ndf/worktree.json` の `base_branch` が `production_branch`（無ければ既定ブランチ）と違う。同じなら、手動反映の本番系の形（下）であること |
+| 開発版のチャネルがある | ブランチ戦略の宣言の `branches.base` が `branches.production` と違う。同じなら、手動反映の本番系の形（下）であること |
 | 導入の確認がある | `.ndf/pace.json` の `<節>.verify` にコマンドが書かれている。確認が走る置き場は下の「リリースの経路からステージを組む」 |
 | リポジトリが許している | `.ndf/pace.json` の `<節>.enabled` が `true`。節が無ければ許さない |
 | モードが対象に入る | `--mode` が `<節>.modes`（既定 `light` / `standard` / `legacy-refactor`）に入る。`operation` と `documentation` は書いても入らない |
@@ -96,13 +96,13 @@ conductor は `normal` で進める。`fast` と `auto` の条件は同じで、
 | プロジェクト MVV が改訂されていない | 状態の `project_mvv.sha256` が今の `.ndf/mvv.md` と一致する。宣言が 未承認・承認と一致しない・壊れている なら断る |
 
 **手動反映の本番系の形。** 起点と本番チャネルが同じ（例 carmo-cdk: どちらも既定ブランチ。本番へは手で打つ `cdk deploy` で届く）でも、
-`.ndf/project.json` の `delivery` が次をすべて満たせば開発版のチャネルがあると数える（判定は `lib/delivery.py` の `dev_channel`）。
+ブランチ戦略の宣言の `release.deliveries` が次をすべて満たせば開発版のチャネルがあると数える（判定は `lib/delivery.py` の `dev_channel`）。
 
 - 読めて、`production: true`（本番系へ届く）の行が 1 つ以上ある。`production` は利用者が書く（解析は書かない）
 - `production: true` の行がすべて `kind: manual`
 - 本番チャネルへのマージで自動で反映する行（`kind: auto`・`branch` が本番チャネル・`production` が `false` でない）が無い
 
-`delivery` が無い・不明・読めない、`production: true` の行が無いときは断る。この形では本番チャネルへのマージは本番系へ届かず、
+`release.deliveries` が無い・不明・読めない、`production: true` の行が無いときは断る。この形では本番チャネルへのマージは本番系へ届かず、
 `merge-gate` もリリース承認ゲートに数えない。リリース承認ゲートは手で行う本番のデプロイの前に掛かる（下の「リリースの経路からステージを組む」）。
 
 **使ってはいけない場面:** 開発版のチャネルが無いリポジトリ（マージがそのまま本番に届く・本番系の行を宣言していない）、
@@ -249,8 +249,8 @@ Pull Request と、スプリントの検査が見た Pull Request は入らな�
 ## リリースの経路からステージを組む
 
 **`new sprint` / `new close` は、リリースの経路（`lib/delivery.py` の `routes`）から検査の後のステージを組む。**
-`.ndf/supervise.json` に `release.form` があれば経路はテンプレート（`template`）で、今の開発版と本番のステージを置く。
-無ければ `.ndf/project.json` の `delivery` の行ごとに経路を決める。選んだ経路は `sprint.json` の `リリースの経路` に並ぶ。
+ブランチ戦略の宣言に `release.form` があれば経路はテンプレート（`template`）で、今の開発版と本番のステージを置く。
+無ければ ブランチ戦略の宣言の `release.deliveries` の行ごとに経路を決める。選んだ経路は `sprint.json` の `リリースの経路` に並ぶ。
 
 **テンプレートの経路の版数は、リリースプランを流す時点に決まる。** `--version`（`close` は `--prod` も）は明示の版で、
 省けばプランは具体的な版の代わりに版の差し込み（`{release_version}`・`{release_base}`）を持ち、作業場所・`branch`・承認資料の
@@ -274,13 +274,13 @@ Pull Request と、スプリントの検査が見た Pull Request は入らな�
 リリースの `bump` も、新しい版がベースブランチの版以下か、既にタグのある正式版なら書き換えずに止まる（終了コード 3。
 読めなければ 2）。どちらも judge を通らずにプランが止まる。版の差し込みを持たない前のプランにも、この止まり方が当たる。
 
-| `delivery` の行 | 経路 | 検査の後に置くステージ |
+| `release.deliveries` の行 | 経路 | 検査の後に置くステージ |
 | --- | --- | --- |
 | `kind: auto`・`branch` がベースブランチ | `merge` | `normal` は置かない。検査の Pull Request のマージが反映で、宛先が自動反映の本番チャネルならそこでリリース承認ゲートに当たる。`fast` / `auto` で本番チャネルへ入れる行が無ければ「導入の確認」: プラン `verify`（下の `verify` のステップ 1 つ。検査に `--then` で続く）。ベースブランチが本番チャネルなら、続けて「CD の結果」: プラン `cd-result`（`cd-result` → `record --merged`） |
 | `kind: auto`・`branch` が本番チャネル（ベースブランチと違う） | `merge` | 「本番」: 本番チャネルへ入れるリリースプラン（ベースブランチ → 本番チャネルの Pull Request を `merged-steps.py promote` が作り、リリース承認ゲートの後にマージする。後片付けはしない） |
 | `kind: auto`・`branch` が無いか別のブランチ、`kind: manual` | `manual` | 「リリース」: 手で行うステージ（`/ndf:release`。note に `target` と `trigger`） |
-| `delivery: []` | `none` | 置かない |
-| `delivery` が無い・不明（`{"unknown": ...}`） | `manual` | 「リリース」: 手で行うステージ。note に経路を決められない理由 |
+| `release.deliveries: []` | `none` | 置かない |
+| `release.deliveries` が無い・不明（`{"unknown": ...}`） | `manual` | 「リリース」: 手で行うステージ。note に経路を決められない理由 |
 
 `versioned` は版を持つかを表し、経路を変えない。`kind: auto`・`versioned: true` の行も上の表のとおりに進む。
 
