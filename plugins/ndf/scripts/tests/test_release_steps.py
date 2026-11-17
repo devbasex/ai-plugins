@@ -2696,3 +2696,42 @@ def test_release_trunk_resumes_a_fast_forwarded_pr_from_the_landed_record(monkey
     monkeypatch.setattr(tr.prod_land, "landed_commit", lambda root, pr, head: "f" * 40)
     pr, merge, items, _ = _trunk(monkeypatch, tmp_path, ops)
     assert (pr, merge, items[-1]["result"]) == (4, "f" * 40, "already_merged") and ops.landed == []
+
+
+# --- publish（CD の入口）: 出す版が無いマージ（#3750） -------------------------------------
+
+
+def _published_once(root: Path) -> str:
+    """ndf 1.0.0 を出した後のリポジトリ（タグ ndf--v1.0.0 を origin に持つ）。タグのコミットを返す。"""
+    plugin_json(root, "plugins/ndf", "1.0.0")
+    git(root, "add", "-A")
+    git(root, "commit", "-q", "-m", "release 1.0.0")
+    git(root, "tag", "-a", "ndf--v1.0.0", "-m", "ndf v1.0.0")
+    push_origin(root, "main")
+    return subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
+
+
+def test_publish_ends_ok_when_the_merge_raises_no_version(repo):
+    """#3750: trunk では版を上げないマージでも CD が publish を打つ。版のタグが先端の祖先を指すなら、何も作らずに 0 で終える。"""
+    tagged = _published_once(repo)
+    git(repo, "commit", "-q", "--allow-empty", "-m", "merge without a bump")
+    push_origin(repo, "main")
+    p = run(repo, "publish", "--plugin", "ndf", "--revision", "HEAD")
+    assert p.returncode == 0, p.stdout + p.stderr
+    res = json.loads(p.stdout.strip().splitlines()[-1])
+    assert res["status"] == "ok" and res["items"] == [{"kind": "tag", "name": "ndf--v1.0.0", "result": "unchanged", "at": tagged}], res
+    # タグは書き換えない
+    at = subprocess.run(["git", "-C", str(repo), "rev-parse", "ndf--v1.0.0^{commit}"], capture_output=True, text=True).stdout.strip()
+    assert at == tagged
+
+
+def test_publish_still_stops_when_the_tag_is_on_another_line(repo):
+    """#3750: 版のタグが先端の祖先でない（別の系統の）コミットを指すときは、今までどおり止める。"""
+    _published_once(repo)
+    git(repo, "checkout", "-q", "-b", "other", "HEAD~1")
+    plugin_json(repo, "plugins/ndf", "1.0.0")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "same version elsewhere")
+    p = run(repo, "publish", "--plugin", "ndf", "--revision", "HEAD")
+    assert p.returncode != 0, p.stdout
+    assert "でなく" in p.stdout + p.stderr

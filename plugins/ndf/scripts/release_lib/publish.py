@@ -80,6 +80,20 @@ def tag_and_release(root, plugin, ver, tag, revision, release: bool = True) -> l
     return [item, _ensure_release(root, plugin, ver, tag, revision)] if release else [item]
 
 
+def released_before(root, plugin, revision) -> dict | None:
+    """`revision` の版のタグが origin にあり、`revision` の祖先を指すなら（版を上げないマージ）その item を返す。無ければ None（#3750）。
+    祖先でない（別の系統の）コミットを指すときも None で、`publish` が今までどおり止める。"""
+    ver = version_at(root, plugin, revision)
+    tag = tag_name(root, plugin, ver)
+    if git(root, "ls-remote", "--exit-code", "--tags", "origin", f"refs/tags/{tag}", check=False).returncode != 0:
+        return None
+    git(root, "fetch", "-q", "origin", f"+refs/tags/{tag}:refs/tags/{tag}")
+    at = git(root, "rev-parse", f"refs/tags/{tag}^{{commit}}").stdout.strip()
+    if at == revision or git(root, "merge-base", "--is-ancestor", at, revision, check=False).returncode != 0:
+        return None
+    return {"kind": "tag", "name": tag, "result": "unchanged", "at": at}
+
+
 def publish(root, plugin, revision) -> tuple[str, str, list[dict]]:
     """`revision` のコミットの版で公開する。版に接尾辞があれば何も作らない。(版, タグ, items) を返す。"""
     ver = version_at(root, plugin, revision)
