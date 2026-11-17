@@ -1,6 +1,6 @@
 """JSON Pointer の分解・書き出し・たどり方（`ndf.core.json_pointer`）の現状固定テスト。
 
-分解（`~1` → `/`・`~0` → `~`）は `json_pointer` に 1 つにまとめた。自前で書いた `release.plugins._bump_pointer` も固定する。
+分解（`~1` → `/`・`~0` → `~`）は `json_pointer` に 1 つにまとめた。自前で書いた `release.plugins.bump_pointer` も固定する。
 """
 
 from __future__ import annotations
@@ -139,13 +139,13 @@ def test_remove_pointer():
 def test_bump_pointer(tmp_path):
     p = tmp_path / "plugin.json"
     p.write_text(json.dumps({"version": "1.0.0", "x": {"a/b": "1.0.0"}}), encoding="utf-8")
-    assert plugins._bump_pointer(p, "/x/a~1b", "1.0.0", "1.1.0") is True
+    assert plugins.bump_pointer(p, "/x/a~1b", "1.0.0", "1.1.0") is True
     assert json.loads(p.read_text(encoding="utf-8")) == {"version": "1.0.0", "x": {"a/b": "1.1.0"}}
-    assert plugins._bump_pointer(p, "/version", "9.9.9", "2.0.0") is False  # バージョンが old でない
-    assert plugins._bump_pointer(p, "/missing/version", "1.0.0", "2.0.0") is False
-    assert plugins._bump_pointer(p, "", "1.0.0", "2.0.0") is False
+    assert plugins.bump_pointer(p, "/version", "9.9.9", "2.0.0") is False  # バージョンが old でない
+    assert plugins.bump_pointer(p, "/missing/version", "1.0.0", "2.0.0") is False
+    assert plugins.bump_pointer(p, "", "1.0.0", "2.0.0") is False
     assert json.loads(p.read_text(encoding="utf-8"))["version"] == "1.0.0"
-    assert plugins._bump_pointer(p, "/version", "1.0.0", "2.0.0") is True
+    assert plugins.bump_pointer(p, "/version", "1.0.0", "2.0.0") is True
     assert p.read_text(encoding="utf-8").endswith("\n")
 
 
@@ -153,7 +153,7 @@ def test_bump_pointer_follows_array_indexes(tmp_path):
     """スキーマが受け付ける配列の添字（`/packages/0/version`）も、読む側（`resolve`）と同じくたどって書き換える。"""
     p = tmp_path / "package.json"
     p.write_text(json.dumps({"packages": [{"version": "1.0.0"}, "1.0.0"]}), encoding="utf-8")
-    assert plugins._bump_pointer(p, "/packages/0/version", "1.0.0", "1.1.0") is True
-    assert plugins._bump_pointer(p, "/packages/1", "1.0.0", "1.1.0") is True
-    assert plugins._bump_pointer(p, "/packages/2", "1.0.0", "1.1.0") is False
+    assert plugins.bump_pointer(p, "/packages/0/version", "1.0.0", "1.1.0") is True
+    assert plugins.bump_pointer(p, "/packages/1", "1.0.0", "1.1.0") is True
+    assert plugins.bump_pointer(p, "/packages/2", "1.0.0", "1.1.0") is False
     assert json.loads(p.read_text(encoding="utf-8")) == {"packages": [{"version": "1.1.0"}, "1.1.0"]}

@@ -160,7 +160,7 @@ class JsonStore:
     def write(self, unit: Unit, new: str) -> list[str]:
         target = self.root / self.path
         old = self._value(target.read_text(encoding="utf-8"))
-        if not plugins_mod._bump_pointer(target, self.pointer, old, new):
+        if not plugins_mod.bump_pointer(target, self.pointer, old, new):
             raise StoreError(f"{self.path} の {self.pointer} を書き換えられない")
         return [self.path, *plugins_mod.bump_files(self.root, self.files, unit.name, old, new)]
 

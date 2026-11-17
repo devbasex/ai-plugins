@@ -148,7 +148,7 @@ def _bump_lines(path: Path, name: str, old: str, new: str) -> bool:
     return True
 
 
-def _bump_pointer(path: Path, pointer: str, old: str, new: str) -> bool:
+def bump_pointer(path: Path, pointer: str, old: str, new: str) -> bool:
     """JSON のファイル `path` の `pointer` の位置のバージョンが `old` なら `new` へ書き換える。書き換えたか。
 
     object のキーと配列の添字（`/packages/0/version`）をたどる（読む側の `land.read_version` と同じ `json_pointer.resolve`）。"""
@@ -173,7 +173,7 @@ def _bump_file(root: Path, row: dict, name: str, old: str, new: str) -> bool:
     if not path.is_file():
         return False
     pointer = row.get("pointer")
-    return _bump_pointer(path, pointer, old, new) if pointer else _bump_lines(path, name, old, new)
+    return bump_pointer(path, pointer, old, new) if pointer else _bump_lines(path, name, old, new)
 
 
 def bump_files(root: Path, files: Sequence[dict], name: str, old: str, new: str) -> list[str]:
