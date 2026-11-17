@@ -23,7 +23,7 @@ from step_result import EXIT_GATE, EXIT_PRECONDITION, EXIT_UNREADABLE, StepError
 TOOL = "release"
 
 
-def _material(ctx: ReleaseCtx) -> Path | None:
+def _trunk_material(ctx: ReleaseCtx) -> Path | None:
     material = getattr(ctx.a, "approval", None)
     if not material:
         return None
@@ -31,7 +31,7 @@ def _material(ctx: ReleaseCtx) -> Path | None:
     return path if path.is_absolute() else Path(ctx.root) / path
 
 
-def read_approval(ctx: ReleaseCtx) -> str | None:
+def read_trunk_approval(ctx: ReleaseCtx) -> str | None:
     """承認したコミット。`--approved-sha` があればその値、無ければ `--approval` の承認資料の承認の記録。
     承認がまだ無い（資料が無い・承認の記録が無い・記録の SHA が違う）ときは None。資料の欄の形が壊れていれば StepError（3）。"""
     if sha := getattr(ctx.a, "approved_sha", None):
@@ -39,7 +39,7 @@ def read_approval(ctx: ReleaseCtx) -> str | None:
             return ac.parse_sha(sha)
         except ValueError as e:
             raise StepError(str(e), EXIT_UNREADABLE) from e
-    path = _material(ctx)
+    path = _trunk_material(ctx)
     if path is None or not path.is_file():
         return None
     try:
@@ -50,7 +50,7 @@ def read_approval(ctx: ReleaseCtx) -> str | None:
         raise StepError(str(e), EXIT_PRECONDITION) from e
 
 
-def _head_of(ctx: ReleaseCtx, ops, pr: int) -> str:
+def _bump_pr_head(ctx: ReleaseCtx, ops, pr: int) -> str:
     head = str((ops.pr_view(ctx.root, pr, "headRefOid") or {}).get("headRefOid") or "").lower()
     if not head:
         raise StepError(f"版上げの PR #{pr} の head を読めない")
@@ -67,7 +67,7 @@ def open_release_pr(ctx: ReleaseCtx, ops) -> int:
     return ops.create_pr(root, prod, branch, f"Release: {plugin} v{a.version}", body)
 
 
-def _rerun(ctx: ReleaseCtx) -> str:
+def _rerun_command(ctx: ReleaseCtx) -> str:
     material = getattr(ctx.a, "approval", None)
     return f"release-steps.py release --version {ctx.a.version} --channel prod" + (f" --approval {material}" if material else "")
 
@@ -84,7 +84,7 @@ def waiting_out(ctx: ReleaseCtx, pr: int, head: str, approved: str | None, items
         summary = f"{plugin} v{a.version} のリリース承認を待つ（版上げの PR #{pr}・head {head[:8]}）"
     nxt = (
         f"release/v{a.version} の head {head[:8]} で承認資料（release-steps.py approval-facts）を作り直して承認を得て、"
-        f"release-steps.py approve --approval {material} --approved-sha {head} --by user で承認の記録を書き、{_rerun(ctx)} を打ち直す"
+        f"release-steps.py approve --approval {material} --approved-sha {head} --by user で承認の記録を書き、{_rerun_command(ctx)} を打ち直す"
     )
     row = {"kind": "pr", "name": f"#{pr}", "result": "awaiting_approval", "base": ctx.prod, "head": head}
     m = {**metrics, "main_pr": pr, "compared_head": head, "approved_sha": approved}
@@ -113,20 +113,20 @@ def _landed_pr(ctx: ReleaseCtx, ops):
         return done["number"], ops.merge_commit_of(root, done["number"])
     closed = ops.find_pr(root, branch, prod, states=("CLOSED",))
     if closed:
-        approved = read_approval(ctx)
+        approved = read_trunk_approval(ctx)
         commit = prod_land.landed_commit(root, closed["number"], approved) if approved else None
         if commit:
             return closed["number"], commit
     return None
 
 
-def _resume(ctx: ReleaseCtx, ops, pr: int, commit: str | None):
+def _resume_landed(ctx: ReleaseCtx, ops, pr: int, commit: str | None):
     """再開: 本番ブランチへ入った版上げの PR の head が承認の SHA と同じことを確かめ、無いものだけを公開へ渡す（I2）。"""
     root, prod = ctx.root, ctx.prod
-    approved = read_approval(ctx)
+    approved = read_trunk_approval(ctx)
     if approved is None:
         raise StepError(f"版上げの PR #{pr} は {prod} へ入っているが、承認の記録が無い。承認資料を戻してから打ち直す")
-    head = _head_of(ctx, ops, pr)
+    head = _bump_pr_head(ctx, ops, pr)
     if head != approved.lower():
         raise StepError(f"本番ブランチへ入った版上げの PR #{pr} の head {head[:8]} が承認したコミット {approved[:8]} と違う")
     metrics = {**_metrics(ctx, pr), "approved_sha": approved, "compared_head": head}
@@ -140,15 +140,15 @@ def release_trunk(ctx: ReleaseCtx, ops) -> tuple[int, str, list[dict], dict]:
     root, a, plugin, prod = ctx.root, ctx.a, ctx.plugin, ctx.prod
     ops.git(root, "fetch", "-q", "origin", "--tags")
     if landed := _landed_pr(ctx, ops):
-        return _resume(ctx, ops, *landed)
+        return _resume_landed(ctx, ops, *landed)
     tag = tag_name(root, plugin, a.version)
     if ops.git(root, "rev-parse", "-q", "--verify", f"refs/tags/{tag}", check=False).returncode == 0:
         raise StepError(f"タグ {tag} は既にある")
     if why := shipped_note(root, plugin, a.version):  # タグを作らない宣言は本番ブランチの版で確かめる
         raise StepError(why)
     pr = open_release_pr(ctx, ops)
-    head = _head_of(ctx, ops, pr)
-    approved = read_approval(ctx)
+    head = _bump_pr_head(ctx, ops, pr)
+    approved = read_trunk_approval(ctx)
     metrics = _metrics(ctx, pr)
     items: list[dict] = []
     if approved is None or approved.lower() != head:

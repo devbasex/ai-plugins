@@ -20,7 +20,8 @@ from supervise_lib.paths import GLOSSARY_PY, MVV_PY, PUSH_DESIGN, SELF, SPEC_COP
 from supervise_lib.procedures import DESIGN_RESULTS, pr_step, rebuild_step, requirements_path, sprint_materials, with_record
 from supervise_lib.decl import sprint_out
 from supervise_lib.procedures import design_path, survey_steps
-from supervise_lib.release_templates import DEV_SERIES, MVV_NOTE, advise_steps, plan_release, release_names
+from supervise_lib.release_approve import advise_steps
+from supervise_lib.release_templates import DEV_SERIES, MVV_NOTE, plan_release, release_names
 from supervise_lib.sprint_revise import with_revise_mvv, with_revise_note
 from supervise_lib.plan import sprint_state_path
 from supervise_lib.review_units import apply_check, apply_design, apply_impl, drop_unchosen, fast_review_row

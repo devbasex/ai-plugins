@@ -36,6 +36,8 @@ from supervise_lib.procedures import with_record
 from supervise_lib.release_cd import MVV_NOTE, RULE_RELEASE_PROD_CD, cd_prod_steps, material_path, mvv_gate_steps, release_cd_case
 from supervise_lib.release_cd import cd_release_wait
 from supervise_lib.release_verify import judge_fix_steps, judge_record_step
+from supervise_lib.release_approve import advise_release_steps, approve_step
+from supervise_lib.release_trunk import RULE_RELEASE_PROD_TRUNK, landed_step, trial_step
 from supervise_lib.queue_fill import RELEASE_BASE, RELEASE_VERSION  # 版の差し込み（キューが流す直前に版の記録で埋める。#2164 の決定 7）
 
 
@@ -52,12 +54,6 @@ RULE_RELEASE_PROD_MVV = (
     "リリース承認ゲートは利用者か MVV 判定が承認した（先頭の mvv のステップが 0 を返したときだけ先へ進む）。"
     "run のステップが落ちたら、外部の待ち（CI・ネットワーク）の揺れなら同じステップをもう一度。"
     "タグの重複・権限の不足と、コードや設定に原因があるもの（版数の書き漏れ・文書の形）は stop。"
-)
-RULE_RELEASE_PROD_TRUNK = (
-    "trunk の本番（#3703）: release は承認の前に版上げの PR を開いて 10 で止まり、その head（release/v<版>）から導入を確かめ（trial）、"
-    "承認資料を作ってからリリース承認ゲートに入る。承認の後は approve から続け、release が宣言のマージの主体と方式で本番ブランチへ入れる。"
-    "merge queue へ入れた・人のマージを待つ（6）なら release-landed で打ち直す。run のステップが落ちたら、外部の待ち（CI・ネットワーク）の"
-    "揺れなら同じステップをもう一度。試用の導入の失敗・タグの重複・権限の不足と、コードや設定に原因があるもの（版数の書き漏れ・文書の形）は stop。"
 )
 
 
@@ -195,22 +191,28 @@ def _dev_approval_steps(
     return steps
 
 
-def _add_prod_mvv_gate(steps: list[dict], a, repo: str | None, approval: str, prs: str) -> None:
-    # リリース承認ゲートを MVV で判定する。承認ゲート（10）なら報告は 結果: 関門 で止まり、conductor が承認を取ってから
-    # run <計画> --from bump で続ける。従えば判定の記録を --pr の PR のすべてへコメントしてから bump へ進み、
-    # コメントが落ちたら handoff がリリース承認ゲートの by: mvv の記録を外して承認ゲートで終える（#1370 の I8）
+def _prod_mvv_gate(a, repo: str | None, approval: str, prs: str, after: str) -> tuple[list[dict], list[dict]]:
+    """リリース承認ゲートを MVV で判定するステップ（先頭に置く mvv・note と、末尾に置く handoff・reject）。承認ゲート（10）なら
+    報告は 結果: 関門 で止まり、conductor が承認を取ってから run <計画> --from `after` で続ける。従えば判定の記録を --pr の PR の
+    すべてへコメントしてから `after` へ進み、コメントが落ちたら handoff がリリース承認ゲートの by: mvv の記録を外して承認ゲートで
+    終える（#1370 の I8）。"""
     material = material_path(repo, approval)
     state = str(Path(a.mvv).resolve())
-    steps[0:0] = mvv_gate_steps(
+    head = mvv_gate_steps(
         f"{MVV_PY} check --sprint {shlex.quote(state)} --gate release "
         f"--material {shlex.quote(material)} --pr {prs} --mode {a.mode}"
         + (f" --root {shlex.quote(repo)}" if repo else "")
         + f" --note {MVV_NOTE}",
         f"sh -c 'for p in {prs}; do gh pr comment \"$p\" --body-file {MVV_NOTE} || exit 1; done'",
-        "bump",
+        after,
     )
-    steps.append(handoff_step(state, RELEASE_GATE, "判定のコメント"))
-    steps.append(reject_step(state, RELEASE_GATE, "mvv", root=repo or "."))
+    return head, [handoff_step(state, RELEASE_GATE, "判定のコメント"), reject_step(state, RELEASE_GATE, "mvv", root=repo or ".")]
+
+
+def _add_prod_mvv_gate(steps: list[dict], a, repo: str | None, approval: str, prs: str) -> None:
+    head, tail = _prod_mvv_gate(a, repo, approval, prs, "bump")
+    steps[0:0] = head
+    steps += tail
 
 
 def _prepare_steps(
@@ -285,31 +287,6 @@ def _release_step(
     return step
 
 
-def _landed_step(release: dict) -> dict:
-    """release と同じコマンドを打ち直すステップ（merge queue のマージか人のマージの後に公開する。#3703 の決定 3・9）。6 は止める。"""
-    on_exit = {k: v for k, v in release["on_exit"].items() if k != "10"}
-    on_exit["6"] = "stop"
-    step = {**release, "id": "release-landed", "on_exit": on_exit, "gate_next": "end"}
-    return step
-
-
-def _trial_step(a, repo: str | None, v: str, rts: str) -> dict:
-    """承認前の試用（#3703 の決定 7）: 版上げの PR の head（release/v<版>）から導入を確かめる。`a.trial_cmd`（fast・auto の
-    `.ndf/pace.json` の verify の {ref} を置き換えたもの）があればそれ、無ければ verify-install。失敗すれば承認資料を作らない。"""
-    cmd = getattr(a, "trial_cmd", None)
-    cmd = cmd.replace(RELEASE_VERSION, v) if cmd else f"{VERIFY_PY} verify-install --ref release/v{v} --expect {v} --runtimes {rts}"
-    return {
-        "id": "trial",
-        "type": "run",
-        "stage": "デプロイ",
-        "timeout": 1500,
-        **({"cwd": repo} if repo else {}),
-        "cmd": cmd,
-        "on_fail": "judge",
-        "next": "facts",
-    }
-
-
 def _record_step(v: str, prs: str) -> dict:
     """リリースの後に、本番のリリースの PR へリリース記録を書くステップ（#1273）。落ちたら judge-record へ回し、
     リリース（release）へは戻らない。書けたら本番のリリースの PR を計画の Pull Request にする（まとめの close が読む）。"""
@@ -344,7 +321,7 @@ def _release_verify_steps(
     release = _release_step(a, v, dev, repo, approval, on_pr, trunk)
     return [
         release,
-        *([] if dev else [_landed_step(release)]),
+        *([] if dev else [landed_step(release)]),
         *([] if dev else [cd_result_step(repo, a.production, release_names(v)[1]), _record_step(v, prs)]),
         {
             "id": "verify",
@@ -383,7 +360,7 @@ def _cd_prod_approvals(c: _KindArgs) -> list[dict]:
     head = release_names(c.v)[1]
     trunk = trunk_release(c.a)
     approvals = _dev_approval_steps(c.a, c.repo, c.approval, c.prs, c.rts, head, head if trunk else None)
-    trial = _trial_step(c.a, c.repo, c.v, c.rts) if trunk else None
+    trial = trial_step(c.a, c.repo, c.v, c.rts) if trunk else None
     return cd_prod_steps(c.a, c.v, c.prs, c.repo, c.approval, approvals, c.cd, trial)
 
 
@@ -391,21 +368,14 @@ def _trunk_prod_approvals(c: _KindArgs) -> list[dict]:
     """CD の無い trunk の本番（`prod-trunk`。#3703 の決定 6）: trial → facts → explain → others →（MVV 判定: mvv → note）→ approve。
     normal は others で終えてリリース承認ゲートとして止まり、承認の後に run <計画> --from approve で続ける。"""
     head = release_names(c.v)[1]
-    steps = [_trial_step(c.a, c.repo, c.v, c.rts), *_dev_approval_steps(c.a, c.repo, c.approval, c.prs, c.rts, head, head)]
+    steps = [trial_step(c.a, c.repo, c.v, c.rts), *_dev_approval_steps(c.a, c.repo, c.approval, c.prs, c.rts, head, head)]
     mvv = getattr(c.a, "mvv", None)
     if mvv:
         for s in steps:  # facts の 10 は gate_as_ok で承認ゲートに数えず、others の後の MVV 判定に任せる
             if s.get("next") == "end":
                 s["next"] = "mvv"
-        material, state = material_path(c.repo, c.approval), str(Path(mvv).resolve())
-        steps += mvv_gate_steps(
-            f"{MVV_PY} check --sprint {shlex.quote(state)} --gate release --material {shlex.quote(material)} --pr {c.prs} --mode {c.a.mode}"
-            + (f" --root {shlex.quote(c.repo)}" if c.repo else "")
-            + f" --note {MVV_NOTE}",
-            f"sh -c 'for p in {c.prs}; do gh pr comment \"$p\" --body-file {MVV_NOTE} || exit 1; done'",
-            "approve",
-        )
-        steps += [handoff_step(state, RELEASE_GATE, "判定のコメント"), reject_step(state, RELEASE_GATE, "mvv", root=c.repo or ".")]
+        gate, tail = _prod_mvv_gate(c.a, c.repo, c.approval, c.prs, "approve")
+        steps += [*gate, *tail]
     steps.append(approve_step(c.a, c.repo, c.approval, facts_from="{state_dir}", by="mvv" if mvv else "user", next_id="release"))
     return steps
 
@@ -522,60 +492,6 @@ def plan_release_package_plugin(a) -> dict:
         plan["リポジトリ"] = repo
         with_record(plan)
     return plan
-
-
-def approve_step(a, repo: str | None, approval: str, facts_from: str | None = None, by: str = "user", next_id: str = "bump") -> dict:
-    """本番のプラン（MVV 判定なし）の先頭: リリース承認ゲートの承認の記録を書く（#1426 の決定 7）。提示した SHA は開発版の
-    facts の出力（--dev-state か、同じディレクトリの開発版のプランの状態）から読み、利用者の承認の記録は --state から読む。
-    証跡が無ければ承認ゲート（10）で終え、`next_id` へ進まない。trunk の本番（#3703）は自分のプランの facts の出力
-    （`facts_from` に `{state_dir}`）を読み、担い手 `by` で書いて release へ進む。"""
-    dev_state = getattr(a, "dev_state", None)
-    facts = facts_from or (shlex.quote(str(Path(dev_state).resolve())) if dev_state else "'{queue_state?:release}'")
-    state = getattr(a, "state", None)
-    answer = f" --answer-from {shlex.quote(str(Path(state).resolve()))}" if state else ""
-    return {
-        "id": "approve",
-        "type": "run",
-        "stage": "デプロイ",
-        "timeout": 120,
-        **({"cwd": repo} if repo else {}),
-        "cmd": f"{STEPS_PY} approve --approval {approval} --facts-from {facts}{answer} --by {by}",
-        "next": next_id,
-        "gate_next": "end",
-    }
-
-
-def advise_steps(state: str, gate: str, args: str, note: dict, head: dict | None = None) -> list[dict]:
-    """助言の MVV 判定（#1400）の mvv・mvv-note のステップ。判定によらず、想定外の失敗でも mvv-note へ進む。
-    `head` は両ステップの type の後（stage）、`note` は mvv-note の timeout から後（載せ先と後続）である。"""
-    return [
-        {
-            "id": "mvv",
-            "type": "run",
-            **(head or {}),
-            "timeout": 900,
-            # 前の実行の判定の記録を載せないよう先に消す（MVV なしのときは記録を書かない）
-            "cmd": f"rm -f {MVV_NOTE} && {MVV_PY} check --sprint {state} --gate {gate} {args} --note {MVV_NOTE} --advise",
-            "on_fail": "mvv-note",
-            "next": "mvv-note",
-        },
-        {"id": "mvv-note", "type": "run", **(head or {}), **note},
-    ]
-
-
-def advise_release_steps(a, repo: str | None, approval: str, prs: str) -> list[dict]:
-    """開発版の explain の後の助言の MVV 判定（#1400）。承認資料と出す版の PR を材料にし、判定の記録を承認資料の末尾へ足す。
-    判定によらず、想定外の失敗でも mvv-note へ進み、プランの結果は facts の承認ゲートのままである。"""
-    material = material_path(repo, approval)
-    state = shlex.quote(str(Path(a.advise).resolve()))
-    args = f"--material {shlex.quote(material)} --pr {prs} --mode {a.mode}" + (f" --root {shlex.quote(repo)}" if repo else "")
-    note = {
-        "timeout": 120,
-        **({"cwd": repo} if repo else {}),
-        "cmd": f"sh -c '[ ! -f {MVV_NOTE} ] || {{ printf \"\\n\"; cat {MVV_NOTE}; }} >> {approval}'",
-        "next": "end",
-    }
-    return advise_steps(state, "release", args, note)
 
 
 # リリースの形（release の form-<形>.md）ごとの雛形。無い形は /ndf:release で配る
