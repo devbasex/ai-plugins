@@ -105,7 +105,7 @@ graph TD
 
 `client_secret.json` だけがありトークンが無い状態で、gws 0.22.5 の `gws auth status` は
 `credential_source: client_secret.json`・`auth_method: none` を返す。この状態を未認証にするため、今の `gws-check.py` の
-判定（`credential_source` が `none` でなければ認証済み）とは同じにしない（#2067）。OAuth でログインした状態は
+判定（`credential_source` が `none` でなければ認証済み）とは同じにしない。OAuth でログインした状態は
 `credential_source: client_secret.json`・`auth_method: oauth2` を返し、gws は認証済みで動くため認証済みとする
 （gws 0.22.5 の実測）。判定は #2067 を直した記録の gws の部品のものを使い、gws の群には置かない。
 
@@ -204,7 +204,7 @@ graph TD
 | 観点 | 満たすこと |
 | --- | --- |
 | 認証済み（I3） | `credential_source` が `token_env_var` で `auth_method` が `none` の応答と、`credential_source` が `client_secret.json` で `auth_method` が `oauth2` の応答（OAuth でログインした状態）と、環境変数のトークンがあり `credential_source` が `none` の応答で、`ok`・0・`authenticated` と 3 つのキーが返ること |
-| 未認証（I3・I9） | トークンが無く `credential_source` が `none` の応答と、`client_secret.json` で `auth_method` が `none` の応答（#2067 の形）の両方で、`gate`・11・`unauthenticated` と gws が返した `client_config_exists` が返り、後者が `ndf records gws-check` と同じ答えになること |
+| 未認証（I3・I9） | トークンが無く `credential_source` が `none` の応答と、`client_secret.json` で `auth_method` が `none` の応答（`client_secret.json` だけがありトークンが無い状態）の両方で、`gate`・11・`unauthenticated` と gws が返した `client_config_exists` が返り、後者が `ndf records gws-check` と同じ答えになること |
 | 同意なしに入れない（I1） | gws が無く npm があり印が無いとき、npm の `install` が起動されず、`gate`・10・`missing` と承認資料が返ること。2 回打っても承認資料は 1 つであること |
 | 同意したときの導入 | 印を付けると npm が `install -g @googleworkspace/cli` で 1 回だけ起動され、入った gws で確かめ直すこと。gws が既にあれば npm を起動しないこと。npm の失敗・打ち切り・入れた後も見つからないときに `stopped`・1 になること |
 | npm が無い（I5） | `stopped`・3・`uninstallable` になること |
