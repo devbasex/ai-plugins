@@ -438,8 +438,9 @@ def _deliveries(repo_root: Path) -> Optional[list]:
     """ブランチ戦略の宣言の届け先の行（`branch_strategy.release.deliveries`）。読めなければ None（呼び手が止める）。
 
     `deliveries` はスキーマで任意で、ブランチ戦略のプリセットは書かない。`release` のセクションまで読めてキーが無ければ、
-    自動で本番へ届く届け先が無いとして空の行を返す（キーが無いことと読めないことを分ける）。宣言のファイル・
-    `branch_strategy`・`release` が無いか形が違う・`deliveries` が配列でなければ読めないとする。"""
+    `release.cd`（本番へのマージで動く CD の workflow）の有無で決める: あれば自動の本番の届け先 1 行、無ければ空の行
+    （キーが無いことと読めないことを分ける）。宣言のファイル・`branch_strategy`・`release` が無いか形が違う・
+    `deliveries` が配列でなければ読めないとする。"""
     try:
         data = json.loads((repo_root / _PROJECT_FILE).read_text(encoding="utf-8"))
     except (OSError, ValueError):  # noqa: NDF401 ファイル: 宣言を読めないことを None で返し、呼び手が止める
@@ -450,5 +451,7 @@ def _deliveries(repo_root: Path) -> Optional[list]:
         cur = cur.get(key) if isinstance(cur, dict) else None
     if not isinstance(cur, dict):
         return None
-    rows = cur.get(leaf, [])
+    if leaf not in cur:
+        return [{"channel": "production", "kind": "auto"}] if cur.get("cd") else []
+    rows = cur[leaf]
     return rows if isinstance(rows, list) else None

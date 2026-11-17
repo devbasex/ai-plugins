@@ -81,7 +81,7 @@ def load(root: Path) -> list[Plugin]:
 
 def entries(marketplace: dict) -> list[Plugin]:
     """読んだマーケットプレイスの登録（`marketplace.json` の中身）のプラグイン（登録の順）。手元に無い版（PR の head・
-    本番の先端）の登録を読む側（`land.store_version`）も、置き場をここの `source` の解決で求める。"""
+    本番の先端）の登録を読む側（`land.read_version`）も、置き場をここの `source` の解決で求める。"""
     rows = marketplace.get("plugins")
     if not isinstance(rows, list):
         raise PluginsError(f"{MARKETPLACE} に plugins の配列が無い")
@@ -138,7 +138,7 @@ def _bump_lines(path: Path, plugin: Plugin, old: str, new: str) -> bool:
 def _bump_pointer(path: Path, pointer: str, old: str, new: str) -> bool:
     """JSON のファイル `path` の `pointer` の位置の版が `old` なら `new` へ書き換える。書き換えたか。
 
-    object のキーと配列の添字（`/packages/0/version`）をたどる（読む側の `land.store_version` と同じ `json_pointer.resolve`）。"""
+    object のキーと配列の添字（`/packages/0/version`）をたどる（読む側の `land.read_version` と同じ `json_pointer.resolve`）。"""
     data = _read_json(path)
     keys = json_pointer.tokens(pointer)
     if not keys:

@@ -317,14 +317,8 @@ def merge_facts(a: RuleFacts, b: RuleFacts) -> RuleFacts:
     """ruleset と従来のブランチ保護の事実を重ねる。GitHub は両方を効かせるため、厳しいほうを採る（迂回は弱いほう）。"""
     if not a.present or not b.present:
         return a if a.present else b
-    return RuleFacts(
-        True,
-        max(a.approvals, b.approvals),
-        a.queue or b.queue,
-        a.up_to_date or b.up_to_date,
-        _weakest((a.bypass, b.bypass)),
-        a.queue_merge_method or b.queue_merge_method,
-    )
+    bypass, queue_method = _weakest((a.bypass, b.bypass)), a.queue_merge_method or b.queue_merge_method
+    return RuleFacts(True, max(a.approvals, b.approvals), a.queue or b.queue, a.up_to_date or b.up_to_date, bypass, queue_method)
 
 
 class MergeOutcome(NamedTuple):
@@ -716,8 +710,9 @@ class GitHub:
         `query` はページの指定に足す絞り込み。"""
         pages = _page_cap("github.list-pages")
         rows: list[dict] = []
+        narrow = dict(query) if query is not None else {}
         for page in range(1, pages + 1):
-            body = self.rest("GET", path, params={**(query or {}), "per_page": PER_PAGE, "page": page})
+            body = self.rest("GET", path, params={**narrow, "per_page": PER_PAGE, "page": page})
             rows.extend(body)
             if len(body) < PER_PAGE:
                 return rows
@@ -868,12 +863,7 @@ class GitHub:
         return bytes(resp.content)
 
     def merge(
-        self,
-        number: int,
-        expect_head: Optional[str] = None,
-        method: Optional[str] = None,
-        require_method: bool = False,
-        jump: bool = False,
+        self, number: int, expect_head: Optional[str] = None, method: Optional[str] = None, require_method: bool = False, jump: bool = False
     ) -> MergeOutcome:
         """PR をマージする。先端の食い違い・決めていない残リスクは要求を送らずに断り、拒否は種類で返す（SF4）。
 

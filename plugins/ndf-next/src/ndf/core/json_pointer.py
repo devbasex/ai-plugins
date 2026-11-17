@@ -1,7 +1,7 @@
 """JSON Pointer（RFC 6901）の分解・書き出し・たどり方。
 
 宣言の読み書き（`has`・`value_of`・`put`・`remove`）は object だけをたどる。配列の添字もたどるのは `resolve` だけで、
-版数のファイルとセクションの値を引く側（`branch_strategy.get`・`release.land.store_version`）が使う。
+版数のファイルとセクションの値を引く側（`branch_strategy.get`・`release.land.read_version`）が使う。
 """
 
 from __future__ import annotations

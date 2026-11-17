@@ -118,7 +118,7 @@ def test_set_pointer_failures():
     ],
 )
 def test_land_pick(pointer, want):
-    """版数のファイルの読み方（`land.store_version`）が使う、配列もたどる `resolve`。見つからなければ値は None。"""
+    """版数のファイルの読み方（`land.read_version`）が使う、配列もたどる `resolve`。見つからなければ値は None。"""
     assert jp.resolve(DOC, pointer)[1] == want
 
 

@@ -99,7 +99,7 @@ def default_api(root: Path, deadline: float) -> Api:
     try:
         repo: Optional[str] = Git(cwd=Path(root)).remote_repo()
         why = ""
-    except GitError as exc:  # noqa: NDF401 外部コマンド: 測るリポジトリを求められなければ読まずに問いへ回す
+    except GitError as exc:
         repo, why = None, f"測るリポジトリをリモートから求められない: {exc}"
 
     def read(path: str) -> tuple[Any, str]:

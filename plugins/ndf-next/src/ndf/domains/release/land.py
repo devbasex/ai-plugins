@@ -204,6 +204,11 @@ def check_production_pr(strategy: Strategy, pr: dict, prod: dict, queue: list[di
         return None
     if not may_bump(pr):
         return None
+    if pr.get("cut_version") is None or prod.get("version") is None:
+        return (
+            f"版数を読めない（版上げの PR を切った時点 {pr.get('cut_version')}・本番ブランチ {prod.get('version')}）。版数の衝突を確かめられないため"
+            f"キューへ入れない。宣言の版数の置き場（release.version_store）とそのファイルを直してから打ち直してください"
+        )
     if pr.get("cut_version") != prod.get("version"):
         return (
             f"本番ブランチの版数 {prod.get('version')} が、版上げの PR を切った時点の {pr.get('cut_version')} と違う。作り直し、{REAPPROVE}"
@@ -227,19 +232,28 @@ def manifest_paths(strategy: Strategy, show: Callable[[str], Optional[str]]) -> 
     try:
         data = json.loads(text) if text is not None else None
         found = plugins.by_name(plugins.entries(data)) if isinstance(data, dict) else {}
-    except (ValueError, plugins.PluginsError):  # noqa: NDF401 ファイル: 登録を読めなければ名前で引く候補へ戻す
+    except (ValueError, plugins.PluginsError):
         found = {}
     if name in found:
-        return [f"{found[name].dir}/{manifest}"]
+        # 根に置いたプラグイン（source が `./`）は dir が空で、定義は根の `.claude-plugin/plugin.json`
+        return ["/".join(filter(None, [found[name].dir, manifest]))]
     return [f"{PLUGINS_DIR}/{name}/{manifest}", manifest]
 
 
-def store_version(strategy: Strategy, show: Callable[[str], Optional[str]]) -> Optional[str]:
-    """`show(path)` で読めるファイルから版数を引く（10 系の `land_read.store_version` と同じ）。置き場が `none`・読めないときは None。"""
+def version_rows(strategy: Strategy, show: Callable[[str], Optional[str]]) -> list[tuple[str, str]]:
+    """版数を引く候補（ファイルのパスと JSON Pointer）。置き場が `none` なら空。`plugin` の置き場の解決は `show` で
+    マーケットプレイスの登録を読むため、`land` 1 回につき本番の先端で 1 度だけ求めて使い回す。"""
     store = strategy.version_store
     if store["kind"] == "none":
-        return None
-    rows = [(p, "/version") for p in manifest_paths(strategy, show)] if store["kind"] == "plugin" else [(store["path"], store["pointer"])]
+        return []
+    if store["kind"] == "plugin":
+        return [(p, "/version") for p in manifest_paths(strategy, show)]
+    return [(store["path"], store["pointer"])]
+
+
+def read_version(rows: list[tuple[str, str]], show: Callable[[str], Optional[str]]) -> Optional[str]:
+    """候補 `rows`（`version_rows`）のうち `show` で読める最初のファイルの版数（10 系の `land_read.store_version` と同じ）。
+    候補が無い（置き場が `none`）・読めないときは None。"""
     for path, pointer in rows:
         text = show(path)
         if text is None:
@@ -414,43 +428,48 @@ class Lander:
             return None
         return base64.b64decode(text_of(got["content"])).decode("utf-8", errors="replace")
 
-    def _version_at(self, ref: str) -> Optional[str]:
-        return store_version(self.strategy, lambda path: self._file_at(ref, path))
+    def _version_rows(self, ref: str) -> list[tuple[str, str]]:
+        """`ref` の時点の登録から求めた版数の候補（`version_rows`）。"""
+        return version_rows(self.strategy, lambda path: self._file_at(ref, path))
 
-    def _production_facts(self) -> dict:
-        """本番ブランチの先端と、その時点の版数（`check_production_pr` の `prod`）。"""
+    def _version_at(self, ref: str, rows: list[tuple[str, str]]) -> Optional[str]:
+        return read_version(rows, lambda path: self._file_at(ref, path))
+
+    def _production_facts(self) -> tuple[dict, list[tuple[str, str]]]:
+        """本番ブランチの先端と、その時点の版数（`check_production_pr` の `prod`）と、先端で求めた版数の候補。"""
         got = self.hub.rest("GET", f"/repos/{self.hub.repo}/branches/{quote(self.production, safe='')}")
         tip = text_of(got["commit"]["sha"]) if isinstance(got, dict) else ""
-        return {"tip": tip, "version": self._version_at(tip) if tip else None}
+        rows = self._version_rows(tip) if tip else []
+        return {"tip": tip, "version": self._version_at(tip, rows) if tip else None}, rows
 
-    def _bump_facts(self, number: int, head: str, tip: str) -> dict:
+    def _bump_facts(self, number: int, head: str, tip: str, rows: list[tuple[str, str]]) -> dict:
         """PR の head と本番の先端 `tip` の比べ（10 系の `GhPort._bump_facts` と同じ値）。
 
         `bump` は版上げの PR か（切った時点と head の版数が違う。片側を読めなければ None）、`cut_version` は切った時点
-        （head と本番の分岐点）の版数、`contains_tip` は head が本番の先端を含むか。
+        （head と本番の分岐点）の版数、`contains_tip` は head が本番の先端を含むか。`rows` は本番の先端で求めた版数の候補。
         """
         got = self.hub.rest("GET", f"/repos/{self.hub.repo}/compare/{tip}...{head}")
         cmp = got if isinstance(got, dict) else {}
         fork = cmp.get("merge_base_commit")
         fork_sha = text_of(fork.get("sha")) if isinstance(fork, dict) else ""
-        cut = self._version_at(fork_sha) if fork_sha else None
+        cut = self._version_at(fork_sha, rows) if fork_sha else None
         if self.strategy.version_store["kind"] == "none":
             bump: Optional[bool] = False
         else:
-            now = self._version_at(head)
+            now = self._version_at(head, rows)
             bump = cut != now if cut and now else None
         return {"number": number, "bump": bump, "cut_version": cut, "contains_tip": cmp.get("behind_by") == 0, "tip": tip}
 
-    def _queue_rows(self, number: int, tip: str) -> list[dict]:
+    def _queue_rows(self, number: int, tip: str, rows: list[tuple[str, str]]) -> list[dict]:
         """本番ブランチの merge queue の PR（自分を除く）と、版上げの PR か。全ページを読む（後ろの版上げを衝突の検査から外さない）。
 
         キューの外の、本番ブランチ宛てで開いており今の head が承認された版上げの PR（版上げでないと分かるものを除く）は
         `approved_release` の行で足す（10 系の `GhPort.queue` と同じ。`check_production_pr` の保留の検査。決定 18）。"""
-        rows = merge_queue.heads(self.hub, self.production)
-        out = [self._bump_facts(n, h, tip) for n, h in rows if n != number]
-        queued = {n for n, _ in rows}
+        heads = merge_queue.heads(self.hub, self.production)
+        out = [self._bump_facts(n, h, tip, rows) for n, h in heads if n != number]
+        queued = {n for n, _ in heads}
         for n, head in self.hub.open_heads(self.production):
-            if n == number or n in queued or self._bump_facts(n, head, tip)["bump"] is False:
+            if n == number or n in queued or self._bump_facts(n, head, tip, rows)["bump"] is False:
                 continue
             if self._approved_at(n, head):
                 out.append({"number": n, "bump": True, "approved_release": True})
@@ -467,9 +486,11 @@ class Lander:
         landing = self.landing
         pr: Optional[dict] = None
         if landing.method != "direct":
-            prod = self._production_facts()
-            pr = self._bump_facts(pull.number, pull.head_sha, prod["tip"])
-            queue = self._queue_rows(pull.number, prod["tip"]) if landing.method == "merge-queue" else []
+            prod, rows = self._production_facts()
+            pr = self._bump_facts(pull.number, pull.head_sha, prod["tip"], rows)
+            # 版数を持たない宣言（version_store が none）は版上げの PR が無く、キューと開いた PR を読まない
+            bumps = landing.method == "merge-queue" and self.strategy.version_store["kind"] != "none"
+            queue = self._queue_rows(pull.number, prod["tip"], rows) if bumps else []
             why = check_production_pr(self.strategy, pr, prod, queue)
             if why is not None:
                 return Gate(Landed(False, "refused", f"#{pull.number}: {why}"), rules=rules, pr=pr)

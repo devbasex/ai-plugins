@@ -15,6 +15,7 @@ from typing import Any
 
 from ndf.adapters import ci
 from ndf.adapters.github import MERGE_QUEUE_PENDING, Authored, GitHubError, MergeOutcome, Pull
+from ndf.core.branch_strategy import Strategy
 from ndf.domains.release import approval_decide, land, trail
 from ndf.domains.release import cli as release_cli
 
@@ -587,6 +588,7 @@ class _PagedQueueHub(FakeHub):
 
     pages: list[Any] = field(default_factory=list)
     versions: dict[str, str] = field(default_factory=dict)
+    contents: list[str] = field(default_factory=list)
 
     def rest(self, method: str, path: str, payload: Any = None, params: Any = None) -> Any:
         if method == "GET" and path == "/repos/o/r/branches/main":
@@ -596,6 +598,7 @@ class _PagedQueueHub(FakeHub):
             self.requests.append((method, path, payload))
             return {"merge_base_commit": {"sha": _TIP}, "behind_by": 0}
         if method == "GET" and "/contents/" in path:
+            self.contents.append(path)
             ref = params["ref"]
             if ref not in self.versions:
                 return None
@@ -657,6 +660,19 @@ def test_gate_passes_when_the_queue_has_no_other_bump() -> None:
     assert gate.stop is None and gate.bypass is False
     assert _compared_heads(hub) == [HEAD, _H8]
     assert len(_graphql_vars(hub)) == 1
+
+
+def test_gate_reads_the_marketplace_once_and_skips_the_queue_without_a_version_store() -> None:
+    """版数の置き場（マーケットプレイスの登録）は本番の先端で 1 度だけ読む。版数を持たない宣言（version_store が none）は
+    版上げの PR が無いため、キューと本番宛ての開いた PR を読まない。"""
+    hub, lander = _paged_lander([_queue_page([(8, _H8)], "c1"), _queue_page([("9", _H9)], None)])
+    lander._gate(pull())
+    assert sum(p.endswith("marketplace.json") for p in hub.contents) == 1
+    plain = section("plugin")
+    plain["release"]["version_store"] = {"kind": "none"}
+    hub2, _ = _paged_lander([_queue_page([(8, _H8)], None)])
+    gate = land.Lander(hub2, Strategy(plain), 60.0)._gate(pull())
+    assert gate.stop is None and _graphql_vars(hub2) == [] and _compared_heads(hub2) == [HEAD]
 
 
 def test_gate_without_a_merge_queue_compares_only_its_own_pr() -> None:

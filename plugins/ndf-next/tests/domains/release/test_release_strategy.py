@@ -92,6 +92,9 @@ def test_check_production_pr() -> None:
     assert land.check_production_pr(plugin, {"bump": False}, prod, []) is None
     # 版数を比べられない PR（bump が None）は版上げとして確かめる
     assert land.check_production_pr(plugin, {"bump": None, "cut_version": None, "number": 1}, prod, [])
+    # 切った時点か本番の版数を読めなければ、両方 None でも衝突を確かめずに通さない
+    unread = land.check_production_pr(plugin, {"bump": None, "cut_version": None, "number": 1}, {"tip": TIP, "version": None}, [])
+    assert unread is not None and "版数を読めない" in unread
     # merge-queue は先端を含まなくても、版数が衝突しなければ通る（含むことを求めない）
     assert land.check_production_pr(plugin, {"bump": True, "cut_version": "1.0.0", "number": 1, "contains_tip": False}, prod, []) is None
     assert land.check_production_pr(docs, {"contains_tip": False}, prod, [])
@@ -257,7 +260,8 @@ def test_approved_release_pr_outside_the_queue_holds_other_prs() -> None:
     hub.pulls[9] = pull(number=9, head=H2)
     hub.versions[H2] = "1.0.2"
     hub.open_at = [(7, H1), (8, "8" * 40), (9, H2)]
-    rows = _lander(hub, strategy("plugin"))._queue_rows(8, TIP)
+    lander = _lander(hub, strategy("plugin"))
+    rows = lander._queue_rows(8, TIP, lander._version_rows(TIP))
     assert rows == [{"number": 7, "bump": True, "approved_release": True}]
     why = land.check_production_pr(strategy("plugin"), {"number": 8, "bump": False}, {"tip": TIP, "version": "1.0.0"}, rows)
     assert why is not None and "#7" in why
@@ -274,10 +278,17 @@ def test_manifest_path_follows_the_marketplace_source() -> None:
         "tools/kit/.claude-plugin/plugin.json": json.dumps({"version": "2.3.4"}),
     }
     assert land.manifest_paths(kit, files.get) == ["tools/kit/.claude-plugin/plugin.json"]
-    assert land.store_version(kit, files.get) == "2.3.4"
+    assert land.read_version(land.version_rows(kit, files.get), files.get) == "2.3.4"
     assert land.manifest_paths(kit, {}.get) == ["plugins/kit/.claude-plugin/plugin.json", ".claude-plugin/plugin.json"]
     broken = {".claude-plugin/marketplace.json": "{"}
     assert land.manifest_paths(kit, broken.get)[0] == "plugins/kit/.claude-plugin/plugin.json"
+    # 根に置いたプラグイン（source が `./`）は根の定義を読む（先頭にスラッシュを付けない）
+    root = {
+        ".claude-plugin/marketplace.json": json.dumps({"plugins": [{"name": "kit", "source": "./"}]}),
+        ".claude-plugin/plugin.json": json.dumps({"version": "3.0.0"}),
+    }
+    assert land.manifest_paths(kit, root.get) == [".claude-plugin/plugin.json"]
+    assert land.read_version(land.version_rows(kit, root.get), root.get) == "3.0.0"
 
 
 def test_human_actor_is_left_to_the_human() -> None:

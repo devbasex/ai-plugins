@@ -38,14 +38,19 @@ def test_old_top_level_delivery_is_not_read(tmp_path):
 
 
 def test_declaration_without_deliveries_passes_but_a_broken_one_is_denied(tmp_path):
-    """ブランチ戦略のプリセット（`deliveries` を書かない）で作った宣言は、自動で本番へ届く届け先が無いとして通す。
-    `deliveries` が配列でない宣言は読めないとして止める。"""
+    """ブランチ戦略のプリセット（`deliveries` を書かない）で作った宣言は、`release.cd` が無ければ自動で本番へ届く
+    届け先が無いとして通し、`release.cd` があれば自動で本番へ届くとして止める。`deliveries` が配列でない宣言は読めないとして止める。"""
     repo = make_repo(tmp_path / "r", deliveries=[])
     decl = repo / ".ndf" / "project.json"
     data = json.loads(decl.read_text(encoding="utf-8"))
     del data["branch_strategy"]["release"]["deliveries"]
+    data["branch_strategy"]["release"]["cd"] = None
     decl.write_text(json.dumps(data), encoding="utf-8")
     assert _check(repo, "gh pr merge 12 --merge") is None
+    data["branch_strategy"]["release"]["cd"] = {"workflow": "release.yml"}
+    decl.write_text(json.dumps(data), encoding="utf-8")
+    got = _check(repo, "gh pr merge 12 --merge")
+    assert got is not None and got.kind == "deny" and "自動で本番へ届く" in got.reason
     data["branch_strategy"]["release"]["deliveries"] = "auto"
     decl.write_text(json.dumps(data), encoding="utf-8")
     got = _check(repo, "gh pr merge 12 --merge")
