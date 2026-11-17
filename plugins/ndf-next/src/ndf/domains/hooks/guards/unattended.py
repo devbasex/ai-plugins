@@ -43,6 +43,7 @@ NEXT_COMMAND_RE = re.compile(r"^[ \t]*(?:-[ \t]*)?次のコマンド:[ \t]*(.*?)
 STOP_RESULTS = ("判断が要る", "完了")
 # `次のコマンド:` を残して区間を終えてよい区分（人の操作待ちは契約で認めた停止）
 HUMAN_ACTION = "ndf-ask:human-action"
+CATEGORY_ITEM = "区分"  # 区間の報告の区分の項目（契約の shape.items の 1 つ）
 ERR_NEXT_COMMAND = (
     "`次のコマンド:` にコマンドが載ったまま区間を終えようとしている。止まる理由（承認ゲート・区分のある問い・人の操作・"
     "続けられない理由）に当たらなければ、区間を終えずにそのコマンドを打って続ける。"
@@ -112,7 +113,7 @@ def pending_command_errors(text: object) -> list[str]:
         return []
     values = (v.strip("` \t") for v in NEXT_COMMAND_RE.findall(text))
     commands = [v for v in values if v and not v.startswith(ur.NONE_VALUE)]
-    if not commands or ur.result_value(text) in STOP_RESULTS or ur.report_items(text).get("区分") == HUMAN_ACTION:
+    if not commands or ur.result_value(text) in STOP_RESULTS or ur.report_items(text).get(CATEGORY_ITEM) == HUMAN_ACTION:
         return []
     return [ERR_NEXT_COMMAND]
 
