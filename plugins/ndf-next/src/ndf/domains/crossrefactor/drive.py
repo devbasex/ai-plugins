@@ -362,9 +362,8 @@ def _tally_fix(run: _Run) -> Tally:
     """起動の秒を実行の修正の集計（`fix_stats`。配分の履歴の `fix` の材料）へ足す数え先。"""
 
     def tally(seconds: float) -> None:
-        count, secs = allocation_decide.SECTION_COUNT["fix"], allocation_decide.SECONDS
-        held = run.state_get("fix_stats", {count: 0, secs: 0.0})
-        run.state["fix_stats"] = {count: held[count] + 1, secs: round(held[secs] + seconds, 1)}
+        held = run.state_get("fix_stats", {})
+        run.state["fix_stats"] = allocation_decide.add_stat(held, allocation_decide.SECTION_COUNT["fix"], seconds)
 
     return tally
 
@@ -479,9 +478,8 @@ def _verify(run: _Run, item: dict[str, Any]) -> None:
 
 def _count_verify(run: _Run, seconds: float) -> None:
     """検証 1 回の秒を実行の検証の集計（配分の履歴の `verify` の材料）へ足す。"""
-    count, secs = allocation_decide.SECTION_COUNT["verify"], allocation_decide.SECONDS
-    held = dict(run.state_get("verify_stats", {count: 0, secs: 0.0}))
-    run.state["verify_stats"] = {count: held[count] + 1, secs: round(held[secs] + max(0.0, seconds), 1)}
+    held = run.state_get("verify_stats", {})
+    run.state["verify_stats"] = allocation_decide.add_stat(held, allocation_decide.SECTION_COUNT["verify"], max(0.0, seconds))
     run.save()
 
 

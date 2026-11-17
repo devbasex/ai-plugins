@@ -175,6 +175,13 @@ def run_row(state: Mapping[str, Any], at: str) -> dict[str, Any]:
     }
 
 
+def add_stat(held: Mapping[str, Any], count_key: str, seconds: float) -> dict[str, Any]:
+    """工程の集計（`verify_stats`・`fix_stats`）へ 1 件と秒を足した新しい集計。鍵が無ければ 0 から数える。"""
+    count = held[count_key] if count_key in held else 0
+    spent = held[SECONDS] if SECONDS in held else 0.0
+    return {count_key: count + 1, SECONDS: round(spent + seconds, 1)}
+
+
 def _section_row(stats: Mapping[str, Any], count_key: str) -> dict[str, float]:
     """工程の集計（`verify_stats`・`fix_stats`）から履歴の行の区分（件数と秒）を作る。"""
     return {count_key: _field(stats, count_key), SECONDS: _field(stats, SECONDS)}
