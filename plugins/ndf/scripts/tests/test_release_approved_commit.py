@@ -196,7 +196,7 @@ def run_release(
     monkeypatch.setattr(mod, "create_pr", hub.create_pr)
     monkeypatch.setattr(mod, "wait_and_merge", hub.wait_and_merge)
     # 本番の PR は本番の取り込み（prod_land.land）で入る（#3703）。比べた先端を expect として同じ偽物へ渡す
-    monkeypatch.setattr(mod, "land", lambda r, a, n, head, trail_url="": hub.wait_and_merge(r, n, expect=head))
+    monkeypatch.setattr(mod, "land", lambda r, a, n, head, trail_url="", admin_ok=True: hub.wait_and_merge(r, n, expect=head))
     monkeypatch.setattr(mod, "pr_view", hub.pr_view)
     # 再開はマージ済みの本番の PR の head（release/v<版> の先頭）を承認と比べる（#3703 の I2）
     monkeypatch.setattr(mod.prod_landed, "landed_head", lambda r, n: git(w["origin"], "rev-parse", f"release/v{VER}"))

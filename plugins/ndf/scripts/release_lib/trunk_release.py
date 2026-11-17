@@ -79,10 +79,13 @@ def waiting_out(ctx: ReleaseCtx, pr: int, head: str, approved: str | None, items
         summary = f"{plugin} v{a.version} のリリース承認を待つ: 承認した {approved[:8]} が版上げの PR #{pr} の head {head[:8]} と違う"
     else:
         summary = f"{plugin} v{a.version} のリリース承認を待つ（版上げの PR #{pr}・head {head[:8]}）"
-    nxt = (
-        f"{RELEASE_PREFIX}{a.version} の head {head[:8]} で承認資料（release-steps.py approval-facts）を作り直して承認を得て、"
-        f"release-steps.py approve --approval {material} --approved-sha {head} --by user で承認の記録を書き、{prod_land.release_retry_command(a)} を打ち直す"
-    )
+    redo = f"{RELEASE_PREFIX}{a.version} の head {head[:8]} で承認資料（release-steps.py approval-facts）を作り直して承認を得て、"
+    retry = f"release-steps.py release --version {a.version} --channel prod"
+    if getattr(a, "approved_sha", None) and not getattr(a, "approval", None):
+        # 承認したコミットで始めたなら、合わなかった古い SHA ではなく今の head を承認として渡し直す（古い SHA の打ち直しは毎回 10 で止まる）
+        nxt = f"{redo}{retry} --approved-sha {head} を打ち直す"
+    else:
+        nxt = f"{redo}release-steps.py approve --approval {material} --approved-sha {head} --by user で承認の記録を書き、{retry} --approval {material} を打ち直す"
     row = {"kind": "pr", "name": f"#{pr}", "result": "awaiting_approval", "base": ctx.prod, "head": head}
     m = {**metrics, "main_pr": pr, "compared_head": head, "approved_sha": approved}
     return result(TOOL, "gate", summary, [*items, row], m, None, nxt)

@@ -84,7 +84,7 @@ class ProdOps:
     merge_commit_of: Callable  # (root, n) -> str | None
     merge_release_pr: Callable  # (root, a, plugin, plugins, branch, base) -> (release_pr, merged_pr, commit)
     published: Callable  # (root, a, plugin, prod, main_pr, merge, items, metrics, back=None) 公開の後。結果を出して終わる
-    land: Callable  # (root, a, pr, head, trail_url="") -> マージコミット。本番の取り込み（`prod_land.land`。#3703）
+    land: Callable  # (root, a, pr, head, trail_url="", *, admin_ok=True) -> マージコミット。本番の取り込み（`prod_land.land`。#3703）
     pr_check_buckets: Callable  # (root, n) -> チェックの並び
     no_checks_reason: Callable | None = None  # (root, n) -> 検査が 0 件のときに待つ理由（None は CI が無い）
     landed_commit: Callable | None = None  # (root, n, head) -> 早送りで閉じた PR の取り込みのコミット
@@ -222,7 +222,9 @@ def merge_on_pr_approval(root, repo, a, case, main_pr, prod, items, metrics, ops
         summary, nxt = waiting(head, judged)
         emit(result(TOOL, "gate", summary, items + list(waiting_items), metrics, None, nxt), EXIT_GATE)
     try:
-        return ops.land(root, a, main_pr, head, judged.url or "")
+        # 迂回は場合が迂回の場合（承認数を読めて 1 以上・迂回の宣言あり）のときだけ。承認数を読めずに cd-no-review に倒れたなら、
+        # 宣言が迂回でも迂回しない（MVV の証跡で人の承認なしに必須レビューを迂回させない。#3506 の I2a）
+        return ops.land(root, a, main_pr, head, judged.url or "", admin_ok=case.admin_merge)
     except HeadMoved:
         summary, nxt = moved(head)
         emit(result(TOOL, "gate", summary, items, metrics, None, nxt), EXIT_GATE)

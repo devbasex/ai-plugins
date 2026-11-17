@@ -1355,7 +1355,7 @@ def test_the_separated_production_merge_lands_the_compared_tip(monkeypatch, tmp_
     monkeypatch.setattr(mod, "find_pr", lambda *a, **k: None)
     monkeypatch.setattr(mod, "create_pr", lambda *a: seen.append(a[-1]) or 9)
     monkeypatch.setattr(mod, "wait_and_merge", lambda *a, **kw: merged.append(a))
-    monkeypatch.setattr(mod, "land", lambda r, a, n, head, trail_url="": seen.append((n, head)) or "m")
+    monkeypatch.setattr(mod, "land", lambda r, a, n, head, trail_url="", admin_ok=True: seen.append((n, head)) or "m")
     a = argparse.Namespace(version="1.2.3", ci_wait=60.0, approval=None)
     verdict = mod.ac.Verdict(True, sha, "b" * 40, "match")
     ctx = mod.ReleaseCtx(tmp_path, a, "ndf", ["ndf"], "release/v1.2.3", "develop", "main")
@@ -2358,6 +2358,29 @@ def test_prod_land_merges_with_the_declared_history(monkeypatch, method, commit)
     assert port.calls == [("merge", HEAD, commit, False)]
 
 
+def test_prod_land_does_not_bypass_when_the_case_is_not_an_admin_merge(monkeypatch):
+    """#3506 の I2a: 宣言が迂回（direct・admin: true）でも、場合が迂回の場合でない（承認数を読めずに cd-no-review に倒れた）なら
+    迂回せずにマージを頼む（必須レビューがあれば GitHub が断る）。"""
+    land, port = _prod_land({"method": "direct", "commit": "merge", "admin": True})
+    port.facts.bypass, port.facts.approvals = "always", 1
+    assert land(Path("."), _LAND_ARGS, 9, HEAD, admin_ok=False) == "m" * 40
+    assert port.calls == [("merge", HEAD, "merge", False)]
+
+
+def test_merge_on_pr_approval_passes_the_admin_merge_of_the_case(monkeypatch):
+    """#3506 の I2a: CD のある本番は、場合が迂回の場合のときだけ本番の取り込みへ迂回を許す（cd-no-review は宣言によらず許さない）。"""
+    import release_case as rc
+    from release_lib import approval, approval_trail, reviewed
+
+    monkeypatch.setattr(approval_trail, "read_head", lambda repo, pr: (HEAD,))
+    monkeypatch.setattr(approval, "approved_on_pr", lambda *a: SimpleNamespace(state="success", url="u", description="ok"))
+    seen = []
+    ops = SimpleNamespace(land=lambda root, a, pr, head, url="", admin_ok=True: seen.append(admin_ok) or "m")
+    for case, want in ((rc.decide_case(True, None, "読めない", admin=True), False), (rc.decide_case(True, 1, "", admin=True), True)):
+        reviewed.merge_on_pr_approval(Path("."), "o/r", _LAND_ARGS, case, 9, "main", [], {}, ops, waiting=None, moved=None)
+    assert seen == [False, True]
+
+
 @pytest.mark.parametrize(("recorded", "want"), [("f" * 40, "f" * 40), (None, None)])
 def test_prod_land_returns_the_fast_forward_commit_without_a_merge_commit(monkeypatch, recorded, want):
     """#3703: ruleset の無い strict の早送りは PR を閉じるだけで mergeCommit が無い。取り込みの記録のコミットを返し、
@@ -2619,7 +2642,9 @@ def test_release_trunk_does_not_land_commits_after_the_approval(monkeypatch, tmp
     """#3703 の受け入れ条件 6・I2: 承認の後に版上げのブランチへ積まれた head は入れず、承認ゲート（10）で取り直しを求める。"""
     ops = _TrunkOps(head="d" * 40, open_pr=4)
     out, code = _trunk(monkeypatch, tmp_path, ops)
-    assert code == 10 and ops.landed == [] and "approve" in out["next"]
+    assert code == 10 and ops.landed == []
+    # --approved-sha で始めたなら、打ち直しは合わなかった古い SHA ではなく今の head を渡す（古い SHA では毎回 10 で止まる）
+    assert f"--approved-sha {'d' * 40}" in out["next"] and f"--approved-sha {HEAD}" not in out["next"]
 
 
 def test_release_trunk_stops_at_the_gate_when_the_head_moves_while_landing(monkeypatch, tmp_path):

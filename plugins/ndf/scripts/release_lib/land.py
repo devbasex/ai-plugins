@@ -151,8 +151,13 @@ class Approval:
     url: str = ""  # 証跡のコメントの URL（管理者の迂回の記録が承認を指す）
 
 
-def land_approved(port: Port, strategy, pr: int, approval: Approval, pull: dict | None = None, rules: Any = None) -> dict:
+def land_approved(
+    port: Port, strategy, pr: int, approval: Approval, pull: dict | None = None, rules: Any = None, allow_admin: bool = True
+) -> dict:
     """承認した head を、セクションの主体と方式で本番ブランチへ入れる。
+
+    `allow_admin` が偽なら、宣言が管理者の迂回（direct・admin: true）でも迂回しない（承認数を読めずに cd-no-review に倒れた
+    本番の PR を、人の承認なしに必須レビューを迂回して入れない。#3506 の I2a）。
 
     `pull` は読んだ PR、`rules` は読んだ本番ブランチの ruleset の事実（どちらも省けば読む）。どの取り込みの経路（direct・管理者の迂回・
     merge queue・ruleset のある strict・ruleset の無い strict の早送り・承認なしで入れるスプリントの PR）でも、入れる前に承認した
@@ -163,7 +168,7 @@ def land_approved(port: Port, strategy, pr: int, approval: Approval, pull: dict 
     merge = sec["merge"]
     pull = pull if pull is not None else port.pull(pr)
     out = {"result": "stopped", "head": pull.get("head"), "reason": ""}
-    admin = bool(merge["admin"] and merge["method"] == "direct")
+    admin = bool(allow_admin and merge["admin"] and merge["method"] == "direct")
     # 迂回でマージした後に記録だけ落ちた打ち直し: 承認した head の意図の印があれば記録を補う（同じ先端の記録があれば書かない）。
     # 印の無いマージ（land が止まった後に GitHub の画面でマージしたものなど）は、迂回でなく人のマージとして記録する
     if pull.get("merged") and admin and approval.head and pull.get("head") == approval.head and port.has_admin_intent(pr, approval.head):

@@ -271,7 +271,7 @@ class _MergeOps:
     def __init__(self, moved=False):
         self.merged, self.moved = [], moved
 
-    def land(self, root, a, n, head, trail_url=""):
+    def land(self, root, a, n, head, trail_url="", admin_ok=True):
         if self.moved:
             raise promotion.HeadMoved("動いた")
         self.merged.append({"pr": n, "head": head})

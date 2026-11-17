@@ -153,8 +153,9 @@ def default_io() -> LandingIO:
     )
 
 
-def land(root, a, pr: int, head: str, trail_url: str = "", *, io: LandingIO | None = None) -> str | None:
+def land(root, a, pr: int, head: str, trail_url: str = "", *, io: LandingIO | None = None, admin_ok: bool = True) -> str | None:
     """承認した head `head` を、宣言の主体と方式で本番ブランチ宛ての PR `pr` から入れる（判定は詳細設計の「`prod_land.land` の判定」）。
+    `admin_ok` が偽なら宣言の迂回を使わない（リリースの場合が迂回の場合でない。`land_approved` の `allow_admin`）。
     戻ったときは PR が本番ブランチへ入っている。入っていなければ例外で抜ける。外部の操作は `io`（省けば `default_io()`）越しに呼ぶ。"""
     io = io or default_io()
     root = Path(root)
@@ -179,7 +180,9 @@ def land(root, a, pr: int, head: str, trail_url: str = "", *, io: LandingIO | No
         pull = port.pull(pr)
         if str(pull.get("head") or "").lower() != str(head).lower():
             raise HeadMoved(f"PR #{pr} の今の head {str(pull.get('head'))[:12]} が承認した {head[:12]} と違う")
-        got = land_lib.land_approved(port, strategy, pr, land_lib.Approval(str(head).lower(), None, trail_url), pull=pull)
+        got = land_lib.land_approved(
+            port, strategy, pr, land_lib.Approval(str(head).lower(), None, trail_url), pull=pull, allow_admin=admin_ok
+        )
     except (land_lib.LandError, approval_trail.TrailError) as e:
         raise StepError(str(e)) from e
     if got["result"] == "merged":
