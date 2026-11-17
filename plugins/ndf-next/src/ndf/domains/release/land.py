@@ -39,6 +39,7 @@ from ndf.contracts import facts
 from ndf.core import json_pointer
 from ndf.core.branch_strategy import TRAILER_HEAD, TRAILER_PR, TRAILER_TIP, Strategy
 from ndf.domains.release import approval_decide, names_decide, plugins, route_decide, trail
+from ndf.domains.release import version_store as store_mod
 from ndf.domains.release.plugins import CLAUDE_MANIFEST, MARKETPLACE, PLUGINS_DIR
 
 # 規則の種類（必須のチェック）
@@ -274,7 +275,7 @@ def manifest_paths(strategy: Strategy, show: Callable[[str], Optional[str]]) -> 
 
 
 # JSON の位置で版数を持つ保存先の種類（ほかの種類は版数の衝突を確かめない）
-JSON_STORES = ("plugin", "json")
+JSON_STORES = (store_mod.PluginStore.kind, store_mod.JsonStore.kind)
 
 
 def version_rows(strategy: Strategy, show: Callable[[str], Optional[str]]) -> list[tuple[str, str]]:
