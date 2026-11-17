@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import approved_commit as ac
 from release_lib import approval_trail, names, prod_land, reviewed
@@ -136,7 +137,9 @@ def release_trunk(ctx: ReleaseCtx, ops) -> tuple[int, str, list[dict], dict]:
     items: list[dict] = []
     if approved is None or approved.lower() != head:
         # 承認資料は検査がそろった head で作る。承認の前の 1 回目もここで待つ（落ちれば 1、上限は 75）
-        reviewed.wait_ci_except(root, pr, (approval_trail.STATUS_CONTEXT,), float(a.ci_wait), ops)
+        # 検査の読みは本番の取り込みの関数を明示して渡す（ops のモジュールの属性名に頼ると、改名で CI の無い判定が落ちて上限まで待つ）
+        probe = SimpleNamespace(pr_check_buckets=prod_land.pr_check_buckets, no_checks_reason=prod_land.pr_no_checks_reason)
+        reviewed.wait_ci_except(root, pr, (approval_trail.STATUS_CONTEXT,), float(a.ci_wait), probe)
         emit(waiting_out(ctx, pr, head, approved, items, metrics), EXIT_GATE)
     try:
         merge = ops.land(root, a, pr, head)

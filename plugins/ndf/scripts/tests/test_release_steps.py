@@ -1021,7 +1021,8 @@ def test_release_takes_branches_and_names_from_the_declaration(monkeypatch, tmp_
     """#1336 の AC10: ベースブランチと本番チャネルを変えた宣言では、その名前で PR を作りタグを打つ（develop・main の直書きで動かない）。"""
     # NDF がタグを打つ形: CD の行の無い届け先（deliveries: []）。release.cd が null だとタグを持てない（R10）
     found, created, calls, out = _release_prod(monkeypatch, tmp_path, ("trunk", "live"), "foo", [])
-    assert found == [("release/v1.2.3", "trunk"), ("release/v1.2.3", "live"), ("release/v1.2.3", "live")]
+    # 本番の PR はマージ済み・開いたもの、早送りで閉じたもの（再開。#3703）、作る前の確かめの順に探す
+    assert found == [("release/v1.2.3", "trunk")] + [("release/v1.2.3", "live")] * 3
     assert created == [("trunk", "release/v1.2.3", "Release: foo v1.2.3"), ("live", "release/v1.2.3", "Release: foo v1.2.3 を live へ")]
     # 開発版の PR はベースブランチへ wait_and_merge、本番の PR は比べた先端で本番の取り込みへ（#3703 の I1・I8・I9）
     assert [c for c in calls if c[0] in ("merge", "base-merge")] == [("base-merge", 1), ("merge", 2, "b" * 40)]
@@ -1032,7 +1033,8 @@ def test_release_takes_branches_and_names_from_the_declaration(monkeypatch, tmp_
 def test_release_with_the_ai_plugins_declaration_keeps_its_values(monkeypatch, tmp_path):
     """#1336 の I9: ai-plugins の宣言では、ブランチ develop / main・タグ ndf--v<版>・題 Release: ndf v<版> が今と同じに出る。"""
     found, created, calls, out = _release_prod(monkeypatch, tmp_path, ("develop", "main"), "ndf", [])
-    assert found == [("release/v1.2.3", "develop"), ("release/v1.2.3", "main"), ("release/v1.2.3", "main")]
+    # 本番の PR はマージ済み・開いたもの、早送りで閉じたもの（再開。#3703）、作る前の確かめの順に探す
+    assert found == [("release/v1.2.3", "develop")] + [("release/v1.2.3", "main")] * 3
     assert created == [("develop", "release/v1.2.3", "Release: ndf v1.2.3"), ("main", "release/v1.2.3", "Release: ndf v1.2.3 を main へ")]
     assert out["metrics"]["tag"] == "ndf--v1.2.3"
 
@@ -2554,8 +2556,8 @@ class _TrunkOps:
         return "m" * 40
 
 
-def _trunk(monkeypatch, tmp_path, ops, approved=HEAD):
-    """trunk_release.release_trunk を偽の操作で流す。止まれば (結果, 終了コード)、戻れば戻り値を返す。"""
+def _trunk(monkeypatch, tmp_path, ops, approved=HEAD, wait=None):
+    """trunk_release.release_trunk を偽の操作で流す。止まれば (結果, 終了コード)、戻れば戻り値を返す。`wait` は CI の待ちの差し替え。"""
     import argparse
 
     from release_lib import trunk_release as tr
@@ -2564,7 +2566,7 @@ def _trunk(monkeypatch, tmp_path, ops, approved=HEAD):
     codes = _exits(monkeypatch, tr)
     monkeypatch.setattr(tr.names, "tag_name", lambda root, plugin, ver: f"{plugin}--v{ver}")
     monkeypatch.setattr(tr.names, "shipped_note", lambda root, plugin, ver: None)
-    monkeypatch.setattr(tr.reviewed, "wait_ci_except", lambda *a: None)
+    monkeypatch.setattr(tr.reviewed, "wait_ci_except", wait or (lambda *a: None))
     a = argparse.Namespace(version="1.2.3", ci_wait=60.0, approved_sha=approved, approval=None)
     ctx = ReleaseCtx(tmp_path, a, "foo", ["foo"], "release/v1.2.3", "main", "main", sync=False)
     try:
@@ -2579,6 +2581,30 @@ def test_release_trunk_opens_the_release_pr_and_stops_at_the_gate_without_the_ap
     out, code = _trunk(monkeypatch, tmp_path, ops, approved=None)
     assert code == 10 and out["status"] == "gate" and ops.created == [("main", "release/v1.2.3")] and ops.landed == []
     assert out["items"][-1]["result"] == "awaiting_approval" and "approve" in out["next"]
+
+
+def test_release_trunk_waits_with_the_no_checks_probe_of_the_landing(monkeypatch, tmp_path):
+    """#3703: 承認の前の待ちは、CI の無いリポジトリを見分ける読み（prod_land.pr_no_checks_reason）を ops の属性名によらず渡す。"""
+    from release_lib import prod_land
+
+    seen = []
+    _, code = _trunk(monkeypatch, tmp_path, _TrunkOps(), approved=None, wait=lambda root, pr, skip, timeout, ops: seen.append(ops))
+    assert code == 10 and seen[0].no_checks_reason is prod_land.pr_no_checks_reason
+    assert seen[0].pr_check_buckets is prod_land.pr_check_buckets
+
+
+@pytest.mark.parametrize(
+    ("approval", "approved", "tail"),
+    [("a.md", None, " --approval a.md"), (None, "c" * 40, " --approved-sha " + "c" * 40), (None, None, "")],
+)
+def test_release_retry_command_keeps_how_the_approval_was_given(approval, approved, tail):
+    """#3703: 6 で返った本番の打ち直しは、開始時の承認の渡し方（--approval か --approved-sha）を引き継ぐ。"""
+    import argparse
+
+    from release_lib import prod_land
+
+    a = argparse.Namespace(version="1.2.3", approval=approval, approved_sha=approved)
+    assert prod_land.release_retry_command(a) == "release-steps.py release --version 1.2.3 --channel prod" + tail
 
 
 def test_release_trunk_lands_the_approved_head(monkeypatch, tmp_path):

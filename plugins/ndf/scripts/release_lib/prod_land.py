@@ -206,9 +206,14 @@ def _require_merged_head(io: LandingIO, root, pr: int, head: str) -> None:
 
 
 def release_retry_command(a) -> str:
-    """本番の release の打ち直しのコマンド（`a` は release の引数。承認資料があれば --approval を添える）。"""
-    material = getattr(a, "approval", None)
-    return f"release-steps.py release --version {a.version} --channel prod" + (f" --approval {material}" if material else "")
+    """本番の release の打ち直しのコマンド（`a` は release の引数）。開始時の承認の渡し方を引き継ぐ: 承認資料があれば --approval、
+    承認したコミットで始めたなら --approved-sha を添える（落とすと再開で承認待ち・引数不足で止まる。2 つは同時に渡せない）。"""
+    cmd = f"release-steps.py release --version {a.version} --channel prod"
+    if material := getattr(a, "approval", None):
+        return f"{cmd} --approval {material}"
+    if approved := getattr(a, "approved_sha", None):
+        return f"{cmd} --approved-sha {approved}"
+    return cmd
 
 
 def pending_result(plugin: str, version: str, prod: str, tag: str, pending: LandPending, nxt: str, metrics: dict | None = None) -> dict:
