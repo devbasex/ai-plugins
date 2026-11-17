@@ -186,10 +186,10 @@ def _read_files(read: Callable[[str], Optional[str]]) -> dict[str, dict]:
 def _check_files(files: dict[str, dict]) -> Strategy:
     found = legacy.find_legacy(files, legacy.load_moves())
     if found:
-        raise StrategyError(legacy.legacy_reason(found, "11"))
+        raise StrategyError(legacy.legacy_reason(found))
     project = files.get("project")
     if not isinstance(project, dict) or SECTION not in project:
-        command = legacy.COMMAND["11"]
+        command = legacy.COMMAND
         raise StrategyError(
             f"`{PROJECT}` にセクション `{SECTION}` がありません。`{command} init --kind <種類>`"
             f"（既存のリポジトリは `{command} measure`）で作ってください"

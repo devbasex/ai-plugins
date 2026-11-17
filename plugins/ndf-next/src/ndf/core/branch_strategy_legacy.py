@@ -23,8 +23,8 @@ SECTION = settings_renames.SECTION
 DECL_DIR = identity.FIXED_WORDS["ndf_settings_dir"]
 # 表の file（ndf-files の ID）→ `.ndf/` の下のファイル名
 FILES = {"project": "project.json", "worktree": "worktree.json", "supervise": "supervise.json", "release": "release.json"}
-# 系ごとの解析のサブコマンド（作成・移行のコマンドの文）
-COMMAND = {"10": 'python3 "$SCRIPTS/project-decl.py" branch-strategy', "11": "ndf project branch-strategy"}
+# 解析のサブコマンド（作成・移行のコマンドの文）
+COMMAND = "ndf project branch-strategy"
 
 
 class LegacyTableError(contracts.ContractError):
@@ -98,7 +98,7 @@ def find_legacy(files: dict[str, dict], moves: list[Move]) -> list[Found]:
     return [h for h in hits if not any(o.file == h.file and o.pointer.startswith(h.pointer + "/") for o in hits)]
 
 
-def legacy_reason(found: list[Found], system: str) -> str:
+def legacy_reason(found: list[Found]) -> str:
     """停止理由の文（ファイル・キーの位置・移行のコマンド）。"""
     where = "、".join(f"`{DECL_DIR}/{f.file}` の `{f.pointer}`" for f in found)
-    return f"{where} は旧い設定のキーです。`{COMMAND[system]} migrate` で移してください"
+    return f"{where} は旧い設定のキーです。`{COMMAND} migrate` で移してください"

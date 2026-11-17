@@ -59,11 +59,10 @@ def test_find_legacy_reports_the_child_once():
 
 def test_legacy_reason_names_file_pointer_and_command():
     found = [legacy.Found("worktree.json", "/branch_flow/promotion"), legacy.Found("release.json", "/version_files")]
-    assert legacy.legacy_reason(found, "11") == (
+    assert legacy.legacy_reason(found) == (
         "`.ndf/worktree.json` の `/branch_flow/promotion`、`.ndf/release.json` の `/version_files` は旧い設定のキーです。"
         "`ndf project branch-strategy migrate` で移してください"
     )
-    assert 'project-decl.py" branch-strategy migrate' in legacy.legacy_reason(found[:1], "10")
 
 
 # --- 値を引く（json_pointer.value_of）と在るかを見る（json_pointer.has）の現状固定 ----------------------------------
