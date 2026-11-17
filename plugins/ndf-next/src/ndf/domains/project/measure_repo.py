@@ -21,7 +21,7 @@ from typing import Any, Callable, Iterator, NamedTuple, Optional
 from ndf.adapters import git
 from ndf.contracts import facts
 from ndf.domains.project import check
-from ndf.domains.project.items import MAX_EVIDENCE, measured, obj, question, seq, unknown
+from ndf.domains.project.items import MAX_EVIDENCE, measured, obj, question, seq
 from ndf.domains.project.secret import is_secret_path, redact
 
 MAX_READ = 512 * 1024
@@ -52,18 +52,6 @@ RUNNERS = {  # 実行器 → 当てる設定ファイルの名前と依存の名
     "rspec": ((".rspec",), ("rspec",)),
 }
 DB_WORDS = ("mysql", "postgres", "mariadb", "redis", "mongo")
-DEPLOY_FILES = (
-    "amplify.yml",
-    "samconfig.toml",
-    "buildspec.yml",
-    "appspec.yml",
-    "serverless.yml",
-    "vercel.json",
-    "netlify.toml",
-    "fly.toml",
-    "Procfile",
-    "app.yaml",
-)
 CHECK_TOOLS = (  # 名前 → 設定ファイルの名前
     ("pint", ("pint.json",)),
     ("phpstan", ("phpstan.neon*",)),
@@ -82,12 +70,9 @@ INSTRUCTION_FILES = facts.ids("instruction-files", measure=True)
 OLD_GUIDE_MARK = "NDF_PLUGIN_GUIDE_START"
 TEST_WORDS = re.compile(r"phpunit|pytest|jest|vitest|rspec|go test|npm (?:run )?test|docker compose exec|run-[\w-]*tests?")
 POLICY_WORDS = re.compile(r"doc-lint|文体|文言テスト|markdown-writing|document-style|書き方")
-DEPLOY_WORDS = re.compile(r"deploy|release|publish|デプロイ|リリース|本番|amplify|sam |(?<![a-z])(?:stg|prd)(?![a-z])", re.I)
 IMPORT_TOKEN = re.compile(r"(?:^|\s)@([\w./-]+\.md)\b")
 DEP_NAME = re.compile(r"[\s<>=!~\[;]")
 REQ_NAME = re.compile(r"[\s<>=!~\[;#]")
-# 本番チャネルの候補（リモートの HEAD が無いときに既定ブランチとして当てる名前）
-DEFAULT_BRANCH_CANDIDATES = check.KNOWN_BRANCHES[:2]
 
 # 素材の宣言の案（#2315）
 MAX_LIBRARIES = 15
@@ -430,57 +415,6 @@ def measure_test(tree: Tree, deps: dict[str, dict[str, str]], services: list[str
     return question({"runners": runners, "commands": commands, "compose_services": services}, evidence)
 
 
-def default_branch(tree: Tree) -> Optional[str]:
-    """既定ブランチ。リモート名のリモートの HEAD の指す先 → ローカルの main・master の順。どれも無ければ `None`。"""
-    head = tree.git("symbolic-ref", "--short", f"refs/remotes/{tree.remote}/HEAD")
-    if head and head.strip():
-        return head.strip().split("/", 1)[-1]
-    local = tree.refs("refs/heads")
-    return next((b for b in DEFAULT_BRANCH_CANDIDATES if b in local), None)
-
-
-def measure_branches(tree: Tree) -> dict[str, Any]:
-    state = check.branch_state(git.Git(tree.root), remote=tree.remote)
-    local = tree.refs("refs/heads")
-    evidence: list[dict[str, Any]] = []
-    names: list[str] = []
-    for b in check.KNOWN_BRANCHES:
-        ref = f"{tree.remote}/{b}" if b in state["present"] else (b if b in local else None)
-        if ref:
-            names.append(b)
-            last = tree.git("log", "-1", "--format=%cI", ref)
-            evidence.append({"text": f"{ref} の最後のコミット: {last.strip() if last else None}"})
-    if state["head"]:
-        evidence.insert(0, {"text": f"{tree.remote} の HEAD: {state['head']}"})
-    if not names and not state["head"]:
-        return unknown(f"{tree.remote} の HEAD も {'・'.join(check.KNOWN_BRANCHES)} も無い")
-    base = [state["head"]] if state["head"] else []
-    base += [b for b in names if b not in base]
-    production = [b for b in DEFAULT_BRANCH_CANDIDATES if b in names] or base[:1]
-    return question({"base": base, "production": production}, evidence)
-
-
-def _versioned(tree: Tree) -> list[str]:
-    out = [f"{f}: version" for f in tree.shallow("package.json", "composer.json") if tree.json(f).get("version")]
-    for f in tree.shallow("pyproject.toml"):
-        c = tree.toml(f)
-        if obj(c.get("project")).get("version") or obj(obj(c.get("tool")).get("poetry")).get("version"):
-            out.append(f"{f}: version")
-    return out + [p for p in tree.files if p.endswith("plugin.json") and p.count("/") <= 3][:5]
-
-
-def measure_delivery(tree: Tree) -> dict[str, Any]:
-    workflows = sorted(p for p in tree.files if p.startswith(".github/workflows/") and check.is_input(p))
-    evidence = tree.grep(workflows, DEPLOY_WORDS) + tree.grep(docs_of(tree), DEPLOY_WORDS)
-    tags = tree.words("tag", "--sort=-creatordate")
-    candidates = {
-        "deploy_files": tree.shallow(*DEPLOY_FILES),
-        "versioned": _versioned(tree),
-        "tags": {"count": len(tags), "latest": tags[:3]},
-    }
-    return question(candidates, evidence)
-
-
 def url_hosts(text: str) -> set[str]:
     """本文の URL のホスト名だけ（github.com とその配下は除く）。"""
     hosts = {m.group(1).lower() for m in re.finditer(r"https?://([\w.-]+)", text)}
@@ -593,8 +527,6 @@ def measure(tree: Tree, step: Step, items: dict[str, Any]) -> dict[str, Any]:
         items["services"], services = services_got
     for key, fn in (
         ("test", lambda: measure_test(tree, dep, services)),
-        ("branches", lambda: measure_branches(tree)),
-        ("delivery", lambda: measure_delivery(tree)),
         ("checks", lambda: measure_checks(tree, dep)),
         ("ndf_policies", lambda: measure_policies(tree)),
         ("instructions", lambda: measure_instructions(tree)),

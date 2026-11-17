@@ -61,7 +61,7 @@ def _drop_form(tree: Path, value: str) -> None:
 
 
 DROPS = [
-    ("branch-flows", "promote-selected", _drop_flow),
+    ("branch-flows", "release-branch", _drop_flow),
     ("delivery-kind", "manual", _drop_delivery),
     ("release-form", "slide", _drop_form),
 ]

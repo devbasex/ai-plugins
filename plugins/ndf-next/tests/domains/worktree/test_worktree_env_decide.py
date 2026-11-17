@@ -3,27 +3,27 @@
 from __future__ import annotations
 
 import pytest
+import strategy_fixture
 
+from ndf.core.branch_strategy import Strategy
 from ndf.domains.worktree import localenv_decide, merged_decide, session_decide, testenv_decide, write_target
-
-SELECTED = {"promotion": "selected", "production_branch": "main"}
 
 
 @pytest.mark.parametrize(
-    ("branch", "flow", "contained", "kept"),
+    ("branch", "kind", "contained", "kept"),
     [
-        ("feat/a", SELECTED, False, False),  # スプリントブランチでなければ残さない
-        ("sprint/s1", SELECTED, False, True),  # 選んで集める取り込み方では本番に含まれるまで残す
-        ("sprint/s1", SELECTED, True, False),
-        ("sprint/s1", SELECTED, None, True),  # 含まれるかを確かめられなければ残す
-        ("sprint/s1", {"promotion": "whole", "production_branch": "main"}, False, False),
-        ("sprint/s1", None, False, False),  # 記録も宣言も無ければ既定の行（whole）
-        ("sprint/s1", {"promotion": "nope", "production_branch": "main"}, True, True),  # 表に無い取り込み方は残す
-        ("sprint/s1", {"promotion": "selected"}, False, False),  # 本番チャネルが無ければ比べる先が無い
+        ("feat/a", "mobile", False, False),  # スプリントブランチでなければ残さない
+        ("sprint/s1", "mobile", False, True),  # 選んで集める取り込み方（release_branch）では本番に含まれるまで残す
+        ("sprint/s1", "mobile", True, False),
+        ("sprint/s1", "mobile", None, True),  # 含まれるかを確かめられなければ残す
+        ("sprint/s1", "web-develop", False, False),  # merge_base_branch はベースブランチを丸ごと出す
+        ("sprint/s1", "web-trunk", False, False),
+        ("sprint/s1", "plugin", None, False),
     ],
 )
-def test_sprint_keep(branch: str, flow: dict | None, contained: bool | None, kept: bool) -> None:
-    assert (merged_decide.sprint_keep(branch, flow, contained, "origin") is not None) == kept
+def test_sprint_keep(branch: str, kind: str, contained: bool | None, kept: bool) -> None:
+    strategy = Strategy(strategy_fixture.section(kind))
+    assert (merged_decide.sprint_keep(branch, strategy, contained, "origin") is not None) == kept
 
 
 def test_long_lived_keep() -> None:
@@ -36,7 +36,7 @@ def test_long_lived_keep() -> None:
 def test_pull_skip() -> None:
     assert merged_decide.pull_skip("develop", "develop") is None
     assert "detached" in str(merged_decide.pull_skip(None, "develop"))
-    assert merged_decide.pull_skip("develop", None) is not None
+    assert merged_decide.pull_skip("main", "develop") is not None
 
 
 @pytest.mark.parametrize(

@@ -66,32 +66,6 @@
         ]
       }
     },
-    "release": {
-      "type": "object",
-      "description": "リリースの形",
-      "properties": {
-        "form": {
-          "type": "string",
-          "description": "リリースの形の名前（package-plugin など）"
-        },
-        "plugin": {
-          "type": "string",
-          "description": "配るプラグインの名前"
-        },
-        "runtimes": {
-          "type": "array",
-          "description": "配るランタイム",
-          "items": {
-            "type": "string"
-          }
-        },
-        "dev_workflow": {
-          "type": "string",
-          "description": "開発版を出す GitHub Actions のワークフローのファイル名"
-        }
-      },
-      "additionalProperties": false
-    },
     "queue": {
       "type": "object",
       "description": "プランを流す待ち行列の資源の枠と共有の一覧。無ければ既定（graphql の枠 2 本・共有の一覧は無し）",

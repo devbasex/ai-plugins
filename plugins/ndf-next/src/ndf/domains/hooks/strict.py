@@ -1,6 +1,7 @@
 """本番チャネルへのマージを見る `strict` の guard（#3345 の決定 91）。
 
-AI が Bash で直に打つ `gh pr merge` を、宛先のリポジトリの宣言（`.ndf/project.json` の `delivery`）で判定する。
+AI が Bash で直に打つ `gh pr merge` を、宛先のリポジトリの宣言（`.ndf/project.json` の `branch_strategy` の
+`release.deliveries`）で判定する。
 自動で本番へ届く宣言のリポジトリでは止め、宛先を確かめる NDF のマージの手順へ回す。hook の中では通信しないため
 Pull Request の宛先のブランチを確かめられない。
 
@@ -34,8 +35,11 @@ from ndf.domains.hooks import strict_shell, tables
 from ndf.domains.hooks.verdict import Verdict, deny
 from ndf.testing import weight
 
-# 宛先のリポジトリの宣言（delivery を読む）
+# 宛先のリポジトリの宣言（ブランチ戦略の宣言の届け先の行を読む）
 _PROJECT_FILE = identity.FIXED_WORDS["declaration_dir"] + "/project.json"
+# 届け先の行の置き場（`branch_strategy` の中の位置。`core.branch_strategy` は jsonschema に依るので、ここでは標準ライブラリで読む）
+_SECTION, _DELIVERIES = "branch_strategy", ("release", "deliveries")
+_DELIVERIES_KEY = f"{_SECTION}.{'.'.join(_DELIVERIES)}"
 
 # guard の表（hooks/guards.json）でのこの guard の名前
 GUARD_NAME = "merge-production"
@@ -358,13 +362,13 @@ def _judge(here: Optional[Path], call: MergeCall) -> Optional[Verdict]:
                 f"宛先 {call.repo}（-R・--repo・GH_REPO か Pull Request の URL）は作業ディレクトリ {repo_root} のリポジトリ（{origin or '不明'}）と違い、"
                 f"宛先の宣言を読めない。`cd <{call.repo} の clone> && gh pr merge ...` で打つか、{_MERGE_HELP}"
             )
-    rows = _delivery(repo_root)
+    rows = _deliveries(repo_root)
     if rows is None:
-        return deny(f"{repo_root} の {_PROJECT_FILE} の delivery を読めず、本番へ届くかを決められない。{_MERGE_HELP}")
+        return deny(f"{repo_root} の {_PROJECT_FILE} の {_DELIVERIES_KEY} を読めず、本番へ届くかを決められない。{_MERGE_HELP}")
     if not any(_automatic_production(row) for row in rows):
         return None
     return deny(
-        f"{repo_root} は本番チャネルへのマージが自動で本番へ届く（delivery）。hook の中では Pull Request の宛先を"
+        f"{repo_root} は本番チャネルへのマージが自動で本番へ届く（{_DELIVERIES_KEY}）。hook の中では Pull Request の宛先を"
         f"確かめられないため、直の gh pr merge を止めた。{_MERGE_HELP}"
     )
 
@@ -430,10 +434,24 @@ def slug_of_url(url: str) -> Optional[str]:
     return "/".join(parts[-2:]) if len(parts) >= 2 and all(parts[-2:]) else None
 
 
-def _delivery(repo_root: Path) -> Optional[list]:
+def _deliveries(repo_root: Path) -> Optional[list]:
+    """ブランチ戦略の宣言の届け先の行（`branch_strategy.release.deliveries`）。読めなければ None（呼び手が止める）。
+
+    `deliveries` はスキーマで任意で、ブランチ戦略のプリセットは書かない。`release` のセクションまで読めてキーが無ければ、
+    `release.cd`（本番へのマージで動く CD の workflow）の有無で決める: あれば自動の本番の届け先 1 行、無ければ空の行
+    （キーが無いことと読めないことを分ける）。宣言のファイル・`branch_strategy`・`release` が無いか形が違う・
+    `deliveries` が配列でなければ読めないとする。"""
     try:
         data = json.loads((repo_root / _PROJECT_FILE).read_text(encoding="utf-8"))
     except (OSError, ValueError):  # noqa: NDF401 ファイル: 宣言を読めないことを None で返し、呼び手が止める
         return None
-    rows = data.get("delivery") if isinstance(data, dict) else None
+    cur: object = data.get(_SECTION) if isinstance(data, dict) else None
+    *parents, leaf = _DELIVERIES
+    for key in parents:
+        cur = cur.get(key) if isinstance(cur, dict) else None
+    if not isinstance(cur, dict):
+        return None
+    if leaf not in cur:
+        return [{"channel": "production", "kind": "auto"}] if cur.get("cd") else []
+    rows = cur[leaf]
     return rows if isinstance(rows, list) else None

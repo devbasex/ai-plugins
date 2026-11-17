@@ -1286,3 +1286,132 @@ def test_check_entry_reports_the_first_violation_in_check_order():
         assert message in str(e.value)
         bad[key] = LOAD_ENTRY.get(key, {"exempt": "hook", "evidence": "e"})
     assert _model._check_entry(_ENTRY_F, bad) is None
+
+
+def _checker_module():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("check_ndf_contracts", CHECK)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_copies_of_the_next_contracts_must_match_byte_for_byte(tmp_path: Path):
+    """11.0 の契約（正本）と 10 系のコピーが 1 バイトでも違えば落ちる（#3681 の受け入れ条件 2）。"""
+    ck = _checker_module()
+    assert ck.copy_mismatches(tmp_path) == []  # 11.0 の木が無い根は比べない
+    rels = {p for pair in ck.COPY_FILES for p in pair} | {ck.COPY_DEFS_ORIGIN} | {p for p, _ in ck.COPY_DEFS}
+    for rel in rels:
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(REPO / rel, tmp_path / rel)
+    assert ck.copy_mismatches(tmp_path) == []
+    origin, copy = ck.COPY_FILES[0]
+    with (tmp_path / copy).open("a", encoding="utf-8") as f:
+        f.write(" ")
+    assert [(i["kind"], i["path"], i["name"]) for i in ck.copy_mismatches(tmp_path)] == [("copy-mismatch", copy, origin)]
+    shutil.copyfile(REPO / copy, tmp_path / copy)
+    generated = ck.COPY_DEFS[0][0]
+    doc = json.loads((tmp_path / generated).read_text(encoding="utf-8"))
+    doc["$defs"]["Delivery"]["description"] = "変えた"
+    (tmp_path / generated).write_text(json.dumps(doc, ensure_ascii=False, indent=2), encoding="utf-8")
+    assert [(i["path"], i["name"]) for i in ck.copy_mismatches(tmp_path)] == [(generated, "Delivery")]
+
+
+def _copy_tree(ck, tmp_path: Path) -> None:
+    rels = {p for pair in ck.COPY_FILES for p in pair} | {ck.COPY_DEFS_ORIGIN} | {p for p, _ in ck.COPY_DEFS}
+    for rel in rels:
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(REPO / rel, tmp_path / rel)
+
+
+def _rewrite(path: Path, edit) -> None:
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    edit(doc)
+    path.write_text(json.dumps(doc, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _defs_table(doc: dict) -> dict:
+    return doc["$defs"] if isinstance(doc.get("$defs"), dict) else doc
+
+
+def test_copy_mismatches_names_why_a_file_pair_differs(tmp_path: Path):
+    """現状固定: 正本が無い・コピーが無いは detail の先頭で言い分け、違反は表の順に並ぶ。"""
+    ck = _checker_module()
+    _copy_tree(ck, tmp_path)
+    (origin0, copy0), (origin1, copy1) = ck.COPY_FILES[0], ck.COPY_FILES[1]
+    (tmp_path / origin0).unlink()
+    (tmp_path / copy1).unlink()
+    got = ck.copy_mismatches(tmp_path)
+    assert [(i["kind"], i["path"], i["name"], i["result"]) for i in got] == [
+        ("copy-mismatch", copy0, origin0, "violation"),
+        ("copy-mismatch", copy1, origin1, "violation"),
+    ]
+    assert got[0]["detail"].startswith("正本が無い。")
+    assert got[1]["detail"].startswith("コピーが無い。")
+    assert got[1]["detail"].endswith(f"cp {origin1} {copy1} で写す")
+    assert all("via" not in i for i in got)
+
+
+def test_copy_mismatches_stops_when_the_origin_has_no_root_def(tmp_path: Path):
+    """現状固定: 正本の定義が読めないか $defs/BranchStrategy が無ければ、ファイルの違反の後に 1 件足して定義は比べない。"""
+    ck = _checker_module()
+    _copy_tree(ck, tmp_path)
+    origin, copy = ck.COPY_FILES[0]
+    (tmp_path / copy).write_text("x", encoding="utf-8")
+    (tmp_path / ck.COPY_DEFS_ORIGIN).write_text("{", encoding="utf-8")
+    for c, _ in ck.COPY_DEFS:
+        (tmp_path / c).write_text("[]", encoding="utf-8")  # 比べられれば落ちるコピー
+    got = ck.copy_mismatches(tmp_path)
+    assert [(i["path"], i["name"]) for i in got] == [(copy, origin), (ck.COPY_DEFS_ORIGIN, ck.COPY_DEF_ROOT)]
+    assert got[0]["detail"].startswith("正本と 1 バイト以上違う。")
+    shutil.copyfile(REPO / ck.COPY_DEFS_ORIGIN, tmp_path / ck.COPY_DEFS_ORIGIN)
+    _rewrite(tmp_path / ck.COPY_DEFS_ORIGIN, lambda d: d["$defs"].pop(ck.COPY_DEF_ROOT))
+    shutil.copyfile(REPO / copy, tmp_path / copy)
+    assert [(i["path"], i["name"]) for i in ck.copy_mismatches(tmp_path)] == [(ck.COPY_DEFS_ORIGIN, ck.COPY_DEF_ROOT)]
+
+
+def test_copy_mismatches_partial_copy_compares_only_what_it_has(tmp_path: Path):
+    """現状固定: 生成の元（whole=False）は持たない定義を見逃し、根の定義が無いときは落とす。生成物（whole=True）は無い定義も落とす。"""
+    ck = _checker_module()
+    _copy_tree(ck, tmp_path)
+    (generated, gen_whole), (partial, whole) = ck.COPY_DEFS
+    assert (gen_whole, whole) == (True, False)
+    names = ck._def_closure(ck._defs_of(tmp_path, ck.COPY_DEFS_ORIGIN), ck.COPY_DEF_ROOT)
+    missing = [n for n in names if n not in ck._defs_of(tmp_path, partial)]
+    assert missing and ck.COPY_DEF_ROOT not in missing  # 生成の元は根を持ち、届け先の行の定義を持たない
+    assert ck.copy_mismatches(tmp_path) == []
+    _rewrite(tmp_path / generated, lambda d: d["$defs"].pop(missing[0]))
+    assert [(i["path"], i["name"]) for i in ck.copy_mismatches(tmp_path)] == [(generated, missing[0])]
+    shutil.copyfile(REPO / generated, tmp_path / generated)
+    _rewrite(tmp_path / partial, lambda d: _defs_table(d).pop(ck.COPY_DEF_ROOT))
+    got = ck.copy_mismatches(tmp_path)
+    assert [(i["path"], i["name"]) for i in got] == [(partial, ck.COPY_DEF_ROOT)]
+    assert got[0]["detail"].startswith(f"$defs/{ck.COPY_DEF_ROOT} が正本 {ck.COPY_DEFS_ORIGIN} と違う")
+
+
+def test_copy_mismatches_unreadable_copy_reports_every_reachable_def(tmp_path: Path):
+    """現状固定: 読めないコピーは、たどれる定義の名前の昇順に 1 件ずつ落ちる（whole の値に関わらない）。"""
+    ck = _checker_module()
+    _copy_tree(ck, tmp_path)
+    names = ck._def_closure(ck._defs_of(tmp_path, ck.COPY_DEFS_ORIGIN), ck.COPY_DEF_ROOT)
+    assert names == sorted(names) and len(names) > 1
+    for copy, _ in ck.COPY_DEFS:
+        (tmp_path / copy).write_text("[]", encoding="utf-8")
+    got = ck.copy_mismatches(tmp_path)
+    assert [(i["path"], i["name"]) for i in got] == [(copy, n) for copy, _ in ck.COPY_DEFS for n in names]
+
+
+def test_copy_mismatches_key_order_of_a_def_matters(tmp_path: Path):
+    """現状固定: 定義の中身が同じでもキーの順が違えば落ちる。"""
+    ck = _checker_module()
+    _copy_tree(ck, tmp_path)
+    generated = ck.COPY_DEFS[0][0]
+
+    def reorder(doc):
+        d = doc["$defs"][ck.COPY_DEF_ROOT]
+        assert len(d) > 1
+        doc["$defs"][ck.COPY_DEF_ROOT] = dict(reversed(list(d.items())))
+
+    _rewrite(tmp_path / generated, reorder)
+    assert [(i["path"], i["name"]) for i in ck.copy_mismatches(tmp_path)] == [(generated, ck.COPY_DEF_ROOT)]

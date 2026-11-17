@@ -21,7 +21,7 @@ import release_case  # noqa: E402
 from release_lib import approval_trail, land, land_checks  # noqa: E402
 from release_lib.workflow_trigger import PullEvent, runs_on_pull_head  # noqa: E402
 
-FIX = Path(__file__).resolve().parent / "fixtures" / "branch_strategy"
+from strategy_fixture import FIX  # noqa: E402
 
 
 @pytest.fixture(autouse=True)

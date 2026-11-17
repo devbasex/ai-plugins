@@ -8,7 +8,8 @@
 
 - プラグインの定義の `version`
 - マーケットプレイスのそのプラグインの `description` の中の `(v<今の版>)`
-- 宣言 `version_files` のファイルの、そのプラグインの名前を含む行の中の今の版（前後に版の続きが無いものだけ）
+- ブランチ戦略の宣言の追加のファイル（`.ndf/project.json` の `branch_strategy.release.version_store.files`）。`pointer` の
+  無い行は、そのプラグインの名前を含む行の中の今の版（前後に版の続きが無いもの）、`pointer` のある行は JSON のその位置の版
 """
 
 from __future__ import annotations
@@ -19,10 +20,16 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from ndf.core import json_pointer
+
 # マーケットプレイスの登録（リポジトリの根から）
 MARKETPLACE = Path(".claude-plugin") / "marketplace.json"
-# プラグインの定義（プラグインの置き場から。先頭は必ずあり、ほかはあるものだけ）
-MANIFESTS = (Path(".claude-plugin") / "plugin.json", Path(".codex-plugin") / "plugin.json")
+# プラグインの定義（プラグインの置き場から）。Claude Code の定義は必ずあり、Codex の定義はあるものだけ
+CLAUDE_MANIFEST = Path(".claude-plugin") / "plugin.json"
+CODEX_MANIFEST = Path(".codex-plugin") / "plugin.json"
+MANIFESTS = (CLAUDE_MANIFEST, CODEX_MANIFEST)
+# 名前で引くプラグインの置き場の親（リポジトリの根からの `<PLUGINS_DIR>/<名前>`。版数の置き場の候補と測定が使う）
+PLUGINS_DIR = "plugins"
 
 
 class PluginsError(Exception):
@@ -69,7 +76,13 @@ def _entry(raw: object) -> Plugin:
 
 def load(root: Path) -> list[Plugin]:
     """マーケットプレイスに登録されたプラグイン（登録の順）。"""
-    rows = _read_json(root / MARKETPLACE).get("plugins")
+    return entries(_read_json(root / MARKETPLACE))
+
+
+def entries(marketplace: dict) -> list[Plugin]:
+    """読んだマーケットプレイスの登録（`marketplace.json` の中身）のプラグイン（登録の順）。手元に無い版（PR の head・
+    本番の先端）の登録を読む側（`land.read_version`）も、置き場をここの `source` の解決で求める。"""
+    rows = marketplace.get("plugins")
     if not isinstance(rows, list):
         raise PluginsError(f"{MARKETPLACE} に plugins の配列が無い")
     return [_entry(r) for r in rows]
@@ -122,8 +135,37 @@ def _bump_lines(path: Path, plugin: Plugin, old: str, new: str) -> bool:
     return True
 
 
-def bump(root: Path, plugin: Plugin, new: str, version_files: Sequence[str] = ()) -> list[str]:
-    """版を `new` へ書き換え、書き換えたファイル（リポジトリの根から）を返す。"""
+def _bump_pointer(path: Path, pointer: str, old: str, new: str) -> bool:
+    """JSON のファイル `path` の `pointer` の位置の版が `old` なら `new` へ書き換える。書き換えたか。
+
+    object のキーと配列の添字（`/packages/0/version`）をたどる（読む側の `land.read_version` と同じ `json_pointer.resolve`）。"""
+    data = _read_json(path)
+    keys = json_pointer.tokens(pointer)
+    if not keys:
+        return False
+    _, cur = json_pointer.resolve(data, json_pointer.join(keys[:-1]))
+    last = keys[-1]
+    if isinstance(cur, dict) and cur.get(last) == old:
+        cur[last] = new
+    elif isinstance(cur, list) and last.isdigit() and int(last) < len(cur) and cur[int(last)] == old:
+        cur[int(last)] = new
+    else:
+        return False
+    _write_json(path, data)
+    return True
+
+
+def _bump_file(root: Path, row: dict, plugin: Plugin, old: str, new: str) -> bool:
+    path = root / row["path"]
+    if not path.is_file():
+        return False
+    pointer = row.get("pointer")
+    return _bump_pointer(path, pointer, old, new) if pointer else _bump_lines(path, plugin, old, new)
+
+
+def bump(root: Path, plugin: Plugin, new: str, extra_files: Sequence[dict] = ()) -> list[str]:
+    """版を `new` へ書き換え、書き換えたファイル（リポジトリの根から）を返す。`extra_files` は宣言の
+    `release.version_store.files` の行（`path` と、あれば `pointer`）。"""
     old = version(root, plugin)
     written = []
     for path in plugin.manifests(root):
@@ -133,5 +175,5 @@ def bump(root: Path, plugin: Plugin, new: str, version_files: Sequence[str] = ()
         written.append(path.relative_to(root).as_posix())
     if _bump_marketplace(root, plugin, old, new):
         written.append(MARKETPLACE.as_posix())
-    written += [rel for rel in version_files if (root / rel).is_file() and _bump_lines(root / rel, plugin, old, new)]
+    written += [row["path"] for row in extra_files if _bump_file(root, row, plugin, old, new)]
     return written

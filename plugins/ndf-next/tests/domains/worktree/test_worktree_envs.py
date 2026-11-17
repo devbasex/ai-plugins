@@ -16,7 +16,7 @@ from ndf.domains.worktree import cli_env, container, create, deps, ledger, local
 
 
 def _declare(main: Path, run_git: Callable, extra: dict) -> None:
-    decl = {"version": 1, "base_branch": "develop", "production_branch": "main", **extra}
+    decl = {"version": 1, **extra}
     (main / ".ndf" / "worktree.json").write_text(json.dumps(decl), encoding="utf-8")
     run_git(main, "add", "-A")
     run_git(main, "commit", "-q", "-m", "declare")

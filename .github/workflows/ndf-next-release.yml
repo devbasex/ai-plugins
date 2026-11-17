@@ -18,7 +18,7 @@ name: ndf-next release
 #   同じ run で続ける。本番ブランチの名前は宣言から読み、push の出来事の絞り込みに写さない）
 # - workflow_dispatch（step=publish）: 起動したコミット（本番ブランチを ref にして打つ）で publish だけを打ち直す
 #
-# ブランチの名前は宣言 .ndf/worktree.json の base_branch・production_branch から読む（ここに写さない）。
+# ブランチの名前は宣言 .ndf/project.json の branch_strategy.branches から読む（ここに写さない）。
 # リリースの PR とベースブランチへ戻す PR で CI を起動するため、PR・ブランチの作成とマージは利用者の token
 # （secrets.NDF_RELEASE_TOKEN）で行う（GITHUB_TOKEN の操作では CI が起動しない）。無ければ github.token で行い、CI は手で
 # 起動し直す。本番ブランチへのマージは NDF_RELEASE_TOKEN を必須にする（github.token の書いたリリース記録は読み手に信用
@@ -72,7 +72,7 @@ env:
 
 jobs:
   branches:
-    # 宣言 .ndf/worktree.json のベースブランチと本番ブランチを 1 か所で読み、後のジョブへ渡す。
+    # 宣言 .ndf/project.json のベースブランチと本番ブランチを 1 か所で読み、後のジョブへ渡す。
     # 起動するのは後のジョブのどれかが動く出来事だけ（証跡の判定の条件はここが持つ）。読む宣言は、組み立ては起動した
     # コミット、マージと証跡の判定は既定ブランチのもの
     if: >-
@@ -92,14 +92,17 @@ jobs:
           ref: ${{ (inputs.step == 'assemble' && github.sha) || github.event.repository.default_branch }}
           persist-credentials: false
       - id: read
-        # 宣言に無いブランチは、スキーマのとおりリモートの HEAD（GitHub の既定ブランチ）で補う（#3617）
-        env:
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        # ブランチ戦略の宣言の branches はスキーマで必須。読めなければ既定ブランチで補わずに止まる（補うと base と
+        # production が食い違ったまま組み立て・マージへ進む）
         run: |
-          decl=.ndf/worktree.json
-          [ -f "$decl" ] || decl=/dev/null
-          echo "base=$(jq -rn --arg d "$DEFAULT_BRANCH" '(input? // {}) | .base_branch // $d' "$decl")" >> "$GITHUB_OUTPUT"
-          echo "production=$(jq -rn --arg d "$DEFAULT_BRANCH" '(input? // {}) | .production_branch // $d' "$decl")" >> "$GITHUB_OUTPUT"
+          decl=.ndf/project.json
+          for key in base production; do
+            value=$(jq -er --arg k "$key" '.branch_strategy.branches[$k] | strings | select(length > 0)' "$decl") || {
+              echo "::error::$decl の branch_strategy.branches.$key を読めない（宣言を直してから打ち直す）"
+              exit 1
+            }
+            echo "$key=$value" >> "$GITHUB_OUTPUT"
+          done
 
   assemble:
     needs: branches
@@ -142,9 +145,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.NDF_RELEASE_TOKEN || github.token }}
           PR: ${{ steps.build.outputs.pr }}
-          BASE: ${{ needs.branches.outputs.base }}
-          PRODUCTION: ${{ needs.branches.outputs.production }}
-        run: '"$NDF" release-steps merge --root . --pr "$PR" --budget "$CHECK_BUDGET" --base "$BASE" --production "$PRODUCTION"'
+        run: '"$NDF" release-steps merge --root . --pr "$PR" --budget "$CHECK_BUDGET"'
 
   merge:
     needs: branches
@@ -173,12 +174,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.NDF_RELEASE_TOKEN || github.token }}
           PR: ${{ inputs.pr }}
-          BASE: ${{ needs.branches.outputs.base }}
-          PRODUCTION: ${{ needs.branches.outputs.production }}
         run: |
           set -o pipefail
           case "$PR" in ''|*[!0-9]*) echo "PR の番号でない: $PR"; exit 2;; esac
-          "$NDF" release-steps merge --root . --pr "$PR" --budget "$CHECK_BUDGET" --base "$BASE" --production "$PRODUCTION" \
+          "$NDF" release-steps merge --root . --pr "$PR" --budget "$CHECK_BUDGET" \
             | tee "$RUNNER_TEMP/merge.json" || code=$?
           # 戻す PR で止まっても本番ブランチへ入れた版は publish へ渡す（書き出してから止まった終了コードで失敗させる）
           echo "production_sha=$(tail -n 1 "$RUNNER_TEMP/merge.json" | jq -r '.outputs.production_sha // ""')" >> "$GITHUB_OUTPUT"
@@ -231,11 +230,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.NDF_RELEASE_TOKEN || github.token }}
           PR: ${{ github.event.issue.number }}
-          BASE: ${{ needs.branches.outputs.base }}
-          PRODUCTION: ${{ needs.branches.outputs.production }}
         run: |
           set -o pipefail
-          "$NDF" release-steps merge --root . --pr "$PR" --budget "$CHECK_BUDGET" --base "$BASE" --production "$PRODUCTION" \
+          "$NDF" release-steps merge --root . --pr "$PR" --budget "$CHECK_BUDGET" \
             | tee "$RUNNER_TEMP/merge.json" || code=$?
           # 戻す PR で止まっても本番ブランチへ入れた版は publish へ渡す（書き出してから止まった終了コードで失敗させる）
           echo "production_sha=$(tail -n 1 "$RUNNER_TEMP/merge.json" | jq -r '.outputs.production_sha // ""')" >> "$GITHUB_OUTPUT"

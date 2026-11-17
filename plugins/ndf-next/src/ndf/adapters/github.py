@@ -71,10 +71,14 @@ _IN_MERGE_QUEUE = (
     "query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) {"
     " pullRequest(number: $number) { id isInMergeQueue } } }"
 )
+# `jump` は版上げの PR をキューの先頭へ入れる指定（#3672 の決定 18。承認の範囲を版上げの PR の head に固定する）
 _ENQUEUE = (
-    "mutation($id: ID!, $head: GitObjectID!) {"
-    " enqueuePullRequest(input: {pullRequestId: $id, expectedHeadOid: $head}) { clientMutationId } }"
+    "mutation($id: ID!, $head: GitObjectID!, $jump: Boolean) {"
+    " enqueuePullRequest(input: {pullRequestId: $id, expectedHeadOid: $head, jump: $jump}) { clientMutationId } }"
 )
+# 迂回の可否（ruleset の `current_user_can_bypass`）の強さ。弱いほうを全体の値にする。`always`・`pull_requests_only` だけが
+# 本番の PR を越えられる（10 系の `release_case._BYPASS_ORDER` と同じ並び）
+BYPASS_ORDER = ("never", "exempt", "pull_requests_only", "always")
 _DEQUEUE = "mutation($id: ID!) { dequeuePullRequest(input: {id: $id}) { clientMutationId } }"
 # マージの方式 → 「基底に含まれたか」の確かめ方（3378-2）。ancestry は head が基底の祖先か、merged は PR がマージ済み
 # （`merged_at` がある）か。squash と rebase は新しいコミットを作り、head は基底の祖先にならない。
@@ -258,6 +262,65 @@ class Pull(NamedTuple):
         )  # fmt: skip
 
 
+class RuleFacts(NamedTuple):
+    """本番ブランチの ruleset と従来のブランチ保護を重ねた事実（#3672 の I10。10 系の `release_case.RuleFacts` と同じ値）。
+
+    `bypass` は当たった ruleset の `current_user_can_bypass`（どれか 1 つでも越えられない値なら、その値。ruleset が無ければ None）。
+    `queue_merge_method` は merge queue の規則の `parameters.merge_method`（`MERGE`・`SQUASH`・`REBASE`）。
+    """
+
+    present: bool
+    approvals: int
+    queue: bool
+    up_to_date: bool
+    bypass: Optional[str]
+    queue_merge_method: Optional[str] = None
+
+
+NO_RULES = RuleFacts(False, 0, False, False, None)
+
+
+def _weakest(bypasses: Iterable[Optional[str]]) -> Optional[str]:
+    known = [b for b in bypasses if b in BYPASS_ORDER]
+    return min(known, key=BYPASS_ORDER.index) if known else None
+
+
+def _review_count(raw: Any) -> int:
+    value = raw.get("required_approving_review_count") if isinstance(raw, dict) else None
+    return value if isinstance(value, int) and not isinstance(value, bool) else 0
+
+
+def rule_facts_of(rules: Sequence[dict], bypasses: Sequence[Optional[str]]) -> RuleFacts:
+    """`rules/branches/<branch>` の規則の配列と、当たった ruleset ごとの迂回の可否から事実を組む。"""
+    if not rules:
+        return NO_RULES
+    params = [(r.get("type"), r.get("parameters") if isinstance(r.get("parameters"), dict) else {}) for r in rules]
+    reviews = [_review_count(p) for kind, p in params if kind == "pull_request"]
+    up_to_date = any(kind == "required_status_checks" and p.get("strict_required_status_checks_policy") for kind, p in params)
+    queue_method = next((p.get("merge_method") for kind, p in params if kind == "merge_queue"), None)
+    queue = any(kind == "merge_queue" for kind, _ in params)
+    return RuleFacts(True, max(reviews) if reviews else 0, queue, bool(up_to_date), _weakest(bypasses), queue_method)
+
+
+def classic_facts_of(protection: dict) -> RuleFacts:
+    """従来のブランチ保護（`branches/<branch>/protection`）から事実を組む。保護を読めるのは管理者だけなので、
+    管理者に保護を課さない（`enforce_admins` が偽）ときは迂回できる（`always`）とみなす。"""
+    checks = protection.get("required_status_checks")
+    enforce = protection.get("enforce_admins")
+    up_to_date = isinstance(checks, dict) and bool(checks.get("strict"))
+    enforced = isinstance(enforce, dict) and bool(enforce.get("enabled"))
+    approvals = _review_count(protection.get("required_pull_request_reviews"))
+    return RuleFacts(True, approvals, False, up_to_date, "never" if enforced else "always")
+
+
+def merge_facts(a: RuleFacts, b: RuleFacts) -> RuleFacts:
+    """ruleset と従来のブランチ保護の事実を重ねる。GitHub は両方を効かせるため、厳しいほうを採る（迂回は弱いほう）。"""
+    if not a.present or not b.present:
+        return a if a.present else b
+    bypass, queue_method = _weakest((a.bypass, b.bypass)), a.queue_merge_method or b.queue_merge_method
+    return RuleFacts(True, max(a.approvals, b.approvals), a.queue or b.queue, a.up_to_date or b.up_to_date, bypass, queue_method)
+
+
 class MergeOutcome(NamedTuple):
     """マージの結果。断られたら `kind` に止まった理由の種類（`refused`・`base_conflict`・`not_ci`・`unknown`）。
 
@@ -339,6 +402,7 @@ class _MergeRoute:
     refused: Callable[["GitHubError"], bool]
     how: str
     require_method: bool = False
+    jump: bool = False
 
 
 def _refused_by_graphql(exc: GitHubError) -> bool:
@@ -630,12 +694,25 @@ class GitHub:
                 return rows
         raise _too_many_pages(spec.what, pages, spec.cap)
 
-    def _pages(self, path: str) -> list[dict]:
-        """配列を返す REST の一覧を、短いページが来るまで読む。`github.list-pages` ページを超えたら途中で切らずに止まる。"""
+    def reviews(self, number: int) -> list[dict]:
+        """PR のレビューを REST の形のまま古い順にすべて読む（`approval.via: review` の承認の判定が使う）。"""
+        return self._pages(f"/repos/{self.repo}/pulls/{int(number)}/reviews")
+
+    def open_heads(self, base: str) -> list[tuple[int, str]]:
+        """`base` 宛ての開いた PR の番号と head の SHA（番号の昇順）。承認したがキューへ入れていない版上げの PR を探す（決定 18）。
+
+        一覧の応答は `merged`・`mergeable_state` を持たないため `Pull` にしない。"""
+        rows = self._pages(f"/repos/{self.repo}/pulls", {"state": "open", "base": base})
+        return sorted((int(p["number"]), text_of(p["head"]["sha"])) for p in rows)
+
+    def _pages(self, path: str, query: Optional[dict] = None) -> list[dict]:
+        """配列を返す REST の一覧を、短いページが来るまで読む。`github.list-pages` ページを超えたら途中で切らずに止まる。
+        `query` はページの指定に足す絞り込み。"""
         pages = _page_cap("github.list-pages")
         rows: list[dict] = []
+        narrow = dict(query) if query is not None else {}
         for page in range(1, pages + 1):
-            body = self.rest("GET", path, params={"per_page": PER_PAGE, "page": page})
+            body = self.rest("GET", path, params={**narrow, "per_page": PER_PAGE, "page": page})
             rows.extend(body)
             if len(body) < PER_PAGE:
                 return rows
@@ -645,6 +722,41 @@ class GitHub:
         """ブランチに当たる規則（`GET /rules/branches/<名前>`）を全ページ読む。`github.list-pages` ページを超えたら `GitHubError`
         （必須のチェックの規則が後ろのページにあっても落とさない。#3506）。"""
         return [r for r in self._pages(f"/repos/{self.repo}/rules/branches/{quote(branch, safe='')}") if isinstance(r, dict)]
+
+    def rule_facts(self, branch: str) -> Optional[RuleFacts]:
+        """本番ブランチの ruleset と従来のブランチ保護から、有無・承認の数・merge queue の有無・最新の取り込みの要否・
+        迂回の可否を読む（10 系の `release_case.read_rule_facts` と同じ値。#3672 の I10）。
+
+        GitHub は両方を重ねて効かせるため両方を読んで重ねる（保護のある本番ブランチを「保護なし」の経路へ入れない）。
+        規則も保護も無ければ `present` が偽。権限・ネットワークで読めなければ None（呼び手が止める）。
+        """
+        try:
+            rules = self.branch_rules(branch)
+            bypasses = []
+            for rid in sorted({r["ruleset_id"] for r in rules if isinstance(r.get("ruleset_id"), int)}):
+                got = self.rest("GET", f"/repos/{self.repo}/rulesets/{rid}")
+                if not isinstance(got, dict):
+                    return None
+                bypasses.append(got.get("current_user_can_bypass"))
+            classic = self._classic_facts(branch)
+        except GitHubError:  # noqa: NDF401 ネットワーク: 読めない事実は None で返し、land が止める（比べずに入れない）
+            return None
+        return None if classic is None else merge_facts(rule_facts_of(rules, bypasses), classic)
+
+    def _classic_facts(self, branch: str) -> Optional[RuleFacts]:
+        """従来のブランチ保護の事実。保護が無ければ `present` が偽、有る（か有無を読めない）のに詳細を読めなければ None。
+        先に読む権限で読める `branches/<b>` の `protection.enabled`（ruleset を含まない従来の保護だけの有無）を見て、
+        偽なら保護の照会を省く（保護の照会は管理者でない利用者に 404 を返しうる）。"""
+        path = f"/repos/{self.repo}/branches/{quote(branch, safe='')}"
+        info = self.rest("GET", path)
+        protection = info.get("protection") if isinstance(info, dict) else None
+        if isinstance(protection, dict) and protection.get("enabled") is False:
+            return NO_RULES
+        try:
+            got = self.rest("GET", f"{path}/protection")
+        except GitHubError:  # noqa: NDF401 ネットワーク: 保護の詳細を読めなければ None（呼び手が止める）
+            return None
+        return classic_facts_of(got) if isinstance(got, dict) else None
 
     def count_issues(self, labels: Sequence[str] = (), state: str = "OPEN") -> int:
         """ラベルと状態の Issue（PR を除く）の件数を `totalCount` で数える。既定の件数の上限で切れない（#3393）。"""
@@ -751,7 +863,7 @@ class GitHub:
         return bytes(resp.content)
 
     def merge(
-        self, number: int, expect_head: Optional[str] = None, method: Optional[str] = None, require_method: bool = False
+        self, number: int, expect_head: Optional[str] = None, method: Optional[str] = None, require_method: bool = False, jump: bool = False
     ) -> MergeOutcome:
         """PR をマージする。先端の食い違い・決めていない残リスクは要求を送らずに断り、拒否は種類で返す（SF4）。
 
@@ -760,8 +872,9 @@ class GitHub:
         許されていない方式は要求を送らずに断る（3378-2）。基底がマージキューを持てば、キューは自分の方式でマージする。
         `require_method` が真の呼び手（merge commit を必須とする本番へのマージ）だけ、キューの方式が `method` と
         違えばキューへ入れずに断る。偽なら（プランの merge ステップ。方式は自動で決めた既定値）キューの方式に従う。
+        `jump` はキューへ入れるときに先頭へ入れる（版上げの PR。#3672 の決定 18）。
         """
-        route = _MergeRoute(self._send_rest_merge, lambda exc: exc.status in MERGE_REFUSED_STATUS, "", require_method)
+        route = _MergeRoute(self._send_rest_merge, lambda exc: exc.status in MERGE_REFUSED_STATUS, "", require_method, jump)
         return self._merge_with(number, expect_head, method, route)
 
     def merge_as_admin(self, number: int, expect_head: str, method: Optional[str] = None) -> MergeOutcome:
@@ -795,19 +908,21 @@ class GitHub:
             if not route.refused(exc):
                 raise
             required = chosen if route.require_method else None
-            queued = self._enqueue(pull, required) if exc.status == MERGE_QUEUE_REFUSED_STATUS else None
+            queued = self._enqueue(pull, required, route.jump) if exc.status == MERGE_QUEUE_REFUSED_STATUS else None
             if queued is not None:
                 return queued
             after = self.pull(number)
             return MergeOutcome(False, refusal_kind(after, pull.head_sha), str(exc), after.head_sha)
         return MergeOutcome(True, None, f"#{number} を {chosen} で{route.how}マージした", pull.head_sha)
 
-    def _enqueue(self, pull: Pull, method: Optional[str]) -> Optional[MergeOutcome]:
+    def _enqueue(self, pull: Pull, method: Optional[str], jump: bool = False) -> Optional[MergeOutcome]:
         """基底がマージキューを持てば PR を先端のままキューへ入れ、待ち（`ci_pending`）を返す。持たなければ None。
 
         直接のマージを 405 で断られたときだけ読む（キューの無い基底の要求の回数を増やさない）。既にキューにあれば入れ直さない。
         `method`（方式を必須とする呼び手だけが渡す）を指定したときは、キューのマージの方式が同じでなければ
         （読めないときも）キューへ入れずに断る（キューは自分の方式でマージし、merge commit を求めた呼び手の祖先の関係が壊れる）。
+        `jump` は先頭へ入れる（版上げの PR。後ろへ並ぶと先に並んだ変更が承認の外で入る。#3672 の決定 18）。
+        要求には読んだ先端（`expectedHeadOid`）を添え、承認の後に先端が動いていれば GitHub が断る。
         """
         repo = self.repository(_MERGE_QUEUE_STATE, {"number": int(pull.number), "branch": pull.base_ref})
         node = repo["pullRequest"]
@@ -824,7 +939,7 @@ class GitHub:
                     pull.head_sha,
                 )
         if not node["isInMergeQueue"]:
-            self.graphql(_ENQUEUE, {"id": node["id"], "head": pull.head_sha})
+            self.graphql(_ENQUEUE, {"id": node["id"], "head": pull.head_sha, "jump": bool(jump)})
         return MergeOutcome(False, MERGE_QUEUE_PENDING, f"#{pull.number} をマージキューへ入れた（マージキューの待ち）", pull.head_sha)
 
     def in_merge_queue(self, number: int) -> bool:

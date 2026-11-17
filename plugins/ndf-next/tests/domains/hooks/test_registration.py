@@ -147,7 +147,7 @@ def test_without_the_environment_every_registered_event_passes_except_strict(tmp
         payload = json.dumps(read_sample(path, tmp_path)) if path else json.dumps({"hook_event_name": event})
         done = _run(command, runtime, tables.PLUGIN_ROOT, cache, payload)
         assert (done.returncode, done.stdout) == (0, ""), (runtime, event, done.stderr)
-    repo = make_repo(tmp_path / "r", delivery=AUTO)
+    repo = make_repo(tmp_path / "r", deliveries=AUTO)
     claude_pre = next(c for rt, ev, c in _commands() if (rt, ev) == ("claude", "PreToolUse"))
     denied = _run(claude_pre, "claude", tables.PLUGIN_ROOT, cache, json.dumps(bash(repo, "gh pr merge 1")))
     assert denied.returncode == 0 and "deny" in denied.stdout

@@ -21,8 +21,8 @@
       "description": "宣言の形の版。読み手は知らない版を読まない"
     },
     "branch_strategy": {
-      "type": "object",
-      "description": "10 系の NDF のブランチ戦略の宣言（#3672）。ndf-next はまだ読まない。読む形は #3681 が決める"
+      "$ref": "#/$defs/BranchStrategy",
+      "description": "ブランチ戦略の宣言。ブランチの名前・取り込み方・リリース・承認・マージを 1 か所で持ち、ndf project branch-strategy だけが作る・更新する・移す・消す。工程の部品は ndf.core.branch_strategy で読む"
     },
     "languages": {
       "anyOf": [
@@ -86,24 +86,6 @@
       ],
       "default": null,
       "description": "テストと動作の確かめに要るコンテナ・compose のファイル・データベース"
-    },
-    "delivery": {
-      "anyOf": [
-        {
-          "items": {
-            "$ref": "#/$defs/Delivery"
-          },
-          "type": "array"
-        },
-        {
-          "$ref": "#/$defs/Unknown"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "description": "リリースの経路の行。本番・ベースブランチで動く行は channel で指し、ブランチ名を写さない"
     },
     "issues": {
       "anyOf": [
@@ -195,21 +177,6 @@
       "default": null,
       "description": "差分の文書のファイルの分け方（文書・振る舞いを決める文書・テストが読む文書とそのテスト）"
     },
-    "production_merge": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/ProductionMerge"
-        },
-        {
-          "$ref": "#/$defs/Unknown"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "description": "本番の Pull Request のマージの方式。admin が true なら、本番チャネルが承認レビューを必須にするとき、承認ゲートの承認の後に管理者の迂回でマージする"
-    },
     "analysis": {
       "anyOf": [
         {
@@ -261,7 +228,7 @@
     },
     {
       "by": "ndf release-steps",
-      "when": "本番のマージで production_merge をメインディレクトリから読む"
+      "when": "本番のマージで branch_strategy（マージの主体・方式・迂回）をメインディレクトリから読む"
     },
     {
       "by": "ndf refactor",
@@ -283,9 +250,6 @@
             "command": "uv run pytest -q"
           }
         ]
-      },
-      "production_merge": {
-        "admin": false
       }
     }
   ],
@@ -356,6 +320,942 @@
       },
       "title": "BranchState",
       "type": "object"
+    },
+    "BranchStrategy": {
+      "title": "BranchStrategy",
+      "description": "ブランチ戦略の宣言（#3672）。.ndf/project.json のセクション branch_strategy。解析の branch-strategy サブコマンドだけが作る・更新する・移す・消す。組み合わせの規則は allOf の R2〜R10。値の等しさを比べる R1（trunk ⇔ base と production が同じ）は JSON Schema で書けないため、読む部品の validate が同じ番号で確かめる",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "release_strategy",
+        "branches",
+        "sprint",
+        "release",
+        "channels",
+        "approval",
+        "merge",
+        "verify"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "web-develop",
+            "web-trunk",
+            "mobile",
+            "docs",
+            "plugin",
+            "custom"
+          ],
+          "description": "作成の記録。代表のリポジトリの種類。答えで既定から変えたときは custom"
+        },
+        "release_strategy": {
+          "type": "string",
+          "enum": [
+            "merge_base_branch",
+            "release_branch",
+            "trunk"
+          ],
+          "description": "取り込み方（#3613 の改名表の名前）"
+        },
+        "branches": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "production",
+            "base"
+          ],
+          "properties": {
+            "production": {
+              "type": "string",
+              "minLength": 1
+            },
+            "base": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "sprint": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "start",
+            "integrate",
+            "doc_prs"
+          ],
+          "properties": {
+            "start": {
+              "enum": [
+                "base",
+                "production"
+              ]
+            },
+            "integrate": {
+              "enum": [
+                "check",
+                "release"
+              ]
+            },
+            "doc_prs": {
+              "enum": [
+                "base",
+                "sprint"
+              ]
+            }
+          }
+        },
+        "reviews": {
+          "type": "object",
+          "description": "レビューの単位（#3163）。PR の種類ごとに掛けるレビューと対象の差分。release は release_strategy が release_branch のときだけ書ける（R9）",
+          "additionalProperties": false,
+          "properties": {
+            "impl": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "checks",
+                "diff"
+              ],
+              "properties": {
+                "checks": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "cross-refactoring",
+                      "cross-review",
+                      "behavior"
+                    ]
+                  }
+                },
+                "diff": {
+                  "type": "string",
+                  "enum": [
+                    "pr",
+                    "none"
+                  ]
+                }
+              }
+            },
+            "sprint": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "checks",
+                "diff"
+              ],
+              "properties": {
+                "checks": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "cross-refactoring",
+                      "cross-review",
+                      "behavior"
+                    ]
+                  }
+                },
+                "diff": {
+                  "type": "string",
+                  "enum": [
+                    "unchecked",
+                    "none"
+                  ]
+                }
+              }
+            },
+            "release": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "checks",
+                "diff"
+              ],
+              "properties": {
+                "checks": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "cross-review"
+                    ]
+                  }
+                },
+                "diff": {
+                  "type": "string",
+                  "enum": [
+                    "pr",
+                    "resolution",
+                    "none"
+                  ]
+                }
+              }
+            },
+            "design": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "checks",
+                "diff"
+              ],
+              "properties": {
+                "checks": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "cross-review"
+                    ]
+                  }
+                },
+                "diff": {
+                  "type": "string",
+                  "enum": [
+                    "pr",
+                    "none"
+                  ]
+                }
+              }
+            },
+            "spec": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "checks",
+                "diff"
+              ],
+              "properties": {
+                "checks": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "cross-review"
+                    ]
+                  }
+                },
+                "diff": {
+                  "type": "string",
+                  "enum": [
+                    "pr",
+                    "none"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "release": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "form",
+            "version_store",
+            "tag",
+            "github_release",
+            "cd"
+          ],
+          "properties": {
+            "form": {
+              "type": "string",
+              "enum": [
+                "service",
+                "mobile",
+                "document",
+                "package-plugin"
+              ]
+            },
+            "plugin": {
+              "type": "string",
+              "minLength": 1
+            },
+            "runtimes": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "enum": [
+                  "claude",
+                  "codex"
+                ]
+              }
+            },
+            "version_store": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "kind"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "const": "plugin"
+                    },
+                    "files": {
+                      "$ref": "#/$defs/BranchStrategyVersionFiles"
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "kind",
+                    "path",
+                    "pointer"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "const": "json"
+                    },
+                    "path": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "pointer": {
+                      "type": "string",
+                      "pattern": "^/"
+                    },
+                    "files": {
+                      "$ref": "#/$defs/BranchStrategyVersionFiles"
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "kind"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "const": "none"
+                    }
+                  }
+                }
+              ]
+            },
+            "tag": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "\\{version\\}"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "github_release": {
+              "type": "boolean"
+            },
+            "deliveries": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Delivery"
+              }
+            },
+            "cd": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "workflow"
+                  ],
+                  "properties": {
+                    "workflow": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "channels": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "name",
+                  "ref"
+                ],
+                "properties": {
+                  "name": {
+                    "const": "stable"
+                  },
+                  "ref": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "name",
+                  "ref",
+                  "workflow"
+                ],
+                "properties": {
+                  "name": {
+                    "const": "dev"
+                  },
+                  "ref": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "workflow": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "approval": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "target",
+            "via"
+          ],
+          "properties": {
+            "target": {
+              "enum": [
+                "release_pr",
+                "production_pr"
+              ]
+            },
+            "via": {
+              "enum": [
+                "gate",
+                "review"
+              ]
+            }
+          }
+        },
+        "merge": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "actor",
+            "method",
+            "commit",
+            "admin"
+          ],
+          "properties": {
+            "actor": {
+              "enum": [
+                "ndf",
+                "human"
+              ]
+            },
+            "method": {
+              "enum": [
+                "merge-queue",
+                "strict",
+                "direct"
+              ]
+            },
+            "commit": {
+              "enum": [
+                "merge",
+                "squash",
+                "rebase"
+              ]
+            },
+            "admin": {
+              "type": "boolean"
+            }
+          }
+        },
+        "verify": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "required": [
+                "kind"
+              ],
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "marketplace",
+                    "deploy"
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "title": "R2",
+          "if": {
+            "required": [
+              "release_strategy"
+            ],
+            "properties": {
+              "release_strategy": {
+                "const": "trunk"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "merge": {
+                "properties": {
+                  "method": {
+                    "enum": [
+                      "merge-queue",
+                      "strict"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "title": "R3",
+          "if": {
+            "required": [
+              "merge"
+            ],
+            "properties": {
+              "merge": {
+                "required": [
+                  "admin"
+                ],
+                "properties": {
+                  "admin": {
+                    "const": true
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "merge": {
+                "properties": {
+                  "method": {
+                    "const": "direct"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "title": "R4",
+          "if": {
+            "required": [
+              "release_strategy",
+              "approval"
+            ],
+            "properties": {
+              "release_strategy": {
+                "enum": [
+                  "trunk",
+                  "release_branch"
+                ]
+              },
+              "approval": {
+                "required": [
+                  "target"
+                ],
+                "properties": {
+                  "target": {
+                    "const": "release_pr"
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "release": {
+                "properties": {
+                  "version_store": {
+                    "not": {
+                      "required": [
+                        "kind"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "const": "none"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "title": "R5",
+          "if": {
+            "required": [
+              "release_strategy"
+            ],
+            "properties": {
+              "release_strategy": {
+                "enum": [
+                  "merge_base_branch",
+                  "release_branch"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "approval": {
+                "properties": {
+                  "target": {
+                    "const": "release_pr"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "title": "R6",
+          "if": {
+            "required": [
+              "release_strategy",
+              "approval"
+            ],
+            "properties": {
+              "release_strategy": {
+                "const": "trunk"
+              },
+              "approval": {
+                "required": [
+                  "target"
+                ],
+                "properties": {
+                  "target": {
+                    "const": "production_pr"
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "sprint": {
+                "properties": {
+                  "integrate": {
+                    "const": "release"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "title": "R6",
+          "if": {
+            "required": [
+              "release_strategy",
+              "approval"
+            ],
+            "properties": {
+              "release_strategy": {
+                "const": "trunk"
+              },
+              "approval": {
+                "required": [
+                  "target"
+                ],
+                "properties": {
+                  "target": {
+                    "const": "release_pr"
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "sprint": {
+                "properties": {
+                  "integrate": {
+                    "const": "check"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "title": "R6",
+          "if": {
+            "required": [
+              "release_strategy"
+            ],
+            "properties": {
+              "release_strategy": {
+                "enum": [
+                  "merge_base_branch",
+                  "release_branch"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "sprint": {
+                "properties": {
+                  "integrate": {
+                    "const": "check"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "title": "R7",
+          "if": {
+            "required": [
+              "channels"
+            ],
+            "properties": {
+              "channels": {
+                "contains": {
+                  "required": [
+                    "name"
+                  ],
+                  "properties": {
+                    "name": {
+                      "const": "dev"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "required": [
+                "release_strategy"
+              ],
+              "properties": {
+                "release_strategy": {
+                  "const": "trunk"
+                }
+              }
+            }
+          }
+        },
+        {
+          "title": "R8",
+          "if": {
+            "required": [
+              "release"
+            ],
+            "properties": {
+              "release": {
+                "required": [
+                  "version_store"
+                ],
+                "properties": {
+                  "version_store": {
+                    "required": [
+                      "kind"
+                    ],
+                    "properties": {
+                      "kind": {
+                        "const": "none"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "release": {
+                "properties": {
+                  "tag": {
+                    "type": "null"
+                  },
+                  "github_release": {
+                    "const": false
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "title": "R9",
+          "if": {
+            "required": [
+              "release_strategy"
+            ],
+            "properties": {
+              "release_strategy": {
+                "const": "merge_base_branch"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "sprint": {
+                "properties": {
+                  "start": {
+                    "const": "base"
+                  },
+                  "doc_prs": {
+                    "const": "base"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "title": "R9",
+          "if": {
+            "required": [
+              "release_strategy"
+            ],
+            "properties": {
+              "release_strategy": {
+                "enum": [
+                  "release_branch",
+                  "trunk"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "sprint": {
+                "properties": {
+                  "start": {
+                    "const": "production"
+                  },
+                  "doc_prs": {
+                    "const": "sprint"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "title": "R9",
+          "if": {
+            "not": {
+              "required": [
+                "release_strategy"
+              ],
+              "properties": {
+                "release_strategy": {
+                  "const": "release_branch"
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "reviews": {
+                "not": {
+                  "required": [
+                    "release"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        {
+          "title": "R10",
+          "if": {
+            "required": [
+              "release"
+            ],
+            "properties": {
+              "release": {
+                "required": [
+                  "cd"
+                ],
+                "properties": {
+                  "cd": {
+                    "type": "null"
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "release": {
+                "properties": {
+                  "tag": {
+                    "type": "null"
+                  },
+                  "github_release": {
+                    "const": false
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "BranchStrategyVersionFiles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "pointer": {
+            "type": "string",
+            "pattern": "^/"
+          }
+        }
+      },
+      "description": "版数を書き換える追加のファイル（旧い .ndf/release.json の version_files の移す先）"
     },
     "CauseType": {
       "additionalProperties": false,
@@ -1090,21 +1990,6 @@
         "kind"
       ],
       "title": "Product",
-      "type": "object"
-    },
-    "ProductionMerge": {
-      "additionalProperties": false,
-      "description": "本番の PR のマージの方式（#3506）。`admin` が true なら、本番チャネルが承認レビューを必須にするとき管理者の迂回でマージする。利用者が手で書き、解析は書かない。",
-      "properties": {
-        "admin": {
-          "title": "Admin",
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "admin"
-      ],
-      "title": "ProductionMerge",
       "type": "object"
     },
     "Seeds": {

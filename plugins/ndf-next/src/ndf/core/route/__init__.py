@@ -19,8 +19,9 @@
     ndf route render <依頼の種類> --out <plan.json> [--set <名前>=<値>]... [--add <名前>=<値>]...
         雛形を選んで埋め、プランのファイルを書く。`--add` は並びの名前へ値を 1 つ足す。`repo` を省けば打った場所の
         git の根、`worktree` を省けば根の `.worktrees/<branch>` にする（サブモジュールでもそのworktreeの根。#2054）。
-        省いた作業場所が使えなければ書かずに止まる。`base` を省けば根の `.ndf/worktree.json` の `base_branch`、
-        宣言が無ければリモート名（`.ndf/worktree.json` の `remote`）のリモートの既定ブランチにする。`merge_method` を省けば `base` のブランチで許された方式
+        省いた作業場所が使えなければ書かずに止まる。`base` を省けば根のブランチ戦略の宣言（`.ndf/project.json` の
+        `branch_strategy`）のスプリントの PR の宛先（`Strategy.pr_target`）にし、宣言が無い・旧いキーが残る・スキーマに
+        落ちるときは既定ブランチへ倒さずに止まる。`merge_method` を省けば `base` のブランチで許された方式
         （ruleset とリポジトリの設定）の先頭にし、読めなければ無い差し込みとして止まる。`repo` の宣言
         （`.ndf/project.json`）がテストを CI に寄せる（`test.ci.only`）なら、手元のテストのステップを外す
     ndf route run <依頼の種類> --out <plan.json> [--set ...] [--add ...]
@@ -59,6 +60,7 @@ from ndf.adapters import git, github
 from ndf.contracts import causes, exit_codes, limits, result
 from ndf.contracts.exit_codes import OK
 from ndf.contracts.routing import END
+from ndf.core import branch_strategy
 from ndf.core.route import local_tests
 from ndf.core.plan import cli as plan_cli
 from ndf.core.plan import model, steps
@@ -80,9 +82,6 @@ TARGET_TABLE_KEYS = ("on_cause", "on_answer")
 REPEAT_LIMIT = "supervise.step-rerun"
 # 作業場所を省いたときの置き場（リポジトリの根の下）
 WORKTREES = ".worktrees"
-# base を省いたときに読むブランチの運用の宣言（リポジトリの根の下）と、その鍵
-BRANCH_DECLARATION = git.WORKTREE_DECLARATION
-BASE_KEY = "base_branch"
 _PARAM = re.compile(r"\{\{([a-z_][a-z0-9_]*)\}\}")
 
 Value = Union[str, list[str]]
@@ -396,21 +395,15 @@ def repo_root(cwd: Path) -> str:
     return git.Git(cwd).run("rev-parse", "--show-toplevel").strip()
 
 
-def default_base(repo: Path, remote: Optional[str] = None) -> Optional[str]:
-    """宛先のブランチの既定: ブランチの運用の宣言の `base_branch`、無ければリモートの既定ブランチ（決まらなければ None）。
+def default_base(repo: Path) -> str:
+    """宛先のブランチの既定: ブランチ戦略の宣言（`repo` の `.ndf/project.json` の `branch_strategy`）のスプリントの PR の宛先。
 
-    `remote` は既定ブランチを読むリモート名（`--set remote=` で渡した値）。省けばこの作業場所のリモート名。
+    宣言が無い・旧いキーが残る・スキーマに落ちるときは `RouteError`（理由に宣言の位置と打つコマンドを載せる）。
     """
     try:
-        declared = json.loads((repo / BRANCH_DECLARATION).read_text(encoding="utf-8")).get(BASE_KEY)
-    except (OSError, ValueError, AttributeError):
-        declared = None
-    if isinstance(declared, str) and declared:
-        return declared
-    try:
-        return git.Git(repo).remote_default_branch(remote)
-    except git.GitError:  # noqa: NDF401 外部コマンド: 宣言の remote が誤り
-        return None
+        return branch_strategy.load(repo).pr_target("sprint")
+    except branch_strategy.StrategyError as exc:
+        raise RouteError(f"base を決められない: {exc.reason}") from None
 
 
 def default_merge_method(repo: Path, base: str, remote: Optional[str] = None) -> Optional[str]:
@@ -452,7 +445,8 @@ def _omitted(t: Template, out: Mapping[str, Value], name: str) -> bool:
 
 
 def derived(t: Template, given: Mapping[str, Value], cwd: Path) -> dict[str, Value]:
-    """省いた `repo`・`worktree`・`remote`・`base`・`merge_method` を打った場所から決めて足す（決まらなければ足さない）。"""
+    """省いた `repo`・`worktree`・`remote`・`base`・`merge_method` を打った場所から決めて足す（決まらなければ足さない。
+    `base` はブランチ戦略の宣言から決め、決まらなければ `RouteError`）。"""
     out = dict(given)
     if _omitted(t, out, "repo"):
         out["repo"] = repo_root(cwd)
@@ -461,9 +455,7 @@ def derived(t: Template, given: Mapping[str, Value], cwd: Path) -> dict[str, Val
     if _omitted(t, out, "worktree") and isinstance(out.get("branch"), str):
         out["worktree"] = str(Path(str(out["repo"])) / WORKTREES / out["branch"])
     if _omitted(t, out, "base") and "repo" in out:
-        base = default_base(Path(str(out["repo"])), _given_remote(out))
-        if base is not None:
-            out["base"] = base
+        out["base"] = default_base(Path(str(out["repo"])))
     if _omitted(t, out, "merge_method") and "repo" in out and isinstance(out.get("base"), str):
         method = default_merge_method(Path(str(out["repo"])), str(out["base"]), _given_remote(out))
         if method is not None:

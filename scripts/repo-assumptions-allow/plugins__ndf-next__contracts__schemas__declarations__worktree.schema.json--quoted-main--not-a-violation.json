@@ -2,6 +2,6 @@
   "path": "plugins/ndf-next/contracts/schemas/declarations/worktree.schema.json",
   "name": "quoted-main",
   "kind": "not-a-violation",
-  "reason": "x-ndf-place の値（メインディレクトリ）と、宣言の例（examples）の production_branch の値。既定ではない",
-  "count": 2
+  "reason": "x-ndf-place の値（メインディレクトリ）。既定ではない",
+  "count": 1
 }

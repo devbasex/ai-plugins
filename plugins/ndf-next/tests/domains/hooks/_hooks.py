@@ -78,8 +78,13 @@ def records() -> list[dict[str, Any]]:
     return lines
 
 
-def make_repo(root: Path, slug: str = "owner/repo", delivery: Any = None, worktree: bool = False) -> Path:
-    """宛先のリポジトリ（.git の設定に origin と、.ndf/project.json の delivery）を作る。`delivery` が None なら宣言を置かない。"""
+# ブランチ戦略の宣言の雛形（代表の 5 種の fixture の web-develop。届け先の行だけを差し替える）
+_STRATEGY = Path(__file__).resolve().parents[2] / "fixtures" / "branch_strategy" / "web-develop.json"
+
+
+def make_repo(root: Path, slug: str = "owner/repo", deliveries: Any = None, worktree: bool = False) -> Path:
+    """宛先のリポジトリ（.git の設定に origin と、.ndf/project.json の `branch_strategy.release.deliveries`）を作る。
+    `deliveries` が None なら宣言を置かない。"""
     root.mkdir(parents=True, exist_ok=True)
     config = f'[core]\n\tbare = false\n[remote "origin"]\n\turl = git@github.com:{slug}.git\n'
     if worktree:
@@ -92,9 +97,11 @@ def make_repo(root: Path, slug: str = "owner/repo", delivery: Any = None, worktr
     else:
         (root / ".git").mkdir(exist_ok=True)
         (root / ".git" / "config").write_text(config, encoding="utf-8")
-    if delivery is not None:
+    if deliveries is not None:
+        section = json.loads(_STRATEGY.read_text(encoding="utf-8"))
+        section["release"]["deliveries"] = deliveries
         (root / ".ndf").mkdir(exist_ok=True)
-        (root / ".ndf" / "project.json").write_text(json.dumps({"version": 1, "delivery": delivery}), encoding="utf-8")
+        (root / ".ndf" / "project.json").write_text(json.dumps({"version": 1, "branch_strategy": section}), encoding="utf-8")
     return root
 
 

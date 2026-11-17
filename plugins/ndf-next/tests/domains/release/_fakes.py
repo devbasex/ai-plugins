@@ -8,11 +8,20 @@ from pathlib import Path
 from typing import Any
 
 import git_sandbox
+from strategy_fixture import KINDS, section  # noqa: F401 代表の 5 種の宣言（10 系のテストも同じファイルを読む）
 
-from ndf.adapters.github import Authored, GitHubError, MergeOutcome, Pull
+from ndf.adapters.github import Authored, GitHubError, MergeOutcome, Pull, RuleFacts, rule_facts_of
+from ndf.core.branch_strategy import Strategy
 
 HEAD = "a" * 40
 OTHER = "b" * 40
+
+
+def strategy(kind: str = "web-develop", **merge: Any) -> Strategy:
+    """種類 `kind` の宣言。`merge` は `merge` の値を差し替える（`admin=True` など）。"""
+    got = section(kind)
+    got["merge"].update(merge)
+    return Strategy(got)
 
 
 def pull(number: int = 7, head: str = HEAD, base: str = "main", ref: str = "release/v1.2.4", merged: bool = False, body: str = "") -> Pull:
@@ -43,6 +52,16 @@ class FakeHub:
     # マージキューに入っている PR と、キューから外した PR
     queued: set[int] = field(default_factory=set)
     dequeued: list[int] = field(default_factory=list)
+    # キューへ入れるときの先頭への指定（`merge` の jump）
+    merge_jumps: list[bool] = field(default_factory=list)
+    # 当たった ruleset の迂回の可否（規則があるときだけ使う）と、ruleset を読めないことにする印
+    bypass: str | None = "always"
+    rules_unreadable: bool = False
+    # GraphQL の応答（クエリの先頭の語で引く）
+    graphql_data: dict[str, Any] = field(default_factory=dict)
+    # PR ごとのレビュー（REST の形）と、本番ブランチ宛てで開いている PR の (番号, head)
+    reviews_of: dict[int, list[dict]] = field(default_factory=dict)
+    open_at: list[tuple[int, str]] = field(default_factory=list)
 
     def pull(self, number: int) -> Pull:
         return self.pulls[number]
@@ -52,6 +71,15 @@ class FakeHub:
 
     def trusts(self, authored: Authored) -> bool:
         return authored.author in self.trusted
+
+    def permission(self, login: str) -> str:
+        return "write" if login in self.trusted else "read"
+
+    def reviews(self, number: int) -> list[dict]:
+        return list(self.reviews_of.get(number, []))
+
+    def open_heads(self, base: str) -> list[tuple[int, str]]:
+        return list(self.open_at)
 
     def token_trusted(self) -> bool:
         # 書いたコメントの書き手は octocat（`rest` の POST）
@@ -76,6 +104,17 @@ class FakeHub:
         got = self.rest("GET", f"/repos/{self.repo}/rules/branches/{branch}")
         return got if isinstance(got, list) else []
 
+    def rule_facts(self, branch: str) -> RuleFacts | None:
+        """`GitHub.rule_facts` の代わり。規則（`branch_rules`）だけから組み、従来の保護は無いとみなす。"""
+        if self.rules_unreadable:
+            return None
+        rules = self.branch_rules(branch)
+        return rule_facts_of(rules, [self.bypass] if rules else [])
+
+    def graphql(self, query: str, variables: dict[str, Any]) -> dict[str, Any]:
+        self.requests.append(("GRAPHQL", query.split("{", 1)[0].strip(), variables))
+        return self.graphql_data
+
     def nodes(self, numbers: Any, node: str, fields: str) -> dict[int, dict]:
         return {int(n): self.node_data.get(int(n), {}) for n in numbers}
 
@@ -95,10 +134,13 @@ class FakeHub:
     def bot_app(self, login: str) -> int | None:
         return self.bot_apps.get(login)
 
-    def merge(self, number: int, expect_head: str | None = None, method: str | None = None, require_method: bool = False) -> MergeOutcome:
+    def merge(
+        self, number: int, expect_head: str | None = None, method: str | None = None, require_method: bool = False, jump: bool = False
+    ) -> MergeOutcome:
         self.merged.append(number)
         self.merge_methods.append(method)
         self.merge_required.append(require_method)
+        self.merge_jumps.append(jump)
         return MergeOutcome(True, None, f"#{number} をマージした", self.pulls[number].head_sha)
 
     def in_merge_queue(self, number: int) -> bool:

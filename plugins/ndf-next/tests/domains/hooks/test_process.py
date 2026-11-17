@@ -135,7 +135,7 @@ def test_the_probe_counts_children_modules_and_scans(tmp_path):
 @pytest.mark.parametrize("path", sample_paths(), ids=lambda p: "/".join(p.parts[-3:]))
 def test_entry_stays_within_the_footprint(path, scripts, tmp_path):
     runtime, event = path.parts[-3], path.stem
-    repo = make_repo(tmp_path / "r", delivery=AUTO)
+    repo = make_repo(tmp_path / "r", deliveries=AUTO)
     payload = json.dumps(read_sample(path, repo))
     code, seen = _footprint(tmp_path, scripts / "entry.py", [runtime, event], payload, cwd=repo)
     assert code == 0
@@ -151,7 +151,7 @@ def test_entry_stays_within_the_footprint(path, scripts, tmp_path):
 
 def test_without_the_environment_every_event_passes_except_strict(scripts, tmp_path):
     missing = tmp_path / "no-venv" / "bin" / "python"
-    repo = make_repo(tmp_path / "r", delivery=AUTO)
+    repo = make_repo(tmp_path / "r", deliveries=AUTO)
     for path in sample_paths():
         runtime, event = path.parts[-3], path.stem
         if event == "SessionStart":

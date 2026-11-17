@@ -35,14 +35,13 @@ PR マージ後の後始末をまとめて実行する。対象 PR のブラン�
 | 対象 | 止めずに行う | 止まる（一覧で示し、同意の無い対象を消さない） | 触らない（報告に「対象外」） |
 | --- | --- | --- | --- |
 | worktree | `git worktree remove <path>` が 0 で終わる。拒まれたら未追跡・無視されたファイルを退避して外す（スクリプトが行う） | 追跡ファイルに未コミットの変更が残っている（退避できず `--force` が消すため外さない）・退避か削除が 0 以外で終わる（未完了。同意の対象にしない） | メインディレクトリ |
-| ローカルブランチ | `git branch -d <name>` が 0 で終わる | 同じコマンドが 0 以外で終わる | 起点・本番チャネル・現在のブランチ・選んで集める取り込み方（`branch_flow.promotion: selected`）で本番チャネルに含まれていないスプリントブランチ（`kept`。リリースの単位として本番へ届くまで要る） |
+| ローカルブランチ | `git branch -d <name>` が 0 で終わる | 同じコマンドが 0 以外で終わる | 起点・本番チャネル・現在のブランチ・選んで集める取り込み方（ブランチ戦略の宣言の `release_strategy: release_branch`）で本番チャネルに含まれていないスプリントブランチ（`kept`。リリースの単位として本番へ届くまで要る） |
 | リモートブランチ | マージ済み Pull Request の head で、同じリポジトリにあり、先端が `headRefOid` と一致する | — | 起点・本番チャネル・fork の head、先端が `headRefOid` と違う、対応する Pull Request が見つからない |
 | 課題 | **閉じない**（スプリント課題の OPEN の一覧を報告に載せるだけ） | — | — |
 
 - **起点・本番チャネル・現在のブランチは、同意を求めずに対象から外す。** 尋ねる場面を
   作ること自体が誤りで、1 回の誤答で開発の本流が消える。起点は「ベースブランチを決める」の
-  `$dev_base`、本番チャネルは `.ndf/worktree.json` の `production_branch`（設定が無ければ
-  既定ブランチ）である
+  `$dev_base`、本番チャネルはブランチ戦略の宣言の `branches.production` である
 - **リモートブランチを消すのは、先端が Pull Request の `headRefOid` と一致するときだけ。**
   マージの後に積まれたコミットは Restore branch で戻らず、消した後に戻す手段が無い。
   引けない・先端が違うときは、同意を得ても戻せないため消さずに対象外として報告する
@@ -65,42 +64,27 @@ PR マージ後の後始末をまとめて実行する。対象 PR のブラン�
 以降の手順はこの値を使う。
 
 ```bash
-# 起点は開発の本流であって、既定ブランチとは限らない。宣言（`.ndf/worktree.json` の
-# `base_branch`）を先に読み、その名前が実在することを確かめる。取得済みの参照に無ければ
-# origin へ問い合わせる（取得していないだけの場合を「無い」と読まないため）。実在しなければ
-# 既定ブランチへ落とさずに止まる。宣言が無ければ origin の HEAD が指す先を使い、それも
-# 取れなければ慣例の名前のうちローカルにあるものへ落とす
-# （共通ライブラリ `wt_base_branch` と同じ順序）
-dev_base=$(jq -r 'select(.version == 1) | .base_branch | select(type == "string")' \
-  .ndf/worktree.json 2>/dev/null)
-if [ -n "$dev_base" ]; then
-  dev_base_found=0
-  if git show-ref --verify --quiet "refs/remotes/origin/$dev_base" ||
-     git show-ref --verify --quiet "refs/heads/$dev_base"; then
-    dev_base_found=1
-  else
-    # `git ls-remote` のパターンは参照名の末尾に一致する。問い合わせの成功だけを見ると
-    # `refs/heads/x/refs/heads/<ベースブランチ>` のような別のブランチでも「ある」と読むため、
-    # 返った行の参照名そのものを照合する（共通ライブラリ `wt_branch_exists` と同じ形）
-    dev_base_listing=$(GIT_TERMINAL_PROMPT=0 git ls-remote --heads origin \
-      "refs/heads/$dev_base" 2>/dev/null)
-    while IFS= read -r line; do
-      case "$line" in *$'\t'"refs/heads/$dev_base") dev_base_found=1; break ;; esac
-    done <<<"$dev_base_listing"
-  fi
-  [ "$dev_base_found" -eq 1 ] || {
-    printf 'NOTE: .ndf/worktree.json の base_branch が指す %s は origin にもローカルにもありません\n' \
-      "$dev_base" >&2
-    exit 1
-  }
+# 起点はブランチ戦略の宣言（`.ndf/project.json` の `branch_strategy.branches.base`）。宣言が無い・読めないときは、
+# 作成のコマンドを出して止まる。既定ブランチへ落とさない
+dev_base=$(jq -er '.branch_strategy.branches.base | strings' .ndf/project.json 2>/dev/null) ||
+  { echo "ブランチ戦略の宣言を読めない。ndf project branch-strategy init で作る" >&2; exit 1; }
+# 名前の実在を確かめる。取得済みの参照に無ければ origin へ問い合わせる（取得していないだけの場合を「無い」と読まないため）。
+# `git ls-remote` のパターンは参照名の末尾に一致するので、返った行の参照名そのものを照合する（共通ライブラリ `wt_branch_exists` と同じ形）
+dev_base_found=0
+if git show-ref --verify --quiet "refs/remotes/origin/$dev_base" ||
+   git show-ref --verify --quiet "refs/heads/$dev_base"; then
+  dev_base_found=1
 else
-  dev_base=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')
-  for candidate in main master; do
-    [ -n "$dev_base" ] && break
-    git show-ref --verify --quiet "refs/heads/$candidate" && dev_base=$candidate
-  done
-  dev_base=${dev_base:-main}
+  dev_base_listing=$(GIT_TERMINAL_PROMPT=0 git ls-remote --heads origin \
+    "refs/heads/$dev_base" 2>/dev/null)
+  while IFS= read -r line; do
+    case "$line" in *$'\t'"refs/heads/$dev_base") dev_base_found=1; break ;; esac
+  done <<<"$dev_base_listing"
 fi
+[ "$dev_base_found" -eq 1 ] || {
+  printf 'NOTE: ブランチ戦略の宣言の branches.base が指す %s は origin にもローカルにもありません\n' "$dev_base" >&2
+  exit 1
+}
 ```
 
 ## クリーンアップの手順
@@ -154,7 +138,7 @@ python3 "$SCRIPTS/merged-steps.py" merge-when-green <PR番号> --root <メイン
   秒を過ぎても空なら CI の無いリポジトリとしてマージする（`items` に `no_checks` が載る）
 - 失敗したチェックが 1 つでもあれば、マージせずに `stopped`（1）で止まる。`items[].name` が失敗したチェック
 - 通ればマージし、続けて上の `cleanup` と同じ後片付けを行う。**管理者の迂回（`--admin`）は使わない側を既定にする。** 迂回を
-  使うのは、`.ndf/project.json` の `production_merge.admin` で迂回を宣言し、かつ本番ブランチの ruleset が承認を 1 以上求めると
+  使うのは、ブランチ戦略の宣言の `merge.admin` で迂回を宣言し、かつ本番ブランチの ruleset が承認を 1 以上求めると
   読めるときの、本番ブランチ宛ての PR だけである（下の cd-admin）。どちらかが欠ければ `--no-admin` を付けて打つ（このスクリプトは
   付けないと `gh pr merge --admin` で打つ）。`--no-admin` ならマージの行に `admin: false` が残り、必須のチェックやレビューが
   足りなければ GitHub が拒んで `stopped`（1）で止まる。CD のある場合の本番チャネルへのマージ（`release-steps.py release
@@ -325,8 +309,7 @@ ndf progress show <進行表の ID>   # ID は ndf progress new の結果にあ�
 **本番系へ届く操作は 3 つの形を取る。** リリース（`release`）、運用モードの実行
 （`operation` の実装）、自動反映の本番チャネルへの Pull Request のマージである。リリースの規則は `/ndf:release` が持ち、
 最後のものは `merge-when-green` が止める（上の「マージから行うとき」）。
-どのブランチが本番チャネルかはリポジトリが設定する（`.ndf/worktree.json` の
-`production_branch`。設定が無ければ既定ブランチ）。
+どのブランチが本番チャネルかはブランチ戦略の宣言の `branches.production` が決める（宣言が無ければ止まる）。
 
 この工程に入ったら進捗記録 `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "後片付け"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「進捗記録」を使う）。
 
