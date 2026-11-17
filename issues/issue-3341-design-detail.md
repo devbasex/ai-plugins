@@ -167,7 +167,7 @@ plugins/ndf-next/
 | 同時に走りうる処理 | 共有する資源 | 排他の取り方 | 冪等性と中断からの再開 |
 | --- | --- | --- | --- |
 | 新しい NDF の 2 つのコマンドが同時に状態の置き場を用意する | 状態のホーム `~/.local/state/ndf` | 今と同じ隣の錠（`ndf.lock`）の排他の下で、錠の確かめ・退避先の確かめ・名前の変更・`format.json` を行う | 後の処理は先が置いた `format.json` を見て退避しない。止まった処理は何も変えないため、打ち直せる |
-| 新しい NDF の置き場の用意と、10 系のラッパー・リレーハブ | 旧い置き場の `relay/*/relay.lock`・`relay/hub/hub.lock` | 待たずに排他で取りにいき、すべて取れたら、名前の変更と新しい置き場の `format.json` の書き込みが終わるまで持ち続ける（隣の錠も同じ間持つ） | 錠を持つ間に起動した 10 系は錠を取れず、退避する置き場へ書かない（不変条件 I3）。10 系の錠は `filelock` で、待つ間も試すたびにパスから錠のファイルを開き直すため、錠を放した後に取れる錠は新しい置き場のものである。その 10 系の記録は新しい置き場だけへ書かれ、退避先と新しい置き場へ分かれない |
+| 新しい NDF の置き場の用意と、10 系のラッパー・リレーハブ | 旧い置き場の `relay/*/relay.lock`・`relay/hub/hub.lock` | 待たずに排他で取りにいき、すべて取れたら、名前の変更と新しい置き場の `format.json` の書き込みが終わるまで持ち続ける（隣の錠も同じ間持つ） | 錠を持つ間に、持っている錠のファイルで起動した 10 系は錠を取れず、退避する置き場へ書かない（不変条件 I3）。10 系の錠は `filelock` で、待つ間も試すたびにパスから錠のファイルを開き直すため、錠を放した後に取れる錠は新しい置き場のものである。その 10 系の記録は新しい置き場だけへ書かれ、退避先と新しい置き場へ分かれない。`hold_legacy_locks` は錠のファイルを作らないため、呼んだ時点に無い錠のファイル（新しい名前のラッパーの `relay/<新しい名前>/relay.lock`・`hub.lock` がまだ無い置き場のリレーハブ）は持てない。持つ間にそれらで起動した 10 系は旧い置き場に錠を作って取れ、その実行の記録は退避先と新しい置き場へ分かれうる。この窓は、退避の前に 10 系をすべて止める入れ替えの手順 U1 を前提にして閉じ、名前の変更の後に確かめ直さない（不変条件 I3 の前提） |
 | 新しい NDF の耐久の実行と、10 系の耐久の実行 | チェックアウトの置き場の `dbos/*.lock`・`progress.sqlite.lock` | 置き場の排他を取ったうえで、旧い錠を待たずに取る。取れなければ待ち直さない。すべて取れたら、名前の変更と新しい置き場の `format.json` の書き込みが終わるまで持ち続ける | 止まった処理は何も変えない。10 系の実行が終われば打ち直せる。錠を持つ間に起動した 10 系の耐久の実行は、上の行と同じ理由で新しい置き場だけへ書く |
 | 10 系と 11.0 の SessionStart | 共有の設定ディレクトリの `relay.py`・`relay.version` | 錠を取らない。`relay.version` の版の大小で 10 系が置き直さない（規則 P3） | `install` の書き込みは一時のファイルからの置き換えで、同じ中身を何度書いてもよい |
 | `check-plugin-refs.py apply` と、ほかの作業 | worktree のファイル | 取らない（入れ替えの PR の作業ディレクトリで 1 回打つ） | 確かめが通るまで何も書かない。途中で落ちたら書いたファイルを戻して打ち直す |
@@ -196,7 +196,7 @@ plugins/ndf-next/
 | `apply_table` | `sed -i` | 無し | 使えない理由: 書き込みの前にすべての行を確かめて 1 つも書かずに止まる形を持たない |
 | `retired_name` | `identity._retire_candidates`・`durable_sweep._free_name` | `grep -rn "_free_name\|_retire_target" plugins/ndf-next/src` | 使えない理由: どちらも退避先があれば名前を足して続ける（規則 P2 と逆）。`identity` の 2 つは消し、`_free_name` は鍵ごとのファイルの片付け（`durable_sweep`）だけが使い続ける |
 | `lock_held` | `domains/relay/registry.lock_busy` | `grep -rn "def lock_busy" plugins/ndf-next/src` | 使う（本体を移す）。`registry` は `identity` より上の層にあり、`identity` から読むと依存が逆向きになるため、本体を `identity` へ移して `registry.lock_busy` から呼ぶ |
-| `hold_legacy_locks` | `identity.lock_held`・`core/durable_locks.try_flock` | `grep -rn "def try_flock" plugins/ndf-next/src` | `lock_held` を使う。`try_flock` は開いたファイルを受ける形で、`core` にあり `identity` から読めない |
+| `hold_legacy_locks` | `identity.lock_held`・`core/durable_locks.try_flock` | `grep -rn "def try_flock" plugins/ndf-next/src` | 使えない理由: `lock_held` は取れた排他をすぐ放して真偽だけを返すため、`with` を抜けるまで錠を持ち続けられない（使うと、確かめた直後に錠を放し、名前の変更までの間に 10 系が取れる）。`try_flock` は開いたファイルを受ける形で、`core` にあり `identity` から読めない。錠のファイルを読むだけで開いた fd に `fcntl.flock(LOCK_EX \| LOCK_NB)` をかけ、`with` を抜けるまで fd を閉じずに持つ |
 
 ## 単体テストの観点
 
@@ -210,8 +210,8 @@ plugins/ndf-next/
 | `apply_table` | 「向け直す」を置き換え、「ファイルを消す」を消す | 「消す」の行は書き換えず `manual` に並ぶ | 「未作成」が残ると何も変えずに 1。`from` が無い行があると何も変えずに 1 |
 | `retired_name` | `format.json` の無い置き場で `ndf.v10-20261117` | `form` が 1 なら `.v1-`。日付をまたぐ時刻でも UTC の日付 | 無し |
 | `lock_held` | 誰も持たない錠で偽 | ファイルが無いと偽で、ファイルを作らない | 別のプロセスが持つと真 |
-| `hold_legacy_locks` | 錠を持つプロセスが居なければ空 | 錠のファイルが無い置き場で空。錠のファイルを作らない | 別のプロセスが `relay/<名前>/relay.lock` か `relay/hub/hub.lock` を持つとそのパスを返す |
-| `prepare_state_dir` | 旧い置き場を `ndf.v10-<日付>` へ退避する | `config-state` だけがある利用者で何も退避しない | 錠を持つプロセスが居ると `legacy_running` で止まり何も変えない。退避先があると `retire_target_exists` で止まり何も変えない。名前を変えられないと `config_broken` |
+| `hold_legacy_locks` | 錠を持つプロセスが居なければ空。空のとき、`with` の中では別のプロセスの待たない取得が失敗し、`with` を抜けた後は成功する | 錠のファイルが無い置き場で空。錠のファイルを作らない | 別のプロセスが `relay/<名前>/relay.lock` か `relay/hub/hub.lock` を持つとそのパスを返し、取れた錠は `with` の中で既に放している（別のプロセスの待たない取得が成功する） |
+| `prepare_state_dir` | 旧い置き場を `ndf.v10-<日付>` へ退避する。名前の変更の時点と `format.json` の書き込みの時点で、別のプロセスの待たない取得が旧い錠に対して失敗する（旧い錠が持たれている） | `config-state` だけがある利用者で何も退避しない | 錠を持つプロセスが居ると `legacy_running` で止まり何も変えない。退避先があると `retire_target_exists` で止まり何も変えない。名前を変えられないと `config_broken` |
 | `_prepare` | 退避した元と先を標準エラーに出す | 退避が無いとき何も出さない | `IdentityError.kind` が結果の `kind` になる |
-| `_retire_store` | `format.json` の無い置き場を `state.v10-<日付>` へ退避する | `_read_format` が 0（`format.json` が無いか読めない）なら `.v10-`。番号は 1 から始まるため、0 を形の版として使わない | 10 系の `dbos/*.lock` を持つプロセスが居ると `StoreLegacyRunning` で、`prepare_store` が再試行しない。退避先があると `StoreRetireTargetExists` |
+| `_retire_store` | `format.json` の無い置き場を `state.v10-<日付>` へ退避する。名前の変更の時点と `format.json` の書き込みの時点で、別のプロセスの待たない取得が旧い錠に対して失敗する（旧い錠が持たれている） | `_read_format` が 0（`format.json` が無いか読めない）なら `.v10-`。番号は 1 から始まるため、0 を形の版として使わない | 10 系の `dbos/*.lock` を持つプロセスが居ると `StoreLegacyRunning` で、`prepare_store` が再試行しない。退避先があると `StoreRetireTargetExists` |
 | `install` | ランチャーを書いたとき `relay.version` が自分の版 | 印の無い 10 系の複製を `replace_foreign` が偽で残すとき `relay.version` を書かない | 書けないと今と同じ止まり方 |
