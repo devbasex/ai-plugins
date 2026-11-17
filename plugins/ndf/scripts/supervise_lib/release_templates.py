@@ -294,11 +294,19 @@ def _release_step(r: _ReleaseArgs, dev: bool) -> dict:
         step.update(cd_release_wait(a, on_pr, step["on_exit"], trunk))
     elif not dev:
         step["cmd"] += f" --approval {shlex.quote(material_path(repo, approval))}" + release_strategy_flag(a)
-        if trunk and getattr(a, "mvv", None):
-            step["on_exit"][str(EXIT_GATE)] = "trial"
-        else:
-            step["gate_next"] = "trial" if trunk else "handoff" if getattr(a, "mvv", None) else "end"
+        step.update(_gate_target(a, trunk, step["on_exit"]))
     return step
+
+
+def _gate_target(a, trunk: bool, on_exit: dict) -> dict:
+    """CD の無い本番の release の承認ゲート（10）の行き先（`step` へ足す欄）。trunk で MVV 判定があれば on_exit で承認前の
+    試用（trial）へ送る。ほかは gate_next で、trunk は trial、MVV 判定は handoff、それ以外は end。"""
+    mvv = getattr(a, "mvv", None)
+    if trunk and mvv:
+        return {"on_exit": {**on_exit, str(EXIT_GATE): "trial"}}
+    if trunk:
+        return {"gate_next": "trial"}
+    return {"gate_next": "handoff" if mvv else "end"}
 
 
 def _record_step(v: str, prs: str) -> dict:
