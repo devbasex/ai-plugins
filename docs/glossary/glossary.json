@@ -7402,7 +7402,7 @@
     {
       "term": "旧い置き場",
       "context": "ndf-workflow",
-      "meaning": "旧いプラグインが状態を書く置き場。入れ替えの前は、旧いプラグインと新しいプラグインの両方が同じ旧い置き場を読み書きする",
+      "meaning": "10 系の NDF（今の `plugins/ndf/`）が状態を書く置き場。プラグイン名を含む置き場（`~/.local/state/ndf`・`.git/ndf/state` など）が新しい NDF の置き場と同じパスになるのは、入れ替えでプラグイン名が `ndf` になった後で、新しい NDF は最初の起動でそれを退避する。リポジトリの `.ndf/` のように名前を含まない置き場は、入れ替えの前から新しい NDF と同じパスを使う",
       "source": "docs/specifications/ndf-next-closed-children-subcommands.md"
     },
     {
@@ -7420,8 +7420,8 @@
     {
       "term": "入れ替えの起点のコミット",
       "context": "ndf-workflow",
-      "meaning": "入れ替えの PR が分かれた develop のコミット。今のプラグインがそのまま残り、入れ替えで切れるリンクの書き換え先の固定の URL に使う",
-      "pending_source": "docs/ndf-swap-doc-destinations.md"
+      "meaning": "入れ替えの PR が分かれた main のコミット（git merge-base origin/main HEAD）。今のプラグインがそのまま残り、入れ替えで切れるリンクの書き換え先の固定の URL に使う",
+      "pending_source": "issues/issue-3341-design.md"
     },
     {
       "term": "非公開の参照",
@@ -8050,6 +8050,19 @@
       "context": "ndf-release",
       "meaning": "承認した head を、検査がそろうのを待ってから、ブランチ戦略の宣言のマージの主体と方式（land_approved）で本番ブランチへ入れること。結果は入れた・merge queue へ入れた・人のマージを待つ・止まったのどれか",
       "source": "docs/specifications/ndf-release-production-land-and-trunk-sprint.md"
+    },
+    {
+      "term": "外からの参照",
+      "context": "ndf-workflow",
+      "meaning": "`plugins/ndf/` の外にあって、`plugins/ndf/` の中のパスを名指しするもの（workflow・`.ndf/*.json`・根の検査のスクリプト・指示書・ISSUE_TEMPLATE・`docs/`）。実行する参照・作り直す生成物・根の検査のテスト・文書の 4 種類に分ける。実行する参照は、書き換えの表と検査をプラグインの入れ替えより前に main へ入れ、書き換えそのものは入れ替えの PR で行う",
+      "pending_source": "issues/issue-3341-design.md"
+    },
+    {
+      "term": "外からの参照の書き換えの表",
+      "code": "plugin_refs_swap",
+      "context": "ndf-workflow",
+      "meaning": "入れ替えで消えるパスを指す実行する参照を、行ごとに入れ替えの後の参照先へ対応づけた表（scripts/plugin-refs-swap.json）。入れ替えの PR が当て、外からの参照の検査が実在を確かめる",
+      "pending_source": "issues/issue-3341-design.md"
     }
   ]
 }
