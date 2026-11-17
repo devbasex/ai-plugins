@@ -1,5 +1,7 @@
-"""drive の後半の工程（予算・安全網・成立の判定・フレーキーの直し・計画のコメントと完了報告）を、担当と GitHub・CI の
-代わりで通す。旧い drive の意図した振る舞いをそろえる（既知の不具合は引き継がない）。
+"""drive の後半の工程（予算・安全網・成立の判定・フレーキーの直し・計画のコメントと完了報告・起動の費用）を、担当と
+GitHub・CI の代わりで通す。旧い drive の意図した振る舞いをそろえる（既知の不具合は引き継がない）。
+
+- #3747: 起動の費用が常に 0 で記録される（費用を報告する CLI の値を拾わず、報告しない CLI と区別しない）
 """
 
 from __future__ import annotations
@@ -225,3 +227,37 @@ def test_flaky_fix_that_changes_non_test_files_is_sent_back_once_then_undone(wor
 def test_required_checks_and_ci_tests_are_args_that_change_the_result(world, over) -> None:
     # 必須の検査や CI のテストを変えたのに、同じ head の前回の成功を返さない
     assert world.config(**over).args() != world.config().args()
+
+
+class _Billed:
+    """claude の起動の出力を `--output-format json` の形にし、費用を報告させる担当の代わり。ほかのランタイムは報告しない。"""
+
+    def __init__(self, fake: FakeAgents, usd: float) -> None:
+        self.fake, self.usd = fake, usd
+
+    def __call__(self, spec: agents.Launch) -> agents.AgentStatus:
+        status = self.fake(spec)
+        if spec.agent == "claude":
+            body = spec.paths.out.read_text(encoding="utf-8")
+            spec.paths.out.write_text(json.dumps({"result": body, "total_cost_usd": self.usd}), encoding="utf-8")
+        return status
+
+
+def test_launch_costs_are_the_reported_usd_and_unreported_launches_are_unknown_not_zero(world) -> None:
+    fake = FakeAgents(_acts())
+    got = drive.drive(world.config(), replace(ports(fake, FakeHub("clean"), ci=fake_ci(Watched(None))), launcher=_Billed(fake, 0.25)))
+    assert got.kind == "ok", got.detail
+    claude_runs = sum(1 for agent, *_ in fake.seen if agent == "claude")
+    others = len(fake.seen) - claude_runs
+    assert claude_runs > 0 and others > 0
+    assert got.metrics["cost"] == pytest.approx(0.25 * claude_runs)
+    assert got.metrics["cost_unknown"] == others
+    phase_cost = _state(world)["phase_cost"]
+    assert phase_cost["implement"]["usd"] > 0 and phase_cost["implement"]["unknown"] == 0
+    assert phase_cost["propose"]["unknown"] > 0
+
+
+def test_cost_is_unknown_when_no_launch_reports_it(world) -> None:
+    got = drive.drive(world.config(), ports(FakeAgents(_acts()), FakeHub("clean"), ci=fake_ci(Watched(None))))
+    assert got.kind == "ok", got.detail
+    assert got.metrics["cost"] is None and got.metrics["cost_unknown"] > 0
