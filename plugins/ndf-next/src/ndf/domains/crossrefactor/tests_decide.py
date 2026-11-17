@@ -23,14 +23,18 @@ from ndf.testing.scoped import NODE_SEPARATOR, in_scope
 from ndf.domains.crossrefactor.symbols_decide import PYTHON_SUFFIX
 
 TABLE = "test-files"
+# テストそのものの役割（列 `role` を省いた行もこれ）。`support`（`conftest.py` など）はテストとして集めない
+TEST_ROLE = "test"
 # 名前の対応（Python 以外のソースと、import を持たないテスト）。`{s}` はソースのファイル名の語幹
 NAME_FORMS = ("test_{s}", "{s}_test", "{s}Test", "{s}Tests", "{s}_spec")
 
 
 def is_test_file(path: str) -> bool:
-    """表 `test-files` のどれか 1 行に当たればテストのファイル。"""
+    """表 `test-files` の役割 `test` の行（列 `role` を省いた行を含む）のどれか 1 つに当たればテストのファイル。"""
     p = PurePosixPath(path)
     for row in facts.rows(TABLE):
+        if row.get("role", TEST_ROLE) != TEST_ROLE:
+            continue
         if row["where"] == "name" and fnmatch.fnmatchcase(p.name, row["pattern"]):
             return True
         if row["where"] == "dir" and row["pattern"] in p.parts[:-1]:

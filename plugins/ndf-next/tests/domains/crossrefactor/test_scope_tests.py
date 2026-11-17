@@ -87,6 +87,8 @@ def test_fill_paths_quotes_and_requires_the_slot():
         ("src/latest_version.py", False),
         ("web/contest_rules.ts", False),
         ("spec/x.rb", True),
+        # 役割 support の行（#3615 の決定 5）。テストを支えるが、テストとして集めない
+        ("plugins/ndf/conftest.py", False),
     ],
 )
 def test_test_file_names_follow_the_shared_table(path, expected):
