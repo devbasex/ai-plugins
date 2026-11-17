@@ -1,16 +1,15 @@
-"""`ndf project` の測定の 3 モジュール（リポジトリ・CI・ブランチ運用）の振る舞い（#3569）。"""
+"""`ndf project` の測定の 2 モジュール（リポジトリ・CI）の振る舞い（#3569）。"""
 
 from __future__ import annotations
 
 import subprocess
 import time
-from collections import Counter
 from pathlib import Path
 
 import pytest
 
 from ndf.domains.project import items as forms
-from ndf.domains.project import measure_ci, measure_flow, measure_repo, secret
+from ndf.domains.project import measure_ci, measure_repo, secret
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -148,44 +147,6 @@ def test_ndf_record_takes_the_median_of_run_rows(tmp_path):
     assert got is not None and got["seconds"] == 20.0 and got["source"] == "ndf-record"
 
 
-def test_flow_infer_and_table():
-    prs = [{"base": "main", "head": "sprint/a"} for _ in range(3)] + [{"base": "main", "head": "design/x"} for _ in range(3)]
-    got = measure_flow.infer(prs, "main", "main", ["whole"] * 3, [])
-    assert got["integrate"]["value"] == "check" and got["integrate"]["confidence"] == "高"
-    assert got["doc_prs"]["value"] == "base"
-    assert got["start"]["value"] == "base"  # 動いているスプリントブランチが無ければ取り込み方の表が許す起点
-    assert measure_flow.as_item(got, [])["status"] == "measured"
-    assert measure_flow.confidence(2, 3) == "中"
-    assert measure_flow.confidence(1, 2) is None
-    assert "unknown" in measure_flow.infer_field(Counter(), "c", "x")
-
-
-def test_flow_answer_problem():
-    assert measure_flow.answer_problem({"start": "base", "integrate": "check", "doc_prs": "base", "promotion": "whole"}) is None
-    assert "start" in measure_flow.answer_problem({"start": "production", "promotion": "whole"})
-    assert "reviews.release" in measure_flow.answer_problem({"promotion": "whole", "reviews": {"release": {"checks": [], "diff": "none"}}})
-    assert measure_flow.answer_problem({"promotion": "nope"}) is not None
-    assert measure_flow.bad_answer({"unknown": "x"}) is None
-
-
-def test_flow_drift_against_default_and_reviews():
-    item = {"fields": {"promotion": {"value": "selected", "confidence": "高", "evidence": []}, "start": {"unknown": "x"}}}
-    item["reviews"] = {"impl": {"value": {"checks": ["cross-review"], "diff": "pr"}}, "design": {"value": {"checks": [], "diff": "none"}}}
-    rows = measure_flow.drift(None, item)
-    assert [r["name"] for r in rows] == ["branch_flow.promotion", "branch_flow.reviews.design"]
-    assert rows[0]["declared"] == "whole"
-    with pytest.raises(ValueError):
-        measure_flow.drift({"branch_flow": {"promotion": "nope"}}, item)
-
-
-def test_pr_kind():
-    assert measure_flow.pr_kind("feat/issue-1-x", "develop", "develop", "main") == "impl"
-    assert measure_flow.pr_kind("sprint/a", "develop", "develop", "main") == "sprint"
-    assert measure_flow.pr_kind("release/v1.0.0", "main", "develop", "main") == "release"
-    assert measure_flow.pr_kind("review/release/v1.0.0-base", "main", "develop", "main") is None
-    assert measure_flow.pr_kind("spec/x", "develop", "develop", "main") == "spec"
-
-
 def _small_repo(tmp_path, files: dict[str, str]) -> Path:
     path = tmp_path / "small"
     path.mkdir()
@@ -247,64 +208,6 @@ def test_measure_materials_caps_libraries_and_evidence(tmp_path):
     assert empty["evidence"] == [] and empty["candidates"]["seeds"]["libraries"] == []
 
 
-def test_flow_drift_rows_for_fields_and_reviews():
-    """現状固定（I-016）: 4 項目とレビューの単位のずれの行の形。書いたレビューの行は 1 つの値と、書いていない種類は既定値の 2 列と比べる。"""
-    worktree = {"branch_flow": {**measure_flow.default_flow(), "reviews": {"impl": {"checks": [], "diff": "none"}}}}
-    item = {
-        "fields": {
-            "start": {"value": "base"},
-            "integrate": {"value": "x", "confidence": "低", "evidence": [{"path": "a"}]},
-            "doc_prs": {"confidence": "高"},
-            "promotion": {"value": "selected", "evidence": "not a list"},
-        },
-        "reviews": {
-            "impl": {"value": {"checks": ["cross-review"], "diff": "pr"}, "confidence": "中"},
-            "sprint": {"value": {"checks": ["cross-refactoring", "behavior"], "diff": "unchecked"}},
-            "release": {"value": {"checks": ["x"], "diff": "none"}, "evidence": [1]},
-            "spec": {"unknown": "測れない"},
-        },
-    }
-    assert measure_flow.drift(worktree, item) == [
-        {
-            "kind": "drift",
-            "name": "branch_flow.integrate",
-            "declared": "check",
-            "measured": "x",
-            "confidence": "低",
-            "evidence": [{"path": "a"}],
-            "proposal": "branch_flow.integrate を x にする（同じ promotion の行が許す組み合わせに揃えてから write で書く）",
-        },
-        {
-            "kind": "drift",
-            "name": "branch_flow.promotion",
-            "declared": "whole",
-            "measured": "selected",
-            "confidence": None,
-            "evidence": [],
-            "proposal": "branch_flow.promotion を selected にする（同じ promotion の行が許す組み合わせに揃えてから write で書く）",
-        },
-        {
-            "kind": "drift",
-            "name": "branch_flow.reviews.impl",
-            "declared": {"checks": [], "diff": "none"},
-            "measured": {"checks": ["cross-review"], "diff": "pr"},
-            "confidence": "中",
-            "evidence": [],
-            "proposal": "branch_flow.reviews.impl を {'checks': ['cross-review'], 'diff': 'pr'} にする（成り立たない組み合わせは check が直すキーと理由を出す）",
-        },
-        {
-            "kind": "drift",
-            "name": "branch_flow.reviews.release",
-            "declared": {"既定値": [{"checks": [], "diff": "none"}, {"checks": [], "diff": "none"}]},
-            "measured": {"checks": ["x"], "diff": "none"},
-            "confidence": None,
-            "evidence": [1],
-            "proposal": "branch_flow.reviews.release を {'checks': ['x'], 'diff': 'none'} にする（成り立たない組み合わせは check が直すキーと理由を出す）",
-        },
-    ]
-    assert measure_flow.drift(None, None) == []
-
-
 def _dated_commit(repo: Path, day: int, tag: str) -> None:
     stamp = f"2026-01-{day:02d}T00:00:00Z"
     env = {"GIT_COMMITTER_DATE": stamp, "GIT_AUTHOR_DATE": stamp, "PATH": "/usr/bin:/bin"}
@@ -313,7 +216,7 @@ def _dated_commit(repo: Path, day: int, tag: str) -> None:
 
 
 def test_tree_words_and_its_readers(tmp_path):
-    """現状固定（I-027）: `Tree.words` の分け方・失敗で空・締め切りで TimeUp と、それを読む既定ブランチ・ブランチ・タグの測定。"""
+    """現状固定（I-027）: `Tree.words` の分け方・失敗で空・締め切りで TimeUp。"""
     path = _small_repo(tmp_path, {"a.txt": "a\n"})
     _git(path, "config", "user.email", "t@example.com")
     for day, tag in ((2, "v1"), (4, "v3"), (3, "v2"), (5, "v4")):
@@ -325,22 +228,6 @@ def test_tree_words_and_its_readers(tmp_path):
     assert tree.words("for-each-ref", "--format=%(refname:short) x", "refs/heads") == ["develop", "x", "main", "x"]
     with pytest.raises(measure_repo.TimeUp):
         _tree(path, -1).words("tag")
-    assert measure_repo.default_branch(tree) == "main"
-    assert measure_repo.measure_delivery(tree)["candidates"]["tags"] == {"count": 4, "latest": ["v4", "v3", "v2"]}
-    branches = measure_repo.measure_branches(tree)
-    assert branches == {
-        "status": "question",
-        "candidates": {"base": ["main", "develop"], "production": ["main"]},
-        "evidence": [
-            {"text": "main の最後のコミット: 2026-01-05T00:00:00Z"},
-            {"text": "develop の最後のコミット: 2026-01-05T00:00:00Z"},
-        ],
-    }
-    _git(path, "branch", "-m", "main", "trunk")
-    _git(path, "branch", "-D", "develop")
-    tree = _tree(path)
-    assert measure_repo.default_branch(tree) is None
-    assert measure_repo.measure_branches(tree)["status"] == "unknown"
 
 
 @pytest.mark.parametrize(
@@ -363,160 +250,6 @@ def test_tree_words_and_its_readers(tmp_path):
 def test_job_ids_reads_ids_under_jobs(text, expected):
     """現状固定（I-030）: `jobs:` の直下の job id を字下げで拾う規則。"""
     assert measure_ci.job_ids(text) == expected
-
-
-# --- 現状固定: measure_flow.collect_flow（I-016。標本の集め方・推した 4 項目・レビューの単位の組み立て） ---
-
-
-class _FlowTree:
-    """git が何も答えない木（リリースブランチの判定は None、スプリントブランチは無し）。"""
-
-    remote = "origin"
-
-    def git(self, *args: str):
-        return None
-
-    def refs(self, prefix: str) -> list[str]:
-        return []
-
-
-def _pull(n: int, head: str, base: str, merged: bool = True, sha="abc") -> dict:
-    return {
-        "number": n,
-        "head": {"ref": head},
-        "base": {"ref": base},
-        "merged_at": "2026-01-01T00:00:00Z" if merged else None,
-        "merge_commit_sha": sha,
-    }
-
-
-class _FlowGh:
-    repo = "o/r"
-
-    def __init__(self, pulls: list, marks: dict, rulesets=None, fail_marks: bool = False) -> None:
-        self.pulls, self.marks, self.rulesets, self.fail_marks = pulls, marks, rulesets, fail_marks
-        self.paths: list[str] = []
-
-    def get(self, path: str):
-        self.paths.append(path)
-        if path.startswith("repos/o/r/pulls?"):
-            return self.pulls
-        if path == "repos/o/r/rulesets":
-            if self.rulesets is None:
-                raise measure_ci.GhUnavailable("forbidden")
-            return self.rulesets
-        if self.fail_marks:
-            raise measure_ci.GhUnavailable("no")
-        return self.marks.get(path, [])
-
-
-_PR_CMD = measure_flow.PR_COMMAND
-_RV_CMD = measure_flow.REVIEWS_COMMAND
-
-
-def _flow_pulls() -> list:
-    return [
-        _pull(1, "sprint/a", "develop"),
-        _pull(2, "sprint/b", "develop"),
-        _pull(3, "sprint/c", "develop"),
-        _pull(4, "develop", "main"),
-        _pull(5, "develop", "main"),
-        _pull(6, "develop", "main"),
-        _pull(7, "design/x", "develop"),
-        _pull(8, "design/y", "develop"),
-        _pull(9, "spec/z", "develop"),
-        _pull(10, "feat/issue-1", "develop", merged=False),
-        "junk",
-    ]
-
-
-def test_collect_flow_current_behavior_measured_when_all_high():
-    marks = {f"repos/o/r/pulls/{n}/reviews?per_page=100": [{"body": "## 🤖 cross-review ok"}] for n in range(1, 10)}
-    gh = _FlowGh(_flow_pulls(), marks, rulesets=[{"name": "main"}])
-    item = measure_flow.collect_flow(_FlowTree(), gh, "develop", "main")
-    assert gh.paths[0] == "repos/o/r/pulls?state=closed&per_page=100"
-    assert item["status"] == "measured"
-    assert item["value"] == {"start": "base", "integrate": "check", "doc_prs": "base", "promotion": "whole"}
-    f = item["fields"]
-    assert f["integrate"] == {
-        "value": "check",
-        "confidence": "高",
-        "evidence": [{"command": _PR_CMD, "text": "head が sprint/* で宛先が develop の Pull Request 3 件: check 3"}],
-    }
-    assert f["doc_prs"]["evidence"] == [{"command": _PR_CMD, "text": "設計 PR・確定仕様化の PR の宛先 3 件: base 3"}]
-    assert f["promotion"]["evidence"] == [
-        {"command": _PR_CMD + " と git rev-list --first-parent", "text": "main 宛ての Pull Request の head 3 件: whole 3"},
-        {"command": "gh api repos/o/r/rulesets", "text": "ルールセット: main"},
-    ]
-    assert f["start"]["value"] == "base" and f["start"]["confidence"] == "高"
-    assert f["start"]["evidence"][-1] == {"command": measure_flow.TABLE_COMMAND, "text": "promotion = whole が許す start は base だけ"}
-    rv = item["reviews"]
-    assert set(rv) == set(measure_flow.REVIEW_KINDS)
-    assert rv["sprint"] == {
-        "value": {"checks": ["cross-review"], "diff": "unchecked"},
-        "confidence": "高",
-        "evidence": [{"command": _RV_CMD, "text": "sprint の PR の印 3 件: cross-review 3"}],
-    }
-    assert rv["impl"] == {"unknown": "impl の PR の印の標本が無い", "evidence": [{"command": _RV_CMD, "text": "0 件"}]}
-    assert rv["design"]["unknown"] == "標本が 2 件で 3 件に満たない"
-    assert rv["spec"]["unknown"] == "標本が 1 件で 3 件に満たない"
-
-
-def test_collect_flow_current_behavior_unreadable_marks_are_counted():
-    gh = _FlowGh(_flow_pulls(), {}, rulesets=[], fail_marks=True)
-    item = measure_flow.collect_flow(_FlowTree(), gh, "develop", "main")
-    assert item["status"] == "measured"
-    assert item["fields"]["promotion"]["evidence"][-1] == {"command": "gh api repos/o/r/rulesets", "text": "ルールセット: 無し"}
-    rv = item["reviews"]
-    assert rv["sprint"] == {
-        "unknown": "sprint の PR の印の標本が無い",
-        "evidence": [{"command": _RV_CMD, "text": "0 件"}, {"command": _RV_CMD, "text": "読めない PR 3 件"}],
-    }
-    assert rv["design"]["evidence"][-1] == {"command": _RV_CMD, "text": "読めない PR 2 件"}
-    assert rv["impl"]["evidence"] == [{"command": _RV_CMD, "text": "0 件"}]
-
-
-def test_collect_flow_current_behavior_release_and_unreadable_rulesets():
-    pulls = [
-        _pull(1, "release/v1.0.0", "main"),
-        _pull(2, "release/v1.1.0", "main", sha=None),
-        _pull(3, "review/release/v1.0.0", "release/v1.0.0", merged=False),
-        _pull(4, "feat/issue-9", "develop"),
-    ]
-    marks = {
-        "repos/o/r/pulls/3/reviews?per_page=100": [{"body": "## 🤖 cross-review"}],
-        "repos/o/r/issues/4/comments?per_page=100": [{"body": "x <!-- cross-refactoring plan -->"}],
-    }
-    item = measure_flow.collect_flow(_FlowTree(), _FlowGh(pulls, marks), "develop", "main")
-    assert item["status"] == "question"
-    assert item["candidates"] == {"branch_flow": {}}
-    assert item["evidence"] == []
-    f = item["fields"]
-    assert f["promotion"] == {
-        "unknown": "main 宛ての Pull Request の headの標本が無い",
-        "evidence": [
-            {"command": _PR_CMD + " と git rev-list --first-parent", "text": "0 件"},
-            {"command": "gh api repos/o/r/rulesets", "text": "読めない: forbidden"},
-        ],
-    }
-    assert f["start"]["unknown"] == "本番に入っていないスプリントブランチの起点の標本が無い"
-    rv = item["reviews"]
-    assert rv["impl"]["evidence"] == [{"command": _RV_CMD, "text": "impl の PR の印 1 件: cross-refactoring 1"}]
-    assert rv["release"] == {
-        "unknown": "標本が 2 件で 3 件に満たない",
-        "evidence": [{"command": _RV_CMD, "text": "release の PR の印 2 件: cross-review 1・(無し) 1"}],
-    }
-
-
-def test_collect_flow_current_behavior_pulls_unavailable_raises():
-    class _Down:
-        repo = "o/r"
-
-        def get(self, path):
-            raise measure_ci.GhUnavailable("down")
-
-    with pytest.raises(measure_ci.GhUnavailable):
-        measure_flow.collect_flow(_FlowTree(), _Down(), "develop", "main")
 
 
 # --- 現状固定: measure_repo.dependencies（I-021。言語ごとの依存の定義の読み方と処理系の版の行） ---
