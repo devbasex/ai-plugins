@@ -5,7 +5,7 @@
 `release_lib/trunk_release.py`・`release_lib/reviewed.py` の `merge_on_pr_approval`・`release_lib/strategy_route.py` の
 `_merge_approved` の 4 か所で、ベースブランチへ入れるマージ（開発版の PR・`-sync` の PR）はここを通らない。
 
-- 入れた（`merged`）: マージコミットを返す（読めなければ None）
+- 入れた（`merged`）: マージコミットを返す（早送りで閉じた PR は取り込みの記録のコミット。読めなければ None）
 - merge queue へ入れた・人のマージを待つ（`queued`・`human`）: `LandPending` を投げる。呼び手は公開を欠けとして 6 で返す
 - 承認した head と今の head が違う: `HeadMoved` を投げる
 - 止まった: `StepError`（検査の中身の失敗・閉じた PR・`land_approved` の stopped は 1、上限までの待ちは 75）
@@ -92,13 +92,17 @@ def landed_commit(root, pr: int, head: str) -> str | None:
     記録の head が `head` と同じで、tree が一致し、記録の先端が最初の親のときだけ取り込みのコミットを返す。それ以外は None。"""
     strategy = _strategy(root)
     port = land_lib.GhPort(root, _repo(root), strategy)
-    rec = port.landed_record(strategy.section["branches"]["production"], pr, None)
+    return _recorded_commit(port, strategy.section["branches"]["production"], pr, head)
+
+
+def _recorded_commit(port, prod: str, pr: int, head: str) -> str | None:
+    rec = port.landed_record(prod, pr, None)
     if rec and rec.get("head") == str(head).lower() and rec.get("tree_ok") and rec.get("first_parent_is_tip"):
         return rec.get("commit")
     return None
 
 
-def no_checks_reason(root, pr: int) -> str | None:
+def pr_no_checks_reason(root, pr: int) -> str | None:
     """PR に検査が 1 件も無いときに待つ理由（`land_checks.no_checks_reason`）。None なら PR の head で動く CI が無く、待たずに進める。
     PR を読めなければその理由を返す（CI が無いとはみなさない）。"""
     port = land_lib.GhPort(root, _repo(root), _strategy(root))
@@ -130,7 +134,7 @@ class LandingIO:
 
 
 def _wait_checks_but_trail(root, pr: int, timeout: float) -> None:
-    ops = SimpleNamespace(pr_check_buckets=pr_check_buckets, no_checks_reason=no_checks_reason)
+    ops = SimpleNamespace(pr_check_buckets=pr_check_buckets, no_checks_reason=pr_no_checks_reason)
     reviewed.wait_ci_except(root, pr, (approval_trail.STATUS_CONTEXT,), timeout, ops)
 
 
@@ -180,7 +184,9 @@ def land(root, a, pr: int, head: str, trail_url: str = "", *, io: LandingIO | No
         raise StepError(str(e)) from e
     if got["result"] == "merged":
         io.fetch(root)
-        return io.merge_commit(root, pr)
+        # ruleset の無い strict の早送りは PR を閉じるだけで mergeCommit が無い。取り込みのコミットを記録から引き、本番ブランチの
+        # 先端（取り込みの後に入った承認の外の変更を含みうる）へタグを打たせない
+        return io.merge_commit(root, pr) or _recorded_commit(port, prod, pr, head)
     if got["result"] in PENDING_REASONS:
         raise LandPending(got["result"], got.get("reason") or PENDING_REASONS[got["result"]], pr)
     raise StepError(f"PR #{pr} を本番ブランチ {prod} へ入れられない: {got.get('reason') or got['result']}")

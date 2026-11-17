@@ -1493,7 +1493,7 @@ def _reviewed_prod(monkeypatch, tmp_path, case, state, found=None, land=None, re
     `record` は迂回の記録の書き込みの差し替え（呼ばれた引数を足す並びか、投げる例外）。`backs` は公開の後の (items, back) を足す。"""
     import argparse
 
-    from release_lib import reviewed as rv
+    from release_lib import prod_landed, reviewed as rv
     from release_lib.context import ReleaseCtx
 
     merged, published, ci = [], [], []
@@ -1503,6 +1503,7 @@ def _reviewed_prod(monkeypatch, tmp_path, case, state, found=None, land=None, re
     monkeypatch.setattr(rv.repo_lib, "restore_branch", lambda *a, **k: None)
     monkeypatch.setattr(rv, "ensure_no_port_line", lambda root, pr: pr)  # 印の足し方は test_ensure_no_port_line_* が確かめる
     monkeypatch.setattr(rv, "repo_or_stop", lambda r: "o/r")
+    monkeypatch.setattr(prod_landed, "repo_or_stop", lambda r: "o/r")
     monkeypatch.setattr(rv.approval_trail, "read_head", lambda repo, n: (HEAD, "main", "open"))
     monkeypatch.setattr(
         rv.approval, "approved_on_pr", lambda repo, n, head, c: rv.approval_trail.Judgment(state, "理由", url="https://t/1")
@@ -1737,28 +1738,28 @@ def _closed_landing_ops(landed):
 def test_landed_prod_pr_resumes_a_pr_closed_by_the_fast_forward(monkeypatch, landed, state, want):
     """#3703: ruleset の無い strict の早送りで閉じた本番の PR は、取り込みの記録が PR の head と合い、その head が PR の上の承認と
     一致するときだけ再開する。記録が無ければ None（新しく作る側へ）、承認と違えば 1 で止める。"""
-    from release_lib import reviewed as rv
+    from release_lib import prod_landed as pld
     from step_result import StepError
 
-    monkeypatch.setattr(rv, "repo_or_stop", lambda r: "o/r")
-    monkeypatch.setattr(rv.approval_trail, "read_head", lambda repo, n: (HEAD, "main", "closed"))
-    monkeypatch.setattr(rv.approval, "approved_on_pr", lambda repo, n, head, c: rv.approval_trail.Judgment(state, "理由"))
+    monkeypatch.setattr(pld, "repo_or_stop", lambda r: "o/r")
+    monkeypatch.setattr(pld.approval_trail, "read_head", lambda repo, n: (HEAD, "main", "closed"))
+    monkeypatch.setattr(pld.approval, "approved_on_pr", lambda repo, n, head, c: pld.approval_trail.Judgment(state, "理由"))
     ops, calls = _closed_landing_ops(landed)
     if want == 1:
         with pytest.raises(StepError) as e:
-            rv.landed_prod_pr(".", "release/v1.2.3", "main", None, ops, _case("cd-no-review"))
+            pld.landed_prod_pr(".", "release/v1.2.3", "main", None, ops, _case("cd-no-review"))
         assert e.value.code == 1
     else:
-        assert rv.landed_prod_pr(".", "release/v1.2.3", "main", None, ops, _case("cd-no-review")) == want
+        assert pld.landed_prod_pr(".", "release/v1.2.3", "main", None, ops, _case("cd-no-review")) == want
     assert calls == [("CLOSED",)]
 
 
 def test_landed_prod_pr_skips_the_closed_search_when_a_pr_is_open():
     """開いた本番の PR があれば、閉じた PR を探さない（開いた PR で承認を待つ）。"""
-    from release_lib import reviewed as rv
+    from release_lib import prod_landed as pld
 
     ops, calls = _closed_landing_ops("f" * 40)
-    assert rv.landed_prod_pr(".", "release/v1.2.3", "main", OPEN_PROD_PR, ops, _case("cd-no-review")) is None and calls == []
+    assert pld.landed_prod_pr(".", "release/v1.2.3", "main", OPEN_PROD_PR, ops, _case("cd-no-review")) is None and calls == []
 
 
 @pytest.mark.parametrize(("reason", "want"), [(None, None), ("動く workflow がある", 75)])
@@ -1789,7 +1790,7 @@ def test_prod_ops_wires_the_entry_functions_at_call_time(monkeypatch):
         "published": "_published",
         "land": "land",
         "pr_check_buckets": "pr_check_buckets",
-        "no_checks_reason": "no_checks_reason",
+        "no_checks_reason": "pr_no_checks_reason",
         "landed_commit": "landed_commit",
     }
     for name in wired.values():
@@ -2353,6 +2354,22 @@ def test_prod_land_merges_with_the_declared_history(monkeypatch, method, commit)
     land, port = _prod_land({"method": method, "commit": commit})
     assert land(Path("."), _LAND_ARGS, 9, HEAD) == "m" * 40
     assert port.calls == [("merge", HEAD, commit, False)]
+
+
+@pytest.mark.parametrize(("recorded", "want"), [("f" * 40, "f" * 40), (None, None)])
+def test_prod_land_returns_the_fast_forward_commit_without_a_merge_commit(monkeypatch, recorded, want):
+    """#3703: ruleset の無い strict の早送りは PR を閉じるだけで mergeCommit が無い。取り込みの記録のコミットを返し、
+    呼び手が本番ブランチの先端（取り込みの後に入った承認の外の変更を含みうる）へタグを打たないようにする。"""
+    import dataclasses
+
+    from release_lib import prod_land as pl
+
+    io, port = _landing_io({"method": "strict"})
+    io = dataclasses.replace(io, merge_commit=lambda root, pr: None)
+    row = {"head": HEAD, "tree_ok": True, "first_parent_is_tip": True, "commit": recorded}
+    port.landed_record = lambda branch, n, since: row if recorded else None
+    monkeypatch.setattr(pl.land_lib, "land_approved", lambda *a, **k: {"result": "merged", "head": HEAD, "reason": ""})
+    assert pl.land(Path("."), _LAND_ARGS, 9, HEAD, io=io) == want
 
 
 @pytest.mark.parametrize("code", [1, 75])

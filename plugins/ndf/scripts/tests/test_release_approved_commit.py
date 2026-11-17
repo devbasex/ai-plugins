@@ -198,6 +198,8 @@ def run_release(
     # 本番の PR は本番の取り込み（prod_land.land）で入る（#3703）。比べた先端を expect として同じ偽物へ渡す
     monkeypatch.setattr(mod, "land", lambda r, a, n, head, trail_url="": hub.wait_and_merge(r, n, expect=head))
     monkeypatch.setattr(mod, "pr_view", hub.pr_view)
+    # 再開はマージ済みの本番の PR の head（release/v<版> の先頭）を承認と比べる（#3703 の I2）
+    monkeypatch.setattr(mod.prod_landed, "landed_head", lambda r, n: git(w["origin"], "rev-parse", f"release/v{VER}"))
     monkeypatch.setattr(mod, "changelog_section", lambda r, ver, plugin: "")
     monkeypatch.setattr(mod.gh_parts, "gh", hub.gh)
     monkeypatch.setattr(mod.trash, "sweep", lambda r, m: ([], {}))
@@ -350,7 +352,7 @@ def test_release_resume_stops_when_the_tag_points_elsewhere(monkeypatch, world):
 
 
 def test_release_resume_stops_when_the_merged_pr_lacks_the_approved_commit(monkeypatch, world):
-    """再開でも、マージ済みの本番の PR が承認したコミットを含まなければ続けない。"""
+    """再開でも、マージ済みの本番の PR の head が承認したコミットを含まなければ続けない。"""
     side = git(world["work"], "commit-tree", "HEAD^{tree}", "-m", "side")  # 本番チャネルに無いコミット
     with pytest.raises(Exception) as e:
         run_release(monkeypatch, world, prod_merged=True, approved_sha=side)

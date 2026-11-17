@@ -12,7 +12,6 @@ _release_pr_body）。出す（emit）のはここで、終了コードは `step
 
 from __future__ import annotations
 
-import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -34,7 +33,8 @@ from release_lib.land_read import merged_or_tip
 from release_lib.included import RELEASE_PREFIX
 from release_lib.names import require_untagged
 from release_lib.port_mark import NO_PORT_LINE, ensure_no_port_line
-from step_result import EXIT_GATE, EXIT_INFRA_WAIT, EXIT_PRECONDITION, EXIT_UNREADABLE, StepError, emit, gh_json, git, git_root, result
+from release_lib.prod_landed import landed_prod_pr, repo_or_stop  # 本番へ入った PR からの再開とリポジトリの解決
+from step_result import EXIT_GATE, EXIT_INFRA_WAIT, EXIT_PRECONDITION, StepError, emit, gh_json, git, git_root, result
 
 TOOL = approval.TOOL
 # 迂回の記録の行（items の `record`。#3506 の I7）
@@ -73,13 +73,6 @@ def dev_workflow_ready(root, workflow) -> bool:
     if "404" in (p.stderr or ""):
         return False
     raise StepError(f"{workflow} が既定ブランチにあるかを読めない: {(p.stderr or '').strip()[:300]}")
-
-
-def repo_or_stop(root):
-    repo = os.environ.get("GITHUB_REPOSITORY") or repo_lib.owner_repo(root)
-    if not repo:
-        raise StepError("リポジトリ（origin の owner/repo）を決められない", EXIT_UNREADABLE)
-    return repo
 
 
 @dataclass(frozen=True)
@@ -209,49 +202,6 @@ def _open_prod_pr(ctx: ReleaseCtx, items, metrics, ops: ProdOps, case=None) -> i
     title = f"Release: {plugin} v{ver} を {prod} へ"
     body = f"{plugin} v{ver} を {prod} へ出す（開発版の PR #{release_pr}）。\n\n{NO_PORT_LINE}\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
     return ops.create_pr(root, prod, branch, title, body)
-
-
-def require_approved_landing(root, pr: int, case, head: str | None = None) -> str:
-    """本番ブランチへ入った本番の PR `pr` の head（`head`。省けば PR から読む）が PR の上の承認（証跡かレビュー）と一致することを確かめ、
-    その head を返す（再開。I2）。人のマージ（`merge.actor: human`）は承認の後に積んだコミットごと入りうるため、一致しなければ
-    StepError（1）で止め、公開しない。読めなければ StepError（1）。"""
-    repo = repo_or_stop(root)
-    try:
-        head = head or approval_trail.read_head(repo, pr)[0]
-        judged = approval.approved_on_pr(repo, pr, head, case)
-    except approval_trail.TrailError as e:
-        raise StepError(str(e)) from e
-    if judged.state != "success":
-        raise StepError(
-            f"本番ブランチへ入った本番の PR #{pr} の head {head[:8]} が PR の上の承認と一致しない（{judged.description}）。公開しない"
-        )
-    return head
-
-
-def landed_prod_pr(root, branch: str, prod: str, done: dict | None, ops, case) -> tuple[int, str | None] | None:
-    """本番ブランチへ入った本番の PR とその取り込みのコミット（再開）。`done` はマージ済みか開いた PR の探索の結果。
-    マージ済みの PR か、ruleset の無い `strict` の早送りで閉じて取り込みの記録がある PR（`ops.landed_commit`）を返し、無ければ None。
-    `case`（CD のある場合）なら、入った head が PR の上の承認と一致することを確かめる（`require_approved_landing`）。"""
-    if done and done["state"] == "MERGED":
-        if case is not None:
-            require_approved_landing(root, done["number"], case)
-        return done["number"], ops.merge_commit_of(root, done["number"])
-    landed = getattr(ops, "landed_commit", None)
-    if done or landed is None:
-        return None
-    closed = ops.find_pr(root, branch, prod, states=("CLOSED",))
-    if not closed:
-        return None
-    try:
-        head = approval_trail.read_head(repo_or_stop(root), closed["number"])[0]
-    except approval_trail.TrailError as e:
-        raise StepError(str(e)) from e
-    commit = landed(root, closed["number"], head)
-    if not commit:
-        return None
-    if case is not None:
-        require_approved_landing(root, closed["number"], case, head)
-    return closed["number"], commit
 
 
 def merge_on_pr_approval(root, repo, a, case, main_pr, prod, items, metrics, ops, *, waiting, moved, waiting_items=()):

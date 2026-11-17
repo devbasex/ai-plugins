@@ -30,7 +30,7 @@ from typing import NamedTuple
 import approved_commit as ac
 import repo as repo_lib
 import strategy_rows
-from release_lib import approval, names, reviewed
+from release_lib import approval, names, prod_landed, reviewed
 from release_lib.approval import HeadMoved
 from release_lib.context import ReleaseCtx
 from release_lib.land_read import merged_or_tip
@@ -138,7 +138,11 @@ def allowed_after(root, approved: str, branch: str, n: int) -> ac.AllowedPR:
     """承認したコミットの後に積んでよいコミット: origin の `branch` の first-parent のうちマージでないもの（版上げ・変更履歴・
     説明文・消費の記録）。承認の後にマージで足した単位のコミットはここに入らず、承認の外として止まる（決定 14）。"""
     git(root, "fetch", "-q", "origin", f"+refs/heads/{branch}:refs/remotes/origin/{branch}")
-    tip = git(root, "rev-parse", f"origin/{branch}").stdout.strip()
+    return allowed_upto(root, approved, git(root, "rev-parse", f"origin/{branch}").stdout.strip(), n)
+
+
+def allowed_upto(root, approved: str, tip: str, n: int) -> ac.AllowedPR:
+    """`allowed_after` の本体: コミット `tip` の first-parent のうち、承認したコミットの後のマージでないもの。"""
     listed = git(root, "rev-list", "--first-parent", "--no-merges", f"{approved}..{tip}", check=False)
     return ac.AllowedPR(n, tip, listed.stdout.split() if listed.returncode == 0 else [])
 
@@ -157,7 +161,7 @@ def release_selected(ctx: ReleaseCtx, approved, ops, case=None) -> tuple:
     items: list[dict] = []
     git(root, "fetch", "-q", "origin", "--tags")
     done = ops.find_pr(root, branch, prod, states=("MERGED", "OPEN"))
-    if landed := reviewed.landed_prod_pr(root, branch, prod, done, ops, case):
+    if landed := prod_landed.landed_prod_pr(root, branch, prod, done, ops, case):
         main_pr = landed[0]  # 再開: 本番チャネルへの取り込みは済んでいる（取り消せない）
         merge, rows = _resume_merged(ctx, main_pr, landed[1], approved, case)
         items += rows
@@ -184,14 +188,15 @@ def release_selected(ctx: ReleaseCtx, approved, ops, case=None) -> tuple:
 
 
 def _resume_merged(ctx: ReleaseCtx, main_pr, commit, approved, case) -> tuple[str, list[dict]]:
-    """再開: 本番チャネルへ入った本番の PR の取り込みのコミット `commit` が承認したコミットを含むかを確かめ、マージし直さない
-    （CD のある場合の PR の上の承認との照合は `reviewed.landed_prod_pr` が済ませている）。
+    """再開: 本番チャネルへ入った本番の PR の head を承認と照らし、マージし直さない。CD のある場合の PR の上の承認との照合は
+    `prod_landed.landed_prod_pr` が済ませ、CD の無い場合は入った head を承認したコミットと許可リスト（`allowed_upto`）で比べる
+    （マージ後の祖先関係でなく head で比べるため、squash・rebase の取り込みも通る。I2）。
     (マージコミット, 足す行) を返す。迂回でマージしたのに記録が無ければ書く（#3506 の I7）。"""
     root, prod = ctx.root, ctx.prod
     git(root, "fetch", "-q", "origin")
+    if case is None:
+        prod_landed.require_landed_head(root, main_pr, approved, lambda head: allowed_upto(root, approved, head, main_pr))
     merge = merged_or_tip(root, commit, prod, git)
-    if approved and git(root, "merge-base", "--is-ancestor", approved, merge, check=False).returncode != 0:
-        raise StepError(f"マージ済みの本番の PR #{main_pr} のコミット {merge[:8]} が承認したコミット {approved[:8]} を含まない")
     rows = [{"kind": "pr", "name": f"#{main_pr}", "result": "already_merged", "base": prod}]
     if case is not None and (row := reviewed.admin_record_on_resume(root, repo_lib.owner_repo(root), case, main_pr)):
         rows.append(row)

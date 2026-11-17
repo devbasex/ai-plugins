@@ -386,7 +386,10 @@ def selected(monkeypatch):
     monkeypatch.setattr(promotion, "merge_back_after", lambda root, a, plugin, br, pr, ops: ("back", br, pr))
     monkeypatch.setattr(reviewed, "admin_back", lambda back: ("admin_back", back))
     monkeypatch.setattr(promotion.repo_lib, "owner_repo", lambda r: "o/r")
-    monkeypatch.setattr(reviewed, "require_approved_landing", lambda root, pr, case, head=None: head or "h" * 40)
+    from release_lib import prod_landed
+
+    monkeypatch.setattr(prod_landed, "require_approved_landing", lambda root, pr, case, head=None: head or "h" * 40)
+    monkeypatch.setattr(prod_landed, "require_landed_head", lambda root, pr, approved, allowed_of: None)
     monkeypatch.setattr(
         reviewed,
         "admin_record_on_resume",
@@ -446,12 +449,22 @@ def test_release_selected_resume_falls_back_to_the_production_tip(selected):
     assert got[:2] == (7, _PROD_TIP) and got[3] == {**_BASE_METRICS, "approved_sha": ""}
 
 
-def test_release_selected_resume_stops_when_the_merge_lacks_the_approval(selected):
+def test_release_selected_resume_stops_when_the_merged_head_lacks_the_approval(selected, monkeypatch):
+    """#3703 の I2: CD の無い場合の再開は、入った本番の PR の head を承認したコミットと、その head の first-parent の
+    マージでないコミット（版上げ）で比べ、合わなければ公開しない。"""
+    from release_lib import prod_landed
     from step_result import StepError
 
+    seen = []
+
+    def require_landed_head(root, pr, approved, allowed_of):
+        seen.append((pr, approved, allowed_of("h" * 40).head))
+        raise StepError("合わない")
+
+    monkeypatch.setattr(prod_landed, "require_landed_head", require_landed_head)
     with pytest.raises(StepError) as e:
-        selected(_APPROVED, _SelOps(found={"state": "MERGED", "number": 7}), ancestor=1)
-    assert e.value.code == 1 and str(e.value) == "マージ済みの本番の PR #7 のコミット mmmmmmmm が承認したコミット aaaaaaaa を含まない"
+        selected(_APPROVED, _SelOps(found={"state": "MERGED", "number": 7}))
+    assert e.value.code == 1 and seen == [(7, _APPROVED, "h" * 40)]
 
 
 def test_release_selected_resume_writes_the_admin_record(selected):
