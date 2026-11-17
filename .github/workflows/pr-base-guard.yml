@@ -16,9 +16,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          # release/v* の head が起点ブランチの祖先か（選んで集める取り込み方ではスプリントブランチの祖先か）を
+          # release/v* の head がベースブランチの祖先か（release_branch ではスプリントブランチの祖先か）を
           # git merge-base で判定するため、履歴をすべて取る
           fetch-depth: 0
+      # 宛先のブランチの宣言を読む部品（branch_strategy_cli.py）は jsonschema を uv の環境で読む
+      - uses: astral-sh/setup-uv@v10.3.3
+        if: github.base_ref == github.event.repository.default_branch
+        with:
+          enable-cache: true
+          cache-dependency-glob: plugins/ndf/uv.lock
       - name: Check the branch this pull request came from
         # 宛先が既定ブランチでなければ、チェックは行わずに成功で終わる。既定ブランチの名前は
         # ワークフローへ書かず、リポジトリの設定から受け取る
@@ -27,6 +33,6 @@ jobs:
         env:
           HEAD_REF: ${{ github.head_ref }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          # 宛先のブランチの宣言（branch_flow）で判定を選ぶ。head 側の宣言は読まない（#3121 の決定 12）
+          # 宛先のブランチの .ndf/project.json のセクション branch_strategy で判定を選ぶ。head 側の宣言は読まない（#3672 の D27）
           PR_BASE_REF: ${{ github.base_ref }}
         run: bash scripts/check-pr-base.sh "$HEAD_REF" "$HEAD_SHA"
