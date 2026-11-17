@@ -9,6 +9,7 @@ from typing import Callable, NamedTuple
 
 import release_case
 from gate_answer import RELEASE_GATE
+from step_result import EXIT_GATE, EXIT_INCOMPLETE
 from supervise_lib.decl import PRODUCTION_SOURCES, DeclError, trunk_release, with_decls
 from supervise_lib.release_flow import (
     REVIEW_RANGE_IDS,
@@ -285,7 +286,7 @@ def _release_step(r: _ReleaseArgs, dev: bool, trunk: bool = False) -> dict:
         "probe": {"cmd": f"{MERGED_PY} probe --head {{branch}} --head {{base}} --act"},
     }
     if not dev:
-        step["on_exit"]["6"] = "release-landed"
+        step["on_exit"][str(EXIT_INCOMPLETE)] = "release-landed"
     if on_pr and not dev:
         # CD のある場合（#2773）: 承認はリリースの PR の上で取る。承認の前は本番の PR を作って 10 で止まり、承認資料を組んで置く
         step["cmd"] += release_strategy_flag(a)
@@ -293,7 +294,7 @@ def _release_step(r: _ReleaseArgs, dev: bool, trunk: bool = False) -> dict:
     elif not dev:
         step["cmd"] += f" --approval {shlex.quote(material_path(repo, approval))}" + release_strategy_flag(a)
         if trunk and getattr(a, "mvv", None):
-            step["on_exit"]["10"] = "trial"
+            step["on_exit"][str(EXIT_GATE)] = "trial"
         else:
             step["gate_next"] = "trial" if trunk else "handoff" if getattr(a, "mvv", None) else "end"
     return step

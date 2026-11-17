@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from step_result import EXIT_GATE, EXIT_INCOMPLETE
 from strategy_rows import RELEASE_PREFIX
 from supervise_lib.paths import VERIFY_PY
 from supervise_lib.queue_fill import RELEASE_VERSION
@@ -20,8 +21,8 @@ RULE_RELEASE_PROD_TRUNK = (
 
 def landed_step(release: dict) -> dict:
     """release と同じコマンドを打ち直すステップ（merge queue のマージか人のマージの後に公開する。#3703 の決定 3・9）。6 は止める。"""
-    on_exit = {k: v for k, v in release["on_exit"].items() if k != "10"}
-    on_exit["6"] = "stop"
+    on_exit = {k: v for k, v in release["on_exit"].items() if k != str(EXIT_GATE)}
+    on_exit[str(EXIT_INCOMPLETE)] = "stop"
     step = {**release, "id": "release-landed", "on_exit": on_exit, "gate_next": "end"}
     return step
 
