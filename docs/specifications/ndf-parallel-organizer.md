@@ -449,7 +449,7 @@ stateDiagram-v2
 | 問いの hook がレーン・一時レーンの問いを送って止め、レーンでない・送れないときは通す | `plugins/ndf/scripts/tests/test_ask_guard.py` |
 | オーガナイザーの印 1 本だけを数から外し、`helper` は 1 本だけ上限を超えて通る（I13） | `plugins/ndf/scripts/tests/test_relay_hub.py` |
 | リリースの依頼の形の例が契約の形を通る | `plugins/ndf/scripts/tests/test_parallel_request_form.py` |
-| `check-pr-base.sh` が `develop` と、先頭が `origin/develop` の祖先の `release/v*` だけを通す。宛先の宣言が `selected` なら決定 14 の 3 条件で判定する（I16） | `scripts/tests/test_pr_base_guard.py` |
+| `check-pr-base.sh` が、宛先の `release_strategy` が `merge_base_branch` ならベースブランチと、先頭が `origin/<ベース>` の祖先の `release/v*` だけを通す。`release_branch` なら #3121 の決定 14 の 3 条件で判定する（I16） | `scripts/tests/test_pr_base_guard.py` |
 | 版数を持つ箇所だけの衝突を本番の版で解き、ほかの衝突は止める | `plugins/ndf/scripts/tests/test_release_version_merge.py` |
 | ループのレーンの `リリース待ち`・`質問待ち`・`waiting_only` | `plugins/ndf/scripts/tests/test_sprint_loop.py` |
 | 答え待ちの依頼の数え方・閾値の宣言・置き場（I23・I27） | `plugins/ndf/scripts/tests/test_parallel_hold.py` |
