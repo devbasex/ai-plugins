@@ -79,7 +79,7 @@
 | それ以外の `## ` の節 | 人・conductor（手で足した節） | 残す |
 | CHANGELOG の版の節 `## [<plugin> <版>]` | `notes`（`write_notes`） | — |
 
-「配る中身」と「開発版のデプロイで確かめたこと」の欄と同意の 1 行は `approval-facts` の節の中にあるため、作り直しで仮の値へ戻り、
+「配る中身」と「承認前の試用で確かめたこと」の欄と同意の 1 行は `approval-facts` の節の中にあるため、作り直しで仮の値へ戻り、
 同じプランの `explain`・`others` が書き直す。「承認の記録」も `## 2.` の中にあり、作り直しで消える（承認を取り直す）。
 `changelog`（`_update_changelog`）は版の節の見出しと仮の中身（PR のタイトル）を置くだけで、最終の箇条は `notes` が決める。
 置き換えは `notes` にだけ効き、`changelog` のタイトルには効かない。
@@ -112,7 +112,7 @@
 | `plugins/ndf/scripts/release-steps.py` の `cmd_approval_facts`・`kept_sections` | `--approval` を受け、承認資料を書く前に `carry.kept` で残す節を読み（読めなければ `StepError`（2））、`approval_present` の出力へ `carry.insert_kept` で差し込む |
 | `release-steps.py` の `pr_notes`・`cmd_notes` と `release_lib/materials.py` の `write_approval`・`write_sections` | `pr_notes` が本文の `## 置き換える箇条` も読み、`cmd_notes` が `replaced.apply` の後の箇条で CHANGELOG と欄を書く。`write_sections` は残る危険の節の機械の行を消して入れ直し、PR の本文の箇条は無い行だけを足す |
 | `plugins/ndf/scripts/release_lib/others.py` の `put_section` | 節の中身を入れ替え、節が無ければ作る |
-| `plugins/ndf/scripts/supervise_lib/release_templates.py` の `_dev_approval_steps` | `facts` のステップの `approval-facts` へ `--approval {approval}`（`presentation_to` と同じパス）を渡す |
+| `plugins/ndf/scripts/supervise_lib/release_templates.py` の `_approval_material_steps` | `facts` のステップの `approval-facts` へ `--approval {approval}`（`presentation_to` と同じパス）を渡す |
 
 ```mermaid
 graph TD

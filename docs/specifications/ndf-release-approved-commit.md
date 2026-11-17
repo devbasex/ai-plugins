@@ -364,8 +364,8 @@ sequenceDiagram
 を載せる。待つ間に別の先端でマージされた PR へタグを打たないためである。一致すれば `gh pr merge --match-head-commit <SHA>`
 でマージする。渡さないときは緑を確かめた先端を `--match-head-commit` に渡す。
 
-`release --channel prod` は承認したコミットを照合した後に、承認の担い手を `--gate-approved` で渡す（承認資料の承認の記録の担い手。
-`--approved-sha` で受けたときは `user`）。宛先が自動反映の本番チャネルでも、マージがリリース承認ゲートで止まらないためである。
+`release --channel prod` は本番ブランチ宛ての PR を `merge-when-green` で入れない。承認したコミットを照合した後に、本番の取り込み
+（`release_lib/prod_land.py` の `land`）へ承認した先端を渡し、取り込みがチェックを待って PR の今の先端と照らしてから入れる。
 
 ### `merged-steps.py promote --expect-head-from <導入の確認の承認資料>`
 

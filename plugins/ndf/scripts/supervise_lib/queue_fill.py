@@ -282,12 +282,10 @@ class _Fill:
         write_text_atomic(self.path, _filled(text, rec["version"]))
         self.log(f"版の差し込みを {rec['version']} で埋めた（{self.record_path}）", version=rec["version"], record=str(self.record_path))
 
-    def redecide(self, rec: dict, new: str, reason: str, existing: str | None, observed: dict) -> dict:
-        """記録の版を決め直す。ステップの記録を退避 → 記録を書き換え → 写しから埋め直す の順（落ちても流し直しで同じ所へ戻る）。"""
-        import versions
-
-        old = rec["version"]
-        dst = self.sd / SUPERSEDED / f"v{old}"
+    def _archive_steps(self, old_version: str) -> Path:
+        """状態のディレクトリのステップの記録（`KEEP_ON_REDECIDE` を除く）を `<SUPERSEDED>/v<old_version>` へ名前の順に移し、
+        その退避先を返す。退避先に同じ名前があれば `.1`・`.2` … を付ける。"""
+        dst = self.sd / SUPERSEDED / f"v{old_version}"
         dst.mkdir(parents=True, exist_ok=True)
         for f in sorted(self.sd.iterdir()):
             if f.name in KEEP_ON_REDECIDE:
@@ -297,6 +295,14 @@ class _Fill:
             while target.exists():
                 target, n = dst / f"{f.name}.{n}", n + 1
             os.replace(f, target)
+        return dst
+
+    def redecide(self, rec: dict, new: str, reason: str, existing: str | None, observed: dict) -> dict:
+        """記録の版を決め直す。ステップの記録を退避 → 記録を書き換え → 写しから埋め直す の順（落ちても流し直しで同じ所へ戻る）。"""
+        import versions
+
+        old = rec["version"]
+        dst = self._archive_steps(old)
         left = {"作業場所": self.info.get("作業場所"), "branch": self.info.get("branch"), "superseded": str(dst)}
         hist = {"from": old, "to": new, "reason": reason, "existing": existing, "observed": observed, "left": left, "at": _version_now()}
         rec = {**rec, "version": new, "base": versions.release_base(new), "observed": observed, "at": _version_now()}
@@ -372,6 +378,8 @@ def _fill_prod(f: _Fill, rec: dict | None):
     if rec is not None and rec.get("how") != "series":
         f.ensure_filled(rec)
         return None, None
+    if not f.explicit and not f.field.get("系列"):
+        return _fill_decided(f)  # trunk の本番は開発版のプランを持たない（#3703 の決定 5）
     series, series_from = (None, None) if f.explicit else f.series_record()
     if not f.explicit and series is None:
         return _stopped("no_series")
@@ -395,13 +403,29 @@ def _fill_prod(f: _Fill, rec: dict | None):
     return None, None
 
 
+def _fill_decided(f: _Fill):
+    """明示の版も系列も無い本番（trunk）: origin から次の正式版を決めて記録を書く。記録があれば決め直さない（I7。呼び手が先に返す）。"""
+    import release_version
+
+    obs = f.observe()
+    if obs.unreadable:
+        return _stopped("unreadable", unreadable=obs.unreadable)
+    d = release_version.decide_release(obs, f.level)
+    t = release_version.taken(obs, d.version, "decided", f.level)
+    if t.is_taken:
+        return _stopped("taken", t.version, t.existing, t.next_free)
+    rec = f.write_record(d.version, "decided", obs.as_dict())
+    f.ensure_filled(rec)
+    return None, None
+
+
 def fill_release_version(plan: str, items: list[dict]) -> tuple[str | None, dict | None]:
     """リリースプランの版の差し込み（`{release_version}`・`{release_base}`）を、版の記録の値で埋める（#2164）。
     (埋められない理由, キューの項目に載せる `version`) を返す。どちらも None なら流してよい。「版」の欄を持たないプランは触らない。
 
     開発版は、記録が無ければ origin から次に空いている版を決めて（明示の版はまだ出ていないかを確かめて）記録を書く。記録が
     あれば記録の版を使い、それがもう出ていて自分のリリースのマージ済みの PR が無ければ決め直す（明示の版は止める）。本番は
-    明示の版か `系列` の開発版の記録の base で出し、タグがあれば止める。リリース承認ゲートの後に開発版の記録の版が変わったら止める。"""
+    明示の版か `系列` の開発版の記録の base で出し、タグがあれば止める。系列も明示も無い本番（trunk）は origin から次の正式版を決めて記録する。リリース承認ゲートの後に開発版の記録の版が変わったら止める。"""
     try:
         text = Path(plan).read_text()
         info = json.loads(text)

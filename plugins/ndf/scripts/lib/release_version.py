@@ -7,6 +7,7 @@
   `plugin.json` の版と、宣言の `release.tag` の形（`lib/release_tag.py`。既定は `<plugin>--v<版>`）の正式版のタグを読む。読めなかったものは `unreadable` に名前で入れる
 - `fetch_origin(repo)`: `git fetch -q origin --tags` を打ち、落ちたら git の stderr を返す（取り直せないことを版を読めないことと分けて伝える側が使う）
 - `decide_dev(obs, level)`: 次に空いている開発版
+- `decide_release(obs, level)`: 系列の無い本番（trunk）の次の正式版
 - `collected_release(obs)`: 並列の計画のまとめたリリースで出す正式版（最新のタグより大きい版）
 - `taken(obs, version)`: その版がもう出ているか（開発版はベースブランチの版が同じか大きい、正式版は同じ版のタグがある）
 - `own_released(repo, branch, base)`: `branch` → `base` のマージ済みの PR があるか（照会できなければ None）
@@ -163,6 +164,15 @@ def decide_dev(obs: Observed, level: str = "patch") -> Decision:
     else:
         v = f"{versions.next_version(_max_base([obs.latest_tag, obs.production_version, b]), level)}-dev.1"
     return Decision(v, versions.release_base(v), "decided", observed=obs.as_dict())
+
+
+def decide_release(obs: Observed, level: str = "patch") -> Decision:
+    """系列の無い本番（trunk。#3703 の決定 5）の次の正式版: 最新のタグ・本番のブランチの版・ベースブランチの版の基底のうち
+    最も大きいものを上げ幅で上げた版。読めないものがあれば決めない。"""
+    if obs.unreadable:
+        return Decision(None, None, "decided", observed=obs.as_dict(), unreadable=list(obs.unreadable))
+    v = versions.next_version(_max_base([obs.latest_tag, obs.production_version, obs.base_version]), level)
+    return Decision(v, v, "decided", observed=obs.as_dict())
 
 
 def collected_release(obs: Observed) -> str | None:

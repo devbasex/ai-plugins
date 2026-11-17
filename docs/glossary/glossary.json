@@ -8044,6 +8044,13 @@
       "meaning": "リリースの承認をどこで受けるか。gate（リリース承認ゲート）か review（GitHub のレビューの承認をゲートの答えとして読む）で、ブランチ戦略の宣言の approval.via が決める",
       "source": "",
       "pending_source": "issues/issue-3672-design.md"
+    },
+    {
+      "term": "本番の取り込み",
+      "context": "ndf-release",
+      "meaning": "承認した head を、検査がそろうのを待ってから、ブランチ戦略の宣言のマージの主体と方式（land_approved）で本番ブランチへ入れること。結果は入れた・merge queue へ入れた・人のマージを待つ・止まったのどれか",
+      "source": "",
+      "pending_source": "issues/issue-3703-design.md"
     }
   ]
 }

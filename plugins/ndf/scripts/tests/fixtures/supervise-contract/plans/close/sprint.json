@@ -75,7 +75,7 @@
       "plans": [
         "<TMP>/out/close/1-close.json"
       ],
-      "command": "python3 <NDF>/scripts/supervise.py queue <TMP>/out/close/1-close.json --max 3 --done <TMP>/out/close/done-1.json --then <TMP>/out/close/2-check.json --then <TMP>/out/close/3-release.json --then <TMP>/out/close/4-release-prod.json",
+      "command": "python3 <NDF>/scripts/supervise.py queue <TMP>/out/close/1-close.json --max 3 --done <TMP>/out/close/done-1.json --then <TMP>/out/close/2-check.json --then <TMP>/out/close/3-release-prod.json",
       "resume": "python3 <NDF>/scripts/supervise.py queue --resume <TMP>/out/close/done-1.json"
     },
     {
@@ -89,18 +89,9 @@
     },
     {
       "wave": 3,
-      "name": "開発版",
-      "plans": [
-        "<TMP>/out/close/3-release.json"
-      ],
-      "then_of": "まとめ",
-      "resume": "python3 <NDF>/scripts/supervise.py queue --resume <TMP>/out/close/done-1.json"
-    },
-    {
-      "wave": 4,
       "name": "本番",
       "plans": [
-        "<TMP>/out/close/4-release-prod.json"
+        "<TMP>/out/close/3-release-prod.json"
       ],
       "then_of": "まとめ",
       "resume": "python3 <NDF>/scripts/supervise.py queue --resume <TMP>/out/close/done-1.json"

@@ -68,6 +68,8 @@ MODULES = [
     "verify_steps",
     "release_flow",  # 取り込み方ごとのリリースのステップの部品（#3121）
     "release_cd",  # CD のある場合の本番のリリースプランの部品（#2773 で release_templates から分けた）
+    "release_approve",  # リリース承認ゲートの承認の記録と助言の MVV 判定のステップ（#3703 で release_templates から分けた）
+    "release_trunk",  # trunk の本番の承認前の試用と release-landed のステップ（#3703 で release_templates から分けた）
     "release_templates",
     "release_verify",  # リリースのプランの確かめと判断のステップ（release_templates から分けた）
     "review_units",  # レビューの単位をスプリントのプランへ差し込む部品（#3163）
@@ -106,6 +108,8 @@ NO_ENGINE = [
     "templates",
     "release_flow",
     "release_cd",
+    "release_approve",
+    "release_trunk",
     "release_templates",
     "release_verify",
     "review_units",
@@ -281,7 +285,9 @@ def test_cd_prod_plan_stacks_the_bumps_before_the_approval_and_merges_after_it(t
     assert ids.index("snapshot") < ids.index("release")
     assert "--decided" not in steps["bump-others"]["cmd"] and "--prs 995" in steps["bump-others"]["cmd"]
     release = steps["release"]
-    assert release["gate_next"] == "facts" and release["next"] == "cd-result" and "--approval" not in release["cmd"]
+    assert release["gate_next"] == "trial" and release["next"] == "cd-result" and "--approval" not in release["cmd"]
+    # trunk（#3703 の決定 7）: 承認の前に版上げの PR の head から導入を確かめ（trial）、それから承認資料を作る
+    assert steps["trial"]["next"] == "facts" and "--ref release/v10.17.11" in steps["trial"]["cmd"]
     assert (steps["facts"]["next"], steps["explain"]["next"], steps["others"]["next"]) == ("explain", "others", "approval-post")
     assert "--head release/v10.17.11" in steps["facts"]["cmd"]
     assert steps["approval-post"]["next"] == "end" and "approval-post --pr" in steps["approval-post"]["cmd"]
@@ -311,7 +317,7 @@ def test_cd_review_prod_plan_writes_no_trail_and_ends_at_the_gate(tmp_path, monk
     steps = {s["id"]: s for s in json.loads(out.read_text(encoding="utf-8"))["steps"]}
     assert "approve-pr" not in steps and "approve --pr" not in json.dumps(list(steps.values()), ensure_ascii=False)
     assert steps["approval-post"]["next"] == ("mvv" if mvv else "end")
-    assert steps["release"]["gate_next"] == "facts" and "10" not in steps["release"]["on_exit"]
+    assert steps["release"]["gate_next"] == "trial" and "10" not in steps["release"]["on_exit"]
     if mvv:
         assert steps["note"]["next"] == "end"
 
@@ -335,9 +341,9 @@ def test_cd_no_review_mvv_plan_does_not_count_the_awaiting_release_as_a_gate(tmp
     release = {s["id"]: s for s in json.loads(out.read_text(encoding="utf-8"))["steps"]}["release"]
     assert release["on_exit"].get("75") == "stop"
     if mvv:
-        assert "gate_next" not in release and release["on_exit"]["10"] == "facts"
+        assert "gate_next" not in release and release["on_exit"]["10"] == "trial"
     else:
-        assert release["gate_next"] == "facts" and "10" not in release["on_exit"]
+        assert release["gate_next"] == "trial" and "10" not in release["on_exit"]
 
 
 def test_cd_dev_plan_has_no_approval_material_steps(tmp_path, monkeypatch):
@@ -346,10 +352,15 @@ def test_cd_dev_plan_has_no_approval_material_steps(tmp_path, monkeypatch):
     assert not {"facts", "explain", "others", "approval-post"} & set(steps) and steps["verify"]["next"] == "end"
 
 
-def test_no_cd_prod_plan_keeps_the_approval_first(tmp_path, monkeypatch):
-    """受け入れ条件 19・I9: CD の無い場合の本番のプランは今のまま承認の記録が先頭に来る。"""
+def test_no_cd_trunk_prod_plan_records_the_approval_after_the_trial(tmp_path, monkeypatch):
+    """#3703 の決定 4・6: CD の無い trunk の本番のプランは、承認の記録を先頭に置かず、release（1 回目）の 10 の後の試用と承認資料の
+    後で終え、承認の後に approve から release（2 回目）へ進む。承認資料を PR へ置くステップ（approval-post）は持たない。"""
     plan = _release_plan(tmp_path, monkeypatch, "prod", "10.17.11", cd=False)
-    assert plan["steps"][0]["id"] == "approve" and "approval-post" not in {s["id"] for s in plan["steps"]}
+    ids = [s["id"] for s in plan["steps"]]
+    steps = {s["id"]: s for s in plan["steps"]}
+    assert ids[0] == "bump" and "approval-post" not in steps
+    assert steps["release"]["gate_next"] == "trial" and steps["trial"]["next"] == "facts" and steps["others"]["next"] == "end"
+    assert steps["approve"]["next"] == "release" and "--facts-from" in steps["approve"]["cmd"]
 
 
 @pytest.mark.parametrize("cd", [True, False])

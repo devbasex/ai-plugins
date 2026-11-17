@@ -67,15 +67,15 @@ I6b の読み直しは迂回の有無に依らず働く。宣言の無いリポ�
 
 ### 本番の経路とマージの持ち主
 
-旧いプラグインの本番の経路は 3 つあり、どれも最後は `merge-when-green` の `_merge_pr` で `gh pr merge` を打つ。迂回の有無を付けるのはこの 1 か所で、ほかの処理は場合の属性から迂回の有無を決めて渡すだけである。
+旧いプラグインの本番の経路は 3 つある。`release` の 2 つの経路は本番の取り込み（`release_lib/prod_land.py` の `land` → `release_lib/land.py` の `land_approved`）で入れ、`promote` は `merge-when-green` の `_merge_pr` で `gh pr merge` を打つ。迂回の有無を付けるのは、`release` の経路では `land_approved`、`promote` では `_merge_pr` の 1 か所ずつで、ほかの処理は場合の属性と宣言から迂回の有無を決めて渡すだけである。
 
 | 経路 | マージまでの呼び出し |
 | --- | --- |
-| `release-steps.py release --channel prod` | `release_lib/reviewed.py` の `release_prod` → `merge_on_pr_approval` → `release-steps.py` の `wait_and_merge` → `merged-steps.py merge-when-green` → `_merge_pr` |
+| `release-steps.py release --channel prod` | `release_lib/reviewed.py` の `release_prod` → `merge_on_pr_approval` → `ProdOps.land`（`release_lib/prod_land.py` の `land`）→ `release_lib/land.py` の `land_approved` |
 | 選んで集める取り込み方の `release` | `release_lib/strategy_route.py` の `release_selected` → `_merge_exact` → `merge_on_pr_approval` → 以降は上と同じ |
 | `merged-steps.py promote` | `merged_lib/merge.py` の `promote` → `merge_when_green` → `_merge_pr` |
 
-迂回は既存の `merge-when-green` の `--admin` の経路を使う。`merge-when-green` はチェックの通過を待ち、`--expect-head` で先端を照らし、`--match-head-commit` 付きでマージするため、I4・I5・I6a が既存の待ちと照合で成り立つ。迂回の指定を GitHub の API で直に打つと、待ちと先端の照合を 2 つ目に持つことになる。
+本番の取り込みは、チェックの通過と証跡の commit status を待ち、PR の今の先端を承認した先端と照らしてから、`land_approved` が `--match-head-commit` 付きでマージする。`promote` の `merge-when-green` は、チェックの通過を待ち、`--expect-head` で先端を照らし、`--match-head-commit` 付きでマージする。どちらも I4・I5・I6a が待ちと照合で成り立つ。
 
 ### 処理の流れ（旧いプラグイン・`release --channel prod`）
 
@@ -84,7 +84,7 @@ sequenceDiagram
   participant S as 本番の経路
   participant C as 場合の判定
   participant M as 本番のマージの処理
-  participant W as merge-when-green
+  participant W as 本番の取り込み
   participant G as GitHub
   participant T as 証跡の書き手
   S->>C: 場合を求める
@@ -94,23 +94,19 @@ sequenceDiagram
   alt 証跡が先端と違う・無い
     M-->>S: 承認ゲート（10）
   end
-  M->>G: 証跡の commit status を待つ
-  M->>W: 先端を指定し、迂回でマージを頼む
-  W->>G: チェックを待つ
+  M->>W: 承認した先端を渡す
+  W->>G: チェックと証跡の commit status を待つ
   alt チェックが落ちた・上限
     W-->>M: 1 / 75（迂回しない）
   end
   alt 待つ間に先端が動いた
-    W-->>M: head_moved → 承認ゲート（10）
+    W-->>M: HeadMoved → 承認ゲート（10）
   end
   W->>G: gh pr merge --admin --match-head-commit
-  alt GitHub が断った
-    W->>G: PR を読み直す
-    W-->>M: 先端が違えば head_moved → 10、同じなら 1
-  end
-  M->>T: 迂回の記録を置く
+  W->>T: 迂回の記録を置く
   T->>G: コメント（同じ先端の記録があれば置かない）
-  M-->>S: 結果の行（admin: true）
+  W-->>M: マージコミット
+  M-->>S: 結果の行
 ```
 
 `promote` は、マージの前に証跡を書き（`merged_lib/promote_trail.py` の `trail_before_merge`）、同じ `merge_when_green` を同じプロセスで呼ぶ。迂回の記録は、`promote` が `merge_when_green` へ渡す `after_merge`（`promote_trail.admin_after_for`）が、結果を出す前に置く。`cd-admin` で `--gate-approved mvv` を受けたら、証跡を書かずに承認ゲート（10）で止まる。
@@ -218,7 +214,7 @@ sequenceDiagram
 | 承認数を読めない（作り直し） | 迂回しない | 出力の `admin` が `false` |
 | 証跡が無い・先端と違う・担い手が `mvv` だけ | マージしない | `gate`・10 |
 | GitHub が迂回のマージを断った | PR を読み直す（`merge._moved_after_refusal`）。先端が動いていれば `head_moved`、衝突なら 4、ほかは 1 | 本番の経路は `head_moved` を 10 にする |
-| 迂回の記録を書けない（旧いプラグイン） | 本番は出ているため公開の後の手順は止めず、`reviewed.admin_back` が本番の完了と分けて報告する | `stopped`・1。要約に「迂回の記録を書けなかった（本番は出ている）」。戻すマージも止まっていればその終了コード |
+| 迂回の記録を書けない（旧いプラグイン） | `land_approved` が止め、本番の取り込みが 1 で抜ける。タグと GitHub Release はまだ作らない | `stopped`・1。要約に「迂回でマージしたが、迂回の記録を書けない」。打ち直すとマージ済みからの再開（`reviewed.admin_record_on_resume`）が記録を補ってから公開する |
 | 迂回の記録を書けない（`promote`） | `after_merge` が文を返す | `stopped`・1「#<番号> をマージした。迂回の記録を書けなかった（本番は出ている）」 |
 | 迂回の記録を書けない（作り直し） | `Landed.record_error` に理由を入れる | `stopped`。要約に「迂回の記録を書けなかった（本番は出ている）: <理由>」を足す。`production_sha` は出力に残り、workflow の publish へ渡る |
 

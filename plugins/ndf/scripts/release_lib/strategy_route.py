@@ -1,6 +1,7 @@
 """strategy_route.py: 取り込み方の値から、版上げの PR の起点・宛先・同期の PR の要否を決める（#3672 の D17）。
 
-取り込み方の名前で振る舞いを分ける分岐は、このモジュールの `route_of` の 1 か所に置く。
+取り込み方の名前で振る舞いを分ける分岐は `route_of` の 1 か所に置く（本体は依存の無い `release_lib/route.py`。計画の組み立てが
+GitHub の照会の部品を読まずに使えるよう分けた。#3703）。
 
 | 取り込み方 | 承認の対象 | 版上げの PR | 起点 → 宛先 | 同期の PR |
 | --- | --- | --- | --- | --- |
@@ -29,47 +30,29 @@ from typing import NamedTuple
 import approved_commit as ac
 import repo as repo_lib
 import strategy_rows
-from release_lib import approval, names, reviewed
+from release_lib import approval, names, prod_landed, reviewed
 from release_lib.approval import HeadMoved
 from release_lib.context import ReleaseCtx
+from release_lib.land_read import merged_or_tip
+from release_lib.route import Route, route_of  # noqa: F401  取り込み方の分岐の正本（呼び手はここから読む）
 from step_result import EXIT_GATE, EXIT_UNREADABLE, StepError, emit, git
 
 
-class Route(NamedTuple):
-    """版上げの経路。`release_pr` が偽なら版上げの PR を作らない。`bump` が偽なら版数・CHANGELOG・タグ・Release を作らない。"""
+def strategy_or_stop(root):
+    """メインディレクトリのブランチ戦略の宣言（作業ツリーの宣言は PR の変更で差し替えられる）。読めなければ StepError で止める
+    （理由と終了コードは `StrategyError` のもの。既定へ倒さない）。"""
+    import branch_strategy
 
-    release_pr: bool
-    bump: bool
-    source: str | None
-    target: str
-    sync: bool
-    collects_units: bool = False
-
-
-def route_of(strategy) -> Route:
-    """`lib/branch_strategy.Strategy` から版上げの経路を決める。"""
-    sec = strategy.section
-    rs = sec["release_strategy"]
-    prod, base = sec["branches"]["production"], sec["branches"]["base"]
-    versioned = sec["release"]["version_store"]["kind"] != "none"
-    if sec["approval"]["target"] == "production_pr":
-        return Route(False, False, None, prod, False)
-    if rs == "merge_base_branch":
-        return Route(True, versioned, base, prod, True)
-    if rs == "release_branch":
-        return Route(True, True, prod, prod, True, collects_units=True)
-    return Route(True, True, prod, prod, False)
+    try:
+        return repo_lib.branch_strategy_of(root)
+    except branch_strategy.StrategyError as e:
+        raise StepError(e.reason, e.exit_code) from e
 
 
 def admin_bypass(root) -> bool:
     """管理者の迂回でマージするか。宣言（メインディレクトリ）の `merge` が `method: direct` で `admin: true` のときだけ（#3672 の I6）。
     宣言を読めなければ StepError で止める（迂回の有無を既定へ倒さない）。"""
-    import branch_strategy
-
-    try:
-        merge = repo_lib.branch_strategy_of(root).section["merge"]
-    except branch_strategy.StrategyError as e:
-        raise StepError(e.reason, e.exit_code) from e
+    merge = strategy_or_stop(root).section["merge"]
     return merge.get("admin") is True and merge.get("method") == "direct"
 
 
@@ -155,43 +138,35 @@ def allowed_after(root, approved: str, branch: str, n: int) -> ac.AllowedPR:
     """承認したコミットの後に積んでよいコミット: origin の `branch` の first-parent のうちマージでないもの（版上げ・変更履歴・
     説明文・消費の記録）。承認の後にマージで足した単位のコミットはここに入らず、承認の外として止まる（決定 14）。"""
     git(root, "fetch", "-q", "origin", f"+refs/heads/{branch}:refs/remotes/origin/{branch}")
-    tip = git(root, "rev-parse", f"origin/{branch}").stdout.strip()
+    return allowed_upto(root, approved, git(root, "rev-parse", f"origin/{branch}").stdout.strip(), n)
+
+
+def allowed_upto(root, approved: str, tip: str, n: int) -> ac.AllowedPR:
+    """`allowed_after` の本体: コミット `tip` の first-parent のうち、承認したコミットの後のマージでないもの。"""
     listed = git(root, "rev-list", "--first-parent", "--no-merges", f"{approved}..{tip}", check=False)
     return ac.AllowedPR(n, tip, listed.stdout.split() if listed.returncode == 0 else [])
 
 
 def release_selected(ctx: ReleaseCtx, approved, ops, case=None) -> tuple:
     """`branch`（リリースブランチ）→ 本番チャネルの Pull Request を使い回すか作り、承認と比べた先端だけをマージする。
-    `ops` は `release-steps.py`（find_pr・create_pr・wait_and_merge・merge_commit_of・_merged_sync_pr・_merge_sync_pr と版の再試行の
+    `ops` は `release-steps.py`（find_pr・create_pr・land（本番の取り込み）・merge_commit_of・_merged_sync_pr・_merge_sync_pr と版の再試行の
     回数）。(本番の PR, マージコミット, items, metrics, 戻すマージ) を返し、戻すマージ（`merge_back_after`）は呼び手が公開の後に打つ。
     承認の外の変更は承認ゲート（10）で止め、組み直しへ戻す。`case` が CD のある場合（#2773）なら、承認したコミットを引数で受けず、
     本番の PR の先端と PR の上の承認（証跡かレビュー）の完全な一致だけで通す（`_merge_exact`。許可リストの許容を使わない）。"""
-    root, a, plugin, plugins, branch, base, prod = ctx.root, ctx.a, ctx.plugin, ctx.plugins, ctx.branch, ctx.base, ctx.prod
+    root, a, plugin, branch, base, prod = ctx.root, ctx.a, ctx.plugin, ctx.branch, ctx.base, ctx.prod
     branches = ReleaseBranches(release=branch, base=base, production=prod)
     if a.channel != "prod":
         raise StepError("選んで集める取り込み方の release は --channel prod だけ（開発版はベースブランチで出す）", EXIT_UNREADABLE)
-    metrics = {"channel": a.channel, "version": a.version, "release_pr": None, "sync_pr": None, "main_pr": None, "tag": None}
-    metrics.update(
-        {
-            "merge_commit": None,
-            "plugins": ",".join(plugins),
-            "release_strategy": getattr(a, "release_strategy", None),
-            "approved_sha": approved,
-        }
-    )
+    metrics = ctx.prod_metrics(release_strategy=getattr(a, "release_strategy", None), approved_sha=approved)
     items: list[dict] = []
     git(root, "fetch", "-q", "origin", "--tags")
     done = ops.find_pr(root, branch, prod, states=("MERGED", "OPEN"))
-    if done and done["state"] == "MERGED":
-        main_pr = done["number"]  # 再開: 本番チャネルへのマージは済んでいる（取り消せない）
-        merge, rows = _resume_merged(ctx, main_pr, approved, case, ops)
+    if landed := prod_landed.landed_prod_pr(root, branch, prod, done, ops, case):
+        main_pr = landed[0]  # 再開: 本番チャネルへの取り込みは済んでいる（取り消せない）
+        merge, rows = _resume_merged(ctx, main_pr, landed[1], approved, case)
         items += rows
     else:
-        tag = names.tag_name(root, plugin, a.version)
-        if git(root, "rev-parse", "-q", "--verify", f"refs/tags/{tag}", check=False).returncode == 0:
-            raise StepError(f"タグ {tag} は既にある")
-        if why := names.shipped_note(root, plugin, a.version):  # タグを作らない宣言は本番ブランチの版で確かめる
-            raise StepError(why)
+        names.require_untagged(root, plugin, a.version, git=git)
         title = f"Release: {plugin} v{a.version} を {prod} へ"
         body = (
             f"{plugin} v{a.version} を {prod} へ出す（選んだスプリントブランチを {prod} から組んだリリースブランチ）。\n\n"
@@ -208,18 +183,20 @@ def release_selected(ctx: ReleaseCtx, approved, ops, case=None) -> tuple:
         admin = case is not None and case.admin_merge
         items.append({"kind": "pr", "name": f"#{main_pr}", "result": "merged", "base": prod, "admin": admin})
         git(root, "fetch", "-q", "origin")
-        merge = merge or git(root, "rev-parse", f"origin/{prod}").stdout.strip()
+        merge = merged_or_tip(root, merge, prod, git)
     return main_pr, merge, items, metrics, reviewed.admin_back(merge_back_after(root, a, plugin, branches, main_pr, ops))
 
 
-def _resume_merged(ctx: ReleaseCtx, main_pr, approved, case, ops) -> tuple[str, list[dict]]:
-    """再開: マージ済みの本番の PR のマージコミットが承認したコミットを含むかを確かめ、マージし直さない。
+def _resume_merged(ctx: ReleaseCtx, main_pr, commit, approved, case) -> tuple[str, list[dict]]:
+    """再開: 本番チャネルへ入った本番の PR の head を承認と照らし、マージし直さない。CD のある場合の PR の上の承認との照合は
+    `prod_landed.landed_prod_pr` が済ませ、CD の無い場合は入った head を承認したコミットと許可リスト（`allowed_upto`）で比べる
+    （マージ後の祖先関係でなく head で比べるため、squash・rebase の取り込みも通る。I2）。
     (マージコミット, 足す行) を返す。迂回でマージしたのに記録が無ければ書く（#3506 の I7）。"""
     root, prod = ctx.root, ctx.prod
     git(root, "fetch", "-q", "origin")
-    merge = ops.merge_commit_of(root, main_pr) or git(root, "rev-parse", f"origin/{prod}").stdout.strip()
-    if approved and git(root, "merge-base", "--is-ancestor", approved, merge, check=False).returncode != 0:
-        raise StepError(f"マージ済みの本番の PR #{main_pr} のコミット {merge[:8]} が承認したコミット {approved[:8]} を含まない")
+    if case is None:
+        prod_landed.require_landed_head(root, main_pr, approved, lambda head: allowed_upto(root, approved, head, main_pr))
+    merge = merged_or_tip(root, commit, prod, git)
     rows = [{"kind": "pr", "name": f"#{main_pr}", "result": "already_merged", "base": prod}]
     if case is not None and (row := reviewed.admin_record_on_resume(root, repo_lib.owner_repo(root), case, main_pr)):
         rows.append(row)
@@ -227,15 +204,15 @@ def _resume_merged(ctx: ReleaseCtx, main_pr, approved, case, ops) -> tuple[str, 
 
 
 def _merge_approved(ctx: ReleaseCtx, main_pr, approved, items, metrics, ops):
-    """承認したコミットと比べ（`allowed_after`）、比べた先端だけを本番チャネルへ入れる。先端が動けば比べ直す。(マージ, 判定)。"""
+    """承認したコミットと比べ（`allowed_after`）、比べた先端だけを本番の取り込み（`ops.land`）で本番チャネルへ入れる。先端が動けば比べ直す（I9）。
+    (マージ, 判定)。merge queue へ入れた・人のマージを待つときは `prod_land.LandPending` で抜ける。"""
     root, a, plugin, branch = ctx.root, ctx.a, ctx.plugin, ctx.branch
-    by = approval.approved_by(root, a)
     for left in range(ops.HEAD_MOVED_RETRIES, -1, -1):
         verdict = approval.check_approved(root, approved, branch, allowed_after(root, approved, branch, main_pr))
         if not verdict.ok:
             emit(approval.gate(root, a, plugin, branch, verdict, items, metrics), EXIT_GATE)
         try:
-            return ops.wait_and_merge(root, main_pr, expect=verdict.tip, ci_wait=a.ci_wait, gate_approved=by), verdict
+            return ops.land(root, a, main_pr, verdict.tip), verdict
         except HeadMoved:
             if not left:
                 emit(approval.gate(root, a, plugin, branch, verdict, items, metrics, moved=True), EXIT_GATE)

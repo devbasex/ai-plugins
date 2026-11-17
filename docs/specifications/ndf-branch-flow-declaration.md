@@ -23,9 +23,9 @@
 - **宣言は任意でない。** セクションが無い・スキーマに合わないときは止まり、既定値へ倒さない（`lib/branch_strategy.py` の冒頭の説明）
 - **旧いキーが残ると止まる。** 旧い 4 か所（`.ndf/worktree.json`・`.ndf/project.json`・`.ndf/supervise.json`・`.ndf/release.json`）にキーが残れば、キーの位置と移行のコマンド（`project-decl.py branch-strategy migrate`）を理由に出す（`lib/branch_strategy_legacy.py`）
 
-**旧いキーを今も読むのは、ai-plugins の本番チャネル宛の検査だけである。** `scripts/check-pr-base.sh` と
-`.github/workflows/pr-base-guard.yml` が、宛先のブランチの `.ndf/worktree.json` の `branch_flow.promotion` を読む
-（`grep -rln branch_flow scripts plugins/ndf/scripts plugins/ndf/skills .github` を、テストを除いて打った結果がこの 2 ファイルだけ）。
+**ai-plugins の本番チャネル宛の検査も新しい宣言を読む。** `scripts/check-pr-base.sh`（`.github/workflows/pr-base-guard.yml` が走らせる）は、
+宛先のブランチの `.ndf/project.json` のセクション `branch_strategy` を `lib/branch_strategy_cli.py get --ref` で読み、
+`release_strategy` の値で判定を分ける。下の「ai-plugins の本番チャネル宛の検査」の `selected` は今の `release_branch` にあたる。
 
 **新しい宣言の確定仕様は、#3672 の手順 2〜5 を終えた後に作る。** それまでの正本は課題の設計
 （`issues/issue-3672-design.md` と、同じ接頭辞の `-design-detail.md`・`-design-decisions.md`・`-design-removal.md`・
@@ -343,9 +343,12 @@ sequenceDiagram
 ### ai-plugins の本番チャネル宛の検査
 
 必須のステータスチェック `guard`（`.github/workflows/pr-base-guard.yml`）が `scripts/check-pr-base.sh` を走らせる。宣言は Pull Request の変更で
-緩められないよう、宛先のブランチの `.ndf/worktree.json`（`git show origin/<宛先>:.ndf/worktree.json`）から読む。
+緩められないよう、宛先のブランチの `.ndf/project.json` のセクション `branch_strategy` から、`plugins/ndf/scripts/lib/branch_strategy_cli.py get --ref origin/<宛先>` で読む。
+セクションが無い・スキーマに合わない・旧いキーが残るときは、読みの部品が出す理由（ファイル・キーの位置・打つコマンド）を添えて落とし、既定の判定へ倒さない。
 
-`branch_flow.promotion` が `selected` のとき、本番チャネル宛の Pull Request は次をすべて満たすときだけ通す。
+判定は `release_strategy` の値で分ける。`trunk` はベースブランチと本番チャネルが同じなので通す。
+
+`release_branch`（選んで集める取り込み方）のとき、本番チャネル宛の Pull Request は次をすべて満たすときだけ通す。
 
 | # | 条件 | 確かめ方 |
 | --- | --- | --- |
@@ -355,13 +358,13 @@ sequenceDiagram
 
 ベースブランチにだけあるコミット（別のスプリントの PR・開発版の版上げ）は条件 3 で落ちる。どのスプリントを承認したかは CI では分からない。
 承認したスプリントだけが入ることは、承認資料の範囲と、承認したコミットとの照合（「スプリントの流れ」の本番チャネルへの Pull Request）が保証する。
-`whole` か `branch_flow` が無いときは、head がベースブランチか、先頭が `origin/<ベースブランチ>` の祖先の `release/v<版>` であるときに通す。
+`merge_base_branch` のときは、head がベースブランチ（`branches.base`）か、先頭が `origin/<ベースブランチ>` の祖先の `release/v<版>` であるときに通す。ベースブランチが origin にまだ無い間は通す。
 
 `scripts/ci-heavy-skip.py` の規則 3（本番の Pull Request で、ベースブランチへの push で通ったコミットから版数と説明しか変えていなければ全体テストを省く）は、
 宛先の宣言が単位を選ぶ行のときは当てない。リリースブランチはベースブランチと違う組み合わせだからである。宣言を読めないときも当てない。
 規則 1（版上げだけの差分）と規則 2（文書だけの差分）は取り込み方に依らず当てる。
 
-ai-plugins の `.ndf/worktree.json` は `branch_flow` を持たず、既定値の行で動いている。
+ai-plugins の `.ndf/project.json` のセクション `branch_strategy` は `release_strategy: trunk` で、宛先の検査は判定をせずに通す。
 
 ## エラー処理
 
@@ -391,7 +394,8 @@ ai-plugins の `.ndf/worktree.json` は `branch_flow` を持たず、既定値�
 - 合成した履歴で `measure` が 4 項目に値・確からしさ・根拠を出し、標本の足りない項目は `unknown` と理由を出すこと。ずれた宣言で `drift` が行を出し、合った宣言では `items` が空であること
 - 特定のブランチ名を例外リストの外のファイルへ足すと `check-skill-repo-assumptions.py` が落ちること
 - `worktree` の手順書の `branch_flow` の例がスキーマに通ること
-- 宛先の宣言が `selected` のとき、`check-pr-base.sh` がベースブランチからの Pull Request とベースブランチにだけあるコミットを含む head を 1 で落とし、条件を満たす `release/v<版>` を 0 で通すこと。`ci-heavy-skip.py` が規則 3 で省かないこと
+- 宛先のセクションの `release_strategy` が `release_branch` のとき、`check-pr-base.sh` がベースブランチからの Pull Request とベースブランチにだけあるコミットを含む head を 1 で落とし、条件を満たす `release/v<版>` を 0 で通すこと。`ci-heavy-skip.py` が規則 3 で省かないこと
+- 宛先のブランチにセクションが無い・壊れている・旧いキーが残るとき、`check-pr-base.sh` が理由を添えて 1 で落とすこと。`trunk` ではどの head も 0 で通すこと。作業ツリーの宣言を変えても判定が変わらないこと
 - ベースブランチの宣言が `selected`、本番チャネルの宣言に `branch_flow` が無い（または `promotion: whole` を明示する）リポジトリで、まとめたリリースと `new release` のプランに `--promotion selected` と `release-branch` のステップが無いこと
 - 両方の宣言が `selected` のリポジトリで、まとめたリリースと `new release` のプランが `selected` の組み方になること
 - 本番チャネルが origin に無い・ファイルが無い・JSON として読めない・`version` が 1 でないそれぞれで `whole` で組まれ、出所の欄に読めない理由が出ること。`branch_flow` が表に合わなければ `new release` が直すキーを出して終了コード 2 で止まり、まとめたリリースがプランを書かないこと

@@ -398,7 +398,7 @@ def plan_parallel_release(main, name: str, d, version: str, carried: bool = Fals
     from supervise_lib.decl import apply_decls, decl_fields
     from supervise_lib.paths import PARALLEL_PY
     from supervise_lib.procedures import with_record
-    from supervise_lib.release_templates import _dev_approval_steps, plan_release, release_names
+    from supervise_lib.release_templates import _approval_material_steps, plan_release, release_names
 
     repo = str(main)
     d = Path(d)
@@ -441,7 +441,7 @@ def plan_parallel_release(main, name: str, d, version: str, carried: bool = Fals
     state = d / "answer.json"
     present_state = present_state_dir(d)  # 提示のプランの状態ディレクトリ（queue の `state_dir_of` と同じ置き場）
     # 足す PR は無い（範囲の PR だけを集める。`--prs` を値なしで渡す）
-    facts = _dev_approval_steps(ns, repo, approval, "", ",".join((ns.release or {}).get("runtimes") or []))
+    facts = _approval_material_steps(ns, repo, approval, "", ",".join((ns.release or {}).get("runtimes") or []))
     for s in facts:
         s.pop("on_fail", None)  # 提示のプランに judge は無い。落ちたらそのステップで止まる
     facts[0]["gate_as_ok"] = True  # facts の 10 は承認ゲートにせず、承認の成否は後段の mvv・approve が決める

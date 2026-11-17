@@ -2,6 +2,7 @@
 
 - `store_version`: 宣言の版数の置き場から版数を引く（版上げの PR かの判定と、本番ブランチの版数）
 - `parse_landed`: 早送りの取り込みのコミットの trailer から、PR の取り込みの記録を引く
+- `merged_or_tip`: 本番の取り込みのコミット。読めなければ本番ブランチの先端
 """
 
 from __future__ import annotations
@@ -57,3 +58,8 @@ def parse_landed(log: str, pr: int) -> dict | None:
                 "first_parent": parents[0] if parents else "",
             }
     return None
+
+
+def merged_or_tip(root, merge: str | None, prod: str, git) -> str:
+    """本番の取り込みのコミット `merge`。読めなければ（None・空）`origin/<prod>` の先端。`git` は呼び手の git（テストが差し替える）。"""
+    return merge or git(root, "rev-parse", f"origin/{prod}").stdout.strip()

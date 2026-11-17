@@ -37,18 +37,21 @@ def release_cd_case(a, repo: str | None) -> release_case.Case | None:
     return case if case.has_cd else None
 
 
-def cd_release_wait(a, case: release_case.Case | None, on_exit: dict) -> dict:
-    """CD のある場合の本番の release が承認を待つ 10 の行き先（承認資料の組み立て facts）。MVV 判定のプランで場合 1 なら承認ゲートに
+def cd_release_wait(a, case: release_case.Case | None, on_exit: dict, trunk: bool = False) -> dict:
+    """CD のある場合の本番の release が承認を待つ 10 の行き先（承認資料の組み立て facts。trunk は承認前の試用 trial。#3703 の決定 7）。MVV 判定のプランで場合 1 なら承認ゲートに
     数えず（on_exit）、後の mvv の判定に任せる（承認の後にマージまで済めば結果は完了。済まなければ mvv が承認ゲートを返す）。
     場合 2 と cd-admin は MVV 判定で人の承認を代えられないため、MVV 判定のプランでも承認ゲート（gate_next）にする。"""
+    target = "trial" if trunk else "facts"
     if getattr(a, "mvv", None) and case is not None and case.mvv_may_trail:
-        return {"on_exit": {**on_exit, str(EXIT_GATE): "facts"}}
-    return {"gate_next": "facts"}
+        return {"on_exit": {**on_exit, str(EXIT_GATE): target}}
+    return {"gate_next": target}
 
 
-def cd_prod_steps(a, v: str, prs: str, repo: str | None, approval: str, approval_steps: list[dict], case: release_case.Case) -> list[dict]:
+def cd_prod_steps(
+    a, v: str, prs: str, repo: str | None, approval: str, approval_steps: list[dict], case: release_case.Case, trial: dict | None = None
+) -> list[dict]:
     """CD のある場合の本番の、release が承認ゲート（10）で止まった後のステップ（#2773 の決定 6）: 承認資料を組む `approval_steps`
-    （facts → explain → others → 助言の MVV 判定。release_templates の `_dev_approval_steps` を本番の PR の先端で組んだもの）→
+    （facts → explain → others → 助言の MVV 判定。release_templates の `_approval_material_steps` を本番の PR の先端で組んだもの）→
     本番の PR へ置き（approval-post）→ リリース承認ゲート → 証跡（approve-pr）→ release（マージ）。MVV 判定のプランは approval-post の
     後に MVV で判定し、従えば approve-pr を --by mvv で打つ。それ以外は approval-post で終え、利用者の承認の後に
     run <計画> --from approve-pr で続ける。
@@ -59,12 +62,14 @@ def cd_prod_steps(a, v: str, prs: str, repo: str | None, approval: str, approval
     承認の後に run <計画> --from release で続ける。
 
     迂回の宣言のある場合（`cd-admin`。#3506 の決定 8）は、MVV 判定のプランでも判定の記録を置いたところで承認ゲートとして終え、
-    その後に approve-pr を --by user で置く（利用者の承認の後に run <計画> --from approve-pr で続ける）。"""
+    その後に approve-pr を --by user で置く（利用者の承認の後に run <計画> --from approve-pr で続ける）。
+
+    `trial` は trunk の承認前の試用（版上げの PR の head からの導入の確認。#3703 の決定 7）で、渡せば先頭（facts の前）に置く。"""
     mvv = getattr(a, "mvv", None)
     human = case.human_approval
     trail = case.trail_approval
     after_gate = "end" if human else "approve-pr"
-    steps = approval_steps
+    steps = [trial, *approval_steps] if trial else approval_steps
     for s in steps:
         if s.get("next") == "end":  # others（助言の MVV 判定があれば mvv-note）の後は承認資料を置く
             s["next"] = "approval-post"

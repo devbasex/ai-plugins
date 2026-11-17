@@ -39,11 +39,11 @@ origin のベースブランチ・本番のブランチ・リリースタグを�
 
 | 要素 | 責務 |
 | --- | --- |
-| `plugins/ndf/scripts/lib/release_version.py` | origin を `git fetch` してベースブランチと本番のブランチの `plugin.json` の版・リリースタグを読み（`observe`）、次に空いている開発版を決め（`decide_dev`）、ある版がもう出ているかを判定する（`taken`）。`release/v<版>` → ベースブランチのマージ済みの PR を照会する（`own_released`）。`bump` の前の判定（`bump_check`）を持つ。ファイルを書かない |
+| `plugins/ndf/scripts/lib/release_version.py` | origin を `git fetch` してベースブランチと本番のブランチの `plugin.json` の版・リリースタグを読み（`observe`）、次に空いている開発版を決め（`decide_dev`）、系列の無い本番の正式版を決め（`decide_release`）、ある版がもう出ているかを判定する（`taken`）。`release/v<版>` → ベースブランチのマージ済みの PR を照会する（`own_released`）。`bump` の前の判定（`bump_check`）を持つ。ファイルを書かない |
 | `plugins/ndf/scripts/supervise_lib/queue_fill.py` の `fill_release_version` | プランの「版」の欄を読み、版の記録を書いて（または読んで）版の差し込みを埋める。開発版の流し直しでは決め直しを行う。埋められなければ理由と判定の結果を返す |
 | `plugins/ndf/scripts/supervise_lib/queue.py` の `fill_stage` | `{queue_pr:…}` の差し込みの後に `fill_release_version` を呼び、判定の結果を流さなかった項目の `version` に載せる |
 | `plugins/ndf/scripts/supervise_lib/release_templates.py` | 版が無ければ版を書く箇所すべてに版の差し込みを書き、プランへ「版」の欄を置く。版があれば具体の値を書き、「版」の欄の `明示` に入れる。`bump` のステップに `on_exit: {"2": "stop", "3": "stop"}` を置く |
-| `plugins/ndf/scripts/supervise_lib/sprint_waves.py`・`sprint.py` | 開発版と本番のプランへ明示の版（無ければ空）と上げ幅を渡す。本番は明示が無ければ系列（開発版のプランの名前 `release`）を渡す |
+| `plugins/ndf/scripts/supervise_lib/sprint_waves.py`・`sprint.py` | 開発版と本番のプランへ明示の版（無ければ空）と上げ幅を渡す。本番は明示が無ければ系列（開発版のプランの名前 `release`）を渡す。版上げの PR が本番の PR を兼ねる取り込み方（開発版のプランを作らない）では系列を渡さない |
 | `plugins/ndf/scripts/supervise_lib/sprint_routes.py` の `normal_gate_2_stage` | 承認資料のパスを、開発版のプランの版の記録の `base` から作るパスとして書く |
 | `plugins/ndf/scripts/supervise_lib/new_args.py` | `--version`・`--prod` を雛形のデプロイでも任意にし、`--level` を `sprint` と `close` に置く |
 | `plugins/ndf/scripts/release-steps.py` の `cmd_bump` | 書き換える前に `release_version.bump_check` を呼び、当たれば `stopped` で返す |
@@ -84,7 +84,7 @@ graph TD
 | I1 | 版を明示せずに作ったプランのファイルと `sprint.json` は具体的な版数を持たない。版を名前に持つ値（作業場所・`branch`・承認資料のパス・ステップの引数）は版の差し込みで書く | 雛形のテストが落とす |
 | I2 | 決めた開発版は、読んだ origin のベースブランチの版より大きく、その基底の版のリリースタグは無い | 判定のテストが落とす |
 | I3 | 版の記録は、自分の `release/v<版>` がベースブランチへマージされるまでで、記録の版がすでに別のスプリントに出ていると分かったときに限り決め直す。それ以外の流し直しは記録の版を使う。明示の版（`how = explicit`）は決め直さない | 差し込みのテストが落とす |
-| I4 | 本番のプランの版は、明示が無ければ同じスプリントの開発版の記録の基底の版に等しい。開発版の記録が変わったら、リリース承認ゲートの前なら本番も新しい基底の版を使い、後なら流さない | 開発版の記録が無ければ流さない（`no_series`）。承認の後に変わっていれば `stopped`（`series_changed`） |
+| I4 | 本番のプランの版は、明示が無ければ同じスプリントの開発版の記録の基底の版に等しい。系列の無い本番のプラン（開発版のプランを作らない取り込み方）は、origin から決めた正式版を記録し、記録があれば決め直さない。開発版の記録が変わったら、リリース承認ゲートの前なら本番も新しい基底の版を使い、後なら流さない | 開発版の記録が無ければ流さない（`no_series`）。承認の後に変わっていれば `stopped`（`series_changed`） |
 | I5 | 明示の版がすでに出ていれば記録を書かず、差し込みを埋めず、プランを流さない（開発版はベースブランチの版が同じか大きい、正式版は同じ版のタグがある） | キューの結果が `stopped`。既に出ている版と次に空いている版を項目に載せる |
 | I6 | origin のベースブランチ・本番のブランチ・タグのどれかを読めなければ記録を書かない | 流さず、読めなかったものを項目に載せる |
 | I7 | `bump` は、新しい版がベースブランチの版以下か、新しい版が正式版でそのタグがあれば、ファイルを書き換えない | `stopped`・終了コード 3 で返し、ステップは `on_exit` で judge を通らずに止まる |
@@ -178,9 +178,11 @@ sequenceDiagram
 記録が無ければ次の順に決める。
 
 1. 「版」の欄に `明示` があればその版、無ければ `系列` の名前の開発版のプランの記録（同じディレクトリの、名前の一致する
-   プランの状態ディレクトリ）の `base`。開発版の記録が無ければ流さない（`no_series`）
+   プランの状態ディレクトリ）の `base`。開発版の記録が無ければ流さない（`no_series`）。`明示` も `系列` も空なら、`observe` の
+   結果から `decide_release` が次の正式版（最新のタグ・本番のブランチの版・ベースブランチの版の基底のうち最も大きいものを上げ幅で
+   上げた版）を決める。origin を読めなければ流さない（`unreadable`）
 2. `observe` の後に `taken` で `<plugin>--v<版>` のタグを調べ、あれば流さない（`taken`。`next_free` を添える）
-3. `how` を `explicit` か `series` にして記録を書き、差し込みを埋める
+3. `how` を `explicit`・`series`・`decided` のどれかにして記録を書き、差し込みを埋める
 
 **本番は次に空いている版へ自動で移らず、自分では決め直さない。** 本番の記録がある流し直しで、`系列` の開発版の記録の
 `base` が本番の記録の版と違うときは、本番のプランの状態にリリース承認ゲートの通過（`approve`・`mvv`・`approve-pr` のどれかのステップの成功。`approve-pr` は CD のある場合の本番のプランで承認を証跡に書くステップ）が無ければ
@@ -213,7 +215,7 @@ sequenceDiagram
 | `チャネル` | `dev` / `prod` | 許さない | 開発版か本番か |
 | `上げ幅` | `patch` / `minor` / `major` | 許さない | 開発版を新しい系列で始めるときの上げ幅。既定 `patch` |
 | `明示` | 文字列 | 許す | 明示の版。空（`null`）は「流す時点に決める」 |
-| `系列` | 文字列 | 許す | 本番のプランだけ。版を読む開発版のプランの名前（スプリントでは `release`）。本番で `明示` と `系列` が両方空なら雛形が作らない |
+| `系列` | 文字列 | 許す | 本番のプランだけ。版を読む開発版のプランの名前（スプリントでは `release`）。本番で `明示` と `系列` が両方空なら、版上げの PR が本番の PR を兼ねる取り込み方の計画だけ雛形が作り、ほかは作らない |
 
 版の差し込みの語は `{release_version}`（出す版）と `{release_base}`（その接尾辞を外した版）である。**この欄を持たない
 プランには、キューは何もしない。** その版は `bump` の止まり方（I7）だけが守る。

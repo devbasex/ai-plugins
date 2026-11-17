@@ -1628,6 +1628,7 @@ def test_new_release_dev_and_prod(tmp_path):
         "snapshot",
         "sync",
         "release",
+        "release-landed",
         "cd-result",
         "record",
         "verify",
@@ -3187,7 +3188,9 @@ def test_step_with_a_leftover_queue_placeholder_stops_without_running(tmp_path):
 # 現状固定テスト（I-004: release_templates.plan_release_package_plugin の分岐。期待値は今の実装の出力。
 # このリポジトリの宣言（sync_checks あり・単位を選ばない取り込み方）で組み、CD の有無は release_case.case_at で決める）
 _BASE_DEV = ["bump", "changelog", "notes", "sync", "release", "verify"]
-_BASE_PROD = ["bump", "bump-others", "changelog", "notes", "snapshot", "sync", "release", "cd-result", "record", "verify", "cleanup"]
+# 本番の release の 6（merge queue へ入れた・人のマージを待つ）は release-landed で打ち直す（#3703 の決定 3・9）
+_BASE_PROD = ["bump", "bump-others", "changelog", "notes", "snapshot", "sync", "release", "release-landed"]
+_BASE_PROD += ["cd-result", "record", "verify", "cleanup"]
 _TAIL_PROD = ["judge", "judge-record"]  # 本番は直しの段を持たない（#3572）
 _APPROVAL = ["facts", "explain", "others"]
 
