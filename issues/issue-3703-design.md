@@ -55,7 +55,8 @@
 
 | 集約 | 持ち主（書き換えてよいもの） | 根 | エンティティ | 値オブジェクト |
 | --- | --- | --- | --- | --- |
-| 本番の取り込み | `release_lib/prod_land.py`（新設）。中で `land_approved` を呼ぶ | 版上げの PR（本番ブランチ宛て） | — | 承認した head・取り込みの結果（`merged`・`queued`・`human`・`stopped`） |
+| 本番の取り込み | `release_lib/prod_land.py`（新設）。中で `land_approved` を呼ぶ | 承認した head の取り込み（1 回の land） | — | 承認した head・取り込みの結果（`merged`・`queued`・`human`・`stopped`） |
+| 版上げの PR | `release_lib/trunk_release.py`（新設。`open_release_pr` が作るか使い回し、`release_trunk` が承認の有無と head の一致で止めるか本番の取り込みへ渡すかを決める）。`release-steps.py` の `cmd_release` は `release_trunk` を呼ぶだけで、PR を書き換えない | trunk の版上げの PR（`release/v<版>` → 本番ブランチ） | — | PR の番号・head・状態（開いている・merge queue にある・マージ済み） |
 | スプリントの計画 | `supervise_lib/sprint.py`（ステージの並び） | 計画（`sprint.json`） | ステージ・プラン | プランの「版」の欄 |
 | 版の記録 | `supervise_lib/queue_fill.py` | プランの状態ディレクトリの `version.json` | — | 版・決め方（`explicit`・`series`・`decided`） |
 
@@ -64,7 +65,7 @@
 | # | 集約 | 条件 | 破れたときの扱い |
 | --- | --- | --- | --- |
 | I1 | 本番の取り込み | `release-steps.py release --channel prod` が本番ブランチへ入れる経路は、下の「本番ブランチへ入れる経路」の 4 か所の呼び出しで全部であり、すべて本番の取り込みを通って `land_approved` に入る。`wait_and_merge` を本番ブランチ宛ての PR に使わない | 該当の経路のテストが落ちる |
-| I2 | 本番の取り込み | trunk の経路では、本番ブランチへ入る head は承認の記録・証跡の SHA と完全に一致する。入れる直前に版上げの PR の今の head と照らす | 承認ゲート（10）で止まり、承認を取り直す依頼を出す。本番ブランチも merge queue も変えない |
+| I2 | 本番の取り込み | trunk の経路では、本番ブランチへ入る head は承認の記録・証跡の SHA と完全に一致する。入れる直前に版上げの PR の今の head と照らす。マージ済みからの再開でも、承認の SHA とマージされた版上げの PR の head（`headRefOid`）の一致で確かめ、マージコミットとの祖先の判定は使わない。宣言の履歴の作り方が squash・rebase でマージコミットが承認の SHA を含まなくても、承認した head をマージしていれば公開へ進む | 承認ゲート（10）で止まり、承認を取り直す依頼を出す。本番ブランチも merge queue も変えない |
 | I9 | 本番の取り込み | ベースブランチと本番ブランチが分かれた CD の無い経路では、本番ブランチへ入る head は、承認したコミットから比べて許容に収まった先端（`verdict.tip`）と同じ。入れる直前に本番の PR の今の head と照らす（決定 2） | 先端が動いていれば比べ直し、今の回数を超えたら承認ゲート（10）で止まる。本番ブランチも merge queue も変えない |
 | I3 | 本番の取り込み | 承認した head の検査がそろうまで入れない。中身の失敗は 1、上限までの基盤の待ちは 75 | 本番ブランチを変えずに止まる |
 | I4 | 本番の取り込み | 取り込みの結果が `queued`・`human` のとき、タグと GitHub Release を作らない | 公開を欠けとして返し（6）、打ち直しでマージ済みを見つけてから公開する |
@@ -272,12 +273,12 @@ merge queue から外れていた PR は、1 回目と同じく検査の待ち�
 
 ### リリース承認ゲートでの止まり方（CD の無い trunk の本番のプラン）
 
-計画にリリース承認ゲートのステージを置かない代わりに、本番のプランの結果を「関門」（承認ゲート）にして止める。今の CD のある本番のプラン（`release_cd.cd_release_wait`）と同じ仕組みを使い、新しい終了コードや状態は足さない。
+計画にリリース承認ゲートのステージを置かない代わりに、本番のプランの結果を「承認ゲート」にして止める。今の CD のある本番のプラン（`release_cd.cd_release_wait`）と同じ仕組みを使い、新しい終了コードや状態は足さない。
 
 | 進め方 | release（1 回目）の 10 の受け方 | プランの終わり方 | 後続のステージ |
 | --- | --- | --- | --- |
-| normal | `gate_next: trial`。実行の基盤（`supervise_lib/engine.py`）がこのステップを承認ゲートとして記録する | others の `next: end` で終わる。承認ゲートを記録したステップがあるため、完了で終えても結果は「関門」になる（`engine._final_result`）。キューの結果は `gate` | 前のステージのプランがすべて完了したときだけ次のステージが流れる（キューの規則。`skills/development-workflow/references/glossary.md` の「ステージ」）。「関門」のプランがある間は、後続のステージ（スプリントの終わりの計画など）は流れない。プランの中の cd-result・record は release（2 回目）の 0 の後にしか進まない |
-| fast・auto | `on_exit: {"10": "trial"}`。承認ゲートとして数えず、others の後の MVV 判定に任せる（今の `cd_release_wait` の MVV 判定のプランと同じ扱い） | MVV 判定が通せば approve → release（2 回目）へ進み、完了で終わる。通さなければ MVV 判定のステップが承認ゲート（`gate_next: end`）を返し、結果は「関門」 | normal と同じ |
+| normal | `gate_next: trial`。実行の基盤（`supervise_lib/engine.py`）がこのステップを承認ゲートとして記録する | others の `next: end` で終わる。承認ゲートを記録したステップがあるため、完了で終えても結果は「承認ゲート」になる（`engine._final_result`）。キューの結果は `gate` | 前のステージのプランがすべて完了したときだけ次のステージが流れる（キューの規則。`skills/development-workflow/references/glossary.md` の「ステージ」）。「承認ゲート」のプランがある間は、後続のステージ（スプリントの終わりの計画など）は流れない。プランの中の cd-result・record は release（2 回目）の 0 の後にしか進まない |
+| fast・auto | `on_exit: {"10": "trial"}`。承認ゲートとして数えず、others の後の MVV 判定に任せる（今の `cd_release_wait` の MVV 判定のプランと同じ扱い） | MVV 判定が通せば approve → release（2 回目）へ進み、完了で終わる。通さなければ MVV 判定のステップが承認ゲート（`gate_next: end`）を返し、結果は「承認ゲート」 | normal と同じ |
 
 承認の後は、利用者の承認を記録してから `run <本番のプラン> --from approve` を打つ。approve が承認したコミットを記録し、release（2 回目）が受け入れ条件 1〜6 の取り込みへ進む（受け入れ条件 12）。承認の前に approve・release（2 回目）が動かないのは、プランが others の後で終わり、続きを `--from approve` でしか始めないためである。
 
@@ -381,7 +382,7 @@ trunk の判定は計画の側（`trunk_release(a)`）とリリースの側（`_
 | 9・I7 | 8 の計画で `--version` を渡さずにキューの版の差し込みを埋めると止まらずに版が決まり、2 回目の埋めは記録の版を使う | 系列を求めたままにすると `no_series` で落ちる |
 | 10・I6 | 8 の本番のプランで、release の 10 の行き先が trial、trial が facts の前。fast・auto では trial のコマンドに `{ref}` が残らず `release/v<版>` が入る | trial を外す、置き換えを外すと落ちる |
 | 11 | 8 の本番のプランが CD の有無によらず facts（承認資料を書く）をリリース承認ゲートより前に持ち、trial の後の explain（`notes --approval`）が欄「承認前の試用で確かめたこと」に `release/v<版>` の ref・版・結果を書く。bump の後の notes は `--approval` を持たない | 欄を書かない、ref を本番ブランチのままにする、欄を書くステップを trial より前に置くと落ちる |
-| 12 | 8 の本番のプランを偽のコマンドで流すと、1 回目の release が 10 で trial へ進み、normal は others の後に結果「関門」で終わって approve・release（2 回目）・cd-result を打たない。`--from approve` で続けると release が取り込みへ進む | 1 回目に承認資料を求めて 3 で止める、10 を承認ゲートとして記録せずに完了で終える、others の後に approve へ進むと落ちる |
+| 12 | 8 の本番のプランを偽のコマンドで流すと、1 回目の release が 10 で trial へ進み、normal は others の後に結果「承認ゲート」で終わって approve・release（2 回目）・cd-result を打たない。`--from approve` で続けると release が取り込みへ進む | 1 回目に承認資料を求めて 3 で止める、10 を承認ゲートとして記録せずに完了で終える、others の後に approve へ進むと落ちる |
 | 13・I8 | 分かれた宣言で `new sprint` の計画に開発版のプランが残り、開発版の PR と `-sync` の PR のマージは `wait_and_merge` を呼ぶ | 開発版のマージまで本番の取り込みへ替えると落ちる |
 | 14 | `release-steps.py land` の今のテストが変更なしで通る | `land_approved` に待ちを入れると落ちる |
 | 15 | 範囲のテスト（`release`・`land`・`supervise`・`sprint` の各テストと契約のコピー）が通る | — |

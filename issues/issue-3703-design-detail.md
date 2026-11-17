@@ -150,7 +150,7 @@ docs/
 | `strategy_route._merge_approved` | `plugins/ndf/scripts/release_lib/strategy_route.py` | 変更 | 変えない | 選んで集める取り込み方の CD の無い本番の PR を、比べた先端で `ops.land` へ渡す | 今と同じ | 今と同じ。`queued`・`human` は `LandPending` で抜ける | GitHub の読み書き（`ops.land` 経由） |
 | `release_version.decide_release` | `plugins/ndf/scripts/lib/release_version.py` | 新設 | `decide_release(obs: Observed, level: str = "patch") -> Decision` | 最新のタグ・本番ブランチの版・ベースブランチの版の基底のうち最も大きいものを上げ幅で上げた正式版を決める | 無し | `obs.unreadable` があれば `version` が `None` の決定。無ければ接尾辞の無い版で `how` が `decided` | 無し |
 | `_fill_prod` | `plugins/ndf/scripts/supervise_lib/queue_fill.py` | 変更 | 変えない | 本番のプランの版を、明示の版・系列の開発版の記録・origin から決めた版のどれかで決めて記録する | 今と同じ | 「版」の欄の `系列` が空で `明示` も空なら `decide_release` で決めて記録（`how: decided`）を書く。記録があれば決め直さない（I7） | 状態ディレクトリの `version.json` の書き込み、`git fetch` |
-| `decl.trunk_release` | `plugins/ndf/scripts/supervise_lib/decl.py` | 新設 | `trunk_release(a) -> bool` | 計画の引数のスナップショットから、版上げの PR があり開発版の PR の段の無い取り込み方かを返す | `a.flow` が `pin_flow` か `_strategy_snapshot` で作ったスナップショット | 真なら `route_of(...).release_pr` が真で `sync` が偽 | 無し |
+| `decl.trunk_release` | `plugins/ndf/scripts/supervise_lib/decl.py` | 新設 | `trunk_release(a) -> bool` | 計画の引数のスナップショットから、版上げの PR があり開発版の PR を作るステップが無い取り込み方かを返す | `a.flow` が `pin_flow` か `_strategy_snapshot` で作ったスナップショット | 真なら `route_of(...).release_pr` が真で `sync` が偽 | 無し |
 | `sprint.sprint_plans` | `plugins/ndf/scripts/supervise_lib/sprint.py` | 変更 | 変えない | normal のステージを組み、trunk では「デプロイ」とリリース承認ゲートのステージを置かずに本番のステージを置く | 今と同じ | trunk では戻り値にチャネル `dev` のプランが無い | 無し |
 | `sprint.fast_sprint_plans` | `plugins/ndf/scripts/supervise_lib/sprint.py` | 変更 | 変えない | fast のステージを組み、trunk では「開発版」のステージを置かない | 今と同じ | trunk では戻り値にチャネル `dev` のプランが無い | 無し |
 | `sprint.auto_sprint_plans` | `plugins/ndf/scripts/supervise_lib/sprint.py` | 変更 | 変えない | auto のステージを組み、trunk では「開発版」のステージを置かない | 今と同じ | trunk では戻り値にチャネル `dev` のプランが無い | 無し |
@@ -194,7 +194,7 @@ docs/
 | `prod_land.wait_queued` | 読み直しの途中で照会に落ちた | GitHub の障害 | `queue_state` | 呼び出し元へ返す（`StepError` をそのまま上げる） | `stopped`・1 | 変えない。打ち直せる |
 | `trunk_release.release_trunk` | 承認が無い・承認した head と今の head が違う | 承認の前の 1 回目の実行・承認の後の push | `read_approval` が `None`、または承認の SHA と PR の head の比較 | 止める（承認ゲート） | `gate`・10。`next` に承認資料の作り直しと承認の取り直し | PR は開いたまま。承認の後に打ち直す |
 | `trunk_release.release_trunk` | 承認ゲートの前の検査の失敗・上限 | CI | `reviewed.wait_ci_except` | 止める（`StepError`、1 か 75） | `stopped`・1 か 75 | PR は開いたまま。直して打ち直す |
-| `trunk_release.release_trunk` | マージ済みの PR が承認したコミットを含まない | 承認と別の中身で人がマージした | `_resume_merged_prod` の祖先の判定 | 止める（`StepError`、1） | `stopped`・1 | 公開しない。人が中身を確かめる |
+| `trunk_release.release_trunk` | マージ済みの PR の head が承認の SHA と違う | 承認と別の中身で人がマージした | `ops.pr_view` で読んだマージ済みの PR の `headRefOid` と承認の SHA の比較（I2。祖先の判定は squash・rebase で外れるため使わない） | 止める（`StepError`、1） | `stopped`・1 | 公開しない。人が中身を確かめる |
 | `trunk_release.release_trunk` | マージ済みなのに承認の記録が無い | 承認資料を消した・別の手でマージした | `read_approval` が `None` | 止める（`StepError`、1） | `stopped`・1 | 公開しない。承認資料を戻して打ち直す |
 | `trunk_release.release_trunk` | タグか本番ブランチの版が既にある | 同じ版を出し済み | `_merge_new_prod` と同じ確かめ（`refs/tags/<タグ>`・`shipped_note`） | 止める（`StepError`、1） | `stopped`・1 | 版を上げ直す |
 | `trunk_release.open_release_pr` | PR を作れない | 権限・同じ head の別の PR | `ops.create_pr` | 呼び出し元へ返す（`StepError`） | `stopped`・1 | 打ち直せる |
@@ -231,7 +231,7 @@ docs/
 
 | # | 条件 | 結果 |
 | --- | --- | --- |
-| 1 | `ops.find_pr` がマージ済みの版上げの PR を返す | `read_approval` が `None` なら `StepError`（1）。あれば `ops._resume_merged_prod` で祖先を確かめ、(PR, マージコミット, 行, 計測) を返す |
+| 1 | `ops.find_pr` がマージ済みの版上げの PR を返す | `read_approval` が `None` なら `StepError`（1）。あれば `ops.pr_view` でマージ済みの PR の `headRefOid` を読み、承認の SHA と違えば `StepError`（1）。同じならマージコミット（`ops.merge_commit_of`、無ければ `origin/<本番ブランチ>`）と `already_merged` の行・計測（`approved_sha`）を作り、(PR, マージコミット, 行, 計測) を返す。`_resume_merged_prod` の祖先の判定は使わない |
 | 2 | タグか本番ブランチの版が既にある | `StepError`（1） |
 | 3 | 開いた PR を `open_release_pr` で使い回すか作る | 4 へ |
 | 4 | `read_approval` が `None`、または承認の SHA が PR の head と違う | `wait_ci_except` の後に `waiting_out` を `emit`（10） |
@@ -323,7 +323,8 @@ approve の後の release は、1 回目と同じステップである。0 な�
 | `prod_land.wait_queued` | `lib/waits.py` の `wait_until` と `limits.policy("release-steps.ci-wait")` | `grep -n 'def wait_until' plugins/ndf/scripts/lib/waits.py` と `wait_ci_except` の使い方 | 使う。間隔は今の行、上限は `--ci-wait` |
 | `prod_land.pending_result` | `lib/step_result.py` の `result`（`gaps` の引数） | `grep -n 'def result' -A12 plugins/ndf/scripts/lib/step_result.py` | 使う |
 | `trunk_release.release_trunk` | `release_lib/reviewed.py` の `release_prod`（CD のある本番） | 同じファイルを読んだ | 使えない。承認を PR の上の証跡かレビューで読み、CD の無い場合の手元の承認資料を読まない（決定 6） |
-| `trunk_release.release_trunk` | `release-steps.py` の `_resume_merged_prod`・`find_pr`・`merge_commit_of`・`_published` | `grep -n '^def ' plugins/ndf/scripts/release-steps.py` | 使う（`ops` 経由。`strategy_route` が `ops._merge_sync_pr` を呼ぶ前例と同じ） |
+| `trunk_release.release_trunk` | `release-steps.py` の `find_pr`・`pr_view`・`merge_commit_of`・`_published` | `grep -n '^def ' plugins/ndf/scripts/release-steps.py` | 使う（`ops` 経由。`strategy_route` が `ops._merge_sync_pr` を呼ぶ前例と同じ） |
+| `trunk_release.release_trunk` | `release-steps.py` の `_resume_merged_prod` | 同じ | 使えない。承認の SHA とマージコミットの祖先を比べるため、squash・rebase の宣言では承認した head をマージしても止まる（I2） |
 | `trunk_release.open_release_pr` | `release-steps.py` の `_open_trunk_release_pr` | 同じ | 移す。開いた PR だけを使い回す形にし、マージ済みの判定は `release_trunk` に置く |
 | `trunk_release.read_approval` | `release_lib/approval.py` の `approved_of`・`_approved_from_material` | `grep -n 'def approved_of\|def _approved_from_material' -A20 plugins/ndf/scripts/release_lib/approval.py` | 使えない。資料が無いと 3、記録が無いと `Gate` を上げて `emit` までの流れを持つ。読む部分の `approved_commit.from_material` と `Unapproved` を使う |
 | `trunk_release.waiting_out` | `release_lib/approval.py` の `gate`・`reviewed.release_prod` の `waiting` | 同じファイルを読んだ | 使えない。`gate` は許容の比べ方の判定（`Verdict`）を前提にし、`waiting` は PR の上の承認の手順を案内する。出力の形（`awaiting_approval` の行）は `release_prod` に合わせる |
@@ -331,7 +332,7 @@ approve の後の release は、1 回目と同じステップである。0 な�
 | `decl.trunk_release` | `release_lib/strategy_route.py` の `route_of`、`supervise_lib/decl.py` の `sprint_flow` | `grep -n 'def route_of\|def sprint_flow' -A12` の 2 ファイル | 使う（取り込み方の分岐の正本を 1 か所にする） |
 | `sprint_routes.trunk_prod_waves` | `sprint.prod_plans`・`sprint_routes.normal_prod_waves` | `grep -n 'def prod_plans\|def normal_prod_waves' -A12` の 2 ファイル | `prod_plans` を使う（レーンならリリースの依頼のプランになる）。`normal_prod_waves` はデプロイのステージを前提にするため使えない |
 | `sprint_routes.trial_verify` | `sprint_routes.pace_verify` | `grep -n 'def pace_verify' -A12 plugins/ndf/scripts/supervise_lib/sprint_routes.py` | 使う。`{ref}` の置き換えだけを足す |
-| `release_templates._trial_step` | `release_templates._release_verify_steps` の verify のステップ | `grep -n 'def _release_verify_steps' -A25 plugins/ndf/scripts/supervise_lib/release_templates.py` | 使えない。verify は起点のブランチを `git pull` してから導入する。trial は ref を `release/v<版>` にし、`git pull` を打たない |
+| `release_templates._trial_step` | `release_templates._release_verify_steps` の verify のステップ | `grep -n 'def _release_verify_steps' -A25 plugins/ndf/scripts/supervise_lib/release_templates.py` | 使えない。verify はベースブランチを `git pull` してから導入する。trial は ref を `release/v<版>` にし、`git pull` を打たない |
 | `release_templates._landed_step` | `release_templates._release_step` | 同じファイルを読んだ | 使う（`_release_step` の値をコピーし、id と 6 の扱いだけを変える） |
 | `release_templates._trunk_prod_approvals` | `release_templates._dev_approval_steps`・`release_cd.cd_prod_steps`・`release_cd.mvv_gate_steps`・`release_templates.approve_step` | `grep -n 'def _dev_approval_steps\|def approve_step' supervise_lib/release_templates.py`・`grep -n 'def cd_prod_steps\|def mvv_gate_steps' supervise_lib/release_cd.py` | `_dev_approval_steps`・`mvv_gate_steps`・`approve_step` を使う。`cd_prod_steps` は承認資料を PR へ置く `approval-post` と証跡の `approve-pr` を前提にするため使えない |
 
@@ -343,7 +344,7 @@ approve の後の release は、1 回目と同じステップである。0 な�
 | `prod_land.queue_state` | `merged: true` → `merged`、開いて `isInMergeQueue: true` → `queued`、開いて偽 → `open` | 閉じて `merged: false` → `closed` | 照会の失敗・PR の無い応答で `StepError`（`open` を返さない） |
 | `prod_land.wait_queued` | 2 回目の読みで `merged` を返す | 上限 0 秒で 1 回だけ読んで `queued` を返す | 照会の失敗を上げる |
 | `prod_land.pending_result` | `queued` で `status: stopped`・`gaps` の reason「merge queue のマージを待つ」 | `human` で reason「人のマージを待つ」 | — |
-| `trunk_release.release_trunk` | 承認と head が一致し、`ops.land` が戻れば (PR, マージコミット, 行, 計測) を返し、`ops.land` を 1 回呼ぶ | 開いた PR があれば作らずに使い回す | 判定表の 1（承認なし・祖先でない）・2・4・5（`HeadMoved`）。4 と 5 は 10 で、`ops.land` を呼ばない（4）か 1 回だけ（5） |
+| `trunk_release.release_trunk` | 承認と head が一致し、`ops.land` が戻れば (PR, マージコミット, 行, 計測) を返し、`ops.land` を 1 回呼ぶ | 開いた PR があれば作らずに使い回す | 判定表の 1（承認なし・マージ済みの PR の head が承認の SHA と違う。squash でマージ済みでも head が一致すれば公開へ進む）・2・4・5（`HeadMoved`）。4 と 5 は 10 で、`ops.land` を呼ばない（4）か 1 回だけ（5） |
 | `trunk_release.open_release_pr` | 開いた PR が無ければ 1 回作る | 開いた PR があれば作らない | `create_pr` の失敗を上げる |
 | `trunk_release.read_approval` | 記録が SHA と一致すれば SHA を返す | 資料が無ければ `None` | 記録が無い・違うで `None`、欄の形の誤りで `StepError`（3） |
 | `trunk_release.waiting_out` | `status: gate`、`items` の末尾が `awaiting_approval` の行 | `moved=True` で summary が「先端が動いた」 | — |
@@ -358,7 +359,7 @@ approve の後の release は、1 回目と同じステップである。0 な�
 | `sprint.sprint_plans` | trunk・CD 無しで「デプロイ」とリリース承認ゲートのステージが無く、本番のステージが `then_of` でつながる | 分かれた宣言で今と同じステージ（I8・受け入れ条件 13） | — |
 | `sprint.fast_sprint_plans` | trunk で「開発版」のステージが無い | 分かれた宣言で今と同じ | — |
 | `sprint.auto_sprint_plans` | trunk で「開発版」のステージが無い | 分かれた宣言で今と同じ | — |
-| `sprint.close_waves` | trunk で「開発版」のステージが無く、本番のステージが変更のあるときだけ流れる（実行の条件） | auto はまとめだけ（今と同じ） | — |
+| `sprint.close_waves` | trunk で「開発版」のステージが無く、本番のステージが変更のあるときだけ流れる（実行条件） | auto はまとめだけ（今と同じ） | — |
 | `sprint_routes.trunk_prod_waves` | 本番のステージ 1 つを返し、`note` を渡せば載る | レーンならリリースの依頼のプラン | — |
 | `sprint_routes.trial_verify` | fast で `{ref}` が `release/v{release_version}` に置き換わる | normal で `None` | 節に `verify` が無いと `DeclError` |
 | `sprint_waves._release_fields` | trunk の本番で `series` が `None` | 分かれた宣言の本番で `series` が `release` | — |
@@ -369,6 +370,6 @@ approve の後の release は、1 回目と同じステップである。0 な�
 | `release_templates._landed_step` | id が `release-landed`、コマンドが release と同じ | `on_exit` の 6 が `stop` | — |
 | `release_templates._trunk_prod_approvals` | trial が facts の前、explain が `--ref release/v<版>`、others の後に normal は終わる | MVV 判定のプランで others → mvv → note → approve（`--by mvv`） | — |
 | `release_templates.approve_step` | 引数を省くと今と同じ値 | trunk で `--facts-from {state_dir}`・`next: release` | — |
-| `release_templates.plan_release_package_plugin` | trunk の本番のプランを偽のコマンドで流すと、1 回目の release の 10 で trial へ進み、normal は others の後に結果「関門」で終わり approve を打たない（受け入れ条件 12） | `--from approve` で続けると release が取り込みへ進む | bump の後の notes が `--approval` を持たない（受け入れ条件 11） |
+| `release_templates.plan_release_package_plugin` | trunk の本番のプランを偽のコマンドで流すと、1 回目の release の 10 で trial へ進み、normal は others の後に結果「承認ゲート」で終わり approve を打たない（受け入れ条件 12） | `--from approve` で続けると release が取り込みへ進む | bump の後の notes が `--approval` を持たない（受け入れ条件 11） |
 | `release_cd.cd_release_wait` | trunk で 10 の行き先が `trial` | 分かれた宣言で `facts`（今と同じ） | — |
 | `release_cd.cd_prod_steps` | trunk で先頭が `trial` | 分かれた宣言で先頭が `facts`（今と同じ） | — |
