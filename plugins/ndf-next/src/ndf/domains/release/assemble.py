@@ -240,6 +240,23 @@ def _since_by_unit(
     return {u.name: since for u in found}
 
 
+def _plan(
+    scope: gather.Scope, target: Target, setting: _Setting, change_list: Sequence[changes_decide.Change], decl: decl_mod.NdfSettings
+) -> list[version_decide.Planned]:
+    """バージョンを上げる単位の計画（出し済みのバージョンを繰り上げる）。上げるものが無ければ `NothingToRelease`。"""
+    planned = gather.clear_shipped(
+        gather.plan_bumps(scope, change_list, decl, target.level, target.channel),
+        gather.shipped(scope.repo_git, target.remote, scope.store, setting.formats, scope.units, target.ref(target.production)),
+        target.level,
+        target.channel,
+    )
+    if not planned:
+        sinces = sorted(set(scope.since_by_unit.values()))
+        span = f"{sinces[0]}..{scope.until}" if len(sinces) == 1 else f"単位ごとの起点..{scope.until}"
+        raise NothingToRelease(f"{span} にバージョンを上げる変化が無い")
+    return planned
+
+
 def _facts(
     root: Path, hub: GitHub, target: Target, setting: _Setting, until: str, fork: Optional[str]
 ) -> tuple[materials_decide.Facts, store_mod.VersionStore]:
@@ -250,19 +267,8 @@ def _facts(
     found = store.units()
     since_by_unit = _since_by_unit(repo_git, target, setting, store, found, fork)
     change_list = gather.changes(repo_git, since_by_unit, until, found, decl)
-    planned: list[version_decide.Planned] = []
-    if setting.versioned:
-        scope = gather.Scope(repo_git, store, found, since_by_unit, until)
-        planned = gather.clear_shipped(
-            gather.plan_bumps(scope, change_list, decl, target.level, target.channel),
-            gather.shipped(repo_git, target.remote, store, setting.formats, found, target.ref(target.production)),
-            target.level,
-            target.channel,
-        )
-        if not planned:
-            sinces = sorted(set(since_by_unit.values()))
-            span = f"{sinces[0]}..{until}" if len(sinces) == 1 else f"単位ごとの起点..{until}"
-            raise NothingToRelease(f"{span} にバージョンを上げる変化が無い")
+    scope = gather.Scope(repo_git, store, found, since_by_unit, until)
+    planned = _plan(scope, target, setting, change_list, decl) if setting.versioned else []
     sinces = sorted({p.since for p in planned} or set(since_by_unit.values()))
     numbers = sorted({n for s in sinces for n in gather.included(repo_git, s, until, target.production, setting.formats)})
     paths = sorted({p for s in sinces for p in repo_git.changed_files(s, until)})
