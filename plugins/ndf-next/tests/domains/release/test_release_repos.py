@@ -145,9 +145,14 @@ def test_flutter_collects_selected_sprints_and_writes_pubspec(tmp_path: Path) ->
 
 
 def test_release_branch_without_units_stops(tmp_path: Path) -> None:
+    """材料の収集（collect）と組み立て（assemble）のどちらの入口も、--units が空なら同じ文言で止まり PR を作らない。"""
     work = _units_origin(tmp_path, {"pubspec.yaml": "version: 1.0.0\n"})
-    with pytest.raises(assemble.AssembleError, match="--units"):
-        assemble.collect(work, _hub(), assemble.Target("production", "patch", "develop", "main", "origin"), Strategy(FLUTTER))
+    target = assemble.Target("production", "patch", "develop", "main", "origin")
+    for entry in (assemble.collect, assemble.assemble):
+        hub = _hub()
+        with pytest.raises(assemble.AssembleError, match="^release_branch の設定では --units に集めるスプリントブランチを渡す$"):
+            entry(work, hub, target, Strategy(FLUTTER))
+        assert not [r for r in hub.requests if r[0] == "POST"]
 
 
 # nd-factory の設定のコピー（#3615 の決定 7: release_branch・qa/dev・タグだけ・CD あり）
