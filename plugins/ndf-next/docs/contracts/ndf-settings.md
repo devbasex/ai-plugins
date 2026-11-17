@@ -253,10 +253,10 @@ worktree・チーム・公開・[release.schema.json](../../contracts/schemas/nd
 | キー | 型 | 既定値 | 取りうる値 | 必須か | 説明 |
 | --- | --- | --- | --- | --- | --- |
 | `$schema` | string | — | — | 任意 | 編集のときの補完に使うスキーマの位置。読み手は参照しない |
-| `bump_undistributed` | boolean | `false` | — | 任意 | リリース対象に関わらない変化だけのプラグインもバージョンを上げるか |
+| `bump_undistributed` | boolean | `false` | — | 任意 | リリース対象に関わらない変化だけのバージョンの単位もバージョンを上げるか |
 | `changelog` | string | `"CHANGELOG.md"` | — | 任意 | CHANGELOG のファイル（リポジトリの根から） |
 | `steps` | array of object | — | — | 任意 | コマンドの並び。書いた順に実行し、最初に落ちたコマンドで止める。無ければ手順なし |
-| `undistributed` | array of string | — | — | 任意 | リリース対象に関わらないファイルの形（プラグインの根からの gitignore の形）。無ければテスト |
+| `undistributed` | array of string | — | — | 任意 | リリース対象に関わらないファイルの形（バージョンの単位の根からの gitignore の形）。テストのファイルの表（contracts/domains/test-files.json）から作る既定へ足す |
 | `version` | integer | — | `1` | 必須 | 設定の形のバージョン。読み手は知らないバージョンを読まない |
 
 例: `{"version": 1, "steps": [{"name": "記録", "stage": "production", "command": ["python3", "scripts/record.py"], "writes": ["docs/metrics/"]}]}`

@@ -1,0 +1,220 @@
+name: ndf release (reusable)
+
+# 利用者のリポジトリから NDF（ndf-next）のリリースを流す再利用可能なワークフロー（#3615 の決定 10）。
+# 利用者は plugins/ndf-next/skills/release/assets/workflows/ndf-release.yml を自分の .github/workflows/ へ置き、
+# uses: でこのファイルを呼ぶ。置き方・権限・秘密の名前の決め方は plugins/ndf-next/skills/release/references/release-workflow.md。
+#
+# - 呼ばれる側は秘密の名前を決め打たない。秘密は release_token の 1 つで受け、呼び出し側が自分の秘密を割り当てる
+# - release_token が無ければ assemble・publish は github.token で動く。github.token が作った PR では CI が起動しないことを
+#   ::warning:: で出す。merge は本番ブランチへ入れる前に止まる（github.token の書いたリリース記録は読み手に信用されない）
+# - ndf_ref の ai-plugins を取り出して plugins/ndf-next/bin/ndf を動かす（uses: の参照と同じ NDF のタグを渡す）
+# - 利用者のリポジトリは repo/、NDF は ndf/ へ取り出し、リリースブランチのコミットへ NDF のファイルを混ぜない
+
+on:
+  workflow_call:
+    inputs:
+      step:
+        description: assemble（組み立て）・merge（マージ）・publish（タグと GitHub Release）
+        required: true
+        type: string
+      ndf_ref:
+        description: "動かす NDF の ai-plugins のタグ（uses: の参照と同じ値）"
+        required: true
+        type: string
+      channel:
+        description: assemble のチャネル（dev か production）
+        required: false
+        type: string
+        default: production
+      level:
+        description: assemble の上げる幅（patch・minor・major）
+        required: false
+        type: string
+        default: patch
+      units:
+        description: release_branch の設定で集めるスプリントブランチ（空白区切り）
+        required: false
+        type: string
+        default: ""
+      pr:
+        description: merge するリリースの PR の番号
+        required: false
+        type: string
+        default: ""
+      revision:
+        description: publish するコミット（省けば起動したコミット）
+        required: false
+        type: string
+        default: ""
+      check_budget:
+        description: merge で必須のチェックを待つ秒
+        required: false
+        type: string
+        default: "3600"
+    secrets:
+      release_token:
+        description: リリースの PR・マージ・記録を書くトークン（呼び出し側の秘密を割り当てる）
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ndf-release-${{ github.repository }}-${{ inputs.step }}
+  cancel-in-progress: false
+
+env:
+  NDF: ndf/plugins/ndf-next/bin/ndf
+
+jobs:
+  branches:
+    # 設定 .ndf/project.json のベースブランチと本番ブランチを 1 か所で読み、後のジョブへ渡す
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      base: ${{ steps.read.outputs.base }}
+      production: ${{ steps.read.outputs.production }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: repo
+          persist-credentials: false
+      - id: read
+        run: |
+          decl=repo/.ndf/project.json
+          for key in base production; do
+            value=$(jq -er --arg k "$key" '.branch_strategy.branches[$k] | strings | select(length > 0)' "$decl") || {
+              echo "::error::$decl の branch_strategy.branches.$key を読めない（設定を直してから打ち直す）"
+              exit 1
+            }
+            echo "$key=$value" >> "$GITHUB_OUTPUT"
+          done
+
+  assemble:
+    needs: branches
+    if: inputs.step == 'assemble'
+    runs-on: ubuntu-latest
+    timeout-minutes: 80
+    permissions:
+      contents: write
+      pull-requests: write
+      checks: read
+      statuses: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: repo
+          fetch-depth: 0
+          token: ${{ secrets.release_token || github.token }}
+      - uses: actions/checkout@v7
+        with:
+          repository: devbasex/ai-plugins
+          ref: ${{ inputs.ndf_ref }}
+          path: ndf
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          enable-cache: true
+          cache-dependency-glob: ndf/plugins/ndf-next/uv.lock
+      - name: Warn when the release token is not given
+        env:
+          HAS_TOKEN: ${{ secrets.release_token != '' }}
+        run: |
+          if [ "$HAS_TOKEN" != "true" ]; then
+            echo "::warning::release_token が渡されず github.token で動く。github.token が作ったリリースの PR では CI が起動しない"
+          fi
+      - name: Assemble the release branch and the pull request
+        env:
+          GH_TOKEN: ${{ secrets.release_token || github.token }}
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          CHANNEL: ${{ inputs.channel }}
+          LEVEL: ${{ inputs.level }}
+          UNITS: ${{ inputs.units }}
+          BASE: ${{ needs.branches.outputs.base }}
+          PRODUCTION: ${{ needs.branches.outputs.production }}
+        run: |
+          set -o pipefail
+          read -r -a units <<< "$UNITS"
+          extra=()
+          if [ "${#units[@]}" -gt 0 ]; then
+            extra=(--units "${units[@]}")
+          fi
+          "$NDF" release-steps assemble --root repo --channel "$CHANNEL" --level "$LEVEL" \
+            --base "$BASE" --production "$PRODUCTION" "${extra[@]}"
+
+  merge:
+    needs: branches
+    if: inputs.step == 'merge'
+    runs-on: ubuntu-latest
+    timeout-minutes: 80
+    permissions:
+      contents: write
+      pull-requests: write
+      checks: read
+      statuses: write
+    steps:
+      - name: Stop without the release token
+        env:
+          HAS_TOKEN: ${{ secrets.release_token != '' }}
+        run: |
+          if [ "$HAS_TOKEN" != "true" ]; then
+            echo "::error::merge には release_token が要る（github.token の書いたリリース記録は読み手に信用されない）"
+            exit 1
+          fi
+      - uses: actions/checkout@v7
+        with:
+          path: repo
+          fetch-depth: 0
+          token: ${{ secrets.release_token }}
+      - uses: actions/checkout@v7
+        with:
+          repository: devbasex/ai-plugins
+          ref: ${{ inputs.ndf_ref }}
+          path: ndf
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          enable-cache: true
+          cache-dependency-glob: ndf/plugins/ndf-next/uv.lock
+      - name: Merge the release pull request
+        env:
+          GH_TOKEN: ${{ secrets.release_token }}
+          PR: ${{ inputs.pr }}
+          CHECK_BUDGET: ${{ inputs.check_budget }}
+          PRODUCTION: ${{ needs.branches.outputs.production }}
+        run: |
+          "$NDF" release-steps merge --root repo --pr "$PR" --budget "$CHECK_BUDGET"
+          "$NDF" release-steps record --root repo --pr "$PR" --production "$PRODUCTION"
+
+  publish:
+    needs: branches
+    if: inputs.step == 'publish'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: repo
+          ref: ${{ inputs.revision || github.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: actions/checkout@v7
+        with:
+          repository: devbasex/ai-plugins
+          ref: ${{ inputs.ndf_ref }}
+          path: ndf
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          enable-cache: true
+          cache-dependency-glob: ndf/plugins/ndf-next/uv.lock
+      - name: Publish the tag and the GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.release_token || github.token }}
+          REVISION: ${{ inputs.revision || github.sha }}
+        run: '"$NDF" release-steps publish --root repo --revision "$REVISION"'

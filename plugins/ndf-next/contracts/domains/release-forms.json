@@ -1,0 +1,19 @@
+{
+  "summary": "リリースの形（設定 .ndf/project.json の branch_strategy.release.form の値）ごとの届き方と、ndf-next での扱い。id の集合は設定のスキーマの release.form の列挙と同じ。supported が偽の形では release-steps の materials・assemble・publish が何もせずに止まり、why を理由に出す。今の NDF の release Skill の 9 種のうち、スライド・文書・表計算・ページは document の 1 行で受ける（#3615 の決定 1）",
+  "owner": "D2（contracts/domains。行はリリースの形を足す子が足す。初版は #3615）",
+  "shared_names": true,
+  "columns": {
+    "label": {"type": "string", "summary": "形の名前（承認資料に出す）"},
+    "reach": {"type": "string", "summary": "利用者へ届く仕組み（承認資料の届き方の 1 行）"},
+    "supported": {"type": "boolean", "summary": "release-steps が扱うか"},
+    "why": {"type": "string", "summary": "扱わない理由と、扱う予定のバージョン（supported が偽の行だけ）", "optional": true}
+  },
+  "rows": [
+    {"id": "package-plugin", "label": "パッケージ・プラグイン", "reach": "タグと GitHub Release を作り、パッケージの登録先やマーケットプレイスから利用者が取得する", "supported": true},
+    {"id": "service", "label": "サービス", "reach": "本番ブランチへのマージの後に、設定の deliveries が指す CD が環境へ反映する", "supported": true},
+    {"id": "desktop", "label": "デスクトップアプリ", "reach": "署名・公証したインストーラーを配り、自動更新で届ける", "supported": false, "why": "署名と公証の確認、自動更新の配信の確かめを release-steps が持たず、届いたことを確かめる手段が決まっていない。11.x で扱う"},
+    {"id": "mobile", "label": "モバイルアプリ", "reach": "ストアへ提出し、審査の後に公開する（提出は deliveries の手動の行）", "supported": true},
+    {"id": "procedure", "label": "手順・設定", "reach": "設定の deliveries の手動の行の手順で配る", "supported": true},
+    {"id": "document", "label": "文書（スライド・文書・表計算・ページ）", "reach": "置き先のシステムへ提出する（deliveries の行）", "supported": true}
+  ]
+}

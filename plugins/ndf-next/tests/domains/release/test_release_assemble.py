@@ -9,12 +9,27 @@ import git_sandbox
 import pytest
 
 from ndf.adapters import git as git_mod
-from ndf.domains.release import assemble, changes_decide, checks_decide, gather, materials_decide, version_decide
+from ndf.core.branch_strategy import Strategy
+from ndf.domains.release import assemble, changes_decide, checks_decide, forms_decide, gather, materials_decide, version_decide
 from ndf.domains.release import cli as release_cli
 from ndf.domains.release import ndf_settings as decl_mod
-from ndf.domains.release import plugins as plugins_mod
+from ndf.domains.release import version_store as store_mod
 
 from ._fakes import FakeHub, clone, init_repo, section, write_json
+
+
+def _plugin_on_develop() -> dict:
+    """ベースブランチ（develop）を本番（main）へ出すリリース方式で、プラグインの形・保存先 plugin の設定（今の組み立ての形）。"""
+    got = section("web-develop")
+    got["release"] = section("plugin")["release"]
+    return got
+
+
+STRATEGY = Strategy(_plugin_on_develop())
+
+
+def _target(channel: str = "production", level: str = "patch") -> assemble.Target:
+    return assemble.Target(channel, level, "develop", "main", "origin")
 
 
 def _node(number: int, title: str, conclusion: str) -> dict:
@@ -32,7 +47,7 @@ def _origin_with_change(tmp_path: Path, test_only: bool, extra: tuple[str, ...] 
         seed / ".claude-plugin" / "marketplace.json", {"plugins": [{"name": "kit", "source": "./tools/kit", "description": "Kit (v1.2.3)"}]}
     )
     write_json(seed / "tools" / "kit" / ".claude-plugin" / "plugin.json", {"name": "kit", "version": "1.2.3"})
-    write_json(seed / ".ndf" / "project.json", {"version": 1, "branch_strategy": section("plugin")})
+    write_json(seed / ".ndf" / "project.json", {"version": 1, "branch_strategy": _plugin_on_develop()})
     (seed / "CHANGELOG.md").write_text("# 変更履歴\n\n## [kit 1.2.3] - 2026-01-01\n\n- 前\n", encoding="utf-8")
     git_sandbox.sh(seed, "add", "-A")
     git_sandbox.sh(seed, "commit", "-q", "-m", "init")
@@ -63,7 +78,7 @@ def _hub() -> FakeHub:
 def test_assemble_builds_branch_and_pull_with_materials(tmp_path: Path) -> None:
     work = _origin_with_change(tmp_path, test_only=False)
     hub = _hub()
-    built = assemble.assemble(work, hub, assemble.Target("production", "patch", "develop", "main"))
+    built = assemble.assemble(work, hub, _target("production", "patch"), STRATEGY)
     assert (built.branch, built.version, built.pr) == ("release/v1.2.4", "1.2.4", 9)
     shown = git_sandbox.sh(work, "show", "origin/release/v1.2.4:tools/kit/.claude-plugin/plugin.json")
     assert json.loads(shown)["version"] == "1.2.4"
@@ -81,7 +96,7 @@ def test_issue_2217_tests_only_change_is_not_released(tmp_path: Path) -> None:
     work = _origin_with_change(tmp_path, test_only=True)
     hub = _hub()
     with pytest.raises(assemble.NothingToRelease):
-        assemble.assemble(work, hub, assemble.Target("production", "patch", "develop", "main"))
+        assemble.assemble(work, hub, _target("production", "patch"), STRATEGY)
     assert hub.requests == []
 
 
@@ -89,8 +104,9 @@ def test_collect_current_behavior(tmp_path: Path) -> None:
     """現状固定（collect）: 範囲の変化から版上げの計画と承認資料の材料を返し、ブランチも PR も作らない。"""
     work = _origin_with_change(tmp_path, test_only=False)
     hub = _hub()
-    facts = assemble.collect(work, hub, assemble.Target("production", "patch", "develop", "main"))
-    expected = [version_decide.Planned("kit", "1.2.3", "1.2.4")]
+    facts = assemble.collect(work, hub, _target("production", "patch"), STRATEGY)
+    since = git_sandbox.sh(work, "rev-parse", "origin/main").strip()
+    expected = [version_decide.Planned("kit", "1.2.3", "1.2.4", since)]
     assert list(facts.planned) == expected
     assert facts == materials_decide.Facts(
         "production",
@@ -99,6 +115,8 @@ def test_collect_current_behavior(tmp_path: Path) -> None:
         (changes_decide.Change("kit", ("tools/kit/a.py",), ()),),
         (),
         git_sandbox.sh(work, "rev-parse", "origin/develop").strip(),
+        forms_decide.form_of("package-plugin"),
+        True,
     )
     assert hub.requests == []
     assert git_sandbox.sh(work, "branch", "--list").strip() == "* develop"
@@ -108,8 +126,8 @@ def test_collect_current_behavior(tmp_path: Path) -> None:
 def test_collect_dev_channel_plans_dev_version(tmp_path: Path) -> None:
     """現状固定（collect）: 開発版のチャネルは接尾辞の付いた次のバージョンを計画する。"""
     work = _origin_with_change(tmp_path, test_only=False)
-    facts = assemble.collect(work, _hub(), assemble.Target("dev", "minor", "develop", "main"))
-    assert list(facts.planned) == [version_decide.Planned("kit", "1.2.3", "1.3.0-dev.1")]
+    facts = assemble.collect(work, _hub(), _target("dev", "minor"), STRATEGY)
+    assert [p[:3] for p in facts.planned] == [("kit", "1.2.3", "1.3.0-dev.1")]
     assert facts.channel == "dev" and facts.changes == (changes_decide.Change("kit", ("tools/kit/a.py",), ()),)
 
 
@@ -117,14 +135,14 @@ def test_collect_without_bump_raises_with_span(tmp_path: Path) -> None:
     """現状固定（collect）: 上げるものが無ければ範囲を書いた `NothingToRelease`。"""
     work = _origin_with_change(tmp_path, test_only=True)
     with pytest.raises(assemble.NothingToRelease, match="^origin/main..origin/develop にバージョンを上げる変化が無い$"):
-        assemble.collect(work, _hub(), assemble.Target("production", "patch", "develop", "main"))
+        assemble.collect(work, _hub(), _target("production", "patch"), STRATEGY)
 
 
 def test_collect_mixed_range_splits_changes_and_instructions(tmp_path: Path) -> None:
     """現状固定（collect）: 同じ範囲のリリース対象・テスト・指示書と `.ndf/` の変化を、Facts.changes と Facts.instructions に分ける。"""
     extra = ("tools/kit/tests/test_b.py", "AGENTS.md", ".ndf/worktree.json")
     work = _origin_with_change(tmp_path, test_only=False, extra=extra)
-    facts = assemble.collect(work, _hub(), assemble.Target("production", "patch", "develop", "main"))
+    facts = assemble.collect(work, _hub(), _target("production", "patch"), STRATEGY)
     assert facts.changes == (changes_decide.Change("kit", ("tools/kit/a.py",), ("tools/kit/tests/test_b.py",)),)
     assert facts.instructions == (".ndf/worktree.json", "AGENTS.md")
 
@@ -140,9 +158,9 @@ def test_gather_changes_current_behavior(tmp_path: Path, test_only: bool, expect
     """現状固定（gather.changes）: 範囲の変わったファイルをプラグインごとに配る・配らないへ分ける。空の範囲は空。"""
     work = _origin_with_change(tmp_path, test_only=test_only)
     repo_git = git_mod.Git(work)
-    found, decl = plugins_mod.load(work), decl_mod.load(work)
-    assert gather.changes(repo_git.changed_files("origin/main", "origin/develop"), found, decl) == expected
-    assert gather.changes(repo_git.changed_files("origin/develop", "origin/develop"), found, decl) == []
+    found, decl = store_mod.PluginStore(work).units(), decl_mod.load(work)
+    assert gather.changes(repo_git, {"kit": "origin/main"}, "origin/develop", found, decl) == expected
+    assert gather.changes(repo_git, {"kit": "origin/develop"}, "origin/develop", found, decl) == []
 
 
 def _develop_ahead(tmp_path: Path) -> Path:
@@ -157,7 +175,7 @@ def _develop_ahead(tmp_path: Path) -> Path:
 def test_assemble_plans_from_base_tip_even_when_started_on_production(tmp_path: Path) -> None:
     """既定ブランチ（main）で起動しても、バージョンは範囲の HEAD（develop）から読んで計画する（バージョンが逆行しない）。"""
     work = _develop_ahead(tmp_path)
-    built = assemble.assemble(work, _hub(), assemble.Target("production", "patch", "develop", "main"))
+    built = assemble.assemble(work, _hub(), _target("production", "patch"), STRATEGY)
     assert built.version == "1.3.1"
 
 
@@ -165,7 +183,7 @@ def test_collect_refuses_when_head_is_not_base_tip(tmp_path: Path) -> None:
     """collect はworktreeが範囲の HEAD でなければ止まる（ほかのブランチのバージョンから計画しない）。"""
     work = _develop_ahead(tmp_path)
     with pytest.raises(assemble.AssembleError, match="origin/develop の HEAD でない"):
-        assemble.collect(work, _hub(), assemble.Target("production", "patch", "develop", "main"))
+        assemble.collect(work, _hub(), _target("production", "patch"), STRATEGY)
 
 
 def _develop_at(tmp_path: Path, develop: str, main: str | None = None, tags: tuple[str, ...] = ()) -> Path:
@@ -190,21 +208,21 @@ def _develop_at(tmp_path: Path, develop: str, main: str | None = None, tags: tup
 def test_issue_2554_production_skips_tagged_version(tmp_path: Path) -> None:
     """#2554: develop のバージョンの基底（1.2.4）が既にタグにあれば、その版数で組まず次に空いているバージョンへ繰り上げる。"""
     work = _develop_at(tmp_path, "1.2.4-dev.2", tags=("kit--v1.2.4",))
-    facts = assemble.collect(work, _hub(), assemble.Target("production", "patch", "develop", "main"))
-    assert list(facts.planned) == [version_decide.Planned("kit", "1.2.4-dev.2", "1.2.5")]
+    facts = assemble.collect(work, _hub(), _target("production", "patch"), STRATEGY)
+    assert [p[:3] for p in facts.planned] == [("kit", "1.2.4-dev.2", "1.2.5")]
 
 
 def test_issue_2554_reversed_reservation_stays_above_production(tmp_path: Path) -> None:
     """#2554: 低いバージョンを予約したレーンが後に出しても（本番 1.2.5、develop 1.2.4-dev.1）、本番のバージョンより大きいバージョンで組む。"""
     work = _develop_at(tmp_path, "1.2.4-dev.1", main="1.2.5")
-    facts = assemble.collect(work, _hub(), assemble.Target("production", "patch", "develop", "main"))
+    facts = assemble.collect(work, _hub(), _target("production", "patch"), STRATEGY)
     assert [p.next for p in facts.planned] == ["1.2.6"]
 
 
 def test_issue_2554_dev_channel_skips_shipped_base(tmp_path: Path) -> None:
     """#2554: 開発版のチャネルも、出し済みの基底の接尾辞のバージョンを組まない。"""
     work = _develop_at(tmp_path, "1.2.4-dev.2", tags=("kit--v1.2.4",))
-    facts = assemble.collect(work, _hub(), assemble.Target("dev", "patch", "develop", "main"))
+    facts = assemble.collect(work, _hub(), _target("dev", "patch"), STRATEGY)
     assert [p.next for p in facts.planned] == ["1.2.5-dev.1"]
 
 
@@ -219,7 +237,7 @@ def test_issue_2441_production_waits_while_another_release_is_open(tmp_path: Pat
     work = _origin_with_change(tmp_path, test_only=False)
     hub = _open_pulls(_hub(), (41, head))
     with pytest.raises(assemble.ReleaseOpen, match="#41"):
-        assemble.assemble(work, hub, assemble.Target("production", "patch", "develop", "main"))
+        assemble.assemble(work, hub, _target("production", "patch"), STRATEGY)
     assert not [r for r in hub.requests if r[0] == "POST"]
     assert git_sandbox.sh(work, "ls-remote", "--heads", "origin", "release/v1.2.4") == ""
 
@@ -227,10 +245,10 @@ def test_issue_2441_production_waits_while_another_release_is_open(tmp_path: Pat
 def test_issue_2441_builds_once_the_other_release_is_closed(tmp_path: Path) -> None:
     """#2441: 本番ブランチ宛ての PR がリリースでなければ（閉じた後の観測）組む。開発版のチャネルは待たない。"""
     work = _origin_with_change(tmp_path, test_only=False)
-    built = assemble.assemble(work, _open_pulls(_hub(), (42, "feat/y")), assemble.Target("production", "patch", "develop", "main"))
+    built = assemble.assemble(work, _open_pulls(_hub(), (42, "feat/y")), _target("production", "patch"), STRATEGY)
     assert built.branch == "release/v1.2.4"
     other = _origin_with_change(tmp_path / "dev", test_only=False)
-    dev = assemble.assemble(other, _open_pulls(_hub(), (41, "release/v9.9.9")), assemble.Target("dev", "patch", "develop", "main"))
+    dev = assemble.assemble(other, _open_pulls(_hub(), (41, "release/v9.9.9")), _target("dev", "patch"), STRATEGY)
     assert dev.version == "1.2.4-dev.1"
 
 
@@ -263,5 +281,5 @@ def test_issue_3172_no_empty_release_after_release_when_only_a_closed_pull_remai
     for _ in range(2):
         hub = _hub()
         with pytest.raises(assemble.NothingToRelease):
-            assemble.assemble(work, hub, assemble.Target("production", "patch", "develop", "main"))
+            assemble.assemble(work, hub, _target("production", "patch"), STRATEGY)
         assert hub.requests == []

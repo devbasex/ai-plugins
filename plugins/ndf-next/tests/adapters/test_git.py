@@ -415,7 +415,7 @@ def test_default_remote_comes_from_the_schema_default() -> None:
     node = json.loads((identity.ROOT / rel).read_text(encoding="utf-8"))
     for key in pointer:
         node = node[key]
-    assert git.default_remote() == node == git.ORIGIN
+    assert git.default_remote() == node
 
 
 def test_remote_of_reads_the_ndf_settings_then_the_default(tmp_path: Path) -> None:

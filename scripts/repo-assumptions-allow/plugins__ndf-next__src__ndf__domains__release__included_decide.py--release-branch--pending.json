@@ -1,8 +1,0 @@
-{
-  "path": "plugins/ndf-next/src/ndf/domains/release/included_decide.py",
-  "name": "release-branch",
-  "kind": "pending",
-  "reason": "リリースのブランチの形 release/v の決め打ち（点検の一覧 9）。#3615 の受け持ち",
-  "count": 1,
-  "issue": 3615
-}

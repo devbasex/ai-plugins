@@ -82,12 +82,12 @@
       "items": {
         "type": "string"
       },
-      "description": "リリース対象に関わらないファイルの形（プラグインの根からの gitignore の形）。無ければテスト"
+      "description": "リリース対象に関わらないファイルの形（バージョンの単位の根からの gitignore の形）。テストのファイルの表（contracts/domains/test-files.json）から作る既定へ足す"
     },
     "bump_undistributed": {
       "type": "boolean",
       "default": false,
-      "description": "リリース対象に関わらない変化だけのプラグインもバージョンを上げるか"
+      "description": "リリース対象に関わらない変化だけのバージョンの単位もバージョンを上げるか"
     },
     "changelog": {
       "type": "string",

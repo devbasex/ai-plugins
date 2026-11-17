@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import pytest
 
-from ndf.domains.release import changelog_decide, changes_decide, included_decide, sync_decide, version_decide
+from ndf.domains.release import changelog_decide, changes_decide, included_decide, names_decide, sync_decide, version_decide
+
+# ai-plugins の設定のタグの書式（リリースブランチと見出しは既定）
+PLUGIN_NAMES = names_decide.NameFormats("{plugin}--v{version}")
 
 
 @pytest.mark.parametrize(
@@ -39,19 +42,20 @@ def test_issue_2554_next_version_clears_shipped(planned: str, shipped: str | Non
 
 
 def test_issue_2554_tag_versions_are_read_per_plugin() -> None:
-    assert version_decide.version_of_tag("kit", "kit--v1.2.4") == "1.2.4"
-    assert version_decide.version_of_tag("kit", "kit2--v1.2.4") is None
-    assert version_decide.version_of_tag("kit", "kit--vnext") is None
+    assert PLUGIN_NAMES.version_of_tag("kit", "kit--v1.2.4") == "1.2.4"
+    assert PLUGIN_NAMES.version_of_tag("kit", "kit2--v1.2.4") is None
+    assert PLUGIN_NAMES.version_of_tag("kit", "kit--vnext") is None
     assert version_decide.highest(["1.2.4", "1.10.0-dev.1", "1.3.0"]) == "1.10.0"
     assert version_decide.highest([]) is None
 
 
 def test_version_names_follow_one_rule() -> None:
-    assert version_decide.branch_of("1.2.4") == "release/v1.2.4"
-    assert version_decide.version_of_branch("release/v1.2.4-dev.1") == "1.2.4-dev.1"
-    assert version_decide.tag_of("kit", "1.2.4-dev.1") == "kit--v1.2.4"
+    """名前の書式の設定が無いときの今の形（受け入れ条件 7）。"""
+    assert PLUGIN_NAMES.branch_of("1.2.4") == "release/v1.2.4"
+    assert PLUGIN_NAMES.version_of_branch("release/v1.2.4-dev.1") == "1.2.4-dev.1"
+    assert PLUGIN_NAMES.tag_of("kit", "1.2.4-dev.1") == "kit--v1.2.4"
     with pytest.raises(version_decide.VersionError):
-        version_decide.version_of_branch("feat/x")
+        PLUGIN_NAMES.version_of_branch("feat/x")
     with pytest.raises(version_decide.VersionError):
         version_decide.next_version("1.2.3", "huge", "production")
 
@@ -59,14 +63,15 @@ def test_version_names_follow_one_rule() -> None:
 def test_issue_1756_plugin_dirs_come_from_the_caller_not_from_names() -> None:
     """#1756: 保存先はマーケットプレイスの登録から渡り、`plugins/<名前>` の形でなくても変化を拾う。"""
     dirs = {"alpha": "tools/a", "beta": "plugins/mcp/b"}
-    got = changes_decide.changes(["tools/a/x.py", "plugins/mcp/b/README.md", "docs/x.md"], dirs, changes_decide.DEFAULT_UNDISTRIBUTED)
+    paths = ["tools/a/x.py", "plugins/mcp/b/README.md", "docs/x.md"]
+    got = changes_decide.changes({name: paths for name in dirs}, dirs, ())
     assert [(c.plugin, c.distributed) for c in got] == [("alpha", ("tools/a/x.py",)), ("beta", ("plugins/mcp/b/README.md",))]
 
 
 @pytest.mark.parametrize(("flag", "want"), [(False, False), (True, True)])
 def test_issue_2217_tests_only_change_bumps_only_when_declared(flag: bool, want: bool) -> None:
     """#2217: テストだけの変化は、設定 bump_undistributed が真のときだけバージョンを上げる。"""
-    change = changes_decide.split(["p/tests/test_a.py", "p/lib/conftest.py"], "p", "p", changes_decide.DEFAULT_UNDISTRIBUTED)
+    change = changes_decide.split(["p/tests/test_a.py", "p/lib/conftest.py"], "p", "p", ())
     assert change.distributed == () and len(change.undistributed) == 2
     assert changes_decide.needs_bump(change, flag) is want
     assert changes_decide.needs_bump(changes_decide.split(["p/a.py"], "p", "p", ()), False) is True
@@ -74,10 +79,25 @@ def test_issue_2217_tests_only_change_bumps_only_when_declared(flag: bool, want:
 
 def test_issue_2601_user_facing_change_is_decided_by_files() -> None:
     """#2601: 利用者向けの変化はリリース対象のファイルの変化だけで決まる（PR 本文を読まない）。"""
-    only_tests = changes_decide.changes(["p/tests/test_a.py"], {"p": "p"}, changes_decide.DEFAULT_UNDISTRIBUTED)
-    shipped = changes_decide.changes(["p/skills/a.md"], {"p": "p"}, changes_decide.DEFAULT_UNDISTRIBUTED)
+    only_tests = changes_decide.changes({"p": ["p/tests/test_a.py"]}, {"p": "p"}, ())
+    shipped = changes_decide.changes({"p": ["p/skills/a.md"]}, {"p": "p"}, ())
     assert changes_decide.distribution_changed(only_tests) is False
     assert changes_decide.distribution_changed(shipped) is True
+
+
+def test_issue_3615_tests_of_other_languages_are_undistributed_by_the_shared_table() -> None:
+    """受け入れ条件 8: 既定はテストのファイルの表から作り、TypeScript・jest・PHP のテストだけの変化はリリース対象に数えない。"""
+    paths = ["src/foo.test.ts", "src/__tests__/bar.ts", "tests/Unit/FooTest.php"]
+    change = changes_decide.split(paths, "web", "", ())
+    assert change.distributed == () and set(change.undistributed) == set(paths)
+    assert changes_decide.needs_bump(change, False) is False
+    assert "conftest.py" in changes_decide.default_undistributed()
+
+
+def test_issue_3615_declared_undistributed_is_added_to_the_default() -> None:
+    """受け入れ条件 8: 設定の undistributed は既定へ足す（既定を置き換えない）。"""
+    change = changes_decide.split(["docs/a.md", "tests/test_a.py", "src/a.ts"], "web", "", ("docs/",))
+    assert change.distributed == ("src/a.ts",) and change.undistributed == ("docs/a.md", "tests/test_a.py")
 
 
 def test_issue_3110_instruction_changes_include_ndf_settings() -> None:
@@ -88,13 +108,27 @@ def test_issue_3110_instruction_changes_include_ndf_settings() -> None:
 
 def test_changelog_insert_replaces_only_the_same_section() -> None:
     text = "# 変更履歴\n\n前書き\n\n## [kit 1.2.3] - 2026-01-01\n\n- 古い\n\n## [kit 1.2.2] - 2025-12-01\n\n- 前\n"
-    new = changelog_decide.block("kit", "1.2.4", "2026-02-01", [changelog_decide.Entry(9, "B"), changelog_decide.Entry(3, "A")])
-    added = changelog_decide.insert(text, "kit", "1.2.4", new)
+    names = PLUGIN_NAMES
+    heading = names.heading_of("kit", "1.2.4", "2026-02-01")
+    new = changelog_decide.block(heading, [changelog_decide.Entry(9, "B"), changelog_decide.Entry(3, "A")])
+    added = changelog_decide.insert(text, names.heading_key("kit", "1.2.4"), new)
     assert added.index("## [kit 1.2.4]") < added.index("## [kit 1.2.3]") and "- A（#3）\n- B（#9）" in added
-    again = changelog_decide.insert(added, "kit", "1.2.4", changelog_decide.block("kit", "1.2.4", "2026-02-02", []))
+    again = changelog_decide.insert(
+        added, names.heading_key("kit", "1.2.4"), changelog_decide.block(names.heading_of("kit", "1.2.4", "2026-02-02"), [])
+    )
     assert again.count("## [kit 1.2.4]") == 1 and "- 古い" in again and "- 前" in again and "- A（#3）" not in again
-    assert changelog_decide.notes(added, "kit", "1.2.3") == "- 古い"
-    assert changelog_decide.notes(added, "kit", "9.9.9") is None
+    assert changelog_decide.notes(added, names.heading_key("kit", "1.2.3")) == "- 古い"
+    assert changelog_decide.notes(added, names.heading_key("kit", "9.9.9")) is None
+
+
+def test_issue_3615_keep_a_changelog_heading() -> None:
+    """受け入れ条件 6: Keep a Changelog の見出しの書式で、その形のセクションを足し、前のセクションを読める。"""
+    names = names_decide.NameFormats("v{version}", changelog_heading="## [{version}] - {date}")
+    text = "# Changelog\n\n## [1.2.2] - 2026-01-01\n\n### Fixed\n\n- 前\n"
+    new = changelog_decide.block(names.heading_of("app", "1.2.3", "2026-11-17"), [changelog_decide.Entry(5, "直した")])
+    added = changelog_decide.insert(text, names.heading_key("app", "1.2.3"), new)
+    assert "## [1.2.3] - 2026-11-17\n\n- 直した（#5）" in added and added.index("## [1.2.3]") < added.index("## [1.2.2]")
+    assert changelog_decide.notes(added, names.heading_key("app", "1.2.2")) == "### Fixed\n\n- 前"
 
 
 def test_included_numbers_skip_release_branches() -> None:
@@ -106,9 +140,26 @@ def test_included_numbers_skip_release_branches() -> None:
         "Merge pull request #12 from o/feat/x",
         "Merge pull request #15 from o/main",
     ]
-    assert included_decide.numbers(subjects) == [12, 14, 15]
+    is_release = PLUGIN_NAMES.is_release_branch
+    assert included_decide.numbers(subjects, (), is_release) == [12, 14, 15]
     # 本番ブランチから戻す PR（head は本番ブランチ）は含めない
-    assert included_decide.numbers(subjects, ("main",)) == [12, 14]
+    assert included_decide.numbers(subjects, ("main",), is_release) == [12, 14]
+    # リリースブランチの書式を変えれば、その書式のブランチからのマージを除く
+    other = names_decide.NameFormats(None, branch="rel-{version}").is_release_branch
+    assert included_decide.numbers(["Merge pull request #16 from o/rel-1.2.3", *subjects], ("main",), other) == [12, 13, 14]
+
+
+@pytest.mark.parametrize(
+    ("subject", "want"),
+    [
+        ("Merge sprint/a into release/v1.2.3", True),
+        ("Merge origin/sprint/a into release/v1.2.3", True),
+        ("Merge sprint/a into feat/x", False),
+        ("Merge pull request #3 from o/sprint/a", False),
+    ],
+)
+def test_issue_3615_unit_merges_are_read_with_the_branch_format(subject: str, want: bool) -> None:
+    assert included_decide.is_unit_merge(subject, PLUGIN_NAMES.is_release_branch) is want
 
 
 @pytest.mark.parametrize(

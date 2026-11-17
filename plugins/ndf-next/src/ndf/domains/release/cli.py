@@ -12,6 +12,9 @@
 | `verification-record` | 会話のセッション | `record.write_verification`（リリース後テストの記録を、リリース記録と同じ PR へ書く） |
 | `records` | 会話のセッション | `record.read`（PR のリリース記録とリリース後テストの記録を読む） |
 | `publish` | workflow | `tagging`（タグと GitHub Release） |
+
+`assemble`・`materials`・`publish` は、メインディレクトリのブランチ戦略の設定（リリースの形・バージョンの保存先・名前の書式・
+リリース方式）と、メインディレクトリの `.ndf/worktree.json` の `remote`（リモート名。1 回の実行で 1 度だけ求める）で動く。
 | `sync-base` | 会話のセッション | `verify.sync_base`（メインディレクトリのベースブランチをそろえる） |
 | `config-snapshot`・`config-check` | 会話のセッション | `verify.snapshot`（利用者の設定のスナップショットと比べ） |
 | `cleanup` | 会話のセッション | `cleanup.sweep`（マージしたブランチの worktree を外す） |
@@ -35,33 +38,46 @@ from ndf.domains.release import (
     approval_decide,
     assemble,
     cleanup,
+    forms_decide,
     land,
     materials_decide,
+    names_decide,
     record,
     record_decide,
     sync_decide,
     tagging,
     trail,
+    units,
     user_config_decide,
     verify,
     version_decide,
 )
 from ndf.domains.release import ndf_settings as decl_mod
 from ndf.domains.release import plugins as plugins_mod
+from ndf.domains.release import version_store as store_mod
 
 # 結果 JSON の tool の名前はサブコマンドの名前（SSOT は `cli.COMMANDS`）
 TOOL = cli.tool_of(__name__)
 
 
-def _strategy(args: argparse.Namespace) -> branch_strategy.Strategy:
-    """メインディレクトリのブランチ戦略の設定（作業場所の設定は PR の変更でマージの主体・方式を差し替えられるため読まない）。
-    git の外ならメインディレクトリを持たないので `--root` の設定。"""
+def _main_dir(args: argparse.Namespace) -> Path:
+    """メインディレクトリ（作業場所の設定は PR の変更でマージの主体・方式を差し替えられるため読まない）。
+    git の外ならメインディレクトリを持たないので `--root`。"""
     root = Path(args.root)
     try:
-        main = git_mod.Git(root).common_dir().parent
+        return git_mod.Git(root).common_dir().parent
     except git_mod.GitError:  # git の外はメインディレクトリが無いので --root の設定を読む
-        main = root
-    return branch_strategy.load(main)
+        return root
+
+
+def _strategy(args: argparse.Namespace) -> branch_strategy.Strategy:
+    """メインディレクトリのブランチ戦略の設定。"""
+    return branch_strategy.load(_main_dir(args))
+
+
+def _remote(args: argparse.Namespace) -> str:
+    """メインディレクトリの設定のリモート名（#3615 の決定 9）。"""
+    return git_mod.remote_of(_main_dir(args))
 
 
 def _hub(args: argparse.Namespace) -> GitHub:
@@ -69,12 +85,12 @@ def _hub(args: argparse.Namespace) -> GitHub:
     return GitHub(repo, github_mod.client())
 
 
-def _target(args: argparse.Namespace) -> assemble.Target:
-    return assemble.Target(args.channel, args.level, args.base, args.production, args.plugin)
+def _target(args: argparse.Namespace, remote: str) -> assemble.Target:
+    return assemble.Target(args.channel, args.level, args.base, args.production, remote, args.plugin, tuple(args.units), args.target_pr)
 
 
 def cmd_assemble(args: argparse.Namespace) -> dict:
-    built = assemble.assemble(Path(args.root), _hub(args), _target(args))
+    built = assemble.assemble(Path(args.root), _hub(args), _target(args, _remote(args)), _strategy(args))
     outputs = {"pr": built.pr, "url": built.url, "branch": built.branch, "version": built.version}
     return result.result(
         TOOL, result.OK, f"{built.branch} の PR #{built.pr} を作った: {built.url}", materials_decide.items(built.facts), outputs=outputs
@@ -82,7 +98,7 @@ def cmd_assemble(args: argparse.Namespace) -> dict:
 
 
 def cmd_materials(args: argparse.Namespace) -> dict:
-    facts = assemble.collect(Path(args.root), _hub(args), _target(args))
+    facts = assemble.collect(Path(args.root), _hub(args), _target(args, _remote(args)), _strategy(args))
     text = materials_decide.render(facts)
     if args.out:
         Path(args.out).write_text(text, encoding="utf-8")
@@ -148,7 +164,8 @@ def cmd_merge(args: argparse.Namespace) -> dict:
 
 
 def cmd_record(args: argparse.Namespace) -> dict:
-    made, written = record.write(_hub(args), args.pr, args.production)
+    formats = names_decide.formats_of(_strategy(args).section["release"])
+    made, written = record.write(_hub(args), args.pr, args.production, formats)
     count = sum(1 for w in written if w.result == record.WRITTEN)
     outputs = {"version": made.version, "included": list(made.included)}
     detail = f"v{made.version} のリリース記録を {count} 件書いた（含めた PR {len(written)} 本。既にあった {len(written) - count} 本）"
@@ -172,7 +189,11 @@ def cmd_records(args: argparse.Namespace) -> dict:
 
 
 def cmd_publish(args: argparse.Namespace) -> dict:
-    made = tagging.publish(Path(args.root), _hub(args), args.revision)
+    strategy = _strategy(args)
+    if strategy.section["release"]["tag"] is None:
+        forms_decide.form_of(strategy.section["release"]["form"])
+        return result.stopped(TOOL, "not_applicable", "設定の release.tag が null で、タグと GitHub Release を作らない")
+    made = tagging.publish(Path(args.root), _hub(args), args.revision, strategy)
     created = sum(1 for m in made if m.result == tagging.CREATED)
     return result.result(TOOL, result.OK, f"タグと GitHub Release を {created} 件作った", [m.item() for m in made])
 
@@ -234,7 +255,9 @@ def _target_args(p: argparse.ArgumentParser) -> None:
     _branches(p)
     p.add_argument("--channel", choices=version_decide.CHANNELS, required=True)
     p.add_argument("--level", choices=version_decide.LEVELS, default="patch")
-    p.add_argument("--plugin", help="ブランチの名前にバージョンを使うプラグイン（省けば登録の順の先頭）")
+    p.add_argument("--plugin", help="ブランチの名前にバージョンを使う単位（省けば単位の順の先頭）")
+    p.add_argument("--units", nargs="+", default=(), help="集めるスプリントブランチ（release_branch の設定で必須）")
+    p.add_argument("--pr", dest="target_pr", type=int, help="本番の PR の番号（承認の対象が production_pr の設定で必須）")
 
 
 def _pr(p: argparse.ArgumentParser) -> None:
@@ -273,7 +296,7 @@ def _verification(p: argparse.ArgumentParser) -> None:
     p.add_argument("--record", required=True, help="リリース後テストの記録の JSON（スキーマ release-verification）")
 
 
-def _main_dir(p: argparse.ArgumentParser) -> None:
+def _main_dir_arg(p: argparse.ArgumentParser) -> None:
     p.add_argument("--main-dir", required=True)
 
 
@@ -305,7 +328,7 @@ ARGS: dict[Callable[[argparse.Namespace], dict], tuple[Callable[[argparse.Argume
     cmd_verification_record: (_pr, _verification),
     cmd_records: (_pr,),
     cmd_publish: (_revision,),
-    cmd_sync_base: (_main_dir, _base),
+    cmd_sync_base: (_main_dir_arg, _base),
     cmd_config_snapshot: (_snapshot_out,),
     cmd_config_check: (_before,),
     cmd_cleanup: (_branch,),
@@ -329,6 +352,11 @@ def _parser() -> argparse.ArgumentParser:
 # 停止理由の種類（例外 → 種類）
 _ERRORS: tuple[tuple[type[Exception], str], ...] = (
     (assemble.NothingToRelease, "not_applicable"),
+    (assemble.NoReleasePr, "not_applicable"),
+    (forms_decide.FormUnsupported, "precondition"),
+    (store_mod.StoreError, "precondition"),
+    (units.UnitsError, "precondition"),
+    (tagging.TagMoved, "refused"),
     (assemble.AssembleError, "precondition"),
     (assemble.ReleaseOpen, "refused"),
     (trail.TrailError, "refused"),
