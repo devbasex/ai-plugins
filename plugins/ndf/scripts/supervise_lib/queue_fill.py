@@ -282,12 +282,10 @@ class _Fill:
         write_text_atomic(self.path, _filled(text, rec["version"]))
         self.log(f"版の差し込みを {rec['version']} で埋めた（{self.record_path}）", version=rec["version"], record=str(self.record_path))
 
-    def redecide(self, rec: dict, new: str, reason: str, existing: str | None, observed: dict) -> dict:
-        """記録の版を決め直す。ステップの記録を退避 → 記録を書き換え → 写しから埋め直す の順（落ちても流し直しで同じ所へ戻る）。"""
-        import versions
-
-        old = rec["version"]
-        dst = self.sd / SUPERSEDED / f"v{old}"
+    def _archive_steps(self, old_version: str) -> Path:
+        """状態のディレクトリのステップの記録（`KEEP_ON_REDECIDE` を除く）を `<SUPERSEDED>/v<old_version>` へ名前の順に移し、
+        その退避先を返す。退避先に同じ名前があれば `.1`・`.2` … を付ける。"""
+        dst = self.sd / SUPERSEDED / f"v{old_version}"
         dst.mkdir(parents=True, exist_ok=True)
         for f in sorted(self.sd.iterdir()):
             if f.name in KEEP_ON_REDECIDE:
@@ -297,6 +295,14 @@ class _Fill:
             while target.exists():
                 target, n = dst / f"{f.name}.{n}", n + 1
             os.replace(f, target)
+        return dst
+
+    def redecide(self, rec: dict, new: str, reason: str, existing: str | None, observed: dict) -> dict:
+        """記録の版を決め直す。ステップの記録を退避 → 記録を書き換え → 写しから埋め直す の順（落ちても流し直しで同じ所へ戻る）。"""
+        import versions
+
+        old = rec["version"]
+        dst = self._archive_steps(old)
         left = {"作業場所": self.info.get("作業場所"), "branch": self.info.get("branch"), "superseded": str(dst)}
         hist = {"from": old, "to": new, "reason": reason, "existing": existing, "observed": observed, "left": left, "at": _version_now()}
         rec = {**rec, "version": new, "base": versions.release_base(new), "observed": observed, "at": _version_now()}
