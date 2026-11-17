@@ -6,6 +6,7 @@ import fcntl
 import json
 import os
 
+from ndf import identity
 from ndf.domains.hooks import counter as counter_mod
 from ndf.domains.hooks.counter import Counter
 
@@ -28,9 +29,12 @@ def test_prose_wait_is_pushed_back_at_most_twice_per_user_input(tmp_path):
 
 def test_pushbacks_are_counted_across_reasons(tmp_path, monkeypatch):
     monkeypatch.setenv("NDF_FACTORY_RUN", "1")
+    # 人のいない実行の Stop の guard は conductor の起動（印）のあるセッションだけを見る（#3746）
+    call_entry("claude", "UserPromptSubmit", sample("claude", "UserPromptSubmit", tmp_path, prompt=f"/{identity.load().prefix}development-workflow #1"))
     first = call_entry("claude", "Stop", stop(tmp_path, WAIT))
-    assert "AskUserQuestion" in first["reason"] and "区間の報告の形" in first["reason"]
-    second = call_entry("claude", "Stop", stop(tmp_path, "- 作業: x\n- 結果: 完了\n"))
+    # 1 回目は本文の待ちと区間の報告の形の 2 つの理由。区間の報告の形の説明が長く、文は上限で切られる
+    assert first is not None and "区間の報告" in first["reason"]
+    second = call_entry("claude", "Stop", stop(tmp_path, "- 作業: x\n"))
     assert second is not None and "区間の報告の形" in second["reason"]
     assert call_entry("claude", "Stop", stop(tmp_path, "形の無い応答")) is None
 
