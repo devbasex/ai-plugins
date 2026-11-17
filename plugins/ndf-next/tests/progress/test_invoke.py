@@ -740,6 +740,11 @@ def test_script_receives_the_inputs_as_json(tmp_path):
     assert seen == {"argv": ["x", "--flag"], "input": {"issues": [5]}}
 
 
+def test_script_argv_runs_a_subcommand_of_this_plugin_with_the_same_python():
+    assert invoke.script_argv([invoke.PACKAGE, "records", "mvv", "gate"]) == invoke.ndf_command("records", "mvv", "gate")
+    assert invoke.script_argv(["x", 1]) == ["x", "1"]
+
+
 def test_skill_prompt_names_the_skill_and_carries_the_notes():
     run = invoke.StageRun("skill", "design", {"issues": [5]}, (), "none", "s", {"skill": "design"}, notes="ここを直す")
     prompt = invoke.skill_prompt(run)

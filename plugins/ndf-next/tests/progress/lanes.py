@@ -22,6 +22,8 @@ def values(cwd: Path, branch: str) -> dict:
         "pr": 8,
         "delivery": {"target": "t", "kind": "auto", "trigger": "cd", "channel": "production", "versioned": True},
         "version": "11.0.0",
+        # 承認ゲートの直前の MVV 判定（進め方 normal は省かない）
+        "mvv_gate": {"gate": "design", "skip": False, "verdict": None, "why": ["進め方 normal は承認ゲートを MVV 判定で省かない"]},
     }
 
 
