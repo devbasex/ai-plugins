@@ -150,6 +150,42 @@ graph TD
 - 最初の失敗で残りのページを打たずに止まる。保存済みの画像は残し、打ち直すと全ページを同じ名前へ書き直す
 - `contentUrl`（一時的な URL）は結果に載せない
 
+### ほかの Skill からの呼び出し
+
+ndf-next の Skill・エージェント・hook の本文は、今の NDF のスクリプト（`gws-check.py`・`slides-thumbnails.py`）を
+呼ばない。gws を使う手順は 2 つの副命令だけを打つ。
+
+| 呼び出し元 | 打つ副命令 | 書き方 |
+| --- | --- | --- |
+| `google-workspace` の SKILL.md | `ndf gws check`・`ndf gws thumbnails` | 流れと操作の対応表を持つ（正本） |
+| `document-systems` の `references/system-gdrive.md` の「描画して見る手段」の Google スライドの行 | `ndf gws thumbnails <ID> <出力のディレクトリ>` | 全ページを `p<番号>.png` で保存すると書き、大きさと終了コードの扱いは `google-workspace` の対応表を指す |
+
+コマンドはパスを付けない `ndf` で書く。Skill の本文は利用先のリポジトリでも読まれ、`plugins/ndf-next/bin/` は
+このリポジトリだけのパスだからである。引数の細部を `system-gdrive.md` に写さないのは、同じ事実を 2 か所に持たない
+ためである。
+
+### 入れ替えの前の試走での扱い
+
+機能の対応表（`scripts/ndf-next-parity/parity/features.json`）の次の 3 行は、試走の判定（`python -m parity.trial.probe --write`）
+が `passed` にする。
+
+| 行 | `passed` にする根拠 |
+| --- | --- |
+| `entrypoint:skills/google-workspace/scripts/gws-check.py` | 試走の記録の `passed` に行の id があり、ndf-next の本文に旧いスクリプトの呼び出しが無い |
+| `entrypoint:skills/google-workspace/scripts/slides-thumbnails.py` | 同上 |
+| `skill:document-systems` | 同上（`system-gdrive.md` が副命令を打つ） |
+
+- 試走は Claude を起動せず、ndf-next のエントリポイント `plugins/ndf-next/bin/ndf` をシェルから直に打つ。`bin/ndf` は
+  ndf-next のパッケージだけを読むため、今の `plugins/ndf/` を経由しない実行になる。言語モデルの判断を挟まず、結果が
+  実行ごとにぶれないためである
+- `system-gdrive.md` の行は、本文の `ndf` を `plugins/ndf-next/bin/ndf` に置き換え、副命令と引数の並びを本文のまま打つ
+- 試走の記録（`trial/<日付>.json`）は追記だけで変え、最新の記録の `runs` と `passed` へ足す。新しい日付のファイルを
+  作ると、どの記録にも載らない行の `record` の指し先が動くためである。記録にはプレゼンテーションの ID・Google の
+  アカウント・ファイルの名前を書かず、ページ数と保存したファイルの数だけを書く
+- 対応表の `trial` の列は判定のコマンドだけが書く。3 行の `now`（旧いスクリプトのパス）と `to`（`S1d`）は、判定が
+  本文の旧い呼び出しを探す手がかりとして残す
+- 今の `plugins/ndf/` の `gws-check.py` を許す例外（`scripts/contract-allow/` の許可ファイル）は、今の NDF を外すまで残す
+
 ### 止まった理由の種類
 
 既存の種類から選び、種類の表（`contracts/causes.json`）に足さない。
@@ -216,7 +252,10 @@ graph TD
 | 引数 | 足りない・3 つ以外の大きさ・知らない引数で `stopped`・2 になること |
 | 定数と契約の一致 | gws の状態の 4 つの値と大きさの 3 つが、結果のスキーマの列挙と一致すること |
 | 記録の部品の互換 | `auth_status()` を引数なしで呼ぶと上限が `gws.auth-status` のままで、`GwsError` が標準エラーを持つこと |
-| 規約の検査 | `plugins/ndf-next/bin/ndf check --base origin/develop` が 0 で終わり、副命令の一覧に 2 つの副命令の行があること |
+| 規約の検査 | `plugins/ndf-next/bin/ndf check --base origin/develop` が 0 で終わり、副命令の一覧に 2 つの副命令の行があること。`env.json` の `GOOGLE_WORKSPACE_CLI_TOKEN` の説明を変えたら `ndf check --write-spec` で `docs/contracts/env.md` を生成し直してあること |
+| 判定の置き場（I9） | `grep -rn "credential_source\|auth_method" plugins/ndf-next/src --include=*.py` の結果が `records/gws.py` だけで、`authenticated` の呼び出し元が `gws/check.py`・`gws/thumbnails.py`・`records/cli.py` の 3 つであること |
+| 旧い呼び出しが無い | ndf-next の Skill・エージェント・hook の本文に `gws-check.py`・`slides-thumbnails.py` の呼び出しが 0 件で、試走の判定が 3 行を `failed` にしないこと |
+| 試走 | 試走の判定のコマンドが 3 行を `passed` にし、`--write` を打ち直しても機能の対応表に差分が出ないこと |
 | 手動 | 実の gws と Google のアカウントで、`ndf gws check` が `authenticated` を返し、`ndf gws thumbnails` が実のプレゼンテーションの全ページを保存すること（未確認。入れ替えの後のリリース後テストで確かめる） |
 
 ## 関連リンク
@@ -224,6 +263,8 @@ graph TD
 - [ndf-next の `google-workspace` の SKILL.md](../../plugins/ndf-next/skills/google-workspace/SKILL.md)
 - [`ndf gws` の受付](../../plugins/ndf-next/src/ndf/domains/gws/cli.py)
 - [記録の gws の部品](../../plugins/ndf-next/src/ndf/domains/records/gws.py)
+- [ndf-next の `document-systems` の Google Drive の手順](../../plugins/ndf-next/skills/document-systems/references/system-gdrive.md)
+- [機能の対応表](../../scripts/ndf-next-parity/parity/features.json) と [試走の判定](../../scripts/ndf-next-parity/parity/trial/probe.py)
 - [今の NDF の gws の確定仕様](ndf-google-workspace-gws.md)
 - [ndf-next の宣言と入出力の規約](ndf-next-declarations-and-io-contracts.md)
 - 課題 [#3547](https://github.com/devbasex/ai-plugins/issues/3547)・[#2067](https://github.com/devbasex/ai-plugins/issues/2067)
