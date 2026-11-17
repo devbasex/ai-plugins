@@ -117,11 +117,20 @@ def _empty(node: ast.AST) -> bool:
     return isinstance(node, ast.Constant) and not isinstance(node.value, bool) and node.value in ("", 0, None)
 
 
+def _empty_fallback(node: ast.AST) -> bool:
+    """空の既定へ落とす式か。`x or <空>` と、同じ値を真偽で見る条件式 `x if x else <空>` の 2 つの形を数える。"""
+    if isinstance(node, ast.BoolOp) and isinstance(node.op, ast.Or):
+        return _empty(node.values[-1])
+    if isinstance(node, ast.IfExp):
+        return _empty(node.orelse) and ast.dump(node.test) == ast.dump(node.body)
+    return False
+
+
 def calls_and_fallbacks(tree: ast.Module, boundary_receivers: frozenset[str]) -> list[Hit]:
-    """`contextlib.suppress`（NDF402）・空の既定への `or`（NDF501）・既定値つきの `.get`（NDF502）を返す。"""
+    """`contextlib.suppress`（NDF402）・空の既定への落とし（NDF501）・既定値つきの `.get`（NDF502）を返す。"""
     hits: list[Hit] = []
     for node in ast.walk(tree):
-        if isinstance(node, ast.BoolOp) and isinstance(node.op, ast.Or) and _empty(node.values[-1]):
+        if _empty_fallback(node):
             hits.append((node.lineno, "NDF501"))
         if not isinstance(node, ast.Call):
             continue

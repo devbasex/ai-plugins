@@ -481,7 +481,7 @@ def _source_keys(s: Samples, release_strategy: Optional[str]) -> dict[str, Measu
         out["/release/version_store"] = Measured({"kind": "none"}, [{"source": "repo", "ref": "版数のファイルが無い", "value": "none"}])
     out["/release/cd"] = _cd_key(s)
     channels = [{"name": "stable", "ref": s.production}] if s.production else []
-    out["/channels"] = Measured(channels, [{"source": "workflow", "ref": "stable", "value": s.production if s.production else ""}])
+    out["/channels"] = Measured(channels, [{"source": "workflow", "ref": "stable", "value": s.production if s.production else ""}])  # noqa: NDF501 ファイル: 本番のブランチを読めないワークフローは空の根拠
     out["/merge/method"] = decide_merge_method(s.rules, release_strategy) if release_strategy else Measured(why="insufficient")
     return out
 

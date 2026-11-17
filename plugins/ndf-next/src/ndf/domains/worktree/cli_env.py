@@ -147,7 +147,7 @@ def _te_compose_env(tool: str, t: testenv.Target, args: argparse.Namespace) -> d
 
 def _te_reap(tool: str, t: testenv.Target, args: argparse.Namespace) -> dict[str, Any]:
     try:
-        idle = parse_period(args.idle if args.idle else "")
+        idle = parse_period(args.idle if args.idle else "")  # noqa: NDF501 利用者の入力: --idle の無い呼び出しは空の期間として parse_period が止める
     except ValueError as exc:
         return result.stopped(tool, "invalid", f"--idle: {exc}")
     items = testenv_sweep.reap(t, idle)

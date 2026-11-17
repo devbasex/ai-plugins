@@ -19,11 +19,12 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional
 
+from ndf import identity
 from ndf.adapters import git
 from ndf.contracts import facts
 from ndf.domains.records import jsonl, usage_decide
 from ndf.domains.relay import context_policy as cp
-from ndf.domains.relay import registry, signals
+from ndf.domains.relay import signals
 
 SCHEMA = 1
 LOCAL = "_local"
@@ -44,7 +45,7 @@ _SLUG = re.compile(r"([^/:]+)/([^/]+?)(?:\.git)?/?$")
 def context_dir(environ: Mapping[str, str]) -> Path:
     """旧い置き場（`NDF_CONTEXT_DIR` → `<旧い状態の根>/context`）。"""
     explicit = environ.get("NDF_CONTEXT_DIR")
-    return Path(explicit) if explicit else registry.legacy_state_root(environ) / "context"
+    return Path(explicit) if explicit else identity.legacy_state_root(environ) / "context"
 
 
 def toplevel(cwd: Optional[Path]) -> Optional[Path]:
@@ -173,7 +174,7 @@ def fill_work(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     last: dict[str, str] = {}
     out = []
     for r in rows:
-        sid, work = r.get("session_id"), r.get("work") if r.get("work") else ""
+        sid, work = r.get("session_id"), r.get("work") if r.get("work") else ""  # noqa: NDF501 ファイル: 作業の識別子の無い行は下で前の行から補う
         if not work and sid in last:
             r = {**r, "work": last[sid]}
         elif work and sid:

@@ -427,7 +427,7 @@ def _branch_of(run: StageRun) -> Optional[str]:
         branch = git.Git(Path(held)).run("symbolic-ref", "--short", "HEAD").strip()
     except GitError:  # noqa: NDF401 外部コマンド: ブランチに居ない作業場所は、足りない値として名前を挙げる
         return None
-    return branch if branch else None
+    return branch if branch else None  # noqa: NDF501 外部コマンド: git が空のブランチ名を返せば足りない値として扱う
 
 
 def ci_only(project: Mapping[str, Any]) -> bool:

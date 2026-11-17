@@ -113,14 +113,18 @@ def _wait_or_kill(pgid: int, remaining: Callable[[], bool], send: Callable[[int]
 
 
 def _target_group(proc: subprocess.Popen, send_first: bool) -> int | None:
-    """止める組の番号。`send_first` なら `proc` の今の組、偽なら組の番号＝先頭の pid。既に終わっていれば回収して None。"""
+    """止める組の番号。`send_first` なら `proc` の今の組、偽なら組の番号＝先頭の pid。
+
+    先頭が終わって回収された後でも、組に子孫が残れば組の番号＝先頭の pid で止める（CLI が自力で終えて
+    子孫だけが残る形）。組全体が終わっていれば回収して None。
+    """
     if not send_first:
         return proc.pid
     try:
         return os.getpgid(proc.pid)
-    except ProcessLookupError:  # 外部コマンド: 既に終わっていれば止める先が無い（直接の子だけ回収する）
+    except ProcessLookupError:  # 外部コマンド: 先頭は終わった。残りの成員は組の番号で見る
         proc.poll()
-        return None
+        return proc.pid if group_alive(proc.pid) else None
 
 
 def _reap(proc: subprocess.Popen, grace: float) -> None:

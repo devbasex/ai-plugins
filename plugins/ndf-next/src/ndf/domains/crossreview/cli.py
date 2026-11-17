@@ -269,7 +269,7 @@ def _run_config(args: argparse.Namespace) -> drive.RunConfig:
         pr=args.pr,
         state_dir=Path(args.state_dir).absolute(),
         every_section=_every_section(args.purpose),
-        reviewers=participants.assign(args.reviewer if args.reviewer else ()),
+        reviewers=participants.assign(args.reviewer if args.reviewer else ()),  # noqa: NDF501 利用者の入力: --reviewer の無い呼び出しは既定の担当に任せる
         max_rounds=args.max_rounds,
         handed=_handed(args.findings),
     )

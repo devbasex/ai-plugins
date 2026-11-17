@@ -398,7 +398,7 @@ def shell_targets(command: str, base: str = "") -> list[str]:
     if root.has_error:
         return []
     scan = _Scan()
-    scan.node(root, _Place(base if base else None, base if base else None))
+    scan.node(root, _Place(base if base else None, base if base else None))  # noqa: NDF501 利用者の入力: 起点の無いコマンドは置き場を決めない
     return scan.out
 
 

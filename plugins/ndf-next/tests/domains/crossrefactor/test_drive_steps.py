@@ -81,27 +81,38 @@ def _state(world: World) -> dict:
 
 def _planned(spec, submit):
     return {"items": [
-        {"path": "src/geo.py", "symbol": "area", "title": "式に名前を付ける", "reason": "r", "tier": "high", "estimate": {"test": 5, "implement": 10}},
-        {"path": "src/geo.py", "symbol": "area", "title": "大きな書き換え", "reason": "r", "tier": "low", "estimate": {"test": 50, "implement": 100}},
-        {"path": "src/geo.py", "symbol": "area", "title": "見積りの無い項目", "reason": "r"},
+        {"path": "src/geo.py", "symbol": "area", "title": "式に名前を付ける", "reason": "r", "tier": "high", "technique": "extract_variable", "tests": True},
+        {"path": "src/geo.py", "symbol": "area", "title": "大きな書き換え", "reason": "r", "tier": "low", "technique": "extract_variable", "tests": True},
     ]}  # fmt: skip
 
 
 def test_plan_items_are_chosen_by_the_budget_and_the_plan_comment_and_report_are_written(world, monkeypatch) -> None:
+    # 宣言の配分（テスト 5 分・実装 10 分）で 1 件 15 分。予算 20 分には 1 件だけ入る（#3643）
+    (world.main / ".ndf").mkdir(exist_ok=True)
+    (world.main / ".ndf" / "estimate.json").write_text(json.dumps({"allocation_minutes": {"test": 5, "structure": 10}}), encoding="utf-8")
     ci = fake_ci(Watched(None))
     comments = Comments()
-    got = drive.drive(world.config(budget_minutes=30), ports(FakeAgents(_acts(plan=_planned)), FakeHub("clean"), comments, ci=ci))
+    got = drive.drive(world.config(budget_minutes=20), ports(FakeAgents(_acts(plan=_planned)), FakeHub("clean"), comments, ci=ci))
     assert got.kind == "ok", got.detail
     state = _state(world)
-    assert [(i["title"], i["status"]) for i in state["items"]] == [("式に名前を付ける", "adopted")]
+    assert [(i["title"], i["status"], i["estimate"]) for i in state["items"]] == [
+        ("式に名前を付ける", "adopted", {"test": 5.0, "implement": 10.0})
+    ]
+    assert state["plan"]["table_source"] == "defaults" and state["plan"]["table"]["structure"] == 10.0
     reasons = {s["title"]: s["reason"] for s in state["skipped"] if "title" in s and s["symbol"] == "area"}
     assert reasons["大きな書き換え"].startswith(budget_decide.OVER_BUDGET)
-    assert reasons["見積りの無い項目"] == budget_decide.NO_ESTIMATE
-    assert state["budget"] == {"minutes": 30, "extended_to": None, "reason": ""}
-    assert got.metrics["budget_minutes"] == 30 and got.metrics["plan_comment"] == "written"
+    assert state["budget"] == {"minutes": 20, "extended_to": None, "reason": ""}
+    assert got.metrics["budget_minutes"] == 20 and got.metrics["plan_comment"] == "written"
     assert len(comments.bodies) == 1 and comments.bodies[0].startswith(report_decide.MARKER)
     report = Path(got.metrics["report"])
     assert report.parent == world.root() / "logs" and "大きな書き換え" not in report.read_text(encoding="utf-8").split("## 見送り")[0]
+
+
+def test_a_broken_allocation_declaration_stops_the_plan(world) -> None:
+    (world.main / ".ndf").mkdir(exist_ok=True)
+    (world.main / ".ndf" / "estimate.json").write_text(json.dumps({"allocation_minutes": {"nope": 1}}), encoding="utf-8")
+    got = drive.drive(world.config(), ports(FakeAgents(_acts(plan=_planned)), FakeHub("clean"), Comments(), ci=fake_ci(Watched(None))))
+    assert got.kind == "invalid" and "配分の表を作れない" in got.detail
 
 
 def test_safety_net_stops_without_undoing_items_and_a_larger_limit_resumes(world, monkeypatch) -> None:

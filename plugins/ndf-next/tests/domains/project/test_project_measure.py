@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from ndf.domains.crossrefactor import allocation
 from ndf.domains.project import items as forms
 from ndf.domains.project import measure_ci, measure_repo, secret
 
@@ -142,7 +143,7 @@ def test_ndf_record_takes_the_median_of_run_rows(tmp_path):
     d = tmp_path / "metrics" / "o--r"
     d.mkdir(parents=True)
     rows = ['{"whole_test": {"init": 10}}', '{"kind": "init_test", "whole_test": {"init": 999}}', "broken", '{"whole_test": {"init": 30}}']
-    (d / measure_ci.RECORD_NAME).write_text("\n".join(rows), encoding="utf-8")
+    (d / allocation.HISTORY_NAME).write_text("\n".join(rows), encoding="utf-8")
     got = measure_ci.ndf_record("o/r", {"NDF_STATE_HOME": str(tmp_path)})
     assert got is not None and got["seconds"] == 20.0 and got["source"] == "ndf-record"
 

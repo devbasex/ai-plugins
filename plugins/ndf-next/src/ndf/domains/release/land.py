@@ -647,7 +647,7 @@ class Lander:
         """本番ブランチへ入れた版上げを、ベースブランチへ戻す PR でマージする（マージ済みからの再開でも打つ）。
         同期の PR が要らない取り込み方（`route_decide.route_of` の `sync` が偽）では戻さない。"""
         merged_sha = landed or self.hub.pull(pull.number).merge_sha
-        landed = merged_sha if merged_sha else None
+        landed = merged_sha if merged_sha else None  # noqa: NDF501 ネットワーク: マージの sha を返さない応答は未着として扱う
         if not route_decide.route_of(self.strategy).sync:
             return Landed(True, None, f"#{pull.number} を本番ブランチへ入れた", production_sha=landed)
         number = self._open_sync()
