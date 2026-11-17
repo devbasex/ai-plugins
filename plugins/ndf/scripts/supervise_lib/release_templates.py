@@ -228,6 +228,7 @@ class _ReleaseArgs(NamedTuple):
     base: str
     units: list
     cd: release_case.Case | None  # CD のある場合（release_cd.release_cd_case）。CD が無ければ None
+    trunk: bool  # trunk の本番（開発版は偽。#3703）
 
 
 def _prepare_steps(r: _ReleaseArgs, plugin: str, dev: bool, after_notes: str, on_pr: bool = False) -> list[dict]:
@@ -260,7 +261,7 @@ def _prepare_steps(r: _ReleaseArgs, plugin: str, dev: bool, after_notes: str, on
     return steps
 
 
-def _release_step(r: _ReleaseArgs, dev: bool, trunk: bool = False) -> dict:
+def _release_step(r: _ReleaseArgs, dev: bool) -> dict:
     """release のステップ。本番は承認資料を --approval で渡し（承認したコミットはステップの実行時に資料から読む）、
     承認の外の変更で承認ゲート（10）になったら verify へ進まない。MVV 判定のプランは handoff でリリース承認ゲートの by: mvv の
     記録を外して人へ戻し、それ以外は end で終える（#815 の I7）。
@@ -271,7 +272,7 @@ def _release_step(r: _ReleaseArgs, dev: bool, trunk: bool = False) -> dict:
 
     本番の公開の欠け（6。merge queue へ入れた・人のマージを待つ）は release-landed で打ち直す（#3703 の決定 3）。trunk の本番は
     承認の前の 10 で承認前の試用（trial）へ進む（normal は承認ゲートとして記録し、MVV 判定のプランは on_exit で送る。決定 6）。"""
-    a, v, repo, approval, on_pr = r.a, r.v, r.repo, r.approval, r.cd
+    a, v, repo, approval, on_pr, trunk = r.a, r.v, r.repo, r.approval, r.cd, r.trunk
     ci_wait = int(plan_limits(a)["ci_wait_timeout"])
     step = {
         "id": "release",
@@ -316,12 +317,12 @@ def _record_step(v: str, prs: str) -> dict:
     }
 
 
-def _release_verify_steps(r: _ReleaseArgs, dev: bool, ref: str, trunk: bool = False) -> list[dict]:
+def _release_verify_steps(r: _ReleaseArgs, dev: bool, ref: str) -> list[dict]:
     """release と verify（導入の確かめ）のステップ。本番は間に record（リリース記録）を挟み、公開の欠け（6）の打ち直し
-    release-landed を足す。`r.cd` は CD のある場合、`trunk` は trunk の本番（#3703）。"""
+    release-landed を足す。`r.cd` は CD のある場合、`r.trunk` は trunk の本番（#3703）。"""
     a, v, repo, rts, prs, on_pr = r.a, r.v, r.repo, r.rts, r.prs, r.cd
     dev_next = ("release-branch" if release_units(a) else "end" if on_pr else "facts") if dev else "cleanup"
-    release = _release_step(r, dev, trunk)
+    release = _release_step(r, dev)
     return [
         release,
         *([] if dev else [landed_step(release)]),
@@ -347,9 +348,8 @@ def _dev_approvals(c: _ReleaseArgs) -> list[dict]:
 
 def _cd_prod_approvals(c: _ReleaseArgs) -> list[dict]:
     head = release_names(c.v)[1]
-    trunk = trunk_release(c.a)
-    approvals = _approval_material_steps(c.a, c.repo, c.approval, c.prs, c.rts, head, head if trunk else None)
-    trial = trial_step(c.a, c.repo, c.v, c.rts) if trunk else None
+    approvals = _approval_material_steps(c.a, c.repo, c.approval, c.prs, c.rts, head, head if c.trunk else None)
+    trial = trial_step(c.a, c.repo, c.v, c.rts) if c.trunk else None
     return cd_prod_steps(c.a, c.v, c.prs, c.repo, c.approval, approvals, c.cd, trial)
 
 
@@ -447,12 +447,12 @@ def plan_release_package_plugin(a) -> dict:
     # まとめたリリース（#2436）の本番は、提示で作って承認した資料を渡す
     approval = getattr(a, "approval_path", None) or f"issues/approval-{plugin}-v{base}.md"
     # trunk の本番も CD のある場合と同じく、承認資料は版上げの PR を開いた後に組むため bump-others は PR の本文の候補で上げる
-    ctx = _ReleaseArgs(a, repo, approval, prs, rts, v, base, units, cd)
+    ctx = _ReleaseArgs(a, repo, approval, prs, rts, v, base, units, cd, trunk)
     steps = _prepare_steps(ctx, plugin, dev, after_notes, on_pr or trunk)
     ref = a.base if dev else a.production
     if sync:
         steps.append({"id": "sync", "type": "run", "preset": "sync-check", "on_fail": "judge", "next": "release"})
-    steps += _release_verify_steps(ctx, dev, ref, trunk)
+    steps += _release_verify_steps(ctx, dev, ref)
     if not dev:
         # 後片付け: デプロイの PR（head が release/v{v} で始まる。開発版の release/v{v}-dev.N も含む。宛先は起点のブランチ）と
         # スプリントの PR（--prs）のブランチと作業ツリー
