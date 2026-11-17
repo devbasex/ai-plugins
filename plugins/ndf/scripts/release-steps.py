@@ -20,7 +20,8 @@
 
 デプロイの決まった手順（#862。試作は #827 の phase-steps.py）も同じスクリプトに置く。結果は
 `lib/step_result.py` の形の 1 行の JSON で、終了コードは 0 = ok / 1 = 失敗（stopped）/ 2 = 読めない / 3 = 前提が無い /
-5 = CD の結果が失敗（record）/ 10 = 本番へのリリースの承認が要る（approval-facts）/ 75 = 待つ PR の CI の基盤待ち（中身の失敗ではない）。
+5 = CD の結果が失敗（record）/ 6 = 公開の欠け（release が merge queue か人のマージを待つ）/ 10 = 本番へのリリースの承認が要る
+（approval-facts）/ 75 = 待つ PR の CI の基盤待ち（中身の失敗ではない）。
 
     python3 release-steps.py bump           --plugin <名前> --to <版> [--base <ベースブランチ>] [--root <dir>]
     python3 release-steps.py changed-plugins [--since <タグ>] [--plugin <名前>] [--root <dir>]  # 差分のある他のプラグイン
@@ -53,6 +54,9 @@ release --channel prod は承認したコミットを受け取り、`origin/rele
 本番チャネルの PR もタグも作らずに承認ゲート（10）で止まる（release_lib/approval.py。#815）。承認の後にベースブランチが
 進んでも止まらず、本番チャネルの PR は head を release/v<版> にして比べた先端だけを出す（#2436 の R2）。本番チャネルの
 PR がマージ済みなら、比較とマージを飛ばし、タグと GitHub Release のうち無いものだけを作る（途中で止まったデプロイの再開）。
+本番ブランチへ入れるマージは、どの経路も本番の取り込み（`release_lib/prod_land.py`。検査の待ち → head の照合 → 宣言の主体と方式の
+`land_approved`）を通り、merge queue へ入れた・人のマージを待つときは公開せずに 6 で返す（#3703）。trunk（ベースブランチと本番ブランチが
+同じ）の CD の無い本番は `release_lib/trunk_release.py` が、承認を読む前に版上げの PR を開き、承認が無ければ 10 で止まる。
 ここまでは CD の無い場合（`lib/release_case.py` の no-cd）である。CD のある場合（cd-no-review / cd-review。#2773）の prod は
 承認したコミットの引数を受けず、本番の PR の先端を PR の承認の証跡（cd-no-review）か承認のレビュー（cd-review）と比べ、
 一致すれば管理者の迂回なしでマージし、一致しなければ本番の PR を開いたまま承認ゲート（10）で止まる。dev は

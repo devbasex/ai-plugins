@@ -145,7 +145,11 @@ def trial_verify(a) -> str | None:
         return None
     from supervise_lib.queue_fill import RELEASE_VERSION
 
-    return pace_verify(a).replace("{ref}", f"release/v{RELEASE_VERSION}")
+    cmd = pace_verify(a).replace("{ref}", f"release/v{RELEASE_VERSION}")
+    # verify-install は確かめる版（--expect）を要る。宣言が持たなければ版上げの PR の版を足す（.ndf/pace.json を書き換えずに流す）
+    if "verify-install" in cmd and "--expect" not in cmd:
+        cmd += f" --expect {RELEASE_VERSION}"
+    return cmd
 
 
 def trunk_prod_waves(

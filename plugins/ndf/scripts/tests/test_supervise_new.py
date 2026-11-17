@@ -128,6 +128,7 @@ def test_trunk_sprint_has_no_dev_release_plan(tmp_path, pace):
     ten = steps["release"].get("on_exit", {}).get("10") or steps["release"].get("gate_next")
     assert ten == "trial" and steps["trial"]["next"] == "facts"
     assert "release/v{release_version}" in steps["trial"]["cmd"] and "{ref}" not in steps["trial"]["cmd"]
+    assert "--expect {release_version}" in steps["trial"]["cmd"]
     assert "--ref release/v{release_version}" in steps["explain"]["cmd"]  # 承認資料の欄の ref は版上げの PR の head（受け入れ条件 11）
     assert "--approval" not in steps["notes"]["cmd"]  # bump の後の notes は欄を書かない
     assert steps["release"]["on_exit"]["6"] == "release-landed" and steps["release-landed"]["on_exit"]["6"] == "stop"
