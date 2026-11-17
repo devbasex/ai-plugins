@@ -236,10 +236,15 @@ def canonical_json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
+def digest_of(value: Any) -> str:
+    """正規化した JSON の SHA-256（計画のハッシュとスナップショットのハッシュ）。"""
+    return hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()
+
+
 def snapshot(strategy: Strategy, source: str) -> dict:
     """スプリントの開始時に控えるセクションの全体（決定 9）。`digest` は正規化した JSON の SHA-256。"""
     section = copy.deepcopy(strategy.section)
-    return {"source": source, "digest": hashlib.sha256(canonical_json(section).encode("utf-8")).hexdigest(), "section": section}
+    return {"source": source, "digest": digest_of(section), "section": section}
 
 
 def _leaves(value: Any, prefix: str = "") -> dict[str, Any]:

@@ -14,7 +14,6 @@
 from __future__ import annotations
 
 import copy
-import hashlib
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -40,13 +39,8 @@ LOCK_LIMIT = "branch-strategy.write-lock"
 WRITE_ORDER = tuple(legacy.FILES.values())
 
 
-def digest_of(value: Any) -> str:
-    """正規化した JSON の SHA-256（計画のハッシュ）。"""
-    return hashlib.sha256(bs.canonical_json(value).encode("utf-8")).hexdigest()
-
-
 # 変える中身が無い計画のハッシュ
-EMPTY_DIGEST = digest_of({"diff": [], "before": {}})
+EMPTY_DIGEST = bs.digest_of({"diff": [], "before": {}})
 
 
 class WriteError(Exception):
@@ -197,7 +191,7 @@ def plan_files(root: Path, after: dict[str, Any], rebuild: Callable[[], WritePla
         if ops:
             plan.files[name] = after[name]
             plan.diff.extend({"file": f"{bs.DECL_DIR}/{name}", **op} for op in ops)
-    plan.digest = digest_of({"diff": plan.diff, "before": befores})
+    plan.digest = bs.digest_of({"diff": plan.diff, "before": befores})
     return plan
 
 
