@@ -61,6 +61,8 @@ HUMAN_KIND = "not_applicable"
 PENDING_STATES = frozenset(facts.ids("ci-outcomes", outcome="pending"))
 # マージキューへ入れた PR がマージされたかを読み直す間隔（秒）
 QUEUE_POLL_SECONDS = 30.0
+# merge queue を読むページの上限（持ち主は merge_queue。本番の PR の確かめが読み切れる範囲として land の名前でも引ける）
+QUEUE_PAGES = merge_queue.QUEUE_PAGES
 # 従来の保護の `app_id` で「どの発行元でもよい」を表す値
 ANY_APP = -1
 
