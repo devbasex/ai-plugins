@@ -8306,120 +8306,120 @@
       "term": "リリースのワークフロー",
       "context": "ndf-workflow",
       "meaning": "本番リリースのパイプライン。本番チャネルへ変更を届ける手順の並び",
-      "pending_source": "issues/issue-3613-design.md",
       "deprecated": [
         "本番のプラン"
-      ]
+      ],
+      "source": "docs/specifications/ndf-next-terms-and-settings-renames.md"
     },
     {
       "term": "修正ステップ",
       "context": "ndf-workflow",
       "meaning": "指摘や失敗を直すステップ（fix ステップ）。担う worker は修正用の worker",
-      "pending_source": "issues/issue-3613-design.md",
       "deprecated": [
         "直しのステップ",
         "直しの worker"
-      ]
+      ],
+      "source": "docs/specifications/ndf-next-terms-and-settings-renames.md"
     },
     {
       "term": "HEAD",
       "context": "ndf-workflow",
       "meaning": "ブランチの最新のコミット",
-      "pending_source": "issues/issue-3613-design.md",
       "deprecated_standalone": [
         "先端"
-      ]
+      ],
+      "source": "docs/specifications/ndf-next-terms-and-settings-renames.md"
     },
     {
       "term": "ブランチ戦略の一覧",
       "context": "ndf-workflow",
       "meaning": "選べるブランチ戦略（merge_base_branch・release_branch・trunk）の一覧",
-      "pending_source": "issues/issue-3613-design.md",
       "deprecated": [
         "取り込み方の表",
         "取り込み方の行"
-      ]
+      ],
+      "source": "docs/specifications/ndf-next-terms-and-settings-renames.md"
     },
     {
       "term": "バージョンアップ",
       "context": "ndf-workflow",
       "meaning": "リリースの単位のバージョンを上げること（version bump）",
-      "pending_source": "issues/issue-3613-design.md",
       "deprecated": [
         "バージョン上げ"
-      ]
+      ],
+      "source": "docs/specifications/ndf-next-terms-and-settings-renames.md"
     },
     {
       "term": "バージョン種別のラベル",
       "context": "ndf-workflow",
       "meaning": "バージョンアップの種別（major・minor・patch）を示す PR のラベル",
-      "pending_source": "issues/issue-3613-design.md",
       "deprecated": [
         "上げ幅のラベル"
-      ]
+      ],
+      "source": "docs/specifications/ndf-next-terms-and-settings-renames.md"
     },
     {
       "term": "検証ブランチ",
       "context": "ndf-workflow",
       "meaning": "マージの前に変更を試すためのブランチ（preview ブランチ）",
-      "pending_source": "issues/issue-3613-design.md",
       "deprecated": [
         "検証用ブランチ"
-      ]
+      ],
+      "source": "docs/specifications/ndf-next-terms-and-settings-renames.md"
     },
     {
       "term": "一時マージコミット",
       "context": "ndf-workflow",
       "meaning": "merge queue が必須のチェックに通すために作る一時のマージコミット（merge group）",
-      "pending_source": "issues/issue-3613-design.md",
       "deprecated": [
         "一時のコミット"
-      ]
+      ],
+      "source": "docs/specifications/ndf-next-terms-and-settings-renames.md"
     },
     {
       "term": "merge queue への追加",
       "context": "ndf-workflow",
       "meaning": "承認済みのコミットを指定して PR を merge queue へ入れること（enqueue）",
-      "pending_source": "issues/issue-3613-design.md",
       "deprecated": [
         "キューへの投入"
-      ]
+      ],
+      "source": "docs/specifications/ndf-next-terms-and-settings-renames.md"
     },
     {
       "term": "パース",
       "context": "ndf-workflow",
       "meaning": "設定や入力を読んで値を取り出すこと・解決すること",
-      "pending_source": "issues/issue-3613-design.md",
       "deprecated": [
         "読み分け"
-      ]
+      ],
+      "source": "docs/specifications/ndf-next-terms-and-settings-renames.md"
     },
     {
       "term": "セクション",
       "context": "ndf-workflow",
       "meaning": "文書や設定ファイルの中の区切り",
-      "pending_source": "issues/issue-3613-design.md",
       "deprecated_standalone": [
         "節"
-      ]
+      ],
+      "source": "docs/specifications/ndf-next-terms-and-settings-renames.md"
     },
     {
       "term": "クリーンアップ",
       "context": "ndf-workflow",
       "meaning": "マージやリリースの後に、不要になったブランチ・worktree・一時ファイルを消すこと",
-      "pending_source": "issues/issue-3613-design.md",
       "deprecated": [
         "後片付け"
-      ]
+      ],
+      "source": "docs/specifications/ndf-next-terms-and-settings-renames.md"
     },
     {
       "term": "マージ先",
       "context": "ndf-workflow",
       "meaning": "PR をマージする先のブランチ",
-      "pending_source": "issues/issue-3613-design.md",
       "deprecated": [
         "宛先"
-      ]
+      ],
+      "source": "docs/specifications/ndf-next-terms-and-settings-renames.md"
     },
     {
       "term": "ブランチ戦略の設定",

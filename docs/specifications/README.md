@@ -183,5 +183,6 @@
 | [ndf-parallel-sprint-design-gate-and-helper-reused-answers.md](ndf-parallel-sprint-design-gate-and-helper-reused-answers.md) | 並列の計画の 1 スプリントのレーンが設計承認を設計承認の依頼（gate1）で送り、承認が設計 PR をマージすること（承認の行・design-answer・マージ済みの設計 PR の承認の確かめ）と、起き直した一時レーンが対象の行で同じ問いを見分けて前の答えを使うこと（reused の行）の常に成り立つ条件・契約・決定の理由・テスト観点。手順は development-workflow の references/asking.md・parallel.md が正 |
 | [ndf-factory-unattended-report.md](ndf-factory-unattended-report.md) | 人のいない実行（`NDF_FACTORY_RUN`）の conductor が最後の応答の末尾に置く区間の報告の形と、報告の無い応答を差し戻す UserPromptSubmit・Stop・SessionEnd の hook（印・差し戻しの回数・対象のセッションの判定）。区間の終え方は `development-workflow` の `references/asking.md` が、報告の形は `contracts/forms/unattended-report.json` が正 |
 | [ndf-release-production-land-and-trunk-sprint.md](ndf-release-production-land-and-trunk-sprint.md) | 本番ブランチへ入れるマージを本番の取り込み（prod_land）へ集め宣言のマージの主体・方式で入れること、公開の欠け（6）と打ち直し、trunk のスプリントの計画が開発版を置かず承認前の試用（版上げの PR の head からの導入）を通って本番まで流れること、系列の無い本番の版。打ち方は release の references/release-steps.md が正 |
+| [ndf-next-terms-and-settings-renames.md](ndf-next-terms-and-settings-renames.md) | ndf-next の用語の置き換えと設定のキーの改名（廃止した語と禁止語の規則・単独でマッチする語・識別子の改名の基準と一覧・改名した保存先と記録・ステートマシンの表のバージョン 2・.ndf/mvv.json の validation への改名表・ndf settings migrate の差分とハッシュによる承認・旧いキーで止まる読む側・入れ替えまでの spec-decl。#3613） |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。
