@@ -227,6 +227,16 @@ def test_an_mvv_verdict_that_may_not_skip_waits_for_a_human(repo, st, env, capsy
     assert not [e for e in run.read(st, tid).events if e.draft.kind == "answered"]
 
 
+def test_the_dedicated_mvv_verdict_that_keeps_the_gate_wins_over_an_earlier_skip(repo, st, env, capsys):
+    # 先の設計のステップが省けると書いても、直前の判定がレッドラインで止めた承認ゲートは省かない
+    tid = _new(capsys, "standard", "--pace", "fast")
+    env.fake.script["design"] = [_mvv("design", True, [])]
+    env.fake.script["design-mvv"] = [_mvv("design", False, ["レッドラインに当たる: C2"])]
+    out = lanes.turn(st, tid, repo, env.env)
+    assert out["status"] == "gate" and out["metrics"]["stage"] == "設計"
+    assert not [e for e in run.read(st, tid).events if e.draft.kind == "answered"]
+
+
 def test_new_writes_the_approved_mvv_reference_into_the_context(repo, st, capsys):
     (repo / ".ndf").mkdir()
     sha = "a" * 64

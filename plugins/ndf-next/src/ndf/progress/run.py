@@ -622,7 +622,8 @@ def _consume(d: Drive, v: View, m: Move) -> None:
     直前の MVV 判定が省けると決めた承認ゲートで、答えた者 `service:mvv` の承認を書く（次の手で読む）。"""
     assert m.stage is not None and m.step is not None and m.progress is not None
     if m.event is None:
-        _write_mvv_approval(d, v, m)
+        payload, reason = model.mvv_answer(m.step.id, invoke.LISTEN, APPROVED, m.step.gate, m.progress.done.values())
+        d.write(model.EventDraft(ANSWERED, CONDUCTOR, m.stage.name, reason=reason, payload=payload, rev=v.rev))
         return
     if payload_of(m.event)["answer"] == APPROVED:
         rep = gate_report(m.step, m.event)
@@ -632,14 +633,6 @@ def _consume(d: Drive, v: View, m: Move) -> None:
     detail = f"承認ゲート {m.step.gate} で承認されなかった（{m.event.draft.reason}）"
     d.write(_failed(m.stage, m.step.id, v.rev, "refused", detail))
     d.synced()
-
-
-def _write_mvv_approval(d: Drive, v: View, m: Move) -> None:
-    """MVV 判定が省けると決めた承認ゲートへ、答えた者 `service:mvv` の承認の事象を書く。"""
-    assert m.stage is not None and m.step is not None and m.progress is not None
-    held = model.mvv_skip(m.progress.done.values(), m.step.gate)
-    payload, reason = model.mvv_answer(m.step.id, invoke.LISTEN, APPROVED, m.step.gate, held)
-    d.write(model.EventDraft(ANSWERED, CONDUCTOR, m.stage.name, reason=reason, payload=payload, rev=v.rev))
 
 
 def _complete(d: Drive, v: View) -> dict[str, Any]:

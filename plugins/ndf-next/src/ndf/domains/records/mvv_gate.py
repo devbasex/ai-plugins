@@ -8,6 +8,7 @@ MVV 判定の前の機械の検査を当て、通れば LLM のアダプター�
 判定の材料は、共通原則の本文（`contracts/data/ndf-common-principles.md`）・プロジェクト MVV の本文・PR の本文と差分。
 レッドライン（必ず人の承認が要る操作）は共通原則とプロジェクト MVV の表から引き、材料の先に置く。
 判定を打てない（PR が無い・GitHub や LLM が答えない）ときは承認ゲートを省かず、理由を `why` に書いて人へ問う。
+PR を読めた後の結果は、省くときも省かないときも判定の記録（`checks.note`）を PR のコメントへ載せる。
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from ndf import contracts, identity
-from ndf.adapters import llm
+from ndf.adapters import llm, publish
 from ndf.adapters.git import Git, GitError
 from ndf.adapters.github import GitHub, GitHubError
 from ndf.contracts import limits
@@ -25,7 +26,7 @@ from ndf.domains.records import files, jsonfile, mvv, preflight
 from ndf.domains.records import mvv_decide as md
 from ndf.domains.records import mvv_material_decide as mm
 from ndf.progress import definition
-from ndf.progress.gate.checks import MvvFacts, may_skip, refusals
+from ndf.progress.gate.checks import MvvFacts, may_skip, note, refusals
 from ndf.progress.model import MVV_PACES
 
 # 共通原則の本文（契約の置き場からの相対）と、判定の答えのスキーマ（contracts/schemas/mvv-verdict.schema.json）
@@ -114,6 +115,11 @@ def _judged(root: Path, gate_name: str, inputs: Mapping[str, Any], open_hub: Cal
     number = pr_number(root, gate_name, inputs, hub)
     rows = mvv.pr_files(hub, number)
     facts = mvv.pr_facts(hub, number, facts, rows)
+    # PR の本文と変えたファイルで決まる検査（レッドラインのパス・MVV の宣言の変更）は LLM を呼ぶ前に当てる。
+    # 差分の全体が材料に載らない PR も、省いた部分を判定できないため LLM を呼ばずに人へ問う
+    why = refusals(facts) or mm.incomplete_patches(rows)
+    if why:
+        return _recorded(hub, number, mm.gate_outcome(gate_name, None, False, why))
     shared = principles()
     materials = {
         "NDF の共通原則": shared,
@@ -124,7 +130,18 @@ def _judged(root: Path, gate_name: str, inputs: Mapping[str, Any], open_hub: Cal
     text = mm.prompt(mm.redlines(shared, project), materials)
     verdict = _verdict(mvv.vet_sprint(root, {"gate": gate_name, "question": mm.SYSTEM, "material": text}, judge_with(ask)))
     skip, why = may_skip(facts, verdict)
-    return mm.gate_outcome(gate_name, verdict, skip, why)
+    return _recorded(hub, number, mm.gate_outcome(gate_name, verdict, skip, why))
+
+
+def post_note(hub: GitHub, number: int, text: str) -> None:
+    """判定の記録を PR のコメントへ書く（`publish.Publisher` を通す）。"""
+    publish.Publisher(hub).comment(number, text)
+
+
+def _recorded(hub: GitHub, number: int, outcome: dict[str, Any]) -> dict[str, Any]:
+    """判定の結果（省く・省かないの両方）を PR へ載せ、人が後から確かめられるようにする。書けなければ例外で省かない側へ倒す。"""
+    post_note(hub, number, note(outcome["gate"], outcome["verdict"], outcome["why"]))
+    return outcome
 
 
 def has_gate(mode: Any, gate_name: str) -> bool:

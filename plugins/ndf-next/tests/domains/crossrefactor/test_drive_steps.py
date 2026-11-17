@@ -108,6 +108,19 @@ def test_plan_items_are_chosen_by_the_budget_and_the_plan_comment_and_report_are
     assert report.parent == world.root() / "logs" and "大きな書き換え" not in report.read_text(encoding="utf-8").split("## 見送り")[0]
 
 
+def test_an_item_planned_without_tests_does_not_launch_add_tests(world) -> None:
+    # 見積りにテストの分を入れない項目（tests: false）は、実行でも add-tests の担当を起動しない
+    def untested(spec, submit):
+        return {"items": [dict(_planned(spec, submit)["items"][0], tests=False)]}
+
+    fake = FakeAgents(_acts(plan=untested))
+    got = drive.drive(world.config(), ports(fake, FakeHub("clean"), Comments(), ci=fake_ci(Watched(None))))
+    assert got.kind == "ok", got.detail
+    (item,) = _state(world)["items"]
+    assert item["estimate"]["test"] == 0.0 and item["status"] == "adopted"
+    assert "add-tests" not in {phase for _, phase, _, _ in fake.seen}
+
+
 def test_a_broken_allocation_declaration_stops_the_plan(world) -> None:
     (world.main / ".ndf").mkdir(exist_ok=True)
     (world.main / ".ndf" / "estimate.json").write_text(json.dumps({"allocation_minutes": {"nope": 1}}), encoding="utf-8")

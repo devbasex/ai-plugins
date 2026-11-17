@@ -135,17 +135,24 @@ def mvv_skip(reports: Iterable[Mapping[str, Any]], gate: Optional[str]) -> Optio
     """承認ゲート `gate` を省くと決めた MVV 判定（済んだステップの出力 `MVV_KEY` のうち、その区分で省けるもの）。無ければ None。
 
     判定を打つのは承認ゲートの直前のステップ（`ndf records mvv gate`）で、ここは結果だけを読む（#3745）。
+    その区分の判定のうち 1 つでも省かないと決めていれば省かない（先のステップが省けると書いても、直前の判定が
+    レッドラインで止めた承認ゲートを省かない）。省けるときは最後の判定を返す。
     """
-    for rep in reports:
-        outputs = rep["outputs"] if isinstance(rep.get("outputs"), dict) else {}
-        held = outputs[MVV_KEY] if MVV_KEY in outputs else None
-        if isinstance(held, dict) and held.get("gate") == gate and held.get("skip") is True:
-            return held
-    return None
+    held = [h for rep in reports if isinstance(h := _outputs(rep).get(MVV_KEY), dict) and h.get("gate") == gate]
+    if not held or any(h.get("skip") is not True for h in held):
+        return None
+    return held[-1]
 
 
-def mvv_answer(step: str, kind: str, answer: str, gate: Optional[str], held: Optional[Mapping[str, Any]]) -> tuple[dict[str, Any], str]:
-    """MVV 判定で承認ゲートを省いた答えの事象の payload と理由。答えた者は `MVV_SERVICE`、判定の結果を `MVV_KEY` に添える。"""
+def _outputs(report: Mapping[str, Any]) -> Mapping[str, Any]:
+    """済んだステップの出力（形が違えば空）。"""
+    got = report["outputs"] if "outputs" in report else None
+    return got if isinstance(got, dict) else {}
+
+
+def mvv_answer(step: str, kind: str, answer: str, gate: Optional[str], reports: Iterable[Mapping[str, Any]]) -> tuple[dict[str, Any], str]:
+    """MVV 判定で承認ゲートを省いた答えの事象の payload と理由。答えた者は `MVV_SERVICE`、判定の結果（`mvv_skip`）を `MVV_KEY` に添える。"""
+    held = mvv_skip(reports, gate)
     payload = {
         "answer": answer,
         "step": step,

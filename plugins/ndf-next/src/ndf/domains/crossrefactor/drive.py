@@ -283,7 +283,7 @@ def _plan(run: _Run) -> None:
     table = _allocation_table(run)
     for item in items:
         # 見積りは配分の表から出す（手法と、テストを足すか）。担当の申告の分は使わない（#3643）
-        item["estimate"] = allocation_history_decide.item_estimate(table, item.get("technique"), item.get("tests") is not False)
+        item["estimate"] = allocation_history_decide.item_estimate(table, item.get("technique"), wants_tests(item))
     picked = budget_decide.select(items, run.cfg.budget)
     run.state.update(
         items=picked.adopted,
@@ -367,6 +367,11 @@ def _tally_fix(run: _Run) -> Tally:
         run.state["fix_stats"] = allocation_history_decide.add_stat(held, allocation_history_decide.SECTION_COUNT["fix"], seconds)
 
     return tally
+
+
+def wants_tests(item: Mapping[str, Any]) -> bool:
+    """項目がテストを足す工程を持つか（計画の担当が `tests: false` と返した項目だけ持たない）。見積りと実行の両方がこれを読む。"""
+    return item.get("tests") is not False
 
 
 def _add_tests(run: _Run, item: dict[str, Any]) -> bool:
@@ -549,7 +554,8 @@ def _items(run: _Run) -> None:
         item = cast(dict[str, Any], found)
         item["start"] = run.work.rev_parse("HEAD")
         run.save()
-        if _add_tests(run, item) and _implement(run, item):
+        # テストを足さない項目は、見積りに入れていない add-tests の担当を起動しない
+        if (not wants_tests(item) or _add_tests(run, item)) and _implement(run, item):
             _verify(run, item)
         _flaky_fix(run)
 

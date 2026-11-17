@@ -152,6 +152,22 @@ def patch_material(files: Sequence[Mapping[str, Any]]) -> str:
     return "\n\n".join(parts)
 
 
+def _cut(f: Mapping[str, Any]) -> bool:
+    """ファイル `f` の差分の一部か全部が材料に載らないか。"""
+    if not f.get("patch"):
+        return f.get("changes") != 0
+    return len(str(f["patch"]).splitlines()) > PATCH_LINES
+
+
+def incomplete_patches(files: Sequence[Mapping[str, Any]]) -> list[str]:
+    """差分の全体が材料に載らないファイル（中身を変えたのに `patch` が無い・`PATCH_LINES` を超えて省く）の理由。空なら全体が載る。
+
+    中身を変えない改名（GitHub の `changes` が 0）は `patch` を持たないが、省いた部分が無いので数えない。
+    """
+    held = [str(f["filename"]) for f in files if _cut(f)]
+    return [f"差分の全体を材料に載せられない: {', '.join(held)}"] if held else []
+
+
 def gate_outcome(gate: str, verdict: Any, skip: bool, why: Sequence[str]) -> dict[str, Any]:
     """判定のステップの出力（文脈の鍵 `mvv_gate` の値）。"""
     return {"gate": gate, "skip": skip, "verdict": verdict if isinstance(verdict, dict) else None, "why": list(why)}

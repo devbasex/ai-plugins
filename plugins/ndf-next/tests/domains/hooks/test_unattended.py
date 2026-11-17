@@ -108,6 +108,14 @@ def test_stop_follows_the_contract_form(tmp_path, factory):
     assert report_text.TEXT_HEAD in reason
 
 
+def test_the_guide_and_the_pushback_reach_the_conversation_whole(tmp_path, factory):
+    # 形の説明（結果の値・要る項目・例）は注入の上限で切らずに届く（導入先を Read できない権限でも書けるように）
+    form = report_text.describe_form(_form())
+    assert form in advise_text(_start(tmp_path))
+    reason = call_entry("claude", "Stop", stop(tmp_path, "途中\n次のコマンド: `ndf plan status p1`\n"))["reason"]
+    assert reason.endswith(form) and "全文:" not in reason
+
+
 def test_stop_with_background_work_is_not_pushed_back(tmp_path, factory):
     _start(tmp_path)
     assert call_entry("claude", "Stop", stop(tmp_path, "途中", background_tasks=[{"id": "b"}])) is None

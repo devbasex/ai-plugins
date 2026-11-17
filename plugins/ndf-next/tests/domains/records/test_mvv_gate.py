@@ -65,6 +65,14 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return root
 
 
+@pytest.fixture(autouse=True)
+def notes(monkeypatch: pytest.MonkeyPatch) -> list[tuple[int, str]]:
+    """PR のコメントへ書く判定の記録（GitHub へは書かず、番号と本文を残す）。"""
+    posted: list[tuple[int, str]] = []
+    monkeypatch.setattr(mvv_gate, "post_note", lambda hub, number, text: posted.append((number, text)))
+    return posted
+
+
 class Hub:
     """GitHub の偽物。設計のブランチ design/x の開いた PR と、その本文・変えたファイルを返す。"""
 
@@ -129,11 +137,14 @@ def test_a_mode_without_the_design_gate_is_not_judged(repo: Path, mode: str) -> 
     assert mvv_gate.has_gate(mode, "release") and mvv_gate.has_gate("standard", "design")
 
 
-def test_follow_without_redlines_skips_and_the_record_is_reused(repo: Path) -> None:
+def test_follow_without_redlines_skips_and_the_record_is_reused(repo: Path, notes: list[tuple[int, str]]) -> None:
     case = {"body": "文書の誤字を直す", "files": [{"filename": "docs/a.md", "status": "modified", "patch": "-誤字\n+正字"}]}
     ask = Ask(FOLLOW)
     out = mvv_gate.gate(repo, "design", _inputs(), _hub(5, case), ask)
     assert (out["skip"], out["why"], out["verdict"]["boundary"]) == (True, [], [])
+    # 承認ゲートを省いた判定も、理由を PR のコメントへ残す
+    ((number, text),) = notes
+    assert number == 5 and "## MVV 判定" in text and "Value 1 に沿う" in text
     # 同じ材料の「従う」は記録を再利用し、理由とレッドラインも引き継ぐ
     again = mvv_gate.gate(repo, "design", _inputs(), _hub(5, case), ask)
     assert again == out and len(ask.calls) == 1
@@ -142,11 +153,16 @@ def test_follow_without_redlines_skips_and_the_record_is_reused(repo: Path) -> N
 
 
 @pytest.mark.parametrize(("number", "gate", "case"), [(2213, "design", DESIGN_2213), (2704, "release", DESIGN_2704)])
-def test_redlines_in_the_verdict_keep_the_gate_2213_2704(repo: Path, number: int, gate: str, case: dict[str, Any]) -> None:
+def test_redlines_in_the_verdict_keep_the_gate_2213_2704(
+    repo: Path, number: int, gate: str, case: dict[str, Any], notes: list[tuple[int, str]]
+) -> None:
     ask = Ask(case["verdict"])
     inputs = _inputs(pr=number) if gate == "release" else _inputs()
     out = mvv_gate.gate(repo, gate, inputs, _hub(number, case), ask)
     assert out["skip"] is False and out["why"] == ["レッドラインに当たる: " + " / ".join(case["verdict"]["boundary"])]
+    # 省かなかった判定も、レッドラインと省かない理由を PR のコメントへ残す
+    ((posted, text),) = notes
+    assert posted == number and case["verdict"]["boundary"][0] in text and "承認ゲートを省かない理由" in text
     ((question, material, schema),) = ask.calls
     # 判定の材料はレッドラインの一覧（共通原則の C1〜C8 とプロジェクト MVV の P1）を先に置き、PR の本文と差分を載せる
     assert question == mm.SYSTEM
@@ -165,6 +181,27 @@ def test_a_follow_with_an_empty_boundary_is_judged_but_the_machine_checks_come_f
     case = {"body": "文書", "files": [{"filename": "docs/a.md", "status": "modified"}]}
     out = mvv_gate.gate(repo, "design", _inputs(), _hub(5, case), ask)
     assert out["skip"] is False and out["why"] == ["レッドラインのパスに当たる: docs/a.md"]
+    # PR を読んで決まる検査で止まるときも LLM を呼ばない
+    assert ask.calls == []
+
+
+@pytest.mark.parametrize(
+    "files",
+    [
+        [{"filename": "src/a.py", "status": "modified", "patch": "\n".join(f"+行 {i}" for i in range(mm.PATCH_LINES + 1))}],
+        [{"filename": "src/a.py", "status": "modified", "changes": 3}],
+    ],
+)
+def test_a_diff_that_cannot_be_shown_whole_keeps_the_gate_without_judging(
+    repo: Path, files: list[dict[str, Any]], notes: list[tuple[int, str]]
+) -> None:
+    # 差分を省いた部分（認可やデータの削除があり得る）は判定できないため、LLM を呼ばずに人へ問う
+    ask = Ask(FOLLOW)
+    out = mvv_gate.gate(repo, "design", _inputs(), _hub(5, {"body": "変更", "files": files}), ask)
+    assert out["skip"] is False and out["why"] == ["差分の全体を材料に載せられない: src/a.py"] and ask.calls == []
+    assert [n for n, _ in notes] == [5]
+    # 中身を変えない改名は patch を持たないが、省いた部分が無い
+    assert mm.incomplete_patches([{"filename": "b.py", "status": "renamed", "changes": 0}]) == []
 
 
 @pytest.mark.parametrize(
