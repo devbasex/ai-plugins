@@ -296,7 +296,7 @@ def _verification(p: argparse.ArgumentParser) -> None:
     p.add_argument("--record", required=True, help="リリース後テストの記録の JSON（スキーマ release-verification）")
 
 
-def _main_dir(p: argparse.ArgumentParser) -> None:
+def _main_dir_arg(p: argparse.ArgumentParser) -> None:
     p.add_argument("--main-dir", required=True)
 
 
@@ -328,7 +328,7 @@ ARGS: dict[Callable[[argparse.Namespace], dict], tuple[Callable[[argparse.Argume
     cmd_verification_record: (_pr, _verification),
     cmd_records: (_pr,),
     cmd_publish: (_revision,),
-    cmd_sync_base: (_main_dir, _base),
+    cmd_sync_base: (_main_dir_arg, _base),
     cmd_config_snapshot: (_snapshot_out,),
     cmd_config_check: (_before,),
     cmd_cleanup: (_branch,),
