@@ -146,7 +146,7 @@ def load(main_dir: Path) -> Optional[NdfSettings]:
     data = read_object(shared)
     found = legacy.find_legacy({"worktree": data}, legacy.load_moves())
     if found:
-        raise NdfSettingsError(legacy.legacy_reason(found))
+        raise NdfSettingsError(legacy.legacy_reason(found, "11"))
     if data.get("version") != VERSION:
         raise NdfSettingsError(f"{shared} の version が {VERSION} でない: {data.get('version')!r}")
     over, ignored = _local_overrides(local_file(main_dir))

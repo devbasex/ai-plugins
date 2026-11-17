@@ -62,7 +62,7 @@ def _init(args: argparse.Namespace, root: Path, presets: dict[str, Any]) -> int:
     state, seen = strategy_measure.classify_repo(root, api, presets)
     base: dict[str, Any] = {"kind": args.kind, "evidence": seen}
     if state != "new":
-        reason = f"既存のリポジトリです。`{legacy.COMMAND} measure` で測ってください"
+        reason = f"既存のリポジトリです。`{legacy.COMMAND['11']} measure` で測ってください"
         return _emit({**base, "status": "stopped", "failed": [{"rule": "existing", "pointer": "", "reason": reason}]})
     if not args.kind:
         question = {"pointer": "/kind", "why": "no_kind", "candidates": list(bw.kinds()), "evidence": []}
