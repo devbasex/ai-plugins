@@ -145,8 +145,8 @@ def _bump_file(root: Path, row: dict, plugin: Plugin, old: str, new: str) -> boo
     return _bump_pointer(path, pointer, old, new) if pointer else _bump_lines(path, plugin, old, new)
 
 
-def bump(root: Path, plugin: Plugin, new: str, version_files: Sequence[dict] = ()) -> list[str]:
-    """版を `new` へ書き換え、書き換えたファイル（リポジトリの根から）を返す。`version_files` は宣言の
+def bump(root: Path, plugin: Plugin, new: str, extra_files: Sequence[dict] = ()) -> list[str]:
+    """版を `new` へ書き換え、書き換えたファイル（リポジトリの根から）を返す。`extra_files` は宣言の
     `release.version_store.files` の行（`path` と、あれば `pointer`）。"""
     old = version(root, plugin)
     written = []
@@ -157,5 +157,5 @@ def bump(root: Path, plugin: Plugin, new: str, version_files: Sequence[dict] = (
         written.append(path.relative_to(root).as_posix())
     if _bump_marketplace(root, plugin, old, new):
         written.append(MARKETPLACE.as_posix())
-    written += [row["path"] for row in version_files if _bump_file(root, row, plugin, old, new)]
+    written += [row["path"] for row in extra_files if _bump_file(root, row, plugin, old, new)]
     return written
