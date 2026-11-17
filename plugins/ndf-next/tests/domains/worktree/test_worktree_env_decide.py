@@ -105,6 +105,8 @@ def test_compose_values_and_volumes() -> None:
         ("echo $(cd z; echo > q) > f", ["/r/z/q", "/r/f"]),
         ("sed -i -e 's/a/b/' x y", ["/r/x", "/r/y"]),
         ("sed -n p f", []),
+        ("sed --in-place 's/a/b/' one.md", ["/r/one.md"]),
+        ("sed --in-place=.bak 's/a/b/' one.md", ["/r/one.md"]),
         ("cp -t d a b", ["/r/d"]),
         ("mv a b c", ["/r/c"]),
         ("echo x | tee -a 'q r' > y", ["/r/q r", "/r/y"]),

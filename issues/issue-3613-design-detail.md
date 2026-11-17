@@ -97,7 +97,7 @@ plugins/ndf-next/
 
 改名表を読む関数（`settings/renames.py`）は、`ndf.domains.records.files` と `ndf.contracts.facts` のほかを読まない。そのため、次の読む側がこれを読んでも循環は生じない（`renames.py` は読む側のどれも import しない）。
 
-- `worktree/ndf_settings.py`・`records/mvv.py`・`records/preflight.py`
+- `records/mvv.py`・`records/preflight.py`
 - `checks/spec_docs.py`
 
 `ndf.checks` は層の並びに入らず、今も `ndf.domains` 以外の層を読んでいる。`spec_docs.py` が `ndf.domains.settings.renames` を読むのは、この規則が許す範囲である。承認ゲート（`ndf.progress.gate`）は `ndf.domains` より下の層なので、改名表を読まない（「既存の部品の再利用」の最後の行）。禁止語の規則は用語集のデータと規則のデータ（`rules.json`）を読むだけで、新しく足す漢字の範囲の定数は `words.py` に置き、今の NDF（`plugins/ndf/`）のモジュールを読まない。
@@ -133,7 +133,7 @@ plugins/ndf-next/
 | `plugins/ndf-next/src/ndf/domains/release/declaration.py` | 削除 | `ndf_settings.py` へ移す | — |
 | `plugins/ndf-next/src/ndf/domains/release/ndf_settings.py` | 新設 | リリースの設定（`.ndf/release.json`）を読み、設定した手順を流す（`declaration.py` の中身を改名して移す） | `plugins/ndf-next/contracts/domains/ndf-files.json` |
 | `plugins/ndf-next/src/ndf/domains/worktree/declaration.py` | 削除 | `ndf_settings.py` へ移す | — |
-| `plugins/ndf-next/src/ndf/domains/worktree/ndf_settings.py` | 新設 | worktree の運用の設定（`.ndf/worktree.json` と個人設定）を読み、旧いキーが残れば止まる | `plugins/ndf-next/contracts/domains/ndf-files.json`、`plugins/ndf-next/src/ndf/domains/settings/renames.py` |
+| `plugins/ndf-next/src/ndf/domains/worktree/ndf_settings.py` | 新設 | worktree の運用の設定（`.ndf/worktree.json` と個人設定）を読む。旧いキーは #3672 の旧い設定の検査（`core/branch_strategy_legacy.py`）が止める | `plugins/ndf-next/contracts/domains/ndf-files.json` |
 | `plugins/ndf-next/src/ndf/domains/worktree/merged.py` | 変更 | 対応表どおりに語を改める。スプリントの開始時のスナップショットは #3672 の形（`.ndf/project.json` の `branch_strategy` のコピー）で、旧いキーの検査を足さない | 無し |
 | `plugins/ndf-next/src/ndf/domains/worktree/merged_decide.py` | 変更 | 対応表どおりに語を改める。表の行はキー `release_strategy` と列 `release_strategy` で引く形（#3672 が main へ入れた）のまま | `plugins/ndf-next/contracts/domains/branch-flows.json` |
 | `plugins/ndf-next/src/ndf/domains/worktree/ledger.py` | 削除 | `allocations.py` へ移す | — |
@@ -235,7 +235,7 @@ plugins/ndf-next/
 | `plugins/ndf-next/src/ndf/domains/settings/cli.py` | モジュール `cli` | `main`・`plan`・`apply`（新設）、`_targets`・`_digest`（新設の内部の関数） |
 | `plugins/ndf-next/src/ndf/domains/relay/markers.py` | モジュール `markers` | `MarkerError`・`marker_path`（改名だけ）、`mark`・`take`（変えない） |
 | `plugins/ndf-next/src/ndf/domains/worktree/allocations.py` | クラス `Allocations` | `allocations_path`（改名だけ）、`Allocations` のメソッド（変えない） |
-| `plugins/ndf-next/src/ndf/domains/worktree/ndf_settings.py` | クラス `NdfSettings` | `load`（変更）、`NdfSettingsError`（改名だけ）、`shared_file`・`local_file`・`read_object`（変えない） |
+| `plugins/ndf-next/src/ndf/domains/worktree/ndf_settings.py` | クラス `NdfSettings` | `load`（型の名前だけ変わる。旧いキーの検査は足さない）、`NdfSettingsError`（改名だけ）、`shared_file`・`local_file`・`read_object`（変えない） |
 | `plugins/ndf-next/src/ndf/domains/worktree/merged.py` | モジュール `merged` | `after_merge`（語だけ変わる） |
 | `plugins/ndf-next/src/ndf/domains/worktree/merged_decide.py` | モジュール `merged_decide` | `_flow_row`・`sprint_keep`（引く列とキーの名前だけ） |
 | `plugins/ndf-next/src/ndf/domains/release/ndf_settings.py` | クラス `NdfSettings` | `NdfSettingsError`（改名だけ）、`load`・`run_step`・`production_admin`（変えない） |
@@ -339,7 +339,7 @@ plugins/ndf-next/
 **書くときの JSON の形は、インデント 2・`ensure_ascii=False`・末尾の改行 1 つにする。** 今の NDF と人が書いた `.ndf/` の実物（このリポジトリの `.ndf/worktree.json`）はインデント 2 である。インデントの違うファイルは書き換えの後にインデント 2 へそろい、差分に空白の行が出る。差分の JSON Patch には空白の変化が載らない。そのため `plan` は、差分の各ファイルの `items` に「インデントがそろう」を 1 行添える。添えるのは、`json.dumps(data, indent=2, ensure_ascii=False) + "\n"` と今の中身が違うときである。
 
 - 繰り返しの終わる条件: `check` はプラグインの下の文字のファイルを 1 回ずつ読み、各ファイルの行を 1 回ずつ見る（今と同じ）。`migrate` は改名表の行を 1 回ずつ当て、`*` は配列の要素の数だけ広げる
-- 計算量の注意: 禁止語の語の数は、廃止した語の登録で今の数十から数百へ増える。正規表現は語を `|` で並べた 1 つにまとめ、ファイルの行ごとに 1 回だけ当てる（今と同じ）。語ごとにファイルを読み直さない。改名表は 4 行、設定の `versions` は MVV の改訂の回数（数十）で、計算量の注意は無い
+- 計算量の注意: 禁止語の語の数は、廃止した語の登録で今の数十から数百へ増える。正規表現は語を `|` で並べた 1 つにまとめ、ファイルの行ごとに 1 回だけ当てる（今と同じ）。語ごとにファイルを読み直さない。改名表のうち `ndf settings migrate` が扱う行は 3 行、設定の `versions` は MVV の改訂の回数（数十）で、計算量の注意は無い
 
 ## 内部のデータと定数
 
@@ -383,7 +383,6 @@ plugins/ndf-next/
 | --- | --- | --- | --- |
 | `check` | 当たった語ごとに、ファイル・行・「「<語>」: <理由>」 | `ndf check` の結果 JSON の指摘（`banned-word`） | 行の本文（語と理由だけを出す。今と同じ） |
 | `ensure_schema` | 版 1 の表で止まった理由と、パスワードを隠した接続先 | 結果 JSON の `stopped` の本文（例外の文） | 接続 URL のパスワード（`render_as_string(hide_password=True)`。今の版が新しいときと同じ） |
-| `ensure_schema` | SQLite のバックアップが取れなかった理由 | ログの `warning` と結果 JSON の警告（今と同じ） | 無し（パスと例外の文だけ） |
 | `plan` | ファイルごとの ID・相対パス・JSON Patch の操作の列・旧いキーの位置の数・インデントがそろうか | 結果 JSON の `items`（`kind: settings-file`）。差分のハッシュは `metrics.digest`、承認の後に打つコマンドは `next` | 設定の中身の全文（差分の操作の列だけを出す。MVV の本文のハッシュなど、改名と関わらない値を出さない） |
 | `apply` | 書いたファイルの ID・相対パス・当てた操作の数 | 結果 JSON の `items` | 設定の中身の全文 |
 | `apply` | ハッシュの不一致・スキーマの誤り | 結果 JSON の `stopped` の本文。スキーマの誤りは位置と文 | 渡されたハッシュの値の全文（先頭 12 桁だけを出し、示し直しを促す） |
@@ -423,11 +422,11 @@ plugins/ndf-next/
 | `pattern` | 「版」を単独の語に持つと、「版の記録」に当たる（受け入れ条件 9） | 「開発版」「出版」「版数」に当たらない。「問い合わせ」「枠組み」「目印」に当たらない。行の先頭と末尾の「版」に当たる | 単独の条件を外すと「開発版」に当たって落ちる |
 | `_part` | 単独の語は両側に漢字でない条件が付く | ASCII の語を単独に持っても、単独の条件が先に当たる | — |
 | `check` | Skill の本文の「副命令」の 1 行に指摘が 1 件ある（受け入れ条件 8） | `words.examples` に挙げたファイルの語は指摘にならない | 用語集の読み込みの失敗は `banned_words` の行と同じ |
-| `ensure_schema` | 表が無い接続先で表を作り、版 2 を書く | 版 2 の表では何もしない | 版 1 の表を持つ接続先（PostgreSQL の代わりに `store.path` を `None` にした SQLite の接続で模す）で `StoreBroken` を送出し、表の版も列も変えない。バックアップが取れないと警告を残して続ける |
+| `ensure_schema` | 表が無い接続先で表を作り、版 2 を書く | 版 2 の表では何もしない | 保存先の外を指した SQLite（`store.path` あり）と PostgreSQL の両方で、版 1 の表は版も列も変えずに `StoreBroken` を送出する |
 | `STORE_FORMAT` を使う保存先の用意 | 形の番号 2 の保存先はそのまま使う | 形の番号 1 の保存先は `<名前>.v1-<日付>` へ退避され、新しい保存先が作られる（`test_durable_store.py` の今のテストが番号 `STORE_FORMAT - 1` で確かめる） | — |
-| `renames.load` | 4 行を表の並びで返し、親のキーの行が子の行より前にある。新しいキーの位置がどれも新しいスキーマにあり、旧いキーの位置がどれも無く、`old` と `new` が同じ行が無い（I9。スキーマの `properties` を位置の階層ごとにたどる。`*` は `items`） | `values` の無い行は空の対応を持つ | 表の形を壊した写し（`ndf.contracts.use_dir` で差し替えた置き場）で `FactsError` を送出する |
-| `legacy_keys` | 旧いキーを持つ worktree の設定（改名表の `old` と `values` のキーから組み立てる）で 1 件、`versions` が 2 つで両方に `vet` を持つ未移行の MVV の設定で、要素ごとの親の位置（`/versions/0/vet`・`/versions/1/vet`）の 2 件を返す。`validation` の下に `verdict` と `at` が残る MVV の設定で、子の行の位置の 2 件を返す | 新しいキーだけの設定で 0 件。表に無い `file` で 0 件。`versions` が空の配列で 0 件。階層に `~1` を含む位置を戻せる | `versions` が配列でない設定で例外を出さずに 0 件 |
-| `migrate` | 旧いキーの worktree の設定と MVV の設定が、要求の受け入れ条件 12 の値になり、新しいスキーマに通り、`legacy_keys` が 0 件。操作の列が `test`・`move`・`replace` だけで、`move` と `replace` の直前に元の位置の今の値を持つ `test` がある | 改名したキーがオブジェクトの中の元の並びの位置にある。表に無いキー（`revise_after`・`reviews`・`body`）と `values` に無い値は変わらない。入力の `data` が変わらない | 同じオブジェクトに旧いキーと新しいキーの両方があると、旧いキーを残して操作を足さない |
+| `renames.load` | 3 行（`.ndf/mvv.json` の行）を表の並びで返し、親のキーの行が子の行より前にある。新しいキーの位置がどれも新しいスキーマにあり、旧いキーの位置がどれも無く、`old` と `new` が同じ行が無い（I9。スキーマの `properties` を位置の階層ごとにたどる。`*` は `items`） | `values` の無い行は空の対応を持つ | 表の形を壊した写し（`ndf.contracts.use_dir` で差し替えた置き場）で `FactsError` を送出する |
+| `legacy_keys` | `versions` が 2 つで両方に `vet` を持つ未移行の MVV の設定で、要素ごとの親の位置（`/versions/0/vet`・`/versions/1/vet`）の 2 件を返す。`validation` の下に `verdict` と `at` が残る MVV の設定で、子の行の位置の 2 件を返す | 新しいキーだけの設定で 0 件。表に無い `file` で 0 件。`versions` が空の配列で 0 件。階層に `~1` を含む位置を戻せる | `versions` が配列でない設定で例外を出さずに 0 件 |
+| `migrate` | 旧いキーの MVV の設定が、要求の受け入れ条件 12 の値になり、新しいスキーマに通り、`legacy_keys` が 0 件。操作の列が `test`・`move`・`replace` だけで、`move` と `replace` の直前に元の位置の今の値を持つ `test` がある | 改名したキーがオブジェクトの中の元の並びの位置にある。表に無いキー（`revise_after`・`reviews`・`body`）と `values` に無い値は変わらない。入力の `data` が変わらない | 同じオブジェクトに旧いキーと新しいキーの両方があると、旧いキーを残して操作を足さない |
 | `legacy_detail` | 旧いキーの残る設定で、ファイルの相対パス・すべての `old` → `new`・`ndf settings migrate --root <root>` を含む文を返す | 旧いキーの無い設定で `None` | — |
 | `plan` | 旧いキーを持つ `.ndf/mvv.json` のリポジトリで `status: gate`、ファイルごとの差分、64 桁のハッシュ、`--apply` 付きの `next` を返し、ファイルのバイト列が変わらない | `.ndf/` の無いリポジトリと移行済みのリポジトリで `status: ok`。同じ中身を 2 回示すと同じハッシュ。インデント 4 の設定で「インデントがそろう」の行が出る | JSON でない設定で `invalid`（終了コード 2）、ほかのファイルの差分を出さない。読めないファイルで `invalid` |
 | `apply` | `plan` が返したハッシュで打つと `.ndf/mvv.json` が受け入れ条件 12 の値になり（`branch_flow` は #3672 の `ndf project branch-strategy migrate` のテストが確かめる）、新しいスキーマに通る。もう一度 `plan` を打つと差分が 0 件（I10） | 書いたファイルがインデント 2・末尾の改行 1 つ。差分の無いファイルは書かない（更新時刻が変わらない） | `plan` の後に設定を変えてから打つと `refused`（終了コード 1）で、どのファイルも変わらない。変える値が移すだけの値（`vet` の `at`）でも同じ。差分が 0 件のときに打つと `refused`。改名と関わらない誤り（型の違う値）を持つ設定で `refused` になり、どのファイルも変わらない。2 つ目のファイルの書き込みを失敗させると `invalid` で、書き終えたファイルの一覧が本文にある |

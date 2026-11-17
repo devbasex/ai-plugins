@@ -343,7 +343,7 @@ def command_targets(words: list[str]) -> list[str]:
 
 def _sed_kind(a: str) -> str:
     """sed の引数 1 つの種類: `inplace`・`script_next`（次の語が台本）・`script`・`flag`・`operand`。"""
-    if a == "--in-location" or a.startswith("--in-location="):
+    if a == "--in-place" or a.startswith("--in-place="):
         return "inplace"
     if a in ("-e", "-f", "--expression", "--file"):
         return "script_next"
