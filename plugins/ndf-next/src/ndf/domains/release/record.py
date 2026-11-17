@@ -22,7 +22,7 @@ from typing import Any, NamedTuple
 from ndf import contracts
 from ndf.adapters.github import GitHub, Pull
 from ndf.adapters.publish import Publisher
-from ndf.domains.release import included_decide, record_decide, version_decide
+from ndf.domains.release import included_decide, names_decide, record_decide
 
 # リリース後テストの記録のスキーマ
 VERIFICATION_SCHEMA = contracts.schema_path("release-verification")
@@ -55,7 +55,7 @@ class Records(NamedTuple):
     verifications: tuple[dict[str, Any], ...]
 
 
-def included_of(hub: GitHub, pull: Pull, production: str) -> list[int]:
+def included_of(hub: GitHub, pull: Pull, production: str, formats: names_decide.NameFormats = names_decide.NameFormats(None)) -> list[int]:
     """リリースの PR `pull` に含めた PR の番号（小さい順）。マージコミットが読めなければ `RecordError`。
 
     PR のコミットは `pulls/<番号>/commits`（250 件で切れる）ではなく、マージコミットの第 1 親（マージ前の本番
@@ -67,16 +67,22 @@ def included_of(hub: GitHub, pull: Pull, production: str) -> list[int]:
     if not parents:
         raise RecordError(f"#{pull.number} のマージコミット {pull.merge_sha} が親を持たない")
     commits = hub.compare_commits(parents[0], pull.head_sha)
-    return included_decide.numbers(record_decide.first_parent_subjects(commits, pull.head_sha), (production,))
+    return included_decide.numbers(record_decide.first_parent_subjects(commits, pull.head_sha), (production,), formats.is_release_branch)
 
 
-def released(hub: GitHub, number: int, production: str) -> tuple[Pull, record_decide.Record]:
-    """本番ブランチへマージしたリリースの PR と、そのバージョンのリリース記録。そうでなければ `NotReleased`。"""
+def released(
+    hub: GitHub, number: int, production: str, formats: names_decide.NameFormats = names_decide.NameFormats(None)
+) -> tuple[Pull, record_decide.Record]:
+    """本番ブランチへマージしたリリースの PR と、そのバージョンのリリース記録。そうでなければ `NotReleased`。
+
+    バージョンは head の名前をリリースブランチの書式（`formats`。省けば既定の書式）で読む。書式に合わなければ `NotReleased`。"""
     pull = hub.pull(number)
     if not pull.merged or pull.base_ref != production:
         raise NotReleased(f"#{number} は {production} へマージしたリリースの PR でない（{pull.base_ref}・merged={pull.merged}）")
-    version = version_decide.version_of_branch(pull.head_ref)
-    return pull, record_decide.Record(version, number, tuple(included_of(hub, pull, production)))
+    if not formats.is_release_branch(pull.head_ref):
+        raise NotReleased(f"#{number} の head {pull.head_ref} はリリースブランチ（{formats.branch}）でない")
+    version = formats.version_of_branch(pull.head_ref)
+    return pull, record_decide.Record(version, number, tuple(included_of(hub, pull, production, formats)))
 
 
 def _trusted_bodies(hub: GitHub, number: int) -> list[str]:
@@ -93,9 +99,11 @@ def _require_trusted_writer(hub: GitHub) -> None:
         )
 
 
-def write(hub: GitHub, number: int, production: str) -> tuple[record_decide.Record, list[Written]]:
+def write(
+    hub: GitHub, number: int, production: str, formats: names_decide.NameFormats = names_decide.NameFormats(None)
+) -> tuple[record_decide.Record, list[Written]]:
     """リリースの PR `number` に含めた PR の各々へ、まだ無ければリリース記録を書く。書く token が信用されなければ `RecordError`。"""
-    _pull, made = released(hub, number, production)
+    _pull, made = released(hub, number, production, formats)
     _require_trusted_writer(hub)
     publisher = Publisher(hub)
     body = record_decide.render_record(made)

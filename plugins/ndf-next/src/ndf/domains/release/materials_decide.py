@@ -6,6 +6,8 @@
   レーンの記録を読まない（並列リリースでも同じ値になる。#2655）。実行されなかったチェックは内訳に出す（#3169）
 - 「利用者向けの変化」はリリース対象のファイルの変化だけで決める。PR 本文の文は読まない（#2601）
 - 「指示書と設定の変化」は指示書と `.ndf/` の下の変化を並べる（C7 の変更を人が見られる。#3110）
+- 「届き方」は設定のリリースの形の行（リリースの形の表の `reach`）を出す。バージョンを持たない保存先（`none`）では
+  「バージョン」のセクションを出さない（#3615）
 """
 
 from __future__ import annotations
@@ -13,7 +15,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import NamedTuple
 
-from ndf.domains.release import approval_decide, changes_decide, checks_decide, version_decide
+from ndf.domains.release import approval_decide, changes_decide, checks_decide, forms_decide, version_decide
 
 
 class PullFact(NamedTuple):
@@ -33,12 +35,18 @@ class Facts(NamedTuple):
     changes: tuple[changes_decide.Change, ...]
     instructions: tuple[str, ...]
     head: str
+    form: forms_decide.Form
+    versioned: bool
 
 
-def _plugins(planned: Sequence[version_decide.Planned]) -> list[str]:
+# 範囲の起点の SHA を承認資料に出す桁数
+SHORT_SHA = 12
+
+
+def _versions(planned: Sequence[version_decide.Planned]) -> list[str]:
     if not planned:
-        return ["- バージョンを上げるプラグインは無い"]
-    return [f"- {p.plugin}: {p.current} → {p.next}" for p in planned]
+        return ["- バージョンを上げる単位は無い"]
+    return [f"- {p.plugin}: {p.current} → {p.next}（範囲の起点 {p.since[:SHORT_SHA]}）" for p in planned]
 
 
 def _pull_line(p: PullFact) -> str:
@@ -76,14 +84,16 @@ def checks_green(facts: Facts) -> bool:
 
 def render(facts: Facts) -> str:
     """承認資料の本文。"""
+    versions = ["## バージョン", *_versions(facts.planned), ""] if facts.versioned else []
     lines = [
         f"# リリースの承認資料（{facts.channel}）",
         "",
         f"{approval_decide.HEAD_LINE} `{facts.head}`",
         "",
-        "## バージョン",
-        *_plugins(facts.planned),
+        "## 届き方",
+        forms_decide.reach_line(facts.form),
         "",
+        *versions,
         "## 含む PR",
         *_pulls(facts.pulls),
         "",

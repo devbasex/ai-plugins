@@ -38,7 +38,7 @@ from ndf.adapters.publish import Publisher
 from ndf.contracts import facts
 from ndf.core import json_pointer
 from ndf.core.branch_strategy import TRAILER_HEAD, TRAILER_PR, TRAILER_TIP, Strategy
-from ndf.domains.release import approval_decide, plugins, route_decide, trail, version_decide
+from ndf.domains.release import approval_decide, names_decide, plugins, route_decide, trail
 from ndf.domains.release.plugins import CLAUDE_MANIFEST, MARKETPLACE, PLUGINS_DIR
 
 # 規則の種類（必須のチェック）
@@ -273,11 +273,16 @@ def manifest_paths(strategy: Strategy, show: Callable[[str], Optional[str]]) -> 
     return [f"{PLUGINS_DIR}/{name}/{manifest}", manifest]
 
 
+# JSON の位置で版数を持つ保存先の種類（ほかの種類は版数の衝突を確かめない）
+JSON_STORES = ("plugin", "json")
+
+
 def version_rows(strategy: Strategy, show: Callable[[str], Optional[str]]) -> list[tuple[str, str]]:
-    """版数を引く候補（ファイルのパスと JSON Pointer）。保存先が `none` なら空。`plugin` の保存先の解決は `show` で
-    マーケットプレイスの登録を読むため、`land` 1 回につき本番の HEAD で 1 度だけ求めて使い回す。"""
+    """版数を引く候補（ファイルのパスと JSON Pointer）。JSON の位置を持たない保存先（`pubspec`・`tag`・`none`）なら空
+    （#3615 の決定 11。保存先のアダプターへ移すのは #3572）。`plugin` の保存先の解決は `show` でマーケットプレイスの登録を読むため、
+    `land` 1 回につき本番の HEAD で 1 度だけ求めて使い回す。"""
     store = strategy.version_store
-    if store["kind"] == "none":
+    if store["kind"] not in JSON_STORES:
         return []
     if store["kind"] == "plugin":
         return [(p, "/version") for p in manifest_paths(strategy, show)]
@@ -707,7 +712,7 @@ class Lander:
         if route.release_pr and route.bump:
             # 版上げの PR はリリースのブランチから出す。`production_pr` ではスプリントの PR が本番の PR を兼ね、
             # 版数を持たない `merge_base_branch`（bump が偽）ではベースブランチから本番への PR そのものを入れる
-            version_decide.version_of_branch(pull.head_ref)
+            names_decide.formats_of(self.strategy.section["release"]).version_of_branch(pull.head_ref)
         if pull.base_ref != self.production:
             return self._merge(pull, deadline, SYNC_METHOD)
         landing = self.landing

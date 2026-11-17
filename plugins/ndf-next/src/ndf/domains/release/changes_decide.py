@@ -1,8 +1,9 @@
-"""変わったファイルから、プラグインごとの変化と承認資料に載せる変化を決める（純粋な関数）。
+"""変わったファイルから、バージョンの単位ごとの変化と承認資料に載せる変化を決める（純粋な関数）。
 
-- プラグインの保存先はマーケットプレイスの登録（`plugins.Plugin.dir`）から渡され、名前で決め打たない（#1756）
-- プラグインの下の変化を、リリース対象の変化とリリース対象に関わらない変化（設定 `undistributed` の形に当たるファイル。既定は
-  テスト）に分ける。リリース対象に関わらない変化だけのプラグインは、設定 `bump_undistributed` が真のときだけバージョンを上げる（#2217）
+- 単位の保存先は保存先のアダプター（`version_store.Unit.dir`）から渡され、名前で決め打たない（#1756）。空ならリポジトリ全体
+- 単位の下の変化を、リリース対象の変化とリリース対象に関わらない変化に分ける。リリース対象に関わらないファイルの既定は
+  テストのファイルの表（`contracts/domains/test-files.json`。役割を問わずすべての行）から作り、設定 `undistributed` の形を足す
+  （#3615 の決定 5）。リリース対象に関わらない変化だけの単位は、設定 `bump_undistributed` が真のときだけバージョンを上げる（#2217）
 - 「利用者向けの変化なし」は、リリース対象のファイルの変化が 1 件も無いことだけで決める。PR 本文の文は読まない（#2601）
 - 指示書の変化は、指示書のファイル（事実の表 `instruction-files`）と設定の保存先（`.ndf/`）の下の変化を並べる。
   `.ndf/` の設定の変化（C7）も人が承認資料で見られる（#3110）
@@ -10,7 +11,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from typing import NamedTuple
 
 import pathspec
@@ -18,14 +19,14 @@ import pathspec
 from ndf import identity
 from ndf.contracts import facts
 
-# リリース対象に関わらないファイルの既定の形（プラグインの根からの gitignore の形）
-DEFAULT_UNDISTRIBUTED = ("tests/", "**/tests/", "**/test_*.py", "**/conftest.py")
+# テストのファイルの表（リリース対象に関わらないファイルの既定）
+TEST_FILES = "test-files"
 # 指示書のファイルの表
 INSTRUCTION_FILES = "instruction-files"
 
 
 class Change(NamedTuple):
-    """1 つのプラグインの変化。パスはリポジトリの根から。"""
+    """1 つのバージョンの単位の変化。パスはリポジトリの根から。"""
 
     plugin: str
     distributed: tuple[str, ...]
@@ -36,27 +37,36 @@ class Change(NamedTuple):
         return bool(self.distributed or self.undistributed)
 
 
+def default_undistributed() -> tuple[str, ...]:
+    """テストのファイルの表のすべての行から作る、リリース対象に関わらないファイルの gitignore の形。
+
+    保存先の行（`dir`）は `<名前>/`（どの深さのそのディレクトリの下も当たる）、名前の行は fnmatch の形のまま（どの深さの
+    そのファイル名にも当たる）。"""
+    return tuple(f"{r['pattern']}/" if r["where"] == "dir" else r["pattern"] for r in facts.rows(TEST_FILES))
+
+
 def _under(path: str, directory: str) -> str | None:
-    """`path` が `directory` の下なら、その中の相対パス。下でなければ None。"""
+    """`path` が `directory` の下なら、その中の相対パス。下でなければ None。`directory` が空ならリポジトリの根の下（そのまま）。"""
+    if not directory:
+        return path
     prefix = directory.rstrip("/") + "/"
     return path[len(prefix) :] if path.startswith(prefix) else None
 
 
-def split(paths: Iterable[str], plugin: str, directory: str, undistributed: Sequence[str]) -> Change:
-    """1 つのプラグインの下の変化を、リリース対象とそれ以外に分ける。"""
-    spec = pathspec.GitIgnoreSpec.from_lines(undistributed)
+def split(paths: Iterable[str], unit: str, directory: str, extra: Sequence[str]) -> Change:
+    """1 つの単位の下の変化を、リリース対象とそれ以外に分ける。リリース対象外の形は既定と `extra`（設定の形）の和。"""
+    spec = pathspec.GitIgnoreSpec.from_lines([*default_undistributed(), *extra])
     inside = [(p, rel) for p in sorted(set(paths)) if (rel := _under(p, directory)) is not None]
     return Change(
-        plugin,
+        unit,
         tuple(p for p, rel in inside if not spec.match_file(rel)),
         tuple(p for p, rel in inside if spec.match_file(rel)),
     )
 
 
-def changes(paths: Iterable[str], plugin_dirs: dict[str, str], undistributed: Sequence[str]) -> list[Change]:
-    """プラグインごとの変化（変化のあるプラグインだけ。名前の順）。"""
-    listed = sorted(set(paths))
-    got = [split(listed, name, plugin_dirs[name], undistributed) for name in sorted(plugin_dirs)]
+def changes(paths_by_unit: Mapping[str, Sequence[str]], unit_dirs: Mapping[str, str], extra: Sequence[str]) -> list[Change]:
+    """単位ごとに、その単位の範囲の変わったファイルを分けた変化（変化のある単位だけ。名前の順）。"""
+    got = [split(paths_by_unit[name], name, unit_dirs[name], extra) for name in sorted(unit_dirs)]
     return [c for c in got if c.touched]
 
 

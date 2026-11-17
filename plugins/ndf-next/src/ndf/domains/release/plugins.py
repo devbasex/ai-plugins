@@ -20,6 +20,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from ndf.adapters import git as git_mod
 from ndf.core import json_pointer
 
 # マーケットプレイスの登録（リポジトリの根から）
@@ -103,6 +104,18 @@ def version(root: Path, plugin: Plugin) -> str:
     if len(set(seen.values())) != 1:
         raise PluginsError(f"{plugin.name} のバージョンがプラグインの定義の間でそろわない: {seen}")
     return next(iter(seen.values()))
+
+
+def version_at(repo_git: git_mod.Git, ref: str, plugin: Plugin) -> str | None:
+    """`ref` のプラグインの定義（先頭）のバージョン。`ref` にまだ定義が無ければ None。定義が JSON として読めなければ `PluginsError`。"""
+    path = f"{plugin.dir}/{MANIFESTS[0].as_posix()}" if plugin.dir else MANIFESTS[0].as_posix()
+    if not repo_git.run("ls-tree", "--name-only", git_mod.END_OF_OPTIONS, ref, path).strip():
+        return None
+    try:
+        value = json.loads(repo_git.run("show", git_mod.END_OF_OPTIONS, f"{ref}:{path}")).get("version")
+    except (json.JSONDecodeError, AttributeError) as exc:
+        raise PluginsError(f"{ref} の {path} を読めない: {exc}") from None
+    return value if isinstance(value, str) else None
 
 
 def _token(version_text: str) -> re.Pattern[str]:

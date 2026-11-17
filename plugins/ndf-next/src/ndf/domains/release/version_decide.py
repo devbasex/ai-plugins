@@ -10,7 +10,7 @@
 出し済みのバージョン（本番ブランチのバージョンとタグのバージョンのうち大きい方）より大きくない次のバージョンは、出し済みのバージョンを同じ幅で上げたバージョンへ
 繰り上げる（`clear_of`。既にある版数で組まない。#2554）。
 
-リリースのブランチの名前・タグの名前もここでバージョンから作る（作り方を 1 か所に置く）。
+リリースブランチ・タグ・CHANGELOG の見出しの名前は、設定の書式から `names_decide` が作る。
 """
 
 from __future__ import annotations
@@ -27,10 +27,6 @@ PRODUCTION, DEV = "production", "dev"
 CHANNELS = (PRODUCTION, DEV)
 # 開発版の接尾辞の名前（`-dev.<n>`）
 DEV_LABEL = "dev"
-# リリースのブランチの接頭辞（`release/v<バージョン>`）
-BRANCH_PREFIX = "release/v"
-# タグの名前の区切り（`<プラグイン名>--v<バージョン>`。今のタグの形と同じ）
-TAG_SEPARATOR = "--v"
 
 
 class VersionError(ValueError):
@@ -38,11 +34,12 @@ class VersionError(ValueError):
 
 
 class Planned(NamedTuple):
-    """1 つのプラグインの版上げの計画。"""
+    """1 つのバージョンの単位の版上げの計画。`since` は範囲の起点（その単位の変化を数えた差分の古い側の端のコミット）。"""
 
     plugin: str
     current: str
     next: str
+    since: str
 
 
 def parse(text: str) -> semver.Version:
@@ -95,30 +92,6 @@ def next_version(current: str, level: str, channel: str) -> str:
     if channel == DEV:
         return dev_next(current, level)
     raise VersionError(f"チャネルは {', '.join(CHANNELS)} のどれか（渡された値: {channel!r}）")
-
-
-def branch_of(version: str) -> str:
-    """リリースのブランチの名前。"""
-    return f"{BRANCH_PREFIX}{parse(version)}"
-
-
-def version_of_branch(branch: str) -> str:
-    """リリースのブランチの名前からバージョンを読む。リリースのブランチでなければ `VersionError`。"""
-    if not branch.startswith(BRANCH_PREFIX):
-        raise VersionError(f"リリースのブランチ（{BRANCH_PREFIX}<バージョン>）でない: {branch!r}")
-    return str(parse(branch[len(BRANCH_PREFIX) :]))
-
-
-def tag_of(plugin: str, version: str) -> str:
-    """基底のバージョンのタグの名前。"""
-    return f"{plugin}{TAG_SEPARATOR}{base_of(version)}"
-
-
-def version_of_tag(plugin: str, tag: str) -> Optional[str]:
-    """そのプラグインのタグ（`<プラグイン名>--v<バージョン>`）のバージョン。そのプラグインのタグでない・バージョンとして読めなければ None。"""
-    prefix = f"{plugin}{TAG_SEPARATOR}"
-    text = tag.removeprefix(prefix)
-    return text if text != tag and semver.Version.is_valid(text) else None
 
 
 def highest(versions: Iterable[str]) -> Optional[str]:

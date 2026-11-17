@@ -6,7 +6,7 @@
 | キー | 意味 | 既定 |
 | --- | --- | --- |
 | `steps` | リリースの段階で流すコマンド（`name`・`stage`・`command`・`writes`・`timeout_seconds`）。`command` の `{version}` は出すバージョンに置き換える | 無し |
-| `undistributed` | リリース対象に関わらないファイルの形（プラグインの根からの gitignore の形） | テスト（`changes_decide.DEFAULT_UNDISTRIBUTED`） |
+| `undistributed` | リリース対象に関わらないファイルの形（バージョンの単位の根からの gitignore の形）。テストのファイルの表から作る既定（`changes_decide.default_undistributed`）へ足す | 無し（既定だけ） |
 | `bump_undistributed` | リリース対象に関わらない変化だけのプラグインもバージョンを上げるか（#2217） | 偽 |
 | `changelog` | CHANGELOG のファイル（リポジトリの根から） | `CHANGELOG.md` |
 
@@ -24,7 +24,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ndf.contracts import facts
-from ndf.domains.release import changes_decide
 
 # 読める設定のバージョン
 READABLE_VERSION = 1
@@ -56,7 +55,8 @@ class Step:
 @dataclass(frozen=True)
 class NdfSettings:
     steps: tuple[Step, ...] = ()
-    undistributed: tuple[str, ...] = changes_decide.DEFAULT_UNDISTRIBUTED
+    # 既定（テストのファイルの表）へ足す形。既定はここに写さない（#3615 の決定 5）
+    undistributed: tuple[str, ...] = ()
     bump_undistributed: bool = False
     changelog: str = "CHANGELOG.md"
     raw: dict = field(default_factory=dict, compare=False, repr=False)
@@ -108,7 +108,7 @@ def _parse(raw: dict) -> NdfSettings:
         raise NdfSettingsError("bump_undistributed は真偽、changelog は文字列")
     return NdfSettings(
         tuple(_step(s) for s in steps),
-        _strings(raw, "undistributed", changes_decide.DEFAULT_UNDISTRIBUTED),
+        _strings(raw, "undistributed", ()),
         flag,
         changelog,
         raw,
