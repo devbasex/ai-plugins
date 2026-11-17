@@ -34,6 +34,7 @@ from urllib.parse import quote
 
 from ndf.adapters import ci
 from ndf.adapters.github import BYPASS_ORDER, MERGE_COMMIT, MERGE_QUEUE_PENDING, GitHub, GitHubError, MergeOutcome, Pull, RuleFacts, text_of
+from ndf.adapters.publish import Publisher
 from ndf.contracts import facts
 from ndf.core import branch_strategy_legacy
 from ndf.core.branch_strategy import Strategy
@@ -503,7 +504,7 @@ class Lander:
                 f"本番ブランチ {self.production} が確かめた先端から進んだ（早送りでない）。本番の PR を作り直し、{REAPPROVE}",
             )
         if commit == "squash":
-            self.hub.rest("POST", f"/repos/{repo}/issues/{pull.number}/comments", {"body": f"{sha} で本番ブランチへ入れた（squash）"})
+            Publisher(self.hub).comment(pull.number, f"{sha} で本番ブランチへ入れた（squash）")
             self.hub.rest("PATCH", f"/repos/{repo}/pulls/{pull.number}", {"state": "closed"})
         return Landed(True, None, f"#{pull.number} を {sha[:12]} で本番ブランチへ早送りで入れた", production_sha=sha)
 
@@ -630,7 +631,9 @@ class Lander:
         pull = self.hub.pull(number)
         if pull.merged:
             return self._resume_merged(number, pull, deadline)
-        version_decide.version_of_branch(pull.head_ref)
+        if route_decide.route_of(self.strategy).release_pr:
+            # 版上げの PR はリリースのブランチから出す。`production_pr` ではスプリントの PR が本番の PR を兼ねる
+            version_decide.version_of_branch(pull.head_ref)
         if pull.base_ref != self.production:
             return self._merge(pull, deadline, SYNC_METHOD)
         landing = self.landing

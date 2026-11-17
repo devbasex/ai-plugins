@@ -1,0 +1,256 @@
+"""リリースとマージをブランチ戦略の宣言で動かす（#3672・#3681・#3720）。
+
+代表の 5 種の宣言（`tests/fixtures/branch_strategy/`。10 系のテストも同じファイルを読む）から、版上げの PR の経路と
+マージの主体と方式が 10 系（`release_lib/strategy_route.route_of`・`release_lib/land.py`）と同じ値になること、
+承認の後に head が動いたら入れないこと（#3661）、証跡の書き手が 1 つで今の head の答えがあれば問わないこと（#3671）を確かめる。
+"""
+
+from __future__ import annotations
+
+import base64
+import json
+from dataclasses import dataclass, field
+from typing import Any
+
+import pytest
+
+from ndf.adapters.github import Authored, RuleFacts
+from ndf.core.branch_strategy import Strategy
+from ndf.domains.release import approval_decide, land, route_decide, trail
+
+from ._fakes import KINDS, FakeHub, pull, section, strategy
+
+H1, H2, TIP = "1" * 40, "2" * 40, "c" * 40
+
+# 種類: (スプリントの PR の宛先, 版上げの PR の起点（None は無し）, 宛先, 同期の PR, 主体, 方式)。10 系の test_branch_strategy.EXPECT と同じ
+EXPECT = {
+    "web-develop": ("develop", "develop", "main", True, "ndf", "direct"),
+    "web-trunk": ("main", None, "main", False, "ndf", "merge-queue"),
+    "mobile": ("develop", "main", "main", True, "ndf", "direct"),
+    "docs": ("main", None, "main", False, "ndf", "strict"),
+    "plugin": ("main", "main", "main", False, "ndf", "merge-queue"),
+}
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_five_kinds_route_and_landing(kind: str) -> None:
+    """受け入れ条件 1（#3681）: 5 種の宣言から、リリースの PR とマージの主体と方式を 10 系と同じ値で返す。"""
+    s = strategy(kind)
+    sprint_to, source, target, sync, actor, method = EXPECT[kind]
+    assert s.pr_target("sprint") == sprint_to and s.pr_target("release") == "main"
+    r = route_decide.route_of(s)
+    assert (r.source if r.release_pr else None) == source and r.target == target and r.sync is sync
+    landing = route_decide.landing_of(s)
+    assert (landing.actor, landing.method, landing.admin) == (actor, method, False)
+    # 人へ問う承認は正式版 1 本につき 1 回（リリース承認ゲートだけ。ruleset の承認を求めない）
+    assert s.section["approval"]["via"] == "gate"
+    assert trail.trail_writer(s, merged_by_human=False) == trail.WRITER_ANSWER
+
+
+def test_route_without_version_store_is_the_pr_itself() -> None:
+    s = section("web-develop")
+    s["release"].update(version_store={"kind": "none"}, tag=None, github_release=False)
+    r = route_decide.route_of(Strategy(s))
+    assert r.release_pr and not r.bump and (r.source, r.target) == ("develop", "main")
+
+
+def test_admin_only_with_direct() -> None:
+    """I6: 迂回は `method: direct` で `admin: true` のときだけ。"""
+    assert route_decide.landing_of(strategy("web-develop", admin=True)).admin
+    assert not route_decide.landing_of(strategy("plugin", admin=True)).admin
+
+
+# --- 本番ブランチの ruleset とセクションの食い違い（I10）と、方式ごとの確かめ（I7） ----------------------------
+
+
+def facts(**kw: Any) -> RuleFacts:
+    base: dict[str, Any] = {"present": True, "approvals": 0, "queue": False, "up_to_date": False, "bypass": None}
+    return RuleFacts(**{**base, **kw})
+
+
+def test_ruleset_mismatch() -> None:
+    plugin = strategy("plugin")
+    assert land.ruleset_mismatch(plugin, facts(queue=True)) == []
+    assert land.ruleset_mismatch(plugin, facts(queue=True, approvals=1))[0]["key"] == "approval.via"
+    assert land.ruleset_mismatch(plugin, facts(queue=False))[0]["key"] == "merge.method"
+    assert land.ruleset_mismatch(plugin, facts(present=False))[0]["key"] == "merge.method"
+    assert land.ruleset_mismatch(plugin, facts(queue=True, queue_merge_method="MERGE")) == []
+    assert land.ruleset_mismatch(plugin, facts(queue=True, queue_merge_method="SQUASH"))[0]["key"] == "merge.commit"
+    assert land.ruleset_mismatch(strategy("docs"), facts(present=False)) == []
+    assert land.ruleset_mismatch(strategy("docs"), facts())[0]["ruleset"] == "最新の取り込みを求めない"
+    admin = strategy("web-develop", admin=True)
+    assert land.ruleset_mismatch(admin, facts(approvals=1, bypass="pull_requests_only")) == []
+    assert land.ruleset_mismatch(admin, facts(approvals=1, bypass="exempt"))[0]["key"] == "merge.admin"
+
+
+def test_check_production_pr() -> None:
+    plugin, docs, dev = strategy("plugin"), strategy("docs"), strategy("web-develop")
+    prod = {"tip": TIP, "version": "1.0.0"}
+    assert land.check_production_pr(plugin, {"bump": True, "cut_version": "1.0.0", "number": 1}, prod, []) is None
+    assert land.check_production_pr(plugin, {"bump": True, "cut_version": "0.9.0", "number": 1}, prod, [])
+    assert land.check_production_pr(plugin, {"bump": True, "cut_version": "1.0.0", "number": 1}, prod, [{"number": 2, "bump": True}])
+    assert land.check_production_pr(plugin, {"bump": False}, prod, []) is None
+    # 版数を比べられない PR（bump が None）は版上げとして確かめる
+    assert land.check_production_pr(plugin, {"bump": None, "cut_version": None, "number": 1}, prod, [])
+    # merge-queue は先端を含まなくても、版数が衝突しなければ通る（含むことを求めない）
+    assert land.check_production_pr(plugin, {"bump": True, "cut_version": "1.0.0", "number": 1, "contains_tip": False}, prod, []) is None
+    assert land.check_production_pr(docs, {"contains_tip": False}, prod, [])
+    assert land.check_production_pr(docs, {"contains_tip": True}, prod, []) is None
+    assert land.check_production_pr(dev, {}, prod, []) is None
+
+
+# --- 承認した head だけを入れる（#3661。テスト設計の 17・19） -----------------------------------------------
+
+
+def _trail(answer: str, sha: str) -> Authored:
+    return Authored("octocat", "OWNER", approval_decide.render_trail(answer, sha, trail.USER_BY))
+
+
+@dataclass
+class StrategyHub(FakeHub):
+    """本番ブランチの先端・版数・比べ・キューを答える偽物。`versions` は ref → 版数、`behind` は head が先端に遅れる数。"""
+
+    versions: dict[str, str] = field(default_factory=dict)
+    behind: int = 0
+    fork: str = TIP  # head と本番の分岐点（版上げの PR を切った時点）
+
+    def rest(self, method: str, path: str, payload: Any = None, params: Any = None) -> Any:
+        if method == "GET" and path == "/repos/o/r/branches/main":
+            return {"commit": {"sha": TIP}}
+        if method == "GET" and path.startswith("/repos/o/r/compare/"):
+            return {"merge_base_commit": {"sha": self.fork}, "behind_by": self.behind}
+        if method == "GET" and "/contents/" in path:
+            ref = params["ref"]
+            if ref not in self.versions:
+                return None
+            raw = json.dumps({"version": self.versions[ref]}).encode("utf-8")
+            return {"encoding": "base64", "content": base64.b64encode(raw).decode("ascii")}
+        return super().rest(method, path, payload, params)
+
+
+def _queue_hub(head: str, approved: str, **kw: Any) -> StrategyHub:
+    """plugin（trunk・merge-queue）の版上げの PR。本番ブランチは merge queue（merge commit）を持つ。"""
+    hub = StrategyHub(pulls={7: pull(head=head)}, comments_of={7: [_trail("approved", approved)]}, **kw)
+    hub.versions = {TIP: "1.0.0", head: "1.0.1"}
+    hub.responses[("GET", "/repos/o/r/rules/branches/main")] = [{"type": "merge_queue", "parameters": {"merge_method": "MERGE"}}]
+    hub.graphql_data = {"repository": {"mergeQueue": {"entries": {"nodes": [], "pageInfo": {"hasNextPage": False, "endCursor": None}}}}}
+    return hub
+
+
+def _lander(hub: FakeHub, s: Strategy) -> land.Lander:
+    def wait(reader: Any, budget: float) -> Any:
+        from ndf.adapters import ci
+
+        return ci.WatchResult(ci.Reading([], [], [], [], [], [], True), 1, 0.0, 0.0)
+
+    return land.Lander(hub, s, 60.0, wait=wait)
+
+
+def test_issue_3661_head_moved_after_approval_neither_merges_nor_enqueues() -> None:
+    """#3661: 承認の後に head が動いた（承認は H1、今の head は H2）なら、マージもキューへの投入もせずに承認を取り直す依頼で止まる。"""
+    hub = _queue_hub(head=H2, approved=H1)
+    done = _lander(hub, strategy("plugin")).land(7)
+    assert not done.merged and done.kind == "refused" and land.REAPPROVE in done.detail
+    assert hub.merged == [] and hub.merge_jumps == []
+
+
+def test_approved_release_pr_goes_to_the_head_of_the_queue() -> None:
+    """承認した head の版上げの PR は、宣言の履歴の作り方で、キューの先頭へ入れる（決定 18）。同期の PR は作らない（trunk）。"""
+    hub = _queue_hub(head=H1, approved=H1)
+    done = _lander(hub, strategy("plugin")).land(7)
+    assert done.merged and hub.merged == [7] and hub.merge_jumps == [True] and hub.merge_methods == ["merge"]
+    assert not any(path == "/repos/o/r/pulls" and method == "POST" for method, path, _ in hub.requests)
+
+
+def test_release_pr_stops_when_the_production_version_moved() -> None:
+    """merge-queue: 本番ブランチの版数が切った時点と違えば、キューへ入れずに止まる。"""
+    hub = _queue_hub(head=H1, approved=H1)
+    hub.fork = "f" * 40
+    hub.versions.update({hub.fork: "1.0.0", TIP: "1.0.1", H1: "1.0.1"})
+    done = _lander(hub, strategy("plugin")).land(7)
+    assert not done.merged and done.kind == "refused" and hub.merged == []
+
+
+def test_mismatched_or_unreadable_ruleset_stops_without_merging() -> None:
+    """I10: 宣言が merge-queue なのに本番ブランチにキューが無い・ruleset を読めないときは、比べずに入れない。"""
+    hub = _queue_hub(head=H1, approved=H1)
+    hub.responses[("GET", "/repos/o/r/rules/branches/main")] = []
+    done = _lander(hub, strategy("plugin")).land(7)
+    assert not done.merged and "merge.method" in done.detail and hub.merged == []
+    hub = _queue_hub(head=H1, approved=H1, rules_unreadable=True)
+    done = _lander(hub, strategy("plugin")).land(7)
+    assert not done.merged and "読めない" in done.detail and hub.merged == []
+
+
+def _strict_hub(head: str, approved: str, behind: int) -> StrategyHub:
+    """docs（trunk・production_pr・strict）のスプリントの PR。本番ブランチに ruleset が無い（private の Free）。"""
+    hub = StrategyHub(pulls={7: pull(head=head, ref="sprint/x")}, comments_of={7: [_trail("approved", approved)]}, behind=behind)
+    hub.responses[("GET", f"/repos/o/r/git/commits/{head}")] = {"tree": {"sha": "t" * 40}}
+    hub.responses[("POST", "/repos/o/r/git/commits")] = {"sha": "d" * 40}
+    return hub
+
+
+def test_strict_without_ruleset_fast_forwards_only_a_head_that_contains_the_tip() -> None:
+    """I7: ruleset の無い strict は、head が本番の先端を含まなければ止まり、含めば確かめた先端からの早送りで入れる。"""
+    hub = _strict_hub(H1, H1, behind=1)
+    done = _lander(hub, strategy("docs")).land(7)
+    assert not done.merged and done.kind == "refused" and not any(m == "PATCH" for m, _, _ in hub.requests)
+    hub = _strict_hub(H1, H1, behind=0)
+    done = _lander(hub, strategy("docs")).land(7)
+    assert done.merged and done.production_sha == "d" * 40 and hub.merged == []
+    made = next(p for m, path, p in hub.requests if (m, path) == ("POST", "/repos/o/r/git/commits"))
+    assert made["parents"] == [TIP, H1] and f"{land.TRAILER_HEAD}: {H1}" in made["message"]
+    ref = next(p for m, path, p in hub.requests if (m, path) == ("PATCH", "/repos/o/r/git/refs/heads/main"))
+    assert ref == {"sha": "d" * 40, "force": False}
+    # 承認の後に head が動けば早送りもしない（#3661）
+    hub = _strict_hub(H2, H1, behind=0)
+    assert not _lander(hub, strategy("docs")).land(7).merged and not any(m == "PATCH" for m, _, _ in hub.requests)
+
+
+def test_human_actor_is_left_to_the_human() -> None:
+    """`merge.actor: human` なら NDF はマージしない。"""
+    hub = _queue_hub(head=H1, approved=H1)
+    done = _lander(hub, strategy("plugin", actor="human")).land(7)
+    assert not done.merged and done.kind == land.HUMAN_KIND and hub.merged == []
+
+
+# --- 証跡の書き手は 1 つ・今の head の答えがあれば問わない（#3671。テスト設計の 18） ---------------------------
+
+
+def test_trail_writer_one_per_case_3671() -> None:
+    s = section("plugin")
+    assert trail.trail_writer(Strategy(s), False) == trail.WRITER_ANSWER
+    assert trail.trail_writer(Strategy(s), True) == trail.WRITER_LAND
+    s["merge"]["actor"] = "human"
+    assert trail.trail_writer(Strategy(s), False) == trail.WRITER_LAND
+    s["approval"]["via"] = "review"
+    assert trail.trail_writer(Strategy(s), False) == trail.WRITER_GITHUB
+
+
+def test_issue_3671_present_does_not_ask_again_when_the_head_has_an_answer() -> None:
+    """#3671: 今の head への答えが既にあれば、承認資料を提示せず（問いを送らず）その判定を返す。古い head の答えなら問う。"""
+    material = f"{approval_decide.HEAD_LINE} `{H1}`\n"
+    hub = FakeHub(pulls={7: pull(head=H1)}, comments_of={7: [_trail("approved", H1)]})
+    shown = trail.present(hub, 7, material)
+    assert not shown.asked and shown.judgment.approved and len(hub.comments(7)) == 1
+    hub = FakeHub(pulls={7: pull(head=H1)}, comments_of={7: [_trail("approved", H2)]})
+    shown = trail.present(hub, 7, material)
+    assert shown.asked and approval_decide.REQUEST_MARK in hub.comments(7)[-1].body
+
+
+@pytest.mark.parametrize("writer", [trail.WRITER_LAND, trail.WRITER_GITHUB])
+def test_issue_3671_only_the_answer_writer_writes_the_answer(writer: str) -> None:
+    """#3671: 書き手が答えの手順でない宣言では、答えの証跡を書かない（書き手を 2 つにしない）。"""
+    hub = FakeHub(pulls={7: pull(head=H1)})
+    with pytest.raises(trail.TrailError, match=writer):
+        trail.answer(hub, 7, "approved", trail.USER_BY, presented=H1, writer=writer)
+    assert hub.comments(7) == []
+
+
+def test_human_merge_record_is_written_once_by_the_land_writer() -> None:
+    """I12: `merge.actor: human` の宣言では、人がマージした先端の記録を land が 1 回だけ書く。"""
+    hub = FakeHub(pulls={7: pull(head=H1, merged=True)})
+    lander = _lander(hub, strategy("plugin", actor="human"))
+    assert lander.land(7).merged and lander.land(7).merged
+    records = [c.body for c in hub.comments(7) if trail.HUMAN_MARK in c.body]
+    assert len(records) == 1 and H1 in records[0]

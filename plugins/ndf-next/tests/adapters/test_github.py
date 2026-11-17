@@ -117,21 +117,22 @@ def test_merge_refusal_is_classified_from_merge_state(status: int, after: dict, 
     assert (out.merged, out.kind) == (False, kind)
 
 
-@pytest.mark.parametrize(("in_queue", "enqueued"), [(False, 1), (True, 0)])
-def test_merge_enqueues_when_base_requires_merge_queue(in_queue: bool, enqueued: int) -> None:
-    # キュー必須の基底は直接のマージを 405 で断る。先端のままキューへ入れ、実際のマージまでは ci_pending で待つ
+@pytest.mark.parametrize(("in_queue", "enqueued", "jump"), [(False, 1, False), (False, 1, True), (True, 0, True)])
+def test_merge_enqueues_when_base_requires_merge_queue(in_queue: bool, enqueued: int, jump: bool) -> None:
+    # キュー必須の基底は直接のマージを 405 で断る。先端のままキューへ入れ、実際のマージまでは ci_pending で待つ。
+    # 版上げの PR（jump）は先頭へ入れる（#3672 の決定 18）
     state = {"data": {"repository": {"pullRequest": {"id": "PR_7", "isMergeQueueEnabled": True, "isInMergeQueue": in_queue}}}}
     server = Server({
         ("GET", f"/repos/{REPO}/pulls/7"): [httpx.Response(200, json=_pull())],
         ("PUT", f"/repos/{REPO}/pulls/7/merge"): [httpx.Response(405, json={"message": "merge queue"})],
         ("POST", "/graphql"): [httpx.Response(200, json=state), httpx.Response(200, json={"data": {"enqueuePullRequest": {}}})],
     })  # fmt: skip
-    out = _hub(server).merge(7)
+    out = _hub(server).merge(7, jump=jump)
     assert (out.merged, out.kind) == (False, "ci_pending")
     mutations = [json.loads(r.content) for r in server.sent("POST") if b"enqueuePullRequest" in r.content]
     assert len(mutations) == enqueued
     if enqueued:
-        assert mutations[0]["variables"] == {"id": "PR_7", "head": HEAD}
+        assert mutations[0]["variables"] == {"id": "PR_7", "head": HEAD, "jump": jump}
 
 
 @pytest.mark.parametrize(("queue_method", "kind", "enqueued"), [("MERGE", "ci_pending", 1), ("SQUASH", "refused", 0), (None, "refused", 0)])
@@ -929,3 +930,47 @@ def test_merge_as_admin_keeps_the_release_contract() -> None:
     server = _GraphQLRecorder(unreached=True)
     with pytest.raises(github.GitHubError):
         hub("o/r", server).merge_as_admin(7, HEAD)
+
+
+# --- 本番ブランチの ruleset の事実（#3672 の I10。10 系の release_case.read_rule_facts と同じ値） -------------
+
+
+def _rule_routes(rules: list, ruleset: dict | None, branch: dict, protection: httpx.Response) -> dict:
+    routes = {
+        ("GET", f"/repos/{REPO}/rules/branches/main"): [httpx.Response(200, json=rules)],
+        ("GET", f"/repos/{REPO}/branches/main"): [httpx.Response(200, json=branch)],
+        ("GET", f"/repos/{REPO}/branches/main/protection"): [protection],
+    }
+    if ruleset is not None:
+        routes[("GET", f"/repos/{REPO}/rulesets/5")] = [httpx.Response(200, json=ruleset)]
+    return routes
+
+
+def test_rule_facts_reads_rulesets_and_bypass() -> None:
+    rules = [
+        {"type": "pull_request", "ruleset_id": 5, "parameters": {"required_approving_review_count": 1}},
+        {"type": "merge_queue", "ruleset_id": 5, "parameters": {"merge_method": "MERGE"}},
+        {"type": "required_status_checks", "ruleset_id": 5, "parameters": {"strict_required_status_checks_policy": True}},
+    ]
+    server = RouteServer(
+        _rule_routes(rules, {"current_user_can_bypass": "pull_requests_only"}, {"protection": {"enabled": False}}, httpx.Response(404))
+    )
+    got = _hub(server).rule_facts("main")
+    assert got == github.RuleFacts(True, 1, True, True, "pull_requests_only", "MERGE")
+
+
+def test_rule_facts_without_rules_or_protection_is_absent_and_unreadable_is_none() -> None:
+    absent = RouteServer(_rule_routes([], None, {"protection": {"enabled": False}}, httpx.Response(404)))
+    assert _hub(absent).rule_facts("main") == github.NO_RULES
+    # 従来の保護がある（か有無を読めない）のに詳細を読めなければ None（比べずに入れない）
+    hidden = RouteServer(_rule_routes([], None, {"protection": {"enabled": True}}, httpx.Response(404, json={"message": "no"})))
+    assert _hub(hidden).rule_facts("main") is None
+
+
+def test_rule_facts_merges_classic_protection_with_the_stricter_values() -> None:
+    protection = {"required_pull_request_reviews": {"required_approving_review_count": 2}, "enforce_admins": {"enabled": True}}
+    server = RouteServer(_rule_routes([], None, {"protection": {"enabled": True}}, httpx.Response(200, json=protection)))
+    assert _hub(server).rule_facts("main") == github.RuleFacts(True, 2, False, False, "never")
+    a = github.RuleFacts(True, 1, True, False, "always", "SQUASH")
+    b = github.RuleFacts(True, 2, False, True, "exempt")
+    assert github.merge_facts(a, b) == github.RuleFacts(True, 2, True, True, "exempt", "SQUASH")
