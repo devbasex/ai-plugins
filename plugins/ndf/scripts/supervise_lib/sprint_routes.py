@@ -9,6 +9,7 @@ import release_case
 from gate_answer import DESIGN_GATE, RELEASE_GATE
 from pace import PaceError, read_pace
 from sprint_mvv import MVV_PACES
+from strategy_rows import RELEASE_PREFIX
 from supervise_lib.decl import DeclError, decl_roots, delivery_decl, sprint_flow
 from supervise_lib.paths import HERE, SELF
 from supervise_lib.plan import QUEUE_PRS, sprint_state_path
@@ -140,12 +141,12 @@ def pace_verify(a) -> str:
 
 def trial_verify(a) -> str | None:
     """fast・auto の承認前の試用（#3703 の決定 7）のコマンド: `.ndf/pace.json` の `verify` の `{ref}` を版上げの PR の head
-    （`release/v{release_version}`。キューが流す時点に版で埋める）へ置き換えたもの。normal は None（雛形が verify-install を組む）。"""
+    （版上げのブランチ。キューが流す時点に版で埋める）へ置き換えたもの。normal は None（雛形が verify-install を組む）。"""
     if getattr(a, "pace", None) not in MVV_PACES:
         return None
     from supervise_lib.queue_fill import RELEASE_VERSION
 
-    cmd = pace_verify(a).replace("{ref}", f"release/v{RELEASE_VERSION}")
+    cmd = pace_verify(a).replace("{ref}", f"{RELEASE_PREFIX}{RELEASE_VERSION}")
     # verify-install は確かめる版（--expect）を要る。宣言が持たなければ版上げの PR の版を足す（.ndf/pace.json を書き換えずに流す）
     if "verify-install" in cmd and "--expect" not in cmd:
         cmd += f" --expect {RELEASE_VERSION}"

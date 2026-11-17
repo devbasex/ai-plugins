@@ -1,4 +1,4 @@
-"""trunk_release.py: CD の無い trunk の本番（#3703）。版上げの PR（`release/v<版>` → 本番ブランチ）が本番の PR を兼ねる。
+"""trunk_release.py: CD の無い trunk の本番（#3703）。版上げの PR（版上げのブランチ → 本番ブランチ）が本番の PR を兼ねる。
 
 承認を読む前に版上げの PR を開き（使い回す）、承認が無いか承認の SHA が PR の今の head と違えば検査を待って承認ゲート（10）で
 止める。一致すれば本番の取り込み（`ops.land`。`release_lib/prod_land.py`）へ渡す。承認の後に head が動いたら許容リストで入れ直さず、
@@ -19,6 +19,7 @@ from release_lib.approval import HeadMoved
 from release_lib.context import ReleaseCtx
 from release_lib.names import shipped_note, tag_name
 from step_result import EXIT_GATE, EXIT_PRECONDITION, EXIT_UNREADABLE, StepError, emit, result
+from strategy_rows import RELEASE_PREFIX
 
 TOOL = "release"
 
@@ -83,7 +84,7 @@ def waiting_out(ctx: ReleaseCtx, pr: int, head: str, approved: str | None, items
     else:
         summary = f"{plugin} v{a.version} のリリース承認を待つ（版上げの PR #{pr}・head {head[:8]}）"
     nxt = (
-        f"release/v{a.version} の head {head[:8]} で承認資料（release-steps.py approval-facts）を作り直して承認を得て、"
+        f"{RELEASE_PREFIX}{a.version} の head {head[:8]} で承認資料（release-steps.py approval-facts）を作り直して承認を得て、"
         f"release-steps.py approve --approval {material} --approved-sha {head} --by user で承認の記録を書き、{_rerun_command(ctx)} を打ち直す"
     )
     row = {"kind": "pr", "name": f"#{pr}", "result": "awaiting_approval", "base": ctx.prod, "head": head}
