@@ -2348,6 +2348,21 @@ def test_prod_land_uses_the_default_io_when_omitted(monkeypatch):
     assert port.calls == [("enqueue", HEAD)]
 
 
+@pytest.fixture
+def prod_land_decl(monkeypatch):
+    """prod_land の宣言とリポジトリの読み（メインディレクトリの宣言・origin の owner/repo）を差し替え、モジュールを返す。
+
+    差し替え先: `prod_land._repo`（"o/r"）・`prod_land._strategy`（宣言の見本 plugin）。prod_land の中で宣言や
+    リポジトリの読み方を分け直したときは、ここの 1 か所を直す（`land` は差し替えずに `LandingIO` で渡す）。"""
+    import branch_strategy
+
+    from release_lib import prod_land as pl
+
+    monkeypatch.setattr(pl, "_repo", lambda root: "o/r")
+    monkeypatch.setattr(pl, "_strategy", lambda root: branch_strategy.Strategy(strategy_fixture.section("plugin")))
+    return pl
+
+
 @pytest.mark.parametrize(
     ("node", "want"),
     [
@@ -2357,21 +2372,18 @@ def test_prod_land_uses_the_default_io_when_omitted(monkeypatch):
         ({"merged": False, "state": "CLOSED", "isInMergeQueue": False}, "closed"),
     ],
 )
-def test_queue_state_maps_the_pr_to_four_states(monkeypatch, node, want):
-    from release_lib import prod_land as pl
-
-    monkeypatch.setattr(pl, "_repo", lambda root: "o/r")
+def test_queue_state_maps_the_pr_to_four_states(monkeypatch, prod_land_decl, node, want):
+    pl = prod_land_decl
     got = SimpleNamespace(ok=True, value={"repository": {"pullRequest": node}}, error="")
     monkeypatch.setattr(pl.gh_graphql, "graphql", lambda q, v: got)
     assert pl.queue_state(Path("."), 9) == want
 
 
-def test_queue_state_does_not_guess_when_unreadable(monkeypatch):
+def test_queue_state_does_not_guess_when_unreadable(monkeypatch, prod_land_decl):
     """読めなければ merge queue に無いとみなさず止まる（merge queue に残る PR を二重に入れない）。"""
-    from release_lib import prod_land as pl
     from step_result import StepError
 
-    monkeypatch.setattr(pl, "_repo", lambda root: "o/r")
+    pl = prod_land_decl
     monkeypatch.setattr(pl.gh_graphql, "graphql", lambda q, v: SimpleNamespace(ok=False, value=None, error="boom"))
     with pytest.raises(StepError):
         pl.queue_state(Path("."), 9)
