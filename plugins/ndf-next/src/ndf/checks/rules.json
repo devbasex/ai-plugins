@@ -102,6 +102,10 @@
         "words": ["区間", "節"],
         "reason": "外部のランナーと同じ文字列に保つ見出し（## 区間の報告。contracts/hooks/unattended-report.json）を名前で指し、cases の誤りの文（「の節が無い」）をそのままの文字列で出す"
       },
+      "src/ndf/domains/hooks/guards/unattended.py": {
+        "words": ["区間"],
+        "reason": "外部のランナーと同じ文字列に保つ見出し（## 区間の報告。contracts/hooks/unattended-report.json）を名前で指す"
+      },
       "src/ndf/domains/hooks/report_text.py": {
         "words": ["区間"],
         "reason": "外部のランナーと同じ文字列に保つ見出し（## 区間の報告。contracts/hooks/unattended-report.json）を名前で指す"

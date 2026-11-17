@@ -127,7 +127,7 @@ def pushback_reason(errors: list[str], remaining: int, form: ur.ReportForm) -> s
     """変更要求の文（誤りの一覧・コントラクトのパス・残りの変更要求の回数・形の説明）。"""
     lines = "\n".join(f"- {e}" for e in errors)
     return (
-        "NDF: 人のいない実行では、最後の応答の末尾にセグメントの報告を置いてセグメントを終える。今の応答は形に合わない。\n"
+        "NDF: 人のいない実行では、最後の応答の末尾にセグメントの報告（見出しは `## 区間の報告`）を置いてセグメントを終える。今の応答は形に合わない。\n"
         f"{lines}\n"
         f"形は {FORM_REL}、決まりは {RULE_REF} にある。下の形の説明に合わせてセグメントの報告を書き、応答を終え直す"
         f"（この後の変更要求は残り {remaining} 回）。\n\n"

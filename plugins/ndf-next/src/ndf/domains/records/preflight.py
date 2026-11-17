@@ -102,7 +102,7 @@ def mvv_checked(root: Path) -> pd.Checked:
 
 def check(root: Path, runner: Runner = run_entry) -> dict[str, Any]:
     """3 つの確かめを順に打ち、まとめた結果 JSON を返す。"""
-    absent = causes.cause("precondition", "worktree の設定の設定が無い")
+    absent = causes.cause("precondition", "worktree の設定が無い")
     wt = pd.worktree_checked(runner(["worktree", "check"], root), result.command("worktree", "init"), absent)
     s = pd.combine([wt, ndf_settings_checked(root), mvv_checked(root)])
     if s.passed:
