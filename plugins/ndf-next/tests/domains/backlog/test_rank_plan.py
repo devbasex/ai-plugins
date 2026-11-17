@@ -366,3 +366,95 @@ def test_config_reads_the_ndf_settings_and_the_argument_overrides_capacity():
 def test_config_rejects_a_label_floor_outside_the_scale():
     with pytest.raises(model.ConfigError):
         model.config_from({"label_floor": {"bug": 7}}, None)
+
+
+# 現状固定テスト（I-004: config_from）
+
+
+def test_config_from_none_values_fall_back_to_defaults():
+    cfg = model.config_from({"scale": None, "margin_steps": None, "label_floor": None, "size_exponent": None}, None)
+    assert cfg == Config()
+
+
+def test_config_from_reads_every_key_and_normalizes_types():
+    decl = {
+        "scale": [1, 2, 4, 8], "margin_steps": 0, "auto_threshold": 4, "capacity": 7,
+        "dependents_steps": [[0, 1], [2, 4]], "size_exponent": 1, "large_slot_ratio": 0,
+        "large_min_size": 8, "label_floor": {"bug": 2}, "quality": {"label": "q", "min": 0},
+    }  # fmt: skip
+    cfg = model.config_from(decl, None)
+    assert cfg.scale == (1, 2, 4, 8)
+    assert cfg.margin_steps == 0 and cfg.auto_threshold == 4 and cfg.capacity == 7
+    assert cfg.dependents_steps == ((0, 1), (2, 4))
+    assert cfg.size_exponent == 1.0 and isinstance(cfg.size_exponent, float)
+    assert cfg.large_slot_ratio == 0.0 and isinstance(cfg.large_slot_ratio, float)
+    assert cfg.large_min_size == 8 and cfg.label_floor == {"bug": 2}
+    assert cfg.quality == {"label": "q", "ratio": 0.2, "min": 0}
+
+
+def test_config_from_large_min_size_defaults_to_the_second_largest_scale_value():
+    decl = {"scale": [1, 2, 4, 8], "dependents_steps": [[0, 1]]}
+    assert model.config_from(decl, None).large_min_size == 4
+    assert model.config_from({}, None).large_min_size == 13
+
+
+def test_config_from_label_floor_keys_become_strings():
+    assert model.config_from({"label_floor": {1: 2}}, None).label_floor == {"1": 2}
+
+
+def test_config_from_capacity_argument_wins_even_when_the_declaration_is_invalid():
+    assert model.config_from({"capacity": 0}, 5).capacity == 5
+
+
+def test_config_from_capacity_none_in_declaration_means_unset():
+    assert model.config_from({"capacity": None}, None).capacity is None
+
+
+@pytest.mark.parametrize(
+    "decl, capacity, message",
+    [
+        ({"scale": [1]}, None, "scale は 2 個以上"),
+        ({"scale": [0, 1]}, None, "scale は 2 個以上"),
+        ({"scale": [1, 1]}, None, "scale は 2 個以上"),
+        ({"scale": [2, 1]}, None, "scale は 2 個以上"),
+        ({"scale": [1, "2"]}, None, "scale は整数で書く"),
+        ({"scale": [1, True]}, None, "scale は整数で書く"),
+        ({"capacity": 0}, None, "capacity は正の整数で書く"),
+        ({}, -1, "capacity は正の整数で書く"),
+        ({"capacity": True}, None, "capacity は正の整数で書く"),
+        ({"margin_steps": -1}, None, "margin_steps は 0 以上"),
+        ({"margin_steps": 1.0}, None, "margin_steps は整数で書く"),
+        ({"dependents_steps": {"a": 1}}, None, "dependents_steps は [下限, 段階] の列で書く"),
+        ({"dependents_steps": [[0, 1, 2]]}, None, "dependents_steps は [下限, 段階] の列で書く"),
+        ({"dependents_steps": [[0, 4]]}, None, "dependents_steps の段階 は尺度の値で書く"),
+        ({"dependents_steps": [["0", 1]]}, None, "dependents_steps は整数で書く"),
+        ({"dependents_steps": [[1, 1], [1, 2]]}, None, "dependents_steps は被依存の数の下限の昇順で書く"),
+        ({"label_floor": ["bug"]}, None, "label_floor はラベル → 段階のオブジェクトで書く"),
+        ({"size_exponent": True}, None, "size_exponent は 0 以上 1 以下の数で書く"),
+        ({"size_exponent": 1.5}, None, "size_exponent は 0 以上 1 以下の数で書く"),
+        ({"size_exponent": -0.1}, None, "size_exponent は 0 以上 1 以下の数で書く"),
+        ({"size_exponent": "0.3"}, None, "size_exponent は 0 以上 1 以下の数で書く"),
+        ({"auto_threshold": 7}, None, "auto_threshold は尺度の値で書く"),
+        ({"large_slot_ratio": 1}, None, "large_slot_ratio は 0 以上 1 未満の数で書く"),
+        ({"large_min_size": 4}, None, "large_min_size は尺度の値で書く"),
+        ({"label_floor": {"bug": "8"}}, None, "label_floor[bug] は整数で書く"),
+        ({"quality": []}, None, "quality は label・ratio・min のオブジェクトで書く"),
+        ({"quality": {"label": ""}}, None, "quality.label は空でない文字列で書く"),
+        ({"quality": {"min": -1}}, None, "quality.min は 0 以上"),
+        ({"quality": {"ratio": 1}}, None, "quality.ratio は 0 以上 1 未満の数で書く"),
+    ],
+)
+def test_config_from_rejects_each_invalid_value(decl, capacity, message):
+    with pytest.raises(model.ConfigError) as err:
+        model.config_from(decl, capacity)
+    assert str(err.value).startswith(message)
+
+
+def test_config_from_checks_default_dependents_steps_against_a_declared_scale():
+    with pytest.raises(model.ConfigError, match="^dependents_steps の段階"):
+        model.config_from({"scale": [1, 2, 4, 8]}, None)
+
+
+def test_config_from_checks_scale_before_capacity():
+    with pytest.raises(model.ConfigError, match="^scale"):
+        model.config_from({"scale": [1], "capacity": 0}, None)
