@@ -198,6 +198,27 @@ def test_a_lane_whose_goal_was_cleared_is_relaunched_with_the_goal_while_the_acc
     assert isinstance(act, Report) and act.key == "stall:a/r1:stalled" and "2 回" in act.detail
 
 
+@pytest.mark.parametrize(
+    ("snap", "kind"),
+    [
+        (run_decide.with_stalls(_snap(running=[("a", "r1", "s1")]), [], relaunch=[("a", "r1", "s1")]), "goal"),
+        (_snap(running=[("a", "r1", "s1")], answered=[("a", "r1", "s1", 7)]), "resume"),
+    ],
+)
+def test_a_stall_read_right_after_a_continuation_launch_is_not_reported_until_it_is_seen_again(snap, kind):
+    """続き（/goal の入れ直し・答えの後の next）を起こした直後の読み直しでは、一覧に残る前の起動の止まった姿で
+    知らせない。次の読み直しでも止まっていれば知らせる（#2629 の回帰）。"""
+    stall = ("a", "stall:a/r1:ended", "レーン a の行 r1: 止まった", None, "r1")
+    act, state, _ = _step(RunState(), Done(Observe(), snap))
+    assert isinstance(act, Launch) and getattr(act, kind) == "s1"
+    act, state, _ = _step(state, Done(act, {"ok": True, "detail": "起こした"}))
+    stopped = _snap(running=[("a", "r1", "s1")], stalls=[stall])
+    act, state, _ = _step(state, Done(Observe(), stopped))
+    assert act == Sleep(30.0) and state.unreported == ()
+    act, state, _ = _step(state, Done(Observe(), stopped))
+    assert isinstance(act, Report) and act.key == "stall:a/r1:ended"
+
+
 def test_a_lane_whose_goal_was_cleared_is_reported_when_the_account_is_not_usable():
     stall = ("a", "stall:a/r1:stalled", "レーン a の行 r1: ラッパーが止まっている", None, "r1")
     act, _, _ = _step(RunState(), Done(Observe(), _snap(running=[("a", "r1", "s1")], stalls=[stall])))
