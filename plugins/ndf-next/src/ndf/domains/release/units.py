@@ -42,6 +42,21 @@ def _resolved_by_rerere(repo_git: git_mod.Git, subject: str) -> bool:
     return repo_git.attempt("commit", "--quiet", "--no-edit", "-m", subject).returncode == 0
 
 
+def _merge_unit(repo_git: git_mod.Git, remote: str, unit: str, branch: str) -> None:
+    """HEAD へ単位 `unit` を `--no-ff` でマージする。既に入っていれば飛ばし、衝突が残れば取り消して `UnitsError`。"""
+    ref = f"{remote}/{unit}"
+    if repo_git.is_ancestor(ref, "HEAD"):
+        return
+    subject = merge_subject(unit, branch)
+    merged = repo_git.attempt(
+        "-c", "rerere.enabled=true", "-c", "rerere.autoupdate=true", "merge", "--no-ff", "--no-edit", "-m", subject,
+        git_mod.END_OF_OPTIONS, ref,
+    )  # fmt: skip
+    if merged.returncode != 0 and not _resolved_by_rerere(repo_git, subject):
+        repo_git.attempt("merge", "--abort")
+        raise UnitsError(f"{unit} を {branch} へマージできない（衝突は人が解く）: {(merged.stdout + merged.stderr).strip()[-TAIL:]}")
+
+
 def build(repo_git: git_mod.Git, remote: str, production: str, units: Sequence[str], branch: str) -> str:
     """`<remote>/<production>` の HEAD から detached HEAD で `units` を順にマージし、先頭の SHA を返す。"""
     if not units:
@@ -54,17 +69,7 @@ def build(repo_git: git_mod.Git, remote: str, production: str, units: Sequence[s
     if done.returncode != 0:
         raise UnitsError(f"{remote}/{production} から {branch} を切れない: {done.stderr.strip()}")
     for unit in units:
-        ref = f"{remote}/{unit}"
-        if repo_git.is_ancestor(ref, "HEAD"):
-            continue
-        subject = merge_subject(unit, branch)
-        merged = repo_git.attempt(
-            "-c", "rerere.enabled=true", "-c", "rerere.autoupdate=true", "merge", "--no-ff", "--no-edit", "-m", subject,
-            git_mod.END_OF_OPTIONS, ref,
-        )  # fmt: skip
-        if merged.returncode != 0 and not _resolved_by_rerere(repo_git, subject):
-            repo_git.attempt("merge", "--abort")
-            raise UnitsError(f"{unit} を {branch} へマージできない（衝突は人が解く）: {(merged.stdout + merged.stderr).strip()[-TAIL:]}")
+        _merge_unit(repo_git, remote, unit, branch)
     return repo_git.rev_parse("HEAD")
 
 
