@@ -4,7 +4,7 @@
 
 **この文書が扱うのは、入れ替えの前に `main` へ入れる 2 つの子である。** 外からの参照の検査と書き換えの表（R0）と、新しい NDF の退避と旧いラッパーの見分けの直し（R1）である。入れ替えそのもの（#3304 の S2-0〜S2-15）はファイルの移動と workflow の書き換えの手順で、新しい関数を持たない。手順と確かめは [issue-3341-design-swap.md](issue-3341-design-swap.md) が持つ。
 
-例: 10 系の利用者が 11.0.0 へ上げた直後に `ndf plan list` を打つと、新しい NDF は状態の置き場 `~/.local/state/ndf` を用意する。今の実装はここで旧い置き場を `ndf.v10-<日付>` へ名前を変える。R1 の直しの後は、名前を変える前に旧いラッパーの錠（`relay/<名前>/relay.lock`）を待たずに取りにいき、1 つでも取れなければ何も変えずに止まる。結果 JSON は `stopped`・`store_in_use` で、`items` に取れなかった錠のパスと `reason: legacy_running` が載る。
+例: 10 系の利用者が 11.0.0 へ上げた直後に `ndf plan list` を打つと、新しい NDF は状態の置き場 `~/.local/state/ndf` を用意する。今の実装はここで旧い置き場を `ndf.v10-<日付>` へ名前を変える。R1 の直しの後は、名前を変える前に旧いラッパーの錠（`relay/<名前>/relay.lock`）を待たずに取りにいき、1 つでも取れなければ何も変えずに止まる。すべて取れたら、名前の変更と新しい置き場の用意が終わるまで錠を持ち続ける。結果 JSON は `stopped`・`store_in_use` で、`items` に取れなかった錠のパスと `reason: legacy_running` が載る。
 
 ## この文書の語
 
@@ -67,7 +67,7 @@ plugins/ndf-next/
 | 置き場 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- |
 | `scripts/check-plugin-refs.py` | モジュール | `main`（新設）・`collect_refs`（新設）・`load_table`（新設）・`check_tree`（新設）・`target_exists`（新設）・`command_exists`（新設）・`apply_table`（新設）・`Ref`（型。新設）・`Row`（型。新設）・`Finding`（型。新設） |
-| `plugins/ndf-next/src/ndf/identity.py` | モジュール | `retired_name`（新設）・`lock_held`（新設。`registry.lock_busy` の本体を移す）・`held_legacy_locks`（新設）・`prepare_state_dir`（変更: 止まる理由）・`_retire_all`（変更: 退避先があれば止まる）・`_retire_target`（削除）・`_retire_candidates`（削除）・`OLD_STATE_PLACES`（変更: `config-state` を `KEEP` へ） |
+| `plugins/ndf-next/src/ndf/identity.py` | モジュール | `retired_name`（新設）・`lock_held`（新設。`registry.lock_busy` の本体を移す）・`hold_legacy_locks`（新設）・`prepare_state_dir`（変更: 止まる理由）・`_retire_all`（変更: 退避先があれば止まる）・`_retire_target`（削除）・`_retire_candidates`（削除）・`OLD_STATE_PLACES`（変更: `config-state` を `KEEP` へ） |
 | `plugins/ndf-next/src/ndf/identity.py` | `IdentityError` | `kind`・`reason`・`paths`（属性を足す）・`items`（変更: 理由とパスを載せる） |
 | `plugins/ndf-next/src/ndf/cli.py` | モジュール | `_prepare`（変更: 止まる理由を `IdentityError.kind` から取る） |
 | `plugins/ndf-next/src/ndf/core/durable.py` | モジュール | `_retire_store`（変更）・`prepare_store`（呼び方は同じ。止まる例外が 2 つ増える） |
@@ -89,11 +89,11 @@ plugins/ndf-next/
 | `apply_table` | `scripts/check-plugin-refs.py` | 新設 | `apply_table(root: Path, rows: list[Row]) -> tuple[list[str], list[Finding]]` | 「向け直す」の行の文字列を置き換え、「ファイルを消す」の行のファイルを消し、「消す」の行を手で直す一覧として返す | 表に「未作成」の行が無い | 指摘が 1 件でもあれば、どのファイルも変えていない | ファイルの書き込みと削除 |
 | `retired_name` | `plugins/ndf-next/src/ndf/identity.py` | 新設 | `retired_name(place: Path, form: int \| None, now: datetime) -> Path` | 退避先のパス `<元の名前>.v<形の版>-<YYYYMMDD>` を求める（規則 P1） | `now` はタイムゾーンを持つ | `form` が None なら形の版は `LEGACY_FORM`。日付は UTC で書く。退避先の有無を見ない | 無し |
 | `lock_held` | `plugins/ndf-next/src/ndf/identity.py` | 新設 | `lock_held(path: Path) -> bool` | `path` の排他を誰かが持っていれば真を返す（`registry.lock_busy` の本体を移したもの） | 無し | 取れた排他はすぐ放している。ファイルが無ければ偽で、ファイルを作らない | 錠のファイルを開く（読むだけ） |
-| `held_legacy_locks` | `plugins/ndf-next/src/ndf/identity.py` | 新設 | `held_legacy_locks(place: Path, patterns: tuple[str, ...]) -> list[Path]` | 旧い置き場の錠を待たずに排他で取りにいき、取れなかった錠のパスを返す（規則 P6） | 無し | 取れた錠はすべて放している。錠のファイルを作らない | 錠のファイルを開く（読むだけ） |
-| `prepare_state_dir` | `plugins/ndf-next/src/ndf/identity.py` | 変更 | `prepare_state_dir(ident: PluginIdentity, now: Optional[datetime] = None) -> StateReady` | 状態の置き場を用意し、旧い置き場を P1・P2・P6 で退避する | 無し | 旧いラッパーの錠が 1 つでも取れない・退避先が既にある、のどちらかなら何も変えずに `IdentityError`（理由つき） | ディレクトリの名前の変更・`format.json` の書き込み・隣の錠のファイル |
-| `_retire_all` | `plugins/ndf-next/src/ndf/identity.py` | 変更 | `_retire_all(old: list[Path], now: datetime) -> tuple[Retired, ...]` | 旧い置き場を順に退避先の名前へ変える | `old` のどの置き場にも、旧い錠を持つプロセスが居ないと確かめた後 | 名前を変える前にすべての退避先が無いことを確かめ、1 つでもあれば何も変えずに `IdentityError`（`retire_target_exists`） | ディレクトリの名前の変更 |
+| `hold_legacy_locks` | `plugins/ndf-next/src/ndf/identity.py` | 新設 | `hold_legacy_locks(place: Path, patterns: tuple[str, ...]) -> ContextManager[list[Path]]` | 旧い置き場の錠を待たずに排他で取りにいき、`with` の中で取れなかった錠のパスを渡す（規則 P6）。すべて取れたときは、`with` を抜けるまで錠を持ち続ける | 無し | 1 つでも取れなければ、取れた錠をすぐ放して空でない一覧を渡す。すべて取れたら空の一覧を渡し、`with` を抜けるときに放す。錠のファイルを作らない | 錠のファイルを開く（読むだけ） |
+| `prepare_state_dir` | `plugins/ndf-next/src/ndf/identity.py` | 変更 | `prepare_state_dir(ident: PluginIdentity, now: Optional[datetime] = None) -> StateReady` | 状態の置き場を用意し、旧い置き場を P1・P2・P6 で退避する。旧い錠の確かめから名前の変更と `format.json` の書き込みまでを、1 つの `hold_legacy_locks` の `with` の中で行う | 無し | 旧いラッパーの錠が 1 つでも取れない・退避先が既にある、のどちらかなら何も変えずに `IdentityError`（理由つき） | ディレクトリの名前の変更・`format.json` の書き込み・隣の錠のファイル |
+| `_retire_all` | `plugins/ndf-next/src/ndf/identity.py` | 変更 | `_retire_all(old: list[Path], now: datetime) -> tuple[Retired, ...]` | 旧い置き場を順に退避先の名前へ変える | `old` のすべての置き場の旧い錠を、呼び出し元が `hold_legacy_locks` で持っている | 名前を変える前にすべての退避先が無いことを確かめ、1 つでもあれば何も変えずに `IdentityError`（`retire_target_exists`） | ディレクトリの名前の変更 |
 | `_prepare` | `plugins/ndf-next/src/ndf/cli.py` | 変更 | `_prepare(ident: PluginIdentity) -> int \| None` | 状態の置き場を用意し、止まったら例外の理由で止まった結果を出す | 無し | 止まった結果の `kind` は `IdentityError.kind`、`items` は退避した置き場と止まった理由のパス | 標準エラーへの書き込み |
-| `_retire_store` | `plugins/ndf-next/src/ndf/core/durable.py` | 変更 | `_retire_store(root: Path, found: int, now: datetime) -> Path` | チェックアウトの置き場を P1・P2・P6 で退避する（`found` が 0 なら `identity.retired_name` へ None を渡す） | 置き場の排他を持っている | 旧い錠が取れなければ `StoreLegacyRunning`、退避先があれば `StoreRetireTargetExists` で、どちらも何も変えていない | ディレクトリの名前の変更・`format.json` の書き込み |
+| `_retire_store` | `plugins/ndf-next/src/ndf/core/durable.py` | 変更 | `_retire_store(root: Path, found: int, now: datetime) -> Path` | チェックアウトの置き場を P1・P2・P6 で退避する（`found` が 0 なら `identity.retired_name` へ None を渡す）。旧い錠の確かめから名前の変更と `format.json` の書き込みまでを、1 つの `hold_legacy_locks` の `with` の中で行う | 置き場の排他を持っている | 旧い錠が取れなければ `StoreLegacyRunning`、退避先があれば `StoreRetireTargetExists` で、どちらも何も変えていない | ディレクトリの名前の変更・`format.json` の書き込み |
 | `install` | `plugins/ndf-next/src/ndf/domains/relay/install.py` | 変更 | `install(environ: Mapping[str, str], plugin_root: Path, missing_code: int, replace_foreign: bool, version: str) -> Installed` | ランチャーと `relay.root` を置き、置き換えたときは `relay.version` に `version` を書く（規則 P3） | `version` は `plugin.json` の `version` | ランチャーを書いたときに限り `relay.version` の中身が `version` と改行 | ファイルの書き込み（`relay.py`・`relay.root`・`relay.version`・`ndf-relay`） |
 
 ## 異常系の処理
@@ -109,8 +109,8 @@ plugins/ndf-next/
 | `apply_table` | 表と worktree が合わない | 「向け直す」の行の `from` がファイルに無い・「ファイルを消す」の行のファイルが無い・「未作成」の行が残っている | 書き込みの前の確かめ | 止める（1 つも書かない） | `failed` と合わない行・終了コード 1 | 何も変えていない。表を直して打ち直せる |
 | `apply_table` | 書き込みの途中で失敗 | 書き込みの権限が無い・ディスクが満杯 | 書き込みの例外 | 止める | `stopped` と書き終えたファイルの一覧・終了コード 2 | 書き終えたファイルは `git checkout -- <パス>` で戻して打ち直す |
 | `lock_held` | 錠のファイルを開けない | 権限が無い | `os.open` の例外（無いファイルは偽で返す） | 呼び出し元へ返す（`OSError`） | 呼び出し元の行のとおり | 何も変えていない |
-| `held_legacy_locks` | 錠のファイルを開けない | 権限が無い | `os.open` の例外（無いファイルは除く） | 呼び出し元へ返す（`IdentityError`。理由 `config_broken`） | `prepare_state_dir` の行と同じ | 何も変えていない |
-| `prepare_state_dir` | 旧いラッパーが動いている | 10 系のラッパー・リレーハブ・耐久の実行が錠を持つ | `held_legacy_locks` | 止める | `{"status": "stopped", "kind": "store_in_use", "items": [{"reason": "legacy_running", "path": "<錠>"}]}`・`store_in_use` の終了コード | 何も変えていない。10 系を止めてから打ち直せる（入れ替えの手順 U1） |
+| `hold_legacy_locks` | 錠のファイルを開けない | 権限が無い | `os.open` の例外（無いファイルは除く） | 呼び出し元へ返す（`IdentityError`。理由 `config_broken`） | `prepare_state_dir` の行と同じ | 何も変えていない |
+| `prepare_state_dir` | 旧いラッパーが動いている | 10 系のラッパー・リレーハブ・耐久の実行が錠を持つ | `hold_legacy_locks` | 止める | `{"status": "stopped", "kind": "store_in_use", "items": [{"reason": "legacy_running", "path": "<錠>"}]}`・`store_in_use` の終了コード | 何も変えていない。10 系を止めてから打ち直せる（入れ替えの手順 U1） |
 | `prepare_state_dir` | 退避先が既にある | 同じ日に退避した後に、10 系がまた置き場を作った | `_retire_all` の名前を変える前の確かめ | 止める | `stopped`・`precondition`・`items` に `{"reason": "retire_target_exists", "path": "<退避先>"}`・`precondition` の終了コード | 何も変えていない。人が 2 つの置き場を確かめ、片方を動かしてから打ち直す |
 | `_retire_all` | 名前を変えられない | 権限が無い・別のファイルシステム | `Path.rename` の例外 | 止める（今と同じ） | `config_broken` と退避できた元と先 | 退避できた置き場は退避先に残る。原因を直して打ち直せる |
 | `_prepare` | 置き場を用意できない | `prepare_state_dir` の上の 3 行 | `IdentityError` と `OSError` | 止める | 例外の `kind` で止まった結果。`OSError` は `config_broken` | 上の行のとおり |
@@ -167,8 +167,8 @@ plugins/ndf-next/
 | 同時に走りうる処理 | 共有する資源 | 排他の取り方 | 冪等性と中断からの再開 |
 | --- | --- | --- | --- |
 | 新しい NDF の 2 つのコマンドが同時に状態の置き場を用意する | 状態のホーム `~/.local/state/ndf` | 今と同じ隣の錠（`ndf.lock`）の排他の下で、錠の確かめ・退避先の確かめ・名前の変更・`format.json` を行う | 後の処理は先が置いた `format.json` を見て退避しない。止まった処理は何も変えないため、打ち直せる |
-| 新しい NDF の置き場の用意と、10 系のラッパー・リレーハブ | 旧い置き場の `relay/*/relay.lock`・`relay/hub/hub.lock` | 待たずに排他で取りにいき、確かめの後すぐ放す。名前を変える間は隣の錠だけを持つ | 確かめと名前の変更の間に 10 系が起動すると、その 10 系は退避先の中の錠を持つ。10 系はパスで置き場を引き直すため次の書き込みで新しい空の置き場を作り、次の新しい NDF の起動は P2 で止まる（人が確かめる）。U1 で 10 系を止める手順が前提 |
-| 新しい NDF の耐久の実行と、10 系の耐久の実行 | チェックアウトの置き場の `dbos/*.lock`・`progress.sqlite.lock` | 今と同じ（置き場の排他を取ったうえで、旧い錠を待たずに取る）。取れなければ待ち直さない | 止まった処理は何も変えない。10 系の実行が終われば打ち直せる |
+| 新しい NDF の置き場の用意と、10 系のラッパー・リレーハブ | 旧い置き場の `relay/*/relay.lock`・`relay/hub/hub.lock` | 待たずに排他で取りにいき、すべて取れたら、名前の変更と新しい置き場の `format.json` の書き込みが終わるまで持ち続ける（隣の錠も同じ間持つ） | 錠を持つ間に起動した 10 系は錠を取れず、退避する置き場へ書かない（不変条件 I3）。10 系の錠は `filelock` で、待つ間も試すたびにパスから錠のファイルを開き直すため、錠を放した後に取れる錠は新しい置き場のものである。その 10 系の記録は新しい置き場だけへ書かれ、退避先と新しい置き場へ分かれない |
+| 新しい NDF の耐久の実行と、10 系の耐久の実行 | チェックアウトの置き場の `dbos/*.lock`・`progress.sqlite.lock` | 置き場の排他を取ったうえで、旧い錠を待たずに取る。取れなければ待ち直さない。すべて取れたら、名前の変更と新しい置き場の `format.json` の書き込みが終わるまで持ち続ける | 止まった処理は何も変えない。10 系の実行が終われば打ち直せる。錠を持つ間に起動した 10 系の耐久の実行は、上の行と同じ理由で新しい置き場だけへ書く |
 | 10 系と 11.0 の SessionStart | 共有の設定ディレクトリの `relay.py`・`relay.version` | 錠を取らない。`relay.version` の版の大小で 10 系が置き直さない（規則 P3） | `install` の書き込みは一時のファイルからの置き換えで、同じ中身を何度書いてもよい |
 | `check-plugin-refs.py apply` と、ほかの作業 | worktree のファイル | 取らない（入れ替えの PR の作業ディレクトリで 1 回打つ） | 確かめが通るまで何も書かない。途中で落ちたら書いたファイルを戻して打ち直す |
 | `command_exists` の `bin/ndf` と、利用者の新しい NDF | 状態の置き場 | `NDF_STATE_HOME` を検査ごとの一時のディレクトリへ向け、利用者の置き場に触れない | 一時のディレクトリは検査の終わりに消す |
@@ -196,7 +196,7 @@ plugins/ndf-next/
 | `apply_table` | `sed -i` | 無し | 使えない理由: 書き込みの前にすべての行を確かめて 1 つも書かずに止まる形を持たない |
 | `retired_name` | `identity._retire_candidates`・`durable_sweep._free_name` | `grep -rn "_free_name\|_retire_target" plugins/ndf-next/src` | 使えない理由: どちらも退避先があれば名前を足して続ける（規則 P2 と逆）。`identity` の 2 つは消し、`_free_name` は鍵ごとのファイルの片付け（`durable_sweep`）だけが使い続ける |
 | `lock_held` | `domains/relay/registry.lock_busy` | `grep -rn "def lock_busy" plugins/ndf-next/src` | 使う（本体を移す）。`registry` は `identity` より上の層にあり、`identity` から読むと依存が逆向きになるため、本体を `identity` へ移して `registry.lock_busy` から呼ぶ |
-| `held_legacy_locks` | `identity.lock_held`・`core/durable_locks.try_flock` | `grep -rn "def try_flock" plugins/ndf-next/src` | `lock_held` を使う。`try_flock` は開いたファイルを受ける形で、`core` にあり `identity` から読めない |
+| `hold_legacy_locks` | `identity.lock_held`・`core/durable_locks.try_flock` | `grep -rn "def try_flock" plugins/ndf-next/src` | `lock_held` を使う。`try_flock` は開いたファイルを受ける形で、`core` にあり `identity` から読めない |
 
 ## 単体テストの観点
 
@@ -210,7 +210,7 @@ plugins/ndf-next/
 | `apply_table` | 「向け直す」を置き換え、「ファイルを消す」を消す | 「消す」の行は書き換えず `manual` に並ぶ | 「未作成」が残ると何も変えずに 1。`from` が無い行があると何も変えずに 1 |
 | `retired_name` | `format.json` の無い置き場で `ndf.v10-20261117` | `form` が 1 なら `.v1-`。日付をまたぐ時刻でも UTC の日付 | 無し |
 | `lock_held` | 誰も持たない錠で偽 | ファイルが無いと偽で、ファイルを作らない | 別のプロセスが持つと真 |
-| `held_legacy_locks` | 錠を持つプロセスが居なければ空 | 錠のファイルが無い置き場で空。錠のファイルを作らない | 別のプロセスが `relay/<名前>/relay.lock` か `relay/hub/hub.lock` を持つとそのパスを返す |
+| `hold_legacy_locks` | 錠を持つプロセスが居なければ空 | 錠のファイルが無い置き場で空。錠のファイルを作らない | 別のプロセスが `relay/<名前>/relay.lock` か `relay/hub/hub.lock` を持つとそのパスを返す |
 | `prepare_state_dir` | 旧い置き場を `ndf.v10-<日付>` へ退避する | `config-state` だけがある利用者で何も退避しない | 錠を持つプロセスが居ると `legacy_running` で止まり何も変えない。退避先があると `retire_target_exists` で止まり何も変えない。名前を変えられないと `config_broken` |
 | `_prepare` | 退避した元と先を標準エラーに出す | 退避が無いとき何も出さない | `IdentityError.kind` が結果の `kind` になる |
 | `_retire_store` | `format.json` の無い置き場を `state.v10-<日付>` へ退避する | `_read_format` が 0（`format.json` が無いか読めない）なら `.v10-`。番号は 1 から始まるため、0 を形の版として使わない | 10 系の `dbos/*.lock` を持つプロセスが居ると `StoreLegacyRunning` で、`prepare_store` が再試行しない。退避先があると `StoreRetireTargetExists` |

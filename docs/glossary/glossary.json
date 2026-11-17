@@ -7402,7 +7402,7 @@
     {
       "term": "旧い置き場",
       "context": "ndf-workflow",
-      "meaning": "旧いプラグインが状態を書く置き場。入れ替えの前は、旧いプラグインと新しいプラグインの両方が同じ旧い置き場を読み書きする",
+      "meaning": "10 系の NDF（今の `plugins/ndf/`）が状態を書く置き場。プラグイン名を含む置き場（`~/.local/state/ndf`・`.git/ndf/state` など）が新しい NDF の置き場と同じパスになるのは、入れ替えでプラグイン名が `ndf` になった後で、新しい NDF は最初の起動でそれを退避する。リポジトリの `.ndf/` のように名前を含まない置き場は、入れ替えの前から新しい NDF と同じパスを使う",
       "source": "docs/specifications/ndf-next-closed-children-subcommands.md"
     },
     {
