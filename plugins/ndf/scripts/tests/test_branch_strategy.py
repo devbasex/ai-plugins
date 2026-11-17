@@ -1,4 +1,4 @@
-"""ブランチ戦略の宣言（#3672）の 10 系の単体テスト。5 種の宣言は fixtures/branch_strategy/ の 1 か所にある。"""
+"""ブランチ戦略の宣言（#3672）の 10 系の単体テスト。5 種の宣言は plugins/ndf-next/tests/fixtures/branch_strategy/ の 1 か所にある。"""
 
 from __future__ import annotations
 
@@ -22,7 +22,8 @@ from project_lib import branch_strategy_write as bw  # noqa: E402
 from release_lib import approval_trail, land  # noqa: E402
 from release_lib.strategy_route import route_of  # noqa: E402
 
-FIX = Path(__file__).resolve().parent / "fixtures" / "branch_strategy"
+from strategy_fixture import FIX  # noqa: E402
+
 KINDS = ("web-develop", "web-trunk", "mobile", "docs", "plugin")
 DECL = SCRIPTS.parent.parent.parent  # リポジトリの根
 

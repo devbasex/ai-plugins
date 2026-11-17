@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf-next/contracts/data/branch-strategy-presets.json",
+  "name": "quoted-develop",
+  "kind": "not-a-violation",
+  "reason": "代表のリポジトリの種類の既定の行のベースブランチの名前（default_names と develop を持つ種類の branches）。init が測った名前で置き換える値で、利用先のブランチ名を決め打たない",
+  "count": 3
+}
