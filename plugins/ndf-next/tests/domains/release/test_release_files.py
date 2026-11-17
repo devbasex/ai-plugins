@@ -11,12 +11,13 @@ import pytest
 
 from ndf import cli
 from ndf.adapters import git as git_mod
+from ndf.core.branch_strategy import Strategy
 from ndf.domains.release import cleanup, names_decide, tagging
 from ndf.domains.release import cli as release_cli
 from ndf.domains.release import ndf_settings as decl_mod
 from ndf.domains.release import plugins as plugins_mod
 
-from ._fakes import FakeHub, init_repo, not_found, pull, strategy, write_json
+from ._fakes import FakeHub, init_repo, not_found, pull, section, strategy, write_json
 
 
 def _repo(root: Path) -> Path:
@@ -144,6 +145,63 @@ def test_issue_3615_publish_compares_where_an_existing_tag_points(tmp_path: Path
         return
     made = tagging.publish(root, hub, head, strategy("plugin"))
     assert made[0] == tagging.Made("tag", "kit--v1.2.3", "exists")
+
+
+def _tag_only() -> Strategy:
+    """タグだけの保存先（バージョンのファイルを持たない）で、タグ `v{version}` と GitHub Release を作る設定。"""
+    got = section("mobile")
+    got["release"].update(version_store={"kind": "tag"}, tag="v{version}", github_release=True)
+    return Strategy(got)
+
+
+@pytest.mark.parametrize(
+    ("rows", "want"),
+    [
+        # マージしていない PR・書式に合わない PR を飛ばし、最初に合うマージ済みの PR の head を読む
+        (
+            [
+                {"merged_at": None, "head": {"ref": "release/v9.9.9"}},
+                {"merged_at": "2026-11-17T00:00:00Z", "head": {"ref": "feat/x"}},
+                {"merged_at": "2026-11-17T00:00:00Z", "head": {"ref": "release/v1.2.3"}},
+                {"merged_at": "2026-11-17T00:00:00Z", "head": {"ref": "release/v1.2.4"}},
+            ],
+            ["v1.2.3"],
+        ),
+        ([{"merged_at": "2026-11-17T00:00:00Z", "head": {"ref": "feat/x"}}], []),
+        ([], []),
+        # 接尾辞の付いたバージョン（開発版）は出さない
+        ([{"merged_at": "2026-11-17T00:00:00Z", "head": {"ref": "release/v1.2.3-dev.1"}}], []),
+    ],
+)
+def test_publish_with_tag_only_store_reads_the_merged_release_branch(tmp_path: Path, rows: list, want: list) -> None:
+    """現状固定（I-003）: ファイルを持たない保存先は、コミットに結び付いたマージ済みの PR の head の名前からバージョンを読む。"""
+    hub = FakeHub()
+    hub.responses[("GET", f"/repos/o/r/commits/{'c' * 40}/pulls")] = rows
+    for tag in want:
+        hub.responses[("GET", f"/repos/o/r/git/ref/tags/{tag}")] = not_found()
+        hub.responses[("GET", f"/repos/o/r/releases/tags/{tag}")] = not_found()
+    made = tagging.publish(tmp_path, hub, "c" * 40, _tag_only())
+    assert [m.name for m in made if m.kind == "tag"] == want
+    posted = [path for m, path, _ in hub.requests if m == "POST"]
+    assert posted == (["/repos/o/r/git/refs", "/repos/o/r/releases"] if want else [])
+
+
+@pytest.mark.parametrize("version", ["1.2.2", "1.2.3-dev.1"])
+def test_publish_with_version_files_skips_unchanged_and_dev_versions(tmp_path: Path, version: str) -> None:
+    """現状固定（I-003）: ファイルを持つ保存先は、第 1 親とバージョンが同じ単位と開発版を出さない（何も書かない）。"""
+    root = _repo(init_repo(tmp_path / "repo"))
+    for rel in ("tools/kit/.claude-plugin/plugin.json", "tools/kit/.codex-plugin/plugin.json"):
+        write_json(root / rel, {"name": "kit", "version": "1.2.2"})
+    git_sandbox.sh(root, "add", "-A")
+    git_sandbox.sh(root, "commit", "-q", "-m", "init")
+    for rel in ("tools/kit/.claude-plugin/plugin.json", "tools/kit/.codex-plugin/plugin.json"):
+        write_json(root / rel, {"name": "kit", "version": version})
+    (root / "README.md").write_text("changed\n", encoding="utf-8")
+    git_sandbox.sh(root, "add", "-A")
+    git_sandbox.sh(root, "commit", "-q", "-m", "next")
+    hub = FakeHub()
+    assert tagging.publish(root, hub, git_sandbox.sh(root, "rev-parse", "HEAD").strip(), strategy("plugin")) == []
+    assert hub.requests == []
 
 
 def _entry(path: str, branch: str | None) -> git_mod.WorktreeEntry:
