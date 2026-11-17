@@ -635,10 +635,11 @@ def _merge_sync_pr(root, a, plugin, branch, base, release_pr, lead=None, section
                 raise
 
 
-def _merge_prod_pr(root, a, plugin, branch, prod, release_pr, approved, allowed, verdict, items, metrics):
+def _merge_prod_pr(ctx, release_pr, approved, allowed, verdict, items, metrics):
     """本番の PR（head は release/v<版>）を使い回すか作り、承認と比べた release/v<版> の先端を本番の取り込み（`land`）で入れる。
     先端が動いたら比べ直し、許可リストの下に収まる限り HEAD_MOVED_RETRIES 回まで入れ直し、それ以外は承認ゲートで止める（不変条件 I9）。
     merge queue へ入れた・人のマージを待つときは `prod_land.LandPending` で抜ける。(PR 番号, マージコミット, 判定) を返す。"""
+    root, a, plugin, branch, prod = ctx.root, ctx.a, ctx.plugin, ctx.branch, ctx.prod
     mp = port_mark.ensure_no_port_line(root, find_pr(root, branch, prod, states=("OPEN",)))  # 本番の PR も旧いプラグインを運ぶ
     title = f"Release: {plugin} v{a.version} を {prod} へ"
     body = f"{plugin} v{a.version} を {prod} へ出す（開発版の PR #{release_pr}）。\n\n{port_mark.NO_PORT_LINE}\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
@@ -770,7 +771,7 @@ def _merge_new_prod(ctx, approved, release_pr, items, metrics):
     if not verdict.ok:
         emit(approval.gate(root, a, plugin, branch, verdict, items, metrics), EXIT_GATE)
     metrics.update({"approved_sha": approved, "compared_head": verdict.tip, "tolerated": len(verdict.tolerated)})
-    main_pr, merge, verdict = _merge_prod_pr(root, a, plugin, branch, prod, release_pr, approved, allowed, verdict, items, metrics)
+    main_pr, merge, verdict = _merge_prod_pr(ctx, release_pr, approved, allowed, verdict, items, metrics)
     metrics.update({"compared_head": verdict.tip, "tolerated": len(verdict.tolerated)})
     items += approval.tolerated_items(verdict)
     items.append({"kind": "pr", "name": f"#{main_pr}", "result": "merged", "base": prod})

@@ -1356,7 +1356,8 @@ def test_the_separated_production_merge_lands_the_compared_tip(monkeypatch, tmp_
     monkeypatch.setattr(mod, "land", lambda r, a, n, head, trail_url="": seen.append((n, head)) or "m")
     a = argparse.Namespace(version="1.2.3", ci_wait=60.0, approval=None)
     verdict = mod.ac.Verdict(True, sha, "b" * 40, "match")
-    main_pr, merge, _ = mod._merge_prod_pr(tmp_path, a, "ndf", "release/v1.2.3", "main", 7, sha, None, verdict, [], {})
+    ctx = mod.ReleaseCtx(tmp_path, a, "ndf", ["ndf"], "release/v1.2.3", "develop", "main")
+    main_pr, merge, _ = mod._merge_prod_pr(ctx, 7, sha, None, verdict, [], {})
     # 本番の PR も旧いプラグインの変更を運ぶので、本文に ndf-next の port 検査の印を持つ
     assert mod.port_mark.NO_PORT_LINE in seen[0] and seen[1] == (9, "b" * 40) and (main_pr, merge) == (9, "m") and merged == []
 
