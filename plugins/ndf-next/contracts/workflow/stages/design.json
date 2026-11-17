@@ -96,12 +96,7 @@
         "metadata": {
           "ndf": {
             "kind": "record",
-            "range": "none",
-            "modes": [
-              "documentation",
-              "legacy-refactor",
-              "standard"
-            ]
+            "range": "none"
           }
         },
         "output": {

@@ -119,6 +119,16 @@ def test_normal_pace_asks_a_human_without_judging(repo: Path) -> None:
     assert ask.calls == []
 
 
+@pytest.mark.parametrize("mode", ["light", "operation"])
+def test_a_mode_without_the_design_gate_is_not_judged(repo: Path, mode: str) -> None:
+    # 設計承認ゲートを持たないモードでも判定のステップは流れ、出力をそろえるが判定は打たない
+    ask = Ask(FOLLOW)
+    out = mvv_gate.gate(repo, "design", _inputs(mode=mode), _no_hub, ask)
+    assert out == {"gate": "design", "skip": False, "verdict": None, "why": [f"モード {mode} は承認ゲート design を持たない"]}
+    assert ask.calls == []
+    assert mvv_gate.has_gate(mode, "release") and mvv_gate.has_gate("standard", "design")
+
+
 def test_follow_without_redlines_skips_and_the_record_is_reused(repo: Path) -> None:
     case = {"body": "文書の誤字を直す", "files": [{"filename": "docs/a.md", "status": "modified", "patch": "-誤字\n+正字"}]}
     ask = Ask(FOLLOW)

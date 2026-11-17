@@ -531,7 +531,8 @@ def test_a_step_naming_an_unknown_mode_is_refused():
     docs = {
         p.stem: contracts.load_json(f"workflow/stages/{p.name}") for p in (contracts.contracts_dir() / "workflow/stages").glob("*.json")
     }
-    docs["design"]["do"][2]["design-gate"]["metadata"]["ndf"]["modes"] = ["heavy"]
+    gate = next(step["design-gate"] for step in docs["design"]["do"] if "design-gate" in step)
+    gate["metadata"]["ndf"]["modes"] = ["heavy"]
     with pytest.raises(definition.WorkflowDefError, match="heavy は定義の無いモード"):
         definition.build(contracts.load_json("workflow/modes/standard.json"), docs)
 

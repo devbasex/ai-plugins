@@ -24,6 +24,7 @@ from ndf.contracts import limits
 from ndf.domains.records import files, jsonfile, mvv, preflight
 from ndf.domains.records import mvv_decide as md
 from ndf.domains.records import mvv_material_decide as mm
+from ndf.progress import definition
 from ndf.progress.gate.checks import MvvFacts, may_skip, refusals
 from ndf.progress.model import MVV_PACES
 
@@ -103,11 +104,13 @@ def _verdict(row: Mapping[str, Any]) -> dict[str, Any]:
     return {"verdict": row["verdict"], **{k: row[k] for k in md.VERDICT_DETAILS if k in row}}
 
 
-def _judged(root: Path, gate_name: str, inputs: Mapping[str, Any], hub: GitHub, ask: Ask) -> dict[str, Any]:
+def _judged(root: Path, gate_name: str, inputs: Mapping[str, Any], open_hub: Callable[[Path], GitHub], ask: Ask) -> dict[str, Any]:
     facts, project = base_facts(root, inputs)
     why = refusals(facts)
     if why:
         return mm.gate_outcome(gate_name, None, False, why)
+    # 機械の検査で止まるときは GitHub を読まない（つなぐのは検査を通った後）
+    hub = open_hub(root)
     number = pr_number(root, gate_name, inputs, hub)
     rows = mvv.pr_files(hub, number)
     facts = mm.facts_from_pr(facts, hub.pull(number).body, mvv.changed_of(rows))
@@ -123,11 +126,23 @@ def _judged(root: Path, gate_name: str, inputs: Mapping[str, Any], hub: GitHub, 
     return mm.gate_outcome(gate_name, verdict, skip, why)
 
 
+def has_gate(mode: Any, gate_name: str) -> bool:
+    """モード `mode` の定義が承認ゲート `gate_name` のステップを持つか（定義の無いモードは持たない）。"""
+    if mode not in definition.modes():
+        return False
+    return any(st.kind == "gate" and st.gate == gate_name for st in definition.load_definition(str(mode)).steps())
+
+
 def gate(root: Path, gate_name: str, inputs: Mapping[str, Any], hub: Callable[[Path], GitHub], ask: Ask = llm.ask) -> dict[str, Any]:
-    """承認ゲートを省けるかを判定し、出力 `mvv_gate` の値を返す（`mm.gate_outcome`）。進め方が fast・auto でなければ判定しない。"""
+    """承認ゲートを省けるかを判定し、出力 `mvv_gate` の値を返す（`mm.gate_outcome`）。進め方が fast・auto でなければ判定しない。
+
+    判定のステップはモードを問わず流れ（工程の出力 `mvv_gate` をどのモードでもそろえる）、承認ゲートを持たないモードでは判定しない。
+    """
+    if not has_gate(inputs.get("mode"), gate_name):
+        return mm.gate_outcome(gate_name, None, False, [f"モード {inputs.get('mode')} は承認ゲート {gate_name} を持たない"])
     if inputs.get("pace") not in MVV_PACES:
         return mm.gate_outcome(gate_name, None, False, [f"進め方 {inputs.get('pace')} は承認ゲートを MVV 判定で省かない"])
     try:
-        return _judged(root, gate_name, inputs, hub(root), ask)
+        return _judged(root, gate_name, inputs, hub, ask)
     except (GateError, GitError, GitHubError, mvv.MvvError, jsonfile.JsonFileError, identity.IdentityError, OSError) as exc:
         return mm.gate_outcome(gate_name, None, False, [f"MVV 判定を打てない: {exc}"])
