@@ -20,6 +20,10 @@
       ],
       "description": "宣言の形の版。読み手は知らない版を読まない"
     },
+    "branch_strategy": {
+      "type": "object",
+      "description": "10 系の NDF のブランチ戦略の宣言（#3672）。ndf-next はまだ読まない。読む形は #3681 が決める"
+    },
     "languages": {
       "anyOf": [
         {
