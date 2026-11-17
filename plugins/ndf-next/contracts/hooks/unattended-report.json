@@ -1,7 +1,7 @@
 {
   "name": "unattended-report",
   "summary": "人のいない実行（NDF_FACTORY_RUN）の conductor が区間を終える最後の応答の末尾に置く区間の報告。Factory のランナーは結果の行の値で区間の結果を決め、ほかの項目は人が読む",
-  "source": "plugins/ndf/contracts/forms/unattended-report.json の写し（#3746）。Factory のランナーが読む契約で、shape と cases は写し元と同じに保つ",
+  "source": "今の NDF の契約 forms/unattended-report.json の写し（#3746）。Factory のランナーが読む契約で、shape と cases は写し元と同じに保つ",
   "rule": "結果の行は ndf-next-block の規則の後半と同じく、応答の文の最後の「- 結果:」の行の値（前後の空白を除く）。値は shape.values のどれか。結果の行より後ろの「- <項目>: <値>」の行を項目として読み（同じ項目が 2 つあれば後ろ）、shape.required が値ごとに要る項目（無しにしない）を決める。材料の値は shape.material.body（区間の報告より前に shape.material.heading の節が要る）か、shape.material.url_prefix で始まる URL を空白で区切ったもの",
   "shape": {
     "values": {
