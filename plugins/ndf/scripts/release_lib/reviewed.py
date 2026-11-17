@@ -93,6 +93,8 @@ class ProdOps:
     published: Callable  # (root, a, plugin, prod, main_pr, merge, items, metrics, back=None) 公開の後。結果を出して終わる
     land: Callable  # (root, a, pr, head, trail_url="") -> マージコミット。本番の取り込み（`prod_land.land`。#3703）
     pr_check_buckets: Callable  # (root, n) -> チェックの並び
+    no_checks_reason: Callable | None = None  # (root, n) -> 検査が 0 件のときに待つ理由（None は CI が無い）
+    landed_commit: Callable | None = None  # (root, n, head) -> 早送りで閉じた PR の取り込みのコミット
 
 
 def release_prod(ctx: ReleaseCtx, case, ops: ProdOps):
@@ -185,13 +187,14 @@ def _open_prod_pr(ctx: ReleaseCtx, items, metrics, ops: ProdOps, case=None) -> i
     ver = a.version
     git(root, "fetch", "-q", "origin", "--tags")
     done = ops.find_pr(root, branch, prod, states=("MERGED", "OPEN"))
-    if done and done["state"] == "MERGED":  # 再開: 本番チャネルへのマージは済んでいる
+    if landed := landed_prod_pr(root, branch, prod, done, ops, case):  # 再開: 本番チャネルへの取り込みは済んでいる
+        n, commit = landed
         git(root, "fetch", "-q", "origin")
-        merge = merged_or_tip(root, ops.merge_commit_of(root, done["number"]), prod, git)
-        items.append({"kind": "pr", "name": f"#{done['number']}", "result": "already_merged", "base": prod})
-        if case is not None and (row := admin_record_on_resume(root, repo_or_stop(root), case, done["number"])):
+        merge = merged_or_tip(root, commit, prod, git)
+        items.append({"kind": "pr", "name": f"#{n}", "result": "already_merged", "base": prod})
+        if case is not None and (row := admin_record_on_resume(root, repo_or_stop(root), case, n)):
             items.append(row)
-        ops.published(root, a, plugin, prod, done["number"], merge, items, metrics, back=admin_back())
+        ops.published(root, a, plugin, prod, n, merge, items, metrics, back=admin_back())
     if done:
         return ensure_no_port_line(root, done)["number"]  # 前の版が作った本番の PR は port 検査の印を持たない
     require_untagged(root, plugin, ver, git=git)
@@ -206,6 +209,49 @@ def _open_prod_pr(ctx: ReleaseCtx, items, metrics, ops: ProdOps, case=None) -> i
     title = f"Release: {plugin} v{ver} を {prod} へ"
     body = f"{plugin} v{ver} を {prod} へ出す（開発版の PR #{release_pr}）。\n\n{NO_PORT_LINE}\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
     return ops.create_pr(root, prod, branch, title, body)
+
+
+def require_approved_landing(root, pr: int, case, head: str | None = None) -> str:
+    """本番ブランチへ入った本番の PR `pr` の head（`head`。省けば PR から読む）が PR の上の承認（証跡かレビュー）と一致することを確かめ、
+    その head を返す（再開。I2）。人のマージ（`merge.actor: human`）は承認の後に積んだコミットごと入りうるため、一致しなければ
+    StepError（1）で止め、公開しない。読めなければ StepError（1）。"""
+    repo = repo_or_stop(root)
+    try:
+        head = head or approval_trail.read_head(repo, pr)[0]
+        judged = approval.approved_on_pr(repo, pr, head, case)
+    except approval_trail.TrailError as e:
+        raise StepError(str(e)) from e
+    if judged.state != "success":
+        raise StepError(
+            f"本番ブランチへ入った本番の PR #{pr} の head {head[:8]} が PR の上の承認と一致しない（{judged.description}）。公開しない"
+        )
+    return head
+
+
+def landed_prod_pr(root, branch: str, prod: str, done: dict | None, ops, case) -> tuple[int, str | None] | None:
+    """本番ブランチへ入った本番の PR とその取り込みのコミット（再開）。`done` はマージ済みか開いた PR の探索の結果。
+    マージ済みの PR か、ruleset の無い `strict` の早送りで閉じて取り込みの記録がある PR（`ops.landed_commit`）を返し、無ければ None。
+    `case`（CD のある場合）なら、入った head が PR の上の承認と一致することを確かめる（`require_approved_landing`）。"""
+    if done and done["state"] == "MERGED":
+        if case is not None:
+            require_approved_landing(root, done["number"], case)
+        return done["number"], ops.merge_commit_of(root, done["number"])
+    landed = getattr(ops, "landed_commit", None)
+    if done or landed is None:
+        return None
+    closed = ops.find_pr(root, branch, prod, states=("CLOSED",))
+    if not closed:
+        return None
+    try:
+        head = approval_trail.read_head(repo_or_stop(root), closed["number"])[0]
+    except approval_trail.TrailError as e:
+        raise StepError(str(e)) from e
+    commit = landed(root, closed["number"], head)
+    if not commit:
+        return None
+    if case is not None:
+        require_approved_landing(root, closed["number"], case, head)
+    return closed["number"], commit
 
 
 def merge_on_pr_approval(root, repo, a, case, main_pr, prod, items, metrics, ops, *, waiting, moved, waiting_items=()):
@@ -233,13 +279,25 @@ def merge_on_pr_approval(root, repo, a, case, main_pr, prod, items, metrics, ops
 
 
 def wait_ci_except(root, n, skip, timeout, ops):
-    """`skip` の名前を除く PR のチェックがすべて通るまで待つ。落ちたら 1、上限で 75。"""
+    """`skip` の名前を除く PR のチェックがすべて通るまで待つ。落ちたら 1、上限で 75。
+    チェックが 0 件なら、`ops.no_checks_reason`（あれば）が PR の head で動く CI が無いと答えたときだけ待たずに戻る（照会は 1 回）。"""
     policy = limits.policy("release-steps.ci-wait")._replace(seconds=timeout)
     bad = ("fail", "cancel")
+    probe = getattr(ops, "no_checks_reason", None)
+    no_ci: list[bool] = []
+
+    def without_ci() -> bool:
+        if probe is None:
+            return False
+        if not no_ci:
+            no_ci.append(probe(root, n) is None)
+        return no_ci[0]
 
     def done(rows):
         rows = [r for r in rows if r.get("name") not in skip]
-        return bool(rows) and (all(r.get("bucket") in ("pass", "skipping") for r in rows) or any(r.get("bucket") in bad for r in rows))
+        if not rows:
+            return without_ci()
+        return all(r.get("bucket") in ("pass", "skipping") for r in rows) or any(r.get("bucket") in bad for r in rows)
 
     got = waits.wait_until(lambda: ops.pr_check_buckets(root, n), done, policy=policy)
     rows = [r for r in got.value or [] if r.get("name") not in skip]

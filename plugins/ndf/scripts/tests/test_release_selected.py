@@ -386,6 +386,7 @@ def selected(monkeypatch):
     monkeypatch.setattr(promotion, "merge_back_after", lambda root, a, plugin, br, pr, ops: ("back", br, pr))
     monkeypatch.setattr(reviewed, "admin_back", lambda back: ("admin_back", back))
     monkeypatch.setattr(promotion.repo_lib, "owner_repo", lambda r: "o/r")
+    monkeypatch.setattr(reviewed, "require_approved_landing", lambda root, pr, case, head=None: head or "h" * 40)
     monkeypatch.setattr(
         reviewed,
         "admin_record_on_resume",

@@ -1628,7 +1628,7 @@ def test_reviewed_prod_resume_writes_the_missing_admin_record(monkeypatch, tmp_p
 
     monkeypatch.setattr(rv.approval_trail, "judge_trails_on", judge)
     record = []
-    out, _, merged, published, _ = _reviewed_prod(monkeypatch, tmp_path, "cd-admin", "failure", found=MERGED_PROD_PR, record=record)
+    out, _, merged, published, _ = _reviewed_prod(monkeypatch, tmp_path, "cd-admin", "success", found=MERGED_PROD_PR, record=record)
     assert merged == [] and published == [9] and record == [(9, HEAD, "https://t/2")] and bys == ["user"]
 
 
@@ -1705,8 +1705,77 @@ def test_release_selected_writes_admin_on_the_production_row(monkeypatch, tmp_pa
 
 
 def test_reviewed_prod_resumes_after_the_merge(monkeypatch, tmp_path):
-    _, _, merged, published, _ = _reviewed_prod(monkeypatch, tmp_path, "cd-no-review", "failure", found=MERGED_PROD_PR)
+    _, _, merged, published, _ = _reviewed_prod(monkeypatch, tmp_path, "cd-no-review", "success", found=MERGED_PROD_PR)
     assert merged == [] and published == [9]
+
+
+@pytest.mark.parametrize("case", ["cd-no-review", "cd-review"])
+def test_reviewed_prod_resume_stops_when_the_merged_head_lacks_the_approval(monkeypatch, tmp_path, case):
+    """#3703 の I2: 人が承認の後のコミットごとマージした本番の PR（head が PR の上の承認と違う）からは、再開でも公開しない。"""
+    from step_result import StepError
+
+    with pytest.raises(StepError) as e:
+        _reviewed_prod(monkeypatch, tmp_path, case, "failure", found=MERGED_PROD_PR)
+    assert e.value.code == 1 and "PR の上の承認と一致しない" in str(e.value)
+
+
+def _closed_landing_ops(landed):
+    """早送りで閉じた本番の PR だけがある `ProdOps` の代わり（`landed_prod_pr` が読む find_pr・merge_commit_of・landed_commit）。"""
+    calls = []
+
+    def find_pr(root, head, base, states):
+        calls.append(tuple(states))
+        return {"number": 9, "state": "CLOSED"} if "CLOSED" in states else None
+
+    ops = SimpleNamespace(find_pr=find_pr, merge_commit_of=lambda r, n: None, landed_commit=lambda r, n, head: landed)
+    return ops, calls
+
+
+@pytest.mark.parametrize(
+    ("landed", "state", "want"), [("f" * 40, "success", (9, "f" * 40)), (None, "success", None), ("f" * 40, "failure", 1)]
+)
+def test_landed_prod_pr_resumes_a_pr_closed_by_the_fast_forward(monkeypatch, landed, state, want):
+    """#3703: ruleset の無い strict の早送りで閉じた本番の PR は、取り込みの記録が PR の head と合い、その head が PR の上の承認と
+    一致するときだけ再開する。記録が無ければ None（新しく作る側へ）、承認と違えば 1 で止める。"""
+    from release_lib import reviewed as rv
+    from step_result import StepError
+
+    monkeypatch.setattr(rv, "repo_or_stop", lambda r: "o/r")
+    monkeypatch.setattr(rv.approval_trail, "read_head", lambda repo, n: (HEAD, "main", "closed"))
+    monkeypatch.setattr(rv.approval, "approved_on_pr", lambda repo, n, head, c: rv.approval_trail.Judgment(state, "理由"))
+    ops, calls = _closed_landing_ops(landed)
+    if want == 1:
+        with pytest.raises(StepError) as e:
+            rv.landed_prod_pr(".", "release/v1.2.3", "main", None, ops, _case("cd-no-review"))
+        assert e.value.code == 1
+    else:
+        assert rv.landed_prod_pr(".", "release/v1.2.3", "main", None, ops, _case("cd-no-review")) == want
+    assert calls == [("CLOSED",)]
+
+
+def test_landed_prod_pr_skips_the_closed_search_when_a_pr_is_open():
+    """開いた本番の PR があれば、閉じた PR を探さない（開いた PR で承認を待つ）。"""
+    from release_lib import reviewed as rv
+
+    ops, calls = _closed_landing_ops("f" * 40)
+    assert rv.landed_prod_pr(".", "release/v1.2.3", "main", OPEN_PROD_PR, ops, _case("cd-no-review")) is None and calls == []
+
+
+@pytest.mark.parametrize(("reason", "want"), [(None, None), ("動く workflow がある", 75)])
+def test_wait_ci_except_passes_a_pr_without_ci(reason, want):
+    """CI を設定していないリポジトリ: 検査が 0 件で、PR の head で動く CI が無ければ待たずに戻る。動く CI があれば上限まで待って 75。"""
+    from release_lib import reviewed as rv
+    from step_result import StepError
+
+    probes = []
+    ops = SimpleNamespace(pr_check_buckets=lambda r, n: [], no_checks_reason=lambda r, n: probes.append(n) or reason)
+    if want is None:
+        assert rv.wait_ci_except(".", 9, ("ndf/release-approval",), 0, ops) is None
+    else:
+        with pytest.raises(StepError) as e:
+            rv.wait_ci_except(".", 9, ("ndf/release-approval",), 0, ops)
+        assert e.value.code == want
+    assert probes == [9]
 
 
 def test_prod_ops_wires_the_entry_functions_at_call_time(monkeypatch):
@@ -1720,6 +1789,8 @@ def test_prod_ops_wires_the_entry_functions_at_call_time(monkeypatch):
         "published": "_published",
         "land": "land",
         "pr_check_buckets": "pr_check_buckets",
+        "no_checks_reason": "no_checks_reason",
+        "landed_commit": "landed_commit",
     }
     for name in wired.values():
         monkeypatch.setattr(mod, name, object())
@@ -2325,6 +2396,17 @@ def test_prod_land_rerun_reads_the_merge_queue(monkeypatch, state, after, want):
             land(Path("."), _LAND_ARGS, 9, HEAD)
         assert e.value.code == want
     assert port.calls == []
+
+
+@pytest.mark.parametrize("state", ["merged", "queued"])
+def test_prod_land_stops_when_the_merged_head_is_not_the_approved_one(monkeypatch, state):
+    """#3703 の I2: 照会の直前か merge queue を待つ間に、承認した head と違う head が入っていれば、マージコミットを返さず 1 で止める。"""
+    from step_result import StepError
+
+    land, port = _prod_land(state=state, head="d" * 40, after_wait="merged")
+    with pytest.raises(StepError) as e:
+        land(Path("."), _LAND_ARGS, 9, HEAD)
+    assert e.value.code == 1 and "承認した" in str(e.value) and port.calls == []
 
 
 def test_prod_land_reenqueues_a_pr_that_left_the_merge_queue(monkeypatch):

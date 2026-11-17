@@ -157,9 +157,9 @@ def release_selected(ctx: ReleaseCtx, approved, ops, case=None) -> tuple:
     items: list[dict] = []
     git(root, "fetch", "-q", "origin", "--tags")
     done = ops.find_pr(root, branch, prod, states=("MERGED", "OPEN"))
-    if done and done["state"] == "MERGED":
-        main_pr = done["number"]  # 再開: 本番チャネルへのマージは済んでいる（取り消せない）
-        merge, rows = _resume_merged(ctx, main_pr, approved, case, ops)
+    if landed := reviewed.landed_prod_pr(root, branch, prod, done, ops, case):
+        main_pr = landed[0]  # 再開: 本番チャネルへの取り込みは済んでいる（取り消せない）
+        merge, rows = _resume_merged(ctx, main_pr, landed[1], approved, case)
         items += rows
     else:
         names.require_untagged(root, plugin, a.version, git=git)
@@ -183,12 +183,13 @@ def release_selected(ctx: ReleaseCtx, approved, ops, case=None) -> tuple:
     return main_pr, merge, items, metrics, reviewed.admin_back(merge_back_after(root, a, plugin, branches, main_pr, ops))
 
 
-def _resume_merged(ctx: ReleaseCtx, main_pr, approved, case, ops) -> tuple[str, list[dict]]:
-    """再開: マージ済みの本番の PR のマージコミットが承認したコミットを含むかを確かめ、マージし直さない。
+def _resume_merged(ctx: ReleaseCtx, main_pr, commit, approved, case) -> tuple[str, list[dict]]:
+    """再開: 本番チャネルへ入った本番の PR の取り込みのコミット `commit` が承認したコミットを含むかを確かめ、マージし直さない
+    （CD のある場合の PR の上の承認との照合は `reviewed.landed_prod_pr` が済ませている）。
     (マージコミット, 足す行) を返す。迂回でマージしたのに記録が無ければ書く（#3506 の I7）。"""
     root, prod = ctx.root, ctx.prod
     git(root, "fetch", "-q", "origin")
-    merge = merged_or_tip(root, ops.merge_commit_of(root, main_pr), prod, git)
+    merge = merged_or_tip(root, commit, prod, git)
     if approved and git(root, "merge-base", "--is-ancestor", approved, merge, check=False).returncode != 0:
         raise StepError(f"マージ済みの本番の PR #{main_pr} のコミット {merge[:8]} が承認したコミット {approved[:8]} を含まない")
     rows = [{"kind": "pr", "name": f"#{main_pr}", "result": "already_merged", "base": prod}]

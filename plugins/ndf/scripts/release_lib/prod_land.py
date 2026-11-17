@@ -24,7 +24,7 @@ import gh_graphql
 import gh_parts
 import limits
 import waits
-from release_lib import approval_trail, land as land_lib, reviewed, strategy_route
+from release_lib import approval_trail, land as land_lib, land_checks, reviewed, strategy_route
 from release_lib.approval import HeadMoved
 from step_result import EXIT_INFRA_WAIT, StepError, gh_json, git, result
 
@@ -98,6 +98,17 @@ def landed_commit(root, pr: int, head: str) -> str | None:
     return None
 
 
+def no_checks_reason(root, pr: int) -> str | None:
+    """PR に検査が 1 件も無いときに待つ理由（`land_checks.no_checks_reason`）。None なら PR の head で動く CI が無く、待たずに進める。
+    PR を読めなければその理由を返す（CI が無いとはみなさない）。"""
+    port = land_lib.GhPort(root, _repo(root), _strategy(root))
+    try:
+        pull = port.pull(pr)
+    except land_lib.LandError as e:
+        return str(e)
+    return land_checks.no_checks_reason(port, pull["head"], pull)
+
+
 def _merge_commit(root, pr: int) -> str | None:
     d = gh_json(root, ["pr", "view", str(pr), "--json", "mergeCommit"], "gh pr view") or {}
     return (d.get("mergeCommit") or {}).get("oid") or None
@@ -119,7 +130,8 @@ class LandingIO:
 
 
 def _wait_checks_but_trail(root, pr: int, timeout: float) -> None:
-    reviewed.wait_ci_except(root, pr, (approval_trail.STATUS_CONTEXT,), timeout, SimpleNamespace(pr_check_buckets=pr_check_buckets))
+    ops = SimpleNamespace(pr_check_buckets=pr_check_buckets, no_checks_reason=no_checks_reason)
+    reviewed.wait_ci_except(root, pr, (approval_trail.STATUS_CONTEXT,), timeout, ops)
 
 
 def default_io() -> LandingIO:
@@ -148,7 +160,9 @@ def land(root, a, pr: int, head: str, trail_url: str = "", *, io: LandingIO | No
         if state == "queued":
             raise StepError(f"PR #{pr} が merge queue に残ったまま上限 {float(a.ci_wait):g} 秒までにマージされない", EXIT_INFRA_WAIT)
     if state == "merged":
-        return io.merge_commit(root, pr)  # 照会の直前に merge queue か人がマージした
+        # 照会の直前か待つ間に merge queue か人がマージした。入った head が承認した head と違えば公開へ進ませない（I2）
+        _require_merged_head(io, root, pr, head)
+        return io.merge_commit(root, pr)
     if state == "closed":
         raise StepError(f"PR #{pr} はマージされずに閉じている。開き直して承認を取り直してから打ち直す")
     strategy = io.strategy(root)
@@ -172,7 +186,20 @@ def land(root, a, pr: int, head: str, trail_url: str = "", *, io: LandingIO | No
     raise StepError(f"PR #{pr} を本番ブランチ {prod} へ入れられない: {got.get('reason') or got['result']}")
 
 
-def rerun_command(a) -> str:
+def _require_merged_head(io: LandingIO, root, pr: int, head: str) -> None:
+    """マージ済みの PR `pr` の head が承認した `head` と同じことを確かめる。違えば（承認の後に積んだコミットごと人がマージした）、
+    読めなければ StepError（1）。マージ済みのため入れ直せず、承認ゲートでなく止まりで返す。"""
+    try:
+        merged = str(io.port(root, io.repo(root), io.strategy(root)).pull(pr).get("head") or "").lower()
+    except land_lib.LandError as e:
+        raise StepError(str(e)) from e
+    if merged != str(head).lower():
+        raise StepError(
+            f"本番ブランチへ入った PR #{pr} の head {merged[:12] or '（読めない）'} が承認した {str(head)[:12]} と違う。公開しない"
+        )
+
+
+def release_retry_command(a) -> str:
     """本番の release の打ち直しのコマンド（`a` は release の引数。承認資料があれば --approval を添える）。"""
     material = getattr(a, "approval", None)
     return f"release-steps.py release --version {a.version} --channel prod" + (f" --approval {material}" if material else "")

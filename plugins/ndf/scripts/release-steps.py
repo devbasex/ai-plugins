@@ -110,7 +110,7 @@ from release_lib import approval, bump, carry, cd_result, changed, deploy, inclu
 from release_lib import names, others, port_mark, publish, record, replaced, review_range, reviewed, strategy_route  # noqa: E402
 import limits
 from release_lib import prod_land, trunk_release, version_merge  # noqa: E402
-from release_lib.prod_land import land, pr_check_buckets  # noqa: E402,F401 -- 本番の取り込みと検査の読み取り（ops として渡す）
+from release_lib.prod_land import land, landed_commit, no_checks_reason, pr_check_buckets  # noqa: E402,F401 -- 本番の取り込みと検査の読み取り（ops として渡す）
 from release_lib.approval import HeadMoved  # noqa: E402
 from release_lib.context import ApprovalRange, ReleaseCtx  # noqa: E402
 from release_lib.land_read import merged_or_tip  # noqa: E402
@@ -670,7 +670,7 @@ def cmd_release(a):
         _release(a, root, base, prod, plugin, route)
     except prod_land.LandPending as p:
         # merge queue へ入れた・人のマージを待つ: 本番ブランチへまだ入っていないので公開しない（決定 3・9）
-        again = prod_land.rerun_command(a)
+        again = prod_land.release_retry_command(a)
         nxt = (
             f"人が PR #{p.pr} をマージした後に {again} を打ち直す"
             if p.result == "human"
@@ -784,6 +784,8 @@ def _prod_ops() -> reviewed.ProdOps:
         published=_published,
         land=land,
         pr_check_buckets=pr_check_buckets,
+        no_checks_reason=no_checks_reason,
+        landed_commit=landed_commit,
     )
 
 
