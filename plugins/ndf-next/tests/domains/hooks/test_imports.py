@@ -155,3 +155,36 @@ def test_closure_follows_function_level_imports(tmp_path):
 )
 def test_characterize_closure_reads_files_under_src(roots, expected):
     assert closure(roots) == expected
+
+
+# 現状固定（I-011）: 最小の木で、関数の中の import・相対 import・親の __init__.py・循環・外のモジュールの扱いを固定する。
+MINI_TREE = {
+    "ndf/__init__.py": "",
+    "ndf/a/__init__.py": "import json\n",
+    "ndf/a/b.py": "from . import c\nfrom .c import thing\nfrom .. import top\n\n\ndef f():\n    import ext_mod\n    from ndf.a import b\n",
+    "ndf/a/c.py": "from ndf.a import b\nimport os.path\n",
+    "ndf/top.py": "from __future__ import annotations\n",
+}
+MINI_ALL = {"ext_mod", "json", "ndf", "ndf.a", "ndf.a.b", "ndf.a.c", "ndf.top", "os", "os.path"}
+
+
+@pytest.fixture
+def mini_src(tmp_path, monkeypatch):
+    for rel, text in MINI_TREE.items():
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text(text, encoding="utf-8")
+    monkeypatch.setattr(sys.modules[__name__], "SRC", tmp_path)
+    return tmp_path
+
+
+@pytest.mark.parametrize(
+    ("roots", "expected"),
+    [
+        (["ndf.a.b"], MINI_ALL),
+        (["ndf.a.c"], MINI_ALL),
+        (["ndf.top"], {"ndf", "ndf.top"}),
+        (["ndf.missing"], {"ndf", "ndf.missing"}),
+    ],
+)
+def test_characterize_closure_on_a_minimal_tree(mini_src, roots, expected):
+    assert closure(roots) == expected
