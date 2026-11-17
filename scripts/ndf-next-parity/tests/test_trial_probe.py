@@ -141,3 +141,74 @@ def test_texts_read_under_the_given_root(plugin):
 
 def test_default_plugin_root_is_ndf_next_of_this_repository():
     assert (probe.PLUGIN_ROOT / "manifests" / "skills.json").is_file()
+
+
+# 現状固定（I-001）: judge_row の分岐ごとの結果を、公開の judge から固定する。期待値は今の実装の出力である。
+def _branch_features():
+    return {
+        "locations": {"M2": [], "M8": ["src/m8/"], "M9": ["src/m9/"], "S1a": ["skills/"], "S1b": ["hooks/", "agents/"]},
+        "rows": [
+            {"id": "entrypoint:scripts/merged-steps.py", "kind": "entrypoint", "now": "scripts/merged-steps.py", "to": "M8"},
+            {"id": "entrypoint:scripts/old-name.py", "kind": "entrypoint", "now": "scripts/old-name.py", "not_built": "x"},
+            {"id": "entrypoint:scripts/m9.py", "kind": "entrypoint", "now": "scripts/m9.py", "to": "M9"},
+            {"id": "agent:helper", "kind": "agent", "now": "agents/helper.md", "to": "S1b"},
+            {"id": "agent:clean", "kind": "agent", "now": "agents/clean.md", "to": "S1b"},
+            {"id": "agent:none", "kind": "agent", "now": "agents/none.md", "to": "S1b"},
+            {"id": "workflow:ci.yml", "kind": "workflow", "now": ".github/workflows/ci.yml", "to": "M2"},
+            {"id": "workflow:ok.yml", "kind": "workflow", "now": ".github/workflows/ok.yml", "to": "M2"},
+            {"id": "contract:x", "kind": "contract", "now": "contracts/x.json", "to": "M2"},
+            {"id": "data:nb", "kind": "data", "now": "—", "not_built": "y"},
+        ],
+    }
+
+
+@pytest.fixture
+def branch_plugin(tmp_path):
+    for d in ("hooks", "src/m8", "skills/merged", "agents", ".github/workflows"):
+        (tmp_path / d).mkdir(parents=True)
+    (tmp_path / "skills/merged/SKILL.md").write_text('python3 "$SCRIPTS/merged-steps.py" plan\n', encoding="utf-8")
+    (tmp_path / "agents/helper.md").write_text("python3 scripts/old-name.py\n", encoding="utf-8")
+    (tmp_path / "agents/clean.md").write_text("bin/ndf x\n", encoding="utf-8")
+    (tmp_path / ".github/workflows/ci.yml").write_text("run: python3 scripts/merged-steps.py\n", encoding="utf-8")
+    (tmp_path / ".github/workflows/ok.yml").write_text("run: bin/ndf x\n", encoding="utf-8")
+    return tmp_path
+
+
+def test_characterize_judge_for_every_branch_of_judge_row(branch_plugin):
+    passed = {
+        "agent:clean": "trial/a.json",
+        "agent:helper": "trial/a.json",
+        "contract:x": "trial/b.json",
+        "entrypoint:scripts/m9.py": "trial/a.json",
+    }
+    got = probe.judge(_branch_features(), passed, "trial/z.json", root=branch_plugin, repo=branch_plugin)
+    z = "trial/z.json"
+    assert got == {
+        "entrypoint:scripts/merged-steps.py": {
+            "result": "failed",
+            "reason": "ndf-next の 1 ファイルがまだ旧い scripts/merged-steps.py を呼ぶ（例 skills/merged/SKILL.md）。"
+            "移行先 M8 が新しいエントリポイントのサブコマンドに置き換えていない",
+            "record": z,
+        },
+        "entrypoint:scripts/old-name.py": {
+            "result": "failed",
+            "reason": "ndf-next の 1 ファイルがまだ旧い scripts/old-name.py を呼ぶ（例 agents/helper.md）。作らない行なのに呼び手が残る",
+            "record": z,
+        },
+        "entrypoint:scripts/m9.py": {"result": "failed", "reason": "移行先 M9 の保存先が無い: src/m9/", "record": z},
+        "agent:helper": {
+            "result": "failed",
+            "reason": "本文が旧いプラグインのスクリプトを呼ぶ: old-name.py（作らない）。括弧は新しいエントリポイントのサブコマンドへ置き換える移行先の子",
+            "record": z,
+        },
+        "agent:clean": {"result": "passed", "record": "trial/a.json"},
+        "agent:none": {"result": "failed", "reason": "ndf-next に agents/none.md が無い（移行先 S1b）", "record": z},
+        "workflow:ci.yml": {
+            "result": "failed",
+            "reason": ".github/workflows/ci.yml が旧いプラグインのスクリプトを直に呼ぶ: merged-steps.py（移行先 M2）",
+            "record": z,
+        },
+        "workflow:ok.yml": {"result": "not_run", "reason": probe.STALLED, "record": z},
+        "contract:x": {"result": "passed", "record": "trial/b.json"},
+        "data:nb": {"result": "passed", "reason": "作らない行。ndf-next の本文に呼び手が無い", "record": z},
+    }
