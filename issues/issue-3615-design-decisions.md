@@ -24,7 +24,7 @@
 
 形ごとの処理をコードのアダプターにする案は採らない。今の 5 つの違い（起点・公開・完了の確かめ・取得・取り消し）のうち `release-steps` が持つのは承認資料の届き方の 1 行だけで、残りはバージョンの保存先と `deliveries` が持つ。
 
-根拠: Value 4 / Value 11 / P2（MVV 版 8）
+根拠: Value 4 / Value 11 / P2（MVV バージョン 8）
 
 ### 決定 2: バージョンの読み書きをプラグインに決め打たないため、#3572 の決定 22 のインタフェースで保存先のアダプターを main に置き、`pubspec` と `tag` を足す
 
@@ -49,7 +49,7 @@
 - 作り方: 自前で作る・標準に倣う
 - 比べた候補: PRD1 / PRD2 / LIB1
 
-根拠: Value 4 / Value 9 / Value 11（MVV 版 8）
+根拠: Value 4 / Value 9 / Value 11（MVV バージョン 8）
 
 ### 決定 3: Flutter のストアの規則を壊さないため、保存先 `pubspec` は `version:` の 1 行だけを書き換え、数のビルド番号を 1 つ上げる
 
@@ -60,7 +60,7 @@
 - 作り方: 自前で作る・標準に倣う
 - 比べた候補: PRD2 / LIB1
 
-根拠: Value 4 / Value 12（MVV 版 8）
+根拠: Value 4 / Value 12（MVV バージョン 8）
 
 ### 決定 4: 名前を設定で変えられるよう、`release.tag` の隣に `branch` と `changelog_heading` を置き、置き換えの語を `{plugin}`・`{version}`・`{date}` にそろえる
 
@@ -75,7 +75,7 @@
 - 作り方: 自前で作る・標準に倣う
 - 比べた候補: STD1 / STD2 / PRD1
 
-根拠: Value 4 / Value 11（MVV 版 8）
+根拠: Value 4 / Value 11（MVV バージョン 8）
 
 ### 決定 5: テストだけの変更でバージョンを上げないため、リリース対象外のファイルの既定をテストのファイルの表から作り、`conftest.py` を役割 `support` の行として表に足す
 
@@ -83,14 +83,14 @@
 
 今の既定は `**/conftest.py` を含む。ai-plugins には `plugins/ndf/conftest.py` がある。そのため、表に無いままでは、直した後にこのファイルの変更でバージョンが上がる（受け入れ条件 7・15 と既存のテスト `test_release_decide.py` の #2217 の行に反する）。表に列 `role`（`test` が既定、`support` はテストを支えるファイル）を足し、行 `python-conftest`（名前 `conftest.py`・`support`）を置く。リリース対象外の既定は両方の役割の行を使い、cross-refactoring のテストの判定（`is_test_file`）は `test` の行だけを使う。`conftest.py` を `test` の行にすると、cross-refactoring が変わった `conftest.py` そのものをテストとして流し、集めるテストが 0 件になる。
 
-テストのファイルの表の持ち主は #1142 の子 D2（表の `owner`）で、cross-review・cross-refactoring・試走の候補・リリースが読む共有カーネルである。列と行の追加は表の `columns` に型を書く形で行い、読む側の cross-refactoring を同じ PR で合わせる（設計文書の「ドメインモデル」のコンテキスト）。
+テストのファイルの表のオーナーは #1142 の子 D2（表の `owner`）で、cross-review・cross-refactoring・試走の候補・リリースが読む共有カーネルである。列と行の追加は表の `columns` に型を書く形で行い、読む側の cross-refactoring を同じ PR で合わせる（設計文書の「ドメインモデル」のコンテキスト）。
 
 採らなかった案: リリースの部品に `conftest.py` だけの既定を別に持つ案は、テストのファイルの見分け方が 2 か所になる（Value 11）。
 
 - 作り方: 自前で作る
 - 比べた候補: LIB3
 
-根拠: Value 4 / Value 11（MVV 版 8）
+根拠: Value 4 / Value 11（MVV バージョン 8）
 
 ### 決定 6: base と production が同じ設定で範囲が空にならないよう、前のリリースの起点をバージョンの単位ごとに決め、終点をリリース方式から決める
 
@@ -124,7 +124,7 @@
 - 作り方: 自前で作る
 - 比べた候補: PRD1
 
-根拠: Value 4 / Value 7 / Value 11（MVV 版 8）
+根拠: Value 4 / Value 7 / Value 11（MVV バージョン 8）
 
 ### 決定 7: `.claude-plugin` の無いリポジトリを確かめる設定として、nd-factory の設定のコピーを `release_branch`・保存先 `tag`・CD ありで組む
 
@@ -145,7 +145,7 @@
 
 採らなかった案: 保存先 `none` のまま R4 を緩める案は、リリースブランチの名前のバージョンを決められない。
 
-根拠: Value 4 / Value 13（MVV 版 8）
+根拠: Value 4 / Value 13（MVV バージョン 8）
 
 ### 決定 8: `release_branch` で選んだスプリントだけを出すため、`materials`・`assemble` は `--units` を受け、10 系の組み立てと含む PR の読み方を移す
 
@@ -156,13 +156,13 @@
 - 作り方: 自前で作る
 - 比べた候補: PRD1
 
-根拠: Value 3 / Value 4（MVV 版 8）
+根拠: Value 3 / Value 4（MVV バージョン 8）
 
 ### 決定 9: リモート名を 1 か所で決めるため、`cli` がメインディレクトリの設定から求め、組み立ての指定（`Target`）で渡す
 
 `cli` が `git.remote_of(<メインディレクトリ>)` を 1 回呼び、`Target.remote` に入れる。材料の収集・組み立ては引数のリモート名だけを使い、`adapters/git.py` の `__getattr__` の `ORIGIN` を消す（#3617 の決定 5 の引き継ぎ）。メインディレクトリの求め方は、今の `_strategy` と同じく `common_dir().parent` で、git の外なら `--root` である。受け入れ条件 11 の検索は語の単位（`rg -nw "ORIGIN"`）で打つ。語の一部に含む識別子（`ORIGIN_KEY`・`PRIVATE_ORIGIN`・`_ORIGINAL_ENV`）はリモート名と関係が無い。`rg -n "ORIGIN" plugins/ndf-next/src` の 18 件のうち、語の単位で当たるのは `git.py` の 2 件とリリースの部品の 5 件である（2026-11-17）。
 
-根拠: Value 4 / Value 11（MVV 版 8）
+根拠: Value 4 / Value 11（MVV バージョン 8）
 
 ### 決定 10: 利用者のリポジトリから起動できるよう、ai-plugins に再利用可能なワークフローを置き、利用者は短い呼び出し側のテンプレートを置く
 
@@ -179,19 +179,19 @@ ai-plugins の `.github/workflows/ndf-next-release.yml` は今のまま残す。
 - 作り方: ライブラリやサービスを使う・標準に倣う
 - 比べた候補: STD3 / STD4
 
-根拠: Value 1 / Value 4 / Value 11（MVV 版 8）
+根拠: Value 1 / Value 4 / Value 11（MVV バージョン 8）
 
 ### 決定 11: 新しい保存先の種類でバージョンの衝突の確かめが壊れないよう、`land` と 10 系のバージョンの候補を JSON の位置を持たない種類で空にする
 
 ndf-next の `land.version_rows` と 10 系の `release_lib/land_read.py` は、種類が `plugin` でなければ `path` と `pointer` を読む。`tag` は `path` を持たず、`pubspec` は `pointer` を持たないため、そのままでは読み出しで落ちる。2 つとも、`plugin`・`json` 以外の種類では候補を空にする（`none` と同じくバージョンのファイルを比べない）。`land` を保存先のアダプターへ移すのは #3572 の決定 22 の範囲で、lr-rel-rest が行う。スキーマの 10 系のコピー 2 つは、コントラクトの一致の検査（`scripts/check-ndf-contracts.py` の `COPY_DEFS`）が求めるため同じ PR でコピーする。10 系は `branch`・`changelog_heading` を読まず、今の形のまま動く。
 
-根拠: Value 3 / Value 7（MVV 版 8）
+根拠: Value 3 / Value 7（MVV バージョン 8）
 
 ### 決定 12: タグが別のコミットを指したまま進まないよう、`publish` は同じ名前のタグの指す先を比べ、違えば止まる
 
 今の `publish` は、同じ名前のタグがあれば指す先を見ずに `exists` を返す。保存先 `tag` ではタグがバージョンそのものであり、別のコミットを指すタグを `exists` で通すと、出したと記録したコミットとタグの中身が食い違う（要求の E8）。同じコミットなら `exists`、違えば原因 `refused` で止まり、タグ・今の指す先・出したコミットを出す。
 
-根拠: Value 7 / Value 13（MVV 版 8）
+根拠: Value 7 / Value 13（MVV バージョン 8）
 
 ### 決定 13: 子の表と実装の順序をそろえるため、子 `B2`（#3615）を順番 9・レーン `lrel-form2` で足し、S2 の先に要る子に入れる
 
@@ -201,18 +201,18 @@ ndf-next の `land.version_rows` と 10 系の `release_lib/land_read.py` は、
 "B2": {"issue": 3615, "packages": [], "needs": ["B1", "M2"], "order": 9, "lane": "lrel-form2", "closed": false}
 ```
 
-パッケージ `ndf.domains.release` のオーナーは M2 のままで、この子は新しいパッケージを持たない。#1142 の本文の子の表にも同じ行を足す（X4・G1 を足した設計と同じく、この設計の決定を子の表の正本とする）。
+パッケージ `ndf.domains.release` のオーナーは M2 のままで、この子は新しいパッケージを持たない。#1142 の本文の子の表にも同じ行を足す（X4・G1 を足した設計と同じく、この設計の決定を子の表の SSOT とする）。
 
-根拠: Value 14（MVV 版 8）
+根拠: Value 14（MVV バージョン 8）
 
-### 決定 14: 設定の置き場を 1 か所にする前提 2 と既存のキーを両立させるため、`.ndf/release.json` の既存のキーはそのまま読み、新しいキーは `branch_strategy.release` に置く
+### 決定 14: 設定を書くファイルを 1 か所にする前提 2 と既存のキーを両立させるため、`.ndf/release.json` の既存のキーはそのまま読み、新しいキーは `branch_strategy.release` に置く
 
 前提 2 は、リリースの形とリリースの形の設定を `branch_strategy.release` に置き、新しいキーもそこに足すと定める。この設計が足すキー（`branch`・`changelog_heading`・`version_store` の種類 `pubspec`・`tag`）はすべて `branch_strategy.release` に置く。
 
-`.ndf/release.json` の `steps`・`undistributed`・`bump_undistributed`・`changelog` は、main で既にあるキーである。根拠は `plugins/ndf-next/contracts/domains/ndf-files.json` の行 `release` の `keys`（2026-11-17）。この設計はキーを足さず、`undistributed` の意味だけを「既定を置き換える」から「既定へ足す」に変える（決定 5）。OpenAPI の `info.version` の書き換えは既存の `steps` の 1 行で受け、CHANGELOG のパスは既存の `changelog` で受ける。これらはリリースの形ではなくリリースの段階で流す手順とファイルの置き場であり、前提 2 の「新しいキー」に当たらないとみなす。
+`.ndf/release.json` の `steps`・`undistributed`・`bump_undistributed`・`changelog` は、main で既にあるキーである。根拠は `plugins/ndf-next/contracts/domains/ndf-files.json` の行 `release` の `keys`（2026-11-17）。この設計はキーを足さず、`undistributed` の意味だけを「既定を置き換える」から「既定へ足す」に変える（決定 5）。OpenAPI の `info.version` の書き換えは既存の `steps` の 1 行で受け、CHANGELOG のパスは既存の `changelog` で受ける。これらはリリースの形ではなくリリースの段階で流す手順とファイルの場所であり、前提 2 の「新しいキー」に当たらないとみなす。
 
 `.ndf/release.json` のキーを `branch_strategy.release` へ移すかは、#3572 の決定 22 との突き合わせと合わせて決める。決定 22 は同じファイルの `version_store` を扱う（設計文書の「人へ残す判断」の 4）。
 
 採らなかった案: この課題で 4 つのキーを `branch_strategy.release` へ移す案は、#3572 のブランチの `bump`・`pr-check` が読む `.ndf/release.json` との食い違いを増やす。lr-rel-rest の突き合わせの量も増える。
 
-根拠: Value 4 / Value 8 / Value 11（MVV 版 8）
+根拠: Value 4 / Value 8 / Value 11（MVV バージョン 8）

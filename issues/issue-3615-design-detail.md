@@ -94,7 +94,7 @@ plugins/ndf-next/
 | `plugins/ndf-next/src/ndf/adapters/git.py` | 変更 | 遅れて読む名前 `ORIGIN`（モジュールの `__getattr__`）を消す | 無し |
 | `plugins/ndf-next/src/ndf/domains/crossrefactor/tests_decide.py` | 変更 | テストのファイルの表の役割 `test` の行だけでテストのファイルを見分ける | `ndf.contracts.facts` |
 | `plugins/ndf-next/src/ndf/checks/children.json` | 変更 | 子 `B2`（#3615）の行と、S2 の `needs` の `B2` を足す | 無し |
-| `plugins/ndf-next/contracts/domains/release-forms.json` | 新設 | リリースの形 6 行（`id`・`label`・`reach`・`supported`・`why`） | 無し |
+| `plugins/ndf-next/contracts/domains/release-forms.json` | 新設 | リリースの形 6 行（`id`・`label`・`reach`・`supported`・`why`）。`owner` は `D2（contracts/domains。行はリリースの形を足す子が足す。初版は #3615）` | 無し |
 | `plugins/ndf-next/contracts/domains/test-files.json` | 変更 | 列 `role` と行 `python-conftest` を足す | 無し |
 | `plugins/ndf-next/contracts/schemas/ndf-settings/project.schema.json` | 変更 | `form` の値 2 つ・保存先 `pubspec`・`tag`・キー `branch`・`changelog_heading`・規則 R11 | 無し |
 | `plugins/ndf-next/docs/contracts/ndf-settings.md` | 変更 | 設定のキーの説明に同じ変更を書く | 無し |
@@ -120,9 +120,9 @@ plugins/ndf-next/
 
 ## クラスと関数の構造
 
-型の関係は設計文書の「構造」の節のクラス図を指し、ここでは描き直さない。
+型の関係は設計文書の「構造」のセクションのクラス図を指し、ここでは描き直さない。
 
-| 置き場 | クラスまたはモジュール | メソッドと最上位の関数 |
+| ファイル | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- |
 | `plugins/ndf-next/src/ndf/domains/release/forms_decide.py` | モジュール | 新設: `Form`・`FormUnsupported`・`form_of`・`reach_line` |
 | `plugins/ndf-next/src/ndf/domains/release/names_decide.py` | `NameFormats` と モジュール | 新設: `NameFormats`（`tag_of`・`version_of_tag`・`branch_of`・`version_of_branch`・`is_release_branch`・`heading_of`・`heading_key`）・`FormatMismatch`・`formats_of`・`highest_tag`・`_pattern` |
@@ -150,11 +150,11 @@ plugins/ndf-next/
 
 型の略: `Git` は `adapters.git.Git`、`GitHub` は `adapters.github.GitHub`、`Strategy` は `core.branch_strategy.Strategy`。
 
-| 関数 | 置き場 | 種類 | シグネチャ | 責務 1 文 | 事前条件 | 事後条件 | 副作用 |
+| 関数 | ファイル | 種類 | シグネチャ | 責務 1 文 | 事前条件 | 事後条件 | 副作用 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `forms_decide.form_of` | `plugins/ndf-next/src/ndf/domains/release/forms_decide.py` | 新設 | `form_of(name: str) -> Form` | 設定の形の名前から表の行を引き、扱わない形なら止める | 表 `release-forms` が読める | 返る行の `supported` は真 | 無し |
 | `forms_decide.reach_line` | `plugins/ndf-next/src/ndf/domains/release/forms_decide.py` | 新設 | `reach_line(form: Form) -> str` | 承認資料の届き方の 1 行を作る | `form` は `form_of` が返した行 | 行は `- 届き方: <label>: <reach>` の形 | 無し |
-| `names_decide.formats_of` | `plugins/ndf-next/src/ndf/domains/release/names_decide.py` | 新設 | `formats_of(release: Mapping[str, Any]) -> NameFormats` | 設定の `release` の節から書式を作り、無いキーに既定を入れる | 節はスキーマを通った値 | `branch`・`changelog_heading` は既定か設定の値。`tag` は設定の値（`None` を含む） | 無し |
+| `names_decide.formats_of` | `plugins/ndf-next/src/ndf/domains/release/names_decide.py` | 新設 | `formats_of(release: Mapping[str, Any]) -> NameFormats` | 設定の `release` のセクションから書式を作り、無いキーに既定を入れる | セクションはスキーマを通った値 | `branch`・`changelog_heading` は既定か設定の値。`tag` は設定の値（`None` を含む） | 無し |
 | `NameFormats.tag_of` | `plugins/ndf-next/src/ndf/domains/release/names_decide.py` | 新設 | `tag_of(self, unit: str, version: str) -> str \| None` | 単位と基底のバージョンからタグの名前を作る | `version` は SemVer | `tag` が `None` なら `None`。ほかは置き換えの語をすべて埋めた名前 | 無し |
 | `NameFormats.version_of_tag` | `plugins/ndf-next/src/ndf/domains/release/names_decide.py` | 新設 | `version_of_tag(self, unit: str, name: str) -> str \| None` | タグの名前がその単位の書式に全体一致すればバージョンを返す | 無し | `tag_of(unit, v)` の結果を渡すと `v` の基底が返る（I3）。合わなければ `None` | 無し |
 | `NameFormats.branch_of` | `plugins/ndf-next/src/ndf/domains/release/names_decide.py` | 新設 | `branch_of(self, version: str) -> str` | リリースブランチの名前を作る | `version` は SemVer | 名前は `branch` の `{version}` を埋めたもの | 無し |
@@ -219,12 +219,12 @@ plugins/ndf-next/
 | `changelog_decide.notes` | `plugins/ndf-next/src/ndf/domains/release/changelog_decide.py` | 変更 | `notes(text: str, key: str) -> str \| None` | `key` で始まる見出しのセクションの本文を読む | 無し | 無ければ `None` | 無し |
 | `changes_decide.default_undistributed` | `plugins/ndf-next/src/ndf/domains/release/changes_decide.py` | 新設 | `default_undistributed() -> tuple[str, ...]` | テストのファイルの表のすべての行から、リリース対象外の gitignore の形を作る（決定 5） | 表が読める | 保存先の行は `<名前>/`、名前の行は `<形>` | 無し |
 | `changes_decide.split` | `plugins/ndf-next/src/ndf/domains/release/changes_decide.py` | 変更 | `split(paths: Iterable[str], unit: str, directory: str, extra: Sequence[str]) -> Change` | 既定と `extra` を合わせた形で、単位の下の変化を分ける。`directory` が空なら根の下のすべて | 無し | 各パスは 2 つの組のどちらか一方にだけ入る | 無し |
-| `changes_decide.changes` | `plugins/ndf-next/src/ndf/domains/release/changes_decide.py` | 変更 | `changes(paths_by_unit: Mapping[str, Sequence[str]], unit_dirs: Mapping[str, str], extra: Sequence[str]) -> list[Change]` | 単位ごとに渡された範囲のパスを分ける | 2 つの写像の鍵が同じ | 変化のある単位だけを名前の順 | 無し |
+| `changes_decide.changes` | `plugins/ndf-next/src/ndf/domains/release/changes_decide.py` | 変更 | `changes(paths_by_unit: Mapping[str, Sequence[str]], unit_dirs: Mapping[str, str], extra: Sequence[str]) -> list[Change]` | 単位ごとに渡された範囲のパスを分ける | 2 つの写像のキーが同じ | 変化のある単位だけを名前の順 | 無し |
 | `included_decide.number_of` | `plugins/ndf-next/src/ndf/domains/release/included_decide.py` | 変更 | `number_of(subject: str, skipped: Collection[str], is_release: Callable[[str], bool]) -> int \| None` | 件名 1 行の PR の番号を、リリースブランチと `skipped` からのマージを除いて読む | 無し | PR のマージでなければ `None` | 無し |
 | `included_decide.numbers` | `plugins/ndf-next/src/ndf/domains/release/included_decide.py` | 変更 | `numbers(subjects: Iterable[str], skipped: Collection[str], is_release: Callable[[str], bool]) -> list[int]` | 件名の並びから含む PR の番号を集める | 無し | 小さい順で重なりが無い | 無し |
 | `included_decide.is_unit_merge` | `plugins/ndf-next/src/ndf/domains/release/included_decide.py` | 新設 | `is_unit_merge(subject: str, is_release: Callable[[str], bool]) -> bool` | 件名がリリースの単位のマージ（`Merge <スプリント> into <リリースブランチ>`）かを見分ける | 無し | リリースブランチの部分が書式に合うときだけ真 | 無し |
 | `ndf_settings._parse` | `plugins/ndf-next/src/ndf/domains/release/ndf_settings.py` | 変更 | `_parse(raw: dict) -> NdfSettings` | `undistributed` を既定へ足す追加の形として読む | 無し | キーが無ければ `undistributed` は空 | 無し |
-| `materials_decide.render` | `plugins/ndf-next/src/ndf/domains/release/materials_decide.py` | 変更 | `render(facts: Facts) -> str` | 届き方の行と、単位ごとの「前 → 次」と範囲の起点を出す | 無し | `versioned` が偽ならバージョンの節を出さない | 無し |
+| `materials_decide.render` | `plugins/ndf-next/src/ndf/domains/release/materials_decide.py` | 変更 | `render(facts: Facts) -> str` | 届き方の行と、単位ごとの「前 → 次」と範囲の起点を出す | 無し | `versioned` が偽ならバージョンのセクションを出さない | 無し |
 | `land.version_rows` | `plugins/ndf-next/src/ndf/domains/release/land.py` | 変更 | `version_rows(strategy: Strategy, show: Callable[[str], str \| None]) -> list[tuple[str, str]]` | `plugin`・`json` 以外の保存先で候補を空にする（決定 11） | 無し | `pubspec`・`tag`・`none` では空 | 無し |
 | `Lander.land` | `plugins/ndf-next/src/ndf/domains/release/land.py` | 変更 | `land(self, number: int) -> Landed` | リリースブランチの名前を書式で読む | 無し | 書式に合わない head では今と同じく止まる | ネットワーク（PR の読みとマージ） |
 | `record.released` | `plugins/ndf-next/src/ndf/domains/release/record.py` | 変更 | `released(hub: GitHub, number: int, production: str, formats: NameFormats) -> tuple[Pull, Record]` | リリースの PR の head の名前を書式で読んでバージョンを決める | 無し | 書式に合わなければ `NotReleased` | ネットワーク（PR の読み） |
@@ -277,7 +277,7 @@ plugins/ndf-next/
 | `assemble._span` | `--units` が無い | `units` の取り方で引数が無い | 同上 | 止める（`AssembleError`） | `precondition`。`--units` が要ると出す | 何も書いていない |
 | `assemble._span` | PR が本番ブランチ宛てでない | `--pr` の番号の誤り | PR の `base_ref` | 止める（`AssembleError`） | `precondition` | 何も書いていない |
 | `assemble.open_releases` | 1 ページで読み切れない | 開いている PR が `PER_PAGE` 件以上 | 件数 | 止める（`AssembleError`。今と同じ） | `precondition` | 何も書いていない |
-| `assemble._write` | 設定の手順が落ちる | 手順のコマンドの失敗 | `run_step` | 止める（`StepFailed`） | `check_failed`。手順の名前と標準エラーの末尾 | 送る前に止まる。手元の作業場所の変更は workflow の後片付けで消える |
+| `assemble._write` | 設定の手順が落ちる | 手順のコマンドの失敗 | `run_step` | 止める（`StepFailed`） | `check_failed`。手順の名前と標準エラーの末尾 | 送る前に止まる。手元の作業場所の変更は workflow のクリーンアップで消える |
 | `assemble._write` | 保存先の書き換えの失敗 | 上の `*Store.write` の行 | `store.write` | 止める（例外をそのまま） | 上の行の出力 | 送る前に止まる |
 | `assemble._commit_and_push` | 送れない | 権限・同じ名前のブランチが先に作られた | `git push` の終了コード | 止める（`GitError`） | `precondition`。リモート名とブランチ名 | リモートに何も残らない。同じブランチが先にあれば I6 の止まり方へ進む |
 | `assemble._facts` | 上げるものが無い | バージョンを持つ保存先で変化がリリース対象外だけ | 計画が空 | 止める（`NothingToRelease`） | `not_applicable`。範囲を出す | 何も書いていない |
@@ -294,7 +294,7 @@ plugins/ndf-next/
 | `tagging.publish` | 扱わない形 | `form_of` の行 | 先頭 | 止める | `precondition` | 何も書いていない |
 | `cli._remote` | 設定の `remote` が壊れている | `.ndf/worktree.json` の値の誤り | `git.remote_of` | 止める（`RemoteError`。`GitError` の子） | `precondition`（I8） | 何も書いていない |
 | `cli.cmd_assemble` | 上の各行 | 上の各行 | 段階のモジュール | `_stopped_of` へ渡す | 上の各行 | 上の各行 |
-| `cli.cmd_materials` | `--out` に書けない | 置き場が無い | `write_text` | 止める（`OSError` は今と同じく捕まえない） | Python の例外と終了コード 1 | 再実行できる |
+| `cli.cmd_materials` | `--out` に書けない | 書き込み先のディレクトリが無い | `write_text` | 止める（`OSError` は今と同じく捕まえない） | Python の例外と終了コード 1 | 再実行できる |
 | `cli.cmd_publish` | 上の各行 | 上の各行 | 段階のモジュール | `_stopped_of` へ渡す | 上の各行 | 上の各行 |
 | `Lander.land` | head が書式に合わない | リリースブランチでない PR | `version_of_branch` | 止める（`FormatMismatch`） | `precondition`（今の `VersionError` と同じ種類） | 何も書いていない |
 | `record.released` | head が書式に合わない | 同上 | `version_of_branch` | 止める（`NotReleased`） | `not_applicable` | 何も書いていない |
@@ -363,16 +363,16 @@ plugins/ndf-next/
 
 | 関数 | 条件の組み合わせ | 結果 |
 | --- | --- | --- |
-| `materials_decide.render` | `versioned` が真 | 節「バージョン」に単位ごとの `<単位>: <前> → <次>（範囲の起点 <短い SHA>）` |
-| `materials_decide.render` | `versioned` が偽 | 節「バージョン」を出さない |
-| `materials_decide.render` | いつも | 節「届き方」に `reach_line` の 1 行 |
+| `materials_decide.render` | `versioned` が真 | セクション「バージョン」に単位ごとの `<単位>: <前> → <次>（範囲の起点 <短い SHA>）` |
+| `materials_decide.render` | `versioned` が偽 | セクション「バージョン」を出さない |
+| `materials_decide.render` | いつも | セクション「届き方」に `reach_line` の 1 行 |
 
 - 繰り返しの終わる条件: `gather.introduced` は本番ブランチの保存先のパスを変えたコミットを新しい順に読む。今のバージョンと違う値に当たった時点で止める（10 系の `untagged_since` と同じ）。`units.build` は `--units` の数だけ回る
 - 計算量の注意: `gather.introduced` は保存先のパスを変えたコミットだけを `git log -- <パス>` で絞ってから `git show` を打つ。単位ごとに 1 回で、ai-plugins の 12 単位でもタグがあれば打たない（タグが先に決まる）。`gather.shipped` はリモートのタグを `ls-remote` 1 回で読む（今と同じ）
 
 ## 内部のデータと定数
 
-| 名前 | 種類 | 置き場 | 既定値 |
+| 名前 | 種類 | ファイル | 既定値 |
 | --- | --- | --- | --- |
 | `Form` | 型（NamedTuple: `id`・`label`・`reach`・`supported`・`why`） | `plugins/ndf-next/src/ndf/domains/release/forms_decide.py` | — |
 | `forms_decide.TABLE` | 定数 | `plugins/ndf-next/src/ndf/domains/release/forms_decide.py` | `"release-forms"`（表のパスは `contracts` が引く） |
@@ -425,7 +425,7 @@ plugins/ndf-next/
 | --- | --- | --- | --- |
 | `forms_decide.form_of` | `ndf.contracts.facts.rows`・`facts.value` | `rg -n "def rows\|def value" plugins/ndf-next/src/ndf/contracts` | 使う（表を引くだけ） |
 | `forms_decide.reach_line` | `materials_decide` の行を作る関数 | `rg -n "def _" plugins/ndf-next/src/ndf/domains/release/materials_decide.py` | 使えない理由: 形の行を受ける関数が無い。新設して `render` から呼ぶ |
-| `names_decide.formats_of` | `Strategy.release_plugin`・`branch_strategy.get` | `rg -n "def get\|release_plugin" plugins/ndf-next/src/ndf/core/branch_strategy.py` | 使う（`get` で節を読む） |
+| `names_decide.formats_of` | `Strategy.release_plugin`・`branch_strategy.get` | `rg -n "def get\|release_plugin" plugins/ndf-next/src/ndf/core/branch_strategy.py` | 使う（`get` でセクションを読む） |
 | `NameFormats.tag_of` | `version_decide.tag_of` | `rg -n "def tag_of" plugins/ndf-next/src` | 使えない理由: 区切り `--v` を決め打つ。こちらへ移して書式で作る |
 | `NameFormats.version_of_tag` | `version_decide.version_of_tag`・10 系の `release_tag.latest_release_tag` | `rg -n "def version_of_tag\|def latest_release_tag" plugins` | 使えない理由: 前者は接頭辞の決め打ち、後者は 10 系で ndf-next から読めない。`_pattern` で作る |
 | `NameFormats.branch_of` | `version_decide.branch_of` | `rg -n "def branch_of" plugins/ndf-next/src` | 使えない理由: 接頭辞の決め打ち。こちらへ移す |
@@ -535,7 +535,7 @@ plugins/ndf-next/
 | `included_decide.numbers` | 重なりを除く | — | — |
 | `included_decide.is_unit_merge` | `Merge sprint/a into release/v1.2.3` で真 | `Merge origin/sprint/a into ...` で真 | PR のマージで偽 |
 | `ndf_settings._parse` | `undistributed` が足す形で読まれる | キーが無いとき空 | 文字列でない値で `NdfSettingsError` |
-| `materials_decide.render` | 届き方と「前 → 次」と範囲の起点が出る | `versioned` が偽でバージョンの節が無い | — |
+| `materials_decide.render` | 届き方と「前 → 次」と範囲の起点が出る | `versioned` が偽でバージョンのセクションが無い | — |
 | `version_decide.Planned` | `since` を持つ | — | — |
 | `land.version_rows` | `plugin`・`json` で今のまま | `pubspec`・`tag`・`none` で空 | — |
 | `Lander.land` | 書式の名前の PR を入れる（既存のテスト） | — | 書式に合わない head で止まる |
