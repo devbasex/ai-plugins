@@ -92,6 +92,10 @@ def wrapper_name(repo: str, plan: str, lane: str) -> str:
     return f"{readable}-{digest}"
 
 
+# 起こせる行の種類（行の入力の `kind`）: スプリントの行と開発ループの行
+SPRINT_KIND, LOOP_KIND = "sprint", "loop"
+
+
 class Unsupported(Exception):
     """起こす入力を組めない行（開発ループの行など）。打ち直しても起こせない。"""
 
@@ -107,10 +111,12 @@ def start_commands(plan: str, lane: str, lane_table: str, row: LaneRow) -> list[
     開発ループの行は `loop_commands`。スプリントの行でも開発ループの行でもなければ `Unsupported`。
     """
     kind = row.input.get("kind")
-    if kind == "loop":
+    if kind == LOOP_KIND:
         return loop_commands(plan, lane, lane_table, row)
-    if kind != "sprint":
-        raise Unsupported(f"行 {lane}/{row.key} は {kind} の行で、起こす入力を組めない（起こせるのは sprint と loop の行だけ）")
+    if kind != SPRINT_KIND:
+        raise Unsupported(
+            f"行 {lane}/{row.key} は {kind} の行で、起こす入力を組めない（起こせるのは {SPRINT_KIND} と {LOOP_KIND} の行だけ）"
+        )
     args = [str(a) for a in row.args]
     mode = [] if "--mode" in args else ["--mode", DEFAULT_MODE]
     issues = [str(i) for i in row.input["issues"]]
@@ -133,7 +139,7 @@ def loop_commands(plan: str, lane: str, lane_table: str, row: LaneRow) -> list[d
 
 def loop_of(lane: str, row: LaneRow) -> Optional[str]:
     """開発ループの行ならループの名前（レーン名）。ほかの行は None。"""
-    return lane if row.input.get("kind") == "loop" else None
+    return lane if row.input.get("kind") == LOOP_KIND else None
 
 
 def _going_on(sprint_id: str, loop: Optional[str]) -> dict[str, Any]:
