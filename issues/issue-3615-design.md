@@ -1,0 +1,435 @@
+# ndf-next のリリース: 設定したリリースの形とバージョンの保存先で、承認資料・リリースブランチ・タグを組む（#3615）
+
+## 目的
+
+- **今どうなっているか**: ndf-next のリリースの部分（`plugins/ndf-next/src/ndf/domains/release/`）は、バージョンとバージョンの単位を Claude Code のマーケットプレイスの登録とプラグインの定義からしか読めない。`.claude-plugin` の無いリポジトリでは承認資料・リリースブランチの組み立て・タグのどれも前提の誤りで止まる。base と production が同じ設定では、差分の範囲が空になる
+- **誰に効くか**: NDF を使う Web サービス・モバイルアプリ・業務文書だけのリポジトリの開発者と、NDF のリリースを自分のリポジトリから起動したい利用者
+- **変えると何が成り立つか**: 設定のリリースの形・バージョンの保存先・名前の書式で、プラグインの登録が無いリポジトリでも承認資料を組み、リリースブランチを作り、タグを打てる。今の NDF の release Skill のリリースの形 9 種の扱いが表で決まる
+
+## 適用範囲
+
+- **働く範囲**: ndf-next を使うすべてのリポジトリ（ai-plugins を含む）。利用者のリポジトリでは、置いた workflow から `ndf release-steps` が動く
+- **プロジェクトごとに違うもの**: リリースの形・バージョンの保存先・名前の書式は `.ndf/project.json` のセクション `branch_strategy` の `release` で受ける。リリース対象外のファイルの追加と CHANGELOG のパスは `.ndf/release.json` で受ける。リモート名は `.ndf/worktree.json` の `remote` で受ける。秘密の名前は利用者の workflow の中で決める
+- **当たるモード**: リリースを通るすべてのモード（`standard`・`light`・`operation`・`documentation`）
+
+### 代表のリポジトリでの振る舞い
+
+| 代表のリポジトリ | 設定の要点 | 直した後に起きること | この種類で扱えなくなること |
+| --- | --- | --- | --- |
+| Web サービス（TypeScript・vitest か jest・develop→main・OpenAPI） | 種類 `web-develop`。`merge_base_branch`・形 `service`・保存先 `json`（`package.json` の `/version`）・タグ `v{version}` | `materials`: 範囲は本番ブランチ..ベースブランチ。`*.test.ts`・`__tests__/` だけの変更ではバージョンを上げない。`package.json` の前と次のバージョンを出す。`assemble`: develop の HEAD から `release/v1.2.3` を作り、`package.json` と CHANGELOG のセクションを書いて main 宛ての PR を作る。OpenAPI の `info.version` は `.ndf/release.json` の手順（`{version}` の置き換え）で書く。`publish`: main へのマージの後に、置いた workflow がタグ `v1.2.3` と GitHub Release を作る | 無し |
+| モバイルアプリ（Flutter か Swift） | 種類 `mobile`。`release_branch`・形 `mobile`。Flutter は保存先 `pubspec`、Swift は保存先 `tag`。タグ `v{version}` | `materials`: 選んだスプリント（`--units`）を本番ブランチの HEAD へ集めた先頭を一時の作業場所に組み、範囲は前のバージョンのタグ..その先頭。`assemble`: 同じ先頭からリリースブランチを作り、Flutter は `pubspec.yaml` の `version: 1.2.3+45` を `1.2.4+46` に書く。Swift は書き換えるファイルが無く、CHANGELOG のセクションだけを書く。`publish`: タグと（設定が真なら）GitHub Release。ストアへの提出は `deliveries` の手動の行として承認資料に並ぶ | 無し |
+| 業務文書だけ | 種類 `docs`。`trunk`・`production_pr`・形 `document`・保存先 `none`・タグ無し | `materials --pr <本番の PR>`: 範囲はその PR（本番ブランチとの分岐点..PR の先頭）。バージョンの行は出さず、含む PR と変化と「提出先へ置く」届き方を出す。`assemble`: バージョンアップの PR を作らないリリース方式なので `not_applicable`。`publish`: バージョンもタグも無いので `not_applicable` | 無し |
+
+### ai-plugins だけの事情
+
+| 値 | 置く所 | 持つ Issue |
+| --- | --- | --- |
+| 形 `package-plugin`・保存先 `plugin`・タグ `{plugin}--v{version}`・GitHub Release を作る | ai-plugins の `.ndf/project.json` の `branch_strategy.release`（値は変えない） | #3615（コードの既定にしない） |
+| マーケットプレイスの登録の 12 個のプラグインをバージョンの単位にする | 保存先のアダプター `plugin` が `.claude-plugin/marketplace.json` から読む | #3615 |
+| リリースの workflow の秘密 `NDF_RELEASE_TOKEN` と変数 `NDF_RELEASE_RUNNER` | ai-plugins の `.github/workflows/ndf-next-release.yml` | #3615（テンプレートと再利用可能なワークフローは名前を持たない） |
+| トークン消費の記録の手順 | ai-plugins の `.ndf/release.json` の `steps` | 既存（変えない） |
+| `plugins/ndf/conftest.py` をリリース対象外にする | テストのファイルの表の行 `python-conftest`（Python の慣習として表に置く） | #3615 |
+
+## あるべき姿の根拠
+
+| 根拠 | 種類 | 何を示すか |
+| --- | --- | --- |
+| 「ai-plugins(ndf) を開発することと、ndf を使って様々な開発を汎用的に進行することの区別がついていない設計が入り込んでしまう」（2026-11-16） | 利用者の指示の原文 | プラグインの形をコードの既定にせず、設定で選ぶアダプターの 1 つにする |
+| PRD1（release-please の release type） | 外部の一次情報 | 主要な製品が、リポジトリの種類ごとにバージョンを書くファイルを選び（`node`・`dart`・`simple`）、工程は共通にしている |
+| STD1（SemVer の FAQ） | 外部の一次情報 | `v1.2.3` はタグの名前であってバージョンではない。タグの書式はバージョンと別に設定で持つ |
+| STD2（Keep a Changelog 1.1.0） | 外部の一次情報 | CHANGELOG の見出しは `## [1.2.3] - 2026-06-07` の形が広く使われ、今の `## [ndf 1.2.3] - <日付>` と違う。見出しを書式で変えられる必要がある |
+| STD3（GitHub Actions の再利用可能なワークフロー） | 外部の一次情報 | 呼び出し側は秘密を名前で渡せ、呼ばれる側は秘密の名前を決め打たない |
+| ai-plugins の `.ndf/project.json` の `branch_strategy`（`trunk`・base と production が `main`） | 実測（2026-11-17） | 今の `assemble` は範囲を `origin/main..origin/main` にし、ai-plugins でも組み立てる変化が 0 件になる |
+
+要求と受け入れ条件は #3615 の本文にある（コピーは [issue-3615-requirements.md](issue-3615-requirements.md)）。この文書は「どう作るか」だけを扱う。
+決定の記録は [issue-3615-design-decisions.md](issue-3615-design-decisions.md) に分けた。
+
+## ドメインモデル
+
+### コンテキスト
+
+| コンテキスト | 何の語が 1 つの意味に決まるか |
+| --- | --- |
+| リリース（`ndf-release`） | リリースの形・バージョンの保存先・バージョンの単位・名前の書式・前のリリースの起点・リリース対象外のファイル |
+| 開発の工程（`ndf-workflow`） | ブランチ戦略の設定・リリース方式・リリースの単位（選んだスプリントブランチ）・テストのファイルの表 |
+
+開発の工程が上流、リリースが下流の関係で、**公開された言語**でつなぐ。リリースは、ブランチ戦略の設定のスキーマ（`contracts/schemas/ndf-settings/project.schema.json`）と、テストのファイルの表・リリースの形の表（`contracts/domains/`）を読むだけで、書き換えない。設定を書くのは解析の `ndf project branch-strategy` だけである。
+
+### 集約
+
+| 集約 | オーナー（書き換えてよいもの） | 根 | エンティティ | 値オブジェクト |
+| --- | --- | --- | --- | --- |
+| リリースの計画 | 材料の収集と組み立て（`gather`・`assemble`） | 承認資料の材料（`Facts`） | バージョンの単位ごとのバージョンアップの計画（`Planned`） | 範囲・前のリリースの起点・含む PR・変化 |
+| バージョンの保存先 | 保存先のアダプター（`version_store`） | 保存先のアダプター 1 つ | バージョンの単位（`Unit`） | バージョン |
+| 名前の書式 | 名前の判断（`names_decide`） | 名前の書式（`NameFormats`） | — | タグ・リリースブランチ・CHANGELOG の見出しの書式 |
+| リリースの形の表 | コントラクト（`contracts/domains/release-forms.json`。コードは書き換えない） | 表 | 形の行 | 届き方・扱い・11.x へ回す理由 |
+
+リリースの計画は、バージョンの単位を名前で参照し、保存先のアダプターをオブジェクトとして持たない。1 回の `assemble` が書き換えるのは、リリースブランチの作業場所の上のバージョンの保存先と CHANGELOG だけである。
+
+### 不変条件
+
+| # | 集約 | 条件 | 破れたときの扱い |
+| --- | --- | --- | --- |
+| I1 | リリースの形の表 | 設定のリリースの形は表の行にあり、扱いが `11.x` の形では `materials`・`assemble`・`publish` が何もせずに止まる | 原因 `precondition`。形の名前と表のパスと 11.x へ回す理由を出す |
+| I2 | バージョンの保存先 | 保存先の種類ごとにアダプターが 1 つあり、材料の収集・組み立て・タグはアダプターのインタフェースだけを呼ぶ（種類の名前で分岐しない） | 種類が表に無ければ原因 `precondition` で止まり、取れる種類を出す |
+| I3 | 名前の書式 | 書式で作った名前を同じ書式で読み戻すと、元のバージョンとバージョンの単位の名前になる。書式に合わない名前は読まない | 合わない名前は前のバージョンの候補にしない |
+| I4 | リリースの計画 | `trunk` の `release_pr` と `release_branch` では、範囲の起点をバージョンの単位ごとに前のリリースの起点から決め、本番ブランチの HEAD にしない | 起点が決まらなければ本番ブランチの最初のコミットから集める |
+| I5 | リリースの計画 | リリース対象外のファイルだけの変化では、`bump_undistributed` が偽ならバージョンを上げない | その単位をバージョンアップの計画に入れない |
+| I6 | リリースの計画 | 同じ名前のリリースブランチが先にあれば作らない | 原因 `precondition` で止まる |
+| I7 | リリースの計画 | 同じ名前のタグが別のコミットを指していれば動かさない | 原因 `refused` で止まり、タグと 2 つのコミットを出す |
+| I8 | リリースの計画 | リモート名は 1 回の実行で設定から 1 度だけ求め、リリースの部品は名前を書かない | 設定が読めなければ原因 `precondition` |
+| I9 | 名前の書式 | ai-plugins の設定（保存先 `plugin`・CHANGELOG の見出しとリリースブランチの書式なし）では、名前と承認資料が直す前と同じになる | 既存のテストが落ちる |
+
+### ドメインイベント
+
+| # | イベント | 発生元 | 受け手 |
+| --- | --- | --- | --- |
+| E1 | 設定を読んだ | `release-steps` の各サブコマンド（`cli`） | リリースの形の判断・保存先のアダプターの選択 |
+| E2 | リリースの形とバージョンの保存先を選んだ | リリースの形の判断（`forms_decide`）・`version_store.load` | 材料の収集 |
+| E3 | 前のリリースの起点を決めた | 起点の判断（`since_decide`）と材料の収集 | 変化の判定 |
+| E4 | 差分の範囲のファイルを、リリース対象とリリース対象外に分けた | 変化の判定（`changes_decide`） | バージョンアップの計画 |
+| E5 | 次のバージョンを決めた | バージョンの計算（`version_decide`） | 承認資料・組み立て |
+| E6 | 承認資料を組んだ | 承認資料（`materials_decide`） | 会話のセッション（`present`）・リリースの PR の本文 |
+| E7 | リリースブランチを作り、バージョンと CHANGELOG のセクションを書いた | 組み立て（`assemble`） | リリースの PR（承認ゲート） |
+| E8 | タグを打った | タグ（`tagging`） | GitHub Release・リリース記録 |
+| E9 | 利用者のリポジトリの workflow がリリースを起動した | 呼び出し側のテンプレートの workflow | 再利用可能なワークフロー → `release-steps` |
+
+### 用語
+
+| 用語 | 意味 | 用語集への反映 |
+| --- | --- | --- |
+| リリースの形 | 利用者へ届く仕組みの種類（パッケージ・サービス・モバイルアプリなど）。設定の `release.form` の値で、リリースの形の表の行を指す | 意味の変更（`ndf-release`） |
+| リリースの形の表 | リリースの形ごとの届き方と、ndf-next での扱い（扱う / 11.x へ回す理由）を持つ表（`plugins/ndf-next/contracts/domains/release-forms.json`） | 追加（`ndf-release`） |
+| バージョンの単位 | 1 つのバージョンを持つリリースの対象。保存先 `plugin` ではマーケットプレイスに登録したプラグイン 1 つ、ほかの保存先ではリポジトリ全体の 1 つ | 追加（`ndf-release`） |
+| 保存先のアダプター | バージョンの保存先の種類ごとに、バージョンの単位の一覧・バージョンの読み書き・書き換えてよいパスを同じインタフェースで持つ部品 | 追加（`ndf-release`） |
+| 前のリリースの起点 | 差分の範囲を集め始めるコミット。前のバージョンのタグ、無ければ本番ブランチで今のバージョンが入ったコミット、それも無ければ本番ブランチの最初のコミット | 追加（`ndf-release`） |
+| 再利用可能なワークフロー | GitHub Actions で `workflow_call` を持ち、ほかのリポジトリの workflow から `uses:` で呼べる workflow。ai-plugins の `.github/workflows/ndf-release-reusable.yml` | 追加（`ndf-release`） |
+
+## 外部の調査
+
+| 種類 | 調べるか | 理由 |
+| --- | --- | --- |
+| 標準・仕様 | 調べる | タグの名前とバージョンの関係（SemVer）、CHANGELOG の見出しの形（Keep a Changelog）、ほかのリポジトリから workflow を呼ぶ形（GitHub Actions）に事実上の標準がある |
+| 主要な製品 | 調べる | リリースの自動化の製品が、リポジトリの種類ごとのバージョンのファイルとタグの書式をどう選ばせているかを比べる |
+| ライブラリとサービス | 調べる | `pubspec.yaml` の読み書きに YAML のライブラリを使うか、バージョンの計算を既存の依存で続けるかを決める |
+
+### 標準・仕様
+
+| # | 標準・仕様 | 何を定めているか | 設計への反映 | 出典 |
+| --- | --- | --- | --- | --- |
+| STD1 | Semantic Versioning 2.0.0 の FAQ「Is "v1.2.3" a semantic version?」 | `v1.2.3` はバージョンではなく、`v` を前に付けるのはタグの名前の慣習である | タグの書式（`{version}` を含む文字列）をバージョンと別の設定に置く | `https://raw.githubusercontent.com/semver/semver/master/semver.md`（2026-11-17） |
+| STD2 | Keep a Changelog 1.1.0 | 新しいバージョンを先頭に置き、見出しは `## [2.0.0] - 2026-06-07`（日付は ISO 8601） | CHANGELOG の見出しの書式を設定で変え、`{date}` は `YYYY-MM-DD` | `https://raw.githubusercontent.com/olivierlacan/keep-a-changelog/main/source/en/1.1.0/index.html.haml`・同リポジトリの `CHANGELOG.md`（2026-11-17） |
+| STD3 | GitHub Actions のワークフローの再利用 | 呼ばれる側は `on: workflow_call` を持ち、秘密は呼び出し側が名前で渡すか `secrets: inherit` で渡す。`required: true` は渡したかだけを確かめる | 呼ばれる側は秘密 `release_token` を受け、呼び出し側は自分の秘密の名前を割り当てる | `https://raw.githubusercontent.com/github/docs/main/content/actions/how-tos/reuse-automations/reuse-workflows.md`（2026-11-17） |
+| STD4 | GitHub Actions の `GITHUB_TOKEN` | 見出し「When `GITHUB_TOKEN` triggers workflow runs」のセクションがある（本文は文書の再利用の断片で、取得していない） | 秘密が無いときに `github.token` へ倒す操作では CI が起動しないことを、ai-plugins の workflow の注記（`.github/workflows/ndf-next-release.yml` の 23 行目）と合わせて案内する | `https://raw.githubusercontent.com/github/docs/main/content/actions/concepts/security/github_token.md`（2026-11-17） |
+
+### 主要な製品
+
+| # | 製品 | どう解いているか | 設計への反映 | 出典 |
+| --- | --- | --- | --- | --- |
+| PRD1 | release-please（設定とマニフェストのリリース） | release type ごとにバージョンを書くファイルを決める（`node`・`dart` は `pubspec.yaml`・`simple` は `version.txt`）。タグは既定で `<component>-v<version>`、`include-component-in-tag: false` で `v<version>`。CHANGELOG のパスは `changelog-path` | 保存先の種類で書くファイルを選び、工程は共通にする。タグの書式を設定で変える | `https://raw.githubusercontent.com/googleapis/release-please/main/docs/customizing.md`・`docs/manifest-releaser.md`（2026-11-17） |
+| PRD2 | release-please の `pubspec.yaml` の書き換え | `^version: ` の行だけを置き換え、`+` の後のビルド番号が数なら 1 つ上げて残す | 保存先 `pubspec` は同じ規則で書く | `https://raw.githubusercontent.com/googleapis/release-please/main/src/updaters/dart/pubspec-yaml.ts`（2026-11-17） |
+
+### ライブラリとサービス
+
+| # | 候補 | バージョン | ライセンス | 最後のリリースの日付 | 終了のアナウンス | 要件を満たすか | 出典 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| LIB1 | ruamel.yaml（ndf-next の既存の依存） | 0.19.1 | MIT | 2026-01-02 | 無し | 満たす（コメントを保つ読み書き）。ただし `version:` の 1 行の置き換えには要らない | `https://pypi.org/pypi/ruamel.yaml/json`（2026-11-17） |
+| LIB2 | semver（ndf-next の既存の依存。`uv.lock` は 3.1.0） | 3.1.2 | BSD-3-Clause | 2026-11-15 | 無し | 満たす（バージョンの解釈と上げ方。今の計算をそのまま使う） | `https://pypi.org/pypi/semver/json`（2026-11-17） |
+| LIB3 | pathspec（ndf-next の既存の依存） | 1.1.1 | PyPI の欄は空 | 2026-04-27 | 無し | 満たす（設定の `undistributed` の gitignore の形のマッチを続ける） | `https://pypi.org/pypi/pathspec/json`（2026-11-17） |
+
+### 確かめられなかったこと
+
+| 対象 | 試した手段 | 結果と理由 |
+| --- | --- | --- |
+| semantic-release のタグの書式（`tagFormat`） | `https://raw.githubusercontent.com/semantic-release/semantic-release/master/docs/usage/configuration.md` と `HEAD` の同じパス | HTTP 404（パスが違う）。PRD1 で同じ論点（タグの書式を設定で変える）を確かめたため、追わなかった |
+| `GITHUB_TOKEN` の操作が workflow を起動しない旨の本文 | STD4 の URL | 本文は文書の再利用の断片（`data reusables`）で、取得したファイルに無い |
+
+調べた量: 候補 9 件・取得の試み 15 回。
+
+## 機能一覧
+
+| # | 機能 | 誰が使うか |
+| --- | --- | --- |
+| F1 | 設定のリリースの形を確かめ、扱わない形なら理由と表の在りかを出して止まる | 利用者・workflow |
+| F2 | 設定のバージョンの保存先（`plugin`・`json`・`pubspec`・`tag`・`none`）から前と次のバージョンを出し、承認資料を組む | 会話のセッション・workflow |
+| F3 | 前のリリースの起点をバージョンの単位ごとに決め、差分の範囲を集める（`release_branch` は選んだスプリントを集めた先頭まで） | 会話のセッション・workflow |
+| F4 | リリース対象外のファイルをテストのファイルの表と設定から決める | 会話のセッション・workflow |
+| F5 | 名前の書式でリリースブランチ・CHANGELOG の見出し・タグを作り、前のものを読む | workflow |
+| F6 | リリースブランチを作り、保存先のバージョンと CHANGELOG を書き、リリースの PR を作る | workflow |
+| F7 | 本番ブランチへ入ったコミットで、タグと GitHub Release を作る | workflow |
+| F8 | 利用者のリポジトリへテンプレートを置き、再利用可能なワークフローで `release-steps` を起動する | 利用者 |
+
+## 構成要素
+
+| 要素 | 責務 |
+| --- | --- |
+| リリースの形の表（`contracts/domains/release-forms.json`、新設） | 設定の値 6 つの行。届き方・扱い（`supported`）・11.x へ回す理由を持つ |
+| リリースの形の判断（`domains/release/forms_decide.py`、新設） | 形の行を引き、扱わない形なら例外を上げる。承認資料の届き方の行を作る（純粋な処理） |
+| 保存先のアダプター（`domains/release/version_store.py`、新設） | インタフェース（`units`・`read`・`write`・`paths`）と 5 つのアダプター、設定から 1 つを選ぶ `load` |
+| 名前の判断（`domains/release/names_decide.py`、新設） | 名前の書式の値と、名前を作る・読み戻す（純粋な処理） |
+| 起点の判断（`domains/release/since_decide.py`、新設） | タグ・バージョンの変わり目・最初のコミットの候補から前のリリースの起点を選び、範囲の終点をリリース方式から決める（純粋な処理） |
+| リリースの単位の組み立て（`domains/release/units.py`、新設） | `release_branch` で、本番ブランチの HEAD から選んだスプリントブランチを順にマージした先頭を組む（10 系の `_build_release_branch` を移す） |
+| 材料の収集（`gather.py`） | git と GitHub から範囲・変化・含む PR・出し済みのバージョンを読む。保存先のアダプターと起点の判断を使う。リモート名を引数で受ける |
+| 組み立て（`assemble.py`） | 材料を読み、リリースブランチを作り、保存先のアダプターで書き、CHANGELOG を書いて PR を作る |
+| タグ（`tagging.py`） | 本番ブランチへ入ったコミットで、出したバージョンのタグと GitHub Release を作る。タグが別のコミットを指していれば止まる |
+| バージョンの計算（`version_decide.py`） | バージョンの計算だけを持つ。名前を作る関数は名前の判断へ移す |
+| CHANGELOG（`changelog_decide.py`） | 見出しの書式でセクションを作る・探す・読む |
+| 変化の判定（`changes_decide.py`） | リリース対象外のファイルの既定をテストのファイルの表から作り、設定の形を足して分ける |
+| 含む PR（`included_decide.py`） | 件名から PR の番号を読み、リリースブランチの名前を書式で見分ける。`release_branch` のリリースの単位のマージを見分ける |
+| リリースの設定（`ndf_settings.py`） | `.ndf/release.json` の `undistributed` を既定へ足す形に読む |
+| 承認資料（`materials_decide.py`） | バージョンの単位の行・届き方の行を出す |
+| サブコマンド（`cli.py`） | 引数（`--units`・`--pr`）・リモート名の解決・停止理由の対応 |
+| マージ（`land.py`）・記録（`record.py`） | リリースブランチの名前を書式で読む。`land` のバージョンの候補は JSON の位置を持たない保存先で空にする |
+| git の部品（`adapters/git.py`） | 遅れて読む名前 `ORIGIN` を消す |
+| テストのファイルの表（`contracts/domains/test-files.json`） | 列 `role`（`test` / `support`）と行 `python-conftest` を足す |
+| cross-refactoring のテストの判定（`crossrefactor/tests_decide.py`） | 表の `role` が `test` の行だけでテストのファイルを判定する |
+| 設定のスキーマ（`contracts/schemas/ndf-settings/project.schema.json` と 10 系のコピー 2 つ） | `form` の値・保存先の種類 `pubspec`・`tag`・キー `branch`・`changelog_heading`・規則 R11 |
+| 10 系のバージョンの読み（`plugins/ndf/scripts/release_lib/land_read.py`） | JSON の位置を持たない保存先ではバージョンの候補を空にする |
+| 再利用可能なワークフロー（`.github/workflows/ndf-release-reusable.yml`、新設） | `workflow_call` で `assemble`・`merge`・`publish` を流す。秘密は `release_token` で受ける |
+| 呼び出し側のテンプレート（`skills/release/assets/workflows/ndf-release.yml`、新設）と手順の文書（`skills/release/references/release-workflow.md`、新設） | 利用者が置く workflow と、置き方・権限・秘密の名前の決め方 |
+| 子の表（`checks/children.json` と #1142 の本文） | 子 `B2`（#3615）を足す |
+
+```mermaid
+graph TB
+  subgraph エントリポイント
+    CLI[サブコマンド cli]
+    WF[再利用可能なワークフロー]
+  end
+  subgraph 判断
+    FORMS[リリースの形の判断]
+    NAMES[名前の判断]
+    SINCE[起点の判断]
+    CHG[変化の判定]
+    VER[バージョンの計算]
+    CL[CHANGELOG]
+    INC[含む PR]
+    MAT[承認資料]
+  end
+  subgraph 外部との接続
+    STORE[保存先のアダプター]
+    UNITS[リリースの単位の組み立て]
+    GATHER[材料の収集]
+    ASM[組み立て]
+    TAG[タグ]
+    GIT[git の部品]
+  end
+  subgraph コントラクト
+    FT[リリースの形の表]
+    TF[テストのファイルの表]
+    SCH[設定のスキーマ]
+  end
+  WF --> CLI
+  CLI --> FORMS
+  CLI --> GATHER
+  CLI --> ASM
+  CLI --> TAG
+  CLI --> GIT
+  FORMS --> FT
+  GATHER --> STORE
+  GATHER --> SINCE
+  GATHER --> CHG
+  GATHER --> INC
+  GATHER --> UNITS
+  ASM --> GATHER
+  ASM --> STORE
+  ASM --> CL
+  ASM --> NAMES
+  TAG --> STORE
+  TAG --> NAMES
+  TAG --> CL
+  STORE --> NAMES
+  CHG --> TF
+  SINCE --> VER
+  ASM --> MAT
+  CLI --> SCH
+```
+
+図に描かない要素: マージ・記録（名前の判断を呼ぶだけ）、リリースの設定（材料の収集と組み立てが読む）、cross-refactoring のテストの判定・10 系のバージョンの読み・子の表・テンプレートと手順の文書（コードの依存を持たない）。
+
+配置: `release-steps` は、ai-plugins では同じコミットの `plugins/ndf-next/bin/ndf` を、利用者のリポジトリでは再利用可能なワークフローが固定した ai-plugins のタグを取り出した `bin/ndf` を GitHub Actions の runner で動かす。会話のセッションは `materials`・`present`・`answer` を手元で動かす。
+
+## 構造
+
+```mermaid
+classDiagram
+  class VersionStore {
+    <<Protocol>>
+    kind
+    units() list~Unit~
+    read(git, ref, unit) str
+    write(unit, new) list~str~
+    paths() frozenset
+  }
+  class PluginStore
+  class JsonStore
+  class PubspecStore
+  class TagStore
+  class NoneStore
+  class Unit {
+    name
+    dir
+  }
+  class NameFormats {
+    tag
+    branch
+    changelog_heading
+    tag_of(unit, version)
+    version_of_tag(unit, name)
+    branch_of(version)
+    version_of_branch(name)
+  }
+  class Facts {
+    channel
+    planned
+    pulls
+    changes
+    head
+    form
+  }
+  class Planned {
+    plugin
+    current
+    next
+    since
+  }
+  VersionStore <|.. PluginStore
+  VersionStore <|.. JsonStore
+  VersionStore <|.. PubspecStore
+  VersionStore <|.. TagStore
+  VersionStore <|.. NoneStore
+  VersionStore --> Unit
+  TagStore --> NameFormats
+  Facts --> Planned
+```
+
+`Planned` は単位の名前（`plugin` の名前のまま）と前のリリースの起点（`since`）を持つ。`Facts` はリリースの形（`form`）を持ち、承認資料の届き方の行に使う。
+
+## 入出力の契約
+
+### 設定（`.ndf/project.json` の `branch_strategy.release`）
+
+| キー | 変更 | 値 | 既定 |
+| --- | --- | --- | --- |
+| `form` | 値を足す | `package-plugin`・`service`・`desktop`・`mobile`・`procedure`・`document` | 必須（既定なし） |
+| `version_store` | 種類を足す | `{"kind": "pubspec", "path": "<pubspec.yaml のパス>"}`・`{"kind": "tag"}` | 必須（既定なし） |
+| `tag` | 変えない | `{version}` を含む文字列か `null`（タグを作らない） | 必須（既定なし） |
+| `branch` | 足す | `{version}` を含む文字列（例 `release/v{version}`） | `release/v{version}` |
+| `changelog_heading` | 足す | `## ` で始まり `{version}` を含む文字列。`{plugin}`・`{date}` を使える（例 `## [{version}] - {date}`） | `## [{plugin} {version}] - {date}` |
+
+規則 R11 を足す: `version_store.kind` が `tag` なら `tag` は文字列である（R10 と合わせて `cd` が要る）。
+
+### 設定（`.ndf/release.json`）
+
+| キー | 変更 | 意味 |
+| --- | --- | --- |
+| `undistributed` | 意味を変える | テストのファイルの表から作る既定へ**足す**形（バージョンの単位の根からの gitignore の形）。既定は置き換えない |
+
+### サブコマンド `ndf release-steps`
+
+| サブコマンド | 引数の変更 | 出力の変更 |
+| --- | --- | --- |
+| `materials` | `--units <ブランチ>...`（`release_branch` で必須）・`--pr <番号>`（`production_pr` で必須）を足す。`--base`・`--production` は今のまま受ける | 承認資料にバージョンの単位ごとの「前 → 次」と前のリリースの起点・届き方の行を出す。バージョンを持たない保存先ではバージョンの行を出さない |
+| `assemble` | `--units` を足す。ほかの引数は今のまま | `outputs.branch` はブランチの書式の名前。バージョンアップの PR を作らないリリース方式では `not_applicable` |
+| `publish` | 変えない | `items` の `name` はタグの書式の名前。タグが別のコミットを指していれば `stopped`（`refused`） |
+
+停止理由の対応を足す: 扱わないリリースの形・保存先の種類が表に無い・保存先が読めない・名前が書式に合わない → `precondition`。
+
+### 呼び出し側のテンプレート（利用者のリポジトリの `.github/workflows/ndf-release.yml`）
+
+| 項目 | 形 |
+| --- | --- |
+| 起動 | `workflow_dispatch`（`step`: `assemble`・`merge`・`publish`、`level`、`pr`、`units`）と、本番ブランチへの `push`（`publish`） |
+| 呼ぶもの | `uses: devbasex/ai-plugins/.github/workflows/ndf-release-reusable.yml@<NDF のタグ>`、`with.ndf_ref` に同じタグ |
+| 秘密 | `secrets.release_token: ${{ secrets.<利用者が決めた名前> }}`（省けば `github.token` で動く） |
+| 権限 | ジョブごとに `contents: write`・`pull-requests: write`・`statuses: write`・`checks: read` の要るものだけ |
+
+## 処理の流れ
+
+```mermaid
+sequenceDiagram
+  participant C as cli
+  participant F as リリースの形の判断
+  participant S as 保存先のアダプター
+  participant G as 材料の収集
+  participant U as リリースの単位の組み立て
+  participant D as 起点の判断
+  participant A as 組み立て
+  participant T as タグ
+  C->>C: 設定を読み、リモート名を求める（E1）
+  C->>F: 形を確かめる（扱わない形は止まる）
+  C->>S: 保存先を選ぶ（E2）
+  alt release_branch
+    C->>U: 選んだスプリントを本番の HEAD へ集めた先頭を組む
+  end
+  C->>G: 範囲の終点（リリース方式で決まる）
+  G->>S: 単位の一覧と本番ブランチのバージョン
+  G->>D: タグ・バージョンの変わり目・最初のコミットから起点（E3）
+  G->>G: 単位ごとの変化（E4）と次のバージョン（E5）
+  G-->>C: 承認資料の材料（E6）
+  C->>A: assemble のとき
+  A->>S: リリースブランチの上でバージョンを書く
+  A->>A: CHANGELOG・設定の手順・PR（E7）
+  C->>T: publish のとき
+  T->>S: コミットで変わったバージョン（tag はリリースの PR のブランチ名）
+  T->>T: タグと GitHub Release（E8）
+```
+
+図に描かない要素は、構成要素図の注記に挙げたものと、材料の収集と組み立ての中で呼ばれる判断（名前・変化・バージョンの計算・CHANGELOG・含む PR・承認資料）である。
+
+範囲の終点はリリース方式で決まる。`merge_base_branch` はベースブランチの HEAD、`trunk` の `release_pr` は本番ブランチの HEAD、`release_branch` は選んだスプリントを集めた先頭、`production_pr` は `--pr` の PR の先頭（起点はその PR と本番ブランチの分岐点）。
+
+## 非機能の実現方式
+
+| 大項目 | 実現方式 |
+| --- | --- |
+| 運用・保守性 | 保存先の種類を足すときは、アダプターを 1 つと `version_store.KINDS` の行とスキーマの `oneOf` の行を足す。リリースの形を足すときは、リリースの形の表の行とスキーマの列挙を足す。材料の収集・組み立て・タグは種類の名前を書かない（I2 のテストが、偽のアダプターで材料を組んで縛る） |
+| セキュリティ | 再利用可能なワークフローとテンプレートは秘密の値を持たず、秘密は `release_token` の 1 つで受ける。`permissions` はワークフローの既定を `contents: read` にし、ジョブごとに要る権限だけを足す。ndf-next はタグを固定して取り出す |
+| システム環境 | GitHub Actions の workflow だけを作る。ほかの CI では、手順の文書のサブコマンドの並びを利用者が自分の CI から呼ぶ |
+
+## 決定の記録
+
+[issue-3615-design-decisions.md](issue-3615-design-decisions.md) に置いた。
+
+## テスト設計
+
+| 受け入れ条件・不変条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
+| --- | --- | --- |
+| 1 | 設計文書の「リリースの形の扱い」の表が 9 行（決定 1）。リリースの形の表の 6 行とスキーマの列挙が一致する | 表かスキーマの片方だけに値を足すと、コントラクトの一致の検査で落ちる |
+| 2 | 設計文書の「代表のリポジトリでの振る舞い」の表（設計の検査 `design-survey.py` が見る） | — |
+| 3 | nd-factory の設定のコピー（決定 7）を置いた一時リポジトリで、`materials` が `ok` を返し承認資料を組む | 保存先を `plugin` に決め打つと `precondition` で落ちる |
+| 4 | 保存先 `json`・`pubspec`・`tag` のそれぞれで、`materials` が前と次のバージョンを出し、`assemble` が保存先を書き換える（`tag` は書き換えるファイルが無い） | アダプターの読みか書きを抜くと、前のバージョンが出ないか書き換わらずに落ちる |
+| 5 | `tag: v{version}` で 1.2.3 のタグ名が `v1.2.3`、前のバージョンを `v1.2.2` から読む | 書式を読まず区切り `--v` を使うと落ちる |
+| 6 | `changelog_heading: ## [{version}] - {date}` で、その形のセクションを足し、前のセクションを読める | 見出しを決め打つと落ちる |
+| 7・I9 | ai-plugins の設定で、同じ材料から組む承認資料・ブランチ名・タグ名・見出しが直す前と同じ | 既定の書式を変えると落ちる |
+| 8・I5 | `src/foo.test.ts`・`src/__tests__/bar.ts`・`tests/Unit/FooTest.php` だけの範囲ではバージョンを上げない。設定の `undistributed` は既定に足される | 既定を表から作らないか、設定で既定を置き換えると落ちる |
+| 9 | `rg -n "NDF_RELEASE_TOKEN|NDF_RELEASE_RUNNER"` をテンプレート・再利用可能なワークフロー・手順の文書に打ち 0 件（結果を PR に添える） | — |
+| 10 | 手順の文書のセクション（置き方・権限・秘密の名前）を PR のレビューで見る（`.md` の文言のテストは書かない） | — |
+| 11・I8 | `rg -nw "ORIGIN" plugins/ndf-next/src` が 0 件。設定の `remote` を `upstream` にした一時リポジトリで、`materials` がそのリモートから取得する | リモート名を書くと、`upstream` だけを持つリポジトリで落ちる |
+| 12・I4 | `trunk`・`release_pr` で範囲の起点が単位ごとの前のタグになり、空にならない。単位ごとにタグが違うとき、各単位の変化はその単位の起点から数える。`release_branch` で選んだスプリントの中の PR を含む PR に数える。`production_pr` で範囲が PR になる | 起点を本番ブランチの HEAD にすると空の範囲で落ちる |
+| 13・I1 | `form: desktop` で `materials`・`assemble`・`publish` が `precondition` で止まり、形の名前と表のパスを出す | 扱いを見ずに進めると落ちる |
+| 14 | `children.json` に子 `B2`（#3615）があり、規則 `child-deps` が通る | — |
+| 15 | 既存の `land` のテストと、`plugin` の保存先の組み立て・タグのテストが通る（`bump`・`pr-check` は main に無く、#3572 のレーンが足す） | — |
+| I2 | 偽の保存先のアダプターを `version_store.load` に返させると、材料の収集・組み立てがその読み書きだけで動く | 部品の中に種類の名前の分岐を書くと落ちる |
+| I3 | 書式ごとに名前を作って読み戻すと元のバージョンと単位の名前になり、書式に合わない名前は読まない | 読み戻しの正規表現が書式の文字をそのまま使うと落ちる |
+| I6 | 同じ名前のリリースブランチがリモートにあれば `assemble` が止まる | 確かめを外すと落ちる |
+| I7 | 同じ名前のタグが別のコミットを指していれば `publish` が `refused` で止まり、同じコミットなら `exists` | 存在だけを見ると落ちる |
+
+`test_ndf_settings_parse_reads_every_key`（現状固定）は、`undistributed` を足す形へ書き換える。
+
+## 設計の結果
+
+| 課題 | 扱い | 取り込み先 | 触るファイル |
+| --- | --- | --- | --- |
+| #3615 | 実装する | — | `plugins/ndf-next/src/ndf/domains/release/version_store.py`、`plugins/ndf-next/src/ndf/domains/release/names_decide.py`、`plugins/ndf-next/src/ndf/domains/release/forms_decide.py`、`plugins/ndf-next/src/ndf/domains/release/since_decide.py`、`plugins/ndf-next/src/ndf/domains/release/units.py`、`plugins/ndf-next/src/ndf/domains/release/gather.py`、`plugins/ndf-next/src/ndf/domains/release/assemble.py`、`plugins/ndf-next/src/ndf/domains/release/tagging.py`、`plugins/ndf-next/src/ndf/domains/release/cli.py`、`plugins/ndf-next/src/ndf/domains/release/version_decide.py`、`plugins/ndf-next/src/ndf/domains/release/changelog_decide.py`、`plugins/ndf-next/src/ndf/domains/release/changes_decide.py`、`plugins/ndf-next/src/ndf/domains/release/included_decide.py`、`plugins/ndf-next/src/ndf/domains/release/ndf_settings.py`、`plugins/ndf-next/src/ndf/domains/release/materials_decide.py`、`plugins/ndf-next/src/ndf/domains/release/plugins.py`、`plugins/ndf-next/src/ndf/domains/release/land.py`、`plugins/ndf-next/src/ndf/domains/release/record.py`、`plugins/ndf-next/src/ndf/domains/release/__init__.py`、`plugins/ndf-next/src/ndf/adapters/git.py`、`plugins/ndf-next/src/ndf/domains/crossrefactor/tests_decide.py`、`plugins/ndf-next/src/ndf/checks/children.json`、`plugins/ndf-next/contracts/domains/release-forms.json`、`plugins/ndf-next/contracts/domains/test-files.json`、`plugins/ndf-next/contracts/schemas/ndf-settings/project.schema.json`、`plugins/ndf-next/docs/contracts/ndf-settings.md`、`plugins/ndf/skills/development-workflow/schemas/project.schema.json`、`plugins/ndf/scripts/data/branch-strategy.schema.json`、`plugins/ndf/scripts/release_lib/land_read.py`、`.github/workflows/ndf-release-reusable.yml`、`plugins/ndf-next/skills/release/assets/workflows/ndf-release.yml`、`plugins/ndf-next/skills/release/references/release-workflow.md`、`plugins/ndf-next/skills/release/references/release-steps.md`、`plugins/ndf-next/tests/domains/release/test_release_version_store.py`、`plugins/ndf-next/tests/domains/release/test_release_names.py`、`plugins/ndf-next/tests/domains/release/test_release_forms.py`、`plugins/ndf-next/tests/domains/release/test_release_since.py`、`plugins/ndf-next/tests/domains/release/test_release_repos.py`、`plugins/ndf-next/tests/domains/release/test_release_decide.py`、`plugins/ndf-next/tests/domains/release/test_release_files.py`、`plugins/ndf-next/tests/domains/release/test_release_assemble.py`、`plugins/ndf-next/tests/domains/release/test_release_materials.py`、`plugins/ndf-next/tests/domains/crossrefactor/test_scope_tests.py`、`docs/glossary/glossary.json`、`docs/glossary.md` |
+
+## 人へ残す判断
+
+無し
+
+## 未確認のまま残ること
+
+| 項目 | 内容 |
+| --- | --- |
+| #3572 の実装との重なり | 保存先のアダプターのインタフェースは、#3572 の決定 22 の 4 つのメソッドで main に置く。マージしていないブランチ `sprint/lrel-lock` の `version_store.py`（`.ndf/release.json` を読む形）との突き合わせは、後のレーン lr-rel-rest が base-sync で行う。食い違いの量はそのときに分かる |
+| 空のコミットのリリースの PR | 保存先 `tag` で CHANGELOG のファイルが無いリポジトリでは、リリースブランチの差分が空のコミットだけになる。GitHub が差分の無いコミットの PR を作れるかは、リリース後テストで Swift のリポジトリの設定を流して分かる |
+| 利用者のリポジトリでの起動 | 再利用可能なワークフローを public のリポジトリから private のリポジトリが呼べること、`bin/ndf` が runner で uv を入れて動くことは、リリース後テスト（要求の「手動確認」）で Web サービスのリポジトリ 1 つに置いて分かる |
