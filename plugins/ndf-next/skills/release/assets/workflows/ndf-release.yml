@@ -1,0 +1,61 @@
+name: ndf release
+
+# NDF（ndf-next）のリリースを流す呼び出し側のテンプレート。利用者のリポジトリの .github/workflows/ndf-release.yml へ置く。
+# 置き方・要る権限・秘密の名前の決め方は NDF の skills/release/references/release-workflow.md にある。
+#
+# 置くときに書き換える所:
+# - NDF_TAG（2 か所）: 動かす NDF の ai-plugins のタグ。uses: の参照と ndf_ref に同じ値を書く
+# - main: 本番ブランチの名前（設定 .ndf/project.json の branch_strategy.branches.production）
+# - YOUR_RELEASE_TOKEN: リリースのトークンを入れた秘密の名前（利用者が決める。省けば github.token で動く）
+
+on:
+  workflow_dispatch:
+    inputs:
+      step:
+        description: assemble（組み立て）・merge（マージ）・publish（タグと GitHub Release）
+        required: true
+        type: choice
+        options: [assemble, merge, publish]
+      channel:
+        description: assemble のチャネル
+        required: false
+        type: choice
+        options: [production, dev]
+        default: production
+      level:
+        description: assemble の上げる幅
+        required: false
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+      units:
+        description: release_branch の設定で集めるスプリントブランチ（空白区切り）
+        required: false
+        default: ""
+      pr:
+        description: merge するリリースの PR の番号
+        required: false
+        default: ""
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    permissions:
+      contents: write
+      pull-requests: write
+      checks: read
+      statuses: write
+    uses: devbasex/ai-plugins/.github/workflows/ndf-release-reusable.yml@NDF_TAG
+    with:
+      step: ${{ github.event_name == 'push' && 'publish' || inputs.step }}
+      ndf_ref: NDF_TAG
+      channel: ${{ inputs.channel || 'production' }}
+      level: ${{ inputs.level || 'patch' }}
+      units: ${{ inputs.units || '' }}
+      pr: ${{ inputs.pr || '' }}
+    secrets:
+      release_token: ${{ secrets.YOUR_RELEASE_TOKEN }}
