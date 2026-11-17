@@ -184,3 +184,41 @@ def test_plugin_store_reads_from_the_ref_and_writes_the_manifests(tmp_path: Path
     assert store.read(repo_git, "HEAD~1", unit) == "1.2.3"
     with pytest.raises(plugins_mod.PluginsError):
         store.read(repo_git, "HEAD", unit)
+
+
+def test_json_store_write_also_bumps_the_declared_files(tmp_path: Path) -> None:
+    """現状固定（I-004）: json の保存先の `files` の行は、pointer の無い行は単位の名前を含む行の今のバージョンを、
+    ある行は JSON のその位置（値が今のバージョンのときだけ）を書き換える。無いファイル・書き換えの無いファイルは返さない。"""
+    files = {
+        "package.json": json.dumps({"name": "app", "version": "1.2.2"}) + "\n",
+        "README.md": "app 1.2.2\nother 1.2.2\napp 1.2.20 v1.2.2.1\n",
+        "NOTES.md": "nothing 1.2.2\n",
+        "meta.json": json.dumps({"packages": [{"version": "1.2.2"}], "other": "1.2.2"}) + "\n",
+        "stale.json": json.dumps({"version": "0.0.1"}) + "\n",
+    }
+    _repo(tmp_path, files)
+    rows = [
+        {"path": "README.md"},
+        {"path": "NOTES.md"},
+        {"path": "meta.json", "pointer": "/packages/0/version"},
+        {"path": "stale.json", "pointer": "/version"},
+        {"path": "missing.md"},
+    ]
+    strategy = _release("json", path="package.json", pointer="/version")
+    strategy.section["release"]["version_store"]["files"] = rows
+    store = store_mod.load(tmp_path, strategy, "o/app")
+    assert store.paths() == frozenset({"package.json", "README.md", "NOTES.md", "meta.json", "stale.json", "missing.md"})
+    assert store.write(store.units()[0], "1.2.3") == ["package.json", "README.md", "meta.json"]
+    assert (tmp_path / "README.md").read_text(encoding="utf-8") == "app 1.2.3\nother 1.2.2\napp 1.2.20 v1.2.2.1\n"
+    assert (tmp_path / "NOTES.md").read_text(encoding="utf-8") == "nothing 1.2.2\n"
+    assert json.loads((tmp_path / "meta.json").read_text(encoding="utf-8")) == {"packages": [{"version": "1.2.3"}], "other": "1.2.2"}
+    assert json.loads((tmp_path / "stale.json").read_text(encoding="utf-8")) == {"version": "0.0.1"}
+    assert not (tmp_path / "missing.md").exists()
+
+
+def test_json_store_write_refuses_when_the_pointer_cannot_be_written(tmp_path: Path) -> None:
+    """現状固定（I-004）: 保存先の位置を書き換えられない（親が配列で添字が範囲外）ときは `StoreError`。"""
+    _repo(tmp_path, {"package.json": json.dumps({"versions": ["1.2.2"]}) + "\n"})
+    store = store_mod.load(tmp_path, _release("json", path="package.json", pointer="/versions/0"), "o/app")
+    assert store.write(store.units()[0], "1.2.3") == ["package.json"]
+    assert json.loads((tmp_path / "package.json").read_text(encoding="utf-8")) == {"versions": ["1.2.3"]}
