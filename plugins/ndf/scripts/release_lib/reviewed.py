@@ -30,6 +30,7 @@ import waits
 from release_lib import approval, approval_trail
 from release_lib.approval import HeadMoved
 from release_lib.context import ReleaseCtx
+from release_lib.land_read import merged_or_tip
 from release_lib.included import RELEASE_PREFIX
 from release_lib.names import require_untagged
 from release_lib.port_mark import NO_PORT_LINE, ensure_no_port_line
@@ -124,7 +125,7 @@ def release_prod(ctx: ReleaseCtx, case, ops: ProdOps):
     )
     items.append({"kind": "pr", "name": f"#{main_pr}", "result": "merged", "base": prod, "admin": case.admin_merge})
     git(root, "fetch", "-q", "origin")
-    merge = merge or git(root, "rev-parse", f"origin/{prod}").stdout.strip()
+    merge = merged_or_tip(root, merge, prod, git)
     ops.published(root, a, plugin, prod, main_pr, merge, items, metrics, back=admin_back())
 
 
@@ -186,7 +187,7 @@ def _open_prod_pr(ctx: ReleaseCtx, items, metrics, ops: ProdOps, case=None) -> i
     done = ops.find_pr(root, branch, prod, states=("MERGED", "OPEN"))
     if done and done["state"] == "MERGED":  # 再開: 本番チャネルへのマージは済んでいる
         git(root, "fetch", "-q", "origin")
-        merge = ops.merge_commit_of(root, done["number"]) or git(root, "rev-parse", f"origin/{prod}").stdout.strip()
+        merge = merged_or_tip(root, ops.merge_commit_of(root, done["number"]), prod, git)
         items.append({"kind": "pr", "name": f"#{done['number']}", "result": "already_merged", "base": prod})
         if case is not None and (row := admin_record_on_resume(root, repo_or_stop(root), case, done["number"])):
             items.append(row)

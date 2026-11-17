@@ -33,6 +33,7 @@ import strategy_rows
 from release_lib import approval, names, reviewed
 from release_lib.approval import HeadMoved
 from release_lib.context import ReleaseCtx
+from release_lib.land_read import merged_or_tip
 from release_lib.route import Route, route_of  # noqa: F401  取り込み方の分岐の正本（呼び手はここから読む）
 from step_result import EXIT_GATE, EXIT_UNREADABLE, StepError, emit, git
 
@@ -172,7 +173,7 @@ def release_selected(ctx: ReleaseCtx, approved, ops, case=None) -> tuple:
         admin = case is not None and case.admin_merge
         items.append({"kind": "pr", "name": f"#{main_pr}", "result": "merged", "base": prod, "admin": admin})
         git(root, "fetch", "-q", "origin")
-        merge = merge or git(root, "rev-parse", f"origin/{prod}").stdout.strip()
+        merge = merged_or_tip(root, merge, prod, git)
     return main_pr, merge, items, metrics, reviewed.admin_back(merge_back_after(root, a, plugin, branches, main_pr, ops))
 
 
@@ -181,7 +182,7 @@ def _resume_merged(ctx: ReleaseCtx, main_pr, approved, case, ops) -> tuple[str, 
     (マージコミット, 足す行) を返す。迂回でマージしたのに記録が無ければ書く（#3506 の I7）。"""
     root, prod = ctx.root, ctx.prod
     git(root, "fetch", "-q", "origin")
-    merge = ops.merge_commit_of(root, main_pr) or git(root, "rev-parse", f"origin/{prod}").stdout.strip()
+    merge = merged_or_tip(root, ops.merge_commit_of(root, main_pr), prod, git)
     if approved and git(root, "merge-base", "--is-ancestor", approved, merge, check=False).returncode != 0:
         raise StepError(f"マージ済みの本番の PR #{main_pr} のコミット {merge[:8]} が承認したコミット {approved[:8]} を含まない")
     rows = [{"kind": "pr", "name": f"#{main_pr}", "result": "already_merged", "base": prod}]

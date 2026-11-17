@@ -114,6 +114,7 @@ from release_lib import prod_land, trunk_release, version_merge  # noqa: E402
 from release_lib.prod_land import land, pr_check_buckets  # noqa: E402,F401 -- 本番の取り込みと検査の読み取り（ops として渡す）
 from release_lib.approval import HeadMoved  # noqa: E402
 from release_lib.context import ReleaseCtx  # noqa: E402
+from release_lib.land_read import merged_or_tip  # noqa: E402
 from release_lib.notes_content import NotesContent  # noqa: E402
 from release_lib.names import changelog_section, changelog_span, h2_lines, next_h2, plugin_of, release_decl  # noqa: E402
 from release_lib.names import drop_untagged, require_unreleased, require_untagged, tag_glob, tag_name, tag_template_of, tag_version  # noqa: E402
@@ -751,7 +752,7 @@ def _resume_merged_prod(ctx, approved, main_pr, items, metrics):
     """再開: 本番チャネルへのマージは済んでいる（取り消せない）。比べ直さず、無いものだけを作って続ける。マージコミットを返す。"""
     root, prod = ctx.root, ctx.prod
     git(root, "fetch", "-q", "origin")
-    merge = merge_commit_of(root, main_pr) or git(root, "rev-parse", f"origin/{prod}").stdout.strip()
+    merge = merged_or_tip(root, merge_commit_of(root, main_pr), prod, git)
     if git(root, "merge-base", "--is-ancestor", approved, merge, check=False).returncode != 0:
         raise StepError(f"マージ済みの本番の PR #{main_pr} のコミット {merge[:8]} が承認したコミット {approved[:8]} を含まない")
     metrics["approved_sha"] = approved
@@ -777,7 +778,7 @@ def _merge_new_prod(ctx, approved, release_pr, items, metrics):
     items += approval.tolerated_items(verdict)
     items.append({"kind": "pr", "name": f"#{main_pr}", "result": "merged", "base": prod})
     git(root, "fetch", "-q", "origin")
-    return main_pr, merge or git(root, "rev-parse", f"origin/{prod}").stdout.strip()
+    return main_pr, merged_or_tip(root, merge, prod, git)
 
 
 def _prod_ops() -> reviewed.ProdOps:

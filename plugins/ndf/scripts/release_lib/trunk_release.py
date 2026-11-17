@@ -17,6 +17,7 @@ import approved_commit as ac
 from release_lib import approval_trail, names, prod_land, reviewed
 from release_lib.approval import HeadMoved
 from release_lib.context import ReleaseCtx
+from release_lib.land_read import merged_or_tip
 from step_result import EXIT_GATE, EXIT_PRECONDITION, EXIT_UNREADABLE, StepError, emit, result
 from strategy_rows import RELEASE_PREFIX
 
@@ -122,7 +123,7 @@ def _resume_landed(ctx: ReleaseCtx, ops, pr: int, commit: str | None):
         raise StepError(f"本番ブランチへ入った版上げの PR #{pr} の head {head[:8]} が承認したコミット {approved[:8]} と違う")
     metrics = {**_metrics(ctx, pr), "approved_sha": approved, "compared_head": head}
     items = [{"kind": "pr", "name": f"#{pr}", "result": "already_merged", "base": prod}]
-    merge = commit or ops.git(root, "rev-parse", f"origin/{prod}").stdout.strip()
+    merge = merged_or_tip(root, commit, prod, ops.git)
     return pr, merge, items, metrics
 
 
@@ -149,4 +150,4 @@ def release_trunk(ctx: ReleaseCtx, ops) -> tuple[int, str, list[dict], dict]:
     metrics.update({"approved_sha": approved, "compared_head": head})
     items.append({"kind": "pr", "name": f"#{pr}", "result": "merged", "base": prod})
     ops.git(root, "fetch", "-q", "origin")
-    return pr, merge or ops.git(root, "rev-parse", f"origin/{prod}").stdout.strip(), items, metrics
+    return pr, merged_or_tip(root, merge, prod, ops.git), items, metrics
