@@ -363,28 +363,38 @@ def _relabel(m: Measured, source: str) -> Measured:
     return m
 
 
-def _history_keys(s: Samples, rule: dict) -> dict[str, Measured]:
-    prod = s.production
-    # 長く残るブランチ（ほかの PR の宛先）からの PR と版上げの PR は、スプリントの事例に数えない。スプリントブランチは課題の PR の
-    # 宛先でも一時的なブランチで、長く残るブランチに数えない（課題の PR → sprint/s1 → develop では sprint/s1 → develop を標本にする）
+def _sprint_units(s: Samples) -> list[dict]:
+    """スプリントの事例にする PR。長く残るブランチ（ほかの PR の宛先）からの PR と版上げの PR は数えない。"""
+    # スプリントブランチは課題の PR の宛先でも一時的なブランチで、長く残るブランチに数えない
+    # （課題の PR → sprint/s1 → develop では sprint/s1 → develop を標本にする）
     long_lived = {b for p in s.prs if isinstance(b := p.get("base"), str) and b and not b.startswith(SPRINT_PREFIX)}
     units = [p for p in s.prs if p.get("base") in long_lived and p.get("head") not in long_lived]
-    units = [p for p in units if not str(p.get("head")).startswith(RELEASE_PREFIX)]
+    return [p for p in units if not str(p.get("head")).startswith(RELEASE_PREFIX)]
+
+
+def _release_keys(s: Samples, rule: dict) -> dict[str, Measured]:
+    """タグの形と GitHub Release の有無。タグも Release も 0 件（読めた上で）なら、0 件を根拠に決める。"""
+    if not s.tags and not s.releases and "tags" not in s.unreadable and "releases" not in s.unreadable:
+        zero = [{"source": "tag", "ref": "0 件", "value": "0"}, {"source": "release", "ref": "0 件", "value": "0"}]
+        return {"/release/tag": Measured(None, zero), "/release/github_release": Measured(False, copy.deepcopy(zero))}
+    shapes = [(sh, t) for t in s.tags if (sh := _tag_shape(t, s.plugins))]
+    rel = set(s.releases)
+    return {
+        "/release/tag": _relabel(count_key("/release/tag", shapes, rule), "tag"),
+        "/release/github_release": _relabel(count_key("/release/github_release", [(t in rel, t) for t in s.tags], rule), "release"),
+    }
+
+
+def _history_keys(s: Samples, rule: dict) -> dict[str, Measured]:
+    prod = s.production
+    units = _sprint_units(s)
     strat = [("trunk" if p["base"] == prod else "merge_base_branch", f"#{p['number']}") for p in units]
     out = {"/release_strategy": count_key("/release_strategy", strat, rule)}
     out["/branches/base"] = count_key("/branches/base", [(p["base"], f"#{p['number']}") for p in units], rule)
     out["/sprint/start"] = count_key(
         "/sprint/start", [("production" if p["base"] == prod else "base", f"#{p['number']}") for p in units], rule
     )
-    if not s.tags and not s.releases and "tags" not in s.unreadable and "releases" not in s.unreadable:
-        zero = [{"source": "tag", "ref": "0 件", "value": "0"}, {"source": "release", "ref": "0 件", "value": "0"}]
-        out["/release/tag"] = Measured(None, zero)
-        out["/release/github_release"] = Measured(False, copy.deepcopy(zero))
-    else:
-        shapes = [(sh, t) for t in s.tags if (sh := _tag_shape(t, s.plugins))]
-        out["/release/tag"] = _relabel(count_key("/release/tag", shapes, rule), "tag")
-        rel = set(s.releases)
-        out["/release/github_release"] = _relabel(count_key("/release/github_release", [(t in rel, t) for t in s.tags], rule), "release")
+    out.update(_release_keys(s, rule))
     merges = [
         ("merge" if c["parents"] >= 2 else "squash", c["sha"][:12])
         for c in s.commits
