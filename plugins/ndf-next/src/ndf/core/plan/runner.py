@@ -243,8 +243,8 @@ def _base_values(plan: model.Plan, state_dir: Path, absolute_plan: Path, work_ba
     """決まった名前の差し込みの値（呼び手の `sets` で上書きできない）。"""
     return {
         "state_dir": str(state_dir),
-        "repo": plan.repo if plan.repo else "",
-        "worktree": plan.worktree if plan.worktree else "",
+        "repo": plan.repo if plan.repo else "",  # noqa: NDF501 ファイル: 計画の repo が無ければ空の差し込み
+        "worktree": plan.worktree if plan.worktree else "",  # noqa: NDF501 ファイル: 計画の worktree が無ければ空の差し込み
         "plan": str(absolute_plan),
         "owner": assemble_decide.owner_of(plan.name, str(state_dir)),
         "work_base": str(work_base),

@@ -131,7 +131,7 @@ def junit_seconds(xml_bytes: bytes) -> Optional[float]:
         if root.get("time"):
             return float(root.get("time"))
         suites = root.findall("testsuite")
-        return sum(float(s.get("time") if s.get("time") else 0) for s in suites) if suites else None
+        return sum(float(s.get("time") if s.get("time") else 0) for s in suites) if suites else None  # noqa: NDF501 ファイル: time の無い testsuite は 0 秒
     except (ET.ParseError, ValueError):  # noqa: NDF401 ネットワーク: 読めない成果物は所要の候補にしない
         return None
 

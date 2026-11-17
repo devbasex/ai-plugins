@@ -84,9 +84,12 @@ def test_fallbacks_and_suppress():
         f = os.environ.get("K", "")
         with contextlib.suppress(OSError):
             pass
+        g = x if x else {}
+        h = x if x else "d"
+        i = y if x else ""
     """)
     hits = smells.calls_and_fallbacks(t, frozenset({"os.environ"}))
-    assert sorted(hits) == [(2, "NDF501"), (4, "NDF502"), (7, "NDF402")]
+    assert sorted(hits) == [(2, "NDF501"), (4, "NDF502"), (7, "NDF402"), (9, "NDF501")]
 
 
 def test_long_function(rules):

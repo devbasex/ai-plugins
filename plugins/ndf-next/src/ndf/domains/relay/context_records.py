@@ -173,7 +173,7 @@ def fill_work(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     last: dict[str, str] = {}
     out = []
     for r in rows:
-        sid, work = r.get("session_id"), r.get("work") if r.get("work") else ""
+        sid, work = r.get("session_id"), r.get("work") if r.get("work") else ""  # noqa: NDF501 ファイル: 作業の識別子の無い行は下で前の行から補う
         if not work and sid in last:
             r = {**r, "work": last[sid]}
         elif work and sid:
