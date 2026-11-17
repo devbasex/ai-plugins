@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from ndf.core import json_pointer
 from ndf.domains.settings import renames
 
 
@@ -13,7 +12,7 @@ def _row(row_id: str) -> renames.Rename:
 
 
 def last(pointer: str) -> str:
-    return json_pointer.tokens(pointer)[-1]
+    return renames.tokens(pointer)[-1]
 
 
 def old_value(row_id: str, new_value: str) -> str:

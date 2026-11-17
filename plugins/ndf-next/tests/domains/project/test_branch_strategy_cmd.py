@@ -676,7 +676,7 @@ PROTECTION_PATH = "repos/{owner}/{repo}/branches/main/protection"
 
 
 def table_api(table: dict):
-    """パス → (値, 理由) の表で答え、読んだパスを順に残す。表に無いパスは (None, "unknown")。"""
+    """パス → (値, 理由) の表で回答し、読んだパスを順に残す。表に無いパスは (None, "unknown")。"""
     calls: list[str] = []
 
     def api(path):

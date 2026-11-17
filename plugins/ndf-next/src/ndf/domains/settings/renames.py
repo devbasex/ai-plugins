@@ -22,7 +22,6 @@ from typing import Any, Optional
 
 from ndf import contracts
 from ndf.contracts import facts, settings_renames
-from ndf.core import json_pointer
 
 # 配列のすべての要素を指す参照トークン
 EVERY = "*"
@@ -67,6 +66,17 @@ def load() -> tuple[Rename, ...]:
     )
 
 
+def tokens(pointer: str) -> list[str]:
+    """JSON Pointer を参照トークンの並びに割る（`~1` → `/`・`~0` → `~` の順で戻す）。"""
+    if not pointer:
+        return []
+    return [t.replace("~1", "/").replace("~0", "~") for t in pointer.lstrip("/").split("/")]
+
+
+def _pointer(parts: list[str]) -> str:
+    return "/" + "/".join(p.replace("~", "~0").replace("/", "~1") for p in parts)
+
+
 def _pointers(data: Any, parts: list[str], done: list[str]) -> Iterator[list[str]]:
     """`parts`（`*` を含む）の親のコンテナが実在する位置を、`*` を添字へ広げて返す。最後のトークンの実在は見ない。"""
     if len(parts) == 1:
@@ -91,8 +101,8 @@ def _parent(data: Any, parts: list[str]) -> Any:
 
 def _expanded(row: Rename, data: Any) -> Iterator[tuple[list[str], list[str]]]:
     """行の `old` が今の中身に実在する位置と、それに当たる `new` の位置（同じ添字）。"""
-    new_last = json_pointer.tokens(row.new)[-1]
-    for parts in _pointers(data, json_pointer.tokens(row.old), []):
+    new_last = tokens(row.new)[-1]
+    for parts in _pointers(data, tokens(row.old), []):
         if parts[-1] in _parent(data, parts):
             yield parts, [*parts[:-1], new_last]
 
@@ -102,7 +112,7 @@ def legacy_keys(file: str, data: Mapping[str, Any]) -> list[LegacyKey]:
     found: list[LegacyKey] = []
     for row in load():
         if row.file == file:
-            found += [LegacyKey(file, json_pointer.join(old), json_pointer.join(new)) for old, new in _expanded(row, data)]
+            found += [LegacyKey(file, _pointer(old), _pointer(new)) for old, new in _expanded(row, data)]
     return found
 
 
@@ -120,14 +130,14 @@ def _apply_row(row: Rename, out: dict[str, Any], patch: list[dict[str, Any]]) ->
             continue  # 利用者が旧いキーと新しいキーの両方を書いた設定は、機械が選ばずに残す
         value = parent[old[-1]]
         patch += [
-            {"op": "test", "path": json_pointer.join(old), "value": copy.deepcopy(value)},
-            {"op": "move", "from": json_pointer.join(old), "path": json_pointer.join(new)},
+            {"op": "test", "path": _pointer(old), "value": copy.deepcopy(value)},
+            {"op": "move", "from": _pointer(old), "path": _pointer(new)},
         ]
         _rename_in_place(parent, old[-1], new[-1])
         if isinstance(value, str) and value in row.values and row.values[value] != value:
             patch += [
-                {"op": "test", "path": json_pointer.join(new), "value": value},
-                {"op": "replace", "path": json_pointer.join(new), "value": row.values[value]},
+                {"op": "test", "path": _pointer(new), "value": value},
+                {"op": "replace", "path": _pointer(new), "value": row.values[value]},
             ]
             _parent(out, new)[new[-1]] = row.values[value]
 

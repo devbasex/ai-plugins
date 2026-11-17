@@ -10,7 +10,7 @@ from typing import Any
 import settings_legacy as legacy
 from ndf import contracts
 from ndf.contracts import settings_renames
-from ndf.core import branch_strategy_legacy, json_pointer
+from ndf.core import branch_strategy_legacy
 from ndf.domains.settings import renames
 
 
@@ -21,7 +21,7 @@ def _schema(file: str) -> dict[str, Any]:
 def _has(schema: dict[str, Any], pointer: str) -> bool:
     """スキーマの properties を位置の階層ごとにたどる（`*` は items。$ref は $defs を引く）。"""
     node = schema
-    for t in json_pointer.tokens(pointer):
+    for t in renames.tokens(pointer):
         while "$ref" in node:
             node = schema["$defs"][node["$ref"].rsplit("/", 1)[-1]]
         node = node.get("items", {}) if t == renames.EVERY else node.get("properties", {}).get(t)
@@ -35,7 +35,7 @@ def test_rename_table_matches_the_schemas():
     assert [r.id for r in rows] == ["mvv-validation", "mvv-validation-result", "mvv-validation-checked-at"]
     for r in rows:
         assert r.old != r.new
-        assert json_pointer.tokens(r.old)[:-1] == json_pointer.tokens(r.new)[:-1]
+        assert renames.tokens(r.old)[:-1] == renames.tokens(r.new)[:-1]
         assert _has(_schema(r.file), r.new), r.new
         assert not _has(_schema(r.file), r.old), r.old
 
@@ -50,8 +50,8 @@ def test_the_two_readers_split_the_one_table_without_overlap():
 
 
 def test_tokens_unescape_reference_tokens():
-    assert json_pointer.tokens("/a~1b/c~0d") == ["a/b", "c~d"]
-    assert json_pointer.tokens("") == []
+    assert renames.tokens("/a~1b/c~0d") == ["a/b", "c~d"]
+    assert renames.tokens("") == []
 
 
 def test_legacy_keys_list_each_array_element_of_the_parent_first():
