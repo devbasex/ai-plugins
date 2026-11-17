@@ -26,6 +26,7 @@ from typing import Any, Callable, NamedTuple, Optional
 from ndf.adapters.git import Git, GitError
 from ndf.contracts import limits
 from ndf.core import branch_strategy as bs
+from ndf.core.branch_strategy import TRAILER_HEAD, TRAILER_PR, TRAILER_TIP
 from ndf.domains.project import check
 from ndf.domains.project import strategy_write as bw
 from ndf.domains.project.items import obj, seq
@@ -34,8 +35,6 @@ from ndf.domains.project.measure_ci import Gh, GhUnavailable
 Api = Callable[[str], tuple[Any, str]]
 VERSION = re.compile(r"\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.\-]+)?")
 CD_MARKS = ("gh release create", "action-gh-release", "git push origin --tags", "git tag ")
-# NDF が本番ブランチへ入れた取り込みの記録（コミットの trailer）。PR を経ない早送りの取り込みも事例に数える
-TRAILER_PR, TRAILER_HEAD, TRAILER_TIP = "NDF-Landed-PR", "NDF-Approved-Head", "NDF-Tip"
 # スプリントブランチ（一時的なブランチで、長く残るブランチに数えない）と版上げのブランチの頭
 SPRINT_PREFIX, RELEASE_PREFIX = "sprint/", "release/v"
 DEFAULT_BRANCH_CANDIDATES = check.KNOWN_BRANCHES[:2]
@@ -277,7 +276,9 @@ def rule_facts(api: Api, branch: str) -> Optional[RuleFacts]:
 
 
 def _collect_production_commits(root: Path, s: Samples, limit: int) -> None:
-    """本番ブランチの最初の親の履歴を 1 回の `git log` で読む。NDF が入れた取り込みの記録（trailer）の PR も事例にする。"""
+    """本番ブランチの最初の親の履歴を 1 回の `git log` で読む。NDF が入れた取り込みの記録（trailer）の PR も事例にする。
+
+    PR を経ない早送りの取り込みも事例に数える。"""
     remote = _remote(root)
     refs = ([f"{remote}/{s.production}"] if remote else []) + [s.production]
     ref = next((r for r in refs if _git_out(root, "rev-parse", "--verify", "--quiet", r)), None)

@@ -36,6 +36,8 @@ DEF = "BranchStrategy"
 PR_KINDS = ("sprint", "doc", "release")
 # 止まる理由の区分（`contracts/facts/exit-codes.json` の id）
 PRECONDITION, UNREADABLE, VIOLATION = "precondition", "unreadable", "failed"
+# 早送りの取り込みのコミットの trailer（書く側は release の land、読む側は project の測定。10 系の `release_lib/land_read.py` と同じ名前）
+TRAILER_PR, TRAILER_HEAD, TRAILER_TIP = "NDF-Landed-PR", "NDF-Approved-Head", "NDF-Tip"
 
 
 class StrategyError(contracts.ContractError):

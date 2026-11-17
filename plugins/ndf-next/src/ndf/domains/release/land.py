@@ -37,7 +37,7 @@ from ndf.adapters.github import BYPASS_ORDER, MERGE_COMMIT, MERGE_QUEUE_PENDING,
 from ndf.adapters.publish import Publisher
 from ndf.contracts import facts
 from ndf.core import branch_strategy_legacy
-from ndf.core.branch_strategy import Strategy
+from ndf.core.branch_strategy import TRAILER_HEAD, TRAILER_PR, TRAILER_TIP, Strategy
 from ndf.domains.release import approval_decide, route_decide, trail, version_decide
 
 # 規則の種類（必須のチェック）
@@ -54,8 +54,6 @@ NOT_FOUND = HTTPStatus.NOT_FOUND
 # 迂回して本番の PR を越えられる迂回の可否（ruleset の `current_user_can_bypass`。強さの並びの `pull_requests_only` 以上）
 BYPASS_OK = BYPASS_ORDER[BYPASS_ORDER.index("pull_requests_only") :]
 REAPPROVE = "承認を取り直してください"
-# 早送りの取り込みのコミットの trailer（10 系の `release_lib/land_read.py` と同じ名前）
-TRAILER_PR, TRAILER_HEAD, TRAILER_TIP = "NDF-Landed-PR", "NDF-Approved-Head", "NDF-Tip"
 # 人のマージを待つときの止まった理由の種類（NDF はマージしない。正常な否定の結果）
 HUMAN_KIND = "not_applicable"
 # 結論の出ていない状態（事実の表 ci-outcomes の pending。commit status の `pending` を含む）
