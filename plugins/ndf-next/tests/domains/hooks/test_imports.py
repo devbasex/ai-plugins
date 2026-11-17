@@ -127,3 +127,31 @@ def test_closure_follows_function_level_imports(tmp_path):
     # エントリポイントの本体は関数の中で import する（strict を依存より先に呼ぶため）。それも閉包に入る
     names = closure(["ndf.domains.hooks.main"])
     assert {"ndf.domains.hooks.dispatch", "ndf.domains.hooks.strict", "tree_sitter_bash"} <= names
+
+
+# 現状固定（I-011）: closure は SRC（モジュール変数）の下のファイルを開いてたどる。期待値は今の実装の出力である。
+@pytest.mark.parametrize(
+    ("roots", "expected"),
+    [
+        ([], set()),
+        (["json"], {"json"}),
+        (["os.path"], {"os", "os.path"}),
+        (["tree_sitter_bash"], {"tree_sitter_bash"}),
+        (["ndf.no_such_module"], {"ndf", "ndf.no_such_module"}),
+        (
+            ["ndf.domains.hooks.tables"],
+            {
+                "functools",
+                "json",
+                "ndf",
+                "ndf.domains",
+                "ndf.domains.hooks",
+                "ndf.domains.hooks.tables",
+                "pathlib",
+                "typing",
+            },
+        ),
+    ],
+)
+def test_characterize_closure_reads_files_under_src(roots, expected):
+    assert closure(roots) == expected
