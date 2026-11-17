@@ -575,3 +575,103 @@ def test_merge_queue_dequeues_when_approval_is_revoked_while_waiting() -> None:
     now = [0.0]
     done = _queue_lander(hub, now, 3600.0, on_poll=lambda: hub.comments_of[7].append(_trail("rejected", HEAD))).land(7)
     assert not done.merged and done.kind == "refused" and hub.dequeued == [7] and 7 not in hub.queued
+
+
+# --- 本番の PR の確かめが読む merge queue（`Lander._queue_rows` の現状固定） ------------------------------------
+_TIP, _H8, _H9 = "c" * 40, "8" * 40, "9" * 40
+
+
+@dataclass
+class _PagedQueueHub(FakeHub):
+    """merge queue をページごとに返す偽物。`pages` の i 番目を `after` が `c<i>`（先頭は None）のときに返す。"""
+
+    pages: list[Any] = field(default_factory=list)
+    versions: dict[str, str] = field(default_factory=dict)
+
+    def rest(self, method: str, path: str, payload: Any = None, params: Any = None) -> Any:
+        if method == "GET" and path == "/repos/o/r/branches/main":
+            self.requests.append((method, path, payload))
+            return {"commit": {"sha": _TIP}}
+        if method == "GET" and path.startswith("/repos/o/r/compare/"):
+            self.requests.append((method, path, payload))
+            return {"merge_base_commit": {"sha": _TIP}, "behind_by": 0}
+        if method == "GET" and "/contents/" in path:
+            ref = params["ref"]
+            if ref not in self.versions:
+                return None
+            import base64
+
+            raw = json.dumps({"version": self.versions[ref]}).encode("utf-8")
+            return {"encoding": "base64", "content": base64.b64encode(raw).decode("ascii")}
+        return super().rest(method, path, payload, params)
+
+    def graphql(self, query: str, variables: dict[str, Any]) -> dict[str, Any]:
+        self.requests.append(("GRAPHQL", query.split("{", 1)[0].strip(), dict(variables)))
+        after = variables["after"]
+        i = 0 if after is None else int(after[1:])
+        page = self.pages[min(i, len(self.pages) - 1)]
+        return {"repository": {"mergeQueue": page}}
+
+
+def _queue_page(nodes: list[tuple[Any, str]], cursor: str | None) -> dict:
+    return {
+        "entries": {
+            "nodes": [{"pullRequest": {"number": n, "headRefOid": h}} for n, h in nodes],
+            "pageInfo": {"hasNextPage": cursor is not None, "endCursor": cursor},
+        }
+    }
+
+
+def _paged_lander(pages: list[Any]) -> tuple[_PagedQueueHub, land.Lander]:
+    hub = _PagedQueueHub(pages=pages, versions={_TIP: "1.0.0", HEAD: "1.0.1", _H8: "1.0.0", _H9: "1.0.1"})
+    hub.responses[("GET", "/repos/o/r/rules/branches/main")] = [{"type": "merge_queue", "parameters": {"merge_method": "MERGE"}}]
+    return hub, land.Lander(hub, strategy("plugin"), 60.0)
+
+
+def _graphql_vars(hub: FakeHub) -> list[dict]:
+    return [r[2] for r in hub.requests if r[0] == "GRAPHQL"]
+
+
+def _compared_heads(hub: FakeHub) -> list[str]:
+    return [r[1].rsplit("...", 1)[1] for r in hub.requests if r[0] == "GET" and r[1].startswith("/repos/o/r/compare/")]
+
+
+def test_gate_reads_every_merge_queue_page_and_skips_its_own_pr() -> None:
+    """現状固定: キューを全ページ読み、自分の PR を除いた行を版上げの比べにかける。後ろのページの版上げで止まる。"""
+    hub, lander = _paged_lander([_queue_page([(8, _H8), (7, HEAD)], "c1"), _queue_page([("9", _H9)], None)])
+    gate = lander._gate(pull())
+    assert _graphql_vars(hub) == [
+        {"owner": "o", "name": "r", "branch": "main", "after": None},
+        {"owner": "o", "name": "r", "branch": "main", "after": "c1"},
+    ]
+    assert _compared_heads(hub) == [HEAD, _H8, _H9]  # 自分の PR の比べ → キューの行（自分を除く。番号の文字列も数にする）
+    assert gate.stop is not None and gate.stop.kind == "refused"
+    assert gate.stop.detail.startswith("#7: キューに別の版上げの PR（#9）がある。")
+    assert gate.pr == {"number": 7, "bump": True, "cut_version": "1.0.0", "contains_tip": True, "tip": _TIP}
+
+
+def test_gate_passes_when_the_queue_has_no_other_bump() -> None:
+    """現状固定: キューの他の行が版上げでなければ通る（行は `_bump_facts` の形で比べる）。"""
+    hub, lander = _paged_lander([_queue_page([(8, _H8)], None)])
+    gate = lander._gate(pull())
+    assert gate.stop is None and gate.bypass is False
+    assert _compared_heads(hub) == [HEAD, _H8]
+    assert len(_graphql_vars(hub)) == 1
+
+
+def test_gate_without_a_merge_queue_compares_only_its_own_pr() -> None:
+    """現状固定: 本番ブランチにキューが無い（mergeQueue が null）なら、キューの行は空で 1 ページで止める。"""
+    hub, lander = _paged_lander([None])
+    gate = lander._gate(pull())
+    assert gate.stop is None
+    assert _compared_heads(hub) == [HEAD]
+    assert len(_graphql_vars(hub)) == 1
+
+
+def test_gate_gives_up_after_the_page_limit() -> None:
+    """現状固定: `QUEUE_PAGES` ページで読み切れなければ GitHubError を上げる（キューの行の比べには進まない）。"""
+    hub, lander = _paged_lander([_queue_page([(9, _H9)], "c1")] * (land.QUEUE_PAGES + 1))
+    with pytest.raises(GitHubError, match=f"merge queue を {land.QUEUE_PAGES} ページで読み切れない"):
+        lander._gate(pull())
+    assert [v["after"] for v in _graphql_vars(hub)] == [None] + ["c1"] * (land.QUEUE_PAGES - 1)
+    assert _compared_heads(hub) == [HEAD]
