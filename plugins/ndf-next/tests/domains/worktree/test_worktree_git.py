@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Callable, Iterable
 
 import pytest
+import strategy_fixture
 
 from ndf import identity
 from ndf.adapters.git import Completed, Git
@@ -41,8 +42,16 @@ def test_create_new_branch_from_start(main_repo: Path) -> None:
     assert repo.current_branch(Git(got.path)) == "feat/a"
 
 
-def test_create_uses_production_channel_and_explicit_start(make_repo: Callable, run_git: Callable) -> None:
-    main = make_repo({"version": 1, "base_branch": "develop", "production_branch": "main", "branch_flow": {"start": "production"}})
+@pytest.mark.parametrize("kind", strategy_fixture.KINDS)
+def test_create_starts_from_the_declared_sprint_start(make_repo: Callable, kind: str) -> None:
+    """5 種の宣言で、スプリントの起点が 10 系の `sprint_start_ref` と同じ（#3681 の受け入れ条件 1）。"""
+    main = make_repo({"version": 1}, kind)
+    got = create.create(main, "sprint/s")
+    assert (got.base, got.start_ref) == (strategy_fixture.EXPECTED[kind][0], f"origin/{strategy_fixture.EXPECTED[kind][0]}")
+
+
+def test_create_uses_explicit_start(make_repo: Callable) -> None:
+    main = make_repo({"version": 1}, "mobile")
     assert create.create(main, "sprint/s").base == "main"
     assert create.create(main, "feat/b", start="sprint/s").start_ref == "sprint/s"
 
@@ -53,9 +62,45 @@ def test_create_reuses_existing_branch(main_repo: Path, run_git: Callable) -> No
     assert (got.new_branch, got.start_ref) == (False, "feat/old")
 
 
-def test_create_without_declaration_uses_origin_default(make_repo: Callable) -> None:
-    main = make_repo(None)
-    assert create.create(main, "feat/c").base == "develop"
+def test_create_without_strategy_stops_without_falling_back(make_repo: Callable) -> None:
+    """セクションが無ければ、origin の既定ブランチへ倒さずに止まり、作成のコマンドを出す（I3）。"""
+    main = make_repo(None, None)
+    with pytest.raises(create.CreateError) as err:
+        create.create(main, "feat/c")
+    assert err.value.kind == "precondition" and "ndf project branch-strategy init" in str(err.value)
+    assert not (main / ".worktrees" / "feat" / "c").exists()
+
+
+@pytest.mark.parametrize(
+    ("name", "doc", "where"),
+    [
+        ("worktree.json", {"version": 1, "base_branch": "develop"}, "`.ndf/worktree.json` の `/base_branch`"),
+        ("worktree.json", {"version": 1, "branch_flow": {"start": "base"}}, "`.ndf/worktree.json` の `/branch_flow/start`"),
+        ("release.json", {"version_files": ["package.json"]}, "`.ndf/release.json` の `/version_files`"),
+    ],
+)
+def test_create_stops_on_legacy_keys(make_repo: Callable, name: str, doc: dict, where: str) -> None:
+    """旧いキーを置いたリポジトリでは作らずに止まり、旧いキーの位置と移行のコマンドを出す（#3672 のテスト設計の 22）。"""
+    main = make_repo({"version": 1})
+    (main / ".ndf" / name).write_text(json.dumps(doc), encoding="utf-8")
+    with pytest.raises(create.CreateError) as err:
+        create.create(main, "sprint/s")
+    assert err.value.kind == "precondition"
+    assert where in str(err.value) and "ndf project branch-strategy migrate" in str(err.value)
+    assert not (main / ".worktrees" / "sprint" / "s").exists()
+
+
+def test_create_writes_start_snapshot_once(main_repo: Path, tmp_path: Path) -> None:
+    """スプリントの開始時にセクションの全体を控え、2 回目は控えを書き換えずに今の宣言との違うキーを返す（決定 9・I13）。"""
+    state = tmp_path / "state"
+    got = create.create(main_repo, "sprint/s", state_dir=state)
+    assert got.snapshot is not None and got.snapshot["written"] and got.snapshot["changed"] == []
+    first = (state / "branch-strategy.json").read_text(encoding="utf-8")
+    assert json.loads(first)["section"] == strategy_fixture.section("web-develop")
+    strategy_fixture.write(main_repo, "mobile")
+    again = create.create(main_repo, "feat/x", start="sprint/s", state_dir=state)
+    assert again.snapshot is not None and not again.snapshot["written"]
+    assert "/release_strategy" in again.snapshot["changed"] and (state / "branch-strategy.json").read_text(encoding="utf-8") == first
 
 
 @pytest.mark.parametrize(
@@ -167,9 +212,8 @@ def test_cleanup_restores_evacuated_files_when_git_refuses(main_repo: Path, run_
 
 
 def test_cleanup_keeps_selected_sprint_until_production(main_repo: Path, run_git: Callable) -> None:
-    """選んで集める取り込み方のスプリントは、merged と同じく本番チャネルに含まれるまで cleanup でも消さない。"""
-    decl = {"version": 1, "base_branch": "develop", "production_branch": "main", "branch_flow": {"promotion": "selected"}}
-    (main_repo / ".ndf" / "worktree.json").write_text(json.dumps(decl), encoding="utf-8")
+    """選んで集める取り込み方（release_branch）のスプリントは、merged と同じく本番ブランチに含まれるまで cleanup でも消さない。"""
+    strategy_fixture.write(main_repo, "mobile")
     run_git(main_repo, "add", "-A")
     run_git(main_repo, "commit", "-q", "-m", "declare")
     wt = create.create(main_repo, "sprint/s9").path

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Callable
 
@@ -71,6 +72,26 @@ def test_init_check_and_env_subcommands(make_repo: Callable, capsys: pytest.Capt
     for argv in (("deps", str(main)), ("localenv", "mode"), ("testenv", "compose-env")):
         code, out = _run(capsys, last_result, "--cwd", str(main), *argv)
         assert code == 0 and out["status"] == result.OK
+
+
+def test_check_and_create_read_the_branch_strategy(
+    main_repo: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str], last_result: Callable
+) -> None:
+    """check はセクションのベースブランチ・本番ブランチ・スプリントの起点を出し、create --state-dir はスナップショットを控える。"""
+    code, out = _run(capsys, last_result, "--cwd", str(main_repo), "check")
+    assert code == 0 and {"base": "develop", "production": "main", "sprint_start": "develop"} in out["items"]
+    state = tmp_path / "state"
+    code, out = _run(capsys, last_result, "--cwd", str(main_repo), "create", "sprint/s1", "--state-dir", str(state))
+    assert code == 0 and out["items"][0]["snapshot"]["written"] and (state / "branch-strategy.json").is_file()
+
+
+def test_create_with_legacy_keys_is_stopped(main_repo: Path, capsys: pytest.CaptureFixture[str], last_result: Callable) -> None:
+    """旧いキーを置いたリポジトリでは worktree を用意せず、旧いキーの位置と移行のコマンドを出す（#3672 のテスト設計の 22）。"""
+    (main_repo / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "base_branch": "develop"}), encoding="utf-8")
+    code, out = _run(capsys, last_result, "--cwd", str(main_repo), "create", "sprint/s1")
+    assert code != 0 and out["cause"]["kind"] == "precondition"
+    assert "`.ndf/worktree.json` の `/base_branch`" in out["summary"] and "ndf project branch-strategy migrate" in out["summary"]
+    assert not (main_repo / ".worktrees" / "sprint" / "s1").exists()
 
 
 def test_trash_requires_approved_names(main_repo: Path, capsys: pytest.CaptureFixture[str], last_result: Callable) -> None:

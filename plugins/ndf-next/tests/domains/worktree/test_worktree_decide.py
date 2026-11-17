@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import pytest
+import strategy_fixture
 
 from ndf.adapters.git import parse_worktree_list
 from ndf.domains.worktree import cleanup_decide as cd
@@ -113,19 +114,32 @@ def test_declaration_absent_broken_and_local_overrides(tmp_path: Path) -> None:
     _write(tmp_path, "worktree.json", {"version": 2})
     with pytest.raises(declaration.DeclarationError):
         declaration.load(tmp_path)
-    _write(tmp_path, "worktree.json", {"version": 1, "base_branch": "dev", "guard": {"allow_paths": ["x/"]}})
-    _write(tmp_path, "worktree.local.json", {"version": 1, "follow_branch": True, "base_branch": "other", "testenv": 3})
+    _write(tmp_path, "worktree.json", {"version": 1, "guard": {"allow_paths": ["x/"]}})
+    _write(tmp_path, "worktree.local.json", {"version": 1, "follow_branch": True, "remote": "other", "testenv": 3})
     got = declaration.load(tmp_path)
     assert got is not None
-    assert (got.base_branch, got.follow_branch, got.allow_paths) == ("dev", True, ("x/",))
-    assert got.local_ignored == ("base_branch", "testenv")
+    assert (got.follow_branch, got.allow_paths) == (True, ("x/",))
+    assert got.local_ignored == ("remote", "testenv")
     _write(tmp_path, "worktree.local.json", "{broken")
     broken = declaration.load(tmp_path)
     assert broken is not None and broken.follow_branch is False and len(broken.local_ignored) == 1
 
 
-def test_declaration_start_channel() -> None:
-    assert declaration.Declaration({"version": 1}).start_channel == "base"
-    assert declaration.Declaration({"branch_flow": {"start": "production"}}).start_channel == "production"
-    with pytest.raises(declaration.DeclarationError):
-        _ = declaration.Declaration({"branch_flow": {"start": "main"}}).start_channel
+@pytest.mark.parametrize("kind", strategy_fixture.KINDS)
+def test_declaration_reads_start_and_target_from_the_section(tmp_path: Path, kind: str) -> None:
+    """5 種の宣言で、スプリントの起点と PR の種類ごとの宛先が 10 系と同じ値（#3681 の受け入れ条件 1）。"""
+    strategy_fixture.write(tmp_path, kind)
+    got = declaration.strategy(tmp_path)
+    targets = (got.pr_target("sprint"), got.pr_target("doc", strategy_fixture.SPRINT_BRANCH), got.pr_target("release"))
+    assert (declaration.sprint_start(tmp_path), *targets) == strategy_fixture.EXPECTED[kind]
+    assert declaration.base_branch(tmp_path) == strategy_fixture.EXPECTED[kind][1]
+
+
+def test_declaration_strategy_stops_without_section_or_with_legacy_keys(tmp_path: Path) -> None:
+    with pytest.raises(declaration.DeclarationError, match="ndf project branch-strategy init"):
+        declaration.strategy(tmp_path)
+    strategy_fixture.write(tmp_path, "docs")
+    _write(tmp_path, "worktree.json", {"version": 1, "production_branch": "main"})
+    for read in (declaration.load, declaration.strategy):
+        with pytest.raises(declaration.DeclarationError, match="`/production_branch` は旧い宣言のキー"):
+            read(tmp_path)

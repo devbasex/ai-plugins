@@ -5,6 +5,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+import strategy_fixture
+
 from ndf.core import route
 
 from ._flow import git
@@ -121,7 +124,7 @@ def test_omitted_worktree_is_under_submodule_worktree_not_git_modules(tmp_path):
     git(sup, "submodule", "add", "-q", str(sub), "mod")
     inner = sup / "mod"
     t = route.choose("immediate_fix")
-    got = route.derived(t, {"branch": "fix/x"}, inner)
+    got = route.derived(t, {"branch": "fix/x", "base": "main"}, inner)
     assert Path(got["repo"]).resolve() == inner.resolve()
     assert Path(got["worktree"]).resolve() == (inner / ".worktrees" / "fix" / "x").resolve()
     assert ".git/modules" not in str(got["worktree"])
@@ -183,26 +186,35 @@ def test_render_stops_when_omitted_worktree_is_not_usable(tmp_path, monkeypatch,
     assert not out.exists()
 
 
-def test_omitted_base_reads_declaration_then_origin_default_branch(tmp_path):
-    """base を省けば、ブランチの運用の宣言の base_branch、無ければ origin の既定ブランチにする（develop に固定しない）。"""
+@pytest.mark.parametrize("kind", strategy_fixture.KINDS)
+def test_omitted_base_is_the_sprint_pr_target_of_the_strategy(tmp_path, kind):
+    """base を省けば、ブランチ戦略の宣言のスプリントの PR の宛先にする。5 種の宣言で 10 系と同じ値（#3681 の受け入れ条件 1）。"""
     repo = tmp_path / "repo"
     repo.mkdir()
     git(repo, "init", "-q", "-b", "main")
+    strategy_fixture.write(repo, kind)
     t = route.choose("immediate_fix")
     given = {"repo": str(repo), "worktree": str(repo), "branch": "fix/x"}
-    assert "base" not in route.derived(t, given, repo)
+    assert route.derived(t, given, repo)["base"] == strategy_fixture.EXPECTED[kind][1]
+    assert route.derived(t, {**given, "base": "release"}, repo)["base"] == "release"
+
+
+def test_omitted_base_stops_without_the_strategy_or_with_legacy_keys(tmp_path):
+    """宣言が無ければ origin の既定ブランチへ倒さずに止まり、旧いキーがあれば位置と移行のコマンドを出す。"""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init", "-q", "-b", "main")
     git(repo, "commit", "-q", "--allow-empty", "-m", "a")
     git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
     git(repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
-    assert route.derived(t, given, repo)["base"] == "main"
-    # --set remote= で渡したリモートの既定ブランチから決める（push の宛先とそろえる）
-    git(repo, "update-ref", "refs/remotes/upstream/develop", "HEAD")
-    git(repo, "symbolic-ref", "refs/remotes/upstream/HEAD", "refs/remotes/upstream/develop")
-    assert route.derived(t, {**given, "remote": "upstream"}, repo)["base"] == "develop"
-    (repo / ".ndf").mkdir()
+    t = route.choose("immediate_fix")
+    given = {"repo": str(repo), "worktree": str(repo), "branch": "fix/x"}
+    with pytest.raises(route.RouteError, match="ndf project branch-strategy init"):
+        route.derived(t, given, repo)
+    strategy_fixture.write(repo, "web-develop")
     (repo / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "base_branch": "develop"}), encoding="utf-8")
-    assert route.derived(t, given, repo)["base"] == "develop"
-    assert route.derived(t, {**given, "base": "release"}, repo)["base"] == "release"
+    with pytest.raises(route.RouteError, match="`/base_branch` は旧い宣言のキー.*ndf project branch-strategy migrate"):
+        route.derived(t, given, repo)
 
 
 def _fake_hub(seen: list[tuple[str, str]]):
