@@ -7,7 +7,7 @@
 | `present` | 会話のセッション | `trail.present`（承認資料の提示。承認ゲート） |
 | `answer` | 会話のセッション | `trail.answer`（答えを証跡に書き、届いたかを確かめる） |
 | `approval-check` | workflow | `trail.check`（証跡の判定を commit status へ） |
-| `merge` | workflow | `land`（証跡の後のマージと、ベースブランチへ戻す PR） |
+| `merge` | workflow | `land`（証跡の後に、ブランチ戦略の宣言の主体と方式で入れ、要ればベースブランチへ戻す PR） |
 | `record` | workflow | `record.write`（含めた PR の各々へリリース記録を書く。本番ブランチへのマージの後） |
 | `verification-record` | 会話のセッション | `record.write_verification`（リリース後テストの記録を、リリース記録と同じ PR へ書く） |
 | `records` | 会話のセッション | `record.read`（PR のリリース記録とリリース後テストの記録を読む） |
@@ -30,6 +30,7 @@ from ndf.adapters import git as git_mod
 from ndf.adapters import github as github_mod
 from ndf.adapters.github import GitHub
 from ndf.contracts import result
+from ndf.core import branch_strategy
 from ndf.domains.release import (
     approval_decide,
     assemble,
@@ -50,6 +51,17 @@ from ndf.domains.release import plugins as plugins_mod
 
 # 結果 JSON の tool の名前は副命令の名前（正本は `cli.COMMANDS`）
 TOOL = cli.tool_of(__name__)
+
+
+def _strategy(args: argparse.Namespace) -> branch_strategy.Strategy:
+    """メインディレクトリのブランチ戦略の宣言（作業場所の宣言は PR の変更でマージの主体・方式を差し替えられるため読まない）。
+    git の外ならメインディレクトリを持たないので `--root` の宣言。"""
+    root = Path(args.root)
+    try:
+        main = git_mod.Git(root).common_dir().parent
+    except git_mod.GitError:  # noqa: NDF401 ファイル: git の外はメインディレクトリが無いので --root の宣言を読む
+        main = root
+    return branch_strategy.load(main)
 
 
 def _hub(args: argparse.Namespace) -> GitHub:
@@ -80,9 +92,17 @@ def cmd_materials(args: argparse.Namespace) -> dict:
 
 
 def cmd_present(args: argparse.Namespace) -> dict:
+    writer = trail.trail_writer(_strategy(args), merged_by_human=False)
+    if writer != trail.WRITER_ANSWER:
+        # 証跡の書き手が答えの手順でなければ問わない（GitHub のレビューか人のマージが承認を持つ。#3671）
+        return result.result(TOOL, result.OK, f"#{args.pr} の承認の証跡の書き手は {writer} で、承認ゲートで問わない", outputs={"writer": writer})
     hub = _hub(args)
     material = Path(args.material).read_text(encoding="utf-8") if args.material else hub.pull(args.pr).body
-    head = trail.present(hub, args.pr, material)
+    shown = trail.present(hub, args.pr, material)
+    head = shown.head
+    if not shown.asked:
+        detail = f"#{args.pr}（{head[:12]}）には今の先端への答えが既にあり、問いを送らない: {shown.judgment.detail}"
+        return result.result(TOOL, result.OK, detail, outputs={"head": head, "state": shown.judgment.state, "writer": writer})
     routes = {
         answer: result.command(TOOL, "answer", "--pr", str(args.pr), "--answer", answer, "--presented", head, ask=("--by",))
         for answer in approval_decide.ANSWERS
@@ -93,7 +113,8 @@ def cmd_present(args: argparse.Namespace) -> dict:
 
 
 def cmd_answer(args: argparse.Namespace) -> dict:
-    judgment = trail.answer(_hub(args), args.pr, args.answer, args.by, args.presented)
+    writer = trail.trail_writer(_strategy(args), merged_by_human=False)
+    judgment = trail.answer(_hub(args), args.pr, args.answer, args.by, args.presented, writer)
     return result.result(TOOL, result.OK, f"#{args.pr} の答えが証跡に届いた: {judgment.detail}", outputs={"state": judgment.state})
 
 
@@ -109,8 +130,7 @@ def cmd_approval_check(args: argparse.Namespace) -> dict:
 
 
 def cmd_merge(args: argparse.Namespace) -> dict:
-    admin = decl_mod.production_admin(Path(args.root))
-    done = land.Lander(_hub(args), args.base, args.production, args.budget, admin=admin).land(args.pr)
+    done = land.Lander(_hub(args), _strategy(args), args.budget).land(args.pr)
     outputs: dict[str, Any] = {"sync_pr": done.sync_pr} if done.sync_pr is not None else {}
     if done.production_sha is not None:
         outputs["production_sha"] = done.production_sha
@@ -204,8 +224,8 @@ def _common(p: argparse.ArgumentParser) -> None:
 
 
 def _branches(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--base", required=True, help="ベースブランチ（宣言 worktree.json の base_branch）")
-    p.add_argument("--production", required=True, help="本番ブランチ（宣言 worktree.json の production_branch）")
+    p.add_argument("--base", required=True, help="ベースブランチ（宣言 project.json の branch_strategy.branches.base）")
+    p.add_argument("--production", required=True, help="本番ブランチ（宣言 project.json の branch_strategy.branches.production）")
 
 
 def _target_args(p: argparse.ArgumentParser) -> None:
@@ -278,7 +298,7 @@ ARGS: dict[Callable[[argparse.Namespace], dict], tuple[Callable[[argparse.Argume
     cmd_present: (_pr, _material),
     cmd_answer: (_pr, _answer_args),
     cmd_approval_check: (_pr, _production),
-    cmd_merge: (_pr, _branches, _budget),
+    cmd_merge: (_pr, _budget),
     cmd_record: (_pr, _production),
     cmd_verification_record: (_pr, _verification),
     cmd_records: (_pr,),
@@ -310,6 +330,7 @@ _ERRORS: tuple[tuple[type[Exception], str], ...] = (
     (assemble.AssembleError, "precondition"),
     (assemble.ReleaseOpen, "refused"),
     (trail.TrailError, "refused"),
+    (branch_strategy.StrategyError, "precondition"),
     (record.NotReleased, "not_applicable"),
     (record.RecordError, "precondition"),
     (record_decide.UnreadableRecord, "invalid"),
