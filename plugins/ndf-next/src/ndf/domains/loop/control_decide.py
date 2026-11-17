@@ -30,6 +30,8 @@ from ndf.domains.loop import record_decide as rec
 STOP_BY = ("human", "organizer")
 # 断りの種類（止まった理由の表の種類）
 REFUSED, PRECONDITION, INVALID = "refused", "precondition", "invalid"
+# 次の 1 手の副命令の名前（`Step.tool`）: 開発ループ自身と、結び付けた進行表
+LOOP_TOOL, PROGRESS_TOOL = "loop", "progress"
 
 
 @dataclass(frozen=True)
@@ -42,7 +44,7 @@ class Step:
     args: tuple[str, ...]
     ask: tuple[str, ...] = ()
     session: bool = False
-    tool: str = "loop"
+    tool: str = LOOP_TOOL
 
 
 @dataclass(frozen=True)
@@ -87,7 +89,7 @@ def next_step(state: rec.LoopState, name: str) -> Optional[Step]:
     """ループの今の状態から、次に打つ 1 手。止めたループはレーンの行の進行表を終える手（結び付けていなければ None）。"""
     lap = state.current
     if state.status == rec.HALTED:
-        return Step(("next", state.row), tool="progress") if state.row is not None else None
+        return Step(("next", state.row), tool=PROGRESS_TOOL) if state.row is not None else None
     if lap is None:
         if state.requested is not None:
             return _step("lap", name, session=True)

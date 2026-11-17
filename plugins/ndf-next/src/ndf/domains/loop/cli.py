@@ -58,7 +58,7 @@ def _command(step: Optional[ctl.Step], session: Optional[str], cwd: Path) -> Opt
     """
     if step is None:
         return None
-    if step.tool != TOOL:
+    if step.tool != ctl.LOOP_TOOL:
         return result.command(step.tool, *step.args, ask=step.ask)
     args = [TOOL, "--cwd", str(cwd), *step.args]
     ask = step.ask

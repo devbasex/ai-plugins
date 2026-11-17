@@ -12,6 +12,7 @@ import pytest
 
 from ndf.contracts import result
 from ndf.domains.loop import cli as loop_cli
+from ndf.domains.loop import control_decide as ctl
 from ndf.domains.loop import record_decide as rec
 from ndf.domains.loop import store
 
@@ -149,3 +150,8 @@ def test_close_plan_and_review_args(loop: Callable[..., dict]) -> None:
         "code",
     ]
     assert loop("close-plan", "--pace", "slow", "--route", "none")["cause"]["kind"] == "invalid"
+
+
+def test_step_loop_tool_is_the_cli_name() -> None:
+    """次の 1 手の既定の副命令（`Step.tool`）は、この CLI の副命令の名前と同じ。"""
+    assert ctl.LOOP_TOOL == loop_cli.TOOL
