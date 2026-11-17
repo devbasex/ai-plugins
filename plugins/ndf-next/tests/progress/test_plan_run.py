@@ -560,6 +560,7 @@ def test_a_loop_row_ends_through_its_table_and_is_cancelled_with_the_loop_halted
     import argparse
 
     from ndf.progress import command, gate
+    from ndf.progress import run as table_run
 
     pid = _create(opened, _doc(_loop_decl("lr")))
     with store.transaction(opened) as conn:
@@ -571,8 +572,8 @@ def test_a_loop_row_ends_through_its_table_and_is_cancelled_with_the_loop_halted
         cancel = run.first_input(conn, pid, Launch("lr", "r1", cancel=sid))
         goal = run.first_input(conn, pid, Launch("lr", "r1", goal=sid))
     assert '"stop"' in cancel and '"--now"' in cancel and '"get"' in goal and '"next"' not in goal
-    env = gate.lane_env(run.Env(facts=lambda w, c, d: {}, records=lambda c: _NoRecords()))
-    out = run.advance(opened, sid, tmp_path, env)
+    env = gate.lane_env(table_run.Env(facts=lambda w, c, d: {}, records=lambda c: _NoRecords()))
+    out = table_run.advance(opened, sid, tmp_path, env)
     assert out["status"] == "ok" and out["metrics"]["state"] == "completed"
     with store.transaction(opened) as conn:
         ended = [e for e in store.read_events(conn, view.lanes["lr"].table_id) if e.draft.kind == "row_ended"]
