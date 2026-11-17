@@ -100,7 +100,7 @@ Skill を呼べるランタイムでは `document-style` を Skill として起�
 **章立てを目的別ガイドの「構成」の順に並べ替える。** 段落と文はまだ触らない。
 
 **別の Skill が固定した章は動かさない**（共通ルール K3）。設計文書の H1 と、H1 の直後の「目的」から
-「あるべき姿の根拠」までの章は、`design` の
+「目指す姿の根拠」までの章は、`design` の
 [design-template.md の「承認する人が読む欄」](../design/references/design-template.md#承認する人が読む欄) が決める。
 要求のテンプレート・Pull Request の本文の形・`type-*.md` の必ず書くセクション・`document-sources` の出典のセクションも同じ扱いで、
 目的別の構成は固定されていない章の中だけに当てる。
