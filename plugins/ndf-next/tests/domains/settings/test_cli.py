@@ -15,10 +15,7 @@ from ndf.domains.settings import cli, renames
 
 def _repo(tmp_path: Path, indent: int = 2) -> Path:
     (tmp_path / ".ndf").mkdir()
-    (tmp_path / ".ndf" / "worktree.json").write_text(
-        json.dumps(legacy.worktree(), indent=indent, ensure_ascii=False) + "\n", encoding="utf-8"
-    )
-    (tmp_path / ".ndf" / "mvv.json").write_text(json.dumps(legacy.mvv(2), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    (tmp_path / ".ndf" / "mvv.json").write_text(json.dumps(legacy.mvv(2), indent=indent, ensure_ascii=False) + "\n", encoding="utf-8")
     return tmp_path
 
 
@@ -35,7 +32,7 @@ def test_plan_shows_the_diff_without_writing(tmp_path: Path):
     before = _bytes(root)
     got = cli.plan(root)
     assert result.errors(got) == []
-    assert got["status"] == "gate" and [i["file"] for i in got["items"]] == ["mvv", "worktree"]
+    assert got["status"] == "gate" and [i["file"] for i in got["items"]] == ["mvv"]
     digest = got["metrics"]["digest"]
     assert len(digest) == 64 and got["routes"]["approved"]["argv"][-2:] == ["--apply", digest]
     assert _bytes(root) == before
@@ -46,11 +43,9 @@ def test_apply_with_the_shown_digest_writes_the_new_keys_once(tmp_path: Path):
     root = _repo(tmp_path)
     got = cli.apply(root, cli.plan(root)["metrics"]["digest"])
     assert got["status"] == "ok" and result.errors(got) == []
-    wt, mvv = _read(root, "worktree.json"), _read(root, "mvv.json")
-    assert wt["branch_flow"]["release_strategy"] == "release_branch"
+    mvv = _read(root, "mvv.json")
     assert mvv["versions"][0]["validation"] == {"result": "pass", "checked_at": "2026-01-01T00:00:00+00:00", "accepted_unknown": False}
     assert mvv["settings"] == {"revise_after": {"overrides": 3}}
-    assert contracts.schema_errors(wt, contracts.schema_path("ndf-settings/worktree")) == []
     assert contracts.schema_errors(mvv, contracts.schema_path("ndf-settings/mvv")) == []
     assert (root / ".ndf" / "mvv.json").read_text(encoding="utf-8").endswith("}\n")
     again = cli.plan(root)
@@ -77,9 +72,9 @@ def test_apply_refuses_an_empty_diff_and_schema_errors(tmp_path: Path):
     assert cli.plan(tmp_path)["status"] == "ok"
     assert cli.apply(tmp_path, "0" * 64)["cause"]["kind"] == "refused"
     root = _repo(tmp_path / "r")
-    data = _read(root, "worktree.json")
-    data["base_branch"] = 7
-    (root / ".ndf" / "worktree.json").write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    data = _read(root, "mvv.json")
+    data["body"] = 7
+    (root / ".ndf" / "mvv.json").write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     before = _bytes(root)
     got = cli.apply(root, cli.plan(root)["metrics"]["digest"])
     assert got["cause"]["kind"] == "refused" and "スキーマ" in got["summary"]
@@ -87,9 +82,10 @@ def test_apply_refuses_an_empty_diff_and_schema_errors(tmp_path: Path):
 
 
 def test_plan_reports_reindent_and_unreadable_settings(tmp_path: Path):
-    root = _repo(tmp_path, indent=4)
-    items = {i["file"]: i for i in cli.plan(root)["items"]}
-    assert items["worktree"]["reindent"] is True and items["mvv"]["reindent"] is False
+    items = {i["file"]: i for i in cli.plan(_repo(tmp_path / "a", indent=4))["items"]}
+    assert items["mvv"]["reindent"] is True
+    root = _repo(tmp_path / "b")
+    assert {i["file"]: i for i in cli.plan(root)["items"]}["mvv"]["reindent"] is False
     (root / ".ndf" / "mvv.json").write_text("{broken", encoding="utf-8")
     got = cli.plan(root)
     assert got["status"] == "stopped" and got["cause"]["kind"] == "invalid" and got["items"] == []

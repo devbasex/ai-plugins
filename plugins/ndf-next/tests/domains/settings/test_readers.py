@@ -1,4 +1,4 @@
-"""旧いキーの残る設定を読むと、旧いキーと新しいキーの位置と移行のコマンドを出して止まる（#3613。I6・受け入れ条件 13）。"""
+"""旧いキーの残る MVV の設定を読むと、旧いキーと新しいキーの位置と移行のコマンドを出して止まる（#3613。I6・受け入れ条件 13）。"""
 
 from __future__ import annotations
 
@@ -9,7 +9,6 @@ from pathlib import Path
 import pytest
 import settings_legacy as legacy
 from ndf.domains.records import mvv, preflight
-from ndf.domains.worktree import merged, ndf_settings
 
 
 def _write(root: Path, name: str, data: dict) -> Path:
@@ -17,33 +16,6 @@ def _write(root: Path, name: str, data: dict) -> Path:
     path = root / ".ndf" / name
     path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
     return path
-
-
-def test_worktree_settings_with_a_legacy_key_stop(tmp_path: Path):
-    _write(tmp_path, "worktree.json", legacy.worktree())
-    with pytest.raises(ndf_settings.NdfSettingsError, match="ndf settings migrate --root") as got:
-        ndf_settings.load(tmp_path)
-    assert "/branch_flow/release_strategy" in str(got.value)
-
-
-def test_worktree_settings_with_the_new_key_are_read(tmp_path: Path):
-    _write(
-        tmp_path,
-        "worktree.json",
-        {**legacy.worktree(), "branch_flow": {"start": "production", "release_strategy": "release_branch", "doc_prs": "sprint"}},
-    )
-    got = ndf_settings.load(tmp_path)
-    assert got is not None
-
-
-def test_flow_record_with_a_legacy_key_stops_before_cleanup(tmp_path: Path):
-    path = tmp_path / "flow.json"
-    path.write_text(json.dumps(legacy.worktree()["branch_flow"]), encoding="utf-8")
-    with pytest.raises(ndf_settings.NdfSettingsError, match="/branch_flow/release_strategy"):
-        merged.read_flow_record(path)
-    path.write_text(json.dumps({"release_strategy": "release_branch"}), encoding="utf-8")
-    assert merged.read_flow_record(path) == {"release_strategy": "release_branch"}
-    assert merged.read_flow_record(None) is None
 
 
 def test_worktree_mvv_with_a_legacy_key_stops(tmp_path: Path):

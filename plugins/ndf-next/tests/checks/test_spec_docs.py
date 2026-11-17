@@ -408,9 +408,9 @@ def test_the_real_settings_with_legacy_keys_is_checked_after_the_renames(copy):
     import settings_legacy as legacy
 
     (copy.repo / ".ndf").mkdir()
-    (copy.repo / ".ndf" / "worktree.json").write_text(json.dumps(legacy.worktree()), encoding="utf-8")
+    (copy.repo / ".ndf" / "mvv.json").write_text(json.dumps(legacy.mvv(1)), encoding="utf-8")
     assert [f for f in copy.findings() if f.rule == spec_docs.DECL] == []
-    broken = {**legacy.worktree(), "base_branch": 7}
-    (copy.repo / ".ndf" / "worktree.json").write_text(json.dumps(broken), encoding="utf-8")
+    broken = {**legacy.mvv(1), "body": 7}
+    (copy.repo / ".ndf" / "mvv.json").write_text(json.dumps(broken), encoding="utf-8")
     found = [f for f in copy.findings() if f.rule == spec_docs.DECL]
-    assert [f.detail.split(":")[0] for f in found] == ["/base_branch"]
+    assert [f.detail.split(":")[0] for f in found] == ["/body"]

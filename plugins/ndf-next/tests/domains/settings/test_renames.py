@@ -9,7 +9,8 @@ from typing import Any
 
 import settings_legacy as legacy
 from ndf import contracts
-from ndf.contracts import facts
+from ndf.contracts import settings_renames
+from ndf.core import branch_strategy_legacy
 from ndf.domains.settings import renames
 
 
@@ -31,7 +32,7 @@ def _has(schema: dict[str, Any], pointer: str) -> bool:
 
 def test_rename_table_matches_the_schemas():
     rows = renames.load()
-    assert [r.id for r in rows] == ["worktree-release-strategy", "mvv-validation", "mvv-validation-result", "mvv-validation-checked-at"]
+    assert [r.id for r in rows] == ["mvv-validation", "mvv-validation-result", "mvv-validation-checked-at"]
     for r in rows:
         assert r.old != r.new
         assert renames.tokens(r.old)[:-1] == renames.tokens(r.new)[:-1]
@@ -39,10 +40,13 @@ def test_rename_table_matches_the_schemas():
         assert not _has(_schema(r.file), r.old), r.old
 
 
-def test_branch_flow_table_uses_only_the_new_values():
-    assert "release_strategy" in facts.table("branch-flows").columns
-    news = set(next(r for r in renames.load() if r.file == "worktree").values.values())
-    assert {r["release_strategy"] for r in facts.rows("branch-flows")} <= news
+def test_the_two_readers_split_the_one_table_without_overlap():
+    """改名表の行は、ブランチ戦略の移行と ndf settings migrate のどちらか一方だけが読む（#3613・#3672）。"""
+    rows = contracts.load_json(settings_renames.TABLE)["rows"]
+    moves = {m.id for m in branch_strategy_legacy.load_moves()}
+    ours = {r.id for r in renames.load()}
+    assert moves.isdisjoint(ours)
+    assert moves | ours == {r["id"] for r in rows}
 
 
 def test_tokens_unescape_reference_tokens():
@@ -72,16 +76,13 @@ def test_legacy_keys_are_empty_for_new_or_unknown_shapes():
 
 
 def test_migrate_renames_keys_in_place_and_maps_values():
-    data = legacy.worktree("release_branch")
+    data = legacy.mvv(1)
     before = copy.deepcopy(data)
-    got, patch = renames.migrate("worktree", data)
+    got, patch = renames.migrate("mvv", data)
     assert data == before
-    assert list(got["branch_flow"]) == ["start", "release_strategy", "doc_prs"]
-    assert got["branch_flow"]["release_strategy"] == "release_branch"
-    assert [op["op"] for op in patch] == ["test", "move", "test", "replace"]
-    assert contracts.schema_errors(got, contracts.schema_path("ndf-settings/worktree")) == []
-    merged, _ = renames.migrate("worktree", legacy.worktree("merge_base_branch"))
-    assert merged["branch_flow"]["release_strategy"] == "merge_base_branch"
+    assert list(got["versions"][0]["validation"]) == ["result", "checked_at", "accepted_unknown"]
+    assert [op["op"] for op in patch] == ["test", "move", "test", "move", "test", "replace", "test", "move"]
+    assert renames.migrate("worktree", {"version": 1}) == ({"version": 1}, [])
 
 
 def test_migrate_mvv_keeps_unlisted_keys_and_passes_the_schema():
@@ -99,11 +100,11 @@ def test_migrate_mvv_keeps_unlisted_keys_and_passes_the_schema():
 
 
 def test_migrate_leaves_both_keys_when_the_user_wrote_both():
-    data = legacy.worktree()
-    data["branch_flow"]["release_strategy"] = "release_branch"
-    got, patch = renames.migrate("worktree", data)
+    data = legacy.mvv(1)
+    data["versions"][0]["validation"] = {"result": "pass", "checked_at": "2026-01-01T00:00:00+00:00", "accepted_unknown": False}
+    got, patch = renames.migrate("mvv", data)
     assert patch == [] and got == data
-    assert len(renames.legacy_keys("worktree", got)) == 1
+    assert len(renames.legacy_keys("mvv", got)) == 1
 
 
 def test_legacy_detail_names_every_key_and_the_command(tmp_path: Path):

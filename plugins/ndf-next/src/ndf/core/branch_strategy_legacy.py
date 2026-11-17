@@ -14,10 +14,11 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from ndf import contracts, identity
+from ndf.contracts import settings_renames
 from ndf.core import json_pointer
 
-MOVES = "data/ndf-settings-renames.json"
-SECTION = "branch_strategy"
+MOVES = settings_renames.TABLE
+SECTION = settings_renames.SECTION
 # 利用先のリポジトリの宣言の置き場（`.ndf`）
 DECL_DIR = identity.FIXED_WORDS["ndf_settings_dir"]
 # 表の file（ndf-files の ID）→ `.ndf/` の下のファイル名
@@ -52,10 +53,9 @@ class Found:
 
 
 def _concerns_section(row: dict) -> bool:
-    new = row.get("new")
-    if new is None:
+    if settings_renames.removes(row):
         return row.get("file") in FILES
-    return row.get("new_file") == "project" and (new == f"/{SECTION}" or new.startswith(f"/{SECTION}/"))
+    return settings_renames.moves_into_section(row)
 
 
 def _rows(data: Any) -> list:

@@ -7909,7 +7909,7 @@
       "term": "設定のキーの改名表",
       "code": "ndf_settings_renames",
       "context": "ndf-workflow",
-      "meaning": "利用者の設定（.ndf/）の旧いキーの位置・新しいキーの位置・値の対応を行ごとに持つコントラクトの表（contracts/domains/ndf-settings-renames.json）。移行のコマンド・設定を読む側の止める検査・規約の規則が同じ表を読む",
+      "meaning": "利用者の設定（.ndf/）の旧いキーの位置・新しいキーの位置・値の対応を行ごとに持つコントラクトの表（contracts/data/ndf-settings-renames.json）。ブランチ戦略の移行（ndf project branch-strategy migrate）と旧い設定の検査、設定のキーの移行（ndf settings migrate）と設定を読む側の止める検査が、行を分けて同じ表を読む",
       "source": "plugins/ndf-next/skills/worktree/references/ndf-settings.md"
     },
     {

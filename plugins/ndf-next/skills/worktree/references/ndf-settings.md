@@ -390,9 +390,14 @@ bash "$SCRIPTS/worktree-localenv.sh" verify "$WT"; echo $?
 
 ## 改名した旧いキーを書き換える
 
-11.0 で改名したキー（`.ndf/worktree.json` の `branch_flow.release_strategy` と、`.ndf/mvv.json` の各バージョンの
-`validation`）の旧い名前が残る設定を読むと、NDF は旧いキーと新しいキーを示して止まる。既定の値へは倒さない。
-旧いキーと新しいキー・値の対応は改名表（`contracts/domains/ndf-settings-renames.json`）が持つ。
+11.0 で改名したキーの旧い名前が残る設定を読むと、NDF は旧いキーと新しいキーを示して止まる。既定の値へは倒さない。
+旧いキーと新しいキー・値の対応は改名表（`contracts/data/ndf-settings-renames.json`）の 1 つが持ち、キーの種類ごとに
+書き換えるコマンドが分かれる。
+
+- ブランチ戦略のキー（`.ndf/worktree.json` の `base_branch`・`branch_flow` など）は、`.ndf/project.json` の
+  `branch_strategy` へ移した。移すのは `ndf project branch-strategy migrate` で、手順は上の「ブランチ名とブランチ戦略」にある
+- `.ndf/mvv.json` の各バージョンの確かめの記録（旧い `vet` → `validation`、その中の `verdict` → `result`・
+  `at` → `checked_at`）は、次の `ndf settings migrate` が書き換える
 
 書き換えは 2 回の実行に分ける。1 回目は差分を示すだけで、ファイルを書かない。
 

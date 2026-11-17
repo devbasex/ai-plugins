@@ -1,4 +1,7 @@
-"""利用者の設定（`.ndf/`）のキーの改名（#3613）。改名表 `contracts/domains/ndf-settings-renames.json` を読む。
+"""利用者の設定（`.ndf/`）のキーの改名（#3613）。改名表 `contracts/data/ndf-settings-renames.json` を読む。
+
+改名表のうち、同じファイルの中でキーの名前と値を改める行だけを扱う。ブランチ戦略のセクションへ移す行と移した後に消す行は
+`ndf project branch-strategy migrate` の受け持ちで、振り分けは `ndf.contracts.settings_renames` が持つ。
 
 旧いキーの名前と旧い値はコードに書かず、改名表から引く（同じ事実を 2 か所に持たない）。この関数群は設定ファイルを
 読み書きせず、終了コードを持たない。移行のコマンド（`ndf settings migrate`）・設定を読む側の止める検査・規約の規則
@@ -17,10 +20,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
-from ndf.contracts import facts
+from ndf import contracts
+from ndf.contracts import facts, settings_renames
 
-# 改名表（コントラクトの表の名前）
-RENAMES = "ndf-settings-renames"
 # 配列のすべての要素を指す参照トークン
 EVERY = "*"
 
@@ -52,9 +54,16 @@ def relpath(file: str) -> str:
 
 
 def load() -> tuple[Rename, ...]:
-    """改名表の行を、表の並びのまま返す。"""
-    rows = facts.rows(RENAMES)
-    return tuple(Rename(r["id"], r["file"], r["old"], r["new"], dict(r["values"]) if "values" in r else {}) for r in rows)
+    """改名表のうち、同じファイルの中でキーの名前と値を改める行を、表の並びのまま返す。"""
+    data = contracts.load_as(settings_renames.TABLE, contracts.ContractError)
+    rows = data.get("rows") if isinstance(data, dict) else None
+    if not isinstance(rows, list):
+        raise contracts.ContractError(f"{settings_renames.TABLE}: rows が配列でない")
+    return tuple(
+        Rename(r["id"], r["file"], r["old"], r["new"], dict(r["values"]) if "values" in r else {})
+        for r in rows
+        if settings_renames.renames_in_place(r)
+    )
 
 
 def tokens(pointer: str) -> list[str]:

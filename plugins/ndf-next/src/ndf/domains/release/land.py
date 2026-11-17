@@ -405,7 +405,9 @@ class Lander:
         """`approval.via: review`: 読み直した PR `now` の HEAD が `pull` から動いたか、write 以上の人の最新の承認のレビューが
         今の HEAD へのものでなければ止まった結果（承認されていれば None。10 系の `approval_of` と同じ読み方）。"""
         if now.head_sha != pull.head_sha:
-            return Landed(False, "refused", f"#{pull.number} の HEAD が {pull.head_sha[:12]} から {now.head_sha[:12]} へ動いた。{REAPPROVE}")
+            return Landed(
+                False, "refused", f"#{pull.number} の HEAD が {pull.head_sha[:12]} から {now.head_sha[:12]} へ動いた。{REAPPROVE}"
+            )
         if trail.review_commit(self.hub, pull.number) != pull.head_sha.lower():
             return Landed(
                 False,
