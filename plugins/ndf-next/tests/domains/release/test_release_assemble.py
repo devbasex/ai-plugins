@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date
 from pathlib import Path
 
 import git_sandbox
@@ -78,12 +79,13 @@ def _hub() -> FakeHub:
 def test_assemble_builds_branch_and_pull_with_materials(tmp_path: Path) -> None:
     work = _origin_with_change(tmp_path, test_only=False)
     hub = _hub()
-    built = assemble.assemble(work, hub, _target("production", "patch"), STRATEGY)
+    built = assemble.assemble(work, hub, _target("production", "patch"), STRATEGY, today=lambda: date(2026, 11, 17))
     assert (built.branch, built.version, built.pr) == ("release/v1.2.4", "1.2.4", 9)
     shown = git_sandbox.sh(work, "show", "origin/release/v1.2.4:tools/kit/.claude-plugin/plugin.json")
     assert json.loads(shown)["version"] == "1.2.4"
     log = git_sandbox.sh(work, "show", "origin/release/v1.2.4:CHANGELOG.md")
     assert log.index("## [kit 1.2.4]") < log.index("## [kit 1.2.3]") and "- 直した（#5）" in log
+    assert "## [kit 1.2.4] - 2026-11-17\n" in log
     create = next(p for m, path, p in hub.requests if (m, path) == ("POST", "/repos/o/r/pulls"))
     assert (create["head"], create["base"]) == ("release/v1.2.4", "main")
     body = next(p for m, path, p in hub.requests if m == "PATCH")["body"]

@@ -21,7 +21,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date
@@ -191,17 +191,22 @@ def open_releases(hub: GitHub, target: Target, formats: names_decide.NameFormats
 
 
 def _write(
-    root: Path, decl: decl_mod.NdfSettings, facts: materials_decide.Facts, store: store_mod.VersionStore, formats: names_decide.NameFormats
+    root: Path,
+    decl: decl_mod.NdfSettings,
+    facts: materials_decide.Facts,
+    store: store_mod.VersionStore,
+    formats: names_decide.NameFormats,
+    today: Callable[[], date],
 ) -> None:
-    """保存先でバージョンを書き、見出しの書式で CHANGELOG を書き、設定の手順を流す。"""
+    """保存先でバージョンを書き、見出しの書式で CHANGELOG を書き（日付は `today` で 1 度だけ読む）、設定の手順を流す。"""
     by_name = {u.name: u for u in store.units()}
     entries = [changelog_decide.Entry(p.number, p.title) for p in facts.pulls]
     log_path = root / decl.changelog
-    today = date.today().isoformat()
+    stamp = today().isoformat()
     for p in facts.planned:
         store.write(by_name[p.plugin], p.next)
         if facts.channel == version_decide.PRODUCTION and log_path.is_file():
-            new = changelog_decide.block(formats.heading_of(p.plugin, p.next, today), entries)
+            new = changelog_decide.block(formats.heading_of(p.plugin, p.next, stamp), entries)
             key = formats.heading_key(p.plugin, p.next)
             log_path.write_text(changelog_decide.insert(log_path.read_text(encoding="utf-8"), key, new), encoding="utf-8")
     for step in decl.for_stage(facts.channel):
@@ -311,8 +316,8 @@ def _build_units(repo_git: git_mod.Git, target: Target, branch: str) -> str:
         return units.build(repo_git, target.remote, target.production, target.units, branch)
 
 
-def assemble(root: Path, hub: GitHub, target: Target, strategy: Strategy) -> Built:
-    """リリースブランチを組み立てて PR を作る。材料は範囲の終点を取り出してから読む。"""
+def assemble(root: Path, hub: GitHub, target: Target, strategy: Strategy, *, today: Callable[[], date] = date.today) -> Built:
+    """リリースブランチを組み立てて PR を作る。材料は範囲の終点を取り出してから読む。`today` は CHANGELOG の見出しの日付。"""
     setting = _setting(strategy)
     if setting.kind == SpanKind.PR or not setting.versioned:
         raise NoReleasePr(
@@ -338,7 +343,7 @@ def assemble(root: Path, hub: GitHub, target: Target, strategy: Strategy) -> Bui
     if setting.kind == SpanKind.UNITS:
         facts = facts._replace(head=_build_units(repo_git, target, branch))
     repo_git.run("switch", "--quiet", "--create", branch, facts.head)
-    _write(root, decl_mod.load(root), facts, store, setting.formats)
+    _write(root, decl_mod.load(root), facts, store, setting.formats, today)
     title = f"Release: {branch_unit.plugin} v{branch_unit.next}"
     head = _commit_and_push(repo_git, target.remote, branch, title)
     facts = facts._replace(head=head)
