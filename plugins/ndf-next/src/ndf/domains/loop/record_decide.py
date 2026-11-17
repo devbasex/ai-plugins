@@ -17,7 +17,7 @@
 | `lap-closed` | `lap`・`outcome`・`reason` | 周を締めた |
 | `stop-requested` | `by`・`reason` | 止める要求。キーは返さない（#2820） |
 | `loop-halted` | `by`・`reason` | ループを止めた状態にした（`--now` か、要求の後の周の境。#2435） |
-| `row-bound` | `table` | レーンの行の進行表に結び付けた。止めた後に `ndf progress next <table>` で行を終える（#3558） |
+| `row-bound` | `table` | レーンの行のステートマシンに結び付けた。止めた後に `ndf progress next <table>` で行を終える（#3558） |
 """
 
 from __future__ import annotations

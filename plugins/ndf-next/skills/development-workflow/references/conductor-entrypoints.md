@@ -55,7 +55,7 @@ ndf plan wait <プラン>.json
 
 | エントリポイント | 使うとき |
 | --- | --- |
-| `ndf loop check-trigger` | 検査を回すかを、範囲の変更行数（除く PR の取り込みを数えない）で判定する（立つ 0 / 立たない・読めないは止まり） |
+| `ndf loop check-trigger` | 検査を回すかを、範囲の変更行数（除く PR のマージを数えない）で判定する（立つ 0 / 立たない・読めないは止まり） |
 | `scripts/check-trigger.py eval` | 検査を回すかを、点数・流出不具合・経過時間・最終のトリガーで判定する |
 | `scripts/check-trigger.py stats` | 検査のラウンド数と指摘の数を集計する |
 | `scripts/merged-steps.py merge-when-green` | CI が通るまで待ってマージし、クリーンアップまで行う。マージ先が自動反映の本番チャネルなら `--gate-approved user\|mvv` が無い限り CI を待たずにリリース承認ゲート（終了コード 10）で止まる |

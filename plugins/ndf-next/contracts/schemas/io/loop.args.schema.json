@@ -147,7 +147,7 @@
           "items": {
             "type": "string"
           },
-          "description": "数えない PR（検査・リリース）の取り込みのコミット"
+          "description": "数えない PR（検査・リリース）のマージのコミット"
         },
         "--threshold": {
           "type": "integer",
@@ -576,7 +576,7 @@
         },
         "--row": {
           "type": "string",
-          "description": "結び付けるレーンの行の進行表の ID（`ndf progress new --loop` の結果）"
+          "description": "結び付けるレーンの行のステートマシンの ID（`ndf progress new --loop` の結果）"
         }
       },
       "required": [

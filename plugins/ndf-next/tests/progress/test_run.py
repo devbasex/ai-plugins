@@ -224,7 +224,7 @@ def test_a_skippable_mvv_verdict_passes_the_design_gate_as_service_mvv(repo, st,
     p = answered.draft.payload
     assert (answered.draft.row_key, p["answer"], p["by"], p["step"]) == ("設計", "approved", "service:mvv", "design-gate")
     assert p["mvv_gate"]["skip"] is True and answered.draft.actor == "conductor"
-    # 人の回答と同じく質問の id・区分・見た head を持ち、承認した head（ndf answer head）が読める
+    # 人の回答と同じく質問の id・区分・見た head を持ち、承認済みのコミット（ndf answer head）が読める
     assert (p["gate"], p["seen"]["head"], len(p["gate_id"])) == ("design", JUDGED, model.QUESTION_ID_LENGTH)
     assert gate.approved_head(run.read(st, tid), "design") == JUDGED
 

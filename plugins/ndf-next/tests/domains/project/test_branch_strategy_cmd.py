@@ -1,7 +1,7 @@
 """`ndf project branch-strategy`（解析のサブコマンド）の単体テスト（#3672 のテスト設計の 8・9・10・11・12・15・20。#3718）。
 
 入力と期待値は 10 系の `plugins/ndf/scripts/tests/test_branch_strategy.py` の同じ観点のテストと同じにする。
-5 種の宣言は `tests/fixtures/branch_strategy/` の 1 か所にあり、10 系のテストも同じ fixture を読む。
+5 種の設定は `tests/fixtures/branch_strategy/` の 1 か所にあり、10 系のテストも同じ fixture を読む。
 """
 
 from __future__ import annotations
@@ -224,7 +224,7 @@ def test_cli_write_rejects_a_rule_breaking_answer_without_writing(tmp_path, caps
 
 
 def test_cli_write_answers_keeps_the_declared_section(tmp_path, capsys):
-    """既存のセクションへの write --answers は今の宣言を土台にし、答えたキーだけを変える（測り直して既定へ戻さない）。"""
+    """既存のセクションへの write --answers は今の設定を基盤にし、回答したキーだけを変える（測り直して既定へ戻さない）。"""
     declared = section("docs")
     declared["merge"]["actor"] = "human"
     root = make_repo(tmp_path, {"project.json": {"version": 1, "branch_strategy": declared}})
@@ -236,14 +236,14 @@ def test_cli_write_answers_keeps_the_declared_section(tmp_path, capsys):
 
 
 def test_cli_write_completes_an_asked_result_answered_with_the_approval(tmp_path, capsys):
-    """問いを返した測った結果へ `/approval/via` を含む答えを足しても、種類の既定から全体を組んで書ける形にする。"""
+    """質問を返した測った結果へ `/approval/via` を含む回答を足しても、種類の既定から全体を組んで書ける形にする。"""
     root = history_repo(tmp_path, 4, {"CONTRIBUTING.md": "`--base develop` で出す\n"})
     protection = {"required_pull_request_reviews": {"required_approving_review_count": 1}, "enforce_admins": {"enabled": True}}
     api = fake_api([(i, "main", f"sprint/{i}") for i in range(1, 5)], rules=[], protection=protection)
     prior = tmp_path / "prior.json"
     prior.write_text(json.dumps(strategy_measure.measure_strategy(root, api)), encoding="utf-8")
     answers = tmp_path / "answers.json"
-    # ruleset はあるが queue も up-to-date も無い trunk は取り込み方を問うので、それにも答える
+    # ruleset はあるが queue も up-to-date も無い trunk はリリース方式を問うので、それにも回答する
     answers.write_text(json.dumps({"/branches/base": "main", "/approval/via": "review", "/merge/method": "strict"}), encoding="utf-8")
     code, out = run_cli(capsys, root, "write", "--result", str(prior), "--answers", str(answers))
     assert code == 0 and out["status"] == "ok", out
@@ -418,7 +418,7 @@ def test_measure_develop_main(tmp_path):
     prs = [(i, "develop", f"sprint/{i}") for i in range(1, 5)] + [(9, "main", "develop")]
     api = fake_api(prs, tags=["v1.0.0", "v1.1.0", "v1.2.0"], releases=["v1.0.0", "v1.1.0", "v1.2.0"])
     res = strategy_measure.measure_strategy(root, api)
-    # 本番と別のブランチへ入る事例は、base を丸ごと出す方式と本番から組んで出す方式を見分けられないため、取り込み方を問う
+    # 本番と別のブランチへ入る事例は、base を丸ごと出す方式と本番から組んで出す方式を見分けられないため、リリース方式を問う
     assert res["status"] == "ask" and [q["pointer"] for q in res["questions"]] == ["/release_strategy"]
     assert res["questions"][0]["candidates"] == ["merge_base_branch", "release_branch"]
     assert_result_shape(res)
@@ -445,7 +445,7 @@ def test_measure_asks_cd_when_a_push_workflow_has_no_release_marks(tmp_path):
 
 
 def test_measure_asks_the_plugin_and_version_store_with_several_plugins(tmp_path):
-    """版数付きのプラグインが複数あるときは「版数のファイルが無い」と扱わず、対象のプラグインと版数の置き場を問う。"""
+    """版数付きのプラグインが複数あるときは「版数のファイルが無い」と扱わず、対象のプラグインと版数の保存先を問う。"""
     manifests = {f"plugins/{n}/.claude-plugin/plugin.json": json.dumps({"name": n, "version": "1.0.0"}) for n in ("a", "b")}
     root = history_repo(tmp_path, 4, manifests)
     res = strategy_measure.measure_strategy(root, fake_api([(i, "main", f"sprint/{i}") for i in range(1, 5)]))
@@ -580,7 +580,7 @@ def test_rule_facts_merge_rulesets_and_classic_protection():
 # --- ai-plugins の値（受け入れ条件 15） --------------------------------------------------------
 
 
-@pytest.mark.skipif(not (REPO_ROOT / ".ndf" / "project.json").is_file(), reason="プラグインだけを写した実行にはリポジトリの宣言が無い")
+@pytest.mark.skipif(not (REPO_ROOT / ".ndf" / "project.json").is_file(), reason="プラグインだけを写した実行にはリポジトリの設定が無い")
 def test_ai_plugins_section_is_the_plugin_row_with_its_measured_facts():
     """ai-plugins の `.ndf/project.json` のセクションは、`init --kind plugin` に ai-plugins の測った事実を渡した結果と一致する。
     移行が持ち込んだ利用者の値（届け先 `release.deliveries`・レビューの単位 `reviews`）だけが init の外にある。"""
@@ -601,7 +601,7 @@ def _commit(root: Path, subject: str, trailers: dict | None = None) -> str:
 
 
 def landed_repo(tmp_path: Path) -> tuple[Path, dict[str, str]]:
-    """本番ブランチの最初の親の履歴に、取り込みの記録（trailer）の各形を並べた木。"""
+    """本番ブランチの最初の親の履歴に、マージの記録（trailer）の各形を並べた木。"""
     root = make_repo(tmp_path, {"project.json": {"version": 1}, "worktree.json": {"remote": "up"}})
     pr, tip = strategy_measure.TRAILER_PR, strategy_measure.TRAILER_TIP
     sha = {"init": git(root, "rev-parse", "HEAD").strip()}
@@ -671,7 +671,7 @@ def test_collect_production_commits_marks_history_unreadable_without_the_branch(
 
 
 def test_default_api_reads_the_repository_of_the_declared_remote(tmp_path, monkeypatch):
-    """`{owner}/{repo}` は宣言したリモートの URL から求めたリポジトリで埋める（gh の選ぶ取得元に任せない）。"""
+    """`{owner}/{repo}` は設定したリモートの URL から求めたリポジトリで埋める（gh の選ぶ取得元に任せない）。"""
     root = make_repo(tmp_path, {"project.json": {"version": 1}})
     git(root, "remote", "add", "origin", "https://github.com/volare/target.git")
     read: list[str] = []
@@ -695,7 +695,7 @@ def test_default_api_without_a_github_remote_reads_nothing(tmp_path, monkeypatch
 
 
 def test_unreadable_kinds_on_questions_follow_the_result_schema(tmp_path):
-    """読めなかった種類（権限の不足・通信の失敗）を添えた問いも、作成の結果の形に通る。"""
+    """読めなかった種類（権限の不足・通信の失敗）を添えた質問も、作成の結果の形に通る。"""
     root = history_repo(tmp_path, 0)
     got = strategy_measure.measure_strategy(root, api=lambda path: (None, "gh が失敗した: HTTP 403"))
     assert got["questions"] and any("unreadable" in q for q in got["questions"])

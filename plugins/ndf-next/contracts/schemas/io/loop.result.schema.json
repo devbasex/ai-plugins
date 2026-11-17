@@ -147,7 +147,7 @@
               "string",
               "null"
             ],
-            "description": "結び付けたレーンの行の進行表の ID（get）"
+            "description": "結び付けたレーンの行のステートマシンの ID（get）"
           },
           "laps": {
             "type": "array",

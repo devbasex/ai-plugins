@@ -23,10 +23,10 @@ NEW = "new"
 REPO_KEY_LENGTH = 12
 # ステートマシンのワークフロー（耐久ワークフロー）が事象を書くときの書き手（progress.json の actors のキー）
 WORKFLOW_ACTOR = "workflow"
-# 承認ゲートを MVV 判定で省ける進め方（文脈の pace）・省いた答えの答えた者・判定の結果を持つ文脈の鍵（context.schema.json）
+# 承認ゲートを MVV 判定で省ける進め方（文脈の pace）・省いた回答の回答した者・判定の結果を持つ文脈のキー（context.schema.json）
 MVV_PACES = ("fast", "auto")
 MVV_SERVICE, MVV_KEY = "service:mvv", "mvv_gate"
-# 承認ゲートの問いの id の長さ（sha256 の頭）
+# 承認ゲートの質問の id の長さ（sha256 の頭）
 QUESTION_ID_LENGTH = 16
 
 
@@ -134,7 +134,7 @@ def gate_label(gate: str) -> str:
 
 
 def question_id(table_id: str, rev: int, stage: str, step: str, anchor: int) -> str:
-    """承認ゲートの問いの id。待ちに入った事象の番号（`anchor`）を含むため、差し戻しで流し直した問いは別の id になる。"""
+    """承認ゲートの質問の id。待ちに入った事象の番号（`anchor`）を含むため、変更要求で流し直した質問は別の id になる。"""
     text = f"{table_id}\0{rev}\0{stage}\0{step}\0{anchor}"
     return hashlib.sha256(text.encode()).hexdigest()[:QUESTION_ID_LENGTH]
 
@@ -157,10 +157,10 @@ def _outputs(report: Mapping[str, Any]) -> Mapping[str, Any]:
 
 
 def mvv_answer(step: str, kind: str, answer: str, held: Optional[Mapping[str, Any]], gate_id: str) -> tuple[dict[str, Any], str]:
-    """MVV 判定で承認ゲートを省いた答えの事象の payload と理由。答えた者は `MVV_SERVICE`、判定の結果（`mvv_skip`）を `MVV_KEY` に添える。
+    """MVV 判定で承認ゲートを省いた回答の事象の payload と理由。回答した者は `MVV_SERVICE`、判定の結果（`mvv_skip`）を `MVV_KEY` に添える。
 
-    人の答えと同じく問いの id（`gate_id`）・区分（`gate`）・見た対象（`seen`。判定した PR の head）を持つ。答えを読む前の照合
-    （`gate.recheck`）が今の head と比べ、判定の後に進んでいれば待ちへ戻して人へ問う。承認した head（`ndf answer head`）もここから読む。
+    人の回答と同じく質問の id（`gate_id`）・区分（`gate`）・見た対象（`seen`。判定した PR の head）を持つ。回答を読む前の検証
+    （`gate.recheck`）が今の head と比べ、判定の後に進んでいれば待ちへ戻して人へ問う。承認済みのコミット（`ndf answer head`）もここから読む。
     """
     gate = held.get("gate") if held is not None else None
     head = held.get("head") if held is not None else None

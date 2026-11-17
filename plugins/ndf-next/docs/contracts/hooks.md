@@ -2,7 +2,7 @@
 
 <!-- ndf check --write-spec が生成する。手で直さない（SSOT は各節の出典） -->
 
-Claude Code・Codex から呼ばれる hook の入出力である。SSOT は `contracts/hooks/runtimes.json`。出力の形の `{reason}` と `{context}` は判定の文に置き換わり、形の無い判定は何も出さない
+Claude Code・Codex から呼ばれる hook の入出力である。SSOT は `contracts/hooks/runtimes.json`。出力の形の `{reason}` と `{context}` は判定の文に置き換わり、形の無い判定は何も出さない。hook の判定は案内として働く（失敗では出力なしで通し、hook を外せば呼ばれない）。必ず人の承認が要る操作は、承認ゲートの機械の検査・ブランチの ruleset・CI の必須チェック・スクリプトの前提条件で止める
 
 ## claude: `Notification`
 

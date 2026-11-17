@@ -77,7 +77,7 @@ def test_init_check_and_env_subcommands(make_repo: Callable, capsys: pytest.Capt
 def test_check_and_create_read_the_branch_strategy(
     main_repo: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str], last_result: Callable
 ) -> None:
-    """check はセクションのベースブランチ・本番ブランチ・スプリントの起点を出し、create --state-dir はスナップショットを控える。"""
+    """check はセクションのベースブランチ・本番ブランチ・スプリントの起点を出し、create --state-dir はスナップショットを書く。"""
     code, out = _run(capsys, last_result, "--cwd", str(main_repo), "check")
     assert code == 0 and {"base": "develop", "production": "main", "sprint_start": "develop"} in out["items"]
     state = tmp_path / "state"

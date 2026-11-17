@@ -37,11 +37,11 @@
         },
         "--answers": {
           "type": "string",
-          "description": "問いへの答え（セクションの JSON Pointer → 値）"
+          "description": "質問への回答（セクションの JSON Pointer → 値）"
         },
         "--result": {
           "type": "string",
-          "description": "write の土台にする measure の結果（省けば今のセクション、無ければ測り直す）"
+          "description": "write の基盤にする measure の結果（省けば今のセクション、無ければ測り直す）"
         },
         "--digest": {
           "type": "string",

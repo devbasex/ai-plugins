@@ -1,10 +1,10 @@
-"""旧い宣言の検査（#3672 の決定 10・I4・I8）。
+"""旧い設定の検査（#3672 の決定 10・I4・I8）。
 
 ブランチ戦略・マージ・リリースの旧いキー（`.ndf/worktree.json`・`.ndf/project.json`・`.ndf/supervise.json`・
 `.ndf/release.json` の 4 か所）の位置を、移す行の表（`contracts/data/ndf-settings-renames.json`）から探す。旧いキーの
 名前をコードに書かず、表だけを読む。旧いキーを新しいキーの別名として読む形は持たない（後方互換は要らない）。
 
-表の正本は 11.0 のこのプラグインの契約で、10 系の `scripts/data/ndf-settings-renames.json` はコピー
+表の SSOT は 11.0 のこのプラグインのコントラクトで、10 系の `scripts/data/ndf-settings-renames.json` はコピー
 （`scripts/check-ndf-contracts.py` が一致を確かめる）。
 """
 
@@ -19,7 +19,7 @@ from ndf.core import json_pointer
 
 MOVES = settings_renames.TABLE
 SECTION = settings_renames.SECTION
-# 利用先のリポジトリの宣言の置き場（`.ndf`）
+# 利用先のリポジトリの設定の保存先（`.ndf`）
 DECL_DIR = identity.FIXED_WORDS["ndf_settings_dir"]
 # 表の file（ndf-files の ID）→ `.ndf/` の下のファイル名
 FILES = {"project": "project.json", "worktree": "worktree.json", "supervise": "supervise.json", "release": "release.json"}
@@ -68,7 +68,7 @@ def _rows(data: Any) -> list:
 def load_moves(path: Optional[str] = None) -> list[Move]:
     """表のうち、セクション `branch_strategy` へ移す行と、旧い 4 か所の `remove` の行だけを返す。
 
-    `path` は契約の置き場（`contracts/`）からの相対パス。省けば移す行の表。"""
+    `path` はコントラクトの保存先（`contracts/`）からの相対パス。省けば移す行の表。"""
     rel = path or MOVES
     data = contracts.load_as(rel, LegacyTableError)
     try:
@@ -99,6 +99,6 @@ def find_legacy(files: dict[str, dict], moves: list[Move]) -> list[Found]:
 
 
 def legacy_reason(found: list[Found], system: str) -> str:
-    """止まる理由の文（ファイル・キーの位置・移行のコマンド）。"""
+    """停止理由の文（ファイル・キーの位置・移行のコマンド）。"""
     where = "、".join(f"`{DECL_DIR}/{f.file}` の `{f.pointer}`" for f in found)
-    return f"{where} は旧い宣言のキーです。`{COMMAND[system]} migrate` で移してください"
+    return f"{where} は旧い設定のキーです。`{COMMAND[system]} migrate` で移してください"

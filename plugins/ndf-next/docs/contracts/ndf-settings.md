@@ -203,7 +203,7 @@ worktree・チーム・公開・[pace.schema.json](../../contracts/schemas/ndf-s
 
 ## `.ndf/project.json`（project）
 
-worktree（抑制コメントのキーはメインディレクトリ）・チーム・公開・[project.schema.json](../../contracts/schemas/ndf-settings/project.schema.json)。読む工程: `ndf records preflight`（工程の前の確かめで、知らないキーを数える）・`ndf release-steps`（本番のマージで production_merge をメインディレクトリから読む）・`ndf refactor`（リファクタリングで test.suites の収集のコマンドを読む）・`ndf progress`（ステートマシンを作るときに workflow.stages の工程の有効・無効を読む）
+worktree（抑制コメントのキーはメインディレクトリ）・チーム・公開・[project.schema.json](../../contracts/schemas/ndf-settings/project.schema.json)。読む工程: `ndf records preflight`（工程の前の確かめで、知らないキーを数える）・`ndf release-steps`（本番のマージで branch_strategy（マージの主体・方式・迂回）をメインディレクトリから読む）・`ndf refactor`（リファクタリングで test.suites の収集のコマンドを読む）・`ndf progress`（ステートマシンを作るときに workflow.stages の工程の有効・無効を読む）
 
 言語・テスト・CI・リリースの経路・課題の保存先の設定。人と解析（M7）が書く。無ければ既定で動く
 
@@ -211,23 +211,22 @@ worktree（抑制コメントのキーはメインディレクトリ）・チー
 | --- | --- | --- | --- | --- | --- |
 | `$schema` | string | — | — | 任意 | 編集のときの補完に使うスキーマの位置。読み手は参照しない |
 | `analysis` | Analysis か null | — | — | 任意 | 解析（M7）が書いた入力の sha256・ブランチ・書いたセクションの記録。人は書かない |
+| `branch_strategy`（メインディレクトリから読む） | BranchStrategy | — | — | 任意 | ブランチ戦略の設定。ブランチの名前・リリース方式・リリース・承認・マージを 1 か所で持ち、ndf project branch-strategy だけが作る・更新する・移す・消す。工程の部品は ndf.core.branch_strategy で読む |
 | `checks` | Checks か Unknown か null | — | — | 任意 | 静的解析・整形の Tool の並び |
 | `ci` | Ci か Unknown か null | — | — | 任意 | CI の提供元・ワークフロー・必須のチェック |
-| `delivery` | array of Delivery か Unknown か null | — | — | 任意 | リリースの経路の行。本番・ベースブランチで動く行は channel で指し、ブランチ名を写さない |
 | `docs` | Docs か Unknown か null | — | — | 任意 | 差分の文書のファイルの分け方（文書・振る舞いを決める文書・テストが読む文書とそのテスト） |
 | `instructions` | Instructions か Unknown か null | — | — | 任意 | 指示書のファイル・読み込み・注記 |
 | `issues` | Issues か Unknown か null | — | — | 任意 | 課題の保存先（primary と others） |
 | `languages` | array of Language か Unknown か null | — | — | 任意 | 言語ごとの名前・フレームワーク・ファイルの数・バージョンの並び。解析（M7）が書く |
 | `materials` | Materials か Unknown か null | — | — | 任意 | 材料の設定（見直しと大整理が読むニーズとシーズの調査の読み先・後回しのマイルストーン・原因の型・裏付けの計測） |
 | `ndf_policies` | NdfPolicies か Unknown か null | — | — | 任意 | NDF の方針の採否（doc_lint・reject_md_wording_tests など） |
-| `production_merge`（メインディレクトリから読む） | ProductionMerge か Unknown か null | — | — | 任意 | 本番の Pull Request のマージの方式。admin が true なら、本番チャネルが承認レビューを必須にするとき、承認ゲートの承認の後に管理者の迂回でマージする |
 | `services` | Services か Unknown か null | — | — | 任意 | テストと動作の確かめに要るコンテナ・compose のファイル・データベース |
 | `test` | Test か Unknown か null | — | — | 任意 | テストの戦略（suites）。テストのコマンドの SSOT |
 | `test_duration`（非推奨。読み手は読まない） | TestDuration か Unknown か null | — | — | 任意 | 読み手は読まない（今のバージョンの読み手が読む値。11.0.0 の後に消す） |
 | `version` | integer | — | `1` | 必須 | 設定の形のバージョン。読み手は知らないバージョンを読まない |
 | `workflow` | object | — | — | 任意 | 工程の有効・無効の設定（stages） |
 
-例: `{"version": 1, "test": {"suites": [{"name": "pytest", "runner": "pytest", "command": "uv run pytest -q"}]}, "production_merge": {"admin": false}}`
+例: `{"version": 1, "test": {"suites": [{"name": "pytest", "runner": "pytest", "command": "uv run pytest -q"}]}}`
 
 ## `.ndf/projects.json`（projects）
 
@@ -259,7 +258,6 @@ worktree・チーム・公開・[release.schema.json](../../contracts/schemas/nd
 | `steps` | array of object | — | — | 任意 | コマンドの並び。書いた順に実行し、最初に落ちたコマンドで止める。無ければ手順なし |
 | `undistributed` | array of string | — | — | 任意 | リリース対象に関わらないファイルの形（プラグインの根からの gitignore の形）。無ければテスト |
 | `version` | integer | — | `1` | 必須 | 設定の形のバージョン。読み手は知らないバージョンを読まない |
-| `version_files` | array of string | `[]` | — | 任意 | 版上げで、プラグインの名前を含む行のバージョンを書き換えるファイル |
 
 例: `{"version": 1, "steps": [{"name": "記録", "stage": "production", "command": ["python3", "scripts/record.py"], "writes": ["docs/metrics/"]}]}`
 
@@ -309,7 +307,6 @@ worktree・チーム・公開・[supervise.schema.json](../../contracts/schemas/
 | `impl_timeout` | integer か null | — | — | 任意 | 実装の上限（秒）。引数が先に効く。null は書かないのと同じ |
 | `queue` | object | — | — | 任意 | プランを流す待ち行列の資源のクォータと共有の一覧。無ければ既定（graphql のスロット 2 本・共有の一覧は無し） |
 | `refactor_budget_minutes` | integer か null | — | — | 任意 | リファクタリングの想定最大時間（分）。引数が先に効く。null は書かないのと同じ |
-| `release` | object | — | — | 任意 | リリースの形 |
 | `sync_checks` | array of object | — | — | 任意 | 同期とチェックのコマンドの並び。書いた順に打ち、落ちたら止める |
 | `test`（非推奨。読み手は読まない） | object | — | — | 任意 | 読み手は読まない（今のバージョンの読み手が読む値。テストのコマンドは project.json の test が持つ） |
 | `version` | integer | — | `1` | 必須 | 設定の形のバージョン。読み手は知らないバージョンを読まない |
@@ -318,25 +315,22 @@ worktree・チーム・公開・[supervise.schema.json](../../contracts/schemas/
 
 ## `.ndf/worktree.json`（worktree）
 
-メインディレクトリ（既定ブランチの worktree）（抑制コメントのキーはメインディレクトリ）・チーム・公開・[worktree.schema.json](../../contracts/schemas/ndf-settings/worktree.schema.json)。読む工程: `ndf worktree`（worktree を作る・片付ける・環境を用意するとき）・`ndf release-steps`（本番チャネルとリリースの範囲を決めるとき）
+メインディレクトリ（既定ブランチの worktree）・チーム・公開・[worktree.schema.json](../../contracts/schemas/ndf-settings/worktree.schema.json)。読む工程: `ndf worktree`（worktree を作る・片付ける・環境を用意するとき）・`ndf release-steps`（本番チャネルとリリースの範囲を決めるとき）
 
-ベースブランチ・本番のブランチ・ブランチの運用・worktree の用意の設定。メインディレクトリから読む。無ければ worktree の運用を使わない
+worktree の用意（書き込みの案内・メインディレクトリの追従・依存・ローカルの動作検証・テスト環境）の設定。メインディレクトリから読む。無ければ worktree の運用を使わない。スプリントの起点と PR のマージ先はブランチ戦略の設定（.ndf/project.json の branch_strategy）が持つ
 
 | キー | 型 | 既定値 | 取りうる値 | 必須か | 説明 |
 | --- | --- | --- | --- | --- | --- |
 | `$schema` | string | — | — | 任意 | 編集のときの補完に使うスキーマの位置。読み手は参照しない |
-| `base_branch` | string | — | — | 任意 | 開発の起点ブランチ。worktreeの分岐元になり、follow_branch が true のときはメインディレクトリの追従先にもなる。未指定なら remote のリモートの HEAD が指すブランチを使う。指定した名前がそのリモートにもローカルにも無いときは既定へ落とさず解決に失敗する |
-| `branch_flow`（メインディレクトリから読む） | object | — | — | 任意 | ブランチ運用の設定。無ければ既定値の行（ベースブランチから切り、ベースブランチを丸ごと出す） |
 | `deps` | object | — | — | 任意 | 依存の用意。worktree を作った直後に copy_from_main・copy_as_real・run の順に行う。無いか空なら何もしない。個人設定からは反映しない |
-| `follow_branch` | boolean | `false` | — | 任意 | true のときだけ、セッションセッション開始 hook がメインディレクトリのブランチを稼働中のworktreeへ detached HEAD で追従させる。既定ではメインディレクトリの HEAD を動かさない。真偽値以外は false と同じ |
+| `follow_branch` | boolean | `false` | — | 任意 | true のときだけ、セッション開始 hook がメインディレクトリのブランチを稼働中のworktree（1 つだけのとき）か、ブランチ戦略の設定の branches.base が指すコミットへ detached HEAD で追従させる。既定ではメインディレクトリの HEAD を動かさない。真偽値以外は false と同じ |
 | `guard` | object | — | — | 任意 | メインディレクトリでの編集の案内（guard）。allow_paths は案内を出さないパス |
 | `localenv` | object | — | — | 任意 | ローカルの動作の確かめ（compose）の設定。個人設定の値を重ねる |
-| `production_branch`（メインディレクトリから読む） | string | — | — | 任意 | リリースしたバージョンが常用する利用者へ届く本番チャネルのブランチ。この先へ進める操作は人手の承認を求める。開発の起点である base_branch とは別のキーで、流用しない。未指定なら remote のリモートの HEAD が指すブランチを使う。指定した名前がそのリモートにもローカルにも無いときは既定へ落とさず解決に失敗する |
 | `remote` | string | `"origin"` | — | 任意 | 取得・検証・差分の基準・送信に使う git のリモートの名前。未指定なら既定の名前を使う。- で始まる名前は受けない |
 | `testenv` | object | — | — | 任意 | テスト環境（ポートの採番・ゴールデンのタグ・リセット）の設定。個人設定の値を重ねる |
 | `version` | integer | — | `1` | 必須 | 設定の形のバージョン。読み手は知らないバージョンを読まない |
 
-例: `{"version": 1, "base_branch": "develop", "production_branch": "main", "branch_flow": {"start": "base", "release_strategy": "merge_base_branch"}, "guard": {"allow_paths": ["issues/", "docs/"]}}`
+例: `{"version": 1, "guard": {"allow_paths": ["issues/", "docs/"]}}`
 
 ## `.ndf/worktree.local.json`（worktree-local）
 

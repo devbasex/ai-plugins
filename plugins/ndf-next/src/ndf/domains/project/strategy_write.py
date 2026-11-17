@@ -1,10 +1,10 @@
-"""ブランチ戦略の宣言を組み、検査を通した中身だけを書く・消す（#3672 の決定 4・5・I2。#3681）。
+"""ブランチ戦略の設定を組み、検査を通した中身だけを書く・消す（#3672 の決定 4・5・I2。#3681）。
 
 セクション `branch_strategy` を作る・更新する・移す・消すのは、解析の `ndf project branch-strategy` の動詞だけで、
 書き込みはどれもこのモジュールの `commit_plan` を通る。
 
 - `init_values`: 代表のリポジトリの種類の既定の行（`contracts/data/branch-strategy-presets.json`）に測った名前を入れる
-- `apply_answers`: 問いへの答えを入れる。既定から変えたら種類を `custom` にする
+- `apply_answers`: 質問への回答を入れる。既定から変えたら種類を `custom` にする
 - `plan_write`・`plan_remove`: 書く前の検査（`branch_strategy.validate`）を通し、差分とハッシュを作る。書かない
 - `commit_plan`: 錠を取り、今のファイルから計画を作り直してハッシュが合うときだけ一時ファイルから置き換える
 
@@ -75,7 +75,7 @@ def kinds() -> tuple[str, ...]:
 
 
 def init_values(kind: str, facts: dict, presets: dict) -> tuple[dict, list[dict]]:
-    """種類の既定の行に測った名前を入れたセクションと、merge queue が分からないときの問いを返す。
+    """種類の既定の行に測った名前を入れたセクションと、merge queue が分からないときの質問を返す。
 
     `facts` のキー: `production`（既定ブランチ）・`base`（ベースブランチ。無ければ既定の名前）・`plugin`・`runtimes`・
     `workflow`（CD のワークフロー。無ければ None）・`dev_workflow`（開発版のワークフロー）・`merge_queue`（真偽か None）。
@@ -120,7 +120,7 @@ def evidence_of(section: dict, facts: dict) -> list[dict]:
 
 
 def apply_answers(result: dict, answers: dict) -> dict:
-    """問いへの答え（pointer → 値）をセクションの値へ入れる。既定から変えたら種類を `custom` にする。"""
+    """質問への回答（pointer → 値）をセクションの値へ入れる。既定から変えたら種類を `custom` にする。"""
     out = copy.deepcopy(result)
     values = out.setdefault("values", {})
     before = copy.deepcopy(values)
@@ -140,7 +140,7 @@ def apply_answers(result: dict, answers: dict) -> dict:
 
 
 def read_decl_file(path: Path) -> Optional[dict]:
-    """`.ndf/` の宣言 1 つ（無ければ None）。読めなければ `WriteError`（区分 unreadable）。"""
+    """`.ndf/` の設定 1 つ（無ければ None）。読めなければ `WriteError`（区分 unreadable）。"""
     if not path.is_file():
         return None
     try:
@@ -235,6 +235,6 @@ def commit_plan(root: Path, plan: WritePlan, digest: Optional[str]) -> WritePlan
             _write_files(root, fresh)
             return fresh
     except Timeout:
-        raise WriteError("別の実行が宣言を書いています。終わってから打ち直してください", bs.PRECONDITION) from None
+        raise WriteError("別の実行が設定を書いています。終わってから打ち直してください", bs.PRECONDITION) from None
     except OSError as exc:
         raise WriteError(f"書けない（{exc}）") from None

@@ -50,7 +50,7 @@ class Gh:
         clock: Optional[Callable[[], float]] = None,
         run: Optional[Callable[..., subprocess.CompletedProcess[bytes]]] = None,
     ) -> None:
-        """`clock` は締め切りと比べる時計、`run` は `gh` を起こす関数。省略すれば呼ぶ時点の `time.monotonic`・`subprocess.run`。"""
+        """`clock` は締め切りと比べる時計、`run` は `gh` を起動する関数。省略すれば呼ぶ時点の `time.monotonic`・`subprocess.run`。"""
         self.root, self.repo, self.deadline = root, repo, deadline
         self.clock, self.run = clock, run
 

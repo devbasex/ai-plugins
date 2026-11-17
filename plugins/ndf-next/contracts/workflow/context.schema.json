@@ -9,7 +9,7 @@
     "issues": {"type": "array", "items": {"type": "integer", "minimum": 1}, "uniqueItems": true, "description": "スプリントの課題の番号。ステートマシンの作成が書く"},
     "mode": {"enum": ["light", "operation", "legacy-refactor", "standard", "documentation"], "description": "モード。モード判定が書く"},
     "pace": {"enum": ["normal", "fast", "auto"], "description": "進め方。モード判定が書く"},
-    "mvv_ref": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$", "description": "スプリントが参照する承認済みプロジェクト MVV の sha256（.ndf/mvv.json の versions の最後）。進行表の作成が書き、承認が無ければ null。MVV 判定の前の検査 2 が承認の記録と照らす"},
+    "mvv_ref": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$", "description": "スプリントが参照する承認済みプロジェクト MVV の sha256（.ndf/mvv.json の versions の最後）。ステートマシンの作成が書き、承認が無ければ null。MVV 判定の前の検査 2 が承認の記録と照らす"},
     "mvv_gate": {"$ref": "#/$defs/mvv_gate", "description": "承認ゲートの直前の MVV 判定の結果。判定のステップが書き、承認ゲートのステップが読む"},
     "worktree": {"type": "string", "pattern": "^/[^\\u0000]*$", "description": "作業場所の絶対パス。作業場所の用意が書く。git と作業へ渡す前にこの形で確かめる（3364-7）"},
     "branch": {"type": "string", "pattern": "^(?!.*\\.\\.)(?!.*//)[A-Za-z0-9_][A-Za-z0-9._/-]*(?<![./])$", "description": "スプリントのブランチ。作業場所の用意が書く。先頭の - と .. を断る形で確かめてから渡す（3364-7）"},
@@ -22,15 +22,15 @@
   "$defs": {
     "mvv_gate": {
       "type": "object",
-      "description": "MVV 判定の結果。skip が真なら承認ゲートを人へ問わずに通す（答えた者 service:mvv）",
+      "description": "MVV 判定の結果。skip が真なら承認ゲートを人へ問わずに通す（回答した者 service:mvv）",
       "additionalProperties": false,
       "required": ["gate", "skip", "why"],
       "properties": {
-        "gate": {"enum": ["design", "release"], "description": "判定した承認ゲートの区分（workflow/progress.json の gates の鍵）"},
+        "gate": {"enum": ["design", "release"], "description": "判定した承認ゲートの区分（workflow/progress.json の gates のキー）"},
         "skip": {"type": "boolean", "description": "承認ゲートを省けるか（ndf.progress.gate.checks.may_skip）"},
         "verdict": {"type": ["object", "null"], "description": "LLM の判定の応答（verdict・reasons・boundary・basis）。判定を打たなかったら null"},
         "why": {"type": "array", "items": {"type": "string", "minLength": 1}, "description": "省かない理由。省けるなら空"},
-        "head": {"type": "string", "minLength": 1, "description": "判定した PR の head の SHA。省いた答えが見た対象（seen）に持ち、後に進んだ head は答えの照合とマージが断る。PR を読む前に止めたら無い"}
+        "head": {"type": "string", "minLength": 1, "description": "判定した PR の head の SHA。省いた回答が見た対象（seen）に持ち、後に進んだ head は回答の検証とマージが断る。PR を読む前に止めたら無い"}
       }
     },
     "delivery": {

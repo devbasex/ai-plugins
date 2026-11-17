@@ -87,7 +87,7 @@ def _planned(spec, submit):
 
 
 def test_plan_items_are_chosen_by_the_budget_and_the_plan_comment_and_report_are_written(world, monkeypatch) -> None:
-    # 宣言の配分（テスト 5 分・実装 10 分）で 1 件 15 分。予算 20 分には 1 件だけ入る（#3643）
+    # 設定の配分（テスト 5 分・実装 10 分）で 1 件 15 分。予算 20 分には 1 件だけ入る（#3643）
     (world.main / ".ndf").mkdir(exist_ok=True)
     (world.main / ".ndf" / "estimate.json").write_text(json.dumps({"allocation_minutes": {"test": 5, "structure": 10}}), encoding="utf-8")
     ci = fake_ci(Watched(None))

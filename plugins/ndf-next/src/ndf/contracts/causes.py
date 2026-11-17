@@ -140,7 +140,7 @@ def policy_of(kind: str) -> Optional[limits.Policy]:
 
 
 def retry_delay(cause: Optional[dict[str, Any]], used: int) -> Optional[float]:
-    """打ち直しで直る止まりの次の待ちの秒。打ち直さない（行き先が retry でない・回数が尽きた）なら None。"""
+    """打ち直しで直る止まりの次の待ちの秒。打ち直さない（ルートが retry でない・回数が尽きた）なら None。"""
     kind = kind_of(cause)
     if cause is None or kind is None or kind not in table() or row(kind).route != "retry":
         return None

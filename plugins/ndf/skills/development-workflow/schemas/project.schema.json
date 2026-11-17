@@ -1067,7 +1067,7 @@
     },
     "BranchStrategy": {
       "title": "BranchStrategy",
-      "description": "ブランチ戦略の宣言（#3672）。.ndf/project.json のセクション branch_strategy。解析の branch-strategy サブコマンドだけが作る・更新する・移す・消す。組み合わせの規則は allOf の R2〜R10。値の等しさを比べる R1（trunk ⇔ base と production が同じ）は JSON Schema で書けないため、読む部品の validate が同じ番号で確かめる",
+      "description": "ブランチ戦略の設定（#3672）。.ndf/project.json のセクション branch_strategy。解析の branch-strategy サブコマンドだけが作る・更新する・移す・消す。組み合わせの規則は allOf の R2〜R10。値の等しさを比べる R1（trunk ⇔ base と production が同じ）は JSON Schema で書けないため、読む部品の validate が同じ番号で確かめる",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -1092,7 +1092,7 @@
             "plugin",
             "custom"
           ],
-          "description": "作成の記録。代表のリポジトリの種類。答えで既定から変えたときは custom"
+          "description": "作成の記録。代表のリポジトリの種類。回答で既定から変えたときは custom"
         },
         "release_strategy": {
           "type": "string",
@@ -1101,7 +1101,7 @@
             "release_branch",
             "trunk"
           ],
-          "description": "取り込み方（#3613 の改名表の名前）"
+          "description": "リリース方式（#3613 の改名表の名前）"
         },
         "branches": {
           "type": "object",
@@ -2111,7 +2111,7 @@
     },
     "DeliveryResult": {
       "additionalProperties": false,
-      "description": "CD の結果を読む手段（結果の読み方）。`workflow` と `command` の両方を書くと、読む側（lib/delivery.py）が読めない宣言として止める。",
+      "description": "CD の結果を読む手段（結果の読み方）。`workflow` と `command` の両方を書くと、読む側（lib/delivery.py）が読めない設定として止める。",
       "properties": {
         "workflow": {
           "anyOf": [

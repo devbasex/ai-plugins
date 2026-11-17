@@ -3,11 +3,11 @@
 工程の定義で承認ゲート（設計・リリース）の直前に置く判定のステップの本体。進め方が fast・auto のときだけ、
 MVV 判定の前の機械の検査を当て、通れば LLM のアダプター（`ndf.adapters.llm`）で判定を打ち（`mvv.mvv_validate_sprint`。同じ材料の
 「従う」は記録を再利用する）、承認ゲートを省けるか（`ndf.progress.gate.checks.may_skip`）を出力の `mvv_gate` に書く。
-承認ゲートのステップ（`ndf.progress.run`）はその結果だけを読み、省けるなら答えた者 `service:mvv` の承認で通す。
+承認ゲートのステップ（`ndf.progress.run`）はその結果だけを読み、省けるなら回答した者 `service:mvv` の承認で通す。
 
 判定の材料は、共通原則の本文（`contracts/data/ndf-common-principles.md`）・プロジェクト MVV の本文・PR の本文と差分。
 レッドライン（必ず人の承認が要る操作）は共通原則とプロジェクト MVV の表から引き、材料の先に置く。
-判定を打てない（PR が無い・GitHub や LLM が答えない）ときは承認ゲートを省かず、理由を `why` に書いて人へ問う。
+判定を打てない（PR が無い・GitHub や LLM が回答しない）ときは承認ゲートを省かず、理由を `why` に書いて人へ問う。
 PR を読めた後の結果は、省くときも省かないときも判定の記録（`checks.note`）を PR のコメントへ載せる。
 """
 
@@ -29,19 +29,19 @@ from ndf.progress import definition
 from ndf.progress.gate.checks import MvvFacts, may_skip, note, refusals
 from ndf.progress.model import MVV_PACES
 
-# 共通原則の本文（契約の置き場からの相対）と、判定の答えのスキーマ（contracts/schemas/mvv-verdict.schema.json）
+# 共通原則の本文（コントラクトの保存先からの相対）と、判定の回答のスキーマ（contracts/schemas/mvv-verdict.schema.json）
 PRINCIPLES = "data/ndf-common-principles.md"
 VERDICT_SCHEMA = "mvv-verdict"
 # 判定の 1 回の呼び出しの上限
 JUDGE_LIMIT = "supervise.judge-step"
 # 承認ゲートの区分（設計は作業場所のブランチの PR、リリースは文脈の pr を判定する）
 DESIGN, RELEASE = "design", "release"
-# 判定の 1 回の呼び出し（問い・材料・答えのスキーマ・上限の秒 → 答え）。テストはスタブへ差し替える
+# 判定の 1 回の呼び出し（質問・材料・回答のスキーマ・上限の秒 → 回答）。テストはスタブへ差し替える
 Ask = Callable[[str, str, dict, float], llm.JudgeAnswer]
 
 
 class GateError(Exception):
-    """判定を打てない（PR が無い・LLM が答えない）。承認ゲートは省かずに人へ問う。"""
+    """判定を打てない（PR が無い・LLM が回答しない）。承認ゲートは省かずに人へ問う。"""
 
 
 def principles() -> str:
@@ -50,7 +50,7 @@ def principles() -> str:
 
 
 def boundary_paths(root: Path) -> tuple[str, ...]:
-    """進め方の宣言のレッドラインのパス（宣言が無ければ空。読めなければ `jsonfile.JsonFileError`）。"""
+    """進め方の設定のレッドラインのパス（設定が無ければ空。読めなければ `jsonfile.JsonFileError`）。"""
     path = files.path(root, "pace")
     decl = jsonfile.read_object(path) if path.is_file() else {}
     held = decl["boundary_paths"] if isinstance(decl.get("boundary_paths"), list) else []
@@ -60,7 +60,7 @@ def boundary_paths(root: Path) -> tuple[str, ...]:
 def base_facts(root: Path, inputs: Mapping[str, Any]) -> tuple[MvvFacts, str]:
     """機械の検査の事実（PR の本文と変えたファイルを除く）と、プロジェクト MVV の本文。
 
-    MVV が承認済みでなければ宣言と本文を読まない（検査 1 が止める）。
+    MVV が承認済みでなければ設定と本文を読まない（検査 1 が止める）。
     """
     state = preflight.mvv_state(root)
     ref = inputs["mvv_ref"] if isinstance(inputs.get("mvv_ref"), str) else None
@@ -89,13 +89,13 @@ def pr_number(root: Path, gate: str, inputs: Mapping[str, Any], hub: GitHub) -> 
 
 
 def judge_with(ask: Ask) -> mvv.Judge:
-    """`mvv.mvv_validate_sprint` へ渡す判定の関数。答えの判定の語と、費用・判定の中身（理由・レッドライン・根拠）を返す。"""
+    """`mvv.mvv_validate_sprint` へ渡す判定の関数。回答の判定の語と、費用・判定の中身（理由・レッドライン・根拠）を返す。"""
     schema = contracts.load_json(contracts.schema_path(VERDICT_SCHEMA))
 
     def judge(inputs: Mapping[str, str]) -> tuple[str, Mapping[str, Any]]:
         got = ask(inputs["question"], inputs["material"], schema, limits.seconds(JUDGE_LIMIT))
         if not got.ok:
-            raise GateError(f"MVV 判定の答えが無い: {got.cause}")
+            raise GateError(f"MVV 判定の回答が無い: {got.cause}")
         return str(got.answer["verdict"]), {"usd": got.cost, **{k: got.answer[k] for k in md.VERDICT_DETAILS}}
 
     return judge
@@ -113,11 +113,11 @@ def _judged(root: Path, gate_name: str, inputs: Mapping[str, Any], open_hub: Cal
     # 機械の検査で止まるときは GitHub を読まない（つなぐのは検査を通った後）
     hub = open_hub(root)
     number = pr_number(root, gate_name, inputs, hub)
-    # 判定する head を先に読む。省いた答えはこの head を見た対象に持ち、後に進んだ head は承認の照合とマージが断る
+    # 判定する head を先に読む。省いた回答はこの head を見た対象に持ち、後に進んだ head は承認の検証とマージが断る
     pull = hub.pull(number)
     rows = mvv.pr_files(hub, number)
     facts = mvv.pr_facts(hub, number, facts, rows, pull)
-    # PR の本文と変えたファイルで決まる検査（レッドラインのパス・MVV の宣言の変更）は LLM を呼ぶ前に当てる。
+    # PR の本文と変えたファイルで決まる検査（レッドラインのパス・MVV の設定の変更）は LLM を呼ぶ前に当てる。
     # 差分の全体が材料に載らない PR も、省いた部分を判定できないため LLM を呼ばずに人へ問う
     why = refusals(facts) or mm.incomplete_patches(rows)
     if why:

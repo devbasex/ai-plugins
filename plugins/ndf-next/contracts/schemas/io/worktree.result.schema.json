@@ -143,7 +143,7 @@
           },
           "base": {
             "type": "string",
-            "description": "起点（create）・ベースブランチ（check。ブランチ戦略の宣言の branches.base）"
+            "description": "起点（create）・ベースブランチ（check。ブランチ戦略の設定の branches.base）"
           },
           "snapshot": {
             "type": "object",
@@ -262,7 +262,7 @@
           },
           "production": {
             "type": "string",
-            "description": "本番ブランチ（check。ブランチ戦略の宣言の branches.production）"
+            "description": "本番ブランチ（check。ブランチ戦略の設定の branches.production）"
           },
           "sprint_start": {
             "type": "string",

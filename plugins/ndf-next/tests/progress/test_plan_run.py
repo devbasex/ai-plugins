@@ -206,12 +206,12 @@ def test_a_lane_whose_goal_was_cleared_is_relaunched_with_the_goal_while_the_acc
     ],
 )
 def test_a_stall_read_right_after_a_continuation_launch_is_not_reported_until_it_is_seen_again(snap, kind):
-    """続き（/goal の入れ直し・答えの後の next）を起こした直後の読み直しでは、一覧に残る前の起動の止まった姿で
+    """続き（/goal の入れ直し・回答の後の next）を起動した直後の読み直しでは、一覧に残る前の起動の止まった姿で
     知らせない。次の読み直しでも止まっていれば知らせる（#2629 の回帰）。"""
     stall = ("a", "stall:a/r1:ended", "レーン a の行 r1: 止まった", None, "r1")
     act, state, _ = _step(RunState(), Done(Observe(), snap))
     assert isinstance(act, Launch) and getattr(act, kind) == "s1"
-    act, state, _ = _step(state, Done(act, {"ok": True, "detail": "起こした"}))
+    act, state, _ = _step(state, Done(act, {"ok": True, "detail": "起動した"}))
     stopped = _snap(running=[("a", "r1", "s1")], stalls=[stall])
     act, state, _ = _step(state, Done(Observe(), stopped))
     assert act == Sleep(30.0) and state.unreported == ()
@@ -556,7 +556,7 @@ class _NoRecords:
 
 
 def test_a_loop_row_ends_through_its_table_and_is_cancelled_with_the_loop_halted(opened, tmp_path):
-    """#3558: 開発ループの行は工程の無い子の進行表を持ち、next で完了すると行が終わる。中止はループを止めてから打つ。"""
+    """#3558: 開発ループの行は工程の無い子のステートマシンを持ち、next で完了すると行が終わる。中止はループを止めてから打つ。"""
     import argparse
 
     from ndf.progress import command, gate

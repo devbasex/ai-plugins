@@ -22,7 +22,7 @@
     },
     "branch_strategy": {
       "$ref": "#/$defs/BranchStrategy",
-      "description": "ブランチ戦略の宣言。ブランチの名前・取り込み方・リリース・承認・マージを 1 か所で持ち、ndf project branch-strategy だけが作る・更新する・移す・消す。工程の部品は ndf.core.branch_strategy で読む"
+      "description": "ブランチ戦略の設定。ブランチの名前・リリース方式・リリース・承認・マージを 1 か所で持ち、ndf project branch-strategy だけが作る・更新する・移す・消す。工程の部品は ndf.core.branch_strategy で読む"
     },
     "languages": {
       "anyOf": [
@@ -323,7 +323,7 @@
     },
     "BranchStrategy": {
       "title": "BranchStrategy",
-      "description": "ブランチ戦略の宣言（#3672）。.ndf/project.json のセクション branch_strategy。解析の branch-strategy サブコマンドだけが作る・更新する・移す・消す。組み合わせの規則は allOf の R2〜R10。値の等しさを比べる R1（trunk ⇔ base と production が同じ）は JSON Schema で書けないため、読む部品の validate が同じ番号で確かめる",
+      "description": "ブランチ戦略の設定（#3672）。.ndf/project.json のセクション branch_strategy。解析の branch-strategy サブコマンドだけが作る・更新する・移す・消す。組み合わせの規則は allOf の R2〜R10。値の等しさを比べる R1（trunk ⇔ base と production が同じ）は JSON Schema で書けないため、読む部品の validate が同じ番号で確かめる",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -348,7 +348,7 @@
             "plugin",
             "custom"
           ],
-          "description": "作成の記録。代表のリポジトリの種類。答えで既定から変えたときは custom"
+          "description": "作成の記録。代表のリポジトリの種類。回答で既定から変えたときは custom"
         },
         "release_strategy": {
           "type": "string",
@@ -357,7 +357,7 @@
             "release_branch",
             "trunk"
           ],
-          "description": "取り込み方（#3613 の改名表の名前）"
+          "description": "リリース方式（#3613 の改名表の名前）"
         },
         "branches": {
           "type": "object",

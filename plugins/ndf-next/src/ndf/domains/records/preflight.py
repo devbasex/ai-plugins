@@ -66,7 +66,7 @@ def sha256_of(path: Path) -> Optional[str]:
 
 
 def mvv_body(root: Path, decl: Mapping[str, Any]) -> Path:
-    """プロジェクト MVV の本文のパス（宣言の `body`、無ければ表 ndf-files の mvv-body。宣言と同じ置き場）。"""
+    """プロジェクト MVV の本文のパス（設定の `body`、無ければ表 ndf-files の mvv-body。設定と同じ保存先）。"""
     body = decl["body"] if isinstance(decl.get("body"), str) else facts.value("ndf-files", "mvv-body", "path")
     return files.path(root, "mvv").parent / body
 

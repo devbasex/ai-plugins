@@ -1,9 +1,9 @@
 """cross-refactoring の配分の表を読む口と、履歴へ実行の行を書く口（#3643。判断は `allocation_decide`・`allocation_history_decide`）。
 
-- 初期値は Skill の `data/allocation-defaults.json`、宣言は表 ndf-files の estimate（`allocation_minutes`）
+- 初期値は Skill の `data/allocation-defaults.json`、設定は表 ndf-files の estimate（`allocation_minutes`）
 - 履歴は `<記録の根>/<owner>--<repo>/cross-refactoring-allocation.jsonl`（今の plugins/ndf が書く所と同じ）。記録の根は
   `NDF_METRICS_DIR` → `<旧い NDF の状態の根>/metrics`。
-  読めない行は飛ばし、ファイルが無い・リモートが GitHub でないときは初期値（と宣言）で表を作る
+  読めない行は飛ばし、ファイルが無い・リモートが GitHub でないときは初期値（と設定）で表を作る
 """
 
 from __future__ import annotations
@@ -72,9 +72,9 @@ def _repo(work: git.Git) -> Optional[str]:
 
 
 def table(work: git.Git, root: Path) -> dict[str, Any]:
-    """配分の表（分）。初期値に `root` の宣言を重ね、履歴の実行の行があればその実測で置き換える。
+    """配分の表（分）。初期値に `root` の設定を重ね、履歴の実行の行があればその実測で置き換える。
 
-    初期値か宣言が読めない・形が違えば `allocation_decide.AllocationError`（黙って捨てない）。
+    初期値か設定が読めない・形が違えば `allocation_decide.AllocationError`（黙って捨てない）。
     """
     values = allocation_decide.decide(_object(DEFAULTS_PATH), _declared(root))
     repo = _repo(work)

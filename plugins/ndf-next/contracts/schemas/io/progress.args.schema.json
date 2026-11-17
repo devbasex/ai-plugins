@@ -161,7 +161,7 @@
         },
         "--loop": {
           "type": "string",
-          "description": "開発ループの行の進行表を作る（工程なし。ループの名前）"
+          "description": "開発ループの行のステートマシンを作る（工程なし。ループの名前）"
         },
         "--pace": {
           "type": "string",

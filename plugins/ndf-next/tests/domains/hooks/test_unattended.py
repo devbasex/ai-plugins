@@ -1,4 +1,4 @@
-"""人のいない実行の guard（#3242・#3746）: 印の作成・印の削除・次のコマンドの確かめ・差し戻しの上限と、区間の報告の契約の形。"""
+"""人のいない実行の guard（#3242・#3746）: マーカーの作成・マーカーの削除・次のコマンドの確かめ・止めて返す回数の上限と、区間の報告のコントラクトの形。"""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from ._hooks import advise_text, call_entry, records, sample, state_dir, stop
 SID = "00000000-0000-0000-0000-000000000000"
 SKILL = f"/{identity.load().prefix}"
 CONTRACT = tables.load(report.FORM_TABLE)
-# 写し元（今の NDF）の契約。11.0.0 で入れ替えた後は無い
+# 写し元（今の NDF）のコントラクト。11.0.0 で入れ替えた後は無い
 ORIGINAL = tables.PLUGIN_ROOT.parent / "ndf" / "contracts" / "forms" / "unattended-report.json"
 
 
@@ -53,7 +53,7 @@ def test_every_example_of_the_form_passes():
     assert all(report.report_errors(text, form) == [] for text in report_text.form_examples(form).values())
 
 
-@pytest.mark.skipif(not ORIGINAL.is_file(), reason="写し元の契約が無い（11.0.0 で入れ替えた後）")
+@pytest.mark.skipif(not ORIGINAL.is_file(), reason="写し元のコントラクトが無い（11.0.0 で入れ替えた後）")
 def test_the_copy_keeps_the_factory_contract():
     import json
 

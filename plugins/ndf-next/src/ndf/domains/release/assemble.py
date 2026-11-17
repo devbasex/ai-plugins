@@ -109,7 +109,7 @@ def _write(root: Path, decl: decl_mod.NdfSettings, facts: materials_decide.Facts
     found = plugins_mod.by_name(plugins_mod.load(root))
     entries = [changelog_decide.Entry(p.number, p.title) for p in facts.pulls]
     log_path = root / decl.changelog
-    # 版上げで書き換える追加のファイルはブランチ戦略の宣言の版数の置き場が持つ（無ければ止まる。旧い release.json を読まない）
+    # 版上げで書き換える追加のファイルはブランチ戦略の設定の版数の保存先が持つ（無ければ止まる。旧い release.json を読まない）
     store = branch_strategy.load(root).version_store
     extra_files = store["files"] if "files" in store else []
     for p in facts.planned:
