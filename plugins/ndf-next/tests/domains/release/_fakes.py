@@ -176,6 +176,16 @@ def clone(tmp_path: Path, origin: Path, name: str, branch: str = "develop") -> P
     return configure(path)
 
 
+def commit_files(repo: Path, files: dict[str, str], message: str) -> str:
+    """`files`（リポジトリの根からのパス → 中身）を書き出してすべてをコミットし、そのコミットの SHA を返す。"""
+    for rel, text in files.items():
+        (repo / rel).parent.mkdir(parents=True, exist_ok=True)
+        (repo / rel).write_text(text, encoding="utf-8")
+    git_sandbox.sh(repo, "add", "-A")
+    git_sandbox.sh(repo, "commit", "-q", "-m", message)
+    return git_sandbox.sh(repo, "rev-parse", "HEAD").strip()
+
+
 def write_json(path: Path, data: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

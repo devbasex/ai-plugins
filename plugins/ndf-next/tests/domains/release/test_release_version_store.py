@@ -15,7 +15,7 @@ from ndf.domains.release import names_decide
 from ndf.domains.release import plugins as plugins_mod
 from ndf.domains.release import version_store as store_mod
 
-from ._fakes import configure, section
+from ._fakes import commit_files, configure, section
 
 
 def _release(kind: str, **store: str) -> Strategy:
@@ -27,11 +27,7 @@ def _release(kind: str, **store: str) -> Strategy:
 def _repo(tmp_path: Path, files: dict[str, str]) -> git_mod.Git:
     git_sandbox.sh(tmp_path, "init", "-q", "-b", "main")
     configure(tmp_path)
-    for rel, text in files.items():
-        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
-        (tmp_path / rel).write_text(text, encoding="utf-8")
-    git_sandbox.sh(tmp_path, "add", "-A")
-    git_sandbox.sh(tmp_path, "commit", "-q", "-m", "init")
+    commit_files(tmp_path, files, "init")
     return git_mod.Git(tmp_path)
 
 

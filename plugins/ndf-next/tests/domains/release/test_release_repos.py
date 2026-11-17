@@ -24,7 +24,7 @@ from ndf.adapters import git as git_mod
 from ndf.domains.release import cli as release_cli
 from ndf.domains.release import units as units_mod
 
-from ._fakes import FakeHub, configure, pull, section, write_json
+from ._fakes import FakeHub, commit_files, configure, pull, section, write_json
 
 
 def _seed(tmp_path: Path, files: dict[str, str]) -> Path:
@@ -32,24 +32,15 @@ def _seed(tmp_path: Path, files: dict[str, str]) -> Path:
     seed.mkdir()
     git_sandbox.sh(seed, "init", "-q", "-b", "main")
     configure(seed)
-    _commit(seed, files, "init")
+    commit_files(seed, files, "init")
     return seed
-
-
-def _commit(repo: Path, files: dict[str, str], message: str) -> str:
-    for rel, text in files.items():
-        (repo / rel).parent.mkdir(parents=True, exist_ok=True)
-        (repo / rel).write_text(text, encoding="utf-8")
-    git_sandbox.sh(repo, "add", "-A")
-    git_sandbox.sh(repo, "commit", "-q", "-m", message)
-    return git_sandbox.sh(repo, "rev-parse", "HEAD").strip()
 
 
 def _merge_pr(repo: Path, into: str, number: int, files: dict[str, str]) -> None:
     """`into` から切ったブランチに `files` を足し、PR #number のマージコミットで `into` へ入れる。"""
     git_sandbox.sh(repo, "switch", "-q", into)
     git_sandbox.sh(repo, "switch", "-q", "-c", f"feat/{number}")
-    _commit(repo, files, f"change {number}")
+    commit_files(repo, files, f"change {number}")
     git_sandbox.sh(repo, "switch", "-q", into)
     git_sandbox.sh(repo, "merge", "-q", "--no-ff", f"feat/{number}", "-m", f"Merge pull request #{number} from o/feat/{number}")
 
@@ -183,7 +174,7 @@ def test_docs_range_is_the_production_pull_and_has_no_version(tmp_path: Path) ->
     """受け入れ条件 12: 本番の PR を範囲にして空にならない。バージョンの行は出さず、組み立ては作らない。"""
     seed = _seed(tmp_path, {"docs/a.md": "a\n"})
     git_sandbox.sh(seed, "switch", "-q", "-c", "feat/9")
-    head = _commit(seed, {"docs/b.md": "b\n"}, "書いた")
+    head = commit_files(seed, {"docs/b.md": "b\n"}, "書いた")
     git_sandbox.sh(seed, "switch", "-q", "main")
     work = _publish(tmp_path, seed, "main")
     git_sandbox.sh(work, "push", "-q", "origin", f"{head}:refs/pull/9/head")
@@ -212,9 +203,9 @@ def test_trunk_collects_each_unit_from_its_previous_tag(tmp_path: Path) -> None:
         },
     )
     git_sandbox.sh(seed, "tag", "a--v1.0.0")
-    _commit(seed, {"pa/x.py": "x\n", "pb/y.py": "y\n"}, "両方を直した")
+    commit_files(seed, {"pa/x.py": "x\n", "pb/y.py": "y\n"}, "両方を直した")
     git_sandbox.sh(seed, "tag", "b--v2.0.0")
-    _commit(seed, {"pa/z.py": "z\n"}, "a を直した (#11)")
+    commit_files(seed, {"pa/z.py": "z\n"}, "a を直した (#11)")
     work = _publish(tmp_path, seed, "main")
     target = assemble.Target("production", "patch", "main", "main", "origin")
     facts = assemble.collect(work, _hub(11), target, Strategy(section("plugin")))
@@ -245,7 +236,7 @@ def _sprints_origin(tmp_path: Path) -> Path:
     git_sandbox.sh(seed, "branch", "sprint/old")
     for name, text in (("sprint/a", "from a\n"), ("sprint/clash", "from clash\n")):
         git_sandbox.sh(seed, "switch", "-q", "-c", name, "main")
-        _commit(seed, {"shared.txt": text}, name)
+        commit_files(seed, {"shared.txt": text}, name)
     git_sandbox.sh(seed, "switch", "-q", "main")
     return _publish(tmp_path, seed, "main")
 
