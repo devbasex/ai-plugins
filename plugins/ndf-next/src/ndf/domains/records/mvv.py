@@ -15,7 +15,7 @@ from typing import Any, Optional
 
 from ndf import identity
 from ndf.adapters import git as git_mod
-from ndf.adapters.github import PER_PAGE, GitHub, GitHubError
+from ndf.adapters.github import PER_PAGE, GitHub, GitHubError, Pull
 from ndf.contracts import facts, limits
 from ndf.domains.records import files, jsonl
 from ndf.domains.records import mvv_decide as md
@@ -151,9 +151,11 @@ def changed_of(rows: list[dict[str, Any]]) -> list[Changed]:
                     f["status"] == "renamed") for f in rows]  # fmt: skip
 
 
-def pr_facts(hub: GitHub, number: int, base: MvvFacts, rows: Optional[list[dict[str, Any]]] = None) -> MvvFacts:
+def pr_facts(
+    hub: GitHub, number: int, base: MvvFacts, rows: Optional[list[dict[str, Any]]] = None, pull: Optional[Pull] = None
+) -> MvvFacts:
     """PR の本文と変えたファイルを読み、機械の検査の事実を埋める（検査 6 の `body`・`claimed`）。
 
-    `rows` は読み済みの変えたファイル（`pr_files` の結果）。無ければここで読む。"""
-    body = hub.pull(number).body
+    `rows` は読み済みの変えたファイル（`pr_files` の結果）、`pull` は読み済みの PR。無ければここで読む。"""
+    body = (pull if pull is not None else hub.pull(number)).body
     return mm.facts_from_pr(base, body, changed_of(rows if rows is not None else pr_files(hub, number)))

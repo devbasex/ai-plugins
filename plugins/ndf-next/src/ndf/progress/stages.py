@@ -53,6 +53,12 @@ class StageDef:
         """工程が持つ承認ゲートの種類。1 つでもあれば工程を無効にできない（3364-2）。"""
         return tuple(st.gate for st in self.steps if st.gate)
 
+    def before(self, step_id: str) -> Optional[str]:
+        """ステップ `step_id` の直前のステップの id（先頭か、工程に無ければ None）。"""
+        ids = [st.id for st in self.steps]
+        at = ids.index(step_id) if step_id in ids else 0
+        return ids[at - 1] if at > 0 else None
+
 
 @dataclass(frozen=True)
 class Snapshot:

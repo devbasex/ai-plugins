@@ -23,22 +23,29 @@ _HELP = (
 
 
 def unquoted_substitution(command: str) -> str | None:
-    """区切りを引用符で囲まず、本文にバッククォートか `$(` があるヒアドキュメントの区切りの語。無ければ None。"""
+    """区切りを引用符で囲まず、本文にバッククォートか `$(` があるヒアドキュメントの区切りの語。無ければ None。
+
+    開きを見つけたら（引用符の有無によらず）区切りの行までの本文を読み飛ばし、その次の行から開きを探し直す。
+    本文の中の `<<EOF` の文字（ヒアドキュメントを説明する文書など）は、シェルが開きとして読まないので開きとしない。
+    1 行に開きが並べば、本文はその順に続く。
+    """
     lines = command.split("\n")
-    for i, line in enumerate(lines):
-        for m in _OPEN.finditer(line):
-            if m.group(1):
-                continue
-            body = _body(lines, i + 1, m.group(2))
-            if "`" in body or "$(" in body:
+    i = 0
+    while i < len(lines):
+        start = i + 1
+        for m in _OPEN.finditer(lines[i]):
+            end = _end(lines, start, m.group(2))
+            body = "\n".join(lines[start:end])
+            if not m.group(1) and ("`" in body or "$(" in body):
                 return m.group(2)
+            start = end + 1
+        i = start
     return None
 
 
-def _body(lines: list[str], start: int, word: str) -> str:
-    """`start` 行目から区切りの語 `word` だけの行の手前までの本文。区切りが無ければ末尾まで。"""
-    end = next((j for j in range(start, len(lines)) if lines[j].strip() == word), len(lines))
-    return "\n".join(lines[start:end])
+def _end(lines: list[str], start: int, word: str) -> int:
+    """`start` 行目から探した、区切りの語 `word` だけの行の番号。区切りが無ければ行の数（末尾まで本文）。"""
+    return next((j for j in range(start, len(lines)) if lines[j].strip() == word), len(lines))
 
 
 def check(ctx, svc) -> Verdict | None:

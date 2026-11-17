@@ -19,7 +19,7 @@ import strategy_fixture
 from ndf import contracts
 from ndf.adapters.github import GitHubError
 from ndf.contracts import causes, result
-from ndf.progress import command, definition, invoke, model, run, stages, store
+from ndf.progress import command, definition, gate, invoke, model, run, stages, store
 
 ISSUE = 3092
 
@@ -192,9 +192,18 @@ def test_revise_needs_a_notes_file_and_reruns_the_stage_with_the_notes(repo, st,
     assert rerun[0].work_dir.name == "design-g1"
 
 
-def _mvv(gate: str, skip: bool, why: list[str]):
-    """承認ゲートの直前の MVV 判定のステップの偽の結果（出力 mvv_gate）。"""
-    held = {"gate": gate, "skip": skip, "verdict": {"verdict": "follow", "reasons": ["Value 1"], "boundary": []}, "why": why}
+JUDGED = "a" * 40
+
+
+def _mvv(kind: str, skip: bool, why: list[str]):
+    """承認ゲートの直前の MVV 判定のステップの偽の結果（出力 mvv_gate。判定した PR の head は JUDGED）。"""
+    held = {
+        "gate": kind,
+        "skip": skip,
+        "verdict": {"verdict": "follow", "reasons": ["Value 1"], "boundary": []},
+        "why": why,
+        "head": JUDGED,
+    }
     return lambda r: invoke.finished(r, result.result("script", "ok", "MVV 判定", outputs={"mvv_gate": held}))
 
 
@@ -209,6 +218,29 @@ def test_a_skippable_mvv_verdict_passes_the_design_gate_as_service_mvv(repo, st,
     p = answered.draft.payload
     assert (answered.draft.row_key, p["answer"], p["by"], p["step"]) == ("設計", "approved", "service:mvv", "design-gate")
     assert p["mvv_gate"]["skip"] is True and answered.draft.actor == "conductor"
+    # 人の答えと同じく問いの id・区分・見た head を持ち、承認した head（ndf answer head）が読める
+    assert (p["gate"], p["seen"]["head"], len(p["gate_id"])) == ("design", JUDGED, model.QUESTION_ID_LENGTH)
+    assert gate.approved_head(run.read(st, tid), "design") == JUDGED
+
+
+def test_an_mvv_approval_whose_head_moved_goes_back_to_a_human(repo, st, env, capsys, monkeypatch):
+    # 省いた答えを書いた後、読む前に PR の head が判定の head から進んだら、待ちへ戻して人へ問う（同じ判定で省き直さない）
+    tid = _new(capsys, "standard", "--pace", "fast")
+    env.fake.script["design-mvv"] = [_mvv("design", True, [])]
+
+    def written_only(d, v, m):
+        run._consume(d, v, m)
+        return result.result(run.TOOL, result.OK, "省いた答えを書いたところで止める")
+
+    with monkeypatch.context() as mp:
+        mp.setitem(run._HANDS, run.Action.CONSUME, written_only)
+        lanes.turn(st, tid, repo, env.env)
+    moved = "b" * 40
+    why = gate.recheck(st, tid, lambda q: gate.Target(moved))
+    assert why is not None and moved in why
+    out = lanes.turn(st, tid, repo, env.env)
+    assert out["status"] == "gate" and out["metrics"]["stage"] == "設計"
+    assert [e.draft.payload["by"] for e in run.read(st, tid).events if e.draft.kind == "answered"] == ["service:mvv"]
 
 
 @pytest.mark.parametrize(

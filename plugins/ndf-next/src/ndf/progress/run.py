@@ -272,7 +272,7 @@ def _running_move(v: View, s: stages.StageDef) -> Move:
         return Move(Action.RESUME, s, None, prog)
     listen = invoke.is_listen(step)
     waiting = listen or (prog.waiting is not None and prog.waiting["step"] == step.id)
-    skip = listen and model.mvv_skip(prog.done.values(), step.gate) is not None
+    skip = listen and prog.waiting is None and model.mvv_skip(prog.done, s.before(step.id), step.gate) is not None
     if waiting and prog.answer is None and not skip:
         return Move(Action.GATE, s, step, prog)
     return Move(Action.CONSUME if listen else Action.RESUME, s, step, prog, prog.answer)
@@ -618,11 +618,12 @@ def gate_report(step: stages.StepDef, answer: model.Event) -> dict[str, Any]:
 
 
 def _consume(d: Drive, v: View, m: Move) -> None:
-    """承認ゲートの答えを読む。承認ならステップを終え、承認しないなら行を失敗にして conductor へ返す。答えが無ければ
-    直前の MVV 判定が省けると決めた承認ゲートで、答えた者 `service:mvv` の承認を書く（次の手で読む）。"""
+    """承認ゲートの答えを読む。答えが無ければ直前の MVV 判定が省けると決めた承認ゲートで、`service:mvv` の承認を書く。"""
     assert m.stage is not None and m.step is not None and m.progress is not None
     if m.event is None:
-        payload, reason = model.mvv_answer(m.step.id, invoke.LISTEN, APPROVED, m.step.gate, m.progress.done.values())
+        held = model.mvv_skip(m.progress.done, m.stage.before(m.step.id), m.step.gate)
+        qid = model.question_id(v.table_id, v.rev, m.stage.name, m.step.id, m.progress.anchor)
+        payload, reason = model.mvv_answer(m.step.id, invoke.LISTEN, APPROVED, held, qid)
         d.write(model.EventDraft(ANSWERED, CONDUCTOR, m.stage.name, reason=reason, payload=payload, rev=v.rev))
         return
     if payload_of(m.event)["answer"] == APPROVED:

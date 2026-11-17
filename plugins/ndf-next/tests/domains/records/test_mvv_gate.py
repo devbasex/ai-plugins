@@ -86,7 +86,7 @@ class Hub:
 
     def pull(self, number: int) -> SimpleNamespace:
         assert number == self.number
-        return SimpleNamespace(body=self.case["body"])
+        return SimpleNamespace(body=self.case["body"], head_sha=self.case.get("head", "h" * 40))
 
     def rest(self, method: str, path: str, payload: Any = None, params: Any = None) -> list[dict]:
         assert path == f"/repos/o/r/pulls/{self.number}/files"
@@ -141,7 +141,7 @@ def test_follow_without_redlines_skips_and_the_record_is_reused(repo: Path, note
     case = {"body": "文書の誤字を直す", "files": [{"filename": "docs/a.md", "status": "modified", "patch": "-誤字\n+正字"}]}
     ask = Ask(FOLLOW)
     out = mvv_gate.gate(repo, "design", _inputs(), _hub(5, case), ask)
-    assert (out["skip"], out["why"], out["verdict"]["boundary"]) == (True, [], [])
+    assert (out["skip"], out["why"], out["verdict"]["boundary"], out["head"]) == (True, [], [], "h" * 40)
     # 承認ゲートを省いた判定も、理由を PR のコメントへ残す
     ((number, text),) = notes
     assert number == 5 and "## MVV 判定" in text and "Value 1 に沿う" in text

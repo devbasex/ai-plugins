@@ -29,7 +29,8 @@
         "gate": {"enum": ["design", "release"], "description": "判定した承認ゲートの区分（workflow/progress.json の gates の鍵）"},
         "skip": {"type": "boolean", "description": "承認ゲートを省けるか（ndf.progress.gate.checks.may_skip）"},
         "verdict": {"type": ["object", "null"], "description": "LLM の判定の応答（verdict・reasons・boundary・basis）。判定を打たなかったら null"},
-        "why": {"type": "array", "items": {"type": "string", "minLength": 1}, "description": "省かない理由。省けるなら空"}
+        "why": {"type": "array", "items": {"type": "string", "minLength": 1}, "description": "省かない理由。省けるなら空"},
+        "head": {"type": "string", "minLength": 1, "description": "判定した PR の head の SHA。省いた答えが見た対象（seen）に持ち、後に進んだ head は答えの照合とマージが断る。PR を読む前に止めたら無い"}
       }
     },
     "delivery": {

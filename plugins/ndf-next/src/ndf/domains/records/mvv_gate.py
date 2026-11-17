@@ -113,13 +113,15 @@ def _judged(root: Path, gate_name: str, inputs: Mapping[str, Any], open_hub: Cal
     # 機械の検査で止まるときは GitHub を読まない（つなぐのは検査を通った後）
     hub = open_hub(root)
     number = pr_number(root, gate_name, inputs, hub)
+    # 判定する head を先に読む。省いた答えはこの head を見た対象に持ち、後に進んだ head は承認の照合とマージが断る
+    pull = hub.pull(number)
     rows = mvv.pr_files(hub, number)
-    facts = mvv.pr_facts(hub, number, facts, rows)
+    facts = mvv.pr_facts(hub, number, facts, rows, pull)
     # PR の本文と変えたファイルで決まる検査（レッドラインのパス・MVV の宣言の変更）は LLM を呼ぶ前に当てる。
     # 差分の全体が材料に載らない PR も、省いた部分を判定できないため LLM を呼ばずに人へ問う
     why = refusals(facts) or mm.incomplete_patches(rows)
     if why:
-        return _recorded(hub, number, mm.gate_outcome(gate_name, None, False, why))
+        return _recorded(hub, number, mm.gate_outcome(gate_name, None, False, why, pull.head_sha))
     shared = principles()
     materials = {
         "NDF の共通原則": shared,
@@ -130,7 +132,7 @@ def _judged(root: Path, gate_name: str, inputs: Mapping[str, Any], open_hub: Cal
     text = mm.prompt(mm.redlines(shared, project), materials)
     verdict = _verdict(mvv.vet_sprint(root, {"gate": gate_name, "question": mm.SYSTEM, "material": text}, judge_with(ask)))
     skip, why = may_skip(facts, verdict)
-    return _recorded(hub, number, mm.gate_outcome(gate_name, verdict, skip, why))
+    return _recorded(hub, number, mm.gate_outcome(gate_name, verdict, skip, why, pull.head_sha))
 
 
 def post_note(hub: GitHub, number: int, text: str) -> None:

@@ -29,8 +29,8 @@ def _gate(word: str) -> str:
 # 承認ゲートの区分（設計承認ゲート・リリース承認ゲート）
 DESIGN_GATE = _gate("design")
 RELEASE_GATE = _gate("release")
-# 問いの id の長さ（sha256 の頭）
-ID_LENGTH = 16
+# 問いの id（承認ゲートの答えと、MVV 判定で省いた答えが同じ id を持つため、置き場は model）
+question_id = model.question_id
 # 承認しなかった答え（差し戻しの記録に数える）
 REJECTING = (run.REVISE, run.REJECTED)
 # 承認資料の置き場（進行表ごとの作業の置き場の下。名前は問いの id）
@@ -84,12 +84,6 @@ class Question:
     @property
     def label(self) -> str:
         return model.gate_label(self.gate) if self.gate else "プランの中の承認ゲート"
-
-
-def question_id(table_id: str, rev: int, stage: str, step: str, anchor: int) -> str:
-    """問いの記録の id。待ちに入った事象の番号（`anchor`）を含むため、差し戻しで流し直した問いは別の id になる。"""
-    text = f"{table_id}\0{rev}\0{stage}\0{step}\0{anchor}"
-    return hashlib.sha256(text.encode()).hexdigest()[:ID_LENGTH]
 
 
 def sprint_issues(v: run.View) -> list[int]:

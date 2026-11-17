@@ -36,6 +36,24 @@ def test_substitution_after_the_delimiter_line_is_not_the_body(tmp_path):
     assert call_entry("claude", "PreToolUse", bash(tmp_path, command)) is None
 
 
+@pytest.mark.parametrize(
+    ("command", "denied"),
+    [
+        # 引用符で囲んだ本文の中の `<<EOF` は開きではない（ヒアドキュメントを説明する文書）
+        ("cat > doc.md <<'MD'\n例: `cat <<EOF`\n```\ncat <<EOF\n$(date)\nEOF\n```\nMD", False),
+        # 本文を読み飛ばした後の開きは探す
+        ("cat > a.md <<'MD'\n`x`\nMD\ncat <<EOF\n$(date)\nEOF", True),
+        # 1 行に並んだ開きの本文は順に続く
+        ("cat <<'A' <<B\n`x`\nA\n$(y)\nB", True),
+        ("cat <<A <<'B'\nplain\nA\n$(y)\nB", False),
+    ],
+    ids=["nested-in-quoted", "after-quoted", "second-unquoted", "second-quoted"],
+)
+def test_heredoc_bodies_are_skipped_before_looking_for_the_next_opening(tmp_path, command, denied):
+    reason = deny_reason(call_entry("claude", "PreToolUse", bash(tmp_path, command)))
+    assert (reason is not None) is denied
+
+
 def test_refusals_are_recorded_as_deny(tmp_path):
     for command in (BACKTICK, SUBST):
         assert deny_reason(call_entry("claude", "PreToolUse", bash(tmp_path, command))) is not None

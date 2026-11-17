@@ -168,6 +168,7 @@ def incomplete_patches(files: Sequence[Mapping[str, Any]]) -> list[str]:
     return [f"差分の全体を材料に載せられない: {', '.join(held)}"] if held else []
 
 
-def gate_outcome(gate: str, verdict: Any, skip: bool, why: Sequence[str]) -> dict[str, Any]:
-    """判定のステップの出力（文脈の鍵 `mvv_gate` の値）。"""
-    return {"gate": gate, "skip": skip, "verdict": verdict if isinstance(verdict, dict) else None, "why": list(why)}
+def gate_outcome(gate: str, verdict: Any, skip: bool, why: Sequence[str], head: Optional[str] = None) -> dict[str, Any]:
+    """判定のステップの出力（文脈の鍵 `mvv_gate` の値）。`head` は判定した PR の head（PR を読む前に止めたら無い）。"""
+    out = {"gate": gate, "skip": skip, "verdict": verdict if isinstance(verdict, dict) else None, "why": list(why)}
+    return {**out, "head": head} if head is not None else out

@@ -26,6 +26,8 @@ WORKFLOW_ACTOR = "workflow"
 # 承認ゲートを MVV 判定で省ける進め方（文脈の pace）・省いた答えの答えた者・判定の結果を持つ文脈の鍵（context.schema.json）
 MVV_PACES = ("fast", "auto")
 MVV_SERVICE, MVV_KEY = "service:mvv", "mvv_gate"
+# 承認ゲートの問いの id の長さ（sha256 の頭）
+QUESTION_ID_LENGTH = 16
 
 
 class ProgressTableError(contracts.ContractError):
@@ -131,17 +133,21 @@ def gate_label(gate: str) -> str:
     return table()["gates"][gate]
 
 
-def mvv_skip(reports: Iterable[Mapping[str, Any]], gate: Optional[str]) -> Optional[dict[str, Any]]:
-    """承認ゲート `gate` を省くと決めた MVV 判定（済んだステップの出力 `MVV_KEY` のうち、その区分で省けるもの）。無ければ None。
+def question_id(table_id: str, rev: int, stage: str, step: str, anchor: int) -> str:
+    """承認ゲートの問いの id。待ちに入った事象の番号（`anchor`）を含むため、差し戻しで流し直した問いは別の id になる。"""
+    text = f"{table_id}\0{rev}\0{stage}\0{step}\0{anchor}"
+    return hashlib.sha256(text.encode()).hexdigest()[:QUESTION_ID_LENGTH]
 
-    判定を打つのは承認ゲートの直前のステップ（`ndf records mvv gate`）で、ここは結果だけを読む（#3745）。
-    その区分の判定のうち 1 つでも省かないと決めていれば省かない（先のステップが省けると書いても、直前の判定が
-    レッドラインで止めた承認ゲートを省かない）。省けるときは最後の判定を返す。
+
+def mvv_skip(done: Mapping[str, Mapping[str, Any]], before: Optional[str], gate: Optional[str]) -> Optional[dict[str, Any]]:
+    """承認ゲート `gate` を省くと決めた MVV 判定。無ければ None。
+
+    読むのは承認ゲートの直前のステップ `before`（専用の判定 `ndf records mvv gate`）の済んだ結果（`done`）の出力 `MVV_KEY`
+    だけである（#3745）。先のステップ（設計など）が出力に省けると書いても採らず、直前の判定が止めた承認ゲートは省かない。
     """
-    held = [h for rep in reports if isinstance(h := _outputs(rep).get(MVV_KEY), dict) and h.get("gate") == gate]
-    if not held or any(h.get("skip") is not True for h in held):
-        return None
-    return held[-1]
+    report = done[before] if before is not None and before in done else None
+    held = _outputs(report).get(MVV_KEY) if report is not None else None
+    return held if isinstance(held, dict) and held.get("gate") == gate and held.get("skip") is True else None
 
 
 def _outputs(report: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -150,15 +156,24 @@ def _outputs(report: Mapping[str, Any]) -> Mapping[str, Any]:
     return got if isinstance(got, dict) else {}
 
 
-def mvv_answer(step: str, kind: str, answer: str, gate: Optional[str], reports: Iterable[Mapping[str, Any]]) -> tuple[dict[str, Any], str]:
-    """MVV 判定で承認ゲートを省いた答えの事象の payload と理由。答えた者は `MVV_SERVICE`、判定の結果（`mvv_skip`）を `MVV_KEY` に添える。"""
-    held = mvv_skip(reports, gate)
+def mvv_answer(step: str, kind: str, answer: str, held: Optional[Mapping[str, Any]], gate_id: str) -> tuple[dict[str, Any], str]:
+    """MVV 判定で承認ゲートを省いた答えの事象の payload と理由。答えた者は `MVV_SERVICE`、判定の結果（`mvv_skip`）を `MVV_KEY` に添える。
+
+    人の答えと同じく問いの id（`gate_id`）・区分（`gate`）・見た対象（`seen`。判定した PR の head）を持つ。答えを読む前の照合
+    （`gate.recheck`）が今の head と比べ、判定の後に進んでいれば待ちへ戻して人へ問う。承認した head（`ndf answer head`）もここから読む。
+    """
+    gate = held.get("gate") if held is not None else None
+    head = held.get("head") if held is not None else None
     payload = {
         "answer": answer,
         "step": step,
         "kind": kind,
         "notes": None,
         "by": MVV_SERVICE,
+        "gate": gate,
+        "gate_id": gate_id,
+        # 形は gate.Target.as_dict（承認資料は作らないので sha256 は無い）
+        "seen": {"head": head if isinstance(head, str) else None, "material_sha256": None},
         MVV_KEY: dict(held) if held is not None else None,
     }
     return payload, f"MVV 判定で承認ゲート {gate} を省いた"
