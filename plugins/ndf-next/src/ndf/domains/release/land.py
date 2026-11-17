@@ -180,6 +180,18 @@ def ruleset_mismatch(strategy: Strategy, facts: RuleFacts) -> list[dict]:
     return out
 
 
+def bump_of(cut: Optional[str], head: Optional[str], prod: Optional[str]) -> Optional[bool]:
+    """版上げの PR か。切った時点 `cut` と `head` の版数が違えば真・同じなら偽。
+
+    切った時点・head・本番 `prod` のどれにも版数が無ければ偽（版数の置き場が無い・プラグインの定義が任意の `version` を
+    持たない構成は版を上げようがない）。それ以外で片側を読めなければ None（版上げとして衝突を確かめる）。"""
+    if cut and head:
+        return cut != head
+    if cut is None and head is None and prod is None:
+        return False
+    return None
+
+
 def may_bump(row: dict) -> bool:
     """版上げの PR でありうるか。`bump` が None（版数を比べられない）は版上げとみなす（衝突の検査から外さない）。"""
     return "bump" in row and row["bump"] is not False
@@ -235,7 +247,7 @@ def manifest_paths(strategy: Strategy, show: Callable[[str], Optional[str]]) -> 
     except (ValueError, plugins.PluginsError):
         found = {}
     if name in found:
-        # 根に置いたプラグイン（source が `./`）は dir が空で、定義は根の `.claude-plugin/plugin.json`
+        # 根に置いたプラグイン（source が `./`）は dir が空で、定義は根の `manifest` そのもの
         return ["/".join(filter(None, [found[name].dir, manifest]))]
     return [f"{PLUGINS_DIR}/{name}/{manifest}", manifest]
 
@@ -435,41 +447,40 @@ class Lander:
     def _version_at(self, ref: str, rows: list[tuple[str, str]]) -> Optional[str]:
         return read_version(rows, lambda path: self._file_at(ref, path))
 
-    def _production_facts(self) -> tuple[dict, list[tuple[str, str]]]:
-        """本番ブランチの先端と、その時点の版数（`check_production_pr` の `prod`）と、先端で求めた版数の候補。"""
+    def _production_facts(self, versioned: bool) -> tuple[dict, list[tuple[str, str]]]:
+        """本番ブランチの先端と、その時点の版数（`check_production_pr` の `prod`）と、先端で求めた版数の候補。
+        `versioned` が偽（版数を比べない方式・宣言）なら、版数の置き場も版数のファイルも読まない（候補は空）。"""
         got = self.hub.rest("GET", f"/repos/{self.hub.repo}/branches/{quote(self.production, safe='')}")
         tip = text_of(got["commit"]["sha"]) if isinstance(got, dict) else ""
-        rows = self._version_rows(tip) if tip else []
+        rows = self._version_rows(tip) if tip and versioned else []
         return {"tip": tip, "version": self._version_at(tip, rows) if tip else None}, rows
 
-    def _bump_facts(self, number: int, head: str, tip: str, rows: list[tuple[str, str]]) -> dict:
-        """PR の head と本番の先端 `tip` の比べ（10 系の `GhPort._bump_facts` と同じ値）。
+    def _bump_facts(self, number: int, head: str, prod: dict, rows: list[tuple[str, str]]) -> dict:
+        """PR の head と本番の先端 `prod["tip"]` の比べ（10 系の `GhPort._bump_facts` と同じ値）。
 
-        `bump` は版上げの PR か（切った時点と head の版数が違う。片側を読めなければ None）、`cut_version` は切った時点
-        （head と本番の分岐点）の版数、`contains_tip` は head が本番の先端を含むか。`rows` は本番の先端で求めた版数の候補。
+        `bump` は版上げの PR か（`bump_of`）、`cut_version` は切った時点（head と本番の分岐点）の版数、`contains_tip` は
+        head が本番の先端を含むか。`prod` は `_production_facts` の本番の先端と版数、`rows` は先端で求めた版数の候補
+        （空なら版数のファイルを読まない）。
         """
+        tip = prod["tip"]
         got = self.hub.rest("GET", f"/repos/{self.hub.repo}/compare/{tip}...{head}")
         cmp = got if isinstance(got, dict) else {}
         fork = cmp.get("merge_base_commit")
         fork_sha = text_of(fork.get("sha")) if isinstance(fork, dict) else ""
         cut = self._version_at(fork_sha, rows) if fork_sha else None
-        if self.strategy.version_store["kind"] == "none":
-            bump: Optional[bool] = False
-        else:
-            now = self._version_at(head, rows)
-            bump = cut != now if cut and now else None
+        bump = bump_of(cut, self._version_at(head, rows), prod.get("version"))
         return {"number": number, "bump": bump, "cut_version": cut, "contains_tip": cmp.get("behind_by") == 0, "tip": tip}
 
-    def _queue_rows(self, number: int, tip: str, rows: list[tuple[str, str]]) -> list[dict]:
+    def _queue_rows(self, number: int, prod: dict, rows: list[tuple[str, str]]) -> list[dict]:
         """本番ブランチの merge queue の PR（自分を除く）と、版上げの PR か。全ページを読む（後ろの版上げを衝突の検査から外さない）。
 
         キューの外の、本番ブランチ宛てで開いており今の head が承認された版上げの PR（版上げでないと分かるものを除く）は
         `approved_release` の行で足す（10 系の `GhPort.queue` と同じ。`check_production_pr` の保留の検査。決定 18）。"""
         heads = merge_queue.heads(self.hub, self.production)
-        out = [self._bump_facts(n, h, tip, rows) for n, h in heads if n != number]
+        out = [self._bump_facts(n, h, prod, rows) for n, h in heads if n != number]
         queued = {n for n, _ in heads}
         for n, head in self.hub.open_heads(self.production):
-            if n == number or n in queued or self._bump_facts(n, head, tip, rows)["bump"] is False:
+            if n == number or n in queued or self._bump_facts(n, head, prod, rows)["bump"] is False:
                 continue
             if self._approved_at(n, head):
                 out.append({"number": n, "bump": True, "approved_release": True})
@@ -486,11 +497,12 @@ class Lander:
         landing = self.landing
         pr: Optional[dict] = None
         if landing.method != "direct":
-            prod, rows = self._production_facts()
-            pr = self._bump_facts(pull.number, pull.head_sha, prod["tip"], rows)
-            # 版数を持たない宣言（version_store が none）は版上げの PR が無く、キューと開いた PR を読まない
+            # 版数を比べるのは merge-queue で版数を持つ宣言だけ。strict は先端を含むかだけを見て版数の置き場とファイルを読まず、
+            # 版数を持たない宣言（version_store が none）は版上げの PR が無く、キューと開いた PR も読まない
             bumps = landing.method == "merge-queue" and self.strategy.version_store["kind"] != "none"
-            queue = self._queue_rows(pull.number, prod["tip"], rows) if bumps else []
+            prod, rows = self._production_facts(bumps)
+            pr = self._bump_facts(pull.number, pull.head_sha, prod, rows)
+            queue = self._queue_rows(pull.number, prod, rows) if bumps else []
             why = check_production_pr(self.strategy, pr, prod, queue)
             if why is not None:
                 return Gate(Landed(False, "refused", f"#{pull.number}: {why}"), rules=rules, pr=pr)
@@ -667,8 +679,10 @@ class Lander:
         pull = self.hub.pull(number)
         if pull.merged:
             return self._resume_merged(number, pull, deadline)
-        if route_decide.route_of(self.strategy).release_pr:
-            # 版上げの PR はリリースのブランチから出す。`production_pr` ではスプリントの PR が本番の PR を兼ねる
+        route = route_decide.route_of(self.strategy)
+        if route.release_pr and route.bump:
+            # 版上げの PR はリリースのブランチから出す。`production_pr` ではスプリントの PR が本番の PR を兼ね、
+            # 版数を持たない `merge_base_branch`（bump が偽）ではベースブランチから本番への PR そのものを入れる
             version_decide.version_of_branch(pull.head_ref)
         if pull.base_ref != self.production:
             return self._merge(pull, deadline, SYNC_METHOD)

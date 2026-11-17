@@ -174,6 +174,55 @@ def test_release_pr_stops_when_the_production_version_moved() -> None:
     assert not done.merged and done.kind == "refused" and hub.merged == []
 
 
+def test_bump_of_treats_no_version_anywhere_as_not_a_bump() -> None:
+    """切った時点・head・本番のどれにも版数が無い（定義が任意の `version` を持たない）PR は版上げでない。片側だけ読めなければ None。"""
+    assert land.bump_of("1.0.0", "1.0.1", "1.0.0") is True
+    assert land.bump_of("1.0.0", "1.0.0", "1.0.0") is False
+    assert land.bump_of(None, None, None) is False
+    assert land.bump_of(None, "1.0.1", None) is None
+    assert land.bump_of(None, None, "1.0.0") is None
+
+
+def test_pr_passes_when_no_ref_has_a_version() -> None:
+    """plugin（merge-queue）でプラグインの定義に版数が無いリポジトリでも、PR を「版数を読めない」で止めず、版上げとして扱わない。"""
+    hub = _queue_hub(head=H1, approved=H1)
+    hub.versions = {}
+    done = _lander(hub, strategy("plugin")).land(7)
+    assert done.merged and hub.merged == [7] and hub.merge_jumps == [False]
+
+
+def test_merge_base_branch_without_a_version_store_takes_the_base_pr() -> None:
+    """版数を持たない merge_base_branch はベースブランチから本番への PR そのものを入れ、リリースのブランチ名を求めない。"""
+    s = section("web-develop")
+    s["release"]["version_store"] = {"kind": "none"}
+    hub = FakeHub(pulls={7: pull(ref="develop")}, trusted=set())
+    done = _lander(hub, Strategy(s)).land(7)
+    assert not done.merged and done.kind == "refused" and "token" in done.detail
+
+
+def test_strict_reads_no_version_files() -> None:
+    """strict は先端を含むかだけを見て、版数の置き場（マーケットプレイスの登録）も版数のファイルも読まない。"""
+    s = section("docs")
+    s["release"]["version_store"] = {"kind": "plugin"}
+    hub = _ReadingHub(pulls={7: pull(head=H1, ref="sprint/x")}, comments_of={7: [_trail("approved", H1)]})
+    hub.versions = {TIP: "1.0.0", H1: "1.0.0"}
+    hub.responses[("GET", f"/repos/o/r/git/commits/{H1}")] = {"tree": {"sha": "t" * 40}}
+    hub.responses[("POST", "/repos/o/r/git/commits")] = {"sha": "d" * 40}
+    assert _lander(hub, Strategy(s)).land(7).merged
+    assert not any("/contents/" in path for path in hub.paths)
+
+
+@dataclass
+class _ReadingHub(StrategyHub):
+    """読んだ REST のパスをすべて `paths` に残す偽物（版数のファイルを読まないことを確かめる）。"""
+
+    paths: list[str] = field(default_factory=list)
+
+    def rest(self, method: str, path: str, payload: Any = None, params: Any = None) -> Any:
+        self.paths.append(path)
+        return super().rest(method, path, payload, params)
+
+
 def test_mismatched_or_unreadable_ruleset_stops_without_merging() -> None:
     """I10: 宣言が merge-queue なのに本番ブランチにキューが無い・ruleset を読めないときは、比べずに入れない。"""
     hub = _queue_hub(head=H1, approved=H1)
@@ -261,7 +310,7 @@ def test_approved_release_pr_outside_the_queue_holds_other_prs() -> None:
     hub.versions[H2] = "1.0.2"
     hub.open_at = [(7, H1), (8, "8" * 40), (9, H2)]
     lander = _lander(hub, strategy("plugin"))
-    rows = lander._queue_rows(8, TIP, lander._version_rows(TIP))
+    rows = lander._queue_rows(8, {"tip": TIP, "version": "1.0.0"}, lander._version_rows(TIP))
     assert rows == [{"number": 7, "bump": True, "approved_release": True}]
     why = land.check_production_pr(strategy("plugin"), {"number": 8, "bump": False}, {"tip": TIP, "version": "1.0.0"}, rows)
     assert why is not None and "#7" in why
