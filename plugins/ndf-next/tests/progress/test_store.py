@@ -104,13 +104,12 @@ def test_newer_table_version_is_not_touched(progress_url, root):
         store.open_store(progress_url, root)
 
 
-def test_an_old_table_version_without_a_file_stops_without_changing_the_table(progress_url, root):
-    # PostgreSQL の接続先（ファイルの保存先を持たない）でバージョン 1 の表を見つけたら、表を変えずに止まる。SQLite でも path を None にして模す
+def test_an_old_table_version_stops_without_changing_the_table(progress_url, root):
+    # バージョン 1 の表を見つけたら、backend（保存先の外を指した SQLite・PostgreSQL）によらず表を変えずに止まる
     with store.open_store(progress_url, root) as st:
         with store.transaction(st) as conn:
             conn.execute(store.VERSIONS.update().values(value=store.SCHEMA_VERSION - 1))
-        remote = store.Store(progress_url, root, st.engine, None)
         with pytest.raises(durable.StoreBroken, match="作り直す"):
-            store.ensure_schema(remote, datetime.now(UTC))
+            store.ensure_schema(st, datetime.now(UTC))
         with st.engine.connect() as conn:
             assert conn.execute(sa.select(store.VERSIONS.c.value)).scalar() == store.SCHEMA_VERSION - 1

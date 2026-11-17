@@ -262,20 +262,18 @@ def _read_version(engine: sa.Engine) -> Optional[int]:
         return conn.execute(sa.select(VERSIONS.c.value).where(VERSIONS.c.key == SCHEMA_VERSION_KEY)).scalar()
 
 
-def _write_schema(engine: sa.Engine, found: Optional[int]) -> None:
+def _write_schema(engine: sa.Engine) -> None:
+    """表の無い DB へ表を作り、表のバージョンを書く。"""
     with engine.begin() as conn:
         if conn.dialect.name == "postgresql":
             conn.execute(sa.text("SELECT pg_advisory_xact_lock(:space, :key)"), {"space": PG_LOCK_SPACE, "key": PG_SCHEMA_KEY})
         META.create_all(conn)
-        if found is None:
-            conn.execute(sa.delete(VERSIONS).where(VERSIONS.c.key == SCHEMA_VERSION_KEY))
-            conn.execute(sa.insert(VERSIONS).values(key=SCHEMA_VERSION_KEY, value=SCHEMA_VERSION))
-        else:
-            conn.execute(sa.update(VERSIONS).where(VERSIONS.c.key == SCHEMA_VERSION_KEY).values(value=SCHEMA_VERSION))
+        conn.execute(sa.delete(VERSIONS).where(VERSIONS.c.key == SCHEMA_VERSION_KEY))
+        conn.execute(sa.insert(VERSIONS).values(key=SCHEMA_VERSION_KEY, value=SCHEMA_VERSION))
 
 
 def ensure_schema(store: Store, now: datetime) -> None:
-    """表が無ければ作り、表のバージョンを上げる。バージョンを上げる前は（SQLite なら）日時に依らずバックアップを取る。"""
+    """表が無ければ作る。古いバージョンの表は変えずに止まり、新しいバージョンの表にも触れない。"""
     with _translated(store):
         found = _read_version(store.engine)
         if found is not None and found > SCHEMA_VERSION:
@@ -284,15 +282,15 @@ def ensure_schema(store: Store, now: datetime) -> None:
             raise durable.StoreFormatNewer(f"ステートマシンの表のバージョン {found} が自分の {SCHEMA_VERSION} より新しい: {shown}")
         if found == SCHEMA_VERSION:
             return
-        if found is not None and store.path is None:
-            # バージョン 1 の表は列の名前が古い。列を変える移行は持たず、表を作り直す手順を示して止まる
+        if found is not None:
+            # バージョン 1 の表は列の名前が古い。列を変える移行は持たず、backend によらず表を変えずに作り直す手順を示して止まる。
+            # 既定の保存先の SQLite は保存先の形（STORE_FORMAT）の退避で表ごと移るため、ここへ来るのは NDF_PROGRESS_DB で
+            # 保存先の外を指した SQLite と PostgreSQL である
             shown = store.engine.url.render_as_string(hide_password=True)
             raise durable.StoreBroken(
                 f"ステートマシンの表のバージョン {found} は列の名前が古い。表 ndf_progress_* を消して作り直す: {shown}"
             )
-        if found is not None and store.path is not None:
-            _backup_or_warn(store, now, force=True)
-        _write_schema(store.engine, found)
+        _write_schema(store.engine)
 
 
 def _backup_or_warn(store: Store, now: datetime, force: bool) -> None:
