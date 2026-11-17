@@ -58,18 +58,6 @@ plugins/ndf-next/
         └── test_release_assemble.py  test_release_decide.py  test_release_files.py  test_release_materials.py
 ```
 
-依存の向きは一方向で、循環は無い。
-
-| モジュール | 読むもの | 読まないもの |
-| --- | --- | --- |
-| 判断のモジュール（名前が `_decide.py` で終わるもの） | ほかの判断のモジュール・コントラクトの表だけ | git・GitHub・ファイル |
-| 外部との接続のモジュール（`version_store`・`units`・`gather`・`assemble`・`tagging`・`land`・`record`） | 判断のモジュール・`adapters/git.py`・`adapters/github.py` | — |
-| `cli` | 外部との接続のモジュール | — |
-| `version_store` | `names_decide`（タグの読み戻し）・`plugins` | `gather` |
-| `gather` | `version_store`・`since_decide` | `assemble` |
-
-どのモジュールも `cli` を読まない。
-
 | パス | 種類 | 役割 1 文 | 依存する先 |
 | --- | --- | --- | --- |
 | `plugins/ndf-next/src/ndf/domains/release/forms_decide.py` | 新設 | リリースの形の表から形の行を引き、扱わない形を止め、承認資料の届き方の 1 行を作る | `ndf.contracts.facts`・`release-forms.json` |
@@ -117,6 +105,18 @@ plugins/ndf-next/
 | `plugins/ndf-next/tests/domains/crossrefactor/test_scope_tests.py` | 変更 | `conftest.py` をテストのファイルに数えない | `tests_decide` |
 | `docs/glossary/glossary.json` | 変更 | 設計文書の用語の表の 7 語を足す・直す | 無し |
 | `docs/glossary.md` | 変更 | `glossary.py render` で作り直す | `docs/glossary/glossary.json` |
+
+依存の向きは一方向で、循環は無い。
+
+| モジュール | 読むもの | 読まないもの |
+| --- | --- | --- |
+| 判断のモジュール（名前が `_decide.py` で終わるもの） | ほかの判断のモジュール・コントラクトの表だけ | git・GitHub・ファイル |
+| 外部との接続のモジュール（`version_store`・`units`・`gather`・`assemble`・`tagging`・`land`・`record`） | 判断のモジュール・`adapters/git.py`・`adapters/github.py` | — |
+| `cli` | 外部との接続のモジュール | — |
+| `version_store` | `names_decide`（タグの読み戻し）・`plugins` | `gather` |
+| `gather` | `version_store`・`since_decide` | `assemble` |
+
+どのモジュールも `cli` を読まない。
 
 ## クラスと関数の構造
 
