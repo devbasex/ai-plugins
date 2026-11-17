@@ -1,4 +1,4 @@
-"""進行表の型と純粋な判断（受け入れ条件 2・3・5・10）。"""
+"""ステートマシンの型と純粋な判断（受け入れ条件 2・3・5・10）。"""
 
 from __future__ import annotations
 
@@ -22,10 +22,10 @@ def _d(kind: str, actor: str, row: str | None = "実装", reason: str | None = N
     return model.EventDraft(kind, actor, row, state=state, reason=reason, rev=1)
 
 
-def test_table_id_is_stable_and_separates_repositories():
-    assert model.table_id("sprint", "git@x:a/b.git", "s1") == model.table_id("sprint", "git@x:a/b.git", "s1")
-    assert model.table_id("sprint", "git@x:a/b.git", "s1") != model.table_id("sprint", "git@x:a/c.git", "s1")
-    assert model.table_id("sprint", "r", "s1").startswith("sprint:") and model.table_id("sprint", "r", "s1").endswith(":s1")
+def test_machine_id_is_stable_and_separates_repositories():
+    assert model.machine_id("sprint", "git@x:a/b.git", "s1") == model.machine_id("sprint", "git@x:a/b.git", "s1")
+    assert model.machine_id("sprint", "git@x:a/b.git", "s1") != model.machine_id("sprint", "git@x:a/c.git", "s1")
+    assert model.machine_id("sprint", "r", "s1").startswith("sprint:") and model.machine_id("sprint", "r", "s1").endswith(":s1")
 
 
 def test_fold_keeps_the_latest_state_per_row_and_skips_stateless_events():
@@ -65,7 +65,7 @@ def test_operations_need_a_reason():
 
 
 def test_only_the_table_owner_writes_sprint_states():
-    # 受け入れ条件 10: オーガナイザーと耐久ワークフローはスプリントの進行表の状態を書けない（I6）
+    # 受け入れ条件 10: オーガナイザーと耐久ワークフローはスプリントのステートマシンの状態を書けない（I6）
     rows = {"実装": model.RowState("pending", 1, AT)}
     for actor in ("organizer", "durable"):
         with pytest.raises(model.Refused, match="書けない"):
@@ -88,7 +88,7 @@ def test_sprint_events_need_a_revision_and_the_right_scope():
         model.check_event("sprint", {}, "running", model.EventDraft("created", "conductor", "実装"))
     with pytest.raises(model.Refused, match="全体の事象"):
         model.check_event("sprint", {}, "running", _d("completed", "workflow"))
-    with pytest.raises(model.Refused, match="行の鍵"):
+    with pytest.raises(model.Refused, match="行のキー"):
         model.check_event("sprint", {}, "running", _d("started", "workflow", row=None))
     with pytest.raises(model.Refused, match="無い"):
         model.check_event("sprint", {}, "running", _d("no_such", "conductor"))
@@ -132,8 +132,8 @@ def test_enablement_priority_is_sprint_then_project_then_definition():
     assert stages.resolve_enabled(snap, None, {}, {})["リファクタリング"].enabled
 
 
-def test_refactoring_suspension_is_a_declaration():
-    # 受け入れ条件 3: リファクタリングの停止は .ndf/project.json の宣言で表す
+def test_refactoring_suspension_is_a_ndf_settings():
+    # 受け入れ条件 3: リファクタリングの停止は .ndf/project.json の設定で表す
     snap = definition.load_definition("standard")
     declared = {"リファクタリング": {"enabled": False, "reason": "#1142 の作り直しの間は止める"}}
     assert stages.resolve_enabled(snap, None, declared, {})["リファクタリング"] == stages.Enablement(

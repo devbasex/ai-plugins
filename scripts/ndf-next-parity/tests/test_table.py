@@ -63,7 +63,7 @@ def test_trial_is_null_or_a_result_with_a_reason_unless_passed(tables, trial, ok
     assert (table.shape_errors(features, fixes) == []) is ok
 
 
-def test_a_destination_outside_places_is_an_error(tables):
+def test_a_destination_outside_locations_is_an_error(tables):
     features, fixes = tables
     _row(features)["to"] = "Z9"
     assert any("Z9" in e for e in table.shape_errors(features, fixes))
@@ -89,7 +89,7 @@ def test_a_fix_needs_either_a_destination_or_a_reason_not_to_move(tables):
     assert table.shape_errors(features, fixes)
 
 
-def test_entrypoints_give_the_place_after_the_move(tables):
+def test_entrypoints_give_the_location_after_the_move(tables):
     features, _ = tables
     every = table.entrypoints(features)
     assert {e.now for e in every} == {r["now"] for r in features["rows"] if r["kind"] == "entrypoint"}

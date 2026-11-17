@@ -1,4 +1,4 @@
-"""判断のループを DBOS を起こさずに確かめる。"""
+"""判断のループを DBOS を起動せずに確かめる。"""
 
 from __future__ import annotations
 

@@ -2,7 +2,7 @@
 
 | ファイル | 書き手 | 中身 |
 | --- | --- | --- |
-| `stop` | `ndf relay stop`・利用者の `touch` | 停止シグナルファイル（中身は空）。中継は次の区間を始めず、今のセッションが終わると終わる |
+| `stop` | `ndf relay stop`・利用者の `touch` | 停止シグナルファイル（中身は空）。中継は次のセグメントを始めず、今のセッションが終わると終わる |
 
 名前は工程が書くファイルの表（`ndf-files` の `relay-stop`）から引く。表を読むため、hook の経路から読む
 `signals` には置かない（hook の import の表 `contracts/hooks/imports.json` は `ndf.contracts` を禁じる）。
@@ -22,8 +22,8 @@ def has_stop(directory: Path) -> bool:
     return (directory / STOP_FILE).is_file()
 
 
-def place_stop(directory: Path) -> None:
-    """停止シグナルファイルを置く。ラッパーの置き場が無ければ `OSError`（作らない）。"""
+def location_stop(directory: Path) -> None:
+    """停止シグナルファイルを置く。ラッパーの保存先が無ければ `OSError`（作らない）。"""
     (directory / STOP_FILE).touch(mode=0o600)
 
 

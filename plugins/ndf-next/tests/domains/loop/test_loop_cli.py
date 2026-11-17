@@ -1,4 +1,4 @@
-"""副命令 `ndf loop`: 記録の読み書き・断りの結果 JSON・ゲートの答えの先端。"""
+"""サブコマンド `ndf loop`: 記録の読み書き・断りの結果 JSON・ゲートの回答の HEAD。"""
 
 from __future__ import annotations
 
@@ -102,12 +102,12 @@ def test_issue_2714_answer_reads_the_head_once(loop: Callable[..., dict], tmp_pa
     loop("gate", "demo", "--pr", "9")
     moved = loop("answer", "demo", "--pr", "9", "--answer", "approved")
     assert moved["cause"]["kind"] == "precondition" and len(calls) == 2
-    ok = loop("answer", "demo", "--pr", "9", "--answer", "revise", "--note", "直す")
+    ok = loop("answer", "demo", "--pr", "9", "--answer", "request_changes", "--note", "直す")
     assert ok["metrics"]["head"] == "a" * 40 and len(calls) == 3
     assert loop("get", "demo", "--field", "rejections")["items"][0]["rejections"][0]["note"] == "直す"
 
 
-def test_issue_3558_a_halted_loop_bound_to_a_row_points_at_the_row_table(loop: Callable[..., dict], tmp_path: Path) -> None:
+def test_issue_3558_a_halted_loop_bound_to_a_row_points_at_the_row_machine(loop: Callable[..., dict], tmp_path: Path) -> None:
     loop("start", "demo", "--session", "s1", "--row", "t1")
     out = loop("stop", "demo", "--by", "organizer", "--now")
     assert out["next"] == {"argv": [result.ENTRY, "progress", "next", "t1"]}
@@ -153,5 +153,5 @@ def test_close_plan_and_review_args(loop: Callable[..., dict]) -> None:
 
 
 def test_step_loop_tool_is_the_cli_name() -> None:
-    """次の 1 手の既定の副命令（`Step.tool`）は、この CLI の副命令の名前と同じ。"""
+    """次の 1 手の既定のサブコマンド（`Step.tool`）は、この CLI のサブコマンドの名前と同じ。"""
     assert ctl.LOOP_TOOL == loop_cli.TOOL

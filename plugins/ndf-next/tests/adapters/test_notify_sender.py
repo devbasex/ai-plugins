@@ -1,4 +1,4 @@
-"""Slack の通知と送信待ちの送り手（`ndf.adapters.notify`）。ネットワークへは出ず、`httpx.MockTransport` で答える。"""
+"""Slack の通知と送信待ちの送り手（`ndf.adapters.notify`）。ネットワークへは出ず、`httpx.MockTransport` で回答する。"""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from ndf.adapters import notify
 from ndf.contracts import limits
 
 NOW = 1_800_000_000.0
-# 上限の宣言の値。境と回数を宣言から引き、宣言を変えても境を試し続ける
+# 上限の設定の値。境と回数を設定から引き、設定を変えても境を試し続ける
 STALE = limits.seconds("notify.stale")
 ATTEMPTS = int(limits.value("notify.send", "attempts"))
 INTERVAL = limits.value("notify.send", "interval")
@@ -45,7 +45,7 @@ def _write(outbox: Path, name: str, **over: object) -> Path:
 
 
 class _Deliver:
-    """送った通知を控え、`fail` に並べた失敗を先頭から 1 回ずつ送出する。"""
+    """送った通知をバックアップ、`fail` に並べた失敗を先頭から 1 回ずつ送出する。"""
 
     def __init__(self, *fail: notify.PostError, configured: bool = True) -> None:
         self.fail = list(fail)
@@ -179,7 +179,7 @@ def test_drain_drops_stale_and_unconfigured(outbox: Path, wall: list[float]) -> 
 
 
 def test_drain_retries_retryable_failures(outbox: Path, wall: list[float]) -> None:
-    # 3377-8: 通りうる失敗は上限の宣言の間隔で打ち直す
+    # 3377-8: 通りうる失敗は上限の設定の間隔で打ち直す
     _write(outbox, "a")
     slept: list[float] = []
     deliver = _Deliver(notify.PostError("HTTP 500", True), notify.PostError("HTTP 429", True))

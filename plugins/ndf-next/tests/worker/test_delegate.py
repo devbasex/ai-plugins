@@ -1,4 +1,4 @@
-"""worker の受け渡し: 結果ファイルが無いまま終えた worker を同じ会話で起こし直す。"""
+"""worker の受け渡し: 結果ファイルが無いまま終えた worker を同じ会話で再起動する。"""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from ndf.core import worker
 
 
 class FakeClaude:
-    """呼ばれた引数を控え、`write_on` 回目の呼び出しで結果ファイルを書く。"""
+    """呼ばれた引数をバックアップ、`write_on` 回目の呼び出しで結果ファイルを書く。"""
 
     def __init__(self, result_file, write_on=None, failure=None):
         self.calls = []
@@ -126,7 +126,7 @@ def test_a_worker_that_left_work_does_not_return_ok(tmp_path):
 
 
 def test_a_malformed_gap_keeps_an_ok_report_from_passing(tmp_path):
-    # 形の違う gaps（文字列の配列・文字列・欠けた鍵）を捨てると、作業を残した ok が完了に化ける（#1682）
+    # 形の違う gaps（文字列の配列・文字列・欠けたキー）を捨てると、作業を残した ok が完了に化ける（#1682）
     for gaps in (["3 を確かめられない"], "3 を確かめられない", [{"kind": "criterion", "name": "3"}]):
         got = _outcome(tmp_path, {"status": "ok", "summary": "完了", "gaps": gaps})
         assert got["status"] == "stopped" and got["cause"]["kind"] == "incomplete"
@@ -142,9 +142,9 @@ def test_a_worker_that_asks_for_a_decision_returns_a_gate(tmp_path):
 def test_a_worker_that_finished_returns_ok_and_an_unreadable_report_is_bad_report(tmp_path):
     assert _outcome(tmp_path, {"status": "ok", "summary": "済んだ"})["status"] == "ok"
     for i, bad in enumerate(("{}", "壊れた", None)):
-        place = tmp_path / f"b{i}"
-        place.mkdir()
-        got = _outcome(place, bad)
+        location = tmp_path / f"b{i}"
+        location.mkdir()
+        got = _outcome(location, bad)
         assert got["status"] == "stopped" and got["cause"]["kind"] == "bad_report"
 
 
@@ -170,7 +170,7 @@ def _replies(h, *bodies):
 
 
 def test_ci_fix_without_the_search_record_is_resumed_until_it_is_written(tmp_path):
-    # #3188: 期待値の直書きを探した記録が無い結果ファイルは、書いたとみなさず起こし直す
+    # #3188: 期待値の直書きを探した記録が無い結果ファイルは、書いたとみなさず再起動する
     h = _ci_fix(tmp_path)
     fake, calls = _replies(h, {"status": "ok"}, {"status": "ok", "metrics": {worker.SEARCH_RECORD: SEARCHED}})
     assert worker.delegate(h, "規則", root=tmp_path, call=fake).cause is None
@@ -186,14 +186,14 @@ def test_ci_fix_that_never_records_the_search_stops(tmp_path):
 
 
 def test_ci_fix_that_asks_stops_or_changed_no_definition_is_not_resumed(tmp_path):
-    # 判断が要る・できなかった結果と、語を空で書いた記録（変えた定義が無い直し）は起こし直さない
+    # 判断が要る・できなかった結果と、語を空で書いた記録（変えた定義が無い直し）は再起動しない
     no_terms = {"status": "ok", "metrics": {worker.SEARCH_RECORD: {"terms": [], "files": []}}}
     for i, body in enumerate(({"status": "gate", "summary": "判断が要る"}, {"status": "stopped", "summary": "直せない"}, no_terms)):
-        place = tmp_path / f"w{i}"
-        place.mkdir()
-        h = _ci_fix(place)
+        location = tmp_path / f"w{i}"
+        location.mkdir()
+        h = _ci_fix(location)
         fake, calls = _replies(h, body)
-        assert worker.delegate(h, "規則", root=place, call=fake).cause is None and len(calls) == 1
+        assert worker.delegate(h, "規則", root=location, call=fake).cause is None and len(calls) == 1
 
 
 def test_other_kinds_do_not_need_the_search_record(tmp_path):

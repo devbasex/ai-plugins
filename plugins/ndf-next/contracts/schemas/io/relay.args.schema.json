@@ -81,7 +81,7 @@
         },
         "--yes": {
           "type": "boolean",
-          "description": "確かめが通れば保存する（前の宣言を置き換える）"
+          "description": "確かめが通れば保存する（前の設定を置き換える）"
         }
       },
       "required": [
@@ -155,12 +155,12 @@
         },
         "five": {
           "type": "string",
-          "description": "5 時間の枠（USD か -）",
+          "description": "5 時間のクォータ（USD か -）",
           "x-ndf-positional": true
         },
         "seven": {
           "type": "string",
-          "description": "週の枠（USD か -）",
+          "description": "週のクォータ（USD か -）",
           "x-ndf-positional": true
         }
       },
@@ -305,7 +305,7 @@
             "引継ぎ開始",
             "復元完了"
           ],
-          "description": "印の行を書く"
+          "description": "マーカーの行を書く"
         },
         "--reason": {
           "type": "string",

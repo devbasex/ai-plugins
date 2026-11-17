@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "result.schema.json",
   "title": "結果 JSON",
-  "description": "副命令と作業が標準出力へ 1 行で出す結果。cause.kind が止まった理由の表にあること・終了コードが種類のものと同じことは、読み手（ndf.contracts.result）が表と照らす",
+  "description": "サブコマンドと作業が標準出力へ 1 行で出す結果。cause.kind が停止理由の表にあること・終了コードが種類のものと同じことは、読み手（ndf.contracts.result）が表と照らす",
   "type": "object",
   "additionalProperties": false,
   "required": ["tool", "status", "summary", "items", "metrics"],
@@ -26,7 +26,7 @@
     },
     "cause": {"$ref": "#/$defs/cause"},
     "routes": {
-      "description": "答えごとに次に打つコマンド。キーは答えの語彙（facts/answers.json の id。読み手が表と照らす）。値が null なら何も打たない",
+      "description": "回答ごとに次に打つコマンド。キーは回答の語彙（facts/answers.json の id。読み手が表と照らす）。値が null なら何も打たない",
       "type": "object",
       "minProperties": 1,
       "propertyNames": {"pattern": "^[a-z][a-z0-9_]*$"},
@@ -41,7 +41,7 @@
       "else": {"not": {"required": ["cause"]}}
     },
     {
-      "description": "承認ゲートの結果は答えごとの行き先 routes を持つ。ok は routes を持たない",
+      "description": "承認ゲートの結果は回答ごとのルート routes を持つ。ok は routes を持たない",
       "if": {"properties": {"status": {"const": "gate"}}},
       "then": {"required": ["routes"]},
       "else": {"if": {"properties": {"status": {"const": "ok"}}}, "then": {"not": {"required": ["routes"]}}}
@@ -56,7 +56,7 @@
   "$defs": {
     "text": {"type": "string", "pattern": "\\S"},
     "command": {
-      "description": "そのまま打てるコマンド。argv は置き換えの要らない引数の配列で、先頭はエントリポイントの短い名前 ndf（パスと版を含まない）。ask は打つ側が埋める鍵で、鍵ごとに --<鍵> <値> を末尾へ足して打つ",
+      "description": "そのまま打てるコマンド。argv は置き換えの要らない引数の配列で、先頭はエントリポイントの短い名前 ndf（パスとバージョンを含まない）。ask は打つ側が埋めるキーで、キーごとに --<キー> <値> を末尾へ足して打つ",
       "type": "object",
       "additionalProperties": false,
       "required": ["argv"],
@@ -66,7 +66,7 @@
       }
     },
     "outputs": {
-      "description": "工程どうしで渡す値。鍵はスプリントの文脈の閉じた語彙で、鍵ごとに型を持つ。読み手は items と metrics から渡す値を判定しない",
+      "description": "工程どうしで渡す値。キーはスプリントの文脈の閉じた語彙で、キーごとに型を持つ。読み手は items と metrics から渡す値を判定しない",
       "type": "object",
       "additionalProperties": false,
       "minProperties": 1,

@@ -1,13 +1,13 @@
-# 推論コンテナ規約と train↔serve 契約書テンプレ
+# 推論コンテナ規約と train↔serve コントラクト書テンプレ
 
 `SKILL.md` の「inference/ の規約」「TRAIN_SPEC.md」の詳細。推論コンテナ (SageMaker 前提) を書く /
-レビューするとき、および TRAIN_SPEC.md を起こすときに読む。
+レビューするとき、および TRAIN_SPEC.md を起動するときに読む。
 
 ## 目次
 
 1. SageMaker 推論ハンドラ
-2. Dockerfile (build context = 版ルート)
-3. .dockerignore の置き場所
+2. Dockerfile (build context = バージョンルート)
+3. .dockerignore の置く場所
 4. model.tar.gz の中身
 5. テストの path 解決 (conftest)
 6. TRAIN_SPEC.md の章立て
@@ -20,7 +20,7 @@
 |---|---|
 | `model_fn(model_dir)` | `model_dir` からモデル本体 + 学習時統計 (列順/dtype/中央値/版文字列) を読み込む。クラス順 (`classes_`) が期待通りかを fail-fast で検証する |
 | `input_fn(body, content_type)` | 生 payload を dict にパースする (変換ロジックは持たない) |
-| `predict_fn(data, model)` | `features.to_model_input(data)` → `features.base_features(df, …)` → `predict_proba`。**版が採用していない派生特徴量は呼ばない**。列順は学習時に保存した列順 JSON を唯一の正とする |
+| `predict_fn(data, model)` | `features.to_model_input(data)` → `features.base_features(df, …)` → `predict_proba`。**バージョンが採用していない派生特徴量は呼ばない**。列順は学習時に保存した列順 JSON を唯一の正とする |
 | `output_fn(pred, accept)` | クラス確率 + ラベル + 版文字列を返す |
 
 - 特徴量化は `features.to_model_input` → `base_features` に閉じる。呼び出し側 (APIゲートウェイ) は
@@ -28,35 +28,35 @@
 - 版文字列 (`model_version`) は学習成果物の JSON から**動的読込**し、欠落時のみ既定値にフォールバックする。
   「学習スクリプトが版文字列を書き出していない」と再学習時に既定値へ化けるので、書き出しを受け入れ基準に含める。
 
-## 2. Dockerfile (build context = 版ルート)
+## 2. Dockerfile (build context = バージョンルート)
 
 ```dockerfile
-# build context は版ルート vN/ に固定する。
+# build context はバージョンルート vN/ に固定する。
 #   cd <project>/vN && docker build -f inference/Dockerfile -t <img>:vN .
 FROM python:3.13-slim
 # … 依存インストール (MMS/sagemaker-inference を使うなら JRE と setuptools<81 に注意) …
 WORKDIR /opt/ml/code
 COPY inference/requirements.txt /opt/ml/code/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
-# 版内 SSoT: context 直下の features.py を取り込む (../ は不可)
+# 版内 SSoT: context 直下の features.py をマージする (../ は不可)
 COPY features.py /opt/ml/code/features.py
 COPY inference/inference.py /opt/ml/code/inference.py
 # … handler_service.py / dockerd-entrypoint.py 等 …
 ```
 
-- `COPY ../features.py` は Docker 仕様上**不可** (context 外参照)。context を版ルートにすることで
+- `COPY ../features.py` は Docker 仕様上**不可** (context 外参照)。context をバージョンルートにすることで
   `features.py` も `inference/` 配下も同一 context 内で参照できる。
 - `inference/features.py` を実体として commit しない。誤コミット検知として CI に
   `find inference/ -name features.py` のガードを置くとよい。
 
-## 3. .dockerignore の置き場所 (重要)
+## 3. .dockerignore の置く場所 (重要)
 
 `.dockerignore` は **build context のルート (= `vN/.dockerignore`)** に置く。
 BuildKit は「Dockerfile 隣の `<dockerfile>.dockerignore`」か「context ルートの `.dockerignore`」しか読まないため、
 `inference/.dockerignore` に置いても**機能しない** (context が肥大化するだけ)。
 
 ```
-# vN/.dockerignore — 取り込むのは features.py と inference/ の推論コード + requirements のみ
+# vN/.dockerignore — マージするのは features.py と inference/ の推論コード + requirements のみ
 train/
 *.md
 *.csv
@@ -97,15 +97,15 @@ DATASET_CSV = os.path.join(_V, "train", "data", "dataset.csv")
 
 ## 6. TRAIN_SPEC.md の章立て
 
-版ルート `vN/TRAIN_SPEC.md` に置く。性能考察 (`*_report.md`) や経営層向け概要 (`executive_summary.md`) とは
-目的を分け、**train↔serve 契約に限定**する。リンクで相互参照し実体を二重化しない。
+バージョンルート `vN/TRAIN_SPEC.md` に置く。性能考察 (`*_report.md`) や経営層向け概要 (`executive_summary.md`) とは
+目的を分け、**train↔serve コントラクトに限定**する。リンクで相互参照し実体を二重化しない。
 
 ```
-# <Model> vN TRAIN_SPEC — train↔serve 契約書
+# <Model> vN TRAIN_SPEC — train↔serve コントラクト書
 0. train↔serve 全体像          … mermaid (学習→成果物→推論の流れ)
 1. データソースと対象母集団     … 生成SQL/期間/母集団定義/リーク除外
 2. ターゲット定義 (クラス符号化) … 学習整数 ↔ 推論ラベルの対応、クラス順
-3. 特徴量契約                   … to_model_input のマッピング、列順の唯一の正
+3. 特徴量コントラクト                   … to_model_input のマッピング、列順の唯一の正
 4. 欠損補完規約                 … 0補完/NA補完/中央値補完の対象と実装位置
 5. 学習成果物                   … tar.gz 同梱ファイルと生成元
 6. train/serve skew の防衛線     … 回帰テストの内容と「再学習で再生成するもの」

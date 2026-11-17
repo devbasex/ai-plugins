@@ -1,7 +1,7 @@
-"""承認ゲートの問い・答えごとの行き先・承認資料（`ndf.progress.gate` の部品）。
+"""承認ゲートの質問・回答ごとのルート・承認資料（`ndf.progress.gate` の部品）。
 
-問いの id は待ちに入った事象の番号から作り、差し戻しで流し直した後の問いは別の id になる。承認資料は問いごとに 1 つで、
-書いた後は書き換えない（答えた者が見た資料の sha256 を変えないため）。
+質問の id は待ちに入った事象の番号から作り、変更要求で流し直した後の質問は別の id になる。承認資料は質問ごとに 1 つで、
+書いた後は書き換えない（回答した者が見た資料の sha256 を変えないため）。
 """
 
 from __future__ import annotations
@@ -16,12 +16,12 @@ from ndf import cli
 from ndf.contracts import result
 from ndf.progress import lane, model, run
 
-# 結果 JSON の tool（副命令の表がこのパッケージを指す）
+# 結果 JSON の tool（サブコマンドの表がこのパッケージを指す）
 TOOL = cli.tool_of(__package__)
 
 
 def _gate(word: str) -> str:
-    """承認ゲートの区分の語（契約 `workflow/progress.json` の gates の行）。表に無ければ import の時点で `KeyError`。"""
+    """承認ゲートの区分の語（コントラクト `workflow/progress.json` の gates の行）。表に無ければ import の時点で `KeyError`。"""
     model.gate_label(word)
     return word
 
@@ -29,15 +29,15 @@ def _gate(word: str) -> str:
 # 承認ゲートの区分（設計承認ゲート・リリース承認ゲート）
 DESIGN_GATE = _gate("design")
 RELEASE_GATE = _gate("release")
-# 問いの id（承認ゲートの答えと、MVV 判定で省いた答えが同じ id を持つため、置き場は model）
+# 質問の id（承認ゲートの回答と、MVV 判定で省いた回答が同じ id を持つため、定義は model）
 question_id = model.question_id
-# 承認しなかった答え（差し戻しの記録に数える）
-REJECTING = (run.REVISE, run.REJECTED)
-# 承認資料の置き場（進行表ごとの作業の置き場の下。名前は問いの id）
+# 承認しなかった回答（変更要求の記録に数える）
+REJECTING = (run.REQUEST_CHANGES, run.REJECTED)
+# 承認資料の保存先（ステートマシンごとの作業の保存先の下。名前は質問の id）
 MATERIAL_DIR = "gate-materials"
 
 
-# --- 問い --------------------------------------------------------------------------------------
+# --- 質問 --------------------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -48,7 +48,7 @@ class Target:
     material: Optional[str] = None
 
     def differs(self, seen: Target) -> list[str]:
-        """答えた者が見た対象 `seen` と今の対象の違い（今の側が分かる項目だけを比べる）。"""
+        """回答した者が見た対象 `seen` と今の対象の違い（今の側が分かる項目だけを比べる）。"""
         out = []
         for name, now, then in (("head の SHA", self.head, seen.head), ("承認資料の sha256", self.material, seen.material)):
             if now is not None and then != now:
@@ -56,7 +56,7 @@ class Target:
         return out
 
     def as_dict(self) -> dict[str, Optional[str]]:
-        """見た対象を記録する形（事象の payload の `seen` と、依頼の隣の `.seen.json`）。"""
+        """見た対象を記録する形（事象の payload の `seen` と、リクエストの隣の `.seen.json`）。"""
         return {"head": self.head, "material_sha256": self.material}
 
     @classmethod
@@ -69,10 +69,10 @@ class Target:
 
 @dataclass(frozen=True)
 class Question:
-    """待っている承認ゲートの問い。`gate` は区分（design・release）で、プランの中の承認ゲートは None。"""
+    """待っている承認ゲートの質問。`gate` は区分（design・release）で、プランの中の承認ゲートは None。"""
 
     id: str
-    table_id: str
+    machine_id: str
     stage: str
     step: str
     gate: Optional[str]
@@ -109,29 +109,29 @@ def _waiting_context(v: run.View, prog: run.StepProgress) -> dict[str, Any]:
 
 
 def question(v: run.View, m: run.Move, *, repo: Optional[str] = None, target: Target = Target()) -> Question:
-    """待っている手 `m`（`run.Action.GATE`）の問い。PR は設計承認ゲートなら設計 PR、ほかはスプリントの PR。"""
+    """待っている手 `m`（`run.Action.GATE`）の質問。PR は設計承認ゲートなら設計 PR、ほかはスプリントの PR。"""
     if m.action != run.Action.GATE or m.stage is None or m.step is None or m.progress is None:
-        raise model.Refused("答えを待つ工程が無い")
+        raise model.Refused("回答を待つ工程が無い")
     ctx = _waiting_context(v, m.progress)
     key = "design_pr" if m.step.gate == DESIGN_GATE else "pr"
     number = ctx[key] if isinstance(ctx.get(key), int) else None
-    qid = question_id(v.table_id, v.rev, m.stage.name, m.step.id, m.progress.anchor)
-    return Question(qid, v.table_id, m.stage.name, m.step.id, m.step.gate, tuple(run.choices(m)), number, pr_url(repo, number), target)
+    qid = question_id(v.machine_id, v.rev, m.stage.name, m.step.id, m.progress.anchor)
+    return Question(qid, v.machine_id, m.stage.name, m.step.id, m.step.gate, tuple(run.choices(m)), number, pr_url(repo, number), target)
 
 
 def waiting(v: run.View, **kw: Any) -> Optional[Question]:
-    """進行表が待っている問い。待っていなければ None。"""
+    """ステートマシンが待っている質問。待っていなければ None。"""
     m = run.decide(v)
     return question(v, m, **kw) if m.action == run.Action.GATE else None
 
 
-# --- 答えごとの行き先 -----------------------------------------------------------------------------
+# --- 回答ごとのルート -----------------------------------------------------------------------------
 
 
 def _asks(q: Question, answer: str) -> tuple[str, ...]:
-    """答えを打つ側が埋める鍵。差し戻しは指摘ファイル、設計承認ゲートの承認は外す課題（無ければ省く）も持つ。"""
+    """回答を打つ側が埋めるキー。変更要求は指摘ファイル、設計承認ゲートの承認は外す課題（無ければ省く）も持つ。"""
     asks = ["reason", "by", "key"]
-    if answer == run.REVISE:
+    if answer == run.REQUEST_CHANGES:
         asks.insert(0, "notes")
     if answer == run.APPROVED and q.gate == DESIGN_GATE:
         asks.append("drop")
@@ -139,22 +139,22 @@ def _asks(q: Question, answer: str) -> tuple[str, ...]:
 
 
 def routes(q: Question) -> dict[str, Any]:
-    """答えの語 → `ndf answer` のコマンド。見た対象（head・承認資料）を引数に固定し、答えた後に対象が変われば断られる。"""
+    """回答の語 → `ndf answer` のコマンド。見た対象（head・承認資料）を引数に固定し、回答した後に対象が変われば断られる。"""
     seen: list[str] = []
     if q.target.head:
         seen += ["--head", q.target.head]
     if q.target.material:
         seen += ["--material-sha256", q.target.material]
-    return {a: result.command(TOOL, q.table_id, "--gate", q.id, "--result", a, *seen, ask=_asks(q, a)) for a in q.choices}
+    return {a: result.command(TOOL, q.machine_id, "--gate", q.id, "--result", a, *seen, ask=_asks(q, a)) for a in q.choices}
 
 
 def describe(q: Question) -> dict[str, Any]:
-    """結果 JSON の `metrics.gate` に載せる問い（機械で読む形）。"""
+    """結果 JSON の `metrics.gate` に載せる質問（機械で読む形）。"""
     return {
         "id": q.id,
         "kind": q.gate,
         "label": q.label,
-        "table_id": q.table_id,
+        "machine_id": q.machine_id,
         "stage": q.stage,
         "step": q.step,
         "pr": q.pr,
@@ -166,9 +166,9 @@ def describe(q: Question) -> dict[str, Any]:
 
 
 def gate_result(q: Question, metrics: Optional[Mapping[str, Any]] = None, presentation: Optional[Path] = None) -> dict[str, Any]:
-    """承認ゲートで止まった結果 JSON（status gate・問い・答えごとの行き先）。"""
+    """承認ゲートで止まった結果 JSON（status gate・質問・回答ごとのルート）。"""
     where = f"（{q.pr_url}）" if q.pr_url else ""
-    summary = f"{q.label}の承認ゲートが答えを待っている: 工程 {q.stage}{where}"
+    summary = f"{q.label}の承認ゲートが回答を待っている: 工程 {q.stage}{where}"
     out = {**(metrics if metrics is not None else {}), "gate": describe(q)}
     return result.result(
         TOOL, result.GATE, summary, metrics=out, routes=routes(q), presentation_path=str(presentation) if presentation else None
@@ -183,14 +183,14 @@ def material_sha256(path: Path) -> str:
 
 
 def material_path(root: Path, q: Question) -> Path:
-    """問いの承認資料の置き場（`run.work_root` の下）。問いごとに 1 つで、書いた後は書き換えない。"""
-    return run.work_root(root, q.table_id) / MATERIAL_DIR / f"{q.id}.md"
+    """質問の承認資料の保存先（`run.work_root` の下）。質問ごとに 1 つで、書いた後は書き換えない。"""
+    return run.work_root(root, q.machine_id) / MATERIAL_DIR / f"{q.id}.md"
 
 
 def unconfirmed(v: run.View, stage: str) -> list[str]:
     """工程の済んだステップの結果が残した欠け（扱われずに届いたレビューの指摘など。#2444）。
 
-    終わった（ok の）結果は欠けを `outputs.gaps` に持つ（結果の契約は、上の段の `gaps` を incomplete にだけ許す）。
+    終わった（ok の）結果は欠けを `outputs.gaps` に持つ（結果のコントラクトは、上のステップの `gaps` を incomplete にだけ許す）。
     """
     out = []
     for step, report in run.step_progress(v, stage).done.items():
@@ -209,22 +209,22 @@ def bullets(items: Iterable[str]) -> list[str]:
 
 
 def material(v: run.View, q: Question) -> str:
-    """承認資料（Markdown）。問い・見る PR と head・出した版（#2554）・未確認の点（#2444）・答えの選択肢を持つ。"""
+    """承認資料（Markdown）。質問・見る PR と head・出したバージョン（#2554）・未確認の点（#2444）・回答の選択肢を持つ。"""
     ctx = v.context()
-    lines = [f"# {q.label}の承認ゲート", "", f"- 工程: {q.stage}（ステップ {q.step}）", f"- 問いの id: {q.id}"]
+    lines = [f"# {q.label}の承認ゲート", "", f"- 工程: {q.stage}（ステップ {q.step}）", f"- 質問の id: {q.id}"]
     if q.pr_url or q.pr:
         lines.append(f"- PR: {q.pr_url or f'#{q.pr}'}")
     if q.target.head:
         lines.append(f"- 見る head: {q.target.head}")
     if q.gate == RELEASE_GATE and isinstance(ctx.get("version"), str):
-        lines.append(f"- 出す版: {ctx['version']}")
+        lines.append(f"- 出すバージョン: {ctx['version']}")
     lines += ["", "## 未確認の点", "", *bullets(unconfirmed(v, q.stage))]
-    lines += ["", "## 答え", "", *[f"- {c}" for c in q.choices]]
+    lines += ["", "## 回答", "", *[f"- {c}" for c in q.choices]]
     return "\n".join(lines) + "\n"
 
 
 def write_material(root: Path, v: run.View, q: Question) -> Path:
-    """承認資料を書く（書いてあれば書き直さない。答えた者が見た資料の sha256 を変えないため）。"""
+    """承認資料を書く（書いてあれば書き直さない。回答した者が見た資料の sha256 を変えないため）。"""
     path = material_path(root, q)
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -234,20 +234,20 @@ def write_material(root: Path, v: run.View, q: Question) -> Path:
     return path
 
 
-# 承認の後に文書だけが加わって出し直さなかった head の置き場（承認資料の隣）
+# 承認の後に文書だけが加わって出し直さなかった head の保存先（承認資料の隣）
 ACCEPTED_SUFFIX = ".accepted.json"
 
 
-def accepted_path(root: Path, table_id: str, gate_id: str) -> Path:
-    return run.work_root(root, table_id) / MATERIAL_DIR / f"{gate_id}{ACCEPTED_SUFFIX}"
+def accepted_path(root: Path, machine_id: str, gate_id: str) -> Path:
+    return run.work_root(root, machine_id) / MATERIAL_DIR / f"{gate_id}{ACCEPTED_SUFFIX}"
 
 
-# 依頼の中身の kind（計画の進行表の依頼。依頼の ID の頭にも使う）
+# リクエストの中身の kind（計画のステートマシンのリクエスト。リクエストの ID の頭にも使う）
 RELEASE_KIND = "lane-release"
 
 
 def request_id(q: Question) -> str:
-    """リリースの依頼の ID（問いの id から作る。差し戻しで流し直した問いは別の依頼になる）。"""
+    """リリースのリクエストの ID（質問の id から作る。変更要求で流し直した質問は別のリクエストになる）。"""
     return f"{RELEASE_KIND}-{q.id}"
 
 
@@ -256,8 +256,8 @@ def plan_request(view: lane.PlanView, ident: str) -> Optional[lane.Request]:
 
 
 def release_request_of(conn: Any, q: Question) -> Optional[tuple[str, str, Optional[lane.Request]]]:
-    """スプリントを持つレーンの行の（計画の ID, レーン）と、問いのリリースの依頼（無ければ None）。レーンの外なら None。"""
-    found = lane.sprint_row(conn, q.table_id)
+    """スプリントを持つレーンの行の（計画の ID, レーン）と、質問のリリースのリクエスト（無ければ None）。レーンの外なら None。"""
+    found = lane.sprint_row(conn, q.machine_id)
     if found is None:
         return None
     plan_id, name, _row = found
@@ -267,9 +267,9 @@ def release_request_of(conn: Any, q: Question) -> Optional[tuple[str, str, Optio
 
 @dataclass(frozen=True)
 class Answer:
-    """`ndf answer` が受ける答え。`by` は答えた者（`service:<主体>` など）、`key` は冪等の鍵、`seen` は見た対象。
+    """`ndf answer` が受ける回答。`by` は回答した者（`service:<主体>` など）、`key` は冪等のキー、`seen` は見た対象。
 
-    `outputs` は答えと同じトランザクションで工程の出力としてスプリントの文脈へ書く値（まとめたリリースの版と
+    `outputs` は回答と同じトランザクションで工程の出力としてスプリントの文脈へ書く値（まとめたリリースのバージョンと
     リリース記録の PR。#2783）。
     """
 

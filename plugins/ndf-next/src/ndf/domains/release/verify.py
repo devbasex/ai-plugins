@@ -1,10 +1,10 @@
 """リリース後テストの手元の部品（利用者の手元で打つ）。
 
 - `sync_base`: メインディレクトリのベースブランチを、マージの後の origin へそろえる（手は `sync_decide`）
-- `snapshot`: 利用者の設定ディレクトリを読むだけで控える（行の作り方は `user_config_decide`）
+- `snapshot`: 利用者の設定ディレクトリを読むだけでスナップショットを取る（行の作り方は `user_config_decide`）
 
 利用者の設定ディレクトリは、Claude Code が `CLAUDE_CONFIG_DIR`（無ければ `~/.claude`）、Codex が `CODEX_HOME`
-（無ければ `~/.codex`）である。読めないファイルは控えに入れず、読めなかったことを `Snapshot.unreadable` に残す。
+（無ければ `~/.codex`）である。読めないファイルはバックアップに入れず、読めなかったことを `Snapshot.unreadable` に残す。
 """
 
 from __future__ import annotations
@@ -21,9 +21,9 @@ from ndf.domains.release import sync_decide, user_config_decide
 
 # 利用者の設定ディレクトリの環境変数と既定
 CLAUDE_DIR_ENV, CODEX_DIR_ENV = "CLAUDE_CONFIG_DIR", "CODEX_HOME"
-# 控えに読むファイル（設定ディレクトリから）
+# バックアップに読むファイル（設定ディレクトリから）
 CLAUDE_INSTALLED = Path("plugins") / "installed_plugins.json"
-CLAUDE_KNOWN = Path("plugins") / "known_marketplaces.json"
+CLAUDE_KNOWN = Path("plugins") / "known_marketlocations.json"
 CODEX_CONFIG = Path("config.toml")
 CODEX_CACHE = Path("plugins") / "cache"
 
@@ -51,7 +51,7 @@ def _read(path: Path, parse: Callable[[str], Any], bad: list[str]) -> Any:
 
 
 def _cached(cache: Path) -> dict[str, list[str]]:
-    """Codex の導入の置き場（`<取得元>/<プラグイン>/<版>`）の `<プラグイン>@<取得元>` → 版。"""
+    """Codex の導入の保存先（`<取得元>/<プラグイン>/<バージョン>`）の `<プラグイン>@<取得元>` → バージョン。"""
     if not cache.is_dir():
         return {}
     plugins = sorted(p for p in cache.glob("*/*") if p.is_dir())
@@ -69,17 +69,17 @@ def _shaped(fn: Callable[[Any], dict[str, str]], value: Any, where: Path, bad: l
 
 
 def _from_file(path: Path, parse: Callable[[str], Any], fn: Callable[[Any], dict[str, str]], bad: list[str]) -> dict[str, str]:
-    """ファイルを読み、形を確かめて控えにする。無い・読めない・形が違うときは空（読めない・形の違いは `bad` へ）。"""
+    """ファイルを読み、形を確かめてバックアップにする。無い・読めない・形が違うときは空（読めない・形の違いは `bad` へ）。"""
     return _shaped(fn, _read(path, parse, bad), path, bad)
 
 
 def snapshot() -> Snapshot:
-    """利用者の設定ディレクトリの控え。"""
+    """利用者の設定ディレクトリのバックアップ。"""
     return snapshot_at(*config_dirs())
 
 
 def snapshot_at(claude: Path, codex: Path) -> Snapshot:
-    """渡した設定ディレクトリ（Claude Code・Codex）の控え。"""
+    """渡した設定ディレクトリ（Claude Code・Codex）のバックアップ。"""
     bad: list[str] = []
     items = _from_file(claude / CLAUDE_INSTALLED, json.loads, user_config_decide.claude_plugins, bad)
     items |= _from_file(claude / CLAUDE_KNOWN, json.loads, user_config_decide.claude_marketplaces, bad)

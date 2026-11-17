@@ -25,7 +25,7 @@ REPO = "devbasex/ai-plugins"
 
 
 def test_issue_2041_merge_with_the_short_sha_git_prints_for_the_same_head_merges(tmp_path: Path) -> None:
-    # #2041: `--expect-head "$(git rev-parse --short HEAD)"` が同じ先端なのに head_moved で止まった
+    # #2041: `--expect-head "$(git rev-parse --short HEAD)"` が同じ HEAD なのに head_moved で止まった
     git_sandbox.sh(tmp_path, "init", "-q", strip=True)
     git_sandbox.sh(
         tmp_path, "-c", "user.email=t@example.invalid", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "x", strip=True

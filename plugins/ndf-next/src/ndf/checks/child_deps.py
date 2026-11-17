@@ -1,15 +1,15 @@
 """規則 `child-deps`: 子の表のコピー（`children.json`）と、import の向き・順番・レーン・表の書き手を照らす。
 
-#3347 の決定 97（先に要るものを import の持ち主から引く）・不変条件 IG1・IG2 と、#3378 の 3378-6（1 つの表へ複数の子が
+#3347 の決定 97（先に要るものを import のオーナーから引く）・不変条件 IG1・IG2 と、#3378 の 3378-6（1 つの表へ複数の子が
 並行で書く）を CI で縛る。
 
-- 持ち主: `src/` のモジュールの持ち主は、`packages` が最も長く一致する子である。持ち主の無いモジュール（パッケージの
+- オーナー: `src/` のモジュールのオーナーは、`packages` が最も長く一致する子である。オーナーの無いモジュール（パッケージの
   `__init__` を除く）は指摘する。表を直す設計 PR を先に通してから、モジュールを足す
 - IG1: 子 A のモジュールが読む別の子 B のモジュールは、A の先に要るものの推移の閉包に B が入る。A に追補 `A+` が
   あれば、`A+` の閉包も A のモジュールが読んでよい範囲に入る（追補は元の子のモジュールを直す）
 - IG2: 閉じていない子は、同じレーン・同じ順番に `max_per_slot` 本まで。どの子の順番も、先に要る子の順番より大きい
 - 表の書き手: 同じ表（`tables`）へ書く閉じていない子どうしは、どちらかが他方の閉包に入る。並行で書かず、後に流れる子が
-  先の子のマージを取り込んでから衝突を解く
+  先の子のマージをマージしてから衝突を解く
 
 入れ替え（S2）がこのモジュールと `children.json` を消す。
 """
@@ -27,7 +27,7 @@ from ndf.checks import imports
 from ndf.checks.model import CheckError, Finding, Scope, Source, module_rel, read_json_text, source_imports
 
 RULE = "child-deps"
-# 子の表のコピーの置き場（プラグインの根からの相対パス）
+# 子の表のコピーの保存先（プラグインの根からの相対パス）
 CHILDREN_REL = module_rel(__name__.rpartition(".")[0], "/children.json")
 # 追補の単位の記号は、元の子の記号の後ろにこの文字を付ける（#3395 の決定 110）
 ADDENDUM_MARK = "+"
@@ -73,7 +73,7 @@ def _child(name: str, row: Any) -> Child:
 
 
 def _validate(rows: dict[str, Child], tables: dict[str, tuple[str, ...]]) -> None:
-    """記号の参照と、パッケージの持ち主の重なりを確かめる。"""
+    """記号の参照と、パッケージのオーナーの重なりを確かめる。"""
     named = [n for c in rows.values() for n in c.needs] + [w for ws in tables.values() for w in ws]
     unknown = sorted(set(named) - set(rows))
     if unknown:
@@ -92,7 +92,7 @@ def load_children(path: Path, rel: str) -> Children:
 
 
 def _parse(data: Any, path: Path) -> tuple[dict[str, Child], dict[str, tuple[str, ...]]]:
-    """読んだ値から子の行と表の書き手を作り、形・参照・持ち主の重なりを確かめる。違えば `CheckError`。"""
+    """読んだ値から子の行と表の書き手を作り、形・参照・オーナーの重なりを確かめる。違えば `CheckError`。"""
     if not isinstance(data, dict) or not isinstance(data.get("children"), dict) or not isinstance(data.get("tables"), dict):
         raise CheckError(f"children.json に children と tables の表が無い: {path}")
     rows = {name: _child(name, row) for name, row in data["children"].items()}
@@ -104,13 +104,13 @@ def _parse(data: Any, path: Path) -> tuple[dict[str, Child], dict[str, tuple[str
 
 
 def _line_numbers(text: str, names: Iterable[str]) -> dict[str, int]:
-    """子の記号 → その記号を鍵に持つ最初の行（無ければ 1 行目）。"""
+    """子の記号 → その記号をキーに持つ最初の行（無ければ 1 行目）。"""
     text_lines = text.splitlines()
     return {name: next((no for no, line in enumerate(text_lines, 1) if line.lstrip().startswith(f'"{name}"')), 1) for name in names}
 
 
 def owner(module: str, children: Children) -> Optional[str]:
-    """モジュール（`ndf.<…>`）の持ち主の子。`packages` が最も長く一致する子で、無ければ None。"""
+    """モジュール（`ndf.<…>`）のオーナーの子。`packages` が最も長く一致する子で、無ければ None。"""
     best = max(
         ((len(p), c.name) for c in children.rows.values() for p in c.packages if imports.is_under(module, p)),
         default=None,
@@ -145,7 +145,7 @@ def _reach(child: str, children: Children) -> frozenset[str]:
 
 
 def import_findings(scope: Scope, children: Children) -> list[Finding]:
-    """持ち主の無いモジュールと、IG1（閉包の外の子のモジュールを読む import）。"""
+    """オーナーの無いモジュールと、IG1（閉包の外の子のモジュールを読む import）。"""
     by_module = scope.modules()
     known = set(by_module)
     reach: dict[str, frozenset[str]] = {}
@@ -155,7 +155,7 @@ def import_findings(scope: Scope, children: Children) -> list[Finding]:
         if mine is None:
             if src.path.name != "__init__.py":
                 found.append(
-                    Finding(RULE, src.rel, 1, f"持ち主の子が children.json に無いモジュール: {module}。表を直す設計 PR を先に通す")
+                    Finding(RULE, src.rel, 1, f"オーナーの子が children.json に無いモジュール: {module}。表を直す設計 PR を先に通す")
                 )
             continue
         allowed = reach.setdefault(mine, _reach(mine, children))
@@ -168,7 +168,7 @@ def import_findings(scope: Scope, children: Children) -> list[Finding]:
 
 
 def _owned_targets(src: Source, module: str, known: set[str], children: Children) -> list[tuple[int, str, str]]:
-    """モジュールの import が読む、持ち主のあるモジュールと持ち主（行・モジュール・持ち主）。"""
+    """モジュールの import が読む、オーナーのあるモジュールとオーナー（行・モジュール・オーナー）。"""
     imps = source_imports(src, module)
     pairs = [(imp.line, target, owner(target, children)) for imp in imps for target in imports.targets(imp, known)]
     return [(line, target, theirs) for line, target, theirs in pairs if theirs is not None]
@@ -179,7 +179,7 @@ def _at(children: Children, name: str, detail: str) -> Finding:
 
 
 def plan_findings(children: Children, max_per_slot: int) -> list[Finding]:
-    """IG2（順番とレーン）と、同じ表へ並行で書く子。指摘は 順番 → 枠 → 表 の順に並べる。"""
+    """IG2（順番とレーン）と、同じ表へ並行で書く子。指摘は 順番 → スロット → 表 の順に並べる。"""
     return _order_findings(children) + _slot_findings(children, max_per_slot) + _table_findings(children)
 
 
@@ -200,7 +200,7 @@ def _order_findings(children: Children) -> list[Finding]:
 
 
 def _slot_findings(children: Children, max_per_slot: int) -> list[Finding]:
-    """IG2: 同じレーン・同じ順番に閉じていない子が `max_per_slot` 本を超える枠。"""
+    """IG2: 同じレーン・同じ順番に閉じていない子が `max_per_slot` 本を超えるスロット。"""
     slots: dict[tuple[str, int], list[str]] = defaultdict(list)
     for c in children.rows.values():
         if not c.closed:
@@ -226,7 +226,7 @@ def _table_findings(children: Children) -> list[Finding]:
 
 
 def check(scope: Scope, children: Children, max_per_slot: int) -> list[Finding]:
-    """見る範囲（検査が作った構文木の集まり）に、持ち主・IG1・IG2・表の書き手を当てる。"""
+    """見る範囲（検査が作った構文木の集まり）に、オーナー・IG1・IG2・表の書き手を当てる。"""
     return import_findings(scope, children) + plan_findings(children, max_per_slot)
 
 

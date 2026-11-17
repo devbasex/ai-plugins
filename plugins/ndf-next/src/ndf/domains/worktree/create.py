@@ -1,17 +1,17 @@
 """作業場所の用意: ブランチの worktree を `<メインディレクトリ>/.worktrees/<ブランチ>` に作る。
 
-起点は `start` を渡せばそれ、無ければスプリントの起点（ブランチ戦略の宣言 `.ndf/project.json` の `branch_strategy` の
+起点は `start` を渡せばそれ、無ければスプリントの起点（ブランチ戦略の設定 `.ndf/project.json` の `branch_strategy` の
 `Strategy.sprint_start_ref`。`sprint.start` が `base` なら `branches.base`、`production` なら `branches.production`）である。
-宣言が無い・旧いキーが残る・スキーマに落ちるときは既定ブランチへ倒さずに止める（旧いキーは位置と移行のコマンドを出す）。
-宣言は書き換えない。課題の worktree はスプリントブランチを `start` に渡して切る。
+設定が無い・旧いキーが残る・スキーマに落ちるときは既定ブランチへ倒さずに止める（旧いキーは位置と移行のコマンドを出す）。
+設定は書き換えない。課題の worktree はスプリントブランチを `start` に渡して切る。
 
-`state_dir` を渡すと（スプリントの開始）、セクションの全体をその下へ控える（`declaration.write_start_snapshot`）。
+`state_dir` を渡すと（スプリントの開始）、セクションの全体をその下へスナップショットとして書く（`ndf_settings.write_start_snapshot`）。
 
 - 取得（`git fetch origin`）は作る前に 1 回だけ行う。失敗しても止めず `warnings` に載せる（origin の無い
   リポジトリでもローカルのブランチから切れる）。hook は取得しない（hook の外で通信する決まり）
 - 起点は origin に参照があればそれ、無ければローカルのブランチから切る。どちらにも無ければ作らずに止める
 - ブランチが既にあれば、そのブランチを checkout した worktree を作る（新しいブランチを切らない）
-- 置き場が既にある・置き場が `.gitignore` に無い・ブランチ名として使えないときは作らずに止める
+- 保存先が既にある・保存先が `.gitignore` に無い・ブランチ名として使えないときは作らずに止める
 """
 
 from __future__ import annotations
@@ -21,11 +21,11 @@ from pathlib import Path
 from typing import Any, Optional
 
 from ndf.adapters.git import Git
-from ndf.domains.worktree import declaration, repo
+from ndf.domains.worktree import ndf_settings, repo
 
 
 class CreateError(Exception):
-    """作れない。`kind` は止まった理由の表の種類（`invalid`・`precondition`・`refused`・`unknown`）。"""
+    """作れない。`kind` は停止理由の表の種類（`invalid`・`precondition`・`refused`・`unknown`）。"""
 
     def __init__(self, kind: str, detail: str) -> None:
         super().__init__(detail)
@@ -46,8 +46,8 @@ class Created:
 def start_branch(main_dir: Path) -> str:
     """スプリントの起点（ブランチの名前）。決められなければ `CreateError`（precondition）。"""
     try:
-        return declaration.sprint_start(main_dir)
-    except declaration.DeclarationError as exc:
+        return ndf_settings.sprint_start(main_dir)
+    except ndf_settings.NdfSettingsError as exc:
         raise CreateError("precondition", str(exc)) from exc
 
 
@@ -57,13 +57,13 @@ def _check_name(git: Git, branch: str) -> None:
         raise CreateError("invalid", f"ブランチ名として使えない: {branch}")
 
 
-def _check_place(git: Git, main_dir: Path, target: Path) -> None:
+def _check_location(git: Git, main_dir: Path, target: Path) -> None:
     rel = repo.worktrees_dir(main_dir).relative_to(main_dir).as_posix()
     ignored = git.attempt("check-ignore", "-q", f"{rel}/")
     if ignored.returncode != 0:
         raise CreateError("precondition", f"{rel}/ が .gitignore に無い。作る前に登録する")
     if target.exists():
-        raise CreateError("refused", f"worktree の置き場が既にある: {target}")
+        raise CreateError("refused", f"worktree の保存先が既にある: {target}")
 
 
 def _fetch(git: Git, remote: str) -> list[str]:
@@ -83,8 +83,8 @@ def _snapshot(main_dir: Path, state_dir: Optional[Path]) -> Optional[dict[str, A
     if state_dir is None:
         return None
     try:
-        return declaration.write_start_snapshot(main_dir, state_dir)
-    except declaration.DeclarationError as exc:
+        return ndf_settings.write_start_snapshot(main_dir, state_dir)
+    except ndf_settings.NdfSettingsError as exc:
         raise CreateError("precondition", str(exc)) from exc
     except OSError as exc:
         raise CreateError("unknown", f"スプリントの開始時のスナップショットを書けない: {exc}") from exc
@@ -97,10 +97,10 @@ def create(
     g = git if git is not None else Git(main_dir)
     _check_name(g, branch)
     target = repo.worktree_path(main_dir, branch)
-    _check_place(g, main_dir, target)
+    _check_location(g, main_dir, target)
     try:
-        declaration.load(main_dir)  # 旧いキーの残る worktree の宣言では作らない
-    except declaration.DeclarationError as exc:
+        ndf_settings.load(main_dir)  # 旧いキーの残る worktree の設定では作らない
+    except ndf_settings.NdfSettingsError as exc:
         raise CreateError("precondition", str(exc)) from exc
     base = start_branch(main_dir) if start is None else start
     snap = _snapshot(main_dir, state_dir)

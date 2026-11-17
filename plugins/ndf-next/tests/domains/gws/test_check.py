@@ -1,6 +1,6 @@
 """`ndf gws check`（gws の確認）と、records の gws の部品に足した 3 つ（#3547・#2067）。
 
-偽の gws・npm を PATH（偽のコマンドの置き場だけ）に置き、受付（`ndf.cli.main`）から通して確かめる。
+偽の gws・npm を PATH（偽のコマンドの保存先だけ）に置き、受付（`ndf.cli.main`）から通して確かめる。
 """
 
 from __future__ import annotations

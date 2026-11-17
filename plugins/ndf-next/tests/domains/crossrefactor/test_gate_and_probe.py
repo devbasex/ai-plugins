@@ -79,7 +79,7 @@ def test_probe_budget_keeps_the_floor_when_the_baseline_used_almost_everything()
     assert probe_decide.probe_budget(540, 533.9, 120) == 120
 
 
-def test_probe_floor_comes_from_the_limits_declaration():
+def test_probe_floor_comes_from_the_limits_ndf_settings():
     assert probe_decide.probe_floor() == 120
 
 
@@ -118,7 +118,7 @@ class _NoLog(FakeHub):
         raise AssertionError("成果物から読めたのにログを読んだ")
 
 
-def test_final_gate_passes_the_work_declaration_to_the_failed_test_assembly(tmp_path, monkeypatch):
+def test_final_gate_passes_the_work_ndf_settings_to_the_failed_test_assembly(tmp_path, monkeypatch):
     decl = {"test": {"ci": {"junit_artifacts": "junit-*"}, "suites": [{"name": "pytest", "runner": "pytest", "command": "pytest"}]}}
     (tmp_path / ".ndf").mkdir()
     (tmp_path / ".ndf" / "project.json").write_text(json.dumps(decl), encoding="utf-8")

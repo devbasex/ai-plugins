@@ -39,7 +39,7 @@ def test_plans_and_wrappers_run_rounds_without_lock_errors(tmp_path: Path) -> No
     assert out["steps_run_twice"] == 0, text
     # B3: 詰まりが無い
     assert out["database_is_locked"] == 0, text
-    # B6: WAL が上限以下。quick_check は鍵のファイルごとに高々 1 回働き、片付けの走査は目印で 1 回だけ働く
+    # B6: WAL が上限以下。quick_check はキーのファイルごとに高々 1 回働き、片付けの走査は目印で 1 回だけ働く
     assert out["wal_max_bytes"] <= L.WAL_LIMIT_BYTES, text
     assert out["quick_check"]["count"] <= out["key_files"], text
     assert out["quick_check"]["count"] < out["calls"], text

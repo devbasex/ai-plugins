@@ -136,7 +136,7 @@ def test_cli_record_fails_when_it_cannot_write(tmp_path, monkeypatch, capsys):
 
 
 def test_estimate_samples_restore_handoff_and_stage_segments(tmp_path):
-    """現状固定（I-005）: 復元・引継ぎ・工程の区間の標本の集め方と、見込みの値の形。"""
+    """現状固定（I-005）: 復元・引継ぎ・工程のセグメントの標本の集め方と、見込みの値の形。"""
     calls = ["2026-11-15T01:00:00Z", "2026-11-15T01:10:00Z", "2026-11-15T01:20:00Z", "2026-11-15T03:00:00Z"]
     rows = []
     for n in range(3):

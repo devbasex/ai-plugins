@@ -41,7 +41,7 @@ def test_bash_pre_tool_use_parses_payload_shell_and_transcript_once(tmp_path, ca
 
 
 def test_stop_classifies_the_last_reply_once(tmp_path, calls, monkeypatch):
-    # stop-wait・unattended・relay-mark が同じ応答を読む
+    # stop-wait・unattended・relay-marker が同じ応答を読む
     _transcript(tmp_path)
     monkeypatch.setenv("NDF_FACTORY_RUN", "1")
     payload = stop(tmp_path, "x")
@@ -67,7 +67,7 @@ def test_shell_tree_reads_words_background_and_loops():
         ("方針は 2 つある。\n\nどちらにしますか？", "prose_wait"),
         ("ここまでで止めた。承認をお願いします", "prose_wait"),
         ("レーン lflow が設計の承認を待っている。こちらは次へ進む", "elsewhere_wait"),
-        ("別のセッションが人の答えを待っている", "elsewhere_wait"),
+        ("別のセッションが人の回答を待っている", "elsewhere_wait"),
     ],
 )
 def test_classify_reply(text, kind):

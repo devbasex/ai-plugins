@@ -1,6 +1,6 @@
-"""`ndf progress next` が本物の工程から作業を呼ぶ層（`invoke.invoke`）と本物の雛形で 1 スプリントを流すテスト（#3474）。
+"""`ndf progress next` が本物の工程から作業を呼ぶ層（`invoke.invoke`）と本物のテンプレートで 1 スプリントを流すテスト（#3474）。
 
-工程の作業の偽物（`test_run.Fake`）を使わず、各行のプランは雛形を差し込みの出所（課題・`.ndf/project.json`・既定）で
+工程の作業の偽物（`test_run.Fake`）を使わず、各行のプランはテンプレートを差し込みの出所（課題・`.ndf/project.json`・既定）で
 埋めて書く。差し替えるのは、埋めたプランを打つ子プロセス（`ndf plan next`）だけである。worker と承認ゲートの起動の
 既定は P2 #3295 が入れるので、ここではテストの中で与える。
 """
@@ -56,7 +56,7 @@ def sprint(repo, monkeypatch):
     patched = {n: replace(p, default=DEFAULTS[n]) if n in DEFAULTS else p for n, p in held.items()}
     monkeypatch.setattr(route, "params", lambda: patched)
     monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None: "squash")
-    monkeypatch.setattr(invoke, "issue_text", lambda place, n: (f"#{n} の題", f"#{n} の本文"))
+    monkeypatch.setattr(invoke, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
     values = {"worktree": str(repo), "branch": BRANCH, "design_pr": 7, "pr": 8, "version": "11.0.0"}
     values["delivery"] = {"target": "t", "kind": "auto", "trigger": "cd", "channel": "production", "versioned": True}
     # 承認ゲートの直前の MVV 判定は人へ問う側（省かない）に倒す（#3745）
@@ -93,13 +93,13 @@ def _new(capsys, mode: str) -> str:
     code = command.main(["new", "s1", "--mode", mode, "--issues", str(ISSUE)])
     out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert code == 0, out
-    return out["metrics"]["table_id"]
+    return out["metrics"]["machine_id"]
 
 
 def _turn(st, tid: str, repo: Path, env: run.Env) -> dict:
-    """`next` を打ち、作業を起こしたらその作業を同じプロセスで流す。承認ゲートには承認で答える。
+    """`next` を打ち、作業を起動したらその作業を同じプロセスで流す。承認ゲートには承認で回答する。
 
-    承認ゲート（`ndf.listen`）への答えは、問いの id を持つ `ndf answer` だけが受ける（3364-2）。"""
+    承認ゲート（`ndf.listen`）への回答は、質問の id を持つ `ndf answer` だけが受ける（3364-2）。"""
     out = run.advance(st, tid, repo, env)
     if out["status"] == "ok" and "next" in out and out["next"]["argv"][2] == "wait":
         out = run.work(st, tid, repo, env)
@@ -109,9 +109,9 @@ def _turn(st, tid: str, repo: Path, env: run.Env) -> dict:
     m = run.decide(v)
     if m.step is not None and invoke.is_listen(m.step):
         q = gate.question(v, m)
-        gate.answer(st, tid, gate.Answer(q.id, "approved", "人が答えた", "human:test", f"test-{q.id}"))
+        gate.answer(st, tid, gate.Answer(q.id, "approved", "人が回答した", "human:test", f"test-{q.id}"))
     else:
-        run.answer(st, tid, out["metrics"]["stage"], "approved", "人が答えた", None)
+        run.answer(st, tid, out["metrics"]["stage"], "approved", "人が回答した", None)
     return out
 
 
@@ -131,7 +131,7 @@ def test_next_carries_a_sprint_to_the_last_row_with_the_real_templates(repo, st,
         pytest.fail(f"{mode} のスプリントが最後の行まで進まない")
     v = run.read(st, tid)
     assert {v.rows[s.name].state for s in v.snap.stages} == {"finished"}
-    # 工程の定義が呼ぶどのプランも雛形から埋め切れ、差し込みの出所（課題・宣言・既定）の値が載る
+    # 工程の定義が呼ぶどのプランもテンプレートから埋め切れ、差し込みの出所（課題・設定・既定）の値が載る
     assert {p["name"].removesuffix(f"-{BRANCH}") for p in sprint.plans} == _called_plans(mode)
     text = json.dumps(sprint.plans, ensure_ascii=False)
     assert "{{" not in text and "ndf-worker" in text and "ndf-review" in text and f"#{ISSUE} の題" in text
@@ -140,7 +140,7 @@ def test_next_carries_a_sprint_to_the_last_row_with_the_real_templates(repo, st,
 
 
 def test_next_stops_naming_the_stage_whose_plan_has_no_template(repo, st, sprint, capsys, monkeypatch):
-    # 雛形の無い名前を呼ぶ工程は、プランを打たずに工程名と雛形の名前を示して止まる
+    # テンプレートの無い名前を呼ぶ工程は、プランを打たずに工程名とテンプレートの名前を示して止まる
     held = route.templates()
     monkeypatch.setattr(route, "templates", lambda: {n: t for n, t in held.items() if n != "worktree"})
     tid = _new(capsys, "light")
@@ -151,6 +151,6 @@ def test_next_stops_naming_the_stage_whose_plan_has_no_template(repo, st, sprint
     else:
         pytest.fail("止まらない")
     assert out["status"] == "stopped" and out["cause"]["kind"] == "precondition"
-    assert out["summary"] == "工程 作業場所の用意 が失敗した: プランの雛形 worktree が無い"
+    assert out["summary"] == "工程 作業場所の用意 が失敗した: プランのテンプレート worktree が無い"
     assert out["metrics"]["stage"] == "作業場所の用意"
     assert [p["name"] for p in sprint.plans] == ["requirements"]

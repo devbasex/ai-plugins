@@ -76,7 +76,7 @@ def test_old_analyzer_and_hand_written_are_stale(repo, capsys, last_result):
     assert len(last_result(capsys.readouterr().out)["items"]) == 1
 
 
-def test_broken_declarations_are_2(repo, capsys, last_result):
+def test_broken_ndf_settings_are_2(repo, capsys, last_result):
     (repo / ".ndf").mkdir()
     (repo / ".ndf" / "project.json").write_text("{", encoding="utf-8")
     assert cli.main(["check", "--root", str(repo)]) == 2
@@ -103,7 +103,7 @@ def test_check_reads_the_main_directory_from_a_linked_worktree(repo, tmp_path):
 def test_schema_prints_or_writes(tmp_path, capsys, last_result):
     assert cli.main(["schema"]) == 0
     out = capsys.readouterr().out.splitlines()
-    assert json.loads("\n".join(out[:-1]))["$id"] == "declarations/project.schema.json"
+    assert json.loads("\n".join(out[:-1]))["$id"] == "ndf-settings/project.schema.json"
     target = tmp_path / "s" / "project.schema.json"
     assert cli.main(["schema", "--out", str(target)]) == 0
     assert json.loads(target.read_text(encoding="utf-8"))["type"] == "object"
@@ -169,7 +169,7 @@ def test_write_creates_then_keeps_hand_values(repo, tmp_path, capsys, last_resul
     assert json.loads((repo / ".ndf" / "project.json").read_text(encoding="utf-8"))["checks"] == decl["checks"]
 
 
-def test_write_refuses_broken_declaration(repo, tmp_path):
+def test_write_refuses_broken_ndf_settings(repo, tmp_path):
     measured = _measure_file(tmp_path, {})
     (repo / ".ndf").mkdir()
     (repo / ".ndf" / "project.json").write_text("{", encoding="utf-8")
@@ -257,12 +257,12 @@ def test_row_line_formats_each_kind():
         "  P4 ci: 秘密の形の値を捨てて不明にした",
         "  P4 ci#a.yml: 不明（壁時計が無い）（前の値を残した）",
         "  P8 issues: 不明（None）",
-        '  P9 checks: 食い違い 宣言 {"a": "値"} / 解析 [1]',
+        '  P9 checks: 食い違い 設定 {"a": "値"} / 解析 [1]',
         "   notes: note",
     ]
 
 
-# --- 現状固定: cli._ci_items（I-022。CI の部分・課題の正本の項目の入れ方と注記） ---
+# --- 現状固定: cli._ci_items（I-022。CI の部分・課題の SSOT の項目の入れ方と注記） ---
 
 _REPO_ISSUES = {"markdown_files": 2, "templates": [], "hosts": []}
 
@@ -349,7 +349,7 @@ def test_ci_items_current_behavior_past_deadline_marks_unknown(monkeypatch):
     assert step.items["issues"] == measure_ci.measure_issues(_REPO_ISSUES, {})
 
 
-SUITE_SCHEMA = contracts.schema_path("declarations/project") + "#/$defs/Suite"
+SUITE_SCHEMA = contracts.schema_path("ndf_settings/project") + "#/$defs/Suite"
 BASE_SUITE = {"name": "pytest", "runner": "pytest", "command": "pytest"}
 
 

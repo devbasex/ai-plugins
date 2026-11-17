@@ -1,0 +1,43 @@
+"""中継のマーカー: 中継が子へ入力を送る前に立てるマーカー（#3345 の決定 92）。標準ライブラリだけで書く。
+
+hook のセッションの数え手は、利用者の入力で数え直し、中継が送った入力では数え直さない。中継は入力を送る前に
+`mark` で `<状態の保存先>/relay/markers/<セッション>.json` を書き、hook（M3a）は UserPromptSubmit で同じプロセスの
+中から `take` を呼んでマーカーを消す（決定 111。依存は hook → 中継の向きで、中継は hook を読まない）。`take` が真なら
+その入力は中継が送ったものである。
+"""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+from ndf.domains.relay import signals
+
+SESSION_RE = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
+
+
+class MarkerError(ValueError):
+    """セッションの ID の形が違う。"""
+
+
+def marker_path(state_dir: Path, session_id: str) -> Path:
+    if not SESSION_RE.match(session_id):
+        raise MarkerError(f"セッションの ID の形が違う: {session_id}")
+    return state_dir / "relay" / "markers" / f"{session_id}.json"
+
+
+def mark(state_dir: Path, session_id: str) -> Path:
+    """マーカーを立てる。立てたマーカーのパスを返す。"""
+    path = marker_path(state_dir, session_id)
+    signals.replace_json(path, {"session_id": session_id, "at": signals.now_iso()})
+    return path
+
+
+def take(state_dir: Path, session_id: str) -> bool:
+    """マーカーがあれば消して真。無ければ偽（利用者の入力）。"""
+    path = marker_path(state_dir, session_id)
+    try:
+        path.unlink()
+    except FileNotFoundError:  # noqa: NDF401 ファイル: マーカーが無ければ利用者の入力
+        return False
+    return True

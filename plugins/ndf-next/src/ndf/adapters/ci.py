@@ -1,7 +1,7 @@
 """CI の結果の読み取りと、落ちたチェックの分類（外部との接続の層。SF3・SF4）。
 
-読み手は CI の状態を `gh pr checks` の文や Markdown から読まず、この関数が返す止まった理由の種類だけで次の手を
-決める。種類と行き先は止まった理由の表（`contracts/causes.json`）が持つ。
+読み手は CI の状態を `gh pr checks` の文や Markdown から読まず、この関数が返す停止理由の種類だけで次の手を
+決める。種類とルートは停止理由の表（`contracts/causes.json`）が持つ。
 
 | 読んだ結果 | 種類 |
 | --- | --- |
@@ -60,7 +60,7 @@ QUEUED_STATES = frozenset(facts.ids("ci-outcomes", outcome="pending")) - {"in_pr
 UNRESOLVED_SHOWN = 3
 # 分割ジョブの名前の末尾（`pytest (0/2)`）
 _SHARD = re.compile(r"\s*\(\d+/\d+\)$")
-# 読んだ結果（`Reading.verdict`）→ 止まった理由の種類。`passed` は通常 None、マージの後なら `not_ci`
+# 読んだ結果（`Reading.verdict`）→ 停止理由の種類。`passed` は通常 None、マージの後なら `not_ci`
 _VERDICT_KINDS = {
     Verdict.TEST_FAILED: "test_failed",
     Verdict.CHECK_FAILED: "check_failed",
@@ -127,12 +127,12 @@ def _unprefixed(name: str) -> str:
 
 
 def bare_name(name: str) -> str:
-    """照合に使う名前。分割ジョブの末尾 `(k/n)` と、ワークフローの名前の前置き `<ワークフロー> / ` を外す。"""
+    """検証に使う名前。分割ジョブの末尾 `(k/n)` と、ワークフローの名前の前置き `<ワークフロー> / ` を外す。"""
     return _SHARD.sub("", _unprefixed(name)).strip()
 
 
 def bare_names(names: Iterable[str]) -> set[str]:
-    """照合に使う名前（`bare_name`）の集合。テストのチェックの名前を 1 度だけ揃えて、分類の間で使い回す。"""
+    """検証に使う名前（`bare_name`）の集合。テストのチェックの名前を 1 度だけ揃えて、分類の間で使い回す。"""
     return {bare_name(n) for n in names}
 
 
@@ -142,7 +142,7 @@ def _short_name(name: str) -> str:
 
 
 def required_key(name: str) -> str:
-    """必須のチェックの照合の鍵。分割ジョブを名指しした（`pytest (1/2)`）ものはその分割を保ち、ほかは `bare_name`。
+    """必須のチェックの検証のキー。分割ジョブを名指しした（`pytest (1/2)`）ものはその分割を保ち、ほかは `bare_name`。
 
     名指しした分割を畳むと、`pytest (0/2)` だけが通った時点で `pytest (1/2)` も揃ったと読んでしまう。
     """
@@ -151,12 +151,12 @@ def required_key(name: str) -> str:
 
 
 def _fulfils(check_name: str, key: str) -> bool:
-    """チェックが必須の鍵（`required_key`）に当たるか。分割を名指しした鍵はその分割だけに当たる。"""
+    """チェックが必須のキー（`required_key`）に当たるか。分割を名指ししたキーはその分割だけに当たる。"""
     return _short_name(check_name) == key if _SHARD.search(key) else bare_name(check_name) == key
 
 
 def fulfils(check_name: str, required: str) -> bool:
-    """チェックが必須のチェック `required` に当たるか（`read` と同じ照合。発行元の照合もこれで揃える。#3506）。"""
+    """チェックが必須のチェック `required` に当たるか（`read` と同じ検証。発行元の検証もこれで揃える。#3506）。"""
     return _fulfils(check_name, required_key(required))
 
 
@@ -204,7 +204,7 @@ class Reading(NamedTuple):
 
 
 def _match_required(checks: list[Check], wanted: set[str]) -> tuple[list[Check], set[str]]:
-    """(必須の鍵のどれかに当たるチェック, 当たるチェックのあった必須の鍵)。照合は `_fulfils`。"""
+    """(必須のキーのどれかに当たるチェック, 当たるチェックのあった必須のキー)。検証は `_fulfils`。"""
     mine = [c for c in checks if any(_fulfils(c.name, w) for w in wanted)]
     present = {w for w in wanted if any(_fulfils(c.name, w) for c in mine)}
     return mine, present
@@ -237,14 +237,14 @@ def split_failed(names: Iterable[str], tests: Iterable[str]) -> tuple[list[str],
 
 
 class Classifier(NamedTuple):
-    """読んだ結果を止まった理由の種類へ分ける前提。`tests` はテストのチェックの名前、`merge_failed` はマージの段階が
+    """読んだ結果を停止理由の種類へ分ける前提。`tests` はテストのチェックの名前、`merge_failed` はマージの段階が
     落ちたと読んだチェックの名前（マージの後の判定だけが渡す）。"""
 
     tests: Iterable[str]
     merge_failed: Optional[Iterable[str]] = None
 
     def cause(self, reading: Reading) -> Optional[str]:
-        """読んだ結果の止まった理由の種類。通っていれば None。
+        """読んだ結果の停止理由の種類。通っていれば None。
 
         マージの段階がテストのチェックの落ちを読んでいれば、読み直しでまとめのチェックが終わっていなくても
         `test_failed` にする（#3153）。マージの後で落ちたチェックがどこにも無ければ `not_ci`（CI 以外の理由で断られた）。
@@ -262,7 +262,7 @@ class Classifier(NamedTuple):
 
 
 def cause_of(reading: Reading, tests: Iterable[str], merge_failed: Optional[Iterable[str]] = None) -> Optional[str]:
-    """読んだ結果の止まった理由の種類（`Classifier.cause`）。通っていれば None。"""
+    """読んだ結果の停止理由の種類（`Classifier.cause`）。通っていれば None。"""
     return Classifier(tests, merge_failed).cause(reading)
 
 
@@ -402,7 +402,7 @@ def _read_zips(github: GitHub, hits: list[dict], tracked: frozenset[str]) -> _Ru
     nodes: set[str] = set()
     unresolved: list[str] = []
     fetched = 0
-    for art in hits:  # noqa: NDF201 上限: 成果物は取得の枠（github.failed-logs）の残り本数まで（呼び手が比べ済み）
+    for art in hits:  # noqa: NDF201 上限: 成果物は取得のスロット（github.failed-logs）の残り本数まで（呼び手が比べ済み）
         fetched += 1
         name = text_of(art.get("name"))
         try:
@@ -423,7 +423,7 @@ def _read_zips(github: GitHub, hits: list[dict], tracked: frozenset[str]) -> _Ru
 def _read_run_junit(github: GitHub, run_id: int, glob: str, tracked: frozenset[str], room: int) -> _RunJunit:
     """1 つのワークフローの実行の成果物から落ちたテストを読み、その実行を「成果物から読めた」とするかを決める。
 
-    当たる成果物が残りの取得の枠 `room` を超えれば、ZIP を 1 本も取得しない（一部だけ読んでも使わない）。
+    当たる成果物が残りの取得のスロット `room` を超えれば、ZIP を 1 本も取得しない（一部だけ読んでも使わない）。
     """
     try:
         arts = github.run_artifacts(run_id)
@@ -433,7 +433,7 @@ def _read_run_junit(github: GitHub, run_id: int, glob: str, tracked: frozenset[s
     if not hits:
         return _RunJunit((), False, f"JUnit の成果物（{glob}）に当たる成果物が無い", 0)
     if len(hits) > room:
-        return _RunJunit((), False, f"当たる成果物 {len(hits)} 本が取得の枠の残り {room} 本を超える（上限 github.failed-logs）", 0)
+        return _RunJunit((), False, f"当たる成果物 {len(hits)} 本が取得のスロットの残り {room} 本を超える（上限 github.failed-logs）", 0)
     big = [a for a in hits if _artifact_size(a) > junit.MAX_ARTIFACT_BYTES]
     if big:
         name = text_of(big[0].get("name"))
@@ -446,7 +446,7 @@ def _joined(*reasons: str) -> str:
 
 
 class _Assembly:
-    """`failed_tests_of` の 1 回の組み立ての途中の状態（実行ごとの読み取りと、残りの取得の枠）。"""
+    """`failed_tests_of` の 1 回の組み立ての途中の状態（実行ごとの読み取りと、残りの取得のスロット）。"""
 
     def __init__(self, github: GitHub, source: FailedTestSource, room: int) -> None:
         self.github = github
@@ -544,7 +544,7 @@ class WatchResult:
         return self.cause_by(Classifier(tests, merge_failed))
 
     def cause_by(self, classifier: Classifier) -> Optional[str]:
-        """止まった理由の種類。ランナーの割り当ての待ちだけで上限を超えた `ci_pending` は `infra_wait`。"""
+        """停止理由の種類。ランナーの割り当ての待ちだけで上限を超えた `ci_pending` は `infra_wait`。"""
         kind = classifier.cause(self.reading)
         return "infra_wait" if kind == "ci_pending" and self.runner_exhausted else kind
 
@@ -552,7 +552,7 @@ class WatchResult:
 def _next_interval(previous: Optional[Reading], reading: Reading, interval: float, policy: limits.Policy) -> float:
     """この周の眠りの間隔。最初の周は最初の値、変化が無い間は前の間隔に倍率をかけて伸ばす（頭打ちは `max_interval`）。
 
-    読んだ結果が変わった（チェックが動いた）周は、倍率 1 段だけ縮める（最初の値より短くしない。不足 g）。
+    読んだ結果が変わった（チェックが動いた）周は、倍率 1 ステップだけ縮める（最初の値より短くしない。不足 g）。
     最初の値まで戻すと、チェックが順に終わる CI では変化のたびに 10 秒へ戻って伸びず、読み取りの回数が増える。
     """
     if previous is None:
@@ -572,7 +572,7 @@ class Watch:
     - 終わっていないチェックがすべてランナーの割り当てを待つ間は `budget` に数えず、`ci.runner-wait` で別に数える（#2719）
     - 読むたびに `on_round` へ読んだ結果と経過の秒を渡す（待つ間に何を待っているかを出す。#2317）
     - `decided` が真を返したら、結論の出ていないチェックが残っていても待たずに返す（マージの段階から引き継いだ
-      失敗で止まった理由が決まっているとき、読み直しに API と待ちを使わない）
+      失敗で停止理由が決まっているとき、読み直しに API と待ちを使わない）
     - 予算は `started`（`clock` の値）から数える。省けば作った時点。前の段階で待ち始めた呼び手は、その時刻を渡して
       同じ予算を引き継ぐ。始まりの時刻は `started` で読める
     """

@@ -1,7 +1,7 @@
 """振る舞いの確認の起動（#3187）。
 
-対象ごとの `claude -p` は、その対象の依頼文だけを入力に受ける。標準入力を閉じて起動し、呼び出し元の標準入力
-（繰り返しで流す依頼文の並びなど）を受け継がせない。
+対象ごとの `claude -p` は、その対象のリクエスト文だけを入力に受ける。標準入力を閉じて起動し、呼び出し元の標準入力
+（繰り返しで流すリクエスト文の並びなど）を受け継がせない。
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ BUDGET_USD = 1
 
 
 def claude_check_command(plugin_root: Path, prompt: str, budget_usd: float = BUDGET_USD) -> list[str]:
-    """1 件の確認の起動の語の並び。依頼文は引数で渡す。"""
+    """1 件の確認の起動の語の並び。リクエスト文は引数で渡す。"""
     return [
         "claude",
         "-p",

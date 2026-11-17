@@ -1,6 +1,6 @@
-"""工程を流す副命令（ndf.progress.run。#3092 の受け入れ条件 4・6・7・8、3364-7・3365-4・3366-1・3377-9、SF8）。
+"""工程を流すサブコマンド（ndf.progress.run。#3092 の受け入れ条件 4・6・7・8、3364-7・3365-4・3366-1・3377-9、SF8）。
 
-作業（プラン）は偽物（`Fake`）に差し替え、`next` が起こす作業は同じプロセスで `run.work` として流す。
+作業（プラン）は偽物（`Fake`）に差し替え、`next` が起動する作業は同じプロセスで `run.work` として流す。
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ ISSUE = 3092
 
 
 def _load_lanes():
-    """同じ置き場のレーンの部品（lanes.py。偽の作業の結果と 1 手の打ち方）。"""
+    """同じ保存先のレーンの部品（lanes.py。偽の作業の結果と 1 手の打ち方）。"""
     spec = importlib.util.spec_from_file_location("lanes", Path(__file__).with_name("lanes.py"))
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -44,11 +44,11 @@ def _main(capsys, fn, *argv: str) -> tuple[int, dict]:
 def _new(capsys, mode: str = "standard", *extra: str) -> str:
     code, out = _main(capsys, command.main, "new", "s1", "--mode", mode, "--issues", str(ISSUE), *extra)
     assert code == 0, out
-    return out["metrics"]["table_id"]
+    return out["metrics"]["machine_id"]
 
 
 class Fake:
-    """作業の偽物。`script[ステップ]` に積んだ結果を順に返し、無ければ宣言した出力を持つ ok を返す。"""
+    """作業の偽物。`script[ステップ]` に積んだ結果を順に返し、無ければ定義した出力を持つ ok を返す。"""
 
     def __init__(self, repo: Path) -> None:
         self.values = lanes.values(repo, "sprint/s1")
@@ -101,7 +101,7 @@ def _labels(st, tid) -> dict[str, str]:
 
 
 def _approve(st, tid, stage, value="approved", notes=None):
-    return lanes.answer(st, tid, stage, value, "人が答えた", notes)
+    return lanes.answer(st, tid, stage, value, "人が回答した", notes)
 
 
 def test_next_starts_the_first_pending_row_and_returns_wait(repo, st, env, capsys):
@@ -117,8 +117,8 @@ def test_next_starts_the_first_pending_row_and_returns_wait(repo, st, env, capsy
 def test_work_flows_rows_until_the_design_gate_and_returns_routes(repo, st, env, capsys):
     tid = _new(capsys)
     out = lanes.turn(st, tid, repo, env.env)
-    assert out["status"] == "gate" and set(out["routes"]) == {"approved", "rejected", "revise"}
-    assert out["routes"]["revise"]["ask"] == ["notes", "reason"]
+    assert out["status"] == "gate" and set(out["routes"]) == {"approved", "rejected", "request_changes"}
+    assert out["routes"]["request_changes"]["ask"] == ["notes", "reason"]
     assert result.code_for(out) == 10
     labels = _labels(st, tid)
     assert labels["要求と受け入れ条件"] == labels["作業場所の用意"] == "finished" and labels["設計"] == "running"
@@ -174,21 +174,23 @@ def test_revise_needs_a_notes_file_and_reruns_the_stage_with_the_notes(repo, st,
     tid = _new(capsys)
     lanes.turn(st, tid, repo, env.env)
     with pytest.raises(model.Refused):
-        _approve(st, tid, "設計", "revise")
+        _approve(st, tid, "設計", "request_changes")
     empty = tmp_path / "empty.md"
     empty.write_text("  \n")
     with pytest.raises(model.Refused):
-        _approve(st, tid, "設計", "revise", empty)
+        _approve(st, tid, "設計", "request_changes", empty)
     notes = tmp_path / "notes.md"
-    notes.write_text("節 2 の根拠が足りない")
-    _approve(st, tid, "設計", "revise", notes)
+    notes.write_text("セクション 2 の根拠が足りない")
+    _approve(st, tid, "設計", "request_changes", notes)
     answered = [e for e in run.read(st, tid).events if e.draft.kind == "answered"][-1]
-    assert answered.draft.payload["notes"] == "節 2 の根拠が足りない"
+    assert answered.draft.payload["notes"] == "セクション 2 の根拠が足りない"
     before = len(env.fake.calls)
     out = lanes.turn(st, tid, repo, env.env)
     assert out["status"] == "gate" and out["metrics"]["stage"] == "設計"
     rerun = env.fake.calls[before:]
-    assert [c.step for c in rerun] == ["design", "design-review", "design-mvv"] and {c.notes for c in rerun} == {"節 2 の根拠が足りない"}
+    assert [c.step for c in rerun] == ["design", "design-review", "design-mvv"] and {c.notes for c in rerun} == {
+        "セクション 2 の根拠が足りない"
+    }
     assert rerun[0].work_dir.name == "design-g1"
 
 
@@ -210,7 +212,7 @@ def _mvv(kind: str, skip: bool, why: list[str]):
 def test_a_skippable_mvv_verdict_passes_the_design_gate_as_service_mvv(repo, st, env, capsys):
     tid = _new(capsys, "standard", "--pace", "fast")
     env.fake.script["design-mvv"] = [_mvv("design", True, [])]
-    # 省いた答えを書いた駆動はそこで止まり、答えは次の next が照合（recheck）を通してから読む
+    # 省いた回答を書いた駆動はそこで止まり、回答は次の next が検証（recheck）を通してから読む
     wrote = lanes.turn(st, tid, repo, env.env)
     assert wrote["status"] == "ok" and wrote["next"]["argv"][2] == "next" and wrote["metrics"]["stage"] == "設計"
     assert gate.recheck(st, tid, lambda q: gate.Target(JUDGED)) is None
@@ -222,16 +224,16 @@ def test_a_skippable_mvv_verdict_passes_the_design_gate_as_service_mvv(repo, st,
     p = answered.draft.payload
     assert (answered.draft.row_key, p["answer"], p["by"], p["step"]) == ("設計", "approved", "service:mvv", "design-gate")
     assert p["mvv_gate"]["skip"] is True and answered.draft.actor == "conductor"
-    # 人の答えと同じく問いの id・区分・見た head を持ち、承認した head（ndf answer head）が読める
+    # 人の回答と同じく質問の id・区分・見た head を持ち、承認した head（ndf answer head）が読める
     assert (p["gate"], p["seen"]["head"], len(p["gate_id"])) == ("design", JUDGED, model.QUESTION_ID_LENGTH)
     assert gate.approved_head(run.read(st, tid), "design") == JUDGED
 
 
 def test_an_mvv_approval_whose_head_moved_goes_back_to_a_human(repo, st, env, capsys):
-    # 省いた答えを書いた後、読む前に PR の head が判定の head から進んだら、待ちへ戻して人へ問う（同じ判定で省き直さない）
+    # 省いた回答を書いた後、読む前に PR の head が判定の head から進んだら、待ちへ戻して人へ問う（同じ判定で省き直さない）
     tid = _new(capsys, "standard", "--pace", "fast")
     env.fake.script["design-mvv"] = [_mvv("design", True, [])]
-    lanes.turn(st, tid, repo, env.env)  # 省いた答えを書いたところで駆動が止まる
+    lanes.turn(st, tid, repo, env.env)  # 省いた回答を書いたところで駆動が止まる
     moved = "b" * 40
     why = gate.recheck(st, tid, lambda q: gate.Target(moved))
     assert why is not None and moved in why
@@ -308,7 +310,7 @@ def test_retryable_causes_are_retried_here_with_the_declared_backoff(repo, st, e
 
 
 def test_a_plan_that_returns_the_same_round_again_is_not_retried_further(repo, st, env, capsys):
-    # PR 3464 の指摘: 打ち直しても控えの結果しか返らない回で、待ちと起動だけを繰り返さない
+    # PR 3464 の指摘: 打ち直してもバックアップの結果しか返らない回で、待ちと起動だけを繰り返さない
     tid = _new(capsys)
     same = lambda r: invoke.StageResult(result.stopped("plan", "transient", "5xx", run_id="r1"), {})  # noqa: E731
     env.fake.script["worktree"] = [same, same, same, same]
@@ -332,7 +334,7 @@ def test_failures_that_need_a_decision_return_routes_and_the_exit_code_of_the_ca
 
 
 def test_stage_output_that_breaks_the_contract_gets_no_finish_mark(repo, st, env, capsys):
-    # 受け入れ条件 8（出力の照合）
+    # 受け入れ条件 8（出力の検証）
     tid = _new(capsys)
     env.fake.script["worktree"] = [lambda r: invoke.finished(r, result.result("plan", "ok", "出力なし"))]
     out = lanes.turn(st, tid, repo, env.env)
@@ -352,7 +354,7 @@ def test_retry_after_a_stage_output_that_breaks_the_contract_runs_the_steps_agai
     assert lanes.turn(st, tid, repo, env.env)["status"] == "gate"
     again = env.fake.calls[before:]
     assert [c.step for c in again][0] == "worktree"
-    # 終わった回の控えの結果を受け取らないよう、行の打ち直しの回数を渡し、プランは同じ置き場で新しい回を流す
+    # 終わった回のバックアップの結果を受け取らないよう、行の打ち直しの回数を渡し、プランは同じ保存先で新しい回を流す
     first = [c for c in env.fake.calls[:before] if c.step == "worktree"][-1]
     assert first.work_dir == again[0].work_dir and (first.retries, again[0].retries) == (0, 1)
     assert _labels(st, tid)["作業場所の用意"] == "finished"
@@ -380,7 +382,7 @@ def test_retry_after_a_failed_step_keeps_the_steps_that_finished(repo, st, env, 
     prog = run.step_progress(run.read(st, tid), stage)
     done = dict(prog.done)
     _main(capsys, command.main, "retry", tid, stage, "--reason", "直した")
-    run.advance(st, tid, repo, env.env)  # 行を始め直す（作業は起こすだけ）
+    run.advance(st, tid, repo, env.env)  # 行を始め直す（作業は起動するだけ）
     assert run.step_progress(run.read(st, tid), stage).done == done
 
 
@@ -419,7 +421,7 @@ def test_false_condition_disables_the_row_with_the_word(repo, st, env, capsys):
 
 
 def test_stage_enabled_by_the_project_runs_even_when_the_condition_is_false(repo, st, env, capsys):
-    # 宣言 > 定義の条件: workflow.stages の enabled=true は code_in_diff が偽でも行を飛ばさない
+    # 設定 > 定義の条件: workflow.stages の enabled=true は code_in_diff が偽でも行を飛ばさない
     (repo / ".ndf").mkdir()
     (repo / ".ndf" / "project.json").write_text(json.dumps({"workflow": {"stages": {"リファクタリング": {"enabled": True}}}}))
     tid = _new(capsys, "standard")
@@ -441,7 +443,7 @@ def test_conditions_that_cannot_be_decided_stop_before_the_row(repo, st, env, ca
     assert _labels(st, tid)["リファクタリング"] == "pending"
 
 
-def test_facts_of_reads_the_declarations_and_the_context(repo):
+def test_facts_of_reads_the_ndf_settings_and_the_context(repo):
     words = ("ci_declared", "design_pr", "prod_branch", "release_record")
     strategy_fixture.write(repo, "web-trunk")  # trunk はベースブランチと本番ブランチが同じ
     assert command.facts_of(words, {}, repo) == dict.fromkeys(words, False)
@@ -465,8 +467,8 @@ def test_prod_branch_cannot_be_decided_without_the_strategy(repo):
         command.facts_of(("prod_branch",), {}, repo)
 
 
-def test_facts_of_reads_a_declaration_that_is_not_an_object_as_empty_and_refuses_broken_json(repo):
-    # 現状固定（I-018）: 宣言の読み方は command._declared と同じ（オブジェクトでなければ空、読めなければ ContractError）
+def test_facts_of_reads_a_ndf_settings_that_is_not_an_object_as_empty_and_refuses_broken_json(repo):
+    # 現状固定（I-018）: 設定の読み方は command._declared と同じ（オブジェクトでなければ空、読めなければ ContractError）
     (repo / ".ndf").mkdir()
     (repo / ".ndf" / "project.json").write_text("[1]")
     assert command.facts_of(("ci_declared",), {}, repo) == {"ci_declared": False}
@@ -505,7 +507,7 @@ def test_diff_words_split_the_sprint_diff_into_code_and_docs(repo, changed, kind
     assert tuple(command.facts_of(words, ctx, repo)[w] for w in words) == kinds
 
 
-def test_diff_words_follow_the_docs_declaration(repo):
+def test_diff_words_follow_the_docs_ndf_settings(repo):
     _sprint_branch(repo, "a.txt", "rules/b.txt")
     words = ("code_in_diff", "docs_only_diff", "behavior_docs_in_diff")
     ctx = {"worktree": str(repo), "branch": "sprint/s1"}
@@ -637,7 +639,7 @@ def test_cli_next_launches_the_work_in_another_process(repo, capsys):
     tid = _new(capsys)
     code, out = _main(capsys, run.main, "next", tid)
     assert code == 0 and out["next"]["argv"][2] == "wait"
-    # 起こした作業が排他を取り、要求と受け入れ条件の行へ結果を書くまで待つ（作業の起動の前に wait が戻りうる）
+    # 起動した作業が排他を取り、要求と受け入れ条件の行へ結果を書くまで待つ（作業の起動の前に wait が戻りうる）
     for _ in range(120):
         _, waited = _main(capsys, run.main, "wait", tid, "--timeout", "60")
         _, shown = _main(capsys, run.main, "show", tid)
@@ -685,7 +687,7 @@ def test_append_writes_the_drafts_built_from_the_current_view(repo, st, capsys):
 
     seqs = run.append(st, tid, build)
     assert seqs == [before.events[-1].seq + 1]
-    assert len(seen) == 1 and seen[0].table_id == tid and seen[0].rev == before.rev
+    assert len(seen) == 1 and seen[0].machine_id == tid and seen[0].rev == before.rev
     assert [e.seq for e in seen[0].events] == [e.seq for e in before.events]
     after = run.read(st, tid)
     assert after.events[-1].seq == seqs[0] and after.events[-1].draft.kind == "started"
@@ -747,7 +749,7 @@ def test_append_lets_refusals_through_without_retrying(repo, st, capsys):
         run.append(st, "no-such-table", lambda v: [])
 
 
-# --- 現状固定: run.wait（I-026。作業が動く間だけ宣言の間隔で待ち、上限で同じ wait を返す） -------------
+# --- 現状固定: run.wait（I-026。作業が動く間だけ設定の間隔で待ち、上限で同じ wait を返す） -------------
 
 
 def test_wait_without_live_work_returns_the_report_at_once_without_sleeping(repo, st, capsys):
@@ -796,19 +798,22 @@ def test_wait_while_the_work_runs_past_the_limit_returns_the_same_wait(repo, st,
         at_once = run.wait(st, tid, 0, sleep=slept.append)
         later = run.wait(st, tid, 0.05, sleep=sleep, clock=lambda: now[0])
     assert at_once == result.stopped(
-        run.TOOL, "wait_timeout", f"進行表 {tid} を流す作業がまだ動いている（0 秒待った）", next=result.command(run.TOOL, "wait", tid)
+        run.TOOL,
+        "wait_timeout",
+        f"ステートマシン {tid} を流す作業がまだ動いている（0 秒待った）",
+        next=result.command(run.TOOL, "wait", tid),
     )
-    assert later["cause"] == {"kind": "wait_timeout", "detail": f"進行表 {tid} を流す作業がまだ動いている（0.05 秒待った）"}
+    assert later["cause"] == {"kind": "wait_timeout", "detail": f"ステートマシン {tid} を流す作業がまだ動いている（0.05 秒待った）"}
     assert later["next"] == result.command(run.TOOL, "wait", tid) and len(slept) >= 1
 
 
 def _session_leader() -> subprocess.Popen:
-    """起こした作業の代わり（別のプロセスの組の頭。`launch_worker` と同じ起こし方）。"""
+    """起動した作業の代わり（別のプロセスの組の頭。`launch_worker` と同じ起動方）。"""
     return subprocess.Popen(["sleep", "60"], start_new_session=True)
 
 
 def test_work_launched_but_not_yet_holding_the_lock_counts_as_live(repo, st, env, capsys):
-    # PR 3464 の指摘: next が排他を放してから作業が排他を取るまでの間に、wait・next が 2 本目を起こさない
+    # PR 3464 の指摘: next が排他を放してから作業が排他を取るまでの間に、wait・next が 2 本目を起動しない
     tid = _new(capsys)
     proc = _session_leader()
     try:
@@ -820,7 +825,7 @@ def test_work_launched_but_not_yet_holding_the_lock_counts_as_live(repo, st, env
         assert again["next"]["argv"][2] == "wait" and "動いている" in again["summary"]
         assert len([e for e in run.read(st, tid).events if e.draft.kind == "started"]) == 1
         assert run.hand(st, run.read(st, tid))["argv"][2] == "wait"
-        run.work(st, tid, repo, env.env)  # 作業が排他を取れば印は消える
+        run.work(st, tid, repo, env.env)  # 作業が排他を取ればマーカーは消える
         assert not run.launch_path(st.root, tid).exists() and not run.is_live(st, tid)
     finally:
         proc.kill()
@@ -836,7 +841,7 @@ def test_a_launch_mark_of_work_that_is_gone_is_not_live(repo, st, capsys):
     mark.parent.mkdir(parents=True, exist_ok=True)
     mark.write_text(json.dumps({"pid": proc.pid}))
     assert not run.is_live(st, tid)
-    mark.write_text("{")  # 書きかけの印も起こした作業として数えない
+    mark.write_text("{")  # 書きかけのマーカーも起動した作業として数えない
     assert not run.is_live(st, tid)
 
 

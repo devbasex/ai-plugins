@@ -34,7 +34,7 @@ def test_pick_default_retry_within_attempts_then_moves_on():
 
 
 def test_pick_prefers_the_policy_the_caller_resolved_over_the_kind_default():
-    # 宣言（プロジェクトの causes・ステップの retry）の上書きは既定の方針より優先する
+    # 設定（プロジェクトの causes・ステップの retry）の上書きは既定の方針より優先する
     declared = limits.Policy(name="cause.infra-wait", summary="s", attempts=1, interval=5)
     assert limits.policy("cause.infra-wait").attempts > 1
     assert routing.pick("infra_wait", retry=routing.RetryState(used=0, policy=declared)) == routing.Route("retry", None, 5.0, "infra_wait")
@@ -102,7 +102,7 @@ def test_backoff_grows_and_is_capped():
     assert routing.backoff(flat, 3, None, None) == 10
 
 
-# 現状固定（I-017）: 打ち直しに retry_after が要るかは表の requires_retry_after、打ち直さないときの行き先は表の exhausted から決まる。
+# 現状固定（I-017）: 打ち直しに retry_after が要るかは表の requires_retry_after、打ち直さないときのルートは表の exhausted から決まる。
 def test_pick_reads_requires_retry_after_and_exhausted_from_the_table(contracts_copy):
     assert routing.pick("infra_wait") == routing.Route("retry", None, 600.0, "infra_wait")
     contracts_copy(

@@ -1,11 +1,11 @@
-"""副命令の引数の定義を取り出す（規約の生成の入力。#3518 の決定 3）。
+"""サブコマンドの引数の定義を取り出す（規約の生成の入力。#3518 の決定 3）。
 
-副命令のモジュールを変えずに、`main([])` を argparse が引数を読む呼び出し（`parse_known_args`。`parse_args` も
+サブコマンドのモジュールを変えずに、`main([])` を argparse が引数を読む呼び出し（`parse_known_args`。`parse_args` も
 これを通る）で止め、その時点の parser から引数の木を作る。下位の命令（`_SubParsersAction` の選択肢）を辿り、
-下位の命令ごとの引数まで載せる。argparse を使わない副命令は、手書きの引数の表（`manual-args`）の行から木を作る。
+下位の命令ごとの引数まで載せる。argparse を使わないサブコマンドは、手書きの引数の表（`manual-args`）の行から木を作る。
 
 argparse には引数の定義を読む公開の API が無く、`_actions` と `_SubParsersAction` の内部の属性を読む。Python の
-版の上げで属性が変われば `CheckError` で止まり、`tests/checks/test_spec_args.py` も落ちる。
+バージョンの上げで属性が変われば `CheckError` で止まり、`tests/checks/test_spec_args.py` も落ちる。
 """
 
 from __future__ import annotations
@@ -49,7 +49,7 @@ class Arg:
 
 @dataclass(frozen=True)
 class ArgTree:
-    """1 つの parser（副命令か下位の命令）の引数と、下位の命令の木。"""
+    """1 つの parser（サブコマンドか下位の命令）の引数と、下位の命令の木。"""
 
     options: tuple[Arg, ...] = ()
     subcommands: dict[str, ArgTree] = field(default_factory=dict)
@@ -66,15 +66,15 @@ class _Captured(Exception):
 
 
 def extract(module_path: str) -> ArgTree | None:
-    """副命令のモジュールの `main([])` を引数を読む直前で止め、その parser の引数の木を返す。
+    """サブコマンドのモジュールの `main([])` を引数を読む直前で止め、その parser の引数の木を返す。
 
     parser に達せずに `main` が戻るか、`_Captured` 以外の例外（`SystemExit` を含む）で終われば `None`。
     import できなければ `CheckError`。
     """
     try:
         module = importlib.import_module(module_path)
-    except Exception as exc:  # 副命令のモジュールの import の失敗を config_broken にする（送出し直す）
-        raise CheckError(f"副命令のモジュールを読めない: {module_path}: {type(exc).__name__}: {exc}") from exc
+    except Exception as exc:  # サブコマンドのモジュールの import の失敗を config_broken にする（送出し直す）
+        raise CheckError(f"サブコマンドのモジュールを読めない: {module_path}: {type(exc).__name__}: {exc}") from exc
     original = argparse.ArgumentParser.parse_known_args
 
     def capture(self: argparse.ArgumentParser, *args: Any, **kwargs: Any) -> Any:
@@ -86,7 +86,7 @@ def extract(module_path: str) -> ArgTree | None:
             module.main([])
     except _Captured as got:
         return tree_of(got.parser)
-    except BaseException:  # noqa: BLE001, NDF401 外部コマンド: parser に達しない副命令は手書きの引数の表へ回す（決定 3）
+    except BaseException:  # noqa: BLE001, NDF401 外部コマンド: parser に達しないサブコマンドは手書きの引数の表へ回す（決定 3）
         return None
     finally:
         argparse.ArgumentParser.parse_known_args = original  # type: ignore[method-assign]
@@ -186,9 +186,9 @@ def arg_of(action: argparse.Action) -> Arg | None:
 
 
 def from_manual(rows: list[dict[str, Any]]) -> ArgTree:
-    """手書きの引数の表（`manual-args`）の、1 つの副命令の行（呼び方ごとに 1 行）から引数の木を作る。
+    """手書きの引数の表（`manual-args`）の、1 つのサブコマンドの行（呼び方ごとに 1 行）から引数の木を作る。
 
-    行の列 `path` は下位の命令の道（無ければ副命令そのもの）、列 `args` は `<名前>:<型>:<required か optional>:<説明>`
+    行の列 `path` は下位の命令の道（無ければサブコマンドそのもの）、列 `args` は `<名前>:<型>:<required か optional>:<説明>`
     の並び（型は JSON Schema の type）。
     """
     top: tuple[Arg, ...] = ()

@@ -1,10 +1,10 @@
 """承認資料と版上げの材料を、git と GitHub から集める。
 
-- 変わったファイルと含む PR は `<前のリリース>..<ベースブランチ>` の範囲から読む（前のリリースは本番ブランチの先端）
+- 変わったファイルと含む PR は `<前のリリース>..<ベースブランチ>` の範囲から読む（前のリリースは本番ブランチの HEAD）
 - 含む PR の題と CI の結論は、GraphQL のエイリアスで 1 回のクエリにまとめて読む（PR ごとに 1 回ずつ呼ばない）。
   CI の結論は各 PR の最後のコミットの `statusCheckRollup` で、手元の検査の状態やレーンの記録を読まない（#2655）
-- 出し済みの版は、本番ブランチの先端のプラグインの定義の版と、origin のタグの版から読む（ベースブランチの定義の版を
-  そのまま出す版にしない。#2554）
+- 出し済みのバージョンは、本番ブランチの HEAD のプラグインの定義のバージョンと、origin のタグのバージョンから読む（ベースブランチの定義のバージョンを
+  そのまま出すバージョンにしない。#2554）
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from ndf.adapters import git as git_mod
 from ndf.adapters.github import GitHub, text_of
 from ndf.domains.release import changes_decide, checks_decide, included_decide, materials_decide, version_decide
 from ndf.domains.release import plugins as plugins_mod
-from ndf.domains.release.declaration import Declaration
+from ndf.domains.release.ndf_settings import NdfSettings
 
 # 含む PR から読む項目（題と、最後のコミットのチェックの結論）
 PULL_SELECTION = (
@@ -28,17 +28,17 @@ PULL_SELECTION = (
 
 
 class Range(NamedTuple):
-    """リリースの範囲。`since` は前のリリース（本番ブランチの先端）、`until` はベースブランチの先端。"""
+    """リリースの範囲。`since` は前のリリース（本番ブランチの HEAD）、`until` はベースブランチの HEAD。"""
 
     since: str
     until: str
 
 
 def fetch(repo_git: git_mod.Git, name: str) -> None:
-    """origin のブランチを取り込む。取り込めなければ `GitError`。"""
+    """origin のブランチをマージする。マージできなければ `GitError`。"""
     done = repo_git.fetch_branch(git_mod.ORIGIN, name)
     if done.returncode != 0:
-        raise git_mod.GitError(f"origin の {name} を取り込めない: {done.stderr.strip()}")
+        raise git_mod.GitError(f"origin の {name} をマージできない: {done.stderr.strip()}")
 
 
 def _context(node: dict) -> tuple[str, str]:
@@ -78,7 +78,7 @@ def included(repo_git: git_mod.Git, span: Range, production: str) -> list[int]:
 
 
 def _production_version(repo_git: git_mod.Git, plugin: plugins_mod.Plugin, production_ref: str) -> list[str]:
-    """本番ブランチの先端のプラグインの定義（先頭）の版。本番ブランチにまだ定義が無ければ空。"""
+    """本番ブランチの HEAD のプラグインの定義（先頭）のバージョン。本番ブランチにまだ定義が無ければ空。"""
     path = f"{plugin.dir}/{plugins_mod.MANIFESTS[0].as_posix()}"
     if not repo_git.run("ls-tree", "--name-only", git_mod.END_OF_OPTIONS, production_ref, path).strip():
         return []
@@ -90,9 +90,9 @@ def _production_version(repo_git: git_mod.Git, plugin: plugins_mod.Plugin, produ
 
 
 def shipped(repo_git: git_mod.Git, found: Sequence[plugins_mod.Plugin], production_ref: str) -> dict[str, str]:
-    """プラグインごとの出し済みの版（本番ブランチの版とタグの版のうち基底が最も大きいもの。無いプラグインは入れない）。
+    """プラグインごとの出し済みのバージョン（本番ブランチのバージョンとタグのバージョンのうち基底が最も大きいもの。無いプラグインは入れない）。
 
-    タグは origin から 1 回で読む（手元に取り込んだタグに限らない）。
+    タグは origin から 1 回で読む（手元にマージしたタグに限らない）。
     """
     refs = repo_git.run("ls-remote", "--tags", "--refs", git_mod.ORIGIN).splitlines()
     tags = [line.partition("\t")[2].removeprefix("refs/tags/") for line in refs]
@@ -105,7 +105,7 @@ def shipped(repo_git: git_mod.Git, found: Sequence[plugins_mod.Plugin], producti
     return out
 
 
-def changes(paths: Sequence[str], found: Sequence[plugins_mod.Plugin], decl: Declaration) -> list[changes_decide.Change]:
+def changes(paths: Sequence[str], found: Sequence[plugins_mod.Plugin], decl: NdfSettings) -> list[changes_decide.Change]:
     """範囲の変わったファイル（`paths`）のプラグインごとの変化。"""
     return changes_decide.changes(paths, {p.name: p.dir for p in found}, decl.undistributed)
 
@@ -114,11 +114,11 @@ def plan_bumps(
     root: Path,
     found: Sequence[plugins_mod.Plugin],
     change_list: Sequence[changes_decide.Change],
-    decl: Declaration,
+    decl: NdfSettings,
     level: str,
     channel: str,
 ) -> list[version_decide.Planned]:
-    """版を上げるプラグインと次の版（マーケットプレイスの登録の順）。"""
+    """バージョンを上げるプラグインと次のバージョン（マーケットプレイスの登録の順）。"""
     wanted = {c.plugin for c in change_list if changes_decide.needs_bump(c, decl.bump_undistributed)}
     out = []
     for p in found:
@@ -131,5 +131,5 @@ def plan_bumps(
 def clear_shipped(
     planned: Sequence[version_decide.Planned], released: Mapping[str, str], level: str, channel: str
 ) -> list[version_decide.Planned]:
-    """次の版を、出し済みの版 `released`（プラグインの名前 → 版）より大きくなるよう繰り上げる（#2554）。"""
+    """次のバージョンを、出し済みのバージョン `released`（プラグインの名前 → バージョン）より大きくなるよう繰り上げる（#2554）。"""
     return [p._replace(next=version_decide.clear_of(p.next, released.get(p.plugin), level, channel)) for p in planned]

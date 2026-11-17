@@ -96,7 +96,7 @@ def _unquote(node: Any) -> str:
 
 
 @dataclass
-class _Place:
+class _Location:
     """現在地。`cwd` が `None` なら相対パスの起点を決められない。`moving` は中で cd する関数の名前。"""
 
     base: Optional[str]
@@ -104,8 +104,8 @@ class _Place:
     cds: int = 0
     moving: set[str] = field(default_factory=set)
 
-    def copy(self) -> "_Place":
-        return _Place(self.base, self.cwd, self.cds, set(self.moving))
+    def copy(self) -> "_Location":
+        return _Location(self.base, self.cwd, self.cds, set(self.moving))
 
 
 @dataclass(frozen=True)
@@ -129,7 +129,7 @@ class _Scan:
     def take(self, n: Any) -> list[Any]:
         return self.pending.pop(n.id) if n.id in self.pending else []
 
-    def emit(self, value: str, st: _Place) -> None:
+    def emit(self, value: str, st: _Location) -> None:
         if value in NOT_TARGET or value.startswith(("&", "|")) or "$" in value:
             return
         if st.base is None:
@@ -145,24 +145,24 @@ class _Scan:
             value = f"{st.cwd}/{value}"
         self.out.append(normalize_path(value, "/"))
 
-    def node(self, n: Any, st: _Place) -> None:
+    def node(self, n: Any, st: _Location) -> None:
         getattr(self, DISPATCH[n.type] if n.type in DISPATCH else "substitutions")(n, st)
 
-    def plain(self, n: Any, st: _Place) -> None:
+    def plain(self, n: Any, st: _Location) -> None:
         self.command(n, st, [])
 
-    def pipeline(self, n: Any, st: _Place) -> None:
+    def pipeline(self, n: Any, st: _Location) -> None:
         for c in n.named_children:
             self.node(c, st.copy())
 
-    def subshell(self, n: Any, st: _Place) -> None:
+    def subshell(self, n: Any, st: _Location) -> None:
         self.sequence(n, st.copy())
 
-    def negated(self, n: Any, st: _Place) -> None:
+    def negated(self, n: Any, st: _Location) -> None:
         for c in n.named_children:
             self.node(c, st)
 
-    def branch(self, n: Any, st: _Place) -> None:
+    def branch(self, n: Any, st: _Location) -> None:
         """分岐とループ。中で cd したら、その後の現在地を決められない。"""
         before = st.cds
         self.substitutions(n, st)
@@ -172,14 +172,14 @@ class _Scan:
         if st.cds > before:
             st.cwd = None
 
-    def sequence(self, n: Any, st: _Place) -> None:
+    def sequence(self, n: Any, st: _Location) -> None:
         for c in n.named_children:
             if c.type == "comment" or c.type in WORDS:
                 continue
             nxt = c.next_sibling
             self.node(c, st.copy() if nxt is not None and nxt.type == "&" else st)
 
-    def function(self, n: Any, st: _Place) -> None:
+    def function(self, n: Any, st: _Location) -> None:
         name, body = n.child_by_field_name("name"), n.child_by_field_name("body")
         inner = st.copy()
         if body is not None:
@@ -187,17 +187,17 @@ class _Scan:
         if inner.cds > st.cds and name is not None:
             st.moving.add(_text(name))
 
-    def andor(self, n: Any, st: _Place) -> None:
+    def andor(self, n: Any, st: _Location) -> None:
         if self._andor(n, st).conditional_cd:
             # 条件つきの cd（`cmd && cd x`）の後は、cd が走ったかを字面から決められない
             st.cwd = None
 
-    def _side(self, n: Any, st: _Place) -> int:
+    def _side(self, n: Any, st: _Location) -> int:
         before = st.cds
         self.node(n, st)
         return st.cds - before
 
-    def _andor(self, n: Any, st: _Place) -> _AndOr:
+    def _andor(self, n: Any, st: _Location) -> _AndOr:
         kids = [c for c in n.children if c.type != "comment"]
         left, op, right = kids[0], kids[1].type, kids[-1]
         entry = st.cwd
@@ -220,7 +220,7 @@ class _Scan:
             st.cwd = None
         return _AndOr(c1 + c2, _is_cd(right), True, first.conditional_cd)
 
-    def redirected(self, n: Any, st: _Place) -> None:
+    def redirected(self, n: Any, st: _Location) -> None:
         body = n.child_by_field_name("body")
         redirects = [c for c in n.named_children if c != body] + self.take(n)
         if body is not None and body.type in ("list", "pipeline"):
@@ -235,7 +235,7 @@ class _Scan:
         if body is not None:
             self.node(body, st)
 
-    def redirects(self, nodes: list[Any], st: _Place) -> None:
+    def redirects(self, nodes: list[Any], st: _Location) -> None:
         for r in nodes:
             self.substitutions(r, st)
             if r.type == "heredoc_redirect":
@@ -245,7 +245,7 @@ class _Scan:
             if value is not None:
                 self.emit(value, st)
 
-    def substitutions(self, n: Any, st: _Place) -> None:
+    def substitutions(self, n: Any, st: _Location) -> None:
         """語の中のコマンド置換とプロセス置換を、部分シェルとして読む。語そのものが置換（`echo $(…)`）でも読む。"""
         stack = [n]
         while stack:
@@ -255,7 +255,7 @@ class _Scan:
             else:
                 stack.extend(c.children)
 
-    def command(self, n: Any, st: _Place, redirects: list[Any]) -> None:
+    def command(self, n: Any, st: _Location, redirects: list[Any]) -> None:
         redirects = [*redirects, *self.take(n)]
         words: list[str] = []
         for c in n.named_children:
@@ -313,8 +313,8 @@ def _noncontinuing(n: Any) -> bool:
     return name is not None and _text(name) in NONCONT
 
 
-def _apply_cd(st: _Place, args: list[str]) -> None:
-    """`cd` の引数から現在地を進める。宛先を字面から決められなければ `cwd` を `None` にする。"""
+def _apply_cd(st: _Location, args: list[str]) -> None:
+    """`cd` の引数から現在地を進める。移動先を字面から決められなければ `cwd` を `None` にする。"""
     st.cds += 1
     dest = next((a for a in args if a == "--" or not a.startswith("-")), "")
     if dest == "--":
@@ -343,7 +343,7 @@ def command_targets(words: list[str]) -> list[str]:
 
 def _sed_kind(a: str) -> str:
     """sed の引数 1 つの種類: `inplace`・`script_next`（次の語が台本）・`script`・`flag`・`operand`。"""
-    if a == "--in-place" or a.startswith("--in-place="):
+    if a == "--in-location" or a.startswith("--in-location="):
         return "inplace"
     if a in ("-e", "-f", "--expression", "--file"):
         return "script_next"
@@ -368,7 +368,7 @@ def sed_inplace_files(args: list[str]) -> list[str]:
 
 
 def _target_dir(a: str) -> Optional[str]:
-    """`--target-directory=<d>`・`-t<d>` の `<d>`。当たらなければ `None`（`-t` 単独は空文字で、次の語が宛先）。"""
+    """`--target-directory=<d>`・`-t<d>` の `<d>`。当たらなければ `None`（`-t` 単独は空文字で、次の語が書き込み先）。"""
     if a.startswith("--target-directory="):
         return a.split("=", 1)[1]
     if a == "--target-directory":
@@ -398,7 +398,7 @@ def shell_targets(command: str, base: str = "") -> list[str]:
     if root.has_error:
         return []
     scan = _Scan()
-    scan.node(root, _Place(base if base else None, base if base else None))  # noqa: NDF501 利用者の入力: 起点の無いコマンドは置き場を決めない
+    scan.node(root, _Location(base if base else None, base if base else None))  # noqa: NDF501 利用者の入力: 起点の無いコマンドは保存先を決めない
     return scan.out
 
 

@@ -1,4 +1,4 @@
-"""チェックアウトの置き場の形の番号と、置き場のロック（決定 85・I10・I11）。"""
+"""チェックアウトの保存先の形の番号と、保存先のロック（決定 85・I10・I11）。"""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ def _snapshot(base: Path) -> dict[str, bytes]:
 
 @pytest.fixture
 def old_store(root):
-    """format.json の無い、入れ替えの前の置き場（今の NDF の .git/ndf/state にあたる）。"""
+    """format.json の無い、入れ替えの前の保存先（今の NDF の .git/ndf/state にあたる）。"""
     (root / "dbos").mkdir(parents=True)
     (root / "dbos" / "run-old.sqlite").write_bytes(b"old")
     (root / "progress.sqlite").write_bytes(b"progress")
@@ -102,9 +102,9 @@ def _hold(path: Path, mode: int):
 @pytest.mark.parametrize(
     ("lock", "mode"),
     [
-        ("../state.lock", fcntl.LOCK_SH),  # 置き場を使うほかのプロセス
-        ("dbos/run-old.lock", fcntl.LOCK_EX),  # 鍵のロックを持つ今の NDF（10.x）の耐久ワークフロー
-        ("progress.sqlite.lock", fcntl.LOCK_SH),  # 別のチェックアウトから進行表の DB を開いたプロセス
+        ("../state.lock", fcntl.LOCK_SH),  # 保存先を使うほかのプロセス
+        ("dbos/run-old.lock", fcntl.LOCK_EX),  # キーのロックを持つ今の NDF（10.x）の耐久ワークフロー
+        ("progress.sqlite.lock", fcntl.LOCK_SH),  # 別のチェックアウトからステートマシンの DB を開いたプロセス
     ],
 )
 def test_retire_stops_with_store_in_use_while_a_lock_is_held(old_store, lock, mode):
@@ -123,7 +123,7 @@ def test_retire_stops_with_store_in_use_while_a_lock_is_held(old_store, lock, mo
 
     ready = durable.prepare_store(old_store, NOW)
     assert ready.retired_to is not None
-    # 置き場のロックと検査と走査のロックは state/ の外にあり、退避で動かない
+    # 保存先のロックと検査と走査のロックは state/ の外にあり、退避で動かない
     assert (old_store.parent / durable.STORE_LOCK).exists()
     with durable.maint_lock(old_store, wait=False) as maint:
         assert maint == old_store.parent / durable.MAINT_LOCK

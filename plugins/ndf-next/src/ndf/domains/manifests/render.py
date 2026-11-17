@@ -5,11 +5,11 @@
 - `definition` があるランタイム: その定義（`plugin.json`）の `skills` に、そのランタイムへ配り `skills/` に実体がある
   Skill を表の並びで書く。null のランタイム（`skills/` をすべて読む）の定義は書かない
 - `policy` があるランタイム: そのランタイムへ配る Skill のうち、明示の指示でだけ起動するもの（frontmatter の
-  `disable-model-invocation` が真）の置き場に、暗黙の起動を止める policy と、`argument-hint` があれば明示の起動の
+  `disable-model-invocation` が真）の保存先に、暗黙の起動を止める policy と、`argument-hint` があれば明示の起動の
   既定の文を書く
 
-`skills/` にまだ無い Skill（作り直しで移す前のもの）は配らない。表に無い Skill の置き場は誤りにし、要らなくなった
-policy のファイルは照合で違いとして出し、作り直しで消す。
+`skills/` にまだ無い Skill（作り直しで移す前のもの）は配らない。表に無い Skill の保存先は誤りにし、要らなくなった
+policy のファイルは検証で違いとして出し、作り直しで消す。
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ from ndf.domains.manifests import front_matter, table
 
 
 class RenderError(Exception):
-    """表と実体が食い違う（表に無い Skill の置き場がある）・定義が読めない。"""
+    """表と実体が食い違う（表に無い Skill の保存先がある）・定義が読めない。"""
 
 
 def present(plugin_root: Path) -> set[str]:
@@ -44,7 +44,7 @@ def policy(fields: dict) -> Optional[str]:
 
 
 def expected(plugin_root: Path) -> dict[Path, str]:
-    """作るファイル → 中身。表に無い Skill の置き場があれば `RenderError`。"""
+    """作るファイル → 中身。表に無い Skill の保存先があれば `RenderError`。"""
     return _expected(plugin_root)[1]
 
 
@@ -54,7 +54,7 @@ def _expected(plugin_root: Path) -> tuple[table.Table, dict[Path, str]]:
     have = present(plugin_root)
     unlisted = sorted(have - {s.name for s in found.skills})
     if unlisted:
-        raise RenderError(f"配る Skill の表（{table.TABLE_REL}）に無い Skill の置き場がある: {', '.join(unlisted)}")
+        raise RenderError(f"配る Skill の表（{table.TABLE_REL}）に無い Skill の保存先がある: {', '.join(unlisted)}")
     out: dict[Path, str] = {}
     for runtime in found.runtimes:
         names = [n for n in found.for_runtime(runtime.name) if n in have]
@@ -123,7 +123,7 @@ def _write_changed(want: dict[Path, str]) -> list[Path]:
 
 
 def _remove(path: Path) -> Path:
-    """ファイルを消し、置き場が空になれば置き場も消す。消したファイルを返す。"""
+    """ファイルを消し、保存先が空になれば保存先も消す。消したファイルを返す。"""
     path.unlink()
     if not any(path.parent.iterdir()):
         path.parent.rmdir()

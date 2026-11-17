@@ -9,8 +9,8 @@ plugins/ndf-next/bin/ndf check --base origin/develop
 - 見るファイルを 1 回集め、`.py` の構文木を 1 ファイルにつき 1 回だけ作る。すべての規則が同じ木を読む
 - 兆候は初日から 0 件で、基準のファイルも増やさないラチェットも持たない。見つけた兆候はすべて違反になる
 - 規則のしきい値と名前の一覧は `rules.json` にあり、規則の関数は値を写さずにそこから読む
-- 結果 JSON を標準出力の最後の 1 行に出す。形は結果の契約（`ndf.contracts.result`）で、出す前に確かめる。違反は 1 件につき 1 行を標準エラーへ出す
-- 止まったときの止まった理由（`cause`）と終了コード:
+- 結果 JSON を標準出力の最後の 1 行に出す。形は結果のコントラクト（`ndf.contracts.result`）で、出す前に確かめる。違反は 1 件につき 1 行を標準エラーへ出す
+- 止まったときの停止理由（`cause`）と終了コード:
 
 | 場合 | `status` | `cause.kind` | 終了コード |
 | --- | --- | --- | ---: |
@@ -29,13 +29,13 @@ plugins/ndf-next/bin/ndf check --base origin/develop
 | `tests/` の下の `.py` | 行数の上限・I3・禁止語 |
 | `bin/`・`hooks/` のスクリプト | 行数の上限・I1・禁止語 |
 | そのほかの文字のファイル（`.md`・`.json` など。`uv.lock` を除く） | 禁止語。`skills/`・`agents/` の `.md` は書かれた呼び出し（spec-skill） |
-| 契約の表・スキーマ・生成物・`bin/` | 規約の規則（spec-docs・spec-decl・spec-io・spec-skill・spec-public） |
+| コントラクトの表・スキーマ・生成物・`bin/` | 規約の規則（spec-docs・spec-decl・spec-io・spec-skill・spec-public） |
 
 ## 兆候の規則
 
 兆候とは、AI が書きがちで、読みにくさや障害の隠れにつながる作りである。次の表の 1 行に当たる箇所を 1 件と数える。
 
-| 規則 | 兆候と数えるもの | 数える行 | 境界の印 |
+| 規則 | 兆候と数えるもの | 数える行 | 抑制コメント |
 | --- | --- | --- | --- |
 | `NDF201` | ループ（`for`・`while`・内包表記）の本体の中の外部呼び出し。外部呼び出しは、名前が `calls` にある関数か、根の名前が `modules` にある属性の呼び出し | 呼び出しを直に含む最も内側のループの行。1 つのループで 1 件 | 境界の種類か `上限` |
 | `NDF301` | `elif` が 4 本以上続く連鎖 | 連鎖の先頭の `if` | 受けない |
@@ -54,11 +54,11 @@ plugins/ndf-next/bin/ndf check --base origin/develop
 
 入れ子の関数・クラス・`lambda` は、外の関数の長さ以外では外の関数に数えず、それぞれ 1 つの関数として数える。
 
-**`S110`・`S112`・`BLE001`・`E722`・`PLR0912`・`PLR1702`・`PLR0913` は ruff が数える**（設計の決定 36。既存の規則で見られるものは自作しない）。`rules.json` で `by` が `ruff` の規則で、しきい値は `ruff.config` にある。見るファイルすべてへ ruff を 1 回だけ起動する（`lint.py`）。ruff には `# noqa` を読ませず（`--ignore-noqa`）、下の境界の印は NDF の規則として `marks` が当てる。ruff が `except` の兆候を型の式の行へ置いても（複数行の `except (` など）、`lint` が構文木の `except` の行へ揃えてから印を当てる。
+**`S110`・`S112`・`BLE001`・`E722`・`PLR0912`・`PLR1702`・`PLR0913` は ruff が数える**（設計の決定 36。既存の規則で見られるものは自作しない）。`rules.json` で `by` が `ruff` の規則で、しきい値は `ruff.config` にある。見るファイルすべてへ ruff を 1 回だけ起動する（`lint.py`）。ruff には `# noqa` を読ませず（`--ignore-noqa`）、下の抑制コメントは NDF の規則として `suppressions` が当てる。ruff が `except` の兆候を型の式の行へ置いても（複数行の `except (` など）、`lint` が構文木の `except` の行へ揃えてから抑制コメントを当てる。
 
-### 境界の印
+### 抑制コメント
 
-兆候が境界（外から来る失敗や値を受ける所）にあって直せないときは、行末に印を付けて外す。
+兆候が境界（外から来る失敗や値を受ける所）にあって直せないときは、行末に抑制コメントを付けて外す。
 
 ```python
 data = os.environ.get("X", "")  # noqa: NDF502 利用者の入力: 未設定は空として扱う
@@ -66,9 +66,9 @@ data = os.environ.get("X", "")  # noqa: NDF502 利用者の入力: 未設定は�
 
 - 形は `# noqa: <規則>[,<規則>] <境界の種類>: <理由>`。境界の種類は `外部コマンド`・`ネットワーク`・`利用者の入力`・`ファイル`
 - `NDF201` だけは `# noqa: NDF201 上限: <件数と根拠>` も使える
-- 「受けない」の規則には印が効かない。直す
-- `except` の規則は、受ける型がすべて内部の型（`TypeError`・`KeyError` など）なら印が効かない。握りつぶさずに送出する
-- 兆候の無い行の印は `mark-unused` の違反になる
+- 「受けない」の規則には抑制コメントが効かない。直す
+- `except` の規則は、受ける型がすべて内部の型（`TypeError`・`KeyError` など）なら抑制コメントが効かない。握りつぶさずに送出する
+- 兆候の無い行の抑制コメントは `suppression-unused` の違反になる
 
 ## 構造の規則
 
@@ -84,28 +84,28 @@ data = os.environ.get("X", "")  # noqa: NDF502 利用者の入力: 未設定は�
 
 | 規則 | 違反と数えるもの |
 | --- | --- |
-| `const-fact` | 2 つ以上のファイルの最上位の大文字の定数が同じ事実を持つ組。種類は `same-str`（4 字以上の同じ文字列）・`same-set`（同じ文字列の集まり）・`same-num`（同じ名前で同じ数）・`subset`（集まりが別のファイルの集まりに含まれる）・`member`（文字列が別のファイルの集まりの要素）・`table-set`（事実の表の `id` を 2 つ以上含む集まり）・`table-str`（事実の表の `id` に等しい 4 字以上の文字列）。`shared_names` が真の表（`id` が他の名前空間と共有する名前）は `table-set`・`table-str` の照合をしない |
-| `fact-table` | 事実の表（`contracts/facts/*.json` と `contracts/domains/*.json`。`*.schema.json` を除く）が、`contracts/facts/fact.schema.json`（表の共通の形）に合わない・読めない・行の並び `rows` が無い・行に文字列の `id` が無い・`id` が重なる・表の名前が 2 つの置き場で重なる |
+| `const-fact` | 2 つ以上のファイルの最上位の大文字の定数が同じ事実を持つ組。種類は `same-str`（4 字以上の同じ文字列）・`same-set`（同じ文字列の集まり）・`same-num`（同じ名前で同じ数）・`subset`（集まりが別のファイルの集まりに含まれる）・`member`（文字列が別のファイルの集まりの要素）・`table-set`（事実の表の `id` を 2 つ以上含む集まり）・`table-str`（事実の表の `id` に等しい 4 字以上の文字列）。`shared_names` が真の表（`id` が他の名前空間と共有する名前）は `table-set`・`table-str` の検証をしない |
+| `fact-table` | 事実の表（`contracts/facts/*.json` と `contracts/domains/*.json`。`*.schema.json` を除く）が、`contracts/facts/fact.schema.json`（表の共通の形）に合わない・読めない・行の並び `rows` が無い・行に文字列の `id` が無い・`id` が重なる・表の名前が 2 つの保存先で重なる |
 
 重複は片方をもう片方から読む形へ直す（定数を import する・事実の表から読む）。
 
 ## 子の表の規則
 
-`child-deps` は、作り直しの子の表のコピー `children.json` と、コードの import・子の順番とレーンを照らす（#3347 の決定 97・IG1・IG2）。表は子ごとに持つサブパッケージ `packages`・先に要る子 `needs`・流す順番 `order`・レーン `lane`・閉じたか `closed` を持ち、共有の表の書き手を `tables` に持つ。正本は [issue-3347-design-detail.md](../../../../../issues/issue-3347-design-detail.md) の「実装計画」と、[issue-3395-design.md](../../../../../issues/issue-3395-design.md) の「構成要素」が足して分けた子である。表を変えるときは、正本を直す設計 PR を先に通す。
+`child-deps` は、作り直しの子の表のコピー `children.json` と、コードの import・子の順番とレーンを照らす（#3347 の決定 97・IG1・IG2）。表は子ごとに持つサブパッケージ `packages`・先に要る子 `needs`・流す順番 `order`・レーン `lane`・閉じたか `closed` を持ち、共有の表の書き手を `tables` に持つ。SSOT は [issue-3347-design-detail.md](../../../../../issues/issue-3347-design-detail.md) の「実装計画」と、[issue-3395-design.md](../../../../../issues/issue-3395-design.md) の「構成要素」が足して分けた子である。表を変えるときは、SSOT を直す設計 PR を先に通す。
 
-| 違反と数えるもの | 指摘の置き場 |
+| 違反と数えるもの | 指摘の保存先 |
 | --- | --- |
-| `src/` のモジュールに持ち主の子が無い（`packages` が最も長く一致する子が持ち主。パッケージの `__init__` を除く） | そのファイルの 1 行目 |
+| `src/` のモジュールにオーナーの子が無い（`packages` が最も長く一致する子がオーナー。パッケージの `__init__` を除く） | そのファイルの 1 行目 |
 | 子 A のモジュールが、A の `needs` の推移の閉包に無い子のモジュールを読む（IG1）。A の追補 `A+` があれば、`A+` の閉包も A のモジュールが読んでよい | import の行 |
 | 閉じていない子が、同じレーン・同じ順番に 3 本以上ある（IG2。上限は `rules.json` の `child_deps.max_per_slot`） | `children.json` の先頭の子の行 |
 | 閉じていない子の順番が、閉じていない先に要る子の順番より大きくない（IG2。閉じた子は流し終えたので、その子の順番も、その子を先に要る子の順番も問わない） | `children.json` のその子の行 |
-| 同じ表（`tables`）へ書く閉じていない 2 つの子が、どちらも他方の閉包に無い（並行で書く。#3378）。順序を付け、後に流れる子が先の子のマージを取り込んでから衝突を解く | `children.json` の後の子の行 |
+| 同じ表（`tables`）へ書く閉じていない 2 つの子が、どちらも他方の閉包に無い（並行で書く。#3378）。順序を付け、後に流れる子が先の子のマージをマージしてから衝突を解く | `children.json` の後の子の行 |
 
 `children.json` が無い・形が違う・知らない子を指す・`needs` に輪があるときは、検査を止める（`config_broken`）。
 
 ## 規約の規則
 
-宣言（`.ndf/`）と入出力（副命令・環境変数・受け渡しのファイル・hook・Skill・起動スクリプト）の規約を、コードと正本の表から生成し、食い違いを落とす（#3518・#3519）。生成物は契約のページ（`docs/contracts/*.md`）と副命令ごとの引数のスキーマ（`contracts/schemas/io/*.args.schema.json`）で、置き場は `rules.json` の `spec.generated` が持つ。契約の置き場（`contracts/`）を持たないプラグインには当てない。
+設定（`.ndf/`）と入出力（サブコマンド・環境変数・受け渡しのファイル・hook・Skill・起動スクリプト）の規約を、コードと SSOT の表から生成し、食い違いを落とす（#3518・#3519）。生成物はコントラクトのページ（`docs/contracts/*.md`）とサブコマンドごとの引数のスキーマ（`contracts/schemas/io/*.args.schema.json`）で、保存先は `rules.json` の `spec.generated` が持つ。コントラクトの保存先（`contracts/`）を持たないプラグインには当てない。
 
 ```bash
 plugins/ndf-next/bin/ndf check --write-spec   # 生成物を書き直してから検査する
@@ -114,17 +114,17 @@ plugins/ndf-next/bin/ndf check                # 書かずに検査する（CI �
 
 | 規則 | 違反と数えるもの |
 | --- | --- |
-| `spec-docs` | コミットされた生成物が、生成し直した中身と違う・無い・読めない。生成物の置き場に生成されないファイルが残る |
-| `spec-decl` | 置き場の表（`contracts/domains/ndf-files.json`）の宣言の行が、スキーマ（`contracts/schemas/declarations/<id>.schema.json`）か節の表（`<id>.sections.json`）を持たない。スキーマの最上位の非推奨でないキーが表の `keys` と食い違う。`main_keys` が `keys` に無い。キーが型か説明を持たない。注釈 `x-ndf-place`・`x-ndf-read-by`・例が無い。検査を打つリポジトリの `.ndf/` の実物がスキーマに通らない（ファイルと JSON Pointer） |
-| `spec-io` | 副命令が結果のスキーマ（`contracts/schemas/io/<副命令>.result.schema.json`）を持たない。引数の出所が argparse の取り出しと手書きの引数の表（`contracts/domains/manual-args.json`）の両方か、どちらでもない。`src/` のコードが名前の文字列で読む環境変数が環境変数の表に無い。`bin/` のファイルが起動スクリプトの表（`contracts/domains/launchers.json`）に無い |
-| `spec-skill` | 実体のある配る Skill が Skill の入出力の表（`contracts/domains/skill-io.json`）に行を持たない。公開する Skill の行が `args`・`env` を持つ。`skills/`・`agents/` の `.md` に書かれた `ndf <副命令>` の呼び出しが、副命令・下位の命令・引数の名前で規約に当たらない（値の型は見ない） |
-| `spec-public` | 公開する面の表（`contracts/domains/entrypoints.json`）の行が規約の項目に当たらない（順番が `caller-first` の行と種類 `spec` の行を除く）。規約の置き場 3 つ（`docs/contracts`・`contracts/schemas/declarations`・`contracts/schemas/io`）を指す種類 `spec` の行がちょうど 1 行ずつでないか、ディレクトリが無い |
+| `spec-docs` | コミットされた生成物が、生成し直した中身と違う・無い・読めない。生成物の保存先に生成されないファイルが残る |
+| `spec-decl` | 保存先の表（`contracts/domains/ndf-files.json`）の設定の行が、スキーマ（`contracts/schemas/ndf-settings/<id>.schema.json`）かセクションの表（`<id>.sections.json`）を持たない。スキーマの最上位の非推奨でないキーが表の `keys` と食い違う。`main_keys` が `keys` に無い。キーが型か説明を持たない。注釈 `x-ndf-location`・`x-ndf-read-by`・例が無い。検査を打つリポジトリの `.ndf/` の実物がスキーマに通らない（ファイルと JSON Pointer） |
+| `spec-io` | サブコマンドが結果のスキーマ（`contracts/schemas/io/<サブコマンド>.result.schema.json`）を持たない。引数の出所が argparse の取り出しと手書きの引数の表（`contracts/domains/manual-args.json`）の両方か、どちらでもない。`src/` のコードが名前の文字列で読む環境変数が環境変数の表に無い。`bin/` のファイルが起動スクリプトの表（`contracts/domains/launchers.json`）に無い |
+| `spec-skill` | 実体のある配る Skill が Skill の入出力の表（`contracts/domains/skill-io.json`）に行を持たない。公開する Skill の行が `args`・`env` を持つ。`skills/`・`agents/` の `.md` に書かれた `ndf <サブコマンド>` の呼び出しが、サブコマンド・下位の命令・引数の名前で規約に当たらない（値の型は見ない） |
+| `spec-public` | 公開する面の表（`contracts/domains/entrypoints.json`）の行が規約の項目に当たらない（順番が `caller-first` の行と種類 `spec` の行を除く）。規約の保存先 3 つ（`docs/contracts`・`contracts/schemas/ndf-settings`・`contracts/schemas/io`）を指す種類 `spec` の行がちょうど 1 行ずつでないか、ディレクトリが無い |
 
-副命令の引数は、副命令の `main` を argparse が引数を読む呼び出しで止めて取り出す（`spec_args`）。結果の形は、テストの間に出たすべての結果 JSON を `tests/conftest.py` が結果の契約と結果のスキーマで確かめる。
+サブコマンドの引数は、サブコマンドの `main` を argparse が引数を読む呼び出しで止めて取り出す（`spec_args`）。結果の形は、テストの間に出たすべての結果 JSON を `tests/conftest.py` が結果のコントラクトと結果のスキーマで確かめる。
 
 ## 禁止語の規則
 
-`banned-word` は、用語集が廃止した語（各語の `deprecated`）と禁止語（用語集の設定 `.ndf/glossary.json` の `check.banned.words`）を、プラグインの下の文字のファイルの行から拾う。用語集の置き場は用語集の設定の `source` から求める。ASCII の語とカタカナだけの語は、同じ字種の語の内側に当てない。避ける語の例として廃止した語を挙げる文書は、`rules.json` の `words.examples` にファイル（プラグインの根からのパス）・外す語・理由を書き、そのファイルのその語だけを外す。
+`banned-word` は、用語集が廃止した語（各語の `deprecated`）と禁止語（用語集の設定 `.ndf/glossary.json` の `check.banned.words`）を、プラグインの下の文字のファイルの行から拾う。用語集の保存先は用語集の設定の `source` から求める。ASCII の語とカタカナだけの語は、同じ字種の語の内側に当てない。避ける語の例として廃止した語を挙げる文書は、`rules.json` の `words.examples` にファイル（プラグインの根からのパス）・外す語・理由を書き、そのファイルのその語だけを外す。
 
 ## 不変条件
 
@@ -133,19 +133,19 @@ plugins/ndf-next/bin/ndf check                # 書かずに検査する（CI �
 | `I1` | `src/` の `.py` の文字列の定数（docstring を除く）と、`bin/`・`hooks/` のスクリプトのコメントでない行が、自分の名前を持つ箇所（下の「I1 の名前の集合」） |
 | `I2` | 新しいプラグインの子の PR（`--base` の起点と `HEAD` の merge-base からの差分が新しいプラグインも変える）が、旧いプラグインのディレクトリ（`plugins/ndf/`）の下を変えた差分。ファイルごとに 1 件 |
 | `port` | 旧いプラグインのディレクトリの下を変えた差分で、PR 本文に移す先の Issue か移さない理由の行が無い（下の「旧いプラグインの直しを移す」）。PR ごとに 1 件 |
-| `I3` | 自分のパッケージ・標準ライブラリ・`pyproject.toml` が宣言した依存の外のモジュールを読む import と、旧いプラグインのパス（`plugins/ndf`）を持つ文字列の定数 |
+| `I3` | 自分のパッケージ・標準ライブラリ・`pyproject.toml` が定義した依存の外のモジュールを読む import と、旧いプラグインのパス（`plugins/ndf`）を持つ文字列の定数 |
 
 ### I1 の名前の集合
 
 I1 は入れ替え（S2）の前後で同じ箇所を当てる。開発の間のプラグイン名は `ndf11`、ディレクトリは `plugins/ndf-next/`、入れ替えの後の名前は `identity.FINAL_NAME`（`ndf`）である。
 
-| 照合 | 名前 |
+| 検証 | 名前 |
 | --- | --- |
 | 文字列そのもの（完全一致） | `plugin.json` の `name`・`identity.FINAL_NAME`・`identity.FIXED_WORDS` の語 |
 | パスの一部（`/<名前>`・`<名前>/`）と前置き（`<名前>:`） | `plugin.json` の `name`・`identity.FINAL_NAME`・ディレクトリ名 |
 
-- Python のパッケージの形（`src/ndf`・`ndf.` で始まるモジュール名）は照合しない。パッケージ名はプラグイン名から切り離した固定の名前である
-- 宣言の置き場 `.ndf`・エントリポイントの名前 `ndf`（`bin/ndf`）・工程の定義の名前空間 `ndf` は、プラグイン名から求めない固定の語で、`identity.FIXED_WORDS` に置く。コードはこの表から引き、I1 は `identity.py` の `FIXED_WORDS` と `FINAL_NAME` の定義の行だけを通す
+- Python のパッケージの形（`src/ndf`・`ndf.` で始まるモジュール名）は検証しない。パッケージ名はプラグイン名から切り離した固定の名前である
+- 設定の保存先 `.ndf`・エントリポイントの名前 `ndf`（`bin/ndf`）・工程の定義の名前空間 `ndf` は、プラグイン名から求めない固定の語で、`identity.FIXED_WORDS` に置く。コードはこの表から引き、I1 は `identity.py` の `FIXED_WORDS` と `FINAL_NAME` の定義の行だけを通す
 - CI（`.github/workflows/ndf-next.yml` の `ndf-next-tests`。6 つのジョブがそれぞれ自分のファイルを元と写しで打つ）は、プラグインを一時ディレクトリの `plugins/ndf/` へ写して `plugin.json` の `name` を `identity.FINAL_NAME` にし、検査とテストを打つ。I1 の指摘の集合（プラグインの根からの相対パスと行）が元と違えば落ちる
 
 ### I1 と Skill 本文の前置き
@@ -154,13 +154,13 @@ I1 は Skill 本文（`skills/`）とエージェント定義（`agents/`）を�
 
 ### I2 と即時修正
 
-旧いプラグインを即時修正で変えた PR は、PR 本文に次の印の行を書く。印の行があり理由が空でなければ、I2 は差分を違反にしない。
+旧いプラグインを即時修正で変えた PR は、PR 本文に次の抑制コメントの行を書く。抑制コメントの行があり理由が空でなければ、I2 は差分を違反にしない。
 
 ```text
 即時修正（plugins/ndf）: <直した不具合と、ここで直す理由>
 ```
 
-旧いプラグインだけを変える PR（新しいプラグインを変えない）には I2 を当てない。ラベルでなく本文の印にしたのは、理由を同じ所に残せるためである。PR 本文は GitHub の事象の JSON（`--event`。既定は環境変数 `GITHUB_EVENT_PATH`）から読む。本文を書き直した後は CI を打ち直す。
+旧いプラグインだけを変える PR（新しいプラグインを変えない）には I2 を当てない。ラベルでなく本文の抑制コメントにしたのは、理由を同じ所に残せるためである。PR 本文は GitHub の事象の JSON（`--event`。既定は環境変数 `GITHUB_EVENT_PATH`）から読む。本文を書き直した後は CI を打ち直す。
 
 ### 旧いプラグインの直しを移す
 

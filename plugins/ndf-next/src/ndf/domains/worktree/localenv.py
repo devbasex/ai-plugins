@@ -1,12 +1,12 @@
-"""worktree でのローカルの動作検証（宣言の `localenv` 節。実行系は `kind: compose` だけを扱う）。
+"""worktree でのローカルの動作検証（設定の `localenv` セクション。実行系は `kind: compose` だけを扱う）。
 
-- `setup`: 宣言の `localenv.copy_from_main`・`copy_as_real` に従って設定と依存物を worktree へ複製する（複製の手順は `deps` と同じ）
-- `verify`: ローカル環境に載っているコードと対象の worktree のブランチを照合する（判断は `localenv_decide.verify`）
-- `healthcheck`: 照合が一致したときだけ、宣言の `localenv.healthcheck` をメインディレクトリで打つ
+- `setup`: 設定の `localenv.copy_from_main`・`copy_as_real` に従って設定と依存物を worktree へ複製する（複製の手順は `deps` と同じ）
+- `verify`: ローカル環境に載っているコードと対象の worktree のブランチを検証する（判断は `localenv_decide.verify`）
+- `healthcheck`: 検証が一致したときだけ、設定の `localenv.healthcheck` をメインディレクトリで打つ
 - `aim`: ローカル環境が指すコードを対象の worktree へ向ける（`layout: indirect` だけ。`direct`・`host` は手順書で行う）
 - `mode`: 対象の変更の一覧から、相乗りか分離かを提示する（判断は `localenv_decide.mode`）
 
-宣言・`localenv` 節が無い、または `kind` が `compose` でないリポジトリでは、どれも `None`（適用外）を返す。
+設定・`localenv` セクションが無い、または `kind` が `compose` でないリポジトリでは、どれも `None`（適用外）を返す。
 """
 
 from __future__ import annotations
@@ -16,19 +16,19 @@ from pathlib import Path
 from typing import Any, Optional
 
 from ndf.adapters.git import Git
-from ndf.domains.worktree import container, declaration, deps, localenv_decide, repo
+from ndf.domains.worktree import container, ndf_settings, deps, localenv_decide, repo
 
-SECTION = declaration.LOCALENV
+SECTION = ndf_settings.LOCALENV
 KIND = "compose"
 
 
 class LocalenvError(Exception):
-    """処理できない（宣言の値が足りない・実行系が無い・複製やコマンドが失敗した）。"""
+    """処理できない（設定の値が足りない・実行系が無い・複製やコマンドが失敗した）。"""
 
 
 @dataclass(frozen=True)
 class Target:
-    """対象の worktree と、メインディレクトリ・`localenv` 節。"""
+    """対象の worktree と、メインディレクトリ・`localenv` セクション。"""
 
     path: Path
     main_dir: Path
@@ -47,15 +47,15 @@ def target(path: Path) -> Optional[Target]:
     """対象（`path` が worktree の下のディレクトリでも、worktree の根）。適用外なら `None`。"""
     loc = repo.locate(Git(path))
     main_dir = loc.main_dir
-    decl = declaration.load(main_dir)
+    decl = ndf_settings.load(main_dir)
     section = decl.section(SECTION) if decl is not None else None
     if section is None or section.get("kind") != KIND:
         return None
     return Target(loc.top, main_dir, section)
 
 
-def compose_files(decl: declaration.Declaration) -> tuple[str, ...]:
-    """`localenv.compose_files` の起動の定義（空でない文字列だけ）。節・配列が無ければ空。"""
+def compose_files(decl: ndf_settings.NdfSettings) -> tuple[str, ...]:
+    """`localenv.compose_files` の起動の定義（空でない文字列だけ）。セクション・配列が無ければ空。"""
     local = decl.section(SECTION)
     files = local.get("compose_files") if local is not None else None
     return tuple(f for f in files if isinstance(f, str) and f) if isinstance(files, list) else ()
@@ -83,7 +83,7 @@ def verify(t: Target, shell: container.Shell) -> localenv_decide.Verdict:
 
 
 def healthcheck(t: Target, shell: container.Shell) -> tuple[localenv_decide.Verdict, Optional[int]]:
-    """照合の結果と、動作確認のコマンドの終了コード（打たなければ `None`）。"""
+    """検証の結果と、動作確認のコマンドの終了コード（打たなければ `None`）。"""
     got = verify(t, shell)
     command = t.text("healthcheck")
     if got.result != localenv_decide.MATCH or command is None:
@@ -131,7 +131,7 @@ def aim(t: Target, shell: container.Shell) -> int:
         raise LocalenvError("localenv.layout が indirect・direct・host のどれでもない")
     if src_target is None:
         raise LocalenvError("localenv.src_target が要る")
-    # 宣言の `compose_project`（名前を決めて起動するプロジェクト）。無ければメインディレクトリの名前から作る
+    # 設定の `compose_project`（名前を決めて起動するプロジェクト）。無ければメインディレクトリの名前から作る
     project = container.compose_project(t.text("compose_project") or t.main_dir.name)
     if project is None:
         raise LocalenvError("コンテナのプロジェクト名を決められない（localenv.compose_project を書く）")

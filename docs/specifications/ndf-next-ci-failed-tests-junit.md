@@ -192,7 +192,7 @@ suite の `collect_command` の終了コードが `collect_exit_codes`（無い�
 
 ## データ・設定
 
-設定ファイル（`.ndf/project.json`。スキーマは `contracts/schemas/declarations/project.schema.json`）:
+設定ファイル（`.ndf/project.json`。スキーマは `contracts/schemas/ndf-settings/project.schema.json`）:
 
 | キー | 型 | 意味 |
 | --- | --- | --- |
@@ -209,7 +209,7 @@ CI の結果 JSON（`ndf ci watch` が `test_failed` で止まったとき。ス
 | `junit_artifacts` | 設定にあるときだけ | 読んだ glob |
 | `log_error` | ジョブかワークフローの実行を読めないチェックがあるときだけ | その理由（2 件以上は `; ` でつなぐ） |
 
-契約のページ（`docs/contracts/commands.md`・`declarations.md`）はスキーマから `ndf check` が作り直す。
+契約のページ（`docs/contracts/commands.md`・`ndf-settings.md`）はスキーマから `ndf check` が作り直す。
 
 ## エラー処理
 

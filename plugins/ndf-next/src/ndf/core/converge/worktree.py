@@ -2,9 +2,9 @@
 
 - 作った直後に `git worktree lock` を掛ける。lock は git の管理情報のファイルで、`/tmp` を共有しない別の環境の
   `git worktree prune` も lock した登録は消さない。lock を掛けられなければ worktree を外して止める
-- lock の理由は作業の鍵（`ndf <tool> pr<N>`）に、掛けたホストと時刻（`host=<名前> at=<ISO 8601>`）を足したもの。
-  `lock_of` は鍵を返し、`holder_of` がホストと時刻を返す
-- 持ち主のいない lock（NDF の lock で、掛けたホストがこのホストで、作業場所のディレクトリが無いもの）は
+- lock の理由は作業のキー（`ndf <tool> pr<N>`）に、掛けたホストと時刻（`host=<名前> at=<ISO 8601>`）を足したもの。
+  `lock_of` はキーを返し、`holder_of` がホストと時刻を返す
+- オーナーのいない lock（NDF の lock で、掛けたホストがこのホストで、作業場所のディレクトリが無いもの）は
   `sweep_orphans` が外して登録を片付ける。別のホストの lock は、そのホストの作業場所が見えないだけなので触らない
 - 打つ前に、worktree の `.git` が指す管理情報（`HEAD`・`commondir`）があるかを確かめ、無ければ
   `WorktreeUnregistered`（worktree のパスと `.git` が指す先）で止める。「リポジトリを決められない」とは書かない
@@ -33,7 +33,7 @@ from ndf.adapters import git
 LOCK_PREFIX = f"{identity.FIXED_WORDS['entrypoint']} "
 # lock の理由（例: `ndf cross-review pr3101`）
 LOCK_REASON = LOCK_PREFIX + "{tool} pr{pr}"
-# lock の理由の末尾の持ち主（掛けたホストと時刻）
+# lock の理由の末尾のオーナー（掛けたホストと時刻）
 _HOLDER = re.compile(r" host=(?P<host>\S+) at=(?P<at>\S+)$")
 # worktree の `.git` ファイルの 1 行
 _GITDIR = re.compile(r"^gitdir:\s*(?P<path>.+?)\s*$", re.MULTILINE)
@@ -88,7 +88,7 @@ def conflict_detail(synced: SyncResult) -> str:
 
 
 class Holder(NamedTuple):
-    """lock の理由を分けたもの。`key` は作業の鍵、`host`・`at` は掛けたホストと時刻（持ち主の無い旧い形では None）。"""
+    """lock の理由を分けたもの。`key` は作業のキー、`host`・`at` は掛けたホストと時刻（オーナーの無い旧い形では None）。"""
 
     key: str
     host: Optional[str]
@@ -96,19 +96,19 @@ class Holder(NamedTuple):
 
 
 def lock_reason(tool: str, pr: int) -> str:
-    """作業の鍵（lock の理由から持ち主を除いたもの）。"""
+    """作業のキー（lock の理由からオーナーを除いたもの）。"""
     return LOCK_REASON.format(tool=tool, pr=pr)
 
 
 def held_reason(tool: str, pr: int, host: Optional[str] = None, at: Optional[str] = None) -> str:
-    """lock に書く理由。鍵の後ろに、掛けたホスト（既定はこのホスト）と時刻（既定は今の UTC）を足す。"""
+    """lock に書く理由。キーの後ろに、掛けたホスト（既定はこのホスト）と時刻（既定は今の UTC）を足す。"""
     who = host if host is not None else socket.gethostname()
     when = at if at is not None else datetime.now(UTC).isoformat(timespec="seconds")
     return f"{lock_reason(tool, pr)} host={who} at={when}"
 
 
 def parse_holder(text: str) -> Holder:
-    """lock の理由を鍵と持ち主へ分ける。持ち主の無い理由は、全体を鍵にしてホストと時刻を None にする。"""
+    """lock の理由をキーとオーナーへ分ける。オーナーの無い理由は、全体をキーにしてホストと時刻を None にする。"""
     m = _HOLDER.search(text)
     if m is None:
         return Holder(text, None, None)
@@ -118,7 +118,7 @@ def parse_holder(text: str) -> Holder:
 def _gitdir_of(worktree: Path, dotgit: Path) -> Optional[Path]:
     try:
         text = dotgit.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):  # noqa: NDF401 ファイル: .git が無い・読めないのは登録が無い印
+    except (OSError, UnicodeDecodeError):  # noqa: NDF401 ファイル: .git が無い・読めないのは登録が無いマーカー
         return None
     m = _GITDIR.search(text)
     if m is None:
@@ -153,7 +153,7 @@ def lock_review_worktree(repo: git.Git, worktree: Path, tool: str, pr: int) -> s
 
 
 def _blocks(porcelain: str) -> list[dict[str, str]]:
-    """`git worktree list --porcelain` を 1 件 1 辞書（鍵は行の先頭の語、値は残り）にする。"""
+    """`git worktree list --porcelain` を 1 件 1 辞書（キーは行の先頭の語、値は残り）にする。"""
     out: list[dict[str, str]] = []
     for block in porcelain.strip().split("\n\n"):
         entry: dict[str, str] = {}
@@ -175,19 +175,19 @@ def _raw_lock(repo: git.Git, worktree: Path) -> Optional[str]:
 
 
 def lock_of(repo: git.Git, worktree: Path) -> Optional[str]:
-    """worktree の lock の鍵（理由から持ち主を除いたもの）。lock されていなければ None、理由の無い lock は空の文字列。"""
+    """worktree の lock のキー（理由からオーナーを除いたもの）。lock されていなければ None、理由の無い lock は空の文字列。"""
     raw = _raw_lock(repo, worktree)
     return parse_holder(raw).key if raw is not None else None
 
 
 def holder_of(repo: git.Git, worktree: Path) -> Optional[Holder]:
-    """worktree の lock の鍵と持ち主。lock されていなければ None。"""
+    """worktree の lock のキーとオーナー。lock されていなければ None。"""
     raw = _raw_lock(repo, worktree)
     return parse_holder(raw) if raw is not None else None
 
 
 def orphans(porcelain: str, host: str) -> list[Path]:
-    """`git worktree list --porcelain` から、持ち主のいない NDF の lock の worktree（このホストが掛け、ディレクトリが無い）。"""
+    """`git worktree list --porcelain` から、オーナーのいない NDF の lock の worktree（このホストが掛け、ディレクトリが無い）。"""
     found: list[Path] = []
     for entry in _blocks(porcelain):
         if "worktree" not in entry or "locked" not in entry:
@@ -199,7 +199,7 @@ def orphans(porcelain: str, host: str) -> list[Path]:
 
 
 def sweep_orphans(repo: git.Git, host: Optional[str] = None) -> list[Path]:
-    """持ち主のいない NDF の lock を外して登録を片付け、片付けた worktree を返す。別のホスト・利用者の lock は触らない。"""
+    """オーナーのいない NDF の lock を外して登録を片付け、片付けた worktree を返す。別のホスト・利用者の lock は触らない。"""
     found = orphans(repo.run("worktree", "list", "--porcelain"), host if host is not None else socket.gethostname())
     for path in found:
         repo.run("worktree", "unlock", str(path))

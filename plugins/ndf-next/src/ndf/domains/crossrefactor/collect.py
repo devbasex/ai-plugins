@@ -3,11 +3,11 @@
 テストを足す工程は、足したテストが今のコードで通ることに加え、全体の実行（suite の `command`）が収集するファイルかを確かめる。
 pytest の `python_files` に当たらない補助のモジュールへ足したテストは、範囲テストで通っても全体の実行に入らない。
 
-suite の宣言（`.ndf/project.json` の `test.suites[]`）の `collect_command` が、全体の実行が収集するテストを 1 行ずつ出す
+suite の設定（`.ndf/project.json` の `test.suites[]`）の `collect_command` が、全体の実行が収集するテストを 1 行ずつ出す
 （pytest なら `pytest --collect-only -q`）。pytest は引数に渡したファイルを `python_files` に依らず収集するため、テンプレートに
-`{paths}` を書くのは、渡したファイルを名前の規則で落とすランナーに限る。宣言の無い suite のファイルは判定できない
+`{paths}` を書くのは、渡したファイルを名前の規則で落とすランナーに限る。設定の無い suite のファイルは判定できない
 （`undecided`）。成功と読む終了コードは suite の `collect_exit_codes`（無ければ 0 だけ）で、ほかは `CollectError` で止める。
-pytest の「収集が 0 件」（終了コード 5）を成功と読むかは、ランナーの事実なので suite の宣言に書く。
+pytest の「収集が 0 件」（終了コード 5）を成功と読むかは、ランナーの事実なので suite の設定に書く。
 """
 
 from __future__ import annotations
@@ -24,9 +24,9 @@ from ndf.testing import scoped
 from ndf.testing import slots
 
 COLLECT_KEY = "collect_command"
-# 収集の確かめの上限（秒）の宣言
+# 収集の確かめの上限（秒）の設定
 COLLECT_POLICY = "cross-refactoring.collect-check"
-# 収集の確かめで成功と読む終了コードの宣言（suite の鍵）と、宣言の無い suite の既定
+# 収集の確かめで成功と読む終了コードの設定（suite のキー）と、設定の無い suite の既定
 EXIT_CODES_KEY = "collect_exit_codes"
 DEFAULT_EXIT_CODES = frozenset({0})
 
@@ -49,7 +49,7 @@ def _suite_of(path: str, suites: Sequence[Mapping[str, Any]]) -> Mapping[str, An
 
 @dataclass
 class _Group:
-    """収集を確かめる 1 つの suite の宣言（同じ名前なら最後に当たった宣言）と、当たった対象ファイル（渡した順）。"""
+    """収集を確かめる 1 つの suite の設定（同じ名前なら最後に当たった設定）と、当たった対象ファイル（渡した順）。"""
 
     decl: Mapping[str, Any]
     files: list[str] = field(default_factory=list)

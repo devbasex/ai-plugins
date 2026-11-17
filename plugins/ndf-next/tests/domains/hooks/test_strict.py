@@ -1,4 +1,4 @@
-"""`strict` の guard（本番チャネルへのマージ）を、宛先のリポジトリの宣言とエントリポイントの経路で確かめる（M3-H6・#2446・#2838）。"""
+"""`strict` の guard（本番チャネルへのマージ）を、マージ先のリポジトリの設定とエントリポイントの経路で確かめる（M3-H6・#2446・#2838）。"""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ def test_merge_in_manual_delivery_repo_passes(tmp_path):
 
 
 def test_old_top_level_delivery_is_not_read(tmp_path):
-    """#3672 の I4: 旧い置き場（`.ndf/project.json` の最上位の delivery）だけでは届け先を読まず、止める。"""
+    """#3672 の I4: 旧い保存先（`.ndf/project.json` の最上位の delivery）だけでは届け先を読まず、止める。"""
     repo = make_repo(tmp_path / "r")
     (repo / ".ndf").mkdir()
     (repo / ".ndf" / "project.json").write_text(json.dumps({"version": 1, "delivery": MANUAL}), encoding="utf-8")
@@ -37,9 +37,9 @@ def test_old_top_level_delivery_is_not_read(tmp_path):
     assert got is not None and got.kind == "deny" and "branch_strategy.release.deliveries" in got.reason
 
 
-def test_declaration_without_deliveries_passes_but_a_broken_one_is_denied(tmp_path):
-    """ブランチ戦略のプリセット（`deliveries` を書かない）で作った宣言は、`release.cd` が無ければ自動で本番へ届く
-    届け先が無いとして通し、`release.cd` があれば自動で本番へ届くとして止める。`deliveries` が配列でない宣言は読めないとして止める。"""
+def test_ndf_settings_without_deliveries_passes_but_a_broken_one_is_denied(tmp_path):
+    """ブランチ戦略のプリセット（`deliveries` を書かない）で作った設定は、`release.cd` が無ければ自動で本番へ届く
+    届け先が無いとして通し、`release.cd` があれば自動で本番へ届くとして止める。`deliveries` が配列でない設定は読めないとして止める。"""
     repo = make_repo(tmp_path / "r", deliveries=[])
     decl = repo / ".ndf" / "project.json"
     data = json.loads(decl.read_text(encoding="utf-8"))
@@ -59,21 +59,21 @@ def test_declaration_without_deliveries_passes_but_a_broken_one_is_denied(tmp_pa
 
 @pytest.mark.parametrize("flag", ["-R other/repo", "--repo other/repo", "--repo=other/repo", "-Rother/repo"])
 def test_repo_flag_naming_another_repository_is_judged_by_that_repository(tmp_path, flag):
-    # 作業ディレクトリ（手動の宣言）の宣言で別のリポジトリの宛先を判定しない（#2446）
+    # 作業ディレクトリ（手動の設定）の設定で別のリポジトリのマージ先を判定しない（#2446）
     repo = make_repo(tmp_path / "r", slug="owner/repo", deliveries=MANUAL)
     got = _check(repo, f"gh {flag} pr merge 3")
     assert got is not None and "other/repo" in got.reason and "clone" in got.reason
 
 
-def test_cd_into_the_target_clone_uses_its_declaration(tmp_path):
-    # セッションのリポジトリ（自動）ではなく、cd した宛先（手動）の宣言で判定する（#2838）
+def test_cd_into_the_target_clone_uses_its_ndf_settings(tmp_path):
+    # セッションのリポジトリ（自動）ではなく、cd したマージ先（手動）の設定で判定する（#2838）
     session = make_repo(tmp_path / "session", slug="owner/session", deliveries=AUTO)
     target = make_repo(tmp_path / "target", slug="volare/target", deliveries=MANUAL, worktree=True)
     assert _check(session, f"cd {target} && gh pr merge 65 -R volare/target --merge") is None
     assert _check(session, "gh pr merge 65 --merge") is not None
 
 
-def test_matching_repo_flag_reads_the_declaration(tmp_path):
+def test_matching_repo_flag_reads_the_ndf_settings(tmp_path):
     repo = make_repo(tmp_path / "r", slug="owner/repo", deliveries=AUTO)
     assert _check(repo, "gh -R OWNER/repo pr merge 3") is not None
     repo2 = make_repo(tmp_path / "m", slug="owner/m", deliveries=MANUAL)
@@ -83,7 +83,7 @@ def test_matching_repo_flag_reads_the_declaration(tmp_path):
 @pytest.mark.parametrize(
     "case",
     [
-        ("decl", "gh pr merge 1"),  # 宣言が無い
+        ("decl", "gh pr merge 1"),  # 設定が無い
         ("quote", "gh pr merge 1 --body 'x"),  # 閉じない引用
         ("norepo", "gh pr merge 1"),  # リポジトリの外
     ],
@@ -111,7 +111,7 @@ def test_multiline_quoted_text_does_not_split_the_command(tmp_path):
 
 
 def test_pull_request_url_naming_another_repository_is_judged_by_that_repository(tmp_path):
-    # 手動の宣言の作業ディレクトリから、URL で別のリポジトリの本番マージを打っても通さない
+    # 手動の設定の作業ディレクトリから、URL で別のリポジトリの本番マージを打っても通さない
     repo = make_repo(tmp_path / "r", slug="owner/repo", deliveries=MANUAL)
     got = _check(repo, "gh pr merge https://github.com/other/production/pull/1 --merge")
     assert got is not None and "other/production" in got.reason
@@ -193,7 +193,7 @@ def test_hook_off_switch_turns_off_the_strict_guard(tmp_path, monkeypatch):
     ],
 )
 def test_shells_reading_the_script_from_stdin_are_denied(tmp_path, command):
-    # 中のスクリプトを読めないシェルは止める側へ倒す（手動の宣言の作業ディレクトリでも止める）
+    # 中のスクリプトを読めないシェルは止める側へ倒す（手動の設定の作業ディレクトリでも止める）
     repo = make_repo(tmp_path / "r", deliveries=MANUAL)
     got = _check(repo, command)
     assert got is not None and "-c 無し" in got.reason
@@ -247,7 +247,7 @@ def test_cd_inside_a_subshell_applies_to_its_own_merge(tmp_path):
 
 @pytest.mark.parametrize("cd", ['cd "$WT"', "cd `pwd`", "cd -", "pushd /tmp", "cd -P x"])
 def test_cd_whose_target_is_not_literal_denies_the_merge(tmp_path, cd):
-    # 移った先を字句から決められなければ、元の作業ディレクトリの宣言で判定しない
+    # 移った先を字句から決められなければ、元の作業ディレクトリの設定で判定しない
     repo = make_repo(tmp_path / "r", deliveries=MANUAL)
     got = _check(repo, f"{cd} && gh pr merge 1 --merge")
     assert got is not None and "決められない" in got.reason
@@ -269,7 +269,7 @@ def test_cd_to_an_absolute_path_after_an_unknown_cd_reads_that_path(tmp_path):
     ],
 )
 def test_gh_repo_naming_another_repository_is_judged_by_that_repository(tmp_path, command):
-    # gh は GH_REPO を -R と同じ宛先として読む（https://cli.github.com/manual/gh_help_environment）
+    # gh は GH_REPO を -R と同じ対象のリポジトリとして読む（https://cli.github.com/manual/gh_help_environment）
     repo = make_repo(tmp_path / "r", slug="owner/repo", deliveries=MANUAL)
     got = _check(repo, command)
     assert got is not None and "other/production" in got.reason
@@ -283,7 +283,7 @@ def test_gh_repo_matching_the_origin_or_overridden_by_the_flag_passes(tmp_path):
 
 
 def test_gh_repo_in_the_hook_environment_is_the_initial_target(tmp_path, monkeypatch):
-    # セッションの前に export した GH_REPO も、gh は -R と同じ宛先として読む
+    # セッションの前に export した GH_REPO も、gh は -R と同じ対象のリポジトリとして読む
     repo = make_repo(tmp_path / "r", slug="owner/repo", deliveries=MANUAL)
     monkeypatch.setenv("GH_REPO", "other/production")
     got = deny_reason(call_entry("claude", "PreToolUse", bash(repo, "gh pr merge 1 --merge")))

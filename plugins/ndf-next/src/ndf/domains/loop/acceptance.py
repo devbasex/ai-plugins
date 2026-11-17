@@ -1,4 +1,4 @@
-"""`ndf loop acceptance` の副命令: 受け入れ条件の確認の区分を課題の本文へ記録する・読む・照らす（#2144・#1682）。
+"""`ndf loop acceptance` のサブコマンド: 受け入れ条件の確認の区分を課題の本文へ記録する・読む・照らす（#2144・#1682）。
 
     ndf loop acceptance record --issue <N> [--pre-merge '<条件の番号>=<手段>']... [--post-release <条件の番号>]...
     ndf loop acceptance show   --issue <N>
@@ -24,7 +24,7 @@ from ndf.adapters import git, github
 from ndf.contracts import result
 from ndf.domains.loop import acceptance_decide as acc
 
-# 結果の tool は親の副命令 `ndf loop` の名前
+# 結果の tool は親のサブコマンド `ndf loop` の名前
 TOOL = cli.tool_of(f"{__package__}.cli")
 
 
@@ -99,7 +99,7 @@ def _check(a: argparse.Namespace) -> dict[str, Any]:
 
 
 def add_parsers(sub: Any) -> None:
-    """`ndf loop` の副命令の並びへ `acceptance` を足す。"""
+    """`ndf loop` のサブコマンドの並びへ `acceptance` を足す。"""
     p = sub.add_parser("acceptance", help="受け入れ条件の確認の区分を記録する・読む・照らす")
     inner = p.add_subparsers(dest="acceptance_command", required=True)
     r = inner.add_parser("record", help="条件ごとの区分（マージ前 / リリース後）と手段を本文へ書く")

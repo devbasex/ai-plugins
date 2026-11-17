@@ -24,7 +24,7 @@ def _stopped(kind="test_failed", **extra):
         (_stopped("deps_missing"), 69),
         (_stopped("incomplete", gaps=[GAP]), 6),
         (result.result("t", "gate", "承認を待つ", routes={"approved": GO, "rejected": None}), 10),
-        (result.result("t", "gate", "判断を待つ", routes={"revise": result.command("loop", "answer", ask=("comment",))}), 20),
+        (result.result("t", "gate", "判断を待つ", routes={"request_changes": result.command("loop", "answer", ask=("comment",))}), 20),
         (_stopped("fix_limit", routes={"retry": result.command("retry")}), 1),
         (_stopped("wait_timeout", next=result.command("test-slot", "run", "--", "pytest")), 3),
         (result.result("t", "ok", "済んだ", outputs={"pr": 3, "issues": [1, 2], "branch": "feat/x", "version": "11.0.0-dev.3"}), 0),
@@ -82,7 +82,7 @@ def test_command_builds_the_argv_with_the_entry_name():
 
 def test_answer_words_are_the_answers_table(contracts_copy):
     routes = {"approved": GO, "hold": GO}
-    assert result.answer_errors(routes) == ["routes のキー 'hold' は答えの語彙（facts/answers.json）に無い"]
+    assert result.answer_errors(routes) == ["routes のキー 'hold' は回答の語彙（facts/answers.json）に無い"]
     contracts_copy("facts/answers.json", lambda t: {**t, "rows": [*t["rows"], {"id": "hold", "label": "保留する"}]})
     assert result.answer_errors(routes) == []
 
@@ -110,7 +110,7 @@ def test_emit_refuses_wrong_shape(capsys):
 
 @pytest.mark.parametrize(("version", "ok"), [("10.27.57", True), ("11.0.0-dev.2", True), ("ndf v10.27.57", False), ("v10.27.57", False)])
 def test_release_verification_version_is_bare(version, ok):
-    # #3115: 対象の版は前置きを持たない版数だけで、本番の版と文字列のまま照合できる
+    # #3115: 対象のバージョンは前置きを持たない版数だけで、本番のバージョンと文字列のまま検証できる
     record = {"version": version, "issues": [{"number": 3115, "result": "passed", "evidence": "PR #3102"}]}
     assert (contracts.schema_errors(record, contracts.schema_path("release-verification")) == []) is ok
 
@@ -135,7 +135,7 @@ def test_exit_codes_matches_compares_non_integers_by_range():
     assert not exit_codes.matches("ok", 0.5)
 
 
-# 現状固定（I-011）: `_schema_validator` の引き方（ファイル全体・`#/$defs/<名前>`・誤りの扱い・置き場を差し替えるまで読み直さない）
+# 現状固定（I-011）: `_schema_validator` の引き方（ファイル全体・`#/$defs/<名前>`・誤りの扱い・保存先を差し替えるまで読み直さない）
 _DEFS_SCHEMA = {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",
@@ -190,8 +190,8 @@ def test_require_schema_raises_reader_error_with_label(contracts_copy):
     assert str(exc.value) == "表 の形が違う: (最上位): 'whole' is a required property"
 
 
-# 現状固定（I-012）: `use_dir` は置き場を差し替え（`None` でプラグインの置き場へ戻し）、読み手のキャッシュを捨てる
-def test_use_dir_switches_and_resets_the_place(tmp_path):
+# 現状固定（I-012）: `use_dir` は保存先を差し替え（`None` でプラグインの保存先へ戻し）、読み手のキャッシュを捨てる
+def test_use_dir_switches_and_resets_the_location(tmp_path):
     contracts.use_dir(tmp_path)
     assert contracts.contracts_dir() == tmp_path
     contracts.use_dir(str(tmp_path))
@@ -226,4 +226,4 @@ def test_use_dir_changes_where_load_json_reads(tmp_path):
     contracts.use_dir(None)
     with pytest.raises(contracts.ContractError) as exc:
         contracts.load_json("probe.json")
-    assert str(exc.value).startswith(f"契約 {contracts.DEFAULT_DIR / 'probe.json'} を読めない: ")
+    assert str(exc.value).startswith(f"コントラクト {contracts.DEFAULT_DIR / 'probe.json'} を読めない: ")

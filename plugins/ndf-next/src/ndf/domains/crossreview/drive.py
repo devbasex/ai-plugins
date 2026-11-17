@@ -1,18 +1,18 @@
-"""収束ループの駆動（副命令 `ndf cross-review run`）。1 回の起動でラウンドを上限まで回す。
+"""収束ループの駆動（サブコマンド `ndf cross-review run`）。1 回の起動でラウンドを上限まで回す。
 
 1 ラウンドは次の順に進む:
 
-1. 範囲を決める（`scope_decide`。設計の PR は、詳細レビューを通らない節が残る間は全差分。#3181）
+1. 範囲を決める（`scope_decide`。設計の PR は、詳細レビューを通らないセクションが残る間は全差分。#3181）
 2. 相手役（`ndf.core.converge.participants`）を並べて起動し、最後の 1 行の `{"findings": [...]}` を読む
-3. 指摘を鍵（`oscillation.finding_key`）で重ねず台帳へ入れる。見送り済みの指摘は出し直されても扱わない
+3. 指摘をキー（`oscillation.finding_key`）で重ねずジャーナルへ入れる。見送り済みの指摘は出し直されても扱わない
 4. 未解決の指摘と、まだ決めていない足すべき内容（`--findings`。#2444）が無ければ収束。前々ラウンドの指摘が
    戻っていれば振動で止める
 5. 修正担当（claude）を起動し、修正の結果ファイル（`store.fix_result_path`）の指摘ごとの「直した」「見送った（理由）」を
-   台帳へ取り込む。修正のコミットを `push.push_fix` で送る（拒まれたら 1 回だけ取り込む。#2440）
+   ジャーナルへ読み込む。修正のコミットを `push.push_fix` で送る（拒まれたら 1 回だけマージする。#2440）
 
-状態ファイルへ rounds・reviewed_sections・台帳（findings）をラウンドごとに書き、終わったら `summary.json`
+状態ファイルへ rounds・reviewed_sections・ジャーナル（findings）をラウンドごとに書き、終わったら `summary.json`
 （`finish_decide` が読む形）を書く。始めに worktree の管理情報を確かめ（#3109）、origin の先頭へ合わせ（#2440）、
-前の起動が残した修正の結果ファイルを取り込む（#2770）。修正の結果は状態ファイルへ書いてから結果ファイルを
+前の起動が残した修正の結果ファイルを読み込む（#2770）。修正の結果は状態ファイルへ書いてから結果ファイルを
 ラウンドの名前へ移し、送る（push が例外で止まっても、次の起動が記録から再開できる）。前の起動が送れなかった修正の
 コミットが残っていれば、始めに送ってから進む。
 """
@@ -45,7 +45,7 @@ Launcher = Callable[[agents.Launch], agents.AgentStatus]
 
 
 class DriveStopped(Exception):
-    """駆動を始められない（同期の衝突・修正の記録の欠け）。`kind` は止まった理由の表の種類。"""
+    """駆動を始められない（同期の衝突・修正の記録の欠け）。`kind` は停止理由の表の種類。"""
 
     def __init__(self, kind: str, detail: str):
         self.kind = kind
@@ -54,7 +54,7 @@ class DriveStopped(Exception):
 
 @dataclass(frozen=True)
 class RunConfig:
-    """1 回の起動の引数。`purpose` は PR の目的（設計のプランの雛形の purpose なら節を必ず詳細レビューへ通す）。"""
+    """1 回の起動の引数。`purpose` は PR の目的（設計のプランのテンプレートの purpose ならセクションを必ず詳細レビューへ通す）。"""
 
     worktree: Path
     branch: str
@@ -79,13 +79,13 @@ class Outcome(NamedTuple):
 
 @dataclass
 class _Run:
-    """1 回の起動の間に重ねる値（状態ファイルの中身・台帳・注意・過程）。"""
+    """1 回の起動の間に重ねる値（状態ファイルの中身・ジャーナル・注意・過程）。"""
 
     cfg: RunConfig
     g: git.Git
     ref: store.StateRef
     data: dict[str, Any]
-    ledger: FindingLedger
+    journal: FindingJournal
     warnings: list[str]
     process: list[dict[str, str]]
     history: list[frozenset[str]]
@@ -95,7 +95,7 @@ class _Run:
 
 
 def changed_sections(g: git.Git, base: str, root: Path) -> list[str]:
-    """`base...HEAD` で変わった Markdown の節（`<パス>#<見出し>`）。"""
+    """`base...HEAD` で変わった Markdown のセクション（`<パス>#<見出し>`）。"""
     out: list[str] = []
     for path in g.changed_files(base, "HEAD"):
         target = root / path
@@ -105,22 +105,22 @@ def changed_sections(g: git.Git, base: str, root: Path) -> list[str]:
 
 
 def _text(value: object) -> Optional[str]:
-    """空でない文字列ならそのまま、ほかは None（理由・節の無い指摘）。"""
+    """空でない文字列ならそのまま、ほかは None（理由・セクションの無い指摘）。"""
     return value if isinstance(value, str) and value.strip() else None
 
 
-# --- 台帳 -------------------------------------------------------------------------------
+# --- ジャーナル -------------------------------------------------------------------------------
 
 
-def _ledger_row(fid: str, round_no: int, text: str, by: Any, key: Optional[str] = None, section: Optional[str] = None) -> dict[str, Any]:
-    """台帳の 1 行（未解決で始まる）。"""
+def _journal_row(fid: str, round_no: int, text: str, by: Any, key: Optional[str] = None, section: Optional[str] = None) -> dict[str, Any]:
+    """ジャーナルの 1 行（未解決で始まる）。"""
     return {"id": fid, "key": key, "text": text, "section": section, "round": round_no, "outcome": fin.UNRESOLVED, "reason": None, "by": by}
 
 
-class FindingLedger:
-    """指摘の台帳（id から行の辞書。状態ファイルの findings に並べる形のまま持つ）と、その規則。
+class FindingJournal:
+    """指摘のジャーナル（id から行の辞書。状態ファイルの findings に並べる形のまま持つ）と、その規則。
 
-    指摘は鍵で重ねず、見送り済みの指摘は出し直されても扱わず、直した指摘が戻れば未解決へ戻す。
+    指摘はキーで重ねず、見送り済みの指摘は出し直されても扱わず、直した指摘が戻れば未解決へ戻す。
     """
 
     def __init__(self, rows: Sequence[Any] = ()):
@@ -131,7 +131,7 @@ class FindingLedger:
         return f"r{round_no}-{sum(1 for f in self.rows.values() if f.get('round') == round_no) + 1}"
 
     def enter(self, round_no: int, raised: Sequence[dict[str, Any]]) -> frozenset[str]:
-        """指摘を台帳へ入れ、このラウンドで出た鍵を返す。見送り済みは扱わず、直した指摘が戻れば未解決へ戻す。"""
+        """指摘をジャーナルへ入れ、このラウンドで出たキーを返す。見送り済みは扱わず、直した指摘が戻れば未解決へ戻す。"""
         by_key = {f.get("key"): f for f in self.rows.values()}
         keys: set[str] = set()
         for item in raised:
@@ -146,7 +146,7 @@ class FindingLedger:
             known = by_key.get(key)
             if known is None:
                 fid = self._next_id(round_no)
-                self.rows[fid] = _ledger_row(fid, round_no, text, item.get("by"), key, _text(item.get("section")))
+                self.rows[fid] = _journal_row(fid, round_no, text, item.get("by"), key, _text(item.get("section")))
             elif known.get("outcome") == fin.FIXED:
                 known |= {"outcome": fin.UNRESOLVED, "reason": None, "round": round_no}
         return frozenset(keys)
@@ -162,7 +162,7 @@ class FindingLedger:
         return open_, undecided
 
     def apply_fix(self, items: Sequence[Any], handed: Sequence[fin.Handed], round_no: int) -> list[dict[str, Any]]:
-        """修正の結果の指摘ごとの終わり方を取り込み、決めた（直した・見送った）件を返す。足すべき内容は新しい行にする。"""
+        """修正の結果の指摘ごとの終わり方をマージ、決めた（直した・見送った）件を返す。足すべき内容は新しい行にする。"""
         texts = {h.id: h.text for h in handed}
         reported = [f for f in items if isinstance(f, dict) and f.get("outcome") in fin.DECIDED]
         for item in reported:
@@ -171,7 +171,7 @@ class FindingLedger:
             if fid in self.rows:
                 self.rows[fid] |= {"outcome": item["outcome"], "reason": reason}
             elif fid in texts:
-                self.rows[fid] = _ledger_row(fid, round_no, texts[fid], "rebuild") | {"outcome": item["outcome"], "reason": reason}
+                self.rows[fid] = _journal_row(fid, round_no, texts[fid], "rebuild") | {"outcome": item["outcome"], "reason": reason}
         return reported
 
     def reopen(self, fids: Sequence[str]) -> None:
@@ -199,7 +199,7 @@ class FindingLedger:
 
 
 def _ingest_pending(run: _Run) -> None:
-    """前の起動が残した修正の結果ファイルを、修正の記録の無い最後のラウンドへ取り込む（#2770）。"""
+    """前の起動が残した修正の結果ファイルを、修正の記録の無い最後のラウンドへマージする（#2770）。"""
     rounds = store.list_of(run.data, store.ROUNDS)
     last = store.last_round(run.data)
     pending = store.pending_fix_result(run.cfg.state_dir, run.ref)
@@ -210,7 +210,7 @@ def _ingest_pending(run: _Run) -> None:
         try:
             last["fix"] = _take_fix(run, pending, len(rounds))
         except store.FixResultMismatch as exc:
-            raise DriveStopped("invalid", f"前の起動が残した修正の結果を取り込めない: {exc}") from exc
+            raise DriveStopped("invalid", f"前の起動が残した修正の結果を読み込めない: {exc}") from exc
         _save(run)
         _consume(pending, len(rounds))
 
@@ -222,11 +222,11 @@ def _resend(run: _Run, synced: worktree.SyncResult) -> None:
         return
     round_no = len(store.list_of(run.data, store.ROUNDS))
     remote = run.g.rev_parse(f"refs/remotes/{run.g.remote()}/{run.cfg.branch}")
-    # 載せ直しでコミットの SHA が変わるので、報告されたコミットとの照合はしない
+    # 載せ直しでコミットの SHA が変わるので、報告されたコミットとの検証はしない
     sent = _push(run, round_no, remote, fix, check_commit=False)
     if sent:
         # 前の起動が送れずに未解決へ戻した指摘は、PR へ届いたので直したへ戻す（修正担当へ渡し直さない）
-        run.ledger.restore_fixed(store.list_of(fix, "fixed"))
+        run.journal.restore_fixed(store.list_of(fix, "fixed"))
     _save(run)
     if not sent:
         raise DriveStopped("work_stopped", f"前の起動の round {round_no} の修正を送れない: {run.warnings[-1]}")
@@ -240,14 +240,14 @@ def _start(cfg: RunConfig) -> _Run:
         raise DriveStopped("precondition", worktree.conflict_detail(synced))
     ref = store.state_pr(cfg.state_dir, cfg.pr)
     data = store.read_state(ref)
-    run = _Run(cfg, g, ref, data, FindingLedger(store.list_of(data, store.FINDINGS)), [], [], [])
+    run = _Run(cfg, g, ref, data, FindingJournal(store.list_of(data, store.FINDINGS)), [], [], [])
     _ingest_pending(run)
     _resend(run, synced)
     return run
 
 
 def _round_stem(run: _Run, round_no: int, suffix: str) -> Path:
-    """状態の置き場のラウンドごとのファイルの名前（`round<n><suffix>`）。"""
+    """状態の保存先のラウンドごとのファイルの名前（`round<n><suffix>`）。"""
     return run.cfg.state_dir / f"round{round_no}{suffix}"
 
 
@@ -262,14 +262,14 @@ def _note(run: _Run, round_no: int, who: str, result: str, warning: Optional[str
 
 
 def _review_prompt(run: _Run, round_no: int, scope: scope_decide.Scope, diff: Path) -> str:
-    decided = run.ledger.skipped_texts()
+    decided = run.journal.skipped_texts()
     handed = [f"- {h.id}: {h.text}" for h in run.cfg.handed]
     lines = [
         f"PR #{run.ref.current_pr} のレビューの round {round_no} である。読むだけで、ファイルを変えない。",
         f"差分は {diff}（範囲: {scope.kind}{'・' + scope.base if scope.base else ''}）にある。worktree は {run.cfg.worktree}。",
     ]
     if scope.unreviewed:
-        lines.append("次の節はまだ詳細レビューを通っていない。1 節ずつ読む: " + "・".join(scope.unreviewed))
+        lines.append("次のセクションはまだ詳細レビューを通っていない。1 セクションずつ読む: " + "・".join(scope.unreviewed))
     if handed:
         lines += ["組み直しが残した足すべき内容（足されたかを確かめる）:", *handed]
     if decided:
@@ -285,13 +285,13 @@ def _reviewer_findings(status: agents.AgentStatus, out: Path) -> Optional[list[d
         return None
     try:
         text = out.read_text(encoding="utf-8", errors="replace")
-    except OSError:  # noqa: NDF401 ファイル: 出力の無い相手役は答えなかった扱い（呼び手が注意に載せる）
+    except OSError:  # noqa: NDF401 ファイル: 出力の無い相手役は回答しなかった扱い（呼び手が注意に載せる）
         return None
     return participants.findings_of(text)
 
 
 def _review(run: _Run, round_no: int, prompt: str, launch: Launcher) -> tuple[list[dict[str, Any]], int]:
-    """相手役を並べて起動し、指摘と、答えた相手役の数を返す。答えなかった相手役は注意と過程に載せる。"""
+    """相手役を並べて起動し、指摘と、回答した相手役の数を返す。回答しなかった相手役は注意と過程に載せる。"""
     cfg = run.cfg
     specs = [participants.review_launch(a, cfg.worktree, prompt, _round_stem(run, round_no, f"-{a}")) for a in cfg.reviewers]
     with ThreadPoolExecutor(max_workers=max(1, len(specs))) as pool:
@@ -301,8 +301,8 @@ def _review(run: _Run, round_no: int, prompt: str, launch: Launcher) -> tuple[li
     for spec, status in zip(specs, statuses):
         found = _reviewer_findings(status, spec.paths.out)
         if found is None:
-            warning = f"round {round_no} の相手役 {spec.agent} が答えなかった（{status.state}: {status.detail}）"
-            _note(run, round_no, spec.agent, f"答え無し（{status.state}）", warning)
+            warning = f"round {round_no} の相手役 {spec.agent} が回答しなかった（{status.state}: {status.detail}）"
+            _note(run, round_no, spec.agent, f"回答無し（{status.state}）", warning)
             continue
         answered += 1
         _note(run, round_no, spec.agent, f"指摘 {len(found)} 件")
@@ -336,30 +336,30 @@ def _fixer_launch(run: _Run, round_no: int, prompt: str) -> agents.Launch:
     )
 
 
-def _fix_record(ledger: FindingLedger, ref: store.StateRef, path: Path, handed: Sequence[fin.Handed], round_no: int) -> dict[str, Any]:
-    """修正の結果ファイルを読んで台帳へ取り込み、ラウンドの修正の記録（commit・reported・fixed）を返す。
+def _fix_record(journal: FindingJournal, ref: store.StateRef, path: Path, handed: Sequence[fin.Handed], round_no: int) -> dict[str, Any]:
+    """修正の結果ファイルを読んでジャーナルへ読み込み、ラウンドの修正の記録（commit・reported・fixed）を返す。
     番号が合わなければ `store.FixResultMismatch`。"""
     found = store.read_fix_result(path, ref)
-    reported = ledger.apply_fix(store.list_of(found, store.FINDINGS), handed, round_no)
+    reported = journal.apply_fix(store.list_of(found, store.FINDINGS), handed, round_no)
     fixed = [str(f.get("id")) for f in reported if f["outcome"] == fin.FIXED]
     return {"commit": found.get("commit"), "reported": len(reported), "fixed": fixed}
 
 
 def _take_fix(run: _Run, path: Path, round_no: int) -> dict[str, Any]:
-    """修正の結果を台帳へ取り込む。結果ファイルは呼び手が状態ファイルへ書いてから `_consume` で移す。"""
-    return _fix_record(run.ledger, run.ref, path, run.cfg.handed, round_no)
+    """修正の結果をジャーナルへ読み込む。結果ファイルは呼び手が状態ファイルへ書いてから `_consume` で移す。"""
+    return _fix_record(run.journal, run.ref, path, run.cfg.handed, round_no)
 
 
 def _consume(path: Path, round_no: int, label: str = "round") -> None:
-    """取り込んだ（または取り込めなかった）結果ファイルを `<label><ラウンド>` の名前へ移す（次の起動が残りと読み違えない）。
+    """マージした（またはマージできなかった）結果ファイルを `<label><ラウンド>` の名前へ移す（次の起動が残りと読み違えない）。
     状態ファイルへ書いた後に呼ぶ。"""
     os.replace(path, path.with_name(f"{path.stem}-{label}{round_no}.json"))
 
 
 def merge_fix(state_dir: Path, pr: int, path: Path, handed: Sequence[fin.Handed] = ()) -> int:
-    """駆動の外で残った修正の結果ファイルを、最後のラウンドへ `run` と同じ形で取り込む（`merge-fix`。#2770）。
-    台帳へ反映して状態ファイルへ書いてから結果ファイルを移し、取り込んだラウンドの番号を返す。`handed` は `run` へ
-    渡した足すべき内容（`--findings`）で、その id の決定も台帳の行にする。
+    """駆動の外で残った修正の結果ファイルを、最後のラウンドへ `run` と同じ形でマージする（`merge-fix`。#2770）。
+    ジャーナルへ反映して状態ファイルへ書いてから結果ファイルを移し、マージしたラウンドの番号を返す。`handed` は `run` へ
+    渡した足すべき内容（`--findings`）で、その id の決定もジャーナルの行にする。
     番号が合わなければ `store.FixResultMismatch`（何も書かない）。"""
     ref = store.state_pr(state_dir, pr)
     data = store.read_state(ref)
@@ -367,9 +367,9 @@ def merge_fix(state_dir: Path, pr: int, path: Path, handed: Sequence[fin.Handed]
     if not rounds:
         rounds.append({"round": 1})
     round_no = rounds[-1].get("round") or len(rounds)
-    ledger = FindingLedger(store.list_of(data, store.FINDINGS))
-    rounds[-1]["fix"] = _fix_record(ledger, ref, path, handed, round_no)
-    data[store.FINDINGS] = list(ledger.rows.values())
+    journal = FindingJournal(store.list_of(data, store.FINDINGS))
+    rounds[-1]["fix"] = _fix_record(journal, ref, path, handed, round_no)
+    data[store.FINDINGS] = list(journal.rows.values())
     store.write_object(ref.path, data)
     _consume(path, round_no)
     return round_no
@@ -378,9 +378,9 @@ def merge_fix(state_dir: Path, pr: int, path: Path, handed: Sequence[fin.Handed]
 def _fix(
     run: _Run, round_no: int, open_: Sequence[dict[str, Any]], handed: Sequence[fin.Handed], launch: Launcher
 ) -> Optional[dict[str, Any]]:
-    """修正担当を起動して結果を取り込む。結果ファイルが無ければ注意に載せて None。
+    """修正担当を起動して結果を読み込む。結果ファイルが無ければ注意に載せて None。
     起動の前に残っている結果ファイルは退避する（前の起動の結果を今のラウンドの結果と読み違えない）。修正担当が
-    DONE で終わらなくても（タイムアウトなど）結果ファイルを書き終えていれば取り込む（直した・見送ったを失わない）。"""
+    DONE で終わらなくても（タイムアウトなど）結果ファイルを書き終えていればマージする（直した・見送ったを失わない）。"""
     result_path = store.fix_result_path(run.cfg.state_dir, run.ref)
     if result_path.is_file():
         _consume(result_path, round_no, "stale-round")
@@ -392,10 +392,10 @@ def _fix(
     try:
         fix = _take_fix(run, result_path, round_no)
     except (store.FixResultMismatch, store.StateBroken) as exc:
-        # 合わない・書きかけ（DONE でない修正担当）のファイルを残すと、次の起動が同じファイルを取り込もうとして
+        # 合わない・書きかけ（DONE でない修正担当）のファイルを残すと、次の起動が同じファイルを読み込もうとして
         # 止まり続けるので、退避する
         _consume(result_path, round_no, "mismatch-round")
-        run.warnings.append(f"round {round_no} の修正の結果を取り込めない: {exc}")
+        run.warnings.append(f"round {round_no} の修正の結果を読み込めない: {exc}")
         return None
     _note(run, round_no, run.cfg.fixer, f"指摘 {fix['reported']} 件を扱った")
     return fix
@@ -411,7 +411,7 @@ def _push(run: _Run, round_no: int, reviewed_head: str, fix: dict[str, Any], che
     if sent.ok:
         fix["pushed"] = sent.head
         return True
-    run.ledger.reopen(store.list_of(fix, "fixed"))
+    run.journal.reopen(store.list_of(fix, "fixed"))
     tail = f"（衝突: {', '.join(sent.conflicts)}）" if sent.conflicts else ""
     _note(run, round_no, "push", f"送れない（{sent.reason}）", f"round {round_no} の修正を送れなかった: {sent.reason}{tail}")
     return False
@@ -421,12 +421,12 @@ def _push(run: _Run, round_no: int, reviewed_head: str, fix: dict[str, Any], che
 
 
 def _save(run: _Run) -> None:
-    run.data[store.FINDINGS] = list(run.ledger.rows.values())
+    run.data[store.FINDINGS] = list(run.journal.rows.values())
     store.write_object(run.ref.path, run.data)
 
 
 def _summary(run: _Run, final: str, rounds: int) -> Outcome:
-    findings = run.ledger.findings()
+    findings = run.journal.findings()
     path = run.cfg.state_dir / SUMMARY_NAME
     review = fin.Review(final, rounds, findings)
     store.write_object(path, fin.summary_of(review, run.ref.origin_pr))
@@ -434,7 +434,7 @@ def _summary(run: _Run, final: str, rounds: int) -> Outcome:
 
 
 class _Prepared(NamedTuple):
-    """ラウンドの前半で決めたもの（範囲・変わった節・詳細レビューを通った節・レビューする head・差分のファイル）。"""
+    """ラウンドの前半で決めたもの（範囲・変わったセクション・詳細レビューを通ったセクション・レビューする head・差分のファイル）。"""
 
     scope: scope_decide.Scope
     sections: list[str]
@@ -471,12 +471,12 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
     raised, answered = _review(run, round_no, _review_prompt(run, round_no, prep.scope, prep.diff), launch)
     if answered == 0:
         return fin.ERROR
-    run.history.append(run.ledger.enter(round_no, raised))
+    run.history.append(run.journal.enter(round_no, raised))
     if prep.scope.kind == scope_decide.FULL:
         run.data[store.REVIEWED] = sorted(prep.reviewed | set(prep.sections))
     record: dict[str, Any] = {"round": round_no, "head": prep.head, "scope": prep.scope.kind}
     rounds.append(record)
-    open_, handed = run.ledger.pending(run.cfg.handed)
+    open_, handed = run.journal.pending(run.cfg.handed)
     record["verdict"] = _verdict(run, open_, handed)
     if record["verdict"] != CHANGES_REQUIRED:
         return record["verdict"]

@@ -2,7 +2,7 @@
 
 `rules.json` の `smells` のうち `by` が `ruff` の規則を、見るファイルすべてへ 1 回の起動で当てる。
 しきい値は `rules.json` の `ruff.config` にあり、`--config` で 1 つずつ渡す。ruff の `# noqa` は読ませない
-（`--ignore-noqa`）。境界の印は NDF の形で、`marks` が規則ごとに効くかを決めるためである。
+（`--ignore-noqa`）。抑制コメントは NDF の形で、`suppressions` が規則ごとに効くかを決めるためである。
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-from ndf.checks.marks import EXCEPT_RULES
+from ndf.checks.suppressions import EXCEPT_RULES
 from ndf.checks.model import CheckError, Source
 
 # ruff の終了コード: 0 は指摘なし、1 は指摘あり。ほかは起動や設定の誤り
@@ -67,7 +67,7 @@ def scan(sources: list[Source], rules: dict[str, Any]) -> dict[Path, list[tuple[
 def handler_rows(src: Source) -> dict[int, int]:
     """`except` の見出し（`except` から本体の前まで）の各行 → `except` の行。
 
-    ruff は BLE001 を例外の型の式の位置に置くため、複数行の `except (` では印を書く `except` の行とずれる。
+    ruff は BLE001 を例外の型の式の位置に置くため、複数行の `except (` では抑制コメントを書く `except` の行とずれる。
     """
     rows: dict[int, int] = {}
     for node in ast.walk(src.tree):

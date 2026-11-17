@@ -1,4 +1,4 @@
-"""現状固定: 宣言の suite 1 件の解釈（`scoped.suite_of`）を、`ndf route test --failed-from`（`scoped.scoped_runs`）と
+"""現状固定: 設定の suite 1 件の解釈（`scoped.suite_of`）を、`ndf route test --failed-from`（`scoped.scoped_runs`）と
 cross-refactoring の検証（`verify.suites`）の両方の呼び手から通す（I-012）。
 
 dict でない要素・`scope_command` の型違いと `{paths}` の欠け・`paths` の省略・型違い・空の並びの扱いを、今の振る舞いの
@@ -41,7 +41,7 @@ def test_scoped_runs_reads_omitted_or_non_list_paths_as_the_whole_and_an_empty_l
     assert _runs([{"name": "all", "scope_command": "a {paths}"}], ["z/y.py"]) == ([("all", "a z/y.py", ("z/y.py",))], [])
 
 
-def test_verify_suites_reads_the_same_declaration_the_same_way(tmp_path: Path):
+def test_verify_suites_reads_the_same_ndf_settings_the_same_way(tmp_path: Path):
     suites = [
         *UNUSABLE,
         {"name": "empty", "kind": "lint", "scope_command": "e {paths}", "paths": []},

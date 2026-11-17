@@ -2,7 +2,7 @@
 
 - スプリントを閉じる条件 2: リリース後テストの記録があれば、フラグを問わず見る。不合格の行を持つ課題は閉じない
   （フラグの付け忘れで不合格の課題を閉じない）
-- 後片付けの工程の記録: 課題の本文の進行の節で、工程「後片付け」の行が未チェックならチェックを付ける。記録済みなら
+- クリーンアップの工程の記録: 課題の本文の進行のセクションで、工程「クリーンアップ」の行が未チェックならチェックを付ける。記録済みなら
   打ち直さない
 """
 
@@ -14,8 +14,8 @@ from typing import Any, Optional
 
 from ndf.progress.run import ISSUE_SECTION, SECTION_END
 
-# 後片付けの工程の名前（進行の節の行）
-CLEANUP_STAGE = "後片付け"
+# クリーンアップの工程の名前（進行のセクションの行）
+CLEANUP_STAGE = "クリーンアップ"
 
 
 def blocking_rows(issue: int, verification: Optional[Iterable[Mapping[str, Any]]]) -> list[Mapping[str, Any]]:
@@ -42,7 +42,7 @@ def _stage_line(stage: str) -> re.Pattern[str]:
 
 
 def mark_stage(body: str, stage: str, stamp: str) -> Optional[str]:
-    """進行の節の工程の行にチェックを付けた本文。記録済み・節か行が無ければ None（書き換えない）。"""
+    """進行のセクションの工程の行にチェックを付けた本文。記録済み・セクションか行が無ければ None（書き換えない）。"""
     start = body.find(ISSUE_SECTION)
     if start < 0:
         return None

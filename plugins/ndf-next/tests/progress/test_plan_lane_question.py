@@ -1,8 +1,8 @@
-"""計画のレーンの問いがオーガナイザーへ届く（#3035 の受け入れ条件 1・2・4）。
+"""計画のレーンの質問がオーガナイザーへ届く（#3035 の受け入れ条件 1・2・4）。
 
 中継の spawn が組む環境（`hub.spawn_env`）から、hook（AskUserQuestion の guard）・中継のラッパー・`ndf lanes question` を
-通して、計画の進行表の依頼と `ndf lanes wait` の知らせまでを確かめる。環境変数は手で足さない。
-子のセッションは偽物で、hook と副命令は同じプロセスで呼ぶ。
+通して、計画のステートマシンのリクエストと `ndf lanes wait` の知らせまでを確かめる。環境変数は手で足さない。
+子のセッションは偽物で、hook とサブコマンドは同じプロセスで呼ぶ。
 """
 
 from __future__ import annotations
@@ -57,7 +57,7 @@ def _lanes(capsys, *argv: str) -> dict:
 
 
 def _in_process(capsys):
-    """`ndf <副命令>` を同じプロセスの `ndf lanes` で流す runner（`subcommand.call` へ渡す）。"""
+    """`ndf <サブコマンド>` を同じプロセスの `ndf lanes` で流す runner（`subcommand.call` へ渡す）。"""
 
     def run(cmd, **kw):
         assert cmd[1] == "lanes" and kw["cwd"]
@@ -127,7 +127,7 @@ def _settings(state: Path, cwd: Path, name: str, env: dict, ask) -> wrapper.Sett
 
 
 def _run_lane(tmp_path, repo, capsys, monkeypatch, entry: dict, name: str) -> wrapper.Wrapper:
-    """spawn の環境でラッパーを組み、問いを出す子を 1 区間だけ流す。"""
+    """spawn の環境でラッパーを組み、質問を出す子を 1 セグメントだけ流す。"""
     state = tmp_path / "relay-state"
     env = hub.spawn_env({"PATH": os.environ.get("PATH", "")}, state, name, entry)
     ask = lane_question.plan_asker(env, name, repo, tmp_path / "plugin", 5.0, _in_process(capsys))
@@ -172,7 +172,7 @@ def test_lane_question_reaches_the_plan_and_lanes_wait(repo, tmp_path, capsys, m
     assert (asked[0]["payload"]["lane"], body["kind"], body["questions"]) == ("b", plan.QUESTION_KIND, QUESTIONS)
     status = _lanes(capsys, "status", PLAN)
     assert [r["lane"] for r in status["metrics"]["open_requests"]] == ["b"]
-    # オーガナイザーの答えで依頼が閉じる（受け入れ条件 3）
+    # オーガナイザーの回答でリクエストが閉じる（受け入れ条件 3）
     _lanes(capsys, "request", "close", PLAN, asked[0]["row_key"], "--reason", "承認する")
     status = _lanes(capsys, "status", PLAN)
     assert status["metrics"]["open_requests"] == [] and status["metrics"]["closed_requests"][0]["closed"] == "承認する"

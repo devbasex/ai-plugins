@@ -1,6 +1,6 @@
 """計画の決まり（#3097）: レーンをまたぐ制約（I2・I13・I18・I19・I20・I21・I12a）と、次に始める行・レーンの状態の判定。
 
-どれも計画の進行表とレーンの進行表の畳み込み（`ndf.progress.lane.types`）を受ける純粋な関数で、DB を読まない。
+どれも計画のステートマシンとレーンのステートマシンの畳み込み（`ndf.progress.lane.types`）を受ける純粋な関数で、DB を読まない。
 """
 
 from __future__ import annotations
@@ -69,7 +69,7 @@ def _limit_errors(view: PlanView, lanes: Lanes) -> list[str]:
 
 
 def _same_repo(view: PlanView, a: str, b: str) -> bool:
-    """2 つのレーンが同じリポジトリで動くか（`repo` を宣言しないレーンは計画のリポジトリ。規則は `PlanView.lane_repo`）。"""
+    """2 つのレーンが同じリポジトリで動くか（`repo` を定義しないレーンは計画のリポジトリ。規則は `PlanView.lane_repo`）。"""
     return view.lane_repo(a) == view.lane_repo(b)
 
 
@@ -201,7 +201,7 @@ def plan_errors(view: PlanView, lanes: Lanes) -> list[str]:
 
 
 def _referenced(view: PlanView, lane: str) -> set[str]:
-    """別のレーンの after が指す、このレーンの行の鍵。"""
+    """別のレーンの after が指す、このレーンの行のキー。"""
     refs = (_target(a) for s in view.lanes.values() if s.name != lane for a in s.after)
     return {row for name, row in refs if name == lane and row is not None}
 
@@ -240,7 +240,7 @@ def next_row(view: PlanView, lanes: Lanes, lane: str) -> Optional[dict[str, Any]
 
 
 def wakeable_lanes(view: PlanView, lanes: Lanes) -> list[tuple[str, str]]:
-    """実行中の行が無く、after を満たす未着手の行があるレーンを（レーン, 行の鍵）で、計画の並びの順に返す。"""
+    """実行中の行が無く、after を満たす未着手の行があるレーンを（レーン, 行のキー）で、計画の並びの順に返す。"""
     if view.state != RUNNING:
         return []
     found = (next_row(view, lanes, name) for name in view.lanes)
@@ -248,7 +248,7 @@ def wakeable_lanes(view: PlanView, lanes: Lanes) -> list[tuple[str, str]]:
 
 
 def plan_complete(view: PlanView, lanes: Lanes) -> bool:
-    """計画を完了にしてよいか（I16）: 全レーンの行が完了か中止で、答えていない依頼が無い。"""
+    """計画を完了にしてよいか（I16）: 全レーンの行が完了か中止で、回答していないリクエストが無い。"""
     rows = [r for name in view.lanes for r in _rows_of(lanes, name)]
     return all(r.state in DONE_STATES for r in rows) and not view.open_requests()
 

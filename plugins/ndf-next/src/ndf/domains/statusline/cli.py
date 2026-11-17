@@ -1,9 +1,9 @@
-"""副命令 `ndf statusline`: statusline の導入・切り替え・復元（#3569。旧い `statusline-switch.sh` の移し先）。
+"""サブコマンド `ndf statusline`: statusline の導入・切り替え・復元（#3569。旧い `statusline-switch.sh` の移し先）。
 
-    ndf statusline ensure    # SessionStart 向け。statusLine が無ければ NDF の表示を設定し、NDF の表示なら本体を今の版に置き直す
-    ndf statusline status    # 今の statusLine と控えの有無
-    ndf statusline set       # 今の値を控えて NDF の表示へ切り替える
-    ndf statusline restore   # 控えから元の値へ戻す（控えが無く NDF の表示なら statusLine を消す）
+    ndf statusline ensure    # SessionStart 向け。statusLine が無ければ NDF の表示を設定し、NDF の表示なら本体を今のバージョンに置き直す
+    ndf statusline status    # 今の statusLine とバックアップの有無
+    ndf statusline set       # 今の値をバックアップして NDF の表示へ切り替える
+    ndf statusline restore   # バックアップから元の値へ戻す（バックアップが無く NDF の表示なら statusLine を消す）
 
 結果は 1 行の結果 JSON で出す（形は contracts/schemas/io/statusline.result.schema.json）。`ensure` は SessionStart を
 止めないため、排他を待ちきれない・`settings.json` を読めないときも `skipped` で終了コード 0 を返す。
@@ -79,10 +79,10 @@ def _run(name: str, p: settings.Paths) -> int:
 def _parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog=f"ndf {TOOL}", description="statusline の導入・切り替え・復元")
     sub = p.add_subparsers(dest="command", required=True)
-    sub.add_parser("ensure", help="statusLine が無ければ NDF の表示を設定し、NDF の表示なら本体を今の版に置き直す")
-    sub.add_parser("status", help="今の statusLine と控えの有無を出す")
-    sub.add_parser("set", help="今の値を控えて NDF の表示へ切り替える")
-    sub.add_parser("restore", help="控えから元の値へ戻す")
+    sub.add_parser("ensure", help="statusLine が無ければ NDF の表示を設定し、NDF の表示なら本体を今のバージョンに置き直す")
+    sub.add_parser("status", help="今の statusLine とバックアップの有無を出す")
+    sub.add_parser("set", help="今の値をバックアップして NDF の表示へ切り替える")
+    sub.add_parser("restore", help="バックアップから元の値へ戻す")
     return p
 
 

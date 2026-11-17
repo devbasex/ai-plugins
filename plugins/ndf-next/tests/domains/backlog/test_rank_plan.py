@@ -1,4 +1,4 @@
-"""順位の算出と plan の照合（#2232・#1595）。"""
+"""順位の算出と plan の検証（#2232・#1595）。"""
 
 from __future__ import annotations
 
@@ -14,13 +14,13 @@ def _est(n: int, ubv: int, size: int = 1, waiting: bool = False) -> Estimate:
     return Estimate(n, ubv, 1, 1, size, digest=f"d{n}", waiting_decision=waiting)
 
 
-def _board(ests: list[Estimate], place: dict[int, str | None], capacity: int | None = 3, **kw) -> rank_decide.Board:
-    issues = {e.number: {"milestone": place[e.number], "labels": [], "created_at": "2026-10-01"} for e in ests}
+def _board(ests: list[Estimate], location: dict[int, str | None], capacity: int | None = 3, **kw) -> rank_decide.Board:
+    issues = {e.number: {"milestone": location[e.number], "labels": [], "created_at": "2026-10-01"} for e in ests}
     return rank_decide.Board(issues, {e.number: e for e in ests}, Config(capacity=capacity), [NEAR, NEXT], **kw)
 
 
 def test_boundary_skips_rows_waiting_for_a_decision():
-    # #2232: 順位 1〜4 が判断待ちで容量の宣言があるとき、境界は 5 位以降から取る
+    # #2232: 順位 1〜4 が判断待ちで容量の設定があるとき、境界は 5 位以降から取る
     ests = [_est(n, 20, waiting=True) for n in (1, 2, 3, 4)] + [_est(5, 8), _est(6, 5), _est(7, 3)]
     board = _board(ests, dict.fromkeys(range(1, 8), NEAR))
     released = rank_decide.released_counts(board.edges)
@@ -122,7 +122,7 @@ def test_stale_rejections_are_removed_by_apply():
     assert got == []
 
 
-# --- 現状固定: quality_slot（品質の枠）。リファクタリングの前の振る舞いをそのまま記録する ---
+# --- 現状固定: quality_slot（品質のクォータ）。リファクタリングの前の振る舞いをそのまま記録する ---
 
 QL = "quality"
 
@@ -144,7 +144,7 @@ def _q(ratio: float = 0.5, minimum: int = 1) -> dict:
     return {"label": QL, "ratio": ratio, "min": minimum}
 
 
-def test_quality_slot_is_none_without_declaration():
+def test_quality_slot_is_none_without_ndf_settings():
     rows = [_row(1)]
     assert rank_decide.quality_slot(rows, _qboard(rows, 10), None, set()) is None
 
@@ -181,7 +181,7 @@ def test_quality_slot_orders_harm_then_created_then_rank():
 def test_quality_slot_skips_rows_whose_dependency_is_not_taken():
     rows = [_row(1), _row(2), _row(3)]
     labels = {1: [QL], 2: [QL], 3: []}
-    # #1 は品質の枠に入らない #3 に依存し、#2 は #1 に依存する
+    # #1 は品質のクォータに入らない #3 に依存し、#2 は #1 に依存する
     board = _qboard(rows, 10, _q(ratio=1.0), labels=labels, edges={(1, 3), (2, 1)})
     got = rank_decide.quality_slot(rows, board, None, set())
     assert got["issues"] == [] and got["size_sum"] == 0
@@ -222,7 +222,7 @@ def test_quality_slot_min_skips_rows_beyond_room_and_continues():
     assert got["budget"] == 1 and got["issues"] == [2, 3] and got["size_sum"] == 3
 
 
-# --- 現状固定: large_slot（大きい課題の枠）。既定の large_slot_ratio=0.5・large_min_size=13 で記録する ---
+# --- 現状固定: large_slot（大きい課題のクォータ）。既定の large_slot_ratio=0.5・large_min_size=13 で記録する ---
 
 
 def _lboard(rows, capacity, sub_issues=None, edges=frozenset()) -> rank_decide.Board:
@@ -290,7 +290,7 @@ def test_large_slot_children_outside_rows_fall_back_to_the_issue_itself():
 
 
 def test_large_slot_skips_rows_held_back_and_does_not_use_their_size():
-    # 判断待ちの Size 13 を枠に当てない。境界は容量 40 を残りの課題に使う
+    # 判断待ちの Size 13 をスロットに当てない。境界は容量 40 を残りの課題に使う
     waiting = model.Row(1, 1, 1, 1, 13, 9, 9 / 13, True, False, False, {})
     rows = [waiting, _row(2, size=8)]
     slot, _, bnd = rank_decide.slots(_lboard(rows, 40), rows)
@@ -333,14 +333,14 @@ def test_retable_drops_closed_issues_and_recomputes_the_boundary():
 
 def test_cycle_across_milestones_is_refused():
     # 別々のマイルストーンにある #1 → #2 → #1 の輪も、未所属の課題の輪も止める
-    for place in ({1: NEAR, 2: NEXT}, {1: None, 2: None}):
-        board = _board([_est(1, 2), _est(2, 1)], place, edges=frozenset({(1, 2), (2, 1)}))
+    for location in ({1: NEAR, 2: NEXT}, {1: None, 2: None}):
+        board = _board([_est(1, 2), _est(2, 1)], location, edges=frozenset({(1, 2), (2, 1)}))
         with pytest.raises(rank_decide.CycleError):
             rank_decide.compute(board)
 
 
 def test_quality_slot_leaves_room_for_the_large_slot():
-    # 容量 20・大きい課題の枠の ratio 0.8・品質の ratio 0.8: Size 13 の大きい課題を当てると、Size 13 の品質の課題は入らない
+    # 容量 20・大きい課題のクォータの ratio 0.8・品質の ratio 0.8: Size 13 の大きい課題を当てると、Size 13 の品質の課題は入らない
     rows = [_row(1, size=13, cod=20), _row(2, size=13)]
     board = _qboard(rows, 20, _q(ratio=0.8, minimum=0), labels={2: [QL]})
     slot = {"issue": 1, "slice": 1, "size": 13, "budget": 16, "status": model.SLOT_FIT}
@@ -348,7 +348,7 @@ def test_quality_slot_leaves_room_for_the_large_slot():
     assert got["issues"] == [] and got["size_sum"] == 0
 
 
-def test_tables_place_approved_moves_at_their_destination():
+def test_tables_location_approved_moves_at_their_destination():
     board = _board([_est(1, 2), _est(2, 1), _est(9, 20)], {1: NEAR, 2: NEAR, 9: NEXT}, capacity=2, approved=frozenset({9}))
     got = rank_decide.compute(board)
     assert got["forward"][0]["decision"] == model.APPROVED
@@ -356,7 +356,7 @@ def test_tables_place_approved_moves_at_their_destination():
     assert 9 in [r["number"] for r in near["rows"]] and 9 not in [r["number"] for r in nxt["rows"]]
 
 
-def test_config_reads_the_declaration_and_the_argument_overrides_capacity():
+def test_config_reads_the_ndf_settings_and_the_argument_overrides_capacity():
     cfg = model.config_from({"capacity": 40, "label_floor": {"bug": 8}, "quality": {"ratio": 0.3}}, None)
     assert cfg.capacity == 40 and cfg.label_floor == {"bug": 8} and cfg.quality == {"label": "quality", "ratio": 0.3, "min": 1}
     assert model.config_from({"capacity": 40}, 10).capacity == 10

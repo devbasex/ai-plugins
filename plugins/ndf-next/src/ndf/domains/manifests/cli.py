@@ -1,4 +1,4 @@
-"""`ndf manifests` の副命令（配る Skill の表からランタイムの定義を作る）。
+"""`ndf manifests` のサブコマンド（配る Skill の表からランタイムの定義を作る）。
 
 ndf manifests render [--check]   # 作り直す（--check は書かずに照らし、違えば stopped）
 """

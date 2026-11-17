@@ -1,4 +1,4 @@
-"""`ndf issues` の副命令が読む入力（JSON・宣言・順位の算出の入力）と、副命令を止める例外。"""
+"""`ndf issues` のサブコマンドが読む入力（JSON・設定・順位の算出の入力）と、サブコマンドを止める例外。"""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from ndf.domains.backlog import depth, estimates_decide, model, rank_decide, sta
 
 
 class Stop(Exception):
-    """副命令を止める。`kind` は止まった理由の種類。`incomplete` は失敗した行（`failed`）を欠け（gaps）として持つ。"""
+    """サブコマンドを止める。`kind` は停止理由の種類。`incomplete` は失敗した行（`failed`）を欠け（gaps）として持つ。"""
 
     def __init__(self, kind: str, detail: str, items: Optional[list] = None, failed: Optional[list] = None) -> None:
         super().__init__(detail)
@@ -37,9 +37,9 @@ def read_json(path: str) -> Any:
         raise Stop("invalid", f"{path} を JSON として読めない: {exc}") from exc
 
 
-def declaration() -> dict[str, Any]:
-    """宣言（.ndf/backlog.json）。"""
-    return depth.declaration(depth.declaration_path(Path.cwd()))
+def ndf_settings() -> dict[str, Any]:
+    """設定（.ndf/backlog.json）。"""
+    return depth.ndf_settings(depth.ndf_settings_path(Path.cwd()))
 
 
 def given_rows(path: Optional[str]) -> dict[int, Any]:
@@ -67,13 +67,13 @@ def previous_rows(rank: Any) -> dict[int, Any]:
 
 
 def _given_number(key: str, given: dict[int, Any]) -> bool:
-    """記録の鍵（番号の文字列）が今回の入力にある課題か。"""
+    """記録のキー（番号の文字列）が今回の入力にある課題か。"""
     return key.isdigit() and int(key) in given
 
 
 def config(a: argparse.Namespace) -> model.Config:
     try:
-        decl = declaration()
+        decl = ndf_settings()
         return model.config_from(decl, a.capacity)
     except (depth.DepthError, model.ConfigError) as exc:
         raise Stop("invalid", str(exc)) from exc

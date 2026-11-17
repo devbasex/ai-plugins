@@ -1,7 +1,7 @@
 """課題の本文・追跡されたファイルの一覧・設計文書から、モードの判定の材料を組む（#3569。旧い `mode-materials.py` の移し先）。
 
 課題ごとに、種類・公開インタフェースの変更の有無（本文の「影響」の表）・触るファイルの候補・候補ごとのテストのファイルを
-組む。判定表の行は選ばない（行を選ぶのは conductor）。候補は code span とリンクの宛先からだけ取り、取れなければ候補 0 件と
+組む。判定表の行は選ばない（行を選ぶのは conductor）。候補は code span とリンク先からだけ取り、取れなければ候補 0 件と
 出す（推して埋めない）。Markdown は markdown-it-py で読み、コードの囲みの中は読まない。
 """
 
@@ -20,7 +20,7 @@ from ndf.domains.relay import signals
 
 LINE_SUFFIX = re.compile(r":\d+(?:-\d+)?$")
 TEST_FORMS = ("test_{}.", "{}_test.", "{}.test.", "{}.spec.")
-# 設計文書の置き場（課題の番号ごと）と、触るファイルを持つ節
+# 設計文書の保存先（課題の番号ごと）と、触るファイルを持つセクション
 DESIGN_FILE = re.compile(r"^issues/issue-(\d+)-design[^/]*\.md$")
 RESULTS_HEADING = "設計の結果"
 ISSUE_CELL = re.compile(r"^#(\d+)$")
@@ -63,7 +63,7 @@ def _heads(tokens: list[Token]) -> list[Head]:
 
 
 def _section(heads: list[Head], title: str) -> Optional[tuple[int, int]]:
-    """見出しが `title` の節の行の範囲（見出しの次の行から、同じか上の水準の次の見出しの前まで）。"""
+    """見出しが `title` のセクションの行の範囲（見出しの次の行から、同じか上の水準の次の見出しの前まで）。"""
     for i, head in enumerate(heads):
         if head.title == title:
             end = next((h.line for h in heads[i + 1 :] if h.level <= head.level), None)
@@ -76,7 +76,7 @@ def _section_of(heads: list[Head], line: int) -> str:
 
 
 def _inline_refs(tokens: list[Token]) -> list[tuple[int, str]]:
-    """インラインの code span の中身とリンクの宛先を (行, 文字列) で並べる。"""
+    """インラインの code span の中身とリンク先を (行, 文字列) で並べる。"""
     found: list[tuple[int, str]] = []
     for tok in tokens:
         if tok.type != "inline" or tok.children is None:
@@ -108,7 +108,7 @@ def _tables(tokens: list[Token]) -> list[Table]:
 
 
 def _section_tables(tokens: list[Token], title: str) -> list[Table]:
-    """見出しが `title` の節の行の範囲に始まる表（出てくる順）。節が無ければ空。"""
+    """見出しが `title` のセクションの行の範囲に始まる表（出てくる順）。セクションが無ければ空。"""
     span = _section(_heads(tokens), title)
     if span is None:
         return []
@@ -116,7 +116,7 @@ def _section_tables(tokens: list[Token], title: str) -> list[Table]:
 
 
 def raw_candidates(body: str) -> list[tuple[str, str]]:
-    """本文の code span の中身とリンクの宛先を整えて (パス, 節の見出し) で返す（出てくる順）。"""
+    """本文の code span の中身とリンク先を整えて (パス, セクションの見出し) で返す（出てくる順）。"""
     tokens = _tokens(body)
     heads = _heads(tokens)
     out: list[tuple[str, str]] = []
@@ -157,7 +157,7 @@ def tests_of(path: str, files: list[str], fileset: set[str]) -> list[str]:
 
 
 def issue_kind(body: str) -> Optional[str]:
-    """本文の「種類」の節の最初の空でない行。節が無ければ None。"""
+    """本文の「種類」のセクションの最初の空でない行。セクションが無ければ None。"""
     span = _section(_heads(_tokens(body)), KIND_HEADING)
     if span is None:
         return None

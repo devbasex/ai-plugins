@@ -1,11 +1,11 @@
 """`ndf relay account add <名前>`: OAuth のアカウントの登録（旧い `relay.py account add` を移した。#3569）。
 
-結果 JSON を出す副命令なので、登録は 2 回に分ける。1 回目（`--code` なし）は `claude auth login` を新しいセッションで
+結果 JSON を出すサブコマンドなので、登録は 2 回に分ける。1 回目（`--code` なし）は `claude auth login` を新しいセッションで
 起動して生かしておき（待機中のログイン。標準入力は FIFO）、認可の URL と期限を返す。2 回目（`--code`）は認可コードの
 1 行を FIFO へ書き、終了を待ち、`claude auth status` で本人を確かめ、同じメールアドレスと組織の重複が無ければ登録する。
 認可コードは FIFO だけを通し、引数・環境変数・ファイル・結果へ書かない。
 
-登録の途中の状態は旧いと同じ `<置き場>/.pending-<名前>/`（`config/`・`code.fifo`・`login.out`・`pending.json`）に置く。
+登録の途中の状態は旧いと同じ `<保存先>/.pending-<名前>/`（`config/`・`code.fifo`・`login.out`・`pending.json`）に置く。
 """
 
 from __future__ import annotations
@@ -286,7 +286,7 @@ def _finish(store: Path, name: str, code: str, environ: Mapping[str, str], now: 
 
 
 def add(store: Path, name: str, code: Optional[str], environ: Mapping[str, str], now: Optional[float] = None) -> Added:
-    """`code` が無ければ待機中のログインを起こして認可コードを求め、あれば渡して登録する。"""
+    """`code` が無ければ待機中のログインを起動して認可コードを求め、あれば渡して登録する。"""
     now = time.time() if now is None else now
     sweep_pending(store, now)
     check_name(store, name)

@@ -1,7 +1,7 @@
-"""メインディレクトリの排他: index か HEAD を動かす git の操作（取り込み・後片付け・ブランチの追従）を 1 本ずつにする。
+"""メインディレクトリの排他: index か HEAD を動かす git の操作（マージ・クリーンアップ・ブランチの追従）を 1 本ずつにする。
 
 並列の計画のレーンが同じメインディレクトリを同時に動かすと `.git/index.lock` が衝突する（#2436）。排他のファイルは
-git の共通ディレクトリの `ndf-main.lock` で、`flock` で取る（シェルの `flock` と互いを待つ）。待つ上限は契約の
+git の共通ディレクトリの `ndf-main.lock` で、`flock` で取る（シェルの `flock` と互いを待つ）。待つ上限はコントラクトの
 `merged.main-lock` の秒である。
 """
 
@@ -18,12 +18,12 @@ from ndf.contracts import limits
 
 # 排他のファイルの名前（git の共通ディレクトリの下）
 LOCK_NAME = "ndf-main.lock"
-# 待つ上限の契約の名前
+# 待つ上限のコントラクトの名前
 POLICY = "merged.main-lock"
 
 
 def lock_file(git: Git) -> Path:
-    """排他のファイルの置き場（`<git の共通ディレクトリ>/ndf-main.lock`）。"""
+    """排他のファイルの保存先（`<git の共通ディレクトリ>/ndf-main.lock`）。"""
     return git.common_dir() / LOCK_NAME
 
 

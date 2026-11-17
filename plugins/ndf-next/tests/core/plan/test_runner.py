@@ -1,4 +1,4 @@
-"""耐久の実行（runner と副命令 plan）。子プロセスで `ndf plan` を打ち、鍵ごとの記録と回復を確かめる（B1・B2・B4・B5・B7・B8）。"""
+"""耐久の実行（runner とサブコマンド plan）。子プロセスで `ndf plan` を打ち、キーごとの記録と回復を確かめる（B1・B2・B4・B5・B7・B8）。"""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ from . import _plan_helpers as H
 
 
 def test_each_plan_round_has_its_own_key_and_is_retired(repo, tmp_path):
-    """実行の回ごとに 1 つの鍵で流し、終わった鍵のファイルは retired/ へ移る（B1・B7）。"""
+    """実行の回ごとに 1 つのキーで流し、終わったキーのファイルは retired/ へ移る（B1・B7）。"""
     a = H.write_plan(repo, "a", [H.count_step("s", tmp_path / "a")])
     b = H.write_plan(repo, "b", [H.count_step("s", tmp_path / "b")])
     assert H.ndf(repo, "next", a)[0] == H.OK
@@ -31,7 +31,7 @@ def test_each_plan_round_has_its_own_key_and_is_retired(repo, tmp_path):
 
 
 def test_a_finished_key_returns_its_result_without_running(repo, tmp_path):
-    """終わった鍵で打ち直すと、retired/ の回の結果を返して流さない（B4）。打ち続けても記録は増えない（B7）。"""
+    """終わったキーで打ち直すと、retired/ の回の結果を返して流さない（B4）。打ち続けても記録は増えない（B7）。"""
     plan = H.write_plan(repo, "p", [H.count_step("s", tmp_path / "n")])
     first = H.ndf(repo, "next", plan)
     second = H.ndf(repo, "next", plan)
@@ -41,7 +41,7 @@ def test_a_finished_key_returns_its_result_without_running(repo, tmp_path):
 
 
 def test_a_fixed_head_runs_a_new_round(repo, tmp_path):
-    """差し戻しの後に head を直して同じ引数で打ち直すと、前回の報告を返さずに流す（#3176）。"""
+    """変更要求の後に head を直して同じ引数で打ち直すと、前回の報告を返さずに流す（#3176）。"""
     plan = H.write_plan(repo, "p", [H.count_step("s", tmp_path / "n")])
     H.ndf(repo, "next", plan)
     git_sandbox.sh(repo, "commit", "-q", "--allow-empty", "-m", "fix", identity=True)
@@ -52,7 +52,7 @@ def test_a_fixed_head_runs_a_new_round(repo, tmp_path):
 
 
 def test_a_gate_survives_the_exit_and_the_next_call_resumes(repo, tmp_path):
-    """承認の答えを待つ間にプロセスが抜けても、次の next が同じ鍵で回復して続ける（B2）。待ちは pending に出る（B5）。"""
+    """承認の回答を待つ間にプロセスが抜けても、次の next が同じキーで回復して続ける（B2）。待ちは pending に出る（B5）。"""
     gate_line = json.dumps({"tool": "t", "status": "gate", "summary": "ask", "routes": {"approved": "x"}})
     ask = {"id": "ask", "run": [sys.executable, "-c", f"print({gate_line!r})"], "on_answer": {"approved": "after", "rejected": "stop"}}
     plan = H.write_plan(
@@ -80,7 +80,7 @@ def test_a_gate_survives_the_exit_and_the_next_call_resumes(repo, tmp_path):
 
 
 def test_the_gate_marker_holds_the_step_seq_and_routes(repo):
-    """現状固定: 承認ゲートで抜けた後の待ちの目印は、ステップ・何度目の待ちか・答えごとのコマンドを持ち、一時ファイルを残さない。"""
+    """現状固定: 承認ゲートで抜けた後の待ちの目印は、ステップ・何度目の待ちか・回答ごとのコマンドを持ち、一時ファイルを残さない。"""
     gate_line = json.dumps({"tool": "t", "status": "gate", "summary": "ask", "routes": {"approved": "x"}})
     ask = {"id": "ask", "run": [sys.executable, "-c", f"print({gate_line!r})"], "on_answer": {"approved": "end", "rejected": "stop"}}
     plan = H.write_plan(repo, "m", [ask])
@@ -106,7 +106,7 @@ def test_a_stopped_plan_returns_the_kind(repo):
 
 
 def test_secrets_stay_out_of_the_records(repo):
-    """秘密の環境変数の値は耐久の記録と結果の控えに入らない（B8）。"""
+    """秘密の環境変数の値は耐久の記録と結果のバックアップに入らない（B8）。"""
     code_text = "import json, os; print(json.dumps({'status': 'ok', 'summary': os.environ['NDF_TEST_TOKEN']}))"
     plan = H.write_plan(repo, "x", [{"id": "s", "run": [sys.executable, "-c", code_text]}])
     assert H.ndf(repo, "next", plan)[0] == H.OK
@@ -128,7 +128,7 @@ def test_wait_reports_the_gate_with_its_routes(repo, tmp_path):
 
 
 def test_the_gate_next_waits_on_the_given_state_dir(repo, tmp_path):
-    """--state-dir で始めた回の承認ゲートの next は、同じ置き場を wait へ渡す。"""
+    """--state-dir で始めた回の承認ゲートの next は、同じ保存先を wait へ渡す。"""
     gate_line = json.dumps({"tool": "t", "status": "gate", "summary": "ask", "routes": {"approved": "x"}})
     ask = {"id": "ask", "run": [sys.executable, "-c", f"print({gate_line!r})"], "on_answer": {"approved": "end"}}
     plan = H.write_plan(repo, "g", [ask])
@@ -160,7 +160,7 @@ def _choices(repo: Path) -> list[dict]:
 
 
 def test_each_chosen_route_is_recorded_once(repo, tmp_path):
-    """行き先を選ぶたびに選択の記録を 1 件書き、終わった回を打ち直しても書き足さない（#3395 の決定 114）。"""
+    """ルートを選ぶたびに選択の記録を 1 件書き、終わった回を打ち直しても書き足さない（#3395 の決定 114）。"""
     gate_line = json.dumps({"tool": "t", "status": "gate", "summary": "ask", "routes": {"approved": None}})
     fail = {
         "id": "a",
@@ -197,7 +197,7 @@ def test_step_outputs_reach_the_plan_result(repo):
 def test_review_gaps_survive_a_later_ok_step(repo):
     """レビューが incomplete と gaps を返しても、後のステップ（CI）が ok ならプランの結果は incomplete のまま gaps を持つ
     （PR #3462 の保留: 設計のプランの review の on_cause incomplete → push-reviewed → CI）。"""
-    gap = {"kind": "unresolved_finding", "name": "r1-1", "reason": "節 A の根拠が無い"}
+    gap = {"kind": "unresolved_finding", "name": "r1-1", "reason": "セクション A の根拠が無い"}
     review = {"tool": "cross-review", "status": "stopped", "summary": "s", "cause": {"kind": "incomplete", "detail": "d"}}
     review |= {"gaps": [gap], "outputs": {"gaps": [gap]}}
     ok_line = json.dumps({"tool": "t", "status": "ok", "summary": "ci"})
@@ -288,7 +288,7 @@ def test_prepare_uses_the_state_dir_of_the_plan(in_repo):
     assert inv.again == (str(in_repo / rel),)
 
 
-def test_prepare_keeps_an_absolute_plan_path_and_a_plan_without_a_place(in_repo, tmp_path):
+def test_prepare_keeps_an_absolute_plan_path_and_a_plan_without_a_location(in_repo, tmp_path):
     path = tmp_path / "loose.json"
     path.write_text(json.dumps({"name": "loose", "steps": [H.py_step("s", "pass")]}), encoding="utf-8")
     inv = runner.prepare(_root(in_repo), path, None, None, in_repo)
@@ -355,7 +355,7 @@ def test_prepare_keeps_a_finished_round_with_the_same_head(in_repo):
 
 
 def test_fresh_after_removing_the_state_dir_runs_a_new_round_from_the_top(repo, tmp_path):
-    """#1592 の再現: 状態の置き場を消して打ち直すと前の回の鍵に戻り流れない。`--fresh` は別の鍵で先頭から流す。"""
+    """#1592 の再現: 状態の保存先を消して打ち直すと前の回のキーに戻り流れない。`--fresh` は別のキーで先頭から流す。"""
     plan = H.write_plan(repo, "p", [H.count_step("s", tmp_path / "n")])
     sdir = repo / "plans" / "p.state"
     assert H.ndf(repo, "next", plan)[0] == H.OK
@@ -371,7 +371,7 @@ def test_fresh_after_removing_the_state_dir_runs_a_new_round_from_the_top(repo, 
 
 
 def test_prepare_fresh_skips_a_recorded_round(in_repo):
-    """`fresh` は終わっていない回を続けず、置き場に鍵の記録が無い番号の回を選ぶ。無ければ今の振る舞いのまま。"""
+    """`fresh` は終わっていない回を続けず、保存先にキーの記録が無い番号の回を選ぶ。無ければ今の振る舞いのまま。"""
     rel = H.write_plan(in_repo, "p", [H.py_step("s", "pass")])
     digest = model.load(in_repo / rel).digest()
     root = _root(in_repo)
@@ -386,12 +386,12 @@ def test_prepare_fresh_skips_a_recorded_round(in_repo):
     assert "--fresh" not in inv.again
 
 
-# --- 現状固定テスト: `runner.final_result` が状態の置き場の記録（prs.json・outputs.json）から作る結果（I-026） ---
+# --- 現状固定テスト: `runner.final_result` が状態の保存先の記録（prs.json・outputs.json）から作る結果（I-026） ---
 
 
 @pytest.fixture
 def two_steps(in_repo) -> runner.Invocation:
-    """ステップ a・b の 2 つのプランの回。状態の置き場を作り、記録はまだ無い。"""
+    """ステップ a・b の 2 つのプランの回。状態の保存先を作り、記録はまだ無い。"""
     rel = H.write_plan(in_repo, "p", [H.py_step("a", "pass"), H.py_step("b", "pass")])
     inv = runner.prepare(_root(in_repo), Path(rel), None, None, in_repo)
     inv.state_dir.mkdir(parents=True, exist_ok=True)
@@ -485,7 +485,7 @@ def test_final_result_gate_routes_approval_to_the_following_step(two_steps, last
     assert out["routes"] == {"approved": cont, "rejected": None}
 
 
-# --- `runner._result_of`: 状態の置き場を読まずに、渡した記録から結果を組む（I-026） ---
+# --- `runner._result_of`: 状態の保存先を読まずに、渡した記録から結果を組む（I-026） ---
 
 
 def _records(inv: runner.Invocation, steps: int, outputs=None) -> "runner._FinalRecords":

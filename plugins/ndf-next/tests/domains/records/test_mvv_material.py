@@ -36,7 +36,7 @@ def test_test_section_carries_exit_codes_and_the_tail_of_outputs() -> None:
 
 
 def test_facts_from_pr_fills_body_claimed_and_changed() -> None:
-    body = "## 概要\n\nx\n\n## 出し直しの指摘への対応\n\n| 指摘 | 対応 |\n| --- | --- |\n| a | 「テスト」の節に記載した |\n| b | 「テスト」の節に追記した |\n"
+    body = "## 概要\n\nx\n\n## 出し直しの指摘への対応\n\n| 指摘 | 対応 |\n| --- | --- |\n| a | 「テスト」のセクションに記載した |\n| b | 「テスト」のセクションに追記した |\n"
     facts = mm.facts_from_pr(BASE, body, [Changed("a.py")])
     assert facts.claimed == ("テスト",) and facts.body == body and facts.changed == (Changed("a.py"),)
     assert facts.boundary_paths == (".ndf/",)
@@ -54,7 +54,7 @@ _FULL = MvvFacts(
     changed=(Changed("old.py"),),
     boundary_paths=("x/", "y/"),
     body="古い本文",
-    claimed=("古い節",),
+    claimed=("古いセクション",),
 )
 
 
@@ -74,7 +74,7 @@ def test_facts_from_pr_keeps_every_base_field_and_replaces_only_the_pr_fields() 
 
 
 def test_facts_from_pr_takes_claimed_from_the_new_body_in_first_seen_order() -> None:
-    body = "## 出し直しの指摘への対応\n\n| a | 「設計」の節に足した |\n| b | 「テスト」の節に記載した |\n| c | 「設計」の節に追記した |\n"
+    body = "## 出し直しの指摘への対応\n\n| a | 「設計」のセクションに足した |\n| b | 「テスト」のセクションに記載した |\n| c | 「設計」のセクションに追記した |\n"
     got = mm.facts_from_pr(_FULL, body, [])
     assert got == MvvFacts(
         status="mismatch",
@@ -109,7 +109,7 @@ class _Hub:
 
 
 def test_pr_facts_reads_the_body_and_changed_files_of_the_pr() -> None:
-    body = "## テスト\n\n通った\n\n## 出し直しの指摘への対応\n\n| a | 「テスト」の節に記載した |\n"
+    body = "## テスト\n\n通った\n\n## 出し直しの指摘への対応\n\n| a | 「テスト」のセクションに記載した |\n"
     facts = mvv.pr_facts(_Hub(body), 3, BASE)  # type: ignore[arg-type]
     assert facts.claimed == ("テスト",) and check_claimed_sections(facts) is None
     assert facts.changed == (Changed("b.py", "a.py", True), Changed("c.md", None, False))

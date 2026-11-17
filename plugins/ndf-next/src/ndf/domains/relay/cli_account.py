@@ -1,4 +1,4 @@
-"""`ndf relay account` の副命令（子の claude を起動するアカウントの指定と、アカウント・従量の接続の登録。#3569）。
+"""`ndf relay account` のサブコマンド（子の claude を起動するアカウントの指定と、アカウント・従量の接続の登録。#3569）。
 
 `relay/cli.py` から分けた。結果 JSON の tool の名前は `ndf relay` と同じ。
 """
@@ -16,7 +16,7 @@ from ndf import cli, identity
 from ndf.contracts import result
 from ndf.domains.relay import account_login, account_metered, account_registry, accounts
 
-# 結果 JSON の tool の名前は副命令の名前（正本は `cli.COMMANDS`）
+# 結果 JSON の tool の名前はサブコマンドの名前（SSOT は `cli.COMMANDS`）
 TOOL = cli.tool_of(f"{__package__}.cli")
 ACCOUNT_COMMANDS = {
     "use": "子の claude を起動するアカウントを指定する",
@@ -26,7 +26,7 @@ ACCOUNT_COMMANDS = {
 
 
 def run(args: argparse.Namespace) -> int:
-    """`ndf relay account` の振り分け（指定の use・show・clear と、登録の副命令）。"""
+    """`ndf relay account` の振り分け（指定の use・show・clear と、登録のサブコマンド）。"""
     if args.account_action in ACCOUNT_REGISTRY_HANDLERS:
         return _account_registry(args)
     state_dir = identity.load().state_dir
@@ -41,12 +41,12 @@ def run(args: argparse.Namespace) -> int:
 
 
 def _capacity_arg(v: str) -> Optional[float]:
-    """枠の引数（正の数か `-`）。`-` は None。"""
+    """スロットの引数（正の数か `-`）。`-` は None。"""
     if v == "-":
         return None
     x = account_registry.parse_number(v)
     if x is None or not 0 < x < float("inf"):
-        raise account_registry.AccountError(f"枠は正の数（USD）か - で渡す: {v}")
+        raise account_registry.AccountError(f"スロットは正の数（USD）か - で渡す: {v}")
     return x
 
 
@@ -117,7 +117,7 @@ def _acc_list(store: Path, a: argparse.Namespace) -> int:
 
 def _acc_capacity(store: Path, a: argparse.Namespace) -> int:
     row = account_registry.set_capacity(store, a.name, _capacity_arg(a.five), _capacity_arg(a.seven))
-    return result.emit(result.result(TOOL, result.OK, f"枠の大きさを宣言した: {a.name}", items=[row]))
+    return result.emit(result.result(TOOL, result.OK, f"スロットの大きさを定義した: {a.name}", items=[row]))
 
 
 def _acc_remove(store: Path, a: argparse.Namespace) -> int:
@@ -139,22 +139,22 @@ def _acc_check(store: Path, a: argparse.Namespace) -> int:
 
 
 class AccountSub(NamedTuple):
-    """アカウントの登録の副命令の 1 つ（名前・説明・ハンドラ）。"""
+    """アカウントの登録のサブコマンドの 1 つ（名前・説明・ハンドラ）。"""
 
     name: str
     text: str
     handler: Callable[[Path, argparse.Namespace], int]
 
 
-# アカウントと従量の接続の登録の副命令（旧い置き場と同じ。#3569）
+# アカウントと従量の接続の登録のサブコマンド（旧い保存先と同じ。#3569）
 ACCOUNT_REGISTRY = (
     AccountSub("add", "OAuth のアカウントを登録する（--code なしで認可の URL を出し、--code で認可コードを渡す）", _acc_add),
     AccountSub("add-bedrock", "Bedrock の従量の接続を確かめて保存する", _acc_bedrock),
     AccountSub("add-api-key", "API キーを確かめて保存する（値は標準入力か --key-file）", _acc_api_key),
-    AccountSub("api-key-monthly", "API キーの月の額を宣言する（0 で外す）", _acc_monthly),
+    AccountSub("api-key-monthly", "API キーの月の額を定義する（0 で外す）", _acc_monthly),
     AccountSub("api-key-use", "API キーへ切り替える使い方と閾値を読む・書く", _acc_use),
     AccountSub("list", "登録したアカウント・従量の接続・API キーの一覧", _acc_list),
-    AccountSub("capacity", "アカウントの 5 時間と週の枠の大きさを宣言する（- で外す）", _acc_capacity),
+    AccountSub("capacity", "アカウントの 5 時間と週のクォータの大きさを定義する（- で外す）", _acc_capacity),
     AccountSub("remove", "アカウント・従量の接続（metered）・API キーの登録を外す", _acc_remove),
     AccountSub("check", "従量の接続（metered）か API キーが呼べるかを確かめる（状態は記録しない）", _acc_check),
 )
@@ -162,7 +162,7 @@ ACCOUNT_REGISTRY_HANDLERS = {sub.name: sub.handler for sub in ACCOUNT_REGISTRY}
 
 
 def _account_registry(args: argparse.Namespace) -> int:
-    """登録の副命令を動かす。使い方の誤りは invalid、待ちきれない排他は store_in_use、書けない置き場は unknown で止まる。"""
+    """登録のサブコマンドを動かす。使い方の誤りは invalid、待ちきれない排他は store_in_use、書けない保存先は unknown で止まる。"""
     try:
         return ACCOUNT_REGISTRY_HANDLERS[args.account_action](account_registry.store_dir(os.environ), args)
     except account_metered.MeteredError as exc:
@@ -174,13 +174,13 @@ def _account_registry(args: argparse.Namespace) -> int:
     except account_registry.AccountLockTimeout as exc:
         return result.emit(result.stopped(TOOL, "store_in_use", str(exc)))  # 書かずに返す。打ち直さず人へ戻す
     except OSError as exc:
-        return result.emit(result.stopped(TOOL, "unknown", f"アカウントの置き場へ書けない: {exc}"))
+        return result.emit(result.stopped(TOOL, "unknown", f"アカウントの保存先へ書けない: {exc}"))
 
 
 def parser(sub: Any, help_text: str) -> None:
-    """`account` の副命令の parser を `sub` へ足す（`help_text` は `ndf relay` の一覧の説明）。"""
+    """`account` のサブコマンドの parser を `sub` へ足す（`help_text` は `ndf relay` の一覧の説明）。"""
     texts = {**ACCOUNT_COMMANDS, **{s.name: s.text for s in ACCOUNT_REGISTRY}}
-    acc = sub.add_parser("account", help=help_text, description="副命令: " + " / ".join(f"{k}（{v}）" for k, v in texts.items()))
+    acc = sub.add_parser("account", help=help_text, description="サブコマンド: " + " / ".join(f"{k}（{v}）" for k, v in texts.items()))
     acc_sub = acc.add_subparsers(dest="account_action", required=True)
     p = {name: acc_sub.add_parser(name, help=text, description=text) for name, text in texts.items()}
     p["use"].add_argument("name")
@@ -188,7 +188,7 @@ def parser(sub: Any, help_text: str) -> None:
     p["add"].add_argument("--code", help="認可コード。- なら標準入力の 1 行（引数と記録に残さない）")
     for opt, text in (("--profile", "AWS のプロファイル"), ("--region", "地域（省けばプロファイルの region）"), ("--model", "モデルの ID")):
         p["add-bedrock"].add_argument(opt, help=text)
-    p["add-bedrock"].add_argument("--yes", action="store_true", help="確かめが通れば保存する（前の宣言を置き換える）")
+    p["add-bedrock"].add_argument("--yes", action="store_true", help="確かめが通れば保存する（前の設定を置き換える）")
     p["add-api-key"].add_argument("name", help="API キーの名前")
     p["add-api-key"].add_argument("--account", required=True, help="結び付ける登録済みアカウント")
     p["add-api-key"].add_argument("--key-file", help="キーの値を 1 行目に持つファイル（省けば標準入力の 1 行）")
@@ -198,7 +198,7 @@ def parser(sub: Any, help_text: str) -> None:
     p["api-key-use"].add_argument("mode", nargs="?", choices=account_registry.USES, help="使い方（省けば今の値を出す）")
     p["api-key-use"].add_argument("--weekly-at", help="閾値（百分率。1〜100）")
     p["capacity"].add_argument("name", help="アカウントの名前")
-    p["capacity"].add_argument("five", help="5 時間の枠（USD か -）")
-    p["capacity"].add_argument("seven", help="週の枠（USD か -）")
+    p["capacity"].add_argument("five", help="5 時間のクォータ（USD か -）")
+    p["capacity"].add_argument("seven", help="週のクォータ（USD か -）")
     p["remove"].add_argument("target", help="アカウントの名前・metered・API キーの名前")
     p["check"].add_argument("target", help="metered か API キーの名前")

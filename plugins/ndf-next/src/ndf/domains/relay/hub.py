@@ -1,14 +1,14 @@
-"""リレーハブ: 名前つきのラッパーの起動（spawn）・起こし直し（restart）・停止（stop）・一覧（ls）。
+"""リレーハブ: 名前つきのラッパーの起動（spawn）・再起動（restart）・停止（stop）・一覧（ls）。
 
-頼む側は依頼を `relay/hub/requests/<id>.json` へ書き、リレーハブの排他（`hub.lock`）を取れたら自分がリレーハブに
-なって、溜まった依頼を古い順に 1 本ずつ処理する（常駐のプロセスを持たない）。結果は `results/<id>.json` へ書き、
+頼む側はリクエストを `relay/hub/requests/<id>.json` へ書き、リレーハブの排他（`hub.lock`）を取れたら自分がリレーハブに
+なって、溜まったリクエストを古い順に 1 本ずつ処理する（常駐のプロセスを持たない）。結果は `results/<id>.json` へ書き、
 頼んだ側が読んで消す。登録簿 `registry.json` を書くのは排他を持つリレーハブだけである。
 
-- 起こし直しは、止める前に上限を判定し、通ったときだけ止めてから起こす（#2753。`hub_decide.restart`）
+- 再起動は、止める前に上限を判定し、通ったときだけ止めてから起動する（#2753。`hub_decide.restart`）
 - 起動が「起動した」を返すのは、ラッパーの錠が取られ、tmux のセッションが残っているときだけ（#2563）
-- ラッパーの置き場（プラグインの `bin/ndf`）が無ければ、理由と打ち直しのコマンドを返す（#2583）
-- 版の違うラッパーが動いていれば起動しない（3341-2。`hub_decide.mixed`）
-- 起こし直しの結果に、待ちを抱えた実行の一覧（`ndf plan pending`）を載せる（#3344 の決定 86）
+- ラッパーの保存先（プラグインの `bin/ndf`）が無ければ、理由と打ち直しのコマンドを返す（#2583）
+- バージョンの違うラッパーが動いていれば起動しない（3341-2。`hub_decide.mixed`）
+- 再起動の結果に、待ちを抱えた実行の一覧（`ndf plan pending`）を載せる（#3344 の決定 86）
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ LOG_FILE = "hub-log.jsonl"
 
 
 class Outcome(NamedTuple):
-    """依頼 1 本の結果。`cause` は断った・失敗した理由の種類（`contracts/causes.json`）。"""
+    """リクエスト 1 本の結果。`cause` は断った・失敗した理由の種類（`contracts/causes.json`）。"""
 
     ok: bool
     summary: str
@@ -67,11 +67,11 @@ class Context:
 
 
 def hub_dir(state_dir: Path) -> Path:
-    return state_dir / facts.value("places", "relay-hub", "path")
+    return state_dir / facts.value("locations", "relay-hub", "path")
 
 
 def submit(ctx: Context, request: Mapping[str, Any]) -> Outcome:
-    """依頼を書き、結果が出るまで待つ（排他が空けば自分で処理する）。"""
+    """リクエストを書き、結果が出るまで待つ（排他が空けば自分で処理する）。"""
     base = hub_dir(ctx.state_dir)
     rid = f"{time.time_ns():020d}-{uuid.uuid4().hex[:8]}"
     signals.replace_json(base / "requests" / f"{rid}.json", dict(request))
@@ -83,7 +83,7 @@ def submit(ctx: Context, request: Mapping[str, Any]) -> Outcome:
 
     if not _wait_until(ctx, ctx.hub_wait, answered):
         (base / "requests" / f"{rid}.json").unlink(missing_ok=True)
-        return Outcome(False, f"リレーハブの答えを {ctx.hub_wait.seconds:g} 秒待っても出ない", "wait_timeout")
+        return Outcome(False, f"リレーハブの回答を {ctx.hub_wait.seconds:g} 秒待っても出ない", "wait_timeout")
     data = json.loads(result.read_text(encoding="utf-8"))
     result.unlink()
     return Outcome(data["ok"], data["summary"], data["cause"], data["items"])
@@ -100,7 +100,7 @@ def _wait_until(ctx: Context, wait: Wait, done: Callable[[], bool]) -> bool:
 
 
 def drain(ctx: Context) -> bool:
-    """排他を取れたら溜まった依頼を古い順に処理する。取れなければ偽。"""
+    """排他を取れたら溜まったリクエストを古い順に処理する。取れなければ偽。"""
     base = hub_dir(ctx.state_dir)
     base.mkdir(parents=True, exist_ok=True)
     with signals.held(base / LOCK_FILE, 0) as owned:
@@ -121,25 +121,25 @@ def drain(ctx: Context) -> bool:
 
 
 def _handle_file(ctx: Context, path: Path) -> Optional[Outcome]:
-    """依頼のファイル 1 本を処理する。読めない依頼・処理が送出した例外も結果にして返す（後ろの依頼を止めない）。
+    """リクエストのファイル 1 本を処理する。読めないリクエスト・処理が送出した例外も結果にして返す（後ろのリクエストを止めない）。
 
-    依頼のファイルが既に無い（頼む側が submit の期限切れで消した）ときは None を返す。
+    リクエストのファイルが既に無い（頼む側が submit の期限切れで消した）ときは None を返す。
     """
     try:
         text = path.read_text(encoding="utf-8")
-    except FileNotFoundError:  # noqa: NDF401 ファイル: 頼む側が期限切れで消した依頼は処理しない
+    except FileNotFoundError:  # noqa: NDF401 ファイル: 頼む側が期限切れで消したリクエストは処理しない
         return None
     try:
         req = json.loads(text)
         if not isinstance(req, dict):
-            return Outcome(False, f"依頼の形が違う（{path.name}）", "invalid")
+            return Outcome(False, f"リクエストの形が違う（{path.name}）", "invalid")
         return handle(ctx, req)
     except (OSError, ValueError, KeyError, TypeError) as exc:
-        return Outcome(False, f"依頼を処理できない（{path.name}）: {type(exc).__name__}: {exc}", "invalid")
+        return Outcome(False, f"リクエストを処理できない（{path.name}）: {type(exc).__name__}: {exc}", "invalid")
 
 
 def handle(ctx: Context, req: Mapping[str, Any]) -> Outcome:
-    """依頼 1 本を処理する。"""
+    """リクエスト 1 本を処理する。"""
     kind = req.get("kind")
     try:
         if kind == "spawn":
@@ -150,7 +150,7 @@ def handle(ctx: Context, req: Mapping[str, Any]) -> Outcome:
             return stop(ctx, str(req["name"]))
     except registry.RegistryError as exc:
         return Outcome(False, str(exc), "invalid")
-    return Outcome(False, f"知らない依頼: {kind}", "invalid")
+    return Outcome(False, f"知らないリクエスト: {kind}", "invalid")
 
 
 def _next_name(taken: set[str]) -> str:
@@ -186,7 +186,7 @@ def spawn(ctx: Context, req: Mapping[str, Any]) -> Outcome:
 
 
 def restart(ctx: Context, name: str) -> Outcome:
-    """止める前に上限と版を判定し、通ったときだけ止めてから起こす。"""
+    """止める前に上限とバージョンを判定し、通ったときだけ止めてから起動する。"""
     entries = registry.read_registry(hub_dir(ctx.state_dir))
     entry = entries.get(name)
     if entry is None:
@@ -227,12 +227,12 @@ def _refused(d: hub_decide.Decision, cause: str) -> Optional[Outcome]:
 
 
 def _own_count(running: list[hub_decide.Running]) -> int:
-    """動いているラッパーのうち、この NDF のもの（版を持つもの）の数。"""
+    """動いているラッパーのうち、この NDF のもの（バージョンを持つもの）の数。"""
     return len([r for r in running if r.version is not None])
 
 
 def _with_pending(got: Outcome, pending: Mapping[str, Any]) -> Outcome:
-    """起こし直しの結果へ、待ちを抱えた実行の件数（読めなければその理由）と一覧を足す。"""
+    """再起動の結果へ、待ちを抱えた実行の件数（読めなければその理由）と一覧を足す。"""
     note = pending.get("note")
     if note:
         summary = f"{got.summary}。待ちの一覧を読めない: {note}"
@@ -255,7 +255,7 @@ def stop(ctx: Context, name: str) -> Outcome:
 def spawn_env(environ: Mapping[str, str], state_dir: Path, name: str, entry: Mapping[str, Any]) -> dict[str, str]:
     """名前つきのラッパーへ渡す環境（子のセッションの環境に、名前・役割・計画の名前を足す）。
 
-    計画の名前（`NDF_RELAY_PLAN`）があれば、ラッパーは子の問いを計画の依頼として載せる（`lane_question`。#3035）。
+    計画の名前（`NDF_RELAY_PLAN`）があれば、ラッパーは子の質問を計画のリクエストとして載せる（`lane_question`。#3035）。
     """
     env = session_env.child_env(environ, state_dir)
     extra = {"NDF_RELAY_NAME": name, "NDF_RELAY_SPAWNED": "1", "NDF_RELAY_ROLE": entry.get("role"), "NDF_RELAY_PLAN": entry.get("plan")}

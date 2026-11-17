@@ -25,7 +25,7 @@ NOTE_COLOR='\033[0;33m'
 
 # 再起動の方針（#2262）。窓の大きさは statusline の入力にだけあるので、状態ディレクトリへ書いて hook に渡す。
 # 適用値は SessionStart と hook が書いたファイルを読むだけにする（優先順位の解決を 2 か所に持たない）。
-# 置き場の順は lib/context_decisions.py の context_state_dir と同じ
+# 保存先の順は lib/context_decisions.py の context_state_dir と同じ
 session_id=$(echo "$input" | jq -r '.session_id // empty' 2>/dev/null)
 [ -n "$session_id" ] || { [ -n "$transcript" ] && session_id=$(basename "$transcript" .jsonl); }
 case "$session_id" in *[!A-Za-z0-9_-]*) session_id="" ;; esac
@@ -133,7 +133,7 @@ if [ -n "$total_input" ]; then
 fi
 
 # 接続先。Bedrock なら環境変数で分かる。Anthropic のアカウントは `claude auth status` の email で、
-# 0.4 秒かかるので 60 秒控える（更新は 5 秒ごと）。取れなければ何も足さない
+# 0.4 秒かかるので 60 秒キャッシュする（更新は 5 秒ごと）。取れなければ何も足さない
 account=""
 if [ -n "${CLAUDE_CODE_USE_BEDROCK:-}" ]; then
   account="bedrock${AWS_PROFILE:+:$AWS_PROFILE}"
@@ -150,10 +150,10 @@ else
     else
       auth_out=$(claude auth status 2>/dev/null)
     fi
-    # 取れなかったときは古い控えを消し、次の更新で取り直す
+    # 取れなかったときは古いバックアップを消し、次の更新で取り直す
     if [ -n "$auth_out" ]; then printf "%s" "$auth_out" > "$auth_cache" 2>/dev/null; else rm -f "$auth_cache" 2>/dev/null; fi
   fi
-  # 同じメールアドレスに Team と個人の契約がありうるので、契約の種別（team / pro / max ...）を添える
+  # 同じメールアドレスに Team と個人のコントラクトがありうるので、コントラクトの種別（team / pro / max ...）を添える
   [ -f "$auth_cache" ] && account=$(jq -r 'select(.loggedIn == true) | select(.email != null) | .email + (if .subscriptionType then " (" + .subscriptionType + ")" else "" end)' "$auth_cache" 2>/dev/null)
 fi
 account_info=""

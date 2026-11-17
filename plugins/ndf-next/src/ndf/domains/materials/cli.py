@@ -1,4 +1,4 @@
-"""副命令 `ndf materials`: 課題の本文と設計文書から、モードの判定の材料を集める（#3569。旧い `mode-materials.py` の移し先）。
+"""サブコマンド `ndf materials`: 課題の本文と設計文書から、モードの判定の材料を集める（#3569。旧い `mode-materials.py` の移し先）。
 
     ndf materials --issue <番号>... [--root <リポジトリ>] [--out <判定の根拠のファイル>]
 
@@ -7,7 +7,7 @@
 `ndf loop sprint` に渡す。結果は 1 行の結果 JSON（形は contracts/schemas/io/materials.result.schema.json）。
 
 終了コード: 0 = 集めた / 6 = 本文を読めない課題がある（種類 `incomplete`。`gaps` に課題と理由）/ 3 = 追跡されたファイルの
-一覧を読めない（git の外）/ 1 = 下書きを書けない。使い方の誤りは副命令の表が `invalid`（2）で返す。
+一覧を読めない（git の外）/ 1 = 下書きを書けない。使い方の誤りはサブコマンドの表が `invalid`（2）で返す。
 """
 
 from __future__ import annotations

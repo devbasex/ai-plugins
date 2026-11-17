@@ -1,4 +1,4 @@
-"""中継の部品: ブロックの読み・シグナルファイル・中継の印・子の環境・アカウント・ラッパーの見分け・会話の記録。"""
+"""中継の部品: ブロックの読み・シグナルファイル・中継のマーカー・子の環境・アカウント・ラッパーの見分け・会話の記録。"""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from ndf.contracts import facts
-from ndf.domains.relay import accounts, blocks, marks, observe, registry, session_env, signals
+from ndf.domains.relay import accounts, blocks, markers, observe, registry, session_env, signals
 from ndf.domains.relay.account_decide import Usage
 
 FENCE = "ndf-next"
@@ -57,7 +57,7 @@ def test_signal_write_gives_up_when_the_lock_is_held(tmp_path, hold_lock):
         os.close(fd)
 
 
-def test_question_and_places_from_the_environment(tmp_path):
+def test_question_and_locations_from_the_environment(tmp_path):
     payload = {"tool_use_id": "t", "tool_input": {"questions": [{"question": "q"}]}, "cwd": "/w"}
     assert signals.write_question(tmp_path / signals.QUESTION_FILE, "s1", payload, 0.1)
     assert signals.has_question(tmp_path)
@@ -69,19 +69,19 @@ def test_question_and_places_from_the_environment(tmp_path):
 
 
 def test_relay_mark_is_taken_once(tmp_path):
-    # 中継が送った入力では hook の数え手が数え直さない（決定 92）。hook は take で印を消す
-    marks.mark(tmp_path, "sess-1")
-    assert marks.take(tmp_path, "sess-1") is True
-    assert marks.take(tmp_path, "sess-1") is False
-    with pytest.raises(marks.MarkError):
-        marks.mark(tmp_path, "../x")
+    # 中継が送った入力では hook の数え手が数え直さない（決定 92）。hook は take でマーカーを消す
+    markers.mark(tmp_path, "sess-1")
+    assert markers.take(tmp_path, "sess-1") is True
+    assert markers.take(tmp_path, "sess-1") is False
+    with pytest.raises(markers.MarkerError):
+        markers.mark(tmp_path, "../x")
 
 
 def test_child_env_drops_editor_git_auth_and_sets_relay_values(tmp_path):
     parent = {"PATH": "/bin", "GIT_ASKPASS": "/vscode/askpass.sh", "VSCODE_GIT_IPC_HANDLE": "/tmp/x.sock", "VSCODE_GIT_ASKPASS_MAIN": "m"}
     got = session_env.child_env(parent, tmp_path)
     assert got["PATH"] == "/bin" and not set(facts.ids("env", child="drop")) & set(got)  # #2985
-    # Claude Code の中から起動しても、入れ子の起動の印と親のセッションの ID を子へ残さない
+    # Claude Code の中から起動しても、入れ子の起動のマーカーと親のセッションの ID を子へ残さない
     nested = session_env.child_env({**parent, "CLAUDECODE": "1", "CLAUDE_CODE_SESSION_ID": "parent"}, tmp_path)
     assert "CLAUDECODE" not in nested and "CLAUDE_CODE_SESSION_ID" not in nested
     assert got["CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION"] == "false"  # #2504
@@ -153,7 +153,7 @@ def test_screen_facts():
     assert not observe.auth_failed("all good")
 
 
-# 現状固定（I-001）: 書き込みはどれも親の置き場を作り、同じ置き場の一時の名前から置き換え、一時の名前を残さない
+# 現状固定（I-001）: 書き込みはどれも親の保存先を作り、同じ保存先の一時の名前から置き換え、一時の名前を残さない
 def _no_temporary(root: Path) -> list[Path]:
     return [p for p in root.rglob("*") if p.name.endswith(".tmp")]
 
@@ -173,16 +173,16 @@ def test_relay_writes_create_the_parent_and_leave_no_temporary_file(tmp_path, mo
     accounts.write_usages(state, [Usage("チーム", 1.5, False)])
     assert accounts.usage_path(state).read_text(encoding="utf-8") == '{"accounts": [{"name": "チーム", "percent": 1.5, "limited": false}]}'
     d = registry.wrapper_dir(state, "t1")
-    registry.write_state(d, {"state": "running", "reason": "区間 1"})
+    registry.write_state(d, {"state": "running", "reason": "セグメント 1"})
     assert (d / registry.STATE_FILE).read_text(encoding="utf-8") == (
-        '{"state": "running", "reason": "区間 1", "at": "2026-11-14T00:00:00+00:00"}'
+        '{"state": "running", "reason": "セグメント 1", "at": "2026-11-14T00:00:00+00:00"}'
     )
     registry.save_registry(hub.hub_dir(state), {"t1": {"cwd": "/w/作業"}})
     assert (hub.hub_dir(state) / registry.REGISTRY_FILE).read_text(
         encoding="utf-8"
     ) == '{"version": 1, "entries": {"t1": {"cwd": "/w/作業"}}}'
     assert registry.read_registry(hub.hub_dir(state)) == {"t1": {"cwd": "/w/作業"}}
-    m = marks.mark(state, "s1")
+    m = markers.mark(state, "s1")
     assert m.read_text(encoding="utf-8") == '{"session_id": "s1", "at": "2026-11-14T00:00:00+00:00"}'
     assert _no_temporary(tmp_path) == []
 
@@ -201,8 +201,8 @@ def test_install_writes_set_the_mode_and_leave_no_temporary_file(tmp_path):
     assert _no_temporary(tmp_path) == []
 
 
-# 現状固定（I-002）: 中継の置き場は状態の置き場の下にあり、宣言（places・ndf-files）のパスと一致する
-def test_relay_places_match_the_declared_paths():
+# 現状固定（I-002）: 中継の保存先は状態の保存先の下にあり、設定（locations・ndf-files）のパスと一致する
+def test_relay_locations_match_the_declared_paths():
     from ndf.domains.relay import hub
 
     state = Path("/s")
@@ -210,22 +210,22 @@ def test_relay_places_match_the_declared_paths():
         "relay-hub": hub.hub_dir(state),
         "relay-wrappers": registry.wrappers_dir(state),
         "relay-accounts": accounts.accounts_dir(state),
-        "relay-marks": marks.mark_path(state, "s1").parent,
+        "relay-markers": markers.marker_path(state, "s1").parent,
     }
     assert {k: str(v) for k, v in got.items()} == {
         "relay-hub": "/s/relay/hub",
         "relay-wrappers": "/s/relay/wrappers",
         "relay-accounts": "/s/relay/accounts",
-        "relay-marks": "/s/relay/marks",
+        "relay-markers": "/s/relay/markers",
     }
-    for place, path in got.items():
-        assert facts.value("places", place, "root") == "state", place
-        assert path == state / facts.value("places", place, "path"), place
+    for location, path in got.items():
+        assert facts.value("locations", location, "root") == "state", location
+        assert path == state / facts.value("locations", location, "path"), location
     assert registry.wrapper_dir(state, "t1") == Path("/s/relay/wrappers/t1")
     assert accounts.pin_path(state) == Path("/s/relay/accounts/pinned.json")
     assert accounts.usage_path(state) == Path("/s/relay/accounts/usage.json")
-    assert marks.mark_path(state, "s1") == Path("/s/relay/marks/s1.json")
-    declared = {r["path"] for r in facts.rows("ndf-files", place="relay-hub")}
+    assert markers.marker_path(state, "s1") == Path("/s/relay/markers/s1.json")
+    declared = {r["path"] for r in facts.rows("ndf-files", location="relay-hub")}
     assert {hub.STATE_FILE, registry.REGISTRY_FILE, hub.LOG_FILE} <= declared
-    wrapper = {r["path"] for r in facts.rows("ndf-files", place="relay-wrappers")}
+    wrapper = {r["path"] for r in facts.rows("ndf-files", location="relay-wrappers")}
     assert {f"<名前>/{n}" for n in (registry.STATE_FILE, registry.LOCK_FILE, registry.LOG_FILE)} <= wrapper

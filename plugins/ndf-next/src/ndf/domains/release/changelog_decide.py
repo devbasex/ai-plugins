@@ -1,10 +1,10 @@
-"""CHANGELOG の版のセクションを組み、差し込み、読み出す（純粋な関数）。
+"""CHANGELOG のバージョンのセクションを組み、差し込み、読み出す（純粋な関数）。
 
-節は `## [<プラグイン名> <基底の版>] - <日付>` の見出しから次の `## ` の見出しの前までである。開発版は載せない
-（呼び手が本番の版のときだけ書く）。
+セクションは `## [<プラグイン名> <基底のバージョン>] - <日付>` の見出しから次の `## ` の見出しの前までである。開発版は載せない
+（呼び手が本番のバージョンのときだけ書く）。
 
-- 同じプラグインの同じ基底の版のセクションが既にあれば、その節だけを置き換える。ほかの節は 1 行も変えない
-- 無ければ、最初の版のセクションの前（前書きの後）へ差し込む。版のセクションが 1 つも無ければ末尾へ足す
+- 同じプラグインの同じ基底のバージョンのセクションが既にあれば、そのセクションだけを置き換える。ほかのセクションは 1 行も変えない
+- 無ければ、最初のバージョンのセクションの前（前書きの後）へ差し込む。バージョンのセクションが 1 つも無ければ末尾へ足す
 """
 
 from __future__ import annotations
@@ -14,36 +14,36 @@ from typing import NamedTuple
 
 from ndf.domains.release import version_decide
 
-# 版のセクションの見出しの先頭
+# バージョンのセクションの見出しの先頭
 SECTION_MARK = "## "
 
 
 class Entry(NamedTuple):
-    """節の 1 行の元（含む PR の題と番号）。"""
+    """セクションの 1 行の元（含む PR の題と番号）。"""
 
     number: int
     title: str
 
 
 def changelog_heading(plugin: str, version: str, date: str) -> str:
-    """CHANGELOG の版の見出し（`## [<プラグイン名> <版>] - <日付>`）。"""
+    """CHANGELOG のバージョンの見出し（`## [<プラグイン名> <バージョン>] - <日付>`）。"""
     return f"{changelog_key(plugin, version)} - {date}"
 
 
 def changelog_key(plugin: str, version: str) -> str:
-    """CHANGELOG の版の見出しの、日付を除いた先頭（節を探す鍵）。"""
+    """CHANGELOG のバージョンの見出しの、日付を除いた先頭（セクションを探すキー）。"""
     return f"{SECTION_MARK}[{plugin} {version_decide.base_of(version)}]"
 
 
 def block(plugin: str, version: str, date: str, entries: Sequence[Entry]) -> list[str]:
-    """節の行（見出し・空行・PR ごとの 1 行・空行）。"""
+    """セクションの行（見出し・空行・PR ごとの 1 行・空行）。"""
     lines = [changelog_heading(plugin, version, date), ""]
     lines += [f"- {e.title.strip()}（#{e.number}）" for e in sorted(entries, key=lambda e: e.number)]
     return [*lines, ""]
 
 
 def _span(lines: list[str], plugin: str, version: str) -> tuple[int, int] | None:
-    """版のセクションの (見出しの行, 次の節の行)。無ければ None。"""
+    """バージョンのセクションの (見出しの行, 次のセクションの行)。無ければ None。"""
     key = changelog_key(plugin, version)
     at = next((i for i, line in enumerate(lines) if line == key or line.startswith(key + " ")), None)
     if at is None:
@@ -53,7 +53,7 @@ def _span(lines: list[str], plugin: str, version: str) -> tuple[int, int] | None
 
 
 def insert(text: str, plugin: str, version: str, new: Sequence[str]) -> str:
-    """節を差し込んだ（か置き換えた）全文。"""
+    """セクションを差し込んだ（か置き換えた）全文。"""
     lines = text.split("\n")
     span = _span(lines, plugin, version)
     if span is not None:
@@ -65,7 +65,7 @@ def insert(text: str, plugin: str, version: str, new: Sequence[str]) -> str:
 
 
 def notes(text: str, plugin: str, version: str) -> str | None:
-    """版のセクションの本文（見出しを除き、前後の空行を落とす）。節が無ければ None。"""
+    """バージョンのセクションの本文（見出しを除き、前後の空行を落とす）。セクションが無ければ None。"""
     lines = text.split("\n")
     span = _span(lines, plugin, version)
     if span is None:

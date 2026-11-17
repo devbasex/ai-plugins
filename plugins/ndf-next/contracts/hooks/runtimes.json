@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "summary": "ランタイムの hook の入出力の契約表（#3345 の決定 95）。ランタイムごとに持つ事象・予算の鍵（limits.json の hook.budget.<budget>）・NDF が読む入力の鍵（reads は無ければ input_shape として通す・optional は無くてよい）・判定ごとの出力の形・timeout の上限・hook の command へプラグインの根を渡す環境変数（plugin_root_env。登録の command をシェルが展開する）を持つ。出力の形の {reason} と {context} は判定の文に置き換わる。形の無い判定は何も出さない。skipped はそのランタイムで働かない guard と理由",
+  "summary": "ランタイムの hook の入出力のコントラクト表（#3345 の決定 95）。ランタイムごとに持つ事象・予算のキー（limits.json の hook.budget.<budget>）・NDF が読む入力のキー（reads は無ければ input_shape として通す・optional は無くてよい）・判定ごとの出力の形・timeout の上限・hook の command へプラグインの根を渡す環境変数（plugin_root_env。登録の command をシェルが展開する）を持つ。出力の形の {reason} と {context} は判定の文に置き換わる。形の無い判定は何も出さない。skipped はそのランタイムで働かない guard と理由",
   "runtimes": {
     "claude": {
       "summary": "Claude Code（https://code.claude.com/docs/en/hooks）",

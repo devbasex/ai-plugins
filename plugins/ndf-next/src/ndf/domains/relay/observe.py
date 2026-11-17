@@ -1,7 +1,7 @@
 """ラッパーが子の画面と会話の記録から読む事実（#3243・#2595・#3337）。
 
 - 画面の末尾: 利用上限の行（`ndf.adapters.agents.usage_limit`）と、認証の失敗で `/goal` が外れた行
-- 会話の記録（`<CLAUDE_CONFIG_DIR か ~/.claude>/projects/<作業ディレクトリの鍵>/<セッション>.jsonl`）の末尾:
+- 会話の記録（`<CLAUDE_CONFIG_DIR か ~/.claude>/projects/<作業ディレクトリのキー>/<セッション>.jsonl`）の末尾:
   最後の応答の文脈の量（入力・キャッシュの読み・キャッシュの作成の token の和）
 """
 
@@ -15,11 +15,11 @@ from typing import Mapping, Optional
 from ndf.adapters import agents
 from ndf.domains.relay import signals
 
-# 認証の失敗で子が入力待ちに戻った印（Claude Code の画面の文言。#3243 の画面の写し）
+# 認証の失敗で子が入力待ちに戻ったマーカー（Claude Code の画面の文言。#3243 の画面の写し）
 AUTH_FAILED = re.compile(r"authentication failed|Please run /login|API Error: 40[13]\b", re.IGNORECASE)
 # 画面の制御の列（色・カーソル）。文言を探す前に外す
 ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*\x07")
-# 行頭の字下げと罫線（画面の枠・応答の印 ⎿ など）。利用上限の行は行頭で照らすので外す
+# 行頭の字下げと罫線（画面のスロット・応答のマーカー ⎿ など）。利用上限の行は行頭で照らすので外す
 LEAD = re.compile(r"^[^\w{]+", re.MULTILINE)
 USAGE_KEYS = ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
 

@@ -36,7 +36,7 @@ def test_resume_prelude_refuses_an_unknown_start():
 
 
 def test_a_plan_without_touches_overlaps_every_plan():
-    """触るファイルの宣言の無いプランは、同時に流す別のプランと重なるものとして直列にする（#2165）。"""
+    """触るファイルの設定の無いプランは、同時に流す別のプランと重なるものとして直列にする（#2165）。"""
     assert overlaps(None, ["x.py"])
     assert overlaps(["x.py"], None)
     assert waves([Queued("a", None), Queued("b", ("y.py",))]) == [["a"], ["b"]]
@@ -53,12 +53,12 @@ def test_a_plan_without_touches_overlaps_every_plan():
     ],
 )
 def test_contains_matches_the_same_file_only(a, b, hit):
-    """重なるのは同じファイルの宣言どうしだけで、ディレクトリの宣言は数えない（#1811）。"""
+    """重なるのは同じファイルの設定どうしだけで、ディレクトリの設定は数えない（#1811）。"""
     assert contains(a, b) is hit
 
 
 def test_a_test_directory_does_not_serialize_plans_touching_other_files():
-    """#1811 の再現の手順の 3 つの組: ディレクトリの宣言では直列にせず、同じファイルの宣言だけ直列にする。"""
+    """#1811 の再現の手順の 3 つの組: ディレクトリの設定では直列にせず、同じファイルの設定だけ直列にする。"""
     a = Queued("a", ("plugins/x/tests/", "a.py"))
     assert waves([a, Queued("b", ("plugins/x/tests/test_b.py", "b.py"))]) == [["a", "b"]]
     assert waves([a, Queued("b", ("plugins/x/tests/", "b.py"))]) == [["a", "b"]]

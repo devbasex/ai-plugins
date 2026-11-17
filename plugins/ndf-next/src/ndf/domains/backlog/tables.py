@@ -1,6 +1,6 @@
-"""順位の表をマイルストーンの説明の `### 順位` の節へ書く。描画と置き換えは `table_decide` が持つ。
+"""順位の表をマイルストーンの説明の `### 順位` のセクションへ書く。描画と置き換えは `table_decide` が持つ。
 
-長さの上限で拒まれたら（HTTP 422）表の行を半分ずつ減らして書き直す。節の外が変わる書き込みはしない。
+長さの上限で拒まれたら（HTTP 422）表の行を半分ずつ減らして書き直す。セクションの外が変わる書き込みはしない。
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ TOO_LONG = issues_gh.UNPROCESSABLE
 
 
 def _write_one(gh: GitHub, number: int, desc: str, ms: dict[str, Any]) -> tuple[str, Optional[int]]:
-    """1 本のマイルストーンの節を書く。(written / unchanged / failed, 載せた行の数か None)。"""
+    """1 本のマイルストーンのセクションを書く。(written / unchanged / failed, 載せた行の数か None)。"""
     limit: Optional[int] = None
     while True:
         new = td.replace_section(desc, td.render(ms, limit))

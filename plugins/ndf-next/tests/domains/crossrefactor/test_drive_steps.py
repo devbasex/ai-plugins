@@ -49,7 +49,7 @@ def world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> World:
 
 
 def _declare(world: World, name: str, script: str) -> None:
-    """検査の宣言と検査の本体を PR のブランチへ載せる（項目の起点にも在る）。"""
+    """検査の設定と検査の本体を PR のブランチへ載せる（項目の起点にも在る）。"""
     decl = {
         "test": {
             "suites": [
@@ -63,7 +63,7 @@ def _declare(world: World, name: str, script: str) -> None:
             ]
         }
     }
-    commit_in(world.main, {".ndf/project.json": json.dumps(decl), f"{name}.py": script}, "検査の宣言")
+    commit_in(world.main, {".ndf/project.json": json.dumps(decl), f"{name}.py": script}, "検査の設定")
     sh(world.main, "push", "-q", "origin", f"HEAD:refs/heads/{BRANCH}")
     sh(world.main, "fetch", "-q", "origin")
 
@@ -146,7 +146,7 @@ def test_safety_net_stops_without_undoing_items_and_a_larger_limit_resumes(world
 
 
 def test_flaky_fix_queued_by_a_stopped_item_is_kept_when_the_item_is_redone_on_resume(world, monkeypatch) -> None:
-    # 再開では途中の項目を起点へ戻してからフレーキーの直しを取り込む。直しの後に戻すと直しのコミットが消える
+    # 再開では途中の項目を起点へ戻してからフレーキーの直しをマージする。直しの後に戻すと直しのコミットが消える
     ci = fake_ci(Watched(None))
     tick = itertools.count(step=600)
     slow = replace(ports(FakeAgents(_acts()), FakeHub("clean"), ci=ci), clock=lambda: float(next(tick)))

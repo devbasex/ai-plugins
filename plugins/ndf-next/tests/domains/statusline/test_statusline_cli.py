@@ -106,7 +106,7 @@ def test_switching_keeps_a_private_settings_file_private(tmp_path, home):
 
 @pytest.mark.parametrize("earlier", ['{"type": "command", "command": "bash ~/first.sh"}\n', None])
 def test_failed_set_puts_the_earlier_backup_back(tmp_path, home, monkeypatch, earlier):
-    """settings.json を書けなければ、控えを操作の前の状態（前の控えの中身・無ければ無し）へ戻す。"""
+    """settings.json を書けなければ、バックアップを操作の前の状態（前のバックアップの中身・無ければ無し）へ戻す。"""
     base = tmp_path / "cfg"
     p = settings.Paths(base / "settings.json", base / settings.BACKUP_NAME, base / settings.LOCK_NAME, home / ".claude" / "body.sh")
     _write(p.settings, {"statusLine": {"type": "command", "command": "bash ~/second.sh"}})

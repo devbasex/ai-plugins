@@ -1,4 +1,4 @@
-"""`ndf loop acceptance`: 受け入れ条件の確認の区分の記録・読み取り・照らし合わせ（#2144・#1682）。"""
+"""`ndf loop acceptance`: 受け入れ条件の確認の区分の記録・読み取り・検証（#2144・#1682）。"""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ x
 
 ## 関連
 
-- [ ] 節の外は数えない
+- [ ] セクションの外は数えない
 """
 
 
@@ -63,7 +63,7 @@ def test_means_with_a_pipe_or_a_newline_round_trip_through_the_table():
 
 
 def test_recording_keeps_the_text_around_the_table_in_the_checks_section():
-    # 確認の節の説明文・小見出しは利用者が書いたもので、表だけを置き換える
+    # 確認のセクションの説明文・小見出しは利用者が書いたもので、表だけを置き換える
     section = f"{inputs.CHECKS_HEADING}\n\n前提: arm64 の機械で確かめる\n\n| 条件 | 区分 | 手段 |\n| :--- | :--- | :--- |\n| 1 | マージ前 | pytest |\n\n### 証跡\n\n- ログは x に置いた\n"
     body = acc.recorded_body(BODY + "\n" + section, {}, [2])
     assert "前提: arm64 の機械で確かめる" in body and "### 証跡" in body and "- ログは x に置いた" in body

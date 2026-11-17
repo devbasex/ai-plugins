@@ -1,7 +1,7 @@
-"""`ndf route test` の本体: 手元のテストのコマンドを枠（`ndf test-slot run`）で打ち、落ちを `test_failed` の結果にする。
+"""`ndf route test` の本体: 手元のテストのコマンドをスロット（`ndf test-slot run`）で打ち、落ちを `test_failed` の結果にする。
 
-副命令の使い方は `ndf.core.route` の説明にある。CI の落ちたテストだけを打つ（`--failed-from`）ときは、打った場所の
-宣言（`.ndf/project.json`）の `test.suites` から範囲のテストのコマンドを組む（`ndf.testing.scoped`）。
+サブコマンドの使い方は `ndf.core.route` の説明にある。CI の落ちたテストだけを打つ（`--failed-from`）ときは、打った場所の
+設定（`.ndf/project.json`）の `test.suites` から範囲のテストのコマンドを組む（`ndf.testing.scoped`）。
 """
 
 from __future__ import annotations
@@ -21,16 +21,16 @@ from ndf.core.plan import steps
 from ndf.testing import declared
 from ndf.testing import scoped
 
-# 結果 JSON の tool は副命令 `route` の名前（このパッケージ）
+# 結果 JSON の tool はサブコマンド `route` の名前（このパッケージ）
 TOOL = cli.tool_of(__package__)
-# 手元のテストを打つ枠のエントリポイント（`ndf route test` が後ろにコマンドを 1 つ足す）
+# 手元のテストを打つスロットのエントリポイント（`ndf route test` が後ろにコマンドを 1 つ足す）
 TEST_SLOT = (identity.FIXED_WORDS["entrypoint"], "test-slot", "run", "--")
 # これ以上の終了コードはシグナルで止まった子（シェルの 128 + シグナルの番号）。テストの落ちと読まない
 SIGNAL_EXIT_BASE = 128
 
 
 class LocalTestError(contracts.ContractError):
-    """CI の結果や宣言を読めない（`invalid`）。"""
+    """CI の結果や設定を読めない（`invalid`）。"""
 
 
 def _invalid(detail: str) -> int:
@@ -92,9 +92,9 @@ def _check_reasons(reads: Sequence[Any]) -> str:
 
 
 def unread_detail(found: Mapping[str, Any], path: Path) -> str:
-    """落ちたテストが空の CI の結果から、止まった理由の文を組む（読み取りの記録は `ndf ci watch` が書く）。
+    """落ちたテストが空の CI の結果から、停止理由の文を組む（読み取りの記録は `ndf ci watch` が書く）。
 
-    止まった理由が `test_failed` でなければ今の文、`test_failed` なら設定のキーか読めなかった理由を出す。
+    停止理由が `test_failed` でなければ今の文、`test_failed` なら設定のキーか読めなかった理由を出す。
     `test_failed` で読み取りの記録（`metrics.failed_test_reads`）が無ければ `ndf ci watch` の結果でないとして `LocalTestError`。
     """
     if causes.kind_of(found.get("cause")) != "test_failed":
@@ -125,7 +125,7 @@ def _run_passing(argv: Sequence[str]) -> tuple[int, Optional[dict[str, Any]]]:
 
 
 def _passed_through(code: int, own: Optional[dict[str, Any]]) -> bool:
-    """枠（test-slot）自身が止まった結果か、シグナルで止まった子か（テストの落ちと読まず、終了コードをそのまま返す）。"""
+    """スロット（test-slot）自身が止まった結果か、シグナルで止まった子か（テストの落ちと読まず、終了コードをそのまま返す）。"""
     return own is not None or code >= SIGNAL_EXIT_BASE
 
 
@@ -138,11 +138,11 @@ def _write_result(path: Optional[str], found: Mapping[str, Any]) -> None:
 
 
 def _declared_suites(cwd: Path) -> Any:
-    """打った場所から根へ探した宣言の `test.suites`（宣言か鍵が無ければ空か None。形の確かめは `scoped.scoped_runs` が持つ）。読めなければ `LocalTestError`。"""
+    """打った場所から根へ探した設定の `test.suites`（設定かキーが無ければ空か None。形の確かめは `scoped.scoped_runs` が持つ）。読めなければ `LocalTestError`。"""
     try:
-        read = declared.read_declaration(cwd)
-    except declared.DeclarationError as exc:
-        raise LocalTestError(f"宣言 {exc.path} を読めない: {exc.cause}") from None
+        read = declared.read_ndf_settings(cwd)
+    except declared.NdfSettingsError as exc:
+        raise LocalTestError(f"設定 {exc.path} を読めない: {exc.cause}") from None
     if read is None:
         return []
     found = read[1]
@@ -213,12 +213,12 @@ def _cmd_failed_from(a: argparse.Namespace) -> int:
 def cmd_test(a: argparse.Namespace) -> int:
     if a.failed_from is not None:
         if a.command is not None:
-            return _invalid("--failed-from はコマンドを取らない（打つコマンドは宣言の scope_command から組む）")
+            return _invalid("--failed-from はコマンドを取らない（打つコマンドは設定の scope_command から組む）")
         return _cmd_failed_from(a)
     if a.command is None:
         return _invalid("打つテストのコマンドが無い（-- <コマンド> か --failed-from を渡す）")
     code, own = _run_passing([*TEST_SLOT, a.command])
-    # 枠（test-slot）自身が止まった結果は出したまま返す。シグナルで止まった子はテストの落ちと読まない
+    # スロット（test-slot）自身が止まった結果は出したまま返す。シグナルで止まった子はテストの落ちと読まない
     if code == exit_codes.code_of("ok") or _passed_through(code, own):
         return code
     metrics = {"exit_code": code, "failed_tests": []}

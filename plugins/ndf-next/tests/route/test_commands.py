@@ -1,4 +1,4 @@
-"""雛形のステップのコマンドを偽の gh・ndf と本物の git で打ち、プランの実行と同じ読み方で止まった理由を確かめる。"""
+"""テンプレートのステップのコマンドを偽の gh・ndf と本物の git で打ち、プランの実行と同じ読み方で停止理由を確かめる。"""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ _REPO = "devbasex/ai-plugins"
 
 
 def test_conflict_check_reports_dirty_pr_as_base_conflict(tmp_path):
-    """#2752・#2680・#2273: 宛先と衝突した PR（mergeStateStatus が DIRTY）は待たずに base_conflict で返す。"""
+    """#2752・#2680・#2273: マージ先と衝突した PR（mergeStateStatus が DIRTY）は待たずに base_conflict で返す。"""
     step = step_of(plan_of("implement", branch="feat/x"), "conflict-check")
     dirty = fake_bin(tmp_path, "gh", "echo DIRTY")
     assert run_step(step, tmp_path, dirty)["kind"] == "base_conflict"
@@ -50,7 +50,7 @@ def test_done_check_skips_only_when_head_is_merged(tmp_path):
 def test_changes_check_finds_no_changes_since_work_start(tmp_path):
     """#3039・#3474: worker を打つ前の HEAD から変更が無ければ not_applicable（PR を作らない）。変更があれば ok。
 
-    宛先へまだ取り込まれていない（取得し直していない）ブランチの差分は数えない。記録した起点は打ち直しでも上書きしない。起点を読めなければ precondition（変更なしと読まない）。
+    マージ先へまだマージされていない（取得し直していない）ブランチの差分は数えない。記録した起点は打ち直しでも上書きしない。起点を読めなければ precondition（変更なしと読まない）。
     """
     for purpose in ("close", "plan_to_spec"):
         plan = plan_of(purpose, base="develop")
@@ -92,7 +92,7 @@ def _ci_result(path, nodes):
 
 
 def _slot(monkeypatch, tmp_path, body, *, append=False):
-    """`ndf route test` が打つ枠（test-slot）を偽のコマンドへ差し替え、受けた引数を書くファイルを返す。"""
+    """`ndf route test` が打つスロット（test-slot）を偽のコマンドへ差し替え、受けた引数を書くファイルを返す。"""
     seen = tmp_path / "seen.txt"
     script = (
         f'printf "%s\\n" "$@" >> {shlex.quote(str(seen))}\n{body}' if append else f'printf "%s\\n" "$@" > {shlex.quote(str(seen))}\n{body}'
@@ -113,7 +113,7 @@ def test_test_steps_run_through_route_test():
 
 
 def test_ci_only_plans_drop_local_test_steps_and_follow_on():
-    """#3473: CI テストの宣言のあるリポジトリのプランから test・test-all・ci-local を外し、そこへの行き先は続きへ付け替える。"""
+    """#3473: CI テストの設定のあるリポジトリのプランから test・test-all・ci-local を外し、そこへのルートは続きへ付け替える。"""
     for purpose in ("implement", "check", "quality_gates", "merge", "close"):
         t = route.choose(purpose)
         plan = route.render(t, values(purpose), local_tests=False)
@@ -140,7 +140,7 @@ def test_route_test_reads_any_non_signal_failure_as_test_failed(tmp_path, monkey
 
 
 def test_route_test_passes_signal_and_slot_results_through(tmp_path, monkeypatch, capsys):
-    """シグナルで止まった子（128 以上）はテストの落ちと読まず、枠（test-slot）自身の止まった結果はそのまま返す。"""
+    """シグナルで止まった子（128 以上）はテストの落ちと読まず、スロット（test-slot）自身の止まった結果はそのまま返す。"""
     _slot(monkeypatch, tmp_path, "exit 130")
     assert route.main(["test", "--", "make test"]) == 130
     assert capsys.readouterr().out == ""
@@ -158,7 +158,7 @@ SUITES = [
 
 
 def _declare(monkeypatch, tmp_path, suites=SUITES):
-    """打つ場所（作業場所）の宣言 `.ndf/project.json` にテストの suite を置き、そこへ移る。"""
+    """打つ場所（作業場所）の設定 `.ndf/project.json` にテストの suite を置き、そこへ移る。"""
     (tmp_path / ".ndf").mkdir(exist_ok=True)
     (tmp_path / ".ndf" / "project.json").write_text(json.dumps({"test": {"suites": suites}}), encoding="utf-8")
     monkeypatch.chdir(tmp_path)
@@ -308,7 +308,7 @@ def test_ci_local_quotes_failed_test_files_for_the_shell(tmp_path, monkeypatch):
 
 
 def test_ci_local_passes_signal_and_slot_results_through_without_running_the_rest(tmp_path, monkeypatch, capsys):
-    """現状固定: --failed-from でも枠の止まり・シグナルの終了コードはそのまま返し、残りの suite を打たず結果ファイルも書かない。"""
+    """現状固定: --failed-from でもスロットの止まり・シグナルの終了コードはそのまま返し、残りの suite を打たず結果ファイルも書かない。"""
     _declare(monkeypatch, tmp_path)
     ci, out = tmp_path / "ci.json", tmp_path / "ci-local.json"
     _ci_result(ci, ["tests/a.py::t1", "web/b.test.ts"])
@@ -366,11 +366,11 @@ def test_ci_local_counts_runs_and_names_the_first_failed_command(tmp_path, monke
     assert "2 本" in found["summary"]
 
 
-_RISK = "- [ ] 残リスク: 設計文書に名前の出るテストの照合が止まっている。マージの前に決める"
+_RISK = "- [ ] 残リスク: 設計文書に名前の出るテストの検証が止まっている。マージの前に決める"
 
 
 def _serve_pull(monkeypatch, head: str, body: str) -> list[dict]:
-    """feat/x の開いた PR 7 番（本文 `body`・先端 `head`）を答える GitHub。送ったマージの要求の本文を返す並びへ足す。"""
+    """feat/x の開いた PR 7 番（本文 `body`・HEAD `head`）を回答する GitHub。送ったマージの要求の本文を返す並びへ足す。"""
     sent: list[dict] = []
     pull = {
         "number": 7, "state": "open", "merged": False, "body": body, "mergeable_state": "clean",
@@ -402,7 +402,7 @@ def _serve_pull(monkeypatch, head: str, body: str) -> list[dict]:
 
 
 def _merge_step(monkeypatch, tmp_path, body: str) -> tuple[int, list[dict], str]:
-    """雛形の merge のステップの run を、feat/x の作業場所で打つ（GitHub は `_serve_pull` が答える）。"""
+    """テンプレートの merge のステップの run を、feat/x の作業場所で打つ（GitHub は `_serve_pull` が回答する）。"""
     step = step_of(plan_of("immediate_fix", branch="feat/x", merge_method="merge"), "merge")
     assert list(step.run[:3]) == ["ndf", "ci", "merge"]
     repo = repo_with_base(tmp_path, {"a.py": "a = 1\n"})
@@ -424,7 +424,7 @@ def test_merge_stops_on_an_undecided_premerge_risk_and_names_the_line(tmp_path, 
 
 
 def test_merge_proceeds_when_the_premerge_risk_is_checked(tmp_path, monkeypatch, capsys, last_result):
-    """決めた印（`- [x]`）のある残リスクは判断の記録とみなし、手元の HEAD を添えて宣言の方式でマージする。"""
+    """決めたマーカー（`- [x]`）のある残リスクは判断の記録とみなし、手元の HEAD を添えて設定の方式でマージする。"""
     decided = _RISK.replace("- [ ]", "- [x]", 1) + "（続けると決めた）"
     code, sent, head = _merge_step(monkeypatch, tmp_path, f"## 残リスク\n\n{decided}\n")
     out = last_result(capsys.readouterr().out)
@@ -455,7 +455,7 @@ def _design_step(tmp_path, step_id):
 
 def test_design_pr_step_keeps_existing_pr_body(tmp_path, monkeypatch):
     """#2853: 設計の出し直しで PR が既にあれば、pr のステップは PR を作り直さず本文を書き換えない
-    （worker が本文の節に足した行が次のループの 1 回で消えない）。設計のプランに本文を組み直すステップは無い。"""
+    （worker が本文のセクションに足した行が次のループの 1 回で消えない）。設計のプランに本文を組み直すステップは無い。"""
     calls = tmp_path / "gh.log"
     gh = fake_bin(tmp_path, "gh", f'echo "$@" >> {shlex.quote(str(calls))}\ncase "$2" in list) echo 7 ;; *) exit 1 ;; esac')
     monkeypatch.setenv("PATH", f"{gh}:{os.environ['PATH']}")
@@ -514,7 +514,7 @@ def _both(sub):
     return declared.load_suites(sub), raw
 
 
-def test_current_declared_suites_without_a_declaration(tmp_path):
+def test_current_declared_suites_without_a_ndf_settings(tmp_path):
     assert _both(_declared_at(tmp_path, None)) == ([], [])
 
 
@@ -525,7 +525,7 @@ def test_current_declared_suites_over_each_shape(tmp_path):
     path = tmp_path.resolve() / "0" / ".ndf" / "project.json"
     broken = got.pop("壊れた JSON")
     assert broken[0] == [] and broken[1][0] == "LocalTestError"
-    assert broken[1][1].startswith(f"宣言 {path} を読めない: ")
+    assert broken[1][1].startswith(f"設定 {path} を読めない: ")
     assert got == {
         "根が配列": ([], None),
         "test が無い": ([], None),
@@ -539,13 +539,13 @@ def test_current_declared_suites_over_each_shape(tmp_path):
     }
 
 
-def test_current_declared_suites_take_the_nearest_declaration(tmp_path):
+def test_current_declared_suites_take_the_nearest_ndf_settings(tmp_path):
     outer = json.dumps({"test": {"suites": [{"name": "outer"}]}})
     sub = _declared_at(tmp_path, outer)
     (sub.parent / ".ndf").mkdir()
     (sub.parent / ".ndf" / "project.json").write_text(json.dumps({"test": {"suites": [{"name": "inner"}]}}), encoding="utf-8")
     assert _both(sub) == ([{"name": "inner"}], [{"name": "inner"}])
-    # 近い側の project.json がファイルでなければ、根の側の宣言を読む
+    # 近い側の project.json がファイルでなければ、根の側の設定を読む
     other = _declared_at(tmp_path / "x", outer)
     (other / ".ndf" / "project.json").mkdir(parents=True)
     assert _both(other) == ([{"name": "outer"}], [{"name": "outer"}])

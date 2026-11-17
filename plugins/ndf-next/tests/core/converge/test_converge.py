@@ -1,4 +1,4 @@
-"""cross 系で共通の部品: 相手役の割り当て・相手役の答えの読み取り・振動の判定。"""
+"""cross 系で共通の部品: 相手役の割り当て・相手役の回答の読み取り・振動の判定。"""
 
 from __future__ import annotations
 
@@ -25,8 +25,8 @@ def test_named_reviewer_without_a_read_only_launch_is_refused() -> None:
 
 def test_review_launch_fills_the_worktree_and_puts_the_prompt_last(tmp_path: Path) -> None:
     reviewer = participants.assign()[0]
-    spec = participants.review_launch(reviewer, tmp_path, "問い", tmp_path / "round1-x")
-    assert spec.argv[0] == facts.value(participants.RUNTIMES, reviewer, "executable") and spec.argv[-1] == "問い"
+    spec = participants.review_launch(reviewer, tmp_path, "質問", tmp_path / "round1-x")
+    assert spec.argv[0] == facts.value(participants.RUNTIMES, reviewer, "executable") and spec.argv[-1] == "質問"
     assert "{workdir}" not in " ".join(spec.argv) and spec.cwd == tmp_path
 
 
@@ -34,7 +34,7 @@ def test_findings_are_read_from_the_last_json_line_and_missing_is_not_empty() ->
     text = 'ログ {壊れた\n{"findings": [{"text": "a {b}"}]}\n'
     assert participants.findings_of(text) == [{"text": "a {b}"}]
     assert participants.findings_of('{"findings": []}') == []
-    assert participants.findings_of("答えが無い") is None
+    assert participants.findings_of("回答が無い") is None
 
 
 def test_finding_key_ignores_spacing_and_case() -> None:

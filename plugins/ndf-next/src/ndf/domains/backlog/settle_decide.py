@@ -2,9 +2,9 @@
 
 証拠は 3 種類で、1 行に 1 つだけ持つ。
 
-| 種類 | 鍵 | 確かめ方（`settle.py` が GitHub から読む） |
+| 種類 | キー | 確かめ方（`settle.py` が GitHub から読む） |
 | --- | --- | --- |
-| `improved`（改善の証拠） | `pr`・`test`（テストのノード ID） | PR がマージ済みで宛先が基底のブランチで、PR の変更ファイルにテストのファイルがあり、PR の差分でテストの関数の定義が足され、基底のブランチのそのファイルに関数がある |
+| `improved`（改善の証拠） | `pr`・`test`（テストのノード ID） | PR がマージ済みでマージ先が基底のブランチで、PR の変更ファイルにテストのファイルがあり、PR の差分でテストの関数の定義が足され、基底のブランチのそのファイルに関数がある |
 | `removed`（消えたコードのパス） | `path`・`commit` | コミットが基底のブランチの祖先で、指したパスが基底のブランチに無い |
 | `not_reproduced`（再現しない記録） | `command`・`exit`・`record`・`at`・`after_pr` | `exit` が 0 で、記録のファイルが基底のブランチにあり、`after_pr` がマージ済みで、`at` がそのマージの後で今より前 |
 """
@@ -18,7 +18,7 @@ from typing import Any, NamedTuple, Optional
 IMPROVED, REMOVED, NOT_REPRODUCED = "improved", "removed", "not_reproduced"
 # 行の結果: 閉じた・確かめた（--dry-run）・確かめられない・前から閉じていた
 CLOSED, VERIFIED, UNVERIFIED, ALREADY_CLOSED = "closed", "verified", "unverified", "already_closed"
-# 種類ごとの必須の鍵と型
+# 種類ごとの必須のキーと型
 SHAPES: dict[str, dict[str, type]] = {
     IMPROVED: {"pr": int, "test": str},
     REMOVED: {"path": str, "commit": str},

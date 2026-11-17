@@ -1,12 +1,12 @@
 # Skill と起動スクリプト
 
-<!-- ndf check --write-spec が生成する。手で直さない（正本は各節の出典） -->
+<!-- ndf check --write-spec が生成する。手で直さない（SSOT は各節の出典） -->
 
-配る Skill（`manifests/skills.json` の行で `skills/<名前>/SKILL.md` があるもの）と、公開する面に載る Skill の入出力である。正本は公開する Skill の引数と環境変数がエントリポイントの表、ほかは `contracts/domains/skill-io.json`。引数の形は正規表現で、どれか 1 つに全体が一致する
+配る Skill（`manifests/skills.json` の行で `skills/<名前>/SKILL.md` があるもの）と、公開する面に載る Skill の入出力である。SSOT は公開する Skill の引数と環境変数がエントリポイントの表、ほかは `contracts/domains/skill-io.json`。引数の形は正規表現で、どれか 1 つに全体が一致する
 
 ## Skill
 
-| Skill | 公開か | 引数の形 | /goal の終わりの条件 | 読む宣言 | 読む環境変数 | 結果 | 意味 |
+| Skill | 公開か | 引数の形 | /goal の終わりの条件 | 読む設定 | 読む環境変数 | 結果 | 意味 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `backlog-refinement` | 内部（予告なく変えてよい） | （引数なし）<br>`.*` | — | `backlog`・`issue-items`・`project` | — | none | 開いている課題を読み、重複と古いものを整理して優先順位を付ける |
 | `cherry-pick-pr` | 内部（予告なく変えてよい） | `[^ ]+` | — | `worktree` | — | none | マージ済みの修正を環境ブランチへ cherry-pick する Pull Request を作る。引数は環境ブランチの名前 |
@@ -22,7 +22,7 @@
 | `document-rebuild` | 内部（予告なく変えてよい） | 引数を受けない | — | — | — | none | 既存の文書を作り直す手順 |
 | `document-sources` | 内部（予告なく変えてよい） | 引数を受けない | — | — | — | none | 文書の材料の集め方と出典の残し方 |
 | `document-style` | 内部（予告なく変えてよい） | 引数を受けない | — | — | — | none | 文書の書き方の規則 |
-| `document-systems` | 内部（予告なく変えてよい） | 引数を受けない | — | — | — | none | 文書の置き場（Google Drive・Notion・Confluence・SharePoint・リポジトリ）ごとの読み書きの手順を持つ |
+| `document-systems` | 内部（予告なく変えてよい） | 引数を受けない | — | — | — | none | 文書の保存先（Google Drive・Notion・Confluence・SharePoint・リポジトリ）ごとの読み書きの手順を持つ |
 | `estimate` | 内部（予告なく変えてよい） | （引数なし）<br>`.*` | — | `estimate` | — | none | 課題か作業の説明から、作業の量と費用を見積もる |
 | `external-ai` | 内部（予告なく変えてよい） | 引数を受けない | — | `runtime-policy` | — | none | 外部の AI ランタイム（codex・agy・kiro）を呼ぶ手順 |
 | `fix` | 内部（予告なく変えてよい） | （引数なし）<br>`.*` | — | `review` | — | none | Pull Request のレビューの指摘を振り分けて直し、戻り値ファイルを書く |
@@ -48,8 +48,8 @@
 | `qa-security-scan` | 内部（予告なく変えてよい） | 引数を受けない | — | — | — | none | セキュリティの検査を流して結果をまとめる |
 | `quality-gates` | 内部（予告なく変えてよい） | 引数を受けない | — | `project` | — | none | テスト・静的解析・型の検査をまとめて流す |
 | `refactoring` | 内部（予告なく変えてよい） | 引数を受けない | — | `code-metrics` | — | none | 言語ごとのリファクタリングの手順 |
-| `release` | 内部（予告なく変えてよい） | 引数を受けない | — | `instructions`・`project`・`release`・`supervise`・`worktree` | — | none | 版を作り、開発版と本番へリリースする |
-| `release-verification` | 内部（予告なく変えてよい） | 引数を受けない | — | — | — | none | リリースした版を実際に使って受け入れ条件を確かめる |
+| `release` | 内部（予告なく変えてよい） | 引数を受けない | — | `instructions`・`project`・`release`・`supervise`・`worktree` | — | none | バージョンを作り、開発版と本番へリリースする |
+| `release-verification` | 内部（予告なく変えてよい） | 引数を受けない | — | — | — | none | リリースしたバージョンを実際に使って受け入れ条件を確かめる |
 | `requirements-design` | 内部（予告なく変えてよい） | 引数を受けない | — | `glossary`・`issue-items` | — | none | 課題から要求と受け入れ条件をまとめる |
 | `restart` | 内部（予告なく変えてよい） | （引数なし）<br>`.*` | — | `handoff` | — | block | 再開のコマンドで claude を再起動する（中継の下では応答の末尾の ndf-next ブロックで切り替える） |
 | `retrospective` | 内部（予告なく変えてよい） | 引数を受けない | — | `worktree` | — | none | スプリントの振り返りを書く |
@@ -66,9 +66,9 @@
 
 ## 起動スクリプト
 
-利用者と AI が打つ `bin/` のスクリプトである（正本は `contracts/domains/launchers.json`）。`ndf` の副命令は [副命令の引数と結果](commands.md) にある。
+利用者と AI が打つ `bin/` のスクリプトである（SSOT は `contracts/domains/launchers.json`）。`ndf` のサブコマンドは [サブコマンドの引数と結果](commands.md) にある。
 
 | 名前 | 渡し先 | 意味 |
 | --- | --- | --- |
-| `ndf` | ndf | 依存の環境を用意し、ndf <副命令> [引数...] を副命令の表の main へ渡す。結果 JSON を標準出力の最後の 1 行に出す |
-| `ndf-claude` | claude | このプラグインだけを読む claude を起こす。引数はそのまま claude の後ろへ渡す |
+| `ndf` | ndf | 依存の環境を用意し、ndf <サブコマンド> [引数...] をサブコマンドの表の main へ渡す。結果 JSON を標準出力の最後の 1 行に出す |
+| `ndf-claude` | claude | このプラグインだけを読む claude を起動する。引数はそのまま claude の後ろへ渡す |

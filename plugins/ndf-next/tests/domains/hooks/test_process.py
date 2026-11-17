@@ -4,7 +4,7 @@ M3-H13 は所要時間で合否を決めない（マシンのスペックと混�
 エントリポイントが起動する子のプロセスの数・読み込むモジュールの数・ディレクトリの走査を数え、決めた値と比べる。
 所要時間（p50・p95）は `ndf hooks stats` に記録するだけである。
 
-登録の command は `hooks/claude.json` の形（決定 89。`registration.SCRIPT`）をそのまま打つ。数える対象を一時の置き場に
+登録の command は `hooks/claude.json` の形（決定 89。`registration.SCRIPT`）をそのまま打つ。数える対象を一時の保存先に
 限るため、`hooks/entry.py` と `hooks/boot.py` と同じ働きの薄いスクリプト（本体の `run_entry`・`run_boot` を呼ぶだけ）を置く。
 """
 
@@ -88,7 +88,7 @@ PROBE = textwrap.dedent(
 
 @pytest.fixture
 def scripts(tmp_path) -> Path:
-    """`hooks/entry.py` と `hooks/boot.py` と同じ働きの薄いスクリプトを置いた置き場。"""
+    """`hooks/entry.py` と `hooks/boot.py` と同じ働きの薄いスクリプトを置いた保存先。"""
     hooks = tmp_path / "hooks"
     hooks.mkdir()
     for name, func, module in (("entry.py", "run_entry", "main"), ("boot.py", "run_boot", "boot")):
@@ -199,9 +199,9 @@ def test_session_start_without_the_environment_prepares_it_detached(scripts, tmp
     used = env.venv_dir(ident) / env.LAST_USED
     assert used.exists()
     os.utime(used, (1, 1))
-    marks = {p: p.stat().st_mtime for p in ident.roots_dir.glob("*.json")}
+    markers = {p: p.stat().st_mtime for p in ident.roots_dir.glob("*.json")}
     after = _register(python, scripts, "claude", "PreToolUse", bash(tmp_path, "ls"), uv_env)
     assert after.returncode == 0
     assert records()[-1]["path"] == "entry" and records()[-1]["event"] == "PreToolUse"
     # 予算の経路（PreToolUse）は目印と最後に使った時刻を書かない
-    assert used.stat().st_mtime == 1 and {p: p.stat().st_mtime for p in ident.roots_dir.glob("*.json")} == marks
+    assert used.stat().st_mtime == 1 and {p: p.stat().st_mtime for p in ident.roots_dir.glob("*.json")} == markers

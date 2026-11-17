@@ -112,7 +112,7 @@ Codex は最終 message を返さなくても `apply_patch` でファイルを�
 stderr の `^tokens used$` sentinel と結果ファイルを脱出条件にし、上限（`--phase` の工程の値）で必ず終わる。
 進捗を覗くときは `tail -30 <metrics.stem>-err.log`。
 
-## 実例: レビュー依頼
+## 実例: レビューリクエスト
 
 ```bash
 FINAL=$TMP/codex-api-v2-review.md
@@ -135,7 +135,7 @@ python3 "$SKILL_DIR/scripts/external-ai.py" run codex --phase review \
 
 **原因**: `--dangerously-bypass-approvals-and-sandbox` を付け忘れ、かつ環境が user namespace 非対応。
 
-**対処**: フラグを追加して再実行する。ホストで有効化する方法は「サンドボックス制約」節を参照。
+**対処**: フラグを追加して再実行する。ホストで有効化する方法は「サンドボックス制約」セクションを参照。
 
 ### Q3. 「ファイルを読めません」と返ってくる
 

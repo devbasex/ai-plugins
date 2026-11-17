@@ -1,7 +1,7 @@
 """項目の測定の結果の形（#3569）。
 
 `{"status": "measured", "value": ...}`・`{"status": "question", "candidates": ..., "evidence": ...}`・
-`{"status": "unknown", "reason": ...}` のどれかを返す。読んだ JSON の欠けた節を空として扱う `obj`・`seq` も置く。
+`{"status": "unknown", "reason": ...}` のどれかを返す。読んだ JSON の欠けたセクションを空として扱う `obj`・`seq` も置く。
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ def unknown(reason: str) -> dict[str, Any]:
 
 
 def obj(value: Any) -> dict[str, Any]:
-    """値が object ならそれ、ほかは空の object（読んだ JSON の欠けた節を空として扱う）。"""
+    """値が object ならそれ、ほかは空の object（読んだ JSON の欠けたセクションを空として扱う）。"""
     return value if isinstance(value, dict) else {}
 
 

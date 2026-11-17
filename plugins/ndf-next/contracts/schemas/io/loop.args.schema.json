@@ -104,14 +104,14 @@
           "type": "string",
           "enum": [
             "approved",
-            "revise",
+            "request_changes",
             "rejected"
           ]
         },
         "--note": {
           "type": "string",
           "default": "",
-          "description": "差し戻しの理由など"
+          "description": "変更要求の理由など"
         }
       },
       "required": [
@@ -383,7 +383,7 @@
         },
         "--failed": {
           "type": "boolean",
-          "description": "手順の失敗の印"
+          "description": "手順の失敗のマーカー"
         },
         "--failure-key": {
           "type": "string"
@@ -393,7 +393,7 @@
           "items": {
             "type": "string"
           },
-          "description": "この周で出した版（記録に無いもの）"
+          "description": "この周で出したバージョン（記録に無いもの）"
         },
         "--returned": {
           "type": "boolean",
@@ -401,7 +401,7 @@
         },
         "--unreadable": {
           "type": "string",
-          "description": "版の記録を読めなかった理由"
+          "description": "バージョンの記録を読めなかった理由"
         }
       },
       "required": [
@@ -503,7 +503,7 @@
           "items": {
             "type": "integer"
           },
-          "description": "先頭に選ぶ課題（直して出し直すと答えた課題）"
+          "description": "先頭に選ぶ課題（直して出し直すと回答した課題）"
         },
         "--size": {
           "type": "integer",

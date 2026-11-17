@@ -1,6 +1,6 @@
-"""`start_new_session` で起こしたプロセスの組を止める（#3394 の 3394-9）。
+"""`start_new_session` で起動したプロセスの組を止める（#3394 の 3394-9）。
 
-テストの枠（`testing/`）と外部との接続（`adapters/`）の両方が読む下の層で、どちらも import しない。
+テストのスロット（`testing/`）と外部との接続（`adapters/`）の両方が読む下の層で、どちらも import しない。
 猶予の秒と終わりを見る間隔は `contracts/limits.json` の方針（既定 `procs.stop-tree`）から読む。
 """
 

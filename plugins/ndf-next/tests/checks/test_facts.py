@@ -102,10 +102,10 @@ def test_domain_tables_are_checked_and_names_do_not_repeat(with_schema, rules):
     plugin.write("contracts/domains/seats.json", table([{"id": "a"}, {"id": "a"}], {}))
     found = facts.check(plugin.scope(), rules)
     details = sorted((f.path.rsplit("/", 2)[-2], f.detail) for f in found if f.rule == "fact-table")
-    assert details == [("domains", "`id` の重なり: a"), ("domains", "表の名前 stages が別の置き場の表と重なる")]
+    assert details == [("domains", "`id` の重なり: a"), ("domains", "表の名前 stages が別の保存先の表と重なる")]
 
 
-# 現状固定テスト（I-002）: 列の宣言から作る行の形。`contracts/facts.py` の `_row_schema` と次の 2 点が違う（今の出力を固定する）。
+# 現状固定テスト（I-002）: 列の設定から作る行の形。`contracts/facts.py` の `_row_schema` と次の 2 点が違う（今の出力を固定する）。
 # - `id` に `minLength` を付けない
 # - `optional` は `True` のときだけ欠いてよい（真に見えるだけの値では必須のまま）
 
@@ -119,7 +119,7 @@ def test_row_schema_without_columns():
     }
 
 
-def test_row_schema_from_column_declarations():
+def test_row_schema_from_column_ndf_settings():
     columns = {
         "rank": {"type": "integer", "summary": "r"},
         "tags": {"type": "array", "summary": "t", "optional": True},
@@ -195,7 +195,7 @@ def test_consts_picks_top_level_constants_by_assignment_form():
         (16, "AUG", 1),
     ]
     assert {c.rel for c in found} == {"src/ndf/a.py"}
-    assert found[0].place == "src/ndf/a.py:2 NAME"
+    assert found[0].location == "src/ndf/a.py:2 NAME"
 
 
 # 現状固定テスト（I-004）: 組の種類ごとの出力の並び・位置・文言。種類の順（same-str → same-set → same-num → subset → member）も固定する。

@@ -11,7 +11,7 @@ description: "Never claim something is absent without showing the search behind 
 
 **レポート・報告文を書くとき**に使う。原因を突き止める作業そのものは扱わない。
 
-| 依頼 | 使う Skill |
+| リクエスト | 使う Skill |
 | --- | --- |
 | 調査結果をレポートにまとめる / 「ない」ことを結論に書く | この Skill |
 | 不具合の原因を突き止めて直す | `problem-solving` |
@@ -19,7 +19,7 @@ description: "Never claim something is absent without showing the search behind 
 | 原因が分かったので修正する | `problem-solving` → `tdd-cycle`（再現テストから） |
 
 `problem-solving` で原因を特定し、その結果を文章にする段階でこの Skill の裏取り規則が効く。
-両方に該当する依頼（「原因を調べてレポートにして」）では両方を使う。
+両方に該当するリクエスト（「原因を調べてレポートにして」）では両方を使う。
 
 トリガ語は「調査」のような広い語を置かない。ほぼ全セッションに一致してしまい、他の Skill の
 発動を埋もれさせる。

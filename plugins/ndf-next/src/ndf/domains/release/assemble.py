@@ -2,14 +2,14 @@
 
 手順（`assemble`）:
 
-1. origin の本番ブランチとベースブランチを取り込み、範囲（本番ブランチの先端..ベースブランチの先端）を決める
-2. 変わったファイルから版を上げるプラグインと次の版を決める。上げるものが無ければ何もせずに `not_applicable`
-3. ベースブランチの先端から `release/v<版>` を作り、版を書き換え、本番の版なら CHANGELOG に節を足し、宣言の手順
+1. origin の本番ブランチとベースブランチをマージ、範囲（本番ブランチの HEAD..ベースブランチの HEAD）を決める
+2. 変わったファイルからバージョンを上げるプラグインと次のバージョンを決める。上げるものが無ければ何もせずに `not_applicable`
+3. ベースブランチの HEAD から `release/v<バージョン>` を作り、バージョンを書き換え、本番のバージョンなら CHANGELOG にセクションを足し、設定の手順
    （トークン消費の記録など）を流す
 4. 1 つのコミットにして push し、リリースの PR（本番は本番ブランチ宛て、開発版はベースブランチ宛て）を作り、承認資料を
    PR の本文に書く
 
-ブランチの名前の版は、版を上げるプラグインのうち `--plugin` で渡したもの（省けば登録の順の先頭）の版である。
+ブランチの名前のバージョンは、バージョンを上げるプラグインのうち `--plugin` で渡したもの（省けば登録の順の先頭）のバージョンである。
 
 本番のリリースは、本番ブランチ宛ての別のリリースの PR（head が `release/v` で始まるかベースブランチ）が開いている
 間は組まずに `ReleaseOpen` で止まる（同じリポジトリの別の組み立てと版数・ブランチがぶつからない。閉じた後に打ち直せば
@@ -28,12 +28,12 @@ from ndf.adapters.github import PER_PAGE, GitHub, text_of
 from ndf.adapters.publish import Publisher
 from ndf.core import branch_strategy
 from ndf.domains.release import changelog_decide, changes_decide, gather, materials_decide, version_decide
-from ndf.domains.release import declaration as decl_mod
+from ndf.domains.release import ndf_settings as decl_mod
 from ndf.domains.release import plugins as plugins_mod
 
 
 class NothingToRelease(Exception):
-    """版を上げるプラグインが無い。"""
+    """バージョンを上げるプラグインが無い。"""
 
 
 class ReleaseOpen(Exception):
@@ -61,7 +61,7 @@ class Target:
 
     @property
     def pr_base(self) -> str:
-        """リリースの PR の宛先（本番は本番ブランチ、開発版はベースブランチ）。"""
+        """リリースの PR のマージ先（本番は本番ブランチ、開発版はベースブランチ）。"""
         return self.production if self.is_production else self.base
 
 
@@ -87,7 +87,7 @@ def _named(planned: Sequence[version_decide.Planned], plugin: str | None) -> ver
         return planned[0]
     hit = [p for p in planned if p.plugin == plugin]
     if not hit:
-        raise AssembleError(f"{plugin} は版を上げる対象に無い（上げるもの: {', '.join(p.plugin for p in planned)}）")
+        raise AssembleError(f"{plugin} はバージョンを上げる対象に無い（上げるもの: {', '.join(p.plugin for p in planned)}）")
     return hit[0]
 
 
@@ -104,8 +104,8 @@ def open_releases(hub: GitHub, target: Target) -> list[int]:
     return sorted(n for n, ref in heads if ref.startswith(version_decide.BRANCH_PREFIX) or ref == target.base)
 
 
-def _write(root: Path, decl: decl_mod.Declaration, facts: materials_decide.Facts) -> None:
-    """版・CHANGELOG を書き換え、宣言の手順を流す。"""
+def _write(root: Path, decl: decl_mod.NdfSettings, facts: materials_decide.Facts) -> None:
+    """バージョン・CHANGELOG を書き換え、設定の手順を流す。"""
     found = plugins_mod.by_name(plugins_mod.load(root))
     entries = [changelog_decide.Entry(p.number, p.title) for p in facts.pulls]
     log_path = root / decl.changelog
@@ -136,7 +136,7 @@ def _open_pr(hub: GitHub, branch: str, base: str, title: str, body: str) -> tupl
 
 
 def _facts(root: Path, hub: GitHub, target: Target, span: gather.Range) -> materials_decide.Facts:
-    """worktree（範囲の先端を取り出したもの）から材料を読む。上げるものが無ければ `NothingToRelease`。"""
+    """worktree（範囲の HEAD を取り出したもの）から材料を読む。上げるものが無ければ `NothingToRelease`。"""
     repo_git = git_mod.Git(root)
     decl = decl_mod.load(root)
     found = plugins_mod.load(root)
@@ -149,7 +149,7 @@ def _facts(root: Path, hub: GitHub, target: Target, span: gather.Range) -> mater
         target.channel,
     )
     if not planned:
-        raise NothingToRelease(f"{span.since}..{span.until} に版を上げる変化が無い")
+        raise NothingToRelease(f"{span.since}..{span.until} にバージョンを上げる変化が無い")
     pulls = gather.pull_facts(hub, gather.included(repo_git, span, target.production))
     return materials_decide.Facts(
         target.channel,
@@ -164,18 +164,18 @@ def _facts(root: Path, hub: GitHub, target: Target, span: gather.Range) -> mater
 def collect(root: Path, hub: GitHub, target: Target) -> materials_decide.Facts:
     """承認資料の材料（版上げの計画を含む。ブランチは作らない）。上げるものが無ければ `NothingToRelease`。
 
-    宣言・マーケットプレイス・今の版はworktreeから読むため、worktreeの HEAD が範囲の先端（origin のベースブランチ）で
-    なければ `AssembleError` で止まる（ほかのブランチの版から計画すると版が逆行する）。
+    設定・マーケットプレイス・今のバージョンはworktreeから読むため、worktreeの HEAD が範囲の HEAD（origin のベースブランチ）で
+    なければ `AssembleError` で止まる（ほかのブランチのバージョンから計画するとバージョンが逆行する）。
     """
     repo_git = git_mod.Git(root)
     span = _span(repo_git, target)
     if repo_git.rev_parse("HEAD") != repo_git.rev_parse(span.until):
-        raise AssembleError(f"worktreeの HEAD が {span.until} の先端でない（ベースブランチの先端で打つ）")
+        raise AssembleError(f"worktreeの HEAD が {span.until} の HEAD でない（ベースブランチの HEAD で打つ）")
     return _facts(root, hub, target, span)
 
 
 def assemble(root: Path, hub: GitHub, target: Target) -> Built:
-    """リリースのブランチを組み立てて PR を作る。材料は範囲の先端を取り出してから読む。"""
+    """リリースのブランチを組み立てて PR を作る。材料は範囲の HEAD を取り出してから読む。"""
     repo_git = git_mod.Git(root)
     span = _span(repo_git, target)
     repo_git.run("switch", "--quiet", "--detach", span.until)

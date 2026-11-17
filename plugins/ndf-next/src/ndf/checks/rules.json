@@ -1,33 +1,33 @@
 {
   "version": 1,
   "smells": {
-    "S110": {"kind": 4, "mark": "boundary", "by": "ruff", "summary": "except の本体が pass だけ"},
-    "S112": {"kind": 4, "mark": "boundary", "by": "ruff", "summary": "except の本体が continue だけ"},
-    "BLE001": {"kind": 4, "mark": "boundary", "by": "ruff", "summary": "Exception・BaseException を受けて送出し直さない"},
-    "E722": {"kind": 4, "mark": "boundary", "by": "ruff", "summary": "素の except"},
+    "S110": {"kind": 4, "suppress": "boundary", "by": "ruff", "summary": "except の本体が pass だけ"},
+    "S112": {"kind": 4, "suppress": "boundary", "by": "ruff", "summary": "except の本体が continue だけ"},
+    "BLE001": {"kind": 4, "suppress": "boundary", "by": "ruff", "summary": "Exception・BaseException を受けて送出し直さない"},
+    "E722": {"kind": 4, "suppress": "boundary", "by": "ruff", "summary": "素の except"},
     "NDF201": {
       "kind": 2,
-      "mark": "boundary-or-limit",
+      "suppress": "boundary-or-limit",
       "summary": "ループの中の外部呼び出し",
       "params": {
         "calls": ["run", "check_output", "check_call", "Popen", "urlopen"],
         "modules": ["subprocess", "httpx", "urllib", "github", "git", "ci", "llm", "notify"]
       }
     },
-    "NDF301": {"kind": 3, "mark": "none", "summary": "elif の長い連鎖", "params": {"min_elif": 4}},
-    "PLR0912": {"kind": 3, "mark": "none", "by": "ruff", "summary": "分岐の多い関数"},
-    "PLR1702": {"kind": 3, "mark": "none", "by": "ruff", "summary": "深い入れ子"},
-    "NDF401": {"kind": 4, "mark": "boundary", "summary": "定数を返して黙る except"},
-    "NDF402": {"kind": 4, "mark": "boundary", "summary": "contextlib.suppress"},
-    "NDF501": {"kind": 5, "mark": "boundary", "summary": "空の既定への落とし（`x or 空` と `x if x else 空`）"},
+    "NDF301": {"kind": 3, "suppress": "none", "summary": "elif の長い連鎖", "params": {"min_elif": 4}},
+    "PLR0912": {"kind": 3, "suppress": "none", "by": "ruff", "summary": "分岐の多い関数"},
+    "PLR1702": {"kind": 3, "suppress": "none", "by": "ruff", "summary": "深い入れ子"},
+    "NDF401": {"kind": 4, "suppress": "boundary", "summary": "定数を返して黙る except"},
+    "NDF402": {"kind": 4, "suppress": "boundary", "summary": "contextlib.suppress"},
+    "NDF501": {"kind": 5, "suppress": "boundary", "summary": "空の既定への落とし（`x or 空` と `x if x else 空`）"},
     "NDF502": {
       "kind": 5,
-      "mark": "boundary",
+      "suppress": "boundary",
       "summary": "既定値つきの .get(k, 既定)",
       "params": {"boundary_receivers": ["os.environ"]}
     },
-    "NDF701": {"kind": 7, "mark": "none", "summary": "長い関数", "params": {"max_lines": 60}},
-    "PLR0913": {"kind": 7, "mark": "none", "by": "ruff", "summary": "引数の多い関数"}
+    "NDF701": {"kind": 7, "suppress": "none", "summary": "長い関数", "params": {"max_lines": 60}},
+    "PLR0913": {"kind": 7, "suppress": "none", "by": "ruff", "summary": "引数の多い関数"}
   },
   "ruff": {
     "preview": true,
@@ -71,7 +71,7 @@
     "skip_files": ["uv.lock"],
     "examples": {
       "skills/document-style/SKILL.md": {
-        "words": ["入口"],
+        "words": ["入口", "雛形", "台帳"],
         "reason": "避ける語の表と、避ける語を探す grep の例が、言い換える前の語として挙げる"
       },
       "skills/pr-review/SKILL.md": {
@@ -86,12 +86,16 @@
         "words": ["実装レビュー"],
         "reason": "旧 projects-sync.sh（M7）が受ける工程名。入れ替えまでは呼び先の工程表の名前を渡す"
       },
+      "skills/merged/SKILL.md": {
+        "words": ["後片付け"],
+        "reason": "旧 projects-sync.sh（M7）が受ける工程名。入れ替えまでは呼び先の工程表の名前を渡す"
+      },
       "skills/development-workflow/references/workflow-modes.md": {
         "words": ["構造改善"],
         "reason": "旧 projects-sync.sh（M7）が受ける工程名。入れ替えまでは呼び先の工程表の名前を渡す"
       },
       "src/ndf/checks/rules.json": {
-        "words": ["入口", "実装レビュー", "構造改善"],
+        "words": ["入口", "雛形", "台帳", "実装レビュー", "構造改善", "後片付け"],
         "reason": "この除外のデータそのものが、外す語を持つ"
       }
     }

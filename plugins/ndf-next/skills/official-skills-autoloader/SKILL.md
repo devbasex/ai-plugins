@@ -26,7 +26,7 @@ allowed-tools:
 | Claude API / SDK開発 | `claude-api` |
 | MCPサーバー作成 | `mcp-builder` |
 
-**スライド（プレゼン・発表資料）を新しく作る依頼は、公式 Skill を使わない。** `release` の `references/form-slide.md`（生成スクリプトの経路）へ回す。公式の `pptx` は既存の .pptx を読む・直す依頼だけに使う。
+**スライド（プレゼン・発表資料）を新しく作るリクエストは、公式 Skill を使わない。** `release` の `references/form-slide.md`（生成スクリプトの経路）へ回す。公式の `pptx` は既存の .pptx を読む・直すリクエストだけに使う。
 
 ## 対応ランタイム
 
@@ -36,11 +36,11 @@ allowed-tools:
 
 ## インストール前の同意取得（必須）
 
-この Skill は自然文の依頼でも起動する。インストールは**外部のマーケットプレイスの登録**と
+この Skill は自然文のリクエストでも起動する。インストールは**外部のマーケットプレイスの登録**と
 **Claude Code のプラグインの導入**を伴い、利用者が明示的に頼んでいない操作になりうる。
 **ステップ3 を実行する前に、以下の 4 点を一覧で提示して利用者の同意を得る。同意が得られなければ
-インストールを行わず、その Skill を使わない方法で作業を続けるか、作業を中断する。** 同意は `AskUserQuestion` で問い、
-`metadata.source` に `ndf-ask:legal`（取得する Skill のライセンスへの同意）を付ける（区分の正本は
+インストールを行わず、その Skill を使わない方法で作業を続けるか、作業を中断する。** 同意は `AskUserQuestion` で質問、
+`metadata.source` に `ndf-ask:legal`（取得する Skill のライセンスへの同意）を付ける（区分の SSOT は
 `development-workflow` の `references/asking.md`）。
 
 公式 Skill は、Anthropic のマーケットプレイス `anthropic-agent-skills`（GitHub の `anthropics/skills`）が
@@ -67,7 +67,7 @@ allowed-tools:
 
 - 「インストールしてよいですか」だけを尋ねるのは確認にならない。**上記 4 点を必ず示す**
 - 利用者が `/ndf11:official-skills-autoloader pptx` のように対象を指定して明示起動した場合や、
-  「公式 Skill を入れて」のように依頼自体がインストールを含む場合は、その依頼を同意とみなす。
+  「公式 Skill を入れて」のようにリクエスト自体がインストールを含む場合は、そのリクエストを同意とみなす。
   それでも取得元・入れるプラグイン・導入の範囲は提示する
 - **暗黙起動（「スライドを作って」等）の場合は、提示のうえ明示的な同意を得てから実行する**
 - すでにインストール済み（ステップ2 が `INSTALLED`）ならインストールは発生しないため、
@@ -80,7 +80,7 @@ allowed-tools:
 ### ステップ1: 対象Skillを特定
 
 ユーザーの発話から上記マッピングで対象Skill名を1つ決定し、入れるプラグイン（`document-skills`・`claude-api`・`example-skills` のどれか）を決める。
-曖昧な場合は依頼に最も合う 1 つを AI が選び、選んだ理由を `ask.py decide --question` で記録する。
+曖昧な場合はリクエストに最も合う 1 つを AI が選び、選んだ理由を `ask.py decide --question` で記録する。
 
 ### ステップ2: インストール状態を確認
 
@@ -110,8 +110,8 @@ claude plugin install "$PLUGIN"   # プロジェクトに限るなら --scope pr
 
 ### ステップ4: SKILL.mdを読み込んで実行
 
-導入したプラグインの Skill は、次のセッションから Claude Code が読み込む。今のセッションでは、導入したプラグインの置き場の
-`skills/<対象名>/SKILL.md` を Read で読む。置き場は `claude plugin list` の出力か `~/.claude/plugins/installed_plugins.json` の
+導入したプラグインの Skill は、次のセッションから Claude Code が読み込む。今のセッションでは、導入したプラグインの保存先の
+`skills/<対象名>/SKILL.md` を Read で読む。保存先は `claude plugin list` の出力か `~/.claude/plugins/installed_plugins.json` の
 `installPath` にある。
 
 読み込んだSKILL.mdの内容を**現在のコンテキストで実行**する。そのSkillが指定する `scripts/` ディレクトリや `reference/` ファイルも必要に応じて読込。

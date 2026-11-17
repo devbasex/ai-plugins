@@ -54,7 +54,7 @@ def is_allowed(rel: str, entries: Iterable[str]) -> bool:
 
 
 @dataclass(frozen=True)
-class Place:
+class Location:
     """判断に要る位置。パスは実体へ解決した絶対パス。"""
 
     main_dir: str
@@ -63,7 +63,7 @@ class Place:
     worktrees_rel: str
 
 
-def flagged(targets: Iterable[str], base: str, where: Place) -> list[str]:
+def flagged(targets: Iterable[str], base: str, where: Location) -> list[str]:
     """書き込み先のうち案内の対象（メインディレクトリからの相対パス、重なりを除いた順）。"""
     if where.in_worktree:
         return []

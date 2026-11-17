@@ -1,4 +1,4 @@
-"""進行表の DB の負荷の測定（load_measure.py）の現状固定。短い時間・少ないプロセスで打ち、出す 1 行の JSON の形を固定する。"""
+"""ステートマシンの DB の負荷の測定（load_measure.py）の現状固定。短い時間・少ないプロセスで打ち、出す 1 行の JSON の形を固定する。"""
 
 from __future__ import annotations
 

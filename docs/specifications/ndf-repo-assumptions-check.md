@@ -81,7 +81,7 @@ Value 6 の棚卸しで、ai-plugins の形を前提にした箇所が 27 件見
 | 5 | 終了コード 2 の判定は 1 より先に行う。`--report` は出力を足すだけで、終了コードを変えない |
 | 6 | manifest に載る Skill のうち、走査できる Markdown を 1 本も持たないものがあれば、例外リストより先に終了コード 2 で落ちる |
 | 7 | リリース対象のファイルに、ファイル全体の除外は無い。除外は常に語とファイルの組で宣言する |
-| 8 | ndf-next の形の family で、リモート名の語（`remote-origin`）に当たる JSON Schema の `default` の値が `contracts/schemas/declarations/worktree.schema.json` の `/properties/remote/default` の 1 か所だけでなければ（2 か所以上か 0 か所）、例外リストより先に終了コード 2 で落ちる |
+| 8 | ndf-next の形の family で、リモート名の語（`remote-origin`）に当たる JSON Schema の `default` の値が `contracts/schemas/ndf-settings/worktree.schema.json` の `/properties/remote/default` の 1 か所だけでなければ（2 か所以上か 0 か所）、例外リストより先に終了コード 2 で落ちる |
 
 ### 走査の範囲
 

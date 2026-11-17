@@ -1,4 +1,4 @@
-"""レーンの進行表（#3097 の受け入れ条件 1・2・3・5、P3-1、3346-5）。
+"""レーンのステートマシン（#3097 の受け入れ条件 1・2・3・5、P3-1、3346-5）。
 
 DB を使うテストは `opened`（SQLite と PostgreSQL の両方）で流す。計画は `plan.create_plan` で作る。
 """
@@ -26,10 +26,10 @@ def _rows(st, pid):
 
 
 def _sprint(st, pid, lane_name, name):
-    """レーンの進行表を親に持つスプリントの進行表（工程の行は持たない）。"""
+    """レーンのステートマシンを親に持つスプリントのステートマシン（工程の行は持たない）。"""
     with store.transaction(st) as conn:
         view, _ = lane.read_plan(conn, pid)
-        return store.create_table(conn, ("sprint", REPO, name), view.lanes[lane_name].table_id, None, [])
+        return store.create_machine(conn, ("sprint", REPO, name), view.lanes[lane_name].machine_id, None, [])
 
 
 def _start(st, pid, lane_name, key, name):
@@ -66,10 +66,10 @@ def test_creation_that_breaks_a_cross_lane_rule_leaves_nothing(opened, doc, rule
     reason = refused(opened, lambda conn: plan.create_plan(conn, REPO, doc, True))
     assert rule in reason
     with store.transaction(opened) as conn:
-        assert store.read_table(conn, plan.plan_id(REPO, "p6")) is None
+        assert store.read_machine(conn, plan.plan_id(REPO, "p6")) is None
 
 
-def test_rows_ordered_by_after_may_touch_the_same_place(opened):
+def test_rows_ordered_by_after_may_touch_the_same_location(opened):
     # b は a の全行の後に動くので、同じ場所を触ってよい（I13 は同時に動き得る組だけを見る）
     pid = _create(opened, _doc(_decl("a", [[1], [2]]), _decl("b", [[3]], after=("a",))))
     view, rows = _rows(opened, pid)
@@ -96,13 +96,13 @@ def test_sprint_end_completes_the_row_and_returns_the_next_row_of_the_same_lane(
     # 耐久ステップの流し直しで 2 度呼ばれても、row_ended は 1 度だけ残り、同じ結果を返す
     with store.transaction(opened) as conn:
         again = lane.end_row(conn, sid, "completed", "workflow")
-        ended = [e for e in store.read_events(conn, view.lanes["a"].table_id) if e.draft.kind == "row_ended"]
+        ended = [e for e in store.read_events(conn, view.lanes["a"].machine_id) if e.draft.kind == "row_ended"]
     assert again == nxt and len(ended) == 1
 
 
 def test_sprint_outside_a_lane_has_no_row_to_end(opened):
     with store.transaction(opened) as conn:
-        sid = store.create_table(conn, ("sprint", REPO, "alone"), None, None, [])
+        sid = store.create_machine(conn, ("sprint", REPO, "alone"), None, None, [])
         assert lane.end_row(conn, sid, "completed", "workflow") is None
 
 
@@ -208,12 +208,12 @@ def test_only_the_ndf_version_differs_so_the_lane_starts_with_a_warning(opened, 
     assert len(warnings) == 1 and "0.0.0-other" in warnings[0]
     with store.transaction(opened) as conn:
         view, _ = lane.read_plan(conn, pid)
-        started = [e for e in store.read_events(conn, view.lanes["a"].table_id) if e.draft.kind == "row_started"]
+        started = [e for e in store.read_events(conn, view.lanes["a"].machine_id) if e.draft.kind == "row_started"]
     assert started[0].draft.payload["ndf_version_mismatch"]["self"] == "0.0.0-other"
     assert started[0].draft.payload["sprint_id"] == sid
 
 
-# --- 答えの後の next（3346-5） -----------------------------------------------------------------------
+# --- 回答の後の next（3346-5） -----------------------------------------------------------------------
 
 
 def test_answer_without_a_following_next_is_read_as_a_stall(opened):
@@ -269,13 +269,13 @@ def test_touch_hit(x, y, hit):
 
 
 def _spec(name, touches=("src/a",), after=(), repo=None):
-    return lane.LaneSpec(name=name, table_id=f"t-{name}", kind="sprint", plans=1, touches=tuple(touches), after=tuple(after), repo=repo)
+    return lane.LaneSpec(name=name, machine_id=f"t-{name}", kind="sprint", plans=1, touches=tuple(touches), after=tuple(after), repo=repo)
 
 
 def _view(*specs, repo=None):
     lanes = {s.name: s for s in specs}
     return lane.PlanView(
-        table_id="p", name="p6", state="running", rules=(), max_lanes=9, max_plans=9, formats={}, ndf_version=None, lanes=lanes, repo=repo
+        machine_id="p", name="p6", state="running", rules=(), max_lanes=9, max_plans=9, formats={}, ndf_version=None, lanes=lanes, repo=repo
     )
 
 
@@ -379,7 +379,7 @@ def test_touch_overlap_errors_as_they_are_now(view, rows, errors):
             {"a": _lane_rows("pending"), "b": _lane_rows("pending"), "c": _lane_rows("pending")},
             [],
         ),
-        # 終わった行も鎖の節になる（a/r1 は完了でも b はその後で、a/r2 とは同時に動き得る）
+        # 終わった行も鎖のセクションになる（a/r1 は完了でも b はその後で、a/r2 とは同時に動き得る）
         (
             _view(_spec("a"), _spec("b", after=("a/r1",))),
             {"a": _lane_rows("completed", "pending"), "b": _lane_rows("pending")},
@@ -398,7 +398,7 @@ def test_row_order_chain_as_it_is_now(view, rows, errors):
 
 
 def test_cross_lane_writes_of_one_plan_wait_for_each_other_on_postgresql(pg_url, root):
-    """PostgreSQL では、計画の決まりを確かめて書く操作が計画の鍵で直列になる（別レーンへの同時の書き込みが互いを見る）。"""
+    """PostgreSQL では、計画の決まりを確かめて書く操作が計画のキーで直列になる（別レーンへの同時の書き込みが互いを見る）。"""
     import sqlalchemy as sa
 
     with store.open_store(pg_url, root) as st, st.engine.connect() as first, st.engine.connect() as second:

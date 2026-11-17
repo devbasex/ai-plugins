@@ -15,7 +15,7 @@
 
 **サイトの URL はリポジトリごとに違う。** 設定の `location` が持つ。この Skill には書かない。
 
-## 取り込みの手段と取れないもの
+## マージの手段と取れないもの
 
 | 対象 | 手段 |
 | --- | --- |
@@ -31,7 +31,7 @@
 | マクロの描画結果 | マクロは記述のまま返る |
 
 **差分の取り方に既存の形がある。** 正規化せずに、**前回投稿した
-storage をそのまま控えておき、次に取得した storage と比べる**方法が実装されている。
+storage をそのままメモしておき、次に取得した storage と比べる**方法が実装されている。
 どちらを採るかは [import.md](import.md) が定める。
 
 ## 投稿の手段
@@ -50,20 +50,20 @@ storage をそのまま控えておき、次に取得した storage と比べる
 
 `storage`（XHTML）が既定である。`atlas_doc_format` と `wiki`（変換のみ）もある。
 
-## 版の扱い
+## バージョンの扱い
 
 **下書きと公開中で扱いが違う。**
 
-| 状態 | 版 |
+| 状態 | バージョン |
 | --- | --- |
-| 下書き | **版は 1 に固定される** |
+| 下書き | **バージョンは 1 に固定される** |
 | 公開中 | 更新のたびに増える |
 
 **混同すると `DRAFT pages do not support multiple versions` で失敗する。**
 
 ## 図の扱い
 
-**PlantUML のマクロは、クラウド版では `Migration Required` と表示されて描画されない。**
+**PlantUML のマクロは、クラウドバージョンでは `Migration Required` と表示されて描画されない。**
 図は画像へ変換して添付し、添付を参照する形（`<ac:image><ri:attachment>`）で載せる。
 
 **Mermaid も同じ扱いになる可能性がある。未確認。**
@@ -78,6 +78,6 @@ storage をそのまま控えておき、次に取得した storage と比べる
 | 事象 | 対処 |
 | --- | --- |
 | MCP が認証で失敗する | REST を直接呼ぶ |
-| `DRAFT pages do not support multiple versions` | 下書きと公開中で版の扱いを分ける |
+| `DRAFT pages do not support multiple versions` | 下書きと公開中でバージョンの扱いを分ける |
 | `UnknownMacroMigrationException` | マクロをマーカーへ差し替えてから変換する |
 | PlantUML が `Migration Required` になる | 画像へ変換して添付する |

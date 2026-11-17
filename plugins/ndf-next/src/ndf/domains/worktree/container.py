@@ -1,4 +1,4 @@
-"""コンテナの実行系（docker）と、宣言のコマンド（`sh -c`）の起動。
+"""コンテナの実行系（docker）と、設定のコマンド（`sh -c`）の起動。
 
 起動するのはこのモジュールの `Shell` だけで、起動の関数は差し替えられる（テストは docker を起動せずに出力を渡す）。
 コンテナの実行系のコマンドは環境変数 `NDF_DOCKER_COMMAND` で差し替えられる（既定は `docker`）。
@@ -59,7 +59,7 @@ def compose_project(name: str) -> Optional[str]:
 
 @dataclass(frozen=True)
 class Shell:
-    """宣言のコマンドとコンテナの実行系の起動。"""
+    """設定のコマンドとコンテナの実行系の起動。"""
 
     runner: Runner = run_process
     attached: Attached = run_attached
@@ -74,7 +74,7 @@ class Shell:
         return shutil.which(self.docker) is not None
 
     def sh(self, command: str, cwd: Path, env: Optional[Mapping[str, str]] = None) -> Completed:
-        """宣言のコマンドを `sh -c` で打つ。"""
+        """設定のコマンドを `sh -c` で打つ。"""
         return self.runner(["sh", "-c", command], cwd, env)
 
     def docker_run(self, *args: str, env: Optional[Mapping[str, str]] = None, cwd: Optional[Path] = None) -> Completed:

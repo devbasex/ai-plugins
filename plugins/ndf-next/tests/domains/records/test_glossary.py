@@ -42,13 +42,18 @@ def test_deprecated_in_meanings_skips_code_live_terms_and_kanji_neighbours() -> 
         "contexts": [{"id": "c", "name": "c"}],
         "terms": [
             {"context": "c", "term": "承認ゲート", "meaning": "旧語ではない。`旧語` はコード", "deprecated": ["旧語"]},
-            {"context": "c", "term": "段階", "meaning": "段階の中の段と、単独の 段 がある", "deprecated_standalone": ["段"]},
+            {
+                "context": "c",
+                "term": "段階",
+                "meaning": "段階の中のステップと、単独の ステップ がある",
+                "deprecated_standalone": ["ステップ"],
+            },
             {"context": "c", "term": "ゲート", "meaning": "承認ゲートの略"},
         ],
     }
     found = gd.deprecated_in_meanings(g)
     assert {"context": "c", "term": "承認ゲート", "word": "旧語"} in found
-    assert {"context": "c", "term": "段階", "word": "段"} in found
+    assert {"context": "c", "term": "段階", "word": "ステップ"} in found
     assert all(f["term"] != "ゲート" for f in found)
 
 
@@ -73,19 +78,19 @@ def test_layout_reads_document_dir_and_max_lines(tmp_path: Path) -> None:
     assert glossary.layout(root) == gd.Layout("glossary.json", "docs/words.md", "docs/terms", 10)
 
 
-def test_layout_without_declaration_raises(tmp_path: Path) -> None:
+def test_layout_without_ndf_settings_raises(tmp_path: Path) -> None:
     with pytest.raises(glossary.GlossaryError):
         glossary.layout(tmp_path)
 
 
-# 現状固定（I-018 の前）: 用語集の設定と正本を読むときの誤りと既定
+# 現状固定（I-018 の前）: 用語集の設定と SSOT を読むときの誤りと既定
 def _decl_only(tmp_path: Path, data: bytes) -> Path:
     (tmp_path / ".ndf").mkdir()
     (tmp_path / ".ndf" / "glossary.json").write_bytes(data)
     return tmp_path
 
 
-def test_layout_reports_unreadable_json_and_a_declaration_without_source_or_document(tmp_path: Path) -> None:
+def test_layout_reports_unreadable_json_and_a_ndf_settings_without_source_or_document(tmp_path: Path) -> None:
     root = _decl_only(tmp_path, b"{")
     with pytest.raises(glossary.GlossaryError, match=r"glossary\.json を読めない: "):
         glossary.layout(root)
@@ -114,7 +119,7 @@ def test_load_reports_a_missing_or_malformed_source(tmp_path: Path) -> None:
     assert glossary.load(root, lay) == {"contexts": [], "terms": []}
 
 
-# NOTE: 現状固定。UTF-8 でない宣言・正本は GlossaryError にならず、UnicodeDecodeError がそのまま出る
+# NOTE: 現状固定。UTF-8 でない設定・SSOT は GlossaryError にならず、UnicodeDecodeError がそのまま出る
 def test_layout_and_load_raise_on_bytes_that_are_not_utf8(tmp_path: Path) -> None:
     root = _decl_only(tmp_path, b"\xff")
     with pytest.raises(UnicodeDecodeError):

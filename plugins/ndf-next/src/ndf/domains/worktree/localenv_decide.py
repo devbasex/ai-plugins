@@ -1,8 +1,8 @@
-"""ローカルの動作検証の判断（純粋な関数）: 載っているコードの照合と、相乗りか分離かの提示。
+"""ローカルの動作検証の判断（純粋な関数）: 載っているコードの検証と、相乗りか分離かの提示。
 
-- `verify`: ローカル環境に載っているブランチ（宣言の `localenv.branch_probe` の出力）と対象のブランチを比べる。
+- `verify`: ローカル環境に載っているブランチ（設定の `localenv.branch_probe` の出力）と対象のブランチを比べる。
   「未起動（読めない）」と「不一致」を分ける（次の手が違う）
-- `mode`: 変更のパスが宣言の `localenv.isolate_when`（glob）に当たれば分離、当たらなければ相乗り
+- `mode`: 変更のパスが設定の `localenv.isolate_when`（glob）に当たれば分離、当たらなければ相乗り
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ from __future__ import annotations
 import fnmatch
 from typing import Iterable, NamedTuple, Optional
 
-# 照合の 3 つの結果
+# 検証の 3 つの結果
 MATCH = "match"
 MISMATCH = "mismatch"
 NOT_RUNNING = "not_running"
@@ -37,7 +37,7 @@ def verify(loaded: Optional[str], branch: Optional[str]) -> Verdict:
 def mode(changed: Iterable[str], patterns: list[str]) -> tuple[Verdict, list[str]]:
     """提示と、条件に当たった `<パス>（<条件>）` の一覧。1 つのパスは 1 度だけ載せる。"""
     if not patterns:
-        return Verdict(SHARE, "相乗り: 分離を促す条件が宣言されていない"), []
+        return Verdict(SHARE, "相乗り: 分離を促す条件が定義されていない"), []
     hits = []
     for path in changed:
         hit = next((p for p in patterns if p and fnmatch.fnmatchcase(path, p)), None)

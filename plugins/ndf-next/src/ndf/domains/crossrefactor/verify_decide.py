@@ -1,11 +1,11 @@
 """検証の判定: 失敗を持ち込んだ項目にだけ帰す（#3339）と、修正の前進の判定。
 
-- 失敗の鍵は `<suite>:<ファイル>`（suite の範囲の検査かテストを、そのファイルに当てて落ちたもの）。行数の上限のような
-  共有の検査（ファイル全体に掛かる検査）も同じ鍵で数える
-- 項目の検証は、項目の起点（テストの追加の前の head）と今の head で同じ鍵を比べ、起点で落ちていなかったものだけを
+- 失敗のキーは `<suite>:<ファイル>`（suite の範囲の検査かテストを、そのファイルに当てて落ちたもの）。行数の上限のような
+  共有の検査（ファイル全体に掛かる検査）も同じキーで数える
+- 項目の検証は、項目の起点（テストの追加の前の head）と今の head で同じキーを比べ、起点で落ちていなかったものだけを
   その項目の失敗（`own`）とする。起点から落ちていたもの（`inherited`）は前の項目か元のコードのもので、この項目の
   修正の対象にしない。後の項目が前の項目の持ち込んだ違反を自分の失敗として拾って停滞しない
-- 修正の前進は宣言 `cross-refactoring.fix-progress` で決める。同じ失敗の集合が `same_cause` 回続けば停滞、前に見た
+- 修正の前進は設定 `cross-refactoring.fix-progress` で決める。同じ失敗の集合が `same_cause` 回続けば停滞、前に見た
   どれかの集合へ戻れば振動で、どちらも修正をやめて項目を戻す
 """
 
@@ -30,13 +30,13 @@ class Kind(StrEnum):
 
 
 def failure_key(suite: str, path: str) -> str:
-    """失敗の鍵（`<suite>:<ファイル>`）。"""
+    """失敗のキー（`<suite>:<ファイル>`）。"""
     return f"{suite}:{path}"
 
 
 @dataclass(frozen=True)
 class Attributed:
-    """今の head で落ちた鍵を、この項目のもの（`own`）と起点から在ったもの（`inherited`）へ分けたもの。"""
+    """今の head で落ちたキーを、この項目のもの（`own`）と起点から在ったもの（`inherited`）へ分けたもの。"""
 
     own: frozenset[str]
     inherited: frozenset[str]
@@ -47,7 +47,7 @@ class Attributed:
 
 
 def attribute(at_start: Iterable[str], now: Iterable[str]) -> Attributed:
-    """起点で落ちた鍵 `at_start` と今落ちた鍵 `now` から、項目の失敗を決める。"""
+    """起点で落ちたキー `at_start` と今落ちたキー `now` から、項目の失敗を決める。"""
     before = frozenset(at_start)
     after = frozenset(now)
     return Attributed(after - before, after & before)

@@ -1,13 +1,13 @@
-"""`ndf refactor` の副命令。
+"""`ndf refactor` のサブコマンド。
 
-    ndf refactor touched --base <起点> --scope <置き場>... [--head HEAD] [--symbols <ファイル>:<名前>...] [--work <dir>]
+    ndf refactor touched --base <起点> --scope <保存先>... [--head HEAD] [--symbols <ファイル>:<名前>...] [--work <dir>]
     ndf refactor tests --changed <ファイル>... [--work <dir>]
     ndf refactor collected --paths <ファイル>... [--timeout <秒>] [--work <dir>]
-    ndf refactor run --pr <N> --branch <head> --base <起点> --scope <置き場>... --required <チェック>... [--ci-test <名前>...]
+    ndf refactor run --pr <N> --branch <head> --base <起点> --scope <保存先>... --required <チェック>... [--ci-test <名前>...]
                      [--symbols <ファイル>:<名前>...] [--participants <ランタイム>...] [--max-fix <回>]
                      [--budget-minutes <分>] [--safety-net-minutes <分>] [--work <dir>]
     ndf refactor state --pr <N> [--work <dir>]
-    ndf refactor scope-args --base <起点> [--tests <置き場>...] [--scope <置き場>...] [--work <dir>]
+    ndf refactor scope-args --base <起点> [--tests <保存先>...] [--scope <保存先>...] [--work <dir>]
     ndf refactor release --pr <N> [--work <dir>]
 
 - `touched`: 課題が触る関数（#622）と、着手前の範囲テストへ渡す範囲の配下のテストのファイル（#2096）。`--symbols` を
@@ -16,12 +16,12 @@
 - `collected`: 足したテストのファイルが全体の実行に収集されるか（#620）。収集されないファイルがあれば `test_failed` で止まる
 - `run`: 1 回の実行を提案から最終ゲートまで進める（`drive`）。止まれば状態ファイルを残し、同じ引数で打ち直すと続ける。
   `--budget-minutes` は採る項目を選ぶ実装の予算、`--safety-net-minutes` はコードを書く工程の起動の秒の累計の上限
-  （無ければ実効の予算 × 宣言の倍率）。安全網で止まったら、上限を大きくして打ち直すと続ける
+  （無ければ実効の予算 × 設定の倍率）。安全網で止まったら、上限を大きくして打ち直すと続ける
 - `state`: 状態ファイルの中身（項目・工程の起点・最終ゲートの記録）を出す
 - `scope-args`: 検査のプランが `run` の `--scope` へ渡す範囲を組む（#1484）
 - `release`: 作業場所を片付ける（NDF の lock だけを外す）
 
-結果 JSON を標準出力の最後の 1 行に出す。止まった理由は `ndf.contracts.causes` の種類で返す。
+結果 JSON を標準出力の最後の 1 行に出す。停止理由は `ndf.contracts.causes` の種類で返す。
 """
 
 from __future__ import annotations
@@ -129,7 +129,7 @@ def _release(a: argparse.Namespace) -> dict[str, Any]:
     return result.result(
         TOOL,
         "ok",
-        f"作業場所を片付けた（残した {len(kept)} 件・持ち主のいない lock {len(swept)} 件）",
+        f"作業場所を片付けた（残した {len(kept)} 件・オーナーのいない lock {len(swept)} 件）",
         items,
         {"kept": len(kept), "swept": len(swept)},
     )
@@ -188,7 +188,7 @@ def _drive_parsers(sub: Any) -> tuple[argparse.ArgumentParser, ...]:
     return r, st, rl, sa
 
 
-# 例外 → 止まった理由の種類。上から見て最初に当たった行を採る（ValueError の派生を先に置くため、並びを保つ）
+# 例外 → 停止理由の種類。上から見て最初に当たった行を採る（ValueError の派生を先に置くため、並びを保つ）
 STOP_KINDS: tuple[tuple[tuple[type[Exception], ...], str], ...] = (
     ((scope.ScopeError,), "invalid"),
     ((store.StateBroken,), "store_broken"),
@@ -199,7 +199,7 @@ STOP_KINDS: tuple[tuple[tuple[type[Exception], ...], str], ...] = (
 
 
 def _stop_kind(exc: Exception) -> Optional[str]:
-    """例外に当たる止まった理由の種類。表に無ければ None。"""
+    """例外に当たる停止理由の種類。表に無ければ None。"""
     return next((kind for types, kind in STOP_KINDS if isinstance(exc, types)), None)
 
 
@@ -213,7 +213,7 @@ def main(argv: list[str]) -> int:
     except final_gate.GateStopped as exc:
         return result.emit(result.stopped(TOOL, exc.kind, exc.detail))
     except slots.Stopped as exc:
-        # テストの枠の待ちの諦めとメモリの停止（collected の収集の確認）。落ちたテストに数えずに止まった理由にする（I9）
+        # テストのスロットの待ちの諦めとメモリの停止（collected の収集の確認）。落ちたテストに数えずに停止理由にする（I9）
         return result.emit(result.stopped(TOOL, exc.cause, exc.summary(), items=exc.retired))
     except Exception as exc:
         kind = _stop_kind(exc)

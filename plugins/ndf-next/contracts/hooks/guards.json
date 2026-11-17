@@ -5,7 +5,7 @@
   "guards": [
     {
       "name": "merge-production",
-      "summary": "Bash で直に打つ gh pr merge を、宛先のリポジトリの delivery で判定し、自動で本番へ届くなら止める（決定 91）",
+      "summary": "Bash で直に打つ gh pr merge を、マージ先のリポジトリの delivery で判定し、自動で本番へ届くなら止める（決定 91）",
       "module": "ndf.domains.hooks.strict",
       "events": ["PreToolUse"],
       "tools": ["Bash"],
@@ -18,7 +18,7 @@
     },
     {
       "name": "turn",
-      "summary": "利用者の入力で数え手を数え直す。中継が送った入力（数え手の印がある）では数え直さない（決定 92）",
+      "summary": "利用者の入力で数え手を数え直す。中継が送った入力（数え手のマーカーがある）では数え直さない（決定 92）",
       "module": "ndf.domains.hooks.guards.turn",
       "events": ["UserPromptSubmit"],
       "tools": [],
@@ -44,7 +44,7 @@
     },
     {
       "name": "context-limit",
-      "summary": "文脈の量が hook.context-limit を超えたら、次の 1 手（中継の下は区間の切り替え、外は引き継ぎの文書）だけを通して止める（SF12）",
+      "summary": "文脈の量が hook.context-limit を超えたら、次の 1 手（中継の下はセグメントの切り替え、外は引き継ぎの文書）だけを通して止める（SF12）",
       "module": "ndf.domains.hooks.guards.context_limit",
       "events": ["PreToolUse"],
       "tools": [],
@@ -90,7 +90,7 @@
     },
     {
       "name": "full-test",
-      "summary": "worker（環境変数 NDF_WORKER_KIND がある）の中で、宣言のテストの suite の全体の実行を止める。範囲テスト（scope_command）と静的解析は通す（#3112）",
+      "summary": "worker（環境変数 NDF_WORKER_KIND がある）の中で、設定のテストの suite の全体の実行を止める。範囲テスト（scope_command）と静的解析は通す（#3112）",
       "module": "ndf.domains.hooks.guards.full_test",
       "events": ["PreToolUse"],
       "tools": ["Bash"],
@@ -103,7 +103,7 @@
     },
     {
       "name": "script-chain",
-      "summary": "NDF のコマンドをシェルの演算子やループでつないで待つ呼び出しを止め、計画の待ちの副命令を背景で打つよう案内する（#1919）",
+      "summary": "NDF のコマンドをシェルの演算子やループでつないで待つ呼び出しを止め、計画の待ちのサブコマンドを背景で打つよう案内する（#1919）",
       "module": "ndf.domains.hooks.guards.chain",
       "events": ["PreToolUse"],
       "tools": ["Bash"],
@@ -145,8 +145,8 @@
       "params": {}
     },
     {
-      "name": "relay-mark",
-      "summary": "中継の下で最後の応答が次の区間のブロックを持てば、背景の作業が残る間は差し戻し、無ければ中継の印を書く（#1877・#2438）",
+      "name": "relay-marker",
+      "summary": "中継の下で最後の応答が次のセグメントのブロックを持てば、背景の作業が残る間は変更要求、無ければ中継のマーカーを書く（#1877・#2438）",
       "module": "ndf.domains.hooks.guards.relay_mark",
       "events": ["Stop"],
       "tools": [],
@@ -159,7 +159,7 @@
     },
     {
       "name": "unattended",
-      "summary": "人のいない実行（NDF_FACTORY_RUN）の conductor の印と区間の報告（#3242・#3746）。UserPromptSubmit で /ndf:development-workflow の起動に印を作って形の案内を返し、Stop で印のあるセッションの最後の応答が契約 hooks/unattended-report.json の形に合わないか次のコマンドを残したまま終えるなら差し戻し、SessionEnd で印を消し、SessionStart で消し残した古い印を消す",
+      "summary": "人のいない実行（NDF_FACTORY_RUN）の conductor のマーカーとセグメントの報告（#3242・#3746）。UserPromptSubmit で /ndf:development-workflow の起動にマーカーを作って形の案内を返し、Stop でマーカーのあるセッションの最後の応答がコントラクト hooks/unattended-report.json の形に合わないか次のコマンドを残したまま終えるなら変更を要求し、SessionEnd でマーカーを消し、SessionStart で消し残した古いマーカーを消す",
       "module": "ndf.domains.hooks.guards.unattended",
       "events": ["SessionStart", "UserPromptSubmit", "Stop", "SessionEnd"],
       "tools": [],
@@ -172,7 +172,7 @@
     },
     {
       "name": "stop-wait",
-      "summary": "最後の応答が AskUserQuestion を使わずに本文で人の答えを待つなら差し戻し、上限の後と別の場所の待ちの報告は通して待ちの知らせを書く（#2324）",
+      "summary": "最後の応答が AskUserQuestion を使わずに本文で人の回答を待つなら変更要求、上限の後と別の場所の待ちの報告は通して待ちの知らせを書く（#2324）",
       "module": "ndf.domains.hooks.guards.stop_wait",
       "events": ["Stop"],
       "tools": [],

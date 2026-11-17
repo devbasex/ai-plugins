@@ -1,4 +1,4 @@
-"""プランの回をまたぐ記録（状態の置き場の `prs.json`・`outputs.json`・`progress.jsonl`）の読み書き。
+"""プランの回をまたぐ記録（状態の保存先の `prs.json`・`outputs.json`・`progress.jsonl`）の読み書き。
 
 書くのは耐久ステップ（`runner.run_step`・`runner.record_choices`）で、読むのはプランの結果を組む `runner` である。
 """

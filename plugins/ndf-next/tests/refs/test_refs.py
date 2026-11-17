@@ -1,4 +1,4 @@
-"""参照の部品（`ndf.core.refs`）の種類ごとの解決と、解けない理由を、DBOS も GitHub も起こさずに確かめる。"""
+"""参照の部品（`ndf.core.refs`）の種類ごとの解決と、解けない理由を、DBOS も GitHub も起動せずに確かめる。"""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ def _ctx(tmp_path: Path, prior: tuple[Outcome, ...] = (), issues: tuple[int, ...
     return refs.Context(prior, issues, tmp_path)
 
 
-# --- 宣言 ---------------------------------------------------------------------------------
+# --- 設定 ---------------------------------------------------------------------------------
 
 
 def test_declared_reads_the_refs_of_the_plan() -> None:
@@ -44,7 +44,7 @@ def test_declared_reads_the_refs_of_the_plan() -> None:
         {"refs": {"x": {"kind": "queue_prs", "when_empty": "zero"}}},
     ],
 )
-def test_declared_refuses_a_broken_declaration(raw: dict) -> None:
+def test_declared_refuses_a_broken_ndf_settings(raw: dict) -> None:
     with pytest.raises(refs.RefError):
         refs.declared(raw)
 
@@ -59,8 +59,8 @@ def test_declared_refuses_a_broken_declaration(raw: dict) -> None:
         ({"kind": "queue_prs", "when_empty": "zero"}, "参照 x の when_empty は skip だけ: 'zero'"),
     ],
 )
-def test_declared_names_what_is_wrong_in_the_declaration(raw: object, message: str) -> None:
-    """現状固定: 宣言の誤りのメッセージ（検査の順は kind → of/key → of の有無 → when_empty）。"""
+def test_declared_names_what_is_wrong_in_the_ndf_settings(raw: object, message: str) -> None:
+    """現状固定: 設定の誤りのメッセージ（検査の順は kind → of/key → of の有無 → when_empty）。"""
     with pytest.raises(refs.RefError) as caught:
         refs.declared({"refs": {"x": raw}})
     assert str(caught.value) == message
@@ -71,7 +71,7 @@ def test_declared_keeps_of_and_key_and_an_explicit_null_when_empty() -> None:
     assert refs.declared(raw) == [refs.Ref("r", "plan_result", "p.state", "out", False)]
 
 
-def test_resolve_plan_returns_a_broken_declaration_as_invalid(tmp_path: Path) -> None:
+def test_resolve_plan_returns_a_broken_ndf_settings_as_invalid(tmp_path: Path) -> None:
     out = refs.resolve_plan({"refs": {"x": {"kind": "nope"}}}, _ctx(tmp_path), FakeSources())
     assert out.decision == STOPPED
     assert out.unresolved["refs"].cause == "invalid"
@@ -92,7 +92,7 @@ def test_version_resolves_from_the_outputs_of_the_referenced_plan(tmp_path: Path
     [
         (None, "前の回の結果が無い"),
         (refs.PlanRecord(STOPPED, {"version": "1.2.3"}), "完了でない"),
-        (refs.PlanRecord(OK, {"version": "v-next"}), "版の形でない"),
+        (refs.PlanRecord(OK, {"version": "v-next"}), "バージョンの形でない"),
         (refs.PlanRecord(OK, {"version": "unknown"}), "が無いか空"),
         (refs.PlanRecord(OK, {"version": "0.0.0"}), "が無いか空"),
         (refs.PlanRecord(OK, {}), "が無いか空"),
@@ -193,7 +193,7 @@ def test_counts_of_a_single_step_by_key(tmp_path: Path) -> None:
     assert got.unresolved["m"].cause == "input_missing"
 
 
-# --- 再開・設計の起点・問いの当て先 -------------------------------------------------------
+# --- 再開・設計の起点・質問の当て先 -------------------------------------------------------
 
 
 def test_match_plan_does_not_match_a_different_file_with_the_same_tail(tmp_path: Path) -> None:

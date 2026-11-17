@@ -1,10 +1,10 @@
-"""副命令 `launch-args` と、外部 CLI のアダプターの名前の窓口（#1142 の AD3。N10）。
+"""サブコマンド `launch-args` と、外部 CLI のアダプターの名前の窓口（#1142 の AD3。N10）。
 
-中身は責務ごとのモジュールが持つ。ここは副命令と、既存の呼び出し元のための再輸出だけを持つ。
+中身は責務ごとのモジュールが持つ。ここはサブコマンドと、既存の呼び出し元のための再輸出だけを持つ。
 
-- `claude.py`: `claude -p` の起動の引数と答えの読み取り
+- `claude.py`: `claude -p` の起動の引数と回答の読み取り
 - `run_log.py`: 1 回の実行を識別子 1 つで追う記録（#2338）
-- `agents.py`: 外部 CLI の起動と監視（#1411・#2059）、kiro のworktree の控え（#2448）
+- `agents.py`: 外部 CLI の起動と監視（#1411・#2059）、kiro のworktree のバックアップ（#2448）
 """
 
 from __future__ import annotations
@@ -64,7 +64,7 @@ from ndf.adapters.run_log import (
 )
 from ndf.contracts import result
 
-# 結果 JSON の tool の名前は副命令の名前（正本は `cli.COMMANDS`）
+# 結果 JSON の tool の名前はサブコマンドの名前（SSOT は `cli.COMMANDS`）
 TOOL = cli.tool_of(__name__)
 
 __all__ = [

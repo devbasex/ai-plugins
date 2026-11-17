@@ -1,4 +1,4 @@
-"""gws の導入の同意を求める承認資料を組み、状態の置き場の下（ファイルの表の行 `gws-install-material`。パスは表が持つ）へ書く。"""
+"""gws の導入の同意を求める承認資料を組み、状態の保存先の下（ファイルの表の行 `gws-install-material`。パスは表が持つ）へ書く。"""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ def render(*, package: str, package_url: str, command: Sequence[str], where: str
             f"| 取得元 | npm の `{package}` |",
             f"| 打つコマンド | `{shown}` |",
             f"| 入る先 | {where} |",
-            "| 注意 | Google の公式サポート外の CLI で、版は 0.x |",
+            "| 注意 | Google の公式サポート外の CLI で、バージョンは 0.x |",
             "",
             "## 同意を求めること",
             "",
@@ -42,7 +42,7 @@ def render(*, package: str, package_url: str, command: Sequence[str], where: str
 
 
 def write(text: str, state_dir: Path) -> Path:
-    """承認資料を状態の置き場 `state_dir` の下へ置き換えで書き、そのパスを返す。"""
+    """承認資料を状態の保存先 `state_dir` の下へ置き換えで書き、そのパスを返す。"""
     dest = files.path(state_dir, "gws-install-material")
     dest.parent.mkdir(parents=True, exist_ok=True)
     atomic.write_text(dest, text)

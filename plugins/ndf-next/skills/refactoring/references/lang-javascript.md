@@ -46,7 +46,7 @@ worker が要る。「反復の実行方式」表の「並行処理」と「並�
 
 ## 指標の測定
 
-`/ndf:cross-refactoring` は提案の前に、既定で lizard 1.24.0 を版を固定して測る（`.ndf/code-metrics.json` で
+`/ndf:cross-refactoring` は提案の前に、既定で lizard 1.24.0 をバージョンを固定して測る（`.ndf/code-metrics.json` で
 置き換えられる）。読む指標は関数ごとの循環的複雑度（`CCN`。11 以上から分岐の多さを疑う）と関数の行数
 （`length`）、ファイルの行数（空行を除く）である。lizard の CC はブール演算子も数えるため、Python の Ruff の値と
 同じ尺度で比べない。重複は jscpd（`jscpd@4.3.0`・最小 8 行）で探す。

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "progress.result.schema.json",
   "title": "ndf progress の結果 JSON",
-  "description": "ndf progress が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果の契約（result.schema.json）が持ち、ここは metrics と items の形だけを足す。metrics と items の要素は閉じていて、載せた項目のほかの項目を持つと通らない",
+  "description": "ndf progress が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果のコントラクト（result.schema.json）が持ち、ここは metrics と items の形だけを足す。metrics と items の要素は閉じていて、載せた項目のほかの項目を持つと通らない",
   "allOf": [
     {
       "$ref": "../result.schema.json"
@@ -17,9 +17,9 @@
       "description": "ndf progress の計測値",
       "additionalProperties": false,
       "properties": {
-        "table_id": {
+        "machine_id": {
           "type": "string",
-          "description": "進行表の ID"
+          "description": "ステートマシンの ID"
         },
         "rev": {
           "type": "integer",
@@ -30,7 +30,7 @@
             "string",
             "null"
           ],
-          "description": "進行表の状態（next・wait・work・show）"
+          "description": "ステートマシンの状態（next・wait・work・show）"
         },
         "move": {
           "type": "string",
@@ -53,11 +53,11 @@
         },
         "answer": {
           "type": "string",
-          "description": "承認ゲートのステップの答え"
+          "description": "承認ゲートのステップの回答"
         },
         "seq": {
           "type": "integer",
-          "description": "答えの事象の番号"
+          "description": "回答の事象の番号"
         },
         "rows": {
           "type": "integer",
@@ -87,7 +87,7 @@
         },
         "current_id": {
           "type": "string",
-          "description": "既にある進行表の ID（refused で止まったときだけ）"
+          "description": "既にあるステートマシンの ID（refused で止まったときだけ）"
         },
         "code_in_diff": {
           "type": "integer",
@@ -180,7 +180,7 @@
           },
           "from": {
             "type": "string",
-            "description": "戻した控え（restore）"
+            "description": "戻したバックアップ（restore）"
           },
           "retired": {
             "type": "string",
@@ -188,7 +188,7 @@
           },
           "path": {
             "type": "string",
-            "description": "置き場のパス（置き場を使えずに止まったとき）"
+            "description": "保存先のパス（保存先を使えずに止まったとき）"
           },
           "error": {
             "type": "string",
@@ -196,7 +196,7 @@
           },
           "key": {
             "type": "string",
-            "description": "文脈に足りない入力の鍵（工程を始められずに止まったとき）"
+            "description": "文脈に足りない入力のキー（工程を始められずに止まったとき）"
           },
           "source": {
             "type": "string",

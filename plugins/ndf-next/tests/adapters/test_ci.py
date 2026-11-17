@@ -237,7 +237,7 @@ def test_unresolved_testcase_moves_every_check_of_the_run_to_the_log() -> None:
 
 
 def test_more_artifacts_than_the_room_are_not_fetched() -> None:
-    # 不変条件 I5: 当たる成果物が取得の枠を超える実行は ZIP を 1 本も取得せず、ログへ移す
+    # 不変条件 I5: 当たる成果物が取得のスロットを超える実行は ZIP を 1 本も取得せず、ログへ移す
     cap = int(limits.value("github.failed-logs", "count"))
     arts = [_art(100 + i, f"junit-{i}") for i in range(cap + 1)]
     hub = FakeHub({1: 9}, {9: ".github/workflows/pytest.yml"}, artifacts={9: arts}, logs={1: LOG})
@@ -335,7 +335,7 @@ def test_runner_of_matches_the_workflow_file_only(workflow: str, suites: tuple, 
     assert bool(reason) == (runner is None)
 
 
-def test_from_work_reads_the_declaration_and_every_tracked_file(tmp_path: Path) -> None:
+def test_from_work_reads_the_ndf_settings_and_every_tracked_file(tmp_path: Path) -> None:
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
     (tmp_path / "pkg").mkdir()
     (tmp_path / "top.py").write_text("", encoding="utf-8")
@@ -351,7 +351,7 @@ def test_from_work_reads_the_declaration_and_every_tracked_file(tmp_path: Path) 
     assert got.tracked == frozenset({"top.py", "pkg/inner.py"})
 
 
-def test_from_work_without_git_or_declaration_reads_nothing(tmp_path: Path) -> None:
+def test_from_work_without_git_or_ndf_settings_reads_nothing(tmp_path: Path) -> None:
     got = ci.FailedTestSource.from_work(tmp_path)
     assert got == ci.FailedTestSource(None, (), frozenset())
 
@@ -460,7 +460,7 @@ def test_watch_stops_with_infra_wait_when_runner_wait_exceeds_its_limit() -> Non
     assert done.queued_for == pytest.approx(limits.seconds("ci.runner-wait"))
 
 
-# --- 現状固定（I-008 required_key）: 必須のチェックの照合の鍵と、鍵に当たるチェック ---
+# --- 現状固定（I-008 required_key）: 必須のチェックの検証のキーと、キーに当たるチェック ---
 
 
 @pytest.mark.parametrize(
@@ -489,7 +489,7 @@ def test_required_key_current_values(name: str, key: str) -> None:
 
 
 def test_required_key_matches_named_shard_only_and_bare_name_any_shard() -> None:
-    """現状固定: 分割を名指しした鍵は、前置きの有無によらずその分割だけに当たる。名指ししない鍵は全分割とまとめに当たる。"""
+    """現状固定: 分割を名指ししたキーは、前置きの有無によらずその分割だけに当たる。名指ししないキーは全分割とまとめに当たる。"""
     runs = [run("CI / pytest (0/2)", rid=1), run("pytest (1/2)", conclusion="failure", rid=2), run("W / pytest", rid=3)]
     named = ci.read(runs, ["X / pytest (0/2)"], ["pytest"])
     assert (named.verdict, named.missing, named.failed_tests) == ("passed", [], [])
@@ -501,12 +501,12 @@ def test_required_key_matches_named_shard_only_and_bare_name_any_shard() -> None
 
 
 def test_required_key_dedupes_required_names_by_key() -> None:
-    """現状固定: 前置きや分割の違う必須の名前は、同じ鍵に畳まれて 1 つだけ欠けたと挙がる。"""
+    """現状固定: 前置きや分割の違う必須の名前は、同じキーに畳まれて 1 つだけ欠けたと挙がる。"""
     reading = ci.read([run("other", rid=1)], ["pytest", "CI / pytest", "pytest (0/2)", "W / pytest (0/2)"], ["pytest"])
     assert reading.missing == ["pytest", "pytest (0/2)"]
 
 
-# --- 現状固定（I-009 bare_name）: 照合に使う名前（前置きと分割の末尾を外す） ---
+# --- 現状固定（I-009 bare_name）: 検証に使う名前（前置きと分割の末尾を外す） ---
 
 
 @pytest.mark.parametrize(
@@ -550,14 +550,14 @@ def test_bare_name_and_required_key_strip_after_removing_prefix(name: str, bare:
 
 
 def test_read_matches_required_with_multiple_prefixes_and_spaces() -> None:
-    """現状固定（I-009）: 複数の前置きと前後の空白のある必須の名前も、前置きを外した鍵でチェックに当たる。"""
+    """現状固定（I-009）: 複数の前置きと前後の空白のある必須の名前も、前置きを外したキーでチェックに当たる。"""
     runs = [run("A / B / pytest (0/2)", rid=1), run("lint ", conclusion="failure", rid=2)]
     reading = ci.read(runs, ["X / Y / pytest (0/2) ", " lint"], ["pytest"])
     assert (reading.verdict, reading.missing, [c.name for c in reading.failed_other]) == ("check_failed", [], ["lint "])
 
 
 def test_bare_names_is_the_set_of_bare_names() -> None:
-    """現状固定: 集合で返し、同じ照合の名前は 1 つに畳む。ジェネレーターも受ける。"""
+    """現状固定: 集合で返し、同じ検証の名前は 1 つに畳む。ジェネレーターも受ける。"""
     assert ci.bare_names(["CI / pytest (0/2)", "pytest", "W / lint"]) == {"pytest", "lint"}
     assert ci.bare_names(n for n in ["pytest (1/2)"]) == {"pytest"}
     assert ci.bare_names([]) == set()
@@ -588,7 +588,7 @@ def test_read_classifies_failures_by_bare_name() -> None:
 
 
 def test_watch_stretches_the_interval_only_while_nothing_changes() -> None:
-    # 不足 g: 変化が無い間は間隔を伸ばし、読んだ結果が変わったら倍率 1 段だけ縮める（最初の値より短くしない）
+    # 不足 g: 変化が無い間は間隔を伸ばし、読んだ結果が変わったら倍率 1 ステップだけ縮める（最初の値より短くしない）
     policy = limits.policy("test-triage.check-wait")
     first, factor = float(policy.interval), float(policy.factor)
     other = _reading(running=["pytest", "doc-lint"])

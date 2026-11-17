@@ -1,14 +1,14 @@
 """作業場所の片付け: マージ済みのブランチの worktree を消す（判断は `cleanup_decide`）。
 
-1. メインディレクトリの `git worktree list` から、置き場 `.worktrees/` の下の worktree を集める
+1. メインディレクトリの `git worktree list` から、保存先 `.worktrees/` の下の worktree を集める
 2. git だけで分かる事実（detached・鎖・今の位置・未コミットの変更）を読み、残すものを先に決める
 3. 残りのブランチの PR を GitHub から 1 回のクエリで読む（`adapters.github.GitHub.pulls_by_head`）。消すと決まっても、
-   選んで集める取り込み方のスプリントブランチは本番ブランチに含まれるまで残す（`merged_decide.sprint_keep`。今のブランチ戦略の
-   宣言で決め、消す候補にスプリントブランチがあるときだけ宣言を読む）
+   選んで集めるリリース方式のスプリントブランチは本番ブランチに含まれるまで残す（`merged_decide.sprint_keep`。今のブランチ戦略の
+   設定で決め、消す候補にスプリントブランチがあるときだけ設定を読む）
 4. 消すと決めた worktree の公開を閉じてテスト環境を破棄し（`testenv_sweep.close_for_removal`。できなければ消さない）、
    追跡していないファイル（無視したものを含む）を先に退避し（`trash.evacuate`。退避できなければ消さない）、
    `git worktree remove`（`--force` を付けない）で消し（断られたら退避したファイルを戻す。`trash.restore`）、ブランチを `git branch -d` で消す
-5. 置き場の消えた worktree の管理情報を `git worktree prune` で片付ける
+5. 保存先の消えた worktree の管理情報を `git worktree prune` で片付ける
 
 `dry_run` では 1〜3 だけを行い、何も消さない。
 """
@@ -24,7 +24,7 @@ from typing import Callable, Iterable, Optional, Protocol
 from ndf.adapters.git import Git, GitError
 from ndf.adapters.github import Pull
 from ndf.core.branch_strategy import Strategy
-from ndf.domains.worktree import cleanup_decide, declaration, merged_decide, removal, repo
+from ndf.domains.worktree import cleanup_decide, merged_decide, ndf_settings, removal, repo
 from ndf.domains.worktree.cleanup_decide import KEEP_SPRINT, REMOVE, Facts, PullState
 
 
@@ -65,7 +65,7 @@ def _inside(path: Path, cwd: Path) -> bool:
 
 
 def _local_facts(item: repo.Worktree, cwd: Path) -> Facts:
-    """git だけで分かる事実。置き場が消えた worktree は変更なしとして扱う（prune が片付ける）。"""
+    """git だけで分かる事実。保存先が消えた worktree は変更なしとして扱う（prune が片付ける）。"""
     dirty = item.path.is_dir() and bool(repo.dirty_paths(Git(item.path), untracked=True))
     return Facts(item.branch, item.locked, _inside(item.path, cwd), dirty, ())
 
@@ -86,7 +86,7 @@ def survey(main_dir: Path, cwd: Path, hub: PullReader, git: Optional[Git] = None
 
 
 def _merge_commit(facts: Facts) -> str:
-    """マージ済みの PR のマージコミット（退避の台帳へ書く。分からなければ空）。"""
+    """マージ済みの PR のマージコミット（退避のジャーナルへ書く。分からなければ空）。"""
     return next((p.merge_sha for p in facts.pulls if p.merged and p.merge_sha), "")
 
 
@@ -116,7 +116,7 @@ def _remove(g: Git, item: repo.Worktree, merge: str = "") -> Outcome:
 def _sprint_keep(g: Git, item: repo.Worktree, strategy: Callable[[], Strategy], remote: str) -> Optional[str]:
     """`merged` が残したスプリントブランチを、本番ブランチに含まれる前に消さない（残す理由。消してよければ `None`）。"""
     branch = str(item.branch)
-    if not branch.startswith(merged_decide.SPRINT_PREFIX):  # スプリントでなければ宣言も本番ブランチも読まない
+    if not branch.startswith(merged_decide.SPRINT_PREFIX):  # スプリントでなければ設定も本番ブランチも読まない
         return None
     got = strategy()
     return merged_decide.sprint_keep(branch, got, repo.contained_in_production(g, branch, got.production, remote), remote)
@@ -125,8 +125,8 @@ def _sprint_keep(g: Git, item: repo.Worktree, strategy: Callable[[], Strategy], 
 def cleanup(main_dir: Path, cwd: Path, hub: PullReader, dry_run: bool = False, git: Optional[Git] = None) -> list[Outcome]:
     """片付けを行い、worktree ごとの結果を返す。"""
     g = git if git is not None else Git(main_dir)
-    declaration.load(main_dir)  # 旧いキーの残る worktree の宣言では片付けない
-    strategy = functools.cache(lambda: declaration.strategy(main_dir))
+    ndf_settings.load(main_dir)  # 旧いキーの残る worktree の設定では片付けない
+    strategy = functools.cache(lambda: ndf_settings.strategy(main_dir))
     remote = g.remote()  # エントリポイントで 1 回だけ求める（worktree ごとに `git worktree list` を打たない）
     out: list[Outcome] = []
     for item, facts in survey(main_dir, cwd, hub, g):

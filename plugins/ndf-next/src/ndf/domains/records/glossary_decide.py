@@ -1,6 +1,6 @@
 """用語集の文書の組み立てと、意味の説明に残った廃止した語の検出（純粋な関数。N8a・#1616・fix:3190）。
 
-用語集の正本（JSON）から、コンテキストごとのファイル（`<document_dir>/<コンテキストの id>.md`）と、各ファイルへの
+用語集の SSOT（JSON）から、コンテキストごとのファイル（`<document_dir>/<コンテキストの id>.md`）と、各ファイルへの
 索引（`document`）を作る。1 つの文書に全コンテキストを並べると上限の行数を超え続けるため、コンテキストで分ける。
 1 つのコンテキストが上限を超えたら書かずに止める（さらに分けるかは人が決める）。
 """
@@ -14,12 +14,12 @@ from typing import Any
 
 # 表の空のセル
 EMPTY_CELL = "—"
-# 1 文字の前後が漢字か（単独で照合する廃止した語は、前後が漢字の出現に当てない）
+# 1 文字の前後が漢字か（単独でマッチする廃止した語は、前後が漢字の出現に当てない）
 KANJI = re.compile(r"[\u4e00-\u9fff\u3400-\u4dbf々]")
 # 行内のコード（意味の説明の検査はコードの中を見ない）
 INLINE_CODE = re.compile(r"`[^`]*`")
 # コンテキストのファイルの表の列
-COLUMNS = ("語", "識別子", "意味", "廃止した語", "廃止した識別子", "正本")
+COLUMNS = ("語", "識別子", "意味", "廃止した語", "廃止した識別子", "SSOT")
 
 
 class RenderError(ValueError):
@@ -34,7 +34,7 @@ class RenderError(ValueError):
 
 @dataclass(frozen=True)
 class Layout:
-    """文書の置き場。`document` は索引のパス、`document_dir` はコンテキストごとのファイルの置き場（どちらも根からの相対）。"""
+    """文書の保存先。`document` は索引のパス、`document_dir` はコンテキストごとのファイルの保存先（どちらも根からの相対）。"""
 
     source: str
     document: str
@@ -156,7 +156,7 @@ def _hits(text: str, word: str, standalone: bool) -> bool:
 
 
 def deprecated_in_meanings(g: Mapping[str, Any]) -> list[dict[str, str]]:
-    """意味の説明に残った廃止した語（単独で照合する語は前後が漢字の出現を除く）。fix:3190。
+    """意味の説明に残った廃止した語（単独でマッチする語は前後が漢字の出現を除く）。fix:3190。
 
     今の語（ほかの語の `term`）の中に現れる廃止した語は数えない。行内のコードの中も見ない。
     """

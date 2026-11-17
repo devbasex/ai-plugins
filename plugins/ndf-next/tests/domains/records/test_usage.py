@@ -1,4 +1,4 @@
-"""使用量の帳簿: 応答ごとの数え方（#1979）・JST の両端（#1978）・置き場（#2575）・停止の差（#2576）。"""
+"""使用量の使用量ログ: 応答ごとの数え方（#1979）・JST の両端（#1978）・保存先（#2575）・停止の差（#2576）。"""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ def test_period_is_applied_per_response_not_per_conversation() -> None:
     recs = [_line("m1", "2026-11-13T14:59:59Z", 5), _line("m2", "2026-11-13T15:00:00Z", 7)]
     a, b = ud.jst_bounds(date(2026, 11, 14), date(2026, 11, 14))
     assert ud.transcript_total(recs, a, b) == ud.Usage(1, 7, 0, 0)
-    # 読めた記録の期間内に応答が無ければ 0（UNKNOWN にして帳簿の行へ戻さない）
+    # 読めた記録の期間内に応答が無ければ 0（UNKNOWN にして使用量ログの行へ戻さない）
     assert ud.transcript_total(recs, a.replace(year=2030), None) == ud.Usage()
     assert ud.transcript_total([], a, b) == ud.UNKNOWN
 
@@ -38,11 +38,11 @@ def test_closed_query_uses_both_jst_ends() -> None:
     assert q == "closed:2026-11-01T00:00:00+09:00..2026-11-14T23:59:59+09:00"
 
 
-def test_state_place_dir_prefers_env_then_state_and_never_falls_back_to_tmp(tmp_path: Path) -> None:
-    assert ud.state_place_dir({"V": str(tmp_path / "x")}, "V", tmp_path, "usage") == tmp_path / "x"
-    assert ud.state_place_dir({}, "V", tmp_path, "usage") == tmp_path / "usage"
+def test_state_location_dir_prefers_env_then_state_and_never_falls_back_to_tmp(tmp_path: Path) -> None:
+    assert ud.state_location_dir({"V": str(tmp_path / "x")}, "V", tmp_path, "usage") == tmp_path / "x"
+    assert ud.state_location_dir({}, "V", tmp_path, "usage") == tmp_path / "usage"
     with pytest.raises(LookupError):
-        ud.state_place_dir({}, "V", None, "usage")
+        ud.state_location_dir({}, "V", None, "usage")
 
 
 def test_stop_delta_subtracts_the_earlier_rows_of_the_same_agent() -> None:
@@ -94,8 +94,8 @@ def _transcript(path: Path, lines: list[dict]) -> Path:
     return path
 
 
-def test_subagent_and_cli_rows_share_one_ledger_and_second_stop_writes_the_delta(tmp_path: Path) -> None:
-    env = {"NDF_USAGE_DIR": str(tmp_path / "ledger")}
+def test_subagent_and_cli_rows_share_one_usage_log_and_second_stop_writes_the_delta(tmp_path: Path) -> None:
+    env = {"NDF_USAGE_DIR": str(tmp_path / "usage")}
     tr = _transcript(tmp_path / "t.jsonl", [_line("m1", "2026-11-14T01:00:00Z", 4)])
     first = usage.record_subagent({"agent_id": "a", "agent_transcript_path": str(tr)}, env)
     assert first is not None and first["usage"]["output_tokens"] == 4
@@ -103,7 +103,7 @@ def test_subagent_and_cli_rows_share_one_ledger_and_second_stop_writes_the_delta
     second = usage.record_subagent({"agent_id": "a", "agent_transcript_path": str(tr)}, env)
     assert second is not None and second["usage"]["output_tokens"] == 6 and second["usage"]["input_tokens"] == 1
     assert usage.record_cli({"output_tokens": 2}, {"run": "x"}, env) is not None
-    rows, broken = jsonl.read_rows(usage.ledger_path(env))
+    rows, broken = jsonl.read_rows(usage.usage_log_path(env))
     assert [r["caller"] for r in rows] == [usage.SUBAGENT, usage.SUBAGENT, usage.CLAUDE_CLI] and broken == 0
 
 
@@ -114,8 +114,8 @@ def test_unreadable_transcript_writes_unknown_without_raising(tmp_path: Path) ->
     assert usage.record_subagent({}, env) is None
 
 
-def test_ledger_path_defaults_to_the_state_dir(tmp_path: Path) -> None:
-    got = usage.ledger_path({})
+def test_usage_log_path_defaults_to_the_state_dir(tmp_path: Path) -> None:
+    got = usage.usage_log_path({})
     assert got.name == "usage.jsonl" and got.parent.name == "usage" and str(tmp_path / "state") in str(got)
 
 
@@ -126,13 +126,13 @@ def test_report_counts_transcript_once_and_the_last_response_missed_by_the_hook(
     # 停止の hook の後に最後の応答が書かれた
     _transcript(tr, [_line("m1", "2026-11-14T01:00:00Z", 4), _line("m2", "2026-11-14T01:01:00Z", 6)])
     queries: list[str] = []
-    got = usage.report(usage.ledger_path(env), date(2026, 11, 14), date(2026, 11, 14), lambda q: queries.append(q) or 3)
+    got = usage.report(usage.usage_log_path(env), date(2026, 11, 14), date(2026, 11, 14), lambda q: queries.append(q) or 3)
     assert got["usage"]["output_tokens"] == 10 and got["closed_issues"] == 3 and queries[0].startswith("closed:2026-11-14T00")
     assert got["since"].endswith("+09:00") and got["unknown_rows"] == 0
 
 
 class _SearchApi:
-    """GraphQL の検索だけに答えるクライアント（件数を文字列で返す）。"""
+    """GraphQL の検索だけに回答するクライアント（件数を文字列で返す）。"""
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict]] = []
@@ -150,7 +150,7 @@ def test_usage_report_counts_closed_issues_of_the_origin_repo_with_one_search(
     root = tmp_path / "r"
     git_sandbox.sh(tmp_path, "init", "-q", str(root))
     git_sandbox.sh(root, "remote", "add", "origin", "https://github.com/o/r.git")
-    monkeypatch.setenv("NDF_USAGE_DIR", str(tmp_path / "ledger"))
+    monkeypatch.setenv("NDF_USAGE_DIR", str(tmp_path / "usage"))
     api = _SearchApi()
     monkeypatch.setattr(github, "client", lambda *a, **k: api)
     code = cli.main(["records", "--cwd", str(root), "usage", "report", "--since", "2026-11-14", "--until", "2026-11-14"])

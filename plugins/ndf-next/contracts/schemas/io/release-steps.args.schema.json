@@ -33,7 +33,7 @@
         },
         "--presented": {
           "type": "string",
-          "description": "提示した先端の SHA（present の outputs.head）"
+          "description": "提示した HEAD の SHA（present の outputs.head）"
         },
         "--by": {
           "type": "string",
@@ -41,7 +41,7 @@
             "user",
             "mvv"
           ],
-          "description": "答えた担い手（利用者 user / MVV 判定 mvv。迂回は user だけを数える）"
+          "description": "回答した担い手（利用者 user / MVV 判定 mvv。迂回は user だけを数える）"
         }
       },
       "required": [
@@ -101,11 +101,11 @@
         },
         "--base": {
           "type": "string",
-          "description": "ベースブランチ（宣言 project.json の branch_strategy.branches.base）"
+          "description": "ベースブランチ（設定 project.json の branch_strategy.branches.base）"
         },
         "--production": {
           "type": "string",
-          "description": "本番ブランチ（宣言 project.json の branch_strategy.branches.production）"
+          "description": "本番ブランチ（設定 project.json の branch_strategy.branches.production）"
         },
         "--channel": {
           "type": "string",
@@ -125,7 +125,7 @@
         },
         "--plugin": {
           "type": "string",
-          "description": "ブランチの名前に版を使うプラグイン（省けば登録の順の先頭）"
+          "description": "ブランチの名前にバージョンを使うプラグイン（省けば登録の順の先頭）"
         }
       },
       "required": [
@@ -235,11 +235,11 @@
         },
         "--base": {
           "type": "string",
-          "description": "ベースブランチ（宣言 project.json の branch_strategy.branches.base）"
+          "description": "ベースブランチ（設定 project.json の branch_strategy.branches.base）"
         },
         "--production": {
           "type": "string",
-          "description": "本番ブランチ（宣言 project.json の branch_strategy.branches.production）"
+          "description": "本番ブランチ（設定 project.json の branch_strategy.branches.production）"
         },
         "--channel": {
           "type": "string",
@@ -259,7 +259,7 @@
         },
         "--plugin": {
           "type": "string",
-          "description": "ブランチの名前に版を使うプラグイン（省けば登録の順の先頭）"
+          "description": "ブランチの名前にバージョンを使うプラグイン（省けば登録の順の先頭）"
         },
         "--out": {
           "type": "string",

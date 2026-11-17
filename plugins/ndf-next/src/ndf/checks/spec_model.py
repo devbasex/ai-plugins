@@ -1,16 +1,16 @@
-"""規約のモデル: 正本の表・スキーマ・引数の木・配る Skill の表・`bin/` を読み、面ごとの項目と公開か内部かを組む（#3518）。
+"""規約のモデル: SSOT の表・スキーマ・引数の木・配る Skill の表・`bin/` を読み、面ごとの項目と公開か内部かを組む（#3518）。
 
-ファイルを読むだけで書かない。読む正本は次のとおりで、値を写さない。
+ファイルを読むだけで書かない。読む SSOT は次のとおりで、値を写さない。
 
-| 面 | 正本 |
+| 面 | SSOT |
 | --- | --- |
-| 宣言 | 置き場の表（`ndf-files` の `kind` が `declaration`・`place` が `ndf` の行）と宣言のスキーマ（`schemas/declarations/`） |
-| 副命令 | 副命令の表（`cli.COMMANDS`）・引数の定義（`spec_args`）・手書きの引数の表（`manual-args`）・結果のスキーマ（`schemas/io/`） |
-| 環境変数・受け渡しのファイル・終了コード・止まった理由 | `env`・`ndf-files`・`exit-codes`・`causes.json` |
+| 設定 | 保存先の表（`ndf-files` の `kind` が `ndf_settings`・`location` が `ndf` の行）と設定のスキーマ（`schemas/ndf-settings/`） |
+| サブコマンド | サブコマンドの表（`cli.COMMANDS`）・引数の定義（`spec_args`）・手書きの引数の表（`manual-args`）・結果のスキーマ（`schemas/io/`） |
+| 環境変数・受け渡しのファイル・終了コード・停止理由 | `env`・`ndf-files`・`exit-codes`・`causes.json` |
 | hook | hook の表（`hooks/runtimes.json`） |
 | Skill・起動スクリプト | 配る Skill の表（`manifests/skills.json`）・Skill の入出力の表（`skill-io`）・起動スクリプトの表（`launchers`） |
 
-公開か内部かは、公開する面の表（エントリポイントの表と、置き場の表の列 `reader` を持つ行。#3518 の決定 8）に当たるかで決める。
+公開か内部かは、公開する面の表（エントリポイントの表と、保存先の表の列 `reader` を持つ行。#3518 の決定 8）に当たるかで決める。
 """
 
 from __future__ import annotations
@@ -29,11 +29,11 @@ from ndf.checks.model import CheckError, read_json
 from ndf.checks.spec_args import ArgTree, extract, from_manual
 from ndf.contracts import exit_codes, facts
 
-DECL_KIND = "declaration"
-# プラグインの根からの契約の置き場（`ndf.contracts` の既定の置き場の名前）
+DECL_KIND = "ndf_settings"
+# プラグインの根からのコントラクトの保存先（`ndf.contracts` の既定の保存先の名前）
 CONTRACTS = contracts.DEFAULT_DIR.name
-# 契約の置き場からの相対パス
-DECL_SCHEMA_DIR = f"{contracts.SCHEMAS}/declarations"
+# コントラクトの保存先からの相対パス
+DECL_SCHEMA_DIR = f"{contracts.SCHEMAS}/ndf-settings"
 IO_SCHEMA_DIR = f"{contracts.SCHEMAS}/io"
 HOOKS_TABLE = "hooks/runtimes.json"
 # プラグインの根からの相対パス
@@ -41,43 +41,43 @@ PAGES_DIR = "docs/contracts"
 BIN_DIR = "bin"
 SCHEMA_SUFFIX = ".schema.json"
 SECTIONS_SUFFIX = ".sections.json"
-# 結果のスキーマが結果の契約を指す $ref（検証は結果の契約と、この $ref を除いた副命令の形の 2 つで行う）
+# 結果のスキーマが結果のコントラクトを指す $ref（検証は結果のコントラクトと、この $ref を除いたサブコマンドの形の 2 つで行う）
 RESULT_REF = "../result.schema.json"
 # 公開か内部か
 PUBLIC = "public"
 INTERNAL = "internal"
 # エントリポイントの表の順番（種類 spec は `is_spec`）
 CALLER_FIRST = "caller-first"
-# 宣言のスキーマの注釈 x-ndf-place が取る値（宣言を読む置き場）
-DECL_PLACES = ("main", "worktree")
+# 設定のスキーマの注釈 x-ndf-location が取る値（設定を読む保存先）
+DECL_LOCATIONS = ("main", "worktree")
 # 公開する項目の集合（面・id の組）
 PublicIds = frozenset[tuple[str, str]]
-# 正本が読めないときの指摘の前置き
-UNREADABLE = "規約の正本を読めない"
+# SSOT が読めないときの指摘の前置き
+UNREADABLE = "規約の SSOT を読めない"
 
 
 def io_schema_rel(name: str, kind: str) -> str:
-    """副命令 `name` の引数（`kind` が `args`）か結果（`result`）のスキーマの、`IO_SCHEMA_DIR` からの相対パス。"""
+    """サブコマンド `name` の引数（`kind` が `args`）か結果（`result`）のスキーマの、`IO_SCHEMA_DIR` からの相対パス。"""
     return f"{name}.{kind}{SCHEMA_SUFFIX}"
 
 
 def decl_schema_rel(ident: str, suffix: str) -> str:
-    """宣言 `ident` のスキーマ（`SCHEMA_SUFFIX`）か節の表（`SECTIONS_SUFFIX`）の、`DECL_SCHEMA_DIR` からの相対パス。"""
+    """設定 `ident` のスキーマ（`SCHEMA_SUFFIX`）かセクションの表（`SECTIONS_SUFFIX`）の、`DECL_SCHEMA_DIR` からの相対パス。"""
     return f"{ident}{suffix}"
 
 
-def decl_place(places: dict[str, dict[str, Any]]) -> str:
-    """宣言の置き場（リポジトリの根の `.ndf`）の、置き場の表の id。"""
-    found = [i for i, r in places.items() if r["root"] == "repo" and r["path"] == identity.FIXED_WORDS["declaration_dir"]]
+def decl_location(locations: dict[str, dict[str, Any]]) -> str:
+    """設定の保存先（リポジトリの根の `.ndf`）の、保存先の表の id。"""
+    found = [i for i, r in locations.items() if r["root"] == "repo" and r["path"] == identity.FIXED_WORDS["ndf_settings_dir"]]
     if len(found) != 1:
-        raise CheckError(f"置き場の表に宣言の置き場がちょうど 1 行ない: {found}")
+        raise CheckError(f"保存先の表に設定の保存先がちょうど 1 行ない: {found}")
     return found[0]
 
 
 def is_spec(row: dict[str, Any]) -> bool:
-    """エントリポイントの表の行が種類 spec（規約の置き場を指す行）か。
+    """エントリポイントの表の行が種類 spec（規約の保存先を指す行）か。
 
-    種類の語を最上位の定数に置くと、テストの置き場の語（`spec`）の集まりと const-fact に数えられる。
+    種類の語を最上位の定数に置くと、テストの保存先の語（`spec`）の集まりと const-fact に数えられる。
     """
     return row["kind"] == "spec"
 
@@ -92,13 +92,13 @@ def face_of(kind: str) -> str | None:
 
 
 def opt(row: dict[str, Any], key: str, empty: Any = ()) -> Any:
-    """表の任意の列（`optional`）の値。行が列を持たなければ `empty`（列の宣言が欠けてよいとする値）。"""
+    """表の任意の列（`optional`）の値。行が列を持たなければ `empty`（列の設定が欠けてよいとする値）。"""
     return row[key] if key in row else empty
 
 
 @dataclass(frozen=True)
-class DeclarationSpec:
-    """宣言のファイル 1 つ。`schema` は JSON の宣言のスキーマ、`sections` は Markdown の宣言の節の表の行。"""
+class NdfSettingsSpec:
+    """設定のファイル 1 つ。`schema` は JSON の設定のスキーマ、`sections` は Markdown の設定のセクションの表の行。"""
 
     id: str
     path: str
@@ -113,7 +113,7 @@ class DeclarationSpec:
 
 @dataclass(frozen=True)
 class CommandSpec:
-    """副命令 1 つ。`args` は引数の木（取り出せず手書きの行も無ければ `None`）。"""
+    """サブコマンド 1 つ。`args` は引数の木（取り出せず手書きの行も無ければ `None`）。"""
 
     name: str
     module: str
@@ -134,7 +134,7 @@ class SkillSpec:
     row: bool
     args: tuple[str, ...] = ()
     goal_end: str | None = None
-    declarations: tuple[str, ...] = ()
+    ndf_settings: tuple[str, ...] = ()
     env: tuple[str, ...] = ()
     result: str | None = None
     meaning: str = ""
@@ -157,11 +157,11 @@ class HookSpec:
 class SpecModel:
     """規約のモデル。並びはどれも id（名前）の昇順で、同じ入力から同じモデルになる。"""
 
-    declarations: tuple[DeclarationSpec, ...]
+    ndf_settings: tuple[NdfSettingsSpec, ...]
     commands: tuple[CommandSpec, ...]
     env: tuple[dict[str, Any], ...]
     files: tuple[dict[str, Any], ...]
-    places: dict[str, dict[str, Any]]
+    locations: dict[str, dict[str, Any]]
     hooks: tuple[HookSpec, ...]
     skills: tuple[SkillSpec, ...]
     launchers: tuple[dict[str, Any], ...]
@@ -185,7 +185,7 @@ class SpecModel:
 
     @property
     def file_ids(self) -> frozenset[str]:
-        """置き場の表の行の id。"""
+        """保存先の表の行の id。"""
         return frozenset(r["id"] for r in self.files)
 
     @property
@@ -200,7 +200,7 @@ def surface_of(public: PublicIds, face: str, ident: str) -> str:
 
 @contextmanager
 def contracts_at(plugin_root: Path) -> Iterator[None]:
-    """契約の置き場を `plugin_root/contracts` へ向け、抜けるときに元へ戻す（読んだ表は捨てて読み直す）。"""
+    """コントラクトの保存先を `plugin_root/contracts` へ向け、抜けるときに元へ戻す（読んだ表は捨てて読み直す）。"""
     before = contracts.contracts_dir()
     target = plugin_root / CONTRACTS
     if before.resolve() == target.resolve():
@@ -219,7 +219,7 @@ def load(plugin_root: Path) -> SpecModel:
         try:
             return _load(plugin_root)
         except contracts.ContractError as exc:
-            raise CheckError(f"規約の正本を読めない: {exc}") from exc
+            raise CheckError(f"規約の SSOT を読めない: {exc}") from exc
 
 
 def _load(plugin_root: Path) -> SpecModel:
@@ -228,11 +228,11 @@ def _load(plugin_root: Path) -> SpecModel:
     public = public_ids(list(entrypoints), list(files))
     launcher_rows, bin_files = launchers(plugin_root)
     return SpecModel(
-        declarations=tuple(declarations(plugin_root, public)),
+        ndf_settings=tuple(ndf_settings(plugin_root, public)),
         commands=tuple(commands(public)),
         env=tuple(sorted(facts.rows("env"), key=lambda r: r["id"])),
         files=tuple(sorted(files, key=lambda r: r["id"])),
-        places={r["id"]: r for r in facts.rows("places")},
+        locations={r["id"]: r for r in facts.rows("locations")},
         hooks=tuple(hooks(public)),
         skills=tuple(skills(plugin_root, public, list(entrypoints))),
         launchers=tuple(sorted(launcher_rows, key=lambda r: r["id"])),
@@ -272,12 +272,12 @@ def _checked_schema(path: Path) -> dict[str, Any]:
     return schema
 
 
-def declarations(plugin_root: Path, public: PublicIds) -> list[DeclarationSpec]:
-    """宣言の行ごとに、スキーマ（JSON の宣言）か節の表（Markdown の宣言）を読む。どちらも無ければ両方 `None`。"""
+def ndf_settings(plugin_root: Path, public: PublicIds) -> list[NdfSettingsSpec]:
+    """設定の行ごとに、スキーマ（JSON の設定）かセクションの表（Markdown の設定）を読む。どちらも無ければ両方 `None`。"""
     base = plugin_root / CONTRACTS / DECL_SCHEMA_DIR
     out = []
-    place = decl_place({r["id"]: r for r in facts.rows("places")})
-    for row in sorted(facts.rows("ndf-files", kind=DECL_KIND, place=place), key=lambda r: r["id"]):
+    location = decl_location({r["id"]: r for r in facts.rows("locations")})
+    for row in sorted(facts.rows("ndf-files", kind=DECL_KIND, location=location), key=lambda r: r["id"]):
         schema_path = base / f"{row['id']}{SCHEMA_SUFFIX}"
         sections_path = base / f"{row['id']}{SECTIONS_SUFFIX}"
         schema = _checked_schema(schema_path) if schema_path.is_file() else None
@@ -287,7 +287,7 @@ def declarations(plugin_root: Path, public: PublicIds) -> list[DeclarationSpec]:
         elif schema is not None:
             read_by = tuple(opt(schema, "x-ndf-read-by"))
         out.append(
-            DeclarationSpec(
+            NdfSettingsSpec(
                 id=row["id"],
                 path=row["path"],
                 tracked=row["tracked"],
@@ -303,22 +303,22 @@ def declarations(plugin_root: Path, public: PublicIds) -> list[DeclarationSpec]:
 
 
 def _sections(path: Path) -> tuple[tuple[dict[str, Any], ...], tuple[dict[str, Any], ...]]:
-    """節の表（事実の表の形の行と、注釈 `x-ndf-read-by`）を読む。"""
+    """セクションの表（事実の表の形の行と、注釈 `x-ndf-read-by`）を読む。"""
     raw = read_json(path, UNREADABLE)
     missing = [k for k in ("summary", "owner", "columns", "rows") if k not in raw]
     if missing:
-        raise CheckError(f"節の表 {path} に鍵が無い: {', '.join(missing)}")
+        raise CheckError(f"セクションの表 {path} にキーが無い: {', '.join(missing)}")
     validator = Draft202012Validator(facts.row_schema(raw["columns"]))
     for row in raw["rows"]:
         bad = sorted(e.message for e in validator.iter_errors(row))
         if bad:
-            raise CheckError(f"節の表 {path} の行 {row.get('id')!r} の形が違う: {'; '.join(bad)}")
+            raise CheckError(f"セクションの表 {path} の行 {row.get('id')!r} の形が違う: {'; '.join(bad)}")
     rows = tuple(sorted(raw["rows"], key=lambda r: r["order"]))
     return rows, tuple(opt(raw, "x-ndf-read-by"))
 
 
 def commands(public: PublicIds) -> list[CommandSpec]:
-    """副命令の表の副命令ごとに、引数の木と結果のスキーマを付ける。"""
+    """サブコマンドの表のサブコマンドごとに、引数の木と結果のスキーマを付ける。"""
     manual: dict[str, list[dict[str, Any]]] = {}
     for r in facts.rows("manual-args"):
         manual.setdefault(r["command"], []).append(r)
@@ -345,7 +345,7 @@ def commands(public: PublicIds) -> list[CommandSpec]:
 
 def skills(plugin_root: Path, public: PublicIds, entrypoints: list[dict[str, Any]]) -> list[SkillSpec]:
     """実体のある配る Skill と、公開する面に載る Skill に、Skill の入出力の表の行を付ける。"""
-    # 配る Skill の表と実体の置き場（持ち主は S1b の ndf.domains.manifests。検査は持ち主のパッケージを読まず、同じファイルを読む）
+    # 配る Skill の表と実体の保存先（オーナーは S1b の ndf.domains.manifests。検査はオーナーのパッケージを読まず、同じファイルを読む）
     listed = [s["name"] for s in read_json(plugin_root / "manifests" / "skills.json", UNREADABLE)["skills"]]
     present = {p.parent.name for p in (plugin_root / "skills").glob("*/SKILL.md")}
     rows = {r["id"]: r for r in facts.rows("skill-io")}
@@ -363,7 +363,7 @@ def skills(plugin_root: Path, public: PublicIds, entrypoints: list[dict[str, Any
                 row=name in rows,
                 args=tuple(ep["args"] if ep is not None else opt(row, "args")),
                 goal_end=opt(row, "goal_end", None),
-                declarations=tuple(opt(row, "declarations")),
+                ndf_settings=tuple(opt(row, "ndf_settings")),
                 env=tuple(ep["env"] if ep is not None else opt(row, "env")),
                 result=opt(row, "result", None),
                 meaning=opt(row, "meaning", ""),
@@ -374,7 +374,7 @@ def skills(plugin_root: Path, public: PublicIds, entrypoints: list[dict[str, Any
 
 
 def hooks(public: PublicIds) -> list[HookSpec]:
-    """hook の表のランタイムと事象ごとに、読む入力の鍵・無くてよい鍵・判定ごとの出力の形を並べる。"""
+    """hook の表のランタイムと事象ごとに、読む入力のキー・無くてよいキー・判定ごとの出力の形を並べる。"""
     table = contracts.load_json(HOOKS_TABLE)
     out = []
     for runtime in sorted(table["runtimes"]):
@@ -398,13 +398,13 @@ def launchers(plugin_root: Path) -> tuple[list[dict[str, Any]], list[str]]:
     """起動スクリプトの表の行と、`bin/` の直下のファイルの名前（昇順。`__pycache__` を含めない）。"""
     base = plugin_root / BIN_DIR
     if not base.is_dir():
-        raise CheckError(f"起動スクリプトの置き場が無い: {base}")
+        raise CheckError(f"起動スクリプトの保存先が無い: {base}")
     names = sorted(p.name for p in base.iterdir() if p.is_file())
     return list(facts.rows("launchers")), names
 
 
 def _without_result_ref(schema: dict[str, Any]) -> dict[str, Any]:
-    """副命令の結果のスキーマから結果の契約への `$ref` を外す（結果の契約は `ndf.contracts.result.errors` が確かめる）。"""
+    """サブコマンドの結果のスキーマから結果のコントラクトへの `$ref` を外す（結果のコントラクトは `ndf.contracts.result.errors` が確かめる）。"""
     rest = [part for part in opt(schema, "allOf", []) if part != {"$ref": RESULT_REF}]
     out = {k: v for k, v in schema.items() if k != "allOf"}
     return out | ({"allOf": rest} if rest else {})
@@ -412,7 +412,7 @@ def _without_result_ref(schema: dict[str, Any]) -> dict[str, Any]:
 
 @contracts.cached_reader
 def result_validator(name: str) -> Draft202012Validator | None:
-    """副命令 `name` の結果のスキーマ（結果の契約への `$ref` を外したもの）の検証器。スキーマが無ければ `None`。"""
+    """サブコマンド `name` の結果のスキーマ（結果のコントラクトへの `$ref` を外したもの）の検証器。スキーマが無ければ `None`。"""
     path = contracts.contracts_dir() / IO_SCHEMA_DIR / io_schema_rel(name, "result")
     if not path.is_file():
         return None

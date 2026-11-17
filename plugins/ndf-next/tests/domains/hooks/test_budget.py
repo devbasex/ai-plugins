@@ -125,7 +125,7 @@ def test_session_start_advises_on_a_broken_budget(tmp_path, monkeypatch):
 
 
 def test_hook_budget_policies_pass_the_limits_schema():
-    # 予算の鍵は上限の宣言の形（D1）で読める
+    # 予算のキーは上限の設定の形（D1）で読める
     for name in tables.policies():
         if name.startswith("hook.budget."):
             assert limits.value(name, "timeout") >= limits.value(name, "deadline")
@@ -134,7 +134,7 @@ def test_hook_budget_policies_pass_the_limits_schema():
 def test_hook_off_is_the_only_switch_in_the_env_table():
     hooks_rows = facts.ids("env", area="hooks")
     assert hooks_rows == ("NDF_HOOK_OFF",)
-    # 閾値は上限の宣言から読み、環境変数では受けない（今の NDF の止める変数を読まない）
+    # 閾値は上限の設定から読み、環境変数では受けない（今の NDF の止める変数を読まない）
     assert not [n for n in facts.ids("env") if n.endswith("_GUARD")]
 
 

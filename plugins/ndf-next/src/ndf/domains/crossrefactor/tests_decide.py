@@ -4,7 +4,7 @@
   実質の全体テストにしない（#3049）
 - 全体テストを CI に任せる戦略の着手前の範囲テストは、`--scope` の配下のテストのファイルだけを `{paths}` へ渡す。
   ファイルだけを受けるテンプレート（`python3 -m unittest {paths}` など）で落ちない（#2096）
-- 足したテストが全体の実行に収集されるかを、宣言の `collect_command` の出力から分ける（#620）
+- 足したテストが全体の実行に収集されるかを、設定の `collect_command` の出力から分ける（#620）
 
 テストのファイルの見分け方は領域の表 `test-files`（cross-review・試走の候補と同じ表）から読む。
 """
@@ -160,7 +160,7 @@ def collected_files(output: str) -> frozenset[str]:
 
 
 def collect_verdict(paths: Iterable[str], collected: Mapping[str, frozenset[str] | None]) -> CollectVerdict:
-    """`collected` はファイル → そのファイルを受け持つ suite が収集したファイル（宣言が無ければ None）。"""
+    """`collected` はファイル → そのファイルを受け持つ suite が収集したファイル（設定が無ければ None）。"""
     sure: list[str] = []
     missed: list[str] = []
     undecided: list[str] = []

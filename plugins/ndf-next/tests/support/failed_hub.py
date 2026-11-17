@@ -25,7 +25,7 @@ def xml(*cases: tuple[str, str]) -> bytes:
 
 
 class FakeHub:
-    """ジョブ → 実行、実行 → ワークフローのファイル・成果物、成果物 → ZIP、ジョブ → ログを答える偽の GitHub。"""
+    """ジョブ → 実行、実行 → ワークフローのファイル・成果物、成果物 → ZIP、ジョブ → ログを回答する偽の GitHub。"""
 
     def __init__(
         self,

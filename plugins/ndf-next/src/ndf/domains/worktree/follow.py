@@ -1,8 +1,8 @@
-"""セッションを始めたときのブランチの追従（宣言の `follow_branch: true` のときだけ。判断は `session_decide.follow_target`）。
+"""セッションを始めたときのブランチの追従（設定の `follow_branch: true` のときだけ。判断は `session_decide.follow_target`）。
 
-メインディレクトリの HEAD を、稼働中の開発 worktree のブランチ（1 つだけのとき）か、ベースブランチ（ブランチ戦略の宣言
+メインディレクトリの HEAD を、稼働中の開発 worktree のブランチ（1 つだけのとき）か、ベースブランチ（ブランチ戦略の設定
 `.ndf/project.json` の `branch_strategy` の `branches.base`）の指すコミットへ detached HEAD で合わせる。HEAD を動かす git の操作はメインディレクトリの排他（`mainlock`）の中で行う。合わせる先を
-解決できない（宣言を読めないときを含む）・合わせられないときは止めず、伝える文に載せる（作業は続けられる）。
+解決できない（設定を読めないときを含む）・合わせられないときは止めず、伝える文に載せる（作業は続けられる）。
 
 ベースブランチが取得済みの参照に無いときだけリモート名のリモートから取得し、`refs/remotes/<リモート名>/<ベースブランチ>` を読む
 （`FETCH_HEAD` を読まない。#3317）。
@@ -16,7 +16,7 @@ from typing import Optional
 from filelock import Timeout
 
 from ndf.adapters.git import Git
-from ndf.domains.worktree import declaration, mainlock, repo, session_decide
+from ndf.domains.worktree import ndf_settings, mainlock, repo, session_decide
 
 # セッションの開始で排他を待つ秒（開始を長く止めない）
 LOCK_WAIT = 60
@@ -45,7 +45,7 @@ def _resolve_base(main: Git, name: str) -> Optional[str]:
 
 
 def _wanted(main: Git, main_dir: Path) -> tuple[Optional[str], str]:
-    """合わせる先のコミットと、その説明。合わせなければ `(None, "")`。宣言を読めなければ `DeclarationError`。"""
+    """合わせる先のコミットと、その説明。合わせなければ `(None, "")`。設定を読めなければ `NdfSettingsError`。"""
     dirty = bool(repo.dirty_paths(main))
     branches = [w.branch for w in repo.dev_worktrees(main_dir, main.worktrees())]
     verdict, branch = session_decide.follow_target(dirty, branches)
@@ -53,20 +53,20 @@ def _wanted(main: Git, main_dir: Path) -> tuple[Optional[str], str]:
         return resolve(main, branch, main.remote()), f"worktree のブランチ {branch}"
     if verdict != session_decide.FOLLOW_BASE:
         return None, ""
-    base = declaration.strategy(main_dir).base
+    base = ndf_settings.strategy(main_dir).base
     if repo.current_branch(main) == base:
         return None, ""
     return _resolve_base(main, base), f"ベースブランチ {base}"
 
 
-def follow(main_dir: Path, decl: Optional[declaration.Declaration]) -> Optional[str]:
+def follow(main_dir: Path, decl: Optional[ndf_settings.NdfSettings]) -> Optional[str]:
     """追従し、伝える文を返す（動かさなければ `None`）。"""
     if decl is None or not decl.follow_branch:
         return None
     main = Git(main_dir)
     try:
         wanted, label = _wanted(main, main_dir)
-    except declaration.DeclarationError as exc:
+    except ndf_settings.NdfSettingsError as exc:
         return f"メインディレクトリをベースブランチへ合わせられなかった（{exc}）。作業は続けられる。"
     if wanted is None or wanted == main.rev_parse("HEAD"):
         return None

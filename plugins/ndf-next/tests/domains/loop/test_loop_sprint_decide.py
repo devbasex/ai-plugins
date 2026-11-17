@@ -10,7 +10,7 @@ PACES = ("normal", "fast", "auto")
 
 
 def test_issue_2968_record_pr_zero_means_no_record() -> None:
-    """--record-pr 0 を偽として読み捨てず、リリース記録なしとして組む（印 {queue_record} を残さない）。"""
+    """--record-pr 0 を偽として読み捨てず、リリース記録なしとして組む（マーカー {queue_record} を残さない）。"""
     plan = sd.close_plan(sd.CloseFacts("fast", (sd.MERGED_BY_CHECK,), mvv=True, record_pr=0), PACES)
     assert plan.record_pr == sd.RECORD_NONE
     assert sd.VERIFY not in plan.steps

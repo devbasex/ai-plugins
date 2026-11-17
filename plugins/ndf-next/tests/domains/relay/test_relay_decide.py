@@ -1,4 +1,4 @@
-"""中継の判断（純粋な関数）: 区間の切り替え・アカウント・リレーハブの上限と版の混ざり。端末と時計を使わない（#2962）。"""
+"""中継の判断（純粋な関数）: セグメントの切り替え・アカウント・リレーハブの上限とバージョンの混ざり。端末と時計を使わない（#2962）。"""
 
 from __future__ import annotations
 
@@ -60,12 +60,12 @@ def test_limit_pick_switches_account_with_resume_prompt():
     got = switch_decide.decide(state(limit_pick=pick, next_block="/goal x"))
     assert (got.kind, got.account, got.prompt) == ("account", "main", switch_decide.RESUME_PROMPT)
     assert switch_decide.decide(state(limit_pick=Pick("wait_reset", "team", "替える先が無い"))).kind == "wait_reset"
-    # 替えて起こし直すのも今日の起動の上限に数える
+    # 替えて再起動するのも今日の起動の上限に数える
     assert switch_decide.decide(state(limit_pick=pick, starts_today=3)).kind == "stop"
 
 
 def test_next_block_waits_from_the_first_mark_not_only_from_the_last_output():
-    # /goal の未達の応答で画面が静かにならなくても、印を最初に書いてから静かな時間が過ぎれば切り替える（#2438）
+    # /goal の未達の応答で画面が静かにならなくても、マーカーを最初に書いてから静かな時間が過ぎれば切り替える（#2438）
     assert switch_decide.decide(state(next_block="/goal 次", idle_seconds=1.0, next_age_seconds=4.0)).kind == "wait"
     assert switch_decide.decide(state(next_block="/goal 次", idle_seconds=1.0, next_age_seconds=5.0)).kind == "switch"
 
@@ -116,7 +116,7 @@ def test_restart_judges_limits_before_stopping_and_excludes_the_target():
     assert hub_decide.spawn(hub_decide.Lanes(3, 3, False, 0, 5)).kind == "refuse"
 
 
-def test_started_needs_the_wrapper_place_a_live_process_and_registration():
+def test_started_needs_the_wrapper_location_a_live_process_and_registration():
     ok = hub_decide.started(hub_decide.Started(True, True, True), "t1")
     assert ok.kind == "go"
     missing = hub_decide.started(hub_decide.Started(False, False, False), "t1")
@@ -126,7 +126,7 @@ def test_started_needs_the_wrapper_place_a_live_process_and_registration():
 
 
 def test_mixed_versions_are_refused():
-    # 旧い版のラッパーと混ぜない（3341-2）
+    # 旧いバージョンのラッパーと混ぜない（3341-2）
     same = [hub_decide.Running("t1", "11.0.0-dev.4")]
     assert hub_decide.mixed("11.0.0-dev.4", same).kind == "go"
     got = hub_decide.mixed("11.0.0-dev.4", [*same, hub_decide.Running("w1", None)])

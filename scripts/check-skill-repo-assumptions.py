@@ -18,7 +18,7 @@ ndf-next の形の family（Skill の一覧を `manifests/skills.json` に持つ
 `hooks/*.py` も走査し、ai-plugins の名前の語（NEXT_DOC_WORDS・NEXT_CODE_WORDS。リポジトリ名・組織名・
 マーケットプレイスの登録・リモート名・機能の対応表）も掛ける（#3617）。今の NDF（`*-skills.txt` を持つ family）の
 走査の対象と語は変えない。`remote-origin` は JSON Schema の `default` の値を走査せず、その値が
-`contracts/schemas/declarations/worktree.schema.json` の `/properties/remote/default` の 1 か所だけかを数える
+`contracts/schemas/ndf-settings/worktree.schema.json` の `/properties/remote/default` の 1 か所だけかを数える
 （2 か所以上か 0 か所なら 2 で落とす。Skill が同梱する `skills/*/schemas/*.json` の `default` も数に入れる）。
 配らない Skill と、`tests/`・`experimental/` の下は対象にしない。Markdown には
 DOC_WORDS、スクリプトと hook には SCRIPT_WORDS を掛け、シェルのスクリプトには SHELL_WORDS も掛ける。プロジェクトごとに違うものは
@@ -157,7 +157,7 @@ NEXT_DOC_MATCHERS = compile_words({**DOC_WORDS, **NEXT_DOC_WORDS})
 NEXT_CODE_MATCHERS = compile_words({**SCRIPT_WORDS, **NEXT_CODE_WORDS})
 # ndf-next の形の family の目印（Skill の一覧）と、リモート名の既定を持つ唯一の置き場（プラグインの根からの相対と JSON の位置）
 NEXT_MANIFEST = "manifests/skills.json"
-REMOTE_DEFAULT_AT = ("contracts/schemas/declarations/worktree.schema.json", ("properties", "remote", "default"))
+REMOTE_DEFAULT_AT = ("contracts/schemas/ndf-settings/worktree.schema.json", ("properties", "remote", "default"))
 # JSON の `"default": "<値>"` の値（引用符を含む）。`remote-origin` はこの中を走査しない
 DEFAULT_VALUE = re.compile(r'"default"\s*:\s*("(?:[^"\\]|\\.)*")')
 SHELL_SUFFIX = ".sh"

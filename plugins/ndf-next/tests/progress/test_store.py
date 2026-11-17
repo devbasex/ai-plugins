@@ -1,13 +1,16 @@
-"""進行表の保存。同じテストを SQLite と PostgreSQL の両方で流す（受け入れ条件 9・10。P1-1）。
+"""ステートマシンの保存。同じテストを SQLite と PostgreSQL の両方で流す（受け入れ条件 9・10。P1-1）。
 
-テストの条件: ローカル（conductor の手元・CI の Runner の SQLite）は `sqlite:///<置き場>/progress.sqlite` か
+テストの条件: ローカル（conductor の手元・CI の Runner の SQLite）は `sqlite:///<保存先>/progress.sqlite` か
 `NDF_PROGRESS_DB` の SQLite の URL で、Factory は `NDF_PROGRESS_DB` に PostgreSQL の URL を渡して開く。
-fixture `progress_url` がこの 2 つの置き場にパラメータで分かれる（tests/progress/conftest.py）。
+fixture `progress_url` がこの 2 つの保存先にパラメータで分かれる（tests/progress/conftest.py）。
 """
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
+import sqlalchemy as sa
 
 from ndf.core import durable
 from ndf.progress import model, store
@@ -18,7 +21,7 @@ KEY = ("sprint", "git@github.com:o/r.git", "s1")
 def _create(st: store.Store, key: tuple[str, str, str] = KEY) -> str:
     drafts = [model.EventDraft("created", "conductor", row, rev=1) for row in ("設計", "実装")]
     with store.transaction(st) as conn:
-        return store.create_table(conn, key, None, {"stages": []}, drafts)
+        return store.create_machine(conn, key, None, {"stages": []}, drafts)
 
 
 def _append(st: store.Store, tid: str, *drafts: model.EventDraft) -> list[int]:
@@ -28,14 +31,14 @@ def _append(st: store.Store, tid: str, *drafts: model.EventDraft) -> list[int]:
 
 
 def test_progress_db_holds_only_the_progress_tables(opened):
-    # P1-1: 進行表の DB は DBOS の表を持たない
-    assert store.table_names(opened) == ["ndf_progress_definitions", "ndf_progress_events", "ndf_progress_meta", "ndf_progress_tables"]
+    # P1-1: ステートマシンの DB は DBOS の表を持たない
+    assert store.table_names(opened) == ["ndf_progress_definitions", "ndf_progress_events", "ndf_progress_machines", "ndf_progress_meta"]
 
 
 def test_create_read_and_refuse_a_second_table(opened):
     tid = _create(opened)
     with store.transaction(opened) as conn:
-        assert store.read_table(conn, tid)["level"] == "sprint"
+        assert store.read_machine(conn, tid)["level"] == "sprint"
         assert store.read_definition(conn, tid) == (1, {"stages": []})
         assert [(e.seq, e.draft.row_key, e.draft.state) for e in store.read_events(conn, tid)] == [
             (1, "設計", "pending"),
@@ -99,3 +102,15 @@ def test_newer_table_version_is_not_touched(progress_url, root):
         conn.execute(store.VERSIONS.update().values(value=store.SCHEMA_VERSION + 1))
     with pytest.raises(durable.StoreFormatNewer):
         store.open_store(progress_url, root)
+
+
+def test_an_old_table_version_without_a_file_stops_without_changing_the_table(progress_url, root):
+    # PostgreSQL の接続先（ファイルの保存先を持たない）でバージョン 1 の表を見つけたら、表を変えずに止まる。SQLite でも path を None にして模す
+    with store.open_store(progress_url, root) as st:
+        with store.transaction(st) as conn:
+            conn.execute(store.VERSIONS.update().values(value=store.SCHEMA_VERSION - 1))
+        remote = store.Store(progress_url, root, st.engine, None)
+        with pytest.raises(durable.StoreBroken, match="作り直す"):
+            store.ensure_schema(remote, datetime.now(UTC))
+        with st.engine.connect() as conn:
+            assert conn.execute(sa.select(store.VERSIONS.c.value)).scalar() == store.SCHEMA_VERSION - 1

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "ndf.schema.json",
   "title": "工程の定義の metadata.ndf",
-  "description": "モードの文書・工程の文書・工程の中のステップが metadata.ndf に書ける語（閉じた語彙）。知らない語は断る。inputs・outputs の鍵がスプリントの文脈のスキーマ（context.schema.json）にあることは、読み手（ndf.progress.definition）が確かめる",
+  "description": "モードの文書・工程の文書・工程の中のステップが metadata.ndf に書ける語（閉じた語彙）。知らない語は断る。inputs・outputs のキーがスプリントの文脈のスキーマ（context.schema.json）にあることは、読み手（ndf.progress.definition）が確かめる",
   "$defs": {
     "mode": {
       "type": "object",
@@ -17,8 +17,8 @@
       "additionalProperties": false,
       "required": ["stage", "phase"],
       "properties": {
-        "stage": {"type": "string", "minLength": 1, "description": "工程表の行名（進捗記録の stage の値）。進行表の行の鍵"},
-        "phase": {"enum": ["design", "implement", "release", "close"], "description": "工程が属するフェーズ。design は要求から設計の承認まで、implement は計画から Pull Request まで、release は後片付けとデプロイ、close はまとめ（確定仕様化・リリース後テスト・振り返り・棚卸し）"},
+        "stage": {"type": "string", "minLength": 1, "description": "工程表の行名（進捗記録の stage の値）。ステートマシンの行のキー"},
+        "phase": {"enum": ["design", "implement", "release", "close"], "description": "工程が属するフェーズ。design は要求から設計の承認まで、implement は計画から Pull Request まで、release はクリーンアップとデプロイ、close はまとめ（確定仕様化・リリース後テスト・振り返り・棚卸し）"},
         "when": {
           "type": "array",
           "uniqueItems": true,
@@ -26,8 +26,8 @@
           "description": "すべてが真のときだけ工程を流す条件。偽の語があれば、最初の偽の語を理由に無効にする"
         },
         "per_issue": {"const": true, "description": "進め方 fast で、課題ごとの子の行にする工程"},
-        "inputs": {"type": "array", "uniqueItems": true, "items": {"type": "string"}, "description": "工程が読むスプリントの文脈の鍵"},
-        "outputs": {"type": "array", "uniqueItems": true, "items": {"type": "string"}, "description": "工程が書くスプリントの文脈の鍵"}
+        "inputs": {"type": "array", "uniqueItems": true, "items": {"type": "string"}, "description": "工程が読むスプリントの文脈のキー"},
+        "outputs": {"type": "array", "uniqueItems": true, "items": {"type": "string"}, "description": "工程が書くスプリントの文脈のキー"}
       }
     },
     "step": {
@@ -35,7 +35,7 @@
       "additionalProperties": false,
       "required": ["kind", "range"],
       "properties": {
-        "kind": {"enum": ["review", "test", "release", "verify", "merge", "work", "gate", "record"], "description": "順序の決まりの対象を決める種類。verify はリリースした版を確かめるステップで、取り込みの前の検査（review・test）と分ける"},
+        "kind": {"enum": ["review", "test", "release", "verify", "merge", "work", "gate", "record"], "description": "順序の決まりの対象を決める種類。verify はリリースしたバージョンを確かめるステップで、マージの前の検査（review・test）と分ける"},
         "range": {"enum": ["sprint_diff", "issue_diff", "released", "lane", "none"], "description": "ステップの入力の範囲。review と test は sprint_diff か issue_diff、verify は released だけ"},
         "subject": {"enum": ["code", "docs", "design"], "description": "レビューの対象。kind が review のときだけ書く"},
         "gate": {"enum": ["design", "release"], "description": "承認ゲートの種類。kind が gate のときだけ書く。語の表示は progress.json の gates が持つ"},

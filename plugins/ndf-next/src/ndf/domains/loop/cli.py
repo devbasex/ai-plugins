@@ -1,24 +1,24 @@
-"""`ndf loop` の副命令（開発ループ）。
+"""`ndf loop` のサブコマンド（開発ループ）。
 
-    ndf loop start <名前> --session <S> [--row <進行表の ID>]  # 持ち主の鍵を取る（持っていれば延ばす）。レーンの行に結び付ける（#3558）
+    ndf loop start <名前> --session <S> [--row <ステートマシンの ID>]  # オーナーのキーを取る（持っていれば延ばす）。レーンの行に結び付ける（#3558）
     ndf loop select <名前> --session <S> --candidates <JSON> [--first <課題>...] [--size <N>]   # 選んで周を始める
     ndf loop sprint <名前> --session <S> --mode <M> --basis <根拠>   # 周のモードを根拠つきで決める（#2923）
     ndf loop exclude <名前> --session <S> --issue <N> --reason <理由>   # 周の途中で課題を外す（#2788）
     ndf loop created <名前> <課題>...                         # 周の中で起票した課題を記録する（#2132）
-    ndf loop gate <名前> --pr <N>                             # 設計承認ゲートを出した時点の先端を記録する
-    ndf loop answer <名前> --pr <N> --answer <答え> [--note <文>]   # ゲートの答えを記録する（#2400・#2714）
-    ndf loop released <名前> --version <版>                   # 周で出した版を記録する
-    ndf loop lap <名前> --session <S> [--failed] [--failure-key <鍵>] [--version <版>...] [--returned] [--unreadable <文>]
+    ndf loop gate <名前> --pr <N>                             # 設計承認ゲートを出した時点の HEAD を記録する
+    ndf loop answer <名前> --pr <N> --answer <回答> [--note <文>]   # ゲートの回答を記録する（#2400・#2714）
+    ndf loop released <名前> --version <バージョン>                   # 周で出したバージョンを記録する
+    ndf loop lap <名前> --session <S> [--failed] [--failure-key <キー>] [--version <バージョン>...] [--returned] [--unreadable <文>]
     ndf loop stop <名前> --by human|organizer [--reason <文>] [--now]   # 止める要求（#2820）・その場で止める（#2435）
     ndf loop get <名前> [--field <名前>]                      # 読むだけ。次の 1 手を next に返す
-    ndf loop close-plan --pace <P> --route <段>... [--mvv] [--record-pr <N>] [--retrospective-due]
+    ndf loop close-plan --pace <P> --route <ステップ>... [--mvv] [--record-pr <N>] [--retrospective-due]
     ndf loop review-args --purpose design|code --pr <N> --state-dir <D> --base <B>
     ndf loop acceptance record|show|check --issue <N> ...      # 受け入れ条件の確認の区分（#2144・#1682。`acceptance`）
     ndf loop design-tests (--issue <N>... | --design <パス>...)   # 設計に名前の出るテストが HEAD にあるか（#2118。`design_tests`）
     ndf loop check-trigger --base <B> [--head <H>] [--exclude <SHA>...] [--threshold <N>]   # 検査のトリガーの行数（#3087。`check_trigger`）
 
-書き込む副命令は、記録の排他の下で記録を読み、判断（`control_decide`）を受けて事象を追記する。断りと止まりは
-止まった理由の種類と、打てる次の 1 手（`next`）を返す（SF11）。
+書き込むサブコマンドは、記録の排他の下で記録を読み、判断（`control_decide`）を受けて事象を追記する。断りと止まりは
+停止理由の種類と、打てる次の 1 手（`next`）を返す（SF11）。
 """
 
 from __future__ import annotations
@@ -45,16 +45,16 @@ from ndf.domains.release.approval_decide import APPROVED, REJECTED
 from ndf.progress import definition
 
 TOOL = cli.tool_of(__name__)
-# 持ち主の鍵の期限の契約の名前
+# オーナーのキーの期限のコントラクトの名前
 LEASE_POLICY = "loop.lease"
-# 設計承認ゲートで受ける答え（事実の表 answers の行）
-GATE_ANSWERS = (APPROVED, str(facts.row(result.ANSWERS, "revise")["id"]), REJECTED)
+# 設計承認ゲートで受ける回答（事実の表 answers の行）
+GATE_ANSWERS = (APPROVED, str(facts.row(result.ANSWERS, "request_changes")["id"]), REJECTED)
 
 
 def _command(step: Optional[ctl.Step], session: Optional[str], cwd: Path) -> Optional[dict[str, Any]]:
     """次の 1 手のコマンド。打った記録と同じリポジトリ（`--cwd`）を引き継ぐ。
 
-    セッションの要る 1 手で打ったセッションを知らない（get・stop など）ときは、`session` を打つ側が埋める鍵にする。
+    セッションの要る 1 手で打ったセッションを知らない（get・stop など）ときは、`session` を打つ側が埋めるキーにする。
     """
     if step is None:
         return None
@@ -107,7 +107,7 @@ def _hub(cwd: Path) -> github.GitHub:
 
 
 def head_of(cwd: Path, pr: int) -> str:
-    """PR の今の先端（GitHub から 1 回だけ読む）。テストが差し替える。"""
+    """PR の今の HEAD（GitHub から 1 回だけ読む）。テストが差し替える。"""
     return _hub(cwd).pull(pr).head_sha
 
 
@@ -131,11 +131,11 @@ def _lap(state: rec.LoopState, c: ctl.Ctx, a: argparse.Namespace) -> ctl.Decisio
 
 
 def _answer(state: rec.LoopState, c: ctl.Ctx, a: argparse.Namespace) -> ctl.Decision:
-    # 先端は 1 回だけ読み、比べる値と記録する値に同じものを使う（#2714）
+    # HEAD は 1 回だけ読み、比べる値と記録する値に同じものを使う（#2714）
     return ctl.answer(state, c, a.pr, a.answer, head_of(a.cwd, a.pr), a.note)
 
 
-# 書き込む副命令の判断の呼び出し（記録を畳んだ状態・文脈・引数 → 判断。選定は選んだ行を判断の items に持つ）
+# 書き込むサブコマンドの判断の呼び出し（記録を畳んだ状態・文脈・引数 → 判断。選定は選んだ行を判断の items に持つ）
 Write = Callable[[rec.LoopState, ctl.Ctx, argparse.Namespace], ctl.Decision]
 
 
@@ -189,11 +189,11 @@ def _named(sub: Any, cmd: str, help_text: str, write: Optional[Write] = None, se
 
 
 def _add_writes(sub: Any) -> None:
-    t = _named(sub, "start", "持ち主の鍵を取る", lambda s, c, a: ctl.start(s, c, limits.seconds(LEASE_POLICY), a.row), True)
-    t.add_argument("--row", default=None, help="結び付けるレーンの行の進行表の ID（`ndf progress new --loop` の結果）")
+    t = _named(sub, "start", "オーナーのキーを取る", lambda s, c, a: ctl.start(s, c, limits.seconds(LEASE_POLICY), a.row), True)
+    t.add_argument("--row", default=None, help="結び付けるレーンの行のステートマシンの ID（`ndf progress new --loop` の結果）")
     s = _named(sub, "select", "候補から課題を選んで周を始める", _select, True)
     s.add_argument("--candidates", type=Path, required=True, help="候補の行の JSON の配列のファイル")
-    s.add_argument("--first", type=int, nargs="*", default=[], help="先頭に選ぶ課題（直して出し直すと答えた課題）")
+    s.add_argument("--first", type=int, nargs="*", default=[], help="先頭に選ぶ課題（直して出し直すと回答した課題）")
     s.add_argument("--size", type=int, default=1, help="周に入れる課題の数")
     m = _named(
         sub, "sprint", "周のモードを根拠つきで決める", lambda s, c, a: ctl.decide_mode(s, c, a.mode, a.basis, definition.modes()), True
@@ -205,20 +205,20 @@ def _add_writes(sub: Any) -> None:
     x.add_argument("--reason", required=True)
     made = _named(sub, "created", "周の中で起票した課題を記録する", lambda s, c, a: ctl.created(s, c, a.issues))
     made.add_argument("issues", type=int, nargs="+")
-    g = _named(sub, "gate", "設計承認ゲートを出した時点の先端を記録する", lambda s, c, a: ctl.gate(s, c, a.pr, head_of(a.cwd, a.pr)))
+    g = _named(sub, "gate", "設計承認ゲートを出した時点の HEAD を記録する", lambda s, c, a: ctl.gate(s, c, a.pr, head_of(a.cwd, a.pr)))
     g.add_argument("--pr", type=int, required=True)
-    w = _named(sub, "answer", "設計承認ゲートの答えを記録する", _answer)
+    w = _named(sub, "answer", "設計承認ゲートの回答を記録する", _answer)
     w.add_argument("--pr", type=int, required=True)
     w.add_argument("--answer", required=True, choices=GATE_ANSWERS)
-    w.add_argument("--note", default="", help="差し戻しの理由など")
-    v = _named(sub, "released", "周で出した版を記録する", lambda s, c, a: ctl.released(s, c, a.version))
+    w.add_argument("--note", default="", help="変更要求の理由など")
+    v = _named(sub, "released", "周で出したバージョンを記録する", lambda s, c, a: ctl.released(s, c, a.version))
     v.add_argument("--version", required=True)
     lp = _named(sub, "lap", "周を締める", _lap, True)
-    lp.add_argument("--failed", action="store_true", help="手順の失敗の印")
+    lp.add_argument("--failed", action="store_true", help="手順の失敗のマーカー")
     lp.add_argument("--failure-key", default=None)
-    lp.add_argument("--version", action="append", default=[], help="この周で出した版（記録に無いもの）")
+    lp.add_argument("--version", action="append", default=[], help="この周で出したバージョン（記録に無いもの）")
     lp.add_argument("--returned", action="store_true", help="リリースを承認されずに人へ戻した")
-    lp.add_argument("--unreadable", default=None, help="版の記録を読めなかった理由")
+    lp.add_argument("--unreadable", default=None, help="バージョンの記録を読めなかった理由")
     st = _named(sub, "stop", "止める要求を置く", lambda s, c, a: ctl.stop(s, c, a.by, a.reason, a.now))
     st.add_argument("--by", required=True, choices=ctl.STOP_BY)
     st.add_argument("--reason", default="")

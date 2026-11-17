@@ -1,4 +1,4 @@
-"""引数の取り出し（`ndf.checks.spec_args`）: 副命令の main を引数を読む直前で止め、argparse の定義から引数の木を作る。"""
+"""引数の取り出し（`ndf.checks.spec_args`）: サブコマンドの main を引数を読む直前で止め、argparse の定義から引数の木を作る。"""
 
 from __future__ import annotations
 
@@ -82,11 +82,11 @@ def test_append_with_many_values_is_an_array_of_arrays():
 
 
 def test_from_manual_builds_the_tree_from_rows():
-    rows = [{"id": "n send", "command": "n", "path": "send", "args": ["--to:string:required:宛先"], "meaning": "m"}]
+    rows = [{"id": "n send", "command": "n", "path": "send", "args": ["--to:string:required:送信先"], "meaning": "m"}]
     tree = spec_args.from_manual(rows)
     assert tree.options == () and list(tree.subcommands) == ["send"]
     to = tree.subcommands["send"].options[0]
-    assert (to.name, to.type, to.required, to.help) == ("--to", "string", True, "宛先")
+    assert (to.name, to.type, to.required, to.help) == ("--to", "string", True, "送信先")
     assert spec_args.from_manual([{"id": "n", "command": "n", "meaning": "m"}]) == spec_args.ArgTree()
 
 

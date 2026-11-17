@@ -4,10 +4,10 @@
 
 | 事実 | 結果 |
 | --- | --- |
-| その周で版をリリースした（記録の出した版か、締めるときに渡した版） | 完了。手順の失敗があれば理由に失敗の鍵を添える |
+| その周でバージョンをリリースした（記録の出したバージョンか、締めるときに渡したバージョン） | 完了。手順の失敗があれば理由に失敗のキーを添える |
 | リリースを承認されなかった | 人へ戻した |
 | 止める要求で周を途中で締めた | 保留 |
-| 失敗の印・失敗の鍵のどれかがある | 失敗 |
+| 失敗のマーカー・失敗のキーのどれかがある | 失敗 |
 | 上のどれでもない | 完了 |
 
 リリースまで届いた周を、後の手順が 1 つ落ちたことで失敗と記録しない（#2905 の lproc の 2・5・9 周目）。
@@ -34,15 +34,15 @@ class LapFacts:
 
 
 def _failure(facts: LapFacts) -> Optional[str]:
-    """手順の失敗の名前（失敗の鍵か、失敗の印）。失敗が無ければ None。"""
+    """手順の失敗の名前（失敗のキーか、失敗のマーカー）。失敗が無ければ None。"""
     if facts.failure_key is not None:
         return facts.failure_key
-    return "失敗の印" if facts.failed else None
+    return "失敗のマーカー" if facts.failed else None
 
 
 def _unreadable_note(facts: LapFacts) -> str:
-    """版の記録を読めなかったときに理由へ添える文。読めたなら空。"""
-    return f"（版の記録を読めない: {facts.unreadable}）" if facts.unreadable is not None else ""
+    """バージョンの記録を読めなかったときに理由へ添える文。読めたなら空。"""
+    return f"（バージョンの記録を読めない: {facts.unreadable}）" if facts.unreadable is not None else ""
 
 
 def lap_outcome(facts: LapFacts) -> tuple[str, str]:
@@ -52,7 +52,7 @@ def lap_outcome(facts: LapFacts) -> tuple[str, str]:
     if facts.released:
         versions = "・".join(facts.released)
         tail = f"。手順の失敗 {failure} は結果を変えない" if failure is not None else ""
-        return rec.DONE, f"版をリリースした（{versions}）{tail}{note}"
+        return rec.DONE, f"バージョンをリリースした（{versions}）{tail}{note}"
     if facts.returned:
         return rec.RETURNED, f"リリースを承認されずに人へ戻した{note}"
     if facts.held:

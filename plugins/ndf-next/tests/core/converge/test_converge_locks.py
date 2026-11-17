@@ -1,4 +1,4 @@
-"""cross 系の作業場所の lock の持ち主・持ち主のいない lock の片付け・再開の前の確かめ・既定の置き場（#3106 の残り）。
+"""cross 系の作業場所の lock のオーナー・オーナーのいない lock の片付け・再開の前の確かめ・既定の保存先（#3106 の残り）。
 
 #3106 の観測: `/tmp` を共有しない別のコンテナの `git worktree prune` で、作業中の登録が消えた。lock は prune から守るが、
 lock を掛けた作業場所が消えると lock が残り続け、誰が掛けたかも読めなかった。
@@ -15,7 +15,7 @@ from git_sandbox import sh as _sh
 
 from ndf import identity
 from ndf.adapters import git
-from ndf.core.converge import place, worktree
+from ndf.core.converge import location, worktree
 
 
 @pytest.fixture
@@ -76,9 +76,9 @@ def test_resume_recreates_a_missing_directory_and_stops_on_a_lost_registration(r
         worktree.resumable(wt)
 
 
-def test_default_place_is_inside_the_repository_not_tmp(repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv(place.BASE_ENV, raising=False)
-    got = place.work_root(git.Git(repo), "rf5")
-    assert got == repo.resolve() / ".worktrees" / identity.FIXED_WORDS["declaration_dir"] / "rf5"
-    monkeypatch.setenv(place.BASE_ENV, str(tmp_path / "shared"))
-    assert place.work_root(git.Git(repo), "rf5") == tmp_path / "shared" / "rf5"
+def test_default_location_is_inside_the_repository_not_tmp(repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(location.BASE_ENV, raising=False)
+    got = location.work_root(git.Git(repo), "rf5")
+    assert got == repo.resolve() / ".worktrees" / identity.FIXED_WORDS["ndf_settings_dir"] / "rf5"
+    monkeypatch.setenv(location.BASE_ENV, str(tmp_path / "shared"))
+    assert location.work_root(git.Git(repo), "rf5") == tmp_path / "shared" / "rf5"

@@ -1,4 +1,4 @@
-"""従量の接続（Bedrock・API キー）の宣言と確かめ（`ndf relay account add-bedrock`・`add-api-key`・`api-key-monthly`・
+"""従量の接続（Bedrock・API キー）の設定と確かめ（`ndf relay account add-bedrock`・`add-api-key`・`api-key-monthly`・
 `api-key-use`・`check`。#3569）。"""
 
 from __future__ import annotations
@@ -137,10 +137,10 @@ def test_add_bedrock_asks_then_saves_after_the_check(tmp_path, fake_aws, monkeyp
     assert denied.value.items[0]["reason"] == "model_unavailable"
 
 
-def test_check_metered_reads_the_env_declaration_first(tmp_path):
+def test_check_metered_reads_the_env_ndf_settings_first(tmp_path):
     with pytest.raises(m.MeteredError, match="Bedrock"):
         m.check(tmp_path, {"NDF_SUPERVISE_CLAUDE_FALLBACK": "ANTHROPIC_BASE_URL=https://x"}, "metered")
-    with pytest.raises(m.MeteredError, match="宣言が無い"):
+    with pytest.raises(m.MeteredError, match="設定が無い"):
         m.check(tmp_path, {}, "metered")
     with pytest.raises(m.MeteredError, match="metered か"):
         m.check(tmp_path, {}, "nobody")

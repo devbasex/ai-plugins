@@ -46,7 +46,7 @@ class FakeHub:
     runs: list[dict] = field(default_factory=list)
     status_list: list[dict] = field(default_factory=list)
     bot_apps: dict[str, int] = field(default_factory=dict)
-    # compare で読むコミット（先端の SHA ごと）と、読んだ (base, head)
+    # compare で読むコミット（HEAD の SHA ごと）と、読んだ (base, head)
     commits_of: dict[str, list[dict]] = field(default_factory=dict)
     compared: list[tuple[str, str]] = field(default_factory=list)
     # マージキューに入っている PR と、キューから外した PR

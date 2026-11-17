@@ -1,7 +1,7 @@
-"""中継が NDF の副命令を打って結果 JSON を読む（`ndf plan pending`・`ndf lanes question`）。
+"""中継が NDF のサブコマンドを打って結果 JSON を読む（`ndf plan pending`・`ndf lanes question`）。
 
-中継は進行表の DB を自分では開かず、副命令の結果 JSON の最後の行だけを読む（同じ事実を 2 か所で集めない）。
-副命令が無い・落ちた・読めないときは送出せず、読めなかった理由を返す。
+中継はステートマシンの DB を自分では開かず、サブコマンドの結果 JSON の最後の行だけを読む（同じ事実を 2 か所で集めない）。
+サブコマンドが無い・落ちた・読めないときは送出せず、読めなかった理由を返す。
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ class Called(NamedTuple):
 def call(plugin_root: Path, args: list[str], timeout: float, runner: Any = subprocess.run, cwd: Optional[Path] = None) -> Called:
     """`ndf <args>` を打ち、結果 JSON の最後の行を読む。"""
     command = [str(identity.entrypoint(plugin_root)), *args]
-    label = "副命令 " + " ".join(args[:2])
+    label = "サブコマンド " + " ".join(args[:2])
     try:
         done = runner(command, capture_output=True, text=True, timeout=timeout, check=False, cwd=None if cwd is None else str(cwd))
     except (OSError, subprocess.TimeoutExpired) as exc:

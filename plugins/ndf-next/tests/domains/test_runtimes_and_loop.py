@@ -9,7 +9,7 @@ LOOP = "loop-phases"
 
 def test_every_domain_table_has_its_owner_and_valid_references():
     policy_names = set(limits.table())
-    domain_tables = [n for n in facts.names() if facts.place(n).startswith(f"{facts.DOMAINS_DIR}/")]
+    domain_tables = [n for n in facts.names() if facts.location(n).startswith(f"{facts.DOMAINS_DIR}/")]
     assert len(domain_tables) == 18  # test-runners は 3392-3 で消した。launchers・manual-args・skill-io は #3518 で足した
     for name in domain_tables:
         assert facts.table(name).owner.startswith("D2")
@@ -28,7 +28,7 @@ def test_runtime_columns_point_at_declared_facts():
         assert set(names) <= env, rid
     # 使用量を測れるランタイムは hook の事象も渡す（使用量の記録は hook の停止で書く）
     assert set(facts.ids("runtimes", usage_observable=True)) <= set(facts.ids("runtimes", hook_events=True))
-    # 委ねる先は既定の席と別の問い。agy は既定の席に無くても委ねられる
+    # 委ねる先は既定の席と別の質問。agy は既定の席に無くても委ねられる
     assert "agy" in facts.ids("runtimes", delegate=True)
 
 

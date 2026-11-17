@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "progress.schema.json",
-  "title": "進行表の状態と事象の表",
+  "title": "ステートマシンの状態と事象の表",
   "description": "contracts/workflow/progress.json の形。状態の語が表の中で食い違わないこと（from・state が row_states にあるなど）は、読み手（ndf.progress.model）が確かめる",
   "type": "object",
   "additionalProperties": false,
@@ -33,7 +33,7 @@
           "level": {"enum": ["plan", "lane", "sprint"]},
           "kind": {"type": "string", "pattern": "^[a-z][a-z_]*$"},
           "actors": {"$ref": "#/$defs/names"},
-          "scope": {"enum": ["row", "table", "any"], "description": "row は行の鍵が要る事象、table は進行表全体の事象、any はどちらも書ける事象"},
+          "scope": {"enum": ["row", "table", "any"], "description": "row は行のキーが要る事象、table はステートマシン全体の事象、any はどちらも書ける事象"},
           "from": {"$ref": "#/$defs/names", "description": "行の事象を書ける今の行の状態。new はまだ無い行。無ければどの状態からでも書ける"},
           "state": {
             "description": "事象の後の状態。配列なら、下書きがそのどれかを持つ。無ければ状態を変えない",

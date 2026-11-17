@@ -21,7 +21,7 @@ Skill の本文から `ndf` を打つ AI が読み手である。
 | 何を | 正本 |
 | --- | --- |
 | 宣言・副命令・環境変数・受け渡しのファイル・hook・Skill・起動スクリプトの規約（読む形） | [`plugins/ndf-next/docs/contracts/`](../../plugins/ndf-next/docs/contracts/index.md)（生成物） |
-| 宣言のキーの型・説明・既定値・取りうる値・例 | [`plugins/ndf-next/contracts/schemas/declarations/`](../../plugins/ndf-next/contracts/schemas/declarations/) |
+| 宣言のキーの型・説明・既定値・取りうる値・例 | [`plugins/ndf-next/contracts/schemas/ndf-settings/`](../../plugins/ndf-next/contracts/schemas/ndf-settings/) |
 | 副命令の引数（生成物）と結果の `metrics`・`items`（手書き） | [`plugins/ndf-next/contracts/schemas/io/`](../../plugins/ndf-next/contracts/schemas/io/) |
 | 規則と不変条件の対応 | [`plugins/ndf-next/src/ndf/checks/spec_docs.py`](../../plugins/ndf-next/src/ndf/checks/spec_docs.py) の docstring |
 | 読む正本の一覧 | [`plugins/ndf-next/src/ndf/checks/spec_model.py`](../../plugins/ndf-next/src/ndf/checks/spec_model.py) の docstring |
@@ -53,8 +53,8 @@ NDF は JSON Schema と生成した文書という文書化された形式を出
 
 | 要素 | 責務 | 書き手 |
 | --- | --- | --- |
-| 宣言のスキーマ（`contracts/schemas/declarations/<id>.schema.json`） | JSON の宣言ごとのキー・型・説明・既定値・取りうる値・例・非推奨と、置き場（`x-ndf-place`）・読む工程（`x-ndf-read-by`）の注釈 | 宣言を読む子が手で書く |
-| Markdown の宣言の形の表（`contracts/schemas/declarations/mvv-body.sections.json`） | `mvv.md` の節の並びと、置き場・範囲・読む工程 | 手で書く |
+| 宣言のスキーマ（`contracts/schemas/ndf-settings/<id>.schema.json`） | JSON の宣言ごとのキー・型・説明・既定値・取りうる値・例・非推奨と、置き場（`x-ndf-location`）・読む工程（`x-ndf-read-by`）の注釈 | 宣言を読む子が手で書く |
+| Markdown の宣言の形の表（`contracts/schemas/ndf-settings/mvv-body.sections.json`） | `mvv.md` の節の並びと、置き場・範囲・読む工程 | 手で書く |
 | 引数のスキーマ（`contracts/schemas/io/<副命令>.args.schema.json`） | 副命令・下位の命令ごとの引数の名前・型・必須・既定値・取りうる値・説明 | 規約の生成だけ |
 | 結果のスキーマ（`contracts/schemas/io/<副命令>.result.schema.json`） | 結果 JSON の `metrics` と `items` の形。結果の契約（`../result.schema.json`）を `$ref` で指し、共通の欄を写さない | 副命令を持つ子が手で書く |
 | 手書きの引数の表・Skill の入出力の表・起動スクリプトの表 | 上の用語の表のとおり | 手で書く |
@@ -90,7 +90,7 @@ NDF は JSON Schema と生成した文書という文書化された形式を出
 | I1 | `spec-decl` | 宣言の行はすべて、スキーマ（JSON の宣言）か形の表（Markdown の宣言）を 1 つ持つ | 無い行の id を出して落ちる |
 | I2 | `spec-decl` | スキーマの最上位のキーのうち非推奨でないもの（`version`・`$schema` を除く）が、置き場の表の行の `keys` に等しい | どちらにだけあるキーを宣言の id と並べて落ちる |
 | I12 | `spec-decl` | `main_keys` は `keys` の部分集合である | `keys` に無いキーを出して落ちる |
-| — | `spec-decl` | スキーマのキーは説明（`description`）と型を持ち、スキーマは `x-ndf-place`（`main` か `worktree`）・`x-ndf-read-by`・`examples` を持つ | 欠けた項目を出して落ちる |
+| — | `spec-decl` | スキーマのキーは説明（`description`）と型を持ち、スキーマは `x-ndf-location`（`main` か `worktree`）・`x-ndf-read-by`・`examples` を持つ | 欠けた項目を出して落ちる |
 | I3 | `spec-decl` | 検査を打つリポジトリの `.ndf/` の JSON の宣言はスキーマに通る。無いファイルは確かめない | ファイルと JSON Pointer を出して落ちる |
 | I4 | `spec-io` | 副命令はすべて結果のスキーマを持つ | 無い副命令を出して落ちる |
 | I13 | `spec-io` | 副命令の引数を与えるのは、引数の取り出しか手書きの引数の表のどちらか一方である | 両方に当たる・どちらにも当たらない副命令を出して落ちる |
@@ -119,7 +119,7 @@ hook の登録のファイル（`hooks/claude.json`・`codex.json`）は hook �
 | --- | --- |
 | 副命令・Skill・hook | エントリポイントの表の行の種類と `target` に当たる |
 | 受け渡しのファイル | エントリポイントの表の `files` に載るか、置き場の表で列 `reader` を持つ |
-| 宣言 | エントリポイントの表の種類 `spec` の行 `spec-declarations` の `files` に載る（追跡する宣言。個人の設定 `worktree.local.json` は内部） |
+| 宣言 | エントリポイントの表の種類 `spec` の行 `spec-ndf_settings` の `files` に載る（追跡する宣言。個人の設定 `worktree.local.json` は内部） |
 | 環境変数 | エントリポイントの表の `env` に載る |
 
 列 `order` が `caller-first` の行（入れ替えの前に呼び手と合わせる行）は、規約の項目に当たらなくても落とさず、
@@ -128,7 +128,7 @@ hook の登録のファイル（`hooks/claude.json`・`codex.json`）は hook �
 
 ### エントリポイントの表の種類 `spec`
 
-規約の置き場は、エントリポイントの表の種類 `spec` の 3 行（`spec-pages`・`spec-declarations`・`spec-io`）が持つ。
+規約の置き場は、エントリポイントの表の種類 `spec` の 3 行（`spec-pages`・`spec-ndf_settings`・`spec-io`）が持つ。
 `target` はプラグインの根からのディレクトリのパスで、連携システムはここから置き場を引く。置き場を変えるときは版で約束する。
 `spec` の行は引数を持たず、`entrypoint-cases.json` に受ける見本を 1 つずつ持つ。
 
@@ -239,7 +239,7 @@ plugins/ndf-next/bin/ndf check                # 書かずに検査だけ（CI �
   CI のジョブ ndf-next は既に `ndf check` を打つため、生成し忘れはワークフローを変えずに落ちる
 - `--write-spec` の結果 JSON は `metrics.written`（書いたファイルの数）を持つ。差分の規則だけの `--only` のときは
   規約の検査を通らず、`--write-spec` を見ない
-- 入れ替え（S2）では、`docs/contracts/`・`contracts/schemas/declarations/`・`contracts/schemas/io/` を `plugins/ndf/` の
+- 入れ替え（S2）では、`docs/contracts/`・`contracts/schemas/ndf-settings/`・`contracts/schemas/io/` を `plugins/ndf/` の
   同じ相対パスへそのまま移し、`bin/ndf check --write-spec` で差分が 0 件であることを確かめる（行き先の表
   [docs/ndf-swap-doc-destinations.md](../ndf-swap-doc-destinations.md) ）
 

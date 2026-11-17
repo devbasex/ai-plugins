@@ -88,7 +88,7 @@ def import_rows(rows):
 
 ## 指標の測定
 
-`/ndf:cross-refactoring` は提案の前に、既定で次のツールを版を固定して測る（`.ndf/code-metrics.json` で置き換えられる）。
+`/ndf:cross-refactoring` は提案の前に、既定で次のツールをバージョンを固定して測る（`.ndf/code-metrics.json` で置き換えられる）。
 
 | 指標 | ツール | 読み方 |
 | --- | --- | --- |

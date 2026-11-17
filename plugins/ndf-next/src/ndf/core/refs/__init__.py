@@ -1,22 +1,22 @@
 """起動の外の成果を、流す直前に参照で解く部品（N1）。
 
-プランとループの 1 回は、今の起動の外にある成果（版・記録の PR・前のステージの PR・検査の件数・問いの当て先・
+プランとループの 1 回は、今の起動の外にある成果（バージョン・記録の PR・前のステージの PR・検査の件数・質問の当て先・
 再開の位置・設計の起点）を、組む時点の値でなく参照で持つ。ここはその参照を、ステップを流す直前に値へ解く。
 
-- 解けない参照は、空・0・unknown で埋めずに、止まった理由の種類つきで返す（`Resolved.unresolved`）
+- 解けない参照は、空・0・unknown で埋めずに、停止理由の種類つきで返す（`Resolved.unresolved`）
 - 空に解けたら飛ばす実行条件（`when_empty: skip`）を持つ参照は、空のときに `Resolved.skipped` へ入る。流さずに
-  ok の印を付ける経路は無い（#2408）
+  ok のマーカーを付ける経路は無い（#2408）
 - 外の値は読み手（`Sources`）を引数で受けて読む。判断の関数はファイルも GitHub も直に読まない
 - GitHub は 1 回のクエリでまとめて読み、ループの中で打たない
 
-プランの参照の宣言は `plan.json` の `refs` に置く:
+プランの参照の設定は `plan.json` の `refs` に置く:
 
 ```json
 {"refs": {"version": {"kind": "version", "of": "release.state"},
           "prs": {"kind": "queue_prs", "when_empty": "skip"}}}
 ```
 
-`of` は参照の先のプランの状態の置き場（呼び手の基準のディレクトリからの相対か絶対のパス）で、`key` は読む outputs の鍵。
+`of` は参照の先のプランの状態の保存先（呼び手の基準のディレクトリからの相対か絶対のパス）で、`key` は読む outputs のキー。
 """
 
 from __future__ import annotations
@@ -39,14 +39,14 @@ from ndf.core.plan.records import PROGRESS_FILE
 from ndf.core.plan.runner import RUN_FILE, result_path
 from ndf.core.refs.resume import SKIP, DesignPr
 
-# 参照の宣言の鍵（種類・参照の先・読む outputs の鍵・空に解けたときの実行条件）
+# 参照の設定のキー（種類・参照の先・読む outputs のキー・空に解けたときの実行条件）
 KIND, OF, KEY, WHEN_EMPTY = "kind", "of", "key", "when_empty"
 # 参照の種類（プランの `refs` の `kind`）
 VERSION, RECORD_PR, PLAN_RESULT, COUNTS = "version", "record_pr", "plan_result", "counts"
 QUEUE_PRS_KIND = QUEUE_PRS
 # 空に解けたら飛ばす実行条件の値（`when_empty`）。流す前の判断の「流さない」と同じ語（`resume.SKIP`）
 WHEN_EMPTY_SKIP = SKIP
-# 版の形（数 3 つ。後ろに pre-release か build の印を持てる）
+# バージョンの形（数 3 つ。後ろに pre-release か build のマーカーを持てる）
 _SEMVER = re.compile(r"^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$")
 # 解けていないことを表す値。参照の値として受けない
 _PLACEHOLDERS = frozenset({"", "0", "0.0.0", "unknown", "null"})
@@ -54,17 +54,17 @@ _PLACEHOLDERS = frozenset({"", "0", "0.0.0", "unknown", "null"})
 EVENT_RUN, EVENT_STEP = "run", "step"
 # 課題を閉じる PR を 1 つの課題から読む件数（超えたら読めないとして止まる）
 CLOSING_PER_ISSUE = 100
-# 課題を閉じる PR の GraphQL の接続の名前（クエリの選択と、答えの節点の鍵）
+# 課題を閉じる PR の GraphQL の接続の名前（クエリの選択と、回答の節点のキー）
 _CLOSED_BY = "closedByPullRequestsReferences"
 _CLOSING_FIELDS = f"{_CLOSED_BY}(first: {CLOSING_PER_ISSUE}, includeClosedPrs: true) {{ totalCount nodes {{ number merged }} }}"
 
 
 class RefError(ValueError):
-    """参照の宣言の形が違う。止まった理由は invalid。"""
+    """参照の設定の形が違う。停止理由は invalid。"""
 
 
 class Unreadable(Exception):
-    """外の値を読めなかった（GitHub の失敗・上限）。`cause` は止まった理由の種類。"""
+    """外の値を読めなかった（GitHub の失敗・上限）。`cause` は停止理由の種類。"""
 
     def __init__(self, cause: str, reason: str) -> None:
         super().__init__(reason)
@@ -73,7 +73,7 @@ class Unreadable(Exception):
 
 
 class Ref(NamedTuple):
-    """参照の宣言 1 つ。`of` は参照の先（プランの状態の置き場）、`key` は読む outputs の鍵。"""
+    """参照の設定 1 つ。`of` は参照の先（プランの状態の保存先）、`key` は読む outputs のキー。"""
 
     name: str
     kind: str
@@ -83,7 +83,7 @@ class Ref(NamedTuple):
 
 
 class Unresolved(NamedTuple):
-    """解けなかった参照。`cause` は止まった理由の表の種類。"""
+    """解けなかった参照。`cause` は停止理由の表の種類。"""
 
     cause: str
     reason: str
@@ -147,11 +147,11 @@ class Sources(Protocol):
     def design_pr(self, branch: str) -> DesignPr: ...
 
 
-# --- 宣言 ---------------------------------------------------------------------------------
+# --- 設定 ---------------------------------------------------------------------------------
 
 
 def _text_fields(name: str, raw: Mapping[str, Any]) -> dict[str, str]:
-    """宣言の `of`・`key` のうち書かれたもの。書かれていて空でない文字列でなければ `RefError`。"""
+    """設定の `of`・`key` のうち書かれたもの。書かれていて空でない文字列でなければ `RefError`。"""
     texts = {k: raw[k] for k in (OF, KEY) if k in raw}
     bad = [k for k, v in texts.items() if not isinstance(v, str) or not v]
     if bad:
@@ -160,7 +160,7 @@ def _text_fields(name: str, raw: Mapping[str, Any]) -> dict[str, str]:
 
 
 def _skip_when_empty(name: str, raw: Mapping[str, Any]) -> bool:
-    """宣言の `when_empty` が `skip` なら True、無ければ False。ほかの値は `RefError`。"""
+    """設定の `when_empty` が `skip` なら True、無ければ False。ほかの値は `RefError`。"""
     when = raw.get(WHEN_EMPTY)
     if when not in (None, WHEN_EMPTY_SKIP):
         raise RefError(f"参照 {name} の {WHEN_EMPTY} は {WHEN_EMPTY_SKIP} だけ: {when!r}")
@@ -177,10 +177,10 @@ def _ref(name: str, raw: Any) -> Ref:
 
 
 def declared(plan_raw: Mapping[str, Any]) -> list[Ref]:
-    """プランの `refs` の宣言を読む。無ければ空。形が違えば `RefError`。"""
+    """プランの `refs` の設定を読む。無ければ空。形が違えば `RefError`。"""
     raw = plan_raw["refs"] if "refs" in plan_raw else {}
     if not isinstance(raw, Mapping):
-        raise RefError("プランの refs は参照名 → 宣言の辞書にする")
+        raise RefError("プランの refs は参照名 → 設定の辞書にする")
     return [_ref(name, value) for name, value in raw.items()]
 
 
@@ -190,7 +190,7 @@ Got = Union[str, Unresolved, _Empty]
 
 
 def _canonical_json(value: Any) -> str:
-    """文字列でない値を参照の値にするときの JSON（日本語をそのまま、鍵は昇順）。"""
+    """文字列でない値を参照の値にするときの JSON（日本語をそのまま、キーは昇順）。"""
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
 
 
@@ -204,7 +204,7 @@ def _target(ref: Ref, ctx: Context) -> Path:
 
 
 def _output(ref: Ref, ctx: Context, src: Sources, default_key: str) -> Union[Any, Unresolved, _Empty]:
-    """参照の先のプランの最後の回が完了で、outputs に鍵があればその値。"""
+    """参照の先のプランの最後の回が完了で、outputs にキーがあればその値。"""
     where, key = _target(ref, ctx), ref.key if ref.key is not None else default_key
     record = src.plan_record(where)
     if record is None:
@@ -226,7 +226,7 @@ def _checked(ref: Ref, ctx: Context, src: Sources, default_key: str, check: Call
 
 def _version_text(got: Any) -> Union[str, Unresolved]:
     if not _SEMVER.match(str(got)):
-        return Unresolved("input_missing", f"版の形でない: {got!r}")
+        return Unresolved("input_missing", f"バージョンの形でない: {got!r}")
     return str(got)
 
 
@@ -254,7 +254,7 @@ def _record_pr(ref: Ref, ctx: Context, src: Sources) -> Got:
 
 def _plan_result(ref: Ref, ctx: Context, src: Sources) -> Got:
     if ref.key is None:
-        return Unresolved("invalid", f"参照 {ref.name} に読む outputs の鍵（key）が無い")
+        return Unresolved("invalid", f"参照 {ref.name} に読む outputs のキー（key）が無い")
     return _checked(ref, ctx, src, ref.key, _result_text)
 
 
@@ -272,10 +272,10 @@ def _queue_prs(ref: Ref, ctx: Context, src: Sources) -> Got:
 
 
 def counts_of(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-    """進捗記録の行から、最後の頭からの回より後の区間で、ステップごとに最後の件数を返す（#2569）。
+    """進捗記録の行から、最後の頭からの回より後のセグメントで、ステップごとに最後の件数を返す（#2569）。
 
     回の始まりの行は `{"event": "run", "start": <開始のステップか null>}`、件数の行は
-    `{"event": "step", "step": <id>, "counts": {...}}`。途中から流し直した回は区間を切らず、前の回の件数を残す。
+    `{"event": "step", "step": <id>, "counts": {...}}`。途中から流し直した回はセグメントを切らず、前の回の件数を残す。
     """
     return {row["step"]: row["counts"] for row in _last_section(rows) if _is_counts_row(row)}
 
@@ -304,7 +304,7 @@ def _counts(ref: Ref, ctx: Context, src: Sources) -> Got:
 
 
 _RESOLVERS = {VERSION: _version, RECORD_PR: _record_pr, QUEUE_PRS_KIND: _queue_prs, PLAN_RESULT: _plan_result, COUNTS: _counts}
-# 受ける参照の種類は解決の対応表が正本（並びはエラー文の列挙の順）
+# 受ける参照の種類は解決の対応表が SSOT（並びはエラー文の列挙の順）
 REF_KINDS = tuple(_RESOLVERS)
 
 
@@ -321,7 +321,7 @@ def _source(ref: Ref, ctx: Context) -> str:
     return str(_target(ref, ctx))
 
 
-def _place(out: Resolved, skipped: list[str], ref: Ref, got: Got, ctx: Context) -> None:
+def _location(out: Resolved, skipped: list[str], ref: Ref, got: Got, ctx: Context) -> None:
     """解いた結果 1 つを、値・解けない参照・飛ばす参照のどれかへ振り分ける。"""
     if isinstance(got, Unresolved):
         out.unresolved[ref.name] = got
@@ -339,12 +339,12 @@ def resolve(refs: Sequence[Ref], ctx: Context, src: Sources) -> Resolved:
     out = Resolved()
     skipped: list[str] = []
     for ref in refs:
-        _place(out, skipped, ref, _one(ref, ctx, src), ctx)
+        _location(out, skipped, ref, _one(ref, ctx, src), ctx)
     return replace(out, skipped=tuple(skipped))
 
 
 def resolve_plan(plan_raw: Mapping[str, Any], ctx: Context, src: Sources) -> Resolved:
-    """プランの `refs` の宣言を読んで解く。宣言の形が違えば、その誤りを invalid の unresolved として返す。"""
+    """プランの `refs` の設定を読んで解く。設定の形が違えば、その誤りを invalid の unresolved として返す。"""
     try:
         refs = declared(plan_raw)
     except RefError as exc:
@@ -376,7 +376,7 @@ def _closing_numbers(issue: int, node: Mapping[str, Any]) -> list[int]:
 
 @dataclass(frozen=True)
 class RepoSources:
-    """状態の置き場のファイルと、GitHub のアダプターから外の値を読む読み手。"""
+    """状態の保存先のファイルと、GitHub のアダプターから外の値を読む読み手。"""
 
     hub: github.GitHub
 

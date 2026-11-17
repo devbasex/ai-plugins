@@ -1,4 +1,4 @@
-"""git の木から測る宣言の項目（P1・P2・P5・P6 の git の分・P7・P9・P10・素材）（#3569。旧い
+"""git の木から測る設定の項目（P1・P2・P5・P6 の git の分・P7・P9・P10・素材）（#3569。旧い
 `project_lib/measure_repo.py`・`compose.py`・`measure_materials.py` の移し先）。秘密の表は `secret.py`、結果の形は `items.py` にある。
 
 ファイルは HEAD の木から読み（`git cat-file`）、秘密の名前の表に当たるファイルは開かない。項目の測定は
@@ -27,7 +27,7 @@ from ndf.domains.project.secret import is_secret_path, redact
 MAX_READ = 512 * 1024
 CALL_LIMIT = 30.0
 LANG_EXT = {ext: row["id"] for row in facts.rows("languages", code=True) for ext in row["extensions"]}
-# 依存の名前とフレームワークの組（版は依存の定義の主の数字）
+# 依存の名前とフレームワークの組（バージョンは依存の定義の主の数字）
 FRAMEWORKS = (
     ("laravel/framework", "laravel"),
     ("symfony/framework-bundle", "symfony"),
@@ -74,10 +74,10 @@ IMPORT_TOKEN = re.compile(r"(?:^|\s)@([\w./-]+\.md)\b")
 DEP_NAME = re.compile(r"[\s<>=!~\[;]")
 REQ_NAME = re.compile(r"[\s<>=!~\[;#]")
 
-# 素材の宣言の案（#2315）
+# 素材の設定の案（#2315）
 MAX_LIBRARIES = 15
 ANALYTICS = ("analytics", "gtag", "sentry", "datadog", "mixpanel", "amplitude", "posthog", "segment", "newrelic", "bugsnag", "rollbar")
-# 依存の表へ処理系の版を書く行の名前（依存ではない）
+# 依存の表へ処理系のバージョンを書く行の名前（依存ではない）
 PHP_ROW, NODE_ROW, PYTHON_ROW = "php", "node", "python"
 RUNTIME_ROWS = (PHP_ROW, PYTHON_ROW, NODE_ROW)
 
@@ -173,7 +173,7 @@ def _major(spec: str) -> Optional[str]:
 
 
 def _first_number(spec: str) -> str:
-    """版の指定の主の数字（`^10.10` → `10`）。主が 0 なら次の数字まで（`^0.115` → `0.115`）。"""
+    """バージョンの指定の主の数字（`^10.10` → `10`）。主が 0 なら次の数字まで（`^0.115` → `0.115`）。"""
     m = re.search(r"(\d+)(?:\.(\d+))?", spec)
     if not m:
         return ""
@@ -255,7 +255,7 @@ def _py_dependencies(tree: Tree) -> dict[str, str]:
 
 
 class DepSource(NamedTuple):
-    """依存を集める言語 1 つ。言語・その依存の置き場・依存の定義を読む関数。"""
+    """依存を集める言語 1 つ。言語・その依存の保存先・依存の定義を読む関数。"""
 
     language: str
     ecosystem: str
@@ -268,14 +268,14 @@ DEP_SOURCES = (
     DepSource("javascript", "npm", _js_dependencies),
     DepSource("python", "pypi", _py_dependencies),
 )
-# 依存の言語 → その依存の置き場
+# 依存の言語 → その依存の保存先
 ECOSYSTEM = {s.language: s.ecosystem for s in DEP_SOURCES}
 # 依存を集める言語（`dependencies` の返す言語の組と、測れなかったときの既定）
 DEP_LANGUAGES = tuple(s.language for s in DEP_SOURCES)
 
 
 def dependencies(tree: Tree) -> dict[str, dict[str, str]]:
-    """言語 → {依存の名前: 版の指定}。根と 1 段下の依存の定義から集める。"""
+    """言語 → {依存の名前: バージョンの指定}。根と 1 段下の依存の定義から集める。"""
     return {s.language: s.read(tree) for s in DEP_SOURCES}
 
 
@@ -479,7 +479,7 @@ def measure_instructions(tree: Tree) -> dict[str, Any]:
 
 
 def _library_seeds(deps: dict[str, dict[str, str]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """(素材の候補の依存（上限 `MAX_LIBRARIES`）, 解析の SDK の根拠)。処理系の版の行は依存でないので外す。"""
+    """(素材の候補の依存（上限 `MAX_LIBRARIES`）, 解析の SDK の根拠)。処理系のバージョンの行は依存でないので外す。"""
     libraries: list[dict[str, Any]] = []
     analytics: list[dict[str, Any]] = []
     for lang, names in deps.items():
@@ -493,7 +493,7 @@ def _library_seeds(deps: dict[str, dict[str, str]]) -> tuple[list[dict[str, Any]
 
 
 def measure_materials(tree: Tree, deps: dict[str, dict[str, str]]) -> dict[str, Any]:
-    """素材の宣言の候補。README の冒頭・直接の依存・解析の SDK を根拠にする。決めるのは人である。"""
+    """素材の設定の候補。README の冒頭・直接の依存・解析の SDK を根拠にする。決めるのは人である。"""
     libraries, analytics = _library_seeds(deps)
     evidence = [
         {"file": f, "text": ln[:200]}
@@ -513,7 +513,7 @@ Step = Callable[[str, Callable[[], Any]], Any]
 
 
 def measure(tree: Tree, step: Step, items: dict[str, Any]) -> dict[str, Any]:
-    """git の木から測る項目を `items` へ入れ、リポジトリの中の課題の置き場（`issues` の材料）を返す。"""
+    """git の木から測る項目を `items` へ入れ、リポジトリの中の課題の保存先（`issues` の材料）を返す。"""
     dep = step("languages", lambda: dependencies(tree))
     if dep is None:
         dep = {lang: {} for lang in DEP_LANGUAGES}
