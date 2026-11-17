@@ -24,7 +24,7 @@ def _module_file(name: str, src: Path) -> Path | None:
 
 
 def _imports(path: Path, module: str, src: Path) -> set[str]:
-    """ファイルが読む絶対の名前。`from a import b` は a.b が `src` の下のモジュールならそれを、ほかは a を数える。"""
+    """ファイルが読む絶対の名前。`from a import b` は a.b がモジュールならそれを、ほかは a を数える。"""
     package = module if path.name == "__init__.py" else module.rpartition(".")[0]
     found: set[str] = set()
     for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
@@ -50,7 +50,7 @@ def _with_parents(name: str) -> list[str]:
 
 
 def closure(roots: list[str], src: Path) -> set[str]:
-    """roots から import でたどれる名前（NDF の中は `src` の下のファイルを開いてたどる。外は名前だけ）。親のパッケージも含む。"""
+    """roots から import でたどれる名前（NDF の中はファイルを開いてたどる。外は名前だけ）。親のパッケージも含む。"""
     seen: set[str] = set()
     todo = [n for r in roots for n in _with_parents(r)]
     while todo:
