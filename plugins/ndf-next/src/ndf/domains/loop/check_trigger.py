@@ -23,13 +23,13 @@ from typing import Any, Optional
 
 from ndf import cli, identity
 from ndf.adapters.git import Git, GitError
-from ndf.contracts import result
+from ndf.contracts import facts, result
 
 # 結果の tool は親の副命令 `ndf loop` の名前
 TOOL = cli.tool_of(f"{__package__}.cli")
 LINES = "lines"
-# 閾値の宣言（対象のリポジトリのルートからの位置）
-PACE = Path(identity.FIXED_WORDS["declaration_dir"]) / "pace.json"
+# 閾値の宣言（対象のリポジトリのルートからの位置。表 ndf-files の pace）
+PACE = Path(identity.FIXED_WORDS["declaration_dir"]) / facts.value("ndf-files", "pace", "path")
 
 
 @dataclass(frozen=True)
