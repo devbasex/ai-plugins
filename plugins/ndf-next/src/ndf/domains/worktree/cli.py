@@ -1,11 +1,11 @@
 """`ndf worktree` の副命令。
 
-    ndf worktree create <ブランチ> [--from <起点>]   # 作業場所を用意する（結果の outputs に worktree と branch）
+    ndf worktree create <ブランチ> [--from <起点>] [--state-dir <dir>]   # 作業場所を用意する（結果の outputs に worktree と branch）
     ndf worktree list                               # 置き場 .worktrees/ の下の worktree の一覧
     ndf worktree cleanup [--dry-run]                # マージ済みのブランチの worktree を片付ける
     ndf worktree session                            # メインディレクトリの逸脱を伝え、宣言で有効ならブランチを追従する
     ndf worktree guard [--base <dir>] [--unread] <パス>...   # 書き込み先がメインディレクトリかの案内
-    ndf worktree merged <PR番号>... [--flow-record <JSON>]   # マージの後の後片付け（worktree・ブランチ・取り込み）
+    ndf worktree merged <PR番号>... [--snapshot <JSON>]   # マージの後の後片付け（worktree・ブランチ・取り込み）
     ndf worktree trash --ref <コミット> [--yes --only <退避先>...]   # 本番に出た退避先を挙げる（承認した名前だけ消す）
     ndf worktree init [--force] | check             # 宣言を作る・宣言の状態を出す
     ndf worktree deps|localenv|testenv ...          # worktree の環境（cli_env）
@@ -53,7 +53,7 @@ COMMANDS = {
     "merged": "マージ済みの PR のブランチの worktree とブランチを外し、メインディレクトリを取り込む",
     "trash": "本番に出たブランチの退避先を挙げる。承認した名前だけを消す",
     "init": f"宣言（{identity.FIXED_WORDS['declaration_dir']}/worktree.json）を作る",
-    "check": "宣言の状態とベースブランチ・本番チャネルを出す",
+    "check": "宣言の状態とベースブランチ・本番ブランチを出す",
 }
 
 
@@ -63,7 +63,9 @@ def _parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="command", required=True)
     c = sub.add_parser("create", help=COMMANDS["create"])
     c.add_argument("branch")
-    c.add_argument("--from", dest="start", default=None, help="ベースブランチ（既定はスプリントの起点）")
+    c.add_argument("--from", dest="start", default=None, help="worktree を切る起点（既定はブランチ戦略の宣言のスプリントの起点）")
+    c.add_argument("--state-dir", type=Path, default=None,
+                   help="スプリントの状態の置き場。渡すとブランチ戦略の宣言の全体をスナップショットとして控える（スプリントの開始）")  # fmt: skip
     sub.add_parser("list", help=COMMANDS["list"])
     k = sub.add_parser("cleanup", help=COMMANDS["cleanup"])
     k.add_argument("--dry-run", action="store_true", help="判断だけを出し、何も消さない")
@@ -74,7 +76,12 @@ def _parser() -> argparse.ArgumentParser:
     g.add_argument("--unread", action="store_true", help="書き込み先を読み切れなかった（構文を解けないコマンド）")
     m = sub.add_parser("merged", help=COMMANDS["merged"])
     m.add_argument("prs", nargs="+", type=int, metavar="PR番号")
-    m.add_argument("--flow-record", type=Path, default=None, help="スプリントの開始時の記録（branch_flow の写しと production_branch）")
+    m.add_argument(
+        "--snapshot",
+        type=Path,
+        default=None,
+        help="スプリントの開始時のブランチ戦略のスナップショット（create --state-dir が書いたファイル）",
+    )
     t = sub.add_parser("trash", help=COMMANDS["trash"])
     t.add_argument("--ref", required=True, help="本番に出たコミット（タグ・本番チャネル）")
     t.add_argument("--yes", action="store_true", help="--only の退避先を消す。人が候補を見て承認したときだけ付ける")
@@ -88,11 +95,19 @@ def _parser() -> argparse.ArgumentParser:
 
 def _create(args: argparse.Namespace, where: repo.Location) -> dict[str, Any]:
     try:
-        got = create.create(where.main_dir, args.branch, args.start)
+        got = create.create(where.main_dir, args.branch, args.start, state_dir=args.state_dir)
     except create.CreateError as exc:
         return result.stopped(TOOL, exc.kind, str(exc))
     outputs = {"worktree": str(got.path), "branch": got.branch}
-    item = {"path": str(got.path), "branch": got.branch, "base": got.base, "start_ref": got.start_ref, "new_branch": got.new_branch}
+    item: dict[str, Any] = {
+        "path": str(got.path),
+        "branch": got.branch,
+        "base": got.base,
+        "start_ref": got.start_ref,
+        "new_branch": got.new_branch,
+    }
+    if got.snapshot is not None:
+        item["snapshot"] = got.snapshot
     return result.result(
         TOOL, result.OK, f"worktree を用意した: {got.path}（起点 {got.base}）", [item], outputs=outputs, warnings=got.warnings
     )
@@ -148,7 +163,7 @@ def _guard(args: argparse.Namespace, where: repo.Location) -> dict[str, Any]:
 def _merged(args: argparse.Namespace, where: repo.Location) -> dict[str, Any]:
     main = Git(where.main_dir)
     hub = _hub(main)
-    rec = merged.after_merge(where.main_dir, args.prs, hub, merged.read_flow_record(args.flow_record))
+    rec = merged.after_merge(where.main_dir, args.prs, hub, args.snapshot)
     counted = (("worktree", outcomes.REMOVED), ("branch", outcomes.DELETED), ("worktree", outcomes.KEPT), ("branch", outcomes.KEPT))
     metrics = {f"{kind}:{word}": rec.count(kind, word) for kind, word in counted}
     summary = f"worktree {metrics['worktree:removed']} 件を外し、ブランチ {metrics['branch:deleted']} 件を消した（残した {metrics['worktree:kept'] + metrics['branch:kept']} 件）"
@@ -185,8 +200,13 @@ def _check(args: argparse.Namespace, where: repo.Location) -> dict[str, Any]:
     got = setup.state(where.main_dir)
     items: list[dict[str, Any]] = [{"declaration": got.state, "detail": got.detail}]
     if got.decl is not None:
-        items.append({"base_branch": got.decl.base_branch, "production_branch": got.decl.production_branch,
-                      "local_ignored": list(got.decl.local_ignored)})  # fmt: skip
+        items.append({"local_ignored": list(got.decl.local_ignored)})
+    if got.state != setup.UNREADABLE:
+        try:
+            strategy = declaration.strategy(where.main_dir)
+        except declaration.DeclarationError as exc:
+            return result.stopped(TOOL, "precondition", str(exc), items=items)
+        items.append({"base": strategy.base, "production": strategy.production, "sprint_start": strategy.sprint_start_ref()})
     if got.state == setup.UNREADABLE:
         return result.stopped(TOOL, "precondition", got.detail, items=items)
     return result.result(TOOL, result.OK, f"宣言: {got.state}", items, {"present": got.state == setup.PRESENT})

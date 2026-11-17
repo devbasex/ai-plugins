@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/devbasex/ai-plugins/main/plugins/ndf/skills/worktree/schemas/worktree.schema.json",
   "title": "NDF worktree 宣言ファイル",
-  "description": "リポジトリごとの差を持つ宣言。このファイルが無いリポジトリでは、worktree運用の仕組みは何もせずに終わる。",
+  "description": "リポジトリごとの差を持つ宣言。このファイルが無いリポジトリでは、worktree運用の仕組みは何もせずに終わる。スプリントの起点と PR の宛先はブランチ戦略の宣言（.ndf/project.json の branch_strategy）が持つ。",
   "type": "object",
   "required": [
     "version"
@@ -26,185 +26,10 @@
       "pattern": "^[^-]",
       "description": "取得・照合・差分の基準・送信に使う git のリモートの名前。未指定なら既定の名前（既定はプラグインの contracts/schemas/declarations/worktree.schema.json の remote の default の 1 か所にある）を使う。- で始まる名前は受けない"
     },
-    "base_branch": {
-      "type": "string",
-      "description": "開発の起点ブランチ。worktreeの分岐元になり、follow_branch が true のときはメインディレクトリの追従先にもなる。未指定なら origin の HEAD が指すブランチを使う。指定した名前が origin にもローカルにも無いときは既定へ落とさず解決に失敗する"
-    },
     "follow_branch": {
       "type": "boolean",
       "default": false,
-      "description": "true のときだけ、セッションセッション開始 hook がメインディレクトリのブランチを稼働中のworktreeへ detached HEAD で追従させる。既定ではメインディレクトリの HEAD を動かさない。真偽値以外は false と同じ"
-    },
-    "production_branch": {
-      "type": "string",
-      "description": "リリースした版が常用する利用者へ届く本番チャネルのブランチ。この先へ進める操作は人手の承認を求める。開発の起点である base_branch とは別の鍵で、流用しない。未指定なら origin の HEAD が指すブランチを使う。指定した名前が origin にもローカルにも無いときは既定へ落とさず解決に失敗する"
-    },
-    "branch_flow": {
-      "type": "object",
-      "description": "ブランチ運用の宣言（#3121）。無ければ既定値の行（ベースブランチから切り、ベースブランチを丸ごと出す）",
-      "additionalProperties": false,
-      "properties": {
-        "start": {
-          "type": "string",
-          "enum": [
-            "base",
-            "production"
-          ],
-          "default": "base"
-        },
-        "integrate": {
-          "type": "string",
-          "enum": [
-            "check"
-          ],
-          "default": "check"
-        },
-        "doc_prs": {
-          "type": "string",
-          "enum": [
-            "base",
-            "sprint"
-          ],
-          "default": "base"
-        },
-        "promotion": {
-          "type": "string",
-          "enum": [
-            "whole",
-            "selected"
-          ],
-          "default": "whole"
-        },
-        "reviews": {
-          "type": "object",
-          "description": "レビューの単位（#3163）。PR の種類ごとに掛けるレビューと対象の差分。書いていない種類は既定値",
-          "additionalProperties": false,
-          "properties": {
-            "impl": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "checks",
-                "diff"
-              ],
-              "properties": {
-                "checks": {
-                  "$ref": "#/$defs/reviewChecks"
-                },
-                "diff": {
-                  "type": "string",
-                  "enum": [
-                    "pr",
-                    "none"
-                  ]
-                }
-              }
-            },
-            "sprint": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "checks",
-                "diff"
-              ],
-              "properties": {
-                "checks": {
-                  "$ref": "#/$defs/reviewChecks"
-                },
-                "diff": {
-                  "type": "string",
-                  "enum": [
-                    "unchecked",
-                    "none"
-                  ]
-                }
-              }
-            },
-            "release": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "checks",
-                "diff"
-              ],
-              "properties": {
-                "checks": {
-                  "type": "array",
-                  "uniqueItems": true,
-                  "items": {
-                    "type": "string",
-                    "enum": [
-                      "cross-review"
-                    ]
-                  }
-                },
-                "diff": {
-                  "type": "string",
-                  "enum": [
-                    "pr",
-                    "resolution",
-                    "none"
-                  ]
-                }
-              }
-            },
-            "design": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "checks",
-                "diff"
-              ],
-              "properties": {
-                "checks": {
-                  "type": "array",
-                  "uniqueItems": true,
-                  "items": {
-                    "type": "string",
-                    "enum": [
-                      "cross-review"
-                    ]
-                  }
-                },
-                "diff": {
-                  "type": "string",
-                  "enum": [
-                    "pr",
-                    "none"
-                  ]
-                }
-              }
-            },
-            "spec": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "checks",
-                "diff"
-              ],
-              "properties": {
-                "checks": {
-                  "type": "array",
-                  "uniqueItems": true,
-                  "items": {
-                    "type": "string",
-                    "enum": [
-                      "cross-review"
-                    ]
-                  }
-                },
-                "diff": {
-                  "type": "string",
-                  "enum": [
-                    "pr",
-                    "none"
-                  ]
-                }
-              }
-            }
-          }
-        }
-      }
+      "description": "true のときだけ、セッション開始 hook がメインディレクトリのブランチを稼働中のworktree（1 つだけのとき）か、ブランチ戦略の宣言の branches.base が指すコミットへ detached HEAD で追従させる。既定ではメインディレクトリの HEAD を動かさない。真偽値以外は false と同じ"
     },
     "guard": {
       "type": "object",
@@ -489,21 +314,6 @@
             }
           }
         }
-      }
-    }
-  },
-  "$defs": {
-    "reviewChecks": {
-      "description": "実装とスプリントの PR に掛けるレビュー",
-      "type": "array",
-      "uniqueItems": true,
-      "items": {
-        "type": "string",
-        "enum": [
-          "cross-refactoring",
-          "cross-review",
-          "behavior"
-        ]
       }
     }
   }

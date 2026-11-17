@@ -7,9 +7,11 @@ from pathlib import Path
 from typing import Callable, Iterable, Optional
 
 import pytest
+import strategy_fixture
 
 from ndf.adapters.git import Completed, Git
 from ndf.adapters.github import Pull
+from ndf.core import branch_strategy as bs
 from ndf.domains.worktree import create, declaration, follow, merged, setup, trash
 
 
@@ -77,25 +79,41 @@ def test_after_merge_keeps_tracked_changes_and_main_dir_off_base(main_repo: Path
     assert results == {"worktree": "kept", "main_dir": "kept"} and wt.exists()
 
 
-def test_sprint_branch_uses_start_record_over_declaration(main_repo: Path, run_git: Callable) -> None:
-    """宣言（whole）を変えても、開始時の記録（selected）で始めたスプリントブランチは本番に入るまで残す（#3310）。"""
+def _snapshot_file(tmp_path: Path, kind: str) -> Path:
+    path = tmp_path / "state" / declaration.SNAPSHOT_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(bs.snapshot(bs.Strategy(strategy_fixture.section(kind)), "test")), encoding="utf-8")
+    return path
+
+
+def test_sprint_branch_uses_start_snapshot_over_declaration(main_repo: Path, run_git: Callable, tmp_path: Path) -> None:
+    """宣言（merge_base_branch）を変えても、開始時のスナップショット（release_branch）で始めたスプリントブランチは本番に入るまで残す（#3310）。"""
     wt = _land(main_repo, run_git, "sprint/s1")
-    record = {"promotion": "selected", "production_branch": "main"}
-    rec = merged.after_merge(main_repo, [2], FakeHub({2: _pull(2, "sprint/s1", True)}), flow_record=record)
+    snap = _snapshot_file(tmp_path, "mobile")
+    rec = merged.after_merge(main_repo, [2], FakeHub({2: _pull(2, "sprint/s1", True)}), snapshot=snap)
     assert [i["result"] for i in rec.items if i["kind"] == "branch"] == ["kept"] and wt.exists()
     rec = merged.after_merge(main_repo, [2], FakeHub({2: _pull(2, "sprint/s1", True)}))
     assert [i["result"] for i in rec.items if i["kind"] == "branch"] == ["deleted"] and not wt.exists()
 
 
-def test_read_flow_record(tmp_path: Path) -> None:
-    path = tmp_path / "flow.json"
-    path.write_text(json.dumps({"promotion": "selected"}), encoding="utf-8")
-    assert merged.read_flow_record(path) == {"promotion": "selected"}
-    assert merged.read_flow_record(None) is None
+def test_read_snapshot_checks_the_section(tmp_path: Path) -> None:
+    path = _snapshot_file(tmp_path, "plugin")
+    assert declaration.read_snapshot(path).section == strategy_fixture.section("plugin")
+    broken = json.loads(path.read_text(encoding="utf-8"))
+    broken["section"]["branches"]["base"] = "develop"  # trunk でベースブランチと本番ブランチが違う（R1）
+    path.write_text(json.dumps(broken), encoding="utf-8")
+    with pytest.raises(declaration.DeclarationError, match="R1"):
+        declaration.read_snapshot(path)
+
+
+def test_after_merge_stops_on_legacy_keys(make_repo: Callable) -> None:
+    main = make_repo({"version": 1, "production_branch": "main"})
+    with pytest.raises(declaration.DeclarationError, match="ndf project branch-strategy migrate"):
+        merged.after_merge(main, [1], FakeHub({}))
 
 
 def test_follow_detaches_main_dir_to_single_worktree(make_repo: Callable, run_git: Callable) -> None:
-    main = make_repo({"version": 1, "base_branch": "develop", "follow_branch": True})
+    main = make_repo({"version": 1, "follow_branch": True})
     wt = create.create(main, "feat/f").path
     (wt / "f.txt").write_text("f", encoding="utf-8")
     run_git(wt, "add", "-A")
@@ -107,7 +125,7 @@ def test_follow_detaches_main_dir_to_single_worktree(make_repo: Callable, run_gi
 
 
 def test_follow_does_nothing_without_flag_or_with_changes(make_repo: Callable) -> None:
-    plain = make_repo({"version": 1, "base_branch": "develop"})
+    plain = make_repo({"version": 1})
     create.create(plain, "feat/g")
     before = Git(plain).rev_parse("HEAD")
     assert follow.follow(plain, declaration.load(plain)) is None
@@ -115,6 +133,21 @@ def test_follow_does_nothing_without_flag_or_with_changes(make_repo: Callable) -
     (plain / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "follow_branch": True}), encoding="utf-8")
     assert follow.follow(plain, declaration.load(plain)) is None  # 未コミットの変更があれば動かさない
     assert Git(plain).rev_parse("HEAD") == before
+
+
+def test_follow_moves_main_dir_to_declared_base(make_repo: Callable, run_git: Callable) -> None:
+    """worktree が無ければ、ブランチ戦略の宣言の branches.base（develop）へ合わせる。宣言が読めなければ伝えて続ける。"""
+    main = make_repo({"version": 1, "follow_branch": True})
+    run_git(main, "checkout", "-q", "main")
+    run_git(main, "commit", "-q", "--allow-empty", "-m", "on main")
+    text = follow.follow(main, declaration.load(main))
+    assert text is not None and "develop" in text
+    assert Git(main).rev_parse("HEAD") == Git(main).rev_parse("refs/heads/develop")
+    run_git(main, "checkout", "-q", "main")
+    run_git(main, "rm", "-q", ".ndf/project.json")
+    run_git(main, "commit", "-q", "-m", "drop the strategy")
+    got = follow.follow(main, declaration.load(main))
+    assert got is not None and "合わせられなかった" in got and Git(main).rev_parse("HEAD") == Git(main).rev_parse("refs/heads/main")
 
 
 def test_setup_init_and_state(make_repo: Callable) -> None:

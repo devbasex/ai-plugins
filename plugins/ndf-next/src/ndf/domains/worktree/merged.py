@@ -3,8 +3,11 @@
 PR 1 件ごとに、メインディレクトリの排他（`mainlock`）を取ってから次を行う（並列のレーンの間で 1 本ずつ）。
 
 1. PR を GitHub から読む（`adapters.github.GitHub.pulls`）。マージされていなければ何も消さない
-2. PR の head がベースブランチか本番チャネルなら何も消さない（`merged_decide.long_lived_keep`。develop から main への
-   リリースの PR）。スプリントブランチを残すかを決める（`merged_decide.sprint_keep`。開始時の記録 `flow_record` があればそれ、無ければ今の宣言）
+2. PR の head がベースブランチか本番ブランチなら何も消さない（`merged_decide.long_lived_keep`。develop から main への
+   リリースの PR）。スプリントブランチを残すかを決める（`merged_decide.sprint_keep`）
+
+ベースブランチ・本番ブランチ・取り込み方は、スプリントの開始時のスナップショット（`declaration.write_start_snapshot` が
+書いたファイル）があればそれ、無ければ今のブランチ戦略の宣言（`.ndf/project.json` の `branch_strategy`）から読む。
 3. ブランチを checkout した worktree を外す。追跡しているファイルに未コミットの変更があれば外さない。外す前に公開を閉じて
    テスト環境を破棄する（できなければ外さない）。locked の worktree は何も動かさずに残す。追跡していないファイル
    （無視したものを含む。`git worktree remove` は無視したファイルを黙って消す）があれば、先に退避（`trash.evacuate`）
@@ -23,10 +26,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Optional, Protocol
+from typing import Any, Iterable, Optional, Protocol
 
 from ndf.adapters.git import Git
 from ndf.adapters.github import Pull
+from ndf.core.branch_strategy import Strategy
 from ndf.domains.worktree import declaration, mainlock, merged_decide, outcomes, repo, testenv, testenv_sweep, trash
 
 # 未コミットの変更を理由に並べるパスの上限
@@ -127,12 +131,12 @@ def _clean_branch(main: Git, main_dir: Path, branch: str, rec: Record, merge: st
         _delete_branch(main, branch, rec)
 
 
-def _keep_reason(main: Git, branch: str, flow: Optional[Mapping[str, Any]], base: Optional[str], remote: str) -> Optional[str]:
+def _keep_reason(main: Git, branch: str, strategy: Strategy, remote: str) -> Optional[str]:
     """ブランチを残す理由（消してよければ `None`）。"""
-    production = flow.get("production_branch") if flow is not None else None
-    keep = merged_decide.long_lived_keep(branch, base, production if isinstance(production, str) else None)
+    keep = merged_decide.long_lived_keep(branch, strategy.base, strategy.production)
     if keep is None:
-        keep = merged_decide.sprint_keep(branch, flow, repo.contained_in_production(main, branch, flow, remote), remote)
+        contained = repo.contained_in_production(main, branch, strategy.production, remote)
+        keep = merged_decide.sprint_keep(branch, strategy, contained, remote)
     return keep
 
 
@@ -143,7 +147,7 @@ def _one(main: Git, main_dir: Path, pull: Pull, keep: Optional[str], rec: Record
     _clean_branch(main, main_dir, pull.head_ref, rec, pull.merge_sha)
 
 
-def sync_main(main: Git, base: Optional[str], remote: str, rec: Record) -> None:
+def sync_main(main: Git, base: str, remote: str, rec: Record) -> None:
     """メインディレクトリがベースブランチにいれば fast-forward で取り込む。失敗は `rec.stopped` に書く。"""
     skip = merged_decide.pull_skip(repo.current_branch(main), base)
     if skip is not None:
@@ -166,21 +170,19 @@ def sync_main(main: Git, base: Optional[str], remote: str, rec: Record) -> None:
     rec.add("main_dir", str(main.cwd), outcomes.STOPPED, rec.stopped)
 
 
-def read_flow_record(path: Optional[Path]) -> Optional[dict[str, Any]]:
-    """開始時の記録（`branch_flow` の写しに `production_branch` を足した JSON のオブジェクト）。読めなければ `DeclarationError`。"""
-    if path is None:
-        return None
-    return declaration.read_object(path)
+def strategy_of(main_dir: Path, snapshot: Optional[Path]) -> Strategy:
+    """開始時のスナップショット（渡したとき）か今の宣言のセクション。読めなければ `DeclarationError`。"""
+    return declaration.read_snapshot(snapshot) if snapshot is not None else declaration.strategy(main_dir)
 
 
-def after_merge(main_dir: Path, numbers: list[int], hub: PullsReader, flow_record: Optional[Mapping[str, Any]] = None) -> Record:
+def after_merge(main_dir: Path, numbers: list[int], hub: PullsReader, snapshot: Optional[Path] = None) -> Record:
     """マージの後の後片付けを行い、記録を返す。"""
     main = Git(main_dir)
-    decl = declaration.load(main_dir)
-    flow = flow_record if flow_record is not None else repo.declared_flow(decl)
+    declaration.load(main_dir)  # 旧いキーの残る worktree の宣言では片付けない
+    strategy = strategy_of(main_dir, snapshot)
     pulls = hub.pulls(numbers)
     rec = Record()
-    base = repo.base_branch(main, decl)
+    base = strategy.base
     remote = main.remote()  # エントリポイントで 1 回だけ求める（PR ごとに `git worktree list` を打たない）
     # 先に取り込む: `git branch -d` はメインディレクトリの HEAD に含まれたブランチだけを消す
     with mainlock.held(main):
@@ -191,7 +193,7 @@ def after_merge(main_dir: Path, numbers: list[int], hub: PullsReader, flow_recor
             rec.add("pr", str(n), outcomes.KEPT, "PR が見つからない" if pull is None else "PR がマージされていない")
             continue
         with mainlock.held(main):
-            _one(main, main_dir, pull, _keep_reason(main, pull.head_ref, flow, base, remote), rec)
+            _one(main, main_dir, pull, _keep_reason(main, pull.head_ref, strategy, remote), rec)
     main.run("worktree", "prune")
     # worktree の消えた割り当てのテスト環境を回収する（排他の外で行う。並列のレーンの後片付けを待たせない）
     t = testenv.target(main_dir)

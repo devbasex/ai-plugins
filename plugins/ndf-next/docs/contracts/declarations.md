@@ -319,25 +319,22 @@ worktree・チーム・公開・[supervise.schema.json](../../contracts/schemas/
 
 ## `.ndf/worktree.json`（worktree）
 
-メインディレクトリ（既定ブランチの worktree）（印のキーはメインディレクトリ）・チーム・公開・[worktree.schema.json](../../contracts/schemas/declarations/worktree.schema.json)。読む工程: `ndf worktree`（worktree を作る・片付ける・環境を用意するとき）・`ndf release-steps`（本番チャネルとリリースの範囲を決めるとき）
+メインディレクトリ（既定ブランチの worktree）・チーム・公開・[worktree.schema.json](../../contracts/schemas/declarations/worktree.schema.json)。読む工程: `ndf worktree`（worktree を作る・片付ける・環境を用意するとき）・`ndf release-steps`（本番チャネルとリリースの範囲を決めるとき）
 
-ベースブランチ・本番のブランチ・ブランチの運用・worktree の用意の宣言。メインディレクトリから読む。無ければ worktree の運用を使わない
+worktree の用意（書き込みの案内・メインディレクトリの追従・依存・ローカルの動作検証・テスト環境）の宣言。メインディレクトリから読む。無ければ worktree の運用を使わない。スプリントの起点と PR の宛先はブランチ戦略の宣言（.ndf/project.json の branch_strategy）が持つ
 
 | キー | 型 | 既定値 | 取りうる値 | 必須か | 説明 |
 | --- | --- | --- | --- | --- | --- |
 | `$schema` | string | — | — | 任意 | 編集のときの補完に使うスキーマの位置。読み手は参照しない |
-| `base_branch` | string | — | — | 任意 | 開発の起点ブランチ。worktreeの分岐元になり、follow_branch が true のときはメインディレクトリの追従先にもなる。未指定なら remote のリモートの HEAD が指すブランチを使う。指定した名前がそのリモートにもローカルにも無いときは既定へ落とさず解決に失敗する |
-| `branch_flow`（メインディレクトリから読む） | object | — | — | 任意 | ブランチ運用の宣言。無ければ既定値の行（ベースブランチから切り、ベースブランチを丸ごと出す） |
 | `deps` | object | — | — | 任意 | 依存の用意。worktree を作った直後に copy_from_main・copy_as_real・run の順に行う。無いか空なら何もしない。個人設定からは反映しない |
-| `follow_branch` | boolean | `false` | — | 任意 | true のときだけ、セッションセッション開始 hook がメインディレクトリのブランチを稼働中のworktreeへ detached HEAD で追従させる。既定ではメインディレクトリの HEAD を動かさない。真偽値以外は false と同じ |
+| `follow_branch` | boolean | `false` | — | 任意 | true のときだけ、セッション開始 hook がメインディレクトリのブランチを稼働中のworktree（1 つだけのとき）か、ブランチ戦略の宣言の branches.base が指すコミットへ detached HEAD で追従させる。既定ではメインディレクトリの HEAD を動かさない。真偽値以外は false と同じ |
 | `guard` | object | — | — | 任意 | メインディレクトリでの編集の案内（guard）。allow_paths は案内を出さないパス |
 | `localenv` | object | — | — | 任意 | ローカルの動作の確かめ（compose）の宣言。個人設定の値を重ねる |
-| `production_branch`（メインディレクトリから読む） | string | — | — | 任意 | リリースした版が常用する利用者へ届く本番チャネルのブランチ。この先へ進める操作は人手の承認を求める。開発の起点である base_branch とは別の鍵で、流用しない。未指定なら remote のリモートの HEAD が指すブランチを使う。指定した名前がそのリモートにもローカルにも無いときは既定へ落とさず解決に失敗する |
 | `remote` | string | `"origin"` | — | 任意 | 取得・照合・差分の基準・送信に使う git のリモートの名前。未指定なら既定の名前を使う。- で始まる名前は受けない |
 | `testenv` | object | — | — | 任意 | テスト環境（ポートの採番・ゴールデンのタグ・リセット）の宣言。個人設定の値を重ねる |
 | `version` | integer | — | `1` | 必須 | 宣言の形の版。読み手は知らない版を読まない |
 
-例: `{"version": 1, "base_branch": "develop", "production_branch": "main", "branch_flow": {"start": "base", "promotion": "whole"}, "guard": {"allow_paths": ["issues/", "docs/"]}}`
+例: `{"version": 1, "guard": {"allow_paths": ["issues/", "docs/"]}}`
 
 ## `.ndf/worktree.local.json`（worktree-local）
 
